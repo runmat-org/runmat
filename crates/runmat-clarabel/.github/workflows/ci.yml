@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main", "develop"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: rust version info
+      run: cargo --version
+      
+    - name: Build
+      run: cargo build --verbose --features sdp-accelerate,faer-sparse,serde
+      
+    - name: Run tests
+      run: cargo test --verbose --features sdp-accelerate,faer-sparse,serde
+
+    - name: Install cargo-tarpaulin
+      run: cargo install cargo-tarpaulin
+
+    - name: Generate code coverage 
+      run: |
+        cargo tarpaulin --out xml --features sdp-accelerate,serde,faer-sparse --exclude-files "src/python/*,src/julia/*"
+
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{secrets.CODECOV_TOKEN}}
+
+
+

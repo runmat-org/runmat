@@ -1,13 +1,10 @@
 //! MATLAB-compatible `fill3` builtin.
-
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    FILL3_ERROR_INTERNAL, FILL3_ERROR_INVALID_ARGUMENT,
+    FILL3_INTEGER_AXES_EXTENSION as INTEGER_AXES_EXTENSION,
 };
+
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -15,280 +12,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "fill3";
-
-const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fill3-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fill3 with a typed-integer numeric axes alias is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Fill3IntegerAxesHandleExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_AXES_EXTENSION];
-
-macro_rules! coordinate_capability {
-    ($name:literal) => {
-        [BuiltinIntegerInputCapability {
-            name: $name,
-            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-            availability: BuiltinIntegerInputAvailability::Documented,
-            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-            notes: "MATLAB documents every built-in integer class for this patch data role; authoritative class and shape are retained before explicit renderer conversion.",
-        }]
-    };
-}
-
-const INTEGER_X: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("X");
-const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("Y");
-const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("Z");
-const INTEGER_C: [BuiltinIntegerInputCapability; 1] = coordinate_capability!("C");
-const INTEGER_AX: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "ax",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension.",
-}];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
-    fill3_capability("p = fill3(integer_X, Y, Z, C, ...)", &INTEGER_X),
-    fill3_capability("p = fill3(X, integer_Y, Z, C, ...)", &INTEGER_Y),
-    fill3_capability("p = fill3(X, Y, integer_Z, C, ...)", &INTEGER_Z),
-    fill3_capability("p = fill3(X, Y, Z, integer_C, ...)", &INTEGER_C),
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = fill3(integer_ax, X, Y, Z, C, ...)",
-        inputs: &INTEGER_AX,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The compatibility extension gate runs before axes selection or input gathering.",
-    },
-];
-
-const fn fill3_capability(
-    form: &'static str,
-    inputs: &'static [BuiltinIntegerInputCapability],
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer source data remains authoritative on the Patch object; client rendering crosses an explicit floating-point boundary.",
-    }
-}
-
-const FILL3_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle or row-vector of handles for created patch objects.",
-}];
-
-const FILL3_INPUTS_X_Y_Z_C: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polygon X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polygon Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polygon Z coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Color specification.",
-    },
-];
-
-const FILL3_INPUTS_MULTI_GROUP: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "groups",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "One or more `(X, Y, Z, C)` polygon groups.",
-}];
-
-const FILL3_INPUTS_MULTI_GROUP_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "groups",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "One or more `(X, Y, Z, C)` polygon groups.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Trailing patch name/value property pairs.",
-    },
-];
-
-const FILL3_INPUTS_AX_X_Y_Z_C: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polygon X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polygon Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polygon Z coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Color specification.",
-    },
-];
-
-const FILL3_INPUTS_AX_MULTI_GROUP: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "groups",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "One or more `(X, Y, Z, C)` polygon groups.",
-    },
-];
-
-const FILL3_INPUTS_AX_MULTI_GROUP_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "groups",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "One or more `(X, Y, Z, C)` polygon groups.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Trailing patch name/value property pairs.",
-    },
-];
-
-const FILL3_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "h = fill3(X, Y, Z, C)",
-        inputs: &FILL3_INPUTS_X_Y_Z_C,
-        outputs: &FILL3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fill3(X1, Y1, Z1, C1, ..., Xn, Yn, Zn, Cn)",
-        inputs: &FILL3_INPUTS_MULTI_GROUP,
-        outputs: &FILL3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fill3(X1, Y1, Z1, C1, ..., Name, Value, ...)",
-        inputs: &FILL3_INPUTS_MULTI_GROUP_PROPS,
-        outputs: &FILL3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fill3(ax, X, Y, Z, C)",
-        inputs: &FILL3_INPUTS_AX_X_Y_Z_C,
-        outputs: &FILL3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fill3(ax, X1, Y1, Z1, C1, ..., Xn, Yn, Zn, Cn)",
-        inputs: &FILL3_INPUTS_AX_MULTI_GROUP,
-        outputs: &FILL3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fill3(ax, X1, Y1, Z1, C1, ..., Name, Value, ...)",
-        inputs: &FILL3_INPUTS_AX_MULTI_GROUP_PROPS,
-        outputs: &FILL3_OUTPUT_HANDLE,
-    },
-];
-
-pub const FILL3_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILL3.INVALID_ARGUMENT",
-    identifier: Some("RunMat:fill3:InvalidArgument"),
-    when: "Input groups, axes targeting, or trailing property pairs are invalid.",
-    message: "fill3: invalid argument",
-};
-
-pub const FILL3_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FILL3.INTERNAL",
-    identifier: Some("RunMat:fill3:Internal"),
-    when: "Internal patch construction or rendering fails unexpectedly.",
-    message: "fill3: internal operation failed",
-};
-
-const FILL3_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [FILL3_ERROR_INVALID_ARGUMENT, FILL3_ERROR_INTERNAL];
-
-pub const FILL3_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FILL3_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FILL3_ERRORS,
-};
 
 fn fill3_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -306,14 +36,28 @@ fn map_fill3_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fill3_error_with_detail(&FILL3_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = fill3_error_with_detail(&FILL3_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_fill3_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fill3_error_with_detail(&FILL3_ERROR_INTERNAL, err.message)
+    let mapped = fill3_error_with_detail(&FILL3_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::fill3")]
@@ -345,21 +89,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fill3",
-    category = "plotting",
-    summary = "Create 3-D filled polygon patches.",
-    keywords = "fill3,patch,plotting,polygon,3d",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::fill3::FILL3_DESCRIPTOR),
-    extensions(crate::builtins::plotting::fill3::EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::fill3::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::fill3"
 )]
-pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    gate_typed_integer_axes_alias(&args)?;
+pub fn fill3_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "fill3: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "fill3")?;
+    let _arguments = args.fork();
+    work.finish(fill3_impl(args, &work))
+}
+
+fn fill3_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
+    gate_typed_integer_axes_alias(args.view())?;
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_fill3_invalid_argument)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_fill3_invalid_argument)?;
 
     let patch_arg_groups =
         parse_fill3_patch_arg_groups(args).map_err(map_fill3_invalid_argument)?;
@@ -372,19 +127,19 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             Ok(plot)
         })
         .collect::<crate::BuiltinResult<Vec<_>>>()?;
+    work.check()?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_fill3_invalid_argument)?;
 
     let mut plots_opt = Some(std::mem::take(&mut plots));
     let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "3-D Filled Polygons",
-            x_label: "X",
-            y_label: "Y",
-            axis_equal: true,
+            // MATLAB leaves the data aspect free; `axis equal` sets it.
+            axis_equal: false,
             ..Default::default()
         },
         move |figure, axes| {
@@ -405,8 +160,7 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return render_result.map(|_| Value::Num(f64::NAN));
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !lower.contains("plotting is unavailable") && !lower.contains("non-main thread") {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(map_fill3_internal(err));
         }
     }
@@ -419,7 +173,10 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(handles_value(handles))
 }
 
-fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Vec<Value>>> {
+fn parse_fill3_patch_arg_groups(
+    arguments: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Vec<Vec<Value>>> {
+    let args = arguments.view();
     if args.len() < 4 {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -427,8 +184,9 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
         ));
     }
 
-    let property_start = find_trailing_property_start(&args);
-    let (positional, properties) = args.split_at(property_start);
+    let property_start = find_trailing_property_start(args);
+    let positional = args.range(..property_start)?;
+    let properties = args.range(property_start..)?;
     if positional.len() < 4 {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -447,13 +205,17 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
             ));
         }
 
-        let color_name = if is_string_like(&positional[offset + 3]) {
+        let color_name = if super::patch::is_color_literal(&positional[offset + 3])? {
             "FaceColor"
         } else {
             "CData"
         };
         let columns = super::patch::split_coordinate_group_columns(
-            &positional[offset..offset + 3],
+            &[
+                positional[offset].clone(),
+                positional[offset + 1].clone(),
+                positional[offset + 2].clone(),
+            ],
             &positional[offset + 3],
             BUILTIN_NAME,
         )?;
@@ -469,7 +231,7 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
                 Value::String(color_name.into()),
                 color,
             ];
-            group.extend_from_slice(properties);
+            group.extend(properties.iter().cloned());
             groups.push(group);
         }
     }
@@ -477,7 +239,9 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
     Ok(groups)
 }
 
-fn gate_typed_integer_axes_alias(args: &[Value]) -> crate::BuiltinResult<()> {
+fn gate_typed_integer_axes_alias(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<()> {
     let Some(first) = args.first() else {
         return Ok(());
     };
@@ -493,9 +257,15 @@ fn gate_typed_integer_axes_alias(args: &[Value]) -> crate::BuiltinResult<()> {
     Ok(())
 }
 
-fn find_trailing_property_start(args: &[Value]) -> usize {
+fn find_trailing_property_start(args: crate::call::FunctionArgumentView<'_>) -> usize {
     for idx in (4..=args.len()).step_by(4) {
-        if args[idx..].iter().step_by(2).all(is_string_like) {
+        if args
+            .range(idx..)
+            .expect("bounded property suffix")
+            .iter()
+            .step_by(2)
+            .all(is_string_like)
+        {
             return idx;
         }
     }
@@ -518,6 +288,14 @@ fn handles_value(handles: Vec<f64>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::FILL3_DESCRIPTOR;
+    fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        super::fill3_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
@@ -561,7 +339,7 @@ mod tests {
         else {
             panic!("expected XData tensor");
         };
-        assert_eq!(x_data.shape, vec![1, 3]);
+        assert_eq!(x_data.shape(), [1, 3]);
         assert_eq!(
             x_data.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, 1, 0]))
@@ -688,7 +466,7 @@ mod tests {
                 else {
                     panic!("expected typed {property}");
                 };
-                assert_eq!(data.shape, vec![3, 1]);
+                assert_eq!(data.shape(), [3, 1]);
                 assert_eq!(data.integer_storage(), Some(&expected));
             }
         }
@@ -718,7 +496,7 @@ mod tests {
             else {
                 panic!("expected typed {property}");
             };
-            assert_eq!(data.shape, shape);
+            assert_eq!(data.shape(), shape);
             assert_eq!(data.integer_storage(), Some(&expected));
         }
     }
@@ -759,7 +537,7 @@ mod tests {
             else {
                 panic!("expected XData");
             };
-            assert_eq!(x_data.shape, vec![3, 1]);
+            assert_eq!(x_data.shape(), [3, 1]);
             assert_eq!(
                 x_data.integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide, 2, 3]))
@@ -770,7 +548,7 @@ mod tests {
                 else {
                     panic!("expected {property}");
                 };
-                assert_eq!(data.shape, vec![3, 1]);
+                assert_eq!(data.shape(), [3, 1]);
                 assert_eq!(data.integer_storage(), Some(&expected));
             }
         }
@@ -821,7 +599,10 @@ mod tests {
             Value::String("value".into()),
         ];
 
-        assert_eq!(find_trailing_property_start(&args), 4);
+        assert_eq!(
+            find_trailing_property_start(crate::call::FunctionArgumentView::from_slice(&args)),
+            4
+        );
     }
 
     #[test]

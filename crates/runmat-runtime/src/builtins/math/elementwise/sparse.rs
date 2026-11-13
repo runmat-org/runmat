@@ -187,8 +187,8 @@ fn preserve_sparse_with_dtype(
     sparse_from_f64_values(
         sparse.rows,
         sparse.cols,
-        sparse.col_ptrs.clone(),
-        sparse.row_indices.clone(),
+        sparse.col_ptrs.to_vec(),
+        sparse.row_indices.to_vec(),
         sparse.materialize_f64(),
         dtype,
         builtin,
@@ -240,7 +240,11 @@ fn scalar_real(value: &Value) -> Option<RealScalar> {
             dtype: NumericDType::F64,
         }),
         Value::CharArray(ca) if ca.rows.checked_mul(ca.cols) == Some(1) => Some(RealScalar {
-            value: ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0),
+            value: ca
+                .data()
+                .first()
+                .map(|&ch| f64::from(ch.raw()))
+                .unwrap_or(0.0),
             dtype: NumericDType::F64,
         }),
         _ => None,
@@ -290,7 +294,10 @@ fn logical_to_tensor(logical: &LogicalArray, builtin: &'static str) -> BuiltinRe
 }
 
 fn char_to_tensor(chars: &CharArray, builtin: &'static str) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = chars
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|err| map_internal_error(builtin, err))
 }
 
@@ -682,7 +689,7 @@ fn sparse_dense_scalar_result(
             combine(scalar, *value)
         };
     }
-    dense_from_f64_values(out, dense.shape, dtype, builtin)
+    dense_from_f64_values(out, dense.shape().to_vec(), dtype, builtin)
 }
 
 fn scale_sparse(
@@ -735,7 +742,7 @@ fn sparse_dense(
     let sparse_shape = sparse_shape(sparse);
     let output_shape = checked_broadcast_shape(
         &sparse_shape,
-        &dense.shape,
+        dense.shape(),
         builtin,
         "sparse and dense sizes",
     )?;
@@ -799,7 +806,7 @@ fn sparse_dense_full(
 ) -> BuiltinResult<Value> {
     checked_len(output_shape, builtin)?;
     let sparse_shape = sparse_shape(sparse);
-    let plan = BroadcastPlan::new(&sparse_shape, &dense.shape).map_err(|err| {
+    let plan = BroadcastPlan::new(&sparse_shape, dense.shape()).map_err(|err| {
         shape_error(
             builtin,
             format!("sparse and dense sizes are not compatible: {err}"),
@@ -891,9 +898,14 @@ fn sparse_dense_times_preserve_sparse(
 }
 
 fn dense_index_for_sparse_position(dense: &Tensor, row: usize, col: usize) -> usize {
-    let dense_row = if dense.rows <= 1 { 0 } else { row };
-    let dense_col = if dense.cols <= 1 { 0 } else { col };
-    dense_row + dense_col * dense.rows
+    let (rows, cols) = match dense.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    };
+    let dense_row = if rows <= 1 { 0 } else { row };
+    let dense_col = if cols <= 1 { 0 } else { col };
+    dense_row + dense_col * rows
 }
 
 fn sparse_complex(
@@ -910,12 +922,12 @@ fn sparse_complex(
     let sparse_shape = sparse_shape(sparse);
     let output_shape = checked_broadcast_shape(
         &sparse_shape,
-        &complex.shape,
+        complex.shape(),
         builtin,
         "sparse and complex sizes",
     )?;
     checked_len(&output_shape, builtin)?;
-    let plan = BroadcastPlan::new(&sparse_shape, &complex.shape).map_err(|err| {
+    let plan = BroadcastPlan::new(&sparse_shape, complex.shape()).map_err(|err| {
         shape_error(
             builtin,
             format!("sparse and complex sizes are not compatible: {err}"),
@@ -990,7 +1002,7 @@ pub(crate) fn map_sparse_real_values(
         }
         return dense_from_f64_values(
             out,
-            dense.shape,
+            dense.shape().to_vec(),
             sparse_floating_dtype(sparse.numeric_dtype()),
             builtin,
         );
@@ -1044,6 +1056,21 @@ fn sparse_numeric_dense_tensor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sparse_times_dense_preserves_rank_one_column_broadcast_and_scalar_rank() {
+        let sparse = Value::SparseTensor(sparse_a());
+        let row = Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap());
+        let product =
+            expect_sparse(sparse_binary(&sparse, &row, SparseBinaryOp::Mul, "times").unwrap());
+        assert_eq!(product.materialize_f64(), vec![20.0, 60.0, 60.0]);
+
+        let scalar = Value::Tensor(Tensor::new(vec![4.0], Vec::new()).unwrap());
+        let product =
+            expect_sparse(sparse_binary(&sparse, &scalar, SparseBinaryOp::Mul, "times").unwrap());
+        assert_eq!(product.materialize_f64(), vec![40.0, 120.0, 80.0]);
+    }
 
     fn sparse_a() -> SparseTensor {
         SparseTensor::new(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![10.0, 30.0, 20.0])
@@ -1176,7 +1203,14 @@ mod tests {
             .expect("sparse complex sum"),
         );
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(output.as_f32_slice(), Some(&[(3.0, 0.5), (2.0, -1.0)][..]));
+        assert_eq!(
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(3.0, 0.5), (2.0, -1.0)])
+        );
     }
 
     fn double_values(tensor: &Tensor) -> &[f64] {
@@ -1214,7 +1248,7 @@ mod tests {
             )
             .expect("sparse plus dense"),
         );
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(double_values(&result), [11.0, 2.0, 33.0, 4.0, 25.0, 6.0]);
     }
 
@@ -1229,7 +1263,7 @@ mod tests {
             )
             .expect("dense minus sparse"),
         );
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(double_values(&result), [-9.0, 2.0, -27.0, 4.0, -15.0, 6.0]);
     }
 
@@ -1278,7 +1312,7 @@ mod tests {
             )
             .expect("sparse times dense with nan"),
         );
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         let values = double_values(&result);
         assert_eq!(values[0], 10.0);
         assert!(values[1].is_nan());
@@ -1300,7 +1334,7 @@ mod tests {
             map_sparse_real_values(&sparse, "test", |value| Ok(1.0 - value))
                 .expect("zero-changing map"),
         );
-        assert_eq!(complemented.shape, vec![3, 2]);
+        assert_eq!(complemented.shape(), [3, 2]);
         assert_eq!(
             double_values(&complemented),
             [-9.0, 1.0, -29.0, 1.0, -19.0, 1.0]
@@ -1336,7 +1370,7 @@ mod tests {
             )
             .expect("sparse times inf"),
         );
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         let values = double_values(&result);
         assert!(values[1].is_nan());
         assert!(values[3].is_nan());
@@ -1413,7 +1447,14 @@ mod tests {
 
     #[test]
     fn sparse_plus_char_array_promotes_chars_to_numeric_dense() {
-        let chars = CharArray::new(vec!['A', 'B', 'C', 'D', 'E', 'F'], 3, 2).unwrap();
+        let chars = CharArray::from_code_units(
+            [0x0041, 0xD800, 0x0042, 0xDC00, 0x0043, 0xFFFF]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            3,
+            2,
+        )
+        .unwrap();
         let result = expect_tensor(
             sparse_binary(
                 &Value::SparseTensor(sparse_a()),
@@ -1424,9 +1465,8 @@ mod tests {
             .expect("sparse plus char"),
         );
         let values = double_values(&result);
-        assert_eq!(values[0], 75.0);
-        assert_eq!(values[1], 66.0);
-        assert_eq!(values[2], 97.0);
+        assert_eq!(result.shape(), &[3, 2]);
+        assert_eq!(values, vec![75.0, 66.0, 97.0, 55296.0, 56340.0, 65535.0]);
     }
 
     #[test]
@@ -1441,7 +1481,7 @@ mod tests {
             )
             .expect("sparse plus complex"),
         );
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(result.materialize_f64()[0], (11.0, 2.0));
         assert_eq!(result.materialize_f64()[1], (1.0, 2.0));
     }
@@ -1458,7 +1498,7 @@ mod tests {
             )
             .expect("complex times sparse"),
         );
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(result.materialize_f64()[0], (10.0, -10.0));
         assert_eq!(result.materialize_f64()[1], (0.0, -0.0));
     }

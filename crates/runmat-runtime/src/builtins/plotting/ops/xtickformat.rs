@@ -1,116 +1,41 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{XTICKFORMAT_DESCRIPTOR, XTICKFORMAT_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_tick_format::axis_tick_format_builtin;
 use super::axis_ticks::TickAxis;
-use crate::builtins::plotting::type_resolvers::get_type;
-
-const OUTPUT_FORMAT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fmt",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current X-axis tick label format.",
-}];
-const NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_FORMAT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fmt",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, date, or duration tick label format.",
-}];
-
-const INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::AxesHandle,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Target axes handle or array of axes handles.",
-}];
-
-const INPUTS_AX_FORMAT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle or array of axes handles.",
-    },
-    BuiltinParamDescriptor {
-        name: "fmt",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, date, or duration tick label format.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "fmt = xtickformat()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_FORMAT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "xtickformat(fmt)",
-        inputs: &INPUTS_FORMAT,
-        outputs: &NO_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "fmt = xtickformat(ax)",
-        inputs: &INPUTS_AX,
-        outputs: &OUTPUT_FORMAT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "xtickformat(ax, fmt)",
-        inputs: &INPUTS_AX_FORMAT,
-        outputs: &NO_OUTPUTS,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XTICKFORMAT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:xtickformat:InvalidArgument"),
-    when: "Argument count, format value, or axes handle is invalid.",
-    message: "xtickformat: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XTICKFORMAT.INTERNAL",
-    identifier: Some("RunMat:xtickformat:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "xtickformat: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const XTICKFORMAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[runtime_builtin(
     name = "xtickformat",
-    category = "plotting",
-    summary = "Query or set X-axis tick label format.",
-    keywords = "xtickformat,plotting,axes,tick format",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::xtickformat::XTICKFORMAT_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::xtickformat"
 )]
+pub fn xtickformat_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    xtickformat_with_runtime(runtime.as_ref(), args)
+}
+
+#[cfg(test)]
 pub fn xtickformat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    axis_tick_format_builtin("xtickformat", TickAxis::X, args)
+    xtickformat_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+}
+
+fn xtickformat_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &XTICKFORMAT_DESCRIPTOR,
+        &XTICKFORMAT_ERROR_TOO_MANY_OUTPUTS,
+        "xtickformat",
+    )?;
+    axis_tick_format_builtin(runtime, "xtickformat", TickAxis::X, args)
 }
 
 #[cfg(test)]

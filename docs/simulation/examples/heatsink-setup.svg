@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="260" viewBox="0 0 760 260" role="img" aria-labelledby="title desc">
+<title id="title">Heat input and cooling of a finned heat sink</title><desc id="desc">Distributed heater power enters a flat aluminum base. The base conducts heat into fins; a prescribed film coefficient represents heat exchange with ambient air.</desc>
+<defs><marker id="hot" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#f6b760"/></marker><marker id="cool" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#79b5f8"/></marker></defs>
+<rect width="760" height="260" rx="8" fill="#111318"/>
+<g font-family="system-ui,sans-serif" font-size="15" fill="#e5e7eb">
+<text x="28" y="34">Air cooling</text><text x="28" y="57" fill="#79b5f8">25 °C ambient</text><text x="28" y="80" fill="#aeb7c4">h = 35 W/(m²·K)</text>
+<path d="M180 160V66H192V160H220V66H232V160H260V66H272V160H300V66H312V160H340V66H352V160H380V66H392V160H420V66H432V160H460V66H472V160H500V66H512V180H180Z" fill="#546c87" stroke="#a8c9ec" stroke-width="2"/>
+<path d="M205 115V42M325 115V42M445 115V42" stroke="#79b5f8" stroke-width="2" marker-end="url(#cool)"/>
+<path d="M250 232V190M350 232V190M450 232V190" stroke="#f6b760" stroke-width="3" marker-end="url(#hot)"/>
+<text x="538" y="154">Heater input</text><text x="538" y="177" fill="#f6b760">≈ 10 W at base</text><text x="538" y="200" fill="#aeb7c4">Distributed heat flux</text>
+<text x="184" y="252" fill="#aeb7c4">Conduction in aluminum · schematic, not to scale</text>
+</g></svg>

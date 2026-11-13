@@ -311,18 +311,18 @@ fn validate_artifact_replay(
     let target_cells = artifact_cells(target);
     let source_nodes = artifact_coordinates(source);
     let target_nodes = artifact_coordinates(target);
-    let region_materials = |artifact: &SolverMeshArtifact| {
+    let region_ids = |artifact: &SolverMeshArtifact| {
         artifact
             .topology
             .regions
             .iter()
-            .map(|region| (region.region_id.clone(), region.material_id.clone()))
-            .collect::<BTreeMap<_, _>>()
+            .map(|region| region.region_id.clone())
+            .collect::<BTreeSet<_>>()
     };
-    if region_materials(source) != region_materials(target) {
+    if region_ids(source) != region_ids(target) {
         return Err(invalid(
-            "solver adaptation region materials",
-            "interior adaptation must preserve region material assignments",
+            "solver adaptation regions",
+            "interior adaptation must preserve region identities",
         ));
     }
     if lineage.kind == SolverMeshAdaptationKind::HRefinement
@@ -410,7 +410,12 @@ fn artifact_nodes(artifact: &SolverMeshArtifact) -> BTreeMap<u64, (StableDigest,
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, (node.stable_identity, node.coordinates_m)))
+        .map(|node| {
+            (
+                node.node_id,
+                (node.stable_identity, node.coordinates_m.canonical_value()),
+            )
+        })
         .collect()
 }
 
@@ -419,7 +424,7 @@ fn artifact_coordinates(artifact: &SolverMeshArtifact) -> BTreeMap<StableDigest,
         .topology
         .nodes
         .iter()
-        .map(|node| (node.stable_identity, node.coordinates_m))
+        .map(|node| (node.stable_identity, node.coordinates_m.canonical_value()))
         .collect()
 }
 

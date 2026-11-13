@@ -1,13 +1,6 @@
 use runmat_accelerate_api::ProviderPrecision;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{PLOT3_ERROR_INTERNAL, PLOT3_ERROR_INVALID_ARGUMENT};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::{line3::Line3GpuInputs, ScalarType};
 use runmat_plot::plots::NumericPlotData;
@@ -18,331 +11,17 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::common::numeric_plot_data_triplet;
 use super::gpu_helpers::gpu_xyz_bounds_async;
 use super::op_common::line_inputs::NumericInput;
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_line_style_args, LineAppearance, LineStyleParseOptions};
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "plot3";
-
-const PLOT3_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X/Y/Z",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Three-dimensional coordinate data accept all eight integer classes and retain native class, shape, and exact values as graphics-object source properties.",
-    }];
-pub const PLOT3_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = plot3(integer_X, integer_Y, integer_Z, ...)",
-        inputs: &PLOT3_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native numeric storage remains authoritative for XData/YData/ZData and figure persistence. Rendering is an explicit floating geometry boundary; integer gpuArray inputs gather exactly because the direct WGPU line path is floating-only.",
-    }];
-
-const PLOT3_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the first 3-D line object in the rendered series.",
-}];
-
-const PLOT3_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z data.",
-    },
-];
-
-const PLOT3_INPUTS_X_Y_Z_STYLE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z data.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style/color shorthand.",
-    },
-];
-
-const PLOT3_INPUTS_X_Y_Z_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z data.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const PLOT3_INPUTS_AX_X_Y_Z: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z data.",
-    },
-];
-
-const PLOT3_INPUTS_AX_X_Y_Z_STYLE: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z data.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style/color shorthand.",
-    },
-];
-
-const PLOT3_INPUTS_AX_X_Y_Z_PROPS: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z data.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const PLOT3_INPUTS_MULTI_SERIES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "series",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Interleaved X/Y/Z series triplets with optional per-series style tokens.",
-}];
-
-const PLOT3_INPUTS_AX_MULTI_SERIES: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "series",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Interleaved X/Y/Z series triplets with optional per-series style tokens.",
-    },
-];
-
-const PLOT3_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(X, Y, Z)",
-        inputs: &PLOT3_INPUTS_X_Y_Z,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(X, Y, Z, LineSpec)",
-        inputs: &PLOT3_INPUTS_X_Y_Z_STYLE,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(X, Y, Z, Name, Value, ...)",
-        inputs: &PLOT3_INPUTS_X_Y_Z_PROPS,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(ax, X, Y, Z)",
-        inputs: &PLOT3_INPUTS_AX_X_Y_Z,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(ax, X, Y, Z, LineSpec)",
-        inputs: &PLOT3_INPUTS_AX_X_Y_Z_STYLE,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(ax, X, Y, Z, Name, Value, ...)",
-        inputs: &PLOT3_INPUTS_AX_X_Y_Z_PROPS,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(X1, Y1, Z1, ..., Xn, Yn, Zn)",
-        inputs: &PLOT3_INPUTS_MULTI_SERIES,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = plot3(ax, X1, Y1, Z1, ..., Xn, Yn, Zn)",
-        inputs: &PLOT3_INPUTS_AX_MULTI_SERIES,
-        outputs: &PLOT3_OUTPUT_HANDLE,
-    },
-];
-
-pub const PLOT3_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PLOT3.INVALID_ARGUMENT",
-    identifier: Some("RunMat:plot3:InvalidArgument"),
-    when: "Input data, series grammar, axes targeting, or style arguments are invalid.",
-    message: "plot3: invalid argument",
-};
-
-pub const PLOT3_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PLOT3.INTERNAL",
-    identifier: Some("RunMat:plot3:Internal"),
-    when: "Internal 3-D line construction or rendering fails unexpectedly.",
-    message: "plot3: internal operation failed",
-};
-
-const PLOT3_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [PLOT3_ERROR_INVALID_ARGUMENT, PLOT3_ERROR_INTERNAL];
-
-pub const PLOT3_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PLOT3_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PLOT3_ERRORS,
-};
 
 fn plot3_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -399,28 +78,37 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "plot3",
-    category = "plotting",
-    summary = "Create 3-D line plots.",
-    keywords = "plot3,line,3d,visualization",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::plot3::PLOT3_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::plot3::PLOT3_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::plot3"
 )]
-pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn plot3_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PLOT3_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "plot3",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "plot3")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(plot3_impl(args, &work).await)
+}
+
+async fn plot3_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_plot3_invalid_argument)?;
-    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_plot3_invalid_argument)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_plot3_invalid_argument)?;
     let (mut plans, line_style_order) =
         parse_plot3_series_specs(args).map_err(map_plot3_invalid_argument)?;
 
     let opts = PlotRenderOptions {
-        title: "3-D Plot",
-        x_label: "X",
-        y_label: "Y",
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
 
@@ -445,7 +133,8 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             .take()
             .unwrap_or_else(|| format!("Series {}", series_idx + 1));
         if let Some((xg, yg, zg)) = plan.data.gpu_handles() {
-            if let Ok(plot) = build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await
+            if let Some(plot) =
+                build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await?
             {
                 plots.push(plot);
                 continue;
@@ -464,9 +153,12 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         );
     }
     let mut plots_opt = Some(plots);
+    work.check()?;
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_plot3_invalid_argument)?;
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let plots = plots_opt.take().expect("plot3 consumed once");
         for (idx, plot) in plots.into_iter().enumerate() {
@@ -483,8 +175,7 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_line3_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_plot3_internal(err));
@@ -544,7 +235,7 @@ struct Plot3SeriesPlan {
 }
 
 fn parse_plot3_series_specs(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<(Vec<Plot3SeriesPlan>, Option<Vec<LineStyle>>)> {
     if args.len() < 3 {
         return Err(plotting_error(
@@ -580,7 +271,13 @@ fn parse_plot3_series_specs(
             let token = args[idx].clone();
             idx += 1;
             style_tokens.push(token.clone());
-            if let Some(text) = super::style::value_as_string(&token) {
+            if let Some(text) = super::style::value_as_string(&token).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "plot3",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 let lower = text.trim().to_ascii_lowercase();
                 if super::style::looks_like_option_name(&lower) {
                     if idx >= args.len() {
@@ -629,14 +326,18 @@ pub(super) fn build_line3_plot_for_builtin(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    Ok(Line3Plot::new(x, y, z)
+    let mut plot = Line3Plot::new(x, y, z)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         )
-        .with_label(label))
+        .with_label(label);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(plot)
 }
 
 pub(super) fn build_line3_plot_from_numeric_data_for_builtin(
@@ -647,14 +348,18 @@ pub(super) fn build_line3_plot_from_numeric_data_for_builtin(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    Ok(Line3Plot::from_numeric_data(x, y, z)
+    let mut plot = Line3Plot::from_numeric_data(x, y, z)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         )
-        .with_label(label))
+        .with_label(label);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(plot)
 }
 
 fn build_line3_plot_from_numeric_data(
@@ -673,78 +378,90 @@ async fn build_line3_gpu_plot_async(
     z: &runmat_accelerate_api::GpuTensorHandle,
     label: &str,
     appearance: &LineAppearance,
-) -> crate::BuiltinResult<Line3Plot> {
-    if runmat_accelerate_api::handle_integer_type(x).is_some()
-        || runmat_accelerate_api::handle_integer_type(y).is_some()
-        || runmat_accelerate_api::handle_integer_type(z).is_some()
-    {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "plot3: integer gpuArray source requires exact host property retention",
-        ));
-    }
-    let _ = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU X data"))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Y data"))?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Z data"))?;
-    if x_ref.len == 0 || x_ref.len != y_ref.len || x_ref.len != z_ref.len {
+) -> crate::BuiltinResult<Option<Line3Plot>> {
+    let count = super::gpu_helpers::GpuBufferExports::element_count;
+    let len = count(x, BUILTIN_NAME)?;
+    if len == 0 || len != count(y, BUILTIN_NAME)? || len != count(z, BUILTIN_NAME)? {
         return Err(plotting_error(
             BUILTIN_NAME,
             "plot3: X, Y, and Z inputs must have identical non-empty lengths",
         ));
     }
-    if x_ref.len == 1 {
-        let host_x = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            x.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let host_y = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            y.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let host_z = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            z.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let (host_x, host_y, host_z) =
-            numeric_plot_data_triplet(host_x, host_y, host_z, BUILTIN_NAME)?;
-        return build_line3_plot_from_numeric_data(host_x, host_y, host_z, label, appearance);
+    if len == 1
+        || runmat_accelerate_api::handle_precision(x) != runmat_accelerate_api::handle_precision(y)
+        || runmat_accelerate_api::handle_precision(x) != runmat_accelerate_api::handle_precision(z)
+    {
+        return Ok(None);
     }
-    if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "plot3: gpuArray precision must match across X, Y, and Z",
-        ));
-    }
-    let len = u32::try_from(x_ref.len)
+    u32::try_from(len)
         .map_err(|_| plotting_error(BUILTIN_NAME, "plot3: point count exceeds supported range"))?;
-    let inputs = Line3GpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
-        z_buffer: z_ref.buffer.clone(),
-        len,
-        scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
+    let Some((_context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&[x, y, z], BUILTIN_NAME)?
+    else {
+        return Ok(None);
     };
-    let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
-    Ok(runmat_plot::plots::Line3Plot::from_gpu_xyz(
-        inputs,
-        appearance.color,
-        appearance.line_width,
-        appearance.line_style,
-        bounds,
-    )
-    .with_label(label))
+    let result = async {
+        let x_ref = gpu_exports
+            .export(x, BUILTIN_NAME)?
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU X data"))?;
+        let y_ref = gpu_exports
+            .export(y, BUILTIN_NAME)?
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Y data"))?;
+        let z_ref = gpu_exports
+            .export(z, BUILTIN_NAME)?
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Z data"))?;
+        if x_ref.len == 0 || x_ref.len != y_ref.len || x_ref.len != z_ref.len {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot3: X, Y, and Z inputs must have identical non-empty lengths",
+            ));
+        }
+        if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot3: gpuArray precision must match across X, Y, and Z",
+            ));
+        }
+        let len = u32::try_from(x_ref.len).map_err(|_| {
+            plotting_error(BUILTIN_NAME, "plot3: point count exceeds supported range")
+        })?;
+        let inputs = Line3GpuInputs {
+            x_buffer: x_ref.clone().into(),
+            y_buffer: y_ref.clone().into(),
+            z_buffer: z_ref.clone().into(),
+            len,
+            scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
+        };
+        let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
+        gpu_exports.record_completed_effect();
+        let mut plot = runmat_plot::plots::Line3Plot::from_gpu_xyz(
+            inputs,
+            appearance.color,
+            appearance.line_width,
+            appearance.line_style,
+            bounds,
+        )
+        .with_label(label);
+        if let Some(visible) = appearance.visible {
+            plot.set_visible(visible);
+        }
+        Ok(plot)
+    }
+    .await;
+    gpu_exports.complete(result, BUILTIN_NAME).map(Some)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::PLOT3_DESCRIPTOR;
+    async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::plot3_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
@@ -880,12 +597,9 @@ mod tests {
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
             Value::Tensor(vec_tensor(&[2.0, 3.0])),
             Value::String("LineStyleOrder".into()),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["--".into(), ":".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["--".into(), ":".into()], vec![1, 2]).unwrap(),
+            ),
             Value::Tensor(vec_tensor(&[0.0, 1.0])),
             Value::Tensor(vec_tensor(&[2.0, 3.0])),
             Value::Tensor(vec_tensor(&[4.0, 5.0])),

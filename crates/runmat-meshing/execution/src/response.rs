@@ -4,19 +4,20 @@ use std::collections::BTreeSet;
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingCanonicalLimits, MeshingFailure, MeshingWorkloadResult,
-    StableDigest,
+    CanonicalMeshingContract, MeshingCanonicalLimits, MeshingFailure, MeshingStageEvidence,
+    MeshingWorkloadResult, StableDigest,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CompletedMeshingStage, MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
+    stage_evidence_object::{validate_stage_evidence_inventory, validate_stage_evidence_result},
+    ArtifactAccess, CompletedMeshingStage, MeshingExecutionError, MeshingExecutionResult,
     MeshingHostWorkload, MeshingSerialExecutionError, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
-pub const MESHING_HOST_RESPONSE_SCHEMA_VERSION: u16 = 2;
-const MAX_RESULT_OBJECTS: usize = 65_538;
+pub const MESHING_HOST_RESPONSE_SCHEMA_VERSION: u16 = 3;
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
+const FAILURE_MESSAGE_PREFIX: &str = "runmat.meshing.failure:";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
@@ -24,7 +25,8 @@ pub enum MeshingHostResponse {
     Validated {
         schema_version: u16,
         stage_manifest_digest: StableDigest,
-        root: ValueRef,
+        stage_evidence: Box<MeshingStageEvidence>,
+        root: Box<ValueRef>,
         result_objects: Vec<ValueRef>,
     },
     Failed {
@@ -47,7 +49,17 @@ impl MeshingHostResponse {
             ));
         };
         let attempt = completed.attempt_success();
-        let [ValuePayload::Object(root)] = attempt.outputs.as_slice() else {
+        let runmat_execution_runner::AttemptSuccess::Values {
+            outputs,
+            result_objects,
+            ..
+        } = attempt
+        else {
+            return Err(MeshingExecutionError::Invalid(
+                "completed meshing stage returned an SPMD result".into(),
+            ));
+        };
+        let [ValuePayload::Object(root)] = outputs.as_slice() else {
             return Err(MeshingExecutionError::Invalid(
                 "completed meshing stage must have one externalized root output".into(),
             ));
@@ -55,8 +67,9 @@ impl MeshingHostResponse {
         let response = Self::Validated {
             schema_version: MESHING_HOST_RESPONSE_SCHEMA_VERSION,
             stage_manifest_digest: *stage_manifest_digest,
-            root: (**root).clone(),
-            result_objects: attempt.result_objects,
+            stage_evidence: Box::new(completed.stage_evidence().clone()),
+            root: root.clone(),
+            result_objects,
         };
         response.validate_against(host)?;
         Ok(response)
@@ -83,14 +96,25 @@ impl MeshingHostResponse {
         match self {
             Self::Validated {
                 stage_manifest_digest,
+                stage_evidence,
                 root,
-                result_objects: _,
+                result_objects,
                 ..
             } => {
                 MeshingWorkloadResult::Validated {
                     stage_manifest_digest: *stage_manifest_digest,
                 }
                 .validate_against(&host.workload)?;
+                stage_evidence.validate()?;
+                validate_stage_evidence_inventory(host, stage_evidence, result_objects)?;
+                if stage_evidence.stage != host.workload.stage
+                    || stage_evidence.partition != host.workload.partition
+                    || stage_evidence.stage_result_digest != *stage_manifest_digest
+                {
+                    return Err(MeshingExecutionError::Invalid(
+                        "meshing host stage evidence does not bind its workload result".into(),
+                    ));
+                }
                 validate_access(root, &host.artifact_access)?;
             }
             Self::Failed { failure, .. } => {
@@ -109,9 +133,10 @@ impl MeshingHostResponse {
                 root,
                 result_objects,
                 ..
-            } => Some(runmat_execution_runner::AttemptSuccess {
-                outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
+            } => Some(runmat_execution_runner::AttemptSuccess::Values {
+                outputs: vec![ValuePayload::Object(root.clone())],
                 result_objects: result_objects.clone(),
+                resources: None,
             }),
             Self::Failed { .. } => None,
         }
@@ -124,15 +149,27 @@ impl MeshingHostResponse {
                 result_objects,
                 ..
             } => runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
-                outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
+                outputs: vec![ValuePayload::Object(root.clone())],
                 result_objects: result_objects.clone(),
             },
             Self::Failed { failure, .. } => {
                 runmat_execution_artifact::ProgramExecutionResponse::Failure {
-                    message: failure.to_string(),
+                    message: encode_failure_message(failure)
+                        .unwrap_or_else(|_| failure.to_string()),
                 }
             }
         }
+    }
+
+    /// Recovers a canonical meshing failure from the generic program failure channel.
+    ///
+    /// Portable execution intentionally knows nothing about meshing. The meshing host therefore
+    /// owns this bounded envelope and the meshing executor unwraps it on the other side of the
+    /// process boundary. Unrelated program failures remain ordinary diagnostic strings.
+    pub fn failure_from_program_message(message: &str) -> Option<MeshingFailure> {
+        let encoded = message.strip_prefix(FAILURE_MESSAGE_PREFIX)?;
+        let bytes = decode_hex(encoded)?;
+        MeshingFailure::canonical_decode(&bytes).ok()
     }
 
     fn validate_standalone(&self) -> MeshingExecutionResult<()> {
@@ -140,27 +177,36 @@ impl MeshingHostResponse {
             Self::Validated {
                 schema_version,
                 stage_manifest_digest,
+                stage_evidence,
                 root,
                 result_objects,
             } => {
                 validate_version(*schema_version)?;
                 stage_manifest_digest.validate_nonzero("host response manifest digest")?;
+                stage_evidence.validate()?;
+                if stage_evidence.stage_result_digest != *stage_manifest_digest {
+                    return Err(MeshingExecutionError::Invalid(
+                        "host response evidence digest differs from its result manifest".into(),
+                    ));
+                }
                 if root.logical_digest.bytes() != stage_manifest_digest.bytes()
                     || root.kind != ValueRefKind::ResultObject
                     || root.media_type != MESHING_STAGE_MANIFEST_MEDIA_TYPE
                     || root.value_schema != STAGE_MANIFEST_SCHEMA
                     || result_objects.is_empty()
-                    || result_objects.len() > MAX_RESULT_OBJECTS
+                    || result_objects.len()
+                        > runmat_execution_artifact::MAX_PROGRAM_EXECUTION_RESULT_OBJECTS
                 {
                     return Err(MeshingExecutionError::Invalid(
                         "validated meshing host response has an invalid root or inventory".into(),
                     ));
                 }
-                let access = MeshingArtifactAccess {
+                let access = ArtifactAccess {
                     authorization_scope: root.authorization_scope.clone(),
                     encryption_context: root.encryption_context,
                 };
                 access.validate()?;
+                validate_stage_evidence_result(&access, stage_evidence, result_objects)?;
                 let mut value_ids = BTreeSet::new();
                 let mut logical_digests = BTreeSet::new();
                 let mut contains_root = false;
@@ -177,7 +223,7 @@ impl MeshingHostResponse {
                                 .into(),
                         ));
                     }
-                    contains_root |= object == root;
+                    contains_root |= object == root.as_ref();
                 }
                 if !contains_root {
                     return Err(MeshingExecutionError::Invalid(
@@ -194,6 +240,41 @@ impl MeshingHostResponse {
             }
         }
         Ok(())
+    }
+}
+
+fn encode_failure_message(failure: &MeshingFailure) -> MeshingExecutionResult<String> {
+    let bytes = failure.canonical_encode()?;
+    let mut message = String::with_capacity(FAILURE_MESSAGE_PREFIX.len() + bytes.len() * 2);
+    message.push_str(FAILURE_MESSAGE_PREFIX);
+    for byte in bytes {
+        use std::fmt::Write;
+        write!(&mut message, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    Ok(message)
+}
+
+fn decode_hex(encoded: &str) -> Option<Vec<u8>> {
+    if !encoded.len().is_multiple_of(2) {
+        return None;
+    }
+    encoded
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = hex_nibble(pair[0])?;
+            let low = hex_nibble(pair[1])?;
+            Some((high << 4) | low)
+        })
+        .collect()
+}
+
+const fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -220,10 +301,7 @@ fn validate_version(schema_version: u16) -> MeshingExecutionResult<()> {
     Ok(())
 }
 
-fn validate_access(
-    reference: &ValueRef,
-    access: &MeshingArtifactAccess,
-) -> MeshingExecutionResult<()> {
+fn validate_access(reference: &ValueRef, access: &ArtifactAccess) -> MeshingExecutionResult<()> {
     if reference.authorization_scope != access.authorization_scope
         || reference.encryption_context != access.encryption_context
         || reference.id != access.value_id(reference.logical_digest)

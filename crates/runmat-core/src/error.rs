@@ -6,10 +6,17 @@ use runmat_vm::CompileError;
 use crate::telemetry::TelemetryFailureInfo;
 
 #[derive(Debug)]
+pub struct SourceCompileError {
+    pub error: CompileError,
+    pub source: crate::SourceMapEntry,
+}
+
+#[derive(Debug)]
 pub enum RunError {
     Syntax(SyntaxError),
     Semantic(HirError),
     Compile(CompileError),
+    SourceCompile(SourceCompileError),
     Runtime(RuntimeError),
 }
 
@@ -19,6 +26,7 @@ impl std::fmt::Display for RunError {
             RunError::Syntax(err) => write!(f, "{err}"),
             RunError::Semantic(err) => write!(f, "{err}"),
             RunError::Compile(err) => write!(f, "{err}"),
+            RunError::SourceCompile(err) => write!(f, "{}: {}", err.source.display_name, err.error),
             RunError::Runtime(err) => write!(f, "{err}"),
         }
     }
@@ -76,6 +84,16 @@ impl RunError {
                     .unwrap_or_else(|| "RunMat:CompileError".to_string()),
                 has_span: err.span.is_some(),
                 component: telemetry_component_for_identifier(err.identifier.as_deref()),
+            },
+            RunError::SourceCompile(err) => TelemetryFailureInfo {
+                stage: "compile".to_string(),
+                code: err
+                    .error
+                    .identifier
+                    .clone()
+                    .unwrap_or_else(|| "RunMat:CompileError".to_string()),
+                has_span: err.error.span.is_some(),
+                component: telemetry_component_for_identifier(err.error.identifier.as_deref()),
             },
             RunError::Runtime(err) => runtime_error_telemetry_failure_info(err),
         }

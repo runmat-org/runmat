@@ -10,11 +10,7 @@ pub(super) fn scoped_id(
     source_topology_id: &str,
     assembly_path: &[String],
 ) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.into(),
-        assembly_path: assembly_path.to_vec(),
-    }
+    PersistentEntityId::new(kind, source_topology_id.into(), assembly_path.to_vec())
 }
 
 pub(super) fn assembly_id(assembly_path: &[String]) -> PersistentEntityId {
@@ -47,7 +43,7 @@ pub(super) fn mass_id(assembly_path: &[String], is_sheet_body: bool) -> MassProp
         hasher.update((segment.len() as u64).to_be_bytes());
         hasher.update(segment.as_bytes());
     }
-    MassPropertiesEvaluatorId(format!("mass:scope:{:x}", hasher.finalize()))
+    MassPropertiesEvaluatorId(format!("mass:scope:{}", hex::encode(hasher.finalize())))
 }
 
 pub(super) const fn orientation(reversed: bool) -> TopologicalOrientation {

@@ -1,10 +1,2 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UnitSystem {
-    Unspecified,
-    Meter,
-    Millimeter,
-    Inch,
-}
+//! Length units use the same typed conversion contract as all physical quantities.
+pub use runmat_types::physical::LengthUnit;

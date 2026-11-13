@@ -5,6 +5,9 @@ use runmat_value::{CellArray, Value};
 
 use crate::{BuiltinResult, RuntimeError};
 
+#[cfg(test)]
+mod selected_context_tests;
+
 pub(crate) type ErrorMapper = fn(String) -> RuntimeError;
 
 pub(crate) fn parse_filter_spec(
@@ -24,10 +27,13 @@ fn parse_filter_cell(
     cell: &CellArray,
     invalid_argument: ErrorMapper,
 ) -> BuiltinResult<Vec<OpenFileDialogFilter>> {
-    if cell.data.is_empty() {
+    if cell.data().is_empty() {
         return Ok(default_filters());
     }
-    if cell.cols == 0 || cell.cols > 2 {
+    if crate::builtins::common::shape::effective_rank(&cell.shape) > 2
+        || cell.cols == 0
+        || cell.cols > 2
+    {
         return Err(invalid_argument(
             "filter cell array must have one or two columns".to_string(),
         ));
@@ -79,12 +85,34 @@ pub(crate) fn default_filters() -> Vec<OpenFileDialogFilter> {
     }]
 }
 
-pub(crate) fn try_scalar_text(value: &Value) -> Option<String> {
+pub(crate) fn try_scalar_text(
+    value: &Value,
+    context: &str,
+    invalid_argument: impl FnOnce(String) -> RuntimeError,
+) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
+        Value::CharArray(chars)
+            if chars.rows == 1
+                && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
+        {
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                invalid_argument(format!("{context} contains malformed UTF-16 text"))
+            })
+            .map(Some)
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -93,7 +121,7 @@ pub(crate) fn scalar_text(
     context: &str,
     invalid_argument: ErrorMapper,
 ) -> BuiltinResult<String> {
-    try_scalar_text(value).ok_or_else(|| {
+    try_scalar_text(value, context, invalid_argument)?.ok_or_else(|| {
         invalid_argument(format!(
             "{context} must be a character vector or string scalar"
         ))
@@ -168,4 +196,58 @@ fn normalized_directory_key(directory: &str) -> String {
     #[cfg(windows)]
     key.make_ascii_lowercase();
     key
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::CharArray;
+
+    fn error(message: String) -> RuntimeError {
+        crate::build_runtime_error(message).build()
+    }
+
+    #[test]
+    fn scalar_text_distinguishes_pages_from_trailing_singletons() {
+        let page = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        );
+        assert!(scalar_text(&page, "title", error).is_err());
+        let row = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+        );
+        assert_eq!(scalar_text(&row, "title", error).unwrap(), "ab");
+        let malformed = Value::CharArray(
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)], 1, 1)
+                .unwrap(),
+        );
+        let failure = try_scalar_text(&malformed, "title", error).unwrap_err();
+        assert!(failure
+            .source
+            .as_deref()
+            .unwrap()
+            .downcast_ref::<runmat_value::Utf16DecodeError>()
+            .is_some());
+        assert!(try_scalar_text(&Value::Num(1.0), "title", error)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn filter_rows_preserve_pattern_description_pairs_and_reject_pages() {
+        let values = vec![
+            Value::from("*.m"),
+            Value::from("Scripts"),
+            Value::from("*.mat"),
+            Value::from("Data"),
+        ];
+        let rows = CellArray::new_with_shape(values.clone(), vec![2, 2, 1]).unwrap();
+        let filters = parse_filter_cell(&rows, error).unwrap();
+        assert_eq!(filters[0].patterns, vec!["*.m"]);
+        assert_eq!(filters[0].description.as_deref(), Some("Scripts"));
+        assert_eq!(filters[1].patterns, vec!["*.mat"]);
+        assert_eq!(filters[1].description.as_deref(), Some("Data"));
+        let pages = CellArray::new_with_shape(values, vec![1, 2, 2]).unwrap();
+        assert!(parse_filter_cell(&pages, error).is_err());
+    }
 }

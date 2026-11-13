@@ -12,10 +12,6 @@ runmat_thread_local! {
 pub(crate) static FIGURE_EVENT_OBSERVER: OnceLock<()> = OnceLock::new();
 
 runmat_thread_local! {
-    pub(crate) static JS_STDIN_HANDLER: RefCell<Option<js_sys::Function>> = RefCell::new(None);
-}
-
-runmat_thread_local! {
     pub(crate) static STDOUT_SUBSCRIBERS: RefCell<HashMap<u32, js_sys::Function>> =
         RefCell::new(HashMap::new());
 }
@@ -52,14 +48,6 @@ pub(crate) fn clear_figure_event_callback() {
     FIGURE_EVENT_CALLBACK.with(|slot| {
         slot.replace(None);
     });
-}
-
-pub(crate) fn set_js_stdin_handler(handler: Option<js_sys::Function>) {
-    JS_STDIN_HANDLER.with(|slot| *slot.borrow_mut() = handler);
-}
-
-pub(crate) fn js_stdin_handler() -> Option<js_sys::Function> {
-    JS_STDIN_HANDLER.with(|slot| slot.borrow().clone())
 }
 
 pub(crate) fn figure_event_callback() -> Option<js_sys::Function> {

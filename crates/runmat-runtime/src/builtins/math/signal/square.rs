@@ -6,161 +6,28 @@
 //! is the duty cycle expressed as a percentage: the output is `+1` over the
 //! first `duty/100 * 2*pi` of every period and `-1` over the remainder.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SQUARE_ERROR_ARG_COUNT, SQUARE_ERROR_COMPLEX_UNSUPPORTED,
+    SQUARE_ERROR_DUTY_INVALID, SQUARE_ERROR_DUTY_RANGE, SQUARE_ERROR_INTERNAL,
+    SQUARE_ERROR_INVALID_INPUT, SQUARE_GPU_INPUT_EXTENSION, SQUARE_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
-use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::tensor::tensor_into_value;
+use crate::builtins::math::signal::common::{
+    admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
+    prepared_real_integer_tensor, waveform_input_tensor, PreparedWaveformControl,
+    SignalCooperation, WaveformControlError, WaveformOutputMode, WaveformSampleError,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "square";
 const TWO_PI: f64 = 2.0 * PI;
-
-const SQUARE_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "square-nonfloating-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "square with an integer or logical argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SquareNonfloatingInputExtension"),
-};
-
-const SQUARE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "square-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interactive square gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SquareGpuInputExtension"),
-};
-
-pub const SQUARE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    SQUARE_NONFLOATING_INPUT_EXTENSION,
-    SQUARE_GPU_INPUT_EXTENSION,
-];
-
-const SQUARE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square-wave output sampled at t.",
-}];
-
-const SQUARE_SIG_DEFAULT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "t",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times.",
-}];
-
-const SQUARE_SIG_DUTY_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times.",
-    },
-    BuiltinParamDescriptor {
-        name: "duty",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("50"),
-        description: "Duty cycle percentage in [0, 100].",
-    },
-];
-
-const SQUARE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = square(t)",
-        inputs: &SQUARE_SIG_DEFAULT_INPUTS,
-        outputs: &SQUARE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = square(t, duty)",
-        inputs: &SQUARE_SIG_DUTY_INPUTS,
-        outputs: &SQUARE_OUTPUT,
-    },
-];
-
-const SQUARE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.INVALID_INPUT",
-    identifier: Some("RunMat:square:InvalidInput"),
-    when: "Primary input is not numeric-real tensor/scalar compatible.",
-    message: "square: expected numeric input",
-};
-
-const SQUARE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:square:ComplexUnsupported"),
-    when: "Primary input includes complex values.",
-    message: "square: input must be real; complex values are not supported",
-};
-
-const SQUARE_ERROR_DUTY_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.DUTY_INVALID",
-    identifier: Some("RunMat:square:DutyInvalid"),
-    when: "Duty argument is not a real numeric scalar.",
-    message: "square: duty must be a real numeric scalar in [0, 100]",
-};
-
-const SQUARE_ERROR_DUTY_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.DUTY_RANGE",
-    identifier: Some("RunMat:square:DutyOutOfRange"),
-    when: "Duty argument lies outside [0, 100] or is non-finite.",
-    message: "square: duty must be a finite scalar in [0, 100]",
-};
-
-const SQUARE_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.ARG_COUNT",
-    identifier: Some("RunMat:square:ArgCount"),
-    when: "More than one optional argument is provided.",
-    message: "square: expected 1 or 2 arguments",
-};
-
-const SQUARE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SQUARE.INTERNAL",
-    identifier: Some("RunMat:square:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "square: internal error",
-};
-
-const SQUARE_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    SQUARE_ERROR_INVALID_INPUT,
-    SQUARE_ERROR_COMPLEX_UNSUPPORTED,
-    SQUARE_ERROR_DUTY_INVALID,
-    SQUARE_ERROR_DUTY_RANGE,
-    SQUARE_ERROR_ARG_COUNT,
-    SQUARE_ERROR_INTERNAL,
-];
-
-pub const SQUARE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SQUARE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SQUARE_ERRORS,
-};
-
-const SQUARE_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "t", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The compatibility target documents single and double sample times. RunMat mode admits typed integers only when every value is exactly representable at the binary64 waveform boundary." }];
-const SQUARE_INTEGER_DUTY_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "duty", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The compatibility target documents single and double duty cycles. RunMat mode admits a typed integer scalar from 0 through 100 behind the nonfloating-input gate." }];
-pub const SQUARE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = square(integer_t)", inputs: &SQUARE_INTEGER_T_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer samples cross one checked binary64 phase boundary and produce a same-shaped double waveform. Automatic residency may gather transparently; explicit gpuArray input has its own extension gate." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = square(t, integer_duty)", inputs: &SQUARE_INTEGER_DUTY_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The scalar duty cycle controls the floating waveform threshold; output class and shape follow the supported t path." },
-];
 
 fn square_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     square_error_with_message(error.message, error)
@@ -195,7 +62,9 @@ fn square_error_with_source(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    let mut failure = builder.build();
+    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    failure
 }
 
 /// Element-wise scalar square wave.
@@ -209,9 +78,16 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
     if !t.is_finite() {
         return f64::NAN;
     }
+    if duty == 0.0 {
+        return -1.0;
+    }
+    if duty == 100.0 {
+        return 1.0;
+    }
     let phi = t.rem_euclid(TWO_PI);
-    let threshold = duty * TWO_PI / 100.0;
-    if phi < threshold {
+    // Keep the percentage comparison in its non-underflowing scale. A
+    // positive subnormal duty still includes phase zero.
+    if phi * 100.0 < duty * TWO_PI {
         1.0
     } else {
         -1.0
@@ -220,16 +96,33 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
 
 #[runtime_builtin(
     name = "square",
-    category = "math/signal",
-    summary = "Generate periodic square waves with an optional duty-cycle argument.",
-    keywords = "square,waveform,signal processing,duty cycle,periodic",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::signal::square::SQUARE_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::square::SQUARE_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::square::SQUARE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::square"
 )]
+async fn square_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    varargin: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    square_in_runtime(runtime.as_ref(), t, varargin).await
+}
+
+#[cfg(test)]
 async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
+    let varargin = crate::execution::RootedValues::new(varargin)
+        .map_err(|error| error.into_runtime_error())?;
+    square_in_runtime(None, t, varargin.into()).await
+}
+
+async fn square_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    varargin: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&SQUARE_ERROR_INTERNAL);
+    cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
@@ -249,32 +142,39 @@ async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> 
             BUILTIN_NAME,
         )?;
     }
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &t,
-        &SQUARE_NONFLOATING_INPUT_EXTENSION,
-        BUILTIN_NAME,
-        "sample-time",
-    )
-    .await?;
-    if let Some(duty) = varargin.first() {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            duty,
-            &SQUARE_NONFLOATING_INPUT_EXTENSION,
-            BUILTIN_NAME,
-            "duty-cycle",
-        )
-        .await?;
+    let mut duty = prepare_duty(varargin.view())?;
+    admit_real_waveform_sample(&t).map_err(|error| match error {
+        WaveformSampleError::Complex => square_error(&SQUARE_ERROR_COMPLEX_UNSUPPORTED),
+        WaveformSampleError::Unsupported => square_error(&SQUARE_ERROR_INVALID_INPUT),
+    })?;
+    if let Some(control) = &mut duty {
+        control
+            .admit_host_boundary(&mut cooperation)
+            .await
+            .map_err(duty_control_error)?;
     }
-    let duty = parse_duty(&varargin).await?;
+    if let Some(control) = &duty {
+        control
+            .admit_resident_metadata(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL)
+            .map_err(duty_control_error)?;
+    }
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &SQUARE_ERROR_INTERNAL)?;
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &SQUARE_NONFLOATING_INPUT_EXTENSION, "sample-time")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
+    let duty = resolve_duty(duty, &mut cooperation).await?;
     match t {
-        Value::GpuTensor(handle) => square_gpu(handle, duty).await,
+        Value::GpuTensor(handle) => {
+            square_gpu(handle, duty, prepared_payload, &mut cooperation).await
+        }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(square_error(&SQUARE_ERROR_COMPLEX_UNSUPPORTED))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(square_error(&SQUARE_ERROR_INVALID_INPUT))
         }
-        other => square_real(other, duty),
+        other => square_real(other, duty, &mut cooperation).await,
     }
 }
 
@@ -293,21 +193,23 @@ fn is_supported_nonfloating_argument(value: &Value) -> bool {
     }
 }
 
-async fn parse_duty(varargin: &[Value]) -> BuiltinResult<f64> {
+fn prepare_duty<'a>(
+    varargin: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<Option<PreparedWaveformControl<'a>>> {
     match varargin.len() {
-        0 => Ok(50.0),
+        0 => Ok(None),
         1 => {
-            let raw = scalar_f64_from_value_async(&varargin[0])
-                .await
-                .map_err(|err| square_error_with_detail(&SQUARE_ERROR_DUTY_INVALID, err))?
-                .ok_or_else(|| square_error(&SQUARE_ERROR_DUTY_INVALID))?;
-            if !raw.is_finite() || !(0.0..=100.0).contains(&raw) {
-                return Err(square_error_with_detail(
-                    &SQUARE_ERROR_DUTY_RANGE,
-                    format!("got {raw}"),
-                ));
+            let control = PreparedWaveformControl::admit(
+                varargin.first().expect("single duty operand was checked"),
+                &SQUARE_NONFLOATING_INPUT_EXTENSION,
+                BUILTIN_NAME,
+                "duty-cycle",
+            )
+            .map_err(duty_control_error)?;
+            if let Some(raw) = control.host_value() {
+                validate_duty(raw)?;
             }
-            Ok(raw)
+            Ok(Some(control))
         }
         _ => Err(square_error_with_detail(
             &SQUARE_ERROR_ARG_COUNT,
@@ -316,51 +218,257 @@ async fn parse_duty(varargin: &[Value]) -> BuiltinResult<f64> {
     }
 }
 
-async fn square_gpu(handle: GpuTensorHandle, duty: f64) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            square_error_with_source(&SQUARE_ERROR_INTERNAL, "gpu gather failed", source)
-        })?;
-    square_tensor(tensor, duty).map(tensor_into_value)
-}
-
-fn square_real(value: Value, duty: f64) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INVALID_INPUT, err))?;
-    square_tensor(tensor, duty).map(tensor_into_value)
-}
-
-fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
-    let storage = tensor
-        .into_numeric_storage()
-        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))?;
-    let storage = match storage {
-        NumericStorage::F32(values) => NumericStorage::F32(
-            values
-                .into_iter()
-                .map(|value| square_scalar(f64::from(value), duty) as f32)
-                .collect(),
-        ),
-        storage => NumericStorage::F64(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(|value| square_scalar(value, duty))
-                .collect(),
-        ),
+async fn resolve_duty(
+    control: Option<PreparedWaveformControl<'_>>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<f64> {
+    let Some(control) = control else {
+        return Ok(50.0);
     };
-    Tensor::from_numeric_storage(storage, shape)
-        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))
+    validate_duty(
+        control
+            .resolve(cooperation)
+            .await
+            .map_err(duty_control_error)?,
+    )
+}
+
+fn validate_duty(raw: f64) -> BuiltinResult<f64> {
+    if !raw.is_finite() || !(0.0..=100.0).contains(&raw) {
+        return Err(square_error_with_detail(
+            &SQUARE_ERROR_DUTY_RANGE,
+            format!("got {raw}"),
+        ));
+    }
+    Ok(raw)
+}
+
+fn duty_control_error(error: WaveformControlError) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => {
+            square_error_with_detail(&SQUARE_ERROR_DUTY_INVALID, detail)
+        }
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            square_error_with_source(&SQUARE_ERROR_INTERNAL, "control download failed", source)
+        }
+    }
+}
+
+async fn square_gpu(
+    handle: GpuTensorHandle,
+    duty: f64,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| square_error_with_detail(&SQUARE_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|source| {
+                square_error_with_source(&SQUARE_ERROR_INTERNAL, "gpu gather failed", source)
+            })?,
+    };
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |value| square_scalar(value, duty),
+        cooperation,
+    )
+    .await?
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL))
+}
+
+async fn square_real(
+    value: Value,
+    duty: f64,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
+        .await?
+        .map_err(|error| {
+            error.into_runtime_error(
+                BUILTIN_NAME,
+                &SQUARE_ERROR_INVALID_INPUT,
+                &SQUARE_ERROR_INTERNAL,
+            )
+        })?;
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |sample| square_scalar(sample, duty),
+        cooperation,
+    )
+    .await?
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SQUARE_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CountingControlProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        probe: runmat_accelerate_api::test_support::RetirementProbe,
+        downloads: std::sync::atomic::AtomicUsize,
+        fail_download: bool,
+    }
+
+    impl runmat_accelerate_api::AccelProvider for CountingControlProvider {
+        fn device_id(&self) -> u32 {
+            self.owner.device_id()
+        }
+        fn device_info(&self) -> String {
+            "waveform-control-counting-provider".into()
+        }
+        fn upload(
+            &self,
+            _: &runmat_accelerate_api::HostTensorView<'_>,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("control-only fixture must not upload")
+        }
+        fn download<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.downloads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async move {
+                if self.fail_download {
+                    anyhow::bail!("control download device fault")
+                }
+                let data = self.probe.with_data(handle, |data| match data {
+                    runmat_accelerate_api::HostNumericDataView::F64(data) => Ok(data.to_vec()),
+                    _ => Err(anyhow::anyhow!("expected F64 control")),
+                })??;
+                Ok(runmat_accelerate_api::HostTensorOwned {
+                    data,
+                    shape: handle.shape().to_vec(),
+                    storage: handle.physical().storage(),
+                })
+            })
+        }
+    }
+
+    fn counted_control(fail_download: bool) -> (&'static CountingControlProvider, GpuTensorHandle) {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![25.0]),
+                shape: vec![1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let provider = Box::leak(Box::new(CountingControlProvider {
+            owner,
+            probe: allocation.probe,
+            downloads: std::sync::atomic::AtomicUsize::new(0),
+            fail_download,
+        }));
+        (provider, allocation.handle)
+    }
+
+    #[test]
+    fn resident_duty_downloads_once_and_preserves_operational_failure() {
+        use std::sync::atomic::Ordering;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        for fail in [false, true] {
+            let (provider, control) = counted_control(fail);
+            let borrowed = control.clone();
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let result = call_with_duty(Value::Num(0.0), Value::GpuTensor(control));
+            assert_eq!(provider.downloads.load(Ordering::Relaxed), 1);
+            assert!(borrowed.allocation_lease().validate_live().is_ok());
+            if fail {
+                let error = result.expect_err("operational download failure");
+                assert_eq!(error.identifier(), SQUARE_ERROR_INTERNAL.identifier);
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                assert!(error.source.is_some());
+            } else {
+                assert!(matches!(result.unwrap(), Value::Num(value) if value == 1.0));
+            }
+        }
+    }
+
+    #[test]
+    fn known_invalid_sample_does_not_download_resident_duty() {
+        use std::sync::atomic::Ordering;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let (provider, control) = counted_control(true);
+        let borrowed = control.clone();
+        let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let error = call_with_duty(Value::String("invalid".into()), Value::GpuTensor(control))
+            .expect_err("known invalid sample");
+        assert_eq!(error.identifier(), SQUARE_ERROR_INVALID_INPUT.identifier);
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+        assert!(borrowed.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
+    fn resident_sample_owner_metadata_keeps_square_context_before_download() {
+        use std::sync::atomic::Ordering;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let (provider, _) = counted_control(true);
+        let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let foreign_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = foreign_owner
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let borrowed = allocation.handle.clone();
+        let error = call(Value::GpuTensor(allocation.handle))
+            .expect_err("resident sample without an active owner must be rejected");
+        assert_eq!(error.identifier(), SQUARE_ERROR_INTERNAL.identifier);
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let original = error
+            .source
+            .as_deref()
+            .and_then(|cause| cause.downcast_ref::<RuntimeError>())
+            .expect("typed metadata failure retained as source");
+        assert_ne!(original.identifier(), SQUARE_ERROR_INTERNAL.identifier);
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+        borrowed.allocation_lease().validate_live().unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
+
+    #[test]
+    fn invalid_host_duty_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err = call_with_duty(Value::GpuTensor(input.handle), Value::Num(101.0))
+            .expect_err("host duty");
+        assert_eq!(err.identifier(), SQUARE_ERROR_DUTY_RANGE.identifier);
+    }
+
+    #[test]
+    fn integer_sample_literal_boundary_matches_catalog_fact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error =
+            call(Value::Int(IntValue::U64((1_u64 << 53) + 1))).expect_err("inexact sample time");
+        assert!(error.message().contains("exactly representable"));
+        assert!(matches!(
+            call(Value::Int(IntValue::U64(1_u64 << 54))).unwrap(),
+            Value::Num(_)
+        ));
+    }
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
-    use runmat_value::{IntValue, LogicalArray};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, LogicalArray, NumericStorage, Tensor};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(square_builtin(t, Vec::new()))
@@ -385,25 +493,16 @@ mod tests {
     }
 
     #[test]
-    fn square_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
     fn square_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("square builtin");
-        let descriptor = builtin.descriptor.expect("square descriptor");
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).unwrap();
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
+        let descriptor = entry.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = square(t)"));
         assert!(labels.contains(&"Y = square(t, duty)"));
@@ -425,13 +524,27 @@ mod tests {
     }
 
     #[test]
+    fn smallest_positive_duty_includes_only_representable_zero_phase() {
+        let minimum = f64::from_bits(1);
+        assert_eq!(square_scalar(0.0, minimum), 1.0);
+        assert_eq!(square_scalar(TWO_PI, minimum), 1.0);
+        assert_eq!(square_scalar(minimum, minimum), -1.0);
+        assert_eq!(square_scalar(0.0, 0.0), -1.0);
+        assert_eq!(square_scalar(0.0, 100.0), 1.0);
+        assert_eq!(
+            square_scalar(f64::from_bits(TWO_PI.to_bits() - 1), 100.0),
+            1.0
+        );
+    }
+
+    #[test]
     fn square_vector_only_contains_plus_or_minus_one() {
         let n: usize = 64;
         let step = TWO_PI / (n as f64 - 1.0);
         let data: Vec<f64> = (0..n).map(|i| i as f64 * step).collect();
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![1, n]);
+        assert_eq!(result.shape(), vec![1, n]);
         for (idx, &value) in result.materialize_f64().iter().enumerate() {
             assert!(
                 value == 1.0 || value == -1.0,
@@ -531,7 +644,7 @@ mod tests {
 
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), vec![1, 2]);
         assert_eq!(result.materialize_f64(), vec![1.0, 1.0]);
     }
 
@@ -551,13 +664,17 @@ mod tests {
             assert!(call(Value::Int(IntValue::I16(0))).is_ok());
         }
 
-        let handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 0,
-            buffer_id: 9_300_004,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("publish provenance view");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(Value::GpuTensor(handle))
             .expect_err("MATLAB mode rejects explicit interactive gpuArray input before gather");
@@ -604,7 +721,7 @@ mod tests {
     fn square_preserves_matrix_shape() {
         let tensor = Tensor::new(vec![0.0, PI / 2.0, PI, 3.0 * PI / 2.0], vec![2, 2]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), vec![2, 2]);
         assert_eq!(result.materialize_f64(), vec![1.0, 1.0, -1.0, -1.0]);
     }
 }

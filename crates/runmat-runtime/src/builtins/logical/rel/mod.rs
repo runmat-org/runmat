@@ -1,5 +1,6 @@
 //! Relational logical builtins.
 
+mod comparison;
 pub mod eq;
 pub mod ge;
 pub mod gt;

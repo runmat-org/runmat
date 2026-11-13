@@ -1,4 +1,5 @@
 pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+{{FINITE_F32_HELPER}}
 
 struct VertexRaw {
     data: array<f32, 12u>,
@@ -51,7 +52,7 @@ fn sample_color(t: f32) -> vec4<f32> {
 }
 
 fn sanitize_finite(v: f32, fallback: f32) -> f32 {
-    return select(v, fallback, isFinite(v));
+    return select(fallback, v, isFinite(v));
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
@@ -111,6 +112,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+{{FINITE_F32_HELPER}}
+
+fn sanitize_finite(v: f32, fallback: f32) -> f32 {
+    return select(fallback, v, isFinite(v));
+}
 
 struct VertexRaw {
     data: array<f32, 12u>,

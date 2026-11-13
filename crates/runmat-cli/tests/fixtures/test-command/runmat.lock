@@ -1,0 +1,37 @@
+schema_version = 1
+resolver_version = "1"
+graph_digest = "sha256:83916c97ee8c457bd7be48f3bef790ef133cfbd9482c93b8852d9e466beff5d8"
+
+[root]
+manifest_digest = "sha256:e3afecaf9eae308a3054e6820604a9bf10aeb7a3988080e7083756a916dc2727"
+package = "workspace:local/cli-test-fixture"
+
+[selection]
+target = "aarch64-apple-darwin"
+groups = ["runtime", "test"]
+root_features = []
+host_capabilities = ["network", "native-library", "mex", "jvm", "subprocess"]
+
+[[packages]]
+features = ["default"]
+required_capabilities = []
+singleton = false
+
+[packages.instance]
+package = "workspace:local/test-helper"
+tree_digest = "sha256:19814de1ff5d7fd89f8284c92171796ee03caadc94b2f44d784e9db066853361"
+identity_digest = "sha256:e04dce701df90e34b2e821fa556f30c728f5d20720e55a6b3be18229070b48b4"
+
+[packages.instance.source]
+kind = "path"
+
+[packages.instance.source.source]
+workspace_path = "deps/test-helper"
+manifest_digest = "sha256:d62d80223fd80e4487a55300c0fc74e2cc6450eb4a829fdac2bfec25360150af"
+tree_digest = "sha256:19814de1ff5d7fd89f8284c92171796ee03caadc94b2f44d784e9db066853361"
+
+[[edges]]
+alias = "test-helper"
+to = "sha256:e04dce701df90e34b2e821fa556f30c728f5d20720e55a6b3be18229070b48b4"
+group = "test"
+optional = false

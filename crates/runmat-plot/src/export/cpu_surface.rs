@@ -1,4 +1,4 @@
-use crate::core::{Camera, ImageData, PipelineType, ProjectionType, RenderData};
+use crate::core::{Camera, ImageData, PipelineType, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{AxesKind, Figure, PlotElement};
 use crate::styling::PlotThemeConfig;
@@ -7,6 +7,7 @@ use glam::{Vec2, Vec3, Vec4};
 
 #[derive(Clone, Debug)]
 struct AxesView {
+    y_direction: crate::plots::figure::YDirection,
     viewport: (u32, u32, u32, u32),
     plot_rect: (u32, u32, u32, u32),
     bounds_2d: (f32, f32, f32, f32),
@@ -578,23 +579,18 @@ fn axes_has_3d_content(figure: &Figure, axes_index: usize) -> bool {
 fn choose_axes_bounds(
     figure: &Figure,
     axes_index: usize,
-    render_data: &[(usize, RenderData)],
+    data_bounds: Option<crate::core::BoundingBox>,
 ) -> (f32, f32, f32, f32) {
     let mut min_x = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
     let mut min_y = f32::INFINITY;
     let mut max_y = f32::NEG_INFINITY;
 
-    for (ax, rd) in render_data {
-        if *ax != axes_index {
-            continue;
-        }
-        if let Some(bounds) = rd.bounds {
-            min_x = min_x.min(bounds.min.x);
-            max_x = max_x.max(bounds.max.x);
-            min_y = min_y.min(bounds.min.y);
-            max_y = max_y.max(bounds.max.y);
-        }
+    if let Some(bounds) = data_bounds {
+        min_x = bounds.min.x;
+        max_x = bounds.max.x;
+        min_y = bounds.min.y;
+        max_y = bounds.max.y;
     }
 
     if !min_x.is_finite() || !max_x.is_finite() || !min_y.is_finite() || !max_y.is_finite() {
@@ -602,6 +598,13 @@ fn choose_axes_bounds(
         max_x = 1.0;
         min_y = -1.0;
         max_y = 1.0;
+    } else {
+        let ((x0, x1), (y0, y1)) = figure.auto_axes_bounds_2d(
+            axes_index,
+            (f64::from(min_x), f64::from(max_x)),
+            (f64::from(min_y), f64::from(max_y)),
+        );
+        (min_x, max_x, min_y, max_y) = (x0 as f32, x1 as f32, y0 as f32, y1 as f32);
     }
 
     if let Some(meta) = figure.axes_metadata(axes_index) {
@@ -649,87 +652,41 @@ fn data_aspect_adjusted_bounds(
 fn choose_axes_bounds_3d(
     figure: &Figure,
     axes_index: usize,
-    render_data: &[(usize, RenderData)],
+    data_bounds: Option<crate::core::BoundingBox>,
     bounds_2d: (f32, f32, f32, f32),
 ) -> (Vec3, Vec3) {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
 
-    for (ax, rd) in render_data {
-        if *ax != axes_index {
-            continue;
-        }
-        if let Some(bounds) = rd.bounds {
-            min = min.min(bounds.min);
-            max = max.max(bounds.max);
-        }
+    if let Some(bounds) = data_bounds {
+        min = bounds.min;
+        max = bounds.max;
     }
 
-    let (mut min, mut max) = if !min.x.is_finite() || !max.x.is_finite() {
+    let (min, max) = if !min.x.is_finite() || !max.x.is_finite() {
         (
             Vec3::new(bounds_2d.0, bounds_2d.2, -1.0),
             Vec3::new(bounds_2d.1, bounds_2d.3, 1.0),
         )
     } else {
-        if (max.z - min.z).abs() < 1e-6 {
-            min.z -= 0.5;
-            max.z += 0.5;
-        }
         (min, max)
     };
 
-    if let Some(meta) = figure.axes_metadata(axes_index) {
-        if let Some((lo, hi)) = meta.x_limits {
-            min.x = lo as f32;
-            max.x = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.y_limits {
-            min.y = lo as f32;
-            max.y = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.z_limits {
-            min.z = lo as f32;
-            max.z = hi as f32;
-        }
-        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
-            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
-        }
-    }
-    (min, max)
-}
-
-fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
-    let aspect = Vec3::new(
-        ratio[0].abs().max(1.0e-12) as f32,
-        ratio[1].abs().max(1.0e-12) as f32,
-        ratio[2].abs().max(1.0e-12) as f32,
+    let bounds = crate::plots::figure::display_bounds_3d(
+        crate::core::BoundingBox { min, max },
+        figure.axes_metadata(axes_index),
     );
-    let center = (min + max) * 0.5;
-    let span = (max - min).abs().max(Vec3::splat(0.1));
-    let units = (span.x / aspect.x)
-        .max(span.y / aspect.y)
-        .max(span.z / aspect.z)
-        .max(0.1);
-    let next = aspect * units;
-    (center - next * 0.5, center + next * 0.5)
+    (bounds.min, bounds.max)
 }
 
-fn default_3d_camera_for_bounds(min: Vec3, max: Vec3) -> Camera {
+fn default_3d_camera_for_bounds(min: Vec3, max: Vec3, viewport: (u32, u32)) -> Camera {
     let center = (min + max) * 0.5;
-    let extent = (max - min).abs();
-    let radius = extent.length().max(1e-3) * 0.5;
-
     let mut cam = Camera::new();
-    let fov = match cam.projection {
-        ProjectionType::Perspective { fov, .. } => fov.max(0.2),
-        _ => 45.0f32.to_radians(),
-    };
-    let distance = (radius / (fov * 0.5).tan()).max(radius * 2.5) * 1.05;
-
     let dir = Vec3::new(1.0, -1.0, 0.8).normalize_or_zero();
     cam.target = center;
-    cam.position = center + dir * distance;
+    cam.position = center + dir;
     cam.up = Vec3::Z;
+    cam.fit_figure_perspective_bounds(min, max, viewport);
     cam
 }
 
@@ -739,6 +696,7 @@ fn choose_axes_camera(
     axes_cameras: Option<&[Camera]>,
     min: Vec3,
     max: Vec3,
+    viewport: (u32, u32),
 ) -> Camera {
     if let Some(cams) = axes_cameras {
         if let Some(cam) = cams.get(axes_index) {
@@ -746,11 +704,12 @@ fn choose_axes_camera(
         }
     }
 
-    let mut cam = default_3d_camera_for_bounds(min, max);
+    let mut cam = default_3d_camera_for_bounds(min, max, viewport);
 
     if let Some(meta) = figure.axes_metadata(axes_index) {
         if let (Some(az), Some(el)) = (meta.view_azimuth_deg, meta.view_elevation_deg) {
             cam.set_view_angles_deg(az, el);
+            cam.fit_figure_perspective_bounds(min, max, viewport);
         }
     }
 
@@ -838,12 +797,24 @@ fn project_vertex(vertex: &crate::core::Vertex, axes: &AxesView) -> Option<Scree
     let pos = Vec3::from_array(vertex.position);
     let color = to_u8_rgba(vertex.color);
     if axes.has_3d_content {
-        axes.camera_3d
-            .as_ref()
-            .and_then(|camera| project_3d(pos, axes.plot_rect, camera, color))
+        project_axes_3d(pos, axes, color)
     } else {
+        let pos = axes
+            .y_direction
+            .model_matrix(axes.bounds_2d.2, axes.bounds_2d.3)
+            .transform_point3(pos);
         Some(project_2d(pos, axes.plot_rect, axes.bounds_2d, color))
     }
+}
+
+fn project_axes_3d(pos: Vec3, axes: &AxesView, color: [u8; 4]) -> Option<ScreenVertex> {
+    let pos = axes
+        .y_direction
+        .model_matrix(axes.bounds_3d.0.y, axes.bounds_3d.1.y)
+        .transform_point3(pos);
+    axes.camera_3d
+        .as_ref()
+        .and_then(|camera| project_3d(pos, axes.plot_rect, camera, color))
 }
 
 fn draw_bitmap_text(canvas: &mut Canvas, x: i32, y: i32, text: &str, scale: u32, color: [u8; 4]) {
@@ -1020,6 +991,7 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
             return None;
         }
         let t = (y_max - value) / span;
+        let t = axes.y_direction.orient(t, 0., 1.);
         Some((top as f32 + t * (bottom - top) as f32).round() as i32)
     };
 
@@ -1218,6 +1190,7 @@ fn draw_2d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
             continue;
         }
         let t = (y_max - yv) / (y_max - y_min).max(f32::EPSILON);
+        let t = axes.y_direction.orient(t, 0., 1.);
         let y = (top as f32 + t * (bottom - top) as f32).round() as i32;
         draw_tick_text(
             canvas,
@@ -1377,7 +1350,7 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let text_color = [212, 220, 234, 255];
 
     let (bmin, bmax) = axes.bounds_3d;
-    let Some(cam) = axes.camera_3d.as_ref() else {
+    let Some(_) = axes.camera_3d.as_ref() else {
         return;
     };
 
@@ -1392,6 +1365,12 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let oy = origin_component(bmin.y, bmax.y);
     let oz = origin_component(bmin.z, bmax.z);
     let floor_z = oz;
+    let grid_level = bmin.z - (bmax - bmin).length().max(1.0) * 0.001;
+    let min_u = bmin.x;
+    let max_u = bmax.x;
+    let min_v = bmin.y;
+    let max_v = bmax.y;
+    let on_grid = |u: f32, v: f32| Vec3::new(u, v, grid_level);
 
     if axes.show_minor_grid {
         let divisions = 28usize;
@@ -1400,26 +1379,26 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
                 continue;
             }
             let t = i as f32 / divisions as f32;
-            let x = bmin.x + t * (bmax.x - bmin.x);
-            let y = bmin.y + t * (bmax.y - bmin.y);
+            let u = min_u + t * (max_u - min_u);
+            let v = min_v + t * (max_v - min_v);
 
-            let gx0 = Vec3::new(x, bmin.y, floor_z);
-            let gx1 = Vec3::new(x, bmax.y, floor_z);
-            let gy0 = Vec3::new(bmin.x, y, floor_z);
-            let gy1 = Vec3::new(bmax.x, y, floor_z);
+            let gx0 = on_grid(u, min_v);
+            let gx1 = on_grid(u, max_v);
+            let gy0 = on_grid(min_u, v);
+            let gy1 = on_grid(max_u, v);
 
-            let Some(a0) = project_3d(gx0, axes.plot_rect, cam, floor_grid_minor) else {
+            let Some(a0) = project_axes_3d(gx0, axes, floor_grid_minor) else {
                 continue;
             };
-            let Some(a1) = project_3d(gx1, axes.plot_rect, cam, floor_grid_minor) else {
+            let Some(a1) = project_axes_3d(gx1, axes, floor_grid_minor) else {
                 continue;
             };
             canvas.draw_line(a0, a1, 0.9, 0, false);
 
-            let Some(b0) = project_3d(gy0, axes.plot_rect, cam, floor_grid_minor) else {
+            let Some(b0) = project_axes_3d(gy0, axes, floor_grid_minor) else {
                 continue;
             };
-            let Some(b1) = project_3d(gy1, axes.plot_rect, cam, floor_grid_minor) else {
+            let Some(b1) = project_axes_3d(gy1, axes, floor_grid_minor) else {
                 continue;
             };
             canvas.draw_line(b0, b1, 0.9, 0, false);
@@ -1431,26 +1410,26 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         let floor_grid_major = [74, 86, 106, 116];
         for i in 0..=divisions {
             let t = i as f32 / divisions as f32;
-            let x = bmin.x + t * (bmax.x - bmin.x);
-            let y = bmin.y + t * (bmax.y - bmin.y);
+            let u = min_u + t * (max_u - min_u);
+            let v = min_v + t * (max_v - min_v);
 
-            let gx0 = Vec3::new(x, bmin.y, floor_z);
-            let gx1 = Vec3::new(x, bmax.y, floor_z);
-            let gy0 = Vec3::new(bmin.x, y, floor_z);
-            let gy1 = Vec3::new(bmax.x, y, floor_z);
+            let gx0 = on_grid(u, min_v);
+            let gx1 = on_grid(u, max_v);
+            let gy0 = on_grid(min_u, v);
+            let gy1 = on_grid(max_u, v);
 
-            let Some(a0) = project_3d(gx0, axes.plot_rect, cam, floor_grid_major) else {
+            let Some(a0) = project_axes_3d(gx0, axes, floor_grid_major) else {
                 continue;
             };
-            let Some(a1) = project_3d(gx1, axes.plot_rect, cam, floor_grid_major) else {
+            let Some(a1) = project_axes_3d(gx1, axes, floor_grid_major) else {
                 continue;
             };
             canvas.draw_line(a0, a1, 1.1, 0, false);
 
-            let Some(b0) = project_3d(gy0, axes.plot_rect, cam, floor_grid_major) else {
+            let Some(b0) = project_axes_3d(gy0, axes, floor_grid_major) else {
                 continue;
             };
-            let Some(b1) = project_3d(gy1, axes.plot_rect, cam, floor_grid_major) else {
+            let Some(b1) = project_axes_3d(gy1, axes, floor_grid_major) else {
                 continue;
             };
             canvas.draw_line(b0, b1, 1.1, 0, false);
@@ -1475,8 +1454,8 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let origin = Vec3::new(ox, oy, oz);
 
     if let (Some(o), Some(xp)) = (
-        project_3d(origin, axes.plot_rect, cam, axis_x_color),
-        project_3d(x_end, axes.plot_rect, cam, axis_x_color),
+        project_axes_3d(origin, axes, axis_x_color),
+        project_axes_3d(x_end, axes, axis_x_color),
     ) {
         canvas.draw_line(o, xp, 1.8, 0, false);
         draw_bitmap_text(
@@ -1489,8 +1468,8 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         );
     }
     if let (Some(o), Some(yp)) = (
-        project_3d(origin, axes.plot_rect, cam, axis_y_color),
-        project_3d(y_end, axes.plot_rect, cam, axis_y_color),
+        project_axes_3d(origin, axes, axis_y_color),
+        project_axes_3d(y_end, axes, axis_y_color),
     ) {
         canvas.draw_line(o, yp, 1.8, 0, false);
         draw_bitmap_text(
@@ -1503,8 +1482,8 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         );
     }
     if let (Some(o), Some(zp)) = (
-        project_3d(origin, axes.plot_rect, cam, axis_z_color),
-        project_3d(z_end, axes.plot_rect, cam, axis_z_color),
+        project_axes_3d(origin, axes, axis_z_color),
+        project_axes_3d(z_end, axes, axis_z_color),
     ) {
         canvas.draw_line(o, zp, 1.8, 0, false);
         draw_bitmap_text(
@@ -1564,7 +1543,7 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
         },
         AxisItem {
             label: "Y",
-            dir_world: Vec3::Y,
+            dir_world: Vec3::Y * axes.y_direction.orient(1., -1., 1.),
             color: [90, 220, 120, 255],
             z_sort: 0.0,
         },
@@ -1588,11 +1567,30 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
     let scale = ((axes.viewport.2.min(axes.viewport.3) as f32) / 720.0).clamp(0.8, 1.6);
     let gizmo_size =
         ((axes.viewport.2.min(axes.viewport.3) as f32) * 0.16).clamp(44.0, 110.0) * scale;
-    let pad = (30.0 * scale).round() as i32;
-    let origin = Vec2::new(
-        (axes.viewport.0 as i32 + pad) as f32,
-        ((axes.viewport.1 + axes.viewport.3) as i32 - pad) as f32,
+    let axis_len = gizmo_size * 0.65;
+    // Inset the origin so every arm and its label stays whole (see `core::triad`).
+    let dirs: Vec<[f32; 2]> = axis_items
+        .iter()
+        .filter_map(|a| {
+            let d = Vec2::new(a.dir_world.x, -a.dir_world.y);
+            let m = d.length();
+            (m.is_finite() && m >= 1e-4).then(|| [d.x / m, d.y / m])
+        })
+        .collect();
+    let (vx, vy, vw, vh) = (
+        axes.viewport.0 as f32,
+        axes.viewport.1 as f32,
+        axes.viewport.2 as f32,
+        axes.viewport.3 as f32,
     );
+    let [ox, oy] = crate::core::triad::triad_origin(
+        [vx, vy],
+        [vx + vw, vy + vh],
+        (30.0 * scale).round(),
+        axis_len + 24.0 * scale,
+        &dirs,
+    );
+    let origin = Vec2::new(ox.round(), oy.round());
     canvas.draw_disc(
         origin,
         (2.0 * scale).max(1.0),
@@ -1601,7 +1599,6 @@ fn draw_3d_orientation_gizmo(canvas: &mut Canvas, axes: &AxesView) {
         false,
     );
 
-    let axis_len = gizmo_size * 0.65;
     let head_len = (8.0 * scale).min(axis_len * 0.35);
     let head_w = 5.0 * scale;
     for a in &axis_items {
@@ -1691,7 +1688,26 @@ fn draw_legend_for_axes(canvas: &mut Canvas, figure: &Figure, axes: &AxesView) {
     let max_entries = entries.len().min(8);
     let pad = 10i32;
     let row_h = 20i32;
-    let legend_w = ((axes.viewport.2 as f32 * 0.30).clamp(92.0, 148.0)).round() as i32;
+    // Fit the longest label (drawn after a 34 px swatch column), within the axes.
+    let widest_label = entries
+        .iter()
+        .take(max_entries)
+        .map(|entry| {
+            bitmap_text_size(
+                if entry.label.is_empty() {
+                    "Series"
+                } else {
+                    &entry.label
+                },
+                1,
+            )
+            .0
+        })
+        .max()
+        .unwrap_or(0);
+    let legend_w = (34 + widest_label + pad)
+        .max(92)
+        .min((axes.viewport.2 as i32 - 2 * pad).max(92));
     let legend_h = row_h * max_entries as i32 + 10;
     let x = (axes.viewport.0 + axes.viewport.2) as i32 - legend_w - pad;
     let y = axes.viewport.1 as i32 + 12;
@@ -1704,23 +1720,31 @@ fn draw_legend_for_axes(canvas: &mut Canvas, figure: &Figure, axes: &AxesView) {
         let swatch_x0 = x + 10;
         let swatch_x1 = swatch_x0 + 18;
         let swatch_color = to_u8_rgba(entry.color.to_array());
-        canvas.draw_line(
-            ScreenVertex {
-                x: swatch_x0 as f32,
-                y: yy as f32,
-                z: 0.0,
-                color: swatch_color,
-            },
-            ScreenVertex {
-                x: swatch_x1 as f32,
-                y: yy as f32,
-                z: 0.0,
-                color: swatch_color,
-            },
-            2.0,
-            0,
-            false,
-        );
+        // The swatch repeats the series' dash pattern, as the interactive legend draws it.
+        for (a, b) in crate::plots::legend_swatch::legend_dashes(
+            entry.line_style,
+            swatch_x0 as f32,
+            swatch_x1 as f32,
+            1.0,
+        ) {
+            canvas.draw_line(
+                ScreenVertex {
+                    x: a,
+                    y: yy as f32,
+                    z: 0.0,
+                    color: swatch_color,
+                },
+                ScreenVertex {
+                    x: b,
+                    y: yy as f32,
+                    z: 0.0,
+                    color: swatch_color,
+                },
+                2.0,
+                0,
+                false,
+            );
+        }
 
         let label = if entry.label.is_empty() {
             "Series".to_string()
@@ -1778,12 +1802,7 @@ pub async fn render_figure_rgba_bytes(
         })
         .collect();
 
-    let render_items = figure.render_data_with_axes_with_viewport_and_gpu(
-        Some((width, height)),
-        Some(&axes_sizes),
-        None,
-        None,
-    );
+    let prepared = figure.prepare_axes_extents(&axes_sizes);
 
     let mut axes_views = Vec::with_capacity(axes_count);
     for axes_index in 0..axes_count {
@@ -1799,15 +1818,30 @@ pub async fn render_figure_rgba_bytes(
         if !has_3d && figure.axes_kind(axes_index) == AxesKind::Polar {
             plot_rect = square_plot_rect(plot_rect);
         }
-        let bounds_2d = choose_axes_bounds(&figure, axes_index, &render_items);
-        let (bmin, bmax) = choose_axes_bounds_3d(&figure, axes_index, &render_items, bounds_2d);
+        let bounds_2d = choose_axes_bounds(&figure, axes_index, prepared.bounds[axes_index]);
+        let (bmin, bmax) =
+            choose_axes_bounds_3d(&figure, axes_index, prepared.bounds[axes_index], bounds_2d);
         let camera_3d = if has_3d {
             Some(if axes_count == 1 {
                 camera.cloned().unwrap_or_else(|| {
-                    choose_axes_camera(&figure, axes_index, axes_cameras, bmin, bmax)
+                    choose_axes_camera(
+                        &figure,
+                        axes_index,
+                        axes_cameras,
+                        bmin,
+                        bmax,
+                        (plot_rect.2, plot_rect.3),
+                    )
                 })
             } else {
-                choose_axes_camera(&figure, axes_index, axes_cameras, bmin, bmax)
+                choose_axes_camera(
+                    &figure,
+                    axes_index,
+                    axes_cameras,
+                    bmin,
+                    bmax,
+                    (plot_rect.2, plot_rect.3),
+                )
             })
         } else {
             None
@@ -1839,6 +1873,10 @@ pub async fn render_figure_rgba_bytes(
         let (colorbar_enabled, colormap) = get_axes_colorbar_prefs(&figure, axes_index);
 
         axes_views.push(AxesView {
+            y_direction: figure
+                .axes_metadata(axes_index)
+                .map(|meta| meta.y_direction)
+                .unwrap_or_default(),
             viewport,
             plot_rect,
             bounds_2d,
@@ -1867,6 +1905,22 @@ pub async fn render_figure_rgba_bytes(
             colormap,
         });
     }
+
+    // Resolve domain extents before the single geometry pass. Pixel-sized
+    // decorations use the final display scale; direction remains separate.
+    let axes_view_bounds: Vec<_> = axes_views
+        .iter()
+        .map(|axes| {
+            let (left, right, bottom, top) = axes.bounds_2d;
+            (!axes.has_3d_content).then_some((left as f64, right as f64, bottom as f64, top as f64))
+        })
+        .collect();
+    let render_items = figure.render_data_with_axes_with_viewport_and_gpu(
+        Some((width, height)),
+        Some(&axes_sizes),
+        Some(&axes_view_bounds),
+        None,
+    );
 
     for axes in &axes_views {
         if axes.has_3d_content {
@@ -1947,6 +2001,56 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
     let style_code = render_data.material.metallic as i32;
 
     match render_data.pipeline_type {
+        PipelineType::AnnotationStroke => {
+            let projection = axes.camera_3d.as_ref().map(|camera| {
+                let mut camera = camera.clone();
+                camera.update_aspect_ratio(
+                    axes.plot_rect.2.max(1) as f32 / axes.plot_rect.3.max(1) as f32,
+                );
+                camera.view_proj_matrix()
+            });
+            for stroke in render_data.vertices.chunks_exact(6) {
+                let face_span = stroke[0].color[3];
+                if face_span > 0.0 {
+                    if let Some(view_proj) = projection {
+                        let clip = view_proj * Vec3::from_array(stroke[0].position).extend(1.0);
+                        let span_px =
+                            face_span * view_proj.y_axis.y.abs() * axes.plot_rect.3.max(1) as f32
+                                / (2.0 * clip.w.abs().max(0.0001));
+                        if span_px < 105.0 {
+                            continue;
+                        }
+                    }
+                }
+                let Some(a) = project_vertex(&stroke[0], axes) else {
+                    continue;
+                };
+                let Some(b) = project_vertex(&stroke[2], axes) else {
+                    continue;
+                };
+                let mut a = a;
+                let mut b = b;
+                a.color[3] = 255;
+                b.color[3] = 255;
+                canvas.draw_line(a, b, 2.8, style_code, false);
+            }
+        }
+        PipelineType::EdgeStroke | PipelineType::EdgeStrokeNoDepth => {
+            // Six vertices per segment; the first and third are its two endpoints, and
+            // tex_coords.y carries the stroke width in CSS px.
+            let depth_test =
+                axes.has_3d_content && render_data.pipeline_type == PipelineType::EdgeStroke;
+            for stroke in render_data.vertices.chunks_exact(6) {
+                let Some(a) = project_vertex(&stroke[0], axes) else {
+                    continue;
+                };
+                let Some(b) = project_vertex(&stroke[2], axes) else {
+                    continue;
+                };
+                let width = stroke[0].tex_coords[1].max(1.0);
+                canvas.draw_line(a, b, width, style_code, depth_test);
+            }
+        }
         PipelineType::Lines | PipelineType::LinesNoDepth => {
             let depth_test =
                 axes.has_3d_content && render_data.pipeline_type != PipelineType::LinesNoDepth;
@@ -2107,6 +2211,7 @@ fn draw_textured_image(canvas: &mut Canvas, render_data: &RenderData, axes: &Axe
 
     for y in min_y..=max_y {
         let v = (y - min_y) as f32 / dst_h;
+        let v = axes.y_direction.orient(v, 0., 1.);
         let src_y = (v * src_h).round().clamp(0.0, src_h) as usize;
         for x in min_x..=max_x {
             let u = (x - min_x) as f32 / dst_w;
@@ -2158,6 +2263,84 @@ mod tests {
     use crate::plots::{MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshScalarField};
     use glam::Vec3;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn cpu_figure_fit_uses_plot_rect_and_keeps_explicit_camera() {
+        let figure = Figure::new();
+        let min = Vec3::new(-3.0, -2.0, -1.0);
+        let max = Vec3::new(5.0, 4.0, 8.0);
+        let wide = choose_axes_camera(&figure, 0, None, min, max, (1200, 400));
+        let narrow = choose_axes_camera(&figure, 0, None, min, max, (200, 700));
+        assert!(
+            (narrow.position - narrow.target).length() > (wide.position - wide.target).length()
+        );
+        let mut explicit = Camera::new();
+        explicit.position = Vec3::new(40.0, 30.0, 20.0);
+        let chosen =
+            choose_axes_camera(&figure, 0, Some(&[explicit.clone()]), min, max, (200, 700));
+        assert_eq!(chosen.position, explicit.position);
+        assert_eq!(chosen.target, explicit.target);
+    }
+
+    #[test]
+    fn cpu_export_large_line_tessellates_once_after_limit_resolution() {
+        let mut figure = Figure::new();
+        let n = 16_384;
+        figure.add_line_plot(
+            crate::plots::LinePlot::new(
+                (0..n).map(|i| i as f64 / (n - 1) as f64).collect(),
+                (0..n)
+                    .map(|i| 0.2 + 0.1 * (i as f64 * 0.001).sin())
+                    .collect(),
+            )
+            .unwrap(),
+        );
+        figure.set_axes_limits(0, Some((-1.0, 2.0)), Some((-1.0, 2.0)));
+        crate::plots::line::take_viewport_tessellations();
+        let output = pollster::block_on(render_figure_rgba_bytes(
+            figure, 160, 120, None, None, None, None,
+        ))
+        .unwrap();
+        assert_eq!(output.len(), 160 * 120 * 4);
+        assert_eq!(crate::plots::line::take_viewport_tessellations(), 1);
+    }
+
+    #[test]
+    fn cpu_export_y_direction_flips_asymmetric_data_with_ordered_limits() {
+        use crate::plots::figure::YDirection;
+        let mut figure = Figure::new();
+        figure.add_line_plot(
+            crate::plots::LinePlot::new(vec![1., 9.], vec![2., 2.])
+                .unwrap()
+                .with_style(
+                    Vec4::new(1., 0., 0., 1.),
+                    3.,
+                    crate::plots::LineStyle::Solid,
+                ),
+        );
+        figure.set_axes_limits(0, Some((0., 10.)), Some((0., 10.)));
+        figure.set_axes_grid_enabled(0, false);
+        figure.set_axes_legend_enabled(0, false);
+        let red_centroid = |figure| {
+            let rgba = pollster::block_on(render_figure_rgba_bytes(
+                figure, 320, 240, None, None, None, None,
+            ))
+            .unwrap();
+            let ys: Vec<_> = rgba
+                .chunks_exact(4)
+                .enumerate()
+                .filter(|(_, p)| p[0] > 200 && p[1] < 60 && p[2] < 60)
+                .map(|(index, _)| (index / 320) as f64)
+                .collect();
+            assert!(ys.len() > 10);
+            ys.iter().sum::<f64>() / ys.len() as f64
+        };
+        let normal = red_centroid(figure.clone());
+        figure.set_axes_y_direction(0, YDirection::Reverse);
+        assert_eq!(figure.axes_metadata(0).unwrap().y_limits, Some((0., 10.)));
+        let reverse = red_centroid(figure);
+        assert!(normal - reverse > 60., "normal={normal}, reverse={reverse}");
+    }
 
     #[test]
     fn cpu_export_respects_explicit_axes_minor_grid_override() {

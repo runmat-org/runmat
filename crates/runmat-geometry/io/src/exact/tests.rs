@@ -1,13 +1,27 @@
 use super::*;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 use runmat_geometry_core::{ExactMassPropertiesImplementation, TopologicalOrientation};
 
 const BOX: &[u8] = include_bytes!("../../tests/fixtures/box.brep");
 
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
+fn meter_brep_options() -> ExactCadImportOptions {
+    ExactCadImportOptions {
+        source_units: Some(LengthUnit::Meter),
+        ..ExactCadImportOptions::default()
+    }
+}
+
 #[test]
 fn exact_analysis_options_are_validated_before_kernel_dispatch() {
     let mut invalid_tolerance = ExactCadImportOptions::default();
-    invalid_tolerance.analysis.requested_deviation_m = 0.0;
+    invalid_tolerance.analysis.requested_deviation_m = runmat_types::physical::Length::new(0.0);
     assert!(matches!(
         import_exact_cad(
             "shape.brep",
@@ -27,7 +41,7 @@ fn exact_analysis_options_are_validated_before_kernel_dispatch() {
         .simplify_short_edges_and_sliver_faces = true;
     invalid_healing_limit
         .analysis
-        .maximum_healing_displacement_m = 0.0;
+        .maximum_healing_displacement_m = runmat_types::physical::Length::new(0.0);
     assert!(matches!(
         import_exact_cad(
             "shape.brep",
@@ -74,14 +88,17 @@ fn exact_analysis_options_are_validated_before_kernel_dispatch() {
 }
 
 #[test]
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     };
 
-    let options = ExactCadImportOptions::default();
+    let options = meter_brep_options();
     let context = GeometryImportContext::new();
     let first =
         import_exact_cad("box.brep", BOX, GeometryFormat::Brep, &options, &context).unwrap();
@@ -101,12 +118,22 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert_eq!(closure.document.revision, options.analysis.revision);
     assert_eq!(closure.document.healing, options.analysis.healing);
     assert_eq!(
-        closure.document.tolerance.maximum_healing_displacement_m,
-        options.analysis.maximum_healing_displacement_m
+        closure
+            .document
+            .tolerance
+            .maximum_healing_displacement_m
+            .canonical_value(),
+        options
+            .analysis
+            .maximum_healing_displacement_m
+            .canonical_value()
     );
     assert_eq!(closure.document.source.content_digest, first.source_digest);
     assert_eq!(closure.document.source.format, GeometrySourceFormat::Brep);
-    assert_eq!(closure.document.source.source_units, UnitSystem::Meter);
+    assert_eq!(
+        closure.document.source.unit_evidence.uniform_unit(),
+        Some(LengthUnit::Meter)
+    );
     assert_eq!(
         closure
             .manifest
@@ -159,9 +186,9 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     else {
         panic!("solid import must contain kernel-validated mass properties");
     };
-    assert!((mass.volume_m3 - 6.0).abs() < 1.0e-12);
-    assert!((mass.surface_area_m2 - 22.0).abs() < 1.0e-12);
-    assert_eq!(mass.centroid_m, [0.5, 1.0, 1.5]);
+    assert!((mass.volume_m3.canonical_value() - 6.0).abs() < 1.0e-12);
+    assert!((mass.surface_area_m2.canonical_value() - 22.0).abs() < 1.0e-12);
+    assert_eq!(mass.centroid_m.canonical_value(), [0.5, 1.0, 1.5]);
 
     let mut non_manifold = first.topology.clone();
     non_manifold.coedges[0].edge_id = non_manifold.coedges[1].edge_id.clone();
@@ -184,7 +211,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert!(misoriented.validate_solid_shell_boundaries().is_err());
 
     let mut millimeter_options = options.clone();
-    millimeter_options.source_units = UnitSystem::Millimeter;
+    millimeter_options.source_units = Some(LengthUnit::Millimeter);
     let millimeter_shape = import_exact_cad(
         "box.brep",
         BOX,
@@ -198,12 +225,12 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
         .topology
         .vertices
         .iter()
-        .any(|vertex| vertex.point_m == [0.0, 0.0, 0.0]));
+        .any(|vertex| vertex.point_m.canonical_value() == [0.0, 0.0, 0.0]));
     assert!(millimeter_shape
         .topology
         .vertices
         .iter()
-        .flat_map(|vertex| vertex.point_m)
+        .flat_map(|vertex| vertex.point_m.canonical_value())
         .all(|coordinate| coordinate <= 0.003));
     let ExactMassPropertiesImplementation::KernelValidated {
         properties: millimeter_mass,
@@ -212,8 +239,11 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     else {
         panic!("solid import must contain kernel-validated mass properties");
     };
-    assert!((millimeter_mass.volume_m3 - 6.0e-9).abs() < 1.0e-20);
-    assert_eq!(millimeter_mass.centroid_m, [0.0005, 0.001, 0.0015]);
+    assert!((millimeter_mass.volume_m3.canonical_value() - 6.0e-9).abs() < 1.0e-20);
+    assert_eq!(
+        millimeter_mass.centroid_m.canonical_value(),
+        [0.0005, 0.001, 0.0015]
+    );
 
     let mut byte_limited = options.clone();
     byte_limited.max_representation_bytes = 1;
@@ -258,7 +288,7 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
             "box.brep",
             BOX,
             GeometryFormat::Brep,
-            &ExactCadImportOptions::default(),
+            &meter_brep_options(),
             &GeometryImportContext::with_cancellation(cancelled.clone()),
         ),
         Err(GeometryImportError::Cancelled)
@@ -266,7 +296,10 @@ fn occt_import_is_non_tessellating_bounded_and_deterministic() {
     assert!(cancelled.load(Ordering::Relaxed));
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 fn assert_canonical_connected_wire_traversals(topology: &ExactBRepTopology) {
     let coedges = topology
         .coedges
@@ -306,7 +339,10 @@ fn assert_canonical_connected_wire_traversals(topology: &ExactBRepTopology) {
 }
 
 #[test]
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 fn occt_orientation_repair_is_explicit_and_preserves_persistent_names() {
     let mut reversed = BOX.to_vec();
     let terminal_orientation = reversed
@@ -320,12 +356,12 @@ fn occt_orientation_repair_is_explicit_and_preserves_persistent_names() {
         "reversed-box.brep",
         &reversed,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &context,
     )
     .is_err());
 
-    let mut options = ExactCadImportOptions::default();
+    let mut options = meter_brep_options();
     options.analysis.healing.repair_orientation = true;
     let healed = import_exact_cad(
         "reversed-box.brep",
@@ -339,7 +375,7 @@ fn occt_orientation_repair_is_explicit_and_preserves_persistent_names() {
         "box.brep",
         BOX,
         GeometryFormat::Brep,
-        &ExactCadImportOptions::default(),
+        &meter_brep_options(),
         &context,
     )
     .unwrap();
@@ -404,7 +440,10 @@ fn occt_orientation_repair_is_explicit_and_preserves_persistent_names() {
 }
 
 #[test]
-#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+#[cfg(not(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+)))]
 fn import_is_capability_honest_without_a_native_kernel() {
     let error = import_exact_cad(
         "box.brep",

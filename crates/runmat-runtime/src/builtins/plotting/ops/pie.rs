@@ -1,11 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{PIE_ERROR_INVALID_ARGUMENT, PIE_INTEGER_VALUES_EXTENSION};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::PieChart;
 use runmat_value::{Tensor, Value};
@@ -15,7 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, RuntimeError};
 
 use super::common::gather_tensor_from_gpu_async;
@@ -23,194 +17,6 @@ use super::op_common::value_as_text_string;
 use super::state::{render_active_plot, PlotRenderOptions};
 
 const BUILTIN_NAME: &str = "pie";
-
-const PIE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the pie chart.",
-}];
-
-const PIE_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Slice values.",
-}];
-
-const PIE_INPUTS_X_EXPLODE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Slice values.",
-    },
-    BuiltinParamDescriptor {
-        name: "explode",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Slice explode mask (nonzero elements explode).",
-    },
-];
-
-const PIE_INPUTS_X_LABELS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Slice values.",
-    },
-    BuiltinParamDescriptor {
-        name: "labels",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label list or label format string.",
-    },
-];
-
-const PIE_INPUTS_X_EXPLODE_LABELS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Slice values.",
-    },
-    BuiltinParamDescriptor {
-        name: "explode",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Slice explode mask (nonzero elements explode).",
-    },
-    BuiltinParamDescriptor {
-        name: "labels",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label list or label format string.",
-    },
-];
-
-const PIE_INPUTS_AX_DATA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Pie data arguments.",
-    },
-];
-
-const PIE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "h = pie(X)",
-        inputs: &PIE_INPUTS_X,
-        outputs: &PIE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = pie(X, explode)",
-        inputs: &PIE_INPUTS_X_EXPLODE,
-        outputs: &PIE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = pie(X, labels)",
-        inputs: &PIE_INPUTS_X_LABELS,
-        outputs: &PIE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = pie(X, explode, labels)",
-        inputs: &PIE_INPUTS_X_EXPLODE_LABELS,
-        outputs: &PIE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = pie(ax, ...)",
-        inputs: &PIE_INPUTS_AX_DATA,
-        outputs: &PIE_OUTPUT_HANDLE,
-    },
-];
-
-const PIE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PIE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:pie:InvalidArgument"),
-    when: "Pie values, explode vectors, or labels are malformed or incompatible.",
-    message: "pie: invalid argument",
-};
-
-const PIE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PIE.INTERNAL",
-    identifier: Some("RunMat:pie:Internal"),
-    when: "Internal render preparation fails.",
-    message: "pie: internal operation failed",
-};
-
-const PIE_ERRORS: [BuiltinErrorDescriptor; 2] = [PIE_ERROR_INVALID_ARGUMENT, PIE_ERROR_INTERNAL];
-
-pub const PIE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PIE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PIE_ERRORS,
-};
-
-const PIE_INTEGER_VALUES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pie-integer-values",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "pie accepts typed-integer slice values as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PieIntegerValuesExtension"),
-};
-pub const PIE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PIE_INTEGER_VALUES_EXTENSION];
-const PIE_INTEGER_VALUES_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target limits numeric pie values to double. RunMat admits typed integers only when exact binary64 chart geometry is possible.",
-    }];
-const PIE_INTEGER_EXPLODE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "explode",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public numeric explode mask uses exact zero/nonzero semantics; every native integer class can be evaluated without value conversion.",
-    }];
-pub const PIE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = pie(integer_X,___)",
-        inputs: &PIE_INTEGER_VALUES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer values are gated before gather and normalized only after exact conversion to renderer geometry.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = pie(X,integer_explode,___)",
-        inputs: &PIE_INTEGER_EXPLODE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed explode masks gather exactly and use zero/nonzero classification; their magnitude never enters renderer arithmetic.",
-    },
-];
 
 fn pie_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -232,7 +38,14 @@ fn map_pie_invalid(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    pie_error_with_detail(&PIE_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = pie_error_with_detail(&PIE_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::pie")]
@@ -264,19 +77,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "pie",
-    category = "plotting",
-    summary = "Render pie charts.",
-    keywords = "pie,plotting,chart",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::pie::PIE_DESCRIPTOR),
-    extensions(crate::builtins::plotting::pie::PIE_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::pie::PIE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::pie"
 )]
-pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn pie_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "pie: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "pie")?;
+    let _arguments = args.fork();
+    work.finish(pie_impl(args, &work).await)
+}
+async fn pie_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (target_axes, args) = parse_axes_target(args).map_err(map_pie_invalid)?;
+    super::op_common::apply_axes_target(target_axes, BUILTIN_NAME)?;
     if let Some(values) = args.first() {
         crate::builtins::common::validation::reject_typed_complex_integer(values, BUILTIN_NAME)?;
         crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
@@ -306,19 +130,24 @@ pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Pie Chart",
             axis_equal: true,
             grid: false,
-            x_label: "",
-            y_label: "",
+            ..Default::default()
         },
         move |figure, axes| {
-            let axes = target_axes.unwrap_or(axes);
             let plot_index =
                 figure.add_pie_chart_on_axes(chart.take().expect("pie consumed once"), axes);
+            // MATLAB's pie hides its axes (as `axis off`).
+            let mut style = figure
+                .axes_metadata(axes)
+                .map(|meta| meta.axes_style.clone())
+                .unwrap_or_default();
+            style.visible = false;
+            figure.set_axes_style(axes, style);
             *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
         },
@@ -329,8 +158,7 @@ pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_pie_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_pie_invalid(err));
@@ -344,7 +172,7 @@ enum PieLabelsArg {
 }
 
 async fn parse_pie_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<(Vec<f64>, Option<Vec<bool>>, Option<PieLabelsArg>)> {
     if args.is_empty() {
         return Err(pie_invalid("expected values input"));
@@ -357,15 +185,23 @@ async fn parse_pie_args(
     let mut explode: Option<Vec<bool>> = None;
     let mut labels: Option<PieLabelsArg> = None;
     for arg in args.into_iter().skip(1) {
-        if explode.is_none() {
-            if let Ok(t) = tensor_from_value(arg.clone()).await {
-                let explode_values = tensor_utils::tensor_values_f64(&t);
-                if explode_values.len() == values.len()
-                    && explode_values.iter().all(|v| v.is_finite())
-                {
-                    explode = Some(explode_values.into_iter().map(|v| v != 0.0).collect());
-                    continue;
-                }
+        if explode.is_none()
+            && matches!(
+                arg,
+                Value::Num(_)
+                    | Value::Int(_)
+                    | Value::Bool(_)
+                    | Value::Tensor(_)
+                    | Value::LogicalArray(_)
+                    | Value::GpuTensor(_)
+            )
+        {
+            let t = tensor_from_value(arg.clone()).await?;
+            let explode_values = tensor_utils::tensor_values_f64(&t);
+            if explode_values.len() == values.len() && explode_values.iter().all(|v| v.is_finite())
+            {
+                explode = Some(explode_values.into_iter().map(|v| v != 0.0).collect());
+                continue;
             }
         }
         labels = Some(parse_labels(arg, values.len())?);
@@ -383,16 +219,10 @@ async fn parse_pie_args(
     Ok((values, explode, labels))
 }
 
-fn parse_axes_target(args: Vec<Value>) -> crate::BuiltinResult<(Option<usize>, Vec<Value>)> {
-    if args.is_empty() {
-        return Ok((None, args));
-    }
-    if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
-        crate::builtins::plotting::properties::resolve_plot_handle(&args[0], BUILTIN_NAME)
-    {
-        return Ok((Some(axes), args.into_iter().skip(1).collect()));
-    }
-    Ok((None, args))
+fn parse_axes_target(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<(super::op_common::AxesTarget, crate::call::BuiltinArguments)> {
+    super::op_common::split_leading_axes_arguments(args, BUILTIN_NAME)
 }
 
 async fn tensor_from_value(value: Value) -> crate::BuiltinResult<Tensor> {
@@ -404,7 +234,19 @@ async fn tensor_from_value(value: Value) -> crate::BuiltinResult<Tensor> {
 
 fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabelsArg> {
     match value {
-        Value::StringArray(arr) => Ok(PieLabelsArg::Explicit(arr.data)),
+        Value::StringArray(arr) => Ok(PieLabelsArg::Explicit(
+            arr.data()
+                .iter()
+                .map(|text| {
+                    text.as_str().map(str::to_owned).ok_or_else(|| {
+                        pie_error_with_detail(
+                            &PIE_ERROR_INVALID_ARGUMENT,
+                            "pie: labels must be text",
+                        )
+                    })
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?,
+        )),
         Value::Cell(cell) => {
             let mut labels = Vec::new();
             for row in 0..cell.rows {
@@ -412,6 +254,13 @@ fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabel
                     let v = cell.get(row, col).map_err(|e| pie_invalid(&e))?;
                     labels.push(
                         value_as_text_string(&v)
+                            .map_err(|source| {
+                                crate::builtins::plotting::plotting_error_with_source(
+                                    "pie",
+                                    source.to_string(),
+                                    source,
+                                )
+                            })?
                             .ok_or_else(|| pie_invalid("labels must be strings"))?,
                     );
                 }
@@ -420,6 +269,13 @@ fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabel
         }
         other => {
             let text = value_as_text_string(&other)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "pie",
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| pie_invalid("labels must be strings"))?;
             if value_len > 1 && text.contains('%') {
                 Ok(PieLabelsArg::Format(text))
@@ -433,6 +289,14 @@ fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabel
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::pie_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
@@ -462,12 +326,13 @@ mod tests {
         let _ = futures::executor::block_on(pie_builtin(vec![
             Value::Tensor(vec_tensor(&[1.0, 2.0, 3.0])),
             Value::Tensor(vec_tensor(&[0.0, 1.0, 0.0])),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["A".into(), "B".into(), "C".into()],
-                shape: vec![1, 3],
-                rows: 1,
-                cols: 3,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(
+                    vec!["A".into(), "B".into(), "C".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
         ]));
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Pie(pie) = fig.plots().next().unwrap() else {
@@ -515,12 +380,10 @@ mod tests {
         let _ = futures::executor::block_on(pie_builtin(vec![
             ax,
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["Left".into(), "Right".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["Left".into(), "Right".into()], vec![1, 2])
+                    .unwrap(),
+            ),
         ]));
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Pie(_)));
@@ -528,12 +391,9 @@ mod tests {
 
         let err = futures::executor::block_on(pie_builtin(vec![
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["Only".into()],
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["Only".into()], vec![1, 1]).unwrap(),
+            ),
         ]))
         .unwrap_err();
         assert!(err.to_string().contains("labels must match values length"));
@@ -579,7 +439,7 @@ mod tests {
 
     #[test]
     fn pie_descriptor_includes_core_signatures() {
-        let labels: Vec<&str> = PIE_DESCRIPTOR
+        let labels: Vec<&str> = runmat_builtins::PIE_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)

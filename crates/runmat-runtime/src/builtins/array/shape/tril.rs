@@ -11,18 +11,12 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, provider_restore, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, TRIL_DESCRIPTOR, TRIL_ERROR_INTERNAL, TRIL_ERROR_INVALID_OFFSET,
+    TRIL_ERROR_TOO_MANY_INPUTS, TRIL_ERROR_TOO_MANY_OUTPUTS, TRIL_ERROR_UNSUPPORTED_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::CharArray;
@@ -58,165 +52,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Triangular masking is not currently fused; fusion planner treats tril nodes as boundaries.",
 };
 
-fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Tensor {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-        Type::Logical { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Logical {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-        Type::Tensor { shape: None } => Type::tensor(),
-        Type::Logical { shape: None } => Type::logical(),
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-const TRIL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Lower triangular output array with preserved shape/type domain.",
-}];
-
-const TRIL_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, matrix, or paged matrix array.",
-}];
-
-const TRIL_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, matrix, or paged matrix array.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal offset for the preserved lower triangle.",
-    },
-];
-
-const TRIL_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = tril(A)",
-        inputs: &TRIL_INPUTS_A,
-        outputs: &TRIL_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = tril(A, k)",
-        inputs: &TRIL_INPUTS_A_K,
-        outputs: &TRIL_OUTPUT,
-    },
-];
-
-const TRIL_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIL.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:tril:TooManyInputs"),
-    when: "More than one optional argument is supplied after A.",
-    message: "tril: too many input arguments",
-};
-
-const TRIL_ERROR_INVALID_OFFSET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIL.INVALID_OFFSET",
-    identifier: Some("RunMat:tril:InvalidOffset"),
-    when: "Diagonal offset is not a finite integer scalar value.",
-    message: "tril: invalid diagonal offset",
-};
-
-const TRIL_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIL.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:tril:UnsupportedInput"),
-    when: "Input value is not supported by tril.",
-    message: "tril: unsupported input type",
-};
-
-const TRIL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIL.INTERNAL",
-    identifier: Some("RunMat:tril:Internal"),
-    when: "Internal masking/upload path fails.",
-    message: "tril: internal operation failed",
-};
-
-const TRIL_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    TRIL_ERROR_TOO_MANY_INPUTS,
-    TRIL_ERROR_INVALID_OFFSET,
-    TRIL_ERROR_UNSUPPORTED_INPUT,
-    TRIL_ERROR_INTERNAL,
-];
-
-pub const TRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRIL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRIL_ERRORS,
-};
-
-const TRIL_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are documented matrix inputs and preserve their class when the upper triangle is replaced by typed zero.",
-    }];
-const TRIL_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The diagonal selector is an integer-valued scalar. Native integer storage is decoded exactly and must fit the runtime index range.",
-    }];
-pub const TRIL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = tril(integer_A)",
-        inputs: &TRIL_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host masking works directly on native storage. Resident integer input uses exact owner-aware fallback when the provider's floating kernel is not applicable.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = tril(A, integer_k)",
-        inputs: &TRIL_INTEGER_OFFSET_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The offset is classified and range-checked before masking; automatic residency gathers transparently when needed.",
-    },
-];
-
 fn tril_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     tril_error_with_message(error.message, error)
 }
@@ -234,20 +69,29 @@ fn tril_error_with_message(
 
 #[runtime_builtin(
     name = "tril",
-    category = "array/shape",
-    summary = "Extract lower-triangular portions of matrices or paged tensors.",
-    keywords = "tril,lower triangular,matrix,diagonal,gpu",
-    accel = "custom",
-    type_resolver(preserve_matrix_type),
-    descriptor(crate::builtins::array::shape::tril::TRIL_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::tril::TRIL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::tril"
 )]
-async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn tril_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &TRIL_DESCRIPTOR,
+        &TRIL_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if rest.len() > 1 {
         return Err(tril_error(&TRIL_ERROR_TOO_MANY_INPUTS));
     }
-    let offset = parse_diagonal_offset(&rest).await?;
+    let offset = parse_diagonal_offset(rest.view()).await?;
+    match value {
+        Value::GpuTensor(handle) => tril_gpu(handle, offset).await,
+        value => tril_host_value(value, offset),
+    }
+}
+
+fn tril_host_value(value: Value, offset: isize) -> crate::BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?),
         Value::LogicalArray(array) => {
@@ -277,7 +121,7 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::CharArray(chars) => Ok(Value::CharArray(tril_char_array(chars, offset)?)),
-        Value::GpuTensor(handle) => Ok(tril_gpu(handle, offset).await?),
+        Value::GpuTensor(_) => unreachable!("resident values are handled before host masking"),
         Value::String(_) | Value::StringArray(_) => Err(tril_error_with_message(
             "tril: string arrays are not supported",
             &TRIL_ERROR_UNSUPPORTED_INPUT,
@@ -292,10 +136,12 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Listener(_)
         | Value::SparseTensor(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -303,6 +149,8 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
@@ -310,7 +158,9 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     }
 }
 
-async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
+async fn parse_diagonal_offset(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<isize> {
     if args.is_empty() {
         return Ok(0);
     }
@@ -375,7 +225,7 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
 }
 
 fn tril_tensor(tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
@@ -425,34 +275,32 @@ fn tril_logical_array(
     Ok(array)
 }
 
-fn tril_char_array(mut array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
-    for row in 0..array.rows {
-        for col in 0..array.cols {
-            if (row as i128) < col as i128 - offset as i128 {
-                array.data[row * array.cols + col] = '\0';
-            }
-        }
-    }
-    Ok(array)
+fn tril_char_array(array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
+    super::triangular_character::mask(
+        crate::context::legacy::active().as_ref(),
+        array,
+        offset,
+        super::triangular_character::Triangle::Lower,
+    )
 }
 
 fn tril_complex_tensor(
     tensor: ComplexTensor,
     offset: isize,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(mut values) => {
-            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0).into())?;
             ComplexStorage::F64(values)
         }
         ComplexStorage::F32(mut values) => {
-            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0))?;
+            apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0).into())?;
             ComplexStorage::F32(values)
         }
         ComplexStorage::Integer(storage) => {
             let zero = storage
-                .real
+                .real()
                 .zeros_like(1)
                 .value_at(0)
                 .expect("one typed integer zero");
@@ -477,34 +325,77 @@ fn tril_complex_tensor(
 async fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if handle.device_id != 0 {
+        if handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_none()
+            && runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+            && !runmat_accelerate_api::handle_is_logical(&handle)
+        {
             match provider.tril(&handle, offset).await {
-                Ok(out) => return Ok(Value::GpuTensor(out)),
-                Err(_) => {
-                    // Fall through to gather path.
+                Ok(mut out) => {
+                    if !triangular_provider_output_valid(provider, &out, &handle) {
+                        return Err(gpu_helpers::reject_gpu_output(
+                            out,
+                            tril_error_with_message(
+                                "tril: provider returned malformed or aliased output",
+                                &TRIL_ERROR_INTERNAL,
+                            ),
+                        ));
+                    }
+                    if let Err(error) =
+                        gpu_helpers::propagate_output_provenance(&mut out, [&handle])
+                    {
+                        return Err(gpu_helpers::reject_gpu_output(out, error));
+                    }
+                    return Ok(Value::GpuTensor(out));
+                }
+                Err(error) if error.is_unsupported() => {}
+                Err(error) => {
+                    let fallback = tril_error_with_message(
+                        format!("tril: admitted provider operation failed: {error}"),
+                        &TRIL_ERROR_INTERNAL,
+                    );
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        fallback, error,
+                    ));
                 }
             }
         }
-        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        let result = tril_tensor(tensor, offset)?;
-        let uploaded = gpu_helpers::upload_tensor(provider, &result).map_err(|e| {
-            tril_error_with_message(
-                format!("tril: failed to upload fallback result: {e}"),
-                &TRIL_ERROR_INTERNAL,
-            )
-        })?;
-        Ok(Value::GpuTensor(uploaded))
+        provider_restore::gather_value_compute_restore(handle, BUILTIN_NAME, move |value| {
+            tril_host_value(value, offset)
+        })
+        .await
     } else {
-        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
+        let value = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+        tril_host_value(value, offset)
     }
+}
+
+fn triangular_provider_output_valid(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+) -> bool {
+    output.allocation_lease().validate_live().is_ok()
+        && output.shape() == input.shape()
+        && output.device_id() == input.device_id()
+        && (input.shape().contains(&0) || !output.shares_allocation_with(input))
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::handle_storage(input)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output)
+            == runmat_accelerate_api::handle_integer_type(input)
+        && runmat_accelerate_api::handle_is_logical(output)
+            == runmat_accelerate_api::handle_is_logical(input)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn apply_tril_inplace<T>(
@@ -544,6 +435,7 @@ where
         for col in 0..cols {
             let col_base = base + col * rows;
             for row in 0..rows {
+                triangular_checkpoint(col_base.saturating_add(row))?;
                 let row_idx = row as i128;
                 let col_idx = col as i128;
                 let offset_idx = offset as i128;
@@ -556,19 +448,39 @@ where
     Ok(())
 }
 
+fn triangular_checkpoint(index: usize) -> crate::BuiltinResult<()> {
+    if !index.is_multiple_of(1_024) {
+        return Ok(());
+    }
+    let Some(runtime) = crate::context::legacy::active() else {
+        return Ok(());
+    };
+    let cancellation = runtime.cancellation_context();
+    if cancellation.is_cancelled() {
+        return Err(crate::builtin::builtin_control_error(
+            Some(&cancellation),
+            BUILTIN_NAME,
+            crate::context::host_allocation::HostAllocationError::Cancelled,
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
 
     fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::tril_builtin(value, rest))
+        block_on(super::tril_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_builtins::Type;
     use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
@@ -607,7 +519,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -638,22 +550,6 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), TRIL_ERROR_INVALID_OFFSET.identifier);
     }
 
-    #[test]
-    fn tril_type_preserves_matrix_shape() {
-        let out = preserve_matrix_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tril_main_diagonal() {
@@ -661,7 +557,7 @@ pub(crate) mod tests {
         let value = tril_builtin(Value::Tensor(tensor), Vec::new()).expect("tril");
         match value {
             Value::Tensor(result) => {
-                assert_eq!(result.shape, vec![2, 3]);
+                assert_eq!(result.shape(), [2, 3]);
                 assert_eq!(result.materialize_f64(), vec![1.0, 4.0, 0.0, 5.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -751,14 +647,46 @@ pub(crate) mod tests {
 
     #[test]
     fn tril_character_matrix_preserves_class_and_row_major_layout() {
-        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix");
+        let chars = CharArray::from_code_units(
+            [0xD800, 65, 0xDC00, 0xFFFF]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .expect("character matrix");
         let value = tril_builtin(Value::CharArray(chars), Vec::new()).expect("tril char");
         let Value::CharArray(result) = value else {
             panic!("expected character result");
         };
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
-        assert_eq!(result.data, vec!['a', '\0', 'c', 'd']);
+        assert_eq!(
+            result
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            vec![0xD800, 0, 0xDC00, 0xFFFF]
+        );
+
+        let pages =
+            CharArray::from_unicode_scalars_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+                .unwrap();
+        let original = pages.clone();
+        let masked = tril_char_array(pages, 0).unwrap();
+        assert_eq!(masked.shape.as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            masked.data(),
+            runmat_value::encode_utf16_code_units("a\0cde\0gh")
+        );
+        assert_eq!(
+            original.data(),
+            runmat_value::encode_utf16_code_units("abcdefgh")
+        );
+        let pointer = masked.data().as_ptr();
+        let reused = tril_char_array(masked, isize::MAX).unwrap();
+        assert_eq!(reused.data().as_ptr(), pointer);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -769,7 +697,7 @@ pub(crate) mod tests {
         let value = tril_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("tril complex");
         match value {
             Value::ComplexTensor(result) => {
-                assert_eq!(result.shape, vec![2, 2]);
+                assert_eq!(result.shape(), [2, 2]);
                 assert_eq!(result.materialize_f64()[0], (1.0, 2.0));
                 assert_eq!(result.materialize_f64()[1], (3.0, 4.0));
                 assert_eq!(result.materialize_f64()[2], (0.0, 0.0));
@@ -810,6 +738,13 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), TRIL_ERROR_TOO_MANY_INPUTS.identifier);
     }
 
+    #[test]
+    fn tril_rejects_excess_outputs_before_masking() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output scope");
+        let err = tril_builtin(Value::Num(3.0), Vec::new()).expect_err("two outputs");
+        assert_eq!(err.identifier(), TRIL_ERROR_TOO_MANY_OUTPUTS.identifier);
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tril_gpu_roundtrip() {
@@ -817,12 +752,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let value = tril_builtin(Value::GpuTensor(handle), Vec::new()).expect("tril gpu");
             let gathered = test_support::gather(value).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 0.0, 4.0]);
         });
     }
@@ -839,7 +774,7 @@ pub(crate) mod tests {
         let cpu = tril_tensor(tensor.clone(), -1).expect("cpu tril");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -847,7 +782,7 @@ pub(crate) mod tests {
             .expect("upload");
         let gpu = block_on(super::tril_gpu(handle, -1)).expect("gpu tril");
         let gathered = test_support::gather(gpu).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

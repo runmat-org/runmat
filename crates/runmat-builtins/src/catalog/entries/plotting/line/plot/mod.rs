@@ -1,0 +1,13 @@
+mod contract;
+mod declarations;
+mod documentation;
+mod inference;
+#[cfg(test)]
+mod tests;
+
+pub use self::contract::*;
+pub use self::declarations::*;
+
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(declarations::ENTRIES.iter().copied());
+}

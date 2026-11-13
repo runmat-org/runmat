@@ -36,10 +36,11 @@ fn all_integer_vectors() -> Vec<(&'static str, Value)> {
 #[test]
 fn numeric_transform_packet_has_class_complete_capability_metadata() {
     for (name, expected_forms) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
-        for capability in builtin.integer_capabilities {
+        let metadata = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .expect("builtin integer metadata");
+        assert_eq!(metadata.capabilities.len(), expected_forms, "{name}");
+        assert!(metadata.audit.is_none(), "{name}");
+        for capability in metadata.capabilities {
             assert!(!capability.inputs.is_empty(), "{name}: {}", capability.form);
             for input in capability.inputs {
                 assert_eq!(input.classes.len(), 8, "{name}: {}", input.name);
@@ -61,9 +62,10 @@ fn numeric_transform_extensions_are_declarative_and_independent() {
         ("permute", 0),
     ];
     for (name, count) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert_eq!(builtin.extensions.len(), count, "{name}");
-        for extension in builtin.extensions {
+        let extensions =
+            runmat_builtins::builtin_extensions_by_name(name).expect("builtin extension metadata");
+        assert_eq!(extensions.len(), count, "{name}");
+        for extension in extensions {
             assert_eq!(
                 extension.mode,
                 runmat_builtins::BuiltinExtensionMode::RunMatOnly,
@@ -240,7 +242,7 @@ fn documented_reordering_forms_preserve_all_integer_classes() {
     for (class, input) in all_integer_vectors() {
         let output =
             block_on(runmat_runtime::call_builtin_async("perms", &[input])).expect("integer perms");
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("{class}: expected tensor");
         };
         assert_ne!(output.numeric_dtype(), NumericDType::F64, "{class}");
@@ -272,7 +274,7 @@ fn documented_reordering_forms_preserve_all_integer_classes() {
             &[data, order],
         ))
         .expect("integer permute");
-        let Value::Tensor(output) = output else {
+        let Value::Tensor(output) = output.value() else {
             panic!("{class}: expected permuted tensor");
         };
         assert_eq!(
@@ -282,7 +284,7 @@ fn documented_reordering_forms_preserve_all_integer_classes() {
                 9_007_199_254_740_994
             ]))
         );
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
     }
 }
 
@@ -299,10 +301,10 @@ fn pdist2_typed_selection_count_remains_structural() {
         ],
     ))
     .expect("structural selection count");
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("expected selected distances");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
 
     let wide = 9_007_199_254_740_993_u64;
     let output = block_on(runmat_runtime::call_builtin_async(
@@ -315,10 +317,10 @@ fn pdist2_typed_selection_count_remains_structural() {
         ],
     ))
     .expect("wide structural selection count clamps to observation count");
-    let Value::Tensor(output) = output else {
+    let Value::Tensor(output) = output.value() else {
         panic!("expected selected distances");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
 }
 
 #[test]
@@ -343,7 +345,7 @@ fn distance_cache_size_controls_accept_every_integer_class() {
             ],
         ))
         .expect("typed pdist CacheSize");
-        assert!(matches!(output, Value::Num(_) | Value::Tensor(_)));
+        assert!(matches!(output.value(), Value::Num(_) | Value::Tensor(_)));
 
         let output = block_on(runmat_runtime::call_builtin_async(
             "pdist2",
@@ -355,6 +357,6 @@ fn distance_cache_size_controls_accept_every_integer_class() {
             ],
         ))
         .expect("typed pdist2 CacheSize");
-        assert!(matches!(output, Value::Tensor(_)));
+        assert!(matches!(output.value(), Value::Tensor(_)));
     }
 }

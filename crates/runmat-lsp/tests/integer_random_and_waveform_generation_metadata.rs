@@ -10,15 +10,77 @@ const PACKET: [(&str, usize, &str); 9] = [
     ("random", 2, "y=random('Normal',0,1);"),
     ("randperm", 1, "y=randperm(uint8(2));"),
     ("randsample", 3, "y=randsample(3,2);"),
-    ("rng", 3, "rng(uint32(1));"),
+    ("rng", 4, "rng(uint32(1));"),
 ];
 
 #[test]
 fn random_and_waveform_integer_metadata_is_public_and_precise() {
     for (name, expected_forms, _) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
+        if name == "rng" {
+            use runmat_builtins::{
+                BuiltinIntegerBackendRule as Backend, BuiltinIntegerComputationDomain as Domain,
+                BuiltinIntegerInputAvailability as Availability,
+                BuiltinIntegerOutputClassRule as Output, BuiltinIntegerOverflowRule as Overflow,
+                BuiltinIntegerOverloadKind as Overload, BuiltinIntegerScalarDoubleRule as Scalar,
+            };
+            let [seed, wide_seed, returned_state, extended_state] = builtin.integer_capabilities
+            else {
+                panic!("rng must separate seed domains and returned versus extended state");
+            };
+            for (capability, availability, classes, scalar, overload) in [
+                (
+                    seed,
+                    Availability::Documented,
+                    &runmat_builtins::ALL_INTEGER_CLASSES[..],
+                    Scalar::Allowed,
+                    Overload::ScalarOnly,
+                ),
+                (
+                    wide_seed,
+                    Availability::RunMatOnly,
+                    &runmat_builtins::ALL_INTEGER_CLASSES[..],
+                    Scalar::Allowed,
+                    Overload::ScalarOnly,
+                ),
+                (
+                    returned_state,
+                    Availability::Documented,
+                    &[runmat_builtins::BuiltinIntegerClass::Uint32][..],
+                    Scalar::NotApplicable,
+                    Overload::StructuralParameter,
+                ),
+                (
+                    extended_state,
+                    Availability::RunMatOnly,
+                    &runmat_builtins::ALL_INTEGER_CLASSES[..],
+                    Scalar::NotApplicable,
+                    Overload::StructuralParameter,
+                ),
+            ] {
+                let [input] = capability.inputs else {
+                    panic!("one exact rng role")
+                };
+                assert_eq!(input.classes, classes);
+                assert_eq!(input.availability, availability);
+                assert_eq!(input.scalar_double, scalar);
+                assert_eq!(capability.computation_domain, Domain::Structural);
+                assert_eq!(capability.output_class, Output::FunctionSpecific);
+                assert_eq!(capability.overflow, Overflow::Error);
+                assert_eq!(capability.backend, Backend::HostOnly);
+                assert_eq!(capability.overload, overload);
+            }
+            assert!(seed.form.contains("seed < 2^32"));
+            assert!(wide_seed.form.contains("wide_integer_seed"));
+            assert!(returned_state
+                .form
+                .contains("twister_state_returned_by_rng"));
+            assert!(returned_state.inputs[0].notes.contains("625-by-1 uint32"));
+            assert!(extended_state.form.contains("extended_integer_fields"));
+        }
         assert!(builtin
             .integer_capabilities
             .iter()
@@ -54,7 +116,8 @@ fn new_runmat_only_forms_publish_stable_compatibility_identifiers() {
     ];
     let mut ids = std::collections::HashSet::new();
     for (name, count) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.extensions.len(), count, "{name}");
         for extension in builtin.extensions {
             assert_eq!(

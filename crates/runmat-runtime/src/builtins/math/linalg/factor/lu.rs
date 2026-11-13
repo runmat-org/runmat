@@ -5,196 +5,23 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderLuResult};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, FactorOption};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
 
 const BUILTIN_NAME: &str = "lu";
 
-const LU_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lu-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lu with integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LuIntegerInputExtension"),
-};
-const LU_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lu-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lu with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LuLogicalInputExtension"),
-};
-pub const LU_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [LU_INTEGER_EXTENSION, LU_LOGICAL_EXTENSION];
-const LU_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "RunMat mode admits integer matrices at an explicit binary64 factorization boundary.",
-}];
-pub const LU_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[L,U,P] = lu(integer_A)",
-        inputs: &LU_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Gated RunMat extension; documented MATLAB input classes remain single and double.",
-    }];
-
-const LU_OUTPUT_COMBINED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "LU",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Combined LU factors.",
-}];
-
-const LU_OUTPUT_LU: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "L",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Lower-triangular factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper-triangular factor.",
-    },
-];
-
-const LU_OUTPUT_LUP: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "L",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Lower-triangular factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "U",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper-triangular factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "P",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Permutation matrix or vector based on pivot mode.",
-    },
-];
-
-const LU_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix to factorize.",
-}];
-
-const LU_INPUTS_A_MODE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to factorize.",
-    },
-    BuiltinParamDescriptor {
-        name: "pivotMode",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"matrix\""),
-        description: "Permutation mode (`\"matrix\"` or `\"vector\"`).",
-    },
-];
-
-const LU_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "LU = lu(A)",
-        inputs: &LU_INPUTS_A,
-        outputs: &LU_OUTPUT_COMBINED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "LU = lu(A, pivotMode)",
-        inputs: &LU_INPUTS_A_MODE,
-        outputs: &LU_OUTPUT_COMBINED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U] = lu(A)",
-        inputs: &LU_INPUTS_A,
-        outputs: &LU_OUTPUT_LU,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U] = lu(A, pivotMode)",
-        inputs: &LU_INPUTS_A_MODE,
-        outputs: &LU_OUTPUT_LU,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U, P] = lu(A)",
-        inputs: &LU_INPUTS_A,
-        outputs: &LU_OUTPUT_LUP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[L, U, P] = lu(A, pivotMode)",
-        inputs: &LU_INPUTS_A_MODE,
-        outputs: &LU_OUTPUT_LUP,
-    },
-];
-
-const LU_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LU.INVALID_ARGUMENT",
-    identifier: Some("RunMat:lu:InvalidArgument"),
-    when: "Option arguments or requested output count are invalid.",
-    message: "lu currently supports at most three outputs",
-};
-
-const LU_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LU.INVALID_INPUT",
-    identifier: Some("RunMat:lu:InvalidInput"),
-    when: "Input is unsupported for LU factorization.",
-    message: "lu: expected numeric or logical input values",
-};
-
-const LU_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LU.INTERNAL",
-    identifier: Some("RunMat:lu:Internal"),
-    when: "Runtime cannot materialize LU outputs.",
-    message: "lu: internal runtime failure",
-};
-
-const LU_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    LU_ERROR_INVALID_ARGUMENT,
-    LU_ERROR_INVALID_INPUT,
-    LU_ERROR_INTERNAL,
-];
-
-pub const LU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LU_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LU_ERRORS,
+#[cfg(test)]
+use runmat_builtins::LU_DESCRIPTOR;
+use runmat_builtins::{
+    LU_ERROR_INTERNAL, LU_ERROR_INVALID_ARGUMENT, LU_ERROR_INVALID_INPUT, LU_INTEGER_EXTENSION,
+    LU_LOGICAL_EXTENSION,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::lu")]
@@ -265,31 +92,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "lu",
-    category = "math/linalg/factor",
-    summary = "Compute LU decompositions with partial pivoting.",
-    keywords = "lu,factorization,decomposition,permutation",
-    accel = "sink",
-    sink = true,
-    type_resolver(matrix_unary_type),
-    descriptor(crate::builtins::math::linalg::factor::lu::LU_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::factor::lu::LU_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::factor::lu::LU_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
-async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
+async fn lu_builtin_context(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let count = crate::output_count::current_output_count();
+    if let Value::SparseTensor(sparse) = &value {
+        if count.is_some_and(|count| count > 5) {
+            return Err(lu_error(&LU_ERROR_INVALID_ARGUMENT));
+        }
+        return sparse::evaluate(runtime.as_ref(), sparse, rest.view(), count).await;
+    }
+    if count.is_some_and(|count| count > 3) {
+        return Err(lu_error(&LU_ERROR_INVALID_ARGUMENT));
+    }
+    let eval = evaluate(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.combined()]));
+            return Ok(Value::output_list(vec![eval.combined()]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![eval.lower(), eval.upper()]));
+            return Ok(Value::output_list(vec![eval.lower(), eval.upper()]));
         }
         if out_count == 3 {
-            return Ok(Value::OutputList(vec![
+            return Ok(Value::output_list(vec![
                 eval.lower(),
                 eval.upper(),
                 eval.permutation(),
@@ -298,6 +132,12 @@ async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
         return Err(lu_error(&LU_ERROR_INVALID_ARGUMENT));
     }
     Ok(eval.combined())
+}
+
+mod sparse;
+#[cfg(test)]
+async fn lu_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    lu_builtin_context(None, value, rest).await
 }
 
 /// Output form for `lu`, reused by both the builtin wrapper and the VM multi-output path.
@@ -370,25 +210,35 @@ impl LuEval {
         mut result: ProviderLuResult,
         pivot_mode: PivotMode,
         provenance: runmat_accelerate_api::GpuHandleProvenance,
-    ) -> Self {
-        for handle in [
-            &mut result.combined,
-            &mut result.lower,
-            &mut result.upper,
-            &mut result.perm_matrix,
-            &mut result.perm_vector,
-        ] {
-            runmat_accelerate_api::set_handle_provenance(handle, provenance);
-            runmat_accelerate_api::mark_residency(handle);
+    ) -> BuiltinResult<Self> {
+        let adoption = (|| {
+            for handle in [
+                &mut result.combined,
+                &mut result.lower,
+                &mut result.upper,
+                &mut result.perm_matrix,
+                &mut result.perm_vector,
+            ] {
+                *handle = handle.with_provenance(provenance).map_err(|error| {
+                    build_runtime_error(format!("lu: cannot adopt provider output: {error}"))
+                        .with_source(error)
+                        .build()
+                })?;
+                runmat_accelerate_api::mark_residency(handle);
+            }
+            Ok::<(), RuntimeError>(())
+        })();
+        if let Err(error) = adoption {
+            return Err(reject_provider_lu_result(result, error));
         }
-        Self {
+        Ok(Self {
             combined: Value::GpuTensor(result.combined),
             lower: Value::GpuTensor(result.lower),
             upper: Value::GpuTensor(result.upper),
             perm_matrix: Value::GpuTensor(result.perm_matrix),
             perm_vector: Value::GpuTensor(result.perm_vector),
             pivot_mode,
-        }
+        })
     }
 }
 
@@ -406,26 +256,30 @@ impl Default for PivotMode {
 }
 
 /// Evaluate `lu` while preserving all output forms for later extraction.
-pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<LuEval> {
     let pivot_mode = parse_pivot_mode(args)?;
     ensure_lu_extensions(&value).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     match value {
         Value::GpuTensor(handle) => {
+            gpu_helpers::require_resident_compute_owner(&handle, || {
+                lu_internal_error("lu: no exact owner for resident input")
+            })?;
             if let Some(eval) = evaluate_gpu(&handle, pivot_mode).await? {
                 return Ok(eval);
             }
-            let owner = gpu_helpers::exact_provider_for_handle(&handle);
+            let owner = gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| lu_internal_error("lu: no exact owner for resident input"))?;
             let explicit = runmat_accelerate_api::handle_is_explicit(&handle);
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            let host = gpu_helpers::download_value_preserving_residency_async(owner, &handle)
                 .await
                 .map_err(with_lu_context)?;
-            let eval = evaluate_host_value(Value::Tensor(tensor), pivot_mode).await?;
+            let eval = evaluate_host_value(host, pivot_mode).await?;
             if explicit {
-                let owner = owner.ok_or_else(|| {
-                    lu_invalid_input("lu: no exact owner for explicit gpuArray input")
-                })?;
-                restore_lu_eval_to_provider(eval, owner)
+                restore_lu_eval_to_provider(eval, owner, &handle)
             } else {
                 Ok(eval)
             }
@@ -437,15 +291,20 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
 fn restore_lu_eval_to_provider(
     eval: LuEval,
     owner: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
 ) -> BuiltinResult<LuEval> {
     fn upload(
         owner: &'static dyn runmat_accelerate_api::AccelProvider,
         value: &Value,
+        protected: &[&GpuTensorHandle],
     ) -> BuiltinResult<GpuTensorHandle> {
         let handle = match value {
-            Value::Tensor(tensor) => gpu_helpers::upload_tensor(owner, tensor)
-                .map_err(|error| lu_internal_error(format!("lu: GPU upload failed: {error}")))?,
-            Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(owner, tensor)?,
+            Value::Tensor(tensor) => {
+                gpu_helpers::upload_tensor_protecting(owner, tensor, protected)?
+            }
+            Value::ComplexTensor(tensor) => {
+                gpu_helpers::upload_complex_tensor_protecting(owner, tensor, protected)?
+            }
             _ => return Err(lu_internal_error("lu: unexpected host factor value")),
         };
         Ok(handle)
@@ -458,32 +317,31 @@ fn restore_lu_eval_to_provider(
         &eval.perm_matrix,
         &eval.perm_vector,
     ] {
-        match upload(owner, value) {
-            Ok(handle) => uploaded.push(handle),
-            Err(error) => {
-                for handle in &uploaded {
-                    gpu_helpers::free_unprotected_exact_owner(handle, &[]);
-                }
-                return Err(error);
-            }
+        let handle = {
+            let protected = std::iter::once(input)
+                .chain(uploaded.iter())
+                .collect::<Vec<_>>();
+            upload(owner, value, &protected)
+        };
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(error) => return Err(gpu_helpers::reject_gpu_outputs(uploaded, error)),
+        };
+        uploaded.push(handle);
+    }
+    for index in 0..uploaded.len() {
+        if let Err(error) = gpu_helpers::propagate_output_provenance(&mut uploaded[index], [input])
+        {
+            return Err(gpu_helpers::reject_gpu_outputs(uploaded, error));
         }
+        runmat_accelerate_api::mark_residency(&uploaded[index]);
     }
     let mut uploaded = uploaded.into_iter();
-    let mut combined = uploaded.next().expect("combined upload");
-    let mut lower = uploaded.next().expect("lower upload");
-    let mut upper = uploaded.next().expect("upper upload");
-    let mut perm_matrix = uploaded.next().expect("permutation upload");
-    let mut perm_vector = uploaded.next().expect("pivot upload");
-    for handle in [
-        &mut combined,
-        &mut lower,
-        &mut upper,
-        &mut perm_matrix,
-        &mut perm_vector,
-    ] {
-        runmat_accelerate_api::mark_handle_explicit(handle);
-        runmat_accelerate_api::mark_residency(handle);
-    }
+    let combined = uploaded.next().expect("combined upload");
+    let lower = uploaded.next().expect("lower upload");
+    let upper = uploaded.next().expect("upper upload");
+    let perm_matrix = uploaded.next().expect("permutation upload");
+    let perm_vector = uploaded.next().expect("pivot upload");
     Ok(LuEval {
         combined: Value::GpuTensor(combined),
         lower: Value::GpuTensor(lower),
@@ -534,13 +392,42 @@ async fn evaluate_gpu(
     pivot_mode: PivotMode,
 ) -> BuiltinResult<Option<LuEval>> {
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
-        if let Ok(result) = provider.lu(handle).await {
-            if valid_provider_lu_result(&result, handle, provider) {
-                let provenance = runmat_accelerate_api::handle_provenance(handle)
-                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-                return Ok(Some(LuEval::from_provider(result, pivot_mode, provenance)));
+        if runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle).is_none()
+            || !gpu_helpers::gpu_class_metadata_matches(
+                handle,
+                runmat_accelerate_api::handle_precision(handle),
+                None,
+                false,
+            )
+        {
+            return Ok(None);
+        }
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
+        match provider.lu(handle).await {
+            Ok(result) => {
+                if valid_provider_lu_result(&result, handle, provider) {
+                    let provenance = runmat_accelerate_api::handle_provenance(handle)
+                        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+                    return Ok(Some(LuEval::from_provider(result, pivot_mode, provenance)?));
+                }
+                return Err(reject_provider_lu_result(
+                    result,
+                    lu_internal_error("lu: provider returned invalid factor outputs"),
+                ));
             }
-            free_invalid_provider_lu_result(&result, handle);
+            Err(error)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &error,
+                ) => {}
+            Err(error) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    lu_internal_error(format!("lu: provider execution failed: {error}")),
+                    runmat_accelerate_api::ProviderExecutionError::from(error),
+                ))
+            }
         }
     }
     Ok(None)
@@ -551,7 +438,7 @@ fn valid_provider_lu_result(
     input: &GpuTensorHandle,
     owner: &'static dyn runmat_accelerate_api::AccelProvider,
 ) -> bool {
-    let rows = input.shape.first().copied().unwrap_or(1);
+    let rows = input.shape().first().copied().unwrap_or(1);
     let outputs = [
         &result.combined,
         &result.lower,
@@ -560,52 +447,49 @@ fn valid_provider_lu_result(
         &result.perm_vector,
     ];
     let expected = [
-        input.shape.clone(),
+        input.shape().to_vec(),
         vec![rows, rows],
-        input.shape.clone(),
+        input.shape().to_vec(),
         vec![rows, rows],
         vec![rows, 1],
     ];
     outputs.iter().zip(expected.iter()).all(|(output, shape)| {
-        output.shape == *shape
-            && output.device_id == input.device_id
-            && !gpu_helpers::same_gpu_handle(output, input)
+        output.shape() == *shape
+            && output.device_id() == input.device_id()
+            && !output.shares_allocation_with(input)
+            && !runmat_accelerate_api::handle_is_transposed(output)
             && runmat_accelerate_api::handle_storage(output)
                 == runmat_accelerate_api::GpuTensorStorage::Real
             && runmat_accelerate_api::handle_integer_type(output).is_none()
             && !runmat_accelerate_api::handle_is_logical(output)
             && runmat_accelerate_api::handle_precision(output)
                 == runmat_accelerate_api::handle_precision(input)
-            && gpu_helpers::exact_provider_for_handle(output)
-                .is_some_and(|candidate| std::ptr::eq(candidate, owner))
+            && gpu_helpers::exact_provider_for_handle(output).is_some_and(|candidate| {
+                runmat_accelerate_api::same_provider_instance(candidate, owner)
+            })
     }) && outputs.iter().enumerate().all(|(index, output)| {
         outputs
             .iter()
             .skip(index + 1)
-            .all(|other| !gpu_helpers::same_gpu_handle(output, other))
+            .all(|other| !output.shares_allocation_with(other))
     })
 }
 
-fn free_invalid_provider_lu_result(result: &ProviderLuResult, input: &GpuTensorHandle) {
+fn reject_provider_lu_result(result: ProviderLuResult, mut error: RuntimeError) -> RuntimeError {
     let outputs = [
-        &result.combined,
-        &result.lower,
-        &result.upper,
-        &result.perm_matrix,
-        &result.perm_vector,
+        result.combined,
+        result.lower,
+        result.upper,
+        result.perm_matrix,
+        result.perm_vector,
     ];
-    for (index, output) in outputs.iter().enumerate() {
-        if outputs[..index]
-            .iter()
-            .any(|prior| gpu_helpers::same_gpu_handle(output, prior))
-        {
-            continue;
-        }
-        gpu_helpers::free_unprotected_exact_owner(output, &[input]);
+    for output in outputs {
+        error = gpu_helpers::reject_gpu_output(output, error);
     }
+    error
 }
 
-fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
+fn parse_pivot_mode(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<PivotMode> {
     if args.is_empty() {
         return Ok(PivotMode::Matrix);
     }
@@ -617,10 +501,13 @@ fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
             "lu: option must be a string or character vector",
         ));
     };
-    match option.trim().to_ascii_lowercase().as_str() {
-        "matrix" => Ok(PivotMode::Matrix),
-        "vector" => Ok(PivotMode::Vector),
-        other => Err(lu_invalid_argument(format!("lu: unknown option '{other}'"))),
+    match FactorOption::parse(&option) {
+        Some(FactorOption::Matrix) => Ok(PivotMode::Matrix),
+        Some(FactorOption::Vector) => Ok(PivotMode::Vector),
+        _ => Err(lu_invalid_argument(format!(
+            "lu: unknown option '{}'",
+            option.trim().to_ascii_lowercase()
+        ))),
     }
 }
 
@@ -859,7 +746,7 @@ impl RowMajorMatrix {
     }
 
     fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(lu_invalid_input("lu: input must be 2-D"));
         }
         let rows = tensor.rows();
@@ -882,11 +769,11 @@ impl RowMajorMatrix {
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(lu_invalid_input("lu: input must be 2-D"));
         }
-        let rows = tensor.rows;
-        let cols = tensor.cols;
+        let rows = tensor.rows();
+        let cols = tensor.cols();
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
@@ -924,6 +811,33 @@ impl RowMajorMatrix {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn rejected_factor_batch_retires_each_owned_allocation_not_borrowed_aliases() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let output = owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let result = ProviderLuResult {
+            combined: input.handle.clone(),
+            lower: output.handle.clone(),
+            upper: output.handle.clone(),
+            perm_matrix: output.handle.clone(),
+            perm_vector: output.handle,
+        };
+        let error = reject_provider_lu_result(result, lu_internal_error("invalid factors"));
+        assert!(error.message().contains("invalid factors"));
+        assert_eq!(input.probe.retirements(), 0);
+        assert_eq!(output.probe.retirements(), 1);
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
+    }
+
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
@@ -1091,7 +1005,7 @@ pub(crate) mod tests {
     }
 
     fn assert_tensor_close(a: &Matrix, b: &Matrix, tol: f64) {
-        assert_eq!(a.shape, b.shape);
+        assert_eq!(a.shape(), b.shape());
         for (lhs, rhs) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
             assert!(
                 (lhs - rhs).abs() <= tol,
@@ -1187,7 +1101,7 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(a), &[Value::from("vector")]).expect("evaluate vector mode");
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
         let pivot = tensor_from_value(eval.pivot_vector());
-        assert_eq!(pivot.shape, vec![2, 1]);
+        assert_eq!(pivot.shape(), [2, 1]);
         assert_eq!(pivot.materialize_f64(), vec![2.0, 1.0]);
     }
 
@@ -1209,7 +1123,7 @@ pub(crate) mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Matrix);
         let perm_selected = tensor_from_value(eval.permutation());
         let perm_matrix = tensor_from_value(eval.permutation_matrix());
-        assert_eq!(perm_selected.shape, perm_matrix.shape);
+        assert_eq!(perm_selected.shape(), perm_matrix.shape());
         assert_tensor_close(&perm_selected, &perm_matrix, 1e-12);
     }
 
@@ -1221,9 +1135,9 @@ pub(crate) mod tests {
         let l = tensor_from_value(eval.lower());
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
-        assert_eq!(l.shape, vec![2, 2]);
-        assert_eq!(u.shape, vec![2, 3]);
-        assert_eq!(p.shape, vec![2, 2]);
+        assert_eq!(l.shape(), [2, 2]);
+        assert_eq!(u.shape(), [2, 3]);
+        assert_eq!(p.shape(), [2, 2]);
 
         let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
         let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
@@ -1292,7 +1206,7 @@ pub(crate) mod tests {
             let host = Matrix::new(vec![10.0, 3.0, 7.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle.clone()), &[]).expect("evaluate gpu input");
@@ -1318,7 +1232,7 @@ pub(crate) mod tests {
             let host = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval =
@@ -1326,7 +1240,7 @@ pub(crate) mod tests {
             let pivot_val = eval.permutation();
             assert!(matches!(pivot_val, Value::GpuTensor(_)));
             let pivot = test_support::gather(pivot_val).expect("gather pivot");
-            assert_eq!(pivot.shape, vec![2, 1]);
+            assert_eq!(pivot.shape(), [2, 1]);
             let expected = Matrix::new(vec![2.0, 1.0], vec![2, 1]).unwrap();
             assert_tensor_close(&pivot, &expected, 1e-12);
         });
@@ -1361,7 +1275,7 @@ pub(crate) mod tests {
         let cpu_eval = evaluate(Value::Tensor(host.clone()), &[]).expect("cpu evaluate");
         let view = runmat_accelerate_api::HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate(Value::GpuTensor(handle), &[]).expect("gpu evaluate");
@@ -1394,10 +1308,15 @@ pub(crate) mod tests {
     }
 
     fn lu_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::lu_builtin(value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::lu_builtin(value, rest.into()))
     }
 
     fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
-        block_on(super::evaluate(value, args))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(args),
+        ))
     }
 }

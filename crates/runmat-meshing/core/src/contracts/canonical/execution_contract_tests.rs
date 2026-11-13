@@ -14,11 +14,7 @@ fn stage_input(byte: u8) -> MeshingInputRef {
 }
 
 fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: id.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, id.into(), vec!["root".into()])
 }
 
 pub(super) fn batch_partition() -> MeshingPartitionDescriptor {
@@ -39,6 +35,11 @@ pub(super) fn stage_identity() -> MeshingStageIdentity {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageKind::SurfaceMesh,
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: digest(1),
             geometry_revision: 3,
             persistent_mapping_version: 2,
@@ -341,6 +342,7 @@ fn workload_failure_must_match_the_requested_stage() {
             witnesses: Vec::new(),
             request_values: Vec::new(),
             achieved_values: Vec::new(),
+            accounting_error: None,
             remediation: "inspect the failed optimization cavity".into(),
         },
     };

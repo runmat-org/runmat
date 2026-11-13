@@ -14,7 +14,8 @@ pub struct LenOpParams {
 pub struct LinearGatherParams {
     pub count: u32,
     pub lane_factor: u32,
-    pub _pad: [u32; 2],
+    pub source_rows: u32,
+    pub source_columns: u32,
 }
 
 #[repr(C)]
@@ -22,7 +23,8 @@ pub struct LinearGatherParams {
 pub struct LinearScatterParams {
     pub count: u32,
     pub lane_factor: u32,
-    pub _pad: [u32; 2],
+    pub rhs_scalar: u32,
+    pub _pad: u32,
 }
 
 #[repr(C)]
@@ -686,6 +688,35 @@ pub const MATMUL_EPILOGUE_FLAG_CLAMP_MIN: u32 = 1 << 4;
 pub const MATMUL_EPILOGUE_FLAG_CLAMP_MAX: u32 = 1 << 5;
 pub const MATMUL_EPILOGUE_FLAG_POW: u32 = 1 << 6;
 pub const MATMUL_EPILOGUE_FLAG_DIAG_WRITE: u32 = 1 << 7;
+pub const MATMUL_EPILOGUE_FLAG_MULTIPLY: u32 = 1 << 9;
+pub const MATMUL_EPILOGUE_FLAG_ADD: u32 = 1 << 10;
+pub const MATMUL_EPILOGUE_FLAG_SUBTRACT: u32 = 1 << 11;
+pub const MATMUL_EPILOGUE_FLAG_SUBTRACT_FROM: u32 = 1 << 12;
+
+pub(crate) fn matmul_affine_params(ep: &runmat_accelerate_api::MatmulEpilogue) -> (u32, f64, f64) {
+    use runmat_accelerate_api::{MatmulAffine, MatmulOffset};
+    let MatmulAffine { scale, offset } = ep.affine;
+    let mut flags = 0;
+    if scale.is_some() {
+        flags |= MATMUL_EPILOGUE_FLAG_MULTIPLY;
+    }
+    let value = match offset {
+        None => 0.0,
+        Some(MatmulOffset::Add(v)) => {
+            flags |= MATMUL_EPILOGUE_FLAG_ADD;
+            v
+        }
+        Some(MatmulOffset::Subtract(v)) => {
+            flags |= MATMUL_EPILOGUE_FLAG_SUBTRACT;
+            v
+        }
+        Some(MatmulOffset::SubtractFrom(v)) => {
+            flags |= MATMUL_EPILOGUE_FLAG_SUBTRACT_FROM;
+            v
+        }
+    };
+    (flags, scale.unwrap_or(1.0), value)
+}
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -937,10 +968,13 @@ pub struct LinspaceParamsF64 {
     pub start: f64,
     pub step: f64,
     pub stop: f64,
+    pub first: f64,
+    pub last: f64,
     pub total: u32,
     pub chunk: u32,
     pub offset: u32,
-    pub _pad: u32,
+    pub mode: u32,
+    pub _pad: f64,
 }
 
 #[repr(C)]
@@ -949,11 +983,13 @@ pub struct LinspaceParamsF32 {
     pub start: f32,
     pub step: f32,
     pub stop: f32,
-    pub _pad0: f32,
+    pub first: f32,
+    pub last: f32,
     pub total: u32,
     pub chunk: u32,
     pub offset: u32,
-    pub _pad1: u32,
+    pub mode: u32,
+    pub _pad: [u32; 3],
 }
 
 #[repr(C)]
@@ -1002,6 +1038,45 @@ pub struct RandomScalarParams {
     pub key1: u32,
 }
 
+/// Exact request-local counter and key for Threefry4x64_20. Four low-to-high
+/// words encode the 128-bit logical item position; no provider RNG mutex.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomChildParams {
+    pub offset: u32,
+    pub chunk: u32,
+    pub first0: u32,
+    pub first1: u32,
+    pub first2: u32,
+    pub first3: u32,
+    pub seed0: u32,
+    pub seed1: u32,
+    pub integer_lower: u32,
+    pub integer_mask: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+/// First twelve words match `RandomChildParams`; the remaining words are one
+/// bounded rejection batch's exact domain and attempt lane. Every dispatch
+/// uses the same type and shader binding layout.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomIntegerBatchParams {
+    pub base: RandomChildParams,
+    pub span0: u32,
+    pub span1: u32,
+    pub accept_limit0: u32,
+    pub accept_limit1: u32,
+    pub lower0: u32,
+    pub lower1: u32,
+    pub attempt0: u32,
+    pub attempt1: u32,
+    pub attempts: u32,
+    pub initial: u32,
+    pub _pad: [u32; 2],
+}
+
 /// Params for parameterized distribution samplers (exprnd, normrnd, unifrnd).
 /// param1/param2 carry distribution-specific scalars (mu, sigma, a, b, etc.).
 #[repr(C)]
@@ -1030,30 +1105,44 @@ pub struct RandomDistParamsF32 {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub struct StochasticEvolutionParamsF32 {
+pub struct StochasticEvolutionStepParams {
     pub offset: u32,
-    pub chunk: u32,
-    pub len: u32,
-    pub steps: u32,
-    pub key0: u32,
-    pub key1: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
-    pub drift: f32,
-    pub scale: f32,
+    pub count: u32,
+    pub total: u32,
+    pub _pad: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub struct StochasticEvolutionParamsF64 {
-    pub offset: u32,
-    pub chunk: u32,
-    pub len: u32,
-    pub steps: u32,
-    pub key0: u32,
-    pub key1: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
+pub struct StochasticEvolutionStepParamsF32F32 {
+    pub base: StochasticEvolutionStepParams,
+    pub drift: f32,
+    pub scale: f32,
+    pub _pad: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct StochasticEvolutionStepParamsF32F64 {
+    pub base: StochasticEvolutionStepParams,
+    pub drift: f32,
+    pub _pad: u32,
+    pub scale: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct StochasticEvolutionStepParamsF64F32 {
+    pub base: StochasticEvolutionStepParams,
+    pub drift: f64,
+    pub scale: f32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct StochasticEvolutionStepParamsF64F64 {
+    pub base: StochasticEvolutionStepParams,
     pub drift: f64,
     pub scale: f64,
 }

@@ -1,0 +1,492 @@
+//! Real `erf` execution for RunMat.
+//!
+//! Provides element-wise error-function evaluation for real inputs. MATLAB documents `erf`
+//! for real single and double arrays and rejects sparse inputs, so complex and sparse values
+//! are reported as input errors instead of silently applying an analytic continuation.
+
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::{
+    BuiltinErrorDescriptor, ERF_ERROR_INTERNAL, ERF_ERROR_INVALID_ARGUMENT,
+    ERF_ERROR_INVALID_INPUT, ERF_ERROR_TOO_MANY_OUTPUTS,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, NumericScalar, NumericStorage, Tensor, Value};
+
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+use crate::builtins::math::resident_real_unary as real_unary;
+
+const BUILTIN_NAME: &str = "erf";
+
+#[runmat_macros::register_gpu_spec(
+    builtin_path = "crate::builtins::math::elementwise::error_functions::erf"
+)]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: BUILTIN_NAME,
+    op_kind: GpuOpKind::Elementwise,
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    broadcast: BroadcastSemantics::Matlab,
+    provider_hooks: &[ProviderHook::Unary { name: "unary_erf" }],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes:
+        "Providers may evaluate erf directly on real device buffers; runtimes gather to host when unary_erf is unavailable.",
+};
+
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::elementwise::error_functions::erf"
+)]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: BUILTIN_NAME,
+    shape: ShapeRequirements::BroadcastCompatible,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Fusion planner currently falls back to provider or host elementwise erf evaluation.",
+};
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn erf_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+#[runtime_builtin(
+    name = "erf",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::elementwise::error_functions::erf"
+)]
+async fn erf_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    reject_excess_outputs()?;
+    if !rest.is_empty() {
+        return Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_ARGUMENT,
+            "erf accepts exactly one input",
+        ));
+    }
+    match value {
+        Value::GpuTensor(handle) => erf_gpu(handle).await,
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_INPUT,
+            "complex inputs are not supported",
+        )),
+        Value::String(_) | Value::StringArray(_) => Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_INPUT,
+            "expected real numeric input, got string",
+        )),
+        Value::SparseTensor(_) => Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_INPUT,
+            "sparse inputs are not supported",
+        )),
+        Value::Bool(_) | Value::LogicalArray(_) => Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_INPUT,
+            "logical inputs are not supported",
+        )),
+        Value::Int(_) => Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_INPUT,
+            "integer-class inputs are not supported",
+        )),
+        Value::CharArray(_) => Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_INPUT,
+            "char inputs are not supported",
+        )),
+        other => erf_real(other),
+    }
+}
+
+fn reject_excess_outputs() -> BuiltinResult<()> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        return Err(erf_error_with_detail(
+            &ERF_ERROR_TOO_MANY_OUTPUTS,
+            "only one output is defined",
+        ));
+    }
+    Ok(())
+}
+
+async fn erf_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if let Err(reason) = real_unary::validate_input(&handle) {
+        return Err(erf_error_with_detail(
+            &ERF_ERROR_INVALID_INPUT,
+            reason.detail(),
+        ));
+    }
+
+    let provider = real_unary::exact_owner(&handle, || {
+        erf_error_with_detail(&ERF_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
+    match provider.unary_erf(&handle).await {
+        Ok(mut out) if real_unary::output_matches(&out, &handle, provider) => {
+            real_unary::preserve_residency_intent(&mut out, &handle)?;
+            return gpu_helpers::resident_gpu_value(out);
+        }
+        Ok(out) => {
+            return Err(real_unary::reject_output(
+                out,
+                erf_error_with_detail(
+                    &ERF_ERROR_INTERNAL,
+                    "provider unary_erf returned malformed output",
+                ),
+            ));
+        }
+        Err(err) if real_unary::hook_allows_host_fallback(&err) => {}
+        Err(err) => {
+            let mut error = erf_error_with_detail(
+                &ERF_ERROR_INTERNAL,
+                format!("provider unary_erf failed: {err}"),
+            );
+            error = crate::runtime_error::with_provider_execution_source(error, err.into());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+    }
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+    let result = erf_tensor(tensor)?;
+    let out = real_unary::restore_fallback(&result, &handle, provider).map_err(|err| {
+        erf_error_with_detail(
+            &ERF_ERROR_INTERNAL,
+            format!("failed to restore fallback result to input provider: {err}"),
+        )
+    })?;
+    gpu_helpers::resident_gpu_value(out)
+}
+
+fn erf_real(value: Value) -> BuiltinResult<Value> {
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|e| erf_error_with_detail(&ERF_ERROR_INVALID_INPUT, e))?;
+    Ok(erf_tensor_into_value(erf_tensor(tensor)?))
+}
+
+fn erf_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    let shape = tensor.shape().to_vec();
+    let storage = tensor
+        .into_numeric_storage()
+        .map_err(|e| builtin_error(format!("erf: {e}")))?;
+    let output = match storage {
+        NumericStorage::F64(values) => {
+            NumericStorage::F64(values.into_iter().map(erf_real_scalar).collect())
+        }
+        NumericStorage::F32(values) => NumericStorage::F32(
+            values
+                .into_iter()
+                .map(|value| erf_real_scalar(f64::from(value)) as f32)
+                .collect(),
+        ),
+        storage => {
+            return Err(erf_error_with_detail(
+                &ERF_ERROR_INVALID_INPUT,
+                format!("{} inputs are not supported", storage.class_name()),
+            ))
+        }
+    };
+    Tensor::from_numeric_storage(output, shape).map_err(|e| builtin_error(format!("erf: {e}")))
+}
+
+fn erf_tensor_into_value(tensor: Tensor) -> Value {
+    if tensor.len() == 1 && tensor.numeric_dtype() == NumericDType::F64 {
+        if let Some(NumericScalar::F64(value)) = tensor.numeric_value_at(0) {
+            return Value::Num(value);
+        }
+    }
+    Value::Tensor(tensor)
+}
+
+fn erf_real_scalar(value: f64) -> f64 {
+    libm::erf(value)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::builtins::common::test_support;
+    use futures::executor::block_on;
+    use runmat_accelerate_api::{GpuHandleProvenance, HostTensorView};
+    use runmat_value::{
+        CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, SparseTensor,
+    };
+
+    fn erf_builtin(value: Value) -> BuiltinResult<Value> {
+        block_on(super::erf_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+    }
+
+    fn approx_eq(got: f64, expected: f64, tol: f64) {
+        assert!(
+            (got - expected).abs() <= tol,
+            "got {got}, expected {expected}, tol {tol}"
+        );
+    }
+
+    fn values_f64(tensor: &Tensor) -> Vec<f64> {
+        tensor.materialize_f64()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_scalar_values() {
+        match erf_builtin(Value::Num(1.0)).expect("erf") {
+            Value::Num(v) => approx_eq(v, 0.842_700_792_949_714_9, 1e-15),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match erf_builtin(Value::Num(-0.5)).expect("erf") {
+            Value::Num(v) => approx_eq(v, -0.520_499_877_813_046_5, 1e-15),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_tensor_shape_and_values() {
+        let tensor = Tensor::new(vec![-0.5, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
+        let result = erf_builtin(Value::Tensor(tensor)).expect("erf");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape(), &[2, 2]);
+                assert_eq!(t.numeric_dtype(), NumericDType::F64);
+                let expected = [
+                    -0.520_499_877_813_046_5,
+                    0.0,
+                    0.842_700_792_949_714_9,
+                    0.999_977_909_503_001_4,
+                ];
+                for (got, expected) in values_f64(&t).iter().zip(expected.iter()) {
+                    approx_eq(*got, *expected, 1e-15);
+                }
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_single_tensor_preserves_single_dtype() {
+        let tensor = Tensor::new_with_dtype(vec![0.5, 1.0], vec![1, 2], NumericDType::F32).unwrap();
+        let result = erf_builtin(Value::Tensor(tensor)).expect("erf");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.numeric_dtype(), NumericDType::F32);
+                let values = values_f64(&t);
+                approx_eq(values[0], 0.520_499_885_082_244_9, 1e-7);
+                approx_eq(values[1], 0.842_700_779_438_018_8, 1e-7);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn erf_preserves_rank_zero_and_rank_one_single_tensors() {
+        for (shape, input, expected) in [
+            (Vec::new(), vec![0.0_f32], vec![0.0_f64]),
+            (
+                vec![2],
+                vec![0.0_f32, 1.0],
+                vec![0.0_f64, 0.842_700_779_438_018_8],
+            ),
+        ] {
+            let tensor = Tensor::from_f32(input, shape.clone()).expect("low-rank single");
+            let Value::Tensor(output) = erf_builtin(Value::Tensor(tensor)).expect("erf") else {
+                panic!("expected native single tensor");
+            };
+            assert_eq!(output.shape(), shape.as_slice());
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+            for (actual, expected) in output.materialize_f64().iter().zip(expected) {
+                approx_eq(*actual, expected, 1e-7);
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_rejects_integer_bool_logical_and_char_inputs() {
+        assert!(erf_builtin(Value::Int(IntValue::I32(1))).is_err());
+        assert!(erf_builtin(Value::Bool(false)).is_err());
+        let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
+        assert!(erf_builtin(Value::LogicalArray(logical)).is_err());
+        let chars = CharArray::from_unicode_scalars(vec!['\0', '\u{1}'], 1, 2).unwrap();
+        assert!(erf_builtin(Value::CharArray(chars)).is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_rejects_typed_integer_tensor_storage() {
+        let scalar =
+            Tensor::new_integer(IntegerStorage::I16(vec![1]), vec![1, 1]).expect("int tensor");
+        assert!(erf_builtin(Value::Tensor(scalar)).is_err());
+        let tensor =
+            Tensor::new_integer(IntegerStorage::I16(vec![1, 0]), vec![1, 2]).expect("int tensor");
+        assert!(erf_builtin(Value::Tensor(tensor)).is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_nan_and_infinities_follow_real_limits() {
+        match erf_builtin(Value::Num(f64::INFINITY)).expect("erf") {
+            Value::Num(v) => assert_eq!(v, 1.0),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match erf_builtin(Value::Num(f64::NEG_INFINITY)).expect("erf") {
+            Value::Num(v) => assert_eq!(v, -1.0),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+        match erf_builtin(Value::Num(f64::NAN)).expect("erf") {
+            Value::Num(v) => assert!(v.is_nan()),
+            other => panic!("expected scalar result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_rejects_complex_string_and_sparse_inputs() {
+        let err = erf_builtin(Value::Complex(1.0, 1.0)).expect_err("complex should error");
+        assert_eq!(err.identifier(), ERF_ERROR_INVALID_INPUT.identifier);
+
+        let complex = ComplexTensor::new(vec![(1.0, 0.0)], vec![1, 1]).unwrap();
+        let err = erf_builtin(Value::ComplexTensor(complex)).expect_err("complex should error");
+        assert_eq!(err.identifier(), ERF_ERROR_INVALID_INPUT.identifier);
+
+        let err = erf_builtin(Value::from("1")).expect_err("string should error");
+        assert_eq!(err.identifier(), ERF_ERROR_INVALID_INPUT.identifier);
+
+        let sparse = SparseTensor::zeros(2, 2);
+        let err = erf_builtin(Value::SparseTensor(sparse)).expect_err("sparse should error");
+        assert_eq!(err.identifier(), ERF_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn erf_gpu_provider_roundtrip() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![-1.0, 0.0, 0.5, 1.0], vec![1, 4]).unwrap();
+            let view = HostTensorView {
+                data: tensor.as_f64_slice().expect("double input"),
+                shape: tensor.shape(),
+            };
+            let handle = provider
+                .upload(&view)
+                .expect("upload")
+                .with_provenance(GpuHandleProvenance::Explicit)
+                .expect("explicit view");
+            let result = erf_builtin(Value::GpuTensor(handle)).expect("erf");
+            let Value::GpuTensor(output) = &result else {
+                panic!("expected resident output, got {result:?}");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_provenance(output),
+                Some(GpuHandleProvenance::Explicit)
+            );
+            let gathered = test_support::gather(result).expect("gather");
+            assert_eq!(gathered.shape(), &[1, 4]);
+            for (got, input) in gathered
+                .materialize_f64()
+                .iter()
+                .zip(tensor.as_f64_slice().expect("double input"))
+            {
+                approx_eq(*got, erf_real_scalar(*input), 1e-15);
+            }
+        });
+    }
+
+    #[test]
+    fn erf_gpu_rejects_integer_and_logical_storage_before_provider_dispatch() {
+        test_support::with_test_provider(|provider| {
+            let integer = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
+            let integer_handle =
+                gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+            let integer_error =
+                erf_builtin(Value::GpuTensor(integer_handle)).expect_err("integer GPU input");
+            assert_eq!(
+                integer_error.identifier(),
+                ERF_ERROR_INVALID_INPUT.identifier
+            );
+
+            let logical_handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1],
+                    shape: &[1, 2],
+                })
+                .expect("logical upload");
+            let weak = logical_handle.downgrade();
+            provider.reset_telemetry();
+            let logical_error = erf_builtin(Value::GpuTensor(logical_handle.clone()))
+                .expect_err("logical GPU input");
+            assert_eq!(
+                logical_error.identifier(),
+                ERF_ERROR_INVALID_INPUT.identifier
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(runmat_accelerate_api::handle_is_logical(&logical_handle));
+            logical_handle
+                .allocation_lease()
+                .validate_live()
+                .expect("caller input survives rejection");
+            drop(logical_error);
+            logical_handle.release().expect("release logical caller");
+            assert!(weak.acquire().is_err());
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn erf_wgpu_matches_cpu_elementwise() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let tensor = Tensor::new(vec![-3.0, -1.0, -0.25, 0.0, 0.25, 1.0, 3.0], vec![1, 7]).unwrap();
+        let cpu = erf_tensor(tensor.clone()).expect("cpu erf");
+        let Some(provider) = runmat_accelerate_api::provider() else {
+            return;
+        };
+        let view = HostTensorView {
+            data: tensor.as_f64_slice().expect("double input"),
+            shape: tensor.shape(),
+        };
+        let handle = provider.upload(&view).expect("upload");
+        let gpu_value = block_on(erf_gpu(handle)).expect("gpu erf");
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        assert_eq!(gathered.shape(), cpu.shape());
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
+            runmat_accelerate_api::ProviderPrecision::F32 => 3e-5,
+        };
+        for (got, expected) in gathered
+            .materialize_f64()
+            .iter()
+            .zip(cpu.as_f64_slice().expect("double cpu result"))
+        {
+            approx_eq(*got, *expected, tol);
+        }
+        assert_eq!(gathered.materialize_f64()[3], 0.0);
+    }
+}

@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -18,6 +19,7 @@ fn split_list(value: &str) -> Vec<String> {
 }
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(runmat_generating_wasm_registry)");
     ensure_wasm_registry_state();
 
     // Only act when BLAS/LAPACK feature is enabled
@@ -58,21 +60,34 @@ fn main() {
     }
 
     // Explicit LAPACK hints
-    if let Ok(lapack_lib_dir) = env::var("LAPACK_LIB_DIR") {
+    println!("cargo:rerun-if-env-changed=LAPACK_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
+    let lapack_lib_dir = env::var("LAPACK_LIB_DIR").ok();
+    if let Some(ref lapack_lib_dir) = lapack_lib_dir {
         println!("cargo:rustc-link-search=native={lapack_lib_dir}");
-        println!("cargo:rerun-if-env-changed=LAPACK_LIB_DIR");
     }
+    // CLAPACK's lapack.lib depends on libf2c.lib. Probe only the selected
+    // LAPACK provider directory, never an unrelated vcpkg installation.
+    let f2c_lib_path = lapack_lib_dir
+        .as_ref()
+        .map(|dir| Path::new(dir).join("libf2c.lib"))
+        .or_else(|| vcpkg_lib_path.as_ref().map(|dir| dir.join("libf2c.lib")));
+    let lapack_has_f2c =
+        target_os == "windows" && f2c_lib_path.as_ref().is_some_and(|path| path.exists());
     if let Ok(lapack_libs) = env::var("LAPACK_LIBS") {
-        for lib in split_list(&lapack_libs) {
+        let libs = split_list(&lapack_libs);
+        for lib in &libs {
             println!("cargo:rustc-link-lib={lib}");
         }
-        println!("cargo:rerun-if-env-changed=LAPACK_LIBS");
+        if lapack_has_f2c
+            && libs.iter().any(|lib| lib == "lapack")
+            && !libs.iter().any(|lib| lib == "libf2c")
+        {
+            println!("cargo:rustc-link-lib=libf2c");
+        }
     } else if target_os == "windows" {
         println!("cargo:rustc-link-lib=lapack");
-        if vcpkg_lib_path
-            .as_ref()
-            .is_some_and(|path| path.join("libf2c.lib").exists())
-        {
+        if lapack_has_f2c {
             println!("cargo:rustc-link-lib=libf2c");
         }
         println!("cargo:rustc-link-lib=openblas");
@@ -107,7 +122,10 @@ fn main() {
 /// to re-run after every proc-macro write during generation, forcing repeated
 /// runmat-runtime recompiles.
 fn ensure_wasm_registry_state() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Cargo may reuse this compiled build script across worktrees sharing a
+    // target directory. Select the source root for this execution, not the
+    // root embedded when the build-script executable was compiled.
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let generating = matches!(env::var(WASM_REGISTRY_ENV), Ok(value) if value == "1");
     println!("cargo:rerun-if-env-changed={WASM_REGISTRY_ENV}");
@@ -129,6 +147,7 @@ fn ensure_wasm_registry_state() {
     let registry_path = manifest_dir.join(WASM_REGISTRY_RELATIVE_PATH);
 
     if generating {
+        println!("cargo:rustc-cfg=runmat_generating_wasm_registry");
         let out_path = env::var(WASM_REGISTRY_OUT_ENV).unwrap_or_else(|_| {
             panic!(
                 "{WASM_REGISTRY_ENV}=1 requires {WASM_REGISTRY_OUT_ENV}; use \
@@ -166,6 +185,11 @@ fn wasm_registry_stub(fingerprint: &str, build_configuration: &str) -> String {
          pub const REGISTRY_SOURCE_FINGERPRINT: &str = \"{fingerprint}\";\n\n\
          pub const REGISTRY_BUILD_CONFIGURATION: &str = \"{build_configuration}\";\n\
          pub const REGISTRY_ENTRY_COUNT: usize = 0;\n\n\
+         pub const REGISTRY_MANIFEST_DIGEST: &str = \"0000000000000000000000000000000000000000000000000000000000000000\";\n\
+         pub const REGISTRY_BUILTIN_COUNT: usize = 0;\n\
+         pub const REGISTRY_CONSTANT_COUNT: usize = 0;\n\
+         pub const REGISTRY_GPU_SPEC_COUNT: usize = 0;\n\
+         pub const REGISTRY_FUSION_SPEC_COUNT: usize = 0;\n\n\
          pub fn register_all() {{\n}}\n"
     )
 }
@@ -200,6 +224,49 @@ fn validate_wasm_registry(
     if entry_count == 0 || builtin_count == 0 {
         errors.push("registry contains no builtin helper registrations".to_string());
     }
+    let mut manifest_rows = registry
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("// @runmat-wasm-registration-v2\t"))
+        .collect::<Vec<_>>();
+    if manifest_rows.len() != entry_count {
+        errors.push(
+            "typed registration manifest does not exactly cover generated helpers".to_string(),
+        );
+    }
+    let unique_rows = manifest_rows
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    if unique_rows.len() != manifest_rows.len() {
+        errors.push("typed registration manifest contains duplicate rows".to_string());
+    }
+    let kinds = [
+        ("builtin", "REGISTRY_BUILTIN_COUNT"),
+        ("constant", "REGISTRY_CONSTANT_COUNT"),
+        ("gpu_spec", "REGISTRY_GPU_SPEC_COUNT"),
+        ("fusion_spec", "REGISTRY_FUSION_SPEC_COUNT"),
+    ];
+    for (kind, metadata) in kinds {
+        let count = manifest_rows
+            .iter()
+            .filter(|row| row.split('\t').nth(1) == Some(kind))
+            .count();
+        let expected = format!("pub const {metadata}: usize = {count};");
+        if !registry.contains(&expected) {
+            errors.push(format!(
+                "{kind} manifest count metadata does not match ({count})"
+            ));
+        }
+    }
+
+    manifest_rows.sort_unstable();
+    let manifest_json = wasm_manifest_json(&manifest_rows, &mut errors);
+    let digest = hex::encode(Sha256::digest(manifest_json.as_bytes()));
+    let expected_digest = format!("pub const REGISTRY_MANIFEST_DIGEST: &str = \"{digest}\";");
+    if !registry.contains(&expected_digest) {
+        errors.push("typed registration manifest digest metadata does not match".to_string());
+    }
 
     let expected_entry_count = format!("pub const REGISTRY_ENTRY_COUNT: usize = {entry_count};");
     if !registry.contains(&expected_entry_count) {
@@ -209,6 +276,40 @@ fn validate_wasm_registry(
     }
 
     errors
+}
+
+fn wasm_manifest_json(rows: &[&str], errors: &mut Vec<String>) -> String {
+    let mut values = Vec::with_capacity(rows.len());
+    for row in rows {
+        let fields = row.split('\t').collect::<Vec<_>>();
+        if fields.len() != 6 {
+            errors
+                .push("typed registration manifest row has invalid field cardinality".to_string());
+            continue;
+        }
+        let kind = fields[1];
+        if !matches!(kind, "builtin" | "constant" | "gpu_spec" | "fusion_spec") {
+            errors.push(format!(
+                "typed registration manifest has unknown kind {kind}"
+            ));
+        }
+        let variant = match fields[3] {
+            "none" if fields[4].is_empty() => "null".to_string(),
+            "some" => serde_json::to_string(fields[4]).expect("manifest field must serialize"),
+            _ => {
+                errors.push("typed registration manifest variant presence is invalid".to_string());
+                "null".to_string()
+            }
+        };
+        values.push(format!(
+            "{{\"kind\":{},\"declaration\":{},\"variant\":{},\"builtin_path\":{}}}",
+            serde_json::to_string(kind).expect("manifest kind must serialize"),
+            serde_json::to_string(fields[2]).expect("manifest declaration must serialize"),
+            variant,
+            serde_json::to_string(fields[5]).expect("manifest path must serialize"),
+        ));
+    }
+    format!("[{}]", values.join(","))
 }
 
 fn wasm_registry_build_configuration() -> String {
@@ -274,21 +375,14 @@ fn collect_registry_source_files(
 }
 
 fn wasm_registry_fingerprint(inputs: &[(String, PathBuf)]) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
+    let mut hash = Sha256::new();
     for (label, path) in inputs {
-        update_registry_hash(&mut hash, label.as_bytes());
-        update_registry_hash(&mut hash, &[0]);
+        hash.update((label.len() as u64).to_le_bytes());
+        hash.update(label.as_bytes());
         let bytes =
             fs::read(path).unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
-        update_registry_hash(&mut hash, &bytes);
-        update_registry_hash(&mut hash, &[0xff]);
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(&bytes);
     }
-    format!("fnv1a64-{hash:016x}")
-}
-
-fn update_registry_hash(hash: &mut u64, bytes: &[u8]) {
-    for byte in bytes {
-        *hash ^= u64::from(*byte);
-        *hash = hash.wrapping_mul(0x100000001b3);
-    }
+    format!("sha256:{}", hex::encode(hash.finalize()))
 }

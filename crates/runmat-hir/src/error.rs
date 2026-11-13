@@ -24,6 +24,15 @@ pub struct HirError {
     pub message: String,
     pub span: Option<Span>,
     pub identifier: Option<String>,
+    pub kind: HirErrorKind,
+}
+
+/// Structured source-lowering cause. Dynamic text consumers must not infer a
+/// failed conversion from the diagnostic's presentation string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirErrorKind {
+    General,
+    UndefinedVariable,
 }
 
 impl HirError {
@@ -32,6 +41,7 @@ impl HirError {
             message: message.into(),
             span: None,
             identifier: None,
+            kind: HirErrorKind::General,
         }
     }
 
@@ -42,6 +52,11 @@ impl HirError {
 
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.identifier = Some(identifier.into());
+        self
+    }
+
+    pub fn with_kind(mut self, kind: HirErrorKind) -> Self {
+        self.kind = kind;
         self
     }
 }

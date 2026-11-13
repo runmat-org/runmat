@@ -1,0 +1,217 @@
+{
+  "binding": {
+    "geometry": [
+      186,
+      211,
+      238,
+      14,
+      191,
+      22,
+      62,
+      248,
+      98,
+      43,
+      27,
+      55,
+      75,
+      112,
+      24,
+      231,
+      17,
+      184,
+      179,
+      111,
+      216,
+      167,
+      100,
+      213,
+      218,
+      233,
+      182,
+      6,
+      87,
+      233,
+      53,
+      49
+    ],
+    "implementation": [
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7,
+      7
+    ],
+    "request": [
+      3,
+      28,
+      133,
+      170,
+      193,
+      181,
+      211,
+      15,
+      37,
+      88,
+      247,
+      45,
+      131,
+      61,
+      44,
+      81,
+      177,
+      188,
+      196,
+      69,
+      56,
+      174,
+      116,
+      249,
+      16,
+      99,
+      30,
+      75,
+      186,
+      248,
+      58,
+      132
+    ]
+  },
+  "options": {
+    "constraints": {
+      "maximum_nodes": 10000,
+      "maximum_segments": 10000,
+      "maximum_facets": 10000,
+      "cancellation_check_interval": 32
+    },
+    "carving": {
+      "facet_recovery": {
+        "segment_recovery": {
+          "constraints": {
+            "maximum_nodes": 10000,
+            "maximum_segments": 10000,
+            "maximum_facets": 10000,
+            "cancellation_check_interval": 32
+          },
+          "insertion": {
+            "topology": {
+              "maximum_nodes": 10000,
+              "maximum_tetrahedra": 10000,
+              "cancellation_check_interval": 1
+            },
+            "maximum_protected_faces": 10000,
+            "maximum_cavity_tetrahedra": 10000,
+            "maximum_cavity_boundary_faces": 10000,
+            "maximum_predicate_evaluations": 1000000
+          },
+          "maximum_steiner_nodes": 10000,
+          "maximum_recovery_steps": 1000000,
+          "maximum_search_steps": 1000000,
+          "maximum_flip_attempts": 1000000,
+          "maximum_split_depth": 32,
+          "maximum_recovery_passes": 64
+        },
+        "maximum_search_steps": 1000000,
+        "maximum_flip_attempts": 1000000,
+        "maximum_support_steps": 1000000,
+        "maximum_pending_support_triangles": 100000,
+        "maximum_cavity_steps": 1000000,
+        "maximum_cavity_tetrahedra": 10000,
+        "maximum_cavity_nodes": 10000,
+        "maximum_cavity_boundary_faces": 10000,
+        "maximum_cavity_apex_attempts": 20000,
+        "maximum_cavity_candidate_tetrahedra": 10000,
+        "maximum_cavity_candidate_evaluations": 1000000,
+        "maximum_cavity_exact_cover_attempts": 1000000,
+        "maximum_cavity_expansion_rounds": 32,
+        "maximum_cavity_steiner_nodes": 64,
+        "maximum_cavity_steiner_candidates": 4096,
+        "maximum_cavity_steiner_candidate_evaluations_per_round": 1000000
+      },
+      "maximum_flood_steps": 1000000
+    },
+    "provenance": {
+      "maximum_node_bindings": 10000,
+      "maximum_segment_bindings": 10000,
+      "maximum_facet_bindings": 10000,
+      "cancellation_check_interval": 32
+    },
+    "quality": {
+      "maximum_nodes": 10000,
+      "maximum_tetrahedra": 10000,
+      "maximum_metric_edge_length": 2.0,
+      "maximum_radius_edge_ratio": 10.0,
+      "minimum_metric_scaled_jacobian": 0.01,
+      "cancellation_check_interval": 32,
+      "provenance": {
+        "maximum_node_bindings": 10000,
+        "maximum_segment_bindings": 10000,
+        "maximum_facet_bindings": 10000,
+        "cancellation_check_interval": 32
+      }
+    },
+    "refinement": {
+      "step": {
+        "candidate": {
+          "maximum_candidate_evaluations": 1000000,
+          "cancellation_check_interval": 1
+        },
+        "insertion": {
+          "topology": {
+            "maximum_nodes": 10000,
+            "maximum_tetrahedra": 10000,
+            "cancellation_check_interval": 1
+          },
+          "maximum_protected_faces": 10000,
+          "maximum_cavity_tetrahedra": 10000,
+          "maximum_cavity_boundary_faces": 10000,
+          "maximum_predicate_evaluations": 1000000
+        }
+      },
+      "maximum_insertions": 10000
+    },
+    "sliver": {
+      "maximum_passes": 1000000,
+      "maximum_candidate_evaluations_per_pass": 2048,
+      "maximum_compound_reconnections_per_insertion": 4,
+      "cancellation_check_interval": 32,
+      "insertion": {
+        "topology": {
+          "maximum_nodes": 10000,
+          "maximum_tetrahedra": 10000,
+          "cancellation_check_interval": 1
+        },
+        "maximum_protected_faces": 10000,
+        "maximum_cavity_tetrahedra": 10000,
+        "maximum_cavity_boundary_faces": 10000,
+        "maximum_predicate_evaluations": 1000000
+      }
+    }
+  }
+}

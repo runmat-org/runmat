@@ -1,7 +1,14 @@
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
-use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::workspace::{
+    WorkspaceCaptureRequest, WorkspacePublicationOutcome, WorkspacePublicationRequest,
+    WorkspaceSnapshot,
+};
+use crate::{
+    AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
+    PublicationDurability,
+};
 use async_trait::async_trait;
 use chrono::DateTime;
 use crossbeam_utils::thread;
@@ -66,6 +73,7 @@ impl Default for RemoteFsConfig {
     }
 }
 
+#[derive(Clone)]
 struct RemoteInner {
     client: Client,
     base: Url,
@@ -79,6 +87,8 @@ struct RemoteInner {
     retry_max_attempts: usize,
     retry_base_delay: Duration,
     retry_max_delay: Duration,
+    pinned_version: Option<String>,
+    pinned_snapshot: Option<String>,
 }
 
 struct FsWriteChunkRequest<'a> {
@@ -99,6 +109,7 @@ struct UploadSessionCompleteParams<'a> {
     content_sha256: &'a str,
     chunk_count: usize,
     create_new: bool,
+    expected_version_id: Option<&'a str>,
 }
 
 struct MultipartCompleteParams {
@@ -119,7 +130,12 @@ impl RemoteInner {
                 "RemoteFsConfig.base_url must be provided",
             ));
         }
-        let base = Url::parse(&config.base_url).map_err(map_url_err)?;
+        let mut base = Url::parse(&config.base_url).map_err(map_url_err)?;
+        // RemoteFsConfig names a project directory. Url::join would otherwise
+        // replace the final project-id segment when the input omits `/`.
+        if !base.path().ends_with('/') {
+            base.set_path(&format!("{}/", base.path()));
+        }
         let client = Client::builder()
             .timeout(config.timeout)
             .user_agent(USER_AGENT.clone())
@@ -138,6 +154,8 @@ impl RemoteInner {
             retry_max_attempts: config.retry_max_attempts.max(1),
             retry_base_delay: config.retry_base_delay,
             retry_max_delay: config.retry_max_delay,
+            pinned_version: None,
+            pinned_snapshot: None,
         })
     }
 
@@ -193,6 +211,39 @@ impl RemoteInner {
         Err(io::Error::other("request retries exhausted"))
     }
 
+    fn workspace_request<I: Serialize, O: serde::de::DeserializeOwned>(
+        &self,
+        route: &str,
+        request: &I,
+    ) -> io::Result<O> {
+        let bytes = super::workspace_wire::encode(request)?;
+        let response = handle_error(
+            self.request(reqwest::Method::POST, route, &[])
+                .header(reqwest::header::CONTENT_TYPE, "application/cbor")
+                .header(reqwest::header::ACCEPT, "application/cbor")
+                .body(bytes)
+                .send()
+                .map_err(map_http_err)?,
+        )?;
+        if response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            != Some("application/cbor")
+        {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "invalid workspace response content type",
+            ));
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(super::workspace_wire::MAX_WIRE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        super::workspace_wire::decode(&bytes)
+    }
+
     fn endpoint(&self, route: &str) -> Url {
         self.base
             .join(route.trim_start_matches('/'))
@@ -210,6 +261,14 @@ impl RemoteInner {
             let mut pairs = url.query_pairs_mut();
             for (k, v) in query {
                 pairs.append_pair(k, v);
+            }
+            if method == reqwest::Method::GET && matches!(route, "/fs/read" | "/fs/download-url") {
+                if let Some(version) = &self.pinned_version {
+                    pairs.append_pair("versionId", version);
+                }
+                if let Some(snapshot) = &self.pinned_snapshot {
+                    pairs.append_pair("snapshotId", snapshot);
+                }
             }
         }
         let mut builder = self.client.request(method, url);
@@ -348,6 +407,7 @@ impl RemoteInner {
         path: &str,
         size_bytes: u64,
         content_sha256: &str,
+        create_new: bool,
     ) -> io::Result<UploadSessionStartResponse> {
         self.post_json(
             "/fs/upload-session/start",
@@ -356,6 +416,7 @@ impl RemoteInner {
                 size_bytes: size_bytes as i64,
                 content_type: None,
                 content_sha256: content_sha256.to_string(),
+                create_new,
             },
         )
     }
@@ -376,8 +437,15 @@ impl RemoteInner {
         )
     }
 
-    fn upload_session_complete(&self, params: UploadSessionCompleteParams<'_>) -> io::Result<()> {
-        self.post_empty(
+    fn upload_session_complete(
+        &self,
+        params: UploadSessionCompleteParams<'_>,
+    ) -> io::Result<Option<String>> {
+        #[derive(Deserialize)]
+        struct Commit {
+            version_id: Option<String>,
+        }
+        let response: Commit = self.post_json(
             "/fs/upload-session/complete",
             &UploadSessionCompleteRequest {
                 path: params.path.to_string(),
@@ -388,8 +456,10 @@ impl RemoteInner {
                 chunk_count: params.chunk_count,
                 create_new: params.create_new,
                 hash: None,
+                expected_version_id: params.expected_version_id.map(str::to_owned),
             },
-        )
+        )?;
+        Ok(response.version_id)
     }
 
     fn multipart_presign_part(
@@ -801,7 +871,29 @@ impl RemoteFsProvider {
     }
 
     fn upload_multipart_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
-        if data.is_empty() {
+        self.upload_multipart_file_with_fallback(path, data, create_new, true)
+    }
+
+    fn upload_multipart_file_with_fallback(
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+        allow_legacy_fallback: bool,
+    ) -> io::Result<()> {
+        self.upload_versioned_file(path, data, create_new, allow_legacy_fallback, None)
+            .map(|_| ())
+    }
+
+    fn upload_versioned_file(
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+        allow_legacy_fallback: bool,
+        expected_version_id: Option<&str>,
+    ) -> io::Result<Option<String>> {
+        if data.is_empty() && allow_legacy_fallback {
             self.inner.upload_chunk(FsWriteChunkRequest {
                 path,
                 offset: 0,
@@ -811,20 +903,29 @@ impl RemoteFsProvider {
                 data,
                 hash: None,
             })?;
-            return Ok(());
+            return Ok(None);
         }
         let content_sha256 = sha256_hex(data);
-        let session =
-            match self
-                .inner
-                .upload_session_start(path, data.len() as u64, &content_sha256)
-            {
-                Ok(session) => session,
-                Err(err) if err.kind() == ErrorKind::NotFound => {
-                    return self.upload_multipart_file_legacy(path, data, create_new);
-                }
-                Err(err) => return Err(err),
-            };
+        let session = match self.inner.upload_session_start(
+            path,
+            data.len() as u64,
+            &content_sha256,
+            create_new,
+        ) {
+            Ok(session) => session,
+            Err(err) if err.kind() == ErrorKind::NotFound && allow_legacy_fallback => {
+                return self
+                    .upload_multipart_file_legacy(path, data, create_new)
+                    .map(|_| None);
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                return Err(io::Error::new(
+                    ErrorKind::Unsupported,
+                    "remote atomic publication requires upload-session support",
+                ));
+            }
+            Err(err) => return Err(err),
+        };
         let chunk_size = (session.chunk_size_bytes as usize).max(1);
         let mut tasks = Vec::new();
         let mut offset = 0usize;
@@ -914,8 +1015,8 @@ impl RemoteFsProvider {
                 content_sha256: &content_sha256,
                 chunk_count: descriptors.len(),
                 create_new,
-            })?;
-        Ok(())
+                expected_version_id,
+            })
     }
 
     fn upload_multipart_file_legacy(
@@ -1052,6 +1153,13 @@ struct UploadTask {
 
 #[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
+    fn supports_workspace_transactions(&self) -> bool {
+        true
+    }
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::VirtualRooted
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/"))
     }
@@ -1125,10 +1233,96 @@ impl FsProvider for RemoteFsProvider {
         }
     }
 
+    async fn read_version(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        let mut inner = self.inner.as_ref().clone();
+        inner.pinned_version = Some(version.to_owned());
+        inner.pinned_snapshot = (!snapshot.is_empty()).then(|| snapshot.to_owned());
+        // The read endpoint also reconstructs sharded file versions. Do not
+        // bypass it by directly downloading a large manifest object's JSON.
+        inner.direct_read_threshold_bytes = u64::MAX;
+        let pinned = Self {
+            inner: Arc::new(inner),
+        };
+        let bytes = if size == 0 {
+            pinned.inner.download_chunk(&self.normalize(path), 0, 1)?
+        } else {
+            pinned.download_raw_file(&self.normalize(path), size)?
+        };
+        if bytes.len() as u64 != size {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "immutable version length mismatch",
+            ));
+        }
+        Ok(bytes)
+    }
+
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.ensure_parent_exists(path)?;
         self.upload_entire_file(&normalized, data, false)
+    }
+
+    async fn capture_workspace(
+        &self,
+        request: WorkspaceCaptureRequest,
+    ) -> io::Result<WorkspaceSnapshot> {
+        self.inner
+            .workspace_request("/collaboration/workspace/capture", &request)
+    }
+
+    async fn lookup_workspace_publication(
+        &self,
+        request: &WorkspacePublicationRequest,
+    ) -> io::Result<Option<WorkspacePublicationOutcome>> {
+        self.inner
+            .workspace_request("/collaboration/workspace/lookup", request)
+    }
+
+    async fn publish_workspace(
+        &self,
+        request: WorkspacePublicationRequest,
+    ) -> io::Result<WorkspacePublicationOutcome> {
+        self.inner
+            .workspace_request("/collaboration/workspace/publish", &request)
+    }
+
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String> {
+        self.upload_versioned_file(
+            &self.normalize(path),
+            data,
+            expected.is_none(),
+            false,
+            expected,
+        )?
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                "conditional publication returned no version",
+            )
+        })
+    }
+
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
+        self.inner.delete_empty(
+            "/fs/file",
+            &[
+                ("path", self.normalize(path)),
+                ("expectedVersionId", expected.to_owned()),
+            ],
+        )
     }
 
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
@@ -1223,6 +1417,19 @@ impl FsProvider for RemoteFsProvider {
                 readonly,
             },
         )
+    }
+
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        let normalized = self.normalize(path);
+        match self.upload_multipart_file_with_fallback(&normalized, bytes, true, false) {
+            Ok(()) => Ok(AtomicCreateResult::Published {
+                durability: PublicationDurability::AtomicVisibility,
+            }),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                self.read(path).await.map(AtomicCreateResult::Existing)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn data_manifest_descriptor(
@@ -1466,6 +1673,8 @@ struct UploadSessionStartRequest {
     size_bytes: i64,
     content_type: Option<String>,
     content_sha256: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    create_new: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1519,6 +1728,8 @@ struct UploadSessionCompleteRequest {
     chunk_count: usize,
     #[serde(default, skip_serializing_if = "is_false")]
     create_new: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_version_id: Option<String>,
     hash: Option<String>,
 }
 
@@ -1689,6 +1900,7 @@ mod tests {
         base_url: Arc<Mutex<Option<String>>>,
         upload_sessions: Arc<Mutex<HashMap<String, UploadSessionTestState>>>,
         omit_last_chunk_target: bool,
+        versions: Arc<Mutex<HashMap<String, String>>>,
     }
 
     impl Harness {
@@ -1705,6 +1917,7 @@ mod tests {
                 base_url: Arc::new(Mutex::new(None)),
                 upload_sessions: Arc::new(Mutex::new(HashMap::new())),
                 omit_last_chunk_target,
+                versions: Arc::new(Mutex::new(HashMap::new())),
             }
         }
 
@@ -1738,6 +1951,8 @@ mod tests {
     #[derive(Clone)]
     struct UploadSessionTestState {
         path: String,
+        size_bytes: i64,
+        create_new: bool,
         chunk_count: usize,
     }
 
@@ -1750,6 +1965,8 @@ mod tests {
         #[serde(rename = "createNew")]
         create_new: Option<String>,
         recursive: Option<String>,
+        #[serde(rename = "expectedVersionId")]
+        expected_version_id: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -1900,6 +2117,8 @@ mod tests {
                 session_id.clone(),
                 UploadSessionTestState {
                     path: req.path,
+                    size_bytes: req.size_bytes,
+                    create_new: req.create_new,
                     chunk_count: 0,
                 },
             );
@@ -2004,13 +2223,19 @@ mod tests {
     async fn upload_session_complete_handler(
         State(harness): State<Harness>,
         Json(req): Json<UploadSessionCompleteRequest>,
-    ) -> Result<(), StatusCode> {
+    ) -> Result<Json<serde_json::Value>, StatusCode> {
         let state = harness
             .upload_sessions
             .lock()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .remove(&req.session_id)
             .ok_or(StatusCode::NOT_FOUND)?;
+        if state.path != req.path
+            || state.size_bytes != req.size_bytes
+            || state.create_new != req.create_new
+        {
+            return Err(StatusCode::BAD_REQUEST);
+        }
         let mut data = Vec::new();
         for chunk_index in 0..state.chunk_count {
             let chunk_path = harness.resolve(&format!(
@@ -2022,6 +2247,12 @@ mod tests {
         }
         if sha256_hex(&data) != req.content_sha256 {
             return Err(StatusCode::BAD_REQUEST);
+        }
+        let mut versions = harness.versions.lock().unwrap();
+        if let Some(expected) = &req.expected_version_id {
+            if versions.get(&req.path) != Some(expected) {
+                return Err(StatusCode::CONFLICT);
+            }
         }
         let target_path = harness.resolve(&state.path);
         if let Some(parent) = target_path.parent() {
@@ -2044,7 +2275,9 @@ mod tests {
         } else {
             std::fs::write(target_path, data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         }
-        Ok(())
+        let version = uuid::Uuid::new_v4().to_string();
+        versions.insert(req.path, version.clone());
+        Ok(Json(serde_json::json!({ "version_id": version })))
     }
 
     async fn mkdir_handler(
@@ -2064,6 +2297,13 @@ mod tests {
         State(harness): State<Harness>,
         Query(params): Query<PathParams>,
     ) -> Result<(), StatusCode> {
+        let mut versions = harness.versions.lock().unwrap();
+        if let Some(expected) = &params.expected_version_id {
+            if versions.get(&params.path) != Some(expected) {
+                return Err(StatusCode::CONFLICT);
+            }
+        }
+        versions.remove(&params.path);
         std::fs::remove_file(harness.resolve(&params.path)).map_err(|_| StatusCode::NOT_FOUND)?;
         Ok(())
     }
@@ -2432,6 +2672,71 @@ mod tests {
             std::fs::read(harness.resolve("/reports/session.bin")).expect("read winner"),
             b"winner"
         );
+    }
+
+    #[test]
+    fn remote_conditional_publication_tracks_versions_without_falling_back() {
+        let (base, harness, _rt) = spawn_server();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            ..RemoteFsConfig::default()
+        })
+        .unwrap();
+        let path = Path::new("/output.bin");
+        let first = executor::block_on(provider.publish_output(path, b"first", None)).unwrap();
+        let second =
+            executor::block_on(provider.publish_output(path, b"second", Some(&first))).unwrap();
+        assert_ne!(first, second);
+        assert!(executor::block_on(provider.publish_output(path, b"stale", Some(&first))).is_err());
+        assert_eq!(
+            std::fs::read(harness.resolve("/output.bin")).unwrap(),
+            b"second"
+        );
+        assert!(executor::block_on(provider.remove_output(path, &first)).is_err());
+        executor::block_on(provider.remove_output(path, &second)).unwrap();
+        assert!(!harness.resolve("/output.bin").exists());
+    }
+
+    #[test]
+    fn remote_atomic_publication_returns_the_complete_winner() {
+        let (base, harness, _rt) = spawn_server();
+        let provider = Arc::new(
+            RemoteFsProvider::new(RemoteFsConfig {
+                base_url: base,
+                auth_token: None,
+                chunk_bytes: 1024,
+                parallel_requests: 2,
+                direct_read_threshold_bytes: u64::MAX,
+                direct_write_threshold_bytes: 1024,
+                timeout: Duration::from_secs(30),
+                ..RemoteFsConfig::default()
+            })
+            .expect("provider"),
+        );
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let handles = [b"first".to_vec(), b"second".to_vec()].map(|payload| {
+            let provider = Arc::clone(&provider);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                executor::block_on(
+                    provider.atomic_create_new(Path::new("/reports/atomic.bin"), &payload),
+                )
+            })
+        });
+        let outcomes = handles.map(|handle| handle.join().unwrap().unwrap());
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, AtomicCreateResult::Published { .. }))
+                .count(),
+            1
+        );
+        let winning = std::fs::read(harness.resolve("/reports/atomic.bin")).unwrap();
+        assert!(winning == b"first" || winning == b"second");
+        assert!(outcomes.iter().any(
+            |outcome| matches!(outcome, AtomicCreateResult::Existing(bytes) if bytes == &winning)
+        ));
     }
 
     #[test]

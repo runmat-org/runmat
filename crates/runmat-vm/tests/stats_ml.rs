@@ -1,4 +1,4 @@
-use runmat_value::{LogicalArray, Tensor, Value};
+use runmat_value::{LogicalArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -11,10 +11,7 @@ fn has_num(vars: &[Value], expected: f64) -> bool {
 
 fn has_tensor_shape(vars: &[Value], shape: &[usize]) -> bool {
     vars.iter().any(|value| match value {
-        Value::Tensor(Tensor {
-            shape: tensor_shape,
-            ..
-        }) => tensor_shape == shape,
+        Value::Tensor(tensor) => tensor.shape() == shape,
         _ => false,
     })
 }
@@ -23,7 +20,7 @@ fn has_tensor_data(vars: &[Value], shape: &[usize], expected: &[f64]) -> bool {
     vars.iter().any(|value| match value {
         Value::Tensor(tensor) => {
             let data = tensor.materialize_f64();
-            tensor.shape == shape
+            tensor.shape() == shape
                 && data.len() == expected.len()
                 && data
                     .iter()
@@ -275,6 +272,19 @@ fn classify_surface_executes_from_scripts() {
     assert!(has_num(&vars, 1.0));
     assert!(has_num(&vars, 2.0));
     assert!(has_num(&vars, 0.0));
+    let coeff = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::StructArray(array) if array.shape() == [2, 2] => Some(array),
+            _ => None,
+        })
+        .expect("classify must return a 2-by-2 coefficient structure array");
+    let boundary = coeff.get_linear(2).expect("coeff(1,2)");
+    assert!(boundary.fields.contains_key("type"));
+    assert!(boundary.fields.contains_key("name1"));
+    assert!(boundary.fields.contains_key("name2"));
+    assert!(boundary.fields.contains_key("const"));
+    assert!(boundary.fields.contains_key("linear"));
 }
 
 #[test]
@@ -403,6 +413,23 @@ fn regress_surface_executes_from_scripts() {
 }
 
 #[test]
+fn nlparci_jacobian_and_covariance_forms_execute_from_scripts() {
+    let vars = execute_source(
+        "beta = [1; 2]; r = [1; -1; 1; -1]; J = [1 -1; 1 -1; 1 1; 1 1]; CovB = [0.5 0; 0 0.5]; ciJ = nlparci(beta,r,'Jacobian',J); ciC = nlparci(beta,r,'Covar',CovB,'Alpha',0.05); difference = max(abs(ciJ(:)-ciC(:)));",
+    )
+    .expect("nlparci source forms");
+    let half_width = 4.302_652_729_749_462 * 0.5_f64.sqrt();
+    let expected = [
+        1.0 - half_width,
+        2.0 - half_width,
+        1.0 + half_width,
+        2.0 + half_width,
+    ];
+    assert!(has_tensor_data(&vars, &[2, 2], &expected));
+    assert!(has_num(&vars, 0.0));
+}
+
+#[test]
 fn lscov_surface_executes_from_scripts() {
     let vars = execute_source(
         "A = [1 0; 1 1; 1 2]; B = [1; 2; 10]; V = [1; 1; 100]; [x,stdx,mse,S] = lscov(A, B, V, 'orth'); intercept = x(1); slope = x(2);",
@@ -499,7 +526,7 @@ fn bootstrp_integer_extensions_preserve_exact_compiled_callback_output() {
         matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 1]
+                if tensor.shape() == vec![2, 1]
                     && tensor.integer_storage()
                         == Some(&runmat_value::IntegerStorage::U64(vec![
                             9_007_199_254_740_993,
@@ -508,7 +535,7 @@ fn bootstrp_integer_extensions_preserve_exact_compiled_callback_output() {
         )
     }));
     assert!(vars.iter().any(
-        |value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![1.0; 4])
+        |value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.materialize_f64() == vec![1.0; 4])
     ));
 }
 

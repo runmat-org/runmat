@@ -10,8 +10,8 @@ use std::sync::{
 };
 
 use runmat_geometry_core::{
-    GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
-    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
+    GeometryAsset, GeometrySource, LengthUnit, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
 };
 use thiserror::Error;
 
@@ -20,7 +20,7 @@ use crate::{
     sniff::{detect_geometry_format, GeometryFormat},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LabeledSubshapeRemapConflictKind {
     Deleted,
     Split,
@@ -30,7 +30,7 @@ pub enum LabeledSubshapeRemapConflictKind {
     UnsupportedKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LabeledSubshapeRemapConflict {
     pub kind: LabeledSubshapeRemapConflictKind,
     pub label_entries: Vec<String>,
@@ -38,16 +38,19 @@ pub struct LabeledSubshapeRemapConflict {
     pub candidate_topology_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GeometryImportOptions {
     pub max_triangles: Option<u64>,
     pub budget_policy: GeometryImportBudgetPolicy,
-    pub units: UnitSystem,
+    pub units: LengthUnit,
+    #[serde(default)]
+    pub source_units: Option<LengthUnit>,
     pub tessellation_profile: TessellationProfile,
     pub relative_deflection: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GeometryImportBudgetPolicy {
     Strict,
     Truncate,
@@ -58,7 +61,8 @@ impl Default for GeometryImportOptions {
         Self {
             max_triangles: Some(16_000_000),
             budget_policy: GeometryImportBudgetPolicy::Strict,
-            units: UnitSystem::Meter,
+            units: LengthUnit::Meter,
+            source_units: None,
             tessellation_profile: TessellationProfile::default(),
             relative_deflection: false,
         }
@@ -67,8 +71,10 @@ impl Default for GeometryImportOptions {
 
 #[derive(Clone, Default)]
 pub struct GeometryImportContext {
-    cancellation: Option<Arc<AtomicBool>>,
+    cancellation: Option<CancellationProbe>,
 }
+
+pub(crate) type CancellationProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 impl std::fmt::Debug for GeometryImportContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -84,15 +90,21 @@ impl GeometryImportContext {
     }
 
     pub fn with_cancellation(cancellation: Arc<AtomicBool>) -> Self {
+        Self::with_cancellation_probe(move || cancellation.load(Ordering::Relaxed))
+    }
+
+    /// Cooperative synchronous import boundary. The probe does not register
+    /// wakeups or interrupt a noncooperative native geometry operation.
+    pub fn with_cancellation_probe(probe: impl Fn() -> bool + Send + Sync + 'static) -> Self {
         Self {
-            cancellation: Some(cancellation),
+            cancellation: Some(Arc::new(probe)),
         }
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
-            .map(|flag| flag.load(Ordering::Relaxed))
+            .map(|is_cancelled| is_cancelled())
             .unwrap_or(false)
     }
 
@@ -104,13 +116,17 @@ impl GeometryImportContext {
         }
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
-    pub(crate) fn cancellation_flag(&self) -> Option<Arc<AtomicBool>> {
+    #[cfg(all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ))]
+    pub(crate) fn cancellation_probe(&self) -> Option<CancellationProbe> {
         self.cancellation.clone()
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", content = "detail", rename_all = "snake_case")]
 pub enum GeometryImportError {
     #[error("GEOMETRY_FORMAT_UNSUPPORTED: unsupported geometry format")]
     UnsupportedFormat,
@@ -138,6 +154,10 @@ pub enum GeometryImportError {
     },
     #[error("GEOMETRY_IMPORT_OPTIONS_INVALID: {0}")]
     InvalidOptions(String),
+    /// Authored units cannot be applied because the file does not declare a single length unit
+    /// (none, or several different ones).
+    #[error("GEOMETRY_UNITS_UNRESOLVED: {0}")]
+    UnresolvedUnits(String),
     #[error("GEOMETRY_IMPORT_CANCELLED: geometry import cancelled")]
     Cancelled,
 }
@@ -156,12 +176,50 @@ pub fn import_geometry_with_context(
     options: GeometryImportOptions,
     context: &GeometryImportContext,
 ) -> Result<ImportResult, GeometryImportError> {
+    import_geometry_with_selection_projection(path, bytes, options, context, None)
+}
+
+/// Tessellate an already admitted exact geometry without assigning it a second identity.
+/// The supplied topology and source-face join must come from the same materialization.
+pub fn import_materialized_geometry_preview(
+    path: &str,
+    bytes: &[u8],
+    options: GeometryImportOptions,
+    context: &GeometryImportContext,
+    topology: &runmat_geometry_core::ExactBRepTopology,
+    source_faces: &std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+) -> Result<ImportResult, GeometryImportError> {
+    let selection = crate::ExactSelectionProjection::new(topology, source_faces);
+    import_geometry_with_selection_projection(path, bytes, options, context, Some(&selection))
+}
+
+fn import_geometry_with_selection_projection(
+    path: &str,
+    bytes: &[u8],
+    options: GeometryImportOptions,
+    context: &GeometryImportContext,
+    exact_selection: Option<&crate::ExactSelectionProjection>,
+) -> Result<ImportResult, GeometryImportError> {
     context.check_cancelled()?;
     let format = detect_geometry_format(path, bytes);
+    let unit_evidence = crate::source_unit_evidence(path, bytes)
+        .resolve_fallback(options.source_units, "explicit preview-import source units");
+    let target_units = options.units;
     let result = match format {
         GeometryFormat::Stl => stl::import_stl(path, bytes, options, context),
         GeometryFormat::Step | GeometryFormat::Iges | GeometryFormat::Brep => {
-            cad::import_cad(path, bytes, format, options, context)
+            #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
+            if let Some(imported) =
+                crate::occt::import_geometry_host(path, bytes, &options, context)?
+            {
+                if imported.asset.source.unit_evidence != unit_evidence {
+                    return Err(GeometryImportError::InvalidGeometry(
+                        "OCCT host source-unit evidence differs from the input file".into(),
+                    ));
+                }
+                return Ok(imported);
+            }
+            cad::import_cad(path, bytes, format, options, context, exact_selection)
         }
         GeometryFormat::Obj => obj::import_obj(path, bytes, options, context),
         GeometryFormat::Ply => ply::import_ply(path, bytes, options, context),
@@ -169,7 +227,40 @@ pub fn import_geometry_with_context(
         _ => Err(GeometryImportError::UnsupportedFormat),
     };
     context.check_cancelled()?;
-    result
+    result.and_then(|mut imported| {
+        // Faceted readers return raw source coordinates. Convert only when the
+        // source scale is known; unitless previews remain explicitly unresolved.
+        if matches!(
+            format,
+            GeometryFormat::Stl | GeometryFormat::Obj | GeometryFormat::Ply | GeometryFormat::Gltf
+        ) {
+            if let Some(source_unit) = unit_evidence.uniform_unit() {
+                let scale = source_unit.meters_per_unit() / target_units.meters_per_unit();
+                if !scale.is_finite() || scale <= 0.0 {
+                    return Err(GeometryImportError::InvalidOptions(
+                        "source-to-preview coordinate scale is invalid".into(),
+                    ));
+                }
+                for mesh in &mut imported.asset.surface_meshes {
+                    for (index, vertex) in mesh.vertices.iter_mut().enumerate() {
+                        check_cancelled_periodic(context, index)?;
+                        for component in vertex {
+                            *component *= scale;
+                        }
+                    }
+                }
+            }
+        }
+        imported.asset.coordinate_units = unit_evidence
+            .physical_scale_resolved()
+            .then(|| runmat_geometry_core::physical::CoordinateUnits::new(target_units));
+        imported.asset.source.unit_evidence = unit_evidence;
+        imported
+            .asset
+            .validate()
+            .map_err(|message| GeometryImportError::InvalidGeometry(message.into()))?;
+        Ok(imported)
+    })
 }
 
 pub(crate) fn check_cancelled_periodic(
@@ -185,7 +276,7 @@ pub(crate) fn check_cancelled_periodic(
 pub(crate) struct BuildAssetInput<'a> {
     pub path: &'a str,
     pub importer_version: &'a str,
-    pub units: UnitSystem,
+    pub units: LengthUnit,
     pub tessellation_profile: TessellationProfile,
     pub vertex_count: u64,
     pub element_count: u64,
@@ -209,6 +300,7 @@ pub(crate) fn build_asset(input: BuildAssetInput<'_>) -> GeometryAsset {
     GeometryAsset {
         geometry_id: format!("geo:{}", path),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: path.to_string(),
             sha256: String::new(),
             importer_version: importer_version.to_string(),
@@ -217,10 +309,11 @@ pub(crate) fn build_asset(input: BuildAssetInput<'_>) -> GeometryAsset {
             kind: SourceGeometryKind::Mesh,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile,
-        units,
+        coordinate_units: Some(runmat_geometry_core::physical::CoordinateUnits::new(units)),
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "mesh_1".to_string(),
@@ -262,7 +355,7 @@ pub(crate) fn default_surface_regions(
     let region_id = "region_default".to_string();
     let regions = vec![Region {
         region_id: region_id.clone(),
-        name: "Default Region".to_string(),
+        name: "Default Region".into(),
         tag: Some("mesh_default".to_string()),
         cad_ownership: None,
     }];
@@ -374,4 +467,20 @@ pub(crate) fn parse_f64(value: &str) -> Result<f64, GeometryImportError> {
 
 pub(crate) fn is_degenerate_triangle(vertices: &[[f64; 3]; 3]) -> bool {
     vertices[0] == vertices[1] || vertices[1] == vertices[2] || vertices[0] == vertices[2]
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+    #[test]
+    fn import_control_follows_its_live_caller_probe() {
+        let caller = Arc::new(AtomicBool::new(false));
+        let context = GeometryImportContext::with_cancellation(caller.clone());
+        assert!(!context.is_cancelled());
+        caller.store(true, Ordering::Release);
+        assert!(matches!(
+            context.check_cancelled(),
+            Err(GeometryImportError::Cancelled)
+        ));
+    }
 }

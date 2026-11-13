@@ -24,6 +24,10 @@ impl TestId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub fn validate(&self) -> Result<(), crate::TestDomainError> {
+        algorithm::validate_current(&self.0, "test_id")
+    }
 }
 
 #[derive(Clone, Debug)]

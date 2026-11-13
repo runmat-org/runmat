@@ -33,14 +33,18 @@ pub(super) fn scaled_worst_face_star_quality(
         (face_points[0][2] + face_points[1][2] + face_points[2][2]) / 3.0,
     ];
     let direction = [
-        node.coordinates_m[0] - face_centroid[0],
-        node.coordinates_m[1] - face_centroid[1],
-        node.coordinates_m[2] - face_centroid[2],
+        node.coordinates_m.canonical_value()[0] - face_centroid[0],
+        node.coordinates_m.canonical_value()[1] - face_centroid[1],
+        node.coordinates_m.canonical_value()[2] - face_centroid[2],
     ];
     let distance_squared =
         direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2];
     if !distance_squared.is_finite()
-        || distance_squared <= MeshingTolerance::default().absolute_m.powi(2)
+        || distance_squared
+            <= MeshingTolerance::default()
+                .absolute_m
+                .canonical_value()
+                .powi(2)
     {
         return None;
     }
@@ -64,7 +68,10 @@ pub(super) fn scaled_worst_face_star_quality(
         candidate_count += 1;
         let adjusted = ConstrainedCavityNode {
             node_id: node.node_id,
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         };
         let Ok(Ok(refill)) =
             star_refill_candidate_with_rejection_reason(cavity, boundary_nodes, adjusted, options)

@@ -4,34 +4,41 @@
 //! ordering and index outputs. GPU tensors use typed host fallback and their
 //! public outputs are restored to the owning provider.
 
+#[cfg(test)]
+use super::type_resolvers::set_values_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    SETXOR_DESCRIPTOR, SETXOR_ERROR_CONFLICTING_ORDER_OPTIONS, SETXOR_ERROR_INTERNAL,
+    SETXOR_ERROR_INVALID_ARGUMENT, SETXOR_ERROR_LEGACY_OPTION_UNSUPPORTED,
+    SETXOR_ERROR_NUMERIC_CLASS_MISMATCH, SETXOR_ERROR_ROWS_COLUMN_MISMATCH,
+    SETXOR_ERROR_TOO_MANY_OUTPUTS, SETXOR_ERROR_UNKNOWN_OPTION,
+    SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE, SETXOR_INTEGER_CAPABILITIES,
+};
 use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, HashMap};
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericScalar, NumericStorage, StringArray, Tensor, Value,
+    NumericScalar, NumericStorage, StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::setxor")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -63,196 +70,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "setxor";
-
-const SETXOR_OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Values or rows that appear in exactly one input.",
-}];
-
-const SETXOR_OUTPUT_C_IA_IB: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Values or rows that appear in exactly one input.",
-    },
-    BuiltinParamDescriptor {
-        name: "ia",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting values or rows from A.",
-    },
-    BuiltinParamDescriptor {
-        name: "ib",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting values or rows from B.",
-    },
-];
-
-const SETXOR_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input array.",
-    },
-];
-
-const SETXOR_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option tokens: 'rows'|'sorted'|'stable'.",
-    },
-];
-
-const SETXOR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "C = setxor(A, B)",
-        inputs: &SETXOR_INPUTS_A_B,
-        outputs: &SETXOR_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = setxor(A, B, option...)",
-        inputs: &SETXOR_INPUTS_A_B_OPTIONS,
-        outputs: &SETXOR_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ib] = setxor(A, B)",
-        inputs: &SETXOR_INPUTS_A_B,
-        outputs: &SETXOR_OUTPUT_C_IA_IB,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ib] = setxor(A, B, option...)",
-        inputs: &SETXOR_INPUTS_A_B_OPTIONS,
-        outputs: &SETXOR_OUTPUT_C_IA_IB,
-    },
-];
-
-const SETXOR_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.LEGACY_OPTION_UNSUPPORTED",
-    identifier: Some("RunMat:setxor:LegacyOptionUnsupported"),
-    when: "Legacy compatibility options are requested.",
-    message: "setxor: the 'legacy' behaviour is not supported",
-};
-
-const SETXOR_ERROR_CONFLICTING_ORDER_OPTIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.CONFLICTING_ORDER_OPTIONS",
-    identifier: Some("RunMat:setxor:ConflictingOrderOptions"),
-    when: "Both 'sorted' and 'stable' options are provided.",
-    message: "setxor: cannot combine 'sorted' with 'stable'",
-};
-
-const SETXOR_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.UNKNOWN_OPTION",
-    identifier: Some("RunMat:setxor:UnknownOption"),
-    when: "An unsupported option token is provided.",
-    message: "setxor: unrecognised option",
-};
-
-const SETXOR_ERROR_ROWS_COLUMN_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.ROWS_COLUMN_MISMATCH",
-    identifier: Some("RunMat:setxor:RowsColumnMismatch"),
-    when: "'rows' mode is used and column counts differ.",
-    message: "setxor: inputs must have the same number of columns when using 'rows'",
-};
-
-const SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.UNSUPPORTED_INPUT_TYPE",
-    identifier: Some("RunMat:setxor:UnsupportedInputType"),
-    when: "Input values cannot be converted into supported setxor domains.",
-    message: "setxor: unsupported input type",
-};
-
-const SETXOR_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.NUMERIC_CLASS_MISMATCH",
-    identifier: Some("RunMat:setxor:NumericClassMismatch"),
-    when: "Numeric inputs have incompatible nondouble classes.",
-    message: "setxor: numeric inputs must have the same class, except double may be combined with one nondouble class",
-};
-
-const SETXOR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:setxor:InvalidArgument"),
-    when: "Option arguments are not string-like where required.",
-    message: "setxor: expected string option arguments",
-};
-
-const SETXOR_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:setxor:TooManyOutputs"),
-    when: "More than three output arguments are requested.",
-    message: "setxor: too many output arguments",
-};
-
-const SETXOR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SETXOR.INTERNAL",
-    identifier: Some("RunMat:setxor:Internal"),
-    when: "Internal conversion, allocation, or provider decode fails.",
-    message: "setxor: internal operation failed",
-};
-
-const SETXOR_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    SETXOR_ERROR_LEGACY_OPTION_UNSUPPORTED,
-    SETXOR_ERROR_CONFLICTING_ORDER_OPTIONS,
-    SETXOR_ERROR_UNKNOWN_OPTION,
-    SETXOR_ERROR_ROWS_COLUMN_MISMATCH,
-    SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
-    SETXOR_ERROR_NUMERIC_CLASS_MISMATCH,
-    SETXOR_ERROR_INVALID_ARGUMENT,
-    SETXOR_ERROR_TOO_MANY_OUTPUTS,
-    SETXOR_ERROR_INTERNAL,
-];
-
-const SETXOR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[C, ia, ib] = setxor(integer_A, integer_B, options)",
-        inputs: &super::BINARY_SET_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback.",
-    }];
-
-pub const SETXOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SETXOR_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SETXOR_ERRORS,
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SetxorOrder {
@@ -311,10 +128,10 @@ enum ComplexRowKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowCharKey(Vec<u32>);
+struct RowCharKey(Vec<Utf16CodeUnit>);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a StringElement>);
 
 fn setxor_error_with(
     error: &'static BuiltinErrorDescriptor,
@@ -337,17 +154,10 @@ fn setxor_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "setxor",
-    category = "array/sorting_sets",
-    summary = "Return the symmetric difference of two arrays or row sets.",
-    keywords = "setxor,symmetric difference,exclusive or,stable,rows,indices,gpu",
-    accel = "array_construct",
-    sink = true,
-    type_resolver(set_values_output_type),
-    descriptor(crate::builtins::array::sorting_sets::setxor::SETXOR_DESCRIPTOR),
-    integer_capabilities(SETXOR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::setxor"
 )]
-async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn setxor_builtin(a: Value, b: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
         return Err(setxor_error_with(
             &SETXOR_ERROR_TOO_MANY_OUTPUTS,
@@ -355,10 +165,10 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
         ));
     }
     let provider = super::set_output_provider(&a, &b);
-    let eval = evaluate(a, b, &rest).await?;
+    let eval = evaluate_view(a, b, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -367,7 +177,7 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
                 vec![eval.into_values_value()],
                 setxor_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
         let mut host_outputs = vec![values, ia, ib];
@@ -378,7 +188,7 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
             host_outputs,
             setxor_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,
@@ -394,9 +204,17 @@ pub async fn evaluate(
     b: Value,
     rest: &[Value],
 ) -> crate::BuiltinResult<SetxorEvaluation> {
+    evaluate_view(a, b, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    a: Value,
+    b: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<SetxorEvaluation> {
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "setxor")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "setxor")?;
-    let opts = parse_options(rest)?;
+    let opts = parse_options_view(rest)?;
     for value in [&a, &b] {
         if let Value::GpuTensor(handle) = value {
             if super::is_unsupported_set_gpu_integer(handle) {
@@ -419,7 +237,7 @@ pub async fn evaluate(
     }
 }
 
-fn parse_options(rest: &[Value]) -> crate::BuiltinResult<SetxorOptions> {
+fn parse_options_view(rest: FunctionArgumentView<'_>) -> crate::BuiltinResult<SetxorOptions> {
     let mut opts = SetxorOptions {
         rows: false,
         order: SetxorOrder::Sorted,
@@ -549,14 +367,14 @@ fn setxor_host(a: Value, b: Value, opts: &SetxorOptions) -> crate::BuiltinResult
             setxor_string(astring, bstring, opts)
         }
         (Value::String(a), right) if value_is_string_compatible(&right) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             let bstring = value_into_string_array(right)?;
             setxor_string(astring, bstring, opts)
         }
         (left, Value::String(b)) if value_is_string_compatible(&left) => {
             let astring = value_into_string_array(left)?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
@@ -564,19 +382,19 @@ fn setxor_host(a: Value, b: Value, opts: &SetxorOptions) -> crate::BuiltinResult
             setxor_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
@@ -612,7 +430,7 @@ fn value_into_complex_tensor(value: Value) -> crate::BuiltinResult<ComplexTensor
 }
 
 fn tensor_to_complex(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = tensor
         .into_numeric_storage()
         .map_err(setxor_internal_error)?
@@ -633,7 +451,7 @@ fn value_is_string_compatible(value: &Value) -> bool {
 fn value_into_string_array(value: Value) -> crate::BuiltinResult<StringArray> {
     match value {
         Value::StringArray(array) => Ok(array),
-        Value::String(value) => StringArray::new(vec![value], vec![1, 1])
+        Value::String(value) => StringArray::from_elements_unbounded(vec![value], vec![1, 1])
             .map_err(|e| setxor_internal_error(format!("setxor: {e}"))),
         Value::CharArray(chars) => char_array_to_string_array(chars),
         other => Err(setxor_error_with(
@@ -646,11 +464,22 @@ fn value_into_string_array(value: Value) -> crate::BuiltinResult<StringArray> {
 fn char_array_to_string_array(chars: CharArray) -> crate::BuiltinResult<StringArray> {
     let values = (0..chars.rows)
         .map(|row| {
-            chars.data[row * chars.cols..row * chars.cols + chars.cols]
-                .iter()
-                .collect()
+            runmat_value::decode_utf16_code_units(
+                &chars.data()[row * chars.cols..row * chars.cols + chars.cols],
+            )
+            .map_err(|error| {
+                let mut builder = build_runtime_error(format!(
+                    "setxor: character row is not valid UTF-16: {error}"
+                ))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(error);
+                if let Some(identifier) = SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE.identifier {
+                    builder = builder.with_identifier(identifier);
+                }
+                builder.build()
+            })
         })
-        .collect::<Vec<String>>();
+        .collect::<crate::BuiltinResult<Vec<String>>>()?;
     let shape = if chars.rows == 0 {
         vec![0, 1]
     } else if chars.rows == 1 {
@@ -675,9 +504,8 @@ fn value_into_char_array(value: Value) -> crate::BuiltinResult<CharArray> {
 }
 
 fn tensor_into_char_array(tensor: Tensor) -> crate::BuiltinResult<CharArray> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let mut values = vec!['\0'; rows * cols];
+    let (rows, cols) = char_matrix_dimensions(tensor.shape());
+    let mut values = vec![Utf16CodeUnit::from_raw(0); rows * cols];
     for col in 0..cols {
         for row in 0..rows {
             let value = tensor.numeric_value_at(row + col * rows).ok_or_else(|| {
@@ -686,17 +514,26 @@ fn tensor_into_char_array(tensor: Tensor) -> crate::BuiltinResult<CharArray> {
             values[row * cols + col] = numeric_to_char(value)?;
         }
     }
-    CharArray::new(values, rows, cols).map_err(|e| setxor_internal_error(format!("setxor: {e}")))
+    CharArray::from_code_units(values, rows, cols)
+        .map_err(|e| setxor_internal_error(format!("setxor: {e}")))
 }
 
-fn numeric_to_char(value: NumericScalar) -> crate::BuiltinResult<char> {
+fn char_matrix_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [n] => (1, *n),
+        [rows, cols, ..] => (*rows, *cols),
+    }
+}
+
+fn numeric_to_char(value: NumericScalar) -> crate::BuiltinResult<Utf16CodeUnit> {
     let code = match value {
         NumericScalar::F64(value) => float_to_char_code(value)?,
         NumericScalar::F32(value) => float_to_char_code(f64::from(value))?,
         value => value
             .into_int_value()
             .and_then(|value| value.try_to_u64())
-            .and_then(|value| u32::try_from(value).ok())
+            .and_then(|value| u16::try_from(value).ok())
             .ok_or_else(|| {
                 setxor_error_with(
                     &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
@@ -704,22 +541,17 @@ fn numeric_to_char(value: NumericScalar) -> crate::BuiltinResult<char> {
                 )
             })?,
     };
-    char::from_u32(code).ok_or_else(|| {
-        setxor_error_with(
-            &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
-            "setxor: numeric values mixed with char inputs must be valid character codes",
-        )
-    })
+    Ok(Utf16CodeUnit::from_raw(code))
 }
 
-fn float_to_char_code(value: f64) -> crate::BuiltinResult<u32> {
-    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u32::MAX as f64 {
+fn float_to_char_code(value: f64) -> crate::BuiltinResult<u16> {
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u16::MAX as f64 {
         return Err(setxor_error_with(
             &SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE,
             "setxor: numeric values mixed with char inputs must be finite character codes",
         ));
     }
-    Ok(value as u32)
+    Ok(value as u16)
 }
 
 fn setxor_numeric(
@@ -730,15 +562,21 @@ fn setxor_numeric(
     let a_dtype = a.numeric_dtype();
     let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
-        if a_storage.class_name() == b_storage.class_name() {
+        if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
-                setxor_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+                setxor_integer_rows(
+                    a_storage,
+                    a.shape().to_vec(),
+                    b_storage,
+                    b.shape().to_vec(),
+                    opts,
+                )
             } else {
                 setxor_integer_elements(
                     a_storage,
-                    a.shape.clone(),
+                    a.shape().to_vec(),
                     b_storage,
-                    b.shape.clone(),
+                    b.shape().to_vec(),
                     opts,
                 )
             };
@@ -746,20 +584,20 @@ fn setxor_numeric(
     }
     match (a.integer_storage(), b.integer_storage()) {
         (Some(storage), None) if b_dtype == NumericDType::F64 => {
-            let target = IntegerTarget::from_storage(storage);
+            let target = IntegerClass::from_storage(storage);
             let b = target.cast_tensor(b).map_err(setxor_internal_error)?;
             return setxor_numeric(a, b, opts);
         }
         (None, Some(storage)) if a_dtype == NumericDType::F64 => {
-            let target = IntegerTarget::from_storage(storage);
+            let target = IntegerClass::from_storage(storage);
             let a = target.cast_tensor(a).map_err(setxor_internal_error)?;
             return setxor_numeric(a, b, opts);
         }
         _ => {}
     }
     numeric_output_dtype(a_dtype, b_dtype)?;
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
+    let a_shape = a.shape().to_vec();
+    let b_shape = b.shape().to_vec();
     let a_storage = a.into_numeric_storage().map_err(setxor_internal_error)?;
     let b_storage = b.into_numeric_storage().map_err(setxor_internal_error)?;
     match (a_storage, b_storage) {
@@ -1004,9 +842,9 @@ fn setxor_complex(
     b: ComplexTensor,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
-    match (a.into_complex_storage(), b.into_complex_storage()) {
+    let (a_storage, a_shape) = a.into_complex_storage_and_shape();
+    let (b_storage, b_shape) = b.into_complex_storage_and_shape();
+    match (a_storage, b_storage) {
         (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
             setxor_floating_complex(a, a_shape, b, b_shape, opts)
         }
@@ -1019,9 +857,9 @@ fn setxor_complex(
 
 fn setxor_promoted_complex_f64(
     a: ComplexStorage,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: ComplexStorage,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     setxor_floating_complex(
@@ -1033,11 +871,11 @@ fn setxor_promoted_complex_f64(
     )
 }
 
-fn setxor_floating_complex<T: SetFloat>(
-    a: Vec<(T, T)>,
-    a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
-    b_shape: Vec<usize>,
+fn setxor_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    a_shape: runmat_value::SharedShape,
+    b: B,
+    b_shape: runmat_value::SharedShape,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     if opts.rows {
@@ -1047,7 +885,8 @@ fn setxor_floating_complex<T: SetFloat>(
         let mut entries = Vec::<SymEntry<(T, T)>>::new();
         let mut map: HashMap<ComplexElementKey, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, &value) in a.iter().enumerate() {
+        for idx in 0..a.len() {
+            let value = a.pair_at(idx);
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -1058,7 +897,8 @@ fn setxor_floating_complex<T: SetFloat>(
                 &mut order_counter,
             );
         }
-        for (idx, &value) in b.iter().enumerate() {
+        for idx in 0..b.len() {
+            let value = b.pair_at(idx);
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -1073,11 +913,11 @@ fn setxor_floating_complex<T: SetFloat>(
     }
 }
 
-fn setxor_complex_rows<T: SetFloat>(
-    a: Vec<(T, T)>,
-    a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
-    b_shape: Vec<usize>,
+fn setxor_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    a_shape: runmat_value::SharedShape,
+    b: B,
+    b_shape: runmat_value::SharedShape,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     if a_shape.len() != 2 || b_shape.len() != 2 {
@@ -1132,18 +972,18 @@ fn setxor_char(
         setxor_char_rows(a, b, opts)
     } else {
         let row_output = a.rows == 1 && b.rows == 1;
-        let mut entries = Vec::<SymEntry<char>>::new();
-        let mut map: HashMap<u32, usize> = HashMap::new();
+        let mut entries = Vec::<SymEntry<Utf16CodeUnit>>::new();
+        let mut map: HashMap<Utf16CodeUnit, usize> = HashMap::new();
         let mut order_counter = 0usize;
         for col in 0..a.cols {
             for row in 0..a.rows {
                 let linear_idx = row + col * a.rows;
                 let data_idx = row * a.cols + col;
-                let ch = a.data[data_idx];
+                let ch = a.data()[data_idx];
                 add_sym_entry(
                     &mut entries,
                     &mut map,
-                    ch as u32,
+                    ch,
                     ch,
                     Origin::A,
                     linear_idx,
@@ -1155,11 +995,11 @@ fn setxor_char(
             for row in 0..b.rows {
                 let linear_idx = row + col * b.rows;
                 let data_idx = row * b.cols + col;
-                let ch = b.data[data_idx];
+                let ch = b.data()[data_idx];
                 add_sym_entry(
                     &mut entries,
                     &mut map,
-                    ch as u32,
+                    ch,
                     ch,
                     Origin::B,
                     linear_idx,
@@ -1179,7 +1019,7 @@ fn setxor_char_rows(
     if a.cols != b.cols {
         return Err(setxor_error(&SETXOR_ERROR_ROWS_COLUMN_MISMATCH));
     }
-    let mut entries = Vec::<SymEntry<Vec<char>>>::new();
+    let mut entries = Vec::<SymEntry<Vec<Utf16CodeUnit>>>::new();
     let mut map: HashMap<RowCharKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
     for row in 0..a.rows {
@@ -1187,7 +1027,7 @@ fn setxor_char_rows(
         add_sym_entry(
             &mut entries,
             &mut map,
-            RowCharKey(values.iter().map(|&ch| ch as u32).collect()),
+            RowCharKey(values.clone()),
             values,
             Origin::A,
             row,
@@ -1199,7 +1039,7 @@ fn setxor_char_rows(
         add_sym_entry(
             &mut entries,
             &mut map,
-            RowCharKey(values.iter().map(|&ch| ch as u32).collect()),
+            RowCharKey(values.clone()),
             values,
             Origin::B,
             row,
@@ -1218,26 +1058,33 @@ fn setxor_string(
         setxor_string_rows(a, b, opts)
     } else {
         let row_output = element_row_output(&a.shape, &b.shape);
-        let mut entries = Vec::<SymEntry<String>>::new();
-        let mut map: HashMap<String, usize> = HashMap::new();
+        let mut entries = Vec::<SymEntry<&StringElement>>::new();
+        let mut map: HashMap<(&StringElement, usize), usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, value) in a.data.iter().enumerate() {
+        for (idx, value) in a.data().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
-                value.clone(),
-                value.clone(),
+                (value, if value.is_missing() { idx + 1 } else { 0 }),
+                value,
                 Origin::A,
                 idx,
                 &mut order_counter,
             );
         }
-        for (idx, value) in b.data.iter().enumerate() {
+        for (idx, value) in b.data().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
-                value.clone(),
-                value.clone(),
+                (
+                    value,
+                    if value.is_missing() {
+                        a.data().len() + idx + 1
+                    } else {
+                        0
+                    },
+                ),
+                value,
                 Origin::B,
                 idx,
                 &mut order_counter,
@@ -1263,15 +1110,22 @@ fn setxor_string_rows(
     let rows_a = a.shape[0];
     let rows_b = b.shape[0];
     let cols = a.shape[1];
-    let mut entries = Vec::<SymEntry<Vec<String>>>::new();
-    let mut map: HashMap<RowStringKey, usize> = HashMap::new();
+    let mut entries = Vec::<SymEntry<Vec<&StringElement>>>::new();
+    let mut map: HashMap<(RowStringKey, usize), usize> = HashMap::new();
     let mut order_counter = 0usize;
     for row in 0..rows_a {
         let values = string_row(&a, row, cols);
         add_sym_entry(
             &mut entries,
             &mut map,
-            RowStringKey(values.clone()),
+            (
+                RowStringKey(values.clone()),
+                if values.iter().any(|text| text.is_missing()) {
+                    row + 1
+                } else {
+                    0
+                },
+            ),
             values,
             Origin::A,
             row,
@@ -1283,7 +1137,14 @@ fn setxor_string_rows(
         add_sym_entry(
             &mut entries,
             &mut map,
-            RowStringKey(values.clone()),
+            (
+                RowStringKey(values.clone()),
+                if values.iter().any(|text| text.is_missing()) {
+                    rows_a + row + 1
+                } else {
+                    0
+                },
+            ),
             values,
             Origin::B,
             row,
@@ -1581,7 +1442,7 @@ fn assemble_complex_rows<T: SetFloat>(
 }
 
 fn assemble_char(
-    entries: Vec<SymEntry<char>>,
+    entries: Vec<SymEntry<Utf16CodeUnit>>,
     opts: &SetxorOptions,
     row_output: bool,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
@@ -1596,7 +1457,7 @@ fn assemble_char(
     } else {
         (order.len(), 1)
     };
-    let value_array = CharArray::new(values, rows, cols)
+    let value_array = CharArray::from_code_units(values, rows, cols)
         .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
     Ok(SetxorEvaluation::new(
@@ -1607,20 +1468,20 @@ fn assemble_char(
 }
 
 fn assemble_char_rows(
-    entries: Vec<SymEntry<Vec<char>>>,
+    entries: Vec<SymEntry<Vec<Utf16CodeUnit>>>,
     opts: &SetxorOptions,
     cols: usize,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     let order = symmetric_order(&entries, opts, |lhs, rhs| compare_char_rows(lhs, rhs));
     let rows = order.len();
-    let mut values = vec!['\0'; rows * cols];
+    let mut values = vec![Utf16CodeUnit::from_raw(0); rows * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         for col in 0..cols {
             values[row_pos * cols + col] = entries[entry_idx].value[col];
         }
     }
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_array = CharArray::new(values, rows, cols)
+    let value_array = CharArray::from_code_units(values, rows, cols)
         .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
     Ok(SetxorEvaluation::new(
@@ -1631,18 +1492,19 @@ fn assemble_char_rows(
 }
 
 fn assemble_string(
-    entries: Vec<SymEntry<String>>,
+    entries: Vec<SymEntry<&StringElement>>,
     opts: &SetxorOptions,
     row_output: bool,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     let order = symmetric_order(&entries, opts, |lhs, rhs| lhs.cmp(rhs));
     let values = order
         .iter()
-        .map(|&idx| entries[idx].value.clone())
+        .map(|&idx| (*entries[idx].value).clone())
         .collect::<Vec<_>>();
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_array = StringArray::new(values, element_shape(row_output, order.len()))
-        .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
+    let value_array =
+        StringArray::from_elements_unbounded(values, element_shape(row_output, order.len()))
+            .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
     Ok(SetxorEvaluation::new(
         Value::StringArray(value_array),
@@ -1652,20 +1514,20 @@ fn assemble_string(
 }
 
 fn assemble_string_rows(
-    entries: Vec<SymEntry<Vec<String>>>,
+    entries: Vec<SymEntry<Vec<&StringElement>>>,
     opts: &SetxorOptions,
     cols: usize,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     let order = symmetric_order(&entries, opts, |lhs, rhs| compare_string_rows(lhs, rhs));
     let rows = order.len();
-    let mut values = vec![String::new(); rows * cols];
+    let mut values = vec![StringElement::default(); rows * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         for col in 0..cols {
             values[row_pos + col * rows] = entries[entry_idx].value[col].clone();
         }
     }
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_array = StringArray::new(values, vec![rows, cols])
+    let value_array = StringArray::from_elements_unbounded(values, vec![rows, cols])
         .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
     Ok(SetxorEvaluation::new(
@@ -1752,19 +1614,26 @@ fn numeric_row_from_values<T: Copy>(values: &[T], row: usize, rows: usize, cols:
     (0..cols).map(|col| values[row + col * rows]).collect()
 }
 
-fn complex_row<T: Copy>(values: &[(T, T)], row: usize, rows: usize, cols: usize) -> Vec<(T, T)> {
-    (0..cols).map(|col| values[row + col * rows]).collect()
-}
-
-fn char_row(array: &CharArray, row: usize) -> Vec<char> {
-    (0..array.cols)
-        .map(|col| array.data[row * array.cols + col])
+fn complex_row<T: Copy, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
+    row: usize,
+    rows: usize,
+    cols: usize,
+) -> Vec<(T, T)> {
+    (0..cols)
+        .map(|col| values.pair_at(row + col * rows))
         .collect()
 }
 
-fn string_row(array: &StringArray, row: usize, cols: usize) -> Vec<String> {
+fn char_row(array: &CharArray, row: usize) -> Vec<Utf16CodeUnit> {
+    (0..array.cols)
+        .map(|col| array.data()[row * array.cols + col])
+        .collect()
+}
+
+fn string_row(array: &StringArray, row: usize, cols: usize) -> Vec<&StringElement> {
     (0..cols)
-        .map(|col| array.data[row + col * array.shape[0]].clone())
+        .map(|col| &array.data()[row + col * array.shape[0]])
         .collect()
 }
 
@@ -1825,7 +1694,7 @@ fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
+fn compare_char_rows(a: &[Utf16CodeUnit], b: &[Utf16CodeUnit]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -1835,7 +1704,7 @@ fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
+fn compare_string_rows(a: &[&StringElement], b: &[&StringElement]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -1858,11 +1727,51 @@ mod tests {
     }
 
     fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(setxor_builtin(a, b, rest))
+        futures::executor::block_on(setxor_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn assert_double(tensor: &Tensor, expected: &[f64]) {
         assert_eq!(tensor.as_f64_slice().expect("double tensor"), expected);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn setxor_char_numeric_preserves_rank_zero_and_rank_one_geometry() {
+        let rank_zero = Tensor::new(vec![f64::from('b' as u32)], vec![]).expect("rank zero");
+        let result = builtin_sync(
+            Value::CharArray(CharArray::new_row("a")),
+            Value::Tensor(rank_zero),
+            Vec::new(),
+        )
+        .expect("rank-zero char/numeric setxor");
+        let Value::CharArray(empty_projection) = result else {
+            panic!("expected character result");
+        };
+        assert_eq!(
+            empty_projection.data(),
+            runmat_value::encode_utf16_code_units("a")
+        );
+
+        let rank_one = Tensor::new(vec![f64::from('b' as u32), f64::from('c' as u32)], vec![2])
+            .expect("rank one");
+        let result = builtin_sync(
+            Value::CharArray(CharArray::new_row("a")),
+            Value::Tensor(rank_one),
+            Vec::new(),
+        )
+        .expect("rank-one char/numeric setxor");
+        let Value::CharArray(row_projection) = result else {
+            panic!("expected character result");
+        };
+        assert_eq!((row_projection.rows, row_projection.cols), (1, 3));
+        assert_eq!(
+            row_projection.data(),
+            runmat_value::encode_utf16_code_units("abc")
+        );
     }
 
     #[test]
@@ -1875,7 +1784,8 @@ mod tests {
             let right = Value::GpuTensor(
                 gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
             );
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let Value::OutputList(outputs) =
                 builtin_sync(left, right, Vec::new()).expect("resident setxor")
             else {
@@ -1912,7 +1822,7 @@ mod tests {
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
         assert_double(&values, &[2.0, 3.0, 4.0, 5.0]);
-        assert_eq!(values.shape, vec![4, 1]);
+        assert_eq!(values.shape(), &[4, 1]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[3.0, 1.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
@@ -1987,7 +1897,7 @@ mod tests {
             values.integer_storage(),
             Some(&IntegerStorage::U16(vec![5, 7, 9]))
         );
-        assert_eq!(values.shape, vec![3, 1]);
+        assert_eq!(values.shape(), &[3, 1]);
         let ia = tensor::value_into_tensor_for("setxor", ia).expect("indices");
         assert_double(&ia, &[1.0, 3.0]);
         let ib = tensor::value_into_tensor_for("setxor", ib).expect("indices");
@@ -2004,7 +1914,7 @@ mod tests {
                 .expect("setxor rows")
                 .into_triple();
         let values = tensor::value_into_tensor_for("setxor", values).expect("row values");
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(
             values.integer_storage(),
             Some(&IntegerStorage::U16(vec![1, 5, 2, 6]))
@@ -2037,11 +1947,11 @@ mod tests {
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
         assert_double(&values, &[2.0, 3.0, 4.0, 5.0]);
-        assert_eq!(values.shape, vec![1, 4]);
+        assert_eq!(values.shape(), &[1, 4]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
-        assert_eq!(ia.shape, vec![2, 1]);
+        assert_eq!(ia.shape(), &[2, 1]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
-        assert_eq!(ib.shape, vec![2, 1]);
+        assert_eq!(ib.shape(), &[2, 1]);
     }
 
     #[test]
@@ -2054,7 +1964,7 @@ mod tests {
             values.integer_storage(),
             Some(&IntegerStorage::U32(vec![1, 2, 3]))
         );
-        assert_eq!(values.shape, vec![1, 3]);
+        assert_eq!(values.shape(), &[1, 3]);
         assert_eq!(values.numeric_dtype(), NumericDType::U32);
     }
 
@@ -2081,7 +1991,7 @@ mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected native single rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(
             values.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 5.0, 2.0, 6.0])
@@ -2137,8 +2047,14 @@ mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single value");
         };
-        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 1.0)][..]));
-
+        assert_eq!(
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 1.0)])
+        );
         let a = ComplexTensor::from_f32(
             vec![(1.0, 0.0), (3.0, 0.0), (2.0, 1.0), (4.0, 1.0)],
             vec![2, 2],
@@ -2159,10 +2075,14 @@ mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(
-            values.as_f32_slice(),
-            Some(&[(1.0, 0.0), (5.0, 0.0), (2.0, 1.0), (6.0, 1.0),][..])
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 0.0), (5.0, 0.0), (2.0, 1.0), (6.0, 1.0),])
         );
     }
 
@@ -2210,7 +2130,7 @@ mod tests {
         let b = Tensor::new(vec![5.0, f64::NAN, f64::NAN], vec![3, 1]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setxor");
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.shape, vec![4, 1]);
+        assert_eq!(values.shape(), &[4, 1]);
         assert!(values
             .as_f64_slice()
             .expect("double values")
@@ -2239,7 +2159,7 @@ mod tests {
         let eval =
             evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap();
         let values = tensor::value_into_tensor_for("setxor", eval.values_value()).unwrap();
-        assert_eq!(values.shape, vec![3, 3]);
+        assert_eq!(values.shape(), &[3, 3]);
         assert_double(&values, &[7.0, 7.0, 7.0, 7.0, 7.0, 8.0, 1.0, 2.0, 9.0]);
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[2.0, 1.0]);
@@ -2272,7 +2192,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
-        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.shape(), &[1, 2]);
     }
 
     #[test]
@@ -2285,18 +2205,18 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(values.materialize_f64(), vec![(1.0, 0.0), (0.0, 1.0)]);
-        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.shape(), &[1, 2]);
     }
 
     #[test]
     fn setxor_char_elements() {
-        let a = CharArray::new(vec!['d', 'o', 'g'], 1, 3).unwrap();
-        let b = CharArray::new(vec!['d', 'i', 'g'], 1, 3).unwrap();
+        let a = CharArray::from_unicode_scalars(vec!['d', 'o', 'g'], 1, 3).unwrap();
+        let b = CharArray::from_unicode_scalars(vec!['d', 'i', 'g'], 1, 3).unwrap();
         let eval = evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("setxor");
         let Value::CharArray(values) = eval.values_value() else {
             panic!("expected char array");
         };
-        assert_eq!(values.data, vec!['i', 'o']);
+        assert_eq!(values.data(), runmat_value::encode_utf16_code_units("io"));
         assert_eq!((values.rows, values.cols), (1, 2));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[2.0]);
@@ -2306,18 +2226,42 @@ mod tests {
 
     #[test]
     fn setxor_char_and_numeric_compare_character_codes() {
-        let a = CharArray::new_row("abc");
-        let b = Tensor::new(vec![98.0, 100.0], vec![1, 2]).unwrap();
+        let a = CharArray::from_code_units(
+            [65, 0xD800, 0xDC00]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            1,
+            3,
+        )
+        .unwrap();
+        let b = Tensor::new(vec![55296.0, 65535.0], vec![1, 2]).unwrap();
         let eval = evaluate_sync(Value::CharArray(a), Value::Tensor(b), &[]).expect("setxor");
         let Value::CharArray(values) = eval.values_value() else {
             panic!("expected char array");
         };
-        assert_eq!(values.data, vec!['a', 'c', 'd']);
+        assert_eq!(
+            values
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            vec![65, 0xDC00, 0xFFFF]
+        );
         assert_eq!((values.rows, values.cols), (1, 3));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[1.0, 3.0]);
         let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
         assert_double(&ib, &[2.0]);
+        let error = evaluate_sync(
+            Value::CharArray(CharArray::new_row("a")),
+            Value::Tensor(Tensor::new(vec![65536.0], vec![1, 1]).unwrap()),
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
+        );
     }
 
     #[test]
@@ -2329,8 +2273,26 @@ mod tests {
         let Value::StringArray(values) = eval.values_value() else {
             panic!("expected string array");
         };
-        assert_eq!(values.data, vec!["alpha".to_string()]);
+        assert_eq!(values.data(), vec!["alpha".to_string()]);
         assert_eq!(values.shape, vec![1, 1]);
+        let invalid =
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)], 1, 1)
+                .unwrap();
+        let error = evaluate_sync(
+            Value::StringArray(StringArray::new(vec!["x".to_owned()], vec![1, 1]).unwrap()),
+            Value::CharArray(invalid),
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            SETXOR_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
+        );
+        assert!(
+            std::error::Error::source(&error).is_some_and(|source| source
+                .downcast_ref::<runmat_value::Utf16DecodeError>()
+                .is_some())
+        );
     }
 
     #[test]
@@ -2366,7 +2328,7 @@ mod tests {
         };
         assert_eq!(values.shape, vec![2, 2]);
         assert_eq!(
-            values.data,
+            values.data(),
             vec![
                 "alpha".to_string(),
                 "delta".to_string(),
@@ -2387,11 +2349,11 @@ mod tests {
             let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).unwrap();
             let view_a = HostTensorView {
                 data: a.as_f64_slice().expect("double A"),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: b.as_f64_slice().expect("double B"),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
             let handle_b = provider.upload(&view_b).expect("upload B");
@@ -2416,7 +2378,7 @@ mod tests {
             let a = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let view_a = HostTensorView {
                 data: a.as_f64_slice().expect("double A"),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
             let b = ComplexTensor::new(vec![(1.0, 1.0), (2.0, 0.0)], vec![1, 2]).unwrap();
@@ -2426,7 +2388,7 @@ mod tests {
                 panic!("expected complex tensor");
             };
             assert_eq!(values.materialize_f64(), vec![(1.0, 1.0), (3.0, 0.0)]);
-            assert_eq!(values.shape, vec![1, 2]);
+            assert_eq!(values.shape(), &[1, 2]);
             let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
             assert_double(&ia, &[2.0]);
             let ib = tensor::value_into_tensor_for("setxor", eval.ib_value()).unwrap();
@@ -2493,7 +2455,7 @@ mod tests {
 
     #[test]
     fn setxor_rejects_more_than_three_outputs() {
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let err = builtin_sync(
             Value::Tensor(tensor.clone()),

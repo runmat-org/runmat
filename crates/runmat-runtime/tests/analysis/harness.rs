@@ -1,20 +1,17 @@
 use super::*;
+use futures::FutureExt;
 
 struct HarnessProvider;
 
-fn harness_store() -> &'static Mutex<HashMap<u64, HostTensorOwned>> {
-    static STORE: OnceLock<Mutex<HashMap<u64, HostTensorOwned>>> = OnceLock::new();
-    STORE.get_or_init(|| Mutex::new(HashMap::new()))
+fn harness_owner() -> &'static runmat_accelerate::simple_provider::InProcessProvider {
+    crate::retained_provider::retained_test_provider!(OWNER: runmat_accelerate::simple_provider::InProcessProvider = runmat_accelerate::simple_provider::InProcessProvider::new())
 }
 
 fn store_get(handle: &GpuTensorHandle) -> anyhow::Result<HostTensorOwned> {
-    let guard = harness_store()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
-    guard
-        .get(&handle.buffer_id)
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("missing tensor for buffer_id={}", handle.buffer_id))
+    harness_owner()
+        .download(handle)
+        .now_or_never()
+        .expect("in-process download is synchronous")
 }
 
 fn store_insert(shape: Vec<usize>, data: Vec<f64>) -> anyhow::Result<GpuTensorHandle> {
@@ -26,24 +23,9 @@ fn store_insert(shape: Vec<usize>, data: Vec<f64>) -> anyhow::Result<GpuTensorHa
             expected
         ));
     }
-    static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(5000);
-    let buffer_id = NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed);
-    let mut guard = harness_store()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
-    guard.insert(
-        buffer_id,
-        HostTensorOwned {
-            data,
-            shape: shape.clone(),
-            storage: runmat_accelerate_api::GpuTensorStorage::Real,
-        },
-    );
-    Ok(GpuTensorHandle {
-        shape,
-        device_id: 21,
-        buffer_id,
-        descriptor: Default::default(),
+    harness_owner().upload(&HostTensorView {
+        data: &data,
+        shape: &shape,
     })
 }
 
@@ -75,26 +57,18 @@ impl AccelProvider for HarnessProvider {
         Box::pin(async move { store_get(h) })
     }
 
-    fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()> {
-        let mut guard = harness_store()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
-        guard.remove(&h.buffer_id);
-        Ok(())
-    }
-
     fn device_info(&self) -> String {
         "analysis-harness-provider".to_string()
     }
 
     fn device_id(&self) -> u32 {
-        21
+        harness_owner().device_id()
     }
 
     fn device_info_struct(&self) -> ApiDeviceInfo {
         ApiDeviceInfo {
-            device_id: 21,
-            name: "analysis-harness-provider".to_string(),
+            device_id: self.device_id(),
+            name: "analysis-harness-provider".into(),
             vendor: "runmat-tests".to_string(),
             memory_bytes: None,
             backend: Some("harness_gpu".to_string()),
@@ -105,24 +79,24 @@ impl AccelProvider for HarnessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { elementwise_binary(a, b, |x, y| x + y) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x + y).map_err(Into::into) })
     }
 
     fn elem_sub<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { elementwise_binary(a, b, |x, y| x - y) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x - y).map_err(Into::into) })
     }
 
     fn elem_mul<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { elementwise_binary(a, b, |x, y| x * y) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x * y).map_err(Into::into) })
     }
 
     fn scalar_mul(&self, a: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
@@ -134,11 +108,15 @@ impl AccelProvider for HarnessProvider {
     fn reduce_sum<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let ah = store_get(a)?;
-            let sum = ah.data.iter().sum::<f64>();
-            store_insert(vec![1], vec![sum])
+            let result: anyhow::Result<GpuTensorHandle> = async {
+                let ah = store_get(a)?;
+                let sum = ah.data.iter().sum::<f64>();
+                store_insert(vec![1], vec![sum])
+            }
+            .await;
+            result.map_err(Into::into)
         })
     }
 
@@ -184,30 +162,24 @@ impl AccelProvider for HarnessProvider {
         indices: &[u32],
         values: &GpuTensorHandle,
     ) -> anyhow::Result<()> {
-        let values_host = store_get(values)?;
-        if values_host.data.len() != indices.len() {
-            return Err(anyhow::anyhow!(
-                "scatter values len {} != indices len {}",
-                values_host.data.len(),
-                indices.len()
-            ));
-        }
-
-        let mut guard = harness_store()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
-        let target_host = guard
-            .get_mut(&target.buffer_id)
-            .ok_or_else(|| anyhow::anyhow!("missing target tensor for scatter"))?;
-        for (i, &idx) in indices.iter().enumerate() {
-            let idx = idx as usize;
-            if idx >= target_host.data.len() {
-                return Err(anyhow::anyhow!("scatter index out of bounds"));
-            }
-            target_host.data[idx] = values_host.data[i];
-        }
-        Ok(())
+        harness_owner().scatter_linear(target, indices, values)
     }
+}
+
+#[test]
+fn harness_backing_preserves_aliases_and_retires_after_last_physical_lease() {
+    let input = store_insert(vec![1, 2], vec![1.0, 2.0]).unwrap();
+    let alias = input.clone();
+    let physical = input.allocation_lease().downgrade();
+    let replacement = store_insert(vec![1, 1], vec![7.0]).unwrap();
+    HarnessProvider
+        .scatter_linear(&input, &[1], &replacement)
+        .unwrap();
+    drop(input);
+    assert_eq!(store_get(&alias).unwrap().data, vec![1.0, 7.0]);
+    assert!(physical.acquire().is_some());
+    drop(alias);
+    assert!(physical.acquire().is_none());
 }
 
 pub(super) fn with_harness_provider<T>(f: impl FnOnce() -> T) -> T {

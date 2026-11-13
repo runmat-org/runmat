@@ -3,10 +3,19 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
+#[path = "support/placement_feedback.rs"]
+mod placement_feedback;
+
+#[path = "fusion_gpu/persistent.rs"]
+mod persistent;
+
 use anyhow::{anyhow, bail, Context};
 use futures::executor::block_on;
+#[cfg(not(target_arch = "wasm32"))]
 use once_cell::sync::OnceCell;
-use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::{
+    execute_elementwise, execute_elementwise_placed, FusionExecutionOutcome, FusionExecutionRequest,
+};
 use runmat_accelerate::{
     configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions, FusionKind,
 };
@@ -30,28 +39,42 @@ use runmat_gc::gc_test_context;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
+#[cfg(target_arch = "wasm32")]
+use runmat_thread_local::runmat_thread_local;
 use runmat_value::{Tensor, Value};
 use runmat_vm::{
     interpret as interpret_async, interpret_function as interpret_function_async, Instr,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
-fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
+#[path = "support/fusion_diagnostics.rs"]
+mod fusion_diagnostics;
+
+fn interpret(
+    bytecode: &runmat_vm::Bytecode,
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     block_on(interpret_async(bytecode))
 }
 
 fn interpret_function(
     bytecode: &runmat_vm::Bytecode,
     vars: Vec<Value>,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     block_on(interpret_function_async(bytecode, vars))
 }
 use runmat_time::Instant;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
+#[path = "fusion_gpu/ownership.rs"]
+mod ownership;
+use ownership::{BufferPayload, BufferRecord, BufferStore};
+
+#[path = "fusion_gpu/staged_image.rs"]
+mod staged_image;
 
 fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
     test_helpers::compile_source(source).expect("compile source")
@@ -60,8 +83,9 @@ fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
 fn graph_for_fusion_test(
     bytecode: &runmat_vm::Bytecode,
 ) -> Option<runmat_accelerate::graph::AccelGraph> {
-    let runtime_groups = bytecode.runtime_fusion_groups();
-    bytecode.runtime_accel_graph_for_fusion(&runtime_groups)
+    bytecode
+        .reconciled_runtime_fusion_graph()
+        .map(|(graph, _)| graph)
 }
 
 #[test]
@@ -122,7 +146,15 @@ fn fusion_graph_helper_ignores_stale_compile_graph_metadata() {
 struct TestProvider {
     next_id: AtomicU64,
     buffers: Mutex<BufferStore>,
+    frees: Mutex<HashMap<u64, usize>>,
+    inspect_roots_on_free: AtomicBool,
+    fail_free_buffer: AtomicU64,
+    single_inputs: Mutex<Vec<u64>>,
     reject_fusion: AtomicBool,
+    fused_dispatches: AtomicU64,
+    fail_next_fused_single: AtomicBool,
+    numeric_downloads: AtomicU64,
+    report_f32: AtomicBool,
 }
 
 impl TestProvider {
@@ -130,47 +162,300 @@ impl TestProvider {
         Self {
             next_id: AtomicU64::new(1),
             buffers: Mutex::new(HashMap::new()),
+            frees: Mutex::new(HashMap::new()),
+            inspect_roots_on_free: AtomicBool::new(false),
+            fail_free_buffer: AtomicU64::new(0),
+            single_inputs: Mutex::new(Vec::new()),
             reject_fusion: AtomicBool::new(false),
+            fused_dispatches: AtomicU64::new(0),
+            fail_next_fused_single: AtomicBool::new(false),
+            numeric_downloads: AtomicU64::new(0),
+            report_f32: AtomicBool::new(false),
         }
     }
 
     fn pull(&self, handle: &GpuTensorHandle) -> anyhow::Result<(Vec<f64>, Vec<usize>)> {
         let guard = self.buffers.lock().unwrap();
         guard
-            .get(&handle.buffer_id)
-            .cloned()
-            .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
+            .get(&handle.buffer_id())
+            .filter(|record| record.owns(handle))
+            .and_then(|record| {
+                record
+                    .data
+                    .to_f64()
+                    .map(|data| (data, handle.shape().to_vec()))
+            })
+            .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id()))
     }
 
-    fn push(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
+    fn push_complex(
+        &self,
+        data: BufferPayload,
+        shape: Vec<usize>,
+        element: runmat_accelerate_api::NumericElementType,
+    ) -> GpuTensorHandle {
+        use runmat_accelerate_api::allocation::{AllocationIdentity, AllocationLease};
+        assert!(matches!(
+            data,
+            BufferPayload::ComplexF32(_) | BufferPayload::ComplexF64(_)
+        ));
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let physical = ownership::complex_physical_for(data.len(), element);
         self.buffers
             .lock()
             .unwrap()
-            .insert(id, (data, shape.clone()));
-        let handle = GpuTensorHandle {
+            .insert(id, BufferRecord::new(data, shape.clone(), physical, false));
+        let registered = registered_provider().expect("registered fixture provider");
+        assert!(std::ptr::eq(self, registered.as_ref()));
+        let owner: runmat_accelerate_api::allocation::AllocationOwnerHandle = registered.clone();
+        let lease = AllocationLease::register(AllocationIdentity::new(0, id, 1), owner)
+            .expect("fixture complex allocation registration");
+        let handle = GpuTensorHandle::from_allocation(
+            lease,
+            runmat_accelerate_api::GpuTensorView::contiguous(shape),
+        )
+        .expect("fixture complex tensor view admission");
+        runmat_accelerate_api::mark_residency(&handle);
+        handle
+    }
+
+    fn push(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
+        self.push_typed(data, shape, runmat_accelerate_api::NumericElementType::F64)
+    }
+
+    fn push_typed(
+        &self,
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        element: runmat_accelerate_api::NumericElementType,
+    ) -> GpuTensorHandle {
+        self.push_with_class(data, shape, element, false)
+    }
+
+    fn push_logical(&self, data: Vec<bool>, shape: Vec<usize>) -> GpuTensorHandle {
+        self.push_with_class(
+            data.into_iter()
+                .map(|value| u8::from(value) as f64)
+                .collect(),
             shape,
-            device_id: 0,
-            buffer_id: id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
-                runmat_accelerate_api::NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            ),
-        };
+            runmat_accelerate_api::NumericElementType::U8,
+            true,
+        )
+    }
+
+    fn push_with_class(
+        &self,
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        element: runmat_accelerate_api::NumericElementType,
+        logical: bool,
+    ) -> GpuTensorHandle {
+        use runmat_accelerate_api::allocation::{AllocationIdentity, AllocationLease};
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let data = BufferPayload::from_values(data, element);
+        let physical = ownership::physical_for(data.len(), element);
+        self.buffers.lock().unwrap().insert(
+            id,
+            BufferRecord::new(data, shape.clone(), physical, logical),
+        );
+        let registered = registered_provider().expect("registered fixture provider");
+        assert!(std::ptr::eq(self, registered.as_ref()));
+        let owner: runmat_accelerate_api::allocation::AllocationOwnerHandle = registered.clone();
+        let lease = AllocationLease::register(AllocationIdentity::new(0, id, 1), owner)
+            .expect("fixture allocation registration");
+        let handle = GpuTensorHandle::from_allocation(
+            lease,
+            runmat_accelerate_api::GpuTensorView::contiguous(shape).with_logical(logical),
+        )
+        .expect("fixture tensor view admission");
         runmat_accelerate_api::mark_residency(&handle);
         handle
     }
 }
 
 impl AccelProvider for TestProvider {
+    fn propose_power_pair_geometry(
+        &self,
+        inputs: &[runmat_accelerate_api::ProviderRepresentation; 2],
+        descriptions: &[runmat_accelerate_api::PowerInputDescription; 2],
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerPairPhysicalProjection>,
+    > {
+        self.staged_power_pair_geometry(inputs, descriptions, frozen)
+    }
+
+    fn propose_power_probe(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        frozen: Option<&runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerProbePhysicalProposal>,
+    > {
+        self.staged_power_probe(base, exponent, frozen)
+    }
+
+    fn execute_power_probe_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerProbeRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::power_service::PowerProbeObserved,
+    > {
+        Box::pin(async move { self.staged_power_probe_execute(recipe) })
+    }
+
+    fn propose_power_evaluation(
+        &self,
+        base: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::power_service::PowerEvaluationPhysicalProposal>,
+    > {
+        self.staged_power_evaluation(base, exponent, domain)
+    }
+
+    fn execute_power_evaluation_recipe<'a>(
+        &'a self,
+        recipe: &'a runmat_accelerate_api::power_service::PowerEvaluationRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(async move { self.staged_power_evaluation_execute(recipe) })
+    }
+
+    fn propose_real_binary(
+        &self,
+        request: &runmat_accelerate_api::ProviderRealBinaryRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::ProviderRealBinaryPhysicalProposal>,
+    > {
+        self.staged_binary_proposal(request)
+    }
+
+    fn execute_real_binary_recipe<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+        recipe: &'a runmat_accelerate_api::ProviderRealBinaryRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealBinary,
+    > {
+        Box::pin(async move {
+            staged_image::require_unmanaged_metadata(admission)?;
+            self.staged_binary_execute(lhs, rhs, recipe)
+        })
+    }
+
+    fn propose_real_elementwise(
+        &self,
+        request: &runmat_accelerate_api::ProviderRealElementwiseRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::ProviderRealElementwisePhysicalProposal>,
+    > {
+        self.staged_real_proposal(request)
+    }
+
+    fn execute_real_elementwise_recipe<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        recipe: &'a runmat_accelerate_api::ProviderRealElementwiseRecipe,
+        admission: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(async move {
+            staged_image::require_unmanaged_metadata(admission)?;
+            self.staged_real_execute(input, recipe)
+        })
+    }
+
+    fn plan_dense_real_output_buffer_bytes(
+        &self,
+        output: &runmat_accelerate_api::ProviderRepresentation,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
+        if output.storage != ProviderStorage::DenseReal
+            || output.layout != runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+            || output.residency != runmat_accelerate_api::ProviderResidency::Device
+            || !matches!(
+                output.element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        {
+            return Ok(None);
+        }
+        Ok(output.checked_byte_len())
+    }
+
+    fn plan_power_output_buffer_bytes(
+        &self,
+        planned: &runmat_accelerate_api::power_service::PowerSymbolicPlan,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
+        Ok(planned
+            .physical_work(domain)
+            .and_then(|work| work.output.checked_byte_len()))
+    }
+
+    fn plan_ordered_real_mean(
+        &self,
+        source: &runmat_accelerate_api::ProviderRepresentation,
+        source_buffer_bytes: u64,
+        axes_zero_based: &[usize],
+        output_precision: ProviderPrecision,
+        nan_mode: runmat_accelerate_api::ProviderRealMeanNaNMode,
+    ) -> anyhow::Result<Option<runmat_accelerate_api::ProviderOrderedRealMeanRecipe>> {
+        self.staged_mean_plan(
+            source,
+            source_buffer_bytes,
+            axes_zero_based,
+            output_precision,
+            nan_mode,
+        )
+    }
+
+    fn prepare_ordered_real_mean_against_recipe(
+        &self,
+        source: &GpuTensorHandle,
+        recipe: &runmat_accelerate_api::ProviderOrderedRealMeanRecipe,
+    ) -> anyhow::Result<Option<runmat_accelerate_api::ProviderOrderedRealMean>> {
+        self.staged_mean_prepare(source, recipe)
+    }
+
+    fn execute_ordered_real_mean(
+        &self,
+        selected: runmat_accelerate_api::ProviderOrderedRealMean,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        runmat_accelerate_api::ProviderExecutedOrderedRealMean,
+    > {
+        staged_image::require_unmanaged_metadata(admission)?;
+        self.staged_mean_execute(selected)
+    }
+
     fn capability_snapshot(&self) -> ProviderCapabilitySnapshot {
         const OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
             ("transfer.upload", ProviderOperationFamily::Upload),
             ("transfer.download", ProviderOperationFamily::Download),
+            ("sin", ProviderOperationFamily::Elementwise),
+            ("minus", ProviderOperationFamily::Elementwise),
+            ("times", ProviderOperationFamily::Elementwise),
+            ("rdivide", ProviderOperationFamily::Elementwise),
+            ("single", ProviderOperationFamily::Elementwise),
+            ("double", ProviderOperationFamily::Elementwise),
+            (
+                runmat_builtins::POWER_CATALOG_ENTRY.identity.name,
+                ProviderOperationFamily::Elementwise,
+            ),
+            ("sum", ProviderOperationFamily::Reduction),
             ("fusion.elementwise", ProviderOperationFamily::Fusion),
-            ("fusion.reduction", ProviderOperationFamily::Fusion),
             ("fusion.matmul_epilogue", ProviderOperationFamily::Fusion),
-            ("fusion.centered_gram", ProviderOperationFamily::Fusion),
             (
                 "fusion.power_step_normalize",
                 ProviderOperationFamily::Fusion,
@@ -189,9 +474,15 @@ impl AccelProvider for TestProvider {
                     family: *family,
                 })
                 .collect(),
-            element_types: vec![ProviderElementType::F64],
+            element_types: vec![
+                ProviderElementType::F32,
+                ProviderElementType::F64,
+                ProviderElementType::ComplexF32,
+                ProviderElementType::ComplexF64,
+            ],
             max_rank: None,
             max_allocation_bytes: None,
+            sparse: None,
             concurrency: ProviderConcurrencyCapabilities {
                 spawn_handles: self.spawn_handle_concurrency(),
                 concurrent_dispatch: false,
@@ -211,9 +502,355 @@ impl AccelProvider for TestProvider {
             );
         }
         let capability = self.capability_snapshot();
+        if query.operation.0 == runmat_builtins::POWER_CATALOG_ENTRY.identity.name
+            && query.family == ProviderOperationFamily::Elementwise
+            && query.outputs.is_empty()
+            && query.inputs.len() == 2
+            && query.inputs[0].element_type == ProviderElementType::F32
+            && query.inputs[0].storage == ProviderStorage::DenseReal
+            && query.inputs[0].residency == runmat_accelerate_api::ProviderResidency::Device
+            && query.inputs[1].element_type == ProviderElementType::F64
+            && query.inputs[1].residency == runmat_accelerate_api::ProviderResidency::Host
+            && query.workload.numerical_domain
+                == runmat_accelerate_api::NumericalDomainEvidence::RealPower(
+                    runmat_accelerate_api::PowerResultDomain::Real,
+                )
+        {
+            if let Some(work) = &query.workload.real_power_scalar {
+                if runmat_accelerate_api::ExactSingleBasePower::for_control(work.control).is_some()
+                {
+                    if let Some(bytes) = work.input.as_ref().map(|input| input.requested_bytes()) {
+                        if let Some(request) =
+                            runmat_accelerate_api::power_service::exact_single_base_request(
+                                &query.inputs[0],
+                                work.control,
+                                runmat_accelerate_api::RealPowerOperand::Base,
+                                bytes,
+                            )
+                        {
+                            if let Ok(Some(physical)) = self.staged_real_proposal(&request) {
+                                return ProviderFeasibility::supported(ProviderResourceEstimate {
+                                    transient_bytes: Some(physical.uniform_buffer_bytes),
+                                    output_bytes: Some(physical.output_buffer_bytes),
+                                    dispatches: Some(physical.dispatches),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if query.operation.0 == runmat_builtins::POWER_CATALOG_ENTRY.identity.name
+            && query.family == ProviderOperationFamily::Elementwise
+            && query.outputs.is_empty()
+            && query.inputs.len() == 2
+            && query.workload.real_power_mode.is_some()
+            && matches!(
+                query.workload.numerical_domain,
+                runmat_accelerate_api::NumericalDomainEvidence::RealPower(_)
+            )
+            && query.inputs.iter().all(|input| {
+                input.storage == ProviderStorage::DenseReal
+                    && input.layout == runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+                    && matches!(
+                        input.element_type,
+                        ProviderElementType::F32 | ProviderElementType::F64
+                    )
+                    && input.checked_byte_len().is_some()
+            })
+            && query
+                .inputs
+                .iter()
+                .filter(|input| input.residency == runmat_accelerate_api::ProviderResidency::Device)
+                .count()
+                == 1
+            && query
+                .inputs
+                .iter()
+                .filter(|input| {
+                    input.residency == runmat_accelerate_api::ProviderResidency::Host
+                        && input.checked_element_count() == Some(1)
+                })
+                .count()
+                == 1
+        {
+            let base = &query.inputs[0];
+            let exponent = &query.inputs[1];
+            let output_shape = base
+                .shape
+                .iter()
+                .copied()
+                .map(usize::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+                .zip(
+                    exponent
+                        .shape
+                        .iter()
+                        .copied()
+                        .map(usize::try_from)
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok(),
+                )
+                .and_then(|(base, exponent)| {
+                    runmat_types::geometry::broadcast_concrete_shape(&base, &exponent).ok()
+                });
+            if let Some(shape) = output_shape {
+                let elements = shape.iter().try_fold(1_u64, |n, &extent| {
+                    n.checked_mul(u64::try_from(extent).ok()?)
+                });
+                // Symbolic feasibility has one device operand and one host
+                // scalar. The paired physical hook sees two device operands
+                // only after the exact scalar upload (and any widening).
+                let element_width = match query.workload.real_power_mode {
+                    Some(runmat_accelerate_api::RealPowerArithmeticMode::NativeSingle) => 4,
+                    Some(_) => 8,
+                    None => {
+                        return ProviderFeasibility::rejected(
+                            runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                            "test_provider.power_mode.unavailable",
+                        )
+                    }
+                };
+                let complex_width = if query.workload.numerical_domain
+                    == runmat_accelerate_api::NumericalDomainEvidence::RealPower(
+                        runmat_accelerate_api::PowerResultDomain::Complex,
+                    ) {
+                    2
+                } else {
+                    1
+                };
+                if let Some(output_bytes) = elements
+                    .and_then(|n| n.checked_mul(element_width))
+                    .and_then(|n| n.checked_mul(complex_width))
+                {
+                    return ProviderFeasibility::supported(ProviderResourceEstimate {
+                        transient_bytes: Some(0),
+                        output_bytes: Some(output_bytes),
+                        dispatches: Some(1),
+                    });
+                }
+            }
+        }
+        if query.operation.0 == "transfer.upload"
+            && query.family == ProviderOperationFamily::Upload
+            && query.outputs.len() == 1
+            && runmat_accelerate_api::class_preserving_upload_query(query.outputs.clone()).as_ref()
+                == Some(query)
+            && matches!(
+                query.outputs[0].element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        {
+            return ProviderFeasibility::supported(ProviderResourceEstimate {
+                transient_bytes: Some(0),
+                output_bytes: query.outputs[0].checked_byte_len(),
+                dispatches: Some(1),
+            });
+        }
+        if matches!(query.operation.0.as_str(), "single" | "double")
+            && query.family == ProviderOperationFamily::Elementwise
+            && query.inputs.len() == 1
+            && query.outputs.len() == 1
+            && query.inputs[0].shape == query.outputs[0].shape
+            && query.inputs[0].storage == ProviderStorage::DenseReal
+            && query.outputs[0].storage == ProviderStorage::DenseReal
+            && query.inputs[0].residency == runmat_accelerate_api::ProviderResidency::Device
+            && query.outputs[0].residency == runmat_accelerate_api::ProviderResidency::Device
+            && matches!(
+                query.inputs[0].element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        {
+            let target = if query.operation.0 == "single" {
+                ProviderPrecision::F32
+            } else {
+                ProviderPrecision::F64
+            };
+            if query.outputs[0].element_type == ProviderElementType::from(target)
+                && query.workload
+                    == (runmat_accelerate_api::ProviderWorkload {
+                        preparation_route: Some(
+                            runmat_accelerate_api::ProviderPreparationRoute::FloatingCast {
+                                target,
+                            },
+                        ),
+                        ..runmat_accelerate_api::ProviderWorkload::default()
+                    })
+            {
+                let changing = query.inputs[0].element_type != query.outputs[0].element_type;
+                let output_bytes = query.outputs[0].checked_byte_len();
+                return ProviderFeasibility::supported(ProviderResourceEstimate {
+                    transient_bytes: output_bytes,
+                    output_bytes,
+                    dispatches: Some(u32::from(changing)),
+                });
+            }
+        }
+        let native_single_image = query.operation
+            == ProviderOperationIdentity::new(
+                runmat_accelerate::placement::fusion_operation_token(&FusionKind::ImageNormalize),
+            );
+        let native_single_elementwise_output = query.operation
+            == ProviderOperationIdentity::new(
+                runmat_accelerate::placement::fusion_operation_token(&FusionKind::ElementwiseChain),
+            );
+        let ordinary = match (
+            query.operation.0.as_str(),
+            query.family,
+            query.inputs.as_slice(),
+        ) {
+            ("minus" | "times" | "rdivide", ProviderOperationFamily::Elementwise, [lhs, rhs])
+                if query.outputs.is_empty()
+                    && lhs.element_type == rhs.element_type
+                    && matches!(
+                        lhs.element_type,
+                        ProviderElementType::F32 | ProviderElementType::F64
+                    )
+                    && [lhs, rhs].iter().all(|input| {
+                        input.storage == ProviderStorage::DenseReal
+                            && input.layout
+                                == runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+                            && matches!(
+                                input.residency,
+                                runmat_accelerate_api::ProviderResidency::Device
+                                    | runmat_accelerate_api::ProviderResidency::Host
+                            )
+                    })
+                    && [lhs, rhs].iter().any(|input| {
+                        input.residency == runmat_accelerate_api::ProviderResidency::Device
+                    }) =>
+            {
+                let shapes = lhs
+                    .shape
+                    .iter()
+                    .copied()
+                    .map(usize::try_from)
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()
+                    .zip(
+                        rhs.shape
+                            .iter()
+                            .copied()
+                            .map(usize::try_from)
+                            .collect::<Result<Vec<_>, _>>()
+                            .ok(),
+                    );
+                shapes.and_then(|(lhs_shape, rhs_shape)| {
+                    runmat_types::geometry::broadcast_concrete_shape(&lhs_shape, &rhs_shape)
+                        .ok()
+                        .and_then(|shape| {
+                            let expansions =
+                                u64::from(lhs_shape != shape) + u64::from(rhs_shape != shape);
+                            shape
+                                .iter()
+                                .copied()
+                                .try_fold(1_u64, |n, dim| n.checked_mul(u64::try_from(dim).ok()?))
+                                .and_then(|count| {
+                                    count.checked_mul(
+                                        if lhs.element_type == ProviderElementType::F32 {
+                                            4
+                                        } else {
+                                            8
+                                        },
+                                    )
+                                })
+                                .and_then(|output| {
+                                    let uploads = [lhs, rhs]
+                                        .iter()
+                                        .filter(|input| {
+                                            input.residency
+                                                == runmat_accelerate_api::ProviderResidency::Host
+                                        })
+                                        .try_fold(0_u64, |bytes, input| {
+                                            bytes.checked_add(input.checked_byte_len()?)
+                                        })?;
+                                    let dispatches = u32::try_from(expansions)
+                                        .ok()?
+                                        .checked_add(u32::from(uploads > 0))?
+                                        .checked_add(1)?;
+                                    output
+                                        .checked_mul(expansions)
+                                        .and_then(|scratch| scratch.checked_add(uploads))
+                                        .map(|scratch| (output, scratch, dispatches))
+                                })
+                        })
+                })
+            }
+            ("sin", ProviderOperationFamily::Elementwise, [input])
+                if input.element_type == ProviderElementType::F64
+                    && input.storage == ProviderStorage::DenseReal
+                    && query.outputs.is_empty() =>
+            {
+                input.checked_byte_len().map(|bytes| (bytes, bytes, 1))
+            }
+            ("single", ProviderOperationFamily::Elementwise, [input])
+                if matches!(
+                    input.element_type,
+                    ProviderElementType::F32 | ProviderElementType::F64
+                ) && input.storage == ProviderStorage::DenseReal
+                    && query.outputs.is_empty() =>
+            {
+                input
+                    .checked_element_count()
+                    .and_then(|count| count.checked_mul(4))
+                    .map(|bytes| (bytes, bytes, 1))
+            }
+            ("double", ProviderOperationFamily::Elementwise, [input])
+                if matches!(
+                    input.element_type,
+                    ProviderElementType::F32 | ProviderElementType::F64
+                ) && input.storage == ProviderStorage::DenseReal
+                    && input.layout
+                        == runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+                    && input.residency == runmat_accelerate_api::ProviderResidency::Device
+                    && query.outputs.is_empty() =>
+            {
+                input
+                    .checked_element_count()
+                    .and_then(|count| count.checked_mul(8))
+                    .map(|bytes| (bytes, bytes, 1))
+            }
+            ("sum", ProviderOperationFamily::Reduction, [input])
+                if input.element_type == ProviderElementType::F64
+                    && input.storage == ProviderStorage::DenseReal
+                    && input.shape.len() == 2
+                    && query.outputs.is_empty() =>
+            {
+                query.workload.sum.as_ref().and_then(|route| {
+                    if route.axes.iter().any(|axis| *axis > 1) {
+                        return None;
+                    }
+                    let mut shape = input.shape.clone();
+                    for &axis in &route.axes {
+                        *shape.get_mut(usize::try_from(axis).ok()?)? = 1;
+                    }
+                    shape
+                        .into_iter()
+                        .try_fold(8_u64, |bytes, extent| bytes.checked_mul(extent))
+                        .map(|bytes| (bytes, bytes, 1))
+                })
+            }
+            _ => None,
+        };
+        if let Some((bytes, scratch, dispatches)) = ordinary {
+            return ProviderFeasibility::supported(ProviderResourceEstimate {
+                transient_bytes: Some(scratch),
+                output_bytes: Some(bytes),
+                dispatches: Some(dispatches),
+            });
+        }
         let supported = capability.supports_operation(&query.operation, query.family)
-            && query.inputs.iter().chain(&query.outputs).all(|value| {
-                value.element_type == ProviderElementType::F64
+            && query.inputs.iter().all(|value| {
+                (value.element_type == ProviderElementType::F64
+                    || (native_single_image && value.element_type == ProviderElementType::F32))
+                    && value.storage == ProviderStorage::DenseReal
+                    && value.checked_byte_len().is_some()
+            })
+            && query.outputs.iter().all(|value| {
+                (value.element_type == ProviderElementType::F64
+                    || (value.element_type == ProviderElementType::F32
+                        && (native_single_image || native_single_elementwise_output)))
                     && value.storage == ProviderStorage::DenseReal
                     && value.checked_byte_len().is_some()
             });
@@ -248,11 +885,98 @@ impl AccelProvider for TestProvider {
                     execution_ns: 1,
                     ..ExecutionCostComponents::default()
                 },
-                scratch_bytes: 0,
+                scratch_bytes: Some(0),
                 confidence: EstimateConfidence::Exact,
                 source: EstimateSource::Provider,
             },
         })
+    }
+
+    fn upload_physical_evidence(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderUploadPhysicalEvidence> {
+        if query.operation.0 != "transfer.upload" || query.family != ProviderOperationFamily::Upload
+        {
+            return None;
+        }
+        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
+            return None;
+        };
+        // The F32 software upload first widens the borrowed source into a
+        // temporary f64 Vec before constructing the retained F32 buffer.
+        // Count that transient and the copied shape separately from output.
+        let output = &query.outputs[0];
+        let host_workspace_bytes = match output.element_type {
+            ProviderElementType::F32 => output.checked_element_count()?.checked_mul(8)?,
+            ProviderElementType::F64 => 0,
+            _ => return None,
+        }
+        .checked_add(
+            u64::try_from(output.shape.len())
+                .ok()?
+                .checked_mul(u64::try_from(std::mem::size_of::<usize>()).ok()?)?,
+        )?;
+        Some(runmat_accelerate_api::ProviderUploadPhysicalEvidence {
+            output_requested_bytes: estimate.output_bytes?,
+            host_workspace_bytes: runmat_execution::ResourceByteBound::Known(host_workspace_bytes),
+            provider_scratch_bytes: runmat_execution::ResourceByteBound::Known(0),
+            completion_queue_slots: 1,
+        })
+    }
+
+    fn numeric_upload_physical_evidence(
+        &self,
+        query: &ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence> {
+        let upload = self.upload_physical_evidence(query)?;
+        Some(
+            runmat_accelerate_api::ProviderNumericUploadPhysicalEvidence {
+                output_requested_bytes: upload.output_requested_bytes,
+                provider_scratch_bytes: upload.provider_scratch_bytes,
+                completion_queue_slots: upload.completion_queue_slots,
+            },
+        )
+    }
+
+    fn floating_cast_physical_evidence(
+        &self,
+        input: &runmat_accelerate_api::ProviderRepresentation,
+        target: ProviderPrecision,
+    ) -> Option<runmat_accelerate_api::ProviderFloatingCastPhysicalEvidence> {
+        let (source_precision, component_lanes) = match (input.element_type, input.storage) {
+            (ProviderElementType::F32, ProviderStorage::DenseReal)
+            | (ProviderElementType::F64, ProviderStorage::DenseReal) => (input.element_type, 1),
+            (ProviderElementType::ComplexF32, ProviderStorage::DenseComplexInterleaved) => {
+                (ProviderElementType::F32, 2)
+            }
+            (ProviderElementType::ComplexF64, ProviderStorage::DenseComplexInterleaved) => {
+                (ProviderElementType::F64, 2)
+            }
+            _ => return None,
+        };
+        if source_precision == ProviderElementType::from(target)
+            || input.layout != runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+            || input.residency != runmat_accelerate_api::ProviderResidency::Device
+        {
+            return None;
+        }
+        let width = if target == ProviderPrecision::F32 {
+            4
+        } else {
+            8
+        };
+        Some(
+            runmat_accelerate_api::ProviderFloatingCastPhysicalEvidence {
+                output_requested_bytes: input
+                    .checked_element_count()?
+                    .checked_mul(width)?
+                    .checked_mul(component_lanes)?,
+                uniform_buffer_bytes: 0,
+                dispatches: 1,
+                queue_slots: 1,
+            },
+        )
     }
 
     fn gather_linear(
@@ -270,12 +994,12 @@ impl AccelProvider for TestProvider {
                     "gather_linear: index {} (pos {}) out of bounds for buffer {}",
                     lin,
                     pos,
-                    source.buffer_id
+                    source.buffer_id()
                 ));
             }
             out.push(data[lin]);
         }
-        Ok(self.push(out, output_shape.to_vec()))
+        Ok(self.push_typed(out, output_shape.to_vec(), source.physical().element_type()))
     }
 
     fn scatter_linear(
@@ -294,56 +1018,83 @@ impl AccelProvider for TestProvider {
         }
         let mut guard = self.buffers.lock().unwrap();
         let target_buf = guard
-            .get_mut(&target.buffer_id)
-            .ok_or_else(|| anyhow!("scatter_linear: unknown target {}", target.buffer_id))?;
+            .get_mut(&target.buffer_id())
+            .ok_or_else(|| anyhow!("scatter_linear: unknown target {}", target.buffer_id()))?;
+        if !target_buf.owns(target) {
+            bail!("scatter_linear: target allocation is not owned by this provider");
+        }
         for (pos, &idx) in indices.iter().enumerate() {
             let lin = idx as usize;
-            if lin >= target_buf.0.len() {
+            if lin >= target_buf.data.len() {
                 return Err(anyhow!(
                     "scatter_linear: index {} (pos {}) out of bounds for buffer {}",
                     lin,
                     pos,
-                    target.buffer_id
+                    target.buffer_id()
                 ));
             }
-            target_buf.0[lin] = vals[pos];
+            target_buf
+                .data
+                .write(lin, vals[pos])
+                .map_err(|error| anyhow!(error))?;
         }
         Ok(())
     }
 
     fn precision(&self) -> ProviderPrecision {
-        ProviderPrecision::F64
+        if self.report_f32.load(Ordering::Relaxed) {
+            ProviderPrecision::F32
+        } else {
+            ProviderPrecision::F64
+        }
+    }
+
+    fn supports_shader_requirements(
+        &self,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
+    ) -> bool {
+        // This software fixture executes the selected F64 math/IEEE forms;
+        // the WGPU provider instead checks enabled device features.
+        matches!(
+            requirements,
+            runmat_accelerate_api::ProviderShaderRequirements::Basic
+                | runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords
+        )
     }
 
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         Ok(self.push(host.data.to_vec(), host.shape.to_vec()))
     }
 
-    fn upload_numeric(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
         match (host.data, host.storage) {
-            (HostNumericDataView::F64(data), runmat_accelerate_api::GpuTensorStorage::Real) => self
-                .upload(&HostTensorView {
+            (HostNumericDataView::F64(data), runmat_accelerate_api::GpuTensorStorage::Real) => {
+                Ok(self.upload(&HostTensorView {
                     data,
                     shape: host.shape,
-                }),
+                })?)
+            }
             (HostNumericDataView::F32(data), runmat_accelerate_api::GpuTensorStorage::Real) => {
-                let mut handle = self.push(
+                let handle = self.push_typed(
                     data.iter().copied().map(f64::from).collect(),
                     host.shape.to_vec(),
-                );
-                handle.descriptor = runmat_accelerate_api::GpuTensorDescriptor::numeric(
                     runmat_accelerate_api::NumericElementType::F32,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
                 );
                 Ok(handle)
             }
-            _ => bail!("test provider only supports real floating-point uploads"),
+            _ => Err(
+                anyhow::anyhow!("test provider only supports real floating-point uploads").into(),
+            ),
         }
     }
 
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
+            suspension::pending_download_if_armed(handle).await;
             let (data, shape) = self.pull(handle)?;
             Ok(HostTensorOwned {
                 data,
@@ -358,34 +1109,106 @@ impl AccelProvider for TestProvider {
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
-            let (data, shape) = self.pull(handle)?;
-            let data = match handle.descriptor.element_type {
-                Some(runmat_accelerate_api::NumericElementType::F32) => {
-                    HostNumericDataOwned::F32(data.into_iter().map(|value| value as f32).collect())
+            suspension::pending_download_if_armed(handle).await;
+            self.numeric_downloads.fetch_add(1, Ordering::Relaxed);
+            let data = {
+                let guard = self.buffers.lock().unwrap();
+                let record = guard
+                    .get(&handle.buffer_id())
+                    .filter(|record| record.owns(handle))
+                    .ok_or_else(|| anyhow!("numeric download source is not live"))?;
+                match &record.data {
+                    BufferPayload::F32(values) => HostNumericDataOwned::F32(values.clone()),
+                    BufferPayload::F64(values) => HostNumericDataOwned::F64(values.clone()),
+                    BufferPayload::U8(values) => HostNumericDataOwned::U8(values.clone()),
+                    BufferPayload::ComplexF32(values) => HostNumericDataOwned::F32(
+                        values
+                            .iter()
+                            .flat_map(|(real, imag)| [*real, *imag])
+                            .collect(),
+                    ),
+                    BufferPayload::ComplexF64(values) => HostNumericDataOwned::F64(
+                        values
+                            .iter()
+                            .flat_map(|(real, imag)| [*real, *imag])
+                            .collect(),
+                    ),
                 }
-                Some(runmat_accelerate_api::NumericElementType::F64) => {
-                    HostNumericDataOwned::F64(data)
-                }
-                other => bail!("test provider cannot download numeric element type {other:?}"),
             };
             Ok(HostNumericTensorOwned {
                 data,
-                shape,
+                shape: handle.shape().to_vec(),
                 storage: handle
-                    .descriptor
+                    .descriptor()
                     .storage
                     .unwrap_or(runmat_accelerate_api::GpuTensorStorage::Real),
             })
         })
     }
 
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.buffers.lock().unwrap().remove(&handle.buffer_id);
-        Ok(())
-    }
-
     fn device_info(&self) -> String {
         "test-provider".to_string()
+    }
+
+    fn query_numeric_download_feasibility(
+        &self,
+        source: &GpuTensorHandle,
+        query: &ProviderFeasibilityQuery,
+    ) -> ProviderFeasibility {
+        // The deterministic fixture's pull implements only its exact owned
+        // contiguous view, not arbitrary strided aliases.
+        if !query.matches_numeric_download(source)
+            || !matches!(
+                source.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::F32
+                    | runmat_accelerate_api::NumericElementType::F64
+            )
+            || !self
+                .buffers
+                .lock()
+                .unwrap()
+                .get(&source.buffer_id())
+                .is_some_and(|record| record.owns(source) && record.shape == source.shape())
+            || source.view().layout() != runmat_accelerate_api::GpuTensorLayout::Contiguous
+        {
+            return ProviderFeasibility::rejected(
+                runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                "test_provider.exact_native_download",
+            );
+        }
+        ProviderFeasibility::supported(ProviderResourceEstimate {
+            transient_bytes: Some(0),
+            output_bytes: runmat_accelerate_api::checked_numeric_download_host_payload_bytes(
+                source,
+            ),
+            dispatches: Some(0),
+        })
+    }
+
+    fn download_numeric_host_workspace_bound(
+        &self,
+        source: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        let bytes = Some(source.physical().payload_bytes());
+        match bytes.and_then(|bytes| {
+            bytes.checked_add(
+                u64::try_from(source.shape().len())
+                    .ok()?
+                    .checked_mul(std::mem::size_of::<usize>() as u64)?,
+            )
+        }) {
+            Some(bytes) => runmat_execution::ResourceByteBound::Known(bytes),
+            None => runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoPeakMemoryBound,
+            ),
+        }
+    }
+
+    fn download_numeric_provider_scratch_bound(
+        &self,
+        _: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Known(0)
     }
 
     fn device_info_struct(&self) -> ApiDeviceInfo {
@@ -403,15 +1226,22 @@ impl AccelProvider for TestProvider {
         Ok(true)
     }
 
+    fn logical_isnan(&self, handle: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        let (data, shape) = self.pull(handle)?;
+        Ok(self.push_logical(
+            data.into_iter().map(|value| value.is_nan()).collect(),
+            shape,
+        ))
+    }
+
     fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow!("pagefun not supported by test provider"))
     }
 
     fn fspecial(&self, request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
-        let spec =
-            test_fspecial_spec_from_request(&request.filter).map_err(|error| anyhow!(error))?;
+        let spec = test_fspecial_spec_from_request(&request.filter);
         let tensor = spec.generate_tensor().map_err(|error| anyhow!(error))?;
-        Ok(self.push(tensor.materialize_f64().clone(), tensor.shape.clone()))
+        Ok(self.push(tensor.materialize_f64().clone(), tensor.shape().to_vec()))
     }
 
     fn covariance<'a>(
@@ -420,57 +1250,67 @@ impl AccelProvider for TestProvider {
         second: Option<&'a GpuTensorHandle>,
         weights: Option<&'a GpuTensorHandle>,
         options: &'a CovarianceOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if second.is_some() {
-                bail!("test provider: covariance secondary input unsupported");
-            }
-            if weights.is_some() || options.has_weight_vector {
-                bail!("test provider: covariance weights unsupported");
-            }
-            if options.rows != CovRows::All {
-                bail!(
-                    "test provider: covariance row option {:?} unsupported",
-                    options.rows
-                );
-            }
-            let (data, shape) = self.pull(matrix)?;
-            let rows = shape.first().copied().unwrap_or(1);
-            let cols = if shape.len() > 1 { shape[1] } else { 1 };
-            if rows == 0 || cols == 0 {
-                return Ok(self.push(Vec::new(), vec![cols, cols]));
-            }
-            let mut means = vec![0.0f64; cols];
-            for (c, mean) in means.iter_mut().enumerate().take(cols) {
-                for r in 0..rows {
-                    let idx = r + rows * c;
-                    if let Some(value) = data.get(idx) {
-                        *mean += *value;
-                    }
+            let result: anyhow::Result<GpuTensorHandle> = async move {
+                if second.is_some() {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "test provider: covariance secondary input unsupported",
+                    ));
                 }
-                *mean /= rows as f64;
-            }
-            let denom = match options.normalization {
-                CovNormalization::Unbiased => (rows as f64) - 1.0,
-                CovNormalization::Biased => rows as f64,
-            };
-            let denom = if denom <= 0.0 { 1.0 } else { denom };
-            let mut cov = vec![0.0f64; cols * cols];
-            for c1 in 0..cols {
-                for c2 in 0..cols {
-                    let mut acc = 0.0f64;
+                if weights.is_some() || options.has_weight_vector {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "test provider: covariance weights unsupported",
+                    ));
+                }
+                if options.rows != CovRows::All {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        format!(
+                            "test provider: covariance row option {:?} unsupported",
+                            options.rows
+                        ),
+                    ));
+                }
+                let (data, shape) = self.pull(matrix)?;
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = if shape.len() > 1 { shape[1] } else { 1 };
+                if rows == 0 || cols == 0 {
+                    return Ok(self.push(Vec::new(), vec![cols, cols]));
+                }
+                let mut means = vec![0.0f64; cols];
+                for (c, mean) in means.iter_mut().enumerate().take(cols) {
                     for r in 0..rows {
-                        let idx1 = r + rows * c1;
-                        let idx2 = r + rows * c2;
-                        let val1 = data.get(idx1).copied().unwrap_or(0.0);
-                        let val2 = data.get(idx2).copied().unwrap_or(0.0);
-                        acc += (val1 - means[c1]) * (val2 - means[c2]);
+                        let idx = r + rows * c;
+                        if let Some(value) = data.get(idx) {
+                            *mean += *value;
+                        }
                     }
-                    let idx = c1 + cols * c2;
-                    cov[idx] = acc / denom;
+                    *mean /= rows as f64;
                 }
+                let denom = match options.normalization {
+                    CovNormalization::Unbiased => (rows as f64) - 1.0,
+                    CovNormalization::Biased => rows as f64,
+                };
+                let denom = if denom <= 0.0 { 1.0 } else { denom };
+                let mut cov = vec![0.0f64; cols * cols];
+                for c1 in 0..cols {
+                    for c2 in 0..cols {
+                        let mut acc = 0.0f64;
+                        for r in 0..rows {
+                            let idx1 = r + rows * c1;
+                            let idx2 = r + rows * c2;
+                            let val1 = data.get(idx1).copied().unwrap_or(0.0);
+                            let val2 = data.get(idx2).copied().unwrap_or(0.0);
+                            acc += (val1 - means[c1]) * (val2 - means[c2]);
+                        }
+                        let idx = c1 + cols * c2;
+                        cov[idx] = acc / denom;
+                    }
+                }
+                Ok(self.push(cov, vec![cols, cols]))
             }
-            Ok(self.push(cov, vec![cols, cols]))
+            .await;
+            result.map_err(Into::into)
         })
     }
 
@@ -496,7 +1336,51 @@ impl AccelProvider for TestProvider {
             }
             let plane = height * width;
             if plane == 0 {
-                return Ok(self.push(Vec::new(), shape));
+                return Ok(self.push_typed(Vec::new(), shape, input.physical().element_type()));
+            }
+
+            if input.physical().element_type() == runmat_accelerate_api::NumericElementType::F32 {
+                let data = data
+                    .into_iter()
+                    .map(|value| value as f32)
+                    .collect::<Vec<_>>();
+                let mut out = vec![0.0f32; data.len()];
+                for b in 0..batch {
+                    let mut sum = 0.0f32;
+                    for idx in 0..plane {
+                        sum += data[b + batch * idx];
+                    }
+                    let mean = sum / plane as f32;
+                    let mut sq_sum = 0.0f32;
+                    for idx in 0..plane {
+                        let diff = data[b + batch * idx] - mean;
+                        sq_sum += diff * diff;
+                    }
+                    let sigma = (sq_sum / plane as f32 + desc.epsilon as f32).sqrt();
+                    let inv_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+                    for idx in 0..plane {
+                        let offset = b + batch * idx;
+                        let mut value = (data[offset] - mean) * inv_sigma;
+                        if let Some(gain) = desc.gain {
+                            value *= gain as f32;
+                        }
+                        if let Some(bias) = desc.bias {
+                            value += bias as f32;
+                        }
+                        if desc.clamp_zero {
+                            value = value.max(0.0);
+                        }
+                        if let Some(gamma) = desc.gamma {
+                            value = value.powf(gamma as f32);
+                        }
+                        out[offset] = value;
+                    }
+                }
+                return Ok(self.push_typed(
+                    out.into_iter().map(f64::from).collect(),
+                    shape,
+                    runmat_accelerate_api::NumericElementType::F32,
+                ));
             }
 
             let mut out = data.clone();
@@ -595,8 +1479,13 @@ impl AccelProvider for TestProvider {
         &'a self,
         _a: &'a GpuTensorHandle,
         _compute_left: bool,
-    ) -> AccelProviderFuture<'a, ProviderEigResult> {
-        Box::pin(async move { bail!("eig not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderEigResult> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "eig not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn linsolve<'a>(
@@ -604,86 +1493,123 @@ impl AccelProvider for TestProvider {
         _lhs: &'a GpuTensorHandle,
         _rhs: &'a GpuTensorHandle,
         _options: &'a ProviderLinsolveOptions,
-    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
-        Box::pin(async move { bail!("linsolve not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderLinsolveResult> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "linsolve not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn pinv<'a>(
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _options: ProviderPinvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { bail!("pinv not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "pinv not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn cond<'a>(
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _norm: ProviderCondNorm,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { bail!("cond not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "cond not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn norm<'a>(
         &'a self,
         _tensor: &'a GpuTensorHandle,
         _order: ProviderNormOrder,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { bail!("norm not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "norm not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn reduce_sum_dim<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let (data, shape) = self.pull(a)?;
-            if shape.len() != 2 {
-                bail!("reduce_sum_dim: only 2D supported in test provider");
-            }
-            let rows = shape[0];
-            let cols = shape[1];
-            match dim {
-                0 => {
-                    // Column-wise: sum over rows -> shape [1, cols]
-                    let mut out = vec![0.0f64; cols];
-                    for c in 0..cols {
-                        let mut acc = 0.0f64;
-                        let mut saw_nan = false;
-                        for r in 0..rows {
-                            let v = data[r + c * rows];
-                            if v.is_nan() {
-                                saw_nan = true;
-                                break;
-                            }
-                            acc += v;
-                        }
-                        out[c] = if saw_nan { f64::NAN } else { acc };
-                    }
-                    Ok(self.push(out, vec![1, cols]))
+            let result: anyhow::Result<GpuTensorHandle> = async {
+                let (data, shape) = self.pull(a)?;
+                if shape.len() != 2 {
+                    bail!("reduce_sum_dim: only 2D supported in test provider");
                 }
-                1 => {
-                    // Row-wise: sum over cols -> shape [rows, 1]
-                    let mut out = vec![0.0f64; rows];
-                    for r in 0..rows {
-                        let mut acc = 0.0f64;
-                        let mut saw_nan = false;
+                let rows = shape[0];
+                let cols = shape[1];
+                match dim {
+                    0 => {
+                        // Column-wise: sum over rows -> shape [1, cols]
+                        let mut out = vec![0.0f64; cols];
                         for c in 0..cols {
-                            let v = data[r + c * rows];
-                            if v.is_nan() {
-                                saw_nan = true;
-                                break;
+                            let mut acc = 0.0f64;
+                            let mut saw_nan = false;
+                            for r in 0..rows {
+                                let v = data[r + c * rows];
+                                if v.is_nan() {
+                                    saw_nan = true;
+                                    break;
+                                }
+                                acc += v;
                             }
-                            acc += v;
+                            out[c] = if saw_nan { f64::NAN } else { acc };
                         }
-                        out[r] = if saw_nan { f64::NAN } else { acc };
+                        Ok(self.push(out, vec![1, cols]))
                     }
-                    Ok(self.push(out, vec![rows, 1]))
+                    1 => {
+                        // Row-wise: sum over cols -> shape [rows, 1]
+                        let mut out = vec![0.0f64; rows];
+                        for r in 0..rows {
+                            let mut acc = 0.0f64;
+                            let mut saw_nan = false;
+                            for c in 0..cols {
+                                let v = data[r + c * rows];
+                                if v.is_nan() {
+                                    saw_nan = true;
+                                    break;
+                                }
+                                acc += v;
+                            }
+                            out[r] = if saw_nan { f64::NAN } else { acc };
+                        }
+                        Ok(self.push(out, vec![rows, 1]))
+                    }
+                    _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
                 }
-                _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
             }
+            .await;
+            result.map_err(Into::into)
         })
+    }
+
+    fn map_nan_to_zero(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (data, shape) = self.pull(input)?;
+        Ok(self.push(
+            data.into_iter()
+                .map(|value| if value.is_nan() { 0.0 } else { value })
+                .collect(),
+            shape,
+        ))
     }
 
     fn reduce_any_dim<'a>(
@@ -697,10 +1623,46 @@ impl AccelProvider for TestProvider {
 
     fn reduce_any<'a>(
         &'a self,
-        _a: &'a GpuTensorHandle,
+        a: &'a GpuTensorHandle,
         _omit_nan: bool,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { bail!("reduce_any not supported by test provider") })
+        Box::pin(async move {
+            if !runmat_accelerate_api::handle_is_logical(a) {
+                bail!("reduce_any requires logical input");
+            }
+            let (data, _) = self.pull(a)?;
+            Ok(self.push_logical(vec![data.iter().any(|value| *value != 0.0)], vec![1, 1]))
+        })
+    }
+
+    fn reduce_min<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (data, _) = self.pull(a)?;
+            let minimum = data
+                .into_iter()
+                .filter(|value| !value.is_nan())
+                .reduce(f64::min)
+                .ok_or_else(|| anyhow!("reduce_min requires a nonempty numeric input"))?;
+            Ok(self.push_typed(vec![minimum], vec![1, 1], a.physical().element_type()))
+        })
+    }
+
+    fn reduce_max<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let (data, _) = self.pull(a)?;
+            let maximum = data
+                .into_iter()
+                .filter(|value| !value.is_nan())
+                .reduce(f64::max)
+                .ok_or_else(|| anyhow!("reduce_max requires a nonempty numeric input"))?;
+            Ok(self.push_typed(vec![maximum], vec![1, 1], a.physical().element_type()))
+        })
     }
 
     fn reduce_all_dim<'a>(
@@ -733,7 +1695,7 @@ impl AccelProvider for TestProvider {
         &'a self,
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let (lhs_data, lhs_shape) = self.pull(lhs)?;
             let (rhs_data, rhs_shape) = self.pull(rhs)?;
@@ -745,7 +1707,7 @@ impl AccelProvider for TestProvider {
             let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
             let data = result.materialize_f64();
-            Ok(self.push(data, result.shape))
+            Ok(self.push(data, result.shape().to_vec()))
         })
     }
 
@@ -757,8 +1719,8 @@ impl AccelProvider for TestProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         options: &'a UniqueOptions,
-    ) -> AccelProviderFuture<'a, UniqueResult> {
-        Box::pin(async move {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<UniqueResult>> {
+        let pending = async move {
             let (data, shape) = self.pull(handle)?;
             let tensor =
                 Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
@@ -766,9 +1728,16 @@ impl AccelProvider for TestProvider {
                 runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
                     tensor, options,
                 )
-                .map_err(|err| anyhow!("unique (test provider): {err}"))?;
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
             eval.into_numeric_unique_result()
-                .map_err(|err| anyhow!("unique (test provider): {err}"))
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
+        };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
         })
     }
 
@@ -776,171 +1745,403 @@ impl AccelProvider for TestProvider {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _options: &'a CorrcoefOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow!("corrcoef (test provider): not implemented")) })
-    }
-
-    fn fused_elementwise(
-        &self,
-        shader: &str,
-        inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
-        len: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        let parsed = ParsedShader::parse(shader)?;
-        if parsed.tmp_exprs.len() > 1024 {
-            bail!(
-                "test provider: excessive temporary count {}",
-                parsed.tmp_exprs.len()
-            );
-        }
-
-        let mut input_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
-        let mut input_shapes: Vec<Vec<usize>> = Vec::with_capacity(inputs.len());
-        for handle in inputs {
-            let (data, shape) = self.pull(handle)?;
-            input_values.push(data);
-            input_shapes.push(shape);
-        }
-
-        let max_input_len = input_values
-            .iter()
-            .map(|data| data.len())
-            .max()
-            .unwrap_or(0);
-        let output_elements = output_shape.iter().product::<usize>();
-        let total = output_elements.max(len).max(max_input_len).max(1);
-
-        let mut out = Vec::with_capacity(total);
-        for idx in 0..total {
-            let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
-            for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
-                let value = evaluate_expression(
-                    expr,
-                    idx,
-                    &input_values,
-                    &input_shapes,
-                    output_shape,
-                    &tmp_values,
-                )
-                .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
-                tmp_values[slot] = Some(value);
-            }
-            let result = evaluate_expression(
-                &parsed.output_expr,
-                idx,
-                &input_values,
-                &input_shapes,
-                output_shape,
-                &tmp_values,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "corrcoef (test provider): not implemented",
             )
-            .with_context(|| format!("evaluating output expression for idx {idx}"))?;
-            out.push(result);
-        }
-
-        let mut shape = if output_elements == 0 {
-            if let Some(first) = inputs.first() {
-                first.shape.clone()
-            } else {
-                vec![total]
-            }
-        } else {
-            output_shape.to_vec()
-        };
-        if shape.iter().product::<usize>() != total {
-            shape = vec![total];
-        }
-        Ok(self.push(out, shape))
+            .into())
+        })
     }
 
-    fn fused_elementwise_multi(
+    fn unary_sin<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if runmat_accelerate_api::handle_precision(input) != Some(ProviderPrecision::F64)
+                || runmat_accelerate_api::handle_storage(input)
+                    != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "test sine hook admits only real Double operands",
+                ));
+            }
+            let (data, shape) = self.pull(input)?;
+            Ok(self.push(data.into_iter().map(f64::sin).collect(), shape))
+        })
+    }
+
+    fn unary_single<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            suspension::pending_single_if_armed().await;
+            self.single_inputs.lock().unwrap().push(input.buffer_id());
+            if input.physical().element_type() == runmat_accelerate_api::NumericElementType::F32 {
+                let live_same_class = self
+                    .buffers
+                    .lock()
+                    .unwrap()
+                    .get(&input.buffer_id())
+                    .is_some_and(|record| {
+                        record.owns(input)
+                            && record.shape == input.shape()
+                            && matches!(
+                                &record.data,
+                                BufferPayload::F32(_) | BufferPayload::ComplexF32(_)
+                            )
+                    });
+                if !live_same_class {
+                    return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                        anyhow!("same-class Single source is not live"),
+                    ));
+                }
+                // The declared zero-dispatch cast is an exact owned view of
+                // the input, not a new physical allocation.
+                return Ok(input.clone());
+            }
+            if input.physical().storage()
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                let data = {
+                    let guard = self.buffers.lock().unwrap();
+                    let record = guard
+                        .get(&input.buffer_id())
+                        .filter(|record| record.owns(input))
+                        .ok_or_else(|| anyhow!("complex Single source is not live"))?;
+                    match &record.data {
+                        BufferPayload::ComplexF32(values) => values.clone(),
+                        BufferPayload::ComplexF64(values) => values
+                            .iter()
+                            .map(|(real, imag)| (*real as f32, *imag as f32))
+                            .collect(),
+                        _ => {
+                            return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                                anyhow!("complex Single source payload is not complex"),
+                            ))
+                        }
+                    }
+                };
+                return Ok(self.push_complex(
+                    BufferPayload::ComplexF32(data),
+                    input.shape().to_vec(),
+                    runmat_accelerate_api::NumericElementType::F32,
+                ));
+            }
+            let (data, shape) = self.pull(input)?;
+            let single = data
+                .into_iter()
+                .map(|value| value as f32)
+                .collect::<Vec<_>>();
+            runmat_accelerate_api::upload_numeric_protecting(
+                self,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::F32(&single),
+                    shape: &shape,
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                },
+                &[input],
+            )
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
+        })
+    }
+
+    fn unary_double<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if input.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "test Double cast admits only real floating operands",
+                )
+                .into());
+            }
+            if input.physical().element_type() == runmat_accelerate_api::NumericElementType::F64 {
+                let owned_real_double = self
+                    .buffers
+                    .lock()
+                    .unwrap()
+                    .get(&input.buffer_id())
+                    .is_some_and(|record| {
+                        record.owns(input)
+                            && record.shape == input.shape()
+                            && matches!(&record.data, BufferPayload::F64(_))
+                    });
+                if !owned_real_double {
+                    return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                        anyhow!("same-class Double source is not owned and live"),
+                    ));
+                }
+                input
+                    .allocation_lease()
+                    .validate_live()
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+                return Ok(input.clone());
+            }
+            if input.physical().element_type() != runmat_accelerate_api::NumericElementType::F32 {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "test Double cast admits only Single or Double operands",
+                )
+                .into());
+            }
+            let (values, shape) = self
+                .pull(input)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            Ok(self.push_typed(
+                values,
+                shape,
+                runmat_accelerate_api::NumericElementType::F64,
+            ))
+        })
+    }
+
+    fn elem_sub<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.ordinary_real_binary(
+                lhs,
+                rhs,
+                runmat_accelerate_api::ProviderRealBinaryOperation::Sub,
+            )
+        })
+    }
+
+    fn elem_mul<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.ordinary_real_arithmetic(
+                lhs,
+                rhs,
+                staged_image::real_binary::RealBinaryArithmetic::Mul,
+            )
+        })
+    }
+
+    fn elem_div<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.ordinary_real_binary(
+                lhs,
+                rhs,
+                runmat_accelerate_api::ProviderRealBinaryOperation::Div,
+            )
+        })
+    }
+
+    fn repmat(
         &self,
-        shader: &str,
-        inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
+        input: &GpuTensorHandle,
+        repetitions: &[usize],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        self.ordinary_real_repmat(input, repetitions)
+    }
+
+    fn fused_elementwise<'a>(
+        &'a self,
+        shader: &'a str,
+        _: runmat_accelerate_api::ProviderShaderRequirements,
+        inputs: &'a [GpuTensorHandle],
+        output_shape: &'a [usize],
         len: usize,
-        num_outputs: usize,
-    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
-        let parsed = ParsedShader::parse(shader)?;
-        if parsed.output_exprs.len() != num_outputs {
-            bail!(
-                "test provider: multi-output shader has {} output expressions, expected {}",
-                parsed.output_exprs.len(),
-                num_outputs
-            );
-        }
-        if parsed.tmp_exprs.len() > 1024 {
-            bail!(
-                "test provider: excessive temporary count {}",
-                parsed.tmp_exprs.len()
-            );
-        }
-
-        let mut input_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
-        let mut input_shapes: Vec<Vec<usize>> = Vec::with_capacity(inputs.len());
-        for handle in inputs {
-            let (data, shape) = self.pull(handle)?;
-            input_values.push(data);
-            input_shapes.push(shape);
-        }
-
-        let max_input_len = input_values.iter().map(|d| d.len()).max().unwrap_or(0);
-        let output_elements = output_shape.iter().product::<usize>();
-        let total = output_elements.max(len).max(max_input_len).max(1);
-
-        let shape = if output_elements == 0 {
-            inputs
-                .first()
-                .map(|h| h.shape.clone())
-                .unwrap_or_else(|| vec![total])
-        } else {
-            output_shape.to_vec()
-        };
-
-        let mut per_output: Vec<Vec<f64>> = vec![Vec::with_capacity(total); num_outputs];
-        for idx in 0..total {
-            let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
-            for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
-                let value = evaluate_expression(
-                    expr,
-                    idx,
-                    &input_values,
-                    &input_shapes,
-                    output_shape,
-                    &tmp_values,
-                )
-                .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
-                tmp_values[slot] = Some(value);
+        output_class: ProviderElementType,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let output_element = ownership::element_for(output_class)?;
+            self.fused_dispatches.fetch_add(1, Ordering::Relaxed);
+            if self.fail_next_fused_single.swap(false, Ordering::Relaxed) {
+                return Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    runmat_runtime::runtime_error::build_runtime_error(
+                        "selected provider rejected single-output execution",
+                    )
+                    .with_identifier("RunMat:FusionFixture:ProviderFailure")
+                    .build(),
+                ));
             }
-            for (k, out_expr) in parsed.output_exprs.iter().enumerate() {
-                let result = evaluate_expression(
-                    out_expr,
-                    idx,
-                    &input_values,
-                    &input_shapes,
-                    output_shape,
-                    &tmp_values,
-                )
-                .with_context(|| format!("evaluating output{k} expression for idx {idx}"))?;
-                per_output[k].push(result);
-            }
-        }
+            let execute = || -> anyhow::Result<GpuTensorHandle> {
+                let parsed = ParsedShader::parse(shader)?;
+                if parsed.tmp_exprs.len() > 1024 {
+                    bail!(
+                        "test provider: excessive temporary count {}",
+                        parsed.tmp_exprs.len()
+                    );
+                }
 
-        let mut handles = Vec::with_capacity(num_outputs);
-        for out_data in per_output {
-            let mut out_shape = shape.clone();
-            if out_shape.iter().product::<usize>() != total {
-                out_shape = vec![total];
-            }
-            handles.push(self.push(out_data, out_shape));
-        }
-        Ok(handles)
+                let mut input_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
+                let mut input_shapes: Vec<Vec<usize>> = Vec::with_capacity(inputs.len());
+                for handle in inputs {
+                    let (data, shape) = self.pull(handle)?;
+                    input_values.push(data);
+                    input_shapes.push(shape);
+                }
+
+                let max_input_len = input_values
+                    .iter()
+                    .map(|data| data.len())
+                    .max()
+                    .unwrap_or(0);
+                let output_elements = output_shape.iter().product::<usize>();
+                let total = output_elements.max(len).max(max_input_len).max(1);
+
+                let mut out = Vec::with_capacity(total);
+                for idx in 0..total {
+                    let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
+                    for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
+                        let value = evaluate_expression(
+                            expr,
+                            idx,
+                            &input_values,
+                            &input_shapes,
+                            output_shape,
+                            &tmp_values,
+                        )
+                        .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
+                        tmp_values[slot] = Some(value);
+                    }
+                    let result = evaluate_expression(
+                        &parsed.output_expr,
+                        idx,
+                        &input_values,
+                        &input_shapes,
+                        output_shape,
+                        &tmp_values,
+                    )
+                    .with_context(|| format!("evaluating output expression for idx {idx}"))?;
+                    out.push(result);
+                }
+
+                let mut shape = if output_elements == 0 {
+                    if let Some(first) = inputs.first() {
+                        first.shape().to_vec()
+                    } else {
+                        vec![total]
+                    }
+                } else {
+                    output_shape.to_vec()
+                };
+                if shape.iter().product::<usize>() != total {
+                    shape = vec![total];
+                }
+                Ok(self.push_typed(out, shape, output_element))
+            };
+            execute().map_err(Into::into)
+        })
+    }
+
+    fn fused_elementwise_multi<'a>(
+        &'a self,
+        shader: &'a str,
+        _: runmat_accelerate_api::ProviderShaderRequirements,
+        inputs: &'a [GpuTensorHandle],
+        output_shape: &'a [usize],
+        len: usize,
+        output_classes: &'a [ProviderElementType],
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async move {
+            let execute = || -> anyhow::Result<Vec<GpuTensorHandle>> {
+                let output_element_types = output_classes
+                    .iter()
+                    .copied()
+                    .map(ownership::element_for)
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                self.fused_dispatches.fetch_add(1, Ordering::Relaxed);
+                let parsed = ParsedShader::parse(shader)?;
+                if parsed.output_exprs.len() != output_classes.len() {
+                    bail!(
+                        "test provider: multi-output shader has {} output expressions, expected {}",
+                        parsed.output_exprs.len(),
+                        output_classes.len()
+                    );
+                }
+                if parsed.tmp_exprs.len() > 1024 {
+                    bail!(
+                        "test provider: excessive temporary count {}",
+                        parsed.tmp_exprs.len()
+                    );
+                }
+
+                let mut input_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
+                let mut input_shapes: Vec<Vec<usize>> = Vec::with_capacity(inputs.len());
+                for handle in inputs {
+                    let (data, shape) = self.pull(handle)?;
+                    input_values.push(data);
+                    input_shapes.push(shape);
+                }
+
+                let max_input_len = input_values.iter().map(|d| d.len()).max().unwrap_or(0);
+                let output_elements = output_shape.iter().product::<usize>();
+                let total = output_elements.max(len).max(max_input_len).max(1);
+
+                let shape = if output_elements == 0 {
+                    inputs
+                        .first()
+                        .map(|h| h.shape().to_vec())
+                        .unwrap_or_else(|| vec![total])
+                } else {
+                    output_shape.to_vec()
+                };
+
+                let mut per_output: Vec<Vec<f64>> =
+                    vec![Vec::with_capacity(total); output_classes.len()];
+                for idx in 0..total {
+                    let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
+                    for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
+                        let value = evaluate_expression(
+                            expr,
+                            idx,
+                            &input_values,
+                            &input_shapes,
+                            output_shape,
+                            &tmp_values,
+                        )
+                        .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
+                        tmp_values[slot] = Some(value);
+                    }
+                    for (k, out_expr) in parsed.output_exprs.iter().enumerate() {
+                        let result = evaluate_expression(
+                            out_expr,
+                            idx,
+                            &input_values,
+                            &input_shapes,
+                            output_shape,
+                            &tmp_values,
+                        )
+                        .with_context(|| {
+                            format!("evaluating output{k} expression for idx {idx}")
+                        })?;
+                        per_output[k].push(result);
+                    }
+                }
+
+                let mut handles = Vec::with_capacity(output_classes.len());
+                for (out_data, output_element) in per_output.into_iter().zip(output_element_types) {
+                    let mut out_shape = shape.clone();
+                    if out_shape.iter().product::<usize>() != total {
+                        out_shape = vec![total];
+                    }
+                    handles.push(self.push_typed(out_data, out_shape, output_element));
+                }
+                Ok(handles)
+            };
+            execute().map_err(Into::into)
+        })
     }
 
     fn transpose(&self, handle: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         let (data, shape) = self.pull(handle)?;
         if shape.len() < 2 {
-            return Ok(self.push(data, shape));
+            return Ok(self.push_typed(data, shape, handle.physical().element_type()));
         }
         let rows = shape[0];
         let cols = shape[1];
@@ -955,7 +2156,7 @@ impl AccelProvider for TestProvider {
         let mut new_shape = shape.clone();
         new_shape[0] = cols;
         new_shape[1] = rows;
-        Ok(self.push(out, new_shape))
+        Ok(self.push_typed(out, new_shape, handle.physical().element_type()))
     }
 
     fn matmul<'a>(
@@ -1012,7 +2213,7 @@ impl AccelProvider for TestProvider {
             let idx = i + rows * i;
             out.push(data[idx]);
         }
-        Ok(self.push(out, vec![len]))
+        Ok(self.push(out, vec![len, 1]))
     }
 
     fn reshape(
@@ -1020,22 +2221,23 @@ impl AccelProvider for TestProvider {
         handle: &GpuTensorHandle,
         new_shape: &[usize],
     ) -> anyhow::Result<GpuTensorHandle> {
-        let len: usize = new_shape.iter().product();
-        let mut buffers = self.buffers.lock().unwrap();
+        let len = new_shape
+            .iter()
+            .try_fold(1usize, |total, &dim| total.checked_mul(dim))
+            .ok_or_else(|| anyhow!("reshape: dimensions exceed addressable length"))?;
+        let buffers = self.buffers.lock().unwrap();
         let entry = buffers
-            .get_mut(&handle.buffer_id)
-            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
-        if entry.0.len() != len {
+            .get(&handle.buffer_id())
+            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id()))?;
+        if entry.data.len() != len {
             bail!(
                 "reshape: product of new dimensions ({}) must equal existing length ({})",
                 len,
-                entry.0.len()
+                entry.data.len()
             );
         }
-        entry.1 = new_shape.to_vec();
-        let mut updated = handle.clone();
-        updated.shape = new_shape.to_vec();
-        Ok(updated)
+        drop(buffers);
+        Ok(handle.with_view(handle.view().clone().with_shape(new_shape.to_vec()))?)
     }
 }
 
@@ -1059,10 +2261,16 @@ impl ParsedShader {
                 if let Some(eq_idx) = rest.find('=') {
                     let (lhs, rhs) = rest.split_at(eq_idx);
                     let name = lhs.split(':').next().map(str::trim).unwrap_or("");
-                    if name.starts_with("tmp") {
+                    if name.starts_with("tmp") || name.starts_with("typed") {
                         let expr = rhs.trim_start_matches('=').trim();
                         let expr = expr.trim_end_matches(';').trim().to_string();
-                        tmp_exprs.push(expr);
+                        tmp_exprs.push(
+                            if lhs.split(':').nth(1).is_some_and(|ty| ty.trim() == "f32") {
+                                format!("f32({expr})")
+                            } else {
+                                expr
+                            },
+                        );
                     }
                 }
             } else if let Some(rest) = trimmed
@@ -1152,11 +2360,24 @@ fn evaluate_expression(
     output_shape: &[usize],
     tmp_values: &[Option<f64>],
 ) -> anyhow::Result<f64> {
-    let tokens = tokenize(expr)?;
-    let mut parser = ExprParser::new(tokens, idx, inputs, input_shapes, output_shape, tmp_values);
-    let value = parser.parse_expression()?;
-    parser.expect_end()?;
-    Ok(value)
+    (|| {
+        let tokens = tokenize(expr)?;
+        let mut parser =
+            ExprParser::new(tokens, idx, inputs, input_shapes, output_shape, tmp_values);
+        let value = parser.parse_expression()?;
+        parser.expect_end()?;
+        Ok(value)
+    })()
+    .map_err(suspension::record_provider_error)
+}
+
+#[test]
+fn fused_shader_fixture_uses_canonical_remainder_math_and_boolean_literals() {
+    let evaluate = |expression| evaluate_expression(expression, 0, &[], &[], &[], &[]).unwrap();
+    assert_eq!(evaluate("rm_remainder_f64(-5.5, 2.0, true)"), 0.5);
+    assert_eq!(evaluate("rm_remainder_f64(-5.5, 2.0, false)"), -1.5);
+    assert_eq!(evaluate("rm_remainder_f32(-5.5, 2.0, true)"), 0.5);
+    assert_eq!(evaluate("rm_remainder_f32(-5.5, 2.0, false)"), -1.5);
 }
 
 #[derive(Clone, Debug)]
@@ -1366,7 +2587,16 @@ impl<'a> ExprParser<'a> {
 
     fn parse_identifier(&mut self, name: String) -> anyhow::Result<f64> {
         self.advance();
-        if let Some(rest) = name.strip_prefix("tmp") {
+        if name == "true" {
+            return Ok(1.0);
+        }
+        if name == "false" {
+            return Ok(0.0);
+        }
+        if let Some(rest) = name
+            .strip_prefix("tmp")
+            .or_else(|| name.strip_prefix("typed"))
+        {
             let idx: usize = rest
                 .parse()
                 .map_err(|e| anyhow!("invalid tmp identifier '{name}': {e}"))?;
@@ -1483,7 +2713,36 @@ impl<'a> ExprParser<'a> {
             "isFinite" => Ok(if arg(0)?.is_finite() { 1.0 } else { 0.0 }),
             "isInf" => Ok(if arg(0)?.is_infinite() { 1.0 } else { 0.0 }),
             "select" => Ok(if arg(2)? != 0.0 { arg(1)? } else { arg(0)? }),
-            "f32" | "f64" => Ok(arg(0)?),
+            "rm_remainder_f32" => {
+                let kind = if arg(2)? != 0.0 {
+                    runmat_types::FloatingRemainderKind::Modulus
+                } else {
+                    runmat_types::FloatingRemainderKind::Remainder
+                };
+                Ok(f64::from(
+                    runmat_runtime::builtins::math::rounding::floating_remainder::apply_f32(
+                        arg(0)? as f32,
+                        arg(1)? as f32,
+                        kind,
+                    ),
+                ))
+            }
+            "rm_remainder_f64" => {
+                let kind = if arg(2)? != 0.0 {
+                    runmat_types::FloatingRemainderKind::Modulus
+                } else {
+                    runmat_types::FloatingRemainderKind::Remainder
+                };
+                Ok(
+                    runmat_runtime::builtins::math::rounding::floating_remainder::apply_f64(
+                        arg(0)?,
+                        arg(1)?,
+                        kind,
+                    ),
+                )
+            }
+            "f32" => Ok(f64::from(arg(0)? as f32)),
+            "f64" => Ok(arg(0)?),
             _ => Err(anyhow!("unsupported function '{name}' in fused shader")),
         }
     }
@@ -1548,17 +2807,50 @@ impl<'a> ExprParser<'a> {
     }
 }
 
-static PROVIDER: OnceCell<TestProvider> = OnceCell::new();
+#[cfg(not(target_arch = "wasm32"))]
+type TestProviderHandle = Arc<TestProvider>;
+#[cfg(target_arch = "wasm32")]
+type TestProviderHandle = Rc<TestProvider>;
+
+#[cfg(not(target_arch = "wasm32"))]
+static PROVIDER: OnceCell<TestProviderHandle> = OnceCell::new();
+
+#[cfg(target_arch = "wasm32")]
+runmat_thread_local! {
+    static WORKER_PROVIDER: std::cell::Cell<Option<&'static TestProviderHandle>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+fn registered_provider() -> Option<&'static TestProviderHandle> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        PROVIDER.get()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        WORKER_PROVIDER.with(std::cell::Cell::get)
+    }
+}
 
 fn ensure_provider_registered() {
-    let provider: &'static TestProvider = PROVIDER.get_or_init(TestProvider::new);
+    #[cfg(not(target_arch = "wasm32"))]
+    let provider: &'static TestProvider = PROVIDER.get_or_init(|| Arc::new(TestProvider::new()));
+    #[cfg(target_arch = "wasm32")]
+    let provider: &'static TestProvider = {
+        if registered_provider().is_none() {
+            let provider: &'static TestProviderHandle =
+                Box::leak(Box::new(Rc::new(TestProvider::new())));
+            WORKER_PROVIDER.with(|slot| slot.set(Some(provider)));
+        }
+        registered_provider().expect("worker provider initialized")
+    };
     unsafe {
         runmat_accelerate_api::register_provider(provider);
     }
     configure_auto_offload(AutoOffloadOptions {
         enabled: true,
         calibrate: false,
-        profile_path: None,
         log_level: AutoOffloadLogLevel::Trace,
     });
 }
@@ -1572,7 +2864,6 @@ fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
     configure_auto_offload(AutoOffloadOptions {
         enabled: false,
         calibrate: false,
-        profile_path: None,
         log_level: AutoOffloadLogLevel::Trace,
     });
     runmat_accelerate_api::set_thread_provider(None);
@@ -1580,71 +2871,43 @@ fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
     guard
 }
 
-#[test]
-fn fusion_execution_records_one_correlated_provider_lifecycle() {
-    gc_test_context(|| {
-        let _guard = accel_test_lock();
-        ensure_provider_registered();
-        runmat_accelerate::placement::reset();
+struct RejectFusion(&'static TestProvider);
 
-        let bytecode = compile_semantic(
-            r#"
-            x = (1:4096) ./ 4096;
-            y = sin(x) .* x + 2;
-            "#,
-        );
-        interpret(&bytecode).expect("fused execution");
-
-        let report = runmat_accelerate::placement_report();
-        let trace = report
-            .traces
-            .iter()
-            .find(|trace| trace.operation == "fusion.elementwise")
-            .expect("elementwise fusion placement trace");
-        assert!(trace.complete);
-        assert_eq!(trace.dropped_events, 0);
-        let kinds = trace
-            .events
-            .iter()
-            .map(|event| event.kind)
-            .collect::<Vec<_>>();
-        for required in [
-            runmat_accelerate::placement::PlacementEventKind::Candidate,
-            runmat_accelerate::placement::PlacementEventKind::Prepare,
-            runmat_accelerate::placement::PlacementEventKind::Selected,
-            runmat_accelerate::placement::PlacementEventKind::Upload,
-            runmat_accelerate::placement::PlacementEventKind::Compile,
-            runmat_accelerate::placement::PlacementEventKind::Queue,
-            runmat_accelerate::placement::PlacementEventKind::Kernel,
-            runmat_accelerate::placement::PlacementEventKind::Complete,
-        ] {
-            assert!(kinds.contains(&required), "missing {required:?}: {kinds:?}");
-        }
-        let queue = trace
-            .events
-            .iter()
-            .find(|event| event.kind == runmat_accelerate::placement::PlacementEventKind::Queue)
-            .expect("queue event");
-        assert_eq!(queue.reason.as_deref(), Some("host_dispatch"));
-        assert!(queue.duration_ns.is_some());
-        let kernel = trace
-            .events
-            .iter()
-            .find(|event| event.kind == runmat_accelerate::placement::PlacementEventKind::Kernel)
-            .expect("kernel event");
-        assert_eq!(
-            kernel.reason.as_deref(),
-            Some("provider_timing_unavailable")
-        );
-        assert_eq!(kernel.duration_ns, None);
-    });
+impl Drop for RejectFusion {
+    fn drop(&mut self) {
+        self.0.reject_fusion.store(false, Ordering::Relaxed);
+        self.0.report_f32.store(false, Ordering::Relaxed);
+    }
 }
 
+#[path = "fusion_gpu/completion.rs"]
+mod completion;
+#[path = "fusion_gpu/consumed_values.rs"]
+mod consumed_values;
+#[path = "fusion_gpu/direct.rs"]
+mod direct;
+#[path = "fusion_gpu/observation.rs"]
+mod observation;
+#[path = "fusion_gpu/suspension.rs"]
+mod suspension;
+#[path = "fusion_gpu/terminal.rs"]
+mod terminal;
+
 #[test]
-fn fusion_execution_updates_the_session_owned_placement_profile() {
+fn fusion_feasibility_rejection_resumes_shared_runtime_before_provider_side_effects() {
     gc_test_context(|| {
         let _guard = accel_test_lock();
         ensure_provider_registered();
+        configure_auto_offload(AutoOffloadOptions {
+            enabled: false,
+            calibrate: false,
+            log_level: AutoOffloadLogLevel::Trace,
+        });
+        let provider = registered_provider().expect("test provider");
+        provider.reject_fusion.store(true, Ordering::Relaxed);
+        let _reject = RejectFusion(provider);
+        runmat_accelerate::placement::reset();
+
         let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
@@ -1653,85 +2916,8 @@ fn fusion_execution_updates_the_session_owned_placement_profile() {
             runmat_runtime::context::RuntimeServicePorts::default()
                 .with_placement(placement.clone()),
         );
-        let bytecode = compile_semantic(
-            r#"
-            x = (1:4096) ./ 4096;
-            y = sin(x) .* x + 2;
-            "#,
-        );
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        block_on(runmat_vm::interpret_with_vars_in_context(
-            &bytecode, &mut vars, None, runtime,
-        ))
-        .expect("session-owned fusion execution");
-
-        let profile = placement.profile_snapshot();
-        let provider = profile
-            .feedback
-            .iter()
-            .find(|series| series.candidate.contains("fusion.elementwise"))
-            .expect("provider feedback series");
-        assert_eq!(provider.samples, 1);
-        assert_eq!(provider.failures, 0);
-    });
-}
-
-#[test]
-fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
-    gc_test_context(|| {
-        let _guard = accel_test_lock();
-        ensure_provider_registered();
-        runmat_accelerate::placement::reset();
-
-        let bytecode = compile_semantic(
-            r#"
-            x = [0.25, 0.5];
-            y = sin(x) .* x + 2;
-            "#,
-        );
-        interpret(&bytecode).expect("shared-runtime fallback");
-
-        let report = runmat_accelerate::placement_report();
-        let trace = report
-            .traces
-            .iter()
-            .find(|trace| trace.operation == "fusion.elementwise")
-            .expect("elementwise fusion placement trace");
-        assert!(trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
-                && event.variant
-                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
-                && event.reason.as_deref() == Some("complete_cost")
-        }));
-        assert!(trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
-        }));
-        assert!(!trace.events.iter().any(|event| {
-            matches!(
-                event.kind,
-                runmat_accelerate::placement::PlacementEventKind::Upload
-                    | runmat_accelerate::placement::PlacementEventKind::Compile
-                    | runmat_accelerate::placement::PlacementEventKind::Queue
-                    | runmat_accelerate::placement::PlacementEventKind::Kernel
-            )
-        }));
-    });
-}
-
-#[test]
-fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {
-    gc_test_context(|| {
-        let _guard = accel_test_lock();
-        ensure_provider_registered();
-        configure_auto_offload(AutoOffloadOptions {
-            enabled: false,
-            calibrate: false,
-            profile_path: None,
-            log_level: AutoOffloadLogLevel::Trace,
-        });
-        let provider = PROVIDER.get().expect("test provider");
-        provider.reject_fusion.store(true, Ordering::Relaxed);
-        runmat_accelerate::placement::reset();
+        let allocations_before = provider.next_id.load(Ordering::Relaxed);
+        let dispatches_before = provider.fused_dispatches.load(Ordering::Relaxed);
 
         let bytecode = compile_semantic(
             r#"
@@ -1739,35 +2925,187 @@ fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {
             y = sin(x) .* x + 2;
             "#,
         );
-        interpret(&bytecode).expect("shared-runtime fusion fallback");
-        provider.reject_fusion.store(false, Ordering::Relaxed);
-
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_workspace(
+                &bytecode,
+                runmat_vm::InterpreterVars::from_owned(vars),
+                None,
+                runtime,
+                None,
+                None,
+            ))
+            .outcome
+            .expect("shared-runtime fusion after provider rejection");
+        let output_slot = *bytecode
+            .var_names
+            .iter()
+            .find(|(_, name)| name.as_str() == "y")
+            .expect("y output slot")
+            .0;
+        let output_value = completion
+            .values
+            .get(output_slot)
+            .expect("completed output slot");
+        let Value::Tensor(output) = &*output_value else {
+            panic!(
+                "shared runtime must return a host tensor: {:?}",
+                &*output_value
+            );
+        };
+        assert_eq!(output.shape(), vec![1, 3]);
+        for (actual, input) in output
+            .materialize_f64()
+            .into_iter()
+            .zip([0.25_f64, 0.5, 0.75])
+        {
+            assert!((actual - (input.sin() * input + 2.0)).abs() < 1e-12);
+        }
+        assert_eq!(provider.next_id.load(Ordering::Relaxed), allocations_before);
+        assert_eq!(
+            provider.fused_dispatches.load(Ordering::Relaxed),
+            dispatches_before
+        );
+        let feedback = placement.profile_snapshot().feedback;
         let report = runmat_accelerate::placement_report();
-        let trace = report
+        let rejected = report
             .traces
             .iter()
-            .find(|trace| trace.operation == "fusion.elementwise")
-            .expect("elementwise fusion placement trace");
-        assert!(trace.complete);
-        assert!(trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
-                && event.variant
-                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
-                && event.reason.as_deref() == Some("provider_operation_unsupported")
-        }));
-        assert!(trace.events.iter().any(|event| {
-            event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
-                && event.reason.as_deref() == Some("fusion_execution_failed")
-        }));
-        assert!(!trace.events.iter().any(|event| {
-            matches!(
-                event.kind,
-                runmat_accelerate::placement::PlacementEventKind::Upload
-                    | runmat_accelerate::placement::PlacementEventKind::Compile
-                    | runmat_accelerate::placement::PlacementEventKind::Queue
-                    | runmat_accelerate::placement::PlacementEventKind::Kernel
+            .filter(|trace| {
+                trace.operation == "fusion.elementwise"
+                    && trace.events.iter().any(|event| {
+                        event.kind == runmat_accelerate::placement::PlacementEventKind::Selected
+                            && event.variant
+                                == Some(
+                                    runmat_accelerate::placement::PlacementVariant::SharedRuntime,
+                                )
+                            && event.reason.as_deref() == Some("provider_operation_unsupported")
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert!(!rejected.is_empty(), "expected a rejected fusion region");
+        for trace in &rejected {
+            assert!(trace.complete);
+            assert!(
+                trace.events.iter().any(|event| {
+                    event.kind == runmat_accelerate::placement::PlacementEventKind::Prepare
+                        && event.reason.as_deref() == Some("generate_wgsl")
+                        && event.duration_ns.is_some()
+                }),
+                "host shader-source preparation remains observed"
+            );
+            assert!(trace.events.iter().any(|event| {
+                event.kind == runmat_accelerate::placement::PlacementEventKind::Complete
+                    && event.variant
+                        == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
+            }));
+            assert!(!trace.events.iter().any(|event| {
+                event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
+                    && event.reason.as_deref() == Some("fusion_execution_failed")
+            }));
+            assert!(
+                !trace.events.iter().any(|event| {
+                    matches!(
+                        event.kind,
+                        runmat_accelerate::placement::PlacementEventKind::Upload
+                            | runmat_accelerate::placement::PlacementEventKind::Compile
+                            | runmat_accelerate::placement::PlacementEventKind::Queue
+                            | runmat_accelerate::placement::PlacementEventKind::Kernel
+                    )
+                }),
+                "rejected CPU trace contains provider stages: {trace:#?}"
+            );
+        }
+        let cpu_samples = feedback
+            .iter()
+            .filter(|series| series.candidate == "cpu.shared.fusion.elementwise")
+            .map(|series| {
+                assert_eq!(series.failures, 0);
+                series.samples
+            })
+            .sum::<u64>();
+        assert_eq!(
+            cpu_samples, 0,
+            "the rejected CPU-only route has no complete-call observation permit"
+        );
+        assert!(feedback
+            .iter()
+            .all(|series| { !series.candidate.starts_with("provider.") || series.samples == 0 }));
+    });
+}
+
+#[test]
+fn ordinary_gpu_sum_survives_unclaimed_fused_reduction_without_fusion_upload() {
+    gc_test_context(|| {
+        let _guard = accel_test_lock();
+        ensure_provider_registered();
+        let provider = registered_provider().expect("test provider");
+        assert!(
+            !provider.capability_snapshot().supports_operation(
+                &ProviderOperationIdentity::new("fusion.reduction"),
+                ProviderOperationFamily::Fusion,
+            ),
+            "fixture must not claim a fused hook it does not implement"
+        );
+
+        let bytecode = compile_semantic("x = [1, 2; 3, 4]; S = sum(x, 1);");
+        let output_slot = *bytecode
+            .var_names
+            .iter()
+            .find(|(_, name)| name.as_str() == "S")
+            .expect("S output slot")
+            .0;
+        let input_slot = *bytecode
+            .var_names
+            .iter()
+            .find(|(_, name)| name.as_str() == "x")
+            .unwrap()
+            .0;
+        let store = bytecode
+            .instructions
+            .iter()
+            .position(
+                |instruction| matches!(instruction, Instr::StoreVar(index) if *index == input_slot),
             )
-        }));
+            .expect("literal input store");
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        vars[input_slot] = Value::GpuTensor(provider.push(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]));
+        let resume = runmat_vm::InterpreterResumeState {
+            pc: store + 1,
+            completion_boundary: None,
+            vars: runmat_vm::InterpreterVars::from_owned(vars),
+            assigned_slots: std::collections::HashSet::from([input_slot]),
+            supplied_inputs: 0,
+            requested_outputs: 0,
+            missing_input_slots: Default::default(),
+            global_aliases: Default::default(),
+            persistent_aliases: Default::default(),
+            side_effect_epoch: 0,
+        };
+        let allocations_before = provider.next_id.load(Ordering::Relaxed);
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_resume_in_context(
+                &bytecode,
+                resume,
+                None,
+                runmat_runtime::context::RuntimeContext::new(Rc::new(
+                    runmat_runtime::execution::RuntimeExecutionService::new(),
+                )),
+            ))
+            .expect("ordinary resident GPU sum");
+        let result_value = completion
+            .values
+            .get(output_slot)
+            .expect("ordinary resident output");
+        let Value::GpuTensor(result) = &*result_value else {
+            panic!("ordinary sum must preserve resident output");
+        };
+        assert_eq!(provider.pull(result).unwrap(), (vec![3.0, 7.0], vec![1, 2]));
+        assert_eq!(
+            provider.next_id.load(Ordering::Relaxed),
+            allocations_before + 1,
+            "unsupported fused reduction must not stage an additional upload"
+        );
     });
 }
 
@@ -1858,7 +3196,7 @@ fn fused_elementwise_then_reduction_sum_rows_profiled() {
                 } else {
                     // Fallback: search all variables for a tensor of length==rows
                     let mut found: Option<runmat_value::Tensor> = None;
-                    for v in &vars_gpu {
+                    for v in vars_gpu.values() {
                         if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
                             if t.materialize_f64().len() == rows {
                                 found = Some(t);
@@ -1935,7 +3273,7 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         }
 
         // Helper to run with/without GPU
-        let run_with = |use_gpu: bool| -> Vec<Value> {
+        let run_with = |use_gpu: bool| -> runmat_runtime::execution::RootedValues {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
             if use_gpu {
                 ensure_provider_registered();
@@ -2543,7 +3881,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
 
         let bytecode = compile_semantic(&source);
 
-        let run_with = |use_gpu: bool| -> Vec<Value> {
+        let run_with = |use_gpu: bool| -> runmat_runtime::execution::RootedValues {
             let vars = vec![Value::Num(0.0); bytecode.var_count];
             if use_gpu {
                 ensure_provider_registered();
@@ -2574,10 +3912,12 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
 
         // Robustly locate SI1 (1 x cols) and SI2 (rows x 1) by shape
         let find_by_shape =
-            |vars: &Vec<Value>, want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
+            |vars: &[Value], want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
                 for v in vars {
                     if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
-                        if t.shape.len() == 2 && t.shape[0] == want_rows && t.shape[1] == want_cols
+                        if t.shape().len() == 2
+                            && t.shape()[0] == want_rows
+                            && t.shape()[1] == want_cols
                         {
                             return Some(t.materialize_f64());
                         }
@@ -2678,11 +4018,11 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
         };
 
         if std::env::var("RUNMAT_DUMP_OMITNAN_VALUES").as_deref() == Ok("1") {
-            let dump = |vars: &Vec<Value>| {
+            let dump = |vars: &[Value]| {
                 vars.iter()
                     .enumerate()
                     .map(|(idx, v)| match gather_if_needed(v) {
-                        Ok(Value::Tensor(t)) => format!("{idx}:tensor{:?}", t.shape),
+                        Ok(Value::Tensor(t)) => format!("{idx}:tensor{:?}", t.shape()),
                         Ok(Value::Num(n)) => format!("{idx}:num({n})"),
                         Ok(other) => format!("{idx}:{other:?}"),
                         Err(err) => format!("{idx}:err({err})"),
@@ -3051,6 +4391,7 @@ fn fused_inverse_hyperbolic_builtins_are_plannable() {
 fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
     gc_test_context(|| {
         ensure_provider_registered();
+        let provider = registered_provider().expect("fixture provider");
 
         let source = r#"
         x = [-2.5, -1.25, 0.5];
@@ -3073,13 +4414,16 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
             "expected x and scalar runtime inputs"
         );
 
-        let x = Tensor::new(vec![-2.5, -1.25, 0.5], vec![1, 3]).expect("tensor x");
-        let result = execute_elementwise(FusionExecutionRequest {
+        let x = provider
+            .push(vec![-2.5, -1.25, 0.5], vec![1, 3])
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit resident source");
+        let result = block_on(execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
-            inputs: vec![Value::Tensor(x), Value::Num(2.0)],
+            inputs: vec![Value::GpuTensor(x), Value::Num(2.0)],
             placement: None,
-            runtime: None,
-        })
+            runtime: Some(direct::selected_runtime_for_plan(group_plan)),
+        }))
         .expect("direct fusion execution");
 
         match result.final_value {
@@ -3112,19 +4456,105 @@ fn direct_execution_of_inverse_hyperbolic_group_returns_gpu_tensor() {
             .expect("supported elementwise fusion group");
 
         let x = Tensor::new(vec![0.25, 0.5, 0.75], vec![1, 3]).expect("tensor x");
-        let result = execute_elementwise(FusionExecutionRequest {
+        let result = block_on(execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(1.0)],
             placement: None,
-            runtime: None,
-        })
-        .expect("direct fusion execution");
+            runtime: Some(direct::selected_runtime_for_plan(group_plan)),
+        }))
+        .unwrap_or_else(|error| {
+            panic!(
+                "inverse fusion execution: {error}; plan={group_plan:#?}; placement={:#?}",
+                runmat_accelerate::placement_report()
+            )
+        });
 
         match result.final_value {
             Value::GpuTensor(handle) => {
                 assert!(fusion_residency::is_resident(&handle));
             }
             other => panic!("expected direct execution to return GPU tensor, got {other:?}"),
+        }
+    });
+}
+
+#[test]
+fn explicit_gpu_inverse_hyperbolic_group_uses_owned_domain_probes() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+        let bytecode =
+            compile_semantic("x = [0.25, 0.5, 0.75]; y = asinh(x) + atanh(x) + acosh(x + 1);");
+        let graph = graph_for_fusion_test(&bytecode).expect("accel graph");
+        let groups = graph.detect_fusion_groups();
+        let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
+        let group_plan = plan
+            .groups
+            .iter()
+            .find(|group| {
+                matches!(group.group.kind, FusionKind::ElementwiseChain) && group.kernel.supported
+            })
+            .expect("supported guarded fusion group");
+        assert_eq!(group_plan.inputs.len(), 2);
+
+        let provider = registered_provider().expect("registered fixture provider");
+        let input = provider
+            .push(vec![0.25, 0.5, 0.75], vec![1, 3])
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit fixture input");
+        let trace = runmat_accelerate::placement::begin_trace("fusion.inverse_fixture", None);
+        let result = block_on(execute_elementwise(FusionExecutionRequest {
+            plan: group_plan,
+            inputs: vec![Value::GpuTensor(input), Value::Num(1.0)],
+            placement: Some(trace.correlation()),
+            runtime: Some(direct::selected_runtime_for_plan(group_plan)),
+        }));
+        trace.complete(None, None);
+        let result = result.unwrap_or_else(|error| {
+            panic!(
+                "guarded GPU fusion: {error}; placement={:#?}",
+                runmat_accelerate::placement_report()
+            )
+        });
+        let Value::GpuTensor(output) = result.final_value else {
+            panic!("expected explicitly resident fused output");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&output));
+        let (actual, shape) = provider.pull(&output).expect("fixture output");
+        assert_eq!(shape, vec![1, 3]);
+        for (actual, input) in actual.into_iter().zip([0.25_f64, 0.5, 0.75]) {
+            let expected = input.asinh() + input.atanh() + (input + 1.0).acosh();
+            assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
+        }
+    });
+}
+
+#[test]
+fn guarded_inverse_hyperbolic_fusion_defers_unsafe_or_unknown_gpu_inputs() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+        let bytecode =
+            compile_semantic("x = [0.25, 0.5, 0.75]; y = asinh(x) + atanh(x) + acosh(x + 1);");
+        let graph = graph_for_fusion_test(&bytecode).expect("accel graph");
+        let groups = graph.detect_fusion_groups();
+        let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
+        let group_plan = plan
+            .groups
+            .iter()
+            .find(|group| {
+                matches!(group.group.kind, FusionKind::ElementwiseChain) && group.kernel.supported
+            })
+            .expect("guarded group");
+        let provider = registered_provider().expect("fixture provider");
+        for data in [vec![-1.25, 0.5, 0.75], vec![0.25, f64::NAN, 0.75], vec![]] {
+            let input = provider.push(data.clone(), vec![1, data.len()]);
+            let outcome = block_on(execute_elementwise_placed(FusionExecutionRequest {
+                plan: group_plan,
+                inputs: vec![Value::GpuTensor(input), Value::Num(1.0)],
+                placement: None,
+                runtime: Some(direct::selected_runtime_for_plan(group_plan)),
+            }))
+            .expect("unknown real domain is not a provider failure");
+            assert!(matches!(outcome, FusionExecutionOutcome::SharedRuntime(_)));
         }
     });
 }
@@ -3150,12 +4580,12 @@ fn direct_execution_of_mod_and_rem_group_returns_gpu_tensor() {
             .expect("supported elementwise fusion group");
 
         let x = Tensor::new(vec![-5.5, -1.25, 5.5], vec![1, 3]).expect("tensor x");
-        let result = execute_elementwise(FusionExecutionRequest {
+        let result = block_on(execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(2.0), Value::Num(2.0)],
             placement: None,
             runtime: None,
-        })
+        }))
         .expect("direct fusion execution");
 
         match result.final_value {
@@ -3589,9 +5019,11 @@ fn fused_reduction_scalar_report_tail_matches_expected() {
         let rendered_value = vars
             .iter()
             .filter_map(|value| match value {
-                Value::CharArray(chars) => {
-                    chars.data.iter().collect::<String>().trim().parse().ok()
-                }
+                Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+                    .expect("valid UTF-16 text fixture")
+                    .trim()
+                    .parse()
+                    .ok(),
                 _ => None,
             })
             .find(|value: &f64| (*value - expected).abs() <= tol)
@@ -3639,9 +5071,11 @@ fn fused_reduction_scalar_single_report_tail_matches_expected() {
         let rendered_value = vars
             .iter()
             .filter_map(|value| match value {
-                Value::CharArray(chars) => {
-                    chars.data.iter().collect::<String>().trim().parse().ok()
-                }
+                Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+                    .expect("valid UTF-16 text fixture")
+                    .trim()
+                    .parse()
+                    .ok(),
                 _ => None,
             })
             .find(|value: &f64| (*value - expected).abs() <= tol)
@@ -3699,7 +5133,8 @@ fn fused_reduction_scalar_branch_report_tail_matches_expected() {
         let s_index = stores.pop().expect("store index for s");
 
         let rendered = match vars.get(s_index).expect("value for s") {
-            Value::CharArray(chars) => chars.data.iter().collect::<String>(),
+            Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+                .expect("valid UTF-16 text fixture"),
             other => panic!("expected char array report, got {other:?}"),
         };
         let rendered_value: f64 = rendered.trim().parse().expect("parse rendered scalar");
@@ -3729,7 +5164,7 @@ fn fused_reduction_scalar_branch_report_tail_matches_expected() {
 }
 
 #[test]
-fn centered_gram_fusion_matches_cpu() {
+fn original_centered_product_matches_cpu_with_provider_available() {
     gc_test_context(|| {
         let rows = 5usize;
         let cols = 3usize;
@@ -3803,7 +5238,7 @@ fn centered_gram_fusion_matches_cpu() {
             other => panic!("expected tensor cov (gpu), got {other:?}"),
         };
 
-        assert_eq!(gpu_tensor.shape, vec![cols, cols], "shape mismatch");
+        assert_eq!(gpu_tensor.shape(), vec![cols, cols], "shape mismatch");
         let tol = 1e-6;
         for (lhs, rhs) in cov_expected.iter().zip(gpu_tensor.materialize_f64().iter()) {
             let diff = (lhs - rhs).abs();
@@ -3881,7 +5316,8 @@ fn power_step_normalization_matches_cpu() {
 
         let bytecode = compile_semantic(source);
 
-        if let Some(graph) = graph_for_fusion_test(&bytecode) {
+        {
+            let graph = graph_for_fusion_test(&bytecode).expect("power-step acceleration graph");
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -3910,7 +5346,7 @@ fn power_step_normalization_matches_cpu() {
             Value::Tensor(t) => t,
             other => panic!("expected tensor Q (cpu), got {other:?}"),
         };
-        assert_eq!(cpu_tensor.shape, vec![rows, cols], "cpu shape mismatch");
+        assert_eq!(cpu_tensor.shape(), vec![rows, cols], "cpu shape mismatch");
 
         ensure_provider_registered();
         let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
@@ -3921,7 +5357,7 @@ fn power_step_normalization_matches_cpu() {
             other => panic!("expected tensor Q (gpu), got {other:?}"),
         };
 
-        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        assert_eq!(cpu_tensor.shape(), gpu_tensor.shape(), "shape mismatch");
         let tol = 1e-6;
         for (lhs, rhs) in cpu_tensor
             .materialize_f64()
@@ -3938,8 +5374,42 @@ fn power_step_normalization_matches_cpu() {
 }
 
 #[test]
+fn image_normalize_feasibility_admits_native_single_without_widening_other_fusion_routes() {
+    let provider = TestProvider::new();
+    let representation = runmat_accelerate_api::ProviderRepresentation {
+        element_type: ProviderElementType::F32,
+        storage: ProviderStorage::DenseReal,
+        layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+        shape: vec![2, 4, 5],
+        residency: runmat_accelerate_api::ProviderResidency::Host,
+    };
+    let mut query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(
+            runmat_accelerate::placement::fusion_operation_token(&FusionKind::ImageNormalize),
+        ),
+        family: ProviderOperationFamily::Fusion,
+        inputs: vec![representation.clone()],
+        outputs: vec![representation],
+        workload: Default::default(),
+    };
+    assert!(provider.query_feasibility(&query).is_supported());
+
+    for kind in [FusionKind::CenteredGram, FusionKind::ElementwiseChain] {
+        query.operation = ProviderOperationIdentity::new(
+            runmat_accelerate::placement::fusion_operation_token(&kind),
+        );
+        assert!(
+            !provider.query_feasibility(&query).is_supported(),
+            "native single inputs must not broaden {kind:?}"
+        );
+    }
+}
+
+#[test]
 fn image_normalize_matches_cpu() {
     gc_test_context(|| {
+        let _accel_guard = accel_test_lock();
+        fusion_diagnostics::enable();
         use runmat_accelerate::FusionKind;
         let source = r#"
         B = 4; H = 8; W = 12;
@@ -3960,9 +5430,18 @@ fn image_normalize_matches_cpu() {
 
         let graph = graph_for_fusion_test(&bytecode).expect("image normalize accel graph");
         let groups = graph.detect_fusion_groups();
-        assert!(groups
-            .iter()
-            .any(|group| matches!(group.kind, FusionKind::ImageNormalize)));
+        assert!(
+            groups
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::ImageNormalize)),
+            "nested image-normalization group not detected: {graph:#?}"
+        );
+        assert!(
+            !bytecode
+                .prospective_image_normalize_publications()
+                .is_empty(),
+            "nested image source must seal an executable VM publication region"
+        );
 
         let out_index = bytecode
             .instructions
@@ -3992,7 +5471,7 @@ fn image_normalize_matches_cpu() {
             other => panic!("expected tensor out (gpu), got {other:?}"),
         };
 
-        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        assert_eq!(cpu_tensor.shape(), gpu_tensor.shape(), "shape mismatch");
         let tol = 5e-4;
         for (lhs, rhs) in cpu_tensor
             .materialize_f64()
@@ -4040,6 +5519,7 @@ fn image_normalize_vecdim_unclamped_detects_fusion() {
                     !pattern.clamp_zero,
                     "exact unclamped script should not set clamp_zero"
                 );
+                assert!(!pattern.requires_single_input);
             }
             other => panic!("missing image normalize pattern, got {other:?}"),
         }
@@ -4047,8 +5527,37 @@ fn image_normalize_vecdim_unclamped_detects_fusion() {
 }
 
 #[test]
+fn image_normalize_vecdim_double_reduction_does_not_claim_native_fusion() {
+    gc_test_context(|| {
+        let source = r#"
+        imgs = rand(2, 4, 5, 'single');
+        mu = mean(imgs, [2 3], 'double');
+        sigma = sqrt(mean((imgs - mu).^2, [2 3], 'double') + single(1e-6));
+        out = ((imgs - mu) ./ sigma) .^ single(1.8);
+        "#;
+        let bytecode = compile_semantic(source);
+        assert!(
+            bytecode
+                .runtime_fusion_groups()
+                .iter()
+                .all(|group| !matches!(group.kind, FusionKind::ImageNormalize)),
+            "double-output mean cannot use the native-precision image kernel"
+        );
+        // A program without an eligible group has no reconciled graph. Check
+        // detection too when another eligible group keeps the graph alive.
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
+            assert!(graph
+                .detect_fusion_groups()
+                .iter()
+                .all(|group| !matches!(group.kind, FusionKind::ImageNormalize)));
+        }
+    });
+}
+
+#[test]
 fn image_normalize_vecdim_matches_cpu() {
     gc_test_context(|| {
+        let _accel_guard = accel_test_lock();
         use runmat_accelerate::{FusionKind, FusionPattern};
         let source = r#"
         rng(0); B=2; H=4; W=5;
@@ -4073,13 +5582,16 @@ fn image_normalize_vecdim_matches_cpu() {
         let group = groups
             .iter()
             .find(|group| matches!(group.kind, FusionKind::ImageNormalize))
-            .expect("image normalize group not detected for vecdim clamped form");
+            .unwrap_or_else(|| {
+                panic!("image normalize group not detected for vecdim clamped form: {graph:#?}")
+            });
         match group.pattern.as_ref() {
             Some(FusionPattern::ImageNormalize(pattern)) => {
                 assert!(
                     pattern.clamp_zero,
                     "clamped vecdim script should set clamp_zero"
                 );
+                assert!(pattern.requires_single_input);
             }
             other => panic!("missing image normalize pattern, got {other:?}"),
         }
@@ -4098,17 +5610,31 @@ fn image_normalize_vecdim_matches_cpu() {
             Value::Tensor(t) => t,
             other => panic!("expected tensor out (cpu), got {other:?}"),
         };
+        assert_eq!(cpu_tensor.numeric_dtype(), runmat_value::NumericDType::F32);
 
+        runmat_accelerate::placement::reset();
         ensure_provider_registered();
         let vars_gpu = interpret_function(&bytecode, vars.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
+        let Value::GpuTensor(output_handle) = out_gpu else {
+            panic!(
+                "vecdim image normalize should retain a resident native single output; got {out_gpu:?}; placement={}",
+                serde_json::to_string_pretty(&runmat_accelerate::placement_report()).unwrap()
+            );
+        };
+        assert_eq!(
+            output_handle.physical().element_type(),
+            runmat_accelerate_api::NumericElementType::F32
+        );
         let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
         let gpu_tensor = match gathered_gpu {
             Value::Tensor(t) => t,
             other => panic!("expected tensor out (gpu), got {other:?}"),
         };
 
-        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        assert_eq!(gpu_tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+
+        assert_eq!(cpu_tensor.shape(), gpu_tensor.shape(), "shape mismatch");
         let tol = 5e-4;
         for (lhs, rhs) in cpu_tensor
             .materialize_f64()
@@ -4154,7 +5680,9 @@ fn explained_variance_matches_cpu() {
             }
         }
 
-        let (q_var_idx, g_var_idx) = if let Some(graph) = graph_for_fusion_test(&bytecode) {
+        let (q_var_idx, g_var_idx) = {
+            let graph =
+                graph_for_fusion_test(&bytecode).expect("explained-variance acceleration graph");
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -4182,8 +5710,6 @@ fn explained_variance_matches_cpu() {
                 .var_binding(g_vid)
                 .expect("g binding available for explained variance");
             (q_binding.index, g_binding.index)
-        } else {
-            panic!("expected accel graph")
         };
 
         let eval_index = bytecode
@@ -4221,7 +5747,7 @@ fn explained_variance_matches_cpu() {
                         .get(q_var_idx)
                         .expect("q var present after cpu run")
                 )
-                .shape
+                .shape()
             );
             println!(
                 "g tensor shape {:?}",
@@ -4230,7 +5756,7 @@ fn explained_variance_matches_cpu() {
                         .get(g_var_idx)
                         .expect("g var present after cpu run")
                 )
-                .shape
+                .shape()
             );
             println!(
                 "q tensor data {:?}",
@@ -4263,14 +5789,14 @@ fn explained_variance_matches_cpu() {
                 .expect("g var present after cpu run"),
         );
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
-            println!("q tensor shape {:?}", q_tensor.shape);
-            println!("g tensor shape {:?}", g_tensor.shape);
+            println!("q tensor shape {:?}", q_tensor.shape());
+            println!("g tensor shape {:?}", g_tensor.shape());
             println!("q tensor data {:?}", q_tensor.materialize_f64());
             println!("g tensor data {:?}", g_tensor.materialize_f64());
         }
 
-        let rows = q_tensor.shape.first().copied().unwrap_or(0);
-        let cols = q_tensor.shape.get(1).copied().unwrap_or(1);
+        let rows = q_tensor.shape().first().copied().unwrap_or(0);
+        let cols = q_tensor.shape().get(1).copied().unwrap_or(1);
         assert!(
             rows > 0 && cols > 0,
             "explained variance requires non-empty Q"
@@ -4311,7 +5837,7 @@ fn explained_variance_matches_cpu() {
                 if let Ok(Value::Tensor(tmp_tensor)) = gather_if_needed(tmp_value) {
                     println!(
                         "tmp var idx {tmp_idx} shape {:?} data {:?}",
-                        tmp_tensor.shape,
+                        tmp_tensor.shape(),
                         tmp_tensor.materialize_f64()
                     );
                 }
@@ -4321,7 +5847,7 @@ fn explained_variance_matches_cpu() {
                 if let Ok(Value::Tensor(prod_tensor)) = gather_if_needed(prod_value) {
                     println!(
                         "prod var idx {prod_idx} shape {:?} data {:?}",
-                        prod_tensor.shape,
+                        prod_tensor.shape(),
                         prod_tensor.materialize_f64()
                     );
                 }
@@ -4343,8 +5869,27 @@ fn explained_variance_matches_cpu() {
             }
         }
 
+        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
+            for (idx, value) in vars_cpu.iter().enumerate() {
+                if let Ok(Value::Tensor(t)) =
+                    futures::executor::block_on(gather_if_needed_async(value))
+                {
+                    if t.shape() == vec![2, 2] {
+                        println!(
+                            "tensor idx {idx} shape {:?} data {:?}",
+                            t.shape(),
+                            t.materialize_f64()
+                        );
+                    }
+                }
+            }
+        }
+
         ensure_provider_registered();
-        let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
+        let vars_gpu = vars_cpu
+            .with_unbounded_values(|vars| interpret_function(&bytecode, vars))
+            .and_then(std::convert::identity)
+            .expect("gpu interpret");
         let eval_gpu = vars_gpu.get(eval_index).expect("gpu eval");
         assert!(matches!(eval_gpu, Value::GpuTensor(_) | Value::Tensor(_)));
         let gathered_gpu = gather_if_needed(eval_gpu).expect("gather gpu");
@@ -4353,7 +5898,7 @@ fn explained_variance_matches_cpu() {
             other => panic!("expected tensor eval (gpu), got {other:#?}"),
         };
 
-        assert_eq!(cpu_tensor.shape, gpu_tensor.shape, "shape mismatch");
+        assert_eq!(cpu_tensor.shape(), gpu_tensor.shape(), "shape mismatch");
         let tol = 1e-6;
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             for (lhs, rhs) in expected_diag
@@ -4382,28 +5927,12 @@ fn explained_variance_matches_cpu() {
         }
 
         if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
-            for (idx, value) in vars_cpu.iter().enumerate() {
-                if let Ok(Value::Tensor(t)) =
-                    futures::executor::block_on(gather_if_needed_async(value))
-                {
-                    if t.shape == vec![2, 2] {
-                        println!(
-                            "tensor idx {idx} shape {:?} data {:?}",
-                            t.shape,
-                            t.materialize_f64()
-                        );
-                    }
-                }
-            }
-        }
-
-        if std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok() {
             let q_tensor_value = Value::Tensor(q_tensor.clone());
             let g_tensor_value = Value::Tensor(g_tensor.clone());
             let q_t_value =
                 runmat_runtime::call_builtin("transpose", std::slice::from_ref(&q_tensor_value))
                     .expect("transpose");
-            if let Value::Tensor(ref q_t_tensor) = q_t_value {
+            if let Value::Tensor(q_t_tensor) = q_t_value.value() {
                 println!("q_t tensor data {:?}", q_t_tensor.materialize_f64());
             }
             let tmp_via_runtime = futures::executor::block_on(runmat_runtime::value_matmul(

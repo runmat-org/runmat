@@ -39,7 +39,7 @@ def queue_records:
         signature_count: (.value.signatures | length),
         screened_input_types: (.value | screened_input_types),
         signature_labels: [.value.signatures[].label],
-        reference: (if ($reference_names | index($name)) != null then "docs/builtins/reference/" + $name + ".json" else null end)
+        reference: ($reference_sources[0][$name | ascii_downcase] // null)
       }
   ]
   | to_entries

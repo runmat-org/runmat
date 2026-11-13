@@ -1,0 +1,32 @@
+[package]
+name = "runmat-analysis-language"
+version = "0.7.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "Typed FEA source-to-domain compiler for RunMat"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+schemars = { version = "0.8", optional = true }
+runmat-analysis-core = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-design-syntax = { workspace = true }
+runmat-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+runmat-analysis-fea = { workspace = true }
+runmat-geometry-fixtures = { workspace = true }
+
+[features]
+tool-schema = ["dep:schemars", "runmat-types/tool-schema"]
+
+[build-dependencies]
+serde_json = { workspace = true }

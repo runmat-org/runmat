@@ -1,5 +1,9 @@
 use super::*;
 
+// witness: FEA-MESH-DISCRETIZATION-001/volume_conformity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A shared-face split preserves component boundary and volume; segment and facet
+//   recovery and nested voids are separate tests.
 #[test]
 fn shared_face_split_preserves_component_boundary_and_volume() {
     let cavity = two_tetrahedron_bipyramid_cavity();
@@ -32,7 +36,10 @@ fn shared_face_split_preserves_component_boundary_and_volume() {
             .expect("shared-face split should preserve cavity boundary");
 
     assert_eq!(split_node.node_id, 5);
-    assert_eq!(split_node.coordinates_m, [1.0 / 3.0, 1.0 / 3.0, 0.0]);
+    assert_eq!(
+        split_node.coordinates_m.canonical_value(),
+        [1.0 / 3.0, 1.0 / 3.0, 0.0]
+    );
     assert_eq!(refill.tetrahedra.len(), 6);
     validate_constrained_cavity_boundary_preserved(&cavity, &refill.boundary_faces)
         .expect("shared-face split should preserve boundary");

@@ -1,0 +1,24 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    feature da = chamfer(
+        edges = [edges_between(feature.body.face.end, feature.body.face.side(s1.l1))],
+        distance = 2 mm,
+        angle = 30 deg,
+        flip
+    )
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+}

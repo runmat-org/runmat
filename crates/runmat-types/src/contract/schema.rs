@@ -15,6 +15,14 @@ impl SchemaValidationError {
     }
 }
 
+impl std::fmt::Display for SchemaValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.path, self.message)
+    }
+}
+
+impl std::error::Error for SchemaValidationError {}
+
 pub(crate) fn validate_token(
     path: &str,
     value: &str,

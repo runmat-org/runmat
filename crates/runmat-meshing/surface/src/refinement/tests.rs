@@ -1,3 +1,11 @@
+mod cooperative_classification;
+mod cooperative_insertion;
+mod cooperative_selection;
+mod local_queries;
+mod protected_edge_inventory;
+mod separated_size_candidate;
+mod sized_curve_boundary;
+
 use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryModel, PersistentEntityId,
     PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
@@ -13,16 +21,46 @@ use runmat_meshing_curve::{
 };
 
 use crate::{
-    exact_face_chart_cut_node_id, ExactFaceDelaunayTriangle, ExactFaceGeometry,
-    ExactFaceGeometryVertex, ExactFaceMetricEvaluation, ExactFacePslg, ExactFacePslgLoop,
-    ExactFacePslgLoopSource, ExactFacePslgSegment, ExactFacePslgSegmentSource, ExactFacePslgVertex,
-    ExactFaceTriangleGeometry, ParametricMetricTensor,
+    exact_face_chart_cut_node_id, ExactFaceChartParameterization, ExactFaceDelaunayTriangle,
+    ExactFaceGeometry, ExactFaceGeometryVertex, ExactFaceMetricEvaluation, ExactFacePslg,
+    ExactFacePslgLoop, ExactFacePslgLoopSource, ExactFacePslgSegment, ExactFacePslgSegmentSource,
+    ExactFacePslgVertex, ExactFaceTriangleGeometry, ParametricMetricTensor,
 };
 
 use super::*;
 
 #[test]
-fn canonical_bad_triangle_selects_its_metric_circumcenter() {
+fn diametral_disk_uses_one_conservative_policy_at_its_floating_boundary() {
+    let metric = ParametricMetricTensor {
+        uu: 1.0,
+        uv: 0.0,
+        vv: 1.0,
+    };
+    let first = [-1.0, 0.0];
+    let second = [1.0, 0.0];
+
+    assert_eq!(
+        super::encroachment::metric_diametral_disk_contains(
+            [0.0, 1.0 + f64::EPSILON],
+            first,
+            second,
+            metric,
+        ),
+        Some(true),
+    );
+    assert_eq!(
+        super::encroachment::metric_diametral_disk_contains(
+            [0.0, 1.0 + 1.0e-8],
+            first,
+            second,
+            metric,
+        ),
+        Some(false),
+    );
+}
+
+#[test]
+fn canonical_bad_triangle_selects_a_reason_specific_construction() {
     let geometry = geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);
     let pslg = triangle_pslg(&geometry);
     let collars = empty_collars(&geometry);
@@ -35,7 +73,50 @@ fn canonical_bad_triangle_selects_its_metric_circumcenter() {
         ExactFaceRefinementReason::MetricEdgeLength
     );
     assert_eq!(candidate.triangle_index, 0);
-    assert_eq!(candidate.uv, [1.0, 1.0]);
+    assert_eq!(candidate.uv, [1.0, 0.0]);
+
+    let mut duplicate_geometry = geometry.clone();
+    let mut duplicate_pslg = pslg.clone();
+    duplicate_pslg.vertices.push(ExactFacePslgVertex {
+        node_id: node(9),
+        seam_image: None,
+        uv: candidate.uv,
+    });
+    duplicate_geometry.vertices.push(ExactFaceGeometryVertex {
+        pslg_vertex_index: 3,
+        point_m: evaluation(&geometry.source_face_id, candidate.uv).point_m,
+        evaluation: evaluation(&geometry.source_face_id, candidate.uv),
+        unit_normal: [0.0, 0.0, 1.0],
+    });
+    let duplicate_collars = empty_collars(&duplicate_geometry);
+    let fallback = select_exact_face_refinement_candidate(
+        &duplicate_geometry,
+        &duplicate_pslg,
+        &duplicate_collars,
+        quality(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(fallback.uv, geometry.triangles[0].deviation_samples[3].uv);
+
+    let mut obtuse_geometry = self::geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);
+    obtuse_geometry.vertices[2].evaluation =
+        evaluation(&obtuse_geometry.source_face_id, [0.2, 0.1]);
+    obtuse_geometry.triangles[0].deviation_samples[3] = evaluation(
+        &obtuse_geometry.source_face_id,
+        [(0.0 + 2.0 + 0.2) / 3.0, 0.1 / 3.0],
+    );
+    let obtuse_pslg = triangle_pslg(&obtuse_geometry);
+    let obtuse_collars = empty_collars(&obtuse_geometry);
+    let obtuse_candidate = select_exact_face_refinement_candidate(
+        &obtuse_geometry,
+        &obtuse_pslg,
+        &obtuse_collars,
+        quality(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(obtuse_candidate.uv, [1.0, 0.0]);
 
     let mut invalid = quality();
     invalid.minimum_metric_angle_degrees = 60.0;
@@ -44,6 +125,198 @@ fn canonical_bad_triangle_selects_its_metric_circumcenter() {
             .unwrap_err()
             .kind,
         ExactFaceRefinementErrorKind::InvalidQuality
+    );
+}
+
+#[test]
+fn refinement_batch_never_inserts_adjacent_stale_cavities() {
+    let face = id(PersistentEntityKind::Face, "batch-face");
+    let mut adjacent = candidate(face.clone(), [20.0, 20.0]);
+    adjacent.triangle_index = 1;
+    adjacent.triangle.vertex_indices = [1, 2, 3];
+    let mut independent = candidate(face.clone(), [30.0, 30.0]);
+    independent.triangle_index = 2;
+    independent.triangle.vertex_indices = [4, 5, 6];
+    let mut geometry = geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);
+    let mut adjacent_geometry = geometry.triangles[0].clone();
+    adjacent_geometry.triangle = adjacent.triangle;
+    let mut independent_geometry = geometry.triangles[0].clone();
+    independent_geometry.triangle = independent.triangle;
+    geometry
+        .triangles
+        .extend([adjacent_geometry, independent_geometry]);
+    let pslg = triangle_pslg(&geometry);
+
+    let selected = super::select::independent_candidate_batch(
+        vec![candidate(face, [10.0, 10.0]), adjacent, independent.clone()],
+        &geometry,
+        &pslg,
+        0.01,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(selected.len(), 2);
+    assert_eq!(selected[1], independent);
+}
+
+#[test]
+fn shape_candidate_batch_respects_the_two_child_spacing_collar() {
+    let face = id(PersistentEntityKind::Face, "batch-spacing-face");
+    let mut geometry = geometry([0.5; 3], 0.5, 1.0, 0.0, 0.0);
+    geometry.vertices[0].evaluation = evaluation(&geometry.source_face_id, [0.0, 0.0]);
+    let pslg = triangle_pslg(&geometry);
+    let mut near = candidate(face, [0.015, 0.0]);
+    near.reason = ExactFaceRefinementReason::MetricAngle;
+
+    let selected =
+        super::select::independent_candidate_batch(vec![near], &geometry, &pslg, 0.02, None)
+            .unwrap();
+
+    assert!(selected.is_empty());
+}
+
+#[test]
+fn near_node_sizing_candidates_are_relocated_or_dropped_not_fatal() {
+    let face = id(PersistentEntityKind::Face, "near-node-face");
+    let geometry = geometry([2.0, 2.0, 2.0], 0.5, 1.0, 0.0, 0.0);
+    let pslg = triangle_pslg(&geometry);
+
+    // A metric-edge-length candidate beside a corner moves to a separated point in its
+    // triangle, measured in the sizing at the new point.
+    let near = candidate(face.clone(), [0.01, 0.0]);
+    let selected = super::select::independent_candidate_batch(
+        vec![near.clone()],
+        &geometry,
+        &pslg,
+        0.02,
+        None,
+    )
+    .unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_ne!(selected[0].uv, near.uv);
+    for vertex in &pslg.vertices {
+        let distance = (selected[0].uv[0] - vertex.uv[0]).hypot(selected[0].uv[1] - vertex.uv[1]);
+        assert!(distance >= 0.02, "relocated candidate stays separated");
+    }
+    let repeated = super::select::independent_candidate_batch(
+        vec![near.clone()],
+        &geometry,
+        &pslg,
+        0.02,
+        None,
+    )
+    .unwrap();
+    assert_eq!(repeated, selected, "relocation is deterministic");
+
+    // With no separated point in the triangle, a boundary-support candidate is dropped and the
+    // batch is empty, so refinement terminates instead of retrying the same target.
+    let mut support = candidate(face.clone(), [0.01, 0.0]);
+    support.reason = ExactFaceRefinementReason::BoundaryMetricSupport;
+    assert!(
+        super::select::independent_candidate_batch(vec![support], &geometry, &pslg, 2.0, None)
+            .unwrap()
+            .is_empty()
+    );
+
+    // Geometric fidelity targets still have no substitute point.
+    let mut chordal = candidate(face, [0.01, 0.0]);
+    chordal.reason = ExactFaceRefinementReason::ChordalDeviation;
+    assert!(super::select::independent_candidate_batch(
+        vec![chordal],
+        &geometry,
+        &pslg,
+        0.02,
+        None
+    )
+    .is_err());
+}
+
+#[test]
+fn shape_refinement_respects_the_surface_minimum_edge_collar() {
+    let geometry = geometry([0.005, 0.5, 0.5], 0.001, 1_000.0, 0.0, 0.0);
+    let mut pslg = triangle_pslg(&geometry);
+    pslg.segments = [[0, 1], [1, 2], [2, 0]]
+        .into_iter()
+        .enumerate()
+        .map(|(index, vertex_indices)| ExactFacePslgSegment {
+            source: ExactFacePslgSegmentSource::ExactTrim {
+                source_coedge_id: id(
+                    PersistentEntityKind::Coedge,
+                    &format!("collar-coedge-{index}"),
+                ),
+                source_edge_id: id(PersistentEntityKind::Edge, &format!("collar-edge-{index}")),
+            },
+            vertex_indices,
+            edge_parameters: Some([0.0, 1.0]),
+        })
+        .collect();
+    let collars = empty_collars(&geometry);
+
+    assert!(
+        select_exact_face_refinement_candidate(&geometry, &pslg, &collars, quality())
+            .unwrap()
+            .is_none()
+    );
+
+    let mut unprotected = pslg;
+    unprotected.segments.clear();
+    unprotected.loops.clear();
+    assert_eq!(
+        select_exact_face_refinement_candidate(
+            &geometry,
+            &unprotected,
+            &empty_collars(&geometry),
+            quality(),
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::UnsatisfiedQuality
+    );
+}
+
+#[test]
+fn shape_candidate_does_not_refine_a_sizing_compliant_protected_edge() {
+    let face = id(PersistentEntityKind::Face, "split-floor-face");
+    let mut pslg = ExactFacePslg {
+        source_face_id: face,
+        vertices: vec![
+            ExactFacePslgVertex {
+                node_id: node(1),
+                seam_image: None,
+                uv: [0.4925, -0.005],
+            },
+            ExactFacePslgVertex {
+                node_id: node(2),
+                seam_image: None,
+                uv: [0.5075, -0.005],
+            },
+        ],
+        segments: Vec::new(),
+        loops: Vec::new(),
+    };
+    pslg.segments.push(ExactFacePslgSegment {
+        source: ExactFacePslgSegmentSource::ExactTrim {
+            source_coedge_id: id(PersistentEntityKind::Coedge, "split-floor-coedge"),
+            source_edge_id: id(PersistentEntityKind::Edge, "split-floor-edge"),
+        },
+        vertex_indices: [0, 1],
+        edge_parameters: Some([0.0, 1.0]),
+    });
+
+    assert!(
+        super::select::shape_candidate_encroaches_sized_protected_segment(
+            [0.5, 0.0],
+            &pslg,
+            identity_metric(),
+        )
+    );
+    assert!(
+        !super::select::shape_candidate_encroaches_sized_protected_segment(
+            [0.5, 0.02],
+            &pslg,
+            identity_metric(),
+        )
     );
 }
 
@@ -91,7 +364,7 @@ fn acute_material_corner_has_canonical_independently_validated_collar() {
 }
 
 #[test]
-fn geometric_deviation_uses_the_exact_triangle_centroid() {
+fn geometric_deviation_uses_the_exact_sample_witness() {
     let geometry = geometry([0.5; 3], 0.5, 1.0, 0.25, 0.0);
     let pslg = triangle_pslg(&geometry);
     let collars = empty_collars(&geometry);
@@ -103,7 +376,7 @@ fn geometric_deviation_uses_the_exact_triangle_centroid() {
         candidate.reason,
         ExactFaceRefinementReason::ChordalDeviation
     );
-    assert_eq!(candidate.uv, geometry.triangles[0].centroid.uv);
+    assert_eq!(candidate.uv, geometry.triangles[0].chordal_deviation_uv);
 }
 
 #[test]
@@ -165,6 +438,96 @@ fn encroaching_candidate_requests_one_exact_parameter_split_before_insertion() {
         )
         .unwrap(),
         ExactFaceCandidateDisposition::Insert
+    );
+}
+
+#[test]
+fn shape_candidate_never_rewrites_a_sizing_validated_shared_curve() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let face_id = topology.faces[0].id.clone();
+    let pslg = one_segment_pslg(face_id.clone());
+    let classify = |uv: [f64; 2]| {
+        let mut shape = candidate(face_id.clone(), uv);
+        shape.reason = ExactFaceRefinementReason::PhysicalAspectRatio;
+        classify_exact_face_refinement_candidate(
+            &shape,
+            &pslg,
+            &topology,
+            &metric_request(),
+            &evaluator,
+            &Control,
+        )
+        .unwrap()
+    };
+    // A shape point never splits the curve: inside its diametral disk it is inserted. Exactly on
+    // the curve it can be neither inserted nor used to split it, so it is withdrawn.
+    assert_eq!(classify([0.0, 1.5]), ExactFaceCandidateDisposition::Insert);
+    assert_eq!(classify([0.0, 0.1]), ExactFaceCandidateDisposition::Insert);
+    assert_eq!(
+        classify([0.0, 0.0]),
+        ExactFaceCandidateDisposition::Withdraw
+    );
+}
+
+#[test]
+fn candidate_batch_requests_every_independently_encroached_segment_once() {
+    let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
+    let GeometryModel::ExactBRep { model } = &document.model else {
+        panic!("fixture must be exact")
+    };
+    let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
+    let face_id = topology.faces[0].id.clone();
+    let mut pslg = one_segment_pslg(face_id.clone());
+    pslg.vertices.extend([
+        ExactFacePslgVertex {
+            node_id: node(3),
+            seam_image: None,
+            uv: [-1.0, 2.0],
+        },
+        ExactFacePslgVertex {
+            node_id: node(4),
+            seam_image: None,
+            uv: [1.0, 2.0],
+        },
+    ]);
+    pslg.segments.push(ExactFacePslgSegment {
+        source: ExactFacePslgSegmentSource::ExactTrim {
+            source_coedge_id: id(PersistentEntityKind::Coedge, "second-coedge"),
+            source_edge_id: id(PersistentEntityKind::Edge, "second-edge"),
+        },
+        vertex_indices: [2, 3],
+        edge_parameters: Some([0.0, 1.0]),
+    });
+    let candidates = [
+        candidate(face_id.clone(), [0.0, 0.0]),
+        candidate(face_id, [0.0, 2.0]),
+    ];
+
+    let classifications = classify_exact_face_refinement_candidates_in_parameterization(
+        &candidates,
+        &pslg,
+        &topology,
+        &metric_request(),
+        &ExactFaceChartParameterization::EvaluatorParameters,
+        &evaluator,
+        &Control,
+    )
+    .unwrap();
+
+    assert_eq!(classifications.protected_splits.len(), 2);
+    assert!(classifications.chart_cut_splits.is_empty());
+    assert!(classifications.insertions.is_empty());
+    assert_eq!(
+        classifications
+            .protected_splits
+            .iter()
+            .map(|split| split.pslg_segment_index)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
     );
 }
 
@@ -354,6 +717,28 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         uv,
     };
 
+    // Cancellation must reach each admission walk before triangulation starts.
+    for cancel_at in [
+        1,
+        pslg.vertices.len() + 1,
+        pslg.vertices.len() + pslg.segments.len() + 1,
+    ] {
+        let signal = cooperative_insertion::CancelDuringCandidateWalk::new(cancel_at);
+        let failure = insert_exact_face_refinement_candidate(
+            face_boundary,
+            &initial,
+            &candidate,
+            &signal,
+            options,
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.kind,
+            ExactFaceRefinementErrorKind::Delaunay(crate::ExactFaceDelaunayErrorKind::Cancelled)
+        );
+        assert_eq!(signal.observed(), cancel_at);
+    }
+
     let refined = insert_exact_face_refinement_candidate(
         face_boundary,
         &initial,
@@ -384,6 +769,46 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
             .count(),
         1
     );
+
+    let second_triangle = trimmed.triangles[1];
+    let second_corners = second_triangle
+        .vertex_indices
+        .map(|index| pslg.vertices[index as usize].uv);
+    let second_candidate = ExactFaceRefinementCandidate {
+        source_face_id: pslg.source_face_id.clone(),
+        triangle_index: 1,
+        triangle: second_triangle,
+        reason: ExactFaceRefinementReason::PhysicalAspectRatio,
+        uv: [
+            second_corners.iter().map(|point| point[0]).sum::<f64>() / 3.0,
+            second_corners.iter().map(|point| point[1]).sum::<f64>() / 3.0,
+        ],
+    };
+    let (batched, inserted) = insert_exact_face_refinement_candidates(
+        face_boundary,
+        &initial,
+        &[
+            candidate.clone(),
+            second_candidate.clone(),
+            candidate.clone(),
+        ],
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+    let (reordered, reordered_inserted) = insert_exact_face_refinement_candidates(
+        face_boundary,
+        &initial,
+        &[second_candidate, candidate.clone()],
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
+    assert_eq!(inserted, 2);
+    assert_eq!(reordered_inserted, 2);
+    assert_eq!(batched, reordered);
+    assert_eq!(batched.pslg.vertices.len(), pslg.vertices.len() + 2);
+
     assert_eq!(
         refined.trimmed.boundary_segments.len(),
         trimmed.boundary_segments.len()
@@ -440,15 +865,19 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     );
 
     let coarse_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let permissive_quality = SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.01,
         maximum_physical_aspect_ratio: 1.0e9,
-        maximum_chordal_deviation_m: 1.0e9,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e9),
         maximum_normal_deviation_degrees: 180.0,
     };
     let converged = refine_exact_face_until_blocked(
@@ -463,6 +892,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         ),
         ExactFaceRefinementPolicy {
             quality: permissive_quality,
+            acceptance: crate::ExactFaceAcceptanceOptions::default(),
             delaunay: options,
             refinement: ExactFaceRefinementOptions {
                 maximum_interior_insertions: 1,
@@ -501,6 +931,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         ),
         ExactFaceRefinementPolicy {
             quality: permissive_quality,
+            acceptance: crate::ExactFaceAcceptanceOptions::default(),
             delaunay: options,
             refinement: ExactFaceRefinementOptions {
                 maximum_interior_insertions: 1,
@@ -541,7 +972,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         converged.geometry.triangles.len()
     );
     assert!(acceptance.sample_count > acceptance.triangles.len() as u64);
-    assert!(acceptance.maximum_chordal_deviation_m < 1.0e-12);
+    assert!(acceptance.maximum_chordal_deviation_m.canonical_value() < 1.0e-12);
     assert!(acceptance.maximum_normal_deviation_rad < 1.0e-7);
     let chart_acceptance = crate::accept_exact_face_chart_mesh(
         &chart,
@@ -581,7 +1012,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         crate::ExactFaceAcceptanceErrorKind::InvalidInput
     );
     let mut tampered_acceptance = acceptance.clone();
-    tampered_acceptance.maximum_chordal_deviation_m = 1.0;
+    tampered_acceptance.maximum_chordal_deviation_m = runmat_types::physical::Length::new(1.0);
     assert_eq!(
         crate::validate_exact_face_acceptance(
             &tampered_acceptance,
@@ -625,67 +1056,57 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         maximum_physical_aspect_ratio: 1.0,
         ..permissive_quality
     };
-    let strict = refine_exact_face_until_blocked(
-        face_boundary,
-        &initial,
-        ExactFaceRefinementContext::new(
-            &topology,
-            &coarse_request,
-            &evaluator,
-            &Control,
-            &NeverCancelled,
-        ),
-        ExactFaceRefinementPolicy {
-            quality: strict_aspect,
-            delaunay: options,
-            refinement: ExactFaceRefinementOptions {
-                maximum_interior_insertions: 1,
+    assert_eq!(
+        refine_exact_face_until_blocked(
+            face_boundary,
+            &initial,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            ExactFaceRefinementPolicy {
+                quality: strict_aspect,
+                acceptance: crate::ExactFaceAcceptanceOptions::default(),
+                delaunay: options,
+                refinement: ExactFaceRefinementOptions {
+                    maximum_interior_insertions: 1,
+                },
             },
-        },
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::ResourceLimit
     );
-    let ExactFaceRefinementOutcome::RequiresCurveSplit {
-        completed_interior_insertions,
-        ..
-    } = strict.unwrap()
-    else {
-        panic!("strict boundary-adjacent refinement must request a protected split")
-    };
-    assert_eq!(completed_interior_insertions, 0);
-
-    let chart_blocked = refine_exact_face_chart_until_blocked(
-        &chart,
-        &chart_domain,
-        ExactFaceRefinementContext::new(
-            &topology,
-            &coarse_request,
-            &evaluator,
-            &Control,
-            &NeverCancelled,
-        ),
-        ExactFaceRefinementPolicy {
-            quality: strict_aspect,
-            delaunay: options,
-            refinement: ExactFaceRefinementOptions {
-                maximum_interior_insertions: 1,
+    assert_eq!(
+        refine_exact_face_chart_until_blocked(
+            &chart,
+            &chart_domain,
+            ExactFaceRefinementContext::new(
+                &topology,
+                &coarse_request,
+                &evaluator,
+                &Control,
+                &NeverCancelled,
+            ),
+            ExactFaceRefinementPolicy {
+                quality: strict_aspect,
+                acceptance: crate::ExactFaceAcceptanceOptions::default(),
+                delaunay: options,
+                refinement: ExactFaceRefinementOptions {
+                    maximum_interior_insertions: 1,
+                },
             },
-        },
-        ExactFaceChartRefinementOptions {
-            maximum_chart_cut_splits: 1,
-        },
-    )
-    .unwrap();
-    let ExactFaceChartRefinementOutcome::RequiresCurveSplit {
-        chart_id: blocked_chart_id,
-        completed_interior_insertions,
-        completed_chart_cut_splits,
-        ..
-    } = chart_blocked
-    else {
-        panic!("boundary-adjacent chart refinement must request a shared-curve split")
-    };
-    assert_eq!(blocked_chart_id, chart_id);
-    assert_eq!(completed_interior_insertions, 0);
-    assert_eq!(completed_chart_cut_splits, 0);
+            ExactFaceChartRefinementOptions {
+                maximum_chart_cut_splits: 1,
+            },
+        )
+        .unwrap_err()
+        .kind,
+        ExactFaceRefinementErrorKind::ResourceLimit
+    );
 
     assert_eq!(
         refine_exact_face_until_blocked(
@@ -700,6 +1121,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
             ),
             ExactFaceRefinementPolicy {
                 quality: permissive_quality,
+                acceptance: crate::ExactFaceAcceptanceOptions::default(),
                 delaunay: options,
                 refinement: ExactFaceRefinementOptions {
                     maximum_interior_insertions: 0,
@@ -723,6 +1145,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
             ),
             ExactFaceRefinementPolicy {
                 quality: permissive_quality,
+                acceptance: crate::ExactFaceAcceptanceOptions::default(),
                 delaunay: options,
                 refinement: ExactFaceRefinementOptions {
                     maximum_interior_insertions: 1,
@@ -751,6 +1174,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
             ),
             ExactFaceRefinementPolicy {
                 quality: permissive_quality,
+                acceptance: crate::ExactFaceAcceptanceOptions::default(),
                 delaunay: options,
                 refinement: ExactFaceRefinementOptions {
                     maximum_interior_insertions: 1,
@@ -766,7 +1190,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     );
 }
 
-fn geometry(
+pub(super) fn geometry(
     metric_edges: [f64; 3],
     minimum_angle: f64,
     aspect: f64,
@@ -780,6 +1204,7 @@ fn geometry(
         .enumerate()
         .map(|(index, uv)| ExactFaceGeometryVertex {
             pslg_vertex_index: index as u32,
+            point_m: evaluation(&face_id, uv).point_m,
             evaluation: evaluation(&face_id, uv),
             unit_normal: [0.0, 0.0, 1.0],
         })
@@ -788,14 +1213,16 @@ fn geometry(
         triangle: ExactFaceDelaunayTriangle {
             vertex_indices: [0, 1, 2],
         },
-        centroid: evaluation(&face_id, [2.0 / 3.0, 2.0 / 3.0]),
+        deviation_samples: deviation_samples(&face_id, uvs),
         unit_normal: [0.0, 0.0, 1.0],
         physical_area_m2: 2.0,
         metric_edge_lengths: metric_edges,
         minimum_metric_angle_rad: minimum_angle,
         physical_aspect_ratio: aspect,
         chordal_deviation_m: chordal,
+        chordal_deviation_uv: [2.0 / 3.0, 2.0 / 3.0],
         normal_deviation_rad: normal,
+        normal_deviation_uv: [2.0 / 3.0, 2.0 / 3.0],
     };
     ExactFaceGeometry {
         source_face_id: face_id,
@@ -804,14 +1231,20 @@ fn geometry(
         maximum_metric_edge_length: metric_edges.into_iter().fold(0.0, f64::max),
         minimum_metric_angle_rad: minimum_angle,
         maximum_physical_aspect_ratio: aspect,
-        maximum_chordal_deviation_m: chordal,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(chordal),
         maximum_normal_deviation_rad: normal,
     }
 }
 
 fn evaluation(face_id: &PersistentEntityId, uv: [f64; 2]) -> ExactFaceMetricEvaluation {
     ExactFaceMetricEvaluation {
-        source_face_id: face_id.clone(),
+        provenance: std::sync::Arc::new(crate::ExactFaceMetricProvenance {
+            source_face_id: face_id.clone(),
+            active_sources: vec![MetricSourceKind::Global],
+            applied_contribution_count: 0,
+            clipped_contribution_count: 0,
+            rejected_contribution_count: 0,
+        }),
         uv,
         evaluator_uv: uv,
         point_m: [uv[0], uv[1], 0.0],
@@ -819,11 +1252,29 @@ fn evaluation(face_id: &PersistentEntityId, uv: [f64; 2]) -> ExactFaceMetricEval
         derivative_v_m: [0.0, 1.0, 0.0],
         physical_metric: identity_metric(),
         sizing_metric: identity_metric(),
-        active_sources: vec![MetricSourceKind::Global],
-        applied_contribution_count: 0,
-        clipped_contribution_count: 0,
-        rejected_contribution_count: 0,
     }
+}
+
+fn deviation_samples(
+    face_id: &PersistentEntityId,
+    corners: [[f64; 2]; 3],
+) -> [ExactFaceMetricEvaluation; 4] {
+    let weights = [
+        [0.5, 0.5, 0.0],
+        [0.0, 0.5, 0.5],
+        [0.5, 0.0, 0.5],
+        [1.0 / 3.0; 3],
+    ];
+    weights.map(|weights| {
+        evaluation(
+            face_id,
+            std::array::from_fn(|axis| {
+                corners[0][axis] * weights[0]
+                    + corners[1][axis] * weights[1]
+                    + corners[2][axis] * weights[2]
+            }),
+        )
+    })
 }
 
 fn one_segment_pslg(source_face_id: PersistentEntityId) -> ExactFacePslg {
@@ -942,6 +1393,7 @@ fn acute_corner_geometry() -> (ExactFacePslg, ExactFaceGeometry) {
             .enumerate()
             .map(|(index, uv)| ExactFaceGeometryVertex {
                 pslg_vertex_index: index as u32,
+                point_m: evaluation(&face_id, uv).point_m,
                 evaluation: evaluation(&face_id, uv),
                 unit_normal: [0.0, 0.0, 1.0],
             })
@@ -950,19 +1402,21 @@ fn acute_corner_geometry() -> (ExactFacePslg, ExactFaceGeometry) {
             triangle: ExactFaceDelaunayTriangle {
                 vertex_indices: [0, 1, 2],
             },
-            centroid: evaluation(&face_id, centroid_uv),
+            deviation_samples: deviation_samples(&face_id, uvs),
             unit_normal: [0.0, 0.0, 1.0],
             physical_area_m2: 0.1,
             metric_edge_lengths: [0.5; 3],
             minimum_metric_angle_rad: 5.0_f64.to_radians(),
             physical_aspect_ratio: 100.0,
             chordal_deviation_m: 0.0,
+            chordal_deviation_uv: centroid_uv,
             normal_deviation_rad: 0.0,
+            normal_deviation_uv: centroid_uv,
         }],
         maximum_metric_edge_length: 0.5,
         minimum_metric_angle_rad: 5.0_f64.to_radians(),
         maximum_physical_aspect_ratio: 100.0,
-        maximum_chordal_deviation_m: 0.0,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0),
         maximum_normal_deviation_rad: 0.0,
     };
     (pslg, geometry)
@@ -1007,35 +1461,39 @@ fn candidate(source_face_id: PersistentEntityId, uv: [f64; 2]) -> ExactFaceRefin
 
 fn quality() -> SurfaceQualityTargets {
     SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.01,
         minimum_metric_angle_degrees: 10.0,
         maximum_physical_aspect_ratio: 10.0,
-        maximum_chordal_deviation_m: 0.1,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.1),
         maximum_normal_deviation_degrees: 30.0,
     }
 }
 
 fn metric_request() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
 fn curve_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: 0.01,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
             maximum_tangent_change_rad: 0.2,
             minimum_metric_edge_length: 0.01,
             maximum_metric_edge_length: 1.0,
         },
         maximum_nodes_per_edge: 1_024,
         maximum_subdivision_depth: 20,
-        geometry_absolute_error_m: 1.0e-10,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: 1.0e-10,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
     }
 }
 
@@ -1052,11 +1510,7 @@ fn node(value: u8) -> StableDigest {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["part".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["part".into()])
 }
 
 struct Control;

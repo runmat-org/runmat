@@ -1,82 +1,50 @@
-use crate::builtins::plotting::type_resolvers::handle_logical_type;
+//! Canonical graphics predicate; candidates remain rooted in BuiltinArguments.
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    ISHANDLE_DESCRIPTOR, ISHANDLE_ERROR_INVALID_ARGUMENT, ISHANDLE_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Value};
 
-const ISHANDLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input resolves to a valid plotting handle.",
-}];
-
-const ISHANDLE_INPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Candidate plotting handle value.",
-}];
-
-const ISHANDLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = ishandle(h)",
-    inputs: &ISHANDLE_INPUTS_HANDLE,
-    outputs: &ISHANDLE_OUTPUT,
-}];
-
-const ISHANDLE_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const ISHANDLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISHANDLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISHANDLE_ERRORS,
-};
-
-const ISHANDLE_INTEGER_HANDLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ishandle-integer-handle-alias",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ishandle numeric integer handle aliases are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IshandleIntegerHandleExtension"),
-};
-const ISHANDLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISHANDLE_INTEGER_HANDLE_EXTENSION];
-pub const ISHANDLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "MATLAB graphics predicates operate on graphics objects; numeric integer handle aliases are a separately declared RunMat-only extension and compatibility mode returns same-shaped false.",
-};
-
+#[cfg(test)]
+#[path = "ishandle/tests.rs"]
+mod tests;
 #[runtime_builtin(
     name = "ishandle",
-    category = "plotting",
-    summary = "Return true if the input is a valid plotting handle.",
-    keywords = "ishandle,plotting,handle",
-    suppress_auto_output = true,
-    type_resolver(handle_logical_type),
-    descriptor(crate::builtins::plotting::ishandle::ISHANDLE_DESCRIPTOR),
-    extensions(ISHANDLE_EXTENSIONS),
-    integer_audit(crate::builtins::plotting::ishandle::ISHANDLE_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::ishandle"
 )]
-pub fn ishandle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if args.len() != 1 {
-        return Err(crate::builtins::plotting::plotting_error(
-            "ishandle",
-            "ishandle: expected exactly one input argument",
-        ));
-    }
-    Ok(handle_predicate_value(&args[0], "ishandle"))
-}
+pub fn ishandle_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let _scope = runtime.as_ref().map(|runtime| runtime.enter());
+    crate::output_count::validate_fixed_outputs(
+        &ISHANDLE_DESCRIPTOR,
+        &ISHANDLE_ERROR_TOO_MANY_OUTPUTS,
+        "ishandle",
+    )
+    .map_err(super::coordinate_admission::terminal)?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "ishandle")?;
+    work.finish((|| {
+        if args.len() != 1 {
+            return Err(invalid_argument("expected exactly one candidate"));
+        }
 
+        let result = handle_predicate_value(&args[0], "ishandle");
+        Ok(result)
+    })())
+}
+fn invalid_argument(detail: &str) -> crate::RuntimeError {
+    super::coordinate_admission::terminal(crate::runtime_descriptor_error_with_detail(
+        "ishandle",
+        &ISHANDLE_ERROR_INVALID_ARGUMENT,
+        detail,
+    ))
+}
 fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
     match value {
-        Value::GpuTensor(handle) => false_value(handle.shape.clone()),
+        Value::GpuTensor(handle) => false_value(handle.shape().to_vec()),
         Value::Int(integer) => {
             if !crate::compatibility::runmat_extensions_enabled() {
                 return Value::Bool(false);
@@ -88,22 +56,22 @@ fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             if crate::compatibility::ensure_builtin_extension_enabled(
-                &ISHANDLE_INTEGER_HANDLE_EXTENSION,
+                &runmat_builtins::ISHANDLE_INTEGER_HANDLE_EXTENSION,
                 builtin,
             )
             .is_err()
             {
                 return Value::LogicalArray(
-                    LogicalArray::new(vec![0; tensor.len()], tensor.shape.clone())
+                    LogicalArray::new(vec![0; tensor.len()], tensor.shape().to_vec())
                         .expect("logical shape from tensor"),
                 );
             }
             integer_handle_predicate(tensor, builtin, handle_is_valid)
         }
         Value::Tensor(tensor) => numeric_handle_predicate(tensor, builtin, handle_is_valid),
-        _ => Value::Bool(
-            crate::builtins::plotting::properties::resolve_plot_handle(value, builtin).is_ok(),
-        ),
+        _ => Value::Bool(super::isgraphics::graphics_handle_valid(
+            value, None, builtin,
+        )),
     }
 }
 
@@ -123,21 +91,19 @@ fn integer_handle_predicate(
     builtin: &'static str,
     predicate: fn(f64, &'static str) -> bool,
 ) -> Value {
-    let storage = tensor
-        .integer_storage()
-        .expect("integer handle predicate requires integer storage");
-    let data = storage
-        .exact_values()
-        .iter()
-        .map(|value| {
-            u8::from(
-                crate::builtins::plotting::op_common::handles::numeric_handle_from_integer(value)
-                    .is_some_and(|handle| predicate(handle, builtin)),
-            )
-        })
-        .collect();
+    let storage = tensor.integer_storage().expect("integer handle storage");
+    let data =
+        (0..storage.len())
+            .map(|index| {
+                u8::from(
+        storage.value_at(index).as_ref()
+            .and_then(crate::builtins::plotting::op_common::handles::numeric_handle_from_integer)
+            .is_some_and(|handle| predicate(handle, builtin))
+    )
+            })
+            .collect();
     Value::LogicalArray(
-        LogicalArray::new(data, tensor.shape.clone()).expect("logical shape from tensor"),
+        LogicalArray::new(data, tensor.shape().to_vec()).expect("logical shape from tensor"),
     )
 }
 
@@ -146,13 +112,16 @@ fn numeric_handle_predicate(
     builtin: &'static str,
     predicate: fn(f64, &'static str) -> bool,
 ) -> Value {
-    let data = tensor
-        .materialize_f64()
-        .iter()
-        .map(|&handle| u8::from(predicate(handle, builtin)))
+    let data = (0..tensor.len())
+        .map(|index| {
+            u8::from(predicate(
+                crate::builtins::common::tensor::tensor_value_f64(tensor, index),
+                builtin,
+            ))
+        })
         .collect();
     Value::LogicalArray(
-        LogicalArray::new(data, tensor.shape.clone()).expect("logical shape from tensor"),
+        LogicalArray::new(data, tensor.shape().to_vec()).expect("logical shape from tensor"),
     )
 }
 
@@ -161,71 +130,4 @@ fn handle_is_valid(handle: f64, builtin: &'static str) -> bool {
         return false;
     }
     crate::builtins::plotting::properties::resolve_plot_handle(&Value::Num(handle), builtin).is_ok()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ishandle_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = ISHANDLE_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"tf = ishandle(h)"));
-    }
-
-    #[test]
-    fn ishandle_vectorizes_numeric_handle_arrays() {
-        let handles = runmat_value::Tensor::new(vec![f64::NAN, -1.0], vec![2, 1]).unwrap();
-        let result = ishandle_builtin(vec![Value::Tensor(handles)]).unwrap();
-        match result {
-            Value::LogicalArray(logical) => {
-                assert_eq!(logical.shape, vec![2, 1]);
-                assert_eq!(logical.data, vec![0, 0]);
-            }
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ishandle_vectorizes_typed_handles_without_a_floating_mirror() {
-        let handles = runmat_value::Tensor::new_integer(
-            runmat_value::IntegerStorage::I16(vec![-1, -2]),
-            vec![2, 1],
-        )
-        .unwrap();
-        let result = ishandle_builtin(vec![Value::Tensor(handles)]).unwrap();
-        match result {
-            Value::LogicalArray(logical) => assert_eq!(logical.data, vec![0, 0]),
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn compatibility_mode_treats_integer_arrays_as_nonobjects() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handles = runmat_value::Tensor::new_integer(
-            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
-            vec![1, 1],
-        )
-        .unwrap();
-        let Value::LogicalArray(result) = ishandle_builtin(vec![Value::Tensor(handles)]).unwrap()
-        else {
-            panic!("expected logical array");
-        };
-        assert_eq!(result.data, vec![0]);
-    }
-
-    #[test]
-    fn ishandle_requires_exactly_one_argument() {
-        assert!(ishandle_builtin(Vec::new()).is_err());
-        assert!(ishandle_builtin(vec![Value::Num(0.0), Value::Num(1.0)]).is_err());
-        assert_eq!(
-            ishandle_builtin(vec![Value::Num(0.0)]).unwrap(),
-            Value::Bool(true)
-        );
-    }
 }

@@ -1,0 +1,55 @@
+geometry plate {
+    file = "./geometry/square-plate.step"
+    units = mm
+    region panel : face { select name "Plate"; expect exactly_one }
+    region south : edge { select name "South edge"; expect exactly_one }
+    region east : edge { select name "East edge"; expect exactly_one }
+    region north : edge { select name "North edge"; expect exactly_one }
+    region west : edge { select name "West edge"; expect exactly_one }
+}
+
+mesh plate on geometry.plate {
+    triangles {
+        target_size = 25 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model clamped_plate {
+    section plate_section {
+        homogeneous_shell {
+            thickness = 10 mm
+            reference_surface = mid_surface
+            shear_correction = 0.8333333333333333
+        }
+    }
+    orientation plate_axes { global_cartesian {} }
+
+    assign material.steel to geometry.plate.region.panel
+    assign section.plate_section to geometry.plate.region.panel
+    assign orientation.plate_axes to geometry.plate.region.panel
+    constraint clamp_south { structural.fixed { target = geometry.plate.region.south } }
+    constraint clamp_east { structural.fixed { target = geometry.plate.region.east } }
+    constraint clamp_north { structural.fixed { target = geometry.plate.region.north } }
+    constraint clamp_west { structural.fixed { target = geometry.plate.region.west } }
+    load uniform_pressure {
+        pressure on geometry.plate.region.panel = 1 kPa
+    }
+    load_case service { include load.uniform_pressure }
+}
+
+study clamped_plate_static {
+    geometry = geometry.plate
+    mesh = mesh.plate
+    model = model.clamped_plate
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+}

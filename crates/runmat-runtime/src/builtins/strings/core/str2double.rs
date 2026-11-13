@@ -1,14 +1,12 @@
 //! MATLAB-compatible `str2double` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::borrow::Cow;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Tensor, Value};
+use runmat_value::{
+    decode_utf16_code_units, CellArray, CharArray, StringArray, Tensor, Utf16CodeUnit, Value,
+};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -17,8 +15,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
-use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use runmat_builtins::{
+    STR2DOUBLE_DESCRIPTOR, STR2DOUBLE_ERROR_INTERNAL, STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT,
+    STR2DOUBLE_ERROR_INVALID_INPUT, STR2DOUBLE_ERROR_TOO_MANY_OUTPUTS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::str2double")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,7 +34,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Parses text on the CPU; GPU-resident inputs are gathered before conversion.",
+    notes: "Parses text on the CPU; numeric GPU-resident inputs reject before provider access.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::str2double")]
@@ -48,69 +49,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "str2double";
-
-const STR2DOUBLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Parsed double values; invalid parses become NaN.",
-}];
-
-const STR2DOUBLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String, character, or cell-array text input to parse.",
-}];
-
-const STR2DOUBLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = str2double(str)",
-    inputs: &STR2DOUBLE_INPUT,
-    outputs: &STR2DOUBLE_OUTPUT,
-}];
-
-const STR2DOUBLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2DOUBLE.INVALID_INPUT",
-    identifier: Some("RunMat:str2double:InvalidInput"),
-    when: "Input is not a supported text container.",
-    message: "str2double: input must be a string array, character array, or cell array of character vectors",
-};
-
-const STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2DOUBLE.INVALID_CELL_ELEMENT",
-    identifier: Some("RunMat:str2double:InvalidCellElement"),
-    when: "Cell array contains non-text or non-scalar text entries.",
-    message: "str2double: cell array elements must be character vectors or string scalars",
-};
-
-const STR2DOUBLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2DOUBLE.INTERNAL",
-    identifier: Some("RunMat:str2double:InternalError"),
-    when: "Internal tensor assembly failed while building parsed output.",
-    message: "str2double: internal error",
-};
-
-const STR2DOUBLE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STR2DOUBLE_ERROR_INVALID_INPUT,
-    STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT,
-    STR2DOUBLE_ERROR_INTERNAL,
-];
-
-pub const STR2DOUBLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STR2DOUBLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STR2DOUBLE_ERRORS,
-};
-
-pub const STR2DOUBLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "str2double parses string, character, or cellstr input and returns double. Integer, numeric, and provider-resident numeric inputs reject before provider access rather than being implicitly converted to text.",
-    };
 
 fn str2double_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     str2double_error_with_message(error.message, error)
@@ -133,16 +71,15 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "str2double",
-    category = "strings/core",
-    summary = "Convert text representations of numbers into double-precision values.",
-    keywords = "str2double,string to double,text conversion,gpu",
-    accel = "sink",
-    type_resolver(numeric_text_scalar_or_tensor_type),
-    descriptor(crate::builtins::strings::core::str2double::STR2DOUBLE_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::str2double::STR2DOUBLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &STR2DOUBLE_DESCRIPTOR,
+        &STR2DOUBLE_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if contains_numeric_or_resident_text_input(&value) {
         return Err(str2double_error(&STR2DOUBLE_ERROR_INVALID_INPUT));
     }
@@ -150,7 +87,9 @@ async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
         .await
         .map_err(remap_str2double_flow)?;
     match gathered {
-        Value::String(text) => Ok(Value::Num(parse_numeric_scalar(&text))),
+        Value::String(text) => Ok(Value::Num(
+            text.as_str().map_or(f64::NAN, parse_numeric_scalar),
+        )),
         Value::StringArray(array) => str2double_string_array(array),
         Value::CharArray(array) => str2double_char_array(array),
         Value::Cell(cell) => str2double_cell_array(cell),
@@ -159,10 +98,10 @@ async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn str2double_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let mut values = Vec::with_capacity(data.len());
     for text in &data {
-        values.push(parse_numeric_scalar(text));
+        values.push(text.as_str().map_or(f64::NAN, parse_numeric_scalar));
     }
     let tensor =
         Tensor::new(values, shape).map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
@@ -176,7 +115,7 @@ fn str2double_char_array(array: CharArray) -> BuiltinResult<Value> {
     for row in 0..rows {
         let start = row * cols;
         let end = start + cols;
-        let row_text: String = array.data[start..end].iter().collect();
+        let row_text = decode_chars(&array.data()[start..end])?;
         values.push(parse_numeric_scalar(&row_text));
     }
     let tensor = Tensor::new(values, vec![rows, 1])
@@ -185,19 +124,19 @@ fn str2double_char_array(array: CharArray) -> BuiltinResult<Value> {
 }
 
 fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut values = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {
             let idx = row * cols + col;
             let element: &Value = &data[idx];
             let numeric = match element {
-                Value::String(text) => parse_numeric_scalar(text),
-                Value::StringArray(sa) if sa.data.len() == 1 => parse_numeric_scalar(&sa.data[0]),
+                Value::String(text) => text.as_str().map_or(f64::NAN, parse_numeric_scalar),
+                Value::StringArray(sa) if sa.data().len() == 1 => {
+                    sa.data()[0].as_str().map_or(f64::NAN, parse_numeric_scalar)
+                }
                 Value::CharArray(char_vec) if char_vec.rows == 1 => {
-                    let row_text: String = char_vec.data.iter().collect();
+                    let row_text = decode_chars(char_vec.data())?;
                     parse_numeric_scalar(&row_text)
                 }
                 Value::CharArray(_) => {
@@ -211,6 +150,18 @@ fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let tensor = Tensor::new(values, vec![rows, cols])
         .map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn decode_chars(units: &[Utf16CodeUnit]) -> BuiltinResult<String> {
+    decode_utf16_code_units(units).map_err(|source| {
+        let mut builder = build_runtime_error("str2double: malformed UTF-16 character input")
+            .with_builtin(BUILTIN_NAME)
+            .with_source(source);
+        if let Some(identifier) = STR2DOUBLE_ERROR_INVALID_INPUT.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })
 }
 
 fn parse_numeric_scalar(text: &str) -> f64 {
@@ -244,7 +195,6 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn str2double_builtin(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::str2double_builtin(value))
@@ -279,7 +229,7 @@ pub(crate) mod tests {
         let result = str2double_builtin(Value::StringArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.shape(), &[3, 1]);
                 assert_eq!(tensor.materialize_f64()[0], 1.0);
                 assert_eq!(tensor.materialize_f64()[1], 2.5);
                 assert!(tensor.materialize_f64()[2].is_nan());
@@ -293,11 +243,11 @@ pub(crate) mod tests {
     #[test]
     fn str2double_char_array_multiple_rows() {
         let data: Vec<char> = vec!['4', '2', ' ', ' ', '1', '0', '0', ' '];
-        let array = CharArray::new(data, 2, 4).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 4).unwrap();
         let result = str2double_builtin(Value::CharArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64()[0], 42.0);
                 assert_eq!(tensor.materialize_f64()[1], 100.0);
             }
@@ -308,11 +258,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_char_array_empty_rows() {
-        let array = CharArray::new(Vec::new(), 0, 0).unwrap();
+        let array = CharArray::from_code_units(Vec::new(), 0, 0).unwrap();
         let result = str2double_builtin(Value::CharArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![0, 1]);
+                assert_eq!(tensor.shape(), &[0, 1]);
                 assert_eq!(tensor.materialize_f64().len(), 0);
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -339,7 +289,7 @@ pub(crate) mod tests {
         let result = str2double_builtin(Value::Cell(cell)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), &[1, 3]);
                 assert_eq!(tensor.materialize_f64()[0], 3.14);
                 assert!(tensor.materialize_f64()[1].is_nan());
                 assert_eq!(tensor.materialize_f64()[2], f64::NEG_INFINITY);
@@ -386,13 +336,5 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn str2double_type_is_numeric_text_scalar_or_tensor() {
-        assert_eq!(
-            numeric_text_scalar_or_tensor_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::Num
-        );
     }
 }

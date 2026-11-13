@@ -16,11 +16,12 @@ use runmat_test_runner::schedule::RetryPolicy;
 use runmat_test_runner::worker::{RunSubmission, WorkerBackend};
 use runmat_test_runner::{CoordinatedRun, Coordinator, CoordinatorConfig};
 use runmat_test_runner_execution::{ExecutionBackendConfig, ExecutionWorkerBackend};
-use runmat_test_runner_native::artifact::FilesystemArtifactStore;
+use runmat_test_runner_native::artifact::{export_reports, FilesystemArtifactStore};
 use runmat_test_runner_native::host::{NativeCancellation, NativeClock};
 use runmat_test_runner_native::telemetry::NativeTelemetry;
 use runmat_test_runner_native::{
-    LocalBackend, LocalBackendConfig, ProcessBackend, ProcessBackendConfig,
+    LocalBackend, LocalBackendConfig, NativeWorkerExecutionConfig, ProcessBackend,
+    ProcessBackendConfig,
 };
 
 use crate::cli::{Cli, TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
@@ -30,8 +31,48 @@ use super::discovery::prepare;
 use super::exit::TestCommandError;
 use super::remote::{RemoteTestBackend, RemoteTestBackendConfig};
 
-pub async fn execute(args: TestArgs, cli: &Cli, _runtime: &RunMatRuntimeConfig) -> Result<()> {
-    match execute_inner(args, cli).await {
+pub async fn execute(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
+    // Circuit files named as targets run the circuit checks (ERC, review suites, DRC, simulation
+    // limits); the other targets go to the test runner, which is skipped when none are left.
+    let (circuits, rest): (Vec<_>, Vec<_>) = args
+        .targets
+        .iter()
+        .cloned()
+        .partition(|target| crate::commands::circuit_checks::is_circuit(target));
+    let mut circuits_failed = false;
+    if !circuits.is_empty() {
+        let mut reports = Vec::new();
+        for file in &circuits {
+            match crate::commands::circuit_checks::check_file(file, true) {
+                Ok(report) => reports.push(report),
+                Err(error) => {
+                    eprintln!("{}: {error:#}", presentation::stderr().error("Error"));
+                    return Err(TestCommandError::new(2).into());
+                }
+            }
+        }
+        circuits_failed = !crate::commands::circuit_checks::print_reports(&reports, false)?;
+        if rest.is_empty() {
+            return if circuits_failed {
+                Err(TestCommandError::new(1).into())
+            } else {
+                Ok(())
+            };
+        }
+    }
+    let args = TestArgs {
+        targets: rest,
+        ..args
+    };
+    let result = execute_runner(args, cli, runtime).await;
+    if circuits_failed && result.is_ok() {
+        return Err(TestCommandError::new(1).into());
+    }
+    result
+}
+
+async fn execute_runner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
+    match execute_inner(args, cli, runtime).await {
         Ok(()) => Ok(()),
         Err(error) if error.downcast_ref::<TestCommandError>().is_some() => Err(error),
         Err(error) => {
@@ -41,13 +82,60 @@ pub async fn execute(args: TestArgs, cli: &Cli, _runtime: &RunMatRuntimeConfig) 
     }
 }
 
-async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
-    let prepared = prepare(&args, cli).await?;
-    let mut session = runmat_core::RunMatSession::with_options(!cli.no_jit, false)
+async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
+    let mut prepared = prepare(
+        &args,
+        cli,
+        crate::diagnostics::parser_compat(runtime.language.compat),
+    )
+    .await?;
+    let cluster = args.cluster.clone().or_else(|| {
+        prepared
+            .test_config
+            .cluster
+            .as_ref()
+            .and_then(|cluster| cluster.profile.clone())
+    });
+    let project_policy = if cluster.is_some() {
+        let project = prepared
+            .project_handoff
+            .as_ref()
+            .context("remote tests require a frozen project")?;
+        Some(
+            runmat_config::runtime::ClusterRuntimePolicy::from_project_file(
+                &project.project.manifest_path,
+            )?,
+        )
+    } else {
+        None
+    };
+    let project_runtime = project_policy
+        .as_ref()
+        .map(|policy| policy.runtime_config())
+        .transpose()?;
+    let runtime = project_runtime.as_ref().unwrap_or(runtime);
+    if project_policy.is_some() {
+        prepared = prepare(
+            &args,
+            cli,
+            crate::diagnostics::parser_compat(runtime.language.compat),
+        )
+        .await?;
+    }
+    let enable_jit = runtime.jit.enabled;
+    let mut session = runmat_core::RunMatSession::with_options(enable_jit, false)
         .context("failed to initialize test discovery session")?;
+    session
+        .apply_runtime_config(runtime)
+        .context("failed to apply test runtime settings")?;
+    if project_policy.is_some() {
+        session.apply_cluster_runtime_config(runtime)?;
+    }
+    session.configure_test_snapshot(&prepared.snapshot)?;
     if let Some(project) = prepared.project_handoff.clone() {
         session
             .install_project_handoff(project)
+            .await
             .context("failed to install frozen project for test discovery")?;
     }
     let prepared_run = session
@@ -117,13 +205,6 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
         }
     });
     let mut reporters = reporters(&args, &prepared.test_config.reports);
-    let cluster = args.cluster.clone().or_else(|| {
-        prepared
-            .test_config
-            .cluster
-            .as_ref()
-            .and_then(|cluster| cluster.profile.clone())
-    });
     let cluster_max_workers = args.max_workers.or_else(|| {
         prepared
             .test_config
@@ -158,10 +239,7 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
                 isolation.as_str()
             );
         }
-        let trust_identity = args
-            .trust_identity
-            .clone()
-            .context("remote tests require --trust-identity with a pinned endpoint fingerprint")?;
+        let trust_identity = crate::cli::resolve_endpoint_trust(args.trust_identity.as_deref())?;
         let queue = args
             .queue
             .clone()
@@ -177,6 +255,15 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             .project_handoff
             .clone()
             .context("remote tests require a project manifest with an exact frozen graph")?;
+        let foreign_artifacts = crate::commands::package::prepare_foreign_artifacts(
+            &project_handoff.project,
+            runtime,
+            false,
+        )
+        .context("failed to prepare project foreign artifacts for remote tests")?;
+        let foreign_policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&runtime.foreign)
+                .map_err(anyhow::Error::msg)?;
         let backend = RemoteTestBackend::new(RemoteTestBackendConfig {
             project: args.project,
             cluster: cluster.clone(),
@@ -184,6 +271,16 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             trust_identity,
             max_workers: jobs,
             project_handoff,
+            interop: foreign_artifacts.interop,
+            foreign_policy,
+            runtime_policy: runmat_core::cluster_settings::capture_project_policy(
+                project_policy
+                    .as_ref()
+                    .context("remote tests require project runtime policy")?,
+            )
+            .map_err(anyhow::Error::msg)?,
+            foreign_artifacts: foreign_artifacts.objects,
+            foreign_artifact_closures: foreign_artifacts.closures,
         })
         .map_err(|error| anyhow::anyhow!("failed to configure remote tests: {error}"))?;
         run_coordinator(
@@ -201,10 +298,11 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
                     std::env::current_exe().context("failed to locate the runmat executable")?,
                 );
                 backend_config.project_handoff = prepared.project_handoff.clone();
-                backend_config.environment.insert(
-                    "RUNMAT_TEST_JIT".into(),
-                    if cli.no_jit { "0" } else { "1" }.into(),
-                );
+                backend_config.execution = NativeWorkerExecutionConfig {
+                    enable_jit,
+                    accelerate: runtime.accelerate.clone(),
+                    foreign: runtime.foreign.clone(),
+                };
                 for name in allowed_environment {
                     if let Ok(value) = std::env::var(&name) {
                         backend_config.environment.insert(name, value);
@@ -229,7 +327,11 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             }
             IsolationMode::Session | IsolationMode::None => {
                 let mut backend_config = LocalBackendConfig::new(isolation);
-                backend_config.enable_jit = !cli.no_jit;
+                backend_config.execution = NativeWorkerExecutionConfig {
+                    enable_jit,
+                    accelerate: runtime.accelerate.clone(),
+                    foreign: runtime.foreign.clone(),
+                };
                 backend_config.max_workers = jobs;
                 backend_config.project_handoff = prepared.project_handoff.clone();
                 let backend = LocalBackend::new(backend_config).map_err(|error| {
@@ -311,8 +413,9 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
     } else {
         prepared.project_root.join(&args.report_dir)
     };
-    let store = FilesystemArtifactStore::new(report_root);
+    let store = FilesystemArtifactStore::new(report_root.as_path());
     let manifest = persist_reports(&store, &run.result.run_id, &run.reports).await?;
+    export_reports(&report_root, &run.reports).await?;
     if run.result.state.is_success() {
         if run
             .reports
@@ -439,12 +542,17 @@ fn reporters(args: &TestArgs, configured: &[ProjectTestReport]) -> ReporterFanou
         args.reports.clone()
     };
     let mut reporters = ReporterFanout::default();
+    let mut selected = Vec::new();
     for format in requested {
+        if selected.contains(&format) {
+            continue;
+        }
+        selected.push(format);
         match format {
             TestReportArg::Human => reporters.push(HumanReporter::default()),
             TestReportArg::Json => reporters.push(JsonReporter::default()),
-            TestReportArg::Junit => reporters.push(JunitReporter),
-            TestReportArg::Tap => reporters.push(TapReporter),
+            TestReportArg::Junit => reporters.push(JunitReporter::default()),
+            TestReportArg::Tap => reporters.push(TapReporter::default()),
         }
     }
     reporters

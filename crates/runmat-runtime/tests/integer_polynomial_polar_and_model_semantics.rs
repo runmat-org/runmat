@@ -1,5 +1,8 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle, IntegerElementType};
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorStorage, HostNumericDataOwned,
+    HostNumericTensorOwned,
+};
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, ObjectInstance, Tensor, Value,
 };
@@ -7,7 +10,7 @@ use runmat_value::{
 const PACKET: [(&str, usize); 15] = [
     ("perfcurve", 4),
     ("pie", 2),
-    ("pivot", 4),
+    ("pivot", 2),
     ("pol2cart", 3),
     ("polarhistogram", 4),
     ("polarplot", 3),
@@ -30,18 +33,24 @@ fn floating(values: Vec<f64>, shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(values, shape.to_vec()).expect("floating tensor"))
 }
 
-fn resident_integer(buffer_id: u64, shape: Vec<usize>) -> Value {
-    let handle = GpuTensorHandle {
-        shape,
-        device_id: u32::MAX - 442,
-        buffer_id,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::U64.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    Value::GpuTensor(handle.with_provenance(GpuHandleProvenance::Explicit))
+fn resident_integer(shape: Vec<usize>) -> Value {
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::U64(vec![u64::MAX; shape.iter().product()]),
+            shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(!runmat_accelerate_api::registered_providers()
+        .iter()
+        .any(|provider| provider.device_id() == allocation.handle.device_id()));
+    Value::GpuTensor(
+        allocation
+            .handle
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap(),
+    )
 }
 
 fn integer_cases(values: &[i64]) -> Vec<(&'static str, Value, Value)> {
@@ -111,9 +120,55 @@ fn integer_cases(values: &[i64]) -> Vec<(&'static str, Value, Value)> {
 #[test]
 fn polynomial_polar_and_model_packet_has_class_complete_metadata() {
     for (name, expected_forms) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
+        if name == "pivot" {
+            use runmat_builtins::{
+                BuiltinIntegerComputationDomain as Domain, BuiltinIntegerOverflowRule as Overflow,
+                BuiltinIntegerOverloadKind as Overload, BuiltinIntegerScalarDoubleRule as Scalar,
+            };
+            let [data, selectors] = builtin.integer_capabilities else {
+                panic!("pivot separates table data from positional selectors");
+            };
+            assert_eq!(
+                data.inputs[0].name,
+                "integer grouping or DataVariable table columns"
+            );
+            assert_eq!(
+                selectors.inputs[0].name,
+                "rowvars, colvars, or datavar variable indices"
+            );
+            for capability in [data, selectors] {
+                assert_eq!(capability.inputs.len(), 1);
+                assert_eq!(
+                    capability.inputs[0].classes,
+                    &runmat_builtins::ALL_INTEGER_CLASSES
+                );
+                assert_eq!(
+                    capability.inputs[0].availability,
+                    runmat_builtins::BuiltinIntegerInputAvailability::Documented
+                );
+                assert_eq!(
+                    capability.backend,
+                    runmat_builtins::BuiltinIntegerBackendRule::HostOnly
+                );
+                assert_eq!(
+                    capability.output_class,
+                    runmat_builtins::BuiltinIntegerOutputClassRule::FunctionSpecific
+                );
+            }
+            assert_eq!(data.computation_domain, Domain::FunctionSpecific);
+            assert_eq!(data.overflow, Overflow::FunctionSpecific);
+            assert_eq!(data.overload, Overload::Multiple);
+            assert_eq!(data.inputs[0].scalar_double, Scalar::NotApplicable);
+            assert_eq!(selectors.computation_domain, Domain::Structural);
+            assert_eq!(selectors.overflow, Overflow::Error);
+            assert_eq!(selectors.overload, Overload::StructuralParameter);
+            assert_eq!(selectors.inputs[0].scalar_double, Scalar::Allowed);
+            assert!(selectors.notes.contains("not implemented"));
+        }
         for capability in builtin.integer_capabilities {
             assert!(!capability.inputs.is_empty(), "{name}: {}", capability.form);
             for input in capability.inputs {
@@ -126,26 +181,46 @@ fn polynomial_polar_and_model_packet_has_class_complete_metadata() {
 #[test]
 fn polynomial_polar_and_model_extensions_are_declarative_and_independent() {
     let expected = [
-        ("perfcurve", 4),
-        ("pie", 1),
-        ("pivot", 0),
-        ("pol2cart", 3),
-        ("polarhistogram", 0),
-        ("polarplot", 1),
-        ("polarscatter", 0),
-        ("pole", 0),
-        ("polyder", 1),
-        ("polyfit", 3),
-        ("polyval", 3),
-        ("pow2", 3),
-        ("ppval", 1),
-        ("predict", 2),
-        ("print", 1),
+        "perfcurve",
+        "pie",
+        "pivot",
+        "pol2cart",
+        "polarhistogram",
+        "polarplot",
+        "polarscatter",
+        "pole",
+        "polyder",
+        "polyfit",
+        "polyval",
+        "pow2",
+        "ppval",
+        "predict",
+        "print",
     ];
     let mut ids = std::collections::HashSet::new();
-    for (name, count) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert_eq!(builtin.extensions.len(), count, "{name}");
+    for name in expected {
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
+        // Independent extensions may grow without changing the integer
+        // contract. Verify their actual declarations and identity separation,
+        // not a historical total unrelated to the behavior under test.
+        if builtin.identity == runmat_builtins::POLE_CATALOG_ENTRY.identity {
+            assert_eq!(
+                builtin.extensions,
+                runmat_builtins::TF_OR_SS_CONSUMED_PROPERTY_EXTENSIONS.as_slice(),
+                "pole must join exact canonical consumed-model property declarations",
+            );
+        }
+        if builtin.integer_capabilities.iter().any(|capability| {
+            capability.inputs.iter().any(|input| {
+                input.availability == runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly
+            })
+        }) {
+            assert!(
+                !builtin.extensions.is_empty(),
+                "{name}: RunMat-only integer inputs need a declared extension gate"
+            );
+        }
         for extension in builtin.extensions {
             assert_eq!(
                 extension.mode,
@@ -165,7 +240,6 @@ fn polynomial_polar_and_model_extensions_are_declarative_and_independent() {
             );
         }
     }
-    assert_eq!(ids.len(), 23);
 }
 
 #[test]
@@ -179,7 +253,9 @@ fn strict_mode_rejects_each_runmat_only_integer_surface_before_evaluation() {
         )
         .expect("complex integer"),
     );
-    let statistical_model = Value::Object(ObjectInstance::new("LinearModel".to_string()));
+    let statistical_model = Value::Object(ObjectInstance::new(
+        runmat_types::standard::LINEAR_MODEL.to_string(),
+    ));
     let calls = vec![
         (
             "perfcurve",
@@ -241,11 +317,11 @@ fn strict_mode_rejects_each_runmat_only_integer_surface_before_evaluation() {
 fn strict_resident_integer_gates_run_before_provider_lookup() {
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let calls = [
-        ("pow2", vec![resident_integer(1, vec![1, 2])]),
+        ("pow2", vec![resident_integer(vec![1, 2])]),
         (
             "perfcurve",
             vec![
-                resident_integer(2, vec![2, 1]),
+                resident_integer(vec![2, 1]),
                 floating(vec![0.0, 1.0], &[2, 1]),
                 Value::Num(1.0),
             ],
@@ -253,8 +329,10 @@ fn strict_resident_integer_gates_run_before_provider_lookup() {
         (
             "predict",
             vec![
-                Value::Object(ObjectInstance::new("LinearModel".to_string())),
-                resident_integer(3, vec![1, 2]),
+                Value::Object(ObjectInstance::new(
+                    runmat_types::standard::LINEAR_MODEL.to_string(),
+                )),
+                resident_integer(vec![1, 2]),
             ],
         ),
     ];
@@ -269,7 +347,13 @@ fn strict_resident_integer_gates_run_before_provider_lookup() {
         );
         for value in args {
             if let Value::GpuTensor(handle) = value {
-                runmat_accelerate_api::clear_handle_metadata(&handle);
+                let physical = handle.allocation_lease().downgrade();
+                assert_eq!(
+                    handle.physical().element_type(),
+                    runmat_accelerate_api::NumericElementType::U64
+                );
+                drop(handle);
+                assert!(physical.acquire().is_none());
             }
         }
     }
@@ -376,5 +460,5 @@ fn perfcurve_keeps_wide_integer_labels_distinct_without_a_f64_mirror() {
         ],
     ))
     .expect("wide labels remain distinct");
-    assert!(matches!(output, Value::Tensor(_)));
+    assert!(matches!(output.value(), Value::Tensor(_)));
 }

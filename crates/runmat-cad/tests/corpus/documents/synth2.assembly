@@ -1,0 +1,46 @@
+runmat 0.7
+std 1
+
+assembly section {
+    input frame_pitch : length = 500 mm
+
+    use assembly frame as frame {
+        placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 0 mm] } }
+    }
+    use part skin as skin
+    use part stringer from "../library" as stringer
+
+    pattern frames = linear(seeds = [frame], direction = [1, 0, 0], spacing = input.frame_pitch, count = 6)
+    pattern stringers = circular(
+        seeds = [stringer],
+        axis_point = [0 mm, 0 mm, 0 mm],
+        axis = [1, 0, 0],
+        count = 8,
+        angle = 360 deg
+    )
+
+    fasteners lap0 = {
+        layout = along(
+            occurrence = [{ name = skin }],
+            path = laps,
+            chains = [lap0],
+            spacing = { spacing = pitch, pitch = 21.6 mm },
+            edge_distance = 2 * 4.8 mm,
+            rows = [{ key = r0, offset = 0 mm }, { key = r1, offset = 25 mm }]
+        ),
+        fastener = {
+            family = { kind = part, name = hi_lok, from = "../library/fasteners" },
+            diameter = 4.8 mm,
+            grip = { grip = auto }
+        },
+        stack = [[{ name = skin }], [{ name = stringer }]],
+        exceptions = [
+            {
+                at = { at = station, station = 74.4 mm, chain = lap0, row = r0 },
+                action = { action = oversize, delta = 0.4 mm }
+            }
+        ]
+    }
+
+    part_number = "SE-120"
+}

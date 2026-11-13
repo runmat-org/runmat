@@ -1,11 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{HISTOGRAM_ERROR_INTERNAL, HISTOGRAM_ERROR_INVALID_ARGUMENT};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::BarChart;
 use runmat_value::{Tensor, Value};
@@ -16,293 +10,22 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, RuntimeError};
 
-use super::bar::apply_bar_style;
-use super::state::{render_active_plot, HistogramHandleMetadata, PlotRenderOptions};
+use super::bar::{apply_bar_style, series_bar_style};
+use super::state::{
+    continue_line_color_cycle_after, current_axes_state, current_hold_enabled, render_active_plot,
+    HistogramHandleMetadata, PlotRenderOptions,
+};
 use super::style::{parse_bar_style_args, BarStyleDefaults};
 
 const BUILTIN_NAME: &str = "histogram";
 
-const HISTOGRAM_INTEGER_DATA: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Histogram data accepts every built-in integer class and remains authoritative on the chart object.",
-    }];
-const HISTOGRAM_INTEGER_EDGES: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "BinEdges",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Explicit integer edges are ordered exactly before the floating rendering boundary.",
-    }];
-pub const HISTOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = histogram(integer_Data, ...)",
-        inputs: &HISTOGRAM_INTEGER_DATA,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Exact typed Data is retained while raw double counts and renderer coordinates remain explicit statistical and client boundaries.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = histogram(X, integer_BinEdges)",
-        inputs: &HISTOGRAM_INTEGER_EDGES,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Bin membership compares against authoritative explicit edges before chart geometry materializes as double.",
-    },
-];
 const HIST_BAR_WIDTH: f32 = 0.95;
-const HIST_DEFAULT_COLOR: glam::Vec4 = glam::Vec4::new(0.15, 0.5, 0.8, 0.95);
+// MATLAB histograms draw with FaceAlpha 0.6 so overlapping series stay visible.
+const HIST_DEFAULT_COLOR: glam::Vec4 = glam::Vec4::new(0.15, 0.5, 0.8, 0.6);
 const HIST_DEFAULT_LABEL: &str = "Frequency";
-
-const HISTOGRAM_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created histogram chart.",
-}];
-
-const HISTOGRAM_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input sample data.",
-}];
-
-const HISTOGRAM_INPUTS_X_BINS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input sample data.",
-    },
-    BuiltinParamDescriptor {
-        name: "bins",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bin count scalar or explicit edge vector.",
-    },
-];
-
-const HISTOGRAM_INPUTS_X_NAMEVALUE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input sample data.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value pairs for histogram options and styling.",
-    },
-];
-
-const HISTOGRAM_INPUTS_X_BINS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input sample data.",
-    },
-    BuiltinParamDescriptor {
-        name: "bins",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bin count scalar or explicit edge vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional name/value pairs for options and styling.",
-    },
-];
-
-const HISTOGRAM_INPUTS_AX_X: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input sample data.",
-    },
-];
-
-const HISTOGRAM_INPUTS_AX_X_BINS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input sample data.",
-    },
-    BuiltinParamDescriptor {
-        name: "bins",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bin count scalar or explicit edge vector.",
-    },
-];
-
-const HISTOGRAM_INPUTS_AX_X_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input sample data.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value pairs for options and styling.",
-    },
-];
-
-const HISTOGRAM_INPUTS_AX_X_BINS_NAMEVALUE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input sample data.",
-    },
-    BuiltinParamDescriptor {
-        name: "bins",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bin count scalar or explicit edge vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional name/value pairs for options and styling.",
-    },
-];
-
-const HISTOGRAM_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(X)",
-        inputs: &HISTOGRAM_INPUTS_X,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(X, bins)",
-        inputs: &HISTOGRAM_INPUTS_X_BINS,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(X, Name, Value, ...)",
-        inputs: &HISTOGRAM_INPUTS_X_NAMEVALUE,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(X, bins, Name, Value, ...)",
-        inputs: &HISTOGRAM_INPUTS_X_BINS_NAMEVALUE,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(ax, X)",
-        inputs: &HISTOGRAM_INPUTS_AX_X,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(ax, X, bins)",
-        inputs: &HISTOGRAM_INPUTS_AX_X_BINS,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(ax, X, Name, Value, ...)",
-        inputs: &HISTOGRAM_INPUTS_AX_X_NAMEVALUE,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = histogram(ax, X, bins, Name, Value, ...)",
-        inputs: &HISTOGRAM_INPUTS_AX_X_BINS_NAMEVALUE,
-        outputs: &HISTOGRAM_OUTPUT_HANDLE,
-    },
-];
-
-const HISTOGRAM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HISTOGRAM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:histogram:InvalidArgument"),
-    when: "Histogram input arrays, bins, or name/value options are malformed or incompatible.",
-    message: "histogram: invalid argument",
-};
-
-const HISTOGRAM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HISTOGRAM.INTERNAL",
-    identifier: Some("RunMat:histogram:Internal"),
-    when: "Internal render preparation or histogram state registration fails.",
-    message: "histogram: internal operation failed",
-};
-
-const HISTOGRAM_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [HISTOGRAM_ERROR_INVALID_ARGUMENT, HISTOGRAM_ERROR_INTERNAL];
-
-pub const HISTOGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HISTOGRAM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HISTOGRAM_ERRORS,
-};
 
 fn histogram_descriptor_error(
     error: &'static BuiltinErrorDescriptor,
@@ -320,14 +43,28 @@ fn map_histogram_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    histogram_descriptor_error(&HISTOGRAM_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = histogram_descriptor_error(&HISTOGRAM_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_histogram_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    histogram_descriptor_error(&HISTOGRAM_ERROR_INTERNAL, err.message)
+    let mapped = histogram_descriptor_error(&HISTOGRAM_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn histogram_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
@@ -367,18 +104,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "histogram",
-    category = "plotting",
-    summary = "Create histogram chart objects.",
-    keywords = "histogram,hist,histcounts,frequency",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::histogram::HISTOGRAM_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::histogram::HISTOGRAM_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::histogram"
 )]
-pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn histogram_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "histogram: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "histogram")?;
+    let _arguments = args.fork();
+    work.finish(histogram_impl(args, &work).await)
+}
+async fn histogram_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (target_axes, data, rest) = parse_histogram_call(args)?;
+    super::op_common::apply_axes_target(target_axes, BUILTIN_NAME)?;
     let retained_data = match &data {
         Value::GpuTensor(handle) => Some(
             crate::builtins::common::gpu_helpers::gather_tensor_async(handle)
@@ -393,12 +142,14 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .as_ref()
         .map(|tensor| Value::Tensor(tensor.clone()))
         .unwrap_or_else(|| data.clone());
-    let (histcounts_args, style_args) = split_histogram_args(&rest);
+    let (histcounts_args, style_args) = split_histogram_args(rest.view())?;
     let raw_histcounts_args = histcounts_count_args(&histcounts_args);
-    let eval =
-        crate::builtins::stats::hist::histcounts::evaluate(evaluation_data, &raw_histcounts_args)
-            .await
-            .map_err(map_histogram_invalid_argument)?;
+    let eval = crate::builtins::stats::hist::histcounts::evaluate(
+        evaluation_data,
+        crate::call::FunctionArgumentView::from_slice(&raw_histcounts_args),
+    )
+    .await
+    .map_err(map_histogram_invalid_argument)?;
     let (counts_value, edges_value) = eval.into_pair();
     let counts = Tensor::try_from(&counts_value)
         .map_err(|e| histogram_invalid_argument(format!("cannot convert counts tensor: {e}")))?;
@@ -417,7 +168,7 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = parse_bar_style_args(BUILTIN_NAME, &style_args, defaults)
         .map_err(map_histogram_invalid_argument)?;
     let explicit_display_name = style.label.clone();
-    let normalization = infer_normalization(&histcounts_args);
+    let normalization = infer_normalization(&histcounts_args)?;
     crate::builtins::plotting::properties::validate_histogram_normalization(
         &normalization,
         BUILTIN_NAME,
@@ -437,32 +188,20 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut chart = BarChart::new(labels, render_counts)
         .map_err(|e| histogram_internal(format!("chart construction failed: {e}")))?;
     chart.set_histogram_bin_edges(edges.clone());
-    apply_bar_style(&mut chart, &style, HIST_DEFAULT_LABEL);
-
-    let y_label = match normalization.as_str() {
-        "count" => "Count",
-        "probability" => "Probability",
-        "percentage" => "Percentage",
-        "countdensity" => "CountDensity",
-        "pdf" => "PDF",
-        "cdf" => "CDF",
-        _ => HIST_DEFAULT_LABEL,
-    };
+    let color_axes = current_axes_state().active_index;
+    let hold_enabled = current_hold_enabled();
+    let series_style = series_bar_style(&style, color_axes, hold_enabled, 0);
+    apply_bar_style(&mut chart, &series_style, HIST_DEFAULT_LABEL);
 
     let mut chart_opt = Some(chart);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Histogram",
-            x_label: "Bin",
-            y_label,
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
-            let axes = target_axes.unwrap_or(axes);
             let plot_index = figure.add_bar_chart_on_axes(
                 chart_opt.take().expect("histogram chart consumed once"),
                 axes,
@@ -471,6 +210,10 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             Ok(())
         },
     );
+    if !hold_enabled {
+        // Rendering cleared the axes and reset the color order; resume it after this series.
+        continue_line_color_cycle_after(color_axes, 1);
+    }
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
@@ -496,8 +239,7 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         })?;
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_histogram_internal(err));
@@ -506,54 +248,64 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 }
 
 fn parse_histogram_call(
-    args: Vec<Value>,
-) -> crate::BuiltinResult<(Option<usize>, Value, Vec<Value>)> {
-    if args.is_empty() {
-        return Err(histogram_invalid_argument("expected data input"));
-    }
-    let mut it = args.into_iter();
-    let first = it.next().unwrap();
-    if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
-        crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
-    {
-        let data = it
-            .next()
-            .ok_or_else(|| histogram_invalid_argument("expected data after axes handle"))?;
-        return Ok((Some(axes), data, it.collect()));
-    }
-    Ok((None, first, it.collect()))
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<(
+    super::op_common::AxesTarget,
+    Value,
+    crate::call::BuiltinArguments,
+)> {
+    let (target, mut args) = super::op_common::split_leading_axes_arguments(args, BUILTIN_NAME)?;
+    let data = args
+        .pop_front()
+        .ok_or_else(|| histogram_invalid_argument("expected data input"))?;
+    Ok((target, data, args))
 }
 
-fn split_histogram_args(args: &[Value]) -> (Vec<Value>, Vec<Value>) {
-    let mut hist_args = Vec::new();
-    let mut style_args = Vec::new();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let Some(key) = value_as_string(&args[idx]) else {
-            if idx == 0 {
+fn split_histogram_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<(Vec<Value>, Vec<Value>)> {
+    Ok({
+        let mut hist_args = Vec::new();
+        let mut style_args = Vec::new();
+        let mut idx = 0usize;
+        while idx < args.len() {
+            let Some(key) = value_as_string(&args[idx]).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "histogram",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            else {
+                if idx == 0 {
+                    hist_args.push(args[idx].clone());
+                    idx += 1;
+                    continue;
+                }
+                style_args.extend(
+                    args.range(idx..)
+                        .expect("validated option tail")
+                        .iter()
+                        .cloned(),
+                );
+                break;
+            };
+            if idx + 1 >= args.len() {
                 hist_args.push(args[idx].clone());
-                idx += 1;
-                continue;
+                break;
             }
-            style_args.extend_from_slice(&args[idx..]);
-            break;
-        };
-        if idx + 1 >= args.len() {
-            hist_args.push(args[idx].clone());
-            break;
+            let lower = key.trim().to_ascii_lowercase();
+            let target = match lower.as_str() {
+                "binedges" | "numbins" | "binwidth" | "binlimits" | "normalization"
+                | "binmethod" => &mut hist_args,
+                _ => &mut style_args,
+            };
+            target.push(args[idx].clone());
+            target.push(args[idx + 1].clone());
+            idx += 2;
         }
-        let lower = key.trim().to_ascii_lowercase();
-        let target = match lower.as_str() {
-            "binedges" | "numbins" | "binwidth" | "binlimits" | "normalization" | "binmethod" => {
-                &mut hist_args
-            }
-            _ => &mut style_args,
-        };
-        target.push(args[idx].clone());
-        target.push(args[idx + 1].clone());
-        idx += 2;
-    }
-    (hist_args, style_args)
+        (hist_args, style_args)
+    })
 }
 
 fn histogram_labels_from_edges(edges: &[f64]) -> Vec<String> {
@@ -563,30 +315,46 @@ fn histogram_labels_from_edges(edges: &[f64]) -> Vec<String> {
         .collect()
 }
 
-fn infer_normalization(args: &[Value]) -> String {
-    let mut idx = 0usize;
-    while idx + 1 < args.len() {
-        if let Some(key) = value_as_string(&args[idx]) {
-            if key.trim().eq_ignore_ascii_case("Normalization") {
-                if let Some(v) = value_as_string(&args[idx + 1]) {
-                    return v.trim().to_ascii_lowercase();
+fn infer_normalization(args: &[Value]) -> crate::BuiltinResult<String> {
+    Ok({
+        let mut idx = 0usize;
+        while idx + 1 < args.len() {
+            if let Some(key) = value_as_string(&args[idx]).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "histogram",
+                    source.to_string(),
+                    source,
+                )
+            })? {
+                if key.trim().eq_ignore_ascii_case("Normalization") {
+                    if let Some(v) = value_as_string(&args[idx + 1]).map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            "histogram",
+                            source.to_string(),
+                            source,
+                        )
+                    })? {
+                        return Ok(v.trim().to_ascii_lowercase());
+                    }
                 }
+                idx += 2;
+            } else {
+                idx += 1;
             }
-            idx += 2;
-        } else {
-            idx += 1;
         }
-    }
-    "count".to_string()
+        "count".to_string()
+    })
 }
 
 fn histcounts_count_args(args: &[Value]) -> Vec<Value> {
     let mut out = Vec::new();
     let mut idx = 0usize;
     while idx < args.len() {
-        if value_as_string(&args[idx])
-            .is_some_and(|key| key.trim().eq_ignore_ascii_case("Normalization"))
-        {
+        if crate::builtins::plotting::style::value_text_equals_ascii(
+            &args[idx],
+            "Normalization",
+            true,
+        ) {
             idx += 2;
         } else {
             out.push(args[idx].clone());
@@ -639,17 +407,25 @@ pub(crate) fn color_to_property_string(color: glam::Vec4) -> String {
     format!("[{:.3},{:.3},{:.3}]", color.x, color.y, color.z)
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
+fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
+        Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::histogram_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
@@ -961,7 +737,7 @@ mod tests {
 
     #[test]
     fn histogram_descriptor_includes_axes_signature() {
-        let labels: Vec<&str> = HISTOGRAM_DESCRIPTOR
+        let labels: Vec<&str> = runmat_builtins::HISTOGRAM_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)

@@ -16,8 +16,8 @@ pub struct ActiveTestContext {
 #[derive(Clone, Debug)]
 pub struct RuntimeTeardownInvocation {
     pub semantic_path: String,
-    pub callback: runmat_value::Value,
-    pub arguments: Vec<runmat_value::Value>,
+    pub callback: crate::execution::RootedValue,
+    pub arguments: crate::call::BuiltinArguments,
 }
 
 #[derive(Debug)]
@@ -137,27 +137,36 @@ fn current_test_context_state() -> Option<Rc<RefCell<ContextState>>> {
 }
 
 pub fn record_runtime_teardown(
+    runtime: Option<&crate::context::RuntimeContext>,
     callback: runmat_value::Value,
-    arguments: Vec<runmat_value::Value>,
-) -> Result<(), &'static str> {
+    arguments: crate::call::BuiltinArguments,
+) -> Result<(), crate::RuntimeError> {
+    // Source provenance helpers read the poll scope. Install only the caller's
+    // explicit context for this synchronous registration, then restore it.
+    let _runtime_scope = runtime.map(crate::context::RuntimeContext::enter);
     {
-        let state = current_test_context_state()
-            .ok_or("addTeardown requires an active test lifecycle context")?;
-        let mut state = state.borrow_mut();
-        if state.active.phase.is_teardown() {
-            return Err("addTeardown cannot be registered from a teardown phase");
-        }
-        if state.commands.len() >= state.limits.max_commands_per_invocation as usize {
-            return Err("testing command limit exceeded");
-        }
+        let lifecycle_error = |message| {
+            crate::build_runtime_error(message)
+                .with_builtin("addTeardown")
+                .build()
+        };
+        let state = runtime_teardown_context_in(runtime).map_err(lifecycle_error)?;
+        validate_runtime_teardown_state(&state.borrow()).map_err(lifecycle_error)?;
         let callback_name = match &callback {
             runmat_value::Value::FunctionHandle(name)
             | runmat_value::Value::ExternalFunctionHandle(name)
-            | runmat_value::Value::MethodFunctionHandle(name) => name.clone(),
-            runmat_value::Value::BoundFunctionHandle { name, .. } => name.clone(),
+            | runmat_value::Value::MethodFunctionHandle(name) => name.clone().into_text_owner(),
+            runmat_value::Value::BoundFunctionHandle(handle) => handle.name.clone(),
             runmat_value::Value::Closure(closure) => closure.function_name.clone(),
-            _ => return Err("addTeardown callback must be a function handle"),
+            _ => {
+                return Err(lifecycle_error(
+                    "addTeardown callback must be a function handle",
+                ))
+            }
         };
+        let callback = crate::execution::RootedValue::in_optional_context(callback, runtime)?;
+        let mut state = state.borrow_mut();
+        validate_runtime_teardown_state(&state).map_err(lifecycle_error)?;
         let semantic_path = format!(
             "runtime-teardown:{}:{}:{}",
             state.active.execution.test_id.as_str(),
@@ -177,7 +186,7 @@ pub fn record_runtime_teardown(
             .unwrap_or_default();
         let procedure = ProcedureDescriptor {
             semantic_path: semantic_path.clone(),
-            display_name: callback_name,
+            display_name: callback_name.into_string_unbounded(),
             kind: ProcedureKind::Teardown,
             source: SourceDescriptor {
                 owner_identity: "runtime:test-context".into(),
@@ -206,6 +215,46 @@ pub fn record_runtime_teardown(
     }
 }
 
+/// Check lifecycle admission before a fixture mutates the path or filesystem.
+/// The final registration still checks again after any suspension.
+pub fn ensure_runtime_teardown_available() -> Result<(), &'static str> {
+    let state = runtime_teardown_context()?;
+    let result = validate_runtime_teardown_state(&state.borrow());
+    result
+}
+
+pub fn ensure_runtime_teardown_available_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<(), &'static str> {
+    let state = runtime_teardown_context_in(runtime)?;
+    let result = validate_runtime_teardown_state(&state.borrow());
+    result
+}
+
+fn runtime_teardown_context_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Rc<RefCell<ContextState>>, &'static str> {
+    match runtime {
+        Some(runtime) => runtime.state().test_contexts.borrow().last().cloned(),
+        None => TEST_CONTEXT_STACK.with(|stack| stack.borrow().last().cloned()),
+    }
+    .ok_or("addTeardown requires an active test lifecycle context")
+}
+
+fn runtime_teardown_context() -> Result<Rc<RefCell<ContextState>>, &'static str> {
+    current_test_context_state().ok_or("addTeardown requires an active test lifecycle context")
+}
+
+fn validate_runtime_teardown_state(state: &ContextState) -> Result<(), &'static str> {
+    if state.active.phase.is_teardown() {
+        return Err("addTeardown cannot be registered from a teardown phase");
+    }
+    if state.commands.len() >= state.limits.max_commands_per_invocation as usize {
+        return Err("testing command limit exceeded");
+    }
+    Ok(())
+}
+
 pub fn active_test_context() -> Option<ActiveTestContext> {
     current_test_context_state().map(|state| state.borrow().active.clone())
 }
@@ -231,6 +280,50 @@ mod tests {
     use runmat_test::result::{Diagnostic, DiagnosticSeverity};
 
     use super::*;
+
+    fn active(phase: ExecutionPhase) -> ActiveTestContext {
+        ActiveTestContext {
+            execution: TestExecutionContext {
+                run_id: RunId::derive("revision", "run"),
+                test_id: TestId::derive(&runmat_test::identity::TestIdentityInput {
+                    owner_identity: "owner",
+                    relative_source_identity: "test.m",
+                    semantic_scheme: "function",
+                    semantic_item_path: "test",
+                    parameter_identity: "",
+                    fixture_identity: "",
+                }),
+                attempt: 1,
+                random_seed: 7,
+            },
+            phase,
+            scope: FixtureScopeKey {
+                scope: FixtureScope::Test,
+                identity: "test".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn fixture_preflight_rejects_absent_and_teardown_lifecycles() {
+        assert_eq!(
+            ensure_runtime_teardown_available(),
+            Err("addTeardown requires an active test lifecycle context")
+        );
+        let teardown = install_test_context(
+            active(ExecutionPhase::TestTeardown),
+            ProtocolLimits::default(),
+        );
+        assert_eq!(
+            ensure_runtime_teardown_available(),
+            Err("addTeardown cannot be registered from a teardown phase")
+        );
+        drop(teardown);
+        let test =
+            install_test_context(active(ExecutionPhase::TestBody), ProtocolLimits::default());
+        assert_eq!(ensure_runtime_teardown_available(), Ok(()));
+        drop(test);
+    }
 
     #[test]
     fn scoped_context_records_bounded_domain_commands() {

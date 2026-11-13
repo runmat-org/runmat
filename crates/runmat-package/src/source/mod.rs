@@ -1,3 +1,5 @@
+mod captured;
+pub use captured::{resolve_captured_project_async, CapturedProjectError, CapturedResolvedProject};
 mod acquisition;
 mod catalog;
 mod encrypted_artifact;
@@ -15,8 +17,9 @@ mod vendor;
 
 pub use acquisition::{SourceAcquisitionIntent, SourceAcquisitionPolicy, SourceLockAction};
 pub use catalog::{
-    FrozenProject, FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision,
-    SourceCatalog, StableSourceId, VisibleProjectSource,
+    FrozenJavaArtifact, FrozenNativeInterface, FrozenProject, FrozenPythonArtifact,
+    FrozenSourceDescriptor, PackageMount, PackageSourceCatalog, ProjectRevision, SourceCatalog,
+    StableSourceId, VisibleProjectSource,
 };
 pub use encrypted_artifact::{
     ArtifactContentCipher, EncryptedArtifactMetadata, KeyEnvelopeAlgorithm, PackageKeyEnvelope,
@@ -62,8 +65,8 @@ pub use symbols::{
     discover_known_project_symbols_from_source_name,
     discover_known_project_symbols_from_source_name_async,
     discover_source_symbols_from_source_name, discover_source_symbols_from_source_name_async,
-    source_symbols_from_frozen, source_symbols_from_index, DiscoverSourceSymbolsError,
-    DiscoveredSourceSymbols, ProjectSymbolDefinition,
+    resolve_visible_function_definition, source_symbols_from_frozen, source_symbols_from_index,
+    DiscoverSourceSymbolsError, DiscoveredSourceSymbols, ProjectSymbolDefinition,
 };
 pub use vendor::{
     VendorManifest, VendoredPackage, VENDOR_MANIFEST_FILENAME, VENDOR_SCHEMA_VERSION,

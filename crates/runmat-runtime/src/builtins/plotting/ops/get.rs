@@ -1,117 +1,16 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::properties::{get_properties, resolve_plot_handle};
-use crate::builtins::plotting::type_resolvers::get_type;
+use super::properties::{get_properties_async, property_name_text, resolve_plot_handle};
 use crate::{build_runtime_error, RuntimeError};
+#[cfg(test)]
+use runmat_builtins::{GET_DESCRIPTOR, GET_INTEGER_CAPABILITIES};
+use runmat_builtins::{
+    GET_ERROR_INTERNAL, GET_ERROR_INVALID_ARGUMENT, GET_INTEGER_HANDLE_ALIAS_EXTENSION,
+};
 
 const BUILTIN_NAME: &str = "get";
-
-const GET_INTEGER_HANDLE_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "get-integer-handle-alias",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "typed-integer numeric graphics aliases for get are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GetIntegerHandleAliasExtension"),
-};
-pub const GET_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GET_INTEGER_HANDLE_ALIAS_EXTENSION];
-
-const GET_INTEGER_HANDLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "h",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents graphics objects, not typed numeric aliases; RunMat resolves exact aliases only under extension policy.",
-    }];
-pub const GET_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "value = get(integer_graphics_alias, property?)",
-        inputs: &GET_INTEGER_HANDLE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Only handle resolution is integer-sensitive. Property payload Values are returned unchanged, including authoritative integer storage.",
-    }];
-
-const GET_OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Property value or a struct of all readable properties.",
-}];
-
-const GET_INPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Graphics object (figure, axes, plot object, text, legend, etc.); RunMat currently also resolves its numeric handle representation.",
-}];
-
-const GET_INPUTS_HANDLE_PROPERTY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics object (figure, axes, plot object, text, legend, etc.); RunMat currently also resolves its numeric handle representation.",
-    },
-    BuiltinParamDescriptor {
-        name: "property",
-        ty: BuiltinParamType::PropertyName,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Property name to query (case-insensitive).",
-    },
-];
-
-const GET_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "value = get(h)",
-        inputs: &GET_INPUTS_HANDLE,
-        outputs: &GET_OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = get(h, property)",
-        inputs: &GET_INPUTS_HANDLE_PROPERTY,
-        outputs: &GET_OUTPUT_VALUE,
-    },
-];
-
-const GET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GET.INVALID_ARGUMENT",
-    identifier: Some("RunMat:get:InvalidArgument"),
-    when:
-        "Handle value or property selector is missing/invalid, or property lookup fails validation.",
-    message: "get: invalid argument",
-};
-
-const GET_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GET.INTERNAL",
-    identifier: Some("RunMat:get:Internal"),
-    when: "Internal handle/property retrieval fails unexpectedly.",
-    message: "get: internal operation failed",
-};
-
-const GET_ERRORS: [BuiltinErrorDescriptor; 2] = [GET_ERROR_INVALID_ARGUMENT, GET_ERROR_INTERNAL];
-
-pub const GET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GET_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GET_ERRORS,
-};
 
 fn get_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -129,25 +28,36 @@ fn map_get_error(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    get_error_with_detail(&GET_ERROR_INVALID_ARGUMENT, err.message)
+    let span = err.span;
+    let retry = err.gpu_gather_retry();
+    let descriptor = if crate::builtins::plotting::error::plot_data_export_failure(&err) {
+        &GET_ERROR_INTERNAL
+    } else {
+        &GET_ERROR_INVALID_ARGUMENT
+    };
+    let mut builder = build_runtime_error(format!("{}: {}", descriptor.message, err.message))
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(retry)
+        .with_source(err);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    if let Some(span) = span {
+        builder = builder.with_span(span);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "get",
-    category = "plotting",
-    summary = "Get graphics object properties.",
-    keywords = "get,plotting,handle,property",
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::get::GET_DESCRIPTOR),
-    extensions(crate::builtins::plotting::get::GET_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::get::GET_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::get"
 )]
-pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if args.is_empty() {
+pub async fn get_builtin_async(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    if args.is_empty() || args.len() > 2 {
         return Err(get_error_with_detail(
             &GET_ERROR_INVALID_ARGUMENT,
-            "expected a plotting handle",
+            "expected a plotting handle and an optional property name",
         ));
     }
     let typed_integer_alias = is_typed_integer_handle_alias(&args[0]);
@@ -171,7 +81,8 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     };
     let property = args
         .get(1)
-        .and_then(|v| crate::builtins::plotting::style::value_as_string(v));
+        .map(|value| property_name_text(value, BUILTIN_NAME).map_err(map_get_error))
+        .transpose()?;
     if let Some(value) =
         super::zoom::get_zoom_object_property(&handle_arg, property.as_deref(), BUILTIN_NAME)?
     {
@@ -189,8 +100,24 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     )? {
         return Ok(value);
     }
+    if let Some(value) =
+        super::properties::get_receiver_properties(&handle_arg, property.as_deref(), BUILTIN_NAME)
+            .await
+            .map_err(map_get_error)?
+    {
+        return Ok(value);
+    }
     let handle = resolve_plot_handle(&handle_arg, BUILTIN_NAME).map_err(map_get_error)?;
-    get_properties(handle, property.as_deref(), BUILTIN_NAME).map_err(map_get_error)
+    get_properties_async(handle, property.as_deref(), BUILTIN_NAME)
+        .await
+        .map_err(map_get_error)
+}
+
+#[cfg(test)]
+pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    futures::executor::block_on(get_builtin_async(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn is_typed_integer_handle_alias(value: &Value) -> bool {
@@ -234,6 +161,81 @@ mod tests {
         let _guard = setup();
         let err = get_builtin(vec![]).expect_err("expected missing handle to fail");
         assert_eq!(err.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn get_rejects_extra_and_nontext_property_arguments() {
+        let _guard = setup();
+        for args in [
+            vec![Value::Num(0.0), Value::Num(1.0)],
+            vec![
+                Value::Num(0.0),
+                Value::String("Type".into()),
+                Value::String("extra".into()),
+            ],
+        ] {
+            let error = get_builtin(args).expect_err("invalid property invocation");
+            assert_eq!(error.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
+        }
+    }
+
+    #[test]
+    fn get_property_name_accepts_scalar_string_array_but_not_multirow_text() {
+        let _guard = setup();
+        let scalar = Value::StringArray(
+            runmat_value::StringArray::new_2d(vec!["Type".into()], 1, 1).expect("scalar text"),
+        );
+        assert_eq!(
+            get_builtin(vec![Value::Num(0.0), scalar]).expect("scalar string property"),
+            Value::String("root".into())
+        );
+        let invalid = [
+            Value::StringArray(
+                runmat_value::StringArray::new_2d(vec!["Type".into(), "Parent".into()], 1, 2)
+                    .expect("two strings"),
+            ),
+            Value::CharArray(
+                runmat_value::CharArray::from_unicode_scalars(vec!['T', 'y', 'p', 'e'], 2, 2)
+                    .expect("two character rows"),
+            ),
+        ];
+        for property in invalid {
+            let error =
+                get_builtin(vec![Value::Num(0.0), property]).expect_err("non-scalar property name");
+            assert_eq!(error.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
+        }
+    }
+
+    #[test]
+    fn control_object_type_is_not_a_supported_property() {
+        let _guard = setup();
+        let controls = [
+            crate::builtins::plotting::zoom::zoom_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("zoom object"),
+            crate::builtins::plotting::pan::pan_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("pan object"),
+            crate::builtins::plotting::datacursormode::datacursormode_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("data cursor object"),
+        ];
+        for control in controls {
+            let error = get_builtin(vec![control.clone(), Value::String("Type".into())])
+                .expect_err("control Type property is not exposed");
+            assert!(error.message.contains("unsupported"));
+            assert!(matches!(
+                get_builtin(vec![control, Value::String("Enable".into())])
+                    .expect("shared supported control property"),
+                Value::String(value) if value == "on" || value == "off"
+            ));
+        }
     }
 
     #[test]
@@ -290,11 +292,13 @@ mod tests {
     #[test]
     fn get_reads_text_handle_properties() {
         let _guard = setup();
-        let h = title_builtin(vec![
-            Value::String("Signal".into()),
-            Value::String("FontSize".into()),
-            Value::Num(16.0),
-        ])
+        let h = title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Signal".into()),
+                Value::String("FontSize".into()),
+                Value::Num(16.0),
+            ],
+        ))
         .unwrap();
 
         let value = get_builtin(vec![Value::Num(h)]).unwrap();
@@ -323,12 +327,10 @@ mod tests {
         let _ = crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(h),
             Value::String("String".into()),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["Top".into(), "Bottom".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["Top".into(), "Bottom".into()], vec![1, 2])
+                    .unwrap(),
+            ),
         ])
         .unwrap();
         let multiline = get_builtin(vec![Value::Num(h), Value::String("String".into())]).unwrap();
@@ -346,7 +348,10 @@ mod tests {
         );
         let handle = crate::builtins::plotting::import_figure(figure);
         let ax = crate::builtins::plotting::state::encode_axes_handle(handle, 0);
-        let legend = legend_builtin(vec![Value::Num(ax)]).unwrap();
+        let legend = legend_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(ax)],
+        ))
+        .unwrap();
 
         let axes_value = get_builtin(vec![Value::Num(ax)]).unwrap();
         assert!(matches!(axes_value, Value::Struct(_)));
@@ -423,17 +428,20 @@ mod tests {
     #[test]
     fn get_reads_figure_properties() {
         let _guard = setup();
-        let fig = crate::builtins::plotting::figure::figure_builtin(vec![
-            Value::Num(1234.0),
-            Value::String("Name".into()),
-            Value::String("demo".into()),
-            Value::String("NumberTitle".into()),
-            Value::String("off".into()),
-            Value::String("Visible".into()),
-            Value::String("off".into()),
-            Value::String("Color".into()),
-            Value::String("k".into()),
-        ])
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1234.0),
+                Value::String("Name".into()),
+                Value::String("demo".into()),
+                Value::String("NumberTitle".into()),
+                Value::String("off".into()),
+                Value::String("Visible".into()),
+                Value::String("off".into()),
+                Value::String("Color".into()),
+                Value::String("k".into()),
+            ]),
+        )
         .unwrap();
         let ax = crate::builtins::plotting::subplot::subplot_builtin(
             Value::Num(1.0),
@@ -450,7 +458,12 @@ mod tests {
         assert_eq!(st.fields.get("Name"), Some(&Value::String("demo".into())));
         assert_eq!(st.fields.get("NumberTitle"), Some(&Value::Bool(false)));
         assert_eq!(st.fields.get("Visible"), Some(&Value::Bool(false)));
-        assert_eq!(st.fields.get("Color"), Some(&Value::String("k".into())));
+        assert_eq!(
+            st.fields.get("Color"),
+            Some(&Value::Tensor(
+                runmat_value::Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 3]).unwrap()
+            ))
+        );
         assert_eq!(st.fields.get("CurrentAxes"), Some(&Value::Num(ax)));
         assert!(matches!(st.fields.get("Children"), Some(Value::Tensor(_))));
         let parent = st.fields.get("Parent").expect("parent property");
@@ -467,17 +480,23 @@ mod tests {
     #[test]
     fn hierarchy_and_query_semantics_exist() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(5555.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5555.0)]),
+        )
+        .unwrap();
         let ax = crate::builtins::plotting::subplot::subplot_builtin(
             Value::Num(1.0),
             Value::Num(1.0),
             Value::Num(1.0),
         )
         .unwrap();
-        let title =
-            crate::builtins::plotting::title::title_builtin(vec![Value::String("Signal".into())])
-                .unwrap();
+        let title = crate::builtins::plotting::title::title_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "Signal".into(),
+            )]),
+        )
+        .unwrap();
 
         let axes_value = get_builtin(vec![Value::Num(ax)]).unwrap();
         let Value::Struct(axes_struct) = axes_value else {
@@ -504,15 +523,27 @@ mod tests {
         assert_eq!(text_struct.fields.get("Parent"), Some(&Value::Num(ax)));
 
         assert!(matches!(
-            ishandle_builtin(vec![Value::Num(fig)]).unwrap(),
+            ishandle_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(fig)])
+            )
+            .unwrap(),
             Value::Bool(true)
         ));
         assert!(matches!(
-            isgraphics_builtin(vec![Value::Num(ax)]).unwrap(),
+            isgraphics_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(ax)])
+            )
+            .unwrap(),
             Value::Bool(true)
         ));
         assert!(matches!(
-            ishandle_builtin(vec![Value::Num(-1.0)]).unwrap(),
+            ishandle_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-1.0)])
+            )
+            .unwrap(),
             Value::Bool(false)
         ));
     }
@@ -520,14 +551,19 @@ mod tests {
     #[test]
     fn stem_handle_exposes_runtime_properties() {
         let _guard = setup();
-        let handle = crate::builtins::plotting::stem::stem_builtin(vec![
-            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values")),
-            Value::String("DisplayName".into()),
-            Value::String("Impulse".into()),
-            Value::String("BaseValue".into()),
-            Value::Num(-1.0),
-            Value::String("filled".into()),
-        ])
+        let handle = futures::executor::block_on(crate::builtins::plotting::stem::stem_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(
+                    runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
+                ),
+                Value::String("DisplayName".into()),
+                Value::String("Impulse".into()),
+                Value::String("BaseValue".into()),
+                Value::Num(-1.0),
+                Value::String("filled".into()),
+            ]),
+        ))
         .unwrap();
         let props = get_builtin(vec![Value::Num(handle)]).unwrap();
         let Value::Struct(st) = props else {

@@ -31,7 +31,8 @@ pub struct StageEvidence {
     #[serde(default)]
     pub rejection_counts: BTreeMap<String, usize>,
     #[serde(default)]
-    pub max_projection_error_m: Option<f64>,
+    #[serde(with = "runmat_types::physical::canonical_scalar::optional")]
+    pub max_projection_error_m: Option<runmat_types::physical::Length>,
     #[serde(default)]
     pub min_scaled_jacobian: Option<f64>,
 }

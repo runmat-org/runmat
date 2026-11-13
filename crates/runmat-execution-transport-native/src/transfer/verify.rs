@@ -5,7 +5,7 @@ use crate::{TransportError, TransportResult};
 
 pub fn verify_ciphertext(object: &OpaqueObject, bytes: &[u8]) -> TransportResult<()> {
     if u64::try_from(bytes.len()).ok() != Some(object.ciphertext_size_bytes)
-        || format!("sha256:{:x}", Sha256::digest(bytes)) != object.ciphertext_digest
+        || format!("sha256:{}", hex::encode(Sha256::digest(bytes))) != object.ciphertext_digest
     {
         return Err(TransportError::Integrity);
     }

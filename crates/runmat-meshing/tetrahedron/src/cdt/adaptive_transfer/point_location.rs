@@ -14,8 +14,7 @@ use super::{
 pub(super) fn build_volume_element_transfers(
     source: &SolverMeshArtifact,
     target: &SolverMeshArtifact,
-    options: DelaunayAdaptiveTransferOptions,
-    cancellation: &dyn MeshingCancellationSignal,
+    work: &mut PointLocationWork<'_>,
 ) -> Result<Vec<SolverEntityTransfer>, DelaunayAdaptiveTransferError> {
     let source_identities = source
         .topology
@@ -23,14 +22,13 @@ pub(super) fn build_volume_element_transfers(
         .iter()
         .map(|element| element.stable_identity)
         .collect::<BTreeSet<_>>();
-    let mut work = PointLocationWork::new(options, cancellation);
     let mut transfers = Vec::new();
     for target_element in &target.topology.volume_elements {
         if source_identities.contains(&target_element.stable_identity) {
             continue;
         }
         let centroid = element_centroid(target, target_element)?;
-        let source_identity = locate_source_element(source, centroid, &mut work)?;
+        let source_identity = locate_source_element(source, centroid, work)?;
         transfers.push(SolverEntityTransfer {
             target_stable_identity: target_element.stable_identity,
             method: SolverTransferMethod::CentroidProjection,
@@ -52,7 +50,7 @@ fn element_centroid(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut centroid = [0.0; 3];
     for node in &element.node_ids[..4] {
@@ -75,7 +73,7 @@ fn locate_source_element(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut containing = Vec::new();
     for element in &source.topology.volume_elements {
@@ -115,14 +113,14 @@ fn locate_source_element(
     })
 }
 
-struct PointLocationWork<'a> {
+pub(super) struct PointLocationWork<'a> {
     predicates: u64,
     options: DelaunayAdaptiveTransferOptions,
     cancellation: &'a dyn MeshingCancellationSignal,
 }
 
 impl<'a> PointLocationWork<'a> {
-    fn new(
+    pub(super) fn new(
         options: DelaunayAdaptiveTransferOptions,
         cancellation: &'a dyn MeshingCancellationSignal,
     ) -> Self {
@@ -133,7 +131,7 @@ impl<'a> PointLocationWork<'a> {
         }
     }
 
-    fn predicate(&mut self) -> Result<(), DelaunayAdaptiveTransferError> {
+    pub(super) fn predicate(&mut self) -> Result<(), DelaunayAdaptiveTransferError> {
         if self
             .predicates
             .is_multiple_of(self.options.cancellation_check_interval)

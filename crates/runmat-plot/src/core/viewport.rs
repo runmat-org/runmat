@@ -1,5 +1,7 @@
 use crate::core::{BoundingBox, Camera};
 use glam::Vec3;
+mod resolved;
+pub(crate) use resolved::ResolvedViewport;
 
 /// Compute the scale factor to convert pixel-sized geometry into data units.
 ///

@@ -100,7 +100,10 @@ void validate_exact_solid_nesting(const TopoDS_Solid& solid,
       if (other == index) {
         continue;
       }
-      if (classify_point(void_shells[other], witness, tolerance) != TopAbs_OUT) {
+      // A void shell bounds its cavity from outside: the solid built from it contains the
+      // infinite point (checked above), so material outside that cavity classifies IN. A witness
+      // of a disjoint cavity therefore lies IN; OUT or ON means the cavities nest or overlap.
+      if (classify_point(void_shells[other], witness, tolerance) != TopAbs_IN) {
         throw std::runtime_error("OCCT exact void shells overlap or nest ambiguously");
       }
     }

@@ -1,171 +1,39 @@
 //! MATLAB-compatible `waitbar` progress figure builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    WAITBAR_ERROR_INVALID_ARGUMENT, WAITBAR_INTEGER_HANDLE_EXTENSION,
+    WAITBAR_INTEGER_PROGRESS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::IntValue;
 use runmat_value::Value;
 
-use super::properties::{set_properties, PlotHandle};
+use super::properties::{set_properties_with_runtime, PlotHandle};
 use super::state::{
     current_or_any_waitbar_handle, figure_handle_exists, new_figure_handle, set_figure_name,
     set_figure_number_title, set_waitbar_state, waitbar_state_snapshot, FigureHandle,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "waitbar";
-
-const INTEGER_PROGRESS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "waitbar-integer-progress",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "waitbar with typed-integer progress storage is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WaitbarIntegerProgressExtension"),
-};
-const INTEGER_HANDLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "waitbar-integer-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "waitbar with a typed-integer numeric figure alias is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WaitbarIntegerHandleExtension"),
-};
-pub const WAITBAR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [INTEGER_PROGRESS_EXTENSION, INTEGER_HANDLE_EXTENSION];
-
-const INTEGER_PROGRESS_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public page specifies a real progress number but does not enumerate native integer storage; RunMat gates typed integer progress independently.",
-    }];
-const INTEGER_HANDLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "f",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented argument is a Figure object; typed-integer numeric aliases are a gated RunMat representation extension.",
-    }];
-pub const WAITBAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = waitbar(integer_x, ...)",
-        inputs: &INTEGER_PROGRESS_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact scalar crosses one checked binary64 UI-metadata boundary and is clamped to the implemented progress interval before figure mutation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = waitbar(x, integer_f, ...)",
-        inputs: &INTEGER_HANDLE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The compatibility gate precedes numeric handle decoding and any waitbar-state access; resident handles are not gathered.",
-    },
-];
-
-const OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Waitbar figure handle.",
-}];
-
-const INPUTS_PROGRESS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Progress fraction. Finite values are clamped into [0, 1].",
-}];
-
-const INPUTS_PROGRESS_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Progress fraction.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Message text, waitbar figure handle, and figure-style property/value pairs.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = waitbar(x)",
-        inputs: &INPUTS_PROGRESS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = waitbar(x, msg)",
-        inputs: &INPUTS_PROGRESS_REST,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = waitbar(x, h)",
-        inputs: &INPUTS_PROGRESS_REST,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = waitbar(x, h, msg, Name, Value, ...)",
-        inputs: &INPUTS_PROGRESS_REST,
-        outputs: &OUTPUT_HANDLE,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WAITBAR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:waitbar:InvalidArgument"),
-    when: "Progress, handle, message, or property/value arguments are invalid.",
-    message: "waitbar: invalid argument",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_ARGUMENT];
-
-pub const WAITBAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[derive(Debug)]
 struct WaitbarRequest {
     progress: f64,
     target: Option<FigureHandle>,
     message: Option<String>,
-    figure_properties: Vec<Value>,
+    figure_properties: crate::call::BuiltinArguments,
+    has_figure_properties: bool,
 }
 
 fn invalid(detail: impl AsRef<str>) -> RuntimeError {
     let mut builder = build_runtime_error(format!(
         "{}: {}",
-        ERROR_INVALID_ARGUMENT.message,
+        WAITBAR_ERROR_INVALID_ARGUMENT.message,
         detail.as_ref()
     ))
     .with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = ERROR_INVALID_ARGUMENT.identifier {
+    if let Some(identifier) = WAITBAR_ERROR_INVALID_ARGUMENT.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -173,33 +41,25 @@ fn invalid(detail: impl AsRef<str>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "waitbar",
-    category = "plotting",
-    summary = "Create or update a waitbar progress figure.",
-    keywords = "waitbar,plotting,progress,ui",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::waitbar::WAITBAR_DESCRIPTOR),
-    extensions(crate::builtins::plotting::waitbar::WAITBAR_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::waitbar::WAITBAR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::waitbar"
 )]
-pub fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+pub fn waitbar_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<f64> {
     if args.first().is_some_and(is_typed_integer) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &INTEGER_PROGRESS_EXTENSION,
+            &WAITBAR_INTEGER_PROGRESS_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
     if args.get(1).is_some_and(is_typed_integer) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &INTEGER_HANDLE_EXTENSION,
+            &WAITBAR_INTEGER_HANDLE_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    let request = parse_request(&args)?;
-    let should_update_existing_waitbar = request.target.is_none()
-        && request.message.is_none()
-        && request.figure_properties.is_empty();
+    let request = parse_request(args)?;
+    let should_update_existing_waitbar =
+        request.target.is_none() && request.message.is_none() && !request.has_figure_properties;
     let mut created_new_waitbar = false;
     let handle = match request.target {
         Some(handle) => {
@@ -236,18 +96,19 @@ pub fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         set_figure_name(handle, "Waitbar".to_string()).map_err(|err| invalid(err.to_string()))?;
     }
 
-    if !request.figure_properties.is_empty() {
-        set_properties(
-            PlotHandle::Figure(handle),
-            &request.figure_properties,
-            BUILTIN_NAME,
-        )?;
+    if request.has_figure_properties {
+        for pair in request.figure_properties.chunks_exact(2) {
+            let name = text_value(&pair[0])?.expect("validated waitbar property name");
+            if is_waitbar_or_figure_property(&name) {
+                set_properties_with_runtime(None, PlotHandle::Figure(handle), pair, BUILTIN_NAME)?;
+            }
+        }
     }
 
     Ok(handle.as_u32() as f64)
 }
 
-fn parse_request(args: &[Value]) -> BuiltinResult<WaitbarRequest> {
+fn parse_request(args: crate::call::BuiltinArguments) -> BuiltinResult<WaitbarRequest> {
     let Some(first) = args.first() else {
         return Err(invalid("expected progress fraction"));
     };
@@ -257,15 +118,19 @@ fn parse_request(args: &[Value]) -> BuiltinResult<WaitbarRequest> {
     let mut message = None;
 
     if let Some(value) = args.get(idx) {
-        if let Some(text) = message_text(value) {
+        if let Some(text) = message_text(value)? {
             message = Some(text);
             idx += 1;
         } else if let Some(handle) = figure_handle(value) {
             target = Some(handle);
             idx += 1;
             if let Some(value) = args.get(idx) {
-                if let Some(text) = message_text(value) {
-                    if !looks_like_property_pair(&args[idx..]) {
+                if let Some(text) = message_text(value)? {
+                    if !looks_like_property_pair(
+                        args.view()
+                            .range(idx..)
+                            .expect("bounded waitbar option tail"),
+                    )? {
                         message = Some(text);
                         idx += 1;
                     }
@@ -274,12 +139,20 @@ fn parse_request(args: &[Value]) -> BuiltinResult<WaitbarRequest> {
         }
     }
 
-    let figure_properties = parse_property_tail(&args[idx..])?;
+    let has_figure_properties = parse_property_tail(
+        args.view()
+            .range(idx..)
+            .expect("bounded waitbar property tail"),
+    )?;
+    let figure_properties = args
+        .into_range(idx..)
+        .expect("bounded waitbar property tail");
     Ok(WaitbarRequest {
         progress,
         target,
         message,
         figure_properties,
+        has_figure_properties,
     })
 }
 
@@ -289,7 +162,11 @@ fn parse_progress(value: &Value) -> BuiltinResult<f64> {
             .ok_or_else(|| invalid("integer progress must be exactly representable as double"))?;
         return Ok(progress.clamp(0.0, 1.0));
     }
-    let progress = super::style::value_as_f64(value)
+    if !matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
+        return Err(invalid("progress must be a numeric scalar"));
+    }
+    let progress = crate::builtins::common::tensor::scalar_f64_from_host_value(value)
+        .map_err(|_| invalid("progress must be a numeric scalar"))?
         .ok_or_else(|| invalid("progress must be a numeric scalar"))?;
     if !progress.is_finite() {
         return Err(invalid("progress must be finite"));
@@ -320,7 +197,12 @@ fn is_typed_integer(value: &Value) -> bool {
 }
 
 fn figure_handle(value: &Value) -> Option<FigureHandle> {
-    let raw = super::style::value_as_f64(value)?;
+    if !matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
+        return None;
+    }
+    let raw = crate::builtins::common::tensor::scalar_f64_from_host_value(value)
+        .ok()
+        .flatten()?;
     if raw.is_finite() && raw >= 1.0 && raw <= u32::MAX as f64 {
         Some(FigureHandle::from(raw.round() as u32))
     } else {
@@ -328,57 +210,70 @@ fn figure_handle(value: &Value) -> Option<FigureHandle> {
     }
 }
 
-fn message_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(_) | Value::CharArray(_) => text_value(value),
-        Value::StringArray(array) => Some(array.data.join("\n")),
-        Value::Cell(cell) => {
-            let mut parts = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
-                parts.push(message_text(item)?);
+fn message_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok({
+        match value {
+            Value::String(_) | Value::CharArray(_) => text_value(value)?,
+            Value::StringArray(array) => array
+                .data()
+                .iter()
+                .map(|text| text.as_str())
+                .collect::<Option<Vec<_>>>()
+                .map(|texts| texts.join("\n")),
+            Value::Cell(cell) => {
+                let mut parts = Vec::with_capacity(cell.data().len());
+                for item in cell.data() {
+                    let Some(part) = message_text(item)? else {
+                        return Ok(None);
+                    };
+                    parts.push(part);
+                }
+                Some(parts.join("\n"))
             }
-            Some(parts.join("\n"))
+            _ => None,
         }
-        _ => None,
+    })
+}
+
+fn text_value(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok({
+        super::style::value_as_string(value).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "waitbar",
+                source.to_string(),
+                source,
+            )
+        })?
+    })
+}
+
+fn looks_like_property_pair(tail: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
+    if tail.len() < 2 || !tail.len().is_multiple_of(2) {
+        return Ok(false);
     }
+    Ok(text_value(tail.first().expect("nonempty pair tail"))?
+        .is_some_and(|name| is_waitbar_or_figure_property(&name)))
 }
 
-fn text_value(value: &Value) -> Option<String> {
-    super::style::value_as_string(value)
-}
-
-fn looks_like_property_pair(tail: &[Value]) -> bool {
-    tail.len() >= 2
-        && tail.len().is_multiple_of(2)
-        && tail
-            .first()
-            .and_then(text_value)
-            .map(|name| is_waitbar_or_figure_property(&name))
-            .unwrap_or(false)
-}
-
-fn parse_property_tail(tail: &[Value]) -> BuiltinResult<Vec<Value>> {
+fn parse_property_tail(tail: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
     if tail.is_empty() {
-        return Ok(Vec::new());
+        return Ok(false);
     }
     if !tail.len().is_multiple_of(2) {
         return Err(invalid("property arguments must be name/value pairs"));
     }
-    let mut out = Vec::with_capacity(tail.len());
+    let mut has_figure_properties = false;
     for pair in tail.chunks_exact(2) {
-        let name = text_value(&pair[0]).ok_or_else(|| invalid("property names must be text"))?;
+        let name = text_value(&pair[0])?.ok_or_else(|| invalid("property names must be text"))?;
         match name.trim().to_ascii_lowercase().as_str() {
             "createcancelbtn" | "cancelbutton" | "units" | "windowstyle" => {}
-            _ if is_waitbar_or_figure_property(&name) => {
-                out.push(pair[0].clone());
-                out.push(pair[1].clone());
-            }
+            _ if is_waitbar_or_figure_property(&name) => has_figure_properties = true,
             _ => {
                 return Err(invalid(format!("unsupported waitbar property '{name}'")));
             }
         }
     }
-    Ok(out)
+    Ok(has_figure_properties)
 }
 
 fn is_waitbar_or_figure_property(name: &str) -> bool {
@@ -394,7 +289,11 @@ mod tests {
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_value::{CellArray, StringArray};
+    use runmat_value::{CellArray, StringArray, Tensor};
+
+    fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+        super::waitbar_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?)
+    }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -426,6 +325,21 @@ mod tests {
             ])
             .unwrap(),
             Value::String("Loading".into())
+        );
+
+        let nonscalar =
+            Value::Tensor(Tensor::new(vec![0.5, 0.75], vec![1, 2]).expect("two progress values"));
+        for invalid_args in [vec![nonscalar.clone()], vec![Value::Num(0.5), nonscalar]] {
+            let error = waitbar_builtin(invalid_args).expect_err("non-scalar control");
+            assert_eq!(error.identifier(), Some("RunMat:waitbar:InvalidArgument"));
+        }
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("WaitbarProgress".into())
+            ])
+            .unwrap(),
+            Value::Num(0.25)
         );
 
         let same = waitbar_builtin(vec![

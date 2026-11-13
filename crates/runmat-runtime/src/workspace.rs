@@ -1,6 +1,48 @@
 use runmat_value::Value;
 
+mod base;
+pub mod bindings;
+mod checked;
+mod completion;
+mod detach;
+mod dynamic_target;
+mod logical_generation;
+#[cfg(test)]
+#[path = "workspace/resolver_tests.rs"]
+mod resolver_tests;
+mod retained;
 pub mod session;
+mod slot_read_lease;
+
+pub use base::base_workspace_error_to_runtime;
+pub use base::{
+    assign_logical_base_value, assign_logical_base_value_ref_with_context,
+    assign_logical_base_value_with_context, lookup_logical_base_value, BaseWorkspaceBindingNames,
+    BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
+    BaseWorkspaceProjectionService, BaseWorkspaceReconciliation, BaseWorkspaceService,
+    BaseWorkspaceSnapshot, PreparedWorkspaceCompletion, WorkspaceChange, WorkspaceChangeKind,
+    WorkspaceDelta, WorkspaceProjectionPublication, WorkspacePublicationBatch,
+    WorkspacePublicationMutation, WorkspacePublicationObserver, WorkspacePublicationOrigin,
+    WorkspacePublicationProtocol, WorkspacePublicationStamp, WorkspacePublicationToken,
+    WorkspaceRevision,
+};
+pub use bindings::GlobalBindingTarget;
+pub use checked::{
+    base_workspace_owner, begin_base_workspace_projection, try_assign, try_clear,
+    try_detach_selected, try_global_names, try_lookup, try_remove, try_snapshot,
+};
+pub use completion::{
+    WorkspaceCompletionAction, WorkspaceCompletionIdentity, WorkspaceCompletionParticipant,
+    WorkspaceCompletionSource, WorkspaceCompletionValue,
+};
+pub use detach::{DetachedWorkspaceValues, WorkspaceDetachSelection};
+pub use dynamic_target::{
+    CapturedWorkspaceReadView, DynamicWorkspaceOverlayEntry, DynamicWorkspaceTargetCapture,
+    DynamicWorkspaceTargetEntry, DynamicWorkspaceTargetOverlay,
+};
+pub use logical_generation::LogicalWorkspaceGeneration;
+pub use retained::{WorkspaceName, WorkspaceValueReadLease};
+pub use slot_read_lease::WorkspaceSlotReadLease;
 
 #[cfg(test)]
 use once_cell::sync::Lazy;
@@ -9,9 +51,9 @@ use std::sync::Mutex;
 
 /// Resolver used by the runtime to access the caller workspace when builtins
 /// (such as `save`) need to look up variables by name.
-type AssignFn = fn(&str, Value) -> Result<(), String>;
-type ClearFn = fn() -> Result<(), String>;
-type RemoveFn = fn(&str) -> Result<(), String>;
+type AssignFn = fn(&str, Value) -> Result<(), crate::RuntimeError>;
+type ClearFn = fn() -> Result<(), crate::RuntimeError>;
+type RemoveFn = fn(&str) -> Result<(), crate::RuntimeError>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct WorkspaceResolver {
@@ -138,75 +180,16 @@ pub fn global_names() -> Vec<String> {
     resolver_storage::with(|resolver| resolver.map(|r| (r.globals)()).unwrap_or_default())
 }
 
-pub fn assign(name: &str, value: Value) -> Result<(), String> {
-    if let Some(context) = crate::context::legacy::active() {
-        if let Some(service) = context.service_ports().workspace() {
-            return service
-                .assign(name, value)
-                .map_err(|error| error.to_string());
-        }
-        if context.state().workspace.borrow().is_some() {
-            return with_context_resolver(&context, |resolver| {
-                let assign = resolver
-                    .assign
-                    .ok_or_else(|| "workspace assignment unavailable".to_string())?;
-                assign(name, value)
-            });
-        }
-    }
-    resolver_storage::with(|resolver| {
-        let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
-        let assign = resolver
-            .assign
-            .ok_or_else(|| "workspace assignment unavailable".to_string())?;
-        (assign)(name, value)
-    })
+pub fn assign(name: &str, value: Value) -> Result<(), crate::RuntimeError> {
+    try_assign(name, value)
 }
 
-pub fn clear() -> Result<(), String> {
-    if let Some(context) = crate::context::legacy::active() {
-        if let Some(service) = context.service_ports().workspace() {
-            return service.clear().map_err(|error| error.to_string());
-        }
-        if context.state().workspace.borrow().is_some() {
-            return with_context_resolver(&context, |resolver| {
-                let clear = resolver
-                    .clear
-                    .ok_or_else(|| "workspace clearing unavailable".to_string())?;
-                clear()
-            });
-        }
-    }
-    resolver_storage::with(|resolver| {
-        let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
-        let clear = resolver
-            .clear
-            .ok_or_else(|| "workspace clearing unavailable".to_string())?;
-        (clear)()
-    })
+pub fn clear() -> Result<(), crate::RuntimeError> {
+    try_clear()
 }
 
-pub fn remove(name: &str) -> Result<(), String> {
-    if let Some(context) = crate::context::legacy::active() {
-        if let Some(service) = context.service_ports().workspace() {
-            return service.remove(name).map_err(|error| error.to_string());
-        }
-        if context.state().workspace.borrow().is_some() {
-            return with_context_resolver(&context, |resolver| {
-                let remove = resolver
-                    .remove
-                    .ok_or_else(|| "workspace removal unavailable".to_string())?;
-                remove(name)
-            });
-        }
-    }
-    resolver_storage::with(|resolver| {
-        let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
-        let remove = resolver
-            .remove
-            .ok_or_else(|| "workspace removal unavailable".to_string())?;
-        (remove)(name)
-    })
+pub fn remove(name: &str) -> Result<(), crate::RuntimeError> {
+    try_remove(name)
 }
 
 /// Returns true when a resolver has been registered.
@@ -223,14 +206,15 @@ pub fn is_available() -> bool {
 
 fn with_context_resolver<R>(
     context: &crate::context::RuntimeContext,
-    callback: impl FnOnce(&WorkspaceResolver) -> Result<R, String>,
-) -> Result<R, String> {
+    callback: impl FnOnce(&WorkspaceResolver) -> Result<R, crate::RuntimeError>,
+) -> Result<R, crate::RuntimeError> {
     let resolver = context.state().workspace.borrow();
-    callback(
-        resolver
-            .as_ref()
-            .ok_or_else(|| "workspace state unavailable".to_string())?,
-    )
+    callback(resolver.as_ref().ok_or_else(|| {
+        crate::runtime_error::semantic_error(
+            "RunMat:Workspace:OperationUnavailable",
+            "workspace state unavailable",
+        )
+    })?)
 }
 
 #[cfg(test)]

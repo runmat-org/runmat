@@ -4,6 +4,9 @@ use runmat_gc::gc_stats;
 
 use crate::presentation;
 
+#[path = "version/runtime_features.rs"]
+mod runtime_features;
+
 pub fn show_version(detailed: bool) {
     println!(
         "{}",
@@ -30,7 +33,11 @@ pub fn show_version(detailed: bool) {
     }
 }
 
-pub async fn show_system_info(config: &RunMatRuntimeConfig) -> Result<()> {
+pub async fn show_system_info(config: &RunMatRuntimeConfig, json: bool) -> Result<()> {
+    if json {
+        println!("{}", runtime_features::json()?);
+        return Ok(());
+    }
     let styles = presentation::stdout();
     println!("{}", styles.brand("RunMat System Information"));
     println!("{}", styles.muted("=========================="));

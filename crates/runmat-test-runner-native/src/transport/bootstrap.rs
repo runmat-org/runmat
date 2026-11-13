@@ -5,20 +5,25 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{NativeRunnerError, NativeRunnerResult};
 
-pub const NATIVE_BOOTSTRAP_SCHEMA_VERSION: u16 = 1;
+pub const NATIVE_BOOTSTRAP_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeWorkerBootstrap {
     pub schema_version: u16,
     pub project: Option<FrozenProjectHandoff>,
+    pub execution: crate::NativeWorkerExecutionConfig,
 }
 
 impl NativeWorkerBootstrap {
-    pub fn new(project: Option<FrozenProjectHandoff>) -> Self {
+    pub fn new(
+        project: Option<FrozenProjectHandoff>,
+        execution: crate::NativeWorkerExecutionConfig,
+    ) -> Self {
         Self {
             schema_version: NATIVE_BOOTSTRAP_SCHEMA_VERSION,
             project,
+            execution,
         }
     }
 }
@@ -49,7 +54,11 @@ pub async fn read_bootstrap(
         runmat_process_host::ipc::read_payload(reader, super::framing::host_limits(limits))
             .await
             .map_err(map_host_error)?;
-    let bootstrap: NativeWorkerBootstrap = serde_json::from_slice(&payload)
+    decode_bootstrap(&payload)
+}
+
+pub(crate) fn decode_bootstrap(payload: &[u8]) -> NativeRunnerResult<NativeWorkerBootstrap> {
+    let bootstrap: NativeWorkerBootstrap = serde_json::from_slice(payload)
         .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
     if bootstrap.schema_version != NATIVE_BOOTSTRAP_SCHEMA_VERSION {
         return Err(NativeRunnerError::Protocol(format!(
@@ -69,5 +78,57 @@ fn map_host_error(error: runmat_process_host::ProcessHostError) -> NativeRunnerE
     match error {
         runmat_process_host::ProcessHostError::Io(error) => NativeRunnerError::Io(error),
         error => NativeRunnerError::Protocol(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_config::runtime::{
+        AccelerateConfig, AccelerateProviderPreference, ForeignConfig, MexConfig,
+        UnmanifestedMexPolicy,
+    };
+
+    #[tokio::test]
+    async fn private_bootstrap_retains_resolved_execution_settings() {
+        let bootstrap = NativeWorkerBootstrap::new(
+            None,
+            crate::NativeWorkerExecutionConfig {
+                enable_jit: false,
+                accelerate: AccelerateConfig {
+                    enabled: true,
+                    provider: AccelerateProviderPreference::Wgpu,
+                    allow_inprocess_fallback: false,
+                    ..AccelerateConfig::default()
+                },
+                foreign: ForeignConfig {
+                    mex: MexConfig {
+                        unmanifested: UnmanifestedMexPolicy::Deny,
+                        ..MexConfig::default()
+                    },
+                    ..ForeignConfig::default()
+                },
+            },
+        );
+        let (mut writer, mut reader) = tokio::io::duplex(1024);
+        let limits = ProtocolLimits::default();
+        let (written, read) = tokio::join!(
+            write_bootstrap(&mut writer, &bootstrap, limits),
+            read_bootstrap(&mut reader, limits),
+        );
+        written.unwrap();
+        let restored = read.unwrap();
+        assert_eq!(restored.schema_version, NATIVE_BOOTSTRAP_SCHEMA_VERSION);
+        assert!(!restored.execution.enable_jit);
+        assert!(restored.execution.accelerate.enabled);
+        assert_eq!(
+            restored.execution.accelerate.provider,
+            AccelerateProviderPreference::Wgpu,
+        );
+        assert!(!restored.execution.accelerate.allow_inprocess_fallback);
+        assert_eq!(
+            restored.execution.foreign.mex.unmanifested,
+            UnmanifestedMexPolicy::Deny,
+        );
     }
 }

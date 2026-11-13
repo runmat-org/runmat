@@ -1,74 +1,31 @@
 use std::f64::consts::PI;
 
-use runmat_execution::Digest;
-use runmat_geometry_core::{
-    ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator, GeometryContractError,
-    GeometryModel, PortableExactEvaluator,
-};
 use runmat_meshing_core::{
     MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry, MeshingDiagnosticValue,
     MeshingFailure, MeshingFailureCategory, MeshingOperation, MeshingRequest, MeshingStageKind,
-    StableDigest, MESHING_FAILURE_SCHEMA_VERSION,
+    MESHING_FAILURE_SCHEMA_VERSION,
 };
 use runmat_meshing_curve::{
-    derive_curve_geometry_metric, discretize_shared_curve_partition, encode_shared_curve_batch,
-    CurveResolutionPolicy, ResolvedCurveMetricField, SharedCurveDiscretizationOptions,
-    SharedCurveError, SharedCurveErrorKind, SHARED_CURVE_BATCH_SCHEMA_VERSION,
+    discretize_shared_curve_partition, encode_shared_curve_batch_admitted, CurveResolutionPolicy,
+    ResolvedCurveMetricField, SharedCurveDiscretizationOptions, SharedCurveError,
+    SharedCurveErrorKind, SHARED_CURVE_BATCH_SCHEMA_VERSION,
 };
 
 use crate::{
-    MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
-    PreparedExactGeometryObjects, PreparedMeshingInput, ValidatedMeshingStageOutput,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
+    PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
 
-pub trait ExactCurveGeometryEvaluation:
-    ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator
-{
-}
-
-impl<T> ExactCurveGeometryEvaluation for T where
-    T: ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator
-{
-}
-
-pub trait ExactCurveEvaluatorProvider: Send + Sync {
-    fn evaluator<'a>(
-        &self,
-        geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn ExactCurveGeometryEvaluation + 'a>, GeometryContractError>;
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PortableCurveEvaluatorProvider;
-
-impl ExactCurveEvaluatorProvider for PortableCurveEvaluatorProvider {
-    fn evaluator<'a>(
-        &self,
-        geometry: &'a PreparedExactGeometryObjects,
-    ) -> Result<Box<dyn ExactCurveGeometryEvaluation + 'a>, GeometryContractError> {
-        let GeometryModel::ExactBRep { model } = &geometry.document.model else {
-            return Err(GeometryContractError::invalid(
-                "curve stage geometry",
-                "portable curve evaluation requires exact B-rep geometry",
-            ));
-        };
-        Ok(Box::new(PortableExactEvaluator::new(
-            &geometry.evaluators,
-            &geometry.topology,
-            model,
-        )?))
-    }
-}
-
 #[derive(Clone, Debug)]
-pub struct ExactCurveStageKernel<P = PortableCurveEvaluatorProvider> {
+pub struct ExactCurveStageKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactCurveStageKernel<PortableCurveEvaluatorProvider> {
+impl Default for ExactCurveStageKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableCurveEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -79,7 +36,7 @@ impl<P> ExactCurveStageKernel<P> {
     }
 }
 
-impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveStageKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
@@ -93,9 +50,10 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
             ));
         }
         let geometry = exact_geometry(invocation.inputs)?;
+        let control = invocation.control.geometry_evaluation_control();
         let evaluator = self
             .evaluator_provider
-            .evaluator(geometry)
+            .evaluator(geometry, &control)
             .map_err(|error| {
                 curve_failure(
                     MeshingFailureCategory::InvalidGeometry,
@@ -104,14 +62,14 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
                     &error.to_string(),
                 )
             })?;
-        let control = invocation.control.geometry_evaluation_control();
         let metric = resolved_curve_metric(
+            &self.evaluator_provider,
             geometry,
             evaluator.as_ref(),
             &control,
             &invocation.host.resolved_request,
         )?;
-        if invocation.host.resolved_request.resources.maximum_nodes < 2 {
+        if invocation.host.resolved_request.limits.maximum_nodes < 2 {
             return Err(curve_failure(
                 MeshingFailureCategory::NodeBudgetExceeded,
                 None,
@@ -131,7 +89,8 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
         )
         .map_err(map_curve_error)?;
         let encoded =
-            encode_shared_curve_batch(&batch, &geometry.topology).map_err(map_curve_error)?;
+            encode_shared_curve_batch_admitted(&batch, &geometry.topology, &control, &control)
+                .map_err(map_curve_error)?;
         let usage = control.usage();
 
         let node_count = batch
@@ -166,7 +125,12 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveStageKerne
         invocation.control.checkpoint(checkpoint.clone())?;
 
         Ok(ValidatedMeshingStageOutput {
-            invariant_summary_digest: validation_digest(&encoded),
+            invariant_summary_digest: crate::publication_digest::record(
+                b"runmat-exact-curve-partition-validation/v1\0",
+                &encoded,
+                invocation.control,
+                &checkpoint,
+            )?,
             streams: vec![MeshingChunkStream {
                 media_type: MeshingChunkMediaType::CurvePartitions,
                 schema_version: SHARED_CURVE_BATCH_SCHEMA_VERSION,
@@ -197,30 +161,29 @@ pub(super) fn curve_options(host: &crate::MeshingHostWorkload) -> SharedCurveDis
     let numerical_error_m = request
         .tolerance
         .absolute_floor_m
-        .max(request.tolerance.requested_deviation_m * 1.0e-6)
+        .canonical_value()
+        .max(request.tolerance.requested_deviation_m.canonical_value() * 1.0e-6)
         .max(f64::EPSILON);
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: curve.maximum_chordal_deviation_m,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                curve.maximum_chordal_deviation_m.canonical_value(),
+            ),
             maximum_tangent_change_rad: curve.maximum_tangent_change_degrees * PI / 180.0,
             minimum_metric_edge_length: curve.minimum_metric_edge_length,
-            maximum_metric_edge_length: curve.maximum_metric_edge_length,
+            maximum_metric_edge_length: curve
+                .maximum_metric_edge_length
+                .min(runmat_meshing_core::MetricTensor3::NORMALIZED_TARGET_LENGTH),
         },
-        maximum_nodes_per_edge: request.resources.maximum_nodes.min(u64::from(u32::MAX)) as u32,
+        maximum_nodes_per_edge: request.limits.maximum_nodes.min(u64::from(u32::MAX)) as u32,
         maximum_subdivision_depth: request
-            .resources
+            .limits
             .maximum_recursion_depth
             .min(u32::from(u16::MAX)) as u16,
-        geometry_absolute_error_m: numerical_error_m,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(numerical_error_m),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: numerical_error_m,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(numerical_error_m),
     }
-}
-
-fn validation_digest(encoded: &[u8]) -> StableDigest {
-    let mut bytes = b"runmat-exact-curve-partition-validation/v1\0".to_vec();
-    bytes.extend_from_slice(encoded);
-    StableDigest::from_bytes(*Digest::sha256(&bytes).bytes())
 }
 
 pub(super) fn map_curve_error(error: SharedCurveError) -> Box<MeshingFailure> {
@@ -263,21 +226,17 @@ pub(crate) fn shared_curve_failure_category(kind: SharedCurveErrorKind) -> Meshi
 }
 
 pub(crate) fn resolved_curve_metric(
+    provider: &impl ExactMeshingEvaluatorProvider,
     geometry: &PreparedExactGeometryObjects,
-    evaluator: &dyn ExactCurveGeometryEvaluation,
+    evaluator: &dyn crate::ExactMeshingGeometryEvaluation,
     control: &crate::MeshingGeometryEvaluationControl<'_>,
     request: &MeshingRequest,
 ) -> Result<ResolvedCurveMetricField, Box<MeshingFailure>> {
-    let metric_request = derive_curve_geometry_metric(
-        &geometry.topology,
-        evaluator,
-        control,
-        &request.metric,
-        request.quality.curve,
-        request.quality.surface,
-    )
-    .map_err(map_curve_error)?;
-    ResolvedCurveMetricField::new(&geometry.topology, &metric_request).map_err(map_curve_error)
+    let metric_request = provider
+        .geometry_metric(geometry, evaluator, control, request)
+        .map_err(map_curve_error)?;
+    ResolvedCurveMetricField::new_with_control(&geometry.topology, &metric_request, control)
+        .map_err(map_curve_error)
 }
 
 pub(super) fn curve_failure(
@@ -300,6 +259,7 @@ pub(super) fn curve_failure(
             value: MeshingDiagnosticValue::Text(detail),
             unit: None,
         }],
+        accounting_error: None,
         remediation: remediation.into(),
     })
 }

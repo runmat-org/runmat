@@ -2,10 +2,16 @@
 
 pub mod end_expr;
 pub mod integer_assignment;
+pub mod object;
 pub mod plan;
 pub mod read_linear;
 pub mod read_slice;
+mod resident;
 pub mod selectors;
+pub mod shape;
+pub mod structure;
+pub mod symbolic;
+pub mod value;
 pub mod write_linear;
 pub mod write_slice;
 

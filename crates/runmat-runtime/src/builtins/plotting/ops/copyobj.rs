@@ -1,13 +1,11 @@
 //! MATLAB-compatible `copyobj` graphics-object copying builtin.
 
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    COPYOBJ_DESCRIPTOR, COPYOBJ_ERROR_INTERNAL, COPYOBJ_ERROR_INVALID_ARGUMENT,
+    COPYOBJ_ERROR_TOO_MANY_OUTPUTS, COPYOBJ_INTEGER_HANDLE_EXTENSION,
 };
+
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericDType, Tensor, Value};
 
@@ -17,110 +15,13 @@ use super::state::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::handles::numeric_handle_from_integer;
-use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "copyobj";
 
-const COPYOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "hnew",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Copied graphics object handle or handle array.",
-}];
-
-const COPYOBJ_INPUTS_SOURCE_PARENT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics object handle or handle array to copy.",
-    },
-    BuiltinParamDescriptor {
-        name: "parent",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Destination axes handle compatible with the plot child.",
-    },
-];
-
-const COPYOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "hnew = copyobj(h, parent)",
-    inputs: &COPYOBJ_INPUTS_SOURCE_PARENT,
-    outputs: &COPYOBJ_OUTPUT,
-}];
-
-const COPYOBJ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COPYOBJ.INVALID_ARGUMENT",
-    identifier: Some("RunMat:copyobj:InvalidArgument"),
-    when: "Argument count, source handle, or target parent handle is invalid or unsupported.",
-    message: "copyobj: invalid argument",
-};
-
-const COPYOBJ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COPYOBJ.INTERNAL",
-    identifier: Some("RunMat:copyobj:Internal"),
-    when: "Internal graphics state lookup or copy registration fails.",
-    message: "copyobj: internal operation failed",
-};
-
-const COPYOBJ_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [COPYOBJ_ERROR_INVALID_ARGUMENT, COPYOBJ_ERROR_INTERNAL];
-
-pub const COPYOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COPYOBJ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COPYOBJ_ERRORS,
-};
-
-pub const COPYOBJ_INTEGER_HANDLE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "copyobj-integer-handle-aliases",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "copyobj with typed-integer numeric graphics-handle aliases is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:CopyobjIntegerHandleExtension"),
-    };
-
-pub const COPYOBJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [COPYOBJ_INTEGER_HANDLE_EXTENSION];
-
-const COPYOBJ_INTEGER_SOURCE: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "h",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode treats exactly representable nonnegative host integers as aliases for its numeric graphics-handle representation; the public contract accepts graphics objects, not integer arrays.",
-    }];
-const COPYOBJ_INTEGER_PARENT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "parent",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode treats exactly representable nonnegative host integers as aliases for numeric axes handles; resident numeric arrays are not graphics objects.",
-    }];
-const COPYOBJ_RESIDENT_INTEGER: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "resident h or parent",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Resident integer arrays are numeric data rather than graphics objects and reject without provider gather.",
-    }];
-
-pub const COPYOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "hnew = copyobj(integer_h, parent)", inputs: &COPYOBJ_INTEGER_SOURCE, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::SameSizeOrScalar, notes: "A separately gated RunMat alias reads authoritative host integer storage, rejects values that cannot be represented exactly by RunMat's f64 graphics registry, validates every source before mutation, and returns fresh host graphics handles." },
-    BuiltinIntegerCapabilityDescriptor { form: "hnew = copyobj(h, integer_parent)", inputs: &COPYOBJ_INTEGER_PARENT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::SameSizeOrScalar, notes: "A separately gated RunMat alias resolves authoritative host integers as axes parents before any copy is made; output handles follow the controlling source/parent shape." },
-    BuiltinIntegerCapabilityDescriptor { form: "copyobj(resident_integer_handle_alias, ...)", inputs: &COPYOBJ_RESIDENT_INTEGER, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "GPU-resident numeric arrays are not graphics-object handles; copyobj performs no provider dispatch or implicit gather." },
-];
-
 fn copyobj_error(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()));
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -129,18 +30,30 @@ fn copyobj_error(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>
 
 #[runtime_builtin(
     name = "copyobj",
-    category = "plotting",
-    summary = "Copy plot-child graphics objects to a compatible axes parent.",
-    keywords = "copyobj,copy,graphics,handle,axes,figure,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_array_type),
-    descriptor(crate::builtins::plotting::copyobj::COPYOBJ_DESCRIPTOR),
-    extensions(crate::builtins::plotting::copyobj::COPYOBJ_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::copyobj::COPYOBJ_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::copyobj"
 )]
-pub fn copyobj_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let mut iter = args.into_iter();
+pub fn copyobj_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let _scope = runtime.as_ref().map(|runtime| runtime.enter());
+    crate::output_count::validate_fixed_outputs(
+        &COPYOBJ_DESCRIPTOR,
+        &COPYOBJ_ERROR_TOO_MANY_OUTPUTS,
+        "copyobj",
+    )
+    .map_err(super::coordinate_admission::terminal)?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "copyobj")?;
+    work.finish(copyobj_impl(arguments.view(), &work))
+}
+
+fn copyobj_impl(
+    args: crate::call::FunctionArgumentView<'_>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<Value> {
+    let mut iter = args.iter();
     let source = iter.next().ok_or_else(|| {
         copyobj_error(
             &COPYOBJ_ERROR_INVALID_ARGUMENT,
@@ -160,23 +73,25 @@ pub fn copyobj_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
-    if is_host_integer_handle_alias(&source) || is_host_integer_handle_alias(&parent) {
+    if is_host_integer_handle_alias(source) || is_host_integer_handle_alias(parent) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &COPYOBJ_INTEGER_HANDLE_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
 
-    let sources = handle_list(&source, "source")?;
-    let parents = parent_target_list(&parent)?;
+    let sources = handle_list(source, "source")?;
+    let parents = parent_target_list(parent)?;
     let plan = copy_plan(&sources, &parents)?;
 
     for &(source_handle, _) in &plan.pairs {
         validate_copy_source(source_handle)?;
     }
 
+    work.check()?;
     let mut copied = Vec::with_capacity(plan.pairs.len());
     for (source_handle, target) in plan.pairs {
+        work.check()?;
         copied.push(copy_plot_child(source_handle, target)?);
     }
 
@@ -252,6 +167,16 @@ fn copy_plan(sources: &HandleList, parents: &ParentTargetList) -> BuiltinResult<
         } else {
             parents.targets[idx]
         };
+        let CopyParentTarget::Axes(figure, axes) = target;
+        if pairs.iter().any(|&(prior, prior_target)| {
+            let CopyParentTarget::Axes(prior_figure, prior_axes) = prior_target;
+            prior == source && prior_figure == figure && prior_axes == axes
+        }) {
+            return Err(copyobj_error(
+                &COPYOBJ_ERROR_INVALID_ARGUMENT,
+                "the same object cannot be copied twice to the same parent in one request",
+            ));
+        }
         pairs.push((source, target));
     }
 
@@ -326,7 +251,7 @@ fn handle_list(value: &Value, role: &'static str) -> BuiltinResult<HandleList> {
             };
             Ok(HandleList {
                 handles,
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
                 is_scalar: tensor_utils::tensor_element_len(tensor) == 1,
             })
         }
@@ -407,7 +332,13 @@ fn is_host_integer_handle_alias(value: &Value) -> bool {
 }
 
 fn map_copy_error(error: &'static BuiltinErrorDescriptor, source: FigureError) -> RuntimeError {
-    copyobj_error(error, source.to_string())
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, source))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[cfg(test)]
@@ -420,6 +351,13 @@ mod tests {
     use crate::builtins::plotting::state::{clone_figure, current_figure_handle, reset_plot_state};
     use crate::builtins::plotting::subplot::subplot_builtin;
     use futures::executor::block_on;
+    use runmat_builtins::{
+        BuiltinIntegerBackendRule, BuiltinIntegerInputAvailability, BuiltinIntegerScalarDoubleRule,
+    };
+    use runmat_builtins::{
+        COPYOBJ_ERROR_INVALID_ARGUMENT, COPYOBJ_INTEGER_CAPABILITIES,
+        COPYOBJ_INTEGER_HANDLE_EXTENSION,
+    };
     use runmat_value::{IntValue, IntegerStorage};
 
     fn tensor(data: &[f64]) -> Value {
@@ -428,7 +366,7 @@ mod tests {
 
     fn value_string(value: Value) -> String {
         match value {
-            Value::String(value) => value,
+            Value::String(runmat_value::StringElement::Text(value)) => value.to_string(),
             other => panic!("expected string, got {other:?}"),
         }
     }
@@ -443,12 +381,15 @@ mod tests {
     fn line_handle(y: &[f64]) -> f64 {
         let x: Vec<f64> = (1..=y.len()).map(|index| index as f64).collect();
         value_num(
-            block_on(line_builtin(vec![
-                Value::String("XData".into()),
-                tensor(&x),
-                Value::String("YData".into()),
-                tensor(y),
-            ]))
+            block_on(line_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("XData".into()),
+                    tensor(&x),
+                    Value::String("YData".into()),
+                    tensor(y),
+                ]),
+            ))
             .unwrap(),
         )
     }
@@ -538,10 +479,13 @@ mod tests {
     #[test]
     fn copyobj_aligned_wide_integer_alias_reaches_ordinary_handle_lookup() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let error = copyobj_builtin(vec![
-            Value::Int(IntValue::U64(1_u64 << 54)),
-            Value::Num(1.0),
-        ])
+        let error = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U64(1_u64 << 54)),
+                Value::Num(1.0),
+            ]),
+        )
         .expect_err("wide exact alias is not a registered graphics handle");
         assert_eq!(
             error.identifier(),
@@ -553,11 +497,14 @@ mod tests {
     #[test]
     fn copyobj_validates_call_shape_before_integer_extension_gate() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = copyobj_builtin(vec![
-            Value::Int(IntValue::U8(1)),
-            Value::Num(1.0),
-            Value::Num(1.0),
-        ])
+        let error = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U8(1)),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ]),
+        )
         .expect_err("malformed call must fail before extension policy");
         assert_eq!(
             error.identifier(),
@@ -575,8 +522,14 @@ mod tests {
         let integer_source = Value::Int(IntValue::U64(source as u64));
 
         let compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = copyobj_builtin(vec![integer_source.clone(), Value::Num(target_axes)])
-            .expect_err("integer handle alias must be gated");
+        let error = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                integer_source.clone(),
+                Value::Num(target_axes),
+            ]),
+        )
+        .expect_err("integer handle alias must be gated");
         assert_eq!(
             error.identifier(),
             COPYOBJ_INTEGER_HANDLE_EXTENSION.error_identifier
@@ -584,12 +537,19 @@ mod tests {
         drop(compat);
 
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        assert!(copyobj_builtin(vec![integer_source, Value::Num(target_axes)]).is_ok());
+        assert!(copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                integer_source,
+                Value::Num(target_axes)
+            ])
+        )
+        .is_ok());
     }
 
     #[test]
     fn copyobj_rejects_all_resident_integer_classes_without_provider_dispatch() {
-        for (offset, element_type) in [
+        for (_offset, element_type) in [
             (0, runmat_accelerate_api::IntegerElementType::I8),
             (1, runmat_accelerate_api::IntegerElementType::I16),
             (2, runmat_accelerate_api::IntegerElementType::I32),
@@ -599,17 +559,21 @@ mod tests {
             (6, runmat_accelerate_api::IntegerElementType::U32),
             (7, runmat_accelerate_api::IntegerElementType::U64),
         ] {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 510 - offset,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                element_type.into(),
-                runmat_accelerate_api::GpuTensorStorage::Real,
+            let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    element_type.into(),
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle;
+            let result = copyobj_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(handle.clone()),
+                    Value::Num(1.0),
+                ]),
             );
-            let result = copyobj_builtin(vec![Value::GpuTensor(handle.clone()), Value::Num(1.0)]);
             let error = result.expect_err("resident numeric handles must reject");
             assert_eq!(
                 error.identifier(),
@@ -623,7 +587,7 @@ mod tests {
         let _guard = lock_plot_test_context();
         reset_plot_state();
         let source = line_handle(&[1.0, 2.0]);
-        for (offset, element_type) in [
+        for (_offset, element_type) in [
             (0, runmat_accelerate_api::IntegerElementType::I8),
             (1, runmat_accelerate_api::IntegerElementType::I16),
             (2, runmat_accelerate_api::IntegerElementType::I32),
@@ -633,18 +597,21 @@ mod tests {
             (6, runmat_accelerate_api::IntegerElementType::U32),
             (7, runmat_accelerate_api::IntegerElementType::U64),
         ] {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 610 - offset,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                element_type.into(),
-                runmat_accelerate_api::GpuTensorStorage::Real,
+            let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    element_type.into(),
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle;
+            let result = copyobj_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(source),
+                    Value::GpuTensor(handle.clone()),
+                ]),
             );
-            let result =
-                copyobj_builtin(vec![Value::Num(source), Value::GpuTensor(handle.clone())]);
             let error = result.expect_err("resident integer parent must reject");
             assert_eq!(
                 error.identifier(),
@@ -659,22 +626,31 @@ mod tests {
         reset_plot_state();
 
         let source = value_num(
-            block_on(line_builtin(vec![
-                Value::String("XData".into()),
-                tensor(&[1.0, 2.0, 3.0]),
-                Value::String("YData".into()),
-                tensor(&[2.0, 4.0, 8.0]),
-                Value::String("DisplayName".into()),
-                Value::String("source".into()),
-            ]))
+            block_on(line_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("XData".into()),
+                    tensor(&[1.0, 2.0, 3.0]),
+                    Value::String("YData".into()),
+                    tensor(&[2.0, 4.0, 8.0]),
+                    Value::String("DisplayName".into()),
+                    Value::String("source".into()),
+                ]),
+            ))
             .unwrap(),
         );
         let target_axes =
             subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).unwrap();
 
         let copied = value_num(
-            copyobj_builtin(vec![Value::Num(source), Value::Num(target_axes)])
-                .expect("copy line to axes"),
+            copyobj_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(source),
+                    Value::Num(target_axes),
+                ]),
+            )
+            .expect("copy line to axes"),
         );
 
         assert_ne!(copied, source);
@@ -729,12 +705,18 @@ mod tests {
             subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).unwrap();
         let sources = Tensor::new(vec![first, second], vec![1, 2]).unwrap();
 
-        let copied = copyobj_builtin(vec![Value::Tensor(sources), Value::Num(target_axes)])
-            .expect("copy handle array");
+        let copied = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(sources),
+                Value::Num(target_axes),
+            ]),
+        )
+        .expect("copy handle array");
         let Value::Tensor(copied) = copied else {
             panic!("expected tensor result");
         };
-        assert_eq!(copied.shape, vec![1, 2]);
+        assert_eq!(copied.shape(), [1, 2]);
         assert_eq!(copied.materialize_f64().len(), 2);
         assert!(copied
             .materialize_f64()
@@ -748,6 +730,44 @@ mod tests {
                 target_axes
             );
         }
+        // Public vectors pair by length, not by stored row/column orientation.
+        let row_sources = Tensor::new(vec![first, second], vec![1, 2]).unwrap();
+        let column_parents = Tensor::new(vec![target_axes, target_axes], vec![2, 1]).unwrap();
+        let paired = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(row_sources),
+                Value::Tensor(column_parents),
+            ]),
+        )
+        .unwrap();
+        let Value::Tensor(paired) = paired else {
+            panic!("expected paired handles");
+        };
+        assert_eq!(paired.shape(), [1, 2]);
+        let children = || {
+            let Value::Tensor(handles) = get_builtin(vec![
+                Value::Num(target_axes),
+                Value::String("Children".into()),
+            ])
+            .unwrap() else {
+                panic!("expected children");
+            };
+            handles.len()
+        };
+        let before = children();
+        let duplicate = Tensor::new(vec![first, first], vec![1, 2]).unwrap();
+        let error = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(duplicate),
+                Value::Num(target_axes),
+            ]),
+        )
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:copyobj:InvalidArgument"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(children(), before);
     }
 
     #[test]
@@ -762,13 +782,19 @@ mod tests {
             subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).unwrap();
         let parents = Tensor::new(vec![first_axes, second_axes], vec![1, 2]).unwrap();
 
-        let copied = copyobj_builtin(vec![Value::Num(source), Value::Tensor(parents)])
-            .expect("copy to parent array");
+        let copied = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(source),
+                Value::Tensor(parents),
+            ]),
+        )
+        .expect("copy to parent array");
         let Value::Tensor(copied) = copied else {
             panic!("expected tensor result");
         };
 
-        assert_eq!(copied.shape, vec![1, 2]);
+        assert_eq!(copied.shape(), [1, 2]);
         assert_eq!(
             value_num(
                 get_builtin(vec![
@@ -800,7 +826,11 @@ mod tests {
         let target_axes =
             subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).unwrap();
 
-        let err = copyobj_builtin(vec![Value::Num(source)]).unwrap_err();
+        let err = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(source)]),
+        )
+        .unwrap_err();
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:copyobj:InvalidArgument")
@@ -808,8 +838,14 @@ mod tests {
 
         let before_len = clone_figure(current_figure_handle()).unwrap().len();
         let sources = Tensor::new(vec![source, f64::NAN], vec![1, 2]).unwrap();
-        let err = copyobj_builtin(vec![Value::Tensor(sources), Value::Num(target_axes)])
-            .expect_err("invalid source array should fail");
+        let err = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(sources),
+                Value::Num(target_axes),
+            ]),
+        )
+        .expect_err("invalid source array should fail");
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:copyobj:InvalidArgument")
@@ -825,7 +861,14 @@ mod tests {
 
         let source = line_handle(&[1.0, 2.0]);
         let figure = current_figure_handle().as_u32() as f64;
-        let err = copyobj_builtin(vec![Value::Num(source), Value::Num(figure)]).unwrap_err();
+        let err = copyobj_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(source),
+                Value::Num(figure),
+            ]),
+        )
+        .unwrap_err();
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:copyobj:InvalidArgument")

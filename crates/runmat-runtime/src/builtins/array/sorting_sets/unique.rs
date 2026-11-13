@@ -5,27 +5,33 @@
 //! use a provider hook or typed host fallback, then public outputs are restored
 //! to the owning provider.
 
+#[cfg(test)]
+use super::type_resolvers::unique_values_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    UNIQUE_DESCRIPTOR, UNIQUE_ERROR_CONFLICTING_OCCURRENCE_OPTIONS,
+    UNIQUE_ERROR_CONFLICTING_ORDER_OPTIONS, UNIQUE_ERROR_GPU_OPTION_COMBINATION,
+    UNIQUE_ERROR_INTERNAL, UNIQUE_ERROR_INVALID_ARGUMENT, UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED,
+    UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX, UNIQUE_ERROR_UNKNOWN_OPTION,
+    UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE, UNIQUE_INTEGER_CAPABILITIES,
+};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, UniqueOccurrence, UniqueOptions, UniqueOrder, UniqueResult,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
-    NumericStorage, StringArray, Tensor, Value,
+    NumericStorage, StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::unique_values_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
@@ -67,217 +73,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "unique";
 
-const UNIQUE_OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Unique values or rows.",
-}];
-
-const UNIQUE_OUTPUT_C_IA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique values or rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "ia",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting representatives in input A.",
-    },
-];
-
-const UNIQUE_OUTPUT_C_IA_IC: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique values or rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "ia",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting representatives in input A.",
-    },
-    BuiltinParamDescriptor {
-        name: "ic",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices mapping each input element/row to C.",
-    },
-];
-
-const UNIQUE_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const UNIQUE_INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option tokens plus the 'TreatMissingAsDistinct', logical name-value pair.",
-    },
-];
-
-const UNIQUE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "C = unique(A)",
-        inputs: &UNIQUE_INPUTS_A,
-        outputs: &UNIQUE_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = unique(A, option...)",
-        inputs: &UNIQUE_INPUTS_A_OPTIONS,
-        outputs: &UNIQUE_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia] = unique(A)",
-        inputs: &UNIQUE_INPUTS_A,
-        outputs: &UNIQUE_OUTPUT_C_IA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia] = unique(A, option...)",
-        inputs: &UNIQUE_INPUTS_A_OPTIONS,
-        outputs: &UNIQUE_OUTPUT_C_IA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ic] = unique(A)",
-        inputs: &UNIQUE_INPUTS_A,
-        outputs: &UNIQUE_OUTPUT_C_IA_IC,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ic] = unique(A, option...)",
-        inputs: &UNIQUE_INPUTS_A_OPTIONS,
-        outputs: &UNIQUE_OUTPUT_C_IA_IC,
-    },
-];
-
-const UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.LEGACY_OPTION_UNSUPPORTED",
-    identifier: Some("RunMat:unique:LegacyOptionUnsupported"),
-    when: "Legacy compatibility options are requested.",
-    message: "unique: the 'legacy' behaviour is not supported",
-};
-
-const UNIQUE_ERROR_CONFLICTING_ORDER_OPTIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.CONFLICTING_ORDER_OPTIONS",
-    identifier: Some("RunMat:unique:ConflictingOrderOptions"),
-    when: "Both 'sorted' and 'stable' options are provided.",
-    message: "unique: cannot combine 'sorted' with 'stable'",
-};
-
-const UNIQUE_ERROR_CONFLICTING_OCCURRENCE_OPTIONS: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.UNIQUE.CONFLICTING_OCCURRENCE_OPTIONS",
-        identifier: Some("RunMat:unique:ConflictingOccurrenceOptions"),
-        when: "Both 'first' and 'last' options are provided.",
-        message: "unique: cannot combine 'first' with 'last'",
-    };
-
-const UNIQUE_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.UNKNOWN_OPTION",
-    identifier: Some("RunMat:unique:UnknownOption"),
-    when: "An unsupported option token is provided.",
-    message: "unique: unrecognised option",
-};
-
-const UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.ROWS_REQUIRES_2D_MATRIX",
-    identifier: Some("RunMat:unique:RowsRequiresTwoDimensionalInput"),
-    when: "'rows' mode is used with non-2D data.",
-    message: "unique: 'rows' option requires a 2-D matrix input",
-};
-
-const UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.UNSUPPORTED_INPUT_TYPE",
-    identifier: Some("RunMat:unique:UnsupportedInputType"),
-    when: "Input cannot be converted into a supported unique domain.",
-    message: "unique: unsupported input type",
-};
-
-const UNIQUE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:unique:InvalidArgument"),
-    when: "Option arguments or name-value pairs are malformed.",
-    message: "unique: invalid option arguments",
-};
-
-const UNIQUE_ERROR_GPU_OPTION_COMBINATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.GPU_OPTION_COMBINATION",
-    identifier: Some("RunMat:unique:GpuOptionCombination"),
-    when: "A resident input specifies both set-order and occurrence options.",
-    message: "unique: GPU inputs cannot combine a set-order option with 'first' or 'last'",
-};
-
-const UNIQUE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.INTERNAL",
-    identifier: Some("RunMat:unique:Internal"),
-    when: "Internal conversion/allocation/provider decode fails.",
-    message: "unique: internal operation failed",
-};
-
-const UNIQUE_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED,
-    UNIQUE_ERROR_CONFLICTING_ORDER_OPTIONS,
-    UNIQUE_ERROR_CONFLICTING_OCCURRENCE_OPTIONS,
-    UNIQUE_ERROR_UNKNOWN_OPTION,
-    UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX,
-    UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE,
-    UNIQUE_ERROR_INVALID_ARGUMENT,
-    UNIQUE_ERROR_GPU_OPTION_COMBINATION,
-    UNIQUE_ERROR_INTERNAL,
-];
-
-const UNIQUE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "A accepts every real integer class and retains exact typed storage throughout host evaluation.",
-    }];
-
-const UNIQUE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[C, ia, ic] = unique(integer_A, options)",
-        inputs: &UNIQUE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "C preserves A's exact integer class; ia and ic are one-based double. GPU supports integer classes through 32 bits and restores all requested outputs after typed fallback.",
-    }];
-
-pub const UNIQUE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UNIQUE_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UNIQUE_ERRORS,
-};
-
 fn unique_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -299,19 +94,10 @@ fn unique_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "unique",
-    category = "array/sorting_sets",
-    summary = "Return unique elements or rows with optional index mappings.",
-    keywords = "unique,set,distinct,stable,rows,indices,gpu",
-    accel = "array_construct",
-    sink = true,
-    type_resolver(unique_values_output_type),
-    descriptor(crate::builtins::array::sorting_sets::unique::UNIQUE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::array::sorting_sets::unique::UNIQUE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
-async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn unique_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
         return Err(unique_error_with(
             &UNIQUE_ERROR_INVALID_ARGUMENT,
@@ -319,10 +105,10 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         ));
     }
     let provider = super::output_provider(&value);
-    let eval = evaluate(value, &rest).await?;
+    let eval = evaluate_view(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -331,7 +117,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 vec![eval.into_values_value()],
                 unique_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         if out_count == 2 {
             let (values, ia) = eval.into_pair();
@@ -341,7 +127,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 vec![values, ia],
                 unique_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia, ic) = eval.into_triple();
         let outputs = super::restore_set_outputs(
@@ -350,7 +136,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             vec![values, ia, ic],
             unique_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,
@@ -363,15 +149,27 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
 
 /// Evaluate `unique` once and expose all outputs to the caller.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
+    evaluate_view(value, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    value: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<UniqueEvaluation> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "unique")?;
-    let opts = parse_options(rest)?;
+    let opts = parse_options_view(rest)?;
     match value {
         Value::GpuTensor(handle) => unique_gpu(handle, &opts).await,
         other => unique_host(other, &opts),
     }
 }
 
+#[cfg(test)]
 fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
+    parse_options_view(FunctionArgumentView::from_slice(rest))
+}
+
+fn parse_options_view(rest: FunctionArgumentView<'_>) -> crate::BuiltinResult<UniqueOptions> {
     let mut opts = UniqueOptions {
         rows: false,
         order: UniqueOrder::Sorted,
@@ -563,12 +361,23 @@ async fn unique_gpu(
         return Err(unique_error(&UNIQUE_ERROR_GPU_OPTION_COMBINATION));
     }
     let logical = runmat_accelerate_api::handle_is_logical(&handle);
-    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+    if super::provider_result::plain_real(&handle) || logical {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
             .or_else(runmat_accelerate_api::provider)
         {
-            if let Ok(result) = provider.unique(&handle, opts).await {
-                let evaluation = UniqueEvaluation::from_unique_result(result)?;
+            if let Some(result) = super::provider_result::attempt(
+                provider.unique(&handle, opts),
+                unique_internal_error,
+            )
+            .await?
+            {
+                let (values, ia, ic) = super::provider_result::unique(
+                    result,
+                    &handle,
+                    opts.rows,
+                    unique_internal_error,
+                )?;
+                let evaluation = UniqueEvaluation::new(tensor::tensor_into_value(values), ia, ic);
                 return if logical {
                     evaluation.into_logical_values()
                 } else {
@@ -577,13 +386,8 @@ async fn unique_gpu(
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let evaluation = unique_numeric_from_tensor(tensor, opts)?;
-    if logical {
-        evaluation.into_logical_values()
-    } else {
-        Ok(evaluation)
-    }
+    let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    unique_host(host, opts)
 }
 
 fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -617,7 +421,7 @@ fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<Uniqu
         Value::CharArray(array) => unique_char_array(array, opts),
         Value::StringArray(array) => unique_string_array(array, opts),
         Value::String(s) => {
-            let array = StringArray::new(vec![s], vec![1, 1]).map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+            let array = StringArray::from_elements_unbounded(vec![s], vec![1, 1]).map_err(|e| unique_internal_error(format!("unique: {e}")))?;
             unique_string_array(array, opts)
         }
         other => Err(unique_error_with(
@@ -634,7 +438,7 @@ pub fn unique_numeric_from_tensor(
     tensor: Tensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     match tensor
         .into_numeric_storage()
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?
@@ -1086,8 +890,8 @@ fn unique_complex_from_tensor(
     tensor: ComplexTensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let shape = tensor.shape.clone();
-    match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    match storage {
         ComplexStorage::F64(values) => unique_floating_complex(values, shape, opts),
         ComplexStorage::F32(values) => unique_floating_complex(values, shape, opts),
         ComplexStorage::Integer(_) => Err(unique_error_with(
@@ -1097,9 +901,9 @@ fn unique_complex_from_tensor(
     }
 }
 
-fn unique_floating_complex<T: SetFloat>(
-    values: Vec<(T, T)>,
-    shape: Vec<usize>,
+fn unique_floating_complex<T: SetFloat, S: ComplexSequence<T>>(
+    values: S,
+    shape: runmat_value::SharedShape,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if opts.rows {
@@ -1109,9 +913,9 @@ fn unique_floating_complex<T: SetFloat>(
     }
 }
 
-fn unique_complex_elements<T: SetFloat>(
-    input: Vec<(T, T)>,
-    shape: Vec<usize>,
+fn unique_complex_elements<T: SetFloat, S: ComplexSequence<T>>(
+    input: S,
+    shape: runmat_value::SharedShape,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     let len = input.len();
@@ -1136,7 +940,8 @@ fn unique_complex_elements<T: SetFloat>(
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, &value) in input.iter().enumerate() {
+    for idx in 0..input.len() {
+        let value = input.pair_at(idx);
         if opts.treat_missing_as_distinct && (value.0.is_nan() || value.1.is_nan()) {
             let entry_idx = entries.len();
             entries.push(ComplexElementEntry {
@@ -1211,9 +1016,9 @@ fn unique_complex_elements<T: SetFloat>(
     ))
 }
 
-fn unique_complex_rows<T: SetFloat>(
-    input: Vec<(T, T)>,
-    shape: Vec<usize>,
+fn unique_complex_rows<T: SetFloat, S: ComplexSequence<T>>(
+    input: S,
+    shape: runmat_value::SharedShape,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if shape.len() != 2 {
@@ -1249,7 +1054,7 @@ fn unique_complex_rows<T: SetFloat>(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            let value = input[idx];
+            let value = input.pair_at(idx);
             row_values.push(value);
             key_row.push(ComplexKey::new(value));
         }
@@ -1372,7 +1177,7 @@ fn unique_char_elements(
     let mut element_entry_index = Vec::with_capacity(total);
 
     for (linear_idx, &ch) in input.iter().enumerate() {
-        let key = ch as u32;
+        let key = ch.raw() as u32;
         match map.get(&key) {
             Some(&entry_idx) => {
                 entries[entry_idx].last = linear_idx;
@@ -1447,7 +1252,7 @@ fn unique_char_rows(
     let rows = array.rows;
     let cols = array.cols;
     if rows == 0 {
-        let values = CharArray::new(Vec::new(), 0, cols)
+        let values = CharArray::from_code_units(Vec::new(), 0, cols)
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ia = Tensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1463,7 +1268,7 @@ fn unique_char_rows(
     for r in 0..rows {
         let start = r * cols;
         let end = start + cols;
-        let slice = &array.data[start..end];
+        let slice = &array.data()[start..end];
         let key = RowCharKey::from_slice(slice);
         match map.get(&key) {
             Some(&entry_idx) => {
@@ -1494,7 +1299,7 @@ fn unique_char_rows(
     }
 
     let unique_rows_count = order.len();
-    let mut values = vec!['\0'; unique_rows_count * cols];
+    let mut values = vec![runmat_value::Utf16CodeUnit::from_raw(0); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
         for col in 0..cols {
@@ -1521,7 +1326,7 @@ fn unique_char_rows(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = CharArray::new(values, unique_rows_count, cols)
+    let value_array = CharArray::from_code_units(values, unique_rows_count, cols)
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows_count, 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1551,7 +1356,7 @@ fn unique_string_elements(
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     let shape = array.shape.clone();
-    let len = array.data.len();
+    let len = array.data().len();
     if len == 0 {
         let values = StringArray::new(Vec::new(), unique_element_values_shape(&shape, 0))
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1563,11 +1368,15 @@ fn unique_string_elements(
     }
 
     let mut entries = Vec::<StringElementEntry>::new();
-    let mut map: HashMap<String, usize> = HashMap::new();
+    let mut map: HashMap<&StringElement, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, value) in array.data.iter().enumerate() {
-        match map.get(value) {
+    for (idx, value) in array.data().iter().enumerate() {
+        match if value.is_missing() {
+            None
+        } else {
+            map.get(value)
+        } {
             Some(&entry_idx) => {
                 entries[entry_idx].last = idx;
                 element_entry_index.push(entry_idx);
@@ -1575,11 +1384,13 @@ fn unique_string_elements(
             None => {
                 let entry_idx = entries.len();
                 entries.push(StringElementEntry {
-                    value: value.clone(),
+                    value,
                     first: idx,
                     last: idx,
                 });
-                map.insert(value.clone(), entry_idx);
+                if !value.is_missing() {
+                    map.insert(value, entry_idx);
+                }
                 element_entry_index.push(entry_idx);
             }
         }
@@ -1587,7 +1398,7 @@ fn unique_string_elements(
 
     let mut order: Vec<usize> = (0..entries.len()).collect();
     if opts.order == UniqueOrder::Sorted {
-        order.sort_by(|&a, &b| entries[a].value.cmp(&entries[b].value));
+        order.sort_by(|&a, &b| entries[a].value.cmp(entries[b].value));
     }
 
     let mut entry_to_position = vec![0usize; entries.len()];
@@ -1613,8 +1424,11 @@ fn unique_string_elements(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = StringArray::new(values, unique_element_values_shape(&shape, order.len()))
-        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let value_array = StringArray::from_elements_unbounded(
+        values,
+        unique_element_values_shape(&shape, order.len()),
+    )
+    .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ic_tensor =
@@ -1658,10 +1472,14 @@ fn unique_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            row_values.push(array.data[idx].clone());
+            row_values.push(&array.data()[idx]);
         }
         let key = RowStringKey(row_values.clone());
-        match map.get(&key) {
+        match if row_values.iter().any(|text| text.is_missing()) {
+            None
+        } else {
+            map.get(&key)
+        } {
             Some(&entry_idx) => {
                 entries[entry_idx].last = r;
                 row_entry_index.push(entry_idx);
@@ -1690,12 +1508,12 @@ fn unique_string_rows(
     }
 
     let unique_rows_count = order.len();
-    let mut values = vec![String::new(); unique_rows_count * cols];
+    let mut values = vec![StringElement::default(); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
         for (col, value) in row.iter().enumerate().take(cols) {
             let dest = row_pos + col * unique_rows_count;
-            values[dest] = value.clone();
+            values[dest] = (*value).clone();
         }
     }
 
@@ -1715,7 +1533,7 @@ fn unique_string_rows(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = StringArray::new(values, vec![unique_rows_count, cols])
+    let value_array = StringArray::from_elements_unbounded(values, vec![unique_rows_count, cols])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows_count, 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1797,7 +1615,7 @@ struct ComplexRowEntry<T> {
 
 #[derive(Debug)]
 struct CharElementEntry {
-    ch: char,
+    ch: Utf16CodeUnit,
     first: usize,
     last: usize,
 }
@@ -1806,31 +1624,31 @@ struct CharElementEntry {
 struct RowCharKey(Vec<u32>);
 
 impl RowCharKey {
-    fn from_slice(values: &[char]) -> Self {
-        RowCharKey(values.iter().map(|&ch| ch as u32).collect())
+    fn from_slice(values: &[Utf16CodeUnit]) -> Self {
+        RowCharKey(values.iter().map(|&ch| ch.raw() as u32).collect())
     }
 }
 
 #[derive(Debug, Clone)]
 struct CharRowEntry {
-    row_data: Vec<char>,
+    row_data: Vec<Utf16CodeUnit>,
     first: usize,
     last: usize,
 }
 
 #[derive(Debug, Clone)]
-struct StringElementEntry {
-    value: String,
+struct StringElementEntry<'a> {
+    value: &'a StringElement,
     first: usize,
     last: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a StringElement>);
 
 #[derive(Debug, Clone)]
-struct StringRowEntry {
-    row_data: Vec<String>,
+struct StringRowEntry<'a> {
+    row_data: Vec<&'a StringElement>,
     first: usize,
     last: usize,
 }
@@ -1890,7 +1708,7 @@ fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
+fn compare_char_rows(a: &[Utf16CodeUnit], b: &[Utf16CodeUnit]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -1900,7 +1718,7 @@ fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
+fn compare_string_rows(a: &[&StringElement], b: &[&StringElement]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -1930,7 +1748,7 @@ impl UniqueEvaluation {
         self.values = match self.values {
             Value::Num(value) => Value::Bool(value != 0.0),
             Value::Tensor(tensor) => {
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let data = tensor
                     .materialize_f64()
                     .into_iter()
@@ -1999,6 +1817,97 @@ impl UniqueEvaluation {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn typed_missing_set_operation_matrix_preserves_occurrences_and_literal_text() {
+        let input = StringArray::from_elements_unbounded(
+            vec![
+                StringElement::Missing,
+                "<missing>".into(),
+                StringElement::Missing,
+                "<missing>".into(),
+                "".into(),
+            ],
+            vec![5, 1],
+        )
+        .unwrap();
+        for shape in [vec![5, 1], vec![1, 5]] {
+            let array = StringArray::from_elements_unbounded(input.data().to_vec(), shape).unwrap();
+            let (value, _, _) = evaluate_sync(Value::StringArray(array), &[Value::from("stable")])
+                .unwrap()
+                .into_triple();
+            let Value::StringArray(value) = value else {
+                panic!("expected strings");
+            };
+            assert_eq!(
+                value.data(),
+                &[
+                    StringElement::Missing,
+                    "<missing>".into(),
+                    StringElement::Missing,
+                    "".into()
+                ]
+            );
+        }
+        use crate::builtins::array::sorting_sets::{intersect, ismember, setdiff, setxor, union};
+        let strings = |value: Value| match value {
+            Value::StringArray(array) => array,
+            other => panic!("expected strings, got {other:?}"),
+        };
+        for rows in [false, true] {
+            let args = if rows {
+                vec![Value::from("rows")]
+            } else {
+                vec![]
+            };
+            let a = Value::StringArray(input.clone());
+            let b = a.clone();
+            let (mask, _) =
+                futures::executor::block_on(ismember::evaluate(a.clone(), b.clone(), &args))
+                    .unwrap()
+                    .into_pair();
+            let Value::LogicalArray(mask) = mask else {
+                panic!("expected membership mask");
+            };
+            assert_eq!(mask.data, vec![0, 1, 0, 1, 1]);
+            let common = strings(
+                futures::executor::block_on(intersect::evaluate(a.clone(), b.clone(), &args))
+                    .unwrap()
+                    .into_values_value(),
+            );
+            assert_eq!(common.data().len(), 2);
+            assert!(common.data().iter().all(|value| !value.is_missing()));
+            for (value, missing_count) in [
+                (
+                    futures::executor::block_on(union::evaluate(a.clone(), b.clone(), &args))
+                        .unwrap()
+                        .into_values_value(),
+                    4,
+                ),
+                (
+                    futures::executor::block_on(setdiff::evaluate(a.clone(), b.clone(), &args))
+                        .unwrap()
+                        .into_values_value(),
+                    2,
+                ),
+                (
+                    futures::executor::block_on(setxor::evaluate(a, b, &args))
+                        .unwrap()
+                        .into_values_value(),
+                    4,
+                ),
+            ] {
+                assert_eq!(
+                    strings(value)
+                        .data()
+                        .iter()
+                        .filter(|value| value.is_missing())
+                        .count(),
+                    missing_count
+                );
+            }
+        }
+    }
     use crate::builtins::common::test_support;
     use runmat_builtins::{LiteralValue, ResolveContext, Type};
     use runmat_value::{
@@ -2010,7 +1919,10 @@ pub(crate) mod tests {
     }
 
     fn builtin_sync(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(unique_builtin(value, rest))
+        futures::executor::block_on(unique_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2022,7 +1934,7 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
             }
             Value::Num(_) => panic!("expected tensor result"),
             other => panic!("unexpected result {other:?}"),
@@ -2204,7 +2116,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("unexpected values {other:?}"),
@@ -2235,7 +2147,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0, 2.0]);
             }
             other => panic!("unexpected values {other:?}"),
@@ -2253,14 +2165,24 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_elements_sorted() {
-        let chars = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
+        let chars = CharArray::from_code_units(
+            [0xD800, 0xDC00, 0xD800, 65]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .unwrap();
         let eval = evaluate_sync(Value::CharArray(chars), &[]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 3);
                 assert_eq!(arr.cols, 1);
-                assert_eq!(arr.data, vec!['a', 'm', 'z']);
+                assert_eq!(
+                    arr.data().iter().map(|unit| unit.raw()).collect::<Vec<_>>(),
+                    vec![65, 0xD800, 0xDC00]
+                );
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2277,7 +2199,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_rows_last() {
-        let chars = CharArray::new(vec!['a', 'b', 'a', 'b', 'a', 'c'], 3, 2).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['a', 'b', 'a', 'b', 'a', 'c'], 3, 2).unwrap();
         let eval = evaluate_sync(
             Value::CharArray(chars),
             &[Value::from("rows"), Value::from("last")],
@@ -2288,7 +2211,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 2);
                 assert_eq!(arr.cols, 2);
-                assert_eq!(arr.data, vec!['a', 'b', 'a', 'c']);
+                assert_eq!(arr.data(), runmat_value::encode_utf16_code_units("abac"));
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2315,7 +2238,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec!["beta", "alpha"]);
+                assert_eq!(sa.data(), vec!["beta", "alpha"]);
                 assert_eq!(sa.shape, vec![2, 1]);
             }
             other => panic!("unexpected values {other:?}"),
@@ -2354,7 +2277,7 @@ pub(crate) mod tests {
         match values {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
-                assert_eq!(sa.data, vec!["alpha", "gamma", "beta", "beta"]);
+                assert_eq!(sa.data(), vec!["alpha", "gamma", "beta", "beta"]);
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2410,7 +2333,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected native single rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(
             values.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 2.0, 10.0, 20.0])
@@ -2431,10 +2354,13 @@ pub(crate) mod tests {
             panic!("expected native complex single values");
         };
         assert_eq!(
-            values.as_f32_slice(),
-            Some(&[(1.0, -1.0), (1.0, 1.0), (0.0, 2.0)][..])
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, -1.0), (1.0, 1.0), (0.0, 2.0)])
         );
-
         let rows = ComplexTensor::from_f32(
             vec![
                 (2.0, 0.0),
@@ -2456,10 +2382,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(
-            values.as_f32_slice(),
-            Some(&[(2.0, 0.0), (1.0, 1.0), (20.0, 0.0), (10.0, -1.0),][..])
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(2.0, 0.0), (1.0, 1.0), (20.0, 0.0), (10.0, -1.0),])
         );
     }
 
@@ -2485,7 +2415,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![5.0, 3.0, 5.0, 1.0], vec![1, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval =
@@ -2493,7 +2423,7 @@ pub(crate) mod tests {
             let values = eval.into_values_value();
             match values {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 3]);
+                    assert_eq!(t.shape(), &[1, 3]);
                     assert_eq!(t.materialize_f64(), vec![5.0, 3.0, 1.0]);
                 }
                 other => panic!("unexpected values {other:?}"),
@@ -2515,12 +2445,12 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider registered");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate_sync(Value::GpuTensor(handle.clone()), &[]).expect("gpu unique");
         let (gpu_values, gpu_ia, gpu_ic) = gpu_eval.into_triple();
-        let _ = provider.free(&handle);
+        drop(handle);
 
         let host_values = test_support::gather(host_values).expect("gather host values");
         let host_ia = test_support::gather(host_ia).expect("gather host ia");
@@ -2529,7 +2459,7 @@ pub(crate) mod tests {
         let gpu_ia = test_support::gather(gpu_ia).expect("gather gpu ia");
         let gpu_ic = test_support::gather(gpu_ic).expect("gather gpu ic");
 
-        assert_eq!(gpu_values.shape, host_values.shape);
+        assert_eq!(gpu_values.shape(), host_values.shape());
         assert_eq!(gpu_values.materialize_f64(), host_values.materialize_f64());
         assert_eq!(gpu_ia.materialize_f64(), host_ia.materialize_f64());
         assert_eq!(gpu_ic.materialize_f64(), host_ic.materialize_f64());
@@ -2594,7 +2524,11 @@ pub(crate) mod tests {
             UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX.identifier
         );
 
-        let chars = CharArray::from_column_major(vec!['a', 'b'], vec![1, 2, 1]).unwrap();
+        let chars = CharArray::from_column_major(
+            runmat_value::encode_utf16_code_units("ab"),
+            vec![1, 2, 1],
+        )
+        .unwrap();
         let err = evaluate_sync(Value::CharArray(chars), &[Value::from("rows")]).unwrap_err();
         assert_eq!(
             err.identifier(),
@@ -2610,7 +2544,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 3]);
+                assert_eq!(t.shape(), &[0, 3]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("unexpected values {other:?}"),
@@ -2730,7 +2664,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected numeric rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(values.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         let Value::Tensor(ia) = ia else {
             panic!("expected row indices");
@@ -2802,7 +2736,7 @@ pub(crate) mod tests {
             let Value::Tensor(values) = values else {
                 panic!("expected exact integer values");
             };
-            assert_eq!(values.shape, vec![1, 2]);
+            assert_eq!(values.shape(), &[1, 2]);
             assert_eq!(values.integer_storage(), Some(&expected));
             let Value::Tensor(ia) = ia else {
                 panic!("expected ia");
@@ -2810,8 +2744,8 @@ pub(crate) mod tests {
             let Value::Tensor(ic) = ic else {
                 panic!("expected ic");
             };
-            assert_eq!(ia.shape, vec![2, 1]);
-            assert_eq!(ic.shape, vec![3, 1]);
+            assert_eq!(ia.shape(), &[2, 1]);
+            assert_eq!(ic.shape(), &[3, 1]);
         }
     }
 
@@ -2843,7 +2777,7 @@ pub(crate) mod tests {
                 let Value::Tensor(values) = values else {
                     panic!("expected exact integer values");
                 };
-                assert_eq!(values.shape, expected_shape);
+                assert_eq!(values.shape(), expected_shape);
                 assert_eq!(values.integer_storage(), Some(&storage));
             }
         }
@@ -2858,7 +2792,7 @@ pub(crate) mod tests {
         else {
             panic!("expected single tensor");
         };
-        assert_eq!(single.shape, vec![1, 2]);
+        assert_eq!(single.shape(), &[1, 2]);
         assert_eq!(single.as_f32_slice(), Some(&[1.0, 3.0][..]));
 
         let complex = ComplexTensor::from_f32(vec![(3.0, 1.0), (1.0, 0.0), (3.0, 1.0)], vec![1, 3])
@@ -2869,9 +2803,10 @@ pub(crate) mod tests {
         else {
             panic!("expected complex tensor");
         };
-        assert_eq!(complex.shape, vec![1, 2]);
+        assert_eq!(complex.shape(), &[1, 2]);
 
-        let chars = CharArray::new(vec!['z', 'a', 'z'], 1, 3).expect("character row input");
+        let chars = CharArray::from_unicode_scalars(vec!['z', 'a', 'z'], 1, 3)
+            .expect("character row input");
         let Value::CharArray(chars) = evaluate_sync(Value::CharArray(chars), &[])
             .expect("unique character row")
             .into_values_value()
@@ -2879,7 +2814,7 @@ pub(crate) mod tests {
             panic!("expected character array");
         };
         assert_eq!(chars.shape, vec![1, 2]);
-        assert_eq!(chars.data, vec!['a', 'z']);
+        assert_eq!(chars.data(), runmat_value::encode_utf16_code_units("az"));
 
         let strings = StringArray::new(vec!["z".into(), "a".into(), "z".into()], vec![1, 3])
             .expect("string row input");
@@ -2891,8 +2826,11 @@ pub(crate) mod tests {
         };
         assert_eq!(strings.shape, vec![1, 2]);
 
-        let nd_chars = CharArray::from_column_major(vec!['c', 'a', 'b', 'c'], vec![2, 1, 2])
-            .expect("N-D character input");
+        let nd_chars = CharArray::from_column_major(
+            runmat_value::encode_utf16_code_units("cabc"),
+            vec![2, 1, 2],
+        )
+        .expect("N-D character input");
         let Value::CharArray(nd_chars) = evaluate_sync(Value::CharArray(nd_chars), &[])
             .expect("unique N-D character input")
             .into_values_value()
@@ -2900,7 +2838,10 @@ pub(crate) mod tests {
             panic!("expected character array");
         };
         assert_eq!(nd_chars.shape, vec![3, 1]);
-        assert_eq!(nd_chars.to_column_major(), vec!['a', 'b', 'c']);
+        assert_eq!(
+            nd_chars.to_column_major(),
+            runmat_value::encode_utf16_code_units("abc")
+        );
     }
 
     #[test]
@@ -2910,7 +2851,8 @@ pub(crate) mod tests {
                 .expect("integer row");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("typed upload");
             {
-                let _guard = crate::output_count::push_output_count(Some(3));
+                let _guard =
+                    crate::output_count::push_output_count(Some(3)).expect("output-count scope");
                 let Value::OutputList(outputs) = builtin_sync(Value::GpuTensor(handle), Vec::new())
                     .expect("resident integer unique")
                 else {
@@ -2928,16 +2870,29 @@ pub(crate) mod tests {
                 );
             };
 
-            let logical = Tensor::new(vec![1.0, 0.0, 1.0], vec![1, 3]).unwrap();
-            let logical_handle =
-                gpu_helpers::upload_tensor(provider, &logical).expect("logical upload");
-            let logical_input = gpu_helpers::logical_gpu_value(logical_handle);
+            let logical_handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1],
+                    shape: &[1, 3],
+                })
+                .expect("logical producer upload");
+            let input_lease = logical_handle.allocation_lease().downgrade();
+            let logical_input = gpu_helpers::logical_gpu_value(logical_handle.clone())
+                .expect("adopt logical producer");
             let Value::GpuTensor(output) =
                 builtin_sync(logical_input, Vec::new()).expect("resident logical unique")
             else {
                 panic!("expected resident logical result");
             };
             assert!(runmat_accelerate_api::handle_is_logical(&output));
+            let output_lease = output.allocation_lease().downgrade();
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("logical payload");
+            assert_eq!(gathered.shape(), &[1, 2]);
+            assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0]);
+            assert!(input_lease.acquire().is_some());
+            drop(logical_handle);
+            assert!(input_lease.acquire().is_none());
+            assert!(output_lease.acquire().is_none());
         });
     }
 
@@ -2968,7 +2923,7 @@ pub(crate) mod tests {
             );
         });
 
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let err = builtin_sync(Value::Num(1.0), Vec::new()).expect_err("excess outputs must fail");
         assert_eq!(err.identifier(), UNIQUE_ERROR_INVALID_ARGUMENT.identifier);
     }
@@ -2982,7 +2937,7 @@ pub(crate) mod tests {
         let Value::Tensor(distinct) = distinct else {
             panic!("expected rows");
         };
-        assert_eq!(distinct.shape, vec![2, 2]);
+        assert_eq!(distinct.shape(), &[2, 2]);
         let collapsed = evaluate_sync(
             Value::Tensor(rows),
             &[
@@ -2996,7 +2951,7 @@ pub(crate) mod tests {
         let Value::Tensor(collapsed) = collapsed else {
             panic!("expected rows");
         };
-        assert_eq!(collapsed.shape, vec![1, 2]);
+        assert_eq!(collapsed.shape(), &[1, 2]);
 
         let complex =
             ComplexTensor::new(vec![(f64::NAN, 1.0), (f64::NAN, 1.0)], vec![2, 1]).unwrap();

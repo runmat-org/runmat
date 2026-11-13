@@ -1,0 +1,155 @@
+use super::*;
+
+/// Closed response-spectrum choices. Descriptors and documentation are owned by
+/// the catalog entries under `fea/policy_types/choices/spectrum`.
+macro_rules! spectrum_choice {
+    ($function:ident, $builtin:literal, $class:expr, $value:expr $(,)?) => {
+        #[runtime_builtin(
+                    name = $builtin,
+                    binding_variant = "default",
+                    builtin_path = "crate::builtins::fea::response_spectrum_policies::choices"
+                )]
+        pub async fn $function() -> BuiltinResult<Value> {
+            typed_value($builtin, $class, $value)
+        }
+    };
+}
+
+spectrum_choice!(
+    response_relative_displacement,
+    "fea.SpectrumResponse.relativeDisplacement",
+    RESPONSE_CLASS,
+    SpectrumResponse::RelativeDisplacement,
+);
+spectrum_choice!(
+    response_relative_velocity,
+    "fea.SpectrumResponse.relativeVelocity",
+    RESPONSE_CLASS,
+    SpectrumResponse::RelativeVelocity,
+);
+spectrum_choice!(
+    response_relative_acceleration,
+    "fea.SpectrumResponse.relativeAcceleration",
+    RESPONSE_CLASS,
+    SpectrumResponse::RelativeAcceleration,
+);
+spectrum_choice!(
+    response_absolute_acceleration,
+    "fea.SpectrumResponse.absoluteAcceleration",
+    RESPONSE_CLASS,
+    SpectrumResponse::AbsoluteAcceleration,
+);
+spectrum_choice!(
+    response_pseudo_velocity,
+    "fea.SpectrumResponse.pseudoVelocity",
+    RESPONSE_CLASS,
+    SpectrumResponse::PseudoVelocity,
+);
+spectrum_choice!(
+    response_pseudo_acceleration,
+    "fea.SpectrumResponse.pseudoAcceleration",
+    RESPONSE_CLASS,
+    SpectrumResponse::PseudoAcceleration,
+);
+spectrum_choice!(
+    envelope_positive,
+    "fea.SpectrumEnvelope.positive",
+    ENVELOPE_CLASS,
+    SpectrumEnvelope::Positive,
+);
+spectrum_choice!(
+    envelope_negative,
+    "fea.SpectrumEnvelope.negative",
+    ENVELOPE_CLASS,
+    SpectrumEnvelope::Negative,
+);
+spectrum_choice!(
+    envelope_maximax,
+    "fea.SpectrumEnvelope.maximax",
+    ENVELOPE_CLASS,
+    SpectrumEnvelope::Maximax,
+);
+spectrum_choice!(
+    interpolation_frequency,
+    "fea.SpectrumInterpolation.linearFrequency",
+    INTERPOLATION_CLASS,
+    SpectrumInterpolation::LinearFrequency,
+);
+spectrum_choice!(
+    interpolation_period,
+    "fea.SpectrumInterpolation.linearPeriod",
+    INTERPOLATION_CLASS,
+    SpectrumInterpolation::LinearPeriod,
+);
+spectrum_choice!(
+    interpolation_loglog,
+    "fea.SpectrumInterpolation.logLog",
+    INTERPOLATION_CLASS,
+    SpectrumInterpolation::LogLog,
+);
+spectrum_choice!(
+    extrapolation_reject,
+    "fea.SpectrumExtrapolation.reject",
+    EXTRAPOLATION_CLASS,
+    SpectrumExtrapolation::Reject,
+);
+spectrum_choice!(
+    extrapolation_hold,
+    "fea.SpectrumExtrapolation.holdEndpoint",
+    EXTRAPOLATION_CLASS,
+    SpectrumExtrapolation::HoldEndpoint,
+);
+spectrum_choice!(
+    modal_srss,
+    "fea.ModalCombination.srss",
+    MODAL_COMBINATION_CLASS,
+    ModalCombination::Srss,
+);
+spectrum_choice!(
+    modal_cqc,
+    "fea.ModalCombination.completeQuadratic",
+    MODAL_COMBINATION_CLASS,
+    ModalCombination::CompleteQuadraticCombination,
+);
+spectrum_choice!(
+    modal_ten_percent,
+    "fea.ModalCombination.tenPercent",
+    MODAL_COMBINATION_CLASS,
+    ModalCombination::TenPercent,
+);
+spectrum_choice!(
+    modal_absolute_sum,
+    "fea.ModalCombination.absoluteSum",
+    MODAL_COMBINATION_CLASS,
+    ModalCombination::AbsoluteSum,
+);
+spectrum_choice!(
+    directional_srss,
+    "fea.DirectionalCombination.srss",
+    DIRECTIONAL_COMBINATION_CLASS,
+    DirectionalCombination::Srss,
+);
+spectrum_choice!(
+    directional_absolute_sum,
+    "fea.DirectionalCombination.absoluteSum",
+    DIRECTIONAL_COMBINATION_CLASS,
+    DirectionalCombination::AbsoluteSum,
+);
+spectrum_choice!(
+    truncation_correction_none,
+    "fea.ModalTruncationCorrection.none",
+    TRUNCATION_CORRECTION_CLASS,
+    ModalTruncationCorrection::None,
+);
+spectrum_choice!(
+    truncation_correction_residual_mode,
+    "fea.ModalTruncationCorrection.residualMode",
+    TRUNCATION_CORRECTION_CLASS,
+    ModalTruncationCorrection::ResidualMode,
+);
+spectrum_choice!(
+    rigid_response_disabled,
+    "fea.RigidResponse.disabled",
+    RIGID_RESPONSE_CLASS,
+    RigidResponsePolicy::Disabled,
+);

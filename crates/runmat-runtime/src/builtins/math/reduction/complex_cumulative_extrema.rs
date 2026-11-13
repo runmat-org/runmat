@@ -1,5 +1,5 @@
 use num_traits::Float;
-use runmat_value::{ComplexStorage, ComplexTensor, Tensor};
+use runmat_value::{ComplexElement, ComplexStorage, ComplexTensor, HostComplexBuffer, Tensor};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Direction {
@@ -76,16 +76,16 @@ pub fn cumulative_extrema(
 }
 
 fn cumulative_extrema_typed<T>(
-    values: Vec<(T, T)>,
+    values: HostComplexBuffer<T>,
     shape: Vec<usize>,
     dim: usize,
     direction: Direction,
     nan_mode: NanMode,
     extrema: Extrema,
-    wrap: fn(Vec<(T, T)>) -> ComplexStorage,
+    wrap: fn(HostComplexBuffer<T>) -> ComplexStorage,
 ) -> Result<(ComplexTensor, Tensor), String>
 where
-    T: Float,
+    T: Float + Clone + Copy,
 {
     let dim_index = dim - 1;
     let segment_len = shape[dim_index];
@@ -137,38 +137,38 @@ fn scan_segment<T>(
     base: usize,
     before: usize,
     stride_before: usize,
-    values: &[(T, T)],
-    values_out: &mut [(T, T)],
+    values: &[ComplexElement<T>],
+    values_out: &mut [ComplexElement<T>],
     indices_out: &mut [f64],
     nan_mode: NanMode,
     extrema: Extrema,
 ) where
-    T: Float,
+    T: Float + Clone + Copy,
 {
     let mut current: Option<((T, T), usize)> = None;
     let mut fixed_nan_index = None;
     for offset in offsets {
         let index = base + before + offset * stride_before;
         let position = offset + 1;
-        let value = values[index];
+        let value: (T, T) = values[index].into();
         if matches!(nan_mode, NanMode::Include) {
             if let Some(nan_index) = fixed_nan_index {
-                values_out[index] = complex_nan();
+                values_out[index] = complex_nan().into();
                 indices_out[index] = nan_index as f64;
                 continue;
             }
             if complex_is_nan(value) {
                 fixed_nan_index = Some(position);
-                values_out[index] = complex_nan();
+                values_out[index] = complex_nan().into();
                 indices_out[index] = position as f64;
                 continue;
             }
         } else if complex_is_nan(value) {
             if let Some((current_value, current_index)) = current {
-                values_out[index] = current_value;
+                values_out[index] = current_value.into();
                 indices_out[index] = current_index as f64;
             } else {
-                values_out[index] = complex_nan();
+                values_out[index] = complex_nan().into();
                 indices_out[index] = f64::NAN;
             }
             continue;
@@ -183,7 +183,7 @@ fn scan_segment<T>(
         }
         let (current_value, current_index) =
             current.expect("non-NaN value establishes cumulative extrema");
-        values_out[index] = current_value;
+        values_out[index] = current_value.into();
         indices_out[index] = current_index as f64;
     }
 }

@@ -1,11 +1,53 @@
-use runmat_runtime::data::{DataArrayPayload, DataArrayValues};
-use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, StructValue, Tensor, Value};
+use runmat_runtime::data::{DataArrayPayload, DataArrayValues, DataChunkIndex, DataManifest};
+use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, Tensor, Value};
+use std::path::{Component, Path};
 
-fn create_array(path: String, dtype: &str, shape: Vec<usize>, chunk: Vec<usize>) -> Value {
-    let mut array = StructValue::new();
+fn assert_portable_storage(root: &Path) {
+    let manifest: DataManifest =
+        serde_json::from_slice(&std::fs::read(root.join("manifest.json")).expect("manifest"))
+            .expect("decode manifest");
+    let check_path = |value: &str| {
+        assert!(!value.contains('\\'), "nonportable storage path: {value}");
+        assert!(!value.is_empty());
+        assert!(Path::new(value)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_))));
+        assert!(
+            root.join(value).is_file(),
+            "missing storage object: {value}"
+        );
+    };
+    for meta in manifest.arrays.values() {
+        check_path(&meta.data_path);
+        let index_path = meta.chunk_index_path.as_ref().expect("chunk index path");
+        check_path(index_path);
+        let index: DataChunkIndex =
+            serde_json::from_slice(&std::fs::read(root.join(index_path)).expect("chunk index"))
+                .expect("decode chunk index");
+        for chunk in index.chunks {
+            check_path(&chunk.data_path);
+            let digest = chunk.hash.strip_prefix("sha256:").expect("SHA-256 hash");
+            assert_eq!(digest.len(), 64);
+            assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            assert_eq!(chunk.object_id, format!("obj_{}", chunk.hash));
+            assert_eq!(
+                Path::new(&chunk.data_path).file_name().expect("chunk file"),
+                format!("obj_{digest}.json").as_str()
+            );
+        }
+    }
+}
+
+fn create_array(
+    path: String,
+    dtype: &str,
+    shape: Vec<usize>,
+    chunk: Vec<usize>,
+) -> runmat_runtime::execution::RootedValue {
+    let mut array = runmat_value::UnboundedStructValueBuilder::new();
     array
         .fields
-        .insert("dtype".to_string(), Value::String(dtype.to_string()));
+        .insert("dtype".to_string(), Value::String(dtype.to_string().into()));
     array.fields.insert(
         "shape".to_string(),
         Value::Tensor(
@@ -26,16 +68,21 @@ fn create_array(path: String, dtype: &str, shape: Vec<usize>, chunk: Vec<usize>)
             .expect("chunk tensor"),
         ),
     );
-    let mut arrays = StructValue::new();
-    arrays.insert("samples", Value::Struct(array));
-    let mut schema = StructValue::new();
-    schema.insert("arrays", Value::Struct(arrays));
-    let dataset =
-        runmat_runtime::call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
-            .expect("create dataset");
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.insert("samples", Value::Struct(array.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
+    schema.insert("arrays", Value::Struct(arrays.finish()));
+    let dataset = runmat_runtime::call_builtin(
+        "data.create",
+        &[Value::String(path.into()), Value::Struct(schema.finish())],
+    )
+    .expect("create dataset");
     runmat_runtime::call_builtin(
         "Dataset.array",
-        &[dataset, Value::String("samples".to_string())],
+        &[
+            (*dataset).clone(),
+            Value::String("samples".to_string().into()),
+        ],
     )
     .expect("open data array")
 }
@@ -93,11 +140,11 @@ fn data_arrays_keep_exact_integer_storage_through_chunked_api_paths() {
             vec![1, 1],
         );
         let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
-        runmat_runtime::call_builtin("DataArray.write", &[array.clone(), Value::Tensor(input)])
+        runmat_runtime::call_builtin("DataArray.write", &[(*array).clone(), Value::Tensor(input)])
             .expect("write array");
-        let Value::Tensor(read_back) =
-            runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read array")
-        else {
+        let read_back = runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()])
+            .expect("read array");
+        let Value::Tensor(read_back) = &*read_back else {
             panic!("expected tensor");
         };
         assert_eq!(read_back.integer_storage(), Some(&storage), "{dtype}");
@@ -114,11 +161,11 @@ fn data_arrays_keep_native_single_storage_through_chunked_api_paths() {
         vec![1, 1],
     );
     let input = Tensor::from_f32(vec![0.1, -2.5], vec![2, 1]).expect("single tensor");
-    runmat_runtime::call_builtin("DataArray.write", &[array.clone(), Value::Tensor(input)])
+    runmat_runtime::call_builtin("DataArray.write", &[(*array).clone(), Value::Tensor(input)])
         .expect("write single array");
-    let Value::Tensor(read_back) =
-        runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read single array")
-    else {
+    let read_back = runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()])
+        .expect("read single array");
+    let Value::Tensor(read_back) = &*read_back else {
         panic!("expected tensor");
     };
     assert_eq!(read_back.numeric_dtype(), NumericDType::F32);
@@ -132,13 +179,16 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
     let array = create_array(dataset_path.clone(), "uint64", vec![2, 2], vec![1, 1]);
     runmat_runtime::call_builtin(
         "DataArray.fill",
-        &[array.clone(), Value::Int(IntValue::U64(u64::MAX))],
+        &[(*array).clone(), Value::Int(IntValue::U64(u64::MAX))],
     )
     .expect("fill array");
 
     let slice = Value::Cell(
         CellArray::new(
-            vec![Value::Int(IntValue::I32(1)), Value::String(":".to_string())],
+            vec![
+                Value::Int(IntValue::I32(1)),
+                Value::String(":".to_string().into()),
+            ],
             1,
             2,
         )
@@ -151,27 +201,32 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
     .expect("replacement");
     runmat_runtime::call_builtin(
         "DataArray.write",
-        &[array.clone(), slice, Value::Tensor(replacement)],
+        &[(*array).clone(), slice, Value::Tensor(replacement)],
     )
     .expect("slice write");
+    assert_portable_storage(Path::new(&dataset_path));
 
-    let dataset = runmat_runtime::call_builtin("data.open", &[Value::String(dataset_path)])
-        .expect("open dataset");
-    let tx = runmat_runtime::call_builtin("Dataset.begin", &[dataset]).expect("begin transaction");
+    let dataset =
+        runmat_runtime::call_builtin("data.open", &[Value::String(dataset_path.clone().into())])
+            .expect("open dataset");
+    let tx = runmat_runtime::call_builtin("Dataset.begin", &[(*dataset).clone()])
+        .expect("begin transaction");
     runmat_runtime::call_builtin(
         "DataTransaction.fill",
         &[
-            tx.clone(),
-            Value::String("samples".to_string()),
+            (*tx).clone(),
+            Value::String("samples".to_string().into()),
             Value::Int(IntValue::U64(1_u64 << 63)),
         ],
     )
     .expect("queue transaction fill");
-    runmat_runtime::call_builtin("DataTransaction.commit", &[tx]).expect("commit transaction");
+    runmat_runtime::call_builtin("DataTransaction.commit", &[(*tx).clone()])
+        .expect("commit transaction");
+    assert_portable_storage(Path::new(&dataset_path));
 
-    let Value::Tensor(read_back) =
-        runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read array")
-    else {
+    let read_back =
+        runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()]).expect("read array");
+    let Value::Tensor(read_back) = &*read_back else {
         panic!("expected tensor");
     };
     assert_eq!(
@@ -191,75 +246,98 @@ fn dataset_lifecycle_preserves_wide_uint64_payloads_exactly() {
     let array = create_array(source_path.clone(), "uint64", vec![1, 2], vec![1, 2]);
     let storage = IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]);
     let input = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
-    runmat_runtime::call_builtin("DataArray.write", &[array, Value::Tensor(input)])
+    runmat_runtime::call_builtin("DataArray.write", &[(*array).clone(), Value::Tensor(input)])
         .expect("write source");
+    assert_portable_storage(Path::new(&source_path));
+    let slice = Value::Cell(
+        CellArray::new(
+            vec![Value::Int(IntValue::I32(1)), Value::String(":".into())],
+            1,
+            2,
+        )
+        .expect("slice"),
+    );
+    let input = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("slice tensor");
+    runmat_runtime::call_builtin(
+        "DataArray.write",
+        &[(*array).clone(), slice, Value::Tensor(input)],
+    )
+    .expect("write source slice before lifecycle operations");
+    assert_portable_storage(Path::new(&source_path));
 
     runmat_runtime::call_builtin(
         "data.copy",
-        &[Value::String(source_path), Value::String(copy_path.clone())],
+        &[
+            Value::String(source_path.into()),
+            Value::String(copy_path.clone().into()),
+        ],
     )
     .expect("copy dataset");
     runmat_runtime::call_builtin(
         "data.export",
         &[
-            Value::String(copy_path),
-            Value::String("data".to_string()),
-            Value::String(export_path.clone()),
+            Value::String(copy_path.into()),
+            Value::String("data".to_string().into()),
+            Value::String(export_path.clone().into()),
         ],
     )
     .expect("export dataset");
     runmat_runtime::call_builtin(
         "data.import",
         &[
-            Value::String(import_path.clone()),
-            Value::String("data".to_string()),
-            Value::String(export_path),
+            Value::String(import_path.clone().into()),
+            Value::String("data".to_string().into()),
+            Value::String(export_path.into()),
         ],
     )
     .expect("import dataset");
     runmat_runtime::call_builtin(
         "data.move",
         &[
-            Value::String(import_path),
-            Value::String(moved_path.clone()),
+            Value::String(import_path.into()),
+            Value::String(moved_path.clone().into()),
         ],
     )
     .expect("move dataset");
 
     assert_eq!(
-        runmat_runtime::call_builtin("data.exists", &[Value::String(moved_path.clone())])
+        runmat_runtime::call_builtin("data.exists", &[Value::String(moved_path.clone().into())])
             .expect("exists"),
         Value::Bool(true)
     );
     let inspected =
-        runmat_runtime::call_builtin("data.inspect", &[Value::String(moved_path.clone())])
+        runmat_runtime::call_builtin("data.inspect", &[Value::String(moved_path.clone().into())])
             .expect("inspect");
-    assert!(matches!(inspected, Value::Struct(_)));
+    assert!(matches!(&*inspected, Value::Struct(_)));
     let listed = runmat_runtime::call_builtin(
         "data.list",
-        &[Value::String(dir.path().display().to_string())],
+        &[Value::String(dir.path().display().to_string().into())],
     )
     .expect("list");
-    assert!(matches!(listed, Value::Cell(_)));
+    assert!(matches!(&*listed, Value::Cell(_)));
 
-    let dataset = runmat_runtime::call_builtin("data.open", &[Value::String(moved_path.clone())])
-        .expect("open moved dataset");
+    let dataset =
+        runmat_runtime::call_builtin("data.open", &[Value::String(moved_path.clone().into())])
+            .expect("open moved dataset");
     let array = runmat_runtime::call_builtin(
         "Dataset.array",
-        &[dataset, Value::String("samples".to_string())],
+        &[
+            (*dataset).clone(),
+            Value::String("samples".to_string().into()),
+        ],
     )
     .expect("open moved array");
-    let Value::Tensor(read_back) =
-        runmat_runtime::call_builtin("DataArray.read", &[array]).expect("read moved array")
-    else {
+    let read_back = runmat_runtime::call_builtin("DataArray.read", &[(*array).clone()])
+        .expect("read moved array");
+    let Value::Tensor(read_back) = &*read_back else {
         panic!("expected tensor");
     };
     assert_eq!(read_back.integer_storage(), Some(&storage));
 
-    runmat_runtime::call_builtin("data.delete", &[Value::String(moved_path.clone())])
+    runmat_runtime::call_builtin("data.delete", &[Value::String(moved_path.clone().into())])
         .expect("delete dataset");
     assert_eq!(
-        runmat_runtime::call_builtin("data.exists", &[Value::String(moved_path)])
+        runmat_runtime::call_builtin("data.exists", &[Value::String(moved_path.into())])
             .expect("exists after delete"),
         Value::Bool(false)
     );

@@ -1,9 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
+use super::validation_storage::{lookup, Claims, ValidationWork};
+mod incidence;
+use incidence::{FaceIncidence, WireOwners};
 
 use super::{
     exact_topology_assembly_validation::validate_assembly_occurrences,
     exact_topology_validation_support::*, ExactBRepModel, ExactBRepTopology, GeometryContractError,
-    PersistentEntityKind, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
+    PersistentEntityKind, TopologicalOrientation, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
 };
 
 const MAX_TOPOLOGY_ENTITIES: usize = 10_000_000;
@@ -11,6 +13,21 @@ const MAX_TOPOLOGY_INCIDENCES: usize = 100_000_000;
 
 impl ExactBRepTopology {
     pub fn validate_against(&self, model: &ExactBRepModel) -> Result<(), GeometryContractError> {
+        self.validate_admitted(model, ValidationWork(None))
+    }
+    pub fn validate_against_with_control(
+        &self,
+        model: &ExactBRepModel,
+        control: &dyn crate::GeometryEvaluationControl,
+    ) -> Result<(), GeometryContractError> {
+        self.validate_admitted(model, ValidationWork(Some(control)))
+    }
+    fn validate_admitted(
+        &self,
+        model: &ExactBRepModel,
+        work: ValidationWork<'_>,
+    ) -> Result<(), GeometryContractError> {
+        work.checkpoint()?;
         if self.schema_version != EXACT_BREP_TOPOLOGY_SCHEMA_VERSION {
             return Err(invalid("exact topology schema", "unsupported version"));
         }
@@ -96,77 +113,80 @@ impl ExactBRepTopology {
             "assemblies",
             PersistentEntityKind::Assembly,
             self.assemblies.iter().map(|value| &value.id),
+            work,
         )?;
         let instances = collect_ids(
             "instances",
             PersistentEntityKind::Instance,
             self.instances.iter().map(|value| &value.id),
+            work,
         )?;
         let bodies = collect_ids(
             "bodies",
             PersistentEntityKind::Body,
             self.bodies.iter().map(|value| &value.id),
+            work,
         )?;
         let lumps = collect_ids(
             "lumps",
             PersistentEntityKind::Lump,
             self.lumps.iter().map(|value| &value.id),
+            work,
         )?;
         let solids = collect_ids(
             "solids",
             PersistentEntityKind::Solid,
             self.solids.iter().map(|value| &value.id),
+            work,
         )?;
         let regions = collect_ids(
             "regions",
             PersistentEntityKind::Region,
             self.regions.iter().map(|value| &value.id),
+            work,
         )?;
         let shells = collect_ids(
             "shells",
             PersistentEntityKind::Shell,
             self.shells.iter().map(|value| &value.id),
+            work,
         )?;
         let faces = collect_ids(
             "faces",
             PersistentEntityKind::Face,
             self.faces.iter().map(|value| &value.id),
+            work,
         )?;
         let wires = collect_ids(
             "wires",
             PersistentEntityKind::Wire,
             self.wires.iter().map(|value| &value.id),
+            work,
         )?;
         let coedges = collect_ids(
             "coedges",
             PersistentEntityKind::Coedge,
             self.coedges.iter().map(|value| &value.id),
+            work,
         )?;
         let edges = collect_ids(
             "edges",
             PersistentEntityKind::Edge,
             self.edges.iter().map(|value| &value.id),
+            work,
         )?;
         let vertices = collect_ids(
             "vertices",
             PersistentEntityKind::Vertex,
             self.vertices.iter().map(|value| &value.id),
+            work,
         )?;
-        let face_by_id = self
-            .faces
-            .iter()
-            .map(|face| (&face.id, face))
-            .collect::<BTreeMap<_, _>>();
-        let coedge_by_id = self
-            .coedges
-            .iter()
-            .map(|coedge| (&coedge.id, coedge))
-            .collect::<BTreeMap<_, _>>();
-        validate_assembly_occurrences(self, &assemblies, &instances, &bodies)?;
+        validate_assembly_occurrences(self, &assemblies, &instances, &bodies, work)?;
 
-        let mut claimed_lumps = BTreeSet::new();
-        let mut claimed_sheet_shells = BTreeSet::new();
+        let mut claimed_lumps = Claims::new(&lumps, work)?;
+        let mut claimed_sheet_shells = Claims::new(&shells, work)?;
         for body in &self.bodies {
+            work.checkpoint()?;
             body.mass_properties_evaluator_id.validate()?;
             if body.is_sheet_body == body.sheet_shell_ids.is_empty()
                 || (body.is_sheet_body && !body.lump_ids.is_empty())
@@ -199,14 +219,15 @@ impl ExactBRepTopology {
                 &mut claimed_sheet_shells,
             )?;
         }
-        if claimed_lumps != lumps {
+        if !claimed_lumps.complete() {
             return Err(invalid(
                 "lump ownership",
                 "every lump must have one body owner",
             ));
         }
-        let mut claimed_solids = BTreeSet::new();
+        let mut claimed_solids = Claims::new(&solids, work)?;
         for lump in &self.lumps {
+            work.checkpoint()?;
             require_ordered_refs(
                 "lump solids",
                 &lump.solid_ids,
@@ -217,14 +238,15 @@ impl ExactBRepTopology {
             require_same_scope("lump solids", &lump.id, &lump.solid_ids)?;
             claim_unique("solid ownership", &lump.solid_ids, &mut claimed_solids)?;
         }
-        if claimed_solids != solids {
+        if !claimed_solids.complete() {
             return Err(invalid(
                 "solid ownership",
                 "every solid must have one lump owner",
             ));
         }
-        let mut region_solids = BTreeSet::new();
+        let mut region_solids = Claims::new(&solids, work)?;
         for region in &self.regions {
+            work.checkpoint()?;
             require_reference(
                 "region solid",
                 &region.solid_id,
@@ -236,14 +258,14 @@ impl ExactBRepTopology {
                 &region.id,
                 std::iter::once(&region.solid_id),
             )?;
-            if !region_solids.insert(region.solid_id.clone()) {
+            if !region_solids.insert(&region.solid_id) {
                 return Err(invalid(
                     "region ownership",
                     "a solid has multiple exact regions",
                 ));
             }
         }
-        if region_solids != solids {
+        if !region_solids.complete() {
             return Err(invalid(
                 "region ownership",
                 "every solid must own exactly one exact region",
@@ -251,6 +273,7 @@ impl ExactBRepTopology {
         }
         let mut claimed_shells = claimed_sheet_shells;
         for solid in &self.solids {
+            work.checkpoint()?;
             require_reference(
                 "solid outer shell",
                 &solid.outer_shell_id,
@@ -262,7 +285,7 @@ impl ExactBRepTopology {
                 &solid.id,
                 std::iter::once(&solid.outer_shell_id),
             )?;
-            if !claimed_shells.insert(solid.outer_shell_id.clone()) {
+            if !claimed_shells.insert(&solid.outer_shell_id) {
                 return Err(invalid(
                     "shell ownership",
                     "a shell has multiple solid owners",
@@ -282,27 +305,24 @@ impl ExactBRepTopology {
                 &mut claimed_shells,
             )?;
         }
-        if claimed_shells != shells {
+        if !claimed_shells.complete() {
             return Err(invalid(
                 "shell ownership",
                 "every shell must have one solid or sheet-body owner",
             ));
         }
-        let mut face_use_orientations = BTreeMap::new();
+        let mut face_use_orientations = FaceIncidence::new(&faces, work)?;
         for shell in &self.shells {
+            work.checkpoint()?;
             if shell.face_uses.is_empty() {
                 return Err(invalid(
                     "shell faces",
                     "shells must contain oriented face uses",
                 ));
             }
-            require_ordered_refs(
+            require_ordered_ref_iter(
                 "shell faces",
-                &shell
-                    .face_uses
-                    .iter()
-                    .map(|value| value.entity_id.clone())
-                    .collect::<Vec<_>>(),
+                shell.face_uses.iter().map(|value| &value.entity_id),
                 PersistentEntityKind::Face,
                 &faces,
                 true,
@@ -313,15 +333,22 @@ impl ExactBRepTopology {
                 shell.face_uses.iter().map(|face_use| &face_use.entity_id),
             )?;
             for face_use in &shell.face_uses {
-                face_use_orientations
-                    .entry(face_use.entity_id.clone())
-                    .or_insert_with(Vec::new)
-                    .push(face_use.orientation);
+                // The side a face use bounds is the use composed with its shell's orientation:
+                // a solid's cavity shell is used reversed (the convention meshing applies too).
+                let orientation = match shell.orientation {
+                    TopologicalOrientation::Forward => face_use.orientation,
+                    TopologicalOrientation::Reversed => match face_use.orientation {
+                        TopologicalOrientation::Forward => TopologicalOrientation::Reversed,
+                        TopologicalOrientation::Reversed => TopologicalOrientation::Forward,
+                    },
+                };
+                face_use_orientations.push(&face_use.entity_id, orientation)?;
             }
         }
 
-        let mut wire_owners = BTreeMap::new();
+        let mut wire_owners = WireOwners::new(&wires, work)?;
         for face in &self.faces {
+            work.checkpoint()?;
             face.surface_evaluator_id.validate()?;
             face.trim_classifier_id.validate()?;
             require_reference(
@@ -335,7 +362,7 @@ impl ExactBRepTopology {
                 &face.id,
                 std::iter::once(&face.outer_wire_id),
             )?;
-            claim_wire(&mut wire_owners, &face.outer_wire_id, &face.id)?;
+            wire_owners.claim(&face.outer_wire_id, &face.id)?;
             require_ordered_refs(
                 "face inner wires",
                 &face.inner_wire_ids,
@@ -345,22 +372,24 @@ impl ExactBRepTopology {
             )?;
             require_same_scope("face inner wires", &face.id, &face.inner_wire_ids)?;
             for wire in &face.inner_wire_ids {
-                claim_wire(&mut wire_owners, wire, &face.id)?;
+                wire_owners.claim(wire, &face.id)?;
             }
         }
-        if wire_owners.len() != wires.len() {
+        if !wire_owners.complete() {
             return Err(invalid(
                 "wire ownership",
                 "every wire must have one face owner",
             ));
         }
-        let mut claimed_coedges = BTreeSet::new();
+        let mut claimed_coedges = Claims::new(&coedges, work)?;
         for wire in &self.wires {
+            work.checkpoint()?;
             require_canonical_cycle_refs(
                 "wire coedges",
                 &wire.coedge_ids,
                 PersistentEntityKind::Coedge,
                 &coedges,
+                work,
             )?;
             require_same_scope("wire coedges", &wire.id, &wire.coedge_ids)?;
             claim_unique("coedge ownership", &wire.coedge_ids, &mut claimed_coedges)?;
@@ -368,9 +397,10 @@ impl ExactBRepTopology {
                 .get(&wire.id)
                 .ok_or_else(|| invalid("wire ownership", "wire owner index is incomplete"))?;
             for coedge_id in &wire.coedge_ids {
-                let coedge = coedge_by_id.get(coedge_id).ok_or_else(|| {
-                    invalid("coedge ownership", "coedge reference index is incomplete")
-                })?;
+                let coedge =
+                    lookup(&self.coedges, coedge_id, |coedge| &coedge.id).ok_or_else(|| {
+                        invalid("coedge ownership", "coedge reference index is incomplete")
+                    })?;
                 if &coedge.face_id != owner {
                     return Err(invalid(
                         "coedge face incidence",
@@ -379,13 +409,14 @@ impl ExactBRepTopology {
                 }
             }
         }
-        if claimed_coedges != coedges {
+        if !claimed_coedges.complete() {
             return Err(invalid(
                 "coedge ownership",
                 "every coedge must have one wire owner",
             ));
         }
         for coedge in &self.coedges {
+            work.checkpoint()?;
             require_reference(
                 "coedge face",
                 &coedge.face_id,
@@ -408,8 +439,7 @@ impl ExactBRepTopology {
                 ));
             }
             if coedge.seam_image.is_some()
-                && !face_by_id
-                    .get(&coedge.face_id)
+                && !lookup(&self.faces, &coedge.face_id, |face| &face.id)
                     .is_some_and(|face| face.periodic_u || face.periodic_v)
             {
                 return Err(invalid(
@@ -419,7 +449,16 @@ impl ExactBRepTopology {
             }
         }
         for edge in &self.edges {
+            work.checkpoint()?;
             edge.curve_evaluator_id.validate()?;
+            if !edge.tolerance_m.canonical_value().is_finite()
+                || edge.tolerance_m.canonical_value() < 0.0
+            {
+                return Err(invalid(
+                    "exact edge geometry",
+                    "edge tolerance must be finite and nonnegative",
+                ));
+            }
             for vertex in [&edge.start_vertex_id, &edge.end_vertex_id]
                 .into_iter()
                 .flatten()
@@ -462,9 +501,14 @@ impl ExactBRepTopology {
             }
         }
         for vertex in &self.vertices {
-            if vertex.point_m.iter().any(|value| !value.is_finite())
-                || !vertex.tolerance_m.is_finite()
-                || vertex.tolerance_m < 0.0
+            work.checkpoint()?;
+            if vertex
+                .point_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
+                || !vertex.tolerance_m.canonical_value().is_finite()
+                || vertex.tolerance_m.canonical_value() < 0.0
             {
                 return Err(invalid(
                     "exact vertex geometry",
@@ -473,14 +517,13 @@ impl ExactBRepTopology {
             }
         }
         validate_interfaces(self, &faces, &regions)?;
-        let interface_faces = self
-            .interfaces
-            .iter()
-            .map(|interface| &interface.face_id)
-            .collect::<BTreeSet<_>>();
-        for face in &faces {
-            let expected_uses = usize::from(interface_faces.contains(face)) + 1;
-            if face_use_orientations.get(face).map(Vec::len) != Some(expected_uses) {
+        for face in faces.iter() {
+            let expected_uses = usize::from(
+                self.interfaces
+                    .binary_search_by(|interface| interface.face_id.cmp(face))
+                    .is_ok(),
+            ) + 1;
+            if face_use_orientations.get(face).map(|uses| uses.count) != Some(expected_uses) {
                 return Err(invalid(
                     "shell face incidence",
                     "ordinary faces require one shell use and shared interfaces require two",
@@ -488,6 +531,7 @@ impl ExactBRepTopology {
             }
         }
         for interface in &self.interfaces {
+            work.checkpoint()?;
             let uses = face_use_orientations
                 .get(&interface.face_id)
                 .ok_or_else(|| {
@@ -496,8 +540,8 @@ impl ExactBRepTopology {
                         "face-use index is incomplete",
                     )
                 })?;
-            if !uses.contains(&interface.side_a_orientation)
-                || !uses.contains(&interface.side_b_orientation)
+            if !uses.contains(interface.side_a_orientation)
+                || !uses.contains(interface.side_b_orientation)
             {
                 return Err(invalid(
                     "shared interface shell uses",
@@ -505,7 +549,7 @@ impl ExactBRepTopology {
                 ));
             }
         }
-        validate_contacts(self, &faces)?;
+        validate_contacts(self, &faces, work)?;
         Ok(())
     }
 }

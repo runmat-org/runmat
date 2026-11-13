@@ -1,0 +1,584 @@
+{
+  "schema_version": 1,
+  "fixture_catalog": "verification/meshing/corpus.json",
+  "mesh_profiles": {
+    "coarse": {
+      "target_size_m": 1.0,
+      "maximum_deviation_m": 0.05,
+      "element_order": "tet4",
+      "seed": 0,
+      "maximum_elements": 1000000,
+      "repeats": 1,
+      "partition_layouts": [{ "edges": 8, "faces": 8 }]
+    },
+    "coarse_cavity": {
+      "target_size_m": 3.0,
+      "maximum_deviation_m": 0.2,
+      "element_order": "tet4",
+      "seed": 0,
+      "maximum_elements": 1000000,
+      "repeats": 1,
+      "partition_layouts": [{ "edges": 8, "faces": 8 }]
+    },
+    "industrial_mm": {
+      "target_size_m": 0.1,
+      "maximum_deviation_m": 0.005,
+      "element_order": "tet4",
+      "seed": 0,
+      "maximum_elements": 1000000,
+      "repeats": 1,
+      "partition_layouts": [{ "edges": 8, "faces": 8 }]
+    },
+    "partition_repeat": {
+      "target_size_m": 1.0,
+      "maximum_deviation_m": 0.05,
+      "element_order": "tet4",
+      "seed": 41,
+      "maximum_elements": 1000000,
+      "repeats": 2,
+      "partition_layouts": [
+        { "edges": 8, "faces": 8 },
+        { "edges": 3, "faces": 2 }
+      ]
+    },
+    "dense_tet10": {
+      "target_size_m": 0.5,
+      "maximum_deviation_m": 0.02,
+      "element_order": "tet10",
+      "seed": 73,
+      "maximum_elements": 2000000,
+      "repeats": 1,
+      "partition_layouts": [{ "edges": 5, "faces": 3 }]
+    },
+    "curved_coarse": {
+      "target_size_m": 0.5,
+      "maximum_deviation_m": 0.02,
+      "element_order": "tet4",
+      "seed": 19,
+      "maximum_elements": 2000000,
+      "repeats": 1,
+      "partition_layouts": [{ "edges": 5, "faces": 3 }]
+    },
+    "curved_dense_tet10": {
+      "target_size_m": 0.3,
+      "maximum_deviation_m": 0.005,
+      "element_order": "tet10",
+      "seed": 29,
+      "maximum_elements": 4000000,
+      "repeats": 1,
+      "partition_layouts": [{ "edges": 3, "faces": 2 }]
+    }
+  },
+  "cases": [
+    {
+      "fixture_id": "analytic-box",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "coarse", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "success", "regions": 1 } },
+        { "id": "partition-repeat", "tier": "complete", "admission": "default", "profile": "partition_repeat", "expected": { "outcome": "success", "regions": 1 } },
+        { "id": "dense-tet10", "tier": "complete", "admission": "default", "profile": "dense_tet10", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "box-with-cavity",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "coarse", "tier": "small", "admission": "default", "profile": "coarse_cavity", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "coincident-solids",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "failure", "kind": "import" } },
+        { "id": "consolidate", "healing": { "consolidate_duplicates": true }, "expected": { "outcome": "success", "solid_regions": 1, "healing_operations": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "ambiguous-rejection", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "admission", "category": "import" } } },
+        { "id": "consolidated", "tier": "complete", "admission": "consolidate", "profile": "coarse", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "disconnected-solids",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "coarse", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "success", "regions": 2 } },
+        { "id": "partition-repeat", "tier": "complete", "admission": "default", "profile": "partition_repeat", "expected": { "outcome": "success", "regions": 2 } }
+      ]
+    },
+    {
+      "fixture_id": "disconnected-solids-reversed",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "coarse", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "success", "regions": 2 } }
+      ]
+    },
+    {
+      "fixture_id": "gapped-sheet",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "failure", "kind": "import" } },
+        { "id": "repair-gap", "healing": { "repair_tolerance_scale_gaps": true, "maximum_displacement_m": 0.000001 }, "expected": { "outcome": "success", "solid_regions": 0, "healing_operations": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "repaired-sheet-is-not-volume", "tier": "small", "admission": "repair-gap", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "meshing", "category": "invalid_geometry", "stage": "geometry_admission" } } }
+      ]
+    },
+    {
+      "fixture_id": "independent-contact",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }
+      ],
+      "mesh_scenarios": [
+        {
+          "id": "explicit-contact",
+          "tier": "small",
+          "admission": "default",
+          "profile": "coarse",
+          "contacts": [{ "side_a_faces": ["face_000002"], "side_b_faces": ["face_000007"] }],
+          "expected": { "outcome": "success", "regions": 2 }
+        }
+      ]
+    },
+    {
+      "fixture_id": "invalid-cavity",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "failure", "kind": "import" } }
+      ],
+      "mesh_scenarios": [
+        { "id": "typed-rejection", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "admission", "category": "import" } } }
+      ]
+    },
+    {
+      "fixture_id": "mixed-solid-sheet",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "solid-projection", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "shared-interface",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "coarse", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "success", "regions": 2 } },
+        { "id": "partition-repeat", "tier": "complete", "admission": "default", "profile": "partition_repeat", "expected": { "outcome": "success", "regions": 2 } }
+      ]
+    },
+    {
+      "fixture_id": "short-edge-face",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 0 } },
+        { "id": "simplified", "healing": { "simplify_short_edges_and_sliver_faces": true, "maximum_displacement_m": 0.000001 }, "expected": { "outcome": "success", "solid_regions": 0, "healing_operations": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "typed-no-solid", "tier": "small", "admission": "simplified", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "meshing", "category": "invalid_geometry", "stage": "geometry_admission" } } }
+      ]
+    },
+    {
+      "fixture_id": "sliver-face-sheet",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 0 } },
+        { "id": "simplified", "healing": { "simplify_short_edges_and_sliver_faces": true, "maximum_displacement_m": 0.000001 }, "expected": { "outcome": "success", "solid_regions": 0 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "typed-no-solid", "tier": "small", "admission": "simplified", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "meshing", "category": "invalid_geometry", "stage": "geometry_admission" } } }
+      ]
+    },
+    {
+      "fixture_id": "two-box-assembly",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "coarse", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "success", "regions": 2 } }
+      ]
+    },
+    {
+      "fixture_id": "xcaf-labeled-face-assembly",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 0 } },
+        { "id": "simplified", "healing": { "simplify_short_edges_and_sliver_faces": true, "maximum_displacement_m": 0.000001 }, "expected": { "outcome": "success", "solid_regions": 0 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "typed-no-solid", "tier": "small", "admission": "simplified", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "meshing", "category": "invalid_geometry", "stage": "geometry_admission" } } }
+      ]
+    },
+    {
+      "fixture_id": "xcaf-labeled-short-edge-assembly",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 0 } },
+        { "id": "simplified", "healing": { "simplify_short_edges_and_sliver_faces": true, "maximum_displacement_m": 0.000001 }, "expected": { "outcome": "failure", "kind": "import" } }
+      ],
+      "mesh_scenarios": [
+        { "id": "labeled-healing-rejection", "tier": "small", "admission": "simplified", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "admission", "category": "import" } } }
+      ]
+    },
+    {
+      "fixture_id": "xcaf-short-edge-assembly",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 0 } },
+        { "id": "simplified", "healing": { "simplify_short_edges_and_sliver_faces": true, "maximum_displacement_m": 0.000001 }, "expected": { "outcome": "success", "solid_regions": 0 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "typed-no-solid", "tier": "small", "admission": "simplified", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "meshing", "category": "invalid_geometry", "stage": "geometry_admission" } } }
+      ]
+    },
+    {
+      "fixture_id": "nist-seeker-table-acis",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "industrial-coarse", "tier": "small", "admission": "default", "profile": "industrial_mm", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "ansys-wireframe-iges",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "failure", "kind": "import" } }
+      ],
+      "mesh_scenarios": [
+        { "id": "typed-rejection", "tier": "small", "admission": "default", "profile": "coarse", "expected": { "outcome": "failure", "failure": { "kind": "admission", "category": "import" } } }
+      ]
+    },
+    {
+      "fixture_id": "analytic-cylinder",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } },
+        { "id": "curved-dense-tet10", "tier": "complete", "admission": "default", "profile": "curved_dense_tet10", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "analytic-cone",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } },
+        { "id": "curved-dense-tet10", "tier": "complete", "admission": "default", "profile": "curved_dense_tet10", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "analytic-sphere",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } },
+        { "id": "curved-dense-tet10", "tier": "complete", "admission": "default", "profile": "curved_dense_tet10", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "analytic-torus",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } },
+        { "id": "curved-dense-tet10", "tier": "complete", "admission": "default", "profile": "curved_dense_tet10", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "cylinder-millimeter-units",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "cylinder-translated",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "cylinder-rotated",
+      "source_units": "meter",
+      "admission_scenarios": [
+        { "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }
+      ],
+      "mesh_scenarios": [
+        { "id": "curved-coarse", "tier": "small", "admission": "default", "profile": "curved_coarse", "expected": { "outcome": "success", "regions": 1 } }
+      ]
+    },
+    {
+      "fixture_id": "authored-face-names",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "part-in-air-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "two-cavity-air-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 3
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "touching-parts-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "overlapping-parts-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "failure",
+            "kind": "import"
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "fused-compound",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "free-wireframe-part",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "named-cavity-part",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "strip-line-imprinted-assembly",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "ap242-exchange-metadata",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "iges-authored-unit-override",
+      "source_units": "meter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "named-step-edges-vertices",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "reversed-shell-hole",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 1
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "touching-parts-edge-vertex-names",
+      "source_units": "millimeter",
+      "admission_scenarios": [
+        {
+          "id": "default",
+          "expected": {
+            "outcome": "success",
+            "solid_regions": 2
+          }
+        }
+      ],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "battery-pack-perimeter-cable",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "drone-arm-study",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 2 } }],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "drone-esc-thermal",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 3 } }],
+      "mesh_scenarios": []
+    }
+  ],
+  "metamorphic_relations": [
+    {
+      "id": "cylinder-source-unit-invariance",
+      "reference": { "fixture_id": "analytic-cylinder", "scenario_id": "curved-coarse" },
+      "comparisons": [
+        { "fixture_id": "cylinder-millimeter-units", "scenario_id": "curved-coarse" }
+      ],
+      "require_equal_entity_counts": true,
+      "volume_relative_tolerance": 1e-9,
+      "quality_relative_tolerance": 1e-8
+    },
+    {
+      "id": "cylinder-rigid-transform-invariance",
+      "reference": { "fixture_id": "analytic-cylinder", "scenario_id": "curved-coarse" },
+      "comparisons": [
+        { "fixture_id": "cylinder-translated", "scenario_id": "curved-coarse" },
+        { "fixture_id": "cylinder-rotated", "scenario_id": "curved-coarse" }
+      ],
+      "require_equal_entity_counts": true,
+      "volume_relative_tolerance": 1e-9,
+      "quality_relative_tolerance": 1e-8
+    }
+  ]
+}

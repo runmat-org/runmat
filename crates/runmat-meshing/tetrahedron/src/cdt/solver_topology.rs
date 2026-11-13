@@ -1,9 +1,10 @@
 use runmat_geometry_core::{
     ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator,
-    ExactTrimClassifier, GeometryEvaluationControl, PersistentEntityId,
+    ExactTrimClassifier, GeometryEvaluationControl,
 };
 use runmat_meshing_core::{
-    validate_solver_mesh_topology, MeshingCancellationSignal, MeshingRequest, SolverMeshTopology,
+    MeshingCancellationSignal, MeshingRequest, MetricFieldRequest, SolverMeshTopology,
+    ValidatedSolverMeshTopology,
 };
 use runmat_meshing_surface::ExactSurfaceMesh;
 
@@ -15,26 +16,30 @@ use super::{
 mod boundaries;
 mod classification;
 mod construction;
+mod node_index;
+use node_index::NodeIndex;
 mod error;
 mod inventories;
 mod order_elevation;
 mod parameters;
+mod source;
+mod storage;
+use source::ProjectionInput;
+pub use source::{
+    decode_delaunay_solver_topology, DelaunaySolverProjectionError, DelaunaySolverProjectionInput,
+};
 
 pub use error::{DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DelaunayRegionMaterial {
-    pub region_id: PersistentEntityId,
-    pub material_id: String,
-}
 
 pub struct DelaunaySolverTopologyInput<'a> {
     pub exact_topology: &'a ExactBRepTopology,
     pub exact_surface: &'a ExactSurfaceMesh,
     pub volume_mesh: &'a DelaunayVolumeMesh,
     pub volume_options: DelaunayVolumeMeshOptions,
+    /// Complete metric authority used to construct and validate the original volume.
+    /// The authored request remains unchanged for solver topology and resource admission.
+    pub volume_metric: &'a MetricFieldRequest,
     pub request: &'a MeshingRequest,
-    pub region_materials: &'a [DelaunayRegionMaterial],
     pub exact_evaluation: Option<DelaunayExactEvaluation<'a>>,
 }
 
@@ -60,6 +65,7 @@ pub struct DelaunaySolverTopologyOptions {
     pub maximum_boundary_edges: u64,
     pub maximum_curved_optimization_candidates: u64,
     pub maximum_curved_optimization_rounds: u32,
+    pub maximum_curved_optimization_sweeps: u32,
     pub trim_boundary_tolerance_uv: f64,
     pub cancellation_check_interval: u64,
 }
@@ -71,6 +77,7 @@ impl Default for DelaunaySolverTopologyOptions {
             maximum_boundary_edges: 3_000_000_000,
             maximum_curved_optimization_candidates: 12_000_000_000,
             maximum_curved_optimization_rounds: 4_096,
+            maximum_curved_optimization_sweeps: 64,
             trim_boundary_tolerance_uv: 1.0e-10,
             cancellation_check_interval: 1_024,
         }
@@ -88,21 +95,63 @@ pub fn build_delaunay_solver_topology(
     validate_delaunay_volume_mesh(
         input.exact_topology,
         input.exact_surface,
-        &input.request.metric,
+        input.volume_metric,
         input.volume_mesh,
         input.volume_options,
         cancellation,
     )
     .map_err(|failure| error::volume(failure.kind, failure.to_string()))?;
+    project(ProjectionInput::from(input), options, cancellation)
+        .map(ValidatedSolverMeshTopology::into_topology)
+}
+
+fn project(
+    input: ProjectionInput<'_>,
+    options: DelaunaySolverTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<ValidatedSolverMeshTopology, DelaunaySolverTopologyError> {
+    let storage = storage::Storage::for_input(&input);
+    storage.slots::<runmat_meshing_core::SolverMeshProjection>(1)?;
     let linear = construction::construct(&input, options, cancellation)?;
-    let result = match input.request.element_order {
-        runmat_meshing_core::ElementOrder::Tet4 => linear,
+    let (result, elevation) = match input.request.element_order {
+        runmat_meshing_core::ElementOrder::Tet4 => (
+            linear,
+            runmat_meshing_core::SolverElevationReport::default(),
+        ),
         runmat_meshing_core::ElementOrder::Tet10 => {
             order_elevation::elevate(&input, linear, options, cancellation)?
         }
     };
-    validate_solver_mesh_topology(&result, input.request).map_err(error::solver)?;
-    Ok(result)
+    let validation_bytes = result
+        .validation_scratch_bytes(input.request.element_order)
+        .map_err(error::solver)?;
+    let _validation_storage = input
+        .exact_evaluation
+        .map(|evaluation| {
+            runmat_geometry_core::GeometryAllocationReservation::new(
+                evaluation.control,
+                validation_bytes,
+            )
+        })
+        .transpose()
+        .map_err(error::geometry)?;
+    let request_bytes = input
+        .request
+        .retained_storage_bytes(u64::MAX, &mut || {
+            if cancellation.is_cancelled() {
+                Err(runmat_meshing_core::MeshingContractError::invalid(
+                    "solver request clone",
+                    "cancelled",
+                ))
+            } else {
+                Ok(())
+            }
+        })
+        .map_err(error::solver)?;
+    storage.charge(request_bytes)?;
+    ValidatedSolverMeshTopology::new(result, input.request.clone(), cancellation)
+        .map(|topology| topology.with_elevation_report(elevation))
+        .map_err(error::solver)
 }
 
 fn validate_options(
@@ -112,6 +161,7 @@ fn validate_options(
         || options.maximum_boundary_edges == 0
         || options.maximum_curved_optimization_candidates == 0
         || options.maximum_curved_optimization_rounds == 0
+        || options.maximum_curved_optimization_sweeps == 0
         || !options.trim_boundary_tolerance_uv.is_finite()
         || options.trim_boundary_tolerance_uv < 0.0
         || options.cancellation_check_interval == 0

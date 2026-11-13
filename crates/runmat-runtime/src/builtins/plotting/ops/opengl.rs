@@ -1,78 +1,26 @@
 //! MATLAB-compatible `opengl` renderer capability builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    OPENGL_DESCRIPTOR, OPENGL_ERROR_INVALID_ARGUMENT, OPENGL_ERROR_TOO_MANY_OUTPUTS,
 };
-use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Value};
 
-use crate::builtins::plotting::type_resolvers::get_type;
+use runmat_macros::runtime_builtin;
+use runmat_value::Value;
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+use runmat_builtins::{OpenGlCommand, OpenGlSaveMode};
+
 const BUILTIN_NAME: &str = "opengl";
-
-const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Renderer status string or information struct.",
-}];
-
-const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_COMMANDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "commands",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description:
-        "Commands such as info, data, hardware, hardwarebasic, software, save, autoselect, or neverselect.",
-}];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "status = opengl()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "info = opengl('info')",
-        inputs: &INPUTS_COMMANDS,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = opengl(command, ...)",
-        inputs: &INPUTS_COMMANDS,
-        outputs: &OUTPUT_VALUE,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPENGL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:opengl:InvalidArgument"),
-    when: "Command text or command combination is invalid.",
-    message: "opengl: invalid argument",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_ARGUMENT];
-
-pub const OPENGL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 fn invalid(detail: impl AsRef<str>) -> RuntimeError {
     let mut builder = build_runtime_error(format!(
         "{}: {}",
-        ERROR_INVALID_ARGUMENT.message,
+        OPENGL_ERROR_INVALID_ARGUMENT.message,
         detail.as_ref()
     ))
     .with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = ERROR_INVALID_ARGUMENT.identifier {
+    if let Some(identifier) = OPENGL_ERROR_INVALID_ARGUMENT.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -80,22 +28,38 @@ fn invalid(detail: impl AsRef<str>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "opengl",
-    category = "plotting",
-    summary = "Report and select deterministic RunMat renderer compatibility mode.",
-    keywords = "opengl,plotting,renderer,graphics",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::opengl::OPENGL_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::opengl"
 )]
-pub fn opengl_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub fn opengl_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let _scope = runtime.as_ref().map(|runtime| runtime.enter());
+    crate::output_count::validate_fixed_outputs(
+        &OPENGL_DESCRIPTOR,
+        &OPENGL_ERROR_TOO_MANY_OUTPUTS,
+        "opengl",
+    )
+    .map_err(super::coordinate_admission::terminal)?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "opengl")?;
+    work.finish(opengl_impl(arguments.view(), &work))
+}
+
+fn opengl_impl(
+    args: crate::call::FunctionArgumentView<'_>,
+    _work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Ok(Value::String("hardware".into()));
     }
 
     let command = command_text(&args[0])?;
-    match command.as_str() {
-        "info" | "data" => {
+    let parsed = OpenGlCommand::parse(&command)
+        .ok_or_else(|| invalid(format!("unsupported opengl command '{command}'")))?;
+    match parsed {
+        OpenGlCommand::Report => {
             if args.len() != 1 {
                 return Err(invalid(format!(
                     "'{command}' does not accept extra arguments"
@@ -103,39 +67,41 @@ pub fn opengl_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             }
             Ok(renderer_info())
         }
-        "hardware" | "hardwarebasic" | "software" | "autoselect" | "neverselect" => {
+        OpenGlCommand::Hardware
+        | OpenGlCommand::HardwareBasic
+        | OpenGlCommand::Software
+        | OpenGlCommand::AutoSelect
+        | OpenGlCommand::NeverSelect => {
             if args.len() != 1 {
                 return Err(invalid(format!(
                     "'{command}' does not accept extra arguments"
                 )));
             }
-            Ok(Value::String(status_for_command(&command).into()))
+            Ok(Value::String(
+                parsed.status().expect("status command").into(),
+            ))
         }
-        "save" => {
-            validate_save_args(&args[1..])?;
+        OpenGlCommand::Save => {
+            validate_save_args(args.range(1..)?)?;
             Ok(Value::String("ok".into()))
         }
-        _ => Err(invalid(format!("unsupported opengl command '{command}'"))),
     }
 }
 
 fn command_text(value: &Value) -> BuiltinResult<String> {
-    super::style::value_as_string(value)
+    crate::builtins::common::validation::value_text_scalar_string(value)
         .map(|text| text.trim().to_ascii_lowercase())
         .filter(|text| !text.is_empty())
-        .ok_or_else(|| invalid("command must be non-empty text"))
+        .ok_or_else(|| invalid("command must be non-empty scalar text"))
 }
 
-fn validate_save_args(args: &[Value]) -> BuiltinResult<()> {
+fn validate_save_args(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if args.len() > 1 {
         return Err(invalid("save accepts at most one renderer mode"));
     }
     if let Some(value) = args.first() {
         let mode = command_text(value)?;
-        if !matches!(
-            mode.as_str(),
-            "hardware" | "hardwarebasic" | "software" | "autoselect" | "none"
-        ) {
+        if OpenGlSaveMode::parse(&mode).is_none() {
             return Err(invalid(
                 "save mode must be hardware, hardwarebasic, software, autoselect, or none",
             ));
@@ -144,17 +110,8 @@ fn validate_save_args(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn status_for_command(command: &str) -> &'static str {
-    match command {
-        "hardwarebasic" => "hardwarebasic",
-        "software" => "software",
-        "neverselect" => "neverselect",
-        _ => "hardware",
-    }
-}
-
 fn renderer_info() -> Value {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert(
         "Version",
         Value::String("RunMat renderer compatibility".into()),
@@ -167,8 +124,8 @@ fn renderer_info() -> Value {
     st.insert("SupportsAlignVertexCenters", Value::Bool(true));
     st.insert("Software", Value::Bool(false));
     st.insert("MaxTextureSize", Value::Num(16384.0));
-    st.insert("Extensions", Value::String(String::new()));
-    Value::Struct(st)
+    st.insert("Extensions", Value::string(String::new()));
+    Value::Struct(st.finish())
 }
 
 #[cfg(test)]
@@ -177,7 +134,13 @@ mod tests {
 
     #[test]
     fn opengl_info_reports_renderer_struct() {
-        let value = opengl_builtin(vec![Value::String("info".into())]).unwrap();
+        let value = opengl_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "info".into(),
+            )]),
+        )
+        .unwrap();
         let Value::Struct(st) = value else {
             panic!("expected info struct");
         };
@@ -190,31 +153,76 @@ mod tests {
 
     #[test]
     fn opengl_accepts_compatibility_modes() {
+        let scalar = runmat_value::StringArray::new(vec!["info".into()], vec![1, 1]).unwrap();
+        assert!(matches!(
+            opengl_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+                    scalar
+                )])
+            )
+            .unwrap(),
+            Value::Struct(_)
+        ));
+        let paged = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "info".chars().collect(),
+            vec![1, 2, 2],
+        )
+        .unwrap();
+        let error = opengl_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(paged)]),
+        )
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:opengl:InvalidArgument"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert_eq!(
-            opengl_builtin(Vec::new()).unwrap(),
+            opengl_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            )
+            .unwrap(),
             Value::String("hardware".into())
         );
         assert_eq!(
-            opengl_builtin(vec![Value::String("software".into())]).unwrap(),
+            opengl_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "software".into()
+                )])
+            )
+            .unwrap(),
             Value::String("software".into())
         );
         assert_eq!(
-            opengl_builtin(vec![Value::String("hardwarebasic".into())]).unwrap(),
+            opengl_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "hardwarebasic".into()
+                )])
+            )
+            .unwrap(),
             Value::String("hardwarebasic".into())
         );
         assert_eq!(
-            opengl_builtin(vec![
-                Value::String("save".into()),
-                Value::String("hardware".into())
-            ])
+            opengl_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("save".into()),
+                    Value::String("hardware".into())
+                ])
+            )
             .unwrap(),
             Value::String("ok".into())
         );
         assert_eq!(
-            opengl_builtin(vec![
-                Value::String("save".into()),
-                Value::String("none".into())
-            ])
+            opengl_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("save".into()),
+                    Value::String("none".into())
+                ])
+            )
             .unwrap(),
             Value::String("ok".into())
         );

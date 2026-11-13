@@ -44,7 +44,8 @@ const PACKET: [(&str, usize, &str); 9] = [
 #[test]
 fn label_and_text_control_metadata_is_class_complete() {
     for (name, expected_forms, _) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {

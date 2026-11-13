@@ -1,0 +1,56 @@
+<xs:schema xmlns="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+	xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xml="http://www.w3.org/XML/1998/namespace"
+	targetNamespace="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+	elementFormDefault="unqualified" attributeFormDefault="unqualified" blockDefault="#all">
+	<xs:import namespace="http://www.w3.org/XML/1998/namespace"
+		schemaLocation="xml.xsd"/>
+
+	<!-- Complex Types -->
+
+	<xs:complexType name="CT_Item">
+		<xs:attribute name="path" type="ST_Path"/>
+		<xs:attribute name="UUID" type="ST_UUID" use="required"/>
+		<xs:anyAttribute namespace="##other" processContents="lax"/>
+	</xs:complexType>
+
+	<xs:complexType name="CT_Component">
+		<xs:attribute name="path" type="ST_Path"/>
+		<xs:attribute name="UUID" type="ST_UUID" use="required"/>
+		<xs:anyAttribute namespace="##other" processContents="lax"/>
+	</xs:complexType>
+
+	<xs:complexType name="CT_Object">
+		<xs:attribute name="UUID" type="ST_UUID" use="required"/>
+		<xs:anyAttribute namespace="##other" processContents="lax"/>
+	</xs:complexType>
+	
+	<xs:complexType name="CT_Build">
+		<xs:attribute name="UUID" type="ST_UUID" use="required"/>
+		<xs:anyAttribute namespace="##other" processContents="lax"/>
+	</xs:complexType>
+
+	<!-- Simple Types -->
+
+	<xs:simpleType name="ST_ResourceID">
+		<xs:restriction base="xs:positiveInteger">
+			<xs:maxExclusive value="2147483648"/>
+		</xs:restriction>
+	</xs:simpleType>
+	
+	<xs:simpleType name="ST_Path">
+		<xs:restriction base="xs:string"> </xs:restriction>
+	</xs:simpleType>
+	
+	<xs:simpleType name="ST_UUID">
+		<xs:restriction base="xs:string">
+			<xs:pattern value="[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	
+	<!-- Elements -->
+	<xs:element name="item" type="CT_Item"/>
+	<xs:element name="component" type="CT_Component"/>
+	<xs:element name="object" type="CT_Object"/>
+	<xs:element name="build" type="CT_Build"/>
+	
+</xs:schema>

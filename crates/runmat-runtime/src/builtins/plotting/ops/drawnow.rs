@@ -1,94 +1,188 @@
-//! MATLAB-compatible `drawnow` builtin.
+//! `drawnow` through the selected host graphics presentation authority.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    DrawNowControl, DRAWNOW_ERROR_TOO_MANY_OUTPUTS, DRAWNOW_STATUS_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
+use runmat_value::Value;
 
-use crate::builtins::plotting::type_resolvers::bool_type;
+use crate::context::{
+    GraphicsCallbackPolicy, GraphicsCallbackReceipt, GraphicsFlushDisposition, GraphicsFlushRate,
+    GraphicsFlushRequest, GraphicsPresentation, RuntimeContext,
+};
 use crate::BuiltinResult;
 
-const DRAWNOW_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ok",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when pending graphics updates were flushed (or no-op completed).",
-}];
+#[path = "drawnow/arguments.rs"]
+mod arguments;
+#[path = "drawnow/errors.rs"]
+mod errors;
+#[cfg(test)]
+#[path = "drawnow/tests.rs"]
+mod tests;
 
-const DRAWNOW_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+use arguments::parse_controls;
+use errors::{attach_disposition, cancelled_flush, drawnow_error};
 
-const DRAWNOW_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "ok = drawnow()",
-    inputs: &DRAWNOW_INPUTS_NONE,
-    outputs: &DRAWNOW_OUTPUT_STATUS,
-}];
-
-const DRAWNOW_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DRAWNOW.INTERNAL",
-    identifier: Some("RunMat:drawnow:Internal"),
-    when: "Rendering flush fails in the active plotting backend.",
-    message: "drawnow: internal operation failed",
-};
-
-const DRAWNOW_ERRORS: [BuiltinErrorDescriptor; 1] = [DRAWNOW_ERROR_INTERNAL];
-
-pub const DRAWNOW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DRAWNOW_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DRAWNOW_ERRORS,
-};
-
-/// Flush pending figure updates to any bound plot surfaces.
-///
-/// On Web/WASM/RunMat Desktop, this presents the current figure revision to any bound surfaces and yields so
-/// the browser can process rendering work. On other targets, this is a no-op.
 #[runtime_builtin(
     name = "drawnow",
-    category = "plotting",
-    summary = "Flush pending graphics updates.",
-    keywords = "drawnow,graphics,flush,plot",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(bool_type),
-    descriptor(crate::builtins::plotting::drawnow::DRAWNOW_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::plotting::drawnow"
 )]
-pub async fn drawnow_builtin() -> BuiltinResult<bool> {
-    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
-    {
-        use crate::builtins::plotting;
-        let handle = plotting::current_figure_handle();
-        plotting::render_current_scene(handle.as_u32()).map_err(|e| {
-            crate::build_runtime_error(format!("drawnow: {e}"))
-                .with_builtin("drawnow")
-                .build()
-        })?;
-        Ok(true)
-    }
-
-    #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
-    {
-        Ok(true)
+pub async fn drawnow_builtin(
+    runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let selected = runtime.clone();
+    let operation = drawnow_in_context(runtime.as_ref(), requested_outputs, arguments);
+    match selected.as_ref() {
+        Some(runtime) => runtime.scope(operation).await,
+        None => operation.await,
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-
-    #[test]
-    fn drawnow_descriptor_signature_present() {
-        assert_eq!(DRAWNOW_DESCRIPTOR.signatures.len(), 1);
-        assert_eq!(DRAWNOW_DESCRIPTOR.signatures[0].label, "ok = drawnow()");
+async fn drawnow_in_context(
+    runtime: Option<&RuntimeContext>,
+    requested_outputs: Option<usize>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    match requested_outputs {
+        Some(count) if count > 1 => {
+            return Err(drawnow_error(
+                &DRAWNOW_ERROR_TOO_MANY_OUTPUTS,
+                "at most one RunMat status result can be requested",
+            ));
+        }
+        Some(1) => {
+            if let Some(runtime) = runtime {
+                crate::compatibility::ensure_builtin_extension_enabled_in_context(
+                    runtime,
+                    &DRAWNOW_STATUS_OUTPUT_EXTENSION,
+                    "drawnow",
+                )?;
+            } else {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &DRAWNOW_STATUS_OUTPUT_EXTENSION,
+                    "drawnow",
+                )?;
+            }
+        }
+        _ => {}
     }
 
-    #[test]
-    fn drawnow_returns_true() {
-        let result = block_on(drawnow_builtin()).unwrap();
-        assert!(result);
+    let control = parse_controls(arguments.view())?;
+    let runtime = runtime.ok_or_else(|| {
+        crate::context::RuntimeCapabilityError::new(
+            crate::context::RuntimeCapability::GraphicsPresentation,
+            "drawnow",
+        )
+        .into_runtime_error()
+    })?;
+    let service = runtime
+        .service_ports()
+        .require_graphics_presentation("drawnow")
+        .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?
+        .clone();
+    let request = request_for(control);
+    let mut cooperation = runtime.cpu_cooperation();
+    cooperation
+        .checkpoint(0)
+        .await
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+
+    let (receipt, disposition) = crate::context::await_graphics_completion(
+        runtime,
+        service.flush(request),
+        cancelled_flush,
+        || {
+            drawnow_error(
+                &runmat_builtins::DRAWNOW_ERROR_PRESENTATION,
+                "host completion returned no receipt",
+            )
+        },
+    )
+    .await
+    .map_err(|mut error| {
+        error.context = error.context.with_builtin("drawnow");
+        error
+    })?;
+    if disposition != GraphicsFlushDisposition::Published
+        && (receipt.presentation == GraphicsPresentation::Presented
+            || receipt.callbacks == GraphicsCallbackReceipt::Processed)
+    {
+        return Err(attach_disposition(
+            drawnow_error(
+                &runmat_builtins::DRAWNOW_ERROR_PRESENTATION,
+                "host claimed presentation or callbacks without a committed effect receipt",
+            ),
+            disposition,
+        ));
+    }
+    let expected_callbacks = match request.callbacks {
+        GraphicsCallbackPolicy::Process => GraphicsCallbackReceipt::Processed,
+        GraphicsCallbackPolicy::Defer => GraphicsCallbackReceipt::Deferred,
+    };
+    if receipt.callbacks != expected_callbacks {
+        return Err(attach_disposition(
+            drawnow_error(
+                &runmat_builtins::DRAWNOW_ERROR_PRESENTATION,
+                "host did not honor the requested callback policy",
+            ),
+            disposition,
+        ));
+    }
+    let impossible_deferral = matches!(
+        (request.rate, receipt.presentation),
+        (
+            GraphicsFlushRate::Immediate,
+            GraphicsPresentation::DeferredByRate | GraphicsPresentation::DeferredByBusy
+        ) | (
+            GraphicsFlushRate::WhenIdle,
+            GraphicsPresentation::DeferredByRate
+        )
+    );
+    if impossible_deferral {
+        return Err(attach_disposition(
+            drawnow_error(
+                &runmat_builtins::DRAWNOW_ERROR_PRESENTATION,
+                "host reported a deferral not permitted by the requested mode",
+            ),
+            disposition,
+        ));
+    }
+    if requested_outputs == Some(0) {
+        Ok(Value::output_list(Vec::new()))
+    } else {
+        // The historical direct Rust entrypoint returned a boolean. Public
+        // MATLAB-compatible calls request zero outputs; one is a gated RunMat
+        // status extension, including a rate-limited host completion.
+        Ok(Value::Bool(true))
+    }
+}
+
+fn request_for(control: DrawNowControl) -> GraphicsFlushRequest {
+    match control {
+        DrawNowControl::Full => GraphicsFlushRequest {
+            rate: GraphicsFlushRate::Immediate,
+            callbacks: GraphicsCallbackPolicy::Process,
+        },
+        DrawNowControl::LimitRate => GraphicsFlushRequest {
+            rate: GraphicsFlushRate::LimitRate,
+            callbacks: GraphicsCallbackPolicy::Process,
+        },
+        DrawNowControl::NoCallbacks | DrawNowControl::Expose => GraphicsFlushRequest {
+            rate: GraphicsFlushRate::Immediate,
+            callbacks: GraphicsCallbackPolicy::Defer,
+        },
+        DrawNowControl::LimitRateNoCallbacks => GraphicsFlushRequest {
+            rate: GraphicsFlushRate::LimitRate,
+            callbacks: GraphicsCallbackPolicy::Defer,
+        },
+        DrawNowControl::Update => GraphicsFlushRequest {
+            rate: GraphicsFlushRate::WhenIdle,
+            callbacks: GraphicsCallbackPolicy::Defer,
+        },
     }
 }

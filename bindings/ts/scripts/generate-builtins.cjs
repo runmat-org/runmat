@@ -2,12 +2,10 @@
 
 const fs = require("fs");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const bindingsRoot = path.resolve(__dirname, "..");
-const builtinsDir = path.resolve(
-  bindingsRoot,
-  "../../docs/builtins/reference"
-);
+const repoRoot = path.resolve(bindingsRoot, "../..");
 const generatedRoot = path.resolve(bindingsRoot, "src/generated");
 const generatedBuiltinsDir = path.resolve(generatedRoot, "builtins");
 const manifestPath = path.resolve(generatedRoot, "builtins-manifest.ts");
@@ -17,12 +15,17 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function readBuiltinSourceFiles() {
-  return fs
-    .readdirSync(builtinsDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map((entry) => entry.name)
-    .sort((a, b) => a.localeCompare(b));
+function readBuiltinDocuments() {
+  const encoded = execFileSync(
+    "cargo",
+    ["run", "--locked", "--quiet", "-p", "runmat-builtins", "--bin", "export_builtin_documentation", "--", "--transition"],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }
+  );
+  const exportPayload = JSON.parse(encoded);
+  if (exportPayload.schema_version !== 2 || !Array.isArray(exportPayload.builtins)) {
+    throw new Error("Unsupported builtin documentation export schema");
+  }
+  return exportPayload.builtins;
 }
 
 function normalizeBuiltinKey(value) {
@@ -59,9 +62,8 @@ function slugifyForPath(value) {
   return normalized || "example";
 }
 
-function buildExampleSuggestedPath(builtinKey, exampleIndex) {
-  const normalizedIndex = Number.isFinite(exampleIndex) && exampleIndex > 0 ? Math.floor(exampleIndex) : 1;
-  return `/${slugifyForPath(builtinKey)}-${normalizedIndex}.m`;
+function buildExampleSuggestedPath(builtinKey, exampleIdentity) {
+  return `/${slugifyForPath(builtinKey)}-${slugifyForPath(exampleIdentity)}.m`;
 }
 
 function removeStaleGeneratedFiles(expectedNames) {
@@ -80,17 +82,17 @@ function removeStaleGeneratedFiles(expectedNames) {
 
 function main() {
   ensureDir(generatedBuiltinsDir);
-  const sourceFiles = readBuiltinSourceFiles();
+  const sourceDocuments = readBuiltinDocuments();
   const manifestEntries = [];
   const loaderEntries = [];
   const exampleCatalogEntries = [];
   const generatedNames = new Set();
 
-  for (const fileName of sourceFiles) {
-    const stem = path.basename(fileName, ".json");
-    const key = normalizeBuiltinKey(stem);
-    const sourcePath = path.join(builtinsDir, fileName);
-    const parsed = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+  for (const parsed of sourceDocuments) {
+    const key = normalizeBuiltinKey(parsed.key ?? parsed.title);
+    const stem = typeof parsed.module_stem === "string" && parsed.module_stem.trim()
+      ? parsed.module_stem.trim()
+      : (typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim() : key);
     const title = typeof parsed.title === "string" && parsed.title.trim() ? parsed.title : stem;
     const category = typeof parsed.category === "string" ? parsed.category : "";
     const categoryPath = categoryPathFromCategory(category);
@@ -134,6 +136,9 @@ function main() {
 
     if (Array.isArray(parsed.examples)) {
       for (const [index, example] of parsed.examples.entries()) {
+        const exampleIdentity = typeof example.id === "string" && example.id.trim()
+          ? example.id.trim().toLowerCase()
+          : String(index + 1);
         const exampleTitle =
           typeof example.description === "string" && example.description.trim()
             ? example.description.trim()
@@ -141,7 +146,7 @@ function main() {
         const code = typeof example.input === "string" ? example.input : "";
         const output = typeof example.output === "string" ? example.output : undefined;
         exampleCatalogEntries.push({
-          id: `${key}:${index + 1}`,
+          id: `${key}:${exampleIdentity}`,
           builtinKey: key,
           builtinTitle: title,
           builtinSlug: slug,
@@ -152,7 +157,7 @@ function main() {
           code,
           ...(output ? { output } : {}),
           keywords: mergedKeywords,
-          suggestedPath: buildExampleSuggestedPath(key, index + 1),
+          suggestedPath: buildExampleSuggestedPath(key, exampleIdentity),
         });
       }
     }

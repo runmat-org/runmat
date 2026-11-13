@@ -1,11 +1,11 @@
 use runmat_lexer::Token;
 
-use crate::{ast::ClassPropertyDecl, Attr, ClassMember, ClassNamedDecl, Stmt};
+use crate::{ast::ClassPropertyDecl, Attr, ClassMember, ClassNamedDecl, Stmt, SyntaxError};
 
 use super::Parser;
 
 impl Parser {
-    pub(super) fn parse_classdef(&mut self) -> Result<Stmt, String> {
+    pub(super) fn parse_classdef(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::ClassDef);
         let attributes = self.parse_optional_attr_list();
@@ -31,7 +31,7 @@ impl Parser {
                     let attrs = self.parse_optional_attr_list();
                     let props = self.parse_properties_names_block()?;
                     if !self.consume(&Token::End) {
-                        return Err("expected 'end' after properties".into());
+                        return Err(self.error("expected 'end' after properties"));
                     }
                     let block_end = self.last_token_end();
                     members.push(ClassMember::Properties {
@@ -46,7 +46,7 @@ impl Parser {
                     let attrs = self.parse_optional_attr_list();
                     let body = self.parse_block(|t| matches!(t, Token::End))?;
                     if !self.consume(&Token::End) {
-                        return Err("expected 'end' after methods".into());
+                        return Err(self.error("expected 'end' after methods"));
                     }
                     let block_end = self.last_token_end();
                     members.push(ClassMember::Methods {
@@ -61,7 +61,7 @@ impl Parser {
                     let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
                     if !self.consume(&Token::End) {
-                        return Err("expected 'end' after events".into());
+                        return Err(self.error("expected 'end' after events"));
                     }
                     let block_end = self.last_token_end();
                     members.push(ClassMember::Events {
@@ -76,7 +76,7 @@ impl Parser {
                     let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
                     if !self.consume(&Token::End) {
-                        return Err("expected 'end' after enumeration".into());
+                        return Err(self.error("expected 'end' after enumeration"));
                     }
                     let block_end = self.last_token_end();
                     members.push(ClassMember::Enumeration {
@@ -91,7 +91,7 @@ impl Parser {
                     let attrs = self.parse_optional_attr_list();
                     let names = self.parse_name_block()?;
                     if !self.consume(&Token::End) {
-                        return Err("expected 'end' after arguments".into());
+                        return Err(self.error("expected 'end' after arguments"));
                     }
                     let block_end = self.last_token_end();
                     members.push(ClassMember::Arguments {
@@ -118,7 +118,7 @@ impl Parser {
         })
     }
 
-    fn parse_name_block(&mut self) -> Result<Vec<ClassNamedDecl>, String> {
+    fn parse_name_block(&mut self) -> Result<Vec<ClassNamedDecl>, SyntaxError> {
         let mut names = Vec::new();
         while let Some(tok) = self.peek_token() {
             if matches!(tok, Token::End) {
@@ -130,7 +130,7 @@ impl Parser {
             {
                 continue;
             }
-            if let Some(Token::Ident) = self.peek_token() {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 let start = self.tokens[self.pos].position;
                 let name = self.expect_ident()?;
                 names.push(ClassNamedDecl {
@@ -144,7 +144,7 @@ impl Parser {
         Ok(names)
     }
 
-    fn parse_properties_names_block(&mut self) -> Result<Vec<ClassPropertyDecl>, String> {
+    fn parse_properties_names_block(&mut self) -> Result<Vec<ClassPropertyDecl>, SyntaxError> {
         // Accept identifiers with optional default assignment: name, name = expr.
         let mut names = Vec::new();
         while let Some(tok) = self.peek_token() {
@@ -157,12 +157,12 @@ impl Parser {
             {
                 continue;
             }
-            if let Some(Token::Ident) = self.peek_token() {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 let start = self.tokens[self.pos].position;
                 let name = self.expect_ident()?;
                 let mut default = None;
                 if self.consume(&Token::Assign) {
-                    default = Some(self.parse_expr().map_err(|e| e.message)?);
+                    default = Some(self.parse_expr()?);
                 }
                 names.push(ClassPropertyDecl {
                     name,
@@ -187,9 +187,9 @@ impl Parser {
                 break;
             }
             match self.peek_token() {
-                Some(Token::Ident) => {
+                Some(token) if token.can_be_identifier() => {
                     let start = self.tokens[self.pos].position;
-                    let name = self.expect_ident().unwrap_or_else(|_| "".to_string());
+                    let name = self.next().expect("peeked attribute identifier").lexeme;
                     let mut value: Option<String> = None;
                     if self.consume(&Token::Assign) {
                         value = self.parse_attribute_value();
@@ -248,7 +248,7 @@ impl Parser {
         (end > start).then(|| self.input[start..end].trim().to_owned())
     }
 
-    fn parse_qualified_name(&mut self) -> Result<String, String> {
+    fn parse_qualified_name(&mut self) -> Result<String, SyntaxError> {
         let mut parts = Vec::new();
         parts.push(self.expect_ident()?);
         while self.consume(&Token::Dot) {

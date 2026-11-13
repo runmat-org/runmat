@@ -1,0 +1,130 @@
+//! Presentation-only resume of authenticated original fields. A saved solve
+//! remains an original solve, never a fresh qualification of changed numerics.
+use anyhow::{anyhow, ensure, Context, Result};
+use serde::Deserialize;
+use std::{io::Read, path::Path};
+
+#[derive(Deserialize)]
+struct SavedSnapshot {
+    schema_version: u16,
+    #[serde(flatten)]
+    primary: super::CapturedRun,
+    #[serde(default)]
+    runs: Vec<super::CapturedRun>,
+    /// The saved views; a render redraws the same ones.
+    views: Vec<SavedView>,
+    /// The units the study's assessments state their bounds in, by assessment id.
+    #[serde(default)]
+    display_units: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct SavedView {
+    id: String,
+    /// The study output the view draws, when the capture named one.
+    #[serde(default)]
+    output: Option<String>,
+}
+
+/// Check one saved run against its authenticated publication manifest and original results.
+fn authenticate(saved: &super::CapturedRun) -> Result<()> {
+    ensure!(
+        !saved.publication.steps.is_empty(),
+        "saved snapshot must contain its original study steps"
+    );
+    let definition: runmat_execution::Digest = saved
+        .publication
+        .study_fingerprint
+        .parse()
+        .map_err(|error| anyhow!("invalid saved definition: {error}"))?;
+    let manifest = saved
+        .publication
+        .result_manifest_artifact_path
+        .as_ref()
+        .context("saved study lacks its authenticated publication manifest")?;
+    let publication =
+        runmat_runtime::analysis::study_result_manifest::read_saved_study_publication(
+            definition,
+            Path::new(manifest),
+            super::super::SAVED_PUBLICATION_MANIFEST_MAX_BYTES,
+        )
+        .map_err(anyhow::Error::msg)?;
+    // The manifest records the publication before the manifest itself is written, so its copy
+    // never names the manifest's own path; every other field must match.
+    let mut located = saved.publication.clone();
+    located.result_manifest_artifact_path = None;
+    ensure!(
+        publication == located && publication.numerically_acceptable,
+        "saved snapshot differs from original accepted study publication"
+    );
+    let step = publication
+        .steps
+        .iter()
+        .find(|step| step.run_id == saved.run_id)
+        .context("saved run does not belong to the original study")?;
+    ensure!(
+        step.procedure_step.step_id.as_str() == saved.step,
+        "saved step differs from the original study step of its run"
+    );
+    let results = super::step_results(&saved.run_id)?;
+    ensure!(
+        results == saved.results && results.numerically_acceptable,
+        "saved presentation metadata differs from authenticated original results"
+    );
+    Ok(())
+}
+
+/// Redraw the saved views (the selected ones, or every saved view) with `presentation`.
+pub(in crate::commands::fea) async fn render_saved(
+    input: &Path,
+    output: &Path,
+    selected: &[String],
+    presentation: &crate::cli::SnapshotPresentationArgs,
+) -> Result<()> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(input)?
+        .take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() <= 16 * 1024 * 1024,
+        "saved snapshot metadata exceeds project limit"
+    );
+    let saved: SavedSnapshot = serde_json::from_slice(&bytes)?;
+    ensure!(saved.schema_version == 1, "unsupported snapshot schema");
+    let mut runs = vec![saved.primary];
+    runs.extend(saved.runs);
+    for run in &runs {
+        authenticate(run)?;
+    }
+    // A redraw keeps the output names the capture gave its views; it has no study source.
+    let outputs = super::views::OutputNames::Saved(
+        saved
+            .views
+            .iter()
+            .filter_map(|view| Some((view.id.clone(), view.output.clone()?)))
+            .collect(),
+    );
+    let saved_views: Vec<String> = saved.views.into_iter().map(|view| view.id).collect();
+    for view in selected {
+        ensure!(
+            saved_views.contains(view),
+            "snapshot has no saved view '{view}'; views: {}",
+            saved_views.join(", ")
+        );
+    }
+    let views = if selected.is_empty() {
+        saved_views
+    } else {
+        selected.to_vec()
+    };
+    let presentation = super::views::Presentation::from_args(presentation)?;
+    super::write_snapshot(
+        &runs,
+        &views,
+        output,
+        &presentation,
+        &saved.display_units,
+        &outputs,
+    )
+    .await
+}

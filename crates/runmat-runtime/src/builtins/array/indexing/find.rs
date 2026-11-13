@@ -1,14 +1,11 @@
 //! MATLAB-compatible `find` builtin with GPU-aware semantics for RunMat.
+mod publication;
 
 use runmat_accelerate_api::ProviderFindResult;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, FIND_DIRECTION_ONLY_EXTENSION, FIND_ERROR_INTERNAL,
+    FIND_ERROR_INVALID_INPUT, FIND_ERROR_PROVIDER, FIND_ERROR_PROVIDER_OUTPUT,
+    FIND_INTEGER_SPARSE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -16,7 +13,6 @@ use runmat_value::{
 };
 
 use super::common::fits_positive_platform_index;
-use crate::builtins::array::type_resolvers::column_vector_type;
 use crate::builtins::common::arg_tokens::ArgToken;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -53,272 +49,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Find drives control flow and currently bypasses fusion; metadata is present for completeness only.",
 };
 
-fn find_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    if matches!(
-        args.first(),
-        Some(Type::Tensor {
-            shape: Some(shape)
-        }) if shape.len() == 2 && shape.first() == Some(&Some(1))
-    ) {
-        return Type::Tensor {
-            shape: Some(vec![Some(1), None]),
-        };
-    }
-    column_vector_type()
-}
-
 const BUILTIN_NAME: &str = "find";
-
-const FIND_DIRECTION_ONLY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "find-direction-only",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "find(X,direction) is a RunMat convenience extension",
-    error_identifier: Some("RunMat:compatibility:FindDirectionOnlyExtension"),
-};
-const FIND_INTEGER_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "find-integer-sparse-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "find on typed-integer sparse storage is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FindIntegerSparseExtension"),
-};
-pub const FIND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [FIND_DIRECTION_ONLY_EXTENSION, FIND_INTEGER_SPARSE_EXTENSION];
-
-const FIND_INTEGER_X_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "All eight integer classes use authoritative storage for the exact nonzero predicate.",
-}];
-const FIND_INTEGER_K_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "K",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "K is an exact positive scalar count; zero, negative, and out-of-platform-range values reject.",
-    }];
-const FIND_INTEGER_SPARSE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "MATLAB sparse values are single, double, or logical; typed-integer sparse storage is RunMat-only.",
-    }];
-pub const FIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "k = find(integer_X,___)",
-        inputs: &FIND_INTEGER_X_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Linear indices are exact binary64 indices; resident integer values gather exactly through their owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[row,col,v] = find(integer_X,___)",
-        inputs: &FIND_INTEGER_X_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "row and col are exact doubles; v preserves the authoritative integer class and value.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "find(X,integer_K[,direction])",
-        inputs: &FIND_INTEGER_K_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The positive count is converted exactly to a platform index before any input traversal.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[k|row,col,v] = find(integer_sparse_X,___)",
-        inputs: &FIND_INTEGER_SPARSE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Strict compatibility gates this RunMat-only form before CSC traversal; v preserves integer storage.",
-    },
-];
-
-const FIND_OUTPUT_LINEAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "idx",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Linear indices of non-zero elements.",
-}];
-
-const FIND_OUTPUT_ROW_COL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "row",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row subscripts of non-zero elements.",
-    },
-    BuiltinParamDescriptor {
-        name: "col",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column subscripts of non-zero elements.",
-    },
-];
-
-const FIND_OUTPUT_ROW_COL_VAL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "row",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row subscripts of non-zero elements.",
-    },
-    BuiltinParamDescriptor {
-        name: "col",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column subscripts of non-zero elements.",
-    },
-    BuiltinParamDescriptor {
-        name: "v",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Values at the reported row/column locations.",
-    },
-];
-
-const FIND_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array to search.",
-}];
-
-const FIND_INPUTS_LIMIT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array to search.",
-    },
-    BuiltinParamDescriptor {
-        name: "K",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum number of indices to return.",
-    },
-];
-
-const FIND_INPUTS_LIMIT_DIR: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array to search.",
-    },
-    BuiltinParamDescriptor {
-        name: "K",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum number of indices to return.",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"first\""),
-        description: "Direction selector: `\"first\"` or `\"last\"`.",
-    },
-];
-
-const FIND_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "idx = find(X)",
-        inputs: &FIND_INPUTS_BASE,
-        outputs: &FIND_OUTPUT_LINEAR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "idx = find(X, K)",
-        inputs: &FIND_INPUTS_LIMIT,
-        outputs: &FIND_OUTPUT_LINEAR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "idx = find(X, K, direction)",
-        inputs: &FIND_INPUTS_LIMIT_DIR,
-        outputs: &FIND_OUTPUT_LINEAR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[row, col] = find(X)",
-        inputs: &FIND_INPUTS_BASE,
-        outputs: &FIND_OUTPUT_ROW_COL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[row, col] = find(X, K, direction)",
-        inputs: &FIND_INPUTS_LIMIT_DIR,
-        outputs: &FIND_OUTPUT_ROW_COL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[row, col, v] = find(X)",
-        inputs: &FIND_INPUTS_BASE,
-        outputs: &FIND_OUTPUT_ROW_COL_VAL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[row, col, v] = find(X, K, direction)",
-        inputs: &FIND_INPUTS_LIMIT_DIR,
-        outputs: &FIND_OUTPUT_ROW_COL_VAL,
-    },
-];
-
-const FIND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FIND.INVALID_INPUT",
-    identifier: Some("RunMat:find:InvalidInput"),
-    when: "Input type or option arguments are not valid for find.",
-    message: "find: invalid input arguments",
-};
-
-const FIND_ERROR_PROVIDER_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FIND.PROVIDER_OUTPUT",
-    identifier: Some("RunMat:find:ProviderOutput"),
-    when: "GPU provider does not return expected output buffers for requested nargout.",
-    message: "find: provider output buffer mismatch",
-};
-
-const FIND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FIND.INTERNAL",
-    identifier: Some("RunMat:find:InternalError"),
-    when: "Internal tensor conversion/materialization fails while building outputs.",
-    message: "find: internal error",
-};
-
-const FIND_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    FIND_ERROR_INVALID_INPUT,
-    FIND_ERROR_PROVIDER_OUTPUT,
-    FIND_ERROR_INTERNAL,
-];
-
-pub const FIND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FIND_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FIND_ERRORS,
-};
 
 fn find_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     find_error_with_message(error.message, error)
@@ -401,44 +132,23 @@ fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
 
 #[runtime_builtin(
     name = "find",
-    category = "array/indexing",
-    summary = "Locate nonzero indices and values.",
-    keywords = "find,nonzero,indices,row,column,gpu",
-    accel = "custom",
-    type_resolver(find_type),
-    descriptor(crate::builtins::array::indexing::find::FIND_DESCRIPTOR),
-    extensions(crate::builtins::array::indexing::find::FIND_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::indexing::find::FIND_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::indexing::find"
 )]
-async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count <= 1 {
-            let linear = eval.linear_value()?;
-            return Ok(crate::output_count::output_list_with_padding(
-                out_count,
-                vec![linear],
-            ));
-        }
-        let rows = eval.row_value()?;
-        let cols = eval.column_value()?;
-        let mut outputs = vec![rows, cols];
-        if out_count >= 3 {
-            outputs.push(eval.values_value()?);
-        }
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count, outputs,
-        ));
-    }
-    eval.linear_value()
+async fn find_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    evaluate(value, rest.view())
+        .await?
+        .into_publication(crate::output_count::current_output_count())
 }
 
 /// Evaluate `find` and return an object that can materialise the various outputs.
-pub async fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<FindEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<FindEval> {
     if args.len() == 1
         && matches!(
             crate::builtins::common::arg_tokens::tokens_from_values(args).first(),
@@ -473,22 +183,24 @@ pub async fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<Find
                 && !runmat_accelerate_api::handle_is_logical(&handle)
                 && runmat_accelerate_api::handle_integer_type(&handle).is_none();
             if provider_indices_are_exact_double {
-                if let Some(result) = try_provider_find(owner, &handle, &options) {
+                if let Some(result) = try_provider_find(owner, &handle, &options)? {
                     return Ok(FindEval::from_gpu(result));
                 }
             }
-            let (storage, _) = materialize_input(Value::GpuTensor(handle)).await?;
+            let (storage, _) = materialize_input(Value::GpuTensor(handle.clone())).await?;
             let result = compute_find(&storage, &options);
-            Ok(FindEval::from_host(result, Some(owner)))
+            let mut evaluation = FindEval::from_host(result);
+            evaluation.source = Some(handle);
+            Ok(evaluation)
         }
         Value::SparseTensor(sparse) => {
             let result = compute_find_sparse(&sparse, &options);
-            Ok(FindEval::from_host(result, None))
+            Ok(FindEval::from_host(result))
         }
         other => {
             let (storage, _) = materialize_input(other).await?;
             let result = compute_find(&storage, &options);
-            Ok(FindEval::from_host(result, None))
+            Ok(FindEval::from_host(result))
         }
     }
 }
@@ -497,20 +209,137 @@ fn try_provider_find(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &runmat_accelerate_api::GpuTensorHandle,
     options: &FindOptions,
-) -> Option<ProviderFindResult> {
+) -> crate::BuiltinResult<Option<ProviderFindResult>> {
     if matches!(options.direction, FindDirection::Last) {
-        return None;
+        return Ok(None);
     }
     let direction = match options.direction {
         FindDirection::First => runmat_accelerate_api::FindDirection::First,
         FindDirection::Last => runmat_accelerate_api::FindDirection::Last,
     };
     let limit = options.effective_limit();
-    let mut result = provider.find(handle, limit, direction).ok()?;
-    if is_row_vector_shape(&handle.shape) {
-        result.linear.shape = vec![1, result.linear.shape.first().copied().unwrap_or(0)];
+    if !provider.supports_find(handle, limit, direction) {
+        return Ok(None);
     }
-    Some(result)
+    let mut result = provider.find(handle, limit, direction).map_err(|error| {
+        build_runtime_error(format!("find: provider execution failed: {error}"))
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier(FIND_ERROR_PROVIDER.identifier.expect("provider identifier"))
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .with_source(
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects(),
+            )
+            .build()
+    })?;
+    if !valid_provider_find_result(provider, handle, limit, &result) {
+        return Err(reject_find_result(
+            result,
+            find_provider_output_error("find: provider returned invalid output handles"),
+        ));
+    }
+    if is_row_vector_shape(handle.shape()) {
+        let matches = result.linear.shape().first().copied().unwrap_or(0);
+        let shape = if handle.shape() == [1, 1] && matches == 0 {
+            vec![0, 0]
+        } else {
+            vec![1, matches]
+        };
+        let view = result.linear.view().clone().with_shape(shape);
+        let reshaped = result.linear.with_view(view).map_err(|error| {
+            build_runtime_error(format!("find: provider row result is invalid: {error}"))
+                .with_builtin(BUILTIN_NAME)
+                .with_identifier(
+                    FIND_ERROR_PROVIDER_OUTPUT
+                        .identifier
+                        .expect("provider output identifier"),
+                )
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .with_source(error)
+                .build()
+        });
+        match reshaped {
+            Ok(linear) => {
+                let original = std::mem::replace(&mut result.linear, linear);
+                if let Err(error) = original.release() {
+                    return Err(reject_find_result(
+                        result,
+                        find_provider_output_error(format!(
+                            "find: provider row view retirement failed: {error}"
+                        )),
+                    ));
+                }
+            }
+            Err(error) => return Err(reject_find_result(result, error)),
+        }
+    }
+    Ok(Some(result))
+}
+
+fn find_provider_output_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(
+            FIND_ERROR_PROVIDER_OUTPUT
+                .identifier
+                .expect("provider output identifier"),
+        )
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
+}
+
+fn reject_find_result(mut result: ProviderFindResult, mut error: RuntimeError) -> RuntimeError {
+    error = gpu_helpers::reject_gpu_output(result.linear, error);
+    error = gpu_helpers::reject_gpu_output(result.rows, error);
+    error = gpu_helpers::reject_gpu_output(result.cols, error);
+    if let Some(values) = result.values.take() {
+        error = gpu_helpers::reject_gpu_output(values, error);
+    }
+    error
+}
+
+fn valid_provider_find_result(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &runmat_accelerate_api::GpuTensorHandle,
+    limit: Option<usize>,
+    result: &ProviderFindResult,
+) -> bool {
+    let Some(values) = result.values.as_ref() else {
+        return false;
+    };
+    let count = result.linear.shape().first().copied().unwrap_or(usize::MAX);
+    let max_input = input
+        .shape()
+        .iter()
+        .try_fold(1usize, |total, extent| total.checked_mul(*extent));
+    if max_input.is_none_or(|maximum| count > maximum)
+        || limit.is_some_and(|maximum| count > maximum)
+    {
+        return false;
+    }
+    let outputs = [&result.linear, &result.rows, &result.cols, values];
+    outputs.iter().enumerate().all(|(index, output)| {
+        output.allocation_lease().validate_live().is_ok()
+            && output.shape() == [count, 1]
+            && output.device_id() == input.device_id()
+            && gpu_helpers::exact_provider_for_handle(output)
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+            && runmat_accelerate_api::handle_storage(output)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_precision(output)
+                == Some(runmat_accelerate_api::ProviderPrecision::F64)
+            && runmat_accelerate_api::handle_integer_type(output).is_none()
+            && !runmat_accelerate_api::handle_is_logical(output)
+            && gpu_helpers::gpu_class_metadata_matches(
+                output,
+                Some(runmat_accelerate_api::ProviderPrecision::F64),
+                None,
+                false,
+            )
+            && !output.shares_allocation_with(input)
+            && outputs[..index]
+                .iter()
+                .all(|previous| !output.shares_allocation_with(previous))
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -553,9 +382,9 @@ enum DataStorage {
 impl DataStorage {
     fn shape(&self) -> &[usize] {
         match self {
-            DataStorage::Real(t) => &t.shape,
+            DataStorage::Real(t) => t.shape(),
             DataStorage::Logical(t) => &t.shape,
-            DataStorage::Complex(t) => &t.shape,
+            DataStorage::Complex(t) => t.shape(),
         }
     }
 }
@@ -574,50 +403,69 @@ enum FindValues {
     Logical(Vec<u8>),
     Integer(IntegerStorage),
     Complex(Vec<(f64, f64)>),
+    ComplexF32(Vec<(f32, f32)>),
     IntegerComplex(IntegerComplexStorage),
 }
 
 pub struct FindEval {
     inner: FindEvalInner,
+    // Retain the original allocation until deferred output uploads finish.
+    source: Option<runmat_accelerate_api::GpuTensorHandle>,
 }
 
 enum FindEvalInner {
-    Host {
-        result: FindResult,
-        output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-    },
-    Gpu {
-        result: ProviderFindResult,
-    },
+    Host { result: FindResult },
+    Gpu { result: ProviderFindResult },
 }
 
 impl FindEval {
-    fn from_host(
-        result: FindResult,
-        output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-    ) -> Self {
+    fn output_values(&self, out_count: usize) -> crate::BuiltinResult<Vec<Value>> {
+        let rows = self.row_value()?;
+        let cols = match self.column_value() {
+            Ok(cols) => cols,
+            Err(error) => return Err(retire_unpublished_find_values(vec![rows], error)),
+        };
+        let mut outputs = vec![rows, cols];
+        if find_outputs_alias(&outputs) {
+            return Err(retire_unpublished_find_values(
+                outputs,
+                find_provider_output_error("find: provider aliased distinct outputs"),
+            ));
+        }
+        if out_count >= 3 {
+            match self.values_value() {
+                Ok(values) => outputs.push(values),
+                Err(error) => return Err(retire_unpublished_find_values(outputs, error)),
+            }
+            if find_outputs_alias(&outputs) {
+                return Err(retire_unpublished_find_values(
+                    outputs,
+                    find_provider_output_error("find: provider aliased distinct outputs"),
+                ));
+            }
+        }
+        Ok(outputs)
+    }
+
+    fn from_host(result: FindResult) -> Self {
         Self {
-            inner: FindEvalInner::Host {
-                result,
-                output_provider,
-            },
+            source: None,
+            inner: FindEvalInner::Host { result },
         }
     }
 
     fn from_gpu(result: ProviderFindResult) -> Self {
         Self {
+            source: None,
             inner: FindEvalInner::Gpu { result },
         }
     }
 
     pub fn linear_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
-            FindEvalInner::Host {
-                result,
-                output_provider,
-            } => {
+            FindEvalInner::Host { result } => {
                 let tensor = result.linear_tensor()?;
-                Ok(tensor_to_value(tensor, *output_provider))
+                tensor_to_value(tensor, self.source.as_ref())
             }
             FindEvalInner::Gpu { result } => Ok(Value::GpuTensor(result.linear.clone())),
         }
@@ -625,12 +473,9 @@ impl FindEval {
 
     pub fn row_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
-            FindEvalInner::Host {
-                result,
-                output_provider,
-            } => {
+            FindEvalInner::Host { result } => {
                 let tensor = result.row_tensor()?;
-                Ok(tensor_to_value(tensor, *output_provider))
+                tensor_to_value(tensor, self.source.as_ref())
             }
             FindEvalInner::Gpu { result } => Ok(Value::GpuTensor(result.rows.clone())),
         }
@@ -638,12 +483,9 @@ impl FindEval {
 
     pub fn column_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
-            FindEvalInner::Host {
-                result,
-                output_provider,
-            } => {
+            FindEvalInner::Host { result } => {
                 let tensor = result.column_tensor()?;
-                Ok(tensor_to_value(tensor, *output_provider))
+                tensor_to_value(tensor, self.source.as_ref())
             }
             FindEvalInner::Gpu { result } => Ok(Value::GpuTensor(result.cols.clone())),
         }
@@ -651,10 +493,7 @@ impl FindEval {
 
     pub fn values_value(&self) -> crate::BuiltinResult<Value> {
         match &self.inner {
-            FindEvalInner::Host {
-                result,
-                output_provider,
-            } => result.values_value(*output_provider),
+            FindEvalInner::Host { result } => result.values_value(self.source.as_ref()),
             FindEvalInner::Gpu { result } => result
                 .values
                 .as_ref()
@@ -664,7 +503,9 @@ impl FindEval {
     }
 }
 
-async fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
+async fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<FindOptions> {
     parse_find_tokens(&crate::builtins::common::arg_tokens::tokens_from_values(
         args,
     ))
@@ -724,7 +565,7 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
                 let data = (0..tensor::tensor_element_len(&tensor))
                     .map(|index| u8::from(tensor::tensor_value_f64(&tensor, index) != 0.0))
                     .collect();
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 return LogicalArray::new(data, shape)
                     .map(|logical| (DataStorage::Logical(logical), true))
                     .map_err(|e| {
@@ -768,11 +609,11 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
         }
         Value::ComplexTensor(tensor) => Ok((DataStorage::Complex(tensor), false)),
         Value::CharArray(chars) => {
-            let mut data = Vec::with_capacity(chars.data.len());
+            let mut data = Vec::with_capacity(chars.data().len());
             for c in 0..chars.cols {
                 for r in 0..chars.rows {
-                    let ch = chars.data[r * chars.cols + c] as u32;
-                    data.push(ch as f64);
+                    let ch = chars.data()[r * chars.cols + c].raw();
+                    data.push(f64::from(ch));
                 }
             }
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
@@ -879,36 +720,24 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
         }
         DataStorage::Complex(tensor) => {
             let mut indices = Vec::new();
-            let mut values = Vec::new();
-            let typed_storage = tensor.integer_storage();
 
             if matches!(limit, Some(0)) {
-                let values = find_values_for_complex_tensor(tensor, &indices, values);
+                let values = find_values_for_complex_tensor(tensor, &indices);
                 return FindResult::new(shape, indices, values);
             }
 
-            let len = typed_storage
-                .map(|storage| storage.len())
-                .unwrap_or(tensor.materialize_f64().len());
+            let len = tensor.len();
+            let nonzero = |index| {
+                let (real, imaginary) = tensor
+                    .numeric_value_at(index)
+                    .expect("validated complex find storage");
+                !real.is_zero() || !imaginary.is_zero()
+            };
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
-                        let nonzero = typed_storage.map_or_else(
-                            || {
-                                let (re, im) = tensor.materialize_f64()[idx];
-                                re != 0.0 || im != 0.0
-                            },
-                            |storage| {
-                                storage
-                                    .is_nonzero_at(idx)
-                                    .expect("typed complex integer storage is structurally valid")
-                            },
-                        );
-                        if nonzero {
+                        if nonzero(idx) {
                             indices.push(idx + 1);
-                            if typed_storage.is_none() {
-                                values.push(tensor.materialize_f64()[idx]);
-                            }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
@@ -917,22 +746,8 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
                 FindDirection::Last => {
                     for idx in (0..len).rev() {
-                        let nonzero = typed_storage.map_or_else(
-                            || {
-                                let (re, im) = tensor.materialize_f64()[idx];
-                                re != 0.0 || im != 0.0
-                            },
-                            |storage| {
-                                storage
-                                    .is_nonzero_at(idx)
-                                    .expect("typed complex integer storage is structurally valid")
-                            },
-                        );
-                        if nonzero {
+                        if nonzero(idx) {
                             indices.push(idx + 1);
-                            if typed_storage.is_none() {
-                                values.push(tensor.materialize_f64()[idx]);
-                            }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
@@ -943,9 +758,8 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
 
             if matches!(options.direction, FindDirection::Last) {
                 indices.reverse();
-                values.reverse();
             }
-            let values = find_values_for_complex_tensor(tensor, &indices, values);
+            let values = find_values_for_complex_tensor(tensor, &indices);
             FindResult::new(shape, indices, values)
         }
     }
@@ -955,11 +769,23 @@ fn sparse_find_values(
     sparse: &runmat_value::SparseTensor,
     real_values: Vec<f64>,
     single_values: Vec<f32>,
+    complex_values: Vec<(f64, f64)>,
     logical_values: Vec<u8>,
     integer_value_indices: &[usize],
 ) -> FindValues {
     if sparse.is_logical() {
         FindValues::Logical(logical_values)
+    } else if sparse.is_complex() {
+        if sparse.numeric_dtype() == Some(runmat_value::NumericDType::F32) {
+            FindValues::ComplexF32(
+                complex_values
+                    .into_iter()
+                    .map(|(real, imaginary)| (real as f32, imaginary as f32))
+                    .collect(),
+            )
+        } else {
+            FindValues::Complex(complex_values)
+        }
     } else if let Some(storage) = sparse.integer_storage() {
         FindValues::Integer(select_integer_values(storage, integer_value_indices))
     } else if sparse.as_f32_slice().is_some() {
@@ -970,6 +796,9 @@ fn sparse_find_values(
 }
 
 fn sparse_stored_value_is_nonzero(sparse: &runmat_value::SparseTensor, index: usize) -> bool {
+    if let Some(value) = sparse.complex_value_at(index) {
+        return value.0 != 0.0 || value.1 != 0.0;
+    }
     !sparse
         .numeric_value_at(index)
         .expect("SparseTensor value storage is consistent")
@@ -983,6 +812,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
     let mut indices = Vec::new();
     let mut values = Vec::new();
     let mut single_values = Vec::new();
+    let mut complex_values = Vec::new();
     let mut logical_values = Vec::new();
     let integer_storage = sparse.integer_storage();
     let floating_values = sparse.as_f64_slice();
@@ -994,6 +824,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
             sparse,
             values,
             single_values,
+            complex_values,
             logical_values,
             &integer_value_indices,
         );
@@ -1012,6 +843,8 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                         indices.push(linear_idx + 1);
                         if sparse.is_logical() {
                             logical_values.push(1);
+                        } else if let Some(value) = sparse.complex_value_at(idx) {
+                            complex_values.push((value.0, value.1));
                         } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else if let Some(native_single_values) = native_single_values {
@@ -1024,6 +857,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                                 sparse,
                                 values,
                                 single_values,
+                                complex_values,
                                 logical_values,
                                 &integer_value_indices,
                             );
@@ -1044,6 +878,8 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                         indices.push(linear_idx + 1);
                         if sparse.is_logical() {
                             logical_values.push(1);
+                        } else if let Some(value) = sparse.complex_value_at(idx) {
+                            complex_values.push((value.0, value.1));
                         } else if integer_storage.is_some() {
                             integer_value_indices.push(idx);
                         } else if let Some(native_single_values) = native_single_values {
@@ -1055,12 +891,14 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
                             indices.reverse();
                             values.reverse();
                             single_values.reverse();
+                            complex_values.reverse();
                             logical_values.reverse();
                             integer_value_indices.reverse();
                             let values = sparse_find_values(
                                 sparse,
                                 values,
                                 single_values,
+                                complex_values,
                                 logical_values,
                                 &integer_value_indices,
                             );
@@ -1076,6 +914,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
         indices.reverse();
         values.reverse();
         single_values.reverse();
+        complex_values.reverse();
         logical_values.reverse();
         integer_value_indices.reverse();
     }
@@ -1083,6 +922,7 @@ fn compute_find_sparse(sparse: &runmat_value::SparseTensor, options: &FindOption
         sparse,
         values,
         single_values,
+        complex_values,
         logical_values,
         &integer_value_indices,
     );
@@ -1145,55 +985,50 @@ impl FindResult {
 
     fn values_value(
         &self,
-        output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+        source: Option<&runmat_accelerate_api::GpuTensorHandle>,
     ) -> crate::BuiltinResult<Value> {
         match &self.values {
             FindValues::Real(values) => {
                 let tensor = Tensor::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
                     find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                 })?;
-                Ok(tensor_to_value(tensor, output_provider))
+                tensor_to_value(tensor, source)
             }
             FindValues::F32(values) => {
                 let tensor =
                     Tensor::from_f32(values.clone(), vec![values.len(), 1]).map_err(|e| {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
-                Ok(tensor_to_value(tensor, output_provider))
+                tensor_to_value(tensor, source)
             }
             FindValues::Logical(values) => {
                 let logical =
                     LogicalArray::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
-                if let Some(provider) = output_provider {
-                    let tensor = Tensor::new(
-                        values.iter().map(|&value| f64::from(value)).collect(),
-                        logical.shape.clone(),
-                    )
-                    .map_err(|e| {
-                        find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
-                    })?;
-                    if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
-                        return Ok(gpu_helpers::logical_gpu_value(handle));
-                    }
-                }
-                Ok(Value::LogicalArray(logical))
+                restore_find_value(Value::LogicalArray(logical), source)
             }
-            FindValues::Integer(values) => integer_values_to_value(values.clone(), output_provider),
+            FindValues::Integer(values) => integer_values_to_value(values.clone(), source),
             FindValues::Complex(values) => {
                 let tensor =
                     ComplexTensor::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
-                Ok(complex_tensor_to_value(tensor, output_provider))
+                complex_tensor_to_value(tensor, source)
+            }
+            FindValues::ComplexF32(values) => {
+                let tensor = ComplexTensor::from_f32(values.clone(), vec![values.len(), 1])
+                    .map_err(|e| {
+                        find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                    })?;
+                complex_tensor_to_value(tensor, source)
             }
             FindValues::IntegerComplex(storage) => {
                 let tensor = ComplexTensor::new_integer(storage.clone(), vec![storage.len(), 1])
                     .map_err(|e| {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
-                Ok(complex_tensor_to_value(tensor, output_provider))
+                complex_tensor_to_value(tensor, source)
             }
         }
     }
@@ -1226,17 +1061,29 @@ fn find_values_for_tensor(tensor: &Tensor, indices: &[usize]) -> FindValues {
     FindValues::Integer(select_integer_values(storage, &selected))
 }
 
-fn find_values_for_complex_tensor(
-    tensor: &ComplexTensor,
-    indices: &[usize],
-    values: Vec<(f64, f64)>,
-) -> FindValues {
-    let Some(storage) = tensor.integer_storage() else {
-        return FindValues::Complex(values);
-    };
+fn find_values_for_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> FindValues {
+    if let Some(values) = tensor.as_f32_slice() {
+        return FindValues::ComplexF32(
+            indices
+                .iter()
+                .map(|index| values[index - 1].into())
+                .collect(),
+        );
+    }
+    if let Some(values) = tensor.as_f64_slice() {
+        return FindValues::Complex(
+            indices
+                .iter()
+                .map(|index| values[index - 1].into())
+                .collect(),
+        );
+    }
+    let storage = tensor
+        .integer_storage()
+        .expect("complex find has native floating or integer storage");
     let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
-    let real = select_integer_values(&storage.real, &selected);
-    let imag = select_integer_values(&storage.imag, &selected);
+    let real = select_integer_values(storage.real(), &selected);
+    let imag = select_integer_values(storage.imag(), &selected);
     let storage = IntegerComplexStorage::new(real, imag)
         .expect("paired typed complex storage preserves class and length through find");
     FindValues::IntegerComplex(storage)
@@ -1262,15 +1109,15 @@ fn select_integer_values(storage: &IntegerStorage, indices: &[usize]) -> Integer
 
 fn integer_values_to_value(
     storage: IntegerStorage,
-    output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
 ) -> crate::BuiltinResult<Value> {
-    if storage.len() == 1 && output_provider.is_none() {
+    if storage.len() == 1 && source.is_none() {
         return Ok(Value::Int(integer_storage_value(&storage, 0)));
     }
     let shape = vec![storage.len(), 1];
     let tensor = Tensor::new_integer(storage, shape)
         .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
-    Ok(tensor_to_value(tensor, output_provider))
+    tensor_to_value(tensor, source)
 }
 
 fn integer_storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
@@ -1301,26 +1148,53 @@ fn integer_storage_from_scalar(value: &IntValue) -> IntegerStorage {
 
 fn tensor_to_value(
     tensor: Tensor,
-    output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-) -> Value {
-    if let Some(provider) = output_provider {
-        if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
-            return Value::GpuTensor(handle);
-        }
-    }
-    tensor::tensor_into_value(tensor)
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> crate::BuiltinResult<Value> {
+    // The shared restore boundary takes a native integer tensor, not an Int
+    // scalar. Other host carriers retain the public scalarization convention.
+    let value = if source.is_some() && tensor.integer_storage().is_some() {
+        Value::Tensor(tensor)
+    } else {
+        tensor::tensor_into_value(tensor)
+    };
+    restore_find_value(value, source)
 }
 
 fn complex_tensor_to_value(
     tensor: ComplexTensor,
-    output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-) -> Value {
-    if let Some(provider) = output_provider {
-        if let Ok(handle) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
-            return gpu_helpers::complex_gpu_value(handle);
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> crate::BuiltinResult<Value> {
+    restore_find_value(complex_tensor_into_value(tensor), source)
+}
+
+fn restore_find_value(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+) -> crate::BuiltinResult<Value> {
+    match source {
+        Some(source) => gpu_helpers::restore_class_preserving_value(source, value, BUILTIN_NAME),
+        None => Ok(value),
+    }
+}
+
+fn retire_unpublished_find_values(outputs: Vec<Value>, mut error: RuntimeError) -> RuntimeError {
+    for output in outputs {
+        if let Value::GpuTensor(handle) = output {
+            error = gpu_helpers::reject_gpu_output(handle, error);
         }
     }
-    complex_tensor_into_value(tensor)
+    error
+}
+
+fn find_outputs_alias(outputs: &[Value]) -> bool {
+    outputs.iter().enumerate().any(|(index, output)| {
+        let Value::GpuTensor(handle) = output else {
+            return false;
+        };
+        outputs[..index].iter().any(|previous| {
+            matches!(previous, Value::GpuTensor(other) if handle.shares_allocation_with(other))
+        })
+    })
 }
 
 #[cfg(test)]
@@ -1328,16 +1202,247 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
+    use runmat_accelerate_api::{
+        allocation::WeakAllocationLease,
+        test_support::{RetirementProbe, TestAllocationOwner},
+        AccelProvider, GpuTensorHandle, GpuTensorStorage, HostLogicalTensorView,
+        HostNumericTensorView, HostTensorView, NumericElementType, ProviderExecutionError,
+        ProviderExecutionResult,
+    };
+    use runmat_builtins::{FIND_EXTENSIONS, FIND_INTEGER_CAPABILITIES};
     use runmat_value::{CharArray, IntValue};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FailingFindProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        foreign: TestAllocationOwner,
+        fault: FindFault,
+        calls: AtomicUsize,
+        downloads: AtomicUsize,
+        output_leases: std::sync::Mutex<Vec<WeakAllocationLease>>,
+        foreign_probes: std::sync::Mutex<Vec<RetirementProbe>>,
+        restore_fault: Option<RestoreFault>,
+        restore_calls: AtomicUsize,
+        restore_leases: std::sync::Mutex<Vec<WeakAllocationLease>>,
+        restore_source: std::sync::Mutex<Option<GpuTensorHandle>>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum FindFault {
+        Execution,
+        MissingValues,
+        AliasedInput,
+        WrongShape,
+        WrongClass,
+        ForeignOwner,
+        CrossOutputAlias,
+        ExpiredOutput,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum RestoreFault {
+        Success,
+        SourceAlias,
+        Unproven,
+        AfterEffect,
+        Unsupported,
+        SecondFailure,
+    }
+
+    impl runmat_accelerate_api::AccelProvider for FailingFindProvider {
+        fn upload_numeric_raw(
+            &self,
+            host: &HostNumericTensorView,
+        ) -> ProviderExecutionResult<GpuTensorHandle> {
+            let call = self.restore_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            let Some(fault) = self.restore_fault else {
+                return self.inner.upload_numeric_raw(host);
+            };
+            match fault {
+                RestoreFault::Success => {
+                    let output = self.inner.upload_numeric_raw(host)?;
+                    self.restore_leases
+                        .lock()
+                        .unwrap()
+                        .push(output.allocation_lease().downgrade());
+                    Ok(output)
+                }
+                RestoreFault::SecondFailure if call == 1 => {
+                    let output = self.inner.upload_numeric_raw(host)?;
+                    self.restore_leases
+                        .lock()
+                        .unwrap()
+                        .push(output.allocation_lease().downgrade());
+                    Ok(output)
+                }
+                RestoreFault::SourceAlias => Ok(self
+                    .restore_source
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .expect("protected source")
+                    .clone()),
+                RestoreFault::Unproven => Err(ProviderExecutionError::from(anyhow::anyhow!(
+                    "unproven upload failure"
+                ))
+                .with_unproven_effects()),
+                RestoreFault::AfterEffect | RestoreFault::SecondFailure => {
+                    let allocation = self.foreign.allocate_zeroed(
+                        host.shape.to_vec(),
+                        host.data.element_type(),
+                        host.storage,
+                    )?;
+                    self.foreign_probes.lock().unwrap().push(allocation.probe);
+                    allocation
+                        .handle
+                        .release()
+                        .map_err(ProviderExecutionError::from_source)?;
+                    Err(ProviderExecutionError::from(anyhow::anyhow!(
+                        "post-allocation upload failure"
+                    ))
+                    .after_effect())
+                }
+                RestoreFault::Unsupported => {
+                    Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "pre-effect representation unavailable",
+                    )
+                    .into())
+                }
+            }
+        }
+
+        fn upload(
+            &self,
+            host: &HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+
+        fn download<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.downloads.fetch_add(1, Ordering::SeqCst);
+            self.inner.download(handle)
+        }
+
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+            self.downloads.fetch_add(1, Ordering::SeqCst);
+            self.inner.download_numeric(handle)
+        }
+
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+
+        fn device_info(&self) -> String {
+            self.inner.device_info()
+        }
+
+        fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+            self.inner.precision()
+        }
+
+        fn supports_find(
+            &self,
+            _input: &runmat_accelerate_api::GpuTensorHandle,
+            _limit: Option<usize>,
+            _direction: runmat_accelerate_api::FindDirection,
+        ) -> bool {
+            true
+        }
+
+        fn find(
+            &self,
+            input: &runmat_accelerate_api::GpuTensorHandle,
+            limit: Option<usize>,
+            direction: runmat_accelerate_api::FindDirection,
+        ) -> anyhow::Result<runmat_accelerate_api::ProviderFindResult> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.fault, FindFault::Execution) {
+                return Err(anyhow::anyhow!("deterministic admitted find failure"));
+            }
+            let mut result = self.inner.find(input, limit, direction)?;
+            {
+                let mut leases = self.output_leases.lock().unwrap();
+                leases.extend(
+                    [&result.linear, &result.rows, &result.cols]
+                        .into_iter()
+                        .chain(result.values.iter())
+                        .map(|handle| handle.allocation_lease().downgrade()),
+                );
+            }
+            match self.fault {
+                FindFault::Execution => unreachable!(),
+                FindFault::MissingValues => {
+                    if let Some(values) = result.values.take() {
+                        values.release().expect("release omitted fixture values");
+                    }
+                }
+                FindFault::AliasedInput => {
+                    let alias = input.with_view(input.view().clone())?;
+                    assert_ne!(alias.view_identity(), input.view_identity());
+                    let discarded = std::mem::replace(&mut result.rows, alias);
+                    discarded.release().expect("release replaced fixture rows");
+                }
+                FindFault::WrongShape => {
+                    let count = result.rows.shape()[0];
+                    result.rows = result
+                        .rows
+                        .with_view(result.rows.view().clone().with_shape(vec![1, count]))?;
+                }
+                FindFault::WrongClass => {
+                    let count = result.rows.shape()[0];
+                    let logical = self
+                        .inner
+                        .upload_logical(&HostLogicalTensorView {
+                            data: &vec![1; count],
+                            shape: &[count, 1],
+                        })
+                        .expect("fixture logical output allocation");
+                    let discarded = std::mem::replace(&mut result.rows, logical);
+                    discarded.release().expect("release replaced fixture rows");
+                }
+                FindFault::ForeignOwner | FindFault::ExpiredOutput => {
+                    let count = result.rows.shape()[0];
+                    let allocation = self.foreign.allocate_zeroed(
+                        vec![count, 1],
+                        NumericElementType::F64,
+                        GpuTensorStorage::Real,
+                    )?;
+                    if matches!(self.fault, FindFault::ExpiredOutput) {
+                        allocation.probe.mark_unavailable();
+                    }
+                    self.foreign_probes.lock().unwrap().push(allocation.probe);
+                    let discarded = std::mem::replace(&mut result.rows, allocation.handle);
+                    discarded.release().expect("release replaced fixture rows");
+                }
+                FindFault::CrossOutputAlias => {
+                    let alias = result.linear.with_view(result.linear.view().clone())?;
+                    assert_ne!(alias.view_identity(), result.linear.view_identity());
+                    let discarded = std::mem::replace(&mut result.rows, alias);
+                    discarded.release().expect("release replaced fixture rows");
+                }
+            }
+            Ok(result)
+        }
+    }
 
     fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::find_builtin(value, rest))
+        block_on(super::find_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<FindEval> {
-        block_on(super::evaluate(value, rest))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1347,35 +1452,11 @@ pub(crate) mod tests {
         let value = find_builtin(Value::Tensor(tensor), Vec::new()).expect("find");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn find_type_tracks_known_row_vector_orientation() {
-        assert_eq!(
-            find_type(
-                &[Type::Tensor { shape: None }],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Tensor {
-                shape: Some(vec![None, Some(1)])
-            }
-        );
-        assert_eq!(
-            find_type(
-                &[Type::Tensor {
-                    shape: Some(vec![Some(1), Some(5)])
-                }],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
     }
 
     #[test]
@@ -1414,7 +1495,7 @@ pub(crate) mod tests {
             find_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("find");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1448,11 +1529,65 @@ pub(crate) mod tests {
                 assert_eq!(re, 1.0);
                 assert_eq!(im, 2.0);
             }
-            Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 1]);
-                assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0)]);
-            }
             other => panic!("expected complex result, got {other:?}"),
+        }
+        let single =
+            ComplexTensor::from_f32(vec![(0.0, 0.0), (1.0, 2.0), (0.0, 0.0)], vec![3, 1]).unwrap();
+        let eval = evaluate(Value::ComplexTensor(single), &[]).expect("single complex find");
+        let Value::ComplexTensor(values) = eval.values_value().expect("single values") else {
+            panic!("single complex values must retain a tensor carrier");
+        };
+        assert_eq!(values.shape(), [1, 1]);
+        assert_eq!(values.materialize_f64(), vec![(1.0, 2.0)]);
+
+        // Selection copies only chosen native components, preserving even
+        // subnormals, signed zero and NaN payload bits in either precision.
+        let single = [
+            (0.0, -0.0),
+            (f32::from_bits(1), -0.0),
+            (f32::from_bits(0x7fc0_1234), 3.0),
+            (f32::INFINITY, f32::NEG_INFINITY),
+        ];
+        let double = [
+            (0.0, -0.0),
+            (f64::from_bits(1), -0.0),
+            (f64::from_bits(0x7ff8_0000_0000_1234), 3.0),
+            (f64::INFINITY, f64::NEG_INFINITY),
+        ];
+        for (limit, direction, expected) in [
+            (Some(0), FindDirection::First, &[][..]),
+            (Some(1), FindDirection::First, &[2][..]),
+            (Some(2), FindDirection::Last, &[3, 4][..]),
+            (None, FindDirection::First, &[2, 3, 4][..]),
+            (None, FindDirection::Last, &[4][..]),
+        ] {
+            let options = FindOptions { limit, direction };
+            let input =
+                DataStorage::Complex(ComplexTensor::from_f32(single.to_vec(), vec![2, 2]).unwrap());
+            let result = compute_find(&input, &options);
+            assert_eq!(result.indices, expected);
+            let FindValues::ComplexF32(values) = result.values else {
+                panic!("native single selection must retain its component class");
+            };
+            assert_eq!(values.len(), expected.len());
+            for ((real, imaginary), &index) in values.iter().zip(expected) {
+                let (expected_real, expected_imaginary) = single[index - 1];
+                assert_eq!(real.to_bits(), expected_real.to_bits());
+                assert_eq!(imaginary.to_bits(), expected_imaginary.to_bits());
+            }
+            let input =
+                DataStorage::Complex(ComplexTensor::new(double.to_vec(), vec![2, 2]).unwrap());
+            let result = compute_find(&input, &options);
+            assert_eq!(result.indices, expected);
+            let FindValues::Complex(values) = result.values else {
+                panic!("native double selection must retain its component class");
+            };
+            assert_eq!(values.len(), expected.len());
+            for ((real, imaginary), &index) in values.iter().zip(expected) {
+                let (expected_real, expected_imaginary) = double[index - 1];
+                assert_eq!(real.to_bits(), expected_real.to_bits());
+                assert_eq!(imaginary.to_bits(), expected_imaginary.to_bits());
+            }
         }
     }
 
@@ -1463,12 +1598,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 4.0, 0.0, 7.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = find_builtin(Value::GpuTensor(handle), Vec::new()).expect("find");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.shape(), [2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0]);
         });
     }
@@ -1482,7 +1617,9 @@ pub(crate) mod tests {
                     data: &values,
                     shape: &[2, 2],
                 })
-                .expect("upload f32-owner input");
+                .expect("upload f32-owner input")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("known automatic intent");
 
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("find fallback");
             let Value::Tensor(indices) = eval.linear_value().expect("linear indices") else {
@@ -1496,14 +1633,13 @@ pub(crate) mod tests {
     #[test]
     fn find_resident_logical_value_output_stays_logical_and_resident() {
         test_support::with_test_provider(|provider| {
-            let values = [0.0, 1.0, 0.0, 1.0];
             let handle = provider
-                .upload(&HostTensorView {
-                    data: &values,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 0, 1],
                     shape: &[2, 2],
                 })
                 .expect("upload logical input");
-            let input = gpu_helpers::logical_gpu_value(handle);
+            let input = gpu_helpers::logical_gpu_value(handle).expect("adopt logical producer");
 
             let eval = evaluate(input, &[]).expect("find logical fallback");
             let Value::GpuTensor(values_handle) = eval.values_value().expect("selected values")
@@ -1513,7 +1649,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&values_handle));
             let values =
                 test_support::gather(Value::GpuTensor(values_handle)).expect("gather logical");
-            assert_eq!(values.shape, vec![2, 1]);
+            assert_eq!(values.shape(), [2, 1]);
             assert_eq!(values.materialize_f64(), vec![1.0, 1.0]);
         });
     }
@@ -1545,7 +1681,7 @@ pub(crate) mod tests {
         else {
             panic!("expected native resident indices");
         };
-        assert_eq!(native_indices.device_id, owner.device_id());
+        assert_eq!(native_indices.device_id(), owner.device_id());
 
         let fallback_input = owner
             .upload(&HostTensorView {
@@ -1558,7 +1694,7 @@ pub(crate) mod tests {
         else {
             panic!("expected fallback resident indices");
         };
-        assert_eq!(fallback_indices.device_id, owner.device_id());
+        assert_eq!(fallback_indices.device_id(), owner.device_id());
         assert_eq!(
             test_support::gather(Value::GpuTensor(fallback_indices))
                 .expect("gather fallback indices")
@@ -1577,7 +1713,7 @@ pub(crate) mod tests {
         else {
             panic!("expected resident integer values");
         };
-        assert_eq!(integer_values.device_id, owner.device_id());
+        assert_eq!(integer_values.device_id(), owner.device_id());
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&integer_values),
             Some(runmat_accelerate_api::IntegerElementType::U64)
@@ -1590,19 +1726,295 @@ pub(crate) mod tests {
         );
 
         let logical_input = owner
-            .upload(&HostTensorView {
-                data: &[0.0, 1.0],
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[0, 1],
                 shape: &[1, 2],
             })
             .expect("upload logical input");
-        let logical =
-            evaluate(gpu_helpers::logical_gpu_value(logical_input), &[]).expect("logical find");
+        let logical = evaluate(
+            gpu_helpers::logical_gpu_value(logical_input).expect("adopt logical producer"),
+            &[],
+        )
+        .expect("logical find");
         let Value::GpuTensor(logical_values) = logical.values_value().expect("logical values")
         else {
             panic!("expected resident logical values");
         };
-        assert_eq!(logical_values.device_id, owner.device_id());
+        assert_eq!(logical_values.device_id(), owner.device_id());
         assert!(runmat_accelerate_api::handle_is_logical(&logical_values));
+    }
+
+    #[test]
+    fn admitted_provider_failure_never_replays_find_on_the_host() {
+        let _lock = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(FailingFindProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            foreign: TestAllocationOwner::new(),
+            fault: FindFault::Execution,
+            calls: AtomicUsize::new(0),
+            downloads: AtomicUsize::new(0),
+            output_leases: std::sync::Mutex::new(Vec::new()),
+            foreign_probes: std::sync::Mutex::new(Vec::new()),
+            restore_fault: None,
+            restore_calls: AtomicUsize::new(0),
+            restore_leases: std::sync::Mutex::new(Vec::new()),
+            restore_source: std::sync::Mutex::new(None),
+        }));
+        unsafe { runmat_accelerate_api::register_provider(provider) };
+        let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 4.0, 0.0, 7.0],
+                shape: &[2, 2],
+            })
+            .expect("resident input");
+        let error = match evaluate(Value::GpuTensor(input), &[]) {
+            Ok(_) => panic!("native failure must propagate"),
+            Err(error) => error,
+        };
+        assert_eq!(error.identifier(), FIND_ERROR_PROVIDER.identifier);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn malformed_admitted_find_outputs_are_rejected_without_replay() {
+        let _lock = test_support::accel_test_lock();
+        for fault in [
+            FindFault::MissingValues,
+            FindFault::AliasedInput,
+            FindFault::WrongShape,
+            FindFault::WrongClass,
+            FindFault::ForeignOwner,
+            FindFault::CrossOutputAlias,
+            FindFault::ExpiredOutput,
+        ] {
+            let provider = Box::leak(Box::new(FailingFindProvider {
+                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+                foreign: TestAllocationOwner::new(),
+                fault,
+                calls: AtomicUsize::new(0),
+                downloads: AtomicUsize::new(0),
+                output_leases: std::sync::Mutex::new(Vec::new()),
+                foreign_probes: std::sync::Mutex::new(Vec::new()),
+                restore_fault: None,
+                restore_calls: AtomicUsize::new(0),
+                restore_leases: std::sync::Mutex::new(Vec::new()),
+                restore_source: std::sync::Mutex::new(None),
+            }));
+            unsafe { runmat_accelerate_api::register_provider(provider) };
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 4.0, 0.0, 7.0],
+                    shape: &[2, 2],
+                })
+                .expect("resident input");
+            let error = match evaluate(Value::GpuTensor(input.clone()), &[]) {
+                Ok(_) => panic!("{fault:?}: malformed output must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.identifier(), FIND_ERROR_PROVIDER_OUTPUT.identifier);
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+            assert!(
+                provider
+                    .output_leases
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|lease| lease.acquire().is_none()),
+                "{fault:?}: provider outputs not retired"
+            );
+            for probe in provider.foreign_probes.lock().unwrap().iter() {
+                assert_eq!(
+                    probe.retirements(),
+                    1,
+                    "{fault:?}: foreign output not retired"
+                );
+            }
+            assert!(input.allocation_lease().validate_live().is_ok());
+            input.release().expect("borrowed input remains releasable");
+        }
+    }
+
+    #[test]
+    fn find_restoration_faults_preserve_source_and_never_mask_admitted_failures() {
+        let _lock = test_support::accel_test_lock();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        for fault in [
+            RestoreFault::Success,
+            RestoreFault::SourceAlias,
+            RestoreFault::Unproven,
+            RestoreFault::AfterEffect,
+            RestoreFault::Unsupported,
+            RestoreFault::SecondFailure,
+        ] {
+            let provider = Box::leak(Box::new(FailingFindProvider {
+                inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+                foreign: TestAllocationOwner::new(),
+                fault: FindFault::Execution,
+                calls: AtomicUsize::new(0),
+                downloads: AtomicUsize::new(0),
+                output_leases: std::sync::Mutex::new(Vec::new()),
+                foreign_probes: std::sync::Mutex::new(Vec::new()),
+                restore_fault: Some(fault),
+                restore_calls: AtomicUsize::new(0),
+                restore_leases: std::sync::Mutex::new(Vec::new()),
+                restore_source: std::sync::Mutex::new(None),
+            }));
+            unsafe { runmat_accelerate_api::register_provider(provider) };
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let source = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 4.0, 0.0, 7.0],
+                    shape: &[2, 2],
+                })
+                .expect("resident input")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("known automatic intent");
+            *provider.restore_source.lock().unwrap() = Some(source.clone());
+            let eval = evaluate(Value::GpuTensor(source.clone()), &[Value::from("last")])
+                .expect("host find fallback");
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+            let result = if matches!(fault, RestoreFault::SecondFailure) {
+                eval.output_values(3).map(|_| ())
+            } else {
+                eval.linear_value().map(|value| match fault {
+                    RestoreFault::Success => assert!(matches!(value, Value::GpuTensor(_))),
+                    RestoreFault::Unsupported => assert!(matches!(value, Value::Num(_))),
+                    _ => panic!("{fault:?}: restoration must fail"),
+                })
+            };
+            if matches!(
+                fault,
+                RestoreFault::SourceAlias
+                    | RestoreFault::Unproven
+                    | RestoreFault::AfterEffect
+                    | RestoreFault::SecondFailure
+            ) {
+                assert!(result.is_err(), "{fault:?}: failure was masked");
+            } else {
+                result.expect("successful or certified unsupported restoration");
+            }
+            let expected_uploads = if matches!(fault, RestoreFault::SecondFailure) {
+                2
+            } else {
+                1
+            };
+            assert_eq!(
+                provider.restore_calls.load(Ordering::SeqCst),
+                expected_uploads
+            );
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+            if matches!(fault, RestoreFault::SecondFailure) {
+                assert!(
+                    provider
+                        .restore_leases
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .all(|lease| lease.acquire().is_none()),
+                    "first unpublished output survived"
+                );
+            }
+            for probe in provider.foreign_probes.lock().unwrap().iter() {
+                assert_eq!(probe.retirements(), 1, "post-effect owner was not retired");
+            }
+            assert!(source.allocation_lease().validate_live().is_ok());
+            drop(eval);
+            provider.restore_source.lock().unwrap().take();
+            source.release().expect("borrowed input remains releasable");
+        }
+    }
+
+    #[test]
+    fn admitted_provider_zero_scalar_uses_host_empty_matrix_convention() {
+        let _lock = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        unsafe { runmat_accelerate_api::register_provider(provider) };
+        let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            })
+            .expect("resident scalar");
+        let result = evaluate(Value::GpuTensor(input), &[]).expect("resident find");
+        let Value::GpuTensor(indices) = result.linear_value().expect("linear output") else {
+            panic!("admitted provider must retain a resident output");
+        };
+        assert_eq!(indices.shape(), [0, 0]);
+        assert!(runmat_accelerate_api::same_provider_instance(
+            provider,
+            runmat_accelerate_api::provider_for_handle(&indices).expect("output owner")
+        ));
+    }
+
+    #[test]
+    fn inferred_find_shapes_admit_runtime_scalar_and_orientation_cases() {
+        use runmat_types::{
+            CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+            OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact,
+            ValueKindFact,
+        };
+
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("find")
+            .expect("canonical find catalog entry");
+        let numeric = |shape| {
+            ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                }),
+                shape,
+                StorageFact::Dense,
+            )
+        };
+        let cases = [
+            (vec![1, 1], vec![0.0], Some(LiteralValue::Number(0.0))),
+            (vec![1, 1], vec![7.0], Some(LiteralValue::Number(7.0))),
+            (vec![1, 3], vec![0.0, 2.0, 0.0], None),
+            (vec![3, 1], vec![0.0, 2.0, 0.0], None),
+        ];
+        for (shape, data, literal) in cases {
+            let runtime = compute_find(
+                &DataStorage::Real(Tensor::new(data, shape.clone()).expect("input")),
+                &FindOptions::default(),
+            )
+            .linear_tensor()
+            .expect("linear runtime result");
+            for requested in [
+                RequestedOutputCount::One,
+                RequestedOutputCount::CurrentFunctionNargout,
+            ] {
+                let inferred = runmat_builtins::infer_catalog_call(
+                    entry,
+                    &CallRequest {
+                        arguments: vec![numeric(ShapeFact::from(
+                            shape.iter().copied().map(Some).collect::<Vec<_>>(),
+                        ))],
+                        literals: LiteralContext::new(literal.clone().into_iter().collect()),
+                        outputs: OutputSelection::new(requested),
+                    },
+                );
+                let dims = inferred.outputs[0]
+                    .shape
+                    .known_dims()
+                    .expect("ranked result");
+                assert_eq!(dims.len(), runtime.shape().len(), "input {shape:?}");
+                assert!(
+                    dims.iter()
+                        .zip(runtime.shape())
+                        .all(|(known, actual)| known.is_none_or(|known| known == *actual)),
+                    "input {shape:?}, output mode {requested:?}, inferred {dims:?}, runtime {:?}",
+                    runtime.shape()
+                );
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1612,13 +2024,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 4.0, 5.0, 7.0], vec![1, 4]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = find_builtin(Value::GpuTensor(handle), Vec::new()).expect("find");
             assert!(matches!(result, Value::GpuTensor(_)));
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 3.0, 4.0]);
         });
     }
@@ -1643,15 +2055,15 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("evaluate");
 
         let rows = test_support::gather(eval.row_value().expect("rows")).expect("gather rows");
-        assert_eq!(rows.shape, vec![3, 1]);
+        assert_eq!(rows.shape(), [3, 1]);
         assert_eq!(rows.materialize_f64(), vec![2.0, 1.0, 2.0]);
 
         let cols = test_support::gather(eval.column_value().expect("cols")).expect("gather cols");
-        assert_eq!(cols.shape, vec![3, 1]);
+        assert_eq!(cols.shape(), [3, 1]);
         assert_eq!(cols.materialize_f64(), vec![1.0, 2.0, 3.0]);
 
         let vals = test_support::gather(eval.values_value().expect("vals")).expect("gather vals");
-        assert_eq!(vals.shape, vec![3, 1]);
+        assert_eq!(vals.shape(), [3, 1]);
         assert_eq!(vals.materialize_f64(), vec![2.0, 3.0, 6.0]);
     }
 
@@ -1668,7 +2080,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected typed tensor values");
         };
-        assert_eq!(values.shape, vec![2, 1]);
+        assert_eq!(values.shape(), [2, 1]);
         assert_eq!(
             values.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
@@ -1684,7 +2096,7 @@ pub(crate) mod tests {
 
         match value {
             Value::Tensor(indices) => {
-                assert_eq!(indices.shape, vec![2, 1]);
+                assert_eq!(indices.shape(), [2, 1]);
                 assert_eq!(indices.materialize_f64(), vec![2.0, 4.0]);
             }
             other => panic!("expected index tensor, got {other:?}"),
@@ -1723,8 +2135,8 @@ pub(crate) mod tests {
             panic!("expected typed complex tensor values");
         };
         let storage = values.integer_storage().expect("typed complex values");
-        assert_eq!(storage.real, IntegerStorage::I16(vec![-7, 0, 9]));
-        assert_eq!(storage.imag, IntegerStorage::I16(vec![0, 5, 0]));
+        assert_eq!(storage.real(), &IntegerStorage::I16(vec![-7, 0, 9]));
+        assert_eq!(storage.imag(), &IntegerStorage::I16(vec![0, 5, 0]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1807,6 +2219,56 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn find_sparse_complex_uses_both_components_and_preserves_values() {
+        let sparse = runmat_value::SparseTensor::new_complex(
+            3,
+            2,
+            vec![0, 3, 4],
+            vec![0, 1, 2, 1],
+            vec![(0.0, 2.0), (0.0, 0.0), (3.0, 0.0), (-4.0, 5.0)],
+        )
+        .expect("complex sparse");
+        let eval = evaluate(Value::SparseTensor(sparse), &[]).expect("find sparse");
+        let linear = tensor::value_into_tensor_for("find", eval.linear_value().expect("linear"))
+            .expect("linear tensor");
+        assert_eq!(linear.materialize_f64(), vec![1.0, 3.0, 5.0]);
+        let Value::ComplexTensor(values) = eval.values_value().expect("values") else {
+            panic!("expected complex sparse find values");
+        };
+        assert_eq!(
+            values.materialize_f64(),
+            vec![(0.0, 2.0), (3.0, 0.0), (-4.0, 5.0)]
+        );
+    }
+
+    #[test]
+    fn find_sparse_complex_single_preserves_component_class() {
+        let sparse = runmat_value::SparseTensor::new_complex_f32(
+            2,
+            1,
+            vec![0, 2],
+            vec![0, 1],
+            vec![(0.0, 2.0), (3.0, -4.0)],
+        )
+        .expect("complex single sparse");
+        let eval = evaluate(Value::SparseTensor(sparse), &[]).expect("find sparse");
+        let Value::ComplexTensor(values) = eval.values_value().expect("values") else {
+            panic!("expected complex sparse find values");
+        };
+        assert_eq!(values.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(
+            values.as_f32_slice(),
+            Some(
+                [
+                    runmat_value::ComplexElement(0.0, 2.0),
+                    runmat_value::ComplexElement(3.0, -4.0),
+                ]
+                .as_slice()
+            )
+        );
+    }
+
+    #[test]
     fn find_integer_selection_preserves_every_integer_class() {
         let cases = [
             (
@@ -1880,7 +2342,7 @@ pub(crate) mod tests {
         .expect("find");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 4.0]);
             }
             Value::Num(_) => panic!("expected column vector"),
@@ -1911,7 +2373,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected empty tensor");
             };
-            assert_eq!(indices.shape, expected_shape);
+            assert_eq!(indices.shape(), expected_shape);
             assert!(indices.materialize_f64().is_empty());
         }
     }
@@ -1925,7 +2387,7 @@ pub(crate) mod tests {
             let Value::Tensor(indices) = find_builtin(input, Vec::new()).expect("find") else {
                 panic!("expected empty tensor");
             };
-            assert_eq!(indices.shape, vec![0, 0]);
+            assert_eq!(indices.shape(), [0, 0]);
         }
     }
 
@@ -2003,7 +2465,9 @@ pub(crate) mod tests {
                     ]),
                     shape: &[1, 4],
                 })
-                .expect("upload integer row vector");
+                .expect("upload integer row vector")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("known automatic intent permits host double indices");
             let eval = evaluate(
                 Value::GpuTensor(handle),
                 &[Value::Int(IntValue::I32(2)), Value::from("last")],
@@ -2014,7 +2478,7 @@ pub(crate) mod tests {
             let Value::Tensor(linear) = linear else {
                 panic!("double indices must fall back to host storage");
             };
-            assert_eq!(linear.shape, vec![1, 2]);
+            assert_eq!(linear.shape(), [1, 2]);
             assert_eq!(linear.materialize_f64(), vec![3.0, 4.0]);
 
             let values = eval.values_value().expect("selected values");
@@ -2026,7 +2490,7 @@ pub(crate) mod tests {
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
             let values = test_support::gather(values).expect("gather selected values");
-            assert_eq!(values.shape, vec![2, 1]);
+            assert_eq!(values.shape(), [2, 1]);
             assert_eq!(
                 values.integer_storage(),
                 Some(&IntegerStorage::U64(vec![7, u64::MAX]))
@@ -2037,7 +2501,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_char_array_supports_nonzero_codes() {
-        let chars = CharArray::new(vec!['\0', 'A', '\0'], 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['\0', 'A', '\0'], 1, 3).unwrap();
         let result = find_builtin(Value::CharArray(chars), Vec::new()).expect("find");
         match result {
             Value::Num(n) => assert_eq!(n, 2.0),
@@ -2053,7 +2517,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 4.0, 5.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
@@ -2089,7 +2553,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate(Value::GpuTensor(handle), &[]).expect("gpu evaluate");

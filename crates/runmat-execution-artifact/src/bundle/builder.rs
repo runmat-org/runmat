@@ -5,7 +5,7 @@ use runmat_package::{FrozenProject, FrozenProjectHandoff};
 
 use crate::bundle::{
     BuildResourceDeclaration, BundleCallable, BundleCodeClosure, BundleManifest,
-    CompiledPackageClosure, ExecutionBundle, ProjectRevisionRecord,
+    CompiledPackageClosure, ExecutionBundle, ForeignArtifactClosure, ProjectRevisionRecord,
     EXECUTION_BUNDLE_SCHEMA_VERSION,
 };
 use crate::{
@@ -46,6 +46,11 @@ pub struct ExecutionBundleBuilder<'a, R> {
     materializations: Vec<Materialization>,
     resources: BuildResourceDeclaration,
     code_closure: CodeClosureMode,
+    portable_environment: Vec<(String, String)>,
+    foreign_objects: Vec<LogicalObject>,
+    foreign_policy_objects: Vec<LogicalObject>,
+    project_runtime_policy_object: Option<LogicalObject>,
+    foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
 
 impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
@@ -77,6 +82,11 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                 scratch_bytes: 1024 * 1024 * 1024,
             },
             code_closure: CodeClosureMode::SourceProject,
+            portable_environment: Vec::new(),
+            foreign_objects: Vec::new(),
+            foreign_policy_objects: Vec::new(),
+            project_runtime_policy_object: None,
+            foreign_artifact_closures: Vec::new(),
         })
     }
 
@@ -104,6 +114,48 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         self
     }
 
+    pub fn with_project_runtime_policy_object(
+        mut self,
+        object: LogicalObject,
+    ) -> ArtifactResult<Self> {
+        if self.project_runtime_policy_object.is_some() {
+            return Err(ArtifactError::Invalid(
+                "bundle already carries a project runtime policy".into(),
+            ));
+        }
+        crate::validate_project_runtime_policy_object(&object)?;
+        self.project_runtime_policy_object = Some(object);
+        Ok(self)
+    }
+
+    pub fn with_foreign_object(mut self, object: LogicalObject) -> ArtifactResult<Self> {
+        if object.descriptor.namespace != ObjectNamespace::ForeignArtifact {
+            return Err(ArtifactError::Invalid(
+                "foreign bundle object has the wrong namespace".into(),
+            ));
+        }
+        object.validate()?;
+        self.foreign_objects.push(object);
+        Ok(self)
+    }
+
+    /// Attach only the exact bounded opaque policy object referenced by a
+    /// recipe. The producer remains responsible for setting that descriptor.
+    pub fn with_foreign_policy_object(mut self, object: LogicalObject) -> ArtifactResult<Self> {
+        crate::object::validate_foreign_policy_object(&object)?;
+        self.foreign_policy_objects.push(object);
+        Ok(self)
+    }
+
+    pub fn with_foreign_artifact_closure(
+        mut self,
+        closure: ForeignArtifactClosure,
+    ) -> ArtifactResult<Self> {
+        closure.validate()?;
+        self.foreign_artifact_closures.push(closure);
+        Ok(self)
+    }
+
     /// Package an already compiled program without source files or a project
     /// handoff. The immutable program revision and sorted package identities
     /// remain in the bundle closure, so workers can validate the exact graph
@@ -113,15 +165,27 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         self
     }
 
+    /// Freeze explicitly selected nonsecret values. Never collects ambient process variables.
+    pub fn with_portable_environment(
+        mut self,
+        entries: Vec<(String, String)>,
+    ) -> ArtifactResult<Self> {
+        crate::environment::validate(&entries)?;
+        self.portable_environment = entries;
+        Ok(self)
+    }
+
     pub fn build(mut self) -> ArtifactResult<ExecutionBundle> {
         if self.code_closure == CodeClosureMode::Compiled
             && (self.materializations.is_empty()
                 || self.materializations.iter().any(|materialization| {
                     !matches!(
                         materialization.form,
-                        ExecutableForm::ExecutableUnitV3
+                        ExecutableForm::ExecutableUnitV4
                             | ExecutableForm::NativeObjectV1
                             | ExecutableForm::MeshingWorkload
+                            | ExecutableForm::AnalysisWorkload
+                            | ExecutableForm::GeometryWorkload
                     )
                 }))
         {
@@ -130,7 +194,15 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                     .into(),
             ));
         }
-        let mut objects = Vec::new();
+        let mut objects = std::mem::take(&mut self.foreign_objects);
+        objects.extend(std::mem::take(&mut self.foreign_policy_objects));
+        let project_runtime_policy = self
+            .project_runtime_policy_object
+            .as_ref()
+            .map(|object| object.descriptor.clone());
+        if let Some(object) = self.project_runtime_policy_object.take() {
+            objects.push(object);
+        }
         let mut callables = Vec::new();
         let code_closure = match self.code_closure {
             CodeClosureMode::SourceProject => {
@@ -172,7 +244,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                     }
                 }
                 BundleCodeClosure::SourceProject {
-                    handoff: project_handoff,
+                    handoff: Box::new(project_handoff),
                 }
             }
             CodeClosureMode::Compiled => {
@@ -199,8 +271,15 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         callables.sort();
         let source_descriptors = objects
             .iter()
+            .filter(|object| object.descriptor.namespace == ObjectNamespace::ProgramSource)
             .map(|object| object.descriptor.clone())
             .collect::<Vec<_>>();
+        let foreign_artifacts = objects
+            .iter()
+            .filter(|object| object.descriptor.namespace == ObjectNamespace::ForeignArtifact)
+            .map(|object| object.descriptor.clone())
+            .collect::<Vec<_>>();
+        self.foreign_artifact_closures.sort();
         for materialization in &mut self.materializations {
             attach_source_closure(
                 &mut materialization.recipe,
@@ -242,12 +321,15 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             },
             code_closure,
             sources: source_descriptors,
+            foreign_artifacts,
+            foreign_artifact_closures: self.foreign_artifact_closures,
+            project_runtime_policy,
             callables,
             recipes,
             artifacts,
             requested_capabilities: Default::default(),
             resources: self.resources,
-            portable_environment: Vec::new(),
+            portable_environment: self.portable_environment,
         };
         let bundle = ExecutionBundle { manifest, objects };
         bundle.validate()?;

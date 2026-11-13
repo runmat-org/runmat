@@ -7,6 +7,11 @@ pub(crate) mod diag;
 pub(crate) mod flip;
 pub(crate) mod fliplr;
 pub(crate) mod flipud;
+mod error;
+mod gpu_reshape;
+mod triangular_character;
+#[cfg(test)]
+mod structural_provider_tests;
 pub(crate) mod horzcat;
 pub(crate) mod ipermute;
 pub(crate) mod kron;

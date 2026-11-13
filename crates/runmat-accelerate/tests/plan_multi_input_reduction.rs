@@ -77,7 +77,7 @@ fn plan_collects_two_parents_for_mul_before_sum_dim1() {
             id: v_sum,
             origin: ValueOrigin::Unknown,
             ty: runmat_builtins::Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(16)]), // sum over rows -> vector of cols
+            shape: ShapeInfo::Tensor(vec![Some(1), Some(16)]),
             constant: None,
         },
     ];
@@ -95,7 +95,8 @@ fn plan_collects_two_parents_for_mul_before_sum_dim1() {
     let sum_node = AccelNode {
         id: 1,
         label: AccelNodeLabel::Builtin {
-            name: "sum".to_string(),
+            name: "sum".into(),
+            origin: runmat_accelerate::graph::FusionCallOrigin::named("sum"),
         },
         category: AccelOpCategory::Reduction,
         inputs: vec![v_mul, v_dim],
@@ -143,6 +144,19 @@ fn plan_collects_two_parents_for_mul_before_sum_dim1() {
         .iter()
         .find(|g| g.group.kind.is_reduction())
         .expect("reduction group plan");
+
+    // Detection currently retains a materialized producer boundary. A
+    // singleton reduction must not borrow an external producer's expression.
+    assert_eq!(red.inputs, vec![v_mul]);
+    assert_eq!(red.group.nodes, vec![1]);
+
+    // Test the two-parent contract only when that producer is actually
+    // retained inside this reduction group, not merely present in the graph.
+    let mut retained = red.group.clone();
+    retained.nodes = vec![0, 1];
+    retained.span.start = 0;
+    let retained_plan = FusionPlan::from_graph(&graph, &[retained]);
+    let red = &retained_plan.groups[0];
 
     // reduction_data should be the mul output
     assert_eq!(

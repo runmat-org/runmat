@@ -23,7 +23,10 @@ pub(in super::super) fn centroid_interior_refill_candidate(
     }
     let node = ConstrainedCavityNode {
         node_id: next_cavity_node_id(cavity),
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
     };
     match star_refill_candidate_with_rejection_reason(cavity, boundary_nodes, node.clone(), options)
     {

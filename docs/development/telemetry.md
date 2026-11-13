@@ -1,5 +1,9 @@
 # Telemetry
 
+User-owned OpenTelemetry collector export is a separate facility configured by
+`[logging.otel]`; see [the logging host contract](../../crates/runmat-logging/README.md).
+Its traces/logs switch and this product-telemetry switch do not affect each other.
+
 RunMat telemetry exists to answer a small set of product and runtime health questions: whether installs are succeeding by OS and architecture, how often acceleration and JIT execution are active, and where parser, compiler, runtime, GPU, or fusion failures happen often enough to prioritize.
 
 The telemetry contract is intentionally narrow. Runtime events carry bounded metadata, counters, and error classes. They do not carry source code, tensor values, file contents, file paths, environment variables, shell history, stack traces, or workspace data.

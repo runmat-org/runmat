@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_hir::{FunctionArgumentValidation, FunctionId};
 use runmat_types::{
-    CertaintyFact, DynamicReason, FactJoin, FunctionArgDim, FunctionArgValidator, NumericClass,
-    NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    standard, CertaintyFact, ClassIdentity, DynamicReason, FactJoin, FunctionArgDim,
+    FunctionArgValidator, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 use crate::{MirAssembly, MirBody};
@@ -11,7 +12,7 @@ use crate::{MirAssembly, MirBody};
 use super::{call_graph, flow};
 use crate::analysis::inference::FunctionSummary;
 
-const MAX_SUMMARY_UPDATES: usize = 24;
+pub(super) const MAX_SUMMARY_UPDATES: usize = 24;
 
 pub(crate) struct ProgramAnalysis {
     pub summaries: BTreeMap<FunctionId, FunctionSummary>,
@@ -83,11 +84,16 @@ pub(crate) fn analyze_program(assembly: &MirAssembly) -> ProgramAnalysis {
                 program_function,
                 parameters.get(function).map_or(&[], Vec::as_slice),
                 captures.get(function).map_or(&[], Vec::as_slice),
+                super::super::constructor_entry::instance_output_local(assembly, body),
                 &summaries,
             );
             for observation in &result.calls {
                 if let Some(expected) = declared_parameters.get(&observation.callee) {
-                    collect_argument_diagnostics(observation, expected, &mut diagnostics);
+                    let source = assembly
+                        .functions
+                        .get(function)
+                        .map(|metadata| metadata.source);
+                    collect_argument_diagnostics(observation, expected, source, &mut diagnostics);
                 }
                 let Some(target) = parameters.get_mut(&observation.callee) else {
                     continue;
@@ -156,7 +162,11 @@ pub(crate) fn analyze_program(assembly: &MirAssembly) -> ProgramAnalysis {
 fn collect_argument_diagnostics(
     observation: &flow::CallObservation,
     expected: &[ValueFact],
-    diagnostics: &mut BTreeMap<(usize, usize, usize), crate::MirDiagnostic>,
+    source: Option<runmat_types::ProgramSourceId>,
+    diagnostics: &mut BTreeMap<
+        (Option<runmat_types::ProgramSourceId>, usize, usize, usize),
+        crate::MirDiagnostic,
+    >,
 ) {
     for (index, (argument, expected)) in observation.arguments.iter().zip(expected).enumerate() {
         let kind_mismatch = match (&argument.kind, &expected.kind) {
@@ -180,20 +190,25 @@ fn collect_argument_diagnostics(
             .copied()
             .unwrap_or(observation.span);
         diagnostics
-            .entry((span.start, span.end, index))
+            .entry((source, span.start, span.end, index))
             .or_insert_with(|| {
-                crate::MirDiagnostic::new(
+                let diagnostic = crate::MirDiagnostic::new(
                     "RM-MIR0012",
                     crate::MirDiagnosticSeverity::Error,
                     "argument is incompatible with the callee's arguments block",
                     span,
                 )
+                .with_runtime_check()
                 .with_primary_label(format!(
                     "argument {} cannot satisfy its declared contract",
                     index + 1
                 ))
                 .with_help("pass a value with the declared class and shape")
-                .with_category("argument-validation")
+                .with_category("argument-validation");
+                match source {
+                    Some(source) => diagnostic.with_source(source),
+                    None => diagnostic,
+                }
             });
     }
 }
@@ -305,30 +320,22 @@ fn validation_fact(validation: &FunctionArgumentValidation) -> ValueFact {
 }
 
 fn class_fact(class: &str) -> Option<ValueKindFact> {
-    let numeric = match class.to_ascii_lowercase().as_str() {
-        "double" => Some(NumericClass::Double),
-        "single" => Some(NumericClass::Single),
-        "int8" => Some(NumericClass::Int8),
-        "uint8" => Some(NumericClass::UInt8),
-        "int16" => Some(NumericClass::Int16),
-        "uint16" => Some(NumericClass::UInt16),
-        "int32" => Some(NumericClass::Int32),
-        "uint32" => Some(NumericClass::UInt32),
-        "int64" => Some(NumericClass::Int64),
-        "uint64" => Some(NumericClass::UInt64),
-        _ => None,
-    };
+    let identity = ClassIdentity::new(class.to_ascii_lowercase()).ok()?;
+    let numeric = NumericClass::from_class_identity(&identity);
     if let Some(class) = numeric {
         return Some(ValueKindFact::Numeric(NumericFact {
             class,
             domain: NumericDomain::Real,
         }));
     }
-    match class.to_ascii_lowercase().as_str() {
-        "logical" => Some(ValueKindFact::Logical),
-        "char" => Some(ValueKindFact::Character),
-        "string" => Some(ValueKindFact::String),
-        _ => None,
+    if identity.is(standard::LOGICAL) {
+        Some(ValueKindFact::Logical)
+    } else if identity.is(standard::CHAR) {
+        Some(ValueKindFact::Character)
+    } else if identity.is(standard::STRING) {
+        Some(ValueKindFact::String)
+    } else {
+        None
     }
 }
 

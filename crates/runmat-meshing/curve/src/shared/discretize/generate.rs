@@ -1,6 +1,5 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator,
-    GeometryEvaluationControl, ParameterRange,
+    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl, ParameterRange,
 };
 
 use crate::shared::{
@@ -16,13 +15,16 @@ use super::{
     error::{edge_error, geometry_error, require_parameter_range, validate_options},
     pcurves::face_uses_for_parameters,
     sampling::{interval_evidence, EvaluatedPoint, EvaluationCache},
-    types::{CurveMetricField, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext},
+    types::{
+        CurveMetricField, ExactFacePcurveEvaluator, SharedCurveDiscretizationOptions,
+        SharedCurveEvaluationContext,
+    },
 };
 
 pub fn discretize_shared_curves(
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
+    pcurves: &dyn ExactFacePcurveEvaluator,
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
@@ -75,14 +77,7 @@ pub(crate) fn discretize_edge_with_parameters(
                 "a degenerate exact edge cannot accept an interior mesh split",
             ));
         }
-        return discretize_degenerate_edge(
-            context.topology,
-            edge,
-            context.curves,
-            context.pcurves,
-            context.control,
-            options,
-        );
+        return discretize_degenerate_edge(context, edge, options);
     }
     let parameter_range = context
         .curves
@@ -130,7 +125,8 @@ pub(crate) fn discretize_edge_with_parameters(
         ));
     }
 
-    let arc_error = options.arc_length_absolute_error_m / (samples.len() - 1) as f64;
+    let arc_error =
+        options.arc_length_absolute_error_m.canonical_value() / (samples.len() - 1) as f64;
     let mut arc_length_m = 0.0;
     let mut nodes = Vec::with_capacity(samples.len());
     for (index, sample) in samples.iter().enumerate() {
@@ -170,8 +166,11 @@ pub(crate) fn discretize_edge_with_parameters(
             node_id,
             source_vertex_id,
             parameter: sample.parameter,
-            arc_length_m,
-            coordinates_m,
+            arc_length_m: runmat_types::physical::Length::new(arc_length_m),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         });
     }
 
@@ -179,15 +178,7 @@ pub(crate) fn discretize_edge_with_parameters(
         .iter()
         .map(|sample| sample.parameter)
         .collect::<Vec<_>>();
-    let face_uses = face_uses_for_parameters(
-        context.topology,
-        edge,
-        context.pcurves,
-        context.control,
-        parameter_range,
-        &parameters,
-        options.pcurve_absolute_error,
-    )?;
+    let face_uses = face_uses_for_parameters(context, edge, parameter_range, &parameters, options)?;
 
     Ok(SharedCurve {
         source_edge_id: edge.id.clone(),
@@ -237,7 +228,11 @@ fn subdivide(
     options: SharedCurveDiscretizationOptions,
 ) -> Result<(), SharedCurveError> {
     let evidence = interval_evidence(cache, left, right)?;
-    let violates = evidence.chordal_deviation_m > options.resolution.maximum_chordal_deviation_m
+    let violates = evidence.chordal_deviation_m
+        > options
+            .resolution
+            .maximum_chordal_deviation_m
+            .canonical_value()
         || evidence.tangent_change_rad > options.resolution.maximum_tangent_change_rad
         || evidence.metric_length > options.resolution.maximum_metric_edge_length;
     if violates {
@@ -283,7 +278,9 @@ fn resolution_evidence(
         maximum_metric_edge_length = maximum_metric_edge_length.max(evidence.metric_length);
     }
     Ok(CurveResolutionEvidence {
-        maximum_chordal_deviation_m,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+            maximum_chordal_deviation_m,
+        ),
         maximum_tangent_change_rad,
         minimum_metric_edge_length,
         maximum_metric_edge_length,

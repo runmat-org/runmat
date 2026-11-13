@@ -24,11 +24,16 @@ pub fn trace_load_var(pc: usize, var_index: usize, value: &Value) {
     if env_flag("RUNMAT_DEBUG_VARS") {
         match value {
             Value::Tensor(t) => {
-                eprintln!("[vm] LoadVar var={} Tensor shape={:?}", var_index, t.shape)
+                eprintln!(
+                    "[vm] LoadVar var={} Tensor shape={:?}",
+                    var_index,
+                    t.shape()
+                )
             }
             Value::GpuTensor(h) => eprintln!(
                 "[vm] LoadVar var={} GpuTensor shape={:?}",
-                var_index, h.shape
+                var_index,
+                h.shape()
             ),
             _ => {}
         }
@@ -39,13 +44,13 @@ pub fn trace_load_var(pc: usize, var_index: usize, value: &Value) {
                 "[vm] LoadVar GPU tensor pc={} var={} shape={:?}",
                 pc,
                 var_index,
-                h.shape
+                h.shape()
             ),
             Value::Tensor(t) => log::debug!(
                 "[vm] LoadVar tensor pc={} var={} shape={:?}",
                 pc,
                 var_index,
-                t.shape
+                t.shape()
             ),
             _ => {}
         }
@@ -56,11 +61,16 @@ pub fn trace_store_var(pc: usize, var_index: usize, value: &Value) {
     if env_flag("RUNMAT_DEBUG_VARS") {
         match value {
             Value::Tensor(t) => {
-                eprintln!("[vm] StoreVar var={} Tensor shape={:?}", var_index, t.shape)
+                eprintln!(
+                    "[vm] StoreVar var={} Tensor shape={:?}",
+                    var_index,
+                    t.shape()
+                )
             }
             Value::GpuTensor(h) => eprintln!(
                 "[vm] StoreVar var={} GpuTensor shape={:?}",
-                var_index, h.shape
+                var_index,
+                h.shape()
             ),
             _ => {}
         }
@@ -91,13 +101,13 @@ pub fn trace_store_var(pc: usize, var_index: usize, value: &Value) {
                 "[vm] StoreVar GPU tensor pc={} var={} shape={:?}",
                 pc,
                 var_index,
-                h.shape
+                h.shape()
             ),
             Value::Tensor(t) => log::debug!(
                 "[vm] StoreVar tensor pc={} var={} shape={:?}",
                 pc,
                 var_index,
-                t.shape
+                t.shape()
             ),
             _ => {}
         }

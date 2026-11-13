@@ -3,19 +3,24 @@ mod test_helpers;
 
 use test_helpers::execute_source;
 
+fn is_char_row(value: &runmat_value::Value, text: &str) -> bool {
+    matches!(value, runmat_value::Value::CharArray(chars)
+        if chars.shape() == [1, text.encode_utf16().count()]
+            && chars.data().iter().map(|unit| unit.raw()).eq(text.encode_utf16()))
+}
+
 #[test]
 fn error_identifier_and_catch() {
     // Emit the message and ensure identifier/message are preserved exactly.
     let vars = execute_source(
-        "try; error(\"RunMat:domainError\", \"bad\"); catch e; id = e.identifier; msg = e.message; out_exc = e; end",
+        "try; error(\"RunMat:domainError\", \"bad\"); catch e; id = e.identifier; msg = e.message; combined = [e.identifier ':' e.message]; out_exc = e; end",
     )
     .unwrap();
-    let has_id = vars
+    let has_id = vars.iter().any(|v| is_char_row(v, "RunMat:domainError"));
+    let has_msg = vars.iter().any(|v| is_char_row(v, "bad"));
+    let has_combined = vars
         .iter()
-        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:domainError"));
-    let has_msg = vars
-        .iter()
-        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "bad"));
+        .any(|v| is_char_row(v, "RunMat:domainError:bad"));
     let has_exc = vars.iter().any(|v| {
         matches!(
             v,
@@ -23,7 +28,7 @@ fn error_identifier_and_catch() {
                 if me.identifier == "RunMat:domainError" && me.message == "bad"
         )
     });
-    assert!(has_exc || (has_id && has_msg));
+    assert!(has_exc && has_id && has_msg && has_combined);
 }
 
 #[test]
@@ -38,6 +43,37 @@ fn nested_try_catch_rethrow() {
 }
 
 #[test]
+fn rethrow_shorthand_uses_only_the_current_lexical_catch() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("try; try; error('RunMat:outer','outer'); catch; try; error('RunMat:inner','inner'); catch; inner_id = 'RunMat:inner'; end; rethrow(); end; catch final; observed = final.identifier; end").unwrap();
+    assert!(vars.iter().any(|value| is_char_row(value, "RunMat:outer")));
+}
+
+#[test]
+fn rethrow_shorthand_rejects_stale_catch_after_exit() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let err = execute_source("try; error('RunMat:prior','prior'); catch; end; rethrow();")
+        .expect_err("catch authority must end at lexical exit");
+    assert_eq!(err.identifier(), Some("RunMat:rethrow:NoActiveCatch"));
+}
+
+#[test]
+fn indirect_rethrow_shorthand_preserves_original_exception() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("try; try; error('RunMat:indirect','original'); catch; feval('rethrow'); end; catch observed; id = observed.identifier; end").unwrap();
+    assert!(vars
+        .iter()
+        .any(|value| is_char_row(value, "RunMat:indirect")));
+}
+
+#[test]
+fn handle_rethrow_shorthand_inherits_current_catch() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("try; try; error('RunMat:handle','original'); catch; callback = @rethrow; callback(); end; catch observed; id = observed.identifier; end").unwrap();
+    assert!(vars.iter().any(|value| is_char_row(value, "RunMat:handle")));
+}
+
+#[test]
 fn catch_and_multi_assign_propagation() {
     // Ensure catch-bound exception can be read and subsequent assignments proceed
     let vars = execute_source(
@@ -49,7 +85,7 @@ fn catch_and_multi_assign_propagation() {
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs()<1e-9));
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
+        .any(|v| is_char_row(v, "RunMat:IndexOutOfBounds"));
     assert!(has_ok && has_id);
 }
 
@@ -66,17 +102,20 @@ fn dot_access_identifier_and_message() {
     assert!(catch_ran, "catch block did not run");
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
-    let has_msg = vars
-        .iter()
-        .any(|v| matches!(v, runmat_value::Value::String(s) if !s.is_empty() && s != "RunMat:IndexOutOfBounds"));
+        .any(|v| is_char_row(v, "RunMat:IndexOutOfBounds"));
+    let has_msg = vars.iter().any(|v| {
+        matches!(v, runmat_value::Value::CharArray(chars)
+            if chars.shape().first() == Some(&1)
+                && !chars.data().is_empty()
+                && !chars.data().iter().map(|unit| unit.raw()).eq("RunMat:IndexOutOfBounds".encode_utf16()))
+    });
     assert!(
         has_id,
-        "err.identifier did not produce a String via dot access"
+        "err.identifier did not produce a character row via dot access"
     );
     assert!(
         has_msg,
-        "err.message did not produce a String via dot access"
+        "err.message did not produce a character row via dot access"
     );
 }
 
@@ -92,7 +131,7 @@ fn catch_index_error_and_continue() {
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs()<1e-9));
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:IndexOutOfBounds"));
+        .any(|v| is_char_row(v, "RunMat:IndexOutOfBounds"));
     assert!(has_ok && has_id);
 }
 
@@ -112,9 +151,9 @@ fn assert_compiled_integer_conditions_and_formatting_are_exact() {
             >= 4,
         "missing one or more assert failure-mode sentinels: {vars:?}"
     );
-    assert!(vars.iter().any(
-        |value| matches!(value, runmat_value::Value::String(text) if text == "wide=9007199254740993")
-    ));
+    assert!(vars
+        .iter()
+        .any(|value| is_char_row(value, "wide=9007199254740993")));
 
     let err = execute_source("out = assert(true);").expect_err("assert has no public output");
     assert_eq!(err.identifier(), Some("RunMat:assertion:TooManyOutputs"));

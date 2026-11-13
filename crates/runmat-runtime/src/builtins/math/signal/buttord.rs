@@ -1,12 +1,11 @@
 //! MATLAB-compatible `buttord` Butterworth order selection.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, BUTTORD_COMPLEX_FREQUENCY_EXTENSION, BUTTORD_ERROR_ARG_COUNT,
+    BUTTORD_ERROR_INTERNAL, BUTTORD_ERROR_INVALID_ATTENUATION, BUTTORD_ERROR_INVALID_FREQUENCY,
+    BUTTORD_ERROR_INVALID_OPTION, BUTTORD_ERROR_TOO_MANY_OUTPUTS, BUTTORD_GPU_INPUT_EXTENSION,
+    BUTTORD_INTEGER_ATTENUATION_EXTENSION, BUTTORD_INTEGER_FREQUENCY_EXTENSION,
+    BUTTORD_LOGICAL_ATTENUATION_EXTENSION, BUTTORD_LOGICAL_FREQUENCY_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -15,14 +14,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::signal::common::real_vector_to_row_value;
+use crate::builtins::math::signal::common::{real_vector_to_row_value, SignalCooperation};
 use crate::builtins::math::signal::order_selection::{
     checked_order, classify_kind, db_excess, db_excess_log_ratio, find_natural_frequency,
     option_text, parse_positive_db, real_edges, transform_edges, unwarp_frequency,
-    validate_critical_frequencies, FilterKind, OrderFamily,
+    validate_critical_frequencies, FilterKind, OrderEdgeError, OrderFamily,
 };
-use crate::builtins::math::signal::type_resolvers::buttord_type;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 const BUILTIN_NAME: &str = "buttord";
 
@@ -34,12 +32,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
+    residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Butterworth order selection is scalar host-side analysis; GPU inputs are gathered automatically.",
+    notes: "Butterworth order selection is host-side analysis; resident arguments require RunMat extension mode and are then gathered through their owner.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::buttord")]
@@ -51,270 +49,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: None,
     emits_nan: false,
     notes: "buttord materialises scalar/vector design parameters and is not fused.",
-};
-
-const BUTTORD_OUTPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum Butterworth filter order.",
-    },
-    BuiltinParamDescriptor {
-        name: "Wn",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Natural cutoff frequency or frequency pair for butter.",
-    },
-];
-
-const BUTTORD_INPUTS_DIGITAL: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "Wp",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Passband edge or two-element passband edge vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Ws",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Stopband edge or two-element stopband edge vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rp",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum passband ripple in dB.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum stopband attenuation in dB.",
-    },
-];
-
-const BUTTORD_INPUTS_ANALOG: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "Wp",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analog passband edge or edge pair in rad/s.",
-    },
-    BuiltinParamDescriptor {
-        name: "Ws",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analog stopband edge or edge pair in rad/s.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rp",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum passband ripple in dB.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum stopband attenuation in dB.",
-    },
-    BuiltinParamDescriptor {
-        name: "s",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analog-design selector.",
-    },
-];
-
-const BUTTORD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "[n, Wn] = buttord(Wp, Ws, Rp, Rs)",
-        inputs: &BUTTORD_INPUTS_DIGITAL,
-        outputs: &BUTTORD_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[n, Wn] = buttord(Wp, Ws, Rp, Rs, 's')",
-        inputs: &BUTTORD_INPUTS_ANALOG,
-        outputs: &BUTTORD_OUTPUTS,
-    },
-];
-
-const BUTTORD_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BUTTORD.ARG_COUNT",
-    identifier: Some("RunMat:buttord:ArgCount"),
-    when: "The argument count is outside supported forms.",
-    message: "buttord: expected buttord(Wp, Ws, Rp, Rs [, 's'])",
-};
-
-const BUTTORD_ERROR_INVALID_FREQUENCY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BUTTORD.INVALID_FREQUENCY",
-    identifier: Some("RunMat:buttord:InvalidFrequency"),
-    when: "Passband or stopband edges are invalid.",
-    message: "buttord: invalid passband or stopband frequency",
-};
-
-const BUTTORD_ERROR_INVALID_ATTENUATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BUTTORD.INVALID_ATTENUATION",
-    identifier: Some("RunMat:buttord:InvalidAttenuation"),
-    when: "Ripple or attenuation values are invalid.",
-    message: "buttord: Rp and Rs must be positive finite scalars with Rs > Rp",
-};
-
-const BUTTORD_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BUTTORD.INVALID_OPTION",
-    identifier: Some("RunMat:buttord:InvalidOption"),
-    when: "The optional selector is not supported.",
-    message: "buttord: optional selector must be 's'",
-};
-
-const BUTTORD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BUTTORD.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:buttord:TooManyOutputs"),
-    when: "More than two output arguments are requested.",
-    message: "buttord: too many output arguments",
-};
-
-const BUTTORD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BUTTORD.INTERNAL",
-    identifier: Some("RunMat:buttord:Internal"),
-    when: "Output tensor construction fails internally.",
-    message: "buttord: internal error",
-};
-
-const BUTTORD_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    BUTTORD_ERROR_ARG_COUNT,
-    BUTTORD_ERROR_INVALID_FREQUENCY,
-    BUTTORD_ERROR_INVALID_ATTENUATION,
-    BUTTORD_ERROR_INVALID_OPTION,
-    BUTTORD_ERROR_TOO_MANY_OUTPUTS,
-    BUTTORD_ERROR_INTERNAL,
-];
-
-const BUTTORD_INTEGER_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "buttord-integer-frequency",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "buttord with typed-integer passband or stopband edges is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ButtordIntegerFrequencyExtension"),
-    };
-const BUTTORD_LOGICAL_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "buttord-logical-frequency",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "buttord with logical passband or stopband edges is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ButtordLogicalFrequencyExtension"),
-    };
-const BUTTORD_COMPLEX_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "buttord-complex-frequency",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "buttord with complex passband or stopband edges is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ButtordComplexFrequencyExtension"),
-    };
-const BUTTORD_INTEGER_ATTENUATION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "buttord-integer-attenuation",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "buttord with typed-integer ripple or attenuation is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ButtordIntegerAttenuationExtension"),
-    };
-const BUTTORD_LOGICAL_ATTENUATION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "buttord-logical-attenuation",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "buttord with logical ripple or attenuation is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ButtordLogicalAttenuationExtension"),
-    };
-const BUTTORD_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "buttord-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "buttord with resident GPU-array design arguments is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ButtordGpuInputExtension"),
-};
-
-pub const BUTTORD_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
-    BUTTORD_INTEGER_FREQUENCY_EXTENSION,
-    BUTTORD_LOGICAL_FREQUENCY_EXTENSION,
-    BUTTORD_COMPLEX_FREQUENCY_EXTENSION,
-    BUTTORD_INTEGER_ATTENUATION_EXTENSION,
-    BUTTORD_LOGICAL_ATTENUATION_EXTENSION,
-    BUTTORD_GPU_INPUT_EXTENSION,
-];
-
-const BUTTORD_INTEGER_FREQUENCY_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Wp",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented passband-edge datatypes are single and double; RunMat mode additionally accepts scalar or two-element typed-integer storage.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Ws",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented stopband-edge datatypes are single and double; RunMat mode additionally accepts scalar or two-element typed-integer storage.",
-    },
-];
-const BUTTORD_INTEGER_ATTENUATION_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Rp",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented passband-ripple datatypes are single and double; RunMat mode additionally accepts every scalar integer class.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Rs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented stopband-attenuation datatypes are single and double; RunMat mode additionally accepts every scalar integer class.",
-    },
-];
-
-pub const BUTTORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[n,Wn] = buttord(integer_Wp,integer_Ws,Rp,Rs,...)",
-        inputs: &BUTTORD_INTEGER_FREQUENCY_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer frequency edges cross the explicit binary64 Butterworth analysis boundary after compatibility and residency checks. Both n and Wn remain host double values.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[n,Wn] = buttord(Wp,Ws,integer_Rp,integer_Rs,...)",
-        inputs: &BUTTORD_INTEGER_ATTENUATION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer ripple and attenuation controls cross the explicit binary64 decibel-analysis boundary after compatibility and residency checks. Both n and Wn remain host double values.",
-    },
-];
-
-pub const BUTTORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &BUTTORD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &BUTTORD_ERRORS,
 };
 
 #[derive(Clone, Debug)]
@@ -345,25 +79,46 @@ fn buttord_error_with_message(
     builder.build()
 }
 
+fn buttord_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut owner = build_runtime_error(format!("{}: {}", error.message, source.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = error.identifier {
+        owner = owner.with_identifier(identifier);
+    }
+    owner.build()
+}
+
+fn frequency_error(error: OrderEdgeError) -> RuntimeError {
+    match error {
+        OrderEdgeError::Invalid(detail) => {
+            buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail)
+        }
+        OrderEdgeError::Operational(source) => {
+            buttord_error_with_source(&BUTTORD_ERROR_INVALID_FREQUENCY, *source)
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "buttord",
-    category = "math/signal",
-    summary = "Select the minimum Butterworth filter order.",
-    keywords = "buttord,butterworth,filter order,signal processing",
-    type_resolver(buttord_type),
-    descriptor(crate::builtins::math::signal::buttord::BUTTORD_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::buttord::BUTTORD_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::buttord::BUTTORD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::buttord"
 )]
 async fn buttord_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     wp: Value,
     ws: Value,
     rp: Value,
     rs: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    evaluate(wp, ws, rp, rs, &rest).await
+    evaluate_in_context(wp, ws, rp, rs, rest.view(), runtime.as_ref()).await
 }
 
 pub async fn evaluate(
@@ -373,12 +128,43 @@ pub async fn evaluate(
     rs: Value,
     rest: &[Value],
 ) -> BuiltinResult<Value> {
+    evaluate_in_context(
+        wp,
+        ws,
+        rp,
+        rs,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        None,
+    )
+    .await
+}
+
+async fn evaluate_in_context(
+    wp: Value,
+    ws: Value,
+    rp: Value,
+    rs: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if rest.len() > 1 {
         return Err(buttord_error(&BUTTORD_ERROR_ARG_COUNT));
     }
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(buttord_error(&BUTTORD_ERROR_TOO_MANY_OUTPUTS));
+    }
     ensure_input_extensions(&wp, &ws, &rp, &rs)?;
     let analog = if let Some(option) = rest.first() {
-        match option_text(option).as_deref() {
+        match option_text(option)
+            .map_err(|source| {
+                let mut error = buttord_error(&BUTTORD_ERROR_INVALID_OPTION);
+                error.source = Some(Box::new(source));
+                error
+            })?
+            .as_deref()
+        {
             Some("s") => true,
             Some(_) => return Err(buttord_error(&BUTTORD_ERROR_INVALID_OPTION)),
             None => return Err(buttord_error(&BUTTORD_ERROR_INVALID_OPTION)),
@@ -386,14 +172,22 @@ pub async fn evaluate(
     } else {
         false
     };
+    let wp = prepare_integer_role(wp, OrderInputRole::Wp, &mut cooperation).await?;
+    let ws = prepare_integer_role(ws, OrderInputRole::Ws, &mut cooperation).await?;
+    let rp = prepare_integer_role(rp, OrderInputRole::Rp, &mut cooperation).await?;
+    let rs = prepare_integer_role(rs, OrderInputRole::Rs, &mut cooperation).await?;
     let wp = real_edges(BUILTIN_NAME, "Wp", wp)
         .await
-        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
+        .map_err(frequency_error)?;
+    cooperation.completed(1).await?;
     let ws = real_edges(BUILTIN_NAME, "Ws", ws)
         .await
-        .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_FREQUENCY, detail))?;
+        .map_err(frequency_error)?;
+    cooperation.completed(1).await?;
     let rp = gather_value(&rp).await?;
+    cooperation.completed(1).await?;
     let rs = gather_value(&rs).await?;
+    cooperation.completed(1).await?;
     let rp = parse_positive_db(BUILTIN_NAME, "Rp", &rp)
         .map_err(|detail| buttord_error_with_detail(&BUTTORD_ERROR_INVALID_ATTENUATION, detail))?;
     let rs = parse_positive_db(BUILTIN_NAME, "Rs", &rs)
@@ -403,7 +197,70 @@ pub async fn evaluate(
     }
 
     let result = compute_buttord(&wp, &ws, rp, rs, analog)?;
+    cooperation.completed(1).await?;
     output_result(result)
+}
+
+#[derive(Clone, Copy)]
+enum OrderInputRole {
+    Wp,
+    Ws,
+    Rp,
+    Rs,
+}
+
+impl OrderInputRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Wp => "Wp",
+            Self::Ws => "Ws",
+            Self::Rp => "Rp",
+            Self::Rs => "Rs",
+        }
+    }
+
+    fn extension(self) -> &'static runmat_builtins::BuiltinExtensionDescriptor {
+        match self {
+            Self::Wp | Self::Ws => &BUTTORD_INTEGER_FREQUENCY_EXTENSION,
+            Self::Rp | Self::Rs => &BUTTORD_INTEGER_ATTENUATION_EXTENSION,
+        }
+    }
+
+    fn error(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::Wp | Self::Ws => &BUTTORD_ERROR_INVALID_FREQUENCY,
+            Self::Rp | Self::Rs => &BUTTORD_ERROR_INVALID_ATTENUATION,
+        }
+    }
+}
+
+async fn prepare_integer_role(
+    value: Value,
+    role: OrderInputRole,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    if !is_typed_integer_value(&value) {
+        return Ok(value);
+    }
+    let prepared = cooperation
+        .prepare_integer_receipt(&value, role.extension())
+        .await?;
+    let descriptor = role.error();
+    if !prepared.is_exact() {
+        return Err(buttord_error_with_detail(
+            descriptor,
+            format!(
+                "integer {} values must be exactly representable as double",
+                role.label()
+            ),
+        ));
+    }
+    let Some(payload) = prepared.into_resident_payload() else {
+        return Ok(value);
+    };
+    payload
+        .into_value()
+        .map_err(|detail| buttord_error_with_detail(descriptor, detail))
 }
 
 fn is_typed_integer_value(value: &Value) -> bool {
@@ -495,13 +352,13 @@ fn output_result(result: ButtordResult) -> BuiltinResult<Value> {
     };
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![order]));
+            return Ok(Value::output_list(vec![order]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![order, wn]));
+            return Ok(Value::output_list(vec![order, wn]));
         }
         return Err(buttord_error(&BUTTORD_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -596,8 +453,43 @@ fn natural_frequency(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::BuiltinIntegerOutputClassRule;
+    use runmat_builtins::{builtin_catalog_entry_by_name, builtin_function_by_name};
     use runmat_value::{IntValue, IntegerStorage, NumericDType, Tensor};
+
+    #[test]
+    fn integer_input_roles_bind_exact_extension_and_error_family() {
+        for (role, label, extension, error) in [
+            (
+                OrderInputRole::Wp,
+                "Wp",
+                &BUTTORD_INTEGER_FREQUENCY_EXTENSION,
+                &BUTTORD_ERROR_INVALID_FREQUENCY,
+            ),
+            (
+                OrderInputRole::Ws,
+                "Ws",
+                &BUTTORD_INTEGER_FREQUENCY_EXTENSION,
+                &BUTTORD_ERROR_INVALID_FREQUENCY,
+            ),
+            (
+                OrderInputRole::Rp,
+                "Rp",
+                &BUTTORD_INTEGER_ATTENUATION_EXTENSION,
+                &BUTTORD_ERROR_INVALID_ATTENUATION,
+            ),
+            (
+                OrderInputRole::Rs,
+                "Rs",
+                &BUTTORD_INTEGER_ATTENUATION_EXTENSION,
+                &BUTTORD_ERROR_INVALID_ATTENUATION,
+            ),
+        ] {
+            assert_eq!(role.label(), label);
+            assert_eq!(role.extension().id, extension.id);
+            assert_eq!(role.error().identifier, error.identifier);
+        }
+    }
 
     fn call(
         wp: Value,
@@ -607,7 +499,10 @@ mod tests {
         rest: &[Value],
         outputs: Option<usize>,
     ) -> BuiltinResult<Value> {
-        let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+        let _guard = outputs
+            .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
+            .expect("output-count scope");
         block_on(evaluate(wp, ws, rp, rs, rest))
     }
 
@@ -642,8 +537,16 @@ mod tests {
 
     #[test]
     fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("buttord builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
+        let builtin = builtin_catalog_entry_by_name(BUILTIN_NAME).expect("buttord catalog entry");
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        assert_eq!(builtin.bindings.len(), 1);
+        let compiled = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(compiled.len(), 1);
+        assert_eq!(
+            compiled[0].identity,
+            builtin.binding_identity(&builtin.bindings[0])
+        );
+        let descriptor = builtin.descriptor;
         assert!(descriptor
             .signatures
             .iter()
@@ -725,6 +628,30 @@ mod tests {
         assert_eq!(wn.len(), 1);
         assert!(wn[0] > 10.0);
         assert!(wn[0] < 12.0);
+    }
+
+    #[test]
+    fn integer_boundary_rejects_rounding_but_accepts_exact_wide_multiple() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+        let Err(inexact) = block_on(prepare_integer_role(
+            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+            OrderInputRole::Wp,
+            &mut cooperation,
+        )) else {
+            panic!("rounded integer must fail before order analysis");
+        };
+        assert_eq!(
+            inexact.identifier(),
+            BUTTORD_ERROR_INVALID_FREQUENCY.identifier
+        );
+        let exact = block_on(prepare_integer_role(
+            Value::Int(IntValue::U64((1_u64 << 53) + 2)),
+            OrderInputRole::Wp,
+            &mut cooperation,
+        ))
+        .expect("exact binary64 multiple is admissible");
+        assert!(matches!(exact, Value::Int(IntValue::U64(value)) if value == (1_u64 << 53) + 2));
     }
 
     #[test]

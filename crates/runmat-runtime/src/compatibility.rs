@@ -1,7 +1,9 @@
 //! Active language compatibility policy for runtime builtin dispatch.
 
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{BuiltinExtensionDescriptor, BuiltinExtensionMode};
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinExtensionMode, MatlabRelease, MatlabReleaseHalf,
+};
 pub use runmat_builtins::{SPARSE_EXTENSIONS, SPARSE_INTEGER_EXTENSION};
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
@@ -16,6 +18,28 @@ pub const MATLAB_COMPATIBILITY_RELEASE: &str = "R2026a";
 /// Numeric product version corresponding to `MATLAB_COMPATIBILITY_RELEASE`.
 pub const MATLAB_COMPATIBILITY_VERSION: &str = "26.1";
 
+fn pinned_release() -> Result<MatlabRelease, RuntimeError> {
+    let body = MATLAB_COMPATIBILITY_RELEASE
+        .strip_prefix('R')
+        .ok_or_else(invalid_release_pin)?;
+    let (year, half) = if let Some(year) = body.strip_suffix('a') {
+        (year, MatlabReleaseHalf::A)
+    } else if let Some(year) = body.strip_suffix('b') {
+        (year, MatlabReleaseHalf::B)
+    } else {
+        return Err(invalid_release_pin());
+    };
+    let year = year.parse().map_err(|_| invalid_release_pin())?;
+    Ok(MatlabRelease { year, half })
+}
+
+fn invalid_release_pin() -> RuntimeError {
+    build_runtime_error("invalid MATLAB compatibility release pin")
+        .with_identifier("RunMat:internal:InvalidCompatibilityPin")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
+}
+
 runmat_thread_local! {
     static RUNMAT_EXTENSIONS_ENABLED: Cell<bool> = const { Cell::new(false) };
 }
@@ -24,7 +48,7 @@ runmat_thread_local! {
 /// RunMat-only builtin forms.
 pub fn runmat_extensions_enabled() -> bool {
     if let Some(context) = crate::context::legacy::active() {
-        return context.state().runmat_extensions_enabled.get();
+        return context.runmat_extensions_enabled();
     }
     RUNMAT_EXTENSIONS_ENABLED.with(Cell::get)
 }
@@ -32,7 +56,7 @@ pub fn runmat_extensions_enabled() -> bool {
 /// Set the extension policy for subsequent builtin dispatch on this thread.
 pub fn set_runmat_extensions_enabled(enabled: bool) {
     if let Some(context) = crate::context::legacy::active() {
-        context.state().runmat_extensions_enabled.set(enabled);
+        context.set_runmat_extensions_enabled(enabled);
         return;
     }
     RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(enabled));
@@ -49,9 +73,98 @@ pub fn ensure_builtin_extension_enabled(
     extension: &BuiltinExtensionDescriptor,
     context: &str,
 ) -> Result<(), RuntimeError> {
-    let enabled = match extension.mode {
-        BuiltinExtensionMode::RunMatOnly => runmat_extensions_enabled(),
+    ensure_builtin_extension_enabled_in_optional_context(None, extension, context)
+}
+
+/// Admit a RunMat-only form against the explicit invocation policy, without
+/// consulting the transitional thread-local compatibility bridge.
+pub fn ensure_builtin_extension_enabled_in_context(
+    runtime: &crate::context::RuntimeContext,
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    ensure_builtin_extension_enabled_in_optional_context(Some(runtime), extension, context)
+}
+
+/// Explicit invocations own their policy; only contextless compatibility
+/// callers consult the selected session or bare-thread default.
+pub(crate) fn ensure_builtin_extension_enabled_in_optional_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    let enabled = runtime.map_or_else(runmat_extensions_enabled, |runtime| {
+        runtime.runmat_extensions_enabled()
+    });
+    ensure_builtin_extension_enabled_with_policy(extension, context, enabled)
+}
+
+fn ensure_builtin_extension_enabled_with_policy(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+    enabled: bool,
+) -> Result<(), RuntimeError> {
+    // Profile selection is not a rejected-call gate. A misplaced descriptor
+    // must fail in either profile, including the otherwise permissive one.
+    if extension.mode != BuiltinExtensionMode::RunMatOnly
+        || extension.validate_error_contract().is_err()
+    {
+        return Err(build_runtime_error(format!(
+            "{context}: extension {} is not a valid rejected-form admission gate",
+            extension.id
+        ))
+        .with_identifier("RunMat:internal:InvalidExtensionGate")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    reject_unavailable_extension_with_policy(extension, context, enabled)
+}
+
+/// Admit a catalog-declared public feature once the central compatibility
+/// release reaches its introduction. Earlier pins retain an explicit RunMat
+/// extension gate without changing the feature's catalog identity.
+pub fn ensure_builtin_feature_enabled(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    let BuiltinExtensionMode::AvailableSince(introduced) = extension.mode else {
+        return Err(invalid_feature_gate(context, extension));
     };
+    if extension.validate_error_contract().is_err() {
+        return Err(invalid_feature_gate(context, extension));
+    }
+    if feature_available_at(pinned_release()?, introduced) {
+        return Ok(());
+    }
+    reject_unavailable_extension(extension, context)
+}
+
+fn feature_available_at(pin: MatlabRelease, introduced: MatlabRelease) -> bool {
+    pin >= introduced
+}
+
+fn invalid_feature_gate(context: &str, extension: &BuiltinExtensionDescriptor) -> RuntimeError {
+    build_runtime_error(format!(
+        "{context}: extension {} is not a valid release-feature admission gate",
+        extension.id
+    ))
+    .with_identifier("RunMat:internal:InvalidExtensionGate")
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
+fn reject_unavailable_extension(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    reject_unavailable_extension_with_policy(extension, context, runmat_extensions_enabled())
+}
+
+fn reject_unavailable_extension_with_policy(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+    enabled: bool,
+) -> Result<(), RuntimeError> {
     if enabled {
         return Ok(());
     }
@@ -86,15 +199,22 @@ fn value_contains_sparse_integer(
     match value {
         Value::SparseTensor(sparse) => sparse.integer_storage().is_some(),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .any(|value| value_contains_sparse_integer(value, visited_handles)),
         Value::Struct(struct_value) => struct_value
             .fields
             .values()
             .any(|value| value_contains_sparse_integer(value, visited_handles)),
+        Value::StructArray(array) => {
+            let mut found = false;
+            array.for_each_value(|value| {
+                found |= value_contains_sparse_integer(value, visited_handles)
+            });
+            found
+        }
         Value::Object(object) => object
-            .properties
+            .properties()
             .values()
             .any(|value| value_contains_sparse_integer(value, visited_handles)),
         Value::HandleObject(handle) => {
@@ -123,20 +243,20 @@ pub fn push_runmat_extensions_enabled(enabled: bool) -> RunMatExtensionsGuard {
     set_runmat_extensions_enabled(enabled);
     RunMatExtensionsGuard {
         previous,
-        state: crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state())),
+        context: crate::context::legacy::active(),
     }
 }
 
 #[must_use]
 pub struct RunMatExtensionsGuard {
     previous: bool,
-    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    context: Option<crate::context::RuntimeContext>,
 }
 
 impl Drop for RunMatExtensionsGuard {
     fn drop(&mut self) {
-        if let Some(state) = &self.state {
-            state.runmat_extensions_enabled.set(self.previous);
+        if let Some(context) = &self.context {
+            context.set_runmat_extensions_enabled(self.previous);
         } else {
             RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(self.previous));
         }
@@ -148,6 +268,117 @@ mod tests {
     use super::*;
 
     #[test]
+    fn release_feature_tracks_typed_pin_without_reclassifying_catalog_descriptor() {
+        let feature = BuiltinExtensionDescriptor {
+            id: "fixture-release-feature",
+            mode: BuiltinExtensionMode::AvailableSince(MatlabRelease {
+                year: 2026,
+                half: MatlabReleaseHalf::B,
+            }),
+            description: "Fixture future feature",
+            error_identifier: Some("RunMat:compatibility:FixtureFutureFeature"),
+        };
+        let current = pinned_release().expect("central release pin parses");
+        let BuiltinExtensionMode::AvailableSince(introduced) = feature.mode else {
+            unreachable!("fixture is versioned")
+        };
+        assert_eq!(
+            feature_available_at(current, introduced),
+            current >= introduced
+        );
+        assert!(feature_available_at(introduced, introduced));
+        assert!(feature_available_at(
+            MatlabRelease {
+                year: introduced.year + 1,
+                half: MatlabReleaseHalf::A,
+            },
+            introduced
+        ));
+        let _mode = push_runmat_extensions_enabled(false);
+        let admission = ensure_builtin_feature_enabled(&feature, "fixture");
+        if current < introduced {
+            assert_eq!(
+                admission.unwrap_err().identifier(),
+                feature.error_identifier
+            );
+        } else {
+            assert!(admission.is_ok());
+        }
+    }
+
+    #[test]
+    fn userpath_partial_form_crosses_the_r2026b_release_boundary() {
+        let BuiltinExtensionMode::AvailableSince(introduced) =
+            runmat_builtins::USERPATH_PARTIAL_PATH_EXTENSION.mode
+        else {
+            panic!("partial user paths must remain a versioned public form");
+        };
+        assert_eq!(
+            introduced,
+            MatlabRelease {
+                year: 2026,
+                half: MatlabReleaseHalf::B,
+            }
+        );
+        assert!(!feature_available_at(
+            MatlabRelease {
+                year: 2026,
+                half: MatlabReleaseHalf::A,
+            },
+            introduced,
+        ));
+        assert!(feature_available_at(introduced, introduced));
+    }
+
+    #[test]
+    fn extension_gate_rejects_profile_behavior_misuse_in_both_profiles() {
+        let behavior = BuiltinExtensionDescriptor {
+            id: "fixture-profile-behavior",
+            mode: BuiltinExtensionMode::ProfileDependentBehavior,
+            description: "Both profiles accept the call with different defaults",
+            error_identifier: None,
+        };
+        let rejected = BuiltinExtensionDescriptor {
+            id: "fixture-rejected-form",
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: "Extra argument form",
+            error_identifier: Some("RunMat:compatibility:FixtureExtension"),
+        };
+        for enabled in [false, true] {
+            let _mode = push_runmat_extensions_enabled(enabled);
+            let error = ensure_builtin_extension_enabled(&behavior, "fixture").unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:internal:InvalidExtensionGate")
+            );
+            let admitted = ensure_builtin_extension_enabled(&rejected, "fixture");
+            if enabled {
+                assert!(admitted.is_ok());
+            } else {
+                assert_eq!(
+                    admitted.unwrap_err().identifier(),
+                    Some("RunMat:compatibility:FixtureExtension")
+                );
+            }
+            let invalid = BuiltinExtensionDescriptor {
+                error_identifier: None,
+                ..rejected
+            };
+            assert_eq!(
+                ensure_builtin_extension_enabled(&invalid, "fixture")
+                    .unwrap_err()
+                    .identifier(),
+                Some("RunMat:internal:InvalidExtensionGate")
+            );
+        }
+    }
+
+    #[path = "metadata_view.rs"]
+    mod metadata_view;
+    #[path = "reviewed_cutover.rs"]
+    mod reviewed_cutover;
+
+    #[test]
     fn documented_compatibility_version_pin_matches_runtime_queries() {
         let policy = include_str!("../../../docs/getting-started/compatability.md");
         assert!(policy.contains(&format!("**MATLAB {MATLAB_COMPATIBILITY_RELEASE}**")));
@@ -157,10 +388,21 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_version_pin_is_centralized_in_the_repository() {
-        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let canonical_policy = workspace_root.join("docs/getting-started/compatability.md");
-        let runtime_policy = workspace_root.join("crates/runmat-runtime/src/compatibility.rs");
+    fn compatibility_pin_is_shared_by_default_policy_consumers() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        assert_eq!(
+            runtime.language_mode(),
+            crate::context::RuntimeLanguageMode::Matlab
+        );
+        assert!(!runtime.runmat_extensions_enabled());
+        assert!(pinned_release().is_ok());
+
+        // Release-boundary facts in builtin contracts, examples, and tests are
+        // not competing defaults. Check the actual policy consumers instead:
+        // runtime query implementations and the parser/Core default-mode
+        // normalization must not define their own release or product pin.
         let release_label = MATLAB_COMPATIBILITY_RELEASE.to_ascii_lowercase();
         let bare_release_label = release_label.strip_prefix('r').unwrap_or(&release_label);
         let product_version = MATLAB_COMPATIBILITY_VERSION.to_ascii_lowercase();
@@ -185,29 +427,30 @@ mod tests {
                 })
             })
         };
-        let mut pending = vec![workspace_root.clone()];
-        while let Some(directory) = pending.pop() {
-            for entry in std::fs::read_dir(&directory).expect("read repository directory") {
-                let path = entry.expect("read repository entry").path();
-                if path.is_dir() {
-                    if !matches!(
-                        path.file_name().and_then(|name| name.to_str()),
-                        Some(".git" | "target")
-                    ) {
-                        pending.push(path);
-                    }
-                } else if path != canonical_policy && path != runtime_policy {
-                    let Ok(contents) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    assert!(
-                        !contains_pin_token(&contents),
-                        "the compatibility pin must appear only in {} and the runtime policy: {}",
-                        canonical_policy.display(),
-                        path.display()
-                    );
-                }
-            }
+        let policy_consumers = [
+            (
+                "runtime queries",
+                include_str!("builtins/introspection/runtime_compat.rs"),
+            ),
+            ("runtime defaults", include_str!("context/state.rs")),
+            (
+                "parser default",
+                include_str!("../../../crates/runmat-parser/src/options.rs"),
+            ),
+            (
+                "session normalization",
+                include_str!("../../../crates/runmat-core/src/session/config.rs"),
+            ),
+            (
+                "session construction",
+                include_str!("../../../crates/runmat-core/src/session/init.rs"),
+            ),
+        ];
+        for (consumer, source) in policy_consumers {
+            assert!(
+                !contains_pin_token(source),
+                "{consumer} must use the central compatibility pin rather than define a second default"
+            );
         }
     }
 
@@ -223,7 +466,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_policy_checks_nested_results() {
-        use runmat_value::{IntegerStorage, SparseTensor, StructValue};
+        use runmat_value::{IntegerStorage, SparseTensor};
 
         let sparse = SparseTensor::new_integer(
             1,
@@ -233,9 +476,9 @@ mod tests {
             IntegerStorage::U64(vec![u64::MAX]),
         )
         .expect("sparse integer");
-        let mut fields = StructValue::new();
+        let mut fields = runmat_value::UnboundedStructValueBuilder::new();
         fields.insert("x", Value::SparseTensor(sparse));
-        let nested = Value::Struct(fields);
+        let nested = Value::Struct(fields.finish());
 
         {
             let _compat = push_runmat_extensions_enabled(false);
@@ -253,28 +496,16 @@ mod tests {
 
     #[test]
     fn integer_extensions_are_declared_in_builtin_metadata() {
-        let sparse = runmat_builtins::builtin_function_by_name("sparse").expect("sparse builtin");
-        assert_eq!(sparse.extensions, &SPARSE_EXTENSIONS);
-        let randi = runmat_builtins::builtin_function_by_name("randi").expect("randi builtin");
+        let sparse = runmat_builtins::builtin_extensions_by_name("sparse").expect("sparse builtin");
+        assert_eq!(sparse, &SPARSE_EXTENSIONS);
+        let randi = runmat_builtins::builtin_extensions_by_name("randi").expect("randi builtin");
+        assert_eq!(randi, &runmat_builtins::RANDI_EXTENSIONS);
         assert_eq!(
-            randi.extensions,
-            &crate::builtins::array::creation::randi::RANDI_EXTENSIONS
-        );
-        assert_eq!(
-            randi.extensions[0].error_identifier,
+            randi[0].error_identifier,
             Some("RunMat:compatibility:RandiWideIntegerExtension")
         );
 
-        let catalog_extensions =
-            runmat_builtins::builtin_catalog_entries()
-                .iter()
-                .flat_map(|entry| {
-                    entry
-                        .extensions
-                        .iter()
-                        .map(move |extension| (entry.identity.name, extension.id))
-                });
-        let declared = runmat_builtins::builtin_functions()
+        let declared = metadata_view::non_fixture_metadata()
             .into_iter()
             .flat_map(|builtin| {
                 builtin
@@ -282,9 +513,52 @@ mod tests {
                     .iter()
                     .map(move |extension| (builtin.name, extension.id))
             })
-            .chain(catalog_extensions)
             .collect::<std::collections::BTreeSet<_>>();
-        let expected = std::collections::BTreeSet::from([
+        let mut expected = std::collections::BTreeSet::from([
+            ("axis", "axis-state-output"),
+            ("box", "box-state-output"),
+            ("cla", "cla-state-output"),
+            ("colorbar", "colorbar-toggle-state"),
+            ("colormap", "colormap-axes-local-default"),
+            ("grid", "grid-state-output"),
+            ("hidden", "hidden-state-output"),
+            ("shading", "shading-state-output"),
+            ("uigetfile", "uigetfile-multiselect-controls"),
+            ("validateFunctionSignaturesJSON", "signature-json-payload"),
+            ("view", "view-vector-output"),
+            ("writelines", "writelines-byte-count"),
+            // Source-verified cutover expectation repairs; provenance is in
+            // compatibility/tests/README.md. Keep this an exhaustive audit.
+            ("bounds", "bounds-extra-outputs"),
+            ("cellstr", "cellstr-cell-input"),
+            ("cellstr", "cellstr-symbolic-input"),
+            (
+                "decomposition.mrdivide",
+                "decomposition-complex-integer-scale-factor",
+            ),
+            (
+                "decomposition.mrdivide",
+                "decomposition-integer-scale-factor",
+            ),
+            ("dir", "dir-folder-pattern"),
+            ("factorial", "factorial-like-residency"),
+            ("factorial", "factorial-logical-input"),
+            ("fullfile", "fullfile-numeric-character-codes"),
+            ("genpath", "genpath-excludes"),
+            ("genpath", "genpath-numeric-character-codes"),
+            ("ls", "ls-portable-row-layout"),
+            ("path", "path-numeric-character-codes"),
+            ("rmfield", "rmfield-variadic-field-arguments"),
+            ("round", "round-decimal-mode-alias"),
+            ("savepath", "savepath-diagnostic-outputs"),
+            ("savepath", "savepath-directory-target"),
+            ("savepath", "savepath-numeric-character-codes"),
+            ("setenv", "setenv-status-outputs"),
+            ("setfield", "setfield-indexed-resident-field"),
+            ("setfield", "setfield-object-family"),
+            ("setfield", "setfield-textual-index"),
+            ("strjoin", "strjoin-rowwise"),
+            ("unsetenv", "unsetenv-status-output"),
             ("DelaunayTri", "delaunaytri-integer-coordinates"),
             ("DelaunayTri", "delaunaytri-integer-topology"),
             ("DelaunayTri.freeBoundary", "delaunaytri-integer-topology"),
@@ -913,7 +1187,6 @@ mod tests {
             ("gpuArray", "gpuarray-size-arguments"),
             ("gpuArray", "gpuarray-text-upload"),
             ("gpuDevice", "gpudevice-logical-selector"),
-            ("gpuDevice", "gpudevice-provider-info"),
             ("fread", "fread-integer-fileid"),
             ("fread", "fread-integer-size"),
             ("fread", "fread-integer-skip"),
@@ -1379,7 +1652,6 @@ mod tests {
             ("uint64.empty", "empty-resident-size"),
             ("uint8.empty", "empty-resident-size"),
             ("var", "var-typed-integer-control"),
-            ("xor", "xor-character-input"),
             ("xor", "xor-complex-input"),
             ("lsqcurvefit", "lsqcurvefit-integer-bound"),
             ("lsqcurvefit", "lsqcurvefit-integer-callback-result"),
@@ -1642,7 +1914,6 @@ mod tests {
             ("tinv", "tinv-integer-degrees-of-freedom"),
             ("tinv", "tinv-integer-probability"),
             ("tinv", "tinv-logical-input"),
-            ("toc", "toc-legacy-double-timer-handle"),
             ("toeplitz", "toeplitz-complex-integer-input"),
             ("tpdf", "tpdf-integer-degrees-of-freedom"),
             ("tpdf", "tpdf-integer-x"),
@@ -1732,7 +2003,301 @@ mod tests {
             ("zlabel", "zlabel-integer-axes-handle"),
             ("zoom", "zoom-integer-target-handle"),
             ("zplane", "zplane-nonfloating-input"),
+            // Completed source-owned extension cohorts in the 728 catalog.
+            // Keep these frozen expectations independent of `declared`.
+            ("__runmat_timer_delete", "timer-method-status-output"),
+            ("__runmat_timer_start", "timer-method-status-output"),
+            ("__runmat_timer_startat", "timer-method-status-output"),
+            ("__runmat_timer_startat", "timer-startat-relative-seconds"),
+            ("__runmat_timer_stop", "timer-method-status-output"),
+            ("__runmat_timer_wait", "timer-method-status-output"),
+            ("adamupdate", "adamupdate-typed-integer-scalar"),
+            ("bi2de", "bi2de-integer-base"),
+            ("bi2de", "bi2de-resident-input"),
+            ("blsimpv", "blsimpv-nondouble-input"),
+            ("blsprice", "blsprice-nondouble-input"),
+            ("busdays", "business-day-typed-legacy-serial-input"),
+            ("busdays", "datetime-logical-numeric-input"),
+            ("busdays", "datetime-resident-numeric-input"),
+            ("caldays", "datetime-resident-numeric-input"),
+            ("calendarDuration", "calendar-duration-logical-component"),
+            ("calendarDuration", "calendar-duration-shorthand"),
+            ("calendarDuration", "datetime-resident-numeric-input"),
+            ("calmonths", "datetime-resident-numeric-input"),
+            ("calquarters", "datetime-resident-numeric-input"),
+            ("calweeks", "datetime-resident-numeric-input"),
+            ("calyears", "datetime-resident-numeric-input"),
+            ("close", "close-network-selector"),
+            ("close", "close-tcp-cell"),
+            ("combvec", "combvec-typed-integer-input"),
+            ("crossentropy", "crossentropy-integer-numeric-input"),
+            ("crossentropy", "crossentropy-plain-numeric-pair"),
+            ("damp", "ss-integer-matrix-input"),
+            ("damp", "ss-integer-sample-time"),
+            ("damp", "tf-integer-coefficients"),
+            ("damp", "tf-integer-sample-time"),
+            ("damp", "tf-logical-coefficients"),
+            ("datenum", "datenum-four-five-components"),
+            ("datenum", "datetime-logical-numeric-input"),
+            ("datenum", "datetime-resident-numeric-input"),
+            ("datenum", "legacy-datetime-typed-numeric-input"),
+            ("datestr", "datetime-logical-numeric-input"),
+            ("datestr", "datetime-resident-numeric-input"),
+            ("datestr", "legacy-datetime-typed-numeric-input"),
+            ("datevec", "datetime-logical-numeric-input"),
+            ("datevec", "datetime-resident-numeric-input"),
+            ("datevec", "legacy-datetime-typed-numeric-input"),
+            ("days", "duration-gpu-input"),
+            ("days252bus", "business-day-typed-legacy-serial-input"),
+            ("days252bus", "datetime-logical-numeric-input"),
+            ("days252bus", "datetime-resident-numeric-input"),
+            ("daysdif", "business-day-typed-legacy-serial-input"),
+            ("daysdif", "datetime-logical-numeric-input"),
+            ("daysdif", "datetime-resident-numeric-input"),
+            ("dcgain", "tf-integer-coefficients"),
+            ("dcgain", "tf-integer-sample-time"),
+            ("dcgain", "tf-logical-coefficients"),
+            ("de2bi", "de2bi-integer-control"),
+            ("de2bi", "de2bi-logical-input"),
+            ("de2bi", "de2bi-nd-input"),
+            ("de2bi", "de2bi-resident-input"),
+            ("de2bi", "de2bi-wide-integer"),
+            ("digraph", "digraph-integer-adjacency"),
+            ("digraph", "digraph-integer-weights"),
+            ("drawnow", "drawnow-status-output"),
+            ("duration.eq", "duration-gpu-input"),
+            ("duration.ge", "duration-gpu-input"),
+            ("duration.gt", "duration-gpu-input"),
+            ("duration.le", "duration-gpu-input"),
+            ("duration.lt", "duration-gpu-input"),
+            ("duration.minus", "duration-gpu-input"),
+            ("duration.ne", "duration-gpu-input"),
+            ("duration.plus", "duration-gpu-input"),
+            ("duration.subsasgn", "duration-gpu-input"),
+            ("duration.subsref", "duration-gpu-input"),
+            ("eomday", "datetime-logical-numeric-input"),
+            ("eomday", "datetime-resident-numeric-input"),
+            ("erase", "erase-char-matrix"),
+            ("erase", "erase-string-cell"),
+            ("etime", "datetime-logical-numeric-input"),
+            ("etime", "datetime-resident-numeric-input"),
+            ("etime", "legacy-datetime-typed-numeric-input"),
+            ("exportONNXNetwork", "export-onnx-typed-integer-controls"),
+            ("fbusdate", "business-day-typed-legacy-serial-input"),
+            ("fbusdate", "datetime-logical-numeric-input"),
+            ("fbusdate", "datetime-resident-numeric-input"),
+            ("featureInputLayer", "feature-input-vector-size"),
+            ("feedback", "tf-integer-coefficients"),
+            ("feedback", "tf-integer-sample-time"),
+            ("feedback", "tf-logical-coefficients"),
+            ("forward", "forward-typed-integer-data"),
+            ("graph", "graph-integer-adjacency"),
+            ("graph", "graph-integer-weights"),
+            (
+                "griddedInterpolant.subsref",
+                "griddedinterpolant-integer-grid",
+            ),
+            (
+                "griddedInterpolant.subsref",
+                "griddedinterpolant-integer-query",
+            ),
+            (
+                "griddedInterpolant.subsref",
+                "griddedinterpolant-integer-values",
+            ),
+            ("h5disp", "h5disp-captured-text-output"),
+            ("hgsave", "figure-persistence-status-output"),
+            ("holidays", "business-day-typed-legacy-serial-input"),
+            ("holidays", "datetime-logical-numeric-input"),
+            ("holidays", "datetime-resident-numeric-input"),
+            ("holidays", "holidays-local-year"),
+            ("hours", "duration-gpu-input"),
+            ("integral", "integral-renamed-tolerance-option"),
+            ("isbetween", "datetime-logical-numeric-input"),
+            ("isbetween", "datetime-resident-numeric-input"),
+            ("isbetween", "isbetween-serial-date-input"),
+            ("isbusday", "business-day-typed-legacy-serial-input"),
+            ("isbusday", "datetime-logical-numeric-input"),
+            ("isbusday", "datetime-resident-numeric-input"),
+            ("isstable", "tf-integer-coefficients"),
+            ("isstable", "tf-integer-sample-time"),
+            ("isstable", "tf-logical-coefficients"),
+            ("lbusdate", "business-day-typed-legacy-serial-input"),
+            ("lbusdate", "datetime-logical-numeric-input"),
+            ("lbusdate", "datetime-resident-numeric-input"),
+            ("lower", "lower-string-cell"),
+            ("lqr", "lqr-integer-matrix-input"),
+            ("memmapfile.subsasgn", "memmapfile-explicit-gpu-argument"),
+            ("memmapfile.subsref", "memmapfile-explicit-gpu-argument"),
+            ("milliseconds", "duration-gpu-input"),
+            ("minutes", "duration-gpu-input"),
+            ("notify", "notify-extra-callback-arguments"),
+            ("notify", "notify-status-output"),
+            ("nyquist", "nyquist-integer-input"),
+            ("nyquist", "nyquist-logical-input"),
+            ("nyquist", "nyquist-resident-input"),
+            ("optimizableVariable", "optimizable-variable-integer-range"),
+            ("pole", "ss-integer-matrix-input"),
+            ("pole", "ss-integer-sample-time"),
+            ("pole", "tf-integer-coefficients"),
+            ("pole", "tf-integer-sample-time"),
+            ("pole", "tf-logical-coefficients"),
+            ("print", "print-status-output"),
+            ("pzmap", "ss-integer-matrix-input"),
+            ("pzmap", "ss-integer-sample-time"),
+            ("pzmap", "tf-integer-coefficients"),
+            ("pzmap", "tf-integer-sample-time"),
+            ("pzmap", "tf-logical-coefficients"),
+            ("readtimetable", "table2timetable-generated-row-times"),
+            ("restoredefaultpath", "restoredefaultpath-return"),
+            ("rethrow", "rethrow-active-catch-shorthand"),
+            ("rethrow", "rethrow-text-input"),
+            ("rlocus", "ss-integer-matrix-input"),
+            ("rlocus", "ss-integer-sample-time"),
+            ("rlocus", "tf-integer-coefficients"),
+            ("rlocus", "tf-integer-sample-time"),
+            ("rlocus", "tf-logical-coefficients"),
+            ("save", "save-status-output"),
+            ("saveas", "figure-persistence-status-output"),
+            ("savefig", "figure-persistence-status-output"),
+            ("seconds", "duration-gpu-input"),
+            ("setpref", "setpref-status-output"),
+            ("step", "tf-integer-coefficients"),
+            ("step", "tf-integer-sample-time"),
+            ("step", "tf-logical-coefficients"),
+            ("stepinfo", "tf-integer-coefficients"),
+            ("stepinfo", "tf-integer-sample-time"),
+            ("stepinfo", "tf-logical-coefficients"),
+            ("strtrim", "strtrim-string-cell"),
+            ("tf.ldivide", "tf-integer-coefficients"),
+            ("tf.ldivide", "tf-integer-sample-time"),
+            ("tf.ldivide", "tf-logical-coefficients"),
+            ("tf.minus", "tf-integer-coefficients"),
+            ("tf.minus", "tf-integer-sample-time"),
+            ("tf.minus", "tf-logical-coefficients"),
+            ("tf.mldivide", "tf-integer-coefficients"),
+            ("tf.mldivide", "tf-integer-sample-time"),
+            ("tf.mldivide", "tf-logical-coefficients"),
+            ("tf.mpower", "tf-integer-coefficients"),
+            ("tf.mpower", "tf-integer-sample-time"),
+            ("tf.mpower", "tf-logical-coefficients"),
+            ("tf.mrdivide", "tf-integer-coefficients"),
+            ("tf.mrdivide", "tf-integer-sample-time"),
+            ("tf.mrdivide", "tf-logical-coefficients"),
+            ("tf.mtimes", "tf-integer-coefficients"),
+            ("tf.mtimes", "tf-integer-sample-time"),
+            ("tf.mtimes", "tf-logical-coefficients"),
+            ("tf.plus", "tf-integer-coefficients"),
+            ("tf.plus", "tf-integer-sample-time"),
+            ("tf.plus", "tf-logical-coefficients"),
+            ("tf.power", "tf-integer-coefficients"),
+            ("tf.power", "tf-integer-sample-time"),
+            ("tf.power", "tf-logical-coefficients"),
+            ("tf.rdivide", "tf-integer-coefficients"),
+            ("tf.rdivide", "tf-integer-sample-time"),
+            ("tf.rdivide", "tf-logical-coefficients"),
+            ("tf.times", "tf-integer-coefficients"),
+            ("tf.times", "tf-integer-sample-time"),
+            ("tf.times", "tf-logical-coefficients"),
+            ("tf.uminus", "tf-integer-coefficients"),
+            ("tf.uminus", "tf-integer-sample-time"),
+            ("tf.uminus", "tf-logical-coefficients"),
+            ("tf.uplus", "tf-integer-coefficients"),
+            ("tf.uplus", "tf-integer-sample-time"),
+            ("tf.uplus", "tf-logical-coefficients"),
+            ("upper", "upper-string-cell"),
+            ("userpath", "userpath-partial-path"),
+            ("weekday", "datetime-logical-numeric-input"),
+            ("weekday", "datetime-resident-numeric-input"),
+            ("years", "duration-gpu-input"),
+            ("zero", "tf-integer-coefficients"),
+            ("zero", "tf-integer-sample-time"),
+            ("zero", "tf-logical-coefficients"),
+            // Current canonical inverse-degree, axes-control, and statistical
+            // extensions retain this exact-set audit across both registries.
+            ("acosd", "acosd-character-input"),
+            ("acosd", "acosd-gpu-real-complex-promotion"),
+            ("acosd", "acosd-integer-input"),
+            ("acosd", "acosd-logical-input"),
+            ("acotd", "acotd-character-input"),
+            ("acotd", "acotd-gpu-real-complex-promotion"),
+            ("acotd", "acotd-integer-input"),
+            ("acotd", "acotd-logical-input"),
+            ("acscd", "acscd-character-input"),
+            ("acscd", "acscd-gpu-real-complex-promotion"),
+            ("acscd", "acscd-integer-input"),
+            ("acscd", "acscd-logical-input"),
+            ("asecd", "asecd-character-input"),
+            ("asecd", "asecd-gpu-real-complex-promotion"),
+            ("asecd", "asecd-integer-input"),
+            ("asecd", "asecd-logical-input"),
+            ("asind", "asind-character-input"),
+            ("asind", "asind-gpu-real-complex-promotion"),
+            ("asind", "asind-integer-input"),
+            ("asind", "asind-logical-input"),
+            ("atan2d", "atan2d-character-input"),
+            ("atan2d", "atan2d-integer-input"),
+            ("atan2d", "atan2d-logical-input"),
+            ("atand", "atand-character-input"),
+            ("atand", "atand-gpu-real-complex-promotion"),
+            ("atand", "atand-integer-input"),
+            ("atand", "atand-logical-input"),
+            ("caxis", "axes-control-setter-output"),
+            ("clim", "axes-control-setter-output"),
+            ("colororder", "axes-control-setter-output"),
+            ("nlparci", "nlparci-resident-input"),
+            ("xlim", "axes-control-setter-output"),
+            ("xscale", "axes-control-setter-output"),
+            ("xtickangle", "axes-control-setter-output"),
+            ("xtickformat", "axes-control-setter-output"),
+            ("xticklabels", "axes-control-setter-output"),
+            ("xticks", "axes-control-setter-output"),
+            ("ylim", "axes-control-setter-output"),
+            ("yscale", "axes-control-setter-output"),
+            ("ytickangle", "axes-control-setter-output"),
+            ("ytickformat", "axes-control-setter-output"),
+            ("yticklabels", "axes-control-setter-output"),
+            ("yticks", "axes-control-setter-output"),
+            ("zlim", "axes-control-setter-output"),
+            // Newly completed public integer-extension contracts. Method-only
+            // datetime operators remain in the raw inventory but are not part
+            // of the default public completion export.
+            ("contour3", "contour-integer-line-color"),
+            ("cylinder", "cylinder-typed-resolution"),
+            ("datetime.eq", "datetime-logical-numeric-input"),
+            ("datetime.ge", "datetime-logical-numeric-input"),
+            ("datetime.gt", "datetime-logical-numeric-input"),
+            ("datetime.le", "datetime-logical-numeric-input"),
+            ("datetime.lt", "datetime-logical-numeric-input"),
+            ("datetime.minus", "datetime-logical-numeric-input"),
+            ("datetime.ne", "datetime-logical-numeric-input"),
+            ("datetime.plus", "datetime-logical-numeric-input"),
+            ("fileDatastore", "filedatastore-boolean-coercion"),
+            ("fileDatastore", "filedatastore-gpu-input"),
+            ("fileDatastore", "filedatastore-metadata-payloads"),
+            ("minreal", "tf-integer-coefficients"),
+            ("minreal", "tf-integer-sample-time"),
+            ("minreal", "tf-logical-coefficients"),
+            ("series", "ss-integer-matrix-input"),
+            ("series", "ss-integer-sample-time"),
+            ("series", "tf-integer-coefficients"),
+            ("series", "tf-integer-sample-time"),
+            ("series", "tf-logical-coefficients"),
+            ("ss2tf", "ss2tf-explicit-gpu-input"),
+            ("strip", "strip-character-set"),
+            ("strip", "strip-direction-alias"),
+            ("tfdata", "ss-integer-matrix-input"),
+            ("tfdata", "ss-integer-sample-time"),
+            ("tfdata", "tf-integer-coefficients"),
+            ("tfdata", "tf-integer-sample-time"),
+            ("tfdata", "tf-logical-coefficients"),
         ]);
+        for pair in reviewed_cutover::extensions() {
+            assert!(
+                expected.insert(pair),
+                "reviewed extension duplicates the baseline: {pair:?}"
+            );
+        }
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
             Vec::<(&str, &str)>::new(),
@@ -1746,70 +2311,16 @@ mod tests {
     }
 
     #[test]
-    fn every_builtin_extension_has_a_structured_compatibility_identifier() {
-        for builtin in runmat_builtins::builtin_functions() {
+    fn every_builtin_extension_has_a_valid_typed_error_contract() {
+        for builtin in metadata_view::integer_metadata() {
             for extension in builtin.extensions {
                 assert!(
-                    extension.error_identifier.is_some_and(|identifier| {
-                        identifier.starts_with("RunMat:compatibility:")
-                    }),
-                    "{} extension {} must use the compatibility identifier namespace",
+                    extension.validate_error_contract().is_ok(),
+                    "{} extension {} must match its typed rejection/profile contract",
                     builtin.name,
                     extension.id
                 );
             }
-        }
-    }
-
-    #[test]
-    fn core_operator_extensions_reject_before_semantic_dispatch_in_matlab_mode() {
-        let _matlab_mode = push_runmat_extensions_enabled(false);
-        let like_cases = [
-            ("plus", "RunMat:compatibility:PlusLikePrototypeExtension"),
-            ("minus", "RunMat:compatibility:MinusLikePrototypeExtension"),
-            ("times", "RunMat:compatibility:TimesLikePrototypeExtension"),
-            (
-                "rdivide",
-                "RunMat:compatibility:RdivideLikePrototypeExtension",
-            ),
-            ("power", "RunMat:compatibility:PowerLikePrototypeExtension"),
-        ];
-        for (name, identifier) in like_cases {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
-            let args = [
-                Value::Num(2.0),
-                Value::Num(1.0),
-                Value::String("like".to_string()),
-                Value::Num(0.0),
-            ];
-            let error = futures::executor::block_on((builtin.implementation)(&args))
-                .expect_err("MATLAB mode must reject RunMat-only like prototype");
-            assert_eq!(error.identifier(), Some(identifier), "{name}");
-        }
-
-        for (name, identifier) in [
-            ("or", "RunMat:compatibility:OrComplexInputExtension"),
-            ("xor", "RunMat:compatibility:XorComplexInputExtension"),
-        ] {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
-            let args = [Value::Complex(0.0, 1.0), Value::Bool(false)];
-            let error = futures::executor::block_on((builtin.implementation)(&args))
-                .expect_err("MATLAB mode must reject RunMat-only complex logical input");
-            assert_eq!(error.identifier(), Some(identifier), "{name}");
-        }
-
-        for (name, identifier) in [
-            ("or", "RunMat:compatibility:OrCharacterInputExtension"),
-            ("xor", "RunMat:compatibility:XorCharacterInputExtension"),
-        ] {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
-            let args = [
-                Value::CharArray(runmat_value::CharArray::new_row("A")),
-                Value::Bool(false),
-            ];
-            let error = futures::executor::block_on((builtin.implementation)(&args))
-                .expect_err("MATLAB mode must reject RunMat-only character logical input");
-            assert_eq!(error.identifier(), Some(identifier), "{name}");
         }
     }
 
@@ -1819,7 +2330,7 @@ mod tests {
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for registered in runmat_builtins::builtin_functions()
+        for registered in metadata_view::public_completion_metadata()
             .into_iter()
             .filter(|builtin| !builtin.extensions.is_empty())
         {
@@ -1845,7 +2356,7 @@ mod tests {
         for name in [
             "gcd", "intmax", "intmin", "linspace", "logspace", "mod", "rem",
         ] {
-            let registered = runmat_builtins::builtin_functions()
+            let registered = metadata_view::public_completion_metadata()
                 .into_iter()
                 .find(|builtin| builtin.name == name)
                 .unwrap_or_else(|| panic!("registered {name} builtin"));
@@ -1870,7 +2381,7 @@ mod tests {
 
     #[test]
     fn integer_capability_metadata_is_complete_and_well_formed_for_settled_apis() {
-        let registered = runmat_builtins::builtin_functions();
+        let registered = metadata_view::integer_metadata();
         for builtin in &registered {
             assert!(
                 builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_none(),
@@ -1878,6 +2389,25 @@ mod tests {
                 builtin.name
             );
         }
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
+                .expect("builtin metadata catalog");
+        let catalog_names = catalog["builtins"]
+            .as_array()
+            .expect("builtin entries")
+            .iter()
+            .filter(|entry| entry.get("integer_capabilities").is_some())
+            .map(|entry| entry["name"].as_str().expect("builtin name"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let registered_names = metadata_view::public_completion_metadata()
+            .iter()
+            .filter(|builtin| !builtin.integer_capabilities.is_empty())
+            .map(|builtin| builtin.name)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            registered_names, catalog_names,
+            "public integer capability census"
+        );
         for name in [
             "DataArray.fill",
             "DataArray.read",
@@ -2053,13 +2583,12 @@ mod tests {
             "fclose",
             "fcontour",
             "feedback",
-            "fea.boundaryCondition",
-            "fea.domain",
-            "fea.interface",
-            "fea.loadCase",
+            "fea.DynamicViscosity.pascalSeconds",
+            "fea.Frequency.hertz",
+            "fea.MassDensity.kilogramsPerCubicMeter",
+            "fea.TurbulenceIntensity.ratio",
             "fea.material",
             "fea.results",
-            "fea.runOptions",
             "fea.trends",
             "feof",
             "fitclinear",
@@ -2147,7 +2676,7 @@ mod tests {
 
     #[test]
     fn integer_audit_dispositions_are_complete_and_well_formed() {
-        let registered = runmat_builtins::builtin_functions();
+        let registered = metadata_view::integer_metadata();
         let mut audited = std::collections::BTreeMap::new();
         for builtin in &registered {
             let Some(audit) = builtin.integer_audit else {
@@ -2157,8 +2686,42 @@ mod tests {
                 assert_eq!(previous, audit, "{} duplicate integer audit", builtin.name);
             }
         }
+        // Validate live contracts before comparing the independently reviewed
+        // inventory, so inventory drift cannot conceal malformed declarations.
+        for (name, audit) in audited {
+            assert!(!audit.notes.is_empty(), "{name} integer audit notes");
+            match audit.kind {
+                runmat_builtins::BuiltinIntegerAuditKind::AliasOf => {
+                    let canonical = audit
+                        .canonical_builtin
+                        .unwrap_or_else(|| panic!("{name} alias target"));
+                    assert_ne!(canonical, name, "{name} cannot alias itself");
+                    let target = registered
+                        .iter()
+                        .find(|builtin| builtin.name == canonical)
+                        .unwrap_or_else(|| panic!("{name} registered alias target {canonical}"));
+                    assert!(
+                        !target.integer_capabilities.is_empty(),
+                        "{name} alias target {canonical} must carry integer capabilities"
+                    );
+                }
+                runmat_builtins::BuiltinIntegerAuditKind::NotApplicable => {
+                    assert_eq!(
+                        audit.canonical_builtin, None,
+                        "{name} inapplicable audit cannot name a canonical builtin"
+                    );
+                }
+            }
+        }
+        // The native FFI calllib/libpointer/libstruct/setdatatype entries now
+        // declare positive typed integer capabilities instead of audit-only
+        // dispositions; retain this as the independently reviewed audit set.
+        let reviewed_audited = metadata_view::reviewed_audit_metadata()
+            .into_iter()
+            .filter_map(|builtin| builtin.integer_audit.map(|audit| (builtin.name, audit)))
+            .collect::<std::collections::BTreeMap<_, _>>();
         assert_eq!(
-            audited.keys().copied().collect::<Vec<_>>(),
+            reviewed_audited.keys().copied().collect::<Vec<_>>(),
             [
                 "DataArray.chunk_shape",
                 "DataArray.codec",
@@ -2191,11 +2754,21 @@ mod tests {
                 "ancestor",
                 "append",
                 "argsort",
+                "audioinfo",
+                "box",
+                "calendarDuration.eq",
+                "calendarDuration.minus",
+                "calendarDuration.ne",
+                "calendarDuration.plus",
                 "cancel",
                 "caxis",
                 "cellstr",
+                "clear",
                 "clearCache",
+                "clearvars",
+                "clibgen.buildInterface",
                 "commit",
+                "copyfile",
                 "data.copy",
                 "data.delete",
                 "data.exists",
@@ -2205,7 +2778,10 @@ mod tests {
                 "data.list",
                 "data.move",
                 "data.open",
+                "datetick",
                 "deblank",
+                "diary",
+                "dir",
                 "erasePunctuation",
                 "eraseURLs",
                 "exist",
@@ -2215,9 +2791,7 @@ mod tests {
                 "fea.materialAssignment",
                 "fea.model",
                 "fea.plan",
-                "fea.plot",
                 "fea.run",
-                "fea.step",
                 "fea.study",
                 "fea.sweep",
                 "fea.validate",
@@ -2225,16 +2799,29 @@ mod tests {
                 "fileattrib",
                 "fileparts",
                 "fileread",
+                "filesep",
                 "findElement",
                 "findprop",
+                "format",
                 "func2str",
                 "functions",
                 "genvarname",
+                "geometry.inspect",
                 "geometry.listRegions",
+                "geometry.load",
                 "geometry.meshes",
                 "getAttribute",
                 "getenv",
                 "getmethod",
+                "gpuInfo",
+                "grid",
+                "gunzip",
+                "gzip",
+                "h5disp",
+                "h5info",
+                "hdf5info",
+                "hdf5read",
+                "hdf5write",
                 "hgload",
                 "hgsave",
                 "htmlTree",
@@ -2246,6 +2833,7 @@ mod tests {
                 "iscellstr",
                 "ischar",
                 "iscolumn",
+                "isdatetime",
                 "isdeployed",
                 "isdiag",
                 "isempty",
@@ -2253,9 +2841,9 @@ mod tests {
                 "isfield",
                 "isfile",
                 "isfolder",
-                "isgraphics",
-                "ishandle",
                 "ishermitian",
+                "isjava",
+                "iskeyword",
                 "isletter",
                 "islogical",
                 "ismatrix",
@@ -2268,6 +2856,7 @@ mod tests {
                 "isspace",
                 "isstable",
                 "isstring",
+                "isstruct",
                 "issymmetric",
                 "istable",
                 "istimetable",
@@ -2276,12 +2865,33 @@ mod tests {
                 "isvalid",
                 "isvarname",
                 "isvector",
+                "javaArray",
+                "javaMethod",
+                "javaMethodEDT",
+                "javaObject",
+                "javaObjectEDT",
+                "javaaddpath",
+                "javaclasspath",
+                "javarmpath",
+                "jenv",
                 "jsondecode",
                 "legend",
+                "libfunctions",
+                "libisloaded",
+                "loadlibrary",
+                "localfunctions",
                 "lower",
+                "ls",
                 "matches",
                 "matlab.metadata.DynamicProperty.delete",
+                "matlabroot",
                 "memoize",
+                "mex",
+                "mexcuda",
+                "mexext",
+                "mfilename",
+                "mkdir",
+                "movefile",
                 "mustBeFile",
                 "mustBeFolder",
                 "mustBeNonzeroLengthText",
@@ -2289,29 +2899,44 @@ mod tests {
                 "mustBeTextScalar",
                 "mustBeValidVariableName",
                 "namedargs2cell",
+                "namelengthmax",
                 "normalizeWords",
                 "notify",
                 "onCleanup",
+                "open",
                 "openfig",
+                "pathsep",
                 "pattern",
+                "pcode",
+                "pyargs",
+                "pyenv",
+                "pyrun",
+                "pyrunfile",
                 "readWordEmbedding",
                 "readline",
+                "readlines",
                 "regexp",
                 "regexpPattern",
                 "regexpi",
+                "rehash",
                 "removeStopWords",
                 "replace",
+                "restoredefaultpath",
                 "rethrow",
                 "reverse",
                 "rmpath",
                 "rowfilter",
+                "run",
+                "save",
                 "saveas",
                 "savefig",
                 "saveobj",
                 "second",
                 "sendmail",
+                "shading",
                 "splitlines",
                 "stats",
+                "stopWords",
                 "str2double",
                 "str2func",
                 "str2num",
@@ -2319,7 +2944,6 @@ mod tests {
                 "strcmp",
                 "strcmpi",
                 "strip",
-                "strjoin",
                 "strjust",
                 "strlength",
                 "strrep",
@@ -2328,21 +2952,31 @@ mod tests {
                 "strtrim",
                 "superclasses",
                 "suptitle",
+                "syms",
                 "system",
+                "tempdir",
+                "tempname",
+                "terminate",
                 "tokenDetails",
                 "tokenizedDocument",
-                "uigetfile",
+                "uigetdir",
                 "uiputfile",
+                "unloadlibrary",
                 "unsetenv",
+                "unzip",
                 "upper",
                 "urldecode",
                 "urlencode",
+                "usejava",
                 "userpath",
                 "validateFunctionSignaturesJSON",
                 "vartype",
                 "verLessThan",
                 "version",
                 "what",
+                "which",
+                "who",
+                "whos",
                 "word2ind",
                 "word2vec",
                 "writeWordEmbedding",
@@ -2352,32 +2986,12 @@ mod tests {
                 "yticklabels",
                 "zero",
             ]
+            .into_iter()
+            .chain(reviewed_cutover::audited_names())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
         );
-        for (name, audit) in audited {
-            assert!(!audit.notes.is_empty(), "{name} integer audit notes");
-            match audit.kind {
-                runmat_builtins::BuiltinIntegerAuditKind::AliasOf => {
-                    let canonical = audit
-                        .canonical_builtin
-                        .unwrap_or_else(|| panic!("{name} alias target"));
-                    assert_ne!(canonical, name, "{name} cannot alias itself");
-                    let target = registered
-                        .iter()
-                        .find(|builtin| builtin.name == canonical)
-                        .unwrap_or_else(|| panic!("{name} registered alias target {canonical}"));
-                    assert!(
-                        !target.integer_capabilities.is_empty(),
-                        "{name} alias target {canonical} must carry integer capabilities"
-                    );
-                }
-                runmat_builtins::BuiltinIntegerAuditKind::NotApplicable => {
-                    assert_eq!(
-                        audit.canonical_builtin, None,
-                        "{name} inapplicable audit cannot name a canonical builtin"
-                    );
-                }
-            }
-        }
     }
 
     #[test]
@@ -2386,7 +3000,7 @@ mod tests {
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for registered in runmat_builtins::builtin_functions()
+        for registered in metadata_view::public_completion_metadata()
             .into_iter()
             .filter(|builtin| {
                 !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()

@@ -7,6 +7,10 @@ use runmat_meshing_core::contracts::{
     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTED_COUNT,
     TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
 };
+use runmat_meshing_core::{
+    quality::predicate::{Point3Construction, SpatialPredicatePoint},
+    StableDigest,
+};
 use std::collections::BTreeMap;
 
 #[test]
@@ -30,6 +34,43 @@ fn two_to_three_face_flip_preserves_local_boundary_faces() {
     assert_eq!(
         local_tetrahedron_boundary_faces(&candidate.created_tetrahedra),
         local_tetrahedron_boundary_faces(&[left.node_ids, right.node_ids])
+    );
+}
+
+#[test]
+fn two_to_three_geometry_requires_a_strictly_convex_bipyramid() {
+    let left = [0, 1, 2, 3];
+    let right = [0, 2, 1, 4];
+    let convex = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [1.0 / 3.0, 1.0 / 3.0, 1.0],
+        [1.0 / 3.0, 1.0 / 3.0, -1.0],
+    ];
+    assert!(
+        two_to_three_geometry_is_admissible(left, right, |node| SpatialPredicatePoint {
+            identity: StableDigest::from_bytes([(node + 1) as u8; 32]),
+            coordinates: convex[node as usize],
+            construction: Point3Construction::Explicit,
+        })
+        .expect("finite points must admit exact predicates")
+    );
+
+    let boundary_apex = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.5, 0.0, 1.0],
+        [0.25, -1.0, 0.0],
+        [0.75, 1.0, 0.0],
+    ];
+    assert!(
+        !two_to_three_geometry_is_admissible(left, right, |node| SpatialPredicatePoint {
+            identity: StableDigest::from_bytes([(node + 1) as u8; 32]),
+            coordinates: boundary_apex[node as usize],
+            construction: Point3Construction::Explicit,
+        })
+        .expect("finite points must admit exact predicates")
     );
 }
 
@@ -197,7 +238,8 @@ fn mesh_local_reconnection_applies_quality_improving_interior_face_flip() {
             max_attempted_reconnections: 32,
             max_accepted_reconnections: 1,
         },
-    );
+    )
+    .unwrap();
 
     assert_eq!(report.attempted_reconnection_count, 1);
     assert_eq!(report.accepted_reconnection_count, 1);
@@ -238,7 +280,8 @@ fn mesh_local_reconnection_records_quality_neutral_rejection() {
             max_attempted_reconnections: 32,
             max_accepted_reconnections: 1,
         },
-    );
+    )
+    .unwrap();
 
     assert_eq!(report.attempted_reconnection_count, 1);
     assert_eq!(report.accepted_reconnection_count, 0);
@@ -279,7 +322,8 @@ fn mesh_local_reconnection_records_attempt_budget_limit() {
             max_attempted_reconnections: 1,
             max_accepted_reconnections: 4,
         },
-    );
+    )
+    .unwrap();
 
     assert_eq!(report.attempted_reconnection_count, 1);
     assert_eq!(report.accepted_reconnection_count, 1);
@@ -326,25 +370,27 @@ fn local_flip_improvement_rejects_candidate_that_does_not_improve_quality_or_cou
 fn two_tetrahedron_mesh(coordinates: [[f64; 3]; 5]) -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "local_reconnection_fixture".to_string(),
-        tetrahedron_generation_family: "unknown".to_string(),
         nodes: coordinates
             .into_iter()
             .enumerate()
             .map(|(index, coordinates_m)| TetrahedronMeshNode {
                 node_id: entity(index),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         elements: vec![
             Tetrahedron4Element {
                 element_id: entity(10),
                 node_ids: [entity(0), entity(1), entity(2), entity(3)],
-                material_region_id: "body".to_string(),
+                region_id: "body".to_string(),
             },
             Tetrahedron4Element {
                 element_id: entity(11),
                 node_ids: [entity(0), entity(2), entity(1), entity(4)],
-                material_region_id: "body".to_string(),
+                region_id: "body".to_string(),
             },
         ],
         boundary_faces: Vec::new(),
@@ -371,19 +417,22 @@ fn two_reconnection_pair_mesh() -> TetrahedronMesh {
             .enumerate()
             .map(|(index, coordinates_m)| TetrahedronMeshNode {
                 node_id: entity(node_offset + index),
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             }),
     );
     mesh.elements.extend([
         Tetrahedron4Element {
             element_id: entity(20),
             node_ids: [entity(5), entity(6), entity(7), entity(8)],
-            material_region_id: "body".to_string(),
+            region_id: "body".to_string(),
         },
         Tetrahedron4Element {
             element_id: entity(21),
             node_ids: [entity(5), entity(7), entity(6), entity(9)],
-            material_region_id: "body".to_string(),
+            region_id: "body".to_string(),
         },
     ]);
     mesh

@@ -102,6 +102,36 @@ Both calls are observational. Providers must not allocate buffers, compile pipel
 
 `placement_resources()` is the corresponding side-effect-free admission snapshot. It reports live allocations, pooled allocations that may be reclaimed, scratch and queue availability when known, loss state, and a resource epoch without allocating or polling by execution. WebGPU does not expose a trustworthy total device-memory budget or queue backlog, so the WGPU provider leaves total capacity, scratch availability, and queue occupancy explicitly unknown while still reporting observed allocation pressure; placement never substitutes the maximum single-buffer size as total VRAM or fabricates queue telemetry.
 
+## Memory budget boundary
+
+RunMat's managed memory budget covers allocations admitted through its own
+allocation owners. It is not a limit on total process memory. Device-buffer
+accounting and host-memory accounting are separate; a maximum buffer size does
+not establish either total device capacity or a host-memory allowance.
+
+Host-side workspace allocated internally for shader parsing, validation,
+translation and backend pipeline creation by Naga, WGPU, graphics drivers and
+browser shader compilers is outside the enforced RunMat-managed host-byte budget.
+Compilation can therefore consume additional memory even when the managed
+allocations fit. Source-size limits, cache hits and measured compiler peaks do
+not establish a hard bound on that additional memory. GPU execution remains
+available under this boundary; successful admission is not a guarantee that
+the complete process cannot run out of memory.
+
+This exclusion does not remove accounting for tensor payloads, their requested
+device-buffer extents, or RunMat-owned preparation, submission and cache backing.
+RunMat callback frames retain their own admission through completion. Private
+callback/task bookkeeping allocated inside backend and browser scheduling
+libraries is not an admitted RunMat block either; it is a separate dependency
+boundary, not shader-compilation memory.
+
+Errors returned by fallible shader preparation and resource admission retain
+their causes through the operation's error path. This does not promise recovery
+from backend panics, a host allocator abort or an operating-system process
+termination. Applications requiring a hard limit on the entire process need an
+independently enforced isolation mechanism; a
+RunMat-managed budget alone does not supply that guarantee.
+
 ## Operation Categories
 
 | Category | Examples |
@@ -129,6 +159,10 @@ Complex operations can combine device kernels with host fallback when the backen
 - Provider-owned `wgpu::Buffer` references for exported buffers.
 
 The provider validates adapter limits before creating buffers or bind groups. It also classifies buffer usage so residency pooling and cleanup can make reasonable reuse decisions.
+
+### Reduction reuse budget
+
+The WGPU provider may retain native mean and squared-moment outputs for reuse by the same tensor view and reduction dimensions. This cache is separate from the buffer residency pool and does not represent the adapter's total memory capacity. Its defaults are 128 moment pairs and 64 MiB of retained output buffers. Set `RUNMAT_WGPU_MOMENTS_CACHE_MAX_ENTRIES` and `RUNMAT_WGPU_MOMENTS_CACHE_MAX_BYTES` to nonnegative integer limits at provider initialization; setting either to `0` disables moment reuse. An output pair larger than the byte limit is not cached. Square-to-source provenance is weak and limited to the configured entry count. Cache keys identify exact views: a different view of the same physical allocation cannot reuse an old pair. When an exact source view is dropped but a sibling keeps the physical allocation alive, its pair remains only until the next insertion prunes dead views or the bounded cache evicts it. Physical allocation retirement removes all matching views and dimension variants immediately, including under optional-cache bookkeeping poison.
 
 ### Exact integer ABI
 

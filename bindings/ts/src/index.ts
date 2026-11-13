@@ -1,14 +1,107 @@
+export { physicalLengthUnit, physicalLengthUnitName, isPhysicalLengthUnit, resolvedSourceLengthUnit, sourceLengthUnitLabel, PHYSICAL_LENGTH_UNITS } from "./physical.js";
+export type { LengthUnit, LengthUnitEvidence } from "./physical.js";
+import { resolveNativeRuntimeSettings, editNativeUserRuntimeSettings } from "./settings.js";
+import type { HostRuntimeSettings, ResolvedRuntimeSettings, UserRuntimeSettingsEdit, RuntimeSettingsNativeExports, PreparedClusterProgram } from "./settings.js";
+export type { HostRuntimeSettings, ResolvedRuntimeSettings, RuntimeSettingsConfig, RuntimeSettingSource, UserRuntimeSettingsEdit, SettingsJsonValue, PreparedClusterProgram } from "./settings.js";
+import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
+import { invokeOpenTelemetry } from "./observability.js";
+import type { OpenTelemetryNativeExports, OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
+export type { OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
+import { checkNativeSource } from "./source-check.js";
+import { listNativeProjectEntrypoints, runNativeProjectEntrypoint, prepareNativeNamedClusterProgram } from "./project-entrypoints.js";
+import type {
+  NamedProjectEntrypoint, ProjectEntrypointContext, ProjectEntrypointDescription,
+  RunProjectEntrypointOptions, ProjectEntrypointRunResult,
+  ProjectEntrypointSessionExports, ProjectEntrypointModuleExports,
+} from "./project-entrypoints.js";
+export type {
+  NamedProjectEntrypoint, ProjectEntrypointContext, ProjectEntrypointDescription,
+  ProjectEntrypointFailure, ProjectEntrypointSupport, RunProjectEntrypointOptions,
+  ProjectEntrypointRunResult,
+} from "./project-entrypoints.js";
+import type { SourceCheckNativeExports, SourceCheckRequest, SourceCheckReport } from "./source-check.js";
+export type {
+  SourceCheckTarget, SourceCheckRequest, SourceCheckOutcome, SourceCheckLocation,
+  SourceCheckDiagnostic, SourceCheckSummary, SourceCheckDocument, SourceCheckReport,
+  SourceAnalysisCompleteness,
+} from "./source-check.js";
+import type {
+  RunMatProgramTaskCancellation,
+  RunMatProgramTaskTerminal,
+  RunMatWorkerProgramInvocation,
+  RunMatProgramWorkerInventory,
+} from "./execution/program-terminal.js";
+export type {
+  RunMatProgramExecutionAssignment,
+  RunMatProgramAcceleratorLease,
+  RunMatWorkerAcceleratorDevice,
+  RunMatWorkerHostCapability,
+  RunMatProgramWorkerInventory,
+  RunMatProgramCancellationReason,
+  RunMatProgramTaskCancellation,
+  RunMatProgramTaskRetirement,
+  RunMatProgramTaskTerminal,
+  RunMatProgramRuntimeFailure,
+  RunMatProgramExecutionResponse,
+  RunMatWorkerProgramInvocation,
+} from "./execution/program-terminal.js";
+export {
+  sameProgramAssignment,
+  isRetiredProgramTerminal,
+} from "./execution/program-terminal.js";
+export {
+  remoteDriverMemoryBytes,
+  REMOTE_DRIVER_COMPLETION_CONTROL_BYTES,
+} from "./execution/remote-driver-resources.js";
+import type { InputManifest } from "./generated/collaboration-contracts.js";
+export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
+export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";
+export type {
+  WorkspaceCaptureRequest,
+  WorkspaceSnapshot as SourceWorkspaceSnapshot,
+  WorkspacePublicationRequest,
+  WorkspacePublicationOutcome,
+  WorkspaceEdit as SourceWorkspaceEdit,
+  WorkspaceRevision as SourceWorkspaceRevision,
+} from "./generated/fea-workspace-contracts.js";
 import type {
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
 import type {
-  FeaAnalysisProfile,
-  FeaAnalysisRunKind,
   FeaCapabilities,
-  FeaCheckResult,
+  FeaExecutionChoices,
+  FeaExecutionCandidate,
+  FeaExecutionDuration,
+  FeaExecutionMode,
+  FeaExecutionReadiness,
+  FeaSourceCheckResult,
+  FeaBrowseRequest,
+  FeaBrowseOutcome,
+  FeaWorkingCheckRequest,
+  FeaChangeSetId,
+  FeaChangeSetRequest,
+  FeaChangeSetReviewRequest,
+  FeaChangeSetReview,
+  FeaChangeSetCheck,
+  FeaChangeSetPublication,
+  FeaWorkspaceCheckRequest,
+  FeaWorkspaceCheckResult,
+  SourceDigest,
+  FeaSemanticProgram,
+  FeaSourceIndex,
+  FeaSourceIndexEntry,
+  FeaSourceIdentity,
+  AuthoredStudy,
+  AuthoredModel,
+  GeometryDefinition,
+  GeneratorCallable,
+  MeshDefinition,
+  FeaDeclaredMaterial,
+  MaterialModel,
   FeaDiagnosticsArtifactPayload,
   FeaDocumentKind,
-  FeaFieldDescriptorsArtifactPayload,
+  FeaFieldBinding,
+  FeaFieldBindingsArtifactPayload,
   FeaFieldKind,
   FeaFieldDescriptor,
   FeaFieldLocation,
@@ -24,24 +117,28 @@ import type {
   FeaRunDatasetFieldPagingPolicy,
   FeaRunDatasetPayload,
   FeaRunDatasetStudyRef,
-  FeaRunResult,
-  FeaStudyDocumentOperation,
-  FeaStudyDocumentOperationOutput
+  FeaRunResult
 } from "./fea-contracts.js";
 import {
+  isFeaSourceCheckContract,
+  isFeaSemanticProgram,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_SCHEMA_VERSION,
   FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
   FEA_FIELD_DEFAULT_PAGE_SIZE,
-  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_FIELD_BINDINGS_ARTIFACT_KIND,
+  FEA_FIELD_BINDINGS_SCHEMA_VERSION,
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
 } from "./fea-contracts.js";
 import { createDefaultFsProvider } from "./fs/default.js";
+import type { FreezeTestSnapshotInput, ProjectTestLayout, RunMatTestPreparationNative } from "./testing/types.js";
+export type { FreezeTestSnapshotInput, ProjectTestLayout } from "./testing/types.js";
+import type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
+export type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
 import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
 import { fetchGitTreeInventoryWire } from "./package-cache/git-gateway.js";
 import { BrowserProjectResolver } from "./package-cache/browser-resolver.js";
@@ -66,35 +163,74 @@ import type {
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
 export {
-  FEA_ANALYSIS_PROFILES,
-  FEA_ANALYSIS_RUN_KINDS,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_SCHEMA_VERSION,
   FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
   FEA_FIELD_DEFAULT_PAGE_SIZE,
-  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_FIELD_BINDINGS_ARTIFACT_KIND,
+  FEA_FIELD_BINDINGS_SCHEMA_VERSION,
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
   FEA_RUN_CELL_ID,
   FEA_RUN_KIND,
   FEA_RUN_MANIFEST_METADATA_SCHEMA_VERSION,
-  FEA_STUDY_DOCUMENT_OPERATIONS,
-  FEA_SUPPORTED_PHYSICS_FAMILIES,
-  FEA_SUPPORTED_PHYSICS_PROFILES,
   feaRunArtifactRefId,
 } from "./fea-contracts.js";
 export type {
-  FeaAnalysisProfile,
-  FeaAnalysisRunKind,
+  AuthoredBoundary,
+  AuthoredConnector,
+  AuthoredConstraint,
+  AuthoredExcitation,
+  AuthoredExcitationCase,
+  AuthoredInitialCondition,
+  AuthoredInterface,
+  AuthoredMaterialAssignment,
+  AuthoredModel,
+  AuthoredOutput,
+  AuthoredPropertyAssignment,
+  AuthoredStudy,
+  FeaDeclaredMaterial,
+  FeaModelMemberKind,
+  FeaSemanticProgram,
+  FeaSourceIdentity,
+  FeaSourceIndex,
+  FeaSourceIndexEntry,
+  GeometryDefinition,
+  GeometryRegionRef,
+  GeneratorCallable,
+  MaterialModel,
+  MeshDefinition,
+  PhysicalSignal,
+  ProcedureStep,
+  FeaAnalysisProcedure,
+  FeaBoundaryInput,
+  FeaCanonicalSequence,
   FeaCapabilities,
-  FeaCheckResult,
+  FeaExecutionChoices,
+  FeaExecutionCandidate,
+  FeaExecutionDuration,
+  FeaExecutionMode,
+  FeaExecutionReadiness,
+  FeaSourceCheckResult,
+  FeaBrowseRequest,
+  FeaBrowseOutcome,
+  FeaWorkingCheckRequest,
+  FeaChangeSetId,
+  FeaChangeSetRequest,
+  FeaChangeSetReviewRequest,
+  FeaChangeSetReview,
+  FeaChangeSetCheck,
+  FeaChangeSetPublication,
+  FeaWorkspaceCheckRequest,
+  FeaWorkspaceCheckResult,
+  SourceDigest,
   FeaDiagnosticsArtifactPayload,
   FeaDocumentKind,
-  FeaFieldDescriptorsArtifactPayload,
+  FeaFieldBinding,
+  FeaFieldBindingsArtifactPayload,
   FeaFieldKind,
   FeaFieldDescriptor,
   FeaFieldLocation,
@@ -104,7 +240,28 @@ export type {
   FeaFieldStorage,
   FeaFieldStorageRef,
   FeaObjectArtifactMetadata,
-  FeaPhysicsProfileCatalogEntry,
+  FeaAcceleratorAdmissionPolicy,
+  FeaComputeBackend,
+  FeaConnectorInput,
+  FeaConstraintInput,
+  FeaDomainsInput,
+  FeaElementOrder,
+  FeaExecutionInput,
+  FeaMaxwellHarmonicOptions,
+  FeaExcitationCaseInput,
+  FeaExcitationInput,
+  FeaGeometryUnits,
+  FeaInitialConditionInput,
+  FeaInterfaceInput,
+  FeaMaterialAssignmentInput,
+  FeaMaterialInput,
+  FeaPhysicsFamily,
+  FeaProcedureStep,
+  FeaRegionInput,
+  FeaRegionSelector,
+  FeaRegionTarget,
+  FeaResponseSpectrumInput,
+  FeaSignalInput,
   FeaProgressEvent,
   FeaProgressPhase,
   FeaProgressStatus,
@@ -112,20 +269,6 @@ export type {
   FeaRunDatasetPayload,
   FeaRunDatasetStudyRef,
   FeaRunResult,
-  FeaStudyBoundaryConditionEntry,
-  FeaStudyDocumentCounts,
-  FeaStudyDocumentDiff,
-  FeaStudyDocumentOperation,
-  FeaStudyDocumentOperationOutput,
-  FeaStudyDocumentOperationResult,
-  FeaStudyDrivingConditionEntry,
-  FeaStudyMaterialAssignmentEntry,
-  FeaStudyMaterialEntry,
-  FeaStudyOutputEntry,
-  FeaStudyReadiness,
-  FeaStudyRegionEntry,
-  FeaStudyStepEntry,
-  FeaStudySummary,
   FeaRunArtifactRole
 } from "./fea-contracts.js";
 export {
@@ -215,8 +358,8 @@ export type {
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
 export type LanguageCompatMode = "runmat" | "matlab" | "strict";
-type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
-export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);
+/** Preset logging level; module-filter expressions are not accepted. */
+export type RunMatLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type RunmatConfigFormat = "toml" | "json";
 export type DesktopRunHistoryMode = "off" | "budgeted" | "full";
@@ -286,7 +429,14 @@ export interface LegacyRunmatConfigMigration {
 
 export type WasmInitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
+/** Explicit session-isolated settings; omission retains browser persistence. */
+export type ApplicationSettingsMode = "isolatedMemory";
+
 export interface RunMatInitOptions {
+  runtimeSettings?: HostRuntimeSettings;
+  /** Runtime-only collector credentials; never stored in runtimeSettings or user/project files. */
+  openTelemetryHeaders?: OpenTelemetryStartupHeaders;
+  applicationSettings?: ApplicationSettingsMode;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -320,6 +470,10 @@ export type BrowserExecutionTopology = "coordinator" | "flat" | "serial";
 export interface BrowserExecutionHostCapabilities {
   topology: BrowserExecutionTopology;
   maxWorkers: number;
+  /** Exact owned builtin route; successful launch responses and cancelOwned acknowledgments certify task settlement. */
+  ownedBuiltinWork?: boolean;
+  /** Selected Direct/Graph route with an exact Runtime-owned retirement terminal. Rejection is not proof. */
+  selectedProgramWork?: boolean;
 }
 
 export interface BrowserProgramLaunchRequest {
@@ -330,8 +484,18 @@ export interface BrowserProgramLaunchRequest {
 
 export interface RunMatExecutionHost {
   capabilities: BrowserExecutionHostCapabilities;
+  /** Actual module/factory host+device inventory; required for selectedProgramWork. */
+  workerInventory?: RunMatProgramWorkerInventory;
   launch(request: BrowserProgramLaunchRequest): Promise<Record<string, unknown>>;
-  cancel(taskId: string): void;
+  cancel(taskId: string): void | Promise<void>;
+  /** Required only for ownedBuiltinWork: literal task-bound physical-exit proof. */
+  cancelOwned?(taskId: string): Promise<{
+    taskId: string;
+    state: "terminated" | "notRunning";
+  }>;
+  /** Required for selectedProgramWork. The terminal must preserve the actual assignment. */
+  launchProgram?(request: BrowserProgramLaunchRequest): Promise<RunMatProgramTaskTerminal>;
+  cancelProgram?(request: RunMatProgramTaskCancellation): Promise<RunMatProgramTaskTerminal>;
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -362,6 +526,13 @@ export interface FigureLayout {
   axesRows: number;
   axesCols: number;
   axesIndices: number[];
+  axesGridCells?: Array<AxesGridCell | null>;
+}
+
+export interface AxesGridCell {
+  rows: number;
+  columns: number;
+  index: number;
 }
 
 export interface FigureMetadata {
@@ -414,6 +585,17 @@ export type FigurePlotKind =
 export type FigureEventListener = (event: FigureEvent) => void;
 export type HoldMode = "on" | "off" | "toggle" | boolean;
 
+/** Omitted fields preserve the runtime's existing navigation defaults. */
+export interface PlotNavigationOptions {
+  preset?: "legacy" | "cad" | "dcc";
+  orbitCenter?: "viewCenter" | "origin" | "underCursor";
+  zoomSpeed?: number;
+  reverseZoom?: boolean;
+  zoomToCursor?: boolean;
+  trackpadPan?: boolean;
+}
+export type PlotAntialiasing = "off" | "x2" | "x4" | "x8";
+
 export type PlotSurfaceEvent =
   | {
       kind: "mouseDown";
@@ -447,12 +629,15 @@ export type PlotSurfaceEvent =
       metaKey?: boolean;
     }
   | {
-      kind: "wheel";
+      /** Hosts classify two-finger scroll separately; Ctrl/Cmd pinch remains zoom. */
+      kind: "wheel" | "trackpadScroll";
       x: number;
       y: number;
     wheelDeltaX: number;
     wheelDeltaY: number;
       wheelDeltaMode?: number;
+      /** Override pixel-scroll inference for precise mice or known trackpads. */
+      trackpad?: boolean;
       shiftKey?: boolean;
       ctrlKey?: boolean;
       altKey?: boolean;
@@ -548,8 +733,12 @@ export interface FigureImageOptions {
   textmark?: string;
 }
 
+/** Observation options are preserved through this JS wrapper and validated by WASM. */
+export const GEOMETRY_OBSERVATION_API_VERSION = 1;
+
 export interface GeometrySceneImageOptions {
   handle: number;
+  selectedRegionIds?: string[];
   width?: number;
   height?: number;
   view?: string | null;
@@ -565,6 +754,10 @@ export interface GeometrySceneImageVisibilityState {
 
 export interface GeometrySceneImageSectionState {
   plane: GeometrySceneImageSectionPlane;
+  /** A second cutting plane: only what lies on the removed side of both planes is cut away. */
+  secondPlane?: GeometrySceneImageSectionPlane | null;
+  /** Fill the solid's cut faces (the default). False leaves the cut open. */
+  cap?: boolean;
 }
 
 export interface GeometrySceneImageSectionPlane {
@@ -648,6 +841,7 @@ export interface ExecuteRequestPathSource {
 export type ExecuteRequestSource = ExecuteRequestTextSource | ExecuteRequestPathSource;
 
 export interface ExecuteRequest {
+  inputManifest?: InputManifest;
   source: ExecuteRequestSource;
   compatibility?: LanguageCompatMode;
   hostPolicy?: {
@@ -658,6 +852,8 @@ export interface ExecuteRequest {
 }
 
 export interface ExecuteResult {
+  /** Canonical lock for the dependency graph actually used for this captured run. */
+  dependencyLock?: string | null;
   flow: RuntimeFlow;
   displayEvents: DisplayEvent[];
   valueText?: string;
@@ -699,7 +895,12 @@ export interface RunMatErrorDetails {
   message: string;
   identifier?: string;
   diagnostic: string;
+  /** Canonical meshing diagnostic, retained without translating its domain contract. */
+  meshingFailure?: unknown;
   span?: RunMatErrorSpan;
+  sourceId?: number;
+  sourceName?: string;
+  sourcePath?: string;
   callstack: string[];
   callstackElided?: number;
 }
@@ -708,7 +909,11 @@ export class RunMatExecutionError extends Error {
   readonly kind: RunMatErrorKind;
   readonly identifier?: string;
   readonly diagnostic: string;
+  readonly meshingFailure?: unknown;
   readonly span?: RunMatErrorSpan;
+  readonly sourceId?: number;
+  readonly sourceName?: string;
+  readonly sourcePath?: string;
   readonly callstack: string[];
   readonly callstackElided?: number;
 
@@ -718,13 +923,40 @@ export class RunMatExecutionError extends Error {
     this.kind = details.kind;
     this.identifier = details.identifier;
     this.diagnostic = details.diagnostic;
+    this.meshingFailure = details.meshingFailure;
     this.span = details.span;
+    this.sourceId = details.sourceId;
+    this.sourceName = details.sourceName;
+    this.sourcePath = details.sourcePath;
     this.callstack = details.callstack;
     this.callstackElided = details.callstackElided;
   }
 }
 
 export type WorkspaceResidency = "cpu" | "gpu" | "unknown";
+
+/** A language string element. Every string is literal text; only null is missing. */
+export type StringElement = string | null;
+
+/** String projections returned in MaterializedVariable.valueJson. */
+export interface StringValueJson {
+  kind: "string";
+  value: StringElement;
+  shape: [1, 1];
+}
+
+/** Exact browser admission revision; older sentinel-based runtimes are incompatible. */
+export const STRING_ELEMENT_WIRE_SCHEMA_VERSION = 1 as const;
+
+export interface StringArrayValueJson {
+  kind: "string-array";
+  shape: number[];
+  rows: number;
+  cols: number;
+  preview: StringElement[];
+  length: number;
+  truncated: boolean;
+}
 
 export interface WorkspaceSnapshot {
   full: boolean;
@@ -984,7 +1216,16 @@ export interface GeometryPreviewResult extends GeometryInspectResult {
   previewMessage?: string | null;
 }
 
+export type { LocalFeaWorkerContext, FeaWorkerWorkClass } from "./fea-run-context.js";
+import type { LocalFeaWorkerContext } from "./fea-run-context.js";
+export { createFeaRunAdmissionHook, FeaRunAdmissionError, feaRunAdmissionError } from "./fea-run-admission.js";
+export type { FeaRunAdmission, FeaRunAdmissionHook, FeaRunWorkerAdmission, FeaRunWorkerOwner, FeaRunWorkerGrantRequest, FeaWorkerAssignment, FeaRunRetirementReceipt, FeaRunWorkerLeaseState, FeaRunRequest, FeaRunLease, FeaRunLeaseRenewal, FeaRunUsage, FeaRunOutcome, FeaRunDenied, FeaRunStopReason, FeaRunSettlement, FeaRunWorkerReport, CompletedSimulationUsage, SimulationOperationCount } from "./fea-run-admission.js";
+export { simulationOperationCount, emptySimulationUsage, parseCompletedSimulationUsage } from "./simulation-usage.js";
+import { createFeaRunAdmissionHook, FeaRunAdmissionError, type FeaRunAdmission, type FeaRunAdmissionHook, type FeaRunWorkerAdmission, type FeaRunLease, type FeaRunLeaseState } from "./fea-run-admission.js";
+
 export interface RunMatSessionHandle {
+  listProjectEntrypoints(projectPath: string, context?: ProjectEntrypointContext): Promise<ProjectEntrypointDescription[]>;
+  runProjectEntrypoint(selection: NamedProjectEntrypoint, options?: RunProjectEntrypointOptions): Promise<ProjectEntrypointRunResult>;
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
@@ -999,14 +1240,20 @@ export interface RunMatSessionHandle {
     geometrySceneHandle?: number | null,
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
-  checkFeaStudy(path: string): Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation(
-    operation: FeaStudyDocumentOperation,
-    path: string,
-    source: string | null,
-    input: Record<string, unknown>,
-  ): Promise<FeaStudyDocumentOperationOutput>;
-  runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
+  planFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaExecutionChoices>;
+  runFeaSource(path: string, planId: string, inputManifest?: InputManifest): Promise<FeaRunResult>;
+  setFeaRunAdmission(admission: FeaRunAdmission | FeaRunAdmissionHook | null): void;
+  retryPendingFeaSettlement(runId: string): Promise<void>;
+  renewFeaRunLease(runId: string, lease: FeaRunLease): void;
+  checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult>;
+  checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult>;
+  browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome>;
+  inspectFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetCheck>;
+  reviewFeaChanges(request: FeaChangeSetReviewRequest): Promise<FeaChangeSetReview>;
+  stageFeaChanges(request: FeaChangeSetRequest): Promise<FeaChangeSetCheck>;
+  publishFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetPublication>;
+  discardFeaChanges(id: FeaChangeSetId): Promise<void>;
+  checkFeaWorkingSource(request: FeaWorkingCheckRequest): Promise<FeaSourceCheckResult>;
   feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
   materializeDataFileVariable(
     path: string,
@@ -1017,6 +1264,7 @@ export interface RunMatSessionHandle {
   exportGeometryScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
   importGeometryScene?(scene: Uint8Array): Promise<number | null>;
+  createFeaFieldScene?(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?(path: string): Promise<number | null>;
   currentFigureHandle?(): Promise<number>;
   dispose(): void;
@@ -1036,6 +1284,7 @@ export interface RunMatSessionHandle {
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
   setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
   packageCacheSnapshot(): Promise<PackageCacheSnapshot | null>;
+  prepareCapturedProject: CapturedProjectResolver;
   installProjectHandoff(handoff: unknown): Promise<unknown>;
   clearProjectHandoff(): Promise<void>;
   projectRevision(): Promise<unknown | null>;
@@ -1060,6 +1309,9 @@ export interface RunMatSessionHandle {
 }
 
 interface NativeInitOptions {
+  runtimeSettings?: HostRuntimeSettings;
+  openTelemetryHeaders?: OpenTelemetryStartupHeaders;
+  applicationSettings?: ApplicationSettingsMode;
   enableGpu?: boolean;
   enableJit?: boolean;
   verbose?: boolean;
@@ -1082,7 +1334,7 @@ interface NativeInitOptions {
   executionHost?: RunMatExecutionHost;
 }
 
-interface RunMatNativeSession {
+interface RunMatNativeSession extends ProjectEntrypointSessionExports {
   executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
@@ -1097,14 +1349,25 @@ interface RunMatNativeSession {
     geometrySceneHandle?: number | null,
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
-  checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation?: (
-    operation: FeaStudyDocumentOperation,
-    path: string,
-    source: string | null,
-    input: Record<string, unknown>,
-  ) => FeaStudyDocumentOperationOutput | Promise<FeaStudyDocumentOperationOutput>;
-  runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
+  planFeaSource?: (path: string, inputManifest?: InputManifest) => FeaExecutionChoices | Promise<FeaExecutionChoices>;
+  runFeaSource?: (path: string, planId: string, inputManifest?: InputManifest) => FeaRunResult | Promise<FeaRunResult>;
+  setFeaRunAdmission?: (admission: FeaRunAdmissionHook | null) => void;
+  renewFeaRunLease?: (runId: string, lease: FeaRunLease) => void;
+  delegateFeaWorker?: (context: LocalFeaWorkerContext) => FeaRunLeaseState;
+  startFeaWorker?: (context: LocalFeaWorkerContext) => void;
+  acquireFeaWorkerGrant?: (context: LocalFeaWorkerContext, requiredOps: import("./simulation-usage.js").SimulationOperationCount) => Promise<FeaRunLeaseState>;
+  reportFeaWorker?: (context: LocalFeaWorkerContext, usage: import("./fea-run-admission.js").FeaRunUsage, finalReport: boolean) => import("./fea-run-admission.js").FeaRunUsage;
+  retireFeaWorker?: (context: LocalFeaWorkerContext, receipt: import("./fea-run-admission.js").FeaRunRetirementReceipt) => void;
+  discardUndispatchedFeaWorker?: (context: LocalFeaWorkerContext, receipt: import("./fea-run-admission.js").FeaRunRetirementReceipt) => void;
+  inspectFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
+  reviewFeaChanges?: (request: FeaChangeSetReviewRequest) => FeaChangeSetReview | Promise<FeaChangeSetReview>;
+  stageFeaChanges?: (request: FeaChangeSetRequest) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
+  publishFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetPublication | Promise<FeaChangeSetPublication>;
+  discardFeaChanges?: (id: FeaChangeSetId) => void | Promise<void>;
+  checkFeaWorkingSource?: (request: FeaWorkingCheckRequest) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
+  browseFeaSource?: (request: FeaBrowseRequest) => FeaBrowseOutcome | Promise<FeaBrowseOutcome>;
+  checkFeaWorkspace?: (request: FeaWorkspaceCheckRequest) => FeaWorkspaceCheckResult | Promise<FeaWorkspaceCheckResult>;
+  checkFeaSource?: (path: string, inputManifest?: InputManifest) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
   feaField?: (
     runId: string,
     fieldId: string,
@@ -1119,6 +1382,7 @@ interface RunMatNativeSession {
   exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  createFeaFieldScene?: (runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null) => { handle: number; deformationScale: number; exact?: boolean } | Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   currentFigureHandle?: () => number;
   dispose?: () => void;
@@ -1138,6 +1402,7 @@ interface RunMatNativeSession {
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
   setFsProvider?: (provider: RunMatFilesystemProvider) => void;
   packageCacheSnapshot?: () => Promise<PackageCacheSnapshot | null>;
+  prepareCapturedProject?: CapturedProjectResolver;
   installProjectHandoff?: (handoff: unknown) => unknown;
   clearProjectHandoff?: () => void;
   projectRevision?: () => unknown | null;
@@ -1208,6 +1473,18 @@ export interface PlotSurfaceCameraState {
   axes: PlotCameraState[];
 }
 
+export interface FeaFieldSceneView {
+  cameraPosition: [number, number, number];
+  cameraTarget: [number, number, number];
+  cameraUp: [number, number, number];
+  fovYRadians: number;
+  orthographicHeight?: number;
+  aspectRatio: number;
+  viewportHeightPx: number;
+  triangleBudget: number;
+  refineAbovePx: number;
+}
+
 export type GeometrySceneDisplayMode = "shaded" | "edges" | "wireframe";
 export type GeometrySceneViewPreset =
   | "perspective"
@@ -1229,25 +1506,64 @@ export interface GeometrySceneRegionHighlightState {
 export interface GeometrySceneRegionAnnotationState {
   regionId: string;
   color?: [number, number, number, number] | null;
-  role?: string | null;
+  kind: GeometrySceneAnnotationKind;
   label?: string | null;
   direction?: [number, number, number] | null;
   size?: number | null;
 }
 
+export type GeometrySceneAnnotationKind =
+  | "label"
+  | "force"
+  | "moment"
+  | "pressure"
+  | "traction"
+  | "body_force"
+  | "heat_flux"
+  | "current_density"
+  | "normal_velocity"
+  | "flow_velocity"
+  | "mass_flow"
+  | "wall_motion"
+  | "fixed_support"
+  | "symmetry_support"
+  | "prescribed_motion"
+  | "boundary_condition"
+  | "thermal_condition"
+  | "electrical_condition"
+  | "magnetic_condition"
+  | "acoustic_condition"
+  | "fluid_condition"
+  | "connector"
+  | "interface"
+  | "initial_condition";
+
 export interface GeometryScenePresentationState {
   selectedRegionId?: string | null;
   selectedRegionIds?: string[] | null;
+  selectedTopology?: GeometrySceneTopologySelectionState[];
   hoveredRegionId?: string | null;
   regionHighlights?: GeometrySceneRegionHighlightState[];
   regionAnnotations?: GeometrySceneRegionAnnotationState[];
   displayMode?: GeometrySceneDisplayMode;
   edgeOverlayEnabled?: boolean;
+  showGrid?: boolean;
   hiddenOwnerNodeIds?: string[] | null;
   isolatedOwnerNodeIds?: string[] | null;
+  /** Regions left out of the view; picks pass through them. */
+  hiddenRegionIds?: string[];
   section?: GeometrySceneImageSectionState | null;
   viewPreset?: GeometrySceneViewPreset | null;
+  /** Edge and wireframe line width in CSS px; above 1 px edges draw as screen-space strokes. */
+  edgeWidthPx?: number | null;
+  /** The 3D view's projection: with perspective, or parallel (orthographic). Unset keeps it. */
+  projection?: "perspective" | "orthographic" | null;
 }
+
+export type GeometrySceneTopologySelectionState =
+  | { kind: "face"; chunkId: string; triangleIndex: number }
+  | { kind: "edge"; chunkId: string; vertexIndices: [number, number]; segments?: [number, number][] }
+  | { kind: "point"; chunkId: string; vertexIndex: number };
 
 export interface GeometryScenePickResult {
   meshId: string | null;
@@ -1258,10 +1574,15 @@ export interface GeometryScenePickResult {
   regionTag: string | null;
   distance: number;
   position: [number, number, number];
+  vertexIndices?: [number, number, number];
+  barycentricCoordinates?: [number, number, number];
+  topologySelection?: GeometrySceneTopologySelectionState;
+  /** The owner nodes (bodies, assembly components) of what was hit, outermost first. */
+  ownerNodeIds?: string[];
 }
 
 
-interface RunMatNativeModule {
+interface RunMatNativeModule extends OpenTelemetryNativeExports, RuntimeSettingsNativeExports, SourceCheckNativeExports, ProjectEntrypointModuleExports {
   default: (
     module?:
       | { module_or_path: WasmInitInput | Promise<WasmInitInput> }
@@ -1269,9 +1590,19 @@ interface RunMatNativeModule {
       | Promise<WasmInitInput>
   ) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
+  stringElementWireSchemaVersion?: () => number;
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
+  executePreparedFeaStudy?: (json: string, memoryBytes: number, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission) => Promise<string>;
+  executeOwnedFeaStudyStep?: (json: string, memoryBytes: number, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission) => Promise<string>;
+  executeWorkerProgram?: (
+    request: Record<string, unknown>
+  ) => Promise<Record<string, unknown>>;
+  createWorkerProgramInvocation?: (
+    request: Record<string, unknown>
+  ) => RunMatWorkerProgramInvocation;
+  workerProgramInventory?: () => RunMatProgramWorkerInventory;
   buildGitSnapshot?: (
     repository: string,
     subdir: string,
@@ -1279,8 +1610,8 @@ interface RunMatNativeModule {
   ) => GitSnapshotWire;
   planGitAcquisition?: (request: GitAcquisitionPlanRequest) => GitAcquisitionPlan;
   validateGitSnapshot?: (snapshot: GitSnapshotWire) => GitSnapshotWire;
-  projectTestLayout?: (input: unknown) => unknown;
-  freezeTestSnapshot?: (input: unknown) => Record<string, unknown>;
+  projectTestLayout?: RunMatTestPreparationNative["projectTestLayout"];
+  freezeTestSnapshot?: RunMatTestPreparationNative["freezeTestSnapshot"];
   runTests?: (input: unknown, backend: unknown) => Promise<unknown>;
   runTestsWithEvents?: (
     input: unknown,
@@ -1337,15 +1668,19 @@ interface RunMatNativeModule {
   bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
+  setSurfacePresence?: (surfaceId: number, frame: PlotPresenceFrame) => void;
+  captureSurfacePointer?: (surfaceId: number, x: number, y: number) => unknown;
   presentGeometrySceneOnSurface?: (surfaceId: number, handle: number) => void;
   setGeometryScenePresentation?: (surfaceId: number, presentation: GeometryScenePresentationState) => void;
-  pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number) => GeometryScenePickResult | null;
+  pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number, mode: string) => GeometryScenePickResult | null;
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
+  configurePlotSurfaceViewer?: (surfaceId: number, navigation: PlotNavigationOptions, antialiasing: PlotAntialiasing) => void;
+  plotSurfaceAntialiasingModes?: (surfaceId: number) => PlotAntialiasing[];
   takePlotSurfaceHostActions?: (surfaceId: number) => unknown;
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
   resetPlotSurfaceCamera?: (surfaceId: number) => void;
   getPlotSurfaceCameraState?: (surfaceId: number) => unknown;
-  setPlotSurfaceCameraState?: (surfaceId: number, state: unknown) => void;
+  setPlotSurfaceCameraState?: (surfaceId: number, state: PlotSurfaceCameraState, expectedTarget?: NonNullable<PlotPresenceFrame["target"]>) => void;
   setPlotThemeConfig?: (theme: unknown) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
@@ -1377,6 +1712,11 @@ interface RunMatNativeModule {
     height: number,
     view?: string | null
   ) => Promise<Uint8Array>;
+  renderGeometrySceneObservationImage?: (
+    handle: number, width: number, height: number, view: string | null,
+    observation: Pick<GeometrySceneImageOptions, "visibility" | "section" | "selectedRegionIds">
+  ) => Promise<Uint8Array>;
+  measureGeometryScene?: (handle: number, kind: string, regionIds: string[]) => unknown;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
   subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
@@ -1389,16 +1729,27 @@ interface RunMatNativeModule {
 let loadPromise: Promise<RunMatNativeModule> | null = null;
 let nativeModuleOverride: RunMatNativeModule | RunMatNativeSession | null = null;
 
+function admitStringElementWire(native: RunMatNativeModule): RunMatNativeModule {
+  const actual = typeof native.stringElementWireSchemaVersion === "function"
+    ? native.stringElementWireSchemaVersion()
+    : undefined;
+  if (actual !== STRING_ELEMENT_WIRE_SCHEMA_VERSION) {
+    throw new Error(`Incompatible RunMat string wire schema ${String(actual)}; expected ${STRING_ELEMENT_WIRE_SCHEMA_VERSION}. Rebuild the browser runtime assets with typed missing-string support.`);
+  }
+  return native;
+}
+
 async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativeModule> {
   installWebGpuCompatibilityShims();
   if (nativeModuleOverride) {
     if (isNativeSession(nativeModuleOverride)) {
       return {
         default: async () => {},
+        stringElementWireSchemaVersion: () => STRING_ELEMENT_WIRE_SCHEMA_VERSION,
         initRunMat: async () => nativeModuleOverride
       } as RunMatNativeModule;
     }
-    return nativeModuleOverride;
+    return admitStringElementWire(nativeModuleOverride);
   }
   if (!loadPromise) {
     loadPromise = (async () => {
@@ -1412,7 +1763,7 @@ async function loadNativeModule(wasmModule?: WasmInitInput): Promise<RunMatNativ
           wasmModule === undefined ? undefined : { module_or_path: wasmModule }
         );
       }
-      return native;
+      return admitStringElementWire(native);
     })();
   }
   return loadPromise;
@@ -1422,6 +1773,57 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   const native = await loadNativeModule(options.wasmModule);
   const fsProvider = await resolveFsProvider(options.fsProvider);
   const packageCache = await resolvePackageCache(options.packageCache);
+  const layeredSettings = options.runtimeSettings
+    ? resolveNativeRuntimeSettings(native, options.runtimeSettings)
+    : undefined;
+  const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
+  const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
+  const requestedGpu = (options.enableGpu ?? layeredSettings?.config.accelerate.enabled ?? true)
+    && layeredSettings?.config.accelerate.provider !== "inprocess";
+  const allowCpuFallback = layeredSettings?.config.accelerate.allow_inprocess_fallback ?? true;
+  let effectiveEnableGpu: boolean;
+  if (hasExplicitEnableFlag) {
+    if (requestedGpu && !supportsWebGpu && allowCpuFallback) {
+      console.warn(
+        "[runmat] GPU acceleration was explicitly requested, but WebGPU APIs are unavailable in this context."
+      );
+      effectiveEnableGpu = !allowCpuFallback;
+    } else {
+      effectiveEnableGpu = requestedGpu;
+    }
+  } else {
+    effectiveEnableGpu = requestedGpu && (supportsWebGpu || !allowCpuFallback);
+    if (requestedGpu && !supportsWebGpu && allowCpuFallback) {
+      console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
+    }
+  }
+  const session = await native.initRunMat({
+    runtimeSettings: options.runtimeSettings,
+    openTelemetryHeaders: options.openTelemetryHeaders,
+    applicationSettings: options.applicationSettings,
+    enableGpu: effectiveEnableGpu,
+    enableJit: options.enableJit,
+    verbose: options.verbose,
+    logLevel: options.logLevel,
+    gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
+    telemetryConsent: options.telemetryConsent,
+    telemetryId: options.telemetryId,
+    telemetryRunKind: options.telemetryRunKind,
+    telemetryEmitter: options.telemetryEmitter,
+    wgpuPowerPreference: options.wgpuPowerPreference,
+    wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter,
+    scatterTargetPoints: options.scatterTargetPoints,
+    surfaceVertexBudget: options.surfaceVertexBudget,
+    emitFusionPlan: options.emitFusionPlan ?? false,
+    callstackLimit: options.callstackLimit,
+    errorNamespace: options.errorNamespace,
+    languageCompat: options.language?.compat,
+    fsProvider,
+    packageCacheProvider: packageCache.provider,
+    executionHost: options.executionHost
+  });
+  // initRunMat resolves collector policy and installs logging before any renderer
+  // can initialize the process-global subscriber with an unconfigured layer.
   if (options.plotCanvas) {
     if (typeof native.createPlotSurface === "function") {
       await native.createPlotSurface(options.plotCanvas);
@@ -1433,48 +1835,25 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
       throw err;
     }
   }
-  const supportsWebGpu = typeof navigator !== "undefined" && typeof (navigator as any).gpu !== "undefined";
-  const hasExplicitEnableFlag = Object.prototype.hasOwnProperty.call(options, "enableGpu");
-  const requestedGpu = options.enableGpu ?? true;
-  let effectiveEnableGpu: boolean;
-  if (hasExplicitEnableFlag) {
-    if (requestedGpu && !supportsWebGpu) {
-      console.warn(
-        "[runmat] GPU acceleration was explicitly requested, but WebGPU APIs are unavailable in this context."
-      );
-      effectiveEnableGpu = false;
-    } else {
-      effectiveEnableGpu = requestedGpu;
-    }
-  } else {
-    effectiveEnableGpu = requestedGpu && supportsWebGpu;
-    if (requestedGpu && !supportsWebGpu) {
-      console.warn("[runmat] WebGPU is not available in this environment; falling back to CPU execution.");
-    }
-  }
-  const session = await native.initRunMat({
-    enableGpu: effectiveEnableGpu,
-    enableJit: options.enableJit ?? false,
-    verbose: options.verbose ?? false,
-    logLevel: options.logLevel,
-    gpuBufferPoolMaxPerKey: options.gpuBufferPoolMaxPerKey,
-    telemetryConsent: options.telemetryConsent ?? true,
-    telemetryId: options.telemetryId,
-    telemetryRunKind: options.telemetryRunKind,
-    telemetryEmitter: options.telemetryEmitter,
-    wgpuPowerPreference: options.wgpuPowerPreference ?? "auto",
-    wgpuForceFallbackAdapter: options.wgpuForceFallbackAdapter ?? false,
-    scatterTargetPoints: options.scatterTargetPoints,
-    surfaceVertexBudget: options.surfaceVertexBudget,
-    emitFusionPlan: options.emitFusionPlan ?? false,
-    callstackLimit: options.callstackLimit,
-    errorNamespace: options.errorNamespace,
-    languageCompat: options.language?.compat,
-    fsProvider,
-    packageCacheProvider: packageCache.provider,
-    executionHost: options.executionHost
-  });
   return new WebRunMatSession(session, packageCache.close);
+}
+
+/** Emit a correlated test span+log and await actual collector acceptance for both. */
+export async function sendOpenTelemetryTest(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "sendOpenTelemetryTest");
+}
+
+export async function flushOpenTelemetry(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "flushOpenTelemetry");
+}
+
+/** Runtime-wide: flush before terminating the shared worker/runtime, not after each session. */
+export async function shutdownOpenTelemetry(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "shutdownOpenTelemetry");
+}
+
+export async function openTelemetryStats(wasmModule?: WasmInitInput): Promise<OpenTelemetryExportStats> {
+  return invokeOpenTelemetry(await loadNativeModule(wasmModule), "openTelemetryStats");
 }
 
 export async function executeProgramArtifact(
@@ -1486,6 +1865,89 @@ export async function executeProgramArtifact(
     throw new Error("The loaded RunMat module does not support portable program execution.");
   }
   return native.executeProgramArtifact(request);
+}
+
+/** Resolve user/project fields and exact provenance without creating a session. */
+export async function resolveRuntimeSettings(settings: HostRuntimeSettings, wasmModule?: WasmInitInput): Promise<ResolvedRuntimeSettings> {
+  return resolveNativeRuntimeSettings(await loadNativeModule(wasmModule), settings);
+}
+
+/** Edit only the user layer. Persist the returned JSON using the host settings store. */
+export async function editUserRuntimeSettings(source: string, edits: UserRuntimeSettingsEdit[], wasmModule?: WasmInitInput): Promise<string> {
+  return editNativeUserRuntimeSettings(await loadNativeModule(wasmModule), source, edits);
+}
+
+/** Check scripts, functions or a project without executing user code. */
+export async function checkSource(request: SourceCheckRequest, wasmModule?: WasmInitInput): Promise<SourceCheckReport> {
+  return checkNativeSource(await loadNativeModule(wasmModule), request);
+}
+
+/** Freeze a project and compile under project-only cluster policy, never laptop user defaults. */
+export async function prepareClusterProgram(sourcePath: string | NamedProjectEntrypoint, functionName?: string, wasmModule?: WasmInitInput): Promise<PreparedClusterProgram> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof sourcePath !== "string") {
+    if (functionName !== undefined) throw new TypeError("A named entrypoint cannot override its declared function");
+    return prepareNativeNamedClusterProgram(native, sourcePath);
+  }
+  if (!native.prepareClusterProgram) throw new Error("The loaded RunMat module lacks project-only cluster program preparation; rebuild the browser runtime assets.");
+  return native.prepareClusterProgram(sourcePath, functionName);
+}
+
+/** Bind project policy to a selected Graph without reinterpreting compiled language/foreign semantics. */
+export async function prepareClusterGraph(programJson: Uint8Array, project: NonNullable<HostRuntimeSettings["project"]>, wasmModule?: WasmInitInput): Promise<Uint8Array> {
+  const native = await loadNativeModule(wasmModule);
+  if (!native.prepareClusterGraph) throw new Error("The loaded RunMat module lacks project-only cluster Graph preparation; rebuild the browser runtime assets.");
+  return native.prepareClusterGraph(programJson, project);
+}
+
+/** Execute only an owned worker's exact admitted root delegation. */
+export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission): Promise<string> {
+  const native = await loadNativeModule(wasmModule);
+  if (!native.executePreparedFeaStudy) throw new Error("Rebuild the browser numerical runtime assets with prepared FEA execution support.");
+  if (!context || !admission) throw new FeaRunAdmissionError({ reason: "signInRequired" });
+  return native.executePreparedFeaStudy(json, memoryBytes, context, admission);
+}
+
+/** Execute one original typed study step inside its supervised numerical worker. */
+export async function executeOwnedFeaStudyStep(json: string, memoryBytes: number, wasmModule?: WasmInitInput, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission): Promise<string> {
+  const native = await loadNativeModule(wasmModule);
+  if (!native.executeOwnedFeaStudyStep) throw new Error("Rebuild the browser numerical runtime assets with owned FEA study-step support.");
+  if (!context || !admission) throw new FeaRunAdmissionError({ reason: "signInRequired" });
+  return native.executeOwnedFeaStudyStep(json, memoryBytes, context, admission);
+}
+
+export async function executeWorkerProgram(
+  request: Record<string, unknown>,
+  wasmModule?: WasmInitInput
+): Promise<Record<string, unknown>> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.executeWorkerProgram !== "function") {
+    throw new Error("The loaded RunMat module does not support worker program execution.");
+  }
+  return native.executeWorkerProgram(request);
+}
+
+/** Construct one selected invocation inside an actual isolated CPU worker. */
+export async function createWorkerProgramInvocation(
+  request: Record<string, unknown>,
+  wasmModule?: WasmInitInput
+): Promise<RunMatWorkerProgramInvocation> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.createWorkerProgramInvocation !== "function") {
+    throw new Error("The loaded RunMat module does not support controlled worker programs.");
+  }
+  return native.createWorkerProgramInvocation(request);
+}
+
+/** Describe the stock CPU worker factory from this exact loaded module. */
+export async function workerProgramInventory(
+  wasmModule?: WasmInitInput
+): Promise<RunMatProgramWorkerInventory> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.workerProgramInventory !== "function") {
+    throw new Error("The loaded RunMat module has no qualified worker factory inventory.");
+  }
+  return native.workerProgramInventory();
 }
 
 export async function fetchGitSnapshot(
@@ -1511,13 +1973,13 @@ export async function planGitAcquisition(
 export async function projectTestLayout(input: {
   manifestPath: string;
   manifestContent: string;
-}): Promise<unknown> {
+}): Promise<ProjectTestLayout> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "projectTestLayout");
   return native.projectTestLayout(input);
 }
 
-export async function freezeTestSnapshot(input: unknown): Promise<Record<string, unknown>> {
+export async function freezeTestSnapshot(input: FreezeTestSnapshotInput): Promise<Record<string, unknown>> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "freezeTestSnapshot");
   return native.freezeTestSnapshot(input);
@@ -1704,6 +2166,18 @@ export async function presentSurface(surfaceId: number): Promise<void> {
   native.presentSurface(surfaceId);
 }
 
+export async function setSurfacePresence(surfaceId: number, frame: PlotPresenceFrame): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setSurfacePresence");
+  native.setSurfacePresence(surfaceId, frame);
+}
+
+export async function captureSurfacePointer(surfaceId: number, x: number, y: number): Promise<PlotPointerPosition | null> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "captureSurfacePointer");
+  return (normalizeWasmStructuredValue(native.captureSurfacePointer(surfaceId, x, y)) ?? null) as PlotPointerPosition | null;
+}
+
 export async function presentFigureOnSurface(surfaceId: number, handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "presentFigureOnSurface");
@@ -1729,10 +2203,11 @@ export async function pickGeometrySceneRegion(
   surfaceId: number,
   x: number,
   y: number,
+  mode = "face",
 ): Promise<GeometryScenePickResult | null> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "pickGeometrySceneRegion");
-  return native.pickGeometrySceneRegion(surfaceId, x, y) ?? null;
+  return native.pickGeometrySceneRegion(surfaceId, x, y, mode) ?? null;
 }
 
 export async function renderCurrentFigureScene(handle: number): Promise<void> {
@@ -1745,6 +2220,19 @@ export async function handlePlotSurfaceEvent(surfaceId: number, event: PlotSurfa
   const native = await loadNativeModule();
   requireNativeFunction(native, "handlePlotSurfaceEvent");
   native.handlePlotSurfaceEvent(surfaceId, event);
+}
+
+/** Unsupported AA modes are rejected without changing navigation settings. */
+export async function configurePlotSurfaceViewer(surfaceId: number, navigation: PlotNavigationOptions, antialiasing: PlotAntialiasing): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "configurePlotSurfaceViewer");
+  native.configurePlotSurfaceViewer(surfaceId, navigation, antialiasing);
+}
+
+export async function plotSurfaceAntialiasingModes(surfaceId: number): Promise<PlotAntialiasing[]> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "plotSurfaceAntialiasingModes");
+  return native.plotSurfaceAntialiasingModes(surfaceId);
 }
 
 export async function takePlotSurfaceHostActions(surfaceId: number): Promise<PlotSurfaceHostAction[]> {
@@ -1776,11 +2264,12 @@ export async function getPlotSurfaceCameraState(surfaceId: number): Promise<Plot
 
 export async function setPlotSurfaceCameraState(
   surfaceId: number,
-  state: PlotSurfaceCameraState
+  state: PlotSurfaceCameraState,
+  expectedTarget?: NonNullable<PlotPresenceFrame["target"]>
 ): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "setPlotSurfaceCameraState");
-  native.setPlotSurfaceCameraState(surfaceId, state);
+  native.setPlotSurfaceCameraState(surfaceId, state, expectedTarget);
 }
 
 export async function setPlotThemeConfig(theme: unknown): Promise<void> {
@@ -1975,11 +2464,30 @@ export async function renderGeometrySceneImage(
   const height = options.height ?? 0;
   const view = options.view ?? null;
   try {
-    const bytes = await native.renderGeometrySceneImage?.(handle, width, height, view);
+    const observation = {visibility: options.visibility ?? null, section: options.section ?? null, selectedRegionIds: options.selectedRegionIds ?? []};
+    const needsObservation = Boolean(observation.selectedRegionIds.length || observation.section
+      || observation.visibility?.hidden_ids?.length || observation.visibility?.isolated_ids?.length
+      || observation.visibility?.mode && observation.visibility.mode !== "all");
+    if (needsObservation && typeof native.renderGeometrySceneObservationImage !== "function") {
+      throw new Error("The loaded runtime predates geometry observation support. Reload the latest runtime.");
+    }
+    const bytes = native.renderGeometrySceneObservationImage
+      ? await native.renderGeometrySceneObservationImage(handle, width, height, view, observation)
+      : await native.renderGeometrySceneImage?.(handle, width, height, view);
     if (bytes instanceof Uint8Array) {
       return bytes;
     }
     return new Uint8Array(bytes ?? []);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function measureGeometryScene(options: {handle: number; kind: string; regionIds: string[]}): Promise<unknown> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "measureGeometryScene");
+  try {
+    return await native.measureGeometryScene!(options.handle, options.kind, options.regionIds);
   } catch (error) {
     throw coerceFigureError(error);
   }
@@ -2078,6 +2586,7 @@ export async function importWorkspaceState(state: Uint8Array): Promise<boolean> 
 
 class WebRunMatSession implements RunMatSessionHandle {
   private disposed = false;
+  private feaAdmissionHook: FeaRunAdmissionHook | null = null;
 
   constructor(
     private readonly native: RunMatNativeSession,
@@ -2156,7 +2665,7 @@ class WebRunMatSession implements RunMatSessionHandle {
     if (typeof this.native.previewGeometry !== "function") {
       throw new Error("The loaded runmat-wasm module does not expose previewGeometry yet.");
     }
-    return this.native.previewGeometry(path, budget ?? null);
+    return normalizeWasmStructuredValue(await this.native.previewGeometry(path, budget ?? null)) as GeometryPreviewResult;
   }
 
   async disposeGeometryPreview(
@@ -2176,6 +2685,16 @@ class WebRunMatSession implements RunMatSessionHandle {
     );
   }
 
+  async listProjectEntrypoints(projectPath: string, context?: ProjectEntrypointContext): Promise<ProjectEntrypointDescription[]> {
+    this.ensureActive();
+    return listNativeProjectEntrypoints(this.native, projectPath, context);
+  }
+
+  async runProjectEntrypoint(selection: NamedProjectEntrypoint, options?: RunProjectEntrypointOptions): Promise<ProjectEntrypointRunResult> {
+    this.ensureActive();
+    return runNativeProjectEntrypoint(this.native, selection, options);
+  }
+
   async feaCapabilities(): Promise<FeaCapabilities> {
     this.ensureActive();
     if (typeof this.native.feaCapabilities !== "function") {
@@ -2184,33 +2703,106 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.feaCapabilities();
   }
 
-  async checkFeaStudy(path: string): Promise<FeaCheckResult> {
+  async planFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaExecutionChoices> {
     this.ensureActive();
-    if (typeof this.native.checkFeaStudy !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose checkFeaStudy yet.");
-    }
-    return this.native.checkFeaStudy(path);
+    if (!this.native.planFeaSource) throw new Error("Reload the current runtime to prepare simulation execution.");
+    return admitFeaExecutionChoices(await this.native.planFeaSource(path, inputManifest));
   }
 
-  async applyFeaStudyDocumentOperation(
-    operation: FeaStudyDocumentOperation,
-    path: string,
-    source: string | null,
-    input: Record<string, unknown>,
-  ): Promise<FeaStudyDocumentOperationOutput> {
+  async runFeaSource(path: string, planId: string, inputManifest?: InputManifest): Promise<FeaRunResult> {
     this.ensureActive();
-    if (typeof this.native.applyFeaStudyDocumentOperation !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose applyFeaStudyDocumentOperation yet.");
-    }
-    return this.native.applyFeaStudyDocumentOperation(operation, path, source, input);
+    if (!this.native.runFeaSource) throw new Error("Reload the current runtime to run this simulation.");
+    return this.native.runFeaSource(path, planId, inputManifest);
   }
 
-  async runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult> {
+  setFeaRunAdmission(admission: FeaRunAdmission | FeaRunAdmissionHook | null): void {
     this.ensureActive();
-    if (typeof this.native.runFeaStudy !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose runFeaStudy yet.");
+    if (!this.native.setFeaRunAdmission) throw new Error("Reload the current runtime to install FEA lease admission.");
+    if (admission === null) { this.native.setFeaRunAdmission(null); this.feaAdmissionHook = null; return; }
+    const hook = "check" in admission ? admission
+      : createFeaRunAdmissionHook(admission, () => this.cancelExecution(), (runId, lease) => this.renewFeaRunLease(runId, lease));
+    const native = this.native;
+    if (!native.delegateFeaWorker || !native.startFeaWorker || !native.acquireFeaWorkerGrant || !native.reportFeaWorker || !native.retireFeaWorker || !native.discardUndispatchedFeaWorker) throw new Error("Reload the current runtime to install owned FEA worker accounting.");
+    hook.bindOwner({
+      delegate: async context => native.delegateFeaWorker!(context),
+      start: async context => { native.startFeaWorker!(context); },
+      acquire: (context, requiredOps) => native.acquireFeaWorkerGrant!(context, requiredOps),
+      report: async (context, usage, finalReport) => native.reportFeaWorker!(context, usage, finalReport),
+      retire: async (context, receipt) => { native.retireFeaWorker!(context, receipt); },
+      discardUndispatched: async (context, receipt) => { native.discardUndispatchedFeaWorker!(context, receipt); },
+    });
+    native.setFeaRunAdmission!(hook);
+    this.feaAdmissionHook = hook;
+  }
+
+  async retryPendingFeaSettlement(runId: string): Promise<void> {
+    this.ensureActive();
+    if (!this.feaAdmissionHook) throw new FeaRunAdmissionError({ reason: "licenseInvalid" });
+    await this.feaAdmissionHook.retryPendingSettlement(runId);
+  }
+
+  renewFeaRunLease(runId: string, lease: FeaRunLease): void {
+    this.ensureActive();
+    if (!this.native.renewFeaRunLease) throw new Error("Reload the current runtime to renew an FEA lease.");
+    this.native.renewFeaRunLease(runId, lease);
+  }
+
+  async checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult> {
+    this.ensureActive();
+    if (typeof this.native.checkFeaSource !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose checkFeaSource yet.");
     }
-    return this.native.runFeaStudy(path, artifactRoot ?? null);
+    const result = await (inputManifest ? this.native.checkFeaSource(path, inputManifest) : this.native.checkFeaSource(path));
+    return admitFeaSourceCheckResult(result);
+  }
+
+  async inspectFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetCheck> {
+    this.ensureActive();
+    if (!this.native.inspectFeaChanges) throw new Error("The runtime does not support study drafts.");
+    const check = await this.native.inspectFeaChanges(id);
+    return { ...check, roots: check.roots.map(admitFeaSourceCheckResult) };
+  }
+
+  async reviewFeaChanges(request: FeaChangeSetReviewRequest): Promise<FeaChangeSetReview> {
+    this.ensureActive();
+    if (!this.native.reviewFeaChanges) throw new Error("The runtime does not support checked source proposals.");
+    return this.native.reviewFeaChanges(request);
+  }
+  async stageFeaChanges(request: FeaChangeSetRequest): Promise<FeaChangeSetCheck> {
+    this.ensureActive();
+    if (!this.native.stageFeaChanges) throw new Error("The runtime does not support checked source proposals.");
+    return this.native.stageFeaChanges(request);
+  }
+  async publishFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetPublication> {
+    this.ensureActive();
+    if (!this.native.publishFeaChanges) throw new Error("The runtime does not support coherent source publication.");
+    return this.native.publishFeaChanges(id);
+  }
+  async discardFeaChanges(id: FeaChangeSetId): Promise<void> {
+    this.ensureActive();
+    if (!this.native.discardFeaChanges) throw new Error("The runtime does not support discarding source proposals.");
+    return this.native.discardFeaChanges(id);
+  }
+
+  async checkFeaWorkingSource(request: FeaWorkingCheckRequest): Promise<FeaSourceCheckResult> {
+    this.ensureActive();
+    if (!this.native.checkFeaWorkingSource) throw new Error("The runtime does not expose working FEA checks.");
+    const result = await this.native.checkFeaWorkingSource(request);
+    return admitFeaSourceCheckResult(result);
+  }
+
+  async browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome> {
+    this.ensureActive();
+    if (typeof this.native.browseFeaSource !== "function") throw new Error("The runtime does not expose checked FEA browsing.");
+    return this.native.browseFeaSource(request);
+  }
+
+  async checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult> {
+    this.ensureActive();
+    if (typeof this.native.checkFeaWorkspace !== "function") {
+      throw new Error("The loaded runtime does not support candidate workspace checks.");
+    }
+    return this.native.checkFeaWorkspace(request);
   }
 
   async feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult> {
@@ -2292,6 +2884,14 @@ class WebRunMatSession implements RunMatSessionHandle {
     } catch {
       return null;
     }
+  }
+
+  async createFeaFieldScene(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }> {
+    this.ensureActive();
+    if (typeof this.native.createFeaFieldScene !== "function") {
+      throw new Error("FEA field visualization is unavailable in this runtime");
+    }
+    return this.native.createFeaFieldScene(runId, fieldId, shapeMode, exaggeration, showUndeformedOutline, view, replaceHandle);
   }
 
   async importFigureSceneFromPath(path: string): Promise<number | null> {
@@ -2427,6 +3027,13 @@ class WebRunMatSession implements RunMatSessionHandle {
     return (await this.native.packageCacheSnapshot()) ?? null;
   }
 
+  prepareCapturedProject: CapturedProjectResolver = async (request, provider, filesystem) => {
+    if (!this.native.prepareCapturedProject) {
+      throw new Error("The loaded runtime does not support captured package resolution");
+    }
+    return this.native.prepareCapturedProject(request, provider, filesystem);
+  };
+
   async installProjectHandoff(handoff: unknown): Promise<unknown> {
     this.ensureActive();
     if (typeof this.native.installProjectHandoff !== "function") {
@@ -2499,6 +3106,13 @@ function ensureFsProvider(provider: RunMatFilesystemProvider): void {
   }
 }
 
+function admitFeaSourceCheckResult(result: FeaSourceCheckResult): FeaSourceCheckResult {
+  if (!isFeaSourceCheckContract(result.contract) || !isFeaSemanticProgram(result.program)) {
+    throw new Error("The runtime returned an incompatible study format. Update RunMat and try again.");
+  }
+  return result;
+}
+
 function requireNativeFunction<T, K extends keyof T>(
   native: T,
   method: K
@@ -2523,7 +3137,12 @@ type RunMatErrorPayload = {
   message: string;
   identifier?: string;
   diagnostic: string;
+  /** Canonical meshing diagnostic, retained without translating its domain contract. */
+  meshingFailure?: unknown;
   span?: RunMatErrorSpan;
+  sourceId?: number;
+  sourceName?: string;
+  sourcePath?: string;
   callstack?: string[];
   callstackElided?: number;
 };
@@ -2547,7 +3166,11 @@ function coerceRunMatError(value: unknown): RunMatExecutionError {
       message: value.message,
       identifier: value.identifier,
       diagnostic: value.diagnostic,
+      meshingFailure: value.meshingFailure,
       span: value.span,
+      sourceId: value.sourceId,
+      sourceName: value.sourceName,
+      sourcePath: value.sourcePath,
       callstack: value.callstack ?? [],
       callstackElided: value.callstackElided
     });
@@ -2802,4 +3425,19 @@ export const __internals = {
 
 function isNativeSession(value: unknown): value is RunMatNativeSession {
   return Boolean(value && typeof (value as RunMatNativeSession).executeRequest === "function");
+}
+
+export { readImmutableFilesystemResponse } from "./fs/immutable-input.js";
+
+/** Execution options are display/admission contracts, never editable solver inputs. */
+function admitFeaExecutionChoices(value: FeaExecutionChoices): FeaExecutionChoices {
+  const modes = new Set<string>();
+  if (!value || value.schemaVersion !== 1 || typeof value.planId !== "string" || !value.planId || !Array.isArray(value.revision) || value.revision.length !== 32 || value.revision.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255) || !Array.isArray(value.candidates) || value.candidates.length > 2) throw new Error("Invalid simulation execution options returned by the runtime.");
+  for (const candidate of value.candidates) {
+    if (!candidate || !["single_core", "multi_core"].includes(candidate.mode) || modes.has(candidate.mode) || (candidate.cores !== null && (!Number.isSafeInteger(candidate.cores) || candidate.cores < 1)) || !["ready", "desktop_required", "unavailable"].includes(candidate.readiness) || [candidate.memoryBytes, candidate.estimatedMillis].some(number => number !== null && (!Number.isSafeInteger(number) || number < 0))) throw new Error("Invalid simulation execution candidate returned by the runtime.");
+    const evidence = candidate.durationEvidence;
+    if (evidence != null && ([evidence.lowerMillis, evidence.upperMillis, evidence.sampleCount].some(number => !Number.isSafeInteger(number) || number < 1) || evidence.sampleCount < 3 || candidate.estimatedMillis == null || evidence.lowerMillis > candidate.estimatedMillis || evidence.upperMillis < candidate.estimatedMillis)) throw new Error("Invalid simulation duration evidence returned by the runtime.");
+    modes.add(candidate.mode);
+  }
+  return value;
 }

@@ -1,234 +1,25 @@
 //! MATLAB-compatible `writematrix` builtin for emitting delimited text files.
 
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+#[cfg(test)]
+use runmat_builtins::WRITEMATRIX_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, WRITEMATRIX_BYTES_OUTPUT_EXTENSION, WRITEMATRIX_ERROR_ARG_CONFIG,
+    WRITEMATRIX_ERROR_DATA, WRITEMATRIX_ERROR_DATA_SHAPE, WRITEMATRIX_ERROR_FILENAME,
+    WRITEMATRIX_ERROR_IO, WRITEMATRIX_ERROR_OPTION, WRITEMATRIX_EXPLICIT_GPU_EXTENSION,
+    WRITEMATRIX_QUOTE_ALIAS_EXTENSION, WRITEMATRIX_TEXT_OPTIONS_EXTENSION,
 };
-use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::fs::expand_user_path;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+use super::cooperation::{await_io, TabularCooperation};
+use super::path::{TabularFsOwner, TabularFsPath};
+
 const BUILTIN_NAME: &str = "writematrix";
-
-const WRITEMATRIX_BYTES_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "writematrix-bytes-written-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Request a bytes-written output from writematrix",
-    error_identifier: Some("RunMat:compatibility:WritematrixBytesOutputExtension"),
-};
-const WRITEMATRIX_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "writematrix-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Pass explicit gpuArray input to writematrix",
-    error_identifier: Some("RunMat:compatibility:WritematrixExplicitGpuInputExtension"),
-};
-const WRITEMATRIX_QUOTE_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "writematrix-quote-strings-logical-alias",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Use logical or numeric aliases for the QuoteStrings option",
-    error_identifier: Some("RunMat:compatibility:WritematrixQuoteStringsAliasExtension"),
-};
-const WRITEMATRIX_TEXT_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "writematrix-text-format-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Use the DecimalSeparator or LineEnding text-format option",
-    error_identifier: Some("RunMat:compatibility:WritematrixTextFormatOptionsExtension"),
-};
-pub const WRITEMATRIX_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    WRITEMATRIX_BYTES_OUTPUT_EXTENSION,
-    WRITEMATRIX_EXPLICIT_GPU_EXTENSION,
-    WRITEMATRIX_QUOTE_ALIAS_EXTENSION,
-    WRITEMATRIX_TEXT_OPTIONS_EXTENSION,
-];
-const WRITEMATRIX_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Numeric matrices from all eight integer classes serialize from authoritative integer storage.",
-    }];
-const WRITEMATRIX_INTEGER_QUOTE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "QuoteStrings logical alias",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode accepts exact integer zero and one as aliases for the text-valued QuoteStrings option.",
-    }];
-pub const WRITEMATRIX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "writematrix(integer_A, filename, ___)", inputs: &WRITEMATRIX_INTEGER_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Every integer element is rendered from its exact signed or unsigned decimal value. Automatically resident data gathers transparently; explicit device input is separately gated." },
-    BuiltinIntegerCapabilityDescriptor { form: "writematrix(A, filename, 'QuoteStrings', integer_alias)", inputs: &WRITEMATRIX_INTEGER_QUOTE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Strict mode accepts the documented text values; RunMat mode additionally maps exact zero to none and exact one to all." },
-];
-
-const WRITEMATRIX_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
-const WRITEMATRIX_INPUTS_DATA_FILENAME: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or string matrix to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output file path.",
-    },
-];
-const WRITEMATRIX_INPUTS_DATA_FILENAME_NAME_VALUE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or string matrix to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name.",
-    },
-    BuiltinParamDescriptor {
-        name: "optionValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value for the preceding option name.",
-    },
-];
-const WRITEMATRIX_INPUTS_DATA_FILENAME_NAME_VALUE_PAIRS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or string matrix to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValuePairs...",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option pairs.",
-    },
-];
-const WRITEMATRIX_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "writematrix(data, filename)",
-        inputs: &WRITEMATRIX_INPUTS_DATA_FILENAME,
-        outputs: &WRITEMATRIX_NO_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "writematrix(data, filename, name, optionValue)",
-        inputs: &WRITEMATRIX_INPUTS_DATA_FILENAME_NAME_VALUE,
-        outputs: &WRITEMATRIX_NO_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "writematrix(data, filename, nameValuePairs...)",
-        inputs: &WRITEMATRIX_INPUTS_DATA_FILENAME_NAME_VALUE_PAIRS,
-        outputs: &WRITEMATRIX_NO_OUTPUT,
-    },
-];
-const WRITEMATRIX_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEMATRIX.ARG_CONFIG",
-    identifier: None,
-    when: "Filename argument is missing or name-value options are malformed.",
-    message: "writematrix: invalid argument configuration",
-};
-const WRITEMATRIX_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEMATRIX.FILENAME",
-    identifier: None,
-    when: "Filename is not a valid scalar path string.",
-    message: "writematrix: invalid filename input",
-};
-const WRITEMATRIX_ERROR_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEMATRIX.OPTION",
-    identifier: None,
-    when: "A provided option value is invalid.",
-    message: "writematrix: invalid option value",
-};
-const WRITEMATRIX_ERROR_DATA: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEMATRIX.DATA",
-    identifier: None,
-    when: "Input data cannot be converted into a supported writematrix matrix form.",
-    message: "writematrix: invalid input data",
-};
-const WRITEMATRIX_ERROR_DATA_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEMATRIX.DATA_SHAPE",
-    identifier: None,
-    when: "Input data has unsupported dimensionality.",
-    message: "writematrix: input must be 2-D",
-};
-const WRITEMATRIX_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEMATRIX.IO",
-    identifier: None,
-    when: "The destination file cannot be opened or written.",
-    message: "writematrix: file write failed",
-};
-const WRITEMATRIX_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    WRITEMATRIX_ERROR_ARG_CONFIG,
-    WRITEMATRIX_ERROR_FILENAME,
-    WRITEMATRIX_ERROR_OPTION,
-    WRITEMATRIX_ERROR_DATA,
-    WRITEMATRIX_ERROR_DATA_SHAPE,
-    WRITEMATRIX_ERROR_IO,
-];
-pub const WRITEMATRIX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WRITEMATRIX_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WRITEMATRIX_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "writematrix",
-    op_kind: GpuOpKind::Custom("io-writematrix"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Runs entirely on the host. Automatically resident values gather transparently; explicit gpuArray input is accepted only in RunMat mode.",
-};
 
 fn writematrix_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     writematrix_error_with(error, error.message)
@@ -251,7 +42,7 @@ fn writematrix_error_with_source<E>(
     source: E,
 ) -> RuntimeError
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: crate::runtime_error::RuntimeErrorSourceBound,
 {
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -274,52 +65,110 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::writematrix")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "writematrix",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; performs host-side file I/O.",
-};
-
 #[runtime_builtin(
     name = "writematrix",
-    category = "io/tabular",
-    summary = "Write numeric or string matrices to delimited text files.",
-    keywords = "writematrix,csv,delimited text,write,append,quote strings",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::tabular::writematrix::WRITEMATRIX_DESCRIPTOR),
-    extensions(crate::builtins::io::tabular::writematrix::WRITEMATRIX_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::io::tabular::writematrix::WRITEMATRIX_INTEGER_CAPABILITIES
-    ),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::tabular::writematrix"
 )]
-async fn writematrix_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn writematrix_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    data: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if rest.is_empty() {
         return Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG));
     }
-    preflight_extensions(&data, &rest)?;
-
-    let filename_value = gather_if_needed_async(&rest[0])
-        .await
-        .map_err(map_control_flow)?;
-    let path = resolve_path(&filename_value)?;
-
-    let options = parse_options(&rest[1..]).await?;
-
-    let gathered = gather_if_needed_async(&data)
-        .await
-        .map_err(map_control_flow)?;
+    preflight_extensions(&data, rest.view())?;
+    preflight_data(&data)?;
+    let path = resolve_path(&rest[0])?;
+    let options_args = rest.range(1..)?;
+    if !options_args.len().is_multiple_of(2) {
+        return Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG));
+    }
+    preflight_host_options(options_args.view())?;
+    let host_options = if options_args
+        .iter()
+        .all(|value| !matches!(value, Value::GpuTensor(_)))
+    {
+        Some(parse_options(options_args.view())?)
+    } else {
+        None
+    };
+    let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
+        writematrix_error_with_source(
+            &WRITEMATRIX_ERROR_IO,
+            "writematrix: unable to capture filesystem authority",
+            source,
+        )
+    })?;
+    let selected = owner.path(path).map_err(|source| {
+        writematrix_error_with_source(
+            &WRITEMATRIX_ERROR_IO,
+            "writematrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    let options = match host_options {
+        Some(options) => options,
+        None => {
+            let gather = options_args.try_map_preserving_roots_async(
+                options_args.len(),
+                runtime.as_ref(),
+                async |index| {
+                    let value = await_io(
+                        runtime.as_ref(),
+                        BUILTIN_NAME,
+                        gather_if_needed_async(&options_args[index]),
+                    )
+                    .await?
+                    .map_err(map_control_flow)?;
+                    cooperation.completed(0).await?;
+                    Ok(value)
+                },
+            );
+            let gathered_options = match runtime.as_ref() {
+                Some(runtime) => runtime.scope(gather).await?,
+                None => gather.await?,
+            };
+            parse_options(gathered_options.view())?
+        }
+    };
+    let gather_data = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        gather_if_needed_async(&data),
+    );
+    let gathered = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(gather_data).await?,
+        None => gather_data.await?,
+    }
+    .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
     let matrix = MatrixData::from_value(gathered)?;
-
-    let bytes_written = write_matrix(&path, &matrix, &options).await?;
-
-    Ok(Value::Num(bytes_written as f64))
+    let bytes_written = write_matrix(
+        runtime.as_ref(),
+        &mut cooperation,
+        &selected,
+        &matrix,
+        &options,
+    )
+    .await?;
+    cooperation.completed(0).await?;
+    selected.check().map_err(|source| {
+        writematrix_error_with_source(
+            &WRITEMATRIX_ERROR_IO,
+            "writematrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Num(bytes_written as f64)])),
+        Some(_) => Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG)),
+        None => Ok(Value::Num(bytes_written as f64)),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -382,215 +231,9 @@ enum FileType {
     Text,
 }
 
-async fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
-    if args.is_empty() {
-        return Ok(WriteMatrixOptions::default());
-    }
-    if !args.len().is_multiple_of(2) {
-        return Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG));
-    }
-
-    let mut options = WriteMatrixOptions::default();
-    let mut index = 0usize;
-    while index < args.len() {
-        let name_value = gather_if_needed_async(&args[index])
-            .await
-            .map_err(map_control_flow)?;
-        let name = option_name_from_value(&name_value)?;
-        let value = gather_if_needed_async(&args[index + 1])
-            .await
-            .map_err(map_control_flow)?;
-        apply_option(&mut options, &name, &value)?;
-        index += 2;
-    }
-    Ok(options)
-}
-
-fn apply_option(options: &mut WriteMatrixOptions, name: &str, value: &Value) -> BuiltinResult<()> {
-    if name.eq_ignore_ascii_case("Delimiter") {
-        let delimiter = parse_delimiter(value)?;
-        options.delimiter = Some(delimiter);
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("WriteMode") {
-        options.write_mode = parse_write_mode(value)?;
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("QuoteStrings") {
-        options.quote_strings = parse_quote_strings(value)?;
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("DecimalSeparator") {
-        options.decimal_separator = parse_decimal_separator(value)?;
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("LineEnding") {
-        options.line_ending = parse_line_ending(value)?;
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("FileType") {
-        options.file_type = parse_file_type(value)?;
-        return Ok(());
-    }
-    // Unsupported or future options are ignored for compatibility with MATLAB's permissive behaviour.
-    Ok(())
-}
-
-fn option_name_from_value(value: &Value) -> BuiltinResult<String> {
-    value_to_string_scalar(value, "option name")
-}
-
-fn parse_delimiter(value: &Value) -> BuiltinResult<String> {
-    let text = value_to_string_scalar(value, "Delimiter")?;
-    if text.is_empty() {
-        return Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: Delimiter cannot be empty",
-        ));
-    }
-    let trimmed = text.trim();
-    let lowered = trimmed.to_ascii_lowercase();
-    match lowered.as_str() {
-        "tab" => Ok("\t".to_string()),
-        "space" | "whitespace" => Ok(" ".to_string()),
-        "comma" => Ok(",".to_string()),
-        "semicolon" => Ok(";".to_string()),
-        "pipe" => Ok("|".to_string()),
-        _ => Ok(trimmed.to_string()),
-    }
-}
-
-fn parse_write_mode(value: &Value) -> BuiltinResult<WriteMode> {
-    let text = value_to_string_scalar(value, "WriteMode")?;
-    let lowered = text.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "overwrite" => Ok(WriteMode::Overwrite),
-        "append" => Ok(WriteMode::Append),
-        _ => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: WriteMode must be 'overwrite' or 'append'",
-        )),
-    }
-}
-
-fn parse_quote_strings(value: &Value) -> BuiltinResult<QuoteStrings> {
-    match value {
-        Value::Bool(value) => Ok(if *value {
-            QuoteStrings::All
-        } else {
-            QuoteStrings::None
-        }),
-        Value::Int(i) => {
-            let raw = i.to_i64();
-            match raw {
-                0 => Ok(QuoteStrings::None),
-                1 => Ok(QuoteStrings::All),
-                _ => Err(writematrix_error_with(
-                    &WRITEMATRIX_ERROR_OPTION,
-                    "writematrix: QuoteStrings numeric aliases must be 0 or 1",
-                )),
-            }
-        }
-        Value::Num(n) => {
-            if (*n - 0.0).abs() < f64::EPSILON {
-                Ok(QuoteStrings::None)
-            } else if (*n - 1.0).abs() < f64::EPSILON {
-                Ok(QuoteStrings::All)
-            } else {
-                Err(writematrix_error_with(
-                    &WRITEMATRIX_ERROR_OPTION,
-                    "writematrix: QuoteStrings numeric aliases must be 0 or 1",
-                ))
-            }
-        }
-        _ => {
-            let text = value_to_string_scalar(value, "QuoteStrings")?;
-            let lowered = text.trim().to_ascii_lowercase();
-            match lowered.as_str() {
-                "minimal" => Ok(QuoteStrings::Minimal),
-                "all" | "on" | "true" | "yes" | "1" => Ok(QuoteStrings::All),
-                "none" | "off" | "false" | "no" | "0" => Ok(QuoteStrings::None),
-                _ => Err(writematrix_error_with(
-                    &WRITEMATRIX_ERROR_OPTION,
-                    "writematrix: QuoteStrings must be 'minimal', 'all', or 'none'",
-                )),
-            }
-        }
-    }
-}
-
-fn parse_decimal_separator(value: &Value) -> BuiltinResult<char> {
-    let text = value_to_string_scalar(value, "DecimalSeparator")?;
-    let mut chars = text.chars();
-    let ch = chars.next().ok_or_else(|| {
-        writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: DecimalSeparator must be a single character",
-        )
-    })?;
-    if chars.next().is_some() {
-        return Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: DecimalSeparator must be a single character",
-        ));
-    }
-    if ch == '\n' || ch == '\r' {
-        return Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: DecimalSeparator cannot be a newline character",
-        ));
-    }
-    Ok(ch)
-}
-
-fn parse_line_ending(value: &Value) -> BuiltinResult<LineEnding> {
-    let text = value_to_string_scalar(value, "LineEnding")?;
-    let lowered = text.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "auto" => Ok(LineEnding::Auto),
-        "unix" => Ok(LineEnding::Unix),
-        "pc" | "windows" => Ok(LineEnding::Windows),
-        "mac" => Ok(LineEnding::Mac),
-        _ => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: LineEnding must be 'auto', 'unix', 'pc', or 'mac'",
-        )),
-    }
-}
-
-fn parse_file_type(value: &Value) -> BuiltinResult<FileType> {
-    let text = value_to_string_scalar(value, "FileType")?;
-    let lowered = text.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "delimitedtext" | "text" => {
-            if lowered == "text" {
-                Ok(FileType::Text)
-            } else {
-                Ok(FileType::DelimitedText)
-            }
-        }
-        "spreadsheet" => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: FileType 'spreadsheet' is not supported; export delimited text instead",
-        )),
-        _ => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            "writematrix: unsupported FileType",
-        )),
-    }
-}
-
-fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_OPTION,
-            format!("writematrix: expected {context} as a string scalar or character vector"),
-        )),
-    }
-}
+#[path = "writematrix/controls.rs"]
+mod controls;
+use controls::*;
 
 enum MatrixData {
     Numeric(Tensor),
@@ -604,7 +247,7 @@ enum MatrixData {
 impl MatrixData {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
-            Value::StringArray(sa) => {
+            Value::StringArray(sa) if sa.data().iter().all(|text| !text.is_missing()) => {
                 ensure_matrix_shape(&sa.shape, "string")?;
                 let (rows, cols) = if sa.shape.is_empty() {
                     (1, 1)
@@ -614,13 +257,13 @@ impl MatrixData {
                 Ok(MatrixData::Text {
                     rows,
                     cols,
-                    data: sa.data.clone(),
+                    data: sa.data().iter().map(|text| text.as_str().expect("checked nonmissing string").to_owned()).collect(),
                 })
             }
-            Value::String(s) => Ok(MatrixData::Text {
+            Value::String(runmat_value::StringElement::Text(s)) => Ok(MatrixData::Text {
                 rows: 1,
                 cols: 1,
-                data: vec![s],
+                data: vec![s.into_string_unbounded()],
             }),
             Value::CharArray(_) => Err(writematrix_error_with(
                 &WRITEMATRIX_ERROR_DATA,
@@ -642,7 +285,7 @@ impl MatrixData {
                             format!("writematrix: {msg}"),
                         )
                     })?;
-                ensure_matrix_shape(&tensor.shape, "numeric")?;
+                ensure_matrix_shape(tensor.shape(), "numeric")?;
                 Ok(MatrixData::Numeric(tensor))
             }
         }
@@ -662,13 +305,7 @@ impl MatrixData {
         }
     }
 
-    fn format_cell(
-        &self,
-        row: usize,
-        col: usize,
-        options: &WriteMatrixOptions,
-        delimiter: &str,
-    ) -> String {
+    fn cell_at(&self, row: usize, col: usize, options: &WriteMatrixOptions) -> MatrixCell<'_> {
         match self {
             MatrixData::Numeric(tensor) => {
                 let rows = tensor.rows();
@@ -676,19 +313,54 @@ impl MatrixData {
                 let value = tensor
                     .numeric_value_at(idx)
                     .expect("index within authoritative numeric storage");
-                if let Some(value) = value.into_int_value() {
-                    return value.decimal_string();
-                }
-                format_numeric(value.materialize_f64(), options.decimal_separator)
+                MatrixCell::Numeric(format_numeric(value, options.decimal_separator))
             }
             MatrixData::Text { rows, data, .. } => {
                 if *rows == 0 {
-                    return String::new();
+                    return MatrixCell::Text("");
                 }
                 let idx = row + col * rows;
-                format_string(&data[idx], options.quote_strings, delimiter)
+                MatrixCell::Text(&data[idx])
             }
         }
+    }
+}
+
+enum MatrixCell<'a> {
+    Numeric(String),
+    Text(&'a str),
+}
+
+fn preflight_data(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(runmat_value::StringElement::Text(_)) => Ok(()),
+        Value::Tensor(tensor) => ensure_matrix_shape(tensor.shape(), "numeric"),
+        Value::LogicalArray(array) => ensure_matrix_shape(&array.shape, "logical"),
+        Value::StringArray(array) => ensure_matrix_shape(&array.shape, "string"),
+        Value::GpuTensor(handle) => {
+            if handle.physical().storage()
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                return Err(writematrix_error_with(
+                    &WRITEMATRIX_ERROR_DATA,
+                    "writematrix: complex values are not supported; write real and imaginary parts separately",
+                ));
+            }
+            ensure_matrix_shape(handle.shape(), "numeric")
+        }
+        Value::CharArray(_) => Err(writematrix_error_with(
+            &WRITEMATRIX_ERROR_DATA,
+            "writematrix: character arrays are not supported; convert to string arrays or use writecell",
+        )),
+        Value::Cell(_) => Err(writematrix_error_with(
+            &WRITEMATRIX_ERROR_DATA,
+            "writematrix: cell arrays are not supported; use writecell for heterogeneous content",
+        )),
+        Value::ComplexTensor(_) | Value::Complex(_, _) => Err(writematrix_error_with(
+            &WRITEMATRIX_ERROR_DATA,
+            "writematrix: complex values are not supported; write real and imaginary parts separately",
+        )),
+        _ => Err(writematrix_error(&WRITEMATRIX_ERROR_DATA)),
     }
 }
 
@@ -708,96 +380,9 @@ fn ensure_matrix_shape(shape: &[usize], context: &str) -> BuiltinResult<()> {
     }
 }
 
-async fn write_matrix(
-    path: &Path,
-    matrix: &MatrixData,
-    options: &WriteMatrixOptions,
-) -> BuiltinResult<usize> {
-    let delimiter = options.resolve_delimiter(path);
-    let line_ending = options.line_ending.as_str();
-
-    let mut open_options = OpenOptions::new();
-    open_options.create(true);
-    match options.write_mode {
-        WriteMode::Overwrite => {
-            open_options.write(true).truncate(true);
-        }
-        WriteMode::Append => {
-            open_options.write(true).append(true);
-        }
-    }
-
-    let mut file = open_options.open_async(path).await.map_err(|err| {
-        writematrix_error_with_source(
-            &WRITEMATRIX_ERROR_IO,
-            format!(
-                "writematrix: unable to open \"{}\" for writing ({err})",
-                path.display()
-            ),
-            err,
-        )
-    })?;
-
-    let mut bytes_written = 0usize;
-    let rows = matrix.rows();
-    let cols = matrix.cols();
-
-    if rows == 0 {
-        // Nothing else to do; file was truncated or created above.
-        file.flush_async().await.map_err(|err| {
-            writematrix_error_with_source(
-                &WRITEMATRIX_ERROR_IO,
-                format!("writematrix: failed to flush output ({err})"),
-                err,
-            )
-        })?;
-        return Ok(0);
-    }
-
-    for row in 0..rows {
-        for col in 0..cols {
-            if col > 0 {
-                file.write_all(delimiter.as_bytes()).map_err(|err| {
-                    writematrix_error_with_source(
-                        &WRITEMATRIX_ERROR_IO,
-                        format!("writematrix: failed to write delimiter ({err})"),
-                        err,
-                    )
-                })?;
-                bytes_written += delimiter.len();
-            }
-            let cell = matrix.format_cell(row, col, options, &delimiter);
-            if !cell.is_empty() {
-                file.write_all(cell.as_bytes()).map_err(|err| {
-                    writematrix_error_with_source(
-                        &WRITEMATRIX_ERROR_IO,
-                        format!("writematrix: failed to write value ({err})"),
-                        err,
-                    )
-                })?;
-                bytes_written += cell.len();
-            }
-        }
-        file.write_all(line_ending.as_bytes()).map_err(|err| {
-            writematrix_error_with_source(
-                &WRITEMATRIX_ERROR_IO,
-                format!("writematrix: failed to write line ending ({err})"),
-                err,
-            )
-        })?;
-        bytes_written += line_ending.len();
-    }
-
-    file.flush_async().await.map_err(|err| {
-        writematrix_error_with_source(
-            &WRITEMATRIX_ERROR_IO,
-            format!("writematrix: failed to flush output ({err})"),
-            err,
-        )
-    })?;
-
-    Ok(bytes_written)
-}
+#[path = "writematrix/writer.rs"]
+mod writer;
+use writer::*;
 
 impl WriteMatrixOptions {
     fn resolve_delimiter(&self, path: &Path) -> String {
@@ -811,401 +396,14 @@ impl WriteMatrixOptions {
     }
 }
 
-fn default_delimiter_for_path(path: &Path) -> String {
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase());
-    match ext.as_deref() {
-        Some("csv") => ",".to_string(),
-        Some("tsv") | Some("tab") => "\t".to_string(),
-        Some("txt") | Some("dat") | Some("dlm") => " ".to_string(),
-        _ => ",".to_string(),
-    }
-}
+#[path = "writematrix/format.rs"]
+mod format;
+use format::*;
 
-fn format_numeric(value: f64, decimal_separator: char) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value.is_sign_negative() {
-            "-Inf".to_string()
-        } else {
-            "Inf".to_string()
-        };
-    }
-
-    let abs = value.abs();
-    let scientific = abs != 0.0 && !(1e-4..1e15).contains(&abs);
-    let raw = if scientific {
-        format!("{:.15e}", value)
-    } else {
-        format!("{:.15}", value)
-    };
-
-    let mut formatted = trim_trailing_zeros(raw);
-    if formatted == "-0" {
-        formatted = "0".to_string();
-    }
-    if decimal_separator != '.' && formatted.contains('.') {
-        formatted = formatted.replace('.', &decimal_separator.to_string());
-    }
-    formatted
-}
-
-fn trim_trailing_zeros(mut value: String) -> String {
-    if let Some(exp_pos) = value.find(['e', 'E']) {
-        let exponent = value.split_off(exp_pos);
-        while value.ends_with('0') {
-            value.pop();
-        }
-        if value.ends_with('.') {
-            value.pop();
-        }
-        value.push_str(&exponent);
-        value
-    } else {
-        if value.contains('.') {
-            while value.ends_with('0') {
-                value.pop();
-            }
-            if value.ends_with('.') {
-                value.pop();
-            }
-        }
-        if value.is_empty() {
-            "0".to_string()
-        } else {
-            value
-        }
-    }
-}
-
-fn format_string(value: &str, quote: QuoteStrings, delimiter: &str) -> String {
-    let quote = match quote {
-        QuoteStrings::All => true,
-        QuoteStrings::None => false,
-        QuoteStrings::Minimal => {
-            value.contains(delimiter) || value.contains('"') || value.contains(['\n', '\r'])
-        }
-    };
-    if !quote {
-        return value.to_string();
-    }
-    let mut escaped = String::with_capacity(value.len() + 2);
-    escaped.push('"');
-    for ch in value.chars() {
-        if ch == '"' {
-            escaped.push('"');
-            escaped.push('"');
-        } else {
-            escaped.push(ch);
-        }
-    }
-    escaped.push('"');
-    escaped
-}
-
-fn preflight_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    let requested_outputs = crate::output_count::current_output_count();
-    if requested_outputs.is_some_and(|count| count > 1) {
-        return Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_ARG_CONFIG,
-            "writematrix: too many output arguments",
-        ));
-    }
-    if requested_outputs.is_some_and(|count| count > 0) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &WRITEMATRIX_BYTES_OUTPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    if crate::builtins::common::validation::value_contains_explicit_gpu(data)
-        || rest
-            .iter()
-            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &WRITEMATRIX_EXPLICIT_GPU_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    for pair in rest.get(1..).unwrap_or_default().chunks_exact(2) {
-        let Ok(name) = option_name_from_value(&pair[0]) else {
-            continue;
-        };
-        if name.eq_ignore_ascii_case("QuoteStrings") {
-            let documented_value =
-                value_to_string_scalar(&pair[1], "QuoteStrings").is_ok_and(|value| {
-                    matches!(
-                        value.trim().to_ascii_lowercase().as_str(),
-                        "minimal" | "all" | "none"
-                    )
-                });
-            if !documented_value {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &WRITEMATRIX_QUOTE_ALIAS_EXTENSION,
-                    BUILTIN_NAME,
-                )?;
-            }
-        }
-        if name.eq_ignore_ascii_case("DecimalSeparator") || name.eq_ignore_ascii_case("LineEnding")
-        {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &WRITEMATRIX_TEXT_OPTIONS_EXTENSION,
-                BUILTIN_NAME,
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
-    match value {
-        Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
-        }
-        Value::CharArray(_) => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_FILENAME,
-            "writematrix: expected a 1-by-N character vector for the filename",
-        )),
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
-        Value::StringArray(_) => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_FILENAME,
-            "writematrix: filename string array inputs must be scalar",
-        )),
-        other => Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_FILENAME,
-            format!(
-                "writematrix: expected filename as string scalar or character vector, got {other:?}"
-            ),
-        )),
-    }
-}
-
-fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
-    if raw.trim().is_empty() {
-        return Err(writematrix_error_with(
-            &WRITEMATRIX_ERROR_FILENAME,
-            "writematrix: filename must not be empty",
-        ));
-    }
-    let expanded = expand_user_path(raw, BUILTIN_NAME)
-        .map_err(|msg| writematrix_error_with(&WRITEMATRIX_ERROR_FILENAME, msg))?;
-    Ok(Path::new(&expanded).to_path_buf())
-}
+#[path = "writematrix/admission.rs"]
+mod admission;
+use admission::*;
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_time::unix_timestamp_ms;
-    use std::fs;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{IntegerStorage, StringArray, Tensor};
-
-    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-    fn temp_path(ext: &str) -> PathBuf {
-        let millis = unix_timestamp_ms();
-        let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "runmat_writematrix_{}_{}_{}.{}",
-            std::process::id(),
-            millis,
-            unique,
-            ext
-        ));
-        path
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn writematrix_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = WRITEMATRIX_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"writematrix(data, filename)"));
-        assert!(labels.contains(&"writematrix(data, filename, name, optionValue)"));
-        assert!(labels.contains(&"writematrix(data, filename, nameValuePairs...)"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn writematrix_writes_space_delimited_txt() {
-        let path = temp_path("txt");
-        let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
-        let filename = path.to_string_lossy().into_owned();
-
-        block_on(writematrix_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from(filename)],
-        ))
-        .expect("writematrix");
-
-        let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "1 2 3\n4 5 6\n");
-        let _ = fs::remove_file(path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn writematrix_defaults_to_comma_for_csv() {
-        let path = temp_path("csv");
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let filename = path.to_string_lossy().into_owned();
-
-        block_on(writematrix_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from(filename)],
-        ))
-        .expect("writematrix");
-
-        let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "1,2,3\n");
-        let _ = fs::remove_file(path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn writematrix_preserves_typed_integer_matrix_values_exactly() {
-        let path = temp_path("csv");
-        let tensor = Tensor::new_integer(
-            IntegerStorage::U64(vec![u64::MAX, 17, (1_u64 << 53) + 1, 29]),
-            vec![2, 2],
-        )
-        .expect("typed integer matrix");
-        let filename = path.to_string_lossy().into_owned();
-
-        block_on(writematrix_builtin(
-            Value::Tensor(tensor),
-            vec![Value::from(filename)],
-        ))
-        .expect("writematrix");
-
-        let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "18446744073709551615,9007199254740993\n17,29\n");
-        let _ = fs::remove_file(path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn writematrix_honours_write_mode_append() {
-        let path = temp_path("txt");
-        let first = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let second = Tensor::new(vec![4.0, 5.0, 6.0], vec![1, 3]).unwrap();
-        let filename = path.to_string_lossy().into_owned();
-
-        block_on(writematrix_builtin(
-            Value::Tensor(first),
-            vec![Value::from(filename.clone())],
-        ))
-        .expect("initial write");
-
-        block_on(writematrix_builtin(
-            Value::Tensor(second),
-            vec![
-                Value::from(filename.clone()),
-                Value::from("WriteMode"),
-                Value::from("append"),
-            ],
-        ))
-        .expect("append write");
-
-        let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "1 2 3\n4 5 6\n");
-        let _ = fs::remove_file(path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn writematrix_uses_minimal_string_quoting_by_default() {
-        let path = temp_path("csv");
-        let strings = StringArray::new(
-            vec!["Alice".to_string(), "Bob, Jr.".to_string()],
-            vec![1, 2],
-        )
-        .expect("string array");
-        let filename = path.to_string_lossy().into_owned();
-
-        block_on(writematrix_builtin(
-            Value::StringArray(strings),
-            vec![Value::from(filename)],
-        ))
-        .expect("writematrix");
-
-        let contents = fs::read_to_string(&path).expect("read contents");
-        assert_eq!(contents, "Alice,\"Bob, Jr.\"\n");
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn writematrix_gates_integer_quote_alias_before_file_access() {
-        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(writematrix_builtin(
-            Value::Num(1.0),
-            vec![
-                Value::from("definitely/missing/out.csv"),
-                Value::from("QuoteStrings"),
-                Value::Int(runmat_value::IntValue::U8(1)),
-            ],
-        ))
-        .expect_err("strict mode rejects integer quote aliases");
-        assert_eq!(
-            error.identifier(),
-            WRITEMATRIX_QUOTE_ALIAS_EXTENSION.error_identifier
-        );
-        drop(strict);
-    }
-
-    #[test]
-    fn writematrix_gates_bytes_output_before_file_access() {
-        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let outputs = crate::output_count::push_output_count(Some(1));
-        let error = block_on(writematrix_builtin(
-            Value::Num(1.0),
-            vec![Value::from("definitely/missing/out.csv")],
-        ))
-        .expect_err("strict mode rejects the bytes-written output");
-        assert_eq!(
-            error.identifier(),
-            WRITEMATRIX_BYTES_OUTPUT_EXTENSION.error_identifier
-        );
-        drop(outputs);
-        drop(strict);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn writematrix_accepts_gpu_tensor_inputs() {
-        test_support::with_test_provider(|provider| {
-            let path = temp_path("csv");
-            let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let filename = path.to_string_lossy().into_owned();
-
-            block_on(writematrix_builtin(
-                Value::GpuTensor(handle),
-                vec![Value::from(filename)],
-            ))
-            .expect("writematrix");
-
-            let contents = fs::read_to_string(&path).expect("read contents");
-            assert_eq!(contents, "1,2\n");
-            let _ = fs::remove_file(path);
-        });
-    }
-}
+#[path = "writematrix/tests.rs"]
+pub(crate) mod tests;

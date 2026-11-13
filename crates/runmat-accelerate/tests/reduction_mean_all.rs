@@ -1,10 +1,14 @@
 #![cfg(feature = "wgpu")]
+#[path = "support/direct_reduction_runtime.rs"]
+mod invocation;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 
 use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
 use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
@@ -31,6 +35,8 @@ fn upload(
 
 #[test]
 fn fused_mean_all_codegen_and_exec_on_vector() {
+    let runtime = invocation::runtime();
+    let _invocation = runtime.enter();
     // Ensure provider is registered
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
@@ -76,13 +82,13 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
             origin: ValueOrigin::Constant,
             ty: Type::String,
             shape: ShapeInfo::Scalar,
-            constant: Some(Value::String("all".to_string())),
+            constant: Some(Value::String("all".into())),
         },
         ValueInfo {
             id: v_mse,
             origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
             ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(1)]),
+            shape: ShapeInfo::Tensor(vec![Some(1), Some(1)]),
             constant: None,
         },
     ];
@@ -98,6 +104,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
     let node_mean = AccelNode {
         id: 1,
         label: AccelNodeLabel::Builtin {
+            origin: Default::default(),
             name: "mean".into(),
         },
         category: AccelOpCategory::Reduction,
@@ -139,7 +146,8 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
                 output: Some(v_sq),
             },
             FusionOp::Builtin {
-                name: "mean".to_string(),
+                origin: Default::default(),
+                name: "mean".into(),
                 inputs: vec![v_sq, v_all],
                 output: Some(v_mse),
             },
@@ -149,7 +157,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
         constants: HashMap::new(),
         const_values: {
             let mut cv = HashMap::new();
-            cv.insert(v_all, Value::String("all".to_string()));
+            cv.insert(v_all, Value::String("all".into()));
             cv
         },
         materialized_stores: Vec::new(),
@@ -176,12 +184,25 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(e)],
         placement: None,
-        runtime: None,
+        runtime: Some(runtime.clone()),
     };
-    let out = execute_reduction(req, rows, 1, 0).expect("execute fused mean(all)");
+    let Some(out) =
+        futures::executor::block_on(selected_reduction::execute(req, rows, 1, &[1, 1], 0))
+            .expect("canonical fused mean(all) admission")
+    else {
+        return;
+    };
     match out {
         Value::GpuTensor(h) => {
-            assert_eq!(h.shape, vec![1], "mean(all) should be scalar [1]");
+            assert_eq!(h.shape(), vec![1, 1], "canonical mean(all) scalar shape");
+            let host =
+                futures::executor::block_on(provider.download(&h)).expect("actual GPU download");
+            let expected = data.iter().map(|value| value * value).sum::<f64>() / n as f64;
+            assert!(
+                (host.data[0] - expected).abs() < 1e-6,
+                "GPU {} != {expected}",
+                host.data[0]
+            );
         }
         _ => panic!("expected GPU tensor result"),
     }

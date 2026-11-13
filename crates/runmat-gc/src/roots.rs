@@ -12,6 +12,10 @@ use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod retained;
+pub(crate) use retained::RegisteredRoot;
+pub use retained::ValueRoot;
+
 /// Recursively collect immediate GC roots from an owned Value tree.
 ///
 /// This helper deliberately does not dereference collected `GcHandle`s. Root
@@ -180,7 +184,7 @@ impl GcRoot for GlobalRoot {
 /// Manages all GC roots in the system
 pub struct RootScanner {
     /// Registered roots
-    roots: parking_lot::RwLock<HashMap<RootId, Box<dyn GcRoot>>>,
+    roots: parking_lot::RwLock<HashMap<RootId, RegisteredRoot>>,
 
     /// Next root ID to assign
     next_id: AtomicUsize,
@@ -202,6 +206,60 @@ impl RootScanner {
 
     /// Register a new GC root
     pub fn register_root(&self, root: Box<dyn GcRoot>) -> Result<RootId> {
+        self.register(RegisteredRoot::Opaque(root))
+    }
+
+    pub fn register_value_root(&self, root: Box<dyn ValueRoot>) -> Result<RootId> {
+        self.register(RegisteredRoot::Values(root))
+    }
+
+    /// Snapshot all registered retained values, or fail closed for an opaque
+    /// active root or an unavailable registration lock.
+    pub fn visit_retained_values(
+        &self,
+        excluded: &[RootId],
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
+        let roots = self.roots.try_read()?;
+        for (_, root) in roots
+            .iter()
+            .filter(|(id, root)| !excluded.contains(id) && root.is_active())
+        {
+            root.visit_retained_values(visitor)?;
+        }
+        Some(())
+    }
+
+    /// Visit one known value registration without treating another root for
+    /// the same handle as equivalent. Missing, inactive, or opaque roots make
+    /// an ownership projection incomplete.
+    pub fn visit_registered_values(
+        &self,
+        registration: RootId,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
+        let roots = self.roots.try_read()?;
+        let root = roots.get(&registration)?;
+        root.is_active().then_some(())?;
+        root.visit_retained_values(visitor)
+    }
+
+    #[cfg(test)]
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        self.retained_values_excluding(&[])
+    }
+
+    #[cfg(test)]
+    fn retained_values_excluding(&self, excluded: &[RootId]) -> Option<Vec<Value>> {
+        let mut values = Vec::new();
+        self.visit_retained_values(excluded, &mut |value| {
+            values.push(value.clone());
+            Some(())
+        })?;
+        Some(values)
+    }
+
+    fn register(&self, root: RegisteredRoot) -> Result<RootId> {
         let id = RootId(self.next_id.fetch_add(1, Ordering::Relaxed));
 
         log::debug!("Registering GC root {}: {}", id.0, root.description());
@@ -214,16 +272,18 @@ impl RootScanner {
 
     /// Unregister a GC root
     pub fn unregister_root(&self, root_id: RootId) -> Result<()> {
-        log::debug!("Unregistering GC root {}", root_id.0);
+        drop(self.take_root(root_id)?);
+        Ok(())
+    }
 
-        let mut roots = self.roots.write();
-        match roots.remove(&root_id) {
-            Some(_) => Ok(()),
-            None => Err(GcError::RootRegistrationFailed(format!(
-                "Root {} not found",
-                root_id.0
-            ))),
-        }
+    pub(crate) fn take_root(&self, root_id: RootId) -> Result<RegisteredRoot> {
+        log::debug!("Unregistering GC root {}", root_id.0);
+        let removed = {
+            let mut roots = self.roots.write();
+            roots.remove(&root_id)
+        };
+        removed
+            .ok_or_else(|| GcError::RootRegistrationFailed(format!("Root {} not found", root_id.0)))
     }
 
     /// Scan all roots and return reachable objects
@@ -342,7 +402,52 @@ impl Default for RootScanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
+    use runmat_value::{Closure, HandleRef, Listener, ObjectInstance};
+
+    #[test]
+    fn unregister_drops_root_after_scanner_and_admission_guards() {
+        use std::sync::{atomic::AtomicBool, Arc};
+
+        struct Reentrant {
+            completed: Arc<AtomicBool>,
+        }
+        impl GcRoot for Reentrant {
+            fn scan(&self) -> Vec<GcHandle> {
+                Vec::new()
+            }
+            fn description(&self) -> String {
+                "reentrant root".into()
+            }
+        }
+        impl Drop for Reentrant {
+            fn drop(&mut self) {
+                let admission_free = crate::ROOT_ADMISSION.try_write().is_some();
+                let scanner_free =
+                    crate::ROOT_SCANNER.with(|scanner| scanner.roots.try_write().is_some());
+                // Fail the witness rather than hanging if either lock is held.
+                if !(admission_free && scanner_free) {
+                    return;
+                }
+                let id =
+                    crate::gc_register_root(Box::new(GlobalRoot::new(Vec::new(), "nested".into())))
+                        .expect("nested registration from root destructor");
+                crate::gc_unregister_root(id).expect("nested root unregister");
+                self.completed.store(true, Ordering::SeqCst);
+            }
+        }
+        crate::gc_test_context(|| {
+            let completed = Arc::new(AtomicBool::new(false));
+            let id = crate::gc_register_root(Box::new(Reentrant {
+                completed: Arc::clone(&completed),
+            }))
+            .expect("outer root registration");
+            crate::gc_unregister_root(id).expect("outer root unregister");
+            assert!(
+                completed.load(Ordering::SeqCst),
+                "root destruction must permit registration reentry"
+            );
+        });
+    }
 
     fn ptr_addr(ptr: GcHandle) -> usize {
         ptr.addr()
@@ -350,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_global_root() {
-        let values = vec![Value::Num(42.0), Value::String("test".to_string())];
+        let values = vec![Value::Num(42.0), Value::String("test".to_string().into())];
 
         let root = GlobalRoot::new(values, "test global".to_string());
         assert_eq!(root.description(), "test global");
@@ -366,20 +471,20 @@ mod tests {
             let target =
                 crate::gc_allocate(Value::Object(ObjectInstance::new("widget".to_string())))
                     .expect("target allocation");
-            let callback = crate::gc_allocate(Value::FunctionHandle("onEvent".to_string()))
+            let callback = crate::gc_allocate(Value::function_handle("onEvent".to_string()))
                 .expect("callback allocation");
 
             let values = vec![
                 Value::HandleObject(HandleRef {
-                    class_name: "widget".to_string(),
+                    class_name: "widget".into(),
                     target,
                     valid: true,
                 }),
                 Value::Listener(Listener {
                     id: 1,
                     target,
-                    target_class_name: "widget".to_string(),
-                    event_name: "Changed".to_string(),
+                    target_class_name: "widget".into(),
+                    event_name: "Changed".into(),
                     callback,
                     enabled: true,
                     valid: true,
@@ -401,41 +506,46 @@ mod tests {
             let handle_target =
                 crate::gc_allocate(Value::Object(ObjectInstance::new("nested".to_string())))
                     .expect("target allocation");
-            let callback = crate::gc_allocate(Value::FunctionHandle("cb".to_string()))
+            let callback = crate::gc_allocate(Value::function_handle("cb".to_string()))
                 .expect("callback allocation");
 
             let handle = Value::HandleObject(HandleRef {
-                class_name: "nested".to_string(),
+                class_name: "nested".into(),
                 target: handle_target,
                 valid: true,
             });
             let listener = Value::Listener(Listener {
                 id: 7,
                 target: handle_target,
-                target_class_name: "nested".to_string(),
-                event_name: "Changed".to_string(),
+                target_class_name: "nested".into(),
+                event_name: "Changed".into(),
                 callback,
                 enabled: true,
                 valid: true,
             });
 
-            let mut object = ObjectInstance::new("owner".to_string());
-            object.properties.insert("h".to_string(), handle.clone());
+            let mut object = runmat_value::UnboundedObjectBuilder::new("owner");
+            object.insert("h".to_string(), handle.clone());
+            let object = object.finish();
 
-            let mut struct_value = StructValue::new();
-            struct_value.fields.insert(
+            let mut struct_value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
+            struct_value.insert(
                 "closure".to_string(),
-                Value::Closure(Closure {
-                    function_name: "f".to_string(),
-                    bound_function: None,
-                    captures: vec![listener],
-                }),
+                Value::Closure(Closure::new(
+                    "f".into(),
+                    None,
+                    Default::default(),
+                    None,
+                    vec![listener],
+                    None,
+                )),
             );
-            struct_value
-                .fields
-                .insert("object".to_string(), Value::Object(object));
+            struct_value.insert("object".to_string(), Value::Object(object));
 
-            let root = GlobalRoot::new(vec![Value::Struct(struct_value)], "nested".to_string());
+            let root = GlobalRoot::new(
+                vec![Value::Struct(struct_value.finish())],
+                "nested".to_string(),
+            );
             let scanned = root.scan();
             let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
 
@@ -481,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_variable_array_root() {
-        let vars = vec![Value::Num(42.0), Value::String("test".to_string())];
+        let vars = vec![Value::Num(42.0), Value::String("test".to_string().into())];
 
         let root = unsafe { VariableArrayRoot::new(NonNull::from(&vars), "test vars".to_string()) };
 

@@ -1,5 +1,5 @@
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
-use runmat_meshing_core::quality::predicate::tetrahedron_volume;
+use runmat_meshing_core::quality::predicate::{tetrahedron_volume, Point3Construction};
 use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 
 use super::*;
@@ -9,6 +9,13 @@ use crate::cdt::{
     DelaunayConstraintSegment, DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
+#[path = "tests/cancellation.rs"]
+pub(super) mod cancellation;
+
+#[path = "tests/local_flip.rs"]
+mod local_flip;
+#[path = "tests/same_facet_multi_steiner.rs"]
+mod same_facet_multi_steiner;
 #[path = "tests/scalable_cavity.rs"]
 mod scalable_cavity;
 
@@ -40,7 +47,10 @@ fn constraints_with_coordinates(
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 50) as u8; 32]),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         segments: segments
@@ -67,11 +77,7 @@ fn constraints_with_coordinates(
 }
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, value.to_owned(), Vec::new())
 }
 
 fn topology(
@@ -111,24 +117,28 @@ fn split_boundary_segment_recovery(
     let mut midpoint_identity = [50; 32];
     midpoint_identity[31] = 51;
     let midpoint_identity = StableDigest::from_bytes(midpoint_identity);
-    let mut nodes = vec![DelaunayVolumeNode {
-        identity: constraints.nodes[0].identity,
-        coordinates_m: constraints.nodes[0].coordinates_m,
-    }];
+    let mut nodes = vec![DelaunayVolumeNode::explicit(
+        constraints.nodes[0].identity,
+        constraints.nodes[0].coordinates_m.canonical_value(),
+    )];
     nodes.push(DelaunayVolumeNode {
         identity: midpoint_identity,
-        coordinates_m: [2.5, 2.5, 0.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                2.5, 2.5, 0.0,
+            ]),
+        construction: Point3Construction::Segment {
+            endpoints: [
+                constraints.nodes[0].coordinates_m.canonical_value(),
+                constraints.nodes[1].coordinates_m.canonical_value(),
+            ],
+            parameter_numerator: 1,
+            parameter_exponent: 1,
+        },
     });
-    nodes.extend(
-        constraints
-            .nodes
-            .iter()
-            .skip(1)
-            .map(|node| DelaunayVolumeNode {
-                identity: node.identity,
-                coordinates_m: node.coordinates_m,
-            }),
-    );
+    nodes.extend(constraints.nodes.iter().skip(1).map(|node| {
+        DelaunayVolumeNode::explicit(node.identity, node.coordinates_m.canonical_value())
+    }));
     let topology = build_delaunay_volume_topology(
         nodes,
         vec![[0, 1, 3, 4], [1, 2, 3, 4], [0, 3, 1, 5], [1, 3, 2, 5]],
@@ -189,9 +199,10 @@ fn facet_cavity_retriangulates_both_exact_sides() {
     .unwrap()
     .expect("the bipyramid facet cavity should be recoverable");
 
-    assert_eq!(recovered.tetrahedra.len(), 2);
+    assert_eq!(recovered.topology.tetrahedra.len(), 2);
+    assert!(recovered.steiner_insertions.is_empty());
     let mut candidate = segments;
-    candidate.topology = recovered;
+    candidate.topology = recovered.topology;
     validate_delaunay_segment_recovery(
         &candidate,
         &constraints,
@@ -270,21 +281,21 @@ fn facet_cavity_enforces_its_tetrahedron_budget() {
 #[test]
 fn facet_star_refill_exceeds_small_exact_cover_inventory() {
     const RING_NODES: usize = 24;
-    let mut nodes = vec![DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([1; 32]),
-        coordinates_m: [0.0, 0.0, 0.0],
-    }];
+    let mut nodes = vec![DelaunayVolumeNode::explicit(
+        StableDigest::from_bytes([1; 32]),
+        [0.0, 0.0, 0.0],
+    )];
     for index in 0..RING_NODES {
         let angle = std::f64::consts::TAU * index as f64 / RING_NODES as f64;
-        nodes.push(DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([(index + 2) as u8; 32]),
-            coordinates_m: [angle.cos(), angle.sin(), 0.0],
-        });
+        nodes.push(DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 2) as u8; 32]),
+            [angle.cos(), angle.sin(), 0.0],
+        ));
     }
-    nodes.push(DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([RING_NODES as u8 + 2; 32]),
-        coordinates_m: [0.0, 0.0, 1.0],
-    });
+    nodes.push(DelaunayVolumeNode::explicit(
+        StableDigest::from_bytes([RING_NODES as u8 + 2; 32]),
+        [0.0, 0.0, 1.0],
+    ));
     let apex = RING_NODES as u32 + 1;
     let tetrahedra = (0..RING_NODES)
         .map(|index| {
@@ -307,11 +318,11 @@ fn facet_star_refill_exceeds_small_exact_cover_inventory() {
         .tetrahedra
         .iter()
         .map(|tetrahedron| {
-            tetrahedron_volume(
-                tetrahedron
-                    .vertex_indices
-                    .map(|node| topology.nodes[node as usize].coordinates_m),
-            )
+            tetrahedron_volume(tetrahedron.vertex_indices.map(|node| {
+                topology.nodes[node as usize]
+                    .coordinates_m
+                    .canonical_value()
+            }))
         })
         .sum();
     let cavity = crate::cavity::constrained::ConstrainedCavity {
@@ -423,6 +434,38 @@ fn facet_recovery_never_removes_a_recovered_segment() {
     );
 }
 
+#[test]
+fn facet_candidate_conflict_splits_and_re_evidences_the_segment() {
+    let constraints = constraints(false);
+    let segments = segment_recovery(false, &constraints);
+    let original_nodes = segments.segments[0].nodes.clone();
+    let mut work = FacetRecoveryWork::new(DelaunayFacetRecoveryOptions::default(), &NeverCancelled);
+
+    let refined = super::conforming_split::try_split_recovered_segment_edge(
+        &segments,
+        [original_nodes[0].identity, original_nodes[1].identity],
+        &[],
+        0,
+        &mut work,
+    )
+    .unwrap()
+    .expect("a conflicting recovered segment must be split conformingly");
+
+    assert!(refined.splits.is_empty());
+    assert_eq!(
+        refined.recovery.segments[0].nodes.len(),
+        original_nodes.len() + 1
+    );
+    assert_eq!(refined.recovery.steiner_node_identities.len(), 1);
+    validate_delaunay_segment_recovery(
+        &refined.recovery,
+        &constraints,
+        DelaunaySegmentRecoveryOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
 struct Cancelled;
 
 impl MeshingCancellationSignal for Cancelled {
@@ -470,6 +513,21 @@ fn facet_recovery_enforces_search_limits_and_cancellation() {
         .kind,
         DelaunayFacetRecoveryErrorKind::ResourceLimit
     );
+    let queue_bounded = DelaunayFacetRecoveryOptions {
+        maximum_pending_support_triangles: 1,
+        ..DelaunayFacetRecoveryOptions::default()
+    };
+    assert_eq!(
+        recover_delaunay_facets(
+            split_boundary_segment_recovery(&constraints).0,
+            &constraints,
+            queue_bounded,
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayFacetRecoveryErrorKind::ResourceLimit
+    );
     let cancelled = DelaunayFacetRecoveryOptions {
         segment_recovery: DelaunaySegmentRecoveryOptions {
             constraints: super::super::DelaunayConstraintOptions {
@@ -485,5 +543,59 @@ fn facet_recovery_enforces_search_limits_and_cancellation() {
             .unwrap_err()
             .kind,
         DelaunayFacetRecoveryErrorKind::Cancelled
+    );
+}
+
+/// Two segments meet at a 27 degree corner, a 4.9 m edge and a 2.5 m edge (the shape of the
+/// battery-pack TIM corner, scaled). The shell split puts both points half the shorter edge
+/// from the corner. At the long edge's midpoint distance, the short edge's point would sit 4% of
+/// its length from its far end and leave a sliver facet triangle there.
+#[test]
+fn shared_vertex_pair_split_stays_inside_the_shorter_edge() {
+    let angle = 27.0_f64.to_radians();
+    let constraints = constraints_with_coordinates(
+        [
+            [0.0, 0.0, 0.0],
+            [4.9, 0.0, 0.0],
+            [2.5 * angle.cos(), 2.5 * angle.sin(), 0.0],
+            [1.0, 0.5, 5.0],
+            [1.0, 0.5, -5.0],
+        ],
+        false,
+    );
+    let recovery = segment_recovery(false, &constraints);
+    let id = |index: usize| constraints.nodes[index].identity;
+    let long = [id(0), id(1)];
+    let short = [id(0), id(2)];
+    let locations = [long, short].map(|edge| {
+        conforming_split::segment_edge_location(&recovery.segments, edge)
+            .expect("both edges are recovered segment intervals")
+    });
+    let [(long_point, _), (short_point, _)] = conforming_split::shared_vertex_split_points(
+        &recovery.topology,
+        &recovery.segments,
+        [long, short],
+        id(0),
+        locations,
+        0,
+    )
+    .unwrap()
+    .unwrap();
+    let radius = |node: DelaunayVolumeNode| {
+        node.coordinates_m
+            .canonical_value()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt()
+    };
+    let (long_radius, short_radius) = (radius(long_point), radius(short_point));
+    assert!(
+        (short_radius - 1.25).abs() < 0.05,
+        "short-edge point at {short_radius} m from the corner"
+    );
+    assert!(
+        (long_radius - short_radius).abs() < 0.05,
+        "the two points lie {long_radius} m and {short_radius} m from the corner"
     );
 }

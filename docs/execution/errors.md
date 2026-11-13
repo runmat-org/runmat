@@ -31,6 +31,8 @@ flowchart TD
 
 Compile-stage failures do not enter MATLAB `try`/`catch`; they occur before bytecode execution. `try`/`catch` handles `RuntimeError` values raised during VM or JIT execution.
 
+Static analysis can identify a failing value operation, such as multiplication with incompatible matrix dimensions. `runmat check` and editor diagnostics still report that error. Executable compilation retains the operation's runtime check rather than rejecting the entire program: an enclosing `try`/`catch`, including one in a caller, can handle the failure. Syntax errors and failures that prevent lowering or compilation remain compile-stage errors.
+
 ## `RunError`
 
 `runmat-core` exposes four failure stages through `RunError`:
@@ -70,7 +72,7 @@ If a runtime error leaves the VM, the session populates call-stack text from VM 
 
 ## MATLAB Exceptions
 
-`MException` is represented as a runtime value with an `identifier`, `message`, and `stack`. The VM converts caught `RuntimeError` values into `MException` values when it redirects control to a catch block.
+`MException` is represented as a runtime value with an `identifier`, `message`, and `stack`. The VM converts caught `RuntimeError` values into `MException` values when it redirects control to a catch block. Dot access and `getfield` return character vectors for `identifier` and `message`, so expressions such as `['Failed: ' e.message]` concatenate text. An empty identifier or message is a 0-by-0 character array. RunMat currently exposes `stack` as a cell array of frame descriptions, rather than MATLAB's stack structure array.
 
 `try`/`catch` compiles to bytecode-level exception routing:
 
@@ -78,9 +80,9 @@ If a runtime error leaves the VM, the session populates call-stack text from VM 
 | --- | --- |
 | `EnterTry(catch_pc, catch_var)` | Pushes a catch target onto the interpreter `try_stack`. |
 | `PopTry` | Removes the target when the protected region exits normally. |
-| `redirect_exception_to_catch` | Converts `RuntimeError` to `MException`, stores the optional catch variable, updates `last_exception`, and jumps to the catch block. |
+| `redirect_exception_to_catch` | Converts `RuntimeError` to `MException`, stores the optional catch variable, establishes the active lexical catch authority, and jumps to the catch block. |
 
-`rethrow(e)` raises a new `RuntimeError` from an explicit `MException`. A bare `rethrow()` is handled by the VM when a previous catch has populated `last_exception`.
+`rethrow(e)` preserves the original runtime failure, including its source location and call frames, when `e` was caught from execution. In RunMat compatibility mode, `rethrow()` without an argument uses the currently active lexical catch, including in a callback invoked by that catch. After the catch exits, the shorthand cannot reuse its exception.
 
 ## Diagnostics Builtins
 
@@ -89,7 +91,7 @@ The diagnostics builtins are ordinary runtime builtins that raise `RuntimeError`
 | Builtin | Behavior |
 | --- | --- |
 | `error` | Raises a runtime error from a message, identifier/message pair, formatted message, `MException`, or message struct. |
-| `assert` | Raises an assertion error when the condition is false. Numeric and logical arrays pass only when all elements are truthy; empty arrays pass. GPU values are gathered before evaluation. |
+| `assert` | Raises an assertion error when the condition is false. Real numeric, logical, and character arrays pass only when nonempty and all elements are nonzero; NaN cannot convert to logical. GPU values are gathered before evaluation. |
 | `warning` | Records or emits a warning, controls warning state, queries status, and can promote warnings to errors. |
 
 Unqualified identifiers are normalized with a `RunMat:` prefix. Message structs can use `identifier` or `messageid` for the code and `message` or `msg` for the text.

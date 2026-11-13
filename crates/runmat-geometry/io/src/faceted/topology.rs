@@ -72,7 +72,10 @@ pub(super) fn canonical_faceted_solid(
         .enumerate()
         .map(|(index, (_, coordinates_m))| FacetedVertex {
             id: entity_id(PersistentEntityKind::Vertex, "vertex", index),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         })
         .collect::<Vec<_>>();
     let triangle_records = triangles
@@ -162,11 +165,15 @@ fn shell_orientation(
     triangles: &[[u32; 3]],
     members: &[u32],
 ) -> Result<FacetedShellOrientation, GeometryImportError> {
-    let origin = vertices[triangles[members[0] as usize][0] as usize].coordinates_m;
+    let origin = vertices[triangles[members[0] as usize][0] as usize]
+        .coordinates_m
+        .canonical_value();
     let mut signed_six_volume = 0.0_f64;
     for &triangle_index in members {
         let [a, b, c] = triangles[triangle_index as usize].map(|vertex_index| {
-            let point = vertices[vertex_index as usize].coordinates_m;
+            let point = vertices[vertex_index as usize]
+                .coordinates_m
+                .canonical_value();
             [
                 point[0] - origin[0],
                 point[1] - origin[1],
@@ -193,11 +200,11 @@ fn shell_orientation(
 }
 
 fn entity_id(kind: PersistentEntityKind, role: &str, index: usize) -> PersistentEntityId {
-    PersistentEntityId {
+    PersistentEntityId::new(
         kind,
-        source_topology_id: format!("faceted:{role}:{index:016x}"),
-        assembly_path: vec!["root".into()],
-    }
+        format!("faceted:{role}:{index:016x}"),
+        vec!["root".into()],
+    )
 }
 
 fn rotate_minimum_first(triangle: &mut [CoordinateKey; 3]) {

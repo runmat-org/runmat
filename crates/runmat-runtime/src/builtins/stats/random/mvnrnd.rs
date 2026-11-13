@@ -1,15 +1,16 @@
 //! Multivariate normal random variates.
+use runmat_builtins::{
+    MVNRND_ERROR_INTERNAL as ERROR_INTERNAL,
+    MVNRND_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    MVNRND_INTEGER_MU_EXTENSION as INTEGER_MU_EXTENSION,
+    MVNRND_INTEGER_N_EXTENSION as INTEGER_N_EXTENSION,
+    MVNRND_INTEGER_SIGMA_EXTENSION as INTEGER_SIGMA_EXTENSION,
+    MVNRND_LOGICAL_INPUT_EXTENSION as LOGICAL_INPUT_EXTENSION,
+    MVNRND_RESIDENT_N_EXTENSION as RESIDENT_N_EXTENSION,
+};
 
 use nalgebra::{DMatrix, SymmetricEigen};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, NumericScalar};
 use runmat_value::{Tensor, Value};
@@ -23,169 +24,6 @@ const SYMMETRY_TOL: f64 = 1.0e-10;
 const PSD_TOL: f64 = 1.0e-10;
 const MAX_OUTPUT_CELLS: usize = 20_000_000;
 const MAX_FACTOR_CELLS: usize = 20_000_000;
-
-const INTEGER_MU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mvnrnd-integer-mu",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mvnrnd with a typed-integer mean array is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MvnrndIntegerMuExtension"),
-};
-const INTEGER_SIGMA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mvnrnd-integer-sigma",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mvnrnd with a typed-integer covariance array is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MvnrndIntegerSigmaExtension"),
-};
-const INTEGER_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mvnrnd-integer-count",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mvnrnd with a typed-integer sample count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MvnrndIntegerCountExtension"),
-};
-const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mvnrnd-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mvnrnd with logical numeric inputs is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MvnrndLogicalInputExtension"),
-};
-const RESIDENT_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mvnrnd-resident-count",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mvnrnd with an explicit gpuArray sample count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MvnrndResidentCountExtension"),
-};
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    INTEGER_MU_EXTENSION,
-    INTEGER_SIGMA_EXTENSION,
-    INTEGER_N_EXTENSION,
-    LOGICAL_INPUT_EXTENSION,
-    RESIDENT_N_EXTENSION,
-];
-
-const INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "mu",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer means are independently gated and require exact binary64 representation.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Sigma",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer covariance values are independently gated and require exact binary64 representation.",
-    },
-];
-const INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "n",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Current MATLAB documents single and double n; native integer n is a gated RunMat structural extension.",
-}];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "r = mvnrnd(integer_mu, integer_Sigma, ___)",
-        inputs: &INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer distribution arrays are RunMat-only, cross one checked binary64 boundary, and return double unless another documented data input is single; fallback restores through the exact owner when it can preserve the required class, otherwise automatic residency may remain host and explicit residency errors.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "r = mvnrnd(mu, Sigma, integer_n)",
-        inputs: &INTEGER_N_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Integer n is parsed exactly without selecting output class or residency; explicit resident n is separately gated.",
-    },
-];
-
-const OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "r",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Random samples with observations in rows.",
-}];
-
-const INPUT_MU: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "mu",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Mean vector or matrix with one mean vector per row.",
-};
-
-const INPUT_SIGMA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Sigma",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Covariance matrix or covariance matrix pages.",
-};
-
-const INPUT_N: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Number of random rows to draw when mu is a single mean vector.",
-};
-
-const INPUTS_MU_SIGMA: [BuiltinParamDescriptor; 2] = [INPUT_MU, INPUT_SIGMA];
-const INPUTS_MU_SIGMA_N: [BuiltinParamDescriptor; 3] = [INPUT_MU, INPUT_SIGMA, INPUT_N];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "r = mvnrnd(mu, Sigma)",
-        inputs: &INPUTS_MU_SIGMA,
-        outputs: &OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "r = mvnrnd(mu, Sigma, n)",
-        inputs: &INPUTS_MU_SIGMA_N,
-        outputs: &OUTPUT_R,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MVNRND.INVALID_ARGUMENT",
-    identifier: Some("RunMat:mvnrnd:InvalidArgument"),
-    when: "Inputs are malformed, dimensions are incompatible, or covariance pages are not symmetric positive semidefinite.",
-    message: "mvnrnd: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MVNRND.INTERNAL",
-    identifier: Some("RunMat:mvnrnd:Internal"),
-    when: "RunMat cannot allocate or construct the requested random samples.",
-    message: "mvnrnd: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const MVNRND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-fn mvnrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    if args.len() >= 2 {
-        Type::Tensor { shape: None }
-    } else {
-        Type::Unknown
-    }
-}
 
 fn mvnrnd_error(
     descriptor: &'static BuiltinErrorDescriptor,
@@ -208,18 +46,12 @@ fn internal(message: impl Into<String>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "mvnrnd",
-    category = "stats/random",
-    summary = "Generate multivariate normal random samples.",
-    keywords = "mvnrnd,multivariate normal,gaussian,random,statistics",
-    type_resolver(mvnrnd_type),
-    descriptor(crate::builtins::stats::random::mvnrnd::MVNRND_DESCRIPTOR),
-    extensions(crate::builtins::stats::random::mvnrnd::EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::random::mvnrnd::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::random::mvnrnd"
 )]
-async fn mvnrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_extensions(&args)?;
-    let output = MvnrndOutputPlan::inspect(&args)?;
+async fn mvnrnd_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    ensure_extensions(args.view())?;
+    let output = MvnrndOutputPlan::inspect(args.view())?;
     let parsed = parse_args(args).await?;
     let output_len = parsed
         .sample_count
@@ -228,7 +60,8 @@ async fn mvnrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if output_len > MAX_OUTPUT_CELLS {
         return Err(invalid("mvnrnd: requested output is too large"));
     }
-    let normals = random::generate_normal_scaled(0.0, 1.0, output_len, NAME)?;
+    let mut turn = random::acquire_turn(None, NAME).await?;
+    let normals = random::generate_normal_scaled(&mut turn, 0.0, 1.0, output_len, NAME)?;
     let mut out = vec![0.0; output_len];
     for sample in 0..parsed.sample_count {
         let mean = &parsed.means[parsed.mean_index(sample)];
@@ -250,7 +83,7 @@ struct MvnrndOutputPlan {
 }
 
 impl MvnrndOutputPlan {
-    fn inspect(args: &[Value]) -> BuiltinResult<Self> {
+    fn inspect(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let single = args.iter().take(2).any(|value| {
             matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
                 || matches!(value, Value::GpuTensor(handle)
@@ -296,7 +129,7 @@ impl MvnrndOutputPlan {
     }
 }
 
-fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if args.first().is_some_and(is_typed_integer) {
         crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_MU_EXTENSION, NAME)?;
     }
@@ -354,7 +187,7 @@ impl ParsedArgs {
     }
 }
 
-async fn parse_args(args: Vec<Value>) -> BuiltinResult<ParsedArgs> {
+async fn parse_args(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedArgs> {
     if !(2..=3).contains(&args.len()) {
         return Err(invalid(
             "mvnrnd: expected mvnrnd(mu, Sigma) or mvnrnd(mu, Sigma, n)",
@@ -449,14 +282,14 @@ fn ensure_exact_integer_tensor(tensor: &Tensor) -> BuiltinResult<()> {
 }
 
 fn parse_means(mu: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
-    if mu.shape.len() > 2 {
+    if mu.shape().len() > 2 {
         return Err(invalid("mvnrnd: mu must be a vector or 2-D matrix"));
     }
     let values = tensor::tensor_values_f64(mu);
     if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("mvnrnd: mu values must be finite"));
     }
-    match mu.shape.as_slice() {
+    match mu.shape() {
         [] => Ok(vec![vec![values[0]]]),
         [len] => Ok(vec![values[..*len].to_vec()]),
         [rows, cols] if *rows == 1 => Ok(vec![(0..*cols).map(|col| values[col]).collect()]),
@@ -476,7 +309,7 @@ fn parse_covariances(sigma: &Tensor, dimension: usize) -> BuiltinResult<Vec<DMat
     if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("mvnrnd: Sigma values must be finite"));
     }
-    match sigma.shape.as_slice() {
+    match sigma.shape() {
         [] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, values[0])]),
         [1] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, values[0])]),
         [rows, cols] if *rows == 1 && *cols == dimension => {
@@ -645,29 +478,60 @@ mod tests {
     #[test]
     fn mvnrnd_vector_mean_single_covariance_with_n() {
         let _guard = reset_rng();
-        let out = block_on(mvnrnd_builtin(vec![
-            tensor(vec![1.0, 2.0], vec![1, 2]),
-            tensor(vec![4.0, 0.0, 0.0, 9.0], vec![2, 2]),
-            Value::Num(5.0),
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![1.0, 2.0], vec![1, 2]),
+                tensor(vec![4.0, 0.0, 0.0, 9.0], vec![2, 2]),
+                Value::Num(5.0),
+            ]),
+        ))
         .expect("mvnrnd");
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![5, 2]);
+                assert_eq!(t.shape(), &[5, 2]);
                 assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn mvnrnd_preserves_rank_zero_scalar_and_rank_one_mean_geometry() {
+        let _guard = reset_rng();
+
+        let scalar = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0], Vec::new()),
+                tensor(vec![1.0], Vec::new()),
+            ]),
+        ))
+        .expect("rank-zero univariate distribution");
+        assert!(matches!(scalar, Value::Num(value) if value.is_finite()));
+
+        let vector = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0, 1.0], vec![2]),
+                tensor(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]),
+            ]),
+        ))
+        .expect("rank-one mean vector");
+        let Value::Tensor(vector) = vector else {
+            panic!("rank-one multivariate output");
+        };
+        assert_eq!(vector.shape(), &[1, 2]);
+    }
+
     #[test]
     fn mvnrnd_identity_covariance_uses_column_major_normal_stream() {
         let _guard = reset_rng();
-        let out = block_on(mvnrnd_builtin(vec![
-            tensor(vec![0.0, 0.0], vec![1, 2]),
-            tensor(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]),
-            Value::Num(3.0),
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0, 0.0], vec![1, 2]),
+                tensor(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]),
+                Value::Num(3.0),
+            ]),
+        ))
         .expect("mvnrnd");
         let expected = random::expected_normal_scaled_sequence(0.0, 1.0, 6);
         match out {
@@ -679,13 +543,15 @@ mod tests {
     #[test]
     fn mvnrnd_matrix_means_reuse_single_covariance() {
         let _guard = reset_rng();
-        let out = block_on(mvnrnd_builtin(vec![
-            tensor(vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0], vec![3, 2]),
-            tensor(vec![1.0, 0.25, 0.25, 1.0], vec![2, 2]),
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0], vec![3, 2]),
+                tensor(vec![1.0, 0.25, 0.25, 1.0], vec![2, 2]),
+            ]),
+        ))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -693,13 +559,15 @@ mod tests {
     #[test]
     fn mvnrnd_column_mu_is_multiple_univariate_means() {
         let _guard = reset_rng();
-        let out = block_on(mvnrnd_builtin(vec![
-            tensor(vec![1.0, 10.0, 100.0], vec![3, 1]),
-            Value::Num(4.0),
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![1.0, 10.0, 100.0], vec![3, 1]),
+                Value::Num(4.0),
+            ]),
+        ))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 1]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -714,13 +582,15 @@ mod tests {
             ],
             vec![2, 2, 2],
         );
-        let out = block_on(mvnrnd_builtin(vec![
-            tensor(vec![0.0, 10.0, 0.0, 20.0], vec![2, 2]),
-            sigma,
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0, 10.0, 0.0, 20.0], vec![2, 2]),
+                sigma,
+            ]),
+        ))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -728,13 +598,15 @@ mod tests {
     #[test]
     fn mvnrnd_accepts_diagonal_covariance_vector_and_pages() {
         let _guard = reset_rng();
-        let out = block_on(mvnrnd_builtin(vec![
-            tensor(vec![0.0, 10.0, 0.0, 20.0], vec![2, 2]),
-            tensor(vec![1.0, 4.0, 9.0, 16.0], vec![1, 2, 2]),
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0, 10.0, 0.0, 20.0], vec![2, 2]),
+                tensor(vec![1.0, 4.0, 9.0, 16.0], vec![1, 2, 2]),
+            ]),
+        ))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -742,15 +614,17 @@ mod tests {
     #[test]
     fn mvnrnd_accepts_semidefinite_covariance() {
         let _guard = reset_rng();
-        let out = block_on(mvnrnd_builtin(vec![
-            tensor(vec![0.0, 0.0], vec![1, 2]),
-            tensor(vec![1.0, 1.0, 1.0, 1.0], vec![2, 2]),
-            Value::Num(3.0),
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0, 0.0], vec![1, 2]),
+                tensor(vec![1.0, 1.0, 1.0, 1.0], vec![2, 2]),
+                Value::Num(3.0),
+            ]),
+        ))
         .expect("mvnrnd");
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 for row in 0..3 {
                     assert!(
                         (t.materialize_f64()[row] - t.materialize_f64()[3 + row]).abs() < 1.0e-10
@@ -763,32 +637,38 @@ mod tests {
 
     #[test]
     fn mvnrnd_rejects_bad_covariance() {
-        let err = block_on(mvnrnd_builtin(vec![
-            tensor(vec![0.0, 0.0], vec![1, 2]),
-            tensor(vec![1.0, 2.0, 3.0, 1.0], vec![2, 2]),
-        ]))
+        let err = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0, 0.0], vec![1, 2]),
+                tensor(vec![1.0, 2.0, 3.0, 1.0], vec![2, 2]),
+            ]),
+        ))
         .expect_err("non-symmetric covariance should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
     fn mvnrnd_rejects_n_with_matrix_mu() {
-        let err = block_on(mvnrnd_builtin(vec![
-            tensor(vec![0.0, 0.0, 1.0, 1.0], vec![2, 2]),
-            tensor(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]),
-            Value::Num(2.0),
-        ]))
+        let err = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![2, 2]),
+                tensor(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]),
+                Value::Num(2.0),
+            ]),
+        ))
         .expect_err("n with matrix mu should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
     fn mvnrnd_rejects_zero_n() {
-        let err = block_on(mvnrnd_builtin(vec![
-            Value::Num(0.0),
-            Value::Num(1.0),
-            Value::Num(0.0),
-        ]))
+        let err = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+                Value::Num(0.0),
+            ]),
+        ))
         .expect_err("zero n should fail");
         assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
@@ -833,10 +713,12 @@ mod tests {
     fn mvnrnd_integer_roles_gate_and_wide_distribution_values_reject() {
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(mvnrnd_builtin(vec![
-                Value::Int(runmat_value::IntValue::I16(0)),
-                Value::Num(1.0),
-            ]))
+            let error = block_on(mvnrnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(runmat_value::IntValue::I16(0)),
+                    Value::Num(1.0),
+                ]),
+            ))
             .expect_err("integer mu must gate");
             assert_eq!(
                 error.identifier(),
@@ -847,8 +729,10 @@ mod tests {
         let wide = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap(),
         );
-        let error = block_on(mvnrnd_builtin(vec![wide, Value::Num(1.0)]))
-            .expect_err("wide integer mu must reject");
+        let error = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![wide, Value::Num(1.0)]),
+        ))
+        .expect_err("wide integer mu must reject");
         assert!(error.message.contains("exactly representable"));
     }
 
@@ -856,7 +740,10 @@ mod tests {
     fn mvnrnd_single_distribution_input_selects_single_output() {
         let _guard = reset_rng();
         let mu = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
-        let out = block_on(mvnrnd_builtin(vec![mu, Value::Num(1.0)])).unwrap();
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![mu, Value::Num(1.0)]),
+        ))
+        .unwrap();
         let Value::Tensor(out) = out else {
             panic!("expected single tensor output");
         };
@@ -875,11 +762,13 @@ mod tests {
         let mu = Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &mu).expect("integer upload");
         let sigma = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap());
-        let out = block_on(mvnrnd_builtin(vec![
-            Value::GpuTensor(handle.clone()),
-            sigma.clone(),
-            Value::Num(2.0),
-        ]))
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(handle.clone()),
+                sigma.clone(),
+                Value::Num(2.0),
+            ]),
+        ))
         .expect("mvnrnd");
         let Value::GpuTensor(out) = out else {
             panic!("expected automatic resident double output");
@@ -887,13 +776,17 @@ mod tests {
         let host = crate::builtins::common::test_support::gather(Value::GpuTensor(out))
             .expect("gather automatic output");
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
-        assert_eq!(host.shape, vec![2, 2]);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let out = block_on(mvnrnd_builtin(vec![
-            Value::GpuTensor(handle),
-            sigma,
-            Value::Num(2.0),
-        ]))
+        assert_eq!(host.shape(), &[2, 2]);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
+        let out = block_on(mvnrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(handle),
+                sigma,
+                Value::Num(2.0),
+            ]),
+        ))
         .expect("explicit resident double output");
         let Value::GpuTensor(out) = out else {
             panic!("expected explicit resident output");

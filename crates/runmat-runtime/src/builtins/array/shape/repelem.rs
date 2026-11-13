@@ -9,23 +9,13 @@
 //! coverage applies here. GPU inputs are gathered to host memory before
 //! replication runs because there is no native provider hook today.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::random_args::complex_tensor_into_value;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::ResolveContext;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, NumericStorage,
@@ -34,167 +24,7 @@ use runmat_value::{
 
 const BUILTIN_NAME: &str = "repelem";
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::repelem")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "repelem",
-    op_kind: GpuOpKind::Custom("repelem"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "repelem executes on the host today; GPU inputs are gathered before replication.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::repelem")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "repelem",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "repelem produces a fresh array; fusion treats it as a residency boundary.",
-};
-
-const REPELEM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Array with element-wise replication applied.",
-}];
-
-const REPELEM_INPUTS_A_R: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar or vector replication control argument.",
-    },
-];
-
-const REPELEM_INPUTS_A_RN: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "R1_RN",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Per-dimension scalar/vector replication controls.",
-    },
-];
-
-const REPELEM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = repelem(A, R)",
-        inputs: &REPELEM_INPUTS_A_R,
-        outputs: &REPELEM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = repelem(A, R1, R2, ...)",
-        inputs: &REPELEM_INPUTS_A_RN,
-        outputs: &REPELEM_OUTPUT,
-    },
-];
-
-const REPELEM_ERROR_MISSING_FACTORS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.MISSING_FACTORS",
-    identifier: Some("RunMat:repelem:MissingReplicationFactors"),
-    when: "No replication arguments are provided.",
-    message: "repelem: replication factors must be specified",
-};
-
-const REPELEM_ERROR_INVALID_FACTORS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.INVALID_FACTORS",
-    identifier: Some("RunMat:repelem:InvalidReplicationFactors"),
-    when: "Replication arguments are non-numeric, non-integer, or shape-incompatible.",
-    message: "repelem: invalid replication factors",
-};
-
-const REPELEM_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:repelem:UnsupportedInput"),
-    when: "Input type is unsupported for repelem.",
-    message: "repelem: unsupported input type",
-};
-
-const REPELEM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.INTERNAL",
-    identifier: Some("RunMat:repelem:Internal"),
-    when: "Internal allocation/indexing path fails.",
-    message: "repelem: internal operation failed",
-};
-
-const REPELEM_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    REPELEM_ERROR_MISSING_FACTORS,
-    REPELEM_ERROR_INVALID_FACTORS,
-    REPELEM_ERROR_UNSUPPORTED_INPUT,
-    REPELEM_ERROR_INTERNAL,
-];
-
-pub const REPELEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REPELEM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REPELEM_ERRORS,
-};
-const REPELEM_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents all eight integer classes; authoritative elements are copied without arithmetic or floating conversion.",
-    }];
-const REPELEM_INTEGER_FACTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "R1,...,RN",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed repetition controls are read exactly as nonnegative structural sizes.",
-    }];
-pub const REPELEM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = repelem(integer_A, R1,...,RN)",
-        inputs: &REPELEM_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Replication preserves native class, shape order, and exact wide values; resident inputs use owner-preserving host fallback when no provider hook exists.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = repelem(A, integer_R1,...,integer_RN)",
-        inputs: &REPELEM_INTEGER_FACTOR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Replication counts never pass through binary64; checked size arithmetic rejects unrepresentable output geometry.",
-    },
-];
+mod managed;
 
 fn repelem_error(
     error: &'static BuiltinErrorDescriptor,
@@ -223,102 +53,110 @@ fn repelem_internal(message: impl Into<String>) -> RuntimeError {
     repelem_error(&REPELEM_ERROR_INTERNAL, message)
 }
 
-fn array_shape(ty: &Type) -> Option<&[Option<usize>]> {
-    match ty {
-        Type::Tensor { shape: Some(shape) } => Some(shape.as_slice()),
-        Type::Logical { shape: Some(shape) } => Some(shape.as_slice()),
-        _ => None,
+fn repelem_with_source(
+    descriptor: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("repelem: {source}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
     }
-}
-
-/// Output shape for repelem given a known input shape and the number of
-/// replication arguments. Like `repmat`, exact dimensions are unknown unless
-/// the input is empty, so we encode rank only.
-fn repelem_output_shape(
-    input_shape: &[Option<usize>],
-    reps_len: usize,
-) -> Option<Vec<Option<usize>>> {
-    let input_rank = input_shape.len();
-    let rank = if reps_len == 1 {
-        if input_rank == 0 {
-            return None;
-        }
-        input_rank.max(2)
-    } else {
-        input_rank.max(reps_len.max(2))
-    };
-
-    let mut output = Vec::with_capacity(rank);
-    for axis in 0..rank {
-        if axis < input_rank && input_shape[axis] == Some(0) {
-            output.push(Some(0));
-        } else {
-            output.push(None);
-        }
-    }
-    Some(output)
-}
-
-fn repelem_reps_len(args: &[Type]) -> Option<usize> {
-    if args.len() < 2 {
-        return None;
-    }
-    if args.len() > 2 {
-        return Some(args.len() - 1);
-    }
-    // Single replication argument: scalar OR vector. Either way reps_len == 1
-    // for the output-rank purposes (we replicate along the vector's axis).
-    match &args[1] {
-        Type::Tensor { shape: Some(_) }
-        | Type::Logical { shape: Some(_) }
-        | Type::Num
-        | Type::Int
-        | Type::Bool => Some(1),
-        _ => None,
-    }
-}
-
-fn repelem_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    let reps_len = repelem_reps_len(args);
-    let shape = array_shape(input)
-        .and_then(|shape| reps_len.and_then(|len| repelem_output_shape(shape, len)));
-    match input {
-        Type::Tensor { .. } => Type::Tensor { shape },
-        Type::Logical { .. } => Type::Logical { shape },
-        Type::Bool => Type::logical(),
-        Type::Num | Type::Int => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::String => Type::cell_of(Type::String),
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "repelem",
-    category = "array/shape",
-    summary = "Replicate each element of an array along one or more dimensions.",
-    keywords = "repelem,replicate,kron,tile,array",
-    accel = "custom",
-    type_resolver(repelem_type),
-    descriptor(crate::builtins::array::shape::repelem::REPELEM_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::repelem::REPELEM_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::shape::repelem"
 )]
-async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn repelem_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(repelem_missing_factors(
             REPELEM_ERROR_MISSING_FACTORS.message,
         ));
     }
-    let factors = parse_factor_args(&rest).await?;
+    if !matches!(
+        &value,
+        Value::Tensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::String(_)
+            | Value::StringArray(_)
+            | Value::CharArray(_)
+            | Value::Cell(_)
+            | Value::Struct(_)
+            | Value::StructArray(_)
+            | Value::GpuTensor(_)
+    ) {
+        return Err(repelem_unsupported("repelem: unsupported input class"));
+    }
+    if rest.len() == 1 {
+        let shape = match &value {
+            Value::Tensor(tensor) => Some(tensor.shape()),
+            Value::ComplexTensor(tensor) => Some(tensor.shape()),
+            Value::LogicalArray(array) => Some(array.shape.as_slice()),
+            Value::StringArray(array) => Some(array.shape.as_slice()),
+            Value::Cell(array) => Some(array.shape.as_slice()),
+            Value::StructArray(array) => Some(array.shape()),
+            Value::GpuTensor(handle) => Some(handle.shape()),
+            _ => None,
+        };
+        if shape.is_some_and(|shape| shape.iter().filter(|&&extent| extent > 1).count() > 1) {
+            return Err(repelem_invalid_factors(
+                "repelem: one replication control requires vector input",
+            ));
+        }
+    }
+    for (index, control) in rest.iter().enumerate() {
+        if let Value::GpuTensor(handle) = control {
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(repelem_invalid_factors(format!(
+                    "repelem: replication argument {} must be real",
+                    index + 1
+                )));
+            }
+            ensure_vector_shape(handle.shape(), index + 1)?;
+        }
+    }
+    if let Some(context) = context.as_ref() {
+        if HostAllocationReceipt::policy(Some(context))
+            .map_err(|cause| managed::admission(context, cause))?
+            == HostAllocationPolicy::Managed
+            && matches!(
+                &value,
+                Value::Tensor(_)
+                    | Value::CharArray(_)
+                    | Value::Num(_)
+                    | Value::Int(_)
+                    | Value::Bool(_)
+                    | Value::LogicalArray(_)
+                    | Value::Complex(_, _)
+                    | Value::ComplexTensor(_)
+            )
+            && rest
+                .iter()
+                .all(|control| !matches!(control, Value::GpuTensor(_)))
+        {
+            if let Value::CharArray(chars) = &value {
+                return managed::character(context, chars, rest.view());
+            }
+            return managed::dense(context, &value, rest.view());
+        }
+    }
+    let factors = parse_factor_args(rest.view()).await?;
     // Treat single-argument form as a vector shorthand (only valid when the
     // input array is a vector; the per-type implementations enforce this).
     let single_arg = factors.len() == 1;
@@ -326,7 +164,7 @@ async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
     if let Value::GpuTensor(handle) = value {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
-            .map_err(|error| repelem_internal(format!("repelem: {error}")))?;
+            .map_err(|error| repelem_with_source(&REPELEM_ERROR_INTERNAL, error))?;
         let output = repelem_host_value(gathered, &factors, single_arg)?;
         return gpu_helpers::restore_class_preserving_value(&handle, output, BUILTIN_NAME);
     }
@@ -370,7 +208,7 @@ fn repelem_host_value(
             Ok(complex_tensor_into_value(out))
         }
         Value::String(s) => {
-            let array = StringArray::new(vec![s], vec![1, 1])
+            let array = StringArray::from_elements_unbounded(vec![s], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
             let out = repelem_string_array(&array, factors, single_arg)?;
             Ok(Value::StringArray(out))
@@ -386,6 +224,18 @@ fn repelem_host_value(
         Value::Cell(ca) => {
             let out = repelem_cell_array(&ca, factors, single_arg)?;
             Ok(Value::Cell(out))
+        }
+        Value::Struct(structure) => {
+            let (_, shape) = repelem_column_major(&[0usize], &[1, 1], factors, single_arg)?;
+            struct_ops::replicate_scalar(&structure, &shape)
+                .map_err(|error| struct_ops::remap(error, |message| repelem_internal(message)))
+        }
+        Value::StructArray(array) => {
+            let shape = array.shape().to_vec();
+            let source = (0..array.len()).collect::<Vec<_>>();
+            let (indices, shape) = repelem_column_major(&source, &shape, factors, single_arg)?;
+            struct_ops::select(&array, &indices, &shape)
+                .map_err(|error| struct_ops::remap(error, |message| repelem_internal(message)))
         }
         Value::GpuTensor(_) => Err(repelem_internal(
             "repelem: resident input reached the host replication boundary",
@@ -403,7 +253,9 @@ enum RepFactor {
     Vector(Vec<usize>),
 }
 
-async fn parse_factor_args(args: &[Value]) -> crate::BuiltinResult<Vec<RepFactor>> {
+async fn parse_factor_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Vec<RepFactor>> {
     let mut out = Vec::with_capacity(args.len());
     for (idx, value) in args.iter().enumerate() {
         out.push(parse_single_factor(value, idx + 1).await?);
@@ -415,7 +267,7 @@ async fn parse_single_factor(value: &Value, position: usize) -> crate::BuiltinRe
     if matches!(value, Value::GpuTensor(_)) {
         let gathered = gpu_helpers::gather_value_async(value)
             .await
-            .map_err(|e| repelem_invalid_factors(format!("repelem: {e}")))?;
+            .map_err(|error| repelem_with_source(&REPELEM_ERROR_INVALID_FACTORS, error))?;
         return parse_host_factor(&gathered, position);
     }
     parse_host_factor(value, position)
@@ -434,7 +286,7 @@ fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<Rep
                         position,
                     )?));
                 }
-                ensure_vector_shape(&tensor.shape, position)?;
+                ensure_vector_shape(tensor.shape(), position)?;
                 return storage
                     .exact_values()
                     .iter()
@@ -448,7 +300,7 @@ fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<Rep
                     position,
                 )?))
             } else {
-                ensure_vector_shape(&tensor.shape, position)?;
+                ensure_vector_shape(tensor.shape(), position)?;
                 let len = tensor::tensor_element_len(tensor);
                 let mut out = Vec::with_capacity(len);
                 for index in 0..len {
@@ -519,7 +371,7 @@ fn coerce_count(value: f64, position: usize) -> crate::BuiltinResult<usize> {
             "repelem: replication count at argument {position} must be non-negative"
         )));
     }
-    if rounded >= (usize::MAX as f64) + 1.0 {
+    if rounded >= (2.0_f64).powi(usize::BITS as i32) {
         return Err(repelem_invalid_factors(format!(
             "repelem: replication count at argument {position} exceeds the maximum supported size"
         )));
@@ -552,7 +404,7 @@ fn vector_replication_axis(shape: &[usize]) -> crate::BuiltinResult<usize> {
     if let Some(axis) = first_axis {
         return Ok(axis);
     }
-    let total: usize = shape.iter().product();
+    let total: usize = shape.iter().product::<usize>();
     // Empty column vectors have no non-singleton dimension, but MATLAB still
     // preserves their 0x1 orientation for the single-factor vector form.
     if total == 0 && shape.first().copied().unwrap_or(1) != 1 {
@@ -570,7 +422,7 @@ fn repelem_tensor(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<Tensor> {
-    let input_shape = tensor.shape.clone();
+    let input_shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
@@ -621,7 +473,7 @@ fn repelem_complex_tensor(
     single_arg: bool,
 ) -> crate::BuiltinResult<ComplexTensor> {
     let indices = (0..tensor.len()).collect::<Vec<_>>();
-    let (indices, shape) = repelem_column_major(&indices, &tensor.shape, factors, single_arg)?;
+    let (indices, shape) = repelem_column_major(&indices, tensor.shape(), factors, single_arg)?;
     let storage = tensor
         .complex_storage()
         .gather(&indices)
@@ -635,8 +487,9 @@ fn repelem_string_array(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<StringArray> {
-    let (data, shape) = repelem_column_major(&sa.data, &sa.shape, factors, single_arg)?;
-    StringArray::new(data, shape).map_err(|e| repelem_internal(format!("repelem: {e}")))
+    let (data, shape) = repelem_column_major(sa.data(), &sa.shape, factors, single_arg)?;
+    StringArray::from_elements_unbounded(data, shape)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 
 fn repelem_char_array(
@@ -646,8 +499,9 @@ fn repelem_char_array(
 ) -> crate::BuiltinResult<CharArray> {
     let (rows, cols, plan) = build_2d_plan(ca.rows, ca.cols, factors, single_arg)?;
     let (data, new_rows, new_cols) =
-        repelem_row_major(&ca.data, ca.rows, ca.cols, rows, cols, &plan)?;
-    CharArray::new(data, new_rows, new_cols).map_err(|e| repelem_internal(format!("repelem: {e}")))
+        repelem_row_major(ca.data(), ca.rows, ca.cols, rows, cols, &plan)?;
+    CharArray::from_code_units(data, new_rows, new_cols)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 
 fn repelem_cell_array(
@@ -667,17 +521,17 @@ fn repelem_cell_row_major(
     let mut input_shape = if cell.shape.is_empty() {
         vec![cell.rows, cell.cols]
     } else {
-        cell.shape.clone()
+        cell.shape.to_vec()
     };
     while input_shape.len() < 2 {
         input_shape.push(1);
     }
 
     let orig_total = checked_total(&input_shape)?;
-    if !(orig_total == cell.data.len() || (orig_total == 0 && cell.data.is_empty())) {
+    if !(orig_total == cell.data().len() || (orig_total == 0 && cell.data().is_empty())) {
         return Err(repelem_internal(format!(
             "repelem: internal cell shape mismatch (expected {orig_total} elements, found {})",
-            cell.data.len()
+            cell.data().len()
         )));
     }
 
@@ -728,7 +582,7 @@ fn repelem_cell_row_major(
             let src_coord = idx_tables[k][coord];
             src_index += src_coord * src_strides[k];
         }
-        values.push(cell.data[src_index].clone());
+        values.push(cell.data()[src_index].clone());
     }
     Ok((values, output_shape))
 }
@@ -996,55 +850,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, StructArray};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::repelem_builtin(value, rest))
-    }
-
-    #[test]
-    fn repelem_type_resolves_tensor_rank() {
-        let out = repelem_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-                Type::Num,
-                Type::Num,
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
-    #[test]
-    fn repelem_type_preserves_logical_kind() {
-        let out = repelem_type(
-            &[
-                Type::Logical {
-                    shape: Some(vec![Some(2), Some(2)]),
-                },
-                Type::Num,
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
-    #[test]
-    fn repelem_type_maps_string_to_string_array_model() {
-        let out = repelem_type(&[Type::String, Type::Num], &ResolveContext::new(Vec::new()));
-        assert_eq!(out, Type::cell_of(Type::String));
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+        block_on(super::repelem_builtin(None, value, rest))
     }
 
     #[test]
@@ -1054,7 +864,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(2))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6]);
+                assert_eq!(t.shape(), &[1, 6]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1068,8 +878,9 @@ pub(crate) mod tests {
             let input = Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![1, 2])
                 .expect("integer tensor");
             let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated fixture provenance");
             let result = repelem_builtin(
                 Value::GpuTensor(source.clone()),
                 vec![Value::Int(IntValue::U8(2))],
@@ -1085,8 +896,8 @@ pub(crate) mod tests {
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide, wide, 7, 7]))
             );
-            provider.free(&output).ok();
-            provider.free(&source).ok();
+            drop(output);
+            drop(source);
         });
     }
 
@@ -1098,7 +909,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6]);
+                assert_eq!(t.shape(), &[1, 6]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1122,7 +933,7 @@ pub(crate) mod tests {
 
             match result {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 6]);
+                    assert_eq!(t.shape(), &[1, 6]);
                     assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
                 }
                 other => panic!("expected tensor, got {other:?}"),
@@ -1137,7 +948,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(2))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![6, 1]);
+                assert_eq!(t.shape(), &[6, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1152,7 +963,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![5, 1]);
+                assert_eq!(t.shape(), &[5, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1178,7 +989,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![6, 9]);
+                assert_eq!(t.shape(), &[6, 9]);
                 let rows = 6usize;
                 for c in 0..9 {
                     for r in 0..rows {
@@ -1216,7 +1027,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 // Sum of row counts -> 4 rows. Sum of col counts -> 5 cols.
-                assert_eq!(t.shape, vec![4, 5]);
+                assert_eq!(t.shape(), &[4, 5]);
 
                 let row_table = [0usize, 1, 1, 2];
                 let col_table = [0usize, 0, 1, 2, 2];
@@ -1296,7 +1107,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1, 6]);
+                assert_eq!(t.shape(), &[1, 1, 6]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1310,7 +1121,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(2))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6, 1]);
+                assert_eq!(t.shape(), &[1, 6, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1331,7 +1142,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2, 2]);
+                assert_eq!(t.shape(), &[2, 2, 2]);
                 assert_eq!(t.materialize_f64(), vec![5.0; 8]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1346,7 +1157,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), &[1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1361,7 +1172,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 1]);
+                assert_eq!(t.shape(), &[0, 1]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1375,7 +1186,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(3))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 1]);
+                assert_eq!(t.shape(), &[0, 1]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1390,7 +1201,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 1]);
+                assert_eq!(t.shape(), &[0, 1]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1407,7 +1218,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1427,7 +1238,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 3]);
+                assert_eq!(t.shape(), &[4, 3]);
                 // Column 0 of source is [1, 4] repeated row-wise twice -> [1, 1, 4, 4].
                 // Column 1 of source is [2, 5] used twice across output cols 1..3.
                 let rows = 4usize;
@@ -1458,7 +1269,7 @@ pub(crate) mod tests {
             .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6]);
+                assert_eq!(t.shape(), &[1, 6]);
                 assert_eq!(
                     t.into_numeric_storage().expect("single storage"),
                     NumericStorage::F32(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
@@ -1491,7 +1302,7 @@ pub(crate) mod tests {
                 panic!("expected exact integer tensor");
             };
 
-            assert_eq!(output.shape, vec![1, 4]);
+            assert_eq!(output.shape(), &[1, 4]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -1560,7 +1371,7 @@ pub(crate) mod tests {
             panic!("expected typed complex integer tensor");
         };
 
-        assert_eq!(output.shape, vec![1, 4]);
+        assert_eq!(output.shape(), &[1, 4]);
         assert_eq!(
             output.integer_storage().cloned(),
             Some(
@@ -1627,6 +1438,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn structure_replication_normalizes_scalar_and_preserves_column_major_order() {
+        let mut scalar = runmat_value::UnboundedStructValueBuilder::new();
+        scalar.insert("id", Value::Num(1.0));
+        let scalar = scalar.finish();
+        assert!(matches!(
+            repelem_builtin(Value::Struct(scalar.clone()), vec![Value::Num(1.0)]).unwrap(),
+            Value::Struct(_)
+        ));
+
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
+        second.insert("id", Value::Num(2.0));
+        let second = second.finish();
+        let array = StructArray::new(vec![scalar, second], vec![2, 1]).unwrap();
+        let Value::StructArray(output) = repelem_builtin(
+            Value::StructArray(array),
+            vec![Value::Num(2.0), Value::Num(1.0)],
+        )
+        .unwrap() else {
+            panic!("expected structure array");
+        };
+        assert_eq!(output.shape(), [4, 1]);
+        assert_eq!(
+            output
+                .elements()
+                .map(|element| element.fields["id"].clone())
+                .collect::<Vec<_>>(),
+            [
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(2.0),
+            ]
+        );
+    }
+
+    #[test]
     fn cell_array_replication_nd_preserves_shape() {
         let cell = CellArray::new_with_shape(vec![Value::Num(1.0), Value::Num(2.0)], vec![1, 1, 2])
             .unwrap();
@@ -1643,7 +1490,7 @@ pub(crate) mod tests {
             Value::Cell(out) => {
                 assert_eq!(out.shape, vec![1, 1, 4]);
                 let values: Vec<f64> = out
-                    .data
+                    .data()
                     .iter()
                     .map(|ptr| match ptr {
                         Value::Num(n) => *n,
@@ -1658,7 +1505,7 @@ pub(crate) mod tests {
 
     #[test]
     fn char_array_replication_2d() {
-        let ca = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
+        let ca = CharArray::from_unicode_scalars("hi".chars().collect(), 1, 2).unwrap();
         let result = repelem_builtin(
             Value::CharArray(ca),
             vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(3))],
@@ -1668,7 +1515,8 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 6);
-                let s: String = out.data.iter().collect();
+                let s = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(s, "hhhiii");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1685,7 +1533,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 4]);
+                assert_eq!(out.shape(), &[1, 4]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(1.0, -1.0), (1.0, -1.0), (0.0, 2.0), (0.0, 2.0)]
@@ -1707,7 +1555,7 @@ pub(crate) mod tests {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![1, 4]);
                 assert_eq!(
-                    out.data,
+                    out.data(),
                     vec![
                         "a".to_string(),
                         "a".to_string(),

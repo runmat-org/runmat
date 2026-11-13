@@ -112,16 +112,16 @@ fn curves(
         &Control,
         SharedCurveDiscretizationOptions {
             resolution: CurveResolutionPolicy {
-                maximum_chordal_deviation_m: 0.01,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
                 maximum_tangent_change_rad: 0.2,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.0,
             },
             maximum_nodes_per_edge: 1_024,
             maximum_subdivision_depth: 20,
-            geometry_absolute_error_m: 1.0e-10,
+            geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
             pcurve_absolute_error: 1.0e-10,
-            arc_length_absolute_error_m: 1.0e-10,
+            arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         },
     )
     .unwrap()
@@ -143,3 +143,5 @@ impl GeometryEvaluationControl for Control {
         Ok(())
     }
 }
+
+mod cancellation;

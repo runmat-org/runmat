@@ -12,9 +12,11 @@
 #include <gp_Vec.hxx>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -39,12 +41,68 @@ void require_bounds(const BRepAdaptor_Surface& surface) {
   }
 }
 
-void require_parameters(const BRepAdaptor_Surface& surface, double u, double v) {
-  require_finite(u, "U parameter");
-  require_finite(v, "V parameter");
-  if (u < surface.FirstUParameter() || u > surface.LastUParameter() ||
-      v < surface.FirstVParameter() || v > surface.LastVParameter()) {
-    throw std::runtime_error("OCCT exact surface parameter is outside the face domain");
+double admitted_parameter(double value,
+                          double start,
+                          double end,
+                          bool periodic,
+                          double period,
+                          const char* role) {
+  require_finite(value, role);
+  if (periodic && (!std::isfinite(period) || period <= 0.0)) {
+    throw std::runtime_error("OCCT exact surface has an invalid period");
+  }
+  const double tolerance = Precision::PConfusion() *
+                           std::max({1.0, std::abs(start), std::abs(end), std::abs(value)});
+  if ((value < start - tolerance || value > end + tolerance) && periodic) {
+    double offset = std::fmod(value - start, period);
+    if (offset < 0.0) {
+      offset += period;
+    }
+    value = start + offset;
+  }
+  if (value < start - tolerance || value > end + tolerance) {
+    std::ostringstream message;
+    message.precision(17);
+    message << "OCCT exact surface parameter is outside the face domain: " << role << " "
+            << value << " outside [" << start << ", " << end << "]"
+            << (periodic ? " (periodic)" : "");
+    throw std::runtime_error(message.str());
+  }
+  return std::clamp(value, start, end);
+}
+
+// The cached bounds pad a face's trimmed domain by UResolution of its largest edge tolerance.
+// UResolution is a global estimate from the surface's largest parametric speed, so near a slow
+// corner a pcurve can run past that padding while its surface point stays inside the edge's
+// tolerance tube (an exported EV battery pack: u = 1 + 6e-9 against 1 + 1.1e-9 padding). Clamp a
+// non-periodic parameter onto the domain when the surface point it names lies within the larger
+// of the face's largest edge tolerance (times the 1.1 sampling allowance of incidence
+// validation) and kAdmissibleEdgeGapM of the clamped point. Clamping only keeps evaluation on the
+// trimmed surface: incidence validation still holds the clamped point to the edge tolerance.
+// Larger overshoots stay outside and are rejected by admitted_parameter.
+void admit_tolerant_overshoot(const BRepAdaptor_Surface& surface,
+                              const TopoDS_Face& face,
+                              double meters_per_source_unit,
+                              const std::array<double, 4>& bounds,
+                              double& u,
+                              double& v) {
+  const bool u_out = !surface.IsUPeriodic() && std::isfinite(u) && (u < bounds[0] || u > bounds[1]);
+  const bool v_out = !surface.IsVPeriodic() && std::isfinite(v) && (v < bounds[2] || v > bounds[3]);
+  if (!u_out && !v_out) {
+    return;
+  }
+  const double tolerance = std::max(1.1 * BRep_Tool::MaxTolerance(face, TopAbs_EDGE),
+                                    kAdmissibleEdgeGapM / meters_per_source_unit);
+  if (!std::isfinite(tolerance) || tolerance <= 0.0) {
+    return;
+  }
+  const double clamped_u = u_out ? std::clamp(u, bounds[0], bounds[1]) : u;
+  const double clamped_v = v_out ? std::clamp(v, bounds[2], bounds[3]) : v;
+  const gp_Pnt requested = surface.Value(u, v);
+  const gp_Pnt clamped = surface.Value(clamped_u, clamped_v);
+  if (requested.Distance(clamped) <= tolerance) {
+    u = clamped_u;
+    v = clamped_v;
   }
 }
 
@@ -132,9 +190,19 @@ OcctSurfaceDerivativesPayload exact_surface_derivatives(std::uint64_t session_id
                                                         double u,
                                                         double v) {
   const detail::ExactFaceContext context = detail::exact_face_context(session_id, face_key);
-  const BRepAdaptor_Surface surface(context.face, Standard_True);
-  require_bounds(surface);
-  require_parameters(surface, u, v);
+  // Unrestricted adaptation avoids recomputing the trimmed wire domain. Admit
+  // parameters against the identical bounds captured with this session face.
+  const BRepAdaptor_Surface surface(context.face, Standard_False);
+  const auto& bounds = context.parameter_bounds;
+  for (const double bound : bounds) require_finite(bound, "cached parameter bound");
+  if (bounds[0] > bounds[1] || bounds[2] > bounds[3]) {
+    throw std::runtime_error("OCCT exact surface has a reversed parameter domain");
+  }
+  admit_tolerant_overshoot(surface, context.face, context.meters_per_source_unit, bounds, u, v);
+  u = admitted_parameter(u, bounds[0], bounds[1], surface.IsUPeriodic(),
+                         surface.IsUPeriodic() ? surface.UPeriod() : 0.0, "U parameter");
+  v = admitted_parameter(v, bounds[2], bounds[3], surface.IsVPeriodic(),
+                         surface.IsVPeriodic() ? surface.VPeriod() : 0.0, "V parameter");
   gp_Pnt point;
   gp_Vec du;
   gp_Vec dv;
@@ -144,6 +212,16 @@ OcctSurfaceDerivativesPayload exact_surface_derivatives(std::uint64_t session_id
   surface.D2(u, v, point, du, dv, duu, dvv, duv);
   const double scale = context.meters_per_source_unit;
   OcctSurfaceDerivativesPayload result;
+  result.parameter_scale = scale;
+  result.u_parameter_unit = 0;
+  result.v_parameter_unit = 0;
+  switch (surface.GetType()) {
+    case GeomAbs_Plane: result.u_parameter_unit = 1; result.v_parameter_unit = 1; break;
+    case GeomAbs_Cylinder: result.u_parameter_unit = 2; result.v_parameter_unit = 1; break;
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus: result.u_parameter_unit = 2; result.v_parameter_unit = 2; break;
+    default: break; // Retain other parameterizations as named native axes.
+  }
   result.point_x = point.X() * scale;
   result.point_y = point.Y() * scale;
   result.point_z = point.Z() * scale;
@@ -231,6 +309,16 @@ OcctSurfaceProjectionPayload exact_surface_closest_point(
   }
 
   OcctSurfaceProjectionPayload result;
+  result.parameter_scale = scale;
+  result.u_parameter_unit = 0;
+  result.v_parameter_unit = 0;
+  switch (surface.GetType()) {
+    case GeomAbs_Plane: result.u_parameter_unit = 1; result.v_parameter_unit = 1; break;
+    case GeomAbs_Cylinder: result.u_parameter_unit = 2; result.v_parameter_unit = 1; break;
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus: result.u_parameter_unit = 2; result.v_parameter_unit = 2; break;
+    default: break;
+  }
   result.u = best.u;
   result.v = best.v;
   result.point_x = best.point.X() * scale;

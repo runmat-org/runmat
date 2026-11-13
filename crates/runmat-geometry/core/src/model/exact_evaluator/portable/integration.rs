@@ -159,7 +159,7 @@ fn simpson(start: f64, end: f64, start_value: f64, midpoint_value: f64, end_valu
 }
 
 fn midpoint(start: f64, end: f64) -> f64 {
-    start + (end - start) * 0.5
+    start.midpoint(end)
 }
 
 fn budget(reason: &str) -> GeometryEvaluationError {

@@ -1,0 +1,274 @@
+mod documentation;
+mod inference;
+use crate::*;
+const INF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Inf-filled output array.",
+}];
+
+const INF_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const INF_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const INF_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector defining output dimensions.",
+}];
+
+const INF_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const INF_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class name override (double|single|gpuArray).",
+    },
+];
+
+const INF_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const INF_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "A = inf()",
+        inputs: &INF_SIG_EMPTY_INPUTS,
+        outputs: &INF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = inf(n)",
+        inputs: &INF_SIG_N_INPUTS,
+        outputs: &INF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = inf(size_vector)",
+        inputs: &INF_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &INF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = inf(m, n, ...)",
+        inputs: &INF_SIG_DIMS_INPUTS,
+        outputs: &INF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = inf(..., typename)",
+        inputs: &INF_SIG_CLASS_INPUTS,
+        outputs: &INF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = inf(..., \"like\", prototype)",
+        inputs: &INF_SIG_LIKE_INPUTS,
+        outputs: &INF_OUTPUT,
+    },
+];
+
+pub const INF_COLUMN_SIZE_VECTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "inf-column-size-vector",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "inf with a column size vector is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:InfColumnSizeVectorExtension"),
+    };
+pub const INF_RESIDENT_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "inf-resident-size-control",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "inf with a resident size control is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:InfResidentSizeControlExtension"),
+};
+pub const INF_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    INF_COLUMN_SIZE_VECTOR_EXTENSION,
+    INF_RESIDENT_SIZE_EXTENSION,
+];
+
+const INF_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "n/sz1...szN/sz",
+        classes: &ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "All eight integer classes are exact structural size controls; negative signed values clamp to zero and trailing singleton dimensions normalize away.",
+    }];
+pub const INF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = inf(integer_n[, integer_sz2, ...])",
+        inputs: &INF_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The default output is host double; typename can select single and explicit gpuArray syntax selects residency.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "X = inf(integer_sz)",
+        inputs: &INF_INTEGER_DIM_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The documented size vector is a row vector of exact integer values.",
+    },
+];
+
+pub const INF_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.LIKE_EXPECTED_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' keyword is provided without a prototype argument.",
+    message: "inf: expected prototype after 'like'",
+};
+
+pub const INF_ERROR_CLASS_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.CLASS_CONFLICT",
+    identifier: None,
+    when: "A class keyword and a 'like' prototype are both provided.",
+    message: "inf: cannot combine 'like' with other class specifiers",
+};
+
+pub const INF_ERROR_UNRECOGNIZED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.UNRECOGNIZED_OPTION",
+    identifier: None,
+    when: "A trailing option string is not a supported class keyword.",
+    message: "inf: unrecognised option",
+};
+
+pub const INF_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.LIKE_DUPLICATE",
+    identifier: None,
+    when: "The 'like' keyword is specified more than once.",
+    message: "inf: multiple 'like' specifications are not supported",
+};
+
+pub const INF_ERROR_INTEGER_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.INTEGER_LIKE_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' prototype has an integer data type that cannot represent Inf.",
+    message: "inf: integer 'like' prototypes are not supported",
+};
+
+pub const INF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:inf:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "inf: too many output arguments",
+};
+const INF_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    INF_ERROR_TOO_MANY_OUTPUTS,
+    INF_ERROR_LIKE_EXPECTED_PROTOTYPE,
+    INF_ERROR_CLASS_CONFLICT,
+    INF_ERROR_UNRECOGNIZED_OPTION,
+    INF_ERROR_LIKE_DUPLICATE,
+    INF_ERROR_INTEGER_LIKE_PROTOTYPE,
+];
+
+pub const INF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INF_ERRORS,
+};
+
+pub const INF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: crate::BuiltinCatalogAudience::Public,
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    identity: BuiltinCatalogIdentity { name: "inf" },
+    category: "array/creation",
+    documentation: documentation::DOCUMENTATION,
+    descriptor: &INF_DESCRIPTOR,
+    contract: BuiltinContractDeclaration {
+        maturity: BuiltinContractMaturity::Complete,
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
+            inference::infer,
+        )),
+        compatibility: BuiltinCompatibility::Matlab,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
+        purity: BuiltinPurity::Pure,
+        semantic_kind: BuiltinSemanticKind::General,
+        workspace_effect: None,
+        environment_effect: None,
+        effects: &[
+            runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
+        ],
+        capabilities: &[],
+    },
+    placement: BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+        portability: BuiltinPortability::NativeAndWasm,
+        accelerator: BuiltinAcceleratorPolicy::Optional,
+        residency: BuiltinResidencyPolicy::Dynamic,
+        fusion: BuiltinFusionPolicy::Candidate,
+        distributed: BuiltinDistributedPolicy::Unsupported,
+    },
+    link: BuiltinLinkContract {
+        reachability: BuiltinReachability::Always,
+        policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
+        artifact_dependencies: &[],
+    },
+    bindings: &REQUIRED_DEFAULT_BINDING,
+    extensions: &INF_EXTENSIONS,
+    integer_capabilities: &INF_INTEGER_CAPABILITIES,
+    integer_audit: None,
+    suppress_auto_output: false,
+};
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&INF_CATALOG_ENTRY];
+pub(super) const CONSTANTS: &[BuiltinConstantCatalogEntry] = &[
+    BuiltinConstantCatalogEntry::new(
+        "inf",
+        BuiltinConstantKind::RealDouble,
+        BuiltinCatalogProvenance::new(file!(), module_path!()),
+    ),
+    BuiltinConstantCatalogEntry::new(
+        "Inf",
+        BuiltinConstantKind::RealDouble,
+        BuiltinCatalogProvenance::new(file!(), module_path!()),
+    ),
+];

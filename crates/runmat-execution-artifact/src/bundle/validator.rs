@@ -43,12 +43,27 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
     }
     validate_code_closure(bundle)?;
     validate_inventory(&bundle.objects, ObjectInventoryLimits::default())?;
+    if let Some(descriptor) = &bundle.manifest.project_runtime_policy {
+        crate::validate_project_runtime_policy_descriptor(descriptor)?;
+    }
+    validate_foreign_artifact_closures(bundle)?;
     let descriptors = bundle
         .objects
         .iter()
         .map(|object| object.descriptor.clone())
         .collect::<Vec<_>>();
-    if descriptors != bundle.manifest.sources
+    let mut manifest_descriptors = bundle.manifest.sources.clone();
+    manifest_descriptors.extend(bundle.manifest.foreign_artifacts.clone());
+    manifest_descriptors.extend(bundle.manifest.project_runtime_policy.clone());
+    let policy_descriptors = bundle
+        .manifest
+        .recipes
+        .iter()
+        .filter_map(|recipe| recipe.foreign_policy.clone())
+        .collect::<BTreeSet<_>>();
+    manifest_descriptors.extend(policy_descriptors);
+    manifest_descriptors.sort();
+    if descriptors != manifest_descriptors
         || bundle
             .manifest
             .sources
@@ -57,6 +72,29 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
         || bundle
             .manifest
             .sources
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || bundle
+            .manifest
+            .foreign_artifacts
+            .iter()
+            .any(|artifact| artifact.namespace != ObjectNamespace::ForeignArtifact)
+        || bundle
+            .manifest
+            .foreign_artifacts
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || bundle.objects.iter().any(|object| {
+            object.descriptor.namespace == ObjectNamespace::ForeignPolicy
+                && crate::object::validate_foreign_policy_object(object).is_err()
+        })
+        || bundle.objects.iter().any(|object| {
+            object.descriptor.namespace == ObjectNamespace::ProjectRuntimePolicy
+                && crate::validate_project_runtime_policy_object(object).is_err()
+        })
+        || bundle
+            .manifest
+            .foreign_artifact_closures
             .windows(2)
             .any(|pair| pair[0] >= pair[1])
         || bundle
@@ -138,23 +176,58 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
             "callable inventory references a source outside the bundle".into(),
         ));
     }
-    for (name, value) in &bundle.manifest.portable_environment {
-        let upper = name.to_ascii_uppercase();
-        if name.is_empty()
-            || name.len() > 128
-            || value.len() > 4096
-            || !name.is_ascii()
-            || !value.is_ascii()
-            || name.chars().any(char::is_control)
-            || value.chars().any(char::is_control)
-            || ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
+    crate::environment::validate(&bundle.manifest.portable_environment)?;
+    Ok(())
+}
+
+fn validate_foreign_artifact_closures(bundle: &ExecutionBundle) -> ArtifactResult<()> {
+    let foreign_digests = bundle
+        .manifest
+        .foreign_artifacts
+        .iter()
+        .map(|artifact| artifact.digest)
+        .collect::<BTreeSet<_>>();
+    let mut bound_digests = BTreeSet::new();
+    let mut closure_keys = BTreeSet::new();
+    for closure in &bundle.manifest.foreign_artifact_closures {
+        closure.validate()?;
+        let key = (closure.adapter.clone(), closure.identity.clone());
+        if !closure_keys.insert(key)
+            || closure
+                .object_digests
                 .iter()
-                .any(|marker| upper.contains(marker))
+                .any(|digest| !foreign_digests.contains(digest))
         {
-            return Err(ArtifactError::Invalid(
-                "portable environment contains an invalid or secret-bearing entry".into(),
+            return Err(ArtifactError::Identity(
+                "foreign artifact closure is duplicated or references an absent object".into(),
             ));
         }
+        bound_digests.extend(closure.object_digests.iter().copied());
+    }
+    if bound_digests != foreign_digests {
+        return Err(ArtifactError::Identity(
+            "foreign artifact objects do not have an exact identity closure".into(),
+        ));
+    }
+
+    let required_keys = bundle
+        .manifest
+        .recipes
+        .iter()
+        .flat_map(|recipe| {
+            recipe.interop.adapters.iter().flat_map(|adapter| {
+                adapter
+                    .artifact_identities
+                    .iter()
+                    .cloned()
+                    .map(|identity| (adapter.adapter.clone(), identity))
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    if closure_keys != required_keys {
+        return Err(ArtifactError::Identity(
+            "foreign artifact identity closure differs from the program recipes".into(),
+        ));
     }
     Ok(())
 }
@@ -168,14 +241,23 @@ fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                 || package.source_digest != bundle.manifest.project_revision.source_digest
                 || !bundle.manifest.sources.is_empty()
                 || !bundle.manifest.callables.is_empty()
-                || !bundle.objects.is_empty()
+                || bundle.objects.iter().any(|object| {
+                    !matches!(
+                        object.descriptor.namespace,
+                        ObjectNamespace::ForeignArtifact
+                            | ObjectNamespace::ForeignPolicy
+                            | ObjectNamespace::ProjectRuntimePolicy
+                    )
+                })
                 || bundle.manifest.artifacts.is_empty()
                 || bundle.manifest.artifacts.iter().any(|artifact| {
                     !matches!(
                         artifact.form,
-                        crate::ExecutableForm::ExecutableUnitV3
+                        crate::ExecutableForm::ExecutableUnitV4
                             | crate::ExecutableForm::NativeObjectV1
                             | crate::ExecutableForm::MeshingWorkload
+                            | crate::ExecutableForm::AnalysisWorkload
+                            | crate::ExecutableForm::GeometryWorkload
                     )
                 })
             {
@@ -268,14 +350,14 @@ fn validate_project_handoff(
 }
 
 pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
-    let mut bytes = b"runmat-execution-bundle-v3\0".to_vec();
+    let mut bytes = b"runmat-execution-bundle-v6\0".to_vec();
     let revision = manifest
         .program_revision
         .canonical_bytes()
         .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
     let mut encoder = Encoder::new(&mut bytes);
     encoder
-        .array(12)
+        .array(15)
         .and_then(|encoder| encoder.u16(manifest.schema_version))
         .and_then(|encoder| encoder.bytes(&revision))
         .and_then(|encoder| encoder.bytes(manifest.project_revision.graph_digest.bytes()))
@@ -296,6 +378,33 @@ pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
             .and_then(|encoder| encoder.u64(source.encoded_length))
             .and_then(|encoder| encoder.str(&source.media_type))
             .map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.foreign_artifacts.len() as u64)
+        .map_err(encoding)?;
+    for artifact in &manifest.foreign_artifacts {
+        encoder
+            .array(5)
+            .and_then(|encoder| encoder.u8(artifact.namespace as u8))
+            .and_then(|encoder| encoder.str(&artifact.logical_name))
+            .and_then(|encoder| encoder.bytes(artifact.digest.bytes()))
+            .and_then(|encoder| encoder.u64(artifact.encoded_length))
+            .and_then(|encoder| encoder.str(&artifact.media_type))
+            .map_err(encoding)?;
+    }
+    encoder
+        .array(manifest.foreign_artifact_closures.len() as u64)
+        .map_err(encoding)?;
+    for closure in &manifest.foreign_artifact_closures {
+        encoder
+            .array(3)
+            .and_then(|encoder| encoder.str(closure.adapter.as_str()))
+            .and_then(|encoder| encoder.str(closure.identity.as_str()))
+            .and_then(|encoder| encoder.array(closure.object_digests.len() as u64))
+            .map_err(encoding)?;
+        for digest in &closure.object_digests {
+            encoder.bytes(digest.bytes()).map_err(encoding)?;
+        }
     }
     encoder
         .array(manifest.callables.len() as u64)
@@ -342,6 +451,21 @@ pub(super) fn identity(manifest: &BundleManifest) -> ArtifactResult<Digest> {
             .and_then(|encoder| encoder.str(value))
             .map_err(encoding)?;
     }
+    match &manifest.project_runtime_policy {
+        Some(policy) => {
+            encoder
+                .array(5)
+                .and_then(|encoder| encoder.u8(policy.namespace as u8))
+                .and_then(|encoder| encoder.str(&policy.logical_name))
+                .and_then(|encoder| encoder.bytes(policy.digest.bytes()))
+                .and_then(|encoder| encoder.u64(policy.encoded_length))
+                .and_then(|encoder| encoder.str(&policy.media_type))
+                .map_err(encoding)?;
+        }
+        None => {
+            encoder.null().map_err(encoding)?;
+        }
+    }
     Ok(Digest::sha256(bytes))
 }
 
@@ -350,13 +474,21 @@ fn encode_capability(
     capability: &Capability,
 ) -> ArtifactResult<()> {
     match capability {
+        Capability::GraphSelectedValuesV11 => encoder.array(1).and_then(|encoder| encoder.u8(5)),
+        Capability::GraphCallableArgumentsV12 => encoder.array(1).and_then(|encoder| encoder.u8(6)),
+        Capability::GraphProjectRuntimePolicyV13 => {
+            encoder.array(1).and_then(|encoder| encoder.u8(7))
+        }
+        Capability::GraphInvocationControlsV14 => {
+            encoder.array(1).and_then(|encoder| encoder.u8(8))
+        }
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),
         Capability::Accelerator(value) => encoder
             .array(2)
             .and_then(|encoder| encoder.u8(3))
-            .and_then(|encoder| encoder.str(value)),
+            .and_then(|encoder| encoder.str(value.as_str())),
         Capability::Custom(value) => encoder
             .array(2)
             .and_then(|encoder| encoder.u8(4))

@@ -1,12 +1,9 @@
 //! MATLAB-compatible `erase` builtin with GPU-aware semantics for RunMat.
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ERASE_CHAR_MATRIX_EXTENSION, ERASE_ERROR_CELL_ELEMENT,
+    ERASE_ERROR_INTERNAL, ERASE_ERROR_INVALID_INPUT, ERASE_ERROR_PATTERN_TYPE,
+    ERASE_STRING_CELL_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
@@ -16,9 +13,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    cell_contains_string, char_row_to_string_slice, is_missing_string, is_multirow_char_array,
+};
 use crate::builtins::strings::core::compat::pattern_regex;
-use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -52,109 +50,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "erase";
 
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "str",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "The public input text accepts string arrays, a character vector, or a cell array of character vectors; numeric values are rejected before provider access.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "match",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "The public match argument accepts text or pattern values; numeric values are rejected before provider access.",
-    },
-];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "newStr = erase(str, match)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "erase is text-only; integer values in either role, including nested resident values, are rejected without gathering.",
-    }];
-
-const ERASE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newStr",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text with substring occurrences removed, preserving input container kind.",
-}];
-
-const ERASE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text list (scalar or array/cell).",
-    },
-];
-
-const ERASE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "newStr = erase(str, pattern)",
-    inputs: &ERASE_INPUTS,
-    outputs: &ERASE_OUTPUT,
-}];
-
-const ERASE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.INVALID_INPUT",
-    identifier: Some("RunMat:erase:InvalidInput"),
-    when: "First argument is not a string array, char array, or cell array of text scalars.",
-    message:
-        "erase: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const ERASE_ERROR_PATTERN_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.PATTERN_TYPE",
-    identifier: Some("RunMat:erase:PatternType"),
-    when: "Second argument is not a text scalar/array/cell of text scalars.",
-    message:
-        "erase: second argument must be a string array, character array, or cell array of character vectors",
-};
-
-const ERASE_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.CELL_ELEMENT",
-    identifier: Some("RunMat:erase:CellElement"),
-    when: "Cell arrays contain non-text elements or non-row char arrays.",
-    message: "erase: cell array elements must be string scalars or character vectors",
-};
-
-const ERASE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.INTERNAL",
-    identifier: Some("RunMat:erase:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "erase: internal error",
-};
-
-const ERASE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ERASE_ERROR_INVALID_INPUT,
-    ERASE_ERROR_PATTERN_TYPE,
-    ERASE_ERROR_CELL_ELEMENT,
-    ERASE_ERROR_INTERNAL,
-];
-
-pub const ERASE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERASE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERASE_ERRORS,
-};
-
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -176,13 +71,7 @@ fn erase_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "erase",
-    category = "strings/transform",
-    summary = "Remove substring occurrences from text inputs.",
-    keywords = "erase,remove substring,strings,character array,text",
-    accel = "sink",
-    integer_capabilities(INTEGER_CAPABILITIES),
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::erase::ERASE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::erase"
 )]
 async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
@@ -192,13 +81,29 @@ async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
     if contains_numeric_or_resident(&pattern) {
         return Err(erase_error(&ERASE_ERROR_PATTERN_TYPE));
     }
+    if is_multirow_char_array(&text) || is_multirow_char_array(&pattern) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ERASE_CHAR_MATRIX_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if cell_contains_string(&text) || cell_contains_string(&pattern) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ERASE_STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let pattern = gather_if_needed_async(&pattern).await.map_err(map_flow)?;
 
     let patterns = PatternList::from_value(&pattern)?;
 
     match text {
-        Value::String(s) => Ok(Value::String(erase_string_scalar(s, &patterns))),
+        Value::String(s) if s.is_missing() => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::string(erase_string_scalar(
+            s.as_str().expect("nonmissing subject"),
+            &patterns,
+        ))),
         Value::StringArray(sa) => erase_string_array(sa, &patterns),
         Value::CharArray(ca) => erase_char_array(ca, &patterns),
         Value::Cell(cell) => erase_cell_array(cell, &patterns),
@@ -216,22 +121,24 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_numeric_or_resident),
+        Value::Cell(cell) => cell.data().iter().any(contains_numeric_or_resident),
+        Value::Struct(value) => value.fields.values().any(contains_numeric_or_resident),
+        Value::StructArray(array) => array.any_value(contains_numeric_or_resident),
         _ => false,
     }
 }
 
-struct PatternList {
-    entries: Vec<PatternEntry>,
+struct PatternList<'a> {
+    entries: Vec<PatternEntry<'a>>,
 }
 
-enum PatternEntry {
-    Literal(String),
+enum PatternEntry<'a> {
+    Literal(std::borrow::Cow<'a, str>),
     Regex(Regex),
 }
 
-impl PatternList {
-    fn from_value(value: &Value) -> BuiltinResult<Self> {
+impl<'a> PatternList<'a> {
+    fn from_value(value: &'a Value) -> BuiltinResult<Self> {
         let entries = match value {
             Value::Object(_) => vec![PatternEntry::Regex(
                 Regex::new(&pattern_regex(value, BUILTIN_NAME).map_err(|err| {
@@ -241,42 +148,67 @@ impl PatternList {
                     erase_error_with_message(err.to_string(), &ERASE_ERROR_PATTERN_TYPE)
                 })?,
             )],
-            Value::String(text) => vec![PatternEntry::Literal(text.clone())],
+            Value::String(text) => vec![PatternEntry::Literal(std::borrow::Cow::Borrowed(
+                text.as_str()
+                    .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))?,
+            ))],
             Value::StringArray(array) => array
-                .data
+                .data()
                 .iter()
-                .cloned()
-                .map(PatternEntry::Literal)
-                .collect(),
+                .map(|text| {
+                    text.as_str()
+                        .map(|text| PatternEntry::Literal(std::borrow::Cow::Borrowed(text)))
+                        .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
             Value::CharArray(array) => {
                 if array.rows == 0 {
                     Vec::new()
                 } else {
                     let mut list = Vec::with_capacity(array.rows);
                     for row in 0..array.rows {
-                        list.push(PatternEntry::Literal(char_row_to_string_slice(
-                            &array.data,
-                            array.cols,
-                            row,
+                        list.push(PatternEntry::Literal(std::borrow::Cow::Owned(
+                            char_row_to_string_slice(array.data(), array.cols, row).map_err(
+                                |e| {
+                                    erase_error_with_message(
+                                        format!("{BUILTIN_NAME}: {e}"),
+                                        &ERASE_ERROR_INTERNAL,
+                                    )
+                                },
+                            )?,
                         )));
                     }
                     list
                 }
             }
             Value::Cell(cell) => {
-                let mut list = Vec::with_capacity(cell.data.len());
-                for handle in &cell.data {
+                let mut list = Vec::with_capacity(cell.data().len());
+                for handle in cell.data() {
                     match &handle {
-                        Value::String(text) => list.push(PatternEntry::Literal(text.clone())),
-                        Value::StringArray(sa) if sa.data.len() == 1 => {
-                            list.push(PatternEntry::Literal(sa.data[0].clone()));
+                        Value::String(text) => {
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Borrowed(
+                                text.as_str()
+                                    .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))?,
+                            )))
+                        }
+                        Value::StringArray(sa) if sa.data().len() == 1 => {
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Borrowed(
+                                sa.data()[0]
+                                    .as_str()
+                                    .ok_or_else(|| erase_error(&ERASE_ERROR_PATTERN_TYPE))?,
+                            )));
                         }
                         Value::CharArray(ca) if ca.rows == 0 => {
-                            list.push(PatternEntry::Literal(String::new()));
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Borrowed("")));
                         }
                         Value::CharArray(ca) if ca.rows == 1 => {
-                            list.push(PatternEntry::Literal(char_row_to_string_slice(
-                                &ca.data, ca.cols, 0,
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Owned(
+                                char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                                    erase_error_with_message(
+                                        format!("{BUILTIN_NAME}: {e}"),
+                                        &ERASE_ERROR_INTERNAL,
+                                    )
+                                })?,
                             )));
                         }
                         Value::CharArray(_) => return Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
@@ -301,7 +233,7 @@ impl PatternList {
                     if pattern.is_empty() {
                         continue;
                     }
-                    current = current.replace(pattern, "");
+                    current = current.replace(pattern.as_ref(), "");
                 }
                 PatternEntry::Regex(pattern) => {
                     current = pattern.replace_all(&current, "").to_string();
@@ -315,79 +247,78 @@ impl PatternList {
     }
 }
 
-fn erase_string_scalar(text: String, patterns: &PatternList) -> String {
-    if is_missing_string(&text) {
-        text
-    } else {
-        patterns.apply(&text)
-    }
+fn erase_string_scalar(text: &str, patterns: &PatternList<'_>) -> String {
+    patterns.apply(text)
 }
 
-fn erase_string_array(array: StringArray, patterns: &PatternList) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+fn erase_string_array(array: StringArray, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
+    let (data, shape, _, _) = array.into_parts();
     let mut erased = Vec::with_capacity(data.len());
-    for entry in data {
+    let input: Vec<runmat_value::StringElement> = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(shared) => shared.iter().cloned().collect(),
+    };
+    for entry in input {
         if is_missing_string(&entry) {
             erased.push(entry);
         } else {
-            erased.push(patterns.apply(&entry));
+            erased.push(runmat_value::StringElement::text(
+                patterns.apply(entry.as_str().expect("nonmissing subject")),
+            ));
         }
     }
-    StringArray::new(erased, shape)
-        .map(Value::StringArray)
-        .map_err(|e| {
-            erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
-        })
+    StringArray::from_shared_storage(
+        runmat_value::ExactArrayStorage::shared_unbounded(erased),
+        shape,
+    )
+    .map(Value::StringArray)
+    .map_err(|e| erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL))
 }
 
-fn erase_char_array(array: CharArray, patterns: &PatternList) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+fn erase_char_array(array: CharArray, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
+    if array.rows == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut processed: Vec<String> = Vec::with_capacity(rows);
     let mut target_cols = 0usize;
     for row in 0..rows {
-        let slice = char_row_to_string_slice(&data, cols, row);
+        let slice = char_row_to_string_slice(&data, cols, row).map_err(|e| {
+            erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
+        })?;
         let erased = patterns.apply(&slice);
-        let len = erased.chars().count();
+        let len = erased.encode_utf16().count();
         if len > target_cols {
             target_cols = len;
         }
         processed.push(erased);
     }
 
-    let mut flattened: Vec<char> = Vec::with_capacity(rows * target_cols);
+    let mut flattened = Vec::with_capacity(rows * target_cols);
     for row_text in processed {
-        let mut chars: Vec<char> = row_text.chars().collect();
-        if chars.len() < target_cols {
-            chars.resize(target_cols, ' ');
-        }
-        flattened.extend(chars);
+        let mut units = row_text
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect::<Vec<_>>();
+        units.extend(std::iter::repeat_n(
+            runmat_value::Utf16CodeUnit::from_raw(b' ' as u16),
+            target_cols - row_text.encode_utf16().count(),
+        ));
+        flattened.extend(units);
     }
 
-    CharArray::new(flattened, rows, target_cols)
+    CharArray::from_code_units(flattened, rows, target_cols)
         .map(Value::CharArray)
         .map_err(|e| {
             erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
         })
 }
 
-fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> BuiltinResult<Value> {
-    let shape = cell.shape.clone();
-    let mut values = Vec::with_capacity(cell.data.len());
-    for handle in &cell.data {
+fn erase_cell_array(cell: CellArray, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
+    let shape = cell.shape().to_vec();
+    let mut values = Vec::with_capacity(cell.data().len());
+    for handle in cell.data() {
         values.push(erase_cell_element(handle, patterns)?);
     }
     make_cell_with_shape(values, shape).map_err(|e| {
@@ -395,16 +326,20 @@ fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> BuiltinResult<Va
     })
 }
 
-fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Value> {
+fn erase_cell_element(value: &Value, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(erase_string_scalar(text.clone(), patterns))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(erase_string_scalar(
-            sa.data[0].clone(),
-            patterns,
-        ))),
+        Value::String(text) => Ok(Value::String(match text.as_str() {
+            Some(text) => runmat_value::StringElement::text(erase_string_scalar(text, patterns)),
+            None => runmat_value::StringElement::Missing,
+        })),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            erase_cell_element(&Value::String(sa.data()[0].clone()), patterns)
+        }
         Value::CharArray(ca) if ca.rows == 0 => Ok(Value::CharArray(ca.clone())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let slice = char_row_to_string_slice(&ca.data, ca.cols, 0);
+            let slice = char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
+            })?;
             let erased = patterns.apply(&slice);
             Ok(Value::CharArray(CharArray::new_row(&erased)))
         }
@@ -416,10 +351,46 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Va
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::erase_builtin(text, pattern))
+    }
+
+    #[test]
+    fn erase_char_matrix_requires_runmat_mode() {
+        let matrix = Value::CharArray(
+            CharArray::from_unicode_scalars("abcdwxyz".chars().collect(), 2, 4)
+                .expect("character matrix"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (text, pattern) in [
+            (matrix.clone(), Value::String("a".into())),
+            (Value::String("abcd".into()), matrix),
+        ] {
+            let error = erase_builtin(text, pattern).expect_err("char matrix is an extension");
+            assert_eq!(
+                error.identifier(),
+                ERASE_CHAR_MATRIX_EXTENSION.error_identifier
+            );
+        }
+    }
+
+    #[test]
+    fn erase_string_cell_requires_runmat_mode() {
+        let cell = Value::Cell(
+            CellArray::new(vec![Value::String("abcd".into())], 1, 1).expect("string cell"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (text, pattern) in [
+            (cell.clone(), Value::String("a".into())),
+            (Value::String("abcd".into()), cell),
+        ] {
+            let error = erase_builtin(text, pattern).expect_err("string cell is an extension");
+            assert_eq!(
+                error.identifier(),
+                ERASE_STRING_CELL_EXTENSION.error_identifier
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -436,9 +407,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_array_multiple_patterns() {
-        let strings = StringArray::new(
-            vec!["gpu".into(), "cpu".into(), "<missing>".into()],
-            vec![3, 1],
+        let strings = StringArray::from_elements_unbounded(
+            vec![
+                "gpu".into(),
+                "cpu".into(),
+                "<missing>".into(),
+                runmat_value::StringElement::Missing,
+            ],
+            vec![4, 1],
         )
         .unwrap();
         let result = erase_builtin(
@@ -448,13 +424,14 @@ pub(crate) mod tests {
         .expect("erase");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.shape, vec![3, 1]);
+                assert_eq!(sa.shape, vec![4, 1]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
-                        String::from("pu"),
-                        String::from("pu"),
-                        String::from("<missing>")
+                        "pu".into(),
+                        "pu".into(),
+                        "<missin>".into(),
+                        runmat_value::StringElement::Missing,
                     ]
                 );
             }
@@ -474,7 +451,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 1]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![String::from("kernel"), String::from("kernel")]
                 );
             }
@@ -485,15 +462,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_adjusts_width() {
-        let chars = CharArray::new("matrix".chars().collect(), 1, 6).unwrap();
+        let chars = CharArray::from_unicode_scalars("matrix".chars().collect(), 1, 6).unwrap();
         let result =
             erase_builtin(Value::CharArray(chars), Value::String("tr".into())).expect("erase");
         match result {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 4);
-                let expected: Vec<char> = "maix".chars().collect();
-                assert_eq!(out.data, expected);
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(out.data()).unwrap(),
+                    "maix"
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -509,7 +488,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 0);
-                assert!(out.data.is_empty());
+                assert!(out.data().is_empty());
             }
             other => panic!("expected empty char array, got {other:?}"),
         }
@@ -518,7 +497,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_multiple_rows_sequential_patterns() {
-        let chars = CharArray::new(
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let chars = CharArray::from_unicode_scalars(
             vec![
                 'G', 'P', 'U', ' ', 'p', 'i', 'p', 'e', 'l', 'i', 'n', 'e', 'C', 'P', 'U', ' ',
                 'p', 'i', 'p', 'e', 'l', 'i', 'n', 'e',
@@ -534,8 +514,8 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 12);
-                let first = char_row_to_string_slice(&out.data, out.cols, 0);
-                let second = char_row_to_string_slice(&out.data, out.cols, 1);
+                let first = char_row_to_string_slice(out.data(), out.cols, 0).unwrap();
+                let second = char_row_to_string_slice(out.data(), out.cols, 1).unwrap();
                 assert_eq!(first.trim_end(), "pipeline");
                 assert_eq!(second.trim_end(), "CPU pipeline");
             }
@@ -546,6 +526,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_mixed_content() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("Kernel Planner")),
@@ -584,6 +565,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_preserves_shape() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::String("alpha".into()),
@@ -612,11 +594,11 @@ pub(crate) mod tests {
     #[test]
     fn erase_preserves_missing_string() {
         let result = erase_builtin(
-            Value::String("<missing>".into()),
+            Value::String(runmat_value::StringElement::Missing),
             Value::String("missing".into()),
         )
         .expect("erase");
-        assert_eq!(result, Value::String("<missing>".into()));
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -685,7 +667,7 @@ pub(crate) mod tests {
             .expect_err("resident numeric pattern is invalid");
             assert_eq!(error.identifier(), ERASE_ERROR_PATTERN_TYPE.identifier);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            provider.free(&handle).expect("free input");
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -699,13 +681,5 @@ pub(crate) mod tests {
         let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");
         let result = erase_builtin(Value::String("run42mat".into()), pattern).expect("erase");
         assert_eq!(result, Value::String("runmat".into()));
-    }
-
-    #[test]
-    fn erase_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
     }
 }

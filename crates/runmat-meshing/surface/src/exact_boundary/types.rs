@@ -51,10 +51,12 @@ pub struct ExactSurfaceBoundaryError {
 pub struct ExactSurfaceBoundaryConflict {
     pub source_edge_ids: [PersistentEntityId; 2],
     pub segment_uv: [[[f64; 2]; 2]; 2],
+    pub node_ids: [[runmat_meshing_core::StableDigest; 2]; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExactSurfaceBoundaryErrorKind {
+    Cancelled,
     InvalidCurveInput,
     MissingTopology,
     InvalidContract,
@@ -88,7 +90,15 @@ impl std::fmt::Display for ExactSurfaceBoundaryError {
         if let Some(entity_id) = &self.entity_id {
             write!(formatter, " for {entity_id:?}")?;
         }
-        write!(formatter, ": {}", self.reason)
+        write!(formatter, ": {}", self.reason)?;
+        if let Some(conflict) = &self.conflict {
+            write!(
+                formatter,
+                "; conflicting edges {:?}; segment UV {:?}; node identities {:?}",
+                conflict.source_edge_ids, conflict.segment_uv, conflict.node_ids
+            )?;
+        }
+        Ok(())
     }
 }
 

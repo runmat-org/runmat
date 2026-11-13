@@ -20,11 +20,13 @@ runmat cluster join \
   run
 ```
 
-The enrollment token is consumed once and is never written to the service definition. The resulting rotating node credential and endpoint identity stay in the private state directory. `inventory` prints the bounded, content-free capabilities the agent will advertise, and `rotate-credential` rotates the enrolled control-plane credential.
+The enrollment token is consumed once and is never written to the service definition. `enroll --token-stdin` also accepts a bounded token over stdin without placing it in process arguments. The resulting rotating node credential and endpoint identity stay in the private state directory. `inventory` prints the bounded, content-free capabilities the agent will advertise, and `rotate-credential` rotates the enrolled control-plane credential.
 
 ## Operating-system service
 
 `service install` validates the complete configuration, persists a canonical JSON file, installs the native boot service, and starts it. It uses systemd on Linux, a system LaunchDaemon on macOS, and a LocalSystem Windows service. Run it with root or Administrator privileges:
+
+Enroll as the service's OS identity using the same explicit `--state-directory` first. Defaults differ: foreground enrollment uses user state, whereas installation uses system state. The installation rejects missing/invalid credentials before changing the host. See [the worker setup guide](../../docs/execution/remote.md) for complete Linux/macOS installation and secret-safe enrollment steps.
 
 ```bash
 sudo runmat cluster join \

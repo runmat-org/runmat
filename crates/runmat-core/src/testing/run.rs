@@ -35,12 +35,15 @@ impl RunMatSession {
             .discover_tests(snapshot)?
             .select(selector)
             .into_plan("runmat-core")?;
+        self.configure_test_snapshot(snapshot)?;
+        let _admission = self.admit_execution(None);
         let parameters = plan
             .tests()
             .map(|test| (test.id.clone(), test.parameters.clone()))
             .collect::<BTreeMap<_, _>>();
         let catalog = TestSourceCatalog::from_snapshot(snapshot);
-        let control = InvocationControl::default().with_cancellation(self.interrupt_handle());
+        let control =
+            InvocationControl::default().with_cancellation(self.interrupt_handle().token());
         let coverage = runmat_runtime::coverage::CoverageSession::start(self.runtime_context());
         let mut executor = CoreTestExecutor::new(self, catalog, parameters, control);
         let lifecycle = LifecycleEngine::new(RedactionPolicy::new(
@@ -95,7 +98,13 @@ impl RunMatSession {
                         .execute(&case, &mut executor, &cancellation, &mut sink)
                         .await;
                     abort_run |= outcome.attempt.abort_run;
-                    if let Some(result) = merge_attempts(test.id.clone(), vec![outcome.attempt]) {
+                    if let Some(mut result) = merge_attempts(test.id.clone(), vec![outcome.attempt])
+                    {
+                        result.report_identity =
+                            Some(runmat_test::result::TestReportIdentity::from_plan(
+                                &suite.display_name,
+                                test,
+                            ));
                         results.push(result);
                     }
                     if abort_run {
@@ -123,6 +132,8 @@ impl RunMatSession {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use runmat_test::descriptor::TestSelector;
     use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
     use runmat_test::result::TerminalDisposition;
@@ -152,7 +163,7 @@ mod tests {
     #[test]
     fn function_test_executes_exact_discovered_procedure_without_workspace_publication() {
         let mut session = RunMatSession::with_options(false, false).unwrap();
-        let before = session.workspace_snapshot();
+        let before = session.workspace_snapshot().unwrap();
         let run = futures::executor::block_on(session.run_test_snapshot(
             &snapshot(
                 "tests/arithmeticTest.m",
@@ -168,7 +179,7 @@ mod tests {
             TerminalDisposition::Passed,
             "{run:#?}"
         );
-        let after = session.workspace_snapshot();
+        let after = session.workspace_snapshot().unwrap();
         assert_eq!(after.version, before.version);
         assert_eq!(
             after
@@ -189,12 +200,53 @@ mod tests {
     }
 
     #[test]
+    fn function_test_qualifications_produce_distinct_pass_and_fail_results() {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let run = futures::executor::block_on(session.run_test_snapshot(
+            &snapshot(
+                "sampleTest.m",
+                "function tests = sampleTest()\n    tests = functiontests(localfunctions);\nend\n\nfunction testPass(testCase)\n    testCase.verifyEqual(2 + 2, 4);\nend\n\nfunction testFail(testCase)\n    testCase.verifyEqual(2 + 2, 5);\nend\n",
+            ),
+            &TestSelector::default(),
+        ))
+        .unwrap();
+
+        assert_eq!(run.results.len(), 2, "{run:#?}");
+        // Plan order is by stable opaque test identity, not source order.
+        let result_for = |case_name| {
+            run.results
+                .iter()
+                .find(|result| {
+                    result
+                        .report_identity
+                        .as_ref()
+                        .is_some_and(|identity| identity.case_name == case_name)
+                })
+                .unwrap_or_else(|| panic!("missing result for {case_name}: {run:#?}"))
+        };
+        let passed = result_for("testPass");
+        let failed = result_for("testFail");
+        assert_eq!(
+            passed.state.disposition,
+            TerminalDisposition::Passed,
+            "{run:#?}"
+        );
+        assert_eq!(
+            failed.state.disposition,
+            TerminalDisposition::Failed,
+            "{run:#?}"
+        );
+        assert!(failed.state.failed);
+        assert!(!failed.attempts[0].diagnostics.is_empty());
+    }
+
+    #[test]
     fn script_section_uses_the_frozen_span_and_reports_failure() {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let run = futures::executor::block_on(session.run_test_snapshot(
             &snapshot(
                 "tests/sectionsTest.m",
-                "%% passing section\nassert(2 * 3 == 6)\n%% failing section\nassert(2 * 3 == 7)\n",
+                "%% passing section\nassert(sectionValue(2) == 6)\n%% failing section\nassert(sectionValue(2) == 7)\nfunction value = sectionValue(x)\nvalue = x * 3;\nend\n",
             ),
             &TestSelector {
                 names: vec!["failing".into()],
@@ -210,5 +262,63 @@ mod tests {
             TerminalDisposition::Failed
         );
         assert_eq!(run.results[0].attempts[0].diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn captured_section_and_helper_use_worker_project_origin() {
+        let worker = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(worker.path().join("src")).unwrap();
+        std::fs::write(
+            worker.path().join("runmat.toml"),
+            "[package]\nname = \"captured-test\"\n[sources]\nroots = [\"src\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            worker.path().join("src/ordinary.m"),
+            "function y = ordinary(x)\ny = x;\nend\n",
+        )
+        .unwrap();
+        let handoff = runmat_package::FrozenProjectHandoff::new(
+            runmat_package::build_frozen_project(
+                &worker.path().join("runmat.toml"),
+                BTreeSet::new(),
+            )
+            .unwrap(),
+        );
+        let revision = handoff.revision();
+        let snapshot = FrozenTestRunSnapshot::freeze(
+            revision.graph_digest.to_string(),
+            revision.source_revision.to_string(),
+            crate::program_environment(crate::CompatMode::Matlab),
+            digest("captured-tests"),
+            vec![
+                SavedRunSource {
+                    owner_identity: "path:workspace".into(),
+                    relative_path: "tests/helper.m".into(),
+                    content: "function y = helper(x)\ny = x + 1;\nend\n".into(),
+                },
+                SavedRunSource {
+                    owner_identity: "path:workspace".into(),
+                    relative_path: "tests/sectionTest.m".into(),
+                    content: "%% selected\nassert(localHelper(2) == 4)\nfunction y = localHelper(x)\ny = helper(x) + 1;\nend\n".into(),
+                },
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+        // Neither test source exists in the worker filesystem. The installed
+        // project supplies only the worker-local path origin and dependencies.
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        futures::executor::block_on(session.install_project_handoff(handoff)).unwrap();
+        let run = futures::executor::block_on(
+            session.run_test_snapshot(&snapshot, &TestSelector::default()),
+        )
+        .unwrap();
+        assert_eq!(run.results.len(), 1, "{run:#?}");
+        assert_eq!(
+            run.results[0].state.disposition,
+            TerminalDisposition::Passed,
+            "{run:#?}"
+        );
     }
 }

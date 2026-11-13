@@ -1,170 +1,42 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    XTICKANGLE_DESCRIPTOR, XTICKANGLE_ERROR_TOO_MANY_OUTPUTS, XTICKANGLE_INTEGER_AXES_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_tick_angle::axis_tick_angle_builtin;
 use super::axis_ticks::TickAxis;
-use crate::builtins::plotting::type_resolvers::get_type;
-
-const XTICKANGLE_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "xtickangle-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Allow a typed-integer alias for an encoded axes handle",
-    error_identifier: Some("RunMat:compatibility:XtickangleIntegerAxesHandleExtension"),
-};
-pub const XTICKANGLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [XTICKANGLE_INTEGER_AXES_EXTENSION];
-const XTICKANGLE_INTEGER_ANGLE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "angle",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public numeric-scalar rotation contract accepts integer degree values.",
-    }];
-const XTICKANGLE_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
-    }];
-pub const XTICKANGLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "xtickangle(integer_angle)",
-        inputs: &XTICKANGLE_INTEGER_ANGLE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The finite angle crosses the graphics rotation boundary; queries return double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "xtickangle(integer_ax, angle)",
-        inputs: &XTICKANGLE_INTEGER_AXES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Strict mode rejects before graphics state access.",
-    },
-];
-
-const OUTPUT_ANGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "angle",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current X-axis tick label rotation in degrees.",
-}];
-const NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_ANGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "angle",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "X-axis tick label rotation in degrees.",
-}];
-
-const INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::AxesHandle,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scalar target axes handle.",
-}];
-
-const INPUTS_AX_ANGLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle or array of axes handles.",
-    },
-    BuiltinParamDescriptor {
-        name: "angle",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X-axis tick label rotation in degrees.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "angle = xtickangle()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_ANGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "xtickangle(angle)",
-        inputs: &INPUTS_ANGLE,
-        outputs: &NO_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "angle = xtickangle(ax)",
-        inputs: &INPUTS_AX,
-        outputs: &OUTPUT_ANGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "xtickangle(ax, angle)",
-        inputs: &INPUTS_AX_ANGLE,
-        outputs: &NO_OUTPUTS,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XTICKANGLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:xtickangle:InvalidArgument"),
-    when: "Argument count, angle value, or axes handle is invalid.",
-    message: "xtickangle: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XTICKANGLE.INTERNAL",
-    identifier: Some("RunMat:xtickangle:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "xtickangle: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const XTICKANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[runtime_builtin(
     name = "xtickangle",
-    category = "plotting",
-    summary = "Query or set X-axis tick label rotation.",
-    keywords = "xtickangle,plotting,axes,tick angle",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::xtickangle::XTICKANGLE_DESCRIPTOR),
-    extensions(crate::builtins::plotting::xtickangle::XTICKANGLE_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::xtickangle::XTICKANGLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::xtickangle"
 )]
+pub fn xtickangle_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    xtickangle_with_runtime(runtime.as_ref(), args)
+}
+
+#[cfg(test)]
 pub fn xtickangle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    xtickangle_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+}
+
+fn xtickangle_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &XTICKANGLE_DESCRIPTOR,
+        &XTICKANGLE_ERROR_TOO_MANY_OUTPUTS,
+        "xtickangle",
+    )?;
     if args.len() == 2
         && args
             .first()
@@ -175,7 +47,7 @@ pub fn xtickangle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "xtickangle",
         )?;
     }
-    axis_tick_angle_builtin("xtickangle", TickAxis::X, args)
+    axis_tick_angle_builtin(runtime, "xtickangle", TickAxis::X, args)
 }
 
 #[cfg(test)]

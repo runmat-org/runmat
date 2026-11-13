@@ -1,0 +1,152 @@
+use crate::*;
+
+const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection {
+        heading: "Files and patterns",
+        paragraphs: &[
+            "`delete(filename)` removes one file without a MATLAB-facing output. Filenames may be text scalars, string arrays, character matrices, or cells of path text. Each target is processed in order; a later failure does not restore earlier deletions.",
+            "Patterns accept `*` and `?` and must match existing files. Directories are rejected; use `rmdir` for a folder. Direct paths and wildcard enumeration use the same captured filesystem provider and working directory. A leading `~` expands to the user's home directory; for example, `delete('~/runmat/build/*.o')` cleans matching build artifacts when that directory exists.",
+            "An empty string scalar or empty character row is invalid. Empty string arrays and cells perform no deletions.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Links and handles",
+        paragraphs: &[
+            "`delete(filename, 'ResolveSymbolicLinks', tf)` accepts logical `tf` or exact numeric zero/one, including every built-in integer class. False removes the link itself; true removes its resolved file or empty-folder target and leaves the link.",
+            "`delete(obj)` invalidates handle objects and event listeners without filesystem access. A handle cannot be mixed with filename targets, and `ResolveSymbolicLinks` does not apply to handles. A pool is accepted only as the sole argument and closes through the active parallel runtime.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Execution",
+        paragraphs: &[
+            "Filesystem mutation and handle callbacks are host effects. Filename inputs must contain host text; resident numeric values are rejected without downloading them. Handle properties and listener callbacks are not filename inputs: deletion retains their existing payloads and residency. There is no acceleration kernel or fusion route for deletion itself.",
+            "Failures retain their diagnostic identifier. A missing path or unmatched pattern raises `RunMat:DELETE:FileNotFound`; a directory raises `RunMat:DELETE:Directories`; filesystem failures raise `RunMat:DELETE:PermissionDenied`.",
+        ],
+    },
+];
+
+const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "single",
+        title: "Delete a temporary file",
+        program: "fname = 'scratch.txt';\nfid = fopen(fname, 'w');\nfclose(fid);\ndelete(fname);\nassert(exist(fname, 'file') == 0);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(exist(fname, 'file') == 0);" },
+    },
+    BuiltinExample {
+        id: "wildcard",
+        title: "Remove matching log files",
+        program: "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor i = 1:numel(logs)\n    fid = fopen(logs(i), 'w');\n    fclose(fid);\nend\ndelete('log-*.txt');\nassert(exist('log-01.txt', 'file') == 0);\nassert(exist('log-02.txt', 'file') == 0);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(exist('log-01.txt', 'file') == 0); assert(exist('log-02.txt', 'file') == 0);" },
+    },
+    BuiltinExample {
+        id: "string-array",
+        title: "Delete a string array of paths",
+        program: "files = [\"stageA.dat\", \"stageB.dat\"];\nfor i = 1:numel(files)\n    fid = fopen(files(i), 'w');\n    fclose(fid);\nend\ndelete(files);\nassert(exist('stageA.dat', 'file') == 0);\nassert(exist('stageB.dat', 'file') == 0);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(exist('stageA.dat', 'file') == 0); assert(exist('stageB.dat', 'file') == 0);" },
+    },
+    BuiltinExample {
+        id: "char-matrix",
+        title: "Delete filenames in a character matrix",
+        program: "names = char('stage1.tmp', 'stage2.tmp');\nfor row = 1:size(names, 1)\n    fname = strtrim(names(row, :));\n    fid = fopen(fname, 'w');\n    fclose(fid);\nend\ndelete(names);\nassert(exist('stage1.tmp', 'file') == 0);\nassert(exist('stage2.tmp', 'file') == 0);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(exist('stage1.tmp', 'file') == 0); assert(exist('stage2.tmp', 'file') == 0);" },
+    },
+    BuiltinExample {
+        id: "missing",
+        title: "Handle a missing file",
+        program: "caught = false;\ntry\n    delete('missing-file.txt');\ncatch err\n    caught = strcmp(err.identifier, 'RunMat:DELETE:FileNotFound');\nend\nassert(caught);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(caught);" },
+    },
+    BuiltinExample {
+        id: "graphics-handle",
+        title: "Invalidate a graphics handle",
+        program: "fig = figure;\ndelete(fig);\ntf = isvalid(fig);\nassert(~tf);",
+        display_output: Some("tf = 0"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements { runtime: &[BuiltinRuntimeCapability::PlotCore], ..BuiltinExampleRequirements::NONE },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(~tf);" },
+    },
+];
+
+const FAQS: &[BuiltinDocumentationFaq] = &[
+    BuiltinDocumentationFaq { question: "What message IDs does delete produce?", answer: "Missing files use `RunMat:DELETE:FileNotFound`; directories use `RunMat:DELETE:Directories`; invalid wildcard patterns use `RunMat:DELETE:InvalidPattern`; filesystem failures use `RunMat:DELETE:PermissionDenied`; invalid handle inputs use `RunMat:DELETE:InvalidHandle`." },
+    BuiltinDocumentationFaq { question: "Can I delete folders?", answer: "No. Use `rmdir`; `delete` raises `RunMat:DELETE:Directories` for a directory." },
+    BuiltinDocumentationFaq { question: "Can I delete several files?", answer: "Yes. Pass several path arguments, a string array, a cell of path text, or a character matrix. Targets are processed sequentially." },
+    BuiltinDocumentationFaq { question: "How do wildcard patterns work?", answer: "`*` and `?` match paths relative to the captured filesystem provider's working directory unless the path is absolute. An unmatched pattern raises `RunMat:DELETE:FileNotFound`." },
+    BuiltinDocumentationFaq { question: "Do empty arrays raise errors?", answer: "Empty string arrays and cells do nothing; an empty string scalar is invalid." },
+    BuiltinDocumentationFaq { question: "Are resident arguments downloaded?", answer: "No. Resident numeric filename inputs are rejected before provider access, including within cells. Handles and listeners may retain resident properties or callback captures; deletion does not download those payloads." },
+    BuiltinDocumentationFaq { question: "Does delete preserve symbolic links?", answer: "By default it removes the link itself. Set `ResolveSymbolicLinks` to true or exact one to remove its resolved target instead." },
+    BuiltinDocumentationFaq { question: "Can I inspect failures?", answer: "Use `try/catch` and inspect the exception's identifier and message." },
+];
+
+const LINKS: &[BuiltinDocumentationLink] = &[
+    BuiltinDocumentationLink { label: "copyfile", target: BuiltinDocumentationLinkTarget::Builtin("copyfile") },
+    BuiltinDocumentationLink { label: "movefile", target: BuiltinDocumentationLinkTarget::Builtin("movefile") },
+    BuiltinDocumentationLink { label: "rmdir", target: BuiltinDocumentationLinkTarget::Builtin("rmdir") },
+    BuiltinDocumentationLink { label: "dir", target: BuiltinDocumentationLinkTarget::Builtin("dir") },
+    BuiltinDocumentationLink { label: "pwd", target: BuiltinDocumentationLinkTarget::Builtin("pwd") },
+    BuiltinDocumentationLink { label: "addpath", target: BuiltinDocumentationLinkTarget::Builtin("addpath") },
+    BuiltinDocumentationLink { label: "cd", target: BuiltinDocumentationLinkTarget::Builtin("cd") },
+    BuiltinDocumentationLink { label: "exist", target: BuiltinDocumentationLinkTarget::Builtin("exist") },
+    BuiltinDocumentationLink { label: "fullfile", target: BuiltinDocumentationLinkTarget::Builtin("fullfile") },
+    BuiltinDocumentationLink { label: "genpath", target: BuiltinDocumentationLinkTarget::Builtin("genpath") },
+    BuiltinDocumentationLink { label: "getenv", target: BuiltinDocumentationLinkTarget::Builtin("getenv") },
+    BuiltinDocumentationLink { label: "ls", target: BuiltinDocumentationLinkTarget::Builtin("ls") },
+    BuiltinDocumentationLink { label: "mkdir", target: BuiltinDocumentationLinkTarget::Builtin("mkdir") },
+    BuiltinDocumentationLink { label: "path", target: BuiltinDocumentationLinkTarget::Builtin("path") },
+    BuiltinDocumentationLink { label: "rmpath", target: BuiltinDocumentationLinkTarget::Builtin("rmpath") },
+    BuiltinDocumentationLink { label: "savepath", target: BuiltinDocumentationLinkTarget::Builtin("savepath") },
+    BuiltinDocumentationLink { label: "setenv", target: BuiltinDocumentationLinkTarget::Builtin("setenv") },
+    BuiltinDocumentationLink { label: "tempdir", target: BuiltinDocumentationLinkTarget::Builtin("tempdir") },
+    BuiltinDocumentationLink { label: "tempname", target: BuiltinDocumentationLinkTarget::Builtin("tempname") },
+    BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/delete.rs") },
+];
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("delete"),
+    slug: Some("delete"),
+    summary: "Remove files or invalidate handles.",
+    description: "`delete(filename)` removes files without a MATLAB-facing output; `delete(obj)` invalidates a handle or listener. The `ResolveSymbolicLinks` control selects link or target deletion.",
+    keywords: &["delete", "remove file", "wildcard delete", "cleanup", "temporary files", "MATLAB delete"],
+    related: &["copyfile", "movefile", "rmdir", "dir", "pwd", "addpath", "cd", "exist", "fullfile", "genpath", "getenv", "ls", "mkdir", "path", "rmpath", "savepath", "setenv", "tempdir", "tempname"],
+    sections: SECTIONS,
+    examples: EXAMPLES,
+    example_exemption: None,
+    faqs: FAQS,
+    links: LINKS,
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Filename, wildcard, link, handle, and integer flag behavior", location: "builtins::io::repl_fs::delete::tests" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

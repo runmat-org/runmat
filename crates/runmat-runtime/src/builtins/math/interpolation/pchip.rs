@@ -1,13 +1,9 @@
 //! MATLAB-compatible `pchip` builtin for shape-preserving cubic interpolation.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, PCHIP_ERROR_INTERNAL,
+    PCHIP_ERROR_INVALID_ARGUMENT, PCHIP_ERROR_INVALID_INPUT, PCHIP_INTEGER_QUERY_EXTENSION,
+    PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION, PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -18,198 +14,12 @@ use crate::builtins::common::spec::{
 };
 
 use super::pp::{
-    build_pchip_pp, evaluate_pp, pp_to_value, query_points, series_from_values, Extrapolation,
+    build_pchip_pp, evaluate_pp, pp_to_value, query_points, series_from_values_on_axis,
+    Extrapolation, PpOutputLayout, SampleAxis,
 };
 use crate::{build_runtime_error, RuntimeError};
 
 const NAME: &str = "pchip";
-
-const PCHIP_OUTPUT_PP: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "pp",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Piecewise-polynomial struct representation.",
-}];
-
-const PCHIP_OUTPUT_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Vq",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "PCHIP-evaluated values at query points.",
-}];
-
-const PCHIP_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Strictly increasing sample locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample values.",
-    },
-];
-
-const PCHIP_INPUTS_X_Y_XQ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Strictly increasing sample locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample values.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query points.",
-    },
-];
-
-const PCHIP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "pp = pchip(X, Y)",
-        inputs: &PCHIP_INPUTS_X_Y,
-        outputs: &PCHIP_OUTPUT_PP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = pchip(X, Y, Xq)",
-        inputs: &PCHIP_INPUTS_X_Y_XQ,
-        outputs: &PCHIP_OUTPUT_VALUES,
-    },
-];
-
-const PCHIP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PCHIP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:pchip:InvalidArgument"),
-    when: "Argument count or interpolation option grammar is invalid.",
-    message: "pchip: invalid argument",
-};
-
-const PCHIP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PCHIP.INVALID_INPUT",
-    identifier: Some("RunMat:pchip:InvalidInput"),
-    when: "Sample/query inputs are invalid for PCHIP construction or evaluation.",
-    message: "pchip: invalid input",
-};
-
-const PCHIP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PCHIP.INTERNAL",
-    identifier: Some("RunMat:pchip:Internal"),
-    when: "PCHIP coefficient generation or tensor assembly fails internally.",
-    message: "pchip: internal interpolation failure",
-};
-
-const PCHIP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    PCHIP_ERROR_INVALID_ARGUMENT,
-    PCHIP_ERROR_INVALID_INPUT,
-    PCHIP_ERROR_INTERNAL,
-];
-
-pub const PCHIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PCHIP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PCHIP_ERRORS,
-};
-
-const PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "pchip-integer-sample-locations",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "pchip accepts typed-integer sample locations as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PchipIntegerSampleLocationsExtension"),
-    };
-const PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "pchip-integer-sample-values",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "pchip accepts typed-integer sample values as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PchipIntegerSampleValuesExtension"),
-    };
-const PCHIP_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "pchip-integer-query-points",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "pchip accepts typed-integer query points as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PchipIntegerQueryPointsExtension"),
-};
-pub const PCHIP_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION,
-    PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION,
-    PCHIP_INTEGER_QUERY_EXTENSION,
-];
-
-const PCHIP_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double sample locations. RunMat admits typed integers only when each value is exactly representable at the binary64 interpolation boundary.",
-    }];
-const PCHIP_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double sample values. RunMat admits typed integers only through the explicit floating interpolation boundary.",
-    }];
-const PCHIP_INTEGER_XQ_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Xq",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double query points. RunMat admits typed integers only when exact binary64 conversion is possible.",
-    }];
-pub const PCHIP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "pp = pchip(integer_X, Y) or Vq = pchip(integer_X, Y, Xq)",
-        inputs: &PCHIP_INTEGER_X_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed sample locations are independently gated before gather and cross once into the floating PCHIP coefficient domain.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "pp = pchip(X, integer_Y) or Vq = pchip(X, integer_Y, Xq)",
-        inputs: &PCHIP_INTEGER_Y_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed sample values are independently gated before gather and produce floating coefficients or interpolated values.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = pchip(X, Y, integer_Xq)",
-        inputs: &PCHIP_INTEGER_XQ_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed query points are independently gated and converted only after exactness is proved.",
-    },
-];
 
 fn pchip_error_with_message(
     message: impl Into<String>,
@@ -260,42 +70,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "PCHIP builds a piecewise-polynomial representation and is not fused.",
 };
 
-fn pchip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.len() {
-        0 | 1 => Type::Unknown,
-        2 => Type::Struct { known_fields: None },
-        _ => match args.get(2) {
-            Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-            Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-                shape: shape.clone(),
-            },
-            _ => Type::tensor(),
-        },
-    }
-}
-
 #[runtime_builtin(
     name = "pchip",
-    category = "math/interpolation",
-    summary = "Construct or evaluate shape-preserving piecewise cubic Hermite interpolants.",
-    keywords = "pchip,shape preserving,cubic hermite,interpolation,ppval",
-    accel = "sink",
-    sink = true,
-    type_resolver(pchip_type),
-    descriptor(crate::builtins::math::interpolation::pchip::PCHIP_DESCRIPTOR),
-    extensions(crate::builtins::math::interpolation::pchip::PCHIP_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::interpolation::pchip::PCHIP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::pchip"
 )]
-async fn pchip_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn pchip_builtin(
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     ensure_pchip_integer_boundary(&x, &PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION, "X").await?;
     ensure_pchip_integer_boundary(&y, &PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION, "Y").await?;
     if let Some(query) = rest.first() {
         ensure_pchip_integer_boundary(query, &PCHIP_INTEGER_QUERY_EXTENSION, "Xq").await?;
     }
-    let series = series_from_values(x, y, NAME).await.map_err(|err| {
-        pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INVALID_INPUT)
-    })?;
+    let series = series_from_values_on_axis(x, y, SampleAxis::Last, NAME)
+        .await
+        .map_err(|err| {
+            pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INVALID_INPUT)
+        })?;
+    let output_layout = match series.sample_axis {
+        SampleAxis::First => PpOutputLayout::QueryLeading,
+        SampleAxis::Last => PpOutputLayout::ComponentLeading,
+    };
     let pp = build_pchip_pp(&series, NAME).map_err(|err| {
         pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INTERNAL)
     })?;
@@ -309,7 +107,14 @@ async fn pchip_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRe
                 .map_err(|err| {
                     pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INVALID_INPUT)
                 })?;
-            evaluate_pp(&pp, &query, &Extrapolation::Extrapolate, NAME).map_err(|err| {
+            evaluate_pp(
+                &pp,
+                &query,
+                &Extrapolation::Extrapolate,
+                output_layout,
+                NAME,
+            )
+            .map_err(|err| {
                 pchip_error_with_message(err.message().to_string(), &PCHIP_ERROR_INTERNAL)
             })
         }
@@ -342,6 +147,7 @@ async fn ensure_pchip_integer_boundary(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::PCHIP_DESCRIPTOR;
     use runmat_value::Tensor;
 
     fn row(values: &[f64]) -> Value {
@@ -353,7 +159,7 @@ mod tests {
         let value = block_on(pchip_builtin(
             row(&[1.0, 2.0, 3.0, 4.0]),
             row(&[0.0, 1.0, 1.5, 1.75]),
-            vec![row(&[1.5, 2.5, 3.5])],
+            crate::builtins::common::test_support::builtin_arguments(vec![row(&[1.5, 2.5, 3.5])]),
         ))
         .expect("pchip");
         let Value::Tensor(tensor) = value else {
@@ -363,6 +169,48 @@ mod tests {
             .materialize_f64()
             .windows(2)
             .all(|pair| pair[1] >= pair[0]));
+    }
+
+    #[test]
+    fn pchip_documented_example_has_checked_values_and_class() {
+        let value = block_on(pchip_builtin(
+            row(&[1.0, 2.0, 3.0]),
+            row(&[1.0, 4.0, 9.0]),
+            crate::builtins::common::test_support::builtin_arguments(vec![row(&[1.5, 2.5])]),
+        ))
+        .expect("pchip values");
+        let Value::Tensor(output) = value else {
+            panic!("vector query must return a double tensor");
+        };
+        assert_eq!(output.materialize_f64(), vec![2.28125, 6.21875]);
+    }
+
+    #[test]
+    fn pchip_uses_last_sample_axis_and_component_leading_output() {
+        let data = (0..4)
+            .flat_map(|sample| (0..6).map(move |component| (component * 100 + sample) as f64))
+            .collect();
+        let value = block_on(pchip_builtin(
+            row(&[1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(Tensor::new(data, vec![2, 3, 4]).unwrap()),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            )]),
+        ))
+        .expect("array-valued pchip");
+        let Value::Tensor(output) = value else {
+            panic!("array-valued pchip must return a tensor");
+        };
+        assert_eq!(output.shape(), vec![2, 3, 2, 2]);
+        let values = output.materialize_f64();
+        for query in 0..4 {
+            for component in 0..6 {
+                assert_eq!(
+                    values[component + query * 6],
+                    (component * 100 + query) as f64
+                );
+            }
+        }
     }
 
     #[test]
@@ -393,7 +241,10 @@ mod tests {
         let err = block_on(pchip_builtin(
             row(&[1.0, 2.0]),
             row(&[1.0, 4.0]),
-            vec![Value::Num(1.5), Value::Num(2.5)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.5),
+                Value::Num(2.5),
+            ]),
         ))
         .expect_err("expected pchip argument error");
         assert_eq!(err.identifier(), PCHIP_ERROR_INVALID_ARGUMENT.identifier);

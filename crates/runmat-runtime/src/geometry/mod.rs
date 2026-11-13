@@ -1,27 +1,18 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
-#[cfg(test)]
-use std::sync::{Mutex, MutexGuard};
+use std::collections::{BTreeMap, BTreeSet};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
-use chrono::Utc;
+#[cfg(feature = "plot-core")]
+use runmat_geometry_core::{AssemblyNode, DiagnosticSeverity};
 use runmat_geometry_core::{
-    AssemblyNode, DiagnosticSeverity, EntityIdRange, EntityKind, EntityRef, GeometryAsset,
-    GeometrySource, MeshKind, Region, SourceGeometry, SourceGeometryKind, TessellationProfile,
-    UnitSystem,
+    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
+    SourceGeometry, SourceGeometryKind, TessellationProfile,
 };
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,
     GeometryImportContext, GeometryImportOptions,
 };
 use runmat_geometry_ops::{compute_stats, find_region, GeometryStats, QueryError};
-use runmat_meshing::{
-    prepare_geometry_for_analysis, MeshingOptions, MeshingPrepResult, MeshingProfile,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -43,10 +34,6 @@ const GEOMETRY_QUERY_ENTITIES_OPERATION: &str = "geometry.query_entities";
 const GEOMETRY_QUERY_ENTITIES_OP_VERSION: &str = "geometry.query_entities/v1";
 const GEOMETRY_CAPTURE_VIEW_OPERATION: &str = "geometry.capture_view";
 const GEOMETRY_CAPTURE_VIEW_OP_VERSION: &str = "geometry.capture_view/v1";
-const GEOMETRY_PREP_FOR_ANALYSIS_OPERATION: &str = "geometry.prep_for_analysis";
-const GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION: &str = "geometry.prep_for_analysis/v1";
-const GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION: &str = "geometry.prep_artifact_health";
-const GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION: &str = "geometry.prep_artifact_health/v1";
 const DEFAULT_QUERY_LIMIT: usize = 2048;
 const DEFAULT_MAPPING_RANGE_PREVIEW_LIMIT: usize = 8;
 
@@ -145,7 +132,11 @@ pub struct GeometryAssetSummary {
     pub source: GeometrySource,
     pub source_geometry: SourceGeometry,
     pub tessellation_profile: TessellationProfile,
-    pub units: UnitSystem,
+    pub coordinate_units: Option<
+        runmat_geometry_core::physical::CoordinateUnits<
+            runmat_geometry_core::physical::PreviewCoordinates,
+        >,
+    >,
     pub meshes: Vec<GeometryMeshSummary>,
     pub mapping_summary: GeometryRegionMappingSummary,
     pub cad: GeometryCadSummary,
@@ -296,596 +287,10 @@ impl Default for GeometryPreviewSceneOptions {
 const CAD_DEFAULT_FACE_COLOR: glam::Vec4 = glam::Vec4::new(0.66, 0.72, 0.80, 1.0);
 #[cfg(feature = "plot-core")]
 const CAD_FEATURE_EDGE_COLOR: glam::Vec4 = glam::Vec4::new(0.08, 0.10, 0.13, 1.0);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GeometryPrepProfile {
-    SurfaceOnly,
-    AnalysisReady,
-    AdaptiveRefine,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GeometryPrepForAnalysisSpec {
-    pub profile: GeometryPrepProfile,
-    pub target_element_budget: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GeometryPrepForAnalysisResult {
-    pub prep_artifact_id: String,
-    pub prep: MeshingPrepResult,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StoredGeometryPrepArtifact {
-    pub prep_artifact_id: String,
-    pub schema_version: String,
-    pub created_at: String,
-    pub source_geometry_id: String,
-    pub source_geometry_revision: u32,
-    pub prep: MeshingPrepResult,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PrepArtifactMetrics {
-    pub created_count: u64,
-    pub loaded_count: u64,
-    pub pruned_count: u64,
-    pub stale_reject_count: u64,
-    pub mismatch_reject_count: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GeometryPrepArtifactHealthQuery {
-    pub include_per_geometry: bool,
-}
-
-impl Default for GeometryPrepArtifactHealthQuery {
-    fn default() -> Self {
-        Self {
-            include_per_geometry: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GeometryPrepArtifactHealthEntry {
-    pub geometry_id: String,
-    pub latest_revision: u32,
-    pub artifact_count: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GeometryPrepArtifactHealthResult {
-    pub schema_version: String,
-    pub current_artifact_count: usize,
-    pub age_p50_seconds: Option<f64>,
-    pub age_p95_seconds: Option<f64>,
-    pub metrics: PrepArtifactMetrics,
-    pub per_geometry: Vec<GeometryPrepArtifactHealthEntry>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GeometryPrepArtifactConfig {
-    pub artifact_root: Option<PathBuf>,
-    pub max_artifacts: Option<usize>,
-    pub max_artifacts_per_geometry: Option<usize>,
-    pub max_age_seconds: Option<u64>,
-    pub require_latest_revision: Option<bool>,
-}
-
-type PrepStore = Arc<RwLock<HashMap<String, StoredGeometryPrepArtifact>>>;
-
-fn prep_store() -> &'static PrepStore {
-    static STORE: OnceLock<PrepStore> = OnceLock::new();
-    STORE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())))
-}
-
-fn prep_artifact_counter() -> &'static AtomicU64 {
-    static COUNTER: OnceLock<AtomicU64> = OnceLock::new();
-    COUNTER.get_or_init(|| AtomicU64::new(1))
-}
-
-fn prep_metrics() -> &'static Arc<RwLock<PrepArtifactMetrics>> {
-    static METRICS: OnceLock<Arc<RwLock<PrepArtifactMetrics>>> = OnceLock::new();
-    METRICS.get_or_init(|| Arc::new(RwLock::new(PrepArtifactMetrics::default())))
-}
-
-fn prep_config() -> &'static RwLock<GeometryPrepArtifactConfig> {
-    static CONFIG: OnceLock<RwLock<GeometryPrepArtifactConfig>> = OnceLock::new();
-    CONFIG.get_or_init(|| RwLock::new(GeometryPrepArtifactConfig::default()))
-}
-
-fn current_prep_config() -> GeometryPrepArtifactConfig {
-    prep_config()
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
-}
-
-pub fn configure_prep_artifacts(config: GeometryPrepArtifactConfig) -> Result<(), String> {
-    let mut guard = prep_config()
-        .write()
-        .map_err(|_| "geometry prep artifact config lock poisoned".to_string())?;
-    *guard = config;
-    Ok(())
-}
-
-fn increment_metric(f: impl FnOnce(&mut PrepArtifactMetrics)) {
-    if let Ok(mut metrics) = prep_metrics().write() {
-        f(&mut metrics);
-    }
-}
-
-fn prep_artifact_root() -> Option<PathBuf> {
-    current_prep_config().artifact_root.or_else(|| {
-        std::env::var("RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT")
-            .ok()
-            .map(PathBuf::from)
-    })
-}
-
-pub(crate) fn require_latest_prep_revision() -> bool {
-    current_prep_config()
-        .require_latest_revision
-        .unwrap_or_else(|| {
-            std::env::var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION")
-                .ok()
-                .map(|value| {
-                    matches!(
-                        value.to_ascii_lowercase().as_str(),
-                        "1" | "true" | "yes" | "on"
-                    )
-                })
-                .unwrap_or(true)
-        })
-}
-
-fn prep_artifact_path(root: &Path, prep_artifact_id: &str) -> PathBuf {
-    root.join("prep").join(format!("{prep_artifact_id}.json"))
-}
-
-fn prep_artifact_id_fragment(value: &str) -> String {
-    let mut fragment = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-' => {
-                fragment.push(byte as char);
-            }
-            _ => {
-                if !fragment.ends_with('_') {
-                    fragment.push('_');
-                }
-            }
-        }
-    }
-    let fragment = fragment.trim_matches('_').to_string();
-    if fragment.is_empty() {
-        "geometry".to_string()
-    } else {
-        fragment
-    }
-}
-
-fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
-    runmat_filesystem::create_dir_all(path.into())
-}
-
-fn fs_read(path: impl Into<PathBuf>) -> std::io::Result<Vec<u8>> {
-    runmat_filesystem::read(path.into())
-}
-
-fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {
-    runmat_filesystem::write(path.into(), bytes)
-}
-
-fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
-    match runmat_filesystem::remove_file(path.into()) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
-}
-
-fn fs_read_dir(path: impl Into<PathBuf>) -> std::io::Result<Vec<runmat_filesystem::DirEntry>> {
-    runmat_filesystem::read_dir(path.into())
-}
-
-fn fs_exists(path: impl Into<PathBuf>) -> std::io::Result<bool> {
-    match runmat_filesystem::metadata(path.into()) {
-        Ok(_) => Ok(true),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err),
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PrepArtifactRetentionPolicy {
-    max_artifacts: usize,
-    max_artifacts_per_geometry: usize,
-    max_age_seconds: u64,
-}
-
-impl PrepArtifactRetentionPolicy {
-    fn current() -> Self {
-        let config = current_prep_config();
-        Self {
-            max_artifacts: config.max_artifacts.unwrap_or_else(|| {
-                std::env::var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS")
-                    .ok()
-                    .and_then(|value| value.parse::<usize>().ok())
-                    .unwrap_or(0)
-            }),
-            max_artifacts_per_geometry: config.max_artifacts_per_geometry.unwrap_or_else(|| {
-                std::env::var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY")
-                    .ok()
-                    .and_then(|value| value.parse::<usize>().ok())
-                    .unwrap_or(0)
-            }),
-            max_age_seconds: config.max_age_seconds.unwrap_or_else(|| {
-                std::env::var("RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS")
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .unwrap_or(0)
-            }),
-        }
-    }
-}
-
-fn persist_prep_artifact(
-    geometry: &GeometryAsset,
-    prep: MeshingPrepResult,
-) -> Result<StoredGeometryPrepArtifact, String> {
-    let prep_artifact_id = format!(
-        "prep_{}_{}_{}",
-        prep_artifact_id_fragment(&geometry.geometry_id),
-        geometry.revision,
-        prep_artifact_counter().fetch_add(1, Ordering::Relaxed)
-    );
-    let artifact = StoredGeometryPrepArtifact {
-        prep_artifact_id: prep_artifact_id.clone(),
-        schema_version: "geometry_prep_artifact/v1".to_string(),
-        created_at: Utc::now().to_rfc3339(),
-        source_geometry_id: geometry.geometry_id.clone(),
-        source_geometry_revision: geometry.revision,
-        prep,
-    };
-
-    prep_store()
-        .write()
-        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
-        .insert(prep_artifact_id.clone(), artifact.clone());
-    increment_metric(|metrics| metrics.created_count = metrics.created_count.saturating_add(1));
-    tracing::info!(
-        target: "runmat_geometry",
-        "prep_artifact_created id={} geometry_id={} revision={}",
-        prep_artifact_id,
-        geometry.geometry_id,
-        geometry.revision
-    );
-
-    if let Some(root) = prep_artifact_root() {
-        let path = prep_artifact_path(&root, &prep_artifact_id);
-        if let Some(parent) = path.parent() {
-            fs_create_dir_all(parent)
-                .map_err(|err| format!("failed to create prep artifact directory: {err}"))?;
-        }
-        let bytes = serde_json::to_vec_pretty(&artifact)
-            .map_err(|err| format!("failed to encode prep artifact: {err}"))?;
-        fs_write(&path, &bytes).map_err(|err| format!("failed to write prep artifact: {err}"))?;
-    }
-
-    prune_prep_artifacts(PrepArtifactRetentionPolicy::current())?;
-
-    Ok(artifact)
-}
-
-pub(crate) fn load_prep_artifact(
-    prep_artifact_id: &str,
-) -> Result<Option<StoredGeometryPrepArtifact>, String> {
-    if let Some(artifact) = prep_store()
-        .read()
-        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
-        .get(prep_artifact_id)
-        .cloned()
-    {
-        return Ok(Some(artifact));
-    }
-
-    let Some(root) = prep_artifact_root() else {
-        return Ok(None);
-    };
-    let path = prep_artifact_path(&root, prep_artifact_id);
-    if !fs_exists(&path).map_err(|err| format!("failed to inspect prep artifact: {err}"))? {
-        return Ok(None);
-    }
-    let bytes = fs_read(&path).map_err(|err| format!("failed to read prep artifact: {err}"))?;
-    let artifact = serde_json::from_slice::<StoredGeometryPrepArtifact>(&bytes)
-        .map_err(|err| format!("failed to decode prep artifact: {err}"))?;
-    prep_store()
-        .write()
-        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
-        .insert(prep_artifact_id.to_string(), artifact.clone());
-    increment_metric(|metrics| metrics.loaded_count = metrics.loaded_count.saturating_add(1));
-    tracing::info!(
-        target: "runmat_geometry",
-        "prep_artifact_loaded id={} geometry_id={} revision={}",
-        prep_artifact_id,
-        artifact.source_geometry_id,
-        artifact.source_geometry_revision
-    );
-    prune_prep_artifacts(PrepArtifactRetentionPolicy::current())?;
-    Ok(Some(artifact))
-}
-
-pub(crate) fn record_prep_stale_reject() {
-    increment_metric(|metrics| {
-        metrics.stale_reject_count = metrics.stale_reject_count.saturating_add(1)
-    });
-    tracing::warn!(target: "runmat_geometry", "prep_artifact_rejected reason=stale");
-}
-
-pub(crate) fn record_prep_mismatch_reject() {
-    increment_metric(|metrics| {
-        metrics.mismatch_reject_count = metrics.mismatch_reject_count.saturating_add(1)
-    });
-    tracing::warn!(
-        target: "runmat_geometry",
-        "prep_artifact_rejected reason=mismatch"
-    );
-}
-
-pub fn geometry_prep_artifact_health_op(
-    query: GeometryPrepArtifactHealthQuery,
-    context: OperationContext,
-) -> Result<OperationEnvelope<GeometryPrepArtifactHealthResult>, OperationErrorEnvelope> {
-    let artifacts = list_prep_artifacts().map_err(|err| {
-        operation_error(
-            GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION,
-            GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.GEOMETRY.PREP_ARTIFACT_HEALTH.STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to list prep artifacts: {err}"),
-            BTreeMap::new(),
-        )
-    })?;
-
-    let now = Utc::now();
-    let mut age_seconds = Vec::new();
-    let mut per_geometry_map: HashMap<String, (u32, usize)> = HashMap::new();
-    for artifact in &artifacts {
-        if let Ok(created) = chrono::DateTime::parse_from_rfc3339(&artifact.created_at) {
-            let age = now.signed_duration_since(created.with_timezone(&Utc));
-            age_seconds.push(age.num_seconds().max(0) as f64);
-        }
-        let entry = per_geometry_map
-            .entry(artifact.source_geometry_id.clone())
-            .or_insert((artifact.source_geometry_revision, 0));
-        if artifact.source_geometry_revision > entry.0 {
-            entry.0 = artifact.source_geometry_revision;
-        }
-        entry.1 = entry.1.saturating_add(1);
-    }
-    age_seconds.sort_by(|a, b| a.total_cmp(b));
-
-    let per_geometry = if query.include_per_geometry {
-        let mut values = per_geometry_map
-            .into_iter()
-            .map(|(geometry_id, (latest_revision, artifact_count))| {
-                GeometryPrepArtifactHealthEntry {
-                    geometry_id,
-                    latest_revision,
-                    artifact_count,
-                }
-            })
-            .collect::<Vec<_>>();
-        values.sort_by(|a, b| a.geometry_id.cmp(&b.geometry_id));
-        values
-    } else {
-        Vec::new()
-    };
-
-    let metrics = prep_metrics()
-        .read()
-        .map_err(|_| {
-            operation_error(
-                GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION,
-                GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.GEOMETRY.PREP_ARTIFACT_HEALTH.STORE_FAILED",
-                    error_type: OperationErrorType::Internal,
-                    retryable: true,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "geometry prep metrics store lock poisoned",
-                BTreeMap::new(),
-            )
-        })?
-        .clone();
-
-    Ok(OperationEnvelope::new(
-        GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION,
-        GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
-        &context,
-        GeometryPrepArtifactHealthResult {
-            schema_version: "geometry-prep-artifact-health/v1".to_string(),
-            current_artifact_count: artifacts.len(),
-            age_p50_seconds: percentile(&age_seconds, 0.5),
-            age_p95_seconds: percentile(&age_seconds, 0.95),
-            metrics,
-            per_geometry,
-        },
-    ))
-}
-
-fn percentile(sorted: &[f64], ratio: f64) -> Option<f64> {
-    if sorted.is_empty() {
-        return None;
-    }
-    let index = ((sorted.len() - 1) as f64 * ratio.clamp(0.0, 1.0)).round() as usize;
-    sorted.get(index).copied()
-}
-
-pub(crate) fn latest_prep_revision_for_geometry(geometry_id: &str) -> Result<Option<u32>, String> {
-    let mut revisions = list_prep_artifacts()?
-        .into_iter()
-        .filter(|artifact| artifact.source_geometry_id == geometry_id)
-        .map(|artifact| artifact.source_geometry_revision)
-        .collect::<Vec<_>>();
-    revisions.sort_unstable();
-    Ok(revisions.pop())
-}
-
-fn list_prep_artifacts() -> Result<Vec<StoredGeometryPrepArtifact>, String> {
-    let mut artifacts = prep_store()
-        .read()
-        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
-    if artifacts.is_empty() {
-        if let Some(root) = prep_artifact_root() {
-            let prep_dir = root.join("prep");
-            if fs_exists(&prep_dir)
-                .map_err(|err| format!("failed to inspect prep artifacts: {err}"))?
-            {
-                for entry in fs_read_dir(&prep_dir)
-                    .map_err(|err| format!("failed to scan prep artifacts: {err}"))?
-                {
-                    let path = entry.path().to_path_buf();
-                    if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                        continue;
-                    }
-                    let bytes = fs_read(&path)
-                        .map_err(|err| format!("failed to read prep artifact: {err}"))?;
-                    if let Ok(artifact) =
-                        serde_json::from_slice::<StoredGeometryPrepArtifact>(&bytes)
-                    {
-                        artifacts.push(artifact);
-                    }
-                }
-            }
-        }
-    }
-    Ok(artifacts)
-}
-
-fn prune_prep_artifacts(policy: PrepArtifactRetentionPolicy) -> Result<(), String> {
-    if policy.max_artifacts == 0
-        && policy.max_artifacts_per_geometry == 0
-        && policy.max_age_seconds == 0
-    {
-        return Ok(());
-    }
-
-    let now = Utc::now();
-    let mut artifacts = list_prep_artifacts()?;
-    artifacts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    let mut remove_ids = Vec::new();
-    if policy.max_age_seconds > 0 {
-        for artifact in &artifacts {
-            if let Ok(created) = chrono::DateTime::parse_from_rfc3339(&artifact.created_at) {
-                let age = now.signed_duration_since(created.with_timezone(&Utc));
-                if age.num_seconds().max(0) as u64 > policy.max_age_seconds {
-                    remove_ids.push(artifact.prep_artifact_id.clone());
-                }
-            }
-        }
-    }
-
-    if policy.max_artifacts_per_geometry > 0 {
-        let mut per_geometry_counts: HashMap<String, usize> = HashMap::new();
-        for artifact in &artifacts {
-            let count = per_geometry_counts
-                .entry(artifact.source_geometry_id.clone())
-                .or_default();
-            *count += 1;
-            if *count > policy.max_artifacts_per_geometry {
-                remove_ids.push(artifact.prep_artifact_id.clone());
-            }
-        }
-    }
-
-    if policy.max_artifacts > 0 {
-        for (index, artifact) in artifacts.iter().enumerate() {
-            if index >= policy.max_artifacts {
-                remove_ids.push(artifact.prep_artifact_id.clone());
-            }
-        }
-    }
-
-    remove_ids.sort();
-    remove_ids.dedup();
-    if remove_ids.is_empty() {
-        return Ok(());
-    }
-
-    {
-        let mut store = prep_store()
-            .write()
-            .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?;
-        for id in &remove_ids {
-            store.remove(id);
-        }
-    }
-
-    if let Some(root) = prep_artifact_root() {
-        for id in &remove_ids {
-            let path = prep_artifact_path(&root, id);
-            let _ = fs_remove_file(path);
-        }
-    }
-
-    increment_metric(|metrics| {
-        metrics.pruned_count = metrics.pruned_count.saturating_add(remove_ids.len() as u64)
-    });
-    tracing::info!(
-        target: "runmat_geometry",
-        "prep_artifact_pruned count={}",
-        remove_ids.len()
-    );
-
-    Ok(())
-}
-
-#[doc(hidden)]
-pub fn reset_prep_artifact_store_for_tests() {
-    if let Ok(mut store) = prep_store().write() {
-        store.clear();
-    }
-    prep_artifact_counter().store(1, Ordering::Relaxed);
-    if let Ok(mut metrics) = prep_metrics().write() {
-        *metrics = PrepArtifactMetrics::default();
-    }
-    if let Ok(mut config) = prep_config().write() {
-        *config = GeometryPrepArtifactConfig::default();
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn prep_artifact_test_guard() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-impl Default for GeometryPrepForAnalysisSpec {
-    fn default() -> Self {
-        Self {
-            profile: GeometryPrepProfile::AnalysisReady,
-            target_element_budget: 250_000,
-        }
-    }
-}
+#[cfg(feature = "plot-core")]
+const CAD_XRAY_FEATURE_EDGE_COLOR: glam::Vec4 = glam::Vec4::new(0.62, 0.78, 0.96, 1.0);
+#[cfg(feature = "plot-core")]
+const CAD_XRAY_FACE_ALPHA: f32 = 0.16;
 
 pub trait GeometryViewCaptureAdapter {
     fn adapter_name(&self) -> &'static str;
@@ -970,14 +375,24 @@ pub fn geometry_load_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<GeometryAsset>, OperationErrorEnvelope> {
     let import_context = current_geometry_import_context();
-    let imported = import_geometry_with_context(path, bytes, options, &import_context)
+    let mut imported = import_geometry_with_context(path, bytes, options, &import_context)
         .map_err(|error| map_geometry_load_error(path, error, &context))?;
+    imported.asset.source.sha256 = sha256_hex(bytes);
     Ok(OperationEnvelope::new(
         GEOMETRY_LOAD_OPERATION,
         GEOMETRY_LOAD_OP_VERSION,
         &context,
         imported.asset,
     ))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest as _, Sha256};
+
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn geometry_load(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryAsset> {
@@ -993,7 +408,7 @@ pub fn geometry_load(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryAsset> {
 
 fn current_geometry_import_context() -> GeometryImportContext {
     crate::interrupt::current_interrupt()
-        .map(GeometryImportContext::with_cancellation)
+        .map(|token| GeometryImportContext::with_cancellation_probe(move || token.is_cancelled()))
         .unwrap_or_default()
 }
 
@@ -1034,7 +449,7 @@ pub fn geometry_asset_summary_with_options(
         source: asset.source.clone(),
         source_geometry: asset.source_geometry.clone(),
         tessellation_profile: asset.tessellation_profile.clone(),
-        units: asset.units,
+        coordinate_units: asset.coordinate_units,
         meshes: mesh_summaries(asset),
         mapping_summary: region_mapping_summary(asset, range_preview_limit),
         cad: cad_summary(asset),
@@ -1593,7 +1008,11 @@ pub fn geometry_preview_scene(
         } else {
             preview_mesh_color(mesh_index)
         };
-        let alpha = if options.xray { 0.34 } else { base_color.w };
+        let alpha = if options.xray {
+            CAD_XRAY_FACE_ALPHA
+        } else {
+            base_color.w
+        };
         let mut material = runmat_plot::cad_default_material();
         material.albedo = glam::Vec4::new(base_color.x, base_color.y, base_color.z, alpha);
         if options.xray {
@@ -1624,14 +1043,25 @@ pub fn geometry_preview_scene(
                 chunk_end_triangle += 1;
             }
             let triangles = &surface_mesh.triangles[chunk_start_triangle..chunk_end_triangle];
-            let mut remap = HashMap::<u32, u32>::with_capacity(triangles.len() * 3);
+            // A vertex shared by two CAD faces gets one copy per face, so each face's normals
+            // average only its own triangles and a crease stays sharp, as in a CAD design scene.
+            let face_groups = presentation
+                .as_ref()
+                .and_then(|item| item.feature_edge_groups.as_deref());
+            let mut remap =
+                std::collections::HashMap::<(u32, u64), u32>::with_capacity(triangles.len() * 3);
             let mut local_positions = Vec::<[f32; 3]>::new();
             let mut local_colors = Vec::<[f32; 4]>::new();
             let mut indices = Vec::<u32>::with_capacity(triangles.len() * 3);
 
-            for triangle in triangles {
+            for (offset, triangle) in triangles.iter().enumerate() {
+                let group = face_groups
+                    .and_then(|groups| groups.get(chunk_start_triangle + offset))
+                    .copied()
+                    .unwrap_or(0);
                 for source_index in triangle {
-                    let local_index = if let Some(local_index) = remap.get(source_index) {
+                    let key = (*source_index, group);
+                    let local_index = if let Some(local_index) = remap.get(&key) {
                         *local_index
                     } else {
                         let source_index_usize = usize::try_from(*source_index).map_err(|_| {
@@ -1662,7 +1092,7 @@ pub fn geometry_preview_scene(
                             .copied()
                             .unwrap_or(base_color);
                         local_colors.push([vertex_color.x, vertex_color.y, vertex_color.z, alpha]);
-                        remap.insert(*source_index, local_index);
+                        remap.insert(key, local_index);
                         local_index
                     };
                     indices.push(local_index);
@@ -1698,7 +1128,15 @@ pub fn geometry_preview_scene(
             ))
             .with_regions(regions)
             .with_owner_node_ids(owner_node_ids);
+            // The CAD import contains surface triangles but no line topology.
+            // Keep explicit edges resident so wireframe and X-ray can draw the
+            // solid even after the shaded triangles are suppressed. Feature edges draw in the CAD
+            // design scenes' near-black, which reads over the shading in both themes.
+            let edges = chunk.wireframe_edges(preview_feature_edge_color(options.xray));
             chunks.push(chunk);
+            if let Some(edges) = edges {
+                chunks.push(edges);
+            }
             chunk_start_triangle = chunk_end_triangle;
             chunk_index += 1;
         }
@@ -1708,10 +1146,17 @@ pub fn geometry_preview_scene(
         return Err("geometry asset did not contain renderable surface mesh triangles".to_string());
     }
 
-    Ok(
+    let scene =
         runmat_plot::GeometryScene::new(geometry_scene_id(asset), asset.revision as u64, chunks)
-            .with_title(title),
-    )
+            .with_title(title);
+    Ok(if let Some(coordinate_units) = asset.coordinate_units {
+        scene.with_physical_context(runmat_plot::geometry_scene::GeometryPhysicalContext {
+            coordinate_units,
+            source_unit_evidence: asset.source.unit_evidence.clone(),
+        })
+    } else {
+        scene
+    })
 }
 
 #[cfg(feature = "plot-core")]
@@ -1763,6 +1208,7 @@ pub fn geometry_preview_scene_overlay(
             .map(|mesh| mesh.triangles.len())
             .sum(),
         progress_percent: None,
+        scalar_legend: None,
         region_count: asset.regions.len(),
         mapped_region_count: mapping_summary.mapped_region_count,
         assembly_nodes: asset
@@ -1902,16 +1348,24 @@ pub fn geometry_preview_figure(
                 surface_mesh.vertices.len(),
             );
             mesh.set_face_color(CAD_DEFAULT_FACE_COLOR);
-            mesh.set_edge_color(CAD_FEATURE_EDGE_COLOR);
-            mesh.set_face_alpha(if options.xray { 0.34 } else { 1.0 });
-            mesh.set_edge_alpha(if options.xray { 0.9 } else { 0.72 });
+            mesh.set_edge_color(if options.xray {
+                CAD_XRAY_FEATURE_EDGE_COLOR
+            } else {
+                CAD_FEATURE_EDGE_COLOR
+            });
+            mesh.set_face_alpha(if options.xray {
+                CAD_XRAY_FACE_ALPHA
+            } else {
+                1.0
+            });
+            mesh.set_edge_alpha(if options.xray { 1.0 } else { 0.72 });
             if let Some(colors) = presentation.vertex_colors {
                 mesh.set_vertex_colors(Some(colors))?;
             }
             if let Some(groups) = presentation.feature_edge_groups {
                 mesh.set_feature_edge_groups(Some(groups))?;
                 mesh.set_edge_mode(runmat_plot::plots::MeshEdgeMode::Feature);
-                mesh.set_edge_width(0.85);
+                mesh.set_edge_width(if options.xray { 1.05 } else { 0.85 });
             } else if surface_mesh.triangles.len() > options.edge_overlay_triangle_limit {
                 mesh.set_edge_mode(runmat_plot::plots::MeshEdgeMode::None);
                 mesh.set_edge_width(0.0);
@@ -2267,15 +1721,34 @@ fn local_vertex_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]
     normals.into_iter().map(normalize_or_default).collect()
 }
 
+/// A preview scene's feature-edge color: the CAD design scenes' edge color, or the X-ray edge
+/// color when the faces are see-through.
+#[cfg(feature = "plot-core")]
+pub(crate) fn preview_feature_edge_color(xray: bool) -> [f32; 4] {
+    if xray {
+        CAD_XRAY_FEATURE_EDGE_COLOR.to_array()
+    } else {
+        CAD_FEATURE_EDGE_COLOR.to_array()
+    }
+}
+
+/// A triangle's unit normal, independent of its size: a part in metres has triangles whose
+/// cross product is far below f32 epsilon, and those still get their true direction. Only a
+/// degenerate triangle falls back to +Z.
 #[cfg(feature = "plot-core")]
 fn face_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
-    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-    normalize_or_default([
+    let ab = [0, 1, 2].map(|k| f64::from(b[k]) - f64::from(a[k]));
+    let ac = [0, 1, 2].map(|k| f64::from(c[k]) - f64::from(a[k]));
+    let cross = [
         ab[1] * ac[2] - ab[2] * ac[1],
         ab[2] * ac[0] - ab[0] * ac[2],
         ab[0] * ac[1] - ab[1] * ac[0],
-    ])
+    ];
+    let length = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+    if !length.is_finite() || length <= f64::MIN_POSITIVE {
+        return [0.0, 0.0, 1.0];
+    }
+    cross.map(|value| (value / length) as f32)
 }
 
 #[cfg(feature = "plot-core")]
@@ -2321,99 +1794,6 @@ fn preview_mesh_color(index: usize) -> glam::Vec4 {
         [0.20, 0.62, 0.75, 1.0],
     ];
     glam::Vec4::from_array(PALETTE[index % PALETTE.len()])
-}
-
-pub fn geometry_prep_for_analysis_op(
-    asset: &GeometryAsset,
-    spec: GeometryPrepForAnalysisSpec,
-    context: OperationContext,
-) -> Result<OperationEnvelope<GeometryPrepForAnalysisResult>, OperationErrorEnvelope> {
-    if spec.target_element_budget == 0 {
-        return Err(operation_error(
-            GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
-            GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.GEOMETRY.PREP_FOR_ANALYSIS.INVALID_SPEC",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "prep-for-analysis target_element_budget must be greater than zero",
-            BTreeMap::from([(
-                "target_element_budget".to_string(),
-                spec.target_element_budget.to_string(),
-            )]),
-        ));
-    }
-
-    let profile = match spec.profile {
-        GeometryPrepProfile::SurfaceOnly => MeshingProfile::SurfaceOnly,
-        GeometryPrepProfile::AnalysisReady => MeshingProfile::AnalysisReady,
-        GeometryPrepProfile::AdaptiveRefine => MeshingProfile::AdaptiveRefine,
-    };
-    let prepared = prepare_geometry_for_analysis(
-        asset,
-        MeshingOptions {
-            profile,
-            target_element_budget: spec.target_element_budget,
-        },
-    )
-    .map_err(|error| {
-        operation_error(
-            GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
-            GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.GEOMETRY.PREP_FOR_ANALYSIS.FAILED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to prepare geometry for analysis: {error}"),
-            BTreeMap::from([("geometry_id".to_string(), asset.geometry_id.clone())]),
-        )
-    })?;
-
-    let artifact = persist_prep_artifact(asset, prepared).map_err(|error| {
-        operation_error(
-            GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
-            GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.GEOMETRY.PREP_FOR_ANALYSIS.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist prep artifact: {error}"),
-            BTreeMap::from([("geometry_id".to_string(), asset.geometry_id.clone())]),
-        )
-    })?;
-
-    Ok(OperationEnvelope::new(
-        GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
-        GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
-        &context,
-        GeometryPrepForAnalysisResult {
-            prep_artifact_id: artifact.prep_artifact_id,
-            prep: artifact.prep,
-        },
-    ))
-}
-
-pub fn geometry_prep_for_analysis(
-    asset: &GeometryAsset,
-    spec: GeometryPrepForAnalysisSpec,
-) -> BuiltinResult<GeometryPrepForAnalysisResult> {
-    let envelope = geometry_prep_for_analysis_op(asset, spec, OperationContext::new(None, None))
-        .map_err(|error| {
-            build_runtime_error(error.message)
-                .with_builtin(GEOMETRY_PREP_FOR_ANALYSIS_OPERATION)
-                .with_identifier("RunMat:GeometryPrepForAnalysisFailed")
-                .build()
-        })?;
-    Ok(envelope.data)
 }
 
 fn format_name(format: GeometryFormat) -> &'static str {
@@ -2485,6 +1865,11 @@ fn map_geometry_load_error(
             OperationErrorType::Input,
             false,
         ),
+        GeometryImportError::UnresolvedUnits(_) => (
+            "RM.GEOMETRY.LOAD.UNITS_UNRESOLVED",
+            OperationErrorType::Input,
+            false,
+        ),
         GeometryImportError::BackendUnavailable(_) => (
             "RM.GEOMETRY.LOAD.BACKEND_UNAVAILABLE",
             OperationErrorType::Backend,
@@ -2535,3 +1920,6 @@ fn map_geometry_query_error(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "plot-core"))]
+mod preview_scene_tests;

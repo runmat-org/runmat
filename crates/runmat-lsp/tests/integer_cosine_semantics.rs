@@ -45,7 +45,8 @@ fn matlab_mode_keeps_integer_extension_metadata_visible_for_runtime_gates() {
         assert!(analysis.syntax_error.is_none(), "{source}");
         assert!(analysis.lowering_error.is_none(), "{source}");
         assert!(analysis.compile_error.is_none(), "{source}");
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.extensions.iter().any(|extension| {
                 extension.id == extension_id

@@ -5,18 +5,12 @@ use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, Met
 use super::*;
 use crate::cdt::{
     assign_delaunay_volume_regions, build_delaunay_volume_topology,
-    evaluate_delaunay_volume_quality, refine_delaunay_volume, validate_delaunay_volume_refinement,
-    DelaunayFacetProvenance, DelaunayTopologyOptions, DelaunayVolumeProvenance,
-    DelaunayVolumeQualityOptions, DelaunayVolumeRefinementInput, DelaunayVolumeRefinementMutation,
-    DelaunayVolumeRefinementOptions, DelaunayVolumeRefinementStepErrorKind,
+    evaluate_delaunay_volume_quality, DelaunayFacetProvenance, DelaunayTopologyOptions,
+    DelaunayVolumeProvenance, DelaunayVolumeQualityOptions, DelaunayVolumeRefinementInput,
 };
 
 fn entity(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, name.to_owned(), Vec::new())
 }
 
 fn region() -> PersistentEntityId {
@@ -24,22 +18,22 @@ fn region() -> PersistentEntityId {
 }
 
 fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-    DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([identity; 32]),
-        coordinates_m,
-    }
+    DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
 }
 
-fn metric() -> MetricFieldRequest {
+pub(super) fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
-fn quality_options() -> DelaunayVolumeQualityOptions {
+pub(super) fn quality_options() -> DelaunayVolumeQualityOptions {
     DelaunayVolumeQualityOptions {
         maximum_metric_edge_length: 1.0e12,
         maximum_radius_edge_ratio: 1.0e12,
@@ -48,7 +42,7 @@ fn quality_options() -> DelaunayVolumeQualityOptions {
     }
 }
 
-fn interior_sliver_fixture() -> (DelaunayVolumeTopology, DelaunayVolumeProvenance) {
+pub(super) fn interior_sliver_fixture() -> (DelaunayVolumeTopology, DelaunayVolumeProvenance) {
     let nodes = vec![
         node(1, [0.0, 0.0, 0.0]),
         node(2, [1.0, 0.0, 0.0]),
@@ -94,7 +88,7 @@ fn interior_sliver_fixture() -> (DelaunayVolumeTopology, DelaunayVolumeProvenanc
     )
 }
 
-fn quality(
+pub(super) fn quality(
     topology: &DelaunayVolumeTopology,
     provenance: &DelaunayVolumeProvenance,
 ) -> DelaunayVolumeQuality {
@@ -109,7 +103,7 @@ fn quality(
 }
 
 #[test]
-fn treatment_relocates_only_the_interior_node_and_eliminates_slivers() {
+fn treatment_removes_a_redundant_interior_node_and_eliminates_slivers() {
     let (topology, provenance) = interior_sliver_fixture();
     let request = metric();
     let initial_quality = quality(&topology, &provenance);
@@ -119,6 +113,7 @@ fn treatment_relocates_only_the_interior_node_and_eliminates_slivers() {
         provenance: &provenance,
         quality: &initial_quality,
         quality_options: quality_options(),
+        fixed_node_identities: &[],
     };
     let first = treat_delaunay_volume_slivers(
         input,
@@ -134,12 +129,15 @@ fn treatment_relocates_only_the_interior_node_and_eliminates_slivers() {
     .unwrap();
 
     assert_eq!(first, second);
-    assert_eq!(first.relocations.len(), 1);
+    assert_eq!(first.mutations.len(), 1);
+    let DelaunayVolumeSliverMutation::Deleted(deletion) = first.mutations[0] else {
+        panic!("fixture should improve by removing its redundant interior node");
+    };
     assert_eq!(
-        first.relocations[0].source_node_identity,
+        deletion.source_node_identity,
         StableDigest::from_bytes([5; 32])
     );
-    assert_eq!(first.topology.nodes.len(), topology.nodes.len());
+    assert_eq!(first.topology.nodes.len() + 1, topology.nodes.len());
     assert!(
         first.quality.minimum_metric_scaled_jacobian
             > initial_quality.minimum_metric_scaled_jacobian
@@ -163,42 +161,57 @@ fn treatment_relocates_only_the_interior_node_and_eliminates_slivers() {
 }
 
 #[test]
-fn refinement_driver_applies_sliver_treatment_before_steiner_insertion() {
+fn deletion_preserves_existing_size_progress_without_requiring_global_convergence() {
     let (topology, provenance) = interior_sliver_fixture();
     let request = metric();
-    let initial_quality = quality(&topology, &provenance);
-    let input = DelaunayVolumeRefinementInput {
-        topology: &topology,
-        metric_request: &request,
-        provenance: &provenance,
-        quality: &initial_quality,
-        quality_options: quality_options(),
+    let options = DelaunayVolumeQualityOptions {
+        maximum_metric_edge_length: 1.0,
+        ..quality_options()
     };
-    let options = DelaunayVolumeRefinementOptions {
-        maximum_insertions: 1,
-        ..DelaunayVolumeRefinementOptions::default()
-    };
-    let refinement = refine_delaunay_volume(input, options, &NeverCancelled).unwrap();
+    let initial_quality = evaluate_delaunay_volume_quality(
+        &topology,
+        &request,
+        &provenance,
+        options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert!(initial_quality.tetrahedra.iter().any(|tetrahedron| {
+        tetrahedron.maximum_metric_edge_length > options.maximum_metric_edge_length
+    }));
 
-    assert_eq!(refinement.mutations.len(), 1);
+    let treatment = treat_delaunay_volume_slivers(
+        DelaunayVolumeRefinementInput {
+            topology: &topology,
+            metric_request: &request,
+            provenance: &provenance,
+            quality: &initial_quality,
+            quality_options: options,
+            fixed_node_identities: &[],
+        },
+        DelaunayVolumeSliverOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
     assert!(matches!(
-        refinement.mutations[0],
-        DelaunayVolumeRefinementMutation::Relocated(_)
+        treatment.mutations.as_slice(),
+        [DelaunayVolumeSliverMutation::Deleted(_)]
     ));
-    assert!(refinement.quality.worst_refinement_tetrahedron.is_none());
-    validate_delaunay_volume_refinement(input, &refinement, options, &NeverCancelled).unwrap();
-
-    let mut tampered = refinement;
-    let DelaunayVolumeRefinementMutation::Relocated(relocation) = &mut tampered.mutations[0] else {
-        unreachable!();
-    };
-    relocation.replacement_node.coordinates_m[0] += 0.01;
-    assert_eq!(
-        validate_delaunay_volume_refinement(input, &tampered, options, &NeverCancelled)
-            .unwrap_err()
-            .kind,
-        DelaunayVolumeRefinementStepErrorKind::InvalidTopology
-    );
+    let initial_maximum = initial_quality
+        .tetrahedra
+        .iter()
+        .map(|tetrahedron| tetrahedron.maximum_metric_edge_length)
+        .max_by(f64::total_cmp)
+        .unwrap();
+    let treated_maximum = treatment
+        .quality
+        .tetrahedra
+        .iter()
+        .map(|tetrahedron| tetrahedron.maximum_metric_edge_length)
+        .max_by(f64::total_cmp)
+        .unwrap();
+    assert!(treated_maximum <= initial_maximum);
 }
 
 #[test]
@@ -224,6 +237,7 @@ fn treatment_is_a_checked_noop_and_rejects_tampering() {
         provenance: &provenance,
         quality: &permissive_quality,
         quality_options: permissive_options,
+        fixed_node_identities: &[],
     };
     let no_op = treat_delaunay_volume_slivers(
         converged_input,
@@ -233,7 +247,7 @@ fn treatment_is_a_checked_noop_and_rejects_tampering() {
     .unwrap();
     assert_eq!(no_op.topology, topology);
     assert_eq!(no_op.quality, permissive_quality);
-    assert!(no_op.relocations.is_empty());
+    assert!(no_op.mutations.is_empty());
 
     let input = DelaunayVolumeRefinementInput {
         topology: &topology,
@@ -241,6 +255,7 @@ fn treatment_is_a_checked_noop_and_rejects_tampering() {
         provenance: &provenance,
         quality: &initial_quality,
         quality_options: quality_options(),
+        fixed_node_identities: &[],
     };
     let mut treatment = treat_delaunay_volume_slivers(
         input,
@@ -248,9 +263,20 @@ fn treatment_is_a_checked_noop_and_rejects_tampering() {
         &NeverCancelled,
     )
     .unwrap();
-    treatment.relocations[0]
-        .source_tetrahedron_node_identities
-        .swap(0, 1);
+    match &mut treatment.mutations[0] {
+        DelaunayVolumeSliverMutation::Relocated(relocation) => {
+            relocation.source_node_identity = StableDigest::from_bytes([9; 32]);
+        }
+        DelaunayVolumeSliverMutation::Deleted(deletion) => {
+            deletion.source_node_identity = StableDigest::from_bytes([9; 32]);
+        }
+        DelaunayVolumeSliverMutation::Reconnected(_) => {
+            panic!("fixture should use an interior vertex mutation")
+        }
+        DelaunayVolumeSliverMutation::Inserted(_) => {
+            panic!("fixture should use an interior vertex mutation")
+        }
+    }
     assert_eq!(
         validate_delaunay_volume_sliver_treatment(
             input,
@@ -260,7 +286,7 @@ fn treatment_is_a_checked_noop_and_rejects_tampering() {
         )
         .unwrap_err()
         .kind,
-        DelaunayVolumeSliverErrorKind::InvalidInput
+        DelaunayVolumeSliverErrorKind::InvalidTopology
     );
 }
 
@@ -307,6 +333,7 @@ fn treatment_reports_immovable_slivers_limits_and_cancellation() {
         provenance: &provenance,
         quality: &initial_quality,
         quality_options: quality_options(),
+        fixed_node_identities: &[],
     };
     assert_eq!(
         treat_delaunay_volume_slivers(
@@ -316,7 +343,7 @@ fn treatment_reports_immovable_slivers_limits_and_cancellation() {
         )
         .unwrap_err()
         .kind,
-        DelaunayVolumeSliverErrorKind::NoAdmissibleRelocation
+        DelaunayVolumeSliverErrorKind::NoAdmissibleOptimization
     );
     assert_eq!(
         treat_delaunay_volume_slivers(
@@ -357,6 +384,7 @@ fn treatment_reports_immovable_slivers_limits_and_cancellation() {
         provenance: &movable_provenance,
         quality: &strict_quality,
         quality_options: strict_options,
+        fixed_node_identities: &[],
     };
     assert_eq!(
         treat_delaunay_volume_slivers(

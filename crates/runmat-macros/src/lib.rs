@@ -9,6 +9,11 @@ use syn::{
     MetaNameValue, NestedMeta, Pat,
 };
 
+mod invocation_parameters;
+use invocation_parameters::{
+    is_optional_call_admission_sink, is_optional_runtime_context, is_optional_usize,
+};
+
 static WASM_REGISTRY_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static WASM_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static WASM_REGISTRY_INIT: OnceLock<()> = OnceLock::new();
@@ -27,6 +32,11 @@ static WASM_REGISTRY_INIT: OnceLock<()> = OnceLock::new();
 ///
 /// This registers the function with the `runmat-builtins` inventory
 /// so the runtime can discover it at start-up.
+/// Canonical `binding_variant` functions may opt into `context = true`
+/// and `requested_outputs = true`. Those leading, structurally typed
+/// invocation parameters are not user arguments and do not affect arity.
+/// `output_sequence = true` selects a handler returning a checked
+/// `ValueSequence` directly, without a language-value output carrier.
 #[proc_macro_attribute]
 pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse attribute arguments as `name = "..."`
@@ -49,8 +59,14 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut integer_capabilities_path: Option<syn::Path> = None;
     let mut integer_audit_path: Option<syn::Path> = None;
     let mut binding_variant_lit: Option<LitStr> = None;
+    let mut explicit_context = false;
+    let mut explicit_requested_outputs = false;
+    let mut explicit_call_observation = false;
+    let mut output_sequence = false;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
+    let mut process_execution_stack = false;
+    let mut required_capabilities: Vec<String> = Vec::new();
     for arg in args {
         match arg {
             NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) => {
@@ -89,6 +105,34 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     if let Lit::Bool(lb) = lit {
                         suppress_auto_output_flag = lb.value;
                     }
+                } else if path.is_ident("execution_stack") {
+                    if let Lit::Str(value) = lit {
+                        match value.value().as_str() {
+                            "process" => process_execution_stack = true,
+                            "any" => process_execution_stack = false,
+                            other => panic!(
+                                "execution_stack must be \"any\" or \"process\", got {other:?}"
+                            ),
+                        }
+                    } else {
+                        panic!("execution_stack must be a string literal");
+                    }
+                } else if path.is_ident("capabilities") {
+                    if let Lit::Str(value) = lit {
+                        required_capabilities.extend(
+                            value
+                                .value()
+                                .split(|character: char| {
+                                    character == ','
+                                        || character == '|'
+                                        || character.is_ascii_whitespace()
+                                })
+                                .filter(|value| !value.is_empty())
+                                .map(str::to_ascii_lowercase),
+                        );
+                    } else {
+                        panic!("capabilities must be a string literal");
+                    }
                 } else if path.is_ident("builtin_path") {
                     if let Lit::Str(ls) = lit {
                         builtin_path_lit = Some(ls);
@@ -100,6 +144,30 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         binding_variant_lit = Some(ls);
                     } else {
                         panic!("binding_variant must be a string literal");
+                    }
+                } else if path.is_ident("context") {
+                    if let Lit::Bool(value) = lit {
+                        explicit_context = value.value;
+                    } else {
+                        panic!("context must be a boolean literal");
+                    }
+                } else if path.is_ident("requested_outputs") {
+                    if let Lit::Bool(value) = lit {
+                        explicit_requested_outputs = value.value;
+                    } else {
+                        panic!("requested_outputs must be a boolean literal");
+                    }
+                } else if path.is_ident("call_observation") {
+                    if let Lit::Bool(value) = lit {
+                        explicit_call_observation = value.value;
+                    } else {
+                        panic!("call_observation must be a boolean literal");
+                    }
+                } else if path.is_ident("output_sequence") {
+                    if let Lit::Bool(value) = lit {
+                        output_sequence = value.value;
+                    } else {
+                        panic!("output_sequence must be a boolean literal");
                     }
                 } else if path.is_ident("type_resolver") {
                     if let Lit::Str(ls) = lit {
@@ -217,6 +285,47 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             _ => panic!("self parameter not allowed"),
         }
     }
+    if (explicit_context || explicit_requested_outputs || explicit_call_observation)
+        && binding_variant_lit.is_none()
+    {
+        panic!("invocation metadata requires a canonical binding_variant");
+    }
+    if output_sequence && binding_variant_lit.is_none() {
+        panic!("output_sequence requires a canonical binding_variant");
+    }
+    let context_param = if explicit_context {
+        let context_type = param_types
+            .first()
+            .expect("context injection requires a first Option<RuntimeContext> parameter");
+        if !is_optional_runtime_context(context_type) {
+            panic!("context injection requires Option<RuntimeContext> as the first parameter");
+        }
+        Some((param_idents.remove(0), param_types.remove(0)))
+    } else {
+        None
+    };
+    let requested_outputs_param = if explicit_requested_outputs {
+        let output_type = param_types.first().expect(
+            "requested_outputs injection requires an Option<usize> parameter after context",
+        );
+        if !is_optional_usize(output_type) {
+            panic!("requested_outputs injection requires Option<usize> after context");
+        }
+        Some((param_idents.remove(0), param_types.remove(0)))
+    } else {
+        None
+    };
+    let call_observation_param = if explicit_call_observation {
+        let observation_type = param_types.first().expect(
+            "call_observation injection requires an Option<CallAdmissionSink> parameter after invocation metadata",
+        );
+        if !is_optional_call_admission_sink(observation_type) {
+            panic!("call_observation injection requires Option<CallAdmissionSink> after invocation metadata");
+        }
+        Some((param_idents.remove(0), param_types.remove(0)))
+    } else {
+        None
+    };
     let param_len = param_idents.len();
 
     // Infer parameter types for BuiltinFunction
@@ -229,12 +338,21 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         syn::ReturnType::Type(_, ty) => infer_builtin_type(ty),
     };
 
-    // Detect if last parameter is variadic Vec<Value>
+    // Canonical variadics retain their source owner; historical bindings may
+    // still expose an explicitly ordinary Vec<Value> ABI.
     let is_last_variadic = param_types
         .last()
         .map(|ty| {
             // crude detection: type path starts with Vec and inner type is runmat_value::Value or Value
             if let syn::Type::Path(tp) = ty {
+                if tp
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "BuiltinArguments")
+                {
+                    return true;
+                }
                 if tp
                     .path
                     .segments
@@ -264,6 +382,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Generate wrapper ident
     let wrapper_ident = format_ident!("__rt_wrap_{}", ident);
+    let body_ident = format_ident!("__rt_owned_body_{}", ident);
+    let layout_ident = format_ident!("__rt_owned_layout_{}", ident);
 
     let conv_stmts: Vec<proc_macro2::TokenStream> = if is_last_variadic && param_len > 0 {
         let mut stmts = Vec::new();
@@ -274,11 +394,28 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             .enumerate()
             .take(param_len - 1)
         {
-            stmts.push(quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; });
+            let conversion =
+                builtin_parameter_conversion(binding_variant_lit.is_some(), i, ident, ty);
+            stmts.push(conversion);
         }
-        // Collect the rest into Vec<Value>
+        // Canonical calls transfer a logical range of the original owner.
         let last_ident = &param_idents[param_len - 1];
-        stmts.push(quote! {
+        if matches!(&param_types[param_len - 1], syn::Type::Path(path)
+            if path.path.segments.last().is_some_and(|segment| segment.ident == "BuiltinArguments"))
+        {
+            stmts.push(quote! {
+                let #last_ident: crate::call::BuiltinArguments = args.into_range((#param_len - 1)..)?;
+            });
+        } else {
+            if binding_variant_lit.is_some() {
+                return syn::Error::new_spanned(
+                    &param_types[param_len - 1],
+                    "canonical variadic bindings require BuiltinArguments to retain their argument owner",
+                )
+                .to_compile_error()
+                .into();
+            }
+            stmts.push(quote! {
             let #last_ident : Vec<runmat_value::Value> = {
                 let mut v = Vec::new();
                 for j in (#param_len-1)..args.len() {
@@ -287,7 +424,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
                 v
             };
-        });
+            });
+        }
         stmts
     } else {
         param_idents
@@ -295,41 +433,160 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             .zip(param_types.iter())
             .enumerate()
             .map(|(i, (ident, ty))| {
-                quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; }
+                builtin_parameter_conversion(binding_variant_lit.is_some(), i, ident, ty)
             })
             .collect()
     };
 
+    let invocation_parameters = context_param
+        .iter()
+        .chain(requested_outputs_param.iter())
+        .chain(call_observation_param.iter())
+        .map(|(ident, _)| ident)
+        .collect::<Vec<_>>();
     let call_expr = if is_async {
-        quote! { #ident(#(#param_idents),*).await? }
+        quote! { #ident(#(#invocation_parameters,)* #(#param_idents),*).await? }
     } else {
-        quote! { #ident(#(#param_idents),*)? }
+        quote! { #ident(#(#invocation_parameters,)* #(#param_idents),*)? }
     };
 
-    let wrapper = quote! {
-        fn #wrapper_ident(args: &[runmat_value::Value]) -> runmat_builtins::BuiltinFuture {
-            #![allow(unused_variables)]
-            let args = args.to_vec();
-            Box::pin(async move {
-                if #is_last_variadic {
-                    if args.len() < #param_len - 1 {
-                        return Err(std::convert::From::from(format!(
-                            "expected at least {} args, got {}",
-                            #param_len - 1,
-                            args.len()
-                        )));
+    let context_binding = context_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = invocation.context; }
+    });
+    let owned_context_binding = context_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = input.context; }
+    });
+    let requested_outputs_binding = requested_outputs_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = invocation.requested_outputs; }
+    });
+    let owned_requested_outputs_binding = requested_outputs_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = input.requested_outputs; }
+    });
+    let call_observation_binding = call_observation_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = invocation.call_observation; }
+    });
+    let owned_call_observation_binding = call_observation_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = input.call_observation; }
+    });
+
+    let wrapper_input = if binding_variant_lit.is_some() {
+        quote! { invocation: crate::builtin::RuntimeBuiltinInvocation<'_> }
+    } else {
+        quote! { args: &[runmat_value::Value] }
+    };
+    let wrapper_return = if binding_variant_lit.is_some() {
+        quote! { crate::builtin::RuntimeBuiltinFuture }
+    } else {
+        quote! { runmat_builtins::BuiltinFuture }
+    };
+    let wrapper_args = if binding_variant_lit.is_some() {
+        quote! {
+            let input = invocation.into_continuation_input();
+        }
+    } else {
+        quote! { let args = args.to_vec(); }
+    };
+
+    let result_adaptation = if binding_variant_lit.is_some() {
+        quote! { crate::builtin::CanonicalBuiltinOutput::into_rooted_sequence(value) }
+    } else if output_sequence {
+        quote! { Ok(value) }
+    } else {
+        quote! { Ok(runmat_value::Value::from(value)) }
+    };
+    let arity_check = quote! {
+        let arity_error = if #is_last_variadic {
+            (args.len() < #param_len - 1).then(|| format!(
+                "expected at least {} args, got {}",
+                #param_len - 1,
+                args.len()
+            ))
+        } else {
+            (args.len() != #param_len).then(|| format!(
+                "expected {} args, got {}",
+                #param_len,
+                args.len()
+            ))
+        };
+    };
+    let body_after_arity = quote! {
+        #(#conv_stmts)*
+        let value = #call_expr;
+        #result_adaptation
+    };
+    let invocation_body = quote! {
+        #arity_check
+        if let Some(message) = arity_error {
+            return Err(std::convert::From::from(message));
+        }
+        #body_after_arity
+    };
+    let owned_args_binding = if param_len == 0 {
+        quote! { let _args = input.args; }
+    } else {
+        quote! { let args = input.args; }
+    };
+    let owned_helpers = if binding_variant_lit.is_some() {
+        quote! {
+            async fn #body_ident(
+                input: crate::builtin::BuiltinContinuationInput,
+            ) -> ::std::result::Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+                let _argument_context = input.context.clone();
+                // A variadic body consumes its argument range. Keep the same
+                // original roots until its returned values have acquired the
+                // canonical output owner, including direct embedding calls.
+                let _argument_owner = input.args.fork();
+                #owned_args_binding
+                #owned_context_binding
+                #owned_requested_outputs_binding
+                #owned_call_observation_binding
+                #body_after_arity
+            }
+
+            fn #layout_ident() -> ::std::result::Result<u64, crate::context::host_allocation::HostAllocationError> {
+                crate::builtin::continuation_layout_for(#body_ident)
+            }
+        }
+    } else {
+        quote! {}
+    };
+    let wrapper = if binding_variant_lit.is_some() {
+        quote! {
+            fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
+                #wrapper_args
+                let input = match input {
+                    Ok(input) => input,
+                    Err(error) => {
+                        return crate::builtin::rejected_builtin_future(error);
                     }
-                } else if args.len() != #param_len {
-                    return Err(std::convert::From::from(format!(
-                        "expected {} args, got {}",
-                        #param_len,
-                        args.len()
-                    )));
+                };
+                let args = &input.args;
+                #arity_check
+                if let Some(message) = arity_error {
+                    return crate::builtin::rejected_builtin_future(std::convert::From::from(message));
                 }
-                #(#conv_stmts)*
-                let value = #call_expr;
-                Ok(runmat_value::Value::from(value))
-            })
+                // Keep the target-sized async state out of this wrapper's
+                // caller stack. The factory boundary admits the exact named
+                // body type before constructing and erasing it once.
+                let allocation_context = input.context.clone();
+                crate::builtin::admitted_builtin_future_with(
+                    allocation_context,
+                    #name_lit,
+                    move |_| #body_ident(input),
+                )
+            }
+        }
+    } else {
+        quote! {
+            fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
+                #wrapper_args
+                #context_binding
+                #requested_outputs_binding
+                #call_observation_binding
+                Box::pin(async move {
+                    #invocation_body
+                })
+            }
         }
     };
 
@@ -391,6 +648,30 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     let sink_bool = sink_flag;
     let suppress_auto_output_bool = suppress_auto_output_flag;
+    let execution_stack_expr = if process_execution_stack {
+        quote! { runmat_builtins::ExecutionStackRequirement::Process }
+    } else {
+        quote! { runmat_builtins::ExecutionStackRequirement::Any }
+    };
+    let required_capability_tokens =
+        required_capabilities
+            .iter()
+            .map(|capability| match capability.as_str() {
+                "host_runtime" => quote! { runmat_types::CapabilityRequirement::HostRuntime },
+                "filesystem" => quote! { runmat_types::CapabilityRequirement::Filesystem },
+                "network" => quote! { runmat_types::CapabilityRequirement::Network },
+                "user_interface" => quote! { runmat_types::CapabilityRequirement::UserInterface },
+                "accelerator" => quote! { runmat_types::CapabilityRequirement::Accelerator },
+                "native_code" => quote! { runmat_types::CapabilityRequirement::NativeCode },
+                "foreign_runtime" => quote! { runmat_types::CapabilityRequirement::ForeignRuntime },
+                "parallel_runtime" => {
+                    quote! { runmat_types::CapabilityRequirement::ParallelRuntime }
+                }
+                "distributed_runtime" => {
+                    quote! { runmat_types::CapabilityRequirement::DistributedRuntime }
+                }
+                other => panic!("unknown builtin capability {other:?}"),
+            });
     let descriptor_expr = if let Some(path) = descriptor_path.as_ref() {
         quote! { Some(&#path) }
     } else {
@@ -427,6 +708,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #sink_bool,
             #suppress_auto_output_bool,
         )
+        .with_execution_stack(#execution_stack_expr)
+        .with_required_capabilities(&[#(#required_capability_tokens),*])
         .with_descriptor_option(#descriptor_expr)
         .with_extensions(#extensions_expr)
         .with_integer_capabilities(#integer_capabilities_expr)
@@ -450,7 +733,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             || integer_capabilities_path.is_some()
             || integer_audit_path.is_some()
             || sink_flag
-            || suppress_auto_output_flag)
+            || suppress_auto_output_flag
+            || process_execution_stack)
     {
         panic!(
             "catalog-backed runtime bindings may declare only name, binding_variant, and builtin_path"
@@ -473,11 +757,44 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let builtin_path_lit =
         builtin_path_lit.expect("runtime_builtin requires `builtin_path = \"...\"`");
+    let builtin_path_text = builtin_path_lit.clone();
     let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
         .expect("runtime_builtin `builtin_path` must be a valid path");
     let helper_ident = format_ident!("__runmat_wasm_register_builtin_{}", ident);
     let builtin_expr_helper = builtin_expr.clone();
     let doc_expr_helper = doc_expr.clone();
+    let provenance_authority = if binding_variant_lit.is_some() {
+        quote! { runmat_builtins::BuiltinImplementationAuthority::CanonicalBinding }
+    } else {
+        quote! { runmat_builtins::BuiltinImplementationAuthority::LegacyFunction }
+    };
+    let provenance_variant = if let Some(variant) = binding_variant_lit.as_ref() {
+        quote! { Some(#variant) }
+    } else {
+        quote! { None }
+    };
+    let provenance_expr = quote! {
+        runmat_builtins::BuiltinImplementationProvenance {
+            name: #name_str,
+            binding_variant: #provenance_variant,
+            source_file: file!(),
+            module_path: module_path!(),
+            function: stringify!(#ident),
+            builtin_path: #builtin_path_text,
+            authority: #provenance_authority,
+        }
+    };
+    let provenance_expr_helper = provenance_expr.clone();
+    let manifest_expr = quote! {
+        runmat_builtins::RegistrationManifestEntry {
+            kind: runmat_builtins::RegistrationKind::Builtin,
+            declaration: #name_str,
+            variant: #provenance_variant,
+            builtin_path: #builtin_path_text,
+        }
+    };
+    let manifest_expr_helper = manifest_expr.clone();
+    let manifest_variant = binding_variant_lit.as_ref().map(|value| value.value());
     let (wasm_helper, register_native) = if let Some(variant) = binding_variant_lit {
         let native_symbol = runmat_builtins::native_binding_symbol(&name_str, &variant.value());
         let native_symbol = syn::LitStr::new(&native_symbol, proc_macro2::Span::call_site());
@@ -492,7 +809,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     variant: #variant,
                 },
                 #wrapper_ident,
-            )
+            ).with_continuation_layout(#layout_ident).with_provenance(&#provenance_expr)
         };
         (
             quote! {
@@ -500,11 +817,17 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 #[allow(non_snake_case)]
                 pub(crate) fn #helper_ident() {
                     crate::builtin::wasm_registry::submit(#binding_expr);
+                    runmat_builtins::wasm_registry::submit_builtin_implementation_provenance(#provenance_expr_helper);
+                    runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
                 }
             },
             quote! {
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #binding_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #provenance_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #manifest_expr }
                 // A package's unit-test harness can link both its cfg(test)
                 // copy and a normal dependency copy of the runtime. Only the
                 // latter should publish the process-wide AOT ABI symbols.
@@ -521,6 +844,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 pub(crate) fn #helper_ident() {
                     runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
                     runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
+                    runmat_builtins::wasm_registry::submit_builtin_implementation_provenance(#provenance_expr_helper);
+                    runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
                 }
             },
             quote! {
@@ -528,16 +853,25 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 runmat_builtins::inventory::submit! { #builtin_expr }
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #doc_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #provenance_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #manifest_expr }
             },
         )
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "builtin",
+        &name_str,
+        manifest_variant.as_deref(),
+        &builtin_path_lit.value(),
+    );
 
     TokenStream::from(quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #func
+        #owned_helpers
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #wrapper
         #wasm_helper
@@ -607,29 +941,47 @@ pub fn runtime_constant(args: TokenStream, input: TokenStream) -> TokenStream {
     let item = parse_macro_input!(input as syn::Item);
 
     let constant_expr = quote! {
-        runmat_builtins::Constant {
-            name: #name,
-            value: #value,
+        runmat_builtins::ConstantRegistration {
+            constant: runmat_builtins::Constant {
+                name: #name,
+                value: #value,
+            },
+            source_file: file!(),
+            module_path: module_path!(),
+            builtin_path: #builtin_path_lit,
         }
     };
 
     let helper_ident = helper_ident_from_name("__runmat_wasm_register_const_", &name);
     let constant_expr_helper = constant_expr.clone();
+    let manifest_expr = quote! {
+        runmat_builtins::RegistrationManifestEntry {
+            kind: runmat_builtins::RegistrationKind::Constant, declaration: #name, variant: None, builtin_path: #builtin_path_lit,
+        }
+    };
+    let manifest_expr_helper = manifest_expr.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
             runmat_builtins::wasm_registry::submit_constant(#constant_expr_helper);
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
         }
     };
     let register_native = quote! {
         #[cfg(not(target_arch = "wasm32"))]
         #[allow(non_upper_case_globals)]
         runmat_builtins::inventory::submit! { #constant_expr }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #manifest_expr }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "constant",
+        &name,
+        None,
+        &builtin_path_lit.value(),
+    );
 
     TokenStream::from(quote! {
         #item
@@ -669,47 +1021,114 @@ pub fn register_constant(input: TokenStream) -> TokenStream {
         value,
         builtin_path,
     } = parse_macro_input!(input as RegisterConstantArgs);
+    let builtin_path_lit = builtin_path.clone();
     let constant_expr = quote! {
-        runmat_builtins::Constant {
-            name: #name,
-            value: #value,
+        runmat_builtins::ConstantRegistration {
+            constant: runmat_builtins::Constant {
+                name: #name,
+                value: #value,
+            },
+            source_file: file!(),
+            module_path: module_path!(),
+            builtin_path: #builtin_path_lit,
         }
     };
     let helper_ident = helper_ident_from_name("__runmat_wasm_register_const_", &name.value());
     let builtin_path: syn::Path = syn::parse_str(&builtin_path.value())
         .expect("register_constant `builtin_path` must be a valid path");
     let constant_expr_helper = constant_expr.clone();
+    let manifest_expr = quote! {
+        runmat_builtins::RegistrationManifestEntry {
+            kind: runmat_builtins::RegistrationKind::Constant, declaration: #name, variant: None, builtin_path: #builtin_path_lit,
+        }
+    };
+    let manifest_expr_helper = manifest_expr.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
             runmat_builtins::wasm_registry::submit_constant(#constant_expr_helper);
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(#manifest_expr_helper);
         }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "constant",
+        &name.value(),
+        None,
+        &builtin_path_lit.value(),
+    );
     TokenStream::from(quote! {
         #wasm_helper
         #[cfg(not(target_arch = "wasm32"))]
         runmat_builtins::inventory::submit! { #constant_expr }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! { #manifest_expr }
     })
 }
 
 struct RegisterSpecAttrArgs {
     spec_expr: Option<Expr>,
     builtin_path: Option<LitStr>,
+    semantics: Option<Expr>,
+    structural: Option<Expr>,
+    epilogue: Option<Expr>,
+    reduction: Option<Expr>,
+    host_resources: Option<Expr>,
 }
+
+#[cfg(test)]
+#[path = "spec_registration_tests.rs"]
+mod spec_registration_tests;
 
 impl Parse for RegisterSpecAttrArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut spec_expr = None;
         let mut builtin_path = None;
+        let mut semantics = None;
+        let mut structural = None;
+        let mut epilogue = None;
+        let mut reduction = None;
+        let mut host_resources = None;
         while !input.is_empty() {
             let ident: syn::Ident = input.parse()?;
             input.parse::<syn::Token![=]>()?;
             if ident == "spec" {
                 spec_expr = Some(input.parse()?);
+            } else if ident == "semantics" {
+                semantics = Some(input.parse()?);
+            } else if ident == "structural" {
+                if structural.is_some() {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "duplicate structural declaration",
+                    ));
+                }
+                structural = Some(input.parse()?);
+            } else if ident == "epilogue" {
+                if epilogue.is_some() {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "duplicate epilogue declaration",
+                    ));
+                }
+                epilogue = Some(input.parse()?);
+            } else if ident == "reduction" {
+                if reduction.is_some() {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "duplicate reduction declaration",
+                    ));
+                }
+                reduction = Some(input.parse()?);
+            } else if ident == "host_resources" {
+                if host_resources.is_some() {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "duplicate host resource declaration",
+                    ));
+                }
+                host_resources = Some(input.parse()?);
             } else if ident == "builtin_path" {
                 let lit: LitStr = input.parse()?;
                 builtin_path = Some(lit);
@@ -723,6 +1142,11 @@ impl Parse for RegisterSpecAttrArgs {
         Ok(Self {
             spec_expr,
             builtin_path,
+            semantics,
+            structural,
+            epilogue,
+            reduction,
+            host_resources,
         })
     }
 }
@@ -733,7 +1157,25 @@ pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
     let RegisterSpecAttrArgs {
         spec_expr,
         builtin_path,
+        semantics,
+        structural,
+        epilogue,
+        reduction,
+        host_resources,
     } = args;
+    if semantics.is_some()
+        || structural.is_some()
+        || epilogue.is_some()
+        || reduction.is_some()
+        || host_resources.is_some()
+    {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "semantics and structural operations belong to a fusion registration",
+        )
+        .to_compile_error()
+        .into();
+    }
     let item_const = parse_macro_input!(item as ItemConst);
     let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
         let ident = &item_const.ident;
@@ -748,24 +1190,51 @@ pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
         "__runmat_wasm_register_gpu_spec_{}",
         item_const.ident.to_string()
     );
+    let declaration = item_const.ident.to_string();
     let spec_tokens_helper = spec_tokens.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
-            crate::builtins::common::spec::wasm_registry::submit_gpu_spec(&#spec_tokens_helper);
+            crate::builtins::common::spec::wasm_registry::submit_gpu_spec(
+                crate::builtins::common::spec::GpuSpecRegistration {
+                    spec: &#spec_tokens_helper, builtin_path: #builtin_path_lit, declaration: #declaration,
+                    source_file: file!(), module_path: module_path!(),
+                }
+            );
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(
+                runmat_builtins::RegistrationManifestEntry {
+                    kind: runmat_builtins::RegistrationKind::GpuSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+                }
+            );
         }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "gpu_spec",
+        &declaration,
+        None,
+        &builtin_path_lit.value(),
+    );
     let expanded = quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #item_const
         #wasm_helper
         #[cfg(not(target_arch = "wasm32"))]
         inventory::submit! {
-            crate::builtins::common::spec::GpuSpecInventory { spec: &#spec_for_native }
+            crate::builtins::common::spec::GpuSpecInventory {
+                spec: &#spec_for_native,
+                builtin_path: #builtin_path_lit,
+                declaration: #declaration,
+                source_file: file!(),
+                module_path: module_path!(),
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! {
+            runmat_builtins::RegistrationManifestEntry {
+                kind: runmat_builtins::RegistrationKind::GpuSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+            }
         }
     };
     expanded.into()
@@ -777,7 +1246,27 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
     let RegisterSpecAttrArgs {
         spec_expr,
         builtin_path,
+        semantics,
+        structural,
+        epilogue,
+        reduction,
+        host_resources,
     } = args;
+    let host_resources = host_resources
+        .map(|value| quote! { Some(#value) })
+        .unwrap_or_else(|| quote! { None });
+    let reduction = reduction
+        .map(|value| quote! { Some(&#value) })
+        .unwrap_or_else(|| quote! { None });
+    let epilogue = epilogue
+        .map(|value| quote! { Some(#value) })
+        .unwrap_or_else(|| quote! { None });
+    let structural = structural
+        .map(|value| quote! { Some(#value) })
+        .unwrap_or_else(|| quote! { None });
+    let semantics = semantics
+        .map(|value| quote! { Some(&#value) })
+        .unwrap_or_else(|| quote! { None });
     let item_const = parse_macro_input!(item as ItemConst);
     let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
         let ident = &item_const.ident;
@@ -792,30 +1281,73 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
         "__runmat_wasm_register_fusion_spec_{}",
         item_const.ident.to_string()
     );
+    let declaration = item_const.ident.to_string();
     let spec_tokens_helper = spec_tokens.clone();
     let wasm_helper = quote! {
         #[cfg(target_arch = "wasm32")]
         #[allow(non_snake_case)]
         pub(crate) fn #helper_ident() {
-            crate::builtins::common::spec::wasm_registry::submit_fusion_spec(&#spec_tokens_helper);
+            crate::builtins::common::spec::wasm_registry::submit_fusion_spec(
+                crate::builtins::common::spec::FusionSpecRegistration {
+                    spec: &#spec_tokens_helper, builtin_path: #builtin_path_lit, declaration: #declaration,
+                    semantics: #semantics,
+                    structural: #structural,
+                    epilogue: #epilogue,
+                    reduction: #reduction,
+                    host_resources: #host_resources,
+                    source_file: file!(), module_path: module_path!(),
+                }
+            );
+            runmat_builtins::wasm_registry::submit_registration_manifest_entry(
+                runmat_builtins::RegistrationManifestEntry {
+                    kind: runmat_builtins::RegistrationKind::FusionSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+                }
+            );
         }
     };
-    append_wasm_block(quote! {
-        #builtin_path::#helper_ident();
-    });
+    append_wasm_block(
+        quote! { #builtin_path::#helper_ident(); },
+        "fusion_spec",
+        &declaration,
+        None,
+        &builtin_path_lit.value(),
+    );
     let expanded = quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #item_const
         #wasm_helper
         #[cfg(not(target_arch = "wasm32"))]
         inventory::submit! {
-            crate::builtins::common::spec::FusionSpecInventory { spec: &#spec_for_native }
+            crate::builtins::common::spec::FusionSpecInventory {
+                spec: &#spec_for_native,
+                semantics: #semantics,
+                structural: #structural,
+                epilogue: #epilogue,
+                reduction: #reduction,
+                host_resources: #host_resources,
+                builtin_path: #builtin_path_lit,
+                declaration: #declaration,
+                source_file: file!(),
+                module_path: module_path!(),
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        runmat_builtins::inventory::submit! {
+            runmat_builtins::RegistrationManifestEntry {
+                kind: runmat_builtins::RegistrationKind::FusionSpec, declaration: #declaration, variant: None, builtin_path: #builtin_path_lit,
+            }
         }
     };
     expanded.into()
 }
 
-fn append_wasm_block(block: proc_macro2::TokenStream) {
+fn append_wasm_block(
+    block: proc_macro2::TokenStream,
+    kind: &str,
+    declaration: &str,
+    variant: Option<&str>,
+    builtin_path: &str,
+) {
     if !should_generate_wasm_registry() {
         return;
     }
@@ -826,7 +1358,16 @@ fn append_wasm_block(block: proc_macro2::TokenStream) {
     let _guard = wasm_registry_lock().lock().unwrap();
     initialize_registry_file(path);
     let mut contents = fs::read_to_string(path).expect("failed to read wasm registry file");
-    let insertion = format!("    {}\n", block);
+    for value in [kind, declaration, variant.unwrap_or("-"), builtin_path] {
+        assert!(
+            !value.contains(['\t', '\n', '\r']),
+            "WASM registry manifest fields cannot contain control separators"
+        );
+    }
+    let (variant_presence, variant_value) = variant.map_or(("none", ""), |value| ("some", value));
+    let insertion = format!(
+        "    // @runmat-wasm-registration-v2\t{kind}\t{declaration}\t{variant_presence}\t{variant_value}\t{builtin_path}\n    {block}\n"
+    );
     if let Some(pos) = contents.rfind('}') {
         contents.insert_str(pos, &insertion);
     } else {
@@ -862,6 +1403,11 @@ pub const REGISTRY_COMPLETE: bool = false;\n\
 pub const REGISTRY_SOURCE_FINGERPRINT: &str = \"missing-build-script\";\n\
 pub const REGISTRY_BUILD_CONFIGURATION: &str = \"missing-build-script\";\n\
 pub const REGISTRY_ENTRY_COUNT: usize = 0;\n\n\
+pub const REGISTRY_MANIFEST_DIGEST: &str = \"0000000000000000000000000000000000000000000000000000000000000000\";\n\
+pub const REGISTRY_BUILTIN_COUNT: usize = 0;\n\
+pub const REGISTRY_CONSTANT_COUNT: usize = 0;\n\
+pub const REGISTRY_GPU_SPEC_COUNT: usize = 0;\n\
+pub const REGISTRY_FUSION_SPEC_COUNT: usize = 0;\n\n\
 pub fn register_all() {\n}\n";
         fs::write(path, HEADER).expect("failed to initialize wasm registry file");
     });
@@ -913,6 +1459,26 @@ fn helper_ident_from_name(prefix: &str, name: &str) -> proc_macro2::Ident {
 }
 
 /// Smart type inference from Rust types to our enhanced Type enum
+fn builtin_parameter_conversion(
+    canonical: bool,
+    index: usize,
+    ident: &syn::Ident,
+    ty: &syn::Type,
+) -> proc_macro2::TokenStream {
+    if canonical
+        && matches!(ty, syn::Type::Path(path)
+        if path.path.segments.last().is_some_and(|segment| segment.ident == "Utf8Text"))
+    {
+        quote! {
+            let #ident: #ty = crate::call::argument_text::convert(
+                &args[#index], _argument_context.as_ref(),
+            )?;
+        }
+    } else {
+        quote! { let #ident: #ty = std::convert::TryInto::try_into(&args[#index])?; }
+    }
+}
+
 fn infer_builtin_type(ty: &syn::Type) -> proc_macro2::TokenStream {
     use syn::Type;
 

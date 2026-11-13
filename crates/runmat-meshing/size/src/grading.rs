@@ -1,12 +1,27 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::metric::{MetricContractError, MetricTensor3, ResolvedMetricEvaluation};
+mod incremental;
+mod indexed;
+pub use incremental::{
+    plan_metric_cap_update, MetricCapGraph, MetricCapUpdate, MetricCapUpdateError,
+};
+/// Realize a validated cap against a raw evaluation, exactly once.
+pub fn apply_metric_grading_cap(
+    evaluation: &mut ResolvedMetricEvaluation,
+    cap: f64,
+) -> Result<(), MetricContractError> {
+    indexed::apply_cap(evaluation, cap)
+}
+
+pub use indexed::grade_indexed_metric_evaluations;
+
+use crate::metric::{MetricContractError, ResolvedMetricEvaluation};
 
 /// Applies a conservative Lipschitz-like size bound over a canonical entity-adjacency graph.
 ///
 /// A fine metric may constrain a graph neighbor to at most `maximum_grading_ratio` times its
-/// characteristic size. Tightening is isotropic, so it cannot weaken an existing anisotropic
-/// tensor in any direction. The result is independent of map construction and traversal order.
+/// characteristic size. Tightening scales the original tensor, preserving its anisotropy
+/// without weakening any direction. The result is independent of map construction and traversal order.
 pub fn grade_metric_evaluations<Identity: Clone + Ord>(
     maximum_grading_ratio: f64,
     adjacency: &BTreeMap<Identity, BTreeSet<Identity>>,
@@ -19,49 +34,38 @@ pub fn grade_metric_evaluations<Identity: Clone + Ord>(
         ));
     }
     validate_graph(adjacency, evaluations)?;
-    let mut size_caps = evaluations
+    let identities = adjacency.keys().collect::<Vec<_>>();
+    let indices = identities
         .iter()
-        .map(|(entity, evaluation)| {
-            Ok((
-                entity.clone(),
-                evaluation.metric.conservative_minimum_length_m()?,
-            ))
-        })
-        .collect::<Result<BTreeMap<_, _>, MetricContractError>>()?;
-    let original_caps = size_caps.clone();
-
-    // Bellman-Ford relaxation computes min(source_size * ratio^graph_distance). A simple
-    // canonical pass is preferable here to queue ordering that could expose floating ties.
-    for _ in 1..size_caps.len() {
-        let previous = size_caps.clone();
-        let mut changed = false;
-        for (entity, neighbors) in adjacency {
-            let source = previous[entity];
-            for neighbor in neighbors {
-                let candidate = source * maximum_grading_ratio;
-                if candidate.is_finite() && candidate < size_caps[neighbor] {
-                    size_caps.insert(neighbor.clone(), candidate);
-                    changed = true;
-                }
-            }
-        }
-        if !changed {
-            break;
-        }
+        .enumerate()
+        .map(|(index, identity)| (*identity, index))
+        .collect::<BTreeMap<_, _>>();
+    let mut offsets = vec![0];
+    let mut neighbors = Vec::new();
+    for identity in &identities {
+        neighbors.extend(
+            adjacency[*identity]
+                .iter()
+                .map(|neighbor| indices[neighbor]),
+        );
+        offsets.push(neighbors.len());
     }
-
-    for (entity, size_cap) in size_caps {
-        if size_cap < original_caps[&entity] {
-            let grading_metric = MetricTensor3::isotropic_length_m(size_cap)?;
-            let evaluation = evaluations
-                .get_mut(&entity)
-                .ok_or_else(|| invalid("metric grading graph", "lost a validated entity"))?;
-            evaluation.metric = add(evaluation.metric, grading_metric)?;
-            evaluation.clipped_contribution_count = evaluation
-                .clipped_contribution_count
-                .checked_add(1)
-                .ok_or_else(|| invalid("metric grading evidence", "count overflowed"))?;
-        }
+    let updates = indexed::plan(
+        maximum_grading_ratio,
+        &identities,
+        &offsets,
+        &neighbors,
+        |index| {
+            evaluations[identities[index]]
+                .metric
+                .conservative_minimum_length_m()
+        },
+    )?;
+    for (index, cap) in updates {
+        let evaluation = evaluations
+            .get_mut(identities[index])
+            .ok_or_else(|| invalid("metric grading graph", "lost a validated entity"))?;
+        indexed::apply_cap(evaluation, cap)?;
     }
     Ok(())
 }
@@ -90,19 +94,6 @@ fn validate_graph<Identity: Ord>(
     Ok(())
 }
 
-fn add(left: MetricTensor3, right: MetricTensor3) -> Result<MetricTensor3, MetricContractError> {
-    let metric = MetricTensor3 {
-        xx: left.xx + right.xx,
-        yy: left.yy + right.yy,
-        zz: left.zz + right.zz,
-        xy: left.xy + right.xy,
-        xz: left.xz + right.xz,
-        yz: left.yz + right.yz,
-    };
-    metric.validate()?;
-    Ok(metric)
-}
-
 fn invalid(field: &str, reason: &str) -> MetricContractError {
     MetricContractError {
         field: field.into(),
@@ -113,7 +104,7 @@ fn invalid(field: &str, reason: &str) -> MetricContractError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metric::MetricSourceKind;
+    use crate::metric::{MetricSourceKind, MetricTensor3};
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 
     #[test]
@@ -170,6 +161,88 @@ mod tests {
         assert!(grade_metric_evaluations(1.2, &adjacency, &mut evaluations).is_err());
     }
 
+    #[test]
+    fn grading_propagates_over_long_paths_from_every_source() {
+        let entities = (0..8).map(entity).collect::<Vec<_>>();
+        let adjacency = entities
+            .iter()
+            .enumerate()
+            .map(|(index, current)| {
+                let mut neighbors = BTreeSet::new();
+                if index > 0 {
+                    neighbors.insert(entities[index - 1].clone());
+                }
+                if index + 1 < entities.len() {
+                    neighbors.insert(entities[index + 1].clone());
+                }
+                (current.clone(), neighbors)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut evaluations = entities
+            .iter()
+            .enumerate()
+            .map(|(index, current)| {
+                let length = match index {
+                    0 => 0.01,
+                    7 => 0.02,
+                    _ => 10.0,
+                };
+                (current.clone(), evaluation(length))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        grade_metric_evaluations(2.0, &adjacency, &mut evaluations).unwrap();
+
+        let expected = [0.01, 0.02, 0.04, 0.08, 0.16, 0.08, 0.04, 0.02];
+        for (current, expected) in entities.iter().zip(expected) {
+            let actual = evaluations[current]
+                .metric
+                .conservative_minimum_length_m()
+                .unwrap();
+            assert!(actual <= expected);
+            assert!(actual > expected * 0.99);
+        }
+    }
+
+    #[test]
+    fn unit_grading_ratio_propagates_the_global_minimum() {
+        let entities = [entity(1), entity(2), entity(3)];
+        let adjacency = BTreeMap::from([
+            (entities[0].clone(), BTreeSet::from([entities[1].clone()])),
+            (
+                entities[1].clone(),
+                BTreeSet::from([entities[0].clone(), entities[2].clone()]),
+            ),
+            (entities[2].clone(), BTreeSet::from([entities[1].clone()])),
+        ]);
+        let mut evaluations = BTreeMap::from([
+            (entities[0].clone(), evaluation(0.25)),
+            (entities[1].clone(), evaluation(1.0)),
+            (entities[2].clone(), evaluation(2.0)),
+        ]);
+
+        grade_metric_evaluations(1.0, &adjacency, &mut evaluations).unwrap();
+
+        let propagated = entities[1..]
+            .iter()
+            .map(|current| {
+                evaluations[current]
+                    .metric
+                    .conservative_minimum_length_m()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(propagated, vec![0.25, 0.25]);
+        let once = evaluations.clone();
+        grade_metric_evaluations(1.0, &adjacency, &mut evaluations).unwrap();
+        assert_eq!(
+            evaluations, once,
+            "regrading must not invent additional density"
+        );
+        assert_eq!(evaluations[&entities[1]].clipped_contribution_count, 1);
+        assert_eq!(evaluations[&entities[2]].clipped_contribution_count, 1);
+    }
+
     fn evaluation(length_m: f64) -> ResolvedMetricEvaluation {
         ResolvedMetricEvaluation {
             metric: MetricTensor3::isotropic_length_m(length_m).unwrap(),
@@ -181,10 +254,10 @@ mod tests {
     }
 
     fn entity(seed: u8) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Edge,
-            source_topology_id: format!("edge-{seed}"),
-            assembly_path: Vec::new(),
-        }
+        PersistentEntityId::new(
+            PersistentEntityKind::Edge,
+            format!("edge-{seed}"),
+            Vec::new(),
+        )
     }
 }

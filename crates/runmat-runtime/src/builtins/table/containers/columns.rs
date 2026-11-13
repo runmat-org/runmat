@@ -35,22 +35,24 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
             Ok(out)
         }
         Value::ComplexTensor(tensor) => {
-            let mut out = Vec::with_capacity(tensor.cols);
-            for col in 0..tensor.cols {
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            let mut out = Vec::with_capacity(cols);
+            for col in 0..cols {
                 let value = if let Some(storage) = &tensor.integer_storage() {
-                    let mut real = Vec::with_capacity(tensor.rows);
-                    let mut imag = Vec::with_capacity(tensor.rows);
-                    for row in 0..tensor.rows {
-                        let index = row + col * tensor.rows;
+                    let mut real = Vec::with_capacity(rows);
+                    let mut imag = Vec::with_capacity(rows);
+                    for row in 0..rows {
+                        let index = row + col * rows;
                         real.push(
                             storage
-                                .real
+                                .real()
                                 .value_at(index)
                                 .expect("integer tensor storage matches tensor shape"),
                         );
                         imag.push(
                             storage
-                                .imag
+                                .imag()
                                 .value_at(index)
                                 .expect("integer tensor storage matches tensor shape"),
                         );
@@ -58,24 +60,52 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                     ComplexTensor::new_integer(
                         runmat_value::IntegerComplexStorage::new(
                             storage
-                                .real
+                                .real()
                                 .from_exact_values_like(real)
                                 .map_err(invalid_variable)?,
                             storage
-                                .imag
+                                .imag()
                                 .from_exact_values_like(imag)
                                 .map_err(invalid_variable)?,
                         )
                         .map_err(invalid_variable)?,
-                        vec![tensor.rows, 1],
+                        vec![rows, 1],
                     )
                     .map_err(invalid_variable)?
                 } else {
-                    let mut data = Vec::with_capacity(tensor.rows);
-                    for row in 0..tensor.rows {
-                        data.push(tensor.materialize_f64()[row + col * tensor.rows]);
+                    let start = col * rows;
+                    let end = start + rows;
+                    match tensor.complex_storage() {
+                        runmat_value::ComplexStorage::F64(values) => ComplexTensor::new(
+                            values
+                                .get(start..end)
+                                .ok_or_else(|| {
+                                    invalid_index("array2table: complex column out of bounds")
+                                })?
+                                .iter()
+                                .copied()
+                                .map(Into::into)
+                                .collect(),
+                            vec![rows, 1],
+                        )
+                        .map_err(invalid_variable)?,
+                        runmat_value::ComplexStorage::F32(values) => ComplexTensor::from_f32(
+                            values
+                                .get(start..end)
+                                .ok_or_else(|| {
+                                    invalid_index("array2table: complex column out of bounds")
+                                })?
+                                .iter()
+                                .copied()
+                                .map(Into::into)
+                                .collect(),
+                            vec![rows, 1],
+                        )
+                        .map_err(invalid_variable)?,
+                        runmat_value::ComplexStorage::Integer(_) => {
+                            unreachable!("integer complex storage handled above")
+                        }
                     }
-                    ComplexTensor::new(data, vec![tensor.rows, 1]).map_err(invalid_variable)?
                 };
                 out.push(Value::ComplexTensor(value));
             }
@@ -88,10 +118,11 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
             for col in 0..cols {
                 let mut data = Vec::with_capacity(rows);
                 for row in 0..rows {
-                    data.push(array.data[row + col * rows].clone());
+                    data.push(array.data()[row + col * rows].clone());
                 }
                 out.push(Value::StringArray(
-                    StringArray::new(data, vec![rows, 1]).map_err(invalid_variable)?,
+                    StringArray::from_elements_unbounded(data, vec![rows, 1])
+                        .map_err(invalid_variable)?,
                 ));
             }
             Ok(out)
@@ -134,6 +165,26 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
 mod tests {
     use super::*;
     use runmat_value::{IntegerStorage, NumericStorage};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn split_complex_columns_preserves_rank_boundaries_and_column_order() {
+        let scalar = ComplexTensor::new(vec![(7.0, 2.0)], Vec::new()).unwrap();
+        assert!(split_value_columns(Value::ComplexTensor(scalar))
+            .unwrap()
+            .is_empty());
+
+        let row = ComplexTensor::new(vec![(7.0, 2.0), (3.0, 4.0)], vec![2]).unwrap();
+        let columns = split_value_columns(Value::ComplexTensor(row)).unwrap();
+        assert_eq!(columns.len(), 2);
+        for (column, expected) in columns.iter().zip([(7.0, 2.0), (3.0, 4.0)]) {
+            let Value::ComplexTensor(tensor) = column else {
+                panic!("complex column")
+            };
+            assert_eq!(tensor.shape(), [1, 1]);
+            assert_eq!(tensor.materialize_f64(), vec![expected]);
+        }
+    }
 
     #[test]
     fn split_value_columns_preserves_native_single_storage() {

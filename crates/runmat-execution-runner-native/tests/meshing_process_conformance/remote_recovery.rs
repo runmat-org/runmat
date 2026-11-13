@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -6,8 +6,8 @@ use runmat_execution::identity::{AttemptId, ValueId};
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
 use runmat_execution_runner_native::{
-    NativeExecutionResult, QuicRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt,
-    RemoteObjectReceipt, RemoteValueReceipt, RemoteWorkerChannel,
+    AuthenticatedPhysicalRetirement, NativeExecutionResult, QuicRemoteWorkerChannel, RemoteAttempt,
+    RemoteBundleReceipt, RemoteObjectReceipt, RemoteValueReceipt, RemoteWorkerChannel,
 };
 
 use super::*;
@@ -17,6 +17,7 @@ struct ObservedRemoteChannel {
     hold_report: bool,
     report_ready: Arc<tokio::sync::Notify>,
     release_report: Arc<tokio::sync::Notify>,
+    retirement_available: Arc<AtomicBool>,
     transferred_objects: AtomicUsize,
     executions: AtomicUsize,
     attempt_ids: Mutex<Vec<AttemptId>>,
@@ -30,6 +31,10 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
 
     fn worker(&self) -> &WorkerSpec {
         self.inner.worker()
+    }
+
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        self.inner.describe_worker().await
     }
 
     async fn install_bundle(
@@ -82,6 +87,23 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
         report
     }
 
+    async fn authenticated_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<Option<AuthenticatedPhysicalRetirement>> {
+        if !self.retirement_available.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        self.inner.authenticated_physical_retirement(request).await
+    }
+
+    async fn acknowledge_physical_retirement(
+        &self,
+        request: &AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        self.inner.acknowledge_physical_retirement(request).await
+    }
+
     fn drain_progress(
         &self,
         attempt_id: AttemptId,
@@ -89,8 +111,12 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
         self.inner.drain_progress(attempt_id)
     }
 
-    async fn cancel(&self, request: &AttemptRequest) -> NativeExecutionResult<()> {
-        self.inner.cancel(request).await
+    async fn cancel(
+        &self,
+        request: &AttemptRequest,
+        reason: runmat_execution::CancellationReason,
+    ) -> NativeExecutionResult<()> {
+        self.inner.cancel(request, reason).await
     }
 
     async fn drain(&self) -> NativeExecutionResult<()> {
@@ -99,10 +125,21 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
 }
 
 pub(super) async fn run() {
-    tokio::task::LocalSet::new().run_until(run_inner()).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            run_inner(RetirementDelivery::BeforeReport).await;
+            run_inner(RetirementDelivery::WithLateReport).await;
+        })
+        .await;
 }
 
-async fn run_inner() {
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RetirementDelivery {
+    BeforeReport,
+    WithLateReport,
+}
+
+async fn run_inner(delivery: RetirementDelivery) {
     const RUN_ID: &str = "remote-meshing-recovery-run";
     let (host, request, _, _, bundle) = remote_fixture(RUN_ID);
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-recovery-scope"]);
@@ -113,11 +150,13 @@ async fn run_inner() {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-recovery-worker-1"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let second_worker = WorkerSpec {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-recovery-worker-2"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let (first_server, first_inner) = start_remote_worker(
         RUN_ID,
@@ -139,11 +178,15 @@ async fn run_inner() {
     .await;
     let report_ready = Arc::new(tokio::sync::Notify::new());
     let release_report = Arc::new(tokio::sync::Notify::new());
+    let retirement_available = Arc::new(AtomicBool::new(
+        delivery == RetirementDelivery::BeforeReport,
+    ));
     let first = Arc::new(ObservedRemoteChannel {
         inner: Arc::clone(&first_inner),
         hold_report: true,
         report_ready: Arc::clone(&report_ready),
         release_report: Arc::clone(&release_report),
+        retirement_available: Arc::clone(&retirement_available),
         transferred_objects: AtomicUsize::new(0),
         executions: AtomicUsize::new(0),
         attempt_ids: Mutex::new(Vec::new()),
@@ -153,6 +196,7 @@ async fn run_inner() {
         hold_report: false,
         report_ready: Arc::new(tokio::sync::Notify::new()),
         release_report: Arc::new(tokio::sync::Notify::new()),
+        retirement_available: Arc::new(AtomicBool::new(true)),
         transferred_objects: AtomicUsize::new(0),
         executions: AtomicUsize::new(0),
         attempt_ids: Mutex::new(Vec::new()),
@@ -162,7 +206,7 @@ async fn run_inner() {
         PoolSpec {
             id: pool_id,
             min_workers: 1,
-            max_workers: 2,
+            max_workers: 1,
             max_in_flight: 1,
             resource_limit: worker_inventory(),
         },
@@ -177,14 +221,57 @@ async fn run_inner() {
     let prerequisite = execution_object_reference(RUN_ID, prerequisite_bytes.as_ref());
     pool.register_execution_object(prerequisite.clone(), Arc::clone(&prerequisite_bytes))
         .unwrap();
+    register_host_invocation(&pool, &host, &request);
     let retry_submission = submission_for(scope_id, pool_id, &host, &request);
     let task_id = retry_submission.request.id;
-    let completion = pool.submit(retry_submission, request.clone()).unwrap();
+    let mut completion = Some(pool.submit(retry_submission, request.clone()).unwrap());
 
     tokio::time::timeout(Duration::from_secs(10), report_ready.notified())
         .await
         .expect("first remote attempt did not reach its held result");
     pool.remove_worker(first_worker.id, true).await.unwrap();
+    if delivery == RetirementDelivery::WithLateReport {
+        // A direct pool has no durable original-worker owner. It reports loss
+        // to its current waiter while retaining the unresolved scheduler task.
+        // Later retirement may recover that task; it cannot change the already
+        // delivered caller outcome into success.
+        let (outcome, progress) = completion.take().unwrap().wait_with_progress().await;
+        assert!(matches!(
+            outcome,
+            Err(runmat_execution_runner_native::NativeProgramFailure::WorkerLost(_))
+        ));
+        assert!(!progress.is_empty());
+        assert!(progress
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence));
+        let unresolved = pool.snapshot();
+        assert_eq!(
+            unresolved.tasks[&task_id].state,
+            runmat_execution::state::TaskState::Indeterminate
+        );
+        assert!(unresolved.tasks[&task_id].committed.is_none());
+        // The old route cannot supply retirement during membership loss. Its
+        // original result later arrives with exact authenticated owner proof.
+        retirement_available.store(true, Ordering::Release);
+        release_report.notify_one();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let retired = pool.snapshot().attempts.values().any(|attempt| {
+                    attempt.request.worker_id == first_worker.id
+                        && attempt
+                            .unverified_retirement
+                            .as_ref()
+                            .is_some_and(|record| record.retired_at_driver_millis.is_some())
+                });
+                if retired {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("late original result did not retire with its resource accounting");
+    }
     pool.add_worker(second.clone()).await.unwrap();
 
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -201,18 +288,34 @@ async fn run_inner() {
         }
     })
     .await
-    .expect("replacement remote worker did not commit the retried stage");
-    let progress = completion.drain_progress();
-    assert!(progress.len() >= 6);
-    assert!(progress
-        .windows(2)
-        .all(|pair| pair[0].sequence < pair[1].sequence));
-    let success = completion.wait().await.unwrap();
-    let [ValuePayload::Object(remote_root)] = success.outputs.as_slice() else {
+    .unwrap_or_else(|error| {
+        panic!(
+            "replacement remote worker did not commit the retried stage: {error}; snapshot: {:#?}",
+            pool.snapshot()
+        )
+    });
+    let success = match completion {
+        Some(completion) => {
+            let (outcome, progress) = completion.wait_with_progress().await;
+            assert!(progress.len() >= 6);
+            assert!(progress
+                .windows(2)
+                .all(|pair| pair[0].sequence < pair[1].sequence));
+            outcome.unwrap()
+        }
+        None => pool.snapshot().tasks[&task_id]
+            .committed
+            .as_ref()
+            .expect("late retirement recovers the retained task")
+            .result
+            .clone(),
+    };
+    let (outputs, result_objects) = success.values().expect("ordinary task result");
+    let [ValuePayload::Object(remote_root)] = outputs else {
         panic!("retried remote meshing returned a non-object root")
     };
     let mut retry_store = TestStore::default();
-    for reference in &success.result_objects {
+    for reference in result_objects {
         retry_store.0.insert(
             reference.logical_digest,
             pool.execution_object(reference)
@@ -233,6 +336,23 @@ async fn run_inner() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     let snapshot = pool.snapshot();
     assert_eq!(snapshot.tasks.get(&task_id).unwrap().attempt_count, 2);
+    for attempt in snapshot.attempts.values() {
+        let resources = attempt
+            .terminal
+            .as_ref()
+            .and_then(|terminal| terminal.resources.as_deref())
+            .expect("both original and retry retain their exact allocated usage");
+        resources.validate_against(&attempt.request).unwrap();
+        assert!(resources.resources.usage.wall_millis > 0);
+        assert!(resources.resources.usage.cpu_core_millis > 0);
+    }
+    assert!(snapshot.attempts.values().any(|attempt| {
+        attempt.state == runmat_execution::state::AttemptState::Lost
+            && attempt
+                .unverified_retirement
+                .as_ref()
+                .is_some_and(|record| record.retired_at_driver_millis.is_some())
+    }));
     assert_eq!(
         snapshot
             .attempts
@@ -243,8 +363,8 @@ async fn run_inner() {
     );
     assert_eq!(first.executions.load(Ordering::Acquire), 1);
     assert_eq!(second.executions.load(Ordering::Acquire), 1);
-    assert_eq!(first.transferred_objects.load(Ordering::Acquire), 1);
-    assert_eq!(second.transferred_objects.load(Ordering::Acquire), 1);
+    assert_eq!(first.transferred_objects.load(Ordering::Acquire), 2);
+    assert_eq!(second.transferred_objects.load(Ordering::Acquire), 2);
     assert_eq!(
         pool.execution_object(&prerequisite)
             .unwrap()
@@ -282,15 +402,19 @@ async fn start_remote_worker(
     .unwrap();
     let authority = listener.local_addr().unwrap();
     let server = tokio::task::spawn_local(run_remote_meshing_worker_quic(
-        listener,
-        run_id.to_string(),
-        worker.clone(),
-        driver_fence,
-        session_id,
-        run_key.clone(),
-        FrameLimits::default(),
-        Arc::new(AdmissionKernel),
-        limits(),
+        RemoteMeshingWorkerQuicRequest {
+            worker: RemoteWorkerQuicRequest {
+                listener,
+                run_identity: run_id.to_string(),
+                worker: worker.clone(),
+                driver_fence,
+                session_id,
+                run_key: run_key.clone(),
+                limits: FrameLimits::default(),
+            },
+            kernel: Arc::new(AdmissionKernel),
+            meshing_limits: limits(),
+        },
     ));
     let channel = QuicRemoteWorkerChannel::connect(
         RemoteWorkerChannelConfig {
@@ -315,7 +439,7 @@ async fn start_remote_worker(
 
 fn execution_object_reference(authorization_scope: &str, bytes: &[u8]) -> ValueRef {
     ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"remote-meshing-prerequisite", bytes]),
         logical_digest: Digest::sha256(bytes),
         encoded_length: bytes.len() as u64,

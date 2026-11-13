@@ -1,4 +1,4 @@
 mod generic;
 mod product;
 
-pub use generic::GenericCompiler;
+pub use generic::{CompilerOptimization, GenericCompiler};

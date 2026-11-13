@@ -27,7 +27,7 @@ impl<'a> ExactFaceJoinContext<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactFaceJoinOptions {
-    pub coordinate_tolerance_m: f64,
+    pub coordinate_tolerance_m: runmat_types::physical::Length,
     pub maximum_nodes: u64,
     pub maximum_triangles: u64,
     pub maximum_boundary_segments: u64,
@@ -36,7 +36,7 @@ pub struct ExactFaceJoinOptions {
 impl Default for ExactFaceJoinOptions {
     fn default() -> Self {
         Self {
-            coordinate_tolerance_m: 1.0e-10,
+            coordinate_tolerance_m: runmat_types::physical::Length::new(1.0e-10),
             maximum_nodes: 100_000_000,
             maximum_triangles: 200_000_000,
             maximum_boundary_segments: 100_000_000,
@@ -55,7 +55,8 @@ pub struct ExactFaceMesh {
     pub triangles: Vec<ExactFaceMeshTriangle>,
     pub boundary_segments: Vec<ExactFaceMeshBoundarySegment>,
     pub joined_chart_cuts: Vec<ExactFaceMeshJoinedCut>,
-    pub maximum_chordal_deviation_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub maximum_chordal_deviation_m: runmat_types::physical::Length,
     pub maximum_normal_deviation_rad: f64,
 }
 
@@ -122,6 +123,7 @@ pub struct ExactFaceMeshBoundarySegment {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExactFaceJoinErrorKind {
+    Cancelled,
     InvalidOptions,
     InvalidInput,
     Acceptance(ExactFaceAcceptanceErrorKind),

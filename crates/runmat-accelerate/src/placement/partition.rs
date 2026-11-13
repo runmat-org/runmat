@@ -3,10 +3,16 @@ use std::collections::BTreeMap;
 
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, PlacementGraphCandidate,
-    PlacementPlanRequest, SelectedExecutionCandidate,
+    PlacementPlanRequest, PlacementResourceSnapshot, SelectedExecutionCandidate,
+    SourceOutputOrdinal,
 };
 
-use super::PlacementPolicy;
+use super::{session::PreparedPlacementRequest, PlacementPolicy};
+
+mod retention;
+use retention::RetentionSchedule;
+use runmat_execution::{admit_candidate_resources, ResourceAccount, ResourceAdmissionContext};
+pub(super) use runmat_execution::{CandidateResourceFacts, ResourceAdmissionError};
 
 #[derive(Clone, Debug)]
 pub(super) struct PartitionPlan {
@@ -15,29 +21,33 @@ pub(super) struct PartitionPlan {
     pub(super) explored_states: u32,
     pub(super) pruned_states: u32,
     pub(super) used_local_fallback: bool,
-    pub(super) alternate: Option<(Vec<usize>, u64)>,
+    /// Feasible alternatives in canonical cost order, bounded by the search frontier.
+    pub(super) alternates: Vec<(Vec<usize>, u64)>,
 }
 
 #[derive(Clone, Debug)]
 struct SearchState {
     selections: Vec<usize>,
     total_ns: u64,
-    host_retained_bytes: u64,
-    provider_retained_bytes: BTreeMap<u32, u64>,
+    host_retained_bytes: ResourceAccount,
+    provider_retained_bytes: BTreeMap<u32, ResourceAccount>,
 }
 
 pub(super) fn solve_partition(
-    request: &PlacementPlanRequest,
+    prepared: &PreparedPlacementRequest,
     policy: PlacementPolicy,
 ) -> Result<PartitionPlan, &'static str> {
-    request.validate()?;
+    // The private carrier proves the original graph passed canonical
+    // validation before feedback could adjust costs or prune candidates.
+    let request = prepared.request();
     if request.resources.cancellation_requested {
         return Err("placement cancelled before dispatch");
     }
+    let retention = RetentionSchedule::new(request);
     let mut frontier = vec![SearchState {
         selections: Vec::new(),
         total_ns: 0,
-        host_retained_bytes: 0,
+        host_retained_bytes: ResourceAccount::default(),
         provider_retained_bytes: BTreeMap::new(),
     }];
     let mut explored = 0_u32;
@@ -48,7 +58,8 @@ pub(super) fn solve_partition(
             for (candidate_index, candidate) in node.candidates.iter().enumerate() {
                 explored = explored.saturating_add(1);
                 if explored > request.limits.max_expansions {
-                    return local_fallback(request, explored, pruned);
+                    return local_fallback(request, &retention, explored, pruned)
+                        .ok_or("bounded search has no executable host fallback");
                 }
                 let Some(candidate_ns) = candidate_total_ns(candidate, request, state) else {
                     continue;
@@ -70,8 +81,11 @@ pub(super) fn solve_partition(
                 };
                 let mut selections = state.selections.clone();
                 selections.push(candidate_index);
-                let (host_retained_bytes, provider_retained_bytes) =
-                    next_retained_state(request, node_index, state, candidate);
+                let Some((host_retained_bytes, provider_retained_bytes)) =
+                    next_retained_state(request, &retention, node_index, state, candidate)
+                else {
+                    continue;
+                };
                 expanded.push(SearchState {
                     selections,
                     total_ns,
@@ -81,7 +95,8 @@ pub(super) fn solve_partition(
             }
         }
         if expanded.is_empty() {
-            return local_fallback(request, explored, pruned);
+            return local_fallback(request, &retention, explored, pruned)
+                .ok_or("no complete placement route has admissible resource evidence");
         }
         expanded.sort_by(|left, right| compare_states(left, right, request));
         let frontier_limit = request.limits.max_frontier_states as usize;
@@ -94,12 +109,13 @@ pub(super) fn solve_partition(
     }
     frontier.sort_by(|left, right| compare_states(left, right, request));
     let best = frontier.remove(0);
-    let alternate = frontier
+    let mut alternates = frontier
         .into_iter()
-        .find(|candidate| candidate.selections != best.selections)
-        .map(|candidate| (candidate.selections, candidate.total_ns));
-    let local = local_fallback(request, explored, pruned)?;
-    if uses_provider(request, &best.selections) {
+        .filter(|candidate| candidate.selections != best.selections)
+        .map(|candidate| (candidate.selections, candidate.total_ns))
+        .collect::<Vec<_>>();
+    let local = local_fallback(request, &retention, explored, pruned);
+    if let Some(local) = local.filter(|_| uses_provider(request, &best.selections)) {
         let required = policy
             .required_improvement_ns(local.total_ns)
             .unwrap_or(u64::MAX);
@@ -108,8 +124,10 @@ pub(super) fn solve_partition(
             .checked_add(required)
             .is_none_or(|cost| cost > local.total_ns)
         {
+            alternates.insert(0, (best.selections, best.total_ns));
+            alternates.retain(|(selections, _)| selections != &local.selections);
             return Ok(PartitionPlan {
-                alternate: Some((best.selections, best.total_ns)),
+                alternates,
                 explored_states: explored,
                 pruned_states: pruned,
                 used_local_fallback: false,
@@ -123,21 +141,23 @@ pub(super) fn solve_partition(
         explored_states: explored,
         pruned_states: pruned,
         used_local_fallback: false,
-        alternate,
+        alternates,
     })
 }
 
 pub(super) fn evaluate_selections(
-    request: &PlacementPlanRequest,
+    prepared: &PreparedPlacementRequest,
     selected: &[SelectedExecutionCandidate],
 ) -> Option<u64> {
+    let request = prepared.request();
     if selected.len() != request.graph.nodes.len() {
         return None;
     }
+    let retention = RetentionSchedule::new(request);
     let mut state = SearchState {
         selections: Vec::with_capacity(selected.len()),
         total_ns: 0,
-        host_retained_bytes: 0,
+        host_retained_bytes: ResourceAccount::default(),
         provider_retained_bytes: BTreeMap::new(),
     };
     for (node_index, (node, selected)) in request.graph.nodes.iter().zip(selected).enumerate() {
@@ -161,7 +181,7 @@ pub(super) fn evaluate_selections(
             .checked_add(candidate_ns)?
             .checked_add(transition_ns)?;
         let (host_retained_bytes, provider_retained_bytes) =
-            next_retained_state(request, node_index, &state, candidate);
+            next_retained_state(request, &retention, node_index, &state, candidate)?;
         state.selections.push(candidate_index);
         state.host_retained_bytes = host_retained_bytes;
         state.provider_retained_bytes = provider_retained_bytes;
@@ -180,15 +200,16 @@ fn uses_provider(request: &PlacementPlanRequest, selections: &[usize]) -> bool {
 
 fn local_fallback(
     request: &PlacementPlanRequest,
+    retention: &RetentionSchedule,
     explored_states: u32,
     pruned_states: u32,
-) -> Result<PartitionPlan, &'static str> {
+) -> Option<PartitionPlan> {
     let mut selections = Vec::with_capacity(request.graph.nodes.len());
     let mut total_ns = 0_u64;
     let mut resource_state = SearchState {
         selections: Vec::new(),
         total_ns: 0,
-        host_retained_bytes: 0,
+        host_retained_bytes: ResourceAccount::default(),
         provider_retained_bytes: BTreeMap::new(),
     };
     for (node_index, node) in request.graph.nodes.iter().enumerate() {
@@ -207,37 +228,35 @@ fn local_fallback(
                         .identity
                         .cmp(&node.candidates[right.0].descriptor.identity)
                 })
-            })
-            .ok_or("placement node has no legal local fallback")?;
+            })?;
         let transition = predecessor_transition_ns(
             request,
             node_index,
             &selections,
             node.candidates[best.0].descriptor.execution_location,
-        )
-        .ok_or("local fallback transition overflow")?;
+        )?;
         total_ns = total_ns
             .checked_add(best.1)
-            .and_then(|total| total.checked_add(transition))
-            .ok_or("local fallback cost overflow")?;
+            .and_then(|total| total.checked_add(transition))?;
         selections.push(best.0);
         let (host_retained_bytes, provider_retained_bytes) = next_retained_state(
             request,
+            retention,
             node_index,
             &resource_state,
             &node.candidates[best.0],
-        );
+        )?;
         resource_state.selections.push(best.0);
         resource_state.host_retained_bytes = host_retained_bytes;
         resource_state.provider_retained_bytes = provider_retained_bytes;
     }
-    Ok(PartitionPlan {
+    Some(PartitionPlan {
         selections,
         total_ns,
         explored_states,
         pruned_states,
         used_local_fallback: true,
-        alternate: None,
+        alternates: Vec::new(),
     })
 }
 
@@ -248,107 +267,86 @@ fn candidate_total_ns(
 ) -> Option<u64> {
     candidate.descriptor.validate().ok()?;
     let mut total = candidate.descriptor.cost.checked_risk_adjusted_ns()?;
-    let demand = candidate.resources;
-    let mut host_peak = state.host_retained_bytes;
-    let mut provider_demands = BTreeMap::<u32, u64>::new();
-    match candidate.descriptor.execution_location {
-        CandidateExecutionLocation::Host => {
-            if demand.cpu_millicores > request.resources.cpu_millicores_available {
-                return None;
-            }
-            host_peak = host_peak.checked_add(demand.scratch_bytes)?;
-        }
-        CandidateExecutionLocation::Provider { device_id } => {
-            let provider = request.resources.provider(device_id)?;
-            if provider.lost
-                || provider
-                    .scratch_available_bytes
-                    .is_some_and(|available| demand.scratch_bytes > available)
-                || provider
-                    .queue_depth
-                    .zip(provider.queue_limit)
-                    .is_some_and(|(depth, limit)| demand.queue_slots > limit.saturating_sub(depth))
-            {
-                return None;
-            }
-            *provider_demands.entry(device_id).or_default() = demand.scratch_bytes;
-        }
-    }
-    if candidate.descriptor.kind.is_provider()
-        && request.require_transactional_results
-        && !candidate.transactional_results
-    {
-        return None;
-    }
-    match candidate.descriptor.output_residency {
-        CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {
-            host_peak = host_peak.checked_add(demand.retained_bytes)?;
-        }
-        CandidateOutputResidency::Provider { device_id } => {
-            let retained = provider_demands.entry(device_id).or_default();
-            *retained = retained.checked_add(demand.retained_bytes)?;
-        }
-        CandidateOutputResidency::Mirrored { device_id } => {
-            host_peak = host_peak.checked_add(demand.retained_bytes)?;
-            let retained = provider_demands.entry(device_id).or_default();
-            *retained = retained.checked_add(demand.retained_bytes)?;
-        }
-    }
-    if request
-        .resources
-        .memory_available_bytes
-        .is_some_and(|available| host_peak > available)
-    {
-        return None;
-    }
-    for (device_id, candidate_bytes) in provider_demands {
-        let provider = request.resources.provider(device_id)?;
-        if provider.lost {
-            return None;
-        }
-        let graph_retained = state
-            .provider_retained_bytes
-            .get(&device_id)
-            .copied()
-            .unwrap_or(0);
-        let required_peak = candidate_bytes.checked_add(graph_retained)?;
-        if let Some(after_eviction) = provider.available_after_eviction_bytes() {
-            if required_peak > after_eviction {
-                return None;
-            }
-            let immediately_available = provider
-                .immediately_available_bytes()
-                .expect("known post-eviction capacity has known immediate capacity");
-            if required_peak > immediately_available {
-                let eviction_bytes = required_peak - immediately_available;
-                total = total
-                    .checked_add(50_000)?
-                    .checked_add(eviction_bytes.saturating_add(7) / 8)?;
-            }
-        }
-    }
+    total = total.checked_add(
+        candidate_resource_adjustment_ns(
+            CandidateResourceFacts {
+                location: candidate.descriptor.execution_location,
+                output_residency: candidate.descriptor.output_residency,
+                presentation: &candidate.descriptor.presentation,
+                kind: candidate.descriptor.kind,
+                demand: candidate.resources,
+                transactional_results: candidate.transactional_results,
+            },
+            ResourceAdmissionContext {
+                resources: &request.resources,
+                host_retained_bytes: state.host_retained_bytes,
+                provider_retained_bytes: &state.provider_retained_bytes,
+                require_transactional_results: request.require_transactional_results,
+            },
+        )
+        .ok()?,
+    )?;
     Some(total)
+}
+
+/// Resource-only admission shared by numeric graph placement and exploratory
+/// whole-work selection. It never constructs a synthetic cost estimate.
+pub(super) fn single_candidate_resources_admitted(
+    candidate: CandidateResourceFacts<'_>,
+    resources: &PlacementResourceSnapshot,
+    require_transactional_results: bool,
+) -> Result<(), ResourceAdmissionError> {
+    single_candidate_resource_adjustment_ns(candidate, resources, require_transactional_results)
+        .map(|_| ())
+}
+
+/// The same physical admission and eviction adjustment used by the graph
+/// planner, evaluated for a complete one-node route without constructing a
+/// graph or a portable descriptor. The empty provider-retention map has no
+/// backing allocation.
+pub(super) fn single_candidate_resource_adjustment_ns(
+    candidate: CandidateResourceFacts<'_>,
+    resources: &PlacementResourceSnapshot,
+    require_transactional_results: bool,
+) -> Result<u64, ResourceAdmissionError> {
+    candidate_resource_adjustment_ns(
+        candidate,
+        ResourceAdmissionContext {
+            resources,
+            host_retained_bytes: ResourceAccount::default(),
+            provider_retained_bytes: &BTreeMap::new(),
+            require_transactional_results,
+        },
+    )
+}
+
+fn candidate_resource_adjustment_ns(
+    candidate: CandidateResourceFacts<'_>,
+    admission: ResourceAdmissionContext<'_>,
+) -> Result<u64, ResourceAdmissionError> {
+    admit_candidate_resources(candidate, admission)?
+        .provider_evictions()
+        .try_fold(0_u64, |current, (_, bytes)| {
+            eviction_adjustment_ns(current, bytes).ok_or(ResourceAdmissionError::Overflow)
+        })
+}
+
+fn eviction_adjustment_ns(current: u64, eviction_bytes: u64) -> Option<u64> {
+    current
+        .checked_add(50_000)?
+        .checked_add(eviction_bytes.div_ceil(8))
 }
 
 fn next_retained_state(
     request: &PlacementPlanRequest,
+    retention: &RetentionSchedule,
     node_index: usize,
     state: &SearchState,
     candidate: &PlacementGraphCandidate,
-) -> (u64, BTreeMap<u32, u64>) {
+) -> Option<(ResourceAccount, BTreeMap<u32, ResourceAccount>)> {
     let mut host = state.host_retained_bytes;
     let mut providers = state.provider_retained_bytes.clone();
-    for predecessor in 0..node_index {
-        let last_consumer = request
-            .graph
-            .edges
-            .iter()
-            .filter(|edge| edge.from as usize == predecessor)
-            .map(|edge| edge.to as usize)
-            .max();
-        if last_consumer != Some(node_index) {
-            continue;
-        }
+    for &(predecessor, output) in &retention.release_at[node_index] {
         let Some(selected) = state
             .selections
             .get(predecessor)
@@ -356,67 +354,175 @@ fn next_retained_state(
         else {
             continue;
         };
-        release_retained(&mut host, &mut providers, selected);
+        release_public_output(&mut host, &mut providers, selected, output)?;
     }
-    let has_future_consumer = request
-        .graph
-        .edges
-        .iter()
-        .any(|edge| edge.from as usize == node_index && edge.to as usize > node_index);
-    if has_future_consumer {
-        retain_output(&mut host, &mut providers, candidate);
+    for &output in &retention.retain_at[node_index] {
+        retain_public_output(&mut host, &mut providers, candidate, output)?;
     }
-    (host, providers)
+    Some((host, providers))
+}
+
+fn retain_public_output(
+    host: &mut ResourceAccount,
+    providers: &mut BTreeMap<u32, ResourceAccount>,
+    candidate: &PlacementGraphCandidate,
+    output: SourceOutputOrdinal,
+) -> Option<()> {
+    let Some(facts) = candidate.output_facts.as_ref() else {
+        if output.index() != 0 {
+            return None;
+        }
+        return retain_output(host, providers, candidate);
+    };
+    let fact = facts.get(output.index() as usize)?;
+    match fact.residency {
+        CandidateOutputResidency::Host => *host = host.checked_add(fact.retained_bytes)?,
+        CandidateOutputResidency::Provider { device_id } => {
+            let retained = providers.entry(device_id).or_default();
+            *retained = retained.checked_add(fact.retained_bytes)?;
+        }
+        CandidateOutputResidency::Mirrored { device_id } => {
+            *host = host.checked_add(fact.retained_bytes)?;
+            let retained = providers.entry(device_id).or_default();
+            *retained = retained.checked_add(fact.retained_bytes)?;
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn release_public_output(
+    host: &mut ResourceAccount,
+    providers: &mut BTreeMap<u32, ResourceAccount>,
+    candidate: &PlacementGraphCandidate,
+    output: SourceOutputOrdinal,
+) -> Option<()> {
+    let Some(facts) = candidate.output_facts.as_ref() else {
+        if output.index() != 0 {
+            return None;
+        }
+        return release_retained(host, providers, candidate);
+    };
+    let fact = facts.get(output.index() as usize)?;
+    match fact.residency {
+        CandidateOutputResidency::Host => *host = host.subtract(fact.retained_bytes)?,
+        CandidateOutputResidency::Provider { device_id } => {
+            release_provider(providers, device_id, fact.retained_bytes)?;
+        }
+        CandidateOutputResidency::Mirrored { device_id } => {
+            *host = host.subtract(fact.retained_bytes)?;
+            release_provider(providers, device_id, fact.retained_bytes)?;
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn release_provider(
+    providers: &mut BTreeMap<u32, ResourceAccount>,
+    device_id: u32,
+    bytes: runmat_execution::ResourceByteBound,
+) -> Option<()> {
+    let retained = providers.get_mut(&device_id)?;
+    *retained = retained.subtract(bytes)?;
+    if retained.is_empty() {
+        providers.remove(&device_id);
+    }
+    Some(())
 }
 
 fn retain_output(
-    host: &mut u64,
-    providers: &mut BTreeMap<u32, u64>,
+    host: &mut ResourceAccount,
+    providers: &mut BTreeMap<u32, ResourceAccount>,
     candidate: &PlacementGraphCandidate,
-) {
+) -> Option<()> {
     match candidate.descriptor.output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {
-            *host = host.saturating_add(candidate.resources.retained_bytes);
+            *host = host.checked_add(candidate.resources.retained_bytes)?;
         }
         CandidateOutputResidency::Provider { device_id } => {
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.saturating_add(candidate.resources.retained_bytes);
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
         }
         CandidateOutputResidency::Mirrored { device_id } => {
-            *host = host.saturating_add(candidate.resources.retained_bytes);
+            *host = host.checked_add(candidate.resources.retained_bytes)?;
             let retained = providers.entry(device_id).or_default();
-            *retained = retained.saturating_add(candidate.resources.retained_bytes);
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
+        }
+        CandidateOutputResidency::ProviderAndHost {
+            device_id,
+            host_bytes,
+        } => {
+            *host = host.checked_add(host_bytes)?;
+            let retained = providers.entry(device_id).or_default();
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
+        }
+        CandidateOutputResidency::ConditionalHostOrProvider {
+            device_id,
+            host_bytes,
+        } => {
+            // The static graph cannot know which branch publishes at runtime;
+            // keep both possible values live for future-consumer admission.
+            *host = host.checked_add(host_bytes)?;
+            let retained = providers.entry(device_id).or_default();
+            *retained = retained.checked_add(candidate.resources.retained_bytes)?;
         }
     }
+    Some(())
 }
 
 fn release_retained(
-    host: &mut u64,
-    providers: &mut BTreeMap<u32, u64>,
+    host: &mut ResourceAccount,
+    providers: &mut BTreeMap<u32, ResourceAccount>,
     candidate: &PlacementGraphCandidate,
-) {
+) -> Option<()> {
     match candidate.descriptor.output_residency {
         CandidateOutputResidency::Host | CandidateOutputResidency::Unknown => {
-            *host = host.saturating_sub(candidate.resources.retained_bytes);
+            *host = host.subtract(candidate.resources.retained_bytes)?;
         }
         CandidateOutputResidency::Provider { device_id } => {
             if let Some(retained) = providers.get_mut(&device_id) {
-                *retained = retained.saturating_sub(candidate.resources.retained_bytes);
-                if *retained == 0 {
+                *retained = retained.subtract(candidate.resources.retained_bytes)?;
+                if retained.is_empty() {
                     providers.remove(&device_id);
                 }
             }
         }
         CandidateOutputResidency::Mirrored { device_id } => {
-            *host = host.saturating_sub(candidate.resources.retained_bytes);
+            *host = host.subtract(candidate.resources.retained_bytes)?;
             if let Some(retained) = providers.get_mut(&device_id) {
-                *retained = retained.saturating_sub(candidate.resources.retained_bytes);
-                if *retained == 0 {
+                *retained = retained.subtract(candidate.resources.retained_bytes)?;
+                if retained.is_empty() {
+                    providers.remove(&device_id);
+                }
+            }
+        }
+        CandidateOutputResidency::ProviderAndHost {
+            device_id,
+            host_bytes,
+        } => {
+            *host = host.subtract(host_bytes)?;
+            if let Some(retained) = providers.get_mut(&device_id) {
+                *retained = retained.subtract(candidate.resources.retained_bytes)?;
+                if retained.is_empty() {
+                    providers.remove(&device_id);
+                }
+            }
+        }
+        CandidateOutputResidency::ConditionalHostOrProvider {
+            device_id,
+            host_bytes,
+        } => {
+            *host = host.subtract(host_bytes)?;
+            if let Some(retained) = providers.get_mut(&device_id) {
+                *retained = retained.subtract(candidate.resources.retained_bytes)?;
+                if retained.is_empty() {
                     providers.remove(&device_id);
                 }
             }
         }
     }
+    Some(())
 }
 
 fn predecessor_transition_ns(
@@ -437,11 +543,9 @@ fn predecessor_transition_ns(
                 .get(edge.from as usize)?
                 .candidates
                 .get(*selections.get(edge.from as usize)?)?;
-            total.checked_add(transition_ns(
-                predecessor.descriptor.output_residency,
-                execution_location,
-                edge,
-            ))
+            let ordinal = edge.source_output.unwrap_or(SourceOutputOrdinal::new(0));
+            let output = predecessor.source_output_residency(ordinal)?;
+            total.checked_add(transition_ns(output, execution_location, edge)?)
         })
 }
 
@@ -449,10 +553,21 @@ fn transition_ns(
     from: CandidateOutputResidency,
     to: CandidateExecutionLocation,
     edge: &runmat_execution::PlacementGraphEdge,
-) -> u64 {
-    use CandidateExecutionLocation::{Host as ExecuteHost, Provider as ExecuteProvider};
-    use CandidateOutputResidency::{Host, Mirrored, Provider, Unknown};
-    match (from, to) {
+) -> Option<u64> {
+    use CandidateExecutionLocation::{Host as ExecuteHost, Provider as ExecuteProvider, VmRegion};
+    use CandidateOutputResidency::{
+        ConditionalHostOrProvider, Host, Mirrored, Provider, ProviderAndHost, Unknown,
+    };
+    let transition = match (from, to) {
+        // An original instruction region has no concrete graph-input
+        // residency. Its whole-work placement must not acquire a fabricated
+        // graph-edge transfer estimate, including a free same-device one.
+        (
+            _,
+            VmRegion { .. }
+            | CandidateExecutionLocation::NativeRegion { .. }
+            | CandidateExecutionLocation::NativeSource,
+        ) => return None,
         (Host, ExecuteHost) | (Mirrored { .. }, ExecuteHost) => 0,
         (Host, ExecuteProvider { .. }) => edge.host_to_provider_ns,
         (Provider { .. }, ExecuteHost) => edge.provider_to_host_ns,
@@ -463,7 +578,35 @@ fn transition_ns(
         }
         (Unknown, ExecuteHost) => edge.provider_to_host_ns,
         (Unknown, ExecuteProvider { .. }) => edge.cross_provider_ns,
-    }
+        // Defensive aggregate envelope only. Validated consumed graph edges
+        // resolve a typed per-output role before this function; an unresolved
+        // mixed aggregate cannot be a source. Keep conservative costs here
+        // for direct aggregate callers without inventing a free mirror.
+        (ProviderAndHost { .. }, ExecuteHost) => edge.provider_to_host_ns,
+        (
+            ProviderAndHost {
+                device_id: left, ..
+            },
+            ExecuteProvider { device_id: right },
+        ) if left == right => edge.host_to_provider_ns,
+        (ProviderAndHost { .. }, ExecuteProvider { .. }) => {
+            edge.host_to_provider_ns.max(edge.cross_provider_ns)
+        }
+        // Until execution resolves the conditional publication, charge the
+        // greater of its admitted host/provider transition costs. Neither
+        // branch is a mirrored copy available to the next operation.
+        (ConditionalHostOrProvider { .. }, ExecuteHost) => edge.provider_to_host_ns,
+        (
+            ConditionalHostOrProvider {
+                device_id: left, ..
+            },
+            ExecuteProvider { device_id: right },
+        ) if left == right => edge.host_to_provider_ns,
+        (ConditionalHostOrProvider { .. }, ExecuteProvider { .. }) => {
+            edge.host_to_provider_ns.max(edge.cross_provider_ns)
+        }
+    };
+    Some(transition)
 }
 
 fn compare_states(
@@ -491,4 +634,24 @@ fn candidate_identity_sequence<'a>(
                 .map(|candidate| candidate.descriptor.identity.as_str())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod conditional_transition_tests;
+#[cfg(test)]
+mod mixed_output_tests;
+
+#[cfg(test)]
+mod eviction_boundary_tests {
+    use super::eviction_adjustment_ns;
+
+    #[test]
+    fn maximum_eviction_bytes_round_up_without_saturation() {
+        assert_eq!(u64::MAX.div_ceil(8), 2_305_843_009_213_693_952);
+        assert_eq!(
+            eviction_adjustment_ns(0, u64::MAX),
+            Some(2_305_843_009_213_743_952)
+        );
+        assert_eq!(eviction_adjustment_ns(u64::MAX, 1), None);
+    }
 }

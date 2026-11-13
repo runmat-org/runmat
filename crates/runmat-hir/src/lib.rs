@@ -12,10 +12,10 @@ mod span;
 pub mod testing;
 
 pub use diagnostic::{
-    HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity, HirDiagnosticSpan,
-    HirDiagnosticSuggestion,
+    DiagnosticExecution, HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity,
+    HirDiagnosticSpan, HirDiagnosticSuggestion,
 };
-pub use error::{set_error_namespace, HirError};
+pub use error::{set_error_namespace, HirError, HirErrorKind};
 pub use hir::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BindingOwner, BindingResolution,
     BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution, CallSyntax,
@@ -25,8 +25,9 @@ pub use hir::{
     ExpansionSemantics, FunctionAbi, FunctionArgumentValidation, FunctionHandleResolution,
     FunctionHandleTarget, FunctionKind, FunctionModifiers, FunctionName, FunctionResolution,
     HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
-    HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule, HirPlace,
-    HirScriptSection, HirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
+    HirDottedInvokeArgument, HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex,
+    HirModule, HirPlace, HirScriptSection, HirSequenceTarget, HirStmt, HirStmtKind,
+    HirSubscriptChain, HirSubscriptStep, ImportResolution, IndexComponent, IndexKind,
     IndexResultContext, IndexingSemantics, LoweringResult, MemberName, MethodId, MethodName,
     OperatorKind, OutputTarget, OutputTargetList, PackageName, PlaceMutation, PlaceMutationKind,
     QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount, SourceUnitKind,
@@ -38,10 +39,11 @@ pub use hir::{
 };
 pub use ids::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, StmtId};
 pub use lowering::lower;
-pub use lowering_context::{FunctionOutputArity, LoweringContext};
+pub use lowering_context::{FunctionOutputArity, LoweringContext, WorkspaceBindingView};
 pub use runmat_types::{
-    ClassDeclaration, ClassKind, EnumerationDeclaration, EventDeclaration, InheritanceDeclaration,
-    MemberAccess, MethodAttributes, MethodDeclaration, PropertyAttributes, PropertyDeclaration,
-    SemanticAttribute, SpawnSafetyFact, SpawnSafetyReason,
+    ClassDeclaration, ClassIdentity, ClassKind, EnumerationDeclaration, EventAccess,
+    EventAttributes, EventDeclaration, InheritanceDeclaration, MemberAccess, MethodAttributes,
+    MethodDeclaration, PropertyAttributes, PropertyDeclaration, SemanticAttribute, SpawnSafetyFact,
+    SpawnSafetyReason,
 };
 pub use span::{merge_span, Span};

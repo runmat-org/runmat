@@ -3,6 +3,9 @@
 
 # Rust
 /target/
+# Extra Cargo target dirs (parallel builds); build output, never commit
+/target-*/
+**/.runmat-wasm-registry-*/
 
 # VSCode
 .vscode/
@@ -26,7 +29,8 @@ artifacts/
 __pycache__/
 
 benchmarks/results/
-bindings/ts/node_modules/
+scripts/example-output-reports/
+bindings/ts/node_modules
 bindings/ts/pkg/
 bindings/ts/pkg-web/
 bindings/ts/src/generated/*
@@ -39,3 +43,11 @@ bindings/ts/dist/**/*
 
 node_modules/
 **/node_modules/
+
+# Local simulation results and interrupted WASM registry generation.
+# Keep authored examples, CAD inputs, and explicit regression fixtures trackable.
+.artifacts/
+.runmat-wasm-registry-*/
+
+# Transferable local evidence bundles; distributed separately from source.
+/.handoff/

@@ -81,7 +81,7 @@ macro_rules! execution_id {
             where
                 S: serde::Serializer,
             {
-                serializer.serialize_str(&self.to_string())
+                super::hex::serialize::<{ $prefix.len() + 32 }, S>($prefix, &self.0, serializer)
             }
         }
 
@@ -105,9 +105,47 @@ execution_id!(TaskId, "task_", "task");
 execution_id!(AttemptId, "attempt_", "attempt");
 execution_id!(ResultCommitId, "result_", "result-commit");
 execution_id!(PoolId, "pool_", "pool");
+execution_id!(GangId, "gang_", "gang");
 execution_id!(JobId, "job_", "job");
 execution_id!(DriverLeaseId, "driver_", "driver-lease");
 execution_id!(NodeLeaseId, "lease_", "node-lease");
 execution_id!(WorkerId, "worker_", "worker");
 execution_id!(ArtifactId, "artifact_", "artifact");
 execution_id!(ValueId, "value_", "value");
+execution_id!(DistributedObjectId, "distributed_", "distributed-object");
+execution_id!(CompositeId, "composite_", "composite");
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    #[test]
+    fn all_fixed_execution_identity_prefixes_preserve_wire_roundtrip() {
+        macro_rules! check {
+            ($($ty:ident),+ $(,)?) => { $(
+                for start in [0u8,15,16,127,128,240,255] {
+                    let id=$ty::from_bytes(std::array::from_fn(|i|start.wrapping_add(i as u8)));
+                    let wire=serde_json::to_string(&id).unwrap();
+                    assert_eq!(wire,format!("\"{}\"",id));
+                    assert_eq!(serde_json::from_str::<$ty>(&wire).unwrap(),id);
+                }
+            )+ };
+        }
+        check!(
+            RunId,
+            ExecutionScopeId,
+            FutureId,
+            TaskId,
+            AttemptId,
+            ResultCommitId,
+            PoolId,
+            JobId,
+            DriverLeaseId,
+            NodeLeaseId,
+            WorkerId,
+            ArtifactId,
+            ValueId,
+            DistributedObjectId,
+            CompositeId
+        );
+    }
+}

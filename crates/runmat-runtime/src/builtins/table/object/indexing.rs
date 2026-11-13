@@ -11,18 +11,20 @@ pub(in crate::builtins::table) fn table_member_get(
     }
     if object.is_class(TIMETABLE_CLASS) {
         let props = table_public_properties(object)?;
-        let time_dimension_name = props
-            .fields
-            .get(DIMENSION_NAMES)
-            .and_then(|value| match value {
-                Value::StringArray(array) => array.data.first().cloned(),
-                Value::Cell(cell) => cell
-                    .data
-                    .first()
-                    .and_then(|value| scalar_text(value, "dimension name").ok()),
-                _ => None,
-            })
-            .unwrap_or_else(|| "Time".to_string());
+        let time_dimension_name = match props.fields.get(DIMENSION_NAMES) {
+            Some(Value::StringArray(array)) => match array.data().first() {
+                Some(text) => text
+                    .as_str()
+                    .ok_or_else(|| invalid_variable("table: dimension name must not be missing"))?
+                    .to_owned(),
+                None => "Time".to_owned(),
+            },
+            Some(Value::Cell(cell)) => match cell.data().first() {
+                Some(value) => scalar_text(value, "dimension name")?,
+                None => "Time".to_owned(),
+            },
+            _ => "Time".to_owned(),
+        };
         if name == ROW_TIMES || name == time_dimension_name {
             if let Some(row_times) = props.fields.get(ROW_TIMES).cloned() {
                 return Ok(row_times);
@@ -38,6 +40,7 @@ pub(in crate::builtins::table) fn table_member_get(
 }
 
 pub(in crate::builtins::table) fn table_member_set(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &mut ObjectInstance,
     field: &str,
     rhs: Value,
@@ -48,10 +51,10 @@ pub(in crate::builtins::table) fn table_member_set(
                 "table: Properties assignment expects a scalar struct",
             ));
         };
-        apply_properties(object, props)?;
+        apply_properties(runtime, object, props)?;
         return Ok(());
     }
-    let mut variables = table_variables(object)?;
+    let variables = table_variables(object)?;
     let mut names = table_variable_names_from_object(object)?;
     let height = table_height(object)?;
     let rhs_rows = value_row_count(&rhs)?;
@@ -63,17 +66,30 @@ pub(in crate::builtins::table) fn table_member_set(
     if !variables.fields.contains_key(field) {
         names.push(field.to_string());
     }
-    variables.insert(field.to_string(), rhs);
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
-    let mut props = table_public_properties(object)?;
-    update_variable_metadata_names(&mut props, names)?;
-    sync_table_properties(object, props);
-    Ok(())
+    let (variables, _variable_roots) = replace_struct_fields(runtime, &variables, &[(field, rhs)])?;
+    let props = table_public_properties(object)?;
+    let (props, _property_roots) = updated_variable_metadata_names(runtime, &props, names)?;
+    let updates = [
+        (TABLE_VARIABLES_FIELD, Value::Struct(variables)),
+        (TABLE_PROPERTIES_FIELD, Value::Struct(props.clone())),
+        (PROPERTIES_MEMBER, Value::Struct(props)),
+    ];
+    replace_table_properties(
+        runtime,
+        object,
+        updates.iter().map(|(name, value)| (*name, value)),
+    )
 }
 
 pub(in crate::builtins::table) fn table_paren_get(
+    object: &ObjectInstance,
+    payload: &Value,
+) -> BuiltinResult<Value> {
+    table_paren_get_in_context(None, object, payload)
+}
+
+pub(in crate::builtins::table) fn table_paren_get_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &ObjectInstance,
     payload: &Value,
 ) -> BuiltinResult<Value> {
@@ -91,17 +107,18 @@ pub(in crate::builtins::table) fn table_paren_get(
             .ok_or_else(|| invalid_variable(format!("table: missing variable '{name}'")))?;
         out.push(select_rows(value, &rows)?);
     }
-    subset_tabular_object(object, selected_names, out, &rows)
+    subset_tabular_object_in_context(runtime, object, selected_names, out, &rows)
 }
 
-pub(in crate::builtins::table) fn subset_tabular_object(
+pub(in crate::builtins::table) fn subset_tabular_object_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     source: &ObjectInstance,
     names: Vec<String>,
     columns: Vec<Value>,
     rows: &[usize],
 ) -> BuiltinResult<Value> {
     let row_names = selected_row_names(source, rows)?;
-    table_from_columns_like(source, names, columns, row_names, Some(rows))
+    table_from_columns_like(runtime, source, names, columns, row_names, Some(rows))
 }
 
 pub(in crate::builtins::table) fn table_brace_get(
@@ -133,6 +150,7 @@ pub(in crate::builtins::table) fn table_brace_get(
 }
 
 pub(in crate::builtins::table) fn table_paren_assign(
+    runtime: Option<&crate::context::RuntimeContext>,
     mut object: ObjectInstance,
     payload: &Value,
     rhs: Value,
@@ -160,15 +178,22 @@ pub(in crate::builtins::table) fn table_paren_assign(
             rhs_variables.fields.get(rhs_name).cloned().ok_or_else(|| {
                 invalid_variable(format!("table: missing rhs variable '{rhs_name}'"))
             })?;
-        variables.insert(target_name.clone(), assign_rows(current, &rows, rhs_col)?);
+        let replacement = assign_rows(current, &rows, rhs_col)?;
+        let (next, _roots) =
+            replace_struct_fields(runtime, &variables, &[(target_name.as_str(), replacement)])?;
+        variables = next;
     }
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
+    replace_table_property(
+        runtime,
+        &mut object,
+        TABLE_VARIABLES_FIELD,
+        Value::Struct(variables),
+    )?;
     Ok(Value::Object(object))
 }
 
 pub(in crate::builtins::table) fn table_brace_assign(
+    runtime: Option<&crate::context::RuntimeContext>,
     mut object: ObjectInstance,
     payload: &Value,
     rhs: Value,
@@ -183,25 +208,30 @@ pub(in crate::builtins::table) fn table_brace_assign(
             "table: brace assignment supports one variable at a time",
         ));
     }
-    let mut variables = table_variables(&object)?;
+    let variables = table_variables(&object)?;
     let target = selected_names[0].clone();
     let current = variables
         .fields
         .get(&target)
         .cloned()
         .ok_or_else(|| invalid_variable(format!("table: missing variable '{target}'")))?;
-    variables.insert(target, assign_rows(current, &rows, rhs)?);
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(variables));
+    let replacement = assign_rows(current, &rows, rhs)?;
+    let (variables, _roots) =
+        replace_struct_fields(runtime, &variables, &[(target.as_str(), replacement)])?;
+    replace_table_property(
+        runtime,
+        &mut object,
+        TABLE_VARIABLES_FIELD,
+        Value::Struct(variables),
+    )?;
     Ok(Value::Object(object))
 }
 
 pub(in crate::builtins::table) fn selector_values(payload: &Value) -> BuiltinResult<Vec<Value>> {
     match payload {
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for handle in &cell.data {
+            let mut out = Vec::with_capacity(cell.data().len());
+            for handle in cell.data() {
                 out.push(handle.clone());
             }
             Ok(out)

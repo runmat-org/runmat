@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 use super::{StageEvidence, TopologyEntityId};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CadModel {
     pub model_id: String,
-    pub unit_scale_to_m: f64,
+    pub coordinate_units:
+        runmat_types::physical::CoordinateUnits<runmat_types::physical::CanonicalCoordinates>,
     #[serde(default)]
     pub vertices: Vec<CadVertexContract>,
     #[serde(default)]
@@ -22,7 +24,9 @@ pub struct CadModel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CadVertexContract {
     pub id: TopologyEntityId,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,7 +37,8 @@ pub struct CadEdgeContract {
     pub adjacent_face_ids: Vec<TopologyEntityId>,
     #[serde(default)]
     pub imported_handle: Option<String>,
-    pub length_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub length_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,7 +69,7 @@ pub struct CadVolumeContract {
     #[serde(default)]
     pub shell_ids: Vec<TopologyEntityId>,
     #[serde(default)]
-    pub material_region_ids: Vec<String>,
+    pub physical_region_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

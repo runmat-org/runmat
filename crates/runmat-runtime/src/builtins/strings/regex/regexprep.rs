@@ -1,27 +1,34 @@
 //! MATLAB-compatible `regexprep` builtin for RunMat.
 
 use runmat_value::NumericScalar;
+fn required_regex_text(text: StringElement) -> BuiltinResult<Utf8Text> {
+    text.into_text()
+        .ok_or_else(|| runtime_error_for("regexprep: pattern or replacement must not be missing"))
+}
+
+fn into_required_regex_text(
+    data: runmat_value::ExactArrayStorage<StringElement>,
+) -> BuiltinResult<Vec<Utf8Text>> {
+    into_text_elements(data)
+        .into_iter()
+        .map(required_regex_text)
+        .collect()
+}
+
 #[cfg(test)]
 use runmat_value::{IntValue, IntegerStorage, Tensor};
 use std::sync::Arc;
 
 use regex::{Captures, Regex, RegexBuilder};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+#[cfg(test)]
+use runmat_builtins::REGEXPREP_DESCRIPTOR;
+use runmat_builtins::REGEXPREP_EXPLICIT_GPU_EXTENSION;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StringArray, Value};
+use runmat_value::{CharArray, StringArray, StringElement, Utf8Text, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
-use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexprep")]
@@ -32,183 +39,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Runs on the CPU; GPU inputs are gathered before processing and results remain on the host.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexprep")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "regexprep",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Regex replacements are control-flow heavy and are excluded from fusion.",
+    notes: "Runtime admission and compatibility gates inspect original operands before supported host fallback gathers.",
 };
 
 const BUILTIN_NAME: &str = "regexprep";
-
-const REGEXPREP_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "regexprep-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "regexprep host fallback for explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RegexprepExplicitGpuInputExtension"),
-};
-const REGEXPREP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [REGEXPREP_EXPLICIT_GPU_EXTENSION];
-const REGEXPREP_INTEGER_OCCURRENCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented Nth-occurrence option accepts every integer class and is validated exactly as a positive scalar before regex execution.",
-    }];
-const REGEXPREP_INTEGER_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "str/expression/replace",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Regex text roles reject integer host and resident values before gather or numeric-to-text conversion.",
-    }];
-pub const REGEXPREP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "out = regexprep(subject, pattern, replacement, integer_N)",
-        inputs: &REGEXPREP_INTEGER_OCCURRENCE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "N selects exactly one eligible match without entering the floating domain. Automatic residency gathers transparently; explicit gpuArray fallback is separately gated.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "out = regexprep(integer_subject_or_pattern_or_replacement, ...)",
-        inputs: &REGEXPREP_INTEGER_TEXT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer data is not text and never triggers provider access or implicit decimal formatting in these roles.",
-    },
-];
-
-const REGEXPREP_OUTPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text with replacements applied (preserves scalar/array shape semantics).",
-}];
-
-const REGEXPREP_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (scalar, sequence, or elementwise list).",
-    },
-    BuiltinParamDescriptor {
-        name: "replacement",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Replacement text (scalar, sequence, or elementwise list).",
-    },
-];
-
-const REGEXPREP_INPUTS_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (scalar, sequence, or elementwise list).",
-    },
-    BuiltinParamDescriptor {
-        name: "replacement",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Replacement text (scalar, sequence, or elementwise list).",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Regex replacement options (case/lineanchors/dotall/once/emptymatch/...).",
-    },
-];
-
-const REGEXPREP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "out = regexprep(subject, pattern, replacement)",
-        inputs: &REGEXPREP_INPUTS_CORE,
-        outputs: &REGEXPREP_OUTPUT_TEXT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = regexprep(subject, pattern, replacement, options...)",
-        inputs: &REGEXPREP_INPUTS_OPTIONS,
-        outputs: &REGEXPREP_OUTPUT_TEXT,
-    },
-];
-
-const REGEXPREP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPREP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:regexprep:InvalidArgument"),
-    when: "Input/options are malformed, unsupported, or shape-incompatible.",
-    message: "regexprep: invalid argument",
-};
-
-const REGEXPREP_ERROR_PATTERN_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPREP.PATTERN_INVALID",
-    identifier: Some("RunMat:regexprep:PatternInvalid"),
-    when: "Pattern cannot be compiled as a regular expression.",
-    message: "regexprep: invalid regular expression pattern",
-};
-
-const REGEXPREP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPREP.INTERNAL",
-    identifier: Some("RunMat:regexprep:Internal"),
-    when: "Internal regex replacement or output reconstruction fails.",
-    message: "regexprep: internal operation failed",
-};
-
-const REGEXPREP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    REGEXPREP_ERROR_INVALID_ARGUMENT,
-    REGEXPREP_ERROR_PATTERN_INVALID,
-    REGEXPREP_ERROR_INTERNAL,
-];
-
-pub const REGEXPREP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGEXPREP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REGEXPREP_ERRORS,
-};
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -225,21 +64,14 @@ fn with_builtin_context(mut err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "regexprep",
-    category = "strings/regex",
-    summary = "Regular expression replacement with MATLAB-compatible semantics.",
-    keywords = "regexprep,regex,replace,substitute",
-    accel = "sink",
-    extensions(REGEXPREP_EXTENSIONS),
-    integer_capabilities(REGEXPREP_INTEGER_CAPABILITIES),
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::regex::regexprep::REGEXPREP_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::regex::regexprep"
 )]
 async fn regexprep_builtin(
     subject: Value,
     pattern: Value,
     replacement: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if [(&subject), (&pattern), (&replacement)]
         .into_iter()
@@ -287,13 +119,17 @@ async fn regexprep_builtin(
 
     let mut results = Vec::with_capacity(subjects.entries.len());
     for (idx, original) in subjects.entries.iter().enumerate() {
-        let mut current = original.clone();
+        let Some(original) = original.as_str() else {
+            results.push(StringElement::Missing);
+            continue;
+        };
+        let mut current = original.to_owned();
         if let Some(sequence) = plan.get(idx) {
             for compiled in sequence {
                 current = compiled.apply(&current, &options);
             }
         }
-        results.push(current);
+        results.push(StringElement::text(current));
     }
 
     reconstruct_output(BUILTIN_NAME, &subjects, results)
@@ -320,7 +156,7 @@ impl RegexprepOptions {
     fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
         let mut case_insensitive = false;
         let mut multi_line = false;
-        let mut dot_all = false;
+        let mut dot_all = true;
         let mut once = false;
         let mut nth = None;
         let mut emptymatch = EmptyMatchPolicy::Remove;
@@ -332,7 +168,7 @@ impl RegexprepOptions {
                 idx += 1;
                 continue;
             }
-            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
+            let raw = value_to_lower_string(&rest[idx])?.ok_or_else(|| {
                 runtime_error_for(format!(
                     "{builtin}: expected option string, got {:?}",
                     rest[idx]
@@ -343,58 +179,41 @@ impl RegexprepOptions {
                 "ignorecase" => case_insensitive = true,
                 "matchcase" => case_insensitive = false,
                 "lineanchors" => {
-                    let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected logical or 'on'/'off' after 'lineanchors'"
-                        ))
-                    })?;
-                    multi_line = flag;
-                    idx += 1;
+                    let flag = parse_toggle(rest.get(idx))?;
+                    multi_line = flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "dotall" => {
-                    let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected logical or 'on'/'off' after 'dotall'"
-                        ))
-                    })?;
-                    dot_all = flag;
-                    idx += 1;
+                    let flag = parse_toggle(rest.get(idx))?;
+                    dot_all = flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "dotexceptnewline" => {
-                    let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected logical or 'on'/'off' after 'dotExceptNewline'"
-                        ))
-                    })?;
-                    dot_all = !flag;
-                    idx += 1;
+                    let flag = parse_toggle(rest.get(idx))?;
+                    dot_all = !flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "once" => once = true,
                 "emptymatch" => {
-                    let value = rest.get(idx).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
-                        ))
-                    })?;
-                    let policy = value_to_lower_string(value).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
-                        ))
-                    })?;
-                    idx += 1;
-                    match policy.as_str() {
-                        "allow" => emptymatch = EmptyMatchPolicy::Allow,
-                        "remove" => emptymatch = EmptyMatchPolicy::Remove,
-                        other => {
-                            return Err(runtime_error_for(format!(
-                                "{builtin}: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
-                            )))
+                    emptymatch = EmptyMatchPolicy::Allow;
+                    let next_text = match rest.get(idx) {
+                        Some(value) => value_to_lower_string(value)?,
+                        None => None,
+                    };
+                    match next_text.as_deref() {
+                        Some("allow") => idx += 1,
+                        Some("remove") => {
+                            emptymatch = EmptyMatchPolicy::Remove;
+                            idx += 1;
                         }
+                        _ => {}
                     }
                 }
+                "noemptymatch" => emptymatch = EmptyMatchPolicy::Remove,
+                "stringanchors" => multi_line = false,
                 "preservecase" => {
                     if idx < rest.len() {
-                        if let Some(flag) = parse_toggle(rest.get(idx)) {
+                        if let Some(flag) = parse_toggle(rest.get(idx))? {
                             preserve_case = flag;
                             if flag {
                                 case_insensitive = true;
@@ -488,7 +307,7 @@ enum InputKind {
 
 #[derive(Debug, Clone)]
 struct SubjectCollection {
-    entries: Vec<String>,
+    entries: Vec<StringElement>,
     rows: usize,
     cols: usize,
     kind: InputKind,
@@ -523,9 +342,9 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
         });
     }
     if array.rows == 1 {
-        let text: String = array.data.into_iter().collect();
+        let text = decode_char_array(array.data())?;
         return Ok(SubjectCollection {
-            entries: vec![text],
+            entries: vec![StringElement::text(text)],
             rows: 1,
             cols: 1,
             kind: InputKind::CharScalar,
@@ -533,11 +352,9 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for col in 0..array.cols {
-            line.push(array.data[row * array.cols + col]);
-        }
-        entries.push(line);
+        let start = row * array.cols;
+        let line = decode_char_array(&array.data()[start..start + array.cols])?;
+        entries.push(StringElement::text(line));
     }
     Ok(SubjectCollection {
         entries,
@@ -550,13 +367,8 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
 fn collect_string_array(array: StringArray) -> BuiltinResult<SubjectCollection> {
     let rows = array.rows();
     let cols = array.cols();
-    let mut entries = Vec::with_capacity(array.data.len());
-    for col in 0..cols {
-        for row in 0..rows {
-            let idx = row + col * rows;
-            entries.push(array.data[idx].clone());
-        }
-    }
+    let (data, _shape, _rows, _cols) = array.into_parts();
+    let entries = into_text_elements(data);
     Ok(SubjectCollection {
         entries,
         rows,
@@ -565,16 +377,23 @@ fn collect_string_array(array: StringArray) -> BuiltinResult<SubjectCollection> 
     })
 }
 
+fn into_text_elements(data: runmat_value::ExactArrayStorage<StringElement>) -> Vec<StringElement> {
+    match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(shared) => shared.iter().cloned().collect(),
+    }
+}
+
 async fn collect_cell_array(
     builtin: &'static str,
     cell: runmat_value::CellArray,
 ) -> BuiltinResult<SubjectCollection> {
-    let mut entries = Vec::with_capacity(cell.data.len());
-    for ptr in &cell.data {
+    let mut entries = Vec::with_capacity(cell.data().len());
+    for ptr in cell.data() {
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(with_builtin_context)?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value)?.ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: cell array elements must be character vectors or string scalars, got {value:?}"
             ))
@@ -594,9 +413,9 @@ async fn collect_cell_array(
 
 #[derive(Debug, Clone)]
 enum PatternCollection {
-    Scalar(String),
-    Sequence(Vec<String>),
-    Elementwise(Vec<String>),
+    Scalar(Utf8Text),
+    Sequence(Vec<Utf8Text>),
+    Elementwise(Vec<Utf8Text>),
 }
 
 impl PatternCollection {
@@ -606,7 +425,7 @@ impl PatternCollection {
         subjects: &SubjectCollection,
     ) -> BuiltinResult<Self> {
         match value {
-            Value::String(s) => Ok(Self::Scalar(s)),
+            Value::String(s) => Ok(Self::Scalar(s.into_text().ok_or_else(|| runtime_error_for(format!("{builtin}: pattern or replacement must not be missing")))?)),
             Value::CharArray(array) => collect_pattern_char_array(array),
             Value::StringArray(array) => collect_pattern_string_array(array, subjects),
             Value::Cell(cell) => collect_pattern_cell(builtin, cell, subjects).await,
@@ -619,16 +438,14 @@ impl PatternCollection {
 
 fn collect_pattern_char_array(array: CharArray) -> BuiltinResult<PatternCollection> {
     if array.rows <= 1 {
-        let text: String = array.data.into_iter().collect();
-        return Ok(PatternCollection::Scalar(text));
+        let text = decode_char_array(array.data())?;
+        return Ok(PatternCollection::Scalar(Utf8Text::new(text)));
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for col in 0..array.cols {
-            line.push(array.data[row * array.cols + col]);
-        }
-        entries.push(line);
+        let start = row * array.cols;
+        let line = decode_char_array(&array.data()[start..start + array.cols])?;
+        entries.push(Utf8Text::new(line));
     }
     Ok(PatternCollection::Sequence(entries))
 }
@@ -639,13 +456,18 @@ fn collect_pattern_string_array(
 ) -> BuiltinResult<PatternCollection> {
     let rows = array.rows();
     let cols = array.cols();
-    if rows == 1 && cols == 1 && !array.data.is_empty() {
-        return Ok(PatternCollection::Scalar(array.data[0].clone()));
+    let (data, _shape, _rows, _cols) = array.into_parts();
+    if rows == 1 && cols == 1 && !data.is_empty() {
+        return Ok(PatternCollection::Scalar(required_regex_text(
+            data[0].clone(),
+        )?));
     }
     if rows == subjects.rows && cols == subjects.cols {
-        return Ok(PatternCollection::Elementwise(array.data.clone()));
+        return Ok(PatternCollection::Elementwise(into_required_regex_text(
+            data,
+        )?));
     }
-    Ok(PatternCollection::Sequence(array.data.clone()))
+    Ok(PatternCollection::Sequence(into_required_regex_text(data)?))
 }
 
 async fn collect_pattern_cell(
@@ -653,17 +475,17 @@ async fn collect_pattern_cell(
     cell: runmat_value::CellArray,
     subjects: &SubjectCollection,
 ) -> BuiltinResult<PatternCollection> {
-    let mut entries = Vec::with_capacity(cell.data.len());
-    for ptr in &cell.data {
+    let mut entries = Vec::with_capacity(cell.data().len());
+    for ptr in cell.data() {
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(with_builtin_context)?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value)?.ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: pattern cell elements must be character vectors or string scalars, got {value:?}"
             ))
         })?;
-        entries.push(text);
+        entries.push(required_regex_text(text)?);
     }
     if cell.rows == subjects.rows && cell.cols == subjects.cols {
         return Ok(PatternCollection::Elementwise(entries));
@@ -673,9 +495,9 @@ async fn collect_pattern_cell(
 
 #[derive(Debug, Clone)]
 enum ReplacementCollection {
-    Scalar(String),
-    Sequence(Vec<String>),
-    Elementwise(Vec<String>),
+    Scalar(Utf8Text),
+    Sequence(Vec<Utf8Text>),
+    Elementwise(Vec<Utf8Text>),
 }
 
 impl ReplacementCollection {
@@ -685,7 +507,7 @@ impl ReplacementCollection {
         subjects: &SubjectCollection,
     ) -> BuiltinResult<Self> {
         match value {
-            Value::String(s) => Ok(Self::Scalar(s)),
+            Value::String(s) => Ok(Self::Scalar(s.into_text().ok_or_else(|| runtime_error_for(format!("{builtin}: pattern or replacement must not be missing")))?)),
             Value::CharArray(array) => collect_replacement_char_array(array),
             Value::StringArray(array) => collect_replacement_string_array(array, subjects),
             Value::Cell(cell) => collect_replacement_cell(builtin, cell, subjects).await,
@@ -698,16 +520,14 @@ impl ReplacementCollection {
 
 fn collect_replacement_char_array(array: CharArray) -> BuiltinResult<ReplacementCollection> {
     if array.rows <= 1 {
-        let text: String = array.data.into_iter().collect();
-        return Ok(ReplacementCollection::Scalar(text));
+        let text = decode_char_array(array.data())?;
+        return Ok(ReplacementCollection::Scalar(Utf8Text::new(text)));
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for col in 0..array.cols {
-            line.push(array.data[row * array.cols + col]);
-        }
-        entries.push(line);
+        let start = row * array.cols;
+        let line = decode_char_array(&array.data()[start..start + array.cols])?;
+        entries.push(Utf8Text::new(line));
     }
     Ok(ReplacementCollection::Sequence(entries))
 }
@@ -718,13 +538,20 @@ fn collect_replacement_string_array(
 ) -> BuiltinResult<ReplacementCollection> {
     let rows = array.rows();
     let cols = array.cols();
-    if rows == 1 && cols == 1 && !array.data.is_empty() {
-        return Ok(ReplacementCollection::Scalar(array.data[0].clone()));
+    let (data, _shape, _rows, _cols) = array.into_parts();
+    if rows == 1 && cols == 1 && !data.is_empty() {
+        return Ok(ReplacementCollection::Scalar(required_regex_text(
+            data[0].clone(),
+        )?));
     }
     if rows == subjects.rows && cols == subjects.cols {
-        return Ok(ReplacementCollection::Elementwise(array.data.clone()));
+        return Ok(ReplacementCollection::Elementwise(
+            into_required_regex_text(data)?,
+        ));
     }
-    Ok(ReplacementCollection::Sequence(array.data.clone()))
+    Ok(ReplacementCollection::Sequence(into_required_regex_text(
+        data,
+    )?))
 }
 
 async fn collect_replacement_cell(
@@ -732,17 +559,17 @@ async fn collect_replacement_cell(
     cell: runmat_value::CellArray,
     subjects: &SubjectCollection,
 ) -> BuiltinResult<ReplacementCollection> {
-    let mut entries = Vec::with_capacity(cell.data.len());
-    for ptr in &cell.data {
+    let mut entries = Vec::with_capacity(cell.data().len());
+    for ptr in cell.data() {
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(with_builtin_context)?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value)?.ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: replacement cell elements must be character vectors or string scalars, got {value:?}"
             ))
         })?;
-        entries.push(text);
+        entries.push(required_regex_text(text)?);
     }
     if cell.rows == subjects.rows && cell.cols == subjects.cols {
         return Ok(ReplacementCollection::Elementwise(entries));
@@ -815,9 +642,7 @@ fn compile_regex(
     if options.multi_line {
         builder.multi_line(true);
     }
-    if options.dot_all {
-        builder.dot_matches_new_line(true);
-    }
+    builder.dot_matches_new_line(options.dot_all);
     builder
         .build()
         .map(Arc::new)
@@ -974,14 +799,14 @@ fn replace_with_policy(
 fn reconstruct_output(
     builtin: &'static str,
     subjects: &SubjectCollection,
-    results: Vec<String>,
+    results: Vec<StringElement>,
 ) -> BuiltinResult<Value> {
     match subjects.kind {
         InputKind::CharScalar => {
             let array = strings_to_char_array(builtin, 1, &results)?;
             Ok(Value::CharArray(array))
         }
-        InputKind::StringScalar => Ok(Value::String(
+        InputKind::StringScalar => Ok(Value::string(
             results.into_iter().next().unwrap_or_default(),
         )),
         InputKind::CharMatrix { rows } => {
@@ -989,12 +814,12 @@ fn reconstruct_output(
             Ok(Value::CharArray(array))
         }
         InputKind::StringArray { rows, cols } => {
-            let array = StringArray::new(results, vec![rows, cols])
+            let array = StringArray::from_elements_unbounded(results, vec![rows, cols])
                 .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))?;
             Ok(Value::StringArray(array))
         }
         InputKind::CellArray { rows, cols } => {
-            let values = results.into_iter().map(Value::String).collect();
+            let values = results.into_iter().map(Value::string).collect();
             make_cell(values, rows, cols)
                 .map_err(|err| runtime_error_for(format!("{builtin}: {err}")))
         }
@@ -1004,28 +829,43 @@ fn reconstruct_output(
 fn strings_to_char_array(
     builtin: &'static str,
     rows: usize,
-    strings: &[String],
+    strings: &[StringElement],
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map_err(|e| runtime_error_for(format!("{builtin}: {e}")));
     }
     let max_cols = strings
         .iter()
         .take(rows)
-        .map(|s| s.chars().count())
+        .map(|s| {
+            s.as_str()
+                .expect("character output has textual input")
+                .encode_utf16()
+                .count()
+        })
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(rows * max_cols);
     for idx in 0..rows {
         let text = strings.get(idx).cloned().unwrap_or_default();
-        let mut chars: Vec<char> = text.chars().collect();
-        while chars.len() < max_cols {
-            chars.push(' ');
+        let mut units = text
+            .as_str()
+            .ok_or_else(|| {
+                runtime_error_for(format!(
+                    "{builtin}: missing cannot be converted to character output"
+                ))
+            })?
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect::<Vec<_>>();
+        while units.len() < max_cols {
+            units.push(runmat_value::Utf16CodeUnit::from_raw(b' ' as u16));
         }
-        data.extend(chars);
+        data.extend(units);
     }
-    CharArray::new(data, rows, max_cols).map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
+    CharArray::from_code_units(data, rows, max_cols)
+        .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
 }
 
 fn matlab_template_to_rust(raw: &str) -> String {
@@ -1147,48 +987,61 @@ fn to_title_case(text: &str) -> String {
     result
 }
 
-fn extract_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        _ => None,
-    }
+fn decode_char_array(units: &[runmat_value::Utf16CodeUnit]) -> BuiltinResult<String> {
+    runmat_value::decode_utf16_code_units(units)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn value_to_lower_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+fn extract_string(value: &Value) -> BuiltinResult<Option<StringElement>> {
+    Ok(match value {
+        Value::String(s) => Some(s.clone()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            Some(ca.data.iter().collect::<String>().to_ascii_lowercase())
+            Some(StringElement::text(decode_char_array(ca.data())?))
         }
         _ => None,
-    }
+    })
 }
 
-fn parse_toggle(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    match value {
+fn value_to_lower_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
+        Value::String(s) => s.as_str().map(str::to_ascii_lowercase),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            sa.data()[0].as_str().map(str::to_ascii_lowercase)
+        }
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(decode_char_array(ca.data())?.to_ascii_lowercase())
+        }
+        _ => None,
+    })
+}
+
+fn parse_toggle(value: Option<&Value>) -> BuiltinResult<Option<bool>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    Ok(match value {
         Value::Bool(b) => Some(*b),
         Value::Int(i) => Some(!i.is_zero()),
         Value::Num(n) => Some(*n != 0.0),
         _ => {
-            let text = value_to_lower_string(value)?;
+            let Some(text) = value_to_lower_string(value)? else {
+                return Ok(None);
+            };
             match text.as_str() {
                 "on" | "true" | "yes" | "1" => Some(true),
                 "off" | "false" | "no" | "0" => Some(false),
                 _ => None,
             }
         }
-    }
+    })
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = REGEXPREP_DESCRIPTOR
@@ -1206,7 +1059,12 @@ pub(crate) mod tests {
         replacement: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
-        futures::executor::block_on(regexprep_builtin(subject, pattern, replacement, rest))
+        futures::executor::block_on(regexprep_builtin(
+            subject,
+            pattern,
+            replacement,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1223,6 +1081,22 @@ pub(crate) mod tests {
             Value::String(s) => assert_eq!(s, "XbrXcXdXbrX"),
             other => panic!("unexpected result {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexprep_rejects_malformed_utf16_character_input() {
+        let subject =
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)], 1, 1)
+                .unwrap();
+        let error = run_regexprep(
+            Value::CharArray(subject),
+            Value::String("x".into()),
+            Value::String("y".into()),
+            Vec::new(),
+        )
+        .expect_err("malformed UTF-16 must not be normalized or replaced");
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1249,8 +1123,8 @@ pub(crate) mod tests {
         let result = run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data.len(), 1);
-                assert_eq!(sa.data[0], "Shade: blue");
+                assert_eq!(sa.data().len(), 1);
+                assert_eq!(sa.data()[0], "Shade: blue");
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -1270,7 +1144,7 @@ pub(crate) mod tests {
         .expect("regexprep");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec![String::from("_lph_"), String::from("bet_")]);
+                assert_eq!(sa.data(), vec![String::from("_lph_"), String::from("bet_")]);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -1303,11 +1177,46 @@ pub(crate) mod tests {
         )
         .expect("regexprep");
         match result {
-            Value::StringArray(sa) => assert_eq!(sa.data[0], "aXYbaba"),
+            Value::StringArray(sa) => assert_eq!(sa.data()[0], "aXYbaba"),
             other => panic!("unexpected result {other:?}"),
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexprep_single_occurrence_is_not_a_toggle_value() {
+        let single = |value| Value::Tensor(Tensor::from_f32(vec![value], vec![1, 1]).unwrap());
+        for flag in ["lineanchors", "dotall"] {
+            assert_eq!(
+                run_regexprep(
+                    Value::String("a a".into()),
+                    Value::String("a".into()),
+                    Value::String("X".into()),
+                    vec![Value::String(flag.into()), single(2.0)],
+                )
+                .expect("single N after a flag"),
+                Value::String("a X".into()),
+            );
+        }
+        let error = run_regexprep(
+            Value::String("a a".into()),
+            Value::String("a".into()),
+            Value::String("X".into()),
+            vec![Value::String("preservecase".into()), single(1.0)],
+        )
+        .expect_err("single is not a preservecase toggle");
+        assert!(error.message().contains("expected logical or 'on'/'off'"));
+        let error = run_regexprep(
+            Value::String("a a".into()),
+            Value::String("a".into()),
+            Value::String("X".into()),
+            vec![Value::String("dotall".into()), single(0.0)],
+        )
+        .expect_err("zero single N is not a toggle");
+        assert!(error.message().contains("positive integer scalar"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_integer_occurrence_option_is_exact_and_class_complete() {
         for occurrence in [
@@ -1344,6 +1253,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_rejects_invalid_integer_occurrence_options() {
         for occurrence in [
@@ -1365,11 +1275,26 @@ pub(crate) mod tests {
                 Value::String("a a".into()),
                 Value::String("a".into()),
                 Value::String("X".into()),
-                vec![Value::Int(IntValue::U64(u64::MAX))],
+                vec![Value::Int(IntValue::U64(u64::from(u32::MAX)))],
             )
             .expect("valid occurrence beyond available matches"),
             Value::String("a a".into())
         );
+        let widest_occurrence = run_regexprep(
+            Value::String("a a".into()),
+            Value::String("a".into()),
+            Value::String("X".into()),
+            vec![Value::Int(IntValue::U64(u64::MAX))],
+        );
+        if usize::BITS == 64 {
+            assert_eq!(
+                widest_occurrence.expect("valid native index beyond available matches"),
+                Value::String("a a".into())
+            );
+        } else {
+            let error = widest_occurrence.expect_err("occurrence exceeds the platform index range");
+            assert!(error.message().contains("positive integer scalar"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1385,7 +1310,7 @@ pub(crate) mod tests {
         let result = run_regexprep(subject, patterns, replacements, Vec::new()).expect("regexprep");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec!["cAt".to_string(), "dOg".to_string()]);
+                assert_eq!(sa.data(), vec!["cAt".to_string(), "dOg".to_string()]);
             }
             other => panic!("unexpected result {other:?}"),
         }
@@ -1418,12 +1343,56 @@ pub(crate) mod tests {
         )
         .expect("regexprep");
         assert_eq!(allowed, Value::String("Xabc".into()));
+
+        let allowed_flag = run_regexprep(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            Value::String("X".into()),
+            vec![Value::String("emptymatch".into())],
+        )
+        .expect("standalone emptymatch");
+        assert_eq!(allowed_flag, Value::String("Xabc".into()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexprep_dot_matches_newline_by_default_and_option_overrides() {
+        let subject = Value::String("a\nb".into());
+        let pattern = Value::String("a.b".into());
+        let replacement = Value::String("HIT".into());
+        let default = run_regexprep(
+            subject.clone(),
+            pattern.clone(),
+            replacement.clone(),
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(default, Value::String("HIT".into()));
+
+        let excluding_newline = run_regexprep(
+            subject.clone(),
+            pattern.clone(),
+            replacement.clone(),
+            vec![Value::String("dotexceptnewline".into())],
+        )
+        .unwrap();
+        assert_eq!(excluding_newline, subject);
+
+        let explicit_off = run_regexprep(
+            Value::String("a\nb".into()),
+            pattern,
+            replacement,
+            vec![Value::String("dotall".into()), Value::Bool(false)],
+        )
+        .unwrap();
+        assert_eq!(explicit_off, Value::String("a\nb".into()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_char_array_result() {
-        let chars = CharArray::new(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
         let result = run_regexprep(
             Value::CharArray(chars),
             Value::String("[ao]".into()),
@@ -1435,7 +1404,10 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 3);
-                assert_eq!(out.data, vec!['c', 'X', 't', 'd', 'X', 'g']);
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(out.data()).unwrap(),
+                    "cXtdXg"
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1538,14 +1510,6 @@ pub(crate) mod tests {
         assert!(
             message.contains("replacement sequence is incompatible with element-wise patterns"),
             "unexpected error message: {message}"
-        );
-    }
-
-    #[test]
-    fn regexprep_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
         );
     }
 }

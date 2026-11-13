@@ -1,219 +1,26 @@
+use runmat_builtins::YLABEL_INTEGER_AXES_EXTENSION;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    YLABEL_DESCRIPTOR, YLABEL_ERROR_INTERNAL, YLABEL_ERROR_INVALID_ARGUMENT,
+    YLABEL_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
 use runmat_value::Value;
 
-use super::op_common::{map_figure_error, parse_numeric_text_command};
+use super::op_common::{annotation_error, map_figure_error, parse_numeric_text_command};
 use super::state::set_ylabel_for_axes;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-
-const YLABEL_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ylabel-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Allow a typed-integer alias for an encoded axes handle",
-    error_identifier: Some("RunMat:compatibility:YlabelIntegerAxesHandleExtension"),
-};
-pub const YLABEL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [YLABEL_INTEGER_AXES_EXTENSION];
-const YLABEL_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "txt",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "A scalar integer label is formatted from its exact signed or unsigned decimal value.",
-    }];
-const YLABEL_INTEGER_FONT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "FontSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented for positive FontSize values.",
-    }];
-const YLABEL_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
-    }];
-pub const YLABEL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = ylabel(integer_txt)",
-        inputs: &YLABEL_INTEGER_TEXT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact decimal spelling becomes the stored String property.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = ylabel(..., 'FontSize', integer_size)",
-        inputs: &YLABEL_INTEGER_FONT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The validated positive size crosses the graphics scalar boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = ylabel(integer_ax, txt, ...)",
-        inputs: &YLABEL_INTEGER_AXES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Strict mode rejects before graphics state access.",
-    },
-];
-
-const YLABEL_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created/updated ylabel object.",
-}];
-
-const YLABEL_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Label text (string/char/cellstr-like multiline forms).",
-}];
-
-const YLABEL_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-];
-
-const YLABEL_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const YLABEL_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const YLABEL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = ylabel(txt)",
-        inputs: &YLABEL_INPUTS_TEXT,
-        outputs: &YLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ylabel(ax, txt)",
-        inputs: &YLABEL_INPUTS_AX_TEXT,
-        outputs: &YLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ylabel(txt, Name, Value, ...)",
-        inputs: &YLABEL_INPUTS_TEXT_PROPS,
-        outputs: &YLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ylabel(ax, txt, Name, Value, ...)",
-        inputs: &YLABEL_INPUTS_AX_TEXT_PROPS,
-        outputs: &YLABEL_OUTPUT_HANDLE,
-    },
-];
-
-const YLABEL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.YLABEL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ylabel:InvalidArgument"),
-    when: "Axes handle, text payload, or property/value arguments are invalid.",
-    message: "ylabel: invalid argument",
-};
-
-const YLABEL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.YLABEL.INTERNAL",
-    identifier: Some("RunMat:ylabel:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "ylabel: internal operation failed",
-};
-
-const YLABEL_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [YLABEL_ERROR_INVALID_ARGUMENT, YLABEL_ERROR_INTERNAL];
-
-pub const YLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &YLABEL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &YLABEL_ERRORS,
-};
 
 #[runtime_builtin(
     name = "ylabel",
-    category = "plotting",
-    summary = "Set the current axes y-axis label.",
-    keywords = "ylabel,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::ylabel::YLABEL_DESCRIPTOR),
-    extensions(crate::builtins::plotting::ylabel::YLABEL_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::ylabel::YLABEL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::ylabel"
 )]
-pub fn ylabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub fn ylabel_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &YLABEL_DESCRIPTOR,
+        &YLABEL_ERROR_TOO_MANY_OUTPUTS,
+        "ylabel",
+    )?;
     if args.len() >= 2
         && args.len().is_multiple_of(2)
         && args
@@ -225,14 +32,16 @@ pub fn ylabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "ylabel",
         )?;
     }
-    let command = parse_numeric_text_command("ylabel", &args)?;
-    set_ylabel_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| map_figure_error("ylabel", err))
+    let command = parse_numeric_text_command("ylabel", args.view())
+        .map_err(|error| annotation_error("ylabel", &YLABEL_ERROR_INVALID_ARGUMENT, error))?;
+    let target = command.resolve_target();
+    set_ylabel_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
+        annotation_error(
+            "ylabel",
+            &YLABEL_ERROR_INTERNAL,
+            map_figure_error("ylabel", err),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -260,14 +69,37 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let err = ylabel_builtin(vec![
-            Value::Num(crate::builtins::plotting::state::encode_axes_handle(
-                crate::builtins::plotting::current_figure_handle(),
-                42,
-            )),
-            Value::String("Amp".into()),
-        ])
+        let err = ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(crate::builtins::plotting::state::encode_axes_handle(
+                    crate::builtins::plotting::current_figure_handle(),
+                    42,
+                )),
+                Value::String("Amp".into()),
+            ],
+        ))
         .unwrap_err();
         assert!(err.message.contains("invalid axes") || err.message.contains("out of range"));
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::ylabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:ylabel:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = super::ylabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:ylabel:TooManyOutputs"));
     }
 }

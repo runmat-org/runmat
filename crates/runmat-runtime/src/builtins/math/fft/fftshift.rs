@@ -4,24 +4,17 @@
 
 use super::common::{
     apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims,
-    gather_gpu_complex_tensor, restore_complex_gpu_result, ShiftKind,
+    gpu_metadata_snapshot, restore_gpu_metadata, same_gpu_handle, valid_provider_shift_output,
+    ShiftKind,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::fft::type_resolvers::fftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value};
 
@@ -53,139 +46,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "fftshift";
-
-const FFTSHIFT_MULTI_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fftshift-multi-dimension-selector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fftshift numeric dimension vectors and logical masks are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FftshiftMultiDimensionExtension"),
-};
-pub const FFTSHIFT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FFTSHIFT_MULTI_DIM_EXTENSION];
-
-const FFTSHIFT_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "All integer classes are reordered exactly with class, shape, and complexity preserved.",
-}];
-const FFTSHIFT_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "DIM",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes:
-        "The documented DIM form is one positive scalar parsed from authoritative integer storage.",
-}];
-const FFTSHIFT_MULTI_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "DIMS",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
-        notes: "RunMat-only numeric vectors are decoded exactly; logical mask vectors share the same independent extension gate.",
-    }];
-pub const FFTSHIFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(integer_X)", inputs: &FFTSHIFT_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Real and typed-complex integer values are reordered exactly with class preserved; resident fallback re-uploads to the owning provider." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(X, integer_DIM)", inputs: &FFTSHIFT_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All eight documented integer scalar classes select one dimension exactly." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(X, integer_DIMS)", inputs: &FFTSHIFT_MULTI_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only multi-axis vector/mask selection is independently gated from documented scalar DIM semantics." },
-];
-
-const FFTSHIFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Shifted array with the same size and type family as X.",
-}];
-
-const FFTSHIFT_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, complex, logical, or gpuArray input.",
-}];
-
-const FFTSHIFT_INPUTS_DIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, complex, logical, or gpuArray input.",
-    },
-    BuiltinParamDescriptor {
-        name: "DIM",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Positive scalar dimension; vectors and logical masks are RunMat extensions.",
-    },
-];
-
-const FFTSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = fftshift(X)",
-        inputs: &FFTSHIFT_INPUTS_CORE,
-        outputs: &FFTSHIFT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = fftshift(X, DIM)",
-        inputs: &FFTSHIFT_INPUTS_DIMS,
-        outputs: &FFTSHIFT_OUTPUT,
-    },
-];
-
-const FFTSHIFT_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.ARG_COUNT",
-    identifier: Some("RunMat:fftshift:ArgCount"),
-    when: "More than two input arguments are supplied.",
-    message: "fftshift: invalid argument count",
-};
-
-const FFTSHIFT_ERROR_INVALID_DIMS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.INVALID_DIMS",
-    identifier: Some("RunMat:fftshift:InvalidDimensions"),
-    when: "DIM argument is malformed or out of range.",
-    message: "fftshift: invalid dimension argument",
-};
-
-const FFTSHIFT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.INVALID_INPUT",
-    identifier: Some("RunMat:fftshift:InvalidInput"),
-    when: "X is not a supported numeric/logical input type.",
-    message: "fftshift: expected numeric or logical input",
-};
-
-const FFTSHIFT_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:fftshift:UnsupportedInput"),
-    when: "X is an unsupported object/cell/function/meta runtime type.",
-    message: "fftshift: unsupported input type",
-};
-
-const FFTSHIFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.INTERNAL",
-    identifier: Some("RunMat:fftshift:Internal"),
-    when: "Shifting, tensor reconstruction, or GPU transfer operations fail.",
-    message: "fftshift: internal error",
-};
-
-const FFTSHIFT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FFTSHIFT_ERROR_ARG_COUNT,
-    FFTSHIFT_ERROR_INVALID_DIMS,
-    FFTSHIFT_ERROR_INVALID_INPUT,
-    FFTSHIFT_ERROR_UNSUPPORTED_INPUT,
-    FFTSHIFT_ERROR_INTERNAL,
-];
-
-pub const FFTSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FFTSHIFT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FFTSHIFT_ERRORS,
-};
 
 fn fftshift_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     fftshift_error_with_message(error.message, error)
@@ -223,6 +83,21 @@ fn fftshift_error_with_message(
     builder.build()
 }
 
+fn fftshift_terminal_error(detail: impl AsRef<str>) -> RuntimeError {
+    build_runtime_error(format!(
+        "fftshift: provider integrity error: {}",
+        detail.as_ref()
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_identifier(
+        FFTSHIFT_ERROR_PROVIDER_INTEGRITY
+            .identifier
+            .expect("fftshift provider-integrity descriptor identifier"),
+    )
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
 fn compute_fftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinResult<Vec<usize>> {
     compute_shift_dims(shape, dims_arg, BUILTIN_NAME).map_err(|source| {
         fftshift_error_with_source(
@@ -235,17 +110,13 @@ fn compute_fftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinRe
 
 #[runtime_builtin(
     name = "fftshift",
-    category = "math/fft",
-    summary = "Shift zero-frequency components to spectrum centers.",
-    keywords = "fftshift,fourier transform,frequency centering,spectrum,gpu",
-    accel = "custom",
-    type_resolver(fftshift_type),
-    descriptor(crate::builtins::math::fft::fftshift::FFTSHIFT_DESCRIPTOR),
-    extensions(crate::builtins::math::fft::fftshift::FFTSHIFT_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::fft::fftshift::FFTSHIFT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::fftshift"
 )]
-async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fftshift_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(fftshift_error(&FFTSHIFT_ERROR_ARG_COUNT));
     }
@@ -259,11 +130,11 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 
     match value {
         Value::Tensor(tensor) => {
-            let dims = compute_fftshift_dims(&tensor.shape, dims_arg)?;
+            let dims = compute_fftshift_dims(tensor.shape(), dims_arg)?;
             Ok(fftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::ComplexTensor(ct) => {
-            let dims = compute_fftshift_dims(&ct.shape, dims_arg)?;
+            let dims = compute_fftshift_dims(ct.shape(), dims_arg)?;
             Ok(fftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::LogicalArray(array) => {
@@ -277,7 +148,7 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
                     format!("complex tensor construction failed: {source}"),
                 )
             })?;
-            let dims = compute_fftshift_dims(&tensor.shape, dims_arg)?;
+            let dims = compute_fftshift_dims(tensor.shape(), dims_arg)?;
             Ok(fftshift_complex_tensor(tensor, &dims).map(|result| {
                 if result.materialize_f64().len() == 1 {
                     let (r, i) = result.materialize_f64()[0];
@@ -294,11 +165,11 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
                     format!("scalar/tensor conversion failed: {detail}"),
                 )
             })?;
-            let dims = compute_fftshift_dims(&tensor.shape, dims_arg)?;
+            let dims = compute_fftshift_dims(tensor.shape(), dims_arg)?;
             Ok(fftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            let dims = compute_fftshift_dims(&handle.shape, dims_arg)?;
+            let dims = compute_fftshift_dims(handle.shape(), dims_arg)?;
             Ok(fftshift_gpu(handle, &dims).await?)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
@@ -308,15 +179,17 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
             Err(fftshift_error(&FFTSHIFT_ERROR_INVALID_INPUT))
         }
         Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::SparseTensor(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -324,6 +197,8 @@ async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(fftshift_error(&FFTSHIFT_ERROR_UNSUPPORTED_INPUT)),
     }
@@ -338,7 +213,7 @@ fn fftshift_uses_multi_dimension_extension(value: &Value) -> bool {
 }
 
 fn fftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|source| {
         fftshift_error_with_detail(
             &FFTSHIFT_ERROR_INTERNAL,
@@ -357,7 +232,7 @@ fn fftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
 }
 
 fn fftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_complex_storage();
     let plan = build_shift_plan(&shape, dims, ShiftKind::Fft);
     if storage.is_empty() || plan.is_noop() {
@@ -369,18 +244,12 @@ fn fftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResu
         });
     }
     let rotated = match storage {
-        ComplexStorage::F64(values) => ComplexStorage::F64(apply_shift(
-            BUILTIN_NAME,
-            &values,
-            &plan.ext_shape,
-            &plan.positive,
-        )?),
-        ComplexStorage::F32(values) => ComplexStorage::F32(apply_shift(
-            BUILTIN_NAME,
-            &values,
-            &plan.ext_shape,
-            &plan.positive,
-        )?),
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            apply_shift(BUILTIN_NAME, &values, &plan.ext_shape, &plan.positive)?.into(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            apply_shift(BUILTIN_NAME, &values, &plan.ext_shape, &plan.positive)?.into(),
+        ),
         ComplexStorage::Integer(storage) => ComplexStorage::Integer(
             storage
                 .reorder(|values| {
@@ -407,7 +276,7 @@ fn fftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<Logica
     let LogicalArray { data, shape } = array;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Fft);
     if data.is_empty() || plan.is_noop() {
-        return LogicalArray::new(data, shape).map_err(|source| {
+        return LogicalArray::from_shared_host_buffer(data, shape).map_err(|source| {
             fftshift_error_with_detail(
                 &FFTSHIFT_ERROR_INTERNAL,
                 format!("logical array reconstruction failed: {source}"),
@@ -415,7 +284,7 @@ fn fftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<Logica
         });
     }
     let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    LogicalArray::new(rotated, shape).map_err(|source| {
+    LogicalArray::from_shared_host_buffer(rotated.into(), shape).map_err(|source| {
         fftshift_error_with_detail(
             &FFTSHIFT_ERROR_INTERNAL,
             format!("logical array reconstruction failed: {source}"),
@@ -424,7 +293,7 @@ fn fftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<Logica
 }
 
 async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
-    let plan = build_shift_plan(&handle.shape, dims, ShiftKind::Fft);
+    let plan = build_shift_plan(handle.shape(), dims, ShiftKind::Fft);
     if plan.is_noop() {
         return Ok(Value::GpuTensor(handle));
     }
@@ -432,9 +301,34 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Provider reshape may mutate a handle's registry entry in place. Only use
         // the native path when no synthetic trailing dimensions are required.
-        if plan.ext_shape == handle.shape {
-            if let Ok(out) = provider.circshift(&handle, &plan.provider) {
-                return Ok(gpu_helpers::resident_gpu_value(out));
+        if plan.ext_shape == handle.shape() && provider.supports_circshift(&handle, &plan.provider)
+        {
+            let input_metadata = gpu_metadata_snapshot(&handle);
+            match provider.circshift(&handle, &plan.provider) {
+                Ok(out) => {
+                    if same_gpu_handle(&out, &handle) {
+                        restore_gpu_metadata(&handle, input_metadata);
+                        return Err(fftshift_terminal_error(
+                            "provider circshift aliased its input",
+                        ));
+                    }
+                    if !valid_provider_shift_output(provider, &out, &handle, input_metadata) {
+                        return Err(gpu_helpers::reject_gpu_output(
+                            out,
+                            fftshift_terminal_error(
+                                "provider circshift returned malformed metadata",
+                            ),
+                        ));
+                    }
+                    return gpu_helpers::resident_gpu_value(out);
+                }
+                Err(source) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        fftshift_terminal_error(format!("provider circshift failed: {source}")),
+                        runmat_accelerate_api::ProviderExecutionError::from(source)
+                            .with_unproven_effects(),
+                    ));
+                }
             }
         }
     }
@@ -443,47 +337,38 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
 }
 
 async fn fftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-        let host = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
-            .await
-            .map_err(|source| {
-                fftshift_error_with_source(&FFTSHIFT_ERROR_INTERNAL, "gpu gather failed", source)
-            })?;
-        let shifted = fftshift_complex_tensor(host, dims)?;
-        return restore_complex_gpu_result(&handle, &shifted, BUILTIN_NAME);
-    }
-    let was_logical = runmat_accelerate_api::handle_is_logical(&handle);
-    let host_tensor = gpu_helpers::gather_tensor_async(&handle)
+    let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
         .await
         .map_err(|source| {
             fftshift_error_with_source(&FFTSHIFT_ERROR_INTERNAL, "gpu gather failed", source)
         })?;
-    let shifted = fftshift_tensor(host_tensor, dims)?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        return gpu_helpers::upload_tensor(provider, &shifted)
-            .map(|output| {
-                if was_logical {
-                    gpu_helpers::logical_gpu_value(output)
-                } else {
-                    gpu_helpers::resident_gpu_value(output)
-                }
-            })
-            .map_err(|source| {
-                fftshift_error_with_detail(
-                    &FFTSHIFT_ERROR_INTERNAL,
-                    format!("gpu upload failed: {source}"),
-                )
-            });
-    }
-    Ok(tensor::tensor_into_value(shifted))
+    let shifted = match host {
+        Value::Tensor(tensor) => Value::Tensor(fftshift_tensor(tensor, dims)?),
+        Value::ComplexTensor(tensor) => {
+            Value::ComplexTensor(fftshift_complex_tensor(tensor, dims)?)
+        }
+        Value::LogicalArray(array) => Value::LogicalArray(fftshift_logical(array, dims)?),
+        other => {
+            let mut error = fftshift_error_with_detail(
+                &FFTSHIFT_ERROR_INTERNAL,
+                format!("unexpected downloaded value {other:?}"),
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, shifted, BUILTIN_NAME)
 }
+
+#[cfg(test)]
+#[path = "fftshift_owned_tests.rs"]
+mod owned_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
@@ -497,25 +382,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fftshift_type_preserves_tensor_shape() {
-        let out = fftshift_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(5)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(5)])
-            }
-        );
-    }
-
-    #[test]
     fn fftshift_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fftshift builtin");
-        let descriptor = builtin.descriptor.expect("fftshift descriptor");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).expect("fftshift builtin");
+        let descriptor = builtin.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = fftshift(X)"));
         assert!(labels.contains(&"Y = fftshift(X, DIM)"));
@@ -532,7 +402,7 @@ pub(crate) mod tests {
         let result = fftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![8, 1]);
+                assert_eq!(out.shape(), [8, 1]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
@@ -549,7 +419,7 @@ pub(crate) mod tests {
         let result = fftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![5, 1]);
+                assert_eq!(out.shape(), [5, 1]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -564,7 +434,7 @@ pub(crate) mod tests {
             .expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -581,7 +451,7 @@ pub(crate) mod tests {
             fftshift_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 6.0, 1.0, 4.0, 2.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -590,7 +460,8 @@ pub(crate) mod tests {
 
     #[test]
     fn fftshift_integer_contract_separates_scalar_dim_from_multi_axis_extension() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fftshift registration");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+            .expect("fftshift registration");
         assert_eq!(builtin.integer_capabilities.len(), 3);
         assert_eq!(builtin.extensions.len(), 1);
 
@@ -625,7 +496,7 @@ pub(crate) mod tests {
             .expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -639,7 +510,7 @@ pub(crate) mod tests {
         let result = fftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![6.0, 3.0, 4.0, 1.0, 5.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -657,7 +528,7 @@ pub(crate) mod tests {
             fftshift_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, original.shape);
+                assert_eq!(out.shape(), original.shape());
                 assert_eq!(out.materialize_f64(), original.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -674,7 +545,7 @@ pub(crate) mod tests {
             fftshift_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("fftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, original.shape);
+                assert_eq!(out.shape(), original.shape());
                 assert_eq!(out.materialize_f64(), original.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -706,7 +577,7 @@ pub(crate) mod tests {
         let result = fftshift_builtin(Value::ComplexTensor(tensor), Vec::new()).unwrap();
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![4, 1]);
+                assert_eq!(out.shape(), [4, 1]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(2.0, 2.0), (3.0, 3.0), (0.0, 0.0), (1.0, 1.0)]
@@ -735,10 +606,13 @@ pub(crate) mod tests {
         };
         let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(
-            storage.real,
-            IntegerStorage::U64(vec![4, 1_u64 << 63, u64::MAX, 2, 3])
+            storage.real(),
+            &IntegerStorage::U64(vec![4, 1_u64 << 63, u64::MAX, 2, 3])
         );
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![40, 50, 10, 20, 30]));
+        assert_eq!(
+            storage.imag(),
+            &IntegerStorage::U64(vec![40, 50, 10, 20, 30])
+        );
     }
 
     #[test]
@@ -844,12 +718,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new((0..8).map(|v| v as f64).collect(), vec![8, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = fftshift_builtin(Value::GpuTensor(handle), Vec::new()).expect("fftshift");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![8, 1]);
+            assert_eq!(gathered.shape(), [8, 1]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
@@ -864,13 +738,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let dims = Value::Int(IntValue::I32(1));
             let result = fftshift_builtin(Value::GpuTensor(handle), vec![dims]).expect("fftshift");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.shape(), [2, 3]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]
@@ -886,11 +760,14 @@ pub(crate) mod tests {
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let tensor = Tensor::new((0..8).map(|v| v as f64).collect(), vec![8, 1]).unwrap();
-        let cpu =
-            fftshift_tensor(tensor.clone(), &(0..tensor.shape.len()).collect::<Vec<_>>()).unwrap();
+        let cpu = fftshift_tensor(
+            tensor.clone(),
+            &(0..tensor.shape().len()).collect::<Vec<_>>(),
+        )
+        .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -898,11 +775,14 @@ pub(crate) mod tests {
             .unwrap();
         let gpu = fftshift_builtin(Value::GpuTensor(handle), Vec::new()).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 
     fn fftshift_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::fftshift_builtin(value, rest))
+        block_on(super::fftshift_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

@@ -1,28 +1,74 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Bytecode;
+use crate::interpreter::bytecode_owner::{BytecodeLease, BytecodeOwner};
+use crate::interpreter::vars::InterpreterVars;
 use log::debug;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
+use runmat_accelerate::FusionPlanRef;
+use runmat_gc::{Trace, Tracer};
+use runmat_runtime::context::RuntimeInvocationArity;
+use runmat_runtime::workspace::bindings::FrameGlobalBindings;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum InterpreterOutcome {
-    Completed(Vec<Value>),
+    Completed(runmat_runtime::execution::RootedResult<InterpreterCompletion>),
+}
+
+/// Final VM frame together with the slots that are semantically assigned.
+///
+/// The value vector remains dense for efficient indexed execution. Consumers
+/// that cross a language boundary must consult `assigned_slots` instead of
+/// treating the internal placeholder in an unassigned slot as a program
+/// value.
+#[derive(Debug)]
+pub struct InterpreterCompletion {
+    /// Actual assigned language binding, including an implicit script expression.
+    pub ans_slot: Option<usize>,
+    pub values: InterpreterVars,
+    pub assigned_slots: HashSet<usize>,
+}
+
+impl Trace for InterpreterCompletion {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in self.values.iter() {
+            value.trace(tracer);
+        }
+    }
+}
+
+/// Compiler-owned point at which a resumed region completes without executing
+/// instructions that belong to its caller.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InterpreterCompletionBoundary {
+    pc: usize,
+}
+
+impl InterpreterCompletionBoundary {
+    pub const fn before(pc: usize) -> Self {
+        Self { pc }
+    }
+
+    pub const fn pc(self) -> usize {
+        self.pc
+    }
 }
 
 /// Exact VM-owned state materialized from a native empty-stack MIR boundary.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct InterpreterResumeState {
     pub pc: usize,
-    pub vars: Vec<Option<Value>>,
+    pub completion_boundary: Option<InterpreterCompletionBoundary>,
+    pub vars: InterpreterVars,
+    pub assigned_slots: HashSet<usize>,
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
     pub missing_input_slots: HashSet<usize>,
-    pub global_aliases: HashMap<usize, String>,
-    pub persistent_aliases: HashMap<usize, String>,
+    pub global_aliases: HashMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
+    pub persistent_aliases: crate::interpreter::persistent::PersistentAliases,
     pub side_effect_epoch: u64,
 }
 
@@ -31,60 +77,179 @@ pub struct ActiveTryHandler {
     pub scope: usize,
     pub catch_pc: usize,
     pub catch_var: Option<usize>,
+    pub stack_depth: usize,
+}
+
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "native-accel",
+    feature = "wgpu"
+))]
+#[derive(Debug)]
+pub(crate) enum VmFusionPublicationFaultRoute {
+    AnySelected,
+    SharedRuntime,
+}
+
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "native-accel",
+    feature = "wgpu"
+))]
+#[derive(Debug)]
+pub(crate) enum VmFusionPublicationFault {
+    /// Corrupt the pending stack value at the real checked VM StoreVar so the
+    /// ordinary dispatch rejects publication and follows its catch path.
+    Reject(
+        VmFusionPublicationFaultRoute,
+        std::rc::Rc<std::cell::Cell<bool>>,
+    ),
+    Cancel(
+        VmFusionPublicationFaultRoute,
+        runmat_execution::cancellation::CancellationSource,
+        std::rc::Rc<std::cell::Cell<bool>>,
+    ),
+    Suspend(
+        VmFusionPublicationFaultRoute,
+        std::rc::Rc<std::cell::Cell<bool>>,
+    ),
+}
+
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "native-accel",
+    feature = "wgpu"
+))]
+impl VmFusionPublicationFault {
+    pub(crate) fn route(&self) -> &VmFusionPublicationFaultRoute {
+        match self {
+            Self::Reject(route, _) | Self::Cancel(route, _, _) | Self::Suspend(route, _) => route,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct InterpreterState {
-    pub bytecode: Bytecode,
-    pub stack: Vec<Value>,
-    pub vars: Vec<Value>,
+    pub bytecode: BytecodeOwner,
+    pub stack: crate::interpreter::stack::InterpreterStack,
+    pub vars: InterpreterVars,
     pub pc: usize,
+    pub completion_boundary: Option<InterpreterCompletionBoundary>,
+    pub completion_assigned_slots: Option<HashSet<usize>>,
     pub context: ExecutionContext,
     pub try_stack: Vec<ActiveTryHandler>,
     pub last_exception: Option<runmat_value::MException>,
     pub imports: Vec<(Vec<String>, bool)>,
-    pub global_aliases: HashMap<usize, String>,
-    pub persistent_aliases: HashMap<usize, String>,
+    pub global_aliases: FrameGlobalBindings,
+    pub persistent_aliases: crate::interpreter::persistent::PersistentAliases,
     pub missing_input_slots: HashSet<usize>,
-    pub current_function_name: String,
-    pub call_counts: Vec<(usize, usize)>,
     pub initial_assigned_var_count: usize,
     #[cfg(feature = "native-accel")]
     pub fusion_plan: Option<FusionPlanRef>,
     #[cfg(feature = "native-accel")]
     pub fusion_accel_graph: Option<AccelGraph>,
+    #[cfg(feature = "native-accel")]
+    pub(crate) fusion_installation: Option<crate::bytecode::program::VmFusionPlanInstallation>,
+    #[cfg(all(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "native-accel",
+        feature = "wgpu"
+    ))]
+    pub(crate) fusion_publication_fault: Option<VmFusionPublicationFault>,
 }
 
 impl InterpreterState {
-    pub fn new(
+    pub fn from_owned_in_context(
         bytecode: Bytecode,
-        initial_vars: &mut [Value],
+        initial_vars: Vec<Value>,
         current_function_name: Option<&str>,
-        call_counts: Vec<(usize, usize)>,
-    ) -> Self {
-        Self::new_in_context(
-            bytecode,
-            initial_vars,
-            current_function_name,
-            call_counts,
-            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
-                runmat_runtime::execution::RuntimeExecutionService::new(),
-            )),
-        )
-    }
-
-    pub fn new_in_context(
-        bytecode: Bytecode,
-        initial_vars: &mut [Value],
-        current_function_name: Option<&str>,
-        call_counts: Vec<(usize, usize)>,
+        invocation_arity: RuntimeInvocationArity,
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Self {
         let initial_assigned_var_count = initial_vars.len();
-        let mut vars = initial_vars.to_vec();
+        let mut vars = InterpreterVars::from_owned(initial_vars);
         if vars.len() < bytecode.var_count {
-            vars.resize(bytecode.var_count, Value::Num(0.0));
+            vars.resize_owned(bytecode.var_count, Value::Num(0.0));
         }
+        Self::from_prepared_vars_in_context(
+            BytecodeOwner::direct(bytecode, display_name(current_function_name)),
+            vars,
+            initial_assigned_var_count,
+            invocation_arity,
+            runtime,
+        )
+    }
+
+    pub fn from_vars_in_context(
+        bytecode: Bytecode,
+        vars: InterpreterVars,
+        initial_assigned_var_count: usize,
+        current_function_name: Option<&str>,
+        invocation_arity: RuntimeInvocationArity,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<Self, runmat_runtime::RuntimeError> {
+        if vars.len() < bytecode.var_count {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Infrastructure(
+                "RunMat:Interpreter:RetainedFrameExtent: retained interpreter frame extent was not prepared before execution"
+                    .to_owned(),
+            )
+            .into_runtime_error());
+        }
+        let mut state = Self::from_prepared_vars_in_context(
+            BytecodeOwner::direct(bytecode, display_name(current_function_name)),
+            vars,
+            initial_assigned_var_count,
+            invocation_arity,
+            runtime,
+        );
+        state.prepare_operand_stack()?;
+        Ok(state)
+    }
+
+    pub(crate) fn from_shared_vars_in_context(
+        bytecode: BytecodeLease,
+        vars: InterpreterVars,
+        initial_assigned_var_count: usize,
+        current_function_name: Option<&str>,
+        invocation_arity: RuntimeInvocationArity,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<Self, runmat_runtime::RuntimeError> {
+        if current_function_name.is_some_and(|name| name != bytecode.display_name()) {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Infrastructure(
+                "RunMat:Interpreter:BytecodeOwner: queued frame name differs from its retained compiler product"
+                    .to_owned(),
+            )
+            .into_runtime_error());
+        }
+        if vars.len() < bytecode.var_count {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Infrastructure(
+                "RunMat:Interpreter:RetainedFrameExtent: retained interpreter frame extent was not prepared before execution"
+                    .to_owned(),
+            )
+            .into_runtime_error());
+        }
+        let mut state = Self::from_prepared_vars_in_context(
+            BytecodeOwner::shared(bytecode),
+            vars,
+            initial_assigned_var_count,
+            invocation_arity,
+            runtime,
+        );
+        state.prepare_operand_stack()?;
+        Ok(state)
+    }
+
+    fn from_prepared_vars_in_context(
+        bytecode: BytecodeOwner,
+        vars: InterpreterVars,
+        initial_assigned_var_count: usize,
+        invocation_arity: RuntimeInvocationArity,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Self {
         if bytecode.async_metadata.mir_spawn_site_count > 0
             || bytecode.async_metadata.mir_await_site_count > 0
         {
@@ -96,51 +261,70 @@ impl InterpreterState {
             );
         }
         #[cfg(feature = "native-accel")]
-        let (fusion_plan, fusion_accel_graph) = {
-            // Runtime planning/execution owns accel-graph realization from the active
-            // bytecode instruction stream whenever semantic fusion scaffolds exist.
-            let runtime_groups = bytecode.runtime_fusion_groups();
-            let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
-            let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
-                bytecode.runtime_fusion_groups_for_graph(graph)
-            } else {
-                runtime_groups
-            };
-            let fusion_plan = prepare_fusion_plan(
-                runtime_graph.as_ref(),
-                &runtime_groups,
-                bytecode.fusion_metadata.mir_fusion_candidate_group_count,
-            );
-            (fusion_plan, runtime_graph)
-        };
+        let (fusion_plan, fusion_accel_graph, fusion_installation) =
+            bytecode.prepare_vm_fusion_plan_with_installation(&runtime);
+        let graph_program = runtime.selected_graph_program().cloned();
         Self {
-            stack: Vec::new(),
+            stack: crate::interpreter::stack::InterpreterStack::unbounded(),
             context: ExecutionContext {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
-                runtime,
+                runtime: runtime.with_invocation_arity(invocation_arity),
+                lexical_environment: None,
+                lexical_binding_slots: Vec::new(),
+                inherited_storage_slots: Vec::new(),
+                graph_program,
+                process_driver: None,
+                bytecode_owner: None,
+                dynamic_eval_admission: None,
             },
             try_stack: Vec::new(),
             last_exception: None,
             imports: Vec::new(),
-            global_aliases: HashMap::new(),
+            global_aliases: FrameGlobalBindings::default(),
             persistent_aliases: HashMap::new(),
             missing_input_slots: HashSet::new(),
             vars,
             pc: 0,
-            call_counts,
+            completion_boundary: None,
+            completion_assigned_slots: None,
             initial_assigned_var_count,
-            current_function_name: current_function_name
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "<main>".to_string()),
             #[cfg(feature = "native-accel")]
             fusion_plan,
             #[cfg(feature = "native-accel")]
             fusion_accel_graph,
+            #[cfg(feature = "native-accel")]
+            fusion_installation,
+            #[cfg(all(
+                test,
+                not(target_arch = "wasm32"),
+                feature = "native-accel",
+                feature = "wgpu"
+            ))]
+            fusion_publication_fault: None,
             bytecode,
         }
     }
+
+    pub(crate) fn prepare_operand_stack(&mut self) -> Result<(), runmat_runtime::RuntimeError> {
+        // Only a compiled parfor region can queue a child that outlives this
+        // frame's poll. Ordinary VM runs keep the original inline code owner
+        // and incur no shared-control allocation or admission claim.
+        if !self.bytecode.parfor_regions.is_empty() {
+            self.bytecode.promote_shared(&self.context.runtime)?;
+        }
+        let prepared = crate::interpreter::stack::InterpreterStack::prepare(
+            &self.context.runtime,
+            self.bytecode.stack_geometry,
+        )?;
+        self.stack = prepared;
+        Ok(())
+    }
+}
+
+fn display_name(name: Option<&str>) -> String {
+    name.unwrap_or("<main>").to_owned()
 }
 
 #[cfg(all(test, feature = "native-accel"))]
@@ -148,6 +332,7 @@ mod tests {
     use super::InterpreterState;
     use crate::bytecode::{Bytecode, FusionInstructionKind, FusionInstructionWindow};
     use runmat_accelerate::graph::{AccelNodeLabel, InstrSpan, PrimitiveOp};
+    use runmat_runtime::context::RuntimeInvocationArity;
 
     #[test]
     fn runtime_materialized_graph_is_retained_for_fusion_execution() {
@@ -168,8 +353,22 @@ mod tests {
             kind: FusionInstructionKind::Elementwise,
         }];
 
-        let mut initial_vars = Vec::new();
-        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        let initial_vars = Vec::new();
+        let mut state = InterpreterState::from_owned_in_context(
+            bytecode,
+            initial_vars,
+            Some("<main>"),
+            RuntimeInvocationArity::Script,
+            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
+        );
+        let original_code = &*state.bytecode as *const Bytecode;
+        state
+            .prepare_operand_stack()
+            .expect("prepare ordinary frame");
+        assert!(state.bytecode.shared_lease().is_none());
+        assert_eq!(original_code, &*state.bytecode as *const Bytecode);
         assert!(
             state.fusion_plan.is_some(),
             "expected runtime fusion plan when semantic windows exist"
@@ -208,8 +407,16 @@ mod tests {
             kind: FusionInstructionKind::Elementwise,
         }];
 
-        let mut initial_vars = Vec::new();
-        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        let initial_vars = Vec::new();
+        let state = InterpreterState::from_owned_in_context(
+            bytecode,
+            initial_vars,
+            Some("<main>"),
+            RuntimeInvocationArity::Script,
+            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
+        );
         let graph = state
             .fusion_accel_graph
             .as_ref()

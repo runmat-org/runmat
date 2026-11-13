@@ -19,7 +19,75 @@ use std::sync::Arc;
 #[cfg(feature = "gui")]
 use tracing::{debug, warn};
 #[cfg(feature = "gui")]
-use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
+use winit::{
+    application::ApplicationHandler,
+    dpi::PhysicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
+    platform::pump_events::{EventLoopExtPumpEvents, PumpStatus},
+    window::{Window, WindowAttributes, WindowId},
+};
+#[cfg(feature = "gui")]
+struct WindowBootstrap {
+    attributes: Option<WindowAttributes>,
+    window: Option<Arc<Window>>,
+    error: Option<winit::error::OsError>,
+}
+#[cfg(feature = "gui")]
+impl ApplicationHandler for WindowBootstrap {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(attributes) = self.attributes.take() {
+            match event_loop.create_window(attributes) {
+                Ok(window) => self.window = Some(Arc::new(window)),
+                Err(error) => self.error = Some(error),
+            }
+        }
+    }
+
+    fn window_event(&mut self, _event_loop: &ActiveEventLoop, _id: WindowId, _event: WindowEvent) {}
+}
+#[cfg(feature = "gui")]
+struct WindowRunner<'a, 'window> {
+    plot: &'a mut PlotWindow<'window>,
+    last_render_time: Instant,
+    close_signal: Option<Arc<AtomicBool>>,
+    modifiers: winit::keyboard::ModifiersState,
+}
+#[cfg(feature = "gui")]
+impl ApplicationHandler for WindowRunner<'_, '_> {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        self.plot.handle_event(
+            Event::WindowEvent {
+                window_id: id,
+                event,
+            },
+            event_loop,
+            &mut self.last_render_time,
+            &self.close_signal,
+            &mut self.modifiers,
+        );
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.plot.handle_event(
+            Event::AboutToWait,
+            event_loop,
+            &mut self.last_render_time,
+            &self.close_signal,
+            &mut self.modifiers,
+        );
+    }
+}
+#[cfg(feature = "gui")]
+#[derive(Debug, thiserror::Error)]
+pub(in crate::gui) enum WindowRenderError {
+    #[error("GPU access failed: {0}")]
+    Access(#[from] runmat_accelerate_api::WgpuAccessError),
+    #[error("surface rendering failed: {0}")]
+    Surface(#[from] wgpu::SurfaceError),
+}
 #[cfg(feature = "gui")]
 impl<'window> PlotWindow<'window> {
     fn update_subplot_camera_aspects_for_rect(&mut self, plot_rect: egui::Rect) {
@@ -55,16 +123,36 @@ impl<'window> PlotWindow<'window> {
     /// Create a new interactive plot window
     pub async fn new(config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // Create a new EventLoop (assumes this is the only EventLoop creation)
-        let event_loop =
+        let mut event_loop =
             EventLoop::new().map_err(|e| format!("Failed to create EventLoop: {e}"))?;
-        let window = WindowBuilder::new()
+        let attributes = Window::default_attributes()
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))
             .with_resizable(config.resizable)
-            .with_maximized(config.maximized)
-            .build(&event_loop)?;
-        let window = Arc::new(window);
+            .with_maximized(config.maximized);
+        let mut bootstrap = WindowBootstrap {
+            attributes: Some(attributes),
+            window: None,
+            error: None,
+        };
+        event_loop.pump_app_events(Some(std::time::Duration::ZERO), &mut bootstrap);
+        if let Some(error) = bootstrap.error {
+            return Err(error.into());
+        }
+        let window = bootstrap
+            .window
+            .ok_or("Winit did not resume the plot window during initialization")?;
 
+        let mut plot = Self::new_with_window(config, window).await?;
+        plot.event_loop = Some(event_loop);
+        Ok(plot)
+    }
+
+    /// Initialize rendering after the application-owned event loop creates a window.
+    pub(in crate::gui) async fn new_with_window(
+        config: WindowConfig,
+        window: Arc<Window>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // Reuse shared context when available; fall back to creating a dedicated device otherwise.
         let shared_ctx = crate::context::shared_wgpu_context();
         let (instance, surface, shared_ctx) = if let Some(ctx) = shared_ctx {
@@ -79,8 +167,8 @@ impl<'window> PlotWindow<'window> {
             (instance, surface, None)
         };
 
-        let (adapter, device, queue) = if let Some(ctx) = shared_ctx {
-            (ctx.adapter, ctx.device, ctx.queue)
+        let (adapter, access) = if let Some(ctx) = shared_ctx {
+            (ctx.adapter, ctx.access)
         } else {
             let adapter = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
@@ -102,7 +190,10 @@ impl<'window> PlotWindow<'window> {
                 )
                 .await?;
 
-            (Arc::new(adapter), Arc::new(device), Arc::new(queue))
+            (
+                Arc::new(adapter),
+                runmat_accelerate_api::WgpuDeviceAccess::new(device, queue),
+            )
         };
 
         // Configure surface
@@ -128,29 +219,33 @@ impl<'window> PlotWindow<'window> {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        surface.configure(&device, &surface_config);
+        let (depth_texture, depth_view) = access.with_shared(|emission| {
+            let device = emission.device();
+            surface.configure(device, &surface_config);
 
-        // Create depth texture
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Depth Texture"),
-            size: wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+            // Create depth texture
+            let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Depth Texture"),
+                size: wgpu::Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
 
-        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            (depth_texture, depth_view)
+        })?;
 
         // Create unified plot renderer
-        let plot_renderer =
-            crate::core::PlotRenderer::new(device.clone(), queue.clone(), surface_config).await?;
+        let plot_renderer = crate::core::PlotRenderer::new(access.clone(), surface_config).await?;
         let plot_overlay = crate::gui::PlotOverlay::new();
 
         // Setup egui with modern dark theme
@@ -166,18 +261,21 @@ impl<'window> PlotWindow<'window> {
             &window,
             Some(window.scale_factor() as f32),
             None,
+            None,
         );
 
-        let egui_renderer = crate::wgpu_compat::egui_renderer_new(
-            &device,
-            surface_format,
-            None, // egui doesn't need depth buffer
-            1,
-        );
+        let egui_renderer = access.with_shared(|emission| {
+            crate::wgpu_compat::egui_renderer_new(
+                emission.device(),
+                surface_format,
+                None, // egui doesn't need depth buffer
+                1,
+            )
+        })?;
 
         Ok(Self {
             window,
-            event_loop: Some(event_loop),
+            event_loop: None,
             plot_renderer,
             plot_overlay,
             surface,
@@ -194,6 +292,7 @@ impl<'window> PlotWindow<'window> {
             mouse_left_down: false,
             active_drag_axes: None,
             close_signal: None,
+            presentation_count: Default::default(),
         })
     }
 
@@ -232,7 +331,7 @@ impl<'window> PlotWindow<'window> {
 
         let node = crate::core::SceneNode {
             id: 0, // Will be set by scene
-            name: "Test Line Plot".to_string(),
+            name: "Test Line Plot".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: false,
@@ -250,6 +349,7 @@ impl<'window> PlotWindow<'window> {
             ),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         self.plot_renderer.scene.add_node(node);
@@ -263,9 +363,13 @@ impl<'window> PlotWindow<'window> {
     }
 
     /// Set the figure to display in this window (clears existing content)
-    pub fn set_figure(&mut self, figure: crate::plots::Figure) {
+    pub fn set_figure(
+        &mut self,
+        figure: crate::plots::Figure,
+    ) -> Result<(), runmat_accelerate_api::WgpuAccessError> {
         // Use the unified plot renderer
-        self.plot_renderer.set_figure(figure);
+        let access = self.plot_renderer.wgpu_renderer.access.clone();
+        access.with_shared(|emission| self.plot_renderer.set_figure(emission, figure))
     }
 
     /// Attach a signal that lets external callers request the window to close.
@@ -273,27 +377,62 @@ impl<'window> PlotWindow<'window> {
         self.close_signal = Some(signal);
     }
 
+    /// A read-only witness that can be observed while `run` owns this window.
+    pub fn presentation_count(&self) -> super::window::PresentationCount {
+        self.presentation_count.clone()
+    }
+
     /// Run the interactive plot window event loop
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let event_loop = self
+        let mut event_loop = self
             .event_loop
             .take()
             .ok_or("Event loop already consumed")?;
-        let window = self.window.clone();
-        let mut last_render_time = Instant::now();
-        let close_signal = self.close_signal.clone();
+        let mut runner = WindowRunner {
+            close_signal: self.close_signal.clone(),
+            last_render_time: Instant::now(),
+            modifiers: winit::keyboard::ModifiersState::empty(),
+            plot: self,
+        };
+        // Initialization already entered this event loop to create the window.
+        // Continue that same application with the pumping API: switching to
+        // run_app would start it again while macOS still considers it running.
+        // Handle redraws synchronously in the callbacks and bound idle waits
+        // so an external close signal does not depend on another window event.
+        loop {
+            match event_loop
+                .pump_app_events(Some(std::time::Duration::from_millis(16)), &mut runner)
+            {
+                PumpStatus::Continue => {}
+                PumpStatus::Exit(0) => break,
+                PumpStatus::Exit(code) => {
+                    return Err(std::io::Error::other(format!(
+                        "Plot event loop exited with status {code}"
+                    ))
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
 
-        event_loop.run(move |event, target| {
+    pub(in crate::gui) fn handle_event(
+        &mut self,
+        event: Event<()>,
+        target: &ActiveEventLoop,
+        last_render_time: &mut Instant,
+        close_signal: &Option<Arc<AtomicBool>>,
+        modifiers: &mut winit::keyboard::ModifiersState,
+    ) {
+        let window = self.window.clone();
+        {
             if let Some(signal) = close_signal.as_ref() {
                 if signal.load(Ordering::Relaxed) {
                     target.exit();
                     return;
                 }
             }
-            target.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-            // Track current modifiers for Command/Ctrl shortcuts
-            static mut MODIFIERS: Option<winit::keyboard::ModifiersState> = None;
+            target.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
             // Handle egui events and record consumption
             let mut repaint = false;
@@ -311,9 +450,7 @@ impl<'window> PlotWindow<'window> {
                 winit::event::Event::WindowEvent {
                     window_id,
                     event: winit::event::WindowEvent::ModifiersChanged(mods),
-                } if window_id == window.id() => unsafe {
-                    MODIFIERS = Some(mods.state());
-                },
+                } if window_id == window.id() => *modifiers = mods.state(),
                 winit::event::Event::WindowEvent {
                     window_id,
                     event: winit::event::WindowEvent::CloseRequested,
@@ -336,15 +473,17 @@ impl<'window> PlotWindow<'window> {
                     event: winit::event::WindowEvent::RedrawRequested,
                 } if window_id == window.id() => {
                     let now = Instant::now();
-                    let dt = now - last_render_time;
-                    last_render_time = now;
+                    let dt = now - *last_render_time;
+                    *last_render_time = now;
 
                     match self.render(dt) {
                         Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost) => {
+                        Err(WindowRenderError::Surface(wgpu::SurfaceError::Lost)) => {
                             self.resize(self.config.width, self.config.height)
                         }
-                        Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
+                        Err(WindowRenderError::Surface(wgpu::SurfaceError::OutOfMemory)) => {
+                            target.exit()
+                        }
                         Err(e) => eprintln!("Render error: {e:?}"),
                     }
                 }
@@ -372,10 +511,7 @@ impl<'window> PlotWindow<'window> {
                         if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyQ) =
                             key_event.physical_key
                         {
-                            let mods = unsafe {
-                                MODIFIERS.unwrap_or_else(winit::keyboard::ModifiersState::empty)
-                            };
-                            if mods.super_key() || mods.control_key() {
+                            if modifiers.super_key() || modifiers.control_key() {
                                 target.exit();
                             }
                         }
@@ -404,15 +540,6 @@ impl<'window> PlotWindow<'window> {
                             route = true;
                             if let Some(tb) = self.plot_overlay.toolbar_rect() {
                                 if my >= tb.min.y * ppp && my <= tb.max.y * ppp {
-                                    route = false;
-                                }
-                            }
-                            if let Some(sb) = self.plot_overlay.sidebar_rect() {
-                                if mx >= sb.min.x * ppp
-                                    && mx <= sb.max.x * ppp
-                                    && my >= sb.min.y * ppp
-                                    && my <= sb.max.y * ppp
-                                {
                                     route = false;
                                 }
                             }
@@ -493,13 +620,25 @@ impl<'window> PlotWindow<'window> {
 
                 _ => {}
             }
-        })?;
-
-        Ok(())
+        }
     }
 
     /// Handle window resize
     fn resize(&mut self, width: u32, height: u32) {
+        let access = self.plot_renderer.wgpu_renderer.access.clone();
+        if let Err(error) =
+            access.with_shared(|emission| self.resize_with_emission(emission, width, height))
+        {
+            log::error!("plot window resize could not access its GPU device: {error}");
+        }
+    }
+
+    fn resize_with_emission(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        width: u32,
+        height: u32,
+    ) {
         if width == 0 || height == 0 {
             return; // Skip invalid sizes that could cause crashes
         }
@@ -525,29 +664,23 @@ impl<'window> PlotWindow<'window> {
 
         // Update renderer's surface config
         self.plot_renderer.wgpu_renderer.surface_config = surface_config.clone();
-        self.surface
-            .configure(&self.plot_renderer.wgpu_renderer.device, &surface_config);
+        self.surface.configure(emission.device(), &surface_config);
 
         // Recreate depth texture
-        self.depth_texture =
-            self.plot_renderer
-                .wgpu_renderer
-                .device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some("Depth Texture"),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Depth32Float,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
+        self.depth_texture = emission.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("Depth Texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
 
         self.depth_view = self
             .depth_texture
@@ -566,7 +699,18 @@ impl<'window> PlotWindow<'window> {
     }
 
     /// Render a frame
-    fn render(&mut self, _dt: std::time::Duration) -> Result<(), wgpu::SurfaceError> {
+    pub(in crate::gui) fn render(
+        &mut self,
+        _dt: std::time::Duration,
+    ) -> Result<(), WindowRenderError> {
+        let access = self.plot_renderer.wgpu_renderer.access.clone();
+        access.with_shared(|emission| self.render_with_emission(emission))?
+    }
+
+    fn render_with_emission(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Result<(), WindowRenderError> {
         // Get the next frame
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -576,13 +720,12 @@ impl<'window> PlotWindow<'window> {
         // Camera updates will be handled by simple interaction code
 
         // Create command encoder
-        let mut encoder = self
-            .plot_renderer
-            .wgpu_renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
+        let mut encoder =
+            emission
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
 
         // Render egui
         let raw_input = self.egui_state.take_egui_input(&self.window);
@@ -602,7 +745,7 @@ impl<'window> PlotWindow<'window> {
         let _ = self.plot_renderer.calculate_data_bounds();
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            // Use PlotOverlay for unified UI rendering - no more duplicate sidebar code!
+            // Use PlotOverlay for plot controls and annotations.
             let has_per_axes_grid = self.plot_renderer.last_figure.as_ref().is_some_and(|fig| {
                 let (rows, cols) = fig.axes_grid();
                 let axes_count = (rows * cols).max(1);
@@ -618,21 +761,9 @@ impl<'window> PlotWindow<'window> {
                     || has_per_axes_grid,
                 show_axes: true,
                 show_title: true,
-                title: self
-                    .plot_renderer
-                    .overlay_title()
-                    .cloned()
-                    .or(Some("Plot".to_string())),
-                x_label: self
-                    .plot_renderer
-                    .overlay_x_label()
-                    .cloned()
-                    .or(Some("X".to_string())),
-                y_label: self
-                    .plot_renderer
-                    .overlay_y_label()
-                    .cloned()
-                    .or(Some("Y".to_string())),
+                title: self.plot_renderer.overlay_title().cloned(),
+                x_label: self.plot_renderer.overlay_x_label().cloned(),
+                y_label: self.plot_renderer.overlay_y_label().cloned(),
                 ..Default::default()
             };
             let overlay_metrics = OverlayMetrics {
@@ -644,7 +775,7 @@ impl<'window> PlotWindow<'window> {
 
             let frame_info = self.plot_overlay.render(
                 ctx,
-                &self.plot_renderer,
+                &mut self.plot_renderer,
                 &overlay_config,
                 overlay_metrics,
             );
@@ -672,13 +803,13 @@ impl<'window> PlotWindow<'window> {
                 for idx in 0..axes_count {
                     fig.set_axes_grid_enabled(idx, show);
                 }
-                self.plot_renderer.set_figure(fig);
+                self.plot_renderer.set_figure(emission, fig);
             }
         }
         if let Some(show) = toggle_legend_opt {
             if let Some(mut fig) = self.plot_renderer.last_figure.clone() {
                 fig.legend_enabled = show;
-                self.plot_renderer.set_figure(fig);
+                self.plot_renderer.set_figure(emission, fig);
             }
         }
         if reset_view {
@@ -754,16 +885,16 @@ impl<'window> PlotWindow<'window> {
             .tessellate(full_output.shapes, full_output.pixels_per_point);
         for (id, image_delta) in &full_output.textures_delta.set {
             self.egui_renderer.update_texture(
-                &self.plot_renderer.wgpu_renderer.device,
-                &self.plot_renderer.wgpu_renderer.queue,
+                emission.device(),
+                emission.queue(),
                 *id,
                 image_delta,
             );
         }
 
-        self.egui_renderer.update_buffers(
-            &self.plot_renderer.wgpu_renderer.device,
-            &self.plot_renderer.wgpu_renderer.queue,
+        let egui_prepare_commands = self.egui_renderer.update_buffers(
+            emission.device(),
+            emission.queue(),
             &mut encoder,
             &tris,
             &egui_wgpu::ScreenDescriptor {
@@ -802,7 +933,7 @@ impl<'window> PlotWindow<'window> {
                 })
                 .collect();
             self.plot_renderer
-                .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
+                .ensure_scene_viewport_dependent_geometry_for_axes(emission, &axes_plot_sizes_px);
             let primary_rect = axes_plot_rects.first().copied().unwrap_or(plot_rect);
             let vx = (primary_rect.min.x * ppp).round();
             let vy = (primary_rect.min.y * ppp).round();
@@ -923,6 +1054,7 @@ impl<'window> PlotWindow<'window> {
                     ..Default::default()
                 };
                 let _ = self.plot_renderer.render_axes_to_viewports(
+                    emission,
                     &mut encoder,
                     &view,
                     &viewports,
@@ -959,6 +1091,7 @@ impl<'window> PlotWindow<'window> {
                 };
                 let cam = self.plot_renderer.camera().clone();
                 let _ = self.plot_renderer.render_camera_to_viewport(
+                    emission,
                     &mut encoder,
                     &view,
                     scissor,
@@ -972,20 +1105,22 @@ impl<'window> PlotWindow<'window> {
 
         // Then render the UI overlay on top (legend, labels, etc.)
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Egui Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
+            let mut render_pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Egui Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                })
+                .forget_lifetime();
             self.egui_renderer.render(
                 &mut render_pass,
                 &tris,
@@ -1001,11 +1136,13 @@ impl<'window> PlotWindow<'window> {
         }
 
         // Submit commands
-        self.plot_renderer
-            .wgpu_renderer
-            .queue
-            .submit(std::iter::once(encoder.finish()));
+        emission.queue().submit(
+            egui_prepare_commands
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
         output.present();
+        self.presentation_count.record();
 
         Ok(())
     }

@@ -2,143 +2,30 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, SINC_ERROR_GATHER_FAILED, SINC_ERROR_INTERNAL,
+    SINC_ERROR_INVALID_INPUT, SINC_ERROR_MALFORMED_COMPLEX_BUFFER, SINC_ERROR_PROVIDER_FAILED,
+    SINC_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::{
+    ComplexElement, ComplexStorage, ComplexTensor, HostComplexBuffer, NumericDType, Tensor, Value,
+};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::builtins::math::signal::common::output_precision::SignalPrecision;
+use crate::builtins::math::signal::common::{
+    admit_resident_waveform_operand, map_real_waveform, prepared_real_integer_tensor,
+    waveform_input_tensor, SignalCooperation, WaveformOutputMode,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinc";
-
-const SINC_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sinc-nonfloating-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sinc with integer or logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SincNonfloatingInputExtension"),
-};
-
-pub const SINC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SINC_NONFLOATING_INPUT_EXTENSION];
-
-const SINC_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer input is outside the documented single/double domain; every nonzero integer maps exactly to zero and integer zero maps exactly to one.",
-    }];
-pub const SINC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sinc(integer_X)",
-        inputs: &SINC_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat mode uses the exact integer identity sinc(0)=1 and sinc(n)=0 for nonzero integers, so full-width values do not require binary64 representability.",
-    }];
-
-const SINC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise normalized sinc output.",
-}];
-
-const SINC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input values.",
-}];
-
-const SINC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = sinc(X)",
-    inputs: &SINC_INPUTS,
-    outputs: &SINC_OUTPUT,
-}];
-
-const SINC_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.INVALID_INPUT",
-    identifier: Some("RunMat:sinc:InvalidInput"),
-    when: "Input cannot be interpreted as numeric/complex data.",
-    message: "sinc: expected numeric input",
-};
-
-const SINC_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.PROVIDER_FAILED",
-    identifier: Some("RunMat:sinc:ProviderFailed"),
-    when: "Provider unary_sinc dispatch fails with a non-unsupported error.",
-    message: "sinc: GPU provider unary_sinc failed",
-};
-
-const SINC_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.GATHER_FAILED",
-    identifier: Some("RunMat:gather:DownloadFailed"),
-    when: "GPU host fallback cannot download source data.",
-    message: "gather: download failed",
-};
-
-const SINC_ERROR_MALFORMED_COMPLEX_BUFFER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.MALFORMED_COMPLEX_BUFFER",
-    identifier: Some("RunMat:sinc:MalformedComplexBuffer"),
-    when: "Complex-interleaved fallback buffer has odd element count.",
-    message: "sinc: malformed complex buffer, odd length",
-};
-
-const SINC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SINC.INTERNAL",
-    identifier: Some("RunMat:sinc:InternalError"),
-    when: "Internal tensor conversion/materialization fails.",
-    message: "sinc: internal error",
-};
-
-const SINC_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    SINC_ERROR_INVALID_INPUT,
-    SINC_ERROR_PROVIDER_FAILED,
-    SINC_ERROR_GATHER_FAILED,
-    SINC_ERROR_MALFORMED_COMPLEX_BUFFER,
-    SINC_ERROR_INTERNAL,
-];
-
-pub const SINC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SINC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SINC_ERRORS,
-};
-
-#[derive(Debug)]
-struct ProviderAnyhowError {
-    message: String,
-}
-
-impl std::fmt::Display for ProviderAnyhowError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ProviderAnyhowError {}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::sinc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -163,13 +50,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            let scaled = format!("(3.141592653589793 * {input})");
-            Ok(format!(
-                "select(select(sin({scaled}) / {scaled}, 0.0, isFinite({input}) && floor(abs({input})) == abs({input})), 1.0, {input} == 0.0)"
-            ))
-        },
+            writer.write_formatted(format_args!("select(select(sin((3.141592653589793 * {input})) / (3.141592653589793 * {input}), 0.0, isFinite({input}) && floor(abs({input})) == abs({input})), 1.0, {input} == 0.0)"))
+        }),
     }),
     reduction: None,
     emits_nan: true,
@@ -199,46 +83,38 @@ fn sinc_error_with_message(
     builder.build()
 }
 
-fn sinc_error_with_source(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-    source: impl std::error::Error + Send + Sync + 'static,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(source);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn provider_error_is_unsupported(err: &anyhow::Error) -> bool {
-    err.chain()
-        .any(|cause| cause.to_string() == "unary_sinc not supported by provider")
-}
-
 fn provider_error(err: anyhow::Error) -> RuntimeError {
-    let message = err.to_string();
-    let source = ProviderAnyhowError {
-        message: format!("{err:?}"),
-    };
-    sinc_error_with_source(&SINC_ERROR_PROVIDER_FAILED, message, source)
+    crate::runtime_error::with_provider_execution_source(
+        sinc_error_with_detail(&SINC_ERROR_PROVIDER_FAILED, err.to_string()),
+        err.into(),
+    )
 }
 
 #[runtime_builtin(
     name = "sinc",
-    category = "math/signal",
-    summary = "Compute the normalized sinc function element-wise.",
-    keywords = "sinc,normalized sinc,signal processing,elementwise",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::signal::sinc::SINC_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::sinc::SINC_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::sinc::SINC_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
+async fn sinc_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    sinc_in_runtime(runtime.as_ref(), value).await
+}
+
+#[cfg(test)]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
+    sinc_in_runtime(None, value).await
+}
+
+async fn sinc_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&SINC_ERROR_INTERNAL);
+    cooperation.completed(0).await?;
     if is_supported_nonfloating_input(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SINC_NONFLOATING_INPUT_EXTENSION,
@@ -246,17 +122,33 @@ async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
         )?;
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    admit_resident_waveform_operand(&value, BUILTIN_NAME, "input", &SINC_ERROR_INTERNAL)?;
+    // Only a resident wide integer needs a retained native readback. Host
+    // integer sinc has an exact zero/nonzero rule and must not do a separate
+    // binary64-exactness scan before its numerical pass.
+    let prepared_payload = match &value {
+        Value::GpuTensor(handle)
+            if runmat_accelerate_api::handle_integer_type(handle)
+                .is_some_and(|element| element.element_size() > 4) =>
+        {
+            cooperation
+                .prepare_integer_receipt(&value, &SINC_NONFLOATING_INPUT_EXTENSION)
+                .await?
+                .into_resident_payload()
+        }
+        _ => None,
+    };
     match value {
-        Value::GpuTensor(handle) => sinc_gpu(handle).await,
+        Value::GpuTensor(handle) => sinc_gpu(handle, prepared_payload, &mut cooperation).await,
         Value::Complex(re, im) => {
             let (out_re, out_im) = sinc_complex_value(re, im);
             Ok(Value::Complex(out_re, out_im))
         }
-        Value::ComplexTensor(tensor) => sinc_complex_tensor(tensor),
+        Value::ComplexTensor(tensor) => sinc_complex_tensor(tensor, &mut cooperation).await,
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
             Err(sinc_error(&SINC_ERROR_INVALID_INPUT))
         }
-        other => sinc_real(other),
+        other => sinc_real(other, &mut cooperation).await,
     }
 }
 
@@ -275,44 +167,99 @@ fn is_supported_nonfloating_input(value: &Value) -> bool {
     }
 }
 
-async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+async fn sinc_gpu(
+    handle: GpuTensorHandle,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+    {
+        let tensor = match prepared_real_integer_tensor(prepared_payload)
+            .map_err(|detail| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, detail))?
+        {
+            Some(tensor) => tensor,
+            None => gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|source| {
+                    let mut error =
+                        sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, source.message());
+                    error.source = Some(Box::new(source));
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })?,
+        };
+        let host = tensor::tensor_into_value(
+            sinc_tensor_mode(tensor, WaveformOutputMode::Double, cooperation).await?,
+        );
+        return gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME);
+    }
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_precision(&handle)
             .is_some_and(|precision| precision != provider.precision())
             || runmat_accelerate_api::handle_integer_type(&handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(&handle)
         {
-            return sinc_gpu_host_fallback(provider, &handle).await;
+            return sinc_gpu_host_fallback(provider, &handle, cooperation).await;
         }
         match provider.unary_sinc(&handle).await {
-            Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
-            Err(err) if provider_error_is_unsupported(&err) => {
-                return sinc_gpu_host_fallback(provider, &handle).await;
+            Ok(out) => {
+                let contract = gpu_helpers::UnaryGpuOutputContract {
+                    storage: runmat_accelerate_api::handle_storage(&handle),
+                    precision: runmat_accelerate_api::handle_precision(&handle),
+                    integer: None,
+                    logical: false,
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                };
+                if !gpu_helpers::unary_gpu_output_matches(&out, &handle, provider, contract) {
+                    let mut error = sinc_error_with_detail(
+                        &SINC_ERROR_INTERNAL,
+                        "provider returned malformed or aliased unary output",
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(out, error));
+                }
+                let out = gpu_helpers::propagate_owned_output_provenance(out, [&handle])?;
+                return gpu_helpers::resident_gpu_value(out);
+            }
+            Err(err) if gpu_helpers::provider_hook_allows_host_fallback(&err) => {
+                return sinc_gpu_host_fallback(provider, &handle, cooperation).await;
             }
             Err(err) => return Err(provider_error(err)),
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
+    Ok(tensor::tensor_into_value(
+        sinc_tensor(tensor, cooperation).await?,
+    ))
 }
 
 async fn sinc_gpu_host_fallback(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
-        .map_err(|err| sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, err.to_string()))?;
+        .map_err(|err| {
+            let mut failure = sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, err.to_string());
+            failure.source = Some(Box::new(err));
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            failure
+        })?;
 
     let runmat_accelerate_api::HostTensorOwned {
         mut data,
         shape,
         storage,
     } = host;
-    let precision =
-        runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
-    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
-        for value in &mut data {
-            *value = (*value as f32) as f64;
+    let precision = SignalPrecision::of_handle(handle);
+    if precision == SignalPrecision::Single {
+        for chunk in data.chunks_mut(4096) {
+            for value in chunk.iter_mut() {
+                *value = (*value as f32) as f64;
+            }
+            cooperation.completed(chunk.len() as u64).await?;
         }
     }
 
@@ -321,62 +268,118 @@ async fn sinc_gpu_host_fallback(
         if !chunks.remainder().is_empty() {
             return Err(sinc_error(&SINC_ERROR_MALFORMED_COMPLEX_BUFFER));
         }
-        let complex = chunks.map(|chunk| (chunk[0], chunk[1])).collect::<Vec<_>>();
-        let tensor = ComplexTensor::new(complex, shape)
+        let mut complex = Vec::new();
+        complex.try_reserve_exact(data.len() / 2).map_err(|cause| {
+            crate::builtins::math::signal::common::WaveformMapError::Allocation(cause)
+                .into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL)
+        })?;
+        for chunk in data.chunks(4096) {
+            for pair in chunk.chunks_exact(2) {
+                complex.push((pair[0], pair[1]));
+            }
+            cooperation.completed(chunk.len() as u64).await?;
+        }
+        let dtype = match precision {
+            SignalPrecision::Single => NumericDType::F32,
+            SignalPrecision::Double => NumericDType::F64,
+        };
+        let tensor = ComplexTensor::from_f64_values_with_dtype(complex, shape, dtype)
             .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
-        let host = sinc_complex_tensor(tensor)?;
+        let host = sinc_complex_tensor(tensor, cooperation).await?;
         return gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME);
     }
 
     let dtype = match precision {
-        runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-        runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+        SignalPrecision::Single => NumericDType::F32,
+        SignalPrecision::Double => NumericDType::F64,
     };
     let tensor = Tensor::new_with_dtype(data, shape, dtype)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
-    let host = tensor::tensor_into_value(sinc_tensor(tensor)?);
+    let host = tensor::tensor_into_value(sinc_tensor(tensor, cooperation).await?);
     gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME)
 }
 
-fn sinc_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, &e))?;
-    Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
+async fn sinc_real(value: Value, cooperation: &mut SignalCooperation) -> BuiltinResult<Value> {
+    let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
+        .await?
+        .map_err(|error| {
+            error.into_runtime_error(
+                BUILTIN_NAME,
+                &SINC_ERROR_INVALID_INPUT,
+                &SINC_ERROR_INTERNAL,
+            )
+        })?;
+    Ok(tensor::tensor_into_value(
+        sinc_tensor(tensor, cooperation).await?,
+    ))
 }
 
-fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
-    let storage = tensor
-        .into_numeric_storage()
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
+async fn sinc_tensor(tensor: Tensor, cooperation: &mut SignalCooperation) -> BuiltinResult<Tensor> {
+    sinc_tensor_mode(tensor, WaveformOutputMode::PreserveSingle, cooperation).await
+}
+
+async fn sinc_tensor_mode(
+    tensor: Tensor,
+    output_mode: WaveformOutputMode,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Tensor> {
+    map_real_waveform(tensor, output_mode, sinc_real_value, cooperation)
+        .await?
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL))
+}
+
+async fn sinc_complex_tensor(
+    tensor: ComplexTensor,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    cooperation.completed(0).await?;
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
     let storage = match storage {
-        NumericStorage::F32(values) => NumericStorage::F32(
-            values
-                .into_iter()
-                .map(|value| sinc_real_value(f64::from(value)) as f32)
-                .collect(),
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            map_complex_values(
+                values,
+                std::convert::identity,
+                std::convert::identity,
+                cooperation,
+            )
+            .await?,
         ),
-        storage => NumericStorage::F64(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(sinc_real_value)
-                .collect(),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            map_complex_values(
+                values,
+                |(re, im)| (f64::from(re), f64::from(im)),
+                |(re, im)| (re as f32, im as f32),
+                cooperation,
+            )
+            .await?,
         ),
+        ComplexStorage::Integer(_) => return Err(sinc_error(&SINC_ERROR_INVALID_INPUT)),
     };
-    Tensor::from_numeric_storage(storage, shape)
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))
-}
-
-fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| sinc_complex_value(re, im))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(data, tensor.shape.clone())
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+async fn map_complex_values<Input: Copy, Output: Copy>(
+    values: HostComplexBuffer<Input>,
+    into_double: impl Fn((Input, Input)) -> (f64, f64),
+    from_double: impl Fn((f64, f64)) -> (Output, Output),
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<HostComplexBuffer<Output>> {
+    let mut result = Vec::new();
+    result.try_reserve_exact(values.len()).map_err(|cause| {
+        crate::builtins::math::signal::common::WaveformMapError::Allocation(cause)
+            .into_runtime_error(BUILTIN_NAME, &SINC_ERROR_INTERNAL)
+    })?;
+    for chunk in values.chunks(4096) {
+        for &value in chunk {
+            let (re, im) = into_double((value.0, value.1));
+            let (re, im) = from_double(sinc_complex_value(re, im));
+            result.push(ComplexElement(re, im));
+        }
+        cooperation.completed(chunk.len() as u64).await?;
+    }
+    Ok(HostComplexBuffer::from_elements(result))
 }
 
 #[inline]
@@ -410,14 +413,14 @@ fn sinc_complex_value(re: f64, im: f64) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::spec::FusionExprContext;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
-        HostTensorView,
+        AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorView,
     };
-    use runmat_builtins::{builtin_function_by_name, AccelTag, ResolveContext, Type};
-    use runmat_value::{CharArray, IntValue};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{CharArray, IntValue, NumericStorage};
 
     fn call(value: Value) -> BuiltinResult<Value> {
         block_on(sinc_builtin(value))
@@ -432,69 +435,40 @@ mod tests {
         assert_close(got.1, want.1);
     }
 
-    struct UnsupportedSincProvider;
+    #[derive(Default)]
+    struct UnsupportedSincProvider(runmat_accelerate::simple_provider::InProcessProvider);
 
     impl AccelProvider for UnsupportedSincProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 2,
-                descriptor: Default::default(),
-            })
+            self.0.upload(host)
         }
-
-        fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0, 0.5, 1.0],
-                    shape: vec![1, 3],
-                    storage: GpuTensorStorage::Real,
-                })
-            })
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.0.download(handle)
         }
-
-        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "unsupported-sinc-test-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            90_001
+            self.0.device_id()
         }
     }
 
-    struct FailingSincProvider;
+    #[derive(Default)]
+    struct FailingSincProvider(runmat_accelerate::simple_provider::InProcessProvider);
 
     impl AccelProvider for FailingSincProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 1,
-                descriptor: Default::default(),
-            })
+            self.0.upload(host)
         }
-
         fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move { Err(anyhow::anyhow!("download should not be called")) })
         }
-
-        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "failing-sinc-test-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            90_002
+            self.0.device_id()
         }
-
         fn unary_sinc<'a>(
             &'a self,
             _: &'a GpuTensorHandle,
@@ -503,98 +477,62 @@ mod tests {
         }
     }
 
-    struct ComplexSincProvider;
+    #[derive(Default)]
+    struct ComplexSincProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        malformed_download: bool,
+    }
 
     impl AccelProvider for ComplexSincProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 3,
-                descriptor: Default::default(),
-            })
+            self.inner.upload(host)
         }
-
+        fn upload_numeric_raw(
+            &self,
+            host: &runmat_accelerate_api::HostNumericTensorView<'_>,
+        ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+            self.inner.upload_numeric_raw(host)
+        }
         fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move {
-                if handle.buffer_id == 4 {
-                    return Ok(HostTensorOwned {
-                        data: vec![0.0, 0.0, 0.5],
-                        shape: vec![2, 1],
-                        storage: GpuTensorStorage::ComplexInterleaved,
-                    });
+                let mut result = self.inner.download(handle).await?;
+                if self.malformed_download {
+                    result.data.pop();
                 }
-                Ok(HostTensorOwned {
-                    data: vec![0.0, 0.0, 0.5, 0.25],
-                    shape: vec![2, 1],
-                    storage: GpuTensorStorage::ComplexInterleaved,
-                })
+                Ok(result)
             })
         }
-
-        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "complex-sinc-test-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            90_003
+            self.inner.device_id()
         }
-
         fn unary_sinc<'a>(
             &'a self,
             _: &'a GpuTensorHandle,
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-            Box::pin(async move { Err(anyhow::anyhow!("unary_sinc not supported by provider")) })
+            Box::pin(async move {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "unary_sinc",
+                ))
+            })
         }
     }
 
     #[test]
-    fn sinc_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
+    fn sinc_catalog_binding_and_provider_route() {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).unwrap();
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
         );
-    }
-
-    #[test]
-    fn sinc_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
-    #[test]
-    fn sinc_registers_unary_acceleration_tag() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("registered sinc builtin");
-        assert!(
-            builtin
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::Unary)),
-            "sinc must be tagged unary so native auto-promotion uploads host numeric inputs for unary_sinc"
-        );
-    }
-
-    #[test]
-    fn sinc_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("registered sinc builtin");
-        let descriptor = builtin.descriptor.expect("sinc descriptor");
+        assert!(matches!(GPU_SPEC.op_kind, GpuOpKind::Elementwise));
+        assert!(FUSION_SPEC.elementwise.is_some());
+        let descriptor = entry.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = sinc(X)"));
         assert!(descriptor
@@ -622,7 +560,7 @@ mod tests {
         let result = call(Value::Tensor(tensor)).expect("sinc");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 6]);
+                assert_eq!(out.shape(), [1, 6]);
                 assert_eq!(out.materialize_f64(), vec![0.0; 6]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -634,18 +572,21 @@ mod tests {
             Value::Num(value) => assert_eq!(value, 0.0),
             other => panic!("expected scalar, got {other:?}"),
         }
+        let wide = call(Value::Int(IntValue::U64(u64::MAX)))
+            .expect("nonzero native integer has exact sinc zero without a binary64 cast");
+        assert!(matches!(wide, Value::Num(0.0)));
     }
 
     #[test]
     fn sinc_fusion_integer_guard_matches_host() {
         let template = FUSION_SPEC.elementwise.expect("fusion template");
-        let inputs = ["x"];
+        let inputs = [crate::builtins::common::spec::FusionExprInput::text("x")];
         let ctx = FusionExprContext {
             scalar_ty: ScalarType::F64,
             inputs: &inputs,
             constants: &[],
         };
-        let expr = (template.wgsl_body)(&ctx).expect("fusion expression");
+        let expr = template.wgsl_body.render(&ctx).expect("fusion expression");
         assert!(expr.contains("isFinite(x) && floor(abs(x)) == abs(x)"));
         assert!(
             !expr.contains("9.007199254740992e15"),
@@ -659,7 +600,7 @@ mod tests {
         let result = call(Value::Tensor(tensor)).expect("sinc");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 4]);
+                assert_eq!(out.shape(), [1, 4]);
                 let expected = [0.0, 1.0, 0.0, 2.0 / std::f64::consts::PI];
                 for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
@@ -674,7 +615,7 @@ mod tests {
         let tensor = Tensor::new(vec![0.0, 0.5, 1.5, 2.0], vec![2, 2]).unwrap();
         let result = call(Value::Tensor(tensor)).expect("sinc");
         match result {
-            Value::Tensor(out) => assert_eq!(out.shape, vec![2, 2]),
+            Value::Tensor(out) => assert_eq!(out.shape(), [2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -710,6 +651,43 @@ mod tests {
     }
 
     #[test]
+    fn integer_and_logical_resident_fallback_keep_double_on_single_provider() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_f32_test_provider(|provider| {
+            let integer = Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![0, u64::MAX]),
+                vec![1, 2],
+            )
+            .unwrap();
+            let integer = gpu_helpers::upload_tensor(provider, &integer)
+                .expect("integer upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap();
+            let integer_result = call(Value::GpuTensor(integer)).expect("integer sinc fallback");
+            let Value::Tensor(integer_result) = integer_result else {
+                panic!("single provider cannot retain double integer result");
+            };
+            assert_eq!(integer_result.numeric_dtype(), NumericDType::F64);
+            assert_eq!(integer_result.materialize_f64(), vec![1.0, 0.0]);
+
+            let logical = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1],
+                    shape: &[1, 2],
+                })
+                .expect("logical upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap();
+            let logical_result = call(Value::GpuTensor(logical)).expect("logical sinc fallback");
+            let Value::Tensor(logical_result) = logical_result else {
+                panic!("single provider cannot retain double logical result");
+            };
+            assert_eq!(logical_result.numeric_dtype(), NumericDType::F64);
+            assert_eq!(logical_result.materialize_f64(), vec![1.0, 0.0]);
+        });
+    }
+
+    #[test]
     fn sinc_nonfloating_input_follows_compatibility_mode() {
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -725,16 +703,14 @@ mod tests {
             assert!(call(Value::Int(IntValue::I16(1))).is_ok());
         }
 
-        let handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_300_005,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::I16,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::I16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = call(Value::GpuTensor(handle.clone()))
@@ -771,7 +747,7 @@ mod tests {
         let result = call(Value::ComplexTensor(tensor)).expect("sinc complex tensor");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
                 assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
@@ -788,22 +764,25 @@ mod tests {
     #[test]
     fn sinc_gpu_falls_back_only_for_explicit_unsupported_hook() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(UnsupportedSincProvider));
+        let provider: &'static dyn AccelProvider =
+            Box::leak(Box::new(UnsupportedSincProvider::default()));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: provider.device_id(),
-            buffer_id: 2,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::Real,
-        );
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 0.5, 1.0],
+                shape: &[1, 3],
+            })
+            .expect("owned input");
         let result = call(Value::GpuTensor(handle)).expect("sinc gpu fallback");
+        let Value::GpuTensor(ref output) = result else {
+            panic!("supported fallback restoration must remain resident: {result:?}");
+        };
+        assert_eq!(output.shape(), &[1, 3]);
+        let result =
+            block_on(gpu_helpers::gather_value_async(&result)).expect("gather restored result");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
                 for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
@@ -814,16 +793,82 @@ mod tests {
     }
 
     #[test]
+    fn stale_resident_input_rejects_before_sinc_hook_or_download() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[derive(Default)]
+        struct CountedSincProvider {
+            owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+            hooks: AtomicUsize,
+            downloads: AtomicUsize,
+        }
+        impl AccelProvider for CountedSincProvider {
+            fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                anyhow::bail!("fixture allocation owner supplies inputs")
+            }
+            fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                self.downloads.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { anyhow::bail!("unavailable allocation must not be downloaded") })
+            }
+            fn device_info(&self) -> String {
+                "sinc unavailable allocation fixture".into()
+            }
+            fn device_id(&self) -> u32 {
+                self.owner.device_id()
+            }
+            fn unary_sinc<'a>(
+                &'a self,
+                _: &'a GpuTensorHandle,
+            ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+                self.hooks.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async {
+                    Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "unary_sinc",
+                    ))
+                })
+            }
+        }
+
+        let _guard = test_support::accel_test_lock();
+        let provider: &'static CountedSincProvider =
+            Box::leak(Box::new(CountedSincProvider::default()));
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let allocation = provider
+            .owner
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        allocation.probe.mark_unavailable();
+        let error = call(Value::GpuTensor(allocation.handle.clone()))
+            .expect_err("unavailable input allocation");
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(std::error::Error::source(&error).is_some());
+        assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
+
+    #[test]
     fn sinc_gpu_propagates_provider_execution_errors() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(FailingSincProvider));
+        let provider: &'static dyn AccelProvider =
+            Box::leak(Box::new(FailingSincProvider::default()));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: provider.device_id(),
-            buffer_id: 1,
-            descriptor: Default::default(),
-        };
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 0.5, 1.0],
+                shape: &[1, 3],
+            })
+            .expect("owned input");
         let err = call(Value::GpuTensor(handle)).expect_err("provider error should surface");
         assert!(err
             .message()
@@ -836,23 +881,30 @@ mod tests {
     #[test]
     fn sinc_gpu_complex_interleaved_falls_back_when_hook_unsupported() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider));
+        let provider: &'static dyn AccelProvider =
+            Box::leak(Box::new(ComplexSincProvider::default()));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: provider.device_id(),
-            buffer_id: 3,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::ComplexInterleaved,
-        );
+        let handle = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[0.0, 0.0, 0.5, 0.25]),
+                shape: &[2, 1],
+                storage: GpuTensorStorage::ComplexInterleaved,
+            })
+            .expect("owned complex input");
 
         let result = call(Value::GpuTensor(handle)).expect("complex sinc gpu fallback");
+        let Value::GpuTensor(ref output) = result else {
+            panic!("supported complex restoration must remain resident: {result:?}");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(output),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let result = block_on(gpu_helpers::gather_value_async(&result))
+            .expect("gather restored complex result");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
                 assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
@@ -863,18 +915,18 @@ mod tests {
     #[test]
     fn sinc_gpu_complex_interleaved_rejects_odd_buffer_length() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider));
+        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider {
+            malformed_download: true,
+            ..Default::default()
+        }));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: provider.device_id(),
-            buffer_id: 4,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::ComplexInterleaved,
-        );
+        let handle = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[0.0, 0.0, 0.5, 0.25]),
+                shape: &[2, 1],
+                storage: GpuTensorStorage::ComplexInterleaved,
+            })
+            .expect("owned complex input");
 
         let err = call(Value::GpuTensor(handle)).expect_err("odd complex buffer should error");
         assert_eq!(err.identifier(), Some("RunMat:gather:DownloadFailed"));
@@ -886,7 +938,7 @@ mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(Value::GpuTensor(handle)).expect("sinc gpu");
@@ -895,7 +947,7 @@ mod tests {
                 "provider-backed sinc should keep gpuArray output resident"
             );
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
             for (got, want) in gathered.materialize_f64().iter().zip(expected) {
                 assert_close(*got, want);
@@ -923,7 +975,7 @@ mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(out.shape, complex.shape);
+            assert_eq!(out.shape(), complex.shape());
             assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
             assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
         });
@@ -943,19 +995,21 @@ mod tests {
             return;
         }
         let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.25, 2.0], vec![1, 5]).unwrap();
-        let cpu = sinc_real(Value::Tensor(tensor.clone())).expect("cpu sinc");
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+        let cpu =
+            block_on(sinc_real(Value::Tensor(tensor.clone()), &mut cooperation)).expect("cpu sinc");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .expect("wgpu provider")
             .upload(&view)
             .expect("upload");
-        let gpu = block_on(sinc_gpu(handle)).expect("gpu sinc");
+        let gpu = block_on(sinc_gpu(handle, None, &mut cooperation)).expect("gpu sinc");
         let gathered = test_support::gather(gpu).expect("gather");
         let expected = test_support::gather(cpu).expect("gather cpu");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         let tol = match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -985,7 +1039,8 @@ mod tests {
         let complex =
             ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)], vec![3, 1]).unwrap();
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-        let gpu = block_on(sinc_gpu(handle)).expect("gpu sinc");
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+        let gpu = block_on(sinc_gpu(handle, None, &mut cooperation)).expect("gpu sinc");
         let Value::GpuTensor(out_handle) = gpu else {
             panic!("expected resident gpu output");
         };
@@ -1000,11 +1055,13 @@ mod tests {
         let Value::ComplexTensor(actual) = gathered else {
             panic!("expected complex tensor");
         };
-        let expected = match sinc_complex_tensor(complex).expect("cpu sinc") {
-            Value::ComplexTensor(tensor) => tensor,
-            other => panic!("expected complex tensor, got {other:?}"),
-        };
-        assert_eq!(actual.shape, expected.shape);
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+        let expected =
+            match block_on(sinc_complex_tensor(complex, &mut cooperation)).expect("cpu sinc") {
+                Value::ComplexTensor(tensor) => tensor,
+                other => panic!("expected complex tensor, got {other:?}"),
+            };
+        assert_eq!(actual.shape(), expected.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

@@ -54,11 +54,14 @@ pub fn flip_refill_tetrahedra_across_shared_face(
             node_ids: tetrahedra[right_index].node_ids,
         },
     )
-    .map_err(
-        |err| ConstrainedCavityRefillTetrahedronFlipError::InvalidFlipTopology {
-            reason: local_tetrahedron_flip_error_reason(&err),
+    .map_err(|err| match err {
+        LocalTetrahedronFlipError::Accounting(cause) => {
+            ConstrainedCavityRefillTetrahedronFlipError::Accounting(cause)
+        }
+        other => ConstrainedCavityRefillTetrahedronFlipError::InvalidFlipTopology {
+            reason: local_tetrahedron_flip_error_reason(&other),
         },
-    )?;
+    })?;
     refill_tetrahedra_from_flip_candidate(tetrahedra, &node_map, &flip, options)
 }
 
@@ -109,11 +112,14 @@ pub fn flip_refill_tetrahedra_around_shared_edge(
         ],
         target_edge,
     )
-    .map_err(
-        |err| ConstrainedCavityRefillTetrahedronFlipError::InvalidFlipTopology {
-            reason: local_tetrahedron_flip_error_reason(&err),
+    .map_err(|err| match err {
+        LocalTetrahedronFlipError::Accounting(cause) => {
+            ConstrainedCavityRefillTetrahedronFlipError::Accounting(cause)
+        }
+        other => ConstrainedCavityRefillTetrahedronFlipError::InvalidFlipTopology {
+            reason: local_tetrahedron_flip_error_reason(&other),
         },
-    )?;
+    })?;
     refill_tetrahedra_from_flip_candidate(tetrahedra, &node_map, &flip, options)
 }
 
@@ -123,7 +129,7 @@ fn refill_component_node_map(
 ) -> Result<BTreeMap<u32, Point3>, ConstrainedCavityRefillTetrahedronFlipError> {
     let node_map = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     for tetrahedron in tetrahedra {
         for node_id in tetrahedron.node_ids {
@@ -184,13 +190,18 @@ fn refill_tetrahedra_from_flip_candidate(
         }
         match raw_refill_tetrahedron_with_rejection_reason(*node_ids, points, options) {
             Ok(tetrahedron) => candidate_tetrahedra.push(tetrahedron),
-            Err(reason) => {
+            Err(RefillTetrahedronError::Rejected(reason)) => {
                 return Err(
                     ConstrainedCavityRefillTetrahedronFlipError::RejectedCreatedTetrahedron {
                         node_ids: *node_ids,
                         reason,
                     },
                 );
+            }
+            Err(RefillTetrahedronError::Accounting(error)) => {
+                return Err(ConstrainedCavityRefillTetrahedronFlipError::Accounting(
+                    error,
+                ));
             }
         }
     }
@@ -199,6 +210,9 @@ fn refill_tetrahedra_from_flip_candidate(
 
 fn local_tetrahedron_flip_error_reason(error: &LocalTetrahedronFlipError) -> &'static str {
     match error {
+        LocalTetrahedronFlipError::Accounting(_) => {
+            unreachable!("accounting errors are handled before topology classification")
+        }
         LocalTetrahedronFlipError::DegenerateTetrahedron { .. } => "degenerate_tetrahedron",
         LocalTetrahedronFlipError::NoSharedFace => "no_shared_face",
         LocalTetrahedronFlipError::NoSharedEdge => "no_shared_edge",

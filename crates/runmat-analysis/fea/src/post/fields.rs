@@ -1,164 +1,523 @@
+use crate::algebra::{capacity::measured, coercivity::NumericalCapacityError};
 use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
+use runmat_simulation_usage::{AsyncCapacityOwner, LedgerError, OperationCount, UsageCategory};
 
 use crate::contracts::{
-    FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
-    FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+    FEA_FIELD_STRUCTURAL_NODAL_STRESS, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
     FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::{
-    assembly::{
-        dofs::StructuralDofKind,
-        elements::beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
-        elements::solid::{strain_displacement_matrix, Tetrahedron4ElementGeometry},
-        AssemblySummary, BeamRecoveryElementSummary, PrepCoordinateSummary,
-        PrepRecoveryEdgeSummary, ShellRecoveryElementSummary, SolidRecoveryElementSummary,
-        StructuralMaterialSummary,
-    },
-    operator::{apply_k, apply_k_unconstrained},
-    solve::linear::LinearSolveResult,
+    assembly::AssemblySummary, planning::resource::LocalExecutionPlan,
+    post::error::StructuralFieldRecoveryError, solve::linear::LinearSolveResult,
+};
+
+mod catalog;
+mod edge;
+mod formulation;
+mod scalars;
+mod state;
+
+pub use catalog::{
+    structural_observable_field_definitions, structural_retained_field_inventory,
+    structural_static_observable_field_definitions, take_structural_observable_fields,
+    StructuralLinearFieldQuantity,
+};
+use edge::edge_strain_tensor;
+use scalars::{recover_strain_energy_density, recover_stress, recover_von_mises};
+use state::{
+    recover_displacement, recover_reaction_force, recover_reaction_moment, recover_rotation,
+    rotation_shape, structural_displacement_node_count,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
-type LocalTriangleCoordinates = [[f64; 2]; 3];
-type LocalFrame = [[f64; 3]; 3];
+
+fn immediate<T>(
+    future: impl std::future::Future<
+        Output = Result<
+            T,
+            NumericalCapacityError<StructuralFieldRecoveryError, std::convert::Infallible>,
+        >,
+    >,
+) -> Result<T, StructuralFieldRecoveryError> {
+    use futures::FutureExt;
+    future
+        .now_or_never()
+        .expect("native field recovery capacity is immediately ready")
+        .map_err(|error| match error {
+            NumericalCapacityError::Numerical(error) => error,
+            NumericalCapacityError::Admission(never) => match never {},
+        })
+}
+
+fn count(length: usize) -> Result<OperationCount, StructuralFieldRecoveryError> {
+    Ok(OperationCount::from_operations(
+        u64::try_from(length).map_err(|_| LedgerError::CountOverflow)?,
+    ))
+}
+
+fn tensor_work(
+    values: &[f64],
+    per_tensor: u64,
+) -> Result<OperationCount, StructuralFieldRecoveryError> {
+    count(values.len() / TENSOR_COMPONENT_COUNT)?
+        .checked_mul(per_tensor)
+        .map_err(LedgerError::from)
+        .map_err(StructuralFieldRecoveryError::from)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeformationRecoveryDetail {
+    Complete,
+    TransientHistory,
+}
 
 pub fn recover_result_fields(
     summary: &AssemblySummary,
     solve_result: &LinearSolveResult,
-) -> Vec<AnalysisField> {
+    local_execution: LocalExecutionPlan,
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
+    immediate(recover_result_fields_with_capacity::<
+        std::convert::Infallible,
+    >(summary, solve_result, local_execution, None))
+}
+
+pub(crate) async fn recover_result_fields_with_capacity<A>(
+    summary: &AssemblySummary,
+    solve_result: &LinearSolveResult,
+    local_execution: LocalExecutionPlan,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<Vec<AnalysisField>, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
     if solve_result.solution.is_empty()
         || solve_result.solution.iter().any(|value| !value.is_finite())
     {
-        return empty_structural_fields();
+        return Ok(empty_structural_fields());
     }
 
-    let dof_count = summary.dof_count.max(3);
-    let mut displacement_values = solve_result.solution.clone();
-    if displacement_values.len() < dof_count {
-        displacement_values.resize(dof_count, 0.0);
+    let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
+    let physical_operator =
+        crate::assembly::physical_fields::StructuralPhysicalOperator::from_assembly(summary)
+            .map_err(
+                |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                    reason: format!("{error:?}"),
+                },
+            )?;
+    let physical_state = summary
+        .state_field(0, &solve_result.solution)
+        .map_err(
+            |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                reason: format!("{error:?}"),
+            },
+        )?;
+    let mut spmv_work = OperationCount::ZERO;
+    let matrix = summary.operator.operators().stiffness();
+    for row in 0..matrix.rows() {
+        spmv_work = spmv_work
+            .checked_add(
+                OperationCount::direct_real_dot(
+                    count(matrix.pattern().row_range(row).len())?.operations(),
+                )
+                .map_err(LedgerError::from)
+                .map_err(StructuralFieldRecoveryError::from)?,
+            )
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)?;
     }
-    if displacement_values.is_empty() {
-        displacement_values = vec![0.0; dof_count];
-    }
-
-    let node_count = structural_displacement_node_count(summary, dof_count);
-    displacement_values = recover_displacement(summary, &displacement_values, node_count);
-
-    let strain_recovery = recover_structural_strain(summary, &displacement_values);
-    let element_count = strain_recovery.element_count;
-    let strain_values = strain_recovery.values;
-    let stress_values = recover_stress(&strain_values, summary.structural_material);
-    let von_mises_values = recover_von_mises(&stress_values);
-    let nodal_von_mises_values =
-        recover_nodal_averaged_scalar(summary, &von_mises_values, node_count);
-    let strain_energy_density_values =
-        recover_strain_energy_density(&strain_values, &stress_values);
-    let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
-    let reaction_values = recover_reaction_force(summary, &internal_force);
-    let rotation_values = recover_rotation(summary, &solve_result.solution);
-    let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
-    let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
-    let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
-
-    let mut fields = vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            vec![node_count, VECTOR_COMPONENT_COUNT],
-            displacement_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_ROTATION,
-            rotation_shape(summary),
-            rotation_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_VON_MISES,
-            vec![element_count],
-            von_mises_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRAIN,
-            vec![element_count, TENSOR_COMPONENT_COUNT],
-            strain_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRESS,
-            vec![element_count, TENSOR_COMPONENT_COUNT],
-            stress_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-            vec![element_count],
-            strain_energy_density_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
-            vec![node_count],
-            nodal_von_mises_values,
-        ),
+    let internal_force = measured(owner, UsageCategory::Solve, spmv_work, || {
+        physical_operator
+            .apply(
+                crate::assembly::physical_fields::StructuralOperatorRole::Stiffness,
+                &physical_state,
+            )
+            .map_err(
+                |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                    reason: format!("{error:?}"),
+                },
+            )
+    })
+    .await?;
+    let (reaction_values, reaction_moment_values) = measured(
+        owner,
+        UsageCategory::Solve,
+        state::reaction_reference_work(summary, node_count)?,
+        || {
+            Ok::<_, StructuralFieldRecoveryError>(internal_force.with_canonical_storage(|values| {
+                (
+                    recover_reaction_force(summary, values, node_count),
+                    recover_reaction_moment(summary, values),
+                )
+            }))
+        },
+    )
+    .await?;
+    let residual_metrics =
+        state::recover_residual_metrics_with_capacity(summary, &solve_result.solution, owner)
+            .await?;
+    let mut fields = recover_deformation_result_fields_with_capacity(
+        summary,
+        &solve_result.solution,
+        local_execution,
+        DeformationRecoveryDetail::Complete,
+        owner,
+    )
+    .await?;
+    let strain_energy = if summary.structural_solid_recovery.iter().any(|element| {
+        element.thermal_eigenstrain.is_some() || element.solved_thermal_quadrature.is_some()
+    }) {
+        super::thermoelastic_energy::total_elastic_energy_with_capacity(summary, &fields, owner)
+            .await?
+    } else {
+        let work =
+            OperationCount::direct_real_dot(count(solve_result.solution.len())?.operations())
+                .and_then(|work| work.checked_add(OperationCount::from_operations(1)))
+                .map_err(LedgerError::from)
+                .map_err(StructuralFieldRecoveryError::from)?;
+        measured(owner, UsageCategory::Solve, work, || {
+            physical_operator
+                .elastic_energy(&physical_state, &internal_force)
+                .map_err(
+                    |error| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+                        reason: format!("{error:?}"),
+                    },
+                )
+                .map(|energy| energy.canonical_value())
+        })
+        .await?
+    };
+    fields.extend([
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-            reaction_shape(summary),
+            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
+            vec![node_count, VECTOR_COMPONENT_COUNT],
             reaction_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node),
             rotation_shape(summary),
             reaction_moment_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+            AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global),
             vec![1],
             vec![strain_energy],
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
             vec![1],
             vec![residual_metrics.normalized_residual_norm],
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::EquationScale, FieldLocation::Global),
             vec![1],
             vec![residual_metrics.equation_scale],
         ),
+    ]);
+    Ok(fields)
+}
+
+/// Recovers only deformation-dependent physical fields from a structural state vector.
+///
+/// Modal shapes have no static load equilibrium, so reaction and residual fields would be
+/// misleading. This shared path keeps their strain, stress, energy-density, beam, and shell
+/// recovery identical to linear-static recovery without manufacturing equilibrium quantities.
+pub fn recover_deformation_result_fields(
+    summary: &AssemblySummary,
+    solution: &[f64],
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
+    recover_deformation_result_fields_with_plan(
+        summary,
+        solution,
+        LocalExecutionPlan::serial(),
+        DeformationRecoveryDetail::Complete,
+    )
+}
+
+/// Intermediate transient states retain element averages, not integration-point tensors.
+/// The final accepted state still uses complete recovery for ordinary result fields.
+pub(crate) fn recover_transient_history_deformation_fields(
+    summary: &AssemblySummary,
+    solution: &[f64],
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
+    recover_deformation_result_fields_with_plan(
+        summary,
+        solution,
+        LocalExecutionPlan::serial(),
+        DeformationRecoveryDetail::TransientHistory,
+    )
+}
+
+fn recover_deformation_result_fields_with_plan(
+    summary: &AssemblySummary,
+    solution: &[f64],
+    local_execution: LocalExecutionPlan,
+    detail: DeformationRecoveryDetail,
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
+    immediate(recover_deformation_result_fields_with_capacity::<
+        std::convert::Infallible,
+    >(summary, solution, local_execution, detail, None))
+}
+
+async fn recover_deformation_result_fields_with_capacity<A>(
+    summary: &AssemblySummary,
+    solution: &[f64],
+    local_execution: LocalExecutionPlan,
+    detail: DeformationRecoveryDetail,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<Vec<AnalysisField>, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
+    if solution.is_empty() || solution.iter().any(|value| !value.is_finite()) {
+        return Ok(Vec::new());
+    }
+    if solution.len() != summary.dof_count {
+        return Err(StructuralFieldRecoveryError::DisplacementShapeMismatch {
+            expected: summary.dof_count,
+            actual: solution.len(),
+        }
+        .into());
+    }
+    let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
+    let displacement_values = recover_displacement(summary, solution, node_count);
+    let continuum_fields = if publishes_continuum_fields(summary) {
+        let strain_recovery = recover_structural_strain_with_capacity(
+            summary,
+            &displacement_values,
+            local_execution,
+            detail == DeformationRecoveryDetail::Complete,
+            owner,
+        )
+        .await?;
+        let element_count = strain_recovery.element_count;
+        let strain_values = strain_recovery.values;
+        let stress_values = match strain_recovery.stress {
+            Some(stress) => stress,
+            None => {
+                measured(
+                    owner,
+                    UsageCategory::Solve,
+                    tensor_work(&strain_values, 17)?,
+                    || {
+                        Ok::<_, StructuralFieldRecoveryError>(recover_stress(
+                            &strain_values,
+                            summary.structural_material,
+                        ))
+                    },
+                )
+                .await?
+            }
+        };
+        let von_mises_values = measured(
+            owner,
+            UsageCategory::Solve,
+            tensor_work(&stress_values, 17)?,
+            || Ok::<_, StructuralFieldRecoveryError>(recover_von_mises(&stress_values)),
+        )
+        .await?;
+        // Nodal stress is recovered as a tensor from each element's own field at its nodes,
+        // then averaged; nodal von Mises is computed from that averaged tensor.
+        let nodal_stress_values = if detail == DeformationRecoveryDetail::Complete {
+            super::volume_weighted::recover_volume_weighted_nodal_tensor_with_capacity(
+                &summary.structural_solid_recovery,
+                &strain_recovery.integration_point_stress,
+                node_count,
+                owner,
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
+        let nodal_von_mises_values = measured(
+            owner,
+            UsageCategory::Solve,
+            tensor_work(&nodal_stress_values, 17)?,
+            || Ok::<_, StructuralFieldRecoveryError>(recover_von_mises(&nodal_stress_values)),
+        )
+        .await?;
+        let strain_energy_density_values = match strain_recovery.strain_energy_density {
+            Some(energy) => energy,
+            None => {
+                measured(
+                    owner,
+                    UsageCategory::Solve,
+                    tensor_work(&strain_values, 12)?,
+                    || {
+                        Ok::<_, StructuralFieldRecoveryError>(recover_strain_energy_density(
+                            &strain_values,
+                            &stress_values,
+                        ))
+                    },
+                )
+                .await?
+            }
+        };
+        let integration_point_strain = strain_recovery.integration_point_strain;
+        let integration_point_stress = strain_recovery.integration_point_stress;
+        Some((
+            element_count,
+            strain_values,
+            stress_values,
+            von_mises_values,
+            nodal_von_mises_values,
+            nodal_stress_values,
+            strain_energy_density_values,
+            integration_point_strain,
+            integration_point_stress,
+        ))
+    } else {
+        None
+    };
+
+    let mut fields = vec![
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            vec![node_count, VECTOR_COMPONENT_COUNT],
+            displacement_values,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_ROTATION,
+            AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node),
+            rotation_shape(summary),
+            recover_rotation(summary, solution),
+        ),
     ];
-    if let Some(beam_fields) = recover_beam_result_fields(summary, &solve_result.solution) {
+    if let Some((
+        element_count,
+        strain_values,
+        stress_values,
+        von_mises_values,
+        nodal_von_mises_values,
+        nodal_stress_values,
+        strain_energy_density_values,
+        integration_point_strain,
+        integration_point_stress,
+    )) = continuum_fields
+    {
+        fields.extend([
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_VON_MISES,
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
+                vec![element_count],
+                von_mises_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_STRAIN,
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Strain,
+                    FieldLocation::Element,
+                ),
+                vec![element_count, TENSOR_COMPONENT_COUNT],
+                strain_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_STRESS,
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Stress,
+                    FieldLocation::Element,
+                ),
+                vec![element_count, TENSOR_COMPONENT_COUNT],
+                stress_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::StrainEnergyDensity,
+                    FieldLocation::Element,
+                ),
+                vec![element_count],
+                strain_energy_density_values,
+            ),
+        ]);
+        if detail == DeformationRecoveryDetail::Complete {
+            fields.extend([
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
+                    AnalysisFieldLayout::symmetric_tensor3(
+                        ObservationQuantity::Strain,
+                        FieldLocation::IntegrationPoint,
+                    ),
+                    vec![element_count * 4, TENSOR_COMPONENT_COUNT],
+                    integration_point_strain,
+                ),
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+                    AnalysisFieldLayout::symmetric_tensor3(
+                        ObservationQuantity::Stress,
+                        FieldLocation::IntegrationPoint,
+                    ),
+                    vec![element_count * 4, TENSOR_COMPONENT_COUNT],
+                    integration_point_stress,
+                ),
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::VonMisesStress,
+                        FieldLocation::Node,
+                    ),
+                    vec![node_count],
+                    nodal_von_mises_values,
+                ),
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_NODAL_STRESS,
+                    AnalysisFieldLayout::symmetric_tensor3(
+                        ObservationQuantity::Stress,
+                        FieldLocation::Node,
+                    ),
+                    vec![node_count, TENSOR_COMPONENT_COUNT],
+                    nodal_stress_values,
+                ),
+            ]);
+        }
+    }
+    if let Some(beam_fields) = formulation::recover_beam_result_fields_with_capacity(
+        summary,
+        solution,
+        local_execution,
+        owner,
+    )
+    .await?
+    {
         fields.extend(beam_fields);
     }
-    if let Some(shell_fields) = recover_shell_result_fields(summary, &solve_result.solution) {
+    if let Some(shell_fields) = formulation::recover_shell_result_fields_with_capacity(
+        summary,
+        solution,
+        local_execution,
+        owner,
+    )
+    .await?
+    {
         fields.extend(shell_fields);
     }
-    fields
+    Ok(fields)
 }
 
-pub fn recover_structural_stress_from_displacement(
-    summary: &AssemblySummary,
-    displacement: &[f64],
-) -> Vec<f64> {
-    let mut displacement_values = displacement.to_vec();
-    let dof_count = summary.dof_count.max(3);
-    if displacement_values.len() < dof_count {
-        displacement_values.resize(dof_count, 0.0);
-    }
-    let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
-    displacement_values.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
-    let strain_recovery = recover_structural_strain(summary, &displacement_values);
-    recover_stress(&strain_recovery.values, summary.structural_material)
+fn publishes_continuum_fields(summary: &AssemblySummary) -> bool {
+    !summary.structural_solid_recovery.is_empty()
 }
 
+/// Moves formulation-owned spatial fields with stable physical semantics into the observation
+/// domain.
+///
+/// Diagnostics, global summaries, derived display conveniences, and unsupported beam/shell
+/// resultants remain in `fields`; they are not mislabeled merely to make them observable.
+/// Constraint-group reactions also remain here because their canonical values are recovered from
+/// [`crate::constraints::CanonicalStructuralConstraintResult`], which preserves authored
+/// constraint ownership when constraints share nodes or degrees of freedom.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StructuralFieldRecoveryMetrics {
     pub active_stiffness_edge_count: usize,
-    pub prep_recovery_edge_count: usize,
     pub constrained_edge_count: usize,
     pub recovery_element_count: usize,
     pub solver_mesh_node_count: usize,
@@ -177,14 +536,65 @@ pub struct StructuralFieldRecoveryMetrics {
 pub fn structural_field_recovery_metrics(
     summary: &AssemblySummary,
     displacement: &[f64],
+) -> Result<StructuralFieldRecoveryMetrics, StructuralFieldRecoveryError> {
+    let strain_recovery = recover_structural_strain(summary, displacement)?;
+    Ok(recovery_metrics_from_strain(
+        summary,
+        displacement,
+        &strain_recovery.values,
+        strain_recovery.element_count,
+        strain_recovery.basis,
+    ))
+}
+
+/// Uses the completed physical field rather than running element recovery again.
+pub(crate) fn structural_field_recovery_metrics_from_fields(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    fields: &[AnalysisField],
+) -> Result<StructuralFieldRecoveryMetrics, StructuralFieldRecoveryError> {
+    if summary.structural_solid_recovery.is_empty() {
+        let edges = structural_recovery_edges(summary);
+        return Ok(recovery_metrics_from_strain(
+            summary,
+            displacement,
+            &recover_edge_strain(displacement, &edges),
+            edges.len().max(1),
+            StructuralRecoveryBasis::OperatorConnectivity.as_str(),
+        ));
+    }
+    let strain = fields
+        .iter()
+        .find(|field| field.field_id == FEA_FIELD_STRUCTURAL_STRAIN)
+        .and_then(AnalysisField::as_host_f64)
+        .ok_or_else(|| StructuralFieldRecoveryError::InvalidPhysicalLayout {
+            reason: "completed structural strain field is absent".into(),
+        })?;
+    let expected = summary.structural_solid_recovery.len() * TENSOR_COMPONENT_COUNT;
+    if strain.len() != expected {
+        return Err(StructuralFieldRecoveryError::ElementValueCountMismatch {
+            expected,
+            actual: strain.len(),
+        });
+    }
+    Ok(recovery_metrics_from_strain(
+        summary,
+        displacement,
+        strain,
+        summary.structural_solid_recovery.len(),
+        solid_recovery_basis(summary),
+    ))
+}
+
+fn recovery_metrics_from_strain(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    strain: &[f64],
+    element_count: usize,
+    basis: &'static str,
 ) -> StructuralFieldRecoveryMetrics {
     let recovery_edges = structural_recovery_edges(summary);
-    let strain_recovery = recover_structural_strain(summary, displacement);
     let active_stiffness_edge_count = recovery_edges.len();
-    let prep_recovery_edge_count = recovery_edges
-        .iter()
-        .filter(|edge| edge.basis == StructuralRecoveryBasis::PrepElementConnectivity)
-        .count();
     let constrained_edge_count = constrained_recovery_edge_count(summary);
     let mut max_edge_displacement_jump = 0.0_f64;
     let mut max_edge_strain_norm = 0.0_f64;
@@ -200,7 +610,7 @@ pub fn structural_field_recovery_metrics(
         stiffness_ratio_sum += edge.stiffness_ratio;
         edge_length_sum += edge.edge_length_m;
     }
-    for strain_tensor in strain_recovery.values.chunks_exact(TENSOR_COMPONENT_COUNT) {
+    for strain_tensor in strain.chunks_exact(TENSOR_COMPONENT_COUNT) {
         let strain_norm = strain_tensor
             .iter()
             .map(|value| value * value)
@@ -221,21 +631,6 @@ pub fn structural_field_recovery_metrics(
     };
     let strain_component_coverage_ratio =
         strain_component_coverage_ratio(displacement, &recovery_edges);
-    let element_geometry_node_count = summary
-        .prep_coordinates
-        .as_ref()
-        .map(|coordinates| coordinates.element_geometry_node_count)
-        .unwrap_or(0);
-    let element_geometry_edge_count = summary
-        .prep_coordinates
-        .as_ref()
-        .map(|coordinates| coordinates.element_geometry_edge_count)
-        .unwrap_or(0);
-    let element_geometry_coverage_ratio = summary
-        .prep_coordinates
-        .as_ref()
-        .map(|coordinates| coordinates.element_geometry_coverage_ratio)
-        .unwrap_or(0.0);
     let solver_mesh_element_count = summary.structural_solid_recovery.len();
     let solver_mesh_node_count = if solver_mesh_element_count == 0 {
         0
@@ -243,7 +638,7 @@ pub fn structural_field_recovery_metrics(
         let mut nodes = summary
             .structural_solid_recovery
             .iter()
-            .flat_map(|element| element.node_indices)
+            .flat_map(|element| element.geometry.node_indices().iter().copied())
             .collect::<Vec<_>>();
         nodes.sort_unstable();
         nodes.dedup();
@@ -252,9 +647,8 @@ pub fn structural_field_recovery_metrics(
 
     StructuralFieldRecoveryMetrics {
         active_stiffness_edge_count,
-        prep_recovery_edge_count,
         constrained_edge_count,
-        recovery_element_count: strain_recovery.element_count,
+        recovery_element_count: element_count,
         solver_mesh_node_count,
         solver_mesh_element_count,
         max_edge_displacement_jump,
@@ -262,41 +656,131 @@ pub fn structural_field_recovery_metrics(
         mean_edge_stiffness_ratio,
         mean_edge_length_m,
         strain_component_coverage_ratio,
-        element_geometry_node_count,
-        element_geometry_edge_count,
-        element_geometry_coverage_ratio,
-        basis: strain_recovery.basis,
+        element_geometry_node_count: solver_mesh_node_count,
+        element_geometry_edge_count: solver_mesh_element_count.saturating_mul(6),
+        element_geometry_coverage_ratio: f64::from(solver_mesh_element_count > 0),
+        basis,
+    }
+}
+
+fn solid_recovery_basis(summary: &AssemblySummary) -> &'static str {
+    if summary.structural_solid_recovery.iter().all(|element| {
+        matches!(
+            element.geometry,
+            crate::assembly::SolidRecoveryGeometry::Tetrahedron4 { .. }
+        )
+    }) {
+        "solid_tetrahedron4_constant_strain"
+    } else {
+        "solid_tetrahedron10_integration_point_projection"
     }
 }
 
 struct StructuralStrainRecovery {
     values: Vec<f64>,
+    stress: Option<Vec<f64>>,
+    strain_energy_density: Option<Vec<f64>>,
+    integration_point_strain: Vec<f64>,
+    integration_point_stress: Vec<f64>,
     element_count: usize,
     basis: &'static str,
 }
 
 fn empty_structural_fields() -> Vec<AnalysisField> {
     vec![
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![0, 3], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_ROTATION, vec![0, 3], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![0], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, vec![0, 6], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![0, 6], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, vec![0], Vec::new()),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            vec![0, 3],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_ROTATION,
+            AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node),
+            vec![0, 3],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_VON_MISES,
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![0],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_STRAIN,
+            AnalysisFieldLayout::symmetric_tensor3(
+                ObservationQuantity::Strain,
+                FieldLocation::Element,
+            ),
+            vec![0, 6],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_STRESS,
+            AnalysisFieldLayout::symmetric_tensor3(
+                ObservationQuantity::Stress,
+                FieldLocation::Element,
+            ),
+            vec![0, 6],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+            AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
+            vec![0],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_NODAL_STRESS,
+            AnalysisFieldLayout::symmetric_tensor3(
+                ObservationQuantity::Stress,
+                FieldLocation::Node,
+            ),
+            vec![0, 6],
+            Vec::new(),
+        ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::StrainEnergyDensity,
+                FieldLocation::Element,
+            ),
             vec![0],
             Vec::new(),
         ),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_FORCE, vec![0, 3], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, vec![0, 3], Vec::new()),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
+            vec![0, 3],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node),
+            vec![0, 3],
+            Vec::new(),
+        ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+            AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global),
             vec![0],
             Vec::new(),
         ),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, vec![0], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_EQUATION_SCALE, vec![0], Vec::new()),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![0],
+            Vec::new(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::EquationScale, FieldLocation::Global),
+            vec![0],
+            Vec::new(),
+        ),
     ]
 }
 
@@ -313,613 +797,148 @@ struct StructuralRecoveryEdge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StructuralRecoveryBasis {
-    SolidTetrahedron4ConstantStrain,
-    PrepConstantStrainBMatrix,
-    PrepElementConnectivity,
     OperatorConnectivity,
 }
 
 impl StructuralRecoveryBasis {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::SolidTetrahedron4ConstantStrain => "solid_tetrahedron4_constant_strain",
-            Self::PrepConstantStrainBMatrix => "prep_constant_strain_b_matrix",
-            Self::PrepElementConnectivity => "prep_element_connectivity",
             Self::OperatorConnectivity => "operator_connectivity",
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct StructuralBMatrixElement {
-    nodes: [usize; 3],
-    coordinates_m: [[f64; 3]; 3],
-}
-
 fn structural_recovery_edges(summary: &AssemblySummary) -> Vec<StructuralRecoveryEdge> {
-    let prep_edges = prep_structural_recovery_edges(summary);
-    if !prep_edges.is_empty() {
-        return prep_edges;
-    }
-
-    summary
-        .operator
-        .stiffness_upper
-        .iter()
-        .enumerate()
-        .filter_map(|(from_dof, stiffness)| {
-            let to_dof = from_dof + 1;
-            if to_dof >= summary.dof_count
-                || *stiffness <= 0.0
-                || summary
-                    .operator
-                    .constrained
-                    .get(from_dof)
-                    .copied()
-                    .unwrap_or(false)
-                || summary
-                    .operator
-                    .constrained
-                    .get(to_dof)
-                    .copied()
-                    .unwrap_or(false)
+    let matrix = summary.operator.operators().stiffness();
+    let constrained = summary.operator.constrained_dofs();
+    let mut edges = Vec::new();
+    for from_dof in 0..matrix.rows() {
+        for entry in matrix.pattern().row_range(from_dof) {
+            let to_dof = matrix.pattern().column(entry);
+            let stiffness = matrix.values()[entry].abs();
+            if to_dof <= from_dof
+                || stiffness == 0.0
+                || constrained[from_dof]
+                || constrained[to_dof]
             {
-                return None;
+                continue;
             }
-            let left_diag = summary
-                .operator
-                .stiffness_diag
-                .get(from_dof)
-                .copied()
-                .unwrap_or(0.0);
-            let right_diag = summary
-                .operator
-                .stiffness_diag
-                .get(to_dof)
-                .copied()
-                .unwrap_or(0.0);
+            let left_diag = matrix.get(from_dof, from_dof);
+            let right_diag = matrix.get(to_dof, to_dof);
             let diag_scale = (0.5 * (left_diag + right_diag)).abs().max(1.0);
-            Some(StructuralRecoveryEdge {
+            edges.push(StructuralRecoveryEdge {
                 from_dof,
                 to_dof,
                 component: from_dof % VECTOR_COMPONENT_COUNT,
-                hop: 1,
+                hop: to_dof - from_dof,
                 edge_length_m: 1.0,
-                stiffness_ratio: (*stiffness / diag_scale).abs(),
+                stiffness_ratio: stiffness / diag_scale,
                 basis: StructuralRecoveryBasis::OperatorConnectivity,
-            })
-        })
-        .collect()
-}
-
-fn prep_structural_recovery_edges(summary: &AssemblySummary) -> Vec<StructuralRecoveryEdge> {
-    summary
-        .prep_recovery_edges
-        .iter()
-        .filter_map(|edge| prep_recovery_edge(summary, *edge))
-        .collect()
-}
-
-fn prep_recovery_edge(
-    summary: &AssemblySummary,
-    edge: PrepRecoveryEdgeSummary,
-) -> Option<StructuralRecoveryEdge> {
-    let from_dof = edge.from_dof.min(edge.to_dof);
-    let to_dof = edge.from_dof.max(edge.to_dof);
-    if from_dof == to_dof
-        || to_dof >= summary.dof_count
-        || summary
-            .operator
-            .constrained
-            .get(from_dof)
-            .copied()
-            .unwrap_or(false)
-        || summary
-            .operator
-            .constrained
-            .get(to_dof)
-            .copied()
-            .unwrap_or(false)
-    {
-        return None;
+            });
+        }
     }
-
-    let left_diag = summary
-        .operator
-        .stiffness_diag
-        .get(from_dof)
-        .copied()
-        .unwrap_or(0.0);
-    let right_diag = summary
-        .operator
-        .stiffness_diag
-        .get(to_dof)
-        .copied()
-        .unwrap_or(0.0);
-    let diag_scale = (0.5 * (left_diag + right_diag)).abs().max(1.0);
-    let hop = to_dof.abs_diff(from_dof).max(1);
-    let family_scale = match edge.element_family_index {
-        0 => 0.95,
-        1 => 1.0,
-        2 => 1.05,
-        3 => 1.1,
-        _ => 0.9,
-    };
-    Some(StructuralRecoveryEdge {
-        from_dof,
-        to_dof,
-        component: from_dof % VECTOR_COMPONENT_COUNT,
-        hop,
-        edge_length_m: finite_positive_or(edge.edge_length_m, hop as f64),
-        stiffness_ratio: family_scale / (hop as f64 * diag_scale.sqrt().max(1.0)),
-        basis: StructuralRecoveryBasis::PrepElementConnectivity,
-    })
-}
-
-fn finite_positive_or(value: f64, fallback: f64) -> f64 {
-    if value.is_finite() && value > 0.0 {
-        value
-    } else {
-        fallback
-    }
+    edges
 }
 
 fn constrained_recovery_edge_count(summary: &AssemblySummary) -> usize {
-    let prep_constrained = summary
-        .prep_recovery_edges
-        .iter()
-        .filter(|edge| {
-            let from_dof = edge.from_dof.min(edge.to_dof);
-            let to_dof = edge.from_dof.max(edge.to_dof);
-            to_dof < summary.dof_count
-                && (summary
-                    .operator
-                    .constrained
-                    .get(from_dof)
-                    .copied()
-                    .unwrap_or(false)
-                    || summary
-                        .operator
-                        .constrained
-                        .get(to_dof)
-                        .copied()
-                        .unwrap_or(false))
-        })
-        .count();
-    if prep_constrained > 0 || !summary.prep_recovery_edges.is_empty() {
-        return prep_constrained;
-    }
-
-    summary
-        .operator
-        .stiffness_upper
-        .iter()
-        .enumerate()
-        .filter(|(from_dof, stiffness)| {
-            let to_dof = from_dof + 1;
-            **stiffness > 0.0
-                && to_dof < summary.dof_count
-                && (summary
-                    .operator
-                    .constrained
-                    .get(*from_dof)
-                    .copied()
-                    .unwrap_or(false)
-                    || summary
-                        .operator
-                        .constrained
-                        .get(to_dof)
-                        .copied()
-                        .unwrap_or(false))
+    structural_recovery_edges_including_constraints(summary)
+        .into_iter()
+        .filter(|(left, right)| {
+            summary.operator.constrained_dofs()[*left]
+                || summary.operator.constrained_dofs()[*right]
         })
         .count()
+}
+
+fn structural_recovery_edges_including_constraints(
+    summary: &AssemblySummary,
+) -> Vec<(usize, usize)> {
+    let matrix = summary.operator.operators().stiffness();
+    let mut edges = Vec::new();
+    for row in 0..matrix.rows() {
+        for entry in matrix.pattern().row_range(row) {
+            let column = matrix.pattern().column(entry);
+            if column > row && matrix.values()[entry] != 0.0 {
+                edges.push((row, column));
+            }
+        }
+    }
+    edges
 }
 
 fn recover_structural_strain(
     summary: &AssemblySummary,
     displacement: &[f64],
-) -> StructuralStrainRecovery {
-    if !summary.structural_solid_recovery.is_empty() {
-        return StructuralStrainRecovery {
-            values: recover_solid_tetrahedron4_strain(
-                displacement,
-                &summary.structural_solid_recovery,
-            ),
-            element_count: summary.structural_solid_recovery.len().max(1),
-            basis: StructuralRecoveryBasis::SolidTetrahedron4ConstantStrain.as_str(),
-        };
-    }
+) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
+    recover_structural_strain_with_plan(summary, displacement, LocalExecutionPlan::serial())
+}
 
-    let b_matrix_elements = prep_b_matrix_recovery_elements(summary, displacement);
-    if !b_matrix_elements.is_empty() {
-        return StructuralStrainRecovery {
-            values: recover_b_matrix_strain(displacement, &b_matrix_elements),
-            element_count: b_matrix_elements.len().max(1),
-            basis: StructuralRecoveryBasis::PrepConstantStrainBMatrix.as_str(),
-        };
+fn recover_structural_strain_with_plan(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    local_execution: LocalExecutionPlan,
+) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
+    recover_structural_strain_with_detail(summary, displacement, local_execution, true)
+}
+
+fn recover_structural_strain_with_detail(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    local_execution: LocalExecutionPlan,
+    retain_integration_points: bool,
+) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
+    immediate(recover_structural_strain_with_capacity::<
+        std::convert::Infallible,
+    >(
+        summary,
+        displacement,
+        local_execution,
+        retain_integration_points,
+        None,
+    ))
+}
+
+async fn recover_structural_strain_with_capacity<A>(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    local_execution: LocalExecutionPlan,
+    retain_integration_points: bool,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<StructuralStrainRecovery, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
+    if !summary.structural_solid_recovery.is_empty() {
+        let recovered = super::solid::recover_solid_fields_with_plan_and_capacity(
+            &summary.structural_solid_recovery,
+            displacement,
+            local_execution,
+            retain_integration_points,
+            owner,
+        )
+        .await?;
+        let basis = solid_recovery_basis(summary);
+        return Ok(StructuralStrainRecovery {
+            values: recovered.strain,
+            stress: Some(recovered.stress),
+            strain_energy_density: Some(recovered.strain_energy_density),
+            integration_point_strain: recovered.integration_point_strain,
+            integration_point_stress: recovered.integration_point_stress,
+            element_count: summary.structural_solid_recovery.len().max(1),
+            basis,
+        });
     }
 
     let recovery_edges = structural_recovery_edges(summary);
-    StructuralStrainRecovery {
+    Ok(StructuralStrainRecovery {
         values: recover_edge_strain(displacement, &recovery_edges),
+        stress: None,
+        strain_energy_density: None,
+        integration_point_strain: Vec::new(),
+        integration_point_stress: Vec::new(),
         element_count: recovery_edges.len().max(1),
         basis: recovery_edges
             .first()
             .map(|edge| edge.basis.as_str())
             .unwrap_or(StructuralRecoveryBasis::OperatorConnectivity.as_str()),
-    }
-}
-
-fn recover_solid_tetrahedron4_strain(
-    displacement: &[f64],
-    elements: &[SolidRecoveryElementSummary],
-) -> Vec<f64> {
-    let mut strain = vec![0.0; elements.len().max(1) * TENSOR_COMPONENT_COUNT];
-    for (element_index, element) in elements.iter().enumerate() {
-        let Ok(b) = strain_displacement_matrix(Tetrahedron4ElementGeometry {
-            nodes_m: element.coordinates_m,
-        }) else {
-            continue;
-        };
-        let mut element_displacement = [0.0_f64; 12];
-        for (local_node, node_index) in element.node_indices.iter().copied().enumerate() {
-            let displacement_vector = nodal_displacement(displacement, node_index);
-            let base = local_node * VECTOR_COMPONENT_COUNT;
-            element_displacement[base..base + VECTOR_COMPONENT_COUNT]
-                .copy_from_slice(&displacement_vector);
-        }
-        let base = element_index * TENSOR_COMPONENT_COUNT;
-        for component in 0..TENSOR_COMPONENT_COUNT {
-            strain[base + component] = b[component]
-                .iter()
-                .zip(element_displacement.iter())
-                .map(|(shape, value)| shape * value)
-                .sum();
-        }
-    }
-    strain
-}
-
-fn recover_nodal_averaged_scalar(
-    summary: &AssemblySummary,
-    element_values: &[f64],
-    node_count: usize,
-) -> Vec<f64> {
-    let mut nodal = vec![0.0_f64; node_count];
-    let mut counts = vec![0_usize; node_count];
-    for (element_index, element) in summary.structural_solid_recovery.iter().enumerate() {
-        let Some(value) = element_values.get(element_index).copied() else {
-            continue;
-        };
-        for node_index in element.node_indices {
-            if let Some(accumulator) = nodal.get_mut(node_index) {
-                *accumulator += value;
-                counts[node_index] += 1;
-            }
-        }
-    }
-    for (value, count) in nodal.iter_mut().zip(counts) {
-        if count > 0 {
-            *value /= count as f64;
-        }
-    }
-    nodal
-}
-
-fn prep_b_matrix_recovery_elements(
-    summary: &AssemblySummary,
-    displacement: &[f64],
-) -> Vec<StructuralBMatrixElement> {
-    let Some(prep_coordinates) = summary.prep_coordinates.as_ref() else {
-        return Vec::new();
-    };
-    if prep_coordinates.element_geometry_coverage_ratio <= 0.0
-        || prep_coordinates.element_geometry_node_count < 3
-        || prep_coordinates.reference_element_area_m2 <= 0.0
-        || !prep_coordinates.reference_element_area_m2.is_finite()
-        || !reference_coordinates_are_valid(prep_coordinates.reference_element_coordinates_m)
-    {
-        return Vec::new();
-    }
-
-    let node_count = displacement.len().div_ceil(VECTOR_COMPONENT_COUNT);
-    let full_elements = prep_full_b_matrix_recovery_elements(summary, node_count, prep_coordinates);
-    if !full_elements.is_empty() {
-        return full_elements;
-    }
-
-    let sample_elements = prep_sample_b_matrix_recovery_elements(
-        summary,
-        node_count,
-        prep_coordinates
-            .element_topology_sample_element_count
-            .min(4),
-        prep_coordinates.element_topology_sample_edge_count.min(8),
-        prep_coordinates.element_topology_sample_element_edges,
-        prep_coordinates.element_topology_sample_edge_nodes,
-        prep_coordinates.element_topology_sample_node_coordinates_m,
-    );
-    if !sample_elements.is_empty() {
-        return sample_elements;
-    }
-
-    fallback_b_matrix_recovery_elements(summary, node_count, prep_coordinates)
-}
-
-fn prep_full_b_matrix_recovery_elements(
-    summary: &AssemblySummary,
-    node_count: usize,
-    prep_coordinates: &PrepCoordinateSummary,
-) -> Vec<StructuralBMatrixElement> {
-    if prep_coordinates.element_topology_edge_nodes.len() < 3
-        || prep_coordinates.element_topology_element_edges.is_empty()
-        || prep_coordinates
-            .element_topology_node_coordinates_m
-            .is_empty()
-    {
-        return Vec::new();
-    }
-    prep_coordinates
-        .element_topology_element_edges
-        .iter()
-        .filter_map(|element_edges| {
-            let mut nodes = Vec::with_capacity(3);
-            for edge_index in element_edges {
-                let edge_index = *edge_index as usize;
-                let edge_nodes = *prep_coordinates
-                    .element_topology_edge_nodes
-                    .get(edge_index)?;
-                for node in edge_nodes {
-                    let node = node as usize;
-                    if node < node_count
-                        && node < prep_coordinates.element_topology_node_coordinates_m.len()
-                        && node_has_unconstrained_dof(summary, node)
-                        && !nodes.contains(&node)
-                    {
-                        nodes.push(node);
-                    }
-                }
-            }
-            if nodes.len() != 3 {
-                return None;
-            }
-            let coordinates_m = [
-                prep_coordinates.element_topology_node_coordinates_m[nodes[0]],
-                prep_coordinates.element_topology_node_coordinates_m[nodes[1]],
-                prep_coordinates.element_topology_node_coordinates_m[nodes[2]],
-            ];
-            reference_coordinates_are_valid(coordinates_m).then_some(StructuralBMatrixElement {
-                nodes: [nodes[0], nodes[1], nodes[2]],
-                coordinates_m,
-            })
-        })
-        .collect()
-}
-
-fn fallback_b_matrix_recovery_elements(
-    summary: &AssemblySummary,
-    node_count: usize,
-    prep_coordinates: &PrepCoordinateSummary,
-) -> Vec<StructuralBMatrixElement> {
-    let mut nodes = summary
-        .prep_recovery_edges
-        .iter()
-        .flat_map(|edge| {
-            [
-                edge.from_dof / VECTOR_COMPONENT_COUNT,
-                edge.to_dof / VECTOR_COMPONENT_COUNT,
-            ]
-        })
-        .filter(|node| *node < node_count && node_has_unconstrained_dof(summary, *node))
-        .collect::<Vec<_>>();
-    nodes.sort_unstable();
-    nodes.dedup();
-    if nodes.len() < 3 {
-        nodes = (0..node_count)
-            .filter(|node| node_has_unconstrained_dof(summary, *node))
-            .take(3)
-            .collect();
-    }
-
-    nodes
-        .chunks_exact(3)
-        .map(|chunk| StructuralBMatrixElement {
-            nodes: [chunk[0], chunk[1], chunk[2]],
-            coordinates_m: prep_coordinates.reference_element_coordinates_m,
-        })
-        .collect()
-}
-
-fn prep_sample_b_matrix_recovery_elements(
-    summary: &AssemblySummary,
-    node_count: usize,
-    sample_element_count: usize,
-    sample_edge_count: usize,
-    element_edges: [[u32; 3]; 4],
-    edge_nodes: [[u32; 2]; 8],
-    node_coordinates_m: [[f64; 3]; 8],
-) -> Vec<StructuralBMatrixElement> {
-    if sample_element_count == 0 || sample_edge_count < 3 {
-        return Vec::new();
-    }
-    element_edges
-        .iter()
-        .take(sample_element_count)
-        .filter_map(|sample_edges| {
-            let mut nodes = Vec::with_capacity(3);
-            for edge_index in sample_edges {
-                let edge_index = *edge_index as usize;
-                if edge_index >= sample_edge_count {
-                    return None;
-                }
-                for node in edge_nodes[edge_index] {
-                    let node = node as usize;
-                    if node < node_count
-                        && node < node_coordinates_m.len()
-                        && node_has_unconstrained_dof(summary, node)
-                        && !nodes.contains(&node)
-                    {
-                        nodes.push(node);
-                    }
-                }
-            }
-            if nodes.len() != 3 {
-                return None;
-            }
-            let coordinates_m = [
-                node_coordinates_m[nodes[0]],
-                node_coordinates_m[nodes[1]],
-                node_coordinates_m[nodes[2]],
-            ];
-            reference_coordinates_are_valid(coordinates_m).then_some(StructuralBMatrixElement {
-                nodes: [nodes[0], nodes[1], nodes[2]],
-                coordinates_m,
-            })
-        })
-        .collect()
-}
-
-fn reference_coordinates_are_valid(coordinates: [[f64; 3]; 3]) -> bool {
-    coordinates.iter().flatten().all(|value| value.is_finite())
-        && triangle_area_3d_m2(coordinates) > 0.0
-}
-
-fn node_has_unconstrained_dof(summary: &AssemblySummary, node: usize) -> bool {
-    let base = node * VECTOR_COMPONENT_COUNT;
-    (0..VECTOR_COMPONENT_COUNT).any(|component| {
-        !summary
-            .operator
-            .constrained
-            .get(base + component)
-            .copied()
-            .unwrap_or(false)
     })
-}
-
-fn recover_b_matrix_strain(
-    displacement: &[f64],
-    elements: &[StructuralBMatrixElement],
-) -> Vec<f64> {
-    let mut strain = vec![0.0; elements.len().max(1) * TENSOR_COMPONENT_COUNT];
-    for (element_index, element) in elements.iter().enumerate() {
-        let edge_strain = b_matrix_strain_tensor(displacement, element);
-        let base = element_index * TENSOR_COMPONENT_COUNT;
-        strain[base..base + TENSOR_COMPONENT_COUNT].copy_from_slice(&edge_strain);
-    }
-    strain
-}
-
-fn b_matrix_strain_tensor(displacement: &[f64], element: &StructuralBMatrixElement) -> [f64; 6] {
-    let Some((local_coordinates, local_basis)) = local_triangle_coordinates(element.coordinates_m)
-    else {
-        return [0.0; TENSOR_COMPONENT_COUNT];
-    };
-    let denominator = triangle_signed_area2(local_coordinates);
-    if !denominator.is_finite() || denominator.abs() <= f64::EPSILON {
-        return [0.0; TENSOR_COMPONENT_COUNT];
-    }
-
-    let mut local_displacement = [[0.0_f64; 3]; 3];
-    for (i, node) in element.nodes.iter().copied().enumerate() {
-        let displacement_vector = nodal_displacement(displacement, node);
-        local_displacement[i] = [
-            dot3(displacement_vector, local_basis[0]),
-            dot3(displacement_vector, local_basis[1]),
-            dot3(displacement_vector, local_basis[2]),
-        ];
-    }
-
-    let b = [
-        local_coordinates[1][1] - local_coordinates[2][1],
-        local_coordinates[2][1] - local_coordinates[0][1],
-        local_coordinates[0][1] - local_coordinates[1][1],
-    ];
-    let c = [
-        local_coordinates[2][0] - local_coordinates[1][0],
-        local_coordinates[0][0] - local_coordinates[2][0],
-        local_coordinates[1][0] - local_coordinates[0][0],
-    ];
-
-    let mut du_dx = 0.0_f64;
-    let mut du_dy = 0.0_f64;
-    let mut dv_dx = 0.0_f64;
-    let mut dv_dy = 0.0_f64;
-    let mut dw_dx = 0.0_f64;
-    let mut dw_dy = 0.0_f64;
-    for i in 0..3 {
-        du_dx += b[i] * local_displacement[i][0];
-        du_dy += c[i] * local_displacement[i][0];
-        dv_dx += b[i] * local_displacement[i][1];
-        dv_dy += c[i] * local_displacement[i][1];
-        dw_dx += b[i] * local_displacement[i][2];
-        dw_dy += c[i] * local_displacement[i][2];
-    }
-
-    [
-        du_dx / denominator,
-        dv_dy / denominator,
-        0.0,
-        (du_dy + dv_dx) / denominator,
-        dw_dy / denominator,
-        dw_dx / denominator,
-    ]
-}
-
-fn local_triangle_coordinates(
-    coordinates: [[f64; 3]; 3],
-) -> Option<(LocalTriangleCoordinates, LocalFrame)> {
-    let origin = coordinates[0];
-    let edge01 = sub3(coordinates[1], origin);
-    let edge02 = sub3(coordinates[2], origin);
-    let e1 = normalize3(edge01)?;
-    let normal = normalize3(cross3(edge01, edge02))?;
-    let e2 = normalize3(cross3(normal, e1))?;
-    let local = coordinates.map(|point| {
-        let relative = sub3(point, origin);
-        [dot3(relative, e1), dot3(relative, e2)]
-    });
-    Some((local, [e1, e2, normal]))
-}
-
-fn triangle_signed_area2(coordinates: [[f64; 2]; 3]) -> f64 {
-    coordinates[0][0] * (coordinates[1][1] - coordinates[2][1])
-        + coordinates[1][0] * (coordinates[2][1] - coordinates[0][1])
-        + coordinates[2][0] * (coordinates[0][1] - coordinates[1][1])
-}
-
-fn triangle_area_3d_m2(coordinates: [[f64; 3]; 3]) -> f64 {
-    let edge01 = sub3(coordinates[1], coordinates[0]);
-    let edge02 = sub3(coordinates[2], coordinates[0]);
-    0.5 * norm3(cross3(edge01, edge02))
-}
-
-fn sub3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
-}
-
-fn dot3(left: [f64; 3], right: [f64; 3]) -> f64 {
-    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
-}
-
-fn cross3(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [
-        left[1] * right[2] - left[2] * right[1],
-        left[2] * right[0] - left[0] * right[2],
-        left[0] * right[1] - left[1] * right[0],
-    ]
-}
-
-fn norm3(value: [f64; 3]) -> f64 {
-    dot3(value, value).sqrt()
-}
-
-fn normalize3(value: [f64; 3]) -> Option<[f64; 3]> {
-    let norm = norm3(value);
-    (norm.is_finite() && norm > f64::EPSILON).then_some([
-        value[0] / norm,
-        value[1] / norm,
-        value[2] / norm,
-    ])
 }
 
 fn recover_edge_strain(
@@ -934,44 +953,6 @@ fn recover_edge_strain(
         strain[base..base + TENSOR_COMPONENT_COUNT].copy_from_slice(&edge_strain);
     }
     strain
-}
-
-fn edge_strain_tensor(displacement: &[f64], edge: &StructuralRecoveryEdge) -> [f64; 6] {
-    let length = finite_positive_or(edge.edge_length_m, edge.hop.max(1) as f64);
-    let from_node = edge.from_dof / VECTOR_COMPONENT_COUNT;
-    let to_node = edge.to_dof / VECTOR_COMPONENT_COUNT;
-    if from_node == to_node {
-        let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
-            - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
-        let mut tensor = [0.0; TENSOR_COMPONENT_COUNT];
-        tensor[edge.component] = jump / length;
-        return tensor;
-    }
-
-    let du = nodal_displacement(displacement, to_node);
-    let u0 = nodal_displacement(displacement, from_node);
-    let gradient = [
-        (du[0] - u0[0]) / length,
-        (du[1] - u0[1]) / length,
-        (du[2] - u0[2]) / length,
-    ];
-    [
-        gradient[0],
-        gradient[1],
-        gradient[2],
-        0.5 * (gradient[0] + gradient[1]),
-        0.5 * (gradient[1] + gradient[2]),
-        0.5 * (gradient[0] + gradient[2]),
-    ]
-}
-
-fn nodal_displacement(displacement: &[f64], node: usize) -> [f64; VECTOR_COMPONENT_COUNT] {
-    let base = node * VECTOR_COMPONENT_COUNT;
-    [
-        displacement.get(base).copied().unwrap_or(0.0),
-        displacement.get(base + 1).copied().unwrap_or(0.0),
-        displacement.get(base + 2).copied().unwrap_or(0.0),
-    ]
 }
 
 fn strain_component_coverage_ratio(
@@ -994,668 +975,5 @@ fn strain_component_coverage_ratio(
     active_component_count as f64 / expected_component_count as f64
 }
 
-fn recover_stress(strain: &[f64], material: StructuralMaterialSummary) -> Vec<f64> {
-    let lambda = material.lame_lambda_pa.max(0.0);
-    let mu = material.shear_modulus_pa.max(0.0);
-    let mut stress = vec![0.0; strain.len()];
-    for (element_index, strain_tensor) in strain.chunks_exact(TENSOR_COMPONENT_COUNT).enumerate() {
-        let trace = strain_tensor[0] + strain_tensor[1] + strain_tensor[2];
-        let base = element_index * TENSOR_COMPONENT_COUNT;
-        stress[base] = lambda * trace + 2.0 * mu * strain_tensor[0];
-        stress[base + 1] = lambda * trace + 2.0 * mu * strain_tensor[1];
-        stress[base + 2] = lambda * trace + 2.0 * mu * strain_tensor[2];
-        stress[base + 3] = mu * strain_tensor[3];
-        stress[base + 4] = mu * strain_tensor[4];
-        stress[base + 5] = mu * strain_tensor[5];
-    }
-    stress
-}
-
-fn recover_von_mises(stress: &[f64]) -> Vec<f64> {
-    stress
-        .chunks_exact(TENSOR_COMPONENT_COUNT)
-        .map(|tensor| {
-            let sxx = tensor[0];
-            let syy = tensor[1];
-            let szz = tensor[2];
-            let txy = tensor[3];
-            let tyz = tensor[4];
-            let txz = tensor[5];
-            (0.5 * ((sxx - syy).powi(2) + (syy - szz).powi(2) + (szz - sxx).powi(2))
-                + 3.0 * (txy.powi(2) + tyz.powi(2) + txz.powi(2)))
-            .sqrt()
-        })
-        .collect()
-}
-
-fn recover_strain_energy_density(strain: &[f64], stress: &[f64]) -> Vec<f64> {
-    strain
-        .chunks_exact(TENSOR_COMPONENT_COUNT)
-        .zip(stress.chunks_exact(TENSOR_COMPONENT_COUNT))
-        .map(|(strain_tensor, stress_tensor)| {
-            0.5 * strain_tensor
-                .iter()
-                .zip(stress_tensor.iter())
-                .map(|(strain, stress)| strain * stress)
-                .sum::<f64>()
-        })
-        .collect()
-}
-
-struct BeamResultValues {
-    axial_force: Vec<f64>,
-    shear_force: Vec<f64>,
-    torsion_moment: Vec<f64>,
-    bending_moment: Vec<f64>,
-    bending_stress: Vec<f64>,
-    torsion_stress: Vec<f64>,
-}
-
-fn recover_beam_result_fields(
-    summary: &AssemblySummary,
-    solution: &[f64],
-) -> Option<Vec<AnalysisField>> {
-    if summary.structural_beam_recovery.is_empty() {
-        return None;
-    }
-    let values = recover_beam_result_values(summary, solution);
-    let element_count = summary.structural_beam_recovery.len();
-    Some(vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
-            vec![element_count],
-            values.axial_force,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
-            vec![element_count, 2],
-            values.shear_force,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
-            vec![element_count],
-            values.torsion_moment,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
-            vec![element_count, 2],
-            values.bending_moment,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
-            vec![element_count, 2],
-            values.bending_stress,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
-            vec![element_count],
-            values.torsion_stress,
-        ),
-    ])
-}
-
-fn recover_beam_result_values(summary: &AssemblySummary, solution: &[f64]) -> BeamResultValues {
-    let mut axial_force = Vec::with_capacity(summary.structural_beam_recovery.len());
-    let mut shear_force = Vec::with_capacity(summary.structural_beam_recovery.len() * 2);
-    let mut torsion_moment = Vec::with_capacity(summary.structural_beam_recovery.len());
-    let mut bending_moment = Vec::with_capacity(summary.structural_beam_recovery.len() * 2);
-    let mut bending_stress = Vec::with_capacity(summary.structural_beam_recovery.len() * 2);
-    let mut torsion_stress = Vec::with_capacity(summary.structural_beam_recovery.len());
-
-    for beam in &summary.structural_beam_recovery {
-        let q_global = beam_global_displacement(summary, solution, beam);
-        let q_local = multiply_beam_matrix_vector(&beam.transform_global_to_local, &q_global);
-        let k_local = local_stiffness_matrix(beam.section, beam.material, beam.length_m)
-            .unwrap_or([[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT]);
-        let f_local = multiply_beam_matrix_vector(&k_local, &q_local);
-
-        let axial = signed_peak_pair(f_local[0], f_local[6]);
-        let shear_y = signed_peak_pair(f_local[1], f_local[7]);
-        let shear_z = signed_peak_pair(f_local[2], f_local[8]);
-        let torsion = signed_peak_pair(f_local[3], f_local[9]);
-        let bending_y = signed_peak_pair(f_local[4], f_local[10]);
-        let bending_z = signed_peak_pair(f_local[5], f_local[11]);
-
-        axial_force.push(axial);
-        shear_force.extend([shear_y, shear_z]);
-        torsion_moment.push(torsion);
-        bending_moment.extend([bending_y, bending_z]);
-        bending_stress.extend([
-            bending_stress_from_moment(bending_y, beam.section.outer_fiber_z_m, beam.section.iy_m4),
-            bending_stress_from_moment(bending_z, beam.section.outer_fiber_y_m, beam.section.iz_m4),
-        ]);
-        torsion_stress.push(torsion_stress_from_moment(
-            torsion,
-            beam.section.torsion_outer_radius_m,
-            beam.section.torsion_j_m4,
-        ));
-    }
-
-    BeamResultValues {
-        axial_force,
-        shear_force,
-        torsion_moment,
-        bending_moment,
-        bending_stress,
-        torsion_stress,
-    }
-}
-
-fn beam_global_displacement(
-    summary: &AssemblySummary,
-    solution: &[f64],
-    beam: &BeamRecoveryElementSummary,
-) -> [f64; BEAM_ELEMENT_DOF_COUNT] {
-    let mut q = [0.0; BEAM_ELEMENT_DOF_COUNT];
-    for (node_offset, node_index) in [beam.node_i_index, beam.node_j_index].iter().enumerate() {
-        for (component, kind) in StructuralDofKind::ORDER.iter().enumerate() {
-            let target = node_offset * StructuralDofKind::ORDER.len() + component;
-            q[target] = summary
-                .structural_dof_layout
-                .index(*node_index, *kind)
-                .and_then(|row| solution.get(row).copied())
-                .unwrap_or(0.0);
-        }
-    }
-    q
-}
-
-fn multiply_beam_matrix_vector(
-    matrix: &[[f64; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT],
-    vector: &[f64; BEAM_ELEMENT_DOF_COUNT],
-) -> [f64; BEAM_ELEMENT_DOF_COUNT] {
-    let mut out = [0.0; BEAM_ELEMENT_DOF_COUNT];
-    for (row, out_value) in out.iter_mut().enumerate() {
-        *out_value = matrix[row]
-            .iter()
-            .zip(vector.iter())
-            .map(|(entry, value)| entry * value)
-            .sum();
-    }
-    out
-}
-
-fn signed_peak_pair(a: f64, b: f64) -> f64 {
-    if a.abs() >= b.abs() {
-        a
-    } else {
-        b
-    }
-}
-
-fn bending_stress_from_moment(moment_n_m: f64, outer_fiber_m: f64, inertia_m4: f64) -> f64 {
-    if outer_fiber_m > 0.0 && inertia_m4 > 0.0 {
-        moment_n_m * outer_fiber_m / inertia_m4
-    } else {
-        0.0
-    }
-}
-
-fn torsion_stress_from_moment(moment_n_m: f64, outer_radius_m: f64, torsion_j_m4: f64) -> f64 {
-    if outer_radius_m > 0.0 && torsion_j_m4 > 0.0 {
-        moment_n_m * outer_radius_m / torsion_j_m4
-    } else {
-        0.0
-    }
-}
-
-struct ShellResultValues {
-    membrane_force: Vec<f64>,
-    bending_moment: Vec<f64>,
-    transverse_shear: Vec<f64>,
-    von_mises: Vec<f64>,
-}
-
-fn recover_shell_result_fields(
-    summary: &AssemblySummary,
-    solution: &[f64],
-) -> Option<Vec<AnalysisField>> {
-    if summary.structural_shell_recovery.is_empty() {
-        return None;
-    }
-    let values = recover_shell_result_values(summary, solution);
-    let element_count = summary.structural_shell_recovery.len();
-    Some(vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-            vec![element_count, 3],
-            values.membrane_force,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-            vec![element_count, 3],
-            values.bending_moment,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-            vec![element_count, 2],
-            values.transverse_shear,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-            vec![element_count],
-            values.von_mises,
-        ),
-    ])
-}
-
-fn recover_shell_result_values(summary: &AssemblySummary, solution: &[f64]) -> ShellResultValues {
-    let mut membrane_force = Vec::with_capacity(summary.structural_shell_recovery.len() * 3);
-    let mut bending_moment = Vec::with_capacity(summary.structural_shell_recovery.len() * 3);
-    let mut transverse_shear = Vec::with_capacity(summary.structural_shell_recovery.len() * 2);
-    let mut von_mises = Vec::with_capacity(summary.structural_shell_recovery.len());
-
-    for shell in &summary.structural_shell_recovery {
-        let q = shell_node_values(summary, solution, shell);
-        let edge_scale = shell_area_scale(shell.area_m2);
-        let t = shell.section.thickness_m.max(1.0e-12);
-        let e = shell.material.youngs_modulus_pa;
-        let g = shell.material.shear_modulus_pa;
-        let nu = shell.material.poisson_ratio;
-        let membrane_stiffness = e * t / (1.0 - nu * nu).max(1.0e-9);
-        let bending_stiffness = e * t.powi(3) / (12.0 * (1.0 - nu * nu).max(1.0e-9));
-        let shear_stiffness = g * t * shell.section.shear_correction;
-
-        let ex = component_spread(&q, 0) * edge_scale;
-        let ey = component_spread(&q, 1) * edge_scale;
-        let gamma_xy = (component_spread(&q, 0) + component_spread(&q, 1)) * 0.5 * edge_scale;
-        let kx = component_spread(&q, 3) * edge_scale;
-        let ky = component_spread(&q, 4) * edge_scale;
-        let kxy = component_spread(&q, 5) * edge_scale;
-        let qx =
-            shear_stiffness * (component_spread(&q, 2) * edge_scale + average_component(&q, 4));
-        let qy =
-            shear_stiffness * (component_spread(&q, 2) * edge_scale + average_component(&q, 3));
-
-        let nx = membrane_stiffness * (ex + nu * ey);
-        let ny = membrane_stiffness * (ey + nu * ex);
-        let nxy = g * t * gamma_xy;
-        let mx = bending_stiffness * (kx + nu * ky);
-        let my = bending_stiffness * (ky + nu * kx);
-        let mxy = g * t.powi(3) * kxy / 12.0;
-        let membrane_vm = (nx.powi(2) - nx * ny + ny.powi(2) + 3.0 * nxy.powi(2))
-            .abs()
-            .sqrt()
-            / t;
-        let bending_vm = 6.0
-            * (mx.powi(2) - mx * my + my.powi(2) + 3.0 * mxy.powi(2))
-                .abs()
-                .sqrt()
-            / t.powi(2);
-
-        membrane_force.extend([nx, ny, nxy]);
-        bending_moment.extend([mx, my, mxy]);
-        transverse_shear.extend([qx, qy]);
-        von_mises.push(membrane_vm + bending_vm);
-    }
-
-    ShellResultValues {
-        membrane_force,
-        bending_moment,
-        transverse_shear,
-        von_mises,
-    }
-}
-
-fn shell_node_values(
-    summary: &AssemblySummary,
-    solution: &[f64],
-    shell: &ShellRecoveryElementSummary,
-) -> [[f64; 6]; 3] {
-    let mut out = [[0.0; 6]; 3];
-    for (node_offset, node_index) in shell.node_indices.iter().enumerate() {
-        for (component, kind) in StructuralDofKind::ORDER.iter().enumerate() {
-            out[node_offset][component] = summary
-                .structural_dof_layout
-                .index(*node_index, *kind)
-                .and_then(|row| solution.get(row).copied())
-                .unwrap_or(0.0);
-        }
-    }
-    out
-}
-
-fn shell_area_scale(area_m2: f64) -> f64 {
-    1.0 / area_m2.max(1.0e-18).sqrt()
-}
-
-fn component_spread(values: &[[f64; 6]; 3], component: usize) -> f64 {
-    let min = values
-        .iter()
-        .map(|value| value[component])
-        .fold(f64::INFINITY, f64::min);
-    let max = values
-        .iter()
-        .map(|value| value[component])
-        .fold(f64::NEG_INFINITY, f64::max);
-    max - min
-}
-
-fn average_component(values: &[[f64; 6]; 3], component: usize) -> f64 {
-    values.iter().map(|value| value[component]).sum::<f64>() / values.len() as f64
-}
-
-fn recover_reaction_force(summary: &AssemblySummary, internal_force: &[f64]) -> Vec<f64> {
-    let mut reactions = vec![0.0; reaction_shape(summary).iter().product()];
-    let mut constrained_ordinal = 0usize;
-    for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
-        if !*is_constrained {
-            continue;
-        }
-        let row = constrained_ordinal / VECTOR_COMPONENT_COUNT;
-        let component = constrained_ordinal % VECTOR_COMPONENT_COUNT;
-        let rhs = summary.operator.rhs.get(dof).copied().unwrap_or(0.0);
-        let internal = internal_force.get(dof).copied().unwrap_or(0.0);
-        reactions[row * VECTOR_COMPONENT_COUNT + component] = internal - rhs;
-        constrained_ordinal += 1;
-    }
-    reactions
-}
-
-fn recover_rotation(summary: &AssemblySummary, solution: &[f64]) -> Vec<f64> {
-    let mut rotation = vec![0.0; rotation_shape(summary).iter().product()];
-    if rotation.is_empty() {
-        return rotation;
-    }
-    for row in 0..summary.structural_dof_layout.total_dof_count() {
-        let Some(address) = summary.structural_dof_layout.address(row) else {
-            continue;
-        };
-        let Some(component) = rotational_component(address.kind) else {
-            continue;
-        };
-        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
-        if target < rotation.len() {
-            rotation[target] = solution.get(row).copied().unwrap_or(0.0);
-        }
-    }
-    rotation
-}
-
-fn recover_displacement(
-    summary: &AssemblySummary,
-    solution: &[f64],
-    node_count: usize,
-) -> Vec<f64> {
-    if summary.structural_rotational_dof_count == 0 {
-        let mut displacement = solution.to_vec();
-        displacement.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
-        return displacement;
-    }
-
-    let mut displacement = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
-    for row in 0..summary.structural_dof_layout.total_dof_count() {
-        let Some(address) = summary.structural_dof_layout.address(row) else {
-            continue;
-        };
-        let Some(component) = translational_component(address.kind) else {
-            continue;
-        };
-        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
-        if target < displacement.len() {
-            displacement[target] = solution.get(row).copied().unwrap_or(0.0);
-        }
-    }
-    displacement
-}
-
-fn translational_component(kind: StructuralDofKind) -> Option<usize> {
-    match kind {
-        StructuralDofKind::Ux => Some(0),
-        StructuralDofKind::Uy => Some(1),
-        StructuralDofKind::Uz => Some(2),
-        _ => None,
-    }
-}
-
-fn recover_reaction_moment(summary: &AssemblySummary, internal_force: &[f64]) -> Vec<f64> {
-    let mut reactions = vec![0.0; rotation_shape(summary).iter().product()];
-    if reactions.is_empty() {
-        return reactions;
-    }
-    for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
-        if !*is_constrained {
-            continue;
-        }
-        let Some(address) = summary.structural_dof_layout.address(dof) else {
-            continue;
-        };
-        let Some(component) = rotational_component(address.kind) else {
-            continue;
-        };
-        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
-        if target < reactions.len() {
-            let rhs = summary.operator.rhs.get(dof).copied().unwrap_or(0.0);
-            let internal = internal_force.get(dof).copied().unwrap_or(0.0);
-            reactions[target] = internal - rhs;
-        }
-    }
-    reactions
-}
-
-fn rotational_component(kind: StructuralDofKind) -> Option<usize> {
-    match kind {
-        StructuralDofKind::Rx => Some(0),
-        StructuralDofKind::Ry => Some(1),
-        StructuralDofKind::Rz => Some(2),
-        _ => None,
-    }
-}
-
-fn rotation_shape(summary: &AssemblySummary) -> Vec<usize> {
-    if summary.structural_rotational_dof_count == 0 {
-        return vec![0, VECTOR_COMPONENT_COUNT];
-    }
-    vec![
-        summary.structural_dof_layout.node_count(),
-        VECTOR_COMPONENT_COUNT,
-    ]
-}
-
-fn structural_displacement_node_count(summary: &AssemblySummary, dof_count: usize) -> usize {
-    if summary.structural_rotational_dof_count > 0 {
-        summary.structural_node_count.max(1)
-    } else {
-        dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1)
-    }
-}
-
-fn reaction_shape(summary: &AssemblySummary) -> Vec<usize> {
-    let rows = summary
-        .constrained_dof_count
-        .div_ceil(VECTOR_COMPONENT_COUNT);
-    vec![rows, VECTOR_COMPONENT_COUNT]
-}
-
-fn recover_total_strain_energy(displacement: &[f64], internal_force: &[f64]) -> f64 {
-    0.5 * displacement
-        .iter()
-        .zip(internal_force.iter())
-        .map(|(u, force)| u * force)
-        .sum::<f64>()
-}
-
-struct StructuralResidualMetrics {
-    normalized_residual_norm: f64,
-    equation_scale: f64,
-}
-
-fn recover_residual_metrics(
-    summary: &AssemblySummary,
-    displacement: &[f64],
-) -> StructuralResidualMetrics {
-    let mut solution = displacement.to_vec();
-    solution.resize(summary.dof_count, 0.0);
-    let applied = apply_k(&summary.operator, &solution);
-    let residual_norm = applied
-        .iter()
-        .zip(summary.operator.rhs.iter())
-        .map(|(lhs, rhs)| {
-            let residual = lhs - rhs;
-            residual * residual
-        })
-        .sum::<f64>()
-        .sqrt();
-    let equation_scale = summary
-        .operator
-        .rhs
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt()
-        .max(1.0);
-    StructuralResidualMetrics {
-        normalized_residual_norm: residual_norm / equation_scale,
-        equation_scale,
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        assembly::assemble_linear_system,
-        fixtures::{fixture_model, FixtureId},
-    };
-    use runmat_meshing_core::{
-        contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisMeshArtifact, AnalysisMeshNode,
-        AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement, MeshSizingField,
-        VolumeElementKind,
-    };
-
-    #[test]
-    fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
-        let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
-        let solve = LinearSolveResult {
-            iterations: 1,
-            residual_norm: 0.0,
-            converged: true,
-            host_sync_count: 0,
-            solver_backend: "test".to_string(),
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            solution: vec![
-                0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
-            ],
-            solver_method: "test".to_string(),
-            preconditioner: "none".to_string(),
-            diagnostics: Vec::new(),
-        };
-
-        let fields = recover_result_fields(&summary, &solve);
-        assert_eq!(
-            field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
-            &[4, 3]
-        );
-        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
-        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRESS), &[1, 6]);
-        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
-        assert_eq!(
-            field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY),
-            &[1]
-        );
-        assert_eq!(
-            field_shape(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES),
-            &[4]
-        );
-        assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0] >= 0.0);
-        let element_von_mises = host_field(&fields, FEA_FIELD_STRUCTURAL_VON_MISES)[0];
-        assert!(host_field(&fields, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES)
-            .iter()
-            .all(|value| (*value - element_von_mises).abs() <= 1.0e-12));
-        let metrics = structural_field_recovery_metrics(&summary, &solve.solution);
-        assert_eq!(metrics.basis, "solid_tetrahedron4_constant_strain");
-        assert_eq!(metrics.solver_mesh_node_count, 4);
-        assert_eq!(metrics.solver_mesh_element_count, 1);
-    }
-
-    #[test]
-    fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
-        let model = fixture_model(FixtureId::CantileverLinearStatic);
-        let summary = assemble_linear_system(&model, None, Some(tetrahedron4_mesh()), None, None);
-        let solve = LinearSolveResult {
-            iterations: 10,
-            residual_norm: 1.0e-4,
-            converged: false,
-            host_sync_count: 0,
-            solver_backend: "test".to_string(),
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            solution: vec![
-                0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
-            ],
-            solver_method: "test".to_string(),
-            preconditioner: "none".to_string(),
-            diagnostics: Vec::new(),
-        };
-
-        let fields = recover_result_fields(&summary, &solve);
-
-        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
-        assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);
-        assert_eq!(
-            field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
-            &[4, 3]
-        );
-    }
-
-    fn field_shape<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [usize] {
-        fields
-            .iter()
-            .find(|field| field.field_id == field_id)
-            .map(|field| field.shape.as_slice())
-            .expect("field should be present")
-    }
-
-    fn host_field<'a>(fields: &'a [AnalysisField], field_id: &str) -> &'a [f64] {
-        fields
-            .iter()
-            .find(|field| field.field_id == field_id)
-            .and_then(AnalysisField::as_host_f64)
-            .expect("field should be present")
-    }
-
-    fn tetrahedron4_mesh() -> AnalysisMeshArtifact {
-        let mut mesh = AnalysisMeshArtifact {
-            schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-            mesh_id: "unit_tetrahedron".to_string(),
-            nodes: vec![
-                node(1, [0.0, 0.0, 0.0]),
-                node(2, [1.0, 0.0, 0.0]),
-                node(3, [0.0, 1.0, 0.0]),
-                node(4, [0.0, 0.0, 1.0]),
-            ],
-            volume_elements: vec![AnalysisVolumeElement {
-                element_id: "tetrahedron_1".to_string(),
-                kind: VolumeElementKind::Tetrahedron4,
-                node_ids: vec![1, 2, 3, 4],
-                material_region_id: "solid".to_string(),
-                provenance: Vec::new(),
-            }],
-            boundary_faces: Vec::new(),
-            boundary_edges: Vec::new(),
-            quality: AnalysisMeshQualityReport::default(),
-            sizing: MeshSizingField::default(),
-            field_topology: Vec::new(),
-            backend: Default::default(),
-            adaptive_iterations: Vec::new(),
-            provenance: AnalysisMeshProvenance {
-                algorithm: "test".to_string(),
-                source_geometry_id: "geo:test".to_string(),
-                source_geometry_revision: 1,
-                source_geometry_sha256: None,
-            },
-        };
-        mesh.refresh_field_topology();
-        mesh
-    }
-
-    fn node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
-        AnalysisMeshNode {
-            node_id,
-            coordinates_m,
-            provenance: Vec::new(),
-        }
-    }
-}
+mod tests;

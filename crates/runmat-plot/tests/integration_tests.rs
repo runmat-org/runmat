@@ -4,8 +4,25 @@
 //! and performance characteristics.
 use runmat_plot::plots::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test(flavor = "current_thread")]
+async fn synchronous_export_inside_session_reactor_writes_png() {
+    let mut figure = Figure::new();
+    figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
+    let path = std::env::temp_dir().join(format!("runmat-sync-export-{}.png", std::process::id()));
+    // Refuse to overwrite an artifact left by another invocation.
+    drop(std::fs::File::create_new(&path).unwrap());
+    let exported = runmat_plot::show_plot_unified(figure, Some(path.to_str().unwrap()));
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    exported.expect("synchronous plotting must not nest or replace the session reactor");
+    let image = image::load_from_memory(&bytes).expect("complete PNG export");
+    assert_eq!((image.width(), image.height()), (800, 600));
+}
+
 #[test]
 fn test_complete_2d_plotting_pipeline() {
+    assert!(!Figure::new().legend_enabled, "legends are opt-in");
     // Test data
     let x_data = (0..100).map(|i| i as f64 * 0.1).collect::<Vec<_>>();
     let y_data = x_data.iter().map(|&x| x.sin()).collect::<Vec<_>>();
@@ -33,6 +50,7 @@ fn test_complete_2d_plotting_pipeline() {
     let mut figure = Figure::new()
         .with_title("2D Multi-Plot Example")
         .with_labels("X", "Y")
+        .with_legend(true)
         .with_grid(true);
 
     figure.add_line_plot(line_plot);
@@ -42,7 +60,10 @@ fn test_complete_2d_plotting_pipeline() {
     assert_eq!(figure.len(), 2);
     assert!(figure.title.is_some());
     assert!(figure.grid_enabled);
-    assert!(figure.legend_enabled);
+    assert!(
+        figure.legend_enabled,
+        "with_legend(true) enables the legend"
+    );
 
     // Test statistics
     let stats = figure.statistics();

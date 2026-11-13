@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join() {
     let mut fixture = Fixture::with_exact_tetrahedron_curve_partition();
-    let exact_root = root(&fixture.program.arguments[0]);
+    let exact_root = root(&fixture.program.arguments[1]);
     let exact = import_exact_geometry_input(
         &fixture.store,
         fixture.host.geometry_document.clone().unwrap(),
@@ -14,9 +14,24 @@ fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join()
     .unwrap();
     let planner =
         crate::ExactMeshingDagPlanner::from_exact_host(&fixture.host, exact_root.clone()).unwrap();
+    let product_planner = crate::ExactMeshingDagPlanner::new(
+        &exact,
+        fixture.host.resolved_request.clone(),
+        fixture.host.ceilings,
+        fixture.host.artifact_access.clone(),
+        fixture.host.stage_identity.capability_cohort.clone(),
+    )
+    .unwrap();
     let pass = planner
         .initial_curve_pass(&exact.geometry_objects().topology, 3)
         .unwrap();
+    assert_eq!(
+        product_planner
+            .initial_curve_pass(&exact.geometry_objects().topology, 3)
+            .unwrap()
+            .partitions(),
+        pass.partitions()
+    );
     assert_eq!(pass.partitions().len(), 2);
     for (index, stage) in pass.partitions().iter().enumerate() {
         assert_eq!(
@@ -56,6 +71,48 @@ fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join()
         MeshingPartitionKind::DeterministicJoin
     );
     assert!(planner.curve_join(&pass, Vec::new()).is_err());
+}
+
+#[test]
+fn exact_meshing_dag_product_boundary_rejects_mismatched_authority_and_tolerance() {
+    let fixture = Fixture::with_exact_tetrahedron_curve_partition();
+    let exact_root = root(&fixture.program.arguments[1]);
+    let exact = import_exact_geometry_input(
+        &fixture.store,
+        fixture.host.geometry_document.clone().unwrap(),
+        &exact_root,
+        fixture.host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+
+    let mut wrong_access = fixture.host.artifact_access.clone();
+    wrong_access.authorization_scope.push_str("-other");
+    assert!(crate::ExactMeshingDagPlanner::new(
+        &exact,
+        fixture.host.resolved_request.clone(),
+        fixture.host.ceilings,
+        wrong_access,
+        fixture.host.stage_identity.capability_cohort.clone(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("artifact authority"));
+
+    let mut wrong_tolerance = fixture.host.resolved_request.clone();
+    wrong_tolerance.tolerance.absolute_floor_m = runmat_types::physical::Quantity::new(
+        wrong_tolerance.tolerance.absolute_floor_m.canonical_value() * (2.0),
+    );
+    assert!(crate::ExactMeshingDagPlanner::new(
+        &exact,
+        wrong_tolerance,
+        crate::serial_tests::ceilings(),
+        fixture.host.artifact_access.clone(),
+        fixture.host.stage_identity.capability_cohort.clone(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("tolerance differs"));
 }
 
 #[test]
@@ -158,14 +215,28 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .surface_join(&second_pass, vec![second_partition_root])
         .unwrap();
     let final_pass = execute_planned(&mut fixture, &final_stage, &crate::ExactSurfaceJoinKernel);
+    let terminal = super::convergence::converge(
+        &mut fixture,
+        &planner,
+        &exact.geometry_objects().topology,
+        super::convergence::SurfacePass {
+            plan: second_pass,
+            curves: refined_curve,
+            partition: second_partition,
+            joined: final_pass,
+        },
+    );
+    let refined_curve = terminal.curves;
+    let second_partition = terminal.partition;
+    let final_pass = terminal.joined;
     let final_streams = final_pass
         .publication()
         .stage_objects()
         .decoded_streams()
         .unwrap();
-    assert_eq!(final_streams.len(), 2);
+    assert_eq!(final_streams.len(), 1);
     assert_eq!(
-        final_streams[1].media_type,
+        final_streams[0].media_type,
         runmat_meshing_core::MeshingChunkMediaType::SurfaceMesh
     );
 
@@ -186,9 +257,9 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .stage_objects()
         .decoded_streams()
         .unwrap()[0]
-        .records[0]
+        .records
         .clone();
-    let partition = runmat_meshing_surface::decode_exact_face_partition_result(
+    let partition = runmat_meshing_surface::decode_exact_face_partition_records(
         &partition_bytes,
         &exact.geometry_objects().topology,
         &curves,
@@ -201,23 +272,40 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .unwrap()[0]
         .records[0]
         .clone();
-    let pass = runmat_meshing_surface::decode_exact_surface_pass_result(
-        &pass_bytes,
-        &exact.geometry_objects().topology,
+    let options = runmat_meshing_surface::ExactSurfaceJoinOptions {
+        coordinate_tolerance_m: runmat_types::physical::Length::new(
+            curve_host
+                .resolved_request
+                .tolerance
+                .absolute_floor_m
+                .canonical_value(),
+        ),
+        maximum_nodes: curve_host.resolved_request.limits.maximum_nodes,
+        maximum_triangles: curve_host.resolved_request.limits.maximum_elements,
+        maximum_boundary_segments: curve_host.resolved_request.limits.maximum_elements,
+    };
+    let partitions = [partition];
+    let pass = runmat_meshing_surface::decide_exact_surface_pass(
         &curves,
-        &[partition],
-        runmat_meshing_surface::ExactSurfaceJoinOptions {
-            coordinate_tolerance_m: curve_host.resolved_request.tolerance.absolute_floor_m,
-            maximum_nodes: curve_host.resolved_request.resources.maximum_nodes,
-            maximum_triangles: curve_host.resolved_request.resources.maximum_elements,
-            maximum_boundary_segments: curve_host.resolved_request.resources.maximum_elements,
-        },
+        &partitions,
+        &exact.geometry_objects().topology,
+        options,
     )
     .unwrap();
-    assert!(matches!(
-        pass.outcome,
-        runmat_meshing_surface::ExactSurfacePassOutcome::Converged { .. }
-    ));
+    let decoded = runmat_meshing_surface::decode_exact_surface_mesh_from_pass(
+        &pass_bytes,
+        &pass,
+        &exact.geometry_objects().topology,
+        &curves,
+        &partitions,
+        options,
+    )
+    .unwrap();
+    let runmat_meshing_surface::ExactSurfacePassOutcome::Converged { surface } = pass.outcome
+    else {
+        panic!("terminal publication must have a complete independently joined surface")
+    };
+    assert_eq!(decoded, surface);
 }
 
 #[test]
@@ -253,10 +341,7 @@ fn exact_surface_dag_enforces_its_convergence_budget_and_context() {
         .contains("newly refined"));
 
     let mut shallow_host = curve_host.clone();
-    shallow_host
-        .resolved_request
-        .resources
-        .maximum_recursion_depth = 1;
+    shallow_host.resolved_request.limits.maximum_recursion_depth = 1;
     shallow_host.stage_identity.resolved_request_digest =
         shallow_host.resolved_request.canonical_digest().unwrap();
     shallow_host.workload.stage_identity_digest =
@@ -338,7 +423,7 @@ fn exact_surface_dag_identity_is_independent_of_partition_completion_order() {
         .all(|pair| pair[0] < pair[1]));
 }
 
-fn execute_planned(
+pub(super) fn execute_planned(
     fixture: &mut Fixture,
     stage: &crate::PlannedMeshingStage,
     kernel: &dyn MeshingStageKernel,
@@ -351,7 +436,7 @@ fn execute_planned_result(
     stage: &crate::PlannedMeshingStage,
     kernel: &dyn MeshingStageKernel,
 ) -> Result<CompletedMeshingStage, MeshingSerialExecutionError> {
-    let program = stage.program_request(revision()).unwrap();
+    let program = stage_program(stage, &mut fixture.store);
     execute_serial_stage(
         &program,
         &mut fixture.store,

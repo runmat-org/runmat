@@ -1,4 +1,4 @@
-use runmat_hir::{HirDiagnostic, LoweringContext};
+use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, LoweringContext};
 
 use runmat_runtime as _;
 
@@ -28,7 +28,7 @@ fn shape_lint_reports_dot_and_reshape() {
     let diags = diagnostics(
         "a = ones(1,3); b = ones(1,4); c = dot(a, b); d = reshape(a, 2, 2); e = reshape(a, -1, -1);",
     );
-    assert!(diags.iter().any(|d| d.code == "RM-TYPE-DOT"));
+    assert!(diags.iter().any(|d| d.code == "RM-CATALOG-DOT-SIZE"));
     assert!(diags.iter().any(|d| d.code == "RM-TYPE-RESHAPE"));
 }
 
@@ -68,11 +68,15 @@ fn shape_lint_reports_repmat_and_permute() {
     let bad_diags = diagnostics(
         "a = ones(2,2); b = repmat(a, 1.5, 2); c = permute(a, [1 2 3]); d = permute(a, [1 1]);",
     );
-    assert!(bad_diags.iter().any(|d| d.code == "RM-TYPE-REPMAT"));
+    assert!(bad_diags
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-SHAPE-DIMENSION"));
     assert!(bad_diags.iter().any(|d| d.code == "RM-TYPE-PERMUTE"));
 
     let good_diags = diagnostics("a = ones(2,2); b = repmat(a, 2, 3); c = permute(a, [2 1]);");
-    assert!(!good_diags.iter().any(|d| d.code == "RM-TYPE-REPMAT"));
+    assert!(!good_diags
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-SHAPE-DIMENSION"));
     assert!(
         !good_diags.iter().any(|d| d.code == "RM-TYPE-PERMUTE"),
         "valid permute produced diagnostics: {good_diags:#?}"
@@ -102,4 +106,38 @@ fn shape_lint_reports_reduction_dim_out_of_range() {
     assert!(invalid_zero
         .iter()
         .any(|d| d.code == "RM-TYPE-REDUCTION-DIMENSION"));
+}
+
+#[test]
+fn min_max_pairwise_controls_are_not_reduction_dimensions() {
+    let pairwise = diagnostics(
+        "x = rand(5,1); y = max(exp(x) - 1, 0); A = ones(2,1); B = ones(1,3); z = min(A, B);",
+    );
+    assert!(
+        !pairwise
+            .iter()
+            .any(|diagnostic| diagnostic.severity == HirDiagnosticSeverity::Error),
+        "valid pairwise extrema were rejected: {pairwise:#?}"
+    );
+
+    let reduction = diagnostics("A = ones(2,3); [m, i] = max(A, [], 2); [n, j] = min(A, [], 1);");
+    assert!(
+        !reduction
+            .iter()
+            .any(|diagnostic| diagnostic.severity == HirDiagnosticSeverity::Error),
+        "valid reduction axes were rejected: {reduction:#?}"
+    );
+
+    for source in [
+        "A = ones(2,3); m = max(A, [], 0);",
+        "A = ones(2,3); m = min(A, [], 0);",
+    ] {
+        let invalid = diagnostics(source);
+        assert!(
+            invalid
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-TYPE-REDUCTION-DIMENSION"),
+            "known zero reduction axis was not diagnosed: {invalid:#?}"
+        );
+    }
 }

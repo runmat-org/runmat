@@ -1,5 +1,3 @@
-use runmat_value::Value;
-
 use crate::builtins::plotting::state::FigureHandle;
 use crate::BuiltinResult;
 
@@ -12,7 +10,9 @@ pub enum FigureAction {
     All,
 }
 
-pub fn parse_clf_action(args: &[Value]) -> BuiltinResult<(FigureAction, bool)> {
+pub fn parse_clf_action(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(FigureAction, bool)> {
     if args.is_empty() {
         return Ok((FigureAction::Current, false));
     }
@@ -20,7 +20,7 @@ pub fn parse_clf_action(args: &[Value]) -> BuiltinResult<(FigureAction, bool)> {
     let mut clear_all = false;
     let mut reset = false;
     for value in args {
-        if let Some(text) = parse_string(value) {
+        if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
             let normalized = text.trim().to_ascii_lowercase();
             if normalized.is_empty() {
                 continue;
@@ -51,14 +51,27 @@ pub fn parse_clf_action(args: &[Value]) -> BuiltinResult<(FigureAction, bool)> {
     }
 }
 
-pub fn parse_close_action(args: &[Value]) -> BuiltinResult<FigureAction> {
+#[cfg(test)]
+pub fn parse_close_action(args: &[runmat_value::Value]) -> BuiltinResult<FigureAction> {
+    parse_close_action_view(crate::call::FunctionArgumentView::from_slice(args))
+}
+
+pub fn parse_close_action_view(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<FigureAction> {
     if args.is_empty() {
         return Ok(FigureAction::Current);
     }
     let mut handles = Vec::new();
     let mut close_all = false;
     for value in args {
-        if let Some(text) = parse_string(value) {
+        if let Some(text) = parse_string(value).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "close",
+                source.to_string(),
+                source,
+            )
+        })? {
             let normalized = text.trim().to_ascii_lowercase();
             if normalized.is_empty() {
                 continue;

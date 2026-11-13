@@ -1,5 +1,5 @@
 use crate::gpu::ScalarType;
-use std::sync::Arc;
+use runmat_accelerate_api::{WgpuDeviceAccess, WgpuEmission};
 use wgpu::util::DeviceExt;
 
 /// Axis data source used by GPU plot packers.
@@ -11,14 +11,14 @@ use wgpu::util::DeviceExt;
 pub enum AxisData<'a> {
     F32(&'a [f32]),
     F64(&'a [f64]),
-    Buffer(Arc<wgpu::Buffer>),
+    Buffer(crate::gpu::GpuInputBuffer),
 }
 
 #[derive(Clone, Debug)]
 pub enum OwnedAxisData {
     F32(Vec<f32>),
     F64(Vec<f64>),
-    Buffer(Arc<wgpu::Buffer>),
+    Buffer(crate::gpu::GpuInputBuffer),
 }
 
 impl OwnedAxisData {
@@ -32,8 +32,7 @@ impl OwnedAxisData {
 
     pub async fn export_f64(
         &self,
-        device: &Arc<wgpu::Device>,
-        queue: &Arc<wgpu::Queue>,
+        access: &WgpuDeviceAccess,
         len: usize,
         scalar: ScalarType,
     ) -> Result<Vec<f64>, String> {
@@ -41,48 +40,57 @@ impl OwnedAxisData {
             Self::F32(values) => Ok(values.iter().map(|value| f64::from(*value)).collect()),
             Self::F64(values) => Ok(values.clone()),
             Self::Buffer(buffer) => {
-                crate::gpu::util::readback_scalar_buffer_f64(device, queue, buffer, len, scalar)
-                    .await
+                crate::gpu::util::readback_scalar_buffer_f64(access, buffer, len, scalar).await
             }
         }
     }
 }
 
 pub fn axis_storage_buffer(
-    device: &Arc<wgpu::Device>,
+    emission: &WgpuEmission<'_>,
     label: &'static str,
     axis: &AxisData<'_>,
     scalar: ScalarType,
-) -> Result<Arc<wgpu::Buffer>, String> {
+) -> Result<crate::gpu::GpuInputBuffer, String> {
+    let device = emission.device();
     match axis {
-        AxisData::Buffer(buffer) => Ok(buffer.clone()),
+        AxisData::Buffer(buffer) => {
+            buffer.buffer(emission).map_err(|error| error.to_string())?;
+            Ok(buffer.clone())
+        }
         AxisData::F32(values) => {
             if scalar != ScalarType::F32 {
                 return Err(format!("{label}: expected f64 axis data for f64 shader"));
             }
-            Ok(Arc::new(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: bytemuck::cast_slice(values),
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_DST
-                        | wgpu::BufferUsages::COPY_SRC,
-                },
-            )))
+            Ok(
+                runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents: bytemuck::cast_slice(values),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    },
+                ))
+                .into(),
+            )
         }
         AxisData::F64(values) => {
             if scalar != ScalarType::F64 {
                 return Err(format!("{label}: expected f32 axis data for f32 shader"));
             }
-            Ok(Arc::new(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: bytemuck::cast_slice(values),
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_DST
-                        | wgpu::BufferUsages::COPY_SRC,
-                },
-            )))
+            Ok(
+                runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents: bytemuck::cast_slice(values),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    },
+                ))
+                .into(),
+            )
         }
     }
 }

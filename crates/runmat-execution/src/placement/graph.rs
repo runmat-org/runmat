@@ -2,15 +2,123 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ExecutionCandidateDescriptor, PlacementResourceSnapshot, PlacementSignature};
+use super::{
+    CandidateOutputResidency, ExecutionCandidateDescriptor, PlacementResourceSnapshot,
+    PlacementSignature, ProviderInputStageDemand, ProviderInputStageDemands, ResourceAccount,
+};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+mod source_output;
+pub use source_output::SourceOutputOrdinal;
+mod output_authority;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ResourceBoundUnavailable {
+    NoPeakMemoryBound,
+    NoScratchBound,
+    NoRetainedValueBound,
+}
+
+/// A byte bound for a resource with the matching meaning. A limit on one
+/// allocation is not a bound on peak memory or transient scratch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ResourceByteBound {
+    Known(u64),
+    Unavailable(ResourceBoundUnavailable),
+}
+
+/// A route's simultaneously live provider allocation bound. Unlike scratch,
+/// this may include borrowed inputs and the published output. The already-live
+/// portion is subtracted exactly once from an available-memory comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CandidatePeakLiveDemand {
+    pub peak_bytes: u64,
+    pub already_live_bytes: u64,
+}
+
+impl CandidatePeakLiveDemand {
+    pub fn incremental_bytes(self) -> Option<u64> {
+        self.peak_bytes.checked_sub(self.already_live_bytes)
+    }
+}
+
+impl From<u64> for ResourceByteBound {
+    fn from(bytes: u64) -> Self {
+        Self::Known(bytes)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CandidateResourceDemand {
     pub cpu_millicores: u32,
-    pub retained_bytes: u64,
-    pub scratch_bytes: u64,
+    pub retained_bytes: ResourceByteBound,
+    pub scratch_bytes: ResourceByteBound,
+    /// Additional host workspace that coexists with a provider operation's
+    /// physical peak. `None` means this older candidate did not declare the
+    /// domain, not that a zero-byte bound was proved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_host_workspace: Option<ResourceByteBound>,
+    /// Sequential provider-execution input preparation, each stage including
+    /// prior operation-created values still live. None is legacy unmodeled,
+    /// not a proven absence of input readbacks or uploads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_input_stages: Option<super::ProviderInputStageDemands>,
     pub queue_slots: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_live: Option<CandidatePeakLiveDemand>,
+}
+
+impl Default for CandidateResourceDemand {
+    fn default() -> Self {
+        Self {
+            cpu_millicores: 0,
+            retained_bytes: ResourceByteBound::Unavailable(
+                ResourceBoundUnavailable::NoRetainedValueBound,
+            ),
+            scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
+            provider_host_workspace: None,
+            provider_input_stages: None,
+            queue_slots: 0,
+            peak_live: None,
+        }
+    }
+}
+
+impl CandidateResourceDemand {
+    /// Charge one owner-issued observation envelope to the candidate peak.
+    /// Input-stage peaks are alternatives, so each receives the same added
+    /// fence/query requirement; retained output is not charged again.
+    pub fn with_provider_observation_peak(self, bytes: u64) -> Option<Self> {
+        let add = |bound| {
+            ResourceAccount::default()
+                .checked_add(bound)?
+                .checked_add(ResourceByteBound::Known(bytes))
+                .map(ResourceAccount::bound)
+        };
+        let mut demand = self;
+        demand.scratch_bytes = add(demand.scratch_bytes)?;
+        if let Some(peak) = &mut demand.peak_live {
+            peak.peak_bytes = peak.peak_bytes.checked_add(bytes)?;
+        }
+        demand.provider_input_stages = match demand.provider_input_stages {
+            None => None,
+            Some(stages) => {
+                let charged = stages
+                    .iter()
+                    .map(|stage| {
+                        Some(ProviderInputStageDemand {
+                            incremental_peak_bytes: add(stage.incremental_peak_bytes)?,
+                            ..stage
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(ProviderInputStageDemands::sequential(charged)?)
+            }
+        };
+        Some(demand)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -18,8 +126,22 @@ pub struct CandidateResourceDemand {
 pub struct PlacementGraphCandidate {
     pub descriptor: ExecutionCandidateDescriptor,
     pub resources: CandidateResourceDemand,
+    /// Public outputs in source order. Absence is legacy one-output authority
+    /// for consumed nodes; only a single-node, edge-free whole-work envelope
+    /// may retain mixed outputs with aggregate resource facts alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_facts: Option<Vec<PlacementGraphOutputFact>>,
     /// Provider failure may fall back only when outputs remain uncommitted.
     pub transactional_results: bool,
+}
+
+/// A public output's post-publication residency and retained byte bound.
+/// Provider execution peak and readback staging remain separate resource facts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementGraphOutputFact {
+    pub residency: CandidateOutputResidency,
+    pub retained_bytes: ResourceByteBound,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -34,6 +156,10 @@ pub struct PlacementGraphNode {
 pub struct PlacementGraphEdge {
     pub from: u32,
     pub to: u32,
+    /// The producing public output, not a provider-internal physical result.
+    /// Omission is accepted only for a one-output source node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_output: Option<SourceOutputOrdinal>,
     pub bytes: u64,
     pub host_to_provider_ns: u64,
     pub provider_to_host_ns: u64,
@@ -81,12 +207,18 @@ pub struct PlacementPlanRequest {
     pub limits: PlacementGraphLimits,
     pub resources: PlacementResourceSnapshot,
     pub deterministic: bool,
-    /// When true, provider candidates must guarantee staged results so a
-    /// pre-commit failure can select the CPU/runtime fallback without replay.
+    /// When true, provider candidates must guarantee staged results. A
+    /// pre-commit failure may use an executable fallback if one was offered.
     pub require_transactional_results: bool,
 }
 
 impl PlacementPlanRequest {
+    /// Bind the exact graph output contract before submitting a request. A
+    /// changed role, byte bound, or source ordinal changes feedback identity.
+    pub fn bind_graph_output_authority(&mut self) {
+        self.signature.graph_output_authority = output_authority::digest(&self.graph);
+    }
+
     pub fn validate(&self) -> Result<(), &'static str> {
         self.signature.validate()?;
         if self.graph.nodes.is_empty() {
@@ -102,6 +234,8 @@ impl PlacementPlanRequest {
             return Err("placement resources exceed provider limit");
         }
         let mut node_identities = BTreeSet::new();
+        let mut output_arities = Vec::with_capacity(self.graph.nodes.len());
+        let whole_work_envelope = self.graph.nodes.len() == 1 && self.graph.edges.is_empty();
         for node in &self.graph.nodes {
             if node.identity.is_empty()
                 || node.identity.len() > 128
@@ -121,23 +255,65 @@ impl PlacementPlanRequest {
                 .candidates
                 .iter()
                 .all(|candidate| candidate.descriptor.kind.is_provider())
+                && (!whole_work_envelope || !self.require_transactional_results)
             {
-                return Err("every placement node requires a CPU/runtime fallback");
+                return Err("provider-only placement requires one transactional whole-work node");
             }
             let mut candidates = BTreeSet::new();
+            let mut candidate_arities = Vec::with_capacity(node.candidates.len());
             for candidate in &node.candidates {
                 candidate.descriptor.validate()?;
+                if matches!(
+                    candidate.descriptor.kind,
+                    super::ExecutionCandidateKind::OriginalVmRegion
+                        | super::ExecutionCandidateKind::OriginalNativeRegion
+                ) && (!whole_work_envelope
+                    || candidate.output_facts.is_some()
+                    || candidate.transactional_results)
+                {
+                    return Err("original VM region is only a source-ordered whole-work route");
+                }
+                let arity = source_output::output_arity(candidate)?;
+                candidate_arities.push(arity);
                 if !candidates.insert(candidate.descriptor.identity.as_str()) {
                     return Err("candidate identities must be unique within a node");
                 }
             }
+            if !whole_work_envelope && candidate_arities.iter().any(Option::is_none) {
+                return Err("placement source candidates lack matching output roles");
+            }
+            if let Some(first) = candidate_arities.iter().copied().flatten().next() {
+                if candidate_arities
+                    .iter()
+                    .flatten()
+                    .any(|candidate| *candidate != first)
+                {
+                    return Err("placement candidates disagree on public output count");
+                }
+            }
+            output_arities.push(candidate_arities);
         }
         let mut edges = BTreeSet::new();
         for edge in &self.graph.edges {
             if edge.from >= edge.to || edge.to as usize >= self.graph.nodes.len() {
                 return Err("placement edges must follow topological node order");
             }
-            if !edges.insert((edge.from, edge.to)) {
+            let arities = &output_arities[edge.from as usize];
+            let Some(arity) = arities[0] else {
+                return Err("placement source candidates lack matching output roles");
+            };
+            if arities.iter().any(|candidate| *candidate != Some(arity)) {
+                return Err("placement source candidates lack matching output roles");
+            }
+            let ordinal = match edge.source_output {
+                Some(ordinal) => ordinal,
+                None if arity == 1 => SourceOutputOrdinal::new(0),
+                None => return Err("mixed placement edge requires a source-output ordinal"),
+            };
+            if ordinal.index() as usize >= arity {
+                return Err("placement edge source-output ordinal is out of range");
+            }
+            if !edges.insert((edge.from, ordinal, edge.to)) {
                 return Err("placement graph edges must be unique");
             }
         }
@@ -148,31 +324,16 @@ impl PlacementPlanRequest {
         {
             return Err("placement search limits must be non-zero");
         }
-        let mut provider_ids = BTreeSet::new();
-        for provider in &self.resources.providers {
-            if !provider_ids.insert(provider.device_id) {
-                return Err("provider resource device identities must be unique");
-            }
-            if provider
-                .capacity_bytes
-                .is_some_and(|capacity| provider.live_bytes > capacity)
-                || provider
-                    .scratch_available_bytes
-                    .zip(provider.capacity_bytes)
-                    .is_some_and(|(scratch, capacity)| scratch > capacity)
-                || provider.reclaimable_bytes > provider.live_bytes
-                || provider.queue_depth.is_some() != provider.queue_limit.is_some()
-                || provider
-                    .queue_depth
-                    .zip(provider.queue_limit)
-                    .is_some_and(|(depth, limit)| depth > limit)
-            {
-                return Err("provider resource snapshot is inconsistent");
-            }
+        self.resources.validate()?;
+        if self.signature.graph_output_authority != output_authority::digest(&self.graph) {
+            return Err("placement graph output authority does not match signature");
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod source_output_tests;
 
 #[cfg(test)]
 mod tests {
@@ -184,7 +345,7 @@ mod tests {
 
     use super::*;
 
-    fn candidate(identity: &str, provider: bool) -> PlacementGraphCandidate {
+    pub(super) fn candidate(identity: &str, provider: bool) -> PlacementGraphCandidate {
         let kind = if provider {
             ExecutionCandidateKind::ProviderFusion
         } else {
@@ -206,31 +367,41 @@ mod tests {
                         execution_ns: 1,
                         ..ExecutionCostComponents::default()
                     },
-                    scratch_bytes: 0,
+                    scratch_bytes: Some(0),
                     confidence: EstimateConfidence::Exact,
                     source: EstimateSource::Synthetic,
                 },
                 // Execution and resulting residency are intentionally
                 // independent: provider work may materialize a host result.
                 output_residency: CandidateOutputResidency::Host,
+                presentation: crate::CandidateOutputPresentation::Direct,
                 guards: Vec::new(),
             },
-            resources: CandidateResourceDemand::default(),
+            resources: CandidateResourceDemand {
+                retained_bytes: 0.into(),
+                scratch_bytes: 0.into(),
+                ..CandidateResourceDemand::default()
+            },
+            output_facts: None,
             transactional_results: true,
         }
     }
 
-    fn request() -> PlacementPlanRequest {
+    pub(super) fn request() -> PlacementPlanRequest {
         PlacementPlanRequest {
             signature: PlacementSignature {
                 region: None,
                 operation: "test.graph".into(),
                 runtime_facts: Digest::sha256(b"facts"),
+                provider_provenance: None,
+                graph_output_authority: None,
                 revision: PlacementRevision {
                     program: None,
                     catalog: Digest::sha256(b"catalog"),
                     compiler: Digest::sha256(b"compiler"),
-                    provider: Digest::sha256(b"provider"),
+                    authority: crate::PlacementExecutionAuthorityRevision::Provider(
+                        Digest::sha256(b"provider"),
+                    ),
                     policy: Digest::sha256(b"policy"),
                 },
             },
@@ -271,6 +442,19 @@ mod tests {
         let encoded = serde_json::to_vec(&request).unwrap();
         let decoded: PlacementPlanRequest = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, request);
+        let known = serde_json::to_value(ResourceByteBound::Known(16)).unwrap();
+        assert_eq!(known, 16);
+        let decoded: ResourceByteBound = serde_json::from_value(known).unwrap();
+        assert_eq!(decoded, ResourceByteBound::Known(16));
+        let unavailable = serde_json::to_value(ResourceByteBound::Unavailable(
+            ResourceBoundUnavailable::NoScratchBound,
+        ))
+        .unwrap();
+        assert_eq!(unavailable, "NoScratchBound");
+        assert_eq!(
+            CandidateResourceDemand::default().scratch_bytes,
+            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound)
+        );
     }
 
     #[test]
@@ -283,6 +467,7 @@ mod tests {
         let edge = PlacementGraphEdge {
             from: 0,
             to: 1,
+            source_output: None,
             bytes: 1,
             host_to_provider_ns: 1,
             provider_to_host_ns: 1,
@@ -297,5 +482,30 @@ mod tests {
         request.graph.edges = vec![edge];
         request.limits.max_edges = 0;
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn provider_only_requires_one_transactional_whole_work_node() {
+        let mut request = request();
+        request.graph.nodes[0].candidates.remove(0);
+        request
+            .validate()
+            .expect("provider-only whole-work is executable");
+
+        request.require_transactional_results = false;
+        assert_eq!(
+            request.validate().unwrap_err(),
+            "provider-only placement requires one transactional whole-work node"
+        );
+
+        request.require_transactional_results = true;
+        request.graph.nodes.push(PlacementGraphNode {
+            identity: "second".into(),
+            candidates: vec![candidate("cpu.second", false)],
+        });
+        assert_eq!(
+            request.validate().unwrap_err(),
+            "provider-only placement requires one transactional whole-work node"
+        );
     }
 }

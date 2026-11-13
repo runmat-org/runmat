@@ -1,10 +1,10 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "exact_healing.hxx"
+#include "exact_identity.hxx"
 
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
-#include <BRepTools.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <ShapeBuild_ReShape.hxx>
 #include <ShapeFix_Shape.hxx>
@@ -24,7 +24,6 @@
 #include <cmath>
 #include <map>
 #include <limits>
-#include <sstream>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -52,29 +51,7 @@ private:
 ExactHealingDigest compute_persistent_digest(const TopoDS_Shape& shape,
                                              const OcctImportOptions& options,
                                              std::uint64_t& byte_work) {
-  const TopoDS_Shape canonical = shape.Oriented(TopAbs_FORWARD);
-  std::ostringstream stream;
-  HealingProgress progress(options);
-  BRepTools::Write(canonical, stream, progress.Start());
-  if (options.cancel_token_id != 0 && occt_import_cancelled(options.cancel_token_id)) {
-    throw std::runtime_error("OCCT CAD import cancelled");
-  }
-  const std::string bytes = stream.str();
-  if (bytes.empty() || byte_work > options.max_exact_identity_bytes ||
-      static_cast<std::uint64_t>(bytes.size()) >
-          options.max_exact_identity_bytes - byte_work) {
-    throw std::runtime_error("OCCT exact persistent identity exceeded its byte-work budget");
-  }
-  byte_work += static_cast<std::uint64_t>(bytes.size());
-  rust::Vec<std::uint8_t> digest = occt_exact_identity_digest(
-      rust::Slice<const std::uint8_t>(
-          reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()));
-  if (digest.size() != 32) {
-    throw std::runtime_error("OCCT healing identity digest has an invalid length");
-  }
-  ExactHealingDigest result;
-  std::copy(digest.begin(), digest.end(), result.begin());
-  return result;
+  return exact_identity_digest(shape, options, byte_work);
 }
 
 std::vector<ExactHealingDigest> persistent_inventory(

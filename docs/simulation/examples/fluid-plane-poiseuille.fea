@@ -1,0 +1,58 @@
+// Plane Poiseuille flow between parallel walls 0.1 m apart in a channel 3 m long (L/h = 30).
+// Symmetry planes close the thin spanwise slab, so the developed flow is
+// u = 1.5 U (1 - (2y/h - 1)^2) and the developed drop is 12 mu U L / h^2 = 36 Pa.
+// The uniform inlet adds an entrance loss of about 0.9 h of equivalent channel length
+// (Re = rho U h / mu = 1), about 3% of the developed drop; pressure_drop lies within 5% of 36 Pa.
+geometry channel {
+    file = "./geometry/plane-channel-long.step"
+    units = m
+    region fluid : cell { select result; expect exactly_one }
+    region inlet : face { select name "Inlet"; expect exactly_one }
+    region outlet : face { select name "Outlet"; expect exactly_one }
+    region lower_wall : face { select name "Lower wall"; expect exactly_one }
+    region upper_wall : face { select name "Upper wall"; expect exactly_one }
+    region back : face { select name "Back"; expect exactly_one }
+    region front : face { select name "Front"; expect exactly_one }
+}
+
+mesh channel on geometry.channel {
+    tetrahedra {
+        order = linear
+        target_size = 0.015 m
+        maximum_deviation = 0.001 m
+    }
+}
+
+material oil {
+    mass_density = 1000 kg/m^3
+    fluid {
+        law = incompressible_newtonian
+        dynamic_viscosity = 1 Pa*s
+    }
+}
+
+model plane_channel {
+    assign material.oil to geometry.channel.region.fluid
+    constraint inlet {
+        fluid.velocity { target = geometry.channel.region.inlet; value = [0.01 m/s, 0 m/s, 0 m/s] }
+    }
+    constraint lower_wall { fluid.no_slip_wall { target = geometry.channel.region.lower_wall } }
+    constraint upper_wall { fluid.no_slip_wall { target = geometry.channel.region.upper_wall } }
+    constraint back { fluid.symmetry { target = geometry.channel.region.back } }
+    constraint front { fluid.symmetry { target = geometry.channel.region.front } }
+    load outlet {
+        fluid.outlet_pressure { target = geometry.channel.region.outlet; value = 0 Pa }
+    }
+}
+
+study plane_poiseuille {
+    geometry = geometry.channel
+    mesh = mesh.channel
+    model = model.plane_channel
+    analysis flow { fluid steady {} }
+    output velocity = analysis.flow.field.cell.fluid_velocity
+    output pressure = analysis.flow.field.cell.fluid_pressure
+    output peak_speed = max(magnitude(output.velocity), over = geometry.channel.region.fluid)
+    output inlet_pressure = max(output.pressure, over = geometry.channel.region.fluid)
+    output pressure_drop = pressure_drop(analysis.flow, from = geometry.channel.region.inlet, to = geometry.channel.region.outlet)
+}

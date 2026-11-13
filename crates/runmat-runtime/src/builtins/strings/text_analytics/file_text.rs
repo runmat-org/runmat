@@ -1,161 +1,29 @@
 //! File-backed text extraction helpers for Text Analytics workflows.
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    EXTRACT_FILE_TEXT_BROAD_FILE_CELL_EXTENSION as BROAD_FILE_CELL_EXTENSION,
+    EXTRACT_FILE_TEXT_DESCRIPTOR, EXTRACT_FILE_TEXT_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
+    EXTRACT_FILE_TEXT_ERROR_IO as ERROR_IO,
+    EXTRACT_FILE_TEXT_ERROR_UNSUPPORTED as ERROR_UNSUPPORTED,
+    EXTRACT_FILE_TEXT_EXTENSIONS as EXTENSIONS,
+    EXTRACT_FILE_TEXT_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
+    EXTRACT_FILE_TEXT_RESIDENT_PAGES_EXTENSION as RESIDENT_PAGES_EXTENSION,
+};
 
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
 use encoding_rs::Encoding;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar, Value};
 
 use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::html::{extract_html_text_value, ExtractionMethod};
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
+use crate::{build_runtime_error, BuiltinResult};
 
 const NAME: &str = "extractFileText";
 const MAX_FILE_BYTES: usize = 512 * 1024 * 1024;
 const MAX_DOCX_XML_BYTES: usize = 128 * 1024 * 1024;
-
-const RESIDENT_PAGES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "extractfiletext-resident-pages",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "extractFileText with a resident Pages control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ExtractFileTextResidentPagesExtension"),
-};
-const BROAD_FILE_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "extractfiletext-broad-file-cell",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "extractFileText with a string-valued or nested filename cell is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ExtractFileTextBroadFileCellExtension"),
-};
-const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [RESIDENT_PAGES_EXTENSION, BROAD_FILE_CELL_EXTENSION];
-const INTEGER_PAGES_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Pages",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Pages is a nonempty vector of positive page numbers and accepts every built-in integer class.",
-    }];
-const INTEGER_FILENAME_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "filename",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "The filename or URL is text; integer data rejects before file IO or provider access.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = extractFileText(filename, 'Pages', integer_pages)",
-        inputs: &INTEGER_PAGES_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Pages values are parsed exactly without floating materialization. PDF extraction itself remains an explicitly unsupported format in RunMat.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = extractFileText(integer_filename)",
-        inputs: &INTEGER_FILENAME_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer filenames are outside the public text domain and reject without conversion.",
-    },
-];
-
-const OUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Extracted text.",
-}];
-
-const IN_FILE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Path to a text, HTML, or DOCX file.",
-}];
-
-const IN_FILE_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Path to a text, HTML, or DOCX file.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: Encoding, ExtractionMethod, Password, and Pages.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EXTRACT_FILE_TEXT.INVALID_INPUT",
-    identifier: Some("RunMat:extractFileText:InvalidInput"),
-    when: "Inputs do not match a supported extractFileText form.",
-    message: "extractFileText: invalid input",
-};
-
-const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EXTRACT_FILE_TEXT.IO",
-    identifier: Some("RunMat:extractFileText:IOError"),
-    when: "The requested file cannot be read.",
-    message: "extractFileText: file read failed",
-};
-
-const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EXTRACT_FILE_TEXT.UNSUPPORTED",
-    identifier: Some("RunMat:extractFileText:UnsupportedFormat"),
-    when: "The requested file type or option requires unsupported extraction infrastructure.",
-    message: "extractFileText: unsupported file type or option",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INVALID_INPUT, ERROR_IO, ERROR_UNSUPPORTED];
-
-pub const EXTRACT_FILE_TEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "str = extractFileText(filename)",
-            inputs: &IN_FILE,
-            outputs: &OUT_TEXT,
-        },
-        BuiltinSignatureDescriptor {
-            label: "str = extractFileText(filename,Name,Value)",
-            inputs: &IN_FILE_REST,
-            outputs: &OUT_TEXT,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-fn string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::String
-}
 
 fn extract_error(
     error: &'static BuiltinErrorDescriptor,
@@ -170,52 +38,72 @@ fn extract_error(
 
 #[runtime_builtin(
     name = "extractFileText",
-    category = "strings/text_analytics",
-    summary = "Read text from text, HTML, and DOCX files.",
-    keywords = "extractFileText,text analytics,file,text,HTML,DOCX",
-    accel = "sink",
-    extensions(EXTENSIONS),
-    integer_capabilities(INTEGER_CAPABILITIES),
-    type_resolver(string_type),
-    descriptor(crate::builtins::strings::text_analytics::file_text::EXTRACT_FILE_TEXT_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::file_text"
 )]
-async fn extract_file_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    preflight_args(&args)?;
-    let args = gather_args(args).await?;
-    let (source, options) = parse_args(args)?;
-    if is_url(&source) {
-        return Err(extract_error(
+async fn extract_file_text_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::EXTRACT_FILE_TEXT_DESCRIPTOR,
+        &runmat_builtins::EXTRACT_FILE_TEXT_ERROR_TOO_MANY_OUTPUTS,
+        "extractFileText",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "extractFileText")?;
+    work.finish(
+        async {
+            preflight_args(args.view())?;
+            let gathered = work
+                .wait(args.try_map_preserving_roots_async(
+                    args.len(),
+                    runtime.as_ref(),
+                    async |index| work.wait(crate::gather_if_needed_async(&args[index])).await,
+                ))
+                .await?;
+            let args = gathered.view();
+            let (source, options) = parse_args(args)?;
+            if is_url(&source) {
+                return Err(extract_error(
             &ERROR_UNSUPPORTED,
             "extractFileText: URL extraction requires website fetching support and remains tracked",
         ));
-    }
-    let path = PathBuf::from(&source);
-    let kind = FileKind::from_path(&path);
-    validate_options_for_kind(kind, &options)?;
-    let bytes = read_file(&path).await?;
-    let text = match kind {
-        FileKind::Html => {
-            let html = decode_bytes(&bytes, options.encoding.as_deref())?;
-            let method = options.extraction_method.unwrap_or(ExtractionMethod::Tree);
-            match extract_html_text_value(Value::String(html), method)? {
-                Value::String(text) => text,
-                other => {
-                    return Err(extract_error(
-                        &ERROR_INVALID_INPUT,
-                        format!("extractFileText: unexpected HTML extraction output {other:?}"),
-                    ))
-                }
             }
+            let path = PathBuf::from(&source);
+            let kind = FileKind::from_path(&path);
+            validate_options_for_kind(kind, &options)?;
+            let bytes = work.wait(read_file(&path)).await?;
+            let output = match kind {
+                FileKind::Html => {
+                    let html = decode_bytes(&bytes, options.encoding.as_deref())?;
+                    let method = options.extraction_method.unwrap_or(ExtractionMethod::Tree);
+                    match extract_html_text_value(Value::string(html), method)? {
+                        value @ Value::String(_) => value,
+                        other => {
+                            return Err(extract_error(
+                                &ERROR_INVALID_INPUT,
+                                format!(
+                                    "extractFileText: unexpected HTML extraction output {other:?}"
+                                ),
+                            ))
+                        }
+                    }
+                }
+                FileKind::Docx => Value::string(extract_docx_text(&bytes)?),
+                FileKind::Pdf => unreachable!("PDF files are rejected before file IO"),
+                FileKind::PlainText => {
+                    Value::string(decode_bytes(&bytes, options.encoding.as_deref())?)
+                }
+            };
+            Ok(output)
         }
-        FileKind::Docx => extract_docx_text(&bytes)?,
-        FileKind::Pdf => unreachable!("PDF files are rejected before file IO"),
-        FileKind::PlainText => decode_bytes(&bytes, options.encoding.as_deref())?,
-    };
-    Ok(Value::String(text))
+        .await,
+    )
 }
 
-fn preflight_args(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_args(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if let Some(source) = args.first() {
         if is_numeric_or_resident(source) || contains_numeric_or_resident(source) {
             return Err(extract_error(
@@ -269,9 +157,16 @@ fn is_numeric_or_resident(value: &Value) -> bool {
 fn contains_numeric_or_resident(value: &Value) -> bool {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .any(|value| is_numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .any(|value| is_numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::StructArray(array) => array.any_value(|value| {
+            is_numeric_or_resident(value) || contains_numeric_or_resident(value)
+        }),
         _ => false,
     }
 }
@@ -279,32 +174,21 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
 fn contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident),
+        Value::Cell(cell) => cell.data().iter().any(contains_resident),
+        Value::Struct(value) => value.fields.values().any(contains_resident),
+        Value::StructArray(array) => array.any_value(contains_resident),
         _ => false,
     }
 }
 
 fn filename_cell_is_broad(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) if cell.data.len() == 1 => !matches!(
-            cell.data.first(),
+        Value::Cell(cell) if cell.data().len() == 1 => !matches!(
+            cell.data().first(),
             Some(Value::CharArray(array)) if array.rows <= 1
         ),
         _ => false,
     }
-}
-
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
-            extract_error(
-                &ERROR_INVALID_INPUT,
-                format!("extractFileText: failed to gather input: {err}"),
-            )
-        })?);
-    }
-    Ok(out)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -315,7 +199,9 @@ struct ExtractFileTextOptions {
     pages: Option<Vec<usize>>,
 }
 
-fn parse_args(args: Vec<Value>) -> BuiltinResult<(String, ExtractFileTextOptions)> {
+fn parse_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(String, ExtractFileTextOptions)> {
     if args.is_empty() {
         return Err(extract_error(
             &ERROR_INVALID_INPUT,
@@ -372,12 +258,41 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(String, ExtractFileTextOptions
 
 fn scalar_file_input(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => nonempty_source(value),
-        Value::StringArray(array) if array.data.len() == 1 => nonempty_source(&array.data[0]),
-        Value::CharArray(array) if array.rows <= 1 => {
-            nonempty_source(&array.data.iter().collect::<String>())
+        Value::String(value) => nonempty_source(value.as_str().ok_or_else(|| {
+            extract_error(
+                &ERROR_INVALID_INPUT,
+                "extractFileText: filename must not be missing",
+            )
+        })?),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            nonempty_source(array.data()[0].as_str().ok_or_else(|| {
+                extract_error(
+                    &ERROR_INVALID_INPUT,
+                    "extractFileText: filename must not be missing",
+                )
+            })?)
         }
-        Value::Cell(cell) if cell.data.len() == 1 => scalar_file_input(&cell.data[0]),
+        Value::CharArray(array) if array.rows <= 1 => {
+            let source = if array.rows == 0 {
+                String::new()
+            } else {
+                crate::builtins::strings::common::char_row_to_string_slice(
+                    array.data(),
+                    array.cols,
+                    0,
+                )
+                .map_err(|cause| {
+                    let mut diagnostic = extract_error(
+                        &ERROR_INVALID_INPUT,
+                        "extractFileText: malformed UTF-16 filename",
+                    );
+                    diagnostic.source = Some(Box::new(cause));
+                    diagnostic
+                })?
+            };
+            nonempty_source(&source)
+        }
+        Value::Cell(cell) if cell.data().len() == 1 => scalar_file_input(&cell.data()[0]),
         other => Err(extract_error(
             &ERROR_INVALID_INPUT,
             format!("extractFileText: expected scalar filename or URL, got {other:?}"),
@@ -401,7 +316,7 @@ fn parse_pages(value: &Value) -> BuiltinResult<Vec<usize>> {
     let values = match value {
         Value::Num(value) => vec![NumericScalar::F64(*value)],
         Value::Int(value) => vec![int_numeric_scalar(value.clone())],
-        Value::Tensor(tensor) if tensor_shape_is_vector(&tensor.shape) => (0..tensor.len())
+        Value::Tensor(tensor) if tensor_shape_is_vector(tensor.shape()) => (0..tensor.len())
             .map(|idx| {
                 tensor.numeric_value_at(idx).ok_or_else(|| {
                     extract_error(
@@ -552,13 +467,16 @@ fn is_url(value: &str) -> bool {
 
 async fn read_file(path: &Path) -> BuiltinResult<Vec<u8>> {
     let bytes = runmat_filesystem::read_async(path).await.map_err(|err| {
-        extract_error(
-            &ERROR_IO,
-            format!(
-                "extractFileText: unable to read '{}': {err}",
-                path.display()
-            ),
-        )
+        let mut builder = build_runtime_error(format!(
+            "extractFileText: unable to read '{}': {err}",
+            path.display()
+        ))
+        .with_builtin(NAME)
+        .with_source(err);
+        if let Some(identifier) = ERROR_IO.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
     })?;
     if bytes.len() > MAX_FILE_BYTES {
         return Err(extract_error(
@@ -692,7 +610,10 @@ mod tests {
     use std::io::Write;
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(extract_file_text_builtin(args))
+        futures::executor::block_on(extract_file_text_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn unique_path(name: &str, ext: &str) -> PathBuf {
@@ -709,20 +630,25 @@ mod tests {
 
     fn string_value(value: Value) -> String {
         match value {
-            Value::String(text) => text,
+            Value::String(text) => text.as_str().expect("nonmissing test text").to_owned(),
             other => panic!("expected string, got {other:?}"),
         }
     }
 
-    #[test]
-    fn parse_pages_reads_typed_integer_storage_exactly() {
-        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 5]), vec![1, 2])
-            .expect("integer tensor");
-
-        assert_eq!(
-            parse_pages(&Value::Tensor(tensor)).expect("pages"),
-            vec![2, 5]
-        );
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn parse_pages_reads_typed_integer_storage_and_preserves_vector_grammar() {
+        for (storage, shape, expected) in [
+            (IntegerStorage::U16(vec![2]), vec![], vec![2]),
+            (IntegerStorage::U16(vec![2, 5]), vec![2], vec![2, 5]),
+            (IntegerStorage::U16(vec![2, 5]), vec![1, 2, 1], vec![2, 5]),
+        ] {
+            let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+            assert_eq!(
+                parse_pages(&Value::Tensor(tensor)).expect("pages"),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -764,12 +690,16 @@ mod tests {
     #[test]
     fn extract_file_text_strict_mode_rejects_resident_pages_before_gather() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let error = run(vec![
             Value::String("document.pdf".into()),
             Value::String("Pages".into()),
@@ -788,9 +718,9 @@ mod tests {
         let path = unique_path("plain", "txt");
         test_support::fs::write(&path, b"caf\xe9").expect("write sample");
         let value = run(vec![
-            Value::String(path.to_string_lossy().to_string()),
-            Value::String("Encoding".to_string()),
-            Value::String("windows-1252".to_string()),
+            Value::String(path.to_string_lossy().to_string().into()),
+            Value::String("Encoding".to_string().into()),
+            Value::String("windows-1252".to_string().into()),
         ])
         .expect("extract");
         assert_eq!(string_value(value), "café");
@@ -807,9 +737,9 @@ mod tests {
         )
         .expect("write sample");
         let value = run(vec![
-            Value::String(path.to_string_lossy().to_string()),
-            Value::String("ExtractionMethod".to_string()),
-            Value::String("all-text".to_string()),
+            Value::String(path.to_string_lossy().to_string().into()),
+            Value::String("ExtractionMethod".to_string().into()),
+            Value::String("all-text".to_string().into()),
         ])
         .expect("extract");
         let text = string_value(value);
@@ -835,7 +765,10 @@ mod tests {
         .expect("write document");
         zip.finish().expect("finish docx");
 
-        let value = run(vec![Value::String(path.to_string_lossy().to_string())]).expect("extract");
+        let value = run(vec![Value::String(
+            path.to_string_lossy().to_string().into(),
+        )])
+        .expect("extract");
         assert_eq!(string_value(value), "Hello & welcome\nSecond");
         let _ = test_support::fs::remove_file(&path);
     }
@@ -844,29 +777,29 @@ mod tests {
     #[test]
     fn rejects_pdf_options_and_urls_as_tracked_gaps() {
         let err = run(vec![
-            Value::String("https://example.com".to_string()),
-            Value::String("ExtractionMethod".to_string()),
-            Value::String("tree".to_string()),
+            Value::String("https://example.com".to_string().into()),
+            Value::String("ExtractionMethod".to_string().into()),
+            Value::String("tree".to_string().into()),
         ])
         .expect_err("expected URL rejection");
         assert!(err.to_string().contains("URL extraction"));
 
         let err = run(vec![
-            Value::String("paper.pdf".to_string()),
-            Value::String("Pages".to_string()),
+            Value::String("paper.pdf".to_string().into()),
+            Value::String("Pages".to_string().into()),
             Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
         ])
         .expect_err("expected PDF option rejection");
         assert!(err.to_string().contains("PDF extraction"));
 
-        let err =
-            run(vec![Value::String("paper.pdf".to_string())]).expect_err("expected PDF rejection");
+        let err = run(vec![Value::String("paper.pdf".to_string().into())])
+            .expect_err("expected PDF rejection");
         assert!(err.to_string().contains("PDF extraction"));
 
         let err = run(vec![
-            Value::String("report.docx".to_string()),
-            Value::String("Encoding".to_string()),
-            Value::String("UTF-8".to_string()),
+            Value::String("report.docx".to_string().into()),
+            Value::String("Encoding".to_string().into()),
+            Value::String("UTF-8".to_string().into()),
         ])
         .expect_err("expected DOCX encoding rejection");
         assert!(err.to_string().contains("Encoding is supported"));

@@ -11,7 +11,12 @@ mod validation;
 pub use construction::{
     build_delaunay_volume_provenance, validate_delaunay_volume_provenance_sources,
 };
+#[cfg(test)]
 pub(super) use derivation::derive_delaunay_volume_metric_contexts;
+pub(super) use derivation::{
+    derive_delaunay_volume_metric_contexts_from_admitted_input, derive_metric_context_for_cell,
+    derive_metric_context_for_corners,
+};
 pub use validation::validate_delaunay_volume_provenance;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,7 +54,8 @@ pub struct DelaunayVolumeProvenance {
     pub facets: Vec<DelaunayFacetProvenance>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeProvenanceOptions {
     pub maximum_node_bindings: u64,
     pub maximum_segment_bindings: u64,
@@ -70,6 +76,7 @@ impl Default for DelaunayVolumeProvenanceOptions {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeProvenanceErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidTopology,
     InvalidProvenance,

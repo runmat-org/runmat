@@ -4,22 +4,33 @@ use std::char;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use runmat_value::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
+use runmat_value::{decode_utf16_code_units, IntValue, IntegerStorage, LogicalArray, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+mod conversion;
+mod floating;
+pub(crate) mod scalar_text;
+use conversion::{FloatStyle, FormatConversion};
+pub(crate) use floating::format_delimited_numeric;
+use floating::format_float;
 
 const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:UnsupportedSpecifier";
 
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
 pub struct ArgCursor<'a> {
-    args: &'a [Value],
+    args: crate::call::FunctionArgumentView<'a>,
     index: usize,
 }
 
 impl<'a> ArgCursor<'a> {
     pub fn new(args: &'a [Value]) -> Self {
+        Self::from_arguments(crate::call::FunctionArgumentView::from_slice(args))
+    }
+
+    pub fn from_arguments(args: crate::call::FunctionArgumentView<'a>) -> Self {
         Self { args, index: 0 }
     }
 
@@ -45,6 +56,12 @@ impl<'a> ArgCursor<'a> {
 
 fn format_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
+}
+
+fn format_utf16_error(context: &str, error: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{context}: {error}"))
+        .with_source(error)
+        .build()
 }
 
 fn format_error_with_identifier(
@@ -88,7 +105,39 @@ struct FormatSpec {
     flags: FormatFlags,
     width: Option<Count>,
     precision: Option<Count>,
-    conversion: char,
+    conversion: FormatConversion,
+}
+
+/// Parsed grammar facts reusable by a sink before it materializes its values.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FormatSummary {
+    conversion: ConversionCount,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ConversionCount {
+    #[default]
+    Zero,
+    SoleStringWithoutStar,
+    OtherOrMultiple,
+}
+
+impl FormatSummary {
+    pub fn sole_string_conversion_without_star(self) -> bool {
+        self.conversion == ConversionCount::SoleStringWithoutStar
+    }
+
+    fn record(&mut self, spec: FormatSpec) {
+        self.conversion = match (self.conversion, spec.conversion) {
+            (ConversionCount::Zero, FormatConversion::String)
+                if !matches!(spec.width, Some(Count::FromArgument))
+                    && !matches!(spec.precision, Some(Count::FromArgument)) =>
+            {
+                ConversionCount::SoleStringWithoutStar
+            }
+            _ => ConversionCount::OtherOrMultiple,
+        };
+    }
 }
 
 /// Format a MATLAB-style format string with the provided arguments.
@@ -98,7 +147,14 @@ struct FormatSpec {
 /// subset required by MATLAB builtins. It is intentionally strict: errors are
 /// reported when format specifiers cannot be satisfied by the provided arguments.
 pub fn format_variadic(fmt: &str, args: &[Value]) -> BuiltinResult<String> {
-    let mut cursor = ArgCursor::new(args);
+    format_variadic_arguments(fmt, crate::call::FunctionArgumentView::from_slice(args))
+}
+
+pub fn format_variadic_arguments(
+    fmt: &str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<String> {
+    let mut cursor = ArgCursor::from_arguments(args);
     let step = format_variadic_with_cursor(fmt, &mut cursor)?;
     Ok(step.output)
 }
@@ -110,6 +166,24 @@ pub fn format_variadic_with_cursor(
     cursor: &mut ArgCursor<'_>,
 ) -> BuiltinResult<FormatStepResult> {
     format_once(fmt, cursor)
+}
+
+/// Validate only the format grammar, without consuming or materializing values.
+/// A sink can call this before reading a resident formatting argument.
+pub fn validate_format_syntax(fmt: &str) -> BuiltinResult<FormatSummary> {
+    let mut chars = fmt.chars().peekable();
+    let mut summary = FormatSummary::default();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            continue;
+        }
+        if chars.peek() == Some(&'%') {
+            chars.next();
+        } else {
+            summary.record(parse_format_spec(&mut chars)?);
+        }
+    }
+    Ok(summary)
 }
 
 fn format_once(fmt: &str, cursor: &mut ArgCursor<'_>) -> BuiltinResult<FormatStepResult> {
@@ -205,10 +279,15 @@ fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> BuiltinResult<FormatSpe
         }
     }
 
-    let conversion = chars
+    let symbol = chars
         .next()
         .ok_or_else(|| format_error("sprintf: incomplete format specifier"))?;
-
+    let conversion = FormatConversion::from_symbol(symbol).ok_or_else(|| {
+        format_error_with_identifier(
+            format!("sprintf: unsupported format %{symbol}"),
+            FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
+        )
+    })?;
     Ok(FormatSpec {
         flags,
         width,
@@ -281,28 +360,45 @@ fn apply_format_spec(
 
     let conversion = spec.conversion;
     let formatted = match conversion {
-        'd' | 'i' => {
+        FormatConversion::SignedDecimal => {
             let value = cursor.next()?;
             consumed += 1;
-            let int_value = value_to_i128(&value)?;
-            format_integer(
-                int_value,
-                int_value.is_negative(),
-                10,
-                flags,
-                width,
-                precision,
-                false,
-                false,
-            )
+            match value {
+                // An incompatible finite floating value cannot use an integer
+                // conversion without losing information; preserve formatting
+                // flags and use the documented conversion-override path.
+                Value::Num(n) if n.is_finite() && !signed_decimal_float_fits_i128(n) => {
+                    format_float(
+                        n,
+                        FloatStyle::ExponentLower,
+                        flags,
+                        width,
+                        precision,
+                        flags.alternate,
+                    )
+                }
+                value => {
+                    let int_value = value_to_i128(&value)?;
+                    format_integer(
+                        int_value,
+                        int_value.is_negative(),
+                        10,
+                        flags,
+                        width,
+                        precision,
+                        false,
+                        false,
+                    )
+                }
+            }
         }
-        'u' => {
+        FormatConversion::UnsignedDecimal => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
             format_unsigned(uint_value, 10, flags, width, precision, false, false)
         }
-        'o' => {
+        FormatConversion::Octal => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -316,7 +412,7 @@ fn apply_format_spec(
                 false,
             )
         }
-        'x' => {
+        FormatConversion::HexLower => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -330,7 +426,7 @@ fn apply_format_spec(
                 false,
             )
         }
-        'X' => {
+        FormatConversion::HexUpper => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -344,7 +440,7 @@ fn apply_format_spec(
                 true,
             )
         }
-        'b' => {
+        FormatConversion::Binary => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -358,34 +454,28 @@ fn apply_format_spec(
                 false,
             )
         }
-        'f' | 'F' | 'e' | 'E' | 'g' | 'G' => {
+        FormatConversion::Float(style) => {
             let value = cursor.next()?;
             consumed += 1;
             let float_value = value_to_f64(&value)?;
             format_float(
                 float_value,
-                conversion,
+                style,
                 flags,
                 width,
                 precision,
                 spec.flags.alternate,
             )
         }
-        's' => {
+        FormatConversion::String => {
             let value = cursor.next()?;
             consumed += 1;
             format_string(value, flags, width, precision)
         }
-        'c' => {
+        FormatConversion::Character => {
             let value = cursor.next()?;
             consumed += 1;
             format_char(value, flags, width)
-        }
-        other => {
-            return Err(format_error_with_identifier(
-                format!("sprintf: unsupported format %{other}"),
-                FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
-            ));
         }
     }?;
 
@@ -507,137 +597,6 @@ fn format_unsigned(
     apply_width(String::new(), prefix, digits, flags, width, flags.zero_pad)
 }
 
-fn format_float(
-    value: f64,
-    conversion: char,
-    flags: FormatFlags,
-    width: Option<isize>,
-    precision: Option<isize>,
-    alternate: bool,
-) -> BuiltinResult<String> {
-    let mut sign = String::new();
-    let mut magnitude = value;
-
-    if value.is_nan() {
-        return apply_width(
-            String::new(),
-            String::new(),
-            "NaN".to_string(),
-            flags,
-            width,
-            false,
-        );
-    }
-
-    if value.is_infinite() {
-        if value.is_sign_negative() {
-            sign.push('-');
-        } else if flags.sign_plus {
-            sign.push('+');
-        } else if flags.sign_space {
-            sign.push(' ');
-        }
-        let text = "Inf".to_string();
-        return apply_width(sign, String::new(), text, flags, width, false);
-    }
-
-    if value.is_sign_negative() || (value == 0.0 && (1.0 / value).is_sign_negative()) {
-        sign.push('-');
-        magnitude = -value;
-    } else if flags.sign_plus {
-        sign.push('+');
-    } else if flags.sign_space {
-        sign.push(' ');
-    }
-
-    let prec = precision.unwrap_or(6).max(0) as usize;
-    let mut body = match conversion {
-        'f' | 'F' => format!("{magnitude:.prec$}"),
-        'e' => format!("{magnitude:.prec$e}"),
-        'E' => format!("{magnitude:.prec$E}"),
-        'g' | 'G' => format_float_general(magnitude, prec, conversion.is_uppercase()),
-        _ => {
-            return Err(format_error(format!(
-                "sprintf: unsupported float conversion %{}",
-                conversion
-            )))
-        }
-    };
-
-    if alternate && !body.contains('.') && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
-        body.push('.');
-    }
-
-    if flags.grouping && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
-        body = group_float_mantissa(&body);
-    }
-
-    let zero_pad_allowed = flags.zero_pad && !flags.left_align;
-    apply_width(sign, String::new(), body, flags, width, zero_pad_allowed)
-}
-
-fn format_float_general(value: f64, precision: usize, uppercase: bool) -> String {
-    if value == 0.0 {
-        if precision == 0 {
-            return "0".to_string();
-        }
-        let mut zero = String::from("0");
-        if precision > 0 {
-            zero.push('.');
-            zero.push_str(&"0".repeat(precision.saturating_sub(1)));
-        }
-        return zero;
-    }
-
-    let mut prec = precision;
-    if prec == 0 {
-        prec = 1;
-    }
-
-    let abs_val = value.abs();
-    let exp = abs_val.log10().floor() as i32;
-    let use_exp = exp < -4 || exp >= prec as i32;
-
-    if use_exp {
-        let mut s = format!("{:.*e}", prec - 1, value);
-        if uppercase {
-            s = s.to_uppercase();
-        }
-        trim_trailing_zeros(&mut s, true);
-        s
-    } else {
-        let mut s = format!("{:.*}", prec.max(1) - 1, value);
-        trim_trailing_zeros(&mut s, false);
-        s
-    }
-}
-
-fn trim_trailing_zeros(text: &mut String, keep_exponent: bool) {
-    if let Some(dot_idx) = text.find('.') {
-        let mut end = text.len();
-        while end > dot_idx + 1 {
-            let byte = text.as_bytes()[end - 1];
-            if byte == b'0' {
-                end -= 1;
-            } else {
-                break;
-            }
-        }
-        if end > dot_idx + 1 && text.as_bytes()[end - 1] == b'.' {
-            end -= 1;
-        }
-        if keep_exponent {
-            if let Some(exp_idx) = text.find(['e', 'E']) {
-                let exponent = text[exp_idx..].to_string();
-                text.truncate(end.min(exp_idx));
-                text.push_str(&exponent);
-                return;
-            }
-        }
-        text.truncate(end);
-    }
-}
-
 fn format_string(
     value: Value,
     flags: FormatFlags,
@@ -754,13 +713,27 @@ fn value_to_i128(value: &Value) -> BuiltinResult<i128> {
                     "sprintf: numeric conversion requires finite input",
                 ));
             }
-            Ok(n.trunc().clamp(i128::MIN as f64, i128::MAX as f64) as i128)
+            if !signed_decimal_float_fits_i128(*n) {
+                return Err(format_error(
+                    "sprintf: integer conversion requires a value in signed range",
+                ));
+            }
+            Ok(*n as i128)
         }
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         other => Err(format_error(format!(
             "sprintf: expected numeric argument, got {other:?}"
         ))),
     }
+}
+
+fn signed_decimal_float_fits_i128(value: f64) -> bool {
+    // i128::MAX rounds UP to 2^127 as f64, which is outside the signed range.
+    // The lower endpoint (-2^127) is exactly representable and inclusive.
+    value.is_finite()
+        && value.fract() == 0.0
+        && value >= i128::MIN as f64
+        && value < i128::MAX as f64
 }
 
 fn value_to_u128(value: &Value) -> BuiltinResult<u128> {
@@ -809,45 +782,28 @@ fn value_to_f64(value: &Value) -> BuiltinResult<f64> {
 }
 
 pub(crate) fn number_to_string(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value.is_sign_negative() {
-            "-Inf".to_string()
-        } else {
-            "Inf".to_string()
-        };
-    }
-    if value == 0.0 {
-        return "0".to_string();
-    }
-    value.to_string()
+    let mut output = String::new();
+    scalar_text::write_number_text(&mut output, value).expect("String formatting is infallible");
+    output
 }
 
 pub(crate) fn complex_to_string(re: f64, im: f64) -> String {
-    if im == 0.0 {
-        number_to_string(re)
-    } else if re == 0.0 {
-        format!("{}i", number_to_string(im))
-    } else if im < 0.0 {
-        format!("{}-{}i", number_to_string(re), number_to_string(im.abs()))
-    } else {
-        format!("{}+{}i", number_to_string(re), number_to_string(im))
-    }
+    let mut output = String::new();
+    scalar_text::write_complex_text(&mut output, re, im).expect("String formatting is infallible");
+    output
 }
 
 fn value_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) => {
-            let mut s = String::with_capacity(ca.data.len());
-            for ch in &ca.data {
-                s.push(*ch);
-            }
-            Ok(s)
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
+        Value::CharArray(ca) => decode_utf16_code_units(ca.data()).map_err(|error| {
+            format_utf16_error("sprintf: character value is not valid UTF-16 text", error)
+        }),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(int_value_to_decimal(i)),
         Value::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
@@ -860,14 +816,23 @@ fn value_to_string(value: &Value) -> BuiltinResult<String> {
 
 fn value_to_char(value: &Value) -> BuiltinResult<char> {
     match value {
-        Value::String(s) => s.chars().next().ok_or_else(|| {
+        Value::String(runmat_value::StringElement::Text(s)) => s.chars().next().ok_or_else(|| {
             format_error("sprintf: %c conversion requires non-empty character input")
         }),
-        Value::CharArray(ca) => ca
-            .data
-            .first()
-            .copied()
-            .ok_or_else(|| format_error("sprintf: %c conversion requires non-empty char input")),
+        Value::CharArray(ca) => {
+            let mut decoded = char::decode_utf16(ca.data().iter().map(|unit| unit.raw()));
+            match decoded.next() {
+                Some(Ok(character)) => Ok(character),
+                Some(Err(source)) => Err(build_runtime_error(format!(
+                    "sprintf: %c character is not valid UTF-16 text: {source}"
+                ))
+                .with_source(source)
+                .build()),
+                None => Err(format_error(
+                    "sprintf: %c conversion requires non-empty char input",
+                )),
+            }
+        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(format_error(
@@ -954,16 +919,26 @@ fn group_float_mantissa(text: &str) -> String {
 /// is a character row vector or string scalar.
 pub fn extract_format_string(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) => {
             if ca.rows != 1 {
                 return Err(format_error(format!(
                     "{context}: formatSpec must be a character row vector or string scalar"
                 )));
             }
-            Ok(ca.data.iter().collect())
+            ca.try_row_string()
+                .map_err(|error| format_utf16_error(context, error))?
+                .ok_or_else(|| {
+                    format_error(format!(
+                        "{context}: formatSpec must be a character row vector or string scalar"
+                    ))
+                })
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => Ok(sa
+            .data()[0]
+            .as_str()
+            .expect("nonmissing scalar text")
+            .to_owned()),
         _ => Err(format_error(format!(
             "{context}: formatSpec must be a character row vector or string scalar"
         ))),
@@ -1053,6 +1028,15 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> BuiltinResult<Stri
 /// printf-style formatting. Arrays are traversed in column-major order and GPU
 /// tensors are gathered back to the host.
 pub async fn flatten_arguments(args: &[Value], context: &str) -> BuiltinResult<Vec<Value>> {
+    flatten_argument_elements(crate::call::FunctionArgumentView::from_slice(args), context).await
+}
+
+/// Expand numerical/text elements for formatting, borrowing the original
+/// logical argument segments. This is formatting scratch, not a new call ABI.
+pub async fn flatten_argument_elements(
+    args: crate::call::FunctionArgumentView<'_>,
+    context: &str,
+) -> BuiltinResult<Vec<Value>> {
     let mut flattened = Vec::new();
     for value in args {
         let gathered = gather_if_needed_async(value)
@@ -1075,8 +1059,8 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             output.push(value);
         }
         Value::SymbolicArray(array) => {
-            for expr in array.data {
-                output.push(Value::Symbolic(expr));
+            for expr in array.data() {
+                output.push(Value::Symbolic(expr.clone()));
             }
         }
         Value::Tensor(tensor) => {
@@ -1094,7 +1078,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         Value::ComplexTensor(tensor) => {
             if tensor.integer_storage().is_some() {
                 for index in 0..tensor::complex_tensor_element_len(&tensor) {
-                    output.push(Value::String(tensor.format_element(index)));
+                    output.push(Value::string(tensor.format_element(index)));
                 }
             } else {
                 for &(re, im) in &tensor.materialize_f64() {
@@ -1107,21 +1091,24 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
                 output.push(Value::Bool(byte != 0));
             }
         }
-        Value::StringArray(StringArray { data, .. }) => {
-            for s in data {
-                output.push(Value::String(s));
-            }
-        }
+        Value::StringArray(array) => match array.into_parts().0.try_into_owned() {
+            Ok(data) => output.extend(data.into_iter().map(|text| Value::String(text.into()))),
+            Err(data) => output.extend(data.iter().cloned().map(|text| Value::String(text.into()))),
+        },
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                output.push(Value::String(ca.data.iter().collect()));
+                let text = decode_utf16_code_units(ca.data()).map_err(|error| {
+                    format_utf16_error("character value is not valid UTF-16 text", error)
+                })?;
+                output.push(Value::string(text));
             } else {
                 for row in 0..ca.rows {
-                    let mut line = String::with_capacity(ca.cols);
-                    for col in 0..ca.cols {
-                        line.push(ca.data[row * ca.cols + col]);
-                    }
-                    output.push(Value::String(line));
+                    let start = row * ca.cols;
+                    let line = decode_utf16_code_units(&ca.data()[start..start + ca.cols])
+                        .map_err(|error| {
+                            format_utf16_error("character row is not valid UTF-16 text", error)
+                        })?;
+                    output.push(Value::string(line));
                 }
             }
         }
@@ -1129,7 +1116,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             for col in 0..cell.cols {
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
-                    let inner = cell.data[idx].clone();
+                    let inner = cell.data()[idx].clone();
                     let gathered = gather_if_needed_async(&inner)
                         .await
                         .map_err(|flow| map_control_flow_with_context(flow, context))?;
@@ -1144,6 +1131,11 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             flatten_value(gathered, output, context).await?;
         }
         Value::OutputList(values) => {
+            let values = values.try_into_owned().map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
             for value in values {
                 flatten_value(value, output, context).await?;
             }
@@ -1155,16 +1147,20 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::Object(_)
         | Value::SparseTensor(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_) => {
             return Err(format_error(format!(
                 "{context}: unsupported argument type"
@@ -1207,6 +1203,124 @@ mod tests {
         get_display_format, set_display_format, FormatMode, IntegerComplexStorage, NumericStorage,
         Tensor,
     };
+
+    #[test]
+    fn syntax_admission_and_typed_execution_share_conversion_grammar() {
+        for (format, value) in [
+            ("%d", Value::Num(12.0)),
+            ("%i", Value::Num(12.0)),
+            ("%u", Value::Num(12.0)),
+            ("%o", Value::Num(12.0)),
+            ("%x", Value::Num(12.0)),
+            ("%X", Value::Num(12.0)),
+            ("%b", Value::Num(12.0)),
+            ("%f", Value::Num(12.0)),
+            ("%F", Value::Num(12.0)),
+            ("%e", Value::Num(12.0)),
+            ("%E", Value::Num(12.0)),
+            ("%g", Value::Num(12.0)),
+            ("%G", Value::Num(12.0)),
+            ("%s", Value::from("value")),
+            ("%c", Value::Num(65.0)),
+        ] {
+            validate_format_syntax(format).expect("admitted conversion");
+            format_variadic(format, &[value]).expect("same conversion executes");
+        }
+        for invalid in ["%q", "%", "%10.2q"] {
+            assert!(validate_format_syntax(invalid).is_err());
+        }
+        assert_eq!(
+            format_variadic("%#x", &[Value::Num(255.0)]).unwrap(),
+            "0xff"
+        );
+        assert_eq!(
+            format_variadic("%#X", &[Value::Num(255.0)]).unwrap(),
+            "0XFF"
+        );
+        assert_eq!(
+            format_variadic("%.1e", &[Value::Num(12.0)]).unwrap(),
+            "1.2e+01"
+        );
+        assert_eq!(
+            format_variadic("%.1E", &[Value::Num(12.0)]).unwrap(),
+            "1.2E+01"
+        );
+    }
+
+    #[test]
+    fn floating_conversions_use_scientific_exponents_and_significant_digits() {
+        for (spec, value, expected) in [
+            ("%.1e", 8.8e8, "8.8e+08"),
+            ("%e", 0.5, "5.000000e-01"),
+            ("%E", 1234.5, "1.234500E+03"),
+            ("%g", 20.0, "20"),
+            ("%g", 1.0, "1"),
+            ("%g", 0.0, "0"),
+            ("%g", 1.0e6, "1e+06"),
+            ("%.3g", 0.000123456, "0.000123"),
+            ("%G", 1.0e-10, "1E-10"),
+            ("%.6g", 999999.5, "1e+06"),
+            ("%#g", 20.0, "20.0000"),
+            ("%#.0e", 1.0, "1.e+00"),
+            ("%#.0f", 1.0, "1."),
+        ] {
+            assert_eq!(
+                format_variadic(spec, &[Value::Num(value)]).unwrap(),
+                expected,
+                "{spec}"
+            );
+        }
+        assert_eq!(format_variadic("%g", &[Value::Num(-0.0)]).unwrap(), "-0");
+    }
+
+    #[test]
+    fn signed_decimal_does_not_truncate_or_clamp_incompatible_floating_values() {
+        assert_eq!(
+            format_variadic("%d", &[Value::Num(2.5)]).unwrap(),
+            "2.500000e+00"
+        );
+        assert_eq!(format_variadic("%d", &[Value::Num(2.0)]).unwrap(), "2");
+        assert_eq!(
+            format_variadic("%d", &[Value::Num(1.0e300)]).unwrap(),
+            "1.000000e+300"
+        );
+        assert_eq!(
+            format_variadic("%d", &[Value::Num(i128::MIN as f64)]).unwrap(),
+            i128::MIN.to_string()
+        );
+        assert!(format_variadic("%d", &[Value::Num(i128::MAX as f64)])
+            .unwrap()
+            .ends_with("e+38"));
+        assert!(format_variadic("%d", &[Value::Num(f64::INFINITY)]).is_err());
+        assert_eq!(
+            format_variadic("%d", &[Value::Int(IntValue::I64(i64::MAX))]).unwrap(),
+            i64::MAX.to_string()
+        );
+        assert_eq!(
+            format_variadic("%+012.1d", &[Value::Num(2.5)]).unwrap(),
+            "+00002.5e+00"
+        );
+    }
+
+    #[test]
+    fn sole_string_query_uses_parsed_specifiers_not_text_scanning() {
+        for format in ["%s", "[%10.2s]", "%% %hs"] {
+            assert!(
+                validate_format_syntax(format)
+                    .unwrap()
+                    .sole_string_conversion_without_star(),
+                "{format}"
+            );
+        }
+        for format in ["plain text", "%%", "%s %s", "%d%s", "%*s", "%.*s"] {
+            assert!(
+                !validate_format_syntax(format)
+                    .unwrap()
+                    .sole_string_conversion_without_star(),
+                "{format}"
+            );
+        }
+    }
 
     #[test]
     fn format_variadic_supports_thousands_grouping_flag() {

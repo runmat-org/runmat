@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{ExactBRepTopology, PersistentEntityId, TopologicalOrientation};
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 use runmat_meshing_curve::shared_curve_vertex_node_id;
-use runmat_meshing_surface::{ExactSurfaceMesh, EXACT_SURFACE_MESH_SCHEMA_VERSION};
+use runmat_meshing_surface::{
+    ExactFaceMeshTriangle, ExactSurfaceMesh, EXACT_SURFACE_MESH_SCHEMA_VERSION,
+};
 
 use super::{
     checkpoint, error, resource, sorted_segment, validate_delaunay_constraints, validate_options,
@@ -60,6 +62,7 @@ pub fn build_delaunay_constraints(
             "exact solid surface facet inventory is empty or exceeds its hard limit",
         ));
     }
+    validate_oriented_region_boundaries(&solid_triangles, &face_sides)?;
     let referenced_nodes = solid_triangles
         .iter()
         .flat_map(|triangle| triangle.node_ids)
@@ -80,7 +83,10 @@ pub fn build_delaunay_constraints(
             Ok(DelaunayConstraintNode {
                 identity: *identity,
                 source_vertex_id: source_vertex_by_node.get(identity).cloned(),
-                coordinates_m: source.point_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(source.point_m),
             })
         })
         .collect::<Result<Vec<_>, DelaunayConstraintError>>()?;
@@ -147,6 +153,57 @@ pub fn build_delaunay_constraints(
     };
     validate_delaunay_constraints(&constraints, options, cancellation)?;
     Ok(constraints)
+}
+
+fn validate_oriented_region_boundaries(
+    triangles: &[&ExactFaceMeshTriangle],
+    face_sides: &BTreeMap<
+        PersistentEntityId,
+        (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide),
+    >,
+) -> Result<(), DelaunayConstraintError> {
+    let mut uses = BTreeMap::<
+        (PersistentEntityId, [StableDigest; 2]),
+        Vec<(bool, StableDigest, PersistentEntityId)>,
+    >::new();
+    for triangle in triangles {
+        let (positive, negative) = face_sides.get(&triangle.source_face_id).ok_or_else(|| {
+            invalid_boundary("solid surface triangle has no authoritative side classification")
+        })?;
+        for (region, reverse) in [positive, negative]
+            .into_iter()
+            .filter_map(|side| match side {
+                DelaunayConstraintFacetSide::Region(region) => Some((region, side == positive)),
+                DelaunayConstraintFacetSide::Exterior | DelaunayConstraintFacetSide::Void => None,
+            })
+        {
+            let mut oriented = triangle.node_ids;
+            if reverse {
+                oriented.swap(1, 2);
+            }
+            for directed in [
+                [oriented[0], oriented[1]],
+                [oriented[1], oriented[2]],
+                [oriented[2], oriented[0]],
+            ] {
+                let mut edge = directed;
+                edge.sort_unstable();
+                uses.entry((region.clone(), edge)).or_default().push((
+                    directed == edge,
+                    triangle.triangle_id,
+                    triangle.source_face_id.clone(),
+                ));
+            }
+        }
+    }
+    for ((region, edge), edge_uses) in uses {
+        if edge_uses.len() != 2 || edge_uses[0].0 == edge_uses[1].0 {
+            return Err(invalid_boundary(format!(
+                "solid region boundary is not a closed consistently oriented two-manifold at region {region:?}, edge {edge:?}, uses {edge_uses:?}",
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_surface(
@@ -221,6 +278,11 @@ fn face_sides(
     BTreeMap<PersistentEntityId, (DelaunayConstraintFacetSide, DelaunayConstraintFacetSide)>,
     DelaunayConstraintError,
 > {
+    let face_orientation = topology
+        .faces
+        .iter()
+        .map(|face| (&face.id, face.orientation))
+        .collect::<BTreeMap<_, _>>();
     let mut region_by_solid = BTreeMap::new();
     let mut region_ids = BTreeSet::new();
     for region in &topology.regions {
@@ -284,11 +346,15 @@ fn face_sides(
             if interfaces.contains(&face_use.entity_id) {
                 continue;
             }
-            // Exact surface triangles already carry `ExactFace::orientation` (the surface join
-            // reverses their winding when necessary). Shell and face-use orientation therefore
-            // classify that oriented triangle directly; composing the face orientation again
-            // would invert every reversed face twice.
-            let orientation = compose(shell.orientation, face_use.orientation);
+            // Surface join has already applied `ExactFace::orientation` to the triangle winding.
+            // Express the shell use relative to that final oriented triangle, rather than the
+            // evaluator's canonical surface orientation.
+            let orientation = compose(
+                compose(shell.orientation, face_use.orientation),
+                *face_orientation.get(&face_use.entity_id).ok_or_else(|| {
+                    invalid_geometry("solid shell use references an absent exact face")
+                })?,
+            );
             let sides = region_and_absent(region.clone(), absent.clone(), orientation);
             if result.insert(face_use.entity_id.clone(), sides).is_some() {
                 return Err(invalid_geometry(
@@ -298,13 +364,16 @@ fn face_sides(
         }
     }
     for interface in &topology.interfaces {
+        let face_orientation = *face_orientation
+            .get(&interface.face_id)
+            .ok_or_else(|| invalid_geometry("exact interface references an absent exact face"))?;
         let first = region_side(
             interface.side_a_region_id.clone(),
-            interface.side_a_orientation,
+            compose(interface.side_a_orientation, face_orientation),
         );
         let second = region_side(
             interface.side_b_region_id.clone(),
-            interface.side_b_orientation,
+            compose(interface.side_b_orientation, face_orientation),
         );
         let sides = merge_region_sides(first, second)?;
         if result.insert(interface.face_id.clone(), sides).is_some() {

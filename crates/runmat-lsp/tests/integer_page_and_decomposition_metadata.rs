@@ -20,7 +20,8 @@ const CAPABILITY_NAMES: [&str; 9] = [
 #[test]
 fn page_and_decomposition_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
     }
@@ -29,7 +30,8 @@ fn page_and_decomposition_integer_metadata_is_explicit() {
 #[test]
 fn floating_decomposition_extensions_declare_checked_runmat_boundaries() {
     for name in ["pagemtimes", "pinv", "qr", "rank", "rcond"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.extensions.is_empty(), "{name}");
         assert!(
             builtin.integer_capabilities.iter().all(|capability| {
@@ -52,7 +54,7 @@ fn floating_decomposition_extensions_declare_checked_runmat_boundaries() {
 
 #[test]
 fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
-    let pagefun = runmat_builtins::builtin_function_by_name("pagefun").expect("pagefun");
+    let pagefun = runmat_builtins::builtin_catalog_entry_by_name("pagefun").expect("pagefun");
     assert_eq!(
         pagefun.integer_capabilities[0].output_class,
         BuiltinIntegerOutputClassRule::FunctionSpecific
@@ -63,7 +65,7 @@ fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
     );
 
     let transpose =
-        runmat_builtins::builtin_function_by_name("pagetranspose").expect("pagetranspose");
+        runmat_builtins::builtin_catalog_entry_by_name("pagetranspose").expect("pagetranspose");
     assert_eq!(
         transpose.integer_capabilities[0].output_class,
         BuiltinIntegerOutputClassRule::PreserveInput
@@ -74,7 +76,7 @@ fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
     );
     assert_eq!(transpose.integer_capabilities[0].inputs[0].classes.len(), 8);
 
-    let real = runmat_builtins::builtin_function_by_name("real").expect("real");
+    let real = runmat_builtins::builtin_catalog_entry_by_name("real").expect("real");
     assert_eq!(
         real.integer_capabilities[0].output_class,
         BuiltinIntegerOutputClassRule::PreserveInput
@@ -84,7 +86,7 @@ fn exact_page_projection_and_realsqrt_rejection_are_distinguished() {
         BuiltinIntegerOverflowRule::NotApplicable
     );
 
-    let realsqrt = runmat_builtins::builtin_function_by_name("realsqrt").expect("realsqrt");
+    let realsqrt = runmat_builtins::builtin_catalog_entry_by_name("realsqrt").expect("realsqrt");
     assert_eq!(
         realsqrt.integer_capabilities[0].inputs[0].availability,
         BuiltinIntegerInputAvailability::Rejected

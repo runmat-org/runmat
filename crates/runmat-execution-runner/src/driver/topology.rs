@@ -1,5 +1,7 @@
 use runmat_execution::identity::WorkerId;
+use runmat_execution::state::PoolState;
 use runmat_execution::state::TaskState;
+use runmat_execution::PoolId;
 
 use crate::pool::{WorkerLifecycle, WorkerRecord, WorkerSpec};
 use crate::port::BackendReport;
@@ -7,12 +9,130 @@ use crate::task::{AttemptReport, TaskRecord, TaskSubmission};
 use crate::{RunnerError, RunnerResult};
 
 use super::state::attempt_state_is_terminal;
-use super::{Driver, DriverAction, DriverEventKind};
+use super::{Driver, DriverAction, DriverCommand, DriverEventKind};
+use crate::pool::ResizeRequest;
 
 impl Driver {
+    /// Borrow the current scheduler-owned pool while the caller holds driver authority.
+    /// Inspection does not copy task histories or authorize a provider launch.
+    pub fn pool_record(
+        &self,
+        pool_id: runmat_execution::PoolId,
+    ) -> RunnerResult<&crate::pool::PoolRecord> {
+        self.snapshot
+            .pools
+            .get(&pool_id)
+            .ok_or(RunnerError::UnknownPool(pool_id))
+    }
+
+    /// Reconciles a pool whose complete worker inventory is already registered.
+    ///
+    /// Process-local and browser hosts use stable logical workers whose backing
+    /// execution contexts are created on demand. Resizing those pools changes
+    /// which registered workers may accept new attempts; it does not provision
+    /// infrastructure. Remote hosts consume `DriverAction::ResizePool` instead.
+    pub fn resize_registered_pool(
+        &mut self,
+        pool_id: PoolId,
+        desired_workers: u32,
+    ) -> RunnerResult<Vec<DriverAction>> {
+        let resize_actions = self.handle(DriverCommand::ResizePool {
+            pool_id,
+            request: ResizeRequest { desired_workers },
+        })?;
+        let requested_resize = resize_actions.iter().any(|action| {
+            matches!(
+                action,
+                DriverAction::ResizePool {
+                    pool_id: action_pool,
+                    desired_workers: action_workers,
+                } if *action_pool == pool_id && *action_workers == desired_workers
+            )
+        });
+        if !requested_resize {
+            return Ok(resize_actions);
+        }
+
+        let pool = self
+            .snapshot
+            .pools
+            .get(&pool_id)
+            .ok_or(RunnerError::UnknownPool(pool_id))?;
+        let ready = pool
+            .workers
+            .values()
+            .filter(|worker| worker.accepts_work())
+            .map(|worker| worker.spec.id)
+            .collect::<Vec<_>>();
+        let ready_count = u32::try_from(ready.len())
+            .map_err(|_| RunnerError::Invalid("pool worker count exceeds u32".into()))?;
+        let mut actions = Vec::new();
+        if desired_workers < ready_count {
+            let count = usize::try_from(ready_count - desired_workers)
+                .map_err(|_| RunnerError::Invalid("pool resize count exceeds usize".into()))?;
+            for worker_id in ready.into_iter().rev().take(count) {
+                actions.extend(self.handle(DriverCommand::DrainWorker(worker_id))?);
+            }
+        } else if desired_workers > ready_count {
+            let count = usize::try_from(desired_workers - ready_count)
+                .map_err(|_| RunnerError::Invalid("pool resize count exceeds usize".into()))?;
+            let candidates = pool
+                .workers
+                .values()
+                .filter(|worker| {
+                    matches!(
+                        worker.lifecycle,
+                        WorkerLifecycle::Draining | WorkerLifecycle::Stopped
+                    )
+                })
+                .map(|worker| worker.spec.id)
+                .take(count)
+                .collect::<Vec<_>>();
+            if candidates.len() != count {
+                return Err(RunnerError::Invalid(format!(
+                    "pool {pool_id} does not have enough registered workers to reach {desired_workers}"
+                )));
+            }
+            for worker_id in candidates {
+                actions.extend(self.handle(DriverCommand::ActivateWorker(worker_id))?);
+            }
+        }
+        actions.extend(self.handle(DriverCommand::SetPoolState {
+            pool_id,
+            state: PoolState::Ready,
+        })?);
+        Ok(actions)
+    }
+
     pub(super) fn register_worker(&mut self, spec: WorkerSpec) -> RunnerResult<()> {
+        spec.host.validate().map_err(|error| {
+            RunnerError::Invalid(format!("worker host inventory is invalid: {error}"))
+        })?;
         let pool = self.pool_mut(spec.pool_id)?;
-        if pool.workers.len() >= pool.spec.max_workers as usize {
+        if let Some(existing) = pool.workers.get(&spec.id) {
+            if existing.lifecycle == WorkerLifecycle::Lost
+                && existing.active_attempts == 0
+                && existing.spec == spec
+            {
+                let worker_id = spec.id;
+                let pool_id = spec.pool_id;
+                pool.workers.insert(worker_id, WorkerRecord::new(spec));
+                self.emit(DriverEventKind::WorkerRegistered { worker_id, pool_id });
+                return Ok(());
+            }
+        }
+        let live_worker_count = pool
+            .workers
+            .values()
+            .filter(|worker| {
+                worker.active_attempts > 0
+                    || !matches!(
+                        worker.lifecycle,
+                        WorkerLifecycle::Lost | WorkerLifecycle::Stopped
+                    )
+            })
+            .count();
+        if live_worker_count >= pool.spec.max_workers as usize {
             return Err(RunnerError::Invalid(format!(
                 "pool {} is at its worker limit",
                 spec.pool_id
@@ -31,8 +151,37 @@ impl Driver {
         Ok(())
     }
 
+    pub(super) fn activate_worker(&mut self, worker_id: WorkerId) -> RunnerResult<()> {
+        if self.snapshot.attempts.values().any(|attempt| {
+            attempt.request.worker_id == worker_id
+                && attempt
+                    .unverified_retirement
+                    .as_ref()
+                    .is_some_and(|evidence| evidence.retired_at_driver_millis.is_none())
+        }) {
+            return Err(RunnerError::Invalid(
+                "worker still owns an unresolved physical attempt".into(),
+            ));
+        }
+        let worker = self.worker_mut(worker_id)?;
+        if worker.lifecycle == WorkerLifecycle::Lost {
+            return Err(RunnerError::Invalid(format!(
+                "lost worker {worker_id} cannot be activated"
+            )));
+        }
+        worker.lifecycle = WorkerLifecycle::Ready;
+        self.emit(DriverEventKind::WorkerActivated { worker_id });
+        Ok(())
+    }
+
     pub(super) fn drain_worker(&mut self, worker_id: WorkerId) -> RunnerResult<()> {
-        self.worker_mut(worker_id)?.lifecycle = WorkerLifecycle::Draining;
+        let worker = self.worker_mut(worker_id)?;
+        if worker.lifecycle == WorkerLifecycle::Lost {
+            return Err(RunnerError::Invalid(
+                "lost worker cannot be unfenced by draining".into(),
+            ));
+        }
+        worker.lifecycle = WorkerLifecycle::Draining;
         self.emit(DriverEventKind::WorkerDraining { worker_id });
         Ok(())
     }
@@ -44,6 +193,37 @@ impl Driver {
     ) -> RunnerResult<()> {
         self.worker_mut(worker_id)?.lifecycle = WorkerLifecycle::Lost;
         self.emit(DriverEventKind::WorkerLost { worker_id });
+        self.close_lost_worker_attempts(worker_id, actions)
+    }
+
+    pub(super) fn worker_lost_with_report(
+        &mut self,
+        worker_id: WorkerId,
+        report: BackendReport,
+        actions: &mut Vec<DriverAction>,
+    ) -> RunnerResult<()> {
+        if report.worker_id != worker_id || !matches!(report.report, AttemptReport::Lost { .. }) {
+            return Err(RunnerError::Invalid(
+                "worker loss requires its original provider loss report".into(),
+            ));
+        }
+        // Validate the triggering attempt before changing worker authority. A
+        // stale, foreign or malformed report cannot fence unrelated live work.
+        if let Some(reason) = self.backend_report_rejection_reason(&report) {
+            self.discard_backend_report(report, reason, actions);
+            return Ok(());
+        }
+        self.worker_mut(worker_id)?.lifecycle = WorkerLifecycle::Lost;
+        self.emit(DriverEventKind::WorkerLost { worker_id });
+        self.apply_backend_report(report, actions)?;
+        self.close_lost_worker_attempts(worker_id, actions)
+    }
+
+    fn close_lost_worker_attempts(
+        &mut self,
+        worker_id: WorkerId,
+        actions: &mut Vec<DriverAction>,
+    ) -> RunnerResult<()> {
         let reports = self
             .snapshot
             .attempts
@@ -67,9 +247,34 @@ impl Driver {
     }
 
     pub(super) fn submit(&mut self, submission: TaskSubmission) -> RunnerResult<()> {
+        submission.retry_resource_envelope()?;
+        submission.request.validate_executable().map_err(|error| {
+            RunnerError::Invalid(format!("task executable identity is invalid: {error}"))
+        })?;
         submission.request.resources.validate().map_err(|error| {
             RunnerError::Invalid(format!("task resource request is invalid: {error}"))
         })?;
+        submission.request.host.validate().map_err(|error| {
+            RunnerError::Invalid(format!("task host requirement is invalid: {error}"))
+        })?;
+        let value_limits = match &submission.request.executable {
+            runmat_execution::TaskExecutableIdentity::ProgramArtifact(_) => {
+                runmat_execution::value::ValueLimits::default()
+            }
+            runmat_execution::TaskExecutableIdentity::OwnedBuiltin(_) => {
+                runmat_execution::OWNED_BUILTIN_VALUE_LIMITS
+            }
+        };
+        for input in &submission.request.inputs {
+            input
+                .validate_for_transport(
+                    value_limits,
+                    runmat_execution::value::ValueTransportContext::Portable,
+                )
+                .map_err(|error| {
+                    RunnerError::Invalid(format!("task input is not portable: {error}"))
+                })?;
+        }
         if !self
             .snapshot
             .cancellation
@@ -94,14 +299,67 @@ impl Driver {
             .pools
             .get(&submission.request.pool_id)
             .ok_or(RunnerError::UnknownPool(submission.request.pool_id))?;
-        if !crate::scheduler::fits(
+        if !crate::scheduler::scalar_resources_fit(
             &pool.spec.resource_limit,
             &Default::default(),
             &submission.request.resources,
-        ) {
-            return Err(RunnerError::Invalid(
-                "task resource request cannot be satisfied by the target pool".into(),
-            ));
+        ) || (!pool.workers.is_empty()
+            && !pool.workers.values().any(|worker| {
+                submission
+                    .request
+                    .host
+                    .is_satisfied_by(&worker.spec.host)
+                    .is_ok()
+                    && crate::scheduler::fits(
+                        &worker.spec.resources,
+                        &Default::default(),
+                        &submission.request.resources,
+                    )
+            }))
+        {
+            let request = &submission.request.resources;
+            let limit = &pool.spec.resource_limit;
+            let missing_capabilities = request
+                .required_capabilities
+                .difference(&limit.capabilities)
+                .collect::<Vec<_>>();
+            let workers = pool
+                .workers
+                .values()
+                .map(|worker| {
+                    let host = submission.request.host.is_satisfied_by(&worker.spec.host);
+                    format!(
+                        "worker {} millicores, {} memory bytes, {} scratch bytes, host {}, missing capabilities {:?}",
+                        worker.spec.resources.cpu_millicores,
+                        worker.spec.resources.memory_bytes,
+                        worker.spec.resources.scratch_bytes,
+                        match &host {
+                            Ok(()) => "satisfied".to_owned(),
+                            Err(reason) => format!("unsatisfied ({reason:?})"),
+                        },
+                        request
+                            .required_capabilities
+                            .difference(&worker.spec.resources.capabilities)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .take(2)
+                .collect::<Vec<_>>();
+            return Err(RunnerError::PoolCapacity(Box::new(
+                crate::error::PoolCapacityRefusal {
+                    requested_cpu_millicores: request.cpu_millicores,
+                    requested_memory_bytes: request.memory_bytes,
+                    requested_scratch_bytes: request.scratch_bytes,
+                    pool_cpu_millicores: limit.cpu_millicores,
+                    pool_memory_bytes: limit.memory_bytes,
+                    pool_scratch_bytes: limit.scratch_bytes,
+                    missing_capabilities: missing_capabilities
+                        .iter()
+                        .map(|capability| format!("{capability:?}"))
+                        .collect(),
+                    workers,
+                },
+            )));
         }
         if self.snapshot.tasks.contains_key(&submission.request.id) {
             return Err(RunnerError::Invalid(format!(
@@ -114,20 +372,109 @@ impl Driver {
                 return Err(RunnerError::UnknownTask(*dependency));
             }
         }
+        let dependency_state = submission
+            .dependencies
+            .iter()
+            .filter_map(|dependency| self.snapshot.tasks.get(dependency).map(|task| task.state))
+            .fold(None, merge_dependency_terminal_state);
+        let dependencies_succeeded = !submission.dependencies.is_empty()
+            && submission
+                .dependencies
+                .iter()
+                .all(|dependency| self.snapshot.tasks[dependency].state == TaskState::Succeeded);
         let task_id = submission.request.id;
         self.snapshot
             .graph
             .insert(task_id, submission.dependencies.clone())?;
-        let record = TaskRecord::new(submission, self.snapshot.next_event_sequence);
+        let mut record = TaskRecord::new(submission, self.snapshot.next_event_sequence);
+        if let Some(state) = dependency_state {
+            record.state = state;
+            record.active_attempt = None;
+            if state == TaskState::Indeterminate {
+                record.indeterminate_dependency = record
+                    .submission
+                    .dependencies
+                    .iter()
+                    .find(|id| self.snapshot.tasks[id].state == TaskState::Indeterminate)
+                    .copied();
+            }
+            if state == TaskState::Cancelled {
+                let dependency = record
+                    .submission
+                    .dependencies
+                    .iter()
+                    .find(|id| self.snapshot.tasks[id].state == TaskState::Cancelled)
+                    .expect("merged cancellation has an original cancelled dependency");
+                record.cancellation = Some(crate::TaskCancellation {
+                    cause: crate::TaskCancellationCause::Dependency {
+                        task_id: *dependency,
+                    },
+                    requested_at_driver_millis: self.snapshot.now_millis,
+                });
+            }
+        } else if dependencies_succeeded {
+            record.state = TaskState::Ready;
+        }
         let state = record.state;
         if state == TaskState::Ready {
             self.enqueue(&record);
         }
-        self.snapshot
-            .deadlines
-            .insert(task_id, record.submission.request.deadline_unix_millis);
+        if !matches!(
+            state,
+            TaskState::Succeeded
+                | TaskState::Failed
+                | TaskState::Cancelled
+                | TaskState::Indeterminate
+        ) {
+            self.snapshot
+                .deadlines
+                .insert(task_id, record.submission.request.deadline_unix_millis);
+        }
         self.snapshot.tasks.insert(task_id, record);
         self.emit(DriverEventKind::TaskSubmitted { task_id, state });
         Ok(())
+    }
+
+    pub(super) fn submit_batch(&mut self, submissions: Vec<TaskSubmission>) -> RunnerResult<()> {
+        if submissions.is_empty() {
+            return Err(RunnerError::Invalid(
+                "task submission batch must not be empty".into(),
+            ));
+        }
+        let mut staged = Driver::from_snapshot(self.snapshot.clone())?;
+        for submission in submissions {
+            staged.submit(submission)?;
+        }
+        self.snapshot = staged.snapshot;
+        Ok(())
+    }
+}
+
+fn merge_dependency_terminal_state(
+    current: Option<TaskState>,
+    candidate: TaskState,
+) -> Option<TaskState> {
+    let candidate_rank = dependency_terminal_rank(candidate)?;
+    match current {
+        Some(current)
+            if dependency_terminal_rank(current).unwrap_or_default() >= candidate_rank =>
+        {
+            Some(current)
+        }
+        _ => Some(candidate),
+    }
+}
+
+const fn dependency_terminal_rank(state: TaskState) -> Option<u8> {
+    match state {
+        TaskState::Cancelled => Some(1),
+        TaskState::Failed => Some(2),
+        TaskState::Indeterminate => Some(3),
+        TaskState::Deferred
+        | TaskState::Ready
+        | TaskState::Assigned
+        | TaskState::Running
+        | TaskState::Committing
+        | TaskState::Succeeded => None,
     }
 }

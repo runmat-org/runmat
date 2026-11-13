@@ -3,38 +3,82 @@
 //! This module provides language-compatible matrix concatenation operations.
 //! Supports both horizontal concatenation [A, B] and vertical concatenation [A; B].
 
-use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
+use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
 use runmat_value::{
-    CharArray, IntValue, NumericDType, NumericScalar, NumericStorage, SymbolicArray, SymbolicExpr,
-    Tensor, Value,
+    decode_utf16_code_units, CharArray, IntValue, NumericDType, NumericScalar, NumericStorage,
+    Tensor, Utf16CodeUnit, Value,
 };
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+#[path = "concatenation/host_matrix.rs"]
+mod host_matrix;
+pub(crate) mod symbolic;
+pub use host_matrix::{create_host_matrix_from_values, host_matrix_can_run_inline};
 
 fn concat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
 }
 
-/// Converts an f64 code point to a 1x1 `CharArray`.
+fn concat_utf16_error(context: &str, error: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{context}: {error}"))
+        .with_source(error)
+        .build()
+}
+
+/// A language-level matrix literal whose already-evaluated numeric rows have
+/// incompatible widths. This is not a provider, allocation, or callee error.
+#[derive(Debug)]
+pub struct MatrixConstructionShapeError {
+    expected_columns: usize,
+    actual_columns: usize,
+}
+
+impl std::fmt::Display for MatrixConstructionShapeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "matrix literal row widths differ: {} vs {}",
+            self.expected_columns, self.actual_columns
+        )
+    }
+}
+
+impl std::error::Error for MatrixConstructionShapeError {}
+
+fn numeric_matrix_columns(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(value) => Some(value.cols()),
+        Value::ComplexTensor(value) => Some(value.cols()),
+        Value::LogicalArray(value) => Some(*value.shape.get(1).unwrap_or(&1)),
+        Value::Num(_) | Value::Int(_) | Value::Complex(_, _) | Value::Bool(_) => Some(1),
+        _ => None,
+    }
+}
+
+/// Converts an f64 character code unit to a 1x1 `CharArray`.
 ///
-/// Validates that the value is a finite integer in the valid Unicode code point range,
-/// then constructs a single-character array. The `error_prefix` is prepended to error
+/// Validates that the value is a finite integer in the physical UTF-16 range,
+/// then constructs a single-code-unit array. The `error_prefix` is prepended to error
 /// messages (e.g., "cat" or "char concat").
 pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> BuiltinResult<CharArray> {
+    let unit = char_from_f64_code_unit(value, error_prefix)?;
+    CharArray::from_code_units(vec![unit], 1, 1).map_err(concat_error)
+}
+
+/// The same code-unit validation without allocating a character array.
+pub fn char_from_f64_code_unit(value: f64, error_prefix: &str) -> BuiltinResult<Utf16CodeUnit> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(concat_error(format!(
-            "{error_prefix}: expected integer code point"
+            "{error_prefix}: expected integer character code unit"
         )));
     }
-    if value < 0.0 || value > u32::MAX as f64 {
+    if value < 0.0 || value > u16::MAX as f64 {
         return Err(concat_error(format!(
-            "{error_prefix}: code point out of range"
+            "{error_prefix}: character code unit out of range"
         )));
     }
-    let code = value as u32;
-    let ch = char::from_u32(code)
-        .ok_or_else(|| concat_error(format!("{error_prefix}: invalid code point")))?;
-    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+    Ok(Utf16CodeUnit::from_raw(value as u16))
 }
 
 fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
@@ -47,279 +91,19 @@ fn has_symbolic_operand(values: &[Value]) -> bool {
         .any(|value| matches!(value, Value::Symbolic(_) | Value::SymbolicArray(_)))
 }
 
-fn numeric_scalar_to_symbolic(value: &Value) -> Option<SymbolicExpr> {
-    match value {
-        Value::Symbolic(expr) => Some(expr.clone()),
-        Value::Num(n) => Some(SymbolicExpr::constant(*n)),
-        Value::Int(i) => Some(SymbolicExpr::constant(i.to_f64())),
-        Value::Bool(flag) => Some(SymbolicExpr::constant(if *flag { 1.0 } else { 0.0 })),
-        _ => None,
-    }
-}
-
-fn normalize_symbolic_concat_shape(shape: &[usize]) -> Vec<usize> {
-    if shape.len() == 1 && shape[0] != 1 {
-        vec![1, shape[0]]
-    } else if crate::builtins::common::shape::is_scalar_shape(shape) {
-        vec![1, 1]
-    } else {
-        shape.to_vec()
-    }
-}
-
-#[derive(Clone)]
-struct SymbolicConcatBlock {
-    data: Vec<SymbolicExpr>,
-    shape: Vec<usize>,
-}
-
-impl SymbolicConcatBlock {
-    fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> BuiltinResult<Self> {
-        let expected_len = checked_shape_len(&shape)?;
-        if data.len() != expected_len {
-            return Err(concat_error(format!(
-                "Symbolic array data length {} does not match shape {:?} (expected {} elements)",
-                data.len(),
-                shape,
-                expected_len
-            )));
-        }
-        Ok(Self { data, shape })
-    }
-
-    fn rows(&self) -> usize {
-        self.shape[0]
-    }
-
-    fn cols(&self) -> usize {
-        self.shape[1]
-    }
-}
-
-fn checked_shape_len(shape: &[usize]) -> BuiltinResult<usize> {
-    shape.iter().try_fold(1usize, |acc, dim| {
-        acc.checked_mul(*dim)
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
-    })
-}
-
-fn dim_or_one(shape: &[usize], dim: usize) -> usize {
-    shape.get(dim).copied().unwrap_or(1)
-}
-
-fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicConcatBlock>> {
-    match value {
-        Value::SymbolicArray(array) => {
-            let shape = normalize_symbolic_concat_shape(&array.shape);
-            if shape[0] == 0 && shape[1] == 0 {
-                return Ok(None);
-            }
-            SymbolicConcatBlock::new(array.data.clone(), shape).map(Some)
-        }
-        Value::Tensor(tensor) => {
-            let shape = normalize_symbolic_concat_shape(&tensor.shape);
-            if shape[0] == 0 && shape[1] == 0 {
-                return Ok(None);
-            }
-            let data = tensor
-                .materialize_f64()
-                .iter()
-                .map(|value| SymbolicExpr::constant(*value))
-                .collect();
-            SymbolicConcatBlock::new(data, shape).map(Some)
-        }
-        Value::LogicalArray(array) => {
-            let shape = normalize_symbolic_concat_shape(&array.shape);
-            if shape[0] == 0 && shape[1] == 0 {
-                return Ok(None);
-            }
-            let data = array
-                .data
-                .iter()
-                .map(|value| SymbolicExpr::constant(if *value == 0 { 0.0 } else { 1.0 }))
-                .collect();
-            SymbolicConcatBlock::new(data, shape).map(Some)
-        }
-        _ => {
-            if let Some(expr) = numeric_scalar_to_symbolic(value) {
-                SymbolicConcatBlock::new(vec![expr], vec![1, 1]).map(Some)
-            } else {
-                Err(concat_error(format!(
-                    "Cannot concatenate value of type {value:?} with symbolic array"
-                )))
-            }
-        }
-    }
-}
-
-fn hcat_symbolic_values(values: &[Value]) -> BuiltinResult<Value> {
-    let mut blocks = Vec::new();
-
-    for value in values {
-        let Some(block) = symbolic_block_from_value(value)? else {
-            continue;
-        };
-        blocks.push(block);
-    }
-
-    if blocks.is_empty() {
-        return SymbolicArray::new(Vec::new(), vec![0, 0])
-            .map(Value::SymbolicArray)
-            .map_err(concat_error);
-    }
-
-    let rank = blocks
-        .iter()
-        .map(|block| block.shape.len())
-        .max()
-        .unwrap_or(2)
-        .max(2);
-    let rows = dim_or_one(&blocks[0].shape, 0);
-    let mut cols_total = 0usize;
-    let mut output_shape = vec![1; rank];
-    output_shape[0] = rows;
-    for dim in 2..rank {
-        output_shape[dim] = dim_or_one(&blocks[0].shape, dim);
-    }
-
-    for block in &blocks {
-        if dim_or_one(&block.shape, 0) != rows {
-            return Err(concat_error(format!(
-                "Cannot horizontally concatenate symbolic arrays with different row counts: {} vs {}",
-                rows,
-                block.rows()
-            )));
-        }
-        for (dim, expected) in output_shape.iter().enumerate().skip(2) {
-            let actual = dim_or_one(&block.shape, dim);
-            if actual != *expected {
-                return Err(concat_error(format!(
-                    "Cannot horizontally concatenate symbolic arrays with different dimension {} sizes: {} vs {}",
-                    dim + 1,
-                    expected,
-                    actual
-                )));
-            }
-        }
-        cols_total = cols_total
-            .checked_add(block.cols())
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
-    }
-    output_shape[1] = cols_total;
-
-    let output_len = checked_shape_len(&output_shape)?;
-    let tail_len = output_shape.iter().skip(2).try_fold(1usize, |acc, dim| {
-        acc.checked_mul(*dim)
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
-    })?;
-    let mut data = Vec::with_capacity(output_len);
-    for tail in 0..tail_len {
-        for block in &blocks {
-            let block_plane_len = block.rows() * block.cols();
-            let block_tail_offset = tail * block_plane_len;
-            for c in 0..block.cols() {
-                for r in 0..rows {
-                    data.push(block.data[block_tail_offset + r + c * block.rows()].clone());
-                }
-            }
-        }
-    }
-    SymbolicArray::new(data, output_shape)
-        .map(Value::SymbolicArray)
-        .map_err(concat_error)
-}
-
-fn vcat_symbolic_values(values: &[Value]) -> BuiltinResult<Value> {
-    let mut blocks = Vec::new();
-
-    for value in values {
-        let Some(block) = symbolic_block_from_value(value)? else {
-            continue;
-        };
-        blocks.push(block);
-    }
-
-    if blocks.is_empty() {
-        return SymbolicArray::new(Vec::new(), vec![0, 0])
-            .map(Value::SymbolicArray)
-            .map_err(concat_error);
-    }
-
-    let rank = blocks
-        .iter()
-        .map(|block| block.shape.len())
-        .max()
-        .unwrap_or(2)
-        .max(2);
-    let cols = dim_or_one(&blocks[0].shape, 1);
-    let mut rows_total = 0usize;
-    let mut output_shape = vec![1; rank];
-    output_shape[1] = cols;
-    for dim in 2..rank {
-        output_shape[dim] = dim_or_one(&blocks[0].shape, dim);
-    }
-
-    for block in &blocks {
-        if dim_or_one(&block.shape, 1) != cols {
-            return Err(concat_error(format!(
-                "Cannot vertically concatenate symbolic arrays with different column counts: {} vs {}",
-                cols,
-                block.cols()
-            )));
-        }
-        for (dim, expected) in output_shape.iter().enumerate().skip(2) {
-            let actual = dim_or_one(&block.shape, dim);
-            if actual != *expected {
-                return Err(concat_error(format!(
-                    "Cannot vertically concatenate symbolic arrays with different dimension {} sizes: {} vs {}",
-                    dim + 1,
-                    expected,
-                    actual
-                )));
-            }
-        }
-        rows_total = rows_total
-            .checked_add(block.rows())
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))?;
-    }
-    output_shape[0] = rows_total;
-
-    let output_len = checked_shape_len(&output_shape)?;
-    let tail_len = output_shape.iter().skip(2).try_fold(1usize, |acc, dim| {
-        acc.checked_mul(*dim)
-            .ok_or_else(|| concat_error("Symbolic array dimensions overflow"))
-    })?;
-    let mut data = Vec::with_capacity(output_len);
-    for tail in 0..tail_len {
-        for c in 0..cols {
-            for block in &blocks {
-                let block_plane_len = block.rows() * block.cols();
-                let block_tail_offset = tail * block_plane_len;
-                for r in 0..block.rows() {
-                    data.push(block.data[block_tail_offset + r + c * block.rows()].clone());
-                }
-            }
-        }
-    }
-    SymbolicArray::new(data, output_shape)
-        .map(Value::SymbolicArray)
-        .map_err(concat_error)
-}
-
 fn char_array_from_int(value: &IntValue) -> BuiltinResult<CharArray> {
     let code = match value {
-        IntValue::I8(value) => u32::try_from(*value),
-        IntValue::I16(value) => u32::try_from(*value),
-        IntValue::I32(value) => u32::try_from(*value),
-        IntValue::I64(value) => u32::try_from(*value),
-        IntValue::U8(value) => Ok(u32::from(*value)),
-        IntValue::U16(value) => Ok(u32::from(*value)),
-        IntValue::U32(value) => Ok(*value),
-        IntValue::U64(value) => u32::try_from(*value),
+        IntValue::I8(value) => u16::try_from(*value),
+        IntValue::I16(value) => u16::try_from(*value),
+        IntValue::I32(value) => u16::try_from(*value),
+        IntValue::I64(value) => u16::try_from(*value),
+        IntValue::U8(value) => Ok(u16::from(*value)),
+        IntValue::U16(value) => Ok(*value),
+        IntValue::U32(value) => u16::try_from(*value),
+        IntValue::U64(value) => u16::try_from(*value),
     };
-    let code = code.map_err(|_| concat_error("char concat: code point out of range"))?;
-    let ch = char::from_u32(code).ok_or_else(|| concat_error("char concat: invalid code point"))?;
-    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+    let code = code.map_err(|_| concat_error("char concat: character code unit out of range"))?;
+    CharArray::from_code_units(vec![Utf16CodeUnit::from_raw(code)], 1, 1).map_err(concat_error)
 }
 
 /// Horizontally concatenate two matrices [A, B]
@@ -335,7 +119,8 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     if a.rows() != b.rows() {
         return Err(concat_error(format!(
             "Cannot horizontally concatenate matrices with different row counts: {} vs {}",
-            a.rows, b.rows
+            a.rows(),
+            b.rows()
         )));
     }
 
@@ -378,7 +163,8 @@ pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     if a.cols() != b.cols() {
         return Err(concat_error(format!(
             "Cannot vertically concatenate matrices with different column counts: {} vs {}",
-            a.cols, b.cols
+            a.cols(),
+            b.cols()
         )));
     }
 
@@ -505,13 +291,13 @@ fn vcat_integer_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     Tensor::new_integer(target.storage(values), vec![new_rows, new_cols]).map_err(concat_error)
 }
 
-fn leftmost_tensor_integer_target(a: &Tensor, b: &Tensor) -> Option<IntegerTarget> {
+fn leftmost_tensor_integer_target(a: &Tensor, b: &Tensor) -> Option<IntegerClass> {
     a.integer_storage()
-        .map(IntegerTarget::from_storage)
-        .or_else(|| b.integer_storage().map(IntegerTarget::from_storage))
+        .map(IntegerClass::from_storage)
+        .or_else(|| b.integer_storage().map(IntegerClass::from_storage))
 }
 
-fn integer_value_at(target: IntegerTarget, tensor: &Tensor, index: usize) -> IntValue {
+fn integer_value_at(target: IntegerClass, tensor: &Tensor, index: usize) -> IntValue {
     match tensor.integer_storage() {
         Some(storage) => target.cast_int(
             &storage
@@ -556,7 +342,11 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::from_elements_unbounded(
+                        vec![s.clone()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
@@ -577,10 +367,14 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     }
                     let mut out: Vec<String> = Vec::with_capacity(ca.rows);
                     for r in 0..ca.rows {
-                        let mut s = String::with_capacity(ca.cols);
-                        for c in 0..ca.cols {
-                            s.push(ca.data[r * ca.cols + c]);
-                        }
+                        let start = r * ca.cols;
+                        let s = decode_utf16_code_units(&ca.data()[start..start + ca.cols])
+                            .map_err(|error| {
+                                concat_utf16_error(
+                                    "string hcat: character row is not valid UTF-16 text",
+                                    error,
+                                )
+                            })?;
                         out.push(s);
                     }
                     let sa = runmat_value::StringArray::new(out, vec![ca.rows, 1]).unwrap();
@@ -636,7 +430,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let rows = rows.unwrap_or(0);
-        let mut data: Vec<String> = Vec::with_capacity(rows * cols_total);
+        let mut data = Vec::with_capacity(rows * cols_total);
         for cacc in 0..cols_total {
             let _ = cacc;
         }
@@ -645,11 +439,11 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             for c in 0..block.cols() {
                 for r in 0..rows {
                     let idx = r + c * rows;
-                    data.push(block.data[idx].clone());
+                    data.push(block.data()[idx].clone());
                 }
             }
         }
-        let sa = runmat_value::StringArray::new(data, vec![rows, cols_total])
+        let sa = runmat_value::StringArray::from_elements_unbounded(data, vec![rows, cols_total])
             .map_err(|e| concat_error(format!("string hcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -710,21 +504,21 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let rows = rows.unwrap_or(0);
-        let mut data: Vec<char> = Vec::with_capacity(rows * cols_total);
+        let mut data: Vec<Utf16CodeUnit> = Vec::with_capacity(rows * cols_total);
         for r in 0..rows {
             for block in &blocks {
                 for c in 0..block.cols {
-                    data.push(block.data[r * block.cols + c]);
+                    data.push(block.data()[r * block.cols + c]);
                 }
             }
         }
-        let ca = CharArray::new(data, rows, cols_total)
+        let ca = CharArray::from_code_units(data, rows, cols_total)
             .map_err(|e| concat_error(format!("char hcat: {e}")))?;
         return Ok(Value::CharArray(ca));
     }
 
     if has_symbolic_operand(values) {
-        return hcat_symbolic_values(values);
+        return crate::builtins::array::shape::cat::symbolic::concatenate(1, values.iter());
     }
     if let Some(target) = leftmost_value_integer_target(values) {
         return hcat_integer_values(target, values);
@@ -842,7 +636,11 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::from_elements_unbounded(
+                        vec![s.clone()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
                     rows_total += 1;
                     if cols.is_none() {
                         cols = Some(1);
@@ -855,7 +653,12 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     if ca.cols == 0 {
                         continue;
                     }
-                    let out: String = ca.data.iter().collect();
+                    let out = decode_utf16_code_units(ca.data()).map_err(|error| {
+                        concat_utf16_error(
+                            "string vcat: character value is not valid UTF-16 text",
+                            error,
+                        )
+                    })?;
                     let sa = runmat_value::StringArray::new(vec![out], vec![1, 1]).unwrap();
                     rows_total += 1;
                     if cols.is_none() {
@@ -909,17 +712,17 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let cols = cols.unwrap_or(0);
-        let mut data: Vec<String> = Vec::with_capacity(rows_total * cols);
-        // Stack rows: copy columns for each block into data
-        for block in &blocks {
-            for c in 0..cols {
+        let mut data = Vec::with_capacity(rows_total * cols);
+        // Each output column contains that column from every stacked block.
+        for c in 0..cols {
+            for block in &blocks {
                 for r in 0..block.rows() {
                     let idx = r + c * block.rows();
-                    data.push(block.data[idx].clone());
+                    data.push(block.data()[idx].clone());
                 }
             }
         }
-        let sa = runmat_value::StringArray::new(data, vec![rows_total, cols])
+        let sa = runmat_value::StringArray::from_elements_unbounded(data, vec![rows_total, cols])
             .map_err(|e| concat_error(format!("string vcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -980,21 +783,21 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let cols = cols.unwrap_or(0);
-        let mut data: Vec<char> = Vec::with_capacity(rows_total * cols);
+        let mut data: Vec<Utf16CodeUnit> = Vec::with_capacity(rows_total * cols);
         for block in &blocks {
             for r in 0..block.rows {
                 for c in 0..cols {
-                    data.push(block.data[r * block.cols + c]);
+                    data.push(block.data()[r * block.cols + c]);
                 }
             }
         }
-        let ca = CharArray::new(data, rows_total, cols)
+        let ca = CharArray::from_code_units(data, rows_total, cols)
             .map_err(|e| concat_error(format!("char vcat: {e}")))?;
         return Ok(Value::CharArray(ca));
     }
 
     if has_symbolic_operand(values) {
-        return vcat_symbolic_values(values);
+        return crate::builtins::array::shape::cat::symbolic::concatenate(0, values.iter());
     }
     if let Some(target) = leftmost_value_integer_target(values) {
         return vcat_integer_values(target, values);
@@ -1082,14 +885,14 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
     Ok(Value::Tensor(result))
 }
 
-fn leftmost_value_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+fn leftmost_value_integer_target(values: &[Value]) -> Option<IntegerClass> {
     let mut empty_target = None;
     for value in values {
         match value {
-            Value::Int(value) => return Some(IntegerTarget::from_int_value(value)),
+            Value::Int(value) => return Some(IntegerClass::from_int_value(value)),
             Value::Tensor(tensor) => {
                 if let Some(storage) = tensor.integer_storage() {
-                    let target = IntegerTarget::from_storage(storage);
+                    let target = IntegerClass::from_storage(storage);
                     if !(tensor.rows() == 0 && tensor.cols() == 0) {
                         return Some(target);
                     }
@@ -1102,7 +905,7 @@ fn leftmost_value_integer_target(values: &[Value]) -> Option<IntegerTarget> {
     empty_target
 }
 
-fn hcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult<Value> {
+fn hcat_integer_values(target: IntegerClass, values: &[Value]) -> BuiltinResult<Value> {
     let mut matrices = Vec::new();
     let mut rows = 0;
 
@@ -1136,7 +939,7 @@ fn hcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult
     Ok(Value::Tensor(result))
 }
 
-fn vcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult<Value> {
+fn vcat_integer_values(target: IntegerClass, values: &[Value]) -> BuiltinResult<Value> {
     let mut matrices = Vec::new();
     let mut cols = 0;
 
@@ -1170,7 +973,7 @@ fn vcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult
     Ok(Value::Tensor(result))
 }
 
-fn integer_matrix_from_value(target: IntegerTarget, value: &Value) -> BuiltinResult<Tensor> {
+fn integer_matrix_from_value(target: IntegerClass, value: &Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Int(value) => {
             Tensor::new_integer(target.storage(vec![target.cast_int(value)]), vec![1, 1])
@@ -1192,7 +995,8 @@ fn integer_matrix_from_value(target: IntegerTarget, value: &Value) -> BuiltinRes
                     })
                     .collect::<BuiltinResult<Vec<_>>>()?,
             };
-            Tensor::new_integer(target.storage(values), tensor.shape.clone()).map_err(concat_error)
+            Tensor::new_integer(target.storage(values), tensor.shape().to_vec())
+                .map_err(concat_error)
         }
         other => Err(concat_error(format!(
             "Cannot concatenate integer value with type {other:?}"
@@ -1202,39 +1006,107 @@ fn integer_matrix_from_value(target: IntegerTarget, value: &Value) -> BuiltinRes
 
 /// Create a matrix from a 2D array of Values with proper concatenation semantics
 /// This handles the case where matrix elements can be variables, not just literals
-pub async fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Value> {
+pub async fn create_matrix_from_values(
+    rows: &[Vec<Value>],
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _inputs_root =
+        crate::execution::RootedValueLease::for_values(rows.iter().flat_map(|row| row.iter()))
+            .map_err(|error| error.into_runtime_error())?;
     if rows.is_empty() {
-        return Ok(Value::Tensor(
+        return crate::execution::RootedValue::new(Value::Tensor(
             Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
-        ));
+        ))
+        .map_err(|error| error.into_runtime_error());
     }
 
     // Build each row using horzcat builtin to preserve canonical semantics
-    let mut row_matrices: Vec<Value> = Vec::with_capacity(rows.len());
+    let mut row_matrices = crate::execution::RootedValuesBuilder::with_capacity(rows.len());
     for row in rows {
         let row_value = if row.is_empty() {
-            Value::Tensor(Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?)
+            crate::execution::RootedValue::new(Value::Tensor(
+                Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
+            ))
+            .map_err(|error| error.into_runtime_error())?
         } else {
             crate::call_builtin_async("horzcat", row).await?
         };
-        row_matrices.push(row_value);
+        row_value
+            .with_owned(|value| row_matrices.push(value))
+            .map_err(|error| error.into_runtime_error())?;
     }
+    let row_matrices = row_matrices
+        .finish()
+        .map_err(|error| error.into_runtime_error())?;
+
+    validate_matrix_row_widths(row_matrices.values())?;
 
     // Stack rows using vertcat builtin
-    if row_matrices.is_empty() {
-        Ok(Value::Tensor(
-            Tensor::new(vec![], vec![0, 0]).map_err(concat_error)?,
-        ))
-    } else if row_matrices.len() == 1 {
-        Ok(row_matrices.into_iter().next().unwrap())
+    if row_matrices.len() == 1 {
+        row_matrices.with_owned_output_storage(|values| {
+            let value = values
+                .try_into_first()
+                .map_err(|_| {
+                    crate::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?
+                .expect("one row");
+            crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
+        })
     } else {
-        Ok(crate::call_builtin_async("vertcat", &row_matrices).await?)
+        crate::call_builtin_async("vertcat", row_matrices.values()).await
     }
+}
+
+/// The aggregate owns this structural check after its row expressions have
+/// completed. Numeric/logical geometry gets the matrix-literal diagnostic;
+/// another concatenation domain retains the selected callee's own error.
+pub(super) fn validate_matrix_row_widths(rows: &[Value]) -> BuiltinResult<()> {
+    let mut expected_columns = None;
+    for row in rows {
+        if matches!(row, Value::Tensor(value) if value.rows() == 0 && value.cols() == 0) {
+            continue;
+        }
+        let Some(columns) = numeric_matrix_columns(row) else {
+            break;
+        };
+        if let Some(expected) = expected_columns {
+            if columns != expected {
+                return Err(build_runtime_error(format!(
+                    "Cannot vertically concatenate matrices with different column counts: {expected} vs {columns}"
+                ))
+                .with_identifier("RunMat:MatrixConstruction:Shape")
+                .with_source(MatrixConstructionShapeError {
+                    expected_columns: expected,
+                    actual_columns: columns,
+                })
+                .build());
+            }
+        } else {
+            expected_columns = Some(columns);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_value::{SymbolicArray, SymbolicExpr};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn concatenation_errors_use_admitted_matrix_geometry() {
+        let vector = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+        let row = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        assert!(hcat_matrices(&vector, &row)
+            .unwrap_err()
+            .contains("row counts: 2 vs 1"));
+        assert!(vcat_matrices(&vector, &row)
+            .unwrap_err()
+            .contains("column counts: 1 vs 2"));
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -1298,7 +1170,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1332,7 +1204,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1357,7 +1229,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1382,7 +1254,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1407,7 +1279,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1436,7 +1308,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1461,7 +1333,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1492,7 +1364,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1533,7 +1405,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1594,7 +1466,7 @@ mod tests {
             assert_eq!(array.shape, vec![3, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1610,7 +1482,7 @@ mod tests {
         let single_row = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let double_row = Tensor::new(vec![3.25, 4.5], vec![1, 2]).unwrap();
         let vertical = vcat_matrices(&single_row, &double_row).unwrap();
-        assert_eq!(vertical.shape, vec![2, 2]);
+        assert_eq!(vertical.shape(), &[2, 2]);
         assert_eq!(
             vertical.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 3.25, 2.0, 4.5])
@@ -1619,7 +1491,7 @@ mod tests {
         let single_column = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let double_column = Tensor::new(vec![3.25, 4.5], vec![2, 1]).unwrap();
         let horizontal = hcat_matrices(&single_column, &double_column).unwrap();
-        assert_eq!(horizontal.shape, vec![2, 2]);
+        assert_eq!(horizontal.shape(), &[2, 2]);
         assert_eq!(
             horizontal.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 2.0, 3.25, 4.5])
@@ -1636,8 +1508,8 @@ mod tests {
         let Value::Tensor(vertical) = vcat_values(&[empty.clone(), empty]).unwrap() else {
             panic!("expected vertical empty tensor");
         };
-        assert_eq!(horizontal.shape, vec![0, 0]);
-        assert_eq!(vertical.shape, vec![0, 0]);
+        assert_eq!(horizontal.shape(), &[0, 0]);
+        assert_eq!(vertical.shape(), &[0, 0]);
         assert!(horizontal.is_empty());
         assert!(vertical.is_empty());
     }
@@ -1662,7 +1534,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1684,7 +1556,7 @@ mod tests {
         let right = Tensor::new(vec![3.5, 4.5], vec![2, 1]).expect("right double tensor");
 
         let horizontal = hcat_matrices(&left, &right).expect("integer hcat");
-        assert_eq!(horizontal.shape, vec![2, 2]);
+        assert_eq!(horizontal.shape(), &[2, 2]);
         assert_eq!(
             horizontal.integer_storage(),
             Some(&runmat_value::IntegerStorage::U64(vec![
@@ -1703,7 +1575,7 @@ mod tests {
         )
         .expect("bottom integer tensor");
         let vertical = vcat_matrices(&top, &bottom).expect("integer vcat");
-        assert_eq!(vertical.shape, vec![2, 2]);
+        assert_eq!(vertical.shape(), &[2, 2]);
         assert_eq!(
             vertical.integer_storage(),
             Some(&runmat_value::IntegerStorage::I8(vec![12, i8::MAX, -8, 2,]))
@@ -1740,7 +1612,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1763,7 +1635,7 @@ mod tests {
         let Value::Tensor(row) = row else {
             panic!("expected integer tensor row");
         };
-        assert_eq!(row.shape, vec![1, 3]);
+        assert_eq!(row.shape(), &[1, 3]);
         assert_eq!(
             row.integer_storage(),
             Some(&runmat_value::IntegerStorage::U64(vec![
@@ -1782,7 +1654,7 @@ mod tests {
         let Value::Tensor(column) = column else {
             panic!("expected integer tensor column");
         };
-        assert_eq!(column.shape, vec![3, 1]);
+        assert_eq!(column.shape(), &[3, 1]);
         assert_eq!(
             column.integer_storage(),
             Some(&runmat_value::IntegerStorage::I16(vec![
@@ -1803,7 +1675,7 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(row.shape, vec![0, 0]);
+        assert_eq!(row.shape(), &[0, 0]);
         assert_eq!(
             row.integer_storage(),
             Some(&runmat_value::IntegerStorage::U32(Vec::new()))
@@ -1813,7 +1685,7 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(column.shape, vec![0, 0]);
+        assert_eq!(column.shape(), &[0, 0]);
         assert_eq!(
             column.integer_storage(),
             Some(&runmat_value::IntegerStorage::U32(Vec::new()))
@@ -1826,19 +1698,48 @@ mod tests {
         let maximum = Value::Int(runmat_value::IntValue::U64(u64::MAX));
 
         let Value::StringArray(horizontal) =
-            hcat_values(&[Value::String("id".to_string()), maximum.clone()]).expect("hcat")
+            hcat_values(&[Value::string("id".to_string()), maximum.clone()]).expect("hcat")
         else {
             panic!("expected string array");
         };
         assert_eq!(horizontal.shape, vec![1, 2]);
-        assert_eq!(horizontal.data, vec!["id", "18446744073709551615"]);
+        assert_eq!(horizontal.data(), vec!["id", "18446744073709551615"]);
 
         let Value::StringArray(vertical) =
-            vcat_values(&[Value::String("id".to_string()), maximum]).expect("vcat")
+            vcat_values(&[Value::string("id".to_string()), maximum]).expect("vcat")
         else {
             panic!("expected string array");
         };
         assert_eq!(vertical.shape, vec![2, 1]);
-        assert_eq!(vertical.data, vec!["id", "18446744073709551615"]);
+        assert_eq!(vertical.data(), vec!["id", "18446744073709551615"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_vertical_concatenation_stacks_each_column() {
+        let top = runmat_value::StringArray::new(
+            ["a", "b", "c", "d"].into_iter().map(String::from).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        let bottom = runmat_value::StringArray::new(
+            ["e", "f", "g", "h"].into_iter().map(String::from).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        let Value::StringArray(output) =
+            vcat_values(&[Value::StringArray(top), Value::StringArray(bottom)]).unwrap()
+        else {
+            panic!("expected string array")
+        };
+        assert_eq!(output.shape.as_slice(), &[4, 2]);
+        assert_eq!(
+            output
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("present concatenated fixture"))
+                .collect::<Vec<_>>(),
+            ["a", "b", "e", "f", "c", "d", "g", "h"]
+        );
     }
 }

@@ -20,42 +20,47 @@ fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet10,
+        dimension: crate::MeshDimension::Solid,
         deterministic_seed: 7,
         algorithms: algorithms(),
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.01).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: vec![MetricContribution {
                 source: MetricSourceKind::Face,
                 scope: MetricContributionScope::Entity {
-                    entity_id: PersistentEntityId {
-                        kind: PersistentEntityKind::Face,
-                        source_topology_id: "face:17".into(),
-                        assembly_path: vec!["root".into(), "instance:2".into()],
-                    },
+                    entity_id: PersistentEntityId::new(
+                        PersistentEntityKind::Face,
+                        "face:17".into(),
+                        vec!["root".into(), "instance:2".into()],
+                    ),
                 },
                 metric: MetricTensor3::isotropic_length_m(0.002).unwrap(),
             }],
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {
@@ -64,21 +69,16 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 2_000_000,
             maximum_elements: 10_000_000,
-            maximum_memory_bytes: 8 * 1024 * 1024 * 1024,
-            maximum_scratch_bytes: 16 * 1024 * 1024 * 1024,
-            maximum_wall_time_ms: 3_600_000,
-            maximum_artifact_bytes: 32 * 1024 * 1024 * 1024,
-            maximum_search_work: 1_000_000_000,
             maximum_recursion_depth: 256,
-            maximum_iterations: 100_000_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 4096,
         },
+        size_controls: Vec::new(),
     }
 }
 
@@ -91,22 +91,19 @@ fn canonical_request_round_trips_and_rejects_unknown_fields() {
     assert_eq!(decoded, request);
 
     let mut value = serde_json::to_value(&request).unwrap();
-    value["backend"] = serde_json::json!("structured_grid_tetrahedron");
+    value["backend"] = serde_json::json!("removed");
     assert!(serde_json::from_value::<MeshingRequest>(value).is_err());
 }
 
 #[test]
 fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
     let mut invalid = request();
-    invalid.tolerance.source_tolerance_m = f64::NAN;
+    invalid.tolerance.source_tolerance_m = runmat_types::physical::Length::new(f64::NAN);
     assert_eq!(invalid.validate().unwrap_err().field, "source_tolerance_m");
 
     let mut invalid = request();
-    invalid.resources.maximum_search_work = 0;
-    assert_eq!(
-        invalid.validate().unwrap_err().field,
-        "meshing resource budget"
-    );
+    invalid.limits.maximum_nodes = 0;
+    assert_eq!(invalid.validate().unwrap_err().field, "meshing size limits");
 
     let mut invalid = request();
     invalid.quality.curve.minimum_metric_edge_length = 2.0;
@@ -116,11 +113,18 @@ fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
     );
 
     let mut invalid = request();
-    let entity_id = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "face:overflow".into(),
-        assembly_path: vec!["root".into()],
-    };
+    invalid.quality.surface.minimum_metric_edge_length = 1.01;
+    assert_eq!(
+        invalid.validate().unwrap_err().field,
+        "surface quality targets"
+    );
+
+    let mut invalid = request();
+    let entity_id = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "face:overflow".into(),
+        vec!["root".into()],
+    );
     invalid.metric.contributions = (0..=65_536)
         .map(|_| MetricContribution {
             source: MetricSourceKind::Face,
@@ -163,16 +167,16 @@ fn metric_requires_a_symmetric_positive_definite_tensor() {
 #[test]
 fn metric_contributions_are_typed_unique_and_canonical() {
     let mut metric = request().metric;
-    let curve_id = PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: "edge:1".into(),
-        assembly_path: vec!["root".into()],
-    };
-    let region_id = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "region:1".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let curve_id = PersistentEntityId::new(
+        PersistentEntityKind::Edge,
+        "edge:1".into(),
+        vec!["root".into()],
+    );
+    let region_id = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "region:1".into(),
+        vec!["root".into()],
+    );
     metric.contributions = vec![
         MetricContribution {
             source: MetricSourceKind::Region,
@@ -196,11 +200,11 @@ fn metric_contributions_are_typed_unique_and_canonical() {
 
     let mut wrong_region = metric.contributions[0].clone();
     wrong_region.scope = MetricContributionScope::Region {
-        region_id: PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "face:not-region".into(),
-            assembly_path: vec!["root".into()],
-        },
+        region_id: PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "face:not-region".into(),
+            vec!["root".into()],
+        ),
     };
     assert_eq!(
         wrong_region.validate().unwrap_err().field,
@@ -211,6 +215,10 @@ fn metric_contributions_are_typed_unique_and_canonical() {
 #[test]
 fn geometry_revision_and_persistent_identity_are_bounded() {
     GeometryRevisionRef {
+        source_unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+            runmat_geometry_core::LengthUnit::Meter,
+            "canonical solver fixture",
+        ),
         source_digest: digest(3),
         geometry_revision: 4,
         persistent_mapping_version: 2,
@@ -218,6 +226,10 @@ fn geometry_revision_and_persistent_identity_are_bounded() {
     .validate()
     .unwrap();
     assert!(GeometryRevisionRef {
+        source_unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+            runmat_geometry_core::LengthUnit::Meter,
+            "canonical solver fixture"
+        ),
         source_digest: StableDigest::ZERO,
         geometry_revision: 4,
         persistent_mapping_version: 2,
@@ -225,11 +237,7 @@ fn geometry_revision_and_persistent_identity_are_bounded() {
     .validate()
     .is_err());
 
-    let invalid = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: " face ".into(),
-        assembly_path: Vec::new(),
-    };
+    let invalid = PersistentEntityId::new(PersistentEntityKind::Face, " face ".into(), Vec::new());
     assert!(invalid.validate().is_err());
 }
 
@@ -240,13 +248,16 @@ fn typed_failure_round_trips_and_requires_canonical_diagnostics() {
         category: MeshingFailureCategory::QualityTargetUnreachable,
         stage: MeshingStageKind::Optimization,
         operation: MeshingOperation::Optimize,
-        entity_ids: vec![PersistentEntityId {
-            kind: PersistentEntityKind::Solid,
-            source_topology_id: "solid:1".into(),
-            assembly_path: vec!["root".into()],
-        }],
+        entity_ids: vec![PersistentEntityId::new(
+            PersistentEntityKind::Solid,
+            "solid:1".into(),
+            vec!["root".into()],
+        )],
         witnesses: vec![GeometricWitness::Point {
-            coordinates_m: [0.0, 1.0, 2.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0, 2.0]),
         }],
         request_values: vec![MeshingDiagnosticEntry {
             name: "minimum_scaled_jacobian".into(),
@@ -258,6 +269,7 @@ fn typed_failure_round_trips_and_requires_canonical_diagnostics() {
             value: MeshingDiagnosticValue::Scalar(0.02),
             unit: None,
         }],
+        accounting_error: None,
         remediation: "relax the quality target or resolve the named geometric feature".into(),
     };
     failure.validate().unwrap();

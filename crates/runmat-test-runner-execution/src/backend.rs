@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use runmat_time::Instant;
+
 use runmat_execution::identity::WorkerId;
 use runmat_execution::state::PoolState;
 use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId};
@@ -102,6 +104,7 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                     id: worker_id,
                     pool_id,
                     resources: self.config.worker_resources.clone(),
+                    host: crate::capability::host_inventory(&revision),
                 }))
                 .map_err(runner_error)?;
             Ok(ExecutionWorkerSession {
@@ -137,31 +140,43 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                 .active
                 .lock()
                 .expect("test attempt registry poisoned") = Some(launch.clone());
-            let execution = self.inner.execute(&session.inner, request).await;
+            let started = Instant::now();
+            let assignment = runmat_execution::ProgramExecutionAssignment {
+                scope_id: launch.scope_id,
+                pool_id: launch.task.pool_id,
+                task_id: launch.task_id,
+                attempt_id: launch.id,
+                worker_id: launch.worker_id,
+                backend: runmat_execution::PoolBackend::LocalProcesses,
+                resources: launch.resource_assignment.clone(),
+            };
+            let execution = self
+                .inner
+                .execute_admitted(
+                    &session.inner,
+                    request,
+                    assignment,
+                    launch.task.resources.clone(),
+                )
+                .await;
             let report = match &execution {
                 Ok(_) => AttemptReport::Succeeded {
-                    result: AttemptSuccess {
-                        outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
-                            runmat_execution::value::InlineValue::Null,
-                        ))],
-                        result_objects: Vec::new(),
-                    },
+                    result: metered_success(&launch, elapsed_millis(started)),
                 },
                 Err(error) => AttemptReport::Failed {
                     kind: failure_kind(error.kind),
                     message: error.to_string(),
                 },
             };
-            let active = session
+            let mut active = session
                 .active
                 .lock()
-                .expect("test attempt registry poisoned")
-                .take();
+                .expect("test attempt registry poisoned");
             // Cancellation may already have committed the terminal scheduler
             // report while the underlying backend was unwinding. In that
             // case the test-owned completion still returns to the coordinator,
             // but the fenced attempt must not be reported a second time.
-            if active.is_some() {
+            if active.as_ref().is_some_and(|active| active.id == launch.id) {
                 session
                     .driver
                     .lock()
@@ -170,6 +185,7 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                         &launch, report,
                     )))
                     .map_err(runner_error)?;
+                *active = None;
             }
             execution
         })
@@ -181,43 +197,46 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
         request: CancelRequest,
     ) -> BackendFuture<'a, Option<WorkerExecution>> {
         Box::pin(async move {
-            session
-                .driver
-                .lock()
-                .expect("test execution driver poisoned")
-                .handle(DriverCommand::CancelScope {
-                    scope_id: session.scope_id,
-                    reason: CancellationReason::User,
-                    now_millis: request.grace_deadline_ms,
-                })
-                .map_err(runner_error)?;
-            let execution = self.inner.cancel(&session.inner, request).await?;
             if let Some(active) = session
                 .active
                 .lock()
                 .expect("test attempt registry poisoned")
-                .take()
+                .as_ref()
             {
-                let report = if execution.is_some() {
-                    AttemptReport::Succeeded {
-                        result: AttemptSuccess {
-                            outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
-                                runmat_execution::value::InlineValue::Null,
-                            ))],
-                            result_objects: Vec::new(),
-                        },
-                    }
-                } else {
-                    AttemptReport::Cancelled
-                };
-                session
+                let mut driver = session
                     .driver
                     .lock()
-                    .expect("test execution driver poisoned")
-                    .handle(DriverCommand::BackendReport(BackendReport::for_request(
-                        &active, report,
-                    )))
+                    .expect("test execution driver poisoned");
+                // Cancel this attempt, not the reusable worker's scope. The
+                // coordinator's grace deadline is not the driver's clock.
+                let now_millis = driver.snapshot_ref().now_millis;
+                driver
+                    .handle(DriverCommand::CancelTask {
+                        task_id: active.task_id,
+                        reason: CancellationReason::User,
+                        now_millis,
+                    })
                     .map_err(runner_error)?;
+            }
+            let execution = self.inner.cancel(&session.inner, request).await?;
+            if let Some(completed) = &execution {
+                let active = session
+                    .active
+                    .lock()
+                    .expect("test attempt registry poisoned");
+                if active.as_ref().is_some_and(|active| {
+                    active.task_id
+                        != session
+                            .task_id(completed.result.test_id.as_str(), completed.result.attempt)
+                }) {
+                    return Err(rejected(
+                        "cancellation completion differs from the active test attempt",
+                    ));
+                }
+                drop(active);
+                // A returned completed attempt certifies cooperative teardown;
+                // an absent response does not certify physical retirement.
+                retire_active(session)?;
             }
             Ok(execution)
         })
@@ -231,6 +250,8 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                 .expect("test execution driver poisoned")
                 .handle(DriverCommand::WorkerLost(session.worker_id))
                 .map_err(runner_error)?;
+            // Some in-process hosts can only request cancellation. Their
+            // transport acknowledgment is not a retirement certificate.
             self.inner.terminate(&session.inner).await
         })
     }
@@ -246,6 +267,49 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
             self.inner.shutdown(&session.inner).await
         })
     }
+}
+
+fn retire_active<S>(session: &ExecutionWorkerSession<S>) -> Result<(), BackendError> {
+    let mut active = session
+        .active
+        .lock()
+        .expect("test attempt registry poisoned");
+    if let Some(request) = active.as_ref() {
+        session
+            .driver
+            .lock()
+            .expect("test execution driver poisoned")
+            .handle(DriverCommand::BackendReport(BackendReport::for_request(
+                request,
+                AttemptReport::Retired,
+            )))
+            .map_err(runner_error)?;
+        *active = None;
+    }
+    Ok(())
+}
+
+fn metered_success(
+    request: &runmat_execution_runner::AttemptRequest,
+    wall_millis: u64,
+) -> AttemptSuccess {
+    AttemptSuccess::new(
+        request,
+        vec![runmat_execution::value::ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::Null,
+        ))],
+        Vec::new(),
+        wall_millis,
+        0,
+        0,
+    )
+    .expect("bounded test-runner allocation accounting must converge")
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1)
 }
 
 fn one_launch(

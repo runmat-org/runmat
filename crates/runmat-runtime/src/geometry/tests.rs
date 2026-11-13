@@ -7,6 +7,67 @@ use runmat_geometry_core::{
 };
 use runmat_geometry_io::import::{LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind};
 
+#[cfg(feature = "occt-native")]
+#[test]
+fn two_box_preview_picks_vertical_edge_near_top_corner() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/simulation/examples/geometry/two-box-assembly.step"
+    );
+    let bytes = std::fs::read(path).unwrap();
+    let asset = geometry_load(path, &bytes).unwrap();
+    let scene = geometry_preview_scene(&asset, "two boxes", GeometryPreviewSceneOptions::default())
+        .unwrap();
+    let mut camera = runmat_plot::core::Camera::new();
+    camera.position = glam::Vec3::new(16.0, 8.0, 8.0);
+    camera.target = glam::Vec3::new(10.5, 1.0, 1.5);
+    camera.up = glam::Vec3::Z;
+    camera.aspect_ratio = 1.0;
+    camera.projection = runmat_plot::core::ProjectionType::Perspective {
+        fov: 45.0_f32.to_radians(),
+        near: 0.1,
+        far: 100.0,
+    };
+    camera.mark_dirty();
+    let index = runmat_plot::GeometryScenePickIndex::build(&scene);
+    for (x, z) in [
+        (11.0, 2.95),
+        (11.0, 2.8),
+        (11.0, 2.5),
+        (11.0, 2.0),
+        (10.0, 2.8),
+    ] {
+        let clip = camera.view_proj_matrix() * glam::Vec3::new(x, 2.0, z).extend(1.0);
+        let point = clip.truncate() / clip.w;
+        let pos = [(point.x + 1.0) * 400.0, (1.0 - point.y) * 400.0];
+        let pick = index.pick(runmat_plot::GeometryScenePickRequest {
+            camera: camera.clone(),
+            surface_size: [800.0, 800.0],
+            position: pos,
+            mode: runmat_plot::GeometryScenePickMode::Edge,
+        });
+        let pick = pick.expect("expected a hit on the translated box");
+        let chunk = scene
+            .chunks
+            .iter()
+            .find(|chunk| chunk.chunk_id == pick.chunk_id)
+            .expect("the picked chunk belongs to the preview scene");
+        let Some(runmat_plot::GeometrySceneTopologySelection::Edge { vertex_indices, .. }) =
+            pick.topology_selection
+        else {
+            panic!("expected a vertical edge at z={z}");
+        };
+        let a = chunk.vertices[vertex_indices[0] as usize].position;
+        let b = chunk.vertices[vertex_indices[1] as usize].position;
+        assert!(
+            (a[0] - x).abs() < 1.0e-5 && (b[0] - x).abs() < 1.0e-5,
+            "picked {a:?} to {b:?} at x={x} z={z}"
+        );
+        assert!((a[1] - 2.0).abs() < 1.0e-5 && (b[1] - 2.0).abs() < 1.0e-5);
+        assert!((a[2] - b[2]).abs() > 2.9, "picked {a:?} to {b:?} at z={z}");
+    }
+}
+
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n";
@@ -546,13 +607,9 @@ fn load_op_maps_unsupported_format_error_code() {
 
 #[test]
 fn load_op_maps_cancelled_import_error_code() {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
-
-    let cancelled = Arc::new(AtomicBool::new(true));
-    let _guard = crate::interrupt::replace_interrupt(Some(Arc::clone(&cancelled)));
+    let cancelled = runmat_execution::cancellation::CancellationSource::new();
+    cancelled.cancel(runmat_execution::CancellationReason::User);
+    let _guard = crate::interrupt::replace_interrupt(Some(cancelled.token()));
     let error = geometry_load_op(
         "/cancelled.stl",
         TRIANGLE_STL.as_bytes(),
@@ -562,7 +619,6 @@ fn load_op_maps_cancelled_import_error_code() {
 
     assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.CANCELLED");
     assert_eq!(error.error_type, OperationErrorType::Cancelled);
-    cancelled.store(false, Ordering::Relaxed);
 }
 
 #[test]
@@ -929,191 +985,11 @@ fn capture_view_op_uses_installed_adapter() {
 }
 
 #[test]
-fn prep_for_analysis_op_returns_versioned_deterministic_result() {
-    let _prep_guard = prep_artifact_test_guard();
-    reset_prep_artifact_store_for_tests();
-    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
-    let first = geometry_prep_for_analysis_op(
-        &asset,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some("trace-g6".to_string()), None),
-    )
-    .expect("prep should work");
-    let second = geometry_prep_for_analysis_op(
-        &asset,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some("trace-g7".to_string()), None),
-    )
-    .expect("prep should be deterministic");
-
-    assert_eq!(first.operation, "geometry.prep_for_analysis");
-    assert_eq!(first.op_version, "geometry.prep_for_analysis/v1");
-    assert!(!first.data.prep_artifact_id.is_empty());
-    assert_ne!(first.data.prep_artifact_id, second.data.prep_artifact_id);
-    assert_eq!(first.data.prep, second.data.prep);
-    assert_eq!(
-        first.data.prep.schema_version,
-        "geometry-prep-for-analysis/v1"
-    );
-    assert!(!first.data.prep.prepared_meshes.is_empty());
-    let prepared_mesh = first
-        .data
-        .prep
-        .prepared_meshes
-        .first()
-        .expect("prepared mesh should be present");
-    assert!(prepared_mesh
-        .coordinate_span_m
-        .iter()
-        .any(|span| *span > 0.0));
-    assert!(prepared_mesh.coordinate_active_dimension_count >= 1);
-    assert!(prepared_mesh.coordinate_characteristic_length_m > 0.0);
-    assert!(prepared_mesh.element_geometry_node_count > 0);
-    assert!(prepared_mesh.element_geometry_edge_count > 0);
-    assert!(prepared_mesh.mean_element_edge_length_m > 0.0);
-    assert!(prepared_mesh.mean_element_area_m2 > 0.0);
-    assert!(prepared_mesh.element_geometry_coverage_ratio > 0.0);
-    assert!(!first.data.prep.region_mappings.is_empty());
-}
-
-#[test]
-fn prep_for_analysis_op_maps_invalid_spec_error() {
-    let _prep_guard = prep_artifact_test_guard();
-    reset_prep_artifact_store_for_tests();
-    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
-    let error = geometry_prep_for_analysis_op(
-        &asset,
-        GeometryPrepForAnalysisSpec {
-            profile: GeometryPrepProfile::AnalysisReady,
-            target_element_budget: 0,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("zero element budget should fail");
-
-    assert_eq!(error.operation, "geometry.prep_for_analysis");
-    assert_eq!(error.op_version, "geometry.prep_for_analysis/v1");
-    assert_eq!(
-        error.error_code,
-        "RM.GEOMETRY.PREP_FOR_ANALYSIS.INVALID_SPEC"
-    );
-}
-
-#[test]
-fn prep_for_analysis_op_supports_adaptive_refine_profile() {
-    let _prep_guard = prep_artifact_test_guard();
-    reset_prep_artifact_store_for_tests();
-    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
-    let analysis_ready = geometry_prep_for_analysis_op(
-        &asset,
-        GeometryPrepForAnalysisSpec {
-            profile: GeometryPrepProfile::AnalysisReady,
-            target_element_budget: 4_000,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("analysis-ready prep should work");
-    let adaptive_refine = geometry_prep_for_analysis_op(
-        &asset,
-        GeometryPrepForAnalysisSpec {
-            profile: GeometryPrepProfile::AdaptiveRefine,
-            target_element_budget: 4_000,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("adaptive-refine prep should work");
-
-    assert_eq!(adaptive_refine.operation, "geometry.prep_for_analysis");
-    assert_eq!(adaptive_refine.op_version, "geometry.prep_for_analysis/v1");
-    assert!(
-        adaptive_refine.data.prep.quality.min_scaled_jacobian
-            >= analysis_ready.data.prep.quality.min_scaled_jacobian
-    );
-    assert!(
-        adaptive_refine.data.prep.quality.mean_aspect_ratio
-            <= analysis_ready.data.prep.quality.mean_aspect_ratio
-    );
-}
-
-#[test]
-fn prep_artifact_retention_prunes_old_entries() {
-    let _prep_guard = prep_artifact_test_guard();
-    reset_prep_artifact_store_for_tests();
-    configure_prep_artifacts(GeometryPrepArtifactConfig {
-        max_artifacts_per_geometry: Some(2),
-        ..GeometryPrepArtifactConfig::default()
-    })
-    .expect("prep artifact config should be configurable");
-
-    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
-    let mut ids = Vec::new();
-    for _ in 0..4 {
-        let prep = geometry_prep_for_analysis_op(
-            &asset,
-            GeometryPrepForAnalysisSpec::default(),
-            OperationContext::new(None, None),
-        )
-        .expect("prep should succeed");
-        assert!(
-            !prep
-                .data
-                .prep_artifact_id
-                .chars()
-                .any(|ch| matches!(ch, '"' | ':' | '<' | '>' | '|' | '*' | '?' | '\r' | '\n')),
-            "prep artifact id should be portable for GitHub artifact upload"
-        );
-        ids.push(prep.data.prep_artifact_id);
-    }
-
-    assert!(load_prep_artifact(&ids[0])
-        .expect("load prep should succeed")
-        .is_none());
-    assert!(load_prep_artifact(ids.last().expect("latest id"))
-        .expect("load latest prep should succeed")
-        .is_some());
-
-    reset_prep_artifact_store_for_tests();
-}
-
-#[test]
-fn prep_artifact_health_reports_metrics_and_distribution() {
-    let _prep_guard = prep_artifact_test_guard();
-    reset_prep_artifact_store_for_tests();
-    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
-    for _ in 0..3 {
-        let _ = geometry_prep_for_analysis_op(
-            &asset,
-            GeometryPrepForAnalysisSpec::default(),
-            OperationContext::new(None, None),
-        )
-        .expect("prep should succeed");
-    }
-
-    let health = geometry_prep_artifact_health_op(
-        GeometryPrepArtifactHealthQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("health op should succeed");
-    assert_eq!(health.operation, "geometry.prep_artifact_health");
-    assert_eq!(health.op_version, "geometry.prep_artifact_health/v1");
-    assert_eq!(
-        health.data.schema_version,
-        "geometry-prep-artifact-health/v1"
-    );
-    assert!(health.data.current_artifact_count >= 1);
-    assert!(
-        health.data.age_p95_seconds.unwrap_or(0.0) >= health.data.age_p50_seconds.unwrap_or(0.0)
-    );
-    assert!(!health.data.per_geometry.is_empty());
-
-    reset_prep_artifact_store_for_tests();
-}
-
-#[test]
 fn asset_summary_reports_semantic_cad_region_status() {
     let asset = GeometryAsset {
         geometry_id: "geo_semantic".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/models/bracket.step".to_string(),
             sha256: "abc123".to_string(),
             importer_version: "cad/occt/step/v1".to_string(),
@@ -1122,10 +998,11 @@ fn asset_summary_reports_semantic_cad_region_status() {
             kind: SourceGeometryKind::Cad,
             assembly: None,
             material_evidence: vec![],
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "mesh_1".to_string(),
@@ -1141,7 +1018,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
         regions: vec![
             Region {
                 region_id: "face_000001".to_string(),
-                name: "Face 1".to_string(),
+                name: "Face 1".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
@@ -1155,14 +1032,14 @@ fn asset_summary_reports_semantic_cad_region_status() {
             },
             Region {
                 region_id: "cad_label_0_1_1".to_string(),
-                name: "Bracket".to_string(),
+                name: "Bracket".into(),
                 tag: Some("cad_body".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:1".to_string(),
-                        name: "Bracket".to_string(),
+                        name: "Bracket".into(),
                         kind: CadSemanticKind::Body,
                     }),
                     owner_path: Vec::new(),
@@ -1191,15 +1068,16 @@ fn asset_summary_reports_semantic_cad_region_status() {
 
 #[cfg(feature = "plot-core")]
 #[test]
-fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
+fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
     let owner = CadLabelRef {
         label_entry: "0:1".to_string(),
-        name: "Bracket".to_string(),
+        name: "Bracket".into(),
         kind: CadSemanticKind::Body,
     };
     let asset = GeometryAsset {
         geometry_id: "geo_batched_preview".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/models/bracket.step".to_string(),
             sha256: "abc123".to_string(),
             importer_version: "cad/occt/step/v1".to_string(),
@@ -1212,10 +1090,11 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
                 children: Vec::new(),
             }),
             material_evidence: vec![],
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "mesh_1".to_string(),
@@ -1236,14 +1115,14 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
         regions: vec![
             Region {
                 region_id: "face_000001".to_string(),
-                name: "Face 1".to_string(),
+                name: "Face 1".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:1".to_string(),
-                        name: "Face 1".to_string(),
+                        name: "Face 1".into(),
                         kind: CadSemanticKind::Face,
                     }),
                     owner_path: vec![owner.clone()],
@@ -1254,14 +1133,14 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
             },
             Region {
                 region_id: "face_000002".to_string(),
-                name: "Face 2".to_string(),
+                name: "Face 2".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(1),
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:2".to_string(),
-                        name: "Face 2".to_string(),
+                        name: "Face 2".into(),
                         kind: CadSemanticKind::Face,
                     }),
                     owner_path: vec![owner.clone()],
@@ -1300,15 +1179,45 @@ fn geometry_preview_scene_batches_face_labels_under_same_assembly_owner() {
     )
     .expect("cad preview scene should be generated");
 
-    assert_eq!(scene.chunks.len(), 1);
-    assert_eq!(scene.chunks[0].owner_node_ids, vec![owner.label_entry]);
-    assert_eq!(scene.chunks[0].regions.len(), 2);
-    assert!(scene.chunks[0]
+    // The shaded surface and its resident wireframe share assembly ownership;
+    // the wireframe is a separate draw item, not a second surface chunk.
+    assert_eq!(scene.chunks.len(), 2);
+    for chunk in &scene.chunks {
+        assert_eq!(chunk.owner_node_ids, vec![owner.label_entry.clone()]);
+    }
+    let surfaces = scene
+        .chunks
+        .iter()
+        .filter(|chunk| !chunk.wireframe_only)
+        .collect::<Vec<_>>();
+    assert_eq!(surfaces.len(), 1);
+    let surface = surfaces[0];
+    assert!(scene.chunks.iter().any(|chunk| chunk.wireframe_only));
+    assert_eq!(surface.regions.len(), 2);
+    assert!(surface
         .regions
         .iter()
         .any(|region| region.region_id == "face_000001"));
-    assert!(scene.chunks[0]
+    assert!(surface
         .regions
         .iter()
         .any(|region| region.region_id == "face_000002"));
+
+    let figure = geometry_preview_figure(
+        &asset,
+        "Preview",
+        GeometryPreviewFigureOptions {
+            presentation: GeometryPreviewPresentation::Cad,
+            xray: true,
+            ..GeometryPreviewFigureOptions::default()
+        },
+    )
+    .expect("x-ray CAD preview figure should be generated");
+    let Some(runmat_plot::plots::PlotElement::Mesh(mesh)) = figure.plots().next() else {
+        panic!("x-ray CAD preview should contain a mesh plot");
+    };
+    assert_eq!(mesh.face_alpha(), CAD_XRAY_FACE_ALPHA);
+    assert_eq!(mesh.edge_color(), CAD_XRAY_FEATURE_EDGE_COLOR);
+    assert_eq!(mesh.edge_alpha(), 1.0);
+    assert_eq!(mesh.edge_width(), 1.05);
 }

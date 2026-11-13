@@ -1,205 +1,20 @@
-use runmat_builtins::{
-    builtin_function_by_name, builtin_functions, AccelTag, BuiltinCompletionPolicy,
-    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
-use runmat_macros::runtime_builtin;
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use runmat_value::{CellArray, Tensor, Value};
 
-const TEST_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Output value.",
-}];
-const ADD_SUB_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left integer input.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right integer input.",
-    },
-];
-const MATRIX_SUM_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-const STR_LENGTH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "s",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input string.",
-}];
-const ADD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = add(x, y)",
-    inputs: &ADD_SUB_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const SUB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = sub(x, y)",
-    inputs: &ADD_SUB_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const MATRIX_SUM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = matrix_sum(A)",
-    inputs: &MATRIX_SUM_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const STR_LENGTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = str_length(s)",
-    inputs: &STR_LENGTH_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const MUL_ADD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = mul_add(x, y)",
-    inputs: &[
-        BuiltinParamDescriptor {
-            name: "x",
-            ty: BuiltinParamType::NumericScalar,
-            arity: BuiltinParamArity::Required,
-            default: None,
-            description: "Left numeric input.",
-        },
-        BuiltinParamDescriptor {
-            name: "y",
-            ty: BuiltinParamType::NumericScalar,
-            arity: BuiltinParamArity::Required,
-            default: None,
-            description: "Right numeric input.",
-        },
-    ],
-    outputs: &OUT_ANY,
-}];
-const ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ADD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &TEST_ERRORS,
-};
-const ADD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [BuiltinExtensionDescriptor {
-    id: "test-add-extension",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "test-only add extension",
-    error_identifier: None,
-}];
-const SUB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUB_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &TEST_ERRORS,
-};
-const MATRIX_SUM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MATRIX_SUM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &TEST_ERRORS,
-};
-const STR_LENGTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STR_LENGTH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &TEST_ERRORS,
-};
-const MUL_ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MUL_ADD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &TEST_ERRORS,
-};
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "registry/native_registration.rs"]
+mod native_registration;
 
-#[runtime_builtin(
-    name = "add",
-    descriptor(crate::ADD_DESCRIPTOR),
-    extensions(crate::ADD_EXTENSIONS),
-    builtin_path = "tests::add"
-)]
-fn add(x: i32, y: i32) -> Result<i32, String> {
-    Ok(x + y)
-}
-
-#[runtime_builtin(
-    name = "sub",
-    descriptor(crate::SUB_DESCRIPTOR),
-    builtin_path = "tests::sub"
-)]
-fn sub(x: i32, y: i32) -> Result<i32, String> {
-    Ok(x - y)
-}
-
-#[runtime_builtin(
-    name = "matrix_sum",
-    descriptor(crate::MATRIX_SUM_DESCRIPTOR),
-    builtin_path = "tests::matrix_sum"
-)]
-fn matrix_sum(m: Tensor) -> Result<f64, String> {
-    Ok(m.materialize_f64().iter().sum())
-}
-
-#[runtime_builtin(
-    name = "str_length",
-    descriptor(crate::STR_LENGTH_DESCRIPTOR),
-    builtin_path = "tests::str_length"
-)]
-fn str_length(s: String) -> Result<i32, String> {
-    Ok(s.len() as i32)
-}
-
-#[runtime_builtin(
-    name = "mul_add",
-    accel = "binary",
-    descriptor(crate::MUL_ADD_DESCRIPTOR),
-    builtin_path = "tests::mul_add"
-)]
-fn mul_add(x: f64, y: f64) -> Result<f64, String> {
-    Ok(x + y)
-}
-
-#[test]
-fn contains_registered_functions() {
-    let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
-    assert!(names.contains(&"add"));
-    assert!(names.contains(&"sub"));
-    assert!(names.contains(&"matrix_sum"));
-    assert!(names.contains(&"str_length"));
-    assert!(names.contains(&"mul_add"));
-}
-
-#[test]
-fn binary_accel_metadata_maps_to_elementwise_tag() {
-    let builtin = builtin_function_by_name("mul_add").expect("registered builtin");
-    assert_eq!(builtin.accel_tags, &[AccelTag::Elementwise]);
-}
-
-#[test]
-fn extension_metadata_is_registered_declaratively() {
-    let add = builtin_function_by_name("add").expect("registered builtin");
-    assert_eq!(add.extensions, &ADD_EXTENSIONS);
-    let sub = builtin_function_by_name("sub").expect("registered builtin");
-    assert!(sub.extensions.is_empty());
-}
-
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_value_conversions() {
     // Test basic types
     let int_val = Value::Int(runmat_value::IntValue::I32(42));
     let num_val = Value::Num(3.15);
     let bool_val = Value::Bool(true);
-    let str_val = Value::String("hello".to_string());
+    let str_val = Value::string("hello".to_string());
 
     // Test From implementations
     assert_eq!(Value::from(42), int_val);
@@ -215,7 +30,8 @@ fn test_value_conversions() {
     assert_eq!((&str_val).try_into(), Ok("hello".to_string()));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_matrix_operations() {
     let mut matrix = Tensor::zeros2(2, 3);
     assert_eq!(matrix.rows(), 2);
@@ -241,13 +57,14 @@ fn test_matrix_operations() {
     assert!(Tensor::new_2d(vec![1.0, 2.0], 2, 2).is_err());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_cell_arrays() {
     let cell = Value::Cell(
         CellArray::new(
             vec![
                 Value::Int(runmat_value::IntValue::I32(1)),
-                Value::String("test".to_string()),
+                Value::string("test".to_string()),
                 Value::Bool(false),
             ],
             1,
@@ -257,13 +74,13 @@ fn test_cell_arrays() {
     );
 
     if let Value::Cell(contents) = cell {
-        assert_eq!(contents.data.len(), 3);
+        assert_eq!(contents.data().len(), 3);
         assert_eq!(
-            &contents.data[0],
+            &contents.data()[0],
             &Value::Int(runmat_value::IntValue::I32(1))
         );
-        assert_eq!(&contents.data[1], &Value::String("test".to_string()));
-        assert_eq!(&contents.data[2], &Value::Bool(false));
+        assert_eq!(&contents.data()[1], &Value::string("test".to_string()));
+        assert_eq!(&contents.data()[2], &Value::Bool(false));
     } else {
         panic!("Expected Cell value");
     }

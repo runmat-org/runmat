@@ -1,11 +1,11 @@
 use runmat_types::{
-    AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
-    DimensionFact, DistributedFact, DistributedValueId, DistributionScheme, DynamicReason,
-    ExecutionFact, FactJoin, FactWiden, ForeignAffinityFact, ForeignFact, ForeignLifetimeFact,
-    ForeignOwnershipFact, InvalidationCause, InvalidationVector, LayoutFact, MutationFact,
-    NumericClass, NumericDomain, NumericFact, OutputListFact, ParallelRegionId, ProgramFunctionId,
-    RegionId, ResidencyFact, ShapeFact, StorageFact, StructFact, SymbolName, ValueFact,
-    ValueKindFact, ViewFact,
+    AliasFact, CallableFact, CallableIdentity, CapabilityRequirement, CapabilitySet, CellFact,
+    CertaintyFact, ContiguityFact, DimensionFact, DistributedFact, DistributedValueId,
+    DistributionScheme, DynamicReason, ExecutionFact, FactJoin, FactSatisfaction, FactWiden,
+    ForeignAffinityFact, ForeignFact, ForeignLifetimeFact, ForeignOwnershipFact, InvalidationCause,
+    InvalidationVector, LayoutFact, MutationFact, NumericClass, NumericDomain, NumericFact,
+    OutputListFact, ParallelRegionId, ProgramFunctionId, RegionId, ResidencyFact, ShapeFact,
+    StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact, ValueSequenceFact, ViewFact,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -46,6 +46,19 @@ fn join_is_commutative_associative_and_idempotent() {
     }
 }
 
+#[test]
+fn struct_position_facts_are_local_precision_not_wire_state() {
+    let common = BTreeMap::from([("value".into(), numeric(NumericClass::Double))]);
+    let fact = StructFact::array(common.clone(), true, vec![common], true);
+    let encoded = serde_json::to_string(&fact).expect("serialize structure fact");
+    assert!(!encoded.contains("elements"));
+    let decoded: StructFact = serde_json::from_str(&encoded).expect("deserialize structure fact");
+    assert_eq!(decoded.fields, fact.fields);
+    assert!(decoded.fields_complete);
+    assert!(decoded.elements.is_empty());
+    assert!(!decoded.elements_complete);
+}
+
 fn representative_facts() -> Vec<ValueFact> {
     let mut shaped = numeric(NumericClass::Double);
     shaped.shape = ShapeFact::Shaped {
@@ -73,16 +86,17 @@ fn representative_facts() -> Vec<ValueFact> {
         invalidation: InvalidationVector::default(),
     };
     let mut structure = numeric(NumericClass::Double);
-    structure.kind = ValueKindFact::Struct(StructFact {
-        fields: BTreeMap::from([
+    structure.kind = ValueKindFact::Struct(StructFact::scalar(
+        BTreeMap::from([
             ("count".into(), numeric(NumericClass::UInt64)),
             ("payload".into(), recursive.clone()),
         ]),
-        fields_complete: true,
-    });
+        true,
+    ));
     let mut callable = numeric(NumericClass::Double);
     callable.kind = ValueKindFact::Callable(CallableFact {
         identity: Some(CallableIdentity::DynamicName(SymbolName("f".into()))),
+        capabilities: Default::default(),
         parameters: vec![numeric(NumericClass::Single)],
         parameters_complete: true,
         outputs: vec![numeric(NumericClass::Double)],
@@ -94,7 +108,7 @@ fn representative_facts() -> Vec<ValueFact> {
     });
     let mut future = numeric(NumericClass::Double);
     future.kind = ValueKindFact::Execution(ExecutionFact::Future {
-        output: Box::new(numeric(NumericClass::UInt32)),
+        output: ValueSequenceFact::single(numeric(NumericClass::UInt32)),
         state: runmat_types::FutureStateFact::Lazy,
     });
     future.alias = AliasFact::Identity;
@@ -114,10 +128,10 @@ fn representative_facts() -> Vec<ValueFact> {
             function: ProgramFunctionId(0),
             ordinal: 1,
         },
-        owner: ParallelRegionId(RegionId {
+        owner: runmat_types::DistributedOwner::Region(ParallelRegionId(RegionId {
             function: ProgramFunctionId(0),
             ordinal: 2,
-        }),
+        })),
         scheme: Some(DistributionScheme::Block { dimension: 1 }),
         value: Box::new(numeric(NumericClass::Double)),
         materializable: true,
@@ -190,6 +204,7 @@ fn joins_do_not_turn_conflicting_runtime_metadata_into_negative_proofs() {
     let mut known_callable = numeric(NumericClass::Double);
     known_callable.kind = ValueKindFact::Callable(CallableFact {
         identity: None,
+        capabilities: Default::default(),
         parameters: vec![numeric(NumericClass::Double)],
         parameters_complete: true,
         outputs: vec![numeric(NumericClass::Double)],
@@ -210,4 +225,41 @@ fn joins_do_not_turn_conflicting_runtime_metadata_into_negative_proofs() {
     };
     assert!(!joined_callable.parameters_complete);
     assert!(joined_callable.variadic_inputs);
+}
+
+#[test]
+fn callable_joins_preserve_every_branch_capability_requirement() {
+    let callable = |capability| {
+        let mut fact = numeric(NumericClass::Double);
+        fact.kind = ValueKindFact::Callable(CallableFact {
+            identity: Some(CallableIdentity::DynamicName(SymbolName("target".into()))),
+            capabilities: CapabilitySet(BTreeSet::from([capability])),
+            parameters: vec![numeric(NumericClass::Double)],
+            parameters_complete: true,
+            outputs: vec![numeric(NumericClass::Double)],
+            outputs_complete: true,
+            variadic_inputs: false,
+            variadic_outputs: false,
+            captures: Vec::new(),
+            captures_complete: true,
+        });
+        fact
+    };
+    let accelerator = callable(CapabilityRequirement::Accelerator);
+    let filesystem = callable(CapabilityRequirement::Filesystem);
+    let joined = accelerator.join(&filesystem);
+    let ValueKindFact::Callable(joined_callable) = &joined.kind else {
+        panic!("a callable join must remain callable");
+    };
+
+    assert_eq!(
+        joined_callable.capabilities,
+        CapabilitySet(BTreeSet::from([
+            CapabilityRequirement::Accelerator,
+            CapabilityRequirement::Filesystem,
+        ]))
+    );
+    assert!(joined.satisfies(&accelerator));
+    assert!(joined.satisfies(&filesystem));
+    assert!(!accelerator.satisfies(&joined));
 }

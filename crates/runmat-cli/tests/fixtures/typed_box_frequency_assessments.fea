@@ -1,0 +1,70 @@
+import function verify_peak from "./verify_peak.m"
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
+
+    region body : solid {
+        select id "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"
+        expect exactly_one
+    }
+    region support : face {
+        select id "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"
+        expect exactly_one
+    }
+    region load_face : face {
+        select id "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"
+        expect exactly_one
+    }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.75 m
+        maximum_deviation = 0.05 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model harmonic_bracket {
+    assign material.steel to geometry.bracket.region.body
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    load service_force {
+        force on geometry.bracket.region.load_face = [0, -1, 0] kN
+    }
+    load_case service { include load.service_force }
+}
+
+study structural_harmonic {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.harmonic_bracket
+    analysis response {
+        structural harmonic {
+            frequencies = [20, 40] Hz
+        }
+    }
+    output spatial_peak = max(magnitude(analysis.response.field.node.displacement), over = geometry.bracket.region.body)
+    output peak_history = sample(output.spatial_peak, over = frequency, at = [20, 40] Hz)
+    output peak = max(output.peak_history, over = frequency)
+    assessment deflection {
+        value = output.peak
+        maximum = 1 mm
+        evidence = authored_samples
+    }
+    assessment custom_deflection {
+        value = output.peak
+        function = function.verify_peak
+        parameters = [1 mm]
+        evidence = authored_samples
+    }
+}

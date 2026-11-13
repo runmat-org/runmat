@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "source_commit": "0d09250a4c9a8394de9ed906953e72dc22c8fb12",
+  "toolchain": "Python 3.13.7",
+  "commands": [
+    ["python3", "scripts/meshing/validate_corpus.py"],
+    ["python3", "scripts/meshing/validate_conformance.py"],
+    ["python3", "scripts/meshing/validate_differential.py"],
+    ["python3", "scripts/meshing/validate_reliability.py"],
+    ["python3", "scripts/meshing/validate_release_evidence.py"],
+    ["python3", "-m", "unittest", "discover", "-s", "scripts/meshing/tests", "-p", "test_*.py"]
+  ],
+  "exit_code": 0,
+  "catalogs": {"corpus_entries": 39, "conformance_cases": 15, "differential_cases": 1, "reliability_cases": 24},
+  "unit_tests": {"passed": 34, "failed": 0},
+  "log_sha256": "d3c02e4573a9dbe2377bd41a92ee3b3be8677400be1d94331e62b59d9902eee9",
+  "log_location": "Main:.tmp-rm1064/settings-release-routing-r1058.checks.log",
+  "repair": "Release invokes the complete scientific receipt verifier. Its workflow validator requires that exact unscoped command and rejects a regression to selecting only the deferred meshing cohort. Required authored/recovery receipts, catalog checks, mandatory attestation and blocking promotion dependencies remain enforced.",
+  "meshing_numerical_cohort": "Not executed; the existing owner-approved November4 disposition remains unchanged.",
+  "scope": "Release workflow validation and its regression only. No solver, mesher, numerical dependency, Rust execution code, scientific workload command or assertion changed. These results validate catalogs and CI routing; they do not represent meshing numerical executions."
+}

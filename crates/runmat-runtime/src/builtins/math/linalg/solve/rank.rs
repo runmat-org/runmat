@@ -2,14 +2,13 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
+#[cfg(test)]
+use runmat_builtins::RANK_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, RANK_ERROR_INTERNAL, RANK_ERROR_INVALID_ARGUMENT,
+    RANK_ERROR_INVALID_INPUT, RANK_INTEGER_INPUT_EXTENSION, RANK_INTEGER_TOLERANCE_EXTENSION,
+    RANK_LOGICAL_INPUT_EXTENSION, RANK_LOGICAL_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -22,166 +21,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rank";
-
-pub const RANK_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rank-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rank with a typed-integer matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RankIntegerInputExtension"),
-};
-
-pub const RANK_INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "rank-integer-tolerance",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "rank with a typed-integer tolerance is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:RankIntegerToleranceExtension"),
-    };
-pub const RANK_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rank-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rank with a logical matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RankLogicalInputExtension"),
-};
-pub const RANK_LOGICAL_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "rank-logical-tolerance",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "rank with a logical tolerance is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:RankLogicalToleranceExtension"),
-    };
-
-pub const RANK_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    RANK_INTEGER_INPUT_EXTENSION,
-    RANK_INTEGER_TOLERANCE_EXTENSION,
-    RANK_LOGICAL_INPUT_EXTENSION,
-    RANK_LOGICAL_TOLERANCE_EXTENSION,
-];
-
-const RANK_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public matrix classes are single and double; RunMat mode admits real integer matrices only after an exact binary64-boundary check.",
-    }];
-
-const RANK_INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "tol",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public tolerance is a real scalar without an integer class list; RunMat mode admits typed integer tolerance values only when exactly representable as binary64.",
-    }];
-
-pub const RANK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "k = rank(integer_A, tol?)",
-        inputs: &RANK_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The gated integer matrix crosses one checked binary64 SVD boundary; the structural rank count is returned as an exactly representable double scalar and automatic residency may restore it to the owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "k = rank(A, integer_tol)",
-        inputs: &RANK_INTEGER_TOLERANCE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed integer tolerance is a gated RunMat extension and crosses into the SVD threshold only after exact binary64 representability and nonnegative finite validation.",
-    },
-];
-
-const RANK_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "k",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Estimated matrix rank.",
-}];
-
-const RANK_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const RANK_INPUTS_TOL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Singular-value threshold.",
-    },
-];
-
-const RANK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "k = rank(A)",
-        inputs: &RANK_INPUTS,
-        outputs: &RANK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "k = rank(A, tol)",
-        inputs: &RANK_INPUTS_TOL,
-        outputs: &RANK_OUTPUT,
-    },
-];
-
-const RANK_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RANK.INVALID_ARGUMENT",
-    identifier: Some("RunMat:rank:InvalidArgument"),
-    when: "Optional tolerance argument is malformed or outside accepted bounds.",
-    message: "rank: invalid argument",
-};
-
-const RANK_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RANK.INVALID_INPUT",
-    identifier: Some("RunMat:rank:InvalidInput"),
-    when: "Input shape/type cannot be processed for rank evaluation.",
-    message: "rank: invalid input",
-};
-
-const RANK_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RANK.INTERNAL",
-    identifier: Some("RunMat:rank:Internal"),
-    when: "Runtime fails while computing rank or executing fallback/upload paths.",
-    message: "rank: internal runtime failure",
-};
-
-const RANK_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    RANK_ERROR_INVALID_ARGUMENT,
-    RANK_ERROR_INVALID_INPUT,
-    RANK_ERROR_INTERNAL,
-];
-
-pub const RANK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RANK_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RANK_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::rank")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -219,6 +61,10 @@ fn argument_error(message: impl Into<String>) -> RuntimeError {
     rank_error_with_message(message, &RANK_ERROR_INVALID_ARGUMENT)
 }
 
+fn internal_error(message: impl Into<String>) -> RuntimeError {
+    rank_error_with_message(message, &RANK_ERROR_INTERNAL)
+}
+
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
     if err.message() == "interaction pending..." {
         return build_runtime_error("interaction pending...")
@@ -254,17 +100,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "rank",
-    category = "math/linalg/solve",
-    summary = "Compute a matrix's numerical rank using SVD-based tolerance rules.",
-    keywords = "rank,svd,tolerance,matrix,gpu",
-    accel = "rank",
-    type_resolver(numeric_scalar_type),
-    descriptor(crate::builtins::math::linalg::solve::rank::RANK_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::rank::RANK_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::solve::rank::RANK_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
-async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rank_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::value_has_native_integer_class(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &RANK_INTEGER_INPUT_EXTENSION,
@@ -300,7 +139,7 @@ async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             )?;
         }
     }
-    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    let tol = parse_tolerance_arg(NAME, rest.view()).map_err(argument_error)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     if crate::builtins::common::validation::value_has_native_integer_class(&value)
         && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
@@ -325,13 +164,51 @@ async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
-    let owner = gpu_helpers::exact_provider_for_handle(&handle);
-    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+    let owner = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || internal_error("rank: resident input has no exact owning provider"),
+    )?);
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+    {
         if let Some(provider) = owner {
             match provider.rank(&handle, tol).await {
-                Ok(device_scalar) => return Ok(Value::GpuTensor(device_scalar)),
-                Err(_) => {
-                    // Fall through to host-based fallback.
+                Ok(mut device_scalar)
+                    if gpu_helpers::unary_gpu_output_matches_shape(
+                        &device_scalar,
+                        &handle,
+                        provider,
+                        &[1, 1],
+                        gpu_helpers::UnaryGpuOutputContract {
+                            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                            precision: Some(runmat_accelerate_api::ProviderPrecision::F64),
+                            integer: None,
+                            logical: false,
+                            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                        },
+                    ) =>
+                {
+                    if let Err(error) =
+                        gpu_helpers::propagate_output_provenance(&mut device_scalar, [&handle])
+                    {
+                        return Err(gpu_helpers::reject_gpu_output(device_scalar, error));
+                    }
+                    return gpu_helpers::resident_gpu_value(device_scalar);
+                }
+                Ok(device_scalar) => {
+                    let failure = internal_error(
+                        "rank: provider returned a malformed, aliased, or foreign scalar",
+                    );
+                    return Err(gpu_helpers::reject_gpu_output(device_scalar, failure));
+                }
+                Err(error) if error.is_unsupported() => {}
+                Err(error) => {
+                    let mut failure =
+                        internal_error(format!("rank: provider execution failed: {error}"));
+                    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        failure, error,
+                    ));
                 }
             }
         }
@@ -343,34 +220,17 @@ async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
     let rank = rank_scalar_from_value(gathered, tol)?;
 
     if let Some(provider) = owner {
-        match upload_rank_scalar(provider, rank) {
-            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(build_runtime_error("interaction pending...")
-                        .with_builtin(NAME)
-                        .build());
-                }
-            }
-        }
+        return gpu_helpers::restore_real_scalar_after_host(
+            &handle,
+            provider,
+            rank,
+            ProviderPrecision::F64,
+            NAME,
+            internal_error,
+        );
     }
 
     Ok(Value::Num(rank))
-}
-
-fn upload_rank_scalar(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    rank: f64,
-) -> BuiltinResult<GpuTensorHandle> {
-    let data = [rank];
-    let shape = [1usize, 1usize];
-    let view = HostTensorView {
-        data: &data,
-        shape: &shape,
-    };
-    provider
-        .upload(&view)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn rank_real_tensor_value(tensor: Tensor, tol: Option<f64>) -> BuiltinResult<Value> {
@@ -407,8 +267,7 @@ fn rank_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResul
 }
 
 fn rank_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usize> {
-    let (rows, cols) =
-        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0);
     }
@@ -425,8 +284,7 @@ fn rank_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usi
 }
 
 fn rank_complex_tensor_impl(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResult<usize> {
-    let (rows, cols) =
-        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0);
     }
@@ -456,7 +314,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -471,17 +328,6 @@ pub(crate) mod tests {
             Value::Num(r) => assert_eq!(r, 2.0),
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn rank_type_returns_scalar() {
-        let out = numeric_scalar_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(3), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[test]
@@ -675,7 +521,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = rank_builtin(Value::GpuTensor(handle), Vec::new()).expect("rank");
@@ -705,7 +551,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
@@ -717,6 +563,9 @@ pub(crate) mod tests {
     }
 
     fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::rank_builtin(value, rest))
+        block_on(super::rank_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

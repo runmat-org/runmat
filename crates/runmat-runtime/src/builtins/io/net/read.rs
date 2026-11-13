@@ -1,230 +1,27 @@
 //! MATLAB-compatible `read` builtin for TCP/IP clients in RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, NetDataType as DataType, READ_ERROR_CONNECTION_CLOSED,
+    READ_ERROR_INTERNAL, READ_ERROR_INVALID_CLIENT, READ_ERROR_INVALID_COUNT,
+    READ_ERROR_INVALID_DATATYPE, READ_ERROR_INVALID_INPUT, READ_ERROR_NOT_CONNECTED,
+    READ_ERROR_TIMEOUT,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::NumericStorage;
-use runmat_value::{CharArray, IntegerStorage, StructValue, Tensor, Value};
-use std::io::{self, Read};
-use std::net::TcpStream;
-use std::time::{Duration, Instant};
+use runmat_value::Value;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
+use crate::context::{RuntimeTcpByteOrder, RuntimeTcpInvocation, RuntimeTcpReadMode};
+use crate::tcp::TcpTransportErrorKind;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
-
 const BUILTIN_NAME: &str = "read";
-
-const READ_OUTPUT_DATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "data",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Available bytes or requested typed payload from the TCP client.",
-}];
-const READ_INPUTS_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "client",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpclient handle struct.",
-}];
-const READ_INPUTS_CLIENT_COUNT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "client",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tcpclient handle struct.",
-    },
-    BuiltinParamDescriptor {
-        name: "count",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Requested element count.",
-    },
-];
-const READ_INPUTS_CLIENT_COUNT_DATATYPE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "client",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tcpclient handle struct.",
-    },
-    BuiltinParamDescriptor {
-        name: "count",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Requested element count.",
-    },
-    BuiltinParamDescriptor {
-        name: "datatype",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"uint8\""),
-        description: "Data type label (for example \"uint8\", \"double\", \"char\", \"string\").",
-    },
-];
-const READ_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "data = read(client)",
-        inputs: &READ_INPUTS_CLIENT,
-        outputs: &READ_OUTPUT_DATA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = read(client, count)",
-        inputs: &READ_INPUTS_CLIENT_COUNT,
-        outputs: &READ_OUTPUT_DATA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = read(client, count, datatype)",
-        inputs: &READ_INPUTS_CLIENT_COUNT_DATATYPE,
-        outputs: &READ_OUTPUT_DATA,
-    },
-];
-
-const READ_ERROR_INVALID_CLIENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.INVALID_CLIENT",
-    identifier: Some("RunMat:read:InvalidTcpClient"),
-    when: "Client handle is missing, malformed, invalid, or disconnected.",
-    message: "read: invalid tcpclient handle",
-};
-const READ_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.INVALID_INPUT",
-    identifier: Some("RunMat:read:InvalidInput"),
-    when: "Argument list shape is unsupported for read.",
-    message: "read: invalid argument list",
-};
-const READ_ERROR_NOT_CONNECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.NOT_CONNECTED",
-    identifier: Some("RunMat:read:NotConnected"),
-    when: "Client has no active socket connection.",
-    message: "read: tcpclient is disconnected",
-};
-const READ_ERROR_TIMEOUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.TIMEOUT",
-    identifier: Some("RunMat:read:Timeout"),
-    when: "Socket read exceeds configured timeout.",
-    message: "read: timed out waiting for data",
-};
-const READ_ERROR_CONNECTION_CLOSED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.CONNECTION_CLOSED",
-    identifier: Some("RunMat:read:ConnectionClosed"),
-    when: "Peer closes socket before requested payload is fully available.",
-    message: "read: connection closed before the requested data was received",
-};
-const READ_ERROR_INVALID_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.INVALID_COUNT",
-    identifier: Some("RunMat:read:InvalidCount"),
-    when: "Requested count is non-scalar, negative, non-finite, or out of range.",
-    message: "read: invalid count argument",
-};
-const READ_ERROR_INVALID_DATATYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.INVALID_DATATYPE",
-    identifier: Some("RunMat:read:InvalidDataType"),
-    when: "Datatype argument is not a supported scalar text label.",
-    message: "read: invalid datatype argument",
-};
-const READ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READ.INTERNAL",
-    identifier: Some("RunMat:read:InternalError"),
-    when: "Internal socket/control-flow conversion fails.",
-    message: "read: internal socket error",
-};
-const READ_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    READ_ERROR_INVALID_CLIENT,
-    READ_ERROR_INVALID_INPUT,
-    READ_ERROR_NOT_CONNECTED,
-    READ_ERROR_TIMEOUT,
-    READ_ERROR_CONNECTION_CLOSED,
-    READ_ERROR_INVALID_COUNT,
-    READ_ERROR_INVALID_DATATYPE,
-    READ_ERROR_INTERNAL,
-];
-pub const READ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &READ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &READ_ERRORS,
-};
-
-const READ_INTEGER_COUNT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "count",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented count inputs. RunMat reads the authoritative scalar exactly, requires a positive value representable as usize, and never routes the count through binary64.",
-    }];
-const READ_NO_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 0] = [];
-pub const READ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "data = read(client)",
-        inputs: &READ_NO_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The current public worked example, default-datatype table, and transfer note converge on an exact uint8 result when datatype is omitted, despite one contradictory prose sentence on the same page.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "data = read(client, integer_count)",
-        inputs: &READ_INTEGER_COUNT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The default result is exact uint8. Networking executes on the host; resident count controls gather automatically before exact validation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "data = read(client, integer_count, integer_datatype)",
-        inputs: &READ_INTEGER_COUNT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "An explicit integer datatype returns that exact integer class in a host row vector, with byte order decoded directly into the requested class.",
-    },
-];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::read")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "read",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Socket reads always execute on the host CPU; GPU providers are never consulted.",
-};
 
 fn read_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -248,113 +45,76 @@ fn read_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -
     read_error_with_detail(error, message)
 }
 
-fn map_control_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::read")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "read",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtin executed eagerly on the CPU.",
-};
-
 #[runtime_builtin(
     name = "read",
-    category = "io/net",
-    summary = "Read numeric or text data from a TCP/IP client.",
-    keywords = "read,tcpclient,networking",
-    type_resolver(crate::builtins::io::type_resolvers::read_type),
-    descriptor(crate::builtins::io::net::read::READ_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::net::read::READ_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::net::read"
 )]
-async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let client = gather_if_needed_async(&client)
-        .await
-        .map_err(|err| map_control_flow(err, &READ_ERROR_INVALID_CLIENT))?;
-    let options = parse_arguments(rest).await?;
-
-    let client_struct = match &client {
-        Value::Struct(st) => st,
-        _ => {
-            return Err(read_flow(
-                &READ_ERROR_INVALID_CLIENT,
-                "read: expected tcpclient struct as first argument",
-            ))
-        }
-    };
-
-    let client_id = extract_client_id(client_struct)?;
-    let handle = client_handle(client_id).ok_or_else(|| {
-        read_flow(
-            &READ_ERROR_INVALID_CLIENT,
-            "read: tcpclient handle is no longer valid",
-        )
-    })?;
-
-    let (stream, timeout, byte_order, connected) = {
-        let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
-        if !guard.connected {
-            return Err(read_error(&READ_ERROR_NOT_CONNECTED));
-        }
-        let timeout = guard.timeout;
-        let byte_order = parse_byte_order(&guard.byte_order);
-        let stream = guard.stream.try_clone().map_err(|err| {
-            read_flow(&READ_ERROR_INTERNAL, format!("read: clone failed ({err})"))
-        })?;
-        (stream, timeout, byte_order, guard.connected)
-    };
-
-    // Ensure cloned descriptor uses the configured timeout.
-    if connected {
-        if let Err(err) = configure_stream(&stream, timeout) {
-            return Err(read_flow(
-                &READ_ERROR_INTERNAL,
-                format!("read: unable to configure socket timeout ({err})"),
-            ));
-        }
-    }
-
-    let element_size = options.datatype.element_size();
-    if let ReadMode::Count(count) = options.mode {
-        count.checked_mul(element_size).ok_or_else(|| {
+pub(super) async fn read_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    client: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let known = preflight_known_arguments(rest.view())?;
+    let authority = super::receiver::authority(&client, runmat_builtins::TCPCLIENT_CLASS)
+        .ok_or_else(|| {
             read_flow(
-                &READ_ERROR_INVALID_COUNT,
-                "read: count and datatype size exceed the maximum supported byte count",
+                &READ_ERROR_INVALID_CLIENT,
+                "read: expected a live tcpclient object",
             )
         })?;
-    }
-    let mut stream = stream;
-    let read_result = perform_read(&mut stream, &options.mode, element_size)?;
-
-    if read_result.connection_closed {
-        if let Ok(mut guard) = handle.lock() {
-            guard.connected = false;
+    let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    let options = parse_arguments(rest, known).await?;
+    let element_size = options.datatype.element_size();
+    let mode = match options.mode {
+        ReadMode::Available => RuntimeTcpReadMode::Available,
+        ReadMode::Count(count) => {
+            RuntimeTcpReadMode::Count(count.checked_mul(element_size).ok_or_else(|| {
+                read_flow(
+                    &READ_ERROR_INVALID_COUNT,
+                    "read: count and datatype size exceed the maximum supported byte count",
+                )
+            })?)
         }
-    }
+    };
+    let read_result = work
+        .await_service(service.read(
+            RuntimeTcpInvocation::from_context(runtime.as_ref()),
+            authority,
+            mode,
+        ))
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            let error = match err.kind() {
+                TcpTransportErrorKind::InvalidAuthority => &READ_ERROR_INVALID_CLIENT,
+                TcpTransportErrorKind::Closed => &READ_ERROR_NOT_CONNECTED,
+                TcpTransportErrorKind::Timeout => &READ_ERROR_TIMEOUT,
+                _ => &READ_ERROR_INTERNAL,
+            };
+            super::error::with_source(BUILTIN_NAME, error, format!("read: {err}"), err)
+        })?;
 
     if let ReadMode::Count(count) = options.mode {
-        if read_result.bytes.is_empty() && count > 0 {
+        if read_result.bytes().is_empty() && count > 0 {
             return Err(read_error(&READ_ERROR_CONNECTION_CLOSED));
         }
         let expected = count.saturating_mul(element_size);
-        if read_result.bytes.len() != expected {
+        if read_result.bytes().len() != expected {
             return Err(read_error(&READ_ERROR_CONNECTION_CLOSED));
         }
     }
 
-    let value = bytes_to_value(&read_result.bytes, options.datatype, byte_order)?;
+    let byte_order = match read_result.byte_order() {
+        RuntimeTcpByteOrder::Little => ByteOrder::Little,
+        RuntimeTcpByteOrder::Big => ByteOrder::Big,
+    };
+    let value =
+        bytes_to_value(read_result.bytes(), options.datatype, byte_order, &mut work).await?;
+    work.completed(0).await?;
+    read_result.publish();
     Ok(value)
 }
 
@@ -370,388 +130,42 @@ struct ReadOptions {
     datatype: DataType,
 }
 
-#[derive(Clone, Copy)]
-enum DataType {
-    UInt8,
-    Int8,
-    UInt16,
-    Int16,
-    UInt32,
-    Int32,
-    UInt64,
-    Int64,
-    Single,
-    Double,
-    Char,
-    String,
-}
+#[path = "read/decode.rs"]
+mod decode;
+use decode::{bytes_to_value, ByteOrder};
 
-impl DataType {
-    fn element_size(self) -> usize {
-        match self {
-            DataType::UInt8 | DataType::Int8 | DataType::Char | DataType::String => 1,
-            DataType::UInt16 | DataType::Int16 => 2,
-            DataType::UInt32 | DataType::Int32 | DataType::Single => 4,
-            DataType::UInt64 | DataType::Int64 | DataType::Double => 8,
-        }
-    }
-}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "read/codec_tests.rs"]
+mod codec_tests;
 
-#[derive(Clone, Copy)]
-enum ByteOrder {
-    Little,
-    Big,
-}
-
-struct ReadOutcome {
-    bytes: Vec<u8>,
-    connection_closed: bool,
-}
-
-enum ReadError {
-    Timeout,
-    ConnectionClosed,
-    Io(io::Error),
-}
-
-fn perform_read(
-    stream: &mut TcpStream,
-    mode: &ReadMode,
-    element_size: usize,
-) -> BuiltinResult<ReadOutcome> {
-    match read_from_stream(stream, mode, element_size) {
-        Ok(outcome) => Ok(outcome),
-        Err(ReadError::Timeout) => Err(read_error(&READ_ERROR_TIMEOUT)),
-        Err(ReadError::ConnectionClosed) => Err(read_error(&READ_ERROR_CONNECTION_CLOSED)),
-        Err(ReadError::Io(err)) => Err(read_flow(
-            &READ_ERROR_INTERNAL,
-            format!("read: socket error ({err})"),
-        )),
-    }
-}
-
-fn read_from_stream(
-    stream: &mut TcpStream,
-    mode: &ReadMode,
-    element_size: usize,
-) -> Result<ReadOutcome, ReadError> {
-    match mode {
-        ReadMode::Available => read_all_available(stream),
-        ReadMode::Count(count) => {
-            let total = count.saturating_mul(element_size);
-            read_exact_bytes(stream, total)
-        }
-    }
-}
-
-fn read_all_available(stream: &mut TcpStream) -> Result<ReadOutcome, ReadError> {
-    let mut buffer = [0u8; 4096];
-    let mut data = Vec::new();
-    let mut connection_closed = false;
-
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                connection_closed = true;
-                return Ok(ReadOutcome {
-                    bytes: Vec::new(),
-                    connection_closed,
-                });
-            }
-            Ok(n) => {
-                data.extend_from_slice(&buffer[..n]);
-                break;
-            }
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => return Err(ReadError::Timeout),
-            Err(err) => return Err(ReadError::Io(err)),
-        }
-    }
-
-    let guard = NonBlockingGuard::enter(stream).map_err(ReadError::Io)?;
-    let mut guard = Some(guard);
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                connection_closed = true;
-                break;
-            }
-            Ok(n) => {
-                data.extend_from_slice(&buffer[..n]);
-            }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => break,
-            Err(err) => return Err(ReadError::Io(err)),
-        }
-    }
-    drop(guard.take());
-
-    Ok(ReadOutcome {
-        bytes: data,
-        connection_closed,
-    })
-}
-
-fn read_exact_bytes(stream: &mut TcpStream, total: usize) -> Result<ReadOutcome, ReadError> {
-    if total == 0 {
-        return Ok(ReadOutcome {
-            bytes: Vec::new(),
-            connection_closed: false,
-        });
-    }
-
-    let mut buf = vec![0u8; total];
-    let mut offset = 0;
-    let timeout = stream.read_timeout().ok().flatten();
-    let start = Instant::now();
-    let _guard = if timeout.is_some() {
-        Some(NonBlockingGuard::enter(stream).map_err(ReadError::Io)?)
-    } else {
-        None
-    };
-    while offset < total {
-        match stream.read(&mut buf[offset..]) {
-            Ok(0) => return Err(ReadError::ConnectionClosed),
-            Ok(n) => {
-                offset += n;
-            }
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => {
-                if let Some(timeout) = timeout {
-                    if start.elapsed() < timeout {
-                        std::thread::sleep(Duration::from_millis(5));
-                        continue;
-                    }
-                }
-                return Err(ReadError::Timeout);
-            }
-            Err(err) => return Err(ReadError::Io(err)),
-        }
-    }
-    Ok(ReadOutcome {
-        bytes: buf,
-        connection_closed: false,
-    })
-}
-
-fn is_timeout(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-    )
-}
-
-fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> BuiltinResult<Value> {
-    match datatype {
-        DataType::Char => Ok(char_row(bytes)),
-        DataType::String => Ok(Value::String(bytes.iter().map(|&b| b as char).collect())),
-        DataType::UInt8
-        | DataType::Int8
-        | DataType::UInt16
-        | DataType::Int16
-        | DataType::UInt32
-        | DataType::Int32
-        | DataType::UInt64
-        | DataType::Int64 => {
-            let storage = integer_storage_from_bytes(bytes, datatype, order)?;
-            let tensor =
-                Tensor::new_integer(storage, vec![1, bytes.len() / datatype.element_size()])
-                    .map_err(|err| read_flow(&READ_ERROR_INTERNAL, format!("read: {err}")))?;
-            Ok(Value::Tensor(tensor))
-        }
-        DataType::Single | DataType::Double => {
-            let storage = floating_storage_from_bytes(bytes, datatype, order)?;
-            let cols = storage.len();
-            let tensor = Tensor::from_numeric_storage(storage, vec![1, cols])
-                .map_err(|err| read_flow(&READ_ERROR_INTERNAL, format!("read: {err}")))?;
-            Ok(Value::Tensor(tensor))
-        }
-    }
-}
-
-fn char_row(bytes: &[u8]) -> Value {
-    let chars: Vec<char> = bytes.iter().map(|&b| b as char).collect();
-    let len = chars.len();
-    let array = CharArray::new(chars, 1, len).unwrap_or_else(|_| CharArray::new_row(""));
-    Value::CharArray(array)
-}
-
-fn floating_storage_from_bytes(
-    bytes: &[u8],
-    datatype: DataType,
-    order: ByteOrder,
-) -> BuiltinResult<NumericStorage> {
-    let size = datatype.element_size();
-    if size == 0 {
-        return Ok(match datatype {
-            DataType::Single => NumericStorage::F32(Vec::new()),
-            DataType::Double => NumericStorage::F64(Vec::new()),
-            _ => unreachable!("floating storage requested for nonfloating datatype"),
-        });
-    }
-    if !bytes.len().is_multiple_of(size) {
-        return Err(read_flow(
-            &READ_ERROR_INTERNAL,
-            "read: received byte count does not align with datatype size",
-        ));
-    }
-    Ok(match datatype {
-        DataType::Single => NumericStorage::F32(
-            bytes
-                .chunks_exact(size)
-                .map(|chunk| f32_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Double => NumericStorage::F64(
-            bytes
-                .chunks_exact(size)
-                .map(|chunk| f64_from(chunk, order))
-                .collect(),
-        ),
-        _ => {
-            return Err(read_flow(
-                &READ_ERROR_INTERNAL,
-                "read: expected a floating-point datatype",
-            ))
-        }
-    })
-}
-
-fn integer_storage_from_bytes(
-    bytes: &[u8],
-    datatype: DataType,
-    order: ByteOrder,
-) -> BuiltinResult<IntegerStorage> {
-    let size = datatype.element_size();
-    if !bytes.len().is_multiple_of(size) {
-        return Err(read_flow(
-            &READ_ERROR_INTERNAL,
-            "read: received byte count does not align with datatype size",
-        ));
-    }
-    Ok(match datatype {
-        DataType::UInt8 => IntegerStorage::U8(bytes.to_vec()),
-        DataType::Int8 => IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect()),
-        DataType::UInt16 => IntegerStorage::U16(
-            bytes
-                .chunks_exact(2)
-                .map(|chunk| u16_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Int16 => IntegerStorage::I16(
-            bytes
-                .chunks_exact(2)
-                .map(|chunk| i16_from(chunk, order))
-                .collect(),
-        ),
-        DataType::UInt32 => IntegerStorage::U32(
-            bytes
-                .chunks_exact(4)
-                .map(|chunk| u32_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Int32 => IntegerStorage::I32(
-            bytes
-                .chunks_exact(4)
-                .map(|chunk| i32_from(chunk, order))
-                .collect(),
-        ),
-        DataType::UInt64 => IntegerStorage::U64(
-            bytes
-                .chunks_exact(8)
-                .map(|chunk| u64_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Int64 => IntegerStorage::I64(
-            bytes
-                .chunks_exact(8)
-                .map(|chunk| i64_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Single | DataType::Double | DataType::Char | DataType::String => {
-            return Err(read_flow(
-                &READ_ERROR_INTERNAL,
-                "read: expected an integer datatype",
-            ));
-        }
-    })
-}
-
-fn u16_from(bytes: &[u8], order: ByteOrder) -> u16 {
-    match order {
-        ByteOrder::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
-        ByteOrder::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
-    }
-}
-
-fn i16_from(bytes: &[u8], order: ByteOrder) -> i16 {
-    u16_from(bytes, order) as i16
-}
-
-fn u32_from(bytes: &[u8], order: ByteOrder) -> u32 {
-    match order {
-        ByteOrder::Little => u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-        ByteOrder::Big => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-    }
-}
-
-fn i32_from(bytes: &[u8], order: ByteOrder) -> i32 {
-    u32_from(bytes, order) as i32
-}
-
-fn u64_from(bytes: &[u8], order: ByteOrder) -> u64 {
-    match order {
-        ByteOrder::Little => u64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-        ByteOrder::Big => u64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-    }
-}
-
-fn i64_from(bytes: &[u8], order: ByteOrder) -> i64 {
-    u64_from(bytes, order) as i64
-}
-
-fn f32_from(bytes: &[u8], order: ByteOrder) -> f32 {
-    match order {
-        ByteOrder::Little => f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-        ByteOrder::Big => f32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-    }
-}
-
-fn f64_from(bytes: &[u8], order: ByteOrder) -> f64 {
-    match order {
-        ByteOrder::Little => f64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-        ByteOrder::Big => f64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-    }
-}
-
-async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
+async fn parse_arguments(
+    rest: crate::call::BuiltinArguments,
+    known: KnownReadControls,
+) -> BuiltinResult<ReadOptions> {
     match rest.len() {
         0 => Ok(ReadOptions {
             mode: ReadMode::Available,
             datatype: DataType::UInt8,
         }),
         1 => {
-            let count_value = gather_if_needed_async(&rest[0]).await?;
-            let count = parse_count(&count_value)?;
+            let count = match known.count {
+                Some(count) => count,
+                None => parse_count(&gather_if_needed_async(&rest[0]).await?)?,
+            };
             Ok(ReadOptions {
                 mode: ReadMode::Count(count),
                 datatype: DataType::UInt8,
             })
         }
         2 => {
-            let count_value = gather_if_needed_async(&rest[0]).await?;
-            let dtype_value = gather_if_needed_async(&rest[1]).await?;
-            let count = parse_count(&count_value)?;
-            let datatype = parse_datatype(&dtype_value)?;
+            let count = match known.count {
+                Some(count) => count,
+                None => parse_count(&gather_if_needed_async(&rest[0]).await?)?,
+            };
+            let datatype = match known.datatype {
+                Some(datatype) => datatype,
+                None => parse_datatype(&gather_if_needed_async(&rest[1]).await?)?,
+            };
             Ok(ReadOptions {
                 mode: ReadMode::Count(count),
                 datatype,
@@ -759,6 +173,28 @@ async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
         }
         _ => Err(read_error(&READ_ERROR_INVALID_INPUT)),
     }
+}
+
+struct KnownReadControls {
+    count: Option<usize>,
+    datatype: Option<DataType>,
+}
+
+fn preflight_known_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<KnownReadControls> {
+    if rest.len() > 2 {
+        return Err(read_error(&READ_ERROR_INVALID_INPUT));
+    }
+    let count = match rest.first() {
+        Some(Value::GpuTensor(_)) | None => None,
+        Some(count) => Some(parse_count(count)?),
+    };
+    let datatype = match rest.get(1) {
+        Some(Value::GpuTensor(_)) | None => None,
+        Some(datatype) => Some(parse_datatype(datatype)?),
+    };
+    Ok(KnownReadControls { count, datatype })
 }
 
 fn parse_count(value: &Value) -> BuiltinResult<usize> {
@@ -834,431 +270,21 @@ fn parse_integer_count(int: &runmat_value::IntValue) -> BuiltinResult<usize> {
 }
 
 fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
-    let text = match value {
-        Value::String(s) => s.clone(),
-        Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
-        Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-        _ => {
-            return Err(read_flow(
+    let text =
+        crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+            read_flow(
                 &READ_ERROR_INVALID_DATATYPE,
                 "read: datatype must be a string scalar",
-            ))
-        }
-    };
-    let lowered = text.trim().to_ascii_lowercase();
-    let dtype = match lowered.as_str() {
-        "uint8" => DataType::UInt8,
-        "int8" => DataType::Int8,
-        "uint16" => DataType::UInt16,
-        "int16" => DataType::Int16,
-        "uint32" => DataType::UInt32,
-        "int32" => DataType::Int32,
-        "uint64" => DataType::UInt64,
-        "int64" => DataType::Int64,
-        "single" => DataType::Single,
-        "double" => DataType::Double,
-        "char" => DataType::Char,
-        "string" => DataType::String,
-        _ => {
-            return Err(read_flow(
-                &READ_ERROR_INVALID_DATATYPE,
-                format!("read: unsupported datatype '{text}'"),
-            ))
-        }
-    };
-    Ok(dtype)
-}
-
-fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
-    let id_value = struct_field(struct_value, CLIENT_HANDLE_FIELD).ok_or_else(|| {
-        read_flow(
-            &READ_ERROR_INVALID_CLIENT,
-            "read: tcpclient struct is missing internal handle",
-        )
-    })?;
-    match id_value {
-        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
-            read_flow(
-                &READ_ERROR_INVALID_CLIENT,
-                "read: tcpclient struct has invalid handle field",
             )
-        }),
-        _ => Err(read_flow(
-            &READ_ERROR_INVALID_CLIENT,
-            "read: tcpclient struct has invalid handle field",
-        )),
-    }
+        })?;
+    DataType::parse(&text).ok_or_else(|| {
+        read_flow(
+            &READ_ERROR_INVALID_DATATYPE,
+            format!("read: unsupported datatype '{text}'"),
+        )
+    })
 }
 
-fn struct_field<'a>(value: &'a StructValue, name: &str) -> Option<&'a Value> {
-    value.fields.get(name)
-}
-
-fn parse_byte_order(text: &str) -> ByteOrder {
-    if text.eq_ignore_ascii_case("big-endian") || text.eq_ignore_ascii_case("big endian") {
-        ByteOrder::Big
-    } else {
-        ByteOrder::Little
-    }
-}
-
-struct NonBlockingGuard {
-    stream: *const TcpStream,
-}
-
-impl NonBlockingGuard {
-    fn enter(stream: &TcpStream) -> io::Result<Self> {
-        stream.set_nonblocking(true)?;
-        Ok(NonBlockingGuard {
-            stream: stream as *const TcpStream,
-        })
-    }
-}
-
-impl Drop for NonBlockingGuard {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(stream) = self.stream.as_ref() {
-                let _ = stream.set_nonblocking(false);
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::builtins::io::net::accept::{
-        configure_stream, insert_client, remove_client_for_test,
-    };
-    use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
-    use std::io::Write;
-    use std::net::{TcpListener, TcpStream};
-    use std::thread;
-    use std::time::Duration;
-
-    fn make_client(stream: TcpStream, timeout: f64) -> Value {
-        let peer_addr = stream.peer_addr().expect("peer addr");
-        configure_stream(&stream, timeout).expect("configure stream");
-        let client_id = insert_client(stream, 0, peer_addr, timeout, "little-endian".to_string());
-        let mut st = StructValue::new();
-        st.fields.insert(
-            CLIENT_HANDLE_FIELD.to_string(),
-            Value::Int(IntValue::U64(client_id)),
-        );
-        Value::Struct(st)
-    }
-
-    fn client_id(client: &Value) -> u64 {
-        match client {
-            Value::Struct(st) => match st.fields.get(CLIENT_HANDLE_FIELD) {
-                Some(Value::Int(IntValue::U64(id))) => *id,
-                Some(Value::Int(iv)) => iv.to_i64() as u64,
-                other => panic!("unexpected id field {other:?}"),
-            },
-            other => panic!("expected struct, got {other:?}"),
-        }
-    }
-
-    fn assert_error_identifier(err: RuntimeError, expected: &str) {
-        assert_eq!(err.identifier(), Some(expected));
-    }
-
-    #[test]
-    fn typed_read_count_and_handle_parsers_are_exact() {
-        assert_eq!(parse_count(&Value::Int(IntValue::U64(42))).unwrap(), 42);
-        assert!(parse_count(&Value::Int(IntValue::U8(0))).is_err());
-        assert!(parse_count(&Value::Num(2.5)).is_err());
-        assert!(parse_count(&Value::Int(IntValue::I8(-1))).is_err());
-        let maximum = parse_count(&Value::Int(IntValue::U64(u64::MAX)));
-        if usize::BITS == 64 {
-            assert_eq!(maximum.unwrap(), usize::MAX);
-        } else {
-            assert!(maximum.is_err());
-        }
-
-        let typed_count =
-            Tensor::new_integer(IntegerStorage::U64(vec![42]), vec![1, 1]).expect("count");
-        assert_eq!(parse_count(&Value::Tensor(typed_count)).unwrap(), 42);
-
-        let boundary = parse_count(&Value::Num(usize::MAX as f64));
-        if usize::BITS == 64 {
-            assert!(boundary.is_err());
-        } else {
-            assert_eq!(boundary.unwrap(), usize::MAX);
-        }
-        assert!(parse_count(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
-
-        let typed_negative =
-            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("count");
-        assert!(parse_count(&Value::Tensor(typed_negative)).is_err());
-
-        let typed_max =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("count");
-        let maximum = parse_count(&Value::Tensor(typed_max));
-        if usize::BITS == 64 {
-            assert_eq!(maximum.unwrap(), usize::MAX);
-        } else {
-            assert!(maximum.is_err());
-        }
-
-        let mut client = StructValue::new();
-        client.fields.insert(
-            CLIENT_HANDLE_FIELD.to_string(),
-            Value::Int(IntValue::I8(-1)),
-        );
-        let err = extract_client_id(&client).unwrap_err();
-        assert_error_identifier(err, READ_ERROR_INVALID_CLIENT.identifier.unwrap());
-    }
-
-    fn run_read(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(read_builtin(client, rest))
-    }
-
-    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
-    }
-
-    fn integer_bytes(storage: &IntegerStorage, order: ByteOrder) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        match storage {
-            IntegerStorage::I8(values) => bytes.extend(values.iter().map(|value| *value as u8)),
-            IntegerStorage::U8(values) => bytes.extend_from_slice(values),
-            IntegerStorage::I16(values) => {
-                for value in values {
-                    bytes.extend_from_slice(&match order {
-                        ByteOrder::Little => value.to_le_bytes(),
-                        ByteOrder::Big => value.to_be_bytes(),
-                    });
-                }
-            }
-            IntegerStorage::U16(values) => {
-                for value in values {
-                    bytes.extend_from_slice(&match order {
-                        ByteOrder::Little => value.to_le_bytes(),
-                        ByteOrder::Big => value.to_be_bytes(),
-                    });
-                }
-            }
-            IntegerStorage::I32(values) => {
-                for value in values {
-                    bytes.extend_from_slice(&match order {
-                        ByteOrder::Little => value.to_le_bytes(),
-                        ByteOrder::Big => value.to_be_bytes(),
-                    });
-                }
-            }
-            IntegerStorage::U32(values) => {
-                for value in values {
-                    bytes.extend_from_slice(&match order {
-                        ByteOrder::Little => value.to_le_bytes(),
-                        ByteOrder::Big => value.to_be_bytes(),
-                    });
-                }
-            }
-            IntegerStorage::I64(values) => {
-                for value in values {
-                    bytes.extend_from_slice(&match order {
-                        ByteOrder::Little => value.to_le_bytes(),
-                        ByteOrder::Big => value.to_be_bytes(),
-                    });
-                }
-            }
-            IntegerStorage::U64(values) => {
-                for value in values {
-                    bytes.extend_from_slice(&match order {
-                        ByteOrder::Little => value.to_le_bytes(),
-                        ByteOrder::Big => value.to_be_bytes(),
-                    });
-                }
-            }
-        }
-        bytes
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn read_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = READ_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"data = read(client)"));
-        assert!(labels.contains(&"data = read(client, count)"));
-        assert!(labels.contains(&"data = read(client, count, datatype)"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn read_reads_requested_uint8_values() {
-        let _guard = net_guard();
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
-        let port = listener.local_addr().unwrap().port();
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let payload: Vec<u8> = (1..=10).collect();
-            stream.write_all(&payload).expect("write");
-        });
-
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 1.0);
-
-        let data = run_read(client.clone(), vec![Value::Num(6.0)]).expect("read");
-        let tensor = match data {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor result, got {other:?}"),
-        };
-        assert_eq!(tensor.shape, vec![1, 6]);
-        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-
-        handle.join().expect("server thread");
-        remove_client_for_test(client_id(&client));
-    }
-
-    #[test]
-    fn bytes_to_value_preserves_all_integer_classes_in_both_byte_orders() {
-        let cases = [
-            (DataType::Int8, IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
-            (DataType::UInt8, IntegerStorage::U8(vec![0, u8::MAX])),
-            (
-                DataType::Int16,
-                IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
-            ),
-            (DataType::UInt16, IntegerStorage::U16(vec![0, u16::MAX])),
-            (
-                DataType::Int32,
-                IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
-            ),
-            (DataType::UInt32, IntegerStorage::U32(vec![0, u32::MAX])),
-            (
-                DataType::Int64,
-                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
-            ),
-            (
-                DataType::UInt64,
-                IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
-            ),
-        ];
-
-        for order in [ByteOrder::Little, ByteOrder::Big] {
-            for (datatype, expected) in &cases {
-                let decoded = bytes_to_value(&integer_bytes(expected, order), *datatype, order)
-                    .expect("typed decode");
-                let Value::Tensor(tensor) = decoded else {
-                    panic!("expected tensor");
-                };
-                assert_eq!(tensor.integer_storage(), Some(expected));
-            }
-        }
-    }
-
-    #[test]
-    fn read_default_uint8_and_explicit_single_output_classes_are_truthful() {
-        let default = bytes_to_value(&[1, 2, 255], DataType::UInt8, ByteOrder::Little)
-            .expect("default decode");
-        let Value::Tensor(default) = default else {
-            panic!("expected default tensor");
-        };
-        assert_eq!(
-            default.integer_storage(),
-            Some(&IntegerStorage::U8(vec![1, 2, 255]))
-        );
-
-        let bytes = [1.25_f32, -2.5_f32]
-            .into_iter()
-            .flat_map(f32::to_le_bytes)
-            .collect::<Vec<_>>();
-        let single =
-            bytes_to_value(&bytes, DataType::Single, ByteOrder::Little).expect("single decode");
-        let Value::Tensor(single) = single else {
-            panic!("expected single tensor");
-        };
-        assert_eq!(single.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(single.materialize_f64(), vec![1.25, -2.5]);
-    }
-
-    #[test]
-    fn read_requested_uint64_preserves_exact_socket_values() {
-        let _guard = net_guard();
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
-        let port = listener.local_addr().unwrap().port();
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            stream
-                .write_all(
-                    &[1_u64 << 63, u64::MAX]
-                        .into_iter()
-                        .flat_map(u64::to_le_bytes)
-                        .collect::<Vec<_>>(),
-                )
-                .expect("write");
-        });
-
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 1.0);
-        let data =
-            run_read(client.clone(), vec![Value::Num(2.0), Value::from("uint64")]).expect("read");
-        let Value::Tensor(tensor) = data else {
-            panic!("expected tensor");
-        };
-        assert_eq!(
-            tensor.integer_storage(),
-            Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
-        );
-
-        handle.join().expect("server thread");
-        remove_client_for_test(client_id(&client));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn read_without_count_drains_available_bytes() {
-        let _guard = net_guard();
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
-        let port = listener.local_addr().unwrap().port();
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            std::thread::sleep(Duration::from_millis(50));
-            let payload: Vec<u8> = vec![42, 43, 44];
-            stream.write_all(&payload).expect("write");
-        });
-
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 1.0);
-
-        let data = run_read(client.clone(), Vec::new()).expect("read");
-        let tensor = match data {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor result, got {other:?}"),
-        };
-        assert_eq!(tensor.shape, vec![1, 3]);
-        assert_eq!(tensor.materialize_f64(), vec![42.0, 43.0, 44.0]);
-
-        handle.join().expect("server thread");
-        remove_client_for_test(client_id(&client));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn read_respects_timeout() {
-        let _guard = net_guard();
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
-        let port = listener.local_addr().unwrap().port();
-        let _handle = thread::spawn(move || {
-            let (stream, _) = listener.accept().expect("accept");
-            // Keep the connection open well beyond the client timeout so the
-            // read call experiences a timeout rather than a clean closure.
-            std::thread::sleep(Duration::from_millis(500));
-            drop(stream);
-        });
-
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 0.1);
-
-        let err = run_read(client.clone(), vec![Value::Num(4.0)]).unwrap_err();
-        assert_error_identifier(err, READ_ERROR_TIMEOUT.identifier.unwrap());
-
-        remove_client_for_test(client_id(&client));
-    }
-}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "read/tests.rs"]
+pub(crate) mod tests;

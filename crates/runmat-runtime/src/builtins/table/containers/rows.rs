@@ -32,7 +32,13 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
             Ok(Value::Num(tensor.get2(row, 0).map_err(invalid_index)?))
         }
         Value::Tensor(_) => select_rows(value, &[row]),
-        Value::ComplexTensor(tensor) if tensor.cols == 1 => {
+        Value::ComplexTensor(tensor)
+            if tensor.cols() == 1
+                && matches!(
+                    tensor.complex_storage(),
+                    runmat_value::ComplexStorage::F64(_)
+                ) =>
+        {
             let value = tensor
                 .materialize_f64()
                 .get(row)
@@ -42,7 +48,7 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
         }
         Value::ComplexTensor(_) => select_rows(value, &[row]),
         Value::StringArray(array) if array.cols() == 1 => Ok(Value::String(
-            array.data.get(row).cloned().unwrap_or_default(),
+            array.data().get(row).cloned().unwrap_or_default(),
         )),
         Value::StringArray(_) => select_rows(value, &[row]),
         Value::LogicalArray(array) if array.shape.get(1).copied().unwrap_or(1) == 1 => {
@@ -56,15 +62,18 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
                 return Err(invalid_index("table2cell: char row out of bounds"));
             }
             let start = row * array.cols;
-            CharArray::new(
-                array.data[start..start + array.cols].to_vec(),
+            CharArray::from_code_units(
+                array.data()[start..start + array.cols].to_vec(),
                 1,
                 array.cols,
             )
             .map(Value::CharArray)
             .map_err(invalid_variable)
         }
-        Value::Object(obj) if obj.is_class("datetime") || obj.is_class("duration") => {
+        Value::Object(obj)
+            if obj.is_class(runmat_types::standard::DATETIME)
+                || obj.is_class(runmat_types::standard::DURATION) =>
+        {
             select_rows(value, &[row])
         }
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => select_rows(value, &[row]),

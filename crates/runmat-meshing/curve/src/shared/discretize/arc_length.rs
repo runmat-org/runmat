@@ -22,10 +22,10 @@ pub(crate) fn world_arc_length(
             .arc_length_m(
                 &edge.curve_evaluator_id,
                 range,
-                absolute_error_m / scale,
+                runmat_geometry_core::physical::Length::new(absolute_error_m / scale),
                 control,
             )
-            .map(|length| length * scale)
+            .map(|length| length.canonical_value() * scale)
             .map_err(|error| geometry_error(edge, error));
     }
     let speed = |parameter| {
@@ -35,7 +35,13 @@ pub(crate) fn world_arc_length(
         let derivatives = curves
             .derivatives(&edge.curve_evaluator_id, parameter, control)
             .map_err(|error| geometry_error(edge, error))?;
-        let value = norm(transform.transform_vector(derivatives.first_m));
+        let value = norm(
+            transform.transform_vector(
+                derivatives
+                    .first_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
+        );
         if !value.is_finite() || value <= 0.0 {
             return Err(edge_error(
                 edge,
@@ -47,7 +53,7 @@ pub(crate) fn world_arc_length(
         Ok(value)
     };
     let start = speed(range.start)?;
-    let midpoint_parameter = (range.start + range.end) * 0.5;
+    let midpoint_parameter = range.start.midpoint(range.end);
     let midpoint = speed(midpoint_parameter)?;
     let end = speed(range.end)?;
     AdaptiveArcLength {
@@ -79,9 +85,9 @@ impl AdaptiveArcLength<'_> {
         tolerance: f64,
         depth: u16,
     ) -> Result<f64, SharedCurveError> {
-        let midpoint = (start + end) * 0.5;
-        let left_midpoint = (start + midpoint) * 0.5;
-        let right_midpoint = (midpoint + end) * 0.5;
+        let midpoint = start.midpoint(end);
+        let left_midpoint = start.midpoint(midpoint);
+        let right_midpoint = midpoint.midpoint(end);
         let left_value = (self.speed)(left_midpoint)?;
         let right_value = (self.speed)(right_midpoint)?;
         let whole = (end - start) * (values[0] + 4.0 * values[1] + values[2]) / 6.0;

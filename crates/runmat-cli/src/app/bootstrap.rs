@@ -3,13 +3,25 @@ use env_logger::Env;
 use log::{debug, error, info, warn};
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_config::runtime::{
-    self as config, ConfigLoader, FeaArtifactStoreMode, PlotMode, RunMatRuntimeConfig,
+    self as config, ConfigLoadOptions, ConfigLoader, ConfigSource, FeaArtifactStoreMode, PlotMode,
+    ResolvedRuntimeConfig, RunMatRuntimeConfig,
 };
 
 use crate::app::dispatch;
 use crate::cli::{Cli, CliOverrideSources, Commands, GcPreset, LogLevel, OptLevel};
 use crate::logging::format_log_record;
 use crate::telemetry;
+
+/// Install a lazy local host port for CLI-owned worker entry points. This does
+/// not read credentials or contact Server until an FEA root asks for admission.
+pub fn install_local_fea_admission(
+    org: Option<uuid::Uuid>,
+) -> Result<runmat_runtime::analysis::fea_run_admission::FeaRunAdmissionGuard> {
+    runmat_runtime::analysis::fea_run_admission::replace_fea_run_admission(Some(
+        std::sync::Arc::new(super::fea_admission::CliFeaAdmission::new(org)),
+    ))
+    .map_err(anyhow::Error::msg)
+}
 
 pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     crate::presentation::initialize(cli.color, crate::presentation::cli_output_mode(&cli));
@@ -19,13 +31,37 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         return Ok(());
     }
 
-    let mut config = match load_configuration(&cli) {
-        Ok(c) => c,
-        Err(e) => return Err(e),
-    };
-    apply_cli_overrides(&mut config, &cli, &sources);
+    let mut resolved = load_configuration(&cli)?;
+    apply_cli_overrides(&mut resolved.config, &cli, &sources);
+    mark_cli_sources(&mut resolved, &cli, &sources);
+    let config = resolved.config;
 
-    telemetry::init(&config.telemetry);
+    // Configuration inspection/editing must not initialize execution, GPU or
+    // collectors. The values and sources here include explicit CLI overrides.
+    if let Some(Commands::Config { config_command }) = &cli.command {
+        if matches!(
+            config_command,
+            crate::cli::ConfigCommand::Show {
+                provenance: true,
+                ..
+            }
+        ) {
+            let canonical: serde_json::Value =
+                serde_json::from_str(&ConfigLoader::render_runtime_config(
+                    &config,
+                    std::path::Path::new("resolved.json"),
+                )?)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"config":canonical,"sources":resolved.sources})
+                )?
+            );
+            return Ok(());
+        }
+        return crate::commands::config::execute_config_command(config_command.clone(), &config)
+            .await;
+    }
 
     let log_level = if config.logging.debug || cli.debug {
         log::LevelFilter::Debug
@@ -39,97 +75,179 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         }
     };
 
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+    let terminal_logger = env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .filter_level(log_level)
         .format(format_log_record)
-        .init();
+        .build();
+    let logging = crate::observability::init_with_terminal(&config.logging, terminal_logger)
+        .map_err(|error| anyhow::anyhow!("failed to initialize CLI logging: {error}"))?;
 
-    info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
-    debug!("Configuration loaded: {config:?}");
+    // Installing this port performs no credential reads, transport setup or
+    // network requests. Only an admitted local FEA root calls the provider.
+    let _fea_admission = install_local_fea_admission(super::fea_admission::organization(&cli))?;
 
-    configure_gc_from_config(&config)?;
+    let result = async move {
+        telemetry::init(&config.telemetry);
+        info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
+        debug!("Configuration loaded: {config:?}");
 
-    let compilation_only = matches!(cli.command, Some(Commands::Compile { .. }));
+        let compilation_only = matches!(
+            cli.command,
+            Some(
+                Commands::Compile { .. } | Commands::Mesh { .. } | Commands::NativeInterface { .. }
+            )
+        );
+        let wants_gui = match config.plotting.mode {
+            PlotMode::Gui => !compilation_only && !config.plotting.force_headless,
+            PlotMode::Auto => {
+                !compilation_only && !config.plotting.force_headless && is_gui_available()
+            }
+            PlotMode::Headless => false,
+        };
+
+        #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+        if wants_gui && super::native_graphics::applies(&cli) {
+            return super::native_graphics::run(cli, config);
+        }
+
+        initialize_execution_lane(&config, compilation_only)?;
+
+        let _gui_initialized = if wants_gui {
+            info!("Initializing GUI plotting system");
+
+            runmat_plot::register_main_thread();
+
+            match runmat_plot::gui::initialize_native_window() {
+                Ok(()) => {
+                    info!("Native window system initialized successfully");
+                }
+                Err(e) => {
+                    info!("Native window initialization failed: {e}, using thread manager");
+                }
+            }
+
+            match runmat_plot::initialize_gui_manager() {
+                Ok(()) => {
+                    info!("GUI thread manager initialized successfully");
+
+                    match runmat_plot::health_check_global() {
+                        Ok(result) => {
+                            info!("GUI system health check: {result}");
+                            true
+                        }
+                        Err(e) => {
+                            error!("GUI system health check failed: {e}");
+                            true
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to initialize GUI thread manager: {e}");
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        let _meshing_execution_provider =
+            runmat_runtime::meshing::replace_meshing_execution_provider(Some(
+                crate::commands::mesh::meshing_execution_provider(),
+            ))
+            .map_err(|error| {
+                anyhow::anyhow!("failed to install native meshing execution: {error}")
+            })?;
+
+        dispatch::dispatch(&cli, &config).await
+    }
+    .await;
+    crate::observability::complete_command(result, logging)
+}
+
+pub(super) fn initialize_execution_lane(
+    config: &RunMatRuntimeConfig,
+    compilation_only: bool,
+) -> Result<()> {
+    configure_gc_from_config(config)?;
     if !compilation_only {
         let accel_options: AccelerateInitOptions = (&config.accelerate).into();
         runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
-
-        configure_plotting_from_config(&config);
-        configure_analysis_from_config(&config)?;
-        report_plot_context_status(&config);
+        configure_plotting_from_config(config);
+        configure_analysis_from_config(config)?;
+        report_plot_context_status(config);
     }
-
-    let wants_gui = match config.plotting.mode {
-        PlotMode::Gui => !compilation_only,
-        PlotMode::Auto => {
-            !compilation_only && !config.plotting.force_headless && is_gui_available()
-        }
-        PlotMode::Headless => false,
-    };
-
-    let _gui_initialized = if wants_gui {
-        info!("Initializing GUI plotting system");
-
-        runmat_plot::register_main_thread();
-
-        match runmat_plot::gui::initialize_native_window() {
-            Ok(()) => {
-                info!("Native window system initialized successfully");
-            }
-            Err(e) => {
-                info!("Native window initialization failed: {e}, using thread manager");
-            }
-        }
-
-        match runmat_plot::initialize_gui_manager() {
-            Ok(()) => {
-                info!("GUI thread manager initialized successfully");
-
-                match runmat_plot::health_check_global() {
-                    Ok(result) => {
-                        info!("GUI system health check: {result}");
-                        true
-                    }
-                    Err(e) => {
-                        error!("GUI system health check failed: {e}");
-                        true
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Failed to initialize GUI thread manager: {e}");
-                false
-            }
-        }
-    } else {
-        false
-    };
-
-    dispatch::dispatch(&cli, &config).await
+    Ok(())
 }
 
 /// Load configuration from files and environment
-fn load_configuration(cli: &Cli) -> Result<RunMatRuntimeConfig> {
-    if let Some(config_file) = &cli.config {
-        if config_file.is_dir() {
-            error!(
-                "Specified config path is a directory, expected a file: {}",
-                config_file.display()
-            );
-            std::process::exit(1);
-        }
-        if !config_file.is_file() {
-            error!(
-                "Specified config file does not exist: {}",
-                config_file.display()
-            );
-            std::process::exit(1);
-        }
-        info!("Loading configuration from: {}", config_file.display());
-        return ConfigLoader::load_from_file(config_file);
-    }
+fn load_configuration(cli: &Cli) -> Result<ResolvedRuntimeConfig> {
+    ConfigLoader::load_with_options(&ConfigLoadOptions {
+        explicit_file: cli.config.clone(),
+        ..ConfigLoadOptions::native()
+    })
+}
 
-    ConfigLoader::load()
+fn mark_cli_sources(resolved: &mut ResolvedRuntimeConfig, cli: &Cli, sources: &CliOverrideSources) {
+    for (field, provided, argument) in [
+        ("jit.enabled", cli.no_jit, "--no-jit"),
+        ("jit.threshold", sources.jit_threshold, "--jit-threshold"),
+        (
+            "jit.optimization_level",
+            sources.jit_opt_level,
+            "--jit-opt-level",
+        ),
+        (
+            "callstack_limit",
+            sources.callstack_limit,
+            "--callstack-limit",
+        ),
+        (
+            "error_namespace",
+            cli.error_namespace.is_some(),
+            "--error-namespace",
+        ),
+        ("verbose", sources.verbose, "--verbose"),
+        ("gc.preset", cli.gc_preset.is_some(), "--gc-preset"),
+        (
+            "gc.young_size_mb",
+            cli.gc_young_size.is_some(),
+            "--gc-young-size",
+        ),
+        ("gc.threads", cli.gc_threads.is_some(), "--gc-threads"),
+        ("gc.collect_stats", sources.gc_stats, "--gc-stats"),
+        ("plotting.mode", cli.plot_mode.is_some(), "--plot-mode"),
+        (
+            "plotting.force_headless",
+            cli.plot_headless,
+            "--plot-headless",
+        ),
+        (
+            "plotting.backend",
+            cli.plot_backend.is_some(),
+            "--plot-backend",
+        ),
+        (
+            "plotting.scatter_target_points",
+            cli.plot_scatter_target.is_some(),
+            "--plot-scatter-target",
+        ),
+        (
+            "plotting.surface_vertex_budget",
+            cli.plot_surface_vertex_budget.is_some(),
+            "--plot-surface-vertex-budget",
+        ),
+        ("logging.debug", sources.debug, "--debug"),
+        ("logging.level", sources.log_level, "--log-level"),
+    ] {
+        if provided {
+            resolved.sources.insert(
+                format!("runtime.{field}"),
+                ConfigSource::CommandLine {
+                    argument: argument.into(),
+                },
+            );
+        }
+    }
 }
 
 /// Apply CLI argument overrides to configuration
@@ -288,7 +406,6 @@ fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
 
 fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
     use runmat_runtime::analysis::{self, storage};
-    use runmat_runtime::geometry;
 
     let artifact_root = config
         .fea
@@ -317,25 +434,10 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
-        thermo_field_artifact_root: config
-            .fea
-            .thermo_field_artifact_root
-            .clone()
-            .or_else(|| Some(artifact_root.join("thermo-fields"))),
+        // Sized from this host's admitted memory (the shared machine-capacity authority).
+        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes(),
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
-    geometry::configure_prep_artifacts(geometry::GeometryPrepArtifactConfig {
-        artifact_root: config
-            .fea
-            .geometry_prep_artifact_root
-            .clone()
-            .or_else(|| Some(artifact_root.join("geometry-prep"))),
-        max_artifacts: config.fea.geometry_prep_max_artifacts,
-        max_artifacts_per_geometry: config.fea.geometry_prep_max_artifacts_per_geometry,
-        max_age_seconds: config.fea.geometry_prep_max_age_seconds,
-        require_latest_revision: config.fea.geometry_prep_require_latest_revision,
-    })
-    .map_err(|err| anyhow::anyhow!("Failed to configure geometry prep artifacts: {err}"))?;
     Ok(())
 }
 

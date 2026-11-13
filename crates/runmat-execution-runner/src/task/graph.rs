@@ -12,6 +12,32 @@ pub struct TaskGraph {
 }
 
 impl TaskGraph {
+    pub(crate) fn validate_submissions<'a>(
+        &self,
+        submissions: impl Iterator<Item = (TaskId, &'a BTreeSet<TaskId>)>,
+    ) -> RunnerResult<()> {
+        let mut expected = Self::default();
+        for (task, dependencies) in submissions {
+            expected.dependencies.insert(task, dependencies.clone());
+            for dependency in dependencies {
+                expected
+                    .dependents
+                    .entry(*dependency)
+                    .or_default()
+                    .insert(task);
+            }
+        }
+        if self != &expected {
+            return Err(RunnerError::Invalid(
+                "snapshot graph differs from task admissions".into(),
+            ));
+        }
+        if self.has_cycle() {
+            return Err(RunnerError::DependencyCycle);
+        }
+        Ok(())
+    }
+
     pub fn insert(&mut self, task_id: TaskId, dependencies: BTreeSet<TaskId>) -> RunnerResult<()> {
         if self.dependencies.contains_key(&task_id) {
             return Err(RunnerError::Invalid(format!(

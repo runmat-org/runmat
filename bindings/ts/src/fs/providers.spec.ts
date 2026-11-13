@@ -15,6 +15,19 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 describe("in-memory filesystem provider", () => {
+  it("publishes complete objects once and returns independent winner bytes", async () => {
+    const provider = createInMemoryFsProvider();
+    const original = encoder.encode("first");
+    expect(await provider.atomicCreateNew!("/object", original)).toEqual({ kind: "published", result: { durability: "atomic_visibility" } });
+    original.fill(0);
+    const loser = await provider.atomicCreateNew!("/object", encoder.encode("second"));
+    expect(loser).toEqual({ kind: "existing", result: Array.from(encoder.encode("first")) });
+    if (loser.kind === "existing") loser.result.fill(0);
+    expect(toText(provider.readFile("/object"))).toBe("first");
+    provider.createDir!("/directory");
+    expect(() => provider.atomicCreateNew!("/directory", original)).toThrow();
+  });
+
   it("supports basic file workflow", () => {
     const provider = createInMemoryFsProvider({
       initialFiles: {
@@ -37,7 +50,35 @@ describe("in-memory filesystem provider", () => {
 
     provider.removeFile("/tmp/file.txt");
     provider.removeDir?.("/tmp");
-    expect(() => provider.metadata("/tmp/file.txt")).toThrow();
+    for (const operation of [
+      () => provider.metadata("/tmp/file.txt"),
+      () => provider.readFile("/tmp/file.txt"),
+      () => provider.readDir("/tmp"),
+      () => provider.removeFile("/tmp/file.txt"),
+      () => provider.rename?.("/tmp/file.txt", "/replaced"),
+      () => provider.setReadonly?.("/tmp/file.txt", true)
+    ]) {
+      expect(operation).toThrowError(expect.objectContaining({ name: "NotFoundError", status: 404 }));
+    }
+    // Existing directories are not missing files; do not turn a type mismatch
+    // into a source-probe miss at the JS/WASM boundary.
+    expect(() => provider.readFile("/")).toThrow("not a file");
+  });
+
+  it("seeds nested initial files without changing ordinary write parent checks", () => {
+    const provider = createInMemoryFsProvider({
+      initialFiles: {
+        "/occupied/keep": "keep",
+        "/source/child": "value"
+      }
+    });
+    expect(toText(provider.readFile("/occupied/keep"))).toBe("keep");
+    expect(toText(provider.readFile("/source/child"))).toBe("value");
+    expect(provider.readDir("/").map((entry) => entry.fileName)).toEqual(["occupied", "source"]);
+    expect(() => provider.writeFile("/missing/child", encoder.encode("no parent"))).toThrow();
+    expect(() => createInMemoryFsProvider({
+      initialFiles: { "/file": "file", "/file/child": "invalid" }
+    })).toThrow();
   });
 });
 
@@ -47,9 +88,9 @@ describe("indexeddb filesystem provider", () => {
     const handle1 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
     const provider1 = handle1.provider;
 
-    provider1.createDirAll?.("/data/cache");
-    provider1.writeFile("/data/cache/foo.txt", encoder.encode("cached"));
-    expect(toText(provider1.readFile("/data/cache/foo.txt"))).toBe("cached");
+    await provider1.createDirAll?.("/data/cache");
+    await provider1.writeFile("/data/cache/foo.txt", encoder.encode("cached"));
+    expect(toText(await provider1.readFile("/data/cache/foo.txt"))).toBe("cached");
 
     await handle1.flush();
     handle1.close();
@@ -57,10 +98,10 @@ describe("indexeddb filesystem provider", () => {
     const handle2 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
     const provider2 = handle2.provider;
 
-    const payload = provider2.readFile("/data/cache/foo.txt");
+    const payload = await provider2.readFile("/data/cache/foo.txt");
     expect(toText(payload)).toBe("cached");
 
-    const listing = provider2.readDir("/data/cache");
+    const listing = await provider2.readDir("/data/cache");
     expect(listing).toHaveLength(1);
     expect(listing[0]?.fileName).toBe("foo.txt");
 
@@ -76,17 +117,17 @@ describe("indexeddb filesystem provider", () => {
     const handle2 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
 
     try {
-      handle2.provider.writeFile("/test.jpg", new Uint8Array([1, 2, 3]));
-      expect(handle1.provider.readFile("/test.jpg")).toEqual(new Uint8Array([1, 2, 3]));
+      await handle2.provider.writeFile("/test.jpg", new Uint8Array([1, 2, 3]));
+      expect(await handle1.provider.readFile("/test.jpg")).toEqual(new Uint8Array([1, 2, 3]));
 
       handle1.close();
-      handle2.provider.writeFile("/after-close.txt", encoder.encode("still-live"));
+      await handle2.provider.writeFile("/after-close.txt", encoder.encode("still-live"));
       await handle2.flush();
       handle2.close();
 
       const handle3 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
       try {
-        expect(toText(handle3.provider.readFile("/after-close.txt"))).toBe("still-live");
+        expect(toText(await handle3.provider.readFile("/after-close.txt"))).toBe("still-live");
       } finally {
         handle3.close();
       }
@@ -97,22 +138,16 @@ describe("indexeddb filesystem provider", () => {
     }
   });
 
-  it("rejects incompatible shared backing options for the same database", async () => {
+  it("permits independent handles with transaction-local clocks", async () => {
     const dbName = `runmat-test-options-${Date.now()}`;
-    const now = () => 1;
-    const handle = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now });
-
+    const a = await createIndexedDbFsHandle({ dbName, now: () => 1 });
+    const b = await createIndexedDbFsHandle({ dbName, now: () => 2 });
     try {
-      await expect(createIndexedDbFsHandle({ dbName, flushDebounceMs: 0, now })).rejects.toThrow(
-        /flushDebounceMs/
-      );
-      await expect(
-        createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now: () => 2 })
-      ).rejects.toThrow(/now/);
-    } finally {
-      handle.close();
-      await deleteDatabase(dbName);
-    }
+      await a.provider.writeFile("/a", encoder.encode("a"));
+      await b.provider.writeFile("/b", encoder.encode("b"));
+      expect((await b.provider.metadata("/a")).modified).toBe(1);
+      expect((await a.provider.metadata("/b")).modified).toBe(2);
+    } finally { a.close(); b.close(); await deleteDatabase(dbName); }
   });
 });
 
@@ -122,19 +157,19 @@ describe("default filesystem provider", () => {
     const provider2 = await createDefaultFsProvider();
 
     expect(provider2).toBe(provider1);
-    provider1.writeFile("/default-shared.txt", encoder.encode("shared"));
-    expect(toText(provider2.readFile("/default-shared.txt"))).toBe("shared");
+    await provider1.writeFile("/default-shared.txt", encoder.encode("shared"));
+    expect(toText(await provider2.readFile("/default-shared.txt"))).toBe("shared");
   });
 
   it("uses persistent storage when IndexedDB is available", async () => {
     const provider1 = await createDefaultFsProvider();
-    provider1.createDirAll?.("/auto");
-    provider1.writeFile("/auto/state.txt", encoder.encode("auto"));
+    await provider1.createDirAll?.("/auto");
+    await provider1.writeFile("/auto/state.txt", encoder.encode("auto"));
 
     await delay(100);
 
     const provider2 = await createDefaultFsProvider();
-    const payload = provider2.readFile("/auto/state.txt");
+    const payload = await provider2.readFile("/auto/state.txt");
     expect(toText(payload)).toBe("auto");
   });
 });

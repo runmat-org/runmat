@@ -36,6 +36,7 @@ pub fn recover_exact_face_chart_domains(
                 &chart.pslg,
                 context.cancellation,
                 delaunay_options,
+                Some(context.geometry_control),
             )
             .map_err(|failure| delaunay_error(source, failure))?;
             let trimmed = carve_validated_face_domain(
@@ -43,6 +44,7 @@ pub fn recover_exact_face_chart_domains(
                 &chart.pslg,
                 context.cancellation,
                 delaunay_options,
+                Some(context.geometry_control),
             )
             .map_err(|failure| delaunay_error(source, failure))?;
             Ok(ExactFaceChartConstrainedDomain {
@@ -105,6 +107,7 @@ pub fn validate_exact_face_chart_domains(
             &chart.pslg,
             context.cancellation,
             delaunay_options,
+            Some(context.geometry_control),
         )
         .map_err(|failure| delaunay_error(source, failure))?;
         validate_face_trimmed_topology(
@@ -113,6 +116,7 @@ pub fn validate_exact_face_chart_domains(
             &chart.pslg,
             context.cancellation,
             delaunay_options,
+            Some(context.geometry_control),
         )
         .map_err(|failure| delaunay_error(source, failure))?;
     }

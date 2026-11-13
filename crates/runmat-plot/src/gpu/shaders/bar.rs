@@ -1,4 +1,5 @@
 pub const F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+{{FINITE_F32_HELPER}}
 
 const VERTICES_PER_BAR: u32 = 6u;
 
@@ -17,7 +18,7 @@ struct BarParams {
     group_index: u32,
     group_count: u32,
     orientation: u32,
-    layout: u32,
+    bar_layout: u32,
 };
 
 @group(0) @binding(0)
@@ -101,26 +102,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         + per_group_width * f32(min(params.group_index, safe_group_count - 1u))
         + per_group_width * 0.5;
     let source_stride = max(params.source_row_count, 1u);
-    let value_index = if (params.transpose_source == 1u) {
-        idx * source_stride + params.series_index
+    var value_index: u32;
+    if (params.transpose_source == 1u) {
+        value_index = idx * source_stride + params.series_index;
     } else {
-        params.series_index * source_stride + idx
-    };
+        value_index = params.series_index * source_stride + idx;
+    }
     let value = values[value_index];
 
     var base_pos = 0.0;
     var base_neg = 0.0;
-    if (params.layout == 1u && params.series_index > 0u) {
+    if (params.bar_layout == 1u && params.series_index > 0u) {
         var col: u32 = 0u;
         loop {
             if (col >= params.series_index) {
                 break;
             }
-            let prev_index = if (params.transpose_source == 1u) {
-                idx * source_stride + col
+            var prev_index: u32;
+            if (params.transpose_source == 1u) {
+                prev_index = idx * source_stride + col;
             } else {
-                col * source_stride + idx
-            };
+                prev_index = col * source_stride + idx;
+            }
             let prev = values[prev_index];
             if (isFinite(prev)) {
                 if (prev >= 0.0) {
@@ -138,7 +141,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!isFinite(value)) {
         start = 0.0;
         end = 0.0;
-    } else if (params.layout == 1u) {
+    } else if (params.bar_layout == 1u) {
         if (value >= 0.0) {
             start = base_pos;
             end = base_pos + value;
@@ -151,11 +154,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         end = value;
     }
 
-    let quad = if (params.orientation == 0u) {
-        build_vertical_quad(idx, start, end, per_group_width, local_offset)
+    var quad: array<vec3<f32>, 4u>;
+    if (params.orientation == 0u) {
+        quad = build_vertical_quad(idx, start, end, per_group_width, local_offset);
     } else {
-        build_horizontal_quad(idx, start, end, per_group_width, local_offset)
-    };
+        quad = build_horizontal_quad(idx, start, end, per_group_width, local_offset);
+    }
 
     let base_index = idx * VERTICES_PER_BAR;
     write_vertices(base_index, quad);
@@ -163,6 +167,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 pub const F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+{{FINITE_F32_HELPER}}
 
 const VERTICES_PER_BAR: u32 = 6u;
 
@@ -181,7 +186,7 @@ struct BarParams {
     group_index: u32,
     group_count: u32,
     orientation: u32,
-    layout: u32,
+    bar_layout: u32,
 };
 
 @group(0) @binding(0)
@@ -265,26 +270,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         + per_group_width * f32(min(params.group_index, safe_group_count - 1u))
         + per_group_width * 0.5;
     let source_stride = max(params.source_row_count, 1u);
-    let value_index = if (params.transpose_source == 1u) {
-        idx * source_stride + params.series_index
+    var value_index: u32;
+    if (params.transpose_source == 1u) {
+        value_index = idx * source_stride + params.series_index;
     } else {
-        params.series_index * source_stride + idx
-    };
+        value_index = params.series_index * source_stride + idx;
+    }
     let value = f32(values[value_index]);
 
     var base_pos = 0.0;
     var base_neg = 0.0;
-    if (params.layout == 1u && params.series_index > 0u) {
+    if (params.bar_layout == 1u && params.series_index > 0u) {
         var col: u32 = 0u;
         loop {
             if (col >= params.series_index) {
                 break;
             }
-            let prev_index = if (params.transpose_source == 1u) {
-                idx * source_stride + col
+            var prev_index: u32;
+            if (params.transpose_source == 1u) {
+                prev_index = idx * source_stride + col;
             } else {
-                col * source_stride + idx
-            };
+                prev_index = col * source_stride + idx;
+            }
             let prev = f32(values[prev_index]);
             if (isFinite(prev)) {
                 if (prev >= 0.0) {
@@ -302,7 +309,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!isFinite(value)) {
         start = 0.0;
         end = 0.0;
-    } else if (params.layout == 1u) {
+    } else if (params.bar_layout == 1u) {
         if (value >= 0.0) {
             start = base_pos;
             end = base_pos + value;
@@ -315,11 +322,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         end = value;
     }
 
-    let quad = if (params.orientation == 0u) {
-        build_vertical_quad(idx, start, end, per_group_width, local_offset)
+    var quad: array<vec3<f32>, 4u>;
+    if (params.orientation == 0u) {
+        quad = build_vertical_quad(idx, start, end, per_group_width, local_offset);
     } else {
-        build_horizontal_quad(idx, start, end, per_group_width, local_offset)
-    };
+        quad = build_horizontal_quad(idx, start, end, per_group_width, local_offset);
+    }
 
     let base_index = idx * VERTICES_PER_BAR;
     write_vertices(base_index, quad);

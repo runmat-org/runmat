@@ -77,11 +77,14 @@ pub fn exact_spherical_octant() -> (GeometryDocument, ExactBRepTopology, ExactEv
     ];
     evaluators.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Sphere {
-            center_m: [0.0; 3],
+            center_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             z_axis: [0.0, 0.0, 1.0],
-            radius_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(1.0),
             domains: [
                 parameter(0.0, std::f64::consts::TAU),
                 parameter(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
@@ -93,8 +96,9 @@ pub fn exact_spherical_octant() -> (GeometryDocument, ExactBRepTopology, ExactEv
     else {
         unreachable!()
     };
-    properties.volume_m3 = 0.0;
-    properties.surface_area_m2 = std::f64::consts::FRAC_PI_2;
+    properties.volume_m3 = runmat_geometry_core::physical::Volume::new(0.0);
+    properties.surface_area_m2 =
+        runmat_geometry_core::physical::Area::new(std::f64::consts::FRAC_PI_2);
 
     let GeometryModel::ExactBRep { model } = &mut document.model else {
         unreachable!()
@@ -121,6 +125,8 @@ fn edge(
         curve_evaluator_id: CurveEvaluatorId::new(evaluator_id).unwrap(),
         start_vertex_id: Some(start.clone()),
         end_vertex_id: Some(end.clone()),
+        tolerance_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(1.0e-8),
         is_closed: false,
         is_periodic: false,
         is_degenerate: false,
@@ -130,8 +136,11 @@ fn edge(
 fn vertex(id: &PersistentEntityId, point_m: [f64; 3]) -> ExactVertex {
     ExactVertex {
         id: id.clone(),
-        point_m,
-        tolerance_m: 1.0e-8,
+        point_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+            point_m,
+        ),
+        tolerance_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(1.0e-8),
     }
 }
 
@@ -145,10 +154,13 @@ fn circle_curve(
         id: CurveEvaluatorId::new(evaluator_id).unwrap(),
         implementation: ExactCurveImplementation::Portable {
             definition: ExactCurveDefinition::Circle {
-                center_m: [0.0; 3],
+                center_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0; 3]),
                 x_axis,
                 y_axis,
-                radius_m: 1.0,
+                radius_m: runmat_types::physical::Length::new(1.0),
                 domain,
                 periodic: false,
             },

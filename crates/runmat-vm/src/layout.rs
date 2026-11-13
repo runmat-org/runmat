@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Portable schema for serialized [`VmAssemblyLayout`] payloads.
-pub const VM_LAYOUT_SCHEMA_VERSION: u16 = 3;
+pub const VM_LAYOUT_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct VmSlotId(pub usize);
@@ -25,7 +25,10 @@ pub struct VmAssemblyLayout {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VmFunctionLayout {
     pub function: FunctionId,
+    /// Lexical containment, not a display-name or capture-based guess.
+    pub parent: Option<FunctionId>,
     pub display_name: String,
+    pub source_role: runmat_types::FunctionSourceRole,
     pub private_owner_scope: String,
     pub frame_abi: VmFrameAbi,
     pub binding_slots: HashMap<BindingId, VmSlotId>,
@@ -134,16 +137,11 @@ pub fn remap_layout_function_ids(
             .copied()
             .unwrap_or(metadata.function);
         metadata.function = published;
-        metadata.resume_points = std::mem::take(&mut metadata.resume_points)
-            .into_iter()
-            .map(|(mut point, pc)| {
-                point.function = runmat_types::ProgramFunctionId(
-                    u32::try_from(published.0)
-                        .expect("published VM function identity exceeds portable schema"),
-                );
-                (point, pc)
-            })
-            .collect();
+        metadata.parent = metadata
+            .parent
+            .map(|parent| remap.get(&parent).copied().unwrap_or(parent));
+        // Resume points belong to the body's original portable revision;
+        // changing its compiler coordinate does not rename program points.
         for capture in &mut metadata.captures {
             capture.from_function = remap
                 .get(&capture.from_function)
@@ -163,15 +161,20 @@ pub fn remap_layout_function_ids(
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutError {
+    #[error("layout has no selected function {0:?}")]
     MissingFunction(FunctionId),
+    #[error("layout has no MIR body for function {0:?}")]
     MissingMirBody(FunctionId),
+    #[error("layout has no binding {0:?}")]
     MissingBinding(BindingId),
+    #[error("layout has no slot for binding {binding:?} in function {function:?}")]
     MissingBindingSlot {
         function: FunctionId,
         binding: BindingId,
     },
+    #[error("layout function remap collides at {0:?}")]
     FunctionRemapCollision(FunctionId),
 }
 
@@ -185,7 +188,14 @@ pub fn derive_layout(
             .bodies
             .get(&function.id)
             .ok_or(LayoutError::MissingMirBody(function.id))?;
-        functions.insert(function.id, derive_function_layout(hir, function, body)?);
+        let metadata = mir
+            .functions
+            .get(&function.id)
+            .ok_or(LayoutError::MissingFunction(function.id))?;
+        functions.insert(
+            function.id,
+            derive_function_layout(hir, function, metadata, body)?,
+        );
     }
 
     let mut entrypoints = HashMap::new();
@@ -235,6 +245,7 @@ pub fn derive_layout(
 fn derive_function_layout(
     hir: &HirAssembly,
     function: &runmat_hir::HirFunction,
+    metadata: &runmat_mir::MirFunctionMetadata,
     body: &runmat_mir::MirBody,
 ) -> Result<VmFunctionLayout, LayoutError> {
     let mut binding_slots = HashMap::new();
@@ -242,7 +253,7 @@ fn derive_function_layout(
 
     let frame_abi = allocate_frame_abi(&function.abi, &mut binding_slots, &mut next_slot);
 
-    for capture in &function.captures {
+    for capture in &metadata.captures {
         allocate_binding_slot(capture.binding, &mut binding_slots, &mut next_slot);
     }
     for binding in &function.locals {
@@ -271,7 +282,7 @@ fn derive_function_layout(
         mir_local_slots.insert(local.id, slot);
     }
 
-    let captures = function
+    let captures = metadata
         .captures
         .iter()
         .map(|capture| {
@@ -298,7 +309,9 @@ fn derive_function_layout(
 
     Ok(VmFunctionLayout {
         function: function.id,
+        parent: function.parent,
         display_name: function.name.0.clone(),
+        source_role: hir.function_source_role(function),
         private_owner_scope: private_owner_scope_for_function(hir, function),
         frame_abi,
         binding_slots,
@@ -424,7 +437,28 @@ mod tests {
         EntrypointPolicy, FunctionKind, FunctionModifiers, FunctionName, HirBinding, HirBlock,
         HirEntrypoint, HirFunction, ModuleId, Span,
     };
-    use runmat_mir::{MirBody, MirLocal, MirLocalKind};
+    use runmat_mir::{MirBody, MirFunctionMetadata, MirLocal, MirLocalKind};
+
+    fn mir_metadata(hir: &HirAssembly, id: FunctionId) -> MirFunctionMetadata {
+        let function = hir
+            .functions
+            .iter()
+            .find(|function| function.id == id)
+            .expect("fixture function");
+        MirFunctionMetadata {
+            source: runmat_types::ProgramSourceId(0),
+            name: function.name.clone(),
+            parent: function.parent,
+            enclosing_class: function.enclosing_class,
+            class_method_owner: None,
+            kind: function.kind.clone(),
+            source_role: hir.function_source_role(function),
+            argument_validations: function.argument_validations.clone(),
+            captures: function.captures.clone(),
+            modifiers: function.modifiers.clone(),
+            span: function.span,
+        }
+    }
 
     #[test]
     fn layout_reuses_shared_input_output_binding_slot() {
@@ -467,9 +501,11 @@ mod tests {
             ..HirAssembly::default()
         };
         let mir = MirAssembly {
+            functions: BTreeMap::from([(function, mir_metadata(&assembly, function))]),
             bodies: BTreeMap::from([(
                 function,
                 MirBody {
+                    catch_scopes: Default::default(),
                     function,
                     abi: assembly.functions[0].abi.clone(),
                     locals: vec![MirLocal {
@@ -565,9 +601,11 @@ mod tests {
             ..HirAssembly::default()
         };
         let mir = MirAssembly {
+            functions: BTreeMap::from([(function, mir_metadata(&assembly, function))]),
             bodies: BTreeMap::from([(
                 function,
                 MirBody {
+                    catch_scopes: Default::default(),
                     function,
                     abi: assembly.functions[0].abi.clone(),
                     locals: vec![
@@ -601,7 +639,9 @@ mod tests {
     fn function_id_remap_rejects_layout_collisions_without_mutating_layout() {
         let function_layout = |function| VmFunctionLayout {
             function,
+            parent: None,
             display_name: format!("function_{}", function.0),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             private_owner_scope: String::new(),
             frame_abi: VmFrameAbi {
                 fixed_inputs: Vec::new(),

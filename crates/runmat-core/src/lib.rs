@@ -4,27 +4,44 @@
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 pub mod abi;
+mod callable_selection;
 mod diagnostic_path;
 mod error;
 mod executable;
 mod execution;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod foreign_artifacts;
+pub mod cluster_settings;
+pub mod project_entrypoints;
+#[cfg(not(target_arch = "wasm32"))]
+mod foreign_unit_host;
 mod fusion;
 #[cfg(not(target_arch = "wasm32"))]
 mod generic_native;
+mod parallel_runtime;
 mod profiling;
 mod session;
 mod source_pool;
+pub mod source_check;
 mod telemetry;
 pub mod testing;
 mod value_metadata;
 mod workspace;
 
-pub use error::{runtime_error_telemetry_failure_info, RunError};
+pub use error::{runtime_error_telemetry_failure_info, RunError, SourceCompileError};
 pub use executable::*;
 pub use execution::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use foreign_unit_host::{ForeignUnitHost, ForeignUnitRetirement};
 pub use fusion::*;
 pub use runmat_parser::CompatMode;
-pub use session::RunMatSession;
+pub use session::{
+    CheckedFeaSessionSource, FeaCapturedDependency, FeaExecutionTimingKey,
+    FeaExecutionTimingObservation, FeaExecutionTimingProfile, FeaTimingRoute,
+    FeaWorkingCheckRequest, FeaWorkingSource, FeaWorkspaceCapture, FeaWorkspaceCheckRequest,
+    FeaWorkspaceCheckResult, PreparedFeaWorkspacePublication, RunMatSession,
+    SelectedNativeSourceEvaluator, SessionGraphicsHost, SessionRetirement,
+};
 pub use telemetry::{
     TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
     TelemetryRunFinish, TelemetryRunGuard, TelemetrySink,
@@ -43,10 +60,10 @@ mod tests;
 pub fn execute_text_request_for_testing(
     session: &mut RunMatSession,
     source_text: &str,
-) -> Result<SessionExecutionResult, RunError> {
+) -> Result<RootedSessionExecutionResult, RunError> {
     let request = abi::ExecutionRequest::for_source(
         abi::SourceInput::Text {
-            name: "<test>".to_string(),
+            name: "<test>".into(),
             text: source_text.to_string(),
         },
         session.compat_mode(),
@@ -55,7 +72,7 @@ pub fn execute_text_request_for_testing(
     );
     let response = futures::executor::block_on(session.execute_request(request));
     let outcome = response.result?;
-    let workspace = session.workspace_snapshot();
+    let workspace = session.workspace_snapshot().map_err(RunError::Runtime)?;
     let warnings = outcome
         .diagnostics
         .iter()
@@ -76,18 +93,28 @@ pub fn execute_text_request_for_testing(
                 .with_call_frames_elided(diag.callstack_elided)
                 .build()
         });
-    Ok(SessionExecutionResult {
-        value: outcome.flow.durable_workspace_value().cloned(),
-        execution_time_ms: outcome.execution_time_ms,
-        used_jit: outcome.used_jit,
-        error,
-        type_info: outcome.type_info,
-        streams: outcome.streams,
-        workspace,
-        figures_touched: outcome.figures_touched,
-        warnings,
-        profiling: outcome.profiling,
-        fusion_plan: outcome.fusion_plan,
-        stdin_events: outcome.stdin_events,
-    })
+    outcome.try_map_owned(
+        |outcome| {
+            Ok(SessionExecutionResult {
+                value: outcome.flow.durable_workspace_value().cloned(),
+                execution_time_ms: outcome.execution_time_ms,
+                used_jit: outcome.used_jit,
+                error,
+                type_info: outcome.type_info,
+                streams: outcome.streams,
+                workspace,
+                figures_touched: outcome.figures_touched,
+                warnings,
+                profiling: outcome.profiling,
+                fusion_plan: outcome.fusion_plan,
+                stdin_events: outcome.stdin_events,
+            })
+        },
+        |error| RunError::Runtime(error.into_runtime_error()),
+    )
 }
+
+pub use session::{
+    FeaExecutionPreflight, FeaGeometryExecutionHost, FeaStudyPreparationError,
+    PreparedSerialFeaExecutionError, PreparedSerialFeaStudy,
+};

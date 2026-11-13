@@ -1,10 +1,14 @@
 use runmat_plot::plots::Figure;
 
+#[path = "engine/capability.rs"]
+mod capability;
+pub(crate) use capability::ensure_png_export_available;
+#[cfg(all(test, not(feature = "plot-core")))]
+pub(crate) use capability::PngExportUnavailable;
+
 #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
 use super::common::ERR_PLOTTING_UNAVAILABLE;
 use super::state::{clone_figure, FigureHandle};
-#[cfg(feature = "plot-core")]
-use crate::builtins::plotting::clone_geometry_scene;
 use thiserror::Error;
 
 #[cfg(feature = "plot-core")]
@@ -14,8 +18,6 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[derive(Debug, Error)]
 #[allow(dead_code)]
 enum PlottingBackendError {
-    #[error("interactive backend error: {0}")]
-    Interactive(String),
     #[error("static backend error: {0}")]
     Static(String),
     #[error("export initialization error: {0}")]
@@ -32,7 +34,7 @@ fn engine_error(message: impl Into<String>) -> RuntimeError {
 
 fn engine_error_with_source(
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     build_runtime_error(message)
         .with_identifier("RunMat:plot:EngineError")
@@ -51,7 +53,10 @@ pub fn render_figure(handle: FigureHandle, figure: Figure) -> BuiltinResult<Stri
     {
         let _ = handle;
         let _ = figure;
-        Err(engine_error(ERR_PLOTTING_UNAVAILABLE))
+        Err(engine_error_with_source(
+            ERR_PLOTTING_UNAVAILABLE,
+            runmat_plot::PlotPresentationError::Unavailable(ERR_PLOTTING_UNAVAILABLE),
+        ))
     }
 }
 
@@ -433,138 +438,15 @@ pub async fn render_figure_snapshot_with_camera_state(
 }
 
 #[cfg(feature = "plot-core")]
-pub async fn render_geometry_scene_snapshot(
-    handle: u32,
-    width: u32,
-    height: u32,
-    view: Option<String>,
-) -> BuiltinResult<Vec<u8>> {
-    const SNAPSHOT_CONTEXT: &str = "renderGeometrySceneImage";
-    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
-
-    log::debug!(
-        "runmat-runtime: render_geometry_scene_snapshot.start handle={} width={} height={} view={}",
-        handle,
-        width,
-        height,
-        view.as_deref().unwrap_or("")
-    );
-    let scene = clone_geometry_scene(handle).ok_or_else(|| {
-        map_control_flow_with_builtin(
-            engine_error(format!("geometry scene handle {handle} does not exist")),
-            SNAPSHOT_CONTEXT,
-        )
-    })?;
-
-    let mut settings = ImageExportSettings::default();
-    if width > 0 {
-        settings.width = width;
-    }
-    if height > 0 {
-        settings.height = height;
-    }
-    let camera = geometry_scene_snapshot_camera(
-        scene.bounds,
-        settings.width,
-        settings.height,
-        parse_camera_view_preset(view.as_deref()),
-    );
-    let mut exporter = ImageExporter::with_settings(settings)
-        .await
-        .map_err(|err| {
-            map_control_flow_with_builtin(
-                engine_error_with_source(
-                    "Geometry export initialization failed.",
-                    PlottingBackendError::ImageExportInit(err),
-                ),
-                SNAPSHOT_CONTEXT,
-            )
-        })?;
-    exporter.set_theme_config(super::web::current_plot_theme_config());
-
-    let bytes = exporter
-        .render_geometry_scene_png_bytes_with_camera(&scene, &camera)
-        .await
-        .map_err(|err| {
-            log::warn!(
-                "runmat-runtime: render_geometry_scene_snapshot.failed handle={} error={}",
-                handle,
-                err
-            );
-            map_control_flow_with_builtin(
-                engine_error_with_source(
-                    format!("Geometry export failed: {err}"),
-                    PlottingBackendError::ImageExport(err),
-                ),
-                SNAPSHOT_CONTEXT,
-            )
-        })?;
-    log::debug!(
-        "runmat-runtime: render_geometry_scene_snapshot.ok handle={} bytes={}",
-        handle,
-        bytes.len()
-    );
-    Ok(bytes)
-}
-
+#[path = "engine/geometry_export.rs"]
+mod geometry_export;
 #[cfg(feature = "plot-core")]
-fn parse_camera_view_preset(value: Option<&str>) -> runmat_plot::core::CameraViewPreset {
-    use runmat_plot::core::CameraViewPreset;
-
-    let Some(value) = value else {
-        return CameraViewPreset::Perspective;
-    };
-    match value.trim().to_ascii_lowercase().as_str() {
-        "perspective" | "iso" | "isometric" => CameraViewPreset::Perspective,
-        "top" | "xy" => CameraViewPreset::Top,
-        "bottom" => CameraViewPreset::Bottom,
-        "front" | "xz" => CameraViewPreset::Front,
-        "back" => CameraViewPreset::Back,
-        "left" | "yz" => CameraViewPreset::Left,
-        "right" => CameraViewPreset::Right,
-        _ => CameraViewPreset::Perspective,
-    }
-}
-
-#[cfg(feature = "plot-core")]
-fn geometry_scene_snapshot_camera(
-    bounds: runmat_plot::core::BoundingBox,
-    width: u32,
-    height: u32,
-    preset: runmat_plot::core::CameraViewPreset,
-) -> runmat_plot::core::Camera {
-    use glam::Vec3;
-    use runmat_plot::core::{BoundingBox, Camera, CameraViewPreset};
-
-    let mut camera = Camera::new();
-    camera.update_aspect_ratio(width.max(1) as f32 / height.max(1) as f32);
-    let bounds = if bounds.min.is_finite()
-        && bounds.max.is_finite()
-        && (bounds.max - bounds.min).length() > 1.0e-6
-    {
-        bounds
-    } else {
-        BoundingBox {
-            min: Vec3::splat(-1.0),
-            max: Vec3::splat(1.0),
-        }
-    };
-    let (direction, up) = match preset {
-        CameraViewPreset::Perspective => (Vec3::new(1.0, -1.0, 1.0).normalize(), Vec3::Z),
-        CameraViewPreset::Top => (Vec3::Z, Vec3::Y),
-        CameraViewPreset::Bottom => (-Vec3::Z, Vec3::Y),
-        CameraViewPreset::Front => (-Vec3::Y, Vec3::Z),
-        CameraViewPreset::Back => (Vec3::Y, Vec3::Z),
-        CameraViewPreset::Left => (-Vec3::X, Vec3::Z),
-        CameraViewPreset::Right => (Vec3::X, Vec3::Z),
-    };
-    let center = (bounds.min + bounds.max) * 0.5;
-    camera.up = up;
-    camera.target = center;
-    camera.position = center + direction;
-    camera.fit_bounds(bounds.min, bounds.max);
-    camera
-}
+pub use geometry_export::{
+    measure_geometry_scene_observation, render_geometry_observation_snapshot,
+    render_geometry_scene_observation_snapshot, render_geometry_scene_snapshot,
+    render_geometry_scene_snapshot_with_camera_state,
+    render_geometry_scene_snapshot_with_camera_state_scaled,
+};
 
 #[cfg(feature = "plot-core")]
 fn surface_plot_camera_to_core_camera(
@@ -617,7 +499,7 @@ pub(crate) mod native {
     static PLOTTING_MODE_OVERRIDE: OnceCell<RwLock<Option<PlottingMode>>> = OnceCell::new();
 
     #[derive(Debug, Clone, Copy)]
-    enum PlottingMode {
+    pub(super) enum PlottingMode {
         Auto,
         Interactive,
         Static,
@@ -640,9 +522,27 @@ pub(crate) mod native {
         });
     }
 
-    pub fn render(handle: FigureHandle, mut figure: Figure) -> BuiltinResult<String> {
+    pub fn render(handle: FigureHandle, figure: Figure) -> BuiltinResult<String> {
         ensure_figure_event_bridge();
-        match detect_mode() {
+        render_in_mode(handle, figure, detect_mode())
+    }
+
+    /// Automatic presentation is separate from explicit print/snapshot export.
+    /// Hidden figures still close an existing window; metadata-only construction
+    /// in static mode waits for content instead of trying to export a blank scene.
+    pub(super) fn render_in_mode(
+        handle: FigureHandle,
+        mut figure: Figure,
+        mode: PlottingMode,
+    ) -> BuiltinResult<String> {
+        if !figure.visible {
+            runmat_plot::gui::lifecycle::request_close(handle.as_u32());
+            return Ok(format!("Figure {} is hidden", handle.as_u32()));
+        }
+        if matches!(mode, PlottingMode::Static) && figure.is_empty() {
+            return Ok(format!("Figure {} updated", handle.as_u32()));
+        }
+        match mode {
             PlottingMode::Interactive => interactive_export(handle, &mut figure),
             PlottingMode::Static => static_export(&mut figure, "plot.png"),
             PlottingMode::Auto => interactive_export(handle, &mut figure),
@@ -661,10 +561,10 @@ pub(crate) mod native {
 
     fn interactive_export(handle: FigureHandle, figure: &mut Figure) -> BuiltinResult<String> {
         let figure_clone = figure.clone();
-        runmat_plot::render_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
+        runmat_plot::present_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
             engine_error_with_source(
                 "Interactive plotting failed. Please check GPU/GUI system setup.",
-                PlottingBackendError::Interactive(err),
+                err,
             )
         })
     }
@@ -700,6 +600,10 @@ pub(crate) mod native {
         });
     }
 }
+
+#[cfg(all(test, feature = "gui", not(target_arch = "wasm32")))]
+#[path = "engine/native_presentation_tests.rs"]
+mod native_presentation_tests;
 
 #[cfg(all(test, feature = "plot-core"))]
 mod tests {
@@ -748,9 +652,18 @@ mod tests {
             Value::Tensor(tensor_from(&centerline)),
         ]))
         .expect("left plot");
-        title_builtin(vec![Value::String("Centerline slice".into())]).expect("left title");
-        xlabel_builtin(vec![Value::String("x (mm)".into())]).expect("left xlabel");
-        ylabel_builtin(vec![Value::String("temperature (C)".into())]).expect("left ylabel");
+        title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Centerline slice".into())],
+        ))
+        .expect("left title");
+        xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("x (mm)".into())],
+        ))
+        .expect("left xlabel");
+        ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("temperature (C)".into())],
+        ))
+        .expect("left ylabel");
 
         subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).expect("subplot 2");
         block_on(plot_builtin(vec![
@@ -758,10 +671,18 @@ mod tests {
             Value::Tensor(tensor_from(&vertical)),
         ]))
         .expect("right plot");
-        title_builtin(vec![Value::String("Vertical slice through source".into())])
-            .expect("right title");
-        xlabel_builtin(vec![Value::String("y (mm)".into())]).expect("right xlabel");
-        ylabel_builtin(vec![Value::String("temperature (C)".into())]).expect("right ylabel");
+        title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Vertical slice through source".into())],
+        ))
+        .expect("right title");
+        xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("y (mm)".into())],
+        ))
+        .expect("right xlabel");
+        ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("temperature (C)".into())],
+        ))
+        .expect("right ylabel");
 
         let handle = current_figure_handle();
         let bytes =

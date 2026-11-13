@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl, GeometryTransform,
+    ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl, GeometryTransform, ParameterRange,
 };
 use runmat_meshing_core::{MetricSourceKind, MetricTensor3};
 
@@ -74,7 +74,7 @@ impl<'a> ValidationSampler<'a> {
         let point_m = self
             .curves
             .point(&self.edge.curve_evaluator_id, parameter, self.control)
-            .map(|point| self.transform.transform_point(point))
+            .map(|point| self.transform.transform_point(point.canonical_value()))
             .map_err(|error| geometry_error(self.edge, error))?;
         let tangent = self
             .curves
@@ -179,18 +179,9 @@ pub(super) fn validate_interval(
     start: f64,
     end: f64,
 ) -> Result<(f64, f64, f64), SharedCurveError> {
-    let span = end - start;
-    let parameters = [
-        start,
-        start + span * 0.125,
-        start + span * 0.25,
-        start + span * 0.375,
-        start + span * 0.5,
-        start + span * 0.625,
-        start + span * 0.75,
-        start + span * 0.875,
-        end,
-    ];
+    let parameters = ParameterRange { start, end }
+        .uniform_samples::<9>()
+        .map_err(|error| geometry_error(sampler.edge, error))?;
     let points = parameters
         .into_iter()
         .map(|parameter| sampler.sample(parameter))

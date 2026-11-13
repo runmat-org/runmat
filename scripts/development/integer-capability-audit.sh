@@ -10,8 +10,8 @@ command -v jq >/dev/null 2>&1 || {
   printf '%s\n' 'integer-capability-audit: jq is required' >&2
   exit 1
 }
-command -v rg >/dev/null 2>&1 || {
-  printf '%s\n' 'integer-capability-audit: rg is required' >&2
+command -v node >/dev/null 2>&1 || {
+  printf '%s\n' 'integer-capability-audit: node is required' >&2
   exit 1
 }
 [[ -f "${catalog}" ]] || {
@@ -19,7 +19,11 @@ command -v rg >/dev/null 2>&1 || {
   exit 1
 }
 
-reference_names=$(rg --files "${repo_root}/docs/builtins/reference" -g '*.json' | sed -E 's#^.*/##; s#\.json$##' | jq -R . | jq -s .)
+load_reference_sources() {
+  reference_sources=$(mktemp "${TMPDIR:-/tmp}/runmat-integer-references.XXXXXX")
+  trap 'rm -f -- "${reference_sources}"' EXIT
+  node "${script_dir}/integer-capability-audit-references.mjs" "${repo_root}" >"${reference_sources}"
+}
 
 usage() {
   printf '%s\n' \
@@ -50,7 +54,7 @@ shift
 case "${command}" in
   summary)
     (($# == 0)) || die 'summary accepts no arguments'
-    jq -r --arg command summary --arg name_regex '' --arg input_type '' --argjson offset 0 --argjson limit 0 --argjson requested_names '[]' --argjson reference_names "${reference_names}" -f "${program}" "${catalog}" | jq -r '.[] | @tsv'
+    jq -r --arg command summary --arg name_regex '' --arg input_type '' --argjson offset 0 --argjson limit 0 --argjson requested_names '[]' --argjson reference_sources '[{}]' -f "${program}" "${catalog}" | jq -r '.[] | @tsv'
     ;;
   queue)
     limit=25
@@ -90,7 +94,8 @@ case "${command}" in
     done
     require_nonnegative_integer limit "${limit}"
     require_nonnegative_integer offset "${offset}"
-    result=$(jq -c --arg command queue --arg name_regex "${name_regex}" --arg input_type "${input_type}" --argjson offset "${offset}" --argjson limit "${limit}" --argjson requested_names '[]' --argjson reference_names "${reference_names}" -f "${program}" "${catalog}")
+    load_reference_sources
+    result=$(jq -c --arg command queue --arg name_regex "${name_regex}" --arg input_type "${input_type}" --argjson offset "${offset}" --argjson limit "${limit}" --argjson requested_names '[]' --slurpfile reference_sources "${reference_sources}" -f "${program}" "${catalog}")
     case "${format}" in
       json) jq . <<<"${result}" ;;
       names) jq -r '.[].name' <<<"${result}" ;;
@@ -104,7 +109,8 @@ case "${command}" in
   packet)
     (($# > 0)) || die 'packet requires 8-25 builtin names'
     requested_names=$(printf '%s\n' "$@" | jq -R . | jq -s .)
-    result=$(jq -c --arg command packet --arg name_regex '' --arg input_type '' --argjson offset 0 --argjson limit 0 --argjson requested_names "${requested_names}" --argjson reference_names "${reference_names}" -f "${program}" "${catalog}")
+    load_reference_sources
+    result=$(jq -c --arg command packet --arg name_regex '' --arg input_type '' --argjson offset 0 --argjson limit 0 --argjson requested_names "${requested_names}" --slurpfile reference_sources "${reference_sources}" -f "${program}" "${catalog}")
     jq . <<<"${result}"
     if ! jq -e '.errors | length == 0' >/dev/null <<<"${result}"; then
       exit 2

@@ -1,13 +1,7 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+
 use runmat_macros::runtime_builtin;
-use runmat_value::{HandleRef, ObjectInstance, StructValue, Value};
+use runmat_value::{HandleRef, ObjectInstance, Value};
 
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
@@ -19,172 +13,19 @@ use super::state::{
     set_zoom_right_click_action_for_figure, zoom_state_snapshot, FigureHandle, ZoomDirection,
     ZoomModeCommand, ZoomMotion, ZoomRightClickAction, ZoomStateSnapshot,
 };
-use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "zoom";
-const ZOOM_CLASS_NAME: &str = "matlab.graphics.interaction.internal.zoom";
+const ZOOM_CLASS_NAME: runmat_types::StaticClassIdentity = runmat_types::standard::ZOOM_CONTROL;
 
-const ZOOM_INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "zoom-integer-target-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Allow a typed-integer alias for an encoded figure or axes handle",
-    error_identifier: Some("RunMat:compatibility:ZoomIntegerTargetHandleExtension"),
-};
-pub const ZOOM_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ZOOM_INTEGER_TARGET_EXTENSION];
-const ZOOM_INTEGER_FACTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "factor",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive numeric zoom factor admits positive integer scalars.",
-    }];
-const ZOOM_INTEGER_TARGET_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "target",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer aliases for RunMat's encoded graphics handles are separately gated.",
-    }];
-pub const ZOOM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "zoom(integer_factor)",
-        inputs: &ZOOM_INTEGER_FACTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The positive finite factor crosses the graphics scaling boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "zoom(integer_target, option_or_factor)",
-        inputs: &ZOOM_INTEGER_TARGET_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Strict mode rejects the encoded-handle alias before graphics state access.",
-    },
-];
+pub use runmat_builtins::ZOOM_INTEGER_TARGET_EXTENSION;
 
-const ZOOM_OUTPUT_OBJECT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "z",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zoom mode object for the current or specified figure.",
-}];
+pub use runmat_builtins::ZOOM_ERROR_INVALID_ARGUMENT;
 
-const ZOOM_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Returns \"ok\" when the zoom command succeeds.",
-}];
+pub use runmat_builtins::ZOOM_ERROR_INTERNAL;
 
-const ZOOM_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const ZOOM_INPUTS_OPTION: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "option",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zoom option: on, off, toggle, xon, yon, reset, or out.",
-}];
-
-const ZOOM_INPUTS_FACTOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "factor",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Positive numeric zoom factor.",
-}];
-
-const ZOOM_INPUTS_FIGURE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fig",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Target figure handle.",
-}];
-
-const ZOOM_INPUTS_TARGET_OPTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "target",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Figure or axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Zoom option or factor.",
-    },
-];
-
-const ZOOM_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "z = zoom()",
-        inputs: &ZOOM_INPUTS_NONE,
-        outputs: &ZOOM_OUTPUT_OBJECT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "zoom()",
-        inputs: &ZOOM_INPUTS_NONE,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = zoom(option)",
-        inputs: &ZOOM_INPUTS_OPTION,
-        outputs: &ZOOM_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = zoom(factor)",
-        inputs: &ZOOM_INPUTS_FACTOR,
-        outputs: &ZOOM_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = zoom(target, option)",
-        inputs: &ZOOM_INPUTS_TARGET_OPTION,
-        outputs: &ZOOM_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "z = zoom(fig)",
-        inputs: &ZOOM_INPUTS_FIGURE,
-        outputs: &ZOOM_OUTPUT_OBJECT,
-    },
-];
-
-const ZOOM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZOOM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:zoom:InvalidArgument"),
-    when: "Argument count, target handle, factor, option, or zoom property is invalid.",
-    message: "zoom: invalid argument",
-};
-
-const ZOOM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZOOM.INTERNAL",
-    identifier: Some("RunMat:zoom:Internal"),
-    when: "Internal zoom state or handle-object update fails.",
-    message: "zoom: internal operation failed",
-};
-
-const ZOOM_ERRORS: [BuiltinErrorDescriptor; 2] = [ZOOM_ERROR_INVALID_ARGUMENT, ZOOM_ERROR_INTERNAL];
-
-pub const ZOOM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ZOOM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ZOOM_ERRORS,
-};
+#[cfg(test)]
+use runmat_builtins::ZOOM_DESCRIPTOR;
 
 fn zoom_error(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
@@ -223,17 +64,14 @@ fn ensure_current_zoom_figure() -> FigureHandle {
 
 #[runtime_builtin(
     name = "zoom",
-    category = "plotting",
-    summary = "Control interactive and programmatic axes zooming.",
-    keywords = "zoom,plotting,axes,figure,pan,interaction",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::zoom::ZOOM_DESCRIPTOR),
-    extensions(crate::builtins::plotting::zoom::ZOOM_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::zoom::ZOOM_INTEGER_CAPABILITIES),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::zoom"
 )]
-pub fn zoom_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub fn zoom_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.len() == 2
         && args
             .first()
@@ -244,8 +82,8 @@ pub fn zoom_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    match args.as_slice() {
-        [] => {
+    match (args.len(), args.first(), args.get(1)) {
+        (0, _, _) => {
             let handle = ensure_current_zoom_figure();
             if requested_outputs() == 0 {
                 set_zoom_mode_for_figure(handle, ZoomModeCommand::Toggle)
@@ -254,11 +92,17 @@ pub fn zoom_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             } else {
                 let snapshot =
                     zoom_state_snapshot(handle, None).map_err(|err| invalid(err.to_string()))?;
-                zoom_object_from_snapshot(snapshot)
+                zoom_object_from_snapshot(runtime.as_ref(), snapshot)
             }
         }
-        [single] => {
-            if let Some(option) = super::style::value_as_string(single) {
+        (1, Some(single), _) => {
+            if let Some(option) = super::style::value_as_string(single).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "zoom",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 apply_option_to_figure(ensure_current_zoom_figure(), &option)?;
                 return Ok(status());
             }
@@ -269,7 +113,7 @@ pub fn zoom_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             {
                 let figure = FigureHandle::from(rounded_handle_id(factor)?);
                 if let Ok(snapshot) = zoom_state_snapshot(figure, None) {
-                    return zoom_object_from_snapshot(snapshot);
+                    return zoom_object_from_snapshot(runtime.as_ref(), snapshot);
                 }
             }
             validate_factor(factor)?;
@@ -277,9 +121,15 @@ pub fn zoom_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 .map_err(|err| invalid(err.to_string()))?;
             Ok(status())
         }
-        [target, command] => {
+        (2, Some(target), Some(command)) => {
             let target = resolve_zoom_target(target)?;
-            if let Some(option) = super::style::value_as_string(command) {
+            if let Some(option) = super::style::value_as_string(command).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "zoom",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 apply_option_to_target(target, &option)?;
                 return Ok(status());
             }
@@ -389,77 +239,150 @@ fn parse_option(option: &str) -> BuiltinResult<ZoomOption> {
     }
 }
 
-fn zoom_object_from_snapshot(snapshot: ZoomStateSnapshot) -> BuiltinResult<Value> {
-    let mut object = ObjectInstance::new(ZOOM_CLASS_NAME.to_string());
-    update_object_properties(&mut object, snapshot);
+fn zoom_object_from_snapshot(
+    runtime: Option<&crate::context::RuntimeContext>,
+    snapshot: ZoomStateSnapshot,
+) -> BuiltinResult<Value> {
+    use super::op_common::mode_object::{Field, FieldValue};
+    let mut fields = [
+        Field {
+            name: "Enable",
+            value: FieldValue::Text(if snapshot.mode.enabled { "on" } else { "off" }),
+        },
+        Field {
+            name: "Motion",
+            value: FieldValue::Text(snapshot.mode.motion.as_str()),
+        },
+        Field {
+            name: "Direction",
+            value: FieldValue::Text(snapshot.mode.direction.as_str()),
+        },
+        Field {
+            name: "RightClickAction",
+            value: FieldValue::Text(snapshot.mode.right_click_action.as_str()),
+        },
+        Field {
+            name: "ContextMenu",
+            value: FieldValue::Value(Some(Value::Num(0.0))),
+        },
+        Field {
+            name: "UIContextMenu",
+            value: FieldValue::Value(Some(Value::Num(0.0))),
+        },
+        Field {
+            name: "ButtonDownFilter",
+            value: FieldValue::Text(""),
+        },
+        Field {
+            name: "ActionPreCallback",
+            value: FieldValue::Text(""),
+        },
+        Field {
+            name: "ActionPostCallback",
+            value: FieldValue::Text(""),
+        },
+        Field {
+            name: "FigureHandle",
+            value: FieldValue::Value(Some(Value::Num(snapshot.figure.as_u32() as f64))),
+        },
+        Field {
+            name: "AxesIndex",
+            value: FieldValue::Value(Some(
+                snapshot
+                    .axes_index
+                    .map(|index| Value::Num((index + 1) as f64))
+                    .unwrap_or(Value::Num(0.0)),
+            )),
+        },
+        Field {
+            name: "UseLegacyExplorationModes",
+            value: FieldValue::Text(if snapshot.mode.use_legacy_exploration_modes {
+                "on"
+            } else {
+                "off"
+            }),
+        },
+    ];
+    let object = super::op_common::mode_object::construct(
+        runtime,
+        ZOOM_CLASS_NAME,
+        super::state::mode_properties::receiver(snapshot.figure, BUILTIN_NAME)?,
+        &mut fields,
+    )?;
+    let (object, _roots) = object.into_value_and_lease();
+    let Value::Object(object) = object else {
+        unreachable!("zoom snapshot publishes an object")
+    };
+    let class_name = object.class_name_owner().clone();
     let target =
         runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| internal(err.to_string()))?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: ZOOM_CLASS_NAME.to_string(),
+        class_name,
         target,
         valid: true,
     }))
 }
 
-fn update_object_properties(object: &mut ObjectInstance, snapshot: ZoomStateSnapshot) {
-    object.properties.insert(
-        "Enable".to_string(),
-        Value::String(if snapshot.mode.enabled { "on" } else { "off" }.into()),
-    );
-    object.properties.insert(
-        "Motion".to_string(),
-        Value::String(snapshot.mode.motion.as_str().into()),
-    );
-    object.properties.insert(
-        "Direction".to_string(),
-        Value::String(snapshot.mode.direction.as_str().into()),
-    );
-    object.properties.insert(
-        "RightClickAction".to_string(),
-        Value::String(snapshot.mode.right_click_action.as_str().into()),
-    );
-    object
-        .properties
-        .entry("ContextMenu".to_string())
-        .or_insert(Value::Num(0.0));
-    object
-        .properties
-        .entry("UIContextMenu".to_string())
-        .or_insert(Value::Num(0.0));
-    object
-        .properties
-        .entry("ButtonDownFilter".to_string())
-        .or_insert(Value::String(String::new()));
-    object
-        .properties
-        .entry("ActionPreCallback".to_string())
-        .or_insert(Value::String(String::new()));
-    object
-        .properties
-        .entry("ActionPostCallback".to_string())
-        .or_insert(Value::String(String::new()));
-    object.properties.insert(
-        "FigureHandle".to_string(),
-        Value::Num(snapshot.figure.as_u32() as f64),
-    );
-    object.properties.insert(
-        "AxesIndex".to_string(),
-        snapshot
-            .axes_index
-            .map(|index| Value::Num((index + 1) as f64))
-            .unwrap_or(Value::Num(0.0)),
-    );
-    object.properties.insert(
-        "UseLegacyExplorationModes".to_string(),
-        Value::String(
-            if snapshot.mode.use_legacy_exploration_modes {
+fn update_object_properties(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    snapshot: ZoomStateSnapshot,
+) -> BuiltinResult<()> {
+    use super::op_common::mode_object::{Field, FieldValue};
+    let mut fields = [
+        Field {
+            name: "Enable",
+            value: FieldValue::Text(if snapshot.mode.enabled { "on" } else { "off" }),
+        },
+        Field {
+            name: "Motion",
+            value: FieldValue::Text(snapshot.mode.motion.as_str()),
+        },
+        Field {
+            name: "Direction",
+            value: FieldValue::Text(snapshot.mode.direction.as_str()),
+        },
+        Field {
+            name: "RightClickAction",
+            value: FieldValue::Text(snapshot.mode.right_click_action.as_str()),
+        },
+        Field {
+            name: "FigureHandle",
+            value: FieldValue::Value(Some(Value::Num(snapshot.figure.as_u32() as f64))),
+        },
+        Field {
+            name: "AxesIndex",
+            value: FieldValue::Value(Some(
+                snapshot
+                    .axes_index
+                    .map(|index| Value::Num((index + 1) as f64))
+                    .unwrap_or(Value::Num(0.0)),
+            )),
+        },
+        Field {
+            name: "UseLegacyExplorationModes",
+            value: FieldValue::Text(if snapshot.mode.use_legacy_exploration_modes {
                 "on"
             } else {
                 "off"
-            }
-            .into(),
-        ),
-    );
+            }),
+        },
+    ];
+    super::op_common::mode_object::prepare_fields(runtime, &mut fields)?;
+    crate::execution::object::replacement::replace_properties(
+        runtime,
+        object,
+        fields.iter().map(|field| (field.name, field.value())),
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:zoom:HostAllocation",
+                message,
+                source,
+            )
+        },
+        invalid,
+    )
 }
 
 fn read_zoom_handle(value: &Value) -> Option<&HandleRef> {
@@ -480,15 +403,12 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<ZoomStateSnapshot> 
         let Value::Object(object) = value else {
             return None;
         };
-        if object.class_name != ZOOM_CLASS_NAME {
+        if *object.class_name() != ZOOM_CLASS_NAME {
             return None;
         }
-        let figure = object
-            .properties
-            .get("FigureHandle")
-            .and_then(numeric_scalar)?;
+        let receiver = object.graphics_receiver()?.clone();
         let axes_index = object
-            .properties
+            .properties()
             .get("AxesIndex")
             .and_then(numeric_scalar)
             .and_then(|value| {
@@ -498,7 +418,7 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<ZoomStateSnapshot> 
                     None
                 }
             });
-        Some((FigureHandle::from(figure.round() as u32), axes_index))
+        Some((receiver, axes_index))
     })
     .map_err(|err| internal(err.to_string()))?
     .ok_or_else(|| invalid("invalid zoom object"))?;
@@ -506,7 +426,7 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<ZoomStateSnapshot> 
 }
 
 fn zoom_struct(snapshot: ZoomStateSnapshot) -> Value {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert(
         "Enable",
         Value::String(if snapshot.mode.enabled { "on" } else { "off" }.into()),
@@ -525,9 +445,9 @@ fn zoom_struct(snapshot: ZoomStateSnapshot) -> Value {
     );
     st.insert("ContextMenu", Value::Num(0.0));
     st.insert("UIContextMenu", Value::Num(0.0));
-    st.insert("ButtonDownFilter", Value::String(String::new()));
-    st.insert("ActionPreCallback", Value::String(String::new()));
-    st.insert("ActionPostCallback", Value::String(String::new()));
+    st.insert("ButtonDownFilter", Value::string(String::new()));
+    st.insert("ActionPreCallback", Value::string(String::new()));
+    st.insert("ActionPostCallback", Value::string(String::new()));
     st.insert("FigureHandle", Value::Num(snapshot.figure.as_u32() as f64));
     st.insert(
         "UseLegacyExplorationModes",
@@ -540,7 +460,7 @@ fn zoom_struct(snapshot: ZoomStateSnapshot) -> Value {
             .into(),
         ),
     );
-    Value::Struct(st)
+    Value::Struct(st.finish())
 }
 
 pub fn get_zoom_object_property(
@@ -554,37 +474,40 @@ pub fn get_zoom_object_property(
     let snapshot = snapshot_from_object(handle)?;
     let value = match property {
         None => {
-            let mut value = zoom_struct(snapshot);
-            if let Value::Struct(st) = &mut value {
-                for (name, default) in [
-                    ("ContextMenu", Value::Num(0.0)),
-                    ("UIContextMenu", Value::Num(0.0)),
-                    ("ButtonDownFilter", Value::String(String::new())),
-                    ("ActionPreCallback", Value::String(String::new())),
-                    ("ActionPostCallback", Value::String(String::new())),
-                ] {
-                    st.insert(name, object_property_or_default(handle, name, default)?);
-                }
+            let Value::Struct(st) = zoom_struct(snapshot) else {
+                unreachable!("zoom snapshot is a structure")
+            };
+            let mut st = runmat_value::UnboundedStructValueBuilder::from_structure(st);
+            for (name, default) in [
+                ("ContextMenu", Value::Num(0.0)),
+                ("UIContextMenu", Value::Num(0.0)),
+                ("ButtonDownFilter", Value::string(String::new())),
+                ("ActionPreCallback", Value::string(String::new())),
+                ("ActionPostCallback", Value::string(String::new())),
+            ] {
+                st.insert(name, object_property_or_default(handle, name, default)?);
             }
-            value
+            Value::Struct(st.finish())
         }
-        Some(name) => match canonical_property(name).as_deref() {
-            Some("Enable") => {
+        Some(name) => match canonical_property(name) {
+            Some(ZoomProperty::Enable) => {
                 Value::String(if snapshot.mode.enabled { "on" } else { "off" }.into())
             }
-            Some("Motion") => Value::String(snapshot.mode.motion.as_str().into()),
-            Some("Direction") => Value::String(snapshot.mode.direction.as_str().into()),
-            Some("RightClickAction") => {
+            Some(ZoomProperty::Motion) => Value::String(snapshot.mode.motion.as_str().into()),
+            Some(ZoomProperty::Direction) => Value::String(snapshot.mode.direction.as_str().into()),
+            Some(ZoomProperty::RightClickAction) => {
                 Value::String(snapshot.mode.right_click_action.as_str().into())
             }
-            Some("ContextMenu") | Some("UIContextMenu") => {
+            Some(ZoomProperty::ContextMenu) | Some(ZoomProperty::UIContextMenu) => {
                 object_property_or_default(handle, name, Value::Num(0.0))?
             }
-            Some("ButtonDownFilter") | Some("ActionPreCallback") | Some("ActionPostCallback") => {
-                object_property_or_default(handle, name, Value::String(String::new()))?
+            Some(ZoomProperty::ButtonDownFilter)
+            | Some(ZoomProperty::ActionPreCallback)
+            | Some(ZoomProperty::ActionPostCallback) => {
+                object_property_or_default(handle, name, Value::string(String::new()))?
             }
-            Some("FigureHandle") => Value::Num(snapshot.figure.as_u32() as f64),
-            Some("UseLegacyExplorationModes") => Value::String(
+            Some(ZoomProperty::FigureHandle) => Value::Num(snapshot.figure.as_u32() as f64),
+            Some(ZoomProperty::UseLegacyExplorationModes) => Value::String(
                 if snapshot.mode.use_legacy_exploration_modes {
                     "on"
                 } else {
@@ -603,17 +526,29 @@ fn object_property_or_default(
     name: &str,
     default: Value,
 ) -> BuiltinResult<Value> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
+    if let Some(key) = canonical_property(name).and_then(ZoomProperty::persistent) {
+        return super::state::mode_properties::get(
+            &mode_receiver(handle)?,
+            key,
+            default,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(ZoomProperty::name)
+        .unwrap_or(name)
+        .to_string();
     runmat_gc::gc_with_value(&handle.target, |value| match value {
-        Value::Object(object) => object.properties.get(&key).cloned().unwrap_or(default),
+        Value::Object(object) => object.properties().get(&key).cloned().unwrap_or(default),
         _ => default,
     })
     .map_err(|err| internal(err.to_string()))
 }
 
-pub fn set_zoom_object_properties(
+pub(crate) fn set_zoom_object_properties_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     _builtin: &'static str,
 ) -> BuiltinResult<Option<()>> {
     let Some(handle) = read_zoom_handle(value).cloned() else {
@@ -622,60 +557,103 @@ pub fn set_zoom_object_properties(
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(invalid("expected zoom property/value pairs"));
     }
-    let snapshot = snapshot_from_object(&handle)?;
+    snapshot_from_object(&handle)?;
     let mut idx = 0;
     while idx < args.len() {
-        let name = super::style::value_as_string(&args[idx])
-            .ok_or_else(|| invalid("zoom property names must be text"))?;
+        let name = super::properties::property_name_text(&args[idx], "set")
+            .map_err(|_| invalid("zoom property names must be scalar text"))?;
         let value = &args[idx + 1];
-        apply_zoom_property(snapshot.figure, &name, value)?;
-        write_object_property(&handle, &name, value.clone())?;
+        apply_zoom_property(mode_receiver(&handle)?, &name, value)?;
+        write_object_property(runtime, &handle, &name, value.clone())?;
         idx += 2;
     }
     let refreshed = snapshot_from_object(&handle)?;
-    runmat_gc::gc_with_value_mut(&handle.target, |target| {
+    let updated = runmat_gc::gc_with_value_mut(&handle.target, |target| {
         if let Value::Object(object) = target {
-            update_object_properties(object, refreshed);
+            update_object_properties(runtime, object, refreshed)
+        } else {
+            Err(invalid("zoom handle target is not an object"))
         }
     })
     .map_err(|err| internal(err.to_string()))?;
+    updated?;
     Ok(Some(()))
 }
 
-fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> BuiltinResult<()> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
-    runmat_gc::gc_with_value_mut(&handle.target, |target| {
+fn write_object_property(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &HandleRef,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<()> {
+    if let Some(key) = canonical_property(name).and_then(ZoomProperty::persistent) {
+        return super::state::mode_properties::set_in_context(
+            runtime,
+            &mode_receiver(handle)?,
+            key,
+            value,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(ZoomProperty::name)
+        .unwrap_or(name)
+        .to_string();
+    runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
         if let Value::Object(object) = target {
-            object.properties.insert(key, value);
+            crate::execution::object::replacement::replace_property(
+                runtime,
+                object,
+                &key,
+                value,
+                |message, source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        runtime,
+                        "RunMat:zoom:HostAllocation",
+                        message,
+                        source,
+                    )
+                },
+                internal,
+            )?;
         }
+        Ok(())
     })
-    .map_err(|err| internal(err.to_string()))
+    .map_err(|err| internal(err.to_string()))?
 }
 
-fn apply_zoom_property(figure: FigureHandle, name: &str, value: &Value) -> BuiltinResult<()> {
-    match canonical_property(name).as_deref() {
-        Some("Enable") => {
+fn apply_zoom_property(
+    figure: impl Into<super::state::FigureTarget>,
+    name: &str,
+    value: &Value,
+) -> BuiltinResult<()> {
+    match canonical_property(name) {
+        Some(ZoomProperty::Enable) => {
             let enabled = parse_on_off(value, "Enable")?;
             set_zoom_enabled_for_figure(figure, enabled).map_err(|err| invalid(err.to_string()))
         }
-        Some("Motion") => set_zoom_motion_for_figure(figure, parse_motion(value)?)
+        Some(ZoomProperty::Motion) => set_zoom_motion_for_figure(figure, parse_motion(value)?)
             .map_err(|err| invalid(err.to_string())),
-        Some("Direction") => set_zoom_direction_for_figure(figure, parse_direction(value)?)
-            .map_err(|err| invalid(err.to_string())),
-        Some("RightClickAction") => {
+        Some(ZoomProperty::Direction) => {
+            set_zoom_direction_for_figure(figure, parse_direction(value)?)
+                .map_err(|err| invalid(err.to_string()))
+        }
+        Some(ZoomProperty::RightClickAction) => {
             set_zoom_right_click_action_for_figure(figure, parse_right_click_action(value)?)
                 .map_err(|err| invalid(err.to_string()))
         }
-        Some("UseLegacyExplorationModes") => {
+        Some(ZoomProperty::UseLegacyExplorationModes) => {
             set_zoom_legacy_for_figure(figure, parse_on_off(value, "UseLegacyExplorationModes")?)
                 .map_err(|err| invalid(err.to_string()))
         }
-        Some("FigureHandle") | Some("AxesIndex") => Err(invalid(format!("{name} is read-only"))),
-        Some("ContextMenu")
-        | Some("UIContextMenu")
-        | Some("ButtonDownFilter")
-        | Some("ActionPreCallback")
-        | Some("ActionPostCallback") => Ok(()),
+        Some(ZoomProperty::FigureHandle) | Some(ZoomProperty::AxesIndex) => {
+            Err(invalid(format!("{name} is read-only")))
+        }
+        Some(ZoomProperty::ContextMenu)
+        | Some(ZoomProperty::UIContextMenu)
+        | Some(ZoomProperty::ButtonDownFilter)
+        | Some(ZoomProperty::ActionPreCallback)
+        | Some(ZoomProperty::ActionPostCallback) => Ok(()),
         _ => Err(invalid(format!("unsupported zoom property '{name}'"))),
     }
 }
@@ -687,6 +665,13 @@ fn parse_on_off(value: &Value, property: &str) -> BuiltinResult<bool> {
 
 fn parse_motion(value: &Value) -> BuiltinResult<ZoomMotion> {
     let text = super::style::value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "zoom",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| invalid("Motion must be 'both', 'horizontal', or 'vertical'"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "both" => Ok(ZoomMotion::Both),
@@ -700,6 +685,13 @@ fn parse_motion(value: &Value) -> BuiltinResult<ZoomMotion> {
 
 fn parse_direction(value: &Value) -> BuiltinResult<ZoomDirection> {
     let text = super::style::value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "zoom",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| invalid("Direction must be 'in' or 'out'"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "in" => Ok(ZoomDirection::In),
@@ -710,6 +702,13 @@ fn parse_direction(value: &Value) -> BuiltinResult<ZoomDirection> {
 
 fn parse_right_click_action(value: &Value) -> BuiltinResult<ZoomRightClickAction> {
     let text = super::style::value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "zoom",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| invalid("RightClickAction must be 'PostContextMenu' or 'InverseZoom'"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "postcontextmenu" => Ok(ZoomRightClickAction::PostContextMenu),
@@ -720,26 +719,90 @@ fn parse_right_click_action(value: &Value) -> BuiltinResult<ZoomRightClickAction
     }
 }
 
-fn canonical_property(name: &str) -> Option<String> {
+#[derive(Clone, Copy)]
+enum ZoomProperty {
+    Enable,
+    Motion,
+    Direction,
+    RightClickAction,
+    ContextMenu,
+    UIContextMenu,
+    ButtonDownFilter,
+    ActionPreCallback,
+    ActionPostCallback,
+    FigureHandle,
+    AxesIndex,
+    UseLegacyExplorationModes,
+}
+impl ZoomProperty {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Enable => "Enable",
+            Self::Motion => "Motion",
+            Self::Direction => "Direction",
+            Self::RightClickAction => "RightClickAction",
+            Self::ContextMenu => "ContextMenu",
+            Self::UIContextMenu => "UIContextMenu",
+            Self::ButtonDownFilter => "ButtonDownFilter",
+            Self::ActionPreCallback => "ActionPreCallback",
+            Self::ActionPostCallback => "ActionPostCallback",
+            Self::FigureHandle => "FigureHandle",
+            Self::AxesIndex => "AxesIndex",
+            Self::UseLegacyExplorationModes => "UseLegacyExplorationModes",
+        }
+    }
+    fn persistent(self) -> Option<super::state::mode_properties::ModeProperty> {
+        use super::state::mode_properties::ModeProperty as Property;
+        use crate::context::GraphicsCallbackKind as Kind;
+        match self {
+            Self::ContextMenu => Some(Property::ZoomContextMenu),
+            Self::UIContextMenu => Some(Property::ZoomLegacyContextMenu),
+            Self::ButtonDownFilter => Some(Property::Callback(Kind::ZoomButtonDownFilter)),
+            Self::ActionPreCallback => Some(Property::Callback(Kind::ZoomActionPre)),
+            Self::ActionPostCallback => Some(Property::Callback(Kind::ZoomActionPost)),
+            _ => None,
+        }
+    }
+}
+fn canonical_property(name: &str) -> Option<ZoomProperty> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "enable" => Some("Enable".into()),
-        "motion" => Some("Motion".into()),
-        "direction" => Some("Direction".into()),
-        "rightclickaction" => Some("RightClickAction".into()),
-        "contextmenu" => Some("ContextMenu".into()),
-        "uicontextmenu" => Some("UIContextMenu".into()),
-        "buttondownfilter" => Some("ButtonDownFilter".into()),
-        "actionprecallback" => Some("ActionPreCallback".into()),
-        "actionpostcallback" => Some("ActionPostCallback".into()),
-        "figurehandle" => Some("FigureHandle".into()),
-        "axesindex" => Some("AxesIndex".into()),
-        "uselegacyexplorationmodes" => Some("UseLegacyExplorationModes".into()),
+        "enable" => Some(ZoomProperty::Enable),
+        "motion" => Some(ZoomProperty::Motion),
+        "direction" => Some(ZoomProperty::Direction),
+        "rightclickaction" => Some(ZoomProperty::RightClickAction),
+        "contextmenu" => Some(ZoomProperty::ContextMenu),
+        "uicontextmenu" => Some(ZoomProperty::UIContextMenu),
+        "buttondownfilter" => Some(ZoomProperty::ButtonDownFilter),
+        "actionprecallback" => Some(ZoomProperty::ActionPreCallback),
+        "actionpostcallback" => Some(ZoomProperty::ActionPostCallback),
+        "figurehandle" => Some(ZoomProperty::FigureHandle),
+        "axesindex" => Some(ZoomProperty::AxesIndex),
+        "uselegacyexplorationmodes" => Some(ZoomProperty::UseLegacyExplorationModes),
         _ => None,
     }
 }
 
+fn mode_receiver(handle: &HandleRef) -> BuiltinResult<runmat_value::GraphicsReceiverRef> {
+    runmat_gc::gc_with_value(&handle.target, |value| match value {
+        Value::Object(object) if *object.class_name() == ZOOM_CLASS_NAME => {
+            object.graphics_receiver().cloned()
+        }
+        _ => None,
+    })
+    .map_err(|cause| internal(cause.to_string()))?
+    .ok_or_else(|| invalid("mode object has no exact Figure receiver"))
+}
+
 #[cfg(test)]
 mod tests {
+    fn zoom_builtin(
+        runtime: Option<crate::context::RuntimeContext>,
+        arguments: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        let arguments = crate::call::BuiltinArguments::from_borrowed(&arguments, runtime.as_ref())?;
+        super::zoom_builtin(runtime, arguments)
+    }
+
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
@@ -760,9 +823,9 @@ mod tests {
     #[test]
     fn zoom_option_toggles_mode_and_returns_live_object_state() {
         let _guard = setup_plot_tests();
-        zoom_builtin(vec![Value::String("on".into())]).unwrap();
+        zoom_builtin(None, vec![Value::String("on".into())]).unwrap();
 
-        let z = zoom_builtin(Vec::new()).unwrap();
+        let z = zoom_builtin(None, Vec::new()).unwrap();
         assert_eq!(
             get_builtin(vec![z.clone(), Value::String("Enable".into())]).unwrap(),
             Value::String("on".into())
@@ -789,7 +852,7 @@ mod tests {
             get_builtin(vec![z, Value::String("RightClickAction".into())]).unwrap(),
             Value::String("InverseZoom".into())
         );
-        let z = zoom_builtin(Vec::new()).unwrap();
+        let z = zoom_builtin(None, Vec::new()).unwrap();
         set_builtin(vec![
             z.clone(),
             Value::String("ActionPreCallback".into()),
@@ -801,7 +864,7 @@ mod tests {
             Value::String("pre".into())
         );
 
-        let z = zoom_builtin(Vec::new()).unwrap();
+        let z = zoom_builtin(None, Vec::new()).unwrap();
         set_builtin(vec![
             z.clone(),
             Value::String("Motion".into()),
@@ -827,8 +890,8 @@ mod tests {
         let _guard = setup_plot_tests();
         crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
 
-        let _outputs = crate::output_count::push_output_count(Some(0));
-        zoom_builtin(vec![Value::Num(2.0)]).unwrap();
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+        zoom_builtin(None, vec![Value::Num(2.0)]).unwrap();
 
         let fig = clone_figure(current_figure_handle()).unwrap();
         let meta = fig.axes_metadata(0).unwrap();
@@ -840,10 +903,10 @@ mod tests {
     fn zoom_reset_and_out_restore_recorded_baseline() {
         let _guard = setup_plot_tests();
         crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
-        zoom_builtin(vec![Value::String("reset".into())]).unwrap();
+        zoom_builtin(None, vec![Value::String("reset".into())]).unwrap();
 
         crate::builtins::plotting::state::set_axis_limits(Some((1.0, 2.0)), Some((3.0, 4.0)));
-        zoom_builtin(vec![Value::String("out".into())]).unwrap();
+        zoom_builtin(None, vec![Value::String("out".into())]).unwrap();
 
         let fig = clone_figure(current_figure_handle()).unwrap();
         let meta = fig.axes_metadata(0).unwrap();
@@ -868,7 +931,7 @@ mod tests {
         .unwrap();
         let (figure, axes_index) =
             crate::builtins::plotting::state::decode_axes_handle(ax1).expect("axes handle");
-        crate::builtins::plotting::state::set_axis_limits_for_axes(
+        crate::builtins::plotting::state::set_axis_manual_limits_for_axes(
             figure,
             axes_index,
             Some((0.0, 10.0)),
@@ -877,8 +940,8 @@ mod tests {
         .unwrap();
         crate::builtins::plotting::state::select_axes_for_figure(figure, 1).unwrap();
 
-        let _outputs = crate::output_count::push_output_count(Some(0));
-        zoom_builtin(vec![Value::Num(ax1), Value::Num(2.0)]).unwrap();
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+        zoom_builtin(None, vec![Value::Num(ax1), Value::Num(2.0)]).unwrap();
 
         assert_eq!(
             crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap(),
@@ -910,8 +973,8 @@ mod tests {
     fn typed_integer_single_argument_is_a_zoom_factor() {
         let _guard = setup_plot_tests();
         crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
-        let _outputs = crate::output_count::push_output_count(Some(0));
-        zoom_builtin(vec![Value::Int(IntValue::U8(2))]).expect("integer factor");
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+        zoom_builtin(None, vec![Value::Int(IntValue::U8(2))]).expect("integer factor");
         let fig = clone_figure(current_figure_handle()).unwrap();
         let meta = fig.axes_metadata(0).unwrap();
         assert_eq!(meta.x_limits, Some((2.5, 7.5)));

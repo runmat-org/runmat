@@ -1,13 +1,7 @@
 //! MATLAB-compatible `addpoints` builtin.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{ADDPOINTS_DESCRIPTOR, ADDPOINTS_ERROR_TOO_MANY_OUTPUTS};
+
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -16,180 +10,42 @@ use super::plotting_error;
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{append_points_to_animated_line, PlotChildHandleState};
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::set_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "addpoints";
 
-const ADDPOINTS_INPUTS_2D: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "an",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Animated line handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates.",
-    },
-];
-
-const ADDPOINTS_INPUTS_3D: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "an",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Animated line handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z coordinates for 3-D animated lines.",
-    },
-];
-
-const ADDPOINTS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "addpoints(an, x, y)",
-        inputs: &ADDPOINTS_INPUTS_2D,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "addpoints(an, x, y, z)",
-        inputs: &ADDPOINTS_INPUTS_3D,
-        outputs: &[],
-    },
-];
-
-const ADDPOINTS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ADDPOINTS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:addpoints:InvalidArgument"),
-    when: "The handle is not an animated line, coordinates are invalid, or vector lengths differ.",
-    message: "addpoints: invalid argument",
-};
-
-const ADDPOINTS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ADDPOINTS.INTERNAL",
-    identifier: Some("RunMat:addpoints:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "addpoints: internal operation failed",
-};
-
-const ADDPOINTS_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ADDPOINTS_ERROR_INVALID_ARGUMENT, ADDPOINTS_ERROR_INTERNAL];
-
-pub const ADDPOINTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ADDPOINTS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ADDPOINTS_ERRORS,
-};
-
-const ADDPOINTS_2D_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "X coordinates independently accept every integer class or documented floating coordinate data.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Y coordinates independently accept every integer class or documented floating coordinate data.",
-    },
-];
-
-const ADDPOINTS_3D_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "X coordinates independently accept every integer class or documented floating coordinate data.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Y coordinates independently accept every integer class or documented floating coordinate data.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "z",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Z coordinates independently accept every integer class or documented floating coordinate data.",
-    },
-];
-
-pub const ADDPOINTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "addpoints(an, integer_x, integer_y)",
-        inputs: &ADDPOINTS_2D_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because graphics state and rendering are client-side.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "addpoints(an, integer_x, integer_y, integer_z)",
-        inputs: &ADDPOINTS_3D_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "All three coordinate vectors must have equal element counts. Host integer storage is read authoritatively before values enter the f64 graphics domain; GPU arrays gather because graphics state and rendering are client-side.",
-    },
-];
-
 #[runtime_builtin(
     name = "addpoints",
-    category = "plotting",
-    summary = "Append points to an animated line.",
-    keywords = "addpoints,animatedline,plotting,graphics,animation",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(set_type),
-    descriptor(crate::builtins::plotting::addpoints::ADDPOINTS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::addpoints::ADDPOINTS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::addpoints"
 )]
-pub async fn addpoints_builtin(args: Vec<Value>) -> BuiltinResult<String> {
+pub async fn addpoints_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<String> {
+    {
+        let _scope = runtime.as_ref().map(|runtime| runtime.enter());
+        crate::output_count::validate_fixed_outputs(
+            &ADDPOINTS_DESCRIPTOR,
+            &ADDPOINTS_ERROR_TOO_MANY_OUTPUTS,
+            "addpoints",
+        )
+        .map_err(super::coordinate_admission::terminal)?;
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "addpoints")?;
+    let result = if let Some(runtime) = runtime.as_ref() {
+        runtime.scope(addpoints_impl(arguments.view(), &work)).await
+    } else {
+        addpoints_impl(arguments.view(), &work).await
+    };
+    work.finish(result)
+}
+
+async fn addpoints_impl(
+    args: crate::call::FunctionArgumentView<'_>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<String> {
     if args.len() != 3 && args.len() != 4 {
         return Err(addpoints_err(
             "expected addpoints(an, x, y) or addpoints(an, x, y, z)",
@@ -212,25 +68,31 @@ pub async fn addpoints_builtin(args: Vec<Value>) -> BuiltinResult<String> {
         }
     };
 
-    let x = numeric_vector(args[1].clone(), "X").await?;
-    let y = numeric_vector(args[2].clone(), "Y").await?;
+    let x = numeric_vector(args[1].clone(), "X", work).await?;
+    let y = numeric_vector(args[2].clone(), "Y", work).await?;
     let z = if args.len() == 4 {
-        Some(numeric_vector(args[3].clone(), "Z").await?)
+        Some(numeric_vector(args[3].clone(), "Z", work).await?)
     } else {
         None
     };
+    work.check()?;
     append_points_to_animated_line(&state, x, y, z)
         .map_err(|err| plotting_error(BUILTIN_NAME, err))?;
     Ok("ok".to_string())
 }
 
-async fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
+async fn numeric_vector(
+    value: Value,
+    name: &str,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<Vec<f64>> {
     if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
         return Err(addpoints_err(format!("{name} must not be logical data")));
     }
     let tensor = NumericInput::from_value(value, BUILTIN_NAME)?
         .into_tensor_async(BUILTIN_NAME)
         .await?;
+    work.check()?;
     if !is_vector_tensor(&tensor) {
         return Err(addpoints_err(format!("{name} must be a scalar or vector")));
     }
@@ -238,7 +100,8 @@ async fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
-    tensor.rows() == 1 || tensor.cols() == 1
+    (tensor.rows() == 1 || tensor.cols() == 1)
+        && tensor.shape().iter().skip(2).all(|&extent| extent == 1)
 }
 
 fn addpoints_err(detail: impl AsRef<str>) -> crate::RuntimeError {
@@ -256,6 +119,7 @@ mod tests {
         clear_figure, current_figure_handle, reset_hold_state_for_run,
     };
     use futures::executor::block_on;
+    use runmat_builtins::ADDPOINTS_INTEGER_CAPABILITIES;
     use runmat_value::IntegerStorage;
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -269,22 +133,30 @@ mod tests {
     #[test]
     fn addpoints_appends_2d_points_and_trims_oldest() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(vec![
-            Value::String("MaximumNumPoints".into()),
-            Value::Num(3.0),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("MaximumNumPoints".into()),
+                Value::Num(3.0),
+            ]),
+        ))
         .unwrap();
-        block_on(addpoints_builtin(vec![
-            handle.clone(),
-            vector(&[1.0, 2.0]),
-            vector(&[10.0, 20.0]),
-        ]))
+        block_on(addpoints_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                handle.clone(),
+                vector(&[1.0, 2.0]),
+                vector(&[10.0, 20.0]),
+            ]),
+        ))
         .unwrap();
-        block_on(addpoints_builtin(vec![
-            handle.clone(),
-            vector(&[3.0, 4.0]),
-            vector(&[30.0, 40.0]),
-        ]))
+        block_on(addpoints_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                handle.clone(),
+                vector(&[3.0, 4.0]),
+                vector(&[30.0, 40.0]),
+            ]),
+        ))
         .unwrap();
         let x = get_builtin(vec![handle, Value::String("XData".into())]).unwrap();
         assert_eq!(tensor_data(x), vec![2.0, 3.0, 4.0]);
@@ -293,13 +165,19 @@ mod tests {
     #[test]
     fn addpoints_supports_3d_coordinates() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
-        block_on(addpoints_builtin(vec![
-            handle.clone(),
-            vector(&[1.0, 2.0]),
-            vector(&[3.0, 4.0]),
-            vector(&[5.0, 6.0]),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
+        block_on(addpoints_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                handle.clone(),
+                vector(&[1.0, 2.0]),
+                vector(&[3.0, 4.0]),
+                vector(&[5.0, 6.0]),
+            ]),
+        ))
         .unwrap();
         let z = get_builtin(vec![handle, Value::String("ZData".into())]).unwrap();
         assert_eq!(tensor_data(z), vec![5.0, 6.0]);
@@ -308,14 +186,20 @@ mod tests {
     #[test]
     fn addpoints_bumps_figure_revision_for_renderer_flush() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         let figure = current_figure_handle();
         let before = current_figure_revision(figure).unwrap();
-        block_on(addpoints_builtin(vec![
-            handle,
-            vector(&[1.0]),
-            vector(&[2.0]),
-        ]))
+        block_on(addpoints_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                handle,
+                vector(&[1.0]),
+                vector(&[2.0]),
+            ]),
+        ))
         .unwrap();
         let after = current_figure_revision(figure).unwrap();
         assert!(after > before, "addpoints must publish a figure revision");
@@ -337,29 +221,44 @@ mod tests {
     #[test]
     fn addpoints_rejects_3d_promotion_when_markers_would_be_lost() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(vec![
-            Value::String("Marker".into()),
-            Value::String("o".into()),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("Marker".into()),
+                Value::String("o".into()),
+            ]),
+        ))
         .unwrap();
-        let err = block_on(addpoints_builtin(vec![
-            handle,
-            vector(&[1.0]),
-            vector(&[2.0]),
-            vector(&[3.0]),
-        ]))
+        let err = block_on(addpoints_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                handle,
+                vector(&[1.0]),
+                vector(&[2.0]),
+                vector(&[3.0]),
+            ]),
+        ))
         .expect_err("3-D promotion with markers should fail");
         assert!(err.message.contains("marker"));
     }
 
     #[test]
     fn addpoints_rejects_non_animatedline_handles() {
+        assert!(!is_vector_tensor(
+            &Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap()
+        ));
+        assert!(is_vector_tensor(
+            &Tensor::new(vec![1.0, 2.0], vec![1, 2, 1]).unwrap()
+        ));
         let _guard = setup();
-        let err = block_on(addpoints_builtin(vec![
-            Value::Num(1.0),
-            vector(&[1.0]),
-            vector(&[2.0]),
-        ]))
+        let figure = crate::builtins::plotting::state::new_figure_handle();
+        let err = block_on(addpoints_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(f64::from(figure.as_u32())),
+                vector(&[1.0]),
+                vector(&[2.0]),
+            ]),
+        ))
         .expect_err("figure handle is not an animated line");
         assert!(err.message.contains("animatedline handle"));
     }
@@ -378,13 +277,19 @@ mod tests {
             IntegerStorage::U64(vec![1, 2]),
         ];
         for storage in coordinates {
-            let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
-            block_on(addpoints_builtin(vec![
-                handle.clone(),
-                integer_value(storage.clone()),
-                vector(&[10.0, 20.0]),
-                integer_value(storage),
-            ]))
+            let handle = block_on(animatedline_builtin(
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap();
+            block_on(addpoints_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    handle.clone(),
+                    integer_value(storage.clone()),
+                    vector(&[10.0, 20.0]),
+                    integer_value(storage),
+                ]),
+            ))
             .unwrap();
             assert_eq!(
                 tensor_data(
@@ -408,12 +313,18 @@ mod tests {
     #[test]
     fn addpoints_rejects_undocumented_logical_coordinates() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
-        let err = block_on(addpoints_builtin(vec![
-            handle,
-            Value::Bool(true),
-            Value::Num(2.0),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
+        let err = block_on(addpoints_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                handle,
+                Value::Bool(true),
+                Value::Num(2.0),
+            ]),
+        ))
         .expect_err("logical coordinates are not documented");
         assert!(err.message.contains("must not be logical"));
     }

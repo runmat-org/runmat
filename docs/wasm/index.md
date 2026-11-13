@@ -48,10 +48,13 @@ await session.executeRequest({
 | Runtime | `enableJit`, `language.compat` | Control native-code tiering and select the `runmat` (default), `matlab`, or `strict` language policy. |
 | GPU | `enableGpu`, `wgpuPowerPreference`, `wgpuForceFallbackAdapter` | Request WebGPU acceleration and adapter preferences. |
 | Filesystem | `fsProvider` | Provide file I/O for `load`, `save`, scripts, and path execution. |
+| Application settings | `applicationSettings` | Select `"isolatedMemory"` for session-local preferences and user paths; omission retains browser IndexedDB persistence. |
 | Plotting | `plotCanvas`, `scatterTargetPoints`, `surfaceVertexBudget` | Attach a canvas and tune plotting LOD defaults. |
 | Diagnostics | `telemetryConsent`, `telemetryId`, `logLevel`, `emitFusionPlan`, `callstackLimit`, `errorNamespace` | Configure logging, telemetry, error detail, and optional fusion-plan payloads. |
 
 GPU is requested by default, but the wrapper checks for `navigator.gpu` and falls back to CPU execution when WebGPU is unavailable.
+
+Node hosts supply `wasmModule` bytes from the same SDK build, a filesystem provider, and `applicationSettings: "isolatedMemory"`. Preferences and user-path changes survive `resetSession()` and last for that session only. Application settings are separate from script files and package storage; an in-memory filesystem alone does not replace the browser application-settings authority.
 
 ## Results
 
@@ -145,7 +148,7 @@ await session.setInputHandler(async (request) => {
 
 The npm package exports test preparation and execution from `runmat/testing`. Rust/WASM owns manifest test-layout parsing, frozen source identity, semantic discovery, selectors, immutable plan construction, scheduling, retries, lifecycle, result merging, reports, plugins, and coverage. JavaScript hosts supply filesystem bytes and Web Worker lifecycle only.
 
-Use `BrowserTestSnapshotPreparer` with a resolved project revision and a session, then submit the returned snapshot and plan through `BrowserTestCoordinatorClient` or `runTests`. Preparation captures MATLAB sources for semantic discovery and all regular files in the selected source/test trees for worker-local fixtures. Symlinks are excluded; snapshots are deterministic and bounded.
+Use `BrowserTestSnapshotPreparer` with a resolved project revision and a session, then submit the returned snapshot and plan through `BrowserTestCoordinatorClient` or `runTests`. Preparation captures MATLAB sources for semantic discovery and all regular files in the selected source/test trees for worker-local fixtures. The project's `[runtime.language].compat` policy is retained in the frozen revision and used by discovery and worker attempts. Symlinks are excluded; snapshots are deterministic and bounded.
 
 Each strong-isolation attempt runs in an independent Web Worker with its own WASM instance, Core session, frozen project handoff, and in-memory filesystem. The coordinator remains outside the executing worker so it can escalate cancellation from cooperative teardown to `Worker.terminate()`, recover after a trap or timeout, and still produce one canonical terminal result. Browser isolation is reported as `worker`, never as an OS process.
 

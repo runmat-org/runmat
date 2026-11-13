@@ -1,4 +1,5 @@
 import type {
+  FrozenTestSubmission,
   RunMatTestSession,
   WorkerSpawnInput,
   WorkerExecution
@@ -40,7 +41,7 @@ export function installRunMatTestWorkerHost(
   options: TestWorkerHostOptions
 ): void {
   let session: RunMatTestSession | undefined;
-  let submission: WorkerSpawnInput | undefined;
+  let submission: FrozenTestSubmission | undefined;
   let active: Promise<WorkerExecution> | undefined;
 
   scope.addEventListener("message", (event: MessageEvent<HostRequest>) => {
@@ -49,12 +50,23 @@ export function installRunMatTestWorkerHost(
       switch (request.type) {
         case "install": {
           session?.dispose?.();
+          session = undefined;
+          submission = undefined;
           const frozen = request.payload as WorkerSpawnInput;
-          session = await options.createSession(frozen);
-          if (frozen.projectHandoff !== undefined) {
-            session.installProjectHandoff?.(frozen.projectHandoff);
+          const replacement = await options.createSession(frozen);
+          try {
+            if (frozen.projectHandoff !== undefined) {
+              await replacement.installProjectHandoff?.(frozen.projectHandoff);
+            }
+            submission = deepFreeze(structuredClone({
+              plan: frozen.plan,
+              snapshot: frozen.snapshot
+            }));
+          } catch (error) {
+            replacement.dispose?.();
+            throw error;
           }
-          submission = deepFreeze(structuredClone(frozen));
+          session = replacement;
           return null;
         }
         case "execute": {
@@ -66,7 +78,8 @@ export function installRunMatTestWorkerHost(
             attempt: number;
           };
           active = session.executeTestAttempt({
-            ...submission,
+            plan: submission.plan,
+            snapshot: submission.snapshot,
             testId: input.testId,
             attempt: input.attempt
           });

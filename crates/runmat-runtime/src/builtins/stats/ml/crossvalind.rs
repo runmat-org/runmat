@@ -3,13 +3,15 @@
 use std::collections::BTreeMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, CrossvalIndMethod as Method, CrossvalIndOption, PartitionCountGrammar,
+    CROSSVALIND_ERROR_INTERNAL, CROSSVALIND_ERROR_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
+use runmat_value::{
+    decode_utf16_code_units, CharArray, LogicalArray, StringArray, Tensor, Utf16DecodeError, Value,
+};
 
+use super::partition_shared::PartitionLabel;
 use crate::builtins::common::random;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -17,128 +19,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const NAME: &str = "crossvalind";
 const MAX_OBSERVATIONS: usize = 10_000_000;
 const EPS: f64 = 1.0e-12;
-
-const PARAM_METHOD: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "method",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cross-validation method: KFold, HoldOut, LeaveMOut, or Resubstitution.",
-};
-
-const PARAM_N: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Observation count.",
-};
-
-const PARAM_VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Fold count, holdout fraction/count, or leave-M-out count.",
-};
-
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value options including Classes and Min.",
-};
-
-const OUTPUT_INDICES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "indices",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Fold indices for KFold, or a logical training mask for partition methods.",
-}];
-
-const OUTPUT_TRAIN_TEST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "train",
-        ty: BuiltinParamType::LogicalArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical training-set mask.",
-    },
-    BuiltinParamDescriptor {
-        name: "test",
-        ty: BuiltinParamType::LogicalArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Logical test-set mask.",
-    },
-];
-
-const INPUTS_METHOD_N_VALUE: [BuiltinParamDescriptor; 3] = [PARAM_METHOD, PARAM_N, PARAM_VALUE];
-const INPUTS_METHOD_N_VALUE_OPTIONS: [BuiltinParamDescriptor; 4] =
-    [PARAM_METHOD, PARAM_N, PARAM_VALUE, PARAM_OPTIONS];
-const INPUTS_METHOD_N: [BuiltinParamDescriptor; 2] = [PARAM_METHOD, PARAM_N];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "indices = crossvalind('KFold', n, k)",
-        inputs: &INPUTS_METHOD_N_VALUE,
-        outputs: &OUTPUT_INDICES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "indices = crossvalind('KFold', n, k, 'Classes', group)",
-        inputs: &INPUTS_METHOD_N_VALUE_OPTIONS,
-        outputs: &OUTPUT_INDICES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "train = crossvalind('HoldOut', n, p)",
-        inputs: &INPUTS_METHOD_N_VALUE,
-        outputs: &OUTPUT_INDICES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[train, test] = crossvalind('HoldOut', n, p)",
-        inputs: &INPUTS_METHOD_N_VALUE,
-        outputs: &OUTPUT_TRAIN_TEST,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[train, test] = crossvalind('LeaveMOut', n, m)",
-        inputs: &INPUTS_METHOD_N_VALUE,
-        outputs: &OUTPUT_TRAIN_TEST,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[train, test] = crossvalind('Resubstitution', n)",
-        inputs: &INPUTS_METHOD_N,
-        outputs: &OUTPUT_TRAIN_TEST,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CROSSVALIND.INVALID_ARGUMENT",
-    identifier: Some("RunMat:crossvalind:InvalidArgument"),
-    when: "Inputs, method names, partition values, options, or output counts are malformed.",
-    message: "crossvalind: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CROSSVALIND.INTERNAL",
-    identifier: Some("RunMat:crossvalind:Internal"),
-    when: "RunMat cannot allocate or construct the requested partition output.",
-    message: "crossvalind: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-fn crossvalind_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Union(vec![Type::tensor(), Type::logical()])
-}
 
 fn builtin_error(
     message: impl Into<String>,
@@ -152,24 +32,28 @@ fn builtin_error(
 }
 
 fn invalid_argument(message: impl Into<String>) -> RuntimeError {
-    builtin_error(message, &ERROR_INVALID_ARGUMENT)
+    builtin_error(message, &CROSSVALIND_ERROR_INVALID_ARGUMENT)
+}
+
+fn invalid_utf16(context: &str, error: Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "crossvalind: {context} is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(NAME)
+    .with_source(error);
+    if let Some(identifier) = CROSSVALIND_ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn internal_error(message: impl Into<String>) -> RuntimeError {
-    builtin_error(message, &ERROR_INTERNAL)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Method {
-    KFold,
-    HoldOut,
-    LeaveMOut,
-    Resubstitution,
+    builtin_error(message, &CROSSVALIND_ERROR_INTERNAL)
 }
 
 #[derive(Clone, Debug, Default)]
 struct Options {
-    classes: Option<Vec<Option<String>>>,
+    classes: Option<Vec<Option<PartitionLabel>>>,
     min: Option<usize>,
 }
 
@@ -181,38 +65,159 @@ enum PartitionOutput {
 
 #[runtime_builtin(
     name = "crossvalind",
-    category = "stats/ml",
-    summary = "Generate cross-validation indices and train/test partitions.",
-    keywords = "crossvalind,cross validation,kfold,holdout,leavemout,resubstitution,statistics,machine learning",
-    type_resolver(crossvalind_type),
-    descriptor(self::DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::crossvalind"
 )]
-async fn crossvalind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_values(args).await?;
-    let output = crossvalind_compute(args)?;
+async fn crossvalind_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let admitted = admit_host_controls(args.view())?;
+    let args = gather_values(args, runtime.as_ref()).await?;
+    let mut turn = if matches!(admitted.method, Method::Resubstitution) {
+        None
+    } else {
+        Some(random::acquire_turn(runtime.as_ref(), NAME).await?)
+    };
+    let output = crossvalind_compute(args.view(), admitted, turn.as_mut())?;
     output_value(output)
 }
 
-async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(|err| invalid_argument(format!("crossvalind: {err}")))?,
-        );
-    }
-    Ok(out)
+struct AdmittedControls {
+    method: Method,
+    option_start: usize,
+    option_names: Vec<CrossvalIndOption>,
 }
 
-fn crossvalind_compute(args: Vec<Value>) -> BuiltinResult<PartitionOutput> {
+fn admit_host_controls(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<AdmittedControls> {
     if args.len() < 2 {
         return Err(invalid_argument(
             "crossvalind: method and observation count are required",
         ));
     }
-    let method = parse_method(&scalar_text(&args[0], "method")?)?;
+    let method_text = scalar_text(&args[0], "method")?;
+    let method = Method::parse(&method_text).ok_or_else(|| {
+        invalid_argument(format!(
+            "crossvalind: unsupported cross-validation method '{}'",
+            canonical(&method_text)
+        ))
+    })?;
+    let (option_start, max_outputs) = match method {
+        Method::KFold => (3, 1),
+        Method::HoldOut | Method::LeaveMOut => (3, 2),
+        Method::Resubstitution => (2, 2),
+    };
+    if args.len() < option_start {
+        return Err(invalid_argument(format!(
+            "crossvalind: {} requires a partition value",
+            method.name()
+        )));
+    }
+    if crate::output_count::current_output_count().is_some_and(|count| count > max_outputs) {
+        return Err(invalid_argument(if max_outputs == 1 {
+            "crossvalind: KFold returns one output argument"
+        } else {
+            "crossvalind: too many output arguments; maximum is 2"
+        }));
+    }
+    if !(args.len() - option_start).is_multiple_of(2) {
+        return Err(invalid_argument(
+            "crossvalind: name-value options must be supplied in pairs",
+        ));
+    }
+    let n = if matches!(&args[1], Value::GpuTensor(_)) {
+        None
+    } else {
+        let n = observation_count(&args[1])?;
+        validate_n(n)?;
+        Some(n)
+    };
+    if let Some(value) = args.get(2).filter(|_| method != Method::Resubstitution) {
+        if !matches!(value, Value::GpuTensor(_)) {
+            match method {
+                Method::KFold => {
+                    let k = positive_integer(value, "KFold")?;
+                    if k < 2 || n.is_some_and(|n| k > n) {
+                        return Err(invalid_argument(
+                            "crossvalind: KFold fold count must be an integer in [2, n]",
+                        ));
+                    }
+                }
+                Method::HoldOut => {
+                    if let Some(n) = n {
+                        holdout_count(value, n)?;
+                    }
+                }
+                Method::LeaveMOut => {
+                    let m = positive_integer(value, "LeaveMOut")?;
+                    if n.is_some_and(|n| m >= n) {
+                        return Err(invalid_argument(
+                            "crossvalind: LeaveMOut must leave between 1 and n-1 observations out",
+                        ));
+                    }
+                }
+                Method::Resubstitution => {}
+            }
+        }
+    }
+    let mut option_names = Vec::with_capacity((args.len() - option_start) / 2);
+    for index in (option_start..args.len()).step_by(2) {
+        let name = scalar_text(&args[index], "option name")?;
+        let option = CrossvalIndOption::parse(&name).ok_or_else(|| {
+            invalid_argument(format!(
+                "crossvalind: unsupported option '{}'",
+                canonical(&name)
+            ))
+        })?;
+        if method == Method::Resubstitution {
+            return Err(invalid_argument(
+                "crossvalind: Resubstitution does not accept Classes or Min options",
+            ));
+        }
+        let value = &args[index + 1];
+        if !matches!(value, Value::GpuTensor(_)) {
+            match option {
+                CrossvalIndOption::Min => {
+                    positive_integer(value, "Min")?;
+                }
+                CrossvalIndOption::Classes => {
+                    if let Some(n) = n {
+                        classes_from_value(value, n)?;
+                    }
+                }
+            }
+        }
+        option_names.push(option);
+    }
+    Ok(AdmittedControls {
+        method,
+        option_start,
+        option_names,
+    })
+}
+
+async fn gather_values(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let gathered = values
+        .try_map_preserving_roots_async(values.len(), runtime, |index| {
+            gather_if_needed_async(&values[index])
+        })
+        .await?;
+    drop(values);
+    Ok(gathered)
+}
+
+fn crossvalind_compute(
+    args: crate::call::FunctionArgumentView<'_>,
+    admitted: AdmittedControls,
+    turn: Option<&mut random::RandomTurn>,
+) -> BuiltinResult<PartitionOutput> {
+    let method = admitted.method;
     let n = observation_count(&args[1])?;
     let (value, option_start) = match method {
         Method::Resubstitution => (None, 2usize),
@@ -226,18 +231,31 @@ fn crossvalind_compute(args: Vec<Value>) -> BuiltinResult<PartitionOutput> {
             (Some(value), 3usize)
         }
     };
-    let options = parse_options(&args[option_start..], n)?;
+    debug_assert_eq!(option_start, admitted.option_start);
+    let options = parse_options(args.range(option_start..)?, n, &admitted.option_names)?;
     validate_n(n)?;
 
     match method {
         Method::KFold => {
             let k = positive_integer(value.expect("KFold value"), "KFold")?;
-            let folds = kfold_indices(n, k, options.classes.as_deref(), options.min)?;
+            let folds = kfold_indices(
+                n,
+                k,
+                options.classes.as_deref(),
+                options.min,
+                turn.expect("random method has an ordered turn"),
+            )?;
             Ok(PartitionOutput::Folds(tensor_value(folds, vec![n, 1])?))
         }
         Method::HoldOut => {
             let test_count = holdout_count(value.expect("HoldOut value"), n)?;
-            let test = random_test_mask(n, test_count, options.classes.as_deref(), options.min)?;
+            let test = random_test_mask(
+                n,
+                test_count,
+                options.classes.as_deref(),
+                options.min,
+                turn.expect("random method has an ordered turn"),
+            )?;
             train_test_from_test_mask(test)
         }
         Method::LeaveMOut => {
@@ -247,7 +265,13 @@ fn crossvalind_compute(args: Vec<Value>) -> BuiltinResult<PartitionOutput> {
                     "crossvalind: LeaveMOut must leave between 1 and n-1 observations out",
                 ));
             }
-            let test = random_test_mask(n, m, options.classes.as_deref(), options.min)?;
+            let test = random_test_mask(
+                n,
+                m,
+                options.classes.as_deref(),
+                options.min,
+                turn.expect("random method has an ordered turn"),
+            )?;
             train_test_from_test_mask(test)
         }
         Method::Resubstitution => {
@@ -267,8 +291,8 @@ fn crossvalind_compute(args: Vec<Value>) -> BuiltinResult<PartitionOutput> {
 fn output_value(output: PartitionOutput) -> BuiltinResult<Value> {
     match output {
         PartitionOutput::Folds(folds) => match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![folds])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![folds])),
             Some(_) => Err(invalid_argument(
                 "crossvalind: KFold returns one output argument",
             )),
@@ -276,9 +300,9 @@ fn output_value(output: PartitionOutput) -> BuiltinResult<Value> {
         },
         PartitionOutput::TrainTest { train, test } => {
             match crate::output_count::current_output_count() {
-                Some(0) => Ok(Value::OutputList(Vec::new())),
-                Some(1) => Ok(Value::OutputList(vec![train])),
-                Some(2) => Ok(Value::OutputList(vec![train, test])),
+                Some(0) => Ok(Value::output_list(Vec::new())),
+                Some(1) => Ok(Value::output_list(vec![train])),
+                Some(2) => Ok(Value::output_list(vec![train, test])),
                 Some(_) => Err(invalid_argument(
                     "crossvalind: too many output arguments; maximum is 2",
                 )),
@@ -288,48 +312,19 @@ fn output_value(output: PartitionOutput) -> BuiltinResult<Value> {
     }
 }
 
-impl Method {
-    fn name(self) -> &'static str {
-        match self {
-            Self::KFold => "KFold",
-            Self::HoldOut => "HoldOut",
-            Self::LeaveMOut => "LeaveMOut",
-            Self::Resubstitution => "Resubstitution",
-        }
-    }
-}
-
-fn parse_method(text: &str) -> BuiltinResult<Method> {
-    match canonical(text).as_str() {
-        "kfold" => Ok(Method::KFold),
-        "holdout" => Ok(Method::HoldOut),
-        "leavemout" | "leavem" => Ok(Method::LeaveMOut),
-        "resubstitution" | "resub" => Ok(Method::Resubstitution),
-        other => Err(invalid_argument(format!(
-            "crossvalind: unsupported cross-validation method '{other}'"
-        ))),
-    }
-}
-
-fn parse_options(rest: &[Value], n: usize) -> BuiltinResult<Options> {
-    if !rest.len().is_multiple_of(2) {
-        return Err(invalid_argument(
-            "crossvalind: name-value options must be supplied in pairs",
-        ));
-    }
+fn parse_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+    n: usize,
+    names: &[CrossvalIndOption],
+) -> BuiltinResult<Options> {
+    debug_assert_eq!(rest.len() / 2, names.len());
     let mut options = Options::default();
     let mut idx = 0usize;
     while idx < rest.len() {
-        let name = scalar_text(&rest[idx], "option name")?;
         let value = &rest[idx + 1];
-        match canonical(&name).as_str() {
-            "classes" => options.classes = Some(classes_from_value(value, n)?),
-            "min" => options.min = Some(positive_integer(value, "Min")?),
-            other => {
-                return Err(invalid_argument(format!(
-                    "crossvalind: unsupported option '{other}'"
-                )))
-            }
+        match names[idx / 2] {
+            CrossvalIndOption::Classes => options.classes = Some(classes_from_value(value, n)?),
+            CrossvalIndOption::Min => options.min = Some(positive_integer(value, "Min")?),
         }
         idx += 2;
     }
@@ -359,8 +354,9 @@ fn validate_n(n: usize) -> BuiltinResult<()> {
 fn kfold_indices(
     n: usize,
     k: usize,
-    classes: Option<&[Option<String>]>,
+    classes: Option<&[Option<PartitionLabel>]>,
     min: Option<usize>,
+    turn: &mut random::RandomTurn,
 ) -> BuiltinResult<Vec<f64>> {
     if k < 2 || k > n {
         return Err(invalid_argument(
@@ -371,7 +367,7 @@ fn kfold_indices(
     if let Some(classes) = classes {
         validate_class_min(classes, min.unwrap_or(1), k)?;
         for indices in grouped_indices(classes).values() {
-            let shuffled = shuffled_indices(indices)?;
+            let shuffled = shuffled_indices(indices, turn)?;
             for (offset, row) in shuffled.into_iter().enumerate() {
                 folds[row] = (offset % k + 1) as f64;
             }
@@ -383,7 +379,7 @@ fn kfold_indices(
         }
     } else {
         let indices: Vec<usize> = (0..n).collect();
-        for (offset, row) in shuffled_indices(&indices)?.into_iter().enumerate() {
+        for (offset, row) in shuffled_indices(&indices, turn)?.into_iter().enumerate() {
             folds[row] = (offset % k + 1) as f64;
         }
     }
@@ -393,8 +389,9 @@ fn kfold_indices(
 fn random_test_mask(
     n: usize,
     test_count: usize,
-    classes: Option<&[Option<String>]>,
+    classes: Option<&[Option<PartitionLabel>]>,
     min: Option<usize>,
+    turn: &mut random::RandomTurn,
 ) -> BuiltinResult<Vec<u8>> {
     if test_count == 0 || test_count >= n {
         return Err(invalid_argument(
@@ -410,7 +407,7 @@ fn random_test_mask(
         for indices in groups.values() {
             let target = ((indices.len() * test_count) + (n / 2)) / n;
             let target = target.clamp(min.min(indices.len()), indices.len().saturating_sub(min));
-            for row in shuffled_indices(indices)?.into_iter().take(target) {
+            for row in shuffled_indices(indices, turn)?.into_iter().take(target) {
                 if selected < test_count {
                     test[row] = 1;
                     selected += 1;
@@ -419,7 +416,7 @@ fn random_test_mask(
         }
         if selected < test_count {
             let candidates: Vec<usize> = (0..n).filter(|row| test[*row] == 0).collect();
-            for row in shuffled_indices(&candidates)? {
+            for row in shuffled_indices(&candidates, turn)? {
                 if selected >= test_count {
                     break;
                 }
@@ -429,7 +426,10 @@ fn random_test_mask(
         }
     } else {
         let indices: Vec<usize> = (0..n).collect();
-        for row in shuffled_indices(&indices)?.into_iter().take(test_count) {
+        for row in shuffled_indices(&indices, turn)?
+            .into_iter()
+            .take(test_count)
+        {
             test[row] = 1;
         }
     }
@@ -448,12 +448,12 @@ fn train_test_from_test_mask(test: Vec<u8>) -> BuiltinResult<PartitionOutput> {
     })
 }
 
-fn shuffled_indices(indices: &[usize]) -> BuiltinResult<Vec<usize>> {
+fn shuffled_indices(indices: &[usize], turn: &mut random::RandomTurn) -> BuiltinResult<Vec<usize>> {
     let mut out = indices.to_vec();
     if out.len() <= 1 {
         return Ok(out);
     }
-    let uniforms = random::generate_uniform(out.len() - 1, NAME)?;
+    let uniforms = random::generate_uniform(turn, out.len() - 1, NAME)?;
     for (i, u) in uniforms.into_iter().enumerate() {
         let span = out.len() - i;
         let mut offset = (u * span as f64).floor() as usize;
@@ -466,6 +466,11 @@ fn shuffled_indices(indices: &[usize]) -> BuiltinResult<Vec<usize>> {
 }
 
 fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
+    if n < 2 {
+        return Err(invalid_argument(
+            "crossvalind: HoldOut requires at least two observations",
+        ));
+    }
     if let Some(integer) = tensor::scalar_integer_value(value) {
         return integer
             .try_to_usize()
@@ -488,7 +493,11 @@ fn holdout_count(value: &Value, n: usize) -> BuiltinResult<usize> {
     ))
 }
 
-fn validate_class_min(classes: &[Option<String>], min: usize, buckets: usize) -> BuiltinResult<()> {
+fn validate_class_min(
+    classes: &[Option<PartitionLabel>],
+    min: usize,
+    buckets: usize,
+) -> BuiltinResult<()> {
     if min == 0 {
         return Err(invalid_argument("crossvalind: Min must be positive"));
     }
@@ -502,14 +511,16 @@ fn validate_class_min(classes: &[Option<String>], min: usize, buckets: usize) ->
     Ok(())
 }
 
-fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<String>>> {
+fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
     let labels = match value {
         Value::Tensor(tensor) => numeric_labels(tensor)?,
+        Value::Num(number) => vec![PartitionLabel::number(*number)],
+        Value::Int(integer) => vec![Some(PartitionLabel::integer(integer))],
         Value::LogicalArray(array) => logical_labels(array)?,
         Value::StringArray(array) => string_array_labels(array)?,
-        Value::CharArray(chars) => char_row_labels(chars),
-        Value::String(text) => vec![Some(text.clone())],
-        Value::Bool(flag) => vec![Some(if *flag { "true" } else { "false" }.to_string())],
+        Value::CharArray(chars) => char_row_labels(chars)?,
+        Value::String(text) => vec![PartitionLabel::text(text.clone())],
+        Value::Bool(flag) => vec![Some(PartitionLabel::Logical(*flag))],
         other => {
             return Err(invalid_argument(format!(
                 "crossvalind: Classes must be a vector, got {other:?}"
@@ -524,49 +535,48 @@ fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<Strin
     Ok(labels)
 }
 
-fn numeric_labels(tensor: &Tensor) -> BuiltinResult<Vec<Option<String>>> {
-    let values = tensor::tensor_values_f64_cow(tensor);
-    ensure_vector(&tensor.shape, values.len(), "Classes")?;
-    Ok(values
+fn numeric_labels(tensor: &Tensor) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
+    ensure_vector(tensor.shape(), tensor.len(), "Classes")?;
+    if let Some(storage) = tensor.integer_storage() {
+        return Ok(storage
+            .exact_values()
+            .iter()
+            .map(|value| Some(PartitionLabel::integer(value)))
+            .collect());
+    }
+    Ok(tensor::tensor_values_f64_cow(tensor)
         .iter()
-        .map(|value| {
-            if value.is_nan() {
-                None
-            } else if value.is_infinite() {
-                Some(value.to_string())
-            } else if value.fract().abs() <= EPS {
-                Some(format!("{value:.0}"))
-            } else {
-                Some(value.to_string())
-            }
-        })
+        .map(|value| PartitionLabel::number(*value))
         .collect())
 }
 
-fn logical_labels(array: &LogicalArray) -> BuiltinResult<Vec<Option<String>>> {
+fn logical_labels(array: &LogicalArray) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
     ensure_vector(&array.shape, array.data.len(), "Classes")?;
     Ok(array
         .data
         .iter()
-        .map(|flag| Some(if *flag == 0 { "false" } else { "true" }.to_string()))
+        .map(|flag| Some(PartitionLabel::Logical(*flag != 0)))
         .collect())
 }
 
-fn string_array_labels(array: &StringArray) -> BuiltinResult<Vec<Option<String>>> {
-    ensure_vector(&array.shape, array.data.len(), "Classes")?;
-    Ok(array.data.iter().map(|text| Some(text.clone())).collect())
+fn string_array_labels(array: &StringArray) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
+    ensure_vector(&array.shape, array.data().len(), "Classes")?;
+    Ok(array
+        .data()
+        .iter()
+        .map(|text| PartitionLabel::text(text.clone()))
+        .collect())
 }
 
-fn char_row_labels(chars: &CharArray) -> Vec<Option<String>> {
+fn char_row_labels(chars: &CharArray) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
     let mut labels = Vec::with_capacity(chars.rows);
     for row in 0..chars.rows {
-        let mut label = String::with_capacity(chars.cols);
-        for col in 0..chars.cols {
-            label.push(chars.data[row + col * chars.rows]);
-        }
-        labels.push(Some(label.trim_end().to_string()));
+        let start = row * chars.cols;
+        let label = decode_utf16_code_units(&chars.data()[start..start + chars.cols])
+            .map_err(|error| invalid_utf16("class label", error))?;
+        labels.push(Some(PartitionLabel::Text(label.trim_end().into())));
     }
-    labels
+    Ok(labels)
 }
 
 fn ensure_vector(shape: &[usize], len: usize, label: &str) -> BuiltinResult<()> {
@@ -583,8 +593,8 @@ fn ensure_vector(shape: &[usize], len: usize, label: &str) -> BuiltinResult<()> 
     Ok(())
 }
 
-fn grouped_indices(labels: &[Option<String>]) -> BTreeMap<String, Vec<usize>> {
-    let mut groups = BTreeMap::<String, Vec<usize>>::new();
+fn grouped_indices(labels: &[Option<PartitionLabel>]) -> BTreeMap<PartitionLabel, Vec<usize>> {
+    let mut groups = BTreeMap::<PartitionLabel, Vec<usize>>::new();
     for (idx, label) in labels.iter().enumerate() {
         if let Some(label) = label {
             groups.entry(label.clone()).or_default().push(idx);
@@ -594,7 +604,7 @@ fn grouped_indices(labels: &[Option<String>]) -> BTreeMap<String, Vec<usize>> {
 }
 
 fn positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
-    if let Value::Int(integer) = value {
+    if let Some(integer) = tensor::scalar_integer_value(value) {
         return integer
             .try_to_usize()
             .filter(|value| *value > 0)
@@ -609,18 +619,13 @@ fn positive_integer(value: &Value, label: &str) -> BuiltinResult<usize> {
 }
 
 fn positive_integer_number(raw: f64, label: &str) -> BuiltinResult<usize> {
-    if raw.is_finite()
-        && raw.fract().abs() <= EPS
-        && raw >= 1.0
-        && raw <= usize::MAX as f64
-        && !(usize::BITS == 64 && raw == usize::MAX as f64)
-    {
-        Ok(raw as usize)
-    } else {
-        Err(invalid_argument(format!(
-            "crossvalind: {label} must be a positive integer scalar"
-        )))
-    }
+    PartitionCountGrammar::CrossvalInd
+        .positive_from_float(raw)
+        .ok_or_else(|| {
+            invalid_argument(format!(
+                "crossvalind: {label} must be a positive integer scalar"
+            ))
+        })
 }
 
 fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
@@ -640,11 +645,22 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
     }
 }
 
-fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
+fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(std::borrow::Cow::Borrowed(text.as_str()))
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(std::borrow::Cow::Borrowed(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
+        }
+        Value::CharArray(chars) => decode_utf16_code_units(chars.data())
+            .map(std::borrow::Cow::Owned)
+            .map_err(|error| invalid_utf16(label, error)),
         other => Err(invalid_argument(format!(
             "crossvalind: {label} must be a text scalar, got {other:?}"
         ))),
@@ -671,208 +687,4 @@ fn logical_value(data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::IntegerStorage;
-
-    fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
-        let _guard = crate::output_count::push_output_count(outputs);
-        block_on(crossvalind_builtin(args))
-    }
-
-    fn logical_data(value: Value) -> Vec<u8> {
-        match value {
-            Value::LogicalArray(array) => array.data,
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    fn tensor_data(value: Value) -> Vec<f64> {
-        match value {
-            Value::Tensor(tensor) => tensor
-                .into_numeric_storage()
-                .expect("valid tensor storage")
-                .materialize_f64(),
-            Value::Num(number) => vec![number],
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    fn output_list(value: Value) -> Vec<Value> {
-        match value {
-            Value::OutputList(values) => values,
-            other => panic!("expected output list, got {other:?}"),
-        }
-    }
-
-    fn int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, vec![rows, cols]).unwrap())
-    }
-
-    #[test]
-    fn holdout_reads_every_integer_storage_variant() {
-        for storage in [
-            IntegerStorage::I8(vec![2]),
-            IntegerStorage::I16(vec![2]),
-            IntegerStorage::I32(vec![2]),
-            IntegerStorage::I64(vec![2]),
-            IntegerStorage::U8(vec![2]),
-            IntegerStorage::U16(vec![2]),
-            IntegerStorage::U32(vec![2]),
-            IntegerStorage::U64(vec![2]),
-        ] {
-            assert_eq!(holdout_count(&int_tensor(storage, 1, 1), 6).unwrap(), 2);
-        }
-    }
-
-    #[test]
-    fn holdout_default_output_is_training_mask() {
-        let _rng_guard = random::test_guard();
-        random::set_seed(2026).expect("seed");
-        let train = logical_data(
-            call(
-                vec![Value::from("HoldOut"), Value::Num(10.0), Value::Num(0.3)],
-                None,
-            )
-            .expect("crossvalind"),
-        );
-        assert_eq!(train.len(), 10);
-        assert_eq!(train.iter().filter(|flag| **flag != 0).count(), 7);
-    }
-
-    #[test]
-    fn holdout_two_outputs_are_complements() {
-        let _rng_guard = random::test_guard();
-        random::set_seed(7).expect("seed");
-        let outputs = output_list(
-            call(
-                vec![Value::from("holdout"), Value::Num(12.0), Value::Num(4.0)],
-                Some(2),
-            )
-            .expect("crossvalind"),
-        );
-        let train = logical_data(outputs[0].clone());
-        let test = logical_data(outputs[1].clone());
-        assert_eq!(test.iter().filter(|flag| **flag != 0).count(), 4);
-        for (a, b) in train.iter().zip(test.iter()) {
-            assert_ne!(*a != 0, *b != 0);
-        }
-    }
-
-    #[test]
-    fn kfold_returns_fold_indices_covering_all_folds() {
-        let _rng_guard = random::test_guard();
-        random::set_seed(11).expect("seed");
-        let folds = tensor_data(
-            call(
-                vec![Value::from("KFold"), Value::Num(9.0), Value::Num(3.0)],
-                None,
-            )
-            .expect("crossvalind"),
-        );
-        assert_eq!(folds.len(), 9);
-        for fold in 1..=3 {
-            assert!(folds
-                .iter()
-                .any(|value| (*value - fold as f64).abs() <= EPS));
-        }
-    }
-
-    #[test]
-    fn classes_option_stratifies_holdout() {
-        let _rng_guard = random::test_guard();
-        random::set_seed(13).expect("seed");
-        let classes = int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1, 2, 2, 2, 2]), 8, 1);
-        let outputs = output_list(
-            call(
-                vec![
-                    Value::from("HoldOut"),
-                    Value::Num(8.0),
-                    Value::Num(0.5),
-                    Value::from("Classes"),
-                    classes,
-                ],
-                Some(2),
-            )
-            .expect("crossvalind"),
-        );
-        let test = logical_data(outputs[1].clone());
-        assert_eq!(test[..4].iter().filter(|flag| **flag != 0).count(), 2);
-        assert_eq!(test[4..].iter().filter(|flag| **flag != 0).count(), 2);
-    }
-
-    #[test]
-    fn resubstitution_returns_all_true_train_and_test() {
-        let outputs = output_list(
-            call(
-                vec![Value::from("Resubstitution"), Value::Num(4.0)],
-                Some(2),
-            )
-            .expect("crossvalind"),
-        );
-        assert_eq!(logical_data(outputs[0].clone()), vec![1, 1, 1, 1]);
-        assert_eq!(logical_data(outputs[1].clone()), vec![1, 1, 1, 1]);
-    }
-
-    #[test]
-    fn invalid_forms_are_rejected() {
-        let err = call(
-            vec![Value::from("KFold"), Value::Num(5.0), Value::Num(2.0)],
-            Some(2),
-        )
-        .expect_err("too many KFold outputs");
-        assert_eq!(err.identifier(), Some("RunMat:crossvalind:InvalidArgument"));
-
-        let err = call(
-            vec![Value::from("HoldOut"), Value::Num(5.0), Value::Num(5.0)],
-            None,
-        )
-        .expect_err("invalid holdout");
-        assert_eq!(err.identifier(), Some("RunMat:crossvalind:InvalidArgument"));
-    }
-
-    #[test]
-    fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
-        let typed_six = Value::Int(runmat_value::IntValue::U16(6));
-        assert_eq!(observation_count(&typed_six).unwrap(), 6);
-        let typed_tensor_six = int_tensor(IntegerStorage::U16(vec![6]), 1, 1);
-        assert_eq!(observation_count(&typed_tensor_six).unwrap(), 6);
-        assert_eq!(
-            positive_integer(&Value::Int(runmat_value::IntValue::U8(3)), "KFold").unwrap(),
-            3
-        );
-        assert_eq!(
-            positive_integer(&int_tensor(IntegerStorage::U8(vec![3]), 1, 1), "KFold").unwrap(),
-            3
-        );
-        assert_eq!(
-            holdout_count(&Value::Int(runmat_value::IntValue::U8(2)), 6).unwrap(),
-            2
-        );
-        assert_eq!(
-            holdout_count(&int_tensor(IntegerStorage::U8(vec![2]), 1, 1), 6).unwrap(),
-            2
-        );
-
-        let folds = crossvalind_compute(vec![
-            Value::from("KFold"),
-            typed_tensor_six,
-            int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
-        ])
-        .unwrap();
-        let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {
-            panic!("expected fold tensor");
-        };
-        assert_eq!(folds.shape, vec![6, 1]);
-
-        for value in [
-            Value::Int(runmat_value::IntValue::I8(-1)),
-            Value::Num(1.5),
-            Value::Num(usize::MAX as f64 + 1.0),
-        ] {
-            assert!(positive_integer(&value, "KFold").is_err());
-        }
-        assert!(holdout_count(&Value::Int(runmat_value::IntValue::I8(-1)), 6).is_err());
-    }
-}
+mod tests;

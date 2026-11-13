@@ -1,7 +1,9 @@
 use super::*;
 
-pub(super) fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
-    anyhow::Error::new(err)
+pub(super) fn runtime_flow_to_provider_error(
+    err: RuntimeError,
+) -> runmat_accelerate_api::ProviderExecutionError {
+    runmat_accelerate_api::ProviderExecutionError::from_source(err)
 }
 
 pub(super) fn validate_compute_binding_counts(
@@ -187,7 +189,7 @@ pub(super) fn build_matrix_operand_view(
     if entry.shape.len() < 2 {
         return Err(anyhow!(
             "matrix operand requires at least 2D tensor (buffer {} shape {:?})",
-            handle.buffer_id,
+            handle.buffer_id(),
             entry.shape
         ));
     }
@@ -197,7 +199,7 @@ pub(super) fn build_matrix_operand_view(
         if rows != info.base_cols || cols != info.base_rows {
             return Err(anyhow!(
                 "transpose metadata mismatch for buffer {}",
-                handle.buffer_id
+                handle.buffer_id()
             ));
         }
         let lda = u32::try_from(info.base_rows)
@@ -242,6 +244,25 @@ pub(super) fn canonical_vendor_name(info: &wgpu::AdapterInfo) -> String {
             format!("{prefix} (0x{other:04x})")
         }
     }
+}
+
+/// Logical broadcast addressing for borrowed buffers. Lazy transpose changes
+/// strides, not the underlying bytes or numeric class.
+pub(super) fn fusion_operand_layout(
+    handle: &GpuTensorHandle,
+    entry: &BufferEntry,
+    output_shape: &[usize],
+) -> Result<(Vec<u32>, Vec<u32>)> {
+    ensure!(
+        handle.shape() == entry.shape,
+        "fusion operand shape does not match allocation"
+    );
+    crate::backend::fusion_operand_layout::resolve(
+        &entry.shape,
+        runmat_accelerate_api::handle_transpose_info(handle),
+        output_shape,
+        crate::backend::wgpu::params::BCAST_MAX_RANK,
+    )
 }
 
 pub(super) const POLYDER_EPS: f64 = 1.0e-12;
@@ -411,6 +432,9 @@ pub(super) fn conv1d_window(
 }
 
 pub(super) fn product_checked(dims: &[usize]) -> Option<usize> {
+    if dims.contains(&0) {
+        return Some(0);
+    }
     dims.iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
 }
@@ -546,20 +570,6 @@ pub(super) fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
     true
 }
 
-pub(super) fn filter_state_shape(
-    mut base: Vec<usize>,
-    dim_idx: usize,
-    state_len: usize,
-) -> Vec<usize> {
-    if base.len() <= dim_idx {
-        base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
-    }
-    if !base.is_empty() {
-        base[dim_idx] = state_len;
-    }
-    base
-}
-
 pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => Err(anyhow!(
@@ -576,15 +586,6 @@ pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor
             "{label}: complex outputs are not supported by the wgpu provider"
         )),
         other => Err(anyhow!("{label}: unexpected value {other:?}")),
-    }
-}
-
-pub(super) fn median_from_slice(values: &[f64]) -> f64 {
-    if values.is_empty() || values.iter().any(|v| v.is_nan()) {
-        f64::NAN
-    } else {
-        let mut tmp = values.to_vec();
-        compute_median_inplace(&mut tmp)
     }
 }
 
@@ -645,114 +646,6 @@ pub(super) fn diag_ensure_shape(shape: &[usize]) -> Result<()> {
     } else {
         Ok(())
     }
-}
-
-pub(super) fn apply_tril_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Result<()> {
-    if data.is_empty() {
-        return Ok(());
-    }
-    let rows = shape.first().copied().unwrap_or(1);
-    let cols = shape.get(1).copied().unwrap_or(1);
-    let plane = rows.saturating_mul(cols);
-    if plane == 0 {
-        ensure!(
-            data.is_empty(),
-            "tril: shape/product mismatch ({} vs {})",
-            0,
-            data.len()
-        );
-        return Ok(());
-    }
-    let pages = if shape.len() <= 2 {
-        1usize
-    } else {
-        shape[2..].iter().product::<usize>()
-    };
-    if pages == 0 {
-        ensure!(
-            data.is_empty(),
-            "tril: shape/product mismatch ({} vs {})",
-            0,
-            data.len()
-        );
-        return Ok(());
-    }
-    let expected = plane
-        .checked_mul(pages)
-        .ok_or_else(|| anyhow!("tril: dimension product overflow"))?;
-    ensure!(
-        expected == data.len(),
-        "tril: shape/product mismatch ({} vs {})",
-        expected,
-        data.len()
-    );
-    for page in 0..pages {
-        let base = page * plane;
-        for col in 0..cols {
-            let col_base = base + col * rows;
-            for row in 0..rows {
-                if (row as isize) - (col as isize) < -offset {
-                    data[col_base + row] = 0.0;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn apply_triu_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Result<()> {
-    if data.is_empty() {
-        return Ok(());
-    }
-    let rows = shape.first().copied().unwrap_or(1);
-    let cols = shape.get(1).copied().unwrap_or(1);
-    let plane = rows.saturating_mul(cols);
-    if plane == 0 {
-        ensure!(
-            data.is_empty(),
-            "triu: shape/product mismatch ({} vs {})",
-            0,
-            data.len()
-        );
-        return Ok(());
-    }
-    let pages = if shape.len() <= 2 {
-        1usize
-    } else {
-        shape[2..].iter().product::<usize>()
-    };
-    if pages == 0 {
-        ensure!(
-            data.is_empty(),
-            "triu: shape/product mismatch ({} vs {})",
-            0,
-            data.len()
-        );
-        return Ok(());
-    }
-    let expected = plane
-        .checked_mul(pages)
-        .ok_or_else(|| anyhow!("triu: dimension product overflow"))?;
-    ensure!(
-        expected == data.len(),
-        "triu: shape/product mismatch ({} vs {})",
-        expected,
-        data.len()
-    );
-    for page in 0..pages {
-        let base = page * plane;
-        for col in 0..cols {
-            let col_base = base + col * rows;
-            let col_isize = col as isize;
-            for row in 0..rows {
-                let diff = col_isize - (row as isize);
-                if diff < offset {
-                    data[col_base + row] = 0.0;
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(super) fn stride_before_for(shape: &[usize], dim: usize) -> usize {

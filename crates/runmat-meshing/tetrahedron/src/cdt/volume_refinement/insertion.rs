@@ -1,4 +1,5 @@
 use runmat_meshing_core::MeshingCancellationSignal;
+use std::collections::BTreeSet;
 
 use super::{
     validate_delaunay_volume_refinement_candidate, DelaunayVolumeRefinementCandidate,
@@ -7,8 +8,8 @@ use super::{
     DelaunayVolumeRefinementStepErrorKind, DelaunayVolumeRefinementStepOptions,
 };
 use crate::cdt::{
-    evaluate_delaunay_volume_quality, insertion::insert_delaunay_volume_node_with_barriers,
-    insertion::validate_constrained_delaunay_volume_topology, validate_delaunay_volume_provenance,
+    insertion::insert_delaunay_volume_node_locally_with_barriers,
+    insertion::validate_conforming_volume_topology, validate_delaunay_volume_provenance,
     validate_delaunay_volume_quality, DelaunayInsertionError, DelaunayInsertionErrorKind,
     DelaunayVolumeProvenanceError, DelaunayVolumeProvenanceErrorKind, DelaunayVolumeQualityError,
     DelaunayVolumeQualityErrorKind,
@@ -33,14 +34,43 @@ pub fn insert_delaunay_volume_refinement_candidate(
         .iter()
         .map(|facet| facet.node_identities)
         .collect::<Vec<_>>();
-    validate_constrained_delaunay_volume_topology(
+    validate_conforming_volume_topology(
         input.topology,
         &protected_faces,
         options.insertion,
         cancellation,
     )
     .map_err(insertion_error)?;
-    let topology = insert_delaunay_volume_node_with_barriers(
+    let step = insert_delaunay_volume_refinement_candidate_from_admitted_input(
+        input,
+        candidate,
+        options,
+        cancellation,
+    )?;
+    validate_delaunay_volume_refinement_step(input, candidate, &step, options, cancellation)?;
+    Ok(step)
+}
+
+pub(super) fn insert_delaunay_volume_refinement_candidate_from_admitted_input(
+    input: DelaunayVolumeRefinementInput<'_>,
+    candidate: &DelaunayVolumeRefinementCandidate,
+    options: DelaunayVolumeRefinementStepOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeRefinementStep, DelaunayVolumeRefinementStepError> {
+    super::validation::validate_delaunay_volume_refinement_candidate_from_admitted_input(
+        input,
+        &Some(candidate.clone()),
+        options.candidate,
+        cancellation,
+    )
+    .map_err(candidate_error)?;
+    let protected_faces = input
+        .provenance
+        .facets
+        .iter()
+        .map(|facet| facet.node_identities)
+        .collect::<Vec<_>>();
+    let topology = insert_delaunay_volume_node_locally_with_barriers(
         input.topology.clone(),
         candidate.node,
         &protected_faces,
@@ -48,16 +78,22 @@ pub fn insert_delaunay_volume_refinement_candidate(
         cancellation,
     )
     .map_err(insertion_error)?;
-    let quality = evaluate_delaunay_volume_quality(
-        &topology,
-        input.metric_request,
-        input.provenance,
-        input.quality_options,
-        cancellation,
-    )
-    .map_err(quality_error)?;
+    let quality =
+        super::super::volume_quality::evaluate_delaunay_volume_quality_from_admitted_input(
+            &topology,
+            input.metric_request,
+            input.provenance,
+            input.quality_options,
+            cancellation,
+        )
+        .map_err(quality_error)?;
     let step = DelaunayVolumeRefinementStep { topology, quality };
-    validate_delaunay_volume_refinement_step(input, candidate, &step, options, cancellation)?;
+    validate_delaunay_volume_refinement_step_from_admitted_input(
+        input,
+        candidate,
+        &step,
+        cancellation,
+    )?;
     Ok(step)
 }
 
@@ -75,35 +111,13 @@ pub fn validate_delaunay_volume_refinement_step(
         cancellation,
     )
     .map_err(candidate_error)?;
-    if step.topology.nodes.len() != input.topology.nodes.len() + 1
-        || step
-            .topology
-            .nodes
-            .binary_search_by_key(&candidate.node.identity, |node| node.identity)
-            .ok()
-            .and_then(|index| step.topology.nodes.get(index))
-            != Some(&candidate.node)
-        || input.topology.nodes.iter().any(|old| {
-            step.topology
-                .nodes
-                .binary_search_by_key(&old.identity, |node| node.identity)
-                .ok()
-                .and_then(|index| step.topology.nodes.get(index))
-                != Some(old)
-        })
-    {
-        return Err(error(
-            DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
-            "refinement must retain every old node and add exactly the selected candidate",
-        ));
-    }
     let protected_faces = input
         .provenance
         .facets
         .iter()
         .map(|facet| facet.node_identities)
         .collect::<Vec<_>>();
-    validate_constrained_delaunay_volume_topology(
+    validate_conforming_volume_topology(
         &step.topology,
         &protected_faces,
         options.insertion,
@@ -126,6 +140,87 @@ pub fn validate_delaunay_volume_refinement_step(
         cancellation,
     )
     .map_err(quality_error)?;
+    validate_delaunay_volume_refinement_step_from_admitted_input(
+        input,
+        candidate,
+        step,
+        cancellation,
+    )
+}
+
+fn validate_delaunay_volume_refinement_step_from_admitted_input(
+    input: DelaunayVolumeRefinementInput<'_>,
+    candidate: &DelaunayVolumeRefinementCandidate,
+    step: &DelaunayVolumeRefinementStep,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunayVolumeRefinementStepError> {
+    if step.topology.nodes.len() != input.topology.nodes.len() + 1
+        || step
+            .topology
+            .nodes
+            .binary_search_by_key(&candidate.node.identity, |node| node.identity)
+            .ok()
+            .and_then(|index| step.topology.nodes.get(index))
+            != Some(&candidate.node)
+        || input.topology.nodes.iter().any(|old| {
+            step.topology
+                .nodes
+                .binary_search_by_key(&old.identity, |node| node.identity)
+                .ok()
+                .and_then(|index| step.topology.nodes.get(index))
+                != Some(old)
+        })
+    {
+        return Err(error(
+            DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
+            "refinement must retain every old node and add exactly the selected candidate",
+        ));
+    }
+    if !step.quality.tetrahedra.iter().any(|tetrahedron| {
+        tetrahedron
+            .node_identities
+            .contains(&candidate.node.identity)
+    }) {
+        return Err(error(
+            DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
+            "refinement candidate has no incident tetrahedron after insertion",
+        ));
+    }
+    if !super::admission::canonical_single_step_nonregression(
+        input.quality,
+        &step.quality,
+        cancellation,
+    )? {
+        return Err(error(
+            DelaunayVolumeRefinementStepErrorKind::InvalidQuality,
+            "refinement insertion regresses the complete changed-neighborhood quality ceiling",
+        ));
+    }
+    let exact_boundary_nodes = input
+        .provenance
+        .facets
+        .iter()
+        .flat_map(|facet| facet.node_identities)
+        .collect::<BTreeSet<_>>();
+    let prior_tetrahedra = input
+        .quality
+        .tetrahedra
+        .iter()
+        .map(|tetrahedron| tetrahedron.node_identities)
+        .collect::<BTreeSet<_>>();
+    if step.quality.tetrahedra.iter().any(|tetrahedron| {
+        tetrahedron.requires_refinement()
+            && tetrahedron
+                .node_identities
+                .iter()
+                .all(|identity| exact_boundary_nodes.contains(identity))
+            && !prior_tetrahedra.contains(&tetrahedron.node_identities)
+    }) {
+        return Err(error(
+            DelaunayVolumeRefinementStepErrorKind::InvalidQuality,
+            "refinement insertion would create a new violating tetrahedron composed entirely of exact boundary nodes",
+        ));
+    }
     Ok(())
 }
 
@@ -133,6 +228,9 @@ pub(super) fn candidate_error(
     failure: DelaunayVolumeRefinementCandidateError,
 ) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
+        DelaunayVolumeRefinementCandidateErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementStepErrorKind::Accounting(cause)
+        }
         DelaunayVolumeRefinementCandidateErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
         }
@@ -180,6 +278,9 @@ pub(super) fn insertion_error(
 
 fn provenance_error(failure: DelaunayVolumeProvenanceError) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
+        DelaunayVolumeProvenanceErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementStepErrorKind::Accounting(cause)
+        }
         DelaunayVolumeProvenanceErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
         }
@@ -203,6 +304,9 @@ pub(super) fn quality_error(
     failure: DelaunayVolumeQualityError,
 ) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementStepErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
         }

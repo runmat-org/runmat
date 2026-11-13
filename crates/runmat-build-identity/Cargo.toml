@@ -1,0 +1,13 @@
+[package]
+name = "runmat-build-identity"
+version = "0.7.1"
+edition = "2021"
+license-file = "../../LICENSE.md"
+description = "Build-time configuration identity for dependency-aware artifact reuse"
+
+[dependencies]
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+sha2-mac = { workspace = true }

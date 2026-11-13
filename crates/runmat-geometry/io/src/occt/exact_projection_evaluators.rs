@@ -32,16 +32,35 @@ pub(super) fn project_evaluators(
             })
         })
         .collect::<Result<Vec<_>, GeometryImportError>>()?;
+    // A coedge's position and seam image are defined on the face use the topology traversed
+    // (its orientation in the body), which can differ from the shape table's stored
+    // orientation. The token names that use so the evaluator walks the same wire.
+    let face_reversed = payload
+        .faces
+        .iter()
+        .map(|face| (face.shape_key, face.reversed))
+        .collect::<BTreeMap<_, _>>();
     let pcurves = payload
         .coedges
         .iter()
         .map(|coedge| {
+            let reversed = face_reversed
+                .get(&coedge.face_key)
+                .copied()
+                .ok_or_else(|| {
+                    GeometryImportError::InvalidGeometry(
+                        "OCCT exact coedge names a face absent from the topology".to_string(),
+                    )
+                })?;
             Ok(ExactPcurveEvaluatorRecord {
                 id: names.pcurve_id(coedge.wire_key, coedge.coedge_key)?,
                 implementation: ExactPcurveImplementation::Kernel {
-                    reference: evaluator_ref(format!(
-                        "face:{:020}:wire:{:020}:coedge:{:020}:seam:{}",
-                        coedge.face_key, coedge.wire_key, coedge.coedge_key, coedge.seam_image
+                    reference: evaluator_ref(pcurve_token(
+                        coedge.face_key,
+                        reversed,
+                        coedge.wire_key,
+                        coedge.coedge_key,
+                        coedge.seam_image,
                     )),
                 },
             })
@@ -96,4 +115,19 @@ where
         .collect::<BTreeMap<_, _>>()
         .into_values()
         .collect()
+}
+
+/// Kernel reference of one coedge's pcurve: the face use (shape key and orientation), its wire,
+/// the coedge's position in that use's traversal and its seam image (-1 off a seam).
+pub(super) fn pcurve_token(
+    face_key: u64,
+    face_reversed: bool,
+    wire_key: u64,
+    position: u64,
+    seam_image: i8,
+) -> String {
+    format!(
+        "face:{face_key:020}:use:{}:wire:{wire_key:020}:coedge:{position:020}:seam:{seam_image}",
+        if face_reversed { "reversed" } else { "forward" }
+    )
 }

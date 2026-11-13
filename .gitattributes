@@ -4,6 +4,18 @@
 *.brep text eol=lf
 *.step text eol=lf
 
+# Design printers and source-identity fixtures use LF on every target. Git's
+# Windows checkout conversion must not change these authored source bytes.
+*.part text eol=lf
+*.assembly text eol=lf
+*.drawing text eol=lf
+*.circuit text eol=lf
+*.circuit.layout text eol=lf
+*.circuit.lock text eol=lf
+*.fea text eol=lf
+# FEA syntax snapshots also include source blocks from Markdown documentation.
+*.md text eol=lf
+
 # Canonical package fixtures are compared byte-for-byte with serializer output.
 # Keep their wire-format line endings stable on Windows checkouts as well.
 crates/runmat-package/tests/fixtures/*.lock text eol=lf
@@ -11,3 +23,13 @@ crates/runmat-package/tests/fixtures/*.lock text eol=lf
 # Native IR snapshots are the canonical, target-independent printer output.
 # Preserve the printer's LF format so byte-for-byte review tests are portable.
 *.native-ir text eol=lf
+
+# Frozen execution envelopes carry canonical byte-oriented headers and payloads.
+# Git must preserve their original bytes, including historical invalid fixtures.
+crates/runmat-vm/tests/fixtures/*.artifact -text
+
+# Imported guide CAD retains its original bytes and source content identity.
+# These inputs must not change when the branch is transferred or checked out.
+docs/simulation/examples/geometry/*.step -text
+docs/simulation/examples/geometry/*.stp -text
+docs/simulation/examples/geometry/*.brep -text

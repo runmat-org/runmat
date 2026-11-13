@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -44,14 +46,60 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       release_validation: true
+      source_ref: ${{ github.event.inputs.ref || github.ref_name }}
+
+  meshing-release-evidence:
+    name: Verify meshing catalogs and scientific release evidence
+    needs: [validate-release-state]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate governed meshing evidence catalogs
+        run: |
+          python3 scripts/meshing/validate_corpus.py
+          python3 scripts/meshing/validate_conformance.py
+          python3 scripts/meshing/validate_differential.py
+          python3 scripts/meshing/validate_reliability.py
+          python3 scripts/meshing/validate_release_evidence.py
+          python3 -m unittest discover -s scripts/meshing/tests -p 'test_*.py'
+      - name: Verify required scientific receipts and approved dispositions
+        run: python3 scripts/qualification/scientific.py verify
+      - name: Stage committed qualification evidence
+        run: |
+          mkdir -p target/runmat-meshing-release-evidence
+          cp -R qualification/scientific/. target/runmat-meshing-release-evidence/
+      - name: Attest meshing release evidence
+        if: github.event_name == 'push'
+        uses: actions/attest@v4
+        with:
+          subject-path: target/runmat-meshing-release-evidence/*
+      - name: Upload mandatory meshing release evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: meshing-release-evidence-${{ github.run_id }}
+          path: target/runmat-meshing-release-evidence/*
+          if-no-files-found: error
 
   build-release:
     if: github.event_name == 'push'
     needs: [validate-release-state]
     environment: Production
     name: Build ${{ matrix.platform.release_for }}
+    timeout-minutes: 480
     env:
       RUNMAT_TELEMETRY_KEY: ${{ secrets.TELEMETRY_INGESTION_KEY }}
+      CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || '1' }}
+      # The archive packer is a dev-profile host tool even for release products.
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_DEV_SPLIT_DEBUGINFO: 'off'
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -59,7 +107,7 @@ jobs:
         platform:
           
           - release_for: windows-x86_64
-            os: warp-windows-latest-x64-8x
+            os: warp-windows-latest-x64-16x
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
             name: runmat-windows-x86_64.zip
@@ -94,11 +142,33 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
+      - name: Prepare bounded Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
+            -TargetDirectory "$env:GITHUB_WORKSPACE/target" `
+            -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch" `
+            -ReclaimUnusedRunnerTools
+          "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+          "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
+
+      - name: Setup Node.js for product evidence
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install native dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+
+      - name: Set macOS deployment baseline before native builds and cache restore
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          printf '%s\n' 'MACOSX_DEPLOYMENT_TARGET=11.0' 'CMAKE_OSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
 
       - name: Install macOS native dependencies
         if: runner.os == 'macOS'
@@ -111,8 +181,34 @@ jobs:
       - name: Restore native artifact build cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: native-artifact-v1-${{ matrix.platform.target }}
+          shared-key: native-artifact-0.7-v2-${{ matrix.platform.target }}
+          # The prefix is also part of restore keys: never reuse pre-policy
+          # Darwin C/CMake objects whose build scripts do not track this env.
+          prefix-key: ${{ runner.os == 'macOS' && 'v1-rust-macos-min11-cmake11' || 'v0-rust' }}
+          env-vars: MACOSX_DEPLOYMENT_TARGET CMAKE_OSX_DEPLOYMENT_TARGET
           cache-workspace-crates: true
+          save-if: false
+
+      - name: Resolve native checkpoint compatibility
+        id: native-checkpoint-key
+        shell: bash
+        env:
+          RUNMAT_CACHE_TARGET: ${{ matrix.platform.target }}
+          RUNMAT_CACHE_INPUTS: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml', '.github/workflows/release.yml', 'scripts/build-runmat-with-aot-runtime.*', 'scripts/ci-install-macos-cross-dependencies.sh', 'infra/scripts/native-build-cache-key.mjs', 'infra/scripts/native-build-cache-source.mjs', 'infra/scripts/*windows*.ps1', 'infra/vcpkg-ports/**') }}
+        run: node infra/scripts/native-build-cache-key.mjs >> "$GITHUB_OUTPUT"
+
+      - name: Restore rolling native checkpoint
+        uses: actions/cache/restore@v5
+        with:
+          path: target
+          key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-
+            ${{ steps.native-checkpoint-key.outputs.key }}-
+
+      - name: Restore byte-verified same-commit source timestamps
+        shell: bash
+        run: node infra/scripts/native-build-cache-source.mjs restore target/.runmat-source-inputs.json
 
       - name: Restore Windows native dependency cache
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -124,6 +220,8 @@ jobs:
       - name: Install Windows MSVC native dependencies
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
 
       - name: Build release CLI with embedded AOT runtime (Unix)
@@ -145,11 +243,23 @@ jobs:
             --locked --release --target "${{ matrix.platform.target }}" \
             --bin runmat --features "$features"
 
+      - name: Prepare pinned Windows shader compiler
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/distribution/prepare-windows-dxc-runtime.ps1 `
+            -Target "${{ matrix.platform.target }}" `
+            -Destination "target/windows-dxc/${{ matrix.platform.target }}"
+
       - name: Build release CLI with embedded AOT runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           CARGO_PROFILE_RELEASE_STRIP: symbols
+          # Match the Windows branch product: do not generate an unused PDB.
+          _LINK_: /DEBUG:NONE
           OPENSSL_NO_PKG_CONFIG: '1'
           OPENSSL_STATIC: '1'
           RUNMAT_BUILD_TARGET: ${{ matrix.platform.target }}
@@ -158,16 +268,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./scripts/build-runmat-with-aot-runtime.ps1 --locked --release --target "${{ matrix.platform.target }}" --bin runmat --features "blas-lapack,vendored-openssl,occt-native"
           if ($LASTEXITCODE -ne 0) { throw "embedded-runtime release build failed with exit code $LASTEXITCODE" }
-
-      - name: Verify packaged CLI contains the native compile runtime (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: bash scripts/verify-runmat-with-aot-runtime.sh "target/${{ matrix.platform.target }}/release/runmat"
-
-      - name: Verify packaged CLI contains the native compile runtime (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/verify-runmat-with-aot-runtime.ps1 -RunMatBinary "target/${{ matrix.platform.target }}/release/runmat.exe"
 
       - name: Sign and notarize release artifact (macOS)
         if: runner.os == 'macOS'
@@ -180,53 +280,132 @@ jobs:
           APPLE_NOTARIZE_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZE_PRIVATE_KEY }}
         run: bash scripts/sign-and-notarize-macos-binary.sh "target/${{ matrix.platform.target }}/release/runmat"
 
+      - name: Stage and accept distributed product (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="artifacts/release-product/${{ matrix.platform.release_for }}"
+          source_revision="$(git rev-parse HEAD)"
+          node scripts/runtime/stage-builtin-example-product.mjs \
+            --binary "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}" \
+            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}"
+          node scripts/runtime/verify-builtin-examples.mjs artifacts \
+            --product native-cli --profile embedded-aot --source-revision "$source_revision" \
+            --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" \
+            --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
+          node scripts/distribution/accept-native-product.mjs \
+            "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
+            "$root/${{ matrix.platform.release_for }}.acceptance.json"
+
+      - name: Stage and accept distributed product (Windows)
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = "artifacts/release-product/${{ matrix.platform.release_for }}"
+          $sourceRevision = (& git rev-parse HEAD).Trim()
+          $dxc = & ./scripts/distribution/prepare-windows-dxc-runtime.ps1 `
+            -Target "${{ matrix.platform.target }}" `
+            -Destination "target/windows-dxc/${{ matrix.platform.target }}"
+          $arguments = @(
+            "scripts/runtime/stage-builtin-example-product.mjs",
+            "--binary", "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}",
+            "--destination", "$root/product",
+            "--executable-name", "${{ matrix.platform.bin }}"
+          )
+          $arguments += @("--dependency-dir", $dxc.BinDir, "--dependency-notice-dir", $dxc.NoticeDir)
+          $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $env:VCPKG_DEFAULT_TRIPLET + "\bin")
+          if (Test-Path $vcpkgBin) { $arguments += @("--dependency-dir", $vcpkgBin) }
+          $zmqBin = Join-Path $env:ZMQ_PATH "bin"
+          $zmqLib = Join-Path $env:ZMQ_PATH "lib"
+          if (Test-Path $zmqBin) { $arguments += @("--dependency-dir", $zmqBin) }
+          elseif (Test-Path $zmqLib) { $arguments += @("--dependency-dir", $zmqLib) }
+          & node @arguments
+          if ($LASTEXITCODE -ne 0) { throw "native product staging failed with exit code $LASTEXITCODE" }
+          & node scripts/runtime/verify-builtin-examples.mjs artifacts `
+            --product native-cli --profile embedded-aot --source-revision $sourceRevision `
+            --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" `
+            --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
+          if ($LASTEXITCODE -ne 0) { throw "native artifact manifest failed with exit code $LASTEXITCODE" }
+          & node scripts/distribution/accept-native-product.mjs `
+            "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
+            "$root/${{ matrix.platform.release_for }}.acceptance.json"
+          if ($LASTEXITCODE -ne 0) { throw "native product probe failed with exit code $LASTEXITCODE" }
+
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $target = "${{ matrix.platform.target }}"
-          $outDir = Join-Path "target" (Join-Path $target "release")
+          $outDir = "artifacts/release-product/${{ matrix.platform.release_for }}/product"
           $artifactName = "runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
+          $archivePath = Join-Path (Get-Location) ("$artifactName.zip")
+          if (Test-Path -LiteralPath $archivePath) { throw "Release archive already exists: $archivePath" }
 
           Push-Location $outDir
-          # Copy required runtime DLLs into output dir
-          $triplet = $env:VCPKG_DEFAULT_TRIPLET
-          $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $triplet + "\bin")
-          if (Test-Path $vcpkgBin) { Copy-Item -Path (Join-Path $vcpkgBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
-
-          $zmqBin = Join-Path $env:ZMQ_PATH "bin"
-          if (Test-Path $zmqBin) { Copy-Item -Path (Join-Path $zmqBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
-          else {
-            $zmqLib = Join-Path $env:ZMQ_PATH "lib"
-            if (Test-Path $zmqLib) { Copy-Item -Path (Join-Path $zmqLib "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
+          try {
+            $members = @("${{ matrix.platform.bin }}", "THIRD_PARTY_NOTICES.txt", "LICENSE.md", "FREE-USE.md") + @(Get-ChildItem -File -Filter *.dll | ForEach-Object { $_.Name })
+            if (Test-Path -LiteralPath 'THIRD_PARTY_NOTICES.d') { $members += 'THIRD_PARTY_NOTICES.d' }
+            & 7z a $archivePath @members
+            if ($LASTEXITCODE -ne 0) { throw "Release archive creation failed" }
+          } finally { Pop-Location }
+          $noticeDir = Join-Path $env:RUNNER_TEMP ("runmat-release-notices-" + [guid]::NewGuid().ToString())
+          & 7z x $archivePath THIRD_PARTY_NOTICES.txt LICENSE.md FREE-USE.md "THIRD_PARTY_NOTICES.d/*" "-o$noticeDir"
+          if ($LASTEXITCODE -ne 0) { throw "Release archive notice extraction failed" }
+          & node scripts/distribution/third-party-notices.cjs verify $noticeDir
+          if ($LASTEXITCODE -ne 0) { throw "Release archive notice verification failed" }
+          & node scripts/distribution/runtime-licenses.cjs verify $noticeDir
+          if ($LASTEXITCODE -ne 0) { throw "Release archive license verification failed" }
+          foreach ($notice in (Get-ChildItem -LiteralPath (Join-Path $outDir 'THIRD_PARTY_NOTICES.d') -File)) {
+            $archived = Join-Path $noticeDir ("THIRD_PARTY_NOTICES.d/" + $notice.Name)
+            if ((Get-FileHash -LiteralPath $notice.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $archived -Algorithm SHA256).Hash) { throw "Redistributable notice changed in release archive: $($notice.Name)" }
           }
-
-          # Create zip with binary and DLLs
-          7z a (Join-Path "..\..\.." ("$artifactName.zip")) ${{ matrix.platform.bin }} *.dll
-          Pop-Location
 
       - name: Package as archive (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cd target/${{ matrix.platform.target }}/release
+          set -euo pipefail
+          cd artifacts/release-product/${{ matrix.platform.release_for }}/product
           ARTIFACT_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
-          tar czvf ../../../${ARTIFACT_NAME}.tar.gz ${{ matrix.platform.bin }}
+          archive="../../../../${ARTIFACT_NAME}.tar.gz"
+          tar czvf "$archive" ${{ matrix.platform.bin }} THIRD_PARTY_NOTICES.txt LICENSE.md FREE-USE.md
+          tar -xOf "$archive" THIRD_PARTY_NOTICES.txt | cmp THIRD_PARTY_NOTICES.txt -
+          tar -xOf "$archive" LICENSE.md | cmp LICENSE.md -
+          tar -xOf "$archive" FREE-USE.md | cmp FREE-USE.md -
           cd -
 
       - name: Publish release artifacts
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}
+          name: runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}-${{ github.run_attempt }}
           path: |
             runmat-*.tar.gz
             runmat-*.zip
+            artifacts/release-product/${{ matrix.platform.release_for }}/*.json
+          if-no-files-found: error
+
+      - name: Save rolling native checkpoint
+        id: native-checkpoint-source
+        if: always() && steps.native-checkpoint-key.outputs.key != ''
+        shell: bash
+        run: node infra/scripts/native-build-cache-source.mjs capture target/.runmat-source-inputs.json
+
+      - name: Upload rolling native checkpoint
+        if: always() && steps.native-checkpoint-source.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: target
+          key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   create-release:
     if: github.event_name == 'push'
     name: Create Release
-    needs: [release-validation, build-release]
+    needs: [release-validation, meshing-release-evidence, build-release]
     environment: Production
     runs-on: ubuntu-latest
     steps:
@@ -300,10 +479,15 @@ jobs:
           set -euxo pipefail
           while IFS= read -r toml; do
             d="${toml%/*}"
-            if [ -f LICENSE ] || [ -f LICENSE.md ]; then
-              cp -f LICENSE* "$d/" || true
-              if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
+            if [ "$d" = "crates/runmat-clarabel" ]; then
+              # This vendored dependency retains its upstream Apache license,
+              # not the RunMat workspace license copied into ordinary crates.
+              grep -Eq '^license[[:space:]]*=[[:space:]]*"Apache-2.0"' "$toml"
+              cmp "$d/LICENSE.md" crates/runmat-runtime/licenses/CLARABEL-LICENSE.txt
+              continue
             fi
+            cp LICENSE.md "$d/LICENSE"
+            cp FREE-USE.md "$d/FREE-USE.md"
           done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 
       - name: Normalize Cargo.toml license metadata
@@ -315,9 +499,6 @@ jobs:
               sed -E -i.bak 's#^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
               rm -f "$toml.bak"
             fi
-            if ! grep -Eq '^license[[:space:]]*=' "$toml" && [ -f "${toml%/*}/LICENSE" ]; then
-              awk 'BEGIN{printed=0} {print} /^\[package\]/{if(!printed){print "license = \"MIT\""; printed=1}}' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
-            fi
           done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 
       - name: Verify published crate assets
@@ -327,6 +508,12 @@ jobs:
           cmp openapi/runmat-public.yaml crates/runmat-server-client/openapi/runmat-public.yaml
           cargo package -p runmat-server-client --allow-dirty --list | tee /tmp/runmat-server-client-package.txt
           grep -Fx 'openapi/runmat-public.yaml' /tmp/runmat-server-client-package.txt
+          cargo package -p runmat-clarabel --allow-dirty --list | tee /tmp/runmat-clarabel-package.txt
+          grep -Fx 'LICENSE.md' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM.md' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM-Cargo.toml' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'UPSTREAM-vcs-info.json' /tmp/runmat-clarabel-package.txt
+          grep -Fx 'src/solver/core/solver.rs' /tmp/runmat-clarabel-package.txt
 
       - name: Publish crates with cargo-workspaces
         shell: bash

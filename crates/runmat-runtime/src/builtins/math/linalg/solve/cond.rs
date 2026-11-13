@@ -2,167 +2,29 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderCondNorm};
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::{GpuTensorHandle, ProviderCondNorm, ProviderPrecision};
+#[cfg(test)]
+use runmat_builtins::COND_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, COND_ERROR_INTERNAL, COND_ERROR_INVALID_ARGUMENT,
+    COND_ERROR_INVALID_INPUT, COND_INTEGER_MATRIX_EXTENSION, COND_INTEGER_NORM_EXTENSION,
+    COND_LOGICAL_MATRIX_EXTENSION, COND_LOGICAL_NORM_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::linalg::matrix_dimensions_for;
+use crate::builtins::common::linalg::{matrix_dimensions_for, one_norm::binary_lu_scale};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cond";
-
-pub const COND_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-integer-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a typed-integer matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondIntegerMatrixExtension"),
-};
-
-pub const COND_LOGICAL_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-logical-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a logical matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondLogicalMatrixExtension"),
-};
-
-pub const COND_INTEGER_NORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-integer-norm-selector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a typed-integer norm selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondIntegerNormSelectorExtension"),
-};
-
-pub const COND_LOGICAL_NORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cond-logical-norm-selector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cond with a logical norm selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CondLogicalNormSelectorExtension"),
-};
-
-pub const COND_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    COND_INTEGER_MATRIX_EXTENSION,
-    COND_LOGICAL_MATRIX_EXTENSION,
-    COND_INTEGER_NORM_EXTENSION,
-    COND_LOGICAL_NORM_EXTENSION,
-];
-
-const COND_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "RunMat mode accepts integer matrices only when every element is exactly representable at the floating linear-algebra boundary.",
-}];
-
-const COND_INTEGER_NORM_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "Integer norm selectors are decoded structurally and accept only exact values 1 or 2.",
-    }];
-
-pub const COND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "c = cond(integer_A, p)", inputs: &COND_INTEGER_MATRIX_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "This RunMat extension requires exact binary64 representability before host execution; the result is double on host, while a resident scalar uses the owning provider's selected precision." },
-    BuiltinIntegerCapabilityDescriptor { form: "c = cond(A, integer_p)", inputs: &COND_INTEGER_NORM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Host typed-integer selectors do not enter matrix arithmetic and wide values are rejected without floating conversion; resident norm selectors are not supported." },
-];
-
-const COND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "c",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Condition number estimate of A.",
-}];
-
-const COND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const COND_INPUTS_NORM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Norm selector (1, 2, inf, or \"fro\").",
-    },
-];
-
-const COND_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "c = cond(A)",
-        inputs: &COND_INPUTS,
-        outputs: &COND_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "c = cond(A, p)",
-        inputs: &COND_INPUTS_NORM,
-        outputs: &COND_OUTPUT,
-    },
-];
-
-const COND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COND.INVALID_ARGUMENT",
-    identifier: Some("RunMat:cond:InvalidArgument"),
-    when: "Norm selector argument is malformed or unsupported.",
-    message: "cond: invalid argument",
-};
-
-const COND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COND.INVALID_INPUT",
-    identifier: Some("RunMat:cond:InvalidInput"),
-    when: "Input shape/type cannot be processed for condition-number evaluation.",
-    message: "cond: invalid input",
-};
-
-const COND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COND.INTERNAL",
-    identifier: Some("RunMat:cond:Internal"),
-    when: "Runtime fails while computing cond or executing fallback/upload paths.",
-    message: "cond: internal runtime failure",
-};
-
-const COND_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    COND_ERROR_INVALID_ARGUMENT,
-    COND_ERROR_INVALID_INPUT,
-    COND_ERROR_INTERNAL,
-];
-
-pub const COND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COND_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::cond")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -238,17 +100,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "cond",
-    category = "math/linalg/solve",
-    summary = "Compute matrix condition numbers.",
-    keywords = "cond,condition number,norm,gpu",
-    accel = "cond",
-    type_resolver(numeric_scalar_type),
-    extensions(COND_EXTENSIONS),
-    integer_capabilities(COND_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::linalg::solve::cond::COND_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
-async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cond_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if rest.iter().any(is_typed_integer_norm_value) {
         crate::compatibility::ensure_builtin_extension_enabled(&COND_INTEGER_NORM_EXTENSION, NAME)?;
     }
@@ -258,7 +113,7 @@ async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     {
         crate::compatibility::ensure_builtin_extension_enabled(&COND_LOGICAL_NORM_EXTENSION, NAME)?;
     }
-    let norm = parse_norm_argument(&rest)?;
+    let norm = parse_norm_argument(rest.view())?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     ensure_cond_input_policy(&value)?;
     let single_output = matches!(&value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
@@ -319,7 +174,10 @@ fn ensure_cond_input_policy(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
-    let maybe_provider = runmat_accelerate_api::provider_for_handle(&handle);
+    let maybe_provider = Some(gpu_helpers::require_resident_compute_owner(
+        &handle,
+        || internal_error("cond: resident input has no exact owning provider"),
+    )?);
 
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
@@ -328,15 +186,23 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
         let tensor = tensor::value_into_tensor_for(NAME, gathered).map_err(builtin_error)?;
         let cond_value = cond_real_tensor_builtin(&tensor, norm)?;
         if let Some(provider) = maybe_provider {
-            let uploaded = upload_scalar(provider, cond_value)?;
-            return Ok(gpu_helpers::resident_gpu_value(uploaded));
+            return gpu_helpers::restore_real_scalar_after_host(
+                &handle,
+                provider,
+                cond_value,
+                cond_output_precision(&handle)?,
+                NAME,
+                internal_error,
+            );
         }
         return Ok(Value::Num(cond_value));
     }
 
-    if let Some(provider) = maybe_provider {
-        if let Some(value) = cond_gpu_via_provider(provider, &handle, norm).await? {
-            return Ok(value);
+    if !runmat_accelerate_api::handle_is_logical(&handle) {
+        if let Some(provider) = maybe_provider {
+            if let Some(value) = cond_gpu_via_provider(provider, &handle, norm).await? {
+                return Ok(value);
+            }
         }
     }
 
@@ -368,8 +234,14 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
     };
 
     if let Some(provider) = maybe_provider {
-        let uploaded = upload_scalar(provider, cond_value)?;
-        return Ok(gpu_helpers::resident_gpu_value(uploaded));
+        return gpu_helpers::restore_real_scalar_after_host(
+            &handle,
+            provider,
+            cond_value,
+            cond_output_precision(&handle)?,
+            NAME,
+            internal_error,
+        );
     }
 
     Ok(Value::Num(cond_value))
@@ -382,8 +254,39 @@ async fn cond_gpu_via_provider(
 ) -> BuiltinResult<Option<Value>> {
     let provider_norm = ProviderCondNorm::from(norm);
     match provider.cond(handle, provider_norm).await {
-        Ok(result) => Ok(Some(Value::GpuTensor(result))),
-        Err(_err) => Ok(None),
+        Ok(mut result)
+            if gpu_helpers::unary_gpu_output_matches_shape(
+                &result,
+                handle,
+                provider,
+                &[1, 1],
+                gpu_helpers::UnaryGpuOutputContract {
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    precision: runmat_accelerate_api::handle_precision(handle),
+                    integer: None,
+                    logical: false,
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                },
+            ) =>
+        {
+            if let Err(error) = gpu_helpers::propagate_output_provenance(&mut result, [handle]) {
+                return Err(gpu_helpers::reject_gpu_output(result, error));
+            }
+            gpu_helpers::resident_gpu_value(result).map(Some)
+        }
+        Ok(result) => {
+            let failure =
+                internal_error("cond: provider returned a malformed, aliased, or foreign scalar");
+            Err(gpu_helpers::reject_gpu_output(result, failure))
+        }
+        Err(error) if error.is_unsupported() => Ok(None),
+        Err(error) => {
+            let mut failure = internal_error(format!("cond: provider execution failed: {error}"));
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(crate::runtime_error::with_provider_execution_source(
+                failure, error,
+            ))
+        }
     }
 }
 
@@ -396,7 +299,7 @@ fn cond_complex_tensor_builtin(matrix: &ComplexTensor, norm: CondNorm) -> Builti
 }
 
 fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     ensure_integer_matrix_exact_at_f64_boundary(matrix)?;
     let values = tensor::tensor_values_f64_cow(matrix);
     if rows == 0 || cols == 0 {
@@ -448,7 +351,7 @@ fn ensure_integer_matrix_exact_at_f64_boundary(matrix: &Tensor) -> BuiltinResult
 }
 
 fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> BuiltinResult<f64> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -496,9 +399,15 @@ fn cond_two_norm_complex(matrix: &ComplexTensor, rows: usize, cols: usize) -> Bu
 }
 
 fn cond_inverse_based_real(values: &[f64], order: usize, norm: CondNorm) -> BuiltinResult<f64> {
-    let dm = DMatrix::from_column_slice(order, order, values);
+    let mut dm = DMatrix::from_column_slice(order, order, values);
+    let max_component = dm.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
+    if max_component == 0.0 {
+        return Ok(f64::INFINITY);
+    }
+    let scale = binary_lu_scale(max_component).expect("finite nonzero matrix component");
+    dm.apply(|value| *value /= scale);
+    let norm_a = matrix_norm_real(dm.as_slice(), order, order, norm);
     if let Some(inv) = dm.try_inverse() {
-        let norm_a = matrix_norm_real(values, order, order, norm);
         let norm_inv = matrix_norm_real(inv.as_slice(), order, order, norm);
         let cond = norm_a * norm_inv;
         if cond.is_finite() {
@@ -516,14 +425,25 @@ fn cond_inverse_based_complex(
     order: usize,
     norm: CondNorm,
 ) -> BuiltinResult<f64> {
-    let data: Vec<Complex64> = matrix
-        .materialize_f64()
+    let mut dm = DMatrix::from_iterator(
+        order,
+        order,
+        matrix
+            .materialize_f64()
+            .into_iter()
+            .map(|(re, im)| Complex64::new(re, im)),
+    );
+    let max_component = dm
         .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect();
-    let dm = DMatrix::from_column_slice(order, order, &data);
+        .map(|value| value.re.abs().max(value.im.abs()))
+        .fold(0.0_f64, f64::max);
+    if max_component == 0.0 {
+        return Ok(f64::INFINITY);
+    }
+    let scale = binary_lu_scale(max_component).expect("finite nonzero matrix component");
+    dm.apply(|value| *value = Complex64::new(value.re / scale, value.im / scale));
+    let norm_a = matrix_norm_complex(dm.as_slice(), order, order, norm);
     if let Some(inv) = dm.try_inverse() {
-        let norm_a = matrix_norm_complex(&data, order, order, norm);
         let norm_inv = matrix_norm_complex(inv.as_slice(), order, order, norm);
         let cond = norm_a * norm_inv;
         if cond.is_finite() {
@@ -560,10 +480,7 @@ fn matrix_norm_real(data: &[f64], rows: usize, cols: usize, norm: CondNorm) -> f
             }
             max_sum
         }
-        CondNorm::Fro => {
-            let sum_sq: f64 = data.iter().map(|v| v * v).sum();
-            sum_sq.sqrt()
-        }
+        CondNorm::Fro => data.iter().fold(0.0_f64, |norm, value| norm.hypot(*value)),
         CondNorm::Two => unreachable!("matrix_norm_real not used for 2-norm"),
     }
 }
@@ -592,10 +509,9 @@ fn matrix_norm_complex(data: &[Complex64], rows: usize, cols: usize, norm: CondN
             }
             max_sum
         }
-        CondNorm::Fro => {
-            let sum_sq: f64 = data.iter().map(|v| v.norm_sqr()).sum();
-            sum_sq.sqrt()
-        }
+        CondNorm::Fro => data
+            .iter()
+            .fold(0.0_f64, |norm, value| norm.hypot(value.norm())),
         CondNorm::Two => unreachable!("matrix_norm_complex not used for 2-norm"),
     }
 }
@@ -621,7 +537,7 @@ fn singular_value_cond(singular_values: &[f64]) -> f64 {
     }
 }
 
-fn parse_norm_argument(args: &[Value]) -> BuiltinResult<CondNorm> {
+fn parse_norm_argument(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<CondNorm> {
     match args.len() {
         0 => Ok(CondNorm::Two),
         1 => parse_norm_value(&args[0]),
@@ -708,19 +624,17 @@ fn parse_norm_string(text: &str) -> BuiltinResult<CondNorm> {
     }
 }
 
-fn upload_scalar(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    value: f64,
-) -> BuiltinResult<GpuTensorHandle> {
-    let data = [value];
-    let shape = [1usize, 1usize];
-    let view = HostTensorView {
-        data: &data,
-        shape: &shape,
-    };
-    provider
-        .upload(&view)
-        .map_err(|e| internal_error(format!("{NAME}: {e}")))
+fn cond_output_precision(handle: &GpuTensorHandle) -> BuiltinResult<ProviderPrecision> {
+    if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
+        return Ok(ProviderPrecision::F64);
+    }
+    runmat_accelerate_api::handle_precision(handle).ok_or_else(|| {
+        let mut failure = internal_error("cond: input has no floating physical precision");
+        failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        failure
+    })
 }
 
 /// Helper for provider backends that reuse the host implementation.
@@ -763,7 +677,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
@@ -778,17 +691,6 @@ pub(crate) mod tests {
             Value::Num(value) => assert!((value - 1.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn cond_type_returns_scalar() {
-        let out = numeric_scalar_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
     }
 
     #[test]
@@ -938,21 +840,28 @@ pub(crate) mod tests {
         drop(_compat);
 
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("logical payload");
             let handle = provider
-                .upload(&HostTensorView {
-                    data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
                 })
-                .expect("upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+                .expect("logical producer upload");
+            let weak = handle.downgrade();
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = cond_builtin(Value::GpuTensor(handle), Vec::new())
+            let error = cond_builtin(Value::GpuTensor(handle.clone()), Vec::new())
                 .expect_err("resident logical A extension");
             assert_eq!(
                 error.identifier(),
                 COND_LOGICAL_MATRIX_EXTENSION.error_identifier
             );
+            assert!(runmat_accelerate_api::handle_is_logical(&handle));
+            handle
+                .allocation_lease()
+                .validate_live()
+                .expect("rejection preserves caller input");
+            drop(error);
+            handle.release().expect("release logical caller");
+            assert!(weak.acquire().is_err());
         });
     }
 
@@ -1021,6 +930,24 @@ pub(crate) mod tests {
             Value::Num(value) => assert!((value - 2.9).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
+        for scale in [1.0e200, 1.0e-200] {
+            let real = Tensor::new(vec![scale, 0.0, 0.0, scale], vec![2, 2]).unwrap();
+            let complex = ComplexTensor::new(
+                vec![(scale, scale), (0.0, 0.0), (0.0, 0.0), (scale, scale)],
+                vec![2, 2],
+            )
+            .unwrap();
+            for input in [Value::Tensor(real), Value::ComplexTensor(complex)] {
+                let result =
+                    cond_builtin(input, vec![Value::from("fro")]).expect("scaled Frobenius cond");
+                match result {
+                    Value::Num(value) => {
+                        assert!((value - 2.0).abs() < 1.0e-12, "scale={scale}: {value}")
+                    }
+                    other => panic!("expected scalar result, got {other:?}"),
+                }
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1078,12 +1005,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu_value = cond_builtin(Value::GpuTensor(handle), Vec::new()).expect("cond");
             let gathered = test_support::gather(gpu_value).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             let expected = cond_builtin(Value::Tensor(tensor.clone()), Vec::new())
                 .map(|v| match v {
                     Value::Num(n) => n,
@@ -1110,7 +1037,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu = cond_builtin(Value::GpuTensor(handle), Vec::new()).expect("cond");
@@ -1119,6 +1046,9 @@ pub(crate) mod tests {
     }
 
     fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::cond_builtin(value, rest))
+        block_on(super::cond_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

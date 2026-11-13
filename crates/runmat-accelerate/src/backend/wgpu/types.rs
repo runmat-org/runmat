@@ -1,8 +1,4 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NumericPrecision {
-    F32,
-    F64,
-}
+pub use crate::wgsl::NumericPrecision;
 
 impl NumericPrecision {
     pub fn as_str(&self) -> &'static str {
@@ -13,7 +9,7 @@ impl NumericPrecision {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOpCode {
     Add = 0,
     Sub = 1,
@@ -67,6 +63,7 @@ pub enum UnaryOpCode {
     Gammaln = 36,
     Round = 37,
     Erfcinv = 38,
+    Spacing = 39,
 }
 
 #[derive(Clone, Copy)]

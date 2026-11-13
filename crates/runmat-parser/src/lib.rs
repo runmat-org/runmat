@@ -1,5 +1,6 @@
 mod ast;
 mod error;
+pub mod fea;
 mod options;
 mod parser;
 mod span;

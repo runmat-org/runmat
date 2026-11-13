@@ -1,0 +1,12 @@
+[package]
+name = "runmat-cpu-execution"
+version = "0.7.1"
+edition = "2021"
+license-file = "../../LICENSE.md"
+description = "Bounded reusable shared-memory CPU execution for RunMat"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1.11"
+
+[build-dependencies]
+runmat-build-identity = { workspace = true }

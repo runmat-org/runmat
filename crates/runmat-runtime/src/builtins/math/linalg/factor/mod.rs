@@ -1,7 +1,15 @@
 pub mod chol;
+pub mod ichol;
+pub mod ilu;
+mod cholesky;
 pub mod decomposition;
 pub mod eig;
 pub mod eigs;
 pub mod lu;
+pub mod pcg;
+mod iterative;
+pub mod gmres;
 pub mod qr;
+pub mod qz;
+pub mod schur;
 pub mod svd;

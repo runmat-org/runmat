@@ -1,0 +1,38 @@
+// Engineering physics belongs in the importing study.
+
+geometry fork {
+    file = "./geometry/tuning-fork.step"
+    units = mm
+    region body : solid { select name "Tuning fork"; expect exactly_one }
+    region fixed_end : face { select name "Stem end"; expect exactly_one }
+}
+
+mesh fork on geometry.fork {
+    tetrahedra {
+        order = quadratic
+        target_size = 30 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model supported_fork {
+    assign material.steel to geometry.fork.region.body
+    constraint fixed_end {
+        structural.fixed { target = geometry.fork.region.fixed_end }
+    }
+}
+study fork_modes {
+    geometry = geometry.fork
+    mesh = mesh.fork
+    model = model.supported_fork
+    analysis modes { structural modal { modes = 2 } retain basis }
+    output shapes = analysis.modes.field.node.displacement
+}

@@ -1,13 +1,10 @@
 //! MATLAB-compatible `triplot` builtin.
-
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    TRIPLOT_ERROR_INTERNAL, TRIPLOT_ERROR_INVALID_ARGUMENT, TRIPLOT_GPU_INPUT_EXTENSION,
+    TRIPLOT_INTEGER_CONNECTIVITY_EXTENSION, TRIPLOT_INTEGER_COORDINATE_EXTENSION,
 };
+
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericScalar;
 use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
@@ -17,11 +14,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::op_common::line_inputs::NumericInput;
-use super::op_common::{apply_axes_target, split_leading_axes_handle, AxesTarget};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments, AxesTarget};
 use super::plot::build_line_plot_for_builtin;
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
@@ -31,215 +28,7 @@ use super::state::{
 use super::style::{parse_line_style_args, value_as_bool, value_as_string, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "triplot";
-type TriangulationArgs = (Value, Value, Value, Vec<Value>);
-
-const TRIPLOT_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the line object containing the triangulation edges.",
-}];
-
-const PARAM_TR: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "TR",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Triangulation-like struct with ConnectivityList and Points fields.",
-};
-
-const PARAM_AX: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::AxesHandle,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Target axes handle.",
-};
-
-const PARAM_TRI: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "TRI",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "M-by-3 triangle connectivity list using MATLAB one-based vertex indices.",
-};
-
-const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Vertex X coordinates.",
-};
-
-const PARAM_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Vertex Y coordinates.",
-};
-
-const PARAM_LINE_SPEC: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "lineSpec",
-    ty: BuiltinParamType::StyleSpec,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Line style, marker, and color shorthand.",
-};
-
-const PARAM_PROPS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "props",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name/value line style properties such as Color, LineWidth, and DisplayName.",
-};
-
-const INPUTS_TRI_X_Y: [BuiltinParamDescriptor; 3] = [PARAM_TRI, PARAM_X, PARAM_Y];
-const INPUTS_TRI_X_Y_STYLE: [BuiltinParamDescriptor; 4] =
-    [PARAM_TRI, PARAM_X, PARAM_Y, PARAM_LINE_SPEC];
-const INPUTS_TRI_X_Y_PROPS: [BuiltinParamDescriptor; 4] =
-    [PARAM_TRI, PARAM_X, PARAM_Y, PARAM_PROPS];
-const INPUTS_AX_TRI_X_Y: [BuiltinParamDescriptor; 4] = [PARAM_AX, PARAM_TRI, PARAM_X, PARAM_Y];
-const INPUTS_TR: [BuiltinParamDescriptor; 1] = [PARAM_TR];
-const INPUTS_TR_STYLE: [BuiltinParamDescriptor; 2] = [PARAM_TR, PARAM_LINE_SPEC];
-const INPUTS_AX_TR_STYLE: [BuiltinParamDescriptor; 3] = [PARAM_AX, PARAM_TR, PARAM_LINE_SPEC];
-
-const TRIPLOT_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "h = triplot(TRI, X, Y)",
-        inputs: &INPUTS_TRI_X_Y,
-        outputs: &TRIPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = triplot(TRI, X, Y, LineSpec)",
-        inputs: &INPUTS_TRI_X_Y_STYLE,
-        outputs: &TRIPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = triplot(TRI, X, Y, Name, Value, ...)",
-        inputs: &INPUTS_TRI_X_Y_PROPS,
-        outputs: &TRIPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = triplot(ax, TRI, X, Y)",
-        inputs: &INPUTS_AX_TRI_X_Y,
-        outputs: &TRIPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = triplot(TR)",
-        inputs: &INPUTS_TR,
-        outputs: &TRIPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = triplot(TR, LineSpec)",
-        inputs: &INPUTS_TR_STYLE,
-        outputs: &TRIPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = triplot(ax, TR, ...)",
-        inputs: &INPUTS_AX_TR_STYLE,
-        outputs: &TRIPLOT_OUTPUT_HANDLE,
-    },
-];
-
-pub const TRIPLOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPLOT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:triplot:InvalidArgument"),
-    when: "Connectivity, coordinate, axes, or style inputs are malformed.",
-    message: "triplot: invalid argument",
-};
-
-pub const TRIPLOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPLOT.INTERNAL",
-    identifier: Some("RunMat:triplot:Internal"),
-    when: "Internal line construction or plotting state update fails.",
-    message: "triplot: internal operation failed",
-};
-
-const TRIPLOT_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [TRIPLOT_ERROR_INVALID_ARGUMENT, TRIPLOT_ERROR_INTERNAL];
-
-pub const TRIPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRIPLOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRIPLOT_ERRORS,
-};
-
-const TRIPLOT_INTEGER_CONNECTIVITY_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "triplot-integer-connectivity",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "triplot with native typed-integer connectivity is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:TriplotIntegerConnectivityExtension"),
-    };
-const TRIPLOT_INTEGER_COORDINATE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "triplot-integer-coordinates",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "triplot with native typed-integer coordinates is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:TriplotIntegerCoordinatesExtension"),
-    };
-const TRIPLOT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "triplot-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interactive triplot gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TriplotGpuInputExtension"),
-};
-pub const TRIPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    TRIPLOT_INTEGER_CONNECTIVITY_EXTENSION,
-    TRIPLOT_INTEGER_COORDINATE_EXTENSION,
-    TRIPLOT_GPU_INPUT_EXTENSION,
-];
-const TRIPLOT_INTEGER_CONNECTIVITY_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "TRI or ConnectivityList",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target describes a connectivity matrix without enumerating native integer storage. RunMat mode decodes every vertex ID exactly as a positive one-based structural index.",
-    }];
-const TRIPLOT_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed X coordinates are mode-gated and must be exactly representable at the binary64 plotting boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed Y coordinates are mode-gated and must be exactly representable at the binary64 plotting boundary.",
-    },
-];
-pub const TRIPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = triplot(integer_TRI, X, Y, ...)",
-        inputs: &TRIPLOT_INTEGER_CONNECTIVITY_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Connectivity remains exact through bounds validation and only selects coordinate elements; the returned graphics handle is double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = triplot(TRI, integer_X, integer_Y, ...)",
-        inputs: &TRIPLOT_INTEGER_COORDINATE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Coordinates cross one checked binary64 rendering boundary after compatibility admission; triplot is a host plotting sink.",
-    },
-];
+type TriangulationArgs = (Value, Value, Value, crate::call::BuiltinArguments);
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::triplot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -270,19 +59,30 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "triplot",
-    category = "plotting",
-    summary = "Draw the edges of a 2-D triangular mesh.",
-    keywords = "triplot,triangulation,mesh,triangle,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::triplot::TRIPLOT_DESCRIPTOR),
-    extensions(crate::builtins::plotting::triplot::TRIPLOT_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::triplot::TRIPLOT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::triplot"
 )]
-pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
-    let (leading_axes, args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+pub async fn triplot_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "triplot: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "triplot")?;
+    let _arguments = args.fork();
+    work.finish(triplot_impl(args, &work).await)
+}
+
+async fn triplot_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
+    let (leading_axes, args) = split_leading_axes_arguments(args, BUILTIN_NAME)?;
     let parsed = parse_triplot_args(leading_axes, args).await?;
 
     let color_target = parsed.axes_target.unwrap_or_else(|| {
@@ -315,20 +115,17 @@ pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         plot.set_visible(visible);
     }
 
+    work.check()?;
     apply_axes_target(parsed.axes_target, BUILTIN_NAME).map_err(map_triplot_invalid)?;
     let figure_handle = current_figure_handle();
     let mut plot_slot = Some(plot);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let target_axes = parsed.axes_target.map(|(_, axes)| axes);
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Triangulation",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
             let plot = plot_slot
@@ -345,8 +142,7 @@ pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     };
     let handle = register_line_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_triplot_internal(err));
@@ -364,7 +160,7 @@ struct ParsedTriplot {
 
 async fn parse_triplot_args(
     leading_axes: AxesTarget,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<ParsedTriplot> {
     if args.is_empty() {
         return Err(triplot_invalid("expected TRI,X,Y or triangulation input"));
@@ -381,7 +177,7 @@ async fn parse_triplot_args(
             args[0].clone(),
             args[1].clone(),
             args[2].clone(),
-            args[3..].to_vec(),
+            args.range(3..)?,
         )
     };
     let StyleArgs {
@@ -444,24 +240,21 @@ async fn parse_triplot_args(
 
 fn peel_parent_value(
     leading_axes: AxesTarget,
-    args: Vec<Value>,
-) -> BuiltinResult<(AxesTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((leading_axes, Vec::new()));
-    };
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(AxesTarget, crate::call::BuiltinArguments)> {
     if leading_axes.is_none() {
-        if let Ok(PlotHandle::Axes(figure, axes)) = resolve_plot_handle(&first, BUILTIN_NAME) {
-            return Ok((Some((figure, axes)), iter.collect()));
+        if let Some(first) = args.first() {
+            if let Ok(PlotHandle::Axes(figure, axes)) = resolve_plot_handle(first, BUILTIN_NAME) {
+                return Ok((Some((figure, axes)), args.into_range(1..)?));
+            }
         }
     }
-    let mut out = Vec::with_capacity(iter.len() + 1);
-    out.push(first);
-    out.extend(iter);
-    Ok((leading_axes, out))
+    Ok((leading_axes, args))
 }
 
-fn parse_triangulation_struct(args: &[Value]) -> BuiltinResult<Option<TriangulationArgs>> {
+fn parse_triangulation_struct(
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<Option<TriangulationArgs>> {
     let Some(first) = args.first() else {
         return Ok(None);
     };
@@ -481,18 +274,19 @@ fn parse_triangulation_struct(args: &[Value]) -> BuiltinResult<Option<Triangulat
         .ok_or_else(|| triplot_invalid("triangulation input must contain Points"))?;
     let points = Tensor::try_from(&points)
         .map_err(|e| triplot_invalid(format!("Points must be numeric: {e}")))?;
-    if points.cols < 2 || points.rows == 0 {
+    let (point_rows, point_cols) = triplot_matrix_dimensions(&points);
+    if point_cols < 2 || point_rows == 0 {
         return Err(triplot_invalid(
             "Points must be an N-by-2 or N-by-more coordinate matrix",
         ));
     }
-    let x = column_tensor(&points, 0);
-    let y = column_tensor(&points, 1);
+    let x = column_tensor(&points, 0)?;
+    let y = column_tensor(&points, 1)?;
     Ok(Some((
         tri,
         Value::Tensor(x),
         Value::Tensor(y),
-        args[1..].to_vec(),
+        args.range(1..)?,
     )))
 }
 
@@ -516,7 +310,7 @@ fn lookup_object_property_case_insensitive<'a>(
     name: &str,
 ) -> Option<&'a Value> {
     object
-        .properties
+        .properties()
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
         .map(|(_, value)| value)
@@ -528,14 +322,21 @@ struct StyleArgs {
     visible: Option<bool>,
 }
 
-fn extract_triplot_style_args(args: Vec<Value>) -> BuiltinResult<StyleArgs> {
+fn extract_triplot_style_args(args: crate::call::BuiltinArguments) -> BuiltinResult<StyleArgs> {
     let mut tokens = Vec::new();
     let mut parent_axes = None;
     let mut visible = None;
     let mut idx = 0usize;
     while idx < args.len() {
         let token = args[idx].clone();
-        let Some(name) = value_as_string(&token) else {
+        let Some(name) = value_as_string(&token).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "triplot",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             return Err(triplot_invalid("style arguments must be strings"));
         };
         let lower = name.trim().to_ascii_lowercase();
@@ -592,7 +393,8 @@ fn build_triangle_edges(
     x: &Tensor,
     y: &Tensor,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
-    if tri.cols != 3 {
+    let (tri_rows, tri_cols) = triplot_matrix_dimensions(tri);
+    if tri_cols != 3 {
         return Err(triplot_invalid("TRI must be an M-by-3 connectivity matrix"));
     }
     let point_count = tensor_utils::tensor_element_len(x);
@@ -604,7 +406,7 @@ fn build_triangle_edges(
             "X and Y must be coordinate vectors with the same length",
         ));
     }
-    if tri.rows == 0 {
+    if tri_rows == 0 {
         return Ok((Vec::new(), Vec::new()));
     }
     if point_count == 0 {
@@ -613,12 +415,29 @@ fn build_triangle_edges(
 
     let x_values = tensor_utils::tensor_values_f64(x);
     let y_values = tensor_utils::tensor_values_f64(y);
-    let mut x_edges = Vec::with_capacity(tri.rows * 5);
-    let mut y_edges = Vec::with_capacity(tri.rows * 5);
-    for row in 0..tri.rows {
+    let edge_count = tri_rows
+        .checked_mul(5)
+        .ok_or_else(|| triplot_invalid("triangle edge count overflows"))?;
+    let mut x_edges = Vec::new();
+    let mut y_edges = Vec::new();
+    x_edges.try_reserve_exact(edge_count).map_err(|cause| {
+        crate::runtime_error::semantic_error_with_source(
+            "RunMat:triplot:InvalidArgument",
+            "triangle edge storage unavailable",
+            cause,
+        )
+    })?;
+    y_edges.try_reserve_exact(edge_count).map_err(|cause| {
+        crate::runtime_error::semantic_error_with_source(
+            "RunMat:triplot:InvalidArgument",
+            "triangle edge storage unavailable",
+            cause,
+        )
+    })?;
+    for row in 0..tri_rows {
         let a = vertex_index_at(tri, row, point_count)?;
-        let b = vertex_index_at(tri, row + tri.rows, point_count)?;
-        let c = vertex_index_at(tri, row + 2 * tri.rows, point_count)?;
+        let b = vertex_index_at(tri, row + tri_rows, point_count)?;
+        let c = vertex_index_at(tri, row + 2 * tri_rows, point_count)?;
         for idx in [a, b, c, a] {
             x_edges.push(x_values[idx]);
             y_edges.push(y_values[idx]);
@@ -662,20 +481,23 @@ fn vertex_index(value: f64, point_count: usize) -> BuiltinResult<usize> {
     Ok(idx - 1)
 }
 
-fn column_tensor(tensor: &Tensor, col: usize) -> Tensor {
-    let indices = (0..tensor.rows)
-        .map(|row| row + col * tensor.rows)
-        .collect::<Vec<_>>();
-    let storage = tensor
-        .clone()
-        .into_numeric_storage()
-        .and_then(|storage| storage.gather(&indices))
-        .expect("triplot column indices");
-    Tensor::from_numeric_storage(storage, vec![tensor.rows, 1]).expect("triplot column shape")
+fn column_tensor(tensor: &Tensor, col: usize) -> BuiltinResult<Tensor> {
+    let (rows, _) = triplot_matrix_dimensions(tensor);
+    let indices = (0..rows).map(|row| row + col * rows).collect::<Vec<_>>();
+    super::op_common::line_inputs::select_native(tensor, &indices, vec![rows, 1], BUILTIN_NAME)
+}
+
+fn triplot_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
-    tensor.rows == 1 || tensor.cols == 1
+    let (rows, cols) = triplot_matrix_dimensions(tensor);
+    rows == 1 || cols == 1
 }
 
 fn triplot_invalid(detail: impl AsRef<str>) -> RuntimeError {
@@ -704,19 +526,41 @@ fn map_triplot_invalid(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    triplot_error_with_detail(&TRIPLOT_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = triplot_error_with_detail(&TRIPLOT_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_triplot_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    triplot_error_with_detail(&TRIPLOT_ERROR_INTERNAL, err.message)
+    let mapped = triplot_error_with_detail(&TRIPLOT_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn triplot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::triplot_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::subplot::subplot_builtin;
@@ -739,6 +583,28 @@ mod tests {
         ensure_plot_test_env();
         reset_plot_state();
         guard
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn triplot_rank_one_connectivity_is_one_triangle_and_rank_zero_is_not_a_vector() {
+        let tri = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let x = Tensor::new(vec![0.0, 1.0, 0.0], vec![3]).unwrap();
+        let y = Tensor::new(vec![0.0, 0.0, 1.0], vec![3]).unwrap();
+        let (x_edges, y_edges) = build_triangle_edges(&tri, &x, &y).unwrap();
+        assert_eq!(&x_edges[..4], &[0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(&y_edges[..4], &[0.0, 0.0, 1.0, 0.0]);
+
+        let scalar = Tensor::new(vec![1.0], Vec::new()).unwrap();
+        assert!(!is_vector_tensor(&scalar));
+        assert!(build_triangle_edges(&scalar, &x, &y)
+            .expect_err("rank-zero TRI has no connectivity columns")
+            .message()
+            .contains("M-by-3"));
+        assert!(build_triangle_edges(&tri, &scalar, &y)
+            .expect_err("rank-zero X is not a coordinate vector")
+            .message()
+            .contains("coordinate vectors"));
     }
 
     #[test]
@@ -800,13 +666,17 @@ mod tests {
     #[test]
     fn triplot_explicit_gpu_input_is_gated_before_gather() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 0,
-            buffer_id: 9_462_001,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let error = block_on(triplot_builtin(vec![
             Value::GpuTensor(handle),
             tensor(&[0.0, 1.0, 0.0], 1, 3),
@@ -821,7 +691,8 @@ mod tests {
 
     #[test]
     fn triplot_column_tensor_reads_typed_integer_storage_exactly() {
-        let column = column_tensor(&int_tensor(vec![1, 2, 3, 4], 2, 2), 1);
+        use runmat_value::{IntegerStorage, NumericDType, NumericStorage};
+        let column = column_tensor(&int_tensor(vec![1, 2, 3, 4], 2, 2), 1).unwrap();
 
         assert_eq!(column.materialize_f64(), vec![3.0, 4.0]);
         assert_eq!(column.numeric_dtype(), runmat_value::NumericDType::I16);
@@ -829,6 +700,34 @@ mod tests {
             column.integer_storage(),
             Some(&runmat_value::IntegerStorage::I16(vec![3, 4]))
         );
+        for (storage, dtype) in [
+            (
+                NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0]),
+                NumericDType::F32,
+            ),
+            (
+                NumericStorage::U64(vec![0, 1, 9_007_199_254_740_993, 9_007_199_254_740_995]),
+                NumericDType::U64,
+            ),
+        ] {
+            let input = Tensor::from_numeric_storage(storage, vec![2, 2]).unwrap();
+            let before = input.clone();
+            let output = column_tensor(&input, 1).unwrap();
+            assert_eq!(output.numeric_dtype(), dtype);
+            assert_eq!(output.shape(), [2, 1]);
+            assert_eq!(input, before);
+            if dtype == NumericDType::F32 {
+                assert_eq!(output.as_f32_slice(), Some([3.0_f32, 4.0].as_slice()));
+            } else {
+                assert_eq!(
+                    output.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![
+                        9_007_199_254_740_993,
+                        9_007_199_254_740_995
+                    ]))
+                );
+            }
+        }
     }
 
     #[test]
@@ -902,14 +801,14 @@ mod tests {
     #[test]
     fn triplot_accepts_triangulation_like_struct() {
         let _guard = setup();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields
             .insert("ConnectivityList".into(), tensor(&[1.0, 2.0, 3.0], 1, 3));
         st.fields.insert(
             "Points".into(),
             tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
         );
-        let handle = block_on(triplot_builtin(vec![Value::Struct(st)])).unwrap();
+        let handle = block_on(triplot_builtin(vec![Value::Struct(st.finish())])).unwrap();
         assert!(handle.is_finite());
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
@@ -935,11 +834,13 @@ mod tests {
     fn triplot_accepts_delaunaytri_object() {
         let _guard = setup();
         let dt = block_on(
-            crate::builtins::geometry::triangulation::delaunay_tri_builtin(vec![tensor(
-                &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                3,
-                2,
-            )]),
+            crate::builtins::geometry::triangulation::delaunay_tri_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                    &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                    3,
+                    2,
+                )]),
+            ),
         )
         .unwrap();
         let handle = block_on(triplot_builtin(vec![dt])).unwrap();

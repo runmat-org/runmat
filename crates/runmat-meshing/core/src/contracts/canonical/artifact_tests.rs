@@ -7,17 +7,14 @@ fn digest(byte: u8) -> StableDigest {
 }
 
 fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: id.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, id.into(), vec!["root".into()])
 }
 
 pub(super) fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: crate::MeshDimension::Solid,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -29,29 +26,33 @@ pub(super) fn request() -> MeshingRequest {
             validation: "validation/v2".into(),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
+            located_sources: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(0.5).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            cells_across_gap: None,
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {
@@ -60,21 +61,16 @@ pub(super) fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
+        size_controls: Vec::new(),
     }
 }
 
@@ -92,7 +88,10 @@ pub(super) fn artifact() -> SolverMeshArtifact {
     .map(|(index, coordinates_m)| SolverMeshNode {
         node_id: index as u64 + 1,
         stable_identity: digest(index as u8 + 1),
-        coordinates_m,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                coordinates_m,
+            ),
         provenance: vec![solid.clone()],
         exact_parameters: Vec::new(),
     })
@@ -133,10 +132,15 @@ pub(super) fn artifact() -> SolverMeshArtifact {
     )
     .collect();
     let mut artifact = SolverMeshArtifact {
-        schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: digest(1),
         root_stage_manifest_digest: digest(2),
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: digest(3),
             geometry_revision: 4,
             persistent_mapping_version: 2,
@@ -155,7 +159,6 @@ pub(super) fn artifact() -> SolverMeshArtifact {
                 order: ElementOrder::Tet4,
                 node_ids: vec![1, 2, 3, 4],
                 region_id: region.clone(),
-                material_id: "steel".into(),
                 provenance: vec![solid],
             }],
             neighbors: (0..4)
@@ -169,10 +172,9 @@ pub(super) fn artifact() -> SolverMeshArtifact {
             boundary_edges,
             regions: vec![MeshRegion {
                 region_id: region,
-                material_id: "steel".into(),
                 element_ids: vec![1],
             }],
-            material_interfaces: Vec::new(),
+            conformal_interfaces: Vec::new(),
             contacts: Vec::new(),
             field_topologies: vec![
                 FieldTopologyMap {
@@ -196,7 +198,8 @@ pub(super) fn artifact() -> SolverMeshArtifact {
                     ordered_entity_ids: vec![20, 21, 22, 23, 24, 25],
                 },
             ],
-        },
+        }
+        .into(),
     };
     artifact.seal_canonical_digest().unwrap();
     artifact
@@ -205,6 +208,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
 pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
     MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+        ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         geometry: artifact.geometry.clone(),
         resolved_request_digest: artifact.resolved_request.canonical_digest().unwrap(),
         artifact_digest: artifact.canonical_digest,
@@ -218,9 +222,17 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
         },
         stages: MeshingStageKind::ALL
             .into_iter()
+            .take(MeshingStageKind::ALL.len() - 1)
             .enumerate()
             .map(|(index, stage)| MeshingStageEvidence {
+                reused_from: None,
                 stage,
+                partition: MeshingPartitionDescriptor {
+                    kind: MeshingPartitionKind::WholeStage,
+                    partition_index: 0,
+                    partition_count: 1,
+                    entity_range: None,
+                },
                 stage_result_digest: digest(index as u8 + 10),
                 entity_counts: BTreeMap::from([("accepted".into(), 1)]),
                 invariants: vec![InvariantEvidence {
@@ -234,6 +246,10 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
                 completed_work: 1,
                 estimated_work: 1,
                 peak_memory_bytes: 100,
+                peak_scratch_bytes: 10,
+                search_work: 1,
+                maximum_recursion_depth: 1,
+                iterations: 1,
                 elapsed_time_ms: 1,
                 cancellation_checkpoints: 1,
             })
@@ -245,6 +261,8 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
             achieved_maximum_size_m: 0.09,
             clipped_contribution_count: 0,
             rejected_contribution_count: 0,
+            control_id: None,
+            achieved: None,
         }],
         resources: MeshingResourceUsage {
             generated_nodes: 4,
@@ -252,15 +270,35 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
             peak_memory_bytes: 100,
             peak_scratch_bytes: 10,
             wall_time_ms: 14,
-            artifact_bytes: 1_000,
-            search_work: 30,
-            maximum_recursion_depth: 2,
-            iterations: 8,
+            artifact_bytes: artifact.canonical_encode().unwrap().len() as u64,
+            search_work: 13,
+            maximum_recursion_depth: 1,
+            iterations: 13,
         },
         cache_admission: CacheAdmissionDecision::Admitted,
     }
 }
 
+#[test]
+fn artifact_identity_excludes_the_physical_validation_manifest_layout() {
+    let first = artifact();
+    let mut second = first.clone();
+    second.root_stage_manifest_digest = digest(99);
+    second.seal_canonical_digest().unwrap();
+
+    assert_eq!(first.canonical_digest, second.canonical_digest);
+    assert_ne!(
+        first.canonical_encode().unwrap(),
+        second.canonical_encode().unwrap()
+    );
+    first.validate().unwrap();
+    second.validate().unwrap();
+}
+
+// witness: FEA-MESH-DISCRETIZATION-001/mesh_evidence_artifact @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A mesh artifact and its evidence round-trip with complete canonical topology;
+//   per-stage counters and quality distributions are asserted in sibling tests.
 #[test]
 fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
     let artifact = artifact();
@@ -278,6 +316,102 @@ fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
         serde_json::from_slice::<MeshingEvidence>(&encoded).unwrap(),
         evidence
     );
+}
+
+#[test]
+fn publication_evidence_closes_over_serialized_artifact_identity_and_bytes() {
+    let artifact = artifact();
+    let evidence = evidence(&artifact);
+    let artifact_bytes = artifact.canonical_encode().unwrap().len() as u64;
+    evidence
+        .validate_publication_closure(
+            &artifact.geometry,
+            &artifact.resolved_request,
+            artifact.canonical_digest,
+            artifact_bytes,
+        )
+        .unwrap();
+
+    assert_eq!(
+        evidence
+            .validate_publication_closure(
+                &artifact.geometry,
+                &artifact.resolved_request,
+                digest(99),
+                artifact_bytes,
+            )
+            .unwrap_err()
+            .field,
+        "meshing publication evidence"
+    );
+    assert_eq!(
+        evidence
+            .validate_publication_closure(
+                &artifact.geometry,
+                &artifact.resolved_request,
+                artifact.canonical_digest,
+                artifact_bytes + 1,
+            )
+            .unwrap_err()
+            .field,
+        "meshing publication evidence"
+    );
+}
+
+#[test]
+fn solver_projection_validation_forms_an_acyclic_final_artifact_chain() {
+    let expected = artifact();
+    let projection = SolverMeshProjection {
+        schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
+        geometry: expected.geometry.clone(),
+        resolved_request: expected.resolved_request.clone(),
+        topology: (*expected.topology).clone(),
+    };
+    let encoded = projection.canonical_encode().unwrap();
+    let decoded = SolverMeshProjection::canonical_decode(&encoded).unwrap();
+    assert_eq!(decoded, projection);
+
+    let validation = SolverMeshValidation::from_validated_projection(&projection).unwrap();
+    validation.validate_against(&projection).unwrap();
+    assert_eq!(
+        SolverMeshValidation::canonical_decode(&validation.canonical_encode().unwrap()).unwrap(),
+        validation
+    );
+
+    let validation_manifest_digest = digest(71);
+    let artifact = projection
+        .clone()
+        .into_artifact(validation_manifest_digest)
+        .unwrap();
+    artifact.validate().unwrap();
+    assert_eq!(
+        artifact.root_stage_manifest_digest,
+        validation_manifest_digest
+    );
+    assert_eq!(artifact.topology, projection.topology);
+
+    let mut tampered = validation;
+    tampered.boundary_face_count += 1;
+    assert!(tampered.validate_against(&projection).is_err());
+}
+
+#[test]
+fn solver_projection_and_validation_reject_incompatible_contracts() {
+    let source = artifact();
+    let mut projection = SolverMeshProjection {
+        schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
+        geometry: source.geometry,
+        resolved_request: source.resolved_request,
+        topology: source.topology.into_topology(),
+    };
+    let validation = SolverMeshValidation::from_validated_projection(&projection).unwrap();
+
+    projection.schema_version += 1;
+    assert!(projection.validate().is_err());
+
+    let mut invalid = validation;
+    invalid.projection_digest = StableDigest::ZERO;
+    assert!(invalid.validate().is_err());
 }
 
 #[test]
@@ -328,12 +462,54 @@ fn artifact_rejects_noncanonical_or_dangling_connectivity() {
     assert_eq!(invalid.validate().unwrap_err().field, "volume element");
 
     let mut invalid = artifact();
-    invalid.topology.boundary_faces[0].role = BoundaryFaceRole::MaterialInterface;
+    invalid.topology.boundary_faces[0].role = BoundaryFaceRole::ConformalInterface;
     assert_eq!(invalid.validate().unwrap_err().field, "boundary face");
 
     let mut invalid = artifact();
     invalid.topology.boundary_edges[0].adjacent_boundary_face_ids = vec![12];
     assert_eq!(invalid.validate().unwrap_err().field, "boundary edge");
+}
+
+#[test]
+fn contact_secondary_face_inventory_rejects_malformed_references_without_panicking() {
+    let mut valid = artifact();
+    let contact_id = entity(PersistentEntityKind::Contact, "contact:1");
+    for (index, role) in [
+        BoundaryFaceRole::ContactPrimary,
+        BoundaryFaceRole::ContactSecondary,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let face = &mut valid.topology.boundary_faces[index];
+        face.role = role;
+        face.provenance.push(contact_id.clone());
+        face.provenance.sort();
+    }
+    let primary = valid.topology.boundary_faces[0].face_id;
+    let secondary = valid.topology.boundary_faces[1].face_id;
+    valid.topology.contacts.push(ContactPair {
+        contact_id,
+        primary_boundary_face_ids: vec![primary],
+        secondary_boundary_face_ids: vec![secondary],
+    });
+    valid.seal_canonical_digest().unwrap();
+    valid.validate_canonical().unwrap();
+
+    for secondary_faces in [
+        Vec::new(),
+        vec![u64::MAX],
+        vec![secondary, u64::MAX],
+        vec![secondary, secondary],
+        vec![secondary, primary],
+    ] {
+        let mut invalid = valid.clone();
+        invalid.topology.contacts[0].secondary_boundary_face_ids = secondary_faces;
+        assert_eq!(
+            invalid.validate_canonical().unwrap_err().field,
+            "contact secondary faces"
+        );
+    }
 }
 
 #[test]
@@ -351,10 +527,19 @@ fn solver_node_exact_parameters_are_typed_bounded_and_canonical() {
             source_edge_id: edge.clone(),
             parameter: 0.25,
         },
+        SolverNodeExactParameter::Curve {
+            source_edge_id: edge.clone(),
+            parameter: 0.75,
+        },
         SolverNodeExactParameter::Surface {
             source_face_id: face.clone(),
             chart_id: chart,
             evaluator_uv: [0.1, 0.2],
+        },
+        SolverNodeExactParameter::Surface {
+            source_face_id: face.clone(),
+            chart_id: chart,
+            evaluator_uv: [6.3, 0.2],
         },
     ];
     let validate = |candidate: &SolverMeshArtifact| {
@@ -399,7 +584,7 @@ fn solver_node_exact_parameters_are_typed_bounded_and_canonical() {
     );
 
     let mut invalid = valid.clone();
-    invalid.topology.nodes[0].exact_parameters[1] = SolverNodeExactParameter::Surface {
+    invalid.topology.nodes[0].exact_parameters[2] = SolverNodeExactParameter::Surface {
         source_face_id: face.clone(),
         chart_id: StableDigest::ZERO,
         evaluator_uv: [0.1, 0.2],
@@ -463,13 +648,17 @@ fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
                 }),
         );
         sort_solver_node_exact_parameters(&mut exact_parameters);
+        let stable_identity = solver_midside_node_identity(
+            TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
+                .map(|corner| quadratic.topology.nodes[corner].stable_identity),
+        );
         quadratic.topology.nodes.push(SolverMeshNode {
             node_id: index as u64 + 5,
-            stable_identity: solver_midside_node_identity(
-                TETRAHEDRON_MIDSIDE_EDGE_CORNERS[index]
-                    .map(|corner| quadratic.topology.nodes[corner].stable_identity),
-            ),
-            coordinates_m,
+            stable_identity,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
             provenance,
             exact_parameters,
         });
@@ -545,7 +734,7 @@ fn quadratic_solver_topology_requires_shared_exact_midside_connectivity() {
 }
 
 #[test]
-fn successful_evidence_requires_every_stage_and_respects_hard_budgets() {
+fn successful_evidence_requires_terminal_order_and_respects_hard_budgets() {
     let artifact = artifact();
     let mut invalid = evidence(&artifact);
     invalid.stages.pop();
@@ -562,6 +751,13 @@ fn successful_evidence_requires_every_stage_and_respects_hard_budgets() {
     );
 
     let mut invalid = evidence(&artifact);
+    invalid.resources.search_work += 1;
+    assert_eq!(
+        invalid.validate(&artifact).unwrap_err().field,
+        "meshing resource usage"
+    );
+
+    let mut invalid = evidence(&artifact);
     invalid.artifact_digest = digest(99);
     assert_eq!(
         invalid.validate(&artifact).unwrap_err().field,
@@ -570,8 +766,57 @@ fn successful_evidence_requires_every_stage_and_respects_hard_budgets() {
 }
 
 #[test]
+fn successful_evidence_admits_canonically_ordered_partition_observations() {
+    let artifact = artifact();
+    let mut evidence = evidence(&artifact);
+    evidence.stages[0].partition.kind = MeshingPartitionKind::CanonicalEntityBatch;
+    evidence.stages[0].partition.partition_count = 2;
+    evidence.stages[0].partition.entity_range = Some(CanonicalEntityRange {
+        first: entity(PersistentEntityKind::Edge, "edge:1"),
+        last: entity(PersistentEntityKind::Edge, "edge:1"),
+        entity_count: 1,
+    });
+    let mut second_partition = evidence.stages[0].clone();
+    second_partition.partition.partition_index = 1;
+    second_partition.stage_result_digest = digest(98);
+    evidence.stages.insert(1, second_partition);
+    evidence.resources.search_work += 1;
+    evidence.resources.iterations += 1;
+    evidence.validate(&artifact).unwrap();
+
+    evidence.stages.swap(0, 1);
+    assert_eq!(
+        evidence.validate(&artifact).unwrap_err().field,
+        "meshing evidence"
+    );
+}
+
+#[test]
 fn solver_artifact_rejects_unknown_legacy_backend_evidence() {
     let mut value = serde_json::to_value(artifact()).unwrap();
-    value["backend"] = serde_json::json!("structured_grid_tetrahedron");
+    value["backend"] = serde_json::json!("removed");
     assert!(serde_json::from_value::<SolverMeshArtifact>(value).is_err());
+}
+
+#[test]
+fn solver_topology_validation_observes_execution_cancellation() {
+    struct Cancelled;
+
+    impl MeshingCancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+    }
+
+    let artifact = artifact();
+    assert_eq!(
+        validate_solver_mesh_topology_with_cancellation(
+            &artifact.topology,
+            &artifact.resolved_request,
+            &Cancelled,
+        )
+        .unwrap_err()
+        .field,
+        "solver mesh validation"
+    );
 }

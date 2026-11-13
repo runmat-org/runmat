@@ -1,7 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_native_codegen::NativeFrameState;
 use runmat_native_codegen::NativeLocalId;
-use runmat_types::{ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan};
+use runmat_types::{FunctionId, ProgramPointId, ProgramSourceId, ProgramSpan};
 use runmat_value::Value;
 use std::collections::BTreeMap;
 
@@ -28,27 +28,30 @@ pub struct MaterializedLocal {
 /// Executor-neutral values required to resume without replaying an earlier site.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MaterializedFrame {
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
     pub site: ResumeSite,
     pub locals: Vec<MaterializedLocal>,
     pub operands: Vec<Value>,
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
     pub missing_input_locals: Vec<NativeLocalId>,
-    pub global_bindings: BTreeMap<usize, String>,
-    pub persistent_bindings: BTreeMap<usize, String>,
+    pub global_bindings: BTreeMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
+    pub persistent_bindings:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentBindingContinuation>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct NativeMaterializationContext {
+    pub compiled_function: FunctionId,
     pub phase: runmat_native_codegen::NativeSitePhase,
     pub ordinal: u32,
     pub bytecode_pc: Option<u64>,
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
     pub missing_input_locals: Vec<NativeLocalId>,
-    pub global_bindings: BTreeMap<usize, String>,
-    pub persistent_bindings: BTreeMap<usize, String>,
+    pub global_bindings: BTreeMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
+    pub persistent_bindings:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentBindingContinuation>,
 }
 
 impl MaterializedFrame {
@@ -80,7 +83,7 @@ impl MaterializedFrame {
             })
             .collect::<NativeExecutorResult<Vec<_>>>()?;
         Ok(Self {
-            function: frame.point.function,
+            function: context.compiled_function,
             site: ResumeSite {
                 point: frame.point,
                 source: frame.source.source,

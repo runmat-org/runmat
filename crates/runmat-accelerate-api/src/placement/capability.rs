@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{AccelProvider, ApiDeviceInfo, SpawnHandleConcurrency};
+use crate::{AccelProvider, ApiDeviceInfo, ProviderSparseCapabilities, SpawnHandleConcurrency};
 
 use super::{ProviderElementType, ProviderOperationIdentity};
 
-pub const PROVIDER_CAPABILITY_SCHEMA_VERSION: u16 = 1;
+pub const PROVIDER_CAPABILITY_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,6 +47,8 @@ pub struct ProviderCapabilitySnapshot {
     pub element_types: Vec<ProviderElementType>,
     pub max_rank: Option<u32>,
     pub max_allocation_bytes: Option<u64>,
+    /// Native sparse capabilities. Absence means every sparse operation is unsupported.
+    pub sparse: Option<ProviderSparseCapabilities>,
     pub concurrency: ProviderConcurrencyCapabilities,
 }
 
@@ -71,6 +73,7 @@ impl ProviderCapabilitySnapshot {
             element_types: vec![element_type],
             max_rank: None,
             max_allocation_bytes: device.memory_bytes,
+            sparse: None,
             concurrency: ProviderConcurrencyCapabilities {
                 spawn_handles: provider.spawn_handle_concurrency(),
                 concurrent_dispatch: false,

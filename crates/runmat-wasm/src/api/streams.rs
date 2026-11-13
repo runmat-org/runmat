@@ -9,14 +9,50 @@ use crate::runtime::logging::{
     ensure_trace_forwarder_installed, init_logging_once,
 };
 use crate::runtime::state::{
-    js_stdin_handler, RUNTIME_LOG_NEXT_ID, RUNTIME_LOG_SUBSCRIBERS, STDOUT_NEXT_ID,
-    STDOUT_SUBSCRIBERS, TRACE_NEXT_ID, TRACE_SUBSCRIBERS,
+    RUNTIME_LOG_NEXT_ID, RUNTIME_LOG_SUBSCRIBERS, STDOUT_NEXT_ID, STDOUT_SUBSCRIBERS,
+    TRACE_NEXT_ID, TRACE_SUBSCRIBERS,
 };
 use crate::wire::errors::{js_error, js_value_to_string};
 
+// Core input closures are Send + Sync, while JS functions belong to this realm.
+// A session owns its registration; the closure carries only its lookup key.
 #[cfg(target_arch = "wasm32")]
-pub(crate) async fn js_input_request(request: InputRequest) -> Result<InputResponse, String> {
-    let handler = js_stdin_handler();
+runmat_thread_local::runmat_thread_local! {
+    static INPUT_HANDLERS: std::cell::RefCell<std::collections::HashMap<u32, js_sys::Function>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+#[cfg(target_arch = "wasm32")]
+static INPUT_NEXT_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct JsInputHandler(u32);
+
+#[cfg(target_arch = "wasm32")]
+impl JsInputHandler {
+    pub(crate) fn new(function: js_sys::Function) -> Self {
+        let id = INPUT_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        INPUT_HANDLERS.with(|handlers| handlers.borrow_mut().insert(id, function));
+        Self(id)
+    }
+
+    pub(crate) fn install_on(&self, session: &mut runmat_core::RunMatSession) {
+        let id = self.0;
+        session.install_async_input_handler(move |request| async move {
+            js_input_request(id, request).await
+        });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for JsInputHandler {
+    fn drop(&mut self) {
+        INPUT_HANDLERS.with(|handlers| handlers.borrow_mut().remove(&self.0));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn js_input_request(id: u32, request: InputRequest) -> Result<InputResponse, String> {
+    let handler = INPUT_HANDLERS.with(|handlers| handlers.borrow().get(&id).cloned());
     let Some(handler) = handler else {
         return Err("stdin requested but no input handler is installed".to_string());
     };

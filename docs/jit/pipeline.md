@@ -27,6 +27,8 @@ Generated code receives opaque, generation-checked value references and a versio
 
 Semantic sites call the same runtime operations used by the VM. Structured exits distinguish completion, exception, cancellation, suspension, and deoptimization. A deoptimization frame includes its exact function, block, position, phase, ordinal, live locals, roots, aliases, and side-effect epoch so continuation does not replay completed work.
 
+The Cranelift lowerer emits a host-site call for each Native IR instruction and terminator, then branches on the validated outcome. Generic JIT versions, specialized JIT versions and linked AOT objects use this lowerer. Representation guards select versions; Runtime numeric-region plans select the arithmetic implementation.
+
 ## Tiering And Specialization
 
 Feedback is keyed by stable entry, function, and optional loop-header identity. Exact runtime facts form bounded representation profiles. Policy admits generic native code after generic heat, and guarded optimized versions only after their matching profile becomes hot. Compilation failures retain the existing continuation; runtime program errors are not mistaken for compiler failures.
@@ -35,7 +37,11 @@ Every published target records exact program, builtin-catalog, project, and refe
 
 ## Optimized Regions And Placement
 
-Specialized products may include verified effect-free numeric regions. The JIT derives the region plan, Runtime evaluates the admitted numeric DAG transactionally, and the session's shared placement authority decides between ordinary specialized CPU execution and vectorized CPU execution. The JIT does not contain independent GPU policy. Unsupported storage, shape, resource, cancellation, or placement conditions leave ordinary execution intact.
+Specialized products may include verified effect-free numeric regions. The JIT derives the region plan, and Runtime retains its validated numeric DAG and operation identities. The session's shared placement authority considers the eligible implementations: original native execution, vectorized CPU execution, CPU evaluation through Runtime's original operations, and provider fusion. Each route must support the input types and shapes and supply its required resource bounds and completion capabilities. The JIT does not maintain separate GPU policy.
+
+The `Vectorized` CPU route evaluates the admitted scalar/dense-double DAG in one element traversal through Runtime's compiled Rust kernel. A host-site checkpoint selects the route; after it publishes the results, native execution skips the covered sites. Other representations continue through their ordinary Runtime operations. Cancellation and errors retain the invocation's originating source and continuation state.
+
+Placement compares complete routes, including preparation, transfers, and synchronization. Estimates and observations remain tied to the implementation and execution boundary they describe. A missing complete-route price stays unknown; bounded exploration can measure an otherwise legal route when the selected runtime supports it. Explicit `gpuArray` intent excludes host alternatives. Rejection before effects can retain ordinary execution; a failed or cancelled execution is not replayed through another route.
 
 ## Interactive Workspace Contract
 

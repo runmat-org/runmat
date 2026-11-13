@@ -18,17 +18,46 @@ pub fn validate_exact_face_trimmed_delaunay(
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceDelaunayError> {
     validate_exact_face_constrained_delaunay(constrained, pslg, boundary, cancellation, options)?;
-    validate_face_trimmed_topology(trimmed, constrained, pslg, cancellation, options)
+    validate_face_trimmed_topology(trimmed, constrained, pslg, cancellation, options, None)
 }
 
+#[track_caller]
 pub(crate) fn validate_face_trimmed_topology(
     trimmed: &ExactFaceTrimmedDelaunay,
     constrained: &ExactFaceConstrainedDelaunay,
     pslg: &ExactFacePslg,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
 ) -> Result<(), ExactFaceDelaunayError> {
-    crate::exact_cdt::validate_face_constrained_topology(constrained, pslg, cancellation, options)?;
+    // Preserve the external entry site without changing inner-loop probe sites.
+    let mut control = ValidationControl::new(pslg, cancellation, options);
+    control.checkpoint()?;
+    validate_trimmed_topology_body(
+        trimmed,
+        constrained,
+        pslg,
+        cancellation,
+        options,
+        geometry_control,
+    )
+}
+
+fn validate_trimmed_topology_body(
+    trimmed: &ExactFaceTrimmedDelaunay,
+    constrained: &ExactFaceConstrainedDelaunay,
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
+) -> Result<(), ExactFaceDelaunayError> {
+    crate::exact_cdt::validate_face_constrained_topology(
+        constrained,
+        pslg,
+        cancellation,
+        options,
+        geometry_control,
+    )?;
     let mut control = ValidationControl::new(pslg, cancellation, options);
     control.checkpoint()?;
     if trimmed.source_face_id != pslg.source_face_id
@@ -59,7 +88,7 @@ pub(crate) fn validate_face_trimmed_topology(
         .iter()
         .map(|segment| ordered_edge(segment.vertex_indices))
         .collect::<BTreeSet<_>>();
-    let retained_edges = independent_edge_uses(&trimmed.triangles);
+    let retained_edges = independent_edge_uses(&trimmed.triangles, &mut control)?;
     if retained_edges.values().any(|uses| uses.len() > 2) {
         return Err(control.invalid("trimmed topology contains a nonmanifold edge"));
     }
@@ -84,7 +113,7 @@ pub(crate) fn validate_face_trimmed_topology(
 
     // Reconstruct incidence and topological flood regions independently of the
     // carving implementation; sharing only the immutable stage contracts is intentional.
-    let full_edges = independent_edge_uses(&constrained.triangles);
+    let full_edges = independent_edge_uses(&constrained.triangles, &mut control)?;
     let adjacency = unconstrained_adjacency(constrained.triangles.len(), &full_edges, &protected);
     let exterior_seeds = full_edges
         .iter()
@@ -260,9 +289,11 @@ struct ValidatorEdgeUse {
 
 fn independent_edge_uses(
     triangles: &[crate::ExactFaceDelaunayTriangle],
-) -> BTreeMap<[u32; 2], Vec<ValidatorEdgeUse>> {
+    control: &mut ValidationControl<'_>,
+) -> Result<BTreeMap<[u32; 2], Vec<ValidatorEdgeUse>>, ExactFaceDelaunayError> {
     let mut edges = BTreeMap::<[u32; 2], Vec<ValidatorEdgeUse>>::new();
     for (triangle_index, triangle) in triangles.iter().enumerate() {
+        control.checkpoint()?;
         let [first, second, third] = triangle.vertex_indices;
         for (edge, opposite_vertex) in [
             (ordered_edge([first, second]), third),
@@ -275,7 +306,7 @@ fn independent_edge_uses(
             });
         }
     }
-    edges
+    Ok(edges)
 }
 
 fn ordered_edge(mut edge: [u32; 2]) -> [u32; 2] {
@@ -317,6 +348,7 @@ impl<'a> ValidationControl<'a> {
         }
     }
 
+    #[track_caller]
     fn consume_predicate(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.predicates_remaining = self.predicates_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
@@ -327,6 +359,7 @@ impl<'a> ValidationControl<'a> {
         self.work()
     }
 
+    #[track_caller]
     fn visit(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.visits_remaining = self.visits_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
@@ -337,6 +370,7 @@ impl<'a> ValidationControl<'a> {
         self.work()
     }
 
+    #[track_caller]
     fn work(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.work_since_check = self.work_since_check.saturating_add(1);
         if self.work_since_check >= self.check_interval {
@@ -345,6 +379,7 @@ impl<'a> ValidationControl<'a> {
         Ok(())
     }
 
+    #[track_caller]
     fn checkpoint(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.work_since_check = 0;
         if self.cancellation.is_cancelled() {

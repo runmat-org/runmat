@@ -1,131 +1,34 @@
 //! Pole-zero map plotting and extraction for SISO transfer-function and state-space models.
 
 use num_complex::Complex64;
+#[cfg(feature = "plot-core")]
+use runmat_builtins::PZMAP_ERROR_PLOT_FAILED;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, PZMAP_ERROR_INTERNAL, PZMAP_ERROR_INVALID_ARGUMENT,
+    PZMAP_ERROR_INVALID_MODEL, PZMAP_ERROR_UNSUPPORTED_MODEL,
 };
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinIntegerInputAvailability, PZMAP_DESCRIPTOR, PZMAP_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+#[cfg(any(feature = "plot-core", test))]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::control::tf_model::{output_complex_column, TfModel, EPS, SS_CLASS, TF_CLASS};
-use crate::builtins::control::type_resolvers::pzmap_type;
+use crate::builtins::control::model_polynomial::ss_object_to_tf_async;
+use crate::builtins::control::tf_model::{output_complex_column, TfModel, SS_CLASS, TF_CLASS};
+#[cfg(feature = "plot-core")]
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
+#[cfg(feature = "plot-core")]
+use crate::plotting_hooks::{presentation_failed, with_render_cause};
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "pzmap";
-
-const PZMAP_OUTPUT_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Poles of the SISO tf or ss model as a column vector.",
-};
-const PZMAP_OUTPUT_Z: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "z",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zeros of the SISO tf or ss model as a column vector.",
-};
-const PZMAP_INPUT_SYS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf or ss model.",
-};
-const PZMAP_OUTPUTS_P: [BuiltinParamDescriptor; 1] = [PZMAP_OUTPUT_P];
-const PZMAP_OUTPUTS_P_Z: [BuiltinParamDescriptor; 2] = [PZMAP_OUTPUT_P, PZMAP_OUTPUT_Z];
-const PZMAP_INPUTS_SYS: [BuiltinParamDescriptor; 1] = [PZMAP_INPUT_SYS];
-const PZMAP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "pzmap(sys)",
-        inputs: &PZMAP_INPUTS_SYS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = pzmap(sys)",
-        inputs: &PZMAP_INPUTS_SYS,
-        outputs: &PZMAP_OUTPUTS_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p,z] = pzmap(sys)",
-        inputs: &PZMAP_INPUTS_SYS,
-        outputs: &PZMAP_OUTPUTS_P_Z,
-    },
-];
-const PZMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:pzmap:InvalidArgument"),
-    when: "Inputs do not match supported pzmap invocation forms.",
-    message: "pzmap: invalid argument",
-};
-const PZMAP_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.INVALID_MODEL",
-    identifier: Some("RunMat:pzmap:InvalidModel"),
-    when: "Input system is not a valid SISO tf object.",
-    message: "pzmap: invalid model",
-};
-const PZMAP_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.UNSUPPORTED_MODEL",
-    identifier: Some("RunMat:pzmap:UnsupportedModel"),
-    when: "Model form is not supported by the current implementation.",
-    message: "pzmap: unsupported model",
-};
-const PZMAP_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.PLOT_FAILED",
-    identifier: Some("RunMat:pzmap:PlotFailed"),
-    when: "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
-    message: "pzmap: plotting failed",
-};
-const PZMAP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.INTERNAL",
-    identifier: Some("RunMat:pzmap:Internal"),
-    when: "Pole-zero extraction or output construction failed.",
-    message: "pzmap: internal error",
-};
-const PZMAP_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    PZMAP_ERROR_INVALID_ARGUMENT,
-    PZMAP_ERROR_INVALID_MODEL,
-    PZMAP_ERROR_UNSUPPORTED_MODEL,
-    PZMAP_ERROR_PLOT_FAILED,
-    PZMAP_ERROR_INTERNAL,
-];
-pub const PZMAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PZMAP_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PZMAP_ERRORS,
-};
-const PZMAP_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "sys",
-    classes: &[],
-    availability: BuiltinIntegerInputAvailability::Rejected,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "pzmap accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input.",
-}];
-pub const PZMAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[p,z] = pzmap(integer_sys)",
-        inputs: &PZMAP_INTEGER_SYS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Model coefficients have already crossed their constructor's model-numeric boundary.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::pzmap")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -156,20 +59,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "pzmap",
-    category = "control",
-    summary = "Plot or return poles and zeros of SISO transfer-function and state-space models.",
-    keywords = "pzmap,pole zero map,poles,zeros,control system,transfer function,state space,tf,ss",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(pzmap_type),
-    descriptor(crate::builtins::control::pzmap::PZMAP_DESCRIPTOR),
-    integer_capabilities(crate::builtins::control::pzmap::PZMAP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::pzmap"
 )]
-async fn pzmap_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pzmap_builtin(sys: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(pzmap_error(
+            "pzmap: too many output arguments",
+            &PZMAP_ERROR_INVALID_ARGUMENT,
+        ));
+    }
     if is_plot_form_call() {
         plot_pole_zero_map_statement(sys, rest).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     if !rest.is_empty() {
@@ -183,11 +85,11 @@ async fn pzmap_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             render_pole_zero_map(&eval, None, 0).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         return match out_count {
-            1 => Ok(Value::OutputList(vec![eval.poles_value()?])),
-            2 => Ok(Value::OutputList(eval.outputs()?)),
+            1 => Ok(Value::output_list(vec![eval.poles_value()?])),
+            2 => Ok(Value::output_list(eval.outputs()?)),
             _ => Err(pzmap_error(
                 "pzmap: too many output arguments",
                 &PZMAP_ERROR_INVALID_ARGUMENT,
@@ -204,11 +106,14 @@ fn is_plot_form_call() -> bool {
             && crate::output_count::current_output_count().is_none())
 }
 
-async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
+#[cfg(feature = "plot-core")]
+async fn plot_pole_zero_map_statement(
+    first_sys: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     for arg in rest {
-        let gathered = crate::dispatcher::gather_if_needed_async(&arg).await?;
-        if is_plot_style_arg(&gathered) {
+        if is_plot_style_arg(&arg) {
             if let Some((_, style)) = systems.last_mut() {
                 if style.is_some() {
                     return Err(pzmap_error(
@@ -216,12 +121,19 @@ async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> Bui
                         &PZMAP_ERROR_INVALID_ARGUMENT,
                     ));
                 }
-                *style = Some(gathered);
+                parse_line_style_args(
+                    std::slice::from_ref(&arg),
+                    &LineStyleParseOptions::generic(BUILTIN_NAME),
+                )
+                .map_err(|err| {
+                    pzmap_error(err.message().to_string(), &PZMAP_ERROR_INVALID_ARGUMENT)
+                })?;
+                *style = Some(arg);
                 continue;
             }
         }
-        if is_dynamic_model_object(&gathered) {
-            systems.push((gathered, None));
+        if is_dynamic_model_object(&arg) {
+            systems.push((arg, None));
             continue;
         }
         return Err(pzmap_error(
@@ -231,17 +143,31 @@ async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> Bui
     }
 
     let mut args = Vec::new();
+    let mut points = Vec::new();
     for (idx, (system, style)) in systems.into_iter().enumerate() {
         let eval = PoleZeroMap::from_value_async(system).await?;
         push_pole_zero_map_series(&mut args, &eval, style.as_ref(), idx)?;
+        points.extend(eval.poles.iter().chain(eval.zeros.iter()).copied());
     }
-    render_pole_zero_map_args(args).await
+    render_pole_zero_map_args(args).await?;
+    super::frame_complex_plane(&points, 0.15).await;
+    Ok(())
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn plot_pole_zero_map_statement(
+    _first_sys: Value,
+    _rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn is_dynamic_model_object(value: &Value) -> bool {
     matches!(value, Value::Object(object) if object.is_class(TF_CLASS) || object.is_class(SS_CLASS))
 }
 
+#[cfg(feature = "plot-core")]
 fn is_plot_style_arg(value: &Value) -> bool {
     matches!(
         value,
@@ -257,19 +183,18 @@ struct PoleZeroMap {
 
 impl PoleZeroMap {
     async fn from_value_async(value: Value) -> BuiltinResult<Self> {
-        let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
-        let model = match gathered {
+        let model = match value {
             Value::Object(object) if object.is_class(TF_CLASS) => {
-                TfModel::from_value(Value::Object(object), BUILTIN_NAME)?
+                TfModel::from_value_async(Value::Object(object), BUILTIN_NAME).await?
             }
             Value::Object(object) if object.is_class(SS_CLASS) => {
-                super::rlocus::ss_object_to_tf(&object).map_err(map_rlocus_ss_error)?
+                ss_object_to_tf_async(object, BUILTIN_NAME).await?
             }
             Value::Object(object) => {
                 return Err(pzmap_error(
                     format!(
                         "pzmap: unsupported model class '{}'; supported classes are tf and ss",
-                        object.class_name
+                        object.class_name()
                     ),
                     &PZMAP_ERROR_UNSUPPORTED_MODEL,
                 ));
@@ -281,7 +206,7 @@ impl PoleZeroMap {
                 ));
             }
         };
-        if model.input_delay.abs() > EPS || model.output_delay.abs() > EPS {
+        if model.input_delay != 0.0 || model.output_delay != 0.0 {
             return Err(pzmap_error(
                 "pzmap: transfer functions with input or output delays are not supported",
                 &PZMAP_ERROR_UNSUPPORTED_MODEL,
@@ -306,6 +231,7 @@ impl PoleZeroMap {
     }
 }
 
+#[cfg(feature = "plot-core")]
 async fn render_pole_zero_map(
     eval: &PoleZeroMap,
     style: Option<&Value>,
@@ -313,9 +239,27 @@ async fn render_pole_zero_map(
 ) -> BuiltinResult<()> {
     let mut args = Vec::new();
     push_pole_zero_map_series(&mut args, eval, style, series_index)?;
-    render_pole_zero_map_args(args).await
+    render_pole_zero_map_args(args).await?;
+    let points: Vec<Complex64> = eval
+        .poles
+        .iter()
+        .chain(eval.zeros.iter())
+        .copied()
+        .collect();
+    super::frame_complex_plane(&points, 0.15).await;
+    Ok(())
 }
 
+#[cfg(not(feature = "plot-core"))]
+async fn render_pole_zero_map(
+    _eval: &PoleZeroMap,
+    _style: Option<&Value>,
+    _series_index: usize,
+) -> BuiltinResult<()> {
+    Err(crate::plotting_hooks::unavailable_presentation())
+}
+
+#[cfg(feature = "plot-core")]
 fn push_pole_zero_map_series(
     args: &mut Vec<Value>,
     eval: &PoleZeroMap,
@@ -328,17 +272,21 @@ fn push_pole_zero_map_series(
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 async fn render_pole_zero_map_args(args: Vec<Value>) -> BuiltinResult<()> {
     if args.is_empty() {
         return Ok(());
     }
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if super::is_nonfatal_plot_setup_error(&err) {
+        if presentation_failed(&err) {
             return Ok(());
         }
-        return Err(pzmap_error(
-            format!("pzmap: plotting failed: {}", err.message()),
-            &PZMAP_ERROR_PLOT_FAILED,
+        return Err(with_render_cause(
+            pzmap_error(
+                format!("pzmap: plotting failed: {}", err.message()),
+                &PZMAP_ERROR_PLOT_FAILED,
+            ),
+            err,
         ));
     }
     let _ = crate::call_builtin_async("title", &[Value::from("Pole-Zero Map")]).await;
@@ -348,6 +296,7 @@ async fn render_pole_zero_map_args(args: Vec<Value>) -> BuiltinResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 fn push_marker_series(
     args: &mut Vec<Value>,
     values: &[Complex64],
@@ -372,6 +321,7 @@ fn push_marker_series(
     Ok(())
 }
 
+#[cfg(feature = "plot-core")]
 fn style_color(style: Option<&Value>, series_index: usize) -> BuiltinResult<glam::Vec4> {
     if let Some(style) = style {
         let parsed = parse_line_style_args(
@@ -386,6 +336,7 @@ fn style_color(style: Option<&Value>, series_index: usize) -> BuiltinResult<glam
     Ok(crate::builtins::plotting::state::line_color_for_series_index(series_index))
 }
 
+#[cfg(feature = "plot-core")]
 fn color_value(color: glam::Vec4) -> BuiltinResult<Value> {
     Tensor::new(
         vec![color.x as f64, color.y as f64, color.z as f64],
@@ -400,6 +351,7 @@ fn color_value(color: glam::Vec4) -> BuiltinResult<Value> {
     })
 }
 
+#[cfg(feature = "plot-core")]
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
     let rows = data.len();
     Tensor::new(data, vec![rows, 1])
@@ -416,17 +368,6 @@ fn map_model_error(err: RuntimeError) -> RuntimeError {
     pzmap_error(err.message().to_string(), &PZMAP_ERROR_INTERNAL)
 }
 
-fn map_rlocus_ss_error(err: RuntimeError) -> RuntimeError {
-    let message = err.message().replace("rlocus", BUILTIN_NAME);
-    let descriptor = match err.identifier() {
-        Some("RunMat:rlocus:UnsupportedModel") => &PZMAP_ERROR_UNSUPPORTED_MODEL,
-        Some("RunMat:rlocus:Internal") => &PZMAP_ERROR_INTERNAL,
-        Some("RunMat:rlocus:InvalidArgument") => &PZMAP_ERROR_INVALID_ARGUMENT,
-        _ => &PZMAP_ERROR_INVALID_MODEL,
-    };
-    pzmap_error(message, descriptor)
-}
-
 fn pzmap_error(message: impl Into<String>, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = crate::build_runtime_error(message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
@@ -439,8 +380,64 @@ fn pzmap_error(message: impl Into<String>, error: &'static BuiltinErrorDescripto
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::ObjectInstance;
 
-    fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn invalid_style_rejects_before_model_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let den = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &den).unwrap();
+            let mut model = ObjectInstance::new(TF_CLASS.to_string());
+            model.replace_property_unbounded("Numerator".into(), Value::Num(1.0));
+            model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident));
+            for name in ["Ts", "InputDelay", "OutputDelay"] {
+                model.replace_property_unbounded(name.into(), Value::Num(0.0));
+            }
+            provider.reset_telemetry();
+            let error = block_on(plot_pole_zero_map_statement(
+                Value::Object(model),
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                    "not-a-style",
+                )]),
+            ))
+            .expect_err("invalid style");
+            assert_eq!(error.identifier(), Some("RunMat:pzmap:InvalidArgument"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn unrelated_resident_property_is_not_downloaded_for_data_form() {
+        let unrelated = Tensor::new(vec![5.0, 6.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated)
+                    .expect("upload unrelated property");
+            let mut model = ObjectInstance::new(TF_CLASS.to_string());
+            model.replace_property_unbounded("Numerator".into(), Value::Num(2.0));
+            model.replace_property_unbounded("Denominator".into(), Value::Num(1.0));
+            model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            model.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+            provider.reset_telemetry();
+            let Value::OutputList(values) = block_on(pzmap_builtin(
+                Value::Object(model),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .expect("static gain") else {
+                panic!("expected two outputs");
+            };
+            assert_eq!(values.len(), 2);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    fn tf(num: Vec<f64>, den: Vec<f64>) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async(
             "tf",
             &[
@@ -451,12 +448,17 @@ mod tests {
         .expect("tf")
     }
 
-    fn ss(a: Value, b: Value, c: Value, d: Value) -> Value {
+    fn ss(a: Value, b: Value, c: Value, d: Value) -> crate::execution::RootedValue {
         block_on(crate::call_builtin_async("ss", &[a, b, c, d])).expect("ss")
     }
 
-    fn run_pzmap(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(pzmap_builtin(sys, rest))
+    fn run_pzmap(sys: crate::execution::RootedValue, rest: Vec<Value>) -> BuiltinResult<Value> {
+        sys.with_owned(|sys| {
+            block_on(pzmap_builtin(
+                sys,
+                crate::builtins::common::test_support::builtin_arguments(rest),
+            ))
+        })
     }
 
     fn tensor(value: &Value) -> &Tensor {
@@ -486,7 +488,7 @@ mod tests {
     #[test]
     fn two_output_call_returns_poles_and_zeros() {
         let sys = tf(vec![1.0, 3.0, 2.0], vec![1.0, 4.0]);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -494,11 +496,11 @@ mod tests {
         assert_eq!(outputs.len(), 2);
 
         let poles = tensor(&outputs[0]);
-        assert_eq!(poles.shape, vec![1, 1]);
+        assert_eq!(poles.shape(), &[1, 1]);
         assert!((poles.materialize_f64()[0] + 4.0).abs() < 1.0e-8);
 
         let zeros = tensor(&outputs[1]);
-        assert_eq!(zeros.shape, vec![2, 1]);
+        assert_eq!(zeros.shape(), &[2, 1]);
         assert!(zeros
             .materialize_f64()
             .iter()
@@ -512,7 +514,7 @@ mod tests {
     #[test]
     fn complex_poles_are_returned_as_complex_column() {
         let sys = tf(vec![1.0], vec![1.0, 0.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -520,7 +522,7 @@ mod tests {
         let Value::ComplexTensor(poles) = &outputs[0] else {
             panic!("expected complex poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -533,37 +535,44 @@ mod tests {
             .materialize_f64()
             .iter()
             .any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
-        assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
+        assert_eq!(tensor(&outputs[1]).shape(), &[0, 1]);
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_plots_without_error() {
         let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_accepts_multiple_systems() {
         let first = tf(vec![1.0], vec![1.0, 1.0]);
         let second = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
-        let result = run_pzmap(first, vec![second]).expect("pzmap");
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+        let result = run_pzmap(first, vec![second.value().clone()]).expect("pzmap");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_accepts_styles_per_system() {
         let _ = crate::builtins::plotting::clear_figure(None);
         let first = tf(vec![1.0, 2.0], vec![1.0, 3.0]);
         let second = tf(vec![1.0, 4.0], vec![1.0, 5.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
-        let result =
-            run_pzmap(first, vec![Value::from("r"), second, Value::from("b--")]).expect("pzmap");
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+        let result = run_pzmap(
+            first,
+            vec![Value::from("r"), second.value().clone(), Value::from("b--")],
+        )
+        .expect("pzmap");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn marker_series_pair_poles_and_zeros_with_same_color() {
         let eval = PoleZeroMap {
@@ -586,10 +595,11 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn statement_form_rejects_invalid_style_tokens() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let err = run_pzmap(sys, vec![Value::from("foo")]).expect_err("invalid style");
         assert!(err.message().contains("unrecognised style token"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_ARGUMENT.identifier);
@@ -603,19 +613,23 @@ mod tests {
             Value::Num(1.0),
             Value::Num(0.0),
         );
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
         };
         assert_eq!(outputs.len(), 2);
         assert_eq!(tensor(&outputs[0]).materialize_f64(), vec![-1.0]);
-        assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
+        assert_eq!(tensor(&outputs[1]).shape(), &[0, 1]);
     }
 
     #[test]
     fn non_model_input_uses_pzmap_invalid_model_identifier() {
-        let err = run_pzmap(Value::Num(1.0), Vec::new()).expect_err("should fail");
+        let err = run_pzmap(
+            crate::execution::RootedValue::new(Value::Num(1.0)).expect("scalar fixture"),
+            Vec::new(),
+        )
+        .expect_err("should fail");
         assert!(err.message().contains("expected a tf or ss object"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_MODEL.identifier);
     }
@@ -623,7 +637,7 @@ mod tests {
     #[test]
     fn output_form_rejects_extra_arguments() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let err = run_pzmap(sys, vec![Value::Num(1.0)]).expect_err("should fail");
         assert!(err.message().contains("exactly one system"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_ARGUMENT.identifier);
@@ -632,7 +646,7 @@ mod tests {
     #[test]
     fn too_many_outputs_are_rejected() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = run_pzmap(sys, Vec::new()).expect_err("should fail");
         assert!(err.message().contains("too many output arguments"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_ARGUMENT.identifier);

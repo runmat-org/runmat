@@ -1,42 +1,55 @@
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 use runmat_meshing_size::metric::{MetricFieldRequest, MetricTensor3};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
     validate_delaunay_volume_quality, DelaunayTetrahedronQuality, DelaunayVolumeNode,
     DelaunayVolumeProvenance, DelaunayVolumeQuality, DelaunayVolumeQualityError,
-    DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions, DelaunayVolumeSliverOptions,
-    DelaunayVolumeSliverRelocation, DelaunayVolumeTopology,
+    DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions, DelaunayVolumeTopology,
 };
 
+mod admission;
+mod batch;
 mod candidate;
+pub(in crate::cdt) mod context;
 mod insertion;
-mod iteration;
+pub(in crate::cdt) mod iteration;
+mod metric_circumcenter;
 mod validation;
 mod work;
+pub(in crate::cdt) mod working;
 
-use candidate::construct_candidate;
+use candidate::{construct_candidate, CandidateQueries};
 pub use insertion::{
     insert_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_step,
 };
 pub use iteration::{refine_delaunay_volume, validate_delaunay_volume_refinement};
 pub use validation::validate_delaunay_volume_refinement_candidate;
+use validation::validate_delaunay_volume_refinement_candidate_from_admitted_input;
 use work::CandidateWork;
 
-const CANDIDATE_IDENTITY_DOMAIN: &[u8] = b"runmat/meshing/cdt/volume-refinement-candidate/1\0";
+const CANDIDATE_IDENTITY_DOMAIN: &[u8] = b"runmat/meshing/cdt/volume-refinement-candidate/4\0";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayRefinementCandidateKind {
     MetricCircumcenter,
-    InteriorCentroid,
+    MetricOffcenter,
+    InteriorPoint,
+    /// Near-midpoint of the longest size-violating edge with an interior endpoint.
+    MetricEdgeMidpoint,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayVolumeRefinementCandidate {
     pub node: DelaunayVolumeNode,
     pub kind: DelaunayRefinementCandidateKind,
+    /// Oriented node identities of the tetrahedron from which the point was
+    /// constructed. This is the quality source for ordinary candidates and a
+    /// same-region neighbor for the numerical-sliver fallback.
+    pub construction_node_identities: [StableDigest; 4],
+    /// Index within the construction tetrahedron's canonical point family.
+    pub construction_point_index: u16,
     pub source_node_identities: [StableDigest; 4],
     pub region_id: PersistentEntityId,
     pub incident_metric_entity_ids: Vec<PersistentEntityId>,
@@ -51,15 +64,19 @@ pub struct DelaunayVolumeRefinementInput<'a> {
     pub provenance: &'a DelaunayVolumeProvenance,
     pub quality: &'a DelaunayVolumeQuality,
     pub quality_options: DelaunayVolumeQualityOptions,
+    /// Sorted identities of construction nodes that refinement must retain unchanged.
+    pub fixed_node_identities: &'a [StableDigest],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeRefinementCandidateOptions {
     pub maximum_candidate_evaluations: u64,
     pub cancellation_check_interval: u64,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeRefinementStepOptions {
     pub candidate: DelaunayVolumeRefinementCandidateOptions,
     pub insertion: super::DelaunayInsertionOptions,
@@ -73,6 +90,7 @@ pub struct DelaunayVolumeRefinementStep {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeRefinementStepErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidInput,
     InvalidCandidate,
@@ -89,10 +107,10 @@ pub struct DelaunayVolumeRefinementStepError {
     pub reason: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeRefinementOptions {
     pub step: DelaunayVolumeRefinementStepOptions,
-    pub sliver: DelaunayVolumeSliverOptions,
     pub maximum_insertions: u64,
 }
 
@@ -100,7 +118,6 @@ impl Default for DelaunayVolumeRefinementOptions {
     fn default() -> Self {
         Self {
             step: DelaunayVolumeRefinementStepOptions::default(),
-            sliver: DelaunayVolumeSliverOptions::default(),
             maximum_insertions: 10_000_000,
         }
     }
@@ -110,20 +127,8 @@ impl Default for DelaunayVolumeRefinementOptions {
 pub struct DelaunayVolumeRefinement {
     pub topology: DelaunayVolumeTopology,
     pub quality: DelaunayVolumeQuality,
-    /// Deterministic mutation order used to validate exact node lineage.
-    pub mutations: Vec<DelaunayVolumeRefinementMutation>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    content = "mutation",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-pub enum DelaunayVolumeRefinementMutation {
-    Inserted(DelaunayVolumeNode),
-    Relocated(DelaunayVolumeSliverRelocation),
+    /// Deterministic insertion order used to validate exact node lineage.
+    pub insertions: Vec<DelaunayVolumeNode>,
 }
 
 impl std::fmt::Display for DelaunayVolumeRefinementStepError {
@@ -141,7 +146,7 @@ impl std::error::Error for DelaunayVolumeRefinementStepError {}
 impl Default for DelaunayVolumeRefinementCandidateOptions {
     fn default() -> Self {
         Self {
-            maximum_candidate_evaluations: 2,
+            maximum_candidate_evaluations: 1_000_000,
             cancellation_check_interval: 1,
         }
     }
@@ -149,6 +154,7 @@ impl Default for DelaunayVolumeRefinementCandidateOptions {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeRefinementCandidateErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidTopology,
     InvalidQuality,
@@ -181,6 +187,20 @@ pub fn select_delaunay_volume_refinement_candidate(
     options: DelaunayVolumeRefinementCandidateOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Option<DelaunayVolumeRefinementCandidate>, DelaunayVolumeRefinementCandidateError> {
+    select_delaunay_volume_refinement_candidate_excluding(
+        input,
+        options,
+        &std::collections::BTreeSet::new(),
+        cancellation,
+    )
+}
+
+fn select_delaunay_volume_refinement_candidate_excluding(
+    input: DelaunayVolumeRefinementInput<'_>,
+    options: DelaunayVolumeRefinementCandidateOptions,
+    excluded_node_identities: &std::collections::BTreeSet<StableDigest>,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Option<DelaunayVolumeRefinementCandidate>, DelaunayVolumeRefinementCandidateError> {
     validate_options(options)?;
     validate_delaunay_volume_quality(
         input.topology,
@@ -191,38 +211,100 @@ pub fn select_delaunay_volume_refinement_candidate(
         cancellation,
     )
     .map_err(quality_error)?;
-    let Some(source_identity) = input.quality.worst_refinement_tetrahedron else {
+    if input.quality.worst_refinement_tetrahedron.is_none() {
         return Ok(None);
-    };
-    let source_index = input
+    }
+    let queries = CandidateQueries::new(input.topology, cancellation)?;
+    select_delaunay_volume_refinement_candidate_excluding_from_admitted_input(
+        input,
+        options,
+        excluded_node_identities,
+        cancellation,
+        &queries,
+    )
+}
+
+fn select_delaunay_volume_refinement_candidate_excluding_from_admitted_input(
+    input: DelaunayVolumeRefinementInput<'_>,
+    options: DelaunayVolumeRefinementCandidateOptions,
+    excluded_node_identities: &std::collections::BTreeSet<StableDigest>,
+    cancellation: &dyn MeshingCancellationSignal,
+    queries: &CandidateQueries,
+) -> Result<Option<DelaunayVolumeRefinementCandidate>, DelaunayVolumeRefinementCandidateError> {
+    if input.quality.worst_refinement_tetrahedron.is_none() {
+        return Ok(None);
+    }
+    let mut sources = input
         .quality
         .tetrahedra
         .iter()
-        .position(|tetrahedron| tetrahedron.node_identities == source_identity)
-        .ok_or_else(|| {
-            error(
-                DelaunayVolumeRefinementCandidateErrorKind::InvalidQuality,
-                "worst refinement identity is absent from quality evidence",
-            )
-        })?;
+        .filter(|quality| quality.requires_refinement())
+        .collect::<Vec<_>>();
+    sources.sort_by(|left, right| {
+        super::volume_quality::compare_violation_priority(
+            right.refinement_violation_ratio,
+            super::volume_quality::tetrahedron_geometry_key(input.topology, right.node_identities),
+            right.node_identities,
+            left.refinement_violation_ratio,
+            super::volume_quality::tetrahedron_geometry_key(input.topology, left.node_identities),
+            left.node_identities,
+        )
+    });
     let mut work = CandidateWork::new(options, cancellation);
-    let candidate = construct_candidate(
-        input.topology,
-        &input.quality.tetrahedra[source_index],
-        &mut work,
+    let mut selected = None;
+    let mut unavailable_source_count = 0usize;
+    let mut unavailable_reasons = Vec::new();
+    for source in sources {
+        match construct_candidate(
+            input.topology,
+            queries,
+            source,
+            input.quality_options,
+            input.fixed_node_identities,
+            excluded_node_identities,
+            &mut work,
+        ) {
+            Ok(candidate) => {
+                selected = Some(candidate);
+                break;
+            }
+            Err(failure)
+                if matches!(
+                    failure.kind,
+                    DelaunayVolumeRefinementCandidateErrorKind::NumericalFailure
+                        | DelaunayVolumeRefinementCandidateErrorKind::InvalidCandidate
+                ) =>
+            {
+                unavailable_source_count += 1;
+                if unavailable_reasons.len() < 4 {
+                    unavailable_reasons.push(failure.reason);
+                }
+            }
+            Err(failure) => return Err(failure),
+        }
+    }
+    if selected.is_none() && unavailable_source_count != 0 {
+        return Err(error(
+            DelaunayVolumeRefinementCandidateErrorKind::NumericalFailure,
+            format!(
+                "all {unavailable_source_count} violating tetrahedra exhausted their admissible refinement constructions; representative failures: {}",
+                unavailable_reasons.join(" | ")
+            ),
+        ));
+    }
+    validate_delaunay_volume_refinement_candidate_from_admitted_input(
+        input,
+        &selected,
+        options,
+        cancellation,
     )?;
-    let selected = Some(candidate);
-    validate_delaunay_volume_refinement_candidate(input, &selected, options, cancellation)?;
     Ok(selected)
 }
 
-/// Coordinates are deterministic derived evidence but not identity input: excluding their final
-/// floating-point rounding keeps the logical node stable across supported IEEE-754 hosts. The
-/// domain version must change if the construction algorithm changes.
 fn candidate_identity(
     source_node_identities: [StableDigest; 4],
     kind: DelaunayRefinementCandidateKind,
-    metric: MetricTensor3,
+    construction_point_index: u16,
 ) -> StableDigest {
     let mut source_node_identities = source_node_identities;
     source_node_identities.sort_unstable();
@@ -232,14 +314,12 @@ fn candidate_identity(
         hasher.update(identity.bytes());
     }
     hasher.update([match kind {
-        DelaunayRefinementCandidateKind::MetricCircumcenter => 1,
-        DelaunayRefinementCandidateKind::InteriorCentroid => 2,
+        DelaunayRefinementCandidateKind::MetricCircumcenter => 0,
+        DelaunayRefinementCandidateKind::MetricOffcenter => 1,
+        DelaunayRefinementCandidateKind::InteriorPoint => 2,
+        DelaunayRefinementCandidateKind::MetricEdgeMidpoint => 3,
     }]);
-    for value in [
-        metric.xx, metric.yy, metric.zz, metric.xy, metric.xz, metric.yz,
-    ] {
-        hasher.update(value.to_bits().to_be_bytes());
-    }
+    hasher.update(construction_point_index.to_be_bytes());
     StableDigest::from_bytes(hasher.finalize().into())
 }
 
@@ -257,6 +337,9 @@ fn validate_options(
 
 fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayVolumeRefinementCandidateError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementCandidateErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementCandidateErrorKind::InvalidOptions
         }

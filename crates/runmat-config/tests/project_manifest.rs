@@ -45,6 +45,310 @@ path = "src/main"
 }
 
 #[test]
+fn parses_strongly_typed_execution_profiles() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.engineering]
+cluster = "fea-production"
+queue = "cpu"
+trust-identity = "sha256:trusted-worker"
+[execution-profiles.engineering.accelerator]
+class = "metal"
+memory-bytes = 17179869184
+"#,
+    );
+
+    let loaded = load_project_manifest(&manifest_path).unwrap();
+    let profile = &loaded.execution_profiles["engineering"];
+    assert_eq!(profile.cluster, "fea-production");
+    assert_eq!(profile.queue.as_deref(), Some("cpu"));
+    assert_eq!(
+        profile.trust_identity.as_deref(),
+        Some("sha256:trusted-worker")
+    );
+    let accelerator = profile.accelerator.as_ref().unwrap();
+    assert_eq!(accelerator.class, "metal");
+    assert_eq!(accelerator.memory_bytes, 17_179_869_184);
+}
+
+#[test]
+fn rejects_malformed_execution_profile_routing() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.engineering]
+cluster = " "
+"#,
+    );
+
+    let error = load_project_manifest(&manifest_path).unwrap_err();
+    assert!(error.to_string().contains("execution profile cluster"));
+}
+
+#[test]
+fn rejects_unbounded_execution_profile_accelerator() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.gpu]
+cluster = "gpu-cluster"
+
+[execution-profiles.gpu.accelerator]
+class = "metal"
+memory-bytes = 0
+"#,
+    );
+    let error = load_project_manifest(&manifest_path).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("execution profile accelerator memory"));
+}
+
+#[test]
+fn validates_explicit_native_interface_artifacts() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("native")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(tmp.path().join("native/fixture.json"), "{}").unwrap();
+    fs::write(tmp.path().join("native/fixture.bin"), b"library").unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[native-interfaces.fixture]
+manifest = "native/fixture.json"
+library = "native/fixture.bin"
+"#,
+    );
+
+    let loaded = load_project_manifest(&manifest_path).expect("native interface should validate");
+    let interface = loaded.native_interfaces.get("fixture").unwrap();
+    assert_eq!(
+        interface.manifest,
+        std::path::Path::new("native/fixture.json")
+    );
+    assert_eq!(
+        interface.library,
+        std::path::Path::new("native/fixture.bin")
+    );
+}
+
+#[test]
+fn rejects_native_interface_paths_outside_the_package() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[native-interfaces.fixture]
+manifest = "../fixture.json"
+library = "/tmp/fixture.bin"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("must be project-relative")));
+}
+
+#[test]
+fn validates_explicit_mex_artifacts() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("mex")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(tmp.path().join("mex/fixture.mex.runmat.json"), "{}").unwrap();
+    fs::write(tmp.path().join("mex/fixture.mex"), b"module").unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[mex-artifacts.fixture]
+manifest = "mex/fixture.mex.runmat.json"
+module = "mex/fixture.mex"
+"#,
+    );
+
+    let loaded = load_project_manifest(&manifest_path).expect("MEX artifact should validate");
+    let artifact = loaded.mex_artifacts.get("fixture").unwrap();
+    assert_eq!(
+        artifact.manifest,
+        std::path::Path::new("mex/fixture.mex.runmat.json")
+    );
+    assert_eq!(artifact.module, std::path::Path::new("mex/fixture.mex"));
+}
+
+#[test]
+fn rejects_mex_artifact_paths_outside_the_package() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[mex-artifacts.fixture]
+manifest = "../fixture.json"
+module = "/tmp/fixture.mex"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert_eq!(
+        error
+            .messages
+            .iter()
+            .filter(|message| message.contains("must be project-relative"))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn validates_explicit_java_artifacts() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("lib")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(tmp.path().join("lib/fixture.jar"), b"jar").unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[java-artifacts.fixture]
+path = "lib/fixture.jar"
+"#,
+    );
+    let loaded = load_project_manifest(&manifest_path).expect("Java artifact should validate");
+    assert_eq!(
+        loaded.java_artifacts["fixture"].path,
+        std::path::Path::new("lib/fixture.jar")
+    );
+}
+
+#[test]
+fn rejects_java_artifact_paths_outside_the_package() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[java-artifacts.fixture]
+path = "../fixture.jar"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("must be project-relative")));
+}
+
+#[test]
+fn loads_project_relative_python_wheel_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("python")).unwrap();
+    std::fs::write(temp.path().join("python/fixture.whl"), b"wheel").unwrap();
+    let manifest_path = temp.path().join("runmat.toml");
+    std::fs::write(
+        &manifest_path,
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[python-artifacts.fixture]
+path = "python/fixture.whl"
+module = "fixture.tools"
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    let loaded = load_project_manifest(&manifest_path).expect("Python artifact should validate");
+    assert_eq!(loaded.python_artifacts["fixture"].module, "fixture.tools");
+}
+
+#[test]
+fn rejects_unsafe_python_artifact_declarations() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[python-artifacts.fixture]
+path = "../fixture.zip"
+module = "fixture-tools"
+"#,
+    )
+    .unwrap();
+    let error = parsed.validate(std::path::Path::new(".")).unwrap_err();
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("module `fixture-tools` is invalid")));
+    assert!(error
+        .messages
+        .iter()
+        .any(|message| message.contains("project-relative .whl")));
+}
+
+#[test]
 fn parses_manifest_with_runtime_section() {
     let parsed = parse_project_manifest_toml(
         r#"

@@ -17,7 +17,7 @@ impl Reporter for JsonReporter {
 
     fn finish(&mut self, result: &RunResult) -> RunnerResult<RenderedReport> {
         let bytes = serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "result": result,
             "events": self.events,
         }))

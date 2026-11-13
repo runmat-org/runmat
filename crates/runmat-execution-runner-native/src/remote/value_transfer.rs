@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use runmat_execution::identity::ValueId;
-use runmat_execution::value::{InlineValue, ValueLimits, ValuePayload, ValueRef};
+use runmat_execution::value::{
+    InlineValue, ValueLimits, ValuePayload, ValueRef, ValueTransportContext,
+};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -22,10 +24,13 @@ pub(super) fn decode_value(
     }
     let value: ValuePayload = serde_json::from_slice(encoded).map_err(protocol)?;
     value
-        .validate(ValueLimits {
-            max_inline_bytes: MAXIMUM_REMOTE_VALUE_BYTES,
-            ..ValueLimits::default()
-        })
+        .validate_for_transport(
+            ValueLimits {
+                max_inline_bytes: MAXIMUM_REMOTE_VALUE_BYTES,
+                ..ValueLimits::default()
+            },
+            ValueTransportContext::Portable,
+        )
         .map_err(protocol)?;
     if value.logical_digest().map_err(protocol)? != reference.logical_digest {
         return Err(protocol(
@@ -43,7 +48,7 @@ pub(super) fn collect_references(values: &[ValuePayload]) -> Vec<ValueRef> {
     references
 }
 
-pub(super) fn materialize(
+pub(crate) fn materialize(
     value: &ValuePayload,
     objects: &HashMap<ValueId, ValuePayload>,
 ) -> NativeExecutionResult<ValuePayload> {
@@ -53,8 +58,9 @@ pub(super) fn materialize(
 fn visit(value: &ValuePayload, references: &mut Vec<ValueRef>) {
     match value {
         ValuePayload::Object(reference) => references.push((**reference).clone()),
+        ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {}
         ValuePayload::Inline(value) => match value.as_ref() {
-            InlineValue::Cell { values, .. } | InlineValue::OutputList(values) => {
+            InlineValue::Cell { values, .. } => {
                 values.iter().for_each(|value| visit(value, references));
             }
             InlineValue::Struct(fields) => fields
@@ -97,7 +103,7 @@ fn materialize_inner(
         ValuePayload::Inline(inline) => {
             let mut inline = (**inline).clone();
             match &mut inline {
-                InlineValue::Cell { values, .. } | InlineValue::OutputList(values) => {
+                InlineValue::Cell { values, .. } => {
                     for value in values {
                         *value = materialize_inner(value, objects, active, depth + 1)?;
                     }
@@ -121,6 +127,7 @@ fn materialize_inner(
             }
             Ok(ValuePayload::Inline(Box::new(inline)))
         }
+        ValuePayload::Distributed(_) | ValuePayload::Composite(_) => Ok(value.clone()),
     }
 }
 

@@ -7,11 +7,17 @@ fn interior_star_quality_diagnostic_bins_candidate_quality() {
     let candidates = vec![
         ConstrainedCavityNode {
             node_id: 10,
-            coordinates_m: [0.25, 0.25, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 11,
-            coordinates_m: [3.0, 3.0, 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([3.0, 3.0, 3.0]),
         },
     ];
 

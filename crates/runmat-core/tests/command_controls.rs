@@ -496,7 +496,7 @@ fn clc_emits_clear_screen_control_stream() {
 }
 
 #[test]
-fn plotting_command_gap_repros_execute() {
+fn plotting_commands_require_an_explicit_rendering_service() {
     let _plot_guard = isolate_plot_test();
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
@@ -505,9 +505,14 @@ fn plotting_command_gap_repros_execute() {
         "figure; plot([1 2], [3 4]); axis off; axis on; axis manual; axis ij; axis xy; drawnow;",
     )
     .unwrap();
-    if let Some(error) = result.error {
-        assert_eq!(error.identifier(), Some("RunMat:plot:EngineError"));
-    }
+    let error = result
+        .error
+        .as_ref()
+        .expect("renderer-free Core refuses presentation");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:RuntimeContext:CapabilityUnavailable")
+    );
 }
 
 #[test]
@@ -529,7 +534,7 @@ fn debugger_compat_commands_execute_through_core() {
     let unlocked = runmat_core::execute_text_request_for_testing(&mut engine, "unlocked").unwrap();
     assert_eq!(unlocked.value.as_ref(), Some(&Value::Bool(false)));
     let status = runmat_core::execute_text_request_for_testing(&mut engine, "status").unwrap();
-    assert!(matches!(status.value.as_ref(), Some(Value::Cell(cell)) if cell.data.is_empty()));
+    assert!(matches!(status.value.as_ref(), Some(Value::Cell(cell)) if cell.data().is_empty()));
     let info = runmat_core::execute_text_request_for_testing(&mut engine, "info").unwrap();
     assert!(matches!(info.value.as_ref(), Some(Value::Struct(_))));
 
@@ -571,21 +576,16 @@ fn dbstack_reports_user_function_frame_through_core() {
         result.error
     );
     let frames = runmat_core::execute_text_request_for_testing(&mut engine, "frames").unwrap();
-    let Some(Value::Cell(cell)) = frames.value.as_ref() else {
-        panic!("dbstack should return a cell row of frame structs");
+    let (name, line) = match frames.value.as_ref() {
+        Some(Value::Struct(first)) => (first.fields.get("name"), first.fields.get("line")),
+        Some(Value::StructArray(array)) => {
+            let first = array.get_linear(0).expect("dbstack includes a frame");
+            (first.fields.get("name"), first.fields.get("line"))
+        }
+        other => panic!("dbstack should return a structure array, got {other:?}"),
     };
-    assert!(
-        !cell.data.is_empty(),
-        "dbstack should include at least one frame"
-    );
-    let Value::Struct(first) = &cell.data[0] else {
-        panic!("first frame should be a struct");
-    };
-    assert_eq!(
-        first.fields.get("name"),
-        Some(&Value::String("stack_probe".to_string()))
-    );
-    let Some(Value::Num(line)) = first.fields.get("line") else {
+    assert_eq!(name, Some(&Value::String("stack_probe".to_string().into())));
+    let Some(Value::Num(line)) = line else {
         panic!("first frame should include a numeric line");
     };
     assert!(

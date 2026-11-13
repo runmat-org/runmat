@@ -11,7 +11,8 @@ use crate::{
     fusion::{active_fusion, FusionKind},
     fusion_residency,
     placement::{
-        plan_local, LocalPlacementOutcome, LocalPlacementRequest, PlacementAttribute,
+        plan_local_vm_cpu_with_provider, LocalCpuAdmission, LocalCpuCandidate,
+        LocalPlacementOutcome, LocalPlacementRequest, LocalProviderAdmission, PlacementAttribute,
         PlacementEventKind, PlacementPolicy, PlacementTraceContext, PlacementVariant,
     },
     precision::ensure_provider_supports_dtype,
@@ -19,16 +20,16 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use futures::lock::Mutex as AsyncMutex;
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, HostTensorView, ProviderOperationFamily, ProviderPrecision,
-    ProviderRejectionCode, ProviderWorkload,
+    AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorView, ProviderOperationFamily,
+    ProviderPrecision, ProviderRejectionCode, ProviderWorkload,
 };
+use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult};
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_execution::{
-    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
-    EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    CandidatePreparationState, EstimateConfidence, EstimateSource, ExecutionCandidateKind,
     ExecutionCostComponents, ExecutionCostEstimate,
 };
 use runmat_runtime::builtins::common::{
@@ -39,13 +40,28 @@ use runmat_runtime::gather_if_needed_async;
 use runmat_value::{Tensor, Value};
 use serde::{Deserialize, Serialize};
 
+mod builtin_call;
+mod calibration_cleanup;
+mod calibration_identity;
+mod refresh;
+pub use calibration_identity::{CalibrationSource, CalibrationUnitPolicy};
+pub use refresh::refresh_auto_offload_calibration;
+mod host_route;
+mod state;
+mod original_work;
+pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
+pub use host_route::{
+    promote_binary_in_context, promote_builtin_binary_in_context, promote_builtin_unary_in_context,
+};
+pub use state::AutoOffloadHandle;
+
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
 const DEFAULT_CPU_REDUCTION_PER_ELEM: f64 = 1.2e-7;
 const DEFAULT_CPU_MATMUL_PER_FLOP: f64 = 2.5e-11;
 const SMALL_BATCH_DEFAULT_MAX_DIM: usize = 8;
 const SMALL_BATCH_DEFAULT_MIN_ELEMS: usize = 1_048_576;
 const DECISION_LOG_CAPACITY: usize = 128;
-const CALIBRATION_VERSION: u32 = 1;
+const CALIBRATION_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BinaryOp {
@@ -124,11 +140,11 @@ pub enum DecisionReason {
     FusionOverride,
     Residency,
     SmallBatchGuard,
-    ProfileModel,
     Threshold,
     Disabled,
     ProviderRejected,
     CostModel,
+    CostUnavailable,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +296,8 @@ static DECISION_LOG: Lazy<Mutex<DecisionLog>> = Lazy::new(|| Mutex::new(Decision
 static AUTO_STATE: OnceCell<Mutex<AutoOffloadState>> = OnceCell::new();
 
 fn record_decision(entry: AutoOffloadDecisionEntry) -> PlacementTraceContext {
+    #[cfg(test)]
+    tests::capture_decision(&entry);
     let trace = crate::placement::begin_trace(&entry.operation, None);
     let attributes = decision_attributes(&entry);
     trace.event(
@@ -351,11 +369,11 @@ fn decision_reason_token(reason: DecisionReason) -> &'static str {
         DecisionReason::FusionOverride => "legacy_fusion_override",
         DecisionReason::Residency => "legacy_residency",
         DecisionReason::SmallBatchGuard => "legacy_small_batch_guard",
-        DecisionReason::ProfileModel => "legacy_profile_model",
         DecisionReason::Threshold => "legacy_threshold",
         DecisionReason::Disabled => "legacy_disabled",
         DecisionReason::ProviderRejected => "provider_feasibility_rejected",
         DecisionReason::CostModel => "unified_cost_model",
+        DecisionReason::CostUnavailable => "comparison_cost_unavailable",
     }
 }
 
@@ -444,6 +462,12 @@ struct CalibrationSuiteSection {
 #[derive(Debug, Clone, Deserialize)]
 struct CalibrationSample {
     #[serde(default)]
+    schema_version: u32,
+    #[serde(default)]
+    precision: Option<ProviderPrecision>,
+    #[serde(default)]
+    unit_policy: Option<calibration_identity::CalibrationUnitPolicy>,
+    #[serde(default)]
     runs: usize,
     #[serde(default, rename = "cpu_time_ms")]
     cpu_time: CalibrationTimes,
@@ -486,7 +510,10 @@ struct CalibrationProviderInfo {
 
 #[derive(Debug, Serialize)]
 pub struct AutoOffloadCalibrationOutcome {
-    pub runs: usize,
+    pub schema_version: u32,
+    pub precision: ProviderPrecision,
+    pub runs: Option<usize>,
+    pub source: CalibrationSource,
     pub before: ThresholdSnapshot,
     pub after: ThresholdSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -587,32 +614,38 @@ pub fn apply_auto_offload_calibration_from_file(
         .ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let device_info = provider.device_info_struct();
 
-    if let Some(ref prov) = sample.provider {
-        if prov.name != device_info.name
-            || prov.vendor != device_info.vendor
-            || prov.backend.as_deref() != device_info.backend.as_deref()
-            || prov.device_id != device_info.device_id
-        {
-            warn!(
-                "Calibration provider mismatch: sample='{} ({})' device='{} ({})'",
-                prov.name, prov.vendor, device_info.name, device_info.vendor
-            );
-        }
-        if sample.provider_conflict {
-            warn!("Calibration sample reported provider conflict across cases");
-        }
-    }
-
-    let (mut cfg, _) = load_cached_thresholds(&device_info)
+    let (mut cfg, _) = load_cached_thresholds(&device_info, provider.precision())
         .unwrap_or_else(|| (ThresholdConfig::default(), PathBuf::new()));
     let before_cfg = cfg.clone();
+    if sample.unit_policy != Some(CalibrationUnitPolicy::OriginalScanMacV1) {
+        if commit {
+            return Err(anyhow!("residual telemetry is diagnostic, not original CPU calibration; use accel-calibrate --refresh to measure the current provider's authoritative templates"));
+        }
+        return Ok(AutoOffloadCalibrationOutcome {
+            schema_version: CALIBRATION_VERSION,
+            precision: provider.precision(),
+            runs: Some(sample.runs),
+            source: CalibrationSource::ResidualDiagnostic,
+            before: threshold_snapshot(&cfg),
+            after: threshold_snapshot(&cfg),
+            delta: None,
+            persisted_to: None,
+            provider: Some(cached_provider_info(&device_info)),
+            commit: false,
+        });
+    }
+    sample.require_current(&device_info, provider.precision())?;
 
     let delta = apply_calibration_sample(&mut cfg, &sample)
         .ok_or_else(|| anyhow!("calibration sample did not produce coefficient updates"))?;
 
     let mut persisted_to: Option<PathBuf> = None;
     if commit {
-        persisted_to = Some(persist_thresholds(&device_info, &cfg)?);
+        persisted_to = Some(persist_thresholds(
+            &device_info,
+            &cfg,
+            provider.precision(),
+        )?);
     }
 
     if let Some(state_mutex) = AUTO_STATE.get() {
@@ -631,7 +664,10 @@ pub fn apply_auto_offload_calibration_from_file(
     }
 
     Ok(AutoOffloadCalibrationOutcome {
-        runs: sample.runs,
+        schema_version: CALIBRATION_VERSION,
+        precision: provider.precision(),
+        runs: Some(sample.runs),
+        source: CalibrationSource::ImportedOriginalTemplates,
         before: threshold_snapshot(&before_cfg),
         after: threshold_snapshot(&cfg),
         delta: Some(delta),
@@ -659,56 +695,34 @@ fn cpu_estimate(per_unit: f64, units: usize) -> Option<f64> {
 }
 
 fn seconds_to_ns(seconds: f64) -> Option<u64> {
+    // Preserve a known positive stage below clock granularity as one tick,
+    // rather than round it into a claimed zero-cost nonempty operation.
     milliseconds_to_nanoseconds(seconds * 1_000.0)
+        .map(|ns| if seconds > 0.0 { ns.max(1) } else { ns })
 }
 
 fn ns_to_seconds(nanoseconds: u64) -> f64 {
     nanoseconds as f64 / 1_000_000_000.0
 }
 
-fn provider_prior(evaluation: &DecisionEvaluation) -> ExecutionCostEstimate {
-    let cpu_ns = evaluation
-        .cpu_secs
-        .and_then(seconds_to_ns)
-        .unwrap_or(u64::MAX / 4);
-    let modeled_execution = evaluation.gpu_secs.and_then(seconds_to_ns);
-    let execution_ns = modeled_execution.unwrap_or_else(|| {
-        if evaluation.recommend_gpu {
-            cpu_ns.saturating_mul(3) / 4
-        } else {
-            cpu_ns.saturating_mul(5) / 4
-        }
-    });
-    ExecutionCostEstimate {
-        components: ExecutionCostComponents {
-            allocation_ns: 5_000,
-            queue_ns: 10_000,
-            execution_ns,
-            ..ExecutionCostComponents::default()
-        },
-        scratch_bytes: 0,
-        confidence: if modeled_execution.is_some() {
-            EstimateConfidence::Medium
-        } else {
-            EstimateConfidence::Prior
-        },
-        source: if modeled_execution.is_some() {
-            EstimateSource::Calibration
-        } else {
-            EstimateSource::StaticPrior
-        },
-    }
-}
-
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
-        Value::Tensor(t) => Some(&t.shape),
-        Value::GpuTensor(handle) => Some(&handle.shape),
+        Value::Int(_) | Value::Num(_) | Value::Complex(_, _) | Value::Bool(_) => Some(&[1, 1]),
+        Value::Tensor(t) => Some(t.shape()),
+        Value::ComplexTensor(t) => Some(t.shape()),
+        Value::LogicalArray(array) => Some(&array.shape),
+        Value::CharArray(array) => Some(array.shape()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
     }
 }
 
 fn batch_dimension_from_value(value: &Value) -> Option<usize> {
+    // Geometry is not numeric admission. Preserve the existing batch heuristic
+    // boundary when other admitted callers borrow logical/complex/text shapes.
+    if !matches!(value, Value::Tensor(_) | Value::GpuTensor(_)) {
+        return None;
+    }
     let shape = value_shape(value)?;
     if shape.len() < 3 {
         return None;
@@ -754,9 +768,7 @@ pub struct NativeAutoOffload {
     enabled: bool,
 }
 
-static GLOBAL: OnceCell<Option<NativeAutoOffload>> = OnceCell::new();
 static GLOBAL_INIT_LOCK: Lazy<AsyncMutex<()>> = Lazy::new(|| AsyncMutex::new(()));
-static PROFILE_MODEL: OnceCell<Option<ProfileCostModel>> = OnceCell::new();
 
 fn env_bool(key: &str) -> Option<bool> {
     env::var(key).ok().and_then(|v| parse_bool(&v))
@@ -790,7 +802,7 @@ fn update_cpu_cost(slot: &mut f64, candidate: f64) {
 fn value_len(value: &Value) -> Option<usize> {
     match value {
         Value::Tensor(t) => Some(tensor_element_len(t)),
-        Value::GpuTensor(handle) => Some(handle.shape.iter().product()),
+        Value::GpuTensor(handle) => Some(handle.shape().iter().product()),
         Value::Num(_) | Value::Bool(_) | Value::Int(_) => Some(1),
         Value::Complex(_, _) => Some(1),
         _ => None,
@@ -841,44 +853,35 @@ fn record_provider_rejection(
     }
 }
 
-pub async fn global() -> Option<&'static NativeAutoOffload> {
+pub async fn global() -> Option<AutoOffloadHandle> {
     if !auto_enabled() {
         return None;
     }
     let active_provider = runmat_accelerate_api::provider()?;
-    if let Some(existing) = GLOBAL.get() {
-        return existing
-            .as_ref()
-            .filter(|offload| std::ptr::eq(offload.provider, active_provider));
+    if let Some(existing) = state::cached() {
+        return existing.filter(|offload| {
+            runmat_accelerate_api::same_provider_instance(offload.provider, active_provider)
+        });
     }
-    // If auto-offload is disabled or there is no GPU provider registered,
-    // initialize_async() would return None immediately (no I/O, no blocking).
-    // Return None directly without acquiring the async lock so single-poll
-    // callers (e.g. the turbine JIT interpreter fallback) never observe a
-    // spurious Pending.  We intentionally do NOT write to GLOBAL here: doing
-    // so without holding GLOBAL_INIT_LOCK would race with a concurrent thread
-    // that is partway through initialize_async() and has found a valid
-    // provider.  That thread's subsequent GLOBAL.set(Some(offload)) would
-    // silently fail (OnceCell is set-once), permanently disabling the
-    // accelerator for the lifetime of the process.  These two checks are
-    // cheap (no I/O), so re-evaluating them on each call is acceptable.
+    // The early checks above must not cache an absent provider. Initialization
+    // can suspend while another caller registers one. Serialize initialization
+    // and retain configuration in the same process/worker scope as its provider.
     let _guard = GLOBAL_INIT_LOCK.lock().await;
-    if let Some(existing) = GLOBAL.get() {
-        return existing
-            .as_ref()
-            .filter(|offload| std::ptr::eq(offload.provider, active_provider));
+    if let Some(existing) = state::cached() {
+        return existing.filter(|offload| {
+            runmat_accelerate_api::same_provider_instance(offload.provider, active_provider)
+        });
     }
-    let initialized = initialize_async().await;
-    let _ = GLOBAL.set(initialized);
-    GLOBAL.get().and_then(|value| value.as_ref())
+    let initialized = initialize_async(active_provider).await;
+    state::initialize(initialized);
+    state::cached().flatten()
 }
 
-async fn initialize_async() -> Option<NativeAutoOffload> {
+async fn initialize_async(provider: &'static dyn AccelProvider) -> Option<NativeAutoOffload> {
     if !auto_enabled() {
         clear_decisions();
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
     let device_info = provider.device_info_struct();
     let mut config = ThresholdConfig::default();
     let mut base_source = ThresholdBase::BuiltInDefault;
@@ -887,7 +890,9 @@ async fn initialize_async() -> Option<NativeAutoOffload> {
     let refresh_calibration = calibrate_refresh_enabled();
 
     if !refresh_calibration {
-        if let Some((cached, path)) = load_cached_thresholds_async(&device_info).await {
+        if let Some((cached, path)) =
+            load_cached_thresholds_async(&device_info, provider.precision()).await
+        {
             info!(
                 "Native auto-offload: loaded cached calibration for '{}' from {}",
                 device_info.name, path
@@ -905,7 +910,7 @@ async fn initialize_async() -> Option<NativeAutoOffload> {
             Ok(()) => {
                 calibrate_duration_ms = Some(start.elapsed().as_millis());
                 base_source = ThresholdBase::Calibrated;
-                match persist_thresholds_async(&device_info, &config).await {
+                match persist_thresholds_async(&device_info, &config, provider.precision()).await {
                     Ok(path) => {
                         cache_path = Some(path.clone());
                         info!(
@@ -925,11 +930,7 @@ async fn initialize_async() -> Option<NativeAutoOffload> {
     }
 
     let env_overrides_applied = apply_env_overrides(&mut config);
-    let model_status = if profile_cost_model().is_some() {
-        "profile"
-    } else {
-        "fallback"
-    };
+    let model_status = "canonical-placement-session; cold-priors";
     info!(
         "Native auto-offload thresholds: unary={} binary={} reduction={} matmul_flops={} small_batch_dim={} small_batch_min_elems={} (model: {}, source: {}, env_overrides={})",
         config.unary_min_elems,
@@ -974,7 +975,17 @@ impl NativeAutoOffload {
         value: &Value,
         threshold: usize,
         trace: Option<&PlacementTraceContext>,
-    ) -> Result<Value> {
+    ) -> ProviderExecutionResult<Value> {
+        self.promote_tensor_protecting(value, threshold, trace, &[])
+    }
+
+    fn promote_tensor_protecting(
+        &self,
+        value: &Value,
+        threshold: usize,
+        trace: Option<&PlacementTraceContext>,
+        protected: &[&GpuTensorHandle],
+    ) -> ProviderExecutionResult<Value> {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
@@ -996,7 +1007,7 @@ impl NativeAutoOffload {
                         )
                     });
                     let started = Instant::now();
-                    match self.tensor_to_gpu(t) {
+                    match self.tensor_to_gpu(t, protected) {
                         Ok(value) => {
                             if let Some(trace) = trace {
                                 trace.event(
@@ -1012,7 +1023,7 @@ impl NativeAutoOffload {
                             }
                             Ok(value)
                         }
-                        Err(error) if t.integer_storage().is_some() => {
+                        Err(error) if t.integer_storage().is_some() && error.is_unsupported() => {
                             if let Some(trace) = trace {
                                 trace.event(
                                     PlacementEventKind::Fallback,
@@ -1050,11 +1061,20 @@ impl NativeAutoOffload {
         }
     }
 
-    fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
-        let mut handle =
-            runmat_runtime::builtins::common::gpu_helpers::upload_tensor(self.provider, tensor)
-                .map_err(|error| anyhow!(error))?;
-        runmat_accelerate_api::mark_handle_automatic(&mut handle);
+    fn tensor_to_gpu(
+        &self,
+        tensor: &Tensor,
+        protected: &[&GpuTensorHandle],
+    ) -> ProviderExecutionResult<Value> {
+        let handle = runmat_runtime::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+            self.provider,
+            tensor,
+            protected,
+        )
+        .map_err(ProviderExecutionError::from_source)?;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .map_err(ProviderExecutionError::from_source)?;
         Ok(Value::GpuTensor(handle))
     }
 
@@ -1075,7 +1095,12 @@ impl NativeAutoOffload {
             && elements >= thresholds.small_batch_min_elems
     }
 
-    fn promote_binary(&self, op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
+    fn promote_binary(
+        &self,
+        op: BinaryOp,
+        a: &Value,
+        b: &Value,
+    ) -> ProviderExecutionResult<(Value, Value)> {
         if !self.enabled {
             return Ok((a.clone(), b.clone()));
         }
@@ -1092,7 +1117,7 @@ impl NativeAutoOffload {
                         elements: u64::try_from(elems).ok(),
                         ..ProviderWorkload::default()
                     },
-                );
+                )?;
                 let trace =
                     record_decision(decision_entry("elementwise", Some(elems), None, &eval));
                 record_provider_rejection(&trace, rejection);
@@ -1113,8 +1138,11 @@ impl NativeAutoOffload {
                     if ca != rb {
                         return Ok((a.clone(), b.clone()));
                     }
-                    let flops = ra.saturating_mul(ca).saturating_mul(cb);
-                    let eval = self.evaluate_matmul(flops);
+                    let Some(flops) = ra.checked_mul(ca).and_then(|n| n.checked_mul(cb)) else {
+                        return Ok((a.clone(), b.clone()));
+                    };
+                    let mut eval = self.evaluate_matmul(flops);
+                    eval.cpu_secs = original_work::matrix(self, ra, ca, cb);
                     let (eval, rejection) = self.enforce_provider_feasibility(
                         eval,
                         "legacy.matmul",
@@ -1124,7 +1152,7 @@ impl NativeAutoOffload {
                             flops: u64::try_from(flops).ok(),
                             ..ProviderWorkload::default()
                         },
-                    );
+                    )?;
                     let trace = record_decision(decision_entry("matmul", None, Some(flops), &eval));
                     record_provider_rejection(&trace, rejection);
                     if eval.recommend_gpu {
@@ -1151,7 +1179,7 @@ impl NativeAutoOffload {
         }
     }
 
-    fn promote_unary(&self, op: UnaryOp, v: &Value) -> Result<Value> {
+    fn promote_unary(&self, op: UnaryOp, v: &Value) -> ProviderExecutionResult<Value> {
         if !self.enabled {
             return Ok(v.clone());
         }
@@ -1170,7 +1198,7 @@ impl NativeAutoOffload {
                 elements: u64::try_from(elems).ok(),
                 ..ProviderWorkload::default()
             },
-        );
+        )?;
         let trace = record_decision(decision_entry(op_label, Some(elems), None, &eval));
         record_provider_rejection(&trace, rejection);
         if eval.recommend_gpu {
@@ -1184,7 +1212,11 @@ impl NativeAutoOffload {
         }
     }
 
-    fn promote_reduction(&self, _op: ReductionOp, args: &[Value]) -> Result<Vec<Value>> {
+    fn promote_reduction(
+        &self,
+        _op: ReductionOp,
+        args: &[Value],
+    ) -> ProviderExecutionResult<Vec<Value>> {
         if !self.enabled || args.is_empty() {
             return Ok(args.to_vec());
         }
@@ -1199,7 +1231,7 @@ impl NativeAutoOffload {
                 elements: u64::try_from(elems).ok(),
                 ..ProviderWorkload::default()
             },
-        );
+        )?;
         let trace = record_decision(decision_entry("reduction", Some(elems), None, &eval));
         record_provider_rejection(&trace, rejection);
         if !eval.recommend_gpu {
@@ -1222,83 +1254,199 @@ impl NativeAutoOffload {
 
     fn enforce_provider_feasibility(
         &self,
-        mut evaluation: DecisionEvaluation,
+        evaluation: DecisionEvaluation,
         operation: &'static str,
         family: ProviderOperationFamily,
         values: &[&Value],
         workload: ProviderWorkload,
-    ) -> (DecisionEvaluation, Option<ProviderRejectionCode>) {
-        let cpu_cost = ExecutionCostEstimate {
-            components: ExecutionCostComponents {
-                execution_ns: evaluation
-                    .cpu_secs
-                    .and_then(seconds_to_ns)
-                    .unwrap_or(u64::MAX),
-                ..ExecutionCostComponents::default()
-            },
-            scratch_bytes: 0,
-            confidence: EstimateConfidence::Low,
-            source: EstimateSource::StaticPrior,
-        };
-        let cpu = ExecutionCandidateDescriptor {
-            identity: format!("cpu.shared.{operation}"),
-            region: None,
-            kind: ExecutionCandidateKind::SharedRuntime,
-            execution_location: CandidateExecutionLocation::Host,
-            preparation: CandidatePreparationState::Ready,
-            cost: cpu_cost,
-            output_residency: CandidateOutputResidency::Host,
-            guards: Vec::new(),
-        };
+    ) -> ProviderExecutionResult<(DecisionEvaluation, Option<ProviderRejectionCode>)> {
+        let (evaluation, rejection, _) = self.plan_operation(
+            evaluation,
+            operation,
+            family,
+            values,
+            workload,
+            Default::default(),
+        )?;
+        Ok((evaluation, rejection))
+    }
+
+    fn plan_operation(
+        &self,
+        mut evaluation: DecisionEvaluation,
+        operation: &str,
+        family: ProviderOperationFamily,
+        values: &[&Value],
+        workload: ProviderWorkload,
+        planning: builtin_call::observation::BuiltinPlanningContext<'_>,
+    ) -> ProviderExecutionResult<(
+        DecisionEvaluation,
+        Option<ProviderRejectionCode>,
+        builtin_call::observation::BuiltinObservationPlan,
+    )> {
+        let host = planning.host;
+        let cpu_cost = evaluation
+            .cpu_secs
+            .and_then(seconds_to_ns)
+            .map(|cpu_ns| ExecutionCostEstimate {
+                components: ExecutionCostComponents {
+                    execution_ns: cpu_ns,
+                    ..ExecutionCostComponents::default()
+                },
+                scratch_bytes: Some(host.map_or(0, |(resources, _)| resources.scratch_bytes)),
+                confidence: EstimateConfidence::Low,
+                source: EstimateSource::StaticPrior,
+            })
+            .map_or(
+                runmat_execution::CandidateCostEvidence::Unavailable(
+                    runmat_execution::CandidateCostUnavailable::NoEstimate,
+                ),
+                runmat_execution::CandidateCostEvidence::Estimated,
+            );
+        let mut cpu = LocalCpuCandidate::host(format!("cpu.shared.{operation}"), cpu_cost);
+        if let Some((host, _)) = host {
+            cpu = cpu.with_presentation(host.presentation.clone());
+        }
         let provider_kind = match family {
             ProviderOperationFamily::MatrixMultiply => ExecutionCandidateKind::ProviderLibrary,
             _ if evaluation.fusion_kind.is_some() => ExecutionCandidateKind::ProviderFusion,
             _ => ExecutionCandidateKind::ProviderOperation,
         };
-        let provider_fallback = provider_prior(&evaluation);
-        match plan_local(
-            self.provider,
-            LocalPlacementRequest {
-                operation,
-                family,
-                provider_kind,
-                inputs: values,
-                outputs: Vec::new(),
-                workload,
-                preparation: CandidatePreparationState::Warm,
-                cpu,
-                provider_fallback,
-                required_download_bytes: 0,
-                downstream_materialization: false,
-                compare_profitability: true,
-                runtime: None,
+        let provider_fallback = runmat_execution::CandidateCostEvidence::Unavailable(
+            runmat_execution::CandidateCostUnavailable::NoEstimate,
+        );
+        let sum_preparation_unknown = workload.sum.is_some();
+        // These are the operation's data leaves, never unrelated controls.
+        // Synchronous callers have no admitted resident-to-host route. The
+        // async preparation owner may supply exact private readback evidence;
+        // VM-certified overlays already arrive here as host values.
+        let cpu_admission = if let Some((host, _)) = host {
+            LocalCpuAdmission::ExactReadbacks {
+                resources: Box::new(host.resources),
+                download_bytes: host.download_bytes,
+                readback_count: host.readback_count,
+            }
+        } else if values
+            .iter()
+            .any(|value| runmat_runtime::dispatcher::value_contains_gpu(value))
+        {
+            LocalCpuAdmission::Unavailable
+        } else {
+            LocalCpuAdmission::Legacy
+        };
+        let original_cast_decline = matches!(&cpu_admission, LocalCpuAdmission::Unavailable)
+            && planning.source_decline == crate::placement::LocalSourceDecline::PlainFloatingCast;
+        Ok(
+            match plan_local_vm_cpu_with_provider(
+                self.provider,
+                LocalPlacementRequest {
+                    compound: planning.compound,
+                    operation,
+                    semantic_identity: host.map(|(_, identity)| identity),
+                    observation_contract: if planning.prepared_authority.is_some() {
+                        crate::placement::TotalCandidateObservationContract::FullCall
+                    } else {
+                        crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
+                    },
+                    prepared_authority: planning.prepared_authority,
+                    source_decline: planning.source_decline,
+                    family,
+                    provider_kind,
+                    inputs: values,
+                    outputs: Vec::new(),
+                    workload,
+                    preparation: if sum_preparation_unknown {
+                        // No exact cache snapshot for the ordinary sum's kernel
+                        // inventory yet; charging Warm would assert an unseen hit.
+                        CandidatePreparationState::Cold
+                    } else {
+                        CandidatePreparationState::Warm
+                    },
+                    preparation_program: planning.preparation_program,
+                    shader_requirements: None,
+                    cpu,
+                    provider_fallback,
+                    required_upload_bytes: None,
+                    required_download_bytes: 0,
+                    downstream_materialization: false,
+                    compare_profitability: true,
+                    runtime: planning.runtime,
+                },
+                PlacementPolicy::default(),
+                None,
+                None,
+                cpu_admission,
+                LocalProviderAdmission::Available,
+            ) {
+                Ok(LocalPlacementOutcome::ProviderRejected {
+                    code,
+                    cpu_cost,
+                    feedback,
+                }) => {
+                    evaluation.recommend_gpu = false;
+                    evaluation.reason = DecisionReason::ProviderRejected;
+                    evaluation.cpu_secs = cpu_cost
+                        .estimate()
+                        .and_then(|cost| cost.checked_total_ns())
+                        .map(ns_to_seconds);
+                    (
+                        evaluation,
+                        Some(code),
+                        builtin_call::observation::BuiltinObservationPlan {
+                            feedback,
+                            source_declined: original_cast_decline,
+                            ..Default::default()
+                        },
+                    )
+                }
+                Ok(LocalPlacementOutcome::Selected {
+                    selected,
+                    cpu_cost,
+                    provider_cost,
+                    provider_rejection,
+                    decision_kind,
+                    predicted_total_ns,
+                    feedback,
+                    provider_query,
+                    provider_observation,
+                    ..
+                }) => {
+                    evaluation.recommend_gpu = selected.kind.is_provider();
+                    evaluation.reason = if provider_rejection.is_some() {
+                        DecisionReason::ProviderRejected
+                    } else if decision_kind == runmat_execution::WholeWorkDecisionKind::Compared {
+                        DecisionReason::CostModel
+                    } else {
+                        DecisionReason::CostUnavailable
+                    };
+                    evaluation.cpu_secs = cpu_cost
+                        .estimate()
+                        .and_then(|cost| cost.checked_total_ns())
+                        .map(ns_to_seconds);
+                    evaluation.gpu_secs = if selected.kind.is_provider() {
+                        predicted_total_ns
+                    } else {
+                        provider_cost.and_then(|cost| cost.checked_total_ns())
+                    }
+                    .map(ns_to_seconds);
+                    (
+                        evaluation,
+                        provider_rejection,
+                        builtin_call::observation::BuiltinObservationPlan {
+                            feedback,
+                            provider_query: Some(provider_query),
+                            provider_observation,
+                            source_declined: false,
+                        },
+                    )
+                }
+                Err(error) => {
+                    let mut error = *error;
+                    error.gpu_gather_retry = runmat_runtime::GpuGatherRetry::Never;
+                    return Err(ProviderExecutionError::from_source(error).with_unproven_effects());
+                }
             },
-            PlacementPolicy::default(),
-        ) {
-            Ok(LocalPlacementOutcome::ProviderRejected { code, cpu_cost }) => {
-                evaluation.recommend_gpu = false;
-                evaluation.reason = DecisionReason::ProviderRejected;
-                evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
-                (evaluation, Some(code))
-            }
-            Ok(LocalPlacementOutcome::Selected {
-                selected,
-                cpu_cost,
-                provider_cost,
-                feedback: _,
-            }) => {
-                evaluation.recommend_gpu = selected.kind.is_provider();
-                evaluation.reason = DecisionReason::CostModel;
-                evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
-                evaluation.gpu_secs = provider_cost.checked_total_ns().map(ns_to_seconds);
-                (evaluation, None)
-            }
-            Err(_) => {
-                evaluation.recommend_gpu = false;
-                evaluation.reason = DecisionReason::Disabled;
-                (evaluation, None)
-            }
-        }
+        )
     }
 
     fn evaluate_elementwise(&self, elements: usize, values: &[&Value]) -> DecisionEvaluation {
@@ -1349,23 +1497,6 @@ impl NativeAutoOffload {
             };
         }
 
-        if let Some(model) = profile_cost_model() {
-            if let Some(gpu_duration) = model.estimate_elemwise(elements) {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.binary_min_elems),
-                    fusion_kind,
-                    batch,
-                };
-            }
-        }
-
         DecisionEvaluation {
             recommend_gpu: elements >= self.thresholds.binary_min_elems,
             reason: DecisionReason::Threshold,
@@ -1379,22 +1510,6 @@ impl NativeAutoOffload {
 
     fn evaluate_matmul(&self, flops: usize) -> DecisionEvaluation {
         let cpu_secs = cpu_estimate(self.thresholds.cpu_matmul_per_flop, flops);
-        if let Some(model) = profile_cost_model() {
-            if let Some(gpu_duration) = model.estimate_matmul_flops(flops) {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.matmul_min_flops),
-                    fusion_kind: None,
-                    batch: None,
-                };
-            }
-        }
 
         DecisionEvaluation {
             recommend_gpu: flops >= self.thresholds.matmul_min_flops,
@@ -1409,23 +1524,12 @@ impl NativeAutoOffload {
 
     fn evaluate_reduction(&self, elements: usize) -> DecisionEvaluation {
         let fusion_kind = active_fusion().map(|f| f.kind.clone());
-        let cpu_secs = cpu_estimate(self.thresholds.cpu_reduction_per_elem, elements);
-        if let Some(model) = profile_cost_model() {
-            if let Some(gpu_duration) = model.estimate_reduction(elements) {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.reduction_min_elems),
-                    fusion_kind,
-                    batch: None,
-                };
-            }
-        }
+        // Input cardinality alone cannot tell whether an empty reduction
+        // produces empty output or a nonempty fill. Admitted Sum supplies its
+        // checked publication geometry; unadmitted legacy calls stay ordinary.
+        let cpu_secs = (elements != 0)
+            .then(|| cpu_estimate(self.thresholds.cpu_reduction_per_elem, elements))
+            .flatten();
 
         DecisionEvaluation {
             recommend_gpu: elements >= self.thresholds.reduction_min_elems,
@@ -1466,26 +1570,6 @@ impl NativeAutoOffload {
         }
 
         let cpu_secs = cpu_estimate(self.thresholds.cpu_elem_per_elem, elements);
-        if let Some(model) = profile_cost_model() {
-            let gpu_duration = match op {
-                UnaryOp::Transpose => model.estimate_transpose(elements),
-                UnaryOp::Generic => model.estimate_elemwise(elements),
-            };
-            if let Some(gpu_duration) = gpu_duration {
-                let gpu_secs = Some(gpu_duration.as_secs_f64());
-                let cpu = cpu_secs.unwrap_or(f64::INFINITY);
-                let recommend = gpu_duration.as_secs_f64() * 0.95 < cpu;
-                return DecisionEvaluation {
-                    recommend_gpu: recommend,
-                    reason: DecisionReason::ProfileModel,
-                    cpu_secs,
-                    gpu_secs,
-                    threshold: Some(self.thresholds.unary_min_elems),
-                    fusion_kind,
-                    batch,
-                };
-            }
-        }
 
         DecisionEvaluation {
             recommend_gpu: elements >= self.thresholds.unary_min_elems,
@@ -1497,116 +1581,14 @@ impl NativeAutoOffload {
             batch,
         }
     }
-
-    async fn prepare_builtin(&self, name: &str, args: &[Value]) -> Result<Vec<Value>> {
-        if !self.enabled {
-            return Ok(args.to_vec());
-        }
-        // Do not attempt to promote 'double' on providers that cannot store f64.
-        // Offloading a cast to double requires device-side f64; otherwise keep host.
-        if name.eq_ignore_ascii_case("double")
-            && self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64
-        {
-            return Ok(args.to_vec());
-        }
-        if let Some(policy) = builtin_policy(name) {
-            if policy.is_sink {
-                clear_sink_inputs(args);
-                if should_gather_sink_args(name) {
-                    trace!(
-                        "auto-offload: prepare_builtin(name={:?}) is_sink=true residency=GatherImmediately -> gathering {} arg(s)",
-                        name,
-                        args.len()
-                    );
-                    return gather_args(args).await;
-                }
-                trace!(
-                    "auto-offload: prepare_builtin(name={:?}) is_sink=true residency!=GatherImmediately -> no gather (fusion barrier only)",
-                    name
-                );
-                return Ok(args.to_vec());
-            }
-
-            let mut processed = args.to_vec();
-
-            if policy
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::Reduction))
-            {
-                if (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
-                    && !max_or_min_reduction_call(args)
-                {
-                    trace!(
-                        "Skipping reduction promotion for builtin '{}' (detected elementwise form)",
-                        name
-                    );
-                } else {
-                    log_promotion(|| format!("Promoting builtin '{}' as reduction", name));
-                    return self.promote_reduction(reduction_op_hint(name), args);
-                }
-            }
-
-            if policy
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::MatMul))
-                && processed.len() >= 2
-            {
-                log_promotion(|| format!("Promoting builtin '{}' as matmul", name));
-                let (a_p, b_p) =
-                    self.promote_binary(BinaryOp::MatMul, &processed[0], &processed[1])?;
-                processed[0] = a_p;
-                processed[1] = b_p;
-                return Ok(processed);
-            }
-
-            if policy
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::Elementwise))
-                && processed.len() >= 2
-            {
-                log_promotion(|| format!("Promoting builtin '{}' as elementwise", name));
-                let (a_p, b_p) =
-                    self.promote_binary(BinaryOp::Elementwise, &processed[0], &processed[1])?;
-                processed[0] = a_p;
-                processed[1] = b_p;
-                return Ok(processed);
-            }
-
-            if let Some(first) = processed.first_mut() {
-                if policy
-                    .accel_tags
-                    .iter()
-                    .any(|tag| matches!(tag, AccelTag::Transpose))
-                {
-                    log_promotion(|| format!("Promoting builtin '{}' as transpose", name));
-                    *first = self.promote_unary(UnaryOp::Transpose, first)?;
-                    return Ok(processed);
-                }
-
-                if policy
-                    .accel_tags
-                    .iter()
-                    .any(|tag| matches!(tag, AccelTag::Unary))
-                {
-                    log_promotion(|| format!("Promoting builtin '{}' as unary", name));
-                    *first = self.promote_unary(UnaryOp::Generic, first)?;
-                    return Ok(processed);
-                }
-            }
-        }
-        Ok(args.to_vec())
-    }
 }
 
 fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
     match value {
         Value::Tensor(t) => Some((t.rows(), t.cols())),
         Value::GpuTensor(handle) => {
-            if handle.shape.len() == 2 {
-                Some((handle.shape[0], handle.shape[1]))
+            if handle.shape().len() == 2 {
+                Some((handle.shape()[0], handle.shape()[1]))
             } else {
                 None
             }
@@ -1615,20 +1597,9 @@ fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
     }
 }
 
-#[allow(dead_code)]
 fn should_skip_reduction_promotion(name: &str, args: &[Value]) -> bool {
     (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
         && !max_or_min_reduction_call(args)
-}
-
-fn reduction_op_hint(name: &str) -> ReductionOp {
-    if name.eq_ignore_ascii_case("max") {
-        ReductionOp::Max
-    } else if name.eq_ignore_ascii_case("min") {
-        ReductionOp::Min
-    } else {
-        ReductionOp::Sum
-    }
 }
 
 fn max_or_min_reduction_call(args: &[Value]) -> bool {
@@ -1642,24 +1613,24 @@ fn is_empty_placeholder_value(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::StringArray(sa) => sa.data.is_empty(),
-        Value::CharArray(ca) => ca.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::String(s) => s.is_empty(),
+        Value::StringArray(sa) => sa.data().is_empty(),
+        Value::CharArray(ca) => ca.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
+        Value::String(_) => false,
         _ => false,
     }
 }
 
-async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
+async fn gather_args(args: &[Value]) -> ProviderExecutionResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for (idx, value) in args.iter().enumerate() {
         if let Value::GpuTensor(handle) = value {
             trace!(
                 "auto-offload: gather_args arg[{}]=GpuTensor device_id={} buffer_id={} shape={:?}",
                 idx,
-                handle.device_id,
-                handle.buffer_id,
-                handle.shape
+                handle.device_id(),
+                handle.buffer_id(),
+                handle.shape()
             );
         } else {
             trace!(
@@ -1670,7 +1641,7 @@ async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
         }
         let gathered = gather_if_needed_async(value)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .map_err(ProviderExecutionError::from_source)?;
         trace!(
             "auto-offload: gather_args arg[{}] -> {:?}",
             idx,
@@ -1679,14 +1650,6 @@ async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
         out.push(gathered);
     }
     Ok(out)
-}
-
-fn clear_sink_inputs(args: &[Value]) {
-    for value in args {
-        if let Value::GpuTensor(handle) = value {
-            fusion_residency::clear(handle);
-        }
-    }
 }
 
 fn should_gather_sink_args(name: &str) -> bool {
@@ -1712,13 +1675,14 @@ fn value_kind(value: &Value) -> &'static str {
         Value::SymbolicArray(_) => "SymbolicArray",
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
+        Value::StructArray(_) => "StructArray",
         Value::ObjectArray(_) => "ObjectArray",
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_) => "FunctionHandle",
-        Value::BoundFunctionHandle { .. } => "FunctionHandle",
+        Value::BoundFunctionHandle(_) | Value::ScopedFunctionHandle(_) => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::Complex(_, _) => "Complex",
@@ -1730,18 +1694,59 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Task(_) => "Task",
         Value::Pool(_) => "Pool",
         Value::Job(_) => "Job",
+        Value::Distributed(_) => "Distributed",
+        Value::Composite(_) => "Composite",
         Value::Foreign(_) => "Foreign",
     }
 }
 
 #[cfg(test)]
+#[path = "native_auto/upload_tests.rs"]
+mod upload_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_accelerate_api::test_support::TestAllocationOwner;
     use runmat_accelerate_api::{
         GpuTensorHandle, HostNumericDataOwned, NumericElementType, ProviderCostEstimate,
         ProviderCostQuery, ProviderFeasibility, ProviderFeasibilityQuery, ProviderResourceEstimate,
     };
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::OnceLock;
+
+    thread_local! {
+        // These promotion APIs execute synchronously. Capture only the caller's
+        // invocation; the public diagnostic log remains process-wide.
+        static CAPTURED_DECISIONS: RefCell<Option<Vec<AutoOffloadDecisionEntry>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn capture_decision(entry: &AutoOffloadDecisionEntry) {
+        CAPTURED_DECISIONS.with(|captured| {
+            if let Some(entries) = captured.borrow_mut().as_mut() {
+                entries.push(entry.clone());
+            }
+        });
+    }
+
+    fn capture_promotion<T>(body: impl FnOnce() -> T) -> (T, Vec<AutoOffloadDecisionEntry>) {
+        struct CaptureGuard;
+        impl Drop for CaptureGuard {
+            fn drop(&mut self) {
+                CAPTURED_DECISIONS.with(|captured| *captured.borrow_mut() = None);
+            }
+        }
+        CAPTURED_DECISIONS.with(|captured| {
+            let mut captured = captured.borrow_mut();
+            assert!(captured.is_none(), "promotion capture must not be nested");
+            *captured = Some(Vec::new());
+        });
+        let _guard = CaptureGuard;
+        let result = body();
+        let entries = CAPTURED_DECISIONS.with(|captured| captured.borrow_mut().take().unwrap());
+        (result, entries)
+    }
 
     struct RejectingProvider {
         uploads: AtomicUsize,
@@ -1765,10 +1770,6 @@ mod tests {
             Box::pin(async { Err(anyhow!("unused")) })
         }
 
-        fn free(&self, _handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "rejecting-test-provider".to_string()
         }
@@ -1780,21 +1781,27 @@ mod tests {
 
     struct CostedProvider {
         uploads: AtomicUsize,
-        next_buffer: AtomicU64,
+        owner: OnceLock<TestAllocationOwner>,
+        quote: bool,
+    }
+
+    impl CostedProvider {
+        fn owner(&self) -> &TestAllocationOwner {
+            self.owner.get_or_init(TestAllocationOwner::new)
+        }
     }
 
     impl AccelProvider for CostedProvider {
         fn upload(&self, host: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
             self.uploads.fetch_add(1, Ordering::Relaxed);
-            Ok(GpuTensorHandle::new(
-                host.shape.to_vec(),
-                self.device_id(),
-                self.next_buffer.fetch_add(1, Ordering::Relaxed),
-            )
-            .with_numeric_descriptor(
-                NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            ))
+            Ok(self
+                .owner()
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: HostNumericDataOwned::F64(host.data.to_vec()),
+                    shape: host.shape.to_vec(),
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })?
+                .handle)
         }
 
         fn download<'a>(
@@ -1804,23 +1811,32 @@ mod tests {
             Box::pin(async { Err(anyhow!("unused")) })
         }
 
-        fn free(&self, _handle: &GpuTensorHandle) -> Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "costed-test-provider".to_string()
         }
 
         fn device_id(&self) -> u32 {
-            71
+            self.owner().device_id()
         }
 
-        fn query_feasibility(&self, _query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
-            ProviderFeasibility::supported(ProviderResourceEstimate::default())
+        fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
+            ProviderFeasibility::supported(ProviderResourceEstimate {
+                output_bytes: Some(
+                    query
+                        .workload
+                        .elements
+                        .expect("fixture element count")
+                        .checked_mul(8)
+                        .expect("F64 fixture output bytes"),
+                ),
+                ..Default::default()
+            })
         }
 
         fn estimate_cost(&self, query: &ProviderCostQuery) -> Option<ProviderCostEstimate> {
+            if !self.quote {
+                return None;
+            }
             Some(ProviderCostEstimate {
                 cost: ExecutionCostEstimate {
                     components: ExecutionCostComponents {
@@ -1828,7 +1844,7 @@ mod tests {
                         execution_ns: 1,
                         ..ExecutionCostComponents::default()
                     },
-                    scratch_bytes: 0,
+                    scratch_bytes: Some(0),
                     confidence: EstimateConfidence::Exact,
                     source: EstimateSource::Provider,
                 },
@@ -1838,8 +1854,89 @@ mod tests {
 
     static COSTED_PROVIDER: CostedProvider = CostedProvider {
         uploads: AtomicUsize::new(0),
-        next_buffer: AtomicU64::new(1),
+        owner: OnceLock::new(),
+        quote: true,
     };
+
+    static UNQUOTED_PROVIDER: CostedProvider = CostedProvider {
+        uploads: AtomicUsize::new(0),
+        owner: OnceLock::new(),
+        quote: false,
+    };
+
+    #[test]
+    fn missing_provider_quotes_ignore_threshold_prices_and_preserve_explicit_intent() {
+        for threshold in [1, usize::MAX] {
+            for cpu_price in [DEFAULT_CPU_ELEM_PER_ELEM, f64::NAN] {
+                let auto = NativeAutoOffload::new(
+                    &UNQUOTED_PROVIDER,
+                    ThresholdConfig {
+                        binary_min_elems: threshold,
+                        cpu_elem_per_elem: cpu_price,
+                        ..ThresholdConfig::default()
+                    },
+                );
+                let tensor = Value::Tensor(Tensor::new(vec![1.; 8], vec![1, 8]).unwrap());
+                let ((left, right), decisions) = capture_promotion(|| {
+                    auto.promote_binary(BinaryOp::Elementwise, &tensor, &tensor)
+                        .unwrap()
+                });
+                assert!(matches!(left, Value::Tensor(_)) && matches!(right, Value::Tensor(_)));
+                assert_eq!(decisions[0].reason, DecisionReason::CostUnavailable);
+                assert!(decisions[0].gpu_estimate_ms.is_none());
+                assert_eq!(
+                    decisions[0].cpu_estimate_ms.is_some(),
+                    cpu_price.is_finite()
+                );
+
+                let allocation = UNQUOTED_PROVIDER
+                    .owner()
+                    .allocate_zeroed(
+                        vec![1, 8],
+                        NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap();
+                let explicit = allocation
+                    .handle
+                    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                    .unwrap();
+                let value = Value::GpuTensor(explicit.clone());
+                let (result, decisions) = capture_promotion(|| {
+                    auto.promote_binary(BinaryOp::Elementwise, &value, &value)
+                });
+                // This promotion-only fixture declares no transactional body
+                // capability. Explicit intent cannot turn that absence into a
+                // legal execution by returning unchanged GPU operands.
+                let error =
+                    result.expect_err("mandatory resident route requires physical admission");
+                let mut cause: &(dyn std::error::Error + 'static) = &error;
+                let original = loop {
+                    if let Some(runtime) = cause.downcast_ref::<runmat_runtime::RuntimeError>() {
+                        break runtime;
+                    }
+                    cause = cause
+                        .source()
+                        .expect("original typed planning failure retained");
+                };
+                assert_eq!(
+                    original.identifier(),
+                    Some("RunMat:Placement:NoLegalCandidate")
+                );
+                assert_eq!(
+                    original.gpu_gather_retry,
+                    runmat_runtime::GpuGatherRetry::Never
+                );
+                assert!(
+                    decisions.is_empty(),
+                    "no Disabled/success decision disguises refusal"
+                );
+                assert!(runmat_accelerate_api::handle_is_explicit(&explicit));
+                explicit.allocation_lease().validate_live().unwrap();
+            }
+        }
+        assert_eq!(UNQUOTED_PROVIDER.uploads.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn max_detection_handles_placeholders() {
@@ -1881,7 +1978,7 @@ mod tests {
                 .data,
             HostNumericDataOwned::U64(vec![1_u64 << 63, u64::MAX])
         );
-        provider.free(&handle).expect("free integer handle");
+        drop(handle);
 
         let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).expect("single tensor");
         let promoted = auto
@@ -1894,50 +1991,137 @@ mod tests {
             .expect("native single download");
         assert_eq!(downloaded.data.element_type(), NumericElementType::F32);
         assert_eq!(downloaded.data, HostNumericDataOwned::F32(vec![1.25, -2.5]));
-        provider.free(&handle).expect("free single handle");
+        drop(handle);
     }
 
     #[test]
-    fn complete_cost_keeps_transfer_dominated_work_on_cpu() {
-        clear_decisions();
+    fn quoted_nontransactional_provider_keeps_legal_host_work_without_upload() {
         COSTED_PROVIDER.uploads.store(0, Ordering::Relaxed);
         let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
         let tensor = Value::Tensor(Tensor::new(vec![1.0; 128], vec![1, 128]).unwrap());
-        let _ = auto
-            .promote_binary(BinaryOp::Elementwise, &tensor, &tensor)
-            .unwrap();
+        let ((left, right), decisions) = capture_promotion(|| {
+            auto.promote_binary(BinaryOp::Elementwise, &tensor, &tensor)
+                .unwrap()
+        });
+        assert!(matches!(left, Value::Tensor(_)) && matches!(right, Value::Tensor(_)));
         assert_eq!(COSTED_PROVIDER.uploads.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            snapshot_decisions().last().map(|entry| entry.decision),
-            Some(AutoOffloadDisposition::Cpu)
-        );
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].operation, "elementwise");
+        assert_eq!(decisions[0].decision, AutoOffloadDisposition::Cpu);
+        assert_eq!(decisions[0].reason, DecisionReason::CostUnavailable);
     }
 
     #[test]
-    fn complete_cost_keeps_a_profitable_resident_chain_on_provider() {
-        clear_decisions();
-        let left = GpuTensorHandle::new(vec![1, 128], COSTED_PROVIDER.device_id(), 10_001)
-            .with_numeric_descriptor(
+    fn decision_capture_unwinds_without_leaking_into_the_next_invocation() {
+        assert!(std::panic::catch_unwind(|| {
+            capture_promotion(|| panic!("interrupted test invocation"));
+        })
+        .is_err());
+        let ((), decisions) = capture_promotion(|| ());
+        assert!(decisions.is_empty());
+    }
+
+    #[test]
+    fn quoted_nontransactional_resident_route_is_rejected_without_retiring_inputs() {
+        let left = COSTED_PROVIDER
+            .owner()
+            .allocate_zeroed(
+                vec![1, 128],
                 NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-        let right = GpuTensorHandle::new(vec![1, 128], COSTED_PROVIDER.device_id(), 10_002)
-            .with_numeric_descriptor(
-                NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-        let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
-        let _ = auto
-            .promote_binary(
-                BinaryOp::Elementwise,
-                &Value::GpuTensor(left),
-                &Value::GpuTensor(right),
             )
             .unwrap();
+        let right = COSTED_PROVIDER
+            .owner()
+            .allocate_zeroed(
+                vec![1, 128],
+                NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let left_weak = left.handle.downgrade();
+        let right_weak = right.handle.downgrade();
+        let left_probe = left.probe;
+        let right_probe = right.probe;
+        let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
+        let left = Value::GpuTensor(left.handle);
+        let right = Value::GpuTensor(right.handle);
+        let (result, decisions) =
+            capture_promotion(|| auto.promote_binary(BinaryOp::Elementwise, &left, &right));
+        let error = result.expect_err("a quote does not prove transactional execution");
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        let original = loop {
+            if let Some(runtime) = cause.downcast_ref::<runmat_runtime::RuntimeError>() {
+                break runtime;
+            }
+            cause = cause
+                .source()
+                .expect("original typed planning failure retained");
+        };
         assert_eq!(
-            snapshot_decisions().last().map(|entry| entry.decision),
-            Some(AutoOffloadDisposition::Gpu)
+            original.identifier(),
+            Some("RunMat:Placement:NoLegalCandidate")
         );
+        assert_eq!(
+            original.gpu_gather_retry,
+            runmat_runtime::GpuGatherRetry::Never
+        );
+        assert!(
+            matches!(left, Value::GpuTensor(ref handle) if handle.shares_allocation_with(&left_weak.acquire().unwrap()))
+        );
+        assert!(
+            matches!(right, Value::GpuTensor(ref handle) if handle.shares_allocation_with(&right_weak.acquire().unwrap()))
+        );
+        assert!(decisions.is_empty());
+        assert_eq!(left_probe.retirements(), 0);
+        assert_eq!(right_probe.retirements(), 0);
+        drop((left, right));
+        assert_eq!(left_probe.retirements(), 1);
+        assert_eq!(right_probe.retirements(), 1);
+    }
+
+    #[test]
+    fn selected_elementwise_builtin_retains_resident_inputs_for_its_async_owner() {
+        use runmat_accelerate_api::GpuHandleProvenance;
+
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        for provenance in [
+            GpuHandleProvenance::Automatic,
+            GpuHandleProvenance::Explicit,
+        ] {
+            let allocation = COSTED_PROVIDER
+                .owner()
+                .allocate_zeroed(
+                    vec![1, 2],
+                    NumericElementType::F32,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            let input = allocation.handle.with_provenance(provenance).unwrap();
+            let original = Value::GpuTensor(input.clone());
+            let (result, decisions) = capture_promotion(|| {
+                futures::executor::block_on(promote_builtin_binary_in_context(
+                    &runtime,
+                    BinaryOp::Elementwise,
+                    &original,
+                    &Value::Num(2.0),
+                ))
+                .expect("selected builtin owns the exact resident route")
+            });
+            let (returned, scalar) = result;
+            let Value::GpuTensor(returned) = returned else {
+                panic!("automatic promotion must not materialize the builtin input");
+            };
+            assert!(returned.shares_allocation_with(&input));
+            assert_eq!(
+                runmat_accelerate_api::handle_provenance(&returned),
+                Some(provenance)
+            );
+            assert!(matches!(scalar, Value::Num(2.0)));
+            assert!(decisions.is_empty(), "no generic route may be selected");
+        }
     }
 
     #[test]
@@ -1966,7 +2150,7 @@ mod tests {
 
     #[test]
     fn feasibility_rejection_prevents_provider_execution_and_is_observable() {
-        crate::placement::reset();
+        let _recorder = crate::placement::ScopedRecorder::new();
         REJECTING_PROVIDER.uploads.store(0, Ordering::Relaxed);
         let thresholds = ThresholdConfig {
             binary_min_elems: 1,
@@ -1983,7 +2167,12 @@ mod tests {
         assert!(matches!(right, Value::Tensor(_)));
         assert_eq!(REJECTING_PROVIDER.uploads.load(Ordering::Relaxed), 0);
         let report = crate::placement::report();
-        let trace = report.traces.last().expect("placement trace");
+        assert_eq!(
+            report.traces.len(),
+            1,
+            "this invocation owns exactly one trace"
+        );
+        let trace = &report.traces[0];
         assert!(trace.events.iter().any(|event| {
             event.kind == PlacementEventKind::Fallback
                 && event.reason.as_deref() == Some("provider_operation_unsupported")
@@ -2019,7 +2208,10 @@ fn builtin_policy(name: &str) -> Option<BuiltinPolicy> {
     map.get(&name.to_ascii_lowercase()).copied()
 }
 
-fn auto_enabled() -> bool {
+pub(crate) fn auto_enabled() -> bool {
+    if let Some(policy) = runmat_runtime::context::current_acceleration_policy() {
+        return policy.automatic_offload_enabled();
+    }
     if let Some(flag) = env_bool("RUNMAT_ACCEL_AUTO_OFFLOAD") {
         return flag;
     }
@@ -2027,6 +2219,9 @@ fn auto_enabled() -> bool {
 }
 
 fn calibrate_enabled() -> bool {
+    if let Some(policy) = runmat_runtime::context::current_acceleration_policy() {
+        return policy.calibrate;
+    }
     if let Some(flag) = env_bool("RUNMAT_ACCEL_CALIBRATE") {
         return flag;
     }
@@ -2034,6 +2229,11 @@ fn calibrate_enabled() -> bool {
 }
 
 fn calibrate_refresh_enabled() -> bool {
+    if runmat_runtime::context::current_acceleration_policy().is_some() {
+        // A resolved host/worker policy must not acquire a second ambient
+        // calibration authority while the invocation is running.
+        return false;
+    }
     env_bool("RUNMAT_ACCEL_CALIBRATE_REFRESH").unwrap_or(false)
 }
 
@@ -2082,6 +2282,7 @@ struct CalibrationRecord {
     recorded_at: u64,
     provider: CalibrationProviderDetails,
     thresholds: ThresholdConfig,
+    precision: ProviderPrecision,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2093,21 +2294,27 @@ struct CalibrationProviderDetails {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn calibration_cache_key(info: &ApiDeviceInfo) -> String {
+fn calibration_cache_key(info: &ApiDeviceInfo, precision: ProviderPrecision) -> String {
     let vendor = slugify(&info.vendor);
     let name = slugify(&info.name);
     let backend = slugify(info.backend.as_deref().unwrap_or("unknown"));
-    format!("{}-{}-{}-{}.json", vendor, name, backend, info.device_id)
+    format!(
+        "v2-{}-{}-{}-{}-{:?}.json",
+        vendor, name, backend, info.device_id, precision
+    )
 }
 
-async fn load_cached_thresholds_async(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, String)> {
+async fn load_cached_thresholds_async(
+    info: &ApiDeviceInfo,
+    precision: ProviderPrecision,
+) -> Option<(ThresholdConfig, String)> {
     #[cfg(target_arch = "wasm32")]
     {
-        let key = calibration_cache_key(info);
+        let key = calibration_cache_key(info, precision);
         let contents = crate::web_auto_offload_store::load(&key).await?;
         match serde_json::from_str::<CalibrationRecord>(&contents) {
             Ok(record) => {
-                if record.version != CALIBRATION_VERSION {
+                if !record.matches(info, precision) {
                     debug!(
                         "Native auto-offload calibration cache version mismatch (found {}, expected {})",
                         record.version,
@@ -2129,15 +2336,20 @@ async fn load_cached_thresholds_async(info: &ApiDeviceInfo) -> Option<(Threshold
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        load_cached_thresholds(info).map(|(cfg, path)| (cfg, path.display().to_string()))
+        load_cached_thresholds(info, precision).map(|(cfg, path)| (cfg, path.display().to_string()))
     }
 }
 
-async fn persist_thresholds_async(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<String> {
+async fn persist_thresholds_async(
+    info: &ApiDeviceInfo,
+    cfg: &ThresholdConfig,
+    precision: ProviderPrecision,
+) -> Result<String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let key = calibration_cache_key(info);
+        let key = calibration_cache_key(info, precision);
         let record = CalibrationRecord {
+            precision,
             version: CALIBRATION_VERSION,
             recorded_at: system_time_now()
                 .duration_since(UNIX_EPOCH)
@@ -2159,16 +2371,19 @@ async fn persist_thresholds_async(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        persist_thresholds(info, cfg).map(|path| path.display().to_string())
+        persist_thresholds(info, cfg, precision).map(|path| path.display().to_string())
     }
 }
 
-fn load_cached_thresholds(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, PathBuf)> {
-    let path = calibration_cache_file(info)?;
+fn load_cached_thresholds(
+    info: &ApiDeviceInfo,
+    precision: ProviderPrecision,
+) -> Option<(ThresholdConfig, PathBuf)> {
+    let path = calibration_cache_file(info, precision)?;
     let contents = fs::read_to_string(&path).ok()?;
     match serde_json::from_str::<CalibrationRecord>(&contents) {
         Ok(record) => {
-            if record.version != CALIBRATION_VERSION {
+            if !record.matches(info, precision) {
                 debug!(
                     "Native auto-offload calibration cache version mismatch (found {}, expected {})",
                     record.version,
@@ -2189,13 +2404,18 @@ fn load_cached_thresholds(info: &ApiDeviceInfo) -> Option<(ThresholdConfig, Path
     }
 }
 
-fn persist_thresholds(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<PathBuf> {
-    let path = calibration_cache_file(info)
+fn persist_thresholds(
+    info: &ApiDeviceInfo,
+    cfg: &ThresholdConfig,
+    precision: ProviderPrecision,
+) -> Result<PathBuf> {
+    let path = calibration_cache_file(info, precision)
         .ok_or_else(|| anyhow!("unable to determine calibration cache directory"))?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| anyhow!(e.to_string()))?;
     }
     let record = CalibrationRecord {
+        precision,
         version: CALIBRATION_VERSION,
         recorded_at: system_time_now()
             .duration_since(UNIX_EPOCH)
@@ -2214,12 +2434,15 @@ fn persist_thresholds(info: &ApiDeviceInfo, cfg: &ThresholdConfig) -> Result<Pat
     Ok(path)
 }
 
-fn calibration_cache_file(info: &ApiDeviceInfo) -> Option<PathBuf> {
+fn calibration_cache_file(info: &ApiDeviceInfo, precision: ProviderPrecision) -> Option<PathBuf> {
     let mut dir = calibration_cache_dir()?;
     let vendor = slugify(&info.vendor);
     let name = slugify(&info.name);
     let backend = slugify(info.backend.as_deref().unwrap_or("unknown"));
-    let file = format!("{}-{}-{}-{}.json", vendor, name, backend, info.device_id);
+    let file = format!(
+        "v2-{}-{}-{}-{}-{:?}.json",
+        vendor, name, backend, info.device_id, precision
+    );
     dir.push(file);
     Some(dir)
 }
@@ -2251,7 +2474,7 @@ fn slugify(input: &str) -> String {
 async fn auto_calibrate(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Result<()> {
+) -> ProviderExecutionResult<()> {
     if let Some(elem_threshold) = calibrate_elemwise(provider, cfg).await.transpose()? {
         if elem_threshold != usize::MAX {
             cfg.binary_min_elems = elem_threshold;
@@ -2274,7 +2497,7 @@ async fn auto_calibrate(
 async fn calibrate_elemwise(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Option<Result<usize>> {
+) -> Option<ProviderExecutionResult<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
         match compare_elemwise(provider, size, &mut cfg.cpu_elem_per_elem).await {
@@ -2291,7 +2514,7 @@ async fn compare_elemwise(
     provider: &'static dyn AccelProvider,
     elements: usize,
     cpu_cost_slot: &mut f64,
-) -> Result<Option<bool>> {
+) -> ProviderExecutionResult<Option<bool>> {
     if elements == 0 {
         return Ok(Some(false));
     }
@@ -2318,44 +2541,27 @@ async fn compare_elemwise(
     });
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
-    if let Some(model) = profile_cost_model() {
-        if let Some(gpu_time) = model.estimate_elemwise(elements) {
-            trace!(
-                "Elemwise calibration ({} elems): cpu={:?}, gpu_est={:?}",
-                elements,
-                cpu_time,
-                gpu_time
-            );
-            return Ok(Some(gpu_time < cpu_time));
-        }
-    }
     let template_data = template.materialize_f64();
     let view = HostTensorView {
         data: template_data.as_slice(),
-        shape: template.shape.as_slice(),
+        shape: template.shape(),
     };
-    let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
-    let hb = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
+    let ha = provider.upload(&view)?;
+    let hb = provider.upload(&view)?;
     let start = Instant::now();
     let hc = match provider.elem_add(&ha, &hb).await {
         Ok(h) => h,
-        Err(_) => {
-            let _ = provider.free(&ha);
-            let _ = provider.free(&hb);
-            return Ok(None);
-        }
+        Err(error) => return calibration_cleanup::operation_failed(error, [ha, hb]),
     };
     let gpu_time = start.elapsed();
-    let _ = provider.free(&ha);
-    let _ = provider.free(&hb);
-    let _ = provider.free(&hc);
+    calibration_cleanup::release([ha, hb, hc])?;
     Ok(Some(gpu_time < cpu_time))
 }
 
 async fn calibrate_reduction(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Option<Result<usize>> {
+) -> Option<ProviderExecutionResult<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
         match compare_reduction(provider, size, &mut cfg.cpu_reduction_per_elem).await {
@@ -2372,7 +2578,7 @@ async fn compare_reduction(
     provider: &'static dyn AccelProvider,
     elements: usize,
     cpu_cost_slot: &mut f64,
-) -> Result<Option<bool>> {
+) -> ProviderExecutionResult<Option<bool>> {
     let shape = vec![elements, 1];
     let template = match provider.precision() {
         ProviderPrecision::F64 => {
@@ -2388,41 +2594,26 @@ async fn compare_reduction(
     let cpu_time = time_cpu(|| std::hint::black_box(cpu_data.iter().sum::<f64>()));
     let cpu_per_elem = cpu_time.as_secs_f64() / elements as f64;
     update_cpu_cost(cpu_cost_slot, cpu_per_elem);
-    if let Some(model) = profile_cost_model() {
-        if let Some(gpu_time) = model.estimate_reduction(elements) {
-            trace!(
-                "Reduction calibration ({} elems): cpu={:?}, gpu_est={:?}",
-                elements,
-                cpu_time,
-                gpu_time
-            );
-            return Ok(Some(gpu_time < cpu_time));
-        }
-    }
     let template_data = template.materialize_f64();
     let view = HostTensorView {
         data: template_data.as_slice(),
-        shape: template.shape.as_slice(),
+        shape: template.shape(),
     };
-    let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
+    let h = provider.upload(&view)?;
     let start = Instant::now();
     let out = match provider.reduce_sum(&h).await {
         Ok(hc) => hc,
-        Err(_) => {
-            provider.free(&h).ok();
-            return Ok(None);
-        }
+        Err(error) => return calibration_cleanup::operation_failed(error, [h]),
     };
     let gpu_time = start.elapsed();
-    let _ = provider.free(&h);
-    let _ = provider.free(&out);
+    calibration_cleanup::release([h, out])?;
     Ok(Some(gpu_time < cpu_time))
 }
 
 async fn calibrate_matmul(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Option<Result<usize>> {
+) -> Option<ProviderExecutionResult<usize>> {
     let dims = [32usize, 64, 96, 128, 192];
     for n in dims {
         match compare_matmul(provider, n, &mut cfg.cpu_matmul_per_flop).await {
@@ -2442,7 +2633,7 @@ async fn compare_matmul(
     provider: &'static dyn AccelProvider,
     n: usize,
     cpu_cost_slot: &mut f64,
-) -> Result<Option<bool>> {
+) -> ProviderExecutionResult<Option<bool>> {
     if n == 0 {
         return Ok(Some(false));
     }
@@ -2481,46 +2672,25 @@ async fn compare_matmul(
     });
     let flops = (n * n * n) as f64;
     update_cpu_cost(cpu_cost_slot, cpu_time.as_secs_f64() / flops);
-    if let Some(model) = profile_cost_model() {
-        if let Some(gpu_time) = model.estimate_matmul(n, n, n) {
-            trace!(
-                "Matmul calibration ({}^3 flops): cpu={:?}, gpu_est={:?}",
-                n,
-                cpu_time,
-                gpu_time
-            );
-            return Ok(Some(gpu_time < cpu_time));
-        }
-    }
     let data_a = ta.materialize_f64();
     let data_b = tb.materialize_f64();
     let view_a = HostTensorView {
         data: data_a.as_slice(),
-        shape: ta.shape.as_slice(),
+        shape: ta.shape(),
     };
     let view_b = HostTensorView {
         data: data_b.as_slice(),
-        shape: tb.shape.as_slice(),
+        shape: tb.shape(),
     };
-    let ha = provider
-        .upload(&view_a)
-        .map_err(|e| anyhow!(e.to_string()))?;
-    let hb = provider
-        .upload(&view_b)
-        .map_err(|e| anyhow!(e.to_string()))?;
+    let ha = provider.upload(&view_a)?;
+    let hb = provider.upload(&view_b)?;
     let start = Instant::now();
     let hc = match provider.matmul(&ha, &hb).await {
         Ok(h) => h,
-        Err(_) => {
-            let _ = provider.free(&ha);
-            let _ = provider.free(&hb);
-            return Ok(None);
-        }
+        Err(error) => return calibration_cleanup::operation_failed(error, [ha, hb]),
     };
     let gpu_time = start.elapsed();
-    let _ = provider.free(&ha);
-    let _ = provider.free(&hb);
-    let _ = provider.free(&hc);
+    calibration_cleanup::release([ha, hb, hc])?;
     Ok(Some(gpu_time < cpu_time))
 }
 
@@ -2569,203 +2739,11 @@ pub fn reset_auto_offload_log() {
     clear_decisions();
 }
 
-#[derive(Clone, Deserialize, Debug)]
-struct ProfileDurationSummary {
-    #[serde(default)]
-    avg_ms: f64,
-}
-
-#[derive(Clone, Deserialize, Debug)]
-struct ProfileReport {
-    category: String,
-    #[serde(default)]
-    input_shapes: Vec<Vec<usize>>,
-    total_ms: ProfileDurationSummary,
-}
-
-#[derive(Clone, Copy, Default, Debug)]
-struct LinearModel {
-    slope: f64,
-    intercept: f64,
-}
-
-impl LinearModel {
-    fn estimate(&self, x: f64) -> Option<Duration> {
-        if !self.slope.is_finite() || self.slope <= 0.0 {
-            return None;
-        }
-        let total = self.intercept + self.slope * x;
-        if total.is_finite() && total > 0.0 {
-            Some(Duration::from_secs_f64(total))
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Default)]
-struct ProfileCostModel {
-    elem: Option<LinearModel>,
-    reduction: Option<LinearModel>,
-    transpose: Option<LinearModel>,
-    matmul: Option<LinearModel>,
-}
-
-impl ProfileCostModel {
-    fn from_reports(reports: &[ProfileReport]) -> Self {
-        let mut elem_samples = Vec::<(f64, f64)>::new();
-        let mut reduction_samples = Vec::<(f64, f64)>::new();
-        let mut transpose_samples = Vec::<(f64, f64)>::new();
-        let mut matmul_samples = Vec::<(f64, f64)>::new();
-
-        for report in reports {
-            let total_secs = report.total_ms.avg_ms / 1_000.0;
-            match report.category.as_str() {
-                "elementwise" | "reduction" | "transpose" => {
-                    if let Some(shape) = report.input_shapes.first() {
-                        let elems: usize = shape.iter().copied().product();
-                        if elems == 0 {
-                            continue;
-                        }
-                        let sample = (elems as f64, total_secs);
-                        match report.category.as_str() {
-                            "elementwise" => elem_samples.push(sample),
-                            "reduction" => reduction_samples.push(sample),
-                            "transpose" => transpose_samples.push(sample),
-                            _ => {}
-                        }
-                    }
-                }
-                "matmul" => {
-                    if report.input_shapes.len() >= 2 {
-                        let a = &report.input_shapes[0];
-                        let b = &report.input_shapes[1];
-                        if a.len() == 2 && b.len() == 2 {
-                            let m = a[0];
-                            let k = a[1];
-                            let n = b[1];
-                            let flops = m.checked_mul(k).and_then(|val| val.checked_mul(n));
-                            if let Some(flops) = flops {
-                                matmul_samples.push((flops as f64, total_secs));
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        ProfileCostModel {
-            elem: fit_linear_model(&elem_samples),
-            reduction: fit_linear_model(&reduction_samples),
-            transpose: fit_linear_model(&transpose_samples),
-            matmul: fit_linear_model(&matmul_samples),
-        }
-    }
-
-    fn estimate_elemwise(&self, elements: usize) -> Option<Duration> {
-        self.elem.and_then(|model| model.estimate(elements as f64))
-    }
-
-    fn estimate_reduction(&self, elements: usize) -> Option<Duration> {
-        self.reduction
-            .and_then(|model| model.estimate(elements as f64))
-    }
-
-    fn estimate_matmul(&self, m: usize, k: usize, n: usize) -> Option<Duration> {
-        let flops = m.checked_mul(k)?.checked_mul(n)?;
-        self.matmul.and_then(|model| model.estimate(flops as f64))
-    }
-
-    fn estimate_matmul_flops(&self, flops: usize) -> Option<Duration> {
-        self.matmul.and_then(|model| model.estimate(flops as f64))
-    }
-
-    fn estimate_transpose(&self, elements: usize) -> Option<Duration> {
-        self.transpose
-            .and_then(|model| model.estimate(elements as f64))
-    }
-}
-
-fn fit_linear_model(samples: &[(f64, f64)]) -> Option<LinearModel> {
-    if samples.is_empty() {
-        return None;
-    }
-    if samples.len() == 1 {
-        let (x, y) = samples[0];
-        if x > 0.0 {
-            return Some(LinearModel {
-                slope: (y / x).max(0.0),
-                intercept: 0.0,
-            });
-        }
-        return None;
-    }
-
-    let sum_x: f64 = samples.iter().map(|(x, _)| *x).sum();
-    let sum_y: f64 = samples.iter().map(|(_, y)| *y).sum();
-    let sum_xx: f64 = samples.iter().map(|(x, _)| x * x).sum();
-    let sum_xy: f64 = samples.iter().map(|(x, y)| x * y).sum();
-    let n = samples.len() as f64;
-    let denom = (n * sum_xx) - (sum_x * sum_x);
-    if denom.abs() < f64::EPSILON {
-        return None;
-    }
-    let slope = ((n * sum_xy) - (sum_x * sum_y)) / denom;
-    let mean_x = sum_x / n;
-    let mean_y = sum_y / n;
-    let mut intercept = mean_y - slope * mean_x;
-    if intercept < 0.0 {
-        intercept = 0.0;
-    }
-    if !slope.is_finite() || slope <= 0.0 {
-        return None;
-    }
-    Some(LinearModel { slope, intercept })
-}
-
-fn profile_cost_model() -> Option<&'static ProfileCostModel> {
-    PROFILE_MODEL.get_or_init(load_profile_cost_model).as_ref()
-}
-
-fn load_profile_cost_model() -> Option<ProfileCostModel> {
-    let mut candidates = Vec::new();
-    if let Ok(path) = env::var("RUNMAT_ACCEL_PROFILE") {
-        candidates.push(PathBuf::from(path));
-    }
-    if let Some(path) = auto_offload_options().profile_path.clone() {
-        candidates.push(path);
-    }
-    candidates.push(PathBuf::from("benchmarks/wgpu_profile/mac_m2.json"));
-    candidates.push(PathBuf::from("wgpu_profile.json"));
-
-    for path in candidates {
-        if !path.exists() {
-            continue;
-        }
-        match fs::read_to_string(&path) {
-            Ok(contents) => match serde_json::from_str::<Vec<ProfileReport>>(&contents) {
-                Ok(reports) => {
-                    debug!(
-                        "Loaded {} GPU profile reports from {}",
-                        reports.len(),
-                        path.display()
-                    );
-                    return Some(ProfileCostModel::from_reports(&reports));
-                }
-                Err(err) => {
-                    debug!("Failed to parse GPU profile {}: {err}", path.display());
-                }
-            },
-            Err(err) => {
-                debug!("Failed to read GPU profile {}: {err}", path.display());
-            }
-        }
-    }
-    None
-}
-
-pub async fn promote_binary(op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
+pub async fn promote_binary(
+    op: BinaryOp,
+    a: &Value,
+    b: &Value,
+) -> ProviderExecutionResult<(Value, Value)> {
     if !auto_enabled() {
         return Ok((a.clone(), b.clone()));
     }
@@ -2776,7 +2754,7 @@ pub async fn promote_binary(op: BinaryOp, a: &Value, b: &Value) -> Result<(Value
     }
 }
 
-pub async fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
+pub async fn promote_unary(op: UnaryOp, value: &Value) -> ProviderExecutionResult<Value> {
     if !auto_enabled() {
         return Ok(value.clone());
     }
@@ -2787,40 +2765,21 @@ pub async fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
     }
 }
 
-pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
-    if let Some(policy) = builtin_policy(name) {
-        if policy.is_sink {
-            clear_sink_inputs(args);
-            if should_gather_sink_args(name) {
-                trace!(
-                    "auto-offload: prepare_builtin_args(name={:?}) is_sink=true residency=GatherImmediately -> gathering {} arg(s)",
-                    name,
-                    args.len()
-                );
-                return gather_args(args).await;
-            }
-            trace!(
-                "auto-offload: prepare_builtin_args(name={:?}) is_sink=true residency!=GatherImmediately -> no gather (fusion barrier only)",
-                name
-            );
-            return Ok(args.to_vec());
-        }
-    }
-    if !auto_enabled() {
-        return Ok(args.to_vec());
-    }
-    if let Some(auto) = global().await {
-        auto.prepare_builtin(name, args).await
-    } else {
-        Ok(args.to_vec())
-    }
+pub async fn prepare_builtin_args(
+    name: &str,
+    args: &[Value],
+) -> ProviderExecutionResult<Vec<Value>> {
+    Ok(builtin_call::prepare(name, args, None).await?.into_args())
 }
 
 pub fn is_sink(name: &str) -> bool {
     builtin_policy(name).map(|p| p.is_sink).unwrap_or(false)
 }
 
-pub async fn promote_reduction_args(op: ReductionOp, args: &[Value]) -> Result<Vec<Value>> {
+pub async fn promote_reduction_args(
+    op: ReductionOp,
+    args: &[Value],
+) -> ProviderExecutionResult<Vec<Value>> {
     if !auto_enabled() {
         return Ok(args.to_vec());
     }

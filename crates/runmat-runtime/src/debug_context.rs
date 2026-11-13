@@ -1,6 +1,10 @@
 use crate::source_context;
+use runmat_execution::resource::ExactShared;
 use runmat_thread_local::runmat_thread_local;
 use runmat_types::SourceId;
+use runmat_value::{
+    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError,
+};
 use std::cell::RefCell;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,31 +21,185 @@ pub struct DebugFrameInfo {
     pub line: usize,
 }
 
+#[derive(Debug)]
+struct FrameNode {
+    frame: DebugFrame,
+    parent: Option<ExactShared<FrameNode>>,
+    _header_claim: Option<ExactHostAllocationClaim>,
+    _name_claim: Option<ExactHostAllocationClaim>,
+}
+
+/// One invocation's immutable async frames and exact-owner synchronous frames.
+/// A poll owner forks this projection; sibling futures never mutate a shared
+/// session stack while suspended.
+#[derive(Debug, Default)]
+pub(crate) struct DebugFrameProjection {
+    head: Option<ExactShared<FrameNode>>,
+    overlays: Vec<(u64, DebugFrame)>,
+    next_overlay: u64,
+}
+
+impl DebugFrameProjection {
+    fn linked_head(&self) -> Option<ExactShared<FrameNode>> {
+        let mut head = self.head.clone();
+        for (_, frame) in &self.overlays {
+            head = Some(ExactShared::new(FrameNode {
+                frame: frame.clone(),
+                parent: head,
+                _header_claim: None,
+                _name_claim: None,
+            }));
+        }
+        head
+    }
+
+    /// Exact physical allocations made when materializing active synchronous
+    /// overlays for one managed poll snapshot. Existing immutable ancestors
+    /// are retained without copying their names or nodes.
+    pub(crate) fn snapshot_requested_bytes(&self) -> Option<usize> {
+        self.overlays.iter().try_fold(0usize, |bytes, (_, frame)| {
+            bytes
+                .checked_add(ExactShared::<FrameNode>::requested_bytes())?
+                .checked_add(frame.function.len())
+        })
+    }
+
+    pub(crate) fn snapshot_retained_claims(&self) -> Option<usize> {
+        self.overlays.len().checked_mul(2)
+    }
+
+    pub(crate) fn snapshot_with_permit(
+        &self,
+        permit: &crate::context::host_allocation::HostOutputPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let mut head = self.head.clone();
+        for (_, frame) in &self.overlays {
+            let header_claim =
+                permit.reserve_exact_claim(ExactShared::<FrameNode>::requested_bytes())?;
+            let name_claim = permit.reserve_exact_claim(frame.function.len())?;
+            let mut function = String::new();
+            function
+                .try_reserve_exact(frame.function.len())
+                .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?;
+            function.push_str(&frame.function);
+            let frame = DebugFrame {
+                function,
+                source_id: frame.source_id,
+                span: frame.span,
+            };
+            head = Some(
+                ExactShared::try_new(FrameNode {
+                    frame,
+                    parent: head,
+                    _header_claim: Some(header_claim),
+                    _name_claim: Some(name_claim),
+                })
+                .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?,
+            );
+        }
+        Ok(Self {
+            head,
+            overlays: Vec::new(),
+            next_overlay: 0,
+        })
+    }
+
+    pub(crate) fn snapshot(&self) -> Self {
+        Self {
+            head: self.linked_head(),
+            overlays: Vec::new(),
+            next_overlay: 0,
+        }
+    }
+
+    pub(crate) fn with_frame(&self, frame: DebugFrame) -> Self {
+        Self {
+            head: Some(ExactShared::new(FrameNode {
+                frame,
+                parent: self.linked_head(),
+                _header_claim: None,
+                _name_claim: None,
+            })),
+            overlays: Vec::new(),
+            next_overlay: 0,
+        }
+    }
+
+    fn push(&mut self, frame: DebugFrame) -> u64 {
+        let token = self.next_overlay;
+        self.next_overlay = self
+            .next_overlay
+            .checked_add(1)
+            .expect("debug frame token space exhausted");
+        self.overlays.push((token, frame));
+        token
+    }
+
+    fn remove(&mut self, token: u64) {
+        if let Some(index) = self.overlays.iter().position(|(entry, _)| *entry == token) {
+            self.overlays.remove(index);
+        }
+    }
+
+    fn current_function_name(&self) -> Option<String> {
+        self.overlays
+            .last()
+            .map(|(_, frame)| frame.function.clone())
+            .or_else(|| {
+                self.head
+                    .as_ref()
+                    .map(|node| node.get().frame.function.clone())
+            })
+    }
+
+    fn frames(&self) -> Vec<DebugFrame> {
+        let mut frames = self
+            .overlays
+            .iter()
+            .rev()
+            .map(|(_, frame)| frame.clone())
+            .collect::<Vec<_>>();
+        let mut current = self.head.as_ref().map(ExactShared::get);
+        while let Some(node) = current {
+            frames.push(node.frame.clone());
+            current = node.parent.as_ref().map(ExactShared::get);
+        }
+        frames
+    }
+
+    fn clear(&mut self) {
+        self.head = None;
+        self.overlays.clear();
+    }
+}
+
 runmat_thread_local! {
-    static DEBUG_STACK: RefCell<Vec<DebugFrame>> = const { RefCell::new(Vec::new()) };
+    static DIRECT_FRAMES: RefCell<DebugFrameProjection> = RefCell::new(DebugFrameProjection::default());
+}
+
+enum GuardOwner {
+    Selected(crate::context::poll_projection::PollProjection<DebugFrameProjection>),
+    Direct,
 }
 
 pub struct DebugFrameGuard {
-    did_push: bool,
-    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    owner: GuardOwner,
+    token: u64,
 }
 
 impl Drop for DebugFrameGuard {
     fn drop(&mut self) {
-        if !self.did_push {
-            return;
-        }
-        if let Some(state) = &self.state {
-            state.debug.borrow_mut().pop();
-        } else {
-            DEBUG_STACK.with(|stack| {
-                let mut stack = stack.borrow_mut();
-                let _ = stack.pop();
-            });
+        match &self.owner {
+            GuardOwner::Selected(projection) => projection.borrow_mut().remove(self.token),
+            GuardOwner::Direct => {
+                DIRECT_FRAMES.with(|frames| frames.borrow_mut().remove(self.token))
+            }
         }
     }
 }
 
+/// Synchronous embedding frame. Async VM calls use `RuntimeContext::with_debug_frame`
+/// so a suspension never leaves an ambient frame installed on the thread.
 pub fn push_frame(
     function: impl Into<String>,
     source_id: Option<SourceId>,
@@ -52,56 +210,45 @@ pub fn push_frame(
         source_id,
         span,
     };
-    if let Some(state) = active_state() {
-        state.debug.borrow_mut().push(frame);
+    if let Some(context) = crate::context::legacy::active() {
+        let projection = context.debug_projection().clone();
+        let token = projection.borrow_mut().push(frame);
         DebugFrameGuard {
-            did_push: true,
-            state: Some(state),
+            owner: GuardOwner::Selected(projection),
+            token,
         }
     } else {
-        DEBUG_STACK.with(|stack| stack.borrow_mut().push(frame));
+        let token = DIRECT_FRAMES.with(|frames| frames.borrow_mut().push(frame));
         DebugFrameGuard {
-            did_push: true,
-            state: None,
+            owner: GuardOwner::Direct,
+            token,
         }
     }
 }
 
 pub fn current_frames() -> Vec<DebugFrameInfo> {
-    if let Some(state) = active_state() {
-        return state.debug.borrow().iter().rev().map(frame_info).collect();
-    }
-    DEBUG_STACK.with(|stack| {
-        stack
-            .borrow()
-            .iter()
-            .rev()
-            .map(frame_info)
-            .collect::<Vec<_>>()
-    })
+    let frames = if let Some(context) = crate::context::legacy::active() {
+        context.debug_projection().borrow().frames()
+    } else {
+        DIRECT_FRAMES.with(|frames| frames.borrow().frames())
+    };
+    frames.iter().map(frame_info).collect()
 }
 
 pub fn current_function_name() -> Option<String> {
-    if let Some(state) = active_state() {
-        return state
-            .debug
-            .borrow()
-            .last()
-            .map(|frame| frame.function.clone());
+    if let Some(context) = crate::context::legacy::active() {
+        context.debug_projection().borrow().current_function_name()
+    } else {
+        DIRECT_FRAMES.with(|frames| frames.borrow().current_function_name())
     }
-    DEBUG_STACK.with(|stack| stack.borrow().last().map(|frame| frame.function.clone()))
 }
 
 pub fn reset_for_tests() {
-    if let Some(state) = active_state() {
-        state.debug.borrow_mut().clear();
-        return;
+    if let Some(context) = crate::context::legacy::active() {
+        context.debug_projection().borrow_mut().clear();
+    } else {
+        DIRECT_FRAMES.with(|frames| frames.borrow_mut().clear());
     }
-    DEBUG_STACK.with(|stack| stack.borrow_mut().clear());
-}
-
-fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
-    crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
 
 fn frame_info(frame: &DebugFrame) -> DebugFrameInfo {
@@ -141,23 +288,5 @@ fn line_for_offset(source: &str, offset: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_frame_snapshot_uses_source_catalog() {
-        let source_id = SourceId(7);
-        let _catalog = source_context::replace_source_catalog_with_fullpaths(vec![(
-            source_id,
-            "demo.m".to_string(),
-            Some("/tmp/demo.m".to_string()),
-            "a = 1;\nb = 2;\n".to_string(),
-        )]);
-        let _guard = push_frame("demo", Some(source_id), Some((8, 13)));
-        let frames = current_frames();
-        assert_eq!(frames.len(), 1);
-        assert_eq!(frames[0].function, "demo");
-        assert_eq!(frames[0].file, "/tmp/demo.m");
-        assert_eq!(frames[0].line, 2);
-    }
-}
+#[path = "debug_context/tests.rs"]
+mod tests;

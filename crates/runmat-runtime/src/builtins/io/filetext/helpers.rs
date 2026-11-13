@@ -1,16 +1,18 @@
 use std::io::{Read, Seek, SeekFrom};
 
-use encoding_rs::{Encoding, UTF_8};
-use runmat_filesystem::File;
+use encoding_rs::Encoding;
 use runmat_value::{CharArray, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) fn extract_scalar_string(value: &Value) -> Option<String> {
+    if !crate::builtins::common::validation::value_is_text_scalar(value) {
+        return None;
+    }
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
+        Value::CharArray(ca) => ca.row_string(),
+        Value::StringArray(sa) => sa.data()[0].as_str().map(str::to_owned),
         _ => None,
     }
 }
@@ -30,8 +32,8 @@ pub(crate) struct LineRead {
     pub(crate) encountered_eof: bool,
 }
 
-pub(crate) fn read_text_line(
-    file: &mut File,
+pub(crate) fn read_text_line<R: Read + Seek>(
+    file: &mut R,
     limit: Option<usize>,
     builtin_name: &'static str,
 ) -> BuiltinResult<LineRead> {
@@ -155,7 +157,11 @@ pub(crate) fn read_text_line(
     })
 }
 
-fn seek_current(file: &mut File, offset: i64, builtin_name: &'static str) -> BuiltinResult<()> {
+fn seek_current<R: Seek>(
+    file: &mut R,
+    offset: i64,
+    builtin_name: &'static str,
+) -> BuiltinResult<()> {
     file.seek(SeekFrom::Current(offset)).map_err(|err| {
         build_runtime_error(format!("{builtin_name}: failed to seek in file: {err}"))
             .with_builtin(builtin_name)
@@ -171,8 +177,8 @@ pub(crate) fn bytes_to_char_array(
     builtin_name: &'static str,
 ) -> BuiltinResult<Value> {
     let chars = decode_bytes(bytes, encoding, builtin_name)?;
-    let cols = chars.len();
-    let char_array = CharArray::new(chars, 1, cols).map_err(|e| {
+    let cols = chars.iter().map(|value| value.len_utf16()).sum();
+    let char_array = CharArray::from_unicode_scalars(chars, 1, cols).map_err(|e| {
         text_io_error(
             builtin_name,
             format!("{builtin_name}: failed to build char array: {e}"),
@@ -186,61 +192,14 @@ pub(crate) fn decode_bytes(
     encoding: &str,
     builtin_name: &'static str,
 ) -> BuiltinResult<Vec<char>> {
-    let label = encoding.trim();
-    if label.is_empty() || label.eq_ignore_ascii_case("utf-8") || label.eq_ignore_ascii_case("utf8")
+    use super::encoding::TextEncoding;
+    match TextEncoding::parse(encoding)
+        .map_err(|detail| text_io_error(builtin_name, format!("{builtin_name}: {detail}")))?
     {
-        return decode_with_encoding(bytes, UTF_8, builtin_name);
+        TextEncoding::Bytes => Ok(bytes.iter().map(|&byte| char::from(byte)).collect()),
+        TextEncoding::Ascii => decode_ascii(bytes, builtin_name),
+        TextEncoding::Encoded(encoding) => decode_with_encoding(bytes, encoding, builtin_name),
     }
-    if label.eq_ignore_ascii_case("binary") {
-        return Ok(bytes
-            .iter()
-            .map(|&b| char::from_u32(b as u32).unwrap())
-            .collect());
-    }
-    if label.eq_ignore_ascii_case("latin1")
-        || label.eq_ignore_ascii_case("latin-1")
-        || label.eq_ignore_ascii_case("iso-8859-1")
-    {
-        return Ok(bytes
-            .iter()
-            .map(|&b| char::from_u32(b as u32).unwrap())
-            .collect());
-    }
-    if label.eq_ignore_ascii_case("windows-1252") || label.eq_ignore_ascii_case("cp1252") {
-        return decode_with_encoding(bytes, encoding_rs::WINDOWS_1252, builtin_name);
-    }
-    if label.eq_ignore_ascii_case("shift_jis")
-        || label.eq_ignore_ascii_case("shift-jis")
-        || label.eq_ignore_ascii_case("sjis")
-    {
-        return decode_with_encoding(bytes, encoding_rs::SHIFT_JIS, builtin_name);
-    }
-    if label.eq_ignore_ascii_case("us-ascii")
-        || label.eq_ignore_ascii_case("ascii")
-        || label.eq_ignore_ascii_case("us_ascii")
-        || label.eq_ignore_ascii_case("usascii")
-    {
-        return decode_ascii(bytes, builtin_name);
-    }
-    if label.eq_ignore_ascii_case("system") {
-        let fallback = system_default_encoding_label();
-        if fallback.eq_ignore_ascii_case("binary") {
-            return Ok(bytes
-                .iter()
-                .map(|&b| char::from_u32(b as u32).unwrap())
-                .collect());
-        }
-        return decode_bytes(bytes, fallback, builtin_name);
-    }
-
-    if let Some(enc) = Encoding::for_label(label.as_bytes()) {
-        return decode_with_encoding(bytes, enc, builtin_name);
-    }
-
-    Err(text_io_error(
-        builtin_name,
-        format!("{builtin_name}: unsupported encoding '{encoding}'"),
-    ))
 }
 
 fn decode_with_encoding(
@@ -293,19 +252,33 @@ pub(crate) fn empty_numeric_row() -> Value {
     Value::Tensor(tensor)
 }
 
-fn system_default_encoding_label() -> &'static str {
-    #[cfg(windows)]
-    {
-        "windows-1252"
-    }
-    #[cfg(not(windows))]
-    {
-        "utf-8"
-    }
-}
-
 fn text_io_error(builtin_name: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(builtin_name)
         .build()
+}
+
+#[cfg(test)]
+mod typed_string_controls {
+    use super::*;
+
+    #[test]
+    fn scalar_text_controls_reject_missing_without_reserving_any_literal_spelling() {
+        for element in [
+            "<missing>".into(),
+            "<MISSING>".into(),
+            "".into(),
+            runmat_value::StringElement::Missing,
+        ] {
+            let expected = element.as_str().map(str::to_owned);
+            assert_eq!(
+                extract_scalar_string(&Value::String(element.clone())),
+                expected
+            );
+            let array =
+                runmat_value::StringArray::from_elements_unbounded(vec![element], vec![1, 1])
+                    .unwrap();
+            assert_eq!(extract_scalar_string(&Value::StringArray(array)), expected);
+        }
+    }
 }

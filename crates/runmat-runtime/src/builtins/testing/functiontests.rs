@@ -1,39 +1,37 @@
 use std::collections::HashMap;
 
-use runmat_builtins::{ResolveContext, Type};
-use runmat_value::{CellArray, ObjectInstance, Value};
+use runmat_value::{CellArray, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
-fn functiontests_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Object {
-        class_name: Some(crate::testing::TEST_SUITE_CLASS.into()),
-        shape: None,
-    }
-}
-
 #[runmat_macros::runtime_builtin(
     name = "functiontests",
-    category = "testing",
-    summary = "Create a TestSuite from local function handles.",
-    keywords = "functiontests,localfunctions,testing,suite",
-    type_resolver(functiontests_type),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::testing::functiontests"
 )]
-fn functiontests_builtin(handles: Value) -> BuiltinResult<Value> {
+fn functiontests_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    handles: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::testing::ensure_testing_classes();
     let Value::Cell(handles) = handles else {
         return Err(functiontests_error(
             "functiontests: expected the cell array returned by localfunctions",
         ));
     };
-    build_function_suite(handles)
+    build_function_suite(runtime.as_ref(), handles)
 }
 
-fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
+fn build_function_suite(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handles: CellArray,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _source =
+        crate::execution::RootedValue::in_optional_context(Value::Cell(handles.clone()), runtime)?;
     let mut fixtures = HashMap::<String, Value>::new();
-    let mut tests = Vec::<(String, Value)>::new();
-    for handle in handles.data {
+    let mut tests = Vec::<(runmat_value::Utf8Text, Value)>::new();
+    let mut classify = |handle: Value| -> BuiltinResult<()> {
         let Some(name) = handle_name(&handle) else {
             return Err(functiontests_error(
                 "functiontests: every input element must be a named function handle",
@@ -45,6 +43,19 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
             }
             name_lower if name_lower.starts_with("test") => tests.push((name, handle)),
             _ => {}
+        }
+        Ok(())
+    };
+    match handles.into_parts().0.try_into_owned() {
+        Ok(owned) => {
+            for handle in owned {
+                classify(handle)?;
+            }
+        }
+        Err(shared) => {
+            for handle in shared.iter() {
+                classify(clone_named_callable(handle)?)?;
+            }
         }
     }
 
@@ -73,47 +84,83 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
         })
         .unwrap_or_default();
 
-    let values = tests
+    let mut values = tests
         .into_iter()
-        .map(|(name, handle)| {
-            let mut object = ObjectInstance::new(crate::testing::TEST_SUITE_CLASS.into());
-            object
-                .properties
-                .insert("Name".into(), Value::String(format!("{suite_name}/{name}")));
-            object
-                .properties
-                .insert("ProcedureName".into(), Value::String(name));
-            object
-                .properties
-                .insert("TestFile".into(), Value::String(source_path.clone()));
-            object.properties.insert(
-                "Tags".into(),
-                Value::StringArray(
-                    runmat_value::StringArray::new(Vec::new(), vec![1, 0])
-                        .expect("empty tag row is valid"),
-                ),
-            );
-            object
-                .properties
-                .insert("__runmat_procedure".into(), handle);
-            for (fixture_name, fixture) in &fixtures {
-                object
-                    .properties
-                    .insert(format!("__runmat_fixture_{fixture_name}"), fixture.clone());
-            }
-            Value::Object(object)
-        })
-        .collect::<Vec<_>>();
-    crate::testing::object_array_or_scalar(crate::testing::TEST_SUITE_CLASS, values)
-        .map_err(functiontests_error)
+        .map(
+            |(name, handle)| -> BuiltinResult<crate::execution::RootedValue> {
+                let fields = [
+                    ("Name", Value::string(format!("{suite_name}/{name}"))),
+                    (
+                        "ProcedureName",
+                        Value::String(runmat_value::StringElement::Text(name)),
+                    ),
+                    ("TestFile", Value::string(source_path.clone())),
+                    (
+                        "Tags",
+                        Value::StringArray(
+                            runmat_value::StringArray::new(Vec::new(), vec![1, 0])
+                                .expect("empty tag row is valid"),
+                        ),
+                    ),
+                    ("__runmat_procedure", handle),
+                ];
+                let fixture_names = [
+                    ("setuponce", "__runmat_fixture_setuponce"),
+                    ("teardownonce", "__runmat_fixture_teardownonce"),
+                    ("setup", "__runmat_fixture_setup"),
+                    ("teardown", "__runmat_fixture_teardown"),
+                ];
+                let properties = fields.iter().map(|(name, value)| (*name, value)).chain(
+                    fixture_names.iter().filter_map(|(name, property)| {
+                        fixtures.get(*name).map(|value| (*property, value))
+                    }),
+                );
+                crate::execution::object::construct_object_from_borrowed_fields(
+                    runtime,
+                    crate::testing::TEST_SUITE_CLASS.display_name(),
+                    properties,
+                )
+            },
+        )
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    if values.len() == 1 {
+        return Ok(values.pop().expect("one rooted suite"));
+    }
+    let mut output = crate::execution::object_array::ObjectArrayConstruction::new(
+        runtime,
+        crate::execution::object_array::Class::Name(
+            crate::testing::TEST_SUITE_CLASS.display_name(),
+        ),
+        values.len(),
+        &[1, values.len()],
+        std::iter::empty(),
+        true,
+    )?;
+    for value in &values {
+        output.push(value.value().clone())?;
+    }
+    output.finish()
 }
 
-fn handle_name(handle: &Value) -> Option<String> {
+fn clone_named_callable(handle: &Value) -> BuiltinResult<Value> {
+    match handle {
+        Value::FunctionHandle(value) => Ok(Value::FunctionHandle(value.clone())),
+        Value::ExternalFunctionHandle(value) => Ok(Value::ExternalFunctionHandle(value.clone())),
+        Value::MethodFunctionHandle(value) => Ok(Value::MethodFunctionHandle(value.clone())),
+        Value::BoundFunctionHandle(value) => Ok(Value::BoundFunctionHandle(value.clone())),
+        Value::Closure(value) => Ok(Value::Closure(value.clone())),
+        _ => Err(functiontests_error(
+            "functiontests: every input element must be a named function handle",
+        )),
+    }
+}
+
+fn handle_name(handle: &Value) -> Option<runmat_value::Utf8Text> {
     match handle {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Some(name.clone()),
-        Value::BoundFunctionHandle { name, .. } => Some(name.clone()),
+        | Value::MethodFunctionHandle(name) => Some(name.clone().into_text_owner()),
+        Value::BoundFunctionHandle(handle) => Some(handle.name.clone()),
         Value::Closure(closure) => Some(closure.function_name.clone()),
         _ => None,
     }
@@ -132,6 +179,24 @@ mod tests {
 
     #[test]
     fn filters_helpers_and_attaches_conventional_fixtures() {
+        let runtime = crate::context::RuntimeContext::with_frozen_environment(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            vec![("PWD".into(), "/not-the-selected-source".into())],
+        )
+        .expect("isolated environment");
+        let _runtime = runtime.enter();
+        let source = crate::source_context::lease_source_context_in_context(
+            &runtime,
+            "metadataSuite.m",
+            Some(std::sync::Arc::from("/frozen/metadataSuite.m")),
+            "function tests = metadataSuite()\ntests = functiontests(localfunctions);\nend\n",
+        )
+        .expect("source record, without opening a file");
+        let _source = crate::source_context::replace_current_source_id_in_context(
+            &runtime,
+            Some(source.source_id()),
+        );
         let handles = [
             ("setup", 1),
             ("testFirst", 2),
@@ -140,24 +205,44 @@ mod tests {
             ("teardown", 5),
         ]
         .into_iter()
-        .map(|(name, function)| Value::BoundFunctionHandle {
-            name: name.into(),
-            function,
+        .map(|(name, function)| {
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: name.into(),
+                    function,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(function),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            ))
         })
         .collect();
         let input = Value::Cell(CellArray::new(handles, 1, 5).unwrap());
-        let value = functiontests_builtin(input).unwrap();
-        let Value::ObjectArray(array) = value else {
+        let value = functiontests_builtin(Some(runtime.clone()), input).unwrap();
+        let Value::ObjectArray(array) = value.value() else {
             panic!("expected suite object array");
         };
-        assert_eq!(array.class_name(), crate::testing::TEST_SUITE_CLASS);
+        assert!(array.class_name().is(crate::testing::TEST_SUITE_CLASS));
         assert_eq!(array.shape(), &[1, 2]);
         for value in array.data() {
             let Value::Object(object) = value else {
                 panic!("expected suite object");
             };
-            assert!(object.properties.contains_key("__runmat_fixture_setup"));
-            assert!(object.properties.contains_key("__runmat_fixture_teardown"));
+            assert!(object.property("__runmat_fixture_setup").is_some());
+            assert!(object.property("__runmat_fixture_teardown").is_some());
+            let Value::String(runmat_value::StringElement::Text(procedure)) =
+                object.property("ProcedureName").unwrap()
+            else {
+                panic!("procedure name");
+            };
+            assert_eq!(
+                object.property("Name"),
+                Some(&Value::string(format!("metadataSuite/{procedure}")))
+            );
+            assert_eq!(
+                object.property("TestFile"),
+                Some(&Value::string("/frozen/metadataSuite.m"))
+            );
         }
     }
 }

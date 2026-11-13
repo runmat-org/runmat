@@ -4,12 +4,16 @@ use crate::builtins::common::tensor;
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
-pub fn as_lower_str(val: &Value) -> Option<String> {
-    match val {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::CharArray(c) => Some(c.data.iter().collect::<String>().to_ascii_lowercase()),
+pub fn as_lower_str(val: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match val {
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.to_ascii_lowercase()),
+        Value::CharArray(c)
+            if c.rows <= 1 && crate::builtins::common::shape::effective_rank(&c.shape) <= 2 =>
+        {
+            Some(runmat_value::decode_utf16_code_units(c.data())?.to_ascii_lowercase())
+        }
         _ => None,
-    }
+    })
 }
 
 pub fn parse_on_off(
@@ -19,7 +23,10 @@ pub fn parse_on_off(
     let Some(arg) = arg else {
         return Ok(None);
     };
-    let Some(s) = as_lower_str(arg) else {
+    let Some(s) = as_lower_str(arg).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })?
+    else {
         return Err(plotting_error(builtin, "expected string argument"));
     };
     match s.trim() {
@@ -111,10 +118,17 @@ pub fn parse_hold_mode(value: &Value) -> BuiltinResult<crate::builtins::plotting
     }
     match value {
         Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "hold",
+                        source.to_string(),
+                        source,
+                    )
+                })?;
             parse_hold_mode_str(text.trim())
         }
-        Value::String(s) => parse_hold_mode_str(s.trim()),
+        Value::String(runmat_value::StringElement::Text(s)) => parse_hold_mode_str(s.trim()),
         Value::Num(0.0) => Ok(HoldMode::Off),
         Value::Num(1.0) => Ok(HoldMode::On),
         Value::Num(_) => Err(plotting_error(
@@ -155,6 +169,35 @@ pub fn parse_hold_mode_str(
 mod tests {
     use super::*;
     use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn mode_text_rejects_character_pages_and_rows_without_changing_empty_policy() {
+        for shape in [vec![2, 2], vec![1, 2, 2], vec![1, 1, 4]] {
+            let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
+                "flat".chars().collect(),
+                shape,
+            )
+            .unwrap();
+            assert_eq!(as_lower_str(&Value::CharArray(chars)).unwrap(), None);
+        }
+        for shape in [vec![1, 4], vec![1, 4, 1, 1]] {
+            let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
+                "FLAT".chars().collect(),
+                shape,
+            )
+            .unwrap();
+            assert_eq!(
+                as_lower_str(&Value::CharArray(chars)).unwrap(),
+                Some("flat".into())
+            );
+        }
+        let empty =
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec![], vec![0, 0]).unwrap();
+        assert_eq!(
+            as_lower_str(&Value::CharArray(empty)).unwrap(),
+            Some(String::new())
+        );
+    }
 
     #[test]
     fn scalar_and_hold_parsers_read_typed_integer_storage() {

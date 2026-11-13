@@ -1,19 +1,35 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
+use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
+use runmat_execution::Digest;
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    assembly::assemble_linear_system,
+    assembly::solver_solid::SolidEnergyPreparation,
     contracts::{
-        fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
-        FeaRunResult, ModalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-        FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-        FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
-        FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
+        ComputeBackend, FeaModalRunResult, FeaRunError, FeaRunResult, ModalSolveOptions,
+        FEA_FIELD_MODAL_BACKWARD_ERROR, FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
+        FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO, FEA_FIELD_MODAL_EFFECTIVE_MASS,
+        FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+        FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+        FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+        FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_MODAL_TOTAL_FREE_MASS,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
-    operator::{apply_k, apply_m},
+    excitation::{realize_step_excitations, ExcitationSamplePoint},
+    execution::{CanonicalSemanticState, StructuralModalSolverResult, StructuralModalWorkload},
+    pipeline::modal_basis::{ModalBasisArtifact, ModalBasisInputs},
+    pipeline::observation_history::required_mode_history_indices,
+    planning::resource::SubspaceSolvePath,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::modal::solve_modal_system,
+    solve::modal::{solve_modal_system_reusing, ModalSolveInput},
+};
+
+mod assembly;
+mod recovery;
+
+use recovery::recover_modal_core;
+pub use recovery::{
+    recover_completed_structural_modal_run, recover_completed_structural_prestressed_modal_run,
 };
 
 pub fn run_modal(
@@ -28,6 +44,160 @@ pub fn run_modal_with_options(
     backend: ComputeBackend,
     options: ModalSolveOptions,
 ) -> Result<FeaModalRunResult, FeaRunError> {
+    execute_modal_numerics(model, backend, options)
+}
+
+/// Executes one path-free modal-extraction workload against its separately transported mesh.
+///
+/// This is the numerical boundary used by portable execution. The workload owns the authored
+/// model and solver policy; the canonical mesh remains an independent object whose digest is
+/// recorded in the returned result.
+pub fn execute_structural_modal_workload(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
+    execute_structural_modal_workload_on_path(
+        workload,
+        solver_mesh,
+        SubspaceSolvePath::ShiftInvertFactorization,
+    )
+}
+
+/// Executes the workload on the solve path its admitted resource plan recorded.
+pub fn execute_structural_modal_workload_on_path(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    path: SubspaceSolvePath,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
+    if workload.prestress_transition().is_some() {
+        return Err(FeaRunError::InvalidModel(
+            "prestressed modal extraction requires its exact geometric-stiffness state".into(),
+        ));
+    }
+    execute_structural_modal_workload_with_state(workload, solver_mesh, None, path)
+}
+
+pub fn execute_structural_prestressed_modal_workload(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: &CanonicalSemanticState,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
+    execute_structural_prestressed_modal_workload_on_path(
+        workload,
+        solver_mesh,
+        prestress_state,
+        SubspaceSolvePath::ShiftInvertFactorization,
+    )
+}
+
+/// Executes the prestressed workload on the solve path its admitted resource plan recorded.
+pub fn execute_structural_prestressed_modal_workload_on_path(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: &CanonicalSemanticState,
+    path: SubspaceSolvePath,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
+    execute_structural_modal_workload_with_state(workload, solver_mesh, Some(prestress_state), path)
+}
+
+fn execute_structural_modal_workload_with_state(
+    workload: &StructuralModalWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    prestress_state: Option<&CanonicalSemanticState>,
+    path: SubspaceSolvePath,
+) -> Result<StructuralModalSolverResult, FeaRunError> {
+    workload
+        .validate()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    solver_mesh
+        .validate_canonical()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    if solver_mesh.geometry.geometry_revision != u64::from(workload.model().geometry_revision) {
+        return Err(FeaRunError::InvalidModel(format!(
+            "structural modal workload geometry revision {} does not match solver mesh geometry revision {}",
+            workload.model().geometry_revision,
+            solver_mesh.geometry.geometry_revision
+        )));
+    }
+    let topology_digest = Digest::from_bytes(*solver_mesh.canonical_digest.bytes());
+    let linearization = match (workload.prestress_transition(), prestress_state) {
+        (None, None) => None,
+        (Some(transition), Some(state)) => Some(
+            super::prestress::structural_linearization_from_state(
+                transition,
+                state,
+                topology_digest,
+            )
+            .map_err(FeaRunError::InvalidModel)?,
+        ),
+        _ => {
+            return Err(FeaRunError::InvalidModel(
+                "modal workload and prestress-state presence differ".into(),
+            ))
+        }
+    };
+    let procedure_step = workload
+        .procedure_step()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let active_model =
+        super::activation::model_with_active_constraints(workload.model(), procedure_step);
+    let modal = execute_modal_core(
+        &active_model,
+        workload.backend(),
+        ModalSolveOptions {
+            truncation: workload.truncation(),
+            convergence: workload.convergence(),
+            residual_vector_directions: workload.residual_vector_directions().to_vec(),
+            solver_mesh: Some(solver_mesh.clone()),
+        },
+        procedure_step.procedure,
+        linearization,
+        path,
+    )?;
+    StructuralModalSolverResult::new(workload, topology_digest, modal.run, modal.basis)
+        .map_err(|error| FeaRunError::Solve(error.to_string()))
+}
+
+pub(super) struct CompletedModalCore {
+    pub(super) run: FeaRunResult,
+    pub(super) basis: ModalBasisArtifact,
+    pub(super) summary: crate::assembly::AssemblySummary,
+}
+
+fn execute_modal_numerics(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: ModalSolveOptions,
+) -> Result<FeaModalRunResult, FeaRunError> {
+    let execution_step =
+        super::admission::require_structural(model, AnalysisProcedure::ModalExtraction)?;
+    let solver_mesh = options.solver_mesh.clone();
+    let core = execute_modal_core(
+        model,
+        backend,
+        options,
+        AnalysisProcedure::ModalExtraction,
+        None,
+        SubspaceSolvePath::ShiftInvertFactorization,
+    )?;
+    recover_modal_core(model, execution_step, solver_mesh.as_ref(), core)
+}
+
+fn execute_modal_core(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: ModalSolveOptions,
+    procedure: AnalysisProcedure,
+    linearization: Option<
+        &crate::pipeline::structural_linearization::StructuralLinearizationArtifact,
+    >,
+    path: SubspaceSolvePath,
+) -> Result<CompletedModalCore, FeaRunError> {
+    let execution_step = super::admission::require_structural(model, procedure)?;
+    crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralModal,
+        backend,
+    )?;
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::RegionResolution,
@@ -38,6 +208,18 @@ pub fn run_modal_with_options(
     );
     check_cancelled("fea.run_modal")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    let required_history_modes = required_mode_history_indices(execution_step)
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    options.truncation.validate()?;
+    options.convergence.validate()?;
+    if required_history_modes
+        .last()
+        .is_some_and(|mode| *mode > options.truncation.requested_mode_count())
+    {
+        return Err(FeaRunError::Observation(
+            "modal history requests a mode beyond the admitted solver mode count".into(),
+        ));
+    }
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::RegionResolution,
@@ -48,6 +230,10 @@ pub fn run_modal_with_options(
     );
     check_cancelled("fea.run_modal")?;
 
+    let excitations =
+        realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::ModelAssembly,
@@ -56,13 +242,21 @@ pub fn run_modal_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_linear_system(
+    let mut solid_energy = SolidEnergyPreparation::default();
+    let summary = assembly::assemble(
         model,
-        options.prep_context.clone(),
-        None,
-        options.thermo_mechanical_context,
-        options.electro_thermal_context,
-    );
+        &excitations,
+        options.solver_mesh.as_ref(),
+        linearization.is_some(),
+        &mut solid_energy,
+    )?;
+    let summary = if let Some(linearization) = linearization {
+        super::prestress::prestressed_structural_summary(&summary, linearization)
+            .map_err(FeaRunError::Assembly)?
+    } else {
+        summary
+    };
+    let identity = super::admission::admit_structural(&summary, execution_step)?;
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_modal",
@@ -82,7 +276,30 @@ pub fn run_modal_with_options(
         Some(2),
         Some(5),
     );
-    let modal = solve_modal_system(&summary, options.mode_count, backend);
+    // The LOBPCG multigrid takes the solid's rigid-body modes as its near-nullspace.
+    let node_coordinates_m = match (path, options.solver_mesh.as_ref()) {
+        (SubspaceSolvePath::PreconditionedLobpcg, Some(mesh)) => Some(
+            mesh.topology
+                .nodes
+                .iter()
+                .map(|node| node.coordinates_m.canonical_value())
+                .collect::<Vec<[f64; 3]>>(),
+        ),
+        _ => None,
+    };
+    let modal = solve_modal_system_reusing(
+        ModalSolveInput {
+            summary: &summary,
+            requested_mode_count: options.truncation.requested_mode_count(),
+            eigenspace_relative_tolerance: options.truncation.eigenspace_relative_tolerance(),
+            convergence: options.convergence,
+            backend,
+            path,
+            node_coordinates_m: node_coordinates_m.as_deref(),
+        },
+        &mut solid_energy.into_reuse(),
+    );
+    drop(node_coordinates_m);
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::Solve,
@@ -93,60 +310,86 @@ pub fn run_modal_with_options(
     );
     check_cancelled("fea.run_modal")?;
 
-    emit_phase(
-        "fea.run_modal",
-        FeaProgressPhase::Postprocess,
-        FeaProgressStatus::Started,
-        "recovering modal fields",
-        Some(3),
-        Some(5),
-    );
     let mut diagnostics = modal.diagnostics.clone();
+    if let Some(admitted) = modal.boundary_unresolved_at_capacity {
+        return Err(FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::ModalSubspaceCapacity {
+                requested_mode_count: options.truncation.requested_mode_count() as u64,
+                admitted_subspace_dimension: admitted as u64,
+            },
+        ));
+    }
+    if !modal.converged {
+        return Err(FeaRunError::Assembly(format!(
+            "modal eigensolver did not qualify its requested subspace: {:?}",
+            modal.diagnostics
+        )));
+    }
     extend_common_run_diagnostics(
         &mut diagnostics,
         CommonRunDiagnosticInputs {
             model,
             summary: &summary,
-            prep_context: options.prep_context.clone(),
-            iteration_metric: mode_shapes_iteration_count_estimate(&modal.residual_norms),
-            residual_metric: modal.residual_norms.iter().copied().fold(0.0_f64, f64::max),
-            requested_preconditioner: "auto",
-            effective_preconditioner: if backend == ComputeBackend::Gpu {
-                "jacobi"
-            } else {
-                "none"
-            },
         },
     );
 
-    let displacement = modal
-        .mode_shapes
-        .first()
-        .cloned()
-        .unwrap_or_else(|| vec![0.0; summary.dof_count.max(3)]);
-    let von_mises = displacement
-        .iter()
-        .map(|value| value.abs())
-        .fold(0.0_f64, f64::max)
-        * 1.0e11;
-    let modal_fields = recover_modal_result_fields(
+    let basis = ModalBasisArtifact::new(
+        identity.clone(),
         &summary,
-        &modal.eigenvalues_hz,
-        &modal.mode_shapes,
-        &modal.residual_norms,
-    );
-    let mut run_fields = vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            vector_shape(summary.dof_count),
-            padded_vector_values(displacement, summary.dof_count),
+        ModalBasisInputs {
+            frequencies_hz: &modal.frequencies_hz,
+            dof_shapes: &modal.mode_shapes,
+            residual_norms: &modal.residual_norms,
+            backward_errors: &modal.backward_errors,
+            truncation_policy: options.truncation,
+            available_mode_count: modal.available_mode_count,
+            boundary_probe_count: modal.boundary_probe_count,
+            boundary_probe_frequency_hz: modal.boundary_probe_frequency_hz,
+        },
+    )?;
+    let residual_directions = super::modal_residual::canonical_residual_vector_directions(
+        &options.residual_vector_directions,
+    )
+    .map_err(FeaRunError::InvalidModel)?;
+    let basis = if residual_directions.is_empty() {
+        basis
+    } else {
+        basis.with_directional_residual_vectors(&summary, &residual_directions)?
+    };
+    diagnostics.push(crate::diagnostics::FeaDiagnostic {
+        code: "FEA_MODAL_TRUNCATION".into(),
+        severity: crate::diagnostics::FeaDiagnosticSeverity::Info,
+        message: format!(
+            "requested_mode_count={} retained_mode_count={} available_mode_count={} boundary_probe_count={} boundary_probe_frequency_hz={:?} expanded_for_eigenspace={} complete_boundary_eigenspace={}",
+            basis.truncation().policy().requested_mode_count(),
+            basis.truncation().retained_mode_count(),
+            basis.truncation().available_mode_count(),
+            basis.truncation().boundary_probe_count(),
+            basis.truncation().boundary_probe_frequency_hz(),
+            basis.truncation().expanded_for_eigenspace(),
+            basis.truncation().complete_boundary_eigenspace(),
         ),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
-    ];
-    run_fields.extend(modal_fields);
-
+    });
+    diagnostics.push(crate::diagnostics::FeaDiagnostic {
+        code: "FEA_MODAL_EIGENSPACES".into(),
+        severity: crate::diagnostics::FeaDiagnosticSeverity::Info,
+        message: format!(
+            "eigenspace_count={} repeated_eigenspace_count={} relative_frequency_tolerance={}",
+            basis.eigenspaces().len(),
+            basis
+                .eigenspaces()
+                .iter()
+                .filter(|eigenspace| eigenspace.is_repeated())
+                .count(),
+            basis.truncation().policy().eigenspace_relative_tolerance(),
+        ),
+    });
     let run = FeaRunResult {
-        backend,
+        identity,
+        requested_backend: backend,
+        execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
+            modal.solver_backend,
+        ),
         solver_backend: modal.solver_backend,
         solver_device_apply_k_ratio: if modal.device_apply_k_attempt_count == 0 {
             0.0
@@ -154,168 +397,161 @@ pub fn run_modal_with_options(
             modal.device_apply_k_count as f64 / modal.device_apply_k_attempt_count as f64
         },
         solver_method: modal.solver_method,
-        preconditioner: if backend == ComputeBackend::Gpu {
-            "jacobi".to_string()
-        } else {
-            "none".to_string()
-        },
+        preconditioner: modal.preconditioner,
         solver_host_sync_count: modal.solver_host_sync_count,
+        accelerator_evidence: modal.accelerator_evidence,
         diagnostics,
-        fields: run_fields,
+        spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        structural_static_convergence: None,
+        structural_static_balance: None,
+        structural_constraint_result: None,
+        structural_connector_result: None,
+        observations: Vec::new(),
+        observation_histories: Vec::new(),
+        series_reductions: Vec::new(),
+        fields: modal_result_fields(&basis),
     };
-
-    let mode_shape = vector_shape(summary.dof_count);
-    let mode_shape_value_count = mode_shape.iter().product();
-    let mode_shapes = modal
-        .mode_shapes
-        .into_iter()
-        .enumerate()
-        .map(|(index, shape)| {
-            let mut values = shape;
-            values.resize(mode_shape_value_count, 0.0);
-            AnalysisField::host_f64(
-                fea_modal_mode_shape_field_id(index + 1),
-                mode_shape.clone(),
-                values,
-            )
-        })
-        .collect();
-
-    emit_phase(
-        "fea.run_modal",
-        FeaProgressPhase::Postprocess,
-        FeaProgressStatus::Completed,
-        "modal result field recovery complete",
-        Some(4),
-        Some(5),
-    );
-    check_cancelled("fea.run_modal")?;
-    emit_phase(
-        "fea.run_modal",
-        FeaProgressPhase::Complete,
-        FeaProgressStatus::Completed,
-        "FEA modal run complete",
-        Some(5),
-        Some(5),
-    );
-
-    Ok(FeaModalRunResult {
+    run.validate_solver_formulation()?;
+    Ok(CompletedModalCore {
         run,
-        eigenvalues_hz: modal.eigenvalues_hz,
-        mode_shapes,
-        residual_norms: modal.residual_norms,
+        basis,
+        summary,
     })
 }
 
-fn mode_shapes_iteration_count_estimate(residual_norms: &[f64]) -> f64 {
-    residual_norms.len() as f64
-}
-
-fn vector_shape(dof_count: usize) -> Vec<usize> {
-    vec![dof_count.div_ceil(3).max(1), 3]
-}
-
-fn padded_vector_values(mut values: Vec<f64>, dof_count: usize) -> Vec<f64> {
-    values.resize(vector_shape(dof_count).iter().product(), 0.0);
-    values
-}
-
-fn recover_modal_result_fields(
-    summary: &crate::assembly::AssemblySummary,
-    frequencies_hz: &[f64],
-    mode_shapes: &[Vec<f64>],
-    residual_norms: &[f64],
-) -> Vec<AnalysisField> {
-    let mode_count = frequencies_hz.len().min(mode_shapes.len());
-    let frequencies = frequencies_hz
-        .iter()
-        .copied()
-        .take(mode_count)
-        .collect::<Vec<_>>();
-    let eigenvalues = frequencies
-        .iter()
-        .map(|frequency| (2.0 * std::f64::consts::PI * frequency).powi(2))
-        .collect::<Vec<_>>();
-    let mut modal_mass = Vec::with_capacity(mode_count);
-    let mut modal_stiffness = Vec::with_capacity(mode_count);
-    let mut participation_factor = Vec::with_capacity(mode_count);
-    let residual_norm = (0..mode_count)
-        .map(|index| residual_norms.get(index).copied().unwrap_or(f64::INFINITY))
-        .collect::<Vec<_>>();
-    let relative_frequency_separation = relative_frequency_separation(&frequencies);
-    let mut m_orthogonality = Vec::with_capacity(mode_count.saturating_mul(mode_count));
-
-    for mode_shape in mode_shapes.iter().take(mode_count) {
-        let mass_applied = apply_m(&summary.operator, mode_shape);
-        let stiffness_applied = apply_k(&summary.operator, mode_shape);
-        let mass = dot(mode_shape, &mass_applied).abs();
-        let stiffness = dot(mode_shape, &stiffness_applied).abs();
-        modal_mass.push(mass);
-        modal_stiffness.push(stiffness);
-        participation_factor.push(mass_applied.iter().sum::<f64>() / mass.sqrt().max(1.0e-12));
-    }
-
-    for left in mode_shapes.iter().take(mode_count) {
-        for right in mode_shapes.iter().take(mode_count) {
-            let mass_applied = apply_m(&summary.operator, right);
-            m_orthogonality.push(dot(left, &mass_applied));
-        }
-    }
-
+fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
+    let mode_count = basis.modes().len();
+    let directional = |select: fn(crate::pipeline::modal_basis::ModalDirectionalMetric) -> f64| {
+        basis
+            .modes()
+            .iter()
+            .flat_map(|mode| mode.directional().iter().copied().map(select))
+            .collect::<Vec<_>>()
+    };
     vec![
-        AnalysisField::host_f64(FEA_FIELD_MODAL_FREQUENCY_HZ, vec![mode_count], frequencies),
-        AnalysisField::host_f64(FEA_FIELD_MODAL_EIGENVALUE, vec![mode_count], eigenvalues),
-        AnalysisField::host_f64(FEA_FIELD_MODAL_MODAL_MASS, vec![mode_count], modal_mass),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_FREQUENCY_HZ,
+            AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode),
+            vec![mode_count],
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.frequency_hz())
+                .collect(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_EIGENVALUE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Eigenvalue, FieldLocation::Mode),
+            vec![mode_count],
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.eigenvalue_rad2_per_s2())
+                .collect(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_MODAL_MASS,
+            AnalysisFieldLayout::scalar(ObservationQuantity::ModalMass, FieldLocation::Mode),
+            vec![mode_count],
+            basis.modes().iter().map(|mode| mode.modal_mass()).collect(),
+        ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_MODAL_STIFFNESS,
+            AnalysisFieldLayout::scalar(ObservationQuantity::ModalStiffness, FieldLocation::Mode),
             vec![mode_count],
-            modal_stiffness,
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.modal_stiffness())
+                .collect(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
-            vec![mode_count],
-            participation_factor,
+            AnalysisFieldLayout::vector3(
+                ObservationQuantity::ModalParticipation,
+                FieldLocation::Mode,
+            ),
+            vec![mode_count, 3],
+            directional(|metric| metric.participation_factor()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_EFFECTIVE_MASS,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ModalMass, FieldLocation::Mode),
+            vec![mode_count, 3],
+            directional(|metric| metric.effective_mass()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ModalMass, FieldLocation::Mode),
+            vec![mode_count, 3],
+            directional(|metric| metric.cumulative_effective_mass()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
+            AnalysisFieldLayout::vector3(ObservationQuantity::MassRatio, FieldLocation::Mode),
+            vec![mode_count, 3],
+            directional(|metric| metric.cumulative_mass_ratio()),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_TOTAL_FREE_MASS,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ModalMass, FieldLocation::Global),
+            vec![3],
+            basis.total_free_mass().to_vec(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_RESIDUAL_NORM,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Mode),
             vec![mode_count],
-            residual_norm,
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.residual_norm())
+                .collect(),
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_MODAL_BACKWARD_ERROR,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Mode),
+            vec![mode_count],
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.backward_error())
+                .collect(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::FrequencySeparation,
+                FieldLocation::Mode,
+            ),
             vec![mode_count],
-            relative_frequency_separation,
+            basis
+                .modes()
+                .iter()
+                .map(|mode| mode.relative_frequency_separation())
+                .collect(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_M_ORTHOGONALITY,
+            // One mode-by-mode matrix for the whole basis: a tensor whatever the mode count.
+            AnalysisFieldLayout::new(
+                ObservationQuantity::MassOrthogonality,
+                FieldLocation::Global,
+                runmat_analysis_core::ObservationValueShape::Tensor {
+                    extents: vec![mode_count, mode_count],
+                },
+            ),
             vec![mode_count, mode_count],
-            m_orthogonality,
+            basis.mass_orthogonality().to_vec(),
         ),
     ]
 }
 
-fn relative_frequency_separation(frequencies: &[f64]) -> Vec<f64> {
-    if frequencies.len() < 2 {
-        return vec![1.0; frequencies.len()];
-    }
+#[cfg(test)]
+mod curved_tet10_tests;
 
-    let mut separation = vec![f64::INFINITY; frequencies.len()];
-    for (index, window) in frequencies.windows(2).enumerate() {
-        let a = window[0].abs().max(1.0e-12);
-        let b = window[1].abs().max(1.0e-12);
-        let value = (b - a).abs() / a.max(b);
-        separation[index] = separation[index].min(value);
-        separation[index + 1] = separation[index + 1].min(value);
-    }
-    separation
-        .into_iter()
-        .map(|value| if value.is_finite() { value } else { 1.0 })
-        .collect()
-}
+#[cfg(test)]
+pub(crate) mod rod_qualification;
 
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(lhs, rhs)| lhs * rhs)
-        .sum()
-}
+#[cfg(test)]
+mod tests;

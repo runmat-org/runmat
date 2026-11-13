@@ -3,8 +3,7 @@
 //! Descriptors carry no path, worker, encryption, retention, or transfer state. The execution
 //! artifact system remains authoritative for those concerns and independently verifies bytes.
 
-use std::collections::BTreeSet;
-
+mod storage;
 use serde::{Deserialize, Serialize};
 
 use super::{identity::validate_digest_list, MeshingContractError, MeshingStageKind, StableDigest};
@@ -29,9 +28,10 @@ pub enum MeshingChunkMediaType {
     MeshNodes,
     MeshElements,
     MeshClassification,
+    SolverMeshProjection,
     ValidationEvidence,
     DiagnosticEvidence,
-    AnalysisMeshArtifact,
+    SolverMeshArtifact,
     MeshingEvidence,
 }
 
@@ -51,10 +51,11 @@ impl MeshingChunkMediaType {
             Self::MeshNodes => "application/vnd.runmat.mesh-nodes.v2",
             Self::MeshElements => "application/vnd.runmat.mesh-elements.v2",
             Self::MeshClassification => "application/vnd.runmat.mesh-classification.v2",
+            Self::SolverMeshProjection => "application/vnd.runmat.solver-mesh-projection.v1",
             Self::ValidationEvidence => "application/vnd.runmat.mesh-validation.v2",
             Self::DiagnosticEvidence => "application/vnd.runmat.mesh-diagnostics.v2",
-            Self::AnalysisMeshArtifact => "application/vnd.runmat.analysis-mesh.v2",
-            Self::MeshingEvidence => "application/vnd.runmat.meshing-evidence.v2",
+            Self::SolverMeshArtifact => "application/vnd.runmat.solver-mesh.v4",
+            Self::MeshingEvidence => "application/vnd.runmat.meshing-evidence.v3",
         }
     }
 
@@ -73,9 +74,10 @@ impl MeshingChunkMediaType {
             Self::MeshNodes,
             Self::MeshElements,
             Self::MeshClassification,
+            Self::SolverMeshProjection,
             Self::ValidationEvidence,
             Self::DiagnosticEvidence,
-            Self::AnalysisMeshArtifact,
+            Self::SolverMeshArtifact,
             Self::MeshingEvidence,
         ]
         .into_iter()
@@ -102,7 +104,6 @@ impl MeshingChunkDescriptor {
             || self.schema_version == 0
             || self.encoded_length == 0
             || self.decoded_length == 0
-            || self.logical_entity_count == 0
         {
             return Err(MeshingContractError::invalid(
                 "meshing chunk descriptor",
@@ -143,6 +144,19 @@ pub struct MeshingStageManifest {
 }
 
 impl MeshingStageManifest {
+    /// Exact typed slots used to check chunk-digest uniqueness; no owned keys.
+    pub fn validation_scratch_bytes(chunk_count: usize) -> Result<u64, MeshingContractError> {
+        chunk_count
+            .checked_mul(std::mem::size_of::<StableDigest>())
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or_else(|| {
+                MeshingContractError::invalid(
+                    "meshing stage manifest chunks",
+                    "uniqueness storage overflow",
+                )
+            })
+    }
+
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         if self.schema_version != MESHING_STAGE_MANIFEST_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
@@ -166,19 +180,18 @@ impl MeshingStageManifest {
                 "manifest must contain a bounded, non-empty chunk inventory",
             ));
         }
-        let mut chunk_digests = BTreeSet::new();
+        let mut chunk_digests = Vec::with_capacity(self.chunks.len());
         let mut total = 0_u64;
         let mut next_entity_ordinal = 0_u64;
         for (ordinal, chunk) in self.chunks.iter().enumerate() {
             chunk.validate(ordinal)?;
-            if chunk.first_logical_entity_ordinal != next_entity_ordinal
-                || !chunk_digests.insert(chunk.digest)
-            {
+            if chunk.first_logical_entity_ordinal != next_entity_ordinal {
                 return Err(MeshingContractError::invalid(
                     "meshing stage manifest chunks",
                     "chunk entity ranges must be contiguous and digests must be unique",
                 ));
             }
+            chunk_digests.push(chunk.digest);
             next_entity_ordinal = next_entity_ordinal
                 .checked_add(chunk.logical_entity_count)
                 .ok_or_else(|| {
@@ -193,6 +206,13 @@ impl MeshingStageManifest {
                     "encoded chunk length overflow",
                 )
             })?;
+        }
+        chunk_digests.sort_unstable();
+        if chunk_digests.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(MeshingContractError::invalid(
+                "meshing stage manifest chunks",
+                "chunk entity ranges must be contiguous and digests must be unique",
+            ));
         }
         if total != self.total_encoded_length {
             return Err(MeshingContractError::invalid(

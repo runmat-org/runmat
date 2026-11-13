@@ -2,25 +2,48 @@
 //! catalog cohorts yet.
 //!
 //! The identity lookup is the inventory: only a registered builtin's own
-//! legacy resolver/declared return participates. No semantic name category is
-//! reinterpreted here. C00-C07 replace these identity-owned legacy contracts
-//! with canonical catalog entries, and R29 removes this module.
+//! legacy resolver/declared return participates. Primitive numeric class
+//! constructors additionally use the shared, class-exhaustive conversion
+//! rule because the legacy `Type` enum cannot retain their storage width.
+//! C00-C07 replace these identity-owned legacy contracts with canonical
+//! catalog entries, and R29 removes this module.
 
 use std::collections::BTreeMap;
 
 use runmat_builtins::Type;
 use runmat_types::{
-    infer_call, infer_concatenate, infer_reduction, infer_repmat, infer_reshape, permute_shape,
-    CallContract, CallInference, CallRequest, CellFact, DimensionFact, DynamicReason,
-    FactInference, FactJoin, InferenceDiagnostic, NumericClass, NumericDomain, NumericFact,
-    ObjectFact, OutputListFact, QualifiedName, ShapeFact, StorageFact, StructFact, SymbolName,
-    ValueFact, ValueKindFact,
+    infer_call, infer_concatenate, infer_numeric_conversion, infer_reduction, CallContract,
+    CallInference, CallRequest, CellFact, DynamicReason, FactInference, FactJoin,
+    InferenceDiagnostic, NumericClass, NumericDomain, NumericFact, ObjectFact, OutputListFact,
+    ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 
 pub(crate) fn infer_legacy_builtin(name: &str, request: &CallRequest) -> Option<CallInference> {
     let function = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|function| function.name.eq_ignore_ascii_case(name))?;
+    infer_registered_legacy_builtin(function, name, request).map(|mut inference| {
+        inference
+            .capabilities
+            .0
+            .extend(function.required_capabilities.iter().copied());
+        inference
+    })
+}
+
+fn infer_registered_legacy_builtin(
+    function: &runmat_builtins::BuiltinFunction,
+    name: &str,
+    request: &CallRequest,
+) -> Option<CallInference> {
+    if request.arguments.len() == 1 {
+        if let Some(target) = NumericClass::from_class_name(function.name) {
+            return Some(call_from_fact(
+                infer_numeric_conversion(&request.arguments[0], target),
+                request,
+            ));
+        }
+    }
 
     if name.eq_ignore_ascii_case("linspace") {
         return Some(infer_call(
@@ -33,43 +56,6 @@ pub(crate) fn infer_legacy_builtin(name: &str, request: &CallRequest) -> Option<
             &repeatable_contract(meshgrid_fact(request)),
             request,
         ));
-    }
-    if name.eq_ignore_ascii_case("reshape") {
-        return request.arguments.first().map(|source| {
-            let (dimensions, mut diagnostics) = dimensions_from(request, 1, true);
-            let mut inference = infer_reshape(source, dimensions);
-            inference.diagnostics.append(&mut diagnostics);
-            call_from_fact(inference, request)
-        });
-    }
-    if name.eq_ignore_ascii_case("repmat") {
-        return request.arguments.first().map(|source| {
-            let (dimensions, diagnostics) = dimensions_from(request, 1, false);
-            let mut inference = infer_repmat(source, &dimensions);
-            inference.diagnostics.extend(diagnostics);
-            call_from_fact(inference, request)
-        });
-    }
-    if name.eq_ignore_ascii_case("permute") {
-        return request.arguments.first().map(|source| {
-            let order = request
-                .literals
-                .numeric_vector_at(1)
-                .unwrap_or_default()
-                .into_iter()
-                .collect::<Option<Vec<_>>>();
-            let inference = match order {
-                Some(order) => match permute_shape(&source.shape, &order) {
-                    Ok(shape) => FactInference::exact(with_shape(source, shape)),
-                    Err(diagnostic) => FactInference {
-                        fact: ValueFact::unknown(DynamicReason::ConflictingControlFlow),
-                        diagnostics: vec![diagnostic],
-                    },
-                },
-                None => FactInference::exact(with_shape(source, ShapeFact::Unknown)),
-            };
-            call_from_fact(inference, request)
-        });
     }
     if name.eq_ignore_ascii_case("horzcat") || name.eq_ignore_ascii_case("vertcat") {
         let dimension = if name.eq_ignore_ascii_case("horzcat") {
@@ -156,61 +142,6 @@ fn call_from_fact(inference: FactInference, request: &CallRequest) -> CallInfere
     let mut call = infer_call(&CallContract::fixed(vec![inference.fact]), request);
     call.diagnostics.extend(inference.diagnostics);
     call
-}
-
-fn with_shape(source: &ValueFact, shape: ShapeFact) -> ValueFact {
-    let mut output = source.clone();
-    output.shape = shape;
-    output
-}
-
-fn dimensions_from(
-    request: &CallRequest,
-    start: usize,
-    reshape: bool,
-) -> (Vec<DimensionFact>, Vec<InferenceDiagnostic>) {
-    let literals = request.literals.literal_args.get(start..).unwrap_or(&[]);
-    let flattened = match literals.first() {
-        Some(runmat_types::LiteralValue::Vector(values)) if literals.len() == 1 => {
-            values.as_slice()
-        }
-        _ => literals,
-    };
-    let mut inferred_dimensions = 0usize;
-    let mut diagnostics = Vec::new();
-    let dimensions = flattened
-        .iter()
-        .map(
-            |literal| match runmat_types::LiteralContext::numeric_from_literal(literal) {
-                Some(value) if reshape && value == -1.0 => {
-                    inferred_dimensions += 1;
-                    DimensionFact::Unknown
-                }
-                Some(value) if value.is_finite() && value >= 0.0 && value.fract() == 0.0 => {
-                    DimensionFact::Known(value as usize)
-                }
-                Some(_) => {
-                    diagnostics.push(InferenceDiagnostic::error(
-                    if reshape { "RM-TYPE-RESHAPE" } else { "RM-TYPE-REPMAT" },
-                    if reshape {
-                        "reshape dimensions must be non-negative integers or one inferred dimension"
-                    } else {
-                        "repmat dimensions must be non-negative integers"
-                    },
-                ));
-                    DimensionFact::Unknown
-                }
-                None => DimensionFact::Unknown,
-            },
-        )
-        .collect();
-    if reshape && inferred_dimensions > 1 {
-        diagnostics.push(InferenceDiagnostic::error(
-            "RM-TYPE-RESHAPE",
-            "reshape accepts at most one inferred dimension",
-        ));
-    }
-    (dimensions, diagnostics)
 }
 
 fn repeatable_contract(output: ValueFact) -> CallContract {
@@ -327,10 +258,7 @@ fn fact_to_type(fact: &ValueFact) -> Type {
                 .then(|| structure.fields.keys().cloned().collect()),
         },
         ValueKindFact::Object(object) => Type::Object {
-            class_name: object
-                .runtime_class
-                .as_ref()
-                .and_then(QualifiedName::display_name),
+            class_name: object.runtime_class.clone(),
             shape,
         },
         ValueKindFact::Callable(callable) => Type::Function {
@@ -392,6 +320,7 @@ fn type_to_fact(value: &Type) -> ValueFact {
         Type::Function { params, returns } => {
             ValueFact::scalar(ValueKindFact::Callable(runmat_types::CallableFact {
                 identity: None,
+                capabilities: Default::default(),
                 parameters: params.iter().map(type_to_fact).collect(),
                 parameters_complete: true,
                 outputs: match returns.as_ref() {
@@ -412,8 +341,8 @@ fn type_to_fact(value: &Type) -> ValueFact {
             .map(type_to_fact)
             .reduce(|left, right| left.join(&right))
             .unwrap_or_else(dynamic_value),
-        Type::Struct { known_fields } => ValueFact::scalar(ValueKindFact::Struct(StructFact {
-            fields: known_fields
+        Type::Struct { known_fields } => {
+            let fields = known_fields
                 .as_ref()
                 .map(|fields| {
                     fields
@@ -422,19 +351,16 @@ fn type_to_fact(value: &Type) -> ValueFact {
                         .map(|field| (field, dynamic_value()))
                         .collect::<BTreeMap<_, _>>()
                 })
-                .unwrap_or_default(),
-            fields_complete: known_fields.is_some(),
-        })),
+                .unwrap_or_default();
+            ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+                fields,
+                known_fields.is_some(),
+            )))
+        }
         Type::Object { class_name, shape } => ValueFact::proven(
             ValueKindFact::Object(ObjectFact {
                 class: None,
-                runtime_class: class_name.as_ref().map(|name| {
-                    QualifiedName(
-                        name.split('.')
-                            .map(|part| SymbolName(part.to_string()))
-                            .collect(),
-                    )
-                }),
+                runtime_class: class_name.clone(),
                 properties: BTreeMap::new(),
                 properties_complete: false,
                 handle_semantics: None,

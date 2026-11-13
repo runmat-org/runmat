@@ -1,0 +1,73 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("pwelch"),
+    slug: Some("pwelch"),
+    summary: "Estimate power spectral density using Welch's method.",
+    description: "`pwelch(x)` combines modified periodograms from overlapping, windowed segments. Optional controls select the window, overlap, DFT length or explicit frequency grid, sampling frequency, range, power scaling, and mean or hold trace.",
+    keywords: &["pwelch", "Welch", "PSD", "periodogram", "spectral density", "signal processing"],
+    related: &["periodogram", "spectrogram", "fft", "hamming"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+            "`pxx = pwelch(x)` returns a one-sided PSD for a real signal and a two-sided PSD for a complex signal. Matrix inputs are processed column-wise, with one output column per signal column.",
+            "In RunMat, all computed numerical outputs follow the signal's precision: Single signals produce Single `pxx` and `f`; Double and admitted typed-integer or logical signals produce Double. Controls do not determine result precision. This is RunMat behavior, not a claim of verified MATLAB output-class parity.",
+            "`[pxx,f] = pwelch(...)` returns the frequency grid in radians/sample when `fs` is omitted. An explicit `fs=[]` selects 1 Hz, while a positive scalar `fs` selects that sample rate in Hz. Even-length one-sided results include DC and Nyquist, so their length is `nfft/2+1`.",
+            "Confidence intervals and `ConfidenceLevel` are not yet supported. Additional requested outputs are runtime padding, not confidence bounds.",
+            "A scalar `window` creates a Hamming window. `[]` uses a Hamming window sized for roughly eight half-overlapped sections, capped at 256 samples. An explicit finite real window is used directly. `noverlap` defaults to half its length and must be smaller than the window length.",
+            "`nfft` defaults to `max(256,2^nextpow2(length(window)))` and can be replaced with a finite real frequency vector. A shorter DFT folds each windowed segment modulo `nfft`; a longer DFT zero-pads it. The optional range selectors are `onesided`, `twosided`, and `centered`; `onesided` requires a real signal, and explicit-frequency grids do not accept a range selector. For even `nfft`, centered frequencies cover (−fs/2,fs/2]; odd `nfft` covers the open interval. The scale selector `psd` is the default; `power` multiplies PSD by the window's equivalent-noise bandwidth.",
+            "The trace selector `mean` is the default. `maxhold` and `minhold` select the largest or smallest segment power at each frequency independently; a missing segment remains missing in the result. The selected trace does not change the frequency grid or the signal-derived output precision.",
+            "Typed-integer signal and numeric-control classes are independently gated RunMat extensions. Scalar lengths and overlap are exact structural controls. Signals, vector windows, frequency grids, and sample rates must be exactly representable at the binary64 Welch boundary. Logical signal/control admission is separately gated in RunMat mode.",
+            "With no output arguments, RunMat plots the spectrum in the current axes. `Parent=ax` selects an existing RunMat axes handle and also plots when numerical outputs are requested. RunMat does not yet represent MATLAB UIAxes or Panel containers, so those Parent forms remain an explicit graphics-model gap rather than being interpreted as ordinary axes.",
+        ] },
+        BuiltinDocumentationSection { heading: "Execution and ownership", paragraphs: &[
+            "Uniform-grid Welch estimation can retain a supported floating signal on its original GPU through segment framing, FFTs, power scaling, and segment averaging. Explicit-frequency and unsupported typed-integer forms use an owner-aware host reference path; eligible outputs restore to the exact original owner.",
+            "Provider capability rejection may select the host reference path. Operational provider failures retain their source and do not replay. Explicit GPU intent fails when the requested result cannot be restored on that device.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "example-1", title: "PSD of a sine wave", program: "fs = 1000;\nt = (0:999) / fs;\nx = sin(2*pi*100*t);\n[pxx, f] = pwelch(x, hamming(256), 128, 512, fs);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(pxx,'double')); assert(size(pxx,1)==257); assert(size(f,1)==257); assert(abs(f(52)-100)<2);" } },
+        BuiltinExample { id: "example-2", title: "Use a scalar window length", program: "[pxx, w] = pwelch(randn(1,1024), 128, 64, 256);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(size(pxx,1)==129); assert(size(w,1)==129);" } },
+        BuiltinExample { id: "example-3", title: "Two-sided spectrum", program: "x = exp(1i*2*pi*(0:127)/16);\n[pxx, w] = pwelch(x, 64, 32, 128, 'twosided');", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(size(pxx,1)==128); assert(size(w,1)==128);" } },
+        BuiltinExample { id: "example-4", title: "Centered spectrum in Hz", program: "[pxx, f] = pwelch(randn(1,512), [], [], 512, 2000, 'centered');", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(size(pxx,1)==512); assert(f(1)<0); assert(f(512)>0);" } },
+        BuiltinExample { id: "example-5", title: "Column-wise spectra for a matrix", program: "x = [sin(2*pi*(0:255)'/16), cos(2*pi*(0:255)'/32)];\n[pxx, f] = pwelch(x, 64, 32, 128, 'power');", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(size(pxx,1)==65); assert(size(pxx,2)==2); assert(size(f,1)==65);" } },
+        BuiltinExample { id: "example-6", title: "Evaluate at explicit normalized frequencies", program: "w = linspace(0, pi, 64);\n[pxx, wout] = pwelch(randn(1,512), hamming(128), 64, w);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(size(pxx,1)==64); assert(size(wout,1)==64); assert(abs(wout(1)-w(1))<1e-12);" } },
+        BuiltinExample { id: "example-7", title: "Explicit empty sample rate", program: "[density, f] = pwelch(ones(1,8), ones(1,8), 0, 8, []);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(f(2)-0.125)<1e-12); assert(abs(density(1)-64/8)<1e-12);" } },
+        BuiltinExample { id: "example-8", title: "Equivalent-noise-bandwidth power", program: "w = [1 2];\n[density, f] = pwelch([1 1], w, 0, 2, 1);\npower = pwelch([1 1], w, 0, 2, 1, 'power');", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(density(1)-9/5)<1e-12); assert(abs(power(1)-1)<1e-12); assert(abs(f(2)-0.5)<1e-12);" } },
+        BuiltinExample { id: "example-9", title: "Mean and hold traces", program: "x = [1;1;3;3];\nw = [1 1];\n[pmean,f] = pwelch(x,w,0,2,1,'mean');\npmax = pwelch(x,w,0,2,1,'maxhold');\npmin = pwelch(x,w,0,2,1,'minhold');\n[pmean(1) pmax(1) pmin(1)]", display_output: Some("10 18 2"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(pmean(1)-10)<1e-12); assert(abs(pmax(1)-18)<1e-12); assert(abs(pmin(1)-2)<1e-12); assert(f(2)==0.5);" } },
+        BuiltinExample { id: "example-10", title: "Fold a segment into a shorter DFT", program: "[pxx,f] = pwelch([1;2;3;4],[1;1;1;1],0,2,1);\npxx", display_output: Some("25; 1"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(pxx(1)-25)<1e-12); assert(abs(pxx(2)-1)<1e-12); assert(f(2)==0.5);" } },
+        BuiltinExample { id: "example-11", title: "Plot a Welch spectrum in a target axes", program: "f = figure();\nax = axes('Parent',f);\npwelch([1;1;1;1],[1;1],0,2,1,Parent=ax);", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(~isempty(findobj(ax,'Type','line')));" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Can I pass a Hamming window from the `hamming` builtin?", answer: "Yes. `pwelch(x,hamming(n),noverlap,nfft,fs)` uses that window directly. A scalar `n` constructs a Hamming segment window internally." },
+        BuiltinDocumentationFaq { question: "Does `pwelch` include the Nyquist bin?", answer: "For one-sided output with even `nfft`, yes. Its length is `nfft/2+1`; DC is first and Nyquist is last." },
+        BuiltinDocumentationFaq { question: "Does `pwelch` plot when no outputs are requested?", answer: "Yes. A zero-output call plots in the current axes. `Parent=ax` targets an existing axes and plots even when numerical outputs are requested; UIAxes and Panel objects still need corresponding RunMat graphics identities." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "periodogram", target: BuiltinDocumentationLinkTarget::Builtin("periodogram") },
+        BuiltinDocumentationLink { label: "spectrogram", target: BuiltinDocumentationLinkTarget::Builtin("spectrogram") },
+        BuiltinDocumentationLink { label: "fft", target: BuiltinDocumentationLinkTarget::Builtin("fft") },
+        BuiltinDocumentationLink { label: "hamming", target: BuiltinDocumentationLinkTarget::Builtin("hamming") },
+        BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch.rs") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Runtime admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch.rs") },
+            BuiltinDocumentationLink { label: "Controls", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch/controls.rs") },
+            BuiltinDocumentationLink { label: "Numerical Welch", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch/numerical.rs") },
+            BuiltinDocumentationLink { label: "Window scaling", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch/scaling.rs") },
+            BuiltinDocumentationLink { label: "Resident execution", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch/resident.rs") },
+            BuiltinDocumentationLink { label: "Plot target admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch/named.rs") },
+            BuiltinDocumentationLink { label: "Welch presentation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/pwelch/presentation.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Welch forms and resident ownership", location: "builtins::math::signal::pwelch::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM public call", location: "crates/runmat-vm/tests/basics.rs" },
+        ],
+        notes: &["Signal-derived numerical output precision is a RunMat policy, not verified MATLAB output-class parity. Native, browser, hardware, and standalone-example execution remain independently qualified."],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

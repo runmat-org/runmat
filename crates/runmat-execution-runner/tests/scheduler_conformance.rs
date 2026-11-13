@@ -7,6 +7,7 @@ use runmat_execution::state::{PoolState, TaskState};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::TaskId;
 use runmat_execution_runner::driver::{DriverAction, DriverActor, DriverCommand};
+use runmat_execution_runner::{AttemptFailureKind, AttemptReport};
 
 #[test]
 fn actor_mailbox_preserves_command_order() {
@@ -75,13 +76,141 @@ fn dependencies_release_only_after_logical_result_commit() {
         .handle(DriverCommand::BackendReport(
             runmat_execution_runner::port::BackendReport::for_request(
                 &first_request,
-                common::success(),
+                common::success(&first_request),
             ),
         ))
         .unwrap();
     assert!(actions.iter().any(
         |action| matches!(action, DriverAction::Launch(request) if request.task_id == child_id)
     ));
+}
+
+#[test]
+fn dependency_submitted_after_success_is_ready_immediately() {
+    let mut fixture = common::fixture(1, 1);
+    let parent = common::task(
+        "late-parent",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let parent_id = parent.request.id;
+    let parent_request = common::submit(&mut fixture.driver, parent);
+    fixture
+        .driver
+        .handle(DriverCommand::BackendReport(
+            runmat_execution_runner::port::BackendReport::for_request(
+                &parent_request,
+                common::success(&parent_request),
+            ),
+        ))
+        .unwrap();
+
+    let mut child = common::task(
+        "late-child",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let child_id = child.request.id;
+    child.dependencies = BTreeSet::from([parent_id]);
+    let actions = fixture
+        .driver
+        .handle(DriverCommand::Submit(Box::new(child)))
+        .unwrap();
+
+    assert!(actions.iter().any(
+        |action| matches!(action, DriverAction::Launch(request) if request.task_id == child_id)
+    ));
+}
+
+#[test]
+fn dependency_submitted_after_failure_inherits_terminal_state() {
+    let mut fixture = common::fixture(1, 1);
+    let parent = common::task(
+        "failed-parent",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let parent_id = parent.request.id;
+    let parent_request = common::submit(&mut fixture.driver, parent);
+    fixture
+        .driver
+        .handle(DriverCommand::BackendReport(
+            runmat_execution_runner::port::BackendReport::for_request(
+                &parent_request,
+                AttemptReport::Failed {
+                    kind: AttemptFailureKind::Execution,
+                    message: "fixture failure".into(),
+                },
+            ),
+        ))
+        .unwrap();
+
+    let mut child = common::task(
+        "failed-child",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let child_id = child.request.id;
+    child.dependencies = BTreeSet::from([parent_id]);
+    assert!(fixture
+        .driver
+        .handle(DriverCommand::Submit(Box::new(child)))
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        fixture.driver.snapshot().tasks[&child_id].state,
+        TaskState::Failed
+    );
+}
+
+#[test]
+fn task_batch_admission_is_atomic() {
+    let mut fixture = common::fixture(1, 1);
+    let first = common::task(
+        "batch-first",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let first_id = first.request.id;
+    let mut rejected = common::task(
+        "batch-rejected",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let rejected_id = rejected.request.id;
+    rejected.dependencies = BTreeSet::from([TaskId::derive(&[b"batch-missing"])]);
+    let before = fixture.driver.snapshot();
+
+    assert!(fixture
+        .driver
+        .handle(DriverCommand::SubmitBatch(vec![first.clone(), rejected]))
+        .is_err());
+    assert_eq!(fixture.driver.snapshot(), before);
+
+    let mut dependent = common::task(
+        "batch-rejected",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    dependent.dependencies = BTreeSet::from([first_id]);
+    let actions = fixture
+        .driver
+        .handle(DriverCommand::SubmitBatch(vec![first, dependent]))
+        .unwrap();
+    assert!(actions.iter().any(
+        |action| matches!(action, DriverAction::Launch(request) if request.task_id == first_id)
+    ));
+    assert_eq!(
+        fixture.driver.snapshot().tasks[&rejected_id].state,
+        TaskState::Deferred
+    );
 }
 
 #[test]
@@ -164,4 +293,49 @@ fn pool_resize_and_worker_drain_are_explicit_lifecycle_actions() {
         ),
     );
     assert_ne!(request.worker_id, fixture.workers[0]);
+}
+
+#[test]
+fn registered_pool_resize_changes_the_schedulable_worker_set() {
+    let mut fixture = common::fixture(3, 3);
+    let actions = fixture
+        .driver
+        .resize_registered_pool(fixture.pool, 1)
+        .unwrap();
+    assert!(actions.is_empty());
+    let snapshot = fixture.driver.snapshot();
+    let pool = &snapshot.pools[&fixture.pool];
+    assert_eq!(
+        pool.workers
+            .values()
+            .filter(|worker| worker.accepts_work())
+            .count(),
+        1
+    );
+
+    let request = common::submit(
+        &mut fixture.driver,
+        common::task(
+            "bounded-after-resize",
+            fixture.scope,
+            fixture.pool,
+            RetryPolicy::Never,
+        ),
+    );
+    assert_eq!(request.worker_id, fixture.workers[0]);
+
+    let actions = fixture
+        .driver
+        .resize_registered_pool(fixture.pool, 3)
+        .unwrap();
+    assert!(actions.is_empty());
+    let snapshot = fixture.driver.snapshot();
+    assert_eq!(
+        snapshot.pools[&fixture.pool]
+            .workers
+            .values()
+            .filter(|worker| worker.accepts_work())
+            .count(),
+        3
+    );
 }

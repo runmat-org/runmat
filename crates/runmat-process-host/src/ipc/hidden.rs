@@ -6,8 +6,10 @@ use crate::{ProcessHostError, ProcessHostResult};
 pub enum HiddenMode {
     TestWorker,
     ExecutionWorker,
+    MeshingWorker,
     ExecutionDriver,
     LocalSupervisor,
+    ExtensionHost,
 }
 
 impl HiddenMode {
@@ -15,8 +17,10 @@ impl HiddenMode {
         match self {
             Self::TestWorker => "--__runmat-test-worker",
             Self::ExecutionWorker => "--__runmat-execution-worker",
+            Self::MeshingWorker => "--__runmat-meshing-worker",
             Self::ExecutionDriver => "--__runmat-execution-driver",
             Self::LocalSupervisor => "--__runmat-local-supervisor",
+            Self::ExtensionHost => "--__runmat-extension-host",
         }
     }
 }
@@ -55,8 +59,10 @@ impl HiddenModeRegistry {
         [
             HiddenMode::TestWorker,
             HiddenMode::ExecutionWorker,
+            HiddenMode::MeshingWorker,
             HiddenMode::ExecutionDriver,
             HiddenMode::LocalSupervisor,
+            HiddenMode::ExtensionHost,
         ]
         .into_iter()
         .find(|mode| argument == OsStr::new(mode.marker()))

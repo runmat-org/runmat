@@ -3,173 +3,27 @@
 //! Runtime owns MATLAB argument parsing, filesystem target resolution, and
 //! result shaping. Core owns semantic discovery and execution.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
-
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_macros::runtime_builtin;
-use runmat_types::RUNTESTS_BUILTIN_NAME;
-use runmat_value::Value;
-
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::builtins::common::path_search::{
     file_candidates, find_file_with_extensions, path_is_directory, path_is_file,
 };
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::{BuiltinErrorDescriptor, RuntestsOption};
+pub use runmat_builtins::{
+    RUNTESTS_DESCRIPTOR, RUNTESTS_ERROR_FILE_READ, RUNTESTS_ERROR_INSUFFICIENT_RESOURCE,
+    RUNTESTS_ERROR_INVALID_INPUT, RUNTESTS_ERROR_REQUIRES_EXECUTOR,
+    RUNTESTS_ERROR_TARGET_NOT_FOUND, RUNTESTS_ERROR_UNSUPPORTED_OPTION,
+    RUNTESTS_INTEGER_CAPABILITIES,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const RUNTESTS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "tests",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("current folder"),
-        description: "Test file, folder, function name, string array, or cell array of targets.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name,Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Common options such as IncludeSubfolders, BaseFolder, Name, ProcedureName, and UseParallel.",
-    },
-];
-
-const RUNTESTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "results",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Scalar TestResult object or homogeneous TestResult object row.",
-}];
-
-const RUNTESTS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "results = runtests",
-        inputs: &[],
-        outputs: &RUNTESTS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "results = runtests(tests, Name, Value, ...)",
-        inputs: &RUNTESTS_INPUTS,
-        outputs: &RUNTESTS_OUTPUT,
-    },
-];
-
-pub const RUNTESTS_ERROR_REQUIRES_EXECUTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTESTS.REQUIRES_EXECUTOR",
-    identifier: Some("RunMat:Testing:RequiresExecutor"),
-    when: "`runtests` is dispatched outside an active Core test executor.",
-    message: "runtests: requires an active Core test executor",
-};
-
-pub const RUNTESTS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTESTS.INVALID_INPUT",
-    identifier: Some("RunMat:runtests:InvalidInput"),
-    when: "A target or option value has an unsupported type or value.",
-    message: "runtests: invalid input",
-};
-
-pub const RUNTESTS_ERROR_UNSUPPORTED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTESTS.UNSUPPORTED_OPTION",
-    identifier: Some("RunMat:runtests:UnsupportedOption"),
-    when: "A documented option requires an execution mode not available through the in-program adapter.",
-    message: "runtests: unsupported option",
-};
-
-pub const RUNTESTS_ERROR_TARGET_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTESTS.TARGET_NOT_FOUND",
-    identifier: Some("RunMat:runtests:TargetNotFound"),
-    when: "A requested test target cannot be resolved to a file or folder.",
-    message: "runtests: test target not found",
-};
-
-pub const RUNTESTS_ERROR_FILE_READ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTESTS.FILE_READ",
-    identifier: Some("RunMat:runtests:FileReadFailed"),
-    when: "A discovered test file cannot be read as source text.",
-    message: "runtests: failed to read test file",
-};
-
-pub const RUNTESTS_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    RUNTESTS_ERROR_REQUIRES_EXECUTOR,
-    RUNTESTS_ERROR_INVALID_INPUT,
-    RUNTESTS_ERROR_UNSUPPORTED_OPTION,
-    RUNTESTS_ERROR_TARGET_NOT_FOUND,
-    RUNTESTS_ERROR_FILE_READ,
-];
-
-pub const RUNTESTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RUNTESTS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RUNTESTS_ERRORS,
-};
-
-const RUNTESTS_INTEGER_FLAG_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "IncludeSubfolders, IncludeInnerNamespaces, IncludeReferencedProjects, Strict, or UseParallel",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Documented numeric-or-logical flags accept only exact scalar zero or one; native integer storage is inspected without binary64 conversion.",
-    }];
-pub const RUNTESTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "results = runtests(..., flag_name, integer_0_or_1, ...)",
-        inputs: &RUNTESTS_INTEGER_FLAG_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Integer flags control host test discovery and execution. Other direct integer arguments are invalid targets or option payloads, and resident numeric values reject before provider access.",
-    }];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::runtests")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "runtests",
-    op_kind: GpuOpKind::Custom("testing"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Test discovery and execution are host control-flow operations. Test bodies may call GPU-capable builtins normally, but runtests itself has no device kernel.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::runtests")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "runtests",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Test execution is a Core service and filesystem boundary and is excluded from fusion.",
-};
+use runmat_macros::runtime_builtin;
+use runmat_types::RUNTESTS_BUILTIN_NAME;
+use runmat_value::Value;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTestTarget {
-    pub name: String,
     pub source_path: PathBuf,
-    pub display_name: String,
     pub source: String,
 }
 
@@ -177,6 +31,7 @@ pub struct ResolvedTestTarget {
 pub struct ResolvedTestTargets {
     pub targets: Vec<ResolvedTestTarget>,
     pub coverage: bool,
+    pub filters: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -190,28 +45,36 @@ struct RunTestsOptions {
 
 #[runtime_builtin(
     name = "runtests",
-    category = "diagnostics",
-    summary = "Discover and run MATLAB-style test files.",
-    keywords = "test,unit testing,runtests,diagnostics,developer tools",
-    descriptor(self::RUNTESTS_DESCRIPTOR),
-    type_resolver(runtests_type),
-    integer_capabilities(self::RUNTESTS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::diagnostics::runtests"
 )]
-pub async fn runtests_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    crate::testing::run_tests(args).await
+pub async fn runtests_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &RUNTESTS_DESCRIPTOR,
+        &runmat_builtins::RUNTESTS_ERROR_TOO_MANY_OUTPUTS,
+        "runtests",
+    )?;
+    crate::testing::run_tests_in_context(runtime, args).await
 }
 
-fn runtests_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Object {
-        class_name: Some(crate::testing::TEST_RESULT_CLASS.into()),
-        shape: None,
+pub async fn resolve_runtests_targets(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<ResolvedTestTargets> {
+    if runtime
+        .and_then(|runtime| runtime.service_ports().parallel())
+        .is_some_and(|port| port.placement_resources().memory_available_bytes.is_some())
+    {
+        return Err(runtests_error_detail(
+            &RUNTESTS_ERROR_INSUFFICIENT_RESOURCE,
+            "",
+        ));
     }
-}
-
-pub async fn resolve_runtests_targets(args: Vec<Value>) -> BuiltinResult<ResolvedTestTargets> {
-    let gathered = gather_values(args).await?;
-    let options = parse_options(gathered)?;
+    let options = parse_options_retained(&args)?;
     let mut paths = BTreeSet::new();
     let targets = if options.targets.is_empty() {
         if !options.base_folders.is_empty() {
@@ -238,6 +101,16 @@ pub async fn resolve_runtests_targets(args: Vec<Value>) -> BuiltinResult<Resolve
     for target in targets {
         for base_folder in &base_folders {
             for path in resolve_target(&target, *base_folder, options.include_subfolders).await? {
+                let path =
+                    runmat_filesystem::canonicalize_async(&path)
+                        .await
+                        .map_err(|source| {
+                            runtests_io_error(
+                                &RUNTESTS_ERROR_TARGET_NOT_FOUND,
+                                path.display().to_string(),
+                                source,
+                            )
+                        })?;
                 paths.insert(path);
             }
         }
@@ -248,64 +121,34 @@ pub async fn resolve_runtests_targets(args: Vec<Value>) -> BuiltinResult<Resolve
         let source = runmat_filesystem::read_to_string_async(&path)
             .await
             .map_err(|err| {
-                runtests_error_detail(
-                    &RUNTESTS_ERROR_FILE_READ,
-                    format!("{} ({err})", path.display()),
-                )
+                runtests_io_error(&RUNTESTS_ERROR_FILE_READ, path.display().to_string(), err)
             })?;
-        let display_path = runmat_filesystem::canonicalize_async(&path)
-            .await
-            .unwrap_or_else(|_| path.clone());
-        let file_name = test_name_for_path(&display_path);
-        let function_tests = function_test_names(&source);
-        if function_tests.is_empty() {
-            if !matches_filters(&file_name, &options.filters) {
-                continue;
-            }
-            cases.push(ResolvedTestTarget {
-                name: file_name,
-                source_path: display_path.clone(),
-                display_name: path_to_string(&display_path),
-                source,
-            });
-        } else {
-            for function_name in function_tests {
-                let name = format!("{file_name}/{function_name}");
-                if !matches_filters(&name, &options.filters)
-                    && !matches_filters(&function_name, &options.filters)
-                {
-                    continue;
-                }
-                cases.push(ResolvedTestTarget {
-                    name,
-                    source_path: display_path.clone(),
-                    display_name: path_to_string(&display_path),
-                    source: format!("{source}\n{function_name}();\n"),
-                });
-            }
-        }
+        let display_path = path;
+        cases.push(ResolvedTestTarget {
+            source_path: display_path,
+            source,
+        });
     }
 
     Ok(ResolvedTestTargets {
         targets: cases,
         coverage: options.coverage,
+        filters: options.filters,
     })
 }
 
-async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(runtests_flow)?);
-    }
-    Ok(out)
+#[cfg(test)]
+fn parse_options(args: Vec<Value>) -> BuiltinResult<RunTestsOptions> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    parse_options_retained(&args)
 }
 
-fn parse_options(args: Vec<Value>) -> BuiltinResult<RunTestsOptions> {
+fn parse_options_retained(args: &crate::call::BuiltinArguments) -> BuiltinResult<RunTestsOptions> {
     let mut options = RunTestsOptions::default();
     let mut idx = 0usize;
 
     if let Some(first) = args.first() {
-        if !is_option_name(first) {
+        if !is_option_name(first)? {
             options.targets.extend(value_to_strings(first)?);
             idx = 1;
         }
@@ -320,9 +163,11 @@ fn parse_options(args: Vec<Value>) -> BuiltinResult<RunTestsOptions> {
         }
         let name = value_to_string_scalar(&args[idx])?.to_ascii_lowercase();
         let value = &args[idx + 1];
-        match normalize_option_name(&name).as_str() {
-            "includesubfolders" => options.include_subfolders = value_to_bool(value)?,
-            "useparallel" => {
+        match RuntestsOption::parse(&name) {
+            Some(RuntestsOption::IncludeSubfolders) => {
+                options.include_subfolders = value_to_bool(value)?
+            }
+            Some(RuntestsOption::UseParallel) => {
                 if value_to_bool(value)? {
                     return Err(runtests_error_detail(
                         &RUNTESTS_ERROR_UNSUPPORTED_OPTION,
@@ -330,12 +175,16 @@ fn parse_options(args: Vec<Value>) -> BuiltinResult<RunTestsOptions> {
                     ));
                 }
             }
-            "basefolder" => options.base_folders.extend(value_to_strings(value)?),
-            "name" | "procedurename" => options.filters.extend(value_to_strings(value)?),
-            "outputdetail" | "logginglevel" => {
+            Some(RuntestsOption::BaseFolder) => {
+                options.base_folders.extend(value_to_strings(value)?)
+            }
+            Some(RuntestsOption::Name) | Some(RuntestsOption::ProcedureName) => {
+                options.filters.extend(value_to_strings(value)?)
+            }
+            Some(RuntestsOption::OutputDetail) | Some(RuntestsOption::LoggingLevel) => {
                 let _ = value_to_string_scalar(value)?;
             }
-            "tag" => {
+            Some(RuntestsOption::Tag) => {
                 let tags = value_to_strings(value)?;
                 if !tags.iter().all(|tag| tag.is_empty()) {
                     return Err(runtests_error_detail(
@@ -344,13 +193,13 @@ fn parse_options(args: Vec<Value>) -> BuiltinResult<RunTestsOptions> {
                     ));
                 }
             }
-            "coverage" => {
+            Some(RuntestsOption::Coverage) => {
                 options.coverage = value_to_bool(value)?;
             }
-            other => {
+            None => {
                 return Err(runtests_error_detail(
                     &RUNTESTS_ERROR_INVALID_INPUT,
-                    format!("unknown option '{other}'"),
+                    format!("unknown option '{name}'"),
                 ));
             }
         }
@@ -360,36 +209,37 @@ fn parse_options(args: Vec<Value>) -> BuiltinResult<RunTestsOptions> {
     Ok(options)
 }
 
-fn normalize_option_name(name: &str) -> String {
-    name.chars()
-        .filter(|ch| !ch.is_ascii_whitespace() && *ch != '_' && *ch != '-')
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-fn is_option_name(value: &Value) -> bool {
-    let Ok(text) = value_to_string_scalar(value) else {
-        return false;
-    };
-    matches!(
-        normalize_option_name(&text).as_str(),
-        "includesubfolders"
-            | "useparallel"
-            | "basefolder"
-            | "name"
-            | "procedurename"
-            | "outputdetail"
-            | "logginglevel"
-            | "tag"
-            | "coverage"
-    )
-}
-
-fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
+fn is_option_name(value: &Value) -> BuiltinResult<bool> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(_) => Ok(RuntestsOption::parse(&value_to_string_scalar(value)?).is_some()),
+        Value::CharArray(array) if array.rows == 1 => {
+            Ok(RuntestsOption::parse(&value_to_string_scalar(value)?).is_some())
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(RuntestsOption::parse(&value_to_string_scalar(value)?).is_some())
+        }
+        _ => Ok(false),
+    }
+}
+
+fn value_to_string_scalar(value: &Value) -> BuiltinResult<runmat_value::Utf8Text> {
+    match value {
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
+        Value::CharArray(array) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data())
+                .map(runmat_value::Utf8Text::from)
+                .map_err(|error| {
+                    runtests_error_detail(&RUNTESTS_ERROR_INVALID_INPUT, error.to_string())
+                })
+        }
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].text_ref().cloned().ok_or_else(|| {
+                runtests_error_detail(
+                    &RUNTESTS_ERROR_INVALID_INPUT,
+                    "expected a string scalar or character row",
+                )
+            })
+        }
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,
             format!("expected a string scalar or character row, got {other:?}"),
@@ -399,10 +249,33 @@ fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
 
 fn value_to_strings(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::CharArray(array) if array.rows == 1 => Ok(vec![array.data.iter().collect()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
-        Value::Cell(cell) => cell.data.iter().map(value_to_string_scalar).collect(),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(vec![text.to_string()]),
+        Value::CharArray(array) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data())
+                .map(|text| vec![text])
+                .map_err(|error| {
+                    runtests_error_detail(&RUNTESTS_ERROR_INVALID_INPUT, error.to_string())
+                })
+        }
+        Value::StringArray(array) => array
+            .data()
+            .iter()
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    runtests_error_detail(
+                        &RUNTESTS_ERROR_INVALID_INPUT,
+                        "expected a string scalar or character row",
+                    )
+                })
+            })
+            .collect(),
+        Value::Cell(cell) => cell
+            .data()
+            .iter()
+            .map(|value| {
+                value_to_string_scalar(value).map(runmat_value::Utf8Text::into_string_unbounded)
+            })
+            .collect(),
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,
             format!("expected a string, string array, or cell array of strings, got {other:?}"),
@@ -440,30 +313,42 @@ async fn resolve_target(
     let expanded = expand_user_path(target, RUNTESTS_BUILTIN_NAME)
         .map_err(|err| runtests_error_detail(&RUNTESTS_ERROR_TARGET_NOT_FOUND, err))?;
     let direct = target_path_in_base(&expanded, base_folder)?;
-    if path_is_directory(&direct).await {
+    if path_is_directory(&direct)
+        .await
+        .map_err(|error| error.into_runtime_error(RUNTESTS_BUILTIN_NAME))?
+    {
         return discover_test_files(&direct, include_subfolders).await;
     }
-    if path_is_file(&direct).await {
+    if path_is_file(&direct)
+        .await
+        .map_err(|error| error.into_runtime_error(RUNTESTS_BUILTIN_NAME))?
+    {
         return Ok(vec![direct]);
     }
     if base_folder.is_none() {
         if let Some(path) = find_file_with_extensions(&expanded, &[".m"], RUNTESTS_BUILTIN_NAME)
             .await
-            .map_err(|err| runtests_error_detail(&RUNTESTS_ERROR_TARGET_NOT_FOUND, err))?
+            .map_err(|error| error.into_runtime_error(RUNTESTS_BUILTIN_NAME))?
         {
             return Ok(vec![path]);
         }
 
         for candidate in file_candidates(&expanded, &[".m"], RUNTESTS_BUILTIN_NAME)
-            .map_err(|err| runtests_error_detail(&RUNTESTS_ERROR_TARGET_NOT_FOUND, err))?
+            .map_err(|error| error.into_runtime_error(RUNTESTS_BUILTIN_NAME))?
         {
-            if path_is_directory(&candidate).await {
+            if path_is_directory(&candidate)
+                .await
+                .map_err(|error| error.into_runtime_error(RUNTESTS_BUILTIN_NAME))?
+            {
                 return discover_test_files(&candidate, include_subfolders).await;
             }
         }
     } else if direct.extension().is_none() {
         let candidate = direct.with_extension("m");
-        if path_is_file(&candidate).await {
+        if path_is_file(&candidate)
+            .await
+            .map_err(|error| error.into_runtime_error(RUNTESTS_BUILTIN_NAME))?
+        {
             return Ok(vec![candidate]);
         }
     }
@@ -479,7 +364,10 @@ fn target_path_in_base(target: &str, base_folder: Option<&str>) -> BuiltinResult
     let Some(base_folder) = base_folder else {
         return Ok(target);
     };
-    if target.is_absolute() {
+    if runmat_filesystem::current_provider()
+        .path_namespace()
+        .is_absolute(&target)
+    {
         return Ok(target);
     }
     let expanded = expand_user_path(base_folder, RUNTESTS_BUILTIN_NAME)
@@ -494,9 +382,10 @@ async fn discover_test_files(dir: &Path, include_subfolders: bool) -> BuiltinRes
         let entries = runmat_filesystem::read_dir_async(&current)
             .await
             .map_err(|err| {
-                runtests_error_detail(
+                runtests_io_error(
                     &RUNTESTS_ERROR_TARGET_NOT_FOUND,
-                    format!("{} ({err})", current.display()),
+                    current.display().to_string(),
+                    err,
                 )
             })?;
         for entry in entries {
@@ -531,48 +420,6 @@ fn is_test_file(path: &Path) -> bool {
     lower.starts_with("test") || lower.ends_with("test") || lower.ends_with("tests")
 }
 
-fn test_name_for_path(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .filter(|stem| !stem.is_empty())
-        .unwrap_or("unnamed")
-        .to_string()
-}
-
-fn matches_filters(name: &str, filters: &[String]) -> bool {
-    filters.is_empty() || filters.iter().any(|filter| name.contains(filter))
-}
-
-fn function_test_names(source: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for line in source.lines() {
-        let trimmed = line.trim_start();
-        let lowered = trimmed.to_ascii_lowercase();
-        if !lowered.starts_with("function") {
-            continue;
-        }
-        let rest = trimmed["function".len()..].trim_start();
-        let after_outputs = rest
-            .split_once('=')
-            .map(|(_, rhs)| rhs.trim_start())
-            .unwrap_or(rest);
-        let name = after_outputs
-            .chars()
-            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
-            .collect::<String>();
-        if name.is_empty() {
-            continue;
-        }
-        let lower_name = name.to_ascii_lowercase();
-        if lower_name.starts_with("test") || lower_name.ends_with("test") {
-            names.push(name);
-        }
-    }
-    names.sort();
-    names.dedup();
-    names
-}
-
 fn runtests_error_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -590,12 +437,15 @@ fn runtests_error_detail(
     builder.build()
 }
 
-fn runtests_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(err.message().to_string())
+fn runtests_io_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: String,
+    source: std::io::Error,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {detail} ({source})", error.message))
         .with_builtin(RUNTESTS_BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -604,13 +454,79 @@ fn runtests_flow(err: RuntimeError) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{CellArray, CharArray, IntegerStorage, LogicalArray, StringArray, Tensor};
+    use runmat_value::{
+        CellArray, CharArray, IntegerStorage, LogicalArray, StringArray, Tensor, Utf16CodeUnit,
+    };
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn first_argument_detection_preserves_target_arrays_and_decode_errors() {
+        let targets = Value::StringArray(
+            StringArray::new(vec!["one".into(), "two".into()], vec![1, 2])
+                .expect("valid target array"),
+        );
+        assert!(!is_option_name(&targets).expect("target arrays remain targets"));
+
+        let malformed = Value::CharArray(
+            CharArray::from_code_units(vec![Utf16CodeUnit::from_raw(0xd83d)], 1, 1)
+                .expect("valid character geometry"),
+        );
+        let error = is_option_name(&malformed).expect_err("invalid UTF-16 is not an option");
+        assert_eq!(error.identifier(), RUNTESTS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn finite_test_discovery_refuses_before_missing_target_resolution() {
+        use crate::context::{
+            ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+            RuntimeServicePorts,
+        };
+        use std::rc::Rc;
+        struct Finite;
+        impl RuntimeParallelService for Finite {
+            fn supports(&self, _: ParallelCapability) -> bool {
+                false
+            }
+            fn placement_resources(&self) -> RuntimeParallelResources {
+                RuntimeParallelResources {
+                    memory_available_bytes: Some(1),
+                    ..Default::default()
+                }
+            }
+        }
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(RuntimeServicePorts::default().with_parallel(Rc::new(Finite)));
+        let args = crate::call::BuiltinArguments::from_borrowed(
+            &[Value::String("/absent/testMissing.m".into())],
+            None,
+        )
+        .unwrap();
+        let error = futures::executor::block_on(resolve_runtests_targets(args, Some(&runtime)))
+            .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:InsufficientResourceEvidence")
+        );
+    }
+
+    #[test]
+    fn runtime_identity_is_the_single_canonical_default_binding() {
+        let entry =
+            runmat_builtins::builtin_catalog_entry_by_name("runtests").expect("canonical runtests");
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name("runtests");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
+    }
 
     #[test]
     fn parse_accepts_target_and_include_subfolders() {
         let opts = parse_options(vec![
-            Value::String("tests".to_string()),
-            Value::String("IncludeSubfolders".to_string()),
+            Value::String("tests".to_string().into()),
+            Value::String("IncludeSubfolders".to_string().into()),
             Value::Bool(true),
         ])
         .expect("parse options");
@@ -631,8 +547,11 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1])
                 .expect("scalar uint8 flag"),
         );
-        let error = parse_options(vec![Value::String("IncludeSubfolders".to_string()), flag])
-            .expect_err("invalid integer flag");
+        let error = parse_options(vec![
+            Value::String("IncludeSubfolders".to_string().into()),
+            flag,
+        ])
+        .expect_err("invalid integer flag");
         assert_eq!(error.identifier(), Some("RunMat:runtests:InvalidInput"));
         assert!(error.message().contains("0 or 1"));
     }
@@ -640,7 +559,7 @@ mod tests {
     #[test]
     fn parse_rejects_parallel_execution() {
         let err = parse_options(vec![
-            Value::String("UseParallel".to_string()),
+            Value::String("UseParallel".to_string().into()),
             Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
         ])
         .unwrap_err();
@@ -655,7 +574,7 @@ mod tests {
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("testOne")),
-                Value::String("testTwo".to_string()),
+                Value::String("testTwo".to_string().into()),
             ],
             1,
             2,
@@ -673,21 +592,6 @@ mod tests {
         assert!(is_test_file(Path::new("SmokeTest.m")));
         assert!(!is_test_file(Path::new("helper.m")));
         assert!(!is_test_file(Path::new("testSmoke.txt")));
-    }
-
-    #[test]
-    fn discovers_function_test_names() {
-        let names = function_test_names(
-            r#"
-function helper()
-end
-function testAlpha()
-end
-function out = betaTest()
-end
-"#,
-        );
-        assert_eq!(names, vec!["betaTest".to_string(), "testAlpha".to_string()]);
     }
 
     #[test]

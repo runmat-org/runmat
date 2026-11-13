@@ -70,8 +70,8 @@ async fn matmul_epilogue_row_col_alpha_beta() {
         .expect("col scale");
 
     let mut ep = MatmulEpilogue::noop();
-    ep.alpha = 1.25;
-    ep.beta = -0.5;
+    ep.affine.scale = Some(1.25);
+    ep.affine.offset = Some(runmat_accelerate_api::MatmulOffset::Add(-0.5));
     ep.row_scale = Some(hrow.clone());
     ep.col_scale = Some(hcol.clone());
     ep.row_op = ScaleOp::Multiply;
@@ -90,7 +90,7 @@ async fn matmul_epilogue_row_col_alpha_beta() {
     for (j, col) in col_scale.iter().enumerate().take(bc) {
         for (i, row) in row_scale.iter().enumerate().take(ar) {
             let idx = i + j * ar;
-            let v = base[idx] * ep.alpha + ep.beta;
+            let v = base[idx] * 1.25 - 0.5;
             expected[idx] = v * row * col;
         }
     }
@@ -182,8 +182,7 @@ async fn matmul_epilogue_clamp_pow() {
         .expect("upload B");
 
     let mut ep = MatmulEpilogue::noop();
-    ep.alpha = 1.0;
-    ep.beta = 0.0;
+    // No affine operation precedes the clamp.
     ep.clamp_min = Some(4.0);
     ep.clamp_max = Some(10.0);
     ep.pow_exponent = Some(2.0);

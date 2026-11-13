@@ -6,7 +6,10 @@ mod manifest;
 mod native;
 mod object_codec;
 mod portable;
+mod program_chunk;
+mod program_manifest;
 mod provider;
+mod recovery;
 mod run_key;
 mod suite;
 
@@ -22,7 +25,19 @@ pub use manifest::{EncryptedArtifact, ExecutionRecipientKey};
 pub use native::{NativeExecutionEncryption, NativeExecutionPrivateKey};
 pub use object_codec::{decode_encrypted_run_object, encode_encrypted_run_object};
 pub use portable::{PortableExecutionEncryption, PortableExecutionPrivateKey};
+pub use program_chunk::{
+    open_program_chunk, seal_program_chunk, ProgramChunkAuthority,
+    MAX_PROGRAM_CHUNK_CBOR_OVERHEAD_BYTES, MAX_PROGRAM_CHUNK_ENCODED_OBJECT_BYTES,
+    MAX_PROGRAM_CHUNK_PLAINTEXT_BYTES,
+};
+pub use program_manifest::{
+    decode_program_chunk_manifest, encode_program_chunk_manifest, open_program_chunk_manifest,
+    seal_program_chunk_manifest, OpenedProgramChunkManifest, ProgramChunkManifest,
+    ProgramChunkObject, ProgramManifestAuthority, MAX_PROGRAM_CHUNK_MANIFEST_BYTES,
+    MAX_PROGRAM_CHUNK_MANIFEST_ENCODED_OBJECT_BYTES,
+};
 pub use provider::ExecutionEncryptionProvider;
+pub use recovery::{open_recovery_artifact, RecoveryArtifactScope};
 pub use run_key::{
     open_run_key, seal_run_key, EncryptedRunObject, RunKeyEnvelope, RunKeyMaterial,
     RunObjectEncryption, RunObjectEncryptionSuite,

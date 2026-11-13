@@ -1,13 +1,9 @@
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
+    IMAGESC_ERROR_INTERNAL, IMAGESC_ERROR_INVALID_ARGUMENT, IMAGESC_FOUR_CHANNEL_EXTENSION,
+};
 use std::sync::Arc;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 use runmat_value::{Tensor, Value};
@@ -21,196 +17,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "imagesc";
-
-const IMAGESC_FOUR_CHANNEL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "imagesc-four-channel-cdata",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "imagesc with M-by-N-by-4 CData is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ImagescFourChannelCDataExtension"),
-};
-
-pub const IMAGESC_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [IMAGESC_FOUR_CHANNEL_EXTENSION];
-
-const IMAGESC_INTEGER_CDATA: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "CData",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Scaled indexed and truecolor CData accept every built-in integer class and remain authoritative on the image object.",
-    }];
-pub const IMAGESC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = imagesc(integer_CData, ...)",
-        inputs: &IMAGESC_INTEGER_CDATA,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Exact CData and scaled-mapping provenance are retained while colormap normalization and rendering cross an explicit client boundary.",
-    }];
-
-const IMAGESC_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered scaled image object.",
-}];
-
-const IMAGESC_INPUTS_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Indexed image matrix.",
-}];
-
-const IMAGESC_INPUTS_X_Y_C: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexed image matrix.",
-    },
-];
-
-const IMAGESC_INPUTS_C_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexed image matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const IMAGESC_INPUTS_X_Y_C_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexed image matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const IMAGESC_INPUTS_C_CLIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexed image matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "clims",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Two-element color limits.",
-    },
-];
-
-const IMAGESC_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "h = imagesc(C)",
-        inputs: &IMAGESC_INPUTS_C,
-        outputs: &IMAGESC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = imagesc(X, Y, C)",
-        inputs: &IMAGESC_INPUTS_X_Y_C,
-        outputs: &IMAGESC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = imagesc(C, clims)",
-        inputs: &IMAGESC_INPUTS_C_CLIMS,
-        outputs: &IMAGESC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = imagesc(C, Name, Value, ...)",
-        inputs: &IMAGESC_INPUTS_C_PROPS,
-        outputs: &IMAGESC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = imagesc(X, Y, C, Name, Value, ...)",
-        inputs: &IMAGESC_INPUTS_X_Y_C_PROPS,
-        outputs: &IMAGESC_OUTPUT_HANDLE,
-    },
-];
-
-pub const IMAGESC_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMAGESC.INVALID_ARGUMENT",
-    identifier: Some("RunMat:imagesc:InvalidArgument"),
-    when: "Image data, axis inputs, or name/value style arguments are invalid.",
-    message: "imagesc: invalid argument",
-};
-
-pub const IMAGESC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMAGESC.INTERNAL",
-    identifier: Some("RunMat:imagesc:Internal"),
-    when: "Internal image/surface construction or rendering fails unexpectedly.",
-    message: "imagesc: internal operation failed",
-};
-
-const IMAGESC_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [IMAGESC_ERROR_INVALID_ARGUMENT, IMAGESC_ERROR_INTERNAL];
-
-pub const IMAGESC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMAGESC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IMAGESC_ERRORS,
-};
 
 fn imagesc_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -228,14 +38,28 @@ fn map_imagesc_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    imagesc_error_with_detail(&IMAGESC_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = imagesc_error_with_detail(&IMAGESC_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_imagesc_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    imagesc_error_with_detail(&IMAGESC_ERROR_INTERNAL, err.message)
+    let mapped = imagesc_error_with_detail(&IMAGESC_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::imagesc")]
@@ -267,22 +91,33 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "imagesc",
-    category = "plotting",
-    summary = "Display scaled matrix images.",
-    keywords = "imagesc,plotting,image,colormap",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::imagesc::IMAGESC_DESCRIPTOR),
-    extensions(crate::builtins::plotting::imagesc::IMAGESC_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::imagesc::IMAGESC_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::imagesc"
 )]
-pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn imagesc_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "imagesc: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "imagesc")?;
+    let _arguments = args.fork();
+    work.finish(imagesc_impl(runtime.as_ref(), args, &work).await)
+}
+async fn imagesc_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (x, y, c, mut rest) =
         parse_image_call_args(args, BUILTIN_NAME).map_err(map_imagesc_invalid_argument)?;
     let (c_data_mapping, parsed_rest) =
-        super::image::extract_cdata_mapping(rest, "scaled", BUILTIN_NAME)
+        super::image::extract_cdata_mapping(runtime, rest, "scaled", BUILTIN_NAME)
             .map_err(map_imagesc_invalid_argument)?;
     rest = parsed_rest;
     if super::image::image_channel_count(&c) == Some(4) {
@@ -297,7 +132,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         None
     };
     if explicit_color_limits.is_some() {
-        rest.clear();
+        rest = rest.into_range(..0)?;
     }
     let (rows, cols, kind, retained_c_data) = super::image::classify_image_input(&c, BUILTIN_NAME)
         .await
@@ -309,7 +144,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let defaults =
         SurfaceStyleDefaults::new(ColorMap::Parula, ShadingMode::None, false, 1.0, true, false);
     let style = Arc::new(
-        parse_surface_style_args(BUILTIN_NAME, &rest, defaults)
+        parse_surface_style_args(BUILTIN_NAME, rest.view(), defaults)
             .map_err(map_imagesc_invalid_argument)?,
     );
     let color_limits = explicit_color_limits.or_else(color_limits_snapshot);
@@ -323,10 +158,21 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 .map_err(map_imagesc_invalid_argument)?
         }
         super::image::ImageInputKind::TrueColorGpu(handle, channels) => {
-            super::image::build_truecolor_image_surface_gpu(
+            match super::image::build_truecolor_image_surface_gpu(
                 &handle, &x_axis, &y_axis, rows, cols, channels,
-            )
-            .map_err(map_imagesc_invalid_argument)?
+            )? {
+                Some(surface) => surface,
+                None => {
+                    let (x_host, y_host) =
+                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
+                    super::image::build_truecolor_image_surface(
+                        retained_c_data.clone(),
+                        x_host,
+                        y_host,
+                    )
+                    .map_err(map_imagesc_invalid_argument)?
+                }
+            }
         }
         super::image::ImageInputKind::Indexed(c_input) => {
             super::image::build_indexed_image_surface(
@@ -352,12 +198,11 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Image",
-        x_label: "X",
-        y_label: "Y",
-        axis_equal: true,
+        // MATLAB keeps the default aspect for image/imagesc; only imshow uses equal axes.
+        axis_equal: false,
         ..Default::default()
     };
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         if explicit_color_limits.is_some() {
             figure.set_axes_color_limits(axes, explicit_color_limits);
@@ -378,8 +223,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         &c_data_mapping,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_imagesc_internal(err));
@@ -397,7 +241,7 @@ fn parse_imagesc_color_limits(value: &Value) -> crate::BuiltinResult<Option<(f64
             "imagesc: color limits must be a two-element numeric vector",
         )
     })?;
-    if tensor.shape.iter().copied().product::<usize>() != 2 {
+    if tensor.shape().iter().copied().product::<usize>() != 2 {
         return Ok(None);
     }
     let values = tensor.materialize_f64();
@@ -414,6 +258,14 @@ fn parse_imagesc_color_limits(value: &Value) -> crate::BuiltinResult<Option<(f64
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::imagesc_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
@@ -646,7 +498,7 @@ mod tests {
 
     #[test]
     fn imagesc_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = IMAGESC_DESCRIPTOR
+        let labels: Vec<&str> = runmat_builtins::IMAGESC_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)
@@ -654,6 +506,19 @@ mod tests {
         assert!(labels.contains(&"h = imagesc(C)"));
         assert!(labels.contains(&"h = imagesc(X, Y, C)"));
         assert!(labels.contains(&"h = imagesc(X, Y, C, Name, Value, ...)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn color_limit_parser_retains_two_element_low_rank_admission() {
+        let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        assert_eq!(parse_imagesc_color_limits(&scalar).unwrap(), None);
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        assert_eq!(
+            parse_imagesc_color_limits(&vector).unwrap(),
+            Some((1.0, 2.0))
+        );
     }
 
     #[test]

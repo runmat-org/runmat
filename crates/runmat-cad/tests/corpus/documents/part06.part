@@ -1,0 +1,11 @@
+runmat 0.7
+std 1
+
+part housing {
+    feature step = import(source = "supplier/housing.step", digest = d2)
+
+    output housing = { body = feature.step.body("housing") }
+
+    region lid : face = { select = [feature.step.face("lid")], expect = exactly_one }
+    region right : face = { select = [feature.step.face("mount_right")], expect = exactly_one }
+}

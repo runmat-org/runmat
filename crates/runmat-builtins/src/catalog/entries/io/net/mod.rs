@@ -1,0 +1,53 @@
+//! TCP socket construction and stream I/O identities.
+
+mod accept;
+mod capability;
+mod class;
+mod constructor_option;
+mod datatype;
+mod constructor_inference;
+mod read;
+mod receiver_inference;
+mod readline;
+mod tcpclient;
+mod tcpserver;
+mod write;
+
+pub use accept::*;
+pub use capability::{NET_ERROR_CANCELLED, NET_ERROR_UNSUPPORTED_TARGET};
+pub use class::{TCPCLIENT_CLASS, TCPSERVER_CLASS};
+pub use constructor_option::NetConstructorOption;
+pub use datatype::NetDataType;
+pub use read::*;
+pub use readline::*;
+pub use tcpclient::{
+    EXPLICIT_GPU_INPUT_EXTENSION as TCPCLIENT_EXPLICIT_GPU_INPUT_EXTENSION,
+    INTEGER_CONNECT_TIMEOUT_EXTENSION as TCPCLIENT_INTEGER_CONNECT_TIMEOUT_EXTENSION,
+    INTEGER_PORT_EXTENSION as TCPCLIENT_INTEGER_PORT_EXTENSION,
+    INTEGER_TIMEOUT_EXTENSION as TCPCLIENT_INTEGER_TIMEOUT_EXTENSION,
+    LEGACY_OPTIONS_EXTENSION as TCPCLIENT_LEGACY_OPTIONS_EXTENSION, TCPCLIENT_CATALOG_ENTRY,
+    TCPCLIENT_DESCRIPTOR, TCPCLIENT_ERROR_CONNECT_FAILED, TCPCLIENT_ERROR_INTERNAL,
+    TCPCLIENT_ERROR_INVALID_ADDRESS, TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+    TCPCLIENT_ERROR_INVALID_PORT, TCPCLIENT_EXTENSIONS, TCPCLIENT_INTEGER_CAPABILITIES,
+    ZERO_PORT_EXTENSION as TCPCLIENT_ZERO_PORT_EXTENSION,
+};
+pub use tcpserver::{
+    EXPLICIT_GPU_INPUT_EXTENSION as TCPSERVER_EXPLICIT_GPU_INPUT_EXTENSION,
+    INTEGER_PORT_EXTENSION as TCPSERVER_INTEGER_PORT_EXTENSION,
+    INTEGER_TIMEOUT_EXTENSION as TCPSERVER_INTEGER_TIMEOUT_EXTENSION,
+    LEGACY_OPTIONS_EXTENSION as TCPSERVER_LEGACY_OPTIONS_EXTENSION, TCPSERVER_CATALOG_ENTRY,
+    TCPSERVER_DESCRIPTOR, TCPSERVER_ERROR_BIND_FAILED, TCPSERVER_ERROR_INTERNAL,
+    TCPSERVER_ERROR_INVALID_ADDRESS, TCPSERVER_ERROR_INVALID_NAME_VALUE,
+    TCPSERVER_ERROR_INVALID_PORT, TCPSERVER_EXTENSIONS, TCPSERVER_INTEGER_CAPABILITIES,
+    ZERO_PORT_EXTENSION as TCPSERVER_ZERO_PORT_EXTENSION,
+};
+pub use write::*;
+
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(accept::ENTRIES.iter().copied());
+    values.extend(read::ENTRIES.iter().copied());
+    values.extend(readline::ENTRIES.iter().copied());
+    values.extend(tcpclient::ENTRIES.iter().copied());
+    values.extend(tcpserver::ENTRIES.iter().copied());
+    values.extend(write::ENTRIES.iter().copied());
+}

@@ -2,13 +2,12 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::RREF_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, RREF_ERROR_INTERNAL, RREF_ERROR_INVALID_ARGUMENT,
+    RREF_ERROR_INVALID_INPUT, RREF_ERROR_TOO_MANY_OUTPUTS, RREF_INTEGER_MATRIX_EXTENSION,
+    RREF_INTEGER_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -20,180 +19,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::linalg::type_resolvers::rref_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rref";
-
-const RREF_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "R",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Reduced row echelon form of A.",
-}];
-
-const RREF_OUTPUT_R_PIVOTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reduced row echelon form of A.",
-    },
-    BuiltinParamDescriptor {
-        name: "pivots",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based pivot column indices.",
-    },
-];
-
-const RREF_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const RREF_INPUTS_A_TOL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Pivot tolerance.",
-    },
-];
-
-const RREF_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "R = rref(A)",
-        inputs: &RREF_INPUTS_A,
-        outputs: &RREF_OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "R = rref(A, tol)",
-        inputs: &RREF_INPUTS_A_TOL,
-        outputs: &RREF_OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, pivots] = rref(A)",
-        inputs: &RREF_INPUTS_A,
-        outputs: &RREF_OUTPUT_R_PIVOTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, pivots] = rref(A, tol)",
-        inputs: &RREF_INPUTS_A_TOL,
-        outputs: &RREF_OUTPUT_R_PIVOTS,
-    },
-];
-
-const RREF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RREF.INVALID_ARGUMENT",
-    identifier: Some("RunMat:rref:InvalidArgument"),
-    when: "Optional tolerance argument is malformed or outside accepted bounds.",
-    message: "rref: invalid argument",
-};
-
-const RREF_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RREF.INVALID_INPUT",
-    identifier: Some("RunMat:rref:InvalidInput"),
-    when: "Input shape/type cannot be processed for row reduction.",
-    message: "rref: invalid input",
-};
-
-const RREF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RREF.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:rref:TooManyOutputs"),
-    when: "More than two output arguments are requested.",
-    message: "rref: too many output arguments",
-};
-
-const RREF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RREF.INTERNAL",
-    identifier: Some("RunMat:rref:Internal"),
-    when: "Runtime fails while computing row reduction or executing gather/upload paths.",
-    message: "rref: internal runtime failure",
-};
-
-const RREF_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    RREF_ERROR_INVALID_ARGUMENT,
-    RREF_ERROR_INVALID_INPUT,
-    RREF_ERROR_TOO_MANY_OUTPUTS,
-    RREF_ERROR_INTERNAL,
-];
-
-pub const RREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RREF_ERRORS,
-};
-
-const RREF_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rref-integer-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rref accepts typed-integer matrix data as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RrefIntegerMatrixExtension"),
-};
-const RREF_INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rref-integer-tolerance",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rref accepts a typed-integer tolerance as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RrefIntegerToleranceExtension"),
-};
-pub const RREF_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    RREF_INTEGER_MATRIX_EXTENSION,
-    RREF_INTEGER_TOLERANCE_EXTENSION,
-];
-const RREF_INTEGER_MATRIX_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double matrices; RunMat admits typed integers only when every matrix entry is exactly representable in binary64.",
-    }];
-const RREF_INTEGER_TOLERANCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "tol",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents a single or double tolerance; the RunMat-only typed scalar form is exactness- and range-checked before conversion.",
-    }];
-pub const RREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[R,pivots] = rref(integer_A [, tol])",
-        inputs: &RREF_INTEGER_MATRIX_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The guarded extension crosses once into the double row-reduction algorithm; R and one-based pivot indices are double, and resident fallback restores R through the exact input owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[R,pivots] = rref(A, integer_tol)",
-        inputs: &RREF_INTEGER_TOLERANCE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The tolerance is a scalar floating-control boundary and never routes an inexact wide integer through binary64.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::rref")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -276,17 +104,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "rref",
-    category = "math/linalg/solve",
-    summary = "Compute reduced row echelon form and pivot columns.",
-    keywords = "rref,reduced row echelon form,row reduction,pivots,rank",
-    accel = "sink",
-    type_resolver(rref_type),
-    descriptor(crate::builtins::math::linalg::solve::rref::RREF_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::rref::RREF_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::solve::rref::RREF_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::rref"
 )]
-async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rref_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &value,
@@ -304,7 +125,7 @@ async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         )
         .await?;
     }
-    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    let tol = parse_tolerance_arg(NAME, rest.view()).map_err(argument_error)?;
     let eval = match value {
         Value::GpuTensor(handle) => rref_gpu(handle, tol).await?,
         other => rref_eval_from_value(other, tol)?,
@@ -313,7 +134,23 @@ async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn rref_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<RrefEval> {
-    let owner = gpu_helpers::exact_provider_for_handle(&handle);
+    // Automatic host execution need not recreate a device result after the
+    // user disables or switches compute. Explicit output intent stays strict.
+    let owner = match gpu_helpers::resolve_resident_compute_owner(&handle) {
+        Ok(owner) => Some(owner),
+        Err(gpu_helpers::ResidentComputeDecline::PolicyDenied)
+            if !runmat_accelerate_api::handle_is_explicit(&handle) =>
+        {
+            None
+        }
+        Err(decline) => {
+            let mut error = decline.with_domain_error(internal_error(
+                "rref: resident input has no exact owning provider",
+            ));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+    };
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
         .await
         .map_err(map_control_flow)?;
@@ -322,7 +159,10 @@ async fn rref_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Rr
     if let Value::Tensor(matrix) = &eval.reduced {
         if let Some(provider) = owner {
             let uploaded = gpu_helpers::upload_tensor(provider, matrix).map_err(|err| {
-                internal_error(format!("{NAME}: failed to upload reduced matrix ({err})"))
+                let mut error =
+                    internal_error(format!("{NAME}: failed to upload reduced matrix ({err})"));
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
             })?;
             eval.reduced = Value::GpuTensor(uploaded);
         }
@@ -355,9 +195,9 @@ impl RrefEval {
     fn into_requested_outputs(self) -> BuiltinResult<Value> {
         if let Some(out_count) = crate::output_count::current_output_count() {
             return match out_count {
-                0 => Ok(Value::OutputList(Vec::new())),
-                1 => Ok(Value::OutputList(vec![self.reduced])),
-                2 => Ok(Value::OutputList(vec![
+                0 => Ok(Value::output_list(Vec::new())),
+                1 => Ok(Value::output_list(vec![self.reduced])),
+                2 => Ok(Value::output_list(vec![
                     self.reduced,
                     tensor::tensor_into_value(self.pivots),
                 ])),
@@ -369,7 +209,7 @@ impl RrefEval {
 }
 
 fn rref_real_eval(matrix: Tensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(input_error)?;
     let data = tensor::tensor_into_values_f64(matrix);
     let tolerance = tol.unwrap_or_else(|| default_real_tolerance(&data, rows, cols));
     let (reduced, pivots) = rref_real_impl(data, rows, cols, tolerance)?;
@@ -382,7 +222,7 @@ fn rref_real_eval(matrix: Tensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
 }
 
 fn rref_complex_eval(matrix: ComplexTensor, tol: Option<f64>) -> BuiltinResult<RrefEval> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(input_error)?;
     let tolerance =
         tol.unwrap_or_else(|| default_complex_tolerance(&matrix.materialize_f64(), rows, cols));
     let data: Vec<Complex64> = matrix
@@ -459,7 +299,6 @@ pub(super) fn rref_real_impl(
         pivot_row += 1;
     }
 
-    zero_small_real(&mut data, tolerance);
     Ok((data, pivots))
 }
 
@@ -494,7 +333,9 @@ pub(super) fn rref_complex_impl(
 
         let pivot = data[index(pivot_row, col, rows)];
         for c in 0..cols {
-            data[index(pivot_row, c, rows)] /= pivot;
+            let slot = index(pivot_row, c, rows);
+            data[slot] =
+                crate::builtins::common::complex_arithmetic::divide_complex64(data[slot], pivot);
         }
 
         for r in 0..rows {
@@ -523,7 +364,6 @@ pub(super) fn rref_complex_impl(
         pivot_row += 1;
     }
 
-    zero_small_complex(&mut data, tolerance);
     Ok((data, pivots))
 }
 
@@ -648,28 +488,6 @@ fn swap_rows_complex(data: &mut [Complex64], rows: usize, cols: usize, a: usize,
     }
 }
 
-fn zero_small_real(data: &mut [f64], tolerance: f64) {
-    if !tolerance.is_finite() {
-        return;
-    }
-    for value in data {
-        if value.abs() <= tolerance {
-            *value = 0.0;
-        }
-    }
-}
-
-fn zero_small_complex(data: &mut [Complex64], tolerance: f64) {
-    if !tolerance.is_finite() {
-        return;
-    }
-    for value in data {
-        if value.norm() <= tolerance {
-            *value = Complex64::new(0.0, 0.0);
-        }
-    }
-}
-
 fn pivot_tensor(pivots: Vec<usize>) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = pivots.into_iter().map(|idx| idx as f64).collect();
     let len = data.len();
@@ -687,7 +505,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -716,54 +533,13 @@ pub(crate) mod tests {
 
     fn output_list(value: Value) -> Vec<Value> {
         match value {
-            Value::OutputList(values) => values,
+            Value::OutputList(values) => values
+                .try_into_owned()
+                .expect("unique output list")
+                .try_into_unbounded_vec()
+                .expect("unbounded output list"),
             other => panic!("expected output list, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn rref_type_preserves_matrix_shape() {
-        let out = rref_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(3), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn rref_type_normalizes_vector_and_trailing_singleton_shapes() {
-        let vector = rref_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            vector,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(1)])
-            }
-        );
-
-        let trailing_singleton = rref_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            trailing_singleton,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
     }
 
     #[test]
@@ -796,11 +572,11 @@ pub(crate) mod tests {
             vec![3, 3],
         )
         .unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
+                assert_eq!(out.shape(), [3, 3]);
                 assert_close(
                     &out.materialize_f64(),
                     &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 2.0, 0.0],
@@ -811,7 +587,7 @@ pub(crate) mod tests {
         }
         match &values[1] {
             Value::Tensor(pivots) => {
-                assert_eq!(pivots.shape, vec![1, 2]);
+                assert_eq!(pivots.shape(), [1, 2]);
                 assert_eq!(pivots.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected pivot tensor, got {other:?}"),
@@ -825,7 +601,7 @@ pub(crate) mod tests {
         let result = rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_close(
                     &out.materialize_f64(),
                     &[1.0, 0.0, 0.0, 1.0, -1.0, 2.0],
@@ -846,7 +622,7 @@ pub(crate) mod tests {
         let result = rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_close(&out.materialize_f64(), &[1.0, 0.0, 2.0, 0.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
@@ -857,11 +633,11 @@ pub(crate) mod tests {
     #[test]
     fn rref_row_vector_pivots_after_leading_zero() {
         let tensor = Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_close(&out.materialize_f64(), &[0.0, 1.0, 2.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
@@ -879,7 +655,7 @@ pub(crate) mod tests {
         let result = rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_close(&out.materialize_f64(), &[1.0, 0.0, 0.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
@@ -893,7 +669,7 @@ pub(crate) mod tests {
         let result = rref_builtin(Value::Tensor(zero_by_three), Vec::new()).expect("rref");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![0, 3]);
+                assert_eq!(out.shape(), [0, 3]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected 0x3 tensor R, got {other:?}"),
@@ -903,7 +679,7 @@ pub(crate) mod tests {
         let result = rref_builtin(Value::Tensor(three_by_zero), Vec::new()).expect("rref");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 0]);
+                assert_eq!(out.shape(), [3, 0]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected 3x0 tensor R, got {other:?}"),
@@ -914,12 +690,12 @@ pub(crate) mod tests {
     #[test]
     fn rref_custom_tolerance_suppresses_small_pivot() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-12], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values =
             output_list(rref_builtin(Value::Tensor(tensor), vec![Value::Num(1e-6)]).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_close(&out.materialize_f64(), &[1.0, 0.0, 0.0, 0.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
@@ -928,24 +704,56 @@ pub(crate) mod tests {
             Value::Num(pivot) => assert_eq!(*pivot, 1.0),
             other => panic!("expected scalar pivot, got {other:?}"),
         }
+
+        let tiny = f64::from_bits(1);
+        let (real, real_pivots) =
+            rref_real_impl(vec![1.0e300, 0.0, 0.0, tiny], 2, 2, 0.0).expect("exact pivots");
+        assert_eq!(real_pivots, vec![1, 2]);
+        assert_eq!(real, vec![1.0, 0.0, 0.0, 1.0]);
+        let (complex, complex_pivots) = rref_complex_impl(
+            vec![
+                Complex64::new(1.0e300, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(tiny, 0.0),
+            ],
+            2,
+            2,
+            0.0,
+        )
+        .expect("exact complex pivots");
+        assert_eq!(complex_pivots, vec![1, 2]);
+        assert_eq!(
+            complex,
+            vec![
+                Complex64::new(1.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(1.0, 0.0)
+            ]
+        );
+        let (normalized, pivots) =
+            rref_real_impl(vec![1.0e200, 1.0e200], 1, 2, 1.0e185).expect("normalized row");
+        assert_eq!(pivots, vec![1]);
+        assert_eq!(normalized, vec![1.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rref_zero_matrix_has_no_pivots() {
         let tensor = Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![0.0; 6]);
             }
             other => panic!("expected tensor R, got {other:?}"),
         }
         match &values[1] {
             Value::Tensor(pivots) => {
-                assert_eq!(pivots.shape, vec![1, 0]);
+                assert_eq!(pivots.shape(), [1, 0]);
                 assert!(pivots.materialize_f64().is_empty());
             }
             other => panic!("expected empty pivot tensor, got {other:?}"),
@@ -963,7 +771,7 @@ pub(crate) mod tests {
         let result = rref_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("rref");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_complex_close(
                     &out.materialize_f64(),
                     &[(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
@@ -971,6 +779,19 @@ pub(crate) mod tests {
                 );
             }
             other => panic!("expected complex tensor R, got {other:?}"),
+        }
+
+        for scale in [1.0e200, 1.0e-200] {
+            let row = ComplexTensor::new(vec![(scale, scale), (scale, 0.0)], vec![1, 2]).unwrap();
+            let reduced = rref_builtin(Value::ComplexTensor(row), Vec::new()).expect("scaled rref");
+            match reduced {
+                Value::ComplexTensor(out) => assert_complex_close(
+                    &out.materialize_f64(),
+                    &[(1.0, 0.0), (0.5, -0.5)],
+                    1.0e-12,
+                ),
+                other => panic!("expected scaled complex R, got {other:?}"),
+            }
         }
     }
 
@@ -985,7 +806,7 @@ pub(crate) mod tests {
         let result = rref_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("rref");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_complex_close(
                     &out.materialize_f64(),
                     &[(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
@@ -1000,18 +821,20 @@ pub(crate) mod tests {
     #[test]
     fn rref_output_count_zero_and_one() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let zero_output_guard = crate::output_count::push_output_count(Some(0));
+        let zero_output_guard =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let values =
             output_list(rref_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("rref"));
         assert!(values.is_empty());
         drop(zero_output_guard);
 
-        let _one_output_guard = crate::output_count::push_output_count(Some(1));
+        let _one_output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         assert_eq!(values.len(), 1);
         match &values[0] {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_close(&out.materialize_f64(), &[1.0, 0.0, 0.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor R, got {other:?}"),
@@ -1022,11 +845,11 @@ pub(crate) mod tests {
     #[test]
     fn rref_infinite_default_tolerance_zeros_columns() {
         let tensor = Tensor::new(vec![f64::INFINITY, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor R, got {other:?}"),
@@ -1041,11 +864,11 @@ pub(crate) mod tests {
     #[test]
     fn rref_nan_default_tolerance_propagates_nan_arithmetic() {
         let tensor = Tensor::new(vec![f64::NAN, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert!(out.materialize_f64()[0].is_nan());
                 assert!(out.materialize_f64()[1].is_nan());
                 assert_eq!(out.materialize_f64()[2], 0.0);
@@ -1104,7 +927,7 @@ pub(crate) mod tests {
     #[test]
     fn rref_too_many_outputs_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = unwrap_error(rref_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
         assert_eq!(err.identifier(), RREF_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
@@ -1116,12 +939,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = rref_builtin(Value::GpuTensor(handle), Vec::new()).expect("rref");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_close(&gathered.materialize_f64(), &[1.0, 0.0, 2.0, 0.0], 1e-12);
         });
     }
@@ -1133,16 +956,17 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let _guard = crate::output_count::push_output_count(Some(2));
+            let _guard =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let values =
                 output_list(rref_builtin(Value::GpuTensor(handle), Vec::new()).expect("rref"));
             match &values[0] {
                 Value::GpuTensor(_) => {
                     let gathered = test_support::gather(values[0].clone()).expect("gather");
-                    assert_eq!(gathered.shape, vec![2, 2]);
+                    assert_eq!(gathered.shape(), [2, 2]);
                     assert_close(&gathered.materialize_f64(), &[1.0, 0.0, 2.0, 0.0], 1e-12);
                 }
                 other => panic!("expected gpu tensor R, got {other:?}"),
@@ -1155,6 +979,9 @@ pub(crate) mod tests {
     }
 
     fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::rref_builtin(value, rest))
+        block_on(super::rref_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

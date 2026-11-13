@@ -1,5 +1,5 @@
 use crate::MirOperand;
-use runmat_hir::Span;
+use runmat_types::Span;
 use runmat_types::SpawnSafetyFact;
 use serde::{Deserialize, Serialize};
 

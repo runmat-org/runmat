@@ -1,4 +1,6 @@
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
+import { normalizePath } from "../fs/path.js";
+import type { WorkspaceCaptureRequest, WorkspacePublicationRequest } from "../generated/fea-workspace-contracts.js";
 import type {
   RunMatFilesystemDirEntry,
   RunMatFilesystemMetadata,
@@ -156,6 +158,32 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
 
   constructor(private readonly workspace: RunMatFilesystemProvider) {}
 
+  async captureWorkspace(request: WorkspaceCaptureRequest) {
+    this.assertMutable(request.root);
+    if (!this.workspace.captureWorkspace) throw new Error("Workspace capture is unavailable");
+    return this.workspace.captureWorkspace(request);
+  }
+
+  async lookupWorkspacePublication(request: WorkspacePublicationRequest) {
+    this.assertMutablePublication(request);
+    if (!this.workspace.lookupWorkspacePublication) throw new Error("Workspace receipt lookup is unavailable");
+    return this.workspace.lookupWorkspacePublication(request);
+  }
+
+  async publishWorkspace(request: WorkspacePublicationRequest) {
+    this.assertMutablePublication(request);
+    if (!this.workspace.publishWorkspace) throw new Error("Conditional workspace publication is unavailable");
+    return this.workspace.publishWorkspace(request);
+  }
+
+  private assertMutablePublication(request: WorkspacePublicationRequest): void {
+    this.assertMutable(request.root);
+    for (const edit of request.edits) {
+      const paths = edit.type === "rename" ? [edit.from, edit.to] : [edit.path];
+      for (const path of paths) this.assertMutable(normalizePath(`${request.root}/${path}`));
+    }
+  }
+
   clear(): void {
     for (const value of this.mounts.values()) {
       value.dispose?.();
@@ -183,6 +211,30 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
       dispose: () => cache.clear()
     });
     return root;
+  }
+
+  async publishOutput(path: string, data: Uint8Array, expectedVersionId: string | null): Promise<string> {
+    this.assertMutable(path);
+    if (!this.workspace.publishOutput) throw new Error("Conditional workspace publication is unavailable");
+    return this.workspace.publishOutput(path, data, expectedVersionId);
+  }
+
+  async removeOutput(path: string, expectedVersionId: string): Promise<void> {
+    this.assertMutable(path);
+    if (!this.workspace.removeOutput) throw new Error("Conditional workspace deletion is unavailable");
+    return this.workspace.removeOutput(path, expectedVersionId);
+  }
+
+  async atomicCreateNew(path: string, data: Uint8Array) {
+    this.assertMutable(path);
+    if (!this.workspace.atomicCreateNew) throw new Error("Atomic workspace publication is unavailable");
+    return this.workspace.atomicCreateNew(path, data);
+  }
+
+  async readVersion(path: string, versionId: string, size: number, snapshotId: string): Promise<Uint8Array | ArrayBuffer> {
+    this.assertMutable(path);
+    if (!this.workspace.readVersion) throw new Error("Immutable workspace reads are unavailable");
+    return this.workspace.readVersion(path, versionId, size, snapshotId);
   }
 
   async readFile(path: string): Promise<Uint8Array | ArrayBuffer> {
@@ -307,6 +359,12 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
     this.assertMutable(from);
     this.assertMutable(to);
     return required(this.workspace.rename, "rename").call(this.workspace, from, to);
+  }
+
+  renameReplace(from: string, to: string): void | Promise<void> {
+    this.assertMutable(from);
+    this.assertMutable(to);
+    return required(this.workspace.renameReplace, "renameReplace").call(this.workspace, from, to);
   }
 
   setReadonly(path: string, readonly: boolean): void | Promise<void> {

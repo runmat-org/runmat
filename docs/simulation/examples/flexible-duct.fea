@@ -1,0 +1,73 @@
+// Hero study of /physics/fluid-structure: water in a 20 x 20 mm square passage, 0.2 m long,
+// inside a 3 mm rubber wall mounted at both ends.
+geometry duct {
+    file = "./geometry/flexible-duct.step"
+    units = m
+    interfaces = shared
+    region water : cell { select name "Water"; expect exactly_one }
+    region wall : solid { select name "Wall"; expect exactly_one }
+    region inlet : face { select name "Inlet"; expect exactly_one }
+    region outlet : face { select name "Outlet"; expect exactly_one }
+    region fluid_wall : face { select name "Fluid wall"; expect one_or_more }
+    region structural_wall : face { select name "Structural wall"; expect one_or_more }
+    region mount : face { select name "Mount"; expect one_or_more }
+}
+
+mesh duct on geometry.duct {
+    tetrahedra {
+        order = linear
+        target_size = 0.004 m
+        maximum_deviation = 0.0004 m
+    }
+}
+
+material water {
+    mass_density = 998 kg/m^3
+    fluid {
+        law = incompressible_newtonian
+        dynamic_viscosity = 0.001 Pa*s
+    }
+}
+
+material rubber {
+    mass_density = 1100 kg/m^3
+    elastic {
+        youngs_modulus = 5 MPa
+        poisson_ratio = 0.45
+    }
+}
+
+model flexible_wall {
+    assign material.water to geometry.duct.region.water
+    assign material.rubber to geometry.duct.region.wall
+    constraint inflow {
+        fluid.velocity { target = geometry.duct.region.inlet; value = [0.01 m/s, 0 m/s, 0 m/s] }
+    }
+    load outflow {
+        fluid.outlet_pressure { target = geometry.duct.region.outlet; value = 0 Pa }
+    }
+    constraint mounted {
+        structural.fixed { target = geometry.duct.region.mount }
+    }
+    interface coupled_wall {
+        fluid_structure.no_slip {
+            primary = geometry.duct.region.fluid_wall
+            secondary = geometry.duct.region.structural_wall
+        }
+    }
+}
+
+study flexible_duct {
+    geometry = geometry.duct
+    mesh = mesh.duct
+    model = model.flexible_wall
+    analysis response {
+        fluid_structure_interaction transient {
+            start_time = 0 s
+            end_time = 1 s
+            time_step = 0.001 s
+        }
+    }
+    output wall_displacement = analysis.response.field.node.displacement
+    output pressure = analysis.response.field.cell.fluid_pressure
+}

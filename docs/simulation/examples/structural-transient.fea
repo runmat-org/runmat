@@ -1,0 +1,65 @@
+// Engineering physics belongs in the importing study.
+
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
+
+    region body : solid { select id "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"; expect exactly_one }
+    region support : face { select id "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"; expect exactly_one }
+    region load_face : face { select id "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"; expect exactly_one }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.75 m
+        maximum_deviation = 0.05 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model impulsive_bracket {
+    assign material.steel to geometry.bracket.region.body
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    signal pulse : force over time {
+        samples = [
+            { at = 0 s, value = 0 N },
+            { at = 0.01 s, value = 1 kN },
+            { at = 0.02 s, value = 0 N },
+            { at = 0.1 s, value = 0 N },
+        ]
+        interpolation = linear
+        extrapolation = reject
+    }
+    excitation impact {
+        force {
+            target = geometry.bracket.region.load_face
+            signal = signal.pulse
+            direction = global([0, -1, 0])
+        }
+    }
+    load_case impact { include excitation.impact }
+}
+
+study structural_transient {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.impulsive_bracket
+    analysis response {
+        structural transient {
+            start_time = 0 s
+            end_time = 0.1 s
+            time_step = 0.001 s
+        }
+    }
+    output displacement = analysis.response.field.node.displacement
+}

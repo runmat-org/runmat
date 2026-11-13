@@ -107,6 +107,8 @@ fn native_capabilities() -> BTreeSet<HostCapability> {
     [
         HostCapability::Network,
         HostCapability::NativeLibrary,
+        HostCapability::Mex,
+        HostCapability::Jvm,
         HostCapability::Subprocess,
     ]
     .into_iter()
@@ -141,6 +143,28 @@ pub(crate) async fn install_project_for_source(
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
             project.resolved.frozen.clone(),
         ))
+        .await
         .context("failed to install resolved project graph")?;
     Ok(Some(project))
+}
+
+/// Project ownership comes from the frozen access row, not an absolute path
+/// labeled as the root package. Pure, unprojected inputs retain their local identity.
+pub(crate) async fn executable_source(
+    project: Option<&runmat_package::FrozenProject>,
+    file: &Path,
+) -> Result<runmat_core::ExecutableSource> {
+    let Some(project) = project else {
+        let text = runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(file)
+            .await
+            .with_context(|| format!("failed to read selected source {}", file.display()))?;
+        return Ok(runmat_core::ExecutableSource::new(
+            "root",
+            file.to_string_lossy(),
+            text,
+        ));
+    };
+    runmat_core::ExecutableSource::capture_project_primary(project, file)
+        .await
+        .map_err(anyhow::Error::msg)
 }

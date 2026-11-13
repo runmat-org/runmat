@@ -59,6 +59,12 @@ impl ProjectContext {
         &self.visible_source_files
     }
 
+    pub fn contains_visible_source(&self, path: &Path) -> bool {
+        self.visible_source_files
+            .iter()
+            .any(|visible| paths_equivalent(visible, path))
+    }
+
     pub fn manifest_path(&self) -> &Path {
         &self.manifest_path
     }
@@ -144,6 +150,21 @@ async fn is_file_async(path: &Path) -> bool {
         .await
         .map(|meta| meta.is_file())
         .unwrap_or(false)
+}
+
+fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

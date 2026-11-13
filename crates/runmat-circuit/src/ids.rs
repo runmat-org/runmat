@@ -1,0 +1,836 @@
+//! Stable identity: hierarchical name paths mapped to UUIDs through a lock section.
+//!
+//! Every elaborated item (component instance, net, sheet instance, pin, layout object) has a
+//! [`NamePath`] such as `/power/buck[2]/U1`. The [`LockSection`] maps paths to [`Uuid`]s the
+//! way `Cargo.lock` pins versions: a UUID is allocated the first time a path is seen and kept
+//! from then on, so layout, review comments and ECO history attach to the UUID, not to the
+//! name. [`LockSection::reconcile`] compares the lock with a new elaboration and reports each
+//! item as kept, new, renamed or removed:
+//!
+//! 1. an exact path match keeps its UUID;
+//! 2. an explicit rename (`renamed_from` in source, or a recorded alias) carries the UUID to
+//!    the new path and records an alias, so a rename is an ECO *rename*, not delete + add;
+//! 3. an unmatched old and new item of the same kind with the same *fingerprint* (for a
+//!    component: its part and connected nets) pair up as an inferred rename, when the pairing
+//!    is unique;
+//! 4. anything else is new (fresh UUID) or removed.
+//!
+//! This module is pure data. [`LockSection::to_text`]/[`LockSection::from_text`] give a
+//! canonical line format; file I/O belongs to the host.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Uuid(pub u128);
+
+impl Uuid {
+    pub const NIL: Uuid = Uuid(0);
+    /// Parses the hyphenated 8-4-4-4-12 form (case-insensitive).
+    pub fn parse(s: &str) -> Option<Uuid> {
+        let hex: String = s.chars().filter(|c| *c != '-').collect();
+        if hex.len() != 32 || s.len() != 36 {
+            return None;
+        }
+        u128::from_str_radix(&hex, 16).ok().map(Uuid)
+    }
+    /// Sets the RFC 9562 version and variant bits.
+    pub fn with_version(self, v: u8) -> Uuid {
+        let mut x = self.0;
+        x &= !(0xF << 76);
+        x |= (v as u128 & 0xF) << 76;
+        x &= !(0x3 << 62);
+        x |= 0x2 << 62;
+        Uuid(x)
+    }
+}
+
+impl fmt::Display for Uuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let h = format!("{:032x}", self.0);
+        write!(
+            f,
+            "{}-{}-{}-{}-{}",
+            &h[0..8],
+            &h[8..12],
+            &h[12..16],
+            &h[16..20],
+            &h[20..32]
+        )
+    }
+}
+
+/// 128-bit FNV-1a, used for name-derived UUIDs. Stable across platforms and releases.
+pub fn fnv128(data: &[u8]) -> u128 {
+    const OFFSET: u128 = 0x6c62272e07bb014262b821756295c58d;
+    const PRIME: u128 = 0x0000000001000000000000000000013B;
+    let mut h = OFFSET;
+    for b in data {
+        h ^= *b as u128;
+        h = h.wrapping_mul(PRIME);
+    }
+    // Final avalanche so similar paths differ in every nibble.
+    h ^= h >> 67;
+    h = h.wrapping_mul(0x9E3779B97F4A7C15F39CC0605CEDC835);
+    h ^= h >> 59;
+    h
+}
+
+/// A hierarchical name path. Segments are sheet-instance names (with a channel index for
+/// repeated sheets, `adc[3]`) followed by the item's local name.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NamePath(pub Vec<String>);
+
+impl NamePath {
+    pub fn root() -> Self {
+        NamePath(Vec::new())
+    }
+    pub fn parse(s: &str) -> Self {
+        NamePath(
+            s.split('/')
+                .filter(|x| !x.is_empty())
+                .map(|x| x.to_string())
+                .collect(),
+        )
+    }
+    pub fn child(&self, seg: impl Into<String>) -> Self {
+        let mut v = self.0.clone();
+        v.push(seg.into());
+        NamePath(v)
+    }
+    pub fn parent(&self) -> Option<NamePath> {
+        if self.0.is_empty() {
+            None
+        } else {
+            Some(NamePath(self.0[..self.0.len() - 1].to_vec()))
+        }
+    }
+    pub fn leaf(&self) -> &str {
+        self.0.last().map(|s| s.as_str()).unwrap_or("")
+    }
+    pub fn depth(&self) -> usize {
+        self.0.len()
+    }
+    pub fn starts_with(&self, p: &NamePath) -> bool {
+        self.0.len() >= p.0.len() && self.0[..p.0.len()] == p.0[..]
+    }
+    /// Replaces the prefix `from` with `to` (for sheet-instance renames).
+    pub fn reprefix(&self, from: &NamePath, to: &NamePath) -> Option<NamePath> {
+        self.starts_with(from).then(|| {
+            let mut v = to.0.clone();
+            v.extend_from_slice(&self.0[from.0.len()..]);
+            NamePath(v)
+        })
+    }
+}
+
+impl fmt::Display for NamePath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.is_empty() {
+            return f.write_str("/");
+        }
+        for s in &self.0 {
+            write!(f, "/{s}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Where new UUIDs come from.
+pub trait UuidSource {
+    fn allocate(&mut self, kind: &str, path: &NamePath) -> Uuid;
+}
+
+/// Name-derived UUIDs (version 8): the same namespace, kind and path always give the same
+/// UUID. Used for reproducible builds and tests, and for items that are re-derived rather
+/// than authored.
+#[derive(Clone, Debug)]
+pub struct DerivedUuids {
+    pub namespace: u128,
+}
+
+impl UuidSource for DerivedUuids {
+    fn allocate(&mut self, kind: &str, path: &NamePath) -> Uuid {
+        let s = format!("{:032x}|{kind}|{path}", self.namespace);
+        Uuid(fnv128(s.as_bytes())).with_version(8)
+    }
+}
+
+/// Seeded pseudo-random UUIDs (version 4 layout) for first-compile allocation. A host seeds
+/// it from the OS once per session; tests use a fixed seed.
+#[derive(Clone, Debug)]
+pub struct SeededUuids {
+    state: u128,
+}
+
+impl SeededUuids {
+    pub fn new(seed: u128) -> Self {
+        SeededUuids {
+            state: seed ^ 0x2545F4914F6CDD1D_9E3779B97F4A7C15,
+        }
+    }
+}
+
+impl UuidSource for SeededUuids {
+    fn allocate(&mut self, _kind: &str, _path: &NamePath) -> Uuid {
+        // xorshift128 on two lanes, then mix.
+        self.state ^= self.state << 23;
+        self.state ^= self.state >> 17;
+        self.state ^= self.state << 26;
+        Uuid(fnv128(&self.state.to_le_bytes())).with_version(4)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LockEntry {
+    pub uuid: Uuid,
+    pub kind: String,
+    /// Assigned designator for components, so re-annotation is stable.
+    pub designator: Option<String>,
+}
+
+/// One item of a new elaboration, as presented to [`LockSection::reconcile`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LockItem {
+    pub path: NamePath,
+    pub kind: String,
+    /// Explicit previous path from source (`renamed_from`).
+    pub renamed_from: Option<NamePath>,
+    /// Content fingerprint for inferred renames; `None` disables inference for this item.
+    pub fingerprint: Option<String>,
+    pub designator: Option<String>,
+}
+
+impl LockItem {
+    pub fn new(path: NamePath, kind: &str) -> Self {
+        LockItem {
+            path,
+            kind: kind.to_string(),
+            renamed_from: None,
+            fingerprint: None,
+            designator: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IdChange {
+    Kept {
+        path: NamePath,
+        uuid: Uuid,
+    },
+    New {
+        path: NamePath,
+        uuid: Uuid,
+    },
+    Renamed {
+        from: NamePath,
+        to: NamePath,
+        uuid: Uuid,
+        /// `true` when paired by fingerprint rather than an explicit rename.
+        inferred: bool,
+    },
+    Removed {
+        path: NamePath,
+        uuid: Uuid,
+    },
+}
+
+impl IdChange {
+    pub fn uuid(&self) -> Uuid {
+        match self {
+            IdChange::Kept { uuid, .. }
+            | IdChange::New { uuid, .. }
+            | IdChange::Renamed { uuid, .. }
+            | IdChange::Removed { uuid, .. } => *uuid,
+        }
+    }
+}
+
+/// A schematic symbol's place, recorded so the user's moves and the first automatic layout
+/// stick: paper millimetres from the top-left corner (y down, as KiCad counts), in nm, with
+/// its quarter turn and mirror. Keyed by sheet definition and local name (`channel/RS`,
+/// `main/U1:A`, `main/ch[0]` for a sheet symbol), so every instance of a sheet shares one
+/// drawing. `page` is the instance's page it sits on: 1, or 2 for a large part's unused units
+/// (the lock writes `page=2`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SchPlace {
+    pub x: i64,
+    pub y: i64,
+    pub rotation: u16,
+    pub mirror: bool,
+    pub page: u16,
+}
+
+impl Default for SchPlace {
+    fn default() -> Self {
+        SchPlace {
+            x: 0,
+            y: 0,
+            rotation: 0,
+            mirror: false,
+            page: 1,
+        }
+    }
+}
+
+/// How a hand-drawn wire's segments run between its waypoints: across and up or down
+/// (`ortho`), also at 45° (`diagonal`), or straight from point to point at any angle (`any`).
+/// When a pin moves, the segment from the pin to the first waypoint keeps to the wire's mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WireMode {
+    #[default]
+    Orthogonal,
+    Diagonal,
+    Any,
+}
+
+impl WireMode {
+    pub fn word(self) -> &'static str {
+        match self {
+            WireMode::Orthogonal => "ortho",
+            WireMode::Diagonal => "diagonal",
+            WireMode::Any => "any",
+        }
+    }
+
+    pub fn from_word(w: &str) -> Option<WireMode> {
+        match w {
+            "ortho" => Some(WireMode::Orthogonal),
+            "diagonal" => Some(WireMode::Diagonal),
+            "any" => Some(WireMode::Any),
+            _ => None,
+        }
+    }
+}
+
+/// A hand-drawn schematic wire between two pins of one sheet definition (`U1.VIN`, `C1.1`;
+/// the pin as the sheet's `connect` statements name it, `a` before `b`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WireKey {
+    pub sheet: String,
+    pub a: String,
+    pub b: String,
+}
+
+impl WireKey {
+    /// The key with its ends in order.
+    pub fn new(sheet: &str, a: &str, b: &str) -> WireKey {
+        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        WireKey {
+            sheet: sheet.to_owned(),
+            a: a.to_owned(),
+            b: b.to_owned(),
+        }
+    }
+}
+
+/// A hand-drawn wire's path: its waypoints between the two pins (paper nm, y down, as
+/// [`SchPlace`] counts) in order from `a` to `b`, and its drawing mode. The pins' tips are the
+/// ends, so a moved part keeps the waypoints and its end segment follows the pin.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SchWire {
+    pub mode: WireMode,
+    pub points: Vec<(i64, i64)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LockSection {
+    pub entries: BTreeMap<NamePath, LockEntry>,
+    /// Schematic places by key (`place` records).
+    pub places: BTreeMap<String, SchPlace>,
+    /// Hand-drawn schematic wires (`wire` records): the router draws these as stored and
+    /// routes the rest.
+    pub wires: BTreeMap<WireKey, SchWire>,
+    /// Rename history: old path → new path. Followed transitively by `reconcile`.
+    pub aliases: BTreeMap<NamePath, NamePath>,
+    /// Fingerprints recorded at the last reconcile, for inferred renames.
+    pub fingerprints: BTreeMap<NamePath, String>,
+}
+
+/// A path as the lock text writes it: spaces and percent signs escaped.
+fn lock_path(p: &NamePath) -> String {
+    p.to_string()
+        .replace('%', "%25")
+        .replace(' ', "%20")
+        .replace('\t', "%09")
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("%20", " ")
+        .replace("%09", "\t")
+        .replace("%25", "%")
+}
+
+impl LockSection {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn uuid_of(&self, p: &NamePath) -> Option<Uuid> {
+        self.entries.get(p).map(|e| e.uuid)
+    }
+
+    pub fn path_of(&self, u: Uuid) -> Option<&NamePath> {
+        self.entries
+            .iter()
+            .find(|(_, e)| e.uuid == u)
+            .map(|(p, _)| p)
+    }
+
+    fn follow_alias(&self, p: &NamePath) -> NamePath {
+        let mut cur = p.clone();
+        let mut seen = BTreeSet::new();
+        while let Some(n) = self.aliases.get(&cur) {
+            if !seen.insert(cur.clone()) {
+                break;
+            }
+            cur = n.clone();
+        }
+        cur
+    }
+
+    /// Reconciles the lock with a new set of items, allocating UUIDs for new ones. The lock is
+    /// updated in place; the returned changes are sorted (kept, new, renamed, removed are
+    /// ordered by path).
+    pub fn reconcile(&mut self, items: &[LockItem], src: &mut dyn UuidSource) -> Vec<IdChange> {
+        let mut items: Vec<&LockItem> = items.iter().collect();
+        items.sort();
+        let mut old: BTreeMap<NamePath, LockEntry> = std::mem::take(&mut self.entries);
+        let old_fp = std::mem::take(&mut self.fingerprints);
+        let mut out = Vec::new();
+        let mut assigned: BTreeMap<NamePath, LockEntry> = BTreeMap::new();
+        let mut pending: Vec<&LockItem> = Vec::new();
+
+        // 1. Exact matches.
+        for it in &items {
+            if let Some(e) = old.get(&it.path) {
+                if e.kind == it.kind {
+                    let e = old.remove(&it.path).unwrap();
+                    out.push(IdChange::Kept {
+                        path: it.path.clone(),
+                        uuid: e.uuid,
+                    });
+                    assigned.insert(
+                        it.path.clone(),
+                        LockEntry {
+                            designator: it.designator.clone().or(e.designator),
+                            ..e
+                        },
+                    );
+                    continue;
+                }
+            }
+            pending.push(it);
+        }
+        // 2. Explicit renames and recorded aliases.
+        let mut still = Vec::new();
+        for it in pending {
+            let mut from = it.renamed_from.clone();
+            if from.is_none() {
+                // An alias chain ending at this path names its old identity.
+                for (o, _) in self.aliases.iter() {
+                    if self.follow_alias(o) == it.path && old.contains_key(o) {
+                        from = Some(o.clone());
+                        break;
+                    }
+                }
+            }
+            if let Some(f) = from {
+                if old.get(&f).is_some_and(|e| e.kind == it.kind) {
+                    let e = old.remove(&f).unwrap();
+                    out.push(IdChange::Renamed {
+                        from: f.clone(),
+                        to: it.path.clone(),
+                        uuid: e.uuid,
+                        inferred: false,
+                    });
+                    self.aliases.insert(f, it.path.clone());
+                    assigned.insert(
+                        it.path.clone(),
+                        LockEntry {
+                            designator: it.designator.clone().or(e.designator),
+                            ..e
+                        },
+                    );
+                    continue;
+                }
+            }
+            still.push(it);
+        }
+        // 3. Inferred renames: unique fingerprint matches of the same kind.
+        let mut by_fp_old: BTreeMap<(String, String), Vec<NamePath>> = BTreeMap::new();
+        for (p, e) in &old {
+            if let Some(fp) = old_fp.get(p) {
+                by_fp_old
+                    .entry((e.kind.clone(), fp.clone()))
+                    .or_default()
+                    .push(p.clone());
+            }
+        }
+        let mut by_fp_new: BTreeMap<(String, String), usize> = BTreeMap::new();
+        for it in &still {
+            if let Some(fp) = &it.fingerprint {
+                *by_fp_new.entry((it.kind.clone(), fp.clone())).or_default() += 1;
+            }
+        }
+        let mut fresh = Vec::new();
+        for it in still {
+            if let Some(fp) = &it.fingerprint {
+                let key = (it.kind.clone(), fp.clone());
+                if by_fp_new.get(&key) == Some(&1) {
+                    if let Some(cands) = by_fp_old.get(&key) {
+                        if cands.len() == 1 && old.contains_key(&cands[0]) {
+                            let f = cands[0].clone();
+                            let e = old.remove(&f).unwrap();
+                            out.push(IdChange::Renamed {
+                                from: f.clone(),
+                                to: it.path.clone(),
+                                uuid: e.uuid,
+                                inferred: true,
+                            });
+                            self.aliases.insert(f, it.path.clone());
+                            assigned.insert(
+                                it.path.clone(),
+                                LockEntry {
+                                    designator: it.designator.clone().or(e.designator),
+                                    ..e
+                                },
+                            );
+                            continue;
+                        }
+                    }
+                }
+            }
+            fresh.push(it);
+        }
+        // 4. New and removed.
+        for it in fresh {
+            let uuid = src.allocate(&it.kind, &it.path);
+            out.push(IdChange::New {
+                path: it.path.clone(),
+                uuid,
+            });
+            assigned.insert(
+                it.path.clone(),
+                LockEntry {
+                    uuid,
+                    kind: it.kind.clone(),
+                    designator: it.designator.clone(),
+                },
+            );
+        }
+        for (p, e) in old {
+            out.push(IdChange::Removed {
+                path: p,
+                uuid: e.uuid,
+            });
+        }
+        for it in &items {
+            if let Some(fp) = &it.fingerprint {
+                self.fingerprints.insert(it.path.clone(), fp.clone());
+            }
+        }
+        // Aliases that point at removed paths are dropped; chains are kept compact.
+        let live: BTreeSet<NamePath> = assigned.keys().cloned().collect();
+        let compact: BTreeMap<NamePath, NamePath> = self
+            .aliases
+            .keys()
+            .map(|k| (k.clone(), self.follow_alias(k)))
+            .filter(|(_, v)| live.contains(v))
+            .collect();
+        self.aliases = compact;
+        self.entries = assigned;
+        out.sort();
+        out
+    }
+
+    /// Canonical text: one `entry` line per path, then `alias` and `fp` lines, sorted. Fields
+    /// are separated by spaces, so a path's spaces and percent signs are written `%20` and
+    /// `%25` (a sheet named `MIPI & ETH` is `/MIPI%20&%20ETH/U1`).
+    pub fn to_text(&self) -> String {
+        let mut s = String::new();
+        for (p, e) in &self.entries {
+            let p = lock_path(p);
+            s.push_str(&format!("entry {} {} {}", e.uuid, e.kind, p));
+            if let Some(d) = &e.designator {
+                s.push_str(&format!(" designator={d}"));
+            }
+            s.push('\n');
+        }
+        for (a, b) in &self.aliases {
+            s.push_str(&format!("alias {} -> {}\n", lock_path(a), lock_path(b)));
+        }
+        for (p, f) in &self.fingerprints {
+            s.push_str(&format!("fp {} {f}\n", lock_path(p)));
+        }
+        let mm = |v: i64| {
+            let t = format!("{:.4}", v as f64 / 1.0e6);
+            t.trim_end_matches('0').trim_end_matches('.').to_owned()
+        };
+        for (k, p) in &self.places {
+            s.push_str(&format!("place {k} {} {} {}", mm(p.x), mm(p.y), p.rotation));
+            if p.mirror {
+                s.push_str(" mirror");
+            }
+            if p.page != 1 {
+                s.push_str(&format!(" page={}", p.page));
+            }
+            s.push('\n');
+        }
+        for (k, w) in &self.wires {
+            s.push_str(&format!(
+                "wire {} {} {} {}",
+                k.sheet,
+                k.a,
+                k.b,
+                w.mode.word()
+            ));
+            for (x, y) in &w.points {
+                s.push_str(&format!(" {},{}", mm(*x), mm(*y)));
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    pub fn from_text(t: &str) -> Result<LockSection, String> {
+        let mut l = LockSection::new();
+        for (n, line) in t.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut parts = line.split_whitespace();
+            match parts.next() {
+                Some("entry") => {
+                    let u = parts
+                        .next()
+                        .and_then(Uuid::parse)
+                        .ok_or_else(|| format!("line {}: bad uuid", n + 1))?;
+                    let kind = parts.next().ok_or(format!("line {}: no kind", n + 1))?;
+                    let path = parts.next().ok_or(format!("line {}: no path", n + 1))?;
+                    let designator = parts
+                        .next()
+                        .and_then(|x| x.strip_prefix("designator="))
+                        .map(|x| x.to_string());
+                    l.entries.insert(
+                        NamePath::parse(&unescape(path)),
+                        LockEntry {
+                            uuid: u,
+                            kind: kind.to_string(),
+                            designator,
+                        },
+                    );
+                }
+                Some("alias") => {
+                    let a = parts.next().ok_or(format!("line {}: bad alias", n + 1))?;
+                    let _ = parts.next();
+                    let b = parts.next().ok_or(format!("line {}: bad alias", n + 1))?;
+                    l.aliases
+                        .insert(NamePath::parse(&unescape(a)), NamePath::parse(&unescape(b)));
+                }
+                Some("fp") => {
+                    let p = parts.next().ok_or(format!("line {}: bad fp", n + 1))?;
+                    let f: Vec<&str> = parts.collect();
+                    l.fingerprints
+                        .insert(NamePath::parse(&unescape(p)), f.join(" "));
+                }
+                Some("place") => {
+                    let bad = || format!("line {}: bad place", n + 1);
+                    let key = parts.next().ok_or_else(bad)?;
+                    let mut num = || -> Result<f64, String> {
+                        parts.next().and_then(|v| v.parse().ok()).ok_or_else(bad)
+                    };
+                    let (x, y, r) = (num()?, num()?, num()?);
+                    let (mut mirror, mut page) = (false, 1);
+                    for flag in parts {
+                        match flag.strip_prefix("page=") {
+                            Some(v) => page = v.parse().map_err(|_| bad())?,
+                            None if flag == "mirror" => mirror = true,
+                            None => return Err(bad()),
+                        }
+                    }
+                    l.places.insert(
+                        key.to_owned(),
+                        SchPlace {
+                            x: (x * 1.0e6).round() as i64,
+                            y: (y * 1.0e6).round() as i64,
+                            rotation: (r as i64).rem_euclid(360) as u16,
+                            mirror,
+                            page,
+                        },
+                    );
+                }
+                Some("wire") => {
+                    let bad = || format!("line {}: bad wire", n + 1);
+                    let (sheet, a, b) = (
+                        parts.next().ok_or_else(bad)?,
+                        parts.next().ok_or_else(bad)?,
+                        parts.next().ok_or_else(bad)?,
+                    );
+                    let mode = parts.next().and_then(WireMode::from_word).ok_or_else(bad)?;
+                    let points = parts
+                        .map(|p| {
+                            let (x, y) = p.split_once(',').ok_or_else(bad)?;
+                            let v = |t: &str| {
+                                t.parse::<f64>()
+                                    .map(|v| (v * 1.0e6).round() as i64)
+                                    .map_err(|_| bad())
+                            };
+                            Ok((v(x)?, v(y)?))
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    l.wires
+                        .insert(WireKey::new(sheet, a, b), SchWire { mode, points });
+                }
+                Some(other) => return Err(format!("line {}: unknown record `{other}`", n + 1)),
+                None => {}
+            }
+        }
+        Ok(l)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(p: &str, k: &str) -> LockItem {
+        LockItem::new(NamePath::parse(p), k)
+    }
+
+    #[test]
+    fn lock_text_keeps_paths_with_spaces() {
+        let mut lock = LockSection::new();
+        let p = NamePath::parse("/MIPI & ETH/U1");
+        lock.entries.insert(
+            p.clone(),
+            LockEntry {
+                uuid: Uuid(7),
+                kind: "component".into(),
+                designator: Some("U2".into()),
+            },
+        );
+        lock.fingerprints
+            .insert(NamePath::parse("/100% load/R1"), "r 10k".into());
+        let text = lock.to_text();
+        assert!(text.contains("/MIPI%20&%20ETH/U1 designator=U2"), "{text}");
+        let back = LockSection::from_text(&text).unwrap();
+        assert_eq!(back.entries[&p].designator.as_deref(), Some("U2"));
+        assert!(back
+            .fingerprints
+            .contains_key(&NamePath::parse("/100% load/R1")));
+    }
+
+    #[test]
+    fn uuid_text() {
+        let u = DerivedUuids { namespace: 7 }.allocate("component", &NamePath::parse("/a/U1"));
+        let s = u.to_string();
+        assert_eq!(s.len(), 36);
+        assert_eq!(&s[14..15], "8");
+        assert_eq!(Uuid::parse(&s), Some(u));
+        let v = DerivedUuids { namespace: 7 }.allocate("component", &NamePath::parse("/a/U2"));
+        assert_ne!(u, v);
+    }
+
+    #[test]
+    fn reconcile_keep_new_rename_remove() {
+        let mut lock = LockSection::new();
+        let mut src = SeededUuids::new(1);
+        let c = lock.reconcile(
+            &[item("/U1", "component"), item("/R1", "component")],
+            &mut src,
+        );
+        assert!(c.iter().all(|x| matches!(x, IdChange::New { .. })));
+        let u1 = lock.uuid_of(&NamePath::parse("/U1")).unwrap();
+        let r1 = lock.uuid_of(&NamePath::parse("/R1")).unwrap();
+
+        // Explicit rename U1 → MCU; R1 removed; C1 new.
+        let mut mcu = item("/MCU", "component");
+        mcu.renamed_from = Some(NamePath::parse("/U1"));
+        let c = lock.reconcile(&[mcu, item("/C1", "component")], &mut src);
+        assert!(c.contains(&IdChange::Renamed {
+            from: NamePath::parse("/U1"),
+            to: NamePath::parse("/MCU"),
+            uuid: u1,
+            inferred: false
+        }));
+        assert!(c.contains(&IdChange::Removed {
+            path: NamePath::parse("/R1"),
+            uuid: r1
+        }));
+        assert_eq!(lock.uuid_of(&NamePath::parse("/MCU")), Some(u1));
+        assert_eq!(
+            lock.aliases.get(&NamePath::parse("/U1")),
+            Some(&NamePath::parse("/MCU"))
+        );
+
+        // Round trip through text.
+        let t = lock.to_text();
+        assert_eq!(LockSection::from_text(&t).unwrap(), lock);
+    }
+
+    #[test]
+    fn inferred_rename_by_fingerprint() {
+        let mut lock = LockSection::new();
+        let mut src = DerivedUuids { namespace: 1 };
+        let mut a = item("/power/U3", "component");
+        a.fingerprint = Some("TPS62130|VIN,SW,FB".into());
+        let mut b = item("/power/C1", "component");
+        b.fingerprint = Some("C0603|VIN,GND".into());
+        lock.reconcile(&[a.clone(), b.clone()], &mut src);
+        let u3 = lock.uuid_of(&a.path).unwrap();
+        // The sheet is renamed; fingerprints still match one-to-one.
+        let mut a2 = a.clone();
+        a2.path = NamePath::parse("/buck/U3");
+        let mut b2 = b.clone();
+        b2.path = NamePath::parse("/buck/C1");
+        let c = lock.reconcile(&[a2.clone(), b2], &mut src);
+        assert!(c
+            .iter()
+            .any(|x| matches!(x, IdChange::Renamed { inferred: true, uuid, .. } if *uuid == u3)));
+        // Ambiguous fingerprints never pair.
+        let mut l2 = LockSection::new();
+        let mut x = item("/C1", "component");
+        x.fingerprint = Some("C|GND".into());
+        let mut y = item("/C2", "component");
+        y.fingerprint = Some("C|GND".into());
+        l2.reconcile(&[x.clone(), y.clone()], &mut src);
+        x.path = NamePath::parse("/C10");
+        y.path = NamePath::parse("/C11");
+        let c = l2.reconcile(&[x, y], &mut src);
+        assert_eq!(
+            c.iter()
+                .filter(|x| matches!(x, IdChange::New { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_place_records_its_page_after_the_first() {
+        let text = "place main/U1:A 10.16 20.32 0 mirror\nplace main/U1:B 30.48 40.64 90 page=2\n";
+        let l = LockSection::from_text(text).unwrap();
+        assert_eq!(l.places["main/U1:A"].page, 1);
+        assert!(l.places["main/U1:A"].mirror);
+        assert_eq!(l.places["main/U1:B"].page, 2);
+        assert_eq!(l.to_text(), text);
+        assert!(LockSection::from_text("place main/U1:B 1 2 0 page=x").is_err());
+        assert!(LockSection::from_text("place main/U1:B 1 2 0 sideways").is_err());
+        // A hand-drawn wire: its sheet, two pins in order, mode and waypoints.
+        let text = "wire main C1.1 U1.VIN diagonal 10.16,20.32 12.7,22.86\n";
+        let lock = LockSection::from_text(text).unwrap();
+        let w = &lock.wires[&WireKey::new("main", "U1.VIN", "C1.1")];
+        assert_eq!(
+            (w.mode, w.points.clone()),
+            (
+                WireMode::Diagonal,
+                vec![(10_160_000, 20_320_000), (12_700_000, 22_860_000)]
+            )
+        );
+        assert_eq!(lock.to_text(), text);
+        assert!(LockSection::from_text("wire main C1.1 U1.VIN curvy").is_err());
+        assert!(LockSection::from_text("wire main C1.1 U1.VIN ortho 1;2").is_err());
+    }
+}

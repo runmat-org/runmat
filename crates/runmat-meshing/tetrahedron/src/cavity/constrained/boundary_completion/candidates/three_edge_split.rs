@@ -36,7 +36,7 @@ pub(in super::super::super) fn best_boundary_face_three_edge_split_completion(
         .collect::<BTreeMap<_, _>>();
     let split_node_coordinates = split_nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let mut best = None::<(Vec<ConstrainedCavityRefillTetrahedron>, f64)>;
     for cap_node_id in cavity_boundary_node_ids(cavity) {
@@ -50,7 +50,8 @@ pub(in super::super::super) fn best_boundary_face_three_edge_split_completion(
             &split_node_coordinates,
             boundary_nodes,
             options,
-        ) else {
+        )?
+        else {
             continue;
         };
         if child_tetrahedra.iter().any(|tetrahedron| {

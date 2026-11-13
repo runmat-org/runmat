@@ -1,0 +1,23 @@
+[package]
+name = "runmat-python"
+version = "0.7.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Native CPython interoperability for RunMat"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures = "0.3"
+libloading = "0.8.9"
+runmat-process-host = { workspace = true }
+
+[dev-dependencies]

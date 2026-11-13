@@ -21,6 +21,7 @@ pub fn merge_attempts(test_id: TestId, mut attempts: Vec<AttemptResult>) -> Opti
             .any(|attempt| !attempt.state.is_success());
     Some(TestResult {
         test_id,
+        report_identity: None,
         state: final_attempt.state,
         attempts,
         flaky,

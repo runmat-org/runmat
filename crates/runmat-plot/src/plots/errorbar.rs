@@ -2,12 +2,13 @@
 
 use crate::context::shared_wgpu_context;
 use crate::core::{
-    marker_shape_code, vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuPackContext,
-    GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    marker_shape_code, AlphaMode, BoundingBox, DrawCall, GpuPackContext, GpuVertexBuffer, Material,
+    PipelineType, RenderData, Vertex,
 };
 use crate::gpu::errorbar::{ErrorBarGpuInputs, ErrorBarGpuParams};
 use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::line::{LineMarkerAppearance, LineStyle};
+use crate::plots::stroke;
 use glam::{Vec3, Vec4};
 use log::warn;
 
@@ -44,6 +45,7 @@ pub struct ErrorBar {
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
     gpu_inputs: Option<ErrorBarGpuInputs>,
+    gpu_cap_scale: Option<f32>,
     marker_vertices: Option<Vec<Vertex>>,
     marker_gpu_vertices: Option<GpuVertexBuffer>,
     marker_dirty: bool,
@@ -88,6 +90,7 @@ impl ErrorBar {
             gpu_vertex_count: None,
             gpu_bounds: None,
             gpu_inputs: None,
+            gpu_cap_scale: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -198,6 +201,7 @@ impl ErrorBar {
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
             gpu_inputs: None,
+            gpu_cap_scale: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -236,6 +240,7 @@ impl ErrorBar {
             gpu_vertex_count: None,
             gpu_bounds: Some(bounds),
             gpu_inputs: Some(inputs),
+            gpu_cap_scale: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -285,59 +290,33 @@ impl ErrorBar {
                     .to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
             let y_neg = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &inputs.y_neg_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
             let y_pos = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &inputs.y_pos_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
             let x_neg = if let Some(buffer) = &inputs.x_neg_buffer {
-                readback_scalar_buffer_f64(
-                    &context.device,
-                    &context.queue,
-                    buffer,
-                    len,
-                    inputs.scalar,
-                )
-                .await?
+                readback_scalar_buffer_f64(&context.access, buffer, len, inputs.scalar).await?
             } else {
                 vec![0.0; len]
             };
             let x_pos = if let Some(buffer) = &inputs.x_pos_buffer {
-                readback_scalar_buffer_f64(
-                    &context.device,
-                    &context.queue,
-                    buffer,
-                    len,
-                    inputs.scalar,
-                )
-                .await?
+                readback_scalar_buffer_f64(&context.access, buffer, len, inputs.scalar).await?
             } else {
                 vec![0.0; len]
             };
@@ -371,39 +350,48 @@ impl ErrorBar {
     }
 
     fn generate_line_vertices_with_cap_half(&self, cap_half_data: f32) -> Vec<Vertex> {
-        let mut verts = Vec::new();
+        let identity = |x: f64, y: f64| {
+            let p = [x as f32 as f64, y as f32 as f64];
+            (p[0].is_finite() && p[1].is_finite()).then_some(p)
+        };
+        let mut segments = self.bar_segments(identity, cap_half_data as f64);
+        segments.extend(self.data_line_segments(identity, &[]));
+        segments
+            .into_iter()
+            .flat_map(|(a, b)| {
+                [a, b].map(|p| Vertex::new(Vec3::new(p[0] as f32, p[1] as f32, 0.0), self.color))
+            })
+            .collect()
+    }
+
+    /// Bars and caps as segments in the space `map` projects into: data values, or viewport
+    /// pixels. Caps extend `cap_half` either side of a bar end, in that same space.
+    fn bar_segments(
+        &self,
+        map: impl Fn(f64, f64) -> Option<[f64; 2]>,
+        cap_half: f64,
+    ) -> Vec<([f64; 2], [f64; 2])> {
+        let mut segments = Vec::new();
+        let offset = |p: [f64; 2], dx: f64, dy: f64| [p[0] + dx, p[1] + dy];
         for i in 0..self.x.len() {
-            let xi = self.x[i] as f32;
-            let yi = self.y[i] as f32;
-            if !xi.is_finite() || !yi.is_finite() {
+            if !self.x[i].is_finite() || !self.y[i].is_finite() {
                 continue;
             }
             if matches!(
                 self.orientation,
                 ErrorBarOrientation::Vertical | ErrorBarOrientation::Both
             ) {
-                let y0 = (self.y[i] - self.y_neg[i]) as f32;
-                let y1 = (self.y[i] + self.y_pos[i]) as f32;
-                if y0.is_finite() && y1.is_finite() && include_segment(i, self.line_style) {
-                    verts.push(Vertex::new(Vec3::new(xi, y0, 0.0), self.color));
-                    verts.push(Vertex::new(Vec3::new(xi, y1, 0.0), self.color));
-                    if cap_half_data > 0.0 {
-                        verts.push(Vertex::new(
-                            Vec3::new(xi - cap_half_data, y0, 0.0),
-                            self.color,
-                        ));
-                        verts.push(Vertex::new(
-                            Vec3::new(xi + cap_half_data, y0, 0.0),
-                            self.color,
-                        ));
-                        verts.push(Vertex::new(
-                            Vec3::new(xi - cap_half_data, y1, 0.0),
-                            self.color,
-                        ));
-                        verts.push(Vertex::new(
-                            Vec3::new(xi + cap_half_data, y1, 0.0),
-                            self.color,
-                        ));
+                let ends = (
+                    map(self.x[i], self.y[i] - self.y_neg[i]),
+                    map(self.x[i], self.y[i] + self.y_pos[i]),
+                );
+                if let (Some(lo), Some(hi)) = ends {
+                    segments.push((lo, hi));
+                    if cap_half > 0.0 {
+                        for end in [lo, hi] {
+                            segments
+                                .push((offset(end, -cap_half, 0.0), offset(end, cap_half, 0.0)));
+                        }
                     }
                 }
             }
@@ -411,33 +399,89 @@ impl ErrorBar {
                 self.orientation,
                 ErrorBarOrientation::Horizontal | ErrorBarOrientation::Both
             ) {
-                let x0 = (self.x[i] - self.x_neg[i]) as f32;
-                let x1 = (self.x[i] + self.x_pos[i]) as f32;
-                if x0.is_finite() && x1.is_finite() && include_segment(i, self.line_style) {
-                    verts.push(Vertex::new(Vec3::new(x0, yi, 0.0), self.color));
-                    verts.push(Vertex::new(Vec3::new(x1, yi, 0.0), self.color));
-                    if cap_half_data > 0.0 {
-                        verts.push(Vertex::new(
-                            Vec3::new(x0, yi - cap_half_data, 0.0),
-                            self.color,
-                        ));
-                        verts.push(Vertex::new(
-                            Vec3::new(x0, yi + cap_half_data, 0.0),
-                            self.color,
-                        ));
-                        verts.push(Vertex::new(
-                            Vec3::new(x1, yi - cap_half_data, 0.0),
-                            self.color,
-                        ));
-                        verts.push(Vertex::new(
-                            Vec3::new(x1, yi + cap_half_data, 0.0),
-                            self.color,
-                        ));
+                let ends = (
+                    map(self.x[i] - self.x_neg[i], self.y[i]),
+                    map(self.x[i] + self.x_pos[i], self.y[i]),
+                );
+                if let (Some(lo), Some(hi)) = ends {
+                    segments.push((lo, hi));
+                    if cap_half > 0.0 {
+                        for end in [lo, hi] {
+                            segments
+                                .push((offset(end, 0.0, -cap_half), offset(end, 0.0, cap_half)));
+                        }
                     }
                 }
             }
         }
-        verts
+        segments
+    }
+
+    /// The line through the data points, in the space `map` projects into, cut into dashes
+    /// of `pattern` (on, off, ... lengths in that space) when the style is not solid. Error
+    /// bars are always solid; `LineStyle` is the style of this line, as in MATLAB.
+    fn data_line_segments(
+        &self,
+        map: impl Fn(f64, f64) -> Option<[f64; 2]>,
+        pattern: &[f64],
+    ) -> Vec<([f64; 2], [f64; 2])> {
+        let mut segments = Vec::new();
+        if matches!(self.line_style, LineStyle::None) {
+            return segments;
+        }
+        let points: Vec<Option<[f64; 2]>> = self
+            .x
+            .iter()
+            .zip(&self.y)
+            .map(|(&x, &y)| {
+                (x.is_finite() && y.is_finite())
+                    .then(|| map(x, y))
+                    .flatten()
+            })
+            .collect();
+        let dashed = !matches!(self.line_style, LineStyle::Solid) && !pattern.is_empty();
+        let (mut phase, mut remaining) = (0usize, pattern.first().copied().unwrap_or(0.0));
+        for pair in points.windows(2) {
+            let (Some(a), Some(b)) = (pair[0], pair[1]) else {
+                continue;
+            };
+            if !dashed {
+                segments.push((a, b));
+                continue;
+            }
+            let length = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+            let at = |t: f64| {
+                [
+                    a[0] + (b[0] - a[0]) * t / length,
+                    a[1] + (b[1] - a[1]) * t / length,
+                ]
+            };
+            let mut t = 0.0;
+            while length > 0.0 && t < length {
+                let step = remaining.min(length - t);
+                if phase % 2 == 0 {
+                    segments.push((at(t), at(t + step)));
+                }
+                t += step;
+                remaining -= step;
+                if remaining <= 1.0e-9 {
+                    phase = (phase + 1) % pattern.len();
+                    remaining = pattern[phase];
+                }
+            }
+        }
+        segments
+    }
+
+    /// Dash pattern in pixels for the data line, scaled with its width.
+    fn dash_pattern_px(&self) -> Vec<f64> {
+        let w = self.line_width.max(1.0) as f64;
+        match self.line_style {
+            LineStyle::Dashed => vec![6.0 + 2.0 * w, 4.0 + w],
+            LineStyle::Dotted => vec![w, 2.0 + 1.5 * w],
+            LineStyle::DashDot => vec![6.0 + 2.0 * w, 3.0 + w, w, 3.0 + w],
+            LineStyle::Solid | LineStyle::None => Vec::new(),
+        }
     }
 
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
@@ -569,14 +613,7 @@ impl ErrorBar {
                     .y
                     .max(yi + self.y_pos.get(i).copied().unwrap_or(0.0) as f32);
             }
-            if self.cap_size > 0.0 {
-                let range_bounds = BoundingBox::new(min, max);
-                let half = self.cap_half_width_data(&range_bounds, None);
-                min.x -= half;
-                max.x += half;
-                min.y -= half;
-                max.y += half;
-            }
+            // Caps are drawn in viewport pixels, so they add nothing to the data bounds.
             if !min.x.is_finite() {
                 min = Vec3::ZERO;
                 max = Vec3::ZERO;
@@ -632,23 +669,23 @@ impl ErrorBar {
     fn pack_gpu_vertices_if_needed(
         &mut self,
         gpu: &GpuPackContext<'_>,
+        viewport: crate::core::ResolvedViewport,
         viewport_px: (u32, u32),
     ) -> Result<(), String> {
-        if self.gpu_vertices.is_some() {
-            return Ok(());
-        }
         let Some(inputs) = self.gpu_inputs.as_ref() else {
             return Ok(());
         };
         let bounds = self
             .gpu_bounds
             .ok_or_else(|| "errorbar: missing GPU bounds".to_string())?;
-        let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+        let data_per_px = crate::core::data_units_per_px(&viewport.bounds(bounds), viewport_px);
         let cap_size_data = self.cap_size.max(0.0) * data_per_px;
+        if self.gpu_vertices.is_some() && self.gpu_cap_scale == Some(cap_size_data) {
+            return Ok(());
+        }
         let orientation = self.orientation_code();
         let packed = crate::gpu::errorbar::pack_vertical_vertices(
-            gpu.device,
-            gpu.queue,
+            gpu.emission,
             inputs,
             &ErrorBarGpuParams {
                 color: self.color,
@@ -663,54 +700,69 @@ impl ErrorBar {
         };
         self.gpu_vertex_count = Some(inputs.len as usize * segments_per_point);
         self.gpu_vertices = Some(packed);
+        self.gpu_cap_scale = Some(cap_size_data);
         Ok(())
     }
 
     pub fn render_data_with_viewport_gpu(
         &mut self,
         viewport_px: Option<(u32, u32)>,
+        view_bounds: Option<(f64, f64, f64, f64)>,
+        log_axes: (bool, bool),
         gpu: Option<&GpuPackContext<'_>>,
     ) -> RenderData {
-        if self.gpu_inputs.is_some() && self.gpu_vertices.is_none() {
+        if self.gpu_inputs.is_some() {
             if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
-                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp) {
+                let viewport = crate::core::ResolvedViewport {
+                    pixels: viewport_px,
+                    view: view_bounds,
+                };
+                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, viewport, vp) {
                     warn!("errorbar gpu pack failed: {err}");
                 }
             }
         }
-        self.render_data_with_viewport(viewport_px)
+        self.render_data_on_axes(viewport_px, view_bounds, log_axes)
     }
 
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        self.render_data_on_axes(viewport_px, None, (false, false))
+    }
+
+    /// Render data sized in pixels for axes with the given visible bounds and log scales.
+    /// Bars, caps and widths are built in viewport pixels, so caps are `cap_size` pixels wide.
+    pub fn render_data_on_axes(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        view_bounds: Option<(f64, f64, f64, f64)>,
+        log_axes: (bool, bool),
+    ) -> RenderData {
         if self.gpu_vertices.is_some() {
             return self.render_data();
         }
 
         let bounds = self.bounds();
-        let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
-            let Some(viewport_px) = viewport_px else {
-                return self.render_data();
-            };
-            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
-            let width_data = self.line_width.max(0.1) * data_per_px;
-            let cap_half_data = self.cap_half_width_data(&bounds, Some(viewport_px));
-            let verts = self.generate_line_vertices_with_cap_half(cap_half_data);
-            let mut thick = Vec::new();
-            for segment in verts.chunks_exact(2) {
-                let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
-                let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
-                let color = Vec4::from_array(segment[0].color);
-                thick.extend(vertex_utils::create_thick_polyline(
-                    &x, &y, color, width_data,
-                ));
-            }
-            let count = thick.len();
-            (thick, count, PipelineType::Triangles)
-        } else {
-            let verts = self.generate_vertices().clone();
-            let count = verts.len();
-            (verts, count, PipelineType::Lines)
+        let Some(viewport_px) = viewport_px else {
+            return self.render_data();
         };
+        let map = stroke::PixelMap::new(
+            stroke::stroke_bounds(bounds, view_bounds),
+            viewport_px,
+            log_axes,
+            &self.x,
+            &self.y,
+        );
+        let mut px_segments =
+            self.bar_segments(|x, y| map.to_px(x, y), self.cap_size.max(0.0) as f64 * 0.5);
+        px_segments
+            .extend(self.data_line_segments(|x, y| map.to_px(x, y), &self.dash_pattern_px()));
+        let segments: Vec<stroke::PixelSegment> = px_segments
+            .into_iter()
+            .map(|(a, b)| (a, b, self.color))
+            .collect();
+        let (vertices, pipeline_type) =
+            stroke::segment_geometry(&map, &segments, self.line_width.max(0.1));
+        let vertex_count = vertices.len();
         RenderData {
             pipeline_type,
             vertices,
@@ -742,18 +794,32 @@ impl ErrorBar {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
     }
-}
 
-fn include_segment(index: usize, style: LineStyle) -> bool {
-    match style {
-        LineStyle::None => false,
-        LineStyle::Solid => true,
-        LineStyle::Dashed => (index % 4) < 2,
-        LineStyle::Dotted => index.is_multiple_of(4),
-        LineStyle::DashDot => {
-            let m = index % 6;
-            m < 2 || m == 3
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for values in [
+            &self.x,
+            &self.y,
+            &self.y_neg,
+            &self.y_pos,
+            &self.x_neg,
+            &self.x_pos,
+        ] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
         }
+        for vertices in [&self.vertices, &self.marker_vertices]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vertex>(vertices.capacity())?,
+            )?;
+        }
+        Some(total)
     }
 }
 
@@ -762,7 +828,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn errorbar_bounds_include_caps() {
+    fn caps_are_sized_from_display_limits_for_thin_and_thick_lines() {
+        for width in [1., 3.] {
+            let mut plot = ErrorBar::new_vertical(vec![0.], vec![0.], vec![1.], vec![1.]).unwrap();
+            plot.line_width = width;
+            let data = plot.render_data_on_axes(
+                Some((100, 100)),
+                Some((-10., 10., -10., 10.)),
+                (false, false),
+            );
+            let min = data
+                .vertices
+                .iter()
+                .map(|v| v.position[0])
+                .fold(f32::INFINITY, f32::min);
+            let max = data
+                .vertices
+                .iter()
+                .map(|v| v.position[0])
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!(
+                (max - min - 1.2).abs() < 1e-5,
+                "width={width}: {min}..{max}"
+            );
+        }
+    }
+
+    #[test]
+    fn errorbar_bounds_fit_bars_not_caps() {
+        // Caps are drawn in pixels, so they add nothing to the data bounds.
         let mut plot = ErrorBar::new_vertical(
             vec![0.0, 1.0],
             vec![1.0, 2.0],
@@ -772,8 +866,23 @@ mod tests {
         .unwrap()
         .with_style(Vec4::ONE, 1.0, LineStyle::Solid, 10.0);
         let bounds = plot.bounds();
-        assert!(bounds.max.x > 1.0);
-        assert!(bounds.min.x < 0.0);
+        assert_eq!((bounds.min.x, bounds.max.x), (0.0, 1.0));
+        assert_eq!((bounds.min.y, bounds.max.y), (0.5, 2.5));
+    }
+
+    #[test]
+    fn errorbar_cap_padding_keeps_positive_bounds_positive() {
+        let mut plot = ErrorBar::new_vertical(
+            vec![1.0, 10.0],
+            vec![1.0, 2.0],
+            vec![0.5, 0.5],
+            vec![0.5, 0.5],
+        )
+        .unwrap()
+        .with_style(Vec4::ONE, 1.0, LineStyle::Solid, 10.0);
+        let bounds = plot.bounds();
+        assert_eq!(bounds.min.x, 1.0);
+        assert!(bounds.min.y > 0.0);
     }
 
     #[test]

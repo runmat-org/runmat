@@ -1,29 +1,32 @@
 //! MATLAB-compatible `webread` builtin for HTTP/HTTPS downloads.
 
+#[path = "webread/options.rs"]
+mod options;
+#[path = "webread/preflight.rs"]
+mod preflight;
+use options::*;
+use preflight::*;
+
 use runmat_value::NumericScalar;
-use std::collections::VecDeque;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    parse_http_url, BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode, WebOptionField,
+    WEBREAD_DESCRIPTOR, WEBREAD_ERROR_FLOW, WEBREAD_ERROR_INVALID_ARGUMENT,
+    WEBREAD_ERROR_INVALID_CREDENTIALS, WEBREAD_ERROR_INVALID_OPTION_VALUE,
+    WEBREAD_ERROR_INVALID_URL, WEBREAD_ERROR_MISSING_OPTION_VALUE, WEBREAD_ERROR_OUTPUT,
+    WEBREAD_ERROR_OUTPUTS, WEBREAD_ERROR_RESPONSE_JSON, WEBREAD_ERROR_TRANSPORT,
+    WEBREAD_EXPLICIT_GPU_EXTENSION as EXPLICIT_GPU_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, IntegerStorage, StructValue, Tensor, Value};
 use url::Url;
 
+use super::request_options::{PreparedRequestNames, RequestOptionName};
 use super::transport::{
     self, decode_body_as_text, header_value, HttpMethod, HttpRequest, HEADER_CONTENT_TYPE,
-};
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::io::json::jsondecode::decode_json_text;
@@ -33,275 +36,6 @@ const DEFAULT_TIMEOUT_SECONDS: f64 = 5.0;
 const MAX_TIMEOUT_SECONDS: f64 = 2147.483647;
 const DEFAULT_USER_AGENT: &str = "RunMat webread/0.0";
 const BUILTIN_NAME: &str = "webread";
-
-const EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "webread-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "passing explicit gpuArray values to host-only webread is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WebreadExplicitGpuInputExtension"),
-};
-pub const WEBREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [EXPLICIT_GPU_EXTENSION];
-
-const QUERY_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "QueryValue",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Integer scalars and vectors are rendered directly from authoritative storage, including full-width int64 and uint64 values.",
-}];
-const TIMEOUT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "options.Timeout",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "A documented positive numeric timeout is bounded before conversion to the host HTTP duration.",
-}];
-pub const WEBREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "data = webread(url, query_name, integer_query_value, ...)",
-        inputs: &QUERY_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The documented numeric query value can be scalar or vector. Default comma-separated encoding preserves each integer exactly; response type is determined independently by the service and content options.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "data = webread(url, ..., options) with integer options.Timeout",
-        inputs: &TIMEOUT_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The bounded timeout crosses the host duration boundary; explicit gpuArray arguments are separately gated before provider access while automatic residency gathers transparently.",
-    },
-];
-
-const WEBREAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "data",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Downloaded payload decoded as JSON, text, or binary tensor.",
-}];
-const WEBREAD_INPUTS_URL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "url",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "HTTP/HTTPS URL to fetch.",
-}];
-const WEBREAD_INPUTS_URL_OPTIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "url",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "HTTP/HTTPS URL to fetch.",
-    },
-    BuiltinParamDescriptor {
-        name: "optionsStruct",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "weboptions struct or option struct literal.",
-    },
-];
-const WEBREAD_INPUTS_URL_QUERY_CELL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "url",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "HTTP/HTTPS URL to fetch.",
-    },
-    BuiltinParamDescriptor {
-        name: "queryParameters",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Two-column cell array of query parameter names and values.",
-    },
-];
-const WEBREAD_INPUTS_URL_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "url",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "HTTP/HTTPS URL to fetch.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option or query parameter name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option or query parameter value.",
-    },
-];
-const WEBREAD_INPUTS_URL_OPTIONS_NAME_VALUE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "url",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "HTTP/HTTPS URL to fetch.",
-    },
-    BuiltinParamDescriptor {
-        name: "optionsStruct",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "weboptions struct or option struct literal.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option or query parameter name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option or query parameter value.",
-    },
-];
-
-const WEBREAD_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "data = webread(url)",
-        inputs: &WEBREAD_INPUTS_URL,
-        outputs: &WEBREAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = webread(url, optionsStruct)",
-        inputs: &WEBREAD_INPUTS_URL_OPTIONS,
-        outputs: &WEBREAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = webread(url, queryParameters)",
-        inputs: &WEBREAD_INPUTS_URL_QUERY_CELL,
-        outputs: &WEBREAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = webread(url, name, value, ...)",
-        inputs: &WEBREAD_INPUTS_URL_NAME_VALUE,
-        outputs: &WEBREAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = webread(url, optionsStruct, name, value, ...)",
-        inputs: &WEBREAD_INPUTS_URL_OPTIONS_NAME_VALUE,
-        outputs: &WEBREAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = webread(url, queryParameters, name, value, ...)",
-        inputs: &WEBREAD_INPUTS_URL_OPTIONS_NAME_VALUE,
-        outputs: &WEBREAD_OUTPUT,
-    },
-];
-
-const WEBREAD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.INVALID_ARGUMENT",
-    identifier: Some("RunMat:webread:InvalidArgument"),
-    when: "Argument type/shape does not match webread call contract.",
-    message: "webread: invalid argument",
-};
-const WEBREAD_ERROR_INVALID_URL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.INVALID_URL",
-    identifier: Some("RunMat:webread:InvalidUrl"),
-    when: "URL input is empty or invalid.",
-    message: "webread: invalid URL",
-};
-const WEBREAD_ERROR_MISSING_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.MISSING_OPTION_VALUE",
-    identifier: Some("RunMat:webread:MissingOptionValue"),
-    when: "A name-value key has no corresponding value.",
-    message: "webread: missing option value",
-};
-const WEBREAD_ERROR_INVALID_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.INVALID_OPTION_VALUE",
-    identifier: Some("RunMat:webread:InvalidOptionValue"),
-    when: "An option value fails validation.",
-    message: "webread: invalid option value",
-};
-const WEBREAD_ERROR_INVALID_CREDENTIALS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.INVALID_CREDENTIALS",
-    identifier: Some("RunMat:webread:InvalidCredentials"),
-    when: "Password is provided without username.",
-    message: "webread: invalid credentials",
-};
-const WEBREAD_ERROR_TRANSPORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.TRANSPORT",
-    identifier: Some("RunMat:webread:Transport"),
-    when: "HTTP transport fails.",
-    message: "webread: transport failure",
-};
-const WEBREAD_ERROR_RESPONSE_JSON: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.RESPONSE_JSON",
-    identifier: Some("RunMat:webread:ResponseJson"),
-    when: "Response body cannot be decoded as JSON.",
-    message: "webread: failed to parse JSON response",
-};
-const WEBREAD_ERROR_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.OUTPUT",
-    identifier: Some("RunMat:webread:Output"),
-    when: "Output payload cannot be materialized.",
-    message: "webread: output materialization failure",
-};
-const WEBREAD_ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WEBREAD.FLOW",
-    identifier: Some("RunMat:webread:Flow"),
-    when: "Nested flow fails while gathering inputs.",
-    message: "webread: flow failure",
-};
-
-const WEBREAD_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    WEBREAD_ERROR_INVALID_ARGUMENT,
-    WEBREAD_ERROR_INVALID_URL,
-    WEBREAD_ERROR_MISSING_OPTION_VALUE,
-    WEBREAD_ERROR_INVALID_OPTION_VALUE,
-    WEBREAD_ERROR_INVALID_CREDENTIALS,
-    WEBREAD_ERROR_TRANSPORT,
-    WEBREAD_ERROR_RESPONSE_JSON,
-    WEBREAD_ERROR_OUTPUT,
-    WEBREAD_ERROR_FLOW,
-];
-
-pub const WEBREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WEBREAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WEBREAD_ERRORS,
-};
-
-#[allow(clippy::too_many_lines)]
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::webread")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "webread",
-    op_kind: GpuOpKind::Custom("http-get"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "HTTP requests always execute on the CPU; gpuArray inputs are gathered eagerly.",
-};
 
 fn webread_error(message: impl Into<String>) -> RuntimeError {
     webread_error_with(&WEBREAD_ERROR_INVALID_ARGUMENT, message)
@@ -324,7 +58,7 @@ fn webread_error_with_source<E>(
     source: E,
 ) -> RuntimeError
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: crate::runtime_error::RuntimeErrorSourceBound,
 {
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -358,30 +92,22 @@ fn webread_flow_with_context(err: RuntimeError) -> RuntimeError {
     })
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::webread")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "webread",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "webread performs network I/O and terminates fusion graphs.",
-};
-
 #[runtime_builtin(
     name = "webread",
-    category = "io/http",
-    summary = "Read web content over HTTP/HTTPS with optional request options.",
-    keywords = "webread,http get,rest client,json,api",
-    accel = "sink",
-    type_resolver(crate::builtins::io::type_resolvers::webread_type),
-    descriptor(crate::builtins::io::http::webread::WEBREAD_DESCRIPTOR),
-    extensions(crate::builtins::io::http::webread::WEBREAD_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::http::webread::WEBREAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::http::webread"
 )]
-async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn webread_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    url: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &WEBREAD_DESCRIPTOR,
+        &WEBREAD_ERROR_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&url)
         || rest
             .iter()
@@ -392,12 +118,8 @@ async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let gathered_url = gather_if_needed_async(&url)
-        .await
-        .map_err(webread_flow_with_context)?;
-    let gathered_args = gather_arguments(rest).await?;
     let url_text = expect_string_scalar(
-        &gathered_url,
+        &url,
         "webread: URL must be a character vector or string scalar",
     )?;
     if url_text.trim().is_empty() {
@@ -406,49 +128,85 @@ async fn webread_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             "webread: URL must not be empty",
         ));
     }
-    let (options, query_params) = parse_arguments(gathered_args)?;
-    execute_request(&url_text, options, &query_params)
+    let prepared_api_key = match rest.first() {
+        Some(Value::Struct(source)) => Some(super::api_key::PreparedApiKey::parse(source)),
+        _ => None,
+    };
+    let prepared_names = preflight_host_arguments(rest.view(), prepared_api_key.as_ref())?;
+    let parsed_url = parse_http_url(&url_text).map_err(|err| {
+        webread_error_with_source(
+            &WEBREAD_ERROR_INVALID_URL,
+            format!("webread: invalid URL: {err}"),
+            err,
+        )
+    })?;
+    let mut gathered_args = gather_arguments(&rest, context.as_ref()).await?;
+    let (options, query_params) = parse_arguments(
+        &mut gathered_args,
+        prepared_api_key.as_ref(),
+        &prepared_names,
+    )?;
+    execute_request(parsed_url, options, &query_params, context.as_ref()).await
 }
 
-async fn gather_arguments(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(
-            gather_if_needed_async(&value)
+async fn gather_arguments(
+    values: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, |index| async move {
+            gather_if_needed_async(&values[index])
                 .await
-                .map_err(webread_flow_with_context)?,
-        );
-    }
-    Ok(out)
+                .map_err(webread_flow_with_context)
+        })
+        .await
 }
 
-fn parse_arguments(args: Vec<Value>) -> BuiltinResult<(WebReadOptions, Vec<(String, String)>)> {
-    let mut queue: VecDeque<Value> = args.into();
+fn parse_arguments(
+    queue: &mut crate::call::BuiltinArguments,
+    prepared_api_key: Option<&super::api_key::PreparedApiKey>,
+    prepared_names: &PreparedRequestNames,
+) -> BuiltinResult<(WebReadOptions, Vec<(String, String)>)> {
     let mut options = WebReadOptions::default();
     let mut query_params = Vec::new();
 
-    if matches!(queue.front(), Some(Value::Struct(_))) {
+    if matches!(queue.first(), Some(Value::Struct(_))) {
         if let Some(Value::Struct(struct_value)) = queue.pop_front() {
-            process_struct_fields(&struct_value, &mut options, &mut query_params)?;
+            process_struct_fields(
+                &struct_value,
+                prepared_api_key,
+                prepared_names,
+                &mut options,
+                &mut query_params,
+            )?;
         }
-    } else if matches!(queue.front(), Some(Value::Cell(_))) {
+    } else if matches!(queue.first(), Some(Value::Cell(_))) {
         if let Some(Value::Cell(cell)) = queue.pop_front() {
             append_query_from_cell(&cell, &mut query_params)?
         }
     }
 
+    let mut pair_index = 0;
     while let Some(name_value) = queue.pop_front() {
-        let name = expect_string_scalar(
-            &name_value,
-            "webread: parameter names must be character vectors or string scalars",
-        )?;
+        let field = match prepared_names
+            .pair_fields
+            .get(pair_index)
+            .and_then(Clone::clone)
+        {
+            Some(field) => field,
+            None => RequestOptionName::decode(&expect_string_scalar(
+                &name_value,
+                "webread: parameter names must be character vectors or string scalars",
+            )?),
+        };
+        pair_index += 1;
         let value = queue.pop_front().ok_or_else(|| {
             webread_error_with(
                 &WEBREAD_ERROR_MISSING_OPTION_VALUE,
                 "webread: missing value for name-value argument",
             )
         })?;
-        process_name_value_pair(&name, &value, &mut options, &mut query_params)?;
+        process_name_value_pair(&field, &value, &mut options, &mut query_params)?;
     }
 
     Ok((options, query_params))
@@ -456,62 +214,81 @@ fn parse_arguments(args: Vec<Value>) -> BuiltinResult<(WebReadOptions, Vec<(Stri
 
 fn process_struct_fields(
     struct_value: &StructValue,
+    prepared_api_key: Option<&super::api_key::PreparedApiKey>,
+    prepared_names: &PreparedRequestNames,
     options: &mut WebReadOptions,
     query_params: &mut Vec<(String, String)>,
 ) -> BuiltinResult<()> {
+    if let Some(prepared) = prepared_api_key {
+        options.api_key_header = prepared.finish(struct_value).map_err(|err| {
+            webread_error_with_source(
+                &WEBREAD_ERROR_INVALID_OPTION_VALUE,
+                format!("webread: {err}"),
+                err,
+            )
+        })?;
+    }
     for (key, value) in &struct_value.fields {
-        process_name_value_pair(key, value, options, query_params)?;
+        if prepared_api_key.is_some_and(|prepared| prepared.contains_field(key)) {
+            continue;
+        }
+        let field = prepared_names
+            .struct_fields
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, field)| field.clone())
+            .ok_or_else(|| webread_error("webread: prepared option field changed during gather"))?;
+        process_name_value_pair(&field, value, options, query_params)?;
     }
     Ok(())
 }
 
 fn process_name_value_pair(
-    name: &str,
+    name: &RequestOptionName,
     value: &Value,
     options: &mut WebReadOptions,
     query_params: &mut Vec<(String, String)>,
 ) -> BuiltinResult<()> {
-    let lower = name.to_ascii_lowercase();
-    match lower.as_str() {
-        "contenttype" => {
+    match name {
+        RequestOptionName::Field(WebOptionField::ContentType) => {
             options.content_type = parse_content_type(value)?;
             Ok(())
         }
-        "timeout" => {
+        RequestOptionName::Field(WebOptionField::Timeout) => {
             options.timeout = parse_timeout(value)?;
             Ok(())
         }
-        "headerfields" => {
+        RequestOptionName::Field(WebOptionField::HeaderFields) => {
             let headers = parse_header_fields(value)?;
             options.headers.extend(headers);
             Ok(())
         }
-        "useragent" => {
+        RequestOptionName::Field(WebOptionField::UserAgent) => {
             options.user_agent = Some(expect_string_scalar(
                 value,
                 "webread: UserAgent must be a character vector or string scalar",
             )?);
             Ok(())
         }
-        "username" => {
+        RequestOptionName::Field(WebOptionField::Username) => {
             options.username = Some(expect_string_scalar(
                 value,
                 "webread: Username must be a character vector or string scalar",
             )?);
             Ok(())
         }
-        "password" => {
+        RequestOptionName::Field(WebOptionField::Password) => {
             options.password = Some(expect_string_scalar(
                 value,
                 "webread: Password must be a character vector or string scalar",
             )?);
             Ok(())
         }
-        "requestmethod" => {
+        RequestOptionName::Field(WebOptionField::RequestMethod) => {
             options.method = parse_request_method(value)?;
             Ok(())
         }
-        "mediatype" => {
+        RequestOptionName::Field(WebOptionField::MediaType) => {
             // weboptions exposes MediaType for webwrite; accept and ignore for webread.
             expect_string_scalar(
                 value,
@@ -519,12 +296,15 @@ fn process_name_value_pair(
             )?;
             Ok(())
         }
-        "queryparameters" => append_query_from_value(value, query_params),
-        _ => {
+        RequestOptionName::Field(WebOptionField::QueryParameters) => {
+            append_query_from_value(value, query_params)
+        }
+        RequestOptionName::Query(name) => {
             let param_value = value_to_query_string(value, name)?;
             query_params.push((name.to_string(), param_value));
             Ok(())
         }
+        RequestOptionName::Field(WebOptionField::KeyName | WebOptionField::KeyValue) => Ok(()),
     }
 }
 
@@ -536,7 +316,7 @@ fn append_query_from_value(
         Value::Struct(struct_value) => {
             for (key, val) in &struct_value.fields {
                 let text = value_to_query_string(val, key)?;
-                query_params.push((key.clone(), text));
+                query_params.push((key.to_owned(), text));
             }
             Ok(())
         }
@@ -574,10 +354,11 @@ fn append_query_from_cell(
     Ok(())
 }
 
-fn execute_request(
-    url_text: &str,
+async fn execute_request(
+    mut url: Url,
     options: WebReadOptions,
     query_params: &[(String, String)],
+    context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let username_present = options
         .username
@@ -596,13 +377,6 @@ fn execute_request(
         ));
     }
 
-    let mut url = Url::parse(url_text).map_err(|err| {
-        webread_error_with_source(
-            &WEBREAD_ERROR_INVALID_URL,
-            format!("webread: invalid URL '{url_text}': {err}"),
-            err,
-        )
-    })?;
     if !query_params.is_empty() {
         {
             let mut pairs = url.query_pairs_mut();
@@ -619,6 +393,9 @@ fn execute_request(
         .to_string();
 
     let mut headers = options.headers.clone();
+    if let Some((name, value)) = &options.api_key_header {
+        headers.push((name.clone(), value.clone()));
+    }
     let has_auth_header = headers
         .iter()
         .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
@@ -639,13 +416,16 @@ fn execute_request(
         user_agent,
     };
 
-    let response = transport::send_request(&request).map_err(|err| {
-        webread_error_with_source(
-            &WEBREAD_ERROR_TRANSPORT,
-            err.message_with_prefix("webread"),
-            err,
-        )
-    })?;
+    let response = transport::send_request(request, context)
+        .await
+        .map_err(|err| match err {
+            transport::TransportCallError::Transport(err) => webread_error_with_source(
+                &WEBREAD_ERROR_TRANSPORT,
+                err.message_with_prefix("webread"),
+                err,
+            ),
+            transport::TransportCallError::Runtime(err) => err,
+        })?;
 
     let header_content_type =
         header_value(&response.headers, HEADER_CONTENT_TYPE).map(|value| value.to_string());
@@ -682,675 +462,6 @@ fn map_json_error(err: RuntimeError) -> RuntimeError {
     webread_error_with_source(&WEBREAD_ERROR_RESPONSE_JSON, message, err)
 }
 
-fn parse_header_fields(value: &Value) -> BuiltinResult<Vec<(String, String)>> {
-    match value {
-        Value::Struct(struct_value) => {
-            let mut headers = Vec::with_capacity(struct_value.fields.len());
-            for (key, val) in &struct_value.fields {
-                let header_value = expect_string_scalar(
-                    val,
-                    "webread: header values must be character vectors or string scalars",
-                )?;
-                headers.push((key.clone(), header_value));
-            }
-            Ok(headers)
-        }
-        Value::Cell(cell) => {
-            if cell.cols != 2 {
-                return Err(webread_error(
-                    "webread: HeaderFields cell array must have exactly two columns",
-                ));
-            }
-            let mut headers = Vec::with_capacity(cell.rows);
-            for row in 0..cell.rows {
-                let name = cell
-                    .get(row, 0)
-                    .map_err(|err| webread_error(format!("webread: {err}")))?;
-                let value = cell
-                    .get(row, 1)
-                    .map_err(|err| webread_error(format!("webread: {err}")))?;
-                let header_name = expect_string_scalar(
-                    &name,
-                    "webread: header names must be character vectors or string scalars",
-                )?;
-                if header_name.trim().is_empty() {
-                    return Err(webread_error("webread: header names must not be empty"));
-                }
-                let header_value = expect_string_scalar(
-                    &value,
-                    "webread: header values must be character vectors or string scalars",
-                )?;
-                headers.push((header_name, header_value));
-            }
-            Ok(headers)
-        }
-        _ => Err(webread_error(
-            "webread: HeaderFields must be provided as a struct or cell array of name/value pairs",
-        )),
-    }
-}
-
-fn parse_content_type(value: &Value) -> BuiltinResult<ContentTypeHint> {
-    let text = expect_string_scalar(
-        value,
-        "webread: ContentType must be a character vector or string scalar",
-    )?;
-    match text.trim().to_ascii_lowercase().as_str() {
-        "auto" => Ok(ContentTypeHint::Auto),
-        "json" => Ok(ContentTypeHint::Json),
-        "text" | "char" | "string" => Ok(ContentTypeHint::Text),
-        "binary" | "octet-stream" | "raw" => Ok(ContentTypeHint::Binary),
-        other => Err(webread_error(format!(
-            "webread: unsupported ContentType '{}'; use 'auto', 'json', 'text', or 'binary'",
-            other
-        ))),
-    }
-}
-
-fn parse_timeout(value: &Value) -> BuiltinResult<Duration> {
-    let seconds = numeric_scalar(value, "webread: Timeout must be a finite, positive scalar")?;
-    if seconds <= 0.0 || (seconds.is_finite() && seconds > MAX_TIMEOUT_SECONDS) {
-        return Err(webread_error(
-            "webread: Timeout must be a positive scalar within the supported range or Inf",
-        ));
-    }
-    Ok(Duration::from_secs_f64(if seconds.is_infinite() {
-        MAX_TIMEOUT_SECONDS
-    } else {
-        seconds
-    }))
-}
-
-fn parse_request_method(value: &Value) -> BuiltinResult<HttpMethod> {
-    let text = expect_string_scalar(
-        value,
-        "webread: RequestMethod must be a character vector or string scalar",
-    )?;
-    let lower = text.trim().to_ascii_lowercase();
-    match lower.as_str() {
-        "get" | "auto" => Ok(HttpMethod::Get),
-        other => Err(webread_error(format!(
-            "webread: RequestMethod '{}' is not supported; expected 'auto' or 'get'",
-            other
-        ))),
-    }
-}
-
-fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
-    match value {
-        Value::Num(n) => Ok(*n),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(tensor) => {
-            if tensor_utils::is_scalar_tensor(tensor) {
-                Ok(tensor_utils::tensor_value_f64(tensor, 0))
-            } else {
-                Err(webread_error(context))
-            }
-        }
-        _ => Err(webread_error(context)),
-    }
-}
-
-fn expect_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(webread_error(context)),
-    }
-}
-
-fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::Num(n) => Ok(format!("{}", n)),
-        Value::Int(i) => Ok(i.decimal_string()),
-        Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
-        Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 || (tensor.rows() > 1 && tensor.cols() > 1) {
-                Err(webread_error(format!(
-                    "webread: query parameter '{}' must be a scalar or vector",
-                    name
-                )))
-            } else {
-                Ok((0..tensor.len())
-                    .map(|index| {
-                        format_numeric_scalar(
-                            tensor
-                                .numeric_value_at(index)
-                                .expect("query tensor index must exist"),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(","))
-            }
-        }
-        Value::LogicalArray(array) => {
-            if array.shape.len() > 2
-                || (array.shape.first().copied().unwrap_or(1) > 1
-                    && array.shape.get(1).copied().unwrap_or(1) > 1)
-            {
-                Err(webread_error(format!(
-                    "webread: query parameter '{}' must be a scalar or vector",
-                    name
-                )))
-            } else {
-                Ok(array
-                    .data
-                    .iter()
-                    .map(|value| if *value != 0 { "true" } else { "false" })
-                    .collect::<Vec<_>>()
-                    .join(","))
-            }
-        }
-        _ => Err(webread_error(format!(
-            "webread: unsupported value type for query parameter '{}'",
-            name
-        ))),
-    }
-}
-
-fn format_numeric_scalar(value: NumericScalar) -> String {
-    match value {
-        NumericScalar::F64(value) => value.to_string(),
-        NumericScalar::F32(value) => value.to_string(),
-        NumericScalar::I8(value) => value.to_string(),
-        NumericScalar::I16(value) => value.to_string(),
-        NumericScalar::I32(value) => value.to_string(),
-        NumericScalar::I64(value) => value.to_string(),
-        NumericScalar::U8(value) => value.to_string(),
-        NumericScalar::U16(value) => value.to_string(),
-        NumericScalar::U32(value) => value.to_string(),
-        NumericScalar::U64(value) => value.to_string(),
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum ContentTypeHint {
-    Auto,
-    Text,
-    Json,
-    Binary,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum ResolvedContentType {
-    Text,
-    Json,
-    Binary,
-}
-
-#[derive(Clone, Debug)]
-struct WebReadOptions {
-    content_type: ContentTypeHint,
-    timeout: Duration,
-    headers: Vec<(String, String)>,
-    user_agent: Option<String>,
-    username: Option<String>,
-    password: Option<String>,
-    method: HttpMethod,
-}
-
-impl Default for WebReadOptions {
-    fn default() -> Self {
-        Self {
-            content_type: ContentTypeHint::Auto,
-            timeout: Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
-            headers: Vec::new(),
-            user_agent: None,
-            username: None,
-            password: None,
-            method: HttpMethod::Get,
-        }
-    }
-}
-
-impl WebReadOptions {
-    fn resolve_content_type(&self, header: Option<&str>) -> ResolvedContentType {
-        match self.content_type {
-            ContentTypeHint::Json => ResolvedContentType::Json,
-            ContentTypeHint::Text => ResolvedContentType::Text,
-            ContentTypeHint::Binary => ResolvedContentType::Binary,
-            ContentTypeHint::Auto => infer_content_type(header),
-        }
-    }
-}
-
-fn infer_content_type(header: Option<&str>) -> ResolvedContentType {
-    if let Some(raw) = header {
-        let mime = raw
-            .split(';')
-            .next()
-            .map(|part| part.trim().to_ascii_lowercase())
-            .unwrap_or_default();
-        if mime == "application/json" || mime == "text/json" || mime.ends_with("+json") {
-            ResolvedContentType::Json
-        } else if mime.starts_with("text/")
-            || mime == "application/xml"
-            || mime.ends_with("+xml")
-            || mime == "application/xhtml+xml"
-            || mime == "application/javascript"
-            || mime == "application/x-www-form-urlencoded"
-        {
-            ResolvedContentType::Text
-        } else {
-            ResolvedContentType::Binary
-        }
-    } else {
-        ResolvedContentType::Text
-    }
-}
-
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::mpsc;
-    use std::thread;
-
-    #[test]
-    fn query_text_preserves_exact_uint64() {
-        assert_eq!(
-            value_to_query_string(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), "id")
-                .expect("query text"),
-            "18446744073709551615"
-        );
-    }
-
-    #[test]
-    fn query_text_and_numeric_scalar_read_typed_integer_storage_exactly() {
-        let query = Tensor::new_integer(
-            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
-            vec![1, 1],
-        )
-        .expect("typed query tensor");
-        assert_eq!(
-            value_to_query_string(&Value::Tensor(query), "id").expect("query text"),
-            "18446744073709551615"
-        );
-
-        let timeout =
-            Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2026]), vec![1, 1])
-                .expect("typed timeout tensor");
-        assert_eq!(
-            numeric_scalar(&Value::Tensor(timeout), "timeout").expect("numeric scalar"),
-            2026.0
-        );
-    }
-
-    fn error_message(err: RuntimeError) -> String {
-        err.message().to_string()
-    }
-
-    fn run_webread(url: Value, args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(webread_builtin(url, args))
-    }
-
-    fn spawn_server<F>(handler: F) -> String
-    where
-        F: FnOnce(TcpStream) + Send + 'static,
-    {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
-        let addr = listener.local_addr().unwrap();
-        thread::spawn(move || {
-            if let Ok((stream, _)) = listener.accept() {
-                handler(stream);
-            }
-        });
-        format!("http://{}", addr)
-    }
-
-    fn respond_with(mut stream: TcpStream, content_type: &str, body: &[u8]) {
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n",
-            body.len(),
-            content_type
-        );
-        let _ = stream.write_all(response.as_bytes());
-        let _ = stream.write_all(body);
-    }
-
-    fn read_request_headers(stream: &mut TcpStream) -> String {
-        let mut buffer = Vec::new();
-        let mut chunk = [0u8; 256];
-        while let Ok(read) = stream.read(&mut chunk) {
-            if read == 0 {
-                break;
-            }
-            buffer.extend_from_slice(&chunk[..read]);
-            if buffer.windows(4).any(|w| w == b"\r\n\r\n") {
-                break;
-            }
-            if buffer.len() > 16 * 1024 {
-                break;
-            }
-        }
-        String::from_utf8_lossy(&buffer).to_string()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = WEBREAD_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"data = webread(url)"));
-        assert!(labels.contains(&"data = webread(url, optionsStruct)"));
-        assert!(labels.contains(&"data = webread(url, name, value, ...)"));
-    }
-
-    #[test]
-    fn webread_query_values_preserve_exact_integer_vectors() {
-        let value = Value::Tensor(
-            Tensor::new_integer(
-                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
-                vec![1, 2],
-            )
-            .expect("integer query vector"),
-        );
-        assert_eq!(
-            value_to_query_string(&value, "id").expect("query encoding"),
-            "9007199254740993,18446744073709551615"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_fetches_json_response() {
-        let url = spawn_server(|mut stream| {
-            let mut buffer = [0u8; 1024];
-            let _ = stream.read(&mut buffer);
-            respond_with(
-                stream,
-                "application/json",
-                br#"{"message":"hello","value":42}"#,
-            );
-        });
-
-        let result = run_webread(Value::from(url), vec![]).expect("webread JSON response");
-
-        match result {
-            Value::Struct(struct_value) => {
-                let message = struct_value.fields.get("message").expect("message field");
-                let value = struct_value.fields.get("value").expect("value field");
-                match message {
-                    Value::CharArray(ca) => {
-                        let text: String = ca.data.iter().collect();
-                        assert_eq!(text, "hello");
-                    }
-                    other => panic!("expected char array, got {other:?}"),
-                }
-                match value {
-                    Value::Num(n) => assert_eq!(*n, 42.0),
-                    other => panic!("expected numeric value, got {other:?}"),
-                }
-            }
-            other => panic!("expected struct, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_fetches_text_response() {
-        let url = spawn_server(|mut stream| {
-            let mut buffer = [0u8; 512];
-            let _ = stream.read(&mut buffer);
-            respond_with(stream, "text/plain; charset=utf-8", b"RunMat webread test");
-        });
-
-        let result = run_webread(Value::from(url), vec![]).expect("webread text response");
-
-        match result {
-            Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
-                assert_eq!(text, "RunMat webread test");
-            }
-            other => panic!("expected char array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_fetches_binary_payload() {
-        let payload = [1u8, 2, 3, 254, 255];
-        let url = spawn_server(move |mut stream| {
-            let mut buffer = [0u8; 512];
-            let _ = stream.read(&mut buffer);
-            respond_with(stream, "application/octet-stream", &payload);
-        });
-
-        let args = vec![Value::from("ContentType"), Value::from("binary")];
-        let result = run_webread(Value::from(url), args).expect("webread binary response");
-
-        match result {
-            Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 5]);
-                assert_eq!(
-                    tensor.integer_storage(),
-                    Some(&IntegerStorage::U8(payload.to_vec()))
-                );
-
-                // Binary consumers must use exact uint8 backing storage rather
-                // than the compatibility f64 mirror.
-                let persisted = crate::data::DataArrayPayload::from_value(
-                    "uint8".to_string(),
-                    &Value::Tensor(tensor),
-                )
-                .expect("persist binary payload");
-                let bytes = serde_json::to_vec(&persisted).expect("encode payload");
-                let decoded: crate::data::DataArrayPayload =
-                    serde_json::from_slice(&bytes).expect("decode payload");
-                assert_eq!(
-                    decoded.values,
-                    crate::data::DataArrayValues::U8(payload.to_vec())
-                );
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_appends_query_parameters() {
-        let (tx, rx) = mpsc::channel();
-        let url = spawn_server(move |mut stream| {
-            let request = read_request_headers(&mut stream);
-            let _ = tx.send(request);
-            respond_with(stream, "application/json", br#"{"ok":true}"#);
-        });
-
-        let args = vec![
-            Value::from("count"),
-            Value::Num(42.0),
-            Value::from("ContentType"),
-            Value::from("json"),
-        ];
-        let result = run_webread(Value::from(url.clone()), args).expect("webread query");
-        match result {
-            Value::Struct(struct_value) => {
-                assert!(struct_value.fields.contains_key("ok"));
-            }
-            other => panic!("expected struct result, got {other:?}"),
-        }
-        let request = rx.recv().expect("request log");
-        assert!(
-            request.starts_with("GET /"),
-            "unexpected request line: {request}"
-        );
-        assert!(
-            request.contains("count=42"),
-            "query parameters missing: {request}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_struct_argument_supports_options_and_query() {
-        let (tx, rx) = mpsc::channel();
-        let url = spawn_server(move |mut stream| {
-            let request = read_request_headers(&mut stream);
-            let _ = tx.send(request);
-            respond_with(stream, "application/json", br#"{"value":123}"#);
-        });
-
-        let mut fields = StructValue::new();
-        fields
-            .fields
-            .insert("ContentType".to_string(), Value::from("json"));
-        fields.fields.insert("limit".to_string(), Value::Num(5.0));
-
-        let result = run_webread(Value::from(url.clone()), vec![Value::Struct(fields)])
-            .expect("webread struct arg");
-
-        let request = rx.recv().expect("request log");
-        assert!(
-            request.contains("GET /?limit=5"),
-            "expected limit query parameter: {request}"
-        );
-
-        match result {
-            Value::Struct(struct_value) => match struct_value.fields.get("value") {
-                Some(Value::Num(n)) => assert_eq!(*n, 123.0),
-                other => panic!("unexpected JSON decode result: {other:?}"),
-            },
-            other => panic!("expected struct, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_headerfields_struct_applies_custom_headers() {
-        let (tx, rx) = mpsc::channel();
-        let url = spawn_server(move |mut stream| {
-            let request = read_request_headers(&mut stream);
-            let _ = tx.send(request);
-            respond_with(stream, "application/json", br#"{"ok":true}"#);
-        });
-
-        let mut headers = StructValue::new();
-        headers
-            .fields
-            .insert("X-Test".to_string(), Value::from("RunMat"));
-
-        let args = vec![
-            Value::from("HeaderFields"),
-            Value::Struct(headers),
-            Value::from("ContentType"),
-            Value::from("json"),
-        ];
-
-        let result = run_webread(Value::from(url), args).expect("webread header fields");
-        assert!(matches!(result, Value::Struct(_)));
-
-        let request = rx.recv().expect("request log");
-        assert!(
-            request.to_ascii_lowercase().contains("x-test: runmat"),
-            "custom header missing: {request}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_queryparameters_option_struct() {
-        let (tx, rx) = mpsc::channel();
-        let url = spawn_server(move |mut stream| {
-            let request = read_request_headers(&mut stream);
-            let _ = tx.send(request);
-            respond_with(stream, "application/json", br#"{"ok":true}"#);
-        });
-
-        let mut params = StructValue::new();
-        params.fields.insert("page".to_string(), Value::Num(2.0));
-
-        let args = vec![
-            Value::from("QueryParameters"),
-            Value::Struct(params),
-            Value::from("ContentType"),
-            Value::from("json"),
-        ];
-
-        let result = run_webread(Value::from(url.clone()), args).expect("webread query parameters");
-        assert!(matches!(result, Value::Struct(_)));
-
-        let request = rx.recv().expect("request log");
-        assert!(
-            request.contains("page=2"),
-            "query parameter missing: {request}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_errors_on_missing_name_value_pair() {
-        let err = run_webread(
-            Value::from("https://example.com"),
-            vec![Value::from("Timeout")],
-        )
-        .expect_err("expected missing value error");
-        let err = error_message(err);
-        assert!(
-            err.contains("missing value"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_rejects_non_positive_timeout() {
-        let args = vec![Value::from("Timeout"), Value::Num(0.0)];
-        let err = run_webread(Value::from("https://example.com"), args).expect_err("timeout error");
-        let err = error_message(err);
-        assert!(
-            err.contains("Timeout must be a positive scalar"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_rejects_password_without_username() {
-        let args = vec![Value::from("Password"), Value::from("secret")];
-        let err = run_webread(Value::from("https://example.com"), args).expect_err("auth error");
-        let err = error_message(err);
-        assert!(
-            err.contains("Password requires a Username"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_rejects_unsupported_content_type() {
-        let args = vec![Value::from("ContentType"), Value::from("table")];
-        let err = run_webread(Value::from("https://example.com"), args).expect_err("format error");
-        let err = error_message(err);
-        assert!(
-            err.contains("unsupported ContentType"),
-            "unexpected error message: {err}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn webread_rejects_invalid_headerfields_shape() {
-        let cell = crate::make_cell(
-            vec![Value::from("A"), Value::from("B"), Value::from("C")],
-            1,
-            3,
-        )
-        .expect("make cell");
-
-        let args = vec![Value::from("HeaderFields"), cell];
-        let err = run_webread(Value::from("https://example.com"), args).expect_err("header error");
-        let err = error_message(err);
-        assert!(
-            err.contains("HeaderFields cell array must have exactly two columns"),
-            "unexpected error message: {err}"
-        );
-    }
-}
+#[path = "webread/tests.rs"]
+pub(crate) mod tests;

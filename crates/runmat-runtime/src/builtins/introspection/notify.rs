@@ -1,96 +1,100 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-pub const NOTIFY_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "The documented handle.notify surface accepts a handle event source, a textual event name, and optionally an event.EventData object. Integer values have no direct data, control, output-class, or backend role; application fields nested inside an event-data object remain ordinary object payloads.",
-};
-
-const NOTIFY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Always zero on success.",
-}];
-
-const NOTIFY_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "target",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target object or handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "event_name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Event name.",
-    },
-    BuiltinParamDescriptor {
-        name: "varargin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Event callback arguments.",
-    },
-];
-
-const NOTIFY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = notify(target, event_name, varargin)",
-    inputs: &NOTIFY_INPUTS,
-    outputs: &NOTIFY_OUTPUT,
-}];
-
-const NOTIFY_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
-    code: "RM.NOTIFY.TARGET_INVALID",
-    identifier: Some("RunMat:NotifyTargetInvalid"),
-    when: "Target is not an object or handle object.",
-    message: "notify: target must be handle or object",
-}];
-
-pub const NOTIFY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NOTIFY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NOTIFY_ERRORS,
-};
-
+/// Callback dispatch is a non-replayable side effect, including with no output.
 #[runtime_builtin(
     name = "notify",
-    category = "introspection",
-    summary = "Dispatch event notifications to registered listeners.",
-    keywords = "events,listener,notify,callback,classdef",
-    descriptor(crate::builtins::introspection::notify::NOTIFY_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::notify::NOTIFY_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::notify"
 )]
 pub async fn notify_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     target: Value,
-    event_name: String,
-    rest: Vec<Value>,
+    event_name: runmat_value::Utf8Text,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    crate::notify_builtin(target, event_name, rest).await
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::NOTIFY_DESCRIPTOR,
+        &runmat_builtins::NOTIFY_ERROR_OUTPUTS,
+        "notify",
+    )?;
+    if crate::output_count::current_output_count() == Some(1) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::NOTIFY_STATUS_EXTENSION,
+            "notify",
+        )?;
+    }
+    if rest.len() > 1 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::NOTIFY_EXTRA_ARGS_EXTENSION,
+            "notify",
+        )?;
+    }
+    crate::notify_builtin(
+        runtime.as_ref(),
+        target,
+        event_name.as_str().to_owned(),
+        rest,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
+
+    async fn notify_builtin(
+        target: Value,
+        event_name: runmat_value::Utf8Text,
+        arguments: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
+        super::notify_builtin(
+            None,
+            target,
+            event_name,
+            crate::execution::RootedValues::new(arguments)
+                .map_err(|error| error.into_runtime_error())?
+                .into(),
+        )
+        .await
+    }
 
     #[test]
     fn notify_is_integer_inapplicable() {
         assert_eq!(
-            NOTIFY_INTEGER_AUDIT.kind,
-            BuiltinIntegerAuditKind::NotApplicable
+            runmat_builtins::NOTIFY_INTEGER_AUDIT.kind,
+            runmat_builtins::BuiltinIntegerAuditKind::NotApplicable
         );
-        assert!(NOTIFY_INTEGER_AUDIT.canonical_builtin.is_none());
+    }
+
+    #[test]
+    fn strict_profile_rejects_status_and_multiple_callback_arguments_before_dispatch() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        {
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
+            let error = block_on(notify_builtin(
+                Value::Num(1.0),
+                "Changed".into(),
+                Vec::new(),
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                runmat_builtins::NOTIFY_STATUS_EXTENSION.error_identifier
+            );
+        }
+        let error = block_on(notify_builtin(
+            Value::Num(1.0),
+            "Changed".into(),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::NOTIFY_EXTRA_ARGS_EXTENSION.error_identifier
+        );
     }
 }

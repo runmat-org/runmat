@@ -5,23 +5,94 @@ use crate::{ContractError, Digest};
 
 pub const EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES: usize = 256 * 1024 * 1024;
 
+/// Revision fields admitted before any executable component is decoded.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutableUnitAdmission {
+    pub schema_version: u16,
+    pub identity: super::ExecutableIdentity,
+    pub revisions: super::ExecutableComponentRevisions,
+    pub capabilities: runmat_types::CapabilitySet,
+    pub interop: runmat_types::InteropManifest,
+}
+
+#[derive(Deserialize)]
+struct AdmissionEnvelope {
+    schema_version: u16,
+    manifest: AdmissionManifest,
+}
+
+#[derive(Deserialize)]
+struct AdmissionManifest {
+    identity: super::ExecutableIdentity,
+    revisions: super::ExecutableComponentRevisions,
+    capabilities: runmat_types::CapabilitySet,
+    interop: runmat_types::InteropManifest,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutableUnitEnvelope {
     pub schema_version: u16,
     pub manifest: ExecutableUnitManifest,
     pub payloads: Vec<ExecutableComponentPayload>,
+    pub dependency_products: Vec<super::ExecutableDependencyProduct>,
 }
 
 impl ExecutableUnitEnvelope {
+    /// Read only the bounded transport envelope's revision header. Component
+    /// payloads remain opaque and are not decoded into MIR, analysis, or
+    /// bytecode types until the caller admits these revisions.
+    pub fn admission(bytes: &[u8]) -> Result<ExecutableUnitAdmission, ContractError> {
+        if bytes.len() > EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES {
+            return Err(ContractError::Limit {
+                field: "executable.envelope",
+                limit: EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES as u64,
+            });
+        }
+        let header = serde_json::from_slice::<AdmissionEnvelope>(bytes)
+            .map_err(|error| ContractError::invalid("executable.envelope", error.to_string()))?;
+        if header.schema_version != super::EXECUTABLE_UNIT_SCHEMA_VERSION {
+            return Err(ContractError::UnsupportedSchema {
+                actual: header.schema_version,
+                supported: super::EXECUTABLE_UNIT_SCHEMA_VERSION,
+            });
+        }
+        Ok(ExecutableUnitAdmission {
+            schema_version: header.schema_version,
+            identity: header.manifest.identity,
+            revisions: header.manifest.revisions,
+            capabilities: header.manifest.capabilities,
+            interop: header.manifest.interop,
+        })
+    }
+
     pub fn new(
         manifest: ExecutableUnitManifest,
         payloads: Vec<ExecutableComponentPayload>,
     ) -> Result<Self, ContractError> {
+        Self::with_dependencies(manifest, payloads, Vec::new())
+    }
+
+    pub fn with_dependencies(
+        mut manifest: ExecutableUnitManifest,
+        payloads: Vec<ExecutableComponentPayload>,
+        dependency_products: Vec<super::ExecutableDependencyProduct>,
+    ) -> Result<Self, ContractError> {
+        if dependency_products.len() > super::EXECUTABLE_DEPENDENCY_MAX_PRODUCTS {
+            return Err(ContractError::Limit {
+                field: "executable.dependencies",
+                limit: super::EXECUTABLE_DEPENDENCY_MAX_PRODUCTS as u64,
+            });
+        }
+        manifest.dependencies = dependency_products
+            .iter()
+            .map(|product| product.descriptor())
+            .collect::<Result<Vec<_>, _>>()?;
         let envelope = Self {
             schema_version: super::EXECUTABLE_UNIT_SCHEMA_VERSION,
             manifest,
             payloads,
+            dependency_products,
         };
         envelope.validate()?;
         Ok(envelope)
@@ -35,22 +106,18 @@ impl ExecutableUnitEnvelope {
             });
         }
         self.manifest.validate()?;
-        if self.payloads.len() != self.manifest.components.len() {
-            return Err(ContractError::invalid(
-                "executable.payloads",
-                "payload count does not match the component manifest",
-            ));
-        }
-        for (payload, descriptor) in self.payloads.iter().zip(&self.manifest.components) {
-            if payload.kind != descriptor.kind
-                || payload.bytes.len() as u64 != descriptor.encoded_length
-                || Digest::sha256(&payload.bytes) != descriptor.digest
-            {
-                return Err(ContractError::invalid(
-                    "executable.payloads",
-                    "payload identity does not match the component manifest",
-                ));
-            }
+        super::dependencies::validate_products(
+            &self.manifest.dependencies,
+            &self.dependency_products,
+        )?;
+        validate_payloads(&self.manifest, &self.payloads)?;
+        if self.manifest.revisions.source_map_schema == 2 {
+            let source_map = self
+                .component(ExecutableComponentKind::SourceMap)
+                .ok_or_else(|| {
+                    ContractError::invalid("executable.source_map", "source map is missing")
+                })?;
+            super::ExecutableSourceMapV2::decode(&source_map.bytes)?;
         }
         Ok(())
     }
@@ -94,4 +161,28 @@ impl ExecutableUnitEnvelope {
     pub fn component(&self, kind: ExecutableComponentKind) -> Option<&ExecutableComponentPayload> {
         self.payloads.iter().find(|payload| payload.kind == kind)
     }
+}
+
+pub(super) fn validate_payloads(
+    manifest: &ExecutableUnitManifest,
+    payloads: &[ExecutableComponentPayload],
+) -> Result<(), ContractError> {
+    if payloads.len() != manifest.components.len() {
+        return Err(ContractError::invalid(
+            "executable.payloads",
+            "payload count does not match the component manifest",
+        ));
+    }
+    for (payload, descriptor) in payloads.iter().zip(&manifest.components) {
+        if payload.kind != descriptor.kind
+            || payload.bytes.len() as u64 != descriptor.encoded_length
+            || Digest::sha256(&payload.bytes) != descriptor.digest
+        {
+            return Err(ContractError::invalid(
+                "executable.payloads",
+                "payload identity does not match the component manifest",
+            ));
+        }
+    }
+    Ok(())
 }

@@ -1,0 +1,70 @@
+use super::*;
+
+pub(in super::super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("save"),
+    slug: Some("save"),
+    summary: "Save workspace values to a Level-5 MAT-file.",
+    description: "`save(filename)` writes the selected caller workspace to an uncompressed Level-5 MAT-file. Variable names, string arrays of names, `-struct`, `-regexp`, and `-append` choose what is written. The MATLAB-compatible form is a zero-output statement; capturing the double-zero success status is a RunMat extension.",
+    keywords: &["save", "MAT-file", "workspace", "Level-5", "append"],
+    related: &["load", "matfile", "gpuArray", "gather", "saveobj"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Paths and selection", paragraphs: &[
+            "Bare `save()` writes `matlab.mat`, or `RUNMAT_SAVE_DEFAULT_PATH` when that environment override is set. Paths without an extension gain `.mat`; parent directories must exist. Explicit names select workspace variables. `-struct` writes selected fields as individual variables, and `-regexp` selects matching workspace names. Missing names, unmatched patterns, and malformed options reject with typed errors.",
+            "`-append` reads an existing Level-5 file, merges the new entries by name, and writes a refreshed file. A new value replaces an existing value of the same name. ASCII/text format switches such as `-ascii` and `-double` are not accepted.",
+        ] },
+        BuiltinDocumentationSection { heading: "Values", paragraphs: &[
+            "Dense real/complex single and double arrays; all eight signed/unsigned integer classes; logical, character, string, cell, struct, and real sparse arrays retain their available shapes and storage semantics. RunMat writes typed Level-5 object records and may invoke registered `saveobj` hooks. Function handles and opaque graphics handles are unsupported and raise errors.",
+            "Resident array values are gathered from their owning provider before encoding. The MAT file holds host bytes; saving does not mutate the original resident value. Large arrays, append, object callbacks, and full-file encoding may require substantial host memory.",
+        ] },
+        BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
+            "The selected filesystem provider and relative path are captured before the file operation. Writes replace the path through that provider; MAT encoding does not create a device kernel. File writing is not a multi-file transaction and an operational error is not retried as a different route.",
+        ] },
+    ],
+    examples: &[
+        example("workspace", "Save the entire workspace", "x = 42;\ny = magic(3);\nsave('session.mat')", None, "S = load('session.mat'); assert(S.x == 42); assert(isequal(S.y, y));"),
+        example("selected", "Save selected variables", "a = [1 2 3];\nb = eye(2);\nc = 'ignore me';\nsave('selection.mat', 'a', 'b')", None, "S = load('selection.mat'); assert(isfield(S, 'a')); assert(isfield(S, 'b')); assert(~isfield(S, 'c'));"),
+        example("struct", "Save struct fields as variables", "x = 1:5;\ny = [5 4 3 2 1];\nopts = struct('output', y, 'answer', x);\nsave('opts.mat', '-struct', 'opts')", None, "S = load('opts.mat'); assert(isequal(S.output, y)); assert(isequal(S.answer, x));"),
+        example("regexp", "Select names by regular expression", "result_acc = 1:3;\nresult_tmp = 4:6;\nscratch = pi;\nsave('filtered.mat', '-regexp', '^result_', 'tmp$')", None, "S = load('filtered.mat'); assert(isfield(S, 'result_acc')); assert(isfield(S, 'result_tmp')); assert(~isfield(S, 'scratch'));"),
+        example("append", "Append another variable", "x = 7;\nsave('append.mat', 'x');\ny = 2*x;\nsave('append.mat', 'y', '-append')", None, "S = load('append.mat'); assert(S.x == 7); assert(S.y == 14);"),
+        example("string-names", "Select names with a string array", "result_acc = 5;\nscratch = 9;\nnames = [\"result_acc\", \"scratch\"];\nsave('mixed.mat', names)", None, "S = load('mixed.mat'); assert(S.result_acc == 5); assert(S.scratch == 9);"),
+        BuiltinExample { id: "gpu", title: "Save a resident array", program: "G = gpuArray(magic(3));\nsave('gpu.mat', 'G')", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Wgpu, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "S = load('gpu.mat'); assert(isequal(S.G, gather(G)));" } },
+        BuiltinExample { id: "missing", title: "Reject a missing workspace name", program: "save('bad.mat', 'missing')", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::ExpectedError { identifier: "RunMat:save:Selection" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Which MAT-file version is generated?", answer: "Uncompressed Level-5 MAT files. Dense available numeric classes, exact integers, and real sparse matrices use Level-5 class tags; HDF5-backed v7.3 output is not supported." },
+        BuiltinDocumentationFaq { question: "Is `-append` supported?", answer: "Yes for supported Level-5 content. The existing file is decoded, entries are merged by name, and a new Level-5 file is written. A duplicate name is replaced by the new value." },
+        BuiltinDocumentationFaq { question: "Do `-ascii` or `-double` work?", answer: "No. The current writer uses the Level-5 MAT format only." },
+        BuiltinDocumentationFaq { question: "Are objects or function handles saved?", answer: "RunMat typed Level-5 object records and registered `saveobj` hooks are supported. Function handles are rejected." },
+        BuiltinDocumentationFaq { question: "Does `save` return a value?", answer: "The MATLAB-compatible call is a zero-output statement. With RunMat extensions enabled, one captured output is double zero on success." },
+        BuiltinDocumentationFaq { question: "How do I change the bare-save filename?", answer: "Set `RUNMAT_SAVE_DEFAULT_PATH`. With no explicit filename, `save` uses that path instead of `matlab.mat`." },
+        BuiltinDocumentationFaq { question: "Are parent folders created?", answer: "No. The parent folder must already exist, or the filesystem provider returns an error." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Builtin("load") },
+        BuiltinDocumentationLink { label: "matfile", target: BuiltinDocumentationLinkTarget::Builtin("matfile") },
+        BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+        BuiltinDocumentationLink { label: "fileread", target: BuiltinDocumentationLinkTarget::Builtin("fileread") },
+        BuiltinDocumentationLink { label: "fopen", target: BuiltinDocumentationLinkTarget::Builtin("fopen") },
+        BuiltinDocumentationLink { label: "saveobj", target: BuiltinDocumentationLinkTarget::Builtin("saveobj") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "MAT save entry and selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save.rs") },
+            BuiltinDocumentationLink { label: "MAT save controls and selections", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save/controls.rs") },
+            BuiltinDocumentationLink { label: "MAT save workspace and append read", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save/workspace.rs") },
+            BuiltinDocumentationLink { label: "Shared MAT value conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding.rs") },
+            BuiltinDocumentationLink { label: "Shared MAT value conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding/value.rs") },
+            BuiltinDocumentationLink { label: "MAT text and scalar coding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding/scalars.rs") },
+            BuiltinDocumentationLink { label: "Checked MAT byte writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding/writer.rs") },
+            BuiltinDocumentationLink { label: "Captured MAT filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/authority.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "MAT writer and exact classes", location: "builtins::io::mat::save::tests" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

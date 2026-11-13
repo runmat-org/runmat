@@ -1,20 +1,18 @@
-use crate::{
-    BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, Span, StmtId,
-};
+use crate::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, Span, StmtId};
 pub use runmat_types::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId,
-    CallableFallbackPolicy, CallableIdentity, ClassDeclaration, DefPath, DefPathSegment,
-    EntrypointName, FunctionName, IndexKind, IndexResultContext, MemberName, MethodId, MethodName,
-    OperatorKind, PackageName, PlaceMutationKind, QualifiedName, RequestedOutputCount,
-    SemanticAttribute, SymbolName, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME,
-    DISCARD_OUTPUT_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME,
-    FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME,
-    NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId, CallSyntax,
+    CallableFallbackPolicy, CallableIdentity, CapturedBinding, ClassDeclaration, ClassIdentity,
+    DefPath, DefPathSegment, EntrypointName, EnvironmentEffect, FunctionAbi,
+    FunctionArgumentValidation, FunctionKind, FunctionModifiers, FunctionName, IndexKind,
+    IndexResultContext, MemberName, MethodId, MethodName, OperatorKind, PackageName,
+    PlaceMutationKind, QualifiedName, RequestedOutputCount, SemanticAttribute, StringLiteral,
+    SymbolName, WorkspaceEffect, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME,
+    EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME, FEVAL_BUILTIN_NAME,
+    NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
+    RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
     TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
-use runmat_types::{
-    FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator, IntegerLiteral,
-};
+use runmat_types::{IntegerLiteral, ProgramSourceId};
 use serde::{Deserialize, Serialize};
 
 /// Canonical semantic HIR product for one compiled source set.
@@ -25,11 +23,51 @@ use serde::{Deserialize, Serialize};
 /// name types.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub struct HirAssembly {
+    /// Original declarations for retained functions outside this unit's ID namespace.
+    #[serde(default)]
+    pub bound_function_modifiers: std::collections::BTreeMap<FunctionId, FunctionModifiers>,
+    /// Exact current-function binding selected for implicit statement results.
+    /// Reusing an incoming or explicit binding preserves its original role and
+    /// storage; consumers must not rediscover this authority from its name.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub statement_result_bindings: std::collections::BTreeMap<FunctionId, BindingId>,
+    /// Compiler-admitted program root, including function-only and empty
+    /// sources with no synthetic executable entrypoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_source: Option<ProgramSourceId>,
     pub modules: Vec<HirModule>,
     pub functions: Vec<HirFunction>,
     pub classes: Vec<HirClass>,
     pub bindings: Vec<HirBinding>,
     pub entrypoints: Vec<HirEntrypoint>,
+}
+
+impl HirAssembly {
+    /// Classify from the typed source unit and function graph, not a display
+    /// name or the spelling of a source path.
+    pub fn function_source_role(&self, function: &HirFunction) -> runmat_types::FunctionSourceRole {
+        use runmat_types::FunctionSourceRole as Role;
+        match &function.kind {
+            FunctionKind::Anonymous => Role::Anonymous,
+            FunctionKind::SyntheticEntrypoint => Role::Synthetic,
+            FunctionKind::ClassMethod { .. } => Role::Method,
+            FunctionKind::Named if function.parent.is_some() => Role::Nested,
+            FunctionKind::Named => {
+                let Some(module) = self.modules.get(function.module.0) else {
+                    return Role::Unknown;
+                };
+                if matches!(module.source_unit, SourceUnitKind::FunctionFile)
+                    && module.top_level_functions.first() == Some(&function.id)
+                {
+                    Role::Primary
+                } else if module.top_level_functions.contains(&function.id) {
+                    Role::Local
+                } else {
+                    Role::Unknown
+                }
+            }
+        }
+    }
 }
 
 /// Source unit metadata plus references to module-owned semantic items.
@@ -41,7 +79,7 @@ pub struct HirAssembly {
 pub struct HirModule {
     pub id: ModuleId,
     pub name: QualifiedName,
-    pub source_id: SourceId,
+    pub source_id: ProgramSourceId,
     pub source_unit: SourceUnitKind,
     pub imports: Vec<HirImport>,
     pub top_level_functions: Vec<FunctionId>,
@@ -125,45 +163,6 @@ pub struct HirFunction {
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum FunctionKind {
-    Named,
-    Anonymous,
-    SyntheticEntrypoint,
-    ClassMethod { is_static: bool },
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub struct FunctionModifiers {
-    pub isolated: bool,
-    pub is_async: bool,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct FunctionAbi {
-    pub fixed_inputs: Vec<BindingId>,
-    pub varargin: Option<BindingId>,
-    pub fixed_outputs: Vec<BindingId>,
-    pub varargout: Option<BindingId>,
-    pub implicit_nargin: Option<BindingId>,
-    pub implicit_nargout: Option<BindingId>,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct FunctionArgumentValidation {
-    pub binding: BindingId,
-    pub size: Option<FunctionArgSizeSpec>,
-    pub class_name: Option<String>,
-    pub validators: Vec<FunctionArgValidator>,
-    pub default_value: Option<FunctionArgDefaultValue>,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct CapturedBinding {
-    pub binding: BindingId,
-    pub from_function: FunctionId,
-}
-
 /// Semantic binding identity for a name owned by a module or function.
 ///
 /// Bindings model MATLAB lexical/global/persistent storage and workspace
@@ -179,7 +178,7 @@ pub struct HirBinding {
     pub declared_span: Span,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum BindingOwner {
     Module(ModuleId),
     Function(FunctionId),
@@ -190,6 +189,9 @@ pub enum BindingRole {
     Parameter,
     Output,
     Local,
+    /// A top-level binding with a value supplied by the admitted incoming
+    /// workspace snapshot, not a newly declared or unresolved local.
+    IncomingWorkspace,
     ExternalWorkspace,
     ModuleBinding,
     ImplicitAns,
@@ -233,6 +235,11 @@ pub enum HirStmtKind {
     ExprStmt(HirExpr, bool),
     Assign(HirPlace, HirExpr, bool),
     MultiAssign(OutputTargetList, HirExpr, bool),
+    SequenceAssign {
+        target: HirSequenceTarget,
+        value: HirExpr,
+        suppressed: bool,
+    },
     If {
         cond: HirExpr,
         then_body: HirBlock,
@@ -289,11 +296,47 @@ impl HirExpr {
     pub fn span(&self) -> Span {
         self.span
     }
+
+    /// An argument already marked by HIR's comma-separated-list policy.
+    /// Merely returning several values does not make an ordinary expression
+    /// an expansion; its actual argument sequence context must request it.
+    pub fn expands_call_argument_sequence(&self) -> bool {
+        match &self.kind {
+            HirExprKind::Index(_, indexing) => {
+                indexing.kind == IndexKind::Brace
+                    && indexing.result_context == IndexResultContext::FunctionArgumentExpansion
+            }
+            HirExprKind::Member { sequence_use, .. }
+            | HirExprKind::MemberDynamic { sequence_use, .. } => {
+                *sequence_use == runmat_types::SequenceUse::ExpandAll
+            }
+            HirExprKind::SubscriptChain(chain) => {
+                chain.sequence_use == runmat_types::SequenceUse::ExpandAll
+                    && chain.terminal_expands_sequence()
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether an unsuppressed expression has a value for statement echo.
+    /// Builtin output policy belongs to the semantic call, not a CLI renderer.
+    pub fn emits_statement_output(&self) -> bool {
+        match &self.kind {
+            HirExprKind::Call(call) => {
+                call.requested_outputs.known_count() != Some(0)
+                    && !matches!(&call.callee, HirCallableRef::Builtin(builtin)
+                        if runmat_builtins::suppresses_auto_output(builtin.0.as_str()))
+            }
+            HirExprKind::CommandCall(_) => false,
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
+    ImaginaryNumber(String),
     IntegerLiteral(IntegerLiteral),
     String(StringLiteral),
     Constant(SymbolName),
@@ -311,11 +354,22 @@ pub enum HirExprKind {
     Colon,
     End,
     Index(Box<HirExpr>, IndexingSemantics),
-    Member(Box<HirExpr>, MemberName),
-    MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    /// One syntactic indexing chain retained as a unit so object dispatch can
+    /// give the authoritative receiver the complete ordered subscript path.
+    SubscriptChain(HirSubscriptChain),
+    Member {
+        base: Box<HirExpr>,
+        member: MemberName,
+        sequence_use: runmat_types::SequenceUse,
+    },
+    MemberDynamic {
+        base: Box<HirExpr>,
+        member: Box<HirExpr>,
+        sequence_use: runmat_types::SequenceUse,
+    },
     WorkspaceFirstStaticProperty {
         workspace_name: SymbolName,
-        class_name: String,
+        class_name: ClassIdentity,
         property: MemberName,
     },
     Call(HirCall),
@@ -334,6 +388,24 @@ pub enum HirPlace {
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
     Index(Box<HirExpr>, IndexingSemantics),
     IndexCell(Box<HirExpr>, IndexingSemantics),
+}
+
+/// A bracketed destination whose cardinality is determined by its evaluated
+/// aggregate rather than by the number of syntactic targets.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirSequenceTarget {
+    Member {
+        base: Box<HirExpr>,
+        member: MemberName,
+    },
+    DynamicMember {
+        base: Box<HirExpr>,
+        member: Box<HirExpr>,
+    },
+    CellContents {
+        base: Box<HirExpr>,
+        indexing: IndexingSemantics,
+    },
 }
 
 /// Call expression with a semantic callee reference and source syntax marker.
@@ -362,11 +434,11 @@ pub enum HirCallableRef {
     Builtin(BuiltinId),
     Imported(DefPath),
     SuperConstructor {
-        current_class: SymbolName,
+        current_class: ClassIdentity,
         super_class: QualifiedName,
     },
     SuperMethod {
-        current_class: SymbolName,
+        current_class: ClassIdentity,
         super_class: QualifiedName,
         method: SymbolName,
     },
@@ -408,14 +480,6 @@ impl HirCallableRef {
             }
         }
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum CallSyntax {
-    Plain,
-    Method,
-    DottedInvoke,
-    Command,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -479,6 +543,7 @@ pub struct OutputTargetList {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum OutputTarget {
     Place(HirPlace),
+    Sequence(HirSequenceTarget),
     Discard,
 }
 
@@ -488,6 +553,54 @@ pub enum IndexComponent {
     End { dim: Option<usize>, offset: isize },
     Expr(HirExpr),
     Logical(HirExpr),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct HirSubscriptChain {
+    pub root: Box<HirExpr>,
+    pub steps: Vec<HirSubscriptStep>,
+    pub sequence_use: runmat_types::SequenceUse,
+    pub context: runmat_types::ObjectIndexingContext,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirSubscriptStep {
+    Index(IndexingSemantics),
+    Member(MemberName),
+    DynamicMember(HirExpr),
+    DottedInvoke {
+        member: MemberName,
+        arguments: Vec<HirDottedInvokeArgument>,
+        /// A lexically resolved function is eligible only after receiver
+        /// method/member dispatch. Never re-resolve its name at execution.
+        semantic_fallback: Option<runmat_types::CallableIdentity>,
+    },
+}
+
+/// A dotted invocation has call arguments, not ordinary index selectors.
+/// Receiver-relative `end` and `:` retain their source-level forms here;
+/// a Value may carry a comma-separated-list expansion request.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirDottedInvokeArgument {
+    Colon,
+    End { offset: isize },
+    Value(HirExpr),
+}
+
+impl HirSubscriptChain {
+    pub fn terminal_expands_sequence(&self) -> bool {
+        matches!(
+            self.steps.last(),
+            Some(
+                HirSubscriptStep::Member(_)
+                    | HirSubscriptStep::DynamicMember(_)
+                    | HirSubscriptStep::Index(IndexingSemantics {
+                        kind: IndexKind::Brace,
+                        ..
+                    })
+            )
+        )
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -529,27 +642,6 @@ impl FunctionHandleTarget {
             FunctionHandleTarget::DynamicName(name) => CallableIdentity::DynamicName(name.clone()),
         }
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum WorkspaceEffect {
-    None,
-    ReadsWorkspace,
-    CreatesBinding,
-    ClearsBinding,
-    ClearsFunctionCache,
-    MutatesGlobal,
-    MutatesPersistent,
-    LoadsExternalBindings,
-    DynamicEval,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum EnvironmentEffect {
-    PathMutation,
-    WorkingDirectoryMutation,
-    FunctionCacheInvalidation,
-    DynamicLookupInvalidation,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -662,6 +754,8 @@ pub struct CallResolution {
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
     pub span: Span,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProgramSourceId>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -669,26 +763,8 @@ pub struct FunctionHandleResolution {
     pub name: QualifiedName,
     pub target: FunctionHandleTarget,
     pub span: Span,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct StringLiteral(pub String);
-
-impl StringLiteral {
-    /// Decode the source spelling into the text observed by MATLAB execution.
-    pub fn runtime_text(&self) -> String {
-        if self.0.starts_with('"') && self.0.ends_with('"') && self.0.len() >= 2 {
-            self.0[1..self.0.len() - 1].replace("\"\"", "\"")
-        } else if self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2 {
-            self.0[1..self.0.len() - 1].replace("''", "'")
-        } else {
-            self.0.clone()
-        }
-    }
-
-    pub fn is_character_row(&self) -> bool {
-        self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2
-    }
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProgramSourceId>,
 }
 
 #[derive(Debug, Clone)]
@@ -698,424 +774,4 @@ pub struct LoweringResult {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn span() -> Span {
-        Span { start: 0, end: 0 }
-    }
-
-    #[test]
-    fn assembly_owns_core_items() {
-        let module = ModuleId(0);
-        let function = FunctionId(0);
-        let binding = BindingId(0);
-        let entrypoint = EntrypointId(0);
-
-        let assembly = HirAssembly {
-            modules: vec![HirModule {
-                id: module,
-                name: QualifiedName(vec![SymbolName("demo".into())]),
-                source_id: SourceId(0),
-                source_unit: SourceUnitKind::ScriptFile,
-                imports: vec![],
-                top_level_functions: vec![],
-                classes: vec![],
-                synthetic_entry_function: Some(function),
-                script_sections: vec![],
-            }],
-            functions: vec![HirFunction {
-                id: function,
-                module,
-                parent: None,
-                enclosing_class: None,
-                name: FunctionName("demo_entry".into()),
-                kind: FunctionKind::SyntheticEntrypoint,
-                params: vec![],
-                outputs: vec![],
-                abi: FunctionAbi {
-                    fixed_inputs: vec![],
-                    varargin: None,
-                    fixed_outputs: vec![],
-                    varargout: None,
-                    implicit_nargin: None,
-                    implicit_nargout: None,
-                },
-                locals: vec![binding],
-                captures: vec![],
-                argument_validations: vec![],
-                modifiers: FunctionModifiers::default(),
-                body: HirBlock { statements: vec![] },
-                span: span(),
-            }],
-            classes: vec![],
-            bindings: vec![HirBinding {
-                id: binding,
-                owner: BindingOwner::Function(function),
-                name: BindingName("x".into()),
-                role: BindingRole::Local,
-                storage: BindingStorage::Lexical,
-                workspace_visibility: WorkspaceVisibility::TopLevel,
-                declared_span: span(),
-            }],
-            entrypoints: vec![HirEntrypoint {
-                id: entrypoint,
-                name: Some(EntrypointName("demo".into())),
-                target: function,
-                origin: EntrypointOrigin::SourcePath,
-                policy: EntrypointPolicy {
-                    workspace_export: WorkspaceExportPolicy::ExportTopLevelBindings,
-                    top_level_await: false,
-                },
-            }],
-        };
-
-        assert_eq!(assembly.modules[0].synthetic_entry_function, Some(function));
-        assert_eq!(assembly.entrypoints[0].target, function);
-        assert_eq!(assembly.functions[0].locals, vec![binding]);
-        assert!(matches!(
-            assembly.bindings[0].workspace_visibility,
-            WorkspaceVisibility::TopLevel
-        ));
-    }
-
-    #[test]
-    fn function_abi_can_reuse_shared_input_output_binding() {
-        let binding = BindingId(0);
-        let abi = FunctionAbi {
-            fixed_inputs: vec![binding],
-            varargin: None,
-            fixed_outputs: vec![binding],
-            varargout: None,
-            implicit_nargin: Some(BindingId(1)),
-            implicit_nargout: Some(BindingId(2)),
-        };
-
-        assert_eq!(abi.fixed_inputs[0], abi.fixed_outputs[0]);
-        assert_eq!(abi.implicit_nargin, Some(BindingId(1)));
-        assert_eq!(abi.implicit_nargout, Some(BindingId(2)));
-    }
-
-    #[test]
-    fn captures_reference_original_binding_identity() {
-        let parent = FunctionId(0);
-        let child = FunctionId(1);
-        let binding = BindingId(0);
-
-        let capture = CapturedBinding {
-            binding,
-            from_function: parent,
-        };
-
-        let child_function = HirFunction {
-            id: child,
-            module: ModuleId(0),
-            parent: Some(parent),
-            enclosing_class: None,
-            name: FunctionName("inner".into()),
-            kind: FunctionKind::Named,
-            params: vec![],
-            outputs: vec![],
-            abi: FunctionAbi {
-                fixed_inputs: vec![],
-                varargin: None,
-                fixed_outputs: vec![],
-                varargout: None,
-                implicit_nargin: None,
-                implicit_nargout: None,
-            },
-            locals: vec![],
-            captures: vec![capture],
-            argument_validations: vec![],
-            modifiers: FunctionModifiers::default(),
-            body: HirBlock { statements: vec![] },
-            span: span(),
-        };
-
-        assert_eq!(child_function.parent, Some(parent));
-        assert_eq!(child_function.captures[0].binding, binding);
-        assert_eq!(child_function.captures[0].from_function, parent);
-    }
-
-    #[test]
-    fn mutation_captures_creation_and_shape_context() {
-        let binding = BindingId(0);
-        let mutation = PlaceMutation {
-            place: HirPlace::Binding(binding),
-            kind: PlaceMutationKind::BindOrAssign,
-            creation_policy: AssignmentCreationPolicy::CreateBinding,
-            shape_policy: AssignmentShapePolicy::MatlabCompatible,
-        };
-        assert!(matches!(mutation.place, HirPlace::Binding(id) if id == binding));
-        assert!(matches!(
-            mutation.creation_policy,
-            AssignmentCreationPolicy::CreateBinding
-        ));
-        assert!(matches!(
-            mutation.shape_policy,
-            AssignmentShapePolicy::MatlabCompatible
-        ));
-    }
-
-    #[test]
-    fn def_path_is_distinct_from_local_table_ids() {
-        let function_id = FunctionId(0);
-        let path = DefPath {
-            package: PackageName("pkg".into()),
-            module: QualifiedName(vec![SymbolName("pkg".into()), SymbolName("demo".into())]),
-            item: vec![DefPathSegment::Function(SymbolName("f".into()))],
-        };
-
-        assert_eq!(function_id, FunctionId(0));
-        assert_eq!(path.package.0, "pkg");
-        assert!(matches!(path.item[0], DefPathSegment::Function(_)));
-    }
-
-    #[test]
-    fn imported_callable_identity_prefers_qualified_display_name() {
-        let path = DefPath {
-            package: PackageName("pkg".into()),
-            module: QualifiedName(vec![
-                SymbolName("pkg".into()),
-                SymbolName("demo".into()),
-                SymbolName("f".into()),
-            ]),
-            item: vec![DefPathSegment::Function(SymbolName("f".into()))],
-        };
-        let identity = CallableIdentity::Imported(path);
-        assert_eq!(identity.display_name().as_deref(), Some("pkg.demo.f"));
-
-        let empty_module_path = DefPath {
-            package: PackageName("pkg".into()),
-            module: QualifiedName(vec![]),
-            item: vec![DefPathSegment::Function(SymbolName("f".into()))],
-        };
-        let empty_module_identity = CallableIdentity::Imported(empty_module_path);
-        assert_eq!(empty_module_identity.display_name(), None);
-    }
-
-    #[test]
-    fn qualified_name_display_name_rejects_empty_segments() {
-        let malformed = QualifiedName(vec![
-            SymbolName("pkg".into()),
-            SymbolName("".into()),
-            SymbolName("remote".into()),
-        ]);
-        assert_eq!(malformed.display_name(), None);
-    }
-
-    #[test]
-    fn callable_identity_display_name_rejects_empty_name_fields() {
-        assert_eq!(
-            CallableIdentity::Builtin(BuiltinId(String::new())).display_name(),
-            None
-        );
-        assert_eq!(
-            CallableIdentity::Method(MethodId(String::new())).display_name(),
-            None
-        );
-        assert_eq!(
-            CallableIdentity::DynamicName(SymbolName(String::new())).display_name(),
-            None
-        );
-    }
-
-    #[test]
-    fn callable_name_fallback_policies_require_well_formed_external_names() {
-        let dynamic = CallableIdentity::DynamicName(SymbolName("sqrt".into()));
-        let imported = CallableIdentity::Imported(DefPath {
-            package: PackageName("Point".into()),
-            module: QualifiedName(vec![
-                SymbolName("Point".into()),
-                SymbolName("origin".into()),
-            ]),
-            item: vec![DefPathSegment::Function(SymbolName("origin".into()))],
-        });
-        let imported_missing_item = CallableIdentity::Imported(DefPath {
-            package: PackageName("Point".into()),
-            module: QualifiedName(vec![
-                SymbolName("Point".into()),
-                SymbolName("origin".into()),
-            ]),
-            item: vec![],
-        });
-        let imported_empty_item_name = CallableIdentity::Imported(DefPath {
-            package: PackageName("Point".into()),
-            module: QualifiedName(vec![
-                SymbolName("Point".into()),
-                SymbolName("origin".into()),
-            ]),
-            item: vec![DefPathSegment::Function(SymbolName("".into()))],
-        });
-        let imported_mismatched_item = CallableIdentity::Imported(DefPath {
-            package: PackageName("Point".into()),
-            module: QualifiedName(vec![
-                SymbolName("Point".into()),
-                SymbolName("origin".into()),
-            ]),
-            item: vec![DefPathSegment::Function(SymbolName("different".into()))],
-        });
-        let method = CallableIdentity::Method(MethodId("deal".into()));
-        let whitespace_dynamic = CallableIdentity::DynamicName(SymbolName("   ".into()));
-        let whitespace_method = CallableIdentity::Method(MethodId("   ".into()));
-        let single_external =
-            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".into())]));
-        let whitespace_external = CallableIdentity::ExternalName(QualifiedName(vec![
-            SymbolName("OverIdx".into()),
-            SymbolName("   ".into()),
-        ]));
-        let qualified_external = CallableIdentity::ExternalName(QualifiedName(vec![
-            SymbolName("OverIdx".into()),
-            SymbolName("plus".into()),
-        ]));
-        let malformed_external = CallableIdentity::ExternalName(QualifiedName(vec![
-            SymbolName("OverIdx".into()),
-            SymbolName("".into()),
-            SymbolName("plus".into()),
-        ]));
-
-        assert!(CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&dynamic));
-        assert!(CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&imported));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&imported_missing_item));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&imported_empty_item_name));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&imported_mismatched_item));
-        assert!(CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&method));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&whitespace_dynamic));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_semantic_name_resolution_for(&whitespace_method));
-        assert!(
-            !CallableFallbackPolicy::ExternalBoundary.allows_semantic_name_resolution_for(&dynamic)
-        );
-        assert!(!CallableFallbackPolicy::ExternalBoundary
-            .allows_semantic_name_resolution_for(&imported));
-        assert!(
-            !CallableFallbackPolicy::ExternalBoundary.allows_semantic_name_resolution_for(&method)
-        );
-        assert!(!CallableFallbackPolicy::ExternalBoundary
-            .allows_semantic_name_resolution_for(&single_external));
-        assert!(CallableFallbackPolicy::ExternalBoundary
-            .allows_semantic_name_resolution_for(&qualified_external));
-        assert!(!CallableFallbackPolicy::ExternalBoundary
-            .allows_semantic_name_resolution_for(&whitespace_external));
-        assert!(!CallableFallbackPolicy::ExternalBoundary
-            .allows_semantic_name_resolution_for(&malformed_external));
-
-        assert!(CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&dynamic));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_vm_name_fallback_for(&whitespace_dynamic));
-        assert!(
-            CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&imported)
-        );
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_vm_name_fallback_for(&imported_missing_item));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_vm_name_fallback_for(&imported_empty_item_name));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution
-            .allows_vm_name_fallback_for(&imported_mismatched_item));
-        assert!(!CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&method));
-        assert!(!CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&dynamic));
-        assert!(
-            !CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&single_external)
-        );
-        assert!(CallableFallbackPolicy::ExternalBoundary
-            .allows_vm_name_fallback_for(&qualified_external));
-        assert!(!CallableFallbackPolicy::ExternalBoundary
-            .allows_vm_name_fallback_for(&whitespace_external));
-        assert!(!CallableFallbackPolicy::ExternalBoundary
-            .allows_vm_name_fallback_for(&malformed_external));
-
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&dynamic),
-            Some("sqrt".into())
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&dynamic),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&whitespace_dynamic),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&imported),
-            Some("Point.origin".into())
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution
-                .vm_fallback_name_for(&imported_missing_item),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution
-                .vm_fallback_name_for(&imported_empty_item_name),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution
-                .vm_fallback_name_for(&imported_mismatched_item),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution
-                .resolution_name_for(&imported_missing_item),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution
-                .resolution_name_for(&imported_empty_item_name),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution
-                .resolution_name_for(&imported_mismatched_item),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&method),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution.resolution_name_for(&method),
-            Some("deal".into())
-        );
-        assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution.resolution_name_for(&whitespace_method),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&single_external),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.resolution_name_for(&single_external),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&qualified_external),
-            Some("OverIdx.plus".into())
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.resolution_name_for(&qualified_external),
-            Some("OverIdx.plus".into())
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&whitespace_external),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.resolution_name_for(&whitespace_external),
-            None
-        );
-        assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&malformed_external),
-            None
-        );
-    }
-}
+mod tests;

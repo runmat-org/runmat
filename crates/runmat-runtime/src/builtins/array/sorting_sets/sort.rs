@@ -1,25 +1,30 @@
 //! MATLAB-compatible `sort` builtin with multi-output and GPU-aware semantics.
 
+#[cfg(test)]
+use super::type_resolvers::tensor_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    SORT_DESCRIPTOR, SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+    SORT_ERROR_COMPARISON_METHOD_UNKNOWN, SORT_ERROR_INTERNAL, SORT_ERROR_INVALID_ARGUMENT,
+    SORT_ERROR_INVALID_DIMENSION, SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
+    SORT_ERROR_MISSINGPLACEMENT_UNKNOWN, SORT_INTEGER_CAPABILITIES,
+};
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, SortComparison as ProviderSortComparison, SortOrder as ProviderSortOrder,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor,
     Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
@@ -58,292 +63,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "sort";
 
-const SORT_OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sorted values.",
-}];
-
-const SORT_OUTPUT_BI: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sorted values.",
-    },
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based index permutation for each sorted slice.",
-    },
-];
-
-const SORT_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const SORT_INPUTS_A_ARG1: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token ('ascend'/'descend').",
-    },
-];
-
-const SORT_INPUTS_A_ARG1_ARG2: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector, placeholder, or direction token.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token.",
-    },
-];
-
-const SORT_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ComparisonMethod\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Comparison method: 'auto', 'real', or 'abs'.",
-    },
-];
-
-const SORT_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"MissingPlacement\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "placement",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Missing-value placement: 'auto', 'first', or 'last'.",
-    },
-];
-
-const SORT_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A)",
-        inputs: &SORT_INPUTS_A,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, arg1)",
-        inputs: &SORT_INPUTS_A_ARG1,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, arg1, arg2)",
-        inputs: &SORT_INPUTS_A_ARG1_ARG2,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, ..., \"ComparisonMethod\", method)",
-        inputs: &SORT_INPUTS_COMPARISON_METHOD,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sort(A, ..., \"MissingPlacement\", placement)",
-        inputs: &SORT_INPUTS_MISSING_PLACEMENT,
-        outputs: &SORT_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A)",
-        inputs: &SORT_INPUTS_A,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, arg1)",
-        inputs: &SORT_INPUTS_A_ARG1,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, arg1, arg2)",
-        inputs: &SORT_INPUTS_A_ARG1_ARG2,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, ..., \"ComparisonMethod\", method)",
-        inputs: &SORT_INPUTS_COMPARISON_METHOD,
-        outputs: &SORT_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sort(A, ..., \"MissingPlacement\", placement)",
-        inputs: &SORT_INPUTS_MISSING_PLACEMENT,
-        outputs: &SORT_OUTPUT_BI,
-    },
-];
-
-const SORT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.INVALID_DIMENSION",
-    identifier: Some("RunMat:sort:InvalidDimension"),
-    when: "Dimension argument is non-positive, non-integer, or otherwise invalid.",
-    message: "sort: invalid dimension argument",
-};
-
-const SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.SORT.COMPARISON_METHOD_REQUIRES_STRING",
-        identifier: Some("RunMat:sort:ComparisonMethodRequiresString"),
-        when: "ComparisonMethod option value is not string-like.",
-        message: "sort: 'ComparisonMethod' requires a string value",
-    };
-
-const SORT_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.COMPARISON_METHOD_UNKNOWN",
-    identifier: Some("RunMat:sort:ComparisonMethodUnknown"),
-    when: "ComparisonMethod option value is not one of 'auto'/'real'/'abs'.",
-    message: "sort: unsupported ComparisonMethod",
-};
-
-const SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.SORT.MISSINGPLACEMENT_REQUIRES_STRING",
-        identifier: Some("RunMat:sort:MissingPlacementRequiresString"),
-        when: "MissingPlacement option value is not string-like.",
-        message: "sort: 'MissingPlacement' requires a string value",
-    };
-
-const SORT_ERROR_MISSINGPLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.MISSINGPLACEMENT_UNKNOWN",
-    identifier: Some("RunMat:sort:MissingPlacementUnknown"),
-    when: "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
-    message: "sort: unsupported MissingPlacement",
-};
-
-const SORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:sort:InvalidArgument"),
-    when: "Parser encounters invalid or unrecognized option/value arguments.",
-    message: "sort: invalid argument sequence",
-};
-
-const SORT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORT.INTERNAL",
-    identifier: Some("RunMat:sort:Internal"),
-    when: "Internal conversion, allocation, or provider result construction fails.",
-    message: "sort: internal operation failed",
-};
-
-const SORT_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    SORT_ERROR_INVALID_DIMENSION,
-    SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
-    SORT_ERROR_COMPARISON_METHOD_UNKNOWN,
-    SORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
-    SORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
-    SORT_ERROR_INVALID_ARGUMENT,
-    SORT_ERROR_INTERNAL,
-];
-
-const SORT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented sortable input domain includes all eight real integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive integer-scalar dimension accepts every integer class and integer-valued scalar double.",
-    },
-];
-
-const SORT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[B, I] = sort(integer_A, integer_dim, direction, options)",
-        inputs: &SORT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "B preserves A's exact integer class and stable equal-value order; optional I is one-based double. Resident integer input uses exact typed gather fallback and restores both outputs to the owning provider.",
-    }];
-
-pub const SORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SORT_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SORT_ERRORS,
-};
-
 fn sort_error(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -365,28 +84,21 @@ fn sort_invalid_argument(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "sort",
-    category = "array/sorting_sets",
-    summary = "Sort array elements along a dimension with optional index outputs.",
-    keywords = "sort,ascending,descending,indices,comparisonmethod,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(tensor_output_type),
-    descriptor(crate::builtins::array::sorting_sets::sort::SORT_DESCRIPTOR),
-    integer_capabilities(SORT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
-async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
+async fn sort_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_view(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let (sorted, indices) = eval.into_values();
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![sorted]));
+            return Ok(Value::output_list(vec![sorted]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![sorted, indices]));
+            return Ok(Value::output_list(vec![sorted, indices]));
         }
         return Err(sort_invalid_argument(
             "sort: too many output arguments; maximum is 2",
@@ -397,6 +109,13 @@ async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 
 /// Evaluate the `sort` builtin once and expose both outputs.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
+    evaluate_view(value, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    value: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<SortEvaluation> {
     let args = SortArgs::parse(rest)?;
     match value {
         Value::GpuTensor(handle) => sort_gpu(handle, &args).await,
@@ -408,7 +127,7 @@ async fn sort_gpu(
     handle: GpuTensorHandle,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = handle.shape.clone();
+    let shape = handle.shape().to_vec();
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
         .or_else(runmat_accelerate_api::provider);
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
@@ -419,24 +138,25 @@ async fn sort_gpu(
         ));
     }
     let dim_len = dimension_length(&shape, dim);
-    let plain_real = runmat_accelerate_api::handle_integer_type(&handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&handle)
-        && runmat_accelerate_api::handle_storage(&handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real;
+    let plain_real = super::provider_result::plain_real(&handle);
     if dim_len > 1 && plain_real && matches!(args.missing, MissingPlacement::Auto) {
         if let Some(provider) = provider {
             let order = args.direction.to_provider();
             let comparison = args.comparison.to_provider();
             let zero_based = dim - 1;
-            if let Ok(result) = provider
-                .sort_dim(&handle, zero_based, order, comparison)
-                .await
+            if let Some(result) = super::provider_result::attempt(
+                provider.sort_dim(&handle, zero_based, order, comparison),
+                sort_internal,
+            )
+            .await?
             {
-                let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-                    .map_err(|e| sort_internal(format!("sort: {e}")))?;
+                let (sorted_tensor, indices_tensor) = super::provider_result::sort(
+                    result,
+                    &handle,
+                    super::provider_result::SortGeometry::Dimension(zero_based),
+                    sort_internal,
+                )?;
                 let sorted_value = tensor::tensor_into_value(sorted_tensor);
-                let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-                    .map_err(|e| sort_internal(format!("sort: {e}")))?;
                 return upload_sort_evaluation(
                     provider,
                     SortEvaluation {
@@ -485,14 +205,14 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
 fn sort_logical(logical: LogicalArray, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
     let shape = logical.shape;
     let evaluation = sort_real_tensor(
-        Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+        Tensor::new_integer(IntegerStorage::U8(logical.data.into_vec()), shape)
             .map_err(|e| sort_internal(format!("sort: {e}")))?,
         args,
     )?;
     let sorted = match evaluation.sorted {
         Value::Int(IntValue::U8(value)) => Value::Bool(value != 0),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|e| sort_internal(format!("sort: {e}")))?
@@ -536,47 +256,38 @@ fn upload_sort_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: Value,
 ) -> crate::BuiltinResult<Value> {
-    let upload_tensor = |tensor: Tensor, logical: bool| -> crate::BuiltinResult<Value> {
+    let upload_tensor = |tensor: Tensor| -> crate::BuiltinResult<Value> {
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|error| sort_internal(format!("sort: GPU upload failed: {error}")))?;
-        Ok(if logical {
-            gpu_helpers::logical_gpu_value(handle)
-        } else {
-            gpu_helpers::resident_gpu_value(handle)
-        })
+        gpu_helpers::resident_gpu_value(handle)
     };
     match value {
-        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Tensor(tensor) => upload_tensor(tensor),
         Value::Num(number) => upload_tensor(
             Tensor::new(vec![number], vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            false,
         ),
         Value::Int(integer) => upload_tensor(
             Tensor::new_integer(IntegerStorage::from_scalar(integer), vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            false,
         ),
-        Value::Bool(logical) => upload_tensor(
-            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            true,
-        ),
+        Value::Bool(logical) => {
+            super::support::upload_logical_output(provider, &[u8::from(logical)], &[1, 1], "sort")
+        }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(sort_internal)?;
-            upload_tensor(tensor, true)
+            super::support::upload_logical_output(provider, &logical.data, &logical.shape, "sort")
         }
         Value::Complex(real, imag) => {
             let tensor = ComplexTensor::new(vec![(real, imag)], vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::ComplexTensor(tensor) => {
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         other => Err(sort_internal(format!(
             "sort: cannot upload unexpected output {other:?}"
@@ -585,7 +296,7 @@ fn upload_sort_value(
 }
 
 fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
@@ -725,8 +436,9 @@ fn sort_complex_tensor(
     tensor: ComplexTensor,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = tensor.shape.clone();
-    let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
+    let dim = args
+        .dimension
+        .unwrap_or_else(|| default_dimension(tensor.shape()));
     if dim == 0 {
         return Err(sort_error(
             &SORT_ERROR_INVALID_DIMENSION,
@@ -734,8 +446,8 @@ fn sort_complex_tensor(
         ));
     }
 
-    let dim_len = dimension_length(&shape, dim);
-    let storage = tensor.into_complex_storage();
+    let dim_len = dimension_length(tensor.shape(), dim);
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
     if storage.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; storage.len()];
         let index_tensor =
@@ -790,10 +502,22 @@ fn complex_integer_sort_permutation(
                 buffer.push((k, source));
             }
             buffer.sort_by(|a, b| {
-                let a_real = storage.real.value_at(a.1).expect("validated complex index");
-                let a_imag = storage.imag.value_at(a.1).expect("validated complex index");
-                let b_real = storage.real.value_at(b.1).expect("validated complex index");
-                let b_imag = storage.imag.value_at(b.1).expect("validated complex index");
+                let a_real = storage
+                    .real()
+                    .value_at(a.1)
+                    .expect("validated complex index");
+                let a_imag = storage
+                    .imag()
+                    .value_at(a.1)
+                    .expect("validated complex index");
+                let b_real = storage
+                    .real()
+                    .value_at(b.1)
+                    .expect("validated complex index");
+                let b_imag = storage
+                    .imag()
+                    .value_at(b.1)
+                    .expect("validated complex index");
                 integer_order::compare_complex(
                     (&a_real, &a_imag),
                     (&b_real, &b_imag),
@@ -812,8 +536,8 @@ fn complex_integer_sort_permutation(
     (source_indices, indices)
 }
 
-fn complex_sort_permutation<T: SetFloat>(
-    values: &[(T, T)],
+fn complex_sort_permutation<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     dim: usize,
     args: &SortArgs,
@@ -830,7 +554,7 @@ fn complex_sort_permutation<T: SetFloat>(
             buffer.clear();
             for k in 0..dim_len {
                 let source = before + k * stride_before + after * stride_before * dim_len;
-                buffer.push((k, source, values[source]));
+                buffer.push((k, source, values.pair_at(source)));
             }
             buffer.sort_by(|a, b| compare_complex_values(a.2, b.2, args));
             for (position, (original_index, source, _)) in buffer.iter().enumerate() {
@@ -1073,7 +797,7 @@ struct SortArgs {
 }
 
 impl SortArgs {
-    fn parse(rest: &[Value]) -> crate::BuiltinResult<Self> {
+    fn parse(rest: FunctionArgumentView<'_>) -> crate::BuiltinResult<Self> {
         let mut args = SortArgs::default();
         let tokens = tokens_from_values(rest);
         let mut i = 0usize;
@@ -1194,11 +918,33 @@ impl SortArgs {
                         }
                         let raw = &rest[i];
                         let value = match raw {
-                            Value::String(s) => s.clone(),
-                            Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-                            Value::CharArray(ca) if ca.rows == 1 => {
-                                ca.data.iter().copied().collect()
+                            Value::String(runmat_value::StringElement::Text(s)) => {
+                                std::borrow::Cow::Borrowed(s.as_str())
                             }
+                            Value::StringArray(sa) if sa.data().len() == 1 => {
+                                std::borrow::Cow::Borrowed(sa.data()[0].as_str().ok_or_else(
+                                    || {
+                                        sort_error(
+                                            &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+                                            SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.message,
+                                        )
+                                    },
+                                )?)
+                            }
+                            Value::CharArray(ca) if ca.rows == 1 => std::borrow::Cow::Owned(
+                                runmat_value::decode_utf16_code_units(ca.data()).map_err(
+                                    |source| {
+                                        let mut error = sort_error(
+                                            &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+                                            format!(
+                                                "sort: invalid ComparisonMethod text: {source}"
+                                            ),
+                                        );
+                                        error.source = Some(Box::new(source));
+                                        error
+                                    },
+                                )?,
+                            ),
                             _ => {
                                 return Err(sort_error(
                                     &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
@@ -1300,7 +1046,10 @@ pub(crate) mod tests {
     };
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::sort_builtin(value, rest))
+        block_on(super::sort_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
@@ -1315,7 +1064,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1527,7 +1276,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 5.0, 3.0, 6.0]);
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1547,7 +1296,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1587,7 +1336,7 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1725,8 +1474,12 @@ pub(crate) mod tests {
             panic!("expected complex single tensor");
         };
         assert_eq!(
-            sorted.as_f32_slice(),
-            Some(&[(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)][..])
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)])
         );
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
@@ -1743,7 +1496,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(sorted) = sorted else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(sorted.as_f32_slice(), Some(&[(1.25, -2.5)][..]));
+        assert_eq!(
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5)])
+        );
     }
 
     #[test]
@@ -2041,7 +1801,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sort_rejects_more_than_two_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = sort_builtin(
             Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).expect("input")),
             Vec::new(),
@@ -2059,7 +1819,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert!(t.materialize_f64().is_empty());
-                assert_eq!(t.shape, tensor.shape);
+                assert_eq!(t.shape(), tensor.shape());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2183,7 +1943,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
@@ -2218,12 +1978,11 @@ pub(crate) mod tests {
             );
 
             let logical = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[1.0, 0.0, 1.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1],
                     shape: &[3, 1],
                 })
                 .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&logical, true);
             let (sorted, _) = evaluate(Value::GpuTensor(logical), &[])
                 .expect("logical GPU sort")
                 .into_values();
@@ -2249,7 +2008,7 @@ pub(crate) mod tests {
 
         let gpu_view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&gpu_view).expect("upload");

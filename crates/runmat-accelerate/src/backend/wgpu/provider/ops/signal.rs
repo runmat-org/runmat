@@ -1,3 +1,4 @@
+use super::elementwise::{IndexedFusionMultiRequest, IndexedFusionOperand};
 use super::*;
 use crate::backend::wgpu::params::{
     MovingWindowParamsF32, MovingWindowParamsF64, PackedF32, PackedU32,
@@ -16,15 +17,68 @@ use runmat_accelerate_api::{
     ProviderTrapezoidSpacing,
 };
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "signal/spectral_preflight_tests.rs"]
+mod spectral_preflight_tests;
+
+#[cfg(test)]
+#[path = "signal/specialized_moving_window_validation_tests.rs"]
+mod specialized_moving_window_validation_tests;
+#[cfg(test)]
+#[path = "signal/required_geometry_tests.rs"]
+mod required_geometry_tests;
+
 #[derive(Clone, Copy)]
 enum GradientSpacingInput<'a> {
     Scalar(f64),
     Coordinates(&'a GpuTensorHandle),
 }
 
-enum IirCoefficientPlan {
-    UnitDenominatorFir,
-    Normalized { b: Vec<f64>, a: Vec<f64> },
+enum IirCoefficientPlan<'a> {
+    UnitDenominatorFir {
+        numerator: &'a GpuTensorHandle,
+    },
+    PreparedResident {
+        numerator: &'a GpuTensorHandle,
+        denominator: &'a GpuTensorHandle,
+    },
+    Normalized {
+        b: std::borrow::Cow<'a, [f64]>,
+        a: std::borrow::Cow<'a, [f64]>,
+    },
+}
+
+/// Owns the device-side finite mask and its scalar reduction until the
+/// readback reaches a terminal state. Dropping a pending validation therefore
+/// retires both private intermediates without touching the borrowed signal.
+struct EnvelopeFiniteValidation {
+    mask: GpuTensorHandle,
+    all: GpuTensorHandle,
+}
+
+impl EnvelopeFiniteValidation {
+    fn scalar(&self) -> &GpuTensorHandle {
+        &self.all
+    }
+
+    fn complete(
+        self,
+        finite: anyhow::Result<HostTensorOwned>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<()> {
+        use runmat_accelerate_api::{EnvelopeSignalDomainError, ProviderExecutionError};
+
+        let Self { mask, all } = self;
+        drop(all);
+        drop(mask);
+        let finite = finite.map_err(|error| ProviderExecutionError::from(error).after_effect())?;
+        if finite.data.as_slice() != [1.0] {
+            return Err(
+                ProviderExecutionError::from_source(EnvelopeSignalDomainError::NonFinite)
+                    .after_effect(),
+            );
+        }
+        Ok(())
+    }
 }
 
 fn moving_window_op_code(op: ProviderMovingWindowOp) -> u32 {
@@ -45,6 +99,30 @@ fn moving_window_endpoint_code(endpoint: ProviderMovingWindowEndpoints) -> (u32,
         ProviderMovingWindowEndpoints::Shrink => (0, 0.0),
         ProviderMovingWindowEndpoints::Discard => (1, 0.0),
         ProviderMovingWindowEndpoints::Fill(value) => (2, value),
+    }
+}
+
+fn specialized_moving_window_fill_helper(precision: NumericPrecision, value: f64) -> String {
+    match precision {
+        NumericPrecision::F32 => format!(
+            "fn moving_window_fill_value() -> f32 {{ var bits: u32 = 0x{:08x}u; return bitcast<f32>(bits); }}",
+            (value as f32).to_bits()
+        ),
+        NumericPrecision::F64 => {
+            let bits = value.to_bits();
+            format!(
+                "fn moving_window_fill_value() -> f64 {{ var low: u32 = 0x{:08x}u; var high: u32 = 0x{:08x}u; return runmat_f64_from_words(low, high); }}",
+                bits as u32,
+                (bits >> 32) as u32
+            )
+        }
+    }
+}
+
+fn finish_specialized_moving_window_shader(precision: NumericPrecision, source: String) -> String {
+    match precision {
+        NumericPrecision::F64 => crate::backend::wgpu::shaders::ieee_words::inject(&source),
+        NumericPrecision::F32 => source,
     }
 }
 
@@ -72,11 +150,12 @@ fn build_specialized_moving_window_shader(spec: &MovingWindowShaderSpec) -> Stri
         NumericPrecision::F64 => {
             r#"
 fn is_nan(value: f64) -> bool {
-  let bits = bitcast<u64>(value);
-  return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u &&
-    (bits & 0x000fffffffffffffu) != 0u;
+  let high = runmat_f64_high(value);
+  let low = runmat_f64_low(value);
+  return (high & 0x7ff00000u) == 0x7ff00000u &&
+    ((high & 0x000fffffu) != 0u || low != 0u);
 }
-fn nan_value() -> f64 { return bitcast<f64>(0x7ff8000000000000u); }
+fn nan_value() -> f64 { return runmat_f64_from_words(0u, 0x7ff80000u); }
 "#
         }
         NumericPrecision::F32 => {
@@ -85,14 +164,15 @@ fn is_nan(value: f32) -> bool {
   let bits = bitcast<u32>(value);
   return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u;
 }
-fn nan_value() -> f32 { return bitcast<f32>(0x7fc00000u); }
+fn nan_value() -> f32 {
+  let nan_bits: u32 = 0x7fc00000u;
+  return bitcast<f32>(nan_bits);
+}
 "#
         }
     };
-    let fill = match spec.precision {
-        NumericPrecision::F64 => format!("f64({:?})", spec.fill_value),
-        NumericPrecision::F32 => format!("f32({:?})", spec.fill_value as f32),
-    };
+    let fill_helper = specialized_moving_window_fill_helper(spec.precision, spec.fill_value);
+    let fill = "moving_window_fill_value()";
     let endpoint = moving_window_endpoint_code(spec.endpoints).0;
     let omit_nan = matches!(spec.nan_mode, ProviderNanMode::Omit);
     let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
@@ -102,6 +182,7 @@ struct Tensor {{ data: array<{ty}>, }};
 @group(0) @binding(0) var<storage, read> Input: Tensor;
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
 {nan_helpers}
+{fill_helper}
 "#
     );
     let main_prefix = format!(
@@ -185,7 +266,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
             stride_before = spec.stride_before,
             axis_len = spec.axis_len,
         );
-        return common + &main_prefix + &median_body;
+        return finish_specialized_moving_window_shader(
+            spec.precision,
+            common + &main_prefix + &median_body,
+        );
     }
 
     let empty_value = match spec.op {
@@ -267,28 +351,55 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         stride_before = spec.stride_before,
         axis_len = spec.axis_len,
     );
-    common + &main_prefix + &body
+    finish_specialized_moving_window_shader(spec.precision, common + &main_prefix + &body)
 }
 
 impl WgpuProvider {
     pub(crate) async fn uniform_spectral_estimate_exec(
         &self,
         request: &ProviderSpectralRequest<'_>,
-    ) -> Result<ProviderSpectralResult> {
-        ensure!(
-            !request.window.is_empty()
-                && request.nfft > 0
-                && request.frame_count > 0
-                && request.denominator.is_finite()
-                && request.denominator > 0.0,
-            "uniform_spectral_estimate: invalid request"
-        );
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderSpectralResult> {
+        runmat_accelerate_api::validate_uniform_spectral_request(request)?;
+        // Authenticate the original allocation before the first window upload.
+        let input = self.get_entry(request.input)?;
+        let component_count = request
+            .input_len
+            .checked_mul(if request.input_complex { 2 } else { 1 })
+            .ok_or_else(|| anyhow!("uniform_spectral_estimate: input too large"))?;
+        if input.len < component_count {
+            return Err(anyhow!("uniform_spectral_estimate: input length mismatch").into());
+        }
+        if runmat_accelerate_api::handle_is_transposed(request.input) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "uniform_spectral_estimate: linear framing requires contiguous input",
+            )
+            .into());
+        }
 
         let framed_len = request
             .nfft
             .checked_mul(request.frame_count)
             .and_then(|len| len.checked_mul(2))
             .ok_or_else(|| anyhow!("uniform_spectral_estimate: frame too large"))?;
+        let mode_dimensions = match request.frame_mode {
+            ProviderSpectralFrameMode::Sliding { hop } => [hop, 0, 0],
+            ProviderSpectralFrameMode::ColumnSliding {
+                hop,
+                input_rows,
+                frames_per_column,
+            } => [hop, input_rows, frames_per_column],
+            ProviderSpectralFrameMode::FoldedColumns { input_rows } => [input_rows, 0, 0],
+        };
+        if [framed_len, component_count, request.window.len()]
+            .into_iter()
+            .chain(mode_dimensions)
+            .any(|n| n > u32::MAX as usize)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "uniform_spectral_estimate: dimensions exceed GPU kernel limits",
+            )
+            .into());
+        }
 
         let window_shape = [request.window.len(), 1usize];
         let window = self.upload_exec(&HostTensorView {
@@ -316,20 +427,20 @@ impl WgpuProvider {
         ) {
             Ok(framed) => framed,
             Err(err) => {
-                self.free_exec(&window).ok();
-                return Err(err);
+                drop(window);
+                return Err(err.into());
             }
         };
-        self.free_exec(&window).ok();
+        drop(window);
 
         let spectrum = match self.fft_dim_exec(&framed, None, 0).await {
             Ok(spectrum) => spectrum,
             Err(err) => {
-                self.free_exec(&framed).ok();
+                drop(framed);
                 return Err(err);
             }
         };
-        self.free_exec(&framed).ok();
+        drop(framed);
 
         let rows = spectral_selected_frequency_len(request.nfft, request.range);
         let range = spectral_range_shader_mode(request.range);
@@ -339,10 +450,7 @@ impl WgpuProvider {
             let selected_len = rows
                 .checked_mul(request.frame_count)
                 .and_then(|len| len.checked_mul(2))
-                .ok_or_else(|| {
-                    self.free_exec(&spectrum).ok();
-                    anyhow!("uniform_spectral_estimate: output too large")
-                })?;
+                .ok_or_else(|| anyhow!("uniform_spectral_estimate: output too large"))?;
             let shader = spectral_select_shader(request.nfft, rows, range, self.precision);
             let handle = match self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
@@ -353,18 +461,17 @@ impl WgpuProvider {
             ) {
                 Ok(handle) => handle,
                 Err(err) => {
-                    self.free_exec(&spectrum).ok();
-                    return Err(err);
+                    drop(spectrum);
+                    return Err(err.into());
                 }
             };
-            self.free_exec(&spectrum).ok();
+            drop(spectrum);
             handle
         };
 
-        let ps_len = rows.checked_mul(request.frame_count).ok_or_else(|| {
-            self.free_exec(&selected).ok();
-            anyhow!("uniform_spectral_estimate: power output too large")
-        })?;
+        let ps_len = rows
+            .checked_mul(request.frame_count)
+            .ok_or_else(|| anyhow!("uniform_spectral_estimate: power output too large"))?;
         let ps_shader = spectral_power_shader(
             rows,
             range,
@@ -380,8 +487,8 @@ impl WgpuProvider {
         ) {
             Ok(ps) => ps,
             Err(err) => {
-                self.free_exec(&selected).ok();
-                return Err(err);
+                drop(selected);
+                return Err(err.into());
             }
         };
 
@@ -393,10 +500,74 @@ impl WgpuProvider {
         })
     }
 
+    /// Side-effect-free request admission. This does not promise successful
+    /// execution: failures after invocation remain terminal to the caller.
+    pub(crate) fn signal_envelope_supported_exec(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+    ) -> bool {
+        let Ok(entry) = self.get_entry(request.input) else {
+            return false;
+        };
+        self.signal_envelope_supported_entry(request, &entry)
+    }
+
+    fn signal_envelope_supported_entry(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+        entry: &BufferEntry,
+    ) -> bool {
+        let Some(input_len) = request.channel_len.checked_mul(request.channel_count) else {
+            return false;
+        };
+        let Some(output_len) = product_checked(request.output_shape) else {
+            return false;
+        };
+        if request.channel_len == 0
+            || request.channel_count == 0
+            || input_len != output_len
+            || input_len > u32::MAX as usize
+            || entry.len != input_len
+            || entry.precision != self.precision
+            || entry.storage != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_storage(request.input) != GpuTensorStorage::Real
+            || entry.integer_type().is_some()
+            || runmat_accelerate_api::handle_is_logical(request.input)
+            || !envelope_input_shape_matches(
+                &entry.shape,
+                request.channel_len,
+                request.channel_count,
+            )
+            || !envelope_input_shape_matches(
+                request.input.shape(),
+                request.channel_len,
+                request.channel_count,
+            )
+            || !envelope_input_shape_matches(
+                request.output_shape,
+                request.channel_len,
+                request.channel_count,
+            )
+        {
+            return false;
+        }
+        match request.method {
+            ProviderEnvelopeMethod::Analytic => input_len
+                .checked_mul(2)
+                .is_some_and(|n| n <= u32::MAX as usize),
+            ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
+                filter_len > 0 && filter_len <= u32::MAX as usize
+            }
+            ProviderEnvelopeMethod::Rms { window_len } => {
+                window_len > 0 && window_len <= u32::MAX as usize
+            }
+        }
+    }
+
     pub(crate) async fn signal_envelope_exec(
         &self,
         request: &ProviderEnvelopeRequest<'_>,
-    ) -> Result<ProviderEnvelopeResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderEnvelopeResult> {
         let output_len = request
             .output_shape
             .iter()
@@ -406,62 +577,191 @@ impl WgpuProvider {
             .channel_len
             .checked_mul(request.channel_count)
             .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
-        ensure!(
-            request.channel_len > 0 && request.channel_count > 0 && output_len == input_len,
-            "signal_envelope: invalid request"
-        );
-        let entry = self.get_entry(request.input)?;
-        ensure!(
-            entry.precision == self.precision,
-            "signal_envelope: mixed precision tensors are not supported"
-        );
-        ensure!(
-            entry.storage == GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
-            "signal_envelope: complex input tensors are not supported"
-        );
-        ensure!(
-            entry.len == input_len,
-            "signal_envelope: input length mismatch"
-        );
-        ensure!(
-            envelope_input_shape_matches(&entry.shape, request.channel_len, request.channel_count)
-                && envelope_input_shape_matches(
-                    &request.input.shape,
-                    request.channel_len,
-                    request.channel_count
-                ),
-            "signal_envelope: input shape mismatch"
-        );
-
-        match request.method {
-            ProviderEnvelopeMethod::Analytic => self.signal_envelope_analytic_exec(request).await,
-            ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
-                ensure!(filter_len > 0, "signal_envelope: invalid request");
-                self.signal_envelope_analytic_fir_exec(request, filter_len)
-            }
-            ProviderEnvelopeMethod::Rms { window_len } => {
-                ensure!(window_len > 0, "signal_envelope: invalid request");
-                self.signal_envelope_rms_exec(request, window_len)
-            }
+        if !(request.channel_len > 0 && request.channel_count > 0 && output_len == input_len) {
+            return Err(anyhow!("signal_envelope: invalid request").into());
         }
+        let entry = self.get_entry(request.input)?;
+        if !self.signal_envelope_supported_entry(request, &entry) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "signal_envelope: input view or geometry is not supported",
+            )
+            .into());
+        }
+        if entry.precision != self.precision {
+            return Err(
+                anyhow!("signal_envelope: mixed precision tensors are not supported").into(),
+            );
+        }
+        if !(entry.storage == GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real)
+        {
+            return Err(anyhow!("signal_envelope: complex input tensors are not supported").into());
+        }
+        if entry.len != input_len {
+            return Err(anyhow!("signal_envelope: input length mismatch").into());
+        }
+        if !(envelope_input_shape_matches(&entry.shape, request.channel_len, request.channel_count)
+            && envelope_input_shape_matches(
+                request.input.shape(),
+                request.channel_len,
+                request.channel_count,
+            ))
+        {
+            return Err(anyhow!("signal_envelope: input shape mismatch").into());
+        }
+
+        // Invalid controls must not trigger a lazy-view materialization.
+        if matches!(
+            request.method,
+            ProviderEnvelopeMethod::AnalyticFir { filter_len: 0 }
+                | ProviderEnvelopeMethod::Rms { window_len: 0 }
+        ) {
+            return Err(anyhow!("signal_envelope: invalid request").into());
+        }
+        // All envelope kernels directly index logical column-major words,
+        // including analytic centering and the final complex bounds. A lazy
+        // transpose is an addressing view, not a reordered allocation.
+        // Existing reshape materializes transpose through the bit-preserving
+        // permutation owner, without mutating the borrowed source view.
+        let materialized = if runmat_accelerate_api::handle_is_transposed(request.input) {
+            Some(
+                self.reshape_exec(request.input, request.input.shape())
+                    .map_err(|error| {
+                        runmat_accelerate_api::ProviderExecutionError::from(error)
+                            .with_unproven_effects()
+                    })?,
+            )
+        } else {
+            None
+        };
+        let prepared = ProviderEnvelopeRequest {
+            input: materialized.as_ref().unwrap_or(request.input),
+            channel_len: request.channel_len,
+            channel_count: request.channel_count,
+            output_shape: request.output_shape,
+            method: request.method,
+        };
+        let request = &prepared;
+        self.validate_envelope_finite(request.input)
+            .await
+            .map_err(|error| {
+                if materialized.is_some() {
+                    error.after_effect()
+                } else {
+                    error
+                }
+            })?;
+        let result: runmat_accelerate_api::ProviderExecutionResult<ProviderEnvelopeResult> =
+            match request.method {
+                ProviderEnvelopeMethod::Analytic => {
+                    self.signal_envelope_analytic_exec(request).await
+                }
+                ProviderEnvelopeMethod::AnalyticFir { filter_len } => self
+                    .signal_envelope_analytic_fir_exec(request, filter_len)
+                    .map_err(Into::into),
+                ProviderEnvelopeMethod::Rms { window_len } => self
+                    .signal_envelope_rms_exec(request, window_len)
+                    .map_err(Into::into),
+            };
+        result.map_err(runmat_accelerate_api::ProviderExecutionError::after_effect)
+    }
+
+    /// A resident input-domain check shared by every envelope method. The
+    /// classification and reduction operate on the prepared logical view;
+    /// only one scalar is read back. All temporary handles retire on every
+    /// return path, and every rejection after classification is post-effect.
+    async fn validate_envelope_finite(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<()> {
+        let validation = self.prepare_envelope_finite_validation(input)?;
+        let finite = self.download_exec(validation.scalar()).await;
+        validation.complete(finite)
+    }
+
+    fn prepare_envelope_finite_validation(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<EnvelopeFiniteValidation> {
+        use runmat_accelerate_api::ProviderExecutionError;
+
+        let mask = self
+            .logical_isfinite_exec(input)
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        let all = match self.reduce_all_exec(&mask, false) {
+            Ok(all) => all,
+            Err(error) => {
+                drop(mask);
+                return Err(ProviderExecutionError::from(error).after_effect());
+            }
+        };
+        Ok(EnvelopeFiniteValidation { mask, all })
+    }
+
+    /// Side-effect-free admission before FFT staging. A later hook failure is
+    /// terminal even when it reports Unsupported.
+    pub(crate) fn signal_hilbert_supported_exec(
+        &self,
+        request: &ProviderHilbertRequest<'_>,
+    ) -> bool {
+        let Ok(entry) = self.get_entry(request.input) else {
+            return false;
+        };
+        self.signal_hilbert_supported_entry(request, &entry)
+    }
+
+    fn signal_hilbert_supported_entry(
+        &self,
+        request: &ProviderHilbertRequest<'_>,
+        entry: &BufferEntry,
+    ) -> bool {
+        if entry.precision != self.precision
+            || entry.storage != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_storage(request.input) != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_transposed(request.input)
+            || entry.integer_type().is_some()
+            || runmat_accelerate_api::handle_is_logical(request.input)
+            || request.length == Some(0)
+        {
+            return false;
+        }
+        let shape = request.input.shape();
+        let Some(&current_len) = shape.get(request.dim) else {
+            return false;
+        };
+        let target_len = request.length.unwrap_or(current_len);
+        if current_len == 0 || target_len == 0 || target_len > u32::MAX as usize {
+            return false;
+        }
+        let Some(inner_stride) = product_checked(&shape[..request.dim]) else {
+            return false;
+        };
+        let Some(outer_stride) = product_checked(&shape[request.dim + 1..]) else {
+            return false;
+        };
+        inner_stride > 0
+            && inner_stride <= u32::MAX as usize
+            && outer_stride
+                .checked_mul(inner_stride)
+                .and_then(|slices| slices.checked_mul(target_len))
+                .and_then(|values| values.checked_mul(2))
+                .is_some_and(|complex_words| complex_words <= u32::MAX as usize)
     }
 
     pub(crate) async fn signal_hilbert_exec(
         &self,
         request: &ProviderHilbertRequest<'_>,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        // Authenticate the owning allocation first: an expired or foreign
+        // handle keeps its actual owner/lease error instead of being recast
+        // as an optional-hook Unsupported result.
         let entry = self.get_entry(request.input)?;
-        ensure!(
-            entry.precision == self.precision,
-            "signal_hilbert: mixed precision tensors are not supported"
-        );
-        ensure!(
-            entry.storage == GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
-            "signal_hilbert: complex input tensors are not supported"
-        );
-        ensure!(request.length != Some(0), "signal_hilbert: invalid request");
+        if !self.signal_hilbert_supported_entry(request, &entry) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "signal_hilbert: input view or geometry is not supported",
+            )
+            .into());
+        }
 
         let spectrum = self
             .fft_dim_exec(request.input, request.length, request.dim)
@@ -516,27 +816,27 @@ impl WgpuProvider {
         let filtered = match filtered_result {
             Ok(filtered) => filtered,
             Err(err) => {
-                self.free_exec(&spectrum).ok();
-                return Err(err);
+                drop(spectrum);
+                return Err(err.into());
             }
         };
-        self.free_exec(&spectrum).ok();
+        drop(spectrum);
 
         let analytic = match self.ifft_dim_exec(&filtered, None, request.dim).await {
             Ok(analytic) => analytic,
             Err(err) => {
-                self.free_exec(&filtered).ok();
+                drop(filtered);
                 return Err(err);
             }
         };
-        self.free_exec(&filtered).ok();
+        drop(filtered);
         Ok(analytic)
     }
 
     async fn signal_envelope_analytic_exec(
         &self,
         request: &ProviderEnvelopeRequest<'_>,
-    ) -> Result<ProviderEnvelopeResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderEnvelopeResult> {
         let complex_len = request
             .channel_len
             .checked_mul(request.channel_count)
@@ -559,11 +859,11 @@ impl WgpuProvider {
         let spectrum = match self.fft_dim_exec(&centered, None, 0).await {
             Ok(spectrum) => spectrum,
             Err(err) => {
-                self.free_exec(&centered).ok();
+                drop(centered);
                 return Err(err);
             }
         };
-        self.free_exec(&centered).ok();
+        drop(centered);
 
         let mask_shader = envelope_analytic_mask_shader(
             request.channel_len,
@@ -579,20 +879,20 @@ impl WgpuProvider {
         ) {
             Ok(filtered) => filtered,
             Err(err) => {
-                self.free_exec(&spectrum).ok();
-                return Err(err);
+                drop(spectrum);
+                return Err(err.into());
             }
         };
-        self.free_exec(&spectrum).ok();
+        drop(spectrum);
 
         let analytic = match self.ifft_dim_exec(&filtered, None, 0).await {
             Ok(analytic) => analytic,
             Err(err) => {
-                self.free_exec(&filtered).ok();
+                drop(filtered);
                 return Err(err);
             }
         };
-        self.free_exec(&filtered).ok();
+        drop(filtered);
 
         let real_len = request
             .channel_len
@@ -604,21 +904,37 @@ impl WgpuProvider {
             self.precision,
         );
         let inputs = [request.input.clone(), analytic.clone()];
-        let mut outputs = match self.fused_elementwise_multi_with_telemetry_exec(
-            &bounds_shader,
-            &inputs,
-            request.output_shape,
-            real_len,
-            2,
-        ) {
-            Ok(outputs) => outputs,
-            Err(err) => {
-                self.free_exec(&analytic).ok();
-                return Err(err);
-            }
-        };
-        self.free_exec(&analytic).ok();
-        ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
+        let operands = [
+            IndexedFusionOperand {
+                shape: request.input.shape(),
+                lanes: real_len,
+                storage: GpuTensorStorage::Real,
+            },
+            IndexedFusionOperand {
+                shape: &channel_shape,
+                lanes: complex_len,
+                storage: GpuTensorStorage::ComplexInterleaved,
+            },
+        ];
+        let mut outputs =
+            match self.fused_indexed_multi_with_telemetry_exec(IndexedFusionMultiRequest {
+                shader: &bounds_shader,
+                inputs: &inputs,
+                output_shape: request.output_shape,
+                len: real_len,
+                output_classes: &[self.provider_precision_exec().into(); 2],
+                operands: &operands,
+            }) {
+                Ok(outputs) => outputs,
+                Err(err) => {
+                    drop(analytic);
+                    return Err(err.into());
+                }
+            };
+        drop(analytic);
+        if outputs.len() != 2 {
+            return Err(anyhow!("signal_envelope: missing outputs").into());
+        }
         let lower = outputs.pop().expect("lower output");
         let upper = outputs.pop().expect("upper output");
         Ok(ProviderEnvelopeResult { upper, lower })
@@ -647,20 +963,34 @@ impl WgpuProvider {
             self.precision,
         );
         let inputs = [request.input.clone(), kernel.clone()];
-        let mut outputs = match self.fused_elementwise_multi_with_telemetry_exec(
-            &shader,
-            &inputs,
-            request.output_shape,
-            real_len,
-            2,
-        ) {
-            Ok(outputs) => outputs,
-            Err(err) => {
-                self.free_exec(&kernel).ok();
-                return Err(err);
-            }
-        };
-        self.free_exec(&kernel).ok();
+        let operands = [
+            IndexedFusionOperand {
+                shape: request.input.shape(),
+                lanes: real_len,
+                storage: GpuTensorStorage::Real,
+            },
+            IndexedFusionOperand {
+                shape: &kernel_shape,
+                lanes: filter_len,
+                storage: GpuTensorStorage::Real,
+            },
+        ];
+        let mut outputs =
+            match self.fused_indexed_multi_with_telemetry_exec(IndexedFusionMultiRequest {
+                shader: &shader,
+                inputs: &inputs,
+                output_shape: request.output_shape,
+                len: real_len,
+                output_classes: &[self.provider_precision_exec().into(); 2],
+                operands: &operands,
+            }) {
+                Ok(outputs) => outputs,
+                Err(err) => {
+                    drop(kernel);
+                    return Err(err);
+                }
+            };
+        drop(kernel);
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");
         let upper = outputs.pop().expect("upper output");
@@ -683,13 +1013,20 @@ impl WgpuProvider {
             window_len,
             self.precision,
         );
-        let mut outputs = self.fused_elementwise_multi_with_telemetry_exec(
-            &shader,
-            std::slice::from_ref(request.input),
-            request.output_shape,
-            real_len,
-            2,
-        )?;
+        let operands = [IndexedFusionOperand {
+            shape: request.input.shape(),
+            lanes: real_len,
+            storage: GpuTensorStorage::Real,
+        }];
+        let mut outputs =
+            self.fused_indexed_multi_with_telemetry_exec(IndexedFusionMultiRequest {
+                shader: &shader,
+                inputs: std::slice::from_ref(request.input),
+                output_shape: request.output_shape,
+                len: real_len,
+                output_classes: &[self.provider_precision_exec().into(); 2],
+                operands: &operands,
+            })?;
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");
         let upper = outputs.pop().expect("upper output");
@@ -702,7 +1039,13 @@ impl WgpuProvider {
         _kernel: &GpuTensorHandle,
         _mode: ProviderConvMode,
     ) -> Result<GpuTensorHandle> {
-        Err(anyhow!("conv2d not implemented for the WGPU provider yet"))
+        // The capability snapshot and feasibility query both reject this
+        // absent hook before any device work. Preserve the same typed
+        // Unsupported result for direct legacy invocations so an unselected
+        // runtime call may gather and use its existing host implementation.
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "conv2d not implemented for the WGPU provider yet",
+        ))
     }
 
     pub(crate) fn conv1d_exec(
@@ -711,6 +1054,12 @@ impl WgpuProvider {
         kernel: &GpuTensorHandle,
         options: ProviderConv1dOptions,
     ) -> Result<GpuTensorHandle> {
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("conv");
+        let observed = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation));
+        let checkpoint = observed.as_ref().map(
+            runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
+        );
         let entry_signal = self.get_entry(signal)?;
         let entry_kernel = self.get_entry(kernel)?;
 
@@ -726,8 +1075,10 @@ impl WgpuProvider {
 
         if output_len == 0 {
             let out_shape = conv1d_output_shape(0, options.orientation);
-            let out_buffer = self.create_storage_buffer(0, "runmat-conv1d-empty");
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-conv1d-empty")
+            })??;
+            return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
 
         ensure!(
@@ -739,7 +1090,9 @@ impl WgpuProvider {
         );
 
         let out_shape = conv1d_output_shape(output_len, options.orientation);
-        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-conv1d-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, output_len, "runmat-conv1d-out")
+        })??;
 
         let params = Conv1dParams {
             signal_len: signal_len as u32,
@@ -747,75 +1100,73 @@ impl WgpuProvider {
             output_len: output_len as u32,
             start_offset: start_offset as u32,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-conv1d-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-conv1d-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-conv1d-bind"),
-                layout: &self.pipelines.conv1d.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_signal.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_kernel.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-conv1d-bind"),
+                    layout: &self.pipelines.conv1d.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_signal.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_kernel.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            output_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::conv::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.conv1d.pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                output_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::conv::run(
+                emission,
+                pending,
+                &self.pipelines.conv1d.get(emission)?.pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
-        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len);
-
+        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len)?;
+        if let (Some(recorder), Some(checkpoint)) = (observed, checkpoint) {
+            recorder.confirm_submitted_provider_execution_after(
+                self.device_id(),
+                &operation,
+                checkpoint,
+            );
+        }
         Ok(handle)
     }
-    pub(crate) async fn iir_filter_exec(
+    pub(crate) async fn iir_filter_exec<'a>(
         &self,
-        b: &GpuTensorHandle,
-        a: &GpuTensorHandle,
+        coefficients: runmat_accelerate_api::ProviderIirCoefficientSource<'a>,
         x: &GpuTensorHandle,
         options: ProviderIirFilterOptions,
     ) -> Result<ProviderIirFilterResult> {
-        let ProviderIirFilterOptions {
-            dim,
-            zi,
-            unit_denominator,
-        } = options;
+        let ProviderIirFilterOptions { dim, zi } = options;
 
-        let entry_b = self.get_entry(b)?;
-        let entry_a = self.get_entry(a)?;
         let entry_x = self.get_entry(x)?;
         ensure!(
-            runmat_accelerate_api::handle_integer_type(b).is_none()
-                && runmat_accelerate_api::handle_integer_type(a).is_none()
-                && runmat_accelerate_api::handle_integer_type(x).is_none(),
+            runmat_accelerate_api::handle_integer_type(x).is_none(),
             "iir_filter: integer buffers must be converted before floating provider dispatch"
         );
         ensure!(
-            !runmat_accelerate_api::handle_is_logical(b)
-                && !runmat_accelerate_api::handle_is_logical(a)
-                && !runmat_accelerate_api::handle_is_logical(x),
+            !runmat_accelerate_api::handle_is_logical(x),
             "iir_filter: logical buffers must be converted before floating provider dispatch"
         );
         let effective_storage = |handle: &GpuTensorHandle, entry_storage: GpuTensorStorage| match (
@@ -826,73 +1177,120 @@ impl WgpuProvider {
             | (_, GpuTensorStorage::ComplexInterleaved) => GpuTensorStorage::ComplexInterleaved,
             _ => GpuTensorStorage::Real,
         };
-        let b_storage = effective_storage(b, entry_b.storage);
-        let a_storage = effective_storage(a, entry_a.storage);
         let x_storage = effective_storage(x, entry_x.storage);
-
         ensure!(
-            b_storage == GpuTensorStorage::Real && a_storage == GpuTensorStorage::Real,
-            "iir_filter: complex filter coefficients are not supported"
-        );
-        ensure!(
-            entry_b.precision == self.precision
-                && entry_a.precision == self.precision
-                && entry_x.precision == self.precision,
+            entry_x.precision == self.precision,
             "iir_filter: mixed precision tensors are not supported"
         );
 
-        let nb = entry_b.len;
-        let na = entry_a.len;
-        ensure!(
-            nb > 0,
-            "iir_filter: numerator coefficients must not be empty"
-        );
-        ensure!(
-            na > 0,
-            "iir_filter: denominator coefficients must not be empty"
-        );
+        let (order, coefficient_plan) = match coefficients {
+            runmat_accelerate_api::ProviderIirCoefficientSource::UnitDenominatorFir {
+                numerator,
+            } => {
+                let entry_b = self.get_entry(numerator)?;
+                ensure!(
+                    entry_b.len > 0
+                        && entry_b.precision == self.precision
+                        && effective_storage(numerator, entry_b.storage) == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_integer_type(numerator).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(numerator),
+                    "iir_filter: invalid resident FIR numerator"
+                );
+                (
+                    entry_b.len,
+                    IirCoefficientPlan::UnitDenominatorFir { numerator },
+                )
+            }
+            runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(prepared) => {
+                let numerator = prepared.numerator();
+                let denominator = prepared.denominator();
+                let entry_b = self.get_entry(numerator)?;
+                let entry_a = self.get_entry(denominator)?;
+                let order = entry_b.len;
+                ensure!(
+                    order > 0
+                        && entry_a.len == order
+                        && entry_b.precision == self.precision
+                        && entry_a.precision == self.precision
+                        && effective_storage(numerator, entry_b.storage) == GpuTensorStorage::Real
+                        && effective_storage(denominator, entry_a.storage)
+                            == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_integer_type(numerator).is_none()
+                        && runmat_accelerate_api::handle_integer_type(denominator).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(numerator)
+                        && !runmat_accelerate_api::handle_is_logical(denominator),
+                    "iir_filter: invalid prepared resident coefficients"
+                );
+                ensure!(
+                    !numerator.shares_allocation_with(x) && !denominator.shares_allocation_with(x),
+                    "iir_filter: prepared coefficients alias the signal"
+                );
+                (
+                    order,
+                    IirCoefficientPlan::PreparedResident {
+                        numerator,
+                        denominator,
+                    },
+                )
+            }
+            runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                numerator,
+                denominator,
+            } => {
+                let entry_b = self.get_entry(numerator)?;
+                let entry_a = self.get_entry(denominator)?;
+                ensure!(
+                    entry_b.len > 0
+                        && entry_a.len > 0
+                        && entry_b.precision == self.precision
+                        && entry_a.precision == self.precision
+                        && effective_storage(numerator, entry_b.storage) == GpuTensorStorage::Real
+                        && effective_storage(denominator, entry_a.storage)
+                            == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_integer_type(numerator).is_none()
+                        && runmat_accelerate_api::handle_integer_type(denominator).is_none()
+                        && !runmat_accelerate_api::handle_is_logical(numerator)
+                        && !runmat_accelerate_api::handle_is_logical(denominator),
+                    "iir_filter: invalid resident coefficients"
+                );
+                let nb = entry_b.len;
+                let na = entry_a.len;
+                let order = nb.max(na);
+                let b_host = self.download_exec(numerator).await?;
+                let a_host = self.download_exec(denominator).await?;
+                let a0 = *a_host.data.first().ok_or_else(|| {
+                    anyhow!("iir_filter: denominator coefficients cannot be empty")
+                })?;
+                ensure!(
+                    a0 != 0.0,
+                    "iir_filter: denominator coefficient a(1) must be non-zero"
+                );
 
-        let order = nb.max(na);
+                let mut b_norm = vec![0.0f64; order];
+                let mut a_norm = vec![0.0f64; order];
+                for i in 0..order {
+                    let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
+                    b_norm[i] = b_coeff / a0;
+                    if i == 0 {
+                        a_norm[0] = 1.0;
+                    } else {
+                        let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
+                        a_norm[i] = a_coeff / a0;
+                    }
+                }
+                (
+                    order,
+                    IirCoefficientPlan::Normalized {
+                        b: b_norm.into(),
+                        a: a_norm.into(),
+                    },
+                )
+            }
+        };
         ensure!(
             order <= u32::MAX as usize,
             "iir_filter: filter order exceeds GPU limits"
         );
-
-        let coefficient_plan = if unit_denominator {
-            ensure!(
-                na == 1,
-                "iir_filter: unit-denominator FIR path requires scalar denominator"
-            );
-            IirCoefficientPlan::UnitDenominatorFir
-        } else {
-            let b_host = self.download_exec(b).await?;
-            let a_host = self.download_exec(a).await?;
-            let a0 = *a_host
-                .data
-                .first()
-                .ok_or_else(|| anyhow!("iir_filter: denominator coefficients cannot be empty"))?;
-            ensure!(
-                a0 != 0.0,
-                "iir_filter: denominator coefficient a(1) must be non-zero"
-            );
-
-            let mut b_norm = vec![0.0f64; order];
-            let mut a_norm = vec![0.0f64; order];
-            for i in 0..order {
-                let b_coeff = if i < nb { b_host.data[i] } else { 0.0 };
-                b_norm[i] = b_coeff / a0;
-                if i == 0 {
-                    a_norm[0] = 1.0;
-                } else {
-                    let a_coeff = if i < na { a_host.data[i] } else { 0.0 };
-                    a_norm[i] = a_coeff / a0;
-                }
-            }
-            IirCoefficientPlan::Normalized {
-                b: b_norm,
-                a: a_norm,
-            }
-        };
 
         let state_len = order.saturating_sub(1);
 
@@ -944,7 +1342,8 @@ impl WgpuProvider {
             "iir_filter: tensors exceed supported rank for GPU kernel"
         );
 
-        let state_shape = filter_state_shape(shape_ext.clone(), dim_idx, state_len);
+        let state_shape =
+            runmat_accelerate_api::provider_iir_state_shape(&shape_ext, dim_idx, state_len)?;
         ensure!(
             state_shape.len() <= crate::backend::wgpu::params::FILTER_MAX_RANK,
             "iir_filter: filter state rank exceeds GPU limits"
@@ -977,16 +1376,11 @@ impl WgpuProvider {
                 shapes_compatible(&state_shape, &zi_entry.shape),
                 "iir_filter: initial conditions are not compatible with the requested dimension"
             );
-            let zi_dim = if dim_idx < zi_entry.shape.len() {
-                zi_entry.shape[dim_idx]
-            } else {
-                1
-            };
+            let zi_dim = zi_entry.shape.first().copied().unwrap_or(1);
             ensure!(
                 zi_dim == state_len,
-                "iir_filter: initial conditions must have {} states along dimension {}",
-                state_len,
-                dim + 1
+                "iir_filter: initial conditions must have {} states along the leading state dimension",
+                state_len
             );
             if state_total == 0 {
                 ensure!(
@@ -1054,14 +1448,16 @@ impl WgpuProvider {
             "iir_filter: filter state size exceeds GPU limits"
         );
 
-        let mut cleanup_handles: Vec<GpuTensorHandle> = Vec::new();
         let result = (|| -> Result<ProviderIirFilterResult> {
             let (b_norm_handle, a_norm_handle) = match &coefficient_plan {
-                IirCoefficientPlan::UnitDenominatorFir => {
+                IirCoefficientPlan::UnitDenominatorFir { numerator } => {
                     let a_norm_handle = self.zeros_exec(&[order, 1usize])?;
-                    cleanup_handles.push(a_norm_handle.clone());
-                    (b.clone(), a_norm_handle)
+                    ((*numerator).clone(), a_norm_handle)
                 }
+                IirCoefficientPlan::PreparedResident {
+                    numerator,
+                    denominator,
+                } => ((*numerator).clone(), (*denominator).clone()),
                 IirCoefficientPlan::Normalized { b, a } => {
                     let b_shape = [order, 1usize];
                     let b_view = HostTensorView {
@@ -1069,7 +1465,6 @@ impl WgpuProvider {
                         shape: &b_shape,
                     };
                     let b_norm_handle = self.upload_exec(&b_view)?;
-                    cleanup_handles.push(b_norm_handle.clone());
 
                     let a_shape = [order, 1usize];
                     let a_view = HostTensorView {
@@ -1077,7 +1472,6 @@ impl WgpuProvider {
                         shape: &a_shape,
                     };
                     let a_norm_handle = self.upload_exec(&a_view)?;
-                    cleanup_handles.push(a_norm_handle.clone());
                     (b_norm_handle, a_norm_handle)
                 }
             };
@@ -1085,18 +1479,35 @@ impl WgpuProvider {
             let b_norm_entry = self.get_entry(&b_norm_handle)?;
             let a_norm_entry = self.get_entry(&a_norm_handle)?;
 
-            let out_buffer = self.create_storage_buffer(entry_x.len, "runmat-iir-filter-out");
-            let states_buffer =
-                self.create_storage_buffer(state_buffer_len, "runmat-iir-filter-state");
-            let final_state_buffer =
-                self.create_storage_buffer(state_total_raw, "runmat-iir-filter-final");
+            let (out_buffer, states_buffer, final_state_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, entry_x.len, "runmat-iir-filter-out")?,
+                        self.create_storage_buffer(
+                            emission,
+                            state_buffer_len,
+                            "runmat-iir-filter-state",
+                        )?,
+                        self.create_storage_buffer(
+                            emission,
+                            state_total_raw,
+                            "runmat-iir-filter-final",
+                        )?,
+                    ))
+                })??;
 
             let (zi_buffer, zi_present_flag) = if let Some(ref zi_handle) = zi {
                 let zi_entry = self.get_entry(zi_handle)?;
                 (zi_entry.buffer, 1u32)
             } else {
                 (
-                    self.create_storage_buffer(state_total_raw, "runmat-iir-filter-zi"),
+                    self.with_emission(|emission, _| {
+                        self.create_storage_buffer(
+                            emission,
+                            state_total_raw,
+                            "runmat-iir-filter-zi",
+                        )
+                    })??,
                     0u32,
                 )
             };
@@ -1131,83 +1542,83 @@ impl WgpuProvider {
                 state_shape: state_shape_arr,
             };
 
-            let params_buffer = self.uniform_buffer(&params, "runmat-iir-filter-params");
+            self.with_emission(|emission, pending| -> Result<()> {
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-iir-filter-params")?;
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-iir-filter-bind"),
-                    layout: &self.pipelines.filter.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_x.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: b_norm_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: a_norm_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: zi_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: states_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: final_state_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 7,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-iir-filter-bind"),
+                        layout: &self.pipelines.filter.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_x.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: b_norm_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: a_norm_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: zi_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: states_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: final_state_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                channel_count as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::filter::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.filter.pipeline,
-                &bind_group,
-                workgroups,
-            );
+                let workgroups = self
+                    .pipelines
+                    .filter
+                    .linear_dispatch_groups(channel_count)?;
+                crate::backend::wgpu::dispatch::filter::run(
+                    emission,
+                    pending,
+                    &self.pipelines.filter.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                )?;
+                Ok(())
+            })??;
 
             let output_handle = self.register_existing_buffer_with_storage(
                 out_buffer,
                 entry_x.shape.clone(),
                 entry_x.len,
                 x_storage,
-            );
+            )?;
             let final_state_handle = self.register_existing_buffer_with_storage(
                 final_state_buffer,
                 state_shape.clone(),
                 state_total_raw,
                 x_storage,
-            );
+            )?;
 
             Ok(ProviderIirFilterResult {
                 output: output_handle,
                 final_state: Some(final_state_handle),
             })
         })();
-
-        for handle in cleanup_handles {
-            let _ = self.free_exec(&handle);
-        }
 
         result
     }
@@ -1233,7 +1644,6 @@ impl WgpuProvider {
             entry.precision == self.precision,
             "moving_window: mixed precision tensors are not supported"
         );
-
         let mut input_shape = entry.shape.clone();
         if request.dim >= input_shape.len() {
             input_shape.extend(std::iter::repeat_n(1, request.dim + 1 - input_shape.len()));
@@ -1310,11 +1720,15 @@ impl WgpuProvider {
             );
         }
 
+        if output_len != 0 {
+            self.require_ieee_words(entry.precision)?;
+        }
         let out_shape = request.output_shape.to_vec();
-        let out_buffer =
-            self.create_storage_buffer_checked(output_len, "runmat-moving-window-out")?;
         if output_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")
+            })??;
+            return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
 
         let op = moving_window_op_code(request.op);
@@ -1341,121 +1755,136 @@ impl WgpuProvider {
             normalization: request.normalization,
             fill_value,
         });
-        let shader_module = self
-            .device_ref()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-moving-window-specialized-shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-            });
-        let pipeline_layout =
-            self.device_ref()
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("runmat-moving-window-specialized-layout"),
-                    bind_group_layouts: &[&self.pipelines.moving_window.layout],
-                    push_constant_ranges: &[],
-                });
-        let pipeline = self.device_ref().create_compute_pipeline(
-            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                label: Some("runmat-moving-window-specialized-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &shader_module,
-                entry_point: "main",
-            },
-        );
+        let prepared_shader = crate::backend::wgpu::shader_compilation::prepare(
+            &shader,
+            self.access.enabled_features(),
+            None,
+        )?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")
+        })??;
+        self.with_emission(|emission, pending| -> Result<()> {
+            let shader_module = crate::backend::wgpu::shader_compilation::create_prepared(
+                emission,
+                "runmat-moving-window-specialized-shader",
+                &prepared_shader,
+            )?;
+            let pipeline_layout =
+                emission
+                    .device()
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("runmat-moving-window-specialized-layout"),
+                        bind_group_layouts: &[&self.pipelines.moving_window.get(emission)?.layout],
+                        push_constant_ranges: &[],
+                    });
+            let pipeline = emission.device().create_compute_pipeline(
+                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                    label: Some("runmat-moving-window-specialized-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader_module,
+                    entry_point: "main",
+                },
+            );
 
-        let bind_group = match self.precision {
-            NumericPrecision::F64 => {
-                let params = MovingWindowParamsF64 {
-                    meta0: PackedU32([
-                        output_len as u32,
-                        axis_len as u32,
-                        out_axis_len as u32,
-                        stride_before as u32,
-                    ]),
-                    meta1: PackedU32([
-                        endpoint,
-                        nan_mode,
-                        request.before as u32,
-                        request.after as u32,
-                    ]),
-                    meta2: PackedU32([op, normalization, stride_after as u32, 0]),
-                    fill_value,
-                    _pad1: 0.0,
-                };
-                let params_buffer = self.uniform_buffer(&params, "runmat-moving-window-params");
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-moving-window-bind"),
-                        layout: &self.pipelines.moving_window.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
-            }
-            NumericPrecision::F32 => {
-                let params = MovingWindowParamsF32 {
-                    meta0: PackedU32([
-                        output_len as u32,
-                        axis_len as u32,
-                        out_axis_len as u32,
-                        stride_before as u32,
-                    ]),
-                    meta1: PackedU32([
-                        endpoint,
-                        nan_mode,
-                        request.before as u32,
-                        request.after as u32,
-                    ]),
-                    meta2: PackedU32([op, normalization, stride_after as u32, 0]),
-                    meta3: PackedF32([fill_value as f32, 0.0, 0.0, 0.0]),
-                };
-                let params_buffer = self.uniform_buffer(&params, "runmat-moving-window-params");
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-moving-window-bind"),
-                        layout: &self.pipelines.moving_window.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
-            }
-        };
+            let bind_group = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = MovingWindowParamsF64 {
+                        meta0: PackedU32([
+                            output_len as u32,
+                            axis_len as u32,
+                            out_axis_len as u32,
+                            stride_before as u32,
+                        ]),
+                        meta1: PackedU32([
+                            endpoint,
+                            nan_mode,
+                            request.before as u32,
+                            request.after as u32,
+                        ]),
+                        meta2: PackedU32([op, normalization, stride_after as u32, 0]),
+                        fill_value,
+                        _pad1: 0.0,
+                    };
+                    let params_buffer =
+                        self.uniform_buffer(emission, &params, "runmat-moving-window-params")?;
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-moving-window-bind"),
+                            layout: &self.pipelines.moving_window.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
+                }
+                NumericPrecision::F32 => {
+                    let params = MovingWindowParamsF32 {
+                        meta0: PackedU32([
+                            output_len as u32,
+                            axis_len as u32,
+                            out_axis_len as u32,
+                            stride_before as u32,
+                        ]),
+                        meta1: PackedU32([
+                            endpoint,
+                            nan_mode,
+                            request.before as u32,
+                            request.after as u32,
+                        ]),
+                        meta2: PackedU32([op, normalization, stride_after as u32, 0]),
+                        meta3: PackedF32([fill_value as f32, 0.0, 0.0, 0.0]),
+                    };
+                    let params_buffer =
+                        self.uniform_buffer(emission, &params, "runmat-moving-window-params")?;
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-moving-window-bind"),
+                            layout: &self.pipelines.moving_window.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
+                }
+            };
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            output_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::diff::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                output_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::diff::run(
+                emission,
+                pending,
+                &pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
+        self.register_existing_buffer(out_buffer, out_shape, output_len)
     }
 
     pub(crate) fn diff_once_exec(
@@ -1488,8 +1917,10 @@ impl WgpuProvider {
         if len_dim <= 1 || entry.len == 0 {
             out_shape[dim] = out_shape[dim].saturating_sub(1);
             let out_len = product_checked(&out_shape).unwrap_or(0);
-            let out_buffer = self.create_storage_buffer(out_len, "runmat-diff-empty");
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, out_len));
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, out_len, "runmat-diff-empty")
+            })??;
+            return self.register_existing_buffer(out_buffer, out_shape, out_len);
         }
 
         let stride_before = if dim == 0 {
@@ -1540,7 +1971,9 @@ impl WgpuProvider {
             "diff: tensor exceeds GPU kernel limits"
         );
 
-        let out_buffer = self.create_storage_buffer(out_len, "runmat-diff-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, out_len, "runmat-diff-out")
+        })??;
         out_shape[dim] = len_dim - 1;
 
         let params = DiffParams {
@@ -1553,42 +1986,42 @@ impl WgpuProvider {
             total_in: entry.len as u32,
             _pad: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-diff-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-diff-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-diff-bind"),
-                layout: &self.pipelines.diff.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-diff-bind"),
+                    layout: &self.pipelines.diff.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            out_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::diff::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.diff.pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = self.pipelines.diff.linear_dispatch_groups(out_len)?;
+            crate::backend::wgpu::dispatch::diff::run(
+                emission,
+                pending,
+                &self.pipelines.diff.get(emission)?.pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, out_len))
+        self.register_existing_buffer(out_buffer, out_shape, out_len)
     }
 
     pub(crate) fn diff_exec(
@@ -1603,17 +2036,22 @@ impl WgpuProvider {
 
         let mut current = handle.clone();
         let mut owns_current = false;
-        for _ in 0..order {
+        for step in 0..order {
             let next = self.diff_once_exec(&current, dim)?;
             if owns_current {
-                let _ = self.free_exec(&current);
+                drop(current);
             }
             current = next;
             owns_current = true;
 
             let entry = self.get_entry(&current)?;
             if entry.len == 0 {
-                break;
+                // Other empty axes can exhaust storage before this axis has
+                // exhausted its geometry. Finish the remaining orders with
+                // the canonical zero-copy view owner, not more dispatches.
+                let mut shape = current.shape().to_vec();
+                shape[dim] = shape[dim].saturating_sub(order - step - 1);
+                return self.reshape_exec(&current, &shape);
             }
         }
         Ok(current)
@@ -1693,9 +2131,11 @@ impl WgpuProvider {
             out_shape.push(1);
         }
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-gradient-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-gradient-out")
+        })??;
         if entry.len == 0 {
-            return Ok(self.register_existing_buffer_with_storage(
+            return self.register_existing_buffer_with_storage(
                 out_buffer,
                 out_shape,
                 0,
@@ -1704,7 +2144,7 @@ impl WgpuProvider {
                 } else {
                     GpuTensorStorage::Real
                 },
-            ));
+            );
         }
 
         let stride_before = if dim == 0 {
@@ -1751,110 +2191,120 @@ impl WgpuProvider {
             "gradient: tensor exceeds GPU kernel limits"
         );
 
-        let params_buffer = match self.precision {
-            NumericPrecision::F64 => self.uniform_buffer(
-                &GradientParamsF64 {
-                    stride_before: kernel_stride_before as u32,
-                    segment_len: len_dim as u32,
-                    block: kernel_block as u32,
-                    total: entry.len as u32,
-                    spacing: match spacing {
-                        GradientSpacingInput::Scalar(spacing) => spacing,
-                        GradientSpacingInput::Coordinates(_) => 0.0,
-                    },
-                    _pad0: 0.0,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                },
-                "runmat-gradient-params",
-            ),
-            NumericPrecision::F32 => self.uniform_buffer(
-                &GradientParamsF32 {
-                    meta0: crate::backend::wgpu::params::PackedU32([
-                        kernel_stride_before as u32,
-                        len_dim as u32,
-                        kernel_block as u32,
-                        entry.len as u32,
-                    ]),
-                    meta1: crate::backend::wgpu::params::PackedF32([
-                        match spacing {
-                            GradientSpacingInput::Scalar(spacing) => spacing as f32,
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => self.uniform_buffer(
+                    emission,
+                    &GradientParamsF64 {
+                        stride_before: kernel_stride_before as u32,
+                        segment_len: len_dim as u32,
+                        block: kernel_block as u32,
+                        total: entry.len as u32,
+                        spacing: match spacing {
+                            GradientSpacingInput::Scalar(spacing) => spacing,
                             GradientSpacingInput::Coordinates(_) => 0.0,
                         },
-                        0.0,
-                        0.0,
-                        0.0,
-                    ]),
-                },
-                "runmat-gradient-params",
-            ),
-        };
+                        _pad0: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                    },
+                    "runmat-gradient-params",
+                )?,
+                NumericPrecision::F32 => self.uniform_buffer(
+                    emission,
+                    &GradientParamsF32 {
+                        meta0: crate::backend::wgpu::params::PackedU32([
+                            kernel_stride_before as u32,
+                            len_dim as u32,
+                            kernel_block as u32,
+                            entry.len as u32,
+                        ]),
+                        meta1: crate::backend::wgpu::params::PackedF32([
+                            match spacing {
+                                GradientSpacingInput::Scalar(spacing) => spacing as f32,
+                                GradientSpacingInput::Coordinates(_) => 0.0,
+                            },
+                            0.0,
+                            0.0,
+                            0.0,
+                        ]),
+                    },
+                    "runmat-gradient-params",
+                )?,
+            };
 
-        let (bind_group, pipeline) = if let Some(coordinate_entry) = coordinate_entry.as_ref() {
-            (
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-gradient-coordinates-bind"),
-                        layout: &self.pipelines.gradient_coordinates.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: coordinate_entry.buffer.as_ref().as_entire_binding(),
-                            },
-                        ],
-                    }),
-                &self.pipelines.gradient_coordinates.pipeline,
-            )
-        } else {
-            (
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-gradient-bind"),
-                        layout: &self.pipelines.gradient.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    }),
-                &self.pipelines.gradient.pipeline,
-            )
-        };
+            let (bind_group, pipeline) = if let Some(coordinate_entry) = coordinate_entry.as_ref() {
+                (
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-gradient-coordinates-bind"),
+                            layout: &self.pipelines.gradient_coordinates.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: coordinate_entry.buffer.as_ref().as_entire_binding(),
+                                },
+                            ],
+                        }),
+                    &self.pipelines.gradient_coordinates.get(emission)?.pipeline,
+                )
+            } else {
+                (
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-gradient-bind"),
+                            layout: &self.pipelines.gradient.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                            ],
+                        }),
+                    &self.pipelines.gradient.get(emission)?.pipeline,
+                )
+            };
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            entry.len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::gradient::run(
-            self.device_ref(),
-            self.queue_ref(),
-            pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = if coordinate_entry.is_some() {
+                self.pipelines
+                    .gradient_coordinates
+                    .linear_dispatch_groups(entry.len)?
+            } else {
+                self.pipelines.gradient.linear_dispatch_groups(entry.len)?
+            };
+            crate::backend::wgpu::dispatch::gradient::run(
+                emission,
+                pending,
+                pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
-        Ok(self.register_existing_buffer_with_storage(
+        self.register_existing_buffer_with_storage(
             out_buffer,
             out_shape,
             entry.len,
@@ -1863,7 +2313,7 @@ impl WgpuProvider {
             } else {
                 GpuTensorStorage::Real
             },
-        ))
+        )
     }
 
     pub(crate) fn cumsum_exec(
@@ -1873,14 +2323,18 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        let selected = self.get_entry(handle)?;
+        if selected.len != 0 {
+            self.require_ieee_words(selected.precision)?;
+        }
         // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
         if matches!(direction, ProviderScanDirection::Reverse) {
             let flipped_in = self.flip_exec(handle, &[dim])?;
             let forward =
                 self.cumsum_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
-            let _ = self.free_exec(&flipped_in);
+            drop(flipped_in);
             let flipped_out = self.flip_exec(&forward, &[dim])?;
-            let _ = self.free_exec(&forward);
+            drop(forward);
             return Ok(flipped_out);
         }
         let entry = self.get_entry(handle)?;
@@ -1904,8 +2358,10 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-cumsum-empty");
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-cumsum-empty")
+            })??;
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let stride_before = if dim == 0 {
@@ -1951,9 +2407,11 @@ impl WgpuProvider {
             "cumsum: tensor too large for GPU kernel"
         );
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-cumsum-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-cumsum-out")
+        })??;
         if entry.len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let mut flags = 0u32;
@@ -1971,41 +2429,41 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cumsum-params");
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cumsum-bind"),
-                layout: &self.pipelines.cumsum.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cumsum.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cumsum-encoder",
-            "runmat-cumsum-pass",
-        );
-        Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cumsum-params")?;
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cumsum-bind"),
+                    layout: &self.pipelines.cumsum.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = self.pipelines.cumsum.linear_dispatch_groups(segments)?;
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cumsum.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cumsum-encoder",
+                "runmat-cumsum-pass",
+            )?;
+            Ok(())
+        })??;
+        self.register_existing_buffer(out_buffer, entry.shape, entry.len)
     }
 
     pub(crate) fn trapz_exec(
@@ -2057,7 +2515,10 @@ impl WgpuProvider {
         } else {
             entry.shape.clone()
         };
-        while work_shape.len() <= dim {
+        let stored_rank = work_shape.len();
+        let virtual_axis = dim >= stored_rank;
+        let dim = dim.min(stored_rank);
+        if virtual_axis {
             work_shape.push(1);
         }
         let logical_len = work_shape
@@ -2099,6 +2560,9 @@ impl WgpuProvider {
         let mut output_shape = work_shape.clone();
         if !cumulative {
             output_shape[dim] = 1;
+        }
+        if virtual_axis {
+            output_shape.truncate(stored_rank);
         }
         let output_len = output_shape
             .iter()
@@ -2165,92 +2629,94 @@ impl WgpuProvider {
             }
         };
 
-        let out_buffer = self.create_storage_buffer(output_raw_len, "runmat-trapezoid-out");
-        let params_buffer = match self.precision {
-            NumericPrecision::F64 => {
-                let params = TrapezoidParamsF64 {
-                    segment_len: segment_len as u32,
-                    segments: segments as u32,
-                    stride_before: stride_before as u32,
-                    block: block as u32,
-                    total_len: logical_len as u32,
-                    output_len: output_len as u32,
-                    spacing_kind,
-                    mode: if cumulative { 1 } else { 0 },
-                    lane_factor: lane_factor as u32,
-                    _pad_u32_0: 0,
-                    _pad_u32_1: 0,
-                    _pad_u32_2: 0,
-                    spacing_scalar: scalar,
-                    _pad0: 0.0,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                };
-                self.uniform_buffer(&params, "runmat-trapezoid-params")
-            }
-            NumericPrecision::F32 => {
-                let params = TrapezoidParamsF32 {
-                    meta0: PackedU32([
-                        segment_len as u32,
-                        segments as u32,
-                        stride_before as u32,
-                        block as u32,
-                    ]),
-                    meta1: PackedU32([
-                        logical_len as u32,
-                        output_len as u32,
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, output_raw_len, "runmat-trapezoid-out")
+        })??;
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = TrapezoidParamsF64 {
+                        segment_len: segment_len as u32,
+                        segments: segments as u32,
+                        stride_before: stride_before as u32,
+                        block: block as u32,
+                        total_len: logical_len as u32,
+                        output_len: output_len as u32,
                         spacing_kind,
-                        if cumulative { 1 } else { 0 },
-                    ]),
-                    meta2: PackedU32([lane_factor as u32, 0, 0, 0]),
-                    scalar: PackedF32([scalar as f32, 0.0, 0.0, 0.0]),
-                };
-                self.uniform_buffer(&params, "runmat-trapezoid-params")
-            }
-        };
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-trapezoid-bind"),
-                layout: &self.pipelines.trapezoid.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: spacing_buffer.as_ref().as_entire_binding(),
-                    },
-                ],
-            });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.trapezoid.pipeline,
-            &bind_group,
-            groups,
-            "runmat-trapezoid-encoder",
-            "runmat-trapezoid-pass",
-        );
-        Ok(self.register_existing_buffer_with_storage(
+                        mode: if cumulative { 1 } else { 0 },
+                        lane_factor: lane_factor as u32,
+                        _pad_u32_0: 0,
+                        _pad_u32_1: 0,
+                        _pad_u32_2: 0,
+                        spacing_scalar: scalar,
+                        _pad0: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                    };
+                    self.uniform_buffer(emission, &params, "runmat-trapezoid-params")?
+                }
+                NumericPrecision::F32 => {
+                    let params = TrapezoidParamsF32 {
+                        meta0: PackedU32([
+                            segment_len as u32,
+                            segments as u32,
+                            stride_before as u32,
+                            block as u32,
+                        ]),
+                        meta1: PackedU32([
+                            logical_len as u32,
+                            output_len as u32,
+                            spacing_kind,
+                            if cumulative { 1 } else { 0 },
+                        ]),
+                        meta2: PackedU32([lane_factor as u32, 0, 0, 0]),
+                        scalar: PackedF32([scalar as f32, 0.0, 0.0, 0.0]),
+                    };
+                    self.uniform_buffer(emission, &params, "runmat-trapezoid-params")?
+                }
+            };
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-trapezoid-bind"),
+                    layout: &self.pipelines.trapezoid.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: spacing_buffer.as_ref().as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = self.pipelines.trapezoid.linear_dispatch_groups(segments)?;
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.trapezoid.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-trapezoid-encoder",
+                "runmat-trapezoid-pass",
+            )?;
+            Ok(())
+        })??;
+        self.register_existing_buffer_with_storage(
             out_buffer,
             output_shape,
             output_raw_len,
             entry.storage,
-        ))
+        )
     }
     pub(crate) fn cumprod_exec(
         &self,
@@ -2259,14 +2725,18 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        let selected = self.get_entry(handle)?;
+        if selected.len != 0 {
+            self.require_ieee_words(selected.precision)?;
+        }
         // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
         if matches!(direction, ProviderScanDirection::Reverse) {
             let flipped_in = self.flip_exec(handle, &[dim])?;
             let forward =
                 self.cumprod_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
-            let _ = self.free_exec(&flipped_in);
+            drop(flipped_in);
             let flipped_out = self.flip_exec(&forward, &[dim])?;
-            let _ = self.free_exec(&forward);
+            drop(forward);
             return Ok(flipped_out);
         }
         let entry = self.get_entry(handle)?;
@@ -2290,8 +2760,10 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-cumprod-empty");
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-cumprod-empty")
+            })??;
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let stride_before = if dim == 0 {
@@ -2337,9 +2809,11 @@ impl WgpuProvider {
             "cumprod: tensor too large for GPU kernel"
         );
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-cumprod-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-cumprod-out")
+        })??;
         if entry.len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let mut flags = 0u32;
@@ -2357,41 +2831,41 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cumprod-params");
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cumprod-bind"),
-                layout: &self.pipelines.cumprod.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cumprod.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cumprod-encoder",
-            "runmat-cumprod-pass",
-        );
-        Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cumprod-params")?;
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cumprod-bind"),
+                    layout: &self.pipelines.cumprod.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = self.pipelines.cumprod.linear_dispatch_groups(segments)?;
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cumprod.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cumprod-encoder",
+                "runmat-cumprod-pass",
+            )?;
+            Ok(())
+        })??;
+        self.register_existing_buffer(out_buffer, entry.shape, entry.len)
     }
     pub(crate) fn cummin_exec(
         &self,
@@ -2402,14 +2876,21 @@ impl WgpuProvider {
     ) -> Result<ProviderCumminResult> {
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-indices-empty")?,
+                    ))
+                })??;
             let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
             return Ok(ProviderCumminResult { values, indices });
         }
+
+        self.require_ieee_words(entry.precision)?;
 
         let work_shape = if entry.shape.is_empty() {
             vec![entry.len]
@@ -2427,12 +2908,17 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-indices-empty")?,
+                    ))
+                })??;
             let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
             return Ok(ProviderCumminResult { values, indices });
         }
 
@@ -2479,8 +2965,13 @@ impl WgpuProvider {
             "cummin: tensor too large for GPU kernel"
         );
 
-        let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-values");
-        let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-indices");
+        let (values_buffer, indices_buffer) =
+            self.with_emission(|emission, _| -> Result<_> {
+                Ok((
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummin-values")?,
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummin-indices")?,
+                ))
+            })??;
 
         let mut flags = 0u32;
         if matches!(direction, ProviderScanDirection::Reverse) {
@@ -2500,49 +2991,51 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cummin-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cummin-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cummin-bind"),
-                layout: &self.pipelines.cummin.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cummin-bind"),
+                    layout: &self.pipelines.cummin.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cummin.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cummin-encoder",
-            "runmat-cummin-pass",
-        );
+            let groups = self.pipelines.cummin.linear_dispatch_groups(segments)?;
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cummin.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cummin-encoder",
+                "runmat-cummin-pass",
+            )?;
+            Ok(())
+        })??;
 
-        let values = self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-        let indices = self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
+        let values =
+            self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
+        let indices =
+            self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
         Ok(ProviderCumminResult { values, indices })
     }
     pub(crate) fn cummax_exec(
@@ -2554,14 +3047,21 @@ impl WgpuProvider {
     ) -> Result<ProviderCummaxResult> {
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-indices-empty")?,
+                    ))
+                })??;
             let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
             return Ok(ProviderCummaxResult { values, indices });
         }
+
+        self.require_ieee_words(entry.precision)?;
 
         let work_shape = if entry.shape.is_empty() {
             vec![entry.len]
@@ -2579,12 +3079,17 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-indices-empty")?,
+                    ))
+                })??;
             let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
+                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
             return Ok(ProviderCummaxResult { values, indices });
         }
 
@@ -2631,8 +3136,13 @@ impl WgpuProvider {
             "cummax: tensor too large for GPU kernel"
         );
 
-        let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-values");
-        let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-indices");
+        let (values_buffer, indices_buffer) =
+            self.with_emission(|emission, _| -> Result<_> {
+                Ok((
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummax-values")?,
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummax-indices")?,
+                ))
+            })??;
 
         let mut flags = 0u32;
         if matches!(direction, ProviderScanDirection::Reverse) {
@@ -2652,49 +3162,51 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cummax-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cummax-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cummax-bind"),
-                layout: &self.pipelines.cummax.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cummax-bind"),
+                    layout: &self.pipelines.cummax.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cummax.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cummax-encoder",
-            "runmat-cummax-pass",
-        );
+            let groups = self.pipelines.cummax.linear_dispatch_groups(segments)?;
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cummax.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cummax-encoder",
+                "runmat-cummax-pass",
+            )?;
+            Ok(())
+        })??;
 
-        let values = self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-        let indices = self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
+        let values =
+            self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
+        let indices =
+            self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
         Ok(ProviderCummaxResult { values, indices })
     }
 }
@@ -2796,15 +3308,16 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 #[cfg(test)]
 mod tests {
     use crate::backend::wgpu::provider::{
-        register_test_wgpu_provider, WgpuProvider, WgpuProviderOptions,
+        register_retained_test_wgpu_provider, register_test_wgpu_provider, WgpuProvider,
+        WgpuProviderOptions,
     };
     use num_complex::Complex;
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
         HostTensorView, ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderHilbertRequest,
         ProviderIirFilterOptions, ProviderMovingWindowEndpoints, ProviderMovingWindowOp,
-        ProviderMovingWindowRequest, ProviderNanMode, ProviderStdNormalization,
-        ProviderTrapezoidSpacing,
+        ProviderMovingWindowRequest, ProviderNanMode, ProviderPreparedIirCoefficients,
+        ProviderStdNormalization, ProviderTrapezoidSpacing,
     };
     use runmat_runtime::builtins::math::reduction::{
         gradient_complex_tensor_host, gradient_real_tensor_host_with_coordinates,
@@ -2822,29 +3335,101 @@ mod tests {
         Some(f(provider.provider()))
     }
 
+    #[test]
+    fn diff_provider_preserves_higher_order_empty_geometry_and_native_precision() {
+        use crate::backend::wgpu::provider::WgpuPrecisionPolicy;
+        for precision in [
+            WgpuPrecisionPolicy::RequireF32,
+            WgpuPrecisionPolicy::RequireF64,
+        ] {
+            let Ok(registered) = register_test_wgpu_provider(WgpuProviderOptions {
+                precision,
+                ..Default::default()
+            }) else {
+                continue; // This physical precision is unavailable on this adapter.
+            };
+            let provider = registered.provider();
+            for (shape, order, dim, expected) in [
+                (vec![0, 5], 3, 1, vec![0, 2]),
+                (vec![2, 0, 7], 4, 2, vec![2, 0, 3]),
+                (vec![0, 5], usize::MAX, 1, vec![0, 0]),
+            ] {
+                let data = match precision {
+                    WgpuPrecisionPolicy::RequireF32 => HostNumericDataView::F32(&[]),
+                    WgpuPrecisionPolicy::RequireF64 => HostNumericDataView::F64(&[]),
+                    _ => unreachable!(),
+                };
+                let input = provider
+                    .upload_numeric(&HostNumericTensorView {
+                        data,
+                        shape: &shape,
+                        storage: GpuTensorStorage::Real,
+                    })
+                    .expect("native empty input");
+                let output = provider
+                    .diff_dim(&input, order, dim)
+                    .expect("empty differences")
+                    .expect("admitted native precision");
+                assert_eq!(output.shape(), expected);
+                assert_eq!(
+                    output.physical().element_type(),
+                    input.physical().element_type()
+                );
+                assert_eq!(output.physical().storage(), input.physical().storage());
+                assert_eq!(output.device_id(), input.device_id());
+                assert!(!output.shares_allocation_with(&input));
+                assert!(pollster::block_on(provider.download(&output))
+                    .unwrap()
+                    .data
+                    .is_empty());
+                output.release().unwrap();
+                input.allocation_lease().validate_live().unwrap();
+                input.release().unwrap();
+            }
+        }
+    }
+
     fn run_envelope(method: ProviderEnvelopeMethod, values: &[f64], shape: &[usize]) -> Vec<f64> {
-        with_wgpu_provider(|provider| {
-            let input = provider
-                .upload(&HostTensorView {
-                    data: values,
-                    shape,
-                })
-                .expect("upload");
-            let result = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
-                input: &input,
-                channel_len: values.len(),
-                channel_count: 1,
-                output_shape: shape,
-                method,
-            }))
-            .expect("envelope");
-            let upper = pollster::block_on(provider.download(&result.upper)).expect("download");
-            provider.free(&input).ok();
-            provider.free(&result.upper).ok();
-            provider.free(&result.lower).ok();
-            upper.data
-        })
-        .unwrap_or_default()
+        with_wgpu_provider(|provider| run_envelope_on(provider, method, values, shape))
+            .unwrap_or_default()
+    }
+
+    fn with_retained_wgpu_provider<F, R>(f: F) -> Option<R>
+    where
+        F: FnOnce(&'static dyn AccelProvider) -> R,
+    {
+        let Ok(session) = register_retained_test_wgpu_provider(WgpuProviderOptions::default())
+        else {
+            return None;
+        };
+        Some(f(session.provider()))
+    }
+
+    fn run_envelope_on(
+        provider: &dyn AccelProvider,
+        method: ProviderEnvelopeMethod,
+        values: &[f64],
+        shape: &[usize],
+    ) -> Vec<f64> {
+        let input = provider
+            .upload(&HostTensorView {
+                data: values,
+                shape,
+            })
+            .expect("upload");
+        let result = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+            input: &input,
+            channel_len: values.len(),
+            channel_count: 1,
+            output_shape: shape,
+            method,
+        }))
+        .expect("envelope");
+        let upper = pollster::block_on(provider.download(&result.upper)).expect("download");
+        input.release().unwrap();
+        result.upper.release().unwrap();
+        result.lower.release().unwrap();
+        upper.data
     }
 
     #[test]
@@ -2933,12 +3518,12 @@ mod tests {
                 }));
             assert!(oversized.is_err());
 
-            provider.free(&input).ok();
-            provider.free(&sum).ok();
-            provider.free(&var_input).ok();
-            provider.free(&var).ok();
-            provider.free(&median_input).ok();
-            provider.free(&median).ok();
+            input.release().unwrap();
+            sum.release().unwrap();
+            var_input.release().unwrap();
+            var.release().unwrap();
+            median_input.release().unwrap();
+            median.release().unwrap();
         }) else {
             return;
         };
@@ -2964,14 +3549,14 @@ mod tests {
             }))
             .expect("hilbert");
             assert_eq!(
-                output.descriptor.storage,
+                output.descriptor().storage,
                 Some(GpuTensorStorage::ComplexInterleaved)
             );
             let host = pollster::block_on(provider.download(&output)).expect("download");
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.data.len() % 2, 0);
-            provider.free(&input).ok();
-            provider.free(&output).ok();
+            input.release().unwrap();
+            output.release().unwrap();
             host.data
                 .chunks_exact(2)
                 .map(|pair| (pair[0], pair[1]))
@@ -3001,12 +3586,13 @@ mod tests {
                 .expect("upload");
             let output = provider
                 .gradient_dim(&input, dim, spacing)
-                .expect("gradient");
+                .expect("gradient")
+                .expect("provider accepted numerical operation");
             let host = pollster::block_on(provider.download(&output)).expect("download");
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.data.len() % 2, 0);
-            provider.free(&input).ok();
-            provider.free(&output).ok();
+            input.release().unwrap();
+            output.release().unwrap();
             host.data
                 .chunks_exact(2)
                 .map(|pair| (pair[0], pair[1]))
@@ -3133,20 +3719,22 @@ mod tests {
                 })
                 .expect("upload");
             let output_shape = [2, 3];
-            let err = pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+            let request = ProviderEnvelopeRequest {
                 input: &input,
                 channel_len: 2,
                 channel_count: 3,
                 output_shape: &output_shape,
                 method: ProviderEnvelopeMethod::Rms { window_len: 3 },
-            }))
-            .expect_err("layout mismatch should be rejected");
-
-            provider.free(&input).ok();
+            };
+            assert!(!provider.supports_signal_envelope(&request));
+            let err = pollster::block_on(provider.signal_envelope(&request))
+                .expect_err("layout mismatch should be rejected");
             assert!(
-                err.to_string().contains("input shape mismatch"),
-                "unexpected error: {err:#}"
+                err.is_unsupported(),
+                "expected pre-effect unsupported: {err}"
             );
+            input.allocation_lease().validate_live().unwrap();
+            input.release().unwrap();
         }) else {
             return;
         };
@@ -3178,6 +3766,87 @@ mod tests {
         for value in upper {
             assert!((value - 1.25).abs() < 1.0e-10);
         }
+    }
+
+    #[test]
+    #[ignore = "requires actual WGPU device; run explicitly for indexed envelope regression"]
+    fn signal_envelope_indexed_operands_preserve_row_vector_output_shape() {
+        let values = [1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0];
+        with_wgpu_provider(|provider| {
+            for method in [
+                ProviderEnvelopeMethod::Analytic,
+                ProviderEnvelopeMethod::AnalyticFir { filter_len: 5 },
+                ProviderEnvelopeMethod::Rms { window_len: 3 },
+            ] {
+                let column = run_envelope_on(provider, method, &values, &[8, 1]);
+                let row = run_envelope_on(provider, method, &values, &[1, 8]);
+                assert_eq!(row.len(), column.len());
+                for (actual, expected) in row.iter().zip(column.iter()) {
+                    assert!((actual - expected).abs() < 1.0e-5);
+                }
+            }
+        })
+        .expect("actual WGPU device required");
+    }
+
+    #[test]
+    #[ignore = "requires actual WGPU device; run explicitly for indexed envelope regression"]
+    fn signal_envelope_direct_indexing_materializes_lazy_transpose() {
+        with_wgpu_provider(|provider| {
+            let base = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0],
+                    shape: &[2, 4],
+                })
+                .expect("base upload");
+            let lazy = provider.transpose(&base).expect("lazy transpose");
+            let contiguous = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                    shape: &[4, 2],
+                })
+                .expect("contiguous upload");
+            for method in [
+                ProviderEnvelopeMethod::Analytic,
+                ProviderEnvelopeMethod::AnalyticFir { filter_len: 5 },
+                ProviderEnvelopeMethod::Rms { window_len: 3 },
+            ] {
+                let invoke = |input| {
+                    pollster::block_on(provider.signal_envelope(&ProviderEnvelopeRequest {
+                        input,
+                        channel_len: 4,
+                        channel_count: 2,
+                        output_shape: &[4, 2],
+                        method,
+                    }))
+                    .expect("indexed envelope")
+                };
+                let observed = invoke(&lazy);
+                let expected = invoke(&contiguous);
+                for (actual, reference) in [
+                    (&observed.upper, &expected.upper),
+                    (&observed.lower, &expected.lower),
+                ] {
+                    let actual =
+                        pollster::block_on(provider.download(actual)).expect("download lazy");
+                    let reference = pollster::block_on(provider.download(reference))
+                        .expect("download contiguous");
+                    assert_eq!(actual.shape, reference.shape);
+                    for (actual, reference) in actual.data.iter().zip(reference.data.iter()) {
+                        assert!((actual - reference).abs() < 1.0e-5);
+                    }
+                }
+                observed.upper.release().unwrap();
+                observed.lower.release().unwrap();
+                expected.upper.release().unwrap();
+                expected.lower.release().unwrap();
+            }
+            assert!(lazy.allocation_lease().validate_live().is_ok());
+            drop(lazy);
+            base.release().unwrap();
+            contiguous.release().unwrap();
+        })
+        .expect("actual WGPU device required");
     }
 
     #[test]
@@ -3307,10 +3976,10 @@ mod tests {
                 vec![0.0, 1.0, 3.0],
             )
             .expect("host gradient");
-            provider.free(&input).ok();
-            provider.free(&coordinates).ok();
-            provider.free(&output).ok();
-            assert_eq!(gathered.shape, expected.shape);
+            input.release().unwrap();
+            coordinates.release().unwrap();
+            output.release().unwrap();
+            assert_eq!(gathered.shape.as_slice(), expected.shape());
             let tol = match provider.precision() {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
                 runmat_accelerate_api::ProviderPrecision::F32 => 2.0e-6,
@@ -3354,25 +4023,23 @@ mod tests {
                 .expect("upload signal");
 
             let result = pollster::block_on(provider.iir_filter(
-                &b,
-                &a,
-                &x,
-                ProviderIirFilterOptions {
-                    dim: 1,
-                    zi: None,
-                    unit_denominator: false,
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
                 },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
             ))
             .expect("iir filter");
             let output = pollster::block_on(provider.download(&result.output)).expect("download");
             let final_state =
                 pollster::block_on(provider.download(result.final_state.as_ref().unwrap()))
                     .expect("download state");
-            provider.free(&b).ok();
-            provider.free(&a).ok();
-            provider.free(&x).ok();
-            provider.free(&result.output).ok();
-            provider.free(result.final_state.as_ref().unwrap()).ok();
+            b.release().unwrap();
+            a.release().unwrap();
+            x.release().unwrap();
+            result.output.release().unwrap();
+            result.final_state.unwrap().release().unwrap();
 
             assert_eq!(output.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(output.shape, vec![1, 3]);
@@ -3381,6 +4048,237 @@ mod tests {
             assert_eq!(final_state.shape, vec![1, 1]);
             assert_eq!(final_state.data, vec![3.0, 30.0]);
         });
+    }
+
+    #[test]
+    fn iir_filter_nonleading_axis_uses_order_first_state_geometry() {
+        let Some(()) = with_retained_wgpu_provider(|provider| {
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[
+                        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+                    ],
+                    shape: &[3, 4],
+                })
+                .expect("matrix signal");
+            let zi = provider
+                .upload(&HostTensorView {
+                    data: &[10.0, 20.0, 30.0],
+                    shape: &[1, 3],
+                })
+                .expect("order-first initial state");
+            let prepared = ProviderPreparedIirCoefficients::upload(
+                provider,
+                &[1.0, 0.0],
+                &[1.0, 0.0],
+                provider.precision(),
+                &[&x, &zi],
+            )
+            .expect("prepare normalized coefficients before observation");
+            provider.reset_telemetry();
+            let result = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
+                &x,
+                ProviderIirFilterOptions {
+                    dim: 1,
+                    zi: Some(zi.clone()),
+                },
+            ))
+            .expect("prepared nonleading filter");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            let final_state = result.final_state.expect("final state");
+            assert_eq!(final_state.shape(), &[1, 3]);
+            let actual = pollster::block_on(provider.download(&result.output)).unwrap();
+            let state = pollster::block_on(provider.download(&final_state)).unwrap();
+            assert_eq!(actual.shape, vec![3, 4]);
+            assert_eq!(actual.data.len(), 12);
+            for (got, want) in actual.data.iter().zip([
+                11.0, 22.0, 33.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ]) {
+                assert!((got - want).abs() < 1.0e-5);
+            }
+            assert_eq!(state.shape, vec![1, 3]);
+            assert_eq!(state.data.len(), 3);
+            assert!(state.data.iter().all(|value| value.abs() < 1.0e-5));
+            assert!(x.allocation_lease().validate_live().is_ok());
+            result.output.release().unwrap();
+            final_state.release().unwrap();
+            zi.release().unwrap();
+            x.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: nonleading IIR hardware witness not executed");
+            return;
+        };
+    }
+
+    #[test]
+    fn iir_filter_third_axis_uses_order_first_state_geometry() {
+        let Some(()) = with_retained_wgpu_provider(|provider| {
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[
+                        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
+                        15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
+                    ],
+                    shape: &[2, 3, 4],
+                })
+                .expect("three-dimensional signal");
+            let zi = provider
+                .upload(&HostTensorView {
+                    data: &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+                    shape: &[1, 2, 3],
+                })
+                .expect("third-axis initial state");
+            let prepared = ProviderPreparedIirCoefficients::upload(
+                provider,
+                &[1.0, 0.0],
+                &[1.0, 0.0],
+                provider.precision(),
+                &[&x, &zi],
+            )
+            .expect("prepare normalized coefficients before observation");
+            provider.reset_telemetry();
+            let result = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
+                &x,
+                ProviderIirFilterOptions {
+                    dim: 2,
+                    zi: Some(zi.clone()),
+                },
+            ))
+            .expect("prepared third-axis filter");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            let final_state = result.final_state.expect("final state");
+            assert_eq!(final_state.shape(), &[1, 2, 3]);
+            let actual = pollster::block_on(provider.download(&result.output)).unwrap();
+            let state = pollster::block_on(provider.download(&final_state)).unwrap();
+            let expected = [
+                11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
+                15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
+            ];
+            assert_eq!(actual.shape, vec![2, 3, 4]);
+            assert!(actual
+                .data
+                .iter()
+                .zip(expected)
+                .all(|(got, want)| (got - want).abs() < 1.0e-5));
+            assert_eq!(state.shape, vec![1, 2, 3]);
+            assert_eq!(state.data.len(), 6);
+            assert!(state.data.iter().all(|value| value.abs() < 1.0e-5));
+            assert!(x.allocation_lease().validate_live().is_ok());
+            result.output.release().unwrap();
+            final_state.release().unwrap();
+            zi.release().unwrap();
+            x.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: third-axis IIR hardware witness not executed");
+            return;
+        };
+    }
+
+    #[test]
+    fn iir_filter_resident_coefficients_read_back_and_normalize_nonunit_denominator() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[2.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("resident numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[2.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("nonunit resident denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("resident signal");
+            provider.reset_telemetry();
+            let result = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
+                },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
+            ))
+            .expect("resident coefficients normalize by a0");
+            let expected_readback = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => 16,
+                runmat_accelerate_api::ProviderPrecision::F64 => 32,
+            };
+            assert_eq!(
+                provider.telemetry_snapshot().download_bytes,
+                expected_readback
+            );
+            let output = pollster::block_on(provider.download(&result.output)).expect("output");
+            assert_eq!(output.shape, vec![1, 3]);
+            for (actual, expected) in output.data.iter().zip([1.0, 1.5, 2.25]) {
+                assert!((*actual - expected).abs() < 1.0e-5);
+            }
+            result.output.release().unwrap();
+            result.final_state.expect("final state").release().unwrap();
+            x.release().unwrap();
+            a.release().unwrap();
+            b.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: resident IIR normalization not executed");
+            return;
+        };
+    }
+
+    #[test]
+    fn iir_filter_resident_zero_leading_denominator_rejects_after_accounted_readback() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[2.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("resident numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("invalid resident denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("resident signal");
+            provider.reset_telemetry();
+            let error = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
+                },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
+            ))
+            .expect_err("zero leading denominator must reject");
+            assert!(error.to_string().contains("a(1) must be non-zero"));
+            let expected_readback = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => 16,
+                runmat_accelerate_api::ProviderPrecision::F64 => 32,
+            };
+            assert_eq!(
+                provider.telemetry_snapshot().download_bytes,
+                expected_readback
+            );
+            assert!(x.allocation_lease().validate_live().is_ok());
+            x.release().unwrap();
+            a.release().unwrap();
+            b.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: resident IIR rejection not executed");
+            return;
+        };
     }
 
     #[test]
@@ -3411,27 +4309,69 @@ mod tests {
             provider.reset_telemetry();
 
             let result = pollster::block_on(provider.iir_filter(
-                &b,
-                &a,
-                &x,
-                ProviderIirFilterOptions {
-                    dim: 1,
-                    zi: None,
-                    unit_denominator: true,
+                runmat_accelerate_api::ProviderIirCoefficientSource::UnitDenominatorFir {
+                    numerator: &b,
                 },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
             ))
             .expect("iir filter");
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
             let output = pollster::block_on(provider.download(&result.output)).expect("download");
-            provider.free(&b).ok();
-            provider.free(&a).ok();
-            provider.free(&x).ok();
-            provider.free(&result.output).ok();
-            provider.free(result.final_state.as_ref().unwrap()).ok();
+            b.release().unwrap();
+            a.release().unwrap();
+            x.release().unwrap();
+            result.output.release().unwrap();
+            result.final_state.unwrap().release().unwrap();
 
             assert_eq!(output.shape, vec![1, 3]);
             assert_eq!(output.data, vec![1.0, 3.0, 5.0]);
+        }
+    }
+
+    #[test]
+    #[ignore = "run explicitly on actual WGPU hardware"]
+    fn prepared_iir_coefficients_are_uploaded_once_and_reused_without_download() {
+        let session = register_retained_test_wgpu_provider(WgpuProviderOptions::default())
+            .expect("actual WGPU provider required");
+        let provider = session.provider();
+        let prepared = ProviderPreparedIirCoefficients::upload(
+            provider,
+            &[0.5, 0.5],
+            &[1.0, 0.0],
+            provider.precision(),
+            &[],
+        )
+        .expect("prepare coefficients once");
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 3.0, 5.0],
+                shape: &[1, 3],
+            })
+            .expect("upload signal");
+        provider.reset_telemetry();
+        let first = pollster::block_on(provider.iir_filter(
+            runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
+            &input,
+            ProviderIirFilterOptions { dim: 1, zi: None },
+        ))
+        .expect("first pass");
+        let second = pollster::block_on(provider.iir_filter(
+            runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
+            &first.output,
+            ProviderIirFilterOptions { dim: 1, zi: None },
+        ))
+        .expect("second pass");
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let output =
+            pollster::block_on(provider.download(&second.output)).expect("result readback");
+        let tolerance = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-6,
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+        };
+        for (actual, expected) in output.data.iter().zip([0.25, 1.25, 3.0]) {
+            assert!((*actual - expected).abs() < tolerance);
         }
     }
 
@@ -3452,11 +4392,12 @@ mod tests {
                 .expect("upload spacing");
             let output = provider
                 .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Vector(&spacing))
-                .expect("trapz");
+                .expect("trapz")
+                .expect("provider accepted numerical operation");
             let gathered = pollster::block_on(provider.download(&output)).expect("download");
-            provider.free(&input).ok();
-            provider.free(&spacing).ok();
-            provider.free(&output).ok();
+            input.release().unwrap();
+            spacing.release().unwrap();
+            output.release().unwrap();
             assert_eq!(gathered.shape, vec![1, 1]);
             assert!((gathered.data[0] - 3.5).abs() < 1.0e-5);
         });
@@ -3479,11 +4420,12 @@ mod tests {
                 .expect("upload spacing");
             let output = provider
                 .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Tensor(&spacing))
-                .expect("cumtrapz");
+                .expect("cumtrapz")
+                .expect("provider accepted numerical operation");
             let gathered = pollster::block_on(provider.download(&output)).expect("download");
-            provider.free(&input).ok();
-            provider.free(&spacing).ok();
-            provider.free(&output).ok();
+            input.release().unwrap();
+            spacing.release().unwrap();
+            output.release().unwrap();
             assert_eq!(gathered.shape, vec![2, 3]);
             assert_eq!(gathered.data.len(), 6);
             let expected = [0.0, 0.0, 1.5, 4.5, 6.5, 15.5];
@@ -3510,18 +4452,37 @@ mod tests {
 
             let trapz = provider
                 .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
-                .expect("trapz");
+                .expect("trapz")
+                .expect("provider accepted numerical operation");
             let cumtrapz = provider
                 .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
-                .expect("cumtrapz");
+                .expect("cumtrapz")
+                .expect("provider accepted numerical operation");
 
             let trapz_host = pollster::block_on(provider.download(&trapz)).expect("download trapz");
             let cumtrapz_host =
                 pollster::block_on(provider.download(&cumtrapz)).expect("download cumtrapz");
 
-            provider.free(&input).ok();
-            provider.free(&trapz).ok();
-            provider.free(&cumtrapz).ok();
+            for dimension in [2, usize::MAX] {
+                for output in [
+                    provider.trapz_dim(&input, dimension, ProviderTrapezoidSpacing::Unit),
+                    provider.cumtrapz_dim(&input, dimension, ProviderTrapezoidSpacing::Unit),
+                ] {
+                    let output = output.unwrap().expect("virtual-axis provider route");
+                    assert_eq!(output.shape(), input.shape());
+                    assert_eq!(
+                        runmat_accelerate_api::handle_precision(&output),
+                        runmat_accelerate_api::handle_precision(&input)
+                    );
+                    let host = pollster::block_on(provider.download(&output)).unwrap();
+                    assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+                    assert_eq!(host.data, vec![0.; 6]);
+                    output.release().unwrap();
+                }
+            }
+            input.release().unwrap();
+            trapz.release().unwrap();
+            cumtrapz.release().unwrap();
 
             assert_eq!(trapz_host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(trapz_host.shape, vec![1, 1]);

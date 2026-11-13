@@ -1,271 +1,31 @@
 //! MATLAB-compatible `tcpclient` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, NetConstructorOption,
+    TCPCLIENT_ERROR_CONNECT_FAILED, TCPCLIENT_ERROR_INTERNAL, TCPCLIENT_ERROR_INVALID_ADDRESS,
+    TCPCLIENT_ERROR_INVALID_NAME_VALUE, TCPCLIENT_ERROR_INVALID_PORT,
+    TCPCLIENT_EXPLICIT_GPU_INPUT_EXTENSION as EXPLICIT_GPU_INPUT_EXTENSION,
+    TCPCLIENT_INTEGER_CONNECT_TIMEOUT_EXTENSION as INTEGER_CONNECT_TIMEOUT_EXTENSION,
+    TCPCLIENT_INTEGER_PORT_EXTENSION as INTEGER_PORT_EXTENSION,
+    TCPCLIENT_INTEGER_TIMEOUT_EXTENSION as INTEGER_TIMEOUT_EXTENSION,
+    TCPCLIENT_LEGACY_OPTIONS_EXTENSION as LEGACY_OPTIONS_EXTENSION,
+    TCPCLIENT_ZERO_PORT_EXTENSION as ZERO_PORT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, StructValue, Value};
+use runmat_value::{ForeignRef, IntValue, Value};
 
-use super::accept::{configure_stream, insert_client, parse_timeout_value, CLIENT_HANDLE_FIELD};
-use super::tcpserver::{
-    canonicalize_byte_order, default_user_data, parse_port, string_scalar, DEFAULT_TIMEOUT_SECONDS,
-    HANDLE_ID_FIELD,
+use super::control::{
+    canonicalize_byte_order, default_user_data, parse_port, parse_timeout_value, string_scalar,
+    DEFAULT_TIMEOUT_SECONDS,
 };
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
+use crate::context::{RuntimeTcpByteOrder, RuntimeTcpConnect, RuntimeTcpInvocation};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use std::io::{self, ErrorKind};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::net::SocketAddr;
 
 const BUILTIN_NAME: &str = "tcpclient";
 
-const INTEGER_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpclient-integer-port",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpclient with a typed-integer port is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpclientIntegerPortExtension"),
-};
-const INTEGER_TIMEOUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpclient-integer-timeout",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpclient with a typed-integer Timeout is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpclientIntegerTimeoutExtension"),
-};
-const INTEGER_CONNECT_TIMEOUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpclient-integer-connect-timeout",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpclient with a typed-integer ConnectTimeout is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpclientIntegerConnectTimeoutExtension"),
-};
-const ZERO_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpclient-zero-port",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpclient port zero is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpclientZeroPortExtension"),
-};
-const LEGACY_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpclient-legacy-constructor-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpclient legacy constructor options are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpclientLegacyOptionsExtension"),
-};
-const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpclient-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpclient with explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpclientExplicitGpuInputExtension"),
-};
-pub const TCPCLIENT_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
-    INTEGER_PORT_EXTENSION,
-    INTEGER_TIMEOUT_EXTENSION,
-    INTEGER_CONNECT_TIMEOUT_EXTENSION,
-    ZERO_PORT_EXTENSION,
-    LEGACY_OPTIONS_EXTENSION,
-    EXPLICIT_GPU_INPUT_EXTENSION,
-];
-
-const INTEGER_PORT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "port",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The public Port datatype is double. RunMat mode additionally decodes all eight typed integer classes directly into the validated 1..65535 structural range.",
-}];
-const INTEGER_TIMEOUT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Timeout",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public Timeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "ConnectTimeout",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public ConnectTimeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode.",
-    },
-];
-const INTEGER_BUFFER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "InputBufferSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "InputBufferSize is part of RunMat's gated legacy constructor-option surface and is decoded exactly into a bounded host size.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "OutputBufferSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "OutputBufferSize is part of RunMat's gated legacy constructor-option surface and is decoded exactly into a bounded host size.",
-    },
-];
-pub const TCPCLIENT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "client = tcpclient(address, integer_port, ...)",
-        inputs: &INTEGER_PORT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The port is range-checked from authoritative integer storage before any socket connection. Public object properties remain double-valued.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "client = tcpclient(..., Timeout=integer_timeout, ConnectTimeout=integer_connect_timeout)",
-        inputs: &INTEGER_TIMEOUT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Each typed timeout is independently gated and must be exactly representable as binary64 before host networking observes it.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "client = tcpclient(..., InputBufferSize=integer_n, OutputBufferSize=integer_n)",
-        inputs: &INTEGER_BUFFER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Legacy buffer controls are gated before provider access and decoded exactly without a floating round trip.",
-    },
-];
-
-const TCPCLIENT_OUTPUT_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "client",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpclient handle struct for subsequent read/write/close operations.",
-}];
-const TCPCLIENT_INPUTS_HOST_PORT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "host",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Server hostname or IP address.",
-    },
-    BuiltinParamDescriptor {
-        name: "port",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Server TCP port (0..65535).",
-    },
-];
-const TCPCLIENT_INPUTS_HOST_PORT_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "host",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Server hostname or IP address.",
-    },
-    BuiltinParamDescriptor {
-        name: "port",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Server TCP port (0..65535).",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value_pairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Name/Value options such as Timeout, ConnectTimeout, ByteOrder, UserData, Name, InputBufferSize, and OutputBufferSize.",
-    },
-];
-const TCPCLIENT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "client = tcpclient(host, port)",
-        inputs: &TCPCLIENT_INPUTS_HOST_PORT,
-        outputs: &TCPCLIENT_OUTPUT_CLIENT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "client = tcpclient(host, port, Name, Value, ...)",
-        inputs: &TCPCLIENT_INPUTS_HOST_PORT_NAME_VALUE,
-        outputs: &TCPCLIENT_OUTPUT_CLIENT,
-    },
-];
-
-const TCPCLIENT_ERROR_INVALID_ADDRESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPCLIENT.INVALID_ADDRESS",
-    identifier: Some("RunMat:tcpclient:InvalidAddress"),
-    when: "Host/address argument is not a valid string scalar.",
-    message: "tcpclient: invalid host argument",
-};
-const TCPCLIENT_ERROR_INVALID_PORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPCLIENT.INVALID_PORT",
-    identifier: Some("RunMat:tcpclient:InvalidPort"),
-    when: "Port argument is non-scalar, non-integer, non-finite, or out of range.",
-    message: "tcpclient: invalid port argument",
-};
-const TCPCLIENT_ERROR_INVALID_NAME_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPCLIENT.INVALID_NAME_VALUE",
-    identifier: Some("RunMat:tcpclient:InvalidNameValue"),
-    when: "Name/Value arguments are malformed, unsupported, or have invalid values.",
-    message: "tcpclient: invalid name-value arguments",
-};
-const TCPCLIENT_ERROR_CONNECT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPCLIENT.CONNECT_FAILED",
-    identifier: Some("RunMat:tcpclient:ConnectionFailed"),
-    when: "Socket connect attempt fails.",
-    message: "tcpclient: unable to connect",
-};
-const TCPCLIENT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPCLIENT.INTERNAL",
-    identifier: Some("RunMat:tcpclient:InternalError"),
-    when: "Internal stream setup or metadata query fails.",
-    message: "tcpclient: internal error",
-};
-const TCPCLIENT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    TCPCLIENT_ERROR_INVALID_ADDRESS,
-    TCPCLIENT_ERROR_INVALID_PORT,
-    TCPCLIENT_ERROR_INVALID_NAME_VALUE,
-    TCPCLIENT_ERROR_CONNECT_FAILED,
-    TCPCLIENT_ERROR_INTERNAL,
-];
-pub const TCPCLIENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TCPCLIENT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TCPCLIENT_ERRORS,
-};
-
 const DEFAULT_BUFFER_SIZE: usize = 8192;
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpclient")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "tcpclient",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host networking only. Inputs backed by GPU memory are gathered before connecting.",
-};
 
 fn tcpclient_error_with_message(
     message: impl Into<String>,
@@ -294,33 +54,23 @@ fn tcpclient_flow(
     tcpclient_error_with_detail(error, message)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpclient")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "tcpclient",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtin executed eagerly on the CPU.",
-};
+fn tcpclient_internal_source(err: RuntimeError) -> RuntimeError {
+    let detail = err.message().to_owned();
+    super::error::with_source(BUILTIN_NAME, &TCPCLIENT_ERROR_INTERNAL, detail, err)
+}
 
 #[runtime_builtin(
     name = "tcpclient",
-    category = "io/net",
-    summary = "Open TCP client connections and return client metadata.",
-    keywords = "tcpclient,tcp,network,client",
-    type_resolver(crate::builtins::io::type_resolvers::tcpclient_type),
-    descriptor(crate::builtins::io::net::tcpclient::TCPCLIENT_DESCRIPTOR),
-    extensions(crate::builtins::io::net::tcpclient::TCPCLIENT_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::net::tcpclient::TCPCLIENT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::net::tcpclient"
 )]
 pub(crate) async fn tcpclient_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     host: Value,
     port: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if std::iter::once(&host)
         .chain(std::iter::once(&port))
         .chain(rest.iter())
@@ -332,105 +82,232 @@ pub(crate) async fn tcpclient_builtin(
         )?;
     }
     ensure_integer_extension(&port, &INTEGER_PORT_EXTENSION)?;
-    preflight_name_value_extensions(&rest).await?;
-    let host = gather_if_needed_async(&host)
-        .await
-        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
-    let port = gather_if_needed_async(&port)
-        .await
-        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
-
-    let host_text = string_scalar(&host, "tcpclient host").map_err(|err| {
-        tcpclient_flow(
-            &TCPCLIENT_ERROR_INVALID_ADDRESS,
-            format!("tcpclient: invalid host argument ({err})"),
+    let prepared_options = preflight_name_value_extensions(rest.view()).await?;
+    let known_host = if matches!(&host, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_host(&host)?)
+    };
+    let known_port = if matches!(&port, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_endpoint_port(&port)?)
+    };
+    let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    let host = gather_if_needed_async(&host).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INTERNAL,
+            format!("tcpclient: {}", err.message()),
+            err,
         )
     })?;
-    let port_num = parse_port(&port).map_err(|err| {
-        tcpclient_flow(
+    let port = gather_if_needed_async(&port).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INTERNAL,
+            format!("tcpclient: {}", err.message()),
+            err,
+        )
+    })?;
+
+    let host_text = match known_host {
+        Some(host) => host,
+        None => parse_host(&host)?,
+    };
+    let port_num = match known_port {
+        Some(port) => port,
+        None => parse_endpoint_port(&port)?,
+    };
+
+    let options = parse_name_value_pairs(rest, prepared_options).await?;
+
+    let endpoint = work
+        .await_service(
+            service.connect(
+                RuntimeTcpInvocation::from_context(runtime.as_ref()),
+                RuntimeTcpConnect {
+                    host: host_text.clone(),
+                    port: port_num,
+                    connect_timeout: options
+                        .connect_timeout
+                        .is_finite()
+                        .then(|| std::time::Duration::from_secs_f64(options.connect_timeout)),
+                    io_timeout: timeout_duration(options.timeout),
+                    byte_order: if options.byte_order == "big-endian" {
+                        RuntimeTcpByteOrder::Big
+                    } else {
+                        RuntimeTcpByteOrder::Little
+                    },
+                },
+            ),
+        )
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            super::error::with_source(
+                BUILTIN_NAME,
+                &TCPCLIENT_ERROR_CONNECT_FAILED,
+                format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
+                err,
+            )
+        })?;
+    work.completed(0).await?;
+    build_tcpclient_object(
+        runtime.as_ref(),
+        endpoint.authority,
+        &host_text,
+        endpoint.peer_addr,
+        endpoint.local_addr,
+        &options,
+    )
+}
+
+fn timeout_duration(seconds: f64) -> Option<std::time::Duration> {
+    (seconds.is_finite() && seconds != 0.0).then(|| std::time::Duration::from_secs_f64(seconds))
+}
+
+fn parse_host(host: &Value) -> BuiltinResult<String> {
+    string_scalar(host, "tcpclient host").map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INVALID_ADDRESS,
+            format!("tcpclient: invalid host argument ({err})"),
+            err,
+        )
+    })
+}
+
+fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
+    let port_num = parse_port(port).map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
             &TCPCLIENT_ERROR_INVALID_PORT,
             format!("tcpclient: invalid port argument ({err})"),
+            err,
         )
     })?;
     if port_num == 0 {
         crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
     }
-
-    let options = parse_name_value_pairs(rest).await?;
-
-    let (stream, resolved_addr) =
-        connect_with_timeout(&host_text, port_num, options.connect_timeout).map_err(|err| {
-            tcpclient_flow(
-                &TCPCLIENT_ERROR_CONNECT_FAILED,
-                format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
-            )
-        })?;
-
-    if let Err(err) = configure_stream(&stream, options.timeout) {
-        return Err(tcpclient_flow(
-            &TCPCLIENT_ERROR_INTERNAL,
-            format!("tcpclient: failed to configure stream timeouts ({err})"),
-        ));
-    }
-
-    let peer_addr = stream.peer_addr().map_err(|err| {
-        tcpclient_flow(
-            &TCPCLIENT_ERROR_INTERNAL,
-            format!("tcpclient: failed to query peer address for {resolved_addr} ({err})"),
-        )
-    })?;
-    let local_addr = stream
-        .local_addr()
-        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, format!("tcpclient: {err}")))?;
-
-    let client_id = insert_client(
-        stream,
-        0,
-        peer_addr,
-        options.timeout,
-        options.byte_order.clone(),
-    );
-
-    Ok(build_tcpclient_struct(
-        client_id, &host_text, peer_addr, local_addr, &options,
-    ))
+    Ok(port_num)
 }
 
-async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
+async fn preflight_name_value_extensions(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
     if !rest.len().is_multiple_of(2) {
-        return Ok(());
+        return Err(tcpclient_flow(
+            &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+            "tcpclient: name-value arguments must appear in pairs",
+        ));
     }
+    let mut known = Vec::with_capacity(rest.len() / 2);
     for pair in rest.chunks_exact(2) {
-        let Ok(name) = string_scalar(&pair[0], "OptionName") else {
-            continue;
+        let option = match &pair[0] {
+            Value::GpuTensor(_) => None,
+            value => {
+                let name = string_scalar(value, "OptionName").map_err(|err| {
+                    tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: invalid option name ({err})"),
+                    )
+                })?;
+                Some(NetConstructorOption::tcpclient(&name).ok_or_else(|| {
+                    tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: unsupported option '{name}'"),
+                    )
+                })?)
+            }
         };
-        match name.to_ascii_lowercase().as_str() {
-            "timeout" => {
+        if let Some(option) = option {
+            preflight_known_option_value(option, &pair[1])?;
+        }
+        known.push(option);
+    }
+    for (option, pair) in known.iter().copied().zip(rest.chunks_exact(2)) {
+        let value = &pair[1];
+        match option {
+            Some(NetConstructorOption::Timeout) => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-                    &pair[1],
+                    value,
                     &INTEGER_TIMEOUT_EXTENSION,
                     BUILTIN_NAME,
                     "Timeout",
                 )
                 .await?;
             }
-            "connecttimeout" => {
+            Some(NetConstructorOption::ConnectTimeout) => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-                    &pair[1],
+                    value,
                     &INTEGER_CONNECT_TIMEOUT_EXTENSION,
                     BUILTIN_NAME,
                     "ConnectTimeout",
                 )
                 .await?;
             }
-            "byteorder" | "userdata" | "name" | "inputbuffersize" | "outputbuffersize" => {
+            Some(
+                NetConstructorOption::ByteOrder
+                | NetConstructorOption::UserData
+                | NetConstructorOption::Name
+                | NetConstructorOption::InputBufferSize
+                | NetConstructorOption::OutputBufferSize,
+            ) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
             }
-            _ => {}
+            None => {}
         }
+    }
+    Ok(known)
+}
+
+fn preflight_known_option_value(option: NetConstructorOption, value: &Value) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(());
+    }
+    match option {
+        NetConstructorOption::Timeout | NetConstructorOption::ConnectTimeout => {
+            parse_timeout_value(value).map_err(|err| {
+                tcpclient_flow(
+                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpclient: invalid timeout value ({err})"),
+                )
+            })?;
+        }
+        NetConstructorOption::ByteOrder => {
+            let text = string_scalar(value, "ByteOrder").map_err(|err| {
+                tcpclient_flow(
+                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpclient: invalid ByteOrder value ({err})"),
+                )
+            })?;
+            if canonicalize_byte_order(&text).is_none() {
+                return Err(tcpclient_flow(
+                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpclient: unsupported ByteOrder '{text}'"),
+                ));
+            }
+        }
+        NetConstructorOption::Name => {
+            string_scalar(value, "Name").map_err(|err| {
+                tcpclient_flow(
+                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpclient: invalid Name value ({err})"),
+                )
+            })?;
+        }
+        NetConstructorOption::InputBufferSize => {
+            parse_buffer_size(value, "InputBufferSize")?;
+        }
+        NetConstructorOption::OutputBufferSize => {
+            parse_buffer_size(value, "OutputBufferSize")?;
+        }
+        NetConstructorOption::UserData => {}
     }
     Ok(())
 }
@@ -460,7 +337,10 @@ impl Default for TcpClientOptions {
     }
 }
 
-async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
+async fn parse_name_value_pairs(
+    rest: crate::call::BuiltinArguments,
+    prepared: Vec<Option<NetConstructorOption>>,
+) -> BuiltinResult<TcpClientOptions> {
     if rest.is_empty() {
         return Ok(TcpClientOptions::default());
     }
@@ -473,22 +353,33 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
 
     let mut options = TcpClientOptions::default();
     let mut iter = rest.into_iter();
-    while let Some(name_raw) = iter.next() {
+    for prepared_option in prepared {
+        let name_raw = iter.next().expect("preflight retained paired option name");
         let value_raw = iter
             .next()
             .expect("even-length vec ensures paired name/value");
-        let name_value = gather_if_needed_async(&name_raw)
-            .await
-            .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
-        let option_name = string_scalar(&name_value, "OptionName").map_err(|err| {
-            tcpclient_flow(
-                &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
-                format!("tcpclient: invalid option name ({err})"),
-            )
-        })?;
-        let lower = option_name.to_ascii_lowercase();
-        match lower.as_str() {
-            "timeout" => {
+        let option = match prepared_option {
+            Some(option) => option,
+            None => {
+                let name_value = gather_if_needed_async(&name_raw)
+                    .await
+                    .map_err(tcpclient_internal_source)?;
+                let option_name = string_scalar(&name_value, "OptionName").map_err(|err| {
+                    tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: invalid option name ({err})"),
+                    )
+                })?;
+                NetConstructorOption::tcpclient(&option_name).ok_or_else(|| {
+                    tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: unsupported option '{option_name}'"),
+                    )
+                })?
+            }
+        };
+        match option {
+            NetConstructorOption::Timeout => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     &value_raw,
                     &INTEGER_TIMEOUT_EXTENSION,
@@ -498,7 +389,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 .await?;
                 let timeout_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.timeout = parse_timeout_value(&timeout_value).map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -506,7 +397,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                     )
                 })?;
             }
-            "connecttimeout" => {
+            NetConstructorOption::ConnectTimeout => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     &value_raw,
                     &INTEGER_CONNECT_TIMEOUT_EXTENSION,
@@ -516,7 +407,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 .await?;
                 let connect_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.connect_timeout = parse_timeout_value(&connect_value).map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -524,14 +415,14 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                     )
                 })?;
             }
-            "byteorder" => {
+            NetConstructorOption::ByteOrder => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 let order_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -546,21 +437,21 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 })?;
                 options.byte_order = canon.to_string();
             }
-            "userdata" => {
+            NetConstructorOption::UserData => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 options.user_data = value_raw;
             }
-            "name" => {
+            NetConstructorOption::Name => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 let name_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -569,31 +460,25 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 })?;
                 options.name = Some(text);
             }
-            "inputbuffersize" => {
+            NetConstructorOption::InputBufferSize => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 let gathered = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.input_buffer_size = parse_buffer_size(&gathered, "InputBufferSize")?;
             }
-            "outputbuffersize" => {
+            NetConstructorOption::OutputBufferSize => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 let gathered = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.output_buffer_size = parse_buffer_size(&gathered, "OutputBufferSize")?;
-            }
-            _ => {
-                return Err(tcpclient_flow(
-                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
-                    format!("tcpclient: unsupported option '{option_name}'"),
-                ));
             }
         }
     }
@@ -664,42 +549,14 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
     Ok(raw as i32)
 }
 
-fn connect_with_timeout(
-    host: &str,
-    port: u16,
-    timeout: f64,
-) -> io::Result<(TcpStream, SocketAddr)> {
-    let mut last_err: Option<io::Error> = None;
-    for addr in (host, port).to_socket_addrs()? {
-        let attempt = if timeout.is_infinite() {
-            TcpStream::connect(addr)
-        } else {
-            let duration = Duration::from_secs_f64(timeout);
-            TcpStream::connect_timeout(&addr, duration)
-        };
-        match attempt {
-            Ok(stream) => return Ok((stream, addr)),
-            Err(err) => last_err = Some(err),
-        }
-    }
-
-    match last_err {
-        Some(err) => Err(err),
-        None => Err(io::Error::new(
-            ErrorKind::NotFound,
-            "tcpclient: no addresses resolved",
-        )),
-    }
-}
-
-fn build_tcpclient_struct(
-    client_id: u64,
+fn build_tcpclient_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    authority: ForeignRef,
     requested_host: &str,
     peer_addr: SocketAddr,
     local_addr: SocketAddr,
     options: &TcpClientOptions,
-) -> Value {
-    let mut st = StructValue::new();
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let remote_addr = peer_addr.ip().to_string();
     let remote_port = peer_addr.port();
     let local_address = local_addr.ip().to_string();
@@ -710,98 +567,68 @@ fn build_tcpclient_struct(
         .clone()
         .unwrap_or_else(|| format!("tcpclient:{requested_host}:{remote_port}"));
 
-    st.fields
-        .insert("Type".to_string(), Value::String("tcpclient".to_string()));
-    st.fields.insert("Name".to_string(), Value::String(name));
-    st.fields
-        .insert("Address".to_string(), Value::String(remote_addr.clone()));
-    st.fields
-        .insert("Port".to_string(), Value::Num(f64::from(remote_port)));
-    st.fields.insert(
-        "ServerAddress".to_string(),
-        Value::String(remote_addr.clone()),
-    );
-    st.fields
-        .insert("ServerPort".to_string(), Value::Num(f64::from(remote_port)));
-    st.fields
-        .insert("LocalAddress".to_string(), Value::String(local_address));
-    st.fields
-        .insert("LocalPort".to_string(), Value::Num(f64::from(local_port)));
-    st.fields.insert(
-        "RequestedAddress".to_string(),
-        Value::String(requested_host.to_string()),
-    );
-    st.fields.insert("Connected".to_string(), Value::Bool(true));
-    st.fields
-        .insert("Status".to_string(), Value::String("connected".to_string()));
-    st.fields.insert(
-        "NumBytesAvailable".to_string(),
-        Value::Int(IntValue::I32(0)),
-    );
-    st.fields
-        .insert("BytesAvailableFcn".to_string(), default_user_data());
-    st.fields.insert(
-        "BytesAvailableFcnMode".to_string(),
-        Value::String("byte".to_string()),
-    );
-    st.fields.insert(
-        "BytesAvailableFcnCount".to_string(),
-        Value::Int(IntValue::I32(1)),
-    );
-    st.fields.insert(
-        "ByteOrder".to_string(),
-        Value::String(options.byte_order.clone()),
-    );
-    st.fields
-        .insert("Timeout".to_string(), Value::Num(options.timeout));
-    st.fields.insert(
-        "ConnectTimeout".to_string(),
-        Value::Num(options.connect_timeout),
-    );
-    st.fields.insert(
-        "InputBufferSize".to_string(),
-        Value::Int(IntValue::I32(options.input_buffer_size)),
-    );
-    st.fields.insert(
-        "OutputBufferSize".to_string(),
-        Value::Int(IntValue::I32(options.output_buffer_size)),
-    );
-    st.fields
-        .insert("UserData".to_string(), options.user_data.clone());
-    st.fields.insert(
-        CLIENT_HANDLE_FIELD.to_string(),
-        Value::Int(IntValue::U64(client_id)),
-    );
-    st.fields
-        .insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::I32(0)));
-
-    Value::Struct(st)
+    let properties = [
+        ("Type", Value::string("tcpclient".to_string())),
+        ("Name", Value::string(name)),
+        ("Address", Value::string(remote_addr.clone())),
+        ("Port", Value::Num(f64::from(remote_port))),
+        ("ServerAddress", Value::string(remote_addr.clone())),
+        ("ServerPort", Value::Num(f64::from(remote_port))),
+        ("LocalAddress", Value::string(local_address)),
+        ("LocalPort", Value::Num(f64::from(local_port))),
+        (
+            "RequestedAddress",
+            Value::string(requested_host.to_string()),
+        ),
+        ("Connected", Value::Bool(true)),
+        ("Status", Value::string("connected".to_string())),
+        ("NumBytesAvailable", Value::Int(IntValue::I32(0))),
+        ("BytesAvailableFcn", default_user_data()),
+        ("BytesAvailableFcnMode", Value::string("byte".to_string())),
+        ("BytesAvailableFcnCount", Value::Int(IntValue::I32(1))),
+        ("ByteOrder", Value::string(options.byte_order.clone())),
+        ("Timeout", Value::Num(options.timeout)),
+        ("ConnectTimeout", Value::Num(options.connect_timeout)),
+        (
+            "InputBufferSize",
+            Value::Int(IntValue::I32(options.input_buffer_size)),
+        ),
+        (
+            "OutputBufferSize",
+            Value::Int(IntValue::I32(options.output_buffer_size)),
+        ),
+        ("UserData", options.user_data.clone()),
+    ];
+    crate::execution::object::construct_object_from_fields_with_native(
+        runtime,
+        runmat_builtins::TCPCLIENT_CLASS.display_name(),
+        properties.iter().map(|(name, value)| (*name, value)),
+        Some(crate::execution::object::ObjectNativeInitialization::TcpAuthority(authority)),
+    )
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
-    use super::super::accept::remove_client_for_test;
     use super::*;
+    use crate::builtins::io::net::test_support::CountingDownloadProvider;
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::tcp::NativeTcpService;
+    use runmat_builtins::TCPCLIENT_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
+    use std::error::Error;
+    use std::io;
     use std::net::TcpListener;
+    use std::rc::Rc;
     use std::thread;
     use std::time::Duration;
 
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
         match value {
-            Value::Struct(st) => st
-                .fields
+            Value::Object(object) => object
+                .properties()
                 .get(name)
                 .unwrap_or_else(|| panic!("missing field {name}")),
-            _ => panic!("expected struct"),
-        }
-    }
-
-    fn client_id(value: &Value) -> u64 {
-        match struct_field(value, CLIENT_HANDLE_FIELD) {
-            Value::Int(IntValue::U64(id)) => *id,
-            Value::Int(iv) => iv.to_i64() as u64,
-            other => panic!("expected client id, got {other:?}"),
+            _ => panic!("expected TCP object"),
         }
     }
 
@@ -809,8 +636,53 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
-    fn run_tcpclient(host: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tcpclient_builtin(host, port, rest))
+    fn run_tcpclient(
+        host: Value,
+        port: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<crate::execution::RootedValue> {
+        let driver = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("isolated TCP host driver");
+        let service = Rc::new(NativeTcpService::new(driver.handle().clone()));
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(RuntimeServicePorts::default().with_tcp(service));
+        driver.block_on(tcpclient_builtin(
+            Some(runtime),
+            host,
+            port,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_options_reject_before_resident_endpoint_download() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let owner = Box::leak(Box::new(CountingDownloadProvider::new()));
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+        let host = Value::GpuTensor(owner.resident());
+        let err = run_tcpclient(
+            host.clone(),
+            Value::Num(80.0),
+            vec![Value::from("EnableTransferDelay"), Value::Bool(true)],
+        )
+        .expect_err("known invalid option rejects before endpoint download");
+        assert_eq!(
+            err.identifier(),
+            TCPCLIENT_ERROR_INVALID_NAME_VALUE.identifier
+        );
+        let err = run_tcpclient(host, Value::Num(80.0), vec![Value::from("Timeout")])
+            .expect_err("incomplete option pair rejects before endpoint download");
+        assert_eq!(
+            err.identifier(),
+            TCPCLIENT_ERROR_INVALID_NAME_VALUE.identifier
+        );
+        assert_eq!(owner.downloads(), 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -854,7 +726,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
+        crate::builtins::io::net::test_support::test_guard()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -883,12 +755,13 @@ pub(crate) mod tests {
             other => panic!("expected Connected bool, got {other:?}"),
         }
         match struct_field(&client, "Address") {
-            Value::String(addr) => assert_eq!(addr, "127.0.0.1"),
+            Value::String(runmat_value::StringElement::Text(addr)) => assert_eq!(addr, "127.0.0.1"),
             other => panic!("expected Address string, got {other:?}"),
         }
 
-        let cid = client_id(&client);
-        remove_client_for_test(cid);
+        assert!(
+            matches!(client.value(), Value::Object(object) if object.tcp_authority().is_some())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -925,7 +798,9 @@ pub(crate) mod tests {
         handle.join().expect("join listener thread");
 
         match struct_field(&client, "Name") {
-            Value::String(name) => assert_eq!(name, "CustomClient"),
+            Value::String(runmat_value::StringElement::Text(name)) => {
+                assert_eq!(name, "CustomClient")
+            }
             other => panic!("expected Name string, got {other:?}"),
         }
         match struct_field(&client, "Timeout") {
@@ -933,7 +808,9 @@ pub(crate) mod tests {
             other => panic!("expected Timeout numeric, got {other:?}"),
         }
         match struct_field(&client, "ByteOrder") {
-            Value::String(order) => assert_eq!(order, "big-endian"),
+            Value::String(runmat_value::StringElement::Text(order)) => {
+                assert_eq!(order, "big-endian")
+            }
             other => panic!("expected ByteOrder string, got {other:?}"),
         }
         match struct_field(&client, "InputBufferSize") {
@@ -945,8 +822,9 @@ pub(crate) mod tests {
             other => panic!("expected UserData numeric, got {other:?}"),
         }
 
-        let cid = client_id(&client);
-        remove_client_for_test(cid);
+        assert!(
+            matches!(client.value(), Value::Object(object) if object.tcp_authority().is_some())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1010,9 +888,16 @@ pub(crate) mod tests {
         let err = run_tcpclient(
             Value::from("127.0.0.1"),
             Value::Num(port as f64),
-            vec![Value::from("ConnectTimeout"), Value::Num(0.05)],
+            vec![Value::from("ConnectTimeout"), Value::Num(5.0)],
         )
         .unwrap_err();
+        let transport = Error::source(&err)
+            .and_then(|source| source.downcast_ref::<crate::tcp::TcpTransportError>())
+            .expect("connect failure retains typed transport cause");
+        assert_eq!(transport.kind(), crate::tcp::TcpTransportErrorKind::Io);
+        assert!(Error::source(transport)
+            .and_then(|source| source.downcast_ref::<io::Error>())
+            .is_some());
         assert_error_identifier(err, TCPCLIENT_ERROR_CONNECT_FAILED.identifier.unwrap());
     }
 }

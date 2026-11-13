@@ -1,9 +1,9 @@
 [package]
 name = "runmat-package-cache-native"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 description = "Native transactional storage and materialization adapter for RunMat packages"
-license = "Apache-2.0"
+license-file = "../../LICENSE.md"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
@@ -19,11 +19,13 @@ keyring = "2.3"
 p256 = { version = "0.13", features = ["ecdh"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 runmat-package = { workspace = true }
+runmat-filesystem = { workspace = true }
 runmat-package-cache = { workspace = true }
 runmat-server-client = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+sha2-mac = { workspace = true }
 thiserror = { workspace = true }
 tempfile = "3.12"
 zeroize = "1"

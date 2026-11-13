@@ -132,6 +132,11 @@ function r = runningTotal()
 end
 ```
 
+For a nested callback, pass an explicit function handle from its lexical scope, for example
+`feval(@add, 5)` inside `runningTotal`. This rule applies in both MATLAB and RunMat modes:
+`feval('add', 5)` is a textual name lookup, not a handle to the nested function. Textual
+`feval` remains available for ordinarily published functions.
+
 ## Anonymous functions and closures
 
 An anonymous function is written with `@(args) expression`. It captures the values of any

@@ -1,12 +1,11 @@
-use std::io::Write;
 use std::path::Path;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver, complete_batch_driver_with_response, execute_program_batch,
-    prepare_batch_driver, BatchDriverInvocation, BatchSubmission, LocalJobRecord, LocalJobState,
-    LocalSupervisorClient,
+    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_graph_batch,
+    execute_and_complete_program_batch, execute_graph_batch, prepare_batch_driver,
+    BatchDriverInvocation, BatchSubmission, JobSubmissionDisposition, LocalJobRecord,
+    LocalJobState, LocalSupervisorClient,
 };
 use runmat_execution_runner_native::WorkerResponse;
 use runmat_process_host::environment::EnvironmentPolicy;
@@ -14,6 +13,8 @@ use runmat_process_host::{HostCommand, StdioPolicy};
 
 use crate::cli::BatchCommand;
 use crate::presentation;
+
+mod attach;
 
 pub async fn execute(command: BatchCommand) -> Result<()> {
     let client = LocalSupervisorClient::for_current_executable()?;
@@ -25,6 +26,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
             json,
             args,
         } => {
+            crate::commands::script::validate_local_script_arguments(&args)?;
             let file = std::fs::canonicalize(&file)
                 .with_context(|| format!("failed to resolve batch source {}", file.display()))?;
             let source_name = source_name(&file)?;
@@ -35,7 +37,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
             let retention_millis = retention_hours
                 .checked_mul(60 * 60 * 1000)
                 .context("batch retention exceeds supported duration")?;
-            let (record, duplicate) = client
+            let (record, submission_disposition) = client
                 .submit(BatchSubmission {
                     source_name,
                     source,
@@ -45,6 +47,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
                     retention_millis,
                 })
                 .await?;
+            let duplicate = submission_disposition == JobSubmissionDisposition::Duplicate;
             if json {
                 println!(
                     "{}",
@@ -91,7 +94,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
             }
         }
         BatchCommand::Attach { job_id, no_follow } => {
-            attach(&client, job_id, no_follow).await?;
+            attach::run(&client, job_id, no_follow).await?;
         }
         BatchCommand::Cancel { job_id, json } => {
             let record = client.cancel(job_id).await?;
@@ -121,12 +124,58 @@ pub async fn run_driver() -> std::process::ExitCode {
             working_directory,
             ..
         } => run_script_driver(source_path, arguments, working_directory).await,
-        BatchDriverInvocation::Program { submission, .. } => {
-            let response = execute_program_batch(*submission).await;
+        BatchDriverInvocation::Program {
+            attempt,
+            submission,
+            lease,
+            ..
+        } => {
+            let execution =
+                match execute_and_complete_program_batch(*attempt, *submission, *lease).await {
+                    Ok(execution) => execution,
+                    Err(error) => {
+                        let message = error.to_string();
+                        // Original provider ownership/report recovery records this loss.
+                        // A script completion cannot stand in for a portable attempt.
+                        eprintln!("runmat batch driver failed: {message}");
+                        return std::process::ExitCode::from(1);
+                    }
+                };
             let success = matches!(
-                response,
+                &execution.response,
                 WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }
             );
+            return if success {
+                std::process::ExitCode::SUCCESS
+            } else {
+                std::process::ExitCode::from(1)
+            };
+        }
+        BatchDriverInvocation::GraphTask {
+            attempt,
+            submission,
+            lease,
+            ..
+        } => {
+            let execution =
+                match execute_and_complete_graph_batch(*attempt, *submission, *lease).await {
+                    Ok(execution) => execution,
+                    Err(error) => {
+                        eprintln!("runmat Graph batch driver failed: {error}");
+                        return std::process::ExitCode::from(1);
+                    }
+                };
+            return if matches!(execution.response, WorkerResponse::GraphSuccess { .. }) {
+                std::process::ExitCode::SUCCESS
+            } else {
+                std::process::ExitCode::from(1)
+            };
+        }
+        BatchDriverInvocation::Graph {
+            job_id, submission, ..
+        } => {
+            let response = execute_graph_batch(*submission, job_id).await;
+            let success = matches!(response, WorkerResponse::GraphSuccess { .. });
             if let Err(error) = complete_batch_driver_with_response(&job_directory, response) {
                 Err(error.to_string())
             } else if success {
@@ -175,41 +224,6 @@ async fn run_script_driver(
     match command.spawn().await {
         Ok(mut child) => child.wait().await.map_err(|error| error.to_string()),
         Err(error) => Err(error.to_string()),
-    }
-}
-
-async fn attach(
-    client: &LocalSupervisorClient,
-    job_id: runmat_execution::JobId,
-    no_follow: bool,
-) -> Result<()> {
-    let mut stdout_offset = 0;
-    let mut stderr_offset = 0;
-    loop {
-        let attachment = client.attach(job_id, stdout_offset, stderr_offset).await?;
-        std::io::stdout().write_all(&attachment.stdout)?;
-        std::io::stdout().flush()?;
-        std::io::stderr().write_all(&attachment.stderr)?;
-        std::io::stderr().flush()?;
-        stdout_offset = attachment.next_stdout_offset;
-        stderr_offset = attachment.next_stderr_offset;
-        if no_follow || attachment.record.state.is_terminal() {
-            if attachment.record.state.is_terminal() {
-                eprintln!(
-                    "{} {}",
-                    presentation::stderr().heading("Job"),
-                    state_name(attachment.record.state)
-                );
-            }
-            return Ok(());
-        }
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
-            _ = tokio::signal::ctrl_c() => {
-                eprintln!("{}", presentation::stderr().muted("Detached; the batch job is still running."));
-                return Ok(());
-            }
-        }
     }
 }
 

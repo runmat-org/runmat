@@ -39,6 +39,11 @@ impl<'a> EventState<'a> {
                 "worker event changed run identity".into(),
             ));
         }
+        if matches!(event.payload, TestEventPayload::ProcessOutput { .. }) {
+            return Err(crate::RunnerError::Protocol(
+                "worker events cannot certify physical process output ownership".into(),
+            ));
+        }
         if matches!(
             event.payload,
             TestEventPayload::RunStarted

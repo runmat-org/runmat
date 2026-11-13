@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use futures::{FutureExt, StreamExt};
 use log::info;
 use runmat_config::runtime::{GcPreset, JitOptLevel, RunMatRuntimeConfig};
 use runmat_core::{
@@ -13,13 +14,25 @@ use std::sync::mpsc;
 
 use crate::cli::Cli;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::create_session;
+use crate::commands::piped_input::PipedInput;
+use crate::commands::session::{
+    create_session_with_graphics,
+    drive_repl_with_graphics_callbacks as drive_with_graphics_callbacks,
+};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_compact_runtime_diagnostic, format_frontend_error};
 use crate::presentation::{self, StreamStyles};
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 
 pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()> {
+    execute_repl_with_graphics(config, cli, &runmat_core::SessionGraphicsHost::Unavailable).await
+}
+
+pub(crate) async fn execute_repl_with_graphics(
+    config: &RunMatRuntimeConfig,
+    cli: &Cli,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
     info!("Starting RunMat REPL");
     if config.runtime.verbose {
         info!("Verbose mode enabled");
@@ -32,11 +45,12 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         if enable_jit { "enabled" } else { "disabled" }
     );
 
-    let mut engine = create_session(
+    let mut engine = create_session_with_graphics(
         enable_jit,
         config.runtime.verbose,
         config,
         "Failed to create REPL engine",
+        graphics,
     )?;
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
     let _project_lease = install_project_for_source(&mut engine, &cwd, cli).await?;
@@ -45,58 +59,146 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         jit_enabled: config.jit.enabled,
         accelerate_enabled: config.accelerate.enabled,
     });
+    let local_tasks = engine.local_task_driver();
 
     info!("RunMat REPL ready");
 
     use rustyline::error::ReadlineError;
     use rustyline::DefaultEditor;
 
-    let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
-
     let stdin_is_tty = atty::is(atty::Stream::Stdin);
     if !stdin_is_tty {
-        let mut buffer = String::new();
-        io::stdin()
-            .read_to_string(&mut buffer)
+        // This CLI invocation is stdin's sole consumer until source admission;
+        // no script/input builtin is running while this owner collects it.
+        let buffer = PipedInput::stdin()?
+            .await
             .context("Failed to read piped input")?;
-        if !process_repl_input(&buffer, &mut engine, config).await? {
+        let callbacks = engine.graphics_callback_queue().cloned();
+        if !local_tasks
+            .drive_until(drive_with_graphics_callbacks(
+                callbacks,
+                process_repl_input(&buffer, &mut engine, config),
+            ))
+            .await
+            .context("Local callback driver stopped during piped REPL input")???
+        {
+            let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
+            engine.shutdown_local_tasks();
+            foreign_lifecycle.context("Failed to finish foreign runtime lifecycle")?;
             finalize_repl_session(&engine, session_start, repl_run);
             return Ok(());
         }
+        let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
+        engine.shutdown_local_tasks();
+        foreign_lifecycle.context("Failed to finish foreign runtime lifecycle")?;
         finalize_repl_session(&engine, session_start, repl_run);
         return Ok(());
     }
 
+    let mut rl = DefaultEditor::new().context("Failed to initialize line editor")?;
     print_repl_banner(config);
+    let prompt = presentation::stdout().brand("runmat> ");
+    let (input_sender, mut input) = futures::channel::mpsc::unbounded();
+    let (continue_sender, continue_receiver) = mpsc::channel();
+    let input_thread = std::thread::Builder::new()
+        .name("runmat-repl-input".into())
+        .spawn(move || loop {
+            let event = match rl.readline(&prompt) {
+                Ok(line) => {
+                    let _ = rl.add_history_entry(line.as_str());
+                    ReplInputEvent::Line(line)
+                }
+                Err(ReadlineError::Interrupted) => ReplInputEvent::Interrupted,
+                Err(ReadlineError::Eof) => ReplInputEvent::Eof,
+                Err(error) => ReplInputEvent::Error(format!("{error:?}")),
+            };
+            let expects_acknowledgement = matches!(event, ReplInputEvent::Line(_));
+            if input_sender.unbounded_send(event).is_err() || !expects_acknowledgement {
+                break;
+            }
+            if !continue_receiver.recv().unwrap_or(false) {
+                break;
+            }
+        })
+        .context("Failed to start REPL input thread")?;
 
+    let mut background_services_available = true;
     loop {
-        let prompt = presentation::stdout().brand("runmat> ");
-        let readline = rl.readline(&prompt);
-        match readline {
-            Ok(line) => {
-                let _ = rl.add_history_entry(line.as_str());
-
-                if !process_repl_input(&line, &mut engine, config).await? {
+        let callbacks = engine.graphics_callback_queue().cloned();
+        let wake = local_tasks
+            .drive_until(drive_with_graphics_callbacks(callbacks, async {
+                if background_services_available {
+                    let input_ready = input.next().fuse();
+                    let background_ready = engine.service_background_once().fuse();
+                    futures::pin_mut!(input_ready, background_ready);
+                    futures::select! {
+                        event = input_ready => ReplWake::Input(event),
+                        serviced = background_ready => ReplWake::Background(serviced),
+                    }
+                } else {
+                    ReplWake::Input(input.next().await)
+                }
+            }))
+            .await
+            .context("Local callback driver stopped while waiting for REPL input")??;
+        let ReplWake::Input(event) = wake else {
+            if let ReplWake::Background(serviced) = wake {
+                background_services_available = serviced;
+            }
+            continue;
+        };
+        match event {
+            Some(ReplInputEvent::Line(line)) => {
+                let callbacks = engine.graphics_callback_queue().cloned();
+                let keep_running = local_tasks
+                    .drive_until(drive_with_graphics_callbacks(
+                        callbacks,
+                        process_repl_input(&line, &mut engine, config),
+                    ))
+                    .await
+                    .context("Local callback driver stopped during REPL execution")???;
+                let _ = continue_sender.send(keep_running);
+                if !keep_running {
                     break;
                 }
             }
-            Err(ReadlineError::Interrupted) => {
+            Some(ReplInputEvent::Interrupted) => {
                 println!("{}", presentation::stdout().muted("CTRL-C"));
                 break;
             }
-            Err(ReadlineError::Eof) => {
+            Some(ReplInputEvent::Eof) => {
                 println!("{}", presentation::stdout().muted("CTRL-D"));
                 break;
             }
-            Err(err) => {
-                println!("{}: {:?}", presentation::stdout().error("Error"), err);
+            Some(ReplInputEvent::Error(error)) => {
+                println!("{}: {error}", presentation::stdout().error("Error"));
                 break;
             }
+            None => break,
         }
     }
+    let _ = continue_sender.send(false);
+    input_thread
+        .join()
+        .map_err(|_| anyhow::anyhow!("REPL input thread panicked"))?;
 
+    let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
+    engine.shutdown_local_tasks();
+    foreign_lifecycle.context("Failed to finish foreign runtime lifecycle")?;
     finalize_repl_session(&engine, session_start, repl_run);
     Ok(())
+}
+
+enum ReplInputEvent {
+    Line(String),
+    Interrupted,
+    Eof,
+    Error(String),
+}
+
+enum ReplWake {
+    Input(Option<ReplInputEvent>),
+    Background(bool),
 }
 
 fn print_repl_banner(config: &RunMatRuntimeConfig) {
@@ -258,6 +360,26 @@ async fn process_repl_input(
         }
     }
 
+    // Execution diagnostics/produced streams remain primary. A presentation
+    // failure is reported separately; fatal callback authority errors still
+    // retire the caller after its original diagnostic/output was presented.
+    if let Err(error) = engine.flush_graphics().await {
+        eprintln!(
+            "{}: {error}",
+            presentation::stderr().error("Graphics error")
+        );
+        if matches!(
+            error
+                .source
+                .as_deref()
+                .and_then(|source| source
+                    .downcast_ref::<runmat_runtime::context::GraphicsCallbackDriveError>()),
+            Some(runmat_runtime::context::GraphicsCallbackDriveError::Service(_))
+        ) {
+            return Err(error).context("graphics callback service failed after command output");
+        }
+    }
+
     Ok(true)
 }
 
@@ -332,7 +454,7 @@ async fn process_repl_line(
 
     let request = ExecutionRequest::for_source(
         SourceInput::Text {
-            name: "<repl>".to_string(),
+            name: "<repl>".into(),
             text: line.to_string(),
         },
         crate::diagnostics::parser_compat(config.language.compat),
@@ -353,7 +475,7 @@ async fn process_repl_line(
                     .as_ref()
                     .is_some_and(|profiling| profiling.total_ms > 10)
             {
-                if let Some(profiling) = outcome.profiling {
+                if let Some(profiling) = outcome.profiling.as_ref() {
                     println!(
                         "  {}",
                         presentation::stdout().muted(format!("({}ms)", profiling.total_ms))
@@ -362,9 +484,11 @@ async fn process_repl_line(
             }
         }
         Err(e) => {
-            if let Some(diag) = response.source_context.source_text().and_then(|source| {
-                format_frontend_error(&e, response.source_context.source_name(), source)
-            }) {
+            if let Some(diag) = format_frontend_error(
+                &e,
+                response.source_context.source_name(),
+                response.source_context.source_text(),
+            ) {
                 eprintln!("{diag}");
             } else {
                 eprintln!("{}: {e}", presentation::stderr().error("Execution error"));

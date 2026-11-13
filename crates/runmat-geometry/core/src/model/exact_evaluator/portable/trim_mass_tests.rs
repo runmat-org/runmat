@@ -85,8 +85,8 @@ fn classifier_and_mass_properties_preserve_typed_failures() {
             &BudgetControl::generous(),
         )
         .unwrap();
-    assert_eq!(properties.volume_m3, 1.0);
-    assert_eq!(properties.centroid_m, [0.5, 0.5, 0.5]);
+    assert_eq!(properties.volume_m3.canonical_value(), 1.0);
+    assert_eq!(properties.centroid_m.canonical_value(), [0.5, 0.5, 0.5]);
     let error = evaluator
         .mass_properties(
             &MassPropertiesEvaluatorId::new("mass:1").unwrap(),
@@ -147,6 +147,7 @@ fn circular_face_with_hole() -> (ExactEvaluatorRegistry, ExactBRepTopology, Exac
         curve_evaluator_id: CurveEvaluatorId::new("curve:2").unwrap(),
         start_vertex_id: Some(topology.vertices[0].id.clone()),
         end_vertex_id: Some(topology.vertices[0].id.clone()),
+        tolerance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(1.0e-8),
         is_closed: true,
         is_periodic: true,
         is_degenerate: false,
@@ -166,10 +167,13 @@ fn circular_face_with_hole() -> (ExactEvaluatorRegistry, ExactBRepTopology, Exac
         id: CurveEvaluatorId::new("curve:2").unwrap(),
         implementation: ExactCurveImplementation::Portable {
             definition: ExactCurveDefinition::Circle {
-                center_m: [0.0; 3],
+                center_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0; 3]),
                 x_axis: [1.0, 0.0, 0.0],
                 y_axis: [0.0, 1.0, 0.0],
-                radius_m: 0.25,
+                radius_m: runmat_types::physical::Length::new(0.25),
                 domain,
                 periodic: true,
             },
@@ -202,9 +206,9 @@ fn circular_face_with_hole() -> (ExactEvaluatorRegistry, ExactBRepTopology, Exac
 }
 
 fn part_id(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
+    PersistentEntityId::new(
         kind,
-        source_topology_id: source_topology_id.into(),
-        assembly_path: vec!["root".into(), "instance".into()],
-    }
+        source_topology_id.into(),
+        vec!["root".into(), "instance".into()],
+    )
 }

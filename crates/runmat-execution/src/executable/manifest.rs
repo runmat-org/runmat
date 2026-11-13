@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -12,7 +10,7 @@ use runmat_types::{
     CapabilityRequirement, CapabilitySet, InteropManifest, ParallelManifest, RegionContract,
 };
 
-pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V3;
+pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V4;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +19,7 @@ pub struct ExecutableUnitManifest {
     pub identity: ExecutableIdentity,
     pub revisions: ExecutableComponentRevisions,
     pub components: Vec<ExecutableComponentDescriptor>,
+    pub dependencies: Vec<super::ExecutableDependencyDescriptor>,
     pub capabilities: CapabilitySet,
     pub regions: Vec<RegionContract>,
     pub interop: InteropManifest,
@@ -39,6 +38,7 @@ impl ExecutableUnitManifest {
         self.identity.validate()?;
         self.revisions.validate()?;
         validate_component_descriptors(&self.components, &self.revisions)?;
+        super::dependencies::validate_descriptors(&self.dependencies)?;
         if self.identity.program.catalog_fingerprint() != &self.revisions.catalog_fingerprint {
             return Err(ContractError::invalid(
                 "executable.revisions.catalog_fingerprint",
@@ -71,25 +71,10 @@ impl ExecutableUnitManifest {
                 format!("{}: {}", error.path, error.message),
             )
         })?;
-        let region_ids = self
-            .regions
-            .iter()
-            .map(|region| region.id)
-            .collect::<BTreeSet<_>>();
-        if self
-            .parallel
-            .parfor_regions
-            .iter()
-            .map(|region| region.id.0)
-            .chain(self.parallel.spmd_regions.iter().map(|region| region.id.0))
-            .any(|region| !region_ids.contains(&region))
-        {
-            return Err(ContractError::invalid(
-                "executable.parallel.regions",
-                "every parallel construct must name a declared region contract",
-            ));
-        }
-        if !self.interop.foreign_types.is_empty()
+        // `regions` are independently discovered pure-operation runs. A
+        // structured parfor/SPMD body has its own contract in `parallel` and
+        // must not be identified by a coincident pure-run ordinal.
+        if (!self.interop.foreign_types.is_empty() || !self.interop.adapters.is_empty())
             && !self
                 .capabilities
                 .0
@@ -98,6 +83,17 @@ impl ExecutableUnitManifest {
             return Err(ContractError::invalid(
                 "executable.capabilities",
                 "foreign requirements need the foreign-runtime capability",
+            ));
+        }
+        if self
+            .interop
+            .adapters
+            .iter()
+            .any(|adapter| !adapter.capabilities.0.is_subset(&self.capabilities.0))
+        {
+            return Err(ContractError::invalid(
+                "executable.capabilities",
+                "foreign adapter capabilities must be declared by the executable",
             ));
         }
         if (!self.parallel.parfor_regions.is_empty() || !self.parallel.spmd_regions.is_empty())
@@ -144,6 +140,32 @@ impl ExecutableUnitManifest {
             support.validate_section(section)?;
         }
         Ok(())
+    }
+
+    /// Validate the complete executable capability contract against one host.
+    ///
+    /// Product frontends use this before decoding or invoking executable
+    /// payloads, so an unavailable native/foreign/parallel requirement cannot
+    /// turn into a late missing-symbol or dynamic-dispatch failure.
+    pub fn validate_capabilities_for(
+        &self,
+        available: &CapabilitySet,
+    ) -> Result<(), ContractError> {
+        self.validate()?;
+        let missing = self
+            .capabilities
+            .0
+            .difference(&available.0)
+            .copied()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(ContractError::invalid(
+                "executable.capabilities",
+                format!("host does not provide required capabilities: {missing:?}"),
+            ))
+        }
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContractError> {

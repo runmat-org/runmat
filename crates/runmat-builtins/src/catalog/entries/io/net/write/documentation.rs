@@ -1,0 +1,71 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("write"),
+    slug: Some("write"),
+    summary: "Write numeric or text payloads to a TCP client connection.",
+    description: "`write(t, data, ...)` sends binary or text payloads through a `tcpclient` connection with selectable datatype conversion, byte order, and timeout handling.",
+    keywords: &["write", "tcpclient", "networking", "socket", "binary data"],
+    related: &["tcpclient", "accept", "read", "readline", "close", "tcpserver"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Payload and datatype", paragraphs: &[
+            "`write(t, data)` sends values using the datatype of `data`. Double, single, and all eight native integer classes retain their native wire width and signedness.",
+            "`write(t, data, datatype)` converts before encoding. Supported tokens are `\"uint8\"`, `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Integer conversions saturate to the destination range; `\"char\"` uses single-byte character codes and `\"string\"` sends UTF-8 text.",
+            "The compatibility target documents real row and column vectors. Matrix and multidimensional numeric data, sparse data, and logical data are separate RunMat language extensions available in `runmat` mode.",
+            "The live client’s captured `ByteOrder` controls multi-byte numeric serialization. `\"little-endian\"` is the default, while `\"big-endian\"` matches network byte order. Editing a visible copied property does not reconfigure the socket.",
+            "RunMat returns the number of elements written when requested. The compatibility target documents `write` without an output, so assigning this value is RunMat-specific.",
+        ] },
+        BuiltinDocumentationSection { heading: "Connection, placement, and errors", paragraphs: &[
+            "The socket write executes on the host. Automatically resident data is gathered through its owning provider before byte conversion. Explicit `gpuArray` input requires `runmat` mode and is rejected in compatible modes before provider or socket access.",
+            "A write continues until all encoded bytes are sent or an error occurs. A timeout raises `RunMat:write:Timeout`; a peer closure before completion raises `RunMat:write:ConnectionClosed` and marks the live client disconnected. A write may already have sent a prefix before either error.",
+            "Networking terminates fusion; no accelerator kernel executes for this identity. Large payloads use the client’s timeout and byte-order settings.",
+        ] },
+        BuiltinDocumentationSection { heading: "Illustrative programs", paragraphs: &[
+            "Sending an array of bytes to an echo service\nclient = tcpclient(\"127.0.0.1\", 50000);\ncount = write(client, uint8(1:4))\nExpected display: count =\n     4",
+            "Writing doubles with explicit byte order\nclient = tcpclient(\"localhost\", 50001, \"ByteOrder\", \"big-endian\");\nvalues = [1.5 2.5 3.5];\nwrite(client, values, \"double\")",
+            "Transmitting ASCII text\nclient = tcpclient(\"127.0.0.1\", 50002);\nwrite(client, \"RunMat TCP\", \"char\")",
+            "Sending UTF-8 encoded strings\nclient = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, \"Διακριτό\", \"string\")",
+            "Handling connection closures\nclient = tcpclient(\"example.com\", 12345, \"Timeout\", 0.25);\ntry\n    write(client, uint8([1 2 3 4]));\ncatch err\n    disp(err.identifier)\nend\nPossible display when the peer closes early: RunMat:write:ConnectionClosed",
+        ] },
+    ],
+    examples: &[BuiltinExample {
+        id: "loopback-u8-write", title: "Send exact bytes to a local peer",
+        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\ncount = write(client, uint8([1 2 3 4]));\nassert(count == 4);\nclose(client);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeLoopbackNetwork,
+        fixture: BuiltinExampleFixture::Loopback(BuiltinLoopbackFixture {
+            id: BuiltinExampleFixtureId { local_name: "write-exact-u8" },
+            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: &[1, 2, 3, 4], server_bytes: b"" }] }),
+            endpoint_substitutions: &[BuiltinEndpointSubstitution::LoopbackHost, BuiltinEndpointSubstitution::LoopbackPort],
+        }),
+        requirements: BuiltinExampleRequirements { host: BuiltinExampleHostRequirement::NativeOnly, ..BuiltinExampleRequirements::NONE },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isa(count, 'double')); assert(count == 4);" },
+    }],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "How many output values does `write` return?", answer: "RunMat returns the number of elements written when requested. The compatibility target documents no output, so portable code should call `write` without assigning a result." },
+        BuiltinDocumentationFaq { question: "Does `write` support complex numbers?", answer: "No. The input must be real. Pass separate real and imaginary parts or convert to a byte representation manually." },
+        BuiltinDocumentationFaq { question: "How are values rounded when converting to integer datatypes?", answer: "Floating-point inputs are rounded to the nearest integer and then saturated to the target range (for example `uint8(255.7)` becomes `255`, and `int8(-128.2)` becomes `-128`)." },
+        BuiltinDocumentationFaq { question: "What happens to GPU-resident tensors?", answer: "Automatically resident tensors are gathered transparently. An explicit `gpuArray` argument requires `runmat` mode because the compatibility target does not document interactive device input for this operation." },
+        BuiltinDocumentationFaq { question: "Can I stream large payloads?", answer: "`write` loops until the entire payload has been sent or an error occurs. Large payloads honour the client’s timeout and byte-order settings; a failed call can already have sent a prefix." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "MATLAB language extensions", target: BuiltinDocumentationLinkTarget::Documentation("/docs/runtime/getting-started/language-extensions") },
+        BuiltinDocumentationLink { label: "tcpclient", target: BuiltinDocumentationLinkTarget::Builtin("tcpclient") },
+        BuiltinDocumentationLink { label: "accept", target: BuiltinDocumentationLinkTarget::Builtin("accept") },
+        BuiltinDocumentationLink { label: "read", target: BuiltinDocumentationLinkTarget::Builtin("read") },
+        BuiltinDocumentationLink { label: "readline", target: BuiltinDocumentationLinkTarget::Builtin("readline") },
+        BuiltinDocumentationLink { label: "close", target: BuiltinDocumentationLinkTarget::Builtin("close") },
+        BuiltinDocumentationLink { label: "tcpserver", target: BuiltinDocumentationLinkTarget::Builtin("tcpserver") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "Runtime TCP writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/write.rs") }, BuiltinDocumentationLink { label: "Typed TCP datatype authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-builtins/src/catalog/entries/io/net/datatype.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Socket write tests", location: "builtins::io::net::write::tests" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

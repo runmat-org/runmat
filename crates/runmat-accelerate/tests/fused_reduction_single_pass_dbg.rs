@@ -1,10 +1,14 @@
 #![cfg(feature = "wgpu")]
+#[path = "support/direct_reduction_runtime.rs"]
+mod invocation;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 
 use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
 use runmat_accelerate::graph::{
     InstrSpan, PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarKind,
 };
@@ -16,6 +20,8 @@ use std::collections::HashMap;
 
 #[test]
 fn fused_single_pass_sum_mul_no_alias() {
+    let runtime = invocation::runtime();
+    let _invocation = runtime.enter();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
     )
@@ -93,7 +99,7 @@ fn fused_single_pass_sum_mul_no_alias() {
             id: v_sum,
             origin: ValueOrigin::Unknown,
             ty: Type::tensor(),
-            shape: ShapeInfo::Tensor(vec![Some(cols)]),
+            shape: ShapeInfo::Tensor(vec![Some(1), Some(cols)]),
             constant: None,
         },
     ];
@@ -102,7 +108,7 @@ fn fused_single_pass_sum_mul_no_alias() {
         id: 0,
         kind: FusionKind::Reduction,
         nodes: vec![],
-        shape: ShapeInfo::Tensor(vec![Some(cols)]),
+        shape: ShapeInfo::Tensor(vec![Some(1), Some(cols)]),
         span: InstrSpan { start: 0, end: 1 },
         pattern: None,
         stack_layout: None,
@@ -118,7 +124,8 @@ fn fused_single_pass_sum_mul_no_alias() {
                 output: Some(v_mul),
             },
             FusionOp::Builtin {
-                name: "sum".to_string(),
+                origin: Default::default(),
+                name: "sum".into(),
                 inputs: vec![v_mul, v_dim],
                 output: Some(v_sum),
             },
@@ -152,13 +159,34 @@ fn fused_single_pass_sum_mul_no_alias() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x), Value::GpuTensor(w)],
         placement: None,
-        runtime: None,
+        runtime: Some(runtime.clone()),
     };
     // reduce_len = rows, num_slices = cols; single-pass expected
-    let out = execute_reduction(req, rows, cols, 0).expect("fused single-pass reduction");
+    let Some(out) =
+        futures::executor::block_on(selected_reduction::execute(req, rows, cols, &[1, cols], 0))
+            .expect("canonical single-pass reduction admission")
+    else {
+        return;
+    };
     match out {
         Value::GpuTensor(h) => {
-            assert_eq!(h.shape, vec![cols], "output shape should be [cols]");
+            assert_eq!(
+                h.shape(),
+                vec![1, cols],
+                "canonical sum retains its reduced axis"
+            );
+            let host =
+                futures::executor::block_on(provider.download(&h)).expect("actual GPU download");
+            for column in 0..cols {
+                let expected: f64 = (0..rows)
+                    .map(|row| xh[row + column * rows] * wh[row + column * rows])
+                    .sum();
+                assert!(
+                    (host.data[column] - expected).abs() < 1e-6,
+                    "column {column}: {} != {expected}",
+                    host.data[column]
+                );
+            }
         }
         _ => panic!("expected GPU tensor"),
     }

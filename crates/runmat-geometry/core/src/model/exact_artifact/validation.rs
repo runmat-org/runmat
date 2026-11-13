@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use super::{
     AdmittedExactGeometry, ExactGeometryManifest, EXACT_EVALUATOR_MEDIA_TYPE,
     EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION, EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE,
@@ -37,18 +35,20 @@ impl ExactGeometryManifest {
         if let Some(healing) = &self.healing_report {
             validate_component(healing, GEOMETRY_HEALING_MEDIA_TYPE)?;
         }
-        let mut digests = BTreeSet::new();
-        for component in [&self.topology, &self.evaluators]
+        let mut digests = [None; 4];
+        for (index, component) in [&self.topology, &self.evaluators]
             .into_iter()
             .chain(self.kernel_representation.iter())
             .chain(self.healing_report.iter())
+            .enumerate()
         {
-            if !digests.insert(component.digest) {
+            if digests[..index].contains(&Some(component.digest)) {
                 return Err(invalid(
                     "exact geometry component identity",
                     "component objects must have distinct content identities",
                 ));
             }
+            digests[index] = Some(component.digest);
         }
         Ok(())
     }
@@ -100,73 +100,37 @@ pub fn admit_exact_geometry_closure(
     manifest.validate_against_document(document)?;
     verify_object(&manifest.topology, topology_bytes)?;
     verify_object(&manifest.evaluators, evaluator_bytes)?;
-    let topology = super::decode_exact_topology(topology_bytes, model)?;
-    let evaluators = super::decode_exact_evaluators(evaluator_bytes, &topology, model)?;
-    let required_representation_digest = evaluators.kernel_representation_digest()?;
-    let kernel_representation = match (
-        &manifest.kernel_representation,
-        kernel_representation_bytes,
-        required_representation_digest,
-    ) {
-        (Some(reference), Some(bytes), Some(required_digest)) => {
-            verify_object(reference, bytes)?;
-            if reference.digest.bytes() != &required_digest {
-                return Err(invalid(
-                    "kernel representation binding",
-                    "every kernel evaluator must bind the inventoried representation object",
-                ));
-            }
-            Some(bytes.to_vec())
-        }
-        (None, None, None) => None,
-        (Some(_), Some(_), None) => {
-            return Err(invalid(
-                "kernel representation component",
-                "portable evaluator closures cannot carry an unreferenced kernel representation",
-            ));
-        }
-        _ => {
-            return Err(invalid(
-                "kernel representation component",
-                "manifest reference, supplied bytes, and kernel evaluator references must agree",
-            ));
-        }
-    };
-    let healing_report = match (&manifest.healing_report, healing_bytes) {
-        (Some(reference), Some(bytes)) => {
-            verify_object(reference, bytes)?;
-            let report = super::decode_geometry_healing_report(bytes)?;
-            if report.healed_topology_digest != manifest.topology.digest
-                || report.revision_map.target_revision != manifest.revision
-            {
-                return Err(invalid(
-                    "exact geometry healing binding",
-                    "healing must produce this topology and target revision",
-                ));
-            }
-            for target in report
-                .revision_map
-                .operations
-                .iter()
-                .flat_map(|operation| operation.targets())
-            {
-                if !topology_contains(&topology, target) {
-                    return Err(invalid(
-                        "exact geometry healed topology mapping",
-                        "every mapped target must exist in the admitted healed topology",
-                    ));
-                }
-            }
-            Some(report)
-        }
-        (None, None) => None,
+    match (&manifest.healing_report, healing_bytes) {
+        (Some(reference), Some(bytes)) => verify_object(reference, bytes)?,
+        (None, None) => {}
         _ => {
             return Err(invalid(
                 "exact geometry healing component",
                 "manifest reference and supplied healing bytes must agree",
-            ));
+            ))
         }
-    };
+    }
+    let super::DecodedExactGeometryComponents {
+        topology,
+        evaluators,
+        healing_report,
+    } = super::decode_exact_geometry_components(
+        super::ExactGeometryComponentBytes {
+            topology: topology_bytes,
+            evaluators: evaluator_bytes,
+            healing: healing_bytes,
+        },
+        model,
+    )?;
+    super::bindings::validate_exact_geometry_component_bindings(
+        document,
+        &manifest,
+        &topology,
+        &evaluators,
+        kernel_representation_bytes,
+        healing_report.as_ref(),
+    )?;
+    let kernel_representation = kernel_representation_bytes.map(<[u8]>::to_vec);
     Ok(AdmittedExactGeometry {
         manifest,
         topology,
@@ -176,30 +140,65 @@ pub fn admit_exact_geometry_closure(
     })
 }
 
-fn topology_contains(
+pub(super) fn topology_contains(
     topology: &crate::ExactBRepTopology,
     target: &crate::PersistentEntityId,
 ) -> bool {
     use crate::PersistentEntityKind;
 
     match target.kind {
-        PersistentEntityKind::Assembly => {
-            topology.assemblies.iter().any(|value| &value.id == target)
-        }
-        PersistentEntityKind::Instance => {
-            topology.instances.iter().any(|value| &value.id == target)
-        }
-        PersistentEntityKind::Body => topology.bodies.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Lump => topology.lumps.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Solid => topology.solids.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Shell => topology.shells.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Face => topology.faces.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Wire => topology.wires.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Coedge => topology.coedges.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Edge => topology.edges.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Vertex => topology.vertices.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Contact => topology.contacts.iter().any(|value| &value.id == target),
-        PersistentEntityKind::Region => topology.regions.iter().any(|value| &value.id == target),
+        PersistentEntityKind::Assembly => topology
+            .assemblies
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Instance => topology
+            .instances
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Body => topology
+            .bodies
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Lump => topology
+            .lumps
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Solid => topology
+            .solids
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Shell => topology
+            .shells
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Face => topology
+            .faces
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Wire => topology
+            .wires
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Coedge => topology
+            .coedges
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Edge => topology
+            .edges
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Vertex => topology
+            .vertices
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Contact => topology
+            .contacts
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
+        PersistentEntityKind::Region => topology
+            .regions
+            .binary_search_by(|value| value.id.cmp(target))
+            .is_ok(),
     }
 }
 
@@ -223,7 +222,10 @@ fn validate_component(
     Ok(())
 }
 
-fn verify_object(reference: &GeometryObjectRef, bytes: &[u8]) -> Result<(), GeometryContractError> {
+pub(super) fn verify_object(
+    reference: &GeometryObjectRef,
+    bytes: &[u8],
+) -> Result<(), GeometryContractError> {
     if reference.encoded_length != bytes.len() as u64
         || reference.digest != crate::model::canonical::digest(bytes)?
     {
@@ -235,6 +237,6 @@ fn verify_object(reference: &GeometryObjectRef, bytes: &[u8]) -> Result<(), Geom
     Ok(())
 }
 
-fn invalid(field: &str, reason: impl Into<String>) -> GeometryContractError {
+pub(super) fn invalid(field: &str, reason: impl Into<String>) -> GeometryContractError {
     GeometryContractError::invalid(field, reason)
 }

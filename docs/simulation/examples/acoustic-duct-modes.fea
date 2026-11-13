@@ -1,0 +1,40 @@
+geometry duct {
+    file = "./geometry/duct.step"
+    units = mm
+    region air : solid { select name "Duct"; expect exactly_one }
+    region near_end : face { select name "Near end"; expect exactly_one }
+    region far_end : face { select name "Far end"; expect exactly_one }
+}
+
+mesh duct on geometry.duct {
+    tetrahedra {
+        order = quadratic
+        target_size = 25 mm
+        maximum_deviation = 1 mm
+    }
+}
+
+material air {
+    mass_density = 1.2 kg/m^3
+    acoustic {
+        speed_of_sound = 343 m/s
+        damping_ratio = 0.0
+    }
+}
+
+model closed_duct {
+    assign material.air to geometry.duct.region.air
+    load near_wall {
+        acoustic.rigid_wall { target = geometry.duct.region.near_end }
+    }
+    load far_wall {
+        acoustic.rigid_wall { target = geometry.duct.region.far_end }
+    }
+}
+
+study acoustic_duct_modes {
+    geometry = geometry.duct
+    mesh = mesh.duct
+    model = model.closed_duct
+    analysis cavity { acoustic modal { modes = 8 } }
+}

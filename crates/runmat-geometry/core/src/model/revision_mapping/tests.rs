@@ -2,11 +2,7 @@ use super::*;
 use crate::{GeometryDigest, PersistentEntityKind};
 
 fn entity(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 fn map() -> GeometryRevisionMap {
@@ -184,4 +180,140 @@ fn display_cache_data_is_not_part_of_revision_mapping_identity() {
     assert!(!serde_json::to_string(&value)
         .unwrap()
         .contains("profile_id"));
+}
+
+#[test]
+fn region_remapping_is_atomic_and_rejects_deleted_or_unmapped_selections() {
+    use crate::{GeometryRegionRole, ResolvedGeometryRegion, ResolvedGeometryRegions};
+    let mut topology = crate::model::exact_topology_tests::topology();
+    let source = topology.faces[0].id.clone();
+    let target = PersistentEntityId::new(
+        source.kind,
+        "reexported-face".into(),
+        source.assembly_path.clone(),
+    );
+    topology.faces[0].id = target.clone();
+    let regions = ResolvedGeometryRegions::from([(
+        "support".into(),
+        ResolvedGeometryRegion {
+            role: GeometryRegionRole::Face,
+            entity_ids: vec![source.clone()],
+        },
+    )]);
+    let mut transition = map();
+    transition.operations = vec![GeometryRevisionOperation::Replace {
+        source: source.clone(),
+        target: target.clone(),
+    }];
+    let rebound = transition.remap_regions(&regions, &topology).unwrap();
+    assert_eq!(rebound["support"].entity_ids, vec![target.clone()]);
+    assert_eq!(regions["support"].entity_ids, vec![source.clone()]);
+
+    transition.operations = vec![GeometryRevisionOperation::Delete {
+        source: source.clone(),
+    }];
+    assert!(matches!(
+        transition.remap_regions(&regions, &topology),
+        Err(GeometryRevisionMappingError::Conflict(
+            GeometryRevisionConflict {
+                kind: GeometryRevisionConflictKind::Deleted,
+                ..
+            }
+        ))
+    ));
+    transition.operations = vec![GeometryRevisionOperation::Retain {
+        source: target.clone(),
+        target,
+    }];
+    assert!(matches!(
+        transition.remap_regions(&regions, &topology),
+        Err(GeometryRevisionMappingError::Conflict(
+            GeometryRevisionConflict {
+                kind: GeometryRevisionConflictKind::SourceNotMapped,
+                ..
+            }
+        ))
+    ));
+}
+
+#[test]
+fn region_remapping_never_picks_one_split_target_or_accepts_absent_targets() {
+    use crate::{GeometryRegionRole, ResolvedGeometryRegion, ResolvedGeometryRegions};
+    let topology = crate::model::exact_topology_tests::topology();
+    let source = topology.faces[0].id.clone();
+    let other =
+        PersistentEntityId::new(source.kind, "new-face".into(), source.assembly_path.clone());
+    let regions = ResolvedGeometryRegions::from([(
+        "load".into(),
+        ResolvedGeometryRegion {
+            role: GeometryRegionRole::Face,
+            entity_ids: vec![source.clone()],
+        },
+    )]);
+    let mut transition = map();
+    let mut targets = vec![source.clone(), other.clone()];
+    targets.sort();
+    transition.operations = vec![GeometryRevisionOperation::Split {
+        source: source.clone(),
+        targets,
+    }];
+    assert!(matches!(
+        transition.remap_regions(&regions, &topology),
+        Err(GeometryRevisionMappingError::Conflict(
+            GeometryRevisionConflict {
+                kind: GeometryRevisionConflictKind::MultipleCandidates,
+                ..
+            }
+        ))
+    ));
+    transition.operations = vec![GeometryRevisionOperation::Replace {
+        source,
+        target: other,
+    }];
+    assert!(matches!(
+        transition.remap_regions(&regions, &topology),
+        Err(GeometryRevisionMappingError::InvalidMap(_))
+    ));
+}
+
+#[test]
+fn authored_canonical_selector_rebinds_through_the_same_revision_map() {
+    use crate::GeometryRegionRole;
+    let mut topology = crate::model::exact_topology_tests::topology();
+    let source = topology.faces[0].id.clone();
+    let target = PersistentEntityId::new(
+        source.kind,
+        "reexported-face".into(),
+        source.assembly_path.clone(),
+    );
+    topology.faces[0].id = target.clone();
+    let mut transition = map();
+    transition.operations = vec![GeometryRevisionOperation::Replace {
+        source: source.clone(),
+        target: target.clone(),
+    }];
+    assert_eq!(
+        transition
+            .remap_selection_id(
+                &source.analysis_selection_id().unwrap(),
+                GeometryRegionRole::Face,
+                &topology
+            )
+            .unwrap(),
+        target.analysis_selection_id().unwrap()
+    );
+    assert!(transition
+        .remap_selection_id(
+            &source.source_topology_id,
+            GeometryRegionRole::Face,
+            &topology
+        )
+        .is_err());
+    assert!(transition
+        .remap_selection_id(
+            &source.analysis_selection_id().unwrap(),
+            GeometryRegionRole::Solid,
+            &topology
+        )
+        .is_err());
 }

@@ -1,164 +1,46 @@
 //! MATLAB-compatible `findobj` builtin over RunMat graphics handles.
 
 use regex::Regex;
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    FINDOBJ_DESCRIPTOR, FINDOBJ_INTEGER_CAPABILITIES,
+};
+use runmat_builtins::{
+    FINDOBJ_ERROR_INVALID_ARGUMENT, FINDOBJ_ERROR_PROPERTY_ACCESS, FINDOBJ_INTEGER_ROOT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use super::properties::{get_properties, map_figure_error, resolve_plot_handle, PlotHandle};
+use super::properties::{get_properties_async, map_figure_error, resolve_plot_handle, PlotHandle};
 use super::state::{self, FigureHandle, PlotObjectKind};
 use super::style::{parse_color_value, LineStyleParseOptions};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::handles::numeric_handle_from_integer;
-use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "findobj";
 
-const FINDOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Graphics handles that satisfy the requested hierarchy and property filters.",
-}];
-
-const FINDOBJ_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const FINDOBJ_INPUTS_FILTERS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filters",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Property/value predicates, -property, -regexp, -not, and logical operators.",
-}];
-
-const FINDOBJ_INPUTS_ROOTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "objhandles",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics handle or handle array that restricts the search root.",
-    },
-    BuiltinParamDescriptor {
-        name: "filters",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional depth/flat options and property predicates.",
-    },
-];
-
-const FINDOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "h = findobj()",
-        inputs: &FINDOBJ_INPUTS_NONE,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = findobj(prop, value, ...)",
-        inputs: &FINDOBJ_INPUTS_FILTERS,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = findobj(objhandles, '-depth', d, filters...)",
-        inputs: &FINDOBJ_INPUTS_ROOTS,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-];
-
-const FINDOBJ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FINDOBJ.INVALID_ARGUMENT",
-    identifier: Some("RunMat:findobj:InvalidArgument"),
-    when: "Arguments, search roots, depth, operators, property names, or regexp patterns are malformed.",
-    message: "findobj: invalid argument",
-};
-
-const FINDOBJ_ERRORS: [BuiltinErrorDescriptor; 1] = [FINDOBJ_ERROR_INVALID_ARGUMENT];
-
-pub const FINDOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FINDOBJ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FINDOBJ_ERRORS,
-};
-
-pub const FINDOBJ_INTEGER_ROOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "findobj-integer-root-aliases",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "findobj with typed-integer numeric graphics-handle aliases is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FindobjIntegerRootExtension"),
-};
-
-pub const FINDOBJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FINDOBJ_INTEGER_ROOT_EXTENSION];
-
-const FINDOBJ_INTEGER_ROOT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "objhandles",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode accepts exactly representable nonnegative host integers as aliases for its numeric graphics-handle registry; MATLAB accepts graphics objects.",
-    }];
-const FINDOBJ_INTEGER_DEPTH: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "d",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented nonnegative integer depth is read exactly from any built-in integer scalar; positive double Inf retains its documented unlimited-depth meaning.",
-    }];
-const FINDOBJ_INTEGER_PROPERTY_VALUE: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Property values may use any legal property class; integer values compare from authoritative storage with class-sensitive exact equality.",
-    }];
-const FINDOBJ_RESIDENT_INTEGER: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "resident root, depth, or property value",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Graphics search is host metadata work; resident numeric buffers are not graphics objects or metadata values and are never gathered.",
-    }];
-
-pub const FINDOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(integer_objhandles, ...)", inputs: &FINDOBJ_INTEGER_ROOT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "A separately gated RunMat alias validates exact representability before searching the host graphics hierarchy; output follows RunMat's current double handle representation." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(objhandles, '-depth', integer_d, ...)", inputs: &FINDOBJ_INTEGER_DEPTH, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Depth remains exact through nonnegative platform-bound validation and controls traversal without a floating computation boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(..., prop, integer_value, ...)", inputs: &FINDOBJ_INTEGER_PROPERTY_VALUE, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer scalar and array property values compare class-sensitively from authoritative storage, including values above flintmax; no numeric coercion is performed." },
-    BuiltinIntegerCapabilityDescriptor { form: "findobj(resident_integer, ...)", inputs: &FINDOBJ_RESIDENT_INTEGER, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Host graphics metadata search rejects resident numeric values without provider lookup, transfer, or kernel dispatch." },
-];
-
 #[runtime_builtin(
     name = "findobj",
-    category = "plotting",
-    summary = "Find graphics objects with matching properties.",
-    keywords = "findobj,graphics,handle,property,plotting",
-    suppress_auto_output = true,
-    extensions(crate::builtins::plotting::findobj::FINDOBJ_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::findobj::FINDOBJ_INTEGER_CAPABILITIES),
-    type_resolver(handle_array_type),
-    descriptor(crate::builtins::plotting::findobj::FINDOBJ_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::findobj"
 )]
-pub fn findobj_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn findobj_builtin_async(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let request = FindRequest::parse(args)?;
     let mut matches = Vec::new();
     for root in request.roots {
-        collect_matches(root, 0, request.max_depth, &request.expr, &mut matches)?;
+        collect_matches(root, request.max_depth, &request.expr, &mut matches).await?;
     }
     Ok(handle_array(matches))
+}
+
+#[cfg(test)]
+pub fn findobj_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    futures::executor::block_on(findobj_builtin_async(args))
 }
 
 #[derive(Clone)]
@@ -169,17 +51,17 @@ struct FindRequest {
 }
 
 impl FindRequest {
-    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         if args.first().is_some_and(is_host_integer_handle_alias) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FINDOBJ_INTEGER_ROOT_EXTENSION,
                 BUILTIN_NAME,
             )?;
         }
-        let (roots, rest) = if let Some((roots, rest)) = split_root_handles(&args)? {
+        let (roots, rest) = if let Some((roots, rest)) = split_root_handles(args.view())? {
             (roots, rest)
         } else {
-            (vec![0.0], args.as_slice())
+            (vec![0.0], args.view())
         };
 
         let (max_depth, rest) = parse_depth(rest)?;
@@ -201,13 +83,18 @@ impl FindRequest {
     }
 }
 
-fn split_root_handles(args: &[Value]) -> crate::BuiltinResult<Option<(Vec<f64>, &[Value])>> {
+fn split_root_handles(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Option<(Vec<f64>, crate::call::FunctionArgumentView<'_>)>> {
     let Some(first) = args.first() else {
         return Ok(None);
     };
     match first {
-        Value::Num(value) => Ok(Some((vec![*value], &args[1..]))),
-        Value::Int(value) => Ok(Some((vec![exact_numeric_root(value)?], &args[1..]))),
+        Value::Num(value) => Ok(Some((vec![*value], args.range(1..).expect("root tail")))),
+        Value::Int(value) => Ok(Some((
+            vec![exact_numeric_root(value)?],
+            args.range(1..).expect("root tail"),
+        ))),
         Value::Tensor(tensor) => {
             let roots = if let Some(storage) = tensor.integer_storage() {
                 storage
@@ -218,7 +105,7 @@ fn split_root_handles(args: &[Value]) -> crate::BuiltinResult<Option<(Vec<f64>, 
             } else {
                 tensor_utils::tensor_values_f64(tensor)
             };
-            Ok(Some((roots, &args[1..])))
+            Ok(Some((roots, args.range(1..).expect("root tail"))))
         }
         _ => Ok(None),
     }
@@ -235,16 +122,18 @@ fn is_host_integer_handle_alias(value: &Value) -> bool {
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
-fn parse_depth(args: &[Value]) -> crate::BuiltinResult<(Option<usize>, &[Value])> {
+fn parse_depth(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<(Option<usize>, crate::call::FunctionArgumentView<'_>)> {
     let mut max_depth = None;
     let mut rest = args;
     loop {
-        let Some(option) = rest.first().and_then(text_scalar) else {
+        let Some(option) = rest.first().map(text_scalar).transpose()?.flatten() else {
             break;
         };
         if option.eq_ignore_ascii_case("flat") {
             max_depth = Some(0);
-            rest = &rest[1..];
+            rest = rest.range(1..).expect("flat tail");
             continue;
         }
         if option.eq_ignore_ascii_case("-depth") {
@@ -252,7 +141,7 @@ fn parse_depth(args: &[Value]) -> crate::BuiltinResult<(Option<usize>, &[Value])
                 return Err(invalid_argument("-depth requires a nonnegative integer"));
             };
             max_depth = Some(depth_from_value(depth_value)?);
-            rest = &rest[2..];
+            rest = rest.range(2..).expect("depth tail");
             continue;
         }
         break;
@@ -297,31 +186,41 @@ enum Expr {
 }
 
 impl Expr {
-    fn matches(&self, handle: f64) -> bool {
-        match self {
-            Expr::True => true,
-            Expr::HasProperty(prop) => property_value(handle, prop).is_some(),
-            Expr::Equals(prop, expected) => property_value(handle, prop)
-                .is_some_and(|actual| values_match(prop, &actual, expected)),
-            Expr::Regex(prop, regexes) => property_value(handle, prop)
-                .map(value_texts)
-                .is_some_and(|texts| {
-                    texts
-                        .iter()
-                        .any(|text| regexes.iter().any(|regex| regex.is_match(text)))
-                }),
-            Expr::Not(expr) => !expr.matches(handle),
-            Expr::And(left, right) => left.matches(handle) && right.matches(handle),
-            Expr::Or(left, right) => left.matches(handle) || right.matches(handle),
-            Expr::Xor(left, right) => left.matches(handle) ^ right.matches(handle),
-        }
+    fn matches<'a>(
+        &'a self,
+        handle: f64,
+    ) -> futures::future::LocalBoxFuture<'a, crate::BuiltinResult<bool>> {
+        Box::pin(async move {
+            Ok(match self {
+                Expr::True => true,
+                Expr::HasProperty(prop) => property_value_async(handle, prop).await?.is_some(),
+                Expr::Equals(prop, expected) => match property_value_async(handle, prop).await? {
+                    Some(actual) => values_match(prop, &actual, expected)?,
+                    None => false,
+                },
+                Expr::Regex(prop, regexes) => match property_value_async(handle, prop).await? {
+                    Some(actual) => value_matches_regex(&actual, regexes)?,
+                    None => false,
+                },
+                Expr::Not(expr) => !expr.matches(handle).await?,
+                Expr::And(left, right) => {
+                    left.matches(handle).await? && right.matches(handle).await?
+                }
+                Expr::Or(left, right) => {
+                    left.matches(handle).await? || right.matches(handle).await?
+                }
+                Expr::Xor(left, right) => {
+                    left.matches(handle).await? ^ right.matches(handle).await?
+                }
+            })
+        })
     }
 }
 
-fn parse_expr(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
+fn parse_expr(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<(Expr, usize)> {
     let (mut expr, mut consumed) = parse_factor(args)?;
     while consumed < args.len() {
-        let (op, op_len) = match args.get(consumed).and_then(text_scalar) {
+        let (op, op_len) = match args.get(consumed).map(text_scalar).transpose()?.flatten() {
             Some(text) if text.eq_ignore_ascii_case("-and") => (LogicalOp::And, 1),
             Some(text) if text.eq_ignore_ascii_case("-or") => (LogicalOp::Or, 1),
             Some(text) if text.eq_ignore_ascii_case("-xor") => (LogicalOp::Xor, 1),
@@ -334,7 +233,10 @@ fn parse_expr(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
             }
             _ => (LogicalOp::And, 0),
         };
-        let (rhs, rhs_len) = parse_factor(&args[consumed + op_len..])?;
+        let (rhs, rhs_len) = parse_factor(
+            args.range(consumed + op_len..)
+                .expect("bounded predicate tail"),
+        )?;
         expr = match op {
             LogicalOp::And => Expr::And(Box::new(expr), Box::new(rhs)),
             LogicalOp::Or => Expr::Or(Box::new(expr), Box::new(rhs)),
@@ -345,34 +247,37 @@ fn parse_expr(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
     Ok((expr, consumed))
 }
 
-fn parse_factor(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
+fn parse_factor(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<(Expr, usize)> {
     let Some(first) = args.first() else {
         return Err(invalid_argument("expected a predicate"));
     };
     if let Value::Cell(cell) = first {
-        let (expr, consumed) = parse_expr(&cell.data)?;
-        if consumed != cell.data.len() {
+        let (expr, consumed) =
+            parse_expr(crate::call::FunctionArgumentView::from_slice(cell.data()))?;
+        if consumed != cell.data().len() {
             return Err(invalid_argument("unable to parse grouped predicate"));
         }
         return Ok((expr, 1));
     }
 
-    let Some(text) = text_scalar(first) else {
+    let Some(text) = text_scalar(first)? else {
         return Err(invalid_argument("expected a property name or operator"));
     };
 
     if text.eq_ignore_ascii_case("-not") {
-        let (expr, consumed) = parse_factor(&args[1..])?;
+        let (expr, consumed) = parse_factor(args.range(1..).expect("not predicate tail"))?;
         return Ok((Expr::Not(Box::new(expr)), consumed + 1));
     }
     if text.eq_ignore_ascii_case("-property") {
-        let Some(prop) = args.get(1).and_then(text_scalar) else {
+        let Some(prop) = args.get(1).map(text_scalar).transpose()?.flatten() else {
             return Err(invalid_argument("-property requires a property name"));
         };
         return Ok((Expr::HasProperty(prop), 2));
     }
     if text.eq_ignore_ascii_case("-regexp") {
-        let Some(prop) = args.get(1).and_then(text_scalar) else {
+        let Some(prop) = args.get(1).map(text_scalar).transpose()?.flatten() else {
             return Err(invalid_argument("-regexp requires a property name"));
         };
         let Some(pattern_value) = args.get(2) else {
@@ -404,16 +309,24 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
     let patterns =
         match value {
             Value::Cell(cell) => cell
-                .data
+                .data()
                 .iter()
                 .map(|value| {
-                    text_scalar(value).ok_or_else(|| {
+                    text_scalar(value)?.ok_or_else(|| {
                         invalid_argument("-regexp cell patterns must contain text values")
                     })
                 })
                 .collect::<crate::BuiltinResult<Vec<_>>>()?,
-            Value::StringArray(strings) => strings.data.clone(),
-            _ => vec![text_scalar(value)
+            Value::StringArray(strings) => strings
+                .data()
+                .iter()
+                .map(|text| {
+                    text.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| invalid_argument("-regexp pattern must be text"))
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?,
+            _ => vec![text_scalar(value)?
                 .ok_or_else(|| invalid_argument("-regexp pattern must be text"))?],
         };
     if patterns.is_empty() {
@@ -425,21 +338,23 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
         .collect()
 }
 
-fn collect_matches(
-    handle: f64,
-    depth: usize,
+async fn collect_matches(
+    root: f64,
     max_depth: Option<usize>,
     expr: &Expr,
     out: &mut Vec<f64>,
 ) -> crate::BuiltinResult<()> {
-    if expr.matches(handle) {
-        out.push(handle);
-    }
-    if max_depth.is_some_and(|max| depth >= max) {
-        return Ok(());
-    }
-    for child in child_handles(handle)? {
-        collect_matches(child, depth.saturating_add(1), max_depth, expr, out)?;
+    let mut stack = vec![(root, 0usize)];
+    while let Some((handle, depth)) = stack.pop() {
+        if expr.matches(handle).await? {
+            out.push(handle);
+        }
+        if max_depth.is_some_and(|max| depth >= max) {
+            continue;
+        }
+        for child in child_handles(handle)?.into_iter().rev() {
+            stack.push((child, depth.saturating_add(1)));
+        }
     }
     Ok(())
 }
@@ -537,52 +452,93 @@ fn axes_children(figure: FigureHandle, axes_index: usize) -> crate::BuiltinResul
     Ok(children)
 }
 
-fn property_value(handle: f64, property: &str) -> Option<Value> {
-    let resolved = resolve_plot_handle(&Value::Num(handle), BUILTIN_NAME).ok()?;
-    get_properties(resolved, Some(property), BUILTIN_NAME).ok()
+async fn property_value_async(handle: f64, property: &str) -> crate::BuiltinResult<Option<Value>> {
+    let Ok(resolved) = resolve_plot_handle(&Value::Num(handle), BUILTIN_NAME) else {
+        return Ok(None);
+    };
+    match get_properties_async(resolved, Some(property), BUILTIN_NAME).await {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.source.is_none() => Ok(None),
+        Err(error) => {
+            let span = error.span;
+            let retry = error.gpu_gather_retry();
+            let mut builder = build_runtime_error(format!(
+                "{}: {}",
+                FINDOBJ_ERROR_PROPERTY_ACCESS.message, error.message
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_gpu_gather_retry(retry)
+            .with_source(error);
+            if let Some(identifier) = FINDOBJ_ERROR_PROPERTY_ACCESS.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                builder = builder.with_span(span);
+            }
+            Err(builder.build())
+        }
+    }
 }
 
-fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
-    let prop = property.trim();
-    if prop.eq_ignore_ascii_case("Color") || prop.to_ascii_lowercase().ends_with("color") {
-        if let (Some(left), Some(right)) = (color_from_value(actual), color_from_value(expected)) {
-            return (left - right).abs().max_element() <= 1e-6;
-        }
-    }
+#[cfg(test)]
+fn property_value(handle: f64, property: &str) -> Option<Value> {
+    futures::executor::block_on(property_value_async(handle, property))
+        .expect("property lookup should not fail operationally")
+}
 
-    if prop.eq_ignore_ascii_case("Type") {
-        if let (Some(left), Some(right)) = (single_text(actual), single_text(expected)) {
-            return left.eq_ignore_ascii_case(&right);
+fn values_match(property: &str, actual: &Value, expected: &Value) -> crate::BuiltinResult<bool> {
+    Ok({
+        let prop = property.trim();
+        if prop.eq_ignore_ascii_case("Color") || prop.to_ascii_lowercase().ends_with("color") {
+            if let (Some(left), Some(right)) =
+                (color_from_value(actual)?, color_from_value(expected)?)
+            {
+                return Ok((left - right).abs().max_element() <= 1e-6);
+            }
         }
-    }
 
-    if let Some(expected_bool) = on_off_bool(expected) {
-        if let Some(actual_bool) = on_off_bool(actual) {
-            return actual_bool == expected_bool;
+        if prop.eq_ignore_ascii_case("Type") {
+            if let (Some(left), Some(right)) = (single_text(actual)?, single_text(expected)?) {
+                return Ok(left.eq_ignore_ascii_case(&right));
+            }
         }
-    }
 
-    match (actual, expected) {
-        (Value::Num(left), Value::Num(right)) => numbers_equal(*left, *right),
-        (Value::Int(left), Value::Int(right)) => left == right,
-        (Value::Num(_), Value::Int(_)) | (Value::Int(_), Value::Num(_)) => false,
-        (Value::Bool(left), Value::Bool(right)) => left == right,
-        (Value::String(left), Value::String(right)) => left == right,
-        (Value::CharArray(left), Value::CharArray(right)) => left.data == right.data,
-        (Value::String(left), Value::CharArray(right)) => {
-            left == &right.data.iter().collect::<String>()
+        if let Some(expected_bool) = on_off_bool(expected) {
+            if let Some(actual_bool) = on_off_bool(actual) {
+                return Ok(actual_bool == expected_bool);
+            }
         }
-        (Value::CharArray(left), Value::String(right)) => {
-            &left.data.iter().collect::<String>() == right
+
+        match (actual, expected) {
+            (Value::Num(left), Value::Num(right)) => numbers_equal(*left, *right),
+            (Value::Int(left), Value::Int(right)) => left == right,
+            (Value::Num(_), Value::Int(_)) | (Value::Int(_), Value::Num(_)) => false,
+            (Value::Bool(left), Value::Bool(right)) => left == right,
+            (Value::String(left), Value::String(right)) => {
+                !left.is_missing() && !right.is_missing() && left == right
+            }
+            (Value::CharArray(left), Value::CharArray(right)) => left.data() == right.data(),
+            (Value::String(left), Value::CharArray(right)) => left.as_str().is_some_and(|left| {
+                left.encode_utf16()
+                    .eq(right.data().iter().map(|unit| unit.raw()))
+            }),
+            (Value::CharArray(left), Value::String(right)) => {
+                left.data().iter().map(|unit| unit.raw()).eq(right
+                    .as_str()
+                    .map(str::encode_utf16)
+                    .into_iter()
+                    .flatten())
+                    && !right.is_missing()
+            }
+            (Value::Tensor(left), Value::Tensor(right)) => {
+                left.shape() == right.shape() && tensor_values_match(left, right)
+            }
+            (Value::StringArray(left), Value::StringArray(right)) => {
+                left.shape == right.shape && left.data() == right.data()
+            }
+            _ => false,
         }
-        (Value::Tensor(left), Value::Tensor(right)) => {
-            left.shape == right.shape && tensor_values_match(left, right)
-        }
-        (Value::StringArray(left), Value::StringArray(right)) => {
-            left.shape == right.shape && left.data == right.data
-        }
-        _ => false,
-    }
+    })
 }
 
 fn tensor_values_match(left: &Tensor, right: &Tensor) -> bool {
@@ -629,10 +585,13 @@ fn numbers_equal(left: f64, right: f64) -> bool {
     }
 }
 
-fn color_from_value(value: &Value) -> Option<glam::Vec4> {
-    parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value)
-        .ok()
-        .or_else(|| single_text(value).and_then(|text| color_from_bracketed_text(&text)))
+fn color_from_value(value: &Value) -> crate::BuiltinResult<Option<glam::Vec4>> {
+    let text = single_text(value)?;
+    Ok(
+        parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value)
+            .ok()
+            .or_else(|| text.and_then(|text| color_from_bracketed_text(&text))),
+    )
 }
 
 fn color_from_bracketed_text(text: &str) -> Option<glam::Vec4> {
@@ -653,35 +612,84 @@ fn color_from_bracketed_text(text: &str) -> Option<glam::Vec4> {
 fn on_off_bool(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
-        _ => single_text(value).and_then(|text| match text.trim().to_ascii_lowercase().as_str() {
-            "on" | "true" => Some(true),
-            "off" | "false" => Some(false),
-            _ => None,
-        }),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            match array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "on" | "true" => Some(true),
+                "off" | "false" => Some(false),
+                _ => None,
+            }
+        }
+        _ => {
+            let eq =
+                |key| crate::builtins::plotting::style::value_text_equals_ascii(value, key, true);
+            if eq("on") || eq("true") {
+                Some(true)
+            } else if eq("off") || eq("false") {
+                Some(false)
+            } else {
+                None
+            }
+        }
     }
 }
 
-fn value_texts(value: Value) -> Vec<String> {
-    match value {
-        Value::String(text) => vec![text],
-        Value::CharArray(chars) => vec![chars.data.into_iter().collect()],
-        Value::StringArray(strings) => strings.data,
-        Value::Cell(cell) => cell.data.into_iter().flat_map(value_texts).collect(),
-        _ => Vec::new(),
-    }
+fn value_matches_regex(value: &Value, regexes: &[Regex]) -> crate::BuiltinResult<bool> {
+    let matches = |text: &str| regexes.iter().any(|regex| regex.is_match(text));
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(text)) => matches(text.as_str()),
+        Value::CharArray(chars) => matches(
+            &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid_argument(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
+        Value::StringArray(strings) => strings
+            .data()
+            .iter()
+            .any(|text| text.as_str().is_some_and(|text| matches(text))),
+        Value::Cell(cell) => {
+            for child in cell.data() {
+                if value_matches_regex(child, regexes)? {
+                    return Ok(true);
+                }
+            }
+            false
+        }
+        _ => false,
+    })
 }
 
-fn single_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        Value::StringArray(strings) if strings.data.len() == 1 => strings.data.first().cloned(),
+fn single_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(text)) => Some(text.as_str().to_owned()),
+        Value::CharArray(chars) => Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid_argument(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            strings
+                .data()
+                .first()
+                .and_then(|text| text.as_str().map(str::to_owned))
+        }
         _ => None,
-    }
+    })
 }
 
-fn text_scalar(value: &Value) -> Option<String> {
-    single_text(value).map(|text| text.trim().to_string())
+fn text_scalar(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(single_text(value)?.map(|text| text.trim().to_string()))
 }
 
 fn handle_array(handles: Vec<f64>) -> Value {
@@ -802,9 +810,11 @@ mod tests {
             IntegerStorage::U64(vec![3]),
         ] {
             let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer root");
-            let (roots, _) = split_root_handles(&[Value::Tensor(tensor)])
-                .expect("root parse")
-                .expect("root list");
+            let values = [Value::Tensor(tensor)];
+            let (roots, _) =
+                split_root_handles(crate::call::FunctionArgumentView::from_slice(&values))
+                    .expect("root parse")
+                    .expect("root list");
             assert_eq!(roots, vec![3.0]);
         }
         assert!(exact_numeric_root(&runmat_value::IntValue::I64(-1)).is_err());
@@ -823,9 +833,10 @@ mod tests {
     fn findobj_root_handles_reads_typed_integer_storage_exactly() {
         let roots = Tensor::new_integer(IntegerStorage::U16(vec![11, 13]), vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(roots), Value::String("Type".into())];
-        let (handles, rest) = split_root_handles(&args)
-            .expect("split roots")
-            .expect("root handle list");
+        let (handles, rest) =
+            split_root_handles(crate::call::FunctionArgumentView::from_slice(&args))
+                .expect("split roots")
+                .expect("root handle list");
 
         assert_eq!(handles, vec![11.0, 13.0]);
         assert_eq!(rest.len(), 1);
@@ -842,19 +853,30 @@ mod tests {
                 .unwrap(),
         );
 
-        assert!(!values_match("UserData", &left, &right));
-        assert!(values_match("UserData", &left, &left));
+        assert!(!values_match("UserData", &left, &right).unwrap());
+        assert!(values_match("UserData", &left, &left).unwrap());
+        let raw = Value::CharArray(
+            runmat_value::CharArray::from_code_units(
+                vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+        assert!(values_match("UserData", &raw, &raw).unwrap());
+        assert!(value_matches_regex(&raw, &[Regex::new(".*").unwrap()]).is_err());
 
         let other_class = Value::Tensor(
             Tensor::new_integer(IntegerStorage::I64(vec![9_007_199_254_740_992]), vec![1, 1])
                 .unwrap(),
         );
-        assert!(!values_match("UserData", &left, &other_class));
+        assert!(!values_match("UserData", &left, &other_class).unwrap());
         assert!(!values_match(
             "UserData",
             &Value::Num(9_007_199_254_740_992.0),
             &Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_992)),
-        ));
+        )
+        .unwrap());
     }
 
     #[test]
@@ -1012,7 +1034,7 @@ mod tests {
         assert!(not_axes.contains(&figure));
         assert!(!not_axes.iter().any(|handle| {
             property_value(*handle, "Type")
-                .and_then(|value| single_text(&value))
+                .and_then(|value| single_text(&value).unwrap())
                 .is_some_and(|text| text == "axes")
         }));
 

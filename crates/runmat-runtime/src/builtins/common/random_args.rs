@@ -1,36 +1,87 @@
 use crate::builtins::common::tensor;
 use runmat_value::{ComplexTensor, IntValue, NumericScalar, Value};
 
+#[cfg(test)]
+mod owned_constructor_tests;
+
 pub(crate) fn validate_constructor_gpu_output(
     label: &str,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    mut output: runmat_accelerate_api::GpuTensorHandle,
+    output: runmat_accelerate_api::GpuTensorHandle,
     expected_shape: &[usize],
     expected_storage: runmat_accelerate_api::GpuTensorStorage,
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
     expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
     expected_logical: bool,
-) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
-    let expected_class = if expected_logical {
-        "logical"
-    } else if let Some(integer) = expected_integer {
-        match integer {
-            runmat_accelerate_api::IntegerElementType::I8 => "int8",
-            runmat_accelerate_api::IntegerElementType::I16 => "int16",
-            runmat_accelerate_api::IntegerElementType::I32 => "int32",
-            runmat_accelerate_api::IntegerElementType::I64 => "int64",
-            runmat_accelerate_api::IntegerElementType::U8 => "uint8",
-            runmat_accelerate_api::IntegerElementType::U16 => "uint16",
-            runmat_accelerate_api::IntegerElementType::U32 => "uint32",
-            runmat_accelerate_api::IntegerElementType::U64 => "uint64",
-        }
-    } else {
-        match expected_precision {
-            Some(runmat_accelerate_api::ProviderPrecision::F32) => "single",
-            Some(runmat_accelerate_api::ProviderPrecision::F64) => "double",
-            None => "",
-        }
-    };
+) -> crate::BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    validate_constructor_gpu_output_protecting(
+        label,
+        provider,
+        output,
+        expected_shape,
+        expected_storage,
+        expected_precision,
+        expected_integer,
+        expected_logical,
+        &[],
+    )
+}
+
+/// Validate a newly allocated constructor result without adopting, relabelling,
+/// or releasing borrowed inputs (including a `like` prototype).
+pub(crate) fn validate_constructor_gpu_output_protecting(
+    label: &str,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    expected_storage: runmat_accelerate_api::GpuTensorStorage,
+    expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
+    expected_logical: bool,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> crate::BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    validate_constructor_gpu_storage_protecting(
+        label,
+        provider,
+        output,
+        expected_shape,
+        expected_storage,
+        expected_precision,
+        expected_integer,
+        expected_logical,
+        protected,
+    )?
+    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+    .map_err(|source| {
+        crate::build_runtime_error(format!(
+            "{label}: cannot adopt constructor result: {source}"
+        ))
+        .with_builtin(label)
+        .with_source(source)
+        .build()
+    })
+}
+
+/// Validate physical ownership/class without allocating a replacement view.
+/// Intermediate provider outputs use this until their final language result
+/// is known, so each retry does not mint another retained view claim.
+pub(crate) fn validate_constructor_gpu_storage_protecting(
+    label: &str,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    expected_storage: runmat_accelerate_api::GpuTensorStorage,
+    expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
+    expected_logical: bool,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> crate::BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    use crate::builtins::common::gpu_helpers::{exact_provider_for_handle, reject_gpu_output};
+    let expected_class = crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
+        expected_precision,
+        expected_integer,
+        expected_logical,
+    );
     let expected_element = expected_integer
         .map(runmat_accelerate_api::NumericElementType::from)
         .or_else(|| {
@@ -43,26 +94,41 @@ pub(crate) fn validate_constructor_gpu_output(
                 }
             })
         });
-    let existing_class = runmat_accelerate_api::handle_class_name(&output);
-    let valid = output.device_id == provider.device_id()
-        && output.shape == expected_shape
-        && runmat_accelerate_api::provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && output.descriptor.storage == Some(expected_storage)
-        && output.descriptor.element_type == expected_element
-        && (!runmat_accelerate_api::handle_is_logical(&output) || expected_logical)
+    let existing_class = runmat_accelerate_api::handle_class_identity(&output);
+    let valid = expected_class.is_some()
+        && !protected
+            .iter()
+            .any(|input| output.shares_allocation_with(input))
+        && output.device_id() == provider.device_id()
+        && output.shape() == expected_shape
+        && exact_provider_for_handle(&output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+        && output.descriptor().storage == Some(expected_storage)
+        && (if expected_logical {
+            expected_storage == runmat_accelerate_api::GpuTensorStorage::Real
+                && matches!(
+                    output.physical().element_type(),
+                    runmat_accelerate_api::NumericElementType::U8
+                        | runmat_accelerate_api::NumericElementType::F32
+                        | runmat_accelerate_api::NumericElementType::F64
+                )
+        } else {
+            output.descriptor().element_type == expected_element
+        })
+        && runmat_accelerate_api::handle_is_logical(&output) == expected_logical
         && existing_class
-            .as_deref()
-            .is_none_or(|class_name| class_name == expected_class);
+            .as_ref()
+            .is_some_and(|class_identity| Some(class_identity) == expected_class.as_ref());
     if !valid {
-        let _ = provider.free(&output);
-        return Err(format!(
-            "{label}: provider returned an invalid constructor result"
+        return Err(reject_gpu_output(
+            output,
+            crate::build_runtime_error(format!(
+                "{label}: provider returned an invalid constructor result"
+            ))
+            .with_builtin(label)
+            .build(),
         ));
     }
-    runmat_accelerate_api::set_handle_logical(&output, expected_logical);
-    runmat_accelerate_api::set_handle_class_name(&output, expected_class);
-    runmat_accelerate_api::mark_handle_explicit(&mut output);
     Ok(output)
 }
 
@@ -101,9 +167,10 @@ pub(crate) async fn extract_constructor_dimensions(
                 }));
             }
             let scalar = len == 1;
-            let row = tensor.shape.len() >= 2 && tensor.shape[0] == 1;
-            let column = tensor.shape.len() >= 2 && tensor.shape[1] == 1;
-            if !(scalar || row || column || tensor.shape.len() == 1) {
+            let shape = tensor.shape();
+            let row = shape.len() >= 2 && shape[0] == 1;
+            let column = shape.len() >= 2 && shape[1] == 1;
+            if !(scalar || row || column || shape.len() == 1) {
                 return Ok(None);
             }
             let values = (0..len)
@@ -147,34 +214,69 @@ pub(crate) fn normalize_constructor_shape(mut dimensions: Vec<usize>) -> Vec<usi
 }
 
 fn parse_constructor_numeric_dimension(value: NumericScalar, label: &str) -> Result<usize, String> {
+    checked_constructor_numeric_dimension(value).map_err(|error| error.message(label))
+}
+
+fn parse_constructor_float_dimension(value: f64, label: &str) -> Result<usize, String> {
+    checked_constructor_float_dimension(value).map_err(|error| error.message(label))
+}
+
+fn parse_constructor_integer_dimension(value: &IntValue, label: &str) -> Result<usize, String> {
+    checked_constructor_integer_dimension(value).map_err(|error| error.message(label))
+}
+
+/// The selected-source path can inspect the same dimension policy without
+/// formatting an error before its host metadata admission. The ordinary
+/// constructor remains the owner of the source-level diagnostic text.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ConstructorDimensionFailure {
+    NonIntegral,
+    OutOfRange,
+}
+
+impl ConstructorDimensionFailure {
+    fn message(self, label: &str) -> String {
+        match self {
+            Self::NonIntegral => format!("{label}: dimensions must be finite integer values"),
+            Self::OutOfRange => {
+                format!("{label}: dimension is outside the supported platform range")
+            }
+        }
+    }
+}
+
+pub(crate) fn checked_constructor_numeric_dimension(
+    value: NumericScalar,
+) -> Result<usize, ConstructorDimensionFailure> {
     match value {
-        NumericScalar::F64(value) => parse_constructor_float_dimension(value, label),
-        NumericScalar::F32(value) => parse_constructor_float_dimension(f64::from(value), label),
-        integer => parse_constructor_integer_dimension(
+        NumericScalar::F64(value) => checked_constructor_float_dimension(value),
+        NumericScalar::F32(value) => checked_constructor_float_dimension(f64::from(value)),
+        integer => checked_constructor_integer_dimension(
             &integer
                 .into_int_value()
                 .expect("nonfloating numeric scalar is an integer"),
-            label,
         ),
     }
 }
 
-fn parse_constructor_float_dimension(value: f64, label: &str) -> Result<usize, String> {
+pub(crate) fn checked_constructor_float_dimension(
+    value: f64,
+) -> Result<usize, ConstructorDimensionFailure> {
     if !value.is_finite() || value.fract() != 0.0 {
-        return Err(format!("{label}: dimensions must be finite integer values"));
+        return Err(ConstructorDimensionFailure::NonIntegral);
     }
     if value <= 0.0 {
         return Ok(0);
     }
     if value >= usize::MAX as f64 {
-        return Err(format!(
-            "{label}: dimension is outside the supported platform range"
-        ));
+        return Err(ConstructorDimensionFailure::OutOfRange);
     }
     Ok(value as usize)
 }
 
-fn parse_constructor_integer_dimension(value: &IntValue, label: &str) -> Result<usize, String> {
+pub(crate) fn checked_constructor_integer_dimension(
+    value: &IntValue,
+) -> Result<usize, ConstructorDimensionFailure> {
     let parsed = match value {
         IntValue::I8(value) => usize::try_from((*value).max(0)),
         IntValue::I16(value) => usize::try_from((*value).max(0)),
@@ -185,21 +287,13 @@ fn parse_constructor_integer_dimension(value: &IntValue, label: &str) -> Result<
         IntValue::U32(value) => usize::try_from(*value),
         IntValue::U64(value) => usize::try_from(*value),
     };
-    parsed.map_err(|_| format!("{label}: dimension is outside the supported platform range"))
+    parsed.map_err(|_| ConstructorDimensionFailure::OutOfRange)
 }
 
 /// Extract a lowercased keyword from runtime values such as strings or
 /// single-row char arrays.
-pub(crate) fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
+pub(crate) fn keyword_of(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    crate::builtins::common::arg_tokens::scalar_keyword_of(value, "arrayCreation")
 }
 
 /// Attempt to parse a dimension argument. Returns `Ok(Some(Vec))` when the
@@ -210,7 +304,7 @@ pub(crate) async fn extract_dims(value: &Value, label: &str) -> Result<Option<Ve
         return Ok(None);
     }
     let gpu_scalar = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+        Value::GpuTensor(handle) => tensor::element_count(handle.shape()) == 1,
         _ => false,
     };
     match tensor::dims_from_value_async(value).await {
@@ -230,12 +324,12 @@ pub(crate) async fn extract_dims(value: &Value, label: &str) -> Result<Option<Ve
 /// Determine the output shape encoded by a runtime value.
 pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>, String> {
     match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
-        Value::ComplexTensor(t) => Ok(t.shape.clone()),
-        Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(h.shape.clone()),
-        Value::CharArray(ca) => Ok(ca.shape.clone()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
+        Value::Tensor(t) => Ok(t.shape().to_vec()),
+        Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
+        Value::LogicalArray(l) => Ok(l.shape.to_vec()),
+        Value::GpuTensor(h) => Ok(h.shape().to_vec()),
+        Value::CharArray(ca) => Ok(ca.shape().to_vec()),
+        Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)
@@ -254,7 +348,8 @@ pub(crate) fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
             .expect("double complex tensor")
             .first()
             .copied()
-            .expect("scalar complex tensor");
+            .expect("scalar complex tensor")
+            .into();
         Value::Complex(re, im)
     } else {
         Value::ComplexTensor(tensor)
@@ -266,6 +361,91 @@ mod constructor_dimension_tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn constructor_validation_releases_rejected_output_through_its_actual_owner() {
+        use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, ProviderPrecision};
+        crate::builtins::common::test_support::with_rejecting_native_result_provider(|provider| {
+            // This fixture deliberately returns an allocation owned by another provider.
+            let dummy = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let output = provider
+                .cross(&dummy, &dummy, None)
+                .expect("foreign-owner result");
+            assert_ne!(output.device_id(), provider.device_id());
+            let retained = output.clone();
+            let physical = output.allocation_lease().downgrade();
+            let before = provider.free_count();
+            let error = validate_constructor_gpu_output(
+                "constructor",
+                provider,
+                output,
+                &[1, 1],
+                GpuTensorStorage::ComplexInterleaved,
+                Some(ProviderPrecision::F64),
+                None,
+                false,
+            )
+            .expect_err("wrong owner must not be adopted");
+            assert!(error.contains("invalid constructor result"));
+            assert_eq!(provider.free_count(), before);
+            retained.allocation_lease().validate_live().unwrap();
+            drop(retained);
+            assert!(physical.acquire().is_none());
+            assert_eq!(provider.free_count(), before + 1);
+            assert!(block_on(provider.download(&dummy)).is_ok());
+        });
+    }
+
+    #[test]
+    fn constructor_validation_preserves_borrowed_prototype_and_its_metadata() {
+        use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+            let prototype = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("prototype");
+            let original_class = runmat_accelerate_api::handle_class_identity(&prototype);
+            let original_logical = runmat_accelerate_api::handle_is_logical(&prototype);
+            for (expected_shape, expected_logical) in [
+                (&[1, 2][..], false),
+                (&[1, 2][..], true),
+                (&[2, 1][..], false),
+            ] {
+                let error = validate_constructor_gpu_output_protecting(
+                    "constructor",
+                    provider,
+                    prototype.clone(),
+                    expected_shape,
+                    GpuTensorStorage::Real,
+                    Some(ProviderPrecision::F64),
+                    None,
+                    expected_logical,
+                    &[&prototype],
+                )
+                .expect_err("borrowed alias must not be adopted or freed");
+                assert!(error.contains("invalid constructor result"));
+                assert_eq!(
+                    runmat_accelerate_api::handle_class_identity(&prototype),
+                    original_class
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_is_logical(&prototype),
+                    original_logical
+                );
+                assert_eq!(
+                    block_on(provider.download(&prototype))
+                        .expect("prototype remains live")
+                        .data,
+                    vec![1.0, 2.0]
+                );
+            }
+            drop(prototype);
+        });
+    }
 
     #[test]
     fn exact_integer_size_vectors_cover_every_integer_class() {
@@ -289,6 +469,23 @@ mod constructor_dimension_tests {
             .expect("dimensions");
             assert_eq!(parsed.values, vec![2, 3]);
             assert!(!parsed.is_column_vector);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn constructor_dimensions_preserve_scalar_and_rank_one_shapes() {
+        for (shape, values) in [(vec![], vec![3.0]), (vec![2], vec![2.0, 3.0])] {
+            let value = Value::Tensor(Tensor::new(values.clone(), shape.clone()).unwrap());
+            let parsed = block_on(extract_constructor_dimensions(&value, "constructor"))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                parsed.values,
+                values.iter().map(|v| *v as usize).collect::<Vec<_>>()
+            );
+            assert!(!parsed.is_column_vector);
+            assert_eq!(shape_from_value(&value, "constructor").unwrap(), shape);
         }
     }
 
@@ -362,7 +559,7 @@ mod constructor_dimension_tests {
             )
             .expect("durable integer descriptor must override stale side metadata");
             assert_eq!(
-                output.descriptor.element_type,
+                output.descriptor().element_type,
                 Some(runmat_accelerate_api::NumericElementType::I32)
             );
         });

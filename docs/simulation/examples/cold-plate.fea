@@ -1,0 +1,84 @@
+// Hero study of /physics/conjugate-heat-transfer: a 200 x 100 x 12 mm aluminium cold plate with
+// two 10 x 4 mm water passages, heated across its top face.
+geometry plate {
+    file = "./geometry/cold-plate.step"
+    units = m
+    interfaces = shared
+    region coolant : cell { select name "Coolant"; expect one_or_more }
+    region plate : solid { select name "Plate"; expect exactly_one }
+    region inlet : face { select name "Inlet"; expect one_or_more }
+    region outlet : face { select name "Outlet"; expect one_or_more }
+    region channel_wall : face { select name "Channel wall"; expect one_or_more }
+    region plate_wall : face { select name "Plate wall"; expect one_or_more }
+    region heater : face { select name "Heater"; expect exactly_one }
+}
+
+mesh plate on geometry.plate {
+    tetrahedra {
+        order = linear
+        target_size = 0.002 m
+        maximum_deviation = 0.0002 m
+    }
+}
+
+material water {
+    mass_density = 997 kg/m^3
+    fluid {
+        law = incompressible_newtonian
+        dynamic_viscosity = 0.00089 Pa*s
+    }
+    thermal {
+        reference_temperature = 293.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        conductivity = 0.6 W/m/K
+        specific_heat = 4180 J/kg/K
+        expansion_coefficient = 0.0002 K^-1
+    }
+}
+
+material aluminum {
+    mass_density = 2700 kg/m^3
+    thermal {
+        reference_temperature = 293.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        conductivity = 167 W/m/K
+        specific_heat = 896 J/kg/K
+        expansion_coefficient = 0.000023 K^-1
+    }
+}
+
+model cooled_plate {
+    thermal { reference_temperature = 293.15 K }
+    assign material.water to geometry.plate.region.coolant
+    assign material.aluminum to geometry.plate.region.plate
+    constraint inlet_flow {
+        fluid.velocity { target = geometry.plate.region.inlet; value = [0.2 m/s, 0 m/s, 0 m/s] }
+    }
+    constraint inlet_temperature {
+        thermal.temperature { target = geometry.plate.region.inlet; value = 293.15 K }
+    }
+    constraint walls {
+        fluid.no_slip_wall { target = geometry.plate.region.channel_wall }
+    }
+    load outlet {
+        fluid.outlet_pressure { target = geometry.plate.region.outlet; value = 0 Pa }
+    }
+    load electronics {
+        thermal.heat_flux { target = geometry.plate.region.heater; value = 20000 W/m^2 }
+    }
+    interface wall_transfer {
+        conjugate_heat_transfer.perfect {
+            primary = geometry.plate.region.plate_wall
+            secondary = geometry.plate.region.channel_wall
+        }
+    }
+}
+
+study cold_plate {
+    geometry = geometry.plate
+    mesh = mesh.plate
+    model = model.cooled_plate
+    analysis operating_point { conjugate_heat_transfer steady {} }
+    output temperature = analysis.operating_point.field.node.temperature
+    output velocity = analysis.operating_point.field.cell.fluid_velocity
+}

@@ -1,3 +1,5 @@
+pub(crate) mod character_numeric;
+
 use std::{borrow::Cow, convert::TryFrom};
 
 use num_complex::Complex64;
@@ -8,6 +10,7 @@ use runmat_value::{
 };
 
 use crate::dispatcher::gather_if_needed_async;
+use crate::RuntimeError;
 
 /// Return the total number of elements for a given shape.
 pub fn element_count(shape: &[usize]) -> usize {
@@ -144,7 +147,7 @@ pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {
 
 /// Consume a tensor at a provider API boundary that currently accepts only owned f64 storage.
 pub fn tensor_into_host_f64_owned(tensor: Tensor) -> HostTensorOwned {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     HostTensorOwned {
         data: tensor_into_values_f64(tensor),
         shape,
@@ -159,8 +162,8 @@ pub fn complex_tensor_values_complex64(tensor: &ComplexTensor) -> Vec<Complex64>
         .integer_storage()
         .as_ref()
         .map(|storage| {
-            let real = storage.real.exact_values();
-            let imag = storage.imag.exact_values();
+            let real = storage.real().exact_values();
+            let imag = storage.imag().exact_values();
             real.into_iter()
                 .zip(imag)
                 .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
@@ -195,12 +198,12 @@ pub fn complex_tensor_value_complex64(tensor: &ComplexTensor, index: usize) -> C
     match tensor.integer_storage() {
         Some(storage) => {
             let real = storage
-                .real
+                .real()
                 .value_at(index)
                 .expect("complex_tensor_value_complex64: real storage index is in bounds")
                 .to_f64();
             let imag = storage
-                .imag
+                .imag()
                 .value_at(index)
                 .expect("complex_tensor_value_complex64: imaginary storage index is in bounds")
                 .to_f64();
@@ -233,7 +236,7 @@ pub fn integer_tensor_to_f64(tensor: Tensor) -> Result<Tensor, String> {
     if tensor.integer_storage().is_none() {
         return Ok(tensor);
     }
-    Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+    Tensor::new(tensor_values_f64(&tensor), tensor.shape().to_vec())
         .map_err(|e| format!("integer tensor conversion: {e}"))
 }
 
@@ -306,7 +309,7 @@ pub fn tensor_element_len(tensor: &Tensor) -> usize {
     tensor.len()
 }
 
-fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
+pub(crate) fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
     match value {
         Value::Num(n) => Ok(Some(*n)),
         Value::Int(i) => Ok(Some(i.to_f64())),
@@ -347,8 +350,8 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
 pub async fn scalar_f64_from_value_async(value: &Value) -> Result<Option<f64>, String> {
     match value {
         Value::GpuTensor(handle) => {
-            if !handle.shape.is_empty() {
-                let len = element_count(&handle.shape);
+            if !handle.shape().is_empty() {
+                let len = element_count(handle.shape());
                 if len != 1 {
                     return Err(format!("expected scalar gpuArray, got array of size {len}"));
                 }
@@ -384,18 +387,79 @@ pub async fn dimension_from_value_async(
     parse_numeric_dimension_value(raw, name, allow_zero).map(Some)
 }
 
+/// Decode an integer or floating scalar dimension without provider access.
+/// Other value kinds are left to the existing asynchronous scalar admission.
+pub fn scalar_dimension_from_value_typed(
+    value: &Value,
+    allow_zero: bool,
+) -> Result<Option<usize>, DimensionDecodeError> {
+    match value {
+        Value::Int(value) => parse_integer_dimension_typed(value, allow_zero).map(Some),
+        Value::Num(value) => parse_numeric_dimension_value_typed(*value, allow_zero).map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn parse_integer_dimension_typed(
+    value: &IntValue,
+    allow_zero: bool,
+) -> Result<usize, DimensionDecodeError> {
+    if value.to_i128() < 0 {
+        return Err(DimensionDecodeError::IntegerNegative);
+    }
+    let dimension = value
+        .try_to_usize()
+        .ok_or(DimensionDecodeError::IntegerOutOfPlatformRange)?;
+    if !allow_zero && dimension == 0 {
+        return Err(DimensionDecodeError::BelowMinimum);
+    }
+    Ok(dimension)
+}
+
+fn parse_numeric_dimension_value_typed(
+    value: f64,
+    allow_zero: bool,
+) -> Result<usize, DimensionDecodeError> {
+    use runmat_types::dimension::ScalarDimensionValueError as Error;
+    runmat_types::dimension::decode_scalar_dimension(value, allow_zero).map_err(|error| match error
+    {
+        Error::NonFinite => DimensionDecodeError::NonFinite,
+        Error::Fractional => DimensionDecodeError::Fractional,
+        Error::BelowMinimum => DimensionDecodeError::BelowMinimum,
+        Error::OutsidePlatformRange => DimensionDecodeError::OutOfPlatformRange,
+    })
+}
+
+fn scalar_dimension_legacy_message(
+    error: DimensionDecodeError,
+    name: &str,
+    allow_zero: bool,
+) -> String {
+    match error {
+        DimensionDecodeError::NonFinite => format!("{name}: dimension must be finite"),
+        DimensionDecodeError::Fractional => format!("{name}: dimension must be an integer"),
+        DimensionDecodeError::BelowMinimum | DimensionDecodeError::Negative => {
+            format!(
+                "{name}: dimension must be >= {}",
+                if allow_zero { 0 } else { 1 }
+            )
+        }
+        DimensionDecodeError::OutOfPlatformRange
+        | DimensionDecodeError::IntegerNegative
+        | DimensionDecodeError::IntegerOutOfPlatformRange => {
+            format!("{name}: dimension is outside the supported range")
+        }
+        DimensionDecodeError::Gather(source) => format!("{name}: {source}"),
+    }
+}
+
 fn parse_integer_dimension(
     value: &IntValue,
     name: &str,
     allow_zero: bool,
 ) -> Result<usize, String> {
-    let dim = value
-        .try_to_usize()
-        .ok_or_else(|| format!("{name}: dimension is outside the supported range"))?;
-    if !allow_zero && dim == 0 {
-        return Err(format!("{name}: dimension must be >= 1"));
-    }
-    Ok(dim)
+    parse_integer_dimension_typed(value, allow_zero)
+        .map_err(|error| scalar_dimension_legacy_message(error, name, allow_zero))
 }
 
 /// Parse every element of a typed integer tensor as a dimension selector without
@@ -418,34 +482,150 @@ pub fn integer_tensor_dimension_vector(
     )
 }
 
-fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, String> {
+/// Why a shape/dimension vector cannot be decoded. Public builtins retain
+/// their own diagnostic wording while dispatching on these semantic causes.
+#[derive(Debug, thiserror::Error)]
+pub enum DimensionDecodeError {
+    #[error("dimensions must be finite")]
+    NonFinite,
+    #[error("matrix dimensions must be non-negative")]
+    Negative,
+    #[error("dimensions must be integers")]
+    Fractional,
+    #[error("dimensions are outside the supported platform range")]
+    OutOfPlatformRange,
+    #[error("dimensions must be non-negative platform integers")]
+    IntegerNegative,
+    #[error("dimensions must be non-negative platform integers")]
+    IntegerOutOfPlatformRange,
+    #[error("dimension is below the allowed minimum")]
+    BelowMinimum,
+    #[error("dimensions: {0}")]
+    Gather(#[source] Box<RuntimeError>),
+}
+
+impl DimensionDecodeError {
+    /// Preserve provider provenance and retry policy beneath an owning
+    /// builtin's public diagnostic rather than formatting away the source.
+    pub fn attach_cause(self, mut owner: RuntimeError) -> RuntimeError {
+        if let Self::Gather(cause) = self {
+            owner.gpu_gather_retry = cause.gpu_gather_retry;
+            if owner.span.is_none() {
+                owner.span = cause.span;
+            }
+            owner.source = Some(cause);
+        }
+        owner
+    }
+}
+
+fn parse_integer_shape_dimension(value: &IntValue) -> Result<usize, DimensionDecodeError> {
+    if value.to_i128() < 0 {
+        return Err(DimensionDecodeError::IntegerNegative);
+    }
     value
         .try_to_usize()
-        .ok_or_else(|| "dimensions must be non-negative platform integers".to_string())
+        .ok_or(DimensionDecodeError::IntegerOutOfPlatformRange)
 }
 
-fn parse_numeric_dimension(value: f64) -> Result<usize, String> {
-    if !value.is_finite() {
-        return Err("dimensions must be finite".to_string());
-    }
-    if value < 0.0 {
-        return Err("matrix dimensions must be non-negative".to_string());
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return Err("dimensions must be integers".to_string());
-    }
-    if !fits_platform_usize(rounded) {
-        return Err("dimensions are outside the supported platform range".to_string());
-    }
-    Ok(rounded as usize)
+fn parse_numeric_dimension(value: f64) -> Result<usize, DimensionDecodeError> {
+    runmat_types::decode_shape_dimension(value).map_err(|cause| match cause {
+        runmat_types::DimensionValueError::NonFinite => DimensionDecodeError::NonFinite,
+        runmat_types::DimensionValueError::Negative => DimensionDecodeError::Negative,
+        runmat_types::DimensionValueError::Fractional => DimensionDecodeError::Fractional,
+        runmat_types::DimensionValueError::OutsidePlatformRange => {
+            DimensionDecodeError::OutOfPlatformRange
+        }
+    })
 }
 
-fn fits_platform_usize(value: f64) -> bool {
-    value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
+/// A borrowed, allocation-free view of the canonical dimension-vector
+/// grammar. Callers with an admitted collection owner can materialize only
+/// their final dimensions instead of first allocating a temporary decoder Vec.
+pub(crate) enum BorrowedHostShapeDimensions<'a> {
+    Floating(&'a Tensor, std::ops::Range<usize>),
+    Integer(&'a IntegerStorage, std::ops::Range<usize>),
+    Logical(&'a [u8], std::ops::Range<usize>),
+    Number(Option<f64>),
+    IntegerScalar(Option<&'a IntValue>),
 }
 
-fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec<usize>>, String> {
+impl BorrowedHostShapeDimensions<'_> {
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Floating(_, indices) | Self::Integer(_, indices) | Self::Logical(_, indices) => {
+                indices.len()
+            }
+            Self::Number(value) => usize::from(value.is_some()),
+            Self::IntegerScalar(value) => usize::from(value.is_some()),
+        }
+    }
+}
+
+impl Iterator for BorrowedHostShapeDimensions<'_> {
+    type Item = Result<usize, DimensionDecodeError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Floating(tensor, indices) => indices
+                .next()
+                .map(|index| parse_numeric_dimension(tensor_value_f64(tensor, index))),
+            Self::Integer(storage, indices) => indices.next().map(|index| {
+                parse_integer_shape_dimension(
+                    &storage.value_at(index).expect("integer storage index"),
+                )
+            }),
+            Self::Logical(values, indices) => indices
+                .next()
+                .map(|index| parse_numeric_dimension(if values[index] != 0 { 1.0 } else { 0.0 })),
+            Self::Number(value) => value.take().map(parse_numeric_dimension),
+            Self::IntegerScalar(value) => value.take().map(parse_integer_shape_dimension),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for BorrowedHostShapeDimensions<'_> {}
+
+pub(crate) fn borrowed_host_shape_dimensions(
+    value: &Value,
+) -> Option<BorrowedHostShapeDimensions<'_>> {
+    let is_vector = |len: usize, shape: &[usize]| {
+        len == 0
+            || len == 1
+            || shape.len() == 1
+            || (shape.len() >= 2 && (shape[0] == 1 || shape[1] == 1))
+    };
+    match value {
+        Value::Num(value) => Some(BorrowedHostShapeDimensions::Number(Some(*value))),
+        Value::Int(value) => Some(BorrowedHostShapeDimensions::IntegerScalar(Some(value))),
+        Value::Tensor(tensor) if is_vector(tensor.len(), tensor.shape()) => {
+            match tensor.integer_storage() {
+                Some(storage) => Some(BorrowedHostShapeDimensions::Integer(
+                    storage,
+                    0..storage.len(),
+                )),
+                None => Some(BorrowedHostShapeDimensions::Floating(
+                    tensor,
+                    0..tensor.len(),
+                )),
+            }
+        }
+        Value::LogicalArray(logical) if is_vector(logical.data.len(), &logical.shape) => Some(
+            BorrowedHostShapeDimensions::Logical(&logical.data, 0..logical.data.len()),
+        ),
+        _ => None,
+    }
+}
+
+fn dims_from_tensor_values(
+    values: impl ExactSizeIterator<Item = f64>,
+    shape: &[usize],
+) -> Result<Option<Vec<usize>>, DimensionDecodeError> {
     let len = values.len();
     if len == 0 {
         return Ok(Some(Vec::new()));
@@ -457,7 +637,7 @@ fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec
         return Ok(None);
     }
     let mut dims = Vec::with_capacity(len);
-    for &value in values {
+    for value in values {
         dims.push(parse_numeric_dimension(value)?);
     }
     Ok(Some(dims))
@@ -466,7 +646,7 @@ fn dims_from_tensor_values(values: &[f64], shape: &[usize]) -> Result<Option<Vec
 fn dims_from_integer_tensor_values(
     storage: &IntegerStorage,
     shape: &[usize],
-) -> Result<Option<Vec<usize>>, String> {
+) -> Result<Option<Vec<usize>>, DimensionDecodeError> {
     let len = storage.len();
     if len == 0 {
         return Ok(Some(Vec::new()));
@@ -488,65 +668,72 @@ fn dims_from_integer_tensor_values(
 
 /// Attempt to parse a dimension vector from a runtime value asynchronously.
 pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, String> {
+    dims_from_value_async_typed(value)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Typed dimension-vector admission for owners that need semantic error
+/// identity and a retained provider cause. The string-returning wrapper above
+/// remains for existing callers until they migrate to this boundary.
+pub async fn dims_from_value_async_typed(
+    value: &Value,
+) -> Result<Option<Vec<usize>>, DimensionDecodeError> {
     match value {
         Value::Num(n) => parse_numeric_dimension(*n).map(|dim| Some(vec![dim])),
         Value::Int(i) => parse_integer_shape_dimension(i).map(|dim| Some(vec![dim])),
         Value::Tensor(t) => match t.integer_storage() {
-            Some(storage) => dims_from_integer_tensor_values(storage, &t.shape),
-            None => dims_from_tensor_values(tensor_values_f64_cow(t).as_ref(), &t.shape),
+            Some(storage) => dims_from_integer_tensor_values(storage, t.shape()),
+            None => dims_from_tensor_values(
+                (0..t.len()).map(|index| tensor_value_f64(t, index)),
+                t.shape(),
+            ),
         },
         Value::LogicalArray(la) => {
-            let values: Vec<f64> = la
-                .data
-                .iter()
-                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-                .collect();
-            dims_from_tensor_values(&values, &la.shape)
+            let values = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 });
+            dims_from_tensor_values(values, &la.shape)
         }
         Value::GpuTensor(handle) => {
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone()))
                 .await
-                .map_err(|e| format!("dimensions: {e}"))?;
+                .map_err(|cause| DimensionDecodeError::Gather(Box::new(cause)))?;
             match gathered {
                 Value::Tensor(t) => {
                     if t.is_empty() {
                         tracing::warn!(
-                            gpu_shape = ?handle.shape,
+                            gpu_shape = ?handle.shape(),
                             "dims_from_value_async: gathered GPU tensor has no data"
                         );
                     }
                     tracing::trace!(
                         "dims_from_value_async: GPU tensor values gpu_shape={:?} host_shape={:?} class={} elements={}",
-                        handle.shape,
-                        t.shape,
+                        handle.shape(),
+                        t.shape(),
                         t.numeric_dtype().class_name(),
                         t.len()
                     );
                     let dims = match t.integer_storage() {
-                        Some(storage) => dims_from_integer_tensor_values(storage, &t.shape)?,
-                        None => {
-                            dims_from_tensor_values(tensor_values_f64_cow(&t).as_ref(), &t.shape)?
-                        }
+                        Some(storage) => dims_from_integer_tensor_values(storage, t.shape())?,
+                        None => dims_from_tensor_values(
+                            (0..t.len()).map(|index| tensor_value_f64(&t, index)),
+                            t.shape(),
+                        )?,
                     };
                     if dims.is_none() {
                         tracing::debug!(
-                            gpu_shape = ?handle.shape,
-                            host_shape = ?t.shape,
+                            gpu_shape = ?handle.shape(),
+                            host_shape = ?t.shape(),
                             "dims_from_value_async: GPU tensor not interpretable as dims"
                         );
                     }
                     Ok(dims)
                 }
                 Value::LogicalArray(la) => {
-                    let values: Vec<f64> = la
-                        .data
-                        .iter()
-                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-                        .collect();
-                    let dims = dims_from_tensor_values(&values, &la.shape)?;
+                    let values = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 });
+                    let dims = dims_from_tensor_values(values, &la.shape)?;
                     if dims.is_none() {
                         tracing::debug!(
-                            gpu_shape = ?handle.shape,
+                            gpu_shape = ?handle.shape(),
                             host_shape = ?la.shape,
                             "dims_from_value_async: GPU logical not interpretable as dims"
                         );
@@ -586,23 +773,8 @@ fn parse_numeric_dimension_value(
     name: &str,
     allow_zero: bool,
 ) -> Result<usize, String> {
-    if !value.is_finite() {
-        return Err(format!("{name}: dimension must be finite"));
-    }
-    let rounded = value.round();
-    // Allow small floating error tolerance when users pass float-typed dims
-    if (rounded - value).abs() > 1e-6 {
-        return Err(format!("{name}: dimension must be an integer"));
-    }
-    let min = if allow_zero { 0.0 } else { 1.0 };
-    if rounded < min {
-        let bound = if allow_zero { 0 } else { 1 };
-        return Err(format!("{name}: dimension must be >= {bound}"));
-    }
-    if !fits_platform_usize(rounded) {
-        return Err(format!("{name}: dimension is outside the supported range"));
-    }
-    Ok(rounded as usize)
+    parse_numeric_dimension_value_typed(value, allow_zero)
+        .map_err(|error| scalar_dimension_legacy_message(error, name, allow_zero))
 }
 
 /// Attempt to extract a string from a runtime value.
@@ -610,18 +782,17 @@ pub fn value_to_string(value: &Value) -> Option<String> {
     String::try_from(value).ok()
 }
 
-/// Return a canonical 2-D shape for a tensor given its shape slice and element count.
+/// Preserve the tensor's shape, including explicit empty dimensions.
 ///
-/// * Empty data (`len == 0`) → `[0, 1]` (MATLAB convention for empty arrays).
-/// * No shape info (`shape.is_empty()`) → `[1, 1]` (scalar).
-/// * Otherwise → the tensor's own shape.
+/// Only absent shape metadata receives a default: `[0, 1]` for empty data,
+/// or `[1, 1]` otherwise.
 pub fn default_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
-    if len == 0 {
-        vec![0, 1]
-    } else if shape.is_empty() {
-        vec![1, 1]
-    } else {
+    if !shape.is_empty() {
         shape.to_vec()
+    } else if len == 0 {
+        vec![0, 1]
+    } else {
+        vec![1, 1]
     }
 }
 
@@ -642,7 +813,13 @@ pub fn clamp_u32(value: f64) -> f64 {
 
 /// Cast all elements of a tensor to the target dtype through typed constructors.
 pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
-    let shape = tensor.shape.clone();
+    // A same-class tensor already has the requested representation. Moving it
+    // preserves its payload, shape allocation, and any exact host reservation
+    // carried by that payload; rebuilding it would silently detach the claim.
+    if tensor.numeric_dtype() == dtype {
+        return tensor;
+    }
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .expect("validated tensor storage");
@@ -693,7 +870,52 @@ pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
 #[cfg(test)]
 mod dtype_tests {
     use super::{coerce_tensor_dtype, ones_with_dtype, zeros_with_dtype};
-    use runmat_value::{IntegerStorage, NumericDType, Tensor};
+    use runmat_value::{IntegerStorage, NumericDType, NumericStorage, Tensor};
+
+    #[test]
+    fn same_dtype_coercion_moves_all_ten_numeric_classes_and_shape() {
+        let cases = [
+            NumericStorage::F64(vec![-0.0, f64::INFINITY]),
+            NumericStorage::F32(vec![-0.0, f32::INFINITY]),
+            NumericStorage::I8(vec![i8::MIN, i8::MAX]),
+            NumericStorage::I16(vec![i16::MIN, i16::MAX]),
+            NumericStorage::I32(vec![i32::MIN, i32::MAX]),
+            NumericStorage::I64(vec![i64::MIN, i64::MAX]),
+            NumericStorage::U8(vec![u8::MIN, u8::MAX]),
+            NumericStorage::U16(vec![u16::MIN, u16::MAX]),
+            NumericStorage::U32(vec![u32::MIN, u32::MAX]),
+            NumericStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+        for storage in cases {
+            let input = Tensor::from_numeric_storage(storage, vec![1, 2]).expect("typed input");
+            let dtype = input.numeric_dtype();
+            let shape_pointer = input.shape().as_ptr();
+            let payload_pointer = unsafe { input.host_buffer().foreign_data_pointer() };
+            let output = coerce_tensor_dtype(input, dtype);
+            assert_eq!(output.numeric_dtype(), dtype);
+            assert_eq!(output.shape(), [1, 2]);
+            assert_eq!(output.shape().as_ptr(), shape_pointer);
+            assert_eq!(
+                unsafe { output.host_buffer().foreign_data_pointer() },
+                payload_pointer
+            );
+            match dtype {
+                NumericDType::F64 => assert_eq!(
+                    output.as_f64_slice().expect("double output")[0].to_bits(),
+                    (-0.0_f64).to_bits()
+                ),
+                NumericDType::F32 => assert_eq!(
+                    output.as_f32_slice().expect("single output")[0].to_bits(),
+                    (-0.0_f32).to_bits()
+                ),
+                NumericDType::U64 => assert_eq!(
+                    output.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+                ),
+                _ => {}
+            }
+        }
+    }
 
     #[test]
     fn dtype_directed_constructors_materialize_all_integer_classes() {
@@ -794,7 +1016,7 @@ mod dtype_tests {
             Tensor::new_integer(IntegerStorage::I64(Vec::new()), vec![0, 3]).expect("empty input");
         let output = coerce_tensor_dtype(input, NumericDType::U64);
 
-        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.shape(), [0, 3]);
         assert_eq!(output.numeric_dtype(), NumericDType::U64);
         assert_eq!(
             output.integer_storage(),
@@ -806,12 +1028,95 @@ mod dtype_tests {
 #[cfg(test)]
 mod dimension_tests {
     use super::{
-        dimension_from_value_async, dims_from_value_async, integer_tensor_to_f64, parse_dimension,
-        scalar_f64_from_value_async, tensor_into_value, tensor_into_values_f64, tensor_values_f64,
-        tensor_values_f64_cow,
+        default_shape_for, dimension_from_value_async, dims_from_value_async,
+        dims_from_value_async_typed, integer_tensor_to_f64, parse_dimension,
+        scalar_dimension_from_value_typed, scalar_f64_from_value_async, tensor_into_value,
+        tensor_into_values_f64, tensor_values_f64, tensor_values_f64_cow, DimensionDecodeError,
     };
     use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor, Value};
+
+    #[test]
+    fn shape_defaults_preserve_explicit_empty_geometry() {
+        for (shape, len, expected) in [
+            (vec![0, 3], 0, vec![0, 3]),
+            (vec![3, 0], 0, vec![3, 0]),
+            (vec![2, 0, 4], 0, vec![2, 0, 4]),
+            (vec![2, 3], 6, vec![2, 3]),
+            (vec![], 0, vec![0, 1]),
+            (vec![], 1, vec![1, 1]),
+        ] {
+            assert_eq!(default_shape_for(&shape, len), expected);
+        }
+    }
+
+    #[test]
+    fn typed_dimension_decoder_retains_semantic_error_identity() {
+        // Single and logical controls decode directly into the final usize
+        // vector; neither needs a temporary floating-point payload.
+        for (value, expected) in [
+            (
+                Value::Tensor(Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).unwrap()),
+                vec![2, 3],
+            ),
+            (
+                Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap()),
+                vec![1, 0],
+            ),
+        ] {
+            assert_eq!(
+                block_on(dims_from_value_async_typed(&value)).unwrap(),
+                Some(expected)
+            );
+        }
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Tensor(
+                Tensor::from_f32(vec![1.25], vec![1, 1]).unwrap()
+            ))),
+            Err(DimensionDecodeError::Fractional)
+        ));
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Num(f64::NAN))),
+            Err(DimensionDecodeError::NonFinite)
+        ));
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Num(-1.0))),
+            Err(DimensionDecodeError::Negative)
+        ));
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Num(1.25))),
+            Err(DimensionDecodeError::Fractional)
+        ));
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Int(IntValue::I64(-1)))),
+            Err(DimensionDecodeError::IntegerNegative)
+        ));
+        assert!(matches!(
+            scalar_dimension_from_value_typed(&Value::Num(0.0), false),
+            Err(DimensionDecodeError::BelowMinimum)
+        ));
+        assert!(matches!(
+            scalar_dimension_from_value_typed(&Value::Num(1.25), false),
+            Err(DimensionDecodeError::Fractional)
+        ));
+        assert_eq!(
+            scalar_dimension_from_value_typed(&Value::Num(1.0 + 5.0e-7), false)
+                .expect("legacy scalar tolerance retained"),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn typed_dimension_error_preserves_nested_provider_cause_and_retry() {
+        let mut cause = crate::RuntimeError::new("provider transfer failed");
+        cause.identifier = Some("RunMat:test:ProviderTransfer".into());
+        cause.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        let owner = DimensionDecodeError::Gather(Box::new(cause))
+            .attach_cause(crate::RuntimeError::new("mean: invalid dimension"));
+        assert_eq!(owner.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let source = owner.source.expect("provider cause retained");
+        assert_eq!(source.to_string(), "provider transfer failed");
+    }
 
     #[test]
     fn typed_dimension_parsers_preserve_representable_uint64_values() {
@@ -948,7 +1253,7 @@ mod dimension_tests {
 
         let normalized = integer_tensor_to_f64(tensor).expect("normalize");
         assert!(normalized.integer_storage().is_none());
-        assert_eq!(normalized.shape, vec![1, 2]);
+        assert_eq!(normalized.shape(), [1, 2]);
         assert_eq!(
             normalized.materialize_f64(),
             vec![
@@ -1090,8 +1395,8 @@ pub fn binary_numeric_tensors(
 ) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
     let lhs_values = tensor_values_f64_cow(lhs);
     let rhs_values = tensor_values_f64_cow(rhs);
-    let lhs_shape = default_shape_for(&lhs.shape, lhs_values.len());
-    let rhs_shape = default_shape_for(&rhs.shape, rhs_values.len());
+    let lhs_shape = default_shape_for(lhs.shape(), lhs_values.len());
+    let rhs_shape = default_shape_for(rhs.shape(), rhs_values.len());
     match (lhs_values.len(), rhs_values.len()) {
         (1, 1) => Ok((vec![lhs_values[0]], vec![rhs_values[0]], vec![1, 1])),
         (1, len) => Ok((vec![lhs_values[0]; len], rhs_values.into_owned(), rhs_shape)),

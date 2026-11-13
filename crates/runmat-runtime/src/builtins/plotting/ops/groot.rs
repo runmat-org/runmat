@@ -1,55 +1,28 @@
 //! MATLAB-compatible `groot` builtin.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{GROOT_DESCRIPTOR, GROOT_ERROR_TOO_MANY_OUTPUTS};
+
 use runmat_macros::runtime_builtin;
-
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-
-const GROOT_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "root",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Root graphics object handle.",
-}];
-
-const GROOT_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const GROOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "root = groot()",
-    inputs: &GROOT_INPUTS_NONE,
-    outputs: &GROOT_OUTPUT_HANDLE,
-}];
-
-const GROOT_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const GROOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GROOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GROOT_ERRORS,
-};
 
 #[runtime_builtin(
     name = "groot",
-    category = "plotting",
-    summary = "Return the root graphics object handle.",
-    keywords = "groot,root,graphics,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::groot::GROOT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::groot"
 )]
 pub fn groot_builtin() -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &GROOT_DESCRIPTOR,
+        &GROOT_ERROR_TOO_MANY_OUTPUTS,
+        "groot",
+    )
+    .map_err(super::coordinate_admission::terminal)?;
     Ok(0.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::GROOT_DESCRIPTOR;
 
     #[test]
     fn groot_descriptor_signature_present() {

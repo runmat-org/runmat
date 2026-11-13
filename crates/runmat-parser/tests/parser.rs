@@ -230,6 +230,7 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
 fn strip_expr(expr: &Expr) -> Expr {
     match expr {
         Expr::Number(value, _) => Expr::Number(value.clone(), Span::default()),
+        Expr::ImaginaryNumber(value, _) => Expr::ImaginaryNumber(value.clone(), Span::default()),
         Expr::IntegerLiteral(value, _) => Expr::IntegerLiteral(value.clone(), Span::default()),
         Expr::String(value, _) => Expr::String(value.clone(), Span::default()),
         Expr::Ident(value, _) => Expr::Ident(value.clone(), Span::default()),
@@ -626,21 +627,13 @@ fn parse_imaginary_unit_adjacent_number_in_matrix() {
         panic!("expected 1+2i");
     };
     assert!(matches!(**lhs, Expr::Number(ref n, _) if n == "1"));
-    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &**rhs else {
-        panic!("expected 2*i");
-    };
-    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == "2"));
-    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "i"));
+    assert!(matches!(**rhs, Expr::ImaginaryNumber(ref n, _) if n == "2i"));
 
     let Expr::Binary(lhs, BinOp::Sub, rhs, _) = &rows[0][1] else {
         panic!("expected 3-4j");
     };
     assert!(matches!(**lhs, Expr::Number(ref n, _) if n == "3"));
-    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &**rhs else {
-        panic!("expected 4*j");
-    };
-    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == "4"));
-    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "j"));
+    assert!(matches!(**rhs, Expr::ImaginaryNumber(ref n, _) if n == "4j"));
 }
 
 #[test]
@@ -652,17 +645,47 @@ fn parse_imaginary_unit_adjacent_leading_dot_number_in_matrix() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].len(), 2);
 
-    let Expr::Binary(lhs_l, BinOp::Mul, lhs_r, _) = &rows[0][0] else {
-        panic!("expected .1*i");
-    };
-    assert!(matches!(**lhs_l, Expr::Number(ref n, _) if n == ".1"));
-    assert!(matches!(**lhs_r, Expr::Ident(ref n, _) if n == "i"));
+    assert!(matches!(&rows[0][0], Expr::ImaginaryNumber(n, _) if n == ".1i"));
 
-    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &rows[0][1] else {
-        panic!("expected .5e-2*j");
+    assert!(matches!(&rows[0][1], Expr::ImaginaryNumber(n, _) if n == ".5e-2j"));
+}
+
+#[test]
+fn imaginary_suffix_is_one_numeric_atom_before_postfix_and_power() {
+    let program = parse("x = 1e3i; y = 2j'; z = 2i^2; w = i;").unwrap();
+    assert!(
+        matches!(&program.body[0], Stmt::Assign(_, Expr::ImaginaryNumber(n, _), _, _) if n == "1e3i")
+    );
+    assert!(
+        matches!(&program.body[1], Stmt::Assign(_, Expr::Unary(_, inner, _), _, _) if matches!(&**inner, Expr::ImaginaryNumber(n, _) if n == "2j"))
+    );
+    assert!(
+        matches!(&program.body[2], Stmt::Assign(_, Expr::Binary(left, BinOp::Pow, _, _), _, _) if matches!(&**left, Expr::ImaginaryNumber(n, _) if n == "2i"))
+    );
+    assert!(matches!(&program.body[3], Stmt::Assign(_, Expr::Ident(n, _), _, _) if n == "i"));
+
+    let matrix = parse("a = [2 i];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &matrix.body[0] else {
+        panic!("spaced matrix entries");
     };
-    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == ".5e-2"));
-    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "j"));
+    assert_eq!(rows[0].len(), 2);
+    assert!(matches!(&rows[0][0], Expr::Number(n, _) if n == "2"));
+    assert!(matches!(&rows[0][1], Expr::Ident(n, _) if n == "i"));
+}
+
+#[test]
+fn decimal_exponents_share_one_numeric_grammar_with_imaginary_and_matrix_atoms() {
+    let program = parse("a = [1d3 .5D-2; 2D+1i 4e0]; b = 3d-1j;").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &program.body[0] else {
+        panic!("matrix expression");
+    };
+    assert!(matches!(&rows[0][0], Expr::Number(value, _) if value == "1e3"));
+    assert!(matches!(&rows[0][1], Expr::Number(value, _) if value == ".5e-2"));
+    assert!(matches!(&rows[1][0], Expr::ImaginaryNumber(value, _) if value == "2e+1i"));
+    assert!(matches!(&rows[1][1], Expr::Number(value, _) if value == "4e0"));
+    assert!(
+        matches!(&program.body[1], Stmt::Assign(_, Expr::ImaginaryNumber(value, _), _, _) if value == "3e-1j")
+    );
 }
 
 #[test]
@@ -684,21 +707,56 @@ fn missing_closing_paren_produces_error() {
 
 #[test]
 fn unclosed_call_argument_reports_current_token_position() {
-    let src = "t0 = sqrt(2h0/g);";
-    let err = parse(src).unwrap_err();
-    assert_eq!(err.message, "expected ')' after arguments");
-    assert_eq!(err.position, src.find("h0").unwrap());
-    assert_eq!(err.found_token.as_deref(), Some("h0"));
-    assert_eq!(err.expected.as_deref(), Some("')'"));
+    for src in [
+        "t0 = sqrt(2h0/g);",
+        "if true\n t0 = sqrt(2h0/g);\nend",
+        "function out = f()\nif true\n t0 = sqrt(2h0/g);\nend\nend",
+        "classdef C\nmethods\nfunction out = f(obj)\nif true\n t0 = sqrt(2h0/g);\nend\nend\nend\nend",
+        "% 😀é\nif true\n label = \"😀é\"; [a, b] = sqrt(2h0/g);\nend",
+        "classdef C\nproperties\n value = sqrt(2h0/g);\nend\nend",
+    ] {
+        let err = parse(src).unwrap_err();
+        assert_eq!(err.message, "expected ')' after arguments", "{src}");
+        assert_eq!(err.position, src.find("h0").unwrap(), "{src}");
+        assert_eq!(err.found_token.as_deref(), Some("h0"), "{src}");
+        assert_eq!(err.expected.as_deref(), Some("')'"), "{src}");
+    }
 }
 
 #[test]
 fn expected_identifier_reports_offending_token_position() {
-    let src = "?1";
-    let err = parse(src).unwrap_err();
-    assert_eq!(err.message, "expected identifier");
-    assert_eq!(err.position, src.find('1').unwrap());
-    assert_eq!(err.found_token.as_deref(), Some("1"));
+    for src in [
+        "?1",
+        "for 1 = x\nend",
+        "function 1()\nend",
+        "classdef 1\nend",
+    ] {
+        let err = parse(src).unwrap_err();
+        assert_eq!(err.message, "expected identifier", "{src}");
+        assert_eq!(err.position, src.find('1').unwrap(), "{src}");
+        assert_eq!(err.found_token.as_deref(), Some("1"), "{src}");
+        assert_eq!(err.expected.as_deref(), Some("identifier"), "{src}");
+    }
+    for (src, found, message, expected) in [
+        (
+            "function [y, 1] = f()\nend",
+            "1",
+            "expected identifier or '~'",
+            "identifier or '~'",
+        ),
+        (
+            "function y = f(x)\narguments\nx (1.5, 1) double\nend\ny = x;\nend",
+            "1.5",
+            "arguments size spec must use non-negative integer dimensions",
+            "non-negative integer dimension",
+        ),
+    ] {
+        let err = parse(src).unwrap_err();
+        assert_eq!(err.position, src.find(found).unwrap(), "{src}");
+        assert_eq!(err.message, message, "{src}");
+        assert_eq!(err.found_token.as_deref(), Some(found), "{src}");
+        assert_eq!(err.expected.as_deref(), Some(expected), "{src}");
+    }
 }
 
 #[test]
@@ -866,6 +924,98 @@ fn whitespace_separated_matrix_allowed() {
 }
 
 #[test]
+fn matrix_sign_boundaries_apply_to_imaginary_values_but_not_nested_expressions() {
+    for (source, columns) in [
+        ("A = [2+1i  -1i; 0  4-2i];", 2),
+        ("A = [1 -2i];", 2),
+        ("A = [1 +2j];", 2),
+        ("A = [1 + 2j];", 1),
+        ("A = [1 - 2i];", 1),
+        ("A = [(1 -2) 3];", 2),
+        ("A = [complex(1 -2) 3];", 2),
+    ] {
+        let ast = parse(source).unwrap_or_else(|error| panic!("{source}: {error:?}"));
+        let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+            panic!("expected matrix assignment: {source}");
+        };
+        assert!(rows.iter().all(|row| row.len() == columns), "{source}");
+    }
+}
+
+#[test]
+fn spaced_parenthesis_starts_next_matrix_element_after_computed_value() {
+    let ast = parse(concat!(
+        "A = [ones(4,1) (1:4)']; B = [x(1)(2)]; p = 2; ",
+        "C = [1 p (3)]; D = [-180 (-180 + Pm)]; ",
+        "E = [0 -(I+m*l^2)*b/p (m^2*g*l^2)/p 0];"
+    ))
+    .unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].len(), 2);
+    assert!(
+        matches!(&rows[0][0], Expr::FuncCall(name, args, _) if name == "ones" && args.len() == 2)
+    );
+    assert!(
+        matches!(&rows[0][1], Expr::Unary(UnOp::Transpose, inner, _) if matches!(&**inner, Expr::Range(_, None, _, _)))
+    );
+
+    // Adjacent parentheses remain postfix indexing, not a separator.
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[1] else {
+        panic!("expected adjacent-postfix matrix assignment");
+    };
+    assert_eq!(rows[0].len(), 1);
+    assert!(matches!(&rows[0][0], Expr::Index(_, _, _)));
+
+    for (statement, columns) in [(3, 3), (4, 2), (5, 4)] {
+        let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[statement] else {
+            panic!("expected matrix assignment at statement {statement}");
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), columns);
+    }
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[3] else {
+        unreachable!();
+    };
+    assert!(matches!(&rows[0][1], Expr::Ident(name, _) if name == "p"));
+    assert!(matches!(&rows[0][2], Expr::Number(value, _) if value == "3"));
+}
+
+#[test]
+fn matrix_separator_rule_does_not_escape_into_call_arguments() {
+    let ast = parse("A = [plus(ones (4,1), 2) (1:4)']; B = ones (4,1);").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows[0].len(), 2);
+    assert!(
+        matches!(&rows[0][0], Expr::FuncCall(name, args, _) if name == "plus" && matches!(&args[0], Expr::FuncCall(inner, _, _) if inner == "ones"))
+    );
+    assert!(
+        matches!(&ast.body[1], Stmt::Assign(_, Expr::FuncCall(name, _, _), _, _) if name == "ones")
+    );
+}
+
+#[test]
+fn spaced_nested_aggregate_starts_matrix_column_not_postfix_index() {
+    let ast = parse("A = [x [1 2] {3,4}]; B = [x[1]];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows[0].len(), 3);
+    assert!(matches!(&rows[0][0], Expr::Ident(name, _) if name == "x"));
+    assert!(matches!(&rows[0][1], Expr::Tensor(_, _)));
+    assert!(matches!(&rows[0][2], Expr::Cell(_, _)));
+
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[1] else {
+        panic!("expected adjacent index assignment");
+    };
+    assert!(matches!(&rows[0][0], Expr::Index(_, _, _)));
+}
+
+#[test]
 fn nested_tensor_literals_and_rows() {
     let ast = parse("A=[1 2 3; 4 5 6]; B=[7 8; 9 10];").unwrap();
     if let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] {
@@ -996,7 +1146,7 @@ fn parse_function_definition() {
         Program {
             sections: vec![],
             body: vec![Stmt::Function {
-                name: "add".to_string(),
+                name: "add".into(),
                 params: vec!["x".to_string()],
                 outputs: vec!["y".to_string()],
                 argument_validations: vec![],
@@ -1016,6 +1166,39 @@ fn parse_function_definition() {
             }],
         },
     );
+}
+
+#[test]
+fn parse_zero_input_function_without_parentheses() {
+    for header in [
+        "function tests = testClearance",
+        "function tests = testClearance()",
+    ] {
+        let source = format!("{header}\n tests = 1;\nend");
+        let program = parse(&source).expect("zero-input function signature");
+        let Stmt::Function {
+            name,
+            params,
+            outputs,
+            ..
+        } = &program.body[0]
+        else {
+            panic!("expected function definition");
+        };
+        assert_eq!(name, "testClearance");
+        assert!(params.is_empty());
+        assert_eq!(outputs, &["tests"]);
+    }
+    for separator in [';', ','] {
+        let source = format!("function tests = testClearance{separator} tests = 1; end");
+        let program = parse(&source).expect("same-line signature separator");
+        let Stmt::Function { params, body, .. } = &program.body[0] else {
+            panic!("expected function definition");
+        };
+        assert!(params.is_empty());
+        assert_eq!(body.len(), 1);
+    }
+    assert!(parse("function tests = testClearance extra\n tests = 1;\nend").is_err());
 }
 
 #[test]
@@ -1183,7 +1366,7 @@ fn parse_function_arguments_block_tracks_unsupported_trailing_tokens() {
     assert_eq!(
         argument_validations[0].validators,
         vec![runmat_parser::FunctionArgValidatorDecl {
-            name: "mustBeFinite".to_string(),
+            name: "mustBeFinite".into(),
             args: vec![],
         }]
     );
@@ -1309,7 +1492,7 @@ fn parse_function_arguments_block_supports_brace_validators() {
     assert_eq!(
         argument_validations[0].validators,
         vec![runmat_parser::FunctionArgValidatorDecl {
-            name: "mustBeFinite".to_string(),
+            name: "mustBeFinite".into(),
             args: vec![],
         }]
     );

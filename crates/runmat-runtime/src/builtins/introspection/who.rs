@@ -1,493 +1,78 @@
 //! MATLAB-compatible `who` builtin for RunMat.
 
-use glob::Pattern;
-use regex::Regex;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+#[cfg(test)]
+use crate::builtins::introspection::workspace_query::char_array_rows_as_strings;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, Value};
-use std::path::PathBuf;
+use runmat_value::Value;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+use crate::builtins::introspection::workspace_query::{
+    parse_request, WorkspaceQueryOwner, WorkspaceQuerySource,
 };
-use crate::builtins::introspection::type_resolvers::who_type;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::who")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "who",
-    op_kind: GpuOpKind::Custom("introspection"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host-only builtin. Arguments are gathered from the GPU if necessary; no kernels are launched.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::who")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "who",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Introspection builtin; registered for diagnostics only.",
-};
-
-const WHO_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "names",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cell array of matching variable names.",
-}];
-
-const WHO_SIG_NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const WHO_SIG_SELECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "selector",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name filters, wildcard patterns, or options.",
-}];
-
-const WHO_SIG_FILE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "file_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"-file\""),
-        description: "File mode option.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "MAT-file path.",
-    },
-];
-
-const WHO_SIG_REGEXP_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "regexp_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"-regexp\""),
-        description: "Regexp mode option.",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Regular-expression patterns.",
-    },
-];
-
-const WHO_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "names = who()",
-        inputs: &WHO_SIG_NO_INPUTS,
-        outputs: &WHO_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "names = who(selector, ...)",
-        inputs: &WHO_SIG_SELECTOR_INPUTS,
-        outputs: &WHO_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "names = who(\"-file\", filename, selector, ...)",
-        inputs: &WHO_SIG_FILE_INPUTS,
-        outputs: &WHO_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "names = who(\"-regexp\", pattern, ...)",
-        inputs: &WHO_SIG_REGEXP_INPUTS,
-        outputs: &WHO_OUTPUT,
-    },
-];
-
-const WHO_ERRORS: [BuiltinErrorDescriptor; 10] = [
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.FILE_REQUIRES_FILENAME",
-        identifier: None,
-        when: "The '-file' option is provided without a filename.",
-        message: "who: '-file' requires a filename",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.FILE_DUPLICATE",
-        identifier: None,
-        when: "The '-file' option is provided more than once.",
-        message: "who: '-file' may only be specified once",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.REGEXP_REQUIRES_PATTERN",
-        identifier: None,
-        when: "The '-regexp' option is provided without patterns.",
-        message: "who: '-regexp' requires at least one pattern",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.REGEXP_EMPTY_PATTERN",
-        identifier: None,
-        when: "The '-regexp' option receives only empty patterns.",
-        message: "who: '-regexp' requires non-empty pattern strings",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.REGEXP_INVALID",
-        identifier: None,
-        when: "A regexp pattern fails to compile.",
-        message: "who: invalid regular expression",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.OPTION_UNSUPPORTED",
-        identifier: None,
-        when: "An unsupported option token is provided.",
-        message: "who: unsupported option",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.FILENAME_ARG_TYPE",
-        identifier: None,
-        when: "Filename argument is not a char row or string scalar.",
-        message: "who: filename must be a character vector or string scalar",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.SELECTOR_CELL_MEMBER_TYPE",
-        identifier: None,
-        when: "A selector cell contains a non-string-like element.",
-        message: "who: selection cells must contain string or character scalars",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.SELECTOR_ARG_TYPE",
-        identifier: None,
-        when: "Selector argument is not a char array/string/string array/cell thereof.",
-        message: "who: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHO.PATTERN_INVALID",
-        identifier: None,
-        when: "Wildcard selector pattern fails to parse.",
-        message: "who: invalid pattern",
-    },
-];
-
-pub const WHO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WHO_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WHO_ERRORS,
-};
+#[cfg(test)]
+use crate::BuiltinResult;
+use crate::{build_runtime_error, make_cell, RuntimeError};
 
 #[runtime_builtin(
     name = "who",
-    category = "introspection",
-    summary = "List variable names in workspaces or MAT-files.",
-    keywords = "who,workspace,variables,introspection",
-    accel = "cpu",
-    type_resolver(who_type),
-    descriptor(crate::builtins::introspection::who::WHO_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::who"
 )]
-async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        // Only install the WGPU provider if none is currently registered to avoid clobbering
-        // the in-process provider used by non-WGPU tests.
-        if runmat_accelerate_api::provider().is_none() {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered.push(gather_if_needed_async(&arg).await.map_err(who_flow)?);
-    }
-    let request = parse_request(&gathered).await?;
+async fn who_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let request = parse_request(args.view(), WorkspaceQueryOwner::Who)?;
 
-    let mut entries = match &request.source {
-        WhoSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
-        WhoSource::File(path) => read_mat_file_for_builtin(path, "who").await?,
+    let file_entries = match &request.source {
+        WorkspaceQuerySource::File(path) => Some(read_mat_file_for_builtin(path, "who").await?),
+        WorkspaceQuerySource::Workspace => None,
     };
-
-    if matches!(request.source, WhoSource::File(_)) {
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-    }
+    let workspace_entries = if file_entries.is_none() {
+        crate::workspace::try_snapshot()
+            .map_err(who_flow)?
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let entries = file_entries
+        .as_ref()
+        .map(|entries| entries.value().0.as_slice())
+        .unwrap_or(&workspace_entries);
 
     let global_names: std::collections::HashSet<String> =
-        if matches!(request.source, WhoSource::Workspace) {
-            crate::workspace::global_names().into_iter().collect()
+        if matches!(request.source, WorkspaceQuerySource::Workspace) {
+            crate::workspace::try_global_names()
+                .map_err(who_flow)?
+                .into_iter()
+                .collect()
         } else {
             std::collections::HashSet::new()
         };
 
     let mut names = Vec::new();
     for (name, _value) in entries {
-        if !matches_filters(&name, &request.selectors, &request.regex_patterns) {
+        if !request.matches(name) {
             continue;
         }
-        let is_global = global_names.contains(&name);
+        let is_global = global_names.contains(name);
         if request.only_global && !is_global {
             continue;
         }
-        names.push(name);
+        names.push(name.clone());
     }
 
     names.sort();
 
     let mut cells = Vec::with_capacity(names.len());
     for name in names.into_iter() {
-        cells.push(Value::String(name));
+        cells.push(Value::string(name));
     }
     let rows = cells.len();
     make_cell(cells, rows, 1).map_err(|err| build_runtime_error(err).with_builtin("who").build())
-}
-
-#[derive(Debug)]
-struct WhoRequest {
-    source: WhoSource,
-    selectors: Vec<NameSelector>,
-    regex_patterns: Vec<Regex>,
-    only_global: bool,
-}
-
-#[derive(Debug)]
-enum WhoSource {
-    Workspace,
-    File(PathBuf),
-}
-
-#[derive(Debug)]
-enum NameSelector {
-    Exact(String),
-    Wildcard(Pattern),
-}
-
-fn who_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("who").build()
 }
 
 fn who_flow(mut err: RuntimeError) -> RuntimeError {
     err.context = err.context.with_builtin("who");
     err
 }
-
-async fn parse_request(values: &[Value]) -> BuiltinResult<WhoRequest> {
-    let mut idx = 0usize;
-    let mut path_value: Option<Value> = None;
-    let mut names: Vec<String> = Vec::new();
-    let mut regex_patterns = Vec::new();
-    let mut only_global = false;
-
-    while idx < values.len() {
-        if let Some(token) = option_token(&values[idx])? {
-            match token.as_str() {
-                "-file" => {
-                    idx += 1;
-                    if idx >= values.len() {
-                        return Err(who_error("who: '-file' requires a filename"));
-                    }
-                    if path_value.is_some() {
-                        return Err(who_error("who: '-file' may only be specified once"));
-                    }
-                    path_value = Some(values[idx].clone());
-                    idx += 1;
-                    continue;
-                }
-                "-regexp" => {
-                    idx += 1;
-                    if idx >= values.len() {
-                        return Err(who_error("who: '-regexp' requires at least one pattern"));
-                    }
-                    while idx < values.len() {
-                        if option_token(&values[idx])?.is_some() {
-                            break;
-                        }
-                        let candidates = extract_name_list(&values[idx]).await?;
-                        if candidates.is_empty() {
-                            return Err(who_error(
-                                "who: '-regexp' requires non-empty pattern strings",
-                            ));
-                        }
-                        for pattern in candidates {
-                            let regex = Regex::new(&pattern).map_err(|err| {
-                                build_runtime_error(format!(
-                                    "who: invalid regular expression '{pattern}': {err}"
-                                ))
-                                .with_builtin("who")
-                                .with_source(err)
-                                .build()
-                            })?;
-                            regex_patterns.push(regex);
-                        }
-                        idx += 1;
-                    }
-                    continue;
-                }
-                other => {
-                    return Err(who_error(format!("who: unsupported option '{other}'")));
-                }
-            }
-        }
-
-        let extracted = extract_name_list(&values[idx]).await?;
-        if extracted.is_empty() {
-            idx += 1;
-            continue;
-        }
-        if extracted.len() == 1
-            && extracted[0].eq_ignore_ascii_case("global")
-            && names.is_empty()
-            && regex_patterns.is_empty()
-            && path_value.is_none()
-        {
-            only_global = true;
-        } else {
-            names.extend(extracted);
-        }
-        idx += 1;
-    }
-
-    let source = if let Some(path_value) = path_value {
-        let path = parse_file_path(&path_value)?;
-        WhoSource::File(path)
-    } else {
-        WhoSource::Workspace
-    };
-
-    let selectors = build_selectors(&names)?;
-
-    Ok(WhoRequest {
-        source,
-        selectors,
-        regex_patterns,
-        only_global,
-    })
-}
-
-fn matches_filters(name: &str, selectors: &[NameSelector], regex_patterns: &[Regex]) -> bool {
-    if selectors.is_empty() && regex_patterns.is_empty() {
-        return true;
-    }
-    if selectors.iter().any(|selector| match selector {
-        NameSelector::Exact(expected) => name == expected,
-        NameSelector::Wildcard(pattern) => pattern.matches(name),
-    }) {
-        return true;
-    }
-    regex_patterns.iter().any(|regex| regex.is_match(name))
-}
-
-fn build_selectors(names: &[String]) -> BuiltinResult<Vec<NameSelector>> {
-    let mut selectors = Vec::with_capacity(names.len());
-    for name in names {
-        if contains_wildcards(name) {
-            let pattern = Pattern::new(name).map_err(|err| {
-                build_runtime_error(format!("who: invalid pattern '{name}': {err}"))
-                    .with_builtin("who")
-                    .with_source(err)
-                    .build()
-            })?;
-            selectors.push(NameSelector::Wildcard(pattern));
-        } else {
-            selectors.push(NameSelector::Exact(name.clone()));
-        }
-    }
-    Ok(selectors)
-}
-
-fn contains_wildcards(text: &str) -> bool {
-    text.chars().any(|ch| matches!(ch, '*' | '?' | '['))
-}
-
-fn parse_file_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let text = value_to_string_scalar(value)
-        .ok_or_else(|| who_error("who: filename must be a character vector or string scalar"))?;
-    let mut path = PathBuf::from(text);
-    if path.extension().is_none() {
-        path.set_extension("mat");
-    }
-    Ok(path)
-}
-
-fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
-    if let Some(token) = value_to_string_scalar(value) {
-        if token.starts_with('-') {
-            return Ok(Some(token.to_ascii_lowercase()));
-        }
-    }
-    Ok(None)
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
-    match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
-        Value::StringArray(sa) => Ok(sa.data.clone()),
-        Value::Cell(ca) => {
-            let mut names = Vec::with_capacity(ca.data.len());
-            for handle in &ca.data {
-                let inner = handle;
-                if let Some(text) = value_to_string_scalar(inner) {
-                    names.push(text);
-                    continue;
-                }
-                let gathered = gather_if_needed_async(inner).await.map_err(who_flow)?;
-                if let Some(text) = value_to_string_scalar(&gathered) {
-                    names.push(text);
-                } else {
-                    return Err(who_error(
-                        "who: selection cells must contain string or character scalars",
-                    ));
-                }
-            }
-            Ok(names)
-        }
-        Value::GpuTensor(_) => {
-            let gathered = gather_if_needed_async(value).await.map_err(who_flow)?;
-            extract_name_list(&gathered).await
-        }
-        _ => Err(who_error(
-            "who: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
-        )),
-    }
-}
-
-fn value_to_string_scalar(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => char_array_rows_as_strings(ca).into_iter().next(),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        _ => None,
-    }
-}
-
-fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
-    let mut rows = Vec::with_capacity(ca.rows);
-    for r in 0..ca.rows {
-        let mut row = String::with_capacity(ca.cols);
-        for c in 0..ca.cols {
-            let idx = r * ca.cols + c;
-            row.push(ca.data[idx]);
-        }
-        rows.push(row.trim_end_matches([' ', '\0']).to_string());
-    }
-    rows
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::whos::tests::{
@@ -498,32 +83,40 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_value::{CellArray, CharArray, StringArray, Tensor};
+    use runmat_value::{CellArray, StringArray, Tensor};
     use tempfile::tempdir;
 
     fn who_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::who_builtin(args))
+        block_on(super::who_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn names_from_value(value: Value) -> Vec<String> {
         match value {
             Value::Cell(cell) => cell
-                .data
+                .data()
                 .iter()
                 .map(|value| match value {
-                    Value::String(s) => s.clone(),
-                    Value::CharArray(ca) if ca.rows == 1 => ca
-                        .data
-                        .iter()
-                        .collect::<String>()
-                        .trim_end_matches([' ', '\0'])
-                        .to_string(),
+                    Value::String(runmat_value::StringElement::Text(s)) => s.to_string(),
+                    Value::CharArray(ca) if ca.rows == 1 => {
+                        runmat_value::decode_utf16_code_units(ca.data())
+                            .expect("valid UTF-16 fixture")
+                            .trim_end_matches([' ', '\0'])
+                            .to_string()
+                    }
                     other => panic!("expected string entry, got {other:?}"),
                 })
                 .collect(),
-            Value::String(s) => vec![s],
-            Value::StringArray(sa) => sa.data,
-            Value::CharArray(ca) => char_array_rows_as_strings(&ca),
+            Value::String(runmat_value::StringElement::Text(s)) => vec![s.to_string()],
+            Value::StringArray(sa) => sa
+                .data()
+                .iter()
+                .map(|text| text.as_str().expect("nonmissing name").to_owned())
+                .collect(),
+            Value::CharArray(ca) => {
+                char_array_rows_as_strings(&ca, WorkspaceQueryOwner::Who).unwrap()
+            }
             other => panic!("expected cell array result, got {other:?}"),
         }
     }
@@ -702,6 +295,20 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn who_rejects_resident_numeric_selector_with_owning_error() {
+        ensure_shared_resolver();
+        shared_set_workspace(&[], &[]);
+        test_support::with_test_provider(|_| {
+            let resident = block_on(crate::call_builtin_async("gpuArray", &[Value::Num(7.0)]))
+                .expect("resident scalar");
+            let error =
+                who_builtin(vec![resident.value().clone()]).expect_err("selector is not text");
+            assert_eq!(error.context.builtin.as_deref(), Some("who"));
+            assert!(error.message().contains("who: selections must"));
+        });
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn who_rejects_unknown_option() {
@@ -765,7 +372,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 0);
                 assert_eq!(cell.cols, 1);
-                assert!(cell.data.is_empty());
+                assert!(cell.data().is_empty());
             }
             other => panic!("expected cell array, got {other:?}"),
         }
@@ -877,7 +484,10 @@ pub(crate) mod tests {
             ))
             .expect("gpu");
             shared_set_workspace(
-                &[("gpuVar", gpu_value.clone()), ("hostVar", Value::Num(5.0))],
+                &[
+                    ("gpuVar", gpu_value.value().clone()),
+                    ("hostVar", Value::Num(5.0)),
+                ],
                 &[],
             );
 
@@ -896,7 +506,10 @@ pub(crate) mod tests {
             shared_set_workspace(&[], &[]);
             let gpu_scalar =
                 block_on(crate::call_builtin_async("gpuArray", &[Value::Num(3.0)])).expect("gpu");
-            shared_set_workspace(&[("shared_gpu", gpu_scalar)], &["shared_gpu"]);
+            shared_set_workspace(
+                &[("shared_gpu", gpu_scalar.value().clone())],
+                &["shared_gpu"],
+            );
 
             let value = who_builtin(vec![Value::from("global")]).expect("who");
             let names = names_from_value(value);
@@ -920,7 +533,7 @@ pub(crate) mod tests {
             &[Value::Tensor(tensor)],
         ))
         .expect("gpuArray");
-        shared_set_workspace(&[("wgpuVar", gpu_value)], &[]);
+        shared_set_workspace(&[("wgpuVar", gpu_value.value().clone())], &[]);
 
         let value = who_builtin(Vec::new()).expect("who");
         let names = names_from_value(value);

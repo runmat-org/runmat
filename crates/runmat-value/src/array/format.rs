@@ -152,7 +152,7 @@ impl fmt::Display for Tensor {
             }
         };
 
-        match self.shape.len() {
+        match self.shape().len() {
             0 | 1 => {
                 // Treat as row vector for display
                 write!(f, "[")?;
@@ -181,12 +181,12 @@ impl fmt::Display for Tensor {
                 Ok(())
             }
             _ => {
-                if should_expand_nd_display(&self.shape) {
-                    write_nd_pages(f, &self.shape, |f, idx| {
+                if should_expand_nd_display(self.shape()) {
+                    write_nd_pages(f, self.shape(), |f, idx| {
                         write!(f, "{}", format_element(idx))
                     })
                 } else {
-                    write!(f, "Tensor(shape={:?})", self.shape)
+                    write!(f, "Tensor(shape={:?})", self.shape())
                 }
             }
         }
@@ -242,11 +242,13 @@ impl fmt::Display for StringArray {
         let count = self.data.len();
         if count == 1 && rows == 1 && cols == 1 {
             let v = &self.data[0];
-            if v == "<missing>" {
-                return write!(f, "<missing>");
-            }
-            let escaped = v.replace('"', "\\\"");
-            return write!(f, "\"{escaped}\"");
+            return match v {
+                StringElement::Missing => write!(f, "<missing>"),
+                StringElement::Text(text) => {
+                    let escaped = text.as_str().replace('"', "\\\"");
+                    write!(f, "\"{escaped}\"")
+                }
+            };
         }
         if self.shape.len() > 2 {
             let dims: Vec<String> = self.shape.iter().map(|d| d.to_string()).collect();
@@ -264,11 +266,12 @@ impl fmt::Display for StringArray {
                     write!(f, "  ")?;
                 }
                 let v = &self.data[r + c * rows];
-                if v == "<missing>" {
-                    write!(f, "<missing>")?;
-                } else {
-                    let escaped = v.replace('"', "\\\"");
-                    write!(f, "\"{escaped}\"")?;
+                match v {
+                    StringElement::Missing => write!(f, "<missing>")?,
+                    StringElement::Text(text) => {
+                        let escaped = text.as_str().replace('"', "\\\"");
+                        write!(f, "\"{escaped}\"")?;
+                    }
                 }
             }
         }
@@ -333,9 +336,18 @@ impl fmt::Display for CharArray {
         for r in 0..self.rows {
             writeln!(f)?;
             write!(f, "  ")?; // Indent
-            for c in 0..self.cols {
-                let ch = self.data[r * self.cols + c];
-                write!(f, "{ch}")?;
+            let row = &self.data()[r * self.cols..(r + 1) * self.cols];
+            match String::from_utf16(&row.iter().map(|unit| unit.raw()).collect::<Vec<_>>()) {
+                Ok(text) => write!(f, "{text}")?,
+                Err(_) => {
+                    for unit in row {
+                        if unit.is_surrogate() {
+                            write!(f, "\\u{:04X}", unit.raw())?;
+                        } else if let Some(value) = char::from_u32(unit.raw() as u32) {
+                            write!(f, "{value}")?;
+                        }
+                    }
+                }
             }
         }
         Ok(())

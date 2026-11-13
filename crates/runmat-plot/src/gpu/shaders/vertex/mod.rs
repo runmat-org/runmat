@@ -1,3 +1,5 @@
+pub mod annotation_stroke;
+pub mod edge_stroke;
 pub mod grid_plane;
 pub mod image_direct;
 pub mod line;
@@ -7,6 +9,7 @@ pub mod point_billboard;
 pub mod point_direct;
 pub mod triangle;
 
+pub use annotation_stroke::SHADER as ANNOTATION_STROKE;
 pub use grid_plane::SHADER as GRID_PLANE;
 pub use image_direct::SHADER as IMAGE_DIRECT;
 pub use line::SHADER as LINE;

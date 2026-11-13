@@ -1,0 +1,46 @@
+// Engineering physics belongs in the importing study.
+
+geometry beam {
+    file = "./geometry/cantilever.step"
+    units = mm
+    region body : solid { select name "Beam"; expect exactly_one }
+    region fixed_end : face { select name "Fixed end"; expect exactly_one }
+    region loaded_end : face { select name "Loaded end"; expect exactly_one }
+}
+
+mesh beam on geometry.beam {
+    tetrahedra {
+        order = linear
+        target_size = 1 m
+        maximum_deviation = 0.001 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    thermal {
+        reference_temperature = 300 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.000012 K^-1
+        conductivity = 45 W/m/K
+        specific_heat = 500 J/kg/K
+    }
+}
+model conducting_bar {
+    thermal { reference_temperature = 300 K }
+    assign material.steel to geometry.beam.region.body
+    constraint cold_end {
+        thermal.temperature { target = geometry.beam.region.fixed_end; value = 300 K }
+    }
+    constraint hot_end {
+        thermal.temperature { target = geometry.beam.region.loaded_end; value = 350 K }
+    }
+}
+study conduction {
+    geometry = geometry.beam
+    mesh = mesh.beam
+    model = model.conducting_bar
+    analysis heat { thermal steady {} }
+    output temperature = analysis.heat.field.node.temperature
+    output heat_flux = analysis.heat.field.element.heat_flux
+}

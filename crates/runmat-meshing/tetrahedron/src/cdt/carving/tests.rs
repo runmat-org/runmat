@@ -14,15 +14,15 @@ use crate::cdt::{
 
 #[path = "tests/close_parallel.rs"]
 mod close_parallel;
+#[path = "tests/multi_steiner.rs"]
+mod multi_steiner;
+#[path = "tests/same_facet_multi_steiner.rs"]
+mod same_facet_multi_steiner;
 #[path = "tests/small_void.rs"]
 mod small_void;
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, value.to_owned(), Vec::new())
 }
 
 fn fixture(interface: bool) -> (DelaunayConstraints, DelaunayFacetRecovery) {
@@ -70,7 +70,10 @@ fn fixture(interface: bool) -> (DelaunayConstraints, DelaunayFacetRecovery) {
             .map(|(index, coordinates_m)| DelaunayConstraintNode {
                 identity: StableDigest::from_bytes([(index + 70) as u8; 32]),
                 source_vertex_id: None,
-                coordinates_m,
+                coordinates_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(coordinates_m),
             })
             .collect(),
         segments: segment_vertices
@@ -373,9 +376,5 @@ fn opposite_vertex(facet: [u32; 3]) -> u32 {
 }
 
 fn region(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, value.to_owned(), Vec::new())
 }

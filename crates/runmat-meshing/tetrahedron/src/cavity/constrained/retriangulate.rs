@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    quality::predicate::{
-        point_in_closed_triangle_surface, tetrahedron_centroid, Point3, PointInClosedSurface,
-    },
+    quality::predicate::{tetrahedron_centroid, Point3, PointInClosedSurface},
     quality::tolerance::MeshingTolerance,
     MeshingCancellationSignal,
 };
@@ -11,10 +9,14 @@ use runmat_meshing_core::{
 use super::{
     boundary_nodes::{
         boundary_node_coordinates, candidate_respects_protected_boundary_distance,
-        cavity_boundary_node_ids, cavity_boundary_triangles,
+        cavity_boundary_node_ids, cavity_boundary_triangles, classify_cavity_point,
+        resolved_cavity_tolerance,
     },
     exact_cover::{on_demand_interior_mate_faces_for_trace, BoundaryExactCoverSearch},
-    refill_tetrahedra::{raw_refill_tetrahedron_with_rejection_reason, refill_from_tetrahedra},
+    refill_tetrahedra::{
+        raw_refill_tetrahedron_with_rejection_reason, refill_from_tetrahedra,
+        RefillTetrahedronError,
+    },
     topology::{sorted_face, sorted_tetrahedron_nodes},
     validation::{validate_constrained_cavity, validate_refill_options},
     ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefill,
@@ -29,6 +31,47 @@ pub fn retriangulate_constrained_cavity_from_nodes(
     budget: ConstrainedCavityRefillBudget,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Option<ConstrainedCavityRefill>, ConstrainedCavityRefillError> {
+    retriangulate_constrained_cavity_from_nodes_with_diagnostics(
+        cavity,
+        nodes,
+        options,
+        budget,
+        cancellation,
+    )
+    .map(|result| result.refill)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ConstrainedCavityRetriangulation {
+    pub refill: Option<ConstrainedCavityRefill>,
+    pub accepted_node_count: usize,
+    pub candidate_tetrahedron_count: usize,
+    pub terminal_reason: &'static str,
+    pub dead_end_reason_counts: BTreeMap<&'static str, usize>,
+    pub candidate_rejection_counts: BTreeMap<&'static str, usize>,
+    pub first_dead_end: Option<String>,
+    pub target_volume_m3: f64,
+    pub sampled_candidate_volumes_m3: Vec<f64>,
+    pub sampled_boundary_faces: Vec<[u32; 3]>,
+    pub sampled_candidate_tetrahedra: Vec<[u32; 4]>,
+    pub sampled_accepted_nodes: Vec<(u32, Point3)>,
+}
+
+struct RetriangulationOutcome {
+    refill: Option<ConstrainedCavityRefill>,
+    terminal_reason: &'static str,
+    dead_end_reason_counts: BTreeMap<&'static str, usize>,
+    candidate_rejection_counts: BTreeMap<&'static str, usize>,
+    first_dead_end: Option<String>,
+}
+
+pub(crate) fn retriangulate_constrained_cavity_from_nodes_with_diagnostics(
+    cavity: &ConstrainedCavity,
+    nodes: &[ConstrainedCavityNode],
+    options: ConstrainedCavityRefillOptions,
+    budget: ConstrainedCavityRefillBudget,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<ConstrainedCavityRetriangulation, ConstrainedCavityRefillError> {
     validate_refill_options(options)?;
     validate_budget(budget)?;
     validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
@@ -41,10 +84,13 @@ pub fn retriangulate_constrained_cavity_from_nodes(
     let boundary_node_map = boundary_node_coordinates(cavity, nodes)?;
     let boundary_node_ids = cavity_boundary_node_ids(cavity);
     let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
-    let tolerance = MeshingTolerance::default();
+    let tolerance = resolved_cavity_tolerance(&boundary_node_map, options.classification_tolerance);
     let mut node_map = BTreeMap::<u32, Point3>::new();
     for node in nodes {
-        if node_map.insert(node.node_id, node.coordinates_m).is_some() {
+        if node_map
+            .insert(node.node_id, node.coordinates_m.canonical_value())
+            .is_some()
+        {
             return Err(ConstrainedCavityRefillError::DuplicateInteriorNode {
                 node_id: node.node_id,
             });
@@ -59,19 +105,35 @@ pub fn retriangulate_constrained_cavity_from_nodes(
         if !candidate_respects_protected_boundary_distance(
             cavity,
             &boundary_node_map,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             options,
         ) {
             continue;
         }
-        if point_in_closed_triangle_surface(node.coordinates_m, &boundary_triangles, tolerance)
-            == PointInClosedSurface::Inside
+        if classify_cavity_point(
+            cavity,
+            &boundary_node_map,
+            &boundary_triangles,
+            node.coordinates_m.canonical_value(),
+            tolerance,
+        ) == PointInClosedSurface::Inside
         {
             candidate_nodes.push(node.clone());
         }
     }
     if candidate_nodes.len() < 4 {
-        return Ok(None);
+        return Ok(result(
+            RetriangulationOutcome {
+                refill: None,
+                terminal_reason: "fewer_than_four_accepted_nodes",
+                dead_end_reason_counts: BTreeMap::new(),
+                candidate_rejection_counts: BTreeMap::new(),
+                first_dead_end: None,
+            },
+            &[],
+            cavity,
+            &candidate_nodes,
+        ));
     }
     candidate_nodes.sort_by_key(|node| node.node_id);
     let boundary_faces = cavity
@@ -84,6 +146,11 @@ pub fn retriangulate_constrained_cavity_from_nodes(
         candidate_nodes: &candidate_nodes,
         node_map: &node_map,
         boundary_triangles: &boundary_triangles,
+        cavity,
+        boundary_nodes: &boundary_node_map,
+        tolerance,
+        maximum_candidate_volume_m3: cavity.target_volume_m3
+            + cavity.target_volume_m3.max(1.0e-18) * options.volume_relative_tolerance,
         options,
         budget,
         cancellation,
@@ -92,6 +159,7 @@ pub fn retriangulate_constrained_cavity_from_nodes(
         work: 0,
         seen: BTreeSet::new(),
         candidates: Vec::new(),
+        rejection_counts: BTreeMap::new(),
     };
     let mut remaining_search_attempts = budget.maximum_search_attempts;
 
@@ -99,7 +167,18 @@ pub fn retriangulate_constrained_cavity_from_nodes(
         let candidate_count_before = inventory.candidates.len();
         generator.append(&pending_faces, &mut inventory)?;
         if inventory.candidates.is_empty() {
-            return Ok(None);
+            return Ok(result(
+                RetriangulationOutcome {
+                    refill: None,
+                    terminal_reason: "no_candidate_tetrahedra",
+                    dead_end_reason_counts: BTreeMap::new(),
+                    candidate_rejection_counts: inventory.rejection_counts.clone(),
+                    first_dead_end: None,
+                },
+                &[],
+                cavity,
+                &candidate_nodes,
+            ));
         }
         if remaining_search_attempts == 0 {
             return Err(resource(
@@ -136,7 +215,18 @@ pub fn retriangulate_constrained_cavity_from_nodes(
                 .filter(|node| used_nodes.contains(&node.node_id))
                 .cloned()
                 .collect();
-            return Ok(Some(refill));
+            return Ok(result(
+                RetriangulationOutcome {
+                    refill: Some(refill),
+                    terminal_reason: "recovered",
+                    dead_end_reason_counts: BTreeMap::new(),
+                    candidate_rejection_counts: inventory.rejection_counts.clone(),
+                    first_dead_end: None,
+                },
+                &inventory.candidates,
+                cavity,
+                &candidate_nodes,
+            ));
         }
         if trace
             .dead_end_reason_counts
@@ -156,10 +246,32 @@ pub fn retriangulate_constrained_cavity_from_nodes(
             &boundary_faces,
             &trace,
         ) else {
-            return Ok(None);
+            return Ok(result(
+                RetriangulationOutcome {
+                    refill: None,
+                    terminal_reason: "exact_cover_has_no_expandable_mate_faces",
+                    dead_end_reason_counts: trace.dead_end_reason_counts,
+                    candidate_rejection_counts: inventory.rejection_counts.clone(),
+                    first_dead_end: trace.dead_end.map(|dead_end| format!("{dead_end:?}")),
+                },
+                &inventory.candidates,
+                cavity,
+                &candidate_nodes,
+            ));
         };
         if inventory.candidates.len() == candidate_count_before {
-            return Ok(None);
+            return Ok(result(
+                RetriangulationOutcome {
+                    refill: None,
+                    terminal_reason: "candidate_expansion_made_no_progress",
+                    dead_end_reason_counts: trace.dead_end_reason_counts,
+                    candidate_rejection_counts: inventory.rejection_counts.clone(),
+                    first_dead_end: trace.dead_end.map(|dead_end| format!("{dead_end:?}")),
+                },
+                &inventory.candidates,
+                cavity,
+                &candidate_nodes,
+            ));
         }
         pending_faces = next_faces;
     }
@@ -168,10 +280,53 @@ pub fn retriangulate_constrained_cavity_from_nodes(
     ))
 }
 
+fn result(
+    outcome: RetriangulationOutcome,
+    candidates: &[ConstrainedCavityRefillTetrahedron],
+    cavity: &ConstrainedCavity,
+    accepted_nodes: &[ConstrainedCavityNode],
+) -> ConstrainedCavityRetriangulation {
+    ConstrainedCavityRetriangulation {
+        refill: outcome.refill,
+        accepted_node_count: accepted_nodes.len(),
+        candidate_tetrahedron_count: candidates.len(),
+        terminal_reason: outcome.terminal_reason,
+        dead_end_reason_counts: outcome.dead_end_reason_counts,
+        candidate_rejection_counts: outcome.candidate_rejection_counts,
+        first_dead_end: outcome.first_dead_end,
+        target_volume_m3: cavity.target_volume_m3,
+        sampled_candidate_volumes_m3: candidates
+            .iter()
+            .take(64)
+            .map(|candidate| candidate.volume_m3)
+            .collect(),
+        sampled_boundary_faces: cavity
+            .boundary_faces
+            .iter()
+            .take(64)
+            .map(|face| sorted_face(face.node_ids))
+            .collect(),
+        sampled_candidate_tetrahedra: candidates
+            .iter()
+            .take(64)
+            .map(|candidate| candidate.node_ids)
+            .collect(),
+        sampled_accepted_nodes: accepted_nodes
+            .iter()
+            .take(64)
+            .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
+            .collect(),
+    }
+}
+
 struct CandidateGenerator<'a> {
     candidate_nodes: &'a [ConstrainedCavityNode],
     node_map: &'a BTreeMap<u32, Point3>,
     boundary_triangles: &'a [[[f64; 3]; 3]],
+    cavity: &'a ConstrainedCavity,
+    boundary_nodes: &'a BTreeMap<u32, Point3>,
+    tolerance: MeshingTolerance,
+    maximum_candidate_volume_m3: f64,
     options: ConstrainedCavityRefillOptions,
     budget: ConstrainedCavityRefillBudget,
     cancellation: &'a dyn MeshingCancellationSignal,
@@ -181,6 +336,7 @@ struct CandidateInventory {
     work: u64,
     seen: BTreeSet<[u32; 4]>,
     candidates: Vec<ConstrainedCavityRefillTetrahedron>,
+    rejection_counts: BTreeMap<&'static str, usize>,
 }
 
 impl CandidateGenerator<'_> {
@@ -215,24 +371,56 @@ impl CandidateGenerator<'_> {
                     continue;
                 }
                 let points = node_ids.map(|node_id| self.node_map[&node_id]);
-                if point_in_closed_triangle_surface(
-                    tetrahedron_centroid(points),
+                let classification = classify_cavity_point(
+                    self.cavity,
+                    self.boundary_nodes,
                     self.boundary_triangles,
-                    MeshingTolerance::default(),
-                ) != PointInClosedSurface::Inside
-                {
+                    tetrahedron_centroid(points),
+                    self.tolerance,
+                );
+                match classification {
+                    PointInClosedSurface::Inside => {}
+                    PointInClosedSurface::OnBoundary => {
+                        *inventory
+                            .rejection_counts
+                            .entry("centroid_on_boundary")
+                            .or_default() += 1;
+                        continue;
+                    }
+                    PointInClosedSurface::Outside => {
+                        *inventory
+                            .rejection_counts
+                            .entry("centroid_outside")
+                            .or_default() += 1;
+                        continue;
+                    }
+                }
+                let candidate = match raw_refill_tetrahedron_with_rejection_reason(
+                    node_ids,
+                    points,
+                    self.options,
+                ) {
+                    Ok(candidate) => candidate,
+                    Err(RefillTetrahedronError::Rejected(reason)) => {
+                        *inventory.rejection_counts.entry(reason).or_default() += 1;
+                        continue;
+                    }
+                    Err(RefillTetrahedronError::Accounting(cause)) => {
+                        return Err(ConstrainedCavityRefillError::Accounting(cause));
+                    }
+                };
+                if candidate.volume_m3 > self.maximum_candidate_volume_m3 {
+                    *inventory
+                        .rejection_counts
+                        .entry("candidate_exceeds_cavity_volume")
+                        .or_default() += 1;
                     continue;
                 }
-                if let Ok(candidate) =
-                    raw_refill_tetrahedron_with_rejection_reason(node_ids, points, self.options)
-                {
-                    inventory.candidates.push(candidate);
-                    if inventory.candidates.len() as u64 > self.budget.maximum_candidate_tetrahedra
-                    {
-                        return Err(resource(
-                            "constrained cavity candidate-tetrahedron limit exceeded",
-                        ));
-                    }
+                inventory.candidates.push(candidate);
+                if inventory.candidates.len() as u64 > self.budget.maximum_candidate_tetrahedra {
+                    return Err(resource(
+                        "constrained cavity candidate-tetrahedron limit exceeded",
+                    ));
                 }
             }
         }

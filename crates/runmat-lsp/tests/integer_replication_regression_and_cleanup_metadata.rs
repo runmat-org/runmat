@@ -22,7 +22,8 @@ const CAPABILITY_NAMES: [(&str, usize); 12] = [
 #[test]
 fn replication_regression_and_cleanup_integer_metadata_is_complete() {
     for (name, form_count) in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), form_count, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -32,7 +33,8 @@ fn replication_regression_and_cleanup_integer_metadata_is_complete() {
         }
     }
     for name in ["removeStopWords", "rmpath"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert_eq!(
             builtin.integer_audit.expect("integer audit").kind,
@@ -53,7 +55,7 @@ fn cohort_metadata_distinguishes_documented_extensions_rejections_and_saturation
         "rmfield",
         "rmmissing",
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
         assert!(
             builtin.integer_capabilities.iter().any(|capability| {
                 capability
@@ -65,7 +67,7 @@ fn cohort_metadata_distinguishes_documented_extensions_rejections_and_saturation
         );
     }
     for name in ["regress", "resample", "ridge", "rlocus"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
         assert!(
             builtin.integer_capabilities.iter().any(|capability| {
                 capability
@@ -76,13 +78,13 @@ fn cohort_metadata_distinguishes_documented_extensions_rejections_and_saturation
             "{name}"
         );
     }
-    let resample = runmat_builtins::builtin_function_by_name("resample").unwrap();
+    let resample = runmat_builtins::builtin_catalog_entry_by_name("resample").unwrap();
     assert!(resample.integer_capabilities.iter().any(|capability| {
         capability.inputs.iter().any(|input| {
             input.name == "X" && input.availability == BuiltinIntegerInputAvailability::Rejected
         })
     }));
-    let rgb2gray = runmat_builtins::builtin_function_by_name("rgb2gray").unwrap();
+    let rgb2gray = runmat_builtins::builtin_catalog_entry_by_name("rgb2gray").unwrap();
     assert_eq!(
         rgb2gray.integer_capabilities[0].overflow,
         BuiltinIntegerOverflowRule::Saturate
@@ -112,7 +114,7 @@ fn cohort_extension_metadata_publishes_stable_gates() {
         ("rlocus", &["rlocus-integer-gain"][..]),
         ("rmmissing", &["rmmissing-integer-dimension"][..]),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
         for id in ids {
             assert!(
                 builtin.extensions.iter().any(|extension| {

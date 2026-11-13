@@ -1,255 +1,70 @@
-//! Integer capability metadata and bounded-count parsing for string-pattern constructors.
+//! Shared bounded-count parsing for Unicode-letter and wildcard patterns.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, LETTERS_PATTERN_ERROR_ARGUMENT_COUNT,
+    LETTERS_PATTERN_ERROR_INVALID_COUNT, LETTERS_PATTERN_ERROR_INVALID_RANGE,
+    WILDCARD_PATTERN_ERROR_ARGUMENT_COUNT, WILDCARD_PATTERN_ERROR_INVALID_COUNT,
+    WILDCARD_PATTERN_ERROR_INVALID_RANGE,
 };
 use runmat_value::{NumericScalar, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
+use crate::builtins::strings::core::numeric_length::nonnegative_platform_usize;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
-const PATTERN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "pat",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Host pattern object.",
-}];
-
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const COUNT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "N",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Exact nonnegative number of characters to match.",
-}];
-
-const RANGE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "minCharacters",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum nonnegative number of characters to match.",
-    },
-    BuiltinParamDescriptor {
-        name: "maxCharacters",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum nonnegative count, or positive infinity for no upper bound.",
-    },
+const LETTERS_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LETTERS_PATTERN_ERROR_ARGUMENT_COUNT,
+    LETTERS_PATTERN_ERROR_INVALID_COUNT,
+    LETTERS_PATTERN_ERROR_INVALID_RANGE,
+];
+const WILDCARD_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    WILDCARD_PATTERN_ERROR_ARGUMENT_COUNT,
+    WILDCARD_PATTERN_ERROR_INVALID_COUNT,
+    WILDCARD_PATTERN_ERROR_INVALID_RANGE,
 ];
 
-const LETTERS_PATTERN_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "pat = lettersPattern",
-        inputs: &NO_INPUTS,
-        outputs: &PATTERN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pat = lettersPattern(N)",
-        inputs: &COUNT_INPUTS,
-        outputs: &PATTERN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pat = lettersPattern(minCharacters, maxCharacters)",
-        inputs: &RANGE_INPUTS,
-        outputs: &PATTERN_OUTPUT,
-    },
-];
-
-const WILDCARD_PATTERN_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "pat = wildcardPattern",
-        inputs: &NO_INPUTS,
-        outputs: &PATTERN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pat = wildcardPattern(N)",
-        inputs: &COUNT_INPUTS,
-        outputs: &PATTERN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pat = wildcardPattern(minCharacters, maxCharacters)",
-        inputs: &RANGE_INPUTS,
-        outputs: &PATTERN_OUTPUT,
-    },
-];
-
-const LETTERS_PATTERN_ERRORS: [BuiltinErrorDescriptor; 3] = pattern_errors(
-    "RM.LETTERS_PATTERN.ARGUMENT_COUNT",
-    "RunMat:lettersPattern:ArgumentCount",
-    "RM.LETTERS_PATTERN.INVALID_COUNT",
-    "RunMat:lettersPattern:InvalidCount",
-    "RM.LETTERS_PATTERN.INVALID_RANGE",
-    "RunMat:lettersPattern:InvalidRange",
-    "lettersPattern: expected zero, one, or two input arguments",
-    "lettersPattern: invalid character count",
-    "lettersPattern: minCharacters must not exceed maxCharacters",
-);
-
-const WILDCARD_PATTERN_ERRORS: [BuiltinErrorDescriptor; 3] = pattern_errors(
-    "RM.WILDCARD_PATTERN.ARGUMENT_COUNT",
-    "RunMat:wildcardPattern:ArgumentCount",
-    "RM.WILDCARD_PATTERN.INVALID_COUNT",
-    "RunMat:wildcardPattern:InvalidCount",
-    "RM.WILDCARD_PATTERN.INVALID_RANGE",
-    "RunMat:wildcardPattern:InvalidRange",
-    "wildcardPattern: expected zero, one, or two count arguments",
-    "wildcardPattern: invalid character count",
-    "wildcardPattern: minCharacters must not exceed maxCharacters",
-);
-
-const fn pattern_errors(
-    count_code: &'static str,
-    count_identifier: &'static str,
-    value_code: &'static str,
-    value_identifier: &'static str,
-    range_code: &'static str,
-    range_identifier: &'static str,
-    count_message: &'static str,
-    value_message: &'static str,
-    range_message: &'static str,
-) -> [BuiltinErrorDescriptor; 3] {
-    [
-        BuiltinErrorDescriptor {
-            code: count_code,
-            identifier: Some(count_identifier),
-            when: "More than two count arguments are supplied.",
-            message: count_message,
-        },
-        BuiltinErrorDescriptor {
-            code: value_code,
-            identifier: Some(value_identifier),
-            when: "A count is not a host or automatically resident nonnegative numeric integer scalar, or positive infinity in the maximum position.",
-            message: value_message,
-        },
-        BuiltinErrorDescriptor {
-            code: range_code,
-            identifier: Some(range_identifier),
-            when: "minCharacters exceeds maxCharacters.",
-            message: range_message,
-        },
-    ]
+#[derive(Clone, Copy)]
+pub(crate) enum BoundedPatternKind {
+    Letters,
+    Wildcard,
 }
 
-pub const LETTERS_PATTERN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LETTERS_PATTERN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LETTERS_PATTERN_ERRORS,
-};
+impl BoundedPatternKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Letters => "lettersPattern",
+            Self::Wildcard => "wildcardPattern",
+        }
+    }
 
-pub const WILDCARD_PATTERN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WILDCARD_PATTERN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WILDCARD_PATTERN_ERRORS,
-};
+    fn atom(self) -> &'static str {
+        match self {
+            Self::Letters => r"\p{Alphabetic}",
+            Self::Wildcard => ".",
+        }
+    }
 
-pub const PATTERN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "pattern constructs a literal pattern only from text. Numeric and integer inputs reject without implicit text conversion or provider access.",
-};
+    fn lazy(self) -> bool {
+        matches!(self, Self::Wildcard)
+    }
 
-pub const REGEXP_PATTERN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "regexpPattern constructs a regular-expression pattern only from text. Numeric and integer inputs reject without implicit text conversion or provider access.",
-    };
-
-const COUNT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every built-in integer class plus integer-valued host single or double can specify the exact nonnegative character count.",
-    }];
-
-const RANGE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "minCharacters",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The inclusive lower bound is read exactly from every built-in integer class.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "maxCharacters",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The inclusive upper bound is read exactly from every built-in integer class; positive host floating infinity separately denotes an unbounded maximum.",
-    },
-];
-
-const fn bounded_capabilities(
-    exact_form: &'static str,
-    range_form: &'static str,
-    lazy: bool,
-) -> [BuiltinIntegerCapabilityDescriptor; 2] {
-    [
-        BuiltinIntegerCapabilityDescriptor {
-            form: exact_form,
-            inputs: &COUNT_INTEGER_INPUTS,
-            computation_domain: BuiltinIntegerComputationDomain::Structural,
-            output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-            overflow: BuiltinIntegerOverflowRule::Error,
-            backend: BuiltinIntegerBackendRule::HostOnly,
-            overload: BuiltinIntegerOverloadKind::StructuralParameter,
-            notes: "N controls only the exact repetition bound of the returned host pattern object; explicit interactive GPU input is not documented, while automatic residency may gather transparently.",
-        },
-        BuiltinIntegerCapabilityDescriptor {
-            form: range_form,
-            inputs: &RANGE_INTEGER_INPUTS,
-            computation_domain: BuiltinIntegerComputationDomain::Structural,
-            output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-            overflow: BuiltinIntegerOverflowRule::Error,
-            backend: BuiltinIntegerBackendRule::HostOnly,
-            overload: BuiltinIntegerOverloadKind::StructuralParameter,
-            notes: if lazy {
-                "The inclusive bounds are structural controls, min must not exceed max, and wildcard matching is lazy toward the minimum bound."
-            } else {
-                "The inclusive bounds are structural controls, min must not exceed max, and letter matching is greedy toward the maximum bound."
-            },
-        },
-    ]
+    fn errors(self) -> &'static [BuiltinErrorDescriptor; 3] {
+        match self {
+            Self::Letters => &LETTERS_ERRORS,
+            Self::Wildcard => &WILDCARD_ERRORS,
+        }
+    }
 }
-
-pub const LETTERS_PATTERN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] =
-    bounded_capabilities(
-        "pat = lettersPattern(integer_N)",
-        "pat = lettersPattern(integer_minCharacters, integer_maxCharacters)",
-        false,
-    );
-
-pub const WILDCARD_PATTERN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] =
-    bounded_capabilities(
-        "pat = wildcardPattern(integer_N)",
-        "pat = wildcardPattern(integer_minCharacters, integer_maxCharacters)",
-        true,
-    );
 
 pub(crate) async fn bounded_regex(
-    rest: Vec<Value>,
-    atom: &str,
-    name: &'static str,
-    lazy: bool,
+    rest: crate::call::BuiltinArguments,
+    kind: BoundedPatternKind,
 ) -> BuiltinResult<String> {
-    let errors = errors_for(name);
+    let name = kind.name();
+    let atom = kind.atom();
+    let lazy = kind.lazy();
+    let errors = kind.errors();
     if rest.len() > 2 {
         return Err(pattern_error(name, &errors[0], errors[0].message));
     }
@@ -273,16 +88,16 @@ pub(crate) async fn bounded_regex(
         [] => Ok(format!("{atom}+")),
         [count] => Ok(format!(
             "{atom}{{{}}}{}",
-            parse_count(count, name)?,
+            parse_count(count, kind)?,
             if lazy { "?" } else { "" }
         )),
         [minimum, maximum] => {
-            let minimum = parse_count(minimum, name)?;
+            let minimum = parse_count(minimum, kind)?;
             let suffix = if lazy { "?" } else { "" };
             if is_positive_infinity(maximum) {
                 Ok(format!("{atom}{{{minimum},}}{suffix}"))
             } else {
-                let maximum = parse_count(maximum, name)?;
+                let maximum = parse_count(maximum, kind)?;
                 if minimum > maximum {
                     return Err(pattern_error(name, &errors[2], errors[2].message));
                 }
@@ -293,17 +108,17 @@ pub(crate) async fn bounded_regex(
     }
 }
 
-fn parse_count(value: &Value, name: &'static str) -> BuiltinResult<usize> {
+fn parse_count(value: &Value, kind: BoundedPatternKind) -> BuiltinResult<usize> {
     let parsed = match value {
-        Value::Num(value) => nonnegative_usize(*value),
+        Value::Num(value) => nonnegative_platform_usize(*value),
         Value::Int(value) => value.try_to_usize(),
         Value::Tensor(value) if tensor::is_scalar_tensor(value) => {
             if let Some(storage) = value.integer_storage() {
                 storage.value_at(0).and_then(|value| value.try_to_usize())
             } else {
                 value.numeric_value_at(0).and_then(|value| match value {
-                    NumericScalar::F64(value) => nonnegative_usize(value),
-                    NumericScalar::F32(value) => nonnegative_usize(f64::from(value)),
+                    NumericScalar::F64(value) => nonnegative_platform_usize(value),
+                    NumericScalar::F32(value) => nonnegative_platform_usize(f64::from(value)),
                     _ => None,
                 })
             }
@@ -311,21 +126,9 @@ fn parse_count(value: &Value, name: &'static str) -> BuiltinResult<usize> {
         _ => None,
     };
     parsed.ok_or_else(|| {
-        let errors = errors_for(name);
-        pattern_error(name, &errors[1], errors[1].message)
+        let errors = kind.errors();
+        pattern_error(kind.name(), &errors[1], errors[1].message)
     })
-}
-
-fn nonnegative_usize(value: f64) -> Option<usize> {
-    if value.is_finite()
-        && value >= 0.0
-        && value.fract() == 0.0
-        && (value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64))
-    {
-        Some(value as usize)
-    } else {
-        None
-    }
 }
 
 fn is_positive_infinity(value: &Value) -> bool {
@@ -344,14 +147,6 @@ fn is_positive_infinity(value: &Value) -> bool {
 
 fn is_explicit_resident(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
-}
-
-fn errors_for(name: &str) -> &'static [BuiltinErrorDescriptor; 3] {
-    if name == "lettersPattern" {
-        &LETTERS_PATTERN_ERRORS
-    } else {
-        &WILDCARD_PATTERN_ERRORS
-    }
 }
 
 fn pattern_error(
@@ -389,10 +184,8 @@ mod tests {
             let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
             assert_eq!(
                 block_on(bounded_regex(
-                    vec![value],
-                    r"\p{Alphabetic}",
-                    "lettersPattern",
-                    false
+                    crate::builtins::common::test_support::builtin_arguments(vec![value]),
+                    BoundedPatternKind::Letters,
                 ))
                 .unwrap(),
                 r"\p{Alphabetic}{2}"
@@ -400,10 +193,11 @@ mod tests {
         }
         assert_eq!(
             block_on(bounded_regex(
-                vec![Value::Int(IntValue::U8(2)), Value::Int(IntValue::U64(4))],
-                ".",
-                "wildcardPattern",
-                true,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(IntValue::U8(2)),
+                    Value::Int(IntValue::U64(4))
+                ]),
+                BoundedPatternKind::Wildcard,
             ))
             .unwrap(),
             ".{2,4}?"
@@ -413,41 +207,45 @@ mod tests {
     #[test]
     fn bounded_patterns_validate_ranges_and_infinity() {
         assert_eq!(
-            block_on(bounded_regex(Vec::new(), ".", "wildcardPattern", true)).unwrap(),
+            block_on(bounded_regex(
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+                BoundedPatternKind::Wildcard
+            ))
+            .unwrap(),
             ".*?"
         );
         assert_eq!(
             block_on(bounded_regex(
-                Vec::new(),
-                r"\p{Alphabetic}",
-                "lettersPattern",
-                false,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+                BoundedPatternKind::Letters,
             ))
             .unwrap(),
             r"\p{Alphabetic}+"
         );
         assert_eq!(
             block_on(bounded_regex(
-                vec![Value::Int(IntValue::U8(3)), Value::Num(f64::INFINITY)],
-                r"\p{Alphabetic}",
-                "lettersPattern",
-                false,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(IntValue::U8(3)),
+                    Value::Num(f64::INFINITY)
+                ]),
+                BoundedPatternKind::Letters,
             ))
             .unwrap(),
             r"\p{Alphabetic}{3,}"
         );
         assert!(block_on(bounded_regex(
-            vec![Value::Int(IntValue::U8(4)), Value::Int(IntValue::U8(3))],
-            ".",
-            "wildcardPattern",
-            true,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U8(4)),
+                Value::Int(IntValue::U8(3))
+            ]),
+            BoundedPatternKind::Wildcard,
         ))
         .is_err());
         assert!(block_on(bounded_regex(
-            vec![Value::Num(usize::MAX as f64)],
-            ".",
-            "wildcardPattern",
-            true,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                usize::MAX as f64
+            )]),
+            BoundedPatternKind::Wildcard,
         ))
         .is_err());
     }
@@ -462,33 +260,35 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("automatic integer count");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             assert_eq!(
                 block_on(bounded_regex(
-                    vec![Value::GpuTensor(handle.clone())],
-                    r"\p{Alphabetic}",
-                    "lettersPattern",
-                    false,
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::GpuTensor(handle.clone())
+                    ]),
+                    BoundedPatternKind::Letters,
                 ))
                 .expect("automatic residency is transparent"),
                 r"\p{Alphabetic}{3}"
             );
 
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let error = block_on(bounded_regex(
-                vec![Value::GpuTensor(handle.clone())],
-                r"\p{Alphabetic}",
-                "lettersPattern",
-                false,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]),
+                BoundedPatternKind::Letters,
             ))
             .expect_err("explicit gpuArray count is unsupported");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:lettersPattern:InvalidCount")
             );
-            provider.free(&handle).expect("free count");
+            handle.release().expect("release fixture handle");
         });
     }
 }

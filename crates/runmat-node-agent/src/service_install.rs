@@ -283,7 +283,7 @@ fn linux_install_plan(config_content: String, agent_executable: &Path) -> AgentR
     let executable = systemd_quote(agent_executable)?;
     let config = systemd_quote(&config_path)?;
     let unit = format!(
-        "[Unit]\nDescription=RunMat execution node agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} cluster join --node-config {config} run\nRestart=on-failure\nRestartSec=5s\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict\nReadWritePaths=/var/lib/runmat/node-agent\nLockPersonality=true\nRestrictSUIDSGID=true\n\n[Install]\nWantedBy=multi-user.target\n"
+        "[Unit]\nDescription=RunMat execution node agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} node --node-config {config} run\nRestart=on-failure\nRestartSec=5s\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict\nReadWritePaths=/var/lib/runmat/node-agent\nLockPersonality=true\nRestrictSUIDSGID=true\n\n[Install]\nWantedBy=multi-user.target\n"
     );
     Ok(ServicePlan {
         platform: "systemd",
@@ -328,7 +328,7 @@ fn macos_install_plan(config_content: String, agent_executable: &Path) -> AgentR
     let executable = xml_escape(&path_text(agent_executable)?);
     let config = xml_escape(&path_text(&config_path)?);
     let plist = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.runmat.node-agent</string>\n  <key>ProgramArguments</key>\n  <array><string>{executable}</string><string>cluster</string><string>join</string><string>--node-config</string><string>{config}</string><string>run</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n  <key>ProcessType</key><string>Background</string>\n</dict>\n</plist>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.runmat.node-agent</string>\n  <key>ProgramArguments</key>\n  <array><string>{executable}</string><string>node</string><string>--node-config</string><string>{config}</string><string>run</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n  <key>ProcessType</key><string>Background</string>\n</dict>\n</plist>\n"
     );
     Ok(ServicePlan {
         platform: "launchd",
@@ -389,7 +389,7 @@ fn windows_install_plan(
 ) -> AgentResult<ServicePlan> {
     let config_path = windows_config_path()?;
     let binary_path = format!(
-        "\"{}\" cluster join --node-config \"{}\" windows-service-run",
+        "\"{}\" node --node-config \"{}\" windows-service-run",
         path_text(agent_executable)?,
         path_text(&config_path)?
     );
@@ -484,8 +484,65 @@ mod tests {
         assert!(plan.files.iter().all(|file| file.path.is_absolute()));
         let rendered = serde_json::to_string(&plan).unwrap();
         assert!(rendered.contains(SERVICE_NAME));
-        assert!(rendered.contains("cluster"));
-        assert!(rendered.contains("join"));
+        #[cfg(target_os = "macos")]
+        {
+            let plist = directory.path().join("node-agent.plist");
+            std::fs::write(&plist, &plan.files[1].content).unwrap();
+            let parsed = Command::new("/usr/bin/plutil")
+                .args(["-extract", "ProgramArguments", "json", "-o", "-"])
+                .arg(plist)
+                .output()
+                .unwrap();
+            assert!(parsed.status.success(), "{:?}", parsed);
+            let arguments: Vec<String> = serde_json::from_slice(&parsed.stdout).unwrap();
+            assert_eq!(
+                arguments,
+                [
+                    executable.to_str().unwrap(),
+                    "node",
+                    "--node-config",
+                    "/Library/Application Support/RunMat/node-agent.json",
+                    "run",
+                ]
+            );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let starts: Vec<_> = plan.files[1]
+                .content
+                .lines()
+                .filter(|line| line.starts_with("ExecStart="))
+                .collect();
+            assert_eq!(
+                starts,
+                [format!(
+                    "ExecStart=\"{}\" node --node-config \"/etc/runmat/node-agent.json\" run",
+                    executable.display()
+                )]
+            );
+        }
+        #[cfg(windows)]
+        {
+            let create = &plan.commands[2];
+            assert_eq!(create.program, "sc.exe");
+            assert_eq!(
+                create.arguments,
+                [
+                    "create".to_string(),
+                    "RunMatNodeAgent".to_string(),
+                    "binPath=".to_string(),
+                    format!(
+                        "\"{}\" node --node-config \"{}\" windows-service-run",
+                        executable.display(),
+                        windows_config_path().unwrap().display()
+                    ),
+                    "start=".to_string(),
+                    "auto".to_string(),
+                    "DisplayName=".to_string(),
+                    "RunMat Execution Node Agent".to_string(),
+                ]
+            );
+        }
         assert!(rendered.contains("runmat"));
         assert!(!rendered.contains("runmat-node-agent --"));
         assert!(!rendered.contains("credential"));

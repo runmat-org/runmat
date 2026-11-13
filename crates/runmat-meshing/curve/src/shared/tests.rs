@@ -1,3 +1,8 @@
+#[path = "tests/cancellation.rs"]
+mod cancellation;
+#[path = "tests/codec_admission.rs"]
+mod codec_admission;
+
 use std::f64::consts::{PI, TAU};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -24,7 +29,8 @@ fn shared_curve_contract_covers_exact_edges_and_face_uses() {
     assert!(tampered_identity.validate_against(&topology).is_err());
 
     let mut missed_bound = mesh;
-    missed_bound.edges[0].achieved.maximum_chordal_deviation_m = 0.2;
+    missed_bound.edges[0].achieved.maximum_chordal_deviation_m =
+        runmat_types::physical::Length::new(0.2);
     assert!(missed_bound.validate_against(&topology).is_err());
 }
 
@@ -52,7 +58,17 @@ fn shared_curve_codec_is_canonical_bounded_and_topology_admitted() {
     assert!(super::codec::decode_with_byte_limit(&encoded, &topology, encoded.len() - 1).is_err());
 
     let mut displaced_vertex = mesh.clone();
-    displaced_vertex.edges[0].nodes[0].coordinates_m[0] += 1.0e-12;
+    {
+        let quantity_change = 1.0e-12;
+        let quantity_index = 0;
+        let quantity_slot = &mut displaced_vertex.edges[0].nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert!(encode_shared_curve_mesh(&displaced_vertex, &topology).is_err());
 
     let mut different_topology = topology.clone();
@@ -91,10 +107,13 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
         curve.face_uses[0].node_uv.last(),
         "a closed edge on a non-periodic face has one canonical endpoint UV"
     );
-    assert!((curve.nodes.last().unwrap().arc_length_m - TAU).abs() < 1.0e-10);
+    assert!((curve.nodes.last().unwrap().arc_length_m.canonical_value() - TAU).abs() < 1.0e-10);
     assert!(
-        curve.achieved.maximum_chordal_deviation_m
-            <= options.resolution.maximum_chordal_deviation_m
+        curve.achieved.maximum_chordal_deviation_m.canonical_value()
+            <= options
+                .resolution
+                .maximum_chordal_deviation_m
+                .canonical_value()
     );
     assert!(
         curve.achieved.maximum_tangent_change_rad <= options.resolution.maximum_tangent_change_rad
@@ -135,6 +154,10 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
     assert_eq!(report.metric_evaluation_count, evaluation_count);
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/curve_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A nonperiodic closed face with distinct pcurve endpoints is rejected; tiny edges and
+//   periodic curves are separate cases.
 #[test]
 fn nonperiodic_closed_face_rejects_distinct_pcurve_endpoints() {
     let (document, topology, mut registry) = runmat_geometry_fixtures::exact_circle();
@@ -164,8 +187,10 @@ fn nonperiodic_closed_face_rejects_distinct_pcurve_endpoints() {
     )
     .unwrap_err();
 
+    // The circle's seam vertex closes the edge, so the pcurve end at (2*pi, 0) is checked against
+    // that vertex: its image on the face lies far outside the vertex tolerance.
     assert_eq!(error.kind, SharedCurveErrorKind::GeometricMismatch);
-    assert_eq!(error.field, "closed pcurve endpoint");
+    assert_eq!(error.field, "vertex pcurve coordinate");
 }
 
 #[test]
@@ -217,7 +242,17 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
     );
 
     let mut coordinates = mesh.clone();
-    coordinates.edges[0].nodes[1].coordinates_m[0] += 1.0e-4;
+    {
+        let quantity_change = 1.0e-4;
+        let quantity_index = 0;
+        let quantity_slot = &mut coordinates.edges[0].nodes[1].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert_eq!(
         validate(&coordinates).unwrap_err().kind,
         SharedCurveErrorKind::GeometricMismatch
@@ -231,14 +266,17 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
     );
 
     let mut arc = mesh.clone();
-    arc.edges[0].nodes[1].arc_length_m += 1.0e-4;
+    arc.edges[0].nodes[1].arc_length_m = runmat_types::physical::Quantity::new(
+        arc.edges[0].nodes[1].arc_length_m.canonical_value() + (1.0e-4),
+    );
     assert_eq!(
         validate(&arc).unwrap_err().kind,
         SharedCurveErrorKind::GeometricMismatch
     );
 
     let mut understated = mesh.clone();
-    understated.edges[0].achieved.maximum_chordal_deviation_m = 1.0e-12;
+    understated.edges[0].achieved.maximum_chordal_deviation_m =
+        runmat_types::physical::Length::new(1.0e-12);
     assert_eq!(
         validate(&understated).unwrap_err().kind,
         SharedCurveErrorKind::GeometricMismatch
@@ -274,6 +312,9 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
     );
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/curve_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Constructive curve discretization fails at its hard node limit.
 #[test]
 fn constructive_curve_discretization_fails_at_its_hard_node_limit() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
@@ -344,17 +385,22 @@ fn constructive_curves_apply_occurrence_scale_to_coordinates_and_arc_length() {
     )
     .unwrap();
     let curve = &mesh.edges[0];
-    assert_eq!(curve.nodes[0].coordinates_m, [5.0, 4.0, 5.0]);
+    assert_eq!(
+        curve.nodes[0].coordinates_m.canonical_value(),
+        [5.0, 4.0, 5.0]
+    );
     assert_eq!(curve.nodes[0].node_id, curve.nodes.last().unwrap().node_id);
     assert_eq!(
         curve.nodes[0].node_id,
         shared_curve_vertex_node_id(curve.nodes[0].source_vertex_id.as_ref().unwrap())
     );
     assert_eq!(
-        curve.nodes[0].coordinates_m,
-        curve.nodes.last().unwrap().coordinates_m
+        curve.nodes[0].coordinates_m.canonical_value(),
+        curve.nodes.last().unwrap().coordinates_m.canonical_value()
     );
-    assert!((curve.nodes.last().unwrap().arc_length_m - 2.0 * TAU).abs() < 1.0e-10);
+    assert!(
+        (curve.nodes.last().unwrap().arc_length_m.canonical_value() - 2.0 * TAU).abs() < 1.0e-10
+    );
 }
 
 #[test]
@@ -378,7 +424,12 @@ fn constructive_curves_integrate_arc_length_under_nonconformal_affine_placement(
         shared_options(),
     )
     .unwrap();
-    let circumference = mesh.edges[0].nodes.last().unwrap().arc_length_m;
+    let circumference = mesh.edges[0]
+        .nodes
+        .last()
+        .unwrap()
+        .arc_length_m
+        .canonical_value();
     assert!((circumference - 9.688_448_220_547_675).abs() < 1.0e-8);
 }
 
@@ -430,10 +481,16 @@ fn singular_edge_preserves_pcurve_interval_as_one_collapsed_mesh_node() {
     let curve = &mesh.edges[0];
     assert_eq!(curve.nodes.len(), 2);
     assert_eq!(curve.nodes[0].node_id, curve.nodes[1].node_id);
-    assert_eq!(curve.nodes[0].coordinates_m, [0.0, 0.0, 1.0]);
-    assert_eq!(curve.nodes[0].coordinates_m, curve.nodes[1].coordinates_m);
-    assert_eq!(curve.nodes[0].arc_length_m, 0.0);
-    assert_eq!(curve.nodes[1].arc_length_m, 0.0);
+    assert_eq!(
+        curve.nodes[0].coordinates_m.canonical_value(),
+        [0.0, 0.0, 1.0]
+    );
+    assert_eq!(
+        curve.nodes[0].coordinates_m.canonical_value(),
+        curve.nodes[1].coordinates_m.canonical_value()
+    );
+    assert_eq!(curve.nodes[0].arc_length_m.canonical_value(), 0.0);
+    assert_eq!(curve.nodes[1].arc_length_m.canonical_value(), 0.0);
     assert_eq!(curve.face_uses[0].node_uv[0], [0.0, PI / 2.0]);
     assert_eq!(curve.face_uses[0].node_uv[1], [TAU, PI / 2.0]);
     assert_eq!(
@@ -470,7 +527,7 @@ fn singular_edge_preserves_pcurve_interval_as_one_collapsed_mesh_node() {
     assert!(fabricated_metric.validate_against(&topology).is_err());
 
     let mut fabricated_length = mesh;
-    fabricated_length.edges[0].nodes[1].arc_length_m = -0.0;
+    fabricated_length.edges[0].nodes[1].arc_length_m = runmat_types::physical::Length::new(-0.0);
     assert!(fabricated_length.validate_against(&topology).is_err());
 }
 
@@ -517,9 +574,9 @@ fn resolved_curve_metric_combines_all_incident_typed_sources() {
             unit_tangent: [0.0, 1.0, 0.0],
         })
         .unwrap();
-    assert_eq!(evaluation.metric.xx, 5.0);
-    assert_eq!(evaluation.metric.yy, 5.0);
-    assert_eq!(evaluation.metric.zz, 5.0);
+    assert_eq!(evaluation.metric.xx, 1.0);
+    assert_eq!(evaluation.metric.yy, 1.0);
+    assert_eq!(evaluation.metric.zz, 1.0);
     assert_eq!(evaluation.applied_contribution_count, 4);
     assert_eq!(
         evaluation.active_sources,
@@ -572,6 +629,8 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
     let (_, base, _) = runmat_geometry_fixtures::exact_circle();
     let topology = repeated_circle_topology(&base, 2);
     let request = runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -582,6 +641,7 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
             },
             metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(0.1).unwrap(),
         }],
+        cells_across_gap: None,
     };
     let metric = ResolvedCurveMetricField::new(&topology, &request).unwrap();
     let evaluation = metric
@@ -593,13 +653,18 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
         })
         .unwrap();
 
-    assert!(evaluation.metric.xx > 25.0);
+    assert!((evaluation.metric.xx - 25.0).abs() <= 16.0 * f64::EPSILON * 25.0);
     assert_eq!(
         evaluation.active_sources,
-        vec![runmat_meshing_core::MetricSourceKind::Global]
+        vec![
+            runmat_meshing_core::MetricSourceKind::Global,
+            runmat_meshing_core::MetricSourceKind::Curve,
+        ]
     );
-    assert_eq!(evaluation.applied_contribution_count, 0);
-    assert_eq!(evaluation.clipped_contribution_count, 1);
+    // The shared face trace retains the adjacent curve's source provenance.
+    assert_eq!(evaluation.applied_contribution_count, 1);
+    // Edge grading and the conservatively rounded face trace each tighten once.
+    assert_eq!(evaluation.clipped_contribution_count, 2);
 }
 
 #[test]
@@ -611,21 +676,25 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
     let evaluator =
         runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
     let request = runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.3,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = runmat_meshing_core::CurveQualityTargets {
-        maximum_chordal_deviation_m: 0.001,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.001),
         maximum_tangent_change_degrees: 5.0,
         minimum_metric_edge_length: 0.01,
         maximum_metric_edge_length: 1.5,
     };
     let surface_quality = runmat_meshing_core::SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.1,
         minimum_metric_angle_degrees: 20.0,
         maximum_physical_aspect_ratio: 10.0,
-        maximum_chordal_deviation_m: 0.001,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.001),
         maximum_normal_deviation_degrees: 5.0,
     };
     let derived = derive_curve_geometry_metric(
@@ -633,8 +702,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &UnlimitedControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap();
 
@@ -653,8 +721,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &CancelledControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap_err();
     assert_eq!(
@@ -680,11 +747,14 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
     registry.surfaces[0].implementation =
         runmat_geometry_core::ExactSurfaceImplementation::Portable {
             definition: runmat_geometry_core::ExactSurfaceDefinition::Cylinder {
-                origin_m: [0.0, 0.0, 0.0],
+                origin_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new([0.0, 0.0, 0.0]),
                 x_axis: [1.0, 0.0, 0.0],
                 y_axis: [0.0, 1.0, 0.0],
                 axis_m_per_v: [0.0, 0.0, 1.0],
-                radius_m: 1.0,
+                radius_m: runmat_types::physical::Length::new(1.0),
                 domains: [
                     runmat_geometry_core::ParameterRange {
                         start: 0.0,
@@ -707,8 +777,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         &evaluator,
         &UnlimitedControl,
         &request,
-        quality,
-        surface_quality,
+        quality_targets(quality, surface_quality),
     )
     .unwrap();
     assert_eq!(
@@ -847,16 +916,16 @@ fn curve_partition_policy_automatically_bounds_join_fan_in() {
 fn shared_options() -> SharedCurveDiscretizationOptions {
     SharedCurveDiscretizationOptions {
         resolution: CurveResolutionPolicy {
-            maximum_chordal_deviation_m: 0.01,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
             maximum_tangent_change_rad: 0.2,
             minimum_metric_edge_length: 0.1,
             maximum_metric_edge_length: 1.0,
         },
         maximum_nodes_per_edge: 1_024,
         maximum_subdivision_depth: 20,
-        geometry_absolute_error_m: 1.0e-10,
+        geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         pcurve_absolute_error: 1.0e-10,
-        arc_length_absolute_error_m: 1.0e-10,
+        arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
     }
 }
 
@@ -865,6 +934,8 @@ fn resolved_metric_request(
 ) -> runmat_meshing_core::MetricFieldRequest {
     let unit = runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap();
     runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.3,
@@ -898,6 +969,7 @@ fn resolved_metric_request(
                 metric: unit,
             },
         ],
+        cells_across_gap: None,
     }
 }
 
@@ -1005,8 +1077,11 @@ fn circle_mesh(topology: &runmat_geometry_core::ExactBRepTopology) -> SharedCurv
             ),
             source_vertex_id,
             parameter,
-            arc_length_m,
-            coordinates_m,
+            arc_length_m: runmat_types::physical::Length::new(arc_length_m),
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         },
     )
     .collect();
@@ -1024,13 +1099,19 @@ fn circle_mesh(topology: &runmat_geometry_core::ExactBRepTopology) -> SharedCurv
                 node_uv: vec![[0.0, 0.0], [PI, 0.0], [TAU, 0.0]],
             }],
             requested: CurveResolutionPolicy {
-                maximum_chordal_deviation_m: 0.1,
+                maximum_chordal_deviation_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.1),
                 maximum_tangent_change_rad: PI,
                 minimum_metric_edge_length: 0.5,
                 maximum_metric_edge_length: 4.0,
             },
             achieved: CurveResolutionEvidence {
-                maximum_chordal_deviation_m: 0.05,
+                maximum_chordal_deviation_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(0.05),
                 maximum_tangent_change_rad: PI,
                 minimum_metric_edge_length: 2.0,
                 maximum_metric_edge_length: 2.0,
@@ -1072,4 +1153,20 @@ fn repeated_circle_topology(
         })
         .collect();
     topology
+}
+
+/// Curve and surface targets with the default volume target (radius-edge ratio 10).
+fn quality_targets(
+    curve: runmat_meshing_core::CurveQualityTargets,
+    surface: runmat_meshing_core::SurfaceQualityTargets,
+) -> runmat_meshing_core::MeshingQualityTargets {
+    runmat_meshing_core::MeshingQualityTargets {
+        curve,
+        surface,
+        volume: runmat_meshing_core::VolumeQualityTargets {
+            maximum_radius_edge_ratio: 10.0,
+            minimum_scaled_jacobian: 0.001,
+            maximum_metric_edge_length: 1.0,
+        },
+    }
 }

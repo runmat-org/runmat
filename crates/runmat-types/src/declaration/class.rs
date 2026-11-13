@@ -1,9 +1,14 @@
-use crate::{ClassId, FunctionId, MemberName, MethodName, QualifiedName, Span};
+use crate::{
+    ClassId, ClassIdentity, FunctionId, MemberName, MethodName, ProgramSourceId, QualifiedName,
+    Span,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassDeclaration {
     pub id: ClassId,
+    /// Original program-source coordinate of this declaration's HIR module.
+    pub source: ProgramSourceId,
     pub name: QualifiedName,
     pub inheritance: InheritanceDeclaration,
     pub kind: ClassKind,
@@ -44,6 +49,7 @@ pub struct MethodDeclaration {
     pub function: FunctionId,
     pub name: MethodName,
     pub is_static: bool,
+    pub role: crate::ClassMethodRole,
     pub attributes: MethodAttributes,
     pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,
@@ -60,6 +66,32 @@ pub struct ExternalClassDeclaration {
     pub is_abstract: bool,
     pub properties: Vec<ExternalPropertyDeclaration>,
     pub methods: Vec<ExternalMethodDeclaration>,
+    /// Structural metadata for a value-backed array wrapper. This does not
+    /// admit numerical operations or invoke user getters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub array_shape: Option<ClassArrayShape>,
+}
+
+/// Array geometry supplied by stored properties, independently of the scalar
+/// object container. Parallel payloads must describe the same array.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClassArrayShape {
+    Property {
+        property: MemberName,
+        payload: ClassArrayPayload,
+    },
+    ConsistentProperties {
+        primary: MemberName,
+        others: Vec<MemberName>,
+        payload: ClassArrayPayload,
+    },
+}
+
+/// Structural storage admission, not an operation's dtype/value policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClassArrayPayload {
+    RealNumeric,
+    NumericOrLogical,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,14 +106,32 @@ pub struct ExternalMethodDeclaration {
     pub attributes: MethodAttributes,
     pub is_static: bool,
     pub callable: crate::CallableIdentity,
-    pub implicit_class_argument: Option<String>,
+    pub implicit_class_argument: Option<ClassIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventDeclaration {
     pub name: MemberName,
+    #[serde(default)]
+    pub attributes: EventAttributes,
     pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct EventAttributes {
+    pub is_hidden: bool,
+    pub listen_access: EventAccess,
+    pub notify_access: EventAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EventAccess {
+    #[default]
+    Public,
+    Private,
+    Protected,
+    Classes(Vec<ClassIdentity>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

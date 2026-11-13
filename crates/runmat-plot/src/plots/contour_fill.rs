@@ -12,6 +12,10 @@ use glam::Vec4;
 pub struct ContourFillPlot {
     pub label: Option<String>,
     pub visible: bool,
+    /// The data range the contour colors span, for the colorbar.
+    pub value_range: Option<(f64, f64)>,
+    /// Each CPU vertex's position in the colormap (0 to 1), so a new colormap can recolor it.
+    colormap_positions: Option<Vec<f32>>,
     vertices: Option<Vec<Vertex>>,
     gpu_vertices: Option<GpuVertexBuffer>,
     vertex_count: usize,
@@ -31,9 +35,8 @@ impl ContourFillPlot {
             })?;
             let generated_count = if let Some(indirect) = &gpu_vertices.indirect {
                 let bytes = copy_readback_bytes(
-                    &context.device,
-                    &context.queue,
-                    &indirect.args,
+                    &context.access,
+                    &crate::gpu::GpuInputBuffer::from(indirect.args.clone()),
                     std::mem::size_of::<u32>(),
                 )
                 .await?;
@@ -52,9 +55,8 @@ impl ContourFillPlot {
             let vertex_count = generated_count.min(gpu_vertices.vertex_count);
             let byte_len = vertex_count * std::mem::size_of::<Vertex>();
             let bytes = copy_readback_bytes(
-                &context.device,
-                &context.queue,
-                &gpu_vertices.buffer,
+                &context.access,
+                &crate::gpu::GpuInputBuffer::from(gpu_vertices.buffer.clone()),
                 byte_len,
             )
             .await?;
@@ -70,6 +72,8 @@ impl ContourFillPlot {
         Self {
             label: None,
             visible: true,
+            value_range: None,
+            colormap_positions: None,
             vertices: Some(vertices),
             gpu_vertices: None,
             vertex_count,
@@ -85,11 +89,41 @@ impl ContourFillPlot {
         Self {
             label: None,
             visible: true,
+            value_range: None,
+            colormap_positions: None,
             vertices: None,
             gpu_vertices: Some(buffer),
             vertex_count,
             bounds,
         }
+    }
+
+    /// Record each vertex's colormap position (0 to 1) so the colors can follow the colormap.
+    pub fn with_colormap_positions(mut self, positions: Vec<f32>) -> Self {
+        let matches = self
+            .vertices
+            .as_ref()
+            .is_some_and(|v| v.len() == positions.len());
+        self.colormap_positions = matches.then_some(positions);
+        self
+    }
+
+    /// Recolor the vertices through `cmap`; plots without recorded positions keep their colors.
+    pub fn recolor_with_colormap(&mut self, cmap: &crate::plots::surface::ColorMap) {
+        let (Some(vertices), Some(positions)) =
+            (self.vertices.as_mut(), self.colormap_positions.as_ref())
+        else {
+            return;
+        };
+        for (vertex, &t) in vertices.iter_mut().zip(positions) {
+            let rgb = cmap.map_value(t);
+            vertex.color = [rgb.x, rgb.y, rgb.z, vertex.color[3]];
+        }
+    }
+
+    pub fn with_value_range(mut self, range: Option<(f64, f64)>) -> Self {
+        self.value_range = range;
+        self
     }
 
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
@@ -147,5 +181,16 @@ impl ContourFillPlot {
             .as_ref()
             .map(|v| v.len() * std::mem::size_of::<Vertex>())
             .unwrap_or(0)
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        Some(total)
     }
 }

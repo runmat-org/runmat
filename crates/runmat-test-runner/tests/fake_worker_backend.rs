@@ -13,6 +13,55 @@ use std::collections::BTreeMap;
 use common::{passed, plan, FakeBackend, PendingClock, Step};
 
 #[test]
+fn incomplete_process_output_cannot_certify_successful_test_results() {
+    use runmat_execution::process_output::{
+        ProcessOutputBytes, ProcessStreamCompletion, ProcessStreamOutput,
+    };
+    use runmat_test::event::{WorkerProcessOutput, WorkerProcessRetirement};
+    use runmat_test::identity::WorkerSessionId;
+
+    for completion in [
+        ProcessStreamCompletion::EndOfStream,
+        ProcessStreamCompletion::Reading,
+    ] {
+        let submission = plan(&["passes"]);
+        let id = submission.plan.tests().next().unwrap().id.clone();
+        let complete = completion == ProcessStreamCompletion::EndOfStream;
+        let stream = ProcessStreamOutput {
+            bytes: ProcessOutputBytes::new(Vec::new()),
+            observed_bytes: Some(0),
+            truncated: false,
+            completion,
+        };
+        let backend = FakeBackend::new([Step::Result(Ok(passed(id, 1)))]).with_process_output(
+            WorkerProcessOutput {
+                worker: WorkerSessionId("fake:0".into()),
+                retirement: WorkerProcessRetirement::Verified,
+                stdout: stream.clone(),
+                stderr: stream,
+            },
+        );
+        let mut reporters = ReporterFanout::default();
+        let run = block_on(Coordinator::new(CoordinatorConfig::default()).unwrap().run(
+            submission,
+            &backend,
+            &PendingClock,
+            &NeverCancelled,
+            &NoopTelemetry,
+            &mut reporters,
+        ))
+        .unwrap();
+        assert!(run.result.tests[0].state.is_success());
+        assert_eq!(run.result.state.is_success(), complete);
+        assert_eq!(run.infrastructure_failures, usize::from(!complete));
+        if !complete {
+            assert!(run.result.state.incomplete);
+            assert_eq!(run.result.state.disposition, TerminalDisposition::Crashed);
+        }
+    }
+}
+
+#[test]
 fn fixture_group_tests_share_one_session_and_shutdown_once() {
     let plan = plan(&["first", "second"]);
     let ids = plan

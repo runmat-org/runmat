@@ -5,7 +5,7 @@ use super::registry_transport::registry_client;
 use crate::cli::{PackageInspectArgs, PackagePublishArgs};
 use anyhow::{bail, Context, Result};
 use runmat_server_client::packages::{
-    AttachKeyEnvelopesRequest, KeyEnvelopeRequest, PublicationArtifactRequest,
+    AttachKeyEnvelopesRequest, KeyEnvelopeRequest, PublicationArtifactRequest, PublicationStatus,
     StagePublicationRequest,
 };
 
@@ -115,7 +115,7 @@ pub(super) async fn publish(args: &PackagePublishArgs) -> Result<()> {
         .await
         .context("failed to stage package publication")?;
     let mut status = staged.status;
-    if status == "staged" {
+    if status == PublicationStatus::Staged {
         let upload_url = staged
             .upload_url
             .as_deref()
@@ -130,31 +130,45 @@ pub(super) async fn publish(args: &PackagePublishArgs) -> Result<()> {
             .context("failed to verify package publication")?
             .status;
     }
-    if status == "verified" {
-        if !envelopes.is_empty() {
-            client
-                .attach_publication_key_envelopes(
-                    &args.org_id,
-                    &args.package_id,
-                    &staged.id,
-                    &AttachKeyEnvelopesRequest {
-                        envelopes: envelopes
-                            .into_iter()
-                            .map(KeyEnvelopeRequest::from)
-                            .collect(),
-                    },
-                )
-                .await
-                .context("failed to attach private package key envelopes")?;
-        }
-        status = client
-            .approve_publication(&args.org_id, &args.package_id, &staged.id)
+    if status == PublicationStatus::Verified && !envelopes.is_empty() {
+        client
+            .attach_publication_key_envelopes(
+                &args.org_id,
+                &args.package_id,
+                &staged.id,
+                &AttachKeyEnvelopesRequest {
+                    envelopes: envelopes
+                        .into_iter()
+                        .map(KeyEnvelopeRequest::from)
+                        .collect(),
+                },
+            )
             .await
-            .context("failed to approve package publication")?
+            .context("failed to attach private package key envelopes")?;
+        // Attaching envelopes can complete the server's automatic checks.
+        // Refresh through idempotent verification, never publisher approval.
+        status = client
+            .verify_publication(&args.org_id, &args.package_id, &staged.id)
+            .await
+            .context("failed to refresh package verification after attaching key envelopes")?
             .status;
     }
-    if status != "approved" && status != "finalized" {
-        bail!("publication stopped in unexpected state `{status}`");
+    if publication_continuation(status)? == PublicationContinuation::WaitingForApproval {
+        println!("publication {} verified; waiting for approval. Ask another organization admin to review approval and outstanding checks in Settings › Packages.", staged.id);
+        println!(
+            "organization: {}; package: {}; registry: {}",
+            args.org_id, args.package_id, origin
+        );
+        if origin.trim_end_matches('/') == runmat_server_client::auth::DEFAULT_SERVER_URL {
+            println!(
+                "Settings › Packages: {}",
+                hosted_package_settings_url(&args.org_id)?
+            );
+        } else {
+            println!("Open this registry's RunMat app → Settings › Packages for the organization and publication above.");
+        }
+        println!("After approval, rerun the same publish command to finalize. Private retry state is retained until finalization.");
+        return Ok(());
     }
     let finalized = client
         .finalize_publication(&args.org_id, &args.package_id, &staged.id)
@@ -166,6 +180,30 @@ pub(super) async fn publish(args: &PackagePublishArgs) -> Result<()> {
         finalized.release_id, finalized.version, finalized.release_digest
     );
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublicationContinuation {
+    WaitingForApproval,
+    Finalize,
+}
+
+fn publication_continuation(status: PublicationStatus) -> Result<PublicationContinuation> {
+    match status {
+        PublicationStatus::Verified => Ok(PublicationContinuation::WaitingForApproval),
+        PublicationStatus::Approved | PublicationStatus::Finalized => {
+            Ok(PublicationContinuation::Finalize)
+        }
+        PublicationStatus::Staged | PublicationStatus::Rejected => {
+            bail!("publication stopped in unexpected state `{status}`")
+        }
+    }
+}
+
+fn hosted_package_settings_url(org_id: &str) -> Result<reqwest::Url> {
+    let mut url = reqwest::Url::parse("https://runmat.com/o/admin/packages")?;
+    url.query_pairs_mut().append_pair("slug", org_id);
+    Ok(url)
 }
 
 fn remove_retry_state(path: Option<std::path::PathBuf>) -> Result<()> {
@@ -181,5 +219,34 @@ fn remove_retry_state(path: Option<std::path::PathBuf>) -> Result<()> {
                 path.display()
             )
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verified_publications_wait_without_publisher_approval() {
+        assert_eq!(
+            publication_continuation(PublicationStatus::Verified).unwrap(),
+            PublicationContinuation::WaitingForApproval
+        );
+        for status in [PublicationStatus::Approved, PublicationStatus::Finalized] {
+            assert_eq!(
+                publication_continuation(status).unwrap(),
+                PublicationContinuation::Finalize
+            );
+        }
+        for status in [PublicationStatus::Staged, PublicationStatus::Rejected] {
+            assert!(publication_continuation(status).is_err());
+        }
+        let url = hosted_package_settings_url("org/id &value").unwrap();
+        assert_eq!(url.path(), "/o/admin/packages");
+        let mut query = url.query_pairs();
+        let (key, value) = query.next().unwrap();
+        assert_eq!(key, "slug");
+        assert_eq!(value, "org/id &value");
+        assert!(query.next().is_none());
     }
 }

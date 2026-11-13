@@ -19,18 +19,20 @@ CI also cross-builds the same native targets before release. The main test matri
 
 RunMat is written in Rust and much of the parser, compiler, VM, runtime, builtin library, and session engine is portable across CPU architectures that support Rust `std`. Packaged and CI-covered support is currently narrower than theoretical source-build support.
 
-| Target family | Support tier | Package | CI coverage | JIT | GPU path | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| `x86_64-pc-windows-msvc` | Packaged native | Yes | Cross-build + release validation | Supported | WGPU / DX12 | Full CLI/runtime target. |
-| `x86_64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | WGPU / Metal | Full CLI/runtime target. |
-| `aarch64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | WGPU / Metal | Apple Silicon; best-supported ARM target today. |
-| `x86_64-unknown-linux-gnu` | Packaged native | Yes | Linux tests + cross-build | Supported | WGPU / Vulkan or host backend | Full CLI/runtime target when native dependencies are present. |
-| `aarch64-pc-windows-msvc` | Configured native | No | Build configuration only | AArch64 backend, unvalidated | WGPU / DX12 if the native stack works | `.cargo/config.toml` includes linker stack sizing, but this target is not packaged. |
-| `aarch64-unknown-linux-gnu` | Experimental source build | No | No routine coverage | AArch64 backend, unvalidated | Experimental WGPU / Linux graphics stack | Source-build target; treat as experimental until CI and packaging cover it. |
-| `armv7-*`, `arm-unknown-linux-*` | Untested source build | No | No routine coverage | Not supported | Platform-specific, untested | Interpreter-only builds may be possible, but native dependencies and GPU support vary by board. |
-| `wasm32-unknown-unknown` | Packaged WASM | Yes | WASM build + browser tests | Not supported | Browser WebGPU | Browser and TypeScript package target, not a native CLI target. |
+| Target family | Support tier | Package | CI coverage | JIT | Native compilation | GPU path | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `x86_64-pc-windows-msvc` | Packaged native | Yes | Cross-build + release validation | Supported | Supported | WGPU / DX12 | Full CLI/runtime target. |
+| `x86_64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | Supported | WGPU / Metal | Full CLI/runtime target. |
+| `aarch64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | Supported | WGPU / Metal | Apple Silicon; best-supported ARM target today. |
+| `x86_64-unknown-linux-gnu` | Packaged native | Yes | Linux tests + cross-build | Supported | Supported | WGPU / Vulkan or host backend | Full CLI/runtime target when native dependencies are present. |
+| `aarch64-pc-windows-msvc` | Configured native | No | Build configuration only | AArch64 backend, unvalidated | Not packaged or validated | WGPU / DX12 if the native stack works | `.cargo/config.toml` includes linker stack sizing, but this target is not packaged. |
+| `aarch64-unknown-linux-gnu` | Experimental source build | No | No routine coverage | AArch64 backend, unvalidated | Not packaged or validated | Experimental WGPU / Linux graphics stack | Source-build target; treat as experimental until CI and packaging cover it. |
+| `armv7-*`, `arm-unknown-linux-*` | Untested source build | No | No routine coverage | Not supported | Not supported | Platform-specific, untested | Interpreter-only builds may be possible, but native dependencies and GPU support vary by board. |
+| `wasm32-unknown-unknown` | Packaged WASM | Yes | WASM build + browser tests | Not supported | Not supported | Browser WebGPU | Browser and TypeScript package target, not a native CLI target. |
 
 The host-native JIT tier is more constrained than the interpreter. RunMat's Cranelift backend supports `x86_64` and `aarch64`; other architectures should be expected to run interpreter-only even if the rest of the runtime builds. WebAssembly validates the portable executable and Native IR contracts but does not allocate host-native executable memory.
+
+`runmat compile` is host-native on the four packaged native targets. It requires a target-matched runtime archive and system linker and does not cross-compile. See [Native Compilation](/docs/runtime/compiler/native-compilation) for the complete workflow.
 
 ## Embedded And Edge Devices
 
@@ -104,15 +106,20 @@ RunMat's active GPU backend is WGPU. On native platforms, WGPU can route through
 
 WASM GPU support depends on browser WebGPU availability. The WASM runtime initializes the WGPU provider asynchronously; synchronous WGPU provider registration is not available on `wasm32`.
 
-Precision support depends on the active provider. Providers advertise supported precision, and RunMat guards kernels accordingly:
+Floating-point precision depends on the active provider. Precision admission does not establish support for every operation:
 
 | Precision | Behavior |
 | --- | --- |
 | `F32` | Accepted on all GPU providers. |
-| `F64` | Requires provider support for double precision. |
-| `U8`, `U16` | Rejected by the current precision guard for GPU kernels. |
+| `F64` | The WGPU route requires a qualified Vulkan 1.2 device on Linux or Windows with native F64, INT64, round-to-nearest and signed-zero/infinity/NaN preservation. Metal and browser WebGPU do not provide this route. |
+
+Native F64 elementary functions use binary64 algorithms with full-range argument reduction and explicit subnormal handling. Their shaders compile with arithmetic-order and rounding controls; advertising `SHADER_F64` alone is insufficient. An explicit F64 request fails admission if the required contract is unavailable. This does not change the default provider precision or authorize an implicit class conversion.
+
+Fixed-width integer transfers and operations use separate typed provider paths. Supported WGPU kernels retain all eight integer classes; 64-bit integer storage uses paired 32-bit words. Integer support is operation-specific, not inferred from the provider's floating-point precision. Consult the builtin's GPU contract for supported resident operations and host boundaries.
 
 `RUNMAT_ALLOW_PRECISION_DOWNCAST=1` permits implicit downcast from double precision to provider-native precision and emits a warning.
+
+Under this opt-in, fused arithmetic on an F32 provider returns actual F32 storage and subsequent operations see that effective precision. It is not a promise of Double arithmetic in an F32 buffer. An explicit `double(...)` conversion still requires a genuine Double result and may use the shared runtime instead of an F32 fusion kernel.
 
 ### ARM And Mali GPUs
 

@@ -1,31 +1,116 @@
+mod original_fields;
+pub use original_fields::original_static_displacement_source;
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, LoadKind,
+    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, StructuralConstraintKind,
 };
-
+mod preflight;
+mod prepared;
+mod observations;
+mod reference_diagnostics;
+mod solve;
+mod static_diagnostics;
+use reference_diagnostics::{
+    scalar_field_value, structural_beam_closed_form_diagnostic,
+    structural_moment_balance_diagnostic, structural_reference_kinematics_diagnostic,
+};
+mod static_thermomechanical;
+mod thermal_state;
+mod work;
 use crate::{
-    assembly::{try_assemble_linear_system, AssemblySummary},
+    algebra::apply_k,
+    assembly::{
+        assemble_structural_system_with_execution, solver_solid::SolverSolidAssemblyError,
+        AssemblySummary, LinearAssemblyError, StructuralFormulationRequirement,
+    },
+    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult},
     contracts::{
         ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
         FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
         FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
+    excitation::{
+        realize_step_excitations, ExcitationSamplePoint, RealizedExcitationKind,
+        RealizedExcitations,
+    },
     pipeline::electro_thermal::recover_electro_thermal_fields,
-    pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     post::fields::{
-        recover_result_fields, recover_structural_stress_from_displacement,
-        structural_field_recovery_metrics,
+        recover_result_fields_with_capacity, structural_field_recovery_metrics_from_fields,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::{backend::build_backend, linear::solve_linear_system},
+};
+pub use prepared::{
+    run_linear_static_with_prepared_constraint_plan,
+    run_linear_static_with_prepared_constraint_plan_and_linearization,
+    run_linear_static_with_prepared_constraint_plan_and_linearization_tet4_owned,
+    run_linear_static_with_prepared_constraint_plan_tet4_owned, LinearStaticExecution,
+    StaticLinearizationInput, StaticResourceAdmission,
+};
+pub use thermal_state::{
+    run_linear_static_from_thermal_state,
+    run_linear_static_from_thermal_state_with_prepared_constraint_plan,
+    PreparedThermoelasticStaticInput, ThermoelasticStaticResult,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
+
+/// Shared quote for constraint compilation, observation resolution and structural
+/// resource planning, including their model-dependent connector projections.
+pub fn structural_linear_preparation_work_upper_bound(
+    model: &AnalysisModel,
+    mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+) -> Result<runmat_simulation_usage::OperationCount, FeaRunError> {
+    work::preparation_work_upper_bound(model, mesh)
+}
+
+impl From<LinearAssemblyError> for FeaRunError {
+    fn from(error: LinearAssemblyError) -> Self {
+        match error {
+            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Accounting(cause))
+            | LinearAssemblyError::SolverMeshRegionMapping(
+                crate::assembly::SolverMeshRegionMappingError::Projection(
+                    crate::topology::AnalysisProjectionError::Accounting(cause),
+                ),
+            )
+            | LinearAssemblyError::Structural(
+                crate::assembly::StructuralAssemblyError::Accounting(cause),
+            )
+            | LinearAssemblyError::ConstraintPlan(
+                crate::constraints::ConstraintPlanError::Accounting(cause),
+            ) => Self::Usage(cause),
+            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
+            | LinearAssemblyError::SolverMeshRegionMapping(
+                crate::assembly::SolverMeshRegionMappingError::Projection(
+                    crate::topology::AnalysisProjectionError::Cancelled,
+                ),
+            )
+            | LinearAssemblyError::Structural(
+                crate::assembly::StructuralAssemblyError::Cancelled,
+            )
+            | LinearAssemblyError::ConstraintPlan(
+                crate::constraints::ConstraintPlanError::Cancelled,
+            ) => Self::Cancelled,
+            LinearAssemblyError::CouplingRealization(message) => Self::InvalidModel(message),
+            other => Self::Assembly(other.to_string()),
+        }
+    }
+}
+
+impl From<SolverSolidAssemblyError> for FeaRunError {
+    fn from(error: SolverSolidAssemblyError) -> Self {
+        LinearAssemblyError::SolidOperator(error).into()
+    }
+}
+
+impl From<crate::assembly::StructuralAssemblyError> for FeaRunError {
+    fn from(error: crate::assembly::StructuralAssemblyError) -> Self {
+        LinearAssemblyError::Structural(error).into()
+    }
+}
 
 pub fn run_linear_static(
     model: &AnalysisModel,
@@ -39,6 +124,126 @@ pub fn run_linear_static_with_options(
     backend: ComputeBackend,
     options: LinearStaticSolveOptions,
 ) -> Result<FeaRunResult, FeaRunError> {
+    run_linear_static_with_constraint_plan(model, backend, options, None, None, None)
+        .map(|result| result.run)
+}
+
+pub async fn run_linear_static_with_options_tet4_owned<O, F, A>(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: LinearStaticSolveOptions,
+    maximum_block_elements: usize,
+    before_block: O,
+) -> Result<FeaRunResult, A>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<FeaRunError>
+        + From<LinearAssemblyError>
+        + From<SolverSolidAssemblyError>
+        + From<crate::assembly::StructuralAssemblyError>
+        + Send,
+{
+    run_linear_static_with_constraint_plan_owned(
+        model,
+        backend,
+        options,
+        StaticPreparedInputs::default(),
+        maximum_block_elements,
+        true,
+        before_block,
+    )
+    .await
+    .map(|result| result.run)
+}
+
+struct LinearStaticComputation {
+    thermal_transition: Option<crate::execution::CanonicalStateTransition>,
+    run: FeaRunResult,
+    summary: AssemblySummary,
+    solution: Vec<f64>,
+}
+
+#[derive(Default)]
+struct StaticPreparedInputs<'a> {
+    constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
+    admitted: Option<StaticResourceAdmission<'a>>,
+    thermal_source: Option<thermal_state::ThermalStateSelection<'a>>,
+}
+
+fn run_linear_static_with_constraint_plan(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: LinearStaticSolveOptions,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    admitted: Option<StaticResourceAdmission<'_>>,
+    thermal_source: Option<thermal_state::ThermalStateSelection<'_>>,
+) -> Result<LinearStaticComputation, FeaRunError> {
+    struct ReadyWake;
+    impl std::task::Wake for ReadyWake {
+        fn wake(self: std::sync::Arc<Self>) {}
+    }
+    let future = run_linear_static_with_constraint_plan_owned(
+        model,
+        backend,
+        options,
+        StaticPreparedInputs {
+            constraint_plan,
+            admitted,
+            thermal_source,
+        },
+        usize::MAX,
+        false,
+        |_, _| std::future::ready(Ok(())),
+    );
+    let mut future = std::pin::pin!(future);
+    let waker = std::task::Waker::from(std::sync::Arc::new(ReadyWake));
+    let mut context = std::task::Context::from_waker(&waker);
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result,
+        std::task::Poll::Pending => unreachable!("immediate static owner cannot suspend"),
+    }
+}
+
+async fn run_linear_static_with_constraint_plan_owned<O, F, A>(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    mut options: LinearStaticSolveOptions,
+    inputs: StaticPreparedInputs<'_>,
+    maximum_block_elements: usize,
+    awaited_solid: bool,
+    mut before_block: O,
+) -> Result<LinearStaticComputation, A>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<FeaRunError>
+        + From<LinearAssemblyError>
+        + From<SolverSolidAssemblyError>
+        + From<crate::assembly::StructuralAssemblyError>
+        + Send,
+{
+    let StaticPreparedInputs {
+        constraint_plan,
+        admitted,
+        thermal_source,
+    } = inputs;
+    let execution_step = match thermal_source.as_ref() {
+        Some(selection) => thermal_state::require_selected_step(model, selection.consumer_step_id)?,
+        None => super::admission::require_structural(model, AnalysisProcedure::Static)?,
+    };
+    if thermal_source.is_none()
+        && execution_step
+            .state_inputs
+            .iter()
+            .any(|input| input.required_kind == runmat_analysis_core::StateKind::Thermal)
+    {
+        return Err(FeaRunError::InvalidModel(
+            "static step declares a thermal state input; its retained source must be supplied"
+                .into(),
+        )
+        .into());
+    }
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::RegionResolution,
@@ -59,6 +264,51 @@ pub fn run_linear_static_with_options(
     );
     check_cancelled("fea.run_linear_static")?;
 
+    let admission = crate::contracts::accelerator_admission::admit_accelerator(
+        crate::contracts::accelerator_admission::AcceleratorFamily::StructuralStatic,
+        backend,
+    )
+    .map_err(FeaRunError::from)?;
+    if admission.fallback.is_some() {
+        options.algebra_backend_kind =
+            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference;
+    }
+    let phase_clock = crate::progress::phase_timer("structural_static.preflight");
+    if awaited_solid {
+        let work =
+            structural_linear_preparation_work_upper_bound(model, options.solver_mesh.as_ref())?;
+        if work > runmat_simulation_usage::OperationCount::ZERO {
+            before_block(
+                crate::algebra::NumericalCapacityPhase::StaticPreassembly,
+                work,
+            )
+            .await?;
+        }
+    }
+    let preassembly = preflight::prepare_static_preassembly(
+        model,
+        execution_step,
+        admission.effective,
+        &options,
+        constraint_plan,
+        admitted,
+    )?;
+    let assembly_constraint_plan = constraint_plan.or(preassembly.constraints.as_ref());
+    // Align the immutable source only after numerical resource admission has succeeded.
+    let thermal_transfer = thermal_source
+        .map(|selection| {
+            thermal_state::bind_source(
+                model,
+                selection.consumer_step_id,
+                &options,
+                selection.source,
+            )
+        })
+        .transpose()?;
+
+    let excitations =
+        realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -67,25 +317,148 @@ pub fn run_linear_static_with_options(
         Some(1),
         Some(5),
     );
-    let summary = try_assemble_linear_system(
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.assembly");
+    check_cancelled("fea.run_linear_static")?;
+    let elastic_path = preassembly.solve_path
+        == Some(crate::planning::resource::StaticSolvePath::ElasticRigidityMultigrid);
+    // The elastic rigidity path checks every element block as it is assembled; no global
+    // factor is ever formed.
+    let mut elastic_capture =
+        elastic_path.then(crate::assembly::solver_solid::SolidEnergyPreparation::elastic);
+    let summary = if awaited_solid {
+        crate::assembly::assemble_structural_system_with_owner(
+            model,
+            &excitations,
+            options.solver_mesh.as_ref(),
+            crate::assembly::AssemblyExecution::physical_owned(
+                assembly_constraint_plan,
+                options.local_execution,
+                thermal_transfer
+                    .as_ref()
+                    .map(|transfer| &transfer.temperature),
+                elastic_capture.as_mut(),
+            ),
+            maximum_block_elements,
+            |phase, required| {
+                let phase = match phase {
+                    crate::assembly::StructuralCapacityPhase::ConstraintValidation => {
+                        crate::algebra::NumericalCapacityPhase::ConstraintValidation
+                    }
+                    crate::assembly::StructuralCapacityPhase::BodyLoadQuadrature => {
+                        crate::algebra::NumericalCapacityPhase::BodyLoadQuadrature
+                    }
+                    crate::assembly::StructuralCapacityPhase::ThermoelasticLoadProjection => {
+                        crate::algebra::NumericalCapacityPhase::ThermoelasticLoadProjection
+                    }
+                    crate::assembly::StructuralCapacityPhase::ConnectorProjection => {
+                        crate::algebra::NumericalCapacityPhase::ConnectorProjection
+                    }
+                    crate::assembly::StructuralCapacityPhase::SolidLoadProjection => {
+                        crate::algebra::NumericalCapacityPhase::SolidLoadProjection
+                    }
+                    crate::assembly::StructuralCapacityPhase::Solid(
+                        crate::assembly::solver_solid::SolidCapacityPhase::Block { elements },
+                    ) => crate::algebra::NumericalCapacityPhase::SolidAssemblyBlock { elements },
+                    crate::assembly::StructuralCapacityPhase::Solid(
+                        crate::assembly::solver_solid::SolidCapacityPhase::Tet4Element { element },
+                    ) => crate::algebra::NumericalCapacityPhase::Tet4AssemblyElement { element },
+                    crate::assembly::StructuralCapacityPhase::Solid(
+                        crate::assembly::solver_solid::SolidCapacityPhase::Tet10Element { element },
+                    ) => crate::algebra::NumericalCapacityPhase::Tet10AssemblyElement { element },
+                    crate::assembly::StructuralCapacityPhase::Explicit(
+                        crate::assembly::ExplicitCapacityPhase::Element { index },
+                    ) => crate::algebra::NumericalCapacityPhase::ExplicitAssemblyElement {
+                        element: index,
+                    },
+                    crate::assembly::StructuralCapacityPhase::Explicit(
+                        crate::assembly::ExplicitCapacityPhase::Scatter { elements },
+                    ) => {
+                        crate::algebra::NumericalCapacityPhase::ExplicitAssemblyScatter { elements }
+                    }
+                    crate::assembly::StructuralCapacityPhase::ThermoelasticLoadElement {
+                        element,
+                    } => {
+                        crate::algebra::NumericalCapacityPhase::ThermoelasticLoadElement { element }
+                    }
+                    crate::assembly::StructuralCapacityPhase::SolidRecoveryElement { element } => {
+                        crate::algebra::NumericalCapacityPhase::SolidRecoveryElement { element }
+                    }
+                };
+                before_block(phase, required)
+            },
+        )
+        .await?
+    } else {
+        assemble_structural_system_with_execution(
+            model,
+            &excitations,
+            options.solver_mesh.clone(),
+            if options.solver_mesh.is_some()
+                || preflight::model_has_explicit_structural_elements(model)
+            {
+                StructuralFormulationRequirement::PhysicalDiscretization
+            } else {
+                StructuralFormulationRequirement::SyntheticOperator
+            },
+            assembly_constraint_plan,
+            options.local_execution,
+            thermal_transfer
+                .as_ref()
+                .map(|transfer| &transfer.temperature),
+            elastic_capture.as_mut(),
+        )
+        .map_err(FeaRunError::from)?
+    };
+    // Element recovery now owns the temperatures it needs. Release the aligned global
+    // field before solving; only the canonical transition must survive into the result.
+    let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
+    if awaited_solid && assembly_constraint_plan.is_some() {
+        let work = work::resource_derivation_work_upper_bound(model, options.solver_mesh.as_ref())?;
+        if work > runmat_simulation_usage::OperationCount::ZERO {
+            before_block(
+                crate::algebra::NumericalCapacityPhase::StaticStorageVerification,
+                work,
+            )
+            .await?;
+        }
+    }
+    let planned_reduced_support = preflight::verify_executed_preassembly(
         model,
-        options.prep_context.clone(),
-        options.analysis_mesh.clone(),
-        options.thermo_mechanical_context,
-        options.electro_thermal_context,
-    )
-    .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+        &options,
+        assembly_constraint_plan,
+        &preassembly,
+        &summary,
+    )?;
+    let identity = super::admission::admit_structural(&summary, execution_step)?;
     super::validate_rotational_dof_targets(model, &summary)?;
-    let analysis_mesh_present = options.analysis_mesh.is_some();
-    if options.require_analysis_mesh_for_solid
-        && !analysis_mesh_present
-        && !model_has_explicit_structural_elements(model)
+    if options.require_solver_mesh_for_solid
+        && options.solver_mesh.is_none()
+        && !preflight::model_has_explicit_structural_elements(model)
     {
         return Err(FeaRunError::InvalidModel(
-            "linear static solid continuum studies require an analysis mesh; generate or provide analysis_mesh_artifact_path before solve"
-                .to_string(),
-        ));
+            "linear static solid continuum studies require a canonical solver mesh".to_string(),
+        )
+        .into());
     }
+    let compiled_constraint_plan;
+    let executed_constraint_plan = match assembly_constraint_plan {
+        Some(plan) => plan,
+        None => {
+            compiled_constraint_plan = CanonicalStructuralConstraintPlan::compile_for_model(
+                model,
+                options.solver_mesh.as_ref(),
+            )
+            .map_err(|error| match error {
+                crate::constraints::ConstraintPlanError::Cancelled => FeaRunError::Cancelled,
+                crate::constraints::ConstraintPlanError::Accounting(cause) => {
+                    FeaRunError::Usage(cause)
+                }
+                other => FeaRunError::Assembly(other.to_string()),
+            })?;
+            &compiled_constraint_plan
+        }
+    };
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -95,7 +468,6 @@ pub fn run_linear_static_with_options(
         Some(5),
     );
     check_cancelled("fea.run_linear_static")?;
-
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Solve,
@@ -104,13 +476,119 @@ pub fn run_linear_static_with_options(
         Some(2),
         Some(5),
     );
-    let algebra_backend = build_backend(options.algebra_backend_kind);
-    let solve_result = solve_linear_system(
-        &summary,
-        options.preconditioner_kind,
-        options.algebra_backend_kind,
-        algebra_backend.as_ref(),
-    );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.solve");
+    let mut elastic_reuse = elastic_capture
+        .map(|capture| {
+            capture.into_elastic_reuse().map_err(|error| {
+                FeaRunError::Solve(format!("FEA_ELASTIC_RIGIDITY_REFUSED: {error}"))
+            })
+        })
+        .transpose()?;
+    let solve_result = if awaited_solid {
+        solve::solve_static_system_with_owner(
+            &summary,
+            &options,
+            preassembly.solver_admission.as_ref(),
+            planned_reduced_support.as_ref(),
+            elastic_reuse.as_mut(),
+            &mut before_block,
+        )
+        .await?
+    } else {
+        solve::solve_static_system(
+            &summary,
+            &options,
+            preassembly.solver_admission.as_ref(),
+            planned_reduced_support.as_ref(),
+            elastic_reuse.as_mut(),
+        )?
+    };
+    let operator_proof = match elastic_reuse.as_ref().and_then(|reuse| reuse.certificate()) {
+        Some(certificate) if certificate.proved_by_elastic_rigidity() => {
+            crate::contracts::StaticOperatorProof::ElasticRigidity
+        }
+        Some(_) => {
+            return Err(FeaRunError::Solve(
+                "elastic rigidity path completed without its elastic proof".into(),
+            )
+            .into())
+        }
+        None => crate::contracts::StaticOperatorProof::SparseCholesky,
+    };
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.balance_and_reactions");
+    let static_balance = if awaited_solid {
+        solve::recover_static_balance_with_owner(
+            &summary,
+            &solve_result.solution,
+            &options,
+            &mut before_block,
+        )
+        .await?
+    } else {
+        solve::recover_static_balance(&summary, &solve_result.solution, &options)?
+    };
+    let structural_constraint_result = {
+        use crate::algebra::{
+            capacity::PhaseCapacityOwner, coercivity::NumericalCapacityError,
+            NumericalCapacityPhase,
+        };
+        let owner = awaited_solid.then(|| {
+            PhaseCapacityOwner::new(
+                &mut before_block,
+                NumericalCapacityPhase::ConstraintRecovery,
+            )
+        });
+        CanonicalStructuralConstraintResult::recover_for_model_from_solver_state_with_capacity(
+            executed_constraint_plan,
+            model,
+            options.solver_mesh.as_ref(),
+            &solve_result.solution,
+            &static_balance.reaction,
+            owner
+                .as_ref()
+                .map(|owner| owner as &dyn runmat_simulation_usage::AsyncCapacityOwner<A>),
+        )
+        .await
+        .map_err(|error| match error {
+            NumericalCapacityError::Numerical(error) => A::from(FeaRunError::from(error)),
+            NumericalCapacityError::Admission(error) => error,
+        })?
+    };
+    structural_constraint_result
+        .validate_against_model(
+            executed_constraint_plan,
+            model,
+            options.solver_mesh.as_ref(),
+        )
+        .map_err(FeaRunError::from)?;
+    let structural_connector_result =
+        crate::connectors::CanonicalStructuralConnectorResult::recover_static(
+            match summary.structural_connector_plan.clone() {
+                Some(plan) => plan,
+                None if model.connectors.is_empty() => {
+                    crate::connectors::CanonicalStructuralConnectorPlan::empty(
+                        executed_constraint_plan.topology,
+                        summary.structural_node_count,
+                    )
+                    .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+                }
+                None => {
+                    return Err(FeaRunError::Assembly(
+                        "structural assembly did not publish a canonical connector plan".into(),
+                    )
+                    .into())
+                }
+            },
+            &summary.structural_dof_layout,
+            &solve_result.solution,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    structural_connector_result
+        .plan
+        .validate_against_authored(&model.connectors)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Solve,
@@ -129,15 +607,32 @@ pub fn run_linear_static_with_options(
         Some(3),
         Some(5),
     );
-    let mut fields = recover_result_fields(&summary, &solve_result);
-    let thermo_mechanical_fields = recover_thermo_mechanical_snapshots(
-        summary.thermo_mechanical.as_ref(),
-        &[1.0],
-        &field_snapshot(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
-        &field_snapshot(&fields, FEA_FIELD_STRUCTURAL_VON_MISES),
-        &[solve_result.residual_norm],
-        element_count_for_dofs(summary.dof_count),
-    );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.field_recovery");
+    let mut fields = {
+        use crate::algebra::{
+            capacity::PhaseCapacityOwner, coercivity::NumericalCapacityError,
+            NumericalCapacityPhase,
+        };
+        let owner = awaited_solid.then(|| {
+            PhaseCapacityOwner::new(&mut before_block, NumericalCapacityPhase::FieldRecovery)
+        });
+        recover_result_fields_with_capacity(
+            &summary,
+            &solve_result,
+            options.local_execution,
+            owner
+                .as_ref()
+                .map(|owner| owner as &dyn runmat_simulation_usage::AsyncCapacityOwner<A>),
+        )
+        .await
+        .map_err(|error| match error {
+            NumericalCapacityError::Numerical(error) => A::from(FeaRunError::from(error)),
+            NumericalCapacityError::Admission(error) => error,
+        })?
+    };
+    let thermo_mechanical_fields =
+        static_thermomechanical::recover(&summary, &fields, solve_result.residual_norm)?;
     fields.extend(thermo_mechanical_fields.temperature_snapshots);
     fields.extend(thermo_mechanical_fields.thermal_strain_snapshots);
     fields.extend(thermo_mechanical_fields.thermal_stress_snapshots);
@@ -150,11 +645,28 @@ pub fn run_linear_static_with_options(
         &[1.0],
         &[solve_result.residual_norm],
         summary.dof_count,
+        options.solver_mesh.as_ref(),
     );
     let electro_thermal_diagnostics = electro_thermal_fields.diagnostics;
     fields.extend(electro_thermal_fields.static_fields);
     fields.extend(electro_thermal_fields.temperature_snapshots);
     fields.extend(electro_thermal_fields.thermal_residual_snapshots);
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.observations");
+    let observations = observations::evaluate(
+        observations::StaticObservationInputs {
+            model,
+            step: execution_step,
+            mesh: options.solver_mesh.as_ref(),
+            constraints: executed_constraint_plan,
+            constraint_result: &structural_constraint_result,
+            connector_result: &structural_connector_result,
+        },
+        &mut fields,
+        awaited_solid.then_some(&mut before_block),
+    )
+    .await?;
+    drop(phase_clock);
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Postprocess,
@@ -186,26 +698,26 @@ pub fn run_linear_static_with_options(
             solve_result.preconditioner,
         ),
     }];
-    if let Some(path) = options.analysis_mesh_artifact_path.as_ref() {
+    if let Some(path) = options.solver_mesh_artifact_path.as_ref() {
         let mesh_summary = options
-            .analysis_mesh
+            .solver_mesh
             .as_ref()
             .map(|mesh| {
                 format!(
-                    " analysis_mesh_node_count={} analysis_mesh_volume_element_count={} analysis_mesh_boundary_face_count={}",
-                    mesh.nodes.len(),
-                    mesh.volume_elements.len(),
-                    mesh.boundary_faces.len()
+                    " solver_mesh_node_count={} solver_mesh_volume_element_count={} solver_mesh_boundary_face_count={}",
+                    mesh.topology.nodes.len(),
+                    mesh.topology.volume_elements.len(),
+                    mesh.topology.boundary_faces.len()
                 )
             })
             .unwrap_or_default();
         diagnostics.push(FeaDiagnostic {
-            code: "FEA_ANALYSIS_MESH_REFERENCE".to_string(),
+            code: "FEA_SOLVER_MESH_REFERENCE".to_string(),
             severity: FeaDiagnosticSeverity::Info,
-            message: format!("analysis_mesh_artifact_path={path}{mesh_summary}"),
+            message: format!("solver_mesh_artifact_path={path}{mesh_summary}"),
         });
     }
-    if let Some(diagnostic) = structural_solid_assembly_diagnostic(&summary) {
+    if let Some(diagnostic) = static_diagnostics::solid_assembly(&summary) {
         diagnostics.push(diagnostic);
     }
     if let (Some(residual_norm), Some(equation_scale)) = (
@@ -237,10 +749,9 @@ pub fn run_linear_static_with_options(
             },
             message: format!("total_strain_energy={total_strain_energy}"),
         });
-        diagnostics.push(structural_linear_known_answer_diagnostic(
+        diagnostics.push(static_diagnostics::known_answer(
             total_strain_energy,
-            &summary.operator.rhs,
-            &solve_result.solution,
+            &static_balance.evidence,
         ));
         if let Some(reference_diagnostic) = structural_reference_kinematics_diagnostic(
             model,
@@ -251,7 +762,9 @@ pub fn run_linear_static_with_options(
             diagnostics.push(reference_diagnostic);
         }
     }
-    let recovery_metrics = structural_field_recovery_metrics(&summary, &solve_result.solution);
+    let recovery_metrics =
+        structural_field_recovery_metrics_from_fields(&summary, &solve_result.solution, &fields)
+            .map_err(FeaRunError::from)?;
     diagnostics.push(FeaDiagnostic {
         code: "FEA_STRUCTURAL_FIELD_RECOVERY".to_string(),
         severity: if recovery_metrics.recovery_element_count > 0
@@ -263,10 +776,9 @@ pub fn run_linear_static_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis={} active_stiffness_edge_count={} prep_recovery_edge_count={} constrained_edge_count={} recovery_element_count={} solver_mesh_node_count={} solver_mesh_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={}",
+            "basis={} active_stiffness_edge_count={} constrained_edge_count={} recovery_element_count={} solver_mesh_node_count={} solver_mesh_element_count={} max_edge_displacement_jump={} max_edge_strain_norm={} mean_edge_stiffness_ratio={} mean_edge_length_m={} strain_component_coverage_ratio={} element_geometry_node_count={} element_geometry_edge_count={} element_geometry_coverage_ratio={}",
             recovery_metrics.basis,
             recovery_metrics.active_stiffness_edge_count,
-            recovery_metrics.prep_recovery_edge_count,
             recovery_metrics.constrained_edge_count,
             recovery_metrics.recovery_element_count,
             recovery_metrics.solver_mesh_node_count,
@@ -281,10 +793,13 @@ pub fn run_linear_static_with_options(
             recovery_metrics.element_geometry_coverage_ratio
         ),
     });
-    if let Some(moment_balance) = structural_moment_balance_diagnostic(model, &fields) {
+    if let Some(moment_balance) = structural_moment_balance_diagnostic(model, &excitations, &fields)
+    {
         diagnostics.push(moment_balance);
     }
-    if let Some(beam_closed_form) = structural_beam_closed_form_diagnostic(model, &fields) {
+    if let Some(beam_closed_form) =
+        structural_beam_closed_form_diagnostic(model, &excitations, &fields)
+    {
         diagnostics.push(beam_closed_form);
     }
     extend_common_run_diagnostics(
@@ -292,16 +807,14 @@ pub fn run_linear_static_with_options(
         CommonRunDiagnosticInputs {
             model,
             summary: &summary,
-            prep_context: options.prep_context.clone(),
-            iteration_metric: solve_result.iterations as f64,
-            residual_metric: solve_result.residual_norm,
-            requested_preconditioner: options.preconditioner_kind.as_str(),
-            effective_preconditioner: &solve_result.preconditioner,
         },
     );
     diagnostics.extend(thermo_mechanical_diagnostics);
     diagnostics.extend(electro_thermal_diagnostics);
+    let structural_static_convergence =
+        crate::contracts::StructuralStaticConvergence::from_solve(&solve_result, operator_proof);
     diagnostics.extend(solve_result.diagnostics);
+    diagnostics.extend(admission.fallback);
 
     emit_phase(
         "fea.run_linear_static",
@@ -312,532 +825,37 @@ pub fn run_linear_static_with_options(
         Some(5),
     );
 
-    Ok(FeaRunResult {
-        backend,
+    let run = FeaRunResult {
+        identity,
+        requested_backend: backend,
+        execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
+            solve_result.solver_backend,
+        ),
         solver_backend: solve_result.solver_backend,
         solver_device_apply_k_ratio,
         solver_method: solve_result.solver_method,
         preconditioner: solve_result.preconditioner,
         solver_host_sync_count: solve_result.host_sync_count,
+        accelerator_evidence: solve_result.accelerator_evidence.into_iter().collect(),
         diagnostics,
+        spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        structural_static_convergence: Some(structural_static_convergence),
+        structural_static_balance: Some(Box::new(static_balance.evidence)),
+        structural_constraint_result: Some(Box::new(structural_constraint_result)),
+        structural_connector_result: Some(Box::new(structural_connector_result)),
+        observations,
+        observation_histories: Vec::new(),
+        series_reductions: Vec::new(),
         fields,
+    };
+    run.validate_solver_formulation()
+        .map_err(FeaRunError::from)?;
+    Ok(LinearStaticComputation {
+        thermal_transition,
+        run,
+        summary,
+        solution: solve_result.solution,
     })
-}
-
-fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
-    model
-        .structural
-        .as_ref()
-        .is_some_and(|structural| !structural.elements.is_empty())
-}
-
-fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<FeaDiagnostic> {
-    if summary.structural_solid_element_count == 0
-        && summary.operator.stiffness_dense.is_none()
-        && summary.operator.stiffness_csr.is_none()
-    {
-        return None;
-    }
-
-    let stiffness_nnz = summary
-        .operator
-        .stiffness_csr
-        .as_ref()
-        .map(|csr| csr.values.iter().filter(|value| value.abs() > 0.0).count())
-        .or_else(|| {
-            summary
-                .operator
-                .stiffness_dense
-                .as_ref()
-                .map(|dense| dense.iter().filter(|value| value.abs() > 0.0).count())
-        })
-        .unwrap_or(0);
-    let rhs_nonzero_count = summary
-        .operator
-        .rhs
-        .iter()
-        .filter(|value| value.abs() > 0.0)
-        .count();
-    let has_solid_stiffness = (summary.operator.stiffness_csr.is_some()
-        || summary.operator.stiffness_dense.is_some())
-        && summary.structural_solid_element_count > 0;
-    let storage = if summary.operator.stiffness_csr.is_some() {
-        "sparse_csr"
-    } else if summary.operator.stiffness_dense.is_some() {
-        "dense"
-    } else {
-        "none"
-    };
-
-    Some(FeaDiagnostic {
-        code: "FEA_STRUCTURAL_SOLID_ASSEMBLY".to_string(),
-        severity: if has_solid_stiffness {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "basis=solid_tetrahedron4_stiffness storage={} solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={}",
-            storage,
-            summary.structural_node_count,
-            summary.structural_solid_element_count,
-            summary.dof_count,
-            summary.constrained_dof_count,
-            stiffness_nnz,
-            rhs_nonzero_count,
-            has_solid_stiffness
-        ),
-    })
-}
-
-fn structural_linear_known_answer_diagnostic(
-    total_strain_energy: f64,
-    rhs: &[f64],
-    displacement: &[f64],
-) -> FeaDiagnostic {
-    let external_work = rhs
-        .iter()
-        .zip(displacement.iter())
-        .map(|(force, displacement)| force * displacement)
-        .sum::<f64>();
-    let work_energy_ratio = if external_work.abs() > 1.0e-12 {
-        (2.0 * total_strain_energy) / external_work
-    } else if total_strain_energy.abs() <= 1.0e-12 {
-        1.0
-    } else {
-        0.0
-    };
-    let work_energy_residual_ratio = (work_energy_ratio - 1.0).abs();
-    let known_answer_coverage_ratio = if rhs.len() == displacement.len()
-        && !rhs.is_empty()
-        && total_strain_energy.is_finite()
-        && external_work.is_finite()
-    {
-        1.0
-    } else {
-        0.0
-    };
-    let severity = if known_answer_coverage_ratio >= 1.0
-        && total_strain_energy >= 0.0
-        && work_energy_residual_ratio <= 1.0e-8
-    {
-        FeaDiagnosticSeverity::Info
-    } else {
-        FeaDiagnosticSeverity::Warning
-    };
-
-    FeaDiagnostic {
-        code: "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER".to_string(),
-        severity,
-        message: format!(
-            "identity=linear_work_energy external_work={} total_strain_energy={} work_energy_ratio={} work_energy_residual_ratio={} known_answer_coverage_ratio={}",
-            external_work,
-            total_strain_energy,
-            work_energy_ratio,
-            work_energy_residual_ratio,
-            known_answer_coverage_ratio
-        ),
-    }
-}
-
-fn structural_reference_kinematics_diagnostic(
-    model: &AnalysisModel,
-    summary: &crate::assembly::AssemblySummary,
-    solution: &[f64],
-    fields: &[AnalysisField],
-) -> Option<FeaDiagnostic> {
-    let (case, primary_component, primary_label) = match model.model_id.0.as_str() {
-        "structural_axial_bar_reference" => ("axial_bar_tension", 0, "x"),
-        "structural_beam_bending_reference" => ("beam_transverse_bending", 1, "y"),
-        _ => return None,
-    };
-    let displacement = field_values(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT)?;
-    let stress = field_values(fields, FEA_FIELD_STRUCTURAL_STRESS)?;
-    let primary_displacement =
-        vector_component_peak(displacement, VECTOR_COMPONENT_COUNT, primary_component);
-    let transverse_displacement = (0..VECTOR_COMPONENT_COUNT)
-        .filter(|component| *component != primary_component)
-        .map(|component| vector_component_peak(displacement, VECTOR_COMPONENT_COUNT, component))
-        .fold(0.0_f64, f64::max);
-    let transverse_displacement_leakage_ratio =
-        transverse_displacement / primary_displacement.max(1.0e-18);
-    let primary_stress = tensor_component_peak(stress, primary_component);
-    let max_stress = stress
-        .iter()
-        .map(|value| value.abs())
-        .fold(0.0_f64, f64::max);
-    let primary_stress_component_ratio = primary_stress / max_stress.max(1.0e-18);
-    let direct_reference = solve_tridiagonal_reference(summary)?;
-    let displacement_error_ratio = vector_relative_error(solution, &direct_reference);
-    let expected_stress = recover_structural_stress_from_displacement(summary, &direct_reference);
-    let stress_error_ratio = vector_relative_error(stress, &expected_stress);
-    let closed_form_reference_coverage_ratio = if displacement_error_ratio.is_finite()
-        && stress_error_ratio.is_finite()
-        && !direct_reference.is_empty()
-        && !expected_stress.is_empty()
-    {
-        1.0
-    } else {
-        0.0
-    };
-    let directional_reference_coverage_ratio = if primary_displacement.is_finite()
-        && primary_displacement > 0.0
-        && transverse_displacement_leakage_ratio.is_finite()
-        && primary_stress_component_ratio.is_finite()
-        && primary_stress_component_ratio > 0.0
-    {
-        1.0
-    } else {
-        0.0
-    };
-    let severity = if directional_reference_coverage_ratio >= 1.0
-        && closed_form_reference_coverage_ratio >= 1.0
-        && transverse_displacement_leakage_ratio <= 0.1
-        && primary_stress_component_ratio >= 0.5
-        && displacement_error_ratio <= 1.0e-7
-        && stress_error_ratio <= 1.0e-7
-    {
-        FeaDiagnosticSeverity::Info
-    } else {
-        FeaDiagnosticSeverity::Warning
-    };
-
-    Some(FeaDiagnostic {
-        code: "FEA_STRUCTURAL_REFERENCE_KINEMATICS".to_string(),
-        severity,
-        message: format!(
-            "case={} primary_component={} primary_displacement_m={} transverse_displacement_leakage_ratio={} primary_stress_component_ratio={} directional_reference_coverage_ratio={} closed_form_displacement_error_ratio={} closed_form_stress_error_ratio={} closed_form_reference_coverage_ratio={}",
-            case,
-            primary_label,
-            primary_displacement,
-            transverse_displacement_leakage_ratio,
-            primary_stress_component_ratio,
-            directional_reference_coverage_ratio,
-            displacement_error_ratio,
-            stress_error_ratio,
-            closed_form_reference_coverage_ratio
-        ),
-    })
-}
-
-fn structural_beam_closed_form_diagnostic(
-    model: &AnalysisModel,
-    fields: &[AnalysisField],
-) -> Option<FeaDiagnostic> {
-    let case = match model.model_id.0.as_str() {
-        "structural_beam_cantilever_end_moment_reference" => "cantilever_end_moment",
-        "structural_beam_torsion_reference" => "cantilever_torsion",
-        "structural_beam_force_and_moment_reference" => "cantilever_force_and_moment",
-        _ => return None,
-    };
-    let structural = model.structural.as_ref()?;
-    if structural.nodes.len() != 2 {
-        return None;
-    }
-    let section = structural.beam_sections.first()?;
-    let material = model.materials.first()?;
-    let youngs_modulus_pa = material.mechanical.youngs_modulus_pa;
-    let shear_modulus_pa =
-        youngs_modulus_pa / (2.0 * (1.0 + material.mechanical.poisson_ratio)).max(1.0e-9);
-    let length_m = distance3(
-        structural.nodes[0].coordinates_m,
-        structural.nodes[1].coordinates_m,
-    );
-    if length_m <= 0.0 {
-        return None;
-    }
-
-    let mut tip_force_y_n = 0.0_f64;
-    let mut tip_torque_x_n_m = 0.0_f64;
-    let mut tip_moment_z_n_m = 0.0_f64;
-    for load in &model.loads {
-        if load.region_id != "node:2" {
-            continue;
-        }
-        match load.kind {
-            LoadKind::Force { fy, .. } => {
-                tip_force_y_n += fy;
-            }
-            LoadKind::Moment { mx, mz, .. } => {
-                tip_torque_x_n_m += mx;
-                tip_moment_z_n_m += mz;
-            }
-            _ => {}
-        }
-    }
-
-    let eiz = youngs_modulus_pa * section.iz_m4;
-    let gj = shear_modulus_pa * section.torsion_j_m4;
-    if eiz <= 0.0 || gj <= 0.0 {
-        return None;
-    }
-
-    let node_count = structural.nodes.len();
-    let mut expected_displacement = vec![0.0_f64; node_count * VECTOR_COMPONENT_COUNT];
-    let mut expected_rotation = vec![0.0_f64; node_count * VECTOR_COMPONENT_COUNT];
-    let tip_offset = VECTOR_COMPONENT_COUNT;
-    expected_displacement[tip_offset + 1] = tip_force_y_n * length_m.powi(3) / (3.0 * eiz)
-        + tip_moment_z_n_m * length_m.powi(2) / (2.0 * eiz);
-    expected_rotation[tip_offset] = tip_torque_x_n_m * length_m / gj;
-    expected_rotation[tip_offset + 2] =
-        tip_force_y_n * length_m.powi(2) / (2.0 * eiz) + tip_moment_z_n_m * length_m / eiz;
-
-    let displacement = field_values(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT)?;
-    let rotation = field_values(fields, crate::contracts::FEA_FIELD_STRUCTURAL_ROTATION)?;
-    let displacement_error_ratio = vector_relative_error(displacement, &expected_displacement);
-    let rotation_error_ratio = vector_relative_error(rotation, &expected_rotation);
-    let torsion_error_ratio = if tip_torque_x_n_m.abs() > 0.0 {
-        let observed = rotation.get(tip_offset).copied().unwrap_or(0.0);
-        let expected = expected_rotation[tip_offset];
-        (observed - expected).abs() / expected.abs().max(1.0e-18)
-    } else {
-        0.0
-    };
-    let coverage_ratio = if displacement_error_ratio.is_finite()
-        && rotation_error_ratio.is_finite()
-        && torsion_error_ratio.is_finite()
-    {
-        1.0
-    } else {
-        0.0
-    };
-    let severity = if coverage_ratio >= 1.0
-        && displacement_error_ratio <= 1.0e-6
-        && rotation_error_ratio <= 1.0e-6
-        && torsion_error_ratio <= 1.0e-6
-    {
-        FeaDiagnosticSeverity::Info
-    } else {
-        FeaDiagnosticSeverity::Warning
-    };
-
-    Some(FeaDiagnostic {
-        code: "FEA_STRUCTURAL_BEAM_CLOSED_FORM".to_string(),
-        severity,
-        message: format!(
-            "case={} structural_beam_closed_form_rotation_error_ratio={} structural_beam_closed_form_displacement_error_ratio={} structural_beam_closed_form_torsion_error_ratio={} structural_beam_closed_form_coverage_ratio={} length_m={} tip_force_y_n={} tip_torque_x_n_m={} tip_moment_z_n_m={}",
-            case,
-            rotation_error_ratio,
-            displacement_error_ratio,
-            torsion_error_ratio,
-            coverage_ratio,
-            length_m,
-            tip_force_y_n,
-            tip_torque_x_n_m,
-            tip_moment_z_n_m
-        ),
-    })
-}
-
-fn structural_moment_balance_diagnostic(
-    model: &AnalysisModel,
-    fields: &[AnalysisField],
-) -> Option<FeaDiagnostic> {
-    let requested = requested_moment_vector(model);
-    let requested_norm = vector3_norm(requested);
-    if requested_norm <= 0.0 {
-        return None;
-    }
-    let reaction_values = field_values(fields, FEA_FIELD_STRUCTURAL_REACTION_MOMENT)?;
-
-    let reaction = vector3_sum(reaction_values);
-    let reaction_norm = vector3_norm(reaction);
-    let realized_norm = reaction_norm;
-    let balance = [
-        reaction[0] + requested[0],
-        reaction[1] + requested[1],
-        reaction[2] + requested[2],
-    ];
-    let balance_residual_ratio = vector3_norm(balance) / requested_norm.max(1.0e-18);
-    let realization_ratio = realized_norm / requested_norm.max(1.0e-18);
-
-    Some(FeaDiagnostic {
-        code: "FEA_STRUCTURAL_MOMENT_BALANCE".to_string(),
-        severity: if balance_residual_ratio <= 1.0e-6 && realization_ratio.is_finite() {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "structural_reaction_moment_norm_n_m={} structural_moment_requested_norm_n_m={} structural_moment_realized_norm_n_m={} structural_moment_realization_ratio={} structural_moment_balance_residual_ratio={}",
-            reaction_norm,
-            requested_norm,
-            realized_norm,
-            realization_ratio,
-            balance_residual_ratio
-        ),
-    })
-}
-
-fn requested_moment_vector(model: &AnalysisModel) -> [f64; 3] {
-    let mut out = [0.0_f64; 3];
-    for load in &model.loads {
-        match load.kind {
-            LoadKind::Moment { mx, my, mz } => {
-                out[0] += mx;
-                out[1] += my;
-                out[2] += mz;
-            }
-            LoadKind::Force { fx, fy, fz } => {
-                if let Some(force_moment) = structural_force_moment_about_reaction_origin(
-                    model,
-                    &load.region_id,
-                    [fx, fy, fz],
-                ) {
-                    out[0] += force_moment[0];
-                    out[1] += force_moment[1];
-                    out[2] += force_moment[2];
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-fn structural_force_moment_about_reaction_origin(
-    model: &AnalysisModel,
-    region_id: &str,
-    force: [f64; 3],
-) -> Option<[f64; 3]> {
-    let structural = model.structural.as_ref()?;
-    let origin = model
-        .boundary_conditions
-        .iter()
-        .find_map(|bc| {
-            if !matches!(bc.kind, BoundaryConditionKind::Fixed) {
-                return None;
-            }
-            structural_node_coordinates(structural, &bc.region_id)
-        })
-        .or_else(|| structural.nodes.first().map(|node| node.coordinates_m))?;
-    let target = structural_node_coordinates(structural, region_id)?;
-    let r = [
-        target[0] - origin[0],
-        target[1] - origin[1],
-        target[2] - origin[2],
-    ];
-    Some([
-        r[1] * force[2] - r[2] * force[1],
-        r[2] * force[0] - r[0] * force[2],
-        r[0] * force[1] - r[1] * force[0],
-    ])
-}
-
-fn structural_node_coordinates(
-    structural: &runmat_analysis_core::StructuralModel,
-    region_id: &str,
-) -> Option<[f64; 3]> {
-    let node_id = region_id.strip_prefix("node:")?.parse::<u32>().ok()?;
-    structural
-        .nodes
-        .iter()
-        .find(|node| node.node_id == node_id)
-        .map(|node| node.coordinates_m)
-}
-
-fn vector3_sum(values: &[f64]) -> [f64; 3] {
-    let mut out = [0.0_f64; 3];
-    for components in values.chunks_exact(VECTOR_COMPONENT_COUNT) {
-        out[0] += components[0];
-        out[1] += components[1];
-        out[2] += components[2];
-    }
-    out
-}
-
-fn vector3_norm(values: [f64; 3]) -> f64 {
-    (values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).sqrt()
-}
-
-fn distance3(a: [f64; 3], b: [f64; 3]) -> f64 {
-    ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
-}
-
-fn solve_tridiagonal_reference(summary: &crate::assembly::AssemblySummary) -> Option<Vec<f64>> {
-    let n = summary.operator.dof_count;
-    if n == 0
-        || summary.operator.stiffness_diag.len() != n
-        || summary.operator.rhs.len() != n
-        || summary.operator.stiffness_upper.len() != n.saturating_sub(1)
-    {
-        return None;
-    }
-    let mut upper = vec![0.0_f64; n.saturating_sub(1)];
-    let mut rhs = vec![0.0_f64; n];
-    let first_pivot = *summary.operator.stiffness_diag.first()?;
-    if !first_pivot.is_finite() || first_pivot.abs() <= 1.0e-24 {
-        return None;
-    }
-    if n > 1 {
-        upper[0] = -summary.operator.stiffness_upper[0] / first_pivot;
-    }
-    rhs[0] = summary.operator.rhs[0] / first_pivot;
-    for row in 1..n {
-        let lower = -summary.operator.stiffness_upper[row - 1];
-        let pivot = summary.operator.stiffness_diag[row] - lower * upper[row - 1];
-        if !pivot.is_finite() || pivot.abs() <= 1.0e-24 {
-            return None;
-        }
-        if row < n - 1 {
-            upper[row] = -summary.operator.stiffness_upper[row] / pivot;
-        }
-        rhs[row] = (summary.operator.rhs[row] - lower * rhs[row - 1]) / pivot;
-    }
-    let mut solution = vec![0.0_f64; n];
-    solution[n - 1] = rhs[n - 1];
-    for row in (0..n - 1).rev() {
-        solution[row] = rhs[row] - upper[row] * solution[row + 1];
-    }
-    Some(solution)
-}
-
-fn vector_relative_error(observed: &[f64], expected: &[f64]) -> f64 {
-    let count = observed.len().max(expected.len());
-    if count == 0 {
-        return 0.0;
-    }
-    let mut max_error = 0.0_f64;
-    let mut max_expected = 0.0_f64;
-    for index in 0..count {
-        let observed_value = observed.get(index).copied().unwrap_or(0.0);
-        let expected_value = expected.get(index).copied().unwrap_or(0.0);
-        max_error = max_error.max((observed_value - expected_value).abs());
-        max_expected = max_expected.max(expected_value.abs());
-    }
-    max_error / max_expected.max(1.0e-18)
-}
-
-fn field_values<'a>(fields: &'a [AnalysisField], field_id: &str) -> Option<&'a [f64]> {
-    fields
-        .iter()
-        .find(|field| field.field_id == field_id)
-        .and_then(AnalysisField::as_host_f64)
-}
-
-fn vector_component_peak(values: &[f64], component_count: usize, component: usize) -> f64 {
-    values
-        .chunks_exact(component_count)
-        .map(|components| components.get(component).copied().unwrap_or(0.0).abs())
-        .fold(0.0_f64, f64::max)
-}
-
-fn tensor_component_peak(values: &[f64], component: usize) -> f64 {
-    values
-        .chunks_exact(6)
-        .map(|components| components.get(component).copied().unwrap_or(0.0).abs())
-        .fold(0.0_f64, f64::max)
-}
-
-fn scalar_field_value(
-    fields: &[runmat_analysis_core::AnalysisField],
-    field_id: &str,
-) -> Option<f64> {
-    fields
-        .iter()
-        .find(|field| field.field_id == field_id)
-        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
-        .and_then(|values| values.first().copied())
 }
 
 fn field_snapshot(fields: &[AnalysisField], field_id: &str) -> Vec<AnalysisField> {

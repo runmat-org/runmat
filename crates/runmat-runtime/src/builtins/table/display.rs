@@ -23,7 +23,7 @@ pub fn table_display_text(value: &Value) -> BuiltinResult<String> {
                 .fields
                 .get(name)
                 .cloned()
-                .unwrap_or_else(|| Value::String(String::new()));
+                .unwrap_or_else(|| Value::string(String::new()));
             let cells = (0..preview)
                 .map(|row| render_table_cell(&value, row))
                 .collect::<Vec<_>>();
@@ -86,17 +86,21 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
             .get2(row, 0)
             .map(format_table_number)
             .unwrap_or_default(),
-        Value::StringArray(array) => array.data.get(row).cloned().unwrap_or_default(),
+        Value::StringArray(array) => array
+            .data()
+            .get(row)
+            .map(|text| text.display().to_string())
+            .unwrap_or_default(),
         Value::LogicalArray(array) => array
             .data
             .get(row)
             .map(|value| if *value != 0 { "true" } else { "false" }.to_string())
             .unwrap_or_default(),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::datetime_string_array(value)
                 .ok()
                 .flatten()
-                .and_then(|array| array.data.get(row).cloned())
+                .and_then(|array| array.data().get(row).map(|text| text.display().to_string()))
                 .unwrap_or_else(|| value.to_string())
         }
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => {
@@ -107,7 +111,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
 }
 
 pub(crate) fn categorical_label_at(object: &ObjectInstance, row: usize) -> Option<String> {
-    let code = match object.properties.get("Codes")? {
+    let code = match object.properties().get("Codes")? {
         Value::Tensor(tensor) => tensor.get2(row, 0).ok()?,
         _ => return None,
     };
@@ -115,8 +119,8 @@ pub(crate) fn categorical_label_at(object: &ObjectInstance, row: usize) -> Optio
         return Some("<undefined>".to_string());
     }
     let idx = code.round() as usize - 1;
-    match object.properties.get("Categories")? {
-        Value::StringArray(array) => array.data.get(idx).cloned(),
+    match object.properties().get("Categories")? {
+        Value::StringArray(array) => array.data().get(idx).map(|text| text.display().to_string()),
         _ => None,
     }
 }

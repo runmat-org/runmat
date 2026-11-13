@@ -1,0 +1,56 @@
+// Plane-wave transmission loss across the interface between two fluids, in the 20 x 20 mm
+// two-block stack. A 1 Pa plane wave enters the first block through `Hot face`; the far face of
+// the second block radiates (anechoic), and the side walls are rigid. Below the first cross mode
+// (c / 2w = 8.6 kHz) the field stays a plane wave.
+//
+// Reference (normal incidence, Z = rho c): Z1 = 1.2 * 343 = 411.6 Pa*s/m, Z2 = 2.4 * 686 =
+// 1646.4 Pa*s/m, m = Z2 / Z1 = 4. The transmitted power fraction is 4 m / (1 + m)^2 = 0.64, so
+// TL = 10 log10((1 + m)^2 / (4 m)) = 1.938 dB at every frequency.
+geometry stack {
+    file = "./geometry/stacked-blocks.step"
+    units = mm
+    interfaces = shared
+    region air : solid { select name "Copper"; expect exactly_one }
+    region dense_gas : solid { select name "Steel"; expect exactly_one }
+    region inlet : face { select name "Hot face"; expect exactly_one }
+    region outlet : face { select name "Cold face"; expect exactly_one }
+}
+
+mesh stack on geometry.stack {
+    tetrahedra {
+        order = quadratic
+        target_size = 5 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material air {
+    mass_density = 1.2 kg/m^3
+    acoustic {
+        speed_of_sound = 343 m/s
+        damping_ratio = 0.0
+    }
+}
+
+material dense_gas {
+    mass_density = 2.4 kg/m^3
+    acoustic {
+        speed_of_sound = 686 m/s
+        damping_ratio = 0.0
+    }
+}
+
+model two_fluid {
+    assign material.air to geometry.stack.region.air
+    assign material.dense_gas to geometry.stack.region.dense_gas
+    load incoming { incident_pressure on geometry.stack.region.inlet = 1 Pa }
+    load anechoic_end { acoustic.radiation { target = geometry.stack.region.outlet } }
+}
+
+study interface_transmission_loss {
+    geometry = geometry.stack
+    mesh = mesh.stack
+    model = model.two_fluid
+    analysis sweep { acoustic harmonic { frequencies = [500, 1000, 2000] Hz } }
+    output tl = transmission_loss(analysis.sweep, incident = geometry.stack.region.inlet, transmitted = geometry.stack.region.outlet)
+}

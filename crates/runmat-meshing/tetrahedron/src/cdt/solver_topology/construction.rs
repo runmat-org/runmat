@@ -1,9 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
-    solver_volume_element_identity, ElementOrder, MeshNeighbor, MeshingCancellationSignal,
-    SolverMeshNode, SolverMeshTopology, SolverVolumeElement, StableDigest,
+    quality::predicate::tetrahedron_signed_volume, solver_volume_element_identity, ElementOrder,
+    MeshNeighbor, MeshingCancellationSignal, SolverMeshNode, SolverMeshTopology,
+    SolverVolumeElement, StableDigest,
 };
 
 use super::{
@@ -11,33 +10,37 @@ use super::{
     checkpoint, error,
     inventories::{build_contacts, build_interfaces, build_regions, field_topologies},
     parameters::build_node_exact_parameters,
-    DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput,
-    DelaunaySolverTopologyOptions,
+    DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyOptions,
+    ProjectionInput,
 };
+
+mod regions;
+use regions::RegionSources;
 
 pub(super) const MAX_PROVENANCE_PER_ENTITY: usize = 32;
 
 pub(super) fn construct(
-    input: &DelaunaySolverTopologyInput<'_>,
+    input: &ProjectionInput<'_>,
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<SolverMeshTopology, DelaunaySolverTopologyError> {
-    let node_indices = node_indices(input)?;
-    let materials = validate_materials(input)?;
+    let node_indices = super::NodeIndex::new(input, options, cancellation)?;
+    let region_sources = RegionSources::prepare(input, options, cancellation)?;
     let nodes = build_nodes(input, &node_indices, options, cancellation)?;
-    let volume_elements = build_elements(input, &materials)?;
-    let neighbors = build_neighbors(input);
+    let (volume_elements, neighbors) =
+        build_elements_and_neighbors(input, &region_sources, options, cancellation)?;
     let (boundary_faces, classes) = build_faces(input, &node_indices, options, cancellation)?;
     let boundary_edges = build_edges(input, &boundary_faces, options, cancellation)?;
-    let regions = build_regions(input, &materials)?;
-    let material_interfaces = build_interfaces(input, &classes)?;
+    let regions = build_regions(input)?;
+    let conformal_interfaces = build_interfaces(input, &classes)?;
     let contacts = build_contacts(input, &classes)?;
     let field_topologies = field_topologies(
+        input,
         nodes.len(),
         volume_elements.len(),
         boundary_faces.len(),
         boundary_edges.len(),
-    );
+    )?;
     Ok(SolverMeshTopology {
         nodes,
         volume_elements,
@@ -45,85 +48,28 @@ pub(super) fn construct(
         boundary_faces,
         boundary_edges,
         regions,
-        material_interfaces,
+        conformal_interfaces,
         contacts,
         field_topologies,
     })
 }
 
-fn node_indices(
-    input: &DelaunaySolverTopologyInput<'_>,
-) -> Result<BTreeMap<StableDigest, u32>, DelaunaySolverTopologyError> {
-    let indices = input
-        .volume_mesh
-        .topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.identity, index as u32))
-        .collect::<BTreeMap<_, _>>();
-    if indices.len() != input.volume_mesh.topology.nodes.len() {
-        return Err(invalid_mesh("volume nodes repeat a stable identity"));
-    }
-    Ok(indices)
-}
-
-fn validate_materials<'a>(
-    input: &'a DelaunaySolverTopologyInput<'_>,
-) -> Result<BTreeMap<&'a PersistentEntityId, &'a str>, DelaunaySolverTopologyError> {
-    let exact_regions = input
-        .exact_topology
-        .regions
-        .iter()
-        .map(|region| &region.id)
-        .collect::<BTreeSet<_>>();
-    let mesh_regions = input
-        .volume_mesh
-        .topology
-        .incidence
-        .regions
-        .iter()
-        .map(|region| &region.region_id)
-        .collect::<BTreeSet<_>>();
-    if exact_regions != mesh_regions {
-        return Err(invalid_materials(
-            "solver projection requires one nonempty mesh region for every exact region",
-        ));
-    }
-    let mut materials = BTreeMap::new();
-    let mut previous = None;
-    for assignment in input.region_materials {
-        if previous.is_some_and(|prior| prior >= &assignment.region_id)
-            || assignment.region_id.kind != PersistentEntityKind::Region
-            || assignment.region_id.validate().is_err()
-            || assignment.material_id.is_empty()
-            || assignment.material_id.len() > 256
-            || assignment.material_id.chars().any(char::is_control)
-            || materials
-                .insert(&assignment.region_id, assignment.material_id.as_str())
-                .is_some()
-        {
-            return Err(invalid_materials(
-                "region materials must be valid, nonempty, unique, and canonically ordered",
-            ));
-        }
-        previous = Some(&assignment.region_id);
-    }
-    if materials.keys().copied().collect::<BTreeSet<_>>() != exact_regions {
-        return Err(invalid_materials(
-            "region materials must classify every exact region exactly once",
-        ));
-    }
-    Ok(materials)
-}
-
 fn build_nodes(
-    input: &DelaunaySolverTopologyInput<'_>,
-    indices: &BTreeMap<StableDigest, u32>,
+    input: &ProjectionInput<'_>,
+    indices: &super::NodeIndex,
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<SolverMeshNode>, DelaunaySolverTopologyError> {
-    let mut provenance = vec![BTreeSet::new(); indices.len()];
+    let storage = super::storage::Storage::for_input(input);
+    let scratch_scope = storage
+        .0
+        .map(runmat_geometry_core::GeometryAllocationScope::new);
+    let scratch = super::storage::Storage(
+        scratch_scope
+            .as_ref()
+            .map(|scope| scope as &dyn runmat_geometry_core::GeometryEvaluationControl),
+    );
+    let mut provenance = scratch.collect((0..indices.len()).map(|_| Vec::new()))?;
     for (tetrahedron_index, tetrahedron) in input.volume_mesh.topology.tetrahedra.iter().enumerate()
     {
         checkpoint(tetrahedron_index as u64, options, cancellation)?;
@@ -132,7 +78,7 @@ fn build_nodes(
             .as_ref()
             .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
         for vertex in tetrahedron.vertex_indices {
-            provenance[vertex as usize].insert(region.clone());
+            insert_entity_admitted(&mut provenance[vertex as usize], region, scratch)?;
         }
     }
     for binding in &input.volume_mesh.provenance.nodes {
@@ -141,6 +87,7 @@ fn build_nodes(
             indices,
             &[binding.node_identity],
             &binding.entity_ids,
+            scratch,
         )?;
     }
     for binding in &input.volume_mesh.provenance.segments {
@@ -149,6 +96,7 @@ fn build_nodes(
             indices,
             &binding.node_identities,
             &binding.entity_ids,
+            scratch,
         )?;
     }
     for binding in &input.volume_mesh.provenance.facets {
@@ -157,113 +105,172 @@ fn build_nodes(
             indices,
             &binding.node_identities,
             &binding.entity_ids,
+            scratch,
         )?;
     }
-    let exact_parameters = build_node_exact_parameters(input, indices)?;
-    input
+    let exact_parameters = build_node_exact_parameters(input, indices, options, cancellation)?;
+    let mut nodes = storage.vector(indices.len())?;
+    for ((index, node), exact_parameters) in input
         .volume_mesh
         .topology
         .nodes
         .iter()
         .enumerate()
         .zip(exact_parameters)
-        .map(|((index, node), exact_parameters)| {
-            let provenance = provenance[index].iter().cloned().collect::<Vec<_>>();
-            if provenance.is_empty() || provenance.len() > MAX_PROVENANCE_PER_ENTITY {
-                return Err(invalid_mesh(
-                    "solver node provenance is empty or exceeds its bound",
-                ));
-            }
-            Ok(SolverMeshNode {
-                node_id: index as u64 + 1,
-                stable_identity: node.identity,
-                coordinates_m: node.coordinates_m,
-                provenance,
-                exact_parameters,
-            })
-        })
-        .collect()
+    {
+        let provenance = storage.entities(provenance[index].iter().copied())?;
+        if provenance.is_empty() || provenance.len() > MAX_PROVENANCE_PER_ENTITY {
+            return Err(invalid_mesh(
+                "solver node provenance is empty or exceeds its bound",
+            ));
+        }
+        nodes.push(SolverMeshNode {
+            node_id: index as u64 + 1,
+            stable_identity: node.identity,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(node.coordinates_m.canonical_value()),
+            provenance,
+            exact_parameters,
+        });
+    }
+    drop(provenance);
+    drop(scratch_scope);
+    Ok(nodes)
 }
 
-fn extend_nodes<const N: usize>(
-    target: &mut [BTreeSet<PersistentEntityId>],
-    indices: &BTreeMap<StableDigest, u32>,
+fn extend_nodes<'a, const N: usize>(
+    target: &mut [Vec<&'a PersistentEntityId>],
+    indices: &super::NodeIndex,
     identities: &[StableDigest; N],
-    entities: &[PersistentEntityId],
+    entities: &'a [PersistentEntityId],
+    storage: super::storage::Storage<'_>,
 ) -> Result<(), DelaunaySolverTopologyError> {
     for identity in identities {
         let index = indices
             .get(identity)
             .ok_or_else(|| invalid_mesh("provenance references a missing volume node"))?;
-        target[*index as usize].extend(entities.iter().cloned());
+        for entity in entities {
+            insert_entity_admitted(&mut target[*index as usize], entity, storage)?;
+        }
     }
     Ok(())
 }
 
-fn build_elements(
-    input: &DelaunaySolverTopologyInput<'_>,
-    materials: &BTreeMap<&PersistentEntityId, &str>,
-) -> Result<Vec<SolverVolumeElement>, DelaunaySolverTopologyError> {
-    input
-        .volume_mesh
-        .topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .map(|(index, tetrahedron)| {
-            let region = tetrahedron
-                .region_id
-                .clone()
-                .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
-            let material = materials
-                .get(&region)
-                .ok_or_else(|| invalid_materials("volume region has no material assignment"))?;
-            Ok(SolverVolumeElement {
-                element_id: index as u64 + 1,
-                stable_identity: solver_volume_element_identity(
-                    tetrahedron
-                        .vertex_indices
-                        .map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].identity),
-                ),
-                order: ElementOrder::Tet4,
-                node_ids: tetrahedron
-                    .vertex_indices
-                    .iter()
-                    .map(|vertex| *vertex as u64 + 1)
-                    .collect(),
-                region_id: region.clone(),
-                material_id: (*material).to_owned(),
-                provenance: vec![region],
-            })
-        })
-        .collect()
-}
-
-fn build_neighbors(input: &DelaunaySolverTopologyInput<'_>) -> Vec<MeshNeighbor> {
-    input
-        .volume_mesh
-        .topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .flat_map(|(index, tetrahedron)| {
-            tetrahedron
-                .neighbors
-                .iter()
+fn build_elements_and_neighbors(
+    input: &ProjectionInput<'_>,
+    regions: &RegionSources<'_>,
+    options: DelaunaySolverTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(Vec<SolverVolumeElement>, Vec<MeshNeighbor>), DelaunaySolverTopologyError> {
+    let count = input.volume_mesh.topology.tetrahedra.len();
+    let neighbor_count = count.checked_mul(4).ok_or_else(|| {
+        error::failure(
+            DelaunaySolverTopologyErrorKind::MemoryBudgetExceeded,
+            "solver neighbor inventory overflow",
+        )
+    })?;
+    let storage = super::storage::Storage::for_input(input);
+    let mut elements = storage.vector(count)?;
+    let mut neighbors = storage.vector(neighbor_count)?;
+    for (index, tetrahedron) in input.volume_mesh.topology.tetrahedra.iter().enumerate() {
+        checkpoint(index as u64, options, cancellation)?;
+        let region = tetrahedron
+            .region_id
+            .as_ref()
+            .ok_or_else(|| invalid_mesh("volume tetrahedron has no assigned region"))?;
+        let solid = regions
+            .solid(region)
+            .ok_or_else(|| invalid_mesh("volume region has no exact solid lineage"))?;
+        let mut provenance = storage.entities([region, solid].into_iter())?;
+        provenance.sort();
+        provenance.dedup();
+        let (vertices, source_faces) = solver_vertices(input, tetrahedron.vertex_indices)?;
+        let capacity = match input.request.element_order {
+            ElementOrder::Tet4 => 4,
+            ElementOrder::Tet10 => 10,
+        };
+        let mut node_ids = storage.vector(capacity)?;
+        node_ids.extend(vertices.map(|vertex| vertex as u64 + 1));
+        elements.push(SolverVolumeElement {
+            element_id: index as u64 + 1,
+            stable_identity: solver_volume_element_identity(
+                vertices.map(|vertex| input.volume_mesh.topology.nodes[vertex as usize].identity),
+            ),
+            order: ElementOrder::Tet4,
+            node_ids,
+            region_id: storage.entity(region)?,
+            provenance,
+        });
+        neighbors.extend(
+            source_faces
+                .into_iter()
                 .enumerate()
-                .map(move |(face, adjacent)| MeshNeighbor {
+                .map(|(face, source_face)| MeshNeighbor {
                     element_id: index as u64 + 1,
                     local_face_index: face as u8,
-                    adjacent_element_id: adjacent.map(|value| value as u64 + 1),
-                })
-        })
-        .collect()
+                    adjacent_element_id: tetrahedron.neighbors[source_face]
+                        .map(|value| value as u64 + 1),
+                }),
+        );
+    }
+    Ok((elements, neighbors))
+}
+
+/// Converts the CDT's robust-predicate orientation into the positive Jacobian convention used
+/// by solver elements. The same permutation maps solver-local faces back to CDT-local faces.
+fn solver_vertices(
+    input: &ProjectionInput<'_>,
+    mut vertices: [u32; 4],
+) -> Result<([u32; 4], [usize; 4]), DelaunaySolverTopologyError> {
+    let points = vertices.map(|vertex| {
+        input.volume_mesh.topology.nodes[vertex as usize]
+            .coordinates_m
+            .canonical_value()
+    });
+    let signed_volume = tetrahedron_signed_volume(points);
+    if !signed_volume.is_finite() || signed_volume == 0.0 {
+        return Err(invalid_mesh(
+            "volume tetrahedron has zero or non-finite solver Jacobian",
+        ));
+    }
+    let mut source_face_by_solver_face = [0, 1, 2, 3];
+    if signed_volume < 0.0 {
+        vertices.swap(0, 1);
+        source_face_by_solver_face.swap(0, 1);
+    }
+    Ok((vertices, source_face_by_solver_face))
 }
 
 fn invalid_mesh(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
 }
 
-fn invalid_materials(reason: impl Into<String>) -> DelaunaySolverTopologyError {
-    error::failure(DelaunaySolverTopologyErrorKind::InvalidMaterials, reason)
+pub(super) fn insert_entity<'a>(
+    target: &mut Vec<&'a PersistentEntityId>,
+    entity: &'a PersistentEntityId,
+) -> Result<(), DelaunaySolverTopologyError> {
+    if let Err(index) = target.binary_search(&entity) {
+        if target.len() == MAX_PROVENANCE_PER_ENTITY {
+            return Err(invalid_mesh("solver entity provenance exceeds its bound"));
+        }
+        target.insert(index, entity);
+    }
+    Ok(())
+}
+
+fn insert_entity_admitted<'a>(
+    target: &mut Vec<&'a PersistentEntityId>,
+    entity: &'a PersistentEntityId,
+    storage: super::storage::Storage<'_>,
+) -> Result<(), DelaunaySolverTopologyError> {
+    if target.binary_search(&entity).is_err() && target.len() == target.capacity() {
+        let capacity = target
+            .capacity()
+            .saturating_mul(2)
+            .clamp(4, MAX_PROVENANCE_PER_ENTITY);
+        storage.reserve(target, capacity)?;
+    }
+    insert_entity(target, entity)
 }

@@ -1,0 +1,19 @@
+[package]
+name = "runmat-fea-source"
+version = "0.7.1"
+edition = "2021"
+license-file = "../../LICENSE.md"
+description = "Checked FEA source contracts and bounded semantic queries"
+
+[dependencies]
+schemars = { version = "0.8", optional = true }
+runmat-analysis-core = { workspace = true }
+runmat-analysis-language = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-meshing-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+tool-schema = ["dep:schemars", "runmat-analysis-language/tool-schema", "runmat-geometry-core/tool-schema"]

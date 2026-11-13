@@ -1,9 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use runmat_execution::cancellation::CancellationToken;
 
 use runmat_value::Value;
+
+mod arguments;
+pub use arguments::ProcedureArguments;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -13,16 +13,21 @@ pub(crate) enum ExecutableBackendPolicy {
     ForcedGenericNative,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ProcedureTarget {
     Entrypoint,
     Function(String),
+    /// Exact compiler identity; display names are not callable authority.
+    SemanticFunction(runmat_types::ProgramFunctionId),
+    /// Select an original callable only against this immutable unit's exact
+    /// runtime definition owners. Arguments remain a separate ingress owner.
+    RetainedCallable(runmat_runtime::execution::RootedValue),
 }
 
 #[derive(Clone, Debug)]
 pub struct ProcedureInvocation {
     pub target: ProcedureTarget,
-    pub arguments: Vec<Value>,
+    pub arguments: ProcedureArguments,
     pub requested_outputs: usize,
 }
 
@@ -30,7 +35,7 @@ impl ProcedureInvocation {
     pub fn entrypoint() -> Self {
         Self {
             target: ProcedureTarget::Entrypoint,
-            arguments: Vec::new(),
+            arguments: Vec::new().into(),
             requested_outputs: 0,
         }
     }
@@ -38,22 +43,68 @@ impl ProcedureInvocation {
     pub fn function(name: impl Into<String>, arguments: Vec<Value>) -> Self {
         Self {
             target: ProcedureTarget::Function(name.into()),
-            arguments,
+            arguments: arguments.into(),
             requested_outputs: 0,
         }
     }
+
+    pub fn retained_function(
+        name: impl Into<String>,
+        arguments: runmat_runtime::call::BuiltinArguments,
+    ) -> Self {
+        Self {
+            target: ProcedureTarget::Function(name.into()),
+            arguments: ProcedureArguments::Retained(arguments),
+            requested_outputs: 0,
+        }
+    }
+
+    pub fn retained_callable(
+        callback: runmat_runtime::execution::RootedValue,
+        arguments: runmat_runtime::call::BuiltinArguments,
+    ) -> Self {
+        Self {
+            target: ProcedureTarget::RetainedCallable(callback),
+            arguments: ProcedureArguments::Retained(arguments),
+            requested_outputs: 0,
+        }
+    }
+
+    pub(crate) fn admit(
+        self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<AdmittedProcedureInvocation, runmat_runtime::RuntimeError> {
+        let arguments = self.arguments.admit(runtime)?;
+        let arguments = if matches!(&self.target, ProcedureTarget::RetainedCallable(_)) {
+            arguments
+        } else {
+            arguments.into_supplied_arguments(Some(runtime))?
+        };
+        Ok(AdmittedProcedureInvocation {
+            target: self.target,
+            arguments,
+            requested_outputs: self.requested_outputs,
+        })
+    }
+}
+
+/// This live backend carrier has one root authority, never a second Vec view.
+pub(crate) struct AdmittedProcedureInvocation {
+    pub target: ProcedureTarget,
+    pub arguments: runmat_runtime::call::BuiltinArguments,
+    pub requested_outputs: usize,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct InvocationControl {
-    cancellation: Option<Arc<AtomicBool>>,
+    cancellation: Option<CancellationToken>,
     deadline_unix_ms: Option<u64>,
     #[cfg(not(target_arch = "wasm32"))]
     backend: ExecutableBackendPolicy,
 }
 
 impl InvocationControl {
-    pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
+    pub fn with_cancellation(mut self, cancellation: CancellationToken) -> Self {
         self.cancellation = Some(cancellation);
         self
     }
@@ -74,14 +125,20 @@ impl InvocationControl {
         self.backend
     }
 
-    pub(crate) fn is_cancelled(&self) -> bool {
-        self.cancellation
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Relaxed))
-    }
-
-    pub(crate) fn deadline_elapsed(&self) -> bool {
-        self.deadline_unix_ms
-            .is_some_and(|deadline| runmat_time::unix_timestamp_ms() >= deadline as u128)
+    /// One live control token reaches both admission and running safepoints.
+    /// A token's existing deadline can only be tightened by this invocation.
+    pub(crate) fn cancellation(&self) -> Option<CancellationToken> {
+        if self.cancellation.is_none() && self.deadline_unix_ms.is_none() {
+            return None;
+        }
+        Some(
+            self.cancellation
+                .clone()
+                .unwrap_or_default()
+                .with_deadline(self.deadline_unix_ms),
+        )
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;

@@ -1,12 +1,9 @@
 //! MATLAB-compatible `strings` builtin that preallocates string arrays filled with empty scalars.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRINGS_ERROR_INTERNAL, STRINGS_ERROR_INVALID_SIZE,
+    STRINGS_ERROR_LIKE_DUPLICATE, STRINGS_ERROR_LIKE_MISSING_PROTOTYPE,
+    STRINGS_ERROR_SIZE_OVERFLOW, STRINGS_FILL_EXTENSION, STRINGS_LIKE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Value};
@@ -18,223 +15,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
 const SIZE_FINITE_ERR: &str = "size inputs must be finite";
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
-
-const STRINGS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Preallocated string array.",
-}];
-
-const STRINGS_INPUT_SZ: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sz",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Size vector or scalar side length.",
-}];
-
-const STRINGS_INPUT_DIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First array dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "n...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional array dimensions.",
-    },
-];
-
-const STRINGS_INPUT_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "dims...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional explicit size dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Literal option keyword \"like\".",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value supplying output shape when dims are omitted.",
-    },
-];
-
-const STRINGS_INPUT_FILL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "dims...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional explicit size dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "fill",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"empty\""),
-        description: "Fill mode keyword: \"empty\" or \"missing\".",
-    },
-];
-
-const STRINGS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "S = strings()",
-        inputs: &[],
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(sz)",
-        inputs: &STRINGS_INPUT_SZ,
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(m, n...)",
-        inputs: &STRINGS_INPUT_DIMS,
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(___, \"like\", p)",
-        inputs: &STRINGS_INPUT_LIKE,
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(___, fill)",
-        inputs: &STRINGS_INPUT_FILL,
-        outputs: &STRINGS_OUTPUT,
-    },
-];
-
-const STRINGS_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.INVALID_SIZE",
-    identifier: Some("RunMat:strings:InvalidSize"),
-    when: "Size arguments are not valid numeric scalar/vector dimensions.",
-    message: "strings: size arguments must be numeric scalars or vectors",
-};
-
-const STRINGS_ERROR_LIKE_MISSING_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.LIKE_MISSING_PROTOTYPE",
-    identifier: Some("RunMat:strings:LikeMissingPrototype"),
-    when: "\"like\" is provided without a following prototype.",
-    message: "strings: expected prototype after 'like'",
-};
-
-const STRINGS_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.LIKE_DUPLICATE",
-    identifier: Some("RunMat:strings:LikeDuplicate"),
-    when: "Multiple \"like\" options are supplied in one call.",
-    message: "strings: multiple 'like' specifications are not supported",
-};
-
-const STRINGS_ERROR_SIZE_OVERFLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.SIZE_OVERFLOW",
-    identifier: Some("RunMat:strings:SizeOverflow"),
-    when: "Requested dimensions overflow platform limits.",
-    message: "strings: requested size exceeds platform limits",
-};
-
-const STRINGS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.INTERNAL",
-    identifier: Some("RunMat:strings:InternalError"),
-    when: "Internal string array construction failed.",
-    message: "strings: internal error",
-};
-
-const STRINGS_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    STRINGS_ERROR_INVALID_SIZE,
-    STRINGS_ERROR_LIKE_MISSING_PROTOTYPE,
-    STRINGS_ERROR_LIKE_DUPLICATE,
-    STRINGS_ERROR_SIZE_OVERFLOW,
-    STRINGS_ERROR_INTERNAL,
-];
-
-pub const STRINGS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRINGS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRINGS_ERRORS,
-};
-
-const STRINGS_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "strings-like-prototype",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "strings(..., 'like', prototype) is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StringsLikePrototypeExtension"),
-};
-
-const STRINGS_FILL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "strings-fill-mode",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "strings(..., 'empty'|'missing') fill selection is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StringsFillModeExtension"),
-};
-
-pub const STRINGS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [STRINGS_LIKE_EXTENSION, STRINGS_FILL_EXTENSION];
-
-const STRINGS_SIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "size",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Scalar, separate, and vector size forms accept every built-in integer class. Negative values become zero, and dimensions are checked exactly against the host allocation domain.",
-    }];
-
-const STRINGS_LIKE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "prototype",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The RunMat-only like form inspects only prototype shape; integer class and payload are not converted or read.",
-    }];
-
-pub const STRINGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = strings(n | sz | sz1,...,szN)",
-        inputs: &STRINGS_SIZE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The compatibility target documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = strings(..., 'like', prototype)",
-        inputs: &STRINGS_LIKE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The like form is a mode-gated RunMat extension and is not presented as part of the compatibility target's strings contract.",
-    },
-];
 
 fn strings_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strings_error_with_message(error.message, error)
@@ -295,18 +81,11 @@ enum FillKind {
 
 #[runtime_builtin(
     name = "strings",
-    category = "strings/core",
-    summary = "Preallocate string arrays filled with empty string scalars (`\"\"`).",
-    keywords = "strings,string array,empty,preallocate",
-    accel = "array_construct",
-    type_resolver(string_array_type),
-    descriptor(crate::builtins::strings::core::strings::STRINGS_DESCRIPTOR),
-    extensions(crate::builtins::strings::core::strings::STRINGS_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::core::strings::STRINGS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::strings"
 )]
-async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    preflight_strings_extensions(&rest)?;
+async fn strings_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    preflight_strings_extensions(rest.view())?;
     let ParsedStrings { shape, fill } = parse_arguments(rest).await?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim)
@@ -314,8 +93,8 @@ async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     })?;
 
     let fill_text = match fill {
-        FillKind::Empty => String::new(),
-        FillKind::Missing => "<missing>".to_string(),
+        FillKind::Empty => runmat_value::StringElement::text(""),
+        FillKind::Missing => runmat_value::StringElement::Missing,
     };
 
     let mut data = Vec::with_capacity(total);
@@ -323,14 +102,14 @@ async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         data.push(fill_text.clone());
     }
 
-    let array =
-        StringArray::new(data, shape).map_err(|_| strings_error(&STRINGS_ERROR_INTERNAL))?;
+    let array = StringArray::from_elements_unbounded(data, shape)
+        .map_err(|_| strings_error(&STRINGS_ERROR_INTERNAL))?;
     Ok(Value::StringArray(array))
 }
 
-fn preflight_strings_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_strings_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     for value in args {
-        let Some(keyword) = keyword_of(value) else {
+        let Some(keyword) = keyword_of(value).map_err(remap_strings_flow)? else {
             continue;
         };
         match keyword.as_str() {
@@ -348,7 +127,7 @@ fn preflight_strings_extensions(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
+async fn parse_arguments(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedStrings> {
     let mut size_values: Vec<Value> = Vec::new();
     let mut like_proto: Option<Value> = None;
     let mut fill = FillKind::Empty;
@@ -358,7 +137,10 @@ async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
         let host = gather_if_needed_async(&args[idx])
             .await
             .map_err(remap_strings_flow)?;
-        if let Some(keyword) = keyword_of(&host) {
+        if let Some(keyword) = keyword_of(&host).map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            remap_strings_flow(error)
+        })? {
             match keyword.as_str() {
                 "like" => {
                     if like_proto.is_some() {
@@ -409,7 +191,7 @@ async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
 
 fn prototype_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::StringArray(sa) => Ok(sa.shape.clone()),
+        Value::StringArray(sa) => Ok(sa.shape().to_vec()),
         _ => {
             shape_from_value(value, FN_NAME).map_err(|_| strings_error(&STRINGS_ERROR_INVALID_SIZE))
         }
@@ -490,7 +272,7 @@ fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     if len == 0 {
         return Ok(vec![0, 0]);
     }
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(strings_error_with_message(
             format!("{FN_NAME}: size vector must be a row or column vector"),
             &STRINGS_ERROR_INVALID_SIZE,
@@ -590,12 +372,37 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerStorage, NumericStorage};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        futures::executor::block_on(super::strings_builtin(rest))
+        futures::executor::block_on(super::strings_builtin(
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn strings_low_rank_size_tensors_keep_scalar_square_and_vector_dimensions() {
+        let square = strings_builtin(vec![Value::Tensor(
+            Tensor::new(vec![2.0], Vec::new()).unwrap(),
+        )])
+        .expect("rank-zero size");
+        let Value::StringArray(square) = square else {
+            panic!("string array expected")
+        };
+        assert_eq!(square.shape, vec![2, 2]);
+        assert_eq!(square.data().len(), 4);
+
+        let rectangle = strings_builtin(vec![Value::Tensor(
+            Tensor::new(vec![2.0, 3.0], vec![2]).unwrap(),
+        )])
+        .expect("rank-one size vector");
+        let Value::StringArray(rectangle) = rectangle else {
+            panic!("string array expected")
+        };
+        assert_eq!(rectangle.shape, vec![2, 3]);
+        assert_eq!(rectangle.data().len(), 6);
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -609,7 +416,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 1]);
-                assert_eq!(array.data, vec![String::new()]);
+                assert_eq!(array.data(), vec![String::new()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -623,7 +430,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![4, 4]);
-                assert!(array.data.iter().all(|s| s.is_empty()));
+                assert!(array.data().iter().all(|s| s.as_str() == Some("")));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -637,7 +444,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
+                assert_eq!(array.data().len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -651,7 +458,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
+                assert_eq!(array.data().len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -665,7 +472,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
+                assert_eq!(array.data().len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -680,7 +487,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![large as usize, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -739,7 +546,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
-                assert_eq!(array.data.len(), 3);
+                assert_eq!(array.data().len(), 3);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -752,7 +559,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -767,7 +574,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -780,7 +587,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![0, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -811,7 +618,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![0, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -829,8 +636,11 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
-                assert!(array.data.iter().all(|s| s == "<missing>"));
+                assert_eq!(array.data().len(), 6);
+                assert!(array
+                    .data()
+                    .iter()
+                    .all(runmat_value::StringElement::is_missing));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -843,7 +653,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 1]);
-                assert_eq!(array.data, vec!["<missing>".to_string()]);
+                assert_eq!(array.data(), &[runmat_value::StringElement::Missing]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -865,7 +675,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, proto.shape);
-                assert!(array.data.iter().all(|s| s.is_empty()));
+                assert!(array.data().iter().all(|s| s.as_str() == Some("")));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -882,8 +692,8 @@ pub(crate) mod tests {
         .expect("strings");
         match result {
             Value::StringArray(array) => {
-                assert_eq!(array.shape, tensor.shape);
-                assert_eq!(array.data.len(), tensor.materialize_f64().len());
+                assert_eq!(array.shape, tensor.shape());
+                assert_eq!(array.data().len(), tensor.materialize_f64().len());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -938,14 +748,14 @@ pub(crate) mod tests {
             let dims = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
                 data: &dims.materialize_f64(),
-                shape: &dims.shape,
+                shape: dims.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = strings_builtin(vec![Value::GpuTensor(handle)]).expect("strings");
             match result {
                 Value::StringArray(array) => {
                     assert_eq!(array.shape, vec![2, 3]);
-                    assert_eq!(array.data.len(), 6);
+                    assert_eq!(array.data().len(), 6);
                 }
                 other => panic!("expected string array, got {other:?}"),
             }
@@ -959,7 +769,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -974,14 +784,6 @@ pub(crate) mod tests {
         });
     }
 
-    #[test]
-    fn strings_type_is_string_array() {
-        assert_eq!(
-            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
-    }
-
     #[cfg(feature = "wgpu")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -992,7 +794,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![1.0, 4.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
             data: &dims.materialize_f64(),
-            shape: &dims.shape,
+            shape: dims.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");

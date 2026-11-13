@@ -6,30 +6,40 @@ use crate::builtins::plotting::{plotting_error, plotting_error_with_source};
 use crate::BuiltinResult;
 
 pub type AxesTarget = Option<(FigureHandle, usize)>;
-pub type SplitAxesArgs = (AxesTarget, Vec<Value>);
+pub type SplitAxesArgs = (AxesTarget, crate::call::BuiltinArguments);
 
-pub fn split_leading_axes_handle(
-    args: Vec<Value>,
+#[path = "axes_target/prepared.rs"]
+mod prepared;
+pub(crate) use prepared::{
+    prepare_axes_call, prepare_graphics_target, PreparedAxesTarget, PreparedGraphicsTarget,
+};
+
+pub fn split_leading_axes_arguments(
+    args: crate::call::BuiltinArguments,
     builtin: &'static str,
 ) -> BuiltinResult<SplitAxesArgs> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
-    };
-    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(&first, builtin) {
-        let rest: Vec<Value> = iter.collect();
-        if rest.is_empty() {
-            return Err(plotting_error(
-                builtin,
-                format!("{builtin}: expected data after axes handle"),
-            ));
+    let target = leading_axes_target(args.first(), args.len(), builtin)?;
+    let skip = usize::from(target.is_some());
+    Ok((target, args.into_range(skip..)?))
+}
+
+fn leading_axes_target(
+    first: Option<&Value>,
+    count: usize,
+    builtin: &'static str,
+) -> BuiltinResult<AxesTarget> {
+    if let Some(first) = first {
+        if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(first, builtin) {
+            if count == 1 {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: expected data after axes handle"),
+                ));
+            }
+            return Ok(Some((handle, axes_index)));
         }
-        return Ok((Some((handle, axes_index)), rest));
     }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((None, rest))
+    Ok(None)
 }
 
 pub fn apply_axes_target(

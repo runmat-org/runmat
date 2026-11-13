@@ -1,5 +1,6 @@
 use runmat_geometry_core::{
-    AssemblyNode, MaterialEvidence, MaterialEvidenceConfidence, Region, SourceGeometryKind,
+    Ap242ExchangeInventory, AssemblyNode, MaterialEvidence, MaterialEvidenceConfidence, Region,
+    SourceGeometryKind,
 };
 
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
@@ -11,6 +12,8 @@ pub(crate) struct StepImportSummary {
     pub material_evidence: Vec<MaterialEvidence>,
     pub regions: Vec<Region>,
     pub diagnostics: Vec<ImportDiagnostic>,
+    pub exchange: Option<Ap242ExchangeInventory>,
+    pub unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
 }
 
 pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSummary, String> {
@@ -22,6 +25,9 @@ pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSum
     let used_fallback_label = model_label == fallback_model_label(path);
     let product_labels = parse_product_labels(text);
     let materials = parse_material_evidence(text);
+    let exchange = crate::ap242::has_ap242_schema(text)
+        .then(|| crate::ap242::inspect_ap242(text).map_err(|error| error.to_string()))
+        .transpose()?;
 
     let mut diagnostics = Vec::new();
     diagnostics.push(ImportDiagnostic {
@@ -95,6 +101,7 @@ pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSum
     };
 
     Ok(StepImportSummary {
+        unit_evidence: crate::ap242::inspect_length_units(text),
         source_kind: SourceGeometryKind::Cad,
         assembly: Some(AssemblyNode {
             node_id: "assembly_root".to_string(),
@@ -104,6 +111,7 @@ pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSum
         material_evidence: materials,
         regions,
         diagnostics,
+        exchange,
     })
 }
 
@@ -193,6 +201,7 @@ mod tests {
         assert_eq!(summary.material_evidence.len(), 1);
         assert_eq!(summary.material_evidence[0].value, "Aluminum 6061");
         assert_eq!(summary.regions.len(), 2);
+        assert!(summary.exchange.is_none());
         let codes = summary
             .diagnostics
             .iter()
@@ -219,5 +228,13 @@ mod tests {
             .map(|item| item.code.as_str())
             .collect::<Vec<_>>();
         assert!(codes.contains(&"CAD_METADATA_FILE_NAME_FALLBACK"));
+    }
+
+    #[test]
+    fn non_ap242_step_does_not_enter_the_bounded_ap242_decoder() {
+        let payload = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n#10=PRODUCT('Part_A','',(#1));\n#20=OPAQUE_BINARY(\"0F\");\nENDSEC;\nEND-ISO-10303-21;\n";
+        let summary = parse_step_summary("/fixtures/ap214.step", payload).expect("parse");
+        assert!(summary.exchange.is_none());
+        assert_eq!(summary.regions.len(), 1);
     }
 }

@@ -1,111 +1,66 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use crate::build_runtime_error;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-
-const GET_P_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Dependent property backing value.",
-}];
-
-const GET_P_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Object receiver.",
-}];
-
-const GET_P_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = get.p(obj)",
-    inputs: &GET_P_INPUTS,
-    outputs: &GET_P_OUTPUT,
-}];
-
-const GET_P_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
-    code: "RM.GET_P.RECEIVER_INVALID",
-    identifier: Some("RunMat:GetPReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "get.p: requires object receiver",
-}];
-
-pub const GET_P_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GET_P_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &GET_P_ERRORS,
-};
-
+#[cfg(test)]
+mod tests;
+// Test-oriented dependent property handlers (global). If a class defines a Dependent
+// property named 'p', the VM will try to call get.p / set.p. We provide generic
+// implementations that read/write a conventional backing field 'p_backing'.
 #[runtime_builtin(
     name = "get.p",
-    category = "introspection",
-    summary = "Get dependent property backing value for test/runtime compatibility flows.",
-    keywords = "classdef,dependent,property,get",
-    descriptor(crate::builtins::introspection::dependent_property::GET_P_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::dependent_property"
 )]
 pub async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
-    crate::get_p_builtin(obj).await
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::GET_P_DESCRIPTOR,
+        &runmat_builtins::GET_P_ERROR_OUTPUTS,
+        "get.p",
+    )?;
+    match obj {
+        Value::Object(o) => {
+            if let Some(v) = o.property("p_backing") {
+                Ok(v.clone())
+            } else {
+                Ok(Value::Num(0.0))
+            }
+        }
+        other => Err(build_runtime_error(format!(
+            "get.p: requires object receiver (got {other:?})"
+        ))
+        .with_builtin("get.p")
+        .with_identifier("RunMat:GetPReceiverInvalid")
+        .build()),
+    }
 }
-
-const SET_P_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated object receiver.",
-}];
-
-const SET_P_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value to assign.",
-    },
-];
-
-const SET_P_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = set.p(obj, value)",
-    inputs: &SET_P_INPUTS,
-    outputs: &SET_P_OUTPUT,
-}];
-
-const SET_P_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
-    code: "RM.SET_P.RECEIVER_INVALID",
-    identifier: Some("RunMat:SetPReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "set.p: requires object receiver",
-}];
-
-pub const SET_P_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SET_P_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &SET_P_ERRORS,
-};
 
 #[runtime_builtin(
     name = "set.p",
-    category = "introspection",
-    summary = "Set dependent property backing value for test/runtime compatibility flows.",
-    keywords = "classdef,dependent,property,set",
-    descriptor(crate::builtins::introspection::dependent_property::SET_P_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::dependent_property"
 )]
 pub async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
-    crate::set_p_builtin(obj, val).await
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SET_P_DESCRIPTOR,
+        &runmat_builtins::SET_P_ERROR_OUTPUTS,
+        "set.p",
+    )?;
+    match obj {
+        Value::Object(o) => {
+            let mut o = o.into_unbounded_builder().map_err(|_| {
+                build_runtime_error("set.p: admitted receiver needs an admitted edit generation")
+                    .with_builtin("set.p")
+                    .with_identifier("RunMat:SetPReceiverInvalid")
+                    .build()
+            })?;
+            o.insert("p_backing".to_string(), val);
+            Ok(Value::Object(o.finish()))
+        }
+        other => Err(build_runtime_error(format!(
+            "set.p: requires object receiver (got {other:?})"
+        ))
+        .with_builtin("set.p")
+        .with_identifier("RunMat:SetPReceiverInvalid")
+        .build()),
+    }
 }

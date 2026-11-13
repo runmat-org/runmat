@@ -49,12 +49,11 @@ pub fn validate_exact_face_pslg(
         return Err(invalid(boundary, "face PSLG vertices are not canonical"));
     }
     if pslg.vertices.windows(2).any(|pair| {
-        pair[0]
-            .node_id
-            .cmp(&pair[1].node_id)
-            .then_with(|| pair[0].seam_image.cmp(&pair[1].seam_image))
-            .then_with(|| pair[0].uv[0].total_cmp(&pair[1].uv[0]))
+        pair[0].uv[0]
+            .total_cmp(&pair[1].uv[0])
             .then_with(|| pair[0].uv[1].total_cmp(&pair[1].uv[1]))
+            .then_with(|| pair[0].seam_image.cmp(&pair[1].seam_image))
+            .then_with(|| pair[0].node_id.cmp(&pair[1].node_id))
             .is_gt()
     }) {
         return Err(invalid(boundary, "face PSLG vertex order is not canonical"));
@@ -94,20 +93,35 @@ pub fn validate_exact_face_pslg(
                 source_coedge_id: expected.source_coedge_id.clone(),
                 source_edge_id: expected.source_edge_id.clone(),
             };
-            if actual.source != expected_source
-                || start.node_id != expected.node_ids[0]
+            let mismatch = if actual.source != expected_source {
+                Some("source identity")
+            } else if start.node_id != expected.node_ids[0]
                 || finish.node_id != expected.node_ids[1]
-                || actual.edge_parameters != Some(expected.edge_parameters)
-                || start.seam_image != expected.seam_image
-                || finish.seam_image != expected.seam_image
-                || start.uv != expected.node_uv[0]
-                || finish.uv != expected.node_uv[1]
-                || actual.vertex_indices[0] == actual.vertex_indices[1]
-                || actual
-                    .edge_parameters
-                    .is_none_or(|parameters| parameters.iter().any(|value| !value.is_finite()))
             {
-                return Err(invalid(boundary, "face PSLG segment differs from boundary"));
+                Some("node identity")
+            } else if actual.edge_parameters != Some(expected.edge_parameters) {
+                Some("edge parameters")
+            } else if start.seam_image != expected.seam_image
+                || finish.seam_image != expected.seam_image
+            {
+                Some("seam image")
+            } else if start.uv != expected.node_uv[0] || finish.uv != expected.node_uv[1] {
+                Some("surface parameters")
+            } else if actual.vertex_indices[0] == actual.vertex_indices[1] {
+                Some("distinct endpoints")
+            } else if actual
+                .edge_parameters
+                .is_none_or(|parameters| parameters.iter().any(|value| !value.is_finite()))
+            {
+                Some("finite edge parameters")
+            } else {
+                None
+            };
+            if let Some(field) = mismatch {
+                return Err(invalid(
+                    boundary,
+                    &format!("face PSLG segment has invalid {field}"),
+                ));
             }
         }
         if actual_segments

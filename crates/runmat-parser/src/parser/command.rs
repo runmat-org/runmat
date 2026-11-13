@@ -227,6 +227,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: REQUIRED_PATH_WORDS,
     },
     CommandVerb {
+        name: "opentoline",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
         name: "path",
         arg_kind: OPTIONAL_PATH_WORDS,
     },
@@ -419,7 +423,7 @@ impl Parser {
                 }
             }
             match self.peek_token() {
-                Some(Token::Ident) => {
+                Some(token) if token.can_be_identifier() => {
                     let token = self.next().unwrap();
                     let start = token.position;
                     let mut end = token.end;
@@ -437,7 +441,9 @@ impl Parser {
                     }
                     if self.can_parse_dotted_word_arg(verb) {
                         while matches!(self.peek_token(), Some(Token::Dot))
-                            && matches!(self.peek_token_at(1), Some(Token::Ident | Token::Integer))
+                            && self.peek_token_at(1).is_some_and(|token| {
+                                token.can_be_identifier() || *token == Token::Integer
+                            })
                         {
                             self.next();
                             let Some(part) = self.next() else {
@@ -470,7 +476,7 @@ impl Parser {
                 }
                 Some(Token::Minus)
                     if self.can_parse_dash_option_arg(verb)
-                        && matches!(self.peek_token_at(1), Some(Token::Ident)) =>
+                        && self.peek_token_at(1).is_some_and(Token::can_be_identifier) =>
                 {
                     let minus = self.next().unwrap();
                     let Some(option) = self.next() else {
@@ -502,7 +508,7 @@ impl Parser {
             return true;
         }
         match self.peek_token_at(*offset) {
-            Some(Token::Ident) => {
+            Some(token) if token.can_be_identifier() => {
                 if self.can_parse_syms_function_arg(verb)
                     && matches!(self.peek_token_at(*offset + 1), Some(Token::LParen))
                 {
@@ -529,7 +535,9 @@ impl Parser {
             return false;
         }
         if !matches!(self.peek_token_at(*offset), Some(Token::Minus))
-            || !matches!(self.peek_token_at(*offset + 1), Some(Token::Ident))
+            || !self
+                .peek_token_at(*offset + 1)
+                .is_some_and(Token::can_be_identifier)
             || !self.tokens_adjacent(self.pos + *offset, self.pos + *offset + 1)
         {
             return false;
@@ -650,7 +658,9 @@ impl Parser {
 
     fn has_malformed_syms_parameter_suffix(&self, verb: &str, offset: usize) -> bool {
         self.can_parse_syms_function_arg(verb)
-            && matches!(self.peek_token_at(offset), Some(Token::Ident))
+            && self
+                .peek_token_at(offset)
+                .is_some_and(Token::can_be_identifier)
             && matches!(self.peek_token_at(offset + 1), Some(Token::LParen))
             && self.skip_syms_parameter_suffix(offset + 1).is_none()
     }
@@ -662,7 +672,7 @@ impl Parser {
         let mut i = offset + 1;
         loop {
             match self.peek_token_at(i) {
-                Some(Token::Ident) => {
+                Some(token) if token.can_be_identifier() => {
                     i += 1;
                     match self.peek_token_at(i) {
                         Some(Token::Comma) => i += 1,
@@ -684,7 +694,7 @@ impl Parser {
         let mut suffix = String::from("(");
         loop {
             let parameter = self.next()?;
-            if !matches!(parameter.token, Token::Ident) {
+            if !parameter.token.can_be_identifier() {
                 return None;
             }
             suffix.push_str(&parameter.lexeme);
@@ -708,10 +718,9 @@ impl Parser {
             return;
         }
         while matches!(self.peek_token_at(*offset), Some(Token::Dot))
-            && matches!(
-                self.peek_token_at(*offset + 1),
-                Some(Token::Ident | Token::Integer)
-            )
+            && self
+                .peek_token_at(*offset + 1)
+                .is_some_and(|token| token.can_be_identifier() || *token == Token::Integer)
         {
             *offset += 2;
         }
@@ -794,26 +803,26 @@ impl Parser {
 }
 
 fn is_path_word_token(token: &Token) -> bool {
-    matches!(
-        token,
-        Token::Ident
-            | Token::Integer
-            | Token::Float
-            | Token::End
-            | Token::Dot
-            | Token::DotStar
-            | Token::DotSlash
-            | Token::DotBackslash
-            | Token::Slash
-            | Token::Backslash
-            | Token::Colon
-            | Token::Tilde
-            | Token::At
-            | Token::Plus
-            | Token::Minus
-            | Token::Star
-            | Token::Question
-    )
+    token.can_be_identifier()
+        || matches!(
+            token,
+            Token::Integer
+                | Token::Float
+                | Token::End
+                | Token::Dot
+                | Token::DotStar
+                | Token::DotSlash
+                | Token::DotBackslash
+                | Token::Slash
+                | Token::Backslash
+                | Token::Colon
+                | Token::Tilde
+                | Token::At
+                | Token::Plus
+                | Token::Minus
+                | Token::Star
+                | Token::Question
+        )
 }
 
 fn quote_command_string(text: &str) -> String {

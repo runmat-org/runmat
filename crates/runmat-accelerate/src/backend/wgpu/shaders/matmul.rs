@@ -1,3 +1,43 @@
+/// Both eager and lazy pipeline construction share the owning power policy.
+pub(crate) fn epilogue_shader(
+    precision: runmat_accelerate_api::ProviderPrecision,
+    tile: u32,
+) -> String {
+    use runmat_accelerate_api::ProviderPrecision;
+    let (source, ty) = match precision {
+        ProviderPrecision::F32 => (MATMUL_EPILOGUE_SHADER_F32, "f32"),
+        ProviderPrecision::F64 => (MATMUL_EPILOGUE_SHADER_F64, "f64"),
+    };
+    let power = crate::kernel_math::power::entrypoint(precision);
+    let clamps = format!(
+        r#"
+fn rm_matmul_max(a: {ty}, b: {ty}) -> {ty} {{
+    if {power}_nan(a) || {power}_nan(b) {{ return a + b; }}
+    if a == {ty}(0.0) && b == {ty}(0.0) {{ return select(a, b, !{power}_negative(b)); }}
+    return select(a, b, b > a);
+}}
+fn rm_matmul_min(a: {ty}, b: {ty}) -> {ty} {{
+    if {power}_nan(a) || {power}_nan(b) {{ return a + b; }}
+    if a == {ty}(0.0) && b == {ty}(0.0) {{ return select(a, b, {power}_negative(b)); }}
+    return select(a, b, b < a);
+}}
+"#
+    );
+    let shader = format!(
+        "{}\n{}\n{}",
+        crate::kernel_math::power::functions(precision),
+        clamps,
+        source
+            .replace("@REAL_POWER@", power)
+            .replace("@MT@", &tile.to_string())
+    );
+    if precision == ProviderPrecision::F64 {
+        super::ieee_words::inject(&shader)
+    } else {
+        shader
+    }
+}
+
 pub const MATMUL_SHADER_F64: &str = r#"
 struct Tensor { data: array<f64>, };
 struct Params {
@@ -330,9 +370,14 @@ fn main(
         }
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
-    var val = acc * ep.alpha + ep.beta;
-
     let flags = ep.flags;
+    var val = acc;
+    {
+        if ((flags & 512u) != 0u) { val = val * ep.alpha; }
+        if ((flags & 1024u) != 0u) { val = val + ep.beta; }
+        if ((flags & 2048u) != 0u) { val = val - ep.beta; }
+        if ((flags & 4096u) != 0u) { val = ep.beta - val; }
+    }
     if ((flags & 1u) != 0u) {
         let s = Row.data[row];
         if ((flags & 4u) != 0u) { val = val / s; } else { val = val * s; }
@@ -342,13 +387,13 @@ fn main(
         if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
     }
     if ((flags & 16u) != 0u) {
-        val = max(val, ep.clamp_min);
+        val = rm_matmul_max(val, ep.clamp_min);
     }
     if ((flags & 32u) != 0u) {
-        val = min(val, ep.clamp_max);
+        val = rm_matmul_min(val, ep.clamp_max);
     }
     if ((flags & 64u) != 0u) {
-        val = pow(val, ep.pow_exponent);
+        val = @REAL_POWER@(val, ep.pow_exponent);
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;
@@ -419,8 +464,14 @@ fn main(
         }
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
-    var val = acc * ep.alpha + ep.beta;
     let flags = ep.flags;
+    var val = acc;
+    {
+        if ((flags & 512u) != 0u) { val = val * ep.alpha; }
+        if ((flags & 1024u) != 0u) { val = val + ep.beta; }
+        if ((flags & 2048u) != 0u) { val = val - ep.beta; }
+        if ((flags & 4096u) != 0u) { val = ep.beta - val; }
+    }
     if ((flags & 1u) != 0u) {
         let s = Row.data[row];
         if ((flags & 4u) != 0u) { val = val / s; } else { val = val * s; }
@@ -430,13 +481,13 @@ fn main(
         if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
     }
     if ((flags & 16u) != 0u) {
-        val = max(val, ep.clamp_min);
+        val = rm_matmul_max(val, ep.clamp_min);
     }
     if ((flags & 32u) != 0u) {
-        val = min(val, ep.clamp_max);
+        val = rm_matmul_min(val, ep.clamp_max);
     }
     if ((flags & 64u) != 0u) {
-        val = pow(val, ep.pow_exponent);
+        val = @REAL_POWER@(val, ep.pow_exponent);
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;

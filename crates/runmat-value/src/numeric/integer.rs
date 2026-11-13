@@ -33,6 +33,12 @@ impl IntegerStorage {
         }
     }
 
+    pub fn integer_class(&self) -> runmat_types::IntegerClass {
+        self.numeric_dtype()
+            .integer_class()
+            .expect("IntegerStorage always has an integer dtype")
+    }
+
     /// Construct a one-element buffer preserving the scalar's MATLAB integer
     /// class.
     pub fn from_scalar(value: IntValue) -> Self {
@@ -66,16 +72,7 @@ impl IntegerStorage {
     }
 
     pub fn class_name(&self) -> &'static str {
-        match self {
-            Self::I8(_) => "int8",
-            Self::I16(_) => "int16",
-            Self::I32(_) => "int32",
-            Self::I64(_) => "int64",
-            Self::U8(_) => "uint8",
-            Self::U16(_) => "uint16",
-            Self::U32(_) => "uint32",
-            Self::U64(_) => "uint64",
-        }
+        self.numeric_dtype().class_name()
     }
 
     pub fn to_f64_vec(&self) -> Vec<f64> {
@@ -215,6 +212,60 @@ impl IntegerStorage {
             Self::U32(_) => Self::U32(vec![1; len]),
             Self::U64(_) => Self::U64(vec![1; len]),
         }
+    }
+
+    /// Resizes this exact native integer buffer in place, filling any new
+    /// elements with the zero of the existing MATLAB integer class.
+    pub fn resize_zeroed(&mut self, len: usize) {
+        match self {
+            Self::I8(values) => values.resize(len, 0),
+            Self::I16(values) => values.resize(len, 0),
+            Self::I32(values) => values.resize(len, 0),
+            Self::I64(values) => values.resize(len, 0),
+            Self::U8(values) => values.resize(len, 0),
+            Self::U16(values) => values.resize(len, 0),
+            Self::U32(values) => values.resize(len, 0),
+            Self::U64(values) => values.resize(len, 0),
+        }
+    }
+
+    /// Reserve native storage before appending exact same-class scalars.
+    pub fn try_reserve(
+        &mut self,
+        additional: usize,
+    ) -> Result<(), std::collections::TryReserveError> {
+        match self {
+            Self::I8(values) => values.try_reserve(additional),
+            Self::I16(values) => values.try_reserve(additional),
+            Self::I32(values) => values.try_reserve(additional),
+            Self::I64(values) => values.try_reserve(additional),
+            Self::U8(values) => values.try_reserve(additional),
+            Self::U16(values) => values.try_reserve(additional),
+            Self::U32(values) => values.try_reserve(additional),
+            Self::U64(values) => values.try_reserve(additional),
+        }
+    }
+
+    /// Append an exact scalar without an intermediate tagged-value array.
+    pub fn push_same_class(&mut self, value: IntValue) -> Result<(), String> {
+        match (self, value) {
+            (Self::I8(values), IntValue::I8(value)) => values.push(value),
+            (Self::I16(values), IntValue::I16(value)) => values.push(value),
+            (Self::I32(values), IntValue::I32(value)) => values.push(value),
+            (Self::I64(values), IntValue::I64(value)) => values.push(value),
+            (Self::U8(values), IntValue::U8(value)) => values.push(value),
+            (Self::U16(values), IntValue::U16(value)) => values.push(value),
+            (Self::U32(values), IntValue::U32(value)) => values.push(value),
+            (Self::U64(values), IntValue::U64(value)) => values.push(value),
+            (storage, value) => {
+                return Err(format!(
+                    "cannot append {} to {} integer storage",
+                    value.class_name(),
+                    storage.class_name(),
+                ))
+            }
+        }
+        Ok(())
     }
 
     /// Stores a same-class exact scalar without floating-point conversion.

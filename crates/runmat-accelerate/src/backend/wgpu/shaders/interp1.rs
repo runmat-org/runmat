@@ -23,9 +23,10 @@ struct Params {
 @group(0) @binding(4) var<uniform> params: Params;
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
+
+fn isNan(value: f64) -> bool { @IEEE_NAN_PREDICATE@ }
 
 fn out_of_range_f64() -> f64 {
     if params.extrapolation == 2u {
@@ -82,7 +83,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let query = Xq.data[query_index];
     let y_base = series * params.sample_len;
 
-    if query != query {
+    if isNan(query) {
         Output.data[idx] = nan_f64();
         return;
     }
@@ -173,6 +174,8 @@ fn nan_f32() -> f32 {
     return bitcast<f32>(bits);
 }
 
+fn isNan(value: f32) -> bool { @IEEE_NAN_PREDICATE@ }
+
 fn out_of_range_f32() -> f32 {
     if params.extrapolation == 2u {
         return params.extrapolation_value;
@@ -228,7 +231,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let query = Xq.data[query_index];
     let y_base = series * params.sample_len;
 
-    if query != query {
+    if isNan(query) {
         Output.data[idx] = nan_f32();
         return;
     }

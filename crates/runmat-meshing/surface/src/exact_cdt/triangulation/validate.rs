@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    predicate::{incircle2d_symbolic, orient2d},
+    predicate::{incircle2d, orient2d},
     MeshingCancellationSignal, PredicateSign,
 };
 
@@ -115,6 +115,36 @@ pub(crate) fn validate_face_delaunay_topology(
             "Delaunay topology does not reference every PSLG vertex",
         ));
     }
+    // The triangulation covers the convex hull: its boundary never turns clockwise.
+    let mut boundary_next = std::collections::BTreeMap::new();
+    for triangle in &triangulation.triangles {
+        let [a, b, c] = triangle.vertex_indices;
+        for [from, to] in [[a, b], [b, c], [c, a]] {
+            let mut key = [from, to];
+            key.sort_unstable();
+            if edges.get(&key).is_some_and(|uses| uses.len() == 1) {
+                boundary_next.insert(from, to);
+            }
+        }
+    }
+    for (&a, &b) in &boundary_next {
+        let Some(&c) = boundary_next.get(&b) else {
+            continue;
+        };
+        predicate_count = consume_predicate(pslg, predicate_count, options)?;
+        if orient2d([a, b, c].map(|index| pslg.vertices[index as usize].uv))
+            .map_err(|error| invalid_predicate(pslg, error))?
+            == PredicateSign::Negative
+        {
+            return Err(invalid(
+                pslg,
+                ExactFaceDelaunayErrorKind::InvalidTopology,
+                format!(
+                    "Delaunay boundary turns inward at vertex {b}; the convex hull is not covered"
+                ),
+            ));
+        }
+    }
     for (edge, uses) in edges {
         check_cancelled(cancellation, pslg, "surface Delaunay validation cancelled")?;
         if uses.len() > 2 {
@@ -132,19 +162,21 @@ pub(crate) fn validate_face_delaunay_topology(
         let opposite = uses[1].1;
         let query = [first[0], first[1], first[2], opposite]
             .map(|index| predicate_point(pslg.vertices[index as usize], index));
-        if incircle2d_symbolic(query).map_err(|error| invalid_predicate(pslg, error))?
+        if incircle2d(query.map(|point| point.coordinates))
+            .map_err(|error| invalid_predicate(pslg, error))?
             == PredicateSign::Positive
         {
             return Err(invalid(
                 pslg,
                 ExactFaceDelaunayErrorKind::InvalidTopology,
-                format!("interior edge {edge:?} is not symbolically Delaunay"),
+                format!("interior edge {edge:?} is not Delaunay"),
             ));
         }
     }
     check_cancelled(cancellation, pslg, "surface Delaunay validation cancelled")
 }
 
+#[track_caller]
 fn consume_predicate(
     pslg: &ExactFacePslg,
     count: u64,
@@ -162,6 +194,7 @@ fn consume_predicate(
     }
 }
 
+#[track_caller]
 fn check_cancelled(
     cancellation: &dyn MeshingCancellationSignal,
     pslg: &ExactFacePslg,

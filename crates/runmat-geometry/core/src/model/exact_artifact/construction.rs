@@ -1,8 +1,7 @@
 use super::{
-    admit_exact_geometry_closure, encode_exact_evaluators, encode_exact_topology,
-    encode_geometry_healing_report, EncodedExactGeometryClosure, ExactGeometryManifest,
-    EXACT_EVALUATOR_MEDIA_TYPE, EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION, EXACT_TOPOLOGY_MEDIA_TYPE,
-    GEOMETRY_HEALING_MEDIA_TYPE, KERNEL_REPRESENTATION_MEDIA_TYPE,
+    encode_exact_topology, encode_geometry_healing_report, EncodedExactGeometryClosure,
+    ExactGeometryManifest, EXACT_EVALUATOR_MEDIA_TYPE, EXACT_GEOMETRY_MANIFEST_SCHEMA_VERSION,
+    EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE, KERNEL_REPRESENTATION_MEDIA_TYPE,
 };
 use crate::{
     ExactBRepTopology, ExactEvaluatorRegistry, GeometryContractError, GeometryDocument,
@@ -24,7 +23,8 @@ pub fn build_exact_geometry_closure(
         ));
     };
     let topology_bytes = encode_exact_topology(topology, model)?;
-    let evaluator_bytes = encode_exact_evaluators(evaluators, topology, model)?;
+    let evaluator_bytes =
+        super::codec::encode_evaluators_after_topology_validation(evaluators, topology, model)?;
     let healing_bytes = healing_report
         .map(encode_geometry_healing_report)
         .transpose()?;
@@ -49,13 +49,13 @@ pub fn build_exact_geometry_closure(
     };
     model.artifact = reference(&manifest_bytes, EXACT_BREP_MEDIA_TYPE)?;
     document.validate()?;
-    admit_exact_geometry_closure(
+    super::bindings::validate_exact_geometry_component_bindings(
         &document,
-        &manifest_bytes,
-        &topology_bytes,
-        &evaluator_bytes,
+        &manifest,
+        topology,
+        evaluators,
         kernel_representation,
-        healing_bytes.as_deref(),
+        healing_report,
     )?;
     Ok(EncodedExactGeometryClosure {
         document,

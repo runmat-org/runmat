@@ -4,7 +4,38 @@ use std::sync::OnceLock;
 
 use wasm_bindgen::prelude::JsValue;
 
+use runmat_logging::otel::{OtelOptions, StartupHeaders};
 use runmat_logging::{init_logging, set_runtime_log_hook, LoggingOptions};
+
+struct StartupPolicy {
+    options: OtelOptions,
+    headers: StartupHeaders,
+}
+
+// The process-global subscriber/exporter is retained across independent sessions.
+// This value is runtime-only and deliberately has no serialization/debug implementation.
+static STARTUP_POLICY: OnceLock<StartupPolicy> = OnceLock::new();
+
+pub(crate) fn configure_logging(
+    options: OtelOptions,
+    headers: StartupHeaders,
+) -> Result<(), String> {
+    if let Some(existing) = STARTUP_POLICY.get() {
+        if existing.options == options && existing.headers == headers {
+            return runmat_logging::browser_otel::configure_browser_otel(options, headers);
+        }
+        return Err("OpenTelemetryRestartRequired: collector settings changed; restart this browser worker/runtime to apply them".into());
+    }
+    if LOGGING_GUARD.get().is_some() && options.enabled {
+        return Err("OpenTelemetryRestartRequired: logging was initialized before collector settings; restart this browser worker/runtime and pass settings to initRunMat first".into());
+    }
+    runmat_logging::browser_otel::configure_browser_otel(options.clone(), headers.clone())?;
+    STARTUP_POLICY
+        .set(StartupPolicy { options, headers })
+        .map_err(|_| {
+            "OpenTelemetryRestartRequired: browser logging was initialized concurrently".into()
+        })
+}
 
 use crate::runtime::state::{
     LOGGING_GUARD, LOG_FILTER_OVERRIDE, RUNTIME_LOG_FORWARDER, RUNTIME_LOG_SUBSCRIBERS,
@@ -89,7 +120,9 @@ pub(crate) fn init_logging_once() {
                 )));
             }));
             let guard = init_logging(LoggingOptions {
-                enable_otlp: false,
+                enable_otlp: STARTUP_POLICY
+                    .get()
+                    .is_some_and(|policy| policy.options.enabled),
                 enable_traces: true,
                 pid: 1,
                 default_filter: Some(

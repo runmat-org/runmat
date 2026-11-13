@@ -1,9 +1,9 @@
 [package]
 name = "runmat-builtins"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
-license-file = "../LICENSE.md"
+license-file = "../../LICENSE.md"
 description = "RunMat built-in functions and standard library components"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
@@ -13,9 +13,16 @@ inventory = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
 runmat-async = { workspace = true }
 runmat-value = { workspace = true }
 runmat-types = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 runmat-macros = { workspace = true }
+syn = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

@@ -318,6 +318,7 @@ pub async fn build_execution_bundle(
     handoff.validate().map_err(js_error)?;
     let recipe: runmat_execution_artifact::ProgramBuildRecipe =
         serde_wasm_bindgen::from_value(recipe).map_err(js_error)?;
+    let executable_bytes = validate_interpreter_program_payload(&executable_bytes)?;
     let mut source_bytes = std::collections::BTreeMap::new();
     for path in handoff.project.access_paths.values() {
         source_bytes.insert(
@@ -328,6 +329,11 @@ pub async fn build_execution_bundle(
         );
     }
     let revision = recipe.program_revision.clone();
+    let policy = super::cluster_program::project_policy(&handoff.project).await?;
+    runmat_core::cluster_settings::validate_program_environment(&policy, &revision)
+        .map_err(js_error)?;
+    let runtime_policy =
+        runmat_core::cluster_settings::capture_project_policy(&policy).map_err(js_error)?;
     let reader = move |path: &std::path::Path| {
         source_bytes.get(path).cloned().ok_or_else(|| {
             runmat_execution_artifact::ArtifactError::Invalid(format!(
@@ -341,9 +347,11 @@ pub async fn build_execution_bundle(
             .map_err(js_error)?
             .with_materialized_program(
                 recipe,
-                runmat_execution_artifact::ExecutableForm::InterpreterBytecodeV1,
+                runmat_execution_artifact::ExecutableForm::InterpreterBytecodeV2,
                 executable_bytes,
             )
+            .with_project_runtime_policy_object(runtime_policy)
+            .map_err(js_error)?
             .build()
             .map_err(js_error)?;
     let mut archive = Vec::new();
@@ -354,6 +362,11 @@ pub async fn build_execution_bundle(
     )
     .map_err(js_error)?;
     Ok(archive)
+}
+
+fn validate_interpreter_program_payload(bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let registry = runmat_vm::decode_interpreter_program_v2(bytes).map_err(js_error)?;
+    runmat_vm::encode_interpreter_program_v2(&registry).map_err(js_error)
 }
 
 /// Verify and materialize an exact execution bundle into the active browser
@@ -412,4 +425,70 @@ pub(super) fn browser_entropy() -> Result<[u8; 32], JsValue> {
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use super::validate_interpreter_program_payload;
+
+    #[wasm_bindgen_test]
+    async fn browser_bundle_admission_matches_interpreter_revision_contract() {
+        let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
+            runmat_filesystem::MemoryFsProvider::new(),
+        ));
+        runmat_runtime::builtins::wasm_registry::register_all();
+        let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+        let unit = session
+            .compile_executable_unit(
+                runmat_core::ExecutableSource::new(
+                    "browser-admission",
+                    "admissionProbe.m",
+                    "function y = admissionProbe(x); y = helper(x) + 1; end\nfunction y = helper(x); y = x * 2; end\n",
+                ),
+                None,
+            )
+            .await
+            .expect("compile the actual current interpreter producer");
+        let envelope = unit.portable_envelope().unwrap();
+        let registry: runmat_vm::FunctionRegistry = serde_json::from_slice(
+            &envelope
+                .component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+                .expect("the compiled product retains its functions")
+                .bytes,
+        )
+        .unwrap();
+        assert!(registry.functions.len() >= 2);
+        let current = runmat_vm::encode_interpreter_program_v2(&registry)
+            .expect("encode the current interpreter producer");
+        let admission = validate_interpreter_program_payload(&current);
+        assert!(
+            admission.is_ok(),
+            "current program admission: {admission:?}"
+        );
+
+        // Preserve the historical bytes; both fixtures predate the current
+        // bytecode schema, which admission checks before the registry schema.
+        for historical in [
+            include_bytes!(
+                "../../../runmat-vm/tests/fixtures/interpreter-program-current.artifact"
+            )
+            .as_slice(),
+            include_bytes!(
+                "../../../runmat-vm/tests/fixtures/interpreter-program-registry-4.artifact"
+            )
+            .as_slice(),
+        ] {
+            assert_eq!(
+                validate_interpreter_program_payload(historical)
+                    .unwrap_err()
+                    .as_string(),
+                Some(format!(
+                    "unsupported bytecode schema revision: actual 7, expected {}",
+                    runmat_vm::BYTECODE_SCHEMA_VERSION
+                ))
+            );
+        }
+    }
 }

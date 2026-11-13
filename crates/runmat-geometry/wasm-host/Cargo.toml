@@ -1,0 +1,32 @@
+[package]
+name = "runmat-geometry-wasm-host"
+description = "Typed exact-geometry host boundary for RunMat WebAssembly execution"
+version = "0.7.1"
+edition = "2021"
+license-file = "../../../LICENSE.md"
+[lib]
+crate-type = ["rlib"]
+[[bin]]
+name = "runmat_geometry_wasm_host"
+path = "src/main.rs"
+[dependencies]
+# occt-kernel: the K1 kernel programs, so runmat-cad regenerates parts on OCCT in this host.
+runmat-geometry-io = { workspace = true, features = ["occt-native", "occt-kernel"] }
+# The CAD design runtime (.part, .assembly, .drawing compile and edit), run on OcctKernel.
+runmat-cad-wasm = { path = "../../runmat-cad/wasm", version = "=0.7.1", default-features = false }
+# Export: STL, 3MF, glTF and a face as DXF, from this host's exact tessellation (no default
+# features: no RunMat runtime).
+runmat-design-tools = { path = "../../runmat-design-tools", version = "=0.7.1", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+
+runmat-analysis-execution = { workspace = true, features = ["occt-native"] }
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-meshing-execution = { workspace = true }
+
+[dev-dependencies]
+runmat-geometry-core = { workspace = true }
+runmat-cad = { path = "../../runmat-cad", version = "=0.7.1" }

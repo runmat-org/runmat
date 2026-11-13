@@ -4,6 +4,7 @@
 
 use runmat_value::Tensor as Matrix;
 
+use crate::blas::matrix_dimensions;
 use crate::builtins::common::tensor;
 
 /// LU decomposition result
@@ -50,18 +51,14 @@ pub fn lapack_solve_linear_system(a: &Matrix, b: &[f64]) -> Result<Vec<f64>, Str
         ));
     }
 
-    let n = a.rows() as i32;
+    let (n, _) = matrix_dimensions(a)?;
+    if n == 0 {
+        return Ok(Vec::new());
+    }
     let nrhs = 1i32;
 
-    // Copy data since LAPACK modifies input
-    // Transpose A since LAPACK expects column-major but we store row-major
-    let values = matrix_values_f64(a);
-    let mut a_copy = vec![0.0; values.len()];
-    for i in 0..a.rows() {
-        for j in 0..a.cols() {
-            a_copy[j * a.rows() + i] = values[i * a.cols() + j]; // transpose
-        }
-    }
+    // DGESV overwrites A; preserve its authoritative column-major ordering.
+    let mut a_copy = matrix_values_f64(a).into_owned();
     let mut b_copy = b.to_vec();
     let mut ipiv = vec![0i32; n as usize];
     let mut info = 0i32;
@@ -93,14 +90,13 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
         return Err("Matrix must be square for LU decomposition".to_string());
     }
 
-    let n = matrix.rows() as i32;
-    // Transpose matrix since LAPACK expects column-major but we store row-major
-    let values = matrix_values_f64(matrix);
-    let mut a_copy = vec![0.0; values.len()];
-    for i in 0..matrix.rows() {
-        for j in 0..matrix.cols() {
-            a_copy[j * matrix.rows() + i] = values[i * matrix.cols() + j]; // transpose
-        }
+    let (n, _) = matrix_dimensions(matrix)?;
+    let mut a_copy = matrix_values_f64(matrix).into_owned();
+    if n == 0 {
+        return Ok(LuDecomposition {
+            lu_matrix: Matrix::new_2d(a_copy, 0, 0)?,
+            pivots: Vec::new(),
+        });
     }
     let mut ipiv = vec![0i32; n as usize];
     let mut info = 0i32;
@@ -120,14 +116,7 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
         return Err(format!("LAPACK DGETRF failed with info = {info}"));
     }
 
-    // Transpose result back to row-major
-    let mut lu_data = vec![0.0; a_copy.len()];
-    for i in 0..matrix.rows() {
-        for j in 0..matrix.cols() {
-            lu_data[i * matrix.cols() + j] = a_copy[j * matrix.rows() + i]; // transpose back
-        }
-    }
-    let lu_matrix = Matrix::new_2d(lu_data, matrix.rows(), matrix.cols())?;
+    let lu_matrix = Matrix::new_2d(a_copy, matrix.rows(), matrix.cols())?;
 
     Ok(LuDecomposition {
         lu_matrix,
@@ -136,13 +125,20 @@ pub fn lapack_lu_decomposition(matrix: &Matrix) -> Result<LuDecomposition, Strin
 }
 
 /// QR decomposition
-/// Uses DGEQRF (double precision general QR factorization)
+/// Uses DGEQRF followed by DORGQR. Returns economy Q(m,k), R(k,n),
+/// where k=min(m,n), for both tall and wide matrices.
 pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, String> {
-    let m = matrix.rows() as i32;
-    let n = matrix.cols() as i32;
+    let (m, n) = matrix_dimensions(matrix)?;
+    let k = m.min(n);
+    if k == 0 {
+        return Ok(QrDecomposition {
+            q: Matrix::new_2d(Vec::new(), matrix.rows(), 0)?,
+            r: Matrix::new_2d(Vec::new(), 0, matrix.cols())?,
+        });
+    }
     // LAPACK expects column-major; our Tensor stores in column-major already
     let mut a_copy = matrix_values_f64(matrix).into_owned();
-    let mut tau = vec![0.0; std::cmp::min(m, n) as usize];
+    let mut tau = vec![0.0; k as usize];
     let mut work = vec![0.0; 1];
     let mut lwork = -1i32;
     let mut info = 0i32;
@@ -158,7 +154,7 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
         ));
     }
 
-    lwork = work[0] as i32;
+    lwork = workspace_size(work[0])?;
     work.resize(lwork as usize, 0.0);
 
     // Perform QR factorization
@@ -172,28 +168,39 @@ pub fn lapack_qr_decomposition(matrix: &Matrix) -> Result<QrDecomposition, Strin
 
     // Extract R matrix (upper triangular part)
     // Extract R from the upper-triangular part of A (column-major)
-    let mut r_data = vec![0.0; (n * n) as usize];
+    let mut r_data = vec![0.0; k as usize * matrix.cols()];
     for col in 0..n as usize {
-        for row in 0..=col {
-            r_data[row + col * n as usize] = a_copy[row + col * m as usize];
+        for row in 0..(col + 1).min(k as usize) {
+            r_data[row + col * k as usize] = a_copy[row + col * m as usize];
         }
     }
-    let r = Matrix::new_2d(r_data, n as usize, n as usize)?;
+    let r = Matrix::new_2d(r_data, k as usize, matrix.cols())?;
 
     // Generate Q matrix using DORGQR
     let mut q_data = a_copy;
+    q_data.truncate(matrix.rows() * k as usize);
+    lwork = -1;
+    unsafe {
+        lapack::dorgqr(m, k, k, &mut q_data, m, &tau, &mut work, lwork, &mut info);
+    }
+    if info != 0 {
+        return Err(format!(
+            "LAPACK DORGQR workspace query failed with info = {info}"
+        ));
+    }
+    lwork = workspace_size(work[0])?;
     work.resize(lwork as usize, 0.0);
 
     unsafe {
-        lapack::dorgqr(m, n, n, &mut q_data, m, &tau, &mut work, lwork, &mut info);
+        lapack::dorgqr(m, k, k, &mut q_data, m, &tau, &mut work, lwork, &mut info);
     }
 
     if info != 0 {
         return Err(format!("LAPACK DORGQR failed with info = {info}"));
     }
 
-    // Q is m x n in column-major already
-    let q = Matrix::new_2d(q_data, matrix.rows(), matrix.cols())?;
+    // Q is m x k in column-major already.
+    let q = Matrix::new_2d(q_data, matrix.rows(), k as usize)?;
 
     Ok(QrDecomposition { q, r })
 }
@@ -208,7 +215,17 @@ pub fn lapack_eigenvalues(
         return Err("Matrix must be square for eigenvalue decomposition".to_string());
     }
 
-    let n = matrix.rows() as i32;
+    let (n, _) = matrix_dimensions(matrix)?;
+    if n == 0 {
+        return Ok(EigenDecomposition {
+            eigenvalues: Vec::new(),
+            eigenvectors: if compute_vectors {
+                Some(Matrix::new_2d(Vec::new(), 0, 0)?)
+            } else {
+                None
+            },
+        });
+    }
     let jobz = if compute_vectors { b'V' } else { b'N' };
     let uplo = b'U'; // Upper triangular
 
@@ -239,7 +256,7 @@ pub fn lapack_eigenvalues(
         ));
     }
 
-    lwork = work[0] as i32;
+    lwork = workspace_size(work[0])?;
     work.resize(lwork as usize, 0.0);
 
     // Compute eigenvalues (and eigenvectors if requested)
@@ -308,7 +325,10 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
         return Err("Matrix must be square for inversion".to_string());
     }
 
-    let n = matrix.rows() as i32;
+    let (n, _) = matrix_dimensions(matrix)?;
+    if n == 0 {
+        return Matrix::new_2d(Vec::new(), 0, 0);
+    }
     // Our storage is column-major; copy as-is
     let mut a_copy = matrix_values_f64(matrix).into_owned();
     let mut ipiv = vec![0i32; n as usize];
@@ -336,7 +356,7 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
         ));
     }
 
-    lwork = work[0] as i32;
+    lwork = workspace_size(work[0])?;
     work.resize(lwork as usize, 0.0);
 
     // Compute inverse
@@ -355,4 +375,11 @@ pub fn lapack_matrix_inverse(matrix: &Matrix) -> Result<Matrix, String> {
 // Helper function to check if a matrix is square
 fn is_square(matrix: &Matrix) -> bool {
     matrix.rows() == matrix.cols()
+}
+
+fn workspace_size(value: f64) -> Result<i32, String> {
+    if !value.is_finite() || value < 1.0 || value.ceil() > f64::from(i32::MAX) {
+        return Err("LAPACK returned an invalid native workspace size".to_string());
+    }
+    Ok(value.ceil() as i32)
 }

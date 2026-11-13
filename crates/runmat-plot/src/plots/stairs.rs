@@ -2,12 +2,12 @@
 
 use crate::context::shared_wgpu_context;
 use crate::core::{
-    vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType,
-    RenderData, Vertex,
+    AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
 use crate::gpu::stairs::StairsGpuInputs;
 use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::line::LineMarkerAppearance;
+use crate::plots::stroke;
 use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
 
@@ -53,22 +53,12 @@ impl StairsPlot {
                     .to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
             return Ok((x, y));
         }
 
@@ -291,34 +281,40 @@ impl StairsPlot {
     }
 
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        self.render_data_on_axes(viewport_px, None, (false, false))
+    }
+
+    /// Render data sized in pixels for axes with the given visible bounds and log scales.
+    pub fn render_data_on_axes(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        view_bounds: Option<(f64, f64, f64, f64)>,
+        log_axes: (bool, bool),
+    ) -> RenderData {
         if self.gpu_vertices.is_some() {
             return self.render_data();
         }
 
         let bounds = self.bounds();
-        let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
-            let Some(viewport_px) = viewport_px else {
-                return self.render_data();
-            };
-            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
-            let width_data = self.line_width.max(0.1) * data_per_px;
-            let verts = self.generate_vertices().clone();
-            let mut thick = Vec::new();
-            for segment in verts.chunks_exact(2) {
-                let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
-                let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
-                let color = Vec4::from_array(segment[0].color);
-                thick.extend(vertex_utils::create_thick_polyline(
-                    &x, &y, color, width_data,
-                ));
+        let thick = self.line_width > 1.0;
+        let (vertices, pipeline_type) = match viewport_px {
+            // Widths are in pixels and log axes are nonlinear, so build in pixel space.
+            Some(viewport_px) if thick || log_axes != (false, false) => {
+                let map = stroke::PixelMap::new(
+                    stroke::stroke_bounds(bounds, view_bounds),
+                    viewport_px,
+                    log_axes,
+                    &self.x,
+                    &self.y,
+                );
+                let pairs = self.generate_vertices().clone();
+                let segments = stroke::pixel_segments_from_pairs(&map, &pairs, false);
+                stroke::segment_geometry(&map, &segments, self.line_width.max(0.1))
             }
-            let count = thick.len();
-            (thick, count, PipelineType::Triangles)
-        } else {
-            let verts = self.generate_vertices().clone();
-            let count = verts.len();
-            (verts, count, PipelineType::Lines)
+            None if thick => return self.render_data(),
+            _ => (self.generate_vertices().clone(), PipelineType::Lines),
         };
+        let vertex_count = vertices.len();
         let material = Material {
             albedo: self.color,
             roughness: self.line_width.max(0.0),
@@ -429,6 +425,29 @@ impl StairsPlot {
         self.vertices
             .as_ref()
             .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for values in [&self.x, &self.y] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for source in [&self.x_source, &self.y_source].into_iter().flatten() {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for vertices in [&self.vertices, &self.marker_vertices]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vertex>(vertices.capacity())?,
+            )?;
+        }
+        Some(total)
     }
 }
 

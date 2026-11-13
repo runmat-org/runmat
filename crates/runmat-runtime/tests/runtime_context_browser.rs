@@ -6,7 +6,7 @@ use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::interaction::{
     replace_async_handler, request_line_async, AsyncInteractionHandler, InteractionResponse,
 };
-use runmat_runtime::workspace::session::{global_value, update_global_slot};
+use runmat_runtime::workspace::session::{global_value, store_global_named};
 use runmat_value::Value;
 use std::future::Future;
 use std::rc::Rc;
@@ -54,7 +54,7 @@ fn interleaved_runtime_contexts_retain_their_host_services() {
 }
 
 async fn session_variable(label: &'static str, value: f64) {
-    update_global_slot(0, Some(label), &Value::Num(value));
+    store_global_named(label, Value::Num(value)).expect("scoped global write should succeed");
     let mut yielded = false;
     std::future::poll_fn(move |_| {
         if yielded {

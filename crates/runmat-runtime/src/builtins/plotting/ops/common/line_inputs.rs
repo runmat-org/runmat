@@ -2,9 +2,12 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_value::{IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::common::{gather_tensor_from_gpu, gather_tensor_from_gpu_async};
+use crate::builtins::plotting::common::gather_tensor_from_gpu_async;
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
+
+mod selection;
+pub(crate) use selection::select_native;
 
 #[derive(Clone, Debug)]
 pub enum NumericInput {
@@ -13,6 +16,23 @@ pub enum NumericInput {
 }
 
 impl NumericInput {
+    /// Infer one-based coordinates through exactly the same native scalar,
+    /// tensor and device shape owner as explicit coordinate pairs. Callers keep
+    /// their established empty-series minimum (zero or one) explicit.
+    pub fn implicit_x(
+        value: &Value,
+        builtin: &'static str,
+        minimum_len: usize,
+    ) -> BuiltinResult<Value> {
+        let len = Self::from_value(value.clone(), builtin)?
+            .len()
+            .max(minimum_len);
+        let data = (1..=len).map(|index| index as f64).collect();
+        Tensor::new(data, vec![len])
+            .map(Value::Tensor)
+            .map_err(|error| plotting_error(builtin, error))
+    }
+
     pub fn from_value(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
@@ -40,14 +60,7 @@ impl NumericInput {
     pub fn len(&self) -> usize {
         match self {
             Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
-            Self::Gpu(handle) => handle.shape.iter().product(),
-        }
-    }
-
-    pub fn into_tensor(self, builtin: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, builtin),
+            Self::Gpu(handle) => handle.shape().iter().product(),
         }
     }
 
@@ -75,7 +88,7 @@ mod tests {
             panic!("expected host tensor")
         };
         assert_eq!(tensor.materialize_f64(), vec![2.5]);
-        assert_eq!(tensor.shape, vec![1]);
+        assert_eq!(tensor.shape(), [1]);
     }
 
     #[test]
@@ -90,6 +103,30 @@ mod tests {
 
     #[test]
     fn numeric_input_preserves_wide_typed_integer_scalar() {
+        use runmat_value::IntValue;
+        for scalar in [
+            IntValue::I8(7),
+            IntValue::I16(7),
+            IntValue::I32(7),
+            IntValue::I64(-9_007_199_254_740_993),
+            IntValue::U8(7),
+            IntValue::U16(7),
+            IntValue::U32(7),
+            IntValue::U64(9_007_199_254_740_993),
+        ] {
+            let value = Value::Int(scalar.clone());
+            let Value::Tensor(x) = NumericInput::implicit_x(&value, "plot", 1).unwrap() else {
+                panic!("implicit axis")
+            };
+            assert_eq!(x.materialize_f64(), vec![1.0]);
+            let NumericInput::Host(y) = NumericInput::from_value(value, "plot").unwrap() else {
+                panic!("host scalar")
+            };
+            assert_eq!(
+                y.integer_storage(),
+                Some(&IntegerStorage::from_scalar(scalar))
+            );
+        }
         let wide = 9_007_199_254_740_993_u64;
         let NumericInput::Host(tensor) =
             NumericInput::from_value(Value::Int(runmat_value::IntValue::U64(wide)), "plot")

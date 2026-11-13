@@ -83,6 +83,7 @@ pub fn decode_run_key_envelope(
         5 => EncryptionPurpose::Checkpoint,
         6 => EncryptionPurpose::TransferFrame,
         7 => EncryptionPurpose::RunKeyEnvelope,
+        9 => EncryptionPurpose::RetirementReceipt,
         _ => return Err(ArtifactError::Invalid("unknown encryption purpose".into())),
     };
     let object_digest = Digest::from_bytes(

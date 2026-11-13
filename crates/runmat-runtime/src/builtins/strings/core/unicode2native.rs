@@ -2,8 +2,9 @@
 
 use encoding_rs::{EncoderResult, Encoding, UTF_16BE, UTF_16LE, UTF_8};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, UNICODE2NATIVE_DESCRIPTOR, UNICODE2NATIVE_ERROR_INTERNAL,
+    UNICODE2NATIVE_ERROR_INVALID_ARGUMENT, UNICODE2NATIVE_ERROR_INVALID_ENCODING,
+    UNICODE2NATIVE_ERROR_INVALID_INPUT, UNICODE2NATIVE_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntegerStorage, StringArray, Tensor, Value};
@@ -14,98 +15,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::char_row_to_string;
-use crate::builtins::strings::type_resolvers::text_search_indices_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "unicode2native";
-
-const UNICODE2NATIVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bytes",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "uint8 row vector containing encoded bytes.",
-}];
-
-const UNICODE2NATIVE_INPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "unicodestr",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Unicode text, provided as a string scalar or character vector.",
-}];
-
-const UNICODE2NATIVE_INPUT_TEXT_ENCODING: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "unicodestr",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unicode text, provided as a string scalar or character vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "encoding",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"UTF-8\""),
-        description: "Character encoding name.",
-    },
-];
-
-const UNICODE2NATIVE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "bytes = unicode2native(unicodestr)",
-        inputs: &UNICODE2NATIVE_INPUT_TEXT,
-        outputs: &UNICODE2NATIVE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "bytes = unicode2native(unicodestr, encoding)",
-        inputs: &UNICODE2NATIVE_INPUT_TEXT_ENCODING,
-        outputs: &UNICODE2NATIVE_OUTPUT,
-    },
-];
-
-const UNICODE2NATIVE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNICODE2NATIVE.INVALID_INPUT",
-    identifier: Some("RunMat:unicode2native:InvalidInput"),
-    when: "Input text is not a string scalar or character vector.",
-    message: "unicode2native: input must be a string scalar or character vector",
-};
-
-const UNICODE2NATIVE_ERROR_INVALID_ENCODING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNICODE2NATIVE.INVALID_ENCODING",
-    identifier: Some("RunMat:unicode2native:InvalidEncoding"),
-    when: "Encoding name is unsupported or malformed.",
-    message: "unicode2native: unsupported character encoding",
-};
-
-const UNICODE2NATIVE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNICODE2NATIVE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:unicode2native:InvalidArgument"),
-    when: "Too many arguments were supplied.",
-    message: "unicode2native: invalid argument",
-};
-
-const UNICODE2NATIVE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNICODE2NATIVE.INTERNAL",
-    identifier: Some("RunMat:unicode2native:InternalError"),
-    when: "Internal byte-vector tensor construction failed.",
-    message: "unicode2native: internal error",
-};
-
-const UNICODE2NATIVE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    UNICODE2NATIVE_ERROR_INVALID_INPUT,
-    UNICODE2NATIVE_ERROR_INVALID_ENCODING,
-    UNICODE2NATIVE_ERROR_INVALID_ARGUMENT,
-    UNICODE2NATIVE_ERROR_INTERNAL,
-];
-
-pub const UNICODE2NATIVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UNICODE2NATIVE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UNICODE2NATIVE_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::unicode2native")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -157,16 +69,18 @@ fn remap_unicode2native_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "unicode2native",
-    category = "strings/core",
-    summary = "Convert Unicode text into encoded uint8 bytes.",
-    keywords = "unicode2native,encoding,utf-8,latin1,uint8,text",
-    examples = "bytes = unicode2native(\"hello\", \"UTF-8\");",
-    accel = "sink",
-    type_resolver(text_search_indices_type),
-    descriptor(crate::builtins::strings::core::unicode2native::UNICODE2NATIVE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::unicode2native"
 )]
-async fn unicode2native_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn unicode2native_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &UNICODE2NATIVE_DESCRIPTOR,
+        &UNICODE2NATIVE_ERROR_TOO_MANY_OUTPUTS,
+        "unicode2native",
+    )?;
     if rest.len() > 1 {
         return Err(unicode2native_error_with_message(
             "unicode2native: too many input arguments",
@@ -410,11 +324,16 @@ fn encode_utf32(text: &str, little_endian: bool, bom: bool) -> BuiltinResult<Vec
     Ok(bytes)
 }
 
-fn value_to_text_scalar(value: &Value) -> BuiltinResult<String> {
+fn value_to_text_scalar(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => text
+            .as_str()
+            .map(std::borrow::Cow::Borrowed)
+            .ok_or_else(|| unicode2native_error(&UNICODE2NATIVE_ERROR_INVALID_INPUT)),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => Ok(char_row_or_empty(array)),
+        Value::CharArray(array) if array.rows <= 1 => Ok(std::borrow::Cow::Owned(
+            char_row_or_empty(array, &UNICODE2NATIVE_ERROR_INVALID_INPUT)?,
+        )),
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: character input must be a row vector",
             &UNICODE2NATIVE_ERROR_INVALID_INPUT,
@@ -423,11 +342,16 @@ fn value_to_text_scalar(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn value_to_encoding_name(value: &Value) -> BuiltinResult<String> {
+fn value_to_encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => text
+            .as_str()
+            .map(std::borrow::Cow::Borrowed)
+            .ok_or_else(|| unicode2native_error(&UNICODE2NATIVE_ERROR_INVALID_INPUT)),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => Ok(char_row_or_empty(array)),
+        Value::CharArray(array) if array.rows <= 1 => Ok(std::borrow::Cow::Owned(
+            char_row_or_empty(array, &UNICODE2NATIVE_ERROR_INVALID_ENCODING)?,
+        )),
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: encoding must be a character row vector",
             &UNICODE2NATIVE_ERROR_INVALID_ENCODING,
@@ -439,9 +363,12 @@ fn value_to_encoding_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn string_array_scalar(array: &StringArray) -> BuiltinResult<String> {
-    if array.data.len() == 1 {
-        Ok(array.data[0].clone())
+fn string_array_scalar(array: &StringArray) -> BuiltinResult<std::borrow::Cow<'_, str>> {
+    if array.data().len() == 1 {
+        array.data()[0]
+            .as_str()
+            .map(std::borrow::Cow::Borrowed)
+            .ok_or_else(|| unicode2native_error(&UNICODE2NATIVE_ERROR_INVALID_INPUT))
     } else {
         Err(unicode2native_error_with_message(
             "unicode2native: string input must be scalar",
@@ -450,11 +377,23 @@ fn string_array_scalar(array: &StringArray) -> BuiltinResult<String> {
     }
 }
 
-fn char_row_or_empty(array: &CharArray) -> String {
+fn char_row_or_empty(
+    array: &CharArray,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     if array.rows == 0 {
-        String::new()
+        Ok(String::new())
     } else {
-        char_row_to_string(array, 0)
+        char_row_to_string(array, 0).map_err(|source| {
+            let mut builder =
+                build_runtime_error("unicode2native: malformed UTF-16 character input")
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(source);
+            if let Some(identifier) = descriptor.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        })
     }
 }
 
@@ -469,11 +408,18 @@ fn bytes_to_uint8_row(bytes: Vec<u8>) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{infer_catalog_call, UNICODE2NATIVE_CATALOG_ENTRY};
+    use runmat_types::{
+        CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
     use runmat_value::NumericDType;
 
     fn unicode2native_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::unicode2native_builtin(value, rest))
+        block_on(super::unicode2native_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn tensor_bytes(value: Value) -> (Vec<u8>, Vec<usize>, NumericDType) {
@@ -484,7 +430,7 @@ pub(crate) mod tests {
                     other => panic!("expected native uint8 storage, got {other:?}"),
                 };
                 let dtype = tensor.numeric_dtype();
-                (bytes, tensor.shape, dtype)
+                (bytes, tensor.shape().to_vec(), dtype)
             }
             other => panic!("expected uint8 tensor, got {other:?}"),
         }
@@ -624,8 +570,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unicode2native_empty_text_preserves_uint8_empty_row() {
-        let (bytes, shape, dtype) =
-            tensor_bytes(unicode2native_builtin(Value::String(String::new()), vec![]).unwrap());
+        let (bytes, shape, dtype) = tensor_bytes(
+            unicode2native_builtin(Value::String(String::new().into()), vec![]).unwrap(),
+        );
         assert!(bytes.is_empty());
         assert_eq!(shape, vec![1, 0]);
         assert_eq!(dtype, NumericDType::U8);
@@ -642,7 +589,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unicode2native_rejects_char_matrices() {
-        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
         let err = unicode2native_builtin(Value::CharArray(chars), vec![]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:unicode2native:InvalidInput"));
     }
@@ -694,8 +641,30 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn unicode2native_type_resolver_returns_tensor_for_text() {
-        let out = text_search_indices_type(&[Type::String], &ResolveContext::new(Vec::new()));
-        assert_eq!(out, Type::tensor());
+    fn unicode2native_catalog_infers_native_byte_row_for_text() {
+        let request = CallRequest {
+            arguments: vec![ValueFact::scalar(ValueKindFact::String)],
+            literals: LiteralContext::new(Vec::new()),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let inferred = infer_catalog_call(&UNICODE2NATIVE_CATALOG_ENTRY, &request);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+        assert_eq!(inferred.outputs.len(), 1);
+        assert_eq!(
+            inferred.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::UInt8,
+                domain: NumericDomain::Real,
+            })
+        );
+        assert_eq!(
+            inferred.outputs[0].shape,
+            ShapeFact::from(vec![Some(1), None])
+        );
+        assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
     }
 }

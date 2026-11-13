@@ -1,8 +1,3 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
 use runmat_core::{
     ExecutableSource, InvocationControl, ProcedureInvocation, RunError, RunMatSession,
 };
@@ -35,18 +30,29 @@ fn result_for<'a>(
 async fn execute_portable_envelope(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
 ) -> runmat_execution_artifact::ProgramExecutionResponse {
-    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+    execute_portable_envelope_with_outputs(envelope, 1).await
+}
+
+async fn execute_portable_envelope_with_outputs(
+    envelope: &runmat_execution::ExecutableUnitEnvelope,
+    requested_outputs: u16,
+) -> runmat_execution_artifact::ProgramExecutionResponse {
+    let function = envelope.manifest.identity.entrypoint_function.unwrap();
     let recipe = runmat_execution_artifact::ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: function.to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: runmat_execution::OutputContract {
-            requested_outputs: 1,
+            requested_outputs,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable(
             "portable-executable-unit-v3-test",
         ),
+        interop: envelope.manifest.interop.clone(),
+        foreign_policy: None,
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
@@ -54,17 +60,22 @@ async fn execute_portable_envelope(
     };
     let artifact = runmat_execution_artifact::ProgramArtifact::materialize(
         &recipe,
-        runmat_execution_artifact::ExecutableForm::ExecutableUnitV3,
+        runmat_execution_artifact::ExecutableForm::ExecutableUnitV4,
         envelope.canonical_bytes().unwrap(),
     )
     .unwrap();
     runmat_vm::execute_program_request(runmat_execution_artifact::ProgramExecutionRequest {
-        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function,
+        callable: runmat_execution::ProgramCallable::semantic(function, None),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: Vec::new(),
-        requested_outputs: 1,
+        requested_outputs,
     })
     .await
 }
@@ -206,12 +217,13 @@ async fn executable_invocation_observes_cancellation_and_deadlines() {
         )
         .await
         .unwrap();
-    let cancelled = Arc::new(AtomicBool::new(true));
+    let cancelled = runmat_execution::cancellation::CancellationSource::new();
+    cancelled.cancel(runmat_execution::CancellationReason::User);
     let cancellation_error = session
         .invoke_executable(
             &unit,
             ProcedureInvocation::function("controlledTest", Vec::new()),
-            &InvocationControl::default().with_cancellation(cancelled.clone()),
+            &InvocationControl::default().with_cancellation(cancelled.token()),
         )
         .await
         .unwrap_err();
@@ -220,7 +232,6 @@ async fn executable_invocation_observes_cancellation_and_deadlines() {
         Some("RunMat:ExecutionCancelled")
     );
 
-    cancelled.store(false, Ordering::Relaxed);
     let deadline_error = session
         .invoke_executable(
             &unit,
@@ -306,15 +317,10 @@ async fn executable_unit_retains_exact_program_point_analysis() {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let binding_names = unit.binding_names();
-        let native =
-            runmat_native_codegen::lower_executable(runmat_native_codegen::NativeLoweringInput {
-                mir: unit.mir(),
-                analysis: unit.analysis(),
-                manifest: &envelope.manifest,
-                binding_names: Some(&binding_names),
-                target: runmat_native_codegen::NativeTarget::current(),
-            })
+        let native = unit
+            .prepare_native_compilation()
+            .unwrap()
+            .lower(runmat_native_codegen::NativeTarget::current())
             .unwrap();
         assert_eq!(native.requirements.regions, envelope.manifest.regions);
         let native_region_ids = native
@@ -392,7 +398,12 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let unit = session
         .compile_executable_unit(
-            ExecutableSource::new("path:portable-script", "script.m", "answer = 42;\n"),
+            // An expression assigns ans; displaying a named variable does not.
+            ExecutableSource::new(
+                "path:portable-script",
+                "script.m",
+                "answer = 42;\nanswer + 0\n",
+            ),
             None,
         )
         .await
@@ -402,10 +413,147 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
         envelope.manifest.identity.entrypoint_kind,
         runmat_execution::ExecutableEntrypointKind::Script
     );
+    let response = execute_portable_envelope(&envelope).await;
+    let runmat_execution_artifact::ProgramExecutionResponse::Success { outputs } = response else {
+        panic!("portable script did not complete: {response:?}");
+    };
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(
+        runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
+        runmat_value::Value::Num(42.0)
+    );
+    for (source, expected) in [
+        ("1 + 1\nans + 3\n", 5.0),
+        ("1 + 1\nans = 7;\n", 7.0),
+        ("1 + 1\nanswer = 42;\nanswer\n", 2.0),
+    ] {
+        let unit = session
+            .compile_executable_unit(
+                ExecutableSource::new("path:portable-ans-order", "ordered.m", source),
+                None,
+            )
+            .await
+            .unwrap();
+        let response = execute_portable_envelope(&unit.portable_envelope().unwrap()).await;
+        let runmat_execution_artifact::ProgramExecutionResponse::Success { outputs } = response
+        else {
+            panic!("assigned script result did not survive: {response:?}");
+        };
+        assert_eq!(
+            runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
+            runmat_value::Value::Num(expected)
+        );
+        let mut invocation = ProcedureInvocation::entrypoint();
+        invocation.requested_outputs = 1;
+        assert_eq!(
+            session
+                .invoke_executable(&unit, invocation, &InvocationControl::default())
+                .await
+                .unwrap()
+                .as_slice(),
+            &[runmat_value::Value::Num(expected)]
+        );
+    }
+    let display_only = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:portable-display",
+                "display.m",
+                "answer = 42;\nanswer\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
     assert!(matches!(
-        execute_portable_envelope(&envelope).await,
-        runmat_execution_artifact::ProgramExecutionResponse::Success { .. }
+        execute_portable_envelope(&display_only.portable_envelope().unwrap()).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Failure { message }
+            if message == "script did not produce the requested ans value"
     ));
+    let cleared = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:portable-cleared-ans",
+                "cleared.m",
+                "1 + 1\nclear ans\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(execute_portable_envelope(&cleared.portable_envelope().unwrap()).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Failure { message }
+            if message == "script did not produce the requested ans value")
+    );
+    let no_outputs = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:portable-no-outputs",
+                "no-outputs.m",
+                "1 + 1\nassert(ans == 2);\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(execute_portable_envelope_with_outputs(&no_outputs.portable_envelope().unwrap(), 0).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Success { outputs } if outputs.is_empty())
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn ordinary_commands_share_the_compiler_owned_ans_binding() {
+    let modes: &[bool] = if cfg!(all(feature = "jit", not(target_arch = "wasm32"))) {
+        &[false, true]
+    } else {
+        &[false]
+    };
+    for &jit in modes {
+        for (index, (source, expected)) in [
+            ("1 + 1\nans + 1\n", Some(3.0)),
+            ("1 + 1\nans = 7;\n", Some(7.0)),
+            ("1 + 1\nanswer = 42;\nanswer\n", Some(2.0)),
+            ("1 + 1;\ndisp(7)\n", None),
+            ("answer = 42;\nanswer\n", None),
+            ("1 + 1\nclear ans\n", None),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut session = RunMatSession::with_options(jit, false).unwrap();
+            for _ in 0..if jit && index == 0 { 12 } else { 1 } {
+                let request = runmat_core::abi::ExecutionRequest::for_source(
+                    runmat_core::abi::SourceInput::Text {
+                        name: "<ans-command>".into(),
+                        text: source.into(),
+                    },
+                    runmat_core::CompatMode::Matlab,
+                    runmat_core::abi::HostExecutionPolicy::default(),
+                    session.workspace_handle(),
+                );
+                let outcome = session.execute_request(request).await.result.unwrap();
+                assert!(
+                    !outcome.has_errors(),
+                    "jit={jit}, {source}: {:?}",
+                    outcome.diagnostics
+                );
+                assert_eq!(
+                    session.get_variables().unwrap().get("ans").cloned(),
+                    expected.map(runmat_value::Value::Num),
+                    "jit={jit}, {source}"
+                );
+            }
+            if jit && index == 0 {
+                assert!(
+                    session.stats().jit_compiled > 0,
+                    "ordinary ans never reached native execution"
+                );
+            }
+        }
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -466,7 +614,10 @@ async fn portable_product_retains_names_for_lexical_and_session_bindings() {
     assert!(names.values().any(|name| name == "shared"));
 
     let envelope = unit.portable_envelope_for(Some("bindings")).unwrap();
-    assert_eq!(envelope.manifest.revisions.vm_layout_schema, 3);
+    assert_eq!(
+        envelope.manifest.revisions.vm_layout_schema,
+        runmat_vm::VM_LAYOUT_SCHEMA_VERSION
+    );
     assert_eq!(
         envelope.manifest.revisions.function_registry_schema,
         runmat_vm::FUNCTION_REGISTRY_SCHEMA_VERSION

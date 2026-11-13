@@ -195,6 +195,10 @@ pub fn exact_tetrahedron() -> (GeometryDocument, ExactBRepTopology, ExactEvaluat
                     .unwrap(),
                 start_vertex_id: Some(vertices[endpoints[0]].clone()),
                 end_vertex_id: Some(vertices[endpoints[1]].clone()),
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(1.0e-10),
                 is_closed: false,
                 is_periodic: false,
                 is_degenerate: false,
@@ -205,8 +209,14 @@ pub fn exact_tetrahedron() -> (GeometryDocument, ExactBRepTopology, ExactEvaluat
             .enumerate()
             .map(|(index, point_m)| ExactVertex {
                 id: vertices[index].clone(),
-                point_m: *point_m,
-                tolerance_m: 1.0e-10,
+                point_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(*point_m),
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(1.0e-10),
             })
             .collect(),
         interfaces: Vec::new(),
@@ -223,7 +233,10 @@ pub fn exact_tetrahedron() -> (GeometryDocument, ExactBRepTopology, ExactEvaluat
                 id: CurveEvaluatorId::new(format!("tetrahedron-curve:{index}")).unwrap(),
                 implementation: ExactCurveImplementation::Portable {
                     definition: ExactCurveDefinition::Line {
-                        origin_m: POINTS[endpoints[0]],
+                        origin_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(POINTS[endpoints[0]]),
                         direction_m_per_parameter: subtract3(
                             POINTS[endpoints[1]],
                             POINTS[endpoints[0]],
@@ -241,7 +254,10 @@ pub fn exact_tetrahedron() -> (GeometryDocument, ExactBRepTopology, ExactEvaluat
                 id: SurfaceEvaluatorId::new(format!("tetrahedron-surface:{index}")).unwrap(),
                 implementation: ExactSurfaceImplementation::Portable {
                     definition: ExactSurfaceDefinition::Plane {
-                        origin_m: POINTS[facet[0]],
+                        origin_m: runmat_types::physical::Quantity::<
+                            runmat_types::physical::kind::Position,
+                            _,
+                        >::new(POINTS[facet[0]]),
                         u_axis_m_per_parameter: subtract3(POINTS[facet[1]], POINTS[facet[0]]),
                         v_axis_m_per_parameter: subtract3(POINTS[facet[2]], POINTS[facet[0]]),
                         domains: [parameter(-0.25, 1.25), parameter(-0.25, 1.25)],
@@ -259,10 +275,15 @@ pub fn exact_tetrahedron() -> (GeometryDocument, ExactBRepTopology, ExactEvaluat
             id: MassPropertiesEvaluatorId::new("tetrahedron-mass-properties").unwrap(),
             implementation: ExactMassPropertiesImplementation::KernelValidated {
                 properties: BodyMassProperties {
-                    volume_m3: 1.0 / 6.0,
-                    surface_area_m2: 1.5 + 3.0_f64.sqrt() * 0.5,
-                    centroid_m: [0.25, 0.25, 0.25],
-                    inertia_about_centroid_m5: [1.0 / 80.0; 6],
+                    volume_m3: runmat_geometry_core::physical::Volume::new(1.0 / 6.0),
+                    surface_area_m2: runmat_geometry_core::physical::Area::new(
+                        1.5 + 3.0_f64.sqrt() * 0.5,
+                    ),
+                    centroid_m: runmat_geometry_core::physical::Position::new([0.25, 0.25, 0.25]),
+                    inertia_about_centroid_m5: runmat_geometry_core::physical::Quantity::<
+                        runmat_geometry_core::physical::kind::GeometricVolumeSecondMoment,
+                        _,
+                    >::new([1.0 / 80.0; 6]),
                 },
                 validation_digest: [33; 32],
             },

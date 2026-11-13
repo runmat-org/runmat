@@ -1,8 +1,8 @@
 use super::*;
-use crate::format_number;
+use crate::{format_number, ExactArrayStorage, Utf8Text};
 use num_bigint::BigInt;
 use num_integer::Integer;
-use num_traits::{One, Signed, ToPrimitive, Zero};
+use num_traits::{One, Signed, Zero};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -10,30 +10,30 @@ use std::fmt;
 pub enum SymbolicExpr {
     Constant(f64),
     Rational {
-        numerator: BigInt,
-        denominator: BigInt,
+        numerator: SymbolicOwner<BigInt>,
+        denominator: SymbolicOwner<BigInt>,
     },
     DecimalLiteral {
-        text: String,
+        text: Utf8Text,
         value: f64,
         digits: usize,
     },
-    Variable(String),
-    FunctionReference(String, Vec<String>),
-    FunctionCall(String, Vec<SymbolicExpr>),
-    Equation(Box<SymbolicExpr>, Box<SymbolicExpr>),
+    Variable(Utf8Text),
+    FunctionReference(Utf8Text, SymbolicList<Utf8Text>),
+    FunctionCall(Utf8Text, SymbolicList<SymbolicExpr>),
+    Equation(SymbolicOwner<SymbolicExpr>, SymbolicOwner<SymbolicExpr>),
     Derivative {
-        expr: Box<SymbolicExpr>,
-        variable: String,
+        expr: SymbolicOwner<SymbolicExpr>,
+        variable: Utf8Text,
         order: u32,
     },
-    Neg(Box<SymbolicExpr>),
-    Add(Box<SymbolicExpr>, Box<SymbolicExpr>),
-    Sub(Box<SymbolicExpr>, Box<SymbolicExpr>),
-    Mul(Box<SymbolicExpr>, Box<SymbolicExpr>),
-    Div(Box<SymbolicExpr>, Box<SymbolicExpr>),
-    Pow(Box<SymbolicExpr>, Box<SymbolicExpr>),
-    Function(SymbolicFunction, Box<SymbolicExpr>),
+    Neg(SymbolicOwner<SymbolicExpr>),
+    Add(SymbolicOwner<SymbolicExpr>, SymbolicOwner<SymbolicExpr>),
+    Sub(SymbolicOwner<SymbolicExpr>, SymbolicOwner<SymbolicExpr>),
+    Mul(SymbolicOwner<SymbolicExpr>, SymbolicOwner<SymbolicExpr>),
+    Div(SymbolicOwner<SymbolicExpr>, SymbolicOwner<SymbolicExpr>),
+    Pow(SymbolicOwner<SymbolicExpr>, SymbolicOwner<SymbolicExpr>),
+    Function(SymbolicFunction, SymbolicOwner<SymbolicExpr>),
 }
 
 impl SymbolicExpr {
@@ -55,12 +55,12 @@ impl SymbolicExpr {
         }
         let divisor = numerator.gcd(&denominator);
         Some(SymbolicExpr::Rational {
-            numerator: numerator / &divisor,
-            denominator: denominator / divisor,
+            numerator: (numerator / &divisor).into(),
+            denominator: (denominator / divisor).into(),
         })
     }
 
-    pub fn decimal_literal(text: impl Into<String>, value: f64, digits: usize) -> Self {
+    pub fn decimal_literal(text: impl Into<Utf8Text>, value: f64, digits: usize) -> Self {
         SymbolicExpr::DecimalLiteral {
             text: text.into(),
             value,
@@ -68,23 +68,35 @@ impl SymbolicExpr {
         }
     }
 
-    pub fn variable(name: impl Into<String>) -> Self {
+    pub fn variable(name: impl Into<Utf8Text>) -> Self {
         SymbolicExpr::Variable(name.into())
     }
 
-    pub fn function_reference(name: impl Into<String>, parameters: Vec<String>) -> Self {
-        SymbolicExpr::FunctionReference(name.into(), parameters).simplify()
+    pub fn function_reference(name: impl Into<Utf8Text>, parameters: Vec<String>) -> Self {
+        SymbolicExpr::FunctionReference(
+            name.into(),
+            parameters
+                .into_iter()
+                .map(Utf8Text::from)
+                .collect::<Vec<_>>()
+                .into(),
+        )
+        .simplify()
     }
 
-    pub fn function_call(name: impl Into<String>, args: Vec<SymbolicExpr>) -> Self {
-        SymbolicExpr::FunctionCall(name.into(), args).simplify()
+    pub fn function_call(name: impl Into<Utf8Text>, args: Vec<SymbolicExpr>) -> Self {
+        SymbolicExpr::FunctionCall(name.into(), args.into()).simplify()
     }
 
     pub fn equation(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
-        SymbolicExpr::Equation(Box::new(lhs), Box::new(rhs)).simplify()
+        SymbolicExpr::Equation(
+            SymbolicOwner::new_unbounded(lhs),
+            SymbolicOwner::new_unbounded(rhs),
+        )
+        .simplify()
     }
 
-    pub fn derivative_expr(expr: SymbolicExpr, variable: impl Into<String>, order: u32) -> Self {
+    pub fn derivative_expr(expr: SymbolicExpr, variable: impl Into<Utf8Text>, order: u32) -> Self {
         let variable = variable.into();
         let expr = expr.simplify();
         if order == 0 {
@@ -94,7 +106,7 @@ impl SymbolicExpr {
             return SymbolicExpr::Constant(0.0);
         }
         SymbolicExpr::Derivative {
-            expr: Box::new(expr),
+            expr: SymbolicOwner::new_unbounded(expr),
             variable,
             order,
         }
@@ -102,31 +114,51 @@ impl SymbolicExpr {
     }
 
     pub fn function(function: SymbolicFunction, argument: SymbolicExpr) -> Self {
-        SymbolicExpr::Function(function, Box::new(argument)).simplify()
+        SymbolicExpr::Function(function, SymbolicOwner::new_unbounded(argument)).simplify()
     }
 
     pub fn neg_expr(value: SymbolicExpr) -> Self {
-        SymbolicExpr::Neg(Box::new(value)).simplify()
+        SymbolicExpr::Neg(SymbolicOwner::new_unbounded(value)).simplify()
     }
 
     pub fn add_expr(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
-        SymbolicExpr::Add(Box::new(lhs), Box::new(rhs)).simplify()
+        SymbolicExpr::Add(
+            SymbolicOwner::new_unbounded(lhs),
+            SymbolicOwner::new_unbounded(rhs),
+        )
+        .simplify()
     }
 
     pub fn sub_expr(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
-        SymbolicExpr::Sub(Box::new(lhs), Box::new(rhs)).simplify()
+        SymbolicExpr::Sub(
+            SymbolicOwner::new_unbounded(lhs),
+            SymbolicOwner::new_unbounded(rhs),
+        )
+        .simplify()
     }
 
     pub fn mul_expr(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
-        SymbolicExpr::Mul(Box::new(lhs), Box::new(rhs)).simplify()
+        SymbolicExpr::Mul(
+            SymbolicOwner::new_unbounded(lhs),
+            SymbolicOwner::new_unbounded(rhs),
+        )
+        .simplify()
     }
 
     pub fn div_expr(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
-        SymbolicExpr::Div(Box::new(lhs), Box::new(rhs)).simplify()
+        SymbolicExpr::Div(
+            SymbolicOwner::new_unbounded(lhs),
+            SymbolicOwner::new_unbounded(rhs),
+        )
+        .simplify()
     }
 
     pub fn pow_expr(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
-        SymbolicExpr::Pow(Box::new(lhs), Box::new(rhs)).simplify()
+        SymbolicExpr::Pow(
+            SymbolicOwner::new_unbounded(lhs),
+            SymbolicOwner::new_unbounded(rhs),
+        )
+        .simplify()
     }
 
     pub fn variable_name(&self) -> Option<&str> {
@@ -143,7 +175,7 @@ impl SymbolicExpr {
         }
     }
 
-    pub fn function_reference_signature(&self) -> Option<(&str, &[String])> {
+    pub fn function_reference_signature(&self) -> Option<(&str, &[Utf8Text])> {
         match self {
             SymbolicExpr::FunctionReference(name, parameters) => Some((name, parameters)),
             _ => None,
@@ -191,11 +223,11 @@ impl SymbolicExpr {
             | SymbolicExpr::Rational { .. }
             | SymbolicExpr::DecimalLiteral { .. } => {}
             SymbolicExpr::Variable(name) => {
-                variables.insert(name.clone());
+                variables.insert(name.as_str().to_owned());
             }
             SymbolicExpr::FunctionReference(_, parameters) => {
                 for parameter in parameters {
-                    variables.insert(parameter.clone());
+                    variables.insert(parameter.as_str().to_owned());
                 }
             }
             SymbolicExpr::FunctionCall(_, args) => {
@@ -254,14 +286,14 @@ impl SymbolicExpr {
                             changed = true;
                             replacement.clone()
                         } else {
-                            SymbolicExpr::variable(parameter)
+                            SymbolicExpr::variable(parameter.clone())
                         }
                     })
                     .collect::<Vec<_>>();
                 if changed {
                     SymbolicExpr::function_call(name.clone(), args)
                 } else {
-                    SymbolicExpr::function_reference(name.clone(), parameters.clone())
+                    SymbolicExpr::FunctionReference(name.clone(), parameters.clone()).simplify()
                 }
             }
             SymbolicExpr::FunctionCall(name, args) => SymbolicExpr::function_call(
@@ -279,7 +311,7 @@ impl SymbolicExpr {
                 variable: derivative_variable,
                 order,
             } => SymbolicExpr::Derivative {
-                expr: Box::new(expr.substitute(variable, replacement)),
+                expr: SymbolicOwner::new_unbounded(expr.substitute(variable, replacement)),
                 variable: derivative_variable.clone(),
                 order: *order,
             }
@@ -436,13 +468,7 @@ impl SymbolicExpr {
             SymbolicExpr::Rational {
                 numerator,
                 denominator,
-            } => {
-                if denominator.is_zero() {
-                    None
-                } else {
-                    Some(numerator.to_f64()? / denominator.to_f64()?)
-                }
-            }
+            } => rational_to_f64(numerator, denominator),
             SymbolicExpr::DecimalLiteral { value, .. } => (!value.is_nan()).then_some(*value),
             SymbolicExpr::Variable(_) => None,
             SymbolicExpr::FunctionReference(_, _)
@@ -575,19 +601,22 @@ impl SymbolicExpr {
             }
             SymbolicExpr::FunctionCall(name, args) => SymbolicExpr::FunctionCall(
                 name,
-                args.into_iter()
+                owned_args_unbounded(args)
+                    .into_iter()
                     .map(SymbolicExpr::simplify)
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<_>>()
+                    .into(),
             ),
-            SymbolicExpr::Equation(lhs, rhs) => {
-                SymbolicExpr::Equation(Box::new(lhs.simplify()), Box::new(rhs.simplify()))
-            }
+            SymbolicExpr::Equation(lhs, rhs) => SymbolicExpr::Equation(
+                SymbolicOwner::new_unbounded(lhs.into_inner_unbounded().simplify()),
+                SymbolicOwner::new_unbounded(rhs.into_inner_unbounded().simplify()),
+            ),
             SymbolicExpr::Derivative {
                 expr,
                 variable,
                 order,
             } => {
-                let expr = expr.simplify();
+                let expr = expr.into_inner_unbounded().simplify();
                 if order == 0 {
                     return expr;
                 }
@@ -608,7 +637,7 @@ impl SymbolicExpr {
                         };
                     }
                     return SymbolicExpr::Derivative {
-                        expr: Box::new(SymbolicExpr::Derivative {
+                        expr: SymbolicOwner::new_unbounded(SymbolicExpr::Derivative {
                             expr: inner,
                             variable: inner_variable,
                             order: inner_order,
@@ -618,22 +647,22 @@ impl SymbolicExpr {
                     };
                 }
                 SymbolicExpr::Derivative {
-                    expr: Box::new(expr),
+                    expr: SymbolicOwner::new_unbounded(expr),
                     variable,
                     order,
                 }
             }
             SymbolicExpr::Neg(inner) => {
-                let inner = inner.simplify();
+                let inner = inner.into_inner_unbounded().simplify();
                 match inner {
                     SymbolicExpr::Constant(value) => SymbolicExpr::Constant(-value),
-                    SymbolicExpr::Neg(value) => *value,
-                    other => SymbolicExpr::Neg(Box::new(other)),
+                    SymbolicExpr::Neg(value) => value.into_inner_unbounded(),
+                    other => SymbolicExpr::Neg(SymbolicOwner::new_unbounded(other)),
                 }
             }
             SymbolicExpr::Add(lhs, rhs) => {
-                let lhs = lhs.simplify();
-                let rhs = rhs.simplify();
+                let lhs = lhs.into_inner_unbounded().simplify();
+                let rhs = rhs.into_inner_unbounded().simplify();
                 match (&lhs, &rhs) {
                     (SymbolicExpr::Constant(a), SymbolicExpr::Constant(b)) if !(a + b).is_nan() => {
                         SymbolicExpr::Constant(a + b)
@@ -647,16 +676,25 @@ impl SymbolicExpr {
                             numerator: bn,
                             denominator: bd,
                         },
-                    ) => SymbolicExpr::rational(an * bd + bn * ad, ad * bd)
-                        .unwrap_or(SymbolicExpr::Add(Box::new(lhs), Box::new(rhs))),
+                    ) => SymbolicExpr::rational(
+                        an.as_ref() * bd.as_ref() + bn.as_ref() * ad.as_ref(),
+                        ad.as_ref() * bd.as_ref(),
+                    )
+                    .unwrap_or(SymbolicExpr::Add(
+                        SymbolicOwner::new_unbounded(lhs),
+                        SymbolicOwner::new_unbounded(rhs),
+                    )),
                     (left, right) if left.is_zero_constant() => right.clone(),
                     (left, right) if right.is_zero_constant() => left.clone(),
-                    _ => SymbolicExpr::Add(Box::new(lhs), Box::new(rhs)),
+                    _ => SymbolicExpr::Add(
+                        SymbolicOwner::new_unbounded(lhs),
+                        SymbolicOwner::new_unbounded(rhs),
+                    ),
                 }
             }
             SymbolicExpr::Sub(lhs, rhs) => {
-                let lhs = lhs.simplify();
-                let rhs = rhs.simplify();
+                let lhs = lhs.into_inner_unbounded().simplify();
+                let rhs = rhs.into_inner_unbounded().simplify();
                 match (&lhs, &rhs) {
                     (SymbolicExpr::Constant(a), SymbolicExpr::Constant(b)) if !(a - b).is_nan() => {
                         SymbolicExpr::Constant(a - b)
@@ -670,19 +708,28 @@ impl SymbolicExpr {
                             numerator: bn,
                             denominator: bd,
                         },
-                    ) => SymbolicExpr::rational(an * bd - bn * ad, ad * bd)
-                        .unwrap_or(SymbolicExpr::Sub(Box::new(lhs), Box::new(rhs))),
+                    ) => SymbolicExpr::rational(
+                        an.as_ref() * bd.as_ref() - bn.as_ref() * ad.as_ref(),
+                        ad.as_ref() * bd.as_ref(),
+                    )
+                    .unwrap_or(SymbolicExpr::Sub(
+                        SymbolicOwner::new_unbounded(lhs),
+                        SymbolicOwner::new_unbounded(rhs),
+                    )),
                     (left, right) if right.is_zero_constant() => left.clone(),
                     (left, right) if left.is_zero_constant() => {
                         SymbolicExpr::neg_expr(right.clone())
                     }
                     (left, right) if left == right => SymbolicExpr::Constant(0.0),
-                    _ => SymbolicExpr::Sub(Box::new(lhs), Box::new(rhs)),
+                    _ => SymbolicExpr::Sub(
+                        SymbolicOwner::new_unbounded(lhs),
+                        SymbolicOwner::new_unbounded(rhs),
+                    ),
                 }
             }
             SymbolicExpr::Mul(lhs, rhs) => {
-                let lhs = lhs.simplify();
-                let rhs = rhs.simplify();
+                let lhs = lhs.into_inner_unbounded().simplify();
+                let rhs = rhs.into_inner_unbounded().simplify();
                 match (&lhs, &rhs) {
                     (SymbolicExpr::Constant(a), SymbolicExpr::Constant(b)) if !(a * b).is_nan() => {
                         SymbolicExpr::Constant(a * b)
@@ -696,8 +743,13 @@ impl SymbolicExpr {
                             numerator: bn,
                             denominator: bd,
                         },
-                    ) => SymbolicExpr::rational(an * bn, ad * bd)
-                        .unwrap_or(SymbolicExpr::Mul(Box::new(lhs), Box::new(rhs))),
+                    ) => {
+                        SymbolicExpr::rational(an.as_ref() * bn.as_ref(), ad.as_ref() * bd.as_ref())
+                            .unwrap_or(SymbolicExpr::Mul(
+                                SymbolicOwner::new_unbounded(lhs),
+                                SymbolicOwner::new_unbounded(rhs),
+                            ))
+                    }
                     (left, right)
                         if left.is_zero_constant() && right.can_eliminate_zero_product_factor() =>
                     {
@@ -710,12 +762,15 @@ impl SymbolicExpr {
                     }
                     (left, right) if is_one_expr(left) => right.clone(),
                     (left, right) if is_one_expr(right) => left.clone(),
-                    _ => SymbolicExpr::Mul(Box::new(lhs), Box::new(rhs)),
+                    _ => SymbolicExpr::Mul(
+                        SymbolicOwner::new_unbounded(lhs),
+                        SymbolicOwner::new_unbounded(rhs),
+                    ),
                 }
             }
             SymbolicExpr::Div(lhs, rhs) => {
-                let lhs = lhs.simplify();
-                let rhs = rhs.simplify();
+                let lhs = lhs.into_inner_unbounded().simplify();
+                let rhs = rhs.into_inner_unbounded().simplify();
                 match (&lhs, &rhs) {
                     (_, right) if is_one_expr(right) => lhs,
                     (left, right) if left == right && !left.is_zero_constant() => {
@@ -740,14 +795,22 @@ impl SymbolicExpr {
                             numerator: bn,
                             denominator: bd,
                         },
-                    ) if !bn.is_zero() => SymbolicExpr::rational(an * bd, ad * bn)
-                        .unwrap_or(SymbolicExpr::Div(Box::new(lhs), Box::new(rhs))),
-                    _ => SymbolicExpr::Div(Box::new(lhs), Box::new(rhs)),
+                    ) if !bn.is_zero() => {
+                        SymbolicExpr::rational(an.as_ref() * bd.as_ref(), ad.as_ref() * bn.as_ref())
+                            .unwrap_or(SymbolicExpr::Div(
+                                SymbolicOwner::new_unbounded(lhs),
+                                SymbolicOwner::new_unbounded(rhs),
+                            ))
+                    }
+                    _ => SymbolicExpr::Div(
+                        SymbolicOwner::new_unbounded(lhs),
+                        SymbolicOwner::new_unbounded(rhs),
+                    ),
                 }
             }
             SymbolicExpr::Pow(lhs, rhs) => {
-                let lhs = lhs.simplify();
-                let rhs = rhs.simplify();
+                let lhs = lhs.into_inner_unbounded().simplify();
+                let rhs = rhs.into_inner_unbounded().simplify();
                 match (&lhs, &rhs) {
                     (left, right)
                         if right.is_zero_constant()
@@ -771,25 +834,42 @@ impl SymbolicExpr {
                         if !(value.is_nan() || is_zero(*a) && b.is_sign_negative()) {
                             SymbolicExpr::Constant(value)
                         } else {
-                            SymbolicExpr::Pow(Box::new(lhs), Box::new(rhs))
+                            SymbolicExpr::Pow(
+                                SymbolicOwner::new_unbounded(lhs),
+                                SymbolicOwner::new_unbounded(rhs),
+                            )
                         }
                     }
-                    _ => SymbolicExpr::Pow(Box::new(lhs), Box::new(rhs)),
+                    _ => SymbolicExpr::Pow(
+                        SymbolicOwner::new_unbounded(lhs),
+                        SymbolicOwner::new_unbounded(rhs),
+                    ),
                 }
             }
             SymbolicExpr::Function(function, inner) => {
-                let inner = inner.simplify();
+                let inner = inner.into_inner_unbounded().simplify();
                 if let Some(value) = inner
                     .constant_value()
                     .and_then(|value| function.apply_constant(value))
                 {
                     SymbolicExpr::Constant(value)
                 } else {
-                    SymbolicExpr::Function(function, Box::new(inner))
+                    SymbolicExpr::Function(function, SymbolicOwner::new_unbounded(inner))
                 }
             }
             other => other,
         }
+    }
+}
+
+fn owned_args_unbounded(
+    args: SymbolicList<SymbolicExpr>,
+) -> crate::OwnedExactArrayValues<SymbolicExpr> {
+    match args.try_into_owned() {
+        Ok(values) => values,
+        Err(shared) => ExactArrayStorage::unbounded(shared.iter().cloned().collect())
+            .try_into_owned()
+            .expect("fresh ordinary symbolic arguments are unique"),
     }
 }
 
@@ -952,6 +1032,13 @@ mod tests {
         let h = SymbolicExpr::variable("h");
         let expr =
             SymbolicExpr::function(SymbolicFunction::Cos, SymbolicExpr::add_expr(x.clone(), h));
+        let retained = expr.clone();
+        let (SymbolicExpr::Function(_, source), SymbolicExpr::Function(_, alias)) =
+            (&expr, &retained)
+        else {
+            panic!("cosine expression must retain its child");
+        };
+        assert!(source.shares_generation_with(alias));
         assert_eq!(
             expr.substitute("h", &SymbolicExpr::constant(0.0))
                 .to_string(),
@@ -1028,12 +1115,48 @@ mod tests {
             SymbolicExpr::constant(f64::NAN).numeric_constant_value(),
             None
         );
+        let large = BigInt::one() << 4096usize;
+        for (numerator, denominator, expected) in [
+            (
+                &large + BigInt::one(),
+                (&large << 1usize) + BigInt::from(3),
+                0.5,
+            ),
+            (
+                -(&large + BigInt::one()),
+                (&large << 1usize) + BigInt::from(3),
+                -0.5,
+            ),
+            (BigInt::one(), BigInt::one() << 1074usize, f64::from_bits(1)),
+            (large.clone(), BigInt::one(), f64::INFINITY),
+        ] {
+            let value = SymbolicExpr::rational(numerator, denominator).expect("valid rational");
+            assert_eq!(value.numeric_constant_value(), Some(expected));
+        }
+        assert_eq!(rational_to_f64(&BigInt::one(), &BigInt::zero()), None);
     }
 
     #[test]
     fn oversized_rational_simplification_does_not_panic() {
         let lhs = SymbolicExpr::rational(i128::MAX, i128::MAX - 2).expect("lhs");
         let rhs = SymbolicExpr::rational(i128::MAX - 4, i128::MAX - 6).expect("rhs");
+        let retained = lhs.clone();
+        let (
+            SymbolicExpr::Rational {
+                numerator: source, ..
+            },
+            SymbolicExpr::Rational {
+                numerator: alias, ..
+            },
+        ) = (&lhs, &retained)
+        else {
+            panic!("exact rational must retain its digit owner");
+        };
+        assert!(source.shares_generation_with(alias));
+        let array = crate::SymbolicArray::new(vec![lhs.clone(), rhs.clone()], vec![1, 2]).unwrap();
+        let alias = array.clone();
+        assert_eq!(array.data.as_ptr(), alias.data.as_ptr());
+        assert_eq!(array.shape.as_ptr(), alias.shape.as_ptr());
         assert!(matches!(
             SymbolicExpr::add_expr(lhs, rhs),
             SymbolicExpr::Rational { .. }

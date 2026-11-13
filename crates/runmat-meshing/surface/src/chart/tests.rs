@@ -20,11 +20,14 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     topology.faces[0].periodic_u = true;
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Cylinder {
-            origin_m: [0.0; 3],
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             axis_m_per_v: [0.0, 0.0, 1.0],
-            radius_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(1.0),
             domains: [
                 range(-std::f64::consts::PI, std::f64::consts::PI),
                 range(-2.0, 2.0),
@@ -72,6 +75,46 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         ExactFaceChartOptions::default(),
     )
     .unwrap();
+
+    let mut mixed_coedge_images = source.clone();
+    mixed_coedge_images.outer_loop.segments[0].seam_image = Some(0);
+    mixed_coedge_images.outer_loop.segments[1].seam_image = None;
+    mixed_coedge_images.outer_loop.segments[2].seam_image = Some(1);
+    mixed_coedge_images.outer_loop.segments[3].seam_image = None;
+    mixed_coedge_images.outer_loop.segments[1].node_uv[0][0] += 5.0e-13;
+    mixed_coedge_images.outer_loop.segments[3].node_uv[1][0] += 5.0e-13;
+    let mixed_charts = build_exact_face_charts(
+        &mixed_coedge_images,
+        &topology,
+        &evaluator,
+        &Control,
+        ExactFaceChartOptions::default(),
+    )
+    .unwrap();
+    assert!(mixed_charts.charts[0]
+        .pslg
+        .segments
+        .iter()
+        .zip(mixed_charts.charts[0].pslg.segments.iter().cycle().skip(1))
+        .all(|(left, right)| left.vertex_indices[1] == right.vertex_indices[0]));
+
+    // The closing node's two pcurve images differ by more than roundoff (a vertex gap of a few
+    // picoradians, as on a trimmed sphere); the loop still closes with winding zero.
+    let mut gapped = source.clone();
+    gapped.outer_loop.segments[3].node_uv[1][0] += 5.0e-12;
+    let gapped_charts = build_exact_face_charts(
+        &gapped,
+        &topology,
+        &evaluator,
+        &Control,
+        ExactFaceChartOptions::default(),
+    )
+    .unwrap();
+    let gapped_loop = &gapped_charts.charts[0].boundary.outer_loop.segments;
+    assert_eq!(
+        gapped_loop.last().unwrap().node_uv[1],
+        gapped_loop[0].node_uv[0]
+    );
 
     let winding = boundary(
         &topology,
@@ -186,15 +229,19 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
     )
     .unwrap();
     let metric_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let quality = SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.01,
         maximum_physical_aspect_ratio: 1.0e9,
-        maximum_chordal_deviation_m: 1.0e9,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e9),
         maximum_normal_deviation_degrees: 180.0,
     };
     let refinement_context = crate::ExactFaceRefinementContext::new(
@@ -210,6 +257,7 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         refinement_context,
         crate::ExactFaceRefinementPolicy {
             quality,
+            acceptance: crate::ExactFaceAcceptanceOptions::default(),
             delaunay: crate::ExactFaceDelaunayOptions::default(),
             refinement: crate::ExactFaceRefinementOptions {
                 maximum_interior_insertions: 1,
@@ -824,17 +872,20 @@ fn nonperiodic_chart_is_identity_and_tamper_evident() {
 }
 
 #[test]
-fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
+fn singular_spherical_wedge_uses_an_exact_bounded_polar_chart() {
     let (document, mut topology, mut registry) = runmat_geometry_fixtures::exact_circle();
     topology.faces[0].periodic_u = true;
     topology.faces[0].has_singularity = true;
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Sphere {
-            center_m: [0.0; 3],
+            center_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             z_axis: [0.0, 0.0, 1.0],
-            radius_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(1.0),
             domains: [
                 range(0.0, std::f64::consts::TAU),
                 range(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
@@ -873,18 +924,19 @@ fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
     let charts =
         build_exact_face_charts(&source, &topology, &evaluator, &Control, options).unwrap();
     let chart = &charts.charts[0];
-    let ExactFaceChartParameterization::ClosestPointProjection {
-        axes,
-        differential_step_m,
+    let ExactFaceChartParameterization::PolarEvaluatorParameters {
+        angular_axis,
+        radial_axis,
+        angular_span,
+        differential_step,
         ..
     } = &chart.parameterization
     else {
         panic!("declared singular face must not retain singular evaluator UV topology")
     };
-    assert!(*differential_step_m > 0.0);
-    assert!(axes
-        .iter()
-        .all(|axis| (axis.iter().map(|value| value * value).sum::<f64>() - 1.0).abs() < 1.0e-12));
+    assert_eq!((*angular_axis, *radial_axis), (0, 1));
+    assert!((*angular_span - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12);
+    assert!(*differential_step > 0.0);
     assert_eq!(chart.pslg.vertices.len(), 3);
     let [first, second, third] = chart.pslg.vertices[..]
         .try_into()
@@ -919,10 +971,13 @@ fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
     )
     .unwrap();
     let metric_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 1.3,
         contributions: Vec::new(),
+        cells_across_gap: None,
     };
     let geometry = crate::evaluate_exact_face_geometry_in_parameterization(
         &domains[0].trimmed,
@@ -963,9 +1018,10 @@ fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
     assert!((pole.evaluation.point_m[2] - 1.0).abs() < 1.0e-10);
     assert!(pole.evaluation.physical_metric.validate().is_ok());
     let quality = SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.001,
         maximum_physical_aspect_ratio: 1.0e9,
-        maximum_chordal_deviation_m: 1.0e9,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e9),
         maximum_normal_deviation_degrees: 180.0,
     };
     let refinement_context = crate::ExactFaceRefinementContext::new(
@@ -981,6 +1037,7 @@ fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
         refinement_context,
         crate::ExactFaceRefinementPolicy {
             quality,
+            acceptance: crate::ExactFaceAcceptanceOptions::default(),
             delaunay: crate::ExactFaceDelaunayOptions::default(),
             refinement: crate::ExactFaceRefinementOptions {
                 maximum_interior_insertions: 1,
@@ -1023,12 +1080,12 @@ fn singular_spherical_wedge_uses_a_canonical_regular_projection() {
         .any(|vertex| vertex.node_id == node(2) && (vertex.point_m[2] - 1.0).abs() < 1.0e-10));
 
     let mut tampered = charts;
-    let ExactFaceChartParameterization::ClosestPointProjection { axes, .. } =
+    let ExactFaceChartParameterization::PolarEvaluatorParameters { angular_origin, .. } =
         &mut tampered.charts[0].parameterization
     else {
         unreachable!()
     };
-    axes[0][0] += 0.25;
+    *angular_origin += 0.25;
     assert_eq!(
         validate_exact_face_charts(&tampered, &source, &topology, &evaluator, &Control, options,)
             .unwrap_err()
@@ -1101,11 +1158,7 @@ fn midpoint(endpoints: [[f64; 2]; 2]) -> [f64; 2] {
 }
 
 fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, source_topology_id.to_owned(), Vec::new())
 }
 
 struct Control;

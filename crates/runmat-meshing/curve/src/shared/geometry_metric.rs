@@ -1,65 +1,117 @@
 use runmat_geometry_core::{
-    surface_principal_curvature, ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator,
-    ExactSurfaceEvaluator, GeometryEvaluationControl, GeometryEvaluationError, SurfaceDerivatives,
+    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator,
+    GeometryEvaluationControl, GeometryEvaluationError,
 };
 use runmat_meshing_core::{
-    CurveQualityTargets, MetricContribution, MetricContributionScope, MetricFieldRequest,
-    MetricSourceKind, MetricTensor3, SurfaceQualityTargets,
+    MeshingQualityTargets, MetricContribution, MetricContributionScope, MetricFieldRequest,
+    MetricSourceKind,
 };
 
+use runmat_meshing_size::metric::DirectionalMetricEnvelope;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{SharedCurveError, SharedCurveErrorKind};
 
+mod feature;
 mod proximity;
+mod relations;
+mod surface_sampling;
+use relations::TopologyRelations;
 
-use proximity::{derive_proximity_contributions, ordered_pair, EdgeWitness};
+use proximity::{
+    derive_face_proximity_contributions, derive_proximity_contributions, ordered_pair,
+    ContactProximityPairs, EdgeWitness, FaceBoundary, FaceWitness,
+};
 
 const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
 
 /// Adds deterministic exact-curve curvature constraints to the resolved metric request.
 /// Constructive chord and tangent validation remains authoritative; this source makes the same
-/// geometry demand visible to curve, surface, and later volume metric consumers.
+/// geometry demand visible to curve, surface, and later volume metric consumers. The volume
+/// quality target bounds how long a narrow face's elements may be along it (see
+/// `proximity::derive_proximity_contributions`).
 pub fn derive_curve_geometry_metric(
     topology: &ExactBRepTopology,
     evaluator: &(impl ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
     request: &MetricFieldRequest,
-    curve_quality: CurveQualityTargets,
-    surface_quality: SurfaceQualityTargets,
+    quality: MeshingQualityTargets,
 ) -> Result<MetricFieldRequest, SharedCurveError> {
+    let curve_quality = quality.curve;
+    let surface_quality = quality.surface;
+    let relations = TopologyRelations::new(topology, control).map_err(|error| {
+        SharedCurveError::new(
+            SharedCurveErrorKind::GeometryEvaluation(error.kind),
+            "curve topology preparation",
+            error.to_string(),
+        )
+    })?;
     let mut contributions = Vec::new();
-    let mut face_curvature = BTreeMap::new();
+    let mut face_metrics = surface_sampling::FaceMetricSamples::new(
+        &topology.faces,
+        control,
+        request.global_metric,
+        surface_quality,
+    )?;
+    let shell_solids = topology
+        .solids
+        .iter()
+        .flat_map(|solid| {
+            std::iter::once(&solid.outer_shell_id)
+                .chain(&solid.void_shell_ids)
+                .map(move |shell| (shell.clone(), solid.id.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut face_solids = BTreeMap::<
+        runmat_geometry_core::PersistentEntityId,
+        BTreeSet<runmat_geometry_core::PersistentEntityId>,
+    >::new();
+    for shell in &topology.shells {
+        if let Some(solid) = shell_solids.get(&shell.id) {
+            for face_use in &shell.face_uses {
+                face_solids
+                    .entry(face_use.entity_id.clone())
+                    .or_default()
+                    .insert(solid.clone());
+            }
+        }
+    }
+    let face_sides = face_material_sides(topology, &relations, &shell_solids)?;
     let mut edge_witnesses = Vec::new();
+    let mut face_witnesses =
+        BTreeMap::<runmat_geometry_core::PersistentEntityId, FaceWitness>::new();
     for edge in &topology.edges {
         if edge.is_degenerate {
             continue;
         }
         let range = ExactCurveEvaluator::parameter_range(evaluator, &edge.curve_evaluator_id)
             .map_err(|error| geometry_error(edge, error))?;
-        let transform = topology.world_transform_for(&edge.id).map_err(|error| {
+        let transform = relations.world_transform_for(&edge.id).map_err(|error| {
             SharedCurveError::invalid_request(
                 "curve metric occurrence transform",
                 error.to_string(),
             )
             .for_edge(&edge.id)
         })?;
-        let mut maximum_curvature = 0.0_f64;
-        let mut minimum_witness_chord = f64::INFINITY;
-        let mut previous_point = None;
+        let mut curve_metric =
+            DirectionalMetricEnvelope::new(request.global_metric).map_err(|error| {
+                SharedCurveError::invalid_request("curve metric baseline", error.to_string())
+            })?;
+        let mut has_curvature = false;
         let mut witness_points = Vec::with_capacity(CURVATURE_SAMPLES_PER_EDGE as usize);
-        let mut is_feature = topology
-            .coedges
-            .iter()
-            .filter(|coedge| coedge.edge_id == edge.id)
-            .count()
-            != 2;
+        let mut is_feature = relations.edge_coedges(&edge.id).len() != 2;
+        // This edge's samples on each face it bounds, in parameter order: one boundary
+        // polyline of that face's gap witness.
+        let mut face_boundaries =
+            BTreeMap::<runmat_geometry_core::PersistentEntityId, Vec<_>>::new();
         for sample in 0..CURVATURE_SAMPLES_PER_EDGE {
             control
                 .consume_iterations(1)
                 .map_err(|error| geometry_error(edge, error))?;
             let fraction = f64::from(sample) / f64::from(CURVATURE_SAMPLES_PER_EDGE - 1);
-            let parameter = range.start + (range.end - range.start) * fraction;
+            let parameter = range
+                .parameter_at_fraction(fraction)
+                .map_err(|error| geometry_error(edge, error))?;
             let derivatives = ExactCurveEvaluator::derivatives(
                 evaluator,
                 &edge.curve_evaluator_id,
@@ -67,17 +119,17 @@ pub fn derive_curve_geometry_metric(
                 control,
             )
             .map_err(|error| geometry_error(edge, error))?;
-            let first = transform.transform_vector(derivatives.first_m);
-            let second = transform.transform_vector(derivatives.second_m);
-            let point = transform.transform_point(derivatives.point_m);
+            let derivatives = derivatives
+                .transformed(&transform)
+                .map_err(|error| geometry_error(edge, error))?;
+            let first = derivatives
+                .first_m
+                .with_canonical_storage(|values, _axes| *values);
+            let second = derivatives
+                .second_m
+                .with_canonical_storage(|values, _axes| *values);
+            let point = *derivatives.point_m.canonical_values();
             witness_points.push(point);
-            if let Some(previous) = previous_point {
-                let chord = distance(previous, point);
-                if chord > 0.0 {
-                    minimum_witness_chord = minimum_witness_chord.min(chord);
-                }
-            }
-            previous_point = Some(point);
             let speed = norm(first);
             let curvature = norm(cross(first, second)) / speed.powi(3);
             if !curvature.is_finite() || speed <= 0.0 {
@@ -90,201 +142,312 @@ pub fn derive_curve_geometry_metric(
                 )
                 .for_edge(&edge.id));
             }
-            maximum_curvature = maximum_curvature.max(curvature);
-            let normals = sample_incident_faces(
-                topology,
-                edge,
-                evaluator,
-                control,
-                parameter,
-                &mut face_curvature,
-            )?;
+            if curvature > 0.0 {
+                let size = curvature_target_size(
+                    curvature,
+                    curve_quality.maximum_chordal_deviation_m.canonical_value(),
+                    curve_quality.maximum_tangent_change_degrees,
+                )
+                .ok_or_else(|| {
+                    SharedCurveError::invalid_request(
+                        "curve curvature metric",
+                        "invalid directional curvature size",
+                    )
+                    .for_edge(&edge.id)
+                })?;
+                curve_metric.include(first, size).map_err(|error| {
+                    SharedCurveError::invalid_request("curve curvature metric", error.to_string())
+                        .for_edge(&edge.id)
+                })?;
+                has_curvature = true;
+            }
+            let normals = face_metrics.sample(&relations, edge, evaluator, control, parameter)?;
             is_feature |= normals.iter().enumerate().any(|(index, left)| {
                 normals[index + 1..].iter().any(|right| {
-                    normal_angle_degrees(*left, *right)
+                    normal_angle_degrees(left.normal, right.normal)
                         > surface_quality.maximum_normal_deviation_degrees
                 })
             });
+            for sample in normals {
+                face_boundaries
+                    .entry(sample.face_id)
+                    .or_default()
+                    .push((sample.point_m, sample.normal));
+            }
         }
-        if maximum_curvature > 0.0 {
-            let target_size_m = curvature_target_size(
-                maximum_curvature,
-                curve_quality.maximum_chordal_deviation_m,
-                curve_quality.maximum_tangent_change_degrees,
-            )
-            .ok_or_else(|| {
-                SharedCurveError::invalid_request(
-                    "curve curvature metric",
-                    "quality targets do not produce a finite positive curvature size",
+        let face_normals = face_boundaries
+            .iter()
+            .map(|(face_id, samples)| {
+                (
+                    face_id.clone(),
+                    samples.iter().map(|(_, normal)| *normal).collect(),
                 )
-                .for_edge(&edge.id)
-            })?;
+            })
+            .collect::<BTreeMap<_, Vec<[f64; 3]>>>();
+        for (face_id, boundary) in face_boundaries {
+            face_witnesses
+                .entry(face_id.clone())
+                .or_insert_with(|| FaceWitness::new(face_id))
+                .boundaries
+                .push(FaceBoundary {
+                    edge_id: edge.id.clone(),
+                    samples: boundary,
+                });
+        }
+        if has_curvature {
             contributions.push(MetricContribution {
                 source: MetricSourceKind::Curve,
                 scope: MetricContributionScope::Entity {
                     entity_id: edge.id.clone(),
                 },
-                metric: MetricTensor3::isotropic_length_m(target_size_m).map_err(|error| {
-                    SharedCurveError::invalid_request("curve curvature metric", error.to_string())
+                metric: curve_metric.metric().map_err(|error| {
+                    SharedCurveError::invalid_request("curve metric envelope", error.to_string())
                         .for_edge(&edge.id)
                 })?,
             });
         }
-        if is_feature && minimum_witness_chord.is_finite() {
+        if let Some(feature_span_m) = is_feature
+            .then(|| feature::witness_span_m(&witness_points))
+            .flatten()
+        {
             contributions.push(MetricContribution {
                 source: MetricSourceKind::Feature,
                 scope: MetricContributionScope::Entity {
                     entity_id: edge.id.clone(),
                 },
-                metric: MetricTensor3::isotropic_length_m(minimum_witness_chord).map_err(
-                    |error| {
-                        SharedCurveError::invalid_request(
-                            "exact edge feature metric",
-                            error.to_string(),
-                        )
-                        .for_edge(&edge.id)
-                    },
-                )?,
+                metric: feature::directional_metric(
+                    request.global_metric,
+                    &witness_points,
+                    feature_span_m,
+                )
+                .map_err(|error| {
+                    SharedCurveError::invalid_request(
+                        "exact edge feature metric",
+                        error.to_string(),
+                    )
+                    .for_edge(&edge.id)
+                })?,
             });
         }
         edge_witnesses.push(EdgeWitness {
             edge_id: edge.id.clone(),
+            tolerance_m: edge.tolerance_m.canonical_value(),
             endpoint_ids: edge
                 .start_vertex_id
                 .iter()
                 .chain(&edge.end_vertex_id)
                 .cloned()
                 .collect(),
-            face_ids: topology
-                .coedges
-                .iter()
-                .filter(|coedge| coedge.edge_id == edge.id)
+            face_ids: relations
+                .edge_coedges(&edge.id)
                 .map(|coedge| coedge.face_id.clone())
                 .collect(),
+            solid_ids: relations
+                .edge_coedges(&edge.id)
+                .filter_map(|coedge| face_solids.get(&coedge.face_id))
+                .flatten()
+                .cloned()
+                .collect(),
             points_m: witness_points,
+            face_material_sides: face_normals
+                .keys()
+                .filter_map(|face| {
+                    face_sides
+                        .get(face)
+                        .map(|sides| (face.clone(), sides.clone()))
+                })
+                .collect(),
+            face_normals,
         });
     }
-    for (face_id, maximum_curvature) in face_curvature {
-        if maximum_curvature == 0.0 {
-            continue;
-        }
-        let target_size_m = curvature_target_size(
-            maximum_curvature,
-            surface_quality.maximum_chordal_deviation_m,
-            surface_quality.maximum_normal_deviation_degrees,
-        )
-        .ok_or_else(|| {
-            SharedCurveError::invalid_request(
-                "face-induced curve metric",
-                "surface quality targets do not produce a finite positive curvature size",
-            )
-        })?;
-        contributions.push(MetricContribution {
-            source: MetricSourceKind::Face,
-            scope: MetricContributionScope::Entity {
-                entity_id: face_id.clone(),
-            },
-            metric: MetricTensor3::isotropic_length_m(target_size_m).map_err(|error| {
-                SharedCurveError::invalid_request("face-induced curve metric", error.to_string())
-            })?,
-        });
-    }
-    let contact_face_pairs = topology
-        .contacts
-        .iter()
-        .flat_map(|contact| {
-            contact.side_a_face_ids.iter().flat_map(move |left| {
-                contact
-                    .side_b_face_ids
-                    .iter()
-                    .map(move |right| ordered_pair(left.clone(), right.clone()))
-            })
-        })
-        .collect::<BTreeSet<_>>();
+    contributions.extend(face_metrics.into_contributions()?);
+    let contact_pairs = contact_proximity_pairs(topology, &relations);
     let search_radius_m = request
         .global_metric
         .conservative_minimum_length_m()
         .map_err(|error| {
             SharedCurveError::invalid_request("curve proximity radius", error.to_string())
         })?
-        * 2.0;
-    contributions.extend(derive_proximity_contributions(
-        edge_witnesses,
-        &contact_face_pairs,
+        * f64::from(request.resolved_cells_across_gap());
+    // Exact edge samples locate edge-local sizing; consumers grade it by distance from the
+    // edge instead of applying it across each face the edge bounds.
+    let supports = edge_witnesses
+        .iter()
+        .map(|witness| runmat_meshing_size::metric::MetricEntitySupport {
+            entity_id: witness.edge_id.clone(),
+            points_m: witness.points_m.clone(),
+        })
+        .collect::<Vec<_>>();
+    for edge in &topology.edges {
+        for coedge in relations.edge_coedges(&edge.id) {
+            if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
+                witness.tolerance_m = witness.tolerance_m.max(edge.tolerance_m.canonical_value());
+                witness.vertex_ids.extend(
+                    edge.start_vertex_id
+                        .iter()
+                        .chain(&edge.end_vertex_id)
+                        .cloned(),
+                );
+            }
+        }
+    }
+    for (face_id, witness) in &mut face_witnesses {
+        if let Some(solids) = face_solids.get(face_id) {
+            witness.solid_ids = solids.clone();
+        }
+        if let Some(sides) = face_sides.get(face_id) {
+            witness.material_sides = sides.clone();
+        }
+    }
+    let (face_gaps, mut located) = derive_face_proximity_contributions(
+        face_witnesses.into_values().collect(),
+        &contact_pairs,
         search_radius_m,
+        request.resolved_cells_across_face_gap(),
+        control,
+    )?;
+    contributions.extend(face_gaps);
+    located.extend(derive_proximity_contributions(
+        edge_witnesses,
+        &contact_pairs,
+        request.global_metric,
+        search_radius_m,
+        request.resolved_cells_across_gap(),
+        quality.volume.maximum_radius_edge_ratio,
         control,
     )?);
-    request
+    let mut resolved = request
         .intersect_contributions(contributions)
         .map_err(|error| {
             SharedCurveError::invalid_request("curve geometry metric", error.to_string())
-        })
+        })?;
+    // Every regular edge carries a support: edge-scoped sizing and the uniform sizing of a
+    // finer adjacent face both grade from it.
+    let mut entity_supports = std::mem::take(&mut resolved.entity_supports);
+    entity_supports.extend(supports);
+    entity_supports.sort_by(|left, right| left.entity_id.cmp(&right.entity_id));
+    entity_supports.dedup_by(|left, right| left.entity_id == right.entity_id);
+    resolved.entity_supports = entity_supports;
+    // Gaps are sized where they are: located sources carry their own supports.
+    located.extend(std::mem::take(&mut resolved.located_sources));
+    runmat_meshing_size::metric::canonicalize_located(&mut located);
+    resolved.located_sources = located;
+    resolved.validate().map_err(|error| {
+        SharedCurveError::invalid_request("curve geometry metric supports", error.to_string())
+    })?;
+    Ok(resolved)
 }
 
-fn sample_incident_faces(
+/// The side of each solid face away from each solid it bounds, as a sign on the sampled surface
+/// normal (the evaluator's `du x dv` in world space): the shell use composed with the shell's
+/// orientation, and flipped under a mirroring occurrence transform. A face use's orientation is
+/// relative to its surface's own `du x dv`, so it alone says which way the use faces.
+/// `ExactFace::orientation` is not composed in: it is the face's orientation in the first shell
+/// that uses it (the frame surface join gives its triangles), so composing it again would count
+/// that shell use twice and turn every face whose first use is reversed inside out. A face shared
+/// by two solids would then report the far solid on each side, and a step (two parallel faces
+/// of one solid that point the same way) would look like the two sides of a thin wall.
+/// Every shell use follows one convention, so the product of two faces' signs for one solid
+/// compares their sides. A shared interface has one entry per solid, with opposite signs.
+fn face_material_sides(
     topology: &ExactBRepTopology,
-    edge: &runmat_geometry_core::ExactEdge,
-    evaluator: &(impl ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized),
-    control: &dyn GeometryEvaluationControl,
-    parameter: f64,
-    maximum_by_face: &mut BTreeMap<runmat_geometry_core::PersistentEntityId, f64>,
-) -> Result<Vec<[f64; 3]>, SharedCurveError> {
-    let mut normals = Vec::new();
-    for coedge in topology
-        .coedges
-        .iter()
-        .filter(|coedge| coedge.edge_id == edge.id)
-    {
-        let face = topology
-            .faces
-            .iter()
-            .find(|face| face.id == coedge.face_id)
-            .expect("admitted coedge face");
-        let uv =
-            ExactPcurveEvaluator::point(evaluator, &coedge.pcurve_evaluator_id, parameter, control)
-                .map_err(|error| geometry_error(edge, error))?;
-        let derivatives =
-            ExactSurfaceEvaluator::derivatives(evaluator, &face.surface_evaluator_id, uv, control)
-                .map_err(|error| geometry_error(edge, error))?;
-        let transform = topology.world_transform_for(&face.id).map_err(|error| {
-            SharedCurveError::invalid_request("face metric occurrence transform", error.to_string())
-                .for_edge(&edge.id)
-        })?;
-        let curvature = surface_principal_curvature(&SurfaceDerivatives {
-            point_m: transform.transform_point(derivatives.point_m),
-            du_m: transform.transform_vector(derivatives.du_m),
-            dv_m: transform.transform_vector(derivatives.dv_m),
-            duu_m: transform.transform_vector(derivatives.duu_m),
-            duv_m: transform.transform_vector(derivatives.duv_m),
-            dvv_m: transform.transform_vector(derivatives.dvv_m),
-        })
-        .map_err(|error| geometry_error(edge, error))?;
-        let maximum = curvature
-            .minimum_1_per_m
-            .abs()
-            .max(curvature.maximum_1_per_m.abs());
-        maximum_by_face
-            .entry(face.id.clone())
-            .and_modify(|current| *current = current.max(maximum))
-            .or_insert(maximum);
-        normals.push(
-            normalize(cross(
-                transform.transform_vector(derivatives.du_m),
-                transform.transform_vector(derivatives.dv_m),
-            ))
-            .ok_or_else(|| {
-                SharedCurveError::new(
-                    SharedCurveErrorKind::GeometryEvaluation(
-                        runmat_geometry_core::GeometryEvaluationErrorKind::InvalidResult,
-                    ),
-                    "face-induced curve metric normal",
-                    "transformed surface derivatives do not define a finite normal",
+    relations: &TopologyRelations<'_>,
+    shell_solids: &BTreeMap<
+        runmat_geometry_core::PersistentEntityId,
+        runmat_geometry_core::PersistentEntityId,
+    >,
+) -> Result<
+    BTreeMap<
+        runmat_geometry_core::PersistentEntityId,
+        BTreeMap<runmat_geometry_core::PersistentEntityId, f64>,
+    >,
+    SharedCurveError,
+> {
+    use runmat_geometry_core::TopologicalOrientation;
+    let sign = |orientation: TopologicalOrientation| match orientation {
+        TopologicalOrientation::Forward => 1.0,
+        TopologicalOrientation::Reversed => -1.0,
+    };
+    let mut sides = BTreeMap::<_, BTreeMap<_, f64>>::new();
+    for shell in &topology.shells {
+        let Some(solid) = shell_solids.get(&shell.id) else {
+            continue;
+        };
+        for face_use in &shell.face_uses {
+            let face = relations.face(&face_use.entity_id);
+            let transform = relations.world_transform_for(&face.id).map_err(|error| {
+                SharedCurveError::invalid_request(
+                    "face proximity occurrence transform",
+                    error.to_string(),
                 )
-                .for_edge(&edge.id)
-            })?,
-        );
+            })?;
+            let [x, y, z] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+                .map(|axis| transform.transform_vector(axis));
+            let cross_yz = cross(y, z);
+            let handedness = (0..3)
+                .map(|axis| x[axis] * cross_yz[axis])
+                .sum::<f64>()
+                .signum();
+            sides.entry(face.id.clone()).or_default().insert(
+                solid.clone(),
+                sign(shell.orientation) * sign(face_use.orientation) * handedness,
+            );
+        }
     }
-    Ok(normals)
+    Ok(sides)
+}
+
+fn contact_proximity_pairs(
+    topology: &ExactBRepTopology,
+    relations: &TopologyRelations<'_>,
+) -> ContactProximityPairs {
+    if topology.contacts.is_empty() {
+        return ContactProximityPairs::default();
+    }
+    let contact_faces = topology
+        .contacts
+        .iter()
+        .flat_map(|contact| {
+            contact
+                .side_a_face_ids
+                .iter()
+                .chain(&contact.side_b_face_ids)
+        })
+        .collect::<BTreeSet<_>>();
+    let vertices_by_face = contact_faces
+        .into_iter()
+        .map(|face_id| {
+            let vertices = relations
+                .face_coedges(face_id)
+                .map(|coedge| relations.edge(&coedge.edge_id))
+                .flat_map(|edge| {
+                    edge.start_vertex_id
+                        .iter()
+                        .chain(&edge.end_vertex_id)
+                        .cloned()
+                })
+                .collect::<BTreeSet<_>>();
+            (face_id.clone(), vertices)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut pairs = ContactProximityPairs::default();
+    for contact in &topology.contacts {
+        for left in &contact.side_a_face_ids {
+            for right in &contact.side_b_face_ids {
+                pairs
+                    .faces
+                    .insert(ordered_pair(left.clone(), right.clone()));
+                let left_vertices = &vertices_by_face[left];
+                let right_vertices = &vertices_by_face[right];
+                pairs.vertices.extend(left_vertices.iter().flat_map(|left| {
+                    right_vertices
+                        .iter()
+                        .map(move |right| ordered_pair(left.clone(), right.clone()))
+                }));
+            }
+        }
+    }
+    pairs
 }
 
 fn curvature_target_size(
@@ -349,6 +512,5 @@ fn normal_angle_degrees(left: [f64; 3], right: [f64; 3]) -> f64 {
     dot.acos().to_degrees()
 }
 
-fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
-    norm([left[0] - right[0], left[1] - right[1], left[2] - right[2]])
-}
+#[cfg(test)]
+mod directional_tests;

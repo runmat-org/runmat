@@ -1,12 +1,12 @@
 //! MATLAB-compatible `contour3` builtin (3-D contour lines).
 
-#[cfg(not(target_arch = "wasm32"))]
-use log::warn;
+use runmat_builtins::{
+    BuiltinErrorDescriptor, CONTOUR3_ERROR_INTERNAL, CONTOUR3_ERROR_INVALID_ARGUMENT,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 #[cfg(test)]
 use runmat_plot::plots::PlotElement;
-use runmat_value::Value;
 
 use super::common::tensor_to_surface_grid_matlab_xy;
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,7 +19,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "contour3";
 
@@ -52,21 +51,62 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "contour3",
-    category = "plotting",
-    summary = "Create 3-D contour line plots.",
-    keywords = "contour3,plotting,contour,3d,isolines",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::contour3"
 )]
-pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let mut raw_args = args.into_iter();
-    let first = raw_args.next().ok_or_else(|| {
-        crate::builtins::plotting::plotting_error(
-            BUILTIN_NAME,
-            format!("{BUILTIN_NAME}: expected at least one input"),
+pub async fn contour3_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "contour3: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "contour3")?;
+    let _arguments = args.fork();
+    work.finish(
+        contour3_impl(args, &work)
+            .await
+            .map_err(|cause| contour3_error(cause, &CONTOUR3_ERROR_INVALID_ARGUMENT)),
+    )
+}
+
+fn contour3_error(
+    cause: crate::RuntimeError,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    if cause.identifier().is_some() {
+        return cause;
+    }
+    crate::build_runtime_error(format!("{}: {}", descriptor.message, cause.message))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(
+            descriptor
+                .identifier
+                .expect("contour3 diagnostic identifier"),
         )
+        .with_source(cause)
+        .build()
+}
+
+async fn contour3_impl(
+    mut args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
+    let (axes_target, retained) = if args
+        .first()
+        .is_some_and(super::contour::is_typed_integer_value)
+    {
+        (None, args)
+    } else {
+        super::op_common::split_leading_axes_arguments(args, BUILTIN_NAME)?
+    };
+    args = retained;
+    let first = args.pop_front().ok_or_else(|| {
+        crate::builtins::plotting::plotting_error(BUILTIN_NAME, "contour3: expected Z input")
     })?;
     let ContourArgs {
         name,
@@ -76,12 +116,10 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         level_spec,
         line_color,
         line_width,
-    } = parse_contour_args(BUILTIN_NAME, first, raw_args.collect())?;
+    } = parse_contour_args(BUILTIN_NAME, first, args.view())?;
     let opts = PlotRenderOptions {
-        title: "3-D Contour Plot",
-        x_label: "X",
-        y_label: "Y",
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
     let color_map = ColorMap::Parula;
@@ -92,7 +130,7 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         let mut contour = None;
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(handle) = z_input.gpu_handle().cloned() {
-            match build_contour_gpu_plot_with_z_mode_async(
+            contour = build_contour_gpu_plot_with_z_mode_async(
                 name,
                 &x_axis,
                 &y_axis,
@@ -103,15 +141,7 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 &line_color,
                 ContourZMode::Level,
             )
-            .await
-            {
-                Ok(gpu_contour) => {
-                    contour = Some(gpu_contour);
-                }
-                Err(err) => {
-                    warn!("contour3 GPU path unavailable: {err}");
-                }
-            }
+            .await?;
         }
         if contour.is_none() {
             let z_tensor = match z_input {
@@ -139,7 +169,10 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut contour = contour;
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    work.check()?;
+    super::op_common::apply_axes_target(axes_target, BUILTIN_NAME)?;
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let Some(contour) = contour.take() else {
             return Ok(());
@@ -154,11 +187,10 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_contour_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(contour3_error(err, &CONTOUR3_ERROR_INTERNAL));
     }
     Ok(handle)
 }
@@ -166,10 +198,17 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::contour3_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::Tensor;
+    use runmat_value::{Tensor, Value};
 
     fn tensor_from(data: &[f64], rows: usize, cols: usize) -> Tensor {
         Tensor::new(data.to_vec(), vec![rows, cols]).expect("contour3 test tensor")
@@ -219,13 +258,53 @@ mod tests {
         ]))
         .expect("contour3 should accept explicit axes and style");
         assert!(handle.is_finite());
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+        )
+        .unwrap();
+        let handle = futures::executor::block_on(contour3_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2)),
+            Value::Tensor(tensor_from(&[0.5, 0.5], 1, 2)),
+        ]))
+        .expect("leading axes uses shared contour grammar");
+        assert_eq!(
+            crate::builtins::plotting::get::get_builtin(vec![
+                Value::Num(handle),
+                Value::from("Parent")
+            ])
+            .unwrap(),
+            Value::Num(ax)
+        );
     }
 
     #[test]
-    fn contour3_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::Num
+    fn contour3_catalog_infers_host_double_handle() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(2)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 1],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::CONTOUR3_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 }

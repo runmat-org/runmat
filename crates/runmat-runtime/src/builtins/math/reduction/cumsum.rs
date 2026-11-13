@@ -1,13 +1,12 @@
 //! MATLAB-compatible `cumsum` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirection};
+use crate::call::BuiltinArguments;
+use crate::context::RuntimeContext;
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinErrorDescriptor, CumulativeKind, CumulativeMissingMode as CumsumNanMode,
+    CumulativeScanDirection as CumsumDirection, CUMSUM_DESCRIPTOR, CUMSUM_ERROR_INTERNAL,
+    CUMSUM_ERROR_INVALID_ARGUMENT, CUMSUM_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -19,257 +18,11 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumsum";
 
-fn cumsum_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    cumulative_numeric_type(args, ctx)
-}
-
-const CUMSUM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cumulative sum result.",
-}];
-
-const CUMSUM_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar or array.",
-};
-
-const CUMSUM_PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "dim",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("[]"),
-    description: "Dimension selector (placeholder [] keeps default dimension).",
-};
-
-const CUMSUM_PARAM_DIRECTION: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "direction",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"forward\""),
-    description: "Scan direction: \"forward\" or \"reverse\".",
-};
-
-const CUMSUM_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nanflag",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"includenan\""),
-    description:
-        "Missing-value mode: \"includenan\"/\"includemissing\" or \"omitnan\"/\"omitmissing\".",
-};
-
-const CUMSUM_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [CUMSUM_PARAM_A];
-const CUMSUM_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [CUMSUM_PARAM_A, CUMSUM_PARAM_DIM];
-const CUMSUM_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] =
-    [CUMSUM_PARAM_A, CUMSUM_PARAM_DIRECTION];
-const CUMSUM_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [CUMSUM_PARAM_A, CUMSUM_PARAM_NANFLAG];
-const CUMSUM_INPUTS_DIM_DIRECTION: [BuiltinParamDescriptor; 3] =
-    [CUMSUM_PARAM_A, CUMSUM_PARAM_DIM, CUMSUM_PARAM_DIRECTION];
-const CUMSUM_INPUTS_DIRECTION_DIM: [BuiltinParamDescriptor; 3] =
-    [CUMSUM_PARAM_A, CUMSUM_PARAM_DIRECTION, CUMSUM_PARAM_DIM];
-const CUMSUM_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [CUMSUM_PARAM_A, CUMSUM_PARAM_DIM, CUMSUM_PARAM_NANFLAG];
-const CUMSUM_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] =
-    [CUMSUM_PARAM_A, CUMSUM_PARAM_NANFLAG, CUMSUM_PARAM_DIM];
-const CUMSUM_INPUTS_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [CUMSUM_PARAM_A, CUMSUM_PARAM_DIRECTION, CUMSUM_PARAM_NANFLAG];
-const CUMSUM_INPUTS_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 3] =
-    [CUMSUM_PARAM_A, CUMSUM_PARAM_NANFLAG, CUMSUM_PARAM_DIRECTION];
-const CUMSUM_INPUTS_DIM_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 4] = [
-    CUMSUM_PARAM_A,
-    CUMSUM_PARAM_DIM,
-    CUMSUM_PARAM_DIRECTION,
-    CUMSUM_PARAM_NANFLAG,
-];
-const CUMSUM_INPUTS_DIM_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 4] = [
-    CUMSUM_PARAM_A,
-    CUMSUM_PARAM_DIM,
-    CUMSUM_PARAM_NANFLAG,
-    CUMSUM_PARAM_DIRECTION,
-];
-const CUMSUM_INPUTS_DIRECTION_DIM_NANFLAG: [BuiltinParamDescriptor; 4] = [
-    CUMSUM_PARAM_A,
-    CUMSUM_PARAM_DIRECTION,
-    CUMSUM_PARAM_DIM,
-    CUMSUM_PARAM_NANFLAG,
-];
-const CUMSUM_INPUTS_DIRECTION_NANFLAG_DIM: [BuiltinParamDescriptor; 4] = [
-    CUMSUM_PARAM_A,
-    CUMSUM_PARAM_DIRECTION,
-    CUMSUM_PARAM_NANFLAG,
-    CUMSUM_PARAM_DIM,
-];
-const CUMSUM_INPUTS_NANFLAG_DIM_DIRECTION: [BuiltinParamDescriptor; 4] = [
-    CUMSUM_PARAM_A,
-    CUMSUM_PARAM_NANFLAG,
-    CUMSUM_PARAM_DIM,
-    CUMSUM_PARAM_DIRECTION,
-];
-const CUMSUM_INPUTS_NANFLAG_DIRECTION_DIM: [BuiltinParamDescriptor; 4] = [
-    CUMSUM_PARAM_A,
-    CUMSUM_PARAM_NANFLAG,
-    CUMSUM_PARAM_DIRECTION,
-    CUMSUM_PARAM_DIM,
-];
-
-const CUMSUM_SIGNATURES: [BuiltinSignatureDescriptor; 16] = [
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A)",
-        inputs: &CUMSUM_INPUTS_CORE,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, dim)",
-        inputs: &CUMSUM_INPUTS_DIM,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, direction)",
-        inputs: &CUMSUM_INPUTS_DIRECTION,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, nanflag)",
-        inputs: &CUMSUM_INPUTS_NANFLAG,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, dim, direction)",
-        inputs: &CUMSUM_INPUTS_DIM_DIRECTION,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, direction, dim)",
-        inputs: &CUMSUM_INPUTS_DIRECTION_DIM,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, dim, nanflag)",
-        inputs: &CUMSUM_INPUTS_DIM_NANFLAG,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, nanflag, dim)",
-        inputs: &CUMSUM_INPUTS_NANFLAG_DIM,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, direction, nanflag)",
-        inputs: &CUMSUM_INPUTS_DIRECTION_NANFLAG,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, nanflag, direction)",
-        inputs: &CUMSUM_INPUTS_NANFLAG_DIRECTION,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, dim, direction, nanflag)",
-        inputs: &CUMSUM_INPUTS_DIM_DIRECTION_NANFLAG,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, dim, nanflag, direction)",
-        inputs: &CUMSUM_INPUTS_DIM_NANFLAG_DIRECTION,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, direction, dim, nanflag)",
-        inputs: &CUMSUM_INPUTS_DIRECTION_DIM_NANFLAG,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, direction, nanflag, dim)",
-        inputs: &CUMSUM_INPUTS_DIRECTION_NANFLAG_DIM,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, nanflag, dim, direction)",
-        inputs: &CUMSUM_INPUTS_NANFLAG_DIM_DIRECTION,
-        outputs: &CUMSUM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumsum(A, nanflag, direction, dim)",
-        inputs: &CUMSUM_INPUTS_NANFLAG_DIRECTION_DIM,
-        outputs: &CUMSUM_OUTPUT,
-    },
-];
-
-const CUMSUM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMSUM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:cumsum:InvalidArgument"),
-    when: "Dimension, direction, or missing-value argument grammar is invalid.",
-    message: "cumsum: invalid argument",
-};
-
-const CUMSUM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMSUM.INVALID_INPUT",
-    identifier: Some("RunMat:cumsum:InvalidInput"),
-    when: "Input value type is unsupported for cumulative sum reduction.",
-    message: "cumsum: invalid input",
-};
-
-const CUMSUM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMSUM.INTERNAL",
-    identifier: Some("RunMat:cumsum:Internal"),
-    when: "Reduction execution fails due to conversion, provider, or allocation operations.",
-    message: "cumsum: internal reduction failure",
-};
-
-const CUMSUM_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    CUMSUM_ERROR_INVALID_ARGUMENT,
-    CUMSUM_ERROR_INVALID_INPUT,
-    CUMSUM_ERROR_INTERNAL,
-];
-
-pub const CUMSUM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CUMSUM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CUMSUM_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Ordinary real arrays accept all eight integer classes; complex-integer scans remain a separately tracked conformance question.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = cumsum(A, dim, direction, nanflag)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Every prefix preserves the integer input class and shape with per-step saturating addition; forward/reverse and missing-value spellings share the rule, and provider scan order may differ for signed saturated arithmetic.",
-    }];
-
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cumsum")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -284,12 +37,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may expose device prefix-sum kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
+    notes: "The exact input owner may expose a class-preserving scan. Only a certified no-attempt permits admitted automatic host fallback.",
 };
-
-fn cumsum_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    cumsum_error_with_message(error.message, error)
-}
 
 fn cumsum_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -324,168 +73,98 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner currently lowers cumsum to the runtime implementation; providers can substitute specialised scan kernels.",
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CumsumDirection {
-    Forward,
-    Reverse,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CumsumNanMode {
-    Include,
-    Omit,
-}
-
 #[runtime_builtin(
     name = "cumsum",
-    category = "math/reduction",
-    summary = "Compute cumulative sums.",
-    keywords = "cumsum,cumulative sum,running total,reverse,omitnan,gpu",
-    accel = "reduction",
-    type_resolver(cumsum_type),
-    descriptor(crate::builtins::math::reduction::cumsum::CUMSUM_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::reduction::cumsum::INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::math::reduction::cumsum"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::reduction::cumsum",
+    context = true
 )]
-async fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
-        return Err(cumsum_error_with_detail(
-            &CUMSUM_ERROR_INVALID_INPUT,
-            "operations involving complex numbers with integer types are not supported",
-        ));
-    }
-    let (dim, direction, nan_mode) = parse_arguments(&rest)?;
+async fn cumsum_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let _roots = super::cumulative::admission::roots(
+        runtime.as_ref(),
+        std::iter::once(&value).chain(rest.iter()),
+    )?;
+    crate::output_count::validate_fixed_outputs(
+        &CUMSUM_DESCRIPTOR,
+        &CUMSUM_ERROR_INVALID_ARGUMENT,
+        NAME,
+    )?;
+    super::cumulative::admission::input(CumulativeKind::Sum, &value)?;
+    let parsed = super::cumulative::options::parse(rest.view())
+        .map_err(|e| cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_ARGUMENT, e))?;
+
     match value {
-        Value::GpuTensor(handle) => cumsum_gpu(handle, dim, direction, nan_mode).await,
-        Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cumsum_internal_error(&e))?;
-            let target_dim = dim.unwrap_or(1);
-            let result = cumsum_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
-            Ok(complex_tensor_into_value(result))
+        Value::GpuTensor(handle) => {
+            cumsum_gpu(
+                handle,
+                parsed.dimension,
+                parsed.direction,
+                parsed.missing,
+                runtime.as_ref(),
+            )
+            .await
         }
-        Value::ComplexTensor(ct) => {
-            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&ct.shape));
-            let result = cumsum_complex_tensor(&ct, target_dim, direction, nan_mode)?;
-            Ok(complex_tensor_into_value(result))
+        other => {
+            host_value(
+                other,
+                parsed.dimension,
+                parsed.direction,
+                parsed.missing,
+                runtime.as_ref(),
+            )
+            .await
+        }
+    }
+}
+
+async fn host_value(
+    value: Value,
+    dim: Option<usize>,
+    direction: CumsumDirection,
+    nan_mode: CumsumNanMode,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<Value> {
+    super::cumulative::admission::host(CumulativeKind::Sum, runtime)?;
+    match value {
+        Value::Complex(re, im) => {
+            let tensor =
+                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(cumsum_internal_error)?;
+            host_complex(&tensor, dim.unwrap_or(1), direction, nan_mode, runtime).await
+        }
+        Value::ComplexTensor(tensor) => {
+            let dimension = dim.unwrap_or_else(|| default_dimension_from_shape(tensor.shape()));
+            host_complex(&tensor, dimension, direction, nan_mode, runtime).await
         }
         other => cumsum_host(other, dim, direction, nan_mode),
     }
 }
-
-fn parse_arguments(
-    args: &[Value],
-) -> BuiltinResult<(Option<usize>, CumsumDirection, CumsumNanMode)> {
-    if args.len() > 3 {
-        return Err(cumsum_error(&CUMSUM_ERROR_INVALID_ARGUMENT));
-    }
-
-    let mut dim: Option<usize> = None;
-    let mut direction = CumsumDirection::Forward;
-    let mut direction_set = false;
-    let mut nan_mode = CumsumNanMode::Include;
-    let mut nan_set = false;
-
-    for value in args {
-        match value {
-            Value::Int(_) | Value::Num(_) => {
-                if dim.is_some() {
-                    return Err(cumsum_error_with_detail(
-                        &CUMSUM_ERROR_INVALID_ARGUMENT,
-                        "dimension specified more than once",
-                    ));
-                }
-                dim = Some(tensor::parse_dimension(value, "cumsum").map_err(|err| {
-                    cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_ARGUMENT, err)
-                })?);
-            }
-            Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-                if dim.is_some() {
-                    return Err(cumsum_error_with_detail(
-                        &CUMSUM_ERROR_INVALID_ARGUMENT,
-                        "dimension specified more than once",
-                    ));
-                }
-                dim = Some(tensor::parse_dimension(value, "cumsum").map_err(|err| {
-                    cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_ARGUMENT, err)
-                })?);
-            }
-            Value::Tensor(t) if tensor::tensor_element_len(t) == 0 => {
-                // MATLAB allows [] as a placeholder for the default dimension; ignore it.
-            }
-            Value::LogicalArray(la) if la.data.is_empty() => {
-                // Treat logical [] the same way.
-            }
-            _ => {
-                if let Some(text) = tensor::value_to_string(value) {
-                    let keyword = text.trim().to_ascii_lowercase();
-                    match keyword.as_str() {
-                        "forward" => {
-                            if direction_set {
-                                return Err(cumsum_error_with_detail(
-                                    &CUMSUM_ERROR_INVALID_ARGUMENT,
-                                    "direction specified more than once",
-                                ));
-                            }
-                            direction = CumsumDirection::Forward;
-                            direction_set = true;
-                        }
-                        "reverse" => {
-                            if direction_set {
-                                return Err(cumsum_error_with_detail(
-                                    &CUMSUM_ERROR_INVALID_ARGUMENT,
-                                    "direction specified more than once",
-                                ));
-                            }
-                            direction = CumsumDirection::Reverse;
-                            direction_set = true;
-                        }
-                        "omitnan" | "omitmissing" => {
-                            if nan_set {
-                                return Err(cumsum_error_with_detail(
-                                    &CUMSUM_ERROR_INVALID_ARGUMENT,
-                                    "missing-value handling specified more than once",
-                                ));
-                            }
-                            nan_mode = CumsumNanMode::Omit;
-                            nan_set = true;
-                        }
-                        "includenan" | "includemissing" => {
-                            if nan_set {
-                                return Err(cumsum_error_with_detail(
-                                    &CUMSUM_ERROR_INVALID_ARGUMENT,
-                                    "missing-value handling specified more than once",
-                                ));
-                            }
-                            nan_mode = CumsumNanMode::Include;
-                            nan_set = true;
-                        }
-                        "" => {
-                            return Err(cumsum_error_with_detail(
-                                &CUMSUM_ERROR_INVALID_ARGUMENT,
-                                "empty string option is not supported",
-                            ));
-                        }
-                        other => {
-                            return Err(cumsum_error_with_detail(
-                                &CUMSUM_ERROR_INVALID_ARGUMENT,
-                                format!("unrecognised option '{other}'"),
-                            ));
-                        }
-                    }
-                } else {
-                    return Err(cumsum_error_with_detail(
-                        &CUMSUM_ERROR_INVALID_ARGUMENT,
-                        format!("unsupported argument type {value:?}"),
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok((dim, direction, nan_mode))
+async fn host_complex(
+    tensor: &ComplexTensor,
+    dimension: usize,
+    direction: CumsumDirection,
+    nan_mode: CumsumNanMode,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let options = super::cumulative::options::Options {
+        dimension: Some(dimension),
+        direction,
+        missing: nan_mode,
+        explicit_missing: false,
+    };
+    let result = super::cumulative::complex::cumulative(
+        tensor,
+        dimension,
+        &options,
+        CumulativeKind::Sum,
+        runtime,
+    )
+    .await?;
+    Ok(complex_tensor_into_value(result))
 }
-
 fn cumsum_host(
     value: Value,
     dim: Option<usize>,
@@ -503,18 +182,18 @@ fn cumsum_host(
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Sum,
             )
-            .map_err(|error| cumsum_internal_error(&error))
+            .map_err(cumsum_internal_error)
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
             crate::builtins::math::reduction::integer_native::cumulative(
                 tensor.integer_storage().expect("checked integer storage"),
-                &tensor.shape,
+                tensor.shape(),
                 target_dim,
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Sum,
             )
-            .map_err(|error| cumsum_internal_error(&error))
+            .map_err(cumsum_internal_error)
         }
         other => cumsum_host_floating(other, dim, direction, nan_mode),
     }
@@ -551,99 +230,43 @@ async fn cumsum_gpu(
     dim: Option<usize>,
     direction: CumsumDirection,
     nan_mode: CumsumNanMode,
+    runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-        cumsum_error_with_detail(
-            &CUMSUM_ERROR_INVALID_INPUT,
-            "cumsum: no acceleration provider owns the input handle",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        if let Some(target) = dim {
-            if target == 0 {
-                return Err(cumsum_error_with_detail(
-                    &CUMSUM_ERROR_INVALID_ARGUMENT,
-                    "dimension must be >= 1",
-                ));
-            }
-            if target > handle.shape.len() {
-                return Ok(Value::GpuTensor(handle));
-            }
-        }
-        let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
-        if target_dim == 0 {
-            return Err(cumsum_error_with_detail(
-                &CUMSUM_ERROR_INVALID_ARGUMENT,
-                "dimension must be >= 1",
-            ));
-        }
-        let provider_direction = match direction {
-            CumsumDirection::Forward => ProviderScanDirection::Forward,
-            CumsumDirection::Reverse => ProviderScanDirection::Reverse,
-        };
-        let device_result = provider
-            .integer_cumsum_scan(&handle, target_dim - 1, provider_direction)
-            .map_err(|err| cumsum_internal_error(format!("cumsum: {err}")))?;
-        return Ok(Value::GpuTensor(device_result));
-    }
-    if matches!(direction, CumsumDirection::Reverse) && matches!(nan_mode, CumsumNanMode::Omit) {
-        let tensor = gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map_err(|err| cumsum_internal_error(err.message()))?;
-        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
-        let result = cumsum_tensor(tensor, fallback_dim, direction, nan_mode)?;
-        return Ok(tensor::tensor_into_value(result));
-    }
-
-    if let Some(target) = dim {
-        if target == 0 {
-            return Err(cumsum_error_with_detail(
-                &CUMSUM_ERROR_INVALID_ARGUMENT,
-                "dimension must be >= 1",
-            ));
-        }
-        if target > handle.shape.len() {
-            return Ok(Value::GpuTensor(handle));
-        }
-    }
-
-    let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
-    if fallback_dim == 0 {
+    let target = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
+    if target == 0 {
         return Err(cumsum_error_with_detail(
             &CUMSUM_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
+            "dimension must be positive",
         ));
     }
-
-    let zero_based_dim = fallback_dim.saturating_sub(1);
-    if zero_based_dim < handle.shape.len() {
-        let provider_direction = match direction {
-            CumsumDirection::Forward => ProviderScanDirection::Forward,
-            CumsumDirection::Reverse => ProviderScanDirection::Reverse,
-        };
-        let provider_nan_mode = match nan_mode {
-            CumsumNanMode::Include => ProviderNanMode::Include,
-            CumsumNanMode::Omit => ProviderNanMode::Omit,
-        };
-        if let Ok(device_result) = provider.cumsum_scan(
-            &handle,
-            zero_based_dim,
-            provider_direction,
-            provider_nan_mode,
-        ) {
-            return Ok(Value::GpuTensor(device_result));
-        }
+    if target > handle.shape().len() {
+        super::cumulative::provider::identity(CumulativeKind::Sum, &handle, runtime)?;
+        return Ok(Value::GpuTensor(handle));
     }
-
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|err| cumsum_internal_error(err.message()))?;
-    let result = cumsum_tensor(tensor, fallback_dim, direction, nan_mode)?;
-    gpu_helpers::restore_class_preserving_value(
+    let result = super::cumulative::provider::execute(
+        CumulativeKind::Sum,
         &handle,
-        tensor::tensor_into_value(result),
-        "cumsum",
+        target - 1,
+        (direction, nan_mode),
+        runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+        runtime,
     )
+    .await?;
+    if let Some(result) = result {
+        return match result {
+            super::cumulative::provider::ResultValue::Values(value) => {
+                gpu_helpers::resident_gpu_value(value)
+            }
+            other => Err(other.reject(super::cumulative::failure(
+                CumulativeKind::Sum,
+                "provider returned an invalid scan result family",
+            ))),
+        };
+    }
+    let value =
+        super::cumulative::provider::fallback(CumulativeKind::Sum, &handle, runtime).await?;
+    let result = host_value(value, Some(target), direction, nan_mode, runtime).await?;
+    gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
 }
 
 fn cumsum_tensor(
@@ -652,10 +275,10 @@ fn cumsum_tensor(
     direction: CumsumDirection,
     nan_mode: CumsumNanMode,
 ) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
-        .map_err(|error| cumsum_internal_error(&error))?;
+        .map_err(cumsum_internal_error)?;
     floating_cumulative_arithmetic::cumulative(
         storage,
         shape,
@@ -673,122 +296,19 @@ fn cumsum_tensor(
     .map_err(|error| cumsum_error_with_detail(&CUMSUM_ERROR_INVALID_ARGUMENT, error))
 }
 
-fn cumsum_complex_tensor(
-    tensor: &ComplexTensor,
-    dim: usize,
-    direction: CumsumDirection,
-    nan_mode: CumsumNanMode,
-) -> BuiltinResult<ComplexTensor> {
-    if dim == 0 {
-        return Err(cumsum_error_with_detail(
-            &CUMSUM_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
-        ));
-    }
-    if tensor.materialize_f64().is_empty() || dim > tensor.shape.len() {
-        return Ok(tensor.clone());
-    }
-
-    let dim_index = dim - 1;
-    let segment_len = tensor.shape[dim_index];
-    if segment_len == 0 {
-        return Ok(tensor.clone());
-    }
-
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
-    let block = stride_before * segment_len;
-    let mut output = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
-
-    for after in 0..stride_after {
-        let base = after * block;
-        for before in 0..stride_before {
-            match direction {
-                CumsumDirection::Forward => {
-                    let mut sum = (0.0f64, 0.0f64);
-                    let mut sum_is_nan = false;
-                    for k in 0..segment_len {
-                        let idx = base + before + k * stride_before;
-                        let value = tensor.materialize_f64()[idx];
-                        let value_is_nan = value.0.is_nan() || value.1.is_nan();
-                        match nan_mode {
-                            CumsumNanMode::Include => {
-                                if sum_is_nan {
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                    continue;
-                                }
-                                if value_is_nan {
-                                    sum_is_nan = true;
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                } else {
-                                    sum.0 += value.0;
-                                    sum.1 += value.1;
-                                    output[idx] = sum;
-                                }
-                            }
-                            CumsumNanMode::Omit => {
-                                if !value_is_nan {
-                                    sum.0 += value.0;
-                                    sum.1 += value.1;
-                                }
-                                output[idx] = sum;
-                            }
-                        }
-                    }
-                }
-                CumsumDirection::Reverse => {
-                    let mut sum = (0.0f64, 0.0f64);
-                    let mut sum_is_nan = false;
-                    for offset in (0..segment_len).rev() {
-                        let idx = base + before + offset * stride_before;
-                        let value = tensor.materialize_f64()[idx];
-                        let value_is_nan = value.0.is_nan() || value.1.is_nan();
-                        match nan_mode {
-                            CumsumNanMode::Include => {
-                                if sum_is_nan {
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                    continue;
-                                }
-                                if value_is_nan {
-                                    sum_is_nan = true;
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                } else {
-                                    sum.0 += value.0;
-                                    sum.1 += value.1;
-                                    output[idx] = sum;
-                                }
-                            }
-                            CumsumNanMode::Omit => {
-                                if !value_is_nan {
-                                    sum.0 += value.0;
-                                    sum.1 += value.1;
-                                }
-                                output[idx] = sum;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumsum_internal_error(&e))
-}
-
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
-        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
-        Value::Complex(value.re, value.im)
+    if let Some([value]) = tensor.as_f64_slice() {
+        Value::Complex(value.0, value.1)
     } else {
         Value::ComplexTensor(tensor)
     }
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
-fn default_dimension_from_shape(shape: &[usize]) -> usize {
+pub(in crate::builtins::math::reduction) fn default_dimension_from_shape(shape: &[usize]) -> usize {
     if shape.is_empty() {
         return 1;
     }
@@ -799,11 +319,9 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-fn dim_product(dims: &[usize]) -> usize {
-    dims.iter()
-        .copied()
-        .fold(1usize, |acc, value| acc.saturating_mul(value))
-}
+pub(in crate::builtins::math) use super::cumulative::geometry::{
+    scan_geometry, ScanGeometry, ScanRows,
+};
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -814,22 +332,6 @@ pub(crate) mod tests {
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage,
         Tensor as BuiltinsTensor,
     };
-
-    #[test]
-    fn cumsum_type_keeps_shape() {
-        let out = cumsum_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
 
     #[test]
     fn cumsum_complex_scalar_finalizer_keeps_typed_integer_storage_without_mirror() {
@@ -847,7 +349,11 @@ pub(crate) mod tests {
     }
 
     fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::cumsum_builtin(value, rest))
+        block_on(super::cumsum_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
@@ -997,7 +503,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::Tensor(tensor), Vec::new()).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 5.0, 2.0, 7.0, 3.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1012,7 +518,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::Tensor(tensor), args).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 4.0, 3.0, 9.0, 6.0, 15.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1082,7 +588,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("cumsum");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[1].0 - 4.0).abs() < 1e-12);
@@ -1099,12 +605,12 @@ pub(crate) mod tests {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumsum_builtin(Value::GpuTensor(handle), Vec::new()).expect("cumsum");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), [4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 6.0, 10.0]);
         });
     }
@@ -1167,7 +673,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::Tensor(tensor), args).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![5.0, 4.0, 7.0, 5.0, 9.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1235,7 +741,7 @@ pub(crate) mod tests {
             .expect("cumsum");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - 0.5).abs() < 1e-12);
                 assert!((out.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
@@ -1255,7 +761,7 @@ pub(crate) mod tests {
                 .expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumsum_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")])
@@ -1272,10 +778,10 @@ pub(crate) mod tests {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let original_id = handle.buffer_id;
+            let original_id = handle.buffer_id();
             let result = cumsum_builtin(
                 Value::GpuTensor(handle.clone()),
                 vec![Value::Int(IntValue::I32(3))],
@@ -1283,8 +789,8 @@ pub(crate) mod tests {
             .expect("cumsum");
             match result {
                 Value::GpuTensor(out) => {
-                    assert_eq!(out.shape, tensor.shape);
-                    assert_eq!(out.buffer_id, original_id);
+                    assert_eq!(out.shape(), tensor.shape());
+                    assert_eq!(out.buffer_id(), original_id);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
@@ -1337,7 +843,7 @@ pub(crate) mod tests {
         let cpu = cumsum_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -1347,7 +853,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu_result).expect("gather gpu");
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(ct.shape, gathered.shape);
+                assert_eq!(ct.shape(), gathered.shape());
                 for (a, b) in ct
                     .materialize_f64()
                     .iter()
@@ -1375,7 +881,7 @@ pub(crate) mod tests {
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).unwrap();
@@ -1387,7 +893,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather gpu");
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(ct.shape, gathered.shape);
+                assert_eq!(ct.shape(), gathered.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -1402,5 +908,32 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected cpu result {other:?}"),
         }
+    }
+
+    #[test]
+    fn canonical_complex_single_prefixes_do_not_widen_or_copy_input() {
+        let input =
+            ComplexTensor::from_f32(vec![(1., 1.), (2., 0.), (-1., 1.)], vec![3, 1]).unwrap();
+        let pointer = input.as_f32_slice().unwrap().as_ptr();
+        let output = block_on(super::cumsum_builtin(
+            None,
+            Value::ComplexTensor(input.clone()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
+        assert_eq!(input.as_f32_slice().unwrap().as_ptr(), pointer);
+        let Value::ComplexTensor(output) = output else {
+            panic!("complex tensor output")
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.shape(), &[3, 1]);
+        assert_eq!(
+            output.as_f32_slice().unwrap(),
+            &[
+                runmat_value::ComplexElement(1., 1.),
+                runmat_value::ComplexElement(3., 1.),
+                runmat_value::ComplexElement(2., 2.)
+            ]
+        );
     }
 }

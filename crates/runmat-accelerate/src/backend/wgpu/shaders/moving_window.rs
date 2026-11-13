@@ -16,14 +16,14 @@ struct MovingWindowParams {
 @group(0) @binding(2) var<uniform> params: MovingWindowParams;
 
 fn isNan(value: f64) -> bool {
-    let bits = bitcast<u64>(value);
-    return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u &&
-        (bits & 0x000fffffffffffffu) != 0u;
+    let high = runmat_f64_high(value);
+    let low = runmat_f64_low(value);
+    return (high & 0x7ff00000u) == 0x7ff00000u &&
+        ((high & 0x000fffffu) != 0u || low != 0u);
 }
 
 fn nanValue() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 fn kthValue(
@@ -35,7 +35,7 @@ fn kthValue(
     fill_count: u32,
     fill: f64,
 ) -> f64 {
-    var selected = 0.0;
+    var selected: f64 = f64(0.0);
     var found = false;
 
     if (in_start <= in_end) {
@@ -138,7 +138,7 @@ fn medianValue(
         return lower;
     }
     let upper = kthValue(upper_rank, in_start, in_end, before_idx, after_idx, fill_count, fill);
-    return (lower + upper) * 0.5;
+    return (lower + upper) * f64(0.5);
 }
 
 fn pushValue(
@@ -197,7 +197,7 @@ fn pushRepeated(
     if ((*count) == 0u) {
         (*count) = repeats;
         (*mean) = value;
-        (*m2) = 0.0;
+        (*m2) = f64(0.0);
         return;
     }
     let old_count = (*count);
@@ -218,10 +218,10 @@ fn finishValue(
 ) -> f64 {
     if (count == 0u) {
         if (params.meta2.x == 0u) {
-            return 0.0;
+            return f64(0.0);
         }
         if (params.meta2.x == 2u) {
-            return 1.0;
+            return f64(1.0);
         }
         return nanValue();
     }
@@ -282,12 +282,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     var count = 0u;
-    var sum = 0.0;
-    var prod = 1.0;
-    var min_value = 0.0;
-    var max_value = 0.0;
-    var mean = 0.0;
-    var m2 = 0.0;
+    var sum: f64 = f64(0.0);
+    var prod: f64 = f64(1.0);
+    var min_value: f64 = f64(0.0);
+    var max_value: f64 = f64(0.0);
+    var mean: f64 = f64(0.0);
+    var m2: f64 = f64(0.0);
     var has_value = false;
     var saw_nan = false;
     var median_fill_count = 0u;

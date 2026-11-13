@@ -12,7 +12,37 @@ use crate::plots::{
 };
 use glam::Vec4;
 use log::trace;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[path = "figure/axes_reset.rs"]
+mod axes_reset;
+#[path = "figure/colormap.rs"]
+mod colormap;
+#[path = "figure/color_range.rs"]
+mod color_range;
+#[path = "figure/y_direction.rs"]
+mod y_direction;
+#[path = "figure/geometry_source.rs"]
+mod geometry_source;
+pub use y_direction::YDirection;
+#[path = "figure/dimensionality.rs"]
+mod dimensionality;
+#[path = "figure/limits.rs"]
+mod limits;
+#[path = "figure/preparation.rs"]
+mod preparation;
+#[path = "figure/persistence_projection/mod.rs"]
+mod persistence_projection;
+pub use limits::{
+    display_bounds_3d, positive_log_bounds, resolve_axis_bounds, AxisLimitAxis, AxisLimitMethod,
+};
+pub use persistence_projection::project_figure_for_persistence;
+pub use persistence_projection::{
+    FigureAnnotationRemap, FigureAxesContainerSelection, FigureAxesPersistenceSelection,
+    FigureAxesRemap, FigureAxesSelectionKind, FigureDecoration, FigureDecorationRemap,
+    FigurePersistenceProjection, FigurePersistenceProjectionError, FigurePersistenceSelection,
+    FigurePlotRemap, FigureProjectionRemap,
+};
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
@@ -53,6 +83,9 @@ pub struct Figure {
 
     /// Global colormap and colorbar
     pub colormap: ColorMap,
+    /// Figure-owned defaults for new/reset axes, distinct from the active-axes mirror.
+    pub default_colormap: ColorMap,
+    pub default_colormap_length: usize,
     pub colorbar_enabled: bool,
 
     /// Color mapping limits for all color-mapped plots in this figure (caxis)
@@ -68,12 +101,19 @@ pub struct Figure {
     /// For each plot element, the axes index (row-major, 0..rows*cols-1)
     plot_axes_indices: Vec<usize>,
 
+    /// Exact source grid cells retained when a hierarchy is compacted.
+    axes_grid_cells: Vec<Option<AxesGridCell>>,
+
     /// The axes index whose annotation metadata is currently active.
     pub active_axes_index: usize,
 
     /// Per-axes metadata used for subplot-correct annotations and legend state.
     pub axes_metadata: Vec<AxesMetadata>,
     pub sg_title_style: TextStyle,
+
+    /// The geometry scene (a field result or model) this figure was imported from; see
+    /// `figure/geometry_source.rs`.
+    geometry_source: Option<std::sync::Arc<crate::geometry_scene::GeometryScene>>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +124,18 @@ pub struct TextStyle {
     pub font_angle: Option<String>,
     pub interpreter: Option<String>,
     pub visible: bool,
+    /// MATLAB `HorizontalAlignment` ("left", "center", "right") for text placed in the axes.
+    pub horizontal_alignment: Option<String>,
+    /// MATLAB `VerticalAlignment` ("top", "middle", "bottom", ...) for text placed in the axes.
+    pub vertical_alignment: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AxesGridCell {
+    pub rows: u32,
+    pub columns: u32,
+    pub index: u32,
 }
 
 impl Default for TextStyle {
@@ -95,7 +147,26 @@ impl Default for TextStyle {
             font_angle: None,
             interpreter: None,
             visible: true,
+            horizontal_alignment: None,
+            vertical_alignment: None,
         }
+    }
+}
+
+impl TextStyle {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        for value in [
+            self.font_weight.as_ref(),
+            self.font_angle.as_ref(),
+            self.interpreter.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        Some(total)
     }
 }
 
@@ -128,8 +199,29 @@ impl Default for LegendStyle {
     }
 }
 
+impl LegendStyle {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        for value in [
+            self.location.as_ref(),
+            self.font_weight.as_ref(),
+            self.font_angle.as_ref(),
+            self.interpreter.as_ref(),
+            self.orientation.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        Some(total)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
+    pub colormap_length: usize,
+    pub y_direction: YDirection,
     pub axes_kind: AxesKind,
     pub overlay_parent: Option<usize>,
     pub y_axis_location: String,
@@ -152,6 +244,9 @@ pub struct AxesMetadata {
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
     pub z_limits: Option<(f64, f64)>,
+    pub x_limit_method: AxisLimitMethod,
+    pub y_limit_method: AxisLimitMethod,
+    pub z_limit_method: AxisLimitMethod,
     pub x_log: bool,
     pub y_log: bool,
     pub view_azimuth_deg: Option<f32>,
@@ -194,6 +289,76 @@ pub struct TextAnnotation {
     pub style: TextStyle,
 }
 
+impl AxesMetadata {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        for value in [
+            Some(&self.y_axis_location),
+            Some(&self.units),
+            self.title.as_ref(),
+            self.subtitle.as_ref(),
+            self.x_label.as_ref(),
+            self.y_label.as_ref(),
+            self.z_label.as_ref(),
+            self.x_tick_format.as_ref(),
+            self.y_tick_format.as_ref(),
+            Some(&self.data_aspect_ratio_mode),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        for values in [&self.x_ticks, &self.y_ticks].into_iter().flatten() {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for labels in [&self.x_tick_labels, &self.y_tick_labels]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::strings(labels)?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.color_order.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        for style in [
+            &self.axes_style,
+            &self.title_style,
+            &self.subtitle_style,
+            &self.x_label_style,
+            &self.y_label_style,
+            &self.z_label_style,
+        ] {
+            crate::plots::clone_budget::add(&mut total, style.retained_snapshot_bytes()?)?;
+        }
+        crate::plots::clone_budget::add(&mut total, self.legend_style.retained_snapshot_bytes()?)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<TextAnnotation>(
+                self.world_text_annotations.capacity(),
+            )?,
+        )?;
+        for annotation in &self.world_text_annotations {
+            crate::plots::clone_budget::add(&mut total, annotation.text.capacity())?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                annotation.style.retained_snapshot_bytes()?,
+            )?;
+        }
+        Some(total)
+    }
+}
+
 /// A plot element that can be any type of plot
 #[derive(Debug, Clone)]
 pub enum PlotElement {
@@ -222,6 +387,20 @@ pub struct LegendEntry {
     pub label: String,
     pub color: Vec4,
     pub plot_type: PlotType,
+    /// The series' marker, drawn in its swatch as MATLAB's legend draws it.
+    pub marker: Option<LegendMarker>,
+    /// False for a marker-only line (`'o'` with no line style): the swatch has no segment.
+    pub line_visible: bool,
+    /// The segment's dash pattern, as the series draws it (`'--'`, `':'`, `'-.'`).
+    pub line_style: crate::plots::line::LineStyle,
+}
+
+#[derive(Debug, Clone)]
+pub struct LegendMarker {
+    pub kind: crate::plots::scatter::MarkerStyle,
+    pub face_color: Vec4,
+    pub edge_color: Vec4,
+    pub filled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -252,7 +431,87 @@ pub enum PlotType {
     ReferenceLine,
 }
 
+#[path = "figure/metadata_budget.rs"]
+mod metadata_budget;
+pub use metadata_budget::FigureMetadataOverlay;
+
 impl Figure {
+    /// Proposed text metadata uses the same retained-body accounting as a
+    /// real snapshot, without cloning plot data or its backing allocations.
+    pub fn retained_snapshot_bytes_with_metadata<'a>(
+        &self,
+        overlays: impl IntoIterator<Item = FigureMetadataOverlay<'a>>,
+    ) -> Option<usize> {
+        let current = self.retained_snapshot_bytes()?;
+        let body = current.checked_sub(self.metadata_overlay().retained_bytes(self)?)?;
+        let mut maximum: Option<usize> = None;
+        for overlay in overlays {
+            let bytes = body.checked_add(overlay.retained_bytes(self)?)?;
+            maximum = Some(maximum.map_or(bytes, |maximum| maximum.max(bytes)));
+        }
+        maximum.or(Some(current))
+    }
+
+    pub fn metadata_overlay(&self) -> FigureMetadataOverlay<'_> {
+        FigureMetadataOverlay {
+            name: self.name.as_ref(),
+            sg_title: self.sg_title.as_ref(),
+            sg_title_style: &self.sg_title_style,
+            active_axes: None,
+        }
+    }
+
+    /// Heap bytes retained by an immutable snapshot of this figure.
+    ///
+    /// Shared GPU buffers are cheap resident handles. Reference-counted host
+    /// tables are included because the snapshot pins their payloads in memory.
+    pub fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::vec::<PlotElement>(self.plots.capacity())?;
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            self.default_colormap.retained_snapshot_bytes()?,
+        )?;
+        for value in [
+            self.name.as_ref(),
+            self.title.as_ref(),
+            self.sg_title.as_ref(),
+            self.x_label.as_ref(),
+            self.y_label.as_ref(),
+            self.z_label.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<usize>(self.plot_axes_indices.capacity())?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Option<AxesGridCell>>(
+                self.axes_grid_cells.capacity(),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<AxesMetadata>(self.axes_metadata.capacity())?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            self.sg_title_style.retained_snapshot_bytes()?,
+        )?;
+        for plot in &self.plots {
+            crate::plots::clone_budget::add(&mut total, plot.retained_snapshot_bytes()?)?;
+        }
+        for axes in &self.axes_metadata {
+            crate::plots::clone_budget::add(&mut total, axes.retained_snapshot_bytes()?)?;
+        }
+        Some(total)
+    }
+
     fn default_axes_metadata() -> AxesMetadata {
         AxesMetadata {
             axes_kind: AxesKind::Cartesian,
@@ -271,9 +530,11 @@ impl Figure {
             axis_equal: false,
             data_aspect_ratio: [1.0, 1.0, 1.0],
             data_aspect_ratio_mode: "auto".into(),
-            legend_enabled: true,
+            // As in MATLAB, a legend is shown only once `legend` is called.
+            legend_enabled: false,
             colorbar_enabled: false,
             colormap: ColorMap::Parula,
+            colormap_length: 256,
             color_limits: None,
             ..Default::default()
         }
@@ -292,7 +553,7 @@ impl Figure {
             x_label: None,
             y_label: None,
             z_label: None,
-            legend_enabled: true,
+            legend_enabled: false,
             grid_enabled: true,
             minor_grid_enabled: false,
             box_enabled: true,
@@ -304,6 +565,8 @@ impl Figure {
             y_log: false,
             axis_equal: false,
             colormap: ColorMap::Parula,
+            default_colormap: ColorMap::Parula,
+            default_colormap_length: 256,
             colorbar_enabled: false,
             color_limits: None,
             bounds: None,
@@ -311,16 +574,19 @@ impl Figure {
             axes_rows: 1,
             axes_cols: 1,
             plot_axes_indices: Vec::new(),
+            axes_grid_cells: vec![None],
             active_axes_index: 0,
             axes_metadata: vec![Self::default_axes_metadata()],
             sg_title_style: TextStyle::default(),
+            geometry_source: None,
         }
     }
 
     fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
         while self.axes_metadata.len() < min_len.max(1) {
-            self.axes_metadata.push(Self::default_axes_metadata());
+            self.axes_metadata.push(self.inherited_axes_metadata());
         }
+        self.axes_grid_cells.resize(self.axes_metadata.len(), None);
     }
 
     fn sync_legacy_fields_from_active_axes(&mut self) {
@@ -363,6 +629,80 @@ impl Figure {
 
     pub fn axes_metadata(&self, axes_index: usize) -> Option<&AxesMetadata> {
         self.axes_metadata.get(axes_index)
+    }
+
+    /// A 2D axes' automatic limits from its data extent, by its limit method, as MATLAB's
+    /// `XLimitMethod`/`YLimitMethod` set them (`tickaligned` by default): an axes that holds only
+    /// line-family series (lines, markers, stairs, stems, error bars) widens each linear axis out
+    /// to its enclosing ticks, so a trace that runs flat at the top of the data sits under a
+    /// labelled tick, clear of the border. Explicit limits, log axes, a fixed aspect and
+    /// axes holding images, bars, areas, patches or fields keep the data extent.
+    pub fn auto_axes_bounds_2d(
+        &self,
+        axes_index: usize,
+        x: (f64, f64),
+        y: (f64, f64),
+    ) -> ((f64, f64), (f64, f64)) {
+        let Some(meta) = self.axes_metadata(axes_index) else {
+            return (x, y);
+        };
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            return (x, y);
+        }
+        let mut lines_only = false;
+        for (plot, idx) in self.plots().zip(self.plot_axes_indices().iter().copied()) {
+            if idx != axes_index {
+                continue;
+            }
+            match plot {
+                PlotElement::Line(_)
+                | PlotElement::Scatter(_)
+                | PlotElement::Stairs(_)
+                | PlotElement::Stem(_)
+                | PlotElement::ErrorBar(_) => lines_only = true,
+                PlotElement::ReferenceLine(_) => {}
+                _ => return (x, y),
+            }
+        }
+        if !lines_only {
+            return (x, y);
+        }
+        let axis = |(lo, hi): (f64, f64), explicit: Option<(f64, f64)>, log: bool, method| {
+            if explicit.is_some() || log || !(lo.is_finite() && hi.is_finite() && lo < hi) {
+                (lo, hi)
+            } else {
+                resolve_axis_bounds(lo, hi, None, method)
+            }
+        };
+        (
+            axis(x, meta.x_limits, meta.x_log, meta.x_limit_method),
+            axis(y, meta.y_limits, meta.y_log, meta.y_limit_method),
+        )
+    }
+
+    pub fn axes_grid_cell(&self, axes_index: usize) -> Option<AxesGridCell> {
+        self.axes_grid_cells.get(axes_index).copied().flatten()
+    }
+
+    pub(crate) fn restore_axes_grid_cells(
+        &mut self,
+        cells: Vec<Option<AxesGridCell>>,
+    ) -> Result<(), String> {
+        if cells.len() > self.axes_metadata.len() {
+            return Err("axes grid-cell metadata exceeds the axes count".into());
+        }
+        for cell in cells.iter().flatten() {
+            let count = cell
+                .rows
+                .checked_mul(cell.columns)
+                .ok_or_else(|| "axes grid-cell dimensions overflow".to_string())?;
+            if cell.rows == 0 || cell.columns == 0 || cell.index >= count {
+                return Err("axes grid-cell metadata is invalid".into());
+            }
+        }
+        self.axes_grid_cells = cells;
+        self.axes_grid_cells.resize(self.axes_metadata.len(), None);
+        Ok(())
     }
 
     pub fn active_axes_metadata(&self) -> Option<&AxesMetadata> {
@@ -454,6 +794,28 @@ impl Figure {
     /// Set axis labels in-place
     pub fn set_axis_labels<S: Into<String>>(&mut self, x_label: S, y_label: S) {
         self.set_axes_labels(self.active_axes_index, x_label, y_label);
+        self.dirty = true;
+    }
+
+    /// Clear axes annotations when a plot replaces the axes' previous contents.
+    /// Figure/window names and the figure-wide title are unaffected.
+    pub fn reset_axes_text(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title = None;
+            meta.subtitle = None;
+            meta.x_label = None;
+            meta.y_label = None;
+            meta.z_label = None;
+            meta.title_style = TextStyle::default();
+            meta.subtitle_style = TextStyle::default();
+            meta.x_label_style = TextStyle::default();
+            meta.y_label_style = TextStyle::default();
+            meta.z_label_style = TextStyle::default();
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
 
@@ -978,6 +1340,7 @@ impl Figure {
                 meta.minor_grid_enabled = false;
             }
         }
+        self.axes_grid_cells[index] = self.axes_grid_cells.get(parent).copied().flatten();
         self.dirty = true;
         index
     }
@@ -1002,6 +1365,7 @@ impl Figure {
             meta.position = position;
             meta.position_explicit = true;
         }
+        self.axes_grid_cells[axes_index] = None;
         self.dirty = true;
     }
 
@@ -1041,6 +1405,7 @@ impl Figure {
         self.axes_cols = cols.max(1);
         let grid_axes = self.axes_rows * self.axes_cols;
         self.ensure_axes_metadata_capacity(grid_axes);
+        self.axes_grid_cells.fill(None);
         for axes_index in 0..grid_axes {
             if self
                 .axes_metadata
@@ -1048,9 +1413,7 @@ impl Figure {
                 .is_some_and(|meta| meta.overlay_parent.is_some())
             {
                 self.clear_axes(axes_index);
-                if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
-                    *meta = Self::default_axes_metadata();
-                }
+                self.axes_metadata[axes_index] = self.inherited_axes_metadata();
             }
         }
         self.active_axes_index = self.active_axes_index.min(
@@ -1101,6 +1464,23 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_limit_method(
+        &mut self,
+        axes_index: usize,
+        axis: AxisLimitAxis,
+        method: AxisLimitMethod,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            match axis {
+                AxisLimitAxis::X => meta.x_limit_method = method,
+                AxisLimitAxis::Y => meta.y_limit_method = method,
+                AxisLimitAxis::Z => meta.z_limit_method = method,
+            }
+        }
+        self.dirty = true;
+    }
+
     pub fn set_axes_box_enabled(&mut self, axes_index: usize, enabled: bool) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -1134,18 +1514,49 @@ impl Figure {
     pub fn set_axes_colormap(&mut self, axes_index: usize, cmap: ColorMap) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            if let ColorMap::Listed(colors) = &cmap {
+                meta.colormap_length = colors.len();
+            }
             meta.colormap = cmap.clone();
         }
         for (idx, plot) in self.plots.iter_mut().enumerate() {
             if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
                 continue;
             }
-            if let PlotElement::Surface(surface) = plot {
-                *surface = surface.clone().with_colormap(cmap.clone());
-            }
+            Self::apply_colormap_to_plot(plot, &cmap);
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    /// Color a colormapped plot (surface, scalar-colored scatter, contour) through `cmap`.
+    fn apply_colormap_to_plot(plot: &mut PlotElement, cmap: &ColorMap) {
+        match plot {
+            PlotElement::Surface(surface) => {
+                *surface = surface.clone().with_colormap(cmap.clone());
+            }
+            PlotElement::Scatter(scatter) => scatter.recolor_with_colormap(cmap),
+            PlotElement::Scatter3(scatter) => scatter.recolor_with_colormap(cmap),
+            PlotElement::Contour(contour) => contour.recolor_with_colormap(cmap),
+            PlotElement::ContourFill(fill) => fill.recolor_with_colormap(cmap),
+            _ => {}
+        }
+    }
+
+    /// Plots from `start` on take their axes' colormap, as MATLAB colors new graphics.
+    pub fn apply_axes_colormaps_from(&mut self, start: usize) {
+        for idx in start..self.plots.len() {
+            let axes_index = self.plot_axes_indices.get(idx).copied().unwrap_or(0);
+            let Some(cmap) = self
+                .axes_metadata
+                .get(axes_index)
+                .map(|m| m.colormap.clone())
+            else {
+                continue;
+            };
+            Self::apply_colormap_to_plot(&mut self.plots[idx], &cmap);
         }
         self.dirty = true;
     }
@@ -1160,7 +1571,9 @@ impl Figure {
                 continue;
             }
             if let PlotElement::Surface(surface) = plot {
-                surface.set_color_limits(limits);
+                if surface.color_mapping == crate::plots::surface::SurfaceColorMapping::Scaled {
+                    surface.set_color_limits(limits);
+                }
             }
         }
         if axes_index == self.active_axes_index {
@@ -1261,6 +1674,7 @@ impl Figure {
         let idx = self.normalize_axes_index(axes_index);
         self.plots.push(element);
         self.plot_axes_indices.push(idx);
+        self.geometry_source = None;
         self.dirty = true;
         self.plots.len() - 1
     }
@@ -1422,6 +1836,7 @@ impl Figure {
         }
         self.plots.remove(index);
         self.plot_axes_indices.remove(index);
+        self.geometry_source = None;
         self.dirty = true;
         Ok(())
     }
@@ -1430,6 +1845,7 @@ impl Figure {
     pub fn clear(&mut self) {
         self.plots.clear();
         self.plot_axes_indices.clear();
+        self.geometry_source = None;
         self.dirty = true;
     }
 
@@ -1441,6 +1857,7 @@ impl Figure {
             if ax == axes_index {
                 self.plots.remove(i);
                 self.plot_axes_indices.remove(i);
+                self.geometry_source = None;
             } else {
                 i += 1;
             }
@@ -1623,6 +2040,12 @@ impl Figure {
             let axes_view_bounds = axes_view_bounds
                 .and_then(|bounds| bounds.get(axes_index).copied())
                 .flatten();
+            let resolved_viewport = crate::core::ResolvedViewport {
+                pixels: axes_viewports_px
+                    .and_then(|viewports| viewports.get(axes_index).copied())
+                    .or(viewport_px),
+                view: axes_view_bounds,
+            };
             let hidden_line_removal = self
                 .axes_metadata
                 .get(axes_index)
@@ -1630,11 +2053,28 @@ impl Figure {
                 .unwrap_or(true);
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
-                    s.set_color_limits(meta.color_limits);
+                    if s.color_mapping == crate::plots::surface::SurfaceColorMapping::Scaled {
+                        s.set_color_limits(meta.color_limits);
+                    }
+                    s.colormap_length = meta.colormap_length;
                     *s = s.clone().with_colormap(meta.colormap.clone());
                 }
             }
+            if let PlotElement::Patch(patch) = p {
+                if let Some(meta) = self.axes_metadata.get(axes_index) {
+                    patch.set_color_context(
+                        meta.colormap.clone(),
+                        meta.colormap_length,
+                        meta.color_limits,
+                    );
+                }
+            }
 
+            let log_axes = self
+                .axes_metadata
+                .get(axes_index)
+                .map(|meta| (meta.x_log, meta.y_log))
+                .unwrap_or((self.x_log, self.y_log));
             match p {
                 PlotElement::Line(plot) => {
                     let axes_viewport_px = axes_viewports_px
@@ -1654,7 +2094,12 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport_gpu(axes_viewport_px, axes_view_bounds, gpu),
+                        plot.render_data_with_viewport_gpu(
+                            axes_viewport_px,
+                            axes_view_bounds,
+                            log_axes,
+                            gpu,
+                        ),
                         plot.marker_render_data(),
                     );
                 }
@@ -1663,9 +2108,9 @@ impl Figure {
                         &mut out,
                         axes_index,
                         plot.render_data_with_viewport_gpu(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
+                            resolved_viewport.pixels,
+                            resolved_viewport.view,
+                            log_axes,
                             gpu,
                         ),
                         plot.marker_render_data(),
@@ -1675,10 +2120,10 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
+                        plot.render_data_on_axes(
+                            resolved_viewport.pixels,
+                            resolved_viewport.view,
+                            log_axes,
                         ),
                         plot.marker_render_data(),
                     );
@@ -1687,21 +2132,17 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
+                        plot.render_data_on_axes(
+                            resolved_viewport.pixels,
+                            resolved_viewport.view,
+                            log_axes,
                         ),
                         plot.marker_render_data(),
                     );
                 }
                 PlotElement::Contour(plot) => out.push((
                     axes_index,
-                    plot.render_data_with_viewport(
-                        axes_viewports_px
-                            .and_then(|viewports| viewports.get(axes_index).copied())
-                            .or(viewport_px),
-                    ),
+                    plot.render_data_with_resolved_viewport(resolved_viewport),
                 )),
                 PlotElement::ReferenceLine(plot) => {
                     let (x_range, y_range) = Self::reference_line_ranges(
@@ -1716,19 +2157,16 @@ impl Figure {
                         plot.render_data_with_range(
                             x_range,
                             y_range,
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
+                            resolved_viewport.pixels,
+                            log_axes,
                         ),
                     ));
                 }
                 PlotElement::Patch(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data_with_viewport(
-                        axes_viewports_px
-                            .and_then(|viewports| viewports.get(axes_index).copied())
-                            .or(viewport_px),
-                    ) {
+                    if let Some(edge_data) =
+                        plot.edge_render_data_with_resolved_viewport(resolved_viewport)
+                    {
                         out.push((axes_index, edge_data));
                     }
                 }
@@ -1836,6 +2274,9 @@ impl Figure {
                     label,
                     color: plot.color(),
                     plot_type: plot.plot_type(),
+                    marker: plot.legend_marker(),
+                    line_visible: plot.legend_line_visible(),
+                    line_style: plot.legend_line_style(),
                 });
             }
         }
@@ -1852,11 +2293,18 @@ impl Figure {
             }
             match plot {
                 PlotElement::Pie(pie) => {
-                    for slice in pie.slice_meta() {
+                    let legend_labels = pie.legend_labels.clone();
+                    for (slice_index, slice) in pie.slice_meta().into_iter().enumerate() {
                         entries.push(LegendEntry {
-                            label: slice.label,
+                            label: legend_labels
+                                .get(slice_index)
+                                .cloned()
+                                .unwrap_or(slice.label),
                             color: slice.color,
                             plot_type: plot.plot_type(),
+                            marker: None,
+                            line_visible: true,
+                            line_style: crate::plots::line::LineStyle::Solid,
                         });
                     }
                 }
@@ -1869,6 +2317,9 @@ impl Figure {
                             label,
                             color: plot.color(),
                             plot_type: plot.plot_type(),
+                            marker: plot.legend_marker(),
+                            line_visible: plot.legend_line_visible(),
+                            line_style: plot.legend_line_style(),
                         });
                     }
                 }
@@ -1899,6 +2350,138 @@ impl Figure {
         out
     }
 
+    /// The data range an axes' colormap spans (its `CLim`): the set limits, else the range of
+    /// the colormapped data on the axes. `None` when nothing on the axes is colormapped.
+    pub fn axes_color_range(&self, axes_index: usize) -> Option<(f64, f64)> {
+        if let Some(limits) = self.axes_metadata(axes_index).and_then(|m| m.color_limits) {
+            return Some(limits);
+        }
+        let mut range: Option<(f64, f64)> = None;
+        let mut include = |lo: f64, hi: f64| {
+            if lo.is_finite() && hi.is_finite() {
+                range = Some(match range {
+                    Some((a, b)) => (a.min(lo), b.max(hi)),
+                    None => (lo, hi),
+                });
+            }
+        };
+        let finite_range = |values: &mut dyn Iterator<Item = f64>| {
+            values
+                .filter(|v| v.is_finite())
+                .fold(None, |acc: Option<(f64, f64)>, v| match acc {
+                    Some((a, b)) => Some((a.min(v), b.max(v))),
+                    None => Some((v, v)),
+                })
+        };
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            if *self.plot_axes_indices.get(plot_idx).unwrap_or(&0) != axes_index {
+                continue;
+            }
+            let found = match plot {
+                PlotElement::Surface(surface)
+                    if surface.visible && surface.color_grid.is_none() =>
+                {
+                    surface.color_limits.or_else(|| {
+                        surface
+                            .z_data
+                            .as_ref()
+                            .and_then(|rows| finite_range(&mut rows.iter().flatten().copied()))
+                    })
+                }
+                PlotElement::Scatter(scatter) if scatter.visible => {
+                    scatter.color_limits.or_else(|| {
+                        scatter
+                            .color_values
+                            .as_ref()
+                            .and_then(|values| finite_range(&mut values.iter().copied()))
+                    })
+                }
+                PlotElement::Contour(contour) if contour.visible => contour.value_range,
+                PlotElement::ContourFill(fill) if fill.visible => fill.value_range,
+                _ => None,
+            };
+            if let Some((lo, hi)) = found {
+                include(lo, hi);
+            }
+        }
+        range
+    }
+
+    /// `xline`/`yline` labels on an axes: orientation, line value, label text and line color.
+    pub fn reference_line_labels_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(ReferenceLineOrientation, f64, String, Option<Vec4>)> {
+        let mut out = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            if *self.plot_axes_indices.get(plot_idx).unwrap_or(&0) != axes_index {
+                continue;
+            }
+            if let PlotElement::ReferenceLine(line) = plot {
+                if let Some(label) = line.label.as_ref().filter(|l| !l.trim().is_empty()) {
+                    if line.visible {
+                        out.push((
+                            line.orientation,
+                            line.value,
+                            label.clone(),
+                            (!line.color_auto).then_some(line.color),
+                        ));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Every visible reference line on an axes, labelled or not: where `best` legend placement
+    /// keeps clear of them.
+    pub fn reference_lines_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(ReferenceLineOrientation, f64)> {
+        self.plots
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *self.plot_axes_indices.get(*i).unwrap_or(&0) == axes_index)
+            .filter_map(|(_, plot)| match plot {
+                PlotElement::ReferenceLine(line) if line.visible => {
+                    Some((line.orientation, line.value))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Give reference lines without a set color the theme's axes color (in this copy).
+    pub fn resolve_auto_reference_line_colors(&mut self, axes_color: Vec4) {
+        for plot in &mut self.plots {
+            if let PlotElement::ReferenceLine(line) = plot {
+                if line.color_auto {
+                    line.color = axes_color;
+                }
+            }
+        }
+    }
+
+    /// Heatmap cell labels on an axes: position, text and the color of the cell under it.
+    pub fn cell_label_marks_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(glam::Vec3, String, glam::Vec4)> {
+        let mut out = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            if *self.plot_axes_indices.get(plot_idx).unwrap_or(&0) != axes_index {
+                continue;
+            }
+            if let PlotElement::Surface(surface) = plot {
+                if surface.visible {
+                    out.extend(surface.cell_label_marks());
+                }
+            }
+        }
+        out
+    }
+
     /// Assign labels to visible plots in order
     pub fn set_labels(&mut self, labels: &[String]) {
         self.set_labels_for_axes(self.active_axes_index, labels);
@@ -1911,7 +2494,8 @@ impl Figure {
             if plot_axes != axes_index {
                 continue;
             }
-            if !plot.is_visible() {
+            // Objects hidden from the legend (HandleVisibility 'off') take no label, as in MATLAB.
+            if !plot.is_visible() || plot.is_hidden_from_legend() {
                 continue;
             }
             if idx >= labels.len() {
@@ -1920,11 +2504,12 @@ impl Figure {
             match plot {
                 PlotElement::Pie(pie) => {
                     let remaining = &labels[idx..];
+                    // Legend names go in the legend, as in MATLAB; slices keep their text.
                     if remaining.len() >= pie.values.len() {
-                        pie.set_slice_labels(remaining[..pie.values.len()].to_vec());
+                        pie.set_legend_labels(remaining[..pie.values.len()].to_vec());
                         idx += pie.values.len();
                     } else {
-                        pie.set_slice_labels(remaining.to_vec());
+                        pie.set_legend_labels(remaining.to_vec());
                         idx = labels.len();
                     }
                 }
@@ -2085,6 +2670,35 @@ fn normalize_reference_range(range: (f64, f64)) -> (f64, f64) {
 }
 
 impl PlotElement {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let (boxed, payload) = match self {
+            Self::Line(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Scatter(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Bar(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ErrorBar(plot) => (
+                std::mem::size_of::<ErrorBar>(),
+                plot.retained_snapshot_bytes()?,
+            ),
+            Self::Stairs(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Stem(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Area(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Quiver(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Pie(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Surface(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Mesh(plot) => (
+                std::mem::size_of::<MeshPlot>(),
+                plot.retained_snapshot_bytes()?,
+            ),
+            Self::Patch(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Line3(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Scatter3(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Contour(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ContourFill(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ReferenceLine(plot) => (0, plot.retained_snapshot_bytes()?),
+        };
+        boxed.checked_add(payload)
+    }
+
     /// Check if the plot is visible
     pub fn is_visible(&self) -> bool {
         match self {
@@ -2129,6 +2743,32 @@ impl PlotElement {
             PlotElement::ContourFill(plot) => plot.label.clone(),
             PlotElement::ReferenceLine(plot) => plot.label_for_legend(),
         }
+    }
+
+    fn legend_marker(&self) -> Option<LegendMarker> {
+        match self {
+            PlotElement::Line(plot) => plot.marker.as_ref().map(|m| LegendMarker {
+                kind: m.kind,
+                face_color: m.face_color,
+                edge_color: m.edge_color,
+                filled: m.filled,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The dash pattern a line-like series' legend swatch repeats.
+    fn legend_line_style(&self) -> crate::plots::line::LineStyle {
+        match self {
+            PlotElement::Line(plot) => plot.line_style,
+            PlotElement::Line3(plot) => plot.line_style,
+            PlotElement::ReferenceLine(plot) => plot.line_style,
+            _ => crate::plots::line::LineStyle::Solid,
+        }
+    }
+
+    fn legend_line_visible(&self) -> bool {
+        !matches!(self, PlotElement::Line(plot) if plot.line_style == crate::plots::line::LineStyle::None)
     }
 
     fn is_hidden_from_legend(&self) -> bool {
@@ -2178,7 +2818,7 @@ impl PlotElement {
             PlotElement::Patch(plot) => plot.effective_face_color(),
             PlotElement::Line3(plot) => plot.color,
             PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
-            PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Contour(plot) => plot.legend_color(),
             PlotElement::ContourFill(_plot) => Vec4::new(0.9, 0.9, 0.9, 1.0),
             PlotElement::ReferenceLine(plot) => plot.color,
         }
@@ -2250,7 +2890,7 @@ impl PlotElement {
             PlotElement::Contour(plot) => plot.render_data(),
             PlotElement::ContourFill(plot) => plot.render_data(),
             PlotElement::ReferenceLine(plot) => {
-                plot.render_data_with_range((0.0, 1.0), (0.0, 1.0), None)
+                plot.render_data_with_range((0.0, 1.0), (0.0, 1.0), None, (false, false))
             }
         }
     }
@@ -2383,7 +3023,8 @@ mod tests {
 
         assert_eq!(figure.len(), 0);
         assert!(figure.is_empty());
-        assert!(figure.legend_enabled);
+        assert!(!figure.legend_enabled);
+        assert!(!figure.axes_metadata(0).unwrap().legend_enabled);
         assert!(figure.grid_enabled);
     }
 
@@ -2432,6 +3073,33 @@ mod tests {
 
         figure.set_axes_title(0, "Panel");
         assert!(figure.has_any_titles());
+    }
+
+    #[test]
+    fn line_axes_autoscale_to_enclosing_ticks_so_a_flat_top_trace_clears_the_border() {
+        // A Bode magnitude: a source flat at -66 dB over a filter that falls to -123 dB.
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![1.0, 2.0], vec![-66.0, -66.0]).unwrap());
+        figure.add_line_plot(LinePlot::new(vec![1.0, 2.0], vec![-67.0, -123.0]).unwrap());
+        let (x, y) = figure.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0));
+        assert_eq!(x, (1.0, 2.0));
+        assert_eq!(y, (-140.0, -60.0));
+
+        // Explicit limits and a fixed aspect keep the data extent.
+        let mut limited = figure.clone();
+        limited.set_axes_limits(0, None, Some((-130.0, -66.0)));
+        assert_eq!(
+            limited
+                .auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0))
+                .1,
+            (-123.0, -66.0)
+        );
+        let mut equal = figure.clone();
+        equal.set_axis_equal(true);
+        assert_eq!(
+            equal.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0)).1,
+            (-123.0, -66.0)
+        );
     }
 
     #[test]
@@ -2492,7 +3160,10 @@ mod tests {
         let stats = figure.statistics();
         assert_eq!(stats.total_plots, 3);
         assert_eq!(stats.visible_plots, 3);
-        assert!(stats.has_legend);
+        // Labels alone do not show a legend, as in MATLAB; `legend` turns it on.
+        assert!(!stats.has_legend);
+        figure.legend_enabled = true;
+        assert!(figure.statistics().has_legend);
     }
 
     #[test]
@@ -2678,6 +3349,44 @@ mod tests {
             figure.axes_metadata(1).unwrap().axes_style.font_size,
             Some(14.0)
         );
+    }
+
+    #[test]
+    fn legend_entry_carries_marker_and_omits_line_for_marker_only_series() {
+        let mut figure = Figure::new();
+        let mut plot = LinePlot::new(vec![2.0], vec![6.0])
+            .unwrap()
+            .with_label("optimum");
+        plot.line_style = crate::plots::line::LineStyle::None;
+        plot.marker = Some(crate::plots::line::LineMarkerAppearance {
+            kind: crate::plots::scatter::MarkerStyle::Circle,
+            size: 10.0,
+            edge_color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            face_color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            filled: true,
+        });
+        figure.add_line_plot(plot);
+        let entry = &figure.legend_entries()[0];
+        assert!(!entry.line_visible);
+        assert!(entry.marker.as_ref().is_some_and(|m| m.filled));
+    }
+
+    #[test]
+    fn set_labels_skips_lines_hidden_from_legend() {
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
+        let mut hidden = LinePlot::new(vec![0.0, 1.0], vec![2.0, 1.0]).unwrap();
+        hidden.handle_visibility = "off".to_string();
+        figure.add_line_plot(hidden);
+        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![3.0, 4.0]).unwrap());
+        figure.set_labels(&["first".into(), "second".into()]);
+
+        let labels: Vec<String> = figure
+            .legend_entries()
+            .into_iter()
+            .map(|e| e.label)
+            .collect();
+        assert_eq!(labels, vec!["first".to_string(), "second".to_string()]);
     }
 
     #[test]

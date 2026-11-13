@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::future::ready;
 
 use futures::channel::oneshot;
@@ -31,17 +32,18 @@ struct FakeBackend {
 }
 
 struct CancellingBackend {
-    completion: RefCell<Option<oneshot::Receiver<WorkerExecution>>>,
+    completions: RefCell<VecDeque<oneshot::Receiver<WorkerExecution>>>,
 }
 
 impl CancellingBackend {
-    fn new() -> (Self, oneshot::Sender<WorkerExecution>) {
-        let (sender, completion) = oneshot::channel();
+    fn new() -> (Self, [oneshot::Sender<WorkerExecution>; 2]) {
+        let (first, first_completion) = oneshot::channel();
+        let (second, second_completion) = oneshot::channel();
         (
             Self {
-                completion: RefCell::new(Some(completion)),
+                completions: RefCell::new(VecDeque::from([first_completion, second_completion])),
             },
-            sender,
+            [first, second],
         )
     }
 }
@@ -116,10 +118,15 @@ impl WorkerBackend for CancellingBackend {
     fn execute<'a>(
         &'a self,
         _session: &'a Self::Session,
-        _request: ExecutionRequest,
+        request: ExecutionRequest,
     ) -> BackendFuture<'a, WorkerExecution> {
-        let completion = self.completion.borrow_mut().take().unwrap();
-        Box::pin(async move { Ok(completion.await.unwrap()) })
+        let completion = self.completions.borrow_mut().pop_front();
+        Box::pin(async move {
+            Ok(match completion {
+                Some(completion) => completion.await.unwrap(),
+                None => passed(request.test_id, request.attempt),
+            })
+        })
     }
 
     fn cancel<'a>(
@@ -184,7 +191,9 @@ fn remote_workload_preserves_revision_result_events_and_coverage_payload() {
     let submission = submission();
     let test_id = submission.plan.tests().next().unwrap().id.clone();
     let workload = TestAttemptWorkload::new(submission, test_id.clone(), 1).unwrap();
-    let program = workload.program_request().unwrap();
+    let program = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let decoded = TestAttemptWorkload::from_program_request(&program).unwrap();
     assert_eq!(
         decoded.submission.plan.program_revision,
@@ -205,7 +214,7 @@ fn cancellation_fences_a_late_backend_completion_without_double_reporting() {
         let submission = submission();
         let run_id = submission.plan.run_id.clone();
         let test_id = submission.plan.tests().next().unwrap().id.clone();
-        let (inner, completion) = CancellingBackend::new();
+        let (inner, [completion, next_completion]) = CancellingBackend::new();
         let backend = ExecutionWorkerBackend::new(inner, ExecutionBackendConfig::local(1)).unwrap();
         let session = backend
             .spawn(SpawnRequest {
@@ -237,10 +246,39 @@ fn cancellation_fences_a_late_backend_completion_without_double_reporting() {
             .await
             .unwrap()
             .unwrap();
+        // Cancellation retires one attempt, not the reusable worker scope.
+        let mut next = backend
+            .execute(
+                &session,
+                ExecutionRequest {
+                    test_id: test_id.clone(),
+                    attempt: 2,
+                    deadline_ms: None,
+                },
+            )
+            .boxed_local();
+        assert!(poll!(&mut next).is_pending());
+        // A late old completion cannot consume the new attempt's identity.
         completion.send(passed(test_id.clone(), 1)).unwrap();
         let completed = execution.await.unwrap();
+        next_completion.send(passed(test_id.clone(), 2)).unwrap();
+        let next = next.await.unwrap();
         assert_eq!(cancelled.result.test_id, test_id);
         assert_eq!(completed.result.test_id, test_id);
+        assert_eq!(next.result.attempt, 2);
+        let final_attempt = backend
+            .execute(
+                &session,
+                ExecutionRequest {
+                    test_id,
+                    attempt: 3,
+                    deadline_ms: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(final_attempt.result.attempt, 3);
+        backend.shutdown(&session).await.unwrap();
     });
 }
 

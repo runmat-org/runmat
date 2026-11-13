@@ -1,13 +1,37 @@
-use minicbor::data::Type;
-use minicbor::{Decoder, Encoder};
-use serde_json::{Map, Number, Value};
+use minicbor::Encoder;
+#[cfg(test)]
+use minicbor::{data::Type, Decoder};
+#[cfg(test)]
+use serde_json::Map;
+use serde_json::{Number, Value};
 
-use crate::{decoding_error, encoding_error, CanonicalCodecError, CanonicalLimits};
+use crate::{checkpoint, encoding_error, CanonicalCodecControl, CanonicalCodecError};
+
+#[cfg(test)]
+use crate::{decoding_error, CanonicalLimits};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct MaterializationProfile {
+    pub value_nodes: u64,
+    pub map_entries: u64,
+    pub string_bytes: u64,
+    /// Arrays and value strings: the heap collections a typed decode owns.
+    pub heap_containers: u64,
+    /// Maps decode into typed structs whose keys are not retained.
+    pub maps: u64,
+    /// String bytes excluding map keys.
+    pub value_string_bytes: u64,
+}
+
+mod profile;
+pub(crate) use profile::{chunked_profile, materialization_profile, value_profile};
 
 pub(crate) fn encode_value(
     encoder: &mut Encoder<&mut Vec<u8>>,
     value: &Value,
+    control: &dyn CanonicalCodecControl,
 ) -> Result<(), CanonicalCodecError> {
+    checkpoint(control)?;
     match value {
         Value::Null => encoder.null().map(|_| ()).map_err(encoding_error),
         Value::Bool(value) => encoder.bool(*value).map(|_| ()).map_err(encoding_error),
@@ -16,7 +40,7 @@ pub(crate) fn encode_value(
         Value::Array(values) => {
             encoder.array(values.len() as u64).map_err(encoding_error)?;
             for value in values {
-                encode_value(encoder, value)?;
+                encode_value(encoder, value, control)?;
             }
             Ok(())
         }
@@ -26,18 +50,21 @@ pub(crate) fn encode_value(
             encoder.map(entries.len() as u64).map_err(encoding_error)?;
             for (key, value) in entries {
                 encoder.str(key).map_err(encoding_error)?;
-                encode_value(encoder, value)?;
+                encode_value(encoder, value, control)?;
             }
             Ok(())
         }
     }
 }
 
+#[cfg(test)]
 pub(crate) fn decode_value(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
     depth: usize,
+    control: &dyn CanonicalCodecControl,
 ) -> Result<Value, CanonicalCodecError> {
+    checkpoint(control)?;
     if depth > limits.maximum_nesting_depth {
         return Err(CanonicalCodecError::invalid(
             "canonical decoding",
@@ -68,8 +95,8 @@ pub(crate) fn decode_value(
             })
         }
         Type::String => decode_string(decoder, limits).map(Value::String),
-        Type::Array => decode_array(decoder, limits, depth),
-        Type::Map => decode_object(decoder, limits, depth),
+        Type::Array => decode_array(decoder, limits, depth, control),
+        Type::Map => decode_object(decoder, limits, depth, control),
         other => Err(CanonicalCodecError::invalid(
             "canonical decoding",
             format!("unsupported CBOR type {other}"),
@@ -101,6 +128,7 @@ fn encode_number(
     }
 }
 
+#[cfg(test)]
 fn decode_string(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
@@ -115,10 +143,12 @@ fn decode_string(
     Ok(value.to_owned())
 }
 
+#[cfg(test)]
 fn decode_array(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
     depth: usize,
+    control: &dyn CanonicalCodecControl,
 ) -> Result<Value, CanonicalCodecError> {
     let length = bounded_length(
         decoder.array().map_err(decoding_error)?,
@@ -127,15 +157,17 @@ fn decode_array(
     )?;
     let mut values = Vec::with_capacity(length);
     for _ in 0..length {
-        values.push(decode_value(decoder, limits, depth + 1)?);
+        values.push(decode_value(decoder, limits, depth + 1, control)?);
     }
     Ok(Value::Array(values))
 }
 
+#[cfg(test)]
 fn decode_object(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
     depth: usize,
+    control: &dyn CanonicalCodecControl,
 ) -> Result<Value, CanonicalCodecError> {
     let length = bounded_length(
         decoder.map().map_err(decoding_error)?,
@@ -145,6 +177,7 @@ fn decode_object(
     let mut values = Map::new();
     let mut previous_key: Option<String> = None;
     for _ in 0..length {
+        checkpoint(control)?;
         let key = decode_string(decoder, limits)?;
         if previous_key
             .as_ref()
@@ -155,13 +188,14 @@ fn decode_object(
                 "map keys must be unique and ordered by UTF-8 bytes",
             ));
         }
-        let value = decode_value(decoder, limits, depth + 1)?;
+        let value = decode_value(decoder, limits, depth + 1, control)?;
         previous_key = Some(key.clone());
         values.insert(key, value);
     }
     Ok(Value::Object(values))
 }
 
+#[cfg(test)]
 fn bounded_length(
     length: Option<u64>,
     maximum: usize,

@@ -1,13 +1,9 @@
 //! MATLAB-compatible `polarplot` builtin.
-
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    POLARPLOT_COMPLEX_INTEGER_EXTENSION, POLARPLOT_ERROR_INTERNAL, POLARPLOT_ERROR_INVALID_ARGUMENT,
 };
+
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{AxesKind, LinePlot, LineStyle};
 use runmat_value::{ComplexTensor, Value};
@@ -16,20 +12,20 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::op_common::polar::{
     complex_tensor_columns, evaluate_theta_rho_tensors, implicit_theta, is_real_numeric_value,
     polar_to_cartesian, real_tensor_from_value, tensor_columns, EvaluatedPolarData,
 };
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::plot::build_line_plot;
 use super::plotting_error;
 use super::state::{
-    current_axes_state, current_hold_enabled, line_color_for_axes_series_index,
-    next_line_color_for_axes, next_line_style_for_axes, render_active_plot,
-    set_line_style_order_for_axes, PlotRenderOptions,
+    continue_line_color_cycle_after, current_axes_state, current_hold_enabled,
+    line_color_for_axes_series_index, next_line_color_for_axes, next_line_style_for_axes,
+    render_active_plot, set_line_style_order_for_axes, PlotRenderOptions,
 };
 use super::style::{
     looks_like_option_name, parse_line_style_args, value_as_string, LineAppearance,
@@ -37,165 +33,6 @@ use super::style::{
 };
 
 const BUILTIN_NAME: &str = "polarplot";
-
-const POLARPLOT_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the first polar line object.",
-}];
-
-const POLARPLOT_INPUTS_THETA_RHO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "theta",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Angular coordinates in radians.",
-    },
-    BuiltinParamDescriptor {
-        name: "rho",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Radial coordinates.",
-    },
-];
-
-const POLARPLOT_INPUTS_RHO: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "rhoOrZ",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Radial data with implicit theta, or complex data interpreted as angle/abs.",
-}];
-
-const POLARPLOT_INPUTS_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Polar plot inputs with optional axes handle, LineSpec, and Name/Value pairs.",
-}];
-
-const POLARPLOT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "h = polarplot(theta, rho)",
-        inputs: &POLARPLOT_INPUTS_THETA_RHO,
-        outputs: &POLARPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarplot(theta, rho, LineSpec)",
-        inputs: &POLARPLOT_INPUTS_ARGS,
-        outputs: &POLARPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarplot(theta1, rho1, ..., thetaN, rhoN)",
-        inputs: &POLARPLOT_INPUTS_ARGS,
-        outputs: &POLARPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarplot(rho)",
-        inputs: &POLARPLOT_INPUTS_RHO,
-        outputs: &POLARPLOT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarplot(Z)",
-        inputs: &POLARPLOT_INPUTS_RHO,
-        outputs: &POLARPLOT_OUTPUT_HANDLE,
-    },
-];
-
-pub const POLARPLOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLARPLOT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polarplot:InvalidArgument"),
-    when: "Input data, series grammar, axes targeting, or style arguments are invalid.",
-    message: "polarplot: invalid argument",
-};
-
-pub const POLARPLOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLARPLOT.INTERNAL",
-    identifier: Some("RunMat:polarplot:Internal"),
-    when: "Internal polar line construction or rendering fails unexpectedly.",
-    message: "polarplot: internal operation failed",
-};
-
-const POLARPLOT_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [POLARPLOT_ERROR_INVALID_ARGUMENT, POLARPLOT_ERROR_INTERNAL];
-
-pub const POLARPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLARPLOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLARPLOT_ERRORS,
-};
-
-const POLARPLOT_COMPLEX_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "polarplot-complex-integer-z",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "polarplot accepts paired complex-integer Z data as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PolarplotComplexIntegerZExtension"),
-    };
-pub const POLARPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [POLARPLOT_COMPLEX_INTEGER_EXTENSION];
-const POLARPLOT_INTEGER_COORDINATE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "theta, rho, or selected real table data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public plotting surface accepts real numeric coordinate data and explicitly permits any real numeric class in selected table variables.",
-    }];
-const POLARPLOT_COMPLEX_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "complex Z components",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public evidence does not establish paired complex-integer Z admission. RunMat keeps this useful form behind an explicit compatibility gate and checked renderer boundary.",
-    }];
-const POLARPLOT_INTEGER_SELECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "thetavar or rhovar variable indices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents numeric scalar/vector table-variable indices; these are exact one-based structural selectors.",
-    }];
-pub const POLARPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = polarplot(integer_theta,integer_rho,___) or polarplot(integer_rho,___)",
-        inputs: &POLARPLOT_INTEGER_COORDINATE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Coordinate storage is read authoritatively; polar-to-Cartesian conversion and rendering are explicit floating geometry boundaries.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = polarplot(complex_integer_Z,___)",
-        inputs: &POLARPLOT_COMPLEX_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Componentwise integer Z is gated before conversion to polar renderer geometry.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = polarplot(tbl,integer_thetavar,integer_rhovar,___)",
-        inputs: &POLARPLOT_INTEGER_SELECTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Variable selection remains exact; broader table-form implementation is tracked as a general plotting surface concern.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::polarplot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -226,18 +63,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polarplot",
-    category = "plotting",
-    summary = "Create 2-D line plots in polar coordinates.",
-    keywords = "polarplot,polar,plot,line,visualization",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::polarplot::POLARPLOT_DESCRIPTOR),
-    extensions(crate::builtins::plotting::polarplot::POLARPLOT_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::polarplot::POLARPLOT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::polarplot"
 )]
-pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+pub async fn polarplot_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "polarplot: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "polarplot")?;
+    let _arguments = args.fork();
+    work.finish(polarplot_impl(args, &work).await)
+}
+async fn polarplot_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     for value in &args {
         if crate::builtins::common::validation::is_typed_complex_integer(value) {
             crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
@@ -250,7 +97,8 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         }
     }
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_polarplot_invalid_argument)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_polarplot_invalid_argument)?;
+    work.check()?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_polarplot_invalid_argument)?;
 
     let (mut series_plans, line_style_order) =
@@ -322,12 +170,11 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Polar Plot",
-        x_label: "",
-        y_label: "",
         axis_equal: true,
         grid: true,
+        ..Default::default()
     };
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
         figure.set_axes_kind(axes_index, AxesKind::Polar);
         figure.set_axes_axis_equal(axes_index, true);
@@ -345,6 +192,10 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         }
         Ok(())
     });
+    if !hold_enabled {
+        // Rendering cleared the axes and reset the color order; resume it after these series.
+        continue_line_color_cycle_after(axes, total);
+    }
     let Some((axes_index, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
@@ -354,8 +205,7 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         plot_index,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_polarplot_internal(err));
@@ -395,7 +245,7 @@ enum ComplexInput {
 }
 
 fn parse_polar_series_specs(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(Vec<PolarSeriesPlan>, Option<Vec<LineStyle>>)> {
     if args.is_empty() {
         return Err(polarplot_err("expected at least one data series"));
@@ -445,6 +295,13 @@ fn parse_polar_series_specs(
             let token = args[idx].clone();
             idx += 1;
             let token_text = value_as_string(&token)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "polarplot",
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| polarplot_err("style tokens must be char arrays or strings"))?;
             let lower = token_text.trim().to_ascii_lowercase();
             style_tokens.push(token);
@@ -460,7 +317,7 @@ fn parse_polar_series_specs(
 
         let applies_to_all_existing = !plans.is_empty()
             && idx == args.len()
-            && style_tokens_are_name_value_only(&style_tokens);
+            && style_tokens_are_name_value_only(&style_tokens)?;
         let parsed_style = parse_line_style_args(&style_tokens, &inline_opts)?;
         if let Some(order) = parsed_style.line_style_order.clone() {
             line_style_order = Some(order);
@@ -486,15 +343,32 @@ fn parse_polar_series_specs(
     Ok((plans, line_style_order))
 }
 
-fn style_tokens_are_name_value_only(tokens: &[Value]) -> bool {
-    !tokens.is_empty()
-        && tokens.len().is_multiple_of(2)
-        && tokens
-            .chunks_exact(2)
-            .all(|pair| value_as_string(&pair[0]).is_some_and(|name| looks_like_option_name(&name)))
+fn style_tokens_are_name_value_only(tokens: &[Value]) -> crate::BuiltinResult<bool> {
+    if tokens.is_empty() || !tokens.len().is_multiple_of(2) {
+        return Ok(false);
+    }
+    for pair in tokens.chunks_exact(2) {
+        let Some(name) = value_as_string(&pair[0]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "polarplot",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
+            return Ok(false);
+        };
+        if !looks_like_option_name(&name) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn merge_group_style(target: &mut PolarSeriesPlan, source: &PolarSeriesPlan) {
+    if source.appearance.visible.is_some() {
+        target.appearance.visible = source.appearance.visible;
+    }
     if source.color_explicit {
         target.appearance.color = source.appearance.color;
         target.color_explicit = true;
@@ -579,14 +453,29 @@ fn map_polarplot_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    polarplot_error_with_detail(&POLARPLOT_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped =
+        polarplot_error_with_detail(&POLARPLOT_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_polarplot_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    polarplot_error_with_detail(&POLARPLOT_ERROR_INTERNAL, err.message)
+    let mapped = polarplot_error_with_detail(&POLARPLOT_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn polarplot_err(msg: impl Into<String>) -> RuntimeError {
@@ -596,6 +485,22 @@ fn polarplot_err(msg: impl Into<String>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn parse_polar_series_specs(
+        args: Vec<Value>,
+    ) -> BuiltinResult<(Vec<PolarSeriesPlan>, Option<Vec<LineStyle>>)> {
+        super::parse_polar_series_specs(crate::builtins::common::test_support::builtin_arguments(
+            args,
+        ))
+    }
+
+    async fn polarplot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::polarplot_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clone_figure, current_figure_handle, reset_hold_state_for_run, reset_plot_state,
@@ -632,15 +537,45 @@ mod tests {
         let (plans, _) = parse_polar_series_specs(vec![
             tensor(&[0.0, 1.0]),
             tensor(&[1.0, 2.0]),
-            Value::String("r--".to_string()),
+            Value::String("r--".to_string().into()),
             tensor(&[2.0, 3.0]),
-            Value::String("LineWidth".to_string()),
+            Value::String("LineWidth".to_string().into()),
             Value::Num(2.0),
         ])
         .unwrap();
         assert_eq!(plans.len(), 2);
         assert!(plans[0].line_style_explicit);
         assert!(plans[1].appearance.line_width > 1.0);
+    }
+
+    #[test]
+    fn trailing_group_visibility_overrides_false_and_unset_does_not() {
+        let (plans, _) = parse_polar_series_specs(vec![
+            tensor(&[0.0, 1.0]),
+            tensor(&[1.0, 2.0]),
+            Value::from("Visible"),
+            Value::from("off"),
+            tensor(&[2.0, 3.0]),
+            Value::from("Visible"),
+            Value::from("on"),
+        ])
+        .unwrap();
+        assert_eq!(plans.len(), 2);
+        assert!(plans
+            .iter()
+            .all(|plan| plan.appearance.visible == Some(true)));
+        let (plans, _) = parse_polar_series_specs(vec![
+            tensor(&[0.0, 1.0]),
+            tensor(&[1.0, 2.0]),
+            Value::from("Visible"),
+            Value::from("off"),
+            tensor(&[2.0, 3.0]),
+            Value::from("LineWidth"),
+            Value::Num(2.0),
+        ])
+        .unwrap();
+        assert_eq!(plans[0].appearance.visible, Some(false));
+        assert_eq!(plans[1].appearance.visible, None);
     }
 
     #[test]
@@ -727,7 +662,7 @@ mod tests {
         futures::executor::block_on(polarplot_builtin(vec![
             theta,
             rho,
-            Value::String("LineWidth".to_string()),
+            Value::String("LineWidth".to_string().into()),
             Value::Num(2.0),
         ]))
         .unwrap();

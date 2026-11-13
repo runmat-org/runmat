@@ -8,37 +8,71 @@ use crate::{JitError, JitResult};
 
 pub struct GenericCompiler;
 
+/// Backend policy, separate from representation specialization/tier admission.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CompilerOptimization {
+    /// Legacy entrypoints: cold generic code unoptimized, specialized code speed.
+    #[default]
+    TierDefault,
+    None,
+    Size,
+    Speed,
+}
+
+impl CompilerOptimization {
+    pub fn cranelift_opt_level(self, specialized: bool) -> &'static str {
+        match self {
+            Self::TierDefault if specialized => "speed",
+            Self::TierDefault | Self::None => "none",
+            Self::Size => "speed_and_size",
+            Self::Speed => "speed",
+        }
+    }
+}
+
 impl GenericCompiler {
     pub fn compile(
         assembly: &runmat_native_codegen::NativeAssembly,
     ) -> JitResult<runmat_native_executor::NativeExecutable> {
-        Self::compile_with_optimization(assembly, false)
+        Self::compile_with_optimization(assembly, CompilerOptimization::TierDefault, false)
     }
 
     pub fn compile_specialized(
         assembly: &runmat_native_codegen::NativeAssembly,
     ) -> JitResult<runmat_native_executor::NativeExecutable> {
-        Self::compile_with_optimization(assembly, true)
+        Self::compile_with_optimization(assembly, CompilerOptimization::TierDefault, true)
+    }
+
+    pub fn compile_with_policy(
+        assembly: &runmat_native_codegen::NativeAssembly,
+        policy: CompilerOptimization,
+    ) -> JitResult<runmat_native_executor::NativeExecutable> {
+        Self::compile_with_optimization(assembly, policy, false)
     }
 
     fn compile_with_optimization(
         assembly: &runmat_native_codegen::NativeAssembly,
+        policy: CompilerOptimization,
         specialized: bool,
     ) -> JitResult<runmat_native_executor::NativeExecutable> {
         assembly.verify()?;
+        assembly.target.require_host_executable()?;
         let mut flags = cranelift_codegen::settings::builder();
         flags
             .set("use_colocated_libcalls", "false")
             .map_err(module_error)?;
         flags.set("is_pic", "false").map_err(module_error)?;
         flags.set("enable_verifier", "true").map_err(module_error)?;
-        if specialized {
-            flags.set("opt_level", "speed").map_err(module_error)?;
-        }
-        let isa = cranelift_native::builder()
-            .map_err(|error| JitError::Module(error.to_string()))?
-            .finish(cranelift_codegen::settings::Flags::new(flags))
+        flags
+            .set("opt_level", policy.cranelift_opt_level(specialized))
             .map_err(module_error)?;
+        // This module and its host-tuned code remain in-process behind the
+        // executor/cache owner; no portable machine-code cache key is claimed.
+        let isa = runmat_native_codegen::cranelift::compilation_isa(
+            &assembly.target,
+            runmat_native_codegen::cranelift::IsaCompilationPurpose::ExactHostInProcessJit,
+            cranelift_codegen::settings::Flags::new(flags),
+        )?;
         let builder = JITBuilder::with_isa(isa, default_libcall_names());
         let mut module = JITModule::new(builder);
         let mut definitions = Vec::with_capacity(assembly.functions.len());

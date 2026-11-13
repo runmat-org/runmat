@@ -1,75 +1,20 @@
 //! MATLAB-compatible `stopWords` builtin.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::STOP_WORDS_ERROR_INVALID_INPUT;
 use runmat_macros::runtime_builtin;
-use runmat_value::{StringArray, Value};
+use runmat_value::Value;
 
-use crate::builtins::strings::core::compat::scalar_text;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const OUT_WORDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "words",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Stop word list.",
-}];
-
-const LANGUAGE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("Language"),
-        description: "Language option name.",
-    },
-    BuiltinParamDescriptor {
-        name: "language",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("en"),
-        description: "Stop word language: en, ja, de, or ko.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STOPWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:stopWords:InvalidInput"),
-    when: "Inputs are not a supported stopWords form.",
-    message: "stopWords: invalid input",
+use crate::builtins::strings::common::{
+    contains_numeric_or_resident_text_input, scalar_text_input, text_input_admission,
 };
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const STOP_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "words = stopWords",
-            inputs: &[],
-            outputs: &OUT_WORDS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "words = stopWords('Language', language)",
-            inputs: &LANGUAGE_INPUTS,
-            outputs: &OUT_WORDS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-fn string_array_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::String
-}
+#[path = "stopwords/output.rs"]
+mod output;
 
 fn stopwords_error(message: impl Into<String>) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin("stopWords");
-    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+    if let Some(identifier) = STOP_WORDS_ERROR_INVALID_INPUT.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -77,40 +22,49 @@ fn stopwords_error(message: impl Into<String>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "stopWords",
-    category = "strings/text_analytics",
-    summary = "Return common stop words for supported Text Analytics languages.",
-    keywords = "stopWords,stop words,text analytics,language,string",
-    accel = "sink",
-    type_resolver(string_array_type),
-    descriptor(crate::builtins::strings::text_analytics::stopwords::STOP_WORDS_DESCRIPTOR),
-    builtin_path = "crate::builtins::strings::text_analytics::stopwords"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::stopwords",
+    context = true
 )]
-async fn stop_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let language = parse_language_args(args).await?;
+async fn stop_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let language = parse_language_args(runtime.as_ref(), args)?;
     let words = stop_words_for_language(language);
-    let strings = words.iter().map(|word| (*word).to_string()).collect();
-    StringArray::new(strings, vec![words.len(), 1])
-        .map(Value::StringArray)
-        .map_err(|err| stopwords_error(format!("stopWords: {err}")))
+    output::string_array(runtime.as_ref(), words).map(Value::StringArray)
 }
 
-async fn parse_language_args(args: Vec<Value>) -> BuiltinResult<StopWordsLanguage> {
+fn parse_language_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<StopWordsLanguage> {
     match args.len() {
         0 => Ok(StopWordsLanguage::English),
         2 => {
-            let name = gather_if_needed_async(&args[0]).await.map_err(|err| {
-                stopwords_error(format!("stopWords: failed to gather option name: {err}"))
-            })?;
-            let value = gather_if_needed_async(&args[1]).await.map_err(|err| {
-                stopwords_error(format!("stopWords: failed to gather language value: {err}"))
-            })?;
-            let option = scalar_text(&name, "stopWords")?.to_ascii_lowercase();
-            if option != "language" {
+            if args.iter().any(contains_numeric_or_resident_text_input) {
+                return Err(stopwords_error(
+                    "stopWords: expected host text option and language",
+                ));
+            }
+            // The preflight above excludes resident values even inside aggregates.
+            // Borrow host controls directly so an existing text payload is never
+            // cloned before its operation-specific admission.
+            let option = scalar_text_input(&args[0], runtime, |runtime, cause| {
+                text_input_admission("stopWords", runtime, cause)
+            })?
+            .ok_or_else(|| stopwords_error("stopWords: expected text option"))?;
+            if !option.as_str().eq_ignore_ascii_case("language") {
                 return Err(stopwords_error(format!(
-                    "stopWords: unsupported option '{option}'"
+                    "stopWords: unsupported option '{}'",
+                    option.as_str()
                 )));
             }
-            parse_language(&scalar_text(&value, "stopWords")?)
+            let language = scalar_text_input(&args[1], runtime, |runtime, cause| {
+                text_input_admission("stopWords", runtime, cause)
+            })?
+            .ok_or_else(|| stopwords_error("stopWords: expected text language"))?;
+            parse_language(language.as_str())
         }
         _ => Err(stopwords_error(
             "stopWords: expected stopWords or stopWords('Language', language)",
@@ -127,14 +81,18 @@ pub(in crate::builtins::strings::text_analytics) enum StopWordsLanguage {
 }
 
 fn parse_language(language: &str) -> BuiltinResult<StopWordsLanguage> {
-    match language.to_ascii_lowercase().as_str() {
-        "en" => Ok(StopWordsLanguage::English),
-        "ja" => Ok(StopWordsLanguage::Japanese),
-        "de" => Ok(StopWordsLanguage::German),
-        "ko" => Ok(StopWordsLanguage::Korean),
-        other => Err(stopwords_error(format!(
-            "stopWords: language must be 'en', 'ja', 'de', or 'ko', got '{other}'"
-        ))),
+    if language.eq_ignore_ascii_case("en") {
+        Ok(StopWordsLanguage::English)
+    } else if language.eq_ignore_ascii_case("ja") {
+        Ok(StopWordsLanguage::Japanese)
+    } else if language.eq_ignore_ascii_case("de") {
+        Ok(StopWordsLanguage::German)
+    } else if language.eq_ignore_ascii_case("ko") {
+        Ok(StopWordsLanguage::Korean)
+    } else {
+        Err(stopwords_error(format!(
+            "stopWords: language must be 'en', 'ja', 'de', or 'ko', got '{language}'"
+        )))
     }
 }
 
@@ -716,18 +674,56 @@ const KOREAN_STOP_WORDS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::host_effect::ManagedHostEffectLedger;
+    use crate::context::{
+        ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+    };
     use futures::executor::block_on;
     use runmat_value::CharArray;
+    use std::rc::Rc;
 
-    fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(stop_words_builtin(args))
+    struct ManagedParallel(ManagedHostEffectLedger);
+
+    impl RuntimeParallelService for ManagedParallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
     }
 
-    fn words(value: Value) -> Vec<String> {
+    fn managed_runtime(ledger: &ManagedHostEffectLedger) -> crate::context::RuntimeContext {
+        crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+    }
+
+    fn call(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(stop_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+    }
+
+    fn words(value: Value) -> runmat_value::StringArray {
         match value {
             Value::StringArray(array) => {
                 assert_eq!(array.cols, 1);
-                array.data
+                array
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -736,11 +732,14 @@ mod tests {
     #[test]
     fn stop_words_default_returns_english_column() {
         let out = words(call(Vec::new()).expect("stopWords"));
-        assert!(out.len() > 100);
-        assert_eq!(out.first().map(String::as_str), Some("a"));
-        assert!(out.contains(&"and".to_string()));
-        assert!(out.contains(&"the".to_string()));
-        assert!(out.contains(&"you're".to_string()));
+        assert!(out.data().len() > 100);
+        assert_eq!(out.data().first().and_then(|text| text.as_str()), Some("a"));
+        assert!(out.data().iter().any(|text| text.as_str() == Some("and")));
+        assert!(out.data().iter().any(|text| text.as_str() == Some("the")));
+        assert!(out
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("you're")));
     }
 
     #[test]
@@ -752,8 +751,14 @@ mod tests {
             ])
             .expect("German stop words"),
         );
-        assert!(german.contains(&"und".to_string()));
-        assert!(german.contains(&"über".to_string()));
+        assert!(german
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("und")));
+        assert!(german
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("über")));
 
         let japanese = words(
             call(vec![
@@ -762,8 +767,14 @@ mod tests {
             ])
             .expect("Japanese stop words"),
         );
-        assert!(japanese.contains(&"これ".to_string()));
-        assert!(japanese.contains(&"する".to_string()));
+        assert!(japanese
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("これ")));
+        assert!(japanese
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("する")));
 
         let korean = words(
             call(vec![
@@ -772,8 +783,14 @@ mod tests {
             ])
             .expect("Korean stop words"),
         );
-        assert!(korean.contains(&"그리고".to_string()));
-        assert!(korean.contains(&"합니다".to_string()));
+        assert!(korean
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("그리고")));
+        assert!(korean
+            .data()
+            .iter()
+            .any(|text| text.as_str() == Some("합니다")));
     }
 
     #[test]
@@ -797,5 +814,28 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:stopWords:InvalidInput"));
         assert!(err.message().contains("language must be"));
+    }
+
+    #[test]
+    fn managed_vocabulary_claims_original_text_until_last_alias_and_refuses_under_budget() {
+        let denied = ManagedHostEffectLedger::new(1);
+        let error = output::string_array(Some(&managed_runtime(&denied)), &["a", "über"])
+            .expect_err("all output layers require pre-effect admission");
+        assert!(error.message().contains("stopWords"));
+        assert_eq!(denied.snapshot().live_reserved_bytes, 0);
+
+        let ledger = ManagedHostEffectLedger::new(1 << 20);
+        let context = managed_runtime(&ledger);
+        let output = output::string_array(Some(&context), &["a", "über"])
+            .expect("admitted static vocabulary");
+        assert_eq!(output.shape(), &[2, 1]);
+        assert_eq!(output.data()[1].as_str(), Some("über"));
+        let retained = ledger.snapshot().live_reserved_bytes;
+        assert!(retained > 0);
+        let alias = output.clone();
+        drop(output);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+        drop(alias);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 }

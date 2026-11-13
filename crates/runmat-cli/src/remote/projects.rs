@@ -1,7 +1,7 @@
 use anyhow::Result;
 use runmat_server_client::auth::{
-    build_public_client, map_public_error, resolve_auth_token, resolve_org_id, resolve_project_id,
-    resolve_server_url, RemoteConfig,
+    build_public_client, map_public_error, resolve_auth_token, resolve_public_org_id,
+    resolve_public_project_id, resolve_server_url, RemoteConfig,
 };
 use runmat_server_client::public_api;
 use uuid::Uuid;
@@ -14,13 +14,16 @@ pub async fn list_projects(
     cursor: Option<String>,
 ) -> Result<()> {
     let mut config = RemoteConfig::load()?;
-    let org_id = resolve_org_id(&config, org)?;
+    let org_id = resolve_public_org_id(&config, org)?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
-    let org_id = org_id.to_string();
     let response = client
-        .list_projects(&org_id, cursor.as_deref(), limit.map(|value| value as u64))
+        .list_projects(
+            org_id.as_str(),
+            cursor.as_deref(),
+            limit.map(|value| value as u64),
+        )
         .await
         .map_err(map_public_error)?
         .into_inner();
@@ -35,14 +38,13 @@ pub async fn list_projects(
 
 pub async fn create_project(org: Option<Uuid>, name: String) -> Result<()> {
     let mut config = RemoteConfig::load()?;
-    let org_id = resolve_org_id(&config, org)?;
+    let org_id = resolve_public_org_id(&config, org)?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
-    let org_id = org_id.to_string();
     let response = client
         .create_project(
-            &org_id,
+            org_id.as_str(),
             &public_api::types::ProjectCreateRequest {
                 handle: None,
                 name,
@@ -62,14 +64,13 @@ pub async fn list_project_members(
     cursor: Option<String>,
 ) -> Result<()> {
     let mut config = RemoteConfig::load()?;
-    let project_id = resolve_project_id(&config, project)?;
+    let project_id = resolve_public_project_id(&config, project)?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
-    let project_id = project_id.to_string();
     let response = client
         .list_project_memberships(
-            &project_id,
+            project_id.as_str(),
             cursor.as_deref(),
             limit.map(|value| value as u64),
         )
@@ -95,7 +96,8 @@ pub async fn select_project(project_id: Uuid) -> Result<()> {
     println!(
         "{} {}",
         presentation::stdout().success("Default project set to"),
-        presentation::stdout().identifier(project_id)
+        presentation::stdout()
+            .identifier(runmat_server_client::ids::ProjectId::from_uuid(project_id))
     );
     Ok(())
 }

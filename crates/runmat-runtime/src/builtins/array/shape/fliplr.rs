@@ -1,104 +1,19 @@
 //! MATLAB-compatible `fliplr` builtin with GPU-aware semantics for RunMat.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::array::shape::flip::{
     complex_tensor_into_value, flip_char_array_with, flip_complex_tensor_with, flip_gpu_with,
     flip_logical_array_with, flip_string_array_with, flip_tensor_with,
 };
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Value};
 
 const LR_DIM: [usize; 1] = [2];
 const BUILTIN_NAME: &str = "fliplr";
-
-const FLIPLR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
-    }];
-pub const FLIPLR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = fliplr(integer_A)",
-        inputs: &FLIPLR_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Dimension 2 is reversed exactly; GPU fallback restores the result to the owning provider.",
-    }];
-
-fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape: Some(shape) } => Type::Tensor {
-            shape: Some(shape.clone()),
-        },
-        Type::Logical { shape: Some(shape) } => Type::Logical {
-            shape: Some(shape.clone()),
-        },
-        Type::Tensor { shape: None } => Type::tensor(),
-        Type::Logical { shape: None } => Type::logical(),
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::fliplr")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "fliplr",
-    op_kind: GpuOpKind::Custom("flip"),
-    supported_precisions: &[
-        ScalarType::F32,
-        ScalarType::F64,
-        ScalarType::I32,
-        ScalarType::Bool,
-    ],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("flip")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Delegates to the generic flip hook with axis=1; falls back to host mirror when the hook is missing.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::fliplr")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "fliplr",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Acts as a data-reordering barrier; fusion planner preserves residency but does not fuse through fliplr.",
-};
 
 fn fliplr_error(message: impl Into<String>) -> RuntimeError {
     fliplr_error_with_message(message, &FLIPLR_ERROR_INVALID_INPUT)
@@ -107,52 +22,6 @@ fn fliplr_error(message: impl Into<String>) -> RuntimeError {
 fn fliplr_error_descriptor(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     fliplr_error_with_message(error.message, error)
 }
-
-const FLIPLR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array mirrored left-to-right (dimension 2).",
-}];
-
-const FLIPLR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array/value to reverse along columns.",
-}];
-
-const FLIPLR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "B = fliplr(A)",
-    inputs: &FLIPLR_INPUTS,
-    outputs: &FLIPLR_OUTPUT,
-}];
-
-const FLIPLR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIPLR.INVALID_INPUT",
-    identifier: Some("RunMat:fliplr:InvalidInput"),
-    when: "Input type or conversion path is unsupported for fliplr.",
-    message: "fliplr: invalid input argument",
-};
-
-const FLIPLR_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIPLR.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:fliplr:UnsupportedInput"),
-    when: "Input type is unsupported for fliplr.",
-    message: "fliplr: unsupported input type",
-};
-
-const FLIPLR_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [FLIPLR_ERROR_INVALID_INPUT, FLIPLR_ERROR_UNSUPPORTED_INPUT];
-
-pub const FLIPLR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FLIPLR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FLIPLR_ERRORS,
-};
 
 fn fliplr_error_with_message(
     message: impl Into<String>,
@@ -177,16 +46,15 @@ fn remap_fliplr_error(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "fliplr",
-    category = "array/shape",
-    summary = "Flip arrays left-to-right.",
-    keywords = "fliplr,flip,horizontal,matrix,gpu",
-    accel = "custom",
-    type_resolver(preserve_matrix_type),
-    descriptor(crate::builtins::array::shape::fliplr::FLIPLR_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::fliplr::FLIPLR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
 async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &FLIPLR_DESCRIPTOR,
+        &FLIPLR_ERROR_INVALID_INPUT,
+        BUILTIN_NAME,
+    )?;
     match value {
         Value::Tensor(tensor) => Ok(flip_tensor_with("fliplr", tensor, &LR_DIM)
             .map(tensor::tensor_into_value)
@@ -210,7 +78,7 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::CharArray(chars) => Ok(flip_char_array_with("fliplr", chars, &LR_DIM)
             .map(Value::CharArray)
             .map_err(remap_fliplr_error)?),
-        Value::String(scalar) => Ok(Value::String(scalar)),
+        Value::String(scalar) => Ok(Value::String(scalar.into())),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Num(n))
                 .map_err(|e| fliplr_error(e))?;
@@ -239,13 +107,17 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
             "fliplr: cell arrays are not yet supported",
             &FLIPLR_ERROR_UNSUPPORTED_INPUT,
         )),
-        Value::FunctionHandle(_)
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(array) => struct_ops::flip(array, 1)
+            .map(Value::StructArray)
+            .map_err(|error| struct_ops::remap(error, |message| fliplr_error(message))),
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -256,6 +128,8 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
@@ -274,38 +148,13 @@ pub(crate) mod tests {
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
     use runmat_value::{
-        CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
+        CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructArray,
         Tensor, Value,
     };
 
     #[test]
-    fn fliplr_type_keeps_matrix_shape() {
-        let out = preserve_matrix_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn fliplr_type_keeps_full_nd_shape_and_integer_contract() {
-        let shape = vec![Some(2), Some(3), Some(4), Some(5)];
-        let out = preserve_matrix_type(
-            &[Type::Tensor {
-                shape: Some(shape.clone()),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Tensor { shape: Some(shape) });
+    fn fliplr_integer_contract_preserves_storage() {
         assert_eq!(FLIPLR_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
         assert_eq!(
             FLIPLR_INTEGER_CAPABILITIES[0].output_class,
@@ -321,7 +170,7 @@ pub(crate) mod tests {
         let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
+                assert_eq!(out.shape(), expected.shape());
                 assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -360,7 +209,7 @@ pub(crate) mod tests {
         let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
+                assert_eq!(out.shape(), expected.shape());
                 assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -370,11 +219,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fliplr_char_array() {
-        let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("runmat".chars().collect(), 2, 3).unwrap();
         let result = fliplr_builtin(Value::CharArray(chars)).expect("fliplr");
         match result {
             Value::CharArray(out) => {
-                let collected: String = out.data.iter().collect();
+                let collected: String = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(collected, "nurtam");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -388,7 +238,7 @@ pub(crate) mod tests {
             StringArray::new(vec!["left".into(), "right".into()], vec![1, 2]).expect("strings");
         let result = fliplr_builtin(Value::StringArray(strings)).expect("fliplr");
         match result {
-            Value::StringArray(out) => assert_eq!(out.data, vec!["right", "left"]),
+            Value::StringArray(out) => assert_eq!(out.data(), vec!["right", "left"]),
             other => panic!("expected string array, got {other:?}"),
         }
     }
@@ -415,7 +265,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), vec![2, 2]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::U64(vec![
@@ -445,10 +295,10 @@ pub(crate) mod tests {
 
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), vec![2, 2]);
                 let storage = out.integer_storage().expect("typed complex integer output");
-                assert_eq!(storage.real, IntegerStorage::I16(vec![3, 4, 1, 2]));
-                assert_eq!(storage.imag, IntegerStorage::I16(vec![7, 8, 5, 6]));
+                assert_eq!(storage.real(), &IntegerStorage::I16(vec![3, 4, 1, 2]));
+                assert_eq!(storage.imag(), &IntegerStorage::I16(vec![7, 8, 5, 6]));
             }
             other => panic!("expected typed complex integer tensor, got {other:?}"),
         }
@@ -482,25 +332,41 @@ pub(crate) mod tests {
                 Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = fliplr_builtin(Value::GpuTensor(handle)).expect("fliplr gpu");
             let gathered = test_support::gather(result).expect("gather");
             let expected = flip_tensor(tensor, &LR_DIM).expect("expected");
-            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.shape(), expected.shape());
             assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn fliplr_rejects_unsupported_type() {
-        let value = Value::Struct(StructValue::new());
-        let err = fliplr_builtin(value).expect_err("structs are unsupported");
-        assert!(
-            err.to_string().contains("unsupported input type"),
-            "unexpected error message: {err}"
+    fn fliplr_preserves_scalar_and_reorders_struct_arrays() {
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
+        first.insert("value", Value::Num(1.0));
+        let first = first.finish();
+        assert_eq!(
+            fliplr_builtin(Value::Struct(first.clone())).unwrap(),
+            Value::Struct(first.clone())
+        );
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
+        second.insert("value", Value::Num(2.0));
+        let second = second.finish();
+        let array = StructArray::new(vec![first, second], vec![1, 2]).unwrap();
+        let Value::StructArray(output) = fliplr_builtin(Value::StructArray(array)).unwrap() else {
+            panic!("expected structure array");
+        };
+        assert_eq!(
+            output.get_linear(0).unwrap().fields["value"],
+            Value::Num(2.0)
+        );
+        assert_eq!(
+            output.get_linear(1).unwrap().fields["value"],
+            Value::Num(1.0)
         );
     }
 
@@ -515,13 +381,13 @@ pub(crate) mod tests {
         let expected = flip_tensor(tensor.clone(), &LR_DIM).expect("expected");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
         let value = fliplr_builtin(Value::GpuTensor(handle)).expect("fliplr gpu");
         let gathered = test_support::gather(value).expect("gather");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

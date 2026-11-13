@@ -1,0 +1,61 @@
+runmat 0.7
+std 1
+
+part vent_cover {
+    sketch s_plate on origin.xy {
+        e1 = line(start = [0 mm, 0 mm], end = [120 mm, 0 mm])
+        e2 = line(start = [120 mm, 0 mm], end = [120 mm, 80 mm])
+        e3 = line(start = [120 mm, 80 mm], end = [0 mm, 80 mm])
+        e4 = line(start = [0 mm, 80 mm], end = [0 mm, 0 mm])
+    }
+    feature base = sheet_metal.base_flange(
+        profile = sketch.s_plate,
+        rules = { thickness = 1.5 mm, bend_radius = 2 mm, rule = k_factor(k = 0.44) }
+    )
+    feature side = sheet_metal.edge_flange(
+        edges = [edges_between(feature.base.face.sheet(plate, ordinal = 1), feature.base.face.sheet_edge(e2))],
+        length = 20 mm,
+        angle = 90 deg,
+        length_reference = tangent
+    )
+    feature back = sheet_metal.edge_flange(
+        edges = [edges_between(feature.base.face.sheet(plate, ordinal = 1), feature.base.face.sheet_edge(e3))],
+        length = 20 mm,
+        angle = 90 deg,
+        length_reference = tangent
+    )
+    feature front = sheet_metal.edge_flange(
+        edges = [edges_between(feature.base.face.sheet(plate, ordinal = 1), feature.base.face.sheet_edge(e1))],
+        length = 20 mm,
+        angle = 90 deg,
+        length_reference = tangent
+    )
+    feature relief = sheet_metal.corner_relief(
+        corners = [feature.base.face.sheet(plate, ordinal = 1)],
+        relief = rectangular(size = 3 mm)
+    )
+    feature louver1 = sheet_metal.form_tool(
+        tool = louver(length = 50 mm, width = 6 mm, height = 4 mm),
+        face = feature.base.face.sheet(plate, ordinal = 1),
+        at = point(35 mm, 40 mm, 1.5 mm),
+        rotation = 90 deg
+    )
+    feature louver2 = sheet_metal.form_tool(
+        tool = louver(length = 50 mm, width = 6 mm, height = 4 mm),
+        face = feature.base.face.sheet(plate, ordinal = 1),
+        at = point(55 mm, 40 mm, 1.5 mm),
+        rotation = 90 deg
+    )
+    feature louver3 = sheet_metal.form_tool(
+        tool = louver(length = 50 mm, width = 6 mm, height = 4 mm),
+        face = feature.base.face.sheet(plate, ordinal = 1),
+        at = point(75 mm, 40 mm, 1.5 mm),
+        rotation = 90 deg
+    )
+    feature dimple = sheet_metal.form_tool(
+        tool = dimple(diameter = 12 mm, height = 3 mm),
+        face = feature.base.face.sheet(plate, ordinal = 1),
+        at = point(100 mm, 40 mm, 1.5 mm)
+    )
+    feature flat = sheet_metal.flat_pattern(fixed_face = feature.base.face.sheet(plate, ordinal = 1))
+}

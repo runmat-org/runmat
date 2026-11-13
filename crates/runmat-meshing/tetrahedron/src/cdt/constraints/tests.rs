@@ -179,6 +179,26 @@ fn exact_surface_build_is_canonical_and_retains_persistent_provenance() {
 }
 
 #[test]
+fn exact_surface_build_rejects_one_reversed_region_facet() {
+    let (topology, mut surface) = tetrahedron();
+    surface.triangles[0].node_ids.swap(1, 2);
+    surface.triangles[0].node_ids = canonical_triangle(surface.triangles[0].node_ids);
+
+    let failure = build_delaunay_constraints(
+        &topology,
+        &surface,
+        DelaunayConstraintOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap_err();
+
+    assert_eq!(failure.kind, DelaunayConstraintErrorKind::InvalidBoundary);
+    assert!(failure
+        .reason
+        .contains("consistently oriented two-manifold"));
+}
+
+#[test]
 fn shell_orientation_places_outer_region_on_the_positive_side_when_reversed() {
     let (mut topology, surface) = tetrahedron();
     topology.shells[0].orientation = TopologicalOrientation::Reversed;
@@ -195,6 +215,41 @@ fn shell_orientation_places_outer_region_on_the_positive_side_when_reversed() {
         facet.positive_side == DelaunayConstraintFacetSide::Region(region.clone())
             && facet.negative_side == DelaunayConstraintFacetSide::Exterior
     }));
+}
+
+#[test]
+fn face_use_is_classified_relative_to_the_oriented_surface_triangle() {
+    let (mut topology, surface) = tetrahedron();
+    topology.faces[0].orientation = TopologicalOrientation::Reversed;
+    topology.shells[0].face_uses[0].orientation = TopologicalOrientation::Reversed;
+    let reversed_face = topology.faces[0].id.clone();
+    for coedge in topology
+        .coedges
+        .iter_mut()
+        .filter(|coedge| coedge.face_id == reversed_face)
+    {
+        coedge.orientation = match coedge.orientation {
+            TopologicalOrientation::Forward => TopologicalOrientation::Reversed,
+            TopologicalOrientation::Reversed => TopologicalOrientation::Forward,
+        };
+    }
+    let constraints = build_delaunay_constraints(
+        &topology,
+        &surface,
+        DelaunayConstraintOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let region = entity(PersistentEntityKind::Region, "region");
+
+    assert!(constraints
+        .facets
+        .iter()
+        .filter(|facet| facet.source_face_id == reversed_face)
+        .all(|facet| {
+            facet.positive_side == DelaunayConstraintFacetSide::Exterior
+                && facet.negative_side == DelaunayConstraintFacetSide::Region(region.clone())
+        }));
 }
 
 #[test]
@@ -531,6 +586,10 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
                 curve_evaluator_id: CurveEvaluatorId::new(format!("curve:{index}")).unwrap(),
                 start_vertex_id: Some(vertices[endpoints[0]].clone()),
                 end_vertex_id: Some(vertices[endpoints[1]].clone()),
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(1.0e-10),
                 is_closed: false,
                 is_periodic: false,
                 is_degenerate: false,
@@ -546,8 +605,14 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
         .enumerate()
         .map(|(index, point_m)| ExactVertex {
             id: vertices[index].clone(),
-            point_m,
-            tolerance_m: 1.0e-10,
+            point_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    point_m,
+                ),
+            tolerance_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(
+                    1.0e-10,
+                ),
         })
         .collect(),
         interfaces: Vec::new(),
@@ -558,7 +623,7 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
         .iter()
         .map(|vertex| ExactFaceMeshNode {
             node_id: shared_curve_vertex_node_id(&vertex.id),
-            point_m: vertex.point_m,
+            point_m: vertex.point_m.canonical_value(),
             uses: Vec::new(),
         })
         .collect::<Vec<_>>();
@@ -600,7 +665,7 @@ pub(crate) fn tetrahedron() -> (ExactBRepTopology, ExactSurfaceMesh) {
             is_sheet_shell: false,
             is_watertight: true,
         }],
-        maximum_chordal_deviation_m: 0.0,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.0),
         maximum_normal_deviation_rad: 0.0,
     };
     (topology, surface)
@@ -626,9 +691,5 @@ fn canonical_triangle(nodes: [StableDigest; 3]) -> [StableDigest; 3] {
 }
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: vec!["root".to_owned()],
-    }
+    PersistentEntityId::new(kind, value.to_owned(), vec!["root".to_owned()])
 }

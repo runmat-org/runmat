@@ -1,31 +1,68 @@
 use runmat_accelerate_api::{
-    AccelProvider, ProviderCostQuery, ProviderFeasibility, ProviderFeasibilityQuery,
-    ProviderOperationFamily, ProviderOperationIdentity, ProviderRejectionCode,
+    AccelProvider, ProviderFeasibilityQuery, ProviderOperationFamily, ProviderRejectionCode,
     ProviderRepresentation, ProviderWorkload,
 };
 use runmat_execution::{
-    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
-    CandidateResourceDemand, Digest, ExecutionCandidateDescriptor, ExecutionCandidateKind,
-    ExecutionCostEstimate, PlacementGraph, PlacementGraphCandidate, PlacementGraphLimits,
-    PlacementGraphNode, PlacementPlanRequest, PlacementResourceSnapshot, PlacementRevision,
-    PlacementSignature,
+    CandidatePreparationState, Digest, ExecutionCandidateKind, ExecutionCostEstimate,
+    PlacementRevision, PlacementSignature,
 };
 use runmat_value::Value;
 
-use super::{select_candidate, summarize_values, tensor_representation, PlacementPolicy};
+use super::PlacementPolicy;
+mod cpu;
+mod multi;
+pub(crate) use cpu::LocalCpuCandidate;
+pub(crate) use multi::{
+    plan_local_multi, plan_local_multi_bounded, LocalCpuAdmission, LocalMultiPlacementRequest,
+    LocalPhysicalCandidate, LocalProviderAdmission, LocalPublicationSemantics, LocalSourceDecline,
+    PreparedPhysicalAuthority,
+};
+mod rejected;
+mod session_facts;
+mod signature;
+use rejected::{rejected_cpu_feedback, RejectedCpuFeedbackRequest};
+use session_facts::session_facts;
+fn plan_error(error: crate::placement::PlacementPlanError) -> Box<runmat_runtime::RuntimeError> {
+    Box::new(
+        runmat_runtime::build_runtime_error(error.message.clone())
+            .with_identifier(error.code)
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+            .with_source(error)
+            .build(),
+    )
+}
+#[cfg(test)]
+mod resource_tests;
 
 pub(crate) struct LocalPlacementRequest<'a> {
+    pub(crate) compound: Option<&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
     pub(crate) operation: &'a str,
+    /// Optional deterministic identity of the selected typed program. This
+    /// augments, rather than replaces, argument/resource/preparation facts.
+    pub(crate) semantic_identity: Option<Digest>,
+    pub(crate) observation_contract: TotalCandidateObservationContract,
+    pub(crate) prepared_authority:
+        Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
+    /// The selected source implementation may handle a typed provider
+    /// feasibility refusal without manufacturing a CPU placement candidate.
+    pub(crate) source_decline: LocalSourceDecline,
     pub(crate) family: ProviderOperationFamily,
     pub(crate) provider_kind: ExecutionCandidateKind,
     pub(crate) inputs: &'a [&'a Value],
     pub(crate) outputs: Vec<ProviderRepresentation>,
     pub(crate) workload: ProviderWorkload,
     pub(crate) preparation: CandidatePreparationState,
-    pub(crate) cpu: ExecutionCandidateDescriptor,
-    /// Provider execution prior without transfer components. It is used only
-    /// when the provider has no trustworthy estimate of its own.
-    pub(crate) provider_fallback: ExecutionCostEstimate,
+    pub(crate) preparation_program: Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
+    /// Requirement sealed by the selected shader producer. This is checked
+    /// through the same rejection/feedback path as provider feasibility.
+    pub(crate) shader_requirements: Option<runmat_accelerate_api::ProviderShaderRequirements>,
+    pub(crate) cpu: LocalCpuCandidate,
+    /// Explicit physical execution evidence without transfer components, or
+    /// typed absence. Provider-owned quotes take precedence over this evidence.
+    pub(crate) provider_fallback: runmat_execution::CandidateCostEvidence,
+    /// Physical transfer bytes when an admitted preparation changes the input
+    /// representation. None preserves ordinary residency-based accounting.
+    pub(crate) required_upload_bytes: Option<u64>,
     pub(crate) required_download_bytes: u64,
     pub(crate) downstream_materialization: bool,
     /// Direct provider APIs preserve caller intent after feasibility succeeds;
@@ -37,241 +74,412 @@ pub(crate) struct LocalPlacementRequest<'a> {
     pub(crate) runtime: Option<&'a runmat_runtime::context::RuntimeContext>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum LocalPlacementOutcome {
-    Selected {
-        selected: Box<ExecutionCandidateDescriptor>,
-        cpu_cost: ExecutionCostEstimate,
-        provider_cost: ExecutionCostEstimate,
-        feedback: Option<Box<LocalPlacementFeedback>>,
-    },
-    ProviderRejected {
-        code: ProviderRejectionCode,
-        cpu_cost: ExecutionCostEstimate,
-    },
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TotalCandidateObservationContract {
+    PreparationBodyCleanup,
+    FullCall,
+    NativeFullCall,
+}
+
+fn observation_revision(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    contract: TotalCandidateObservationContract,
+    authority: Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    native_right: Option<
+        &runmat_runtime::numeric_region::service::NativeNumericRegionSelectionAuthority,
+    >,
+    provider_digest: Digest,
+    policy: PlacementPolicy,
+) -> Option<PlacementRevision> {
+    match (contract, authority) {
+        (TotalCandidateObservationContract::NativeFullCall, None)
+            if native_right.is_some_and(|right| right.is_current(runtime)) =>
+        {
+            Some(super::revision::local(
+                runtime.program_revision().cloned(),
+                provider_digest,
+                policy,
+            ))
+        }
+        (TotalCandidateObservationContract::PreparationBodyCleanup, None) => Some(
+            super::revision::local(runtime.program_revision().cloned(), provider_digest, policy),
+        ),
+        (TotalCandidateObservationContract::FullCall, None) if vm_right.is_some() => {
+            let right = vm_right?;
+            // Recheck the installed VM generation without retaining a lease
+            // across planning; publication consumes the selected right.
+            session_revision_only(right.planning_revision(runtime)?)
+        }
+        (TotalCandidateObservationContract::FullCall, Some(authority)) => {
+            let revision = runtime
+                .service_ports()
+                .placement()?
+                .whole_work_runtime_binding_session_revision(
+                    runtime.program_revision().cloned(),
+                    authority.binding(),
+                    authority.generation(),
+                )?;
+            session_revision_only(revision)
+        }
+        _ => None,
+    }
+}
+
+fn session_revision_only(revision: PlacementRevision) -> Option<PlacementRevision> {
+    matches!(
+        revision.authority,
+        runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+    )
+    .then_some(revision)
+}
+
+/// The selected provider capability snapshot is an invalidation namespace,
+/// not a replacement for the VM/prepared binding execution authority.
+fn session_provider_provenance(revision: &PlacementRevision, provider: Digest) -> Option<Digest> {
+    matches!(
+        revision.authority,
+        runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+    )
+    .then_some(provider)
+}
+
+fn observation_semantic_identity(
+    contract: TotalCandidateObservationContract,
+    existing: Option<Digest>,
+    provider: Digest,
+) -> Option<Digest> {
+    match contract {
+        TotalCandidateObservationContract::PreparationBodyCleanup => existing,
+        TotalCandidateObservationContract::FullCall
+        | TotalCandidateObservationContract::NativeFullCall => Some(
+            Digest::sha256_serialized(&(provider, existing, b"prepared-provider-authority-v3"))
+                .expect("typed provider authority serializes"),
+        ),
+    }
 }
 
 #[derive(Clone, Debug)]
+pub(crate) enum LocalPlacementOutcome {
+    Selected {
+        selected: Box<runmat_execution::SelectedExecutionCandidate>,
+        cpu_cost: runmat_execution::CandidateCostEvidence,
+        provider_cost: Option<ExecutionCostEstimate>,
+        provider_rejection: Option<ProviderRejectionCode>,
+        decision_kind: runmat_execution::WholeWorkDecisionKind,
+        predicted_total_ns: Option<u64>,
+        feedback: Option<Box<LocalPlacementFeedback>>,
+        /// Exact compact query already validated by this placement authority.
+        provider_query: Box<ProviderFeasibilityQuery>,
+        provider_observation: bool,
+        /// Original physical-record ordinal, if the provider won. The exact
+        /// selected query above belongs to this same record.
+        provider_index: Option<usize>,
+    },
+    ProviderRejected {
+        code: ProviderRejectionCode,
+        cpu_cost: runmat_execution::CandidateCostEvidence,
+        feedback: Option<Box<LocalPlacementFeedback>>,
+    },
+}
+
+#[derive(Clone)]
 pub(crate) struct LocalPlacementFeedback {
     pub(crate) runtime: runmat_runtime::context::RuntimeContext,
     pub(crate) signature: PlacementSignature,
     pub(crate) candidate: String,
+    pub(crate) kind: ExecutionCandidateKind,
+    pub(crate) authority: LocalPlacementFeedbackAuthority,
 }
 
-/// Normalize provider feasibility and complete transfer costs before comparing
-/// profitability. This is the one local authority shared by legacy automatic
-/// offload and correlated fusion execution.
+#[derive(Clone)]
+pub(crate) enum LocalPlacementFeedbackAuthority {
+    Graph(std::sync::Arc<dyn runmat_runtime::context::RuntimeGraphObservationPermit>),
+    /// Shared one-shot selection: the probe is Send, not Sync. The mutex
+    /// transports that same lease into deferred completion without retaining
+    /// a RuntimeContext/service or cloning its authority.
+    WholeWork(
+        std::sync::Arc<
+            std::sync::Mutex<Option<runmat_runtime::context::RuntimeWholeWorkSelection>>,
+        >,
+    ),
+    /// One finite managed decision and its retained in-flight observation
+    /// lease. Deferred completion consumes the same selection exactly once.
+    Managed(
+        std::sync::Arc<
+            std::sync::Mutex<Option<runmat_runtime::context::RuntimeManagedWholeWorkSelection>>,
+        >,
+    ),
+}
+
+impl LocalPlacementFeedbackAuthority {
+    pub(super) fn authorizes(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+    ) -> bool {
+        match self {
+            Self::Graph(permit) => permit.authorizes(signature, candidate, kind),
+            Self::WholeWork(slot) => {
+                // No permit callback, service call, or probe destruction may
+                // run under this transport lock. Reentry sees the selection
+                // temporarily unavailable and therefore fails closed.
+                let selection = match slot.lock() {
+                    Ok(mut slot) => slot.take(),
+                    Err(_) => None,
+                };
+                let Some(selection) = selection else {
+                    return false;
+                };
+                let current = selection.observation_permit.is_some()
+                    && selection.observation_is_current()
+                    && selection.decision.signature == *signature
+                    && selection.decision.selected.candidate == candidate
+                    && selection.decision.selected.kind == kind;
+                let restored = match slot.lock() {
+                    Ok(mut slot) => {
+                        *slot = Some(selection);
+                        true
+                    }
+                    Err(_) => false,
+                };
+                current && restored
+            }
+            Self::Managed(slot) => {
+                let selection = match slot.lock() {
+                    Ok(mut slot) => slot.take(),
+                    Err(_) => None,
+                };
+                let Some(selection) = selection else {
+                    return false;
+                };
+                let current = selection.observation_is_current()
+                    && signature.permit_identity().ok() == Some(selection.identity)
+                    && runmat_execution::Digest::parse_canonical(candidate)
+                        == Some(selection.selected.candidate)
+                    && selection.selected.kind == kind;
+                let restored = match slot.lock() {
+                    Ok(mut slot) => {
+                        *slot = Some(selection);
+                        true
+                    }
+                    Err(_) => false,
+                };
+                current && restored
+            }
+        }
+    }
+
+    pub(super) fn delivery(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+        elapsed_ns: u64,
+        succeeded: bool,
+    ) -> Option<runmat_runtime::context::RuntimePlacementFeedbackDelivery> {
+        use runmat_runtime::context::RuntimePlacementFeedbackDelivery;
+        if !self.authorizes(signature, candidate, kind) {
+            return None;
+        }
+        let outcome = if succeeded {
+            runmat_execution::WholeWorkObservationOutcome::Success
+        } else {
+            runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+        };
+        match self {
+            Self::Graph(permit) => Some(RuntimePlacementFeedbackDelivery::Graph {
+                feedback: runmat_execution::PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.to_owned(),
+                    kind,
+                    total_elapsed_ns: elapsed_ns,
+                    succeeded,
+                },
+                permit: std::sync::Arc::clone(permit),
+            }),
+            Self::WholeWork(selection) => {
+                let selected = selection.lock().ok()?.take()?;
+                Some(RuntimePlacementFeedbackDelivery::WholeWork {
+                    selected,
+                    elapsed_ns,
+                    outcome,
+                })
+            }
+            Self::Managed(slot) => {
+                let selected = slot.lock().ok()?.take()?;
+                Some(RuntimePlacementFeedbackDelivery::ManagedWholeWork {
+                    selected,
+                    elapsed_ns,
+                    outcome,
+                })
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for LocalPlacementFeedback {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalPlacementFeedback")
+            .field("signature", &self.signature)
+            .field("candidate", &self.candidate)
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
+impl LocalPlacementFeedback {
+    pub(crate) fn is_current(&self) -> bool {
+        self.authority
+            .authorizes(&self.signature, &self.candidate, self.kind)
+    }
+
+    pub(crate) fn observe(self, total_elapsed_ns: u64, succeeded: bool) {
+        if !self.is_current() {
+            return;
+        }
+        let Some(service) = self.runtime.service_ports().placement() else {
+            return;
+        };
+        let feedback = runmat_execution::PlacementFeedback {
+            signature: self.signature,
+            candidate: self.candidate,
+            kind: self.kind,
+            total_elapsed_ns,
+            succeeded,
+        };
+        match &self.authority {
+            LocalPlacementFeedbackAuthority::Graph(permit) => {
+                let _ = service.observe_selected_graph(permit.as_ref(), feedback);
+            }
+            LocalPlacementFeedbackAuthority::WholeWork(_) => {
+                if let Some(delivery) = self.authority.delivery(
+                    &feedback.signature,
+                    &feedback.candidate,
+                    feedback.kind,
+                    feedback.total_elapsed_ns,
+                    feedback.succeeded,
+                ) {
+                    let _ = service.observe_deferred_feedback(delivery);
+                }
+            }
+            LocalPlacementFeedbackAuthority::Managed(slot) => {
+                let selected = slot.lock().ok().and_then(|mut slot| slot.take());
+                if let Some(selected) = selected {
+                    let outcome = if succeeded {
+                        runmat_execution::WholeWorkObservationOutcome::Success
+                    } else {
+                        runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+                    };
+                    let _ =
+                        service.observe_managed_whole_work(&selected, total_elapsed_ns, outcome);
+                }
+            }
+        }
+    }
+}
+
+/// Exercise the production owner with ordinary host admission in fixtures.
+#[cfg(test)]
 pub(crate) fn plan_local(
     provider: &dyn AccelProvider,
     request: LocalPlacementRequest<'_>,
     policy: PlacementPolicy,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
-    debug_assert!(request.provider_kind.is_provider());
-    let residency = summarize_values(request.inputs);
-    let provider_resident_bytes = residency
-        .provider_bytes
-        .values()
-        .copied()
-        .fold(0_u64, u64::saturating_add);
-    let mut cpu = request.cpu;
-    if provider_resident_bytes > 0 {
-        cpu.cost.components.synchronization_ns =
-            cpu.cost.components.synchronization_ns.saturating_add(5_000);
-        cpu.cost.components.download_ns = cpu
-            .cost
-            .components
-            .download_ns
-            .saturating_add(transfer_prior_ns(provider_resident_bytes));
-    }
-    let query = ProviderFeasibilityQuery {
-        operation: ProviderOperationIdentity::new(request.operation),
-        family: request.family,
-        inputs: request
-            .inputs
-            .iter()
-            .filter_map(|value| tensor_representation(value, provider.precision()))
-            .collect(),
-        outputs: request.outputs,
-        workload: request.workload,
-    };
-    if let ProviderFeasibility::Rejected { rejection } = provider.query_feasibility(&query) {
-        return Ok(LocalPlacementOutcome::ProviderRejected {
-            code: rejection.code,
-            cpu_cost: cpu.cost,
-        });
-    }
+    plan_local_vm_cpu_with_provider(
+        provider,
+        request,
+        policy,
+        None,
+        None,
+        multi::LocalCpuAdmission::Legacy,
+        LocalProviderAdmission::Available,
+    )
+}
 
-    let upload_bytes = residency.required_upload_bytes(provider.device_id());
-    let provider_cost = provider
-        .estimate_cost(&ProviderCostQuery {
-            operation: query.clone(),
-            preparation: request.preparation,
-            required_upload_bytes: upload_bytes,
-            required_download_bytes: request.required_download_bytes,
-            downstream_materialization: request.downstream_materialization,
-        })
-        .map(|estimate| estimate.cost)
-        .unwrap_or_else(|| {
-            let mut cost = request.provider_fallback;
-            cost.components.upload_ns = transfer_prior_ns(upload_bytes);
-            cost.components.download_ns = transfer_prior_ns(request.required_download_bytes);
-            cost.components.synchronization_ns = if request.required_download_bytes == 0 {
-                0
-            } else {
-                cost.components.synchronization_ns.max(5_000)
-            };
-            cost
-        });
-    let provider_candidate = ExecutionCandidateDescriptor {
-        identity: format!("provider.{}.{}", provider.device_id(), request.operation),
-        region: cpu.region,
-        kind: request.provider_kind,
-        execution_location: CandidateExecutionLocation::Provider {
-            device_id: provider.device_id(),
-        },
-        preparation: request.preparation,
-        cost: provider_cost,
-        output_residency: CandidateOutputResidency::Provider {
-            device_id: provider.device_id(),
-        },
-        guards: cpu.guards.clone(),
-    };
-    let cpu_cost = cpu.cost;
-    let mut feedback = None;
-    let selected = if request.compare_profitability {
-        if let Some(runtime) = request.runtime {
-            if let Some(service) = runtime.service_ports().placement() {
-                let capability = provider.capability_snapshot();
-                let provider_resources = provider.placement_resources();
-                let provider_digest = Digest::sha256(
-                    serde_json::to_vec(&capability)
-                        .expect("provider capability snapshot must serialize"),
-                );
-                let mut facts =
-                    serde_json::to_vec(&query).expect("provider feasibility query must serialize");
-                facts.extend_from_slice(&residency.host_bytes.to_le_bytes());
-                facts.extend_from_slice(&provider_resident_bytes.to_le_bytes());
-                facts.extend_from_slice(&provider_resources.epoch.to_le_bytes());
-                let signature = PlacementSignature {
-                    region: cpu.region,
-                    operation: request.operation.into(),
-                    runtime_facts: Digest::sha256(facts),
-                    revision: PlacementRevision {
-                        program: runtime.program_revision().cloned(),
-                        catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
-                        compiler: Digest::sha256(b"runmat-placement-compiler-v1"),
-                        provider: provider_digest,
-                        policy: Digest::sha256(format!(
-                            "local:{}:{}",
-                            policy.absolute_margin_ns, policy.relative_margin_basis_points
-                        )),
-                    },
-                };
-                let transactional = capability.concurrency.transactional_results;
-                let host_resources = runtime
-                    .service_ports()
-                    .parallel()
-                    .map(|service| service.placement_resources())
-                    .unwrap_or_default();
-                let resources = PlacementResourceSnapshot {
-                    cpu_millicores_available: host_resources.cpu_millicores_available,
-                    memory_available_bytes: host_resources.memory_available_bytes,
-                    cancellation_requested: runtime
-                        .cancellation()
-                        .load(std::sync::atomic::Ordering::Relaxed),
-                    providers: vec![provider_resources.clone()],
-                    epoch: provider_resources.epoch ^ host_resources.epoch.rotate_left(32),
-                };
-                let decision = service.plan(PlacementPlanRequest {
-                    signature: signature.clone(),
-                    graph: PlacementGraph {
-                        nodes: vec![PlacementGraphNode {
-                            identity: request.operation.into(),
-                            candidates: vec![
-                                PlacementGraphCandidate {
-                                    resources: CandidateResourceDemand {
-                                        cpu_millicores: 1_000,
-                                        retained_bytes: 0,
-                                        scratch_bytes: cpu_cost.scratch_bytes,
-                                        queue_slots: 0,
-                                    },
-                                    descriptor: cpu.clone(),
-                                    transactional_results: true,
-                                },
-                                PlacementGraphCandidate {
-                                    resources: CandidateResourceDemand {
-                                        cpu_millicores: 0,
-                                        retained_bytes: estimated_output_bytes(
-                                            &query.outputs,
-                                            provider.precision(),
-                                        ),
-                                        scratch_bytes: provider_cost.scratch_bytes,
-                                        queue_slots: 1,
-                                    },
-                                    descriptor: provider_candidate.clone(),
-                                    transactional_results: transactional,
-                                },
-                            ],
-                        }],
-                        edges: Vec::new(),
-                    },
-                    limits: PlacementGraphLimits::default(),
-                    resources,
-                    deterministic: false,
-                    require_transactional_results: true,
-                })?;
-                if decision.selections[0].kind.is_provider() {
-                    feedback = Some(Box::new(LocalPlacementFeedback {
-                        runtime: runtime.clone(),
-                        signature: signature.clone(),
-                        candidate: provider_candidate.identity.clone(),
-                    }));
-                    provider_candidate
-                } else {
-                    feedback = Some(Box::new(LocalPlacementFeedback {
-                        runtime: runtime.clone(),
-                        signature,
-                        candidate: cpu.identity.clone(),
-                    }));
-                    cpu
-                }
-            } else {
-                select_candidate([cpu, provider_candidate], policy).expect(
-                    "CPU and provider placement candidates must contain one valid descriptor",
-                )
-            }
+pub(crate) fn plan_local_vm_cpu_with_provider(
+    provider: &dyn AccelProvider,
+    request: LocalPlacementRequest<'_>,
+    policy: PlacementPolicy,
+    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    vm_decline: Option<&runmat_runtime::context::VmFusionDeclineRight>,
+    cpu_admission: multi::LocalCpuAdmission,
+    implementation: LocalProviderAdmission,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
+    let LocalPlacementRequest {
+        compound,
+        operation,
+        semantic_identity,
+        observation_contract,
+        prepared_authority,
+        source_decline,
+        family,
+        provider_kind,
+        inputs,
+        outputs,
+        workload,
+        preparation,
+        preparation_program,
+        shader_requirements,
+        cpu,
+        provider_fallback,
+        required_upload_bytes,
+        required_download_bytes,
+        downstream_materialization,
+        compare_profitability,
+        runtime,
+    } = request;
+    let publication =
+        if cpu.route.kind == runmat_execution::ExecutionCandidateKind::OriginalNativeRegion {
+            multi::LocalPublicationSemantics::SourceOrderedNative
         } else {
-            select_candidate([cpu, provider_candidate], policy)
-                .expect("CPU and provider placement candidates must contain one valid descriptor")
-        }
-    } else {
-        provider_candidate
-    };
-    Ok(LocalPlacementOutcome::Selected {
-        selected: Box::new(selected),
-        cpu_cost,
-        provider_cost,
-        feedback,
-    })
+            multi::LocalPublicationSemantics::Atomic
+        };
+    let outcome = multi::plan_local_multi_with_provider(
+        provider,
+        multi::LocalMultiPlacementRequest {
+            operation,
+            semantic_identity,
+            observation_contract,
+            prepared_authority,
+            vm_right,
+            vm_decline,
+            source_decline,
+            family,
+            cpu,
+            cpu_admission,
+            publication,
+            physical: vec![multi::LocalPhysicalCandidate {
+                authority: compound.map(multi::PreparedPhysicalAuthority::Compound),
+                physical_identity: compound.map(|plan| plan.identity()),
+                provider_kind,
+                data_inputs: inputs,
+                source_inputs: compound.map(|plan| plan.source_inputs()),
+                prepared_inputs: compound.map(|plan| plan.source_inputs()),
+                input_adaptation: None,
+                outputs: compound.map_or(outputs, |plan| vec![plan.query_output()]),
+                workload,
+                preparation,
+                preparation_program,
+                shader_requirements,
+                fallback: provider_fallback,
+                required_upload_bytes,
+                required_download_bytes,
+                downstream_materialization,
+            }],
+            compare_profitability,
+            runtime,
+        },
+        policy,
+        implementation,
+    )?;
+    if let LocalPlacementOutcome::Selected { provider_index, .. } = &outcome {
+        debug_assert!(provider_index.is_none_or(|index| index == 0));
+    }
+    Ok(outcome)
 }
-
-fn estimated_output_bytes(
-    outputs: &[ProviderRepresentation],
-    precision: runmat_accelerate_api::ProviderPrecision,
-) -> u64 {
-    let element_bytes = match precision {
-        runmat_accelerate_api::ProviderPrecision::F32 => 4_u64,
-        runmat_accelerate_api::ProviderPrecision::F64 => 8_u64,
-    };
-    outputs.iter().fold(0_u64, |total, output| {
-        let elements = output
-            .shape
-            .iter()
-            .fold(1_u64, |count, dimension| count.saturating_mul(*dimension));
-        total.saturating_add(elements.saturating_mul(element_bytes))
-    })
-}
-
 pub(crate) fn transfer_prior_ns(bytes: u64) -> u64 {
     if bytes == 0 {
         0

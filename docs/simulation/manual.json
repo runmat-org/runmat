@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "topics": [
+    {
+      "id": "linear-static",
+      "route": "/docs/simulation/guides/linear-static",
+      "title": "Linear static analysis",
+      "summary": "Predict deformation and stress under steady loading. Create a structural study, explore its results, and open the complete example in RunMat Desktop.",
+      "keywords": [
+        "linear elasticity",
+        "static",
+        "stress",
+        "displacement",
+        "traction",
+        "STEP",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 1,
+      "narrative": "docs/simulation/guides/linear-static.md",
+      "examples": [
+        "cantilever-static"
+      ],
+      "related_topics": [
+        {
+          "title": "Structural validation",
+          "href": "/docs/simulation/validation/structural"
+        },
+        {
+          "title": "RunMat Desktop",
+          "href": "/docs/desktop"
+        },
+        {
+          "title": "Command-line workflow",
+          "href": "/docs/runtime/getting-started/cli"
+        }
+      ],
+      "scope": {
+        "procedure": "Linear static",
+        "example_mesh": "Quadratic tetrahedra"
+      },
+      "verification_labels": {
+        "FEA-STRUCTURAL-SOLID-001": "Element formulation and integration",
+        "FEA-STRUCTURAL-REFERENCE-001": "Physical references and mesh convergence",
+        "FEA-STRUCTURAL-EXECUTION-001": "Execution and durable results"
+      }
+    },
+    {
+      "id": "validation-methodology",
+      "title": "Validation methodology and coverage",
+      "route": "/docs/simulation/validation",
+      "summary": "Understand how RunMat checks its finite-element formulations, physical accuracy, and complete execution workflows.",
+      "keywords": [
+        "validation",
+        "verification",
+        "finite element"
+      ],
+      "group": "Validation",
+      "order": 0,
+      "narrative": "docs/simulation/validation/methodology.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Linear static analysis guide",
+          "href": "/docs/simulation/guides/linear-static"
+        }
+      ],
+      "scope": {
+        "procedure": "Cross-domain",
+        "example_mesh": "Not applicable"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "steady-heat-transfer",
+      "route": "/docs/simulation/guides/steady-heat-transfer",
+      "title": "Steady heat transfer",
+      "summary": "Prescribe end temperatures on a steel bar and explore its saved temperature and heat-flow fields.",
+      "keywords": [
+        "Steady heat transfer",
+        "RunMat",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 2,
+      "narrative": "docs/simulation/guides/steady-heat-transfer.md",
+      "examples": [
+        "steady-conduction",
+        "heatsink-steady"
+      ],
+      "related_topics": [
+        {
+          "title": "Validation: thermal",
+          "href": "/docs/simulation/validation/thermal"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/guides/linear-static"
+        }
+      ],
+      "scope": {
+        "procedure": "Thermal steady",
+        "example_mesh": "Linear tetrahedra"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "modal-analysis",
+      "route": "/docs/simulation/guides/modal-analysis",
+      "title": "Modal analysis",
+      "summary": "Extract a tuning fork\u2019s natural frequencies and compare its original mode shapes in RunMat.",
+      "keywords": [
+        "Modal analysis",
+        "RunMat",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 3,
+      "narrative": "docs/simulation/guides/modal-analysis.md",
+      "examples": [
+        "tuning-fork-modal"
+      ],
+      "related_topics": [
+        {
+          "title": "Validation: structural",
+          "href": "/docs/simulation/validation/structural"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/guides/linear-static"
+        }
+      ],
+      "scope": {
+        "procedure": "Structural modal",
+        "example_mesh": "Quadratic tetrahedra"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "mesh-refinement",
+      "route": "/docs/simulation/guides/mesh-refinement",
+      "title": "Mesh refinement",
+      "summary": "Compare the same physical model on several meshes and decide which result quantities are stable.",
+      "keywords": [
+        "Mesh refinement",
+        "RunMat",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 4,
+      "narrative": "docs/simulation/guides/mesh-refinement.md",
+      "examples": [
+        "cantilever-coarse",
+        "cantilever-medium",
+        "cantilever-static"
+      ],
+      "related_topics": [
+        {
+          "title": "Validation: structural",
+          "href": "/docs/simulation/validation/structural"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/guides/linear-static"
+        }
+      ],
+      "scope": {
+        "procedure": "Structural static",
+        "example_mesh": "Quadratic tetrahedra"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "thermal-stress",
+      "route": "/docs/simulation/guides/thermal-stress",
+      "title": "Thermal stress",
+      "summary": "Find the stress and support force in a clamped steel bar heated by 80 K, from the restrained-bar formula and a thermomechanical finite-element solution in RunMat.",
+      "keywords": [
+        "thermal stress",
+        "thermal expansion",
+        "thermomechanical",
+        "restrained bar",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 5,
+      "narrative": "docs/simulation/guides/thermal-stress.md",
+      "examples": [
+        "heated-bar-thermal-stress"
+      ],
+      "related_topics": [
+        {
+          "title": "Thermomechanical validation",
+          "href": "/docs/simulation/validation/thermomechanical"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/guides/linear-static"
+        }
+      ],
+      "scope": {
+        "procedure": "Thermomechanical steady",
+        "example_mesh": "Quadratic tetrahedra"
+      },
+      "verification_labels": {}
+    }
+  ]
+}

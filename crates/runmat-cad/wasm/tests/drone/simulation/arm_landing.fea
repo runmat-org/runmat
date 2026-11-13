@@ -1,0 +1,70 @@
+// The folding arm and its hinge on a hard landing: the skids stop the body, and the motor pod at
+// the arm's tip keeps moving down until the arm stops it.
+//
+// Geometry: ./geometry/arm_study.step, exported from arm_study.assembly (the arm at its 88.2 mm
+// default and the motor pod on its pad; the check below takes the 90.6 mm rear arm). The hinge
+// pin carries the arm at the knuckle's bore (fixed here).
+//
+// Load: a 1 m/s touchdown (the descent limit) stopped over the skids' 2 mm of compliance is
+// 1^2 / (2 x 0.002) = 250 m/s^2, about 25 g; on the pod's 40 g (motor, propeller and cowl) that
+// is 0.04 kg x 250 m/s^2 = 10 N down. Check: the moment at the knuckle is 10 N x 90.6 mm =
+// 906 N mm; the root's section modulus (16 x 12.4 mm superellipse) is about 275 mm^3, so the
+// bending stress there is about 3.3 MPa, two orders below the laminate's 600 MPa strength. The
+// lugs, 16.8 mm apart, carry the moment as a 54 N couple on the 4 mm pin.
+
+geometry arm {
+    file = "./geometry/arm_study.step"
+    units = mm
+    interfaces = shared
+    region arm : solid { select name "arm"; expect exactly_one }
+    region pod : solid { select name "motor_pod"; expect exactly_one }
+    region root : face { select name "root"; expect one_or_more }
+    region motor_seat : face { select name "motor_seat"; expect one_or_more }
+}
+
+mesh arm on geometry.arm {
+    tetrahedra {
+        order = quadratic
+        target_size = 3 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material prepreg_carbon {
+    mass_density = 1550 kg/m^3
+    elastic {
+        youngs_modulus = 90 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+material pod_lumped {
+    mass_density = 6390 kg/m^3
+    elastic {
+        youngs_modulus = 9 GPa
+        poisson_ratio = 0.35
+    }
+}
+
+model landing {
+    assign material.prepreg_carbon to geometry.arm.region.arm
+    assign material.pod_lumped to geometry.arm.region.pod
+    constraint hinge {
+        structural.fixed { target = geometry.arm.region.root }
+    }
+    load pod_inertia {
+        force on geometry.arm.region.motor_seat = [0, 0, -10] N
+    }
+    load_case hard_landing { include load.pod_inertia }
+}
+
+study arm_landing {
+    geometry = geometry.arm
+    mesh = mesh.arm
+    model = model.landing
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+    output peak_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.arm.region.arm)
+    output tip_deflection = max(magnitude(analysis.static.field.node.displacement), over = geometry.arm.region.pod)
+}

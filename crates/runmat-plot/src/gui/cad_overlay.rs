@@ -1,7 +1,8 @@
+use crate::core::plot_renderer::GeometryScreenAnnotation;
 use crate::core::CameraViewPreset;
 use crate::geometry_scene::{
-    GeometrySceneAssemblyNode, GeometrySceneCompleteness, GeometrySceneOverlay,
-    GeometrySceneRegionSummary,
+    GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCompleteness,
+    GeometrySceneOverlay, GeometrySceneRegionSummary,
 };
 use std::collections::BTreeSet;
 
@@ -63,6 +64,11 @@ pub(crate) struct CadOverlayRenderInput<'a> {
 }
 
 impl CadOverlayState {
+    pub(crate) fn clear_interaction(&mut self) {
+        self.pointer_captured = false;
+        self.capture_regions.clear();
+    }
+
     pub(crate) fn pointer_captured(&self) -> bool {
         self.pointer_captured
     }
@@ -117,6 +123,147 @@ impl CadOverlayState {
         }
 
         actions
+    }
+
+    pub(crate) fn render_annotation_labels(
+        &self,
+        ctx: &egui::Context,
+        plot_rect: egui::Rect,
+        annotations: &[GeometryScreenAnnotation],
+        font_scale: f32,
+    ) {
+        self.render_annotations(
+            ctx,
+            plot_rect,
+            annotations,
+            font_scale.clamp(0.9, 1.0),
+            &CadOverlayTheme::from_context(ctx),
+        );
+    }
+
+    fn render_annotations(
+        &self,
+        ctx: &egui::Context,
+        plot_rect: egui::Rect,
+        annotations: &[GeometryScreenAnnotation],
+        scale: f32,
+        theme: &CadOverlayTheme,
+    ) {
+        if annotations.is_empty() {
+            return;
+        }
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("runmat_fea_geometry_annotations"),
+        ));
+        let vector_keepouts: Vec<_> = annotations
+            .iter()
+            .filter_map(|annotation| {
+                annotation.vector_extent.map(|extent| {
+                    egui::Rect::from_two_pos(
+                        plot_rect.min + egui::vec2(extent[0][0], extent[0][1]),
+                        plot_rect.min + egui::vec2(extent[1][0], extent[1][1]),
+                    )
+                    .expand(10.0 * scale)
+                })
+            })
+            .collect();
+        let mut occupied = Vec::<egui::Rect>::new();
+        // Presentation order prioritizes selected names, selected conditions and
+        // loads before repeated supports. Keep dense assemblies bounded.
+        let label_budget =
+            ((plot_rect.width() * plot_rect.height() / 32_000.0) as usize).clamp(6, 24);
+        for annotation in annotations {
+            if annotation.label.is_empty() {
+                continue;
+            }
+            if occupied.len() >= label_budget {
+                break;
+            }
+            let anchor = plot_rect.min + egui::vec2(annotation.position[0], annotation.position[1]);
+            if !plot_rect.contains(anchor) {
+                continue;
+            }
+            let nearest = nearest_annotation_distance(annotation, annotations);
+            let detail = annotation_detail(nearest, annotations.len());
+            // Preserve physical values even in crowded views; support symbols
+            // may collapse, but a force/flux must not lose its magnitude.
+            let detail = if matches!(detail, AnnotationDetail::Symbol)
+                && !matches!(
+                    annotation.kind,
+                    GeometrySceneAnnotationKind::FixedSupport
+                        | GeometrySceneAnnotationKind::SymmetrySupport
+                ) {
+                AnnotationDetail::Compact
+            } else {
+                detail
+            };
+            let label = annotation_label(annotation, detail);
+            let font = egui::FontId::proportional(match detail {
+                AnnotationDetail::Full => 9.5 * scale,
+                AnnotationDetail::Compact => 9.5 * scale,
+                AnnotationDetail::Symbol => 12.0 * scale,
+            });
+            let galley = painter.layout_no_wrap(label, font.clone(), theme.primary_text);
+            let padding = egui::vec2(4.0 * scale, 2.0 * scale);
+            let size = galley.size() + 2.0 * padding;
+            let mut positions: Vec<_> = [0.0, -1.0, 1.0, -2.0, 2.0, -3.0, 3.0]
+                .into_iter()
+                .map(|row| {
+                    anchor + egui::vec2(7.0 * scale, -size.y * 0.5 + row * (size.y + 4.0 * scale))
+                })
+                .collect();
+            if let Some(extent) = annotation.vector_extent {
+                let bounds = egui::Rect::from_two_pos(
+                    plot_rect.min + egui::vec2(extent[0][0], extent[0][1]),
+                    plot_rect.min + egui::vec2(extent[1][0], extent[1][1]),
+                )
+                .expand(12.0 * scale);
+                positions.extend([
+                    egui::pos2(anchor.x + 7.0 * scale, bounds.top() - size.y),
+                    egui::pos2(anchor.x + 7.0 * scale, bounds.bottom()),
+                    egui::pos2(bounds.right(), anchor.y - size.y * 0.5),
+                    egui::pos2(bounds.left() - size.x, anchor.y - size.y * 0.5),
+                ]);
+            }
+            positions.sort_by(|a, b| a.distance_sq(anchor).total_cmp(&b.distance_sq(anchor)));
+            let rect = positions.into_iter().find_map(|position| {
+                let candidate = egui::Rect::from_min_size(position, size);
+                let rect = candidate.translate(egui::vec2(
+                    (plot_rect.right() - candidate.right())
+                        .min(0.0)
+                        .max(plot_rect.left() - candidate.left()),
+                    (plot_rect.bottom() - candidate.bottom())
+                        .min(0.0)
+                        .max(plot_rect.top() - candidate.top()),
+                ));
+                (!occupied
+                    .iter()
+                    .chain(vector_keepouts.iter())
+                    .any(|used| used.intersects(rect)))
+                .then_some(rect)
+            });
+            let Some(rect) = rect else {
+                continue;
+            };
+            occupied.push(rect);
+            let color = annotation_color(annotation.color);
+            painter.rect_filled(rect, 3.0 * scale, theme.strip_bg.gamma_multiply(0.94));
+            painter.rect_stroke(
+                rect,
+                3.0 * scale,
+                egui::Stroke::new(1.0, color),
+                egui::StrokeKind::Inside,
+            );
+            painter.line_segment(
+                [anchor, egui::pos2(rect.left(), rect.center().y)],
+                egui::Stroke::new(1.0, color),
+            );
+            if annotation.vector_extent.is_none() {
+                painter.circle_filled(anchor, 2.0 * scale, color);
+            }
+            painter.galley(rect.min + padding, galley, theme.primary_text);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -709,17 +856,13 @@ fn visibility_checkbox(
     let size = egui::vec2(14.0 * scale, 14.0 * scale);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let stroke = egui::Stroke::new(1.0_f32, theme.checkbox_border);
-    #[cfg(target_arch = "wasm32")]
     ui.painter().rect(
         rect,
         scaled_corner_radius(PANEL_CORNER_RADIUS * scale),
         theme.checkbox_bg,
         stroke,
-        egui::StrokeKind::Inside,
+        super::OUTLINE_STROKE_KIND,
     );
-    #[cfg(not(target_arch = "wasm32"))]
-    ui.painter()
-        .rect(rect, PANEL_CORNER_RADIUS * scale, theme.checkbox_bg, stroke);
     match state {
         VisibilityState::Visible => {
             let p0 = egui::pos2(rect.left() + 3.0 * scale, rect.center().y);
@@ -758,7 +901,90 @@ fn region_icon(ui: &mut egui::Ui, scale: f32, theme: &CadOverlayTheme) {
         .circle_filled(center, 2.0 * scale, theme.region_dot);
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnnotationDetail {
+    Full,
+    Compact,
+    Symbol,
+}
+
+fn nearest_annotation_distance(
+    annotation: &GeometryScreenAnnotation,
+    annotations: &[GeometryScreenAnnotation],
+) -> f32 {
+    annotations
+        .iter()
+        .filter(|candidate| !std::ptr::eq(*candidate, annotation))
+        .map(|candidate| {
+            let dx = candidate.position[0] - annotation.position[0];
+            let dy = candidate.position[1] - annotation.position[1];
+            (dx * dx + dy * dy).sqrt()
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
+fn annotation_detail(nearest_distance: f32, count: usize) -> AnnotationDetail {
+    if count <= 8 && nearest_distance >= 105.0 {
+        AnnotationDetail::Full
+    } else if count <= 24 && nearest_distance >= 48.0 {
+        AnnotationDetail::Compact
+    } else {
+        AnnotationDetail::Symbol
+    }
+}
+
+fn annotation_label(annotation: &GeometryScreenAnnotation, detail: AnnotationDetail) -> String {
+    if annotation.kind == GeometrySceneAnnotationKind::Label {
+        return annotation.label.clone();
+    }
+    match detail {
+        AnnotationDetail::Full => annotation.label.clone(),
+        AnnotationDetail::Compact => annotation
+            .label
+            .split_once(" · ")
+            .map(|(_, detail)| detail.to_string())
+            .unwrap_or_else(|| annotation.label.clone()),
+        AnnotationDetail::Symbol if annotation.label.contains("</>") => "</>".to_string(),
+        AnnotationDetail::Symbol => match annotation.kind {
+            GeometrySceneAnnotationKind::Label => annotation.label.clone(),
+            GeometrySceneAnnotationKind::Force | GeometrySceneAnnotationKind::BodyForce => {
+                "→".to_string()
+            }
+            GeometrySceneAnnotationKind::Moment => "↻".to_string(),
+            GeometrySceneAnnotationKind::Pressure | GeometrySceneAnnotationKind::Traction => {
+                "⇥".to_string()
+            }
+            GeometrySceneAnnotationKind::HeatFlux => "⇥♨".to_string(),
+            GeometrySceneAnnotationKind::CurrentDensity => "⇥ϟ".to_string(),
+            GeometrySceneAnnotationKind::NormalVelocity => "⇥)))".to_string(),
+            GeometrySceneAnnotationKind::FlowVelocity => "⇥≈".to_string(),
+            GeometrySceneAnnotationKind::MassFlow => "⇥m".to_string(),
+            GeometrySceneAnnotationKind::WallMotion => "⇆".to_string(),
+            GeometrySceneAnnotationKind::FixedSupport => "▰".to_string(),
+            GeometrySceneAnnotationKind::SymmetrySupport => "║".to_string(),
+            GeometrySceneAnnotationKind::PrescribedMotion => "⇢".to_string(),
+            GeometrySceneAnnotationKind::ThermalCondition => "♨".to_string(),
+            GeometrySceneAnnotationKind::ElectricalCondition => "ϟ".to_string(),
+            GeometrySceneAnnotationKind::MagneticCondition => "⊙".to_string(),
+            GeometrySceneAnnotationKind::AcousticCondition => ")))".to_string(),
+            GeometrySceneAnnotationKind::FluidCondition => "≈".to_string(),
+            GeometrySceneAnnotationKind::Connector => "⟷".to_string(),
+            GeometrySceneAnnotationKind::Interface => "⇄".to_string(),
+            GeometrySceneAnnotationKind::BoundaryCondition => "▱".to_string(),
+            GeometrySceneAnnotationKind::InitialCondition => "◌".to_string(),
+        },
+    }
+}
+
+fn annotation_color(color: [f32; 4]) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(
+        (color[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
 struct CadOverlayTheme {
     strip_bg: egui::Color32,
     strip_border: egui::Color32,
@@ -832,7 +1058,6 @@ fn strip_height(scale: f32) -> f32 {
     STRIP_HEIGHT * scale
 }
 
-#[cfg(target_arch = "wasm32")]
 fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(theme.panel_bg)
@@ -841,16 +1066,6 @@ fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
         .inner_margin(scaled_margin_same(10.0 * scale))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
-    egui::Frame::none()
-        .fill(theme.panel_bg)
-        .stroke(egui::Stroke::new(1.0_f32, theme.panel_border))
-        .rounding(scaled_corner_radius(PANEL_CORNER_RADIUS * scale))
-        .inner_margin(scaled_margin_same(10.0 * scale))
-}
-
-#[cfg(target_arch = "wasm32")]
 fn allocate_ui_at_rect_compat(
     ui: &mut egui::Ui,
     rect: egui::Rect,
@@ -859,43 +1074,16 @@ fn allocate_ui_at_rect_compat(
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), add_contents);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn allocate_ui_at_rect_compat(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    ui.allocate_ui_at_rect(rect, add_contents);
-}
-
-#[cfg(target_arch = "wasm32")]
 fn scroll_area_id(scroll_area: egui::ScrollArea, id: &'static str) -> egui::ScrollArea {
     scroll_area.id_salt(id)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn scroll_area_id(scroll_area: egui::ScrollArea, id: &'static str) -> egui::ScrollArea {
-    scroll_area.id_source(id)
-}
-
-#[cfg(target_arch = "wasm32")]
 fn scaled_corner_radius(radius: f32) -> egui::CornerRadius {
     egui::CornerRadius::same(radius.round().clamp(0.0, u8::MAX as f32) as u8)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn scaled_corner_radius(radius: f32) -> egui::Rounding {
-    egui::Rounding::same(radius)
-}
-
-#[cfg(target_arch = "wasm32")]
 fn scaled_margin_same(margin: f32) -> egui::Margin {
     egui::Margin::same(margin.round().clamp(i8::MIN as f32, i8::MAX as f32) as i8)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn scaled_margin_same(margin: f32) -> egui::Margin {
-    egui::Margin::same(margin)
 }
 
 fn panel_header(
@@ -1139,5 +1327,34 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", value / KIB)
     } else {
         format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn annotation_labels_reduce_detail_as_projected_spacing_tightens() {
+        assert_eq!(annotation_detail(160.0, 4), AnnotationDetail::Full);
+        assert_eq!(annotation_detail(70.0, 12), AnnotationDetail::Compact);
+        assert_eq!(annotation_detail(30.0, 12), AnnotationDetail::Symbol);
+
+        let function = GeometryScreenAnnotation {
+            position: [10.0, 20.0],
+            color: [1.0, 0.0, 0.0, 1.0],
+            kind: GeometrySceneAnnotationKind::Force,
+            label: "Force · </> impactPulse".to_string(),
+            vector_extent: None,
+        };
+        assert_eq!(
+            annotation_label(&function, AnnotationDetail::Full),
+            "Force · </> impactPulse"
+        );
+        assert_eq!(
+            annotation_label(&function, AnnotationDetail::Compact),
+            "</> impactPulse"
+        );
+        assert_eq!(annotation_label(&function, AnnotationDetail::Symbol), "</>");
     }
 }

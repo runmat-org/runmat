@@ -2,25 +2,29 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ROUND_DECIMAL_MODE_ALIAS_EXTENSION, ROUND_ERROR_INTERNAL,
+    ROUND_ERROR_INVALID_ARGUMENT, ROUND_ERROR_INVALID_DIGITS, ROUND_ERROR_INVALID_INPUT,
+    ROUND_ERROR_INVALID_MODE, ROUND_ERROR_TOO_MANY_OUTPUTS, ROUND_TYPED_INTEGER_DIGITS_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{ROUND_DESCRIPTOR, ROUND_EXTENSIONS, ROUND_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::ComplexStorage;
 use runmat_value::{CharArray, ComplexTensor, NumericStorage, Tensor, Value};
 
+use super::digits::{
+    decimal_f32 as round_with_decimals_f32, decimal_f64 as round_with_decimals,
+    significant_f32 as round_with_significant_f32, significant_f64 as round_with_significant,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
+use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::rounding::round")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -43,197 +47,47 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute round directly on the device; digit-aware rounding uses the round_digits hook when available.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round")]
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::ROUND_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        admit_static: None,
+        required_real_unary: None,
+        required_arithmetic: None,
+        helpers: &[crate::builtins::common::spec::FusionMathHelper::Round],
+        scalar_operation: None,
+    };
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round", semantics = FUSION_SEMANTICS)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "round",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            if ctx.inputs.len() != 1 { return Err(FusionError::Message("round digit forms require their parsed runtime strategy")); }
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("round({input})"))
-        },
+            let helper = crate::builtins::common::spec::FusionMathHelper::Round.entrypoint(ctx.scalar_ty)?;
+            writer.write_formatted(format_args!("{helper}({input})"))
+        }),
     }),
     reduction: None,
     emits_nan: false,
-    notes: "Fusion planner emits WGSL `round` calls; providers can substitute custom kernels.",
+    notes: "Plain round(X) uses the shared ties-away rounding helper; digit forms retain their parsed runtime strategy.",
 };
 
 const BUILTIN_NAME: &str = "round";
-
-const ROUND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Rounded output values.",
-}];
-const ROUND_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, logical, or complex input values.",
-}];
-const ROUND_INPUTS_X_N: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, logical, or complex input values.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
-        description: "Digits for decimal-place rounding.",
-    },
-];
-const ROUND_INPUTS_X_N_MODE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, logical, or complex input values.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Digits argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "mode",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"decimals\""),
-        description: "Rounding mode ('decimals' or 'significant').",
-    },
-];
-const ROUND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = round(X)",
-        inputs: &ROUND_INPUTS_X,
-        outputs: &ROUND_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = round(X, N)",
-        inputs: &ROUND_INPUTS_X_N,
-        outputs: &ROUND_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = round(X, N, mode)",
-        inputs: &ROUND_INPUTS_X_N_MODE,
-        outputs: &ROUND_OUTPUT,
-    },
-];
-const ROUND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROUND.INVALID_INPUT",
-    identifier: Some("RunMat:round:InvalidInput"),
-    when: "Input X cannot be interpreted as numeric/logical/complex data.",
-    message: "round: invalid input",
-};
-const ROUND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROUND.INVALID_ARGUMENT",
-    identifier: Some("RunMat:round:InvalidArgument"),
-    when: "Argument count does not match supported call forms.",
-    message: "round: invalid argument",
-};
-const ROUND_ERROR_INVALID_DIGITS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROUND.INVALID_DIGITS",
-    identifier: Some("RunMat:round:InvalidDigits"),
-    when: "N is not an integer scalar or violates mode constraints.",
-    message: "round: invalid digits argument",
-};
-const ROUND_ERROR_INVALID_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROUND.INVALID_MODE",
-    identifier: Some("RunMat:round:InvalidMode"),
-    when: "mode is not a supported text token.",
-    message: "round: invalid mode",
-};
-const ROUND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROUND.INTERNAL",
-    identifier: Some("RunMat:round:Internal"),
-    when: "Internal tensor conversion/allocation failed.",
-    message: "round: internal error",
-};
-const ROUND_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    ROUND_ERROR_INVALID_INPUT,
-    ROUND_ERROR_INVALID_ARGUMENT,
-    ROUND_ERROR_INVALID_DIGITS,
-    ROUND_ERROR_INVALID_MODE,
-    ROUND_ERROR_INTERNAL,
-];
-pub const ROUND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ROUND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ROUND_ERRORS,
-};
-
-const ROUND_TYPED_INTEGER_DIGITS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "round-typed-integer-digits",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "round accepts a typed-integer digits argument as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:RoundTypedIntegerDigitsExtension"),
-    };
-pub const ROUND_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [ROUND_TYPED_INTEGER_DIGITS_EXTENSION];
-const ROUND_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight real integer classes are already integral; the one-input form is an exact class- and shape-preserving identity.",
-    }];
-const ROUND_INTEGER_DIGITS_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents N as double; RunMat mode accepts an exact scalar typed integer and range-checks it before selecting the rounding mode.",
-    }];
-pub const ROUND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = round(integer_X)",
-        inputs: &ROUND_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host and resident values retain their original authoritative storage unchanged. Multi-input round with integer X is rejected before dispatch as documented.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = round(floating_X, integer_N [, mode])",
-        inputs: &ROUND_INTEGER_DIGITS_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The RunMat-only control extension never converts N through binary64; it accepts one authoritative integer element within i32 range.",
-    },
-];
 
 fn builtin_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
-        .with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
+    super::unary::error_with_detail(BUILTIN_NAME, error, detail.as_ref())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,17 +109,18 @@ impl RoundStrategy {
 
 #[runtime_builtin(
     name = "round",
-    category = "math/rounding",
-    summary = "Round values to nearest integers, decimal places, or significant digits.",
-    keywords = "round,rounding,significant,decimals,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::rounding::round::ROUND_DESCRIPTOR),
-    extensions(crate::builtins::math::rounding::round::ROUND_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::rounding::round::ROUND_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::math::rounding::round"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::rounding::round",
+    context = true
 )]
-async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn round_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<RootedValue> {
+    let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
+        .map_err(|error| error.into_runtime_error())?;
+    super::unary::reject_excess_outputs(BUILTIN_NAME, &ROUND_ERROR_TOO_MANY_OUTPUTS)?;
     if rest
         .first()
         .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
@@ -275,7 +130,7 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    let strategy = parse_arguments(&rest)?;
+    let strategy = parse_arguments(rest.view())?;
     if !matches!(strategy, RoundStrategy::Integer) && has_exact_integer_storage(&value) {
         return Err(builtin_error_with_detail(
             &ROUND_ERROR_INVALID_INPUT,
@@ -283,8 +138,36 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    if strategy == RoundStrategy::Integer {
+        return super::preparation::unary(
+            runtime.as_ref(),
+            &runmat_builtins::ROUND_CATALOG_ENTRY,
+            value,
+            |value| round_value(value, strategy),
+        )
+        .await;
+    }
+    let (digits, significant) = strategy.provider_digits().expect("parsed digit strategy");
+    let mode = if significant {
+        runmat_accelerate_api::RoundDigitsMode::Significant
+    } else {
+        runmat_accelerate_api::RoundDigitsMode::Decimals
+    };
+    super::preparation::digits(runtime.as_ref(), value, digits, mode, rest.len(), |value| {
+        round_value(value, strategy)
+    })
+    .await
+}
+
+async fn round_value(value: Value, strategy: RoundStrategy) -> BuiltinResult<RootedValue> {
     match value {
-        Value::GpuTensor(handle) => round_gpu(handle, strategy).await,
+        Value::GpuTensor(handle) => super::unary::root_output(round_gpu(handle, strategy).await?),
+        value => super::unary::root_output(round_host_value(value, strategy)?),
+    }
+}
+
+fn round_host_value(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
+    match value {
         Value::Complex(re, im) => Ok(Value::Complex(
             round_scalar(re, strategy),
             round_scalar(im, strategy),
@@ -309,27 +192,77 @@ fn has_exact_integer_storage(value: &Value) -> bool {
 }
 
 async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
+    enum RoundingHookFailure {
+        Digits(runmat_accelerate_api::ProviderExecutionError),
+        Unary(anyhow::Error),
+    }
+    let provider = super::unary::input_provider(&handle, BUILTIN_NAME, &ROUND_ERROR_INTERNAL)?;
     if matches!(strategy, RoundStrategy::Integer)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
     {
         return Ok(Value::GpuTensor(handle));
     }
-    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        match strategy.provider_digits() {
-            Some((digits, significant)) => {
-                if let Ok(out) = provider.round_digits(&handle, digits, significant).await {
-                    return Ok(Value::GpuTensor(out));
+    if !runmat_accelerate_api::handle_is_logical(&handle) {
+        let storage = runmat_accelerate_api::handle_storage(&handle);
+        let provider_result = {
+            let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+            match strategy.provider_digits() {
+                Some((digits, significant)) => provider
+                    .round_digits(&handle, digits, significant)
+                    .await
+                    .map_err(RoundingHookFailure::Digits),
+                None if runmat_accelerate_api::handle_storage(&handle)
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>
+                {
+                    provider
+                        .round_digits(&handle, 0, false)
+                        .await
+                        .map_err(RoundingHookFailure::Digits)
                 }
+                None => provider
+                    .unary_round(&handle)
+                    .await
+                    .map_err(RoundingHookFailure::Unary),
             }
-            None => {
-                if let Ok(out) = provider.unary_round(&handle).await {
-                    return Ok(Value::GpuTensor(out));
-                }
+        };
+        match provider_result {
+            Ok(output) => {
+                return super::unary::validate_provider_output_with_storage(
+                    provider,
+                    &handle,
+                    output,
+                    storage,
+                    BUILTIN_NAME,
+                    &ROUND_ERROR_INTERNAL,
+                )
+            }
+            Err(RoundingHookFailure::Digits(error))
+                if runmat_accelerate_api::is_unsupported_provider_error(&error) => {}
+            Err(RoundingHookFailure::Unary(error))
+                if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
+            Err(RoundingHookFailure::Digits(error)) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    builtin_error_with_detail(
+                        &ROUND_ERROR_INTERNAL,
+                        format!("provider rounding failed: {error}"),
+                    ),
+                    error,
+                ));
+            }
+            Err(RoundingHookFailure::Unary(error)) => {
+                return Err(builtin_error_with_detail(
+                    &ROUND_ERROR_INTERNAL,
+                    format!("provider rounding failed: {error}"),
+                ))
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    round_tensor(tensor, strategy).map(tensor::tensor_into_value)
+    let host = {
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?
+    };
+    let rounded = round_host_value(host, strategy)?;
+    gpu_helpers::restore_class_preserving_value(&handle, rounded, BUILTIN_NAME)
 }
 
 fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
@@ -352,7 +285,7 @@ fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> 
 }
 
 fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor
         .into_numeric_storage()
         .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, err))?
@@ -366,7 +299,7 @@ fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor
         NumericStorage::F32(values) => NumericStorage::F32(
             values
                 .into_iter()
-                .map(|value| round_scalar(f64::from(value), strategy) as f32)
+                .map(|value| round_scalar_f32(value, strategy))
                 .collect(),
         ),
         storage => storage,
@@ -376,8 +309,8 @@ fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor
 }
 
 fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let storage = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()
@@ -389,8 +322,8 @@ fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinRe
                 .into_iter()
                 .map(|(re, im)| {
                     (
-                        round_scalar(f64::from(re), strategy) as f32,
-                        round_scalar(f64::from(im), strategy) as f32,
+                        round_scalar_f32(re, strategy),
+                        round_scalar_f32(im, strategy),
                     )
                 })
                 .collect(),
@@ -403,11 +336,11 @@ fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinRe
 }
 
 fn round_char_array(ca: CharArray, strategy: RoundStrategy) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ca.data.len());
-    for ch in ca.data {
-        data.push(round_scalar(ch as u32 as f64, strategy));
+    let mut data = Vec::with_capacity(ca.data().len());
+    for ch in ca.to_column_major() {
+        data.push(round_scalar(u32::from(ch.raw()) as f64, strategy));
     }
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+    let tensor = Tensor::new(data, ca.shape)
         .map_err(|e| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
@@ -423,33 +356,18 @@ fn round_scalar(value: f64, strategy: RoundStrategy) -> f64 {
     }
 }
 
-fn round_with_decimals(value: f64, digits: i32) -> f64 {
-    if digits == 0 {
-        return value.round();
-    }
-    let factor = 10f64.powi(digits);
-    if !factor.is_finite() || factor == 0.0 {
-        // Large magnitude digits saturate: rounding has no effect.
+fn round_scalar_f32(value: f32, strategy: RoundStrategy) -> f32 {
+    if !value.is_finite() {
         return value;
     }
-    (value * factor).round() / factor
+    match strategy {
+        RoundStrategy::Integer => value.round(),
+        RoundStrategy::Decimals(digits) => round_with_decimals_f32(value, digits),
+        RoundStrategy::Significant(digits) => round_with_significant_f32(value, digits),
+    }
 }
 
-fn round_with_significant(value: f64, digits: i32) -> f64 {
-    if value == 0.0 {
-        return 0.0;
-    }
-    let abs_val = value.abs();
-    let order = abs_val.log10().floor();
-    let scale_power = digits - 1 - order as i32;
-    let scale = 10f64.powi(scale_power);
-    if !scale.is_finite() || scale == 0.0 {
-        return value;
-    }
-    (value * scale).round() / scale
-}
-
-fn parse_arguments(args: &[Value]) -> BuiltinResult<RoundStrategy> {
+fn parse_arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<RoundStrategy> {
     match args.len() {
         0 => Ok(RoundStrategy::Integer),
         1 => {
@@ -538,7 +456,14 @@ fn parse_mode(value: &Value) -> BuiltinResult<RoundMode> {
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
         "significant" => Ok(RoundMode::Significant),
-        "decimal" | "decimals" => Ok(RoundMode::Decimals),
+        "decimals" => Ok(RoundMode::Decimals),
+        "decimal" => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &ROUND_DECIMAL_MODE_ALIAS_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            Ok(RoundMode::Decimals)
+        }
         other => Err(builtin_error_with_detail(
             &ROUND_ERROR_INVALID_MODE,
             format!("unknown rounding mode '{other}'"),
@@ -549,13 +474,51 @@ fn parse_mode(value: &Value) -> BuiltinResult<RoundMode> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::spec::FusionExprContext;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{IntValue, Tensor};
+    use runmat_builtins::{
+        BuiltinIntegerBackendRule, BuiltinIntegerInputAvailability, BuiltinIntegerOutputClassRule,
+    };
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
+
+    #[test]
+    fn fusion_plain_form_uses_shared_helper_and_rejects_digit_controls() {
+        let template = FUSION_SPEC.elementwise.as_ref().unwrap();
+        for (scalar_ty, helper) in [
+            (ScalarType::F32, "rm_round_f32"),
+            (ScalarType::F64, "rm_round_f64"),
+        ] {
+            let expression = template
+                .wgsl_body
+                .render(&FusionExprContext {
+                    scalar_ty,
+                    inputs: &[crate::builtins::common::spec::FusionExprInput::text("x")],
+                    constants: &[],
+                })
+                .unwrap();
+            assert_eq!(expression, format!("{helper}(x)"));
+            assert!(template
+                .wgsl_body
+                .render(&FusionExprContext {
+                    scalar_ty,
+                    inputs: &[
+                        crate::builtins::common::spec::FusionExprInput::text("x"),
+                        crate::builtins::common::spec::FusionExprInput::text("2"),
+                    ],
+                    constants: &[]
+                })
+                .is_err());
+        }
+    }
 
     fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::round_builtin(value, rest))
+        block_on(super::round_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .map(|owned| owned.value().clone())
     }
 
     fn assert_error_contains(err: &crate::RuntimeError, needle: &str) {
@@ -567,12 +530,59 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn round_rejects_excess_outputs() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = round_builtin(Value::Num(1.25), Vec::new())
+            .expect_err("round must reject excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:round:TooManyOutputs"));
+    }
+
+    #[test]
     fn round_typed_digit_parser_rejects_unrepresentable_uint64() {
         assert_eq!(
             parse_digits(&Value::Int(IntValue::I32(-3))).expect("digits"),
             -3
         );
         assert!(parse_digits(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+    }
+
+    #[test]
+    fn round_compatibility_policy_guards_typed_digits_and_decimal_alias() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let typed = round_builtin(Value::Num(1234.0), vec![Value::Int(IntValue::I8(-2))])
+            .expect_err("strict mode must reject typed N");
+        assert_eq!(
+            typed.identifier(),
+            Some("RunMat:compatibility:RoundTypedIntegerDigitsExtension")
+        );
+
+        let alias = round_builtin(
+            Value::Num(1.25),
+            vec![Value::Num(1.0), Value::from("decimal")],
+        )
+        .expect_err("strict mode must reject the decimal alias");
+        assert_eq!(
+            alias.identifier(),
+            Some("RunMat:compatibility:RoundDecimalModeAliasExtension")
+        );
+
+        let documented = round_builtin(
+            Value::Num(1.25),
+            vec![Value::Num(1.0), Value::from("decimals")],
+        )
+        .expect("documented mode remains available");
+        assert_eq!(documented, Value::Num(1.3));
+    }
+
+    #[test]
+    fn round_runmat_mode_accepts_decimal_alias() {
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = round_builtin(
+            Value::Num(1.25),
+            vec![Value::Num(1.0), Value::from("decimal")],
+        )
+        .expect("RunMat mode accepts the alias");
+        assert_eq!(result, Value::Num(1.3));
     }
 
     #[test]
@@ -588,30 +598,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn round_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
+    fn round_catalog_integer_capabilities_cover_data_and_digits() {
+        assert_eq!(ROUND_EXTENSIONS.len(), 2);
+        assert_eq!(ROUND_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(
+            ROUND_INTEGER_CAPABILITIES[0].output_class,
+            BuiltinIntegerOutputClassRule::PreserveInput
         );
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
+            ROUND_INTEGER_CAPABILITIES[0].backend,
+            BuiltinIntegerBackendRule::HostAndGpu
         );
-    }
-
-    #[test]
-    fn round_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
+        assert_eq!(
+            ROUND_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
         );
-        assert_eq!(out, Type::Num);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -662,11 +663,8 @@ pub(crate) mod tests {
         assert_error_contains(&scalar, "integer inputs support only");
         assert_eq!(scalar.identifier(), ROUND_ERROR_INVALID_INPUT.identifier);
 
-        let tensor = Tensor::new_integer(
-            runmat_value::IntegerStorage::I64(vec![1, i64::MAX]),
-            vec![1, 2],
-        )
-        .expect("integer tensor");
+        let tensor = Tensor::new_integer(IntegerStorage::I64(vec![1, i64::MAX]), vec![1, 2])
+            .expect("integer tensor");
         let array = round_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))])
             .expect_err("integer array digit round must fail");
         assert_error_contains(&array, "integer inputs support only");
@@ -689,7 +687,7 @@ pub(crate) mod tests {
         );
 
         let integer = Tensor::new_integer(
-            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
             vec![1, 2],
         )
         .unwrap();
@@ -700,10 +698,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             integer.integer_storage(),
-            Some(&runmat_value::IntegerStorage::U64(vec![
-                9_007_199_254_740_993,
-                u64::MAX,
-            ]))
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX,]))
         );
     }
 
@@ -714,7 +709,7 @@ pub(crate) mod tests {
         let result = round_builtin(Value::Tensor(tensor), vec![Value::Num(2.0)]).expect("round");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 let expected = [1.23, 2.5, 3.5];
                 for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12, "expected {b}, got {a}");
@@ -783,12 +778,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![-2.5, -0.2, 0.5, 1.8], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = round_builtin(Value::GpuTensor(handle), Vec::new()).expect("round");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![-3.0, 0.0, 1.0, 2.0]);
         });
     }
@@ -799,7 +794,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.2345, 2.499, 149.9, 150.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -809,7 +804,7 @@ pub(crate) mod tests {
                 "digit-aware round should stay GPU resident"
             );
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 100.0, 200.0]);
         });
     }
@@ -820,7 +815,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0012345, 12.3456, 98765.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = round_builtin(
@@ -841,5 +836,103 @@ pub(crate) mod tests {
                 );
             }
         });
+    }
+
+    #[test]
+    fn round_rejects_provider_storage_changes_without_invalidating_input() {
+        test_support::with_test_provider(|provider| {
+            let complex = ComplexTensor::new(vec![(1.25, -2.75)], vec![1, 1]).unwrap();
+            let input =
+                gpu_helpers::upload_complex_tensor(provider, &complex).expect("complex upload");
+            let real = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let output = gpu_helpers::upload_tensor(provider, &real).expect("real upload");
+
+            assert!(
+                crate::builtins::math::rounding::unary::validate_provider_output_with_storage(
+                    provider,
+                    &input,
+                    output,
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                    BUILTIN_NAME,
+                    &ROUND_ERROR_INTERNAL,
+                )
+                .is_err()
+            );
+
+            let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
+                input.clone(),
+            )))
+            .expect("input remains live after malformed output rejection");
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("expected complex input to remain intact")
+            };
+            assert_eq!(gathered, complex);
+            let physical = input.allocation_lease().downgrade();
+            input.release().expect("release input");
+            assert!(physical.acquire().is_none());
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn round_wgpu_matches_host_for_nearest_digits_and_complex_values() {
+        if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+
+        let real = Tensor::new(vec![-2.5, -0.5, 1.234, 149.9], vec![2, 2]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &real).expect("real upload");
+        let nearest = block_on(round_gpu(handle, RoundStrategy::Integer)).expect("nearest round");
+        assert_eq!(
+            test_support::gather(nearest)
+                .expect("nearest gather")
+                .materialize_f64(),
+            vec![-3.0, -1.0, 1.0, 150.0]
+        );
+
+        let handle = gpu_helpers::upload_tensor(provider, &real).expect("digits upload");
+        let digits = block_on(round_gpu(handle, RoundStrategy::Decimals(1))).expect("digit round");
+        assert_eq!(
+            test_support::gather(digits)
+                .expect("digits gather")
+                .materialize_f64(),
+            vec![-2.5, -0.5, 1.2, 149.9]
+        );
+
+        let complex = ComplexTensor::new(vec![(1.2, -3.6), (-2.5, 0.5)], vec![1, 2]).unwrap();
+        let handle =
+            gpu_helpers::upload_complex_tensor(provider, &complex).expect("complex upload");
+        let output = block_on(round_gpu(handle, RoundStrategy::Integer)).expect("complex round");
+        let gathered = block_on(gpu_helpers::gather_value_async(&output)).expect("complex gather");
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(
+            gathered.into_complex_storage(),
+            ComplexStorage::F64(vec![(1.0, -4.0), (-3.0, 1.0)].into())
+        );
+
+        let integer = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![1, 2],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
+        let expected_buffer = handle.buffer_id();
+        let output = block_on(round_gpu(handle, RoundStrategy::Integer)).expect("integer round");
+        let Value::GpuTensor(output_handle) = &output else {
+            panic!("expected resident integer tensor")
+        };
+        assert_eq!(output_handle.buffer_id(), expected_buffer);
+        let gathered = test_support::gather(output).expect("integer gather");
+        assert_eq!(
+            gathered.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX,]))
+        );
     }
 }

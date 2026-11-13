@@ -20,7 +20,8 @@ const CAPABILITY_PACKET: [(&str, usize, &str); 8] = [
 #[test]
 fn plotting_missing_statistics_and_control_integer_metadata_is_explicit() {
     for (name, expected_forms, _) in CAPABILITY_PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(builtin
@@ -37,7 +38,8 @@ fn plotting_missing_statistics_and_control_integer_metadata_is_explicit() {
         "statget",
         "stem",
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin
             .integer_capabilities
             .iter()
@@ -45,7 +47,8 @@ fn plotting_missing_statistics_and_control_integer_metadata_is_explicit() {
             .any(|input| input.availability == BuiltinIntegerInputAvailability::Documented));
     }
     for name in ["standardizeMissing", "statset", "step", "stepinfo"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin
             .integer_capabilities
             .iter()
@@ -53,7 +56,7 @@ fn plotting_missing_statistics_and_control_integer_metadata_is_explicit() {
             .any(|input| input.availability == BuiltinIntegerInputAvailability::RunMatOnly));
     }
 
-    let stats = runmat_builtins::builtin_function_by_name("stats").expect("registered stats");
+    let stats = runmat_builtins::builtin_catalog_entry_by_name("stats").expect("registered stats");
     assert!(stats.integer_capabilities.is_empty());
     assert_eq!(
         stats.integer_audit.map(|audit| audit.kind),

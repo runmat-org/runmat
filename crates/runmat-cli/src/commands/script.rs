@@ -14,17 +14,23 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::{CaptureFiguresMode, Cli, FigureSize};
+use crate::cli::{CaptureFiguresMode, Cli, ExecutionTarget, ExecutionTargetArgs, FigureSize};
 use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::create_session;
+use crate::commands::piped_input::PipedInput;
+use crate::commands::session::{
+    create_session_with_graphics, drive_with_graphics_callbacks, future::boxed_command,
+};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
 use crate::presentation;
 use crate::telemetry::{capture_provider_snapshot, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
+
+#[path = "script/lifecycle.rs"]
+mod lifecycle;
 
 pub async fn execute_script(
     script: PathBuf,
@@ -32,7 +38,16 @@ pub async fn execute_script(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
-    execute_script_with_args(script, vec![], emit_bytecode_path, cli, config, false).await
+    execute_script_with_args(
+        script,
+        vec![],
+        emit_bytecode_path,
+        cli,
+        config,
+        false,
+        ExecutionTargetArgs::default(),
+    )
+    .await
 }
 
 pub async fn execute_script_with_args(
@@ -41,20 +56,114 @@ pub async fn execute_script_with_args(
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
-    fea_json: bool,
+    json: bool,
+    execution: ExecutionTargetArgs,
 ) -> Result<()> {
+    execute_script_with_graphics(
+        ScriptInvocation {
+            script,
+            args,
+            function: None,
+            emit_bytecode_path,
+            json,
+            fea_root: crate::cli::FeaRootArgs::default(),
+            execution,
+        },
+        cli,
+        config,
+        &runmat_core::SessionGraphicsHost::Unavailable,
+    )
+    .await
+}
+
+pub(crate) struct ScriptInvocation {
+    pub(crate) script: PathBuf,
+    pub(crate) args: Vec<String>,
+    pub(crate) function: Option<String>,
+    pub(crate) emit_bytecode_path: Option<PathBuf>,
+    pub(crate) json: bool,
+    /// `--study`/`--sweep` selection; only `.fea` documents accept it.
+    pub(crate) fea_root: crate::cli::FeaRootArgs,
+    pub(crate) execution: ExecutionTargetArgs,
+}
+
+pub(crate) async fn execute_script_with_graphics(
+    invocation: ScriptInvocation,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
+    let ScriptInvocation {
+        script,
+        args,
+        function,
+        emit_bytecode_path,
+        json,
+        fea_root,
+        execution,
+    } = invocation;
+    if function.is_some()
+        && (script.as_path() == Path::new("-")
+            || crate::commands::fea::source::is_fea_source_path(&script)
+            || !matches!(execution.resolve()?, ExecutionTarget::Remote(_)))
+    {
+        anyhow::bail!("--function requires remote execution of a MATLAB source file");
+    }
+    if script.as_path() == Path::new("-") {
+        if !matches!(execution.resolve()?, ExecutionTarget::Local) {
+            anyhow::bail!("remote execution requires a project-owned source file, not stdin");
+        }
+        return boxed_command(|| {
+            execute_stdin_script_with_graphics(emit_bytecode_path, cli, config, graphics)
+        })
+        .await;
+    }
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
-    if runmat_runtime::analysis::is_fea_file_path(&script) {
+    if crate::commands::fea::source::is_fea_source_path(&script) {
         if emit_bytecode_path.is_some() {
             anyhow::bail!("--emit-bytecode is only supported for .m script files");
         }
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return execute_fea_path(script, cli, config, fea_json).await;
+        return boxed_command(|| execute_fea_path(script, fea_root, cli, config, json, execution))
+            .await;
     }
+    if !fea_root.is_empty() {
+        anyhow::bail!(
+            "--study and --sweep select a root of a .fea document; {script:?} is not one"
+        );
+    }
+
+    if let ExecutionTarget::Remote(target) = execution.resolve()? {
+        if emit_bytecode_path.is_some() {
+            anyhow::bail!("--emit-bytecode cannot be combined with remote execution");
+        }
+        return boxed_command(|| {
+            crate::commands::job::submit::submit(
+                crate::commands::job::submit::JobSubmission {
+                    file: script,
+                    project: target.project,
+                    cluster: target.cluster,
+                    queue: target.queue,
+                    trust_identity: target.trust_identity,
+                    function,
+                    idempotency_key: target.idempotency_key,
+                    workers: target.workers,
+                    detach: target.detach,
+                    json,
+                    args,
+                },
+                cli,
+                config,
+            )
+        })
+        .await;
+    }
+
+    validate_local_script_arguments(&args)?;
 
     if let Some(path) = &emit_bytecode_path {
         let content = fs::read_to_string(&script)
@@ -69,7 +178,61 @@ pub async fn execute_script_with_args(
         return Ok(());
     }
 
-    execute_script_path(script, cli, config).await
+    let source_name = script.to_string_lossy().to_string();
+    boxed_command(|| {
+        execute_script_request(
+            script,
+            SourceInput::Path(source_name),
+            cli,
+            config,
+            graphics,
+        )
+    })
+    .await
+}
+
+/// CLI stdin is a whole script, not a sequence of REPL submissions. Its
+/// synthetic source name is deliberately not a project-owned file identity:
+/// package installation comes from the current directory, while compilation
+/// uses exactly the bytes captured by the CLI's exclusive stdin reader.
+pub(crate) async fn execute_stdin_script_with_graphics(
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
+    let content = PipedInput::stdin()?
+        .await
+        .context("Failed to read stdin script")?;
+    if let Some(path) = emit_bytecode_path {
+        let output = emit_bytecode_with_catalog(&content, config, None)
+            .context("Failed to emit bytecode for stdin script")?;
+        return write_bytecode_output(&path, &output);
+    }
+    let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+    boxed_command(|| {
+        execute_script_request(
+            cwd,
+            SourceInput::Text {
+                name: "<stdin>".to_owned(),
+                text: content,
+            },
+            cli,
+            config,
+            graphics,
+        )
+    })
+    .await
+}
+
+pub(crate) fn validate_local_script_arguments(args: &[String]) -> Result<()> {
+    if !args.is_empty() {
+        anyhow::bail!(
+            "local MATLAB script execution does not accept positional arguments; \
+             invoke a typed function entrypoint through `runmat job submit --function`"
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
@@ -106,25 +269,19 @@ pub(crate) async fn execute_script_contents(
     }
 
     let source_name = script.to_string_lossy().to_string();
-    execute_script_request(
-        script,
-        SourceInput::Text {
-            name: source_name,
-            text: content.clone(),
-        },
-        cli,
-        config,
-    )
+    boxed_command(|| {
+        execute_script_request(
+            script,
+            SourceInput::Text {
+                name: source_name,
+                text: content.clone(),
+            },
+            cli,
+            config,
+            &runmat_core::SessionGraphicsHost::Unavailable,
+        )
+    })
     .await
-}
-
-async fn execute_script_path(
-    script: PathBuf,
-    cli: &Cli,
-    config: &RunMatRuntimeConfig,
-) -> Result<()> {
-    let source_name = script.to_string_lossy().to_string();
-    execute_script_request(script, SourceInput::Path(source_name), cli, config).await
 }
 
 async fn execute_script_request(
@@ -132,13 +289,15 @@ async fn execute_script_request(
     request_source: SourceInput,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
     let enable_jit = config.jit.enabled;
-    let mut engine = create_session(
+    let mut engine = create_session_with_graphics(
         enable_jit,
         config.runtime.verbose,
         config,
         "Failed to create execution engine",
+        graphics,
     )?;
     let _project_lease = install_project_for_source(&mut engine, &script, cli).await?;
     let mut script_run = engine.telemetry_run(TelemetryRunConfig {
@@ -153,11 +312,34 @@ async fn execute_script_request(
         HostExecutionPolicy::default(),
         engine.workspace_handle(),
     );
-    let response = engine.execute_request(request).await;
+    let interrupt = engine.interrupt_handle();
+    let signal_task = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            interrupt.cancel(runmat_execution::CancellationReason::User);
+        }
+    });
+    tokio::task::yield_now().await;
+    let local_tasks = engine.local_task_driver();
+    let callbacks = engine.graphics_callback_queue().cloned();
+    let response = boxed_command(|| {
+        local_tasks.drive_until(drive_with_graphics_callbacks(
+            callbacks,
+            engine.execute_request(request),
+        ))
+    })
+    .await;
+    signal_task.abort();
+    let response = response.context("Local callback driver stopped during script execution")??;
     let source_context = response.source_context;
     let outcome = match response.result {
         Ok(outcome) => outcome,
         Err(err) => {
+            if let Err(shutdown_error) = engine.shutdown_foreign_runtime().await {
+                warn!(
+                    "could not finish foreign runtime lifecycle after execution failure: {shutdown_error}"
+                );
+            }
+            engine.shutdown_local_tasks();
             let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
                 run.finish(TelemetryRunFinish {
@@ -171,14 +353,31 @@ async fn execute_script_request(
                     provider: capture_provider_snapshot(),
                 });
             }
-            if let Some(diag) = source_context.source_text().and_then(|source| {
-                format_frontend_error(&err, source_context.source_name(), source)
-            }) {
+            if let Some(diag) = format_frontend_error(
+                &err,
+                source_context.source_name(),
+                source_context.source_text(),
+            ) {
                 eprintln!("{diag}");
             } else {
                 eprintln!("{}: {err}", presentation::stderr().error("Execution error"));
             }
             return Err(AlreadyReportedCliError.into());
+        }
+    };
+    engine
+        .flush_graphics()
+        .await
+        .context("failed to flush native graphics")?;
+    let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
+    engine.shutdown_local_tasks();
+    let lifecycle_failure = match lifecycle::complete(&outcome, foreign_lifecycle) {
+        Ok(()) => None,
+        Err(error) if outcome.has_errors() => Some(error),
+        Err(error) => {
+            return Err(
+                anyhow::Error::new(error).context("failed to finish foreign runtime lifecycle")
+            )
         }
     };
 
@@ -227,6 +426,13 @@ async fn execute_script_request(
             "{}",
             format_script_runtime_diagnostic(diagnostic, &source_context)
         );
+        if let Some(failure) = lifecycle_failure {
+            if let Some(cleanup) = failure.source {
+                // Original structured diagnostic is rendered above, unchanged.
+                // The canonical composition retains the cleanup as secondary.
+                eprintln!("{cleanup}");
+            }
+        }
         return Err(AlreadyReportedCliError.into());
     } else {
         if outcome.used_jit {
@@ -234,11 +440,12 @@ async fn execute_script_request(
         } else {
             info!("Script executed successfully in {:?}", execution_time);
         }
-        if let RuntimeFlow::Single(value) = outcome.flow {
-            if config.runtime.verbose {
-                println!("{value:?}");
-            } else {
-                println!("{value}");
+        // The session has already rendered unsuppressed values (including their
+        // assignment labels) into streams. Flow is the structured return value,
+        // not an additional console event. Keep verbose inspection diagnostic-only.
+        if config.runtime.verbose {
+            if let RuntimeFlow::Single(value) = &outcome.flow {
+                eprintln!("Execution result: {value:?}");
             }
         }
     }
@@ -494,11 +701,24 @@ fn outcome_error_diagnostic(outcome: &ExecutionOutcome) -> Option<&RuntimeDiagno
 }
 
 #[cfg(test)]
+#[path = "script/future_size_tests.rs"]
+mod future_size_tests;
+
+#[cfg(test)]
 mod tests {
-    use super::resolve_script_input;
+    use super::{resolve_script_input, validate_local_script_arguments};
     use crate::test_support::ScopedCurrentDir;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn local_script_arguments_reject_instead_of_being_discarded() {
+        validate_local_script_arguments(&[]).unwrap();
+        let error = validate_local_script_arguments(&["input".into()]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("does not accept positional arguments"));
+    }
 
     #[test]
     fn resolves_named_entrypoint_to_manifest_path_target() {

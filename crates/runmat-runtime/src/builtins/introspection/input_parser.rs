@@ -1,171 +1,23 @@
 //! Minimal MATLAB-compatible `inputParser` name-value parsing.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, HandleRef, ObjectInstance, StructValue, Value};
+use runmat_value::{HandleRef, StructValue, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const CLASS_NAME: &str = "inputParser";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("inputParser");
 const INPUT_PARSER_NAME: &str = "inputParser";
 const ADD_PARAMETER_NAME: &str = "addParameter";
 const PARSE_NAME: &str = "parse";
 const RESULTS_PROPERTY: &str = "Results";
 const PARAMETERS_PROPERTY: &str = "__runmat_inputParser_parameters";
 
-const INPUT_PARSER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "inputParser handle object.",
-}];
-
-const INPUT_PARSER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "p = inputParser()",
-    inputs: &[],
-    outputs: &INPUT_PARSER_OUTPUT,
-}];
-
-const ADD_PARAMETER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated inputParser handle object.",
-}];
-
-const ADD_PARAMETER_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "inputParser handle object.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Parameter name.",
-    },
-    BuiltinParamDescriptor {
-        name: "default",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Default value for the parameter.",
-    },
-];
-
-const ADD_PARAMETER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "p = addParameter(p, name, default)",
-    inputs: &ADD_PARAMETER_INPUTS,
-    outputs: &ADD_PARAMETER_OUTPUT,
-}];
-
-const PARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated inputParser handle object.",
-}];
-
-const PARSE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "inputParser handle object.",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value arguments to parse.",
-    },
-];
-
-const PARSE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "p = parse(p, Name, Value, ...)",
-    inputs: &PARSE_INPUTS,
-    outputs: &PARSE_OUTPUT,
-}];
-
-const ERROR_INVALID_PARSER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTPARSER.INVALID_PARSER",
-    identifier: Some("RunMat:inputParser:InvalidParser"),
-    when: "The parser argument is not a valid inputParser handle.",
-    message: "inputParser: expected a valid inputParser handle",
-};
-
-const ERROR_PARAMETER_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTPARSER.PARAMETER_NAME",
-    identifier: Some("RunMat:inputParser:InvalidParameterName"),
-    when: "A parameter name is not a character vector or string scalar.",
-    message: "inputParser: parameter names must be text scalars",
-};
-
-const ERROR_DUPLICATE_PARAMETER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTPARSER.DUPLICATE_PARAMETER",
-    identifier: Some("RunMat:inputParser:DuplicateParameter"),
-    when: "The same parameter name is registered more than once.",
-    message: "inputParser: duplicate parameter name",
-};
-
-const ERROR_NAME_VALUE_PAIRS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTPARSER.NAME_VALUE_PAIRS",
-    identifier: Some("RunMat:inputParser:NameValuePairs"),
-    when: "The parse argument list does not contain complete name-value pairs.",
-    message: "inputParser: expected name-value pairs",
-};
-
-const ERROR_UNKNOWN_PARAMETER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTPARSER.UNKNOWN_PARAMETER",
-    identifier: Some("RunMat:inputParser:UnknownParameter"),
-    when: "A parsed name does not match any registered parameter.",
-    message: "inputParser: unknown parameter name",
-};
-
-const INPUT_PARSER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-const ADD_PARAMETER_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ERROR_INVALID_PARSER,
-    ERROR_PARAMETER_NAME,
-    ERROR_DUPLICATE_PARAMETER,
-];
-const PARSE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ERROR_INVALID_PARSER,
-    ERROR_PARAMETER_NAME,
-    ERROR_NAME_VALUE_PAIRS,
-    ERROR_UNKNOWN_PARAMETER,
-];
-
-pub const INPUT_PARSER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INPUT_PARSER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INPUT_PARSER_ERRORS,
-};
-
-pub const ADD_PARAMETER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ADD_PARAMETER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ADD_PARAMETER_ERRORS,
-};
-
-pub const PARSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PARSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PARSE_ERRORS,
+use runmat_builtins::{
+    INPUT_PARSER_ERROR_DUPLICATE_PARAMETER, INPUT_PARSER_ERROR_INVALID_PARSER,
+    INPUT_PARSER_ERROR_NAME_VALUE_PAIRS, INPUT_PARSER_ERROR_PARAMETER_NAME,
+    INPUT_PARSER_ERROR_UNKNOWN_PARAMETER,
 };
 
 fn input_parser_error(
@@ -193,76 +45,141 @@ fn input_parser_error_with_detail(
     builder.build()
 }
 
-fn text_scalar(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
+fn text_scalar<'a>(
+    value: &'a Value,
+    builtin: &'static str,
+) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(strings) if strings.data.len() == 1 => Ok(strings.data[0].clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        _ => Err(input_parser_error(builtin, &ERROR_PARAMETER_NAME)),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(std::borrow::Cow::Borrowed(text.as_str()))
+        }
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            Ok(std::borrow::Cow::Borrowed(
+                strings.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
+        }
+        Value::CharArray(chars) if chars.rows == 1 => Ok(std::borrow::Cow::Owned(
+            super::text::decode_utf16_with_error(chars.data(), || {
+                input_parser_error(builtin, &INPUT_PARSER_ERROR_PARAMETER_NAME)
+            })?,
+        )),
+        _ => Err(input_parser_error(
+            builtin,
+            &INPUT_PARSER_ERROR_PARAMETER_NAME,
+        )),
     }
 }
 
-fn new_results_struct(parameters: &StructValue) -> StructValue {
-    let mut results = StructValue::new();
-    for (name, value) in &parameters.fields {
-        results.insert(name.clone(), value.clone());
+fn validate_parameter_name(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::String(runmat_value::StringElement::Text(_)) => Ok(()),
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            Ok(())
+        }
+        Value::CharArray(chars) if chars.rows == 1 => {
+            super::text::decode_utf16_with_error(chars.data(), || {
+                input_parser_error(PARSE_NAME, &INPUT_PARSER_ERROR_PARAMETER_NAME)
+            })?;
+            Ok(())
+        }
+        _ => Err(input_parser_error(
+            PARSE_NAME,
+            &INPUT_PARSER_ERROR_PARAMETER_NAME,
+        )),
     }
-    results
+}
+
+fn parameter_name_matches(value: &Value, name: &str) -> bool {
+    match value {
+        Value::String(runmat_value::StringElement::Text(value)) => value.as_str() == name,
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && !strings.data()[0].is_missing() =>
+        {
+            strings.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                == name
+        }
+        Value::CharArray(chars) if chars.rows == 1 => {
+            runmat_value::decode_utf16_code_units(chars.data()).is_ok_and(|text| text == name)
+        }
+        _ => false,
+    }
 }
 
 fn parser_handle(value: &Value, builtin: &'static str) -> BuiltinResult<HandleRef> {
     match value {
-        Value::HandleObject(handle) if handle.class_name == CLASS_NAME => {
+        Value::HandleObject(handle) if handle.class_name.is(CLASS_IDENTITY) => {
             if crate::is_handle_valid(handle) {
                 Ok(handle.clone())
             } else {
-                Err(input_parser_error(builtin, &ERROR_INVALID_PARSER))
+                Err(input_parser_error(
+                    builtin,
+                    &INPUT_PARSER_ERROR_INVALID_PARSER,
+                ))
             }
         }
-        _ => Err(input_parser_error(builtin, &ERROR_INVALID_PARSER)),
+        _ => Err(input_parser_error(
+            builtin,
+            &INPUT_PARSER_ERROR_INVALID_PARSER,
+        )),
     }
 }
 
 fn with_parser_object_mut<R>(
     parser: &Value,
     builtin: &'static str,
-    f: impl FnOnce(&mut ObjectInstance) -> BuiltinResult<R>,
+    f: impl FnOnce(&mut runmat_value::ObjectInstance) -> BuiltinResult<R>,
 ) -> BuiltinResult<R> {
     let handle = parser_handle(parser, builtin)?;
     runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<R> {
         let Value::Object(obj) = target else {
-            return Err(input_parser_error(builtin, &ERROR_INVALID_PARSER));
+            return Err(input_parser_error(
+                builtin,
+                &INPUT_PARSER_ERROR_INVALID_PARSER,
+            ));
         };
-        if obj.class_name != CLASS_NAME {
-            return Err(input_parser_error(builtin, &ERROR_INVALID_PARSER));
+        if !obj.class_name().is(CLASS_IDENTITY) {
+            return Err(input_parser_error(
+                builtin,
+                &INPUT_PARSER_ERROR_INVALID_PARSER,
+            ));
         }
-        let result = f(obj)?;
-        if let Some(value) = obj.properties.get(PARAMETERS_PROPERTY) {
+        let result = f(obj);
+        if let Some(value) = obj.property(PARAMETERS_PROPERTY) {
             runmat_gc::gc_record_handle_write(&handle.target, value);
         }
-        if let Some(value) = obj.properties.get(RESULTS_PROPERTY) {
+        if let Some(value) = obj.property(RESULTS_PROPERTY) {
             runmat_gc::gc_record_handle_write(&handle.target, value);
         }
-        Ok(result)
+        result
     })
     .map_err(|err| {
         input_parser_error_with_detail(
             builtin,
-            &ERROR_INVALID_PARSER,
+            &INPUT_PARSER_ERROR_INVALID_PARSER,
             format!("invalid handle target: {err}"),
         )
     })?
 }
 
-fn parameters_mut<'a>(
-    obj: &'a mut ObjectInstance,
+fn parameters(
+    obj: &runmat_value::ObjectInstance,
     builtin: &'static str,
-) -> BuiltinResult<&'a mut StructValue> {
-    match obj.properties.get_mut(PARAMETERS_PROPERTY) {
-        Some(Value::Struct(parameters)) => Ok(parameters),
+) -> BuiltinResult<StructValue> {
+    match obj.property(PARAMETERS_PROPERTY) {
+        Some(Value::Struct(parameters)) => Ok(parameters.clone()),
         _ => Err(input_parser_error_with_detail(
             builtin,
-            &ERROR_INVALID_PARSER,
+            &INPUT_PARSER_ERROR_INVALID_PARSER,
             "parser storage is corrupted",
         )),
     }
@@ -270,55 +187,85 @@ fn parameters_mut<'a>(
 
 #[runtime_builtin(
     name = "inputParser",
-    category = "introspection",
-    summary = "Create a parser for MATLAB-style name-value arguments.",
-    keywords = "inputParser,name-value,arguments,varargin",
-    descriptor(crate::builtins::introspection::input_parser::INPUT_PARSER_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::input_parser"
 )]
-async fn input_parser_builtin() -> BuiltinResult<Value> {
-    let mut obj = ObjectInstance::new(CLASS_NAME.to_string());
-    obj.properties.insert(
-        RESULTS_PROPERTY.to_string(),
-        Value::Struct(StructValue::new()),
-    );
-    obj.properties.insert(
-        PARAMETERS_PROPERTY.to_string(),
-        Value::Struct(StructValue::new()),
-    );
-    let target = runmat_gc::gc_allocate(Value::Object(obj)).map_err(|err| {
-        input_parser_error_with_detail(INPUT_PARSER_NAME, &ERROR_INVALID_PARSER, err.to_string())
-    })?;
-    Ok(Value::HandleObject(HandleRef {
-        class_name: CLASS_NAME.to_string(),
-        target,
-        valid: true,
-    }))
+async fn input_parser_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let fields = [
+        (RESULTS_PROPERTY, Value::Struct(StructValue::new())),
+        (PARAMETERS_PROPERTY, Value::Struct(StructValue::new())),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        CLASS_IDENTITY.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    let Value::Object(instance) = object.value() else {
+        unreachable!("constructed parser object")
+    };
+    let class_name = instance.class_name_owner().clone();
+    object.with_owned(|value| {
+        let target = runmat_gc::gc_allocate_rooted(value).map_err(|err| {
+            input_parser_error_with_detail(
+                INPUT_PARSER_NAME,
+                &INPUT_PARSER_ERROR_INVALID_PARSER,
+                err.to_string(),
+            )
+        })?;
+        crate::execution::RootedValue::in_optional_context(
+            Value::HandleObject(HandleRef {
+                class_name,
+                target: target.handle(),
+                valid: true,
+            }),
+            runtime.as_ref(),
+        )
+    })
 }
 
 #[runtime_builtin(
     name = "addParameter",
-    category = "introspection",
-    summary = "Register an inputParser name-value parameter and default.",
-    keywords = "inputParser,addParameter,name-value,varargin",
-    descriptor(crate::builtins::introspection::input_parser::ADD_PARAMETER_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::input_parser"
 )]
-async fn add_parameter_builtin(parser: Value, name: Value, default: Value) -> BuiltinResult<Value> {
+async fn add_parameter_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    parser: Value,
+    name: Value,
+    default: Value,
+) -> BuiltinResult<Value> {
     let name = text_scalar(&name, ADD_PARAMETER_NAME)?;
     with_parser_object_mut(&parser, ADD_PARAMETER_NAME, |obj| {
-        let parameters = parameters_mut(obj, ADD_PARAMETER_NAME)?;
-        if parameters.fields.contains_key(&name) {
+        let parameters = parameters(obj, ADD_PARAMETER_NAME)?;
+        if parameters.fields.contains_key(name.as_ref()) {
             return Err(input_parser_error_with_detail(
                 ADD_PARAMETER_NAME,
-                &ERROR_DUPLICATE_PARAMETER,
+                &INPUT_PARSER_ERROR_DUPLICATE_PARAMETER,
                 format!("'{name}'"),
             ));
         }
-        parameters.insert(name.clone(), default.clone());
-        let results = new_results_struct(parameters);
-        obj.properties
-            .insert(RESULTS_PROPERTY.to_string(), Value::Struct(results));
+        let prepared =
+            crate::execution::structure::construct_struct_from_fields_in_optional_context(
+                runtime.as_ref(),
+                parameters
+                    .fields
+                    .iter()
+                    .chain(std::iter::once((name.as_ref(), &default))),
+            )?;
+        let fields = [
+            (PARAMETERS_PROPERTY, prepared.value()),
+            (RESULTS_PROPERTY, prepared.value()),
+        ];
+        publish_parser_fields(
+            runtime.as_ref(),
+            obj,
+            fields.into_iter(),
+            ADD_PARAMETER_NAME,
+        )?;
         Ok(())
     })?;
     Ok(parser)
@@ -326,55 +273,107 @@ async fn add_parameter_builtin(parser: Value, name: Value, default: Value) -> Bu
 
 #[runtime_builtin(
     name = "parse",
-    category = "introspection",
-    summary = "Parse name-value arguments with an inputParser.",
-    keywords = "inputParser,parse,name-value,varargin",
-    descriptor(crate::builtins::introspection::input_parser::PARSE_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::input_parser"
 )]
-async fn parse_builtin(parser: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn parse_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    parser: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !rest.len().is_multiple_of(2) {
-        return Err(input_parser_error(PARSE_NAME, &ERROR_NAME_VALUE_PAIRS));
+        return Err(input_parser_error(
+            PARSE_NAME,
+            &INPUT_PARSER_ERROR_NAME_VALUE_PAIRS,
+        ));
     }
 
-    let mut overrides = Vec::with_capacity(rest.len() / 2);
-    let mut iter = rest.into_iter();
-    while let (Some(name), Some(value)) = (iter.next(), iter.next()) {
-        overrides.push((text_scalar(&name, PARSE_NAME)?, value));
+    for pair in rest.chunks_exact(2) {
+        validate_parameter_name(&pair[0])?;
     }
 
     with_parser_object_mut(&parser, PARSE_NAME, |obj| {
-        let parameters = parameters_mut(obj, PARSE_NAME)?;
-        let mut results = new_results_struct(parameters);
-        for (name, value) in overrides {
-            if !parameters.fields.contains_key(&name) {
+        let parameters = parameters(obj, PARSE_NAME)?;
+        for pair in rest.chunks_exact(2) {
+            if !parameters
+                .field_names()
+                .any(|name| parameter_name_matches(&pair[0], name))
+            {
+                let name = text_scalar(&pair[0], PARSE_NAME)?;
                 return Err(input_parser_error_with_detail(
                     PARSE_NAME,
-                    &ERROR_UNKNOWN_PARAMETER,
+                    &INPUT_PARSER_ERROR_UNKNOWN_PARAMETER,
                     format!("'{name}'"),
                 ));
             }
-            results.insert(name, value);
         }
-        obj.properties
-            .insert(RESULTS_PROPERTY.to_string(), Value::Struct(results));
+        let fields = parameters.fields.iter().map(|(name, default)| {
+            let value = rest
+                .chunks_exact(2)
+                .rev()
+                .find_map(|pair| {
+                    parameter_name_matches(&pair[0], name)
+                        .then(|| pair.get(1))
+                        .flatten()
+                })
+                .unwrap_or(default);
+            (name, value)
+        });
+        let results =
+            crate::execution::structure::construct_struct_from_fields_in_optional_context(
+                runtime.as_ref(),
+                fields,
+            )?;
+        publish_parser_fields(
+            runtime.as_ref(),
+            obj,
+            std::iter::once((RESULTS_PROPERTY, results.value())),
+            PARSE_NAME,
+        )?;
         Ok(())
     })?;
     Ok(parser)
+}
+
+fn publish_parser_fields<'a>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut runmat_value::ObjectInstance,
+    fields: impl Iterator<Item = (&'a str, &'a Value)> + Clone,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    crate::execution::object::replacement::replace_properties(
+        runtime,
+        object,
+        fields,
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:inputParser:Allocation",
+                message,
+                source,
+            )
+        },
+        |message| {
+            input_parser_error_with_detail(builtin, &INPUT_PARSER_ERROR_INVALID_PARSER, message)
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::CharArray;
 
     fn parser_with_root() -> (Value, runmat_gc::ExplicitRoot) {
-        let parser = block_on(input_parser_builtin()).expect("inputParser");
-        let Value::HandleObject(handle) = &parser else {
+        let parser = block_on(input_parser_builtin(None)).expect("inputParser");
+        let parser_value = parser.value().clone();
+        let Value::HandleObject(handle) = &parser_value else {
             panic!("expected inputParser handle, got {parser:?}");
         };
         let root = runmat_gc::gc_root(handle.target).expect("root inputParser handle");
-        (parser, root)
+        (parser_value, root)
     }
 
     fn property(value: &Value, name: &str) -> Value {
@@ -382,7 +381,7 @@ mod tests {
             panic!("expected inputParser handle, got {value:?}");
         };
         runmat_gc::gc_with_value(&handle.target, |target| match target {
-            Value::Object(obj) => obj.properties.get(name).cloned().unwrap(),
+            Value::Object(obj) => obj.property(name).cloned().unwrap(),
             other => panic!("expected object target, got {other:?}"),
         })
         .expect("read target")
@@ -399,11 +398,17 @@ mod tests {
     }
 
     fn run_add_parameter(parser: Value, name: Value, default: Value) -> BuiltinResult<Value> {
-        block_on(add_parameter_builtin(parser, name, default))
+        block_on(add_parameter_builtin(None, parser, name, default))
     }
 
     fn run_parse(parser: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(parse_builtin(parser, rest))
+        block_on(parse_builtin(
+            None,
+            parser,
+            crate::execution::RootedValues::new(rest)
+                .map_err(|error| error.into_runtime_error())?
+                .into(),
+        ))
     }
 
     #[test]
@@ -412,7 +417,7 @@ mod tests {
         let Value::HandleObject(handle) = &parser else {
             panic!("expected handle");
         };
-        assert_eq!(handle.class_name, CLASS_NAME);
+        assert!(handle.class_name.is(CLASS_IDENTITY));
         assert!(crate::is_handle_valid(handle));
         let Value::Struct(results) = property(&parser, RESULTS_PROPERTY) else {
             panic!("expected Results struct");

@@ -1,0 +1,294 @@
+[package]
+name = "clarabel"
+version = "0.11.1"
+authors = ["Paul Goulart <paul.goulart@eng.ox.ac.uk>"]
+edition = "2021"
+rust-version = "1.70.0"
+license = "Apache-2.0"
+description = "Clarabel Conic Interior Point Solver for Rust / Python"
+readme = "README.md"
+repository = "https://github.com/oxfordcontrol/Clarabel.rs"
+keywords = ["convex", "optimization", "conic", "solver", "linear-programming"]
+categories = ["mathematics"]
+
+#required for openssl to work on git actions
+resolver = "1"     
+
+[dependencies]
+amd            = "0.2.2"
+cfg-if         = "1.0"
+itertools      = "0.11"
+derive_builder = "0.11"
+enum_dispatch  = "0.3.8"
+lazy_static    = "1.4"
+num-traits     = "0.2"
+thiserror      = "1.0"
+
+
+# -------------------------------
+# features
+# -------------------------------
+
+[features]
+default = ["serde"]
+
+# enable reading / writing of problems from json files 
+serde = ["dep:serde", "dep:serde_json", "dep:serde-big-array"]
+
+# enables blas/lapack for SDP support, with blas/lapack src unspecified
+# also enable packages required for chordal decomposition 
+sdp = ["blas","lapack", "indexmap"]
+
+# enable detailed build info reporting 
+buildinfo = ["dep:vergen"]
+
+# explicit configuration options for different blas flavours
+sdp-accelerate = ["sdp", "blas-src/accelerate", "lapack-src/accelerate"]
+sdp-netlib     = ["sdp", "blas-src/netlib", "lapack-src/netlib", "netlib-src"]
+sdp-openblas   = ["sdp", "blas-src/openblas", "lapack-src/openblas", "openblas-src"]
+sdp-mkl        = ["sdp", "blas-src/intel-mkl", "lapack-src/intel-mkl","intel-mkl-src"]
+sdp-r          = ["sdp", "blas-src/r", "lapack-src/r"]
+
+# build as the julia interface 
+julia = [
+    "dep:libc",
+    "dep:num-derive",
+    "buildinfo",
+    "faer-sparse",
+    "serde",
+    "sdp",
+] 
+ 
+# build as the python interface via maturin.
+# python builds will default to use scipy shared libraries
+# for blas/lapack if none of the options above are specified.
+# This is the behaviour used when building the python wheels
+# for distribution on pypi
+
+python = [
+    "dep:derive_more",
+    "dep:num-derive",
+    "dep:libc",
+    "dep:pyo3",
+    "buildinfo",
+    "faer-sparse",
+    "serde",
+    "sdp",
+]
+
+# compile with faer supernodal solver option
+faer-sparse = ["dep:faer", "dep:faer-traits"]
+
+# various pardiso options
+pardiso-panua = ["pardiso-wrapper/panua"]
+pardiso-mkl = ["pardiso-wrapper/mkl"]
+pardiso = ["pardiso-panua", "pardiso-mkl"]
+
+# compile with more exhaustive benchmarking tests 
+bench = []
+
+# -------------------------------
+# SDP configuration
+# -------------------------------
+
+[dependencies.blas]
+version = "0.22.0"
+optional = true
+
+[dependencies.lapack]
+version = "0.19.0"
+optional = true
+
+[dependencies.blas-src]
+version = "0.11.1"
+optional = true 
+
+[dependencies.lapack-src]
+version = "0.11.0"
+optional = true 
+
+[target.'cfg(not(windows))'.dependencies.openblas-src]
+version = "0.10.11"
+features = ["static"]
+optional = true
+
+[target.'cfg(windows)'.dependencies.openblas-src]
+version = "0.10.11"
+features = ["system"]
+optional = true
+
+[dependencies.intel-mkl-src]
+version = "0.8.1"
+features = ["mkl-static-lp64-iomp"]
+optional = true
+
+[dependencies.netlib-src]
+version = "0.8.0"
+features = ["static"]
+optional = true
+
+[dependencies.indexmap]
+version = "2.2"
+optional = true
+
+# -------------------------------
+# 3rd party sparse LDL solvers
+# -------------------------------
+
+[dependencies.faer]
+version = "0.21.9"
+optional = true 
+
+[dependencies.faer-traits]
+version = "0.21.5"
+optional = true 
+
+[dependencies.pardiso-wrapper]
+version = "0.1"
+optional = true
+
+
+# -------------------------------
+# examples
+# -------------------------------
+
+[[example]]
+name = "lp"
+path = "examples/rust/example_lp.rs"
+
+[[example]]
+name = "qp"
+path = "examples/rust/example_qp.rs"
+
+[[example]]
+name = "socp"
+path = "examples/rust/example_socp.rs"
+
+[[example]]
+name = "powcone"
+path = "examples/rust/example_powcone.rs"
+
+[[example]]
+name = "expcone"
+path = "examples/rust/example_expcone.rs"
+
+[[example]]
+name = "box"
+path = "examples/rust/example_box.rs"
+
+[[example]]
+name = "callback"
+path = "examples/rust/example_callback.rs"
+
+[[example]]
+name = "sdp"
+path = "examples/rust/example_sdp.rs"
+required-features = ["sdp"]
+
+[[example]]
+name = "box_faer"
+path = "examples/rust/example_box_faer.rs"
+required-features = ["faer-sparse"]
+
+[[example]]
+name = "json"
+path = "examples/rust/example_json.rs"
+required-features = ["serde"]
+
+
+
+# -------------------------------
+# custom build profiles 
+# -------------------------------
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+
+
+# ------------------------------
+# Optional julia and python interface 
+# ------------------------------
+
+[dependencies.num-derive]
+optional = true 
+version = "0.4"
+
+[dependencies.serde]
+optional = true 
+version = "1"
+features = ["derive"]
+
+[dependencies.serde_json]
+optional = true 
+version = "1"
+features = ["float_roundtrip"]
+
+
+# derive_more is used to implement the Debug trait
+# used for display python objects.  Increases MSRV
+# to 1.75, so not used by default.
+[dependencies.derive_more]
+optional = true
+version = "2.0"
+features = ["debug"]
+
+# serde_big_array is used to serialize/deserialize 64 element pardiso iparm settings.
+# Could de dropped once https://github.com/serde-rs/serde/issues/1937 is resolved.
+[dependencies.serde-big-array]
+optional = true 
+version = "0.5"
+
+[dependencies.libc]
+optional = true 
+version = "0.2"
+
+[dependencies.pyo3]
+optional = true
+version = "0.25"
+# "extension-module" tells pyo3 we want to build an extension module (skips linking against libpython.so)
+# "abi3-py39" tells pyo3 (and maturin) to build using the stable ABI with minimum Python version 3.9
+features = ["extension-module", "abi3-py39"]
+
+[lib]
+name = "clarabel"
+# "cdylib" is necessary to produce a shared libraries for Python/Julia
+# "lib" is necessary to allow the ./examples to build
+crate-type = ["lib","cdylib"] 
+
+
+# ------------------------------
+# enable latex in docs 
+# credit: https://github.com/victe/rust-latex-doc-minimal-example
+# ------------------------------
+
+[package.metadata.docs.rs]
+rustdoc-args = [ "--html-in-header", "./html/rustdocs-header.html" ]
+features = ["sdp","sdp-mkl"]
+
+# ------------------------------
+# wasm compatibility
+# ------------------------------
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "0.2.3"
+[target.'cfg(target_family = "wasm")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+
+# ------------------------------
+# detailed build info
+# ------------------------------
+[build-dependencies.vergen]
+optional = true
+version = "9.0"
+features = ["build", "cargo", "rustc", "si"]
+
+# ------------------------------
+# testing, benchmarking etc 
+# ------------------------------
+[dev-dependencies]
+tempfile = "3"
+
+
+
+

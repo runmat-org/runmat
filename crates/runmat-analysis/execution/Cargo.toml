@@ -1,0 +1,35 @@
+[package]
+name = "runmat-analysis-execution"
+version = "0.7.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "Portable execution and artifact bridge for RunMat finite element analysis"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[features]
+default = []
+occt-native = ["runmat-geometry-io/occt-native"]
+
+[dependencies]
+runmat-analysis-core = { workspace = true }
+runmat-analysis-fea = { workspace = true }
+runmat-canonical-codec = { workspace = true }
+runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-execution-runner = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-geometry-io = { workspace = true }
+runmat-geometry-ops = { workspace = true }
+runmat-meshing-core = { workspace = true }
+runmat-meshing-execution = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
+runmat-simulation-usage = { workspace = true }
+runmat-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

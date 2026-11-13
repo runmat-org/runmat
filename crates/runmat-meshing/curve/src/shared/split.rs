@@ -23,25 +23,50 @@ pub fn validate_shared_curve_split_set(
     topology: &runmat_geometry_core::ExactBRepTopology,
     splits: &[SharedCurveSegmentSplit],
 ) -> Result<(), SharedCurveError> {
-    existing.validate_against(topology)?;
+    validate_split_set(existing, topology, splits, None)
+}
+
+pub fn validate_shared_curve_split_set_with_cancellation(
+    existing: &SharedCurveMesh,
+    topology: &runmat_geometry_core::ExactBRepTopology,
+    splits: &[SharedCurveSegmentSplit],
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+) -> Result<(), SharedCurveError> {
+    validate_split_set(existing, topology, splits, Some(cancellation))
+}
+
+fn validate_split_set(
+    existing: &SharedCurveMesh,
+    topology: &runmat_geometry_core::ExactBRepTopology,
+    splits: &[SharedCurveSegmentSplit],
+    cancellation: Option<&dyn runmat_meshing_core::MeshingCancellationSignal>,
+) -> Result<(), SharedCurveError> {
+    super::validation::validate_shared_curve_mesh_with_cancellation(
+        existing,
+        topology,
+        cancellation,
+    )?;
+
     if splits.is_empty() || splits.len() > MAX_SPLIT_REQUESTS {
         return Err(SharedCurveError::invalid_request(
             "protected curve splits",
             "split inventory must be nonempty and within its hard bound",
         ));
     }
-    let curves_by_edge = existing
-        .edges
-        .iter()
-        .map(|curve| (&curve.source_edge_id, curve))
-        .collect::<BTreeMap<_, _>>();
+    let mut curves_by_edge = BTreeMap::new();
+    for curve in &existing.edges {
+        super::validation::checkpoint(cancellation)?;
+        curves_by_edge.insert(&curve.source_edge_id, curve);
+    }
     for split in splits {
+        super::validation::checkpoint(cancellation)?;
         validate_split(split, &curves_by_edge)?;
     }
-    if splits
-        .windows(2)
-        .any(|pair| compare_splits(&pair[0], &pair[1]) != std::cmp::Ordering::Less)
-    {
+    for pair in splits.windows(2) {
+        super::validation::checkpoint(cancellation)?;
+        if compare_splits(&pair[0], &pair[1]) == std::cmp::Ordering::Less {
+            continue;
+        }
         return Err(SharedCurveError::invalid_request(
             "protected curve splits",
             "split inventory is not in unique canonical order",

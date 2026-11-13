@@ -1,0 +1,290 @@
+use crate::fea_contract::policy_types::conformance::assert_family;
+use crate::BuiltinCatalogEntry;
+
+const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &super::state_kind_structural::structural_primary::CATALOG_ENTRY,
+    &super::state_kind_structural::structural_kinematics::CATALOG_ENTRY,
+    &super::state_kind_structural::structural_stress_strain::CATALOG_ENTRY,
+    &super::state_kind_structural::geometric_stiffness::CATALOG_ENTRY,
+    &super::state_kind_history::material_history::CATALOG_ENTRY,
+    &super::state_kind_history::contact_history::CATALOG_ENTRY,
+    &super::state_kind_history::thermal::CATALOG_ENTRY,
+    &super::state_kind_fields::electromagnetic_static::CATALOG_ENTRY,
+    &super::state_kind_fields::electromagnetic_complex::CATALOG_ENTRY,
+    &super::state_kind_fields::acoustic_complex::CATALOG_ENTRY,
+    &super::state_kind_fields::fluid::CATALOG_ENTRY,
+    &super::state_kind_auxiliary::moving_mesh::CATALOG_ENTRY,
+    &super::state_kind_auxiliary::modal_basis::CATALOG_ENTRY,
+    &super::state_kind_auxiliary::coupled_interface::CATALOG_ENTRY,
+    &super::state_kind_auxiliary::integrator::CATALOG_ENTRY,
+    &super::completeness::complete::CATALOG_ENTRY,
+    &super::completeness::checkpoint::CATALOG_ENTRY,
+    &super::completeness::partial::CATALOG_ENTRY,
+    &super::persistence::canonical::CATALOG_ENTRY,
+    &super::persistence::until_dependents_complete::CATALOG_ENTRY,
+    &super::persistence::checkpoint_only::CATALOG_ENTRY,
+    &super::state_use_physical::physical_initial_state::CATALOG_ENTRY,
+    &super::state_use_physical::linearization_point::CATALOG_ENTRY,
+    &super::state_use_physical::prestress::CATALOG_ENTRY,
+    &super::state_use_physical::initial_guess::CATALOG_ENTRY,
+    &super::state_use_structural::modal_basis::CATALOG_ENTRY,
+    &super::state_use_structural::coupled_interface::CATALOG_ENTRY,
+    &super::state_use_structural::restart::CATALOG_ENTRY,
+    &super::conflict::reject::CATALOG_ENTRY,
+    &super::conflict::replace_initial_condition::CATALOG_ENTRY,
+    &super::conflict::augment_disjoint_quantities::CATALOG_ENTRY,
+    &super::dependency_reason::state_transfer::CATALOG_ENTRY,
+    &super::dependency_reason::authored_ordering::CATALOG_ENTRY,
+    &super::dependency_reason::shared_interface::CATALOG_ENTRY,
+    &super::dependency_reason::adaptation::CATALOG_ENTRY,
+    &super::transition_method_direct::reuse::CATALOG_ENTRY,
+    &super::transition_method_direct::conservative_projection::CATALOG_ENTRY,
+    &super::transition_method_direct::interpolation::CATALOG_ENTRY,
+    &super::transition_method_derived::linearize::CATALOG_ENTRY,
+    &super::transition_method_derived::derive_operator_contribution::CATALOG_ENTRY,
+    &super::transition_method_derived::initial_guess_only::CATALOG_ENTRY,
+    &super::topology::require_identical::CATALOG_ENTRY,
+    &super::topology::project_with_evidence::CATALOG_ENTRY,
+    &super::topology::adapted_mesh_lineage::CATALOG_ENTRY,
+    &super::reference_state::preserve::CATALOG_ENTRY,
+    &super::reference_state::receiving_step_origin::CATALOG_ENTRY,
+    &super::reference_state::explicit_linearization_point::CATALOG_ENTRY,
+];
+
+#[test]
+fn sequence_policy_choices_conform() {
+    assert_family(&[
+        (
+            &super::state_kind_structural::structural_primary::CATALOG_ENTRY,
+            &super::state_kind_structural::structural_primary::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_structural::structural_kinematics::CATALOG_ENTRY,
+            &super::state_kind_structural::structural_kinematics::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_structural::structural_stress_strain::CATALOG_ENTRY,
+            &super::state_kind_structural::structural_stress_strain::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_structural::geometric_stiffness::CATALOG_ENTRY,
+            &super::state_kind_structural::geometric_stiffness::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_history::material_history::CATALOG_ENTRY,
+            &super::state_kind_history::material_history::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_history::contact_history::CATALOG_ENTRY,
+            &super::state_kind_history::contact_history::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_history::thermal::CATALOG_ENTRY,
+            &super::state_kind_history::thermal::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_fields::electromagnetic_static::CATALOG_ENTRY,
+            &super::state_kind_fields::electromagnetic_static::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_fields::electromagnetic_complex::CATALOG_ENTRY,
+            &super::state_kind_fields::electromagnetic_complex::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_fields::acoustic_complex::CATALOG_ENTRY,
+            &super::state_kind_fields::acoustic_complex::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_fields::fluid::CATALOG_ENTRY,
+            &super::state_kind_fields::fluid::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_auxiliary::moving_mesh::CATALOG_ENTRY,
+            &super::state_kind_auxiliary::moving_mesh::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_auxiliary::modal_basis::CATALOG_ENTRY,
+            &super::state_kind_auxiliary::modal_basis::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_auxiliary::coupled_interface::CATALOG_ENTRY,
+            &super::state_kind_auxiliary::coupled_interface::POLICY_CALL,
+        ),
+        (
+            &super::state_kind_auxiliary::integrator::CATALOG_ENTRY,
+            &super::state_kind_auxiliary::integrator::POLICY_CALL,
+        ),
+        (
+            &super::completeness::complete::CATALOG_ENTRY,
+            &super::completeness::complete::POLICY_CALL,
+        ),
+        (
+            &super::completeness::checkpoint::CATALOG_ENTRY,
+            &super::completeness::checkpoint::POLICY_CALL,
+        ),
+        (
+            &super::completeness::partial::CATALOG_ENTRY,
+            &super::completeness::partial::POLICY_CALL,
+        ),
+        (
+            &super::persistence::canonical::CATALOG_ENTRY,
+            &super::persistence::canonical::POLICY_CALL,
+        ),
+        (
+            &super::persistence::until_dependents_complete::CATALOG_ENTRY,
+            &super::persistence::until_dependents_complete::POLICY_CALL,
+        ),
+        (
+            &super::persistence::checkpoint_only::CATALOG_ENTRY,
+            &super::persistence::checkpoint_only::POLICY_CALL,
+        ),
+        (
+            &super::state_use_physical::physical_initial_state::CATALOG_ENTRY,
+            &super::state_use_physical::physical_initial_state::POLICY_CALL,
+        ),
+        (
+            &super::state_use_physical::linearization_point::CATALOG_ENTRY,
+            &super::state_use_physical::linearization_point::POLICY_CALL,
+        ),
+        (
+            &super::state_use_physical::prestress::CATALOG_ENTRY,
+            &super::state_use_physical::prestress::POLICY_CALL,
+        ),
+        (
+            &super::state_use_physical::initial_guess::CATALOG_ENTRY,
+            &super::state_use_physical::initial_guess::POLICY_CALL,
+        ),
+        (
+            &super::state_use_structural::modal_basis::CATALOG_ENTRY,
+            &super::state_use_structural::modal_basis::POLICY_CALL,
+        ),
+        (
+            &super::state_use_structural::coupled_interface::CATALOG_ENTRY,
+            &super::state_use_structural::coupled_interface::POLICY_CALL,
+        ),
+        (
+            &super::state_use_structural::restart::CATALOG_ENTRY,
+            &super::state_use_structural::restart::POLICY_CALL,
+        ),
+        (
+            &super::conflict::reject::CATALOG_ENTRY,
+            &super::conflict::reject::POLICY_CALL,
+        ),
+        (
+            &super::conflict::replace_initial_condition::CATALOG_ENTRY,
+            &super::conflict::replace_initial_condition::POLICY_CALL,
+        ),
+        (
+            &super::conflict::augment_disjoint_quantities::CATALOG_ENTRY,
+            &super::conflict::augment_disjoint_quantities::POLICY_CALL,
+        ),
+        (
+            &super::dependency_reason::state_transfer::CATALOG_ENTRY,
+            &super::dependency_reason::state_transfer::POLICY_CALL,
+        ),
+        (
+            &super::dependency_reason::authored_ordering::CATALOG_ENTRY,
+            &super::dependency_reason::authored_ordering::POLICY_CALL,
+        ),
+        (
+            &super::dependency_reason::shared_interface::CATALOG_ENTRY,
+            &super::dependency_reason::shared_interface::POLICY_CALL,
+        ),
+        (
+            &super::dependency_reason::adaptation::CATALOG_ENTRY,
+            &super::dependency_reason::adaptation::POLICY_CALL,
+        ),
+        (
+            &super::transition_method_direct::reuse::CATALOG_ENTRY,
+            &super::transition_method_direct::reuse::POLICY_CALL,
+        ),
+        (
+            &super::transition_method_direct::conservative_projection::CATALOG_ENTRY,
+            &super::transition_method_direct::conservative_projection::POLICY_CALL,
+        ),
+        (
+            &super::transition_method_direct::interpolation::CATALOG_ENTRY,
+            &super::transition_method_direct::interpolation::POLICY_CALL,
+        ),
+        (
+            &super::transition_method_derived::linearize::CATALOG_ENTRY,
+            &super::transition_method_derived::linearize::POLICY_CALL,
+        ),
+        (
+            &super::transition_method_derived::derive_operator_contribution::CATALOG_ENTRY,
+            &super::transition_method_derived::derive_operator_contribution::POLICY_CALL,
+        ),
+        (
+            &super::transition_method_derived::initial_guess_only::CATALOG_ENTRY,
+            &super::transition_method_derived::initial_guess_only::POLICY_CALL,
+        ),
+        (
+            &super::topology::require_identical::CATALOG_ENTRY,
+            &super::topology::require_identical::POLICY_CALL,
+        ),
+        (
+            &super::topology::project_with_evidence::CATALOG_ENTRY,
+            &super::topology::project_with_evidence::POLICY_CALL,
+        ),
+        (
+            &super::topology::adapted_mesh_lineage::CATALOG_ENTRY,
+            &super::topology::adapted_mesh_lineage::POLICY_CALL,
+        ),
+        (
+            &super::reference_state::preserve::CATALOG_ENTRY,
+            &super::reference_state::preserve::POLICY_CALL,
+        ),
+        (
+            &super::reference_state::receiving_step_origin::CATALOG_ENTRY,
+            &super::reference_state::receiving_step_origin::POLICY_CALL,
+        ),
+        (
+            &super::reference_state::explicit_linearization_point::CATALOG_ENTRY,
+            &super::reference_state::explicit_linearization_point::POLICY_CALL,
+        ),
+    ]);
+}
+
+#[test]
+fn family_entries_are_valid_documented_and_registered() {
+    let errors = crate::catalog::validate_builtin_catalog(ENTRIES);
+    assert!(errors.is_empty(), "{errors:#?}");
+    let mut registered = Vec::new();
+    super::extend_entries(&mut registered);
+    assert_eq!(registered.len(), ENTRIES.len());
+    for entry in ENTRIES {
+        let documentation = &entry.documentation;
+        let name = entry.identity.name;
+        assert_eq!(documentation.title, Some(name));
+        let headings: Vec<_> = documentation
+            .sections
+            .iter()
+            .map(|section| section.heading)
+            .collect();
+        assert!(
+            headings.contains(&"Behavior") && headings.contains(&"Use in a study"),
+            "{name}"
+        );
+        assert!(
+            !documentation.faqs.is_empty() || !documentation.examples.is_empty(),
+            "{name}"
+        );
+        assert!(
+            !documentation.related.contains(&name),
+            "{name} lists itself as related"
+        );
+        for example in documentation.examples {
+            assert!(
+                example.program.contains(name),
+                "{name} example must call it"
+            );
+            assert!(matches!(
+                example.verification,
+                crate::BuiltinExampleVerification::Assertions { .. }
+            ));
+        }
+        assert!(registered
+            .iter()
+            .any(|candidate| std::ptr::eq(*candidate, *entry) || candidate.identity.name == name));
+    }
+}

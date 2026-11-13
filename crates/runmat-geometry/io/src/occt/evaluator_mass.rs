@@ -34,17 +34,24 @@ impl ExactMassPropertiesEvaluator for OcctExactEvaluator {
                     ffi::bridge::exact_mass_properties(self.session_id, &shape_keys, is_sheet_body)
                         .map_err(|error| kernel(error.to_string()))?;
                 BodyMassProperties {
-                    volume_m3: value.volume,
-                    surface_area_m2: value.surface_area,
-                    centroid_m: [value.centroid_x, value.centroid_y, value.centroid_z],
-                    inertia_about_centroid_m5: [
+                    volume_m3: runmat_geometry_core::physical::Volume::new(value.volume),
+                    surface_area_m2: runmat_geometry_core::physical::Area::new(value.surface_area),
+                    centroid_m: runmat_geometry_core::physical::Position::new([
+                        value.centroid_x,
+                        value.centroid_y,
+                        value.centroid_z,
+                    ]),
+                    inertia_about_centroid_m5: runmat_geometry_core::physical::Quantity::<
+                        runmat_geometry_core::physical::kind::GeometricVolumeSecondMoment,
+                        _,
+                    >::new([
                         value.inertia_xx,
                         value.inertia_yy,
                         value.inertia_zz,
                         value.inertia_xy,
                         value.inertia_xz,
                         value.inertia_yz,
-                    ],
+                    ]),
                 }
             }
         };

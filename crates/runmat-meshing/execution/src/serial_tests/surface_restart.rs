@@ -1,5 +1,6 @@
 use super::*;
 
+pub(super) mod convergence;
 mod dag;
 
 struct SurfaceRestartKernel;
@@ -22,7 +23,8 @@ impl MeshingStageKernel for SurfaceRestartKernel {
             .iter()
             .find_map(PreparedMeshingInput::stage_artifact)
             .expect("restart fixture has shared curves");
-        let curve_bytes = crate::surface_kernel::curve_record(geometry, curve_publication)?;
+        let curve_bytes =
+            crate::surface_kernel::curve_record(geometry, curve_publication, None, None)?;
         let curves =
             runmat_meshing_curve::decode_shared_curve_mesh(&curve_bytes, &geometry.topology)
                 .map_err(crate::curve_kernel::map_curve_error)?;
@@ -42,12 +44,24 @@ impl MeshingStageKernel for SurfaceRestartKernel {
             },
         )
         .unwrap();
+        let allocation = invocation.control.geometry_evaluation_control();
+        let profile = runmat_meshing_surface::profile_exact_face_partition_result_encoding(
+            &result,
+            &allocation,
+        )
+        .unwrap();
+        let mut storage = runmat_geometry_core::GeometryAllocationReservation::new(
+            &allocation,
+            profile.resident_workspace_bytes_estimate,
+        )
+        .unwrap();
         let encoded = runmat_meshing_surface::encode_exact_face_partition_result(
             &result,
             &geometry.topology,
             &curves,
         )
         .unwrap();
+        storage.retain_bytes(encoded.capacity() as u64);
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(91),
             streams: vec![MeshingChunkStream {
@@ -91,8 +105,8 @@ fn serial_surface_partition_can_publish_a_curve_restart() {
         .stage_objects()
         .decoded_streams()
         .unwrap();
-    let result = runmat_meshing_surface::decode_exact_face_partition_result(
-        &streams[0].records[0],
+    let result = runmat_meshing_surface::decode_exact_face_partition_records(
+        &streams[0].records,
         &exact.geometry_objects().topology,
         &curves,
     )
@@ -106,7 +120,7 @@ fn serial_surface_partition_can_publish_a_curve_restart() {
 #[test]
 fn serial_surface_join_publishes_the_reconstructed_pass_decision() {
     let (fixture, host, exact_root, joined, partition, completed) =
-        execute_surface_join_pipeline(&ExactSurfacePartitionKernel::default());
+        convergence::execute_from_fixture(Fixture::with_exact_curve_partition());
     let exact = import_exact_geometry_input(
         &fixture.store,
         host.geometry_document.clone().unwrap(),
@@ -130,8 +144,8 @@ fn serial_surface_join_publishes_the_reconstructed_pass_decision() {
         .stage_objects()
         .decoded_streams()
         .unwrap();
-    let partition_result = runmat_meshing_surface::decode_exact_face_partition_result(
-        &partition_streams[0].records[0],
+    let partition_result = runmat_meshing_surface::decode_exact_face_partition_records(
+        &partition_streams[0].records,
         &exact.geometry_objects().topology,
         &curves,
     )
@@ -141,32 +155,36 @@ fn serial_surface_join_publishes_the_reconstructed_pass_decision() {
         .stage_objects()
         .decoded_streams()
         .unwrap();
-    assert_eq!(streams.len(), 2);
     assert_eq!(
-        streams[0].media_type,
-        runmat_meshing_core::MeshingChunkMediaType::SurfacePartitions
+        streams.len(),
+        1,
+        "the complete terminal surface is serialized once"
     );
     assert_eq!(
-        streams[1].media_type,
+        streams[0].media_type,
         runmat_meshing_core::MeshingChunkMediaType::SurfaceMesh
     );
     let options = runmat_meshing_surface::ExactSurfaceJoinOptions {
-        coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
-        maximum_nodes: host.resolved_request.resources.maximum_nodes,
-        maximum_triangles: host.resolved_request.resources.maximum_elements,
-        maximum_boundary_segments: host.resolved_request.resources.maximum_elements,
+        coordinate_tolerance_m: runmat_types::physical::Length::new(
+            host.resolved_request
+                .tolerance
+                .absolute_floor_m
+                .canonical_value(),
+        ),
+        maximum_nodes: host.resolved_request.limits.maximum_nodes,
+        maximum_triangles: host.resolved_request.limits.maximum_elements,
+        maximum_boundary_segments: host.resolved_request.limits.maximum_elements,
     };
     let partition_results = [partition_result];
-    let pass = runmat_meshing_surface::decode_exact_surface_pass_result(
-        &streams[0].records[0],
-        &exact.geometry_objects().topology,
+    let pass = runmat_meshing_surface::decide_exact_surface_pass(
         &curves,
         &partition_results,
+        &exact.geometry_objects().topology,
         options,
     )
     .unwrap();
     let surface = runmat_meshing_surface::decode_exact_surface_mesh_from_pass(
-        &streams[1].records[0],
+        &streams[0].records[0],
         &pass,
         &exact.geometry_objects().topology,
         &curves,
@@ -257,11 +275,12 @@ fn serial_curve_refinement_consumes_the_surface_restart_pass() {
         workload,
         identity,
         request,
+        pass_host.ceilings,
         pass_host.artifact_access.clone(),
         pass_host.geometry_document.clone(),
     )
     .unwrap();
-    let program = host.program_request(revision(), &roots).unwrap();
+    let program = host_program(&host, &roots, &mut fixture.store);
     let refined = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -353,7 +372,7 @@ pub(super) fn execute_surface_join_pipeline_from_fixture(
         .unwrap();
     let join = planner.surface_join(&pass, vec![partition_root]).unwrap();
     let host = join.host().clone();
-    let program = join.program_request(revision()).unwrap();
+    let program = stage_program(&join, &mut fixture.store);
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,

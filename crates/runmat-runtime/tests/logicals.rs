@@ -31,14 +31,14 @@ fn logical_size_numel_ndims() {
     let la = LogicalArray::new(vec![1, 0, 1, 1, 0, 0], vec![3, 2]).unwrap();
     let v = Value::LogicalArray(la);
     let sz = runmat_runtime::call_builtin("size", std::slice::from_ref(&v)).unwrap();
-    if let Value::Tensor(t) = sz {
+    if let Value::Tensor(t) = sz.value() {
         // Verify row vector and product equals numel
         let dims = t.materialize_f64().clone();
         assert!(t.rows() == 1 || t.cols() == 1);
         let prod: usize = dims.iter().map(|x| *x as usize).product();
         let ne = runmat_runtime::call_builtin("numel", std::slice::from_ref(&v)).unwrap();
-        if let Value::Num(n) = ne {
-            assert_eq!(prod as f64, n);
+        if let Value::Num(n) = ne.value() {
+            assert_eq!(prod as f64, *n);
         } else {
             panic!();
         }
@@ -46,8 +46,8 @@ fn logical_size_numel_ndims() {
         panic!();
     }
     let nd = runmat_runtime::call_builtin("ndims", std::slice::from_ref(&v)).unwrap();
-    if let Value::Num(n) = nd {
-        assert_eq!(n, 2.0);
+    if let Value::Num(n) = nd.value() {
+        assert_eq!(*n, 2.0);
     } else {
         panic!();
     }
@@ -59,7 +59,7 @@ fn logical_from_numeric_and_stringarray() {
     let t = Tensor::new_2d(vec![0.0, 1.0, -2.0], 3, 1).unwrap();
     let v = Value::Tensor(t);
     let l = runmat_runtime::call_builtin("logical", &[v]).unwrap();
-    if let Value::LogicalArray(la) = l {
+    if let Value::LogicalArray(la) = l.value() {
         assert_eq!(la.data, vec![0, 1, 1]);
     } else {
         panic!();
@@ -74,7 +74,7 @@ fn logical_from_numeric_and_stringarray() {
     );
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let l2 = runmat_runtime::call_builtin("logical", &[Value::StringArray(sa)]).unwrap();
-    if let Value::LogicalArray(la) = l2 {
+    if let Value::LogicalArray(la) = l2.value() {
         assert_eq!(la.data, vec![0, 1]);
     } else {
         panic!();

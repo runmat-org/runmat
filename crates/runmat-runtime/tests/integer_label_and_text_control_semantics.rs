@@ -1,5 +1,8 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle};
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage,
+    HostNumericDataOwned, HostNumericTensorOwned,
+};
 use runmat_value::Value;
 
 const PACKET: [(&str, usize); 9] = [
@@ -14,20 +17,25 @@ const PACKET: [(&str, usize); 9] = [
     ("replaceBetween", 2),
 ];
 
-fn resident_handle(buffer_id: u64, provenance: GpuHandleProvenance) -> GpuTensorHandle {
-    GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX - 440,
-        buffer_id,
-        descriptor: Default::default(),
-    }
-    .with_provenance(provenance)
+fn resident_handle(value: u32, provenance: GpuHandleProvenance) -> GpuTensorHandle {
+    let allocation = TestAllocationOwner::new()
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![f64::from(value)]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(!runmat_accelerate_api::registered_providers()
+        .iter()
+        .any(|provider| provider.device_id() == allocation.handle.device_id()));
+    allocation.handle.with_provenance(provenance).unwrap()
 }
 
 #[test]
 fn label_and_text_control_packet_has_class_complete_capability_metadata() {
     for (name, expected_forms) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -124,6 +132,15 @@ fn explicit_resident_fallbacks_reject_before_provider_access_in_strict_mode() {
         ),
     ];
     for (name, args) in calls {
+        let caller = args
+            .iter()
+            .find_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let descriptor = caller.wire_descriptor();
+        let physical = caller.allocation_lease().downgrade();
         let error = block_on(runmat_runtime::call_builtin_async(name, &args))
             .expect_err("explicit resident fallback must be gated");
         assert!(
@@ -137,14 +154,11 @@ fn explicit_resident_fallbacks_reject_before_provider_access_in_strict_mode() {
             "{name}: {}",
             error.message()
         );
-    }
-    for buffer_id in 1..=9 {
-        runmat_accelerate_api::clear_handle_metadata(&GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX - 440,
-            buffer_id,
-            descriptor: Default::default(),
-        });
+        assert_eq!(caller.wire_descriptor(), descriptor);
+        drop(args);
+        assert!(physical.acquire().is_some());
+        drop(caller);
+        assert!(physical.acquire().is_none());
     }
 }
 
@@ -152,6 +166,8 @@ fn explicit_resident_fallbacks_reject_before_provider_access_in_strict_mode() {
 fn onehotdecode_broad_output_policy_precedes_automatic_provider_gather() {
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let handle = resident_handle(10, GpuHandleProvenance::Automatic);
+    let physical = handle.allocation_lease().downgrade();
+    let descriptor = handle.wire_descriptor();
     let error = block_on(runmat_runtime::call_builtin_async(
         "onehotdecode",
         &[
@@ -167,5 +183,7 @@ fn onehotdecode_broad_output_policy_precedes_automatic_provider_gather() {
         Some("RunMat:compatibility:OnehotdecodeLogicalCellOutputExtension")
     );
     assert!(!error.message().to_ascii_lowercase().contains("provider"));
-    runmat_accelerate_api::clear_handle_metadata(&handle);
+    assert_eq!(handle.wire_descriptor(), descriptor);
+    drop(handle);
+    assert!(physical.acquire().is_none());
 }

@@ -1,17 +1,14 @@
 //! MATLAB-compatible `char` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CHAR_ERROR_DIMENSION, CHAR_ERROR_INTERNAL,
+    CHAR_ERROR_INVALID_CODEPOINT, CHAR_ERROR_INVALID_INPUT, CHAR_LOGICAL_INPUT_EXTENSION,
+    CHAR_RESIDENT_NUMERIC_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
-    SymbolicArray, Tensor, Value,
+    SymbolicArray, Tensor, Utf16CodeUnit, Value,
 };
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -19,7 +16,6 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::char")]
@@ -52,130 +48,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "char";
 const CHAR_SPARSE_DENSE_ELEMENT_LIMIT: usize = 10_000_000;
 
-pub(crate) const CHAR_RESIDENT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "char-resident-numeric-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "char with interactive resident numeric input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:CharResidentNumericInputExtension"),
-    };
-pub(crate) const CHAR_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "char-logical-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "char with logical input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:CharLogicalInputExtension"),
-    };
-
-pub const CHAR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    CHAR_LOGICAL_INPUT_EXTENSION,
-    CHAR_RESIDENT_NUMERIC_EXTENSION,
-];
-
-const CHAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Character array result.",
-}];
-
-const CHAR_INPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to convert into character data.",
-}];
-
-const CHAR_INPUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X...",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Multiple inputs converted row-wise and padded.",
-}];
-
-const CHAR_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "C = char()",
-        inputs: &[],
-        outputs: &CHAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = char(X)",
-        inputs: &CHAR_INPUT_SINGLE,
-        outputs: &CHAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = char(X...)",
-        inputs: &CHAR_INPUT_VARIADIC,
-        outputs: &CHAR_OUTPUT,
-    },
-];
-
-const CHAR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHAR.INVALID_INPUT",
-    identifier: Some("RunMat:char:InvalidInput"),
-    when: "Input type cannot be converted to character data.",
-    message: "char: invalid input",
-};
-
-const CHAR_ERROR_INVALID_CODEPOINT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHAR.INVALID_CODEPOINT",
-    identifier: Some("RunMat:char:InvalidCodePoint"),
-    when: "Numeric input cannot be represented by RunMat's scalar-value character storage.",
-    message: "char: numeric input cannot be represented as a RunMat character",
-};
-
-const CHAR_ERROR_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHAR.INVALID_DIMENSION",
-    identifier: Some("RunMat:char:InvalidDimension"),
-    when: "Array inputs are not 2-D (or trailing singleton dimensions).",
-    message: "char: inputs must be 2-D",
-};
-
-const CHAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHAR.INTERNAL",
-    identifier: Some("RunMat:char:InternalError"),
-    when: "Internal character array construction failed.",
-    message: "char: internal error",
-};
-
-const CHAR_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    CHAR_ERROR_INVALID_INPUT,
-    CHAR_ERROR_INVALID_CODEPOINT,
-    CHAR_ERROR_DIMENSION,
-    CHAR_ERROR_INTERNAL,
-];
-
-pub const CHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CHAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CHAR_ERRORS,
-};
-
-const CHAR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "All eight integer classes are documented numeric-code inputs. Floating values truncate toward zero and all numeric codes clamp to the UTF-16 code-unit interval 0..65535.",
-}];
-
-pub const CHAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "C = char(integer_X) or char(X1, ..., XN)",
-        inputs: &CHAR_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host integer values are decoded exactly, then clamped to 0..65535. RunMat CharArray stores Rust Unicode scalar values, so isolated UTF-16 surrogate code units U+D800..U+DFFF cannot yet be represented and produce an explicit error. Interactive resident numeric input is a mode-gated RunMat extension before gather.",
-    }];
-
 fn char_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     char_error_with_message(error.message, error)
 }
@@ -201,24 +73,17 @@ fn remap_char_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "char",
-    category = "strings/core",
-    summary = "Convert numeric codes and text values into character arrays.",
-    keywords = "char,character,string,gpu",
-    accel = "conversion",
-    type_resolver(string_array_type),
-    descriptor(crate::builtins::strings::core::char::CHAR_DESCRIPTOR),
-    extensions(crate::builtins::strings::core::char::CHAR_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::core::char::CHAR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::char"
 )]
-async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn char_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        let empty =
-            CharArray::new(Vec::new(), 0, 0).map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
+        let empty = CharArray::from_code_units(Vec::new(), 0, 0)
+            .map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
         return Ok(Value::CharArray(empty));
     }
 
-    let mut rows: Vec<Vec<char>> = Vec::new();
+    let mut rows: Vec<Vec<Utf16CodeUnit>> = Vec::new();
     let mut max_width = 0usize;
 
     for arg in rest {
@@ -249,14 +114,14 @@ async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     if rows.is_empty() {
-        let empty =
-            CharArray::new(Vec::new(), 0, 0).map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
+        let empty = CharArray::from_code_units(Vec::new(), 0, 0)
+            .map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
         return Ok(Value::CharArray(empty));
     }
 
     let cols = max_width;
     let total_rows = rows.len();
-    let mut data = vec![' '; total_rows * cols];
+    let mut data = vec![Utf16CodeUnit::from_raw(b' ' as u16); total_rows * cols];
     for (row_idx, row) in rows.into_iter().enumerate() {
         for (col_idx, ch) in row.into_iter().enumerate() {
             if col_idx < cols {
@@ -265,12 +130,12 @@ async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         }
     }
 
-    let array =
-        CharArray::new(data, total_rows, cols).map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
+    let array = CharArray::from_code_units(data, total_rows, cols)
+        .map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
     Ok(Value::CharArray(array))
 }
 
-fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
+fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
     if let Some(array) = crate::builtins::datetime::datetime_char_array(value)
         .map_err(|err| char_flow(err.message().to_string()))?
     {
@@ -283,8 +148,15 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
     }
     match value {
         Value::CharArray(ca) => Ok(char_array_rows(ca)),
-        Value::String(s) => Ok(vec![s.chars().collect()]),
-        Value::Symbolic(expr) => Ok(vec![expr.to_string().chars().collect()]),
+        Value::String(s) => Ok(vec![match s.as_str() {
+            Some(text) => text.encode_utf16().map(Utf16CodeUnit::from_raw).collect(),
+            None => Vec::new(),
+        }]),
+        Value::Symbolic(expr) => Ok(vec![expr
+            .to_string()
+            .encode_utf16()
+            .map(Utf16CodeUnit::from_raw)
+            .collect()]),
         Value::SymbolicArray(array) => symbolic_array_rows(array),
         Value::StringArray(sa) => string_array_rows(sa),
         Value::Num(n) => Ok(vec![vec![number_to_char(*n)?]]),
@@ -307,14 +179,16 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
             &CHAR_ERROR_INVALID_INPUT,
         )),
         Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -322,6 +196,8 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(char_error_with_message(
             format!("char: unsupported input type {:?}", value),
@@ -330,24 +206,24 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
     }
 }
 
-fn char_array_rows(ca: &CharArray) -> Vec<Vec<char>> {
+fn char_array_rows(ca: &CharArray) -> Vec<Vec<Utf16CodeUnit>> {
     let mut rows = Vec::with_capacity(ca.rows);
     for r in 0..ca.rows {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            row.push(ca.data[r * ca.cols + c]);
+            row.push(ca.data()[r * ca.cols + c]);
         }
         rows.push(row);
     }
     rows
 }
 
-fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
+fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
     ensure_two_dimensional(&sa.shape, "char")?;
-    if sa.data.is_empty() {
+    if sa.data().is_empty() {
         return Ok(Vec::new());
     }
-    let mut rows = Vec::with_capacity(sa.data.len());
+    let mut rows = Vec::with_capacity(sa.data().len());
     let rows_count = sa.rows();
     let cols_count = sa.cols();
     if rows_count == 0 || cols_count == 0 {
@@ -356,15 +232,18 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
     for c in 0..cols_count {
         for r in 0..rows_count {
             let idx = r + c * rows_count;
-            rows.push(sa.data[idx].chars().collect());
+            rows.push(match sa.data()[idx].as_str() {
+                Some(text) => text.encode_utf16().map(Utf16CodeUnit::from_raw).collect(),
+                None => Vec::new(),
+            });
         }
     }
     Ok(rows)
 }
 
-fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
+fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
     ensure_two_dimensional(&array.shape, "char")?;
-    let (rows, cols) = infer_rows_cols(&array.shape, array.data.len());
+    let (rows, cols) = infer_rows_cols(&array.shape, array.data().len());
     if rows == 0 {
         return Ok(Vec::new());
     }
@@ -376,17 +255,22 @@ fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
                 continue;
             }
             let idx = r + c * rows;
-            row.extend(array.data[idx].to_string().chars());
+            row.extend(
+                array.data()[idx]
+                    .to_string()
+                    .encode_utf16()
+                    .map(Utf16CodeUnit::from_raw),
+            );
         }
         out.push(row);
     }
     Ok(out)
 }
 
-fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
-    ensure_two_dimensional(&t.shape, "char")?;
+fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
+    ensure_two_dimensional(t.shape(), "char")?;
     let element_len = t.len();
-    let (rows, cols) = infer_rows_cols(&t.shape, element_len);
+    let (rows, cols) = infer_rows_cols(t.shape(), element_len);
     if rows == 0 {
         return Ok(Vec::new());
     }
@@ -420,7 +304,7 @@ fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
     Ok(out)
 }
 
-fn logical_rows(la: &LogicalArray) -> BuiltinResult<Vec<Vec<char>>> {
+fn logical_rows(la: &LogicalArray) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
     ensure_two_dimensional(&la.shape, "char")?;
     let (rows, cols) = infer_rows_cols(&la.shape, la.data.len());
     if rows == 0 {
@@ -442,9 +326,9 @@ fn logical_rows(la: &LogicalArray) -> BuiltinResult<Vec<Vec<char>>> {
     Ok(out)
 }
 
-fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<char>>> {
-    let mut rows = Vec::with_capacity(ca.data.len());
-    for ptr in &ca.data {
+fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<Utf16CodeUnit>>> {
+    let mut rows = Vec::with_capacity(ca.data().len());
+    for ptr in ca.data() {
         let element = (ptr).clone();
         let mut converted = value_to_char_rows(&element)?;
         match converted.len() {
@@ -483,7 +367,7 @@ fn ensure_sparse_dense_conversion(sparse: &SparseTensor) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn number_to_char(value: f64) -> BuiltinResult<char> {
+fn number_to_char(value: f64) -> BuiltinResult<Utf16CodeUnit> {
     if !value.is_finite() {
         return Err(char_error_with_message(
             "char: numeric inputs must be finite",
@@ -491,10 +375,10 @@ fn number_to_char(value: f64) -> BuiltinResult<char> {
         ));
     }
     let code_unit = value.trunc().clamp(0.0, u16::MAX as f64) as u16;
-    utf16_code_unit_to_char(code_unit)
+    Ok(Utf16CodeUnit::from_raw(code_unit))
 }
 
-fn integer_value_to_char(value: &IntValue) -> BuiltinResult<char> {
+fn integer_value_to_char(value: &IntValue) -> BuiltinResult<Utf16CodeUnit> {
     let code_unit = match value {
         IntValue::I8(value) => signed_integer_to_code_unit(*value as i128),
         IntValue::I16(value) => signed_integer_to_code_unit(*value as i128),
@@ -505,18 +389,7 @@ fn integer_value_to_char(value: &IntValue) -> BuiltinResult<char> {
         IntValue::U32(value) => unsigned_integer_to_code_unit(*value as u128),
         IntValue::U64(value) => unsigned_integer_to_code_unit(*value as u128),
     };
-    utf16_code_unit_to_char(code_unit)
-}
-
-fn utf16_code_unit_to_char(code_unit: u16) -> BuiltinResult<char> {
-    char::from_u32(u32::from(code_unit)).ok_or_else(|| {
-        char_error_with_message(
-            format!(
-                "char: UTF-16 surrogate code unit U+{code_unit:04X} cannot be represented by the current RunMat CharArray scalar-value storage"
-            ),
-            &CHAR_ERROR_INVALID_CODEPOINT,
-        )
-    })
+    Ok(Utf16CodeUnit::from_raw(code_unit))
 }
 
 fn signed_integer_to_code_unit(value: i128) -> u16 {
@@ -563,13 +436,38 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{IntegerStorage, NumericStorage, SymbolicArray, SymbolicExpr};
+    use runmat_builtins::CHAR_EXTENSIONS;
+    use runmat_value::{IntegerStorage, NumericStorage, StringArray, SymbolicArray, SymbolicExpr};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::char_builtin(rest))
+        futures::executor::block_on(super::char_builtin(
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
-    use runmat_value::StringArray;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn char_numeric_low_rank_inputs_keep_row_character_geometry() {
+        let scalar = char_builtin(vec![Value::Tensor(
+            Tensor::new(vec![65.0], Vec::new()).unwrap(),
+        )])
+        .expect("rank-zero character code");
+        let Value::CharArray(scalar) = scalar else {
+            panic!("character array expected")
+        };
+        assert_eq!((scalar.rows, scalar.cols), (1, 1));
+        assert_eq!(scalar.data(), runmat_value::encode_utf16_code_units("A"));
+
+        let vector = char_builtin(vec![Value::Tensor(
+            Tensor::new(vec![65.0, 66.0], vec![2]).unwrap(),
+        )])
+        .expect("rank-one character codes");
+        let Value::CharArray(vector) = vector else {
+            panic!("character array expected")
+        };
+        assert_eq!((vector.rows, vector.cols), (1, 2));
+        assert_eq!(vector.data(), runmat_value::encode_utf16_code_units("AB"));
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -583,7 +481,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 0);
                 assert_eq!(ca.cols, 0);
-                assert!(ca.data.is_empty());
+                assert!(ca.data().is_empty());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -592,13 +490,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_string_scalar() {
-        let value = Value::String("RunMat".to_string());
+        let value = Value::String("RunMat".to_string().into());
         let result = char_builtin(vec![value]).expect("char");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
-                assert_eq!(ca.data, "RunMat".chars().collect::<Vec<_>>());
+                assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("RunMat"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -614,7 +512,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
-                assert_eq!(ca.data, "RUNMAT".chars().collect::<Vec<_>>());
+                assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("RUNMAT"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -627,7 +525,9 @@ pub(crate) mod tests {
                 .expect("single tensor");
         let result = char_builtin(vec![Value::Tensor(tensor)]).expect("char");
         match result {
-            Value::CharArray(array) => assert_eq!(array.data, vec!['R', 'M']),
+            Value::CharArray(array) => {
+                assert_eq!(array.data(), runmat_value::encode_utf16_code_units("RM"))
+            }
             other => panic!("expected char array, got {other:?}"),
         }
     }
@@ -643,7 +543,10 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['R', '\u{FFFF}']);
+                assert_eq!(
+                    ca.data(),
+                    runmat_value::encode_utf16_code_units("R\u{FFFF}")
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -666,7 +569,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected char array");
             };
-            assert_eq!(array.data, vec!['A']);
+            assert_eq!(array.data(), runmat_value::encode_utf16_code_units("A"));
         }
     }
 
@@ -680,7 +583,7 @@ pub(crate) mod tests {
         else {
             panic!("expected char array");
         };
-        assert_eq!(array.data, vec!['\0']);
+        assert_eq!(array.data(), vec![Utf16CodeUnit::from_raw(0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -693,7 +596,10 @@ pub(crate) mod tests {
         else {
             panic!("expected char array");
         };
-        assert_eq!(array.data, vec!['\u{FFFF}']);
+        assert_eq!(
+            array.data(),
+            runmat_value::encode_utf16_code_units("\u{FFFF}")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -707,8 +613,8 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 7);
                 assert_eq!(
-                    ca.data,
-                    vec!['c', 'a', 't', ' ', ' ', ' ', ' ', 'g', 'i', 'r', 'a', 'f', 'f', 'e']
+                    ca.data(),
+                    runmat_value::encode_utf16_code_units("cat    giraffe")
                 );
             }
             other => panic!("expected char array, got {other:?}"),
@@ -734,8 +640,8 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 3);
                 assert_eq!(ca.cols, 5);
                 assert_eq!(
-                    ca.data,
-                    vec!['n', 'o', 'r', 't', 'h', 'e', 'a', 's', 't', ' ', 'w', 'e', 's', 't', ' ']
+                    ca.data(),
+                    runmat_value::encode_utf16_code_units("northeast west ")
                 );
             }
             other => panic!("expected char array, got {other:?}"),
@@ -745,14 +651,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_numeric_and_text_arguments_concatenate() {
-        let text = Value::String("hi".to_string());
+        let text = Value::String("hi".to_string().into());
         let codes = Tensor::new(vec![65.0, 66.0], vec![1, 2]).expect("tensor");
         let result = char_builtin(vec![text, Value::Tensor(codes)]).expect("char");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['h', 'i', 'A', 'B']);
+                assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("hiAB"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -766,7 +672,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![82.0, 85.0, 78.0], vec![1, 3]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = char_builtin(vec![Value::GpuTensor(handle)]).expect("char");
@@ -774,7 +680,7 @@ pub(crate) mod tests {
                 Value::CharArray(ca) => {
                     assert_eq!(ca.rows, 1);
                     assert_eq!(ca.cols, 3);
-                    assert_eq!(ca.data, vec!['R', 'U', 'N']);
+                    assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("RUN"));
                 }
                 other => panic!("expected char array, got {other:?}"),
             }
@@ -787,11 +693,11 @@ pub(crate) mod tests {
         let Value::CharArray(array) = char_builtin(vec![Value::Num(65.9)]).expect("char") else {
             panic!("expected char array");
         };
-        assert_eq!(array.data, vec!['A']);
+        assert_eq!(array.data(), runmat_value::encode_utf16_code_units("A"));
     }
 
     #[test]
-    fn char_supports_all_integer_classes_and_reports_surrogate_gap() {
+    fn char_supports_all_integer_classes_and_preserves_utf16_code_units() {
         let values = [
             IntValue::I8(65),
             IntValue::I16(65),
@@ -807,13 +713,19 @@ pub(crate) mod tests {
             else {
                 panic!("expected char array");
             };
-            assert_eq!(array.data, vec!['A']);
+            assert_eq!(array.data(), runmat_value::encode_utf16_code_units("A"));
         }
 
-        let err = char_builtin(vec![Value::Int(IntValue::U16(0xD800))])
-            .expect_err("surrogate is not a Rust char");
-        assert_eq!(err.identifier(), Some("RunMat:char:InvalidCodePoint"));
-        assert!(err.message().contains("surrogate code unit"));
+        let Value::CharArray(array) = char_builtin(vec![Value::Int(IntValue::U16(0xD800))])
+            .expect("char retains unpaired UTF-16 code units")
+        else {
+            panic!("expected char array");
+        };
+        assert_eq!(
+            array.data(),
+            [runmat_value::Utf16CodeUnit::from_raw(0xD800)]
+        );
+        assert_eq!(array.shape(), [1, 1]);
     }
 
     #[test]
@@ -864,7 +776,10 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 4);
                 assert_eq!(ca.cols, 4);
-                assert_eq!(ca.data, "c0r0c0r1c1r0c1r1".chars().collect::<Vec<char>>());
+                assert_eq!(
+                    ca.data(),
+                    runmat_value::encode_utf16_code_units("c0r0c0r1c1r0c1r1")
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -890,7 +805,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['x', 'y', 'z', 'w']);
+                assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("xyzw"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -916,7 +831,10 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 7);
-                assert_eq!(ca.data.iter().collect::<String>(), "x1thetayz     ");
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(ca.data()).unwrap(),
+                    "x1thetayz     "
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -937,7 +855,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['x', 'y']);
+                assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("xy"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -981,7 +899,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .expect("wgpu provider")
@@ -995,13 +913,5 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected results {other:?}"),
         }
-    }
-
-    #[test]
-    fn char_type_is_string_array() {
-        assert_eq!(
-            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
     }
 }

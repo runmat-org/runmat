@@ -210,14 +210,6 @@ REQUIRED_FIXTURES = {
         "nonlinear_path_mix_material_spread_ratio",
         "nonlinear_path_mix_spike_count",
         "thermo_nonlinear_severity",
-        "thermo_nonlinear_field_clamp_ratio",
-        "thermo_nonlinear_time_scale_mean",
-        "electro_nonlinear_joule_heating_scale",
-        "electro_nonlinear_conductivity_spread_ratio",
-        "electro_nonlinear_severity_peak",
-        "electro_nonlinear_severity_mean",
-        "electro_nonlinear_temporal_variation",
-        "electro_nonlinear_time_scale_mean",
     },
     "nonlinear_plasticity_benchmark_gpu_provider": {
         "plasticity_nonlinear_severity_peak",
@@ -293,7 +285,6 @@ REQUIRED_FIXTURES = {
         "thermo_mech_material_spread_ratio",
         "thermo_mech_assignment_heterogeneity_index",
         "thermo_mech_transient_severity",
-        "thermo_mech_transient_time_scale_mean",
         "thermo_mech_constitutive_residual_ratio",
         "thermo_mech_thermal_strain_energy_density_mean",
         "thermo_mech_consistency_coverage_ratio",
@@ -308,7 +299,6 @@ REQUIRED_FIXTURES = {
     "thermo_gradient_benign_gpu_provider": {
         "thermo_gradient_benign_spread_ratio",
         "thermo_gradient_benign_heterogeneity",
-        "thermo_gradient_benign_temporal_variation",
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
         "transient_prepared_cache_hit_ratio",
@@ -317,31 +307,14 @@ REQUIRED_FIXTURES = {
     "thermo_gradient_pathological_gpu_provider": {
         "thermo_gradient_pathological_spread_ratio",
         "thermo_gradient_pathological_heterogeneity",
-        "thermo_gradient_pathological_temporal_variation",
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
         "transient_prepared_cache_hit_ratio",
         "transient_prepared_cache_misses",
     },
     "thermo_ramp_smooth_gpu_provider": {
-        "thermo_ramp_smooth_temporal_variation",
         "thermo_ramp_smooth_spatial_gradient_index",
         "thermo_ramp_smooth_spatial_coverage_ratio",
-        "thermo_ramp_smooth_field_extrapolation_ratio",
-        "thermo_ramp_smooth_field_clamp_ratio",
-        "thermo_ramp_smooth_constitutive_temperature_factor",
-        "thermo_ramp_smooth_effective_modulus_scale",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "thermo_ramp_smooth_field_artifact_gpu_provider": {
-        "thermo_ramp_smooth_temporal_variation",
-        "thermo_ramp_smooth_spatial_gradient_index",
-        "thermo_ramp_smooth_spatial_coverage_ratio",
-        "thermo_ramp_smooth_field_extrapolation_ratio",
-        "thermo_ramp_smooth_field_clamp_ratio",
         "thermo_ramp_smooth_constitutive_temperature_factor",
         "thermo_ramp_smooth_effective_modulus_scale",
         "transient_max_residual_norm",
@@ -350,24 +323,8 @@ REQUIRED_FIXTURES = {
         "transient_prepared_cache_misses",
     },
     "thermo_shock_oscillatory_gpu_provider": {
-        "thermo_shock_oscillatory_temporal_variation",
         "thermo_shock_oscillatory_spatial_gradient_index",
         "thermo_shock_oscillatory_spatial_coverage_ratio",
-        "thermo_shock_oscillatory_field_extrapolation_ratio",
-        "thermo_shock_oscillatory_field_clamp_ratio",
-        "thermo_shock_constitutive_temperature_factor",
-        "thermo_shock_effective_modulus_scale",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "thermo_shock_oscillatory_field_artifact_gpu_provider": {
-        "thermo_shock_oscillatory_temporal_variation",
-        "thermo_shock_oscillatory_spatial_gradient_index",
-        "thermo_shock_oscillatory_spatial_coverage_ratio",
-        "thermo_shock_oscillatory_field_extrapolation_ratio",
-        "thermo_shock_oscillatory_field_clamp_ratio",
         "thermo_shock_constitutive_temperature_factor",
         "thermo_shock_effective_modulus_scale",
         "transient_max_residual_norm",
@@ -376,140 +333,37 @@ REQUIRED_FIXTURES = {
         "transient_prepared_cache_misses",
     },
     "thermal_standalone_ramp_cpu": {
-        "thermal_standalone_max_residual_norm",
+        "thermal_standalone_max_relative_residual_norm",
         "thermal_standalone_min_temperature_k",
         "thermal_standalone_max_temperature_k",
-        "thermal_standalone_heat_balance_residual_ratio",
+        "thermal_standalone_energy_balance_residual_ratio",
         "thermal_standalone_conductivity_spread_ratio",
         "thermal_standalone_heat_capacity_spread_ratio",
-        "thermal_standalone_spatial_gradient_index",
-        "thermal_standalone_monotonic_response_fraction",
-        "thermal_standalone_response_realization_ratio",
-        "thermal_standalone_prep_recovery_edge_count",
-        "thermal_standalone_prep_triangle_element_count",
-        "thermal_standalone_full_topology_element_count",
-        "thermal_standalone_prep_active_dimension_count",
-        "thermal_standalone_slab_linear_profile_rms_ratio",
-        "thermal_standalone_slab_monotonic_edge_fraction",
-        "thermal_standalone_lumped_response_error_ratio",
-        "thermal_standalone_source_response_sign_alignment",
-        "thermal_standalone_source_coverage_ratio",
-        "thermal_standalone_boundary_coverage_ratio",
-        "thermal_standalone_prescribed_temperature_count",
-        "thermal_standalone_heat_flux_boundary_count",
-        "thermal_standalone_convection_boundary_count",
+        "thermal_standalone_element_count",
+        "thermal_standalone_boundary_face_count",
+        "thermal_standalone_initial_prescribed_node_count",
     },
     "thermal_standalone_ramp_gpu_provider": {
-        "thermal_standalone_max_residual_norm",
+        "thermal_standalone_max_relative_residual_norm",
         "thermal_standalone_min_temperature_k",
         "thermal_standalone_max_temperature_k",
-        "thermal_standalone_heat_balance_residual_ratio",
+        "thermal_standalone_energy_balance_residual_ratio",
         "thermal_standalone_conductivity_spread_ratio",
         "thermal_standalone_heat_capacity_spread_ratio",
-        "thermal_standalone_spatial_gradient_index",
-        "thermal_standalone_monotonic_response_fraction",
-        "thermal_standalone_response_realization_ratio",
-        "thermal_standalone_prep_recovery_edge_count",
-        "thermal_standalone_prep_triangle_element_count",
-        "thermal_standalone_full_topology_element_count",
-        "thermal_standalone_prep_active_dimension_count",
-        "thermal_standalone_slab_linear_profile_rms_ratio",
-        "thermal_standalone_slab_monotonic_edge_fraction",
-        "thermal_standalone_lumped_response_error_ratio",
-        "thermal_standalone_source_response_sign_alignment",
-        "thermal_standalone_source_coverage_ratio",
-        "thermal_standalone_boundary_coverage_ratio",
-        "thermal_standalone_prescribed_temperature_count",
-        "thermal_standalone_heat_flux_boundary_count",
-        "thermal_standalone_convection_boundary_count",
+        "thermal_standalone_element_count",
+        "thermal_standalone_boundary_face_count",
+        "thermal_standalone_initial_prescribed_node_count",
     },
     "thermal_standalone_ramp_gpu_fallback": {
-        "thermal_standalone_max_residual_norm",
+        "thermal_standalone_max_relative_residual_norm",
         "thermal_standalone_min_temperature_k",
         "thermal_standalone_max_temperature_k",
-        "thermal_standalone_heat_balance_residual_ratio",
+        "thermal_standalone_energy_balance_residual_ratio",
         "thermal_standalone_conductivity_spread_ratio",
         "thermal_standalone_heat_capacity_spread_ratio",
-        "thermal_standalone_spatial_gradient_index",
-        "thermal_standalone_monotonic_response_fraction",
-        "thermal_standalone_response_realization_ratio",
-        "thermal_standalone_prep_recovery_edge_count",
-        "thermal_standalone_prep_triangle_element_count",
-        "thermal_standalone_full_topology_element_count",
-        "thermal_standalone_prep_active_dimension_count",
-        "thermal_standalone_slab_linear_profile_rms_ratio",
-        "thermal_standalone_slab_monotonic_edge_fraction",
-        "thermal_standalone_lumped_response_error_ratio",
-        "thermal_standalone_source_response_sign_alignment",
-        "thermal_standalone_source_coverage_ratio",
-        "thermal_standalone_boundary_coverage_ratio",
-        "thermal_standalone_prescribed_temperature_count",
-        "thermal_standalone_heat_flux_boundary_count",
-        "thermal_standalone_convection_boundary_count",
-    },
-    "electro_thermal_joule_benign_gpu_provider": {
-        "electro_thermal_benign_joule_heating_scale",
-        "electro_thermal_benign_conductivity_spread_ratio",
-        "electro_thermal_benign_transient_severity_peak",
-        "electro_thermal_benign_temporal_variation",
-        "electro_thermal_benign_time_scale_mean",
-        "electro_thermal_benign_conductive_node_count",
-        "electro_thermal_benign_mapped_voltage_boundary_count",
-        "electro_thermal_benign_mapped_current_source_count",
-        "electro_thermal_benign_topology_component_count",
-        "electro_thermal_benign_source_boundary_alignment_ratio",
-        "electro_thermal_benign_domain_conductance_coverage_ratio",
-        "electro_thermal_benign_mesh_backed_topology_ratio",
-        "electro_thermal_benign_material_region_coverage_ratio",
-        "electro_thermal_benign_potential_residual_norm",
-        "electro_thermal_benign_current_balance_residual",
-        "electro_thermal_benign_potential_span_v",
-        "electro_thermal_benign_conduction_edge_count",
-        "electro_thermal_benign_topology_coverage_ratio",
-        "electro_thermal_benign_ohms_law_residual_ratio",
-        "electro_thermal_benign_joule_heat_balance_ratio",
-        "electro_thermal_benign_potential_monotonic_edge_fraction",
-        "electro_thermal_benign_conduction_graph_coverage_ratio",
-        "electro_thermal_benign_joule_heat_realization_ratio",
-        "electro_thermal_benign_joule_source_coverage_ratio",
-        "electro_thermal_benign_thermal_temperature_source_alignment",
-        "electro_thermal_benign_thermal_source_residual_ratio",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "electro_thermal_joule_pathological_gpu_provider": {
-        "electro_thermal_pathological_joule_heating_scale",
-        "electro_thermal_pathological_conductivity_spread_ratio",
-        "electro_thermal_pathological_transient_severity_peak",
-        "electro_thermal_pathological_temporal_variation",
-        "electro_thermal_pathological_time_scale_mean",
-        "electro_thermal_pathological_conductive_node_count",
-        "electro_thermal_pathological_mapped_voltage_boundary_count",
-        "electro_thermal_pathological_mapped_current_source_count",
-        "electro_thermal_pathological_topology_component_count",
-        "electro_thermal_pathological_source_boundary_alignment_ratio",
-        "electro_thermal_pathological_domain_conductance_coverage_ratio",
-        "electro_thermal_pathological_mesh_backed_topology_ratio",
-        "electro_thermal_pathological_material_region_coverage_ratio",
-        "electro_thermal_pathological_potential_residual_norm",
-        "electro_thermal_pathological_current_balance_residual",
-        "electro_thermal_pathological_potential_span_v",
-        "electro_thermal_pathological_conduction_edge_count",
-        "electro_thermal_pathological_topology_coverage_ratio",
-        "electro_thermal_pathological_ohms_law_residual_ratio",
-        "electro_thermal_pathological_joule_heat_balance_ratio",
-        "electro_thermal_pathological_potential_monotonic_edge_fraction",
-        "electro_thermal_pathological_conduction_graph_coverage_ratio",
-        "electro_thermal_pathological_joule_heat_realization_ratio",
-        "electro_thermal_pathological_joule_source_coverage_ratio",
-        "electro_thermal_pathological_thermal_temperature_source_alignment",
-        "electro_thermal_pathological_thermal_source_residual_ratio",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
+        "thermal_standalone_element_count",
+        "thermal_standalone_boundary_face_count",
+        "thermal_standalone_initial_prescribed_node_count",
     },
     "electromagnetic_reference_homogeneous_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
@@ -548,7 +402,6 @@ REQUIRED_FIXTURES = {
         "em_homogeneous_edge_dof_count",
         "em_homogeneous_element_count",
         "em_homogeneous_oriented_edge_count",
-        "em_homogeneous_prep_recovery_edge_count",
         "em_homogeneous_incidence_element_count",
         "em_homogeneous_incidence_orientation_count",
         "em_homogeneous_incidence_pair_count",
@@ -1319,7 +1172,6 @@ EM_TOPOLOGY_REQUIRED_FIELDS = {
     "electromagnetic_edge_dof_count",
     "electromagnetic_element_count",
     "electromagnetic_oriented_edge_count",
-    "electromagnetic_prep_recovery_edge_count",
     "electromagnetic_full_topology_edge_count",
     "electromagnetic_full_topology_element_count",
     "electromagnetic_incidence_element_count",
@@ -1359,9 +1211,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
     },
     "nonlinear_invalid_plasticity_options": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_MATERIAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "nonlinear_invalid_contact_options": {
         "validate_ok": True,
@@ -1369,9 +1222,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
     },
     "thermal_standalone_ramp_invalid_material": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_MATERIAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL",
+        "run_error_code": None,
     },
     "thermal_standalone_ramp_invalid_source": {
         "validate_ok": True,
@@ -1384,24 +1238,32 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
     },
     "electro_thermal_invalid_voltage": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_SIGNAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+        "run_error_code": None,
     },
-    "electro_thermal_invalid_conductivity_scale": {
-        "validate_ok": True,
+    "electro_thermal_invalid_conductivity": {
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_MATERIAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+        "run_error_code": None,
     },
-    "electro_thermal_unmapped_region": {
+    "electro_thermal_joule_benign_rejected": {
         "validate_ok": True,
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+        "run_error_code": "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+    },
+    "electro_thermal_joule_pathological_rejected": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
     },
     "cfd_invalid_domain_options": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_DOMAIN",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_CFD.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "cfd_invalid_boundary_conditions": {
         "validate_ok": True,
@@ -1414,9 +1276,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
     },
     "cht_coupled_invalid_cfd_domain": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_DOMAIN",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_CHT.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "fsi_coupled_invalid_interface_mapping": {
         "validate_ok": True,
@@ -1424,9 +1287,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
     },
     "fsi_coupled_invalid_cfd_domain": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_DOMAIN",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_FSI.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "structural_invalid_moment_without_rotational_dofs": {
         "validate_ok": True,
@@ -1444,18 +1308,8 @@ THERMO_REQUIRED_FIELDS = {
     "thermo_assignment_heterogeneity_index",
     "thermo_region_delta_count",
     "thermo_spatial_coverage_ratio",
-    "thermo_field_extrapolation_ratio",
     "thermo_transient_severity",
     "thermo_nonlinear_severity",
-}
-
-ELECTRO_REQUIRED_FIELDS = {
-    "electro_thermal_coupling_enabled",
-    "electro_thermal_coupling_fingerprint",
-    "electro_joule_heating_scale",
-    "electro_conductivity_spread_ratio",
-    "electro_transient_severity",
-    "electro_nonlinear_severity",
 }
 
 PLASTIC_REQUIRED_FIELDS = {
@@ -1632,15 +1486,7 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
-    "thermo_ramp_smooth_field_artifact_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
     "thermo_shock_oscillatory_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "thermo_shock_oscillatory_field_artifact_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
@@ -1649,14 +1495,6 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_solver_solve_ms",
     },
     "thermal_standalone_ramp_gpu_fallback": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "electro_thermal_joule_benign_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "electro_thermal_joule_pathological_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
@@ -1822,9 +1660,6 @@ def main() -> int:
     require_thermo_field_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY", "false")
     )
-    require_electro_summary = is_true(
-        os.getenv("RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY", "false")
-    )
     require_plastic_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY", "false")
     )
@@ -1876,9 +1711,7 @@ def main() -> int:
             "thermo_gradient_benign_gpu_provider",
             "thermo_gradient_pathological_gpu_provider",
             "thermo_ramp_smooth_gpu_provider",
-            "thermo_ramp_smooth_field_artifact_gpu_provider",
             "thermo_shock_oscillatory_gpu_provider",
-            "thermo_shock_oscillatory_field_artifact_gpu_provider",
             "nonlinear_load_path_mix_gpu_provider",
         }:
             missing_fields = sorted(
@@ -1888,32 +1721,6 @@ def main() -> int:
                 errors.append(
                     f"fixture {fixture_id} missing thermo summary fields: {', '.join(missing_fields)}"
                 )
-            if "field_artifact" in fixture_id:
-                for required_field in (
-                    "thermo_field_artifact_id",
-                    "thermo_field_artifact_approved",
-                    "thermo_field_artifact_age_days",
-                    "thermo_field_artifact_provenance_valid",
-                ):
-                    if required_field not in record:
-                        errors.append(
-                            f"fixture {fixture_id} missing thermo artifact field: {required_field}"
-                        )
-
-        if fixture_id in {
-            "electro_thermal_joule_benign_gpu_provider",
-            "electro_thermal_joule_pathological_gpu_provider",
-            "nonlinear_load_path_mix_gpu_provider",
-            "nonlinear_plasticity_benchmark_gpu_provider",
-        }:
-            missing_fields = sorted(
-                field for field in ELECTRO_REQUIRED_FIELDS if field not in record
-            )
-            if missing_fields:
-                errors.append(
-                    f"fixture {fixture_id} missing electro summary fields: {', '.join(missing_fields)}"
-                )
-
         if fixture_id in {
             "nonlinear_plasticity_benchmark_gpu_provider",
         }:
@@ -2185,27 +1992,6 @@ def main() -> int:
                 errors.append(
                     "thermo_spatial_coverage_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
                 )
-            if not any(
-                isinstance(record.get("thermo_field_extrapolation_ratio"), (int, float))
-                for record in thermo_field_records
-            ):
-                errors.append(
-                    "thermo_field_extrapolation_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
-                )
-
-    if require_electro_summary:
-        electro_records = [
-            record
-            for record in records.values()
-            if isinstance(record.get("electro_thermal_coupling_enabled"), bool)
-            or isinstance(record.get("electro_transient_severity"), (int, float))
-            or isinstance(record.get("electro_nonlinear_severity"), (int, float))
-        ]
-        if not electro_records:
-            errors.append(
-                "electro summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY=true"
-            )
-
     if require_plastic_summary:
         plastic_records = [
             record

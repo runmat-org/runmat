@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{
-    ExecutableForm, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject,
+    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::protocol::{ProtocolHandshake, WorkerCapability};
@@ -30,20 +31,24 @@ pub(super) struct RemoteTestBackendConfig {
     pub project: Option<Uuid>,
     pub cluster: String,
     pub queue: String,
-    pub trust_identity: String,
+    pub trust_identity: runmat_server_client::execution::RemoteEndpointTrust,
     pub max_workers: usize,
     pub project_handoff: FrozenProjectHandoff,
+    pub interop: runmat_types::InteropManifest,
+    pub foreign_policy: LogicalObject,
+    pub runtime_policy: LogicalObject,
+    pub foreign_artifacts: Vec<LogicalObject>,
+    pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
 
 impl RemoteTestBackend {
     pub fn new(config: RemoteTestBackendConfig) -> Result<Self, BackendError> {
         if config.cluster.trim().is_empty()
             || config.queue.trim().is_empty()
-            || config.trust_identity.trim().is_empty()
             || config.max_workers == 0
         {
             return Err(rejected(
-                "remote tests require a cluster, queue, pinned trust identity, and non-zero worker bound",
+                "remote tests require a cluster, queue, and non-zero worker bound",
             ));
         }
         config
@@ -135,8 +140,13 @@ impl WorkerBackend for RemoteTestBackend {
                 request.attempt,
             )
             .map_err(protocol)?;
-            let program = workload.program_request().map_err(protocol)?;
-            let bundle = ExecutionBundleBuilder::native(
+            let program = workload
+                .program_request_with_policy(
+                    self.config.interop.clone(),
+                    Some(self.config.foreign_policy.descriptor.clone()),
+                )
+                .map_err(protocol)?;
+            let mut builder = ExecutionBundleBuilder::native(
                 &self.config.project_handoff.project,
                 program.recipe.program_revision.clone(),
             )
@@ -146,8 +156,22 @@ impl WorkerBackend for RemoteTestBackend {
                 ExecutableForm::TestAttemptV1,
                 program.artifact.executable_bytes.clone(),
             )
-            .build()
+            .with_foreign_policy_object(self.config.foreign_policy.clone())
+            .map_err(protocol)?
+            .with_project_runtime_policy_object(self.config.runtime_policy.clone())
             .map_err(protocol)?;
+            drop(program);
+            for artifact in &self.config.foreign_artifacts {
+                builder = builder
+                    .with_foreign_object(artifact.clone())
+                    .map_err(protocol)?;
+            }
+            for closure in &self.config.foreign_artifact_closures {
+                builder = builder
+                    .with_foreign_artifact_closure(closure.clone())
+                    .map_err(protocol)?;
+            }
+            let bundle = builder.build().map_err(protocol)?;
             let mut bundle_archive = Vec::new();
             write_bundle(&bundle, &mut bundle_archive, ArchiveLimits::default())
                 .map_err(protocol)?;
@@ -163,18 +187,30 @@ impl WorkerBackend for RemoteTestBackend {
                 .first()
                 .cloned()
                 .ok_or_else(|| protocol("remote test bundle has no program artifact"))?;
-            let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            let selected_descriptor = ProgramExecutionDescriptor {
+                console: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe: bundled_recipe.clone(),
                 artifact: bundled_artifact,
-                function: 0,
+                callable: runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(0),
+                    None,
+                ),
                 requested_outputs: 1,
-            })
-            .map_err(protocol)?;
-            let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            };
+            let selected_inputs = ProgramExecutionInputs {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+                context: runmat_execution::ProgramInvocationContext::Direct,
                 arguments: Vec::new(),
-            })
+                objects: Vec::new(),
+            };
+            let descriptor = serde_json::to_vec(&selected_descriptor).map_err(protocol)?;
+            let inputs = selected_inputs.clone();
+            let response_contract = runmat_execution_artifact::ProgramExecutionRequest::from_parts(
+                selected_descriptor,
+                selected_inputs,
+            )
             .map_err(protocol)?;
             let active_run = Arc::clone(&session.active_run);
             let submitted = crate::commands::job::submit::submit_prepared(
@@ -183,8 +219,10 @@ impl WorkerBackend for RemoteTestBackend {
                     bundle_archive,
                     descriptor,
                     inputs,
+                    objects: Vec::new(),
                 },
                 RemoteSubmissionOptions {
+                    console: None,
                     project: self.config.project,
                     cluster: self.config.cluster.clone(),
                     queue: self.config.queue.clone(),
@@ -196,9 +234,11 @@ impl WorkerBackend for RemoteTestBackend {
                         request.attempt
                     )),
                     workers: 1,
+                    accelerator: None,
                     on_run_created: Some(Arc::new(move |run_id| {
                         *active_run.lock().expect("remote test session poisoned") = Some(run_id);
                     })),
+                    output_intent: crate::commands::job::secret::SavedOutputIntent::Generic,
                 },
             )
             .await
@@ -224,17 +264,35 @@ impl WorkerBackend for RemoteTestBackend {
                 .active_run
                 .lock()
                 .expect("remote test session poisoned") = None;
-            match response? {
-                ProgramExecutionResponse::Success { value } => {
-                    decode_execution(&value).map_err(protocol)
+            let response = response?;
+            response
+                .validate_against(&response_contract)
+                .map_err(protocol)?;
+            match response {
+                ProgramExecutionResponse::Success { outputs } => {
+                    let [value] = outputs.as_slice() else {
+                        return Err(protocol("test execution returned an invalid output count"));
+                    };
+                    decode_execution(value).map_err(protocol)
                 }
                 ProgramExecutionResponse::ExternalizedSuccess { .. } => Err(BackendError::new(
                     BackendErrorKind::Crashed,
                     "test execution returned unsupported externalized result objects",
                 )),
+                ProgramExecutionResponse::GraphSuccess { .. } => Err(protocol(
+                    "Direct test execution cannot consume a rooted Graph result",
+                )),
+                ProgramExecutionResponse::SpmdSuccess { .. } => Err(BackendError::new(
+                    BackendErrorKind::Crashed,
+                    "test execution cannot consume an SPMD gang result",
+                )),
                 ProgramExecutionResponse::Failure { message } => {
                     Err(BackendError::new(BackendErrorKind::Crashed, message))
                 }
+                ProgramExecutionResponse::RuntimeFailure { failure } => Err(BackendError::new(
+                    BackendErrorKind::Crashed,
+                    failure.message,
+                )),
             }
         })
     }

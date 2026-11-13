@@ -5,20 +5,19 @@ use runmat_value::Tensor as Matrix;
 
 use crate::builtins::common::tensor;
 
-/// Helper function to transpose a matrix from row-major to column-major
-fn transpose_to_column_major(matrix: &Matrix) -> Vec<f64> {
-    let values = tensor::tensor_values_f64_cow(matrix);
-    let mut result = vec![0.0; values.len()];
-    for i in 0..matrix.rows() {
-        for j in 0..matrix.cols() {
-            result[j * matrix.rows() + i] = values[i * matrix.cols() + j];
-        }
+/// Validate the matrix geometry before passing native dimensions/pointers.
+pub(crate) fn matrix_dimensions(matrix: &Matrix) -> Result<(i32, i32), String> {
+    if matrix.shape().iter().skip(2).any(|&extent| extent != 1)
+        || matrix.rows().checked_mul(matrix.cols()) != Some(matrix.len())
+    {
+        return Err("BLAS/LAPACK input must be a two-dimensional matrix".to_string());
     }
-    result
+    let rows = i32::try_from(matrix.rows())
+        .map_err(|_| "Matrix rows exceed native BLAS/LAPACK limits".to_string())?;
+    let cols = i32::try_from(matrix.cols())
+        .map_err(|_| "Matrix columns exceed native BLAS/LAPACK limits".to_string())?;
+    Ok((rows, cols))
 }
-
-// /// Helper function to transpose a matrix from column-major to row-major
-// Removed: not needed with column-major everywhere
 
 /// BLAS-accelerated matrix multiplication: C = A * B
 /// Uses DGEMM (double precision general matrix multiply)
@@ -33,14 +32,21 @@ pub fn blas_matrix_mul(a: &Matrix, b: &Matrix) -> Result<Matrix, String> {
         ));
     }
 
-    let m = a.rows() as i32;
-    let n = b.cols() as i32;
-    let k = a.cols() as i32;
+    let (m, k) = matrix_dimensions(a)?;
+    let (_, n) = matrix_dimensions(b)?;
+    let count = a
+        .rows()
+        .checked_mul(b.cols())
+        .ok_or("Matrix output size overflow")?;
+    let mut c_col_major = vec![0.0; count];
+    if m == 0 || n == 0 || k == 0 {
+        return Matrix::new_2d(c_col_major, a.rows(), b.cols());
+    }
 
-    // Convert to column-major storage for BLAS
-    let a_col_major = transpose_to_column_major(a);
-    let b_col_major = transpose_to_column_major(b);
-    let mut c_col_major = vec![0.0; (m * n) as usize];
+    // Tensor is already column-major. Borrow native F64 storage; other
+    // numeric classes retain the existing explicit F64 computation boundary.
+    let a_col_major = tensor::tensor_values_f64_cow(a);
+    let b_col_major = tensor::tensor_values_f64_cow(b);
 
     unsafe {
         blas::dgemm(
@@ -75,12 +81,14 @@ pub fn blas_matrix_vector_mul(matrix: &Matrix, vector: &[f64]) -> Result<Vec<f64
         ));
     }
 
-    let m = matrix.rows() as i32;
-    let n = matrix.cols() as i32;
+    let (m, n) = matrix_dimensions(matrix)?;
     let mut result = vec![0.0; matrix.rows()];
+    if m == 0 || n == 0 {
+        return Ok(result);
+    }
 
-    // Convert matrix to column-major storage for BLAS
-    let matrix_col_major = transpose_to_column_major(matrix);
+    // Borrow the original column-major payload (or convert its numeric class).
+    let matrix_col_major = tensor::tensor_values_f64_cow(matrix);
 
     unsafe {
         blas::dgemv(
@@ -112,23 +120,40 @@ pub fn blas_dot_product(a: &[f64], b: &[f64]) -> Result<f64, String> {
         ));
     }
 
-    let n = a.len() as i32;
-    unsafe { Ok(blas::ddot(n, a, 1, b, 1)) }
+    if let Ok(n) = i32::try_from(a.len()) {
+        return unsafe { Ok(blas::ddot(n, a, 1, b, 1)) };
+    }
+    Ok(a.chunks(i32::MAX as usize)
+        .zip(b.chunks(i32::MAX as usize))
+        .map(|(a, b)| {
+            let n = i32::try_from(a.len()).expect("BLAS chunk is bounded by i32::MAX");
+            unsafe { blas::ddot(n, a, 1, b, 1) }
+        })
+        .sum())
 }
 
 /// BLAS-accelerated vector norm (Euclidean norm)
 /// Uses DNRM2 (double precision norm)
 pub fn blas_vector_norm(vector: &[f64]) -> f64 {
-    let n = vector.len() as i32;
-    unsafe { blas::dnrm2(n, vector, 1) }
+    if let Ok(n) = i32::try_from(vector.len()) {
+        return unsafe { blas::dnrm2(n, vector, 1) };
+    }
+    vector
+        .chunks(i32::MAX as usize)
+        .fold(0.0_f64, |norm, chunk| {
+            let n = i32::try_from(chunk.len()).expect("BLAS chunk is bounded by i32::MAX");
+            norm.hypot(unsafe { blas::dnrm2(n, chunk, 1) })
+        })
 }
 
 /// BLAS-accelerated scalar-vector multiplication: y = alpha * x
 /// Uses DSCAL (double precision scalar multiplication)
 pub fn blas_scale_vector(vector: &mut [f64], alpha: f64) {
-    let n = vector.len() as i32;
-    unsafe {
-        blas::dscal(n, alpha, vector, 1);
+    for chunk in vector.chunks_mut(i32::MAX as usize) {
+        let n = i32::try_from(chunk.len()).expect("BLAS chunk is bounded by i32::MAX");
+        unsafe {
+            blas::dscal(n, alpha, chunk, 1);
+        }
     }
 }
 
@@ -143,9 +168,14 @@ pub fn blas_vector_add(alpha: f64, x: &[f64], y: &mut [f64]) -> Result<(), Strin
         ));
     }
 
-    let n = x.len() as i32;
-    unsafe {
-        blas::daxpy(n, alpha, x, 1, y, 1);
+    for (x, y) in x
+        .chunks(i32::MAX as usize)
+        .zip(y.chunks_mut(i32::MAX as usize))
+    {
+        let n = i32::try_from(x.len()).expect("BLAS chunk is bounded by i32::MAX");
+        unsafe {
+            blas::daxpy(n, alpha, x, 1, y, 1);
+        }
     }
     Ok(())
 }

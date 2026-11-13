@@ -3,13 +3,12 @@ use crate::core::scene::{DrawIndirectArgsRaw, GpuVertexBuffer};
 use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 pub struct ContourFillGpuInputs<'a> {
     pub x_axis: AxisData<'a>,
     pub y_axis: AxisData<'a>,
-    pub z_buffer: Arc<wgpu::Buffer>,
+    pub z_buffer: crate::gpu::GpuInputBuffer,
     pub color_table: &'a [[f32; 4]],
     pub level_values: &'a [f32],
     pub x_len: u32,
@@ -38,11 +37,12 @@ struct ContourFillUniforms {
 const MAX_VERTICES_PER_INVOCATION: u32 = 36;
 
 pub fn pack_contour_fill_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &ContourFillGpuInputs<'_>,
     params: &ContourFillGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.x_len < 2 || inputs.y_len < 2 {
         return Err("contourf: axis vectors must contain at least two elements".to_string());
     }
@@ -75,45 +75,49 @@ pub fn pack_contour_fill_vertices(
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
 
-    let x_buffer = axis_storage_buffer(device, "contourf-x-axis", &inputs.x_axis, inputs.scalar)?;
-    let y_buffer = axis_storage_buffer(device, "contourf-y-axis", &inputs.y_axis, inputs.scalar)?;
+    let x_buffer = axis_storage_buffer(emission, "contourf-x-axis", &inputs.x_axis, inputs.scalar)?;
+    let y_buffer = axis_storage_buffer(emission, "contourf-y-axis", &inputs.y_axis, inputs.scalar)?;
 
-    let color_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let color_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
             label: Some("contourf-color-table"),
             contents: bytemuck::cast_slice(inputs.color_table),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+        },
+    ));
 
-    let level_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let level_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
             label: Some("contourf-level-values"),
             contents: bytemuck::cast_slice(inputs.level_values),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+        },
+    ));
 
     let output_size = vertex_count as u64 * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("contourf-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("contourf-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
-    let indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("contourf-gpu-indirect-args"),
-        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::INDIRECT
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let indirect_args = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("contourf-gpu-indirect-args"),
+            size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let init = DrawIndirectArgsRaw {
         vertex_count: 0,
         instance_count: 1,
@@ -245,15 +249,25 @@ pub fn pack_contour_fill_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: x_buffer.as_ref().as_entire_binding(),
+                resource: x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: y_buffer.as_ref().as_entire_binding(),
+                resource: y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: inputs.z_buffer.as_ref().as_entire_binding(),
+                resource: inputs
+                    .z_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -301,7 +315,7 @@ pub fn pack_contour_fill_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -309,7 +323,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::contour_fill::F32,
         ScalarType::F64 => shaders::contour_fill::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("contourf-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

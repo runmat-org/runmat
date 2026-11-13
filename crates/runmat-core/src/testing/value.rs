@@ -1,4 +1,4 @@
-use runmat_value::{CellArray, StructValue, Tensor, Value};
+use runmat_value::{CellArray, Tensor, UnboundedStructValueBuilder, Value};
 
 pub(super) fn from_json(value: &serde_json::Value) -> Result<Value, String> {
     match value {
@@ -8,7 +8,7 @@ pub(super) fn from_json(value: &serde_json::Value) -> Result<Value, String> {
             .as_f64()
             .map(Value::Num)
             .ok_or_else(|| "test parameter number is outside f64 range".into()),
-        serde_json::Value::String(value) => Ok(Value::String(value.clone())),
+        serde_json::Value::String(value) => Ok(Value::String(value.clone().into())),
         serde_json::Value::Array(values) => {
             if values.iter().all(serde_json::Value::is_number) {
                 let data = values
@@ -31,11 +31,11 @@ pub(super) fn from_json(value: &serde_json::Value) -> Result<Value, String> {
             }
         }
         serde_json::Value::Object(values) => {
-            let mut structure = StructValue::new();
+            let mut structure = UnboundedStructValueBuilder::with_capacity(values.len());
             for (name, value) in values {
-                structure.fields.insert(name.clone(), from_json(value)?);
+                structure.insert(name.clone(), from_json(value)?);
             }
-            Ok(Value::Struct(structure))
+            Ok(Value::Struct(structure.finish()))
         }
     }
 }

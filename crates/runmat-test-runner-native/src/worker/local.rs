@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 use runmat_core::RunMatSession;
@@ -15,7 +15,7 @@ use tokio::sync::watch;
 #[derive(Clone, Debug)]
 pub struct LocalBackendConfig {
     pub isolation: IsolationMode,
-    pub enable_jit: bool,
+    pub execution: super::NativeWorkerExecutionConfig,
     pub max_workers: usize,
     pub project_handoff: Option<FrozenProjectHandoff>,
 }
@@ -24,7 +24,7 @@ impl LocalBackendConfig {
     pub fn new(isolation: IsolationMode) -> Self {
         Self {
             isolation,
-            enable_jit: true,
+            execution: super::NativeWorkerExecutionConfig::default(),
             max_workers: std::thread::available_parallelism()
                 .map(usize::from)
                 .unwrap_or(1),
@@ -77,11 +77,11 @@ impl LocalBackend {
     fn spawn_state(&self, submission: RunSubmission) -> Result<Arc<LocalState>, BackendError> {
         let (sender, receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
-        let enable_jit = self.config.enable_jit;
+        let execution = self.config.execution.clone();
         let project = self.config.project_handoff.clone();
         std::thread::Builder::new()
             .name("runmat-test-session".into())
-            .spawn(move || worker_loop(receiver, ready_sender, submission, enable_jit, project))
+            .spawn(move || worker_loop(receiver, ready_sender, submission, execution, project))
             .map_err(|error| {
                 BackendError::new(
                     BackendErrorKind::Unavailable,
@@ -134,7 +134,7 @@ struct LocalState {
 
 #[derive(Clone)]
 struct ActiveExecution {
-    cancellation: Arc<AtomicBool>,
+    cancellation: runmat_execution::cancellation::CancellationSource,
     result: watch::Receiver<Option<Result<WorkerExecution, BackendError>>>,
 }
 
@@ -142,10 +142,12 @@ enum LocalCommand {
     Execute {
         test_id: TestId,
         attempt: u32,
-        cancellation: Arc<AtomicBool>,
+        cancellation: runmat_execution::cancellation::CancellationSource,
         result: watch::Sender<Option<Result<WorkerExecution, BackendError>>>,
     },
-    Shutdown,
+    Shutdown {
+        result: tokio::sync::oneshot::Sender<Result<(), BackendError>>,
+    },
 }
 
 impl WorkerBackend for LocalBackend {
@@ -200,7 +202,7 @@ impl WorkerBackend for LocalBackend {
         request: ExecutionRequest,
     ) -> BackendFuture<'a, WorkerExecution> {
         Box::pin(async move {
-            let cancellation = Arc::new(AtomicBool::new(false));
+            let cancellation = runmat_execution::cancellation::CancellationSource::new();
             let (result_sender, result) = watch::channel(None);
             {
                 let mut active = session
@@ -254,7 +256,9 @@ impl WorkerBackend for LocalBackend {
             let Some(active) = active else {
                 return Ok(None);
             };
-            active.cancellation.store(true, Ordering::Release);
+            active
+                .cancellation
+                .cancel(runmat_execution::CancellationReason::User);
             await_result(active.result).await.map(Some)
         })
     }
@@ -268,7 +272,9 @@ impl WorkerBackend for LocalBackend {
                 .expect("local session lock poisoned")
                 .as_ref()
             {
-                active.cancellation.store(true, Ordering::Release);
+                active
+                    .cancellation
+                    .cancel(runmat_execution::CancellationReason::User);
             }
             Ok(())
         })
@@ -277,7 +283,17 @@ impl WorkerBackend for LocalBackend {
     fn shutdown<'a>(&'a self, session: &'a Self::Session) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             if session.mode == IsolationMode::Session {
-                let _ = session.state.sender.send(LocalCommand::Shutdown);
+                let (result_sender, result) = tokio::sync::oneshot::channel();
+                session
+                    .state
+                    .sender
+                    .send(LocalCommand::Shutdown {
+                        result: result_sender,
+                    })
+                    .map_err(|_| crashed("local test session has exited"))?;
+                return result
+                    .await
+                    .map_err(|_| crashed("local test session exited during shutdown"))?;
             }
             Ok(())
         })
@@ -306,10 +322,10 @@ fn worker_loop(
     commands: mpsc::Receiver<LocalCommand>,
     ready: mpsc::SyncSender<Result<(), BackendError>>,
     submission: RunSubmission,
-    enable_jit: bool,
+    execution: super::NativeWorkerExecutionConfig,
     project: Option<FrozenProjectHandoff>,
 ) {
-    let mut session = match RunMatSession::with_options(enable_jit, false) {
+    let mut session = match RunMatSession::with_options(execution.enable_jit, false) {
         Ok(session) => session,
         Err(error) => {
             let _ = ready.send(Err(crashed(format!(
@@ -318,13 +334,17 @@ fn worker_loop(
             return;
         }
     };
-    if let Some(project) = project {
-        if let Err(error) = session.install_project_handoff(project) {
-            let _ = ready.send(Err(rejected(format!(
-                "failed to install frozen project in local session: {error}"
-            ))));
-            return;
-        }
+    if let Err(error) = session.configure_test_snapshot(&submission.snapshot) {
+        let _ = ready.send(Err(rejected(format!(
+            "invalid frozen test environment: {error}"
+        ))));
+        return;
+    }
+    if let Err(error) = session.set_foreign_config(&execution.foreign) {
+        let _ = ready.send(Err(rejected(format!(
+            "invalid local test foreign policy: {error}"
+        ))));
+        return;
     }
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -338,6 +358,14 @@ fn worker_loop(
             return;
         }
     };
+    if let Some(project) = project {
+        if let Err(error) = runtime.block_on(session.install_project_handoff(project)) {
+            let _ = ready.send(Err(rejected(format!(
+                "failed to install frozen project in local session: {error}"
+            ))));
+            return;
+        }
+    }
     if ready.send(Ok(())).is_err() {
         return;
     }
@@ -355,7 +383,7 @@ fn worker_loop(
                         &submission.plan,
                         &test_id,
                         attempt,
-                        cancellation,
+                        cancellation.token(),
                     ))
                     .map(|attempt| WorkerExecution {
                         result: attempt.result,
@@ -365,9 +393,18 @@ fn worker_loop(
                     .map_err(|error| rejected(error.to_string()));
                 let _ = result.send(Some(completed));
             }
-            LocalCommand::Shutdown => return,
+            LocalCommand::Shutdown { result } => {
+                let completed = runtime
+                    .block_on(session.shutdown_foreign_runtime())
+                    .map_err(|error| {
+                        crashed(format!("failed to shut down local test session: {error}"))
+                    });
+                let _ = result.send(completed);
+                return;
+            }
         }
     }
+    let _ = runtime.block_on(session.shutdown_foreign_runtime());
 }
 
 fn rejected(message: impl Into<String>) -> BackendError {

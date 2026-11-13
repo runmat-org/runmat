@@ -11,11 +11,17 @@ fn two_interior_node_refill_preserves_bipyramid_cavity() {
     let interior_candidates = [
         ConstrainedCavityNode {
             node_id: 10,
-            coordinates_m: [0.25, 0.25, 0.25],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, 0.25]),
         },
         ConstrainedCavityNode {
             node_id: 11,
-            coordinates_m: [0.25, 0.25, -0.25],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, -0.25]),
         },
     ];
     let options = refill_options();
@@ -52,15 +58,24 @@ fn multi_interior_node_refill_preserves_bipyramid_cavity() {
     let interior_candidates = [
         ConstrainedCavityNode {
             node_id: 10,
-            coordinates_m: [0.25, 0.25, 0.25],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, 0.25]),
         },
         ConstrainedCavityNode {
             node_id: 11,
-            coordinates_m: [0.25, 0.25, -0.25],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, -0.25]),
         },
         ConstrainedCavityNode {
             node_id: 12,
-            coordinates_m: [0.50, 0.25, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.50, 0.25, 0.0]),
         },
     ];
     let options = refill_options();

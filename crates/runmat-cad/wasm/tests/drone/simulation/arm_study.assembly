@@ -1,0 +1,14 @@
+runmat 0.7
+std 1
+
+// The arm as the arm studies see it: the arm at its defaults (its 88.2 mm nominal length and
+// 5.2 mm rise), and the motor pod on the arm's published `seat` frame, so the pod follows the
+// arm's length. In the studies the pod carries the motor and propeller as a lumped mass.
+// Exported to geometry/arm_study.step for arm_modal.fea and arm_landing.fea.
+assembly arm_study {
+    use part arm from "../mechanical/arm" as arm
+    use part motor_pod from "../mechanical/propulsion" as motor_pod {
+        placement = { placement = attach, own = { anchor = origin }, to = { frame = connector, connector = seat } }
+    }
+    connector seat = { occurrence = [{ name = arm }], anchor = { anchor = published, name = seat } }
+}

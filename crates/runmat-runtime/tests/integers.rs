@@ -169,10 +169,11 @@ fn sum_native_preserves_exact_integer_storage_while_default_is_double() {
         .expect("native scalar sum"),
         Value::Int(IntValue::U64(u64::MAX))
     );
-    match runmat_runtime::call_builtin("sum", &[input]).expect("default sum") {
+    let default_sum = runmat_runtime::call_builtin("sum", &[input]).expect("default sum");
+    match default_sum.value() {
         Value::Tensor(tensor) => {
             assert!(tensor.integer_storage().is_none());
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
         }
         other => panic!("expected double tensor, got {other:?}"),
     }
@@ -200,7 +201,8 @@ fn prod_native_preserves_integer_storage_while_default_is_double() {
         .expect("native scalar product"),
         Value::Int(IntValue::I64(i64::MIN))
     );
-    match runmat_runtime::call_builtin("prod", &[input]).expect("default product") {
+    let default_product = runmat_runtime::call_builtin("prod", &[input]).expect("default product");
+    match default_product.value() {
         Value::Tensor(tensor) => assert!(tensor.integer_storage().is_none()),
         other => panic!("expected double tensor, got {other:?}"),
     }
@@ -211,14 +213,14 @@ fn prod_native_preserves_integer_storage_while_default_is_double() {
 fn integer_class_and_string() {
     let i = Value::Int(IntValue::U16(42));
     let cls = runmat_runtime::call_builtin("class", [i.clone()].as_slice()).unwrap();
-    if let Value::String(s) = cls {
+    if let Value::String(s) = cls.value() {
         assert_eq!(s, "uint16");
     } else {
         panic!();
     }
     let s = runmat_runtime::call_builtin("string", [i].as_slice()).unwrap();
-    if let Value::StringArray(sa) = s {
-        assert_eq!(sa.data[0], "42");
+    if let Value::StringArray(sa) = s.value() {
+        assert_eq!(sa.data()[0], "42");
     } else {
         panic!();
     }
@@ -229,9 +231,9 @@ fn integer_class_and_string() {
 fn uint16_builtin_dispatches_and_casts_array() {
     let input = Value::Tensor(Tensor::new(vec![3.49, -2.0, 70000.0], vec![1, 3]).unwrap());
     let output = runmat_runtime::call_builtin("uint16", &[input]).expect("uint16 builtin");
-    match output {
+    match output.value() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), &[1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![3.0, 0.0, u16::MAX as f64]);
         }
         other => panic!("expected tensor output, got {other:?}"),

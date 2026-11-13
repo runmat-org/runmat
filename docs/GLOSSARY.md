@@ -9,6 +9,7 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | ABI | The structured boundary between RunMat layers or between RunMat and a host. Session requests, workspace deltas, WASM payloads, and builtin descriptors are ABI surfaces because external callers depend on their shape. | [Session Engine](/docs/runtime/session) |
 | Accelerate | RunMat's acceleration layer for GPU execution, provider hooks, and fusion-aware operations. In Cargo features and docs, `wgpu` is the currently wired backend while other backend feature names describe future or platform-specific integration points. | [GPU Acceleration & Fusion Engine](/docs/runtime/gpu) |
 | Analysis store | The MIR analysis result container. It holds facts such as definite assignment, type and shape information, spawn safety, and async behavior that later compiler or runtime layers can query. | [MIR & Static Analysis](/docs/runtime/compiler/static-analysis) |
+| AOT | Ahead-of-time compilation. `runmat compile` lowers a composed program through verified Native IR, emits a host-native object, and links it with the matching RunMat runtime before the program is launched. | [Native Compilation](/docs/runtime/compiler/native-compilation) |
 | AST | Abstract syntax tree. The parser produces the source-shaped representation before HIR lowering resolves scopes and bindings. | [Lexer & Parser](/docs/runtime/compiler/lexer-and-parser) |
 | Async execution | RunMat's execution model for operations that may wait on host interaction, runtime futures, providers, or external I/O while preserving the session request boundary. | [Async Execution](/docs/runtime/execution/async) |
 
@@ -22,7 +23,7 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | BLAS/LAPACK | Native numerical libraries used by selected builtin linear algebra paths. They are build-time dependencies when the relevant Cargo features are enabled. | [Builtins](/docs/runtime/builtins) |
 | Builtin | A MATLAB-visible function implemented by RunMat's Rust runtime. Builtins are registered with metadata so the VM, JIT, LSP, docs, and validation paths can reason about them consistently. | [Builtins](/docs/runtime/builtins) |
 | Builtin descriptor | Structured metadata for a builtin: signatures, output behavior, completion policy, known errors, documentation text, and acceleration tags. | [Authoring Builtins](/docs/runtime/builtins/authoring) |
-| Bytecode | The compact instruction form executed by the VM interpreter and used as the input for eligible JIT compilation. It is emitted from analyzed MIR. | [Bytecode Compilation](/docs/runtime/vm/bytecode) |
+| Bytecode | The compact instruction form executed by the VM interpreter. It is emitted from analyzed MIR and retained in the executable unit alongside the products used by native compilation. | [Bytecode Compilation](/docs/runtime/vm/bytecode) |
 
 ## C
 
@@ -95,7 +96,7 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | Ingestion key | The key used by official builds to authenticate telemetry delivery to the hosted collector. Source builds without a key can still print payloads and use local provider counters. | [Telemetry](/docs/runtime/development/telemetry) |
 | Instruction | A single VM bytecode operation, represented by `Instr` in the VM. Instructions define the stack, variable, call, indexing, control-flow, async, and runtime service operations the interpreter executes. | [Bytecode Compilation](/docs/runtime/vm/bytecode) |
 | Interpreter | The VM execution tier that runs bytecode directly. It is the semantic baseline for RunMat execution and the fallback when JIT execution is unavailable or ineligible. | [VM Interpreter & Bytecode](/docs/runtime/vm) |
-| IR | Intermediate representation. RunMat uses HIR and MIR to move from source-shaped syntax toward analyzable control flow and executable bytecode. | [Compilation Pipeline](/docs/runtime/compiler) |
+| IR | Intermediate representation. RunMat uses HIR, MIR, and Native IR to move from source-shaped syntax toward analyzable control flow and executable products. | [Compilation Pipeline](/docs/runtime/compiler) |
 
 ## J
 
@@ -118,8 +119,15 @@ This page defines RunMat-specific terms and abbreviations used across the runtim
 | --- | --- | --- |
 | MAT payload | Binary workspace data used by save/load and workspace replay paths. Session replay can encode MAT bytes in a host-facing JSON envelope. | [Workspace Replay](/docs/runtime/session/workspace-replay) |
 | MException | MATLAB-compatible error value used for catch/rethrow behavior and structured runtime failures. | [Errors & Diagnostics](/docs/runtime/execution/errors) |
-| MIR | Mid-Level Intermediate Representation. MIR turns HIR into explicit control flow, statements, terminators, places, rvalues, and analysis inputs for bytecode generation. | [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) |
-| MIR analysis | Static analysis over MIR. It computes facts used by diagnostics, bytecode compilation, async behavior, spawn safety, and future optimization work. | [MIR & Static Analysis](/docs/runtime/compiler/static-analysis) |
+| MIR | Mid-Level Intermediate Representation. MIR turns HIR into explicit control flow, statements, terminators, places, rvalues, and analysis inputs for VM and native compilation. | [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) |
+| MIR analysis | Static analysis over MIR. It computes facts used by diagnostics, VM compilation, native specialization, placement, async behavior, and spawn safety. | [MIR & Static Analysis](/docs/runtime/compiler/static-analysis) |
+
+## N
+
+| Term | Definition | More |
+| --- | --- | --- |
+| Native compilation | Compilation of a composed RunMat program into a host-native executable before launch. The output contains native program code and a matching compiler-free runtime. | [Native Compilation](/docs/runtime/compiler/native-compilation) |
+| Native IR | The verified, target-bound intermediate representation consumed by RunMat's Cranelift JIT and object emitter. It retains runtime sites, effects, source identities, guards, and materializable continuation state. | [Mid-Level IR (MIR)](/docs/runtime/compiler/mir#verified-native-ir-boundary) |
 
 ## O
 

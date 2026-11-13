@@ -18,12 +18,10 @@ const COHORT: [&str; 11] = [
 #[test]
 fn histogram_and_image_integer_metadata_is_public() {
     for name in COHORT {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(
-            builtin
-                .descriptor
-                .expect("public descriptor")
-                .completion_policy,
+            builtin.descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
             "{name}"
         );

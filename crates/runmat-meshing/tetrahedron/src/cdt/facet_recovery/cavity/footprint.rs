@@ -1,18 +1,23 @@
 //! Exact-sign tests that keep a facet cavity bounded to the authored triangular footprint.
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
 
 use runmat_meshing_core::quality::predicate::{orient2d, orient3d, PredicateSign};
 
 use super::{super::FacetRecoveryWork, invalid_topology};
-use crate::cdt::{DelaunayFacetRecoveryError, DelaunayVolumeTopology};
+use crate::cdt::DelaunayFacetRecoveryError;
 
 pub(super) fn facet_footprint_crosses_face(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     facet: [u32; 3],
     face: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let coordinates = |node: u32| topology.nodes[node as usize].coordinates_m;
+    let coordinates = |node: u32| {
+        topology.nodes()[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let facet_points = facet.map(coordinates);
     let face_points = face.map(coordinates);
     let face_plane_signs = [
@@ -77,10 +82,19 @@ fn coplanar_triangles_overlap_interior(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let axes = projection_axes(left, constraint_index, work)?;
+    let Some(axes) = projection_axes(left, constraint_index, work)? else {
+        return Ok(false);
+    };
     let project = |point: [f64; 3]| [point[axes[0]], point[axes[1]]];
     let left = left.map(project);
     let right = right.map(project);
+    // Exact edge insertion can leave symbolic faces whose three coordinates are
+    // collinear. Such a face has no geometric interior, so it cannot cross the
+    // positive-area interior of the recovered facet. It remains relevant to the
+    // surrounding topology, but not to this triangle-interior overlap query.
+    if planar_orientation(right, constraint_index, work)? == PredicateSign::Zero {
+        return Ok(false);
+    }
     triangles_overlap_across_every_edge(left, right, constraint_index, work).and_then(|overlap| {
         if overlap {
             triangles_overlap_across_every_edge(right, left, constraint_index, work)
@@ -127,14 +141,18 @@ fn triangles_overlap_across_every_edge(
     Ok(true)
 }
 
-fn segment_hits_triangle_interior(
-    topology: &DelaunayVolumeTopology,
+pub(in crate::cdt::facet_recovery) fn segment_hits_triangle_interior(
+    topology: &impl TetrahedralTopology,
     segment: [u32; 2],
     triangle: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let point = |node: u32| topology.nodes[node as usize].coordinates_m;
+    let point = |node: u32| {
+        topology.nodes()[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let plane_signs = [
         orientation(
             [
@@ -205,15 +223,21 @@ fn segment_hits_triangle_interior(
 }
 
 fn point_strictly_inside_triangle(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     node: u32,
     triangle: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let coordinates = |node: u32| topology.nodes[node as usize].coordinates_m;
+    let coordinates = |node: u32| {
+        topology.nodes()[node as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let points = triangle.map(coordinates);
-    let axes = projection_axes(points, constraint_index, work)?;
+    let Some(axes) = projection_axes(points, constraint_index, work)? else {
+        return Ok(false);
+    };
     let projected = |point: [f64; 3]| [point[axes[0]], point[axes[1]]];
     let query = projected(coordinates(node));
     let signs = [
@@ -241,21 +265,14 @@ fn projection_axes(
     triangle: [[f64; 3]; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
-) -> Result<[usize; 2], DelaunayFacetRecoveryError> {
-    for axes in [[0, 1], [0, 2], [1, 2]] {
-        if planar_orientation(
-            triangle.map(|point| [point[axes[0]], point[axes[1]]]),
+) -> Result<Option<[usize; 2]>, DelaunayFacetRecoveryError> {
+    work.search_step(constraint_index)?;
+    runmat_meshing_core::quality::predicate::triangle_projection_axes(triangle).map_err(|failure| {
+        invalid_topology(
             constraint_index,
-            work,
-        )? != PredicateSign::Zero
-        {
-            return Ok(axes);
-        }
-    }
-    Err(invalid_topology(
-        constraint_index,
-        "facet-footprint triangle is exactly collinear",
-    ))
+            format!("facet-footprint projection failed: {failure:?}"),
+        )
+    })
 }
 
 fn orientation(
@@ -329,6 +346,14 @@ mod tests {
         assert!(!overlaps(
             target,
             [[1.0, 0.0, 0.0], [3.0, 0.0, 0.0], [2.0, -2.0, 0.0]],
+        ));
+        assert!(!overlaps(
+            target,
+            [[1.0, 1.0, 0.0], [2.0, 2.0, 0.0], [3.0, 3.0, 0.0]],
+        ));
+        assert!(!overlaps(
+            [[1.0, 1.0, 0.0], [2.0, 2.0, 0.0], [3.0, 3.0, 0.0]],
+            target,
         ));
     }
 }

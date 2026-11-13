@@ -92,3 +92,12 @@ pub enum LockError {
     #[error("incompatible runmat.lock: {0}")]
     Incompatible(String),
 }
+
+impl From<runmat_types::RelativePathError> for IdentityError {
+    fn from(error: runmat_types::RelativePathError) -> Self {
+        Self::InvalidRelativePath {
+            value: error.value,
+            reason: error.reason,
+        }
+    }
+}

@@ -1,6 +1,7 @@
 //! Backend-neutral authoritative geometry fixtures for cross-crate conformance tests.
 
 use runmat_geometry_core::*;
+use runmat_types::physical::{Length, Position};
 
 mod spherical;
 mod tetrahedral;
@@ -104,14 +105,15 @@ pub fn exact_circle() -> (GeometryDocument, ExactBRepTopology, ExactEvaluatorReg
             curve_evaluator_id: CurveEvaluatorId::new("curve:1").unwrap(),
             start_vertex_id: Some(vertex.clone()),
             end_vertex_id: Some(vertex.clone()),
+            tolerance_m: Length::new(1.0e-8),
             is_closed: true,
             is_periodic: true,
             is_degenerate: false,
         }],
         vertices: vec![ExactVertex {
             id: vertex,
-            point_m: [1.0, 0.0, 0.0],
-            tolerance_m: 1.0e-8,
+            point_m: Position::new([1.0, 0.0, 0.0]),
+            tolerance_m: Length::new(1.0e-8),
         }],
         interfaces: Vec::new(),
         contacts: Vec::new(),
@@ -128,10 +130,13 @@ pub fn exact_singular_edge() -> (GeometryDocument, ExactBRepTopology, ExactEvalu
     topology.faces[0].has_singularity = true;
     topology.edges[0].is_periodic = false;
     topology.edges[0].is_degenerate = true;
-    topology.vertices[0].point_m = [0.0, 0.0, 1.0];
+    topology.vertices[0].point_m = Position::new([0.0, 0.0, 1.0]);
     evaluators.curves[0].implementation = ExactCurveImplementation::Portable {
         definition: ExactCurveDefinition::Degenerate {
-            point_m: [0.0, 0.0, 1.0],
+            point_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0, 0.0, 1.0],
+                ),
             domain,
         },
     };
@@ -144,11 +149,14 @@ pub fn exact_singular_edge() -> (GeometryDocument, ExactBRepTopology, ExactEvalu
     };
     evaluators.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Sphere {
-            center_m: [0.0, 0.0, 0.0],
+            center_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0, 0.0, 0.0],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             z_axis: [0.0, 0.0, 1.0],
-            radius_m: 1.0,
+            radius_m: runmat_types::physical::Length::new(1.0),
             domains: [
                 domain,
                 parameter(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
@@ -176,7 +184,10 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
                 PersistentEntityKind::Vertex,
                 &format!("faceted:vertex:{index}"),
             ),
-            coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
         })
         .collect(),
         triangles: [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
@@ -201,8 +212,13 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
             format: GeometrySourceFormat::Stl,
             importer_version: "runmat-faceted-fixture/1".into(),
             kernel_version: None,
-            source_units: UnitSystem::Meter,
-            meters_per_source_unit: 1.0,
+            unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                LengthUnit::Meter,
+                "authored fixture",
+            ),
+            representation_units: runmat_geometry_core::physical::CoordinateUnits::new(
+                LengthUnit::Meter,
+            ),
         },
         revision: GeometryRevisionIdentity {
             revision: 1,
@@ -210,11 +226,11 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
             parent_document_digest: None,
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 0.0,
-            absolute_floor_m: 1.0e-12,
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-12),
             model_relative_term: 1.0e-12,
-            requested_deviation_m: 1.0e-4,
-            maximum_healing_displacement_m: 0.0,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(0.0),
         },
         healing: GeometryHealingPolicy {
             algorithm_version: "none/1".into(),
@@ -223,6 +239,7 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
             consolidate_duplicates: false,
             repair_tolerance_scale_gaps: false,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::FacetedSolid {
             model: FacetedSolidModel {
@@ -245,15 +262,15 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
+    PersistentEntityId::new(
         kind,
-        source_topology_id: name.into(),
-        assembly_path: if kind == PersistentEntityKind::Assembly && name == "root" {
+        name.into(),
+        if kind == PersistentEntityKind::Assembly && name == "root" {
             Vec::new()
         } else {
             vec!["part".into()]
         },
-    }
+    )
 }
 
 fn parameter(start: f64, end: f64) -> ParameterRange {
@@ -268,10 +285,10 @@ fn evaluators() -> ExactEvaluatorRegistry {
             id: CurveEvaluatorId::new("curve:1").unwrap(),
             implementation: ExactCurveImplementation::Portable {
                 definition: ExactCurveDefinition::Circle {
-                    center_m: [0.0, 0.0, 0.0],
+                    center_m: Position::new([0.0, 0.0, 0.0]),
                     x_axis: [1.0, 0.0, 0.0],
                     y_axis: [0.0, 1.0, 0.0],
-                    radius_m: 1.0,
+                    radius_m: Length::new(1.0),
                     domain: parameter(0.0, std::f64::consts::TAU),
                     periodic: true,
                 },
@@ -293,7 +310,7 @@ fn evaluators() -> ExactEvaluatorRegistry {
             id: SurfaceEvaluatorId::new("surface:1").unwrap(),
             implementation: ExactSurfaceImplementation::Portable {
                 definition: ExactSurfaceDefinition::Plane {
-                    origin_m: [0.0, 0.0, 0.0],
+                    origin_m: Position::new([0.0, 0.0, 0.0]),
                     u_axis_m_per_parameter: [1.0, 0.0, 0.0],
                     v_axis_m_per_parameter: [0.0, 1.0, 0.0],
                     domains: [parameter(-2.0, 2.0), parameter(-2.0, 2.0)],
@@ -308,10 +325,20 @@ fn evaluators() -> ExactEvaluatorRegistry {
             id: MassPropertiesEvaluatorId::new("mass:1").unwrap(),
             implementation: ExactMassPropertiesImplementation::KernelValidated {
                 properties: BodyMassProperties {
-                    volume_m3: 1.0,
-                    surface_area_m2: 6.0,
-                    centroid_m: [0.5, 0.5, 0.5],
-                    inertia_about_centroid_m5: [1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0, 0.0, 0.0, 0.0],
+                    volume_m3: runmat_geometry_core::physical::Volume::new(1.0),
+                    surface_area_m2: runmat_geometry_core::physical::Area::new(6.0),
+                    centroid_m: runmat_geometry_core::physical::Position::new([0.5, 0.5, 0.5]),
+                    inertia_about_centroid_m5: runmat_geometry_core::physical::Quantity::<
+                        runmat_geometry_core::physical::kind::GeometricVolumeSecondMoment,
+                        _,
+                    >::new([
+                        1.0 / 6.0,
+                        1.0 / 6.0,
+                        1.0 / 6.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ]),
                 },
                 validation_digest: [9; 32],
             },
@@ -372,8 +399,13 @@ fn document(model: ExactBRepModel) -> GeometryDocument {
             format: GeometrySourceFormat::Step,
             importer_version: "step-import/3".into(),
             kernel_version: Some("occt/7.9".into()),
-            source_units: UnitSystem::Meter,
-            meters_per_source_unit: 1.0,
+            unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                LengthUnit::Meter,
+                "authored fixture",
+            ),
+            representation_units: runmat_geometry_core::physical::CoordinateUnits::new(
+                LengthUnit::Meter,
+            ),
         },
         revision: GeometryRevisionIdentity {
             revision: 1,
@@ -381,11 +413,11 @@ fn document(model: ExactBRepModel) -> GeometryDocument {
             parent_document_digest: None,
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         healing: GeometryHealingPolicy {
             algorithm_version: "occt-healing/1".into(),
@@ -394,6 +426,7 @@ fn document(model: ExactBRepModel) -> GeometryDocument {
             consolidate_duplicates: true,
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::ExactBRep { model },
         display_tessellations: Vec::new(),

@@ -107,7 +107,7 @@ describe("Git snapshot gateway", () => {
     const snapshot = { source: {}, tree: {}, blobs: [] };
     const buildGitSnapshot = vi.fn().mockReturnValue(snapshot);
     __internals.setNativeModuleOverride({
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: vi.fn(),
       buildGitSnapshot
     } as never);
@@ -143,7 +143,7 @@ describe("Git snapshot gateway", () => {
     };
     const nativePlanner = vi.fn().mockReturnValue(plan);
     __internals.setNativeModuleOverride({
-      default: async () => {},
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
       initRunMat: vi.fn(),
       planGitAcquisition: nativePlanner
     } as never);

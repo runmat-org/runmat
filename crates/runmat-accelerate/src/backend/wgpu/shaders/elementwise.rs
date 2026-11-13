@@ -1,6 +1,8 @@
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::backend::wgpu::types::UnaryOpCode;
 
+mod complex_division;
+
 fn wgsl_function(source: &str, name: &str) -> String {
     let marker = format!("fn {name}(");
     let start = source
@@ -170,15 +172,38 @@ fn unary_helper_names(op: UnaryOpCode, precision: NumericPrecision) -> &'static 
 }
 
 fn inline_gammaln_body(precision: NumericPrecision) -> String {
-    let (ty, max_finite, small_cutoff, epsilon) = match precision {
-        NumericPrecision::F64 => ("f64", "1.7976931348623157e308", "1.0e-305", "1.0e-12"),
-        NumericPrecision::F32 => ("f32", "3.4028234663852886e38", "1.0e-30", "1.0e-5"),
+    let (ty, max_finite, small_cutoff, epsilon, positive_infinity, nan, log_pi) = match precision {
+        NumericPrecision::F64 => (
+            "f64",
+            "1.7976931348623157e308",
+            "1.0e-305",
+            "1.0e-12",
+            "pos_inf_f64",
+            "nan_f64",
+            // Nearest Double representation of ln(pi), replacing a constant
+            // WGSL log call that Naga cannot evaluate for f64.
+            "f64(1.1447298858494002)",
+        ),
+        NumericPrecision::F32 => (
+            "f32",
+            "3.4028234663852886e38",
+            "1.0e-30",
+            "1.0e-5",
+            "pos_inf_f32",
+            "nan_f32",
+            // Nearest Single representation of ln(the represented f32 pi).
+            "f32(1.1447299718856812)",
+        ),
+    };
+    let is_nan = match precision {
+        NumericPrecision::F32 => "is_nan32",
+        NumericPrecision::F64 => "is_nan64",
     };
     format!(
         r#"
-if a != a {{ return a; }}
-if a == {ty}(0.0) || a > {ty}({max_finite}) {{ return {ty}(1.0) / {ty}(0.0); }}
-if a < {ty}(0.0) {{ return {ty}(0.0) / {ty}(0.0); }}
+if {is_nan}(a) {{ return a; }}
+if a == {ty}(0.0) || a > {ty}({max_finite}) {{ return {positive_infinity}(); }}
+if a < {ty}(0.0) {{ return {nan}(); }}
 if a < {ty}({small_cutoff}) {{ return -log(a); }}
 var z = a;
 if a < {ty}(0.5) {{ z = {ty}(1.0) - a; }}
@@ -196,8 +221,9 @@ let t = z_minus_one + {ty}(7.5);
 let value = {ty}(0.9189385332046727) + (z_minus_one + {ty}(0.5)) * log(t) - t + log(sum);
 if a < {ty}(0.5) {{
     let sin_term = sin({ty}(3.141592653589793) * a);
-    if abs(sin_term) <= {ty}({epsilon}) {{ return {ty}(1.0) / {ty}(0.0); }}
-    return log({ty}(3.141592653589793)) - log(sin_term) - value;
+    if abs(sin_term) <= {ty}({epsilon}) {{ return {positive_infinity}(); }}
+    let LN_PI: {ty} = {log_pi};
+    return LN_PI - log(sin_term) - value;
 }}
 return value;
 "#
@@ -205,70 +231,35 @@ return value;
 }
 
 fn inline_erfcinv_body(precision: NumericPrecision) -> String {
-    // Some D3D12 drivers reject kernels that construct non-finite floating-point
-    // values in shader arithmetic. Construct their IEEE representations with
-    // typed bitcast helpers while preserving the floating-point storage ABI.
     let (ty, positive_infinity, negative_infinity, nan) = match precision {
         NumericPrecision::F64 => ("f64", "pos_inf_f64", "neg_inf_f64", "nan_f64"),
         NumericPrecision::F32 => ("f32", "pos_inf_f32", "neg_inf_f32", "nan_f32"),
     };
+    let is_nan = match precision {
+        NumericPrecision::F32 => "is_nan32",
+        NumericPrecision::F64 => "is_nan64",
+    };
     format!(
         r#"
-var safe_a = {ty}(1.0);
-if a > {ty}(0.0) && a < {ty}(2.0) {{ safe_a = a; }}
-let p = safe_a * {ty}(0.5);
+if {is_nan}(a) {{ return a; }}
+if a < {ty}(0.0) || a > {ty}(2.0) {{ return {nan}(); }}
+if a == {ty}(0.0) {{ return {positive_infinity}(); }}
+if a == {ty}(2.0) {{ return {negative_infinity}(); }}
+if a == {ty}(1.0) {{ return {ty}(0.0); }}
+let p = a * {ty}(0.5);
 var normal: {ty};
 if p < {ty}(0.02425) {{
-    let q = sqrt(-{ty}(2.0) * log(p));
-    var numerator = {ty}(-0.007784894002430293);
-    numerator = numerator * q + {ty}(-0.3223964580411365);
-    numerator = numerator * q + {ty}(-2.400758277161838);
-    numerator = numerator * q + {ty}(-2.549732539343734);
-    numerator = numerator * q + {ty}(4.374664141464968);
-    numerator = numerator * q + {ty}(2.938163982698783);
-    var denominator = {ty}(0.007784695709041462);
-    denominator = denominator * q + {ty}(0.3224671290700398);
-    denominator = denominator * q + {ty}(2.445134137142996);
-    denominator = denominator * q + {ty}(3.754408661907416);
-    denominator = denominator * q + {ty}(1.0);
-    normal = numerator / denominator;
+    let q = sqrt({ty}(-2.0) * log(p));
+    normal = ((((({ty}(-0.007784894002430293) * q + {ty}(-0.3223964580411365)) * q + {ty}(-2.400758277161838)) * q + {ty}(-2.549732539343734)) * q + {ty}(4.374664141464968)) * q + {ty}(2.938163982698783)) / (((({ty}(0.007784695709041462) * q + {ty}(0.3224671290700398)) * q + {ty}(2.445134137142996)) * q + {ty}(3.754408661907416)) * q + {ty}(1.0));
 }} else if p > {ty}(0.97575) {{
-    let q = sqrt(-{ty}(2.0) * log({ty}(1.0) - p));
-    var numerator = {ty}(-0.007784894002430293);
-    numerator = numerator * q + {ty}(-0.3223964580411365);
-    numerator = numerator * q + {ty}(-2.400758277161838);
-    numerator = numerator * q + {ty}(-2.549732539343734);
-    numerator = numerator * q + {ty}(4.374664141464968);
-    numerator = numerator * q + {ty}(2.938163982698783);
-    var denominator = {ty}(0.007784695709041462);
-    denominator = denominator * q + {ty}(0.3224671290700398);
-    denominator = denominator * q + {ty}(2.445134137142996);
-    denominator = denominator * q + {ty}(3.754408661907416);
-    denominator = denominator * q + {ty}(1.0);
-    normal = -(numerator / denominator);
+    let q = sqrt({ty}(-2.0) * log({ty}(1.0) - p));
+    normal = -((((({ty}(-0.007784894002430293) * q + {ty}(-0.3223964580411365)) * q + {ty}(-2.400758277161838)) * q + {ty}(-2.549732539343734)) * q + {ty}(4.374664141464968)) * q + {ty}(2.938163982698783)) / (((({ty}(0.007784695709041462) * q + {ty}(0.3224671290700398)) * q + {ty}(2.445134137142996)) * q + {ty}(3.754408661907416)) * q + {ty}(1.0));
 }} else {{
     let q = p - {ty}(0.5);
     let r = q * q;
-    var numerator = {ty}(-39.69683028665376);
-    numerator = numerator * r + {ty}(220.9460984245205);
-    numerator = numerator * r + {ty}(-275.9285104469687);
-    numerator = numerator * r + {ty}(138.3577518672690);
-    numerator = numerator * r + {ty}(-30.66479806614716);
-    numerator = numerator * r + {ty}(2.506628277459239);
-    var denominator = {ty}(-54.47609879822406);
-    denominator = denominator * r + {ty}(161.5858368580409);
-    denominator = denominator * r + {ty}(-155.6989798598866);
-    denominator = denominator * r + {ty}(66.80131188771972);
-    denominator = denominator * r + {ty}(-13.28068155288572);
-    denominator = denominator * r + {ty}(1.0);
-    normal = (numerator * q) / denominator;
+    normal = ((((({ty}(-39.69683028665376) * r + {ty}(220.9460984245205)) * r + {ty}(-275.9285104469687)) * r + {ty}(138.3577518672690)) * r + {ty}(-30.66479806614716)) * r + {ty}(2.506628277459239)) * q / ((((({ty}(-54.47609879822406) * r + {ty}(161.5858368580409)) * r + {ty}(-155.6989798598866)) * r + {ty}(66.80131188771972)) * r + {ty}(-13.28068155288572)) * r + {ty}(1.0));
 }}
-var result = -normal * {ty}(0.7071067811865476);
-if a != a {{ result = a; }}
-if a < {ty}(0.0) || a > {ty}(2.0) {{ result = {nan}(); }}
-if a == {ty}(0.0) {{ result = {positive_infinity}(); }}
-if a == {ty}(2.0) {{ result = {negative_infinity}(); }}
-return result;
+return -normal * {ty}(0.7071067811865476);
 "#
     )
 }
@@ -286,33 +277,119 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
         .map(|offset| constants_start + offset)
         .expect("unary WGSL constants must precede expm1");
     let constants = &template[constants_start..constants_end];
-    let helper_names: &[&str] = if matches!(op, UnaryOpCode::Gammaln | UnaryOpCode::Erfcinv) {
-        match (op, precision) {
-            (UnaryOpCode::Erfcinv, NumericPrecision::F64) => {
-                &["pos_inf_f64", "neg_inf_f64", "nan_f64"]
-            }
-            (UnaryOpCode::Erfcinv, NumericPrecision::F32) => {
-                &["pos_inf_f32", "neg_inf_f32", "nan_f32"]
-            }
-            _ => &[],
+    let helper_names: &[&str] = match (op, precision) {
+        (UnaryOpCode::Gammaln, NumericPrecision::F32) => &["is_nan32", "pos_inf_f32", "nan_f32"],
+        (UnaryOpCode::Gammaln, NumericPrecision::F64) => &["is_nan64", "pos_inf_f64", "nan_f64"],
+        (UnaryOpCode::Erfcinv, NumericPrecision::F32) => {
+            &["is_nan32", "pos_inf_f32", "neg_inf_f32", "nan_f32"]
         }
-    } else {
-        unary_helper_names(op, precision)
+        (UnaryOpCode::Erfcinv, NumericPrecision::F64) => {
+            &["is_nan64", "pos_inf_f64", "neg_inf_f64", "nan_f64"]
+        }
+        _ => unary_helper_names(op, precision),
     };
-    let helpers = helper_names
+    let mut helpers = helper_names
         .iter()
         .map(|name| wgsl_function(template, name))
         .collect::<Vec<_>>()
         .join("\n\n");
-    let case_body = if matches!(op, UnaryOpCode::Gammaln) {
+    let logarithm_body = match (op, precision) {
+        (UnaryOpCode::Log, _) => Some("return runmat_log(a);"),
+        (UnaryOpCode::Log1p, _) => Some("return runmat_log1p(a);"),
+        (UnaryOpCode::Log10, NumericPrecision::F64) => {
+            Some("return runmat_log(a) * f64(0.4342944819032518);")
+        }
+        (UnaryOpCode::Log2, NumericPrecision::F64) => {
+            Some("return runmat_log(a) * f64(1.4426950408889634);")
+        }
+        (UnaryOpCode::Log10, NumericPrecision::F32) => {
+            Some("return runmat_log(a) * 0.4342944819032518;")
+        }
+        (UnaryOpCode::Log2, NumericPrecision::F32) => {
+            Some("return runmat_log(a) * 1.4426950408889634;")
+        }
+        _ => None,
+    };
+    let case_body = if matches!(op, UnaryOpCode::Round) {
+        let precision = match precision {
+            NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+            NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+        };
+        helpers = crate::kernel_math::rounding::functions(precision);
+        format!(
+            "return {}(a);",
+            crate::kernel_math::rounding::entrypoint(precision)
+        )
+    } else if let Some(body) = logarithm_body {
+        helpers = super::logarithms::helpers(precision);
+        body.to_owned()
+    } else if matches!(op, UnaryOpCode::Spacing) {
+        match precision {
+            NumericPrecision::F32 => r#"
+let exponent = (bitcast<u32>(a) >> 23u) & 0xffu;
+if exponent == 0xffu { return bitcast<f32>(0x7fc00000u); }
+if exponent == 0u { return bitcast<f32>(1u); }
+if exponent <= 23u { return bitcast<f32>(1u << (exponent - 1u)); }
+return bitcast<f32>((exponent - 23u) << 23u);
+"#
+            .to_owned(),
+            NumericPrecision::F64 => r#"
+let exponent = (runmat_f64_high(a) >> 20u) & 0x7ffu;
+if exponent == 0x7ffu { return runmat_f64_from_words(0u, 0x7ff80000u); }
+if exponent == 0u { return runmat_f64_from_words(1u, 0u); }
+if exponent <= 32u { return runmat_f64_from_words(1u << (exponent - 1u), 0u); }
+if exponent <= 52u { return runmat_f64_from_words(0u, 1u << (exponent - 33u)); }
+return runmat_f64_from_words(0u, (exponent - 52u) << 20u);
+"#
+            .to_owned(),
+        }
+    } else if matches!(op, UnaryOpCode::Gammaln) {
         inline_gammaln_body(precision)
     } else if matches!(op, UnaryOpCode::Erfcinv) {
         inline_erfcinv_body(precision)
     } else {
         wgsl_switch_case(template, op)
     };
-    format!(
-        "struct InputTensor {{ data: array<{ty}> }};\nstruct OutputTensor {{ data: array<{ty}> }};\nstruct Params {{ len: u32, offset: u32, _pad1: u32, _pad2: u32 }};\n{constants}\n@group(0) @binding(0) var<storage, read> A: InputTensor;\n@group(0) @binding(1) var<storage, read_write> Out: OutputTensor;\n@group(0) @binding(2) var<uniform> params: Params;\n{helpers}\nfn apply(a: {ty}) -> {ty} {{ {case_body} }}\n@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let local = gid.x;\n    if local >= params.len {{ return; }}\n    let idx = params.offset + local;\n    Out.data[idx] = apply(A.data[idx]);\n}}\n"
+    let shader = format!(
+        "struct Tensor {{ data: array<{ty}> }};\nstruct Params {{ len: u32, offset: u32, _pad1: u32, _pad2: u32 }};\n{constants}\n@group(0) @binding(0) var<storage, read> A: Tensor;\n@group(0) @binding(1) var<storage, read_write> Out: Tensor;\n@group(0) @binding(2) var<uniform> params: Params;\n{helpers}\nfn apply(a: {ty}) -> {ty} {{ {case_body} }}\n@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let local = gid.x;\n    if local >= params.len {{ return; }}\n    let idx = params.offset + local;\n    Out.data[idx] = apply(A.data[idx]);\n}}\n"
+    );
+    let shader = if matches!(
+        op,
+        UnaryOpCode::Gamma
+            | UnaryOpCode::Factorial
+            | UnaryOpCode::Sinc
+            | UnaryOpCode::Heaviside
+            | UnaryOpCode::Erf
+            | UnaryOpCode::Gammaln
+            | UnaryOpCode::Erfcinv
+    ) {
+        super::nan_predicate::inject(&shader, precision)
+    } else {
+        shader
+    };
+    if precision == NumericPrecision::F64 && real_unary_requires_ieee_words(op) {
+        super::ieee_words::inject(&shader)
+    } else {
+        shader
+    }
+}
+
+pub(crate) fn real_unary_requires_ieee_words(op: UnaryOpCode) -> bool {
+    matches!(
+        op,
+        UnaryOpCode::Log
+            | UnaryOpCode::Log1p
+            | UnaryOpCode::Log10
+            | UnaryOpCode::Log2
+            | UnaryOpCode::Gamma
+            | UnaryOpCode::Factorial
+            | UnaryOpCode::Sinc
+            | UnaryOpCode::Heaviside
+            | UnaryOpCode::Erf
+            | UnaryOpCode::Gammaln
+            | UnaryOpCode::Round
+            | UnaryOpCode::Erfcinv
+            | UnaryOpCode::Spacing
     )
 }
 
@@ -320,7 +397,7 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
 mod real_unary_tests {
     use super::*;
 
-    const OPS: [UnaryOpCode; 39] = [
+    const OPS: [UnaryOpCode; 40] = [
         UnaryOpCode::Sin,
         UnaryOpCode::Cos,
         UnaryOpCode::Abs,
@@ -360,6 +437,7 @@ mod real_unary_tests {
         UnaryOpCode::Gammaln,
         UnaryOpCode::Round,
         UnaryOpCode::Erfcinv,
+        UnaryOpCode::Spacing,
     ];
 
     #[test]
@@ -370,8 +448,21 @@ mod real_unary_tests {
                 assert!(shader.contains("fn apply("));
                 assert!(shader.contains("@workgroup_size(@WG@)"));
                 assert!(!shader.contains("switch params.op"));
+                assert!(!shader.contains("@IEEE_NAN_PREDICATE@"));
+                assert!(!shader.contains("a != a"));
             }
         }
+    }
+
+    #[test]
+    fn spacing_shader_uses_exact_ieee_exponents_in_both_precisions() {
+        let single = real_unary_shader(UnaryOpCode::Spacing, NumericPrecision::F32);
+        assert!(single.contains("bitcast<f32>(1u)"));
+        assert!(single.contains("(exponent - 23u) << 23u"));
+        let double = real_unary_shader(UnaryOpCode::Spacing, NumericPrecision::F64);
+        assert!(double.contains("runmat_f64_high(a)"));
+        assert!(double.contains("runmat_f64_from_words(1u, 0u)"));
+        assert!(double.contains("(exponent - 52u) << 20u"));
     }
 
     #[test]
@@ -383,20 +474,52 @@ mod real_unary_tests {
     }
 
     #[test]
-    fn erfcinv_shader_preserves_typed_storage_with_portable_ieee_values() {
-        let f32_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F32);
-        assert!(f32_shader.contains("struct OutputTensor { data: array<f32> }"));
-        assert!(f32_shader.contains("fn pos_inf_f32() -> f32"));
-        assert!(f32_shader.contains("fn neg_inf_f32() -> f32"));
-        assert!(f32_shader.contains("fn nan_f32() -> f32"));
-        assert!(f32_shader.find("let p = safe_a").unwrap() < f32_shader.find("if a != a").unwrap());
+    fn inline_special_functions_use_the_precision_selected_nan_test() {
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            for op in [UnaryOpCode::Gammaln, UnaryOpCode::Erfcinv] {
+                let shader = real_unary_shader(op, precision);
+                assert!(shader.contains("fn is_nan"));
+                assert!(shader.contains("if is_nan"));
+                assert!(!shader.contains("@IEEE_NAN_PREDICATE@"));
+            }
+        }
+    }
 
-        let f64_shader = real_unary_shader(UnaryOpCode::Erfcinv, NumericPrecision::F64);
-        assert!(f64_shader.contains("struct OutputTensor { data: array<f64> }"));
-        assert!(f64_shader.contains("fn pos_inf_f64() -> f64"));
-        assert!(f64_shader.contains("fn neg_inf_f64() -> f64"));
-        assert!(f64_shader.contains("fn nan_f64() -> f64"));
-        assert!(f64_shader.find("let p = safe_a").unwrap() < f64_shader.find("if a != a").unwrap());
+    #[test]
+    fn inline_gamma_family_uses_encoded_specials_and_represented_log_pi() {
+        assert_eq!(1.144_73_f32.to_bits(), 0x3f928683);
+        assert_eq!(1.1447298858494002_f64.to_bits(), 0x3ff250d048e7a1bd);
+        assert!((1.144_73_f32 - std::f32::consts::PI.ln()).abs() <= f32::EPSILON);
+        assert!((1.1447298858494002_f64 - std::f64::consts::PI.ln()).abs() <= f64::EPSILON);
+        for (precision, ty, literal, positive, negative, nan) in [
+            (
+                NumericPrecision::F32,
+                "f32",
+                "f32(1.1447299718856812)",
+                "pos_inf_f32()",
+                "neg_inf_f32()",
+                "nan_f32()",
+            ),
+            (
+                NumericPrecision::F64,
+                "f64",
+                "f64(1.1447298858494002)",
+                "pos_inf_f64()",
+                "neg_inf_f64()",
+                "nan_f64()",
+            ),
+        ] {
+            let gammaln = real_unary_shader(UnaryOpCode::Gammaln, precision);
+            assert!(gammaln.contains(&format!("let LN_PI: {ty} = {literal};")));
+            assert!(gammaln.contains(positive));
+            assert!(gammaln.contains(nan));
+            assert!(!gammaln.contains(&format!("{ty}(1.0) / {ty}(0.0)")));
+            let erfcinv = real_unary_shader(UnaryOpCode::Erfcinv, precision);
+            assert!(erfcinv.contains(positive));
+            assert!(erfcinv.contains(negative));
+            assert!(erfcinv.contains(nan));
+            assert!(!erfcinv.contains(&format!("{ty}(0.0) / {ty}(0.0)")));
+        }
     }
 }
 
@@ -442,6 +565,14 @@ pub(crate) fn complex_unary_shader(op: ComplexUnaryOp, precision: NumericPrecisi
     let ty = match precision {
         NumericPrecision::F64 => "f64",
         NumericPrecision::F32 => "f32",
+    };
+    let nan_body = match precision {
+        NumericPrecision::F64 => "return runmat_f64_from_words(0u, 0x7ff80000u);",
+        NumericPrecision::F32 => "var bits: u32 = 0x7fc00000u; return bitcast<f32>(bits);",
+    };
+    let negative_one = match precision {
+        NumericPrecision::F64 => "f64(-1.0)",
+        NumericPrecision::F32 => "f32(-1.0)",
     };
     let max_finite = match precision {
         NumericPrecision::F64 => "1.7976931348623157e308",
@@ -495,11 +626,11 @@ const PI_COMPLEX_UNARY: {ty} = {ty}(3.141592653589793);
 const MAX_FINITE_COMPLEX_UNARY: {ty} = {ty}({max_finite});
 
 fn isfinite_complex_unary(x: {ty}) -> bool {{
-    return (x == x) && (abs(x) < MAX_FINITE_COMPLEX_UNARY);
+    return isFinite(x) && (abs(x) < MAX_FINITE_COMPLEX_UNARY);
 }}
 
 fn signum_nonzero_complex_unary(x: {ty}) -> {ty} {{
-    return select(-{ty}(1.0), {ty}(1.0), x > {ty}(0.0));
+    return select({negative_one}, {ty}(1.0), x > {ty}(0.0));
 }}
 
 fn finite_product_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
@@ -507,7 +638,7 @@ fn finite_product_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
         return {ty}(0.0);
     }}
     let product = a * b;
-    if isfinite_complex_unary(product) || product != product {{
+    if isfinite_complex_unary(product) || isNan(product) {{
         return product;
     }}
     return signum_nonzero_complex_unary(a) * signum_nonzero_complex_unary(b) * MAX_FINITE_COMPLEX_UNARY;
@@ -515,7 +646,7 @@ fn finite_product_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
 
 fn finite_sum_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
     let sum = a + b;
-    if isfinite_complex_unary(sum) || sum != sum {{
+    if isfinite_complex_unary(sum) || isNan(sum) {{
         return sum;
     }}
     return signum_nonzero_complex_unary(a) * MAX_FINITE_COMPLEX_UNARY;
@@ -562,6 +693,7 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
 "#,
             ty = ty,
             max_finite = max_finite,
+            negative_one = negative_one,
         ),
         ComplexUnaryOp::Sin
         | ComplexUnaryOp::Cos
@@ -572,11 +704,11 @@ fn sinc_complex_lane(out_idx: u32) -> {ty} {{
 const MAX_FINITE_COMPLEX_UNARY: {ty} = {ty}({max_finite});
 
 fn isfinite_complex_unary(x: {ty}) -> bool {{
-    return (x == x) && (abs(x) < MAX_FINITE_COMPLEX_UNARY);
+    return isFinite(x) && (abs(x) < MAX_FINITE_COMPLEX_UNARY);
 }}
 
 fn signum_nonzero_complex_unary(x: {ty}) -> {ty} {{
-    return select(-{ty}(1.0), {ty}(1.0), x > {ty}(0.0));
+    return select({negative_one}, {ty}(1.0), x > {ty}(0.0));
 }}
 
 fn finite_product_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
@@ -584,7 +716,7 @@ fn finite_product_complex_unary(a: {ty}, b: {ty}) -> {ty} {{
         return {ty}(0.0);
     }}
     let product = a * b;
-    if isfinite_complex_unary(product) || product != product {{
+    if isfinite_complex_unary(product) || isNan(product) {{
         return product;
     }}
     return signum_nonzero_complex_unary(a) * signum_nonzero_complex_unary(b) * MAX_FINITE_COMPLEX_UNARY;
@@ -633,7 +765,7 @@ fn tan_complex_lane(out_idx: u32) -> {ty} {{
     let two_re = {ty}(2.0) * re;
     let two_im = {ty}(2.0) * im;
     if abs(two_im) > {ty}(80.0) {{
-        return select({ty}(0.0), select(-{ty}(1.0), {ty}(1.0), im > {ty}(0.0)), (out_idx % 2u) == 1u);
+        return select({ty}(0.0), select({negative_one}, {ty}(1.0), im > {ty}(0.0)), (out_idx % 2u) == 1u);
     }}
     let inv_cosh = {ty}(1.0) / cosh(two_im);
     let denom = {ty}(1.0) + (cos(two_re) * inv_cosh);
@@ -644,13 +776,14 @@ fn tan_complex_lane(out_idx: u32) -> {ty} {{
 "#,
             ty = ty,
             max_finite = max_finite,
+            negative_one = negative_one,
         ),
         ComplexUnaryOp::Sign => format!(
             r#"
 const HALF_MAX_FINITE_COMPLEX_UNARY: {ty} = {ty}({half_max_finite});
 
 fn nan_complex_unary() -> {ty} {{
-    return {ty}(0.0) / {ty}(0.0);
+    {nan_body}
 }}
 
 {sign_inf_helper}
@@ -660,7 +793,7 @@ fn signum_complex_unary(x: {ty}) -> {ty} {{
         return {ty}(1.0);
     }}
     if x < {ty}(0.0) {{
-        return -{ty}(1.0);
+        return {negative_one};
     }}
     if x == {ty}(0.0) {{
         return {ty}(0.0);
@@ -672,7 +805,7 @@ fn sign_complex_lane(out_idx: u32) -> {ty} {{
     let elem = out_idx / 2u;
     let re = A.data[elem * 2u];
     let im = A.data[elem * 2u + 1u];
-    if (re != re) || (im != im) {{
+    if isNan(re) || isNan(im) {{
         return nan_complex_unary();
     }}
     if (re == {ty}(0.0)) && (im == {ty}(0.0)) {{
@@ -726,6 +859,8 @@ fn sign_complex_lane(out_idx: u32) -> {ty} {{
 }}
 "#,
             ty = ty,
+            nan_body = nan_body,
+            negative_one = negative_one,
             half_max_finite = half_max_finite,
             sign_inf_helper = sign_inf_helper,
         ),
@@ -745,7 +880,21 @@ fn sign_complex_lane(out_idx: u32) -> {ty} {{
         ComplexUnaryOp::Tan => "tan_complex_lane(idx)",
         ComplexUnaryOp::Sign => "sign_complex_lane(idx)",
     };
-    format!(
+    let classification_helpers = match op {
+        ComplexUnaryOp::Sinc
+        | ComplexUnaryOp::Sin
+        | ComplexUnaryOp::Cos
+        | ComplexUnaryOp::Sinh
+        | ComplexUnaryOp::Cosh
+        | ComplexUnaryOp::Tan => format!(
+            "fn isNan(value: {ty}) -> bool {{ @IEEE_NAN_PREDICATE@ }}\nfn isFinite(value: {ty}) -> bool {{ @IEEE_FINITE_PREDICATE@ }}"
+        ),
+        ComplexUnaryOp::Sign => {
+            format!("fn isNan(value: {ty}) -> bool {{ @IEEE_NAN_PREDICATE@ }}")
+        }
+        _ => String::new(),
+    };
+    let shader = format!(
         r#"
 struct Tensor {{
     data: array<{ty}>,
@@ -762,6 +911,7 @@ struct Params {{
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
+{classification_helpers}
 {extra_helpers}
 
 @compute @workgroup_size(@WG@)
@@ -780,7 +930,60 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         ty = ty,
         expression = expression,
         extra_helpers = extra_helpers,
+    );
+    match op {
+        ComplexUnaryOp::Sinc
+        | ComplexUnaryOp::Sin
+        | ComplexUnaryOp::Cos
+        | ComplexUnaryOp::Sinh
+        | ComplexUnaryOp::Cosh
+        | ComplexUnaryOp::Tan => super::nan_predicate::inject_finite(
+            &super::nan_predicate::inject(&shader, precision),
+            precision,
+        ),
+        ComplexUnaryOp::Sign => super::nan_predicate::inject(&shader, precision),
+        _ => shader,
+    }
+}
+
+pub(crate) fn complex_unary_requires_ieee_words(op: ComplexUnaryOp) -> bool {
+    matches!(
+        op,
+        ComplexUnaryOp::Sinc
+            | ComplexUnaryOp::Sin
+            | ComplexUnaryOp::Cos
+            | ComplexUnaryOp::Sinh
+            | ComplexUnaryOp::Cosh
+            | ComplexUnaryOp::Tan
+            | ComplexUnaryOp::Sign
     )
+}
+
+#[cfg(test)]
+mod complex_classification_tests {
+    use super::*;
+
+    #[test]
+    fn complex_nan_and_finite_guards_keep_operation_policy() {
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            for op in [
+                ComplexUnaryOp::Sinc,
+                ComplexUnaryOp::Sin,
+                ComplexUnaryOp::Sign,
+            ] {
+                let shader = complex_unary_shader(op, precision);
+                assert!(!shader.contains("@IEEE_NAN_PREDICATE@"));
+                assert!(!shader.contains("@IEEE_FINITE_PREDICATE@"));
+                assert!(!shader.contains("product != product"));
+                assert!(!shader.contains("re != re"));
+                assert!(shader.contains("fn isNan("));
+                if !matches!(op, ComplexUnaryOp::Sign) {
+                    assert!(shader.contains("abs(x) < MAX_FINITE_COMPLEX_UNARY"));
+                    assert!(shader.contains("fn isFinite("));
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn complex_from_real_shader(precision: NumericPrecision) -> String {
@@ -819,7 +1022,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     if (idx % 2u) == 0u {{
         Out.data[idx] = Real.data[elem];
     }} else {{
-        Out.data[idx] = 0.0;
+        Out.data[idx] = {ty}(0.0);
     }}
 }}
 "#,
@@ -886,9 +1089,16 @@ pub(crate) fn complex_binary_shader(
     lhs_complex: bool,
     rhs_complex: bool,
 ) -> String {
+    if op == ComplexBinaryOp::Div {
+        return complex_division::shader(precision, lhs_complex, rhs_complex, false);
+    }
     let ty = match precision {
         NumericPrecision::F64 => "f64",
         NumericPrecision::F32 => "f32",
+    };
+    let zero = match precision {
+        NumericPrecision::F64 => "f64(0.0)",
+        NumericPrecision::F32 => "f32(0.0)",
     };
     let lhs_real = if lhs_complex {
         "A.data[elem * 2u]"
@@ -898,7 +1108,7 @@ pub(crate) fn complex_binary_shader(
     let lhs_imag = if lhs_complex {
         "A.data[elem * 2u + 1u]"
     } else {
-        "0.0"
+        zero
     };
     let rhs_real = if rhs_complex {
         "B.data[elem * 2u]"
@@ -908,7 +1118,7 @@ pub(crate) fn complex_binary_shader(
     let rhs_imag = if rhs_complex {
         "B.data[elem * 2u + 1u]"
     } else {
-        "0.0"
+        zero
     };
     let body = match op {
         ComplexBinaryOp::Add => "let out_re = ar + br;\n    let out_im = ai + bi;",
@@ -916,9 +1126,7 @@ pub(crate) fn complex_binary_shader(
         ComplexBinaryOp::Mul => {
             "let out_re = (ar * br) - (ai * bi);\n    let out_im = (ar * bi) + (ai * br);"
         }
-        ComplexBinaryOp::Div => {
-            "let scale = max(abs(br), abs(bi));\n    let sr = br / scale;\n    let si = bi / scale;\n    let denom = scale * ((sr * sr) + (si * si));\n    let out_re = ((ar * sr) + (ai * si)) / denom;\n    let out_im = ((ai * sr) - (ar * si)) / denom;"
-        }
+        ComplexBinaryOp::Div => unreachable!("division has its raw-word shader"),
     };
     format!(
         r#"
@@ -972,9 +1180,16 @@ pub(crate) fn complex_binary_broadcast_shader(
     lhs_complex: bool,
     rhs_complex: bool,
 ) -> String {
+    if op == ComplexBinaryOp::Div {
+        return complex_division::shader(precision, lhs_complex, rhs_complex, true);
+    }
     let ty = match precision {
         NumericPrecision::F64 => "f64",
         NumericPrecision::F32 => "f32",
+    };
+    let zero = match precision {
+        NumericPrecision::F64 => "f64(0.0)",
+        NumericPrecision::F32 => "f32(0.0)",
     };
     let lhs_real = if lhs_complex {
         "A.data[ia * 2u]"
@@ -984,7 +1199,7 @@ pub(crate) fn complex_binary_broadcast_shader(
     let lhs_imag = if lhs_complex {
         "A.data[ia * 2u + 1u]"
     } else {
-        "0.0"
+        zero
     };
     let rhs_real = if rhs_complex {
         "B.data[ib * 2u]"
@@ -994,7 +1209,7 @@ pub(crate) fn complex_binary_broadcast_shader(
     let rhs_imag = if rhs_complex {
         "B.data[ib * 2u + 1u]"
     } else {
-        "0.0"
+        zero
     };
     let body = match op {
         ComplexBinaryOp::Add => "let out_re = ar + br;\n    let out_im = ai + bi;",
@@ -1002,9 +1217,7 @@ pub(crate) fn complex_binary_broadcast_shader(
         ComplexBinaryOp::Mul => {
             "let out_re = (ar * br) - (ai * bi);\n    let out_im = (ar * bi) + (ai * br);"
         }
-        ComplexBinaryOp::Div => {
-            "let scale = max(abs(br), abs(bi));\n    let sr = br / scale;\n    let si = bi / scale;\n    let denom = scale * ((sr * sr) + (si * si));\n    let out_re = ((ar * sr) + (ai * si)) / denom;\n    let out_im = ((ai * sr) - (ar * si)) / denom;"
-        }
+        ComplexBinaryOp::Div => unreachable!("division has its raw-word shader"),
     };
     format!(
         r#"
@@ -1086,6 +1299,27 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RealBinaryShaderKind {
+    General,
+    SignedZeroAtan2,
+}
+
+pub(crate) fn binary_shader_f64(kind: RealBinaryShaderKind, broadcast: bool) -> String {
+    let source = if broadcast {
+        BINARY_BROADCAST_SHADER_F64
+    } else {
+        BINARY_SHADER_F64
+    };
+    let case = match kind {
+        RealBinaryShaderKind::General => "",
+        RealBinaryShaderKind::SignedZeroAtan2 => {
+            "case 5u: { let negative_zero = bitcast<u64>(b) == (u64(0x80000000u) << 32u); return select(atan2(a, b), select(a, f64(0.0), negative_zero), (a == f64(0.0)) && (b == f64(0.0))); }"
+        }
+    };
+    source.replace("@ATAN2_CASE@", case)
+}
+
 pub const BINARY_SHADER_F64: &str = r#"
 struct Tensor {
     data: array<f64>,
@@ -1114,7 +1348,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u64>(b) == 0x8000000000000000u), (a == 0.0) && (b == 0.0)); }
+        @ATAN2_CASE@
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -1227,7 +1461,7 @@ fn apply(a: f64, b: f64) -> f64 {
         case 2u: { return a * b; }
         case 3u: { return a / b; }
         case 4u: { return hypot(a, b); }
-        case 5u: { return select(atan2(a, b), select(a, 0.0, bitcast<u64>(b) == 0x8000000000000000u), (a == 0.0) && (b == 0.0)); }
+        @ATAN2_CASE@
         case 6u: { return pow(a, b); }
         case 7u: { return max(a, b); }
         case 8u: { return min(a, b); }
@@ -1402,27 +1636,33 @@ const SMALL_REFLECTION_CUTOFF: f64 = 1.0e-305;
 const FACTORIAL_MAX: u32 = 170u;
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 fn expm1_precise(a: f64) -> f64 {
+    if a == f64(0.0) {
+        return a;
+    }
     let abs_a = abs(a);
-    if abs_a < 1.0e-6 {
+    if abs_a < f64(1.0e-6) {
         let a2 = a * a;
         let a3 = a2 * a;
         let a4 = a2 * a2;
         let a5 = a4 * a;
-        return (((a5 * (1.0 / 120.0)) + (a4 * (1.0 / 24.0)) + (a3 * (1.0 / 6.0))) + (a2 * 0.5)) + a;
+        return (((a5 * (f64(1.0) / f64(120.0))) + (a4 * (f64(1.0) / f64(24.0))) + (a3 * (f64(1.0) / f64(6.0)))) + (a2 * f64(0.5))) + a;
     }
-    return exp(a) - 1.0;
+    return exp(a) - f64(1.0);
 }
 
 fn log1p_precise(a: f64) -> f64 {
+    if a == f64(0.0) {
+        return a;
+    }
     let abs_a = abs(a);
-    if abs_a < 1.0e-6 {
+    if abs_a < f64(1.0e-6) {
         let a2 = a * a;
         let a3 = a2 * a;
         let a4 = a2 * a2;
         let a5 = a4 * a;
-        return ((((a5 * (1.0 / 5.0)) - (a4 * 0.25)) + (a3 * (1.0 / 3.0))) - (a2 * 0.5)) + a;
+        return ((((a5 * (f64(1.0) / f64(5.0))) - (a4 * f64(0.25))) + (a3 * (f64(1.0) / f64(3.0)))) - (a2 * f64(0.5))) + a;
     }
-    return log(1.0 + a);
+    return log(f64(1.0) + a);
 }
 
 @group(0) @binding(0) var<storage, read> A: Tensor;
@@ -1430,18 +1670,18 @@ fn log1p_precise(a: f64) -> f64 {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn lanczos_gamma(z: f64) -> f64 {
-    let z_minus_one = z - 1.0;
-    var sum = 0.99999999999980993;
-    sum = sum + 676.5203681218851 / (z_minus_one + 1.0);
-    sum = sum + -1259.1392167224028 / (z_minus_one + 2.0);
-    sum = sum + 771.3234287776531 / (z_minus_one + 3.0);
-    sum = sum + -176.6150291621406 / (z_minus_one + 4.0);
-    sum = sum + 12.507343278686905 / (z_minus_one + 5.0);
-    sum = sum + -0.13857109526572012 / (z_minus_one + 6.0);
-    sum = sum + 0.000009984369578019572 / (z_minus_one + 7.0);
-    sum = sum + 0.00000015056327351493116 / (z_minus_one + 8.0);
-    let t = z_minus_one + (LANCZOS_G + 0.5);
-    return SQRT_TWO_PI * pow(t, z_minus_one + 0.5) * exp(-t) * sum;
+    let z_minus_one = z - f64(1.0);
+    var sum: f64 = f64(0.99999999999980993);
+    sum = sum + f64(676.5203681218851) / (z_minus_one + f64(1.0));
+    sum = sum + f64(-1259.1392167224028) / (z_minus_one + f64(2.0));
+    sum = sum + f64(771.3234287776531) / (z_minus_one + f64(3.0));
+    sum = sum + f64(-176.6150291621406) / (z_minus_one + f64(4.0));
+    sum = sum + f64(12.507343278686905) / (z_minus_one + f64(5.0));
+    sum = sum + f64(-0.13857109526572012) / (z_minus_one + f64(6.0));
+    sum = sum + f64(0.000009984369578019572) / (z_minus_one + f64(7.0));
+    sum = sum + f64(0.00000015056327351493116) / (z_minus_one + f64(8.0));
+    let t = z_minus_one + (LANCZOS_G + f64(0.5));
+    return SQRT_TWO_PI * pow(t, z_minus_one + f64(0.5)) * exp(-t) * sum;
 }
 
 fn lanczos_gammaln(z: f64) -> f64 {
@@ -1460,32 +1700,27 @@ fn lanczos_gammaln(z: f64) -> f64 {
 }
 
 fn is_non_positive_integer(x: f64) -> bool {
-    if (x > 0.0) {
+    if (x > f64(0.0)) {
         return false;
     }
     let nearest = round(x);
-    return abs(x - nearest) <= EPSILON * (1.0 + abs(x));
+    return abs(x - nearest) <= EPSILON * (f64(1.0) + abs(x));
 }
 
-fn is_nan64(x: f64) -> bool {
-    let bits = bitcast<u64>(x);
-    return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u &&
-        (bits & 0x000fffffffffffffu) != 0u;
+fn is_nan64(value: f64) -> bool {
+    @IEEE_NAN_PREDICATE@
 }
 
 fn pos_inf_f64() -> f64 {
-    var bits: u64 = 0x7ff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff00000u);
 }
 
 fn neg_inf_f64() -> f64 {
-    var bits: u64 = 0xfff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0xfff00000u);
 }
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 fn is_inf64(x: f64) -> bool {
@@ -1499,7 +1734,7 @@ fn gamma_real(a: f64) -> f64 {
         return a;
     }
     if (is_inf64(a)) {
-        if (a > 0.0) {
+        if (a > f64(0.0)) {
             return pos_inf_f64();
         }
         return nan_f64();
@@ -1507,12 +1742,12 @@ fn gamma_real(a: f64) -> f64 {
     if (is_non_positive_integer(a)) {
         return pos_inf_f64();
     }
-    if (a < 0.5) {
+    if (a < f64(0.5)) {
         let sin_term = sin(PI * a);
         if (abs(sin_term) <= EPSILON) {
             return pos_inf_f64();
         }
-        let gamma_one_minus = lanczos_gamma(1.0 - a);
+        let gamma_one_minus = lanczos_gamma(f64(1.0) - a);
         return PI / (sin_term * gamma_one_minus);
     }
     return lanczos_gamma(a);
@@ -1541,23 +1776,23 @@ fn factorial_real(a: f64) -> f64 {
     if (is_nan64(a)) {
         return a;
     }
-    if (a == 0.0) {
-        return 1.0;
+    if (a == f64(0.0)) {
+        return f64(1.0);
     }
     if (is_inf64(a)) {
-        if (a > 0.0) {
+        if (a > f64(0.0)) {
             return pos_inf_f64();
         }
         return nan_f64();
     }
-    if (a < 0.0) {
+    if (a < f64(0.0)) {
         return nan_f64();
     }
     let rounded = round(a);
     if (abs(a - rounded) > FACTORIAL_INT_TOL) {
         return nan_f64();
     }
-    if (rounded < 0.0) {
+    if (rounded < f64(0.0)) {
         return nan_f64();
     }
     if (rounded > f64(FACTORIAL_MAX)) {
@@ -1565,10 +1800,10 @@ fn factorial_real(a: f64) -> f64 {
     }
     let n = i32(rounded);
     if (n <= 1) {
-        return 1.0;
+        return f64(1.0);
     }
     let limit = u32(n);
-    var acc: f64 = 1.0;
+    var acc: f64 = f64(1.0);
     var i: u32 = 2u;
     loop {
         if (i > limit) {
@@ -1581,12 +1816,12 @@ fn factorial_real(a: f64) -> f64 {
 }
 
 fn sinc_real(a: f64) -> f64 {
-    if (a == 0.0) {
-        return 1.0;
+    if (a == f64(0.0)) {
+        return f64(1.0);
     }
     let abs_a = abs(a);
     if (!is_nan64(a) && !is_inf64(a) && floor(abs_a) == abs_a) {
-        return 0.0;
+        return f64(0.0);
     }
     let scaled = PI * a;
     return sin(scaled) / scaled;
@@ -1596,13 +1831,13 @@ fn heaviside_real(a: f64) -> f64 {
     if (is_nan64(a)) {
         return a;
     }
-    if (a > 0.0) {
-        return 1.0;
+    if (a > f64(0.0)) {
+        return f64(1.0);
     }
-    if (a < 0.0) {
-        return 0.0;
+    if (a < f64(0.0)) {
+        return f64(0.0);
     }
-    return 0.5;
+    return f64(0.5);
 }
 
 fn erf_real(a: f64) -> f64 {
@@ -1610,25 +1845,25 @@ fn erf_real(a: f64) -> f64 {
         return a;
     }
     if (is_inf64(a)) {
-        if (a > 0.0) {
-            return 1.0;
+        if (a > f64(0.0)) {
+            return f64(1.0);
         }
-        return -1.0;
+        return f64(-1.0);
     }
-    if (a == 0.0) {
+    if (a == f64(0.0)) {
         return a;
     }
-    var sign = 1.0;
+    var sign: f64 = f64(1.0);
     var x = a;
-    if (a < 0.0) {
-        sign = -1.0;
+    if (a < f64(0.0)) {
+        sign = f64(-1.0);
         x = -a;
     }
-    if (x >= 6.0) {
+    if (x >= f64(6.0)) {
         return sign;
     }
     let x2 = x * x;
-    if (x < 3.5) {
+    if (x < f64(3.5)) {
         var sum = x;
         var term = x;
         var n: u32 = 1u;
@@ -1639,34 +1874,34 @@ fn erf_real(a: f64) -> f64 {
             term = term * (-x2 / f64(n));
             let add = term / f64((2u * n) + 1u);
             sum = sum + add;
-            if (abs(add) <= 1.0e-16 * max(1.0, abs(sum))) {
+            if (abs(add) <= f64(1.0e-16) * max(f64(1.0), abs(sum))) {
                 break;
             }
             n = n + 1u;
         }
-        return sign * 1.1283791670955126 * sum;
+        return sign * f64(1.1283791670955126) * sum;
     }
-    var asym_sum = 1.0;
-    var asym_term = 1.0;
-    var previous = 1.0e300;
+    var asym_sum: f64 = f64(1.0);
+    var asym_term: f64 = f64(1.0);
+    var previous: f64 = f64(1.0e300);
     var k: u32 = 1u;
     loop {
         if (k >= 60u) {
             break;
         }
-        asym_term = asym_term * (-(f64((2u * k) - 1u)) / (2.0 * x2));
+        asym_term = asym_term * (-(f64((2u * k) - 1u)) / (f64(2.0) * x2));
         if (abs(asym_term) > previous) {
             break;
         }
         asym_sum = asym_sum + asym_term;
         previous = abs(asym_term);
-        if (abs(asym_term) <= 1.0e-16 * abs(asym_sum)) {
+        if (abs(asym_term) <= f64(1.0e-16) * abs(asym_sum)) {
             break;
         }
         k = k + 1u;
     }
-    let erfc_tail = exp(-x2) * asym_sum / (x * 1.772453850905516);
-    return sign * (1.0 - erfc_tail);
+    let erfc_tail = exp(-x2) * asym_sum / (x * f64(1.772453850905516));
+    return sign * (f64(1.0) - erfc_tail);
 }
 
 fn erfc_positive_tail_real(a: f64) -> f64 {
@@ -1772,32 +2007,32 @@ fn apply(a: f64) -> f64 {
         case 4u: { return log(a); }
         case 5u: { return sqrt(a); }
         case 6u: {
-            if (a > 0.0) {
-                return 1.0;
+            if (a > f64(0.0)) {
+                return f64(1.0);
             }
-            if (a < 0.0) {
-                return -1.0;
+            if (a < f64(0.0)) {
+                return f64(-1.0);
             }
-            if (a == 0.0) {
-                return 0.0;
+            if (a == f64(0.0)) {
+                return f64(0.0);
             }
             return a;
         }
         case 7u: { return a; }
-        case 8u: { return 0.0; }
+        case 8u: { return f64(0.0); }
         case 9u: { return a; }
         case 10u: { return atan2(f64(0.0), a); }
         case 11u: { return expm1_precise(a); }
         case 12u: { return log1p_precise(a); }
-        case 13u: { return log(a) * 0.4342944819032518; }
-        case 14u: { return log(a) * 1.4426950408889634; }
-        case 15u: { return exp(a * 0.6931471805599453); }
+        case 13u: { return log(a) * f64(0.4342944819032518); }
+        case 14u: { return log(a) * f64(1.4426950408889634); }
+        case 15u: { return exp(a * f64(0.6931471805599453)); }
         case 16u: { return floor(a); }
         case 17u: { return ceil(a); }
         case 18u: {
             let t = trunc(a);
-            if (t == 0.0) {
-                return 0.0;
+            if (t == f64(0.0)) {
+                return f64(0.0);
             }
             return t;
         }
@@ -1812,8 +2047,8 @@ fn apply(a: f64) -> f64 {
         case 31u: { return f64(f32(a)); }
         case 32u: {
             let aa = abs(a);
-            if (aa == 0.0) {
-                return 0.0;
+            if (aa == f64(0.0)) {
+                return f64(0.0);
             }
             return ceil(log2(aa));
         }
@@ -1870,6 +2105,9 @@ const SMALL_REFLECTION_CUTOFF: f32 = 1.0e-30;
 const FACTORIAL_MAX_F32: u32 = 170u;
 const FACTORIAL_INT_TOL_F32: f32 = 1.0e-4;
 fn expm1_precise(a: f32) -> f32 {
+    if a == 0.0 {
+        return a;
+    }
     let abs_a = abs(a);
     if abs_a < 1.0e-4 {
         let a2 = a * a;
@@ -1882,6 +2120,9 @@ fn expm1_precise(a: f32) -> f32 {
 }
 
 fn log1p_precise(a: f32) -> f32 {
+    if a == 0.0 {
+        return a;
+    }
     let abs_a = abs(a);
     if abs_a < 1.0e-4 {
         let a2 = a * a;
@@ -1935,10 +2176,8 @@ fn is_non_positive_integer(x: f32) -> bool {
     return abs(x - nearest) <= EPSILON * (1.0 + abs(x));
 }
 
-fn is_nan32(x: f32) -> bool {
-    let bits = bitcast<u32>(x);
-    return (bits & 0x7f800000u) == 0x7f800000u &&
-        (bits & 0x007fffffu) != 0u;
+fn is_nan32(value: f32) -> bool {
+    @IEEE_NAN_PREDICATE@
 }
 
 fn pos_inf_f32() -> f32 {
@@ -2283,8 +2522,8 @@ struct Tensor {
 struct Params {
     len: u32,
     op: u32,
-    _pad0: u32,
-    _pad1: u32,
+    offset: u32,
+    total: u32,
     scalar: f64,
     scalar_pad: f64,
     scalar_pad2: f64,
@@ -2297,12 +2536,14 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn isNan(x: f64) -> bool { return x != x; }
-
 @compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if idx >= params.len {
+    let local = gid.x;
+    if local >= params.len {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
         return;
     }
     let a = A.data[idx];
@@ -2342,8 +2583,6 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn isNan(x: f32) -> bool { return x != x; }
-
 @compute @workgroup_size(512)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local = gid.x;
@@ -2372,63 +2611,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-pub(crate) fn round_digits_shader(precision: NumericPrecision, significant: bool) -> String {
+pub(crate) fn round_digits_shader(
+    precision: NumericPrecision,
+    significant: bool,
+    workgroup: u32,
+) -> String {
     let ty = match precision {
         NumericPrecision::F64 => "f64",
         NumericPrecision::F32 => "f32",
     };
-    let max_finite = match precision {
-        NumericPrecision::F64 => "1.7976931348623157e308",
-        NumericPrecision::F32 => "3.4028234663852886e38",
+    let provider_precision = match precision {
+        NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+        NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
     };
-    let inv_ln10 = match precision {
-        NumericPrecision::F64 => "0.4342944819032518",
-        NumericPrecision::F32 => "0.4342944819",
-    };
-    let apply_body = if significant {
-        format!(
-            r#"
-fn apply_round(a: {ty}) -> {ty} {{
-    if !is_finite_value(a) {{
-        return a;
-    }}
-    if a == {ty}(0.0) {{
-        return {ty}(0.0);
-    }}
-    let order = floor(log(abs(a)) * {ty}({inv_ln10}));
-    let scale_power = params.digits - 1 - i32(order);
-    let scale = pow({ty}(10.0), {ty}(scale_power));
-    if !is_finite_value(scale) || scale == {ty}(0.0) {{
-        return a;
-    }}
-    return round_half_away(a * scale) / scale;
-}}
-"#
-        )
-    } else {
-        format!(
-            r#"
-fn apply_round(a: {ty}) -> {ty} {{
-    if !is_finite_value(a) {{
-        return a;
-    }}
-    if params.digits == 0 {{
-        return round_half_away(a);
-    }}
-    let scale = pow({ty}(10.0), {ty}(abs(params.digits)));
-    if !is_finite_value(scale) || scale == {ty}(0.0) {{
-        return a;
-    }}
-    if params.digits > 0 {{
-        return round_half_away(a * scale) / scale;
-    }}
-    return round_half_away(a / scale) * scale;
-}}
-"#
-        )
-    };
-
-    format!(
+    let helpers = crate::kernel_math::rounding::digit_functions(provider_precision);
+    let source = format!(
         r#"
 struct Tensor {{
     data: array<{ty}>,
@@ -2445,23 +2642,9 @@ struct Params {{
 @group(0) @binding(1) var<storage, read_write> Out: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn is_finite_value(a: {ty}) -> bool {{
-    return (a == a) && (abs(a) < {ty}({max_finite}));
-}}
+{helpers}
 
-fn round_half_away(a: {ty}) -> {ty} {{
-    if !is_finite_value(a) {{
-        return a;
-    }}
-    if a >= {ty}(0.0) {{
-        return floor(a + {ty}(0.5));
-    }}
-    return ceil(a - {ty}(0.5));
-}}
-
-{apply_body}
-
-@compute @workgroup_size(512)
+@compute @workgroup_size({workgroup})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     let local = gid.x;
     if local >= params.len {{
@@ -2471,8 +2654,50 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     if idx >= params.total {{
         return;
     }}
-    Out.data[idx] = apply_round(A.data[idx]);
+    Out.data[idx] = rm_round_digits_{ty}(A.data[idx], params.digits, {significant});
 }}
 "#
-    )
+    );
+    if precision == NumericPrecision::F64 {
+        super::ieee_words::inject(&source)
+    } else {
+        source
+    }
 }
+
+#[cfg(test)]
+mod f64_special_word_tests {
+    use super::*;
+    use crate::backend::wgpu::shaders::{interp1, symmetry};
+
+    #[test]
+    fn f64_special_values_and_negative_zero_use_scalar_words() {
+        for source in [
+            UNARY_SHADER_F64,
+            BINARY_SHADER_F64,
+            BINARY_BROADCAST_SHADER_F64,
+            interp1::INTERP1_SHADER_F64,
+            symmetry::SYMMETRY_SHADER_F64,
+        ] {
+            assert!(!source.contains("var bits: u64 = 0x"));
+            assert!(!source.contains("0x7ff8000000000000u"));
+        }
+        assert!(UNARY_SHADER_F64.contains("runmat_f64_from_words(0u, 0x7ff80000u)"));
+        assert!(interp1::INTERP1_SHADER_F64.contains("runmat_f64_from_words(0u, 0x7ff80000u)"));
+        assert!(symmetry::SYMMETRY_SHADER_F64.contains("runmat_f64_from_words(0u, 0xfff00000u)"));
+        for broadcast in [false, true] {
+            let general = binary_shader_f64(RealBinaryShaderKind::General, broadcast);
+            let selected = binary_shader_f64(RealBinaryShaderKind::SignedZeroAtan2, broadcast);
+            assert!(!general.contains("case 5u:"));
+            assert!(!general.contains("bitcast<u64>(b)"));
+            assert!(selected.contains("case 5u:"));
+            assert!(selected.contains("bitcast<u64>(b) == (u64(0x80000000u) << 32u)"));
+            assert!(selected.contains("select(a, f64(0.0), negative_zero)"));
+            assert!(!selected.contains("@ATAN2_CASE@"));
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "elementwise/atan2_selected_tests.rs"]
+mod atan2_selected_tests;

@@ -1,15 +1,33 @@
-use std::collections::{BTreeMap, BTreeSet};
+mod indexed;
+pub(in crate::cdt) use indexed::IndexedCanonicalTopology;
+pub(in crate::cdt) mod queries;
+mod read;
+pub(in crate::cdt) use read::VolumeTopologyRead;
+mod validation;
+pub(in crate::cdt) use validation::validate_canonical_volume_topology;
+mod search_state;
+#[cfg(test)]
+pub(in crate::cdt) use search_state::connectivity_search_fingerprint;
+pub(in crate::cdt) use search_state::ConnectivitySearchState;
+mod canonical;
+mod neighbors;
+pub(in crate::cdt) use canonical::CanonicalVolumeTopology;
+pub(in crate::cdt) use neighbors::connect as connect_volume_neighbors;
 
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
-    quality::predicate::{orient3d, PredicateSign, SpatialPredicateError},
+    quality::predicate::{
+        insphere3d_constructed, orient3d_constructed, Point3Construction, PredicateSign,
+        SpatialPredicateError, SpatialPredicatePoint,
+    },
     MeshingCancellationSignal, StableDigest,
 };
 use serde::{Deserialize, Serialize};
 
 use super::incidence::{build_volume_incidence, DelaunayVolumeIncidence};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayTopologyOptions {
     pub maximum_nodes: u64,
     pub maximum_tetrahedra: u64,
@@ -30,7 +48,55 @@ impl Default for DelaunayTopologyOptions {
 #[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeNode {
     pub identity: StableDigest,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
+    pub construction: Point3Construction,
+}
+
+impl DelaunayVolumeNode {
+    pub fn explicit(identity: StableDigest, coordinates_m: [f64; 3]) -> Self {
+        Self {
+            identity,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(coordinates_m),
+            construction: Point3Construction::Explicit,
+        }
+    }
+
+    pub(crate) fn predicate_point(self) -> SpatialPredicatePoint {
+        SpatialPredicatePoint {
+            identity: self.identity,
+            coordinates: self.coordinates_m.canonical_value(),
+            construction: self.construction,
+        }
+    }
+
+    /// Predicates for connectivity consumed by the solver use its stored
+    /// coordinates. Exact construction provenance remains available separately.
+    pub(crate) fn materialized_predicate_point(self) -> SpatialPredicatePoint {
+        Self::explicit(self.identity, self.coordinates_m.canonical_value()).predicate_point()
+    }
+}
+
+pub(super) fn orient_volume_nodes(
+    nodes: [DelaunayVolumeNode; 4],
+) -> Result<PredicateSign, SpatialPredicateError> {
+    orient3d_constructed(nodes.map(DelaunayVolumeNode::predicate_point))
+}
+
+pub(super) fn orient_materialized_volume_nodes(
+    nodes: [DelaunayVolumeNode; 4],
+) -> Result<PredicateSign, SpatialPredicateError> {
+    orient3d_constructed(nodes.map(DelaunayVolumeNode::materialized_predicate_point))
+}
+
+pub(super) fn insphere_materialized_volume_nodes(
+    nodes: [DelaunayVolumeNode; 5],
+) -> Result<PredicateSign, SpatialPredicateError> {
+    insphere3d_constructed(nodes.map(DelaunayVolumeNode::materialized_predicate_point))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +169,16 @@ pub(super) fn build_delaunay_volume_topology_with_regions(
     options: DelaunayTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayTopologyError> {
+    build_canonical_volume_topology(nodes, tetrahedra, options, cancellation)
+        .map(CanonicalVolumeTopology::into_inner)
+}
+
+pub(in crate::cdt) fn build_canonical_volume_topology(
+    nodes: Vec<DelaunayVolumeNode>,
+    tetrahedra: Vec<([u32; 4], Option<PersistentEntityId>)>,
+    options: DelaunayTopologyOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<CanonicalVolumeTopology, DelaunayTopologyError> {
     validate_options(options)?;
     if nodes.is_empty() || nodes.len() as u64 > options.maximum_nodes {
         return Err(error(
@@ -119,7 +195,11 @@ pub(super) fn build_delaunay_volume_topology_with_regions(
     for (index, node) in nodes.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         if node.identity == StableDigest::ZERO
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
             || index > 0 && nodes[index - 1].identity >= node.identity
         {
             return Err(error(
@@ -130,7 +210,6 @@ pub(super) fn build_delaunay_volume_topology_with_regions(
     }
 
     let mut oriented = Vec::with_capacity(tetrahedra.len());
-    let mut tetrahedron_keys = BTreeSet::new();
     for (index, (vertices, region_id)) in tetrahedra.into_iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         if vertices
@@ -144,47 +223,37 @@ pub(super) fn build_delaunay_volume_topology_with_regions(
         }
         let mut key = vertices;
         key.sort_unstable();
-        if key.windows(2).any(|pair| pair[0] == pair[1]) || !tetrahedron_keys.insert(key) {
+        if key.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(error(
                 DelaunayTopologyErrorKind::InvalidTetrahedron,
                 "tetrahedron vertices must be distinct and tetrahedra unique",
             ));
         }
         let mut canonical_vertices = key;
-        match orient3d(canonical_vertices.map(|vertex| nodes[vertex as usize].coordinates_m))
-            .map_err(predicate_error)?
-        {
+        let tetrahedron_nodes = canonical_vertices.map(|vertex| nodes[vertex as usize]);
+        let sign = orient_materialized_volume_nodes(tetrahedron_nodes).map_err(predicate_error)?;
+        match sign {
             PredicateSign::Positive => {}
             PredicateSign::Negative => canonical_vertices.swap(0, 1),
             PredicateSign::Zero => {
                 return Err(error(
                     DelaunayTopologyErrorKind::DegenerateTetrahedron,
-                    "tetrahedron vertices are exactly coplanar",
+                    format!(
+                        "tetrahedron {index} with vertices {key:?} is coplanar at materialized solver coordinates"
+                    ),
                 ));
             }
         }
         oriented.push((key, canonical_vertices, region_id));
     }
     oriented.sort_by_key(|(key, _, _)| *key);
-
-    let mut face_uses = BTreeMap::<[u32; 3], Vec<(usize, usize)>>::new();
-    for (tetrahedron_index, (_, vertices, _)) in oriented.iter().enumerate() {
-        for opposite in 0..4 {
-            let mut face = [0u32; 3];
-            let mut cursor = 0;
-            for (vertex_index, vertex) in vertices.iter().enumerate() {
-                if vertex_index != opposite {
-                    face[cursor] = *vertex;
-                    cursor += 1;
-                }
-            }
-            face.sort_unstable();
-            face_uses
-                .entry(face)
-                .or_default()
-                .push((tetrahedron_index, opposite));
-        }
+    if oriented.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err(error(
+            DelaunayTopologyErrorKind::InvalidTetrahedron,
+            "tetrahedra must be unique",
+        ));
     }
+
     let mut result = oriented
         .into_iter()
         .map(|(_, vertex_indices, region_id)| DelaunayVolumeTetrahedron {
@@ -193,27 +262,15 @@ pub(super) fn build_delaunay_volume_topology_with_regions(
             region_id,
         })
         .collect::<Vec<_>>();
-    for uses in face_uses.values() {
-        match uses.as_slice() {
-            [_] => {}
-            [(left, left_opposite), (right, right_opposite)] => {
-                result[*left].neighbors[*left_opposite] = Some(*right as u32);
-                result[*right].neighbors[*right_opposite] = Some(*left as u32);
-            }
-            _ => {
-                return Err(error(
-                    DelaunayTopologyErrorKind::NonManifoldFace,
-                    "more than two tetrahedra share one face",
-                ));
-            }
-        }
-    }
+    neighbors::connect(&nodes, &mut result, options, cancellation)?;
     let incidence = build_volume_incidence(&nodes, &result, cancellation, options)?;
-    Ok(DelaunayVolumeTopology {
-        nodes,
-        tetrahedra: result,
-        incidence,
-    })
+    Ok(CanonicalVolumeTopology::from_construction(
+        DelaunayVolumeTopology {
+            nodes,
+            tetrahedra: result,
+            incidence,
+        },
+    ))
 }
 
 fn validate_options(options: DelaunayTopologyOptions) -> Result<(), DelaunayTopologyError> {
@@ -264,10 +321,7 @@ mod tests {
     use super::*;
 
     fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-        DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([identity; 32]),
-            coordinates_m,
-        }
+        DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
     }
 
     #[test]
@@ -307,11 +361,13 @@ mod tests {
         );
         for tetrahedron in &topology.tetrahedra {
             assert_eq!(
-                orient3d(
-                    tetrahedron
-                        .vertex_indices
-                        .map(|index| topology.nodes[index as usize].coordinates_m)
-                )
+                runmat_meshing_core::quality::predicate::orient3d(tetrahedron.vertex_indices.map(
+                    |index| {
+                        topology.nodes[index as usize]
+                            .coordinates_m
+                            .canonical_value()
+                    }
+                ))
                 .unwrap(),
                 PredicateSign::Positive
             );
@@ -363,6 +419,47 @@ mod tests {
             .kind,
             DelaunayTopologyErrorKind::NonManifoldFace
         );
+    }
+
+    #[test]
+    fn topology_rejects_constructed_volume_lost_by_solver_coordinate_rounding() {
+        let plane = 1.0e16;
+        let constructed = DelaunayVolumeNode {
+            identity: StableDigest::from_bytes([4; 32]),
+            // The exact dyadic midpoint is one unit above the plane, but that offset is below one
+            // binary64 ULP at this magnitude and therefore is not present in solver coordinates.
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, plane]),
+            construction: runmat_meshing_core::quality::predicate::Point3Construction::Segment {
+                endpoints: [[0.25, 0.25, plane], [0.25, 0.25, plane + 2.0]],
+                parameter_numerator: 1,
+                parameter_exponent: 1,
+            },
+        };
+        let nodes = vec![
+            node(1, [0.0, 0.0, plane]),
+            node(2, [1.0, 0.0, plane]),
+            node(3, [0.0, 1.0, plane]),
+            constructed,
+        ];
+        assert_ne!(
+            orient_volume_nodes(nodes.clone().try_into().unwrap()).unwrap(),
+            PredicateSign::Zero
+        );
+        let failure = build_delaunay_volume_topology(
+            nodes,
+            vec![[0, 1, 2, 3]],
+            DelaunayTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.kind,
+            DelaunayTopologyErrorKind::DegenerateTetrahedron
+        );
+        assert!(failure.reason.contains("materialized solver coordinates"));
     }
 
     struct Cancelled;

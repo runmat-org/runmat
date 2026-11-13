@@ -19,6 +19,8 @@ pub struct PieChart {
     pub colors: Vec<Vec4>,
     pub label: Option<String>,
     pub slice_labels: Vec<String>,
+    /// Names for the legend (`legend(labels)`); the slice text keeps its percentages.
+    pub legend_labels: Vec<String>,
     pub label_format: Option<String>,
     pub explode: Vec<bool>,
     pub visible: bool,
@@ -39,6 +41,7 @@ impl PieChart {
             colors: colors.unwrap_or_default(),
             label: None,
             slice_labels: Vec::new(),
+            legend_labels: Vec::new(),
             label_format: None,
             explode: Vec::new(),
             visible: true,
@@ -73,6 +76,9 @@ impl PieChart {
         self.slice_labels = labels;
         self.dirty = true;
         self
+    }
+    pub fn set_legend_labels(&mut self, labels: Vec<String>) {
+        self.legend_labels = labels;
     }
     pub fn set_slice_labels(&mut self, labels: Vec<String>) {
         self.slice_labels = labels;
@@ -168,7 +174,8 @@ impl PieChart {
                 let start = angle;
                 let offset = slice.offset;
                 let center_index = acc_index;
-                verts.push(Vertex::new(offset, Vec4::new(1.0, 1.0, 1.0, 1.0)));
+                // Slices are one flat color, center included.
+                verts.push(Vertex::new(offset, color));
                 acc_index += 1;
                 for s in 0..=steps {
                     let a = start + (theta * (s as f32 / steps as f32));
@@ -242,6 +249,39 @@ impl PieChart {
                 .indices
                 .as_ref()
                 .map_or(0, |i| i.len() * std::mem::size_of::<u32>())
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.label_format.as_ref()),
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::strings(&self.slice_labels)?,
+        )?;
+        for bytes in [
+            crate::plots::clone_budget::vec::<f64>(self.values.capacity())?,
+            crate::plots::clone_budget::vec::<Vec4>(self.colors.capacity())?,
+            crate::plots::clone_budget::vec::<bool>(self.explode.capacity())?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<u32>(self.indices.as_ref().map_or(0, Vec::capacity))?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        if let Some(slices) = &self.slices {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<PieSliceMeta>(slices.capacity())?,
+            )?;
+            for slice in slices {
+                crate::plots::clone_budget::add(&mut total, slice.label.capacity())?;
+            }
+        }
+        Some(total)
     }
 }
 

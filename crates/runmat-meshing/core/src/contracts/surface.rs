@@ -21,7 +21,9 @@ pub struct SurfaceMesh {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceMeshNode {
     pub node_id: TopologyEntityId,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
     #[serde(default)]
     pub source_edge_id: Option<TopologyEntityId>,
     pub source_face_id: TopologyEntityId,
@@ -37,10 +39,12 @@ pub struct SurfaceMeshTriangle {
     #[serde(default)]
     pub region_ids: Vec<String>,
     #[serde(default)]
-    pub material_region_ids: Vec<String>,
+    pub physical_region_ids: Vec<String>,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub max_projection_error_m: f64,
-    pub area_m2: f64,
+    pub max_projection_error_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub area_m2: runmat_types::physical::Area,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,7 +53,8 @@ pub struct SurfaceCurveBoundaryValidation {
     pub curve_node_count: usize,
     pub curve_element_count: usize,
     pub max_endpoint_error_m: f64,
-    pub max_projection_error_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub max_projection_error_m: runmat_types::physical::Length,
     pub max_length_error_m: f64,
     pub max_segment_length_m: f64,
     pub max_parameter_gap: f64,

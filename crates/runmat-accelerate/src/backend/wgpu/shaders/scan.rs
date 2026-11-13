@@ -19,12 +19,11 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn is_nan_f64(value: f64) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 @compute @workgroup_size(@WG@)
@@ -44,7 +43,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let omit_nan = (params.flags & 2u) != 0u;
 
     if is_reverse {
-        var sum: f64 = 0.0;
+        var sum: f64 = f64(0.0);
         var has_nan = false;
         var offset = params.segment_len;
         loop {
@@ -75,7 +74,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     } else {
-        var sum: f64 = 0.0;
+        var sum: f64 = f64(0.0);
         var has_nan = false;
         var offset: u32 = 0u;
         loop {
@@ -131,7 +130,7 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn is_nan_f32(value: f32) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f32() -> f32 {
@@ -253,7 +252,7 @@ struct Params {
 
 fn interval_width(idx0: u32, idx1: u32, k: u32) -> f64 {
     if params.spacing_kind == 0u {
-        return 1.0;
+        return f64(1.0);
     }
     if params.spacing_kind == 1u {
         return params.spacing_scalar;
@@ -288,7 +287,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if lane >= params.lane_factor {
                     break;
                 }
-                Output.data[raw_first_idx + lane] = 0.0;
+                Output.data[raw_first_idx + lane] = f64(0.0);
                 lane = lane + 1u;
             }
         }
@@ -299,7 +298,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if lane >= params.lane_factor {
             break;
         }
-        var acc: f64 = 0.0;
+        var acc: f64 = f64(0.0);
         var k: u32 = 0u;
         loop {
             if k + 1u >= params.segment_len {
@@ -311,7 +310,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let width = interval_width(idx0, idx1, k);
                 let raw0 = idx0 * params.lane_factor + lane;
                 let raw1 = idx1 * params.lane_factor + lane;
-                acc = acc + 0.5 * width * (Input.data[raw0] + Input.data[raw1]);
+                acc = acc + f64(0.5) * width * (Input.data[raw0] + Input.data[raw1]);
                 if params.mode == 1u {
                     Output.data[raw1] = acc;
                 }
@@ -451,12 +450,11 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn is_nan_f64(value: f64) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 @compute @workgroup_size(@WG@)
@@ -476,7 +474,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let omit_nan = (params.flags & 2u) != 0u;
 
     if is_reverse {
-        var prod: f64 = 1.0;
+        var prod: f64 = f64(1.0);
         var has_nan = false;
         var offset = params.segment_len;
         loop {
@@ -507,7 +505,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     } else {
-        var prod: f64 = 1.0;
+        var prod: f64 = f64(1.0);
         var has_nan = false;
         var offset: u32 = 0u;
         loop {
@@ -563,7 +561,7 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn is_nan_f32(value: f32) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f32() -> f32 {
@@ -680,12 +678,11 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn is_nan_f64(value: f64) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 @compute @workgroup_size(@WG@)
@@ -705,7 +702,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let omit_nan = (params.flags & 2u) != 0u;
 
     if is_reverse {
-        var current: f64 = 0.0;
+        var current: f64 = f64(0.0);
         var current_idx: u32 = 1u;
         var has_value: bool = false;
         var nan_fixed: bool = false;
@@ -761,7 +758,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     } else {
-        var current: f64 = 0.0;
+        var current: f64 = f64(0.0);
         var current_idx: u32 = 1u;
         var has_value: bool = false;
         var nan_fixed: bool = false;
@@ -847,12 +844,11 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn is_nan_f64(value: f64) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 @compute @workgroup_size(@WG@)
@@ -872,7 +868,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let omit_nan = (params.flags & 2u) != 0u;
 
     if is_reverse {
-        var current: f64 = 0.0;
+        var current: f64 = f64(0.0);
         var current_idx: u32 = 1u;
         var has_value: bool = false;
         var nan_fixed: bool = false;
@@ -928,7 +924,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     } else {
-        var current: f64 = 0.0;
+        var current: f64 = f64(0.0);
         var current_idx: u32 = 1u;
         var has_value: bool = false;
         var nan_fixed: bool = false;
@@ -1014,7 +1010,7 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn is_nan_f32(value: f32) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f32() -> f32 {
@@ -1181,7 +1177,7 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn is_nan_f32(value: f32) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn nan_f32() -> f32 {

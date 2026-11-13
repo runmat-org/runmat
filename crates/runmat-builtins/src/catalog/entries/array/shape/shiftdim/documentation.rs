@@ -1,0 +1,62 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("shiftdim"), slug: Some("shiftdim"), related: &[],
+    summary: "Shift array dimensions, removing leading singleton axes or rotating/prepending axes explicitly.",
+    description: "`B = shiftdim(A)` removes leading singleton dimensions, retaining a two-dimensional result. `[B,m] = shiftdim(A)` also returns the number removed. Positive `n` rotates dimensions cyclically; negative `n` prepends singleton dimensions.",
+    keywords: &["shiftdim", "dimensions", "singleton", "permute", "gpuArray"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Forms and shape", paragraphs: &[
+            "Without `n`, `shiftdim` removes the leading singleton axes before the first non-singleton dimension. An all-singleton array remains two-dimensional and reports `m = 0`.",
+            "For positive `n`, dimensions rotate left by `mod(n, ndims(A))` and column-major elements are permuted to match. For negative `n`, `-n` singleton axes are prepended without reordering element values. Explicit `n` has one output only.",
+            "A scalar or scalar-like host value retains its scalar representation. Dense numeric, logical, complex, character, string, cell, and structure arrays preserve their native element class. Sparse arrays support only a shift that leaves their existing two-dimensional shape unchanged.",
+            "`n` must be a host finite real integer scalar in the signed platform range. Native integer controls are decoded exactly; a gpuArray control, complex control, noninteger, or vector is rejected before provider work.",
+        ] },
+        BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
+            "Metadata-only numeric, logical, complex, and gpuArray shifts preserve the input payload owner; character, string, cell, and structure carriers may reconstruct their container. A positive data-reordering shift uses the input provider's permutation when available and validates the returned owner, shape, storage, and class before publication.",
+            "Paired complex integer resident data take an exact-class gathered permutation followed by restoration to the same provider. Failure to restore explicit resident data is an error, not silent host publication.",
+            "The operation is a structural fusion boundary, not an elementwise or reduction kernel. Native and browser execution reach the same runtime binding; provider work may suspend and fail after an effect.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "example-1", title: "Remove leading singleton axes and count them",
+            program: "A = reshape(1:6, [1 1 2 3]);\n[B,m] = shiftdim(A);\nsize(B)\nm",
+            display_output: Some("ans = [2 3]\nm = 2"), compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B), [2 3])); assert(m == 2); assert(isequal(B(:), A(:)));" } },
+        BuiltinExample { id: "example-2", title: "Rotate dimensions and preserve values",
+            program: "A = reshape(1:24, [2 3 4]);\nB = shiftdim(A, 1);\nsize(B)",
+            display_output: Some("ans = [3 4 2]"), compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B), [3 4 2])); assert(B(1,1,1) == A(1,1,1)); assert(B(1,1,2) == A(2,1,1));" } },
+        BuiltinExample { id: "example-3", title: "Prepend singleton axes without changing data",
+            program: "A = reshape(1:6, [2 3]);\nB = shiftdim(A, -2);\nsize(B)",
+            display_output: Some("ans = [1 1 2 3]"), compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B), [1 1 2 3])); assert(isequal(B(:), A(:)));" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "When can I request the second output?", answer: "Only in the form `[B,m] = shiftdim(A)` without an explicit shift. `m` counts removed leading singleton axes." },
+        BuiltinDocumentationFaq { question: "Does a negative shift move the data?", answer: "No. It prepends singleton dimensions and preserves the underlying element sequence." },
+        BuiltinDocumentationFaq { question: "What happens to gpuArray input?", answer: "Metadata-only shifts retain residency. Data-reordering shifts use an admitted provider permutation, or an exact-class restoration route where supported; they never silently publish an explicit resident input on the host." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "permute", target: BuiltinDocumentationLinkTarget::Builtin("permute") },
+        BuiltinDocumentationLink { label: "reshape", target: BuiltinDocumentationLinkTarget::Builtin("reshape") },
+        BuiltinDocumentationLink { label: "squeeze", target: BuiltinDocumentationLinkTarget::Builtin("squeeze") },
+        BuiltinDocumentationLink { label: "circshift", target: BuiltinDocumentationLinkTarget::Builtin("circshift") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "`shiftdim` runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/shiftdim.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "shiftdim shape, class and GPU route tests", location: "builtins::array::shape::shiftdim::tests" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};

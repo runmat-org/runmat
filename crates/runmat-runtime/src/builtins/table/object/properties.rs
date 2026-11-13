@@ -8,11 +8,12 @@ pub(in crate::builtins::table) fn default_properties(
 }
 
 pub(in crate::builtins::table) fn default_properties_for_class(
-    class_name: &str,
+    class_name: impl Into<runmat_types::ClassIdentity>,
     variable_names: Vec<String>,
     row_names: Option<Vec<String>>,
 ) -> StructValue {
-    let mut props = StructValue::new();
+    let class_name = class_name.into();
+    let mut props = runmat_value::UnboundedStructValueBuilder::new();
     props.insert(
         VARIABLE_NAMES,
         Value::StringArray(
@@ -38,7 +39,7 @@ pub(in crate::builtins::table) fn default_properties_for_class(
         Value::StringArray(
             StringArray::new(
                 vec![
-                    if class_name == TIMETABLE_CLASS {
+                    if class_name.is(TIMETABLE_CLASS) {
                         "Time".to_string()
                     } else {
                         DEFAULT_ROW_DIM_NAME.to_string()
@@ -70,18 +71,18 @@ pub(in crate::builtins::table) fn default_properties_for_class(
             .expect("VariableDescriptions shape is valid"),
         ),
     );
-    props.insert(DESCRIPTION, Value::String(String::new()));
+    props.insert(DESCRIPTION, Value::string(String::new()));
     props.insert(USER_DATA, Value::Tensor(Tensor::zeros(vec![0, 0])));
-    props
+    props.finish()
 }
 
 pub(in crate::builtins::table) fn table_public_properties(
     object: &ObjectInstance,
 ) -> BuiltinResult<StructValue> {
     match object
-        .properties
+        .properties()
         .get(TABLE_PROPERTIES_FIELD)
-        .or_else(|| object.properties.get(PROPERTIES_MEMBER))
+        .or_else(|| object.properties().get(PROPERTIES_MEMBER))
     {
         Some(Value::Struct(st)) => Ok(st.clone()),
         Some(other) => Err(invalid_variable(format!(
@@ -95,61 +96,126 @@ pub(in crate::builtins::table) fn table_public_properties(
 }
 
 pub(in crate::builtins::table) fn sync_table_properties(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &mut ObjectInstance,
     props: StructValue,
-) {
-    object.properties.insert(
-        TABLE_PROPERTIES_FIELD.to_string(),
-        Value::Struct(props.clone()),
-    );
-    object
-        .properties
-        .insert(PROPERTIES_MEMBER.to_string(), Value::Struct(props));
+) -> BuiltinResult<()> {
+    let updates = [
+        (TABLE_PROPERTIES_FIELD, Value::Struct(props.clone())),
+        (PROPERTIES_MEMBER, Value::Struct(props)),
+    ];
+    replace_table_properties(
+        runtime,
+        object,
+        updates.iter().map(|(name, value)| (*name, value)),
+    )
+}
+
+pub(in crate::builtins::table) fn replace_table_property(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<Option<Value>> {
+    crate::execution::object::replacement::replace_property(
+        runtime,
+        object,
+        name,
+        value,
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:table:HostAllocation",
+                message,
+                source,
+            )
+        },
+        invalid_variable,
+    )
+}
+
+pub(in crate::builtins::table) fn replace_table_properties<'a, I>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    updates: I,
+) -> BuiltinResult<()>
+where
+    I: Iterator<Item = (&'a str, &'a Value)> + Clone,
+{
+    crate::execution::object::replacement::replace_properties(
+        runtime,
+        object,
+        updates,
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:table:HostAllocation",
+                message,
+                source,
+            )
+        },
+        invalid_variable,
+    )
 }
 
 pub(in crate::builtins::table) fn set_table_dimension_names(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &mut ObjectInstance,
     dimension_names: Vec<String>,
     context: &str,
 ) -> BuiltinResult<()> {
-    let mut properties = table_public_properties(object)?;
-    properties.insert(
-        DIMENSION_NAMES,
-        Value::StringArray(
-            StringArray::new(dimension_names, vec![1, 2])
-                .map_err(|error| invalid_variable(format!("{context}: {error}")))?,
-        ),
+    let properties = table_public_properties(object)?;
+    let value = Value::StringArray(
+        StringArray::new(dimension_names, vec![1, 2])
+            .map_err(|error| invalid_variable(format!("{context}: {error}")))?,
     );
-    sync_table_properties(object, properties);
-    Ok(())
+    let (properties, _roots) =
+        replace_struct_fields(runtime, &properties, &[(DIMENSION_NAMES, value)])?;
+    sync_table_properties(runtime, object, properties)
 }
 
 pub(in crate::builtins::table) fn apply_properties(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &mut ObjectInstance,
-    mut props: StructValue,
+    props: StructValue,
 ) -> BuiltinResult<()> {
-    if let Some(value) = props.fields.get(VARIABLE_NAMES) {
+    let renamed = if let Some(value) = props.fields.get(VARIABLE_NAMES) {
         let names = variable_name_list(value)?;
-        rename_table_variables(object, names.clone())?;
-        update_variable_metadata_names(&mut props, names)?;
+        let renamed = renamed_table_variables(object, &names)?;
+        Some((renamed, names))
+    } else {
+        None
+    };
+    if let Some((renamed, names)) = renamed {
+        let (props, _property_roots) = updated_variable_metadata_names(runtime, &props, names)?;
+        let updates = [
+            (TABLE_VARIABLES_FIELD, Value::Struct(renamed)),
+            (TABLE_PROPERTIES_FIELD, Value::Struct(props.clone())),
+            (PROPERTIES_MEMBER, Value::Struct(props)),
+        ];
+        replace_table_properties(
+            runtime,
+            object,
+            updates.iter().map(|(name, value)| (*name, value)),
+        )
+    } else {
+        sync_table_properties(runtime, object, props)
     }
-    sync_table_properties(object, props);
-    Ok(())
 }
 
-pub(in crate::builtins::table) fn rename_table_variables(
-    object: &mut ObjectInstance,
-    new_names: Vec<String>,
-) -> BuiltinResult<()> {
+fn renamed_table_variables(
+    object: &ObjectInstance,
+    new_names: &[String],
+) -> BuiltinResult<StructValue> {
     let old_names = table_variable_names_from_object(object)?;
     if old_names.len() != new_names.len() {
         return Err(invalid_variable(
             "table: VariableNames assignment must preserve variable count",
         ));
     }
-    validate_variable_names(&new_names)?;
+    validate_variable_names(new_names)?;
     let variables = table_variables(object)?;
-    let mut renamed = StructValue::new();
+    let mut renamed = runmat_value::UnboundedStructValueBuilder::new();
     for (old, new) in old_names.iter().zip(new_names.iter()) {
         let value = variables
             .fields
@@ -158,40 +224,74 @@ pub(in crate::builtins::table) fn rename_table_variables(
             .ok_or_else(|| invalid_variable(format!("table: missing variable '{old}'")))?;
         renamed.insert(new.clone(), value);
     }
-    object
-        .properties
-        .insert(TABLE_VARIABLES_FIELD.to_string(), Value::Struct(renamed));
-    Ok(())
+    Ok(renamed.finish())
 }
 
-pub(in crate::builtins::table) fn update_variable_metadata_names(
-    props: &mut StructValue,
+pub(in crate::builtins::table) fn updated_variable_metadata_names(
+    runtime: Option<&crate::context::RuntimeContext>,
+    props: &StructValue,
     names: Vec<String>,
-) -> BuiltinResult<()> {
-    props.insert(
-        VARIABLE_NAMES,
-        Value::StringArray(
-            StringArray::new(names.clone(), vec![1, names.len()])
-                .map_err(|err| invalid_variable(format!("table: {err}")))?,
-        ),
+) -> BuiltinResult<(StructValue, Option<crate::execution::RootedValueLease>)> {
+    let variable_names = Value::StringArray(
+        StringArray::new(names.clone(), vec![1, names.len()])
+            .map_err(|err| invalid_variable(format!("table: {err}")))?,
     );
-    for field in [VARIABLE_UNITS, VARIABLE_DESCRIPTIONS] {
+    let mut metadata = [
+        (VARIABLE_UNITS, Value::Tensor(Tensor::zeros(vec![0, 0]))),
+        (
+            VARIABLE_DESCRIPTIONS,
+            Value::Tensor(Tensor::zeros(vec![0, 0])),
+        ),
+    ];
+    for (field, output) in &mut metadata {
         let existing = props.fields.get(field).cloned();
         let values = match existing {
-            Some(Value::StringArray(mut array)) => {
-                array.data.resize(names.len(), String::new());
-                array.data.truncate(names.len());
-                array.data
+            Some(Value::StringArray(array)) => {
+                let mut values = array.data().to_vec();
+                values.resize(names.len(), runmat_value::StringElement::text(""));
+                values.truncate(names.len());
+                values
             }
-            _ => vec![String::new(); names.len()],
+            _ => vec![runmat_value::StringElement::text(""); names.len()],
         };
-        props.insert(
-            field,
-            Value::StringArray(
-                StringArray::new(values, vec![1, names.len()])
-                    .map_err(|err| invalid_variable(format!("table: {err}")))?,
-            ),
+        *output = Value::StringArray(
+            StringArray::from_elements_unbounded(values, vec![1, names.len()])
+                .map_err(|err| invalid_variable(format!("table: {err}")))?,
         );
     }
-    Ok(())
+    let updates = [
+        (VARIABLE_NAMES, variable_names),
+        metadata[0].clone(),
+        metadata[1].clone(),
+    ];
+    replace_struct_fields(runtime, props, &updates)
+}
+
+pub(in crate::builtins::table) fn replace_struct_fields(
+    runtime: Option<&crate::context::RuntimeContext>,
+    source: &StructValue,
+    updates: &[(&str, Value)],
+) -> BuiltinResult<(StructValue, Option<crate::execution::RootedValueLease>)> {
+    if let Some(runtime) = runtime {
+        let _source = crate::execution::structure::replacement::lease(
+            &Value::Struct(source.clone()),
+            Some(runtime),
+        )?;
+        let fields = source
+            .fields
+            .iter()
+            .filter(|(name, _)| !updates.iter().any(|(updated, _)| name == updated))
+            .chain(updates.iter().map(|(name, value)| (*name, value)));
+        let output = crate::execution::construct_struct_from_fields_in_context(runtime, fields)?;
+        let (output, roots) = output.into_value_and_lease();
+        let Value::Struct(output) = output else {
+            unreachable!("structure replacement publishes a structure")
+        };
+        return Ok((output, Some(roots)));
+    }
+    let mut builder = runmat_value::UnboundedStructValueBuilder::from_structure(source.clone());
+    for (name, value) in updates {
+        builder.insert(*name, value.clone());
+    }
+    Ok((builder.finish(), None))
 }

@@ -1,3 +1,5 @@
+use super::control::checkpoint;
+use runmat_meshing_core::MeshingCancellationSignal;
 use runmat_meshing_core::{predicate::orient2d, PredicateSign};
 
 use super::{
@@ -7,13 +9,27 @@ use super::{
 
 const MAX_PSLG_PAIR_TESTS: usize = 10_000_000;
 
-pub(super) fn validate_face_segment_intersections(
+pub(super) fn validate_face_segment_intersections_controlled(
     face: &ExactFaceBoundary,
+    periodicity: [bool; 2],
+    control: Option<&dyn MeshingCancellationSignal>,
 ) -> Result<(), ExactSurfaceBoundaryError> {
-    let mut segments = std::iter::once(&face.outer_loop)
+    checkpoint(control)?;
+    // Raw pcurve coordinates on a periodic surface are separate parameter-space
+    // images, not one Euclidean chart. Testing them here can therefore report a
+    // false crossing at the seam. The chart builder lifts those images into its
+    // canonical chart and validates the resulting PSLG before triangulation.
+    if periodicity.into_iter().any(|periodic| periodic) {
+        return Ok(());
+    }
+    let mut segments = Vec::new();
+    for segment in std::iter::once(&face.outer_loop)
         .chain(&face.inner_loops)
         .flat_map(|loop_boundary| &loop_boundary.segments)
-        .collect::<Vec<_>>();
+    {
+        checkpoint(control)?;
+        segments.push(segment);
+    }
     segments.sort_by(|left, right| {
         minimum_x(left)
             .total_cmp(&minimum_x(right))
@@ -24,9 +40,11 @@ pub(super) fn validate_face_segment_intersections(
 
     let mut pair_tests = 0usize;
     for left_index in 0..segments.len() {
+        checkpoint(control)?;
         let left = segments[left_index];
         let left_maximum_x = maximum_x(left);
         for right in &segments[left_index + 1..] {
+            checkpoint(control)?;
             if minimum_x(right) > left_maximum_x {
                 break;
             }
@@ -52,6 +70,7 @@ pub(super) fn validate_face_segment_intersections(
                 .with_conflict(ExactSurfaceBoundaryConflict {
                     source_edge_ids: [left.source_edge_id.clone(), right.source_edge_id.clone()],
                     segment_uv: [left.node_uv, right.node_uv],
+                    node_ids: [left.node_ids, right.node_ids],
                 }));
             }
         }
@@ -150,12 +169,51 @@ fn intersection_is_declared_endpoint(
 }
 
 #[cfg(test)]
+fn validate_face_segment_intersections(
+    face: &ExactFaceBoundary,
+    periodicity: [bool; 2],
+) -> Result<(), ExactSurfaceBoundaryError> {
+    validate_face_segment_intersections_controlled(face, periodicity, None)
+}
+
+#[cfg(test)]
 mod tests {
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
     use runmat_meshing_core::StableDigest;
 
     use super::*;
     use crate::{ExactFaceBoundaryLoop, ExactFaceBoundarySegment};
+
+    #[test]
+    fn crossing_failure_preserves_original_trim_coordinates_in_diagnostics() {
+        let face = ExactFaceBoundary {
+            source_face_id: id(PersistentEntityKind::Face, "face"),
+            outer_loop: ExactFaceBoundaryLoop {
+                source_wire_id: id(PersistentEntityKind::Wire, "wire"),
+                orientation: runmat_geometry_core::TopologicalOrientation::Forward,
+                segments: vec![
+                    segment("a", 1, 2, [[0.0, 0.0], [1.0, 1.0]]),
+                    segment("b", 3, 4, [[0.0, 1.0], [1.0, 0.0]]),
+                ],
+            },
+            inner_loops: Vec::new(),
+        };
+        let error = validate_face_segment_intersections(&face, [false, false]).unwrap_err();
+        assert_eq!(error.kind, ExactSurfaceBoundaryErrorKind::InvalidPslg);
+        let conflict = error.conflict.as_ref().unwrap();
+        assert_eq!(
+            conflict.segment_uv,
+            [
+                face.outer_loop.segments[0].node_uv,
+                face.outer_loop.segments[1].node_uv
+            ]
+        );
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("conflicting edges"));
+        assert!(
+            diagnostic.contains("segment UV [[[0.0, 0.0], [1.0, 1.0]], [[0.0, 1.0], [1.0, 0.0]]]")
+        );
+    }
 
     #[test]
     fn crossing_trim_segments_report_both_edges_and_uv_witnesses() {
@@ -172,7 +230,7 @@ mod tests {
             inner_loops: Vec::new(),
         };
 
-        let error = validate_face_segment_intersections(&face).unwrap_err();
+        let error = validate_face_segment_intersections(&face, [false, false]).unwrap_err();
         assert_eq!(error.kind, ExactSurfaceBoundaryErrorKind::InvalidPslg);
         let conflict = error.conflict.unwrap();
         assert_eq!(conflict.source_edge_ids[0].source_topology_id, "a");
@@ -194,7 +252,25 @@ mod tests {
             },
             inner_loops: Vec::new(),
         };
-        validate_face_segment_intersections(&face).unwrap();
+        validate_face_segment_intersections(&face, [false, false]).unwrap();
+    }
+
+    #[test]
+    fn periodic_raw_pcurve_images_defer_crossing_checks_to_the_lifted_chart() {
+        let face = ExactFaceBoundary {
+            source_face_id: id(PersistentEntityKind::Face, "face"),
+            outer_loop: ExactFaceBoundaryLoop {
+                source_wire_id: id(PersistentEntityKind::Wire, "wire"),
+                orientation: runmat_geometry_core::TopologicalOrientation::Forward,
+                segments: vec![
+                    segment("a", 1, 2, [[0.0, 0.0], [1.0, 1.0]]),
+                    segment("b", 3, 4, [[0.0, 1.0], [1.0, 0.0]]),
+                ],
+            },
+            inner_loops: Vec::new(),
+        };
+
+        validate_face_segment_intersections(&face, [true, false]).unwrap();
     }
 
     fn segment(edge: &str, start: u8, end: u8, node_uv: [[f64; 2]; 2]) -> ExactFaceBoundarySegment {
@@ -212,10 +288,6 @@ mod tests {
     }
 
     fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind,
-            source_topology_id: name.into(),
-            assembly_path: vec!["root".into()],
-        }
+        PersistentEntityId::new(kind, name.into(), vec!["root".into()])
     }
 }

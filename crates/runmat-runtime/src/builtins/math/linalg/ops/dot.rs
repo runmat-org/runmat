@@ -7,13 +7,12 @@
 
 #[cfg(test)]
 use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::DOT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    DOT_ERROR_INTERNAL, DOT_ERROR_INVALID_ARGUMENT, DOT_ERROR_INVALID_INPUT,
+    DOT_INTEGER_DATA_EXTENSION, DOT_LOGICAL_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericScalar, Tensor, Value};
@@ -24,164 +23,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::dot_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DOT_NAME: &str = "dot";
-
-const DOT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Dot product result.",
-}];
-
-const DOT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-];
-
-const DOT_INPUTS_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reduction dimension.",
-    },
-];
-
-const DOT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "C = dot(A, B)",
-        inputs: &DOT_INPUTS,
-        outputs: &DOT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = dot(A, B, dim)",
-        inputs: &DOT_INPUTS_DIM,
-        outputs: &DOT_OUTPUT,
-    },
-];
-
-const DOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:dot:InvalidArgument"),
-    when: "Argument count or dimension argument is invalid.",
-    message: "dot: invalid argument",
-};
-
-const DOT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOT.INVALID_INPUT",
-    identifier: Some("RunMat:dot:InvalidInput"),
-    when: "Inputs are unsupported or incompatible.",
-    message: "dot: A and B must be the same size.",
-};
-
-const DOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOT.INTERNAL",
-    identifier: Some("RunMat:dot:Internal"),
-    when: "Runtime cannot materialize dot outputs.",
-    message: "dot: internal runtime failure",
-};
-
-const DOT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    DOT_ERROR_INVALID_ARGUMENT,
-    DOT_ERROR_INVALID_INPUT,
-    DOT_ERROR_INTERNAL,
-];
-
-const DOT_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "dot-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "dot with typed-integer data operands is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DotIntegerDataExtension"),
-};
-
-const DOT_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "dot-logical-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "dot with logical data operands is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DotLogicalDataExtension"),
-};
-
-const DOT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [DOT_INTEGER_DATA_EXTENSION, DOT_LOGICAL_DATA_EXTENSION];
-
-const DOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A_or_B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes.",
-    }];
-
-const DOT_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive-integer scalar dimension is read exactly from typed scalar storage before platform-bound validation.",
-    }];
-
-pub const DOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = dot(integer_A_or_B, B, dim?)",
-        inputs: &DOT_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Mode-gated integer operands are read from authoritative storage and multiplied exactly when both host operands are integral; each exact product then crosses to the floating reduction/output domain.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = dot(A, B, integer_dim)",
-        inputs: &DOT_INTEGER_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "All eight scalar integer classes select the reduction dimension through exact structural decoding.",
-    },
-];
-
-pub const DOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DOT_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::dot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -225,6 +71,12 @@ fn dot_invalid_input(message: impl Into<String>) -> RuntimeError {
 fn dot_internal_error(message: impl Into<String>) -> RuntimeError {
     dot_error_with_message(message, &DOT_ERROR_INTERNAL)
 }
+
+#[path = "dot/kernel_error.rs"]
+pub mod kernel_error;
+mod geometry;
+pub(in crate::builtins::math) use geometry::{dot_geometry, DotGeometry};
+use kernel_error::{DotKernelError, DotKernelResult};
 
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
@@ -279,17 +131,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "dot",
-    category = "math/linalg/ops",
-    summary = "Compute dot products.",
-    keywords = "dot,inner product,gpu,linear algebra",
-    accel = "reduction",
-    type_resolver(dot_type),
-    descriptor(crate::builtins::math::linalg::ops::dot::DOT_DESCRIPTOR),
-    extensions(DOT_EXTENSIONS),
-    integer_capabilities(DOT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
-async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn dot_builtin(
+    lhs: Value,
+    rhs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(dot_invalid_argument("dot: too many input arguments"));
     }
@@ -347,7 +196,14 @@ async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<
     };
 
     if lhs_gpu || rhs_gpu {
-        promote_result_to_gpu(value, resident_anchor.as_ref())
+        let protected = [&lhs, &rhs]
+            .into_iter()
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        promote_result_to_gpu(value, resident_anchor.as_ref(), &protected)
     } else {
         Ok(value)
     }
@@ -380,8 +236,8 @@ async fn try_provider_dot(
             != runmat_accelerate_api::GpuTensorStorage::Real
         || runmat_accelerate_api::handle_storage(rhs_handle)
             != runmat_accelerate_api::GpuTensorStorage::Real
-        || lhs_handle.shape != rhs_handle.shape
-        || lhs_handle.device_id != rhs_handle.device_id
+        || lhs_handle.shape() != rhs_handle.shape()
+        || lhs_handle.device_id() != rhs_handle.device_id()
     {
         return Ok(None);
     }
@@ -391,20 +247,20 @@ async fn try_provider_dot(
     let Some(rhs_owner) = resolved_actual_dot_owner(rhs_handle) else {
         return Ok(None);
     };
-    if !std::ptr::eq(provider, rhs_owner) {
+    if !runmat_accelerate_api::same_provider_instance(provider, rhs_owner) {
         return Ok(None);
     }
     match provider.dot(lhs_handle, rhs_handle, dim).await {
         Ok(handle) if valid_provider_dot_output(&handle, lhs_handle, rhs_handle, provider, dim) => {
             Ok(Some(Value::GpuTensor(handle)))
         }
-        Ok(handle) => {
-            free_rejected_dot_handle(&handle, &[lhs_handle, rhs_handle]);
-            Ok(None)
-        }
+        Ok(handle) => Err(reject_dot_output(handle)),
+        Err(err) if gpu_helpers::provider_hook_allows_host_fallback(&err) => Ok(None),
         Err(err) => {
-            log::trace!("dot: provider dot fallback triggered: {err}");
-            Ok(None)
+            let mut error = dot_internal_error(format!("dot: provider execution failed: {err}"));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error = kernel_error::with_provider_source(error, err.into());
+            Err(error)
         }
     }
 }
@@ -416,14 +272,14 @@ fn valid_provider_dot_output(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     dim: Option<usize>,
 ) -> bool {
-    let shape = canonical_shape(&lhs.shape);
+    let shape = canonical_shape(lhs.shape());
     let target_dim = dim.unwrap_or_else(|| default_dimension(&shape));
     let mut expected_shape = shape;
     if target_dim <= expected_shape.len() {
         expected_shape[target_dim - 1] = 1;
     }
-    output.shape == expected_shape
-        && output.device_id == lhs.device_id
+    output.shape() == expected_shape
+        && output.device_id() == lhs.device_id()
         && !gpu_handles_alias(output, lhs)
         && !gpu_handles_alias(output, rhs)
         && runmat_accelerate_api::handle_storage(output)
@@ -432,7 +288,8 @@ fn valid_provider_dot_output(
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::handle_precision(output)
             == requested_dot_precision_for_handles(lhs, rhs)
-        && resolved_actual_dot_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && resolved_actual_dot_owner(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn requested_dot_precision_for_handles(
@@ -507,27 +364,21 @@ fn real_tensor_to_complex(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
         .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
 }
 
-fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<Tensor> {
-    if dim.is_none()
-        && is_vector_shape(&canonical_shape_tensor(a))
-        && is_vector_shape(&canonical_shape_tensor(b))
-    {
+fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> DotKernelResult<Tensor> {
+    let left_shape = canonical_shape_tensor(a);
+    let right_shape = canonical_shape_tensor(b);
+    if dim.is_none() && is_vector_shape(&left_shape) && is_vector_shape(&right_shape) {
         if tensor::tensor_element_len(a) != tensor::tensor_element_len(b) {
-            return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+            return Err(DotKernelError::invalid_input());
         }
-        return dot_real_vectors(a, b);
+    } else {
+        ensure_same_size(a, b)?;
     }
-    ensure_same_size(a, b)?;
-
-    let shape = canonical_shape_tensor(a);
-    let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
-    let target_dim = dim.unwrap_or_else(|| default_dimension(&shape));
-    let dim_index = target_dim - 1;
-
-    if dim_index >= shape.len() {
+    let plan = DotGeometry::new(&left_shape, &right_shape, dim)?;
+    if plan.elementwise() {
         return elementwise_real_product(a, b);
     }
-
+    let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
     let floating_values = if exact_integer_operands {
         None
     } else {
@@ -536,68 +387,42 @@ fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<
             tensor::tensor_values_f64_cow(b),
         ))
     };
-
-    let reduce_len = shape[dim_index];
-    let stride_before = dim_product(&shape[..dim_index]);
-    let stride_after = dim_product(&shape[dim_index + 1..]);
-    let mut output = vec![0.0f64; stride_before * stride_after];
-
-    for after in 0..stride_after {
-        for before in 0..stride_before {
-            let mut acc = 0.0;
-            for k in 0..reduce_len {
-                let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let prod = if exact_integer_operands {
-                    exact_integer_product_as_f64(a.numeric_value_at(idx), b.numeric_value_at(idx))
-                        .ok_or_else(|| dot_internal_error("dot: invalid integer storage"))?
-                } else {
-                    let (a_values, b_values) = floating_values
-                        .as_ref()
-                        .expect("floating dot values are materialized only for floating operands");
-                    a_values[idx] * b_values[idx]
-                };
-                acc += prod;
-            }
-            let out_idx = after * stride_before + before;
-            output[out_idx] = acc;
-        }
-    }
-
-    let mut out_shape = shape.clone();
-    out_shape[dim_index] = 1;
-    dot_real_output(output, out_shape, dot_real_output_dtype(a, b))
-}
-
-fn dot_real_vectors(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
-    let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
-    let mut output = 0.0;
-    if exact_integer_operands {
-        for index in 0..tensor::tensor_element_len(a) {
-            output +=
+    let mut output = Vec::with_capacity(plan.outputs());
+    for row in 0..plan.outputs() {
+        let mut acc = 0.;
+        for axis in 0..plan.factor() {
+            let index = plan
+                .source(row, axis)
+                .ok_or_else(|| DotKernelError::internal("dot source geometry overflow"))?;
+            let product = if exact_integer_operands {
                 exact_integer_product_as_f64(a.numeric_value_at(index), b.numeric_value_at(index))
-                    .ok_or_else(|| dot_internal_error("dot: invalid integer storage"))?;
+                    .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?
+            } else {
+                let (left, right) = floating_values.as_ref().expect("floating dot operands");
+                left[index] * right[index]
+            };
+            acc += product;
         }
-    } else {
-        let a_values = tensor::tensor_values_f64_cow(a);
-        let b_values = tensor::tensor_values_f64_cow(b);
-        for index in 0..a_values.len() {
-            output += a_values[index] * b_values[index];
-        }
+        output.push(acc);
     }
-    dot_real_output(vec![output], vec![1, 1], dot_real_output_dtype(a, b))
+    dot_real_output(
+        output,
+        plan.output_shape().to_vec(),
+        dot_real_output_dtype(a, b),
+    )
 }
 
 fn dot_complex_tensor(
     a: &ComplexTensor,
     b: &ComplexTensor,
     dim: Option<usize>,
-) -> BuiltinResult<ComplexTensor> {
+) -> DotKernelResult<ComplexTensor> {
     if dim.is_none()
         && is_vector_shape(&canonical_shape_complex(a))
         && is_vector_shape(&canonical_shape_complex(b))
     {
         if a.materialize_f64().len() != b.materialize_f64().len() {
-            return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+            return Err(DotKernelError::invalid_input());
         }
         let mut output = (0.0, 0.0);
         for ((ar, ai), (br, bi)) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
@@ -609,7 +434,7 @@ fn dot_complex_tensor(
             vec![1, 1],
             dot_complex_output_dtype(a, b),
         )
-        .map_err(|error| dot_internal_error(format!("{DOT_NAME}: {error}")));
+        .map_err(|error| DotKernelError::internal(format!("{DOT_NAME}: {error}")));
     }
     ensure_same_size_complex(a, b)?;
 
@@ -647,14 +472,14 @@ fn dot_complex_tensor(
     let mut out_shape = shape.clone();
     out_shape[dim_index] = 1;
     ComplexTensor::from_f64_values_with_dtype(output, out_shape, dot_complex_output_dtype(a, b))
-        .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
+        .map_err(|e| DotKernelError::internal(format!("{DOT_NAME}: {e}")))
 }
 
 pub fn dot_host_real_for_provider(
     a: &Tensor,
     b: &Tensor,
     dim: Option<usize>,
-) -> BuiltinResult<Tensor> {
+) -> DotKernelResult<Tensor> {
     dot_real_tensor(a, b, dim)
 }
 
@@ -662,18 +487,18 @@ pub fn dot_host_complex_for_provider(
     a: &ComplexTensor,
     b: &ComplexTensor,
     dim: Option<usize>,
-) -> BuiltinResult<ComplexTensor> {
+) -> DotKernelResult<ComplexTensor> {
     dot_complex_tensor(a, b, dim)
 }
 
-fn elementwise_real_product(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
+fn elementwise_real_product(a: &Tensor, b: &Tensor) -> DotKernelResult<Tensor> {
     let mut data = Vec::with_capacity(tensor::tensor_element_len(a));
     let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
     if exact_integer_operands {
         for index in 0..tensor::tensor_element_len(a) {
             data.push(
                 exact_integer_product_as_f64(a.numeric_value_at(index), b.numeric_value_at(index))
-                    .ok_or_else(|| dot_internal_error("dot: invalid integer storage"))?,
+                    .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?,
             );
         }
     } else {
@@ -707,14 +532,14 @@ fn dot_real_output(
     data: Vec<f64>,
     shape: Vec<usize>,
     dtype: NumericDType,
-) -> BuiltinResult<Tensor> {
+) -> DotKernelResult<Tensor> {
     match dtype {
         NumericDType::F32 => {
             Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
         }
         _ => Tensor::new(data, shape),
     }
-    .map_err(|error| dot_internal_error(format!("{DOT_NAME}: {error}")))
+    .map_err(|error| DotKernelError::internal(format!("{DOT_NAME}: {error}")))
 }
 
 fn exact_integer_product_as_f64(
@@ -750,7 +575,7 @@ fn integer_sign_magnitude(value: NumericScalar) -> Option<(bool, u128)> {
 fn elementwise_complex_product(
     a: &ComplexTensor,
     b: &ComplexTensor,
-) -> BuiltinResult<ComplexTensor> {
+) -> DotKernelResult<ComplexTensor> {
     let mut data = Vec::with_capacity(a.materialize_f64().len());
     for ((ar, ai), (br, bi)) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
         let real = ar * br + ai * bi;
@@ -759,42 +584,44 @@ fn elementwise_complex_product(
     }
     let shape = canonical_shape_complex(a);
     ComplexTensor::from_f64_values_with_dtype(data, shape, dot_complex_output_dtype(a, b))
-        .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
+        .map_err(|e| DotKernelError::internal(format!("{DOT_NAME}: {e}")))
 }
 
-fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
+fn ensure_same_size(a: &Tensor, b: &Tensor) -> DotKernelResult<()> {
     if tensor::tensor_element_len(a) != tensor::tensor_element_len(b) {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     if canonical_shape_tensor(a) != canonical_shape_tensor(b) {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     Ok(())
 }
 
-fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<()> {
+fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> DotKernelResult<()> {
     if a.materialize_f64().len() != b.materialize_f64().len() {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     if canonical_shape_complex(a) != canonical_shape_complex(b) {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     Ok(())
 }
 
 fn canonical_shape_tensor(t: &Tensor) -> Vec<usize> {
-    if t.shape.is_empty() {
-        vec![t.rows, t.cols]
+    if t.shape().is_empty() {
+        // Dot interprets a rank-zero tensor as an empty 0-by-0 matrix rather
+        // than using Tensor's general scalar projection.
+        vec![0, 0]
     } else {
-        t.shape.clone()
+        t.shape().to_vec()
     }
 }
 
 fn canonical_shape_complex(t: &ComplexTensor) -> Vec<usize> {
-    if t.shape.is_empty() {
-        vec![t.rows, t.cols]
+    if t.shape().is_empty() {
+        vec![t.rows(), t.cols()]
     } else {
-        t.shape.clone()
+        t.shape().to_vec()
     }
 }
 
@@ -824,108 +651,34 @@ fn dim_product(dims: &[usize]) -> usize {
 fn promote_result_to_gpu(
     value: Value,
     anchor: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let provider = match anchor.and_then(resolved_actual_dot_owner) {
-        Some(p) => p,
-        None => return Ok(value),
-    };
-    match value {
-        Value::Tensor(tensor) => {
-            let Some(anchor) = anchor else {
-                return Ok(Value::Tensor(tensor));
-            };
-            let expected_precision = match tensor.numeric_dtype() {
-                NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                _ => runmat_accelerate_api::ProviderPrecision::F64,
-            };
-            if provider.precision() != expected_precision {
-                return Ok(Value::Tensor(tensor));
-            }
-            match gpu_helpers::upload_tensor(provider, &tensor) {
-                Ok(handle)
-                    if valid_dot_uploaded_output(
-                        &handle,
-                        anchor,
-                        provider,
-                        &tensor.shape,
-                        expected_precision,
-                    ) =>
-                {
-                    Ok(Value::GpuTensor(handle))
-                }
-                Ok(handle) => {
-                    free_rejected_dot_handle(&handle, &[anchor]);
-                    Ok(Value::Tensor(tensor))
-                }
-                Err(_) => Ok(Value::Tensor(tensor)),
-            }
-        }
-        Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))?;
-            promote_result_to_gpu(Value::Tensor(tensor), anchor)
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(dot_internal_error)?;
-            promote_result_to_gpu(Value::Tensor(tensor), anchor)
-        }
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
-        other => Ok(other),
+    match anchor {
+        Some(anchor) => gpu_helpers::restore_class_preserving_value_protecting(
+            anchor, value, DOT_NAME, protected,
+        ),
+        None => Ok(value),
     }
-}
-
-fn valid_dot_uploaded_output(
-    output: &runmat_accelerate_api::GpuTensorHandle,
-    anchor: &runmat_accelerate_api::GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    expected_shape: &[usize],
-    expected_precision: runmat_accelerate_api::ProviderPrecision,
-) -> bool {
-    output.shape == expected_shape
-        && output.device_id == anchor.device_id
-        && !gpu_handles_alias(output, anchor)
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
-        && resolved_actual_dot_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
 fn resolved_actual_dot_owner(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
-    runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+    gpu_helpers::exact_provider_for_handle(handle)
+        .filter(|owner| owner.device_id() == handle.device_id())
 }
 
 fn gpu_handles_alias(
     lhs: &runmat_accelerate_api::GpuTensorHandle,
     rhs: &runmat_accelerate_api::GpuTensorHandle,
 ) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.shares_allocation_with(rhs)
 }
 
-fn free_rejected_dot_handle(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    protected: &[&runmat_accelerate_api::GpuTensorHandle],
-) {
-    if protected
-        .iter()
-        .any(|protected| gpu_handles_alias(handle, protected))
-    {
-        log::trace!("dot: rejected handle aliases a caller-owned input; not freeing it");
-        return;
-    }
-    if let Some(owner) = resolved_actual_dot_owner(handle) {
-        if let Err(error) = owner.free(handle) {
-            log::trace!("dot: failed to free rejected handle through its owner: {error}");
-        }
-    } else {
-        log::trace!(
-            "dot: rejected handle has no resolvable owner; leaving cleanup to its producer"
-        );
-    }
+fn reject_dot_output(handle: runmat_accelerate_api::GpuTensorHandle) -> RuntimeError {
+    let mut error = dot_internal_error("dot: provider returned malformed or aliased output");
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    gpu_helpers::reject_gpu_output(handle, error)
 }
 
 #[cfg(test)]
@@ -1055,165 +808,135 @@ pub(crate) mod tests {
     #[test]
     fn dot_validates_requested_precision_and_hostile_result_metadata() {
         test_support::with_test_provider(|provider| {
-            let lhs_f32 = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-                    shape: &[2, 3],
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                })
-                .expect("single lhs upload");
-            let rhs_f32 = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&[6.0, 5.0, 4.0, 3.0, 2.0, 1.0]),
-                    shape: &[2, 3],
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                })
-                .expect("single rhs upload");
-            let mut f32_output = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&[21.0, 22.0, 23.0]),
-                    shape: &[1, 3],
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                })
-                .expect("single result upload");
+            let upload_single = |data: &[f32], shape: &[usize]| {
+                runmat_accelerate_api::upload_numeric_protecting(
+                    provider,
+                    &HostNumericTensorView {
+                        data: HostNumericDataView::F32(data),
+                        shape,
+                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    },
+                    &[],
+                )
+                .unwrap()
+            };
+            let lhs_single = upload_single(&[1.0; 6], &[2, 3]);
+            let rhs_single = upload_single(&[2.0; 6], &[2, 3]);
+            let single_output = upload_single(&[4.0; 3], &[1, 3]);
             assert!(valid_provider_dot_output(
-                &f32_output,
-                &lhs_f32,
-                &rhs_f32,
+                &single_output,
+                &lhs_single,
+                &rhs_single,
                 provider,
-                Some(1),
+                Some(1)
             ));
-
-            f32_output.descriptor.element_type =
-                Some(runmat_accelerate_api::NumericElementType::F64);
+            let double_output = provider
+                .upload(&HostTensorView {
+                    data: &[4.0; 3],
+                    shape: &[1, 3],
+                })
+                .unwrap();
             assert!(!valid_provider_dot_output(
-                &f32_output,
-                &lhs_f32,
-                &rhs_f32,
+                &double_output,
+                &lhs_single,
+                &rhs_single,
                 provider,
-                Some(1),
+                Some(1)
             ));
-            provider.free(&f32_output).expect("free precision result");
-            provider.free(&lhs_f32).expect("free single lhs");
-            provider.free(&rhs_f32).expect("free single rhs");
 
             let lhs = provider
                 .upload(&HostTensorView {
-                    data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    data: &[1.0; 6],
                     shape: &[2, 3],
                 })
-                .expect("lhs upload");
+                .unwrap();
             let rhs = provider
                 .upload(&HostTensorView {
-                    data: &[6.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+                    data: &[2.0; 6],
                     shape: &[2, 3],
                 })
-                .expect("rhs upload");
-            let make_output = || {
-                provider
-                    .upload(&HostTensorView {
-                        data: &[21.0, 22.0, 23.0],
-                        shape: &[1, 3],
-                    })
-                    .expect("result upload")
-            };
-
-            let wrong_shape = {
-                let mut handle = make_output();
-                handle.shape = vec![3, 1];
-                handle
-            };
-            assert!(!valid_provider_dot_output(
-                &wrong_shape,
+                .unwrap();
+            assert!(valid_provider_dot_output(
+                &double_output,
                 &lhs,
                 &rhs,
                 provider,
-                Some(1),
+                Some(1)
             ));
-            provider
-                .free(&wrong_shape)
-                .expect("free wrong-shape result");
-
-            let mut wrong_storage = make_output();
-            wrong_storage.descriptor.storage =
-                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+            let wrong_shape = double_output
+                .with_view(double_output.view().clone().with_shape(vec![3, 1]))
+                .unwrap();
+            let complex = gpu_helpers::upload_complex_tensor_protecting(
+                provider,
+                &ComplexTensor::new(vec![(1.0, 2.0); 3], vec![1, 3]).unwrap(),
+                &[&lhs, &rhs],
+            )
+            .unwrap();
+            let integer = runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::I16(&[1; 3]),
+                    shape: &[1, 3],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                },
+                &[&lhs, &rhs],
+            )
+            .unwrap();
+            let logical = runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1; 3],
+                    shape: &[1, 3],
+                },
+                &[&lhs, &rhs],
+            )
+            .unwrap();
+            for rejected in [wrong_shape, complex, integer, logical] {
+                assert!(!valid_provider_dot_output(
+                    &rejected,
+                    &lhs,
+                    &rhs,
+                    provider,
+                    Some(1)
+                ));
+                let error = reject_dot_output(rejected);
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            }
+            let alias = lhs.with_view(lhs.view().clone()).unwrap();
             assert!(!valid_provider_dot_output(
-                &wrong_storage,
+                &alias,
                 &lhs,
                 &rhs,
                 provider,
-                Some(1),
+                Some(1)
             ));
-            provider
-                .free(&wrong_storage)
-                .expect("free wrong-storage result");
+            assert!(alias.shares_allocation_with(&lhs));
+            let _error = reject_dot_output(alias);
+            lhs.allocation_lease().validate_live().unwrap();
+            rhs.allocation_lease().validate_live().unwrap();
 
-            let mut integer = make_output();
-            integer.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::I16);
+            let foreign_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+            let foreign = foreign_owner
+                .allocate_zeroed(
+                    vec![1, 3],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
             assert!(!valid_provider_dot_output(
-                &integer,
+                &foreign.handle,
                 &lhs,
                 &rhs,
                 provider,
-                Some(1),
+                Some(1)
             ));
-            provider.free(&integer).expect("free integer result");
-
-            let logical = make_output();
-            runmat_accelerate_api::set_handle_logical(&logical, true);
-            assert!(!valid_provider_dot_output(
-                &logical,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
-            ));
-            provider.free(&logical).expect("free logical result");
-
-            let mut owned_rejection = make_output();
-            owned_rejection.descriptor.storage =
-                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-            free_rejected_dot_handle(&owned_rejection, &[]);
-            assert!(block_on(provider.download(&owned_rejection)).is_err());
-
-            let mut native_alias = lhs.clone();
-            native_alias.shape = vec![1, 3];
-            assert!(!valid_provider_dot_output(
-                &native_alias,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
-            ));
-            assert!(!valid_dot_uploaded_output(
-                &native_alias,
-                &lhs,
-                provider,
-                &[1, 3],
-                runmat_accelerate_api::ProviderPrecision::F64,
-            ));
-            free_rejected_dot_handle(&native_alias, &[&lhs, &rhs]);
-            assert!(block_on(provider.download(&lhs)).is_ok());
-
-            let unowned_rejection = runmat_accelerate_api::GpuTensorHandle {
-                device_id: lhs.device_id.wrapping_add(10_000),
-                buffer_id: lhs.buffer_id,
-                shape: vec![1, 3],
-                descriptor: Default::default(),
-            };
-            assert!(!valid_provider_dot_output(
-                &unowned_rejection,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
-            ));
-            assert!(resolved_actual_dot_owner(&unowned_rejection).is_none());
-            free_rejected_dot_handle(&unowned_rejection, &[]);
-            assert!(block_on(provider.download(&lhs)).is_ok());
-
-            provider.free(&lhs).expect("free lhs");
-            provider.free(&rhs).expect("free rhs");
+            assert!(resolved_actual_dot_owner(&foreign.handle).is_none());
+            let _error = reject_dot_output(foreign.handle);
+            assert_eq!(foreign.probe.retirements(), 1);
+            assert_eq!(
+                block_on(provider.download(&lhs)).unwrap().data,
+                vec![1.0; 6]
+            );
         });
     }
 
@@ -1240,6 +963,25 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dot_preserves_rank_zero_tensor_as_zero_by_zero() {
+        let lhs = Tensor::new(vec![2.0], Vec::new()).expect("rank-zero lhs");
+        let rhs = Tensor::new(vec![3.0], Vec::new()).expect("rank-zero rhs");
+
+        assert!(lhs.shape().is_empty());
+        assert_eq!(lhs.rows(), 1, "the general Tensor projection is scalar");
+        assert_eq!(canonical_shape_tensor(&lhs), [0, 0]);
+
+        let Value::Tensor(result) =
+            dot_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("dot")
+        else {
+            panic!("rank-zero tensors follow the tensor dot path");
+        };
+        assert_eq!(result.shape(), [1, 0]);
+        assert!(result.materialize_f64().is_empty());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn dot_with_dimension_argument() {
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
@@ -1252,7 +994,7 @@ pub(crate) mod tests {
         .expect("dot");
         match cols {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![18.0, 20.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1265,7 +1007,7 @@ pub(crate) mod tests {
         .expect("dot");
         match rows {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), [2, 1]);
                 assert_eq!(t.materialize_f64(), vec![28.0, 28.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1289,7 +1031,7 @@ pub(crate) mod tests {
         .expect("dot");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![18.0, 20.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1337,11 +1079,11 @@ pub(crate) mod tests {
         assert_ne!(exact_products, preconverted_products);
 
         let elementwise = dot_real_tensor(&lhs, &rhs, Some(3)).unwrap();
-        assert_eq!(elementwise.shape, vec![2, 2]);
+        assert_eq!(elementwise.shape(), [2, 2]);
         assert_eq!(elementwise.materialize_f64(), exact_products);
 
         let reduced = dot_real_tensor(&lhs, &rhs, Some(1)).unwrap();
-        assert_eq!(reduced.shape, vec![1, 2]);
+        assert_eq!(reduced.shape(), [1, 2]);
         assert_eq!(
             reduced.materialize_f64(),
             vec![
@@ -1416,7 +1158,7 @@ pub(crate) mod tests {
         .expect("dot");
         match value {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 let expected = [(-4.0, 11.0), (4.0, 21.0)];
                 for (idx, (got, exp)) in t.materialize_f64().iter().zip(expected.iter()).enumerate()
                 {
@@ -1483,7 +1225,7 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 0.0]);
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1550,7 +1292,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 7.0]);
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1564,11 +1306,11 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![4.0, 3.0, 2.0, 1.0], vec![1, 4]).unwrap();
             let view_lhs = HostTensorView {
                 data: &lhs.materialize_f64(),
-                shape: &lhs.shape,
+                shape: lhs.shape(),
             };
             let view_rhs = HostTensorView {
                 data: &rhs.materialize_f64(),
-                shape: &rhs.shape,
+                shape: rhs.shape(),
             };
             let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
             let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -1581,7 +1323,7 @@ pub(crate) mod tests {
             match value {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 1]);
+                    assert_eq!(gathered.shape(), [1, 1]);
                     assert_eq!(gathered.materialize_f64(), vec![20.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -1597,7 +1339,7 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![4.0, 3.0, 2.0, 1.0], vec![1, 4]).unwrap();
             let view_lhs = HostTensorView {
                 data: &lhs.materialize_f64(),
-                shape: &lhs.shape,
+                shape: lhs.shape(),
             };
             let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
             let value = dot_builtin(
@@ -1610,7 +1352,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(handle)).expect("gather result");
-                    assert_eq!(gathered.shape, vec![1, 1]);
+                    assert_eq!(gathered.shape(), [1, 1]);
                     assert_eq!(gathered.materialize_f64(), vec![20.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -1631,7 +1373,7 @@ pub(crate) mod tests {
         .expect("dot");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 8.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1641,21 +1383,26 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
+    #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn dot_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        use runmat_accelerate_api::AccelProvider;
+
+        let _guard = test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .expect("requested vector-product hardware gate requires an actual WGPU adapter");
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![6.0, 3.0, 5.0, 1.0], vec![2, 2]).unwrap();
         let cpu = dot_real_tensor(&lhs, &rhs, Some(1)).expect("cpu dot");
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_lhs = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_rhs = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
         let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -1666,11 +1413,15 @@ pub(crate) mod tests {
         )
         .expect("gpu dot");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 
     fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::dot_builtin(lhs, rhs, rest))
+        block_on(super::dot_builtin(
+            lhs,
+            rhs,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

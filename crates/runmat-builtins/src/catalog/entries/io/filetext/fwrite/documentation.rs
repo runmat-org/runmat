@@ -1,0 +1,71 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("fwrite"),
+    slug: Some("fwrite"),
+    summary: "Write binary data to file identifiers in MATLAB and RunMat.",
+    description: "`fwrite` converts real numeric, logical, or text data to a binary precision and writes it through a file identifier from `fopen`. Values are emitted in column-major order. The result is a double scalar count of elements, not bytes.",
+    keywords: &["fwrite", "binary write", "io", "precision", "machine format", "skip"],
+    related: &["fopen", "fclose", "fread", "fileread", "filewrite", "feof", "fgets", "fprintf", "frewind"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Data and precision", paragraphs: &[
+            "`count = fwrite(fid, A)` writes one unsigned 8-bit value per element. A precision such as `'double'`, `'single'`, `'uint16'`, or `'int64'` chooses the target binary representation. `count` reports elements successfully written, so an empty input returns zero. Exact values from all eight integer input classes remain in integer storage through conversion, including int64 and uint64 values above binary64's exact-integer range. Integer narrowing rounds and saturates; NaN maps to zero for integer output and remains NaN for floating output, while infinities saturate at integer bounds.",
+            "Numeric and logical arrays traverse column-first. Character arrays emit Unicode scalar values; string arrays join elements with newline separators before emission. Complex values are not supported. File identifiers 0, 1, and 2 are reserved; use `fopen` for a writable file handle.",
+        ] },
+        BuiltinDocumentationSection { heading: "Skip, byte order, and residency", paragraphs: &[
+            "`fwrite(fid, A, precision, skip)` seeks forward by `skip` bytes after each element. A seek beyond the end can leave a sparse region, commonly read back as zero-filled bytes. A machine-format argument overrides the format recorded by `fopen`: `'native'`, `'ieee-le'`, and `'ieee-be'` select native, little-endian, and big-endian byte ordering for multibyte values.",
+            "The write runs on the host and is a fusion boundary. In RunMat mode, resident data and controls are gathered from their owning provider before writing, without changing the caller's original resident value. Integer-class file IDs and skips, logical/single/resident controls, direct GPU data, and fread-style `source=>output` precision are separately gated RunMat extensions. An unavailable owning provider fails the gather. Browser execution requires an installed filesystem service.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "bytes", title: "Write unsigned bytes with the default precision", program: "[fid, msg] = fopen('bytes.bin', 'w+b');\nassert(fid ~= -1, msg);\ncount = fwrite(fid, [1 2 3 255]);\nfclose(fid);\ncount", display_output: Some("count = 4"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 4); [check, msg] = fopen('bytes.bin', 'r'); assert(check ~= -1, msg); got = fread(check, 4, '*uint8'); fclose(check); assert(numel(got) == 4); assert(got(1) == 1); assert(got(2) == 2); assert(got(3) == 3); assert(got(4) == 255);" } },
+        BuiltinExample { id: "double", title: "Write double-precision values", program: "[fid, msg] = fopen('values.bin', 'w+b');\nassert(fid ~= -1, msg);\ndata = [1.5 -2.25 42.0];\ncount = fwrite(fid, data, 'double');\nfclose(fid);\ncount", display_output: Some("count = 3"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 3); [check, msg] = fopen('values.bin', 'r'); assert(check ~= -1, msg); got = fread(check, 3, '*double'); fclose(check); assert(got(1) == 1.5); assert(got(2) == -2.25); assert(got(3) == 42);" } },
+        BuiltinExample { id: "big-endian", title: "Write 16-bit integers with big-endian byte order", program: "[fid, msg] = fopen('sensor.be', 'w+b', 'ieee-be');\nassert(fid ~= -1, msg);\ncount = fwrite(fid, [258 772], 'uint16');\nfclose(fid);\ncount", display_output: Some("count = 2"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 2); [check, msg] = fopen('sensor.be', 'r'); assert(check ~= -1, msg); got = fread(check, 4, '*uint8'); fclose(check); assert(got(1) == 1); assert(got(2) == 2); assert(got(3) == 3); assert(got(4) == 4);" } },
+        BuiltinExample { id: "skip", title: "Insert padding between samples", program: "[fid, msg] = fopen('spaced.bin', 'w+b');\nassert(fid ~= -1, msg);\ncount = fwrite(fid, [10 20 30], 'uint8', 1);\nfclose(fid);\ncount", display_output: Some("count = 3"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 3); [check, msg] = fopen('spaced.bin', 'r'); assert(check ~= -1, msg); got = fread(check, 5, '*uint8'); fclose(check); assert(numel(got) == 5); assert(got(1) == 10); assert(got(3) == 20); assert(got(5) == 30);" } },
+        BuiltinExample { id: "characters", title: "Write character data without manual conversion", program: "[fid, msg] = fopen('greeting.txt', 'w+b');\nassert(fid ~= -1, msg);\ncount = fwrite(fid, 'RunMat!', 'char');\nfclose(fid);\ncount", display_output: Some("count = 7"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 7); assert(strcmp(fileread('greeting.txt'), 'RunMat!'));" } },
+        BuiltinExample { id: "resident", title: "Gather GPU data before writing", program: "[fid, msg] = fopen('gpu.bin', 'w+b');\nassert(fid ~= -1, msg);\nG = gpuArray([1 2 3 4]);\ncount = fwrite(fid, G, 'uint16');\nfclose(fid);\ncount", display_output: Some("count = 4"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Wgpu, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 4); [check, msg] = fopen('gpu.bin', 'r'); assert(check ~= -1, msg); got = fread(check, 4, '*uint16'); fclose(check); assert(got(1) == 1); assert(got(2) == 2); assert(got(3) == 3); assert(got(4) == 4);" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "What precisions does fwrite support?", answer: "The runtime recognizes double, single, all eight integer widths, and char, with aliases such as float64 and real*8. In RunMat mode, matching `source=>output` forms are a separately gated convenience; the compatibility target documents that grammar for fread, not fwrite." },
+        BuiltinDocumentationFaq { question: "How are values converted before writing?", answer: "Integer precisions round floating values to the nearest integer and saturate at the target bounds. Logical values become 0 or 1; character inputs use their Unicode scalar values. Exact integer inputs do not pass through a binary64 mirror." },
+        BuiltinDocumentationFaq { question: "What does the return value represent?", answer: "The number of elements written, not bytes. Multiply by the precision's element width to estimate payload bytes." },
+        BuiltinDocumentationFaq { question: "Does skip insert bytes into the file?", answer: "It seeks after each element. A later write beyond the previous end may create a sparse region, commonly read back as zeros." },
+        BuiltinDocumentationFaq { question: "How do machine formats affect output?", answer: "Native uses the host endianness, ieee-le forces little-endian, and ieee-be forces big-endian for multibyte values." },
+        BuiltinDocumentationFaq { question: "Can I write directly to standard output?", answer: "No. IDs 0, 1, and 2 are reserved by this binary file API; open a writable file with fopen." },
+        BuiltinDocumentationFaq { question: "Are GPU tensors supported?", answer: "In RunMat mode, direct resident data gathers from its owning provider for host file writing. If the owner cannot provide the data, the write fails." },
+        BuiltinDocumentationFaq { question: "Do string arrays insert newlines?", answer: "Yes. The runtime joins string-array elements with newline separators before converting characters to the selected binary precision." },
+        BuiltinDocumentationFaq { question: "What happens with NaN or infinity?", answer: "NaN maps to zero for integer precisions and remains NaN for floating precisions; infinities saturate for integer precisions." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "fopen", target: BuiltinDocumentationLinkTarget::Builtin("fopen") },
+        BuiltinDocumentationLink { label: "fclose", target: BuiltinDocumentationLinkTarget::Builtin("fclose") },
+        BuiltinDocumentationLink { label: "fread", target: BuiltinDocumentationLinkTarget::Builtin("fread") },
+        BuiltinDocumentationLink { label: "fileread", target: BuiltinDocumentationLinkTarget::Builtin("fileread") },
+        BuiltinDocumentationLink { label: "filewrite", target: BuiltinDocumentationLinkTarget::Builtin("filewrite") },
+        BuiltinDocumentationLink { label: "feof", target: BuiltinDocumentationLinkTarget::Builtin("feof") },
+        BuiltinDocumentationLink { label: "fgets", target: BuiltinDocumentationLinkTarget::Builtin("fgets") },
+        BuiltinDocumentationLink { label: "fprintf", target: BuiltinDocumentationLinkTarget::Builtin("fprintf") },
+        BuiltinDocumentationLink { label: "frewind", target: BuiltinDocumentationLinkTarget::Builtin("frewind") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Binary file write owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs") },
+            BuiltinDocumentationLink { label: "Precision and control admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite/controls.rs") },
+            BuiltinDocumentationLink { label: "Binary encoder and writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite/writing.rs") },
+            BuiltinDocumentationLink { label: "Borrowed typed element traversal", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite/writing/elements.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Native endian binary write", location: "builtins::io::filetext::fwrite::tests::writing::fwrite_double_precision_writes_native_endian" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident gather", location: "builtins::io::filetext::fwrite::tests::writing::fwrite_gpu_tensor_gathers_before_write" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "WGPU binary roundtrip", location: "builtins::io::filetext::fwrite::tests::writing::fwrite_wgpu_tensor_roundtrip" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Invalid precision", location: "builtins::io::filetext::fwrite::tests::writing::fwrite_invalid_precision_errors" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Negative skip", location: "builtins::io::filetext::fwrite::tests::writing::fwrite_negative_skip_errors" },
+        ],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

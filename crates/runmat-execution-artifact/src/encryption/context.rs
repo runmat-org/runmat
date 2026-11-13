@@ -17,6 +17,7 @@ pub enum EncryptionPurpose {
     TransferFrame,
     RunKeyEnvelope,
     Program,
+    RetirementReceipt,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

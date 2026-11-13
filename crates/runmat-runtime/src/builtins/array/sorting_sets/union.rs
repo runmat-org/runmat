@@ -5,34 +5,41 @@
 //! provider hook or typed host fallback, then public outputs are restored to the
 //! owning provider.
 
+use super::set_policy::{ElementKey, Operand};
+#[cfg(test)]
+use super::type_resolvers::set_values_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    UNION_DESCRIPTOR, UNION_ERROR_CONFLICTING_ORDER_OPTIONS, UNION_ERROR_INTERNAL,
+    UNION_ERROR_INVALID_ARGUMENT, UNION_ERROR_LEGACY_OPTION_UNSUPPORTED,
+    UNION_ERROR_NUMERIC_CLASS_MISMATCH, UNION_ERROR_ROWS_COLUMN_MISMATCH,
+    UNION_ERROR_UNKNOWN_OPTION, UNION_ERROR_UNSUPPORTED_INPUT_TYPE, UNION_INTEGER_CAPABILITIES,
+};
 use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, HashMap};
 
 use runmat_accelerate_api::{GpuTensorHandle, UnionOptions, UnionOrder, UnionResult};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericStorage, StringArray, Tensor, Value,
+    NumericStorage, StringArray, StringElement, Tensor, Utf16CodeUnit, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::set_values_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::union")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -63,215 +70,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "union";
 
-const UNION_OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Union values or rows.",
-}];
-
-const UNION_OUTPUT_C_IA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Union values or rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "ia",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting contributions from A.",
-    },
-];
-
-const UNION_OUTPUT_C_IA_IB: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Union values or rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "ia",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting contributions from A.",
-    },
-    BuiltinParamDescriptor {
-        name: "ib",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting contributions from B.",
-    },
-];
-
-const UNION_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input array.",
-    },
-];
-
-const UNION_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option tokens: 'rows'|'sorted'|'stable'.",
-    },
-];
-
-const UNION_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "C = union(A, B)",
-        inputs: &UNION_INPUTS_A_B,
-        outputs: &UNION_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = union(A, B, option...)",
-        inputs: &UNION_INPUTS_A_B_OPTIONS,
-        outputs: &UNION_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia] = union(A, B)",
-        inputs: &UNION_INPUTS_A_B,
-        outputs: &UNION_OUTPUT_C_IA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia] = union(A, B, option...)",
-        inputs: &UNION_INPUTS_A_B_OPTIONS,
-        outputs: &UNION_OUTPUT_C_IA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ib] = union(A, B)",
-        inputs: &UNION_INPUTS_A_B,
-        outputs: &UNION_OUTPUT_C_IA_IB,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ib] = union(A, B, option...)",
-        inputs: &UNION_INPUTS_A_B_OPTIONS,
-        outputs: &UNION_OUTPUT_C_IA_IB,
-    },
-];
-
-const UNION_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.LEGACY_OPTION_UNSUPPORTED",
-    identifier: Some("RunMat:union:LegacyOptionUnsupported"),
-    when: "Legacy compatibility options are requested.",
-    message: "union: the 'legacy' behaviour is not supported",
-};
-
-const UNION_ERROR_CONFLICTING_ORDER_OPTIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.CONFLICTING_ORDER_OPTIONS",
-    identifier: Some("RunMat:union:ConflictingOrderOptions"),
-    when: "Both 'sorted' and 'stable' options are provided.",
-    message: "union: cannot combine 'sorted' with 'stable'",
-};
-
-const UNION_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.UNKNOWN_OPTION",
-    identifier: Some("RunMat:union:UnknownOption"),
-    when: "An unsupported option token is provided.",
-    message: "union: unrecognised option",
-};
-
-const UNION_ERROR_ROWS_COLUMN_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.ROWS_COLUMN_MISMATCH",
-    identifier: Some("RunMat:union:RowsColumnMismatch"),
-    when: "'rows' mode is used and column counts differ.",
-    message: "union: inputs must have the same number of columns when using 'rows'",
-};
-
-const UNION_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.UNSUPPORTED_INPUT_TYPE",
-    identifier: Some("RunMat:union:UnsupportedInputType"),
-    when: "Input values cannot be converted into supported union domains.",
-    message: "union: unsupported input type",
-};
-
-const UNION_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.NUMERIC_CLASS_MISMATCH",
-    identifier: Some("RunMat:union:NumericClassMismatch"),
-    when: "Numeric inputs have incompatible nondouble classes.",
-    message: "union: numeric inputs must have the same class, except double may be combined with one nondouble class",
-};
-
-const UNION_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.INVALID_ARGUMENT",
-    identifier: Some("RunMat:union:InvalidArgument"),
-    when: "Option arguments are not string-like where required.",
-    message: "union: expected string option arguments",
-};
-
-const UNION_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNION.INTERNAL",
-    identifier: Some("RunMat:union:Internal"),
-    when: "Internal conversion/allocation/provider decode fails.",
-    message: "union: internal operation failed",
-};
-
-const UNION_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    UNION_ERROR_LEGACY_OPTION_UNSUPPORTED,
-    UNION_ERROR_CONFLICTING_ORDER_OPTIONS,
-    UNION_ERROR_UNKNOWN_OPTION,
-    UNION_ERROR_ROWS_COLUMN_MISMATCH,
-    UNION_ERROR_UNSUPPORTED_INPUT_TYPE,
-    UNION_ERROR_NUMERIC_CLASS_MISMATCH,
-    UNION_ERROR_INVALID_ARGUMENT,
-    UNION_ERROR_INTERNAL,
-];
-
-const UNION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[C, ia, ib] = union(integer_A, integer_B, options)",
-        inputs: &super::BINARY_SET_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "C preserves the common nondouble integer class, including when paired with double; ia and ib are one-based double. GPU supports integer classes through 32 bits and restores outputs after typed fallback.",
-    }];
-
-pub const UNION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UNION_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UNION_ERRORS,
-};
-
 fn union_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -293,17 +91,10 @@ fn union_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "union",
-    category = "array/sorting_sets",
-    summary = "Return unions of input arrays with ordering and index-output controls.",
-    keywords = "union,set,stable,rows,indices,gpu",
-    accel = "array_construct",
-    sink = true,
-    type_resolver(set_values_output_type),
-    descriptor(crate::builtins::array::sorting_sets::union::UNION_DESCRIPTOR),
-    integer_capabilities(UNION_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::union"
 )]
-async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn union_builtin(a: Value, b: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
         return Err(union_error_with(
             &UNION_ERROR_INVALID_ARGUMENT,
@@ -311,10 +102,10 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
         ));
     }
     let provider = super::set_output_provider(&a, &b);
-    let eval = evaluate(a, b, &rest).await?;
+    let eval = evaluate_view(a, b, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -323,7 +114,7 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
                 vec![eval.into_values_value()],
                 union_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         if out_count == 2 {
             let (values, ia) = eval.into_pair();
@@ -333,7 +124,7 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
                 vec![values, ia],
                 union_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
         let outputs = super::restore_set_outputs(
@@ -342,7 +133,7 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             vec![values, ia, ib],
             union_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,
@@ -355,9 +146,17 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
 
 /// Evaluate the `union` builtin once and expose all outputs.
 pub async fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
+    evaluate_view(a, b, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    a: Value,
+    b: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<UnionEvaluation> {
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "union")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "union")?;
-    let opts = parse_options(rest)?;
+    let opts = parse_options_view(rest)?;
     for value in [&a, &b] {
         if let Value::GpuTensor(handle) = value {
             if super::is_unsupported_set_gpu_integer(handle) {
@@ -378,7 +177,7 @@ pub async fn evaluate(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResul
     }
 }
 
-fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UnionOptions> {
+fn parse_options_view(rest: FunctionArgumentView<'_>) -> crate::BuiltinResult<UnionOptions> {
     let mut opts = UnionOptions {
         rows: false,
         order: UnionOrder::Sorted,
@@ -446,19 +245,32 @@ async fn union_gpu_pair(
     handle_b: GpuTensorHandle,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle_a)
-        .or_else(runmat_accelerate_api::provider)
-    {
-        match provider.union(&handle_a, &handle_b, opts).await {
-            Ok(result) => return UnionEvaluation::from_union_result(result),
-            Err(_) => {
-                // Fall back to host gather when provider union is unavailable.
+    if super::provider_result::real_pair(&handle_a, &handle_b) {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle_a) {
+            if let Some(result) = super::provider_result::attempt(
+                provider.union(&handle_a, &handle_b, opts),
+                union_internal_error,
+            )
+            .await?
+            {
+                let (values, ia, ib) = super::provider_result::union(
+                    result,
+                    &handle_a,
+                    &handle_b,
+                    opts.rows,
+                    union_internal_error,
+                )?;
+                return Ok(UnionEvaluation::new(
+                    tensor::tensor_into_value(values),
+                    ia,
+                    ib,
+                ));
             }
         }
     }
-    let tensor_a = gpu_helpers::gather_tensor_async(&handle_a).await?;
-    let tensor_b = gpu_helpers::gather_tensor_async(&handle_b).await?;
-    union_numeric(tensor_a, tensor_b, opts)
+    let a = gpu_helpers::gather_value_async(&Value::GpuTensor(handle_a)).await?;
+    let b = gpu_helpers::gather_value_async(&Value::GpuTensor(handle_b)).await?;
+    union_host(a, b, opts)
 }
 
 async fn union_gpu_mixed(
@@ -467,18 +279,18 @@ async fn union_gpu_mixed(
     opts: &UnionOptions,
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    let tensor_gpu = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
-    let tensor_other =
-        tensor::value_into_tensor_for("union", other).map_err(|e| union_internal_error(e))?;
+    let gpu = gpu_helpers::gather_value_async(&Value::GpuTensor(handle_gpu)).await?;
     if gpu_is_a {
-        union_numeric(tensor_gpu, tensor_other, opts)
+        union_host(gpu, other, opts)
     } else {
-        union_numeric(tensor_other, tensor_gpu, opts)
+        union_host(other, gpu, opts)
     }
 }
 
 fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<UnionEvaluation> {
-    match (a, b) {
+    let row_output =
+        !opts.rows && super::set_policy::ElementOrientation::BothRow.values_row(&a, &b);
+    let mut evaluation = match (a, b) {
         // Complex cases
         (Value::ComplexTensor(at), Value::ComplexTensor(bt)) => union_complex(at, bt, opts),
         (Value::ComplexTensor(at), Value::Complex(re, im)) => {
@@ -507,19 +319,19 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
             union_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_elements_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_elements_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
@@ -532,7 +344,10 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
                 .map_err(|e| union_error_with(&UNION_ERROR_UNSUPPORTED_INPUT_TYPE, e))?;
             union_numeric(tensor_a, tensor_b, opts)
         }
-    }
+    }?;
+    evaluation.values =
+        super::set_policy::orient(evaluation.values, row_output, union_internal_error)?;
+    Ok(evaluation)
 }
 
 fn union_numeric(
@@ -543,9 +358,15 @@ fn union_numeric(
     let a_dtype = a.numeric_dtype();
     let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
-        if a_storage.class_name() == b_storage.class_name() {
+        if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
-                union_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+                union_integer_rows(
+                    a_storage,
+                    a.shape().to_vec(),
+                    b_storage,
+                    b.shape().to_vec(),
+                    opts,
+                )
             } else {
                 union_integer_elements(a_storage, b_storage, opts)
             };
@@ -554,12 +375,12 @@ fn union_numeric(
     }
     match (a.integer_storage(), b.integer_storage()) {
         (Some(storage), None) if b_dtype == NumericDType::F64 => {
-            let target = IntegerTarget::from_storage(storage);
+            let target = IntegerClass::from_storage(storage);
             let b = target.cast_tensor(b).map_err(union_internal_error)?;
             return union_numeric(a, b, opts);
         }
         (None, Some(storage)) if a_dtype == NumericDType::F64 => {
-            let target = IntegerTarget::from_storage(storage);
+            let target = IntegerClass::from_storage(storage);
             let a = target.cast_tensor(a).map_err(union_internal_error)?;
             return union_numeric(a, b, opts);
         }
@@ -568,8 +389,8 @@ fn union_numeric(
     if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
         return Err(union_error(&UNION_ERROR_NUMERIC_CLASS_MISMATCH));
     }
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
+    let a_shape = a.shape().to_vec();
+    let b_shape = b.shape().to_vec();
     let a_storage = a
         .into_numeric_storage()
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
@@ -583,6 +404,20 @@ fn union_numeric(
         (NumericStorage::F32(a), NumericStorage::F32(b)) => {
             union_floating(a, a_shape, b, b_shape, opts)
         }
+        (NumericStorage::F64(a), NumericStorage::F32(b)) => union_floating(
+            a.into_iter().map(|value| value as f32).collect(),
+            a_shape,
+            b,
+            b_shape,
+            opts,
+        ),
+        (NumericStorage::F32(a), NumericStorage::F64(b)) => union_floating(
+            a,
+            a_shape,
+            b.into_iter().map(|value| value as f32).collect(),
+            b_shape,
+            opts,
+        ),
         (a, b) => union_promoted_f64(a, a_shape, b, b_shape, opts),
     }
 }
@@ -623,7 +458,12 @@ pub fn union_numeric_from_tensors(
     b: Tensor,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    union_numeric(a, b, opts)
+    let row_output =
+        !opts.rows && super::set_policy::ElementOrientation::BothRow.row(a.shape(), b.shape());
+    let mut evaluation = union_numeric(a, b, opts)?;
+    evaluation.values =
+        super::set_policy::orient(evaluation.values, row_output, union_internal_error)?;
+    Ok(evaluation)
 }
 
 fn union_integer_elements(
@@ -723,11 +563,11 @@ fn union_floating_elements<T: SetFloat>(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let mut entries = Vec::<FloatingUnionEntry<T>>::new();
-    let mut map: HashMap<u64, usize> = HashMap::new();
+    let mut map: HashMap<ElementKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
     for (idx, &value) in a_values.iter().enumerate() {
-        let key = value.canonical_key();
+        let key = ElementKey::real(value, Operand::A, idx);
         match map.entry(key) {
             Entry::Occupied(_) => {
                 // Already recorded from A; keep first occurrence only.
@@ -747,7 +587,7 @@ fn union_floating_elements<T: SetFloat>(
     }
 
     for (idx, &value) in b_values.iter().enumerate() {
-        let key = value.canonical_key();
+        let key = ElementKey::real(value, Operand::B, idx);
         match map.entry(key) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
@@ -804,7 +644,7 @@ fn union_floating_rows<T: SetFloat>(
             let idx = r + c * rows_a;
             row_values.push(a_values[idx]);
         }
-        let key = FloatingRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values, Operand::A, r);
         match map.entry(key) {
             Entry::Occupied(_) => {}
             Entry::Vacant(v) => {
@@ -827,7 +667,7 @@ fn union_floating_rows<T: SetFloat>(
             let idx = r + c * rows_b;
             row_values.push(b_values[idx]);
         }
-        let key = FloatingRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values, Operand::B, r);
         match map.entry(key) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
@@ -857,24 +697,38 @@ fn union_complex(
     b: ComplexTensor,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
-    match (a.into_complex_storage(), b.into_complex_storage()) {
+    let (a_storage, a_shape) = a.into_complex_storage_and_shape();
+    let (b_storage, b_shape) = b.into_complex_storage_and_shape();
+    match (a_storage, b_storage) {
         (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
             union_floating_complex(a, a_shape, b, b_shape, opts)
         }
         (ComplexStorage::F32(a), ComplexStorage::F32(b)) => {
             union_floating_complex(a, a_shape, b, b_shape, opts)
         }
+        (ComplexStorage::F64(a), ComplexStorage::F32(b)) => union_floating_complex(
+            super::float_order::ComplexSingleView(a),
+            a_shape,
+            b,
+            b_shape,
+            opts,
+        ),
+        (ComplexStorage::F32(a), ComplexStorage::F64(b)) => union_floating_complex(
+            a,
+            a_shape,
+            super::float_order::ComplexSingleView(b),
+            b_shape,
+            opts,
+        ),
         (a, b) => union_promoted_complex_f64(a, a_shape, b, b_shape, opts),
     }
 }
 
 fn union_promoted_complex_f64(
     a: ComplexStorage,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: ComplexStorage,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     union_floating_complex(
@@ -886,11 +740,11 @@ fn union_promoted_complex_f64(
     )
 }
 
-fn union_floating_complex<T: SetFloat>(
-    a: Vec<(T, T)>,
-    a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
-    b_shape: Vec<usize>,
+fn union_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    a_shape: runmat_value::SharedShape,
+    b: B,
+    b_shape: runmat_value::SharedShape,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if opts.rows {
@@ -900,17 +754,18 @@ fn union_floating_complex<T: SetFloat>(
     }
 }
 
-fn union_complex_elements<T: SetFloat>(
-    a: Vec<(T, T)>,
-    b: Vec<(T, T)>,
+fn union_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    b: B,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let mut entries = Vec::<ComplexUnionEntry<T>>::new();
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
-    for (idx, &value) in a.iter().enumerate() {
-        let key = ComplexKey::new(value);
+    for idx in 0..a.len() {
+        let value = a.pair_at(idx);
+        let key = ElementKey::complex(value, Operand::A, idx);
         match map.entry(key) {
             Entry::Occupied(_) => {}
             Entry::Vacant(v) => {
@@ -927,8 +782,9 @@ fn union_complex_elements<T: SetFloat>(
         }
     }
 
-    for (idx, &value) in b.iter().enumerate() {
-        let key = ComplexKey::new(value);
+    for idx in 0..b.len() {
+        let value = b.pair_at(idx);
+        let key = ElementKey::complex(value, Operand::B, idx);
         match map.entry(key) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
@@ -953,11 +809,11 @@ fn union_complex_elements<T: SetFloat>(
     assemble_complex_union(entries, opts)
 }
 
-fn union_complex_rows<T: SetFloat>(
-    a: Vec<(T, T)>,
-    a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
-    b_shape: Vec<usize>,
+fn union_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    a_shape: runmat_value::SharedShape,
+    b: B,
+    b_shape: runmat_value::SharedShape,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a_shape.len() != 2 || b_shape.len() != 2 {
@@ -984,9 +840,9 @@ fn union_complex_rows<T: SetFloat>(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            let value = a[idx];
+            let value = a.pair_at(idx);
             row_values.push(value);
-            key_row.push(ComplexKey::new(value));
+            key_row.push(ElementKey::complex(value, Operand::A, r));
         }
         match map.entry(key_row) {
             Entry::Occupied(_) => {}
@@ -1009,9 +865,9 @@ fn union_complex_rows<T: SetFloat>(
         let mut key_row = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            let value = b[idx];
+            let value = b.pair_at(idx);
             row_values.push(value);
-            key_row.push(ComplexKey::new(value));
+            key_row.push(ElementKey::complex(value, Operand::B, r));
         }
         match map.entry(key_row) {
             Entry::Occupied(occ) => {
@@ -1062,8 +918,8 @@ fn union_char_elements(
         for row in 0..a.rows {
             let linear_idx = row + col * a.rows;
             let data_idx = row * a.cols + col;
-            let ch = a.data[data_idx];
-            let key = ch as u32;
+            let ch = a.data()[data_idx];
+            let key = ch.raw() as u32;
             match map.entry(key) {
                 Entry::Occupied(_) => {}
                 Entry::Vacant(v) => {
@@ -1085,8 +941,8 @@ fn union_char_elements(
         for row in 0..b.rows {
             let linear_idx = row + col * b.rows;
             let data_idx = row * b.cols + col;
-            let ch = b.data[data_idx];
-            let key = ch as u32;
+            let ch = b.data()[data_idx];
+            let key = ch.raw() as u32;
             match map.entry(key) {
                 Entry::Occupied(occ) => {
                     let entry = &mut entries[*occ.get()];
@@ -1135,7 +991,7 @@ fn union_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(a.data[idx]);
+            row_values.push(a.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         match map.entry(key) {
@@ -1158,7 +1014,7 @@ fn union_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(b.data[idx]);
+            row_values.push(b.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         match map.entry(key) {
@@ -1203,16 +1059,16 @@ fn union_string_elements(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let mut entries = Vec::<StringUnionEntry>::new();
-    let mut map: HashMap<String, usize> = HashMap::new();
+    let mut map: HashMap<(&StringElement, usize), usize> = HashMap::new();
     let mut order_counter = 0usize;
 
-    for (idx, value) in a.data.iter().enumerate() {
-        match map.entry(value.clone()) {
+    for (idx, value) in a.data().iter().enumerate() {
+        match map.entry((value, if value.is_missing() { idx + 1 } else { 0 })) {
             Entry::Occupied(_) => {}
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
                 entries.push(StringUnionEntry {
-                    value: value.clone(),
+                    value,
                     a_index: Some(idx),
                     b_index: None,
                     order_rank: order_counter,
@@ -1223,8 +1079,15 @@ fn union_string_elements(
         }
     }
 
-    for (idx, value) in b.data.iter().enumerate() {
-        match map.entry(value.clone()) {
+    for (idx, value) in b.data().iter().enumerate() {
+        match map.entry((
+            value,
+            if value.is_missing() {
+                a.data().len() + idx + 1
+            } else {
+                0
+            },
+        )) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
                 if entry.a_index.is_none() && entry.b_index.is_none() {
@@ -1234,7 +1097,7 @@ fn union_string_elements(
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
                 entries.push(StringUnionEntry {
-                    value: value.clone(),
+                    value,
                     a_index: None,
                     b_index: Some(idx),
                     order_rank: order_counter,
@@ -1269,16 +1132,21 @@ fn union_string_rows(
     let rows_b = b.shape[0];
 
     let mut entries = Vec::<StringRowUnionEntry>::new();
-    let mut map: HashMap<RowStringKey, usize> = HashMap::new();
+    let mut map: HashMap<(RowStringKey, usize), usize> = HashMap::new();
     let mut order_counter = 0usize;
 
     for r in 0..rows_a {
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx].clone());
+            row_values.push(&a.data()[idx]);
         }
-        let key = RowStringKey(row_values.clone());
+        let salt = if row_values.iter().any(|text| text.is_missing()) {
+            r + 1
+        } else {
+            0
+        };
+        let key = (RowStringKey(row_values.clone()), salt);
         match map.entry(key) {
             Entry::Occupied(_) => {}
             Entry::Vacant(v) => {
@@ -1299,9 +1167,14 @@ fn union_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx].clone());
+            row_values.push(&b.data()[idx]);
         }
-        let key = RowStringKey(row_values.clone());
+        let salt = if row_values.iter().any(|text| text.is_missing()) {
+            rows_a + r + 1
+        } else {
+            0
+        };
+        let key = (RowStringKey(row_values.clone()), salt);
         match map.entry(key) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
@@ -1442,7 +1315,7 @@ struct ComplexRowUnionEntry<T> {
 
 #[derive(Debug)]
 struct CharUnionEntry {
-    ch: char,
+    ch: Utf16CodeUnit,
     a_index: Option<usize>,
     b_index: Option<usize>,
     order_rank: usize,
@@ -1450,63 +1323,53 @@ struct CharUnionEntry {
 
 #[derive(Debug)]
 struct CharRowUnionEntry {
-    row_data: Vec<char>,
+    row_data: Vec<Utf16CodeUnit>,
     a_row: Option<usize>,
     b_row: Option<usize>,
     order_rank: usize,
 }
 
 #[derive(Debug)]
-struct StringUnionEntry {
-    value: String,
+struct StringUnionEntry<'a> {
+    value: &'a StringElement,
     a_index: Option<usize>,
     b_index: Option<usize>,
     order_rank: usize,
 }
 
 #[derive(Debug)]
-struct StringRowUnionEntry {
-    row_data: Vec<String>,
+struct StringRowUnionEntry<'a> {
+    row_data: Vec<&'a StringElement>,
     a_row: Option<usize>,
     b_row: Option<usize>,
     order_rank: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct FloatingRowKey(Vec<u64>);
-
+struct FloatingRowKey(Vec<ElementKey>);
 impl FloatingRowKey {
-    fn from_slice<T: SetFloat>(values: &[T]) -> Self {
-        Self(values.iter().map(|&value| value.canonical_key()).collect())
+    fn from_slice<T: SetFloat>(values: &[T], operand: Operand, record: usize) -> Self {
+        Self(
+            values
+                .iter()
+                .map(|&value| ElementKey::real(value, operand, record))
+                .collect(),
+        )
     }
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct ComplexKey {
-    re: u64,
-    im: u64,
-}
-
-impl ComplexKey {
-    fn new<T: SetFloat>(value: (T, T)) -> Self {
-        Self {
-            re: value.0.canonical_key(),
-            im: value.1.canonical_key(),
-        }
-    }
-}
+type ComplexKey = ElementKey;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RowCharKey(Vec<u32>);
 
 impl RowCharKey {
-    fn from_slice(values: &[char]) -> Self {
-        RowCharKey(values.iter().map(|&ch| ch as u32).collect())
+    fn from_slice(values: &[Utf16CodeUnit]) -> Self {
+        RowCharKey(values.iter().map(|&ch| ch.raw() as u32).collect())
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a StringElement>);
 
 fn assemble_floating_union<T: SetFloat>(
     entries: Vec<FloatingUnionEntry<T>>,
@@ -1823,7 +1686,7 @@ fn assemble_char_union(
         }
     }
 
-    let value_array = CharArray::new(values, order.len(), 1)
+    let value_array = CharArray::from_code_units(values, order.len(), 1)
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
@@ -1857,7 +1720,7 @@ fn assemble_char_row_union(
     }
 
     let unique_rows = order.len();
-    let mut values = vec!['\0'; unique_rows * cols];
+    let mut values = vec![runmat_value::Utf16CodeUnit::from_raw(0); unique_rows * cols];
     let mut ia = Vec::new();
     let mut ib = Vec::new();
 
@@ -1874,7 +1737,7 @@ fn assemble_char_row_union(
         }
     }
 
-    let value_array = CharArray::new(values, unique_rows, cols)
+    let value_array = CharArray::from_code_units(values, unique_rows, cols)
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
@@ -1897,7 +1760,7 @@ fn assemble_string_union(
     let mut order: Vec<usize> = (0..entries.len()).collect();
     match opts.order {
         UnionOrder::Sorted => {
-            order.sort_by(|&lhs, &rhs| entries[lhs].value.cmp(&entries[rhs].value));
+            order.sort_by(|&lhs, &rhs| entries[lhs].value.cmp(entries[rhs].value));
         }
         UnionOrder::Stable => {
             order.sort_by_key(|&idx| entries[idx].order_rank);
@@ -1917,7 +1780,7 @@ fn assemble_string_union(
         }
     }
 
-    let value_array = StringArray::new(values, vec![order.len(), 1])
+    let value_array = StringArray::from_elements_unbounded(values, vec![order.len(), 1])
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
@@ -1951,7 +1814,7 @@ fn assemble_string_row_union(
     }
 
     let unique_rows = order.len();
-    let mut values = vec![String::new(); unique_rows * cols];
+    let mut values = vec![StringElement::default(); unique_rows * cols];
     let mut ia = Vec::new();
     let mut ib = Vec::new();
 
@@ -1968,7 +1831,7 @@ fn assemble_string_row_union(
         }
     }
 
-    let value_array = StringArray::new(values, vec![unique_rows, cols])
+    let value_array = StringArray::from_elements_unbounded(values, vec![unique_rows, cols])
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
@@ -2029,7 +1892,7 @@ fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
+fn compare_char_rows(a: &[Utf16CodeUnit], b: &[Utf16CodeUnit]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -2039,7 +1902,7 @@ fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
+fn compare_string_rows(a: &[&StringElement], b: &[&StringElement]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -2062,7 +1925,27 @@ pub(crate) mod tests {
     }
 
     fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(union_builtin(a, b, rest))
+        futures::executor::block_on(union_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn union_rows_rejects_rank_zero_and_rank_one_tensors() {
+        for (shape, data) in [(vec![], vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+            let left = Tensor::new(data, shape).expect("left tensor");
+            let right = Tensor::new(vec![1.0], vec![1, 1]).expect("right matrix");
+            let error = builtin_sync(
+                Value::Tensor(left),
+                Value::Tensor(right),
+                vec![Value::from("rows")],
+            )
+            .expect_err("rows requires two-dimensional numeric matrices");
+            assert!(error.message().contains("requires 2-D numeric matrices"));
+        }
     }
 
     #[test]
@@ -2077,7 +1960,8 @@ pub(crate) mod tests {
             );
 
             {
-                let _guard = crate::output_count::push_output_count(Some(3));
+                let _guard =
+                    crate::output_count::push_output_count(Some(3)).expect("output-count scope");
                 let Value::OutputList(outputs) =
                     builtin_sync(left, right, Vec::new()).expect("resident union")
                 else {
@@ -2095,7 +1979,8 @@ pub(crate) mod tests {
                 );
             }
 
-            let _guard = crate::output_count::push_output_count(Some(4));
+            let _guard =
+                crate::output_count::push_output_count(Some(4)).expect("output-count scope");
             let err = builtin_sync(Value::Num(1.0), Value::Num(1.0), Vec::new())
                 .expect_err("excess outputs must fail");
             assert_eq!(err.identifier(), UNION_ERROR_INVALID_ARGUMENT.identifier);
@@ -2111,16 +1996,16 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
-                assert_eq!(t.shape, vec![4, 1]);
+                assert_eq!(t.shape(), &[4, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
         assert_eq!(ia.materialize_f64(), vec![3.0, 1.0, 2.0]);
-        assert_eq!(ia.shape, vec![3, 1]);
+        assert_eq!(ia.shape(), &[3, 1]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
         assert_eq!(ib.materialize_f64(), vec![1.0]);
-        assert_eq!(ib.shape, vec![1, 1]);
+        assert_eq!(ib.shape(), &[1, 1]);
     }
 
     #[test]
@@ -2146,7 +2031,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected native single rows");
         };
-        assert_eq!(values.shape, vec![3, 2]);
+        assert_eq!(values.shape(), &[3, 2]);
         assert_eq!(
             values.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
@@ -2163,8 +2048,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single value");
         };
-        assert_eq!(values.as_f32_slice(), Some(&[(1.0, 1.0)][..]));
-
+        assert_eq!(
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 1.0)])
+        );
         let a = ComplexTensor::from_f32(
             vec![
                 (1.0, 0.0),
@@ -2192,19 +2083,21 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single rows");
         };
-        assert_eq!(values.shape, vec![3, 2]);
+        assert_eq!(values.shape(), &[3, 2]);
         assert_eq!(
-            values.as_f32_slice(),
-            Some(
-                &[
-                    (1.0, 0.0),
-                    (3.0, 0.0),
-                    (5.0, 0.0),
-                    (2.0, 1.0),
-                    (4.0, 1.0),
-                    (6.0, 1.0),
-                ][..]
-            )
+            values.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.0, 0.0),
+                (3.0, 0.0),
+                (5.0, 0.0),
+                (2.0, 1.0),
+                (4.0, 1.0),
+                (6.0, 1.0),
+            ])
         );
     }
 
@@ -2344,7 +2237,7 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![5.0, 7.0, 1.0, 3.0, 2.0, 4.0]);
-                assert_eq!(t.shape, vec![6, 1]);
+                assert_eq!(t.shape(), &[6, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -2361,14 +2254,15 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![2.0, f64::NAN], vec![2, 1]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
         let values = tensor::value_into_tensor_for("union", eval.values_value()).expect("values");
-        assert_eq!(values.shape, vec![3, 1]);
+        assert_eq!(values.shape(), &[4, 1]);
         assert_eq!(values.materialize_f64()[0], 1.0);
         assert_eq!(values.materialize_f64()[1], 2.0);
         assert!(values.materialize_f64()[2].is_nan());
+        assert!(values.materialize_f64()[3].is_nan());
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
         assert_eq!(ia.materialize_f64(), vec![2.0, 1.0]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
-        assert_eq!(ib.materialize_f64(), vec![1.0]);
+        assert_eq!(ib.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2380,7 +2274,7 @@ pub(crate) mod tests {
             .expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2405,7 +2299,7 @@ pub(crate) mod tests {
         let (values, ia, ib) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2419,14 +2313,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn union_char_elements() {
-        let a = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
-        let b = CharArray::new(vec!['a', 'x', 'm', 'a'], 2, 2).unwrap();
+        let a = CharArray::from_unicode_scalars(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
+        let b = CharArray::from_unicode_scalars(vec!['a', 'x', 'm', 'a'], 2, 2).unwrap();
         let eval = evaluate_sync(Value::CharArray(a), Value::CharArray(b), &[]).expect("union");
         match eval.values_value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 4);
                 assert_eq!(arr.cols, 1);
-                assert_eq!(arr.data, vec!['a', 'm', 'x', 'z']);
+                assert_eq!(arr.data(), runmat_value::encode_utf16_code_units("amxz"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -2469,7 +2363,7 @@ pub(crate) mod tests {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![3, 2]);
                 assert_eq!(
-                    arr.data,
+                    arr.data(),
                     vec![
                         "alpha".to_string(),
                         "gamma".to_string(),
@@ -2496,11 +2390,11 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).unwrap();
             let view_a = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
             let handle_b = provider.upload(&view_b).expect("upload B");
@@ -2582,7 +2476,7 @@ pub(crate) mod tests {
     #[test]
     fn union_requires_matching_types() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let b = CharArray::new(vec!['a', 'b'], 1, 2).unwrap();
+        let b = CharArray::from_unicode_scalars(vec!['a', 'b'], 1, 2).unwrap();
         let err = union_host(
             Value::Tensor(a),
             Value::CharArray(b),
@@ -2606,7 +2500,7 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0]);
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[1, 2]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
         }
@@ -2635,11 +2529,11 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
@@ -2650,7 +2544,7 @@ pub(crate) mod tests {
         let gpu_ib = tensor::value_into_tensor_for("union", gpu_eval.ib_value()).unwrap();
 
         assert_eq!(gpu_values.materialize_f64(), cpu_values.materialize_f64());
-        assert_eq!(gpu_values.shape, cpu_values.shape);
+        assert_eq!(gpu_values.shape(), cpu_values.shape());
         assert_eq!(gpu_ia.materialize_f64(), cpu_ia.materialize_f64());
         assert_eq!(gpu_ib.materialize_f64(), cpu_ib.materialize_f64());
     }

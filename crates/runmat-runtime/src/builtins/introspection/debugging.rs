@@ -1,14 +1,18 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    DBCLEAR_DESCRIPTOR, DBCLEAR_ERROR_TOO_MANY_OUTPUTS, DBSTACK_DESCRIPTOR, DBSTATUS_DESCRIPTOR,
+    DBSTATUS_ERROR_TOO_MANY_OUTPUTS, DBTYPE_DESCRIPTOR, DBTYPE_ERROR_TOO_MANY_OUTPUTS,
+    DEBUG_ERROR_FILE_NOT_FOUND, DEBUG_ERROR_FILE_READ, DEBUG_ERROR_INVALID_INPUT,
+    DEBUG_ERROR_NO_CURRENT_FILE, DEBUG_ERROR_TOO_MANY_INPUTS, DEBUG_ERROR_TOO_MANY_OUTPUTS,
+    GETCALLINFO_DESCRIPTOR, GETCALLINFO_ERROR_TOO_MANY_OUTPUTS, KEYBOARD_DESCRIPTOR,
+    KEYBOARD_ERROR_TOO_MANY_OUTPUTS, MISLOCKED_DESCRIPTOR, MISLOCKED_ERROR_TOO_MANY_OUTPUTS,
+    MLOCK_DESCRIPTOR, MLOCK_ERROR_TOO_MANY_OUTPUTS, MUNLOCK_DESCRIPTOR,
+    MUNLOCK_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::{CellArray, NumericDType, StructValue, Tensor, Value};
+use runmat_value::{CellArray, NumericDType, StructArray, StructValue, Tensor, Value};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -17,416 +21,6 @@ use crate::builtins::common::path_search::{file_candidates, path_is_file};
 use crate::builtins::common::tensor;
 use crate::console::{record_console_line, ConsoleStream};
 use crate::{BuiltinResult, RuntimeError};
-
-const DBSTACK_OUTPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ST",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description:
-            "Call-stack entries in RunMat's column-cell representation of a structure array.",
-    },
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Current workspace index within the returned stack.",
-    },
-];
-
-const DBSTACK_STACK_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ST",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Call-stack entries in RunMat's column-cell representation of a structure array.",
-}];
-
-const DBSTACK_N_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of leading stack entries to omit.",
-}];
-
-const DBSTACK_OPTION_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "option",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "`-completenames` requests full source paths.",
-}];
-
-const DBSTACK_OPTION_N_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "`-completenames` requests full source paths.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of leading stack entries to omit.",
-    },
-];
-
-const DBSTACK_N_OPTION_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of leading stack entries to omit.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "`-completenames` requests full source paths.",
-    },
-];
-
-const DBSTACK_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
-    BuiltinSignatureDescriptor {
-        label: "dbstack",
-        inputs: &[],
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "ST = dbstack",
-        inputs: &[],
-        outputs: &DBSTACK_STACK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ST = dbstack(n)",
-        inputs: &DBSTACK_N_INPUT,
-        outputs: &DBSTACK_STACK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ST = dbstack('-completenames')",
-        inputs: &DBSTACK_OPTION_INPUT,
-        outputs: &DBSTACK_STACK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ST = dbstack('-completenames', n)",
-        inputs: &DBSTACK_OPTION_N_INPUTS,
-        outputs: &DBSTACK_STACK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ST = dbstack(n, '-completenames')",
-        inputs: &DBSTACK_N_OPTION_INPUTS,
-        outputs: &DBSTACK_STACK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ST,I] = dbstack",
-        inputs: &[],
-        outputs: &DBSTACK_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ST,I] = dbstack(n)",
-        inputs: &DBSTACK_N_INPUT,
-        outputs: &DBSTACK_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ST,I] = dbstack('-completenames')",
-        inputs: &DBSTACK_OPTION_INPUT,
-        outputs: &DBSTACK_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ST,I] = dbstack('-completenames', n)",
-        inputs: &DBSTACK_OPTION_N_INPUTS,
-        outputs: &DBSTACK_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ST,I] = dbstack(n, '-completenames')",
-        inputs: &DBSTACK_N_OPTION_INPUTS,
-        outputs: &DBSTACK_OUTPUTS,
-    },
-];
-
-const TEXT_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Function, script, file, command, or option text.",
-}];
-
-const DBTYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "file",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "MATLAB source file, path, or function name.",
-    },
-    BuiltinParamDescriptor {
-        name: "range",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional line range such as `3:8`.",
-    },
-];
-
-const DBTYPE_FILE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "file",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "MATLAB source file, path, or function name.",
-}];
-
-const DBTYPE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "dbtype file",
-        inputs: &DBTYPE_FILE_INPUT,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "dbtype file start:end",
-        inputs: &DBTYPE_INPUTS,
-        outputs: &[],
-    },
-];
-
-const SIMPLE_NO_OUTPUT_SIGNATURE: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "keyboard",
-    inputs: &[],
-    outputs: &[],
-}];
-
-const MLOCK_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "mlock",
-    inputs: &[],
-    outputs: &[],
-}];
-
-const MUNLOCK_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "munlock",
-        inputs: &[],
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "munlock(fun)",
-        inputs: &TEXT_INPUT,
-        outputs: &[],
-    },
-];
-
-const MISLOCKED_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical scalar indicating whether the function or script is locked.",
-}];
-
-const MISLOCKED_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = mislocked",
-        inputs: &[],
-        outputs: &MISLOCKED_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = mislocked(fun)",
-        inputs: &TEXT_INPUT,
-        outputs: &MISLOCKED_OUTPUT,
-    },
-];
-
-const DBSTATUS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "dbstatus",
-        inputs: &TEXT_INPUT,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "b = dbstatus(file, '-completenames')",
-        inputs: &TEXT_INPUT,
-        outputs: &DBSTATUS_OUTPUT,
-    },
-];
-
-const DBSTATUS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "b",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Breakpoint entries as a 1-by-N cell row; currently empty until execution breakpoints are implemented.",
-}];
-
-const DBCLEAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "dbclear all | dbclear in file at location | dbclear if condition",
-    inputs: &TEXT_INPUT,
-    outputs: &[],
-}];
-
-const GETCALLINFO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "info = getcallinfo",
-    inputs: &[],
-    outputs: &GETCALLINFO_OUTPUT,
-}];
-
-const GETCALLINFO_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "info",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scalar struct describing the current call context and stack.",
-}];
-
-pub const DEBUG_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DEBUG.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:TooManyInputs"),
-    when: "A debugger compatibility helper receives more inputs than it supports.",
-    message: "debugger helper: too many input arguments",
-};
-
-pub const DEBUG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DEBUG.INVALID_INPUT",
-    identifier: Some("RunMat:InvalidInput"),
-    when: "An input is not a supported text, scalar, or option value.",
-    message: "debugger helper: invalid input",
-};
-
-pub const DEBUG_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DEBUG.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:dbstack:TooManyOutputs"),
-    when: "More than two outputs are requested from dbstack.",
-    message: "dbstack: too many output arguments",
-};
-
-pub const DEBUG_ERROR_NO_CURRENT_FILE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DEBUG.NO_CURRENT_FILE",
-    identifier: Some("RunMat:NoCurrentFile"),
-    when: "`mlock`, `munlock`, or `mislocked` is called without a current function or script.",
-    message: "debugger helper: no current function or script is available",
-};
-
-pub const DEBUG_ERROR_FILE_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DEBUG.FILE_NOT_FOUND",
-    identifier: Some("RunMat:FileNotFound"),
-    when: "`dbtype` cannot resolve a MATLAB source file.",
-    message: "dbtype: file not found",
-};
-
-pub const DEBUG_ERROR_FILE_READ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DEBUG.FILE_READ",
-    identifier: Some("RunMat:FileReadFailed"),
-    when: "`dbtype` cannot read the resolved source file.",
-    message: "dbtype: failed to read file",
-};
-
-pub const DEBUG_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    DEBUG_ERROR_TOO_MANY_INPUTS,
-    DEBUG_ERROR_INVALID_INPUT,
-    DEBUG_ERROR_NO_CURRENT_FILE,
-    DEBUG_ERROR_FILE_NOT_FOUND,
-    DEBUG_ERROR_FILE_READ,
-];
-
-pub const DBSTACK_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    DEBUG_ERROR_TOO_MANY_INPUTS,
-    DEBUG_ERROR_TOO_MANY_OUTPUTS,
-    DEBUG_ERROR_INVALID_INPUT,
-    DEBUG_ERROR_NO_CURRENT_FILE,
-    DEBUG_ERROR_FILE_NOT_FOUND,
-    DEBUG_ERROR_FILE_READ,
-];
-
-pub const DBSTACK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DBSTACK_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DBSTACK_ERRORS,
-};
-
-const DBSTACK_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "n is an exact nonnegative scalar count of leading stack entries to omit; values outside the host indexing domain reject.",
-    }];
-
-pub const DBSTACK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "ST or [ST, I] = dbstack(n) or dbstack('-completenames', n)",
-        inputs: &DBSTACK_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The skip count is parsed from exact scalar storage. Stack line and workspace-index fields follow the debugger's host metadata representation rather than n's input class.",
-    }];
-
-pub const DBTYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DBTYPE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
-};
-
-pub const KEYBOARD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIMPLE_NO_OUTPUT_SIGNATURE,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-pub const MLOCK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MLOCK_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
-};
-
-pub const MUNLOCK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MUNLOCK_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
-};
-
-pub const MISLOCKED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MISLOCKED_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
-};
-
-pub const DBSTATUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DBSTATUS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
-};
-
-pub const DBCLEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DBCLEAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
-};
-
-pub const GETCALLINFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GETCALLINFO_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEBUG_ERRORS,
-};
 
 runmat_thread_local! {
     static LOCKED_FUNCTIONS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
@@ -458,12 +52,29 @@ fn empty_value() -> Value {
     Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor"))
 }
 
-fn text_value(value: &Value) -> Option<String> {
+fn text_value(value: &Value, builtin: &'static str) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
-        _ => None,
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
+        }
+        Value::CharArray(array)
+            if array.rows == 1 && array.shape().iter().skip(2).all(|n| *n == 1) =>
+        {
+            super::text::decode_utf16_with_error(array.data(), || {
+                debug_error(builtin, &DEBUG_ERROR_INVALID_INPUT, "invalid UTF-16 text")
+            })
+            .map(Some)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -490,8 +101,8 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
     Some(value as usize)
 }
 
-fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bool) -> Value {
-    let mut st = StructValue::new();
+fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bool) -> StructValue {
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     let file = if complete_names {
         frame.file.clone()
     } else {
@@ -501,10 +112,10 @@ fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bo
             .unwrap_or(&frame.file)
             .to_string()
     };
-    st.insert("file", Value::String(file));
-    st.insert("name", Value::String(frame.function.clone()));
+    st.insert("file", Value::string(file));
+    st.insert("name", Value::string(frame.function.clone()));
     st.insert("line", Value::Num(frame.line as f64));
-    Value::Struct(st)
+    st.finish()
 }
 
 fn cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
@@ -539,42 +150,60 @@ fn stack_value(skip: usize, complete_names: bool) -> BuiltinResult<Value> {
         .skip(skip)
         .map(|frame| stack_struct(frame, complete_names))
         .collect::<Vec<_>>();
-    cell_column(entries)
+    StructArray::normalize(
+        vec!["file".into(), "name".into(), "line".into()],
+        entries,
+        vec![frames.len().saturating_sub(skip), 1],
+    )
+    .map_err(|error| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, &error))
 }
 
-fn parse_dbstack_args(args: &[Value]) -> BuiltinResult<(usize, bool)> {
+fn parse_dbstack_args(args: FunctionArgumentView<'_>) -> BuiltinResult<(usize, bool)> {
     if args.len() > 2 {
         return Err(debug_error("dbstack", &DEBUG_ERROR_TOO_MANY_INPUTS, ""));
     }
-    match args {
-        [] => Ok((0, false)),
-        [arg] if is_complete_names(arg) => Ok((0, true)),
-        [arg] => integer_value(arg)
+    let first_complete = args
+        .get(0)
+        .map(|value| is_complete_names(value, "dbstack"))
+        .transpose()?
+        .unwrap_or(false);
+    let second_complete = args
+        .get(1)
+        .map(|value| is_complete_names(value, "dbstack"))
+        .transpose()?
+        .unwrap_or(false);
+    match (args.get(0), args.get(1)) {
+        (None, None) => Ok((0, false)),
+        (Some(_), None) if first_complete => Ok((0, true)),
+        (Some(arg), None) => integer_value(arg)
             .map(|skip| (skip, false))
             .ok_or_else(|| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
-        [option, n] if is_complete_names(option) => integer_value(n)
+        (Some(_), Some(n)) if first_complete => integer_value(n)
             .map(|skip| (skip, true))
             .ok_or_else(|| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
-        [n, option] if is_complete_names(option) => integer_value(n)
+        (Some(n), Some(_)) if second_complete => integer_value(n)
             .map(|skip| (skip, true))
             .ok_or_else(|| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
         _ => Err(debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, "")),
     }
 }
 
-fn is_complete_names(value: &Value) -> bool {
-    text_value(value).is_some_and(|text| text.trim().eq_ignore_ascii_case("-completenames"))
+fn is_complete_names(value: &Value, builtin: &'static str) -> BuiltinResult<bool> {
+    Ok(text_value(value, builtin)?
+        .is_some_and(|text| text.trim().eq_ignore_ascii_case("-completenames")))
 }
 
-pub(crate) fn dispatch_dbstack(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (skip, complete_names) = parse_dbstack_args(&args)?;
-    if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
-        return Err(debug_error("dbstack", &DEBUG_ERROR_TOO_MANY_OUTPUTS, ""));
-    }
+pub(crate) fn dispatch_dbstack(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &DBSTACK_DESCRIPTOR,
+        &DEBUG_ERROR_TOO_MANY_OUTPUTS,
+        "dbstack",
+    )?;
+    let (skip, complete_names) = parse_dbstack_args(args)?;
     let stack = stack_value(skip, complete_names)?;
     match crate::output_count::current_output_count() {
         Some(0) => {
-            record_console_line(ConsoleStream::Stdout, format_stack_for_display(&stack));
+            record_console_line(ConsoleStream::Stdout, format_stack_for_display(&stack)?)?;
             Ok(empty_value())
         }
         Some(n) if n >= 2 => Ok(crate::output_count::output_list_with_padding(
@@ -585,26 +214,28 @@ pub(crate) fn dispatch_dbstack(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn format_stack_for_display(stack: &Value) -> String {
-    let Value::Cell(cell) = stack else {
-        return String::new();
+fn format_stack_for_display(stack: &Value) -> BuiltinResult<String> {
+    let structures: Vec<StructValue> = match stack {
+        Value::Struct(structure) => vec![structure.clone()],
+        Value::StructArray(array) => array.elements().map(|value| value.to_owned()).collect(),
+        _ => return Ok(String::new()),
     };
-    let lines = cell
-        .data
-        .iter()
-        .filter_map(|value| {
-            let Value::Struct(st) = value else {
-                return None;
-            };
+    let lines = structures
+        .into_iter()
+        .map(|st| {
             let name = st
                 .fields
                 .get("name")
-                .and_then(text_value)
+                .map(|value| text_value(value, "dbstack"))
+                .transpose()?
+                .flatten()
                 .unwrap_or_default();
             let file = st
                 .fields
                 .get("file")
-                .and_then(text_value)
+                .map(|value| text_value(value, "dbstack"))
+                .transpose()?
+                .flatten()
                 .unwrap_or_default();
             let line = st
                 .fields
@@ -615,14 +246,14 @@ fn format_stack_for_display(stack: &Value) -> String {
                     _ => None,
                 })
                 .unwrap_or(0);
-            Some(if file.is_empty() {
+            Ok(if file.is_empty() {
                 format!("In {name} at line {line}")
             } else {
                 format!("In {name} ({file}) at line {line}")
             })
         })
-        .collect::<Vec<_>>();
-    lines.join("\n")
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    Ok(lines.join("\n"))
 }
 
 fn normalize_lock_key(raw: &str) -> String {
@@ -647,10 +278,13 @@ fn current_lock_key() -> BuiltinResult<String> {
         .ok_or_else(|| debug_error("mlock", &DEBUG_ERROR_NO_CURRENT_FILE, ""))
 }
 
-fn optional_lock_key(args: &[Value], builtin: &'static str) -> BuiltinResult<String> {
-    match args {
-        [] => current_lock_key(),
-        [value] => text_value(value)
+fn optional_lock_key(
+    args: FunctionArgumentView<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<String> {
+    match (args.len(), args.get(0)) {
+        (0, _) => current_lock_key(),
+        (1, Some(value)) => text_value(value, builtin)?
             .map(|text| normalize_lock_key(&text))
             .filter(|key| !key.is_empty())
             .ok_or_else(|| debug_error(builtin, &DEBUG_ERROR_INVALID_INPUT, "")),
@@ -658,7 +292,7 @@ fn optional_lock_key(args: &[Value], builtin: &'static str) -> BuiltinResult<Str
     }
 }
 
-pub(crate) fn dispatch_mlock(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) fn dispatch_mlock(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(debug_error("mlock", &DEBUG_ERROR_TOO_MANY_INPUTS, ""));
     }
@@ -669,16 +303,16 @@ pub(crate) fn dispatch_mlock(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(empty_value())
 }
 
-pub(crate) fn dispatch_munlock(args: Vec<Value>) -> BuiltinResult<Value> {
-    let key = optional_lock_key(&args, "munlock")?;
+pub(crate) fn dispatch_munlock(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
+    let key = optional_lock_key(args, "munlock")?;
     LOCKED_FUNCTIONS.with(|locks| {
         locks.borrow_mut().remove(&key);
     });
     Ok(empty_value())
 }
 
-pub(crate) fn dispatch_mislocked(args: Vec<Value>) -> BuiltinResult<Value> {
-    let key = optional_lock_key(&args, "mislocked")?;
+pub(crate) fn dispatch_mislocked(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
+    let key = optional_lock_key(args, "mislocked")?;
     let locked = LOCKED_FUNCTIONS.with(|locks| locks.borrow().contains(&key));
     Ok(Value::Bool(locked))
 }
@@ -687,9 +321,9 @@ fn empty_breakpoint_list() -> BuiltinResult<Value> {
     cell_column(Vec::new())
 }
 
-pub(crate) fn dispatch_dbstatus(args: Vec<Value>) -> BuiltinResult<Value> {
-    for arg in &args {
-        if text_value(arg).is_none() {
+pub(crate) fn dispatch_dbstatus(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
+    for arg in args.iter() {
+        if text_value(arg, "dbstatus")?.is_none() {
             return Err(debug_error("dbstatus", &DEBUG_ERROR_INVALID_INPUT, ""));
         }
     }
@@ -700,9 +334,9 @@ pub(crate) fn dispatch_dbstatus(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-pub(crate) fn dispatch_dbclear(args: Vec<Value>) -> BuiltinResult<Value> {
-    for arg in &args {
-        if text_value(arg).is_none() {
+pub(crate) fn dispatch_dbclear(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
+    for arg in args.iter() {
+        if text_value(arg, "dbclear")?.is_none() {
             return Err(debug_error("dbclear", &DEBUG_ERROR_INVALID_INPUT, ""));
         }
     }
@@ -713,13 +347,16 @@ fn parse_line_range(value: Option<&Value>) -> BuiltinResult<Option<(usize, usize
     let Some(value) = value else {
         return Ok(None);
     };
-    let text =
-        text_value(value).ok_or_else(|| debug_error("dbtype", &DEBUG_ERROR_INVALID_INPUT, ""))?;
+    let text = text_value(value, "dbtype")?
+        .ok_or_else(|| debug_error("dbtype", &DEBUG_ERROR_INVALID_INPUT, ""))?;
     let Some((start, end)) = text.split_once(':') else {
         let line = text
             .trim()
             .parse::<usize>()
             .map_err(|_| debug_error("dbtype", &DEBUG_ERROR_INVALID_INPUT, text.clone()))?;
+        if line == 0 {
+            return Err(debug_error("dbtype", &DEBUG_ERROR_INVALID_INPUT, text));
+        }
         return Ok(Some((line, line)));
     };
     let start = start
@@ -736,32 +373,45 @@ fn parse_line_range(value: Option<&Value>) -> BuiltinResult<Option<(usize, usize
     Ok(Some((start, end)))
 }
 
-async fn resolve_dbtype_path(name: &str) -> Result<Option<PathBuf>, String> {
+async fn resolve_dbtype_path(
+    name: &str,
+) -> Result<Option<PathBuf>, crate::builtins::common::path_search::PathSearchError> {
     for candidate in file_candidates(name, &[".m", ""], "dbtype")? {
-        if path_is_file(&candidate).await {
+        if path_is_file(&candidate).await? {
             return Ok(Some(candidate));
         }
     }
     Ok(None)
 }
 
-pub(crate) async fn dispatch_dbtype(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn dispatch_dbtype(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(debug_error("dbtype", &DEBUG_ERROR_INVALID_INPUT, ""));
     }
     if args.len() > 2 {
         return Err(debug_error("dbtype", &DEBUG_ERROR_TOO_MANY_INPUTS, ""));
     }
-    let file = text_value(&args[0])
+    let file = text_value(&args[0], "dbtype")?
         .ok_or_else(|| debug_error("dbtype", &DEBUG_ERROR_INVALID_INPUT, "file must be text"))?;
     let range = parse_line_range(args.get(1))?;
     let path = resolve_dbtype_path(&file)
         .await
-        .map_err(|err| debug_error("dbtype", &DEBUG_ERROR_FILE_NOT_FOUND, err))?
+        .map_err(|error| error.into_runtime_error("dbtype"))?
         .ok_or_else(|| debug_error("dbtype", &DEBUG_ERROR_FILE_NOT_FOUND, file.clone()))?;
     let text = runmat_filesystem::read_to_string_async(&path)
         .await
-        .map_err(|err| debug_error("dbtype", &DEBUG_ERROR_FILE_READ, err.to_string()))?;
+        .map_err(|source| {
+            let mut error =
+                crate::build_runtime_error(format!("{}: {source}", DEBUG_ERROR_FILE_READ.message))
+                    .with_builtin("dbtype")
+                    .with_source(source);
+            if let Some(identifier) = DEBUG_ERROR_FILE_READ.identifier {
+                error = error.with_identifier(identifier);
+            }
+            error
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
     let lines = text.lines().collect::<Vec<_>>();
     let (start, end) = range.unwrap_or((1, lines.len()));
     let rendered = lines
@@ -777,22 +427,22 @@ pub(crate) async fn dispatch_dbtype(args: Vec<Value>) -> BuiltinResult<Value> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    record_console_line(ConsoleStream::Stdout, rendered);
+    record_console_line(ConsoleStream::Stdout, rendered)?;
     Ok(empty_value())
 }
 
-pub(crate) fn dispatch_keyboard(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) fn dispatch_keyboard(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(debug_error("keyboard", &DEBUG_ERROR_TOO_MANY_INPUTS, ""));
     }
     Ok(empty_value())
 }
 
-pub(crate) fn dispatch_getcallinfo(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) fn dispatch_getcallinfo(args: FunctionArgumentView<'_>) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(debug_error("getcallinfo", &DEBUG_ERROR_TOO_MANY_INPUTS, ""));
     }
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     let current = crate::debug_context::current_frames()
         .into_iter()
         .next()
@@ -801,134 +451,183 @@ pub(crate) fn dispatch_getcallinfo(args: Vec<Value>) -> BuiltinResult<Value> {
             file: String::new(),
             line: 0,
         });
-    info.insert("name", Value::String(current.function));
-    info.insert("file", Value::String(current.file));
+    info.insert("name", Value::string(current.function));
+    info.insert("file", Value::string(current.file));
     info.insert("line", Value::Num(current.line as f64));
     info.insert("stack", stack_value(0, false)?);
-    Ok(Value::Struct(info))
+    Ok(Value::Struct(info.finish()))
 }
 
 #[runtime_builtin(
     name = "dbstack",
-    category = "introspection",
-    summary = "Return or display the active RunMat call stack.",
-    descriptor(self::DBSTACK_DESCRIPTOR),
-    integer_capabilities(self::DBSTACK_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn dbstack_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_dbstack(args)
+fn dbstack_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    dispatch_dbstack(args.view())
 }
 
 #[runtime_builtin(
     name = "dbtype",
-    category = "introspection",
-    summary = "Display MATLAB source text with line numbers.",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(self::DBTYPE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-async fn dbtype_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_dbtype(args).await
+async fn dbtype_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &DBTYPE_DESCRIPTOR,
+        &DBTYPE_ERROR_TOO_MANY_OUTPUTS,
+        "dbtype",
+    )?;
+    dispatch_dbtype(args.view()).await
 }
 
 #[runtime_builtin(
     name = "keyboard",
-    category = "introspection",
-    summary = "Compatibility no-op for MATLAB keyboard debugging stops.",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(self::KEYBOARD_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn keyboard_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_keyboard(args)
+fn keyboard_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &KEYBOARD_DESCRIPTOR,
+        &KEYBOARD_ERROR_TOO_MANY_OUTPUTS,
+        "keyboard",
+    )?;
+    dispatch_keyboard(args.view())
 }
 
 #[runtime_builtin(
     name = "mlock",
-    category = "introspection",
-    summary = "Mark the current function or script as locked in RunMat's compatibility registry.",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(self::MLOCK_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn mlock_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_mlock(args)
+fn mlock_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &MLOCK_DESCRIPTOR,
+        &MLOCK_ERROR_TOO_MANY_OUTPUTS,
+        "mlock",
+    )?;
+    dispatch_mlock(args.view())
 }
 
 #[runtime_builtin(
     name = "munlock",
-    category = "introspection",
-    summary = "Remove a function or script from RunMat's lock compatibility registry.",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(self::MUNLOCK_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn munlock_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_munlock(args)
+fn munlock_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &MUNLOCK_DESCRIPTOR,
+        &MUNLOCK_ERROR_TOO_MANY_OUTPUTS,
+        "munlock",
+    )?;
+    dispatch_munlock(args.view())
 }
 
 #[runtime_builtin(
     name = "mislocked",
-    category = "introspection",
-    summary = "Return whether a function or script is in RunMat's lock compatibility registry.",
-    descriptor(self::MISLOCKED_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn mislocked_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_mislocked(args)
+fn mislocked_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &MISLOCKED_DESCRIPTOR,
+        &MISLOCKED_ERROR_TOO_MANY_OUTPUTS,
+        "mislocked",
+    )?;
+    dispatch_mislocked(args.view())
 }
 
 #[runtime_builtin(
     name = "dbstatus",
-    category = "introspection",
-    summary = "Return RunMat debugger breakpoint status.",
-    descriptor(self::DBSTATUS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn dbstatus_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_dbstatus(args)
+fn dbstatus_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &DBSTATUS_DESCRIPTOR,
+        &DBSTATUS_ERROR_TOO_MANY_OUTPUTS,
+        "dbstatus",
+    )?;
+    dispatch_dbstatus(args.view())
 }
 
 #[runtime_builtin(
     name = "dbclear",
-    category = "introspection",
-    summary = "Clear RunMat debugger breakpoint status entries.",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(self::DBCLEAR_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn dbclear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_dbclear(args)
+fn dbclear_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &DBCLEAR_DESCRIPTOR,
+        &DBCLEAR_ERROR_TOO_MANY_OUTPUTS,
+        "dbclear",
+    )?;
+    dispatch_dbclear(args.view())
 }
 
 #[runtime_builtin(
     name = "getcallinfo",
-    category = "introspection",
-    summary = "Return deterministic information about the current RunMat call context.",
-    descriptor(self::GETCALLINFO_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::debugging"
 )]
-fn getcallinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    dispatch_getcallinfo(args)
+fn getcallinfo_builtin(args: BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &GETCALLINFO_DESCRIPTOR,
+        &GETCALLINFO_ERROR_TOO_MANY_OUTPUTS,
+        "getcallinfo",
+    )?;
+    dispatch_getcallinfo(args.view())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_types::SourceId;
-    use runmat_value::{IntValue, IntegerStorage};
+    use runmat_value::{CharArray, IntValue, IntegerStorage};
+
+    #[test]
+    fn debug_controls_reject_character_pages_zero_lines_and_excess_outputs() {
+        let pages =
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+        assert!(text_value(&Value::CharArray(pages), "dbtype")
+            .unwrap()
+            .is_none());
+        assert!(parse_line_range(Some(&Value::string("0"))).is_err());
+        let _outputs = crate::output_count::push_output_count(Some(1)).unwrap();
+        let arguments = || crate::builtins::common::test_support::builtin_arguments(vec![]);
+        for error in [
+            keyboard_builtin(arguments()).unwrap_err(),
+            mlock_builtin(arguments()).unwrap_err(),
+            munlock_builtin(arguments()).unwrap_err(),
+            dbclear_builtin(arguments()).unwrap_err(),
+        ] {
+            assert!(error
+                .identifier()
+                .is_some_and(|id| id.ends_with(":TooManyOutputs")));
+        }
+    }
 
     fn cell_len(value: &Value) -> usize {
         let Value::Cell(cell) = value else {
             panic!("expected cell row, got {value:?}");
         };
-        cell.data.len()
+        cell.data().len()
+    }
+
+    fn stack_len(value: &Value) -> usize {
+        match value {
+            Value::Struct(_) => 1,
+            Value::StructArray(array) => array.len(),
+            other => panic!("expected stack structure array, got {other:?}"),
+        }
+    }
+
+    fn stack_element(value: &Value, index: usize) -> StructValue {
+        match value {
+            Value::Struct(structure) if index == 0 => structure.clone(),
+            Value::StructArray(array) => array.get_linear(index).unwrap().to_owned(),
+            other => panic!("expected stack structure array, got {other:?}"),
+        }
     }
 
     #[test]
@@ -960,81 +659,89 @@ mod tests {
         ] {
             let scalar = Tensor::new_integer(storage, vec![1, 1]).expect("integer scalar");
             assert_eq!(
-                parse_dbstack_args(&[Value::Tensor(scalar)]).unwrap(),
+                parse_dbstack_args(FunctionArgumentView::from_slice(&[Value::Tensor(scalar)]))
+                    .unwrap(),
                 (0, false)
             );
         }
         let scalar_double = Tensor::new(vec![0.0], vec![1, 1]).expect("double scalar");
         assert_eq!(
-            parse_dbstack_args(&[Value::Tensor(scalar_double)]).unwrap(),
+            parse_dbstack_args(FunctionArgumentView::from_slice(&[Value::Tensor(
+                scalar_double
+            )]))
+            .unwrap(),
             (0, false)
         );
     }
 
     #[test]
     fn dbstack_accepts_documented_option_orders_and_rejects_duplicates() {
-        assert!(parse_dbstack_args(&[Value::Num(1.0), Value::Num(2.0)]).is_err());
+        assert!(parse_dbstack_args(FunctionArgumentView::from_slice(&[
+            Value::Num(1.0),
+            Value::Num(2.0)
+        ]))
+        .is_err());
         assert_eq!(
-            parse_dbstack_args(&[Value::Num(1.0), Value::String("-completenames".into())]).unwrap(),
+            parse_dbstack_args(FunctionArgumentView::from_slice(&[
+                Value::Num(1.0),
+                Value::String("-completenames".into())
+            ]))
+            .unwrap(),
             (1, true)
         );
         assert_eq!(
-            parse_dbstack_args(&[Value::String("-completenames".into()), Value::Num(1.0)]).unwrap(),
+            parse_dbstack_args(FunctionArgumentView::from_slice(&[
+                Value::String("-completenames".into()),
+                Value::Num(1.0)
+            ]))
+            .unwrap(),
             (1, true)
         );
-        assert!(parse_dbstack_args(&[
+        assert!(parse_dbstack_args(FunctionArgumentView::from_slice(&[
             Value::String("-completenames".into()),
             Value::String("-completenames".into())
-        ])
+        ]))
         .is_err());
-        assert!(parse_dbstack_args(&[
+        assert!(parse_dbstack_args(FunctionArgumentView::from_slice(&[
             Value::Num(1.0),
             Value::String("-completenames".into()),
             Value::String("-completenames".into())
-        ])
+        ]))
         .is_err());
     }
 
     #[test]
     fn dbstack_rejects_more_than_two_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(3));
-        let err = dispatch_dbstack(Vec::new()).unwrap_err();
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
+        let err = dispatch_dbstack(FunctionArgumentView::from_slice(&[])).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:dbstack:TooManyOutputs"));
     }
 
     #[test]
-    fn dbstack_returns_source_backed_stack_cell() {
+    fn dbstack_returns_source_backed_structure_array() {
         let source_id = SourceId(31);
         let _catalog = crate::source_context::replace_source_catalog_with_fullpaths(vec![(
             source_id,
             "worker.m".to_string(),
             Some("/tmp/worker.m".to_string()),
             "function worker\nx = dbstack;\nend\n".to_string(),
-        )]);
+        )])
+        .expect("debugging source catalog admission");
         let _guard = crate::debug_context::push_frame("worker", Some(source_id), Some((16, 25)));
-        let value = dispatch_dbstack(Vec::new()).expect("dbstack");
-        let Value::Cell(cell) = value else {
-            panic!("expected cell row");
-        };
-        assert_eq!(cell.data.len(), 1);
-        let Value::Struct(st) = &cell.data[0] else {
-            panic!("expected stack struct");
-        };
+        let value = dispatch_dbstack(FunctionArgumentView::from_slice(&[])).expect("dbstack");
+        assert_eq!(stack_len(&value), 1);
+        let st = stack_element(&value, 0);
         assert_eq!(st.fields.get("name"), Some(&Value::String("worker".into())));
         assert_eq!(
             st.fields.get("file"),
             Some(&Value::String("worker.m".into()))
         );
-        assert_eq!(cell.shape, vec![1, 1]);
         assert_eq!(st.fields.len(), 3);
-        let complete =
-            dispatch_dbstack(vec![Value::String("-completenames".into())]).expect("complete names");
-        let Value::Cell(complete) = complete else {
-            panic!("expected cell column");
-        };
-        let Value::Struct(complete_frame) = &complete.data[0] else {
-            panic!("expected stack struct");
-        };
+        let complete = dispatch_dbstack(FunctionArgumentView::from_slice(&[Value::String(
+            "-completenames".into(),
+        )]))
+        .expect("complete names");
+        let complete_frame = stack_element(&complete, 0);
         assert_eq!(
             complete_frame.fields.get("file"),
             Some(&Value::String("/tmp/worker.m".into()))
@@ -1045,35 +752,37 @@ mod tests {
     fn dbstack_skips_leading_entries() {
         let _outer = crate::debug_context::push_frame("outer", None, None);
         let _inner = crate::debug_context::push_frame("inner", None, None);
-        let value = dispatch_dbstack(vec![Value::Num(1.0)]).expect("dbstack");
-        assert_eq!(cell_len(&value), 1);
-        let Value::Cell(cell) = value else {
-            unreachable!();
-        };
-        let Value::Struct(st) = &cell.data[0] else {
-            panic!("expected stack struct");
-        };
+        let value = dispatch_dbstack(FunctionArgumentView::from_slice(&[Value::Num(1.0)]))
+            .expect("dbstack");
+        assert_eq!(stack_len(&value), 1);
+        let st = stack_element(&value, 0);
         assert_eq!(st.fields.get("name"), Some(&Value::String("outer".into())));
     }
 
     #[test]
     fn mlock_mislocked_munlock_current_function() {
         let _guard = crate::debug_context::push_frame("locked_fn", None, None);
-        dispatch_mlock(Vec::new()).expect("mlock");
+        dispatch_mlock(FunctionArgumentView::from_slice(&[])).expect("mlock");
         assert_eq!(
-            dispatch_mislocked(Vec::new()).expect("mislocked"),
+            dispatch_mislocked(FunctionArgumentView::from_slice(&[])).expect("mislocked"),
             Value::Bool(true)
         );
-        dispatch_munlock(vec![Value::String("locked_fn".into())]).expect("munlock");
+        dispatch_munlock(FunctionArgumentView::from_slice(&[Value::String(
+            "locked_fn".into(),
+        )]))
+        .expect("munlock");
         assert_eq!(
-            dispatch_mislocked(vec![Value::String("locked_fn".into())]).expect("mislocked"),
+            dispatch_mislocked(FunctionArgumentView::from_slice(&[Value::String(
+                "locked_fn".into()
+            )]))
+            .expect("mislocked"),
             Value::Bool(false)
         );
     }
 
     #[test]
     fn dbstatus_returns_empty_breakpoint_cell() {
-        let value = dispatch_dbstatus(Vec::new()).expect("dbstatus");
+        let value = dispatch_dbstatus(FunctionArgumentView::from_slice(&[])).expect("dbstatus");
         assert_eq!(cell_len(&value), 0);
     }
 
@@ -1082,18 +791,20 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("demo_dbtype.m");
         std::fs::write(&path, "a = 1;\nb = 2;\nc = 3;\n").expect("write source");
-        let result = futures::executor::block_on(dispatch_dbtype(vec![
-            Value::String(path.to_string_lossy().to_string()),
-            Value::String("2:3".to_string()),
-        ]))
-        .expect("dbtype");
+        let result =
+            futures::executor::block_on(dispatch_dbtype(FunctionArgumentView::from_slice(&[
+                Value::String(path.to_string_lossy().to_string().into()),
+                Value::String("2:3".to_string().into()),
+            ])))
+            .expect("dbtype");
         assert!(matches!(result, Value::Tensor(t) if t.materialize_f64().is_empty()));
     }
 
     #[test]
     fn getcallinfo_reports_current_frame() {
         let _guard = crate::debug_context::push_frame("callsite", None, None);
-        let value = dispatch_getcallinfo(Vec::new()).expect("getcallinfo");
+        let value =
+            dispatch_getcallinfo(FunctionArgumentView::from_slice(&[])).expect("getcallinfo");
         let Value::Struct(st) = value else {
             panic!("expected struct");
         };
@@ -1101,6 +812,39 @@ mod tests {
             st.fields.get("name"),
             Some(&Value::String("callsite".into()))
         );
-        assert!(matches!(st.fields.get("stack"), Some(Value::Cell(_))));
+        let stack = st.fields.get("stack").expect("stack field");
+        assert_eq!(stack_len(stack), 1);
+        let frame = stack_element(stack, 0);
+        assert_eq!(frame.fields.get("name"), st.fields.get("name"));
+        assert_eq!(frame.fields.get("file"), st.fields.get("file"));
+        assert_eq!(frame.fields.get("line"), st.fields.get("line"));
+        assert_eq!(frame.fields.len(), 3);
+    }
+
+    #[test]
+    fn getcallinfo_preserves_ordered_structure_stack() {
+        let _outer = crate::debug_context::push_frame("outer", None, None);
+        let _inner = crate::debug_context::push_frame("inner", None, None);
+        let Value::Struct(info) =
+            dispatch_getcallinfo(FunctionArgumentView::from_slice(&[])).expect("getcallinfo")
+        else {
+            panic!("expected call information structure");
+        };
+        let stack = info.fields.get("stack").expect("stack field");
+        let Value::StructArray(array) = stack else {
+            panic!("expected structure array for two frames");
+        };
+        assert_eq!(array.shape(), [2, 1]);
+        assert_eq!(stack_len(stack), 2);
+        for (index, name) in ["inner", "outer"].into_iter().enumerate() {
+            assert_eq!(
+                stack_element(stack, index).fields.get("name"),
+                Some(&Value::String(name.into()))
+            );
+        }
+        assert_eq!(
+            info.fields.get("name"),
+            Some(&Value::String("inner".into()))
+        );
     }
 }

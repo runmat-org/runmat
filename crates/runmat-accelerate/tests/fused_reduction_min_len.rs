@@ -1,10 +1,14 @@
 #![cfg(feature = "wgpu")]
+#[path = "support/direct_reduction_runtime.rs"]
+mod invocation;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 
 use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
 use runmat_accelerate::graph::{InstrSpan, PrimitiveOp, ShapeInfo, ValueId};
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
@@ -29,6 +33,8 @@ fn upload(
 // Mirrors the captured Metal binding layout: layout_tag=runmat-reduction-layout-1
 #[test]
 fn fused_single_pass_reduce_len_1_no_alias() {
+    let runtime = invocation::runtime();
+    let _invocation = runtime.enter();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
     )
@@ -57,7 +63,7 @@ fn fused_single_pass_reduce_len_1_no_alias() {
         id: 0,
         kind: FusionKind::Reduction,
         nodes: vec![],
-        shape: ShapeInfo::Tensor(vec![Some(cols)]),
+        shape: ShapeInfo::Tensor(vec![Some(rows), Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
         stack_layout: None,
@@ -73,7 +79,8 @@ fn fused_single_pass_reduce_len_1_no_alias() {
                 output: Some(vid_mul),
             },
             FusionOp::Builtin {
-                name: "sum".to_string(),
+                origin: Default::default(),
+                name: "sum".into(),
                 inputs: vec![vid_mul, vid_dim],
                 output: Some(vid_sum),
             },
@@ -107,8 +114,30 @@ fn fused_single_pass_reduce_len_1_no_alias() {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x), Value::GpuTensor(w)],
         placement: None,
-        runtime: None,
+        runtime: Some(runtime.clone()),
     };
     // reduce_len=rows=1, num_slices=cols
-    let _ = execute_reduction(req, rows, cols, 0).expect("fused sum(x.*W,1) should run");
+    let Some(result) = futures::executor::block_on(selected_reduction::execute(
+        req,
+        rows,
+        cols,
+        &[rows, cols],
+        0,
+    ))
+    .expect("canonical fused sum(x.*W,1) admission") else {
+        return;
+    };
+    let Value::GpuTensor(output) = result else {
+        panic!("expected actual GPU output");
+    };
+    let host = futures::executor::block_on(provider.download(&output))
+        .expect("actual GPU result download");
+    assert_eq!(host.shape, vec![rows, cols]);
+    for (index, actual) in host.data.iter().enumerate() {
+        let expected = x_data[index] * w_data[index];
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "slice {index}: {actual} != {expected}"
+        );
+    }
 }

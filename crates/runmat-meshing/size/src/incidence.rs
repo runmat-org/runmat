@@ -139,6 +139,14 @@ impl TopologyMetricIncidence {
         self.known_entities.contains(entity_id)
     }
 
+    /// Borrow exact face uses of an edge; seam uses can repeat a face identity.
+    pub fn edge_face_ids(&self, edge_id: &PersistentEntityId) -> &[PersistentEntityId] {
+        self.faces_by_edge
+            .get(edge_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     pub fn incident_edge_entities(&self, edge: &ExactEdge) -> BTreeSet<PersistentEntityId> {
         let mut entities = BTreeSet::from([edge.id.clone()]);
         entities.extend(edge.start_vertex_id.iter().cloned());

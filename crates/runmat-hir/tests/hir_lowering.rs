@@ -16,6 +16,86 @@ fn lower_semantic(src: &str) -> runmat_hir::HirAssembly {
 }
 
 #[test]
+fn implicit_ans_has_one_current_scope_binding_only_after_value_expression() {
+    let assembly = lower_semantic("1 + 1\nans + 1\nans = 7;\n");
+    let bindings: Vec<_> = assembly
+        .bindings
+        .iter()
+        .filter(|b| b.name.0 == "ans")
+        .collect();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].role, BindingRole::ImplicitAns);
+    assert_eq!(
+        assembly
+            .statement_result_bindings
+            .values()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![bindings[0].id]
+    );
+    assert_eq!(
+        bindings[0].workspace_visibility,
+        WorkspaceVisibility::ImplicitAns
+    );
+    for source in ["1 + 1;\n", "disp(7)\n", "answer = 42;\nanswer\n"] {
+        assert!(
+            !lower_semantic(source)
+                .bindings
+                .iter()
+                .any(|b| b.name.0 == "ans"),
+            "{source}"
+        );
+    }
+    let ast = runmat_parser::parse("ans + 1\n").unwrap();
+    assert!(lower(&ast, &LoweringContext::empty()).is_err());
+    for incoming in [false, true] {
+        let variables = if incoming {
+            HashMap::from([("ans".to_owned(), 3)])
+        } else {
+            HashMap::new()
+        };
+        let source = if incoming {
+            "ans + 1\n"
+        } else {
+            "ans = 7;\nans + 1\n"
+        };
+        let ast = runmat_parser::parse(source).unwrap();
+        let assembly = lower(&ast, &LoweringContext::new(&variables))
+            .unwrap()
+            .assembly;
+        let (&owner, &result) = assembly.statement_result_bindings.iter().next().unwrap();
+        let binding = assembly
+            .bindings
+            .iter()
+            .find(|binding| binding.id == result)
+            .unwrap();
+        assert_eq!(binding.owner, runmat_hir::BindingOwner::Function(owner));
+        assert_eq!(
+            binding.role,
+            if incoming {
+                BindingRole::IncomingWorkspace
+            } else {
+                BindingRole::Local
+            }
+        );
+        assert_eq!(
+            assembly
+                .bindings
+                .iter()
+                .filter(|binding| binding.name.0 == "ans")
+                .count(),
+            1
+        );
+        let restored: runmat_hir::HirAssembly =
+            serde_json::from_slice(&serde_json::to_vec(&assembly).unwrap()).unwrap();
+        assert_eq!(
+            restored.statement_result_bindings,
+            assembly.statement_result_bindings
+        );
+    }
+}
+
+#[test]
 fn parallel_regions_receive_stable_function_local_identities() {
     let assembly = lower_semantic("parfor (i = 1:10, 4); y = i; end; spmd (2, 8); z = 1; end");
     let function = assembly
@@ -64,6 +144,23 @@ fn script_lowers_to_module_entrypoint_and_workspace_bindings() {
         binding.name.0 == "x"
             && matches!(binding.workspace_visibility, WorkspaceVisibility::TopLevel)
     }));
+}
+
+#[test]
+fn imaginary_suffix_lowers_as_literal_even_when_unit_is_bound() {
+    let assembly = lower_semantic("i = 7; j = 9; a = 1i; b = 2j; c = i;");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let statements = &assembly.functions[entry.0].body.statements;
+    for (index, expected) in [(2, "1"), (3, "2")] {
+        let HirStmtKind::Assign(_, expr, _) = &statements[index].kind else {
+            panic!("imaginary assignment");
+        };
+        assert!(matches!(&expr.kind, HirExprKind::ImaginaryNumber(value) if value == expected));
+    }
+    let HirStmtKind::Assign(_, expr, _) = &statements[4].kind else {
+        panic!("bare unit assignment");
+    };
+    assert!(matches!(&expr.kind, HirExprKind::Binding(_)));
 }
 
 #[test]
@@ -443,6 +540,126 @@ fn bare_builtin_identifier_statement_preserves_requested_output_count() {
 }
 
 #[test]
+fn catalog_no_auto_output_is_unobserved_only_for_standalone_calls() {
+    let assembly = lower_semantic(
+        "tic\ntoc\nfprintf('x')\nwarning('x')\nplot(1)\nrand\nelapsed = toc;\nline = plot(1);\nnested = toc(tic);",
+    );
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let calls = function
+        .body
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let expr = match &statement.kind {
+                HirStmtKind::ExprStmt(expr, _) | HirStmtKind::Assign(_, expr, _) => expr,
+                _ => return None,
+            };
+            let HirExprKind::Call(call) = &expr.kind else {
+                return None;
+            };
+            let HirCallableRef::Builtin(id) = &call.callee else {
+                return None;
+            };
+            Some((id.0.as_str(), call.requested_outputs))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls,
+        vec![
+            ("tic", RequestedOutputCount::Zero),
+            ("toc", RequestedOutputCount::Zero),
+            ("fprintf", RequestedOutputCount::Zero),
+            ("warning", RequestedOutputCount::Zero),
+            ("plot", RequestedOutputCount::Zero),
+            ("rand", RequestedOutputCount::One),
+            ("toc", RequestedOutputCount::One),
+            ("plot", RequestedOutputCount::One),
+            ("toc", RequestedOutputCount::One),
+        ]
+    );
+    let outer = function
+        .body
+        .statements
+        .iter()
+        .find_map(|statement| {
+            let HirStmtKind::Assign(_, expr, _) = &statement.kind else {
+                return None;
+            };
+            let HirExprKind::Call(call) = &expr.kind else {
+                return None;
+            };
+            (call.args.len() == 1 && matches!(&call.args[0].kind, HirExprKind::Call(_)))
+                .then_some(call)
+        })
+        .expect("nested toc assignment");
+    let HirExprKind::Call(inner) = &outer.args[0].kind else {
+        panic!("inner tic call")
+    };
+    assert_eq!(inner.requested_outputs, RequestedOutputCount::One);
+
+    let shadowed = lower_semantic("toc\nfunction y = toc(); y = 9; end");
+    let entry = shadowed.modules[0].synthetic_entry_function.unwrap();
+    let function = shadowed
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::ExprStmt(expr, false) = &function.body.statements[0].kind else {
+        panic!("shadowed toc statement")
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("shadowed toc call")
+    };
+    assert!(matches!(call.callee, HirCallableRef::Function(_)));
+    assert_eq!(call.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
+fn constructor_resolution_precedes_catalogued_statement_output_policy() {
+    for (source, name) in [
+        ("toc\nclassdef toc\nend", "toc"),
+        ("plot(1)\nclassdef plot\nend", "plot"),
+        ("gcf\nclassdef gcf\nend", "gcf"),
+    ] {
+        let result = lower_result(source);
+        let call = result
+            .hir_index
+            .calls
+            .iter()
+            .find(|call| call.name.display_name().as_deref() == Some(name))
+            .expect("constructor call");
+        assert!(matches!(call.kind, CallKind::Constructor(_)), "{source}");
+        assert_eq!(
+            call.requested_outputs,
+            RequestedOutputCount::One,
+            "{source}"
+        );
+    }
+
+    let source = "import pkg.plot\nplot(1)\nclassdef ShadowPlot\nend";
+    let ast = runmat_parser::parse(source).expect("parse imported constructor");
+    let aliases = HashMap::from([("pkg.plot".to_string(), "ShadowPlot".to_string())]);
+    let result = lower(
+        &ast,
+        &LoweringContext::empty().with_project_symbol_aliases(&aliases),
+    )
+    .expect("lower imported constructor");
+    let call = result
+        .hir_index
+        .calls
+        .iter()
+        .find(|call| call.name.display_name().as_deref() == Some("plot"))
+        .expect("imported constructor call");
+    assert!(matches!(call.kind, CallKind::Constructor(_)));
+    assert_eq!(call.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
 fn bare_builtin_identifier_after_external_visibility_uses_workspace_first_call() {
     let assembly = lower_semantic("run(\"setup.m\"); x = rand;");
     let expr = assembly
@@ -467,6 +684,42 @@ fn bare_builtin_identifier_after_external_visibility_uses_workspace_first_call()
             .as_ref()
             .map(|name| name.0.as_str()),
         Some("rand")
+    );
+}
+
+#[test]
+fn current_workspace_eval_exposes_later_reads_without_exposing_evalin_base() {
+    for source in [
+        "eval('h = 4;'); x = h;",
+        "text = evalc('h = 4;'); x = h;",
+        "[first, second] = eval('h = 4; [2, 3]'); x = h;",
+    ] {
+        let assembly = lower_semantic(source);
+        assert!(
+            assembly.bindings.iter().any(|binding| {
+                binding.name.0 == "h" && matches!(binding.role, BindingRole::ExternalWorkspace)
+            }),
+            "{source}"
+        );
+    }
+
+    let ast =
+        runmat_parser::parse("function x = read_local(); evalin('base', 'h = 4;'); x = h; end")
+            .unwrap();
+    let error = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:UndefinedVariable")
+    );
+}
+
+#[test]
+fn shadowed_eval_does_not_expose_external_bindings() {
+    let ast = runmat_parser::parse("eval = @sin; eval('h = 4;'); x = h;").unwrap();
+    let error = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:UndefinedVariable")
     );
 }
 
@@ -802,7 +1055,10 @@ fn class_method_lowers_to_function_referenced_by_class() {
     assert_eq!(method_function.enclosing_class, Some(class.declaration.id));
     assert!(matches!(
         method_function.kind,
-        FunctionKind::ClassMethod { is_static: false }
+        FunctionKind::ClassMethod {
+            is_static: false,
+            role: runmat_types::ClassMethodRole::Ordinary
+        }
     ));
 }
 
@@ -1008,6 +1264,28 @@ fn multi_output_assignment_records_requested_outputs_and_discard() {
 }
 
 #[test]
+fn indexed_assignment_requests_one_rhs_function_output() {
+    let result = lower_result(
+        r#"
+function [first, second] = pair()
+  first = 7;
+  second = 8;
+end
+A = zeros(1, 2);
+A(1:2) = pair();
+"#,
+    );
+
+    let pair = result
+        .hir_index
+        .calls
+        .iter()
+        .find(|call| call.name.display_name().as_deref() == Some("pair"))
+        .expect("indexed assignment RHS call");
+    assert_eq!(pair.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
 fn ordinary_builtin_args_do_not_infer_outputs_from_last_call_argument() {
     let result = lower_result(
         r#"
@@ -1089,7 +1367,12 @@ fn lowering_emits_only_fixed_requested_output_counts() {
             HirExprKind::Unary(_, inner)
             | HirExprKind::Spawn(inner)
             | HirExprKind::Await(inner) => walk_expr(inner),
-            HirExprKind::Binary(left, _, right) | HirExprKind::MemberDynamic(left, right) => {
+            HirExprKind::Binary(left, _, right)
+            | HirExprKind::MemberDynamic {
+                base: left,
+                member: right,
+                ..
+            } => {
                 walk_expr(left);
                 walk_expr(right);
             }
@@ -1126,12 +1409,39 @@ fn lowering_emits_only_fixed_requested_output_counts() {
                     }
                 }
             }
-            HirExprKind::Member(base, _) => walk_expr(base),
+            HirExprKind::SubscriptChain(chain) => {
+                walk_expr(&chain.root);
+                for step in &chain.steps {
+                    match step {
+                        runmat_hir::HirSubscriptStep::Index(indexing) => {
+                            for component in &indexing.components {
+                                if let IndexComponent::Expr(value)
+                                | IndexComponent::Logical(value) = component
+                                {
+                                    walk_expr(value);
+                                }
+                            }
+                        }
+                        runmat_hir::HirSubscriptStep::DottedInvoke { arguments, .. } => {
+                            for argument in arguments {
+                                if let runmat_hir::HirDottedInvokeArgument::Value(value) = argument
+                                {
+                                    walk_expr(value);
+                                }
+                            }
+                        }
+                        runmat_hir::HirSubscriptStep::DynamicMember(member) => walk_expr(member),
+                        runmat_hir::HirSubscriptStep::Member(_) => {}
+                    }
+                }
+            }
+            HirExprKind::Member { base, .. } => walk_expr(base),
             HirExprKind::FunctionHandle(_)
             | HirExprKind::AnonymousFunction(_)
             | HirExprKind::WorkspaceFirstStaticProperty { .. }
             | HirExprKind::MetaClass(_)
             | HirExprKind::Number(_)
+            | HirExprKind::ImaginaryNumber(_)
             | HirExprKind::IntegerLiteral(_)
             | HirExprKind::String(_)
             | HirExprKind::Constant(_)
@@ -1172,6 +1482,26 @@ fn lowering_emits_only_fixed_requested_output_counts() {
                 for target in &targets.targets {
                     if let OutputTarget::Place(place) = target {
                         walk_place(place);
+                    }
+                }
+                walk_expr(value);
+            }
+            HirStmtKind::SequenceAssign { target, value, .. } => {
+                match target {
+                    runmat_hir::HirSequenceTarget::Member { base, .. } => walk_expr(base),
+                    runmat_hir::HirSequenceTarget::DynamicMember { base, member } => {
+                        walk_expr(base);
+                        walk_expr(member);
+                    }
+                    runmat_hir::HirSequenceTarget::CellContents { base, indexing } => {
+                        walk_expr(base);
+                        for component in &indexing.components {
+                            if let IndexComponent::Expr(value) | IndexComponent::Logical(value) =
+                                component
+                            {
+                                walk_expr(value);
+                            }
+                        }
                     }
                 }
                 walk_expr(value);
@@ -1392,7 +1722,7 @@ fn brace_index_expression_records_comma_list_read_context() {
 }
 
 #[test]
-fn binding_call_with_expansion_lowers_to_dynamic_call_dispatch() {
+fn binding_call_with_expansion_retains_receiver_selected_subscript() {
     let assembly = lower_semantic("h = @sin; C = {0}; y = h(C{:});");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
     let function = assembly
@@ -1403,42 +1733,182 @@ fn binding_call_with_expansion_lowers_to_dynamic_call_dispatch() {
     let HirStmtKind::Assign(_, expr, _) = &function.body.statements[2].kind else {
         panic!("expected assignment");
     };
-    let HirExprKind::Call(call) = &expr.kind else {
-        panic!("expected dynamic call expression");
+    let HirExprKind::SubscriptChain(chain) = &expr.kind else {
+        panic!("expected receiver-selected subscript expression");
     };
-    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
-    assert_eq!(call.args.len(), 1);
-    let HirExprKind::Index(_, indexing) = &call.args[0].kind else {
+    assert!(matches!(&chain.root.kind, HirExprKind::Binding(_)));
+    assert_eq!(chain.steps.len(), 1);
+    let runmat_hir::HirSubscriptStep::Index(indexing) = &chain.steps[0] else {
+        panic!("expected parentheses application");
+    };
+    assert!(matches!(indexing.kind, IndexKind::Paren));
+    let IndexComponent::Expr(argument) = &indexing.components[0] else {
         panic!("expected brace-index expansion argument");
     };
-    assert!(matches!(indexing.kind, IndexKind::Brace));
+    let HirExprKind::Index(_, expansion) = &argument.kind else {
+        panic!("expected brace-index expansion argument");
+    };
+    assert!(matches!(expansion.kind, IndexKind::Brace));
     assert!(matches!(
-        indexing.result_context,
+        expansion.result_context,
         IndexResultContext::FunctionArgumentExpansion
     ));
+    #[derive(Debug)]
+    enum MemberForm {
+        Plain,
+        Dynamic,
+        Indexed,
+        Chain,
+    }
+    for (source, form) in [
+        ("A=1; S=1; y=A(S.idx);", MemberForm::Plain),
+        ("A=1; S=1; y=(A+0)(S.idx);", MemberForm::Plain),
+        ("A=1; S=1; name='idx'; y=A(S.(name));", MemberForm::Dynamic),
+        ("A=1; S=1; y=A(S(1:2).idx);", MemberForm::Indexed),
+        ("A=1; S=1; y=A((S+0)(1:2).idx);", MemberForm::Chain),
+    ] {
+        let assembly = lower_semantic(source);
+        let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+        let function = assembly
+            .functions
+            .iter()
+            .find(|function| function.id == entry)
+            .unwrap();
+        let HirStmtKind::Assign(_, expression, _) = &function.body.statements.last().unwrap().kind
+        else {
+            panic!("expected assignment")
+        };
+        let HirExprKind::SubscriptChain(chain) = &expression.kind else {
+            panic!("expected receiver-selected parentheses for {form:?}")
+        };
+        let [runmat_hir::HirSubscriptStep::Index(indexing)] = chain.steps.as_slice() else {
+            panic!("expected one parentheses step")
+        };
+        let [IndexComponent::Expr(argument)] = indexing.components.as_slice() else {
+            panic!("expected one expanding argument")
+        };
+        assert!(argument.expands_call_argument_sequence());
+        let assert_range_index = |indexing: &IndexingSemantics| {
+            assert_eq!(indexing.kind, IndexKind::Paren);
+            assert_eq!(indexing.result_context, IndexResultContext::ReadSingle);
+            let [IndexComponent::Expr(range)] = indexing.components.as_slice() else {
+                panic!("expected one range selector for {source}");
+            };
+            let HirExprKind::Range(start, None, end) = &range.kind else {
+                panic!("expected the original unit-step range for {source}");
+            };
+            assert!(matches!(&start.kind, HirExprKind::Number(value) if value == "1"));
+            assert!(matches!(&end.kind, HirExprKind::Number(value) if value == "2"));
+        };
+        match (&form, &argument.kind) {
+            (
+                MemberForm::Plain,
+                HirExprKind::Member {
+                    base,
+                    member,
+                    sequence_use,
+                },
+            ) => {
+                assert!(matches!(base.kind, HirExprKind::Binding(_)));
+                assert_eq!(member.0, "idx");
+                assert_eq!(*sequence_use, runmat_types::SequenceUse::ExpandAll);
+            }
+            (
+                MemberForm::Dynamic,
+                HirExprKind::MemberDynamic {
+                    base,
+                    member,
+                    sequence_use,
+                },
+            ) => {
+                assert!(matches!(base.kind, HirExprKind::Binding(_)));
+                assert!(matches!(member.kind, HirExprKind::Binding(_)));
+                assert_eq!(*sequence_use, runmat_types::SequenceUse::ExpandAll);
+            }
+            (
+                MemberForm::Indexed,
+                HirExprKind::Member {
+                    base,
+                    member,
+                    sequence_use,
+                },
+            ) => {
+                assert_eq!(member.0, "idx");
+                assert_eq!(*sequence_use, runmat_types::SequenceUse::ExpandAll);
+                let HirExprKind::Index(receiver, indexing) = &base.kind else {
+                    panic!("expected indexed member receiver for {source}");
+                };
+                assert!(matches!(receiver.kind, HirExprKind::Binding(_)));
+                assert_range_index(indexing);
+            }
+            (MemberForm::Chain, HirExprKind::SubscriptChain(chain)) => {
+                let [runmat_hir::HirSubscriptStep::Index(indexing), runmat_hir::HirSubscriptStep::Member(member)] =
+                    chain.steps.as_slice()
+                else {
+                    panic!("expected ordered index/member chain for {source}");
+                };
+                assert_range_index(indexing);
+                assert_eq!(member.0, "idx");
+                assert_eq!(chain.sequence_use, runmat_types::SequenceUse::ExpandAll);
+            }
+            _ => panic!(
+                "unexpected {form:?} expansion for {source}: {:#?}",
+                argument.kind
+            ),
+        }
+        let mut scalar = argument.clone();
+        match &mut scalar.kind {
+            HirExprKind::Member { sequence_use, .. }
+            | HirExprKind::MemberDynamic { sequence_use, .. } => {
+                *sequence_use = runmat_types::SequenceUse::RequireSingle
+            }
+            HirExprKind::SubscriptChain(chain) => {
+                chain.sequence_use = runmat_types::SequenceUse::RequireSingle
+            }
+            _ => unreachable!("fixture is a member CSL form"),
+        }
+        assert!(
+            !scalar.expands_call_argument_sequence(),
+            "ordinary value context is not a CSL expansion"
+        );
+    }
 }
 
 #[test]
-fn binding_call_with_multi_output_lowers_to_dynamic_call_dispatch() {
-    let assembly = lower_semantic("h = @sin; [a, b] = h(1);");
+fn binding_parens_with_multi_output_keep_receiver_selected_index_or_call() {
+    let assembly = lower_semantic("h = @sin; [a, b] = h(1); A = [29, 30]; [c, d] = A(2);");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
     let function = assembly
         .functions
         .iter()
         .find(|function| function.id == entry)
         .unwrap();
-    let HirStmtKind::MultiAssign(targets, expr, _) = &function.body.statements[1].kind else {
-        panic!("expected multi-assign");
-    };
-    let HirExprKind::Call(call) = &expr.kind else {
-        panic!("expected dynamic call expression");
-    };
-    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
-    assert_eq!(targets.targets.len(), 2);
-    assert!(matches!(
-        call.requested_outputs,
-        RequestedOutputCount::Exactly(2)
-    ));
+    for statement in [&function.body.statements[1], &function.body.statements[3]] {
+        let HirStmtKind::MultiAssign(targets, expr, _) = &statement.kind else {
+            panic!("expected multi-assign");
+        };
+        let HirExprKind::SubscriptChain(chain) = &expr.kind else {
+            panic!("bound parentheses must retain receiver-selected indexing or invocation");
+        };
+        assert_eq!(targets.targets.len(), 2);
+        assert!(matches!(&chain.root.kind, HirExprKind::Binding(_)));
+        assert_eq!(
+            chain.sequence_use,
+            runmat_types::SequenceUse::SelectPrefix { count: 2 }
+        );
+        assert_eq!(
+            chain.context,
+            runmat_types::ObjectIndexingContext::Expression
+        );
+        assert!(matches!(
+            chain.steps.as_slice(),
+            [runmat_hir::HirSubscriptStep::Index(IndexingSemantics {
+                kind: IndexKind::Paren,
+                result_context: IndexResultContext::ReadSingle,
+                ..
+            })]
+        ));
+    }
 }
 
 #[test]
@@ -1466,11 +1936,15 @@ fn expr_stmt_output_policy_controls_binding_call_lowering_shape() {
     let HirStmtKind::ExprStmt(expr_suppressed, true) = &function.body.statements[2].kind else {
         panic!("expected semicolon-suppressed expression statement");
     };
-    let HirExprKind::Call(call) = &expr_suppressed.kind else {
-        panic!("suppressed expression statement should lower as dynamic call dispatch");
+    let HirExprKind::SubscriptChain(chain) = &expr_suppressed.kind else {
+        panic!("suppressed bound parentheses must retain the actual receiver route");
     };
-    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
-    assert!(matches!(call.requested_outputs, RequestedOutputCount::Zero));
+    assert!(matches!(&chain.root.kind, HirExprKind::Binding(_)));
+    assert_eq!(chain.sequence_use, runmat_types::SequenceUse::Discard);
+    assert_eq!(
+        chain.context,
+        runmat_types::ObjectIndexingContext::Statement
+    );
 }
 
 #[test]
@@ -1569,23 +2043,39 @@ fn undefined_variable_errors_have_stable_identifier() {
 }
 
 #[test]
-fn ragged_tensor_literal_rejected_with_identifier() {
-    let ast = runmat_parser::parse("x = [1 2; 3];").unwrap();
-    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
-    assert_eq!(
-        err.identifier.as_deref(),
-        Some("RunMat:AggregateShapeMismatch")
-    );
+fn tensor_literal_preserves_syntactic_rows_for_realized_shape_validation() {
+    let assembly = lower_semantic("x = [1 2; 3];");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[0].kind else {
+        panic!("expected tensor assignment");
+    };
+    let HirExprKind::Tensor(rows) = &value.kind else {
+        panic!("expected tensor literal");
+    };
+    assert_eq!(rows.iter().map(Vec::len).collect::<Vec<_>>(), vec![2, 1]);
 }
 
 #[test]
-fn ragged_cell_literal_rejected_with_identifier() {
-    let ast = runmat_parser::parse("x = {1, 2; 3};").unwrap();
-    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
-    assert_eq!(
-        err.identifier.as_deref(),
-        Some("RunMat:AggregateShapeMismatch")
-    );
+fn cell_literal_preserves_syntactic_rows_for_realized_shape_validation() {
+    let assembly = lower_semantic("x = {1, 2; 3};");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[0].kind else {
+        panic!("expected cell assignment");
+    };
+    let HirExprKind::Cell(rows) = &value.kind else {
+        panic!("expected cell literal");
+    };
+    assert_eq!(rows.iter().map(Vec::len).collect::<Vec<_>>(), vec![2, 1]);
 }
 
 #[test]
@@ -1722,7 +2212,7 @@ fn empty_array_indexed_member_assignment_records_deletion_target() {
     let HirPlace::Index(base, indexing) = &mutation.place else {
         panic!("expected indexed place");
     };
-    assert!(matches!(&base.kind, HirExprKind::Member(_, _)));
+    assert!(matches!(&base.kind, HirExprKind::Member { .. }));
     assert!(matches!(
         indexing.result_context,
         IndexResultContext::DeletionTarget
@@ -1787,7 +2277,7 @@ fn empty_array_indexed_dynamic_member_assignment_records_deletion_target() {
     let HirPlace::Index(base, indexing) = &mutation.place else {
         panic!("expected indexed place");
     };
-    assert!(matches!(&base.kind, HirExprKind::MemberDynamic(_, _)));
+    assert!(matches!(&base.kind, HirExprKind::MemberDynamic { .. }));
     assert!(matches!(
         indexing.result_context,
         IndexResultContext::DeletionTarget
@@ -1949,7 +2439,7 @@ fn dynamic_member_expression_lowers_to_member_dynamic_expr() {
     let HirStmtKind::Assign(_, value, _) = &stmt.kind else {
         panic!("expected assignment statement");
     };
-    assert!(matches!(value.kind, HirExprKind::MemberDynamic(_, _)));
+    assert!(matches!(value.kind, HirExprKind::MemberDynamic { .. }));
 }
 
 #[test]
@@ -1972,10 +2462,210 @@ fn indexed_dynamic_member_expression_lowers_to_indexcell_over_member_dynamic_exp
     let HirStmtKind::Assign(_, value, _) = &stmt.kind else {
         panic!("expected assignment statement");
     };
+    let HirExprKind::SubscriptChain(chain) = &value.kind else {
+        panic!("expected a typed subscript chain");
+    };
+    assert_eq!(chain.steps.len(), 2);
     assert!(matches!(
-        value.kind,
-        HirExprKind::Index(ref base, ref indexing)
-            if matches!(base.kind, HirExprKind::MemberDynamic(_, _))
-                && matches!(indexing.kind, IndexKind::Brace)
+        chain.steps.as_slice(),
+        [
+            runmat_hir::HirSubscriptStep::DynamicMember(_),
+            runmat_hir::HirSubscriptStep::Index(indexing)
+        ] if matches!(indexing.kind, IndexKind::Brace)
     ));
+}
+
+#[test]
+fn subscript_chain_preserves_call_result_root_and_ordered_suffix() {
+    let assembly = lower_semantic("y = makeObj().a(i).b;");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[0].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::SubscriptChain(chain) = &value.kind else {
+        panic!("expected a typed subscript chain");
+    };
+    assert!(matches!(chain.root.kind, HirExprKind::Call(_)));
+    assert!(matches!(
+        chain.steps.as_slice(),
+        [
+            runmat_hir::HirSubscriptStep::DottedInvoke { member: first, .. },
+            runmat_hir::HirSubscriptStep::Member(last)
+        ] if first.0 == "a" && last.0 == "b"
+    ));
+    assert_eq!(
+        chain.context,
+        runmat_types::ObjectIndexingContext::Expression
+    );
+}
+
+#[test]
+fn instance_method_syntax_remains_in_root_overload_path() {
+    let assembly = lower_semantic("obj = 1; arg = 2; i = 1; y = obj.method(arg).field(i);");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[3].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::SubscriptChain(chain) = &value.kind else {
+        panic!("expected a typed subscript chain");
+    };
+    assert!(matches!(chain.root.kind, HirExprKind::Binding(_)));
+    assert!(matches!(
+        chain.steps.as_slice(),
+        [
+            runmat_hir::HirSubscriptStep::DottedInvoke { member: method, .. },
+            runmat_hir::HirSubscriptStep::DottedInvoke { member: field, .. }
+        ] if method.0 == "method" && field.0 == "field"
+    ));
+}
+
+#[test]
+fn static_class_call_is_a_true_subscript_chain_boundary() {
+    let ast = runmat_parser::parse("i = 1; y = C.make().field(i);").unwrap();
+    let mut project_symbols = std::collections::HashSet::new();
+    project_symbols.insert("C.make".to_string());
+    let context = LoweringContext::empty().with_known_project_symbols(&project_symbols);
+    let assembly = lower(&ast, &context).unwrap().assembly;
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[1].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::SubscriptChain(chain) = &value.kind else {
+        panic!("expected a typed subscript chain");
+    };
+    assert!(matches!(chain.root.kind, HirExprKind::Call(_)));
+    assert!(matches!(
+        chain.steps.as_slice(),
+        [runmat_hir::HirSubscriptStep::DottedInvoke { member: field, .. }]
+            if field.0 == "field"
+    ));
+}
+
+#[test]
+fn external_workspace_object_dotted_call_is_not_misclassified_as_static() {
+    let ast = runmat_parser::parse("y = obj.method(1).field;").unwrap();
+    let variables = HashMap::from([("obj".to_string(), 0)]);
+    let context = LoweringContext::new(&variables);
+    let assembly = lower(&ast, &context).unwrap().assembly;
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[0].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::SubscriptChain(chain) = &value.kind else {
+        panic!("expected workspace object path");
+    };
+    assert!(matches!(chain.root.kind, HirExprKind::Binding(_)));
+    assert!(matches!(
+        chain.steps.as_slice(),
+        [
+            runmat_hir::HirSubscriptStep::DottedInvoke { member: method, .. },
+            runmat_hir::HirSubscriptStep::Member(field)
+        ] if method.0 == "method" && field.0 == "field"
+    ));
+}
+
+#[test]
+fn discarded_subscript_chain_has_statement_context_independent_of_output_arity() {
+    let assembly = lower_semantic("obj = 1; obj.a(i).b");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::ExprStmt(value, false) = &function.body.statements[1].kind else {
+        panic!("expected unsuppressed expression statement");
+    };
+    let HirExprKind::SubscriptChain(chain) = &value.kind else {
+        panic!("expected a typed subscript chain");
+    };
+    assert_eq!(
+        chain.context,
+        runmat_types::ObjectIndexingContext::Statement
+    );
+}
+
+#[test]
+fn single_contextual_end_binding_uses_typed_index_path() {
+    let assembly = lower_semantic("obj = 1; y = obj(end);");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[1].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Index(base, indexing) = &value.kind else {
+        panic!("expected contextual binding indexing to use the typed index path");
+    };
+    assert!(matches!(&base.kind, HirExprKind::Binding(_)));
+    assert_eq!(indexing.kind, IndexKind::Paren);
+    assert_eq!(indexing.result_context, IndexResultContext::ReadSingle);
+    assert!(matches!(
+        indexing.components.as_slice(),
+        [IndexComponent::Expr(end)] if matches!(&end.kind, HirExprKind::End)
+    ));
+}
+
+#[test]
+fn subscript_chain_terminal_syntax_controls_sequence_use() {
+    let assembly = lower_semantic(
+        "obj = 1; x = f(obj.method()); y = f(obj.a.b); z = plus(obj.a{1}, 2); [a,b] = obj.method();",
+    );
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let mut uses = Vec::new();
+    for statement in &function.body.statements {
+        match &statement.kind {
+            HirStmtKind::Assign(_, value, _) => {
+                if let HirExprKind::Call(call) = &value.kind {
+                    if let Some(arg) = call.args.first() {
+                        if let HirExprKind::SubscriptChain(chain) = &arg.kind {
+                            uses.push(chain.sequence_use);
+                        }
+                    }
+                }
+            }
+            HirStmtKind::MultiAssign(_, value, _) => {
+                if let HirExprKind::SubscriptChain(chain) = &value.kind {
+                    uses.push(chain.sequence_use);
+                }
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        uses,
+        vec![
+            runmat_types::SequenceUse::RequireSingle,
+            runmat_types::SequenceUse::ExpandAll,
+            runmat_types::SequenceUse::SelectPrefix { count: 2 },
+        ]
+    );
 }

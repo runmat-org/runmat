@@ -1,24 +1,29 @@
 use std::collections::BTreeMap;
 
+mod error_measurement;
+pub use error_measurement::measure_solver_field_transfer_error;
+mod projection;
+#[cfg(test)]
+mod quadratic_tests;
+mod topology;
+
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
-use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::{
-    ElementOrder, FieldTopologyLocation, SolverEntityTransfer, SolverMeshArtifact,
-    SolverMeshTransferMap, SolverTransferMethod, StableDigest, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    ElementOrder, FieldTopologyLocation, SolverMeshArtifact, SolverMeshTransferMap, StableDigest,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 
-const FIELD_CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-field-cbor/v1\0";
-const FIELD_CODEC_DOMAIN: &str = "analysis.fea.field/v1";
-const FIELD_CODEC_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16);
+use projection::{apply_projection, field_transfer_method};
+use topology::{
+    component_count, stable_identities, target_midpoint_edges, transfer_map_for_location,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SolverFieldTransferMethod {
     StableIdentity,
-    QuadraticEdgeInterpolation,
+    LinearEdgeInterpolation,
+    QuadraticLagrangeInterpolation,
     BarycentricInterpolation,
     CentroidProjection,
     ConservativeProjection,
@@ -55,6 +60,7 @@ pub struct SolverFieldTransferResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverFieldTransferError {
+    Cancelled,
     InvalidSourceArtifact(String),
     InvalidTargetArtifact(String),
     InvalidTransferMap(String),
@@ -63,69 +69,11 @@ pub enum SolverFieldTransferError {
     MissingTargetTopology,
     TopologyLocationMismatch,
     InvalidFieldShape,
+    InvalidFieldValues,
     DeviceFieldRequiresHostTransfer,
     UnsupportedTopologyChange,
     InconsistentQuadraticConnectivity,
     InvalidReferenceField,
-}
-
-pub fn measure_solver_field_transfer_error(
-    transfer: &SolverFieldTransferResult,
-    reference: &AnalysisField,
-) -> Result<SolverFieldTransferErrorEvidence, SolverFieldTransferError> {
-    if transfer.field.field_id != reference.field_id || transfer.field.shape != reference.shape {
-        return Err(SolverFieldTransferError::InvalidReferenceField);
-    }
-    let transferred = transfer
-        .field
-        .as_host_f64()
-        .ok_or(SolverFieldTransferError::DeviceFieldRequiresHostTransfer)?;
-    let reference_values = reference
-        .as_host_f64()
-        .ok_or(SolverFieldTransferError::DeviceFieldRequiresHostTransfer)?;
-    if transferred.len() != reference_values.len()
-        || transferred.iter().any(|value| !value.is_finite())
-        || reference_values.iter().any(|value| !value.is_finite())
-    {
-        return Err(SolverFieldTransferError::InvalidReferenceField);
-    }
-    let error_squared = transferred
-        .iter()
-        .zip(reference_values)
-        .map(|(transferred, reference)| (transferred - reference).powi(2))
-        .sum::<f64>();
-    let reference_squared = reference_values
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>();
-    let absolute_l2_error = error_squared.sqrt();
-    let relative_l2_error = if reference_squared == 0.0 {
-        if absolute_l2_error == 0.0 {
-            Some(0.0)
-        } else {
-            None
-        }
-    } else {
-        Some(absolute_l2_error / reference_squared.sqrt())
-    };
-    Ok(SolverFieldTransferErrorEvidence {
-        transfer: transfer.evidence.clone(),
-        transferred_field_digest: field_digest(&transfer.field)?,
-        reference_field_digest: field_digest(reference)?,
-        absolute_l2_error,
-        relative_l2_error,
-    })
-}
-
-fn field_digest(field: &AnalysisField) -> Result<StableDigest, SolverFieldTransferError> {
-    let encoded = runmat_canonical_codec::encode_contract(
-        FIELD_CODEC_PREFIX,
-        FIELD_CODEC_DOMAIN,
-        field,
-        FIELD_CODEC_LIMITS,
-    )
-    .map_err(|_| SolverFieldTransferError::InvalidReferenceField)?;
-    Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
 }
 
 pub fn transfer_solver_field(
@@ -135,6 +83,9 @@ pub fn transfer_solver_field(
     topology_id: &str,
     field: &AnalysisField,
 ) -> Result<SolverFieldTransferResult, SolverFieldTransferError> {
+    if crate::is_fea_cancelled() {
+        return Err(SolverFieldTransferError::Cancelled);
+    }
     source
         .validate()
         .map_err(|failure| SolverFieldTransferError::InvalidSourceArtifact(failure.to_string()))?;
@@ -172,6 +123,9 @@ pub fn transfer_solver_field(
     };
     let component_count =
         component_count(field, source_map.ordered_entity_ids.len(), values.len())?;
+    if values.iter().any(|v| !v.is_finite()) {
+        return Err(SolverFieldTransferError::InvalidFieldValues);
+    }
     let source_identities = stable_identities(source, source_map.location);
     let target_identities = stable_identities(target, target_map.location);
     let source_values = source_map
@@ -186,6 +140,8 @@ pub fn transfer_solver_field(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let quadratic_nodal_source = source_map.location == FieldTopologyLocation::Node
+        && source.resolved_request.element_order == ElementOrder::Tet10;
     let midpoint_edges = if source_map.location == FieldTopologyLocation::Node {
         target_midpoint_edges(target)?
     } else {
@@ -198,11 +154,13 @@ pub fn transfer_solver_field(
     let mut copied_entity_count = 0;
     let mut projected_entity_count = 0;
     let mut applied_projection_methods = Vec::new();
-    let mut resolved_values = source_values
-        .iter()
-        .map(|(identity, values)| (*identity, values.to_vec()))
-        .collect::<BTreeMap<_, _>>();
-    for entity_id in &target_map.ordered_entity_ids {
+    // Original values are already borrowed above. Retain only newly projected values
+    // needed by later linear midsides; do not duplicate every original component array.
+    let mut resolved_values: BTreeMap<_, Vec<f64>> = BTreeMap::new();
+    for (ordinal, entity_id) in target_map.ordered_entity_ids.iter().enumerate() {
+        if ordinal % 1024 == 0 && crate::is_fea_cancelled() {
+            return Err(SolverFieldTransferError::Cancelled);
+        }
         let stable_identity = target_identities[entity_id];
         if let Some(values) = source_values.get(&stable_identity) {
             output.extend_from_slice(values);
@@ -215,18 +173,26 @@ pub fn transfer_solver_field(
                 field_transfer_method(projection.method),
             )
         } else if let Some([left, right]) = midpoint_edges.get(&stable_identity).copied() {
-            let left = resolved_values
+            // Endpoint averaging is exact only when elevating a linear source.
+            if quadratic_nodal_source {
+                return Err(SolverFieldTransferError::UnsupportedTopologyChange);
+            }
+            let left = source_values
                 .get(&left)
+                .copied()
+                .or_else(|| resolved_values.get(&left).map(Vec::as_slice))
                 .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
-            let right = resolved_values
+            let right = source_values
                 .get(&right)
+                .copied()
+                .or_else(|| resolved_values.get(&right).map(Vec::as_slice))
                 .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
             (
                 left.iter()
                     .zip(right)
-                    .map(|(left, right)| 0.5 * (left + right))
+                    .map(|(left, right)| projection::linear_midpoint(*left, *right))
                     .collect(),
-                SolverFieldTransferMethod::QuadraticEdgeInterpolation,
+                SolverFieldTransferMethod::LinearEdgeInterpolation,
             )
         } else {
             return Err(SolverFieldTransferError::UnsupportedTopologyChange);
@@ -243,7 +209,7 @@ pub fn transfer_solver_field(
     let mut methods = vec![SolverFieldTransferMethod::StableIdentity];
     methods.extend(applied_projection_methods);
     Ok(SolverFieldTransferResult {
-        field: AnalysisField::host_f64(field.field_id.clone(), shape, output),
+        field: AnalysisField::host_f64(field.field_id.clone(), field.layout.clone(), shape, output),
         evidence: SolverFieldTransferEvidence {
             source_artifact_digest: source.canonical_digest,
             target_artifact_digest: target.canonical_digest,
@@ -257,139 +223,15 @@ pub fn transfer_solver_field(
     })
 }
 
-fn transfer_map_for_location(
-    transfer_map: &SolverMeshTransferMap,
-    location: FieldTopologyLocation,
-) -> BTreeMap<StableDigest, &SolverEntityTransfer> {
-    let transfers = match location {
-        FieldTopologyLocation::Node => &transfer_map.node_transfers,
-        FieldTopologyLocation::VolumeElement => &transfer_map.volume_element_transfers,
-        FieldTopologyLocation::BoundaryFace => &transfer_map.boundary_face_transfers,
-        FieldTopologyLocation::BoundaryEdge => &transfer_map.boundary_edge_transfers,
-    };
-    transfers
-        .iter()
-        .map(|transfer| (transfer.target_stable_identity, transfer))
-        .collect()
-}
-
-fn apply_projection(
-    projection: &SolverEntityTransfer,
-    source_values: &BTreeMap<StableDigest, &[f64]>,
-    component_count: usize,
-) -> Result<Vec<f64>, SolverFieldTransferError> {
-    let mut result = vec![0.0; component_count];
-    for source in &projection.sources {
-        let values = source_values
-            .get(&source.stable_identity)
-            .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
-        for (result, value) in result.iter_mut().zip(*values) {
-            *result += source.weight * value;
-        }
-    }
-    Ok(result)
-}
-
-fn field_transfer_method(method: SolverTransferMethod) -> SolverFieldTransferMethod {
-    match method {
-        SolverTransferMethod::BarycentricInterpolation => {
-            SolverFieldTransferMethod::BarycentricInterpolation
-        }
-        SolverTransferMethod::CentroidProjection => SolverFieldTransferMethod::CentroidProjection,
-        SolverTransferMethod::ConservativeProjection => {
-            SolverFieldTransferMethod::ConservativeProjection
-        }
-    }
-}
-
-fn stable_identities(
-    artifact: &SolverMeshArtifact,
-    location: FieldTopologyLocation,
-) -> BTreeMap<u64, StableDigest> {
-    match location {
-        FieldTopologyLocation::Node => artifact
-            .topology
-            .nodes
-            .iter()
-            .map(|entity| (entity.node_id, entity.stable_identity))
-            .collect(),
-        FieldTopologyLocation::VolumeElement => artifact
-            .topology
-            .volume_elements
-            .iter()
-            .map(|entity| (entity.element_id, entity.stable_identity))
-            .collect(),
-        FieldTopologyLocation::BoundaryFace => artifact
-            .topology
-            .boundary_faces
-            .iter()
-            .map(|entity| (entity.face_id, entity.stable_identity))
-            .collect(),
-        FieldTopologyLocation::BoundaryEdge => artifact
-            .topology
-            .boundary_edges
-            .iter()
-            .map(|entity| (entity.edge_id, entity.stable_identity))
-            .collect(),
-    }
-}
-
-fn component_count(
-    field: &AnalysisField,
-    entity_count: usize,
-    value_count: usize,
-) -> Result<usize, SolverFieldTransferError> {
-    if field.shape.is_empty() || field.shape[0] != entity_count {
-        return Err(SolverFieldTransferError::InvalidFieldShape);
-    }
-    let components = field.shape[1..]
-        .iter()
-        .try_fold(1_usize, |product, count| product.checked_mul(*count))
-        .ok_or(SolverFieldTransferError::InvalidFieldShape)?;
-    if components == 0
-        || entity_count
-            .checked_mul(components)
-            .is_none_or(|expected| expected != value_count)
-    {
-        return Err(SolverFieldTransferError::InvalidFieldShape);
-    }
-    Ok(components)
-}
-
-fn target_midpoint_edges(
-    target: &SolverMeshArtifact,
-) -> Result<BTreeMap<StableDigest, [StableDigest; 2]>, SolverFieldTransferError> {
-    if target.resolved_request.element_order == ElementOrder::Tet4 {
-        return Ok(BTreeMap::new());
-    }
-    let mut result = BTreeMap::new();
-    let identities = stable_identities(target, FieldTopologyLocation::Node);
-    for element in &target.topology.volume_elements {
-        for (local_edge, corners) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
-            let mut edge = [
-                identities[&element.node_ids[corners[0]]],
-                identities[&element.node_ids[corners[1]]],
-            ];
-            edge.sort_unstable();
-            let midpoint = identities[&element.node_ids[4 + local_edge]];
-            if result
-                .insert(midpoint, edge)
-                .is_some_and(|existing| existing != edge)
-            {
-                return Err(SolverFieldTransferError::InconsistentQuadraticConnectivity);
-            }
-        }
-    }
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::assembly::solver_solid::tests::artifact;
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
     use runmat_meshing_core::{
         solver_boundary_edge_identity, solver_boundary_face_identity,
-        solver_volume_element_identity, CanonicalMeshingContract, SolverTransferSource,
+        solver_volume_element_identity, CanonicalMeshingContract, ElementOrder,
+        SolverEntityTransfer, SolverTransferMethod, SolverTransferSource,
         SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
     };
 
@@ -399,6 +241,7 @@ mod tests {
         let quadratic = artifact(ElementOrder::Tet10);
         let nodal = AnalysisField::host_f64(
             "displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![4, 3],
             vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 6.0],
         );
@@ -411,14 +254,27 @@ mod tests {
         assert_eq!(&values[15..18], &[1.0, 2.0, 0.0]);
         assert_eq!(&values[27..30], &[0.0, 2.0, 3.0]);
 
-        let history = AnalysisField::host_f64("plastic_strain", vec![1, 2], vec![0.2, 0.3]);
+        let history = AnalysisField::host_f64(
+            "plastic_strain",
+            AnalysisFieldLayout::components(
+                ObservationQuantity::PlasticStrain,
+                FieldLocation::IntegrationPoint,
+                2,
+            ),
+            vec![1, 2],
+            vec![0.2, 0.3],
+        );
         let transferred =
             transfer_solver_field(&linear, &quadratic, None, "elements", &history).unwrap();
         assert_eq!(transferred.field, history);
         assert_eq!(transferred.evidence.projected_entity_count, 0);
 
-        let contact_state =
-            AnalysisField::host_f64("contact_state", vec![4], vec![0.0, 1.0, 1.0, 0.0]);
+        let contact_state = AnalysisField::host_f64(
+            "contact_state",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![4],
+            vec![0.0, 1.0, 1.0, 0.0],
+        );
         let transferred =
             transfer_solver_field(&linear, &quadratic, None, "faces", &contact_state).unwrap();
         assert_eq!(transferred.field, contact_state);
@@ -433,7 +289,12 @@ mod tests {
         let linear = artifact(ElementOrder::Tet4);
         let quadratic = artifact(ElementOrder::Tet10);
         let values = (0..30).map(f64::from).collect::<Vec<_>>();
-        let quadratic_field = AnalysisField::host_f64("state", vec![10, 3], values);
+        let quadratic_field = AnalysisField::host_f64(
+            "state",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            vec![10, 3],
+            values,
+        );
         let restricted =
             transfer_solver_field(&quadratic, &linear, None, "nodes", &quadratic_field).unwrap();
         assert_eq!(restricted.field.shape, vec![4, 3]);
@@ -451,7 +312,15 @@ mod tests {
                 &unrelated,
                 None,
                 "nodes",
-                &AnalysisField::host_f64("x", vec![4], vec![0.0; 4])
+                &AnalysisField::host_f64(
+                    "x",
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global
+                    ),
+                    vec![4],
+                    vec![0.0; 4]
+                )
             )
             .unwrap_err(),
             SolverFieldTransferError::GeometryRevisionMismatch
@@ -459,6 +328,10 @@ mod tests {
 
         let device = AnalysisField {
             field_id: "x".into(),
+            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
             shape: vec![4],
             values: AnalysisFieldValues::DeviceRef(runmat_analysis_core::DeviceFieldRef {
                 backend: "gpu".into(),
@@ -482,20 +355,46 @@ mod tests {
                 &quadratic,
                 None,
                 "nodes",
-                &AnalysisField::host_f64("bad", vec![3], vec![0.0; 3]),
+                &AnalysisField::host_f64(
+                    "bad",
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global
+                    ),
+                    vec![3],
+                    vec![0.0; 3]
+                ),
             )
             .unwrap_err(),
             SolverFieldTransferError::InvalidFieldShape
         );
         let mut tampered = quadratic;
-        tampered.topology.nodes[0].coordinates_m[0] = 0.25;
+        {
+            let quantity_change = 0.25;
+            let quantity_index = 0;
+            let quantity_slot = &mut tampered.topology.nodes[0].coordinates_m;
+            let mut quantity_coordinates = quantity_slot.canonical_value();
+            quantity_coordinates[quantity_index] = quantity_change;
+            *quantity_slot = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(quantity_coordinates);
+        };
         assert!(matches!(
             transfer_solver_field(
                 &linear,
                 &tampered,
                 None,
                 "nodes",
-                &AnalysisField::host_f64("x", vec![4], vec![0.0; 4]),
+                &AnalysisField::host_f64(
+                    "x",
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global
+                    ),
+                    vec![4],
+                    vec![0.0; 4]
+                ),
             ),
             Err(SolverFieldTransferError::InvalidTargetArtifact(_))
         ));
@@ -529,7 +428,12 @@ mod tests {
         }
         target.seal_canonical_digest().unwrap();
 
-        let field = AnalysisField::host_f64("temperature", vec![4], vec![10.0, 20.0, 30.0, 40.0]);
+        let field = AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![4],
+            vec![10.0, 20.0, 30.0, 40.0],
+        );
         let transferred = transfer_solver_field(&source, &target, None, "nodes", &field).unwrap();
         assert_eq!(
             transferred.field.as_host_f64().unwrap(),
@@ -624,35 +528,56 @@ mod tests {
             transfer_map
         );
 
-        let nodal = AnalysisField::host_f64("temperature", vec![4], vec![10.0, 20.0, 30.0, 40.0]);
+        // The transferred first component is 2, one unit from the reference 3.
+        // Successive Pythagorean triples (3,4,5), (5,12,13), (13,84,85)
+        // make its reference norm exact even with rescaled hypot reduction.
+        // This checks exact transfer/error values, not platform libm rounding.
+        let nodal = AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![4],
+            vec![-92.0, 4.0, 12.0, 84.0],
+        );
         let transferred =
             transfer_solver_field(&source, &target, Some(&transfer_map), "nodes", &nodal).unwrap();
         assert_eq!(
             transferred.field.as_host_f64().unwrap(),
-            &[25.0, 20.0, 30.0, 40.0]
+            &[2.0, 4.0, 12.0, 84.0]
         );
         assert!(transferred
             .evidence
             .methods
             .contains(&SolverFieldTransferMethod::BarycentricInterpolation));
-        let reference =
-            AnalysisField::host_f64("temperature", vec![4], vec![24.0, 20.0, 30.0, 40.0]);
+        let reference = AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![4],
+            vec![3.0, 4.0, 12.0, 84.0],
+        );
         let transfer_error = measure_solver_field_transfer_error(&transferred, &reference).unwrap();
         assert_eq!(transfer_error.absolute_l2_error, 1.0);
-        assert_eq!(
-            transfer_error.relative_l2_error,
-            Some(
-                1.0 / (24.0_f64.powi(2) + 20.0_f64.powi(2) + 30.0_f64.powi(2) + 40.0_f64.powi(2))
-                    .sqrt()
-            )
+        assert_eq!(transfer_error.relative_l2_error, Some(1.0 / 85.0));
+        let wrong_reference = AnalysisField::host_f64(
+            "other",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![4],
+            vec![0.0; 4],
         );
-        let wrong_reference = AnalysisField::host_f64("other", vec![4], vec![0.0; 4]);
         assert_eq!(
             measure_solver_field_transfer_error(&transferred, &wrong_reference),
             Err(SolverFieldTransferError::InvalidReferenceField)
         );
 
-        let history = AnalysisField::host_f64("history", vec![1, 2], vec![0.2, 0.3]);
+        let history = AnalysisField::host_f64(
+            "history",
+            AnalysisFieldLayout::components(
+                ObservationQuantity::Residual,
+                FieldLocation::Global,
+                2,
+            ),
+            vec![1, 2],
+            vec![0.2, 0.3],
+        );
         let transferred =
             transfer_solver_field(&source, &target, Some(&transfer_map), "elements", &history)
                 .unwrap();

@@ -4,6 +4,31 @@ use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::tensor;
 
+/// Runtime-only scalar keyword admission for array creators. Static literal
+/// inference below remains speculative and cannot issue a runtime failure.
+pub(crate) fn scalar_keyword_of(
+    value: &Value,
+    builtin: &'static str,
+) -> crate::BuiltinResult<Option<String>> {
+    match value {
+        Value::String(text) => Ok(text.as_str().map(str::to_ascii_lowercase)),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().map(str::to_ascii_lowercase))
+        }
+        Value::CharArray(array) if array.rows == 1 => array
+            .try_row_string()
+            .map(|text| text.map(|text| text.to_ascii_lowercase()))
+            .map_err(|source| {
+                crate::runtime_error::semantic_error_with_source(
+                    "InvalidArgument",
+                    format!("{builtin} keyword contains malformed UTF-16"),
+                    source,
+                )
+            }),
+        _ => Ok(None),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ArgToken {
     Number(f64),
@@ -14,8 +39,8 @@ pub enum ArgToken {
     Unknown,
 }
 
-pub fn tokens_from_values(args: &[Value]) -> Vec<ArgToken> {
-    args.iter().map(token_from_value).collect()
+pub fn tokens_from_values<'a>(args: impl IntoIterator<Item = &'a Value>) -> Vec<ArgToken> {
+    args.into_iter().map(token_from_value).collect()
 }
 
 pub fn tokens_from_context(ctx: &ResolveContext) -> Vec<ArgToken> {
@@ -70,20 +95,26 @@ fn token_from_value(value: &Value) -> ArgToken {
         Value::Num(num) => ArgToken::Number(*num),
         Value::Int(value) => ArgToken::Integer(value.clone()),
         Value::Bool(value) => ArgToken::Bool(*value),
-        Value::String(text) => ArgToken::String(text.to_ascii_lowercase()),
-        Value::StringArray(arr) if arr.data.len() == 1 => {
-            ArgToken::String(arr.data[0].to_ascii_lowercase())
-        }
-        Value::CharArray(arr) if arr.rows == 1 => {
-            let text: String = arr.data.iter().collect();
-            ArgToken::String(text.to_ascii_lowercase())
-        }
+        Value::String(text) => text
+            .as_str()
+            .map(|text| ArgToken::String(text.to_ascii_lowercase()))
+            .unwrap_or(ArgToken::Unknown),
+        Value::StringArray(arr) if arr.data().len() == 1 => arr.data()[0]
+            .as_str()
+            .map(|text| ArgToken::String(text.to_ascii_lowercase()))
+            .unwrap_or(ArgToken::Unknown),
+        Value::CharArray(arr) if arr.rows == 1 => arr
+            .try_row_string()
+            .ok()
+            .flatten()
+            .map(|text| ArgToken::String(text.to_ascii_lowercase()))
+            .unwrap_or(ArgToken::Unknown),
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                return token_from_integer_storage(storage, &tensor.shape);
+                return token_from_integer_storage(storage, tensor.shape());
             }
             let values = tensor::tensor_values_f64_cow(tensor);
-            token_from_tensor(values.as_ref(), &tensor.shape)
+            token_from_tensor(values.as_ref(), tensor.shape())
         }
         Value::LogicalArray(arr) => token_from_logical(&arr.data, &arr.shape),
         _ => ArgToken::Unknown,
@@ -175,7 +206,7 @@ mod tests {
             Value::Num(2.0),
             Value::Int(IntValue::I32(3)),
             Value::Bool(true),
-            Value::String("All".to_string()),
+            Value::String("All".to_string().into()),
         ];
         assert_eq!(
             tokens_from_values(&args),
@@ -234,6 +265,37 @@ mod tests {
                 ArgToken::Integer(IntValue::U64(9_007_199_254_740_993)),
                 ArgToken::Integer(IntValue::U64(u64::MAX)),
             ])]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn tokens_from_values_preserves_low_rank_numeric_grammar() {
+        let integer_scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new())
+            .expect("rank-zero integer");
+        let integer_vector = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2],
+        )
+        .expect("rank-one integers");
+        let real_scalar = Tensor::new(vec![1.25], Vec::new()).expect("rank-zero real");
+        let real_vector = Tensor::new(vec![1.25, -2.5], vec![2]).expect("rank-one reals");
+        assert_eq!(
+            tokens_from_values(&[
+                Value::Tensor(integer_scalar),
+                Value::Tensor(integer_vector),
+                Value::Tensor(real_scalar),
+                Value::Tensor(real_vector),
+            ]),
+            vec![
+                ArgToken::Integer(IntValue::U64(u64::MAX)),
+                ArgToken::Vector(vec![
+                    ArgToken::Integer(IntValue::U64(9_007_199_254_740_993)),
+                    ArgToken::Integer(IntValue::U64(u64::MAX)),
+                ]),
+                ArgToken::Number(1.25),
+                ArgToken::Vector(vec![ArgToken::Number(1.25), ArgToken::Number(-2.5)]),
+            ]
         );
     }
 }

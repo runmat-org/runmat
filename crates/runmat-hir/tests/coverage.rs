@@ -1,6 +1,7 @@
 use runmat_hir::{
     lower, CallKind, DefPathSegment, FunctionHandleTarget, FunctionId, FunctionKind, HirAssembly,
-    HirCall, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexKind, LoweringContext,
+    HirCall, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, HirSubscriptStep, IndexComponent,
+    IndexKind, IndexResultContext, IndexingSemantics, LoweringContext,
 };
 use runmat_parser::parse;
 use std::collections::{HashMap, HashSet};
@@ -26,6 +27,30 @@ fn lower_assembly_with_bound_functions(
 fn entry_body(assembly: &HirAssembly) -> &[runmat_hir::HirStmt] {
     let entry = assembly.entrypoints[0].target;
     &assembly.functions[entry.0].body.statements
+}
+
+fn discarded_parentheses(
+    stmt: &runmat_hir::HirStmt,
+    binding: runmat_hir::BindingId,
+) -> &IndexingSemantics {
+    let HirStmtKind::ExprStmt(expr, true) = &stmt.kind else {
+        panic!("expected suppressed expression statement: {stmt:?}");
+    };
+    let HirExprKind::SubscriptChain(chain) = &expr.kind else {
+        panic!("expected receiver-selected parentheses: {expr:?}");
+    };
+    assert!(matches!(chain.root.kind, HirExprKind::Binding(id) if id == binding));
+    assert_eq!(chain.sequence_use, runmat_types::SequenceUse::Discard);
+    assert_eq!(
+        chain.context,
+        runmat_types::ObjectIndexingContext::Statement
+    );
+    let [HirSubscriptStep::Index(indexing)] = chain.steps.as_slice() else {
+        panic!("expected one indexing step: {chain:?}");
+    };
+    assert_eq!(indexing.kind, IndexKind::Paren);
+    assert_eq!(indexing.result_context, IndexResultContext::ReadSingle);
+    indexing
 }
 
 #[test]
@@ -54,10 +79,15 @@ fn matrices_cells_and_indexing_lower_to_semantic_shapes() {
     assert!(
         matches!(&body[1].kind, HirStmtKind::Assign(_, expr, _) if matches!(expr.kind, HirExprKind::Cell(_)))
     );
+    let HirStmtKind::Assign(HirPlace::Binding(a), _, _) = &body[0].kind else {
+        panic!("expected A assignment");
+    };
+    let indexing = discarded_parentheses(&body[2], *a);
     assert!(matches!(
-        &body[2].kind,
-        HirStmtKind::ExprStmt(expr, _)
-            if matches!(expr.kind, HirExprKind::Call(HirCall { callee: HirCallableRef::DynamicExpr(_), .. }) | HirExprKind::Index(_, _))
+        indexing.components.as_slice(),
+        [IndexComponent::Expr(row), IndexComponent::Expr(column)]
+            if matches!(&row.kind, HirExprKind::Number(value) if value == "1")
+                && matches!(&column.kind, HirExprKind::Number(value) if value == "2")
     ));
     assert!(
         matches!(&body[3].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Index(_, _)))
@@ -69,10 +99,16 @@ fn end_colon_and_range_lower_to_semantic_shapes() {
     let prog = lower_assembly("A = [1,2,3,4]; A(2:end); 1:2:5; :");
     let body = entry_body(&prog);
     assert_eq!(body.len(), 4);
+    let HirStmtKind::Assign(HirPlace::Binding(a), _, _) = &body[0].kind else {
+        panic!("expected A assignment");
+    };
+    let indexing = discarded_parentheses(&body[1], *a);
     assert!(matches!(
-        &body[1].kind,
-        HirStmtKind::ExprStmt(expr, _)
-            if matches!(expr.kind, HirExprKind::Call(HirCall { callee: HirCallableRef::DynamicExpr(_), .. }) | HirExprKind::Index(_, _))
+        indexing.components.as_slice(),
+        [IndexComponent::Expr(range)]
+            if matches!(&range.kind, HirExprKind::Range(start, None, end)
+                if matches!(&start.kind, HirExprKind::Number(value) if value == "2")
+                    && matches!(end.kind, HirExprKind::End))
     ));
     assert!(
         matches!(&body[2].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Range(_, _, _)))
@@ -175,12 +211,26 @@ z = f(3)
 fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
     let method = lower_assembly("obj = 1; obj.method(1);");
     assert!(entry_body(&method).iter().any(|stmt| {
-        matches!(&stmt.kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Call(_)))
+        matches!(
+            &stmt.kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(
+                    &expr.kind,
+                    HirExprKind::SubscriptChain(chain)
+                        if matches!(&chain.root.kind, HirExprKind::Binding(_))
+                            && matches!(
+                                chain.steps.as_slice(),
+                                [HirSubscriptStep::DottedInvoke { member, arguments, .. }]
+                                    if member.0 == "method"
+                                        && arguments.len() == 1
+                            )
+                )
+        )
     }));
 
     let member = lower_assembly("obj = 1; obj.field;");
     assert!(entry_body(&member).iter().any(|stmt| {
-        matches!(&stmt.kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Member(_, _)))
+        matches!(&stmt.kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Member { .. }))
     }));
 
     let handle = lower_assembly("@sin;");
@@ -188,7 +238,7 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
         matches!(&entry_body(&handle)[0].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::FunctionHandle(FunctionHandleTarget::Builtin(_)) | HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(_))))
     );
 
-    let imported_handle = lower_assembly("import Point.origin; @origin;");
+    let imported_handle = lower_assembly("import MissingCoverageClass.origin; @origin;");
     assert!(entry_body(&imported_handle).iter().any(|stmt| matches!(
         &stmt.kind,
         HirStmtKind::ExprStmt(expr, _)
@@ -218,12 +268,12 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
             HirStmtKind::ExprStmt(expr, _)
                 if matches!(
                     &expr.kind,
-                    HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(name))
-                        if name.0 == "Point.origin"
+                    HirExprKind::FunctionHandle(FunctionHandleTarget::Builtin(identity))
+                        if identity.0 == "Point.origin"
                 )
         )));
 
-    let wildcard_imported_handle = lower_assembly("import Point.*; @origin;");
+    let wildcard_imported_handle = lower_assembly("import MissingCoverageClass.*; @origin;");
     assert!(entry_body(&wildcard_imported_handle)
         .iter()
         .any(|stmt| matches!(
@@ -295,14 +345,21 @@ fn imported_call_lowers_to_package_function_identity() {
 
 #[test]
 fn an_import_does_not_prove_that_its_target_exists() {
-    let src = "import Point.origin; o = origin(); h = @origin;";
+    // Point.origin is a known canonical fixture builtin, so it cannot witness
+    // an import whose target has no semantic evidence.
+    assert!(!runmat_builtins::builtin_name_is_known(
+        "MissingCoverageClass.origin"
+    ));
+    let src = "import MissingCoverageClass.origin; o = origin(); h = @origin;";
     let ast = parse(src).unwrap();
     let result = lower(&ast, &LoweringContext::empty()).unwrap();
     assert!(result
         .hir_index
         .calls
         .iter()
-        .any(|call| matches!(call.kind, CallKind::Dynamic)));
+        .any(|call| matches!(&call.kind, CallKind::Dynamic)
+            && matches!(&call.callee, HirCallableRef::Unresolved(name)
+                if name.display_name().as_deref() == Some("origin"))));
     assert!(entry_body(&result.assembly).iter().any(|stmt| matches!(
         &stmt.kind,
         HirStmtKind::Assign(_, expr, _)
@@ -338,14 +395,19 @@ fn verified_project_function_handles_use_static_identity() {
 
 #[test]
 fn wildcard_import_non_builtin_call_lowers_to_dynamic_identity() {
-    let src = "import Point.*; __register_test_classes(); o = origin();";
+    assert!(!runmat_builtins::builtin_name_is_known(
+        "MissingCoverageClass.origin"
+    ));
+    let src = "import MissingCoverageClass.*; o = origin();";
     let ast = parse(src).unwrap();
     let result = lower(&ast, &LoweringContext::empty()).unwrap();
     assert!(result
         .hir_index
         .calls
         .iter()
-        .any(|call| matches!(&call.kind, CallKind::Dynamic)));
+        .any(|call| matches!(&call.kind, CallKind::Dynamic)
+            && matches!(&call.callee, HirCallableRef::Unresolved(name)
+                if name.display_name().as_deref() == Some("origin"))));
 }
 
 #[test]

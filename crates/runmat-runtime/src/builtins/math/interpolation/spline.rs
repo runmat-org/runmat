@@ -1,13 +1,9 @@
 //! MATLAB-compatible `spline` builtin backed by piecewise-polynomial structs.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, SPLINE_ERROR_INTERNAL, SPLINE_ERROR_INVALID_ARGUMENT,
+    SPLINE_ERROR_INVALID_INPUT, SPLINE_INTEGER_XQ_EXTENSION, SPLINE_INTEGER_X_EXTENSION,
+    SPLINE_INTEGER_Y_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -18,151 +14,12 @@ use crate::builtins::common::spec::{
 };
 
 use super::pp::{
-    build_spline_pp, evaluate_pp, pp_to_value, query_points, series_from_values, Extrapolation,
+    build_spline_pp_with_slopes, evaluate_pp, is_spline_execution_failure, pp_to_value,
+    query_points, spline_samples_from_values, Extrapolation, PpOutputLayout, SampleAxis,
 };
 use crate::{build_runtime_error, RuntimeError};
 
 const NAME: &str = "spline";
-
-const SPLINE_OUTPUT_PP: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "pp",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Piecewise-polynomial struct representation.",
-}];
-
-const SPLINE_OUTPUT_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Vq",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Spline-evaluated values at query points.",
-}];
-
-const SPLINE_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Strictly increasing sample locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample values.",
-    },
-];
-
-const SPLINE_INPUTS_X_Y_XQ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Strictly increasing sample locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample values.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query points.",
-    },
-];
-
-const SPLINE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "pp = spline(X, Y)",
-        inputs: &SPLINE_INPUTS_X_Y,
-        outputs: &SPLINE_OUTPUT_PP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = spline(X, Y, Xq)",
-        inputs: &SPLINE_INPUTS_X_Y_XQ,
-        outputs: &SPLINE_OUTPUT_VALUES,
-    },
-];
-
-const SPLINE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLINE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:spline:InvalidArgument"),
-    when: "Argument count or interpolation option grammar is invalid.",
-    message: "spline: invalid argument",
-};
-
-const SPLINE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLINE.INVALID_INPUT",
-    identifier: Some("RunMat:spline:InvalidInput"),
-    when: "Sample/query inputs are invalid for spline construction or evaluation.",
-    message: "spline: invalid input",
-};
-
-const SPLINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLINE.INTERNAL",
-    identifier: Some("RunMat:spline:Internal"),
-    when: "Spline coefficient generation or tensor assembly fails internally.",
-    message: "spline: internal interpolation failure",
-};
-
-const SPLINE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    SPLINE_ERROR_INVALID_ARGUMENT,
-    SPLINE_ERROR_INVALID_INPUT,
-    SPLINE_ERROR_INTERNAL,
-];
-
-pub const SPLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPLINE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SPLINE_ERRORS,
-};
-
-const SPLINE_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "spline-integer-sample-locations",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "spline with typed-integer sample locations is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SplineIntegerSampleLocationsExtension"),
-};
-const SPLINE_INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "spline-integer-sample-values",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "spline with typed-integer sample values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SplineIntegerSampleValuesExtension"),
-};
-const SPLINE_INTEGER_XQ_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "spline-integer-query-points",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "spline with typed-integer query points is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SplineIntegerQueryPointsExtension"),
-};
-pub const SPLINE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    SPLINE_INTEGER_X_EXTENSION,
-    SPLINE_INTEGER_Y_EXTENSION,
-    SPLINE_INTEGER_XQ_EXTENSION,
-];
-
-const SPLINE_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The compatibility target documents single and double sample locations. RunMat mode admits typed integers only when every value is exactly representable at the binary64 interpolation boundary." }];
-const SPLINE_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "Y", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The compatibility target documents single and double sample values. RunMat mode admits typed integers only through the checked floating interpolation boundary." }];
-const SPLINE_INTEGER_XQ_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability { name: "Xq", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The compatibility target documents single and double query points. RunMat mode admits typed integers only when exact binary64 conversion is possible." }];
-pub const SPLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "pp = spline(integer_X, Y)", inputs: &SPLINE_INTEGER_X_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Sample locations cross the checked spline coefficient boundary; the returned piecewise-polynomial structure stores floating coefficients." },
-    BuiltinIntegerCapabilityDescriptor { form: "pp = spline(X, integer_Y)", inputs: &SPLINE_INTEGER_Y_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Sample values cross the same checked binary64 coefficient boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "Vq = spline(X, Y, integer_Xq)", inputs: &SPLINE_INTEGER_XQ_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Query values are checked before conversion and the evaluated result is floating." },
-];
 
 fn spline_error_with_message(
     message: impl Into<String>,
@@ -215,36 +72,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Spline builds a piecewise-polynomial representation and is not fused.",
 };
 
-fn spline_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.len() {
-        0 | 1 => Type::Unknown,
-        2 => Type::Struct { known_fields: None },
-        _ => match args.get(2) {
-            Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-            Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-                shape: shape.clone(),
-            },
-            _ => Type::tensor(),
-        },
-    }
-}
-
 #[runtime_builtin(
     name = "spline",
-    category = "math/interpolation",
-    summary = "Construct or evaluate cubic spline interpolants.",
-    keywords = "spline,cubic interpolation,pp,ppval",
-    accel = "sink",
-    sink = true,
-    type_resolver(spline_type),
-    descriptor(crate::builtins::math::interpolation::spline::SPLINE_DESCRIPTOR),
-    extensions(crate::builtins::math::interpolation::spline::SPLINE_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::interpolation::spline::SPLINE_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::math::interpolation::spline"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::interpolation::spline",
+    context = true
 )]
-async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn spline_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &x,
         &SPLINE_INTEGER_X_EXTENSION,
@@ -268,11 +107,31 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
         )
         .await?;
     }
-    let series = series_from_values(x, y, NAME).await.map_err(|err| {
-        spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INVALID_INPUT)
-    })?;
-    let pp = build_spline_pp(&series, NAME).map_err(|err| {
-        spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
+    let samples = spline_samples_from_values(x, y, NAME)
+        .await
+        .map_err(|err| {
+            spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INVALID_INPUT)
+        })?;
+    let output_layout = match samples.series.sample_axis {
+        SampleAxis::First => PpOutputLayout::QueryLeading,
+        SampleAxis::Last => PpOutputLayout::ComponentLeading,
+    };
+    let mut work = runtime
+        .as_ref()
+        .map(crate::context::RuntimeContext::cpu_cooperation);
+    let pp = build_spline_pp_with_slopes(
+        &samples.series,
+        samples.endpoint_slopes.as_deref(),
+        NAME,
+        &mut work,
+    )
+    .await
+    .map_err(|err| {
+        if is_spline_execution_failure(&err) {
+            crate::builtins::common::map_control_flow_with_builtin(err, NAME)
+        } else {
+            spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
+        }
     })?;
     match rest.len() {
         0 => pp_to_value(pp, NAME).map_err(|err| {
@@ -287,7 +146,14 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
                         &SPLINE_ERROR_INVALID_INPUT,
                     )
                 })?;
-            evaluate_pp(&pp, &query, &Extrapolation::Extrapolate, NAME).map_err(|err| {
+            evaluate_pp(
+                &pp,
+                &query,
+                &Extrapolation::Extrapolate,
+                output_layout,
+                NAME,
+            )
+            .map_err(|err| {
                 spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
             })
         }
@@ -296,9 +162,21 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
 }
 
 #[cfg(test)]
+async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    spline_builtin_registered(
+        None,
+        x,
+        y,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::SPLINE_DESCRIPTOR;
     use runmat_value::{StructValue, Tensor};
 
     fn row(values: &[f64]) -> Value {
@@ -332,6 +210,74 @@ mod tests {
             panic!("expected scalar");
         };
         assert!((result - 2.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn spline_vector_endpoint_slopes_reproduce_cubic_and_column_vector_form() {
+        let x = row(&[0.0, 1.0, 2.0]);
+        for y_shape in [vec![1, 5], vec![5, 1]] {
+            let y = Value::Tensor(Tensor::new(vec![0.0, 0.0, 1.0, 8.0, 12.0], y_shape).unwrap());
+            let value = block_on(spline_builtin(x.clone(), y, vec![row(&[0.5, 1.5])]))
+                .expect("clamped spline");
+            let Value::Tensor(output) = value else {
+                panic!("vector query must return a tensor");
+            };
+            assert_eq!(output.shape(), vec![1, 2]);
+            assert!((output.materialize_f64()[0] - 0.125).abs() < 1e-12);
+            assert!((output.materialize_f64()[1] - 3.375).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn spline_array_endpoint_slopes_apply_to_each_component() {
+        let y = Value::Tensor(
+            Tensor::new(
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 3.0, 8.0, 17.0, 12.0, 24.0],
+                vec![2, 5],
+            )
+            .unwrap(),
+        );
+        let value = block_on(spline_builtin(
+            row(&[0.0, 1.0, 2.0]),
+            y,
+            vec![row(&[0.5, 1.5])],
+        ))
+        .expect("array clamped spline");
+        let Value::Tensor(output) = value else {
+            panic!("array-valued spline must return a tensor");
+        };
+        assert_eq!(output.shape(), vec![2, 2]);
+        let expected = [0.125, 1.25, 3.375, 7.75];
+        for (actual, expected) in output.materialize_f64().iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn spline_preserves_nonsquare_array_component_axes() {
+        let data = (0..4)
+            .flat_map(|sample| (0..6).map(move |component| (component * 100 + sample) as f64))
+            .collect();
+        let value = block_on(spline_builtin(
+            row(&[1.0, 2.0, 3.0, 4.0]),
+            Value::Tensor(Tensor::new(data, vec![2, 3, 4]).unwrap()),
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            )],
+        ))
+        .expect("array-valued spline");
+        let Value::Tensor(output) = value else {
+            panic!("array-valued spline must return a tensor");
+        };
+        assert_eq!(output.shape(), vec![2, 3, 2, 2]);
+        let values = output.materialize_f64();
+        for query in 0..4 {
+            for component in 0..6 {
+                assert!(
+                    (values[component + query * 6] - (component * 100 + query) as f64).abs() < 1e-9
+                );
+            }
+        }
     }
 
     #[test]

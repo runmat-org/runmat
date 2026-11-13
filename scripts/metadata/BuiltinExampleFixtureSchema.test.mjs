@@ -1,0 +1,195 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  NO_EXAMPLE_REQUIREMENTS,
+  validateBuiltinExampleFixture,
+  validateBuiltinExampleRequirements
+} from "./BuiltinExampleFixtureSchema.mjs";
+
+const nativeRequirements = {
+  host: "NativeOnly",
+  engine: "Default",
+  compiler: [],
+  runtime: [],
+  toolchain: []
+};
+
+function loopbackFixture() {
+  return {
+    Loopback: {
+      id: { local_name: "http-value" },
+      scenario: { Http: { exchanges: [{
+        request: { method: "Get", path: "/value", body: null },
+        response: { status: 200, headers: [{ name: "content-type", value: "text/plain" }], body: [111, 107] }
+      }] } },
+      endpoint_substitutions: ["HttpBaseUrl"]
+    }
+  };
+}
+
+test("accepts a closed loopback fixture with a declared fixed token", () => {
+  assert.equal(validateBuiltinExampleRequirements(NO_EXAMPLE_REQUIREMENTS), NO_EXAMPLE_REQUIREMENTS);
+  const fixture = loopbackFixture();
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", {
+    program: 'url = "__RUNMAT_HTTP_BASE_URL__/value";',
+    harness: "NativeLoopbackNetwork",
+    requirements: nativeRequirements
+  }), fixture);
+});
+
+test("application settings fixture is explicit, bounded, and portable", () => {
+  const fixture = { ApplicationSettings: { id: { local_name: "fresh-settings" } } };
+  const context = { program: "setpref('Example','Value',1);", harness: "Portable", requirements: NO_EXAMPLE_REQUIREMENTS };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", context), fixture);
+  assert.throws(() => validateBuiltinExampleFixture({ ApplicationSettings: { ...fixture.ApplicationSettings, path: "/real-home" } }, "fixture", context), /fields/);
+  assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", { ...context, harness: "NativeFilesystem" }), /harness/);
+});
+
+test("Wgpu browser lane accepts only an isolated filesystem fixture", () => {
+  const fixture = { Filesystem: {
+    id: { local_name: "gpu-file" },
+    root: "IsolatedWorkspace",
+    entries: [{ File: { relative_path: "data.csv", content: { Utf8: "1,2\n" } } }]
+  } };
+  const context = { program: "G = gpuArray(1); A = readmatrix('data.csv', 'Like', G);", harness: "Wgpu", requirements: NO_EXAMPLE_REQUIREMENTS };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", context), fixture);
+  assert.throws(() => validateBuiltinExampleFixture({ Filesystem: { ...fixture.Filesystem, entries: [{ File: { relative_path: "../escape", content: { Utf8: "x" } } }] } }, "fixture", context), /relative path/);
+});
+
+test("mail outbox fixture requires a native host and bounded exact message", () => {
+  const fixture = { MailOutbox: { id: { local_name: "mail" }, expected_message: "To: a\n\nbody\n" } };
+  const context = { program: "sendmail('a','s');", harness: "Native", requirements: nativeRequirements };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", context), fixture);
+  assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", { ...context, harness: "Browser" }), /harness/);
+  assert.throws(() => validateBuiltinExampleFixture({ MailOutbox: { ...fixture.MailOutbox, expected_message: "" } }, "fixture", context), /nonempty/);
+});
+
+test("rejects unsafe filesystem paths and file descendants", () => {
+  const base = { id: { local_name: "files" }, root: "IsolatedWorkspace" };
+  assert.throws(() => validateBuiltinExampleFixture({ Filesystem: { ...base, entries: [{ Directory: { relative_path: "../escape" } }] } }), /relative path/);
+  assert.throws(() => validateBuiltinExampleFixture({ Filesystem: { ...base, entries: [{ Directory: { relative_path: "CON" } }] } }), /relative path/);
+  assert.throws(() => validateBuiltinExampleFixture({ Filesystem: { ...base, entries: [
+    { File: { relative_path: "a", content: { Utf8: "file" } } },
+    { File: { relative_path: "a/b", content: { Utf8: "child" } } }
+  ] } }), /below a file/);
+});
+
+test("rejects duplicate capabilities and endpoint declaration mismatches", () => {
+  assert.deepEqual(validateBuiltinExampleRequirements({ ...nativeRequirements, runtime: ["PlotCore"] }).runtime, ["PlotCore"]);
+  assert.deepEqual(validateBuiltinExampleRequirements({ ...nativeRequirements, runtime: ["NativeCad", "NativeMeshing"] }).runtime, ["NativeCad", "NativeMeshing"]);
+  assert.throws(() => validateBuiltinExampleRequirements({ ...nativeRequirements, runtime: ["Python", "Python"] }), /sorted and unique/);
+  assert.throws(() => validateBuiltinExampleFixture(loopbackFixture(), "fixture", {
+    program: 'host = "__RUNMAT_LOOPBACK_HOST__";',
+    harness: "NativeLoopbackNetwork",
+    requirements: nativeRequirements
+  }), /absent|undeclared/);
+});
+
+test("rejects incompatible harnesses and unterminated CLI transcripts", () => {
+  assert.throws(() => validateBuiltinExampleFixture(loopbackFixture(), "fixture", {
+    program: 'url = "__RUNMAT_HTTP_BASE_URL__";',
+    harness: "Portable",
+    requirements: nativeRequirements
+  }), /harness/);
+  assert.throws(() => validateBuiltinExampleFixture({ CliInteraction: {
+    id: { local_name: "prompt" },
+    transcript: [{ SendLine: "4" }]
+  } }, "fixture", {
+    program: "value = input('value: ');",
+    harness: "InteractiveHost",
+    requirements: nativeRequirements
+  }), /terminal action/);
+});
+
+test("rejects foreign fixtures without adapter capabilities", () => {
+  const fixture = { ForeignAdapter: {
+    id: { local_name: "native" },
+    files: {
+      id: { local_name: "files" }, root: "IsolatedWorkspace",
+      entries: [{ File: { relative_path: "entry.f90", content: { Utf8: "end" } } }]
+    },
+    preparation: { Mex: {
+      module_name: "native",
+      api: "R2017b",
+      translation_units: [{ relative_path: "entry.f90", language: "Fortran" }],
+      include_directories: [],
+      definitions: []
+    } }
+  } };
+  assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", {
+    program: "value = native();",
+    harness: "NativeForeignRuntime",
+    requirements: nativeRequirements
+  }), /adapter runtime/);
+});
+
+test("rejects isolation at the foreign-fixture level", () => {
+  const fixture = { ForeignAdapter: {
+    id: { local_name: "java" },
+    isolation: "OutOfProcess",
+    files: {
+      id: { local_name: "files" }, root: "IsolatedWorkspace",
+      entries: [{ File: { relative_path: "Fixture.java", content: { Utf8: "class Fixture {}" } } }]
+    },
+    preparation: { Java: {
+      artifact_name: "fixture",
+      release: 17,
+      source_files: ["Fixture.java"],
+      resources: [],
+      compile_classpath: []
+    } }
+  } };
+  assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", {
+    program: "java.lang.String('value');",
+    harness: "NativeForeignRuntime",
+    requirements: {
+      host: "NativeOnly", engine: "Default", compiler: ["JavaBytecode"],
+      runtime: ["JavaVirtualMachine"], toolchain: ["JavaDevelopmentKit"]
+    }
+  }), /fields/u);
+});
+
+test("accepts typed desktop interactions and rejects unsafe outcomes", () => {
+  const requirements = { ...nativeRequirements, host: "DesktopHostOnly" };
+  const fixture = { DesktopHostOnly: {
+    id: { local_name: "desktop-host" },
+    entries: [
+      { Directory: { relative_path: "data" } },
+      { File: { relative_path: "data/input.csv", content: { Utf8: "value\n1\n" } } }
+    ],
+    interactions: [
+      { OpenFileDialog: {
+        request: {
+          title: "Choose data",
+          default_path: "data",
+          filters: [{ patterns: ["*.csv"], description: "CSV files" }],
+          multiselect: false
+        },
+        outcome: { Selection: { paths: ["data/input.csv"], filter_index: 0 } }
+      } },
+      { FigurePresentation: {
+        figure_ordinal: 1,
+        event: "Created",
+        snapshot: { title: "Result", axes_rows: 1, axes_cols: 1 }
+      } }
+    ]
+  } };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", {
+    program: "file = uigetfile('*.csv'); figure;",
+    harness: "InteractiveHost",
+    requirements
+  }), fixture);
+
+  const unsafe = structuredClone(fixture);
+  unsafe.DesktopHostOnly.interactions[0].OpenFileDialog.outcome.Selection.paths = ["../outside.csv"];
+  assert.throws(() => validateBuiltinExampleFixture(unsafe), /relative path/);
+
+  const missingSnapshot = structuredClone(fixture);
+  missingSnapshot.DesktopHostOnly.interactions[1].FigurePresentation.snapshot = null;
+  assert.throws(() => validateBuiltinExampleFixture(missingSnapshot), /requires a snapshot/);
+
+  const impossibleSelection = structuredClone(fixture);
+  impossibleSelection.DesktopHostOnly.interactions[0].OpenFileDialog.outcome.Selection.paths = ["data/missing.csv"];
+  assert.throws(() => validateBuiltinExampleFixture(impossibleSelection), /declared file/);
+});

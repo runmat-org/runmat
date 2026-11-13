@@ -1,0 +1,21 @@
+runmat 0.7
+std 1
+
+part frame {
+    sketch layout on origin.xy {
+        bottom = line(start = [0 mm, 0 mm], end = [200 mm, 0 mm])
+        right = line(start = [200 mm, 0 mm], end = [200 mm, 100 mm])
+        top = line(start = [200 mm, 100 mm], end = [0 mm, 100 mm])
+        left = line(start = [0 mm, 100 mm], end = [0 mm, 0 mm])
+    }
+    feature members = weldment.structural_member(
+        groups = [
+            {
+                sketch = layout,
+                segments = [bottom, right, top, left],
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 2 mm),
+                material = S235
+            }
+        ]
+    )
+}

@@ -116,6 +116,51 @@ pub struct FrozenProject {
     pub sources: SourceCatalog,
     #[serde(with = "stable_source_path_map")]
     pub access_paths: BTreeMap<StableSourceId, PathBuf>,
+    pub native_interfaces: Vec<FrozenNativeInterface>,
+    pub mex_artifacts: Vec<FrozenMexArtifact>,
+    pub java_artifacts: Vec<FrozenJavaArtifact>,
+    pub python_artifacts: Vec<FrozenPythonArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenNativeInterface {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub manifest_digest: ContentDigest,
+    pub manifest_path: PathBuf,
+    pub library_digest: ContentDigest,
+    pub library_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenMexArtifact {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub manifest_digest: ContentDigest,
+    pub manifest_path: PathBuf,
+    pub module_digest: ContentDigest,
+    pub module_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenJavaArtifact {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub digest: ContentDigest,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenPythonArtifact {
+    pub package_instance: ContentDigest,
+    pub name: String,
+    pub module: String,
+    pub digest: ContentDigest,
+    pub path: PathBuf,
 }
 
 pub(crate) struct FrozenPackageInput {
@@ -124,10 +169,43 @@ pub(crate) struct FrozenPackageInput {
     pub source: SourceId,
     pub root: PathBuf,
     pub files: Vec<FrozenSourceInput>,
+    pub native_interfaces: Vec<FrozenNativeInterfaceInput>,
+    pub mex_artifacts: Vec<FrozenMexArtifactInput>,
+    pub java_artifacts: Vec<FrozenJavaArtifactInput>,
+    pub python_artifacts: Vec<FrozenPythonArtifactInput>,
 }
 
 pub(crate) struct FrozenSourceInput {
     pub descriptor: ProjectSourceFile,
+    pub bytes: Vec<u8>,
+}
+
+pub(crate) struct FrozenNativeInterfaceInput {
+    pub name: String,
+    pub manifest_path: PathBuf,
+    pub manifest_bytes: Vec<u8>,
+    pub library_path: PathBuf,
+    pub library_bytes: Vec<u8>,
+}
+
+pub(crate) struct FrozenMexArtifactInput {
+    pub name: String,
+    pub manifest_path: PathBuf,
+    pub manifest_bytes: Vec<u8>,
+    pub module_path: PathBuf,
+    pub module_bytes: Vec<u8>,
+}
+
+pub(crate) struct FrozenJavaArtifactInput {
+    pub name: String,
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
+pub(crate) struct FrozenPythonArtifactInput {
+    pub name: String,
+    pub module: String,
+    pub path: PathBuf,
     pub bytes: Vec<u8>,
 }
 
@@ -139,6 +217,10 @@ pub(crate) fn assemble_frozen_project(
 ) -> Result<FrozenProject, CatalogAssemblyError> {
     let mut packages = BTreeMap::new();
     let mut access_paths = BTreeMap::new();
+    let mut native_interfaces = Vec::new();
+    let mut mex_artifacts = Vec::new();
+    let mut java_artifacts = Vec::new();
+    let mut python_artifacts = Vec::new();
     for package in package_inputs {
         if !graph.packages.contains_key(&package.instance) {
             return Err(CatalogAssemblyError::MissingInstance(package.instance));
@@ -167,6 +249,43 @@ pub(crate) fn assemble_frozen_project(
                 is_private: file.descriptor.is_private,
             });
         }
+        for interface in package.native_interfaces {
+            native_interfaces.push(FrozenNativeInterface {
+                package_instance: package.instance.clone(),
+                name: interface.name,
+                manifest_digest: ContentDigest::sha256(&interface.manifest_bytes),
+                manifest_path: interface.manifest_path,
+                library_digest: ContentDigest::sha256(&interface.library_bytes),
+                library_path: interface.library_path,
+            });
+        }
+        for artifact in package.mex_artifacts {
+            mex_artifacts.push(FrozenMexArtifact {
+                package_instance: package.instance.clone(),
+                name: artifact.name,
+                manifest_digest: ContentDigest::sha256(&artifact.manifest_bytes),
+                manifest_path: artifact.manifest_path,
+                module_digest: ContentDigest::sha256(&artifact.module_bytes),
+                module_path: artifact.module_path,
+            });
+        }
+        for artifact in package.java_artifacts {
+            java_artifacts.push(FrozenJavaArtifact {
+                package_instance: package.instance.clone(),
+                name: artifact.name,
+                digest: ContentDigest::sha256(&artifact.bytes),
+                path: artifact.path,
+            });
+        }
+        for artifact in package.python_artifacts {
+            python_artifacts.push(FrozenPythonArtifact {
+                package_instance: package.instance.clone(),
+                name: artifact.name,
+                module: artifact.module,
+                digest: ContentDigest::sha256(&artifact.bytes),
+                path: artifact.path,
+            });
+        }
         sources.sort_by(|left, right| left.id.cmp(&right.id));
         let logical_root = logical_mount_root(&package.instance)?;
         packages.insert(
@@ -185,12 +304,28 @@ pub(crate) fn assemble_frozen_project(
     }
     let revision = compute_source_revision(&graph.graph_digest, &packages)
         .map_err(|error| CatalogAssemblyError::Revision(error.to_string()))?;
+    native_interfaces.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
+    mex_artifacts.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
+    java_artifacts.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
+    python_artifacts.sort_by(|left, right| {
+        (&left.package_instance, &left.name).cmp(&(&right.package_instance, &right.name))
+    });
     Ok(FrozenProject {
         manifest_path,
         workspace_root,
         graph,
         sources: SourceCatalog { packages, revision },
         access_paths,
+        native_interfaces,
+        mex_artifacts,
+        java_artifacts,
+        python_artifacts,
     })
 }
 
@@ -209,7 +344,7 @@ pub(crate) enum CatalogAssemblyError {
 fn source_relative_path(
     source: &ProjectSourceFile,
 ) -> Result<NormalizedRelativePath, IdentityError> {
-    NormalizedRelativePath::new(source.source_root.join(&source.relative_path))
+    NormalizedRelativePath::new(source.source_root.join(&source.relative_path)).map_err(Into::into)
 }
 
 fn logical_mount_root(identity: &ContentDigest) -> Result<NormalizedRelativePath, IdentityError> {
@@ -217,6 +352,7 @@ fn logical_mount_root(identity: &ContentDigest) -> Result<NormalizedRelativePath
         "packages/{}",
         identity.to_string().replace(':', "_")
     ))
+    .map_err(Into::into)
 }
 
 mod stable_source_path_map {
@@ -263,6 +399,97 @@ pub struct VisibleProjectSource<'a> {
 }
 
 impl FrozenProject {
+    /// Source-only candidates must retain the admitted manifest. Comparing the
+    /// canonical manifest preserves comments/formatting freedom without changing
+    /// dependency, source-root, or capability interpretation under an old graph.
+    pub fn validate_root_manifest(
+        &self,
+        manifest: &runmat_config::project::ProjectManifest,
+    ) -> Result<(), String> {
+        let root = self
+            .graph
+            .packages
+            .get(&self.graph.root)
+            .ok_or("admitted root package is missing")?;
+        let SourceId::Path(source) = &root.instance.source else {
+            return Err("workspace candidates require an admitted path project".into());
+        };
+        let canonical = toml::to_string(manifest).map_err(|error| error.to_string())?;
+        if ContentDigest::sha256(canonical) != source.manifest_digest {
+            return Err("captured manifest differs from the admitted project; readmit the project before checking source changes".into());
+        }
+        Ok(())
+    }
+    /// Replace only the admitted root package source inventory. Dependency
+    /// catalogs and graph identities remain frozen; no filesystem is consulted.
+    pub fn with_root_sources(
+        &self,
+        files: Vec<(ProjectSourceFile, Vec<u8>)>,
+    ) -> Result<Self, String> {
+        let mut candidate = self.clone();
+        let root = &self.graph.root;
+        candidate
+            .access_paths
+            .retain(|id, _| &id.package_instance != root);
+        let package = candidate
+            .sources
+            .packages
+            .get_mut(root)
+            .ok_or_else(|| "frozen project has no root source catalog".to_string())?;
+        package.sources.clear();
+        for (file, bytes) in files {
+            let relative_path = source_relative_path(&file).map_err(|error| error.to_string())?;
+            let access_path = self.workspace_root.join(relative_path.as_str());
+            // Recompute declaration identity with the canonical source index.
+            // Caller-supplied qualified names cannot grant private visibility.
+            let canonical = runmat_config::project::project_source_file_from_path(
+                &access_path,
+                &self.workspace_root.join(&file.source_root),
+                &file.source_root,
+            )
+            .ok_or_else(|| "candidate source is not an admitted MATLAB source".to_string())?;
+            if canonical != file {
+                return Err(
+                    "candidate source descriptor differs from canonical project indexing".into(),
+                );
+            }
+            let id = StableSourceId {
+                package_instance: root.clone(),
+                relative_path,
+                content_digest: ContentDigest::sha256(&bytes),
+            };
+            if candidate
+                .access_paths
+                .insert(id.clone(), access_path)
+                .is_some()
+            {
+                return Err("duplicate candidate source identity".into());
+            }
+            if package
+                .sources
+                .iter()
+                .any(|source| source.id.relative_path == id.relative_path)
+            {
+                return Err("duplicate candidate source path".into());
+            }
+            package.sources.push(FrozenSourceDescriptor {
+                id,
+                qualified_name: canonical.qualified_name,
+                package_path: canonical.package_path,
+                class_name: canonical.class_name,
+                class_qualified_name: canonical.class_qualified_name,
+                is_private: canonical.is_private,
+            });
+        }
+        package
+            .sources
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        candidate.sources.revision =
+            compute_source_revision(&candidate.graph.graph_digest, &candidate.sources.packages)
+                .map_err(|error| error.to_string())?;
+        Ok(candidate)
+    }
+
     pub fn source_revision(&self) -> &ContentDigest {
         &self.sources.revision
     }

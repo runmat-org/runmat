@@ -1,10 +1,9 @@
 //! MATLAB runtime/version compatibility helpers.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ISDEPLOYED_INVALID_INPUT, VERSION_INVALID_INPUT,
+    VER_LESS_THAN_INVALID_INPUT,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -12,64 +11,50 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const RUNMAT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const VALUE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Version or logical result.",
-}];
+#[derive(Clone, Copy)]
+enum CompatibilityOperation {
+    Version,
+    VerLessThan,
+    IsDeployed,
+}
 
-const ANY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Version query arguments.",
-}];
+impl CompatibilityOperation {
+    fn descriptor(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::Version => &VERSION_INVALID_INPUT,
+            Self::VerLessThan => &VER_LESS_THAN_INVALID_INPUT,
+            Self::IsDeployed => &ISDEPLOYED_INVALID_INPUT,
+        }
+    }
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = runtimeCompat(args...)",
-    inputs: &ANY_INPUTS,
-    outputs: &VALUE_OUTPUT,
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RUNTIME_COMPAT.INVALID_INPUT",
-    identifier: Some("RunMat:runtimeCompat:InvalidInput"),
-    when: "Arguments are malformed or unsupported.",
-    message: "runtime compatibility helper: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const RUNTIME_COMPAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const ISDEPLOYED_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "isdeployed accepts no arguments and has no integer data, control, output-class, or provider surface." };
-pub const VERSION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "version accepts no input or one documented text option and returns text; numeric and resident inputs reject before provider access." };
-pub const VER_LESS_THAN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "verLessThan accepts two documented character-vector controls and returns logical; native and resident integer values are not version-number aliases." };
+    fn name(self) -> &'static str {
+        match self {
+            Self::Version => "version",
+            Self::VerLessThan => "verLessThan",
+            Self::IsDeployed => "isdeployed",
+        }
+    }
+}
 
 #[runtime_builtin(
     name = "version",
-    category = "introspection",
-    summary = "Return RunMat's MATLAB-compatible version string.",
-    keywords = "version,release,environment,compatibility",
-    descriptor(crate::builtins::introspection::runtime_compat::RUNTIME_COMPAT_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::runtime_compat::VERSION_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
-fn version_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn version_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Ok(Value::from(RUNMAT_VERSION));
     }
     if args.len() != 1 {
-        return Err(error("version: expected zero or one argument"));
+        return Err(error(
+            CompatibilityOperation::Version,
+            "version: expected zero or one argument",
+        ));
     }
-    match text_scalar(&args[0])?.to_ascii_lowercase().as_str() {
+    match text_scalar(&args[0], CompatibilityOperation::Version)?
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "-release" => Ok(Value::from(
             crate::compatibility::MATLAB_COMPATIBILITY_RELEASE,
         )),
@@ -78,22 +63,21 @@ fn version_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             crate::compatibility::MATLAB_COMPATIBILITY_RELEASE
         ))),
         "-java" => Ok(Value::from("")),
-        other => Err(error(format!("version: unsupported option '{other}'"))),
+        other => Err(error(
+            CompatibilityOperation::Version,
+            format!("version: unsupported option '{other}'"),
+        )),
     }
 }
 
 #[runtime_builtin(
     name = "verLessThan",
-    category = "introspection",
-    summary = "Compare the MATLAB compatibility version against a required version.",
-    keywords = "verLessThan,version,compatibility",
-    descriptor(crate::builtins::introspection::runtime_compat::RUNTIME_COMPAT_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::runtime_compat::VER_LESS_THAN_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
 fn ver_less_than_builtin(product: Value, version: Value) -> BuiltinResult<Value> {
-    let product = text_scalar(&product)?.to_ascii_lowercase();
-    let requested = text_scalar(&version)?;
+    let product = text_scalar(&product, CompatibilityOperation::VerLessThan)?.to_ascii_lowercase();
+    let requested = text_scalar(&version, CompatibilityOperation::VerLessThan)?;
     if product != "matlab" {
         return Ok(Value::Bool(false));
     }
@@ -107,26 +91,38 @@ fn ver_less_than_builtin(product: Value, version: Value) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "isdeployed",
-    category = "introspection",
-    summary = "Return false because RunMat is not MATLAB Compiler deployed code.",
-    keywords = "isdeployed,deployment,runtime",
-    descriptor(crate::builtins::introspection::runtime_compat::RUNTIME_COMPAT_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::runtime_compat::ISDEPLOYED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
-fn isdeployed_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn isdeployed_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err(error("isdeployed: expected no input arguments"));
+        return Err(error(
+            CompatibilityOperation::IsDeployed,
+            "isdeployed: expected no input arguments",
+        ));
     }
     Ok(Value::Bool(false))
 }
 
-fn text_scalar(value: &Value) -> BuiltinResult<String> {
+fn text_scalar(value: &Value, operation: CompatibilityOperation) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        _ => Err(error("runtime compatibility helper: expected text scalar")),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            super::text::decode_utf16_with_error(chars.data(), || {
+                error(operation, "compatibility operand is not valid UTF-16 text")
+            })
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .as_str()
+                .to_owned())
+        }
+        _ => Err(error(
+            operation,
+            "runtime compatibility helper: expected text scalar",
+        )),
     }
 }
 
@@ -155,9 +151,9 @@ fn version_parts(value: &str) -> Vec<u64> {
         .collect()
 }
 
-fn error(message: impl Into<String>) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin("runtime compatibility helper");
-    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+fn error(operation: CompatibilityOperation, message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(operation.name());
+    if let Some(identifier) = operation.descriptor().identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -170,18 +166,30 @@ mod tests {
     #[test]
     fn version_options_return_text() {
         assert!(matches!(
-            version_builtin(Vec::new()).unwrap(),
+            version_builtin(crate::builtins::common::test_support::builtin_arguments(
+                Vec::new()
+            ))
+            .unwrap(),
             Value::String(_)
         ));
         assert_eq!(
-            version_builtin(vec![Value::from("-release")]).unwrap(),
+            version_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::from("-release")]
+            ))
+            .unwrap(),
             Value::from(crate::compatibility::MATLAB_COMPATIBILITY_RELEASE)
         );
     }
 
     #[test]
     fn deployed_and_version_comparison_are_stable() {
-        assert_eq!(isdeployed_builtin(Vec::new()).unwrap(), Value::Bool(false));
+        assert_eq!(
+            isdeployed_builtin(crate::builtins::common::test_support::builtin_arguments(
+                Vec::new()
+            ))
+            .unwrap(),
+            Value::Bool(false)
+        );
         assert_eq!(
             ver_less_than_builtin(Value::from("matlab"), Value::from("99.0")).unwrap(),
             Value::Bool(true)
@@ -202,7 +210,12 @@ mod tests {
 
     #[test]
     fn runtime_version_controls_reject_integer_aliases() {
-        assert!(version_builtin(vec![Value::Int(runmat_value::IntValue::I32(1))]).is_err());
+        assert!(
+            version_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::Int(runmat_value::IntValue::I32(1))]
+            ))
+            .is_err()
+        );
         assert!(ver_less_than_builtin(
             Value::Int(runmat_value::IntValue::I32(1)),
             Value::from(crate::compatibility::MATLAB_COMPATIBILITY_VERSION),
@@ -213,5 +226,24 @@ mod tests {
             Value::Int(runmat_value::IntValue::I32(1)),
         )
         .is_err());
+    }
+
+    #[test]
+    fn public_compatibility_forms_preserve_error_owner() {
+        let version = version_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(1.0)],
+        ))
+        .unwrap_err();
+        let comparison = ver_less_than_builtin(Value::Bool(true), Value::from("1.0")).unwrap_err();
+        let deployed = isdeployed_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Bool(true)]),
+        )
+        .unwrap_err();
+        for error in [version, comparison, deployed] {
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:runtimeCompat:InvalidInput")
+            );
+        }
     }
 }

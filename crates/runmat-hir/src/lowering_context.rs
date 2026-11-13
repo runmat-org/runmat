@@ -1,7 +1,54 @@
-use crate::FunctionId;
-use runmat_types::ExternalClassDeclaration;
+use crate::{FunctionId, FunctionModifiers};
+use runmat_types::{ExternalClassDeclaration, ProgramSourceId};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
+
+/// Read-only compiler view of an existing workspace name-to-slot index.
+///
+/// The compiler never owns or mutates this index. Keeping the interface
+/// callback-based lets operation-admitted workspace metadata participate
+/// without first detaching every name into a second `HashMap`.
+pub trait WorkspaceBindingView {
+    fn len(&self) -> usize;
+
+    fn get(&self, name: &str) -> Option<usize>;
+
+    fn visit(&self, visitor: &mut dyn FnMut(&str, usize));
+
+    /// Visit in deterministic `(slot, name)` order. Implementations may use
+    /// transient compiler scratch, but must not detach or retain the names.
+    fn visit_in_slot_order(&self, visitor: &mut dyn FnMut(&str, usize));
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl WorkspaceBindingView for HashMap<String, usize> {
+    fn len(&self) -> usize {
+        HashMap::len(self)
+    }
+
+    fn get(&self, name: &str) -> Option<usize> {
+        HashMap::get(self, name).copied()
+    }
+
+    fn visit(&self, visitor: &mut dyn FnMut(&str, usize)) {
+        for (name, slot) in self {
+            visitor(name, *slot);
+        }
+    }
+
+    fn visit_in_slot_order(&self, visitor: &mut dyn FnMut(&str, usize)) {
+        let mut ordered = self.iter().collect::<Vec<_>>();
+        ordered.sort_unstable_by(|(left_name, left_slot), (right_name, right_slot)| {
+            (**left_slot, left_name.as_str()).cmp(&(**right_slot, right_name.as_str()))
+        });
+        for (name, slot) in ordered {
+            visitor(name, *slot);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FunctionOutputArity {
@@ -33,7 +80,8 @@ impl FunctionOutputArity {
 }
 
 pub struct LoweringContext<'a> {
-    pub variables: &'a HashMap<String, usize>,
+    pub variables: &'a dyn WorkspaceBindingView,
+    pub function_modifiers: &'a HashMap<FunctionId, FunctionModifiers>,
     pub bound_functions: &'a HashMap<String, FunctionId>,
     pub function_output_arities: &'a HashMap<FunctionId, FunctionOutputArity>,
     pub known_project_symbols: &'a HashSet<String>,
@@ -43,12 +91,19 @@ pub struct LoweringContext<'a> {
     pub runmat_extensions_enabled: bool,
     pub top_level_await_enabled: bool,
     pub external_class_declarations: &'a [ExternalClassDeclaration],
+    /// Deterministic source ordinal for each top-level statement. Empty uses
+    /// the ordinary single-source lowering contract.
+    pub top_level_sources: &'a [ProgramSourceId],
+    /// Explicit primary source for a compiler-owned program. Generic
+    /// source-less embedding retains the historical None contract.
+    pub primary_source: Option<ProgramSourceId>,
 }
 
 impl<'a> LoweringContext<'a> {
-    pub fn new(variables: &'a HashMap<String, usize>) -> Self {
+    pub fn new(variables: &'a dyn WorkspaceBindingView) -> Self {
         Self {
             variables,
+            function_modifiers: empty_function_modifiers(),
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
@@ -58,6 +113,8 @@ impl<'a> LoweringContext<'a> {
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
             external_class_declarations: &[],
+            top_level_sources: &[],
+            primary_source: None,
         }
     }
 
@@ -66,6 +123,14 @@ impl<'a> LoweringContext<'a> {
         bound_functions: &'a HashMap<String, FunctionId>,
     ) -> Self {
         self.bound_functions = bound_functions;
+        self
+    }
+
+    pub fn with_function_modifiers(
+        mut self,
+        modifiers: &'a HashMap<FunctionId, FunctionModifiers>,
+    ) -> Self {
+        self.function_modifiers = modifiers;
         self
     }
 
@@ -115,10 +180,21 @@ impl<'a> LoweringContext<'a> {
         self
     }
 
+    pub fn with_top_level_sources(mut self, sources: &'a [ProgramSourceId]) -> Self {
+        self.top_level_sources = sources;
+        self
+    }
+
+    pub fn with_primary_source(mut self, source: ProgramSourceId) -> Self {
+        self.primary_source = Some(source);
+        self
+    }
+
     pub fn empty() -> Self {
         static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
         Self {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
+            function_modifiers: empty_function_modifiers(),
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
@@ -128,6 +204,8 @@ impl<'a> LoweringContext<'a> {
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
             external_class_declarations: &[],
+            top_level_sources: &[],
+            primary_source: None,
         }
     }
 }
@@ -162,4 +240,9 @@ fn empty_private_function_aliases() -> &'static HashMap<String, HashMap<String, 
     static EMPTY_PRIVATE_FUNCTION_ALIASES: OnceLock<HashMap<String, HashMap<String, String>>> =
         OnceLock::new();
     EMPTY_PRIVATE_FUNCTION_ALIASES.get_or_init(HashMap::new)
+}
+
+fn empty_function_modifiers() -> &'static HashMap<FunctionId, FunctionModifiers> {
+    static EMPTY: OnceLock<HashMap<FunctionId, FunctionModifiers>> = OnceLock::new();
+    EMPTY.get_or_init(HashMap::new)
 }

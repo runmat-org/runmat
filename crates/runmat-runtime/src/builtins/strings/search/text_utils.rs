@@ -2,10 +2,12 @@
 
 use std::convert::TryFrom;
 
-use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Value};
+use runmat_value::{
+    CellArray, CharArray, LogicalArray, StringArray, StringElement, Utf8Text, Value,
+};
 
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::{char_row_to_string, is_missing_string};
+use crate::builtins::strings::common::char_row_to_string;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Clone)]
@@ -18,7 +20,7 @@ pub(crate) struct TextCollection {
 #[derive(Clone)]
 pub(crate) enum TextElement {
     Missing,
-    Text(String),
+    Text(Utf8Text),
 }
 
 impl TextCollection {
@@ -42,7 +44,7 @@ impl TextCollection {
         let collection = match value {
             Value::StringArray(array) => Ok(Self::from_string_array(array)),
             Value::String(text) => Ok(Self::from_string_scalar(text)),
-            Value::CharArray(array) => Ok(Self::from_char_array(array)),
+            Value::CharArray(array) => Self::from_char_array(fn_name, array),
             Value::Cell(cell) => Self::from_cell_array(fn_name, cell),
             _ => Err(text_error(
                 fn_name,
@@ -67,16 +69,19 @@ impl TextCollection {
     }
 
     fn from_string_array(array: StringArray) -> Self {
-        let StringArray { data, shape, .. } = array;
-        let elements = data.into_iter().map(make_text_element).collect::<Vec<_>>();
+        let (data, shape, _, _) = array.into_parts();
+        let elements = match data.try_into_owned() {
+            Ok(values) => values.into_iter().map(make_text_element).collect(),
+            Err(data) => data.iter().cloned().map(make_text_element).collect(),
+        };
         Self {
             elements,
-            shape,
+            shape: shape.to_vec(),
             is_cell: false,
         }
     }
 
-    fn from_string_scalar(text: String) -> Self {
+    fn from_string_scalar(text: StringElement) -> Self {
         Self {
             elements: vec![make_text_element(text)],
             shape: vec![1, 1],
@@ -84,37 +89,38 @@ impl TextCollection {
         }
     }
 
-    fn from_char_array(array: CharArray) -> Self {
+    fn from_char_array(fn_name: &str, array: CharArray) -> BuiltinResult<Self> {
         if array.rows == 0 {
-            return Self {
+            return Ok(Self {
                 elements: Vec::new(),
                 shape: vec![0, 1],
                 is_cell: false,
-            };
+            });
         }
         if array.rows == 1 {
-            let text = char_row_to_string(&array, 0);
-            return Self {
-                elements: vec![TextElement::Text(text)],
+            let text = char_row_to_string(&array, 0)
+                .map_err(|source| text_decode_error(fn_name, source))?;
+            return Ok(Self {
+                elements: vec![TextElement::Text(text.into())],
                 shape: vec![1, 1],
                 is_cell: false,
-            };
+            });
         }
         let mut elements = Vec::with_capacity(array.rows);
         for row in 0..array.rows {
-            elements.push(TextElement::Text(char_row_to_string(&array, row)));
+            let text = char_row_to_string(&array, row)
+                .map_err(|source| text_decode_error(fn_name, source))?;
+            elements.push(TextElement::Text(text.into()));
         }
-        Self {
+        Ok(Self {
             elements,
             shape: vec![array.rows, 1],
             is_cell: false,
-        }
+        })
     }
 
     fn from_cell_array(fn_name: &str, cell: CellArray) -> BuiltinResult<Self> {
-        let CellArray {
-            data, rows, cols, ..
-        } = cell;
+        let (data, _, rows, cols) = cell.into_parts();
         let mut elements = Vec::with_capacity(rows * cols);
         for col in 0..cols {
             for row in 0..rows {
@@ -142,13 +148,16 @@ impl TextCollection {
     }
 }
 
-pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> BuiltinResult<bool> {
+pub(crate) fn parse_ignore_case(
+    fn_name: &str,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);
     }
 
     if rest.len() == 1 {
-        if let Some(name) = value_to_owned_string(&rest[0]) {
+        if let Some(name) = value_to_owned_string(&rest[0], fn_name)? {
             if name.eq_ignore_ascii_case("ignorecase") {
                 return Err(text_error(
                     fn_name,
@@ -172,8 +181,8 @@ pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> BuiltinResult<
     }
 
     let mut ignore_case = None;
-    for pair in rest.chunks(2) {
-        let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
+    for pair in rest.chunks_exact(2) {
+        let name = value_to_owned_string(&pair[0], fn_name)?.ok_or_else(|| {
             text_error(
                 fn_name,
                 format!("{fn_name}: option names must be text scalars"),
@@ -253,7 +262,7 @@ fn parse_logical_value(fn_name: &str, value: &Value) -> BuiltinResult<bool> {
             Ok(value != 0.0)
         }
         _ => {
-            let text = value_to_owned_string(value).ok_or_else(|| {
+            let text = value_to_owned_string(value, fn_name)?.ok_or_else(|| {
                 text_error(
                     fn_name,
                     format!("{fn_name}: option values must be logical scalars"),
@@ -273,8 +282,22 @@ fn parse_logical_value(fn_name: &str, value: &Value) -> BuiltinResult<bool> {
     }
 }
 
-pub(crate) fn value_to_owned_string(value: &Value) -> Option<String> {
-    String::try_from(value).ok()
+pub(crate) fn value_to_owned_string(value: &Value, fn_name: &str) -> BuiltinResult<Option<String>> {
+    match value {
+        Value::CharArray(array) if array.shape.len() <= 2 && array.rows == 1 => array
+            .try_row_string()
+            .map_err(|source| text_decode_error(fn_name, source)),
+        // Other scalar carriers cannot contain malformed UTF-16. This is a
+        // shape/type probe; actual CharArray decoding must preserve its error.
+        _ => Ok(String::try_from(value).ok()),
+    }
+}
+
+fn text_decode_error(fn_name: &str, source: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{fn_name}: malformed UTF-16 character input"))
+        .with_builtin(fn_name)
+        .with_source(source)
+        .build()
 }
 
 fn text_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
@@ -295,23 +318,24 @@ pub(crate) fn logical_result(
     }
 }
 
-fn make_text_element(text: String) -> TextElement {
-    if is_missing_string(&text) {
-        TextElement::Missing
-    } else {
-        TextElement::Text(text)
+fn make_text_element(text: StringElement) -> TextElement {
+    match text {
+        StringElement::Missing => TextElement::Missing,
+        StringElement::Text(text) => TextElement::Text(text),
     }
 }
 
 fn cell_value_to_text(fn_name: &str, value: &Value) -> BuiltinResult<TextElement> {
     match value {
         Value::String(text) => Ok(make_text_element(text.clone())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(make_text_element(array.data[0].clone()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(make_text_element(array.data()[0].clone()))
         }
-        Value::CharArray(array) if array.rows == 0 => Ok(TextElement::Text(String::new())),
+        Value::CharArray(array) if array.rows == 0 => Ok(TextElement::Text(String::new().into())),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(TextElement::Text(char_row_to_string(array, 0)))
+            let text = char_row_to_string(array, 0)
+                .map_err(|source| text_decode_error(fn_name, source))?;
+            Ok(TextElement::Text(text.into()))
         }
         _ => Err(text_error(
             fn_name,

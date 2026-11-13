@@ -65,6 +65,16 @@ fn compiled_sparse_integer_roles_separate_documented_structure_from_extension_va
 #[test]
 fn compiled_struct_preference_and_numeric_title_values_remain_exact() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    execute_source("base=uint64(9007199254740992); wide=base+uint64(1); s=setfield(struct(),'value',wide); if ~isa(s.value,'uint64') || s.value ~= wide; error('setfield integer payload'); end; setpref('integer-slice','wide',wide); p=getpref('integer-slice','wide'); if ~isa(p,'uint64') || p ~= wide; error('setpref integer payload'); end;")
+    let preferences =
+        std::rc::Rc::new(runmat_runtime::context::IsolatedMemoryPreferenceService::new());
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        runmat_runtime::context::RuntimeServicePorts::default().with_preferences(preferences),
+    );
+    let bytecode = test_helpers::compile_source("base=uint64(9007199254740992); wide=base+uint64(1); s=setfield(struct(),'value',wide); if ~isa(s.value,'uint64') || s.value ~= wide; error('setfield integer payload'); end; setpref('integer-slice','wide',wide); p=getpref('integer-slice','wide'); if ~isa(p,'uint64') || p ~= wide; error('setpref integer payload'); end;")
+        .expect("compile exact original preference roundtrip");
+    test_helpers::interpret_in_context(&bytecode, runtime)
         .expect("compiled structure and preference payload preservation");
 }

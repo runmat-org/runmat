@@ -1,385 +1,64 @@
-pub mod counts {
-    pub const F32_UNIFORM: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+//! Exact unweighted histogram classification. Numerical edges are binary64
+//! storage words, not rendering floats; no native F64 or INT64 instructions.
+use crate::gpu::ScalarType;
 
-struct HistogramParams {
-    min_value: f32,
-    inv_bin_width: f32,
-    sample_count: u32,
-    bin_count: u32,
-    accumulate_total: u32,
-    _pad: vec3<u32>,
-};
+pub fn source(scalar: ScalarType, workgroup_size: u32) -> String {
+    let sample = match scalar {
+        ScalarType::F32 => "fn sample_words(index: u32) -> vec2<u32> { return runmat_f32_to_binary64_words(samples[index]); }",
+        ScalarType::F64 => "fn sample_words(index: u32) -> vec2<u32> { return vec2<u32>(samples[2u * index], samples[2u * index + 1u]); }",
+    };
+    format!(
+        "{}\n{}\n{sample}",
+        runmat_accelerate_api::wgpu_ieee_words::BINARY32_TO_BINARY64_WORDS_WGSL,
+        super::compute_source(COMMON, workgroup_size)
+    )
+}
 
-@group(0) @binding(0)
-var<storage, read> samples: array<f32>;
+const COMMON: &str = r#"
+const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
+struct HistogramParams { sample_count: u32, bin_count: u32, stride: u32, _pad: u32 };
+@group(0) @binding(0) var<storage, read> samples: array<u32>;
+@group(0) @binding(1) var<storage, read> edges: array<vec2<u32>>;
+@group(0) @binding(2) var<storage, read_write> counts: array<atomic<u32>>;
+@group(0) @binding(3) var<uniform> params: HistogramParams;
 
-@group(0) @binding(1)
-var<storage, read_write> counts: array<atomic<u32>>;
-
-@group(0) @binding(2)
-var<storage, read_write> total_weight: atomic<u32>;
-
-@group(0) @binding(3)
-var<uniform> params: HistogramParams;
-
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+fn word_nan(value: vec2<u32>) -> bool {
+    let magnitude = value.y & 0x7fffffffu;
+    return magnitude > 0x7ff00000u || (magnitude == 0x7ff00000u && value.x != 0u);
+}
+fn word_less(a: vec2<u32>, b: vec2<u32>) -> bool {
+    let am = a.y & 0x7fffffffu;
+    let bm = b.y & 0x7fffffffu;
+    // IEEE numerical comparison, not totalOrder: signed zeros compare equal.
+    if am == 0u && a.x == 0u && bm == 0u && b.x == 0u { return false; }
+    let an = (a.y & 0x80000000u) != 0u;
+    let bn = (b.y & 0x80000000u) != 0u;
+    if an != bn { return an; }
+    if an { return am > bm || (am == bm && a.x > b.x); }
+    return am < bm || (am == bm && a.x < b.x);
+}
+fn bin_index(value: vec2<u32>) -> u32 {
+    // Preserve the actual CPU owner's NaN-last and clipped-outlier policy.
+    if word_nan(value) { return params.bin_count - 1u; }
+    var lower = 1u;
+    var upper = params.bin_count;
     loop {
-        let old_value = bitcast<f32>(old_bits);
-        let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
-        if (exchange.exchanged) {
-            break;
-        }
-        old_bits = exchange.old_value;
+        if lower >= upper { break; }
+        let middle = lower + (upper - lower) / 2u;
+        if word_less(value, edges[middle]) { upper = middle; }
+        else { lower = middle + 1u; }
     }
+    return lower - 1u;
 }
-
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= params.sample_count) {
-        return;
-    }
-
-    let value = samples[idx];
-    let normalized = (value - params.min_value) * params.inv_bin_width;
-    let raw_bin = i32(floor(normalized));
-    let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
-    let bin_index = u32(clamped);
-
-    atomic_add_f32(&counts[bin_index], 1.0);
-    if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, 1.0);
-    }
-}
-"#;
-
-    pub const F32_WEIGHTS_F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
-
-struct HistogramParams {
-    min_value: f32,
-    inv_bin_width: f32,
-    sample_count: u32,
-    bin_count: u32,
-    accumulate_total: u32,
-    _pad: vec3<u32>,
-};
-
-@group(0) @binding(0)
-var<storage, read> samples: array<f32>;
-
-@group(0) @binding(1)
-var<storage, read> weights: array<f32>;
-
-@group(0) @binding(2)
-var<storage, read_write> counts: array<atomic<u32>>;
-
-@group(0) @binding(3)
-var<storage, read_write> total_weight: atomic<u32>;
-
-@group(0) @binding(4)
-var<uniform> params: HistogramParams;
-
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
+    var index = gid.x;
     loop {
-        let old_value = bitcast<f32>(old_bits);
-        let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
-        if (exchange.exchanged) {
-            break;
-        }
-        old_bits = exchange.old_value;
-    }
-}
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= params.sample_count) {
-        return;
-    }
-
-    let value = samples[idx];
-    let normalized = (value - params.min_value) * params.inv_bin_width;
-    let raw_bin = i32(floor(normalized));
-    let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
-    let bin_index = u32(clamped);
-    let weight = weights[idx];
-
-    atomic_add_f32(&counts[bin_index], weight);
-    if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
+        if index >= params.sample_count { break; }
+        atomicAdd(&counts[bin_index(sample_words(index))], 1u);
+        // Avoid overflow even at the closed u32 sample-count bound.
+        if params.sample_count - index <= params.stride { break; }
+        index = index + params.stride;
     }
 }
 "#;
-
-    pub const F32_WEIGHTS_F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
-
-struct HistogramParams {
-    min_value: f32,
-    inv_bin_width: f32,
-    sample_count: u32,
-    bin_count: u32,
-    accumulate_total: u32,
-    _pad: vec3<u32>,
-};
-
-@group(0) @binding(0)
-var<storage, read> samples: array<f32>;
-
-@group(0) @binding(1)
-var<storage, read> weights: array<f64>;
-
-@group(0) @binding(2)
-var<storage, read_write> counts: array<atomic<u32>>;
-
-@group(0) @binding(3)
-var<storage, read_write> total_weight: atomic<u32>;
-
-@group(0) @binding(4)
-var<uniform> params: HistogramParams;
-
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
-    loop {
-        let old_value = bitcast<f32>(old_bits);
-        let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
-        if (exchange.exchanged) {
-            break;
-        }
-        old_bits = exchange.old_value;
-    }
-}
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= params.sample_count) {
-        return;
-    }
-
-    let value = samples[idx];
-    let normalized = (value - params.min_value) * params.inv_bin_width;
-    let raw_bin = i32(floor(normalized));
-    let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
-    let bin_index = u32(clamped);
-    let weight = f32(weights[idx]);
-
-    atomic_add_f32(&counts[bin_index], weight);
-    if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
-    }
-}
-"#;
-
-    pub const F64_UNIFORM: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
-
-struct HistogramParams {
-    min_value: f32,
-    inv_bin_width: f32,
-    sample_count: u32,
-    bin_count: u32,
-    accumulate_total: u32,
-    _pad: vec3<u32>,
-};
-
-@group(0) @binding(0)
-var<storage, read> samples: array<f64>;
-
-@group(0) @binding(1)
-var<storage, read_write> counts: array<atomic<u32>>;
-
-@group(0) @binding(2)
-var<storage, read_write> total_weight: atomic<u32>;
-
-@group(0) @binding(3)
-var<uniform> params: HistogramParams;
-
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
-    loop {
-        let old_value = bitcast<f32>(old_bits);
-        let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
-        if (exchange.exchanged) {
-            break;
-        }
-        old_bits = exchange.old_value;
-    }
-}
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= params.sample_count) {
-        return;
-    }
-
-    let value = f32(samples[idx]);
-    let normalized = (value - params.min_value) * params.inv_bin_width;
-    let raw_bin = i32(floor(normalized));
-    let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
-    let bin_index = u32(clamped);
-
-    atomic_add_f32(&counts[bin_index], 1.0);
-    if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, 1.0);
-    }
-}
-"#;
-
-    pub const F64_WEIGHTS_F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
-
-struct HistogramParams {
-    min_value: f32,
-    inv_bin_width: f32,
-    sample_count: u32,
-    bin_count: u32,
-    accumulate_total: u32,
-    _pad: vec3<u32>,
-};
-
-@group(0) @binding(0)
-var<storage, read> samples: array<f64>;
-
-@group(0) @binding(1)
-var<storage, read> weights: array<f32>;
-
-@group(0) @binding(2)
-var<storage, read_write> counts: array<atomic<u32>>;
-
-@group(0) @binding(3)
-var<storage, read_write> total_weight: atomic<u32>;
-
-@group(0) @binding(4)
-var<uniform> params: HistogramParams;
-
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
-    loop {
-        let old_value = bitcast<f32>(old_bits);
-        let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
-        if (exchange.exchanged) {
-            break;
-        }
-        old_bits = exchange.old_value;
-    }
-}
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= params.sample_count) {
-        return;
-    }
-
-    let value = f32(samples[idx]);
-    let normalized = (value - params.min_value) * params.inv_bin_width;
-    let raw_bin = i32(floor(normalized));
-    let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
-    let bin_index = u32(clamped);
-    let weight = weights[idx];
-
-    atomic_add_f32(&counts[bin_index], weight);
-    if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
-    }
-}
-"#;
-
-    pub const F64_WEIGHTS_F64: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
-
-struct HistogramParams {
-    min_value: f32,
-    inv_bin_width: f32,
-    sample_count: u32,
-    bin_count: u32,
-    accumulate_total: u32,
-    _pad: vec3<u32>,
-};
-
-@group(0) @binding(0)
-var<storage, read> samples: array<f64>;
-
-@group(0) @binding(1)
-var<storage, read> weights: array<f64>;
-
-@group(0) @binding(2)
-var<storage, read_write> counts: array<atomic<u32>>;
-
-@group(0) @binding(3)
-var<storage, read_write> total_weight: atomic<u32>;
-
-@group(0) @binding(4)
-var<uniform> params: HistogramParams;
-
-fn atomic_add_f32(target: ptr<storage, atomic<u32>>, value: f32) {
-    var old_bits = atomicLoad(target);
-    loop {
-        let old_value = bitcast<f32>(old_bits);
-        let new_bits = bitcast<u32>(old_value + value);
-        let exchange = atomicCompareExchangeWeak(target, old_bits, new_bits);
-        if (exchange.exchanged) {
-            break;
-        }
-        old_bits = exchange.old_value;
-    }
-}
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= params.sample_count) {
-        return;
-    }
-
-    let value = f32(samples[idx]);
-    let normalized = (value - params.min_value) * params.inv_bin_width;
-    let raw_bin = i32(floor(normalized));
-    let clamped = clamp(raw_bin, 0, i32(params.bin_count) - 1);
-    let bin_index = u32(clamped);
-    let weight = f32(weights[idx]);
-
-    atomic_add_f32(&counts[bin_index], weight);
-    if (params.accumulate_total != 0u) {
-        atomic_add_f32(&total_weight, weight);
-    }
-}
-"#;
-}
-
-pub mod convert {
-    pub const TEMPLATE: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
-
-struct ConvertParams {
-    bin_count: u32,
-    _pad0: vec3<u32>,
-    scale: f32,
-    _pad1: vec3<u32>,
-};
-
-@group(0) @binding(0)
-var<storage, read> counts: array<u32>;
-
-@group(0) @binding(1)
-var<storage, read_write> values: array<f32>;
-
-@group(0) @binding(2)
-var<uniform> params: ConvertParams;
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= params.bin_count) {
-        return;
-    }
-
-    let count_value = bitcast<f32>(counts[idx]);
-    values[idx] = count_value * params.scale;
-}
-"#;
-}

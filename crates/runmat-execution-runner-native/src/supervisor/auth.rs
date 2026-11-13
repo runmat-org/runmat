@@ -1,34 +1,20 @@
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::Path;
 
-use runmat_process_host::is_process_alive;
 use uuid::Uuid;
 
 use super::store::SupervisorPaths;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub(super) fn load_or_create_token(paths: &SupervisorPaths) -> NativeExecutionResult<String> {
-    if paths.token.exists() {
-        return read_token(&paths.token);
-    }
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    match options.open(&paths.token) {
-        Ok(mut file) => {
-            file.write_all(token.as_bytes()).map_err(protocol_io)?;
-            file.sync_all().map_err(protocol_io)?;
-            Ok(token)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => read_token(&paths.token),
-        Err(error) => Err(protocol_io(error)),
-    }
+    // Clients must never see an empty or partial token. The shared filesystem
+    // publishes one complete winner, with private permissions set before writes.
+    runmat_filesystem::NativeFsProvider
+        .atomic_create_private_new(&paths.token, token.as_bytes(), 64)
+        .map_err(protocol_io)?;
+    read_token(&paths.token)
 }
 
 pub(super) fn read_token(path: &Path) -> NativeExecutionResult<String> {
@@ -37,7 +23,7 @@ pub(super) fn read_token(path: &Path) -> NativeExecutionResult<String> {
     OpenOptions::new()
         .read(true)
         .open(path)
-        .and_then(|mut file| file.read_to_string(&mut token))
+        .and_then(|file| file.take(65).read_to_string(&mut token))
         .map_err(protocol_io)?;
     if token.len() != 64
         || token
@@ -79,60 +65,16 @@ fn validate_private_token_file(path: &Path) -> NativeExecutionResult<()> {
     }
 }
 
-pub(super) struct SupervisorLock {
-    path: PathBuf,
-    process_id: u32,
-}
-
-impl SupervisorLock {
-    pub(super) fn acquire(paths: &SupervisorPaths) -> NativeExecutionResult<Self> {
-        let process_id = std::process::id();
-        for _ in 0..2 {
-            let mut options = OpenOptions::new();
-            options.create_new(true).write(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt as _;
-                options.mode(0o600);
-            }
-            match options.open(&paths.lock) {
-                Ok(mut file) => {
-                    writeln!(file, "{process_id}").map_err(protocol_io)?;
-                    file.sync_all().map_err(protocol_io)?;
-                    return Ok(Self {
-                        path: paths.lock.clone(),
-                        process_id,
-                    });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let owner = fs::read_to_string(&paths.lock)
-                        .ok()
-                        .and_then(|value| value.trim().parse::<u32>().ok());
-                    if owner.is_some_and(is_process_alive) {
-                        return Err(NativeExecutionError::Configuration(
-                            "the per-user local execution supervisor is already running".into(),
-                        ));
-                    }
-                    fs::remove_file(&paths.lock).map_err(protocol_io)?;
-                }
-                Err(error) => return Err(protocol_io(error)),
-            }
-        }
-        Err(NativeExecutionError::Protocol(
-            "unable to acquire the local supervisor lock".into(),
-        ))
-    }
-}
-
-impl Drop for SupervisorLock {
-    fn drop(&mut self) {
-        let owner = fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|value| value.trim().parse::<u32>().ok());
-        if owner == Some(self.process_id) {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
+pub(super) fn acquire_supervisor_lock(
+    paths: &SupervisorPaths,
+) -> NativeExecutionResult<runmat_filesystem::ExclusiveFileLock> {
+    runmat_filesystem::ExclusiveFileLock::try_acquire(&paths.lock)
+        .map_err(protocol_io)?
+        .ok_or_else(|| {
+            NativeExecutionError::Configuration(
+                "the per-user local execution supervisor already has an authority owner".into(),
+            )
+        })
 }
 
 pub(super) fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -148,3 +90,6 @@ pub(super) fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 fn protocol_io(error: std::io::Error) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
+
+#[cfg(test)]
+mod tests;

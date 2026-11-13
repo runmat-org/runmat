@@ -1,57 +1,21 @@
 //! MATLAB-compatible `cat` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::arg_tokens::{tokens_from_context, tokens_from_values, ArgToken};
-use crate::builtins::common::concatenation::char_array_from_f64_with_prefix;
-use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::random_args::complex_tensor_into_value;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+use crate::builtins::common::concatenation::{
+    char_array_from_f64_with_prefix, char_from_f64_code_unit,
 };
+use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::tensor;
-use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::AccelProvider;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, LogicalArray,
-    NumericDType, NumericStorage, StringArray, Tensor, Value,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::cat")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "cat",
-    op_kind: GpuOpKind::Custom("cat"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("cat")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Falls back to exact gather, host assembly, and upload for typed integers, mixed host/device inputs, runtime empty omission, or providers without a native concatenation kernel.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::cat")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "cat",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Concatenation is a sink and terminates fusion pipelines.",
+    CellArray, CharArray, ComplexTensor, IntegerComplexStorage, LogicalArray, NumericDType,
+    NumericStorage, StringArray, Tensor, Value,
 };
 
 fn cat_error(message: impl Into<String>) -> RuntimeError {
@@ -61,430 +25,27 @@ fn cat_error(message: impl Into<String>) -> RuntimeError {
 const MAX_CAT_DIMENSION: usize = 1024;
 const BUILTIN_NAME: &str = "cat";
 
-const CAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Concatenated output array.",
-}];
+mod managed;
+pub(crate) mod symbolic;
 
-const CAT_INPUTS_CORE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Concatenation dimension (1-based).",
-    },
-    BuiltinParamDescriptor {
-        name: "A1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "A2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "An",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional input arrays.",
-    },
-];
-
-const CAT_INPUTS_LIKE: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Concatenation dimension (1-based).",
-    },
-    BuiltinParamDescriptor {
-        name: "A1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "A2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "An",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional input arrays.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::PropertyName,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Name-value key ('like').",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype that sets output class/device.",
-    },
-];
-
-const CAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = cat(dim, A1, A2, An...)",
-        inputs: &CAT_INPUTS_CORE,
-        outputs: &CAT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cat(dim, A1, A2, An..., \"like\", prototype)",
-        inputs: &CAT_INPUTS_LIKE,
-        outputs: &CAT_OUTPUT,
-    },
-];
-
-const CAT_ERROR_TOO_FEW_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAT.TOO_FEW_INPUTS",
-    identifier: Some("RunMat:cat:TooFewInputs"),
-    when: "Fewer than two input arrays are supplied after dim.",
-    message: "cat: at least two input arrays are required",
-};
-
-const CAT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAT.INVALID_DIMENSION",
-    identifier: Some("RunMat:cat:InvalidDimension"),
-    when: "dim is non-numeric, non-integer, or less than one.",
-    message: "cat: dimension must be numeric and >= 1",
-};
-
-const CAT_ERROR_GPU: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAT.GPU",
-    identifier: Some("RunMat:cat:GpuError"),
-    when: "A required gpuArray gather, upload, or provider operation fails.",
-    message: "cat: gpuArray operation failed",
-};
-
-const CAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAT.TYPE_MISMATCH",
-    identifier: Some("RunMat:cat:TypeMismatch"),
-    when: "Inputs are from incompatible classes for concatenation.",
-    message: "cat: incompatible input classes for concatenation",
-};
-
-const CAT_ERROR_INVALID_LIKE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CAT.INVALID_LIKE",
-    identifier: Some("RunMat:cat:InvalidLikePrototype"),
-    when: "The 'like' name-value form is malformed or uses an unsupported prototype.",
-    message: "cat: invalid 'like' prototype",
-};
-
-const CAT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    CAT_ERROR_TOO_FEW_INPUTS,
-    CAT_ERROR_INVALID_DIMENSION,
-    CAT_ERROR_GPU,
-    CAT_ERROR_TYPE_MISMATCH,
-    CAT_ERROR_INVALID_LIKE,
-];
-
-pub const CAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CAT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CAT_ERRORS,
-};
-
-const CAT_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cat-like-prototype",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "the trailing cat \"like\" prototype form is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CatLikePrototypeExtension"),
-};
-
-const CAT_RESIDENT_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cat-resident-dimension",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cat with a resident gpuArray dimension control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CatResidentDimensionExtension"),
-};
-
-pub const CAT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [CAT_LIKE_EXTENSION, CAT_RESIDENT_DIMENSION_EXTENSION];
-
-const CAT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A host scalar from any integer class is read exactly as the positive one-based concatenation dimension; scalar double remains accepted by the same structural parser.",
-    }];
-
-const CAT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A1,...,An",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every ordered mixture of the eight real integer classes is accepted together with real single, double, or logical data; the leftmost participating integer class determines the numeric output class.",
-    }];
-
-const CAT_COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "complex A1,...,An",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight paired complex-integer classes concatenate structurally with exact real and imaginary components.",
-    }];
-
-const CAT_RESIDENT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "gpuArray dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode may gather a resident scalar dimension exactly before structural concatenation; the documented dimension control is a host positive integer scalar.",
-    }];
-
-pub const CAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = cat(integer_dim,A1,A2,...,An)",
-        inputs: &CAT_INTEGER_DIMENSION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The integer dimension is a structural control only and does not affect output class. It is range-checked exactly before shape arithmetic; data inputs independently determine output class and residency.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = cat(dim,A1,A2,...,An) with real integer data",
-        inputs: &CAT_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The leftmost nonempty integer class dominates real numeric and logical operands. Unlike integer values and floating or logical values convert to that class with ordinary rounding and saturation. Empty operands are omitted when a nonempty operand remains and therefore do not affect the result class. Resident data uses the provider hook where representable or exact gather/assemble/upload fallback.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = cat(dim,complex_integer_A1,...,An)",
-        inputs: &CAT_COMPLEX_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed complex-integer concatenation applies the leftmost integer component class independently to real and imaginary parts, preserves exact paired storage, and restores resident output to the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = cat(gpuArray(integer_dim),A1,A2,...,An)",
-        inputs: &CAT_RESIDENT_INTEGER_DIMENSION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "RunMat-only resident dimension controls are gathered exactly after the extension gate; the scalar remains a structural control and data inputs independently determine output class and residency.",
-    },
-];
-
-#[derive(Clone, Copy, Debug)]
-struct ParsedCatTokens {
-    dim: Option<usize>,
-    like_index: Option<usize>,
-}
-
-fn parse_cat_tokens(tokens: &[ArgToken]) -> ParsedCatTokens {
-    let dim = match tokens.first() {
-        Some(ArgToken::Number(value)) => coerce_positive_dim(*value),
-        Some(ArgToken::Integer(value)) => coerce_positive_integer_dim(value),
-        _ => None,
-    };
-    let like_index = if tokens.len() >= 3 {
-        match &tokens[tokens.len() - 2] {
-            ArgToken::String(text) if text == "like" => Some(tokens.len() - 2),
-            _ => None,
-        }
-    } else {
-        None
-    };
-    ParsedCatTokens { dim, like_index }
-}
-
-fn coerce_positive_integer_dim(value: &IntValue) -> Option<usize> {
-    value.try_to_usize().filter(|&dim| dim >= 1)
-}
-
-fn coerce_positive_dim(value: f64) -> Option<usize> {
-    if !value.is_finite() {
-        return None;
+fn is_like_name(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("like")),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("like")),
+        Value::CharArray(array) if array.rows == 1 && array.data().len() == 4 => array
+            .data()
+            .iter()
+            .copied()
+            .zip(b"like")
+            .all(|(actual, expected)| {
+                u8::try_from(actual.raw()).is_ok_and(|actual| actual.eq_ignore_ascii_case(expected))
+            }),
+        _ => false,
     }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return None;
-    }
-    if rounded < 1.0 {
-        return None;
-    }
-    Some(rounded as usize)
-}
-
-fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
-    let mut element: Option<Type> = None;
-    for ty in inputs {
-        let Type::Cell { element_type, .. } = ty else {
-            return None;
-        };
-        match (&element, element_type.as_deref()) {
-            (None, Some(current)) => element = Some(current.clone()),
-            (Some(existing), Some(current)) if existing == current => {}
-            (Some(_), Some(_)) => return None,
-            _ => {}
-        }
-    }
-    element.map(Box::new)
-}
-
-fn cat_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
-    match ty {
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            Some(shape.clone())
-        }
-        Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
-        _ => None,
-    }
-}
-
-fn cat_concat_shape(inputs: &[Type], dim_1based: usize) -> Option<Vec<Option<usize>>> {
-    if inputs.is_empty() || dim_1based == 0 {
-        return None;
-    }
-    let mut shapes = Vec::with_capacity(inputs.len());
-    for ty in inputs {
-        shapes.push(cat_input_shape(ty)?);
-    }
-    let has_known_nonempty = shapes.iter().any(|shape| {
-        shape.iter().all(Option::is_some)
-            && shape.iter().all(|dimension| dimension.unwrap_or(0) > 0)
-    });
-    if has_known_nonempty {
-        shapes.retain(|shape| !shape.iter().any(|dimension| matches!(dimension, Some(0))));
-    }
-    let rank = shapes
-        .iter()
-        .map(|shape| shape.len())
-        .max()?
-        .max(dim_1based);
-    let mut padded = Vec::with_capacity(shapes.len());
-    for shape in shapes {
-        let mut current = shape;
-        while current.len() < rank {
-            current.push(Some(1));
-        }
-        padded.push(current);
-    }
-    let mut output = vec![None; rank];
-    let dim_zero = dim_1based - 1;
-    for axis in 0..rank {
-        if axis == dim_zero {
-            let mut total: Option<usize> = Some(0);
-            for shape in &padded {
-                match (total, shape[axis]) {
-                    (Some(acc), Some(value)) => total = acc.checked_add(value),
-                    _ => {
-                        total = None;
-                        break;
-                    }
-                }
-            }
-            output[axis] = total;
-        } else {
-            let mut shared: Option<usize> = None;
-            let mut mismatch = false;
-            for shape in &padded {
-                match (shared, shape[axis]) {
-                    (None, value) => shared = value,
-                    (Some(current), Some(value)) if current == value => {}
-                    (Some(_), Some(_)) => {
-                        mismatch = true;
-                        break;
-                    }
-                    _ => {
-                        shared = None;
-                        break;
-                    }
-                }
-            }
-            output[axis] = if mismatch { None } else { shared };
-        }
-    }
-    let min_len = dim_1based.max(2).min(output.len());
-    while output.len() > min_len && matches!(output.last(), Some(Some(1))) {
-        output.pop();
-    }
-    Some(output)
-}
-
-fn cat_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.len() < 3 {
-        return Type::Unknown;
-    }
-    let parsed = parse_cat_tokens(&tokens_from_context(ctx));
-    let inputs = &args[1..];
-    let has_cell = inputs.iter().any(|arg| matches!(arg, Type::Cell { .. }));
-    if has_cell {
-        return Type::Cell {
-            element_type: cell_element_type(inputs),
-            length: None,
-        };
-    }
-    let has_string = inputs.iter().any(|arg| matches!(arg, Type::String));
-    if has_string {
-        return Type::cell_of(Type::String);
-    }
-    let has_numeric = inputs
-        .iter()
-        .any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
-    let has_logical = inputs
-        .iter()
-        .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
-    let dim = match parsed.dim {
-        Some(value) if value > 0 => value,
-        Some(_) => return Type::Unknown,
-        None => {
-            if has_numeric {
-                return Type::tensor();
-            }
-            if has_logical {
-                return Type::logical();
-            }
-            return Type::Unknown;
-        }
-    };
-    let shape = cat_concat_shape(inputs, dim);
-    if has_numeric {
-        return Type::Tensor { shape };
-    }
-    if has_logical {
-        return Type::Logical { shape };
-    }
-    Type::Unknown
 }
 
 fn cat_err(message: impl Into<String>) -> RuntimeError {
@@ -499,6 +60,7 @@ enum CatCategory {
     Char,
     String,
     Cell,
+    Symbolic,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -525,7 +87,7 @@ impl Default for LikeSpec {
 }
 
 impl LikeSpec {
-    fn from_prototype(proto: Value) -> BuiltinResult<Self> {
+    fn from_prototype(proto: &Value) -> BuiltinResult<Self> {
         match proto {
             Value::GpuTensor(_) => Ok(Self {
                 device: LikeDevice::Gpu,
@@ -565,25 +127,23 @@ impl LikeSpec {
     }
 }
 
-fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)> {
-    if inputs.len() >= 2 {
-        let tokens = tokens_from_values(&inputs);
-        let parsed = parse_cat_tokens(&tokens);
-        if parsed.like_index == Some(inputs.len() - 2) {
-            let prototype = inputs.last().cloned().unwrap();
-            if matches!(
-                prototype,
-                Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_)
-            ) {
-                // Treat as data to avoid colliding with textual concatenation cases.
-            } else if inputs.len() < 4 {
-                // Removing the pair would leave fewer than two inputs; treat as data.
-            } else {
-                let spec = LikeSpec::from_prototype(prototype)?;
-                inputs.pop();
-                inputs.pop();
-                return Ok((inputs, spec));
-            }
+fn extract_like(
+    mut inputs: crate::call::BuiltinArguments,
+) -> BuiltinResult<(crate::call::BuiltinArguments, LikeSpec)> {
+    if inputs.len() >= 2 && is_like_name(&inputs[inputs.len() - 2]) {
+        let prototype = inputs.last().expect("nonempty like suffix");
+        if matches!(
+            prototype,
+            Value::CharArray(_) | Value::String(_) | Value::StringArray(_) | Value::Cell(_)
+        ) {
+            // Treat as data to avoid colliding with textual concatenation cases.
+        } else if inputs.len() < 4 {
+            // Removing the pair would leave fewer than two inputs; treat as data.
+        } else {
+            let spec = LikeSpec::from_prototype(prototype)?;
+            inputs.pop();
+            inputs.pop();
+            return Ok((inputs, spec));
         }
     }
     Ok((inputs, LikeSpec::default()))
@@ -591,17 +151,15 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
 
 #[runtime_builtin(
     name = "cat",
-    category = "array/shape",
-    summary = "Concatenate arrays along a chosen dimension.",
-    keywords = "cat,concatenate,array,dimension,gpu",
-    accel = "array_construct",
-    type_resolver(cat_type),
-    descriptor(crate::builtins::array::shape::cat::CAT_DESCRIPTOR),
-    extensions(crate::builtins::array::shape::cat::CAT_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::cat::CAT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::shape::cat"
 )]
-async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn cat_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    dim: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() < 2 {
         return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
     }
@@ -647,28 +205,98 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     }
     let dim_zero = dim_index - 1;
 
+    if inputs
+        .iter()
+        .any(|value| matches!(value, Value::Struct(_) | Value::StructArray(_)))
+    {
+        let has_nonempty_structure = inputs.iter().any(|value| {
+            matches!(value, Value::Struct(_))
+                || matches!(value, Value::StructArray(array) if !array.is_empty())
+        });
+        return crate::aggregate::structure::operations::concatenate_arguments(
+            dim_zero,
+            &inputs,
+            has_nonempty_structure,
+            context.as_ref(),
+        )
+        .map_err(|error| {
+            crate::aggregate::structure::operations::remap(error, |message| {
+                cat_err(format!("cat: {message}"))
+            })
+        });
+    }
+
     if inputs.iter().any(|value| matches!(value, Value::Cell(_))) {
-        let category = determine_category(&inputs, &like)?;
+        let category = determine_category(inputs.view(), &like)?;
         debug_assert_eq!(category, CatCategory::Cell);
         return cat_cell_arrays(dim_zero, inputs);
     }
 
     if inputs.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
-        return cat_gpu_values(dim_zero, inputs, &like).await;
+        return cat_gpu_values(dim_zero, inputs, &like, context.as_ref()).await;
     }
 
-    let category = determine_category(&inputs, &like)?;
+    cat_host_values(dim_zero, inputs, &like, context.as_ref())
+}
+
+pub(crate) fn is_canonical_host_binding(binding: crate::builtin::RuntimeBuiltinBinding) -> bool {
+    binding.identity.builtin.name == "cat"
+        && binding.identity.variant == "default"
+        && std::ptr::fn_addr_eq(
+            binding.implementation,
+            __rt_wrap_cat_builtin as crate::builtin::RuntimeBuiltinImplementation,
+        )
+        && binding.continuation_layout.is_some_and(|layout| {
+            std::ptr::fn_addr_eq(
+                layout,
+                __rt_owned_layout_cat_builtin as crate::builtin::RuntimeBuiltinContinuationLayout,
+            )
+        })
+}
+
+/// The one synchronous host assembly tail shared by `cat` and matrix literals.
+/// Callers have already selected the canonical host route and excluded cell,
+/// struct, resident, and method-dispatched operands.
+pub(crate) fn concatenate_host_values(dim_zero: usize, inputs: Vec<Value>) -> BuiltinResult<Value> {
+    let inputs = BuiltinArguments::from_borrowed(&inputs, None)?;
+    cat_host_values(dim_zero, inputs, &LikeSpec::default(), None)
+}
+
+fn cat_host_values(
+    dim_zero: usize,
+    inputs: BuiltinArguments,
+    like: &LikeSpec,
+    context: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let category = determine_category(inputs.view(), like)?;
+    if let Some(context) = context {
+        let policy = HostAllocationReceipt::policy(Some(context))
+            .map_err(|cause| managed::admission_error(context, cause))?;
+        if policy == HostAllocationPolicy::Managed && like.device == LikeDevice::Host {
+            match category {
+                CatCategory::Numeric => return managed::numeric(context, dim_zero, inputs.view()),
+                CatCategory::Logical => return managed::logical(context, dim_zero, inputs.view()),
+                CatCategory::Complex => return managed::complex(context, dim_zero, inputs.view()),
+                CatCategory::Char => return managed::character(context, dim_zero, inputs.view()),
+                _ => {}
+            }
+        }
+    }
     match category {
         CatCategory::String => cat_string_arrays(dim_zero, inputs),
         CatCategory::Char => cat_char_arrays(dim_zero, inputs),
         CatCategory::Cell => unreachable!("cell concatenation returned before residency dispatch"),
-        CatCategory::Logical => cat_logical_arrays(dim_zero, inputs, &like),
-        CatCategory::Complex => cat_complex_arrays(dim_zero, inputs, &like),
-        CatCategory::Numeric => cat_numeric_tensors(dim_zero, inputs, &like),
+        CatCategory::Logical => cat_logical_arrays(dim_zero, inputs, like),
+        CatCategory::Complex => cat_complex_arrays(dim_zero, inputs, like),
+        CatCategory::Numeric => cat_numeric_tensors(dim_zero, inputs, like),
+        CatCategory::Symbolic => symbolic::concatenate(dim_zero, inputs.iter()),
     }
 }
 
-fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCategory> {
+fn determine_category(
+    inputs: FunctionArgumentView<'_>,
+    like: &LikeSpec,
+) -> BuiltinResult<CatCategory> {
     let mut category = infer_category(inputs)?;
     if let Some(hint) = like.category_hint {
         category = match hint {
@@ -679,6 +307,7 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCat
                         | CatCategory::Char
                         | CatCategory::Cell
                         | CatCategory::Complex
+                        | CatCategory::Symbolic
                 ) {
                     return Err(cat_err(
                         "cat: 'like' prototype class does not match the input classes",
@@ -697,7 +326,10 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCat
             CatCategory::Complex => {
                 if matches!(
                     category,
-                    CatCategory::String | CatCategory::Char | CatCategory::Cell
+                    CatCategory::String
+                        | CatCategory::Char
+                        | CatCategory::Cell
+                        | CatCategory::Symbolic
                 ) {
                     return Err(cat_err(
                         "cat: 'like' complex prototypes require numeric or complex inputs",
@@ -705,7 +337,7 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCat
                 }
                 CatCategory::Complex
             }
-            CatCategory::Char | CatCategory::String | CatCategory::Cell => {
+            CatCategory::Char | CatCategory::String | CatCategory::Cell | CatCategory::Symbolic => {
                 return Err(cat_err(
                     "cat: 'like' prototypes for char, string, or cell arrays are not supported",
                 ));
@@ -716,11 +348,17 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCat
     Ok(category)
 }
 
-fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
+fn infer_category(inputs: FunctionArgumentView<'_>) -> BuiltinResult<CatCategory> {
     // Direct cell concatenation encloses each complete non-cell operand in one
     // cell. Resolve this dominance before validating the enclosed value class.
     if inputs.iter().any(|value| matches!(value, Value::Cell(_))) {
         return Ok(CatCategory::Cell);
+    }
+    if inputs
+        .iter()
+        .any(|value| matches!(value, Value::Symbolic(_) | Value::SymbolicArray(_)))
+    {
+        return Ok(CatCategory::Symbolic);
     }
 
     let mut has_string = false;
@@ -829,15 +467,15 @@ fn upload_numeric_tensor(
 
 fn cat_numeric_tensors(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
-    if let Some(target) = leftmost_integer_target(&values) {
+    if let Some(target) = leftmost_integer_target(values.view()) {
         return cat_integer_tensors(target, dim_zero, values, like);
     }
 
     let mut tensors = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let tensor = tensor::value_into_tensor_for("cat", value).map_err(cat_err)?;
         tensors.push(tensor);
     }
@@ -850,7 +488,10 @@ fn concat_floating_tensors(dim_zero: usize, tensors: Vec<Tensor>) -> BuiltinResu
     let use_single = tensors
         .iter()
         .any(|tensor| tensor.numeric_dtype() == NumericDType::F32);
-    let shapes: Vec<Vec<usize>> = tensors.iter().map(|tensor| tensor.shape.clone()).collect();
+    let shapes: Vec<Vec<usize>> = tensors
+        .iter()
+        .map(|tensor| tensor.shape().to_vec())
+        .collect();
     let storages: Vec<NumericStorage> = tensors
         .into_iter()
         .map(|tensor| {
@@ -898,15 +539,15 @@ fn concat_floating_tensors(dim_zero: usize, tensors: Vec<Tensor>) -> BuiltinResu
 
 /// MATLAB concatenation adopts the class of the leftmost integer operand,
 /// converting every other numeric or logical input to that class.
-fn leftmost_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+fn leftmost_integer_target(values: FunctionArgumentView<'_>) -> Option<IntegerClass> {
     let mut empty_integer_target = None;
     for value in values {
         match value {
-            Value::Int(value) => return Some(IntegerTarget::from_int_value(value)),
+            Value::Int(value) => return Some(IntegerClass::from_int_value(value)),
             Value::Tensor(tensor) => {
                 if let Some(storage) = tensor.integer_storage() {
-                    let target = IntegerTarget::from_storage(storage);
-                    if !is_empty_concat_shape(&tensor.shape) {
+                    let target = IntegerClass::from_storage(storage);
+                    if !is_empty_concat_shape(tensor.shape()) {
                         return Some(target);
                     }
                     empty_integer_target.get_or_insert(target);
@@ -919,9 +560,9 @@ fn leftmost_integer_target(values: &[Value]) -> Option<IntegerTarget> {
 }
 
 fn cat_integer_tensors(
-    target: IntegerTarget,
+    target: IntegerClass,
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     let tensor = build_integer_cat_tensor(target, dim_zero, values)?;
@@ -929,14 +570,14 @@ fn cat_integer_tensors(
 }
 
 fn build_integer_cat_tensor(
-    target: IntegerTarget,
+    target: IntegerClass,
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
 ) -> BuiltinResult<Tensor> {
     let mut shapes = Vec::with_capacity(values.len());
     let mut value_buffers = Vec::with_capacity(values.len());
 
-    for value in values {
+    for value in values.iter().cloned() {
         let (shape, values) = integer_concat_input(target, value)?;
         shapes.push(shape);
         value_buffers.push(values);
@@ -950,12 +591,12 @@ fn build_integer_cat_tensor(
 }
 
 fn integer_concat_input(
-    target: IntegerTarget,
+    target: IntegerClass,
     value: Value,
 ) -> BuiltinResult<(Vec<usize>, Vec<runmat_value::IntValue>)> {
     match value {
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -986,7 +627,7 @@ fn integer_concat_input(
             vec![target.cast_scalar(if value { 1.0 } else { 0.0 })],
         )),
         Value::LogicalArray(array) => Ok((
-            array.shape,
+            array.shape.to_vec(),
             array
                 .data
                 .iter()
@@ -1001,14 +642,14 @@ fn integer_concat_input(
 
 fn cat_logical_arrays(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     _like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         arrays.push(value_into_logical(value)?);
     }
-    let shapes: Vec<Vec<usize>> = arrays.iter().map(|a| a.shape.clone()).collect();
+    let shapes: Vec<&[usize]> = arrays.iter().map(|a| a.shape.as_slice()).collect();
     let data_refs: Vec<&[u8]> = arrays.iter().map(|a| a.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     let logical = LogicalArray::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
@@ -1017,7 +658,7 @@ fn cat_logical_arrays(
 
 fn cat_complex_arrays(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     if values.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
@@ -1026,12 +667,12 @@ fn cat_complex_arrays(
         ));
     }
 
-    if let Some(target) = leftmost_complex_integer_target(&values) {
+    if let Some(target) = leftmost_complex_integer_target(values.view()) {
         return cat_typed_complex_integer_arrays(target, dim_zero, values, like);
     }
 
     let mut tensors = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let tensor = match value {
             Value::ComplexTensor(ct) => ct,
             Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
@@ -1044,7 +685,7 @@ fn cat_complex_arrays(
         tensors.push(tensor);
     }
 
-    let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
+    let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape().to_vec()).collect();
     let output_dtype = if tensors
         .iter()
         .all(|tensor| tensor.numeric_dtype() == NumericDType::F32)
@@ -1062,7 +703,7 @@ fn cat_complex_arrays(
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+fn leftmost_complex_integer_target(values: FunctionArgumentView<'_>) -> Option<IntegerClass> {
     let mut empty_target = None;
     for value in values {
         let Value::ComplexTensor(tensor) = value else {
@@ -1071,8 +712,8 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
         let Some(storage) = tensor.integer_storage() else {
             continue;
         };
-        let target = IntegerTarget::from_storage(&storage.real);
-        if !is_empty_concat_shape(&tensor.shape) {
+        let target = IntegerClass::from_storage(storage.real());
+        if !is_empty_concat_shape(tensor.shape()) {
             return Some(target);
         }
         empty_target.get_or_insert(target);
@@ -1081,9 +722,9 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
 }
 
 fn cat_typed_complex_integer_arrays(
-    target: IntegerTarget,
+    target: IntegerClass,
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     like.ensure_device(CatCategory::Complex)?;
@@ -1096,7 +737,7 @@ fn cat_typed_complex_integer_arrays(
     let mut shapes = Vec::with_capacity(values.len());
     let mut real_buffers = Vec::with_capacity(values.len());
     let mut imag_buffers = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let (shape, real, imag) = typed_complex_integer_concat_input(target, value)?;
         shapes.push(shape);
         real_buffers.push(real);
@@ -1117,7 +758,7 @@ fn cat_typed_complex_integer_arrays(
 }
 
 fn typed_complex_integer_concat_input(
-    target: IntegerTarget,
+    target: IntegerClass,
     value: Value,
 ) -> BuiltinResult<(
     Vec<usize>,
@@ -1129,18 +770,18 @@ fn typed_complex_integer_concat_input(
         Value::ComplexTensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 return Ok((
-                    tensor.shape.clone(),
-                    integer_values(storage.real.clone())
+                    tensor.shape().to_vec(),
+                    integer_values(storage.real().clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),
-                    integer_values(storage.imag.clone())
+                    integer_values(storage.imag().clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),
                 ));
             }
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor.materialize_f64();
             Ok((
                 shape,
@@ -1160,7 +801,7 @@ fn typed_complex_integer_concat_input(
             vec![target.cast_scalar(imag)],
         )),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let real: Vec<runmat_value::IntValue> = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -1199,7 +840,7 @@ fn typed_complex_integer_concat_input(
                 .map(|&value| target.cast_scalar(if value == 0 { 0.0 } else { 1.0 }))
                 .collect();
             let imag = vec![zero(); real.len()];
-            Ok((array.shape, real, imag))
+            Ok((array.shape.to_vec(), real, imag))
         }
         other => Err(cat_err(format!(
             "cat: cannot concatenate typed complex integer arrays with {other:?}"
@@ -1207,14 +848,23 @@ fn typed_complex_integer_concat_input(
     }
 }
 
-fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
+fn cat_char_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         arrays.push(char_array_from_value(value)?);
     }
-    let shapes: Vec<Vec<usize>> = arrays.iter().map(|array| array.shape.clone()).collect();
-    let buffers: Vec<Vec<char>> = arrays.iter().map(CharArray::to_column_major).collect();
-    let data_refs: Vec<&[char]> = buffers.iter().map(Vec::as_slice).collect();
+    let shapes: Vec<Vec<usize>> = arrays
+        .iter()
+        .map(|array| match array.shape() {
+            [] => vec![0, 0],
+            [length] => vec![1, *length],
+            shape => shape.to_vec(),
+        })
+        .collect();
+    let buffers: Vec<Vec<runmat_value::Utf16CodeUnit>> =
+        arrays.iter().map(CharArray::to_column_major).collect();
+    let data_refs: Vec<&[runmat_value::Utf16CodeUnit]> =
+        buffers.iter().map(Vec::as_slice).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     CharArray::from_column_major(data, shape)
         .map(Value::CharArray)
@@ -1227,7 +877,7 @@ fn char_array_from_value(value: Value) -> BuiltinResult<CharArray> {
         Value::Num(n) => char_array_from_f64_with_prefix(n, "cat"),
         Value::Int(i) => char_array_from_f64_with_prefix(i.to_f64(), "cat"),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let column_major = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -1261,35 +911,32 @@ fn char_array_from_value(value: Value) -> BuiltinResult<CharArray> {
     }
 }
 
-fn char_from_numeric_code_point(value: f64) -> BuiltinResult<char> {
-    let scalar = char_array_from_f64_with_prefix(value, "cat")?;
-    scalar
-        .data
-        .into_iter()
-        .next()
-        .ok_or_else(|| cat_err("cat: internal character conversion produced no value"))
+fn char_from_numeric_code_point(value: f64) -> BuiltinResult<runmat_value::Utf16CodeUnit> {
+    char_from_f64_code_unit(value, "cat")
 }
 
-fn cat_string_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
+fn cat_string_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         arrays.push(value_into_string_array(value)?);
     }
-    let shapes: Vec<Vec<usize>> = arrays.iter().map(|a| a.shape.clone()).collect();
-    let data_refs: Vec<&[String]> = arrays.iter().map(|a| a.data.as_slice()).collect();
+    let shapes: Vec<&[usize]> = arrays.iter().map(StringArray::shape).collect();
+    let data_refs: Vec<&[runmat_value::StringElement]> =
+        arrays.iter().map(StringArray::data).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
-    let array = StringArray::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
+    let array = StringArray::from_elements_unbounded(data, shape)
+        .map_err(|e| cat_err(format!("cat: {e}")))?;
     Ok(Value::StringArray(array))
 }
 
-fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
+fn cat_cell_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<Value> {
     let mut shapes = Vec::with_capacity(values.len());
     let mut buffers = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let (shape, data) = match value {
             Value::Cell(cell) => {
                 let data = cell.to_column_major();
-                (cell.shape, data)
+                (cell.shape().to_vec(), data)
             }
             other => (vec![1, 1], vec![other]),
         };
@@ -1305,8 +952,9 @@ fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> 
 
 async fn cat_gpu_values(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let has_complex_data = values.iter().any(|value| match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => true,
@@ -1365,7 +1013,7 @@ async fn cat_gpu_values(
         let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) else {
             return Err(cat_err("cat: no acceleration provider is registered"));
         };
-        if owner.device_id() != provider.device_id() {
+        if !runmat_accelerate_api::same_provider_instance(owner, provider) {
             return Err(cat_err(
                 "cat: all gpuArray inputs must belong to the same acceleration provider",
             ));
@@ -1374,30 +1022,91 @@ async fn cat_gpu_values(
     let has_integer_handle = handles
         .iter()
         .any(|handle| runmat_accelerate_api::handle_integer_type(handle).is_some());
-    let has_empty_handle = handles.iter().any(|handle| handle.shape.contains(&0));
-    let has_nonempty_handle = handles.iter().any(|handle| !handle.shape.contains(&0));
+    let has_empty_handle = handles.iter().any(|handle| handle.shape().contains(&0));
+    let has_nonempty_handle = handles.iter().any(|handle| !handle.shape().contains(&0));
     let must_apply_runtime_empty_omission = has_empty_handle && has_nonempty_handle;
 
-    // Native provider hook
+    // A provider may decline before effects, but an attempted execution may
+    // not be replayed through gathering after allocation or submission.
     if all_gpu && !has_integer_handle && !must_apply_runtime_empty_omission {
+        let expected_shape = gpu_cat_output_shape(dim_zero, &handles)?;
+        let expected_storage = if has_complex_data {
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        } else {
+            runmat_accelerate_api::GpuTensorStorage::Real
+        };
+        let expected_logical = handles
+            .iter()
+            .all(|handle| runmat_accelerate_api::handle_is_logical(handle));
+        let expected_precision = if (has_complex_data
+            && handles.iter().all(|handle| {
+                runmat_accelerate_api::handle_precision(handle)
+                    == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            }))
+            || (!has_complex_data
+                && handles.iter().any(|handle| {
+                    runmat_accelerate_api::handle_precision(handle)
+                        == Some(runmat_accelerate_api::ProviderPrecision::F32)
+                })) {
+            runmat_accelerate_api::ProviderPrecision::F32
+        } else {
+            runmat_accelerate_api::ProviderPrecision::F64
+        };
         let owned_handles: Vec<_> = handles.iter().map(|handle| (*handle).clone()).collect();
-        if let Ok(result) = provider.cat(dim_zero + 1, &owned_handles) {
-            return finalize_gpu_value(result, &output_like).await;
-        }
-    }
-
-    let mut gathered_values = Vec::with_capacity(values.len());
-    for value in values {
-        match value {
-            Value::GpuTensor(handle) => {
-                gathered_values
-                    .push(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?);
+        match provider.cat_optional(dim_zero + 1, &owned_handles).await {
+            Ok(result) => {
+                let same_owner =
+                    runmat_accelerate_api::provider_for_handle(&result).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, provider)
+                    });
+                if !same_owner
+                    || result.shape() != expected_shape
+                    || result.view().layout() != runmat_accelerate_api::GpuTensorLayout::Contiguous
+                    || runmat_accelerate_api::handle_storage(&result) != expected_storage
+                    || runmat_accelerate_api::handle_is_logical(&result) != expected_logical
+                    || (!expected_logical
+                        && runmat_accelerate_api::handle_precision(&result)
+                            != Some(expected_precision))
+                    || owned_handles
+                        .iter()
+                        .any(|input| result.shares_allocation_with(input))
+                {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        result,
+                        cat_err("cat: provider returned an invalid output shape, class, owner, or alias"),
+                    ));
+                }
+                let mut result = result;
+                if let Err(error) =
+                    gpu_helpers::propagate_output_provenance(&mut result, owned_handles.iter())
+                {
+                    return Err(gpu_helpers::reject_gpu_output(result, error));
+                }
+                return finalize_gpu_value(result, &output_like).await;
             }
-            value => gathered_values.push(value),
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => {
+                return Err(build_runtime_error(format!(
+                    "cat: provider execution failed: {error}"
+                ))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(error)
+                .build());
+            }
         }
     }
 
-    let category = determine_category(&gathered_values, &output_like)?;
+    let gathered_values = values
+        .try_map_preserving_roots_async(values.len(), context, async |index| {
+            let value = &values[index];
+            match value {
+                Value::GpuTensor(_) => gpu_helpers::gather_value_async(value).await,
+                value => Ok(value.clone()),
+            }
+        })
+        .await?;
+
+    let category = determine_category(gathered_values.view(), &output_like)?;
     if matches!(category, CatCategory::Complex) {
         let host_like = LikeSpec {
             device: LikeDevice::Host,
@@ -1414,13 +1123,13 @@ async fn cat_gpu_values(
     if !matches!(category, CatCategory::Numeric) {
         return Err(cat_err("cat: gpuArray concatenation requires numeric data"));
     }
-    if let Some(target) = leftmost_integer_target(&gathered_values) {
+    if let Some(target) = leftmost_integer_target(gathered_values.view()) {
         let tensor = build_integer_cat_tensor(target, dim_zero, gathered_values)?;
         return finalize_numeric_output_with_provider(tensor, &output_like, Some(provider));
     }
 
     let mut tensors = Vec::with_capacity(gathered_values.len());
-    for value in gathered_values {
+    for value in gathered_values.iter().cloned() {
         tensors.push(tensor::value_into_tensor_for("cat", value).map_err(cat_err)?);
     }
     let tensor = concat_floating_tensors(dim_zero, tensors)?;
@@ -1434,25 +1143,75 @@ async fn cat_gpu_values(
     }
 }
 
-fn concat_column_major<T: Clone>(
+fn gpu_cat_output_shape(
     dim_zero: usize,
-    shapes: &[Vec<usize>],
+    handles: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Vec<usize>> {
+    let rank = handles
+        .iter()
+        .map(|handle| handle.shape().len())
+        .max()
+        .unwrap_or(0)
+        .max(dim_zero + 1);
+    let mut output = vec![1usize; rank];
+    let first = handles
+        .first()
+        .ok_or_else(|| cat_err("cat: no gpuArray inputs to concatenate"))?;
+    for (axis, extent) in output.iter_mut().enumerate() {
+        *extent = first.shape().get(axis).copied().unwrap_or(1);
+    }
+    let mut concatenated = 0usize;
+    for (index, handle) in handles.iter().enumerate() {
+        for (axis, &expected) in output.iter().enumerate() {
+            if axis != dim_zero && handle.shape().get(axis).copied().unwrap_or(1) != expected {
+                return Err(cat_err(format!(
+                    "cat: dimension {} mismatch between input 1 and input {}",
+                    axis + 1,
+                    index + 1
+                )));
+            }
+        }
+        concatenated = concatenated
+            .checked_add(handle.shape().get(dim_zero).copied().unwrap_or(1))
+            .ok_or_else(|| cat_err("cat: concatenated dimension exceeds maximum size"))?;
+    }
+    output[dim_zero] = concatenated;
+    if !output.contains(&0) {
+        checked_product(&output)
+            .ok_or_else(|| cat_err("cat: resulting array exceeds maximum size"))?;
+    }
+    Ok(normalize_shape(output, dim_zero))
+}
+
+fn concat_column_major<T: Clone, S: AsRef<[usize]>>(
+    dim_zero: usize,
+    shapes: &[S],
     data: &[&[T]],
     context: &str,
+) -> BuiltinResult<(Vec<T>, Vec<usize>)> {
+    concat_column_major_with_neutral(dim_zero, shapes, data, context, is_empty_concat_shape)
+}
+
+fn concat_column_major_with_neutral<T: Clone, S: AsRef<[usize]>>(
+    dim_zero: usize,
+    shapes: &[S],
+    data: &[&[T]],
+    context: &str,
+    is_neutral: impl Fn(&[usize]) -> bool,
 ) -> BuiltinResult<(Vec<T>, Vec<usize>)> {
     if shapes.is_empty() {
         return Err(cat_err(format!("{context}: no inputs to concatenate")));
     }
     let rank = shapes
         .iter()
-        .map(|s| s.len())
+        .map(|s| s.as_ref().len())
         .max()
         .unwrap_or(1)
         .max(dim_zero + 1);
 
     let mut padded = Vec::with_capacity(shapes.len());
     for shape in shapes {
-        let mut current = shape.clone();
+        let mut current = shape.as_ref().to_vec();
         while current.len() < rank {
             current.push(1);
         }
@@ -1474,12 +1233,12 @@ fn concat_column_major<T: Clone>(
 
     // MATLAB omits empty operands when a nonempty partner remains. Preserve
     // ordinary geometry when every operand is empty.
-    let has_non_neutral = padded.iter().any(|shape| !is_empty_concat_shape(shape));
+    let has_non_neutral = padded.iter().any(|shape| !is_neutral(shape));
     let mut active_shapes: Vec<Vec<usize>> = Vec::with_capacity(padded.len());
     let mut active_data: Vec<&[T]> = Vec::with_capacity(data.len());
     if has_non_neutral {
         for (shape, slice) in padded.iter().zip(data.iter()) {
-            if !is_empty_concat_shape(shape) {
+            if !is_neutral(shape) {
                 active_shapes.push(shape.clone());
                 active_data.push(*slice);
             }
@@ -1589,9 +1348,8 @@ fn value_into_logical(value: Value) -> BuiltinResult<LogicalArray> {
 fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
     match value {
         Value::StringArray(array) => Ok(array),
-        Value::String(text) => {
-            StringArray::new(vec![text], vec![1, 1]).map_err(|e| cat_err(format!("cat: {e}")))
-        }
+        Value::String(text) => StringArray::from_elements_unbounded(vec![text], vec![1, 1])
+            .map_err(|e| cat_err(format!("cat: {e}"))),
         Value::CharArray(chars) => {
             let pages = if chars.shape.len() <= 2 {
                 1
@@ -1605,7 +1363,12 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
                 for row in 0..chars.rows {
                     let start = page_offset + row * chars.cols;
                     let end = start + chars.cols;
-                    let text: String = chars.data[start..end].iter().collect();
+                    let text = runmat_value::decode_utf16_code_units(&chars.data()[start..end])
+                        .map_err(|source| {
+                            let mut error = cat_err(format!("cat: invalid string row: {source}"));
+                            error.source = Some(Box::new(source));
+                            error
+                        })?;
                     data.push(text);
                 }
             }
@@ -1614,7 +1377,7 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
             StringArray::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))
         }
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -1650,7 +1413,7 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
                 .into_iter()
                 .map(|value| if value == 0 { "0" } else { "1" }.to_string())
                 .collect(),
-            array.shape,
+            array.shape.to_vec(),
         )
         .map_err(|e| cat_err(format!("cat: {e}"))),
         other => Err(cat_err(format!(
@@ -1661,7 +1424,7 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
 }
 
 fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| cat_err(format!("cat: {error}")))?;
@@ -1688,8 +1451,14 @@ async fn finalize_gpu_value(
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     if matches!(like.device, LikeDevice::Host) {
-        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        return Ok(tensor::tensor_into_value(tensor));
+        let value = match gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await {
+            Ok(value) => value,
+            Err(error) => return Err(gpu_helpers::reject_gpu_output(handle, error)),
+        };
+        handle
+            .release()
+            .map_err(|error| cat_err(format!("cat: provider output retirement failed: {error}")))?;
+        return Ok(value);
     }
     Ok(Value::GpuTensor(handle))
 }
@@ -1700,95 +1469,57 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::cat_builtin(dim, rest))
+        block_on(super::cat_builtin(
+            None,
+            dim,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_value::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, StructArray, StructValue, Tensor};
 
-    #[test]
-    fn cat_type_prefers_cell() {
-        let out = cat_type(
-            &[
-                Type::Int,
-                Type::Cell {
-                    element_type: Some(Box::new(Type::Num)),
-                    length: None,
-                },
-                Type::Cell {
-                    element_type: Some(Box::new(Type::Num)),
-                    length: None,
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert!(matches!(out, Type::Cell { .. }));
+    fn test_structure(value: f64) -> StructValue {
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
+        structure.insert("payload", Value::Num(value));
+        structure.finish()
     }
 
     #[test]
-    fn cat_type_numeric_falls_back_tensor() {
-        let out = cat_type(
-            &[Type::Int, Type::Num, Type::Num],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::tensor());
-    }
-
-    #[test]
-    fn cat_type_omits_known_empty_geometry_and_marks_mixed_cell_output() {
-        let shape = cat_concat_shape(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(0), Some(4)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
+    fn struct_cat_omits_empty_operands_when_nonempty_structure_remains() {
+        let array = StructArray::new(vec![test_structure(1.0), test_structure(2.0)], vec![2, 1])
+            .expect("structure array");
+        let unrelated_empty =
+            StructArray::empty(vec!["other".into()], vec![0, 4]).expect("empty structure array");
+        let numeric_empty = Tensor::new(Vec::new(), vec![0, 0]).expect("numeric empty");
+        let result = cat_builtin(
+            Value::Num(1.0),
+            vec![
+                Value::StructArray(unrelated_empty),
+                Value::Tensor(numeric_empty),
+                Value::StructArray(array),
             ],
-            1,
+        )
+        .expect("empty operands are neutral");
+        let Value::StructArray(result) = result else {
+            panic!("expected structure array");
+        };
+        assert_eq!(result.shape(), [2, 1]);
+        assert_eq!(
+            result
+                .field_names()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>(),
+            ["payload"]
         );
-        assert_eq!(shape, Some(vec![Some(2), Some(3)]));
-
-        let output = cat_type(
-            &[
-                Type::Int,
-                Type::Cell {
-                    element_type: Some(Box::new(Type::String)),
-                    length: Some(1),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(2)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert!(matches!(
-            output,
-            Type::Cell {
-                element_type: None,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn cat_integer_tokens_parse_exact_dimensions() {
-        let parsed = parse_cat_tokens(&[ArgToken::Integer(IntValue::U16(2))]);
-        assert_eq!(parsed.dim, Some(2));
-        assert_eq!(parsed.like_index, None);
-
-        let parsed = parse_cat_tokens(&[ArgToken::Integer(IntValue::I8(0))]);
-        assert_eq!(parsed.dim, None);
-
-        let parsed = parse_cat_tokens(&[ArgToken::Integer(IntValue::I8(-1))]);
-        assert_eq!(parsed.dim, None);
     }
 
     #[test]
     fn cat_integer_capability_and_extension_metadata_is_explicit() {
-        let builtin = runmat_builtins::builtin_function_by_name("cat").expect("registered cat");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name("cat").expect("catalogued cat");
         assert_eq!(builtin.integer_capabilities.len(), 4);
         assert_eq!(builtin.extensions.len(), 2);
         assert_eq!(
@@ -1826,7 +1557,7 @@ pub(crate) mod tests {
         .expect("cat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 2]);
+                assert_eq!(t.shape(), &[4, 2]);
                 assert_eq!(
                     t.materialize_f64(),
                     vec![1.0, 3.0, 5.0, 7.0, 2.0, 4.0, 6.0, 8.0]
@@ -1849,7 +1580,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
         assert_eq!(
             output.into_numeric_storage().expect("single storage"),
@@ -1868,7 +1599,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
@@ -1883,7 +1614,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
@@ -1941,7 +1672,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 4, 5]))
@@ -2002,7 +1733,7 @@ pub(crate) mod tests {
                     std::mem::discriminant(left_storage),
                     "left={left_storage:?}, right={right_storage:?}"
                 );
-                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.shape(), &[1, 2]);
             }
         }
     }
@@ -2019,7 +1750,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I16(vec![4, 8]))
@@ -2042,8 +1773,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_char_columns() {
-        let left = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
-        let right = CharArray::new("Mat".chars().collect(), 1, 3).unwrap();
+        let left = CharArray::from_unicode_scalars("Run".chars().collect(), 1, 3).unwrap();
+        let right = CharArray::from_unicode_scalars("Mat".chars().collect(), 1, 3).unwrap();
         let result = cat_builtin(
             Value::Int(IntValue::I32(2)),
             vec![Value::CharArray(left), Value::CharArray(right)],
@@ -2053,7 +1784,8 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 6);
-                let text: String = arr.data.iter().collect();
+                let text: String = runmat_value::decode_utf16_code_units(arr.data())
+                    .expect("valid UTF-16 fixture");
                 assert_eq!(text, "RunMat");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -2079,7 +1811,7 @@ pub(crate) mod tests {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
                 assert_eq!(
-                    arr.data,
+                    arr.data(),
                     vec!["wn = ".to_string(), "6".to_string(), " rad/s".to_string()]
                 );
             }
@@ -2111,7 +1843,7 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![1, 4]);
         assert_eq!(
-            output.data,
+            output.data(),
             vec![
                 "id".to_string(),
                 "9007199254740993".to_string(),
@@ -2136,8 +1868,8 @@ pub(crate) mod tests {
             panic!("expected cell array");
         };
         assert_eq!(output.shape, vec![1, 2]);
-        assert_eq!(output.data[0], Value::String("head".into()));
-        assert_eq!(output.data[1], Value::Tensor(matrix));
+        assert_eq!(output.data()[0], Value::String("head".into()));
+        assert_eq!(output.data()[1], Value::Tensor(matrix));
     }
 
     #[test]
@@ -2162,9 +1894,11 @@ pub(crate) mod tests {
     #[test]
     fn cat_supports_nd_character_and_cell_arrays() {
         let left_chars =
-            CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).expect("left");
+            CharArray::from_unicode_scalars_with_shape("abcd".chars().collect(), vec![1, 2, 2])
+                .expect("left");
         let right_chars =
-            CharArray::new_with_shape("efgh".chars().collect(), vec![1, 2, 2]).expect("right");
+            CharArray::from_unicode_scalars_with_shape("efgh".chars().collect(), vec![1, 2, 2])
+                .expect("right");
         let char_result = cat_builtin(
             Value::Int(IntValue::I32(3)),
             vec![Value::CharArray(left_chars), Value::CharArray(right_chars)],
@@ -2174,7 +1908,10 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!(chars.shape, vec![1, 2, 4]);
-        assert_eq!(chars.data.iter().collect::<String>(), "abcdefgh");
+        assert_eq!(
+            runmat_value::decode_utf16_code_units(chars.data()).unwrap(),
+            "abcdefgh"
+        );
 
         let left_cells = CellArray::new_with_shape(
             vec![Value::Int(IntValue::I8(1)), Value::Int(IntValue::I8(2))],
@@ -2196,7 +1933,7 @@ pub(crate) mod tests {
         };
         assert_eq!(cells.shape, vec![1, 1, 4]);
         assert_eq!(
-            cells.data,
+            cells.data(),
             vec![
                 Value::Int(IntValue::I8(1)),
                 Value::Int(IntValue::I8(2)),
@@ -2221,7 +1958,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![2, 3]);
+        assert_eq!(output.shape(), &[2, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]))
@@ -2243,7 +1980,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![0, 5]);
+        assert_eq!(output.shape(), &[0, 5]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I16(Vec::new()))
@@ -2323,13 +2060,13 @@ pub(crate) mod tests {
             else {
                 panic!("expected complex integer");
             };
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), &[1, 2]);
             let storage = gathered.integer_storage().expect("integer storage");
             assert_eq!(
-                storage.real,
-                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
+                storage.real(),
+                &IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
             );
-            assert_eq!(storage.imag, IntegerStorage::U64(vec![3, 5]));
+            assert_eq!(storage.imag(), &IntegerStorage::U64(vec![3, 5]));
         });
     }
 
@@ -2360,11 +2097,11 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![5.0, 7.0], vec![2, 1]).unwrap();
             let view_a = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let ha = provider.upload(&view_a).expect("upload a");
             let hb = provider.upload(&view_b).expect("upload b");
@@ -2374,7 +2111,7 @@ pub(crate) mod tests {
             )
             .expect("cat");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
@@ -2387,7 +2124,7 @@ pub(crate) mod tests {
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = HostTensorView {
                 data: &proto.materialize_f64(),
-                shape: &proto.shape,
+                shape: proto.shape(),
             };
             let proto_handle = provider.upload(&proto_view).expect("upload proto");
 
@@ -2404,7 +2141,7 @@ pub(crate) mod tests {
             )
             .expect("cat with like");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
@@ -2418,7 +2155,7 @@ pub(crate) mod tests {
             let proto_handle = provider
                 .upload(&HostTensorView {
                     data: &proto.materialize_f64(),
-                    shape: &proto.shape,
+                    shape: proto.shape(),
                 })
                 .expect("upload proto");
             let left = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 4]), vec![1, 2])
@@ -2445,7 +2182,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -2489,7 +2226,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -2565,7 +2302,7 @@ pub(crate) mod tests {
         .expect("typed complex integer concatenation is documented") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(complex_output.shape, vec![2, 1]);
+        assert_eq!(complex_output.shape(), &[2, 1]);
 
         test_support::with_test_provider(|provider| {
             let dim_values = [1_u16];
@@ -2620,7 +2357,7 @@ pub(crate) mod tests {
             )
             .expect("gpu empty omission");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.shape(), &[2, 3]);
             assert_eq!(gathered.materialize_f64(), values);
         });
     }
@@ -2666,22 +2403,50 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let ha = provider.upload(&view_a).expect("upload a");
         let hb = provider.upload(&view_b).expect("upload b");
         let gpu_value = cat_builtin(
             Value::Int(IntValue::I32(2)),
-            vec![Value::GpuTensor(ha), Value::GpuTensor(hb)],
+            vec![Value::GpuTensor(ha.clone()), Value::GpuTensor(hb.clone())],
         )
         .expect("cat gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
+
+        let transposed = ha
+            .with_view(
+                runmat_accelerate_api::GpuTensorView::contiguous(vec![2, 2]).with_layout(
+                    runmat_accelerate_api::GpuTensorLayout::Transpose(
+                        runmat_accelerate_api::TransposeInfo {
+                            base_rows: 2,
+                            base_cols: 2,
+                        },
+                    ),
+                ),
+            )
+            .expect("authenticated lazy transpose");
+        let refused = block_on(provider.cat_optional(2, &[transposed.clone(), hb.clone()]))
+            .expect_err("native copy must not reinterpret lazy transpose storage");
+        assert!(refused.is_unsupported());
+        assert!(!refused.is_after_effect());
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![Value::GpuTensor(transposed), Value::GpuTensor(hb)],
+        )
+        .expect("cat fallback for lazy transpose");
+        let gathered = test_support::gather(result).expect("gather lazy transpose result");
+        assert_eq!(gathered.shape(), &[2, 4]);
+        assert_eq!(
+            gathered.materialize_f64(),
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 7.0, 6.0, 8.0]
+        );
     }
 
     #[test]

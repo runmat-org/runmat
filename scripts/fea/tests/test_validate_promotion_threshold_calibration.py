@@ -168,8 +168,8 @@ class ValidatePromotionThresholdCalibrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "promotion_calibration.json"
             payload = _payload(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
-            payload["by_profile"]["experimental"] = payload["by_profile"]["feature"].copy()
-            payload["cadence_days"]["experimental"] = 90
+            payload["by_profile"]["unregistered"] = payload["by_profile"]["feature"].copy()
+            payload["cadence_days"]["unregistered"] = 90
             path.write_text(json.dumps(payload))
 
             os.environ["RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT"] = str(path)

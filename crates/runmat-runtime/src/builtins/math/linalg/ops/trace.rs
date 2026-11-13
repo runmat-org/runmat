@@ -1,15 +1,13 @@
 //! MATLAB-compatible `trace` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::GpuTensorHandle;
 #[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::TRACE_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    TRACE_CHAR_INPUT_EXTENSION, TRACE_ERROR_INTERNAL, TRACE_ERROR_INVALID_INPUT,
+    TRACE_INTEGER_INPUT_EXTENSION, TRACE_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, Tensor, Value};
@@ -21,99 +19,17 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod resident;
+use resident::trace_gpu;
+
+#[cfg(test)]
+mod resident_tests;
+
 const NAME: &str = "trace";
-
-const INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trace-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trace accepts native integer matrices",
-    error_identifier: Some("RunMat:compatibility:TraceIntegerInputExtension"),
-};
-const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trace-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trace accepts logical matrices",
-    error_identifier: Some("RunMat:compatibility:TraceLogicalInputExtension"),
-};
-const CHAR_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trace-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trace accepts character matrices",
-    error_identifier: Some("RunMat:compatibility:TraceCharacterInputExtension"),
-};
-pub const TRACE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_INPUT_EXTENSION,
-    LOGICAL_INPUT_EXTENSION,
-    CHAR_INPUT_EXTENSION,
-];
-
-const TRACE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public trace input is single or double. Native integer matrices are independently gated and summed exactly before a checked double result boundary.",
-    }];
-pub const TRACE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "t = trace(integer_A)",
-        inputs: &TRACE_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Diagonal values are accumulated in an exact wide integer domain; the call rejects a result outside binary64's exact integer range instead of rounding it.",
-    }];
-
-const TRACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "t",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Diagonal-sum trace result.",
-}];
-
-const TRACE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix-like value.",
-}];
-
-const TRACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "t = trace(A)",
-    inputs: &TRACE_INPUTS,
-    outputs: &TRACE_OUTPUT,
-}];
-
-const TRACE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRACE.INVALID_INPUT",
-    identifier: Some("RunMat:trace:InvalidInput"),
-    when: "Input is unsupported or not matrix-shaped.",
-    message: "trace: input must be 2-D",
-};
-
-const TRACE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRACE.INTERNAL",
-    identifier: Some("RunMat:trace:Internal"),
-    when: "Runtime cannot materialize or transport trace results.",
-    message: "trace: internal runtime failure",
-};
-
-const TRACE_ERRORS: [BuiltinErrorDescriptor; 2] = [TRACE_ERROR_INVALID_INPUT, TRACE_ERROR_INTERNAL];
-
-pub const TRACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRACE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRACE_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::trace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -128,13 +44,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         },
     ],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: Some(256),
     workgroup_size: Some(256),
     accepts_nan_mode: false,
     notes:
-        "Uses provider diagonal extraction followed by a sum reduction when available; otherwise gathers once, computes on the host, and uploads a 1×1 scalar back to the device.",
+        "Resident inputs retain their exact owner. A provider with double accumulation extracts the diagonal and sums it in double precision, then restores single precision when required; scalar identity results may share the input allocation. A provider that certifies its double-sum hook unavailable takes the class-preserving host route before resident staging; other unsupported hooks follow effect-aware fallback rules.",
 };
 
 fn trace_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -191,14 +107,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "trace",
-    category = "math/linalg/ops",
-    summary = "Sum main-diagonal elements of matrix and matrix-like inputs.",
-    keywords = "trace,matrix trace,diagonal sum,gpu",
-    accel = "reduction",
-    type_resolver(numeric_scalar_type),
-    descriptor(crate::builtins::math::linalg::ops::trace::TRACE_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::ops::trace::TRACE_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::ops::trace::TRACE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
 async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
@@ -216,11 +125,11 @@ async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
 
 fn trace_numeric(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(NAME, value).map_err(trace_invalid_input)?;
-    ensure_matrix_shape(NAME, &tensor.shape)?;
+    let (rows, cols) = ensure_matrix_shape(NAME, tensor.shape())?;
     if tensor.integer_storage().is_some() {
-        return Ok(Value::Num(trace_integer_tensor_sum(&tensor)?));
+        return Ok(Value::Num(trace_integer_tensor_sum(&tensor, rows)?));
     }
-    let sum = trace_tensor_sum(&tensor);
+    let sum = trace_tensor_sum(&tensor, rows, cols);
     if tensor.numeric_dtype() == NumericDType::F32 {
         let scalar = Tensor::from_f32(vec![sum as f32], vec![1, 1]).map_err(|error| {
             trace_error_with_message(format!("trace: {error}"), &TRACE_ERROR_INTERNAL)
@@ -244,6 +153,19 @@ fn trace_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
         }
         return exact_integer_sum_to_double(sum);
     }
+    if sparse.is_complex() {
+        let (real, imaginary) = (0..sparse.rows).fold((0.0, 0.0), |sum, index| {
+            let value = sparse.complex_at(index, index).unwrap_or((0.0, 0.0));
+            (sum.0 + value.0, sum.1 + value.1)
+        });
+        if sparse.numeric_dtype() == Some(NumericDType::F32) {
+            return Ok(Value::ComplexTensor(
+                ComplexTensor::from_f32(vec![(real as f32, imaginary as f32)], vec![1, 1])
+                    .map_err(trace_invalid_input)?,
+            ));
+        }
+        return Ok(Value::Complex(real, imaginary));
+    }
     let sum = (0..sparse.rows)
         .map(|index| sparse.get(index, index).unwrap_or(0.0))
         .sum::<f64>();
@@ -257,30 +179,15 @@ fn trace_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
 }
 
 fn trace_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    ensure_matrix_shape(NAME, &ct.shape)?;
+    let (rows, cols) = ensure_matrix_shape(NAME, ct.shape())?;
     let dtype = ct.numeric_dtype();
-    let rows = if ct.rows == 0 {
-        ct.shape.first().copied().unwrap_or(0)
-    } else {
-        ct.rows
-    };
-    let cols = if ct.cols == 0 {
-        if ct.shape.len() >= 2 {
-            ct.shape[1]
-        } else if ct.shape.len() == 1 {
-            1
-        } else {
-            rows
-        }
-    } else {
-        ct.cols
-    };
     let diag_len = rows.min(cols);
     let mut sum_re = 0.0;
     let mut sum_im = 0.0;
+    let values = ct.materialize_f64();
     for idx in 0..diag_len {
         let linear = idx + idx * rows;
-        let (re, im) = ct.materialize_f64()[linear];
+        let (re, im) = values[linear];
         sum_re += re;
         sum_im += im;
     }
@@ -295,53 +202,19 @@ fn trace_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn trace_char_array(ca: CharArray) -> BuiltinResult<Value> {
-    ensure_matrix_shape(NAME, &[ca.rows, ca.cols])?;
-    let diag_len = ca.rows.min(ca.cols);
+    let (rows, cols) = ensure_matrix_shape(NAME, &[ca.rows, ca.cols])?;
+    let diag_len = rows.min(cols);
     let mut sum = 0.0;
     for idx in 0..diag_len {
         let linear = idx * ca.cols + idx;
-        if let Some(ch) = ca.data.get(linear) {
-            sum += *ch as u32 as f64;
+        if let Some(ch) = ca.data().get(linear) {
+            sum += f64::from(ch.raw());
         }
     }
     Ok(Value::Num(sum))
 }
 
-async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    ensure_matrix_shape(NAME, &handle.shape)?;
-    let (rows, _) = matrix_extents_from_shape(&handle.shape);
-    let diag_len = rows;
-
-    let floating_input = runmat_accelerate_api::handle_integer_type(&handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&handle);
-    if diag_len != 0 && floating_input {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-            if let Ok(diagonal) = provider.diag_extract(&handle, 0) {
-                let reduced = provider.reduce_sum(&diagonal).await;
-                let _ = provider.free(&diagonal);
-                if let Ok(result) = reduced {
-                    return Ok(Value::GpuTensor(result));
-                }
-            }
-        }
-    }
-
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(map_control_flow)?;
-    let host = match trace_numeric(Value::Tensor(tensor))? {
-        Value::Num(value) => {
-            Value::Tensor(Tensor::new(vec![value], vec![1, 1]).map_err(trace_invalid_input)?)
-        }
-        value => value,
-    };
-    gpu_helpers::restore_class_preserving_value(&handle, host, NAME)
-        .map_err(|error| trace_error_with_message(format!("trace: {error}"), &TRACE_ERROR_INTERNAL))
-}
-
-fn trace_tensor_sum(tensor: &Tensor) -> f64 {
-    let rows = tensor.rows();
-    let cols = tensor.cols();
+fn trace_tensor_sum(tensor: &Tensor, rows: usize, cols: usize) -> f64 {
     let diag_len = rows.min(cols);
     let mut sum = 0.0;
     for idx in 0..diag_len {
@@ -351,13 +224,14 @@ fn trace_tensor_sum(tensor: &Tensor) -> f64 {
     sum
 }
 
-fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
+fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     if shape.len() > 2 && shape.iter().skip(2).any(|&d| d != 1) {
         let _ = name;
         Err(trace_error(&TRACE_ERROR_INVALID_INPUT))
     } else {
         let (rows, cols) = matrix_extents_from_shape(shape);
-        ensure_square(rows, cols)
+        ensure_square(rows, cols)?;
+        Ok((rows, cols))
     }
 }
 
@@ -369,8 +243,7 @@ fn ensure_square(rows: usize, cols: usize) -> BuiltinResult<()> {
     }
 }
 
-fn trace_integer_tensor_sum(tensor: &Tensor) -> BuiltinResult<f64> {
-    let rows = tensor.rows();
+fn trace_integer_tensor_sum(tensor: &Tensor, rows: usize) -> BuiltinResult<f64> {
     let mut sum = 0_i128;
     for index in 0..rows {
         let value = tensor
@@ -416,16 +289,22 @@ fn ensure_trace_extensions(value: &Value) -> BuiltinResult<()> {
         || matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
     {
-        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_INPUT_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRACE_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
     }
     if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
         || matches!(value, Value::SparseTensor(sparse) if sparse.is_logical())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
     {
-        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_INPUT_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRACE_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
     }
     if matches!(value, Value::CharArray(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(&CHAR_INPUT_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(&TRACE_CHAR_INPUT_EXTENSION, NAME)?;
     }
     Ok(())
 }
@@ -437,6 +316,10 @@ fn matrix_extents_from_shape(shape: &[usize]) -> (usize, usize) {
         _ => (shape[0], shape[1]),
     }
 }
+
+#[path = "trace/geometry.rs"]
+mod geometry;
+pub(in crate::builtins::math) use geometry::{trace_geometry, TraceGeometry};
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -516,6 +399,79 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn trace_rank_zero_and_singleton_vector_use_validated_matrix_extents() {
+        let scalar = Tensor::new(vec![7.0], Vec::new()).expect("rank-zero real scalar");
+        assert_eq!(
+            trace_builtin(Value::Tensor(scalar)).expect("real scalar trace"),
+            Value::Num(7.0)
+        );
+
+        let single = Tensor::from_f32(vec![3.5], vec![1]).expect("single vector");
+        let Value::Tensor(single_trace) =
+            trace_builtin(Value::Tensor(single)).expect("single vector trace")
+        else {
+            panic!("single trace must retain its typed carrier")
+        };
+        assert_eq!(single_trace.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single_trace.materialize_f64(), vec![3.5]);
+
+        let exact = Tensor::new_integer(IntegerStorage::I16(vec![-4]), Vec::new())
+            .expect("rank-zero exact scalar");
+        assert_eq!(
+            trace_builtin(Value::Tensor(exact)).expect("exact scalar trace"),
+            Value::Num(-4.0)
+        );
+
+        let complex =
+            ComplexTensor::new(vec![(2.0, -5.0)], Vec::new()).expect("rank-zero complex scalar");
+        assert_eq!(
+            trace_builtin(Value::ComplexTensor(complex)).expect("complex scalar trace"),
+            Value::Complex(2.0, -5.0)
+        );
+
+        let complex_single =
+            ComplexTensor::from_f32(vec![(1.25, -0.5)], vec![1]).expect("single complex vector");
+        let Value::ComplexTensor(complex_trace) =
+            trace_builtin(Value::ComplexTensor(complex_single)).expect("complex vector trace")
+        else {
+            panic!("single complex trace must retain its typed carrier")
+        };
+        assert_eq!(complex_trace.numeric_dtype(), NumericDType::F32);
+        assert_eq!(complex_trace.materialize_f64(), vec![(1.25, -0.5)]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn trace_empty_typed_arrays_use_zero_matrix_extents() {
+        let single = Tensor::from_f32(Vec::new(), vec![0, 0]).expect("empty single matrix");
+        let Value::Tensor(single_trace) =
+            trace_builtin(Value::Tensor(single)).expect("empty single trace")
+        else {
+            panic!("empty single trace must retain its typed carrier")
+        };
+        assert_eq!(single_trace.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single_trace.materialize_f64(), vec![0.0]);
+
+        let exact = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 0])
+            .expect("empty exact matrix");
+        assert_eq!(
+            trace_builtin(Value::Tensor(exact)).expect("empty exact trace"),
+            Value::Num(0.0)
+        );
+
+        let complex =
+            ComplexTensor::from_f32(Vec::new(), vec![0, 0]).expect("empty complex single matrix");
+        let Value::ComplexTensor(complex_trace) =
+            trace_builtin(Value::ComplexTensor(complex)).expect("empty complex single trace")
+        else {
+            panic!("empty complex single trace must retain its typed carrier")
+        };
+        assert_eq!(complex_trace.numeric_dtype(), NumericDType::F32);
+        assert_eq!(complex_trace.materialize_f64(), vec![(0.0, 0.0)]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_complex_matrix() {
         let data = vec![(1.0, 2.0), (3.0, -4.0), (5.0, 6.0), (7.0, 8.0)];
@@ -533,7 +489,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_promotes_to_double() {
-        let chars = CharArray::new("a".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("a".chars().collect(), 1, 1).unwrap();
         let result = trace_builtin(Value::CharArray(chars)).expect("trace");
         match result {
             Value::Num(value) => assert!((value - ('a' as u32 as f64)).abs() < 1e-12),
@@ -544,11 +500,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn trace_char_array_square_matrix_uses_diagonal() {
-        let chars = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
+        let chars = CharArray::from_code_units(
+            [0xD800, 0x0042, 0x0043, 0xDC00]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .unwrap();
         let result = trace_builtin(Value::CharArray(chars)).expect("trace");
         match result {
             Value::Num(value) => {
-                let expected = ('a' as u32 as f64) + ('d' as u32 as f64);
+                let expected = 111616.0;
                 assert!((value - expected).abs() < 1e-12);
             }
             other => panic!("expected numeric result, got {other:?}"),
@@ -562,17 +525,17 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = trace_builtin(Value::GpuTensor(handle)).expect("trace");
             match result {
                 Value::GpuTensor(out) => {
                     let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
-                    assert_eq!(host.shape, vec![1, 1]);
+                    assert_eq!(host.shape(), [1, 1]);
                     assert_eq!(host.len(), 1);
                     assert!((host.materialize_f64()[0] - 6.0).abs() < 1e-12);
-                    let _ = provider.free(&out);
+                    drop(out);
                 }
                 other => panic!("expected gpu result, got {other:?}"),
             }
@@ -587,7 +550,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = trace_builtin(Value::GpuTensor(handle)).expect("trace");
@@ -595,10 +558,98 @@ pub(crate) mod tests {
                 Value::GpuTensor(out) => {
                     let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
                     assert_eq!(host.materialize_f64(), vec![0.0]);
-                    let _ = provider.free(&out);
+                    drop(out);
                 }
                 other => panic!("expected gpu result, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn trace_single_resident_sum_restores_single_without_download() {
+        test_support::with_test_provider(|provider| {
+            let matrix = [16_777_216.0_f32, 2.0, 3.0, 1.0];
+            let input = provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(&matrix),
+                    shape: &[2, 2],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let result = trace_builtin(Value::GpuTensor(input.clone())).unwrap();
+            let Value::GpuTensor(output) = result else {
+                panic!("single trace should stay resident")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&output),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(output))
+                    .unwrap()
+                    .materialize_f64(),
+                vec![16_777_216.0],
+            );
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn complex_resident_trace_uses_class_preserving_fallback() {
+        test_support::with_test_provider(|provider| {
+            let matrix = ComplexTensor::new(
+                vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &matrix).unwrap();
+            let result = trace_builtin(Value::GpuTensor(input.clone())).unwrap();
+            let Value::GpuTensor(output) = result else {
+                panic!("complex trace must retain resident class")
+            };
+            let Value::ComplexTensor(host) = futures::executor::block_on(
+                gpu_helpers::gather_value_async(&Value::GpuTensor(output)),
+            )
+            .unwrap() else {
+                panic!("complex trace must preserve complex storage")
+            };
+            assert_eq!(host.materialize_f64(), vec![(8.0, 10.0)]);
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn asymmetric_single_complex_trace_matches_host_without_repeated_materialization() {
+        let matrix = ComplexTensor::from_f32(
+            vec![(1.0, 2.0), (100.0, 200.0), (-50.0, -60.0), (7.0, 8.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let Value::ComplexTensor(host) =
+            trace_builtin(Value::ComplexTensor(matrix.clone())).unwrap()
+        else {
+            panic!("single complex trace must preserve its typed carrier")
+        };
+        assert_eq!(host.numeric_dtype(), NumericDType::F32);
+        assert_eq!(host.materialize_f64(), vec![(8.0, 10.0)]);
+
+        test_support::with_test_provider(|provider| {
+            let input = gpu_helpers::upload_complex_tensor(provider, &matrix).unwrap();
+            let result = trace_builtin(Value::GpuTensor(input.clone())).unwrap();
+            let Value::GpuTensor(output) = result else {
+                panic!("single complex trace must stay typed on its owner")
+            };
+            let Value::ComplexTensor(gathered) = futures::executor::block_on(
+                gpu_helpers::gather_value_async(&Value::GpuTensor(output)),
+            )
+            .unwrap() else {
+                panic!("single complex trace must retain complex storage")
+            };
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.materialize_f64(), host.materialize_f64());
+            input.allocation_lease().validate_live().unwrap();
         });
     }
 
@@ -618,9 +669,9 @@ pub(crate) mod tests {
             };
             assert_eq!(runmat_accelerate_api::handle_integer_type(&out), None);
             let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
-            assert_eq!(host.shape, vec![1, 1]);
+            assert_eq!(host.shape(), [1, 1]);
             assert_eq!(host.materialize_f64(), vec![10.0]);
-            let _ = provider.free(&out);
+            drop(out);
         });
     }
 
@@ -682,7 +733,7 @@ pub(crate) mod tests {
         let cpu = trace_numeric(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -696,7 +747,7 @@ pub(crate) mod tests {
             Value::Tensor(_) => 0.0,
             other => panic!("unexpected cpu comparison value {other:?}"),
         };
-        assert_eq!(gathered.shape, vec![1, 1]);
+        assert_eq!(gathered.shape(), [1, 1]);
         let actual = gathered
             .materialize_f64()
             .first()
@@ -714,7 +765,10 @@ pub(crate) mod tests {
     fn trace_integer_extension_is_rejected_in_matlab_mode() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(super::trace_builtin(Value::Int(IntValue::I32(5)))).unwrap_err();
-        assert_eq!(error.identifier(), INTEGER_INPUT_EXTENSION.error_identifier);
+        assert_eq!(
+            error.identifier(),
+            TRACE_INTEGER_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[test]
@@ -746,5 +800,37 @@ pub(crate) mod tests {
         .unwrap();
         let error = trace_builtin(Value::SparseTensor(sparse)).unwrap_err();
         assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn trace_preserves_complex_sparse_diagonal() {
+        let sparse = SparseTensor::new_complex(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(2.5, -1.0), (3.5, 4.0)],
+        )
+        .expect("complex sparse");
+        assert_eq!(
+            trace_builtin(Value::SparseTensor(sparse)).expect("trace"),
+            Value::Complex(6.0, 3.0)
+        );
+
+        let sparse_single = SparseTensor::new_complex_f32(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(2.5, -1.0), (3.5, 4.0)],
+        )
+        .expect("complex single sparse");
+        let Value::ComplexTensor(single) =
+            trace_builtin(Value::SparseTensor(sparse_single)).expect("single trace")
+        else {
+            panic!("single complex sparse trace must retain its typed carrier")
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.materialize_f64(), vec![(6.0, 3.0)]);
     }
 }

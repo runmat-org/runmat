@@ -2,11 +2,17 @@ use super::*;
 use std::collections::HashSet;
 use std::time::Duration;
 
+enum PreparedReduction<T> {
+    PipelineOnly(runmat_accelerate_api::WgpuBufferOwner),
+    Ready(T),
+}
+
 impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn fused_reduction_exec(
         &self,
         shader: &str,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         reduce_len: usize,
@@ -14,6 +20,14 @@ impl WgpuProvider {
         workgroup_size: u32,
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
+        if self.precision == crate::backend::wgpu::types::NumericPrecision::F64
+            && requirements == runmat_accelerate_api::ProviderShaderRequirements::Basic
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "unsealed f64 fused reduction shader has no physical feature proof",
+            ));
+        }
+        self.require_selected_shader_requirements(requirements)?;
         if inputs.is_empty() {
             return Err(anyhow!("fused_reduction: no inputs"));
         }
@@ -34,14 +48,41 @@ impl WgpuProvider {
         } else {
             workgroup_size
         };
-        let tuning_key = ReductionAutotuneKey::new(self.precision, num_slices, reduce_len);
+        let limits = &self.adapter_limits;
+        let tile_bytes = crate::backend::wgpu::shaders::reduction::two_pass_tile_bytes(
+            self.precision,
+            workgroup_size,
+        )
+        .ok_or_else(|| anyhow!("fused_reduction: workgroup tile byte overflow"))?;
+        if !workgroup_size.is_power_of_two()
+            || workgroup_size > limits.max_compute_workgroup_size_x
+            || workgroup_size > limits.max_compute_invocations_per_workgroup
+            || tile_bytes > u64::from(limits.max_compute_workgroup_storage_size)
+        {
+            return Err(anyhow!(
+                "fused_reduction: unsupported workgroup {} or {} tile bytes for adapter limits",
+                workgroup_size,
+                tile_bytes
+            ));
+        }
+        // This exact selected launch source is what the shader module, cache
+        // key, and persisted warmup record must all consume. The generic
+        // module helper's late token fallback cannot authenticate a raw key.
+        let shader = crate::wgsl::substitute_tokens(
+            shader,
+            workgroup_size,
+            self.workgroup_config.matmul_tile,
+            None,
+        )?;
+        let tuning_key =
+            ReductionAutotuneKey::new(self.precision, requirements, num_slices, reduce_len);
         if self.reduction_autotune.is_enabled() {
             if let Some(tuning) = self.reduction_autotune.get(&tuning_key) {
                 return self.execute_reduction_with_strategy(
                     &tuning,
                     inputs,
                     output_shape,
-                    shader,
+                    shader.as_ref(),
                     reduce_len,
                     num_slices,
                     workgroup_size,
@@ -52,7 +93,7 @@ impl WgpuProvider {
                 &tuning_key,
                 inputs,
                 output_shape,
-                shader,
+                shader.as_ref(),
                 reduce_len,
                 num_slices,
                 workgroup_size,
@@ -65,7 +106,7 @@ impl WgpuProvider {
                     &tuning,
                     inputs,
                     output_shape,
-                    shader,
+                    shader.as_ref(),
                     reduce_len,
                     num_slices,
                     workgroup_size,
@@ -80,7 +121,7 @@ impl WgpuProvider {
             &fallback_tuning,
             inputs,
             output_shape,
-            shader,
+            shader.as_ref(),
             reduce_len,
             num_slices,
             workgroup_size,
@@ -151,221 +192,252 @@ impl WgpuProvider {
         workgroup_size: u32,
     ) -> Result<GpuTensorHandle> {
         let layout_tag = &format!("runmat-reduction-layout-{}", inputs.len());
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-fused-reduction-module",
-            shader,
-        );
-        let bgl = self
-            .cached_bind_group_layout_for_tag(layout_tag)
-            .expect("reduction bgl");
-        let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-reduction-pl",
-            bgl.as_ref(),
-        );
-        if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
+        let prepared = self.with_emission(|emission, pending| -> Result<_> {
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-fused-reduction-module",
+                shader,
+            )?;
+            let bgl = self
+                .cached_bind_group_layout_for_tag(emission, layout_tag)?
+                .expect("reduction bgl");
+            let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-reduction-pl",
+                bgl.as_ref(),
+            );
+            if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
+                let out_len = num_slices.max(1);
+                let out_buffer =
+                    self.create_storage_buffer_checked(emission, out_len, "runmat-reduction-out")?;
+                return Ok(PreparedReduction::PipelineOnly(out_buffer));
+            }
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                layout_tag,
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                emission,
+                key,
+                &pl,
+                &module,
+                "runmat-reduction-pipeline",
+                Some(shader.as_bytes()),
+                Some(layout_tag),
+                Some(workgroup_size),
+            )?;
+            crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+                emission, pending, &pipeline,
+            )?;
+            Ok(PreparedReduction::Ready((bgl, pipeline)))
+        })??;
+        let (bgl, pipeline) = match prepared {
+            PreparedReduction::PipelineOnly(buffer) => {
+                return self.register_existing_buffer(
+                    buffer,
+                    output_shape.to_vec(),
+                    num_slices.max(1),
+                )
+            }
+            PreparedReduction::Ready(prepared) => prepared,
+        };
+        self.access.poll(wgpu::Maintain::Poll);
+        self.access.poll(wgpu::Maintain::Poll);
+        let (out_buffer, out_len) = self.with_emission(|emission, pending| -> Result<_> {
+            let flush_enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-flush-single-pass-gap"),
+                },
+            );
+            self.submit(emission, pending, flush_enc)?;
             let out_len = num_slices.max(1);
-            let out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduction-out")?;
-            return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
-        }
-        let key =
-            self.compute_pipeline_hash_bytes(shader.as_bytes(), layout_tag, Some(workgroup_size));
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pl,
-            &module,
-            "runmat-reduction-pipeline",
-            Some(shader.as_bytes()),
-            Some(layout_tag),
-            Some(workgroup_size),
-        );
-        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-        );
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        let flush_enc = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-flush-single-pass-gap"),
-            });
-        self.submit(flush_enc);
-        let out_len = num_slices.max(1);
-        let mut out_buffer = self.create_storage_buffer_checked_with_usage(
-            out_len,
-            "runmat-reduction-out",
-            BufferUsageClass::FusionOut,
-        )?;
-        {
-            let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
-            let mut alias = false;
+            let mut out_buffer = self.create_storage_buffer_checked_with_usage(
+                emission,
+                out_len,
+                "runmat-reduction-out",
+                BufferUsageClass::FusionOut,
+            )?;
+            {
+                let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
+                let mut alias = false;
+                for h in inputs.iter() {
+                    let ptr = self.get_entry(h)?.buffer.as_ref() as *const wgpu::Buffer as usize;
+                    if ptr == out_ptr {
+                        alias = true;
+                        break;
+                    }
+                }
+                if alias {
+                    out_buffer = self.create_storage_buffer_checked_with_usage(
+                        emission,
+                        out_len,
+                        "runmat-reduction-out-unique",
+                        BufferUsageClass::FusionOut,
+                    )?;
+                }
+            }
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct Params {
+                nrows: u32,
+                ncols: u32,
+                ld: u32,
+                flags: u32,
+            }
+            let flags = if shader.contains("const OMITNAN: bool = true") {
+                1u32
+            } else {
+                0u32
+            };
+            let params = Params {
+                nrows: reduce_len as u32,
+                ncols: num_slices as u32,
+                ld: reduce_len as u32,
+                flags,
+            };
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                emission,
+                crate::backend::wgpu::resources::UniformBufferKey::ReductionParams,
+                std::mem::size_of::<Params>() as u64,
+                "runmat-reduction-params",
+            )?;
+            emission.write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
+            let mut input_bufs: Vec<(runmat_accelerate_api::WgpuBufferOwner, u64)> =
+                Vec::with_capacity(inputs.len());
             for h in inputs.iter() {
-                let ptr = self.get_entry(h)?.buffer.as_ref() as *const wgpu::Buffer as usize;
-                if ptr == out_ptr {
-                    alias = true;
-                    break;
-                }
+                let e = self.get_entry(h)?;
+                let bytes = (e.len * self.element_size) as u64;
+                input_bufs.push((e.buffer.clone(), bytes));
             }
-            if alias {
-                out_buffer = self.create_storage_buffer_checked_with_usage(
-                    out_len,
-                    "runmat-reduction-out-unique",
-                    BufferUsageClass::FusionOut,
-                )?;
-            }
-        }
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            nrows: u32,
-            ncols: u32,
-            ld: u32,
-            flags: u32,
-        }
-        let flags = if shader.contains("const OMITNAN: bool = true") {
-            1u32
-        } else {
-            0u32
-        };
-        let params = Params {
-            nrows: reduce_len as u32,
-            ncols: num_slices as u32,
-            ld: reduce_len as u32,
-            flags,
-        };
-        let params_buffer = self.kernel_resources.uniform_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::UniformBufferKey::ReductionParams,
-            std::mem::size_of::<Params>() as u64,
-            "runmat-reduction-params",
-        );
-        self.queue
-            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-        let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
-        let mut input_bufs: Vec<(Arc<wgpu::Buffer>, u64)> = Vec::with_capacity(inputs.len());
-        for h in inputs.iter() {
-            let e = self.get_entry(h)?;
-            let bytes = (e.len * self.element_size) as u64;
-            input_bufs.push((e.buffer.clone(), bytes));
-        }
-        let snapshot_inputs = std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok();
-        let mut bind_input_bufs: Vec<Arc<wgpu::Buffer>> = Vec::with_capacity(inputs.len());
-        if snapshot_inputs {
-            for (buf, bytes) in input_bufs.iter() {
-                let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-fused-input-snapshot"),
-                    size: *bytes,
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_SRC
-                        | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }));
-                let mut enc =
-                    self.device_ref()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            let snapshot_inputs = std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok();
+            let mut bind_input_bufs: Vec<runmat_accelerate_api::WgpuBufferOwner> =
+                Vec::with_capacity(inputs.len());
+            if snapshot_inputs {
+                for (buf, bytes) in input_bufs.iter() {
+                    let snap = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("runmat-fused-input-snapshot"),
+                            size: *bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
+                    let mut enc = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
                             label: Some("runmat-fused-input-snapshot-copy"),
-                        });
-                enc.copy_buffer_to_buffer(buf.as_ref(), 0, snap.as_ref(), 0, *bytes);
-                self.submit(enc);
-                bind_input_bufs.push(snap);
-            }
-        } else {
-            for (buf, _bytes) in input_bufs.iter() {
-                bind_input_bufs.push(buf.clone());
-            }
-        }
-        for (i, buf_arc) in bind_input_bufs.iter().enumerate() {
-            entries_vec.push(wgpu::BindGroupEntry {
-                binding: i as u32,
-                resource: buf_arc.as_ref().as_entire_binding(),
-            });
-        }
-        entries_vec.push(wgpu::BindGroupEntry {
-            binding: inputs.len() as u32,
-            resource: out_buffer.as_ref().as_entire_binding(),
-        });
-        entries_vec.push(wgpu::BindGroupEntry {
-            binding: (inputs.len() + 1) as u32,
-            resource: params_buffer.as_ref().as_entire_binding(),
-        });
-        {
-            let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
-            let mut alias_found = false;
-            for b in bind_input_bufs.iter() {
-                let in_ptr = b.as_ref() as *const wgpu::Buffer as usize;
-                if in_ptr == out_ptr {
-                    alias_found = true;
-                    break;
+                        },
+                    );
+                    enc.copy_buffer_to_buffer(buf.as_ref(), 0, snap.as_ref(), 0, *bytes);
+                    self.submit(emission, pending, enc)?;
+                    bind_input_bufs.push(snap);
+                }
+            } else {
+                for (buf, _bytes) in input_bufs.iter() {
+                    bind_input_bufs.push(buf.clone());
                 }
             }
-            if alias_found {
-                return Err(anyhow!("fused_reduction(single-pass): input/output alias"));
+            for (i, buf_arc) in bind_input_bufs.iter().enumerate() {
+                entries_vec.push(wgpu::BindGroupEntry {
+                    binding: i as u32,
+                    resource: buf_arc.as_ref().as_entire_binding(),
+                });
             }
-        }
-        let groups = (num_slices as u32).max(1);
-        if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-            for (i, buf) in input_bufs.iter().enumerate() {
+            entries_vec.push(wgpu::BindGroupEntry {
+                binding: inputs.len() as u32,
+                resource: out_buffer.as_ref().as_entire_binding(),
+            });
+            entries_vec.push(wgpu::BindGroupEntry {
+                binding: (inputs.len() + 1) as u32,
+                resource: params_buffer.as_ref().as_entire_binding(),
+            });
+            {
+                let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
+                let mut alias_found = false;
+                for b in bind_input_bufs.iter() {
+                    let in_ptr = b.as_ref() as *const wgpu::Buffer as usize;
+                    if in_ptr == out_ptr {
+                        alias_found = true;
+                        break;
+                    }
+                }
+                if alias_found {
+                    return Err(anyhow!("fused_reduction(single-pass): input/output alias"));
+                }
+            }
+            let groups = (num_slices as u32).max(1);
+            if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
+                for (i, buf) in input_bufs.iter().enumerate() {
+                    log::debug!(
+                        "[fused-reduction] binding={} role=read ptr={:p}",
+                        i,
+                        buf.0.as_ref()
+                    );
+                }
                 log::debug!(
-                    "[fused-reduction] binding={} role=read ptr={:p}",
-                    i,
-                    buf.0.as_ref()
+                    "[fused-reduction] binding={} role=read_write ptr={:p}",
+                    inputs.len(),
+                    out_buffer.as_ref()
+                );
+                log::debug!(
+                    "[fused-reduction] binding={} role=uniform ptr={:p}",
+                    inputs.len() + 1,
+                    params_buffer.as_ref()
+                );
+                log::debug!(
+                    "[fused-reduction] reduce_len={} slices={} wg={} groups={}",
+                    reduce_len,
+                    num_slices,
+                    workgroup_size,
+                    groups
                 );
             }
-            log::debug!(
-                "[fused-reduction] binding={} role=read_write ptr={:p}",
-                inputs.len(),
-                out_buffer.as_ref()
-            );
-            log::debug!(
-                "[fused-reduction] binding={} role=uniform ptr={:p}",
-                inputs.len() + 1,
-                params_buffer.as_ref()
-            );
-            log::debug!(
-                "[fused-reduction] reduce_len={} slices={} wg={} groups={}",
-                reduce_len,
-                num_slices,
-                workgroup_size,
-                groups
-            );
-        }
-        let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
-        let bg = if disable_bg_cache {
-            Arc::new(
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-reduction-bg-direct"),
-                        layout: bgl.as_ref(),
-                        entries: &entries_vec,
-                    }),
-            )
-        } else {
-            self.bind_group_cache
-                .get_or_create(bgl.as_ref(), &entries_vec, || {
+            let disable_bg_cache = std::env::var("RUNMAT_DISABLE_FUSED_BG_CACHE").is_ok();
+            let bg =
+                if disable_bg_cache {
                     Arc::new(
-                        self.device_ref()
+                        emission
+                            .device()
                             .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("runmat-reduction-bg"),
+                                label: Some("runmat-reduction-bg-direct"),
                                 layout: bgl.as_ref(),
                                 entries: &entries_vec,
                             }),
                     )
-                })
-        };
-        crate::backend::wgpu::dispatch::reduction::run_single_pass(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            bg.as_ref(),
-            groups,
-        );
-        if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-            log::debug!("[fused-reduction] single-pass dispatch complete");
-        }
-        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
+                } else {
+                    self.bind_group_cache.get_or_create(
+                        emission,
+                        bgl.as_ref(),
+                        &entries_vec,
+                        |emission| {
+                            Arc::new(emission.device().create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-reduction-bg"),
+                                    layout: bgl.as_ref(),
+                                    entries: &entries_vec,
+                                },
+                            ))
+                        },
+                    )?
+                };
+            crate::backend::wgpu::dispatch::reduction::run_single_pass(
+                emission,
+                pending,
+                &pipeline,
+                bg.as_ref(),
+                groups,
+            )?;
+            if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
+                log::debug!("[fused-reduction] single-pass dispatch complete");
+            }
+            Ok((out_buffer, out_len))
+        })??;
+        self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -380,9 +452,11 @@ impl WgpuProvider {
         chunk_rows: u32,
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
-        let scalar_ty = match self.provider_precision_exec() {
-            runmat_accelerate_api::ProviderPrecision::F64 => "f64",
-            _ => "f32",
+        let precision = match self.provider_precision_exec() {
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                crate::backend::wgpu::types::NumericPrecision::F64
+            }
+            _ => crate::backend::wgpu::types::NumericPrecision::F32,
         };
         let flags = if shader.contains("const OMITNAN: bool = true") {
             1u32
@@ -396,301 +470,342 @@ impl WgpuProvider {
             u32::try_from(total_chunks).map_err(|_| anyhow!("reduction: too many chunks"))?;
         let partials_len = num_slices.max(1) * (total_chunks as usize);
         let (pass1, pass2) = crate::backend::wgpu::shaders::reduction::build_two_pass_shaders(
-            scalar_ty,
+            precision,
             workgroup_size,
         );
-        let m1 = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-reduction-pass1",
-            &pass1,
-        );
-        let m2 = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-reduction-pass2",
-            &pass2,
-        );
-        let bgl1 = self
-            .cached_bind_group_layout_for_tag("runmat-reduction-p1-bgl")
-            .expect("p1 bgl");
-        let bgl2 = self
-            .cached_bind_group_layout_for_tag("runmat-reduction-p2-bgl")
-            .expect("p2 bgl");
-        let pl1 = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-reduction-p1-pl",
-            bgl1.as_ref(),
-        );
-        let pl2 = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-reduction-p2-pl",
-            bgl2.as_ref(),
-        );
-        if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
-            let out_len = num_slices.max(1);
-            let out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduction-out")?;
-            return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
-        }
-        let p2_key = self.compute_pipeline_hash_bytes(
-            pass2.as_bytes(),
-            "runmat-reduction-p2-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline_p2 = self.get_or_create_pipeline(
-            p2_key,
-            &pl2,
-            &m2,
-            "runmat-reduction-pass2",
-            Some(pass2.as_bytes()),
-            Some("runmat-reduction-p2-bgl"),
-            Some(workgroup_size),
-        );
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        let flush_enc = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-flush-before-pass1"),
-            });
-        self.submit(flush_enc);
-        crate::backend::wgpu::dispatch::reduction::warmup_noop_after_pass2(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline_p2,
-        );
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        let p1_key = self.compute_pipeline_hash_bytes(
-            pass1.as_bytes(),
-            "runmat-reduction-p1-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline_p1 = self.get_or_create_pipeline(
-            p1_key,
-            &pl1,
-            &m1,
-            "runmat-reduction-pass1",
-            Some(pass1.as_bytes()),
-            Some("runmat-reduction-p1-bgl"),
-            Some(workgroup_size),
-        );
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
-        let input_buf = if std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok() {
-            let bytes = (reduce_len * num_slices.max(1) * self.element_size) as u64;
-            let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-fused-p1-input-snapshot"),
-                size: bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-fused-p1-input-snapshot-copy"),
-                    });
-            enc.copy_buffer_to_buffer(input_buf.as_ref(), 0, snap.as_ref(), 0, bytes);
-            self.submit(enc);
-            snap
-        } else {
-            input_buf
-        };
-        let partials_bytes = (partials_len * self.element_size) as u64;
-        let mut partials_buffer = self.kernel_resources.scratch_storage_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::ScratchBufferKind::ReductionPartials,
-            partials_bytes,
-            "runmat-reduction-partials-scratch",
-        );
-        let out_len = num_slices.max(1);
-        let mut out_buffer = self
-            .create_storage_buffer_for_usage(
-                BufferUsageClass::FusionOut,
-                out_len,
-                "runmat-reduction-out",
-            )
-            .0;
-        {
-            let in_ptr = input_buf.as_ref() as *const wgpu::Buffer as usize;
-            let mut part_ptr = partials_buffer.as_ref() as *const wgpu::Buffer as usize;
-            let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
-            if part_ptr == in_ptr {
-                let unique =
-                    self.create_storage_buffer(partials_len, "runmat-reduction-partials-unique");
-                partials_buffer = unique;
-                part_ptr = partials_buffer.as_ref() as *const wgpu::Buffer as usize;
+        let prepared = self.with_emission(|emission, _| -> Result<_> {
+            let m1 = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-reduction-pass1",
+                &pass1,
+            )?;
+            let m2 = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-reduction-pass2",
+                &pass2,
+            )?;
+            let bgl1 = self
+                .cached_bind_group_layout_for_tag(emission, "runmat-reduction-p1-bgl")?
+                .expect("p1 bgl");
+            let bgl2 = self
+                .cached_bind_group_layout_for_tag(emission, "runmat-reduction-p2-bgl")?
+                .expect("p2 bgl");
+            let pl1 = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-reduction-p1-pl",
+                bgl1.as_ref(),
+            );
+            let pl2 = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-reduction-p2-pl",
+                bgl2.as_ref(),
+            );
+            if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
+                let out_len = num_slices.max(1);
+                let out_buffer =
+                    self.create_storage_buffer_checked(emission, out_len, "runmat-reduction-out")?;
+                return Ok(PreparedReduction::PipelineOnly(out_buffer));
             }
-            if out_ptr == in_ptr || out_ptr == part_ptr {
-                out_buffer = self
+            let p2_key = self.compute_pipeline_hash_bytes(
+                pass2.as_bytes(),
+                "runmat-reduction-p2-bgl",
+                Some(workgroup_size),
+            );
+            let pipeline_p2 = self.get_or_create_pipeline(
+                emission,
+                p2_key,
+                &pl2,
+                &m2,
+                "runmat-reduction-pass2",
+                Some(pass2.as_bytes()),
+                Some("runmat-reduction-p2-bgl"),
+                Some(workgroup_size),
+            )?;
+            Ok(PreparedReduction::Ready((m1, pl1, bgl1, bgl2, pipeline_p2)))
+        })??;
+        let (m1, pl1, bgl1, bgl2, pipeline_p2) = match prepared {
+            PreparedReduction::PipelineOnly(buffer) => {
+                return self.register_existing_buffer(
+                    buffer,
+                    output_shape.to_vec(),
+                    num_slices.max(1),
+                )
+            }
+            PreparedReduction::Ready(prepared) => prepared,
+        };
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let flush_enc = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-flush-before-pass1"),
+                },
+            );
+            self.submit(emission, pending, flush_enc)?;
+            crate::backend::wgpu::dispatch::reduction::warmup_noop_after_pass2(
+                emission,
+                pending,
+                &pipeline_p2,
+            )?;
+            Ok(())
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        let pipeline_p1 = self.with_emission(|emission, _| -> Result<_> {
+            let p1_key = self.compute_pipeline_hash_bytes(
+                pass1.as_bytes(),
+                "runmat-reduction-p1-bgl",
+                Some(workgroup_size),
+            );
+            let pipeline_p1 = self.get_or_create_pipeline(
+                emission,
+                p1_key,
+                &pl1,
+                &m1,
+                "runmat-reduction-pass1",
+                Some(pass1.as_bytes()),
+                Some("runmat-reduction-p1-bgl"),
+                Some(workgroup_size),
+            )?;
+            Ok(pipeline_p1)
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        let out_buffer =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
+                let input_buf = if std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok() {
+                    let bytes = (reduce_len * num_slices.max(1) * self.element_size) as u64;
+                    let snap = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("runmat-fused-p1-input-snapshot"),
+                            size: bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
+                    let mut enc = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-fused-p1-input-snapshot-copy"),
+                        },
+                    );
+                    enc.copy_buffer_to_buffer(input_buf.as_ref(), 0, snap.as_ref(), 0, bytes);
+                    self.submit(emission, pending, enc)?;
+                    snap
+                } else {
+                    input_buf
+                };
+                let partials_bytes = (partials_len * self.element_size) as u64;
+                let mut partials_buffer = self.kernel_resources.scratch_storage_buffer(
+                    emission,
+                    crate::backend::wgpu::resources::ScratchBufferKind::ReductionPartials,
+                    partials_bytes,
+                    "runmat-reduction-partials-scratch",
+                )?;
+                let out_len = num_slices.max(1);
+                let mut out_buffer = self
                     .create_storage_buffer_for_usage(
+                        emission,
                         BufferUsageClass::FusionOut,
                         out_len,
-                        "runmat-reduction-out-unique",
-                    )
+                        "runmat-reduction-out",
+                    )?
                     .0;
-            }
-        }
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct P1 {
-            nrows: u32,
-            ncols: u32,
-            ld: u32,
-            flags: u32,
-            chunks: u32,
-            chunk_stride: u32,
-            chunk_rows: u32,
-            _pad: u32,
-        }
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct P2F32 {
-            ncols: u32,
-            chunks: u32,
-            flags: u32,
-            scale: f32,
-        }
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct P2F64 {
-            ncols: u32,
-            chunks: u32,
-            flags: u32,
-            _pad: u32,
-            scale: f64,
-        }
-        let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS;
-        let mut chunk_stride = total_chunks_u32.min(max_dispatch).max(1);
-        let mut chunk_tiles = (total_chunks_u32 as u64).div_ceil(chunk_stride as u64);
-        if chunk_tiles > max_dispatch as u64 {
-            let required_stride = (total_chunks_u32 as u64).div_ceil(max_dispatch as u64);
-            chunk_stride = required_stride.max(1).min(max_dispatch as u64) as u32;
-            chunk_tiles = (total_chunks_u32 as u64).div_ceil(chunk_stride as u64);
-            if chunk_tiles > max_dispatch as u64 {
-                return Err(anyhow!(
+                {
+                    let in_ptr = input_buf.as_ref() as *const wgpu::Buffer as usize;
+                    let mut part_ptr = partials_buffer.as_ref() as *const wgpu::Buffer as usize;
+                    let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer as usize;
+                    if part_ptr == in_ptr {
+                        let unique = self.create_storage_buffer(
+                            emission,
+                            partials_len,
+                            "runmat-reduction-partials-unique",
+                        )?;
+                        partials_buffer = unique;
+                        part_ptr = partials_buffer.as_ref() as *const wgpu::Buffer as usize;
+                    }
+                    if out_ptr == in_ptr || out_ptr == part_ptr {
+                        out_buffer = self
+                            .create_storage_buffer_for_usage(
+                                emission,
+                                BufferUsageClass::FusionOut,
+                                out_len,
+                                "runmat-reduction-out-unique",
+                            )?
+                            .0;
+                    }
+                }
+                #[repr(C)]
+                #[derive(Clone, Copy, Pod, Zeroable)]
+                struct P1 {
+                    nrows: u32,
+                    ncols: u32,
+                    ld: u32,
+                    flags: u32,
+                    chunks: u32,
+                    chunk_stride: u32,
+                    chunk_rows: u32,
+                    _pad: u32,
+                }
+                #[repr(C)]
+                #[derive(Clone, Copy, Pod, Zeroable)]
+                struct P2F32 {
+                    ncols: u32,
+                    chunks: u32,
+                    flags: u32,
+                    scale: f32,
+                }
+                #[repr(C)]
+                #[derive(Clone, Copy, Pod, Zeroable)]
+                struct P2F64 {
+                    ncols: u32,
+                    chunks: u32,
+                    flags: u32,
+                    _pad: u32,
+                    scale: f64,
+                }
+                let max_dispatch = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS;
+                let mut chunk_stride = total_chunks_u32.min(max_dispatch).max(1);
+                let mut chunk_tiles = (total_chunks_u32 as u64).div_ceil(chunk_stride as u64);
+                if chunk_tiles > max_dispatch as u64 {
+                    let required_stride = (total_chunks_u32 as u64).div_ceil(max_dispatch as u64);
+                    chunk_stride = required_stride.max(1).min(max_dispatch as u64) as u32;
+                    chunk_tiles = (total_chunks_u32 as u64).div_ceil(chunk_stride as u64);
+                    if chunk_tiles > max_dispatch as u64 {
+                        return Err(anyhow!(
                     "fused_reduction: chunk grid {} exceeds dispatch limits (stride {}, tiles {})",
                     total_chunks_u32,
                     chunk_stride,
                     chunk_tiles
                 ));
-            }
-        }
-        let p1u = P1 {
-            nrows: reduce_len as u32,
-            ncols: num_slices as u32,
-            ld: reduce_len as u32,
-            flags,
-            chunks: total_chunks_u32,
-            chunk_stride,
-            chunk_rows: chunk_rows_u32,
-            _pad: 0,
-        };
-        let p1_buf = self.kernel_resources.uniform_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::UniformBufferKey::ReductionPass1Params,
-            std::mem::size_of::<P1>() as u64,
-            "runmat-reduction-p1-params",
-        );
-        let p2_size = match self.precision {
-            NumericPrecision::F64 => std::mem::size_of::<P2F64>() as u64,
-            NumericPrecision::F32 => std::mem::size_of::<P2F32>() as u64,
-        };
-        let p2_buf = self.kernel_resources.uniform_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::UniformBufferKey::ReductionPass2Params,
-            p2_size,
-            "runmat-reduction-p2-params",
-        );
-
-        self.queue.write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
-        let scale_value = flavor.scale(reduce_len);
-        match self.precision {
-            NumericPrecision::F64 => {
-                let p2u = P2F64 {
+                    }
+                }
+                let p1u = P1 {
+                    nrows: reduce_len as u32,
                     ncols: num_slices as u32,
-                    chunks: total_chunks_u32,
+                    ld: reduce_len as u32,
                     flags,
+                    chunks: total_chunks_u32,
+                    chunk_stride,
+                    chunk_rows: chunk_rows_u32,
                     _pad: 0,
-                    scale: scale_value,
                 };
-                self.queue.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
-            }
-            NumericPrecision::F32 => {
-                let p2u = P2F32 {
-                    ncols: num_slices as u32,
-                    chunks: total_chunks_u32,
-                    flags,
-                    scale: scale_value as f32,
+                let p1_buf = self.kernel_resources.uniform_buffer(
+                    emission,
+                    crate::backend::wgpu::resources::UniformBufferKey::ReductionPass1Params,
+                    std::mem::size_of::<P1>() as u64,
+                    "runmat-reduction-p1-params",
+                )?;
+                let p2_size = match self.precision {
+                    NumericPrecision::F64 => std::mem::size_of::<P2F64>() as u64,
+                    NumericPrecision::F32 => std::mem::size_of::<P2F32>() as u64,
                 };
-                self.queue.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
-            }
-        }
-        let entries_bg1 = vec![
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: input_buf.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: partials_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: p1_buf.as_ref().as_entire_binding(),
-            },
-        ];
-        let bg1 = self
-            .bind_group_cache
-            .get_or_create(bgl1.as_ref(), &entries_bg1, || {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-reduction-p1-bg"),
-                            layout: bgl1.as_ref(),
-                            entries: &entries_bg1,
-                        }),
-                )
-            });
-        let entries_bg2 = vec![
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: partials_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: out_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: p2_buf.as_ref().as_entire_binding(),
-            },
-        ];
-        let bg2 = self
-            .bind_group_cache
-            .get_or_create(bgl2.as_ref(), &entries_bg2, || {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-reduction-p2-bg"),
-                            layout: bgl2.as_ref(),
-                            entries: &entries_bg2,
-                        }),
-                )
-            });
-        let g0 = (num_slices as u32).max(1);
-        let g1 = chunk_stride.max(1);
-        let g2 = (chunk_tiles as u32).max(1);
-        crate::backend::wgpu::dispatch::reduction::run_two_pass(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline_p1,
-            &pipeline_p2,
-            bg1.as_ref(),
-            bg2.as_ref(),
-            g0,
-            g1,
-            g2,
-        );
-        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1)))
+                let p2_buf = self.kernel_resources.uniform_buffer(
+                    emission,
+                    crate::backend::wgpu::resources::UniformBufferKey::ReductionPass2Params,
+                    p2_size,
+                    "runmat-reduction-p2-params",
+                )?;
+
+                emission.write_buffer(p1_buf.as_ref(), 0, bytes_of(&p1u));
+                let scale_value = flavor.scale(reduce_len);
+                match self.precision {
+                    NumericPrecision::F64 => {
+                        let p2u = P2F64 {
+                            ncols: num_slices as u32,
+                            chunks: total_chunks_u32,
+                            flags,
+                            _pad: 0,
+                            scale: scale_value,
+                        };
+                        emission.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+                    }
+                    NumericPrecision::F32 => {
+                        let p2u = P2F32 {
+                            ncols: num_slices as u32,
+                            chunks: total_chunks_u32,
+                            flags,
+                            scale: scale_value as f32,
+                        };
+                        emission.write_buffer(p2_buf.as_ref(), 0, bytes_of(&p2u));
+                    }
+                }
+                let entries_bg1 = vec![
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: input_buf.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: partials_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: p1_buf.as_ref().as_entire_binding(),
+                    },
+                ];
+                let bg1 =
+                    self.bind_group_cache.get_or_create(
+                        emission,
+                        bgl1.as_ref(),
+                        &entries_bg1,
+                        |emission| {
+                            Arc::new(emission.device().create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-reduction-p1-bg"),
+                                    layout: bgl1.as_ref(),
+                                    entries: &entries_bg1,
+                                },
+                            ))
+                        },
+                    )?;
+                let entries_bg2 = vec![
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: partials_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: p2_buf.as_ref().as_entire_binding(),
+                    },
+                ];
+                let bg2 =
+                    self.bind_group_cache.get_or_create(
+                        emission,
+                        bgl2.as_ref(),
+                        &entries_bg2,
+                        |emission| {
+                            Arc::new(emission.device().create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-reduction-p2-bg"),
+                                    layout: bgl2.as_ref(),
+                                    entries: &entries_bg2,
+                                },
+                            ))
+                        },
+                    )?;
+                let g0 = (num_slices as u32).max(1);
+                let g1 = chunk_stride.max(1);
+                let g2 = (chunk_tiles as u32).max(1);
+                crate::backend::wgpu::dispatch::reduction::run_two_pass(
+                    emission,
+                    pending,
+                    &pipeline_p1,
+                    &pipeline_p2,
+                    bg1.as_ref(),
+                    bg2.as_ref(),
+                    g0,
+                    g1,
+                    g2,
+                )?;
+                Ok(out_buffer)
+            })??;
+        self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1))
     }
 
     fn reduction_partials_budget_bytes(&self) -> u64 {
@@ -773,6 +888,13 @@ impl WgpuProvider {
         match tuning.mode {
             ReductionMode::SinglePass => Some(*tuning),
             ReductionMode::TwoPass { chunk_rows } => {
+                let tile_bytes = crate::backend::wgpu::shaders::reduction::two_pass_tile_bytes(
+                    self.precision,
+                    workgroup_size,
+                )?;
+                if tile_bytes > u64::from(self.adapter_limits.max_compute_workgroup_storage_size) {
+                    return None;
+                }
                 let rows = self.sanitize_chunk_rows_for_limits(
                     chunk_rows,
                     reduce_len,
@@ -786,7 +908,7 @@ impl WgpuProvider {
         }
     }
 
-    fn heuristic_reduction_tuning(
+    pub(super) fn heuristic_reduction_tuning(
         &self,
         reduce_len: usize,
         num_slices: usize,
@@ -813,7 +935,7 @@ impl WgpuProvider {
         }
     }
 
-    fn default_chunk_rows(&self, reduce_len: usize, workgroup_size: u32) -> u32 {
+    pub(super) fn default_chunk_rows(&self, reduce_len: usize, workgroup_size: u32) -> u32 {
         let wg = workgroup_size.max(1) as usize;
         if reduce_len <= wg {
             return reduce_len.min(u32::MAX as usize) as u32;
@@ -952,12 +1074,12 @@ impl WgpuProvider {
                     let elapsed = start.elapsed();
                     if best_time.is_none_or(|t| elapsed < t) {
                         if let Some(existing) = best_handle.replace(handle) {
-                            let _ = self.free_exec(&existing);
+                            drop(existing);
                         }
                         best_time = Some(elapsed);
                         best_tuning = Some(sanitized);
                     } else {
-                        let _ = self.free_exec(&handle);
+                        drop(handle);
                     }
                 }
                 Err(err) => {

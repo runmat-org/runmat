@@ -1,141 +1,42 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
+    XTICKLABELS_DESCRIPTOR, XTICKLABELS_ERROR_TOO_MANY_OUTPUTS, XTICKLABELS_INTEGER_AXES_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_tick_labels::axis_tick_labels_builtin;
 use super::axis_ticks::TickAxis;
-use crate::builtins::plotting::type_resolvers::get_type;
-
-const XTICKLABELS_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "xticklabels-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Allow a typed-integer alias for an encoded axes handle",
-    error_identifier: Some("RunMat:compatibility:XticklabelsIntegerAxesHandleExtension"),
-};
-pub const XTICKLABELS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [XTICKLABELS_INTEGER_AXES_EXTENSION];
-pub const XTICKLABELS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Tick labels accept text and categorical containers; integer label payloads are invalid, while a typed-integer encoded axes alias is a separately gated RunMat extension." };
-
-const XTICKLABELS_OUTPUT_LABELS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "labels",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current X-axis tick labels as a cell array of character vectors.",
-}];
-
-const XTICKLABELS_OUTPUT_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current X-axis tick label mode, 'auto' or 'manual'.",
-}];
-
-const XTICKLABELS_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const XTICKLABELS_INPUTS_LABELS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "labels",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String array or cell array of character vectors for X-axis tick labels.",
-}];
-
-const XTICKLABELS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Tick label mode string: 'auto', 'manual', or 'mode'.",
-}];
-
-const XTICKLABELS_INPUTS_AX_LABELS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "labels",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String array or cell array of character vectors for X-axis tick labels.",
-    },
-];
-
-const XTICKLABELS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "labels = xticklabels()",
-        inputs: &XTICKLABELS_INPUTS_NONE,
-        outputs: &XTICKLABELS_OUTPUT_LABELS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "labels = xticklabels(labels)",
-        inputs: &XTICKLABELS_INPUTS_LABELS,
-        outputs: &XTICKLABELS_OUTPUT_LABELS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "mode = xticklabels(mode)",
-        inputs: &XTICKLABELS_INPUTS_MODE,
-        outputs: &XTICKLABELS_OUTPUT_MODE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "labels = xticklabels(ax, labels)",
-        inputs: &XTICKLABELS_INPUTS_AX_LABELS,
-        outputs: &XTICKLABELS_OUTPUT_LABELS,
-    },
-];
-
-const XTICKLABELS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XTICKLABELS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:xticklabels:InvalidArgument"),
-    when: "Argument count, tick label values, mode, or axes handle is invalid.",
-    message: "xticklabels: invalid argument",
-};
-
-const XTICKLABELS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XTICKLABELS.INTERNAL",
-    identifier: Some("RunMat:xticklabels:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "xticklabels: internal operation failed",
-};
-
-const XTICKLABELS_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    XTICKLABELS_ERROR_INVALID_ARGUMENT,
-    XTICKLABELS_ERROR_INTERNAL,
-];
-
-pub const XTICKLABELS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &XTICKLABELS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &XTICKLABELS_ERRORS,
-};
 
 #[runtime_builtin(
     name = "xticklabels",
-    category = "plotting",
-    summary = "Query or set X-axis tick labels.",
-    keywords = "xticklabels,plotting,axes,tick labels",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::xticklabels::XTICKLABELS_DESCRIPTOR),
-    extensions(crate::builtins::plotting::xticklabels::XTICKLABELS_EXTENSIONS),
-    integer_audit(crate::builtins::plotting::xticklabels::XTICKLABELS_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::xticklabels"
 )]
+pub fn xticklabels_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    xticklabels_with_runtime(runtime.as_ref(), args)
+}
+
+#[cfg(test)]
 pub fn xticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    xticklabels_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+}
+
+fn xticklabels_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &XTICKLABELS_DESCRIPTOR,
+        &XTICKLABELS_ERROR_TOO_MANY_OUTPUTS,
+        "xticklabels",
+    )?;
     if args.len() == 2
         && args
             .first()
@@ -154,7 +55,7 @@ pub fn xticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "xticklabels: tick labels must be text or categorical values",
         ));
     }
-    axis_tick_labels_builtin("xticklabels", TickAxis::X, args)
+    axis_tick_labels_builtin(runtime, "xticklabels", TickAxis::X, args)
 }
 
 #[cfg(test)]
@@ -204,6 +105,17 @@ mod tests {
         assert_eq!(label_cell_texts(&prop), vec!["zero", "five", ""]);
         let mode = get_builtin(vec![ax, Value::String("XTickLabelMode".into())]).unwrap();
         assert_eq!(mode, Value::String("manual".into()));
+        for text in ["auto", "manual", "mode"] {
+            let labels =
+                Value::StringArray(StringArray::new(vec![text.into()], vec![1, 1]).unwrap());
+            let result = xticklabels_builtin(vec![labels]).unwrap();
+            assert_eq!(label_cell_texts(&result), vec![text, "", ""]);
+            assert_eq!(
+                xticklabels_builtin(vec![Value::String("mode".into())]).unwrap(),
+                Value::String("manual".into()),
+                "singleton StringArray remains labels, not a mode token",
+            );
+        }
     }
 
     #[test]

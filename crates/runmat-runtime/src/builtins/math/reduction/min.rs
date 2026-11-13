@@ -3,14 +3,11 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinErrorDescriptor, MinComparisonMethod as ComparisonMethod, MinControl,
+    MIN_ERROR_INTERNAL, MIN_ERROR_INVALID_ARGUMENT, MIN_ERROR_INVALID_INPUT,
+    MIN_ERROR_SIZE_MISMATCH,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
@@ -19,359 +16,17 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "min";
 
-fn min_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    min_max_type(args, ctx)
-}
-
-const MIN_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Minimum values.",
-}];
-
-const MIN_OUTPUT_MI: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum values.",
-    },
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based minimum indices/origins.",
-    },
-];
-
-const MIN_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar or array.",
-};
-
-const MIN_PARAM_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Second operand for element-wise minimum.",
-};
-
-const MIN_PARAM_EMPTY: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "placeholder",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("[]"),
-    description: "Empty placeholder selecting reduction-argument grammar.",
-};
-
-const MIN_PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "dim",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("[]"),
-    description: "Reduction dimension selector (scalar or dimension vector).",
-};
-
-const MIN_PARAM_REDUCTION_FLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "flag",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"all\""),
-    description: "Reduction mode flag: \"all\" or \"linear\".",
-};
-
-const MIN_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nanflag",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"includenan\""),
-    description: "Missing-value mode: \"includenan\" or \"omitnan\".",
-};
-
-const MIN_PARAM_COMPARISON_NAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "optionName",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"ComparisonMethod\""),
-    description: "Option name (currently \"ComparisonMethod\").",
-};
-
-const MIN_PARAM_COMPARISON_VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "method",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"auto\""),
-    description: "Comparison method: \"auto\", \"abs\"/\"magnitude\", or \"real\".",
-};
-
-const MIN_PARAM_OPTION_NAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "optionName",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value option name.",
-};
-
-const MIN_PARAM_OPTION_VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "optionValue",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value option value.",
-};
-
-const MIN_INPUTS_A: [BuiltinParamDescriptor; 1] = [MIN_PARAM_A];
-const MIN_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [MIN_PARAM_A, MIN_PARAM_B];
-const MIN_INPUTS_A_EMPTY_DIM: [BuiltinParamDescriptor; 3] =
-    [MIN_PARAM_A, MIN_PARAM_EMPTY, MIN_PARAM_DIM];
-const MIN_INPUTS_A_EMPTY_FLAG: [BuiltinParamDescriptor; 3] =
-    [MIN_PARAM_A, MIN_PARAM_EMPTY, MIN_PARAM_REDUCTION_FLAG];
-const MIN_INPUTS_A_EMPTY_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [MIN_PARAM_A, MIN_PARAM_EMPTY, MIN_PARAM_NANFLAG];
-const MIN_INPUTS_A_EMPTY_COMPARISON: [BuiltinParamDescriptor; 4] = [
-    MIN_PARAM_A,
-    MIN_PARAM_EMPTY,
-    MIN_PARAM_COMPARISON_NAME,
-    MIN_PARAM_COMPARISON_VALUE,
-];
-const MIN_INPUTS_A_B_COMPARISON: [BuiltinParamDescriptor; 4] = [
-    MIN_PARAM_A,
-    MIN_PARAM_B,
-    MIN_PARAM_COMPARISON_NAME,
-    MIN_PARAM_COMPARISON_VALUE,
-];
-const MIN_INPUTS_A_EMPTY_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    MIN_PARAM_A,
-    MIN_PARAM_EMPTY,
-    MIN_PARAM_OPTION_NAME,
-    MIN_PARAM_OPTION_VALUE,
-];
-const MIN_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    MIN_PARAM_A,
-    MIN_PARAM_B,
-    MIN_PARAM_OPTION_NAME,
-    MIN_PARAM_OPTION_VALUE,
-];
-
-const MIN_SIGNATURES: [BuiltinSignatureDescriptor; 19] = [
-    BuiltinSignatureDescriptor {
-        label: "M = min(A)",
-        inputs: &MIN_INPUTS_A,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A)",
-        inputs: &MIN_INPUTS_A,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, B)",
-        inputs: &MIN_INPUTS_A_B,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, [], dim)",
-        inputs: &MIN_INPUTS_A_EMPTY_DIM,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, [], dim)",
-        inputs: &MIN_INPUTS_A_EMPTY_DIM,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, [], vecdim)",
-        inputs: &MIN_INPUTS_A_EMPTY_DIM,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, [], vecdim)",
-        inputs: &MIN_INPUTS_A_EMPTY_DIM,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, [], \"all\")",
-        inputs: &MIN_INPUTS_A_EMPTY_FLAG,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, [], \"all\")",
-        inputs: &MIN_INPUTS_A_EMPTY_FLAG,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, [], \"linear\")",
-        inputs: &MIN_INPUTS_A_EMPTY_FLAG,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, [], \"linear\")",
-        inputs: &MIN_INPUTS_A_EMPTY_FLAG,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, [], nanflag)",
-        inputs: &MIN_INPUTS_A_EMPTY_NANFLAG,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, [], nanflag)",
-        inputs: &MIN_INPUTS_A_EMPTY_NANFLAG,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, [], \"ComparisonMethod\", method)",
-        inputs: &MIN_INPUTS_A_EMPTY_COMPARISON,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, [], \"ComparisonMethod\", method)",
-        inputs: &MIN_INPUTS_A_EMPTY_COMPARISON,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, B, \"ComparisonMethod\", method)",
-        inputs: &MIN_INPUTS_A_B_COMPARISON,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, [], optionName, optionValue, ...)",
-        inputs: &MIN_INPUTS_A_EMPTY_OPTIONS,
-        outputs: &MIN_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, I] = min(A, [], optionName, optionValue, ...)",
-        inputs: &MIN_INPUTS_A_EMPTY_OPTIONS,
-        outputs: &MIN_OUTPUT_MI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = min(A, B, optionName, optionValue, ...)",
-        inputs: &MIN_INPUTS_A_B_OPTIONS,
-        outputs: &MIN_OUTPUT_M,
-    },
-];
-
-const MIN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MIN.INVALID_ARGUMENT",
-    identifier: Some("RunMat:min:InvalidArgument"),
-    when: "Argument grammar, dimensions, or option names/values are invalid.",
-    message: "min: invalid argument",
-};
-
-const MIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MIN.INVALID_INPUT",
-    identifier: Some("RunMat:min:InvalidInput"),
-    when: "Input values cannot be converted to supported min domains.",
-    message: "min: invalid input",
-};
-
-const MIN_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MIN.SIZE_MISMATCH",
-    identifier: Some("RunMat:min:SizeMismatch"),
-    when: "Element-wise operands are not broadcast-compatible.",
-    message: "min: size mismatch",
-};
-
-const MIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MIN.INTERNAL",
-    identifier: Some("RunMat:min:Internal"),
-    when: "Execution fails due to gather, provider, allocation, or conversion internals.",
-    message: "min: internal failure",
-};
-
-const MIN_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    MIN_ERROR_INVALID_ARGUMENT,
-    MIN_ERROR_INVALID_INPUT,
-    MIN_ERROR_SIZE_MISMATCH,
-    MIN_ERROR_INTERNAL,
-];
-
-pub const MIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MIN_ERRORS,
-};
-
-const REDUCTION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Ordinary real reduction data accepts every integer storage class; complex-integer ordering remains a separately tracked conformance question.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim_or_vecdim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage.",
-    },
-];
-
-const PAIRWISE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "An integer array may pair with the same integer class or a scalar double in either operand position.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Two integer arrays must share one class; mixed integer classes and nonscalar floating arrays are rejected.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[M, I] = min(A, [], dim_or_vecdim, missingflag)",
-        inputs: &REDUCTION_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Minimum values preserve the integer input class and one-based indices are double; supported provider reductions retain resident values and indices.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = min(A, B, missingflag)",
-        inputs: &PAIRWISE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
-        notes: "Pairwise minimum applies compatible-size expansion and preserves the integer operand class, including exact comparison against an allowed scalar double.",
-    },
-];
-
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{
-    gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::min_max_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::min")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -431,7 +86,10 @@ fn min_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     min_descriptor_error_with_detail(&MIN_ERROR_INTERNAL, detail)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::min")]
+#[path = "min/fusion_contract.rs"]
+mod fusion_contract;
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::min", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Minimum, reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "min",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -439,15 +97,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            Ok(format!(
-                "accumulator = min(accumulator, {input});"
-            ))
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            writer.write_formatted(format_args!("accumulator = min(accumulator, {input});"))
+        }),
     }),
     emits_nan: true,
     notes: "Fusion planner emits canonical reduction kernels; providers may substitute custom WGSL via reduce_min_dim hooks.",
@@ -479,17 +132,17 @@ impl MinEvaluation {
 
 #[runtime_builtin(
     name = "min",
-    category = "math/reduction",
-    summary = "Return minimum elements along dimensions or pairwise comparisons.",
-    keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
-    accel = "reduction",
-    type_resolver(min_type),
-    descriptor(crate::builtins::math::reduction::min::MIN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::reduction::min::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::reduction::min"
 )]
-pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, &rest).await {
+pub(crate) async fn min_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, rest.view()).await
+    {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
     }
     if crate::output_count::current_output_count().unwrap_or(1) > 1
@@ -501,15 +154,53 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
             "min: pairwise element-wise form has exactly one output",
         ));
     }
-    let eval = evaluate(value, &rest).await?;
+    let demand = if crate::output_count::current_output_count().unwrap_or(1) > 1 {
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices
+    } else {
+        super::extrema_provider::ExtremaDemand::ValuesOnly
+    };
+    let eval = evaluate_for_demand(runtime.as_ref(), value, rest.view(), demand).await?;
+    min_output_from_eval(eval)
+}
+
+/// Apply the owning reduction grammar with an alias-imposed missing-data policy.
+/// The alias can select reduction without constructing a placeholder argument.
+pub(crate) async fn min_reduction_with_nan_policy(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+    imposed_nan_mode: ReductionNaN,
+) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(min_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
+    let controls = if rest.first().is_some_and(is_empty_placeholder) {
+        rest.view().range(1..)?
+    } else {
+        rest.view()
+    };
+    let mut parsed = ReductionArgs::default();
+    parse_reduction_options(&mut parsed, controls).await?;
+    parsed.nan_mode = imposed_nan_mode;
+    let demand = if crate::output_count::current_output_count().unwrap_or(1) > 1 {
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices
+    } else {
+        super::extrema_provider::ExtremaDemand::ValuesOnly
+    };
+    let eval = reduction_min(None, value, parsed, demand).await?;
+    min_output_from_eval(eval)
+}
+
+fn min_output_from_eval(eval: super::extrema_provider::ExtremaResult) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_value()]));
+            return Ok(Value::output_list(vec![eval.into_value()]));
         }
-        let (values, indices) = eval.into_pair();
+        let (values, indices) = eval.into_pair(super::extrema_provider::ExtremaKind::Min)?;
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![values, indices],
@@ -519,15 +210,47 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
+pub async fn evaluate(
+    value: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<MinEvaluation> {
+    let evaluated = evaluate_for_demand(
+        None,
+        value,
+        rest,
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices,
+    )
+    .await?;
+    let (values, indices) = evaluated.into_pair(super::extrema_provider::ExtremaKind::Min)?;
+    Ok(MinEvaluation { values, indices })
+}
+
+pub(super) async fn evaluate_for_demand(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(min_invalid_input(
             "operations involving complex numbers with integer types are not supported",
         ));
     }
     match parse_call(rest).await? {
-        ParsedCall::Elementwise(args) => elementwise_min(value, args).await,
-        ParsedCall::Reduction(args) => reduction_min(value, args).await,
+        ParsedCall::Elementwise(args) => elementwise_min(value, args, demand).await,
+        ParsedCall::Reduction(args) => reduction_min(runtime, value, args, demand).await,
+    }
+}
+
+/// Validate a reduction's controls without materializing its data operand.
+/// L07 will move this parser together with the extrema engine into its domain
+/// service; bounds must not duplicate option or exact-dimension authority.
+pub(super) async fn validate_reduction_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    match parse_call(rest).await? {
+        ParsedCall::Reduction(_) => Ok(()),
+        ParsedCall::Elementwise(_) => Err(min_invalid_argument("expected reduction controls")),
     }
 }
 
@@ -564,27 +287,20 @@ enum DimSelection {
     All,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ComparisonMethod {
-    Auto,
-    Real,
-    Abs,
-}
-
 #[derive(Debug, Clone)]
 struct ElementwiseArgs {
     other: Value,
     comparison: ComparisonMethod,
 }
 
-async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
+async fn parse_call(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<ParsedCall> {
     if rest.is_empty() {
         return Ok(ParsedCall::Reduction(ReductionArgs::default()));
     }
 
     let first = &rest[0];
     if !is_empty_placeholder(first) {
-        let comparison = parse_elementwise_options(&rest[1..])?;
+        let comparison = parse_elementwise_options(rest.range(1..)?)?;
         return Ok(ParsedCall::Elementwise(ElementwiseArgs {
             other: first.clone(),
             comparison,
@@ -592,7 +308,7 @@ async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
     }
 
     let mut args = ReductionArgs::default();
-    parse_reduction_options(&mut args, &rest[1..]).await?;
+    parse_reduction_options(&mut args, rest.range(1..)?).await?;
     Ok(ParsedCall::Reduction(args))
 }
 
@@ -600,10 +316,10 @@ fn is_empty_placeholder(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::StringArray(sa) => sa.data.is_empty(),
-        Value::CharArray(ca) => ca.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::String(s) => s.is_empty(),
+        Value::StringArray(sa) => sa.data().is_empty(),
+        Value::CharArray(ca) => ca.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.is_empty(),
         _ => false,
     }
 }
@@ -612,25 +328,22 @@ fn tensor_len(tensor: &Tensor) -> usize {
     tensor::tensor_element_len(tensor)
 }
 
-async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
+async fn parse_reduction_options(
+    args: &mut ReductionArgs,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
-    let tokens = tokens_from_values(rest);
     while idx < rest.len() {
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "omitnan" => {
-                    args.nan_mode = ReductionNaN::Omit;
+        if let Some(keyword) = keyword_of(&rest[idx])? {
+            match MinControl::from_public_option(&keyword) {
+                Some(MinControl::Missing(mode)) => {
+                    args.nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includenan" => {
-                    args.nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(MinControl::All) => {
                     if selection_set {
                         return Err(min_invalid_argument(
                             "min: 'all' cannot be combined with an explicit dimension",
@@ -641,33 +354,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                     idx += 1;
                     continue;
                 }
-                _ => {}
-            }
-        }
-        if let Some(keyword) = keyword_of(&rest[idx]) {
-            match keyword.as_str() {
-                "omitnan" => {
-                    args.nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includenan" => {
-                    args.nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if selection_set {
-                        return Err(min_invalid_argument(
-                            "min: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    args.selection = DimSelection::All;
-                    selection_set = true;
-                    idx += 1;
-                    continue;
-                }
-                "linear" => {
+                Some(MinControl::Linear) => {
                     if selection_set {
                         return Err(min_invalid_argument(
                             "min: 'linear' cannot be combined with an explicit dimension",
@@ -679,7 +366,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                     idx += 1;
                     continue;
                 }
-                "comparisonmethod" => {
+                Some(MinControl::ComparisonMethod) => {
                     let Some(value) = rest.get(idx + 1) else {
                         return Err(min_invalid_argument(
                             "min: expected a value after 'ComparisonMethod'",
@@ -690,7 +377,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                     idx += 2;
                     continue;
                 }
-                _ => {}
+                None => {}
             }
         }
 
@@ -716,14 +403,16 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
     Ok(())
 }
 
-fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> {
+fn parse_elementwise_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ComparisonMethod> {
     let mut comparison = ComparisonMethod::Auto;
     let mut comparison_set = false;
     let mut idx = 0usize;
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
-            match keyword.as_str() {
-                "comparisonmethod" => {
+        if let Some(keyword) = keyword_of(&rest[idx])? {
+            match MinControl::from_public_option(&keyword) {
+                Some(MinControl::ComparisonMethod) => {
                     let Some(value) = rest.get(idx + 1) else {
                         return Err(min_invalid_argument(
                             "min: expected a value after 'ComparisonMethod'",
@@ -734,13 +423,13 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
                     idx += 2;
                     continue;
                 }
-                "omitnan" | "includenan" | "all" | "linear" => {
+                Some(MinControl::Missing(_) | MinControl::All | MinControl::Linear) => {
                     return Err(min_invalid_argument(format!(
                         "min: '{}' is only supported for reduction calls",
                         keyword
                     )));
                 }
-                _ => {}
+                None => {}
             }
         }
         return Err(min_invalid_argument(format!(
@@ -755,28 +444,22 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
 }
 
 fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
-    let Some(keyword) = keyword_of(value) else {
+    let Some(keyword) = keyword_of(value)? else {
         return Err(min_invalid_argument(
             "min: 'ComparisonMethod' expects a string value",
         ));
     };
-    match keyword.as_str() {
-        "auto" => Ok(ComparisonMethod::Auto),
-        "abs" | "magnitude" => Ok(ComparisonMethod::Abs),
-        "real" => Ok(ComparisonMethod::Real),
-        other => Err(min_invalid_argument(format!(
-            "min: unsupported ComparisonMethod '{other}'"
-        ))),
-    }
+    ComparisonMethod::from_public_option(&keyword).ok_or_else(|| {
+        min_invalid_argument(format!("min: unsupported ComparisonMethod '{keyword}'"))
+    })
 }
 
 async fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelection>> {
     match value {
-        Value::Int(_) | Value::Num(_) => tensor::dimension_from_value_async(value, "min", false)
-            .await
+        Value::Int(_) | Value::Num(_) => tensor::scalar_dimension_from_value_typed(value, false)
             .map_err(map_scalar_dim_error)
             .map(|dim| dim.map(DimSelection::Dim)),
-        Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
+        Value::Tensor(t) => parse_dimension_tensor(value, t.shape()).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
         Value::GpuTensor(_) => Err(min_invalid_argument(
             "min: dimension arguments must reside on the host",
@@ -800,7 +483,7 @@ async fn parse_dimension_tensor(
             "min: dimension vector must be a row or column vector",
         ));
     }
-    let dims = tensor::dims_from_value_async(value)
+    let dims = tensor::dims_from_value_async_typed(value)
         .await
         .map_err(map_vector_dim_error)?;
     let Some(dims) = dims else {
@@ -822,44 +505,89 @@ async fn parse_dimension_tensor(
     Ok(Some(DimSelection::Vec(uniq)))
 }
 
-fn map_scalar_dim_error(message: String) -> RuntimeError {
-    if message.contains("integer") {
-        return min_invalid_argument("min: dimension must be integral");
-    }
-    min_invalid_argument(message)
+fn map_scalar_dim_error(error: tensor::DimensionDecodeError) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match &error {
+        DimensionDecodeError::Fractional => "min: dimension must be integral".to_string(),
+        DimensionDecodeError::NonFinite => "min: dimension must be finite".to_string(),
+        DimensionDecodeError::Negative | DimensionDecodeError::BelowMinimum => {
+            "min: dimension must be >= 1".to_string()
+        }
+        DimensionDecodeError::OutOfPlatformRange
+        | DimensionDecodeError::IntegerNegative
+        | DimensionDecodeError::IntegerOutOfPlatformRange => {
+            "min: dimension is outside the supported range".to_string()
+        }
+        DimensionDecodeError::Gather(_) => error.to_string(),
+    };
+    error.attach_cause(min_invalid_argument(message))
 }
 
-fn map_vector_dim_error(message: String) -> RuntimeError {
-    if message.contains("non-negative") {
-        return min_invalid_argument("min: dimension indices must be >= 1");
-    }
-    if message.contains("finite") {
-        return min_invalid_argument("min: dimension entries must be finite");
-    }
-    if message.contains("integer") {
-        return min_invalid_argument("min: dimension entries must be integers");
-    }
-    min_invalid_argument(message)
+fn map_vector_dim_error(error: tensor::DimensionDecodeError) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match &error {
+        DimensionDecodeError::Negative
+        | DimensionDecodeError::IntegerNegative
+        | DimensionDecodeError::IntegerOutOfPlatformRange
+        | DimensionDecodeError::BelowMinimum => "min: dimension indices must be >= 1".to_string(),
+        DimensionDecodeError::NonFinite => "min: dimension entries must be finite".to_string(),
+        DimensionDecodeError::Fractional => "min: dimension entries must be integers".to_string(),
+        DimensionDecodeError::OutOfPlatformRange | DimensionDecodeError::Gather(_) => {
+            error.to_string()
+        }
+    };
+    error.attach_cause(min_invalid_argument(message))
 }
 
-async fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEvaluation> {
+async fn reduction_min(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    args: ReductionArgs,
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = reduction_min_gpu(handle.clone(), &args).await? {
+            if let Some(eval) = reduction_min_gpu(runtime, handle.clone(), &args, demand).await? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            reduction_min_host(Value::Tensor(tensor), &args)
+            let value = super::extrema_provider::ExtremaKind::Min
+                .gather(&handle)
+                .await?;
+            reduction_min_host(value, &args).map(|eval| {
+                super::extrema_provider::ExtremaResult::from_pair(demand, eval.values, eval.indices)
+            })
         }
-        other => reduction_min_host(other, &args),
+        other => {
+            let typed_host_input = matches!(&other, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32);
+            let eval = reduction_min_host(other, &args)?;
+            if typed_host_input
+                && matches!(&eval.values, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            {
+                if let Some(runtime) = runtime {
+                    if let Some(route) = runtime.vm_fusion_host_route() {
+                        route.confirm_host_branch(
+                            runtime,
+                            crate::context::VmFusionHostInstruction::Reduction,
+                        );
+                    }
+                }
+            }
+            Ok(super::extrema_provider::ExtremaResult::from_pair(
+                demand,
+                eval.values,
+                eval.indices,
+            ))
+        }
     }
 }
 
 async fn reduction_min_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     handle: GpuTensorHandle,
     args: &ReductionArgs,
-) -> BuiltinResult<Option<MinEvaluation>> {
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<Option<super::extrema_provider::ExtremaResult>> {
     if args.nan_mode == ReductionNaN::Omit {
         log::trace!("min: gpu path disabled (nan_mode=omit)");
         return Ok(None);
@@ -872,23 +600,12 @@ async fn reduction_min_gpu(
         log::trace!("min: gpu path disabled (linear_index=true)");
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider_for_handle(&handle) {
-        Some(p) => p,
-        None => {
-            log::trace!(
-                "min: gpu path unavailable (provider() is None) handle_shape={:?} device_id={}",
-                handle.shape,
-                handle.device_id
-            );
-            return Ok(None);
-        }
-    };
     let target_dim = match args.selection {
-        DimSelection::Auto => default_dimension_from_shape(&handle.shape),
+        DimSelection::Auto => default_dimension_from_shape(handle.shape()),
         DimSelection::Dim(dim) => dim,
         DimSelection::Vec(ref dims) if dims.len() == 1 => dims[0],
         DimSelection::All => {
-            if handle.shape.len() <= 1 {
+            if handle.shape().len() <= 1 {
                 1
             } else {
                 return Ok(None);
@@ -901,26 +618,19 @@ async fn reduction_min_gpu(
     }
     // MATLAB dimensions are 1-based; `reduce_min_dim` expects zero-based.
     let zero_based = target_dim.saturating_sub(1);
-    if zero_based >= handle.shape.len() {
+    if zero_based >= handle.shape().len() {
         return Ok(None);
     }
     log::trace!(
         "min: attempting reduce_min_dim dim={} (zero_based={}) shape={:?} device_id={}",
         target_dim,
         zero_based,
-        handle.shape,
-        handle.device_id
+        handle.shape(),
+        handle.device_id()
     );
-    match provider.reduce_min_dim(&handle, zero_based).await {
-        Ok(ReduceDimResult { values, indices }) => Ok(Some(MinEvaluation {
-            values: Value::GpuTensor(values),
-            indices: Value::GpuTensor(indices),
-        })),
-        Err(err) => {
-            log::trace!("min: reduce_min_dim failed: {err}");
-            Ok(None)
-        }
-    }
+    super::extrema_provider::ExtremaKind::Min
+        .reduce_dim(runtime, &handle, zero_based, demand)
+        .await
 }
 
 fn reduction_min_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
@@ -941,7 +651,7 @@ fn native_integer_input(value: &Value) -> Option<(&runmat_value::IntegerStorage,
     match value {
         Value::Tensor(tensor) => tensor
             .integer_storage()
-            .map(|storage| (storage, tensor.shape.clone())),
+            .map(|storage| (storage, tensor.shape().to_vec())),
         _ => None,
     }
 }
@@ -1064,11 +774,13 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::Listener(_) => Err(min_invalid_input(format!("{name}: unsupported input type"))),
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+        | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -1076,13 +788,15 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(min_invalid_input(format!("{name}: unsupported input type"))),
     }
 }
 
 fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let dtype = tensor.numeric_dtype();
     let storage = tensor
         .into_numeric_storage()
@@ -1187,7 +901,7 @@ fn reduce_complex_tensor(
     tensor: ComplexTensor,
     args: &ReductionArgs,
 ) -> BuiltinResult<MinEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let dtype = tensor.numeric_dtype();
     let data = tensor.materialize_f64();
     if data.is_empty() {
@@ -1286,6 +1000,40 @@ fn reduce_complex_tensor(
         values: complex_tensor_into_value(value_tensor),
         indices: tensor::tensor_into_value(index_tensor),
     })
+}
+
+/// The Single real one-output host path materializes F64 input for extrema,
+/// retains a BestReal record and F64 value/index arrays per output, and may
+/// briefly retain a converted F32 result alongside them. Include the
+/// rank-sized strides, masks, and coordinates at their joint maximum. The
+/// caller accounts for the input tensor and producer outputs separately.
+pub(crate) fn checked_single_host_scratch(
+    input_elements: u64,
+    output_elements: u64,
+    rank: u64,
+) -> Option<u64> {
+    let input_copy = input_elements.checked_mul(8)?;
+    let output_record = u64::try_from(std::mem::size_of::<BestReal>())
+        .ok()?
+        .checked_add(8)?
+        .checked_add(8)?
+        .checked_add(4)?;
+    let outputs = output_elements.checked_mul(output_record)?;
+    // The real path's owned usize vectors are: source shape; resolved output
+    // shape, reduced axes, and reduction strides; local output-shape clone;
+    // input and output strides; local reduction-strides clone; coordinates;
+    // value-tensor shape; and index-tensor shape. Bound all eleven at once,
+    // plus the canonical binding's argument Tensor shape clone. Some do not
+    // overlap. The resolved and local dimension masks are two bool vectors.
+    // Empty/singleton normalization uses rank >= 2.
+    let usize_word = u64::try_from(std::mem::size_of::<usize>()).ok()?;
+    let bool_word = u64::try_from(std::mem::size_of::<bool>()).ok()?;
+    let dimensions = rank.checked_mul(
+        usize_word
+            .checked_mul(12)?
+            .checked_add(bool_word.checked_mul(2)?)?,
+    )?;
+    input_copy.checked_add(outputs)?.checked_add(dimensions)
 }
 
 #[derive(Debug, Clone)]
@@ -1714,8 +1462,73 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
     1
 }
 
-async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
+async fn elementwise_min(
+    value: Value,
+    args: ElementwiseArgs,
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
+    use super::extrema_provider::{ExtremaDemand, ExtremaKind, ExtremaResult};
     let ElementwiseArgs { other, comparison } = args;
+    let kind = ExtremaKind::Min;
+    let resident = if comparison == ComparisonMethod::Auto {
+        match (&value, &other) {
+            (Value::GpuTensor(left), Value::GpuTensor(right)) => {
+                kind.pair_values(left, right).await?
+            }
+            (Value::GpuTensor(input), other) => match extract_scalar(other) {
+                Some(scalar) => kind.scalar_values(input, other, scalar, false).await?,
+                None => None,
+            },
+            (other, Value::GpuTensor(input)) => match extract_scalar(other) {
+                Some(scalar) => kind.scalar_values(input, other, scalar, true).await?,
+                None => None,
+            },
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if let Some(values) = resident {
+        if demand == ExtremaDemand::ValuesOnly {
+            return Ok(ExtremaResult::Values(Value::GpuTensor(values)));
+        }
+        // Generic <=/>= masks do not encode NaN or signed-zero extrema origins.
+        // The existing typed host selector is the sole origin authority.
+        let left = kind.gather_input(value).await?;
+        let right = kind.gather_input(other).await?;
+        let evaluated = elementwise_real_or_complex(left, right, comparison)?;
+        return Ok(ExtremaResult::Pair {
+            values: Value::GpuTensor(values),
+            indices: evaluated.indices,
+        });
+    }
+    let left = kind.gather_input(value).await?;
+    let right = kind.gather_input(other).await?;
+    let evaluated = elementwise_real_or_complex(left, right, comparison)?;
+    Ok(ExtremaResult::from_pair(
+        demand,
+        evaluated.values,
+        evaluated.indices,
+    ))
+}
+
+fn extract_scalar(v: &Value) -> Option<f64> {
+    match v {
+        Value::Num(n) => Some(*n),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) && t.integer_storage().is_none() => {
+            Some(tensor::tensor_value_f64(t, 0))
+        }
+        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
+        _ => None,
+    }
+}
+
+fn elementwise_real_or_complex(
+    lhs: Value,
+    rhs: Value,
+    comparison: ComparisonMethod,
+) -> BuiltinResult<MinEvaluation> {
     let integer_comparison = match comparison {
         ComparisonMethod::Auto | ComparisonMethod::Real => {
             crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural
@@ -1725,8 +1538,8 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
         }
     };
     if let Some(eval) = crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
-        &value,
-        &other,
+        &lhs,
+        &rhs,
         crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
         integer_comparison,
         false,
@@ -1738,289 +1551,13 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
             indices: eval.indices,
         });
     }
-    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&value)
-        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&other)
+    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&lhs)
+        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&rhs)
     {
         return Err(min_invalid_input(
             "min: integer pairwise inputs require the same integer class or a scalar double",
         ));
     }
-    match (value, other) {
-        (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await {
-                return Ok(eval);
-            }
-            if let (Ok(ta), Ok(tb)) = (
-                gpu_helpers::gather_tensor_async(&handle_a).await,
-                gpu_helpers::gather_tensor_async(&handle_b).await,
-            ) {
-                if let Ok(eval) =
-                    elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
-                {
-                    return Ok(eval);
-                }
-            }
-            Err(min_internal_error("min: elementwise GPU path failed"))
-        }
-        (Value::GpuTensor(handle), other) => {
-            if let Some(eval) = elementwise_min_gpu_scalar_left(&handle, &other, comparison).await {
-                return Ok(eval);
-            }
-            let t = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|_| min_internal_error("min: elementwise GPU scalar path failed"))?;
-            elementwise_real_or_complex(Value::Tensor(t), other, comparison)
-        }
-        (other, Value::GpuTensor(handle)) => {
-            if let Some(eval) = elementwise_min_gpu_scalar_right(&other, &handle, comparison).await
-            {
-                return Ok(eval);
-            }
-            let t = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|_| min_internal_error("min: elementwise GPU scalar path failed"))?;
-            elementwise_real_or_complex(other, Value::Tensor(t), comparison)
-        }
-        (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
-    }
-}
-
-async fn elementwise_min_gpu_pair(
-    a: &GpuTensorHandle,
-    b: &GpuTensorHandle,
-    comparison: ComparisonMethod,
-) -> Option<MinEvaluation> {
-    if comparison != ComparisonMethod::Auto {
-        return None;
-    }
-    if a.device_id != b.device_id {
-        return None;
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(a)?;
-    // Equal-shape fast path
-    if a.shape == b.shape {
-        let values = provider.elem_min(a, b).await.ok()?;
-        // Try device mask first; if unavailable, compute indices on host while keeping values on device
-        if let Ok(mask) = provider.elem_le(a, b).await {
-            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-            let _ = provider.free(&mask);
-            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-            let mut indices = Vec::with_capacity(mask_values.len());
-            for &m in mask_values.iter() {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            let index_tensor = Tensor::new(indices, mask_host.shape.clone()).ok()?;
-            return Some(MinEvaluation {
-                values: Value::GpuTensor(values),
-                indices: tensor::tensor_into_value(index_tensor),
-            });
-        } else {
-            // Host indices only
-            let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
-            let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
-            let a_values = tensor::tensor_values_f64_cow(&ta);
-            let b_values = tensor::tensor_values_f64_cow(&tb);
-            let mut indices = Vec::with_capacity(a_values.len());
-            for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
-                indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
-            }
-            let index_tensor = Tensor::new(indices, ta.shape.clone()).ok()?;
-            return Some(MinEvaluation {
-                values: Value::GpuTensor(values),
-                indices: tensor::tensor_into_value(index_tensor),
-            });
-        }
-    }
-    // Broadcast-compatible path via repmat, then device compare
-    let (out_shape, reps_a, reps_b) = broadcast_reps(&a.shape, &b.shape)?;
-    let a_exp = if reps_a.iter().any(|&r| r != 1) {
-        provider.repmat(a, &reps_a).ok()?
-    } else {
-        a.clone()
-    };
-    let b_exp = if reps_b.iter().any(|&r| r != 1) {
-        provider.repmat(b, &reps_b).ok()?
-    } else {
-        b.clone()
-    };
-    let values = provider.elem_min(&a_exp, &b_exp).await.ok();
-    let mask = provider.elem_le(&a_exp, &b_exp).await.ok();
-    if !std::ptr::eq(&a_exp, a) {
-        let _ = provider.free(&a_exp);
-    }
-    if !std::ptr::eq(&b_exp, b) {
-        let _ = provider.free(&b_exp);
-    }
-    let values = values?;
-    if values.shape != out_shape {
-        let _ = provider.free(&values);
-        return None;
-    }
-    let index_tensor = if let Some(mask) = mask {
-        let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-        let _ = provider.free(&mask);
-        let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-        let mut indices = Vec::with_capacity(mask_values.len());
-        for &m in mask_values.iter() {
-            indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, out_shape).ok()?
-    } else {
-        // Host indices fallback
-        let ta = gpu_helpers::gather_tensor_async(&a_exp).await.ok()?;
-        let tb = gpu_helpers::gather_tensor_async(&b_exp).await.ok()?;
-        let a_values = tensor::tensor_values_f64_cow(&ta);
-        let b_values = tensor::tensor_values_f64_cow(&tb);
-        let mut indices = Vec::with_capacity(a_values.len());
-        for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
-            indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, out_shape).ok()?
-    };
-    Some(MinEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    })
-}
-
-fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    let rank = a.len().max(b.len()).max(1);
-    let mut out = vec![1usize; rank];
-    let aa = crate::builtins::common::broadcast::align_shape(a, rank);
-    let bb = crate::builtins::common::broadcast::align_shape(b, rank);
-    for i in 0..rank {
-        let (ad, bd) = (aa[i], bb[i]);
-        if ad == bd {
-            out[i] = ad;
-        } else if ad == 1 {
-            out[i] = bd;
-        } else if bd == 1 {
-            out[i] = ad;
-        } else {
-            return None;
-        }
-    }
-    let reps_a: Vec<usize> = (0..rank)
-        .map(|i| if aa[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    let reps_b: Vec<usize> = (0..rank)
-        .map(|i| if bb[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    Some((out, reps_a, reps_b))
-}
-
-async fn elementwise_min_gpu_scalar_left(
-    a: &GpuTensorHandle,
-    other: &Value,
-    comparison: ComparisonMethod,
-) -> Option<MinEvaluation> {
-    if comparison != ComparisonMethod::Auto {
-        return None;
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(a)?;
-    let scalar = extract_scalar(other)?;
-    let values = provider.scalar_min(a, scalar).ok()?;
-    // Try device mask; if unavailable, compute on host
-    let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
-        if let Ok(mask) = provider.elem_le(a, &fill).await {
-            let _ = provider.free(&fill);
-            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-            let _ = provider.free(&mask);
-            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-            let mut indices = Vec::with_capacity(mask_values.len());
-            for &m in mask_values.iter() {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, mask_host.shape.clone()).ok()?
-        } else {
-            let _ = provider.free(&fill);
-            let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
-            let values = tensor::tensor_values_f64_cow(&ta);
-            let mut indices = Vec::with_capacity(values.len());
-            for &v in values.iter() {
-                indices.push(if v <= scalar { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, ta.shape.clone()).ok()?
-        }
-    } else {
-        let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
-        let values = tensor::tensor_values_f64_cow(&ta);
-        let mut indices = Vec::with_capacity(values.len());
-        for &v in values.iter() {
-            indices.push(if v <= scalar { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, ta.shape.clone()).ok()?
-    };
-    Some(MinEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    })
-}
-
-async fn elementwise_min_gpu_scalar_right(
-    other: &Value,
-    b: &GpuTensorHandle,
-    comparison: ComparisonMethod,
-) -> Option<MinEvaluation> {
-    if comparison != ComparisonMethod::Auto {
-        return None;
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(b)?;
-    let scalar = extract_scalar(other)?;
-    let values = provider.scalar_min(b, scalar).ok()?;
-    // Try device mask; if unavailable, compute on host
-    let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
-        if let Ok(mask) = provider.elem_le(&fill, b).await {
-            let _ = provider.free(&fill);
-            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-            let _ = provider.free(&mask);
-            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-            let mut indices = Vec::with_capacity(mask_values.len());
-            for &m in mask_values.iter() {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, mask_host.shape.clone()).ok()?
-        } else {
-            let _ = provider.free(&fill);
-            let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
-            let values = tensor::tensor_values_f64_cow(&tb);
-            let mut indices = Vec::with_capacity(values.len());
-            for &v in values.iter() {
-                indices.push(if scalar <= v { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, tb.shape.clone()).ok()?
-        }
-    } else {
-        let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
-        let values = tensor::tensor_values_f64_cow(&tb);
-        let mut indices = Vec::with_capacity(values.len());
-        for &v in values.iter() {
-            indices.push(if scalar <= v { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, tb.shape.clone()).ok()?
-    };
-    Some(MinEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    })
-}
-
-fn extract_scalar(v: &Value) -> Option<f64> {
-    match v {
-        Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
-        Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
-        _ => None,
-    }
-}
-
-fn elementwise_real_or_complex(
-    lhs: Value,
-    rhs: Value,
-    comparison: ComparisonMethod,
-) -> BuiltinResult<MinEvaluation> {
     if let Some(eval) = scalar_elementwise_min(&lhs, &rhs, comparison) {
         return Ok(eval);
     }
@@ -2057,6 +1594,11 @@ fn scalar_elementwise_min(
     rhs: &Value,
     comparison: ComparisonMethod,
 ) -> Option<MinEvaluation> {
+    if super::extrema_provider::needs_typed_scalar_selection(lhs)
+        || super::extrema_provider::needs_typed_scalar_selection(rhs)
+    {
+        return None;
+    }
     let left = scalar_complex_value(lhs).or_else(|| extract_scalar(lhs).map(|v| (v, 0.0)))?;
     let right = scalar_complex_value(rhs).or_else(|| extract_scalar(rhs).map(|v| (v, 0.0)))?;
     let (ar, ai) = left;
@@ -2080,7 +1622,7 @@ fn elementwise_real_min(
     rhs: Tensor,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MinEvaluation> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| min_size_mismatch(format!("min: {err}")))?;
     let mut indices = vec![0.0f64; plan.len()];
     let lhs_storage = lhs
@@ -2165,7 +1707,7 @@ fn elementwise_complex_min(
     rhs: ComplexTensor,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MinEvaluation> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| min_size_mismatch(format!("min: {err}")))?;
     let mut indices = vec![0.0f64; plan.len()];
     let lhs_storage = lhs.into_complex_storage();
@@ -2185,7 +1727,7 @@ fn elementwise_complex_min(
                 values.push(if origin == 1.0 { a } else { b });
                 indices[offset] = origin;
             }
-            ComplexStorage::$variant(values)
+            ComplexStorage::$variant(values.into())
         }};
     }
 
@@ -2206,7 +1748,7 @@ fn elementwise_complex_min(
                 values.push(value);
                 indices[offset] = origin;
             }
-            ComplexStorage::F64(values)
+            ComplexStorage::F64(values.into())
         }
     };
 
@@ -2222,7 +1764,7 @@ fn elementwise_complex_min(
 }
 
 fn promote_real_tensor_to_complex(tensor: Tensor) -> ComplexTensor {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor
         .into_numeric_storage()
         .expect("real extrema input has numeric storage")
@@ -2293,47 +1835,55 @@ pub(crate) mod tests {
     };
 
     fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::min_builtin(value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::min_builtin(None, value, rest.into()))
     }
 
     #[test]
-    fn min_type_with_two_args_returns_tensor() {
-        let out = min_type(
-            &[Type::Tensor { shape: None }, Type::Tensor { shape: None }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::tensor());
+    fn min_typed_controls_keep_pairwise_restrictions_and_method_alias() {
+        let pairwise = min_builtin(
+            Value::Num(3.0),
+            vec![
+                Value::Num(2.0),
+                Value::from("ComparisonMethod"),
+                Value::from("magnitude"),
+            ],
+        )
+        .expect("comparison method alias");
+        assert_eq!(pairwise, Value::Num(2.0));
+
+        let invalid = min_builtin(
+            Value::Num(3.0),
+            vec![Value::Num(2.0), Value::from("omitnan")],
+        )
+        .expect_err("missing policy is reduction-only");
+        assert_eq!(invalid.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(invalid.message().contains("only supported for reduction"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn min_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = MIN_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"M = min(A)"));
-        assert!(labels.contains(&"[M, I] = min(A)"));
-        assert!(labels.contains(&"M = min(A, B)"));
-        assert!(!labels.contains(&"[M, I] = min(A, B)"));
-        assert!(labels.contains(&"M = min(A, [], dim)"));
-        assert!(labels.contains(&"M = min(A, [], \"all\")"));
-        assert!(labels.contains(&"M = min(A, [], nanflag)"));
-        assert!(labels.contains(&"M = min(A, [], \"ComparisonMethod\", method)"));
-        assert!(labels.contains(&"M = min(A, B, \"ComparisonMethod\", method)"));
-    }
-
-    #[test]
-    fn min_descriptor_errors_have_stable_codes() {
-        let codes: Vec<&str> = MIN_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
-        assert!(codes.contains(&"RM.MIN.INVALID_ARGUMENT"));
-        assert!(codes.contains(&"RM.MIN.INVALID_INPUT"));
-        assert!(codes.contains(&"RM.MIN.SIZE_MISMATCH"));
-        assert!(codes.contains(&"RM.MIN.INTERNAL"));
+    fn same_class_single_scalar_pairwise_retains_typed_storage() {
+        let left = Tensor::from_f32(vec![3.25], vec![1, 1]).expect("single left");
+        let right = Tensor::from_f32(vec![2.5], vec![1, 1]).expect("single right");
+        let (value, index) = evaluate(Value::Tensor(left), &[Value::Tensor(right)])
+            .expect("single scalar pairwise minimum")
+            .into_pair();
+        let Value::Tensor(value) = value else {
+            panic!("single scalar remains a typed tensor");
+        };
+        assert_eq!(value.numeric_dtype(), NumericDType::F32);
+        assert_eq!(value.shape(), [1, 1]);
+        assert_eq!(value.materialize_f64(), vec![2.5]);
+        assert_eq!(index, Value::Num(2.0));
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
-        block_on(super::evaluate(value, rest))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        ))
     }
 
     fn placeholder() -> Value {
@@ -2492,7 +2042,7 @@ pub(crate) mod tests {
             1,
         ))
         .expect("dispatch min");
-        match value {
+        match value.value() {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 1);
                 assert_eq!(
@@ -2502,7 +2052,7 @@ pub(crate) mod tests {
             }
             other => assert_eq!(
                 other,
-                Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap())
+                &Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap())
             ),
         }
     }
@@ -2515,7 +2065,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 1.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -2591,7 +2141,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, -2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2638,7 +2188,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.into_complex_storage(),
-            ComplexStorage::F32(vec![(1.0, 2.0)])
+            ComplexStorage::F32(vec![(1.0, 2.0)].into())
         );
     }
 
@@ -2651,7 +2201,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 assert_eq!(
                     [
                         t.materialize_f64()[0],
@@ -2681,7 +2231,7 @@ pub(crate) mod tests {
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 assert_eq!(
                     [
                         t.materialize_f64()[0],
@@ -2745,14 +2295,14 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.into_complex_storage(),
-            ComplexStorage::F32(vec![(4.0, 0.0), (1.0, 0.0)])
+            ComplexStorage::F32(vec![(4.0, 0.0), (1.0, 0.0)].into())
         );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_pairwise_public_form_rejects_second_output() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = min_builtin(Value::Num(1.0), vec![Value::Num(2.0)])
             .expect_err("pairwise min has one output");
         assert_eq!(error.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
@@ -2934,18 +2484,29 @@ pub(crate) mod tests {
     #[test]
     fn min_dimension_gpu_argument_errors() {
         let tensor = Tensor::new(vec![3.0, 1.0], vec![2, 1]).unwrap();
-        let dim_handle = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 42,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident reduction admission fixture");
+        let dim_handle = Value::GpuTensor(allocation.handle.clone());
         let err = evaluate(Value::Tensor(tensor), &[placeholder(), dim_handle])
             .expect_err("expected error");
         assert_eq!(err.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err
             .message()
             .contains("dimension arguments must reside on the host"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        drop(err);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2973,7 +2534,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval_gpu = evaluate(Value::GpuTensor(handle), &[]).expect("gpu");
@@ -2992,12 +2553,12 @@ pub(crate) mod tests {
                 Value::Tensor(t) => t,
                 other => panic!("expected tensor indices from cpu eval, got {other:?}"),
             };
-            assert_eq!(gathered_vals.shape, expected_vals.shape);
+            assert_eq!(gathered_vals.shape(), expected_vals.shape());
             assert_eq!(
                 gathered_vals.materialize_f64(),
                 expected_vals.materialize_f64()
             );
-            assert_eq!(gathered_idx.shape, expected_idx.shape);
+            assert_eq!(gathered_idx.shape(), expected_idx.shape());
             assert_eq!(
                 gathered_idx.materialize_f64(),
                 expected_idx.materialize_f64()
@@ -3070,7 +2631,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), [2, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -3123,5 +2684,25 @@ pub(crate) mod tests {
         let args = vec![placeholder(), Value::Int(IntValue::I32(0))];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
         assert!(err.message().contains("dimension must be >= 1"));
+    }
+
+    #[test]
+    fn min_scalar_dimension_diagnostics_follow_typed_decode_reasons() {
+        let invalid = [
+            (Value::Num(f64::NAN), "dimension must be finite"),
+            (Value::Num(1.25), "dimension must be integral"),
+            (Value::Num(0.0), "dimension must be >= 1"),
+            (
+                Value::Int(IntValue::I64(-1)),
+                "dimension is outside the supported range",
+            ),
+        ];
+        for (dimension, expected) in invalid {
+            let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+            let error = evaluate(Value::Tensor(input), &[placeholder(), dimension])
+                .expect_err("invalid scalar dimension must fail");
+            assert_eq!(error.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);
+            assert!(error.message().contains(expected), "{error}");
+        }
     }
 }

@@ -1,9 +1,16 @@
 mod discovery;
 mod env;
 mod file;
+mod layers;
+mod settings;
+pub use discovery::ApplicationSettingsDirectory;
+pub use layers::{
+    ConfigLoadOptions, ConfigSource, ConfigurationPolicy, HostConfigDocument, HostRuntimeSettings,
+    ResolvedRuntimeConfig, UserSettingsSource,
+};
+pub use settings::UserSettingsDocument;
 
 use anyhow::Result;
-use log::{debug, info};
 use std::path::{Path, PathBuf};
 
 use crate::runtime::RunMatRuntimeConfig;
@@ -14,51 +21,12 @@ pub struct ConfigLoader;
 impl ConfigLoader {
     /// Load configuration from all sources with proper precedence
     pub fn load() -> Result<RunMatRuntimeConfig> {
-        let mut config = Self::load_from_files()?;
-        Self::apply_environment_variables(&mut config)?;
-        Ok(config)
+        Ok(Self::load_with_options(&ConfigLoadOptions::native())?.config)
     }
 
-    /// Find and load configuration from files
-    fn load_from_files() -> Result<RunMatRuntimeConfig> {
-        if let Ok(config_path) = std::env::var("RUNMAT_CONFIG") {
-            let path = PathBuf::from(config_path);
-            if path.is_dir() {
-                return Err(anyhow::anyhow!(
-                    "RUNMAT_CONFIG points to a directory, expected a file: {}",
-                    path.display()
-                ));
-            }
-            if !path.is_file() {
-                return Err(anyhow::anyhow!(
-                    "RUNMAT_CONFIG points to a missing file: {}",
-                    path.display()
-                ));
-            }
-            info!(
-                "Loading configuration from RUNMAT_CONFIG: {}",
-                path.display()
-            );
-            return Self::load_from_file(&path);
-        }
-
-        if let Ok(current_dir) = std::env::current_dir() {
-            if let Some(path) = discovery::discover_project_config_path_from(&current_dir) {
-                info!("Loading configuration from: {}", path.display());
-                return Self::load_from_file(&path);
-            }
-        }
-
-        if let Some(path) = discovery::user_config_candidates()
-            .into_iter()
-            .find(|candidate| candidate.is_file())
-        {
-            info!("Loading configuration from: {}", path.display());
-            return Self::load_from_file(&path);
-        }
-
-        debug!("No configuration file found, using defaults");
-        Ok(RunMatRuntimeConfig::default())
+    /// Resolve recursive layers and exact leaf provenance using a host policy.
+    pub fn load_with_options(options: &ConfigLoadOptions) -> Result<ResolvedRuntimeConfig> {
+        layers::resolve(options)
     }
 
     /// Walk up from the provided directory looking for the first config file.
@@ -69,11 +37,6 @@ impl ConfigLoader {
     /// Load configuration from a specific file
     pub fn load_from_file(path: &Path) -> Result<RunMatRuntimeConfig> {
         file::load_from_file(path)
-    }
-
-    /// Apply environment variable overrides
-    fn apply_environment_variables(config: &mut RunMatRuntimeConfig) -> Result<()> {
-        env::apply_environment_variables(config)
     }
 
     /// Save configuration to a file

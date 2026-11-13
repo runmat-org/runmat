@@ -22,6 +22,7 @@ impl NativeFrameKind {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeResumeState {
+    /// Portable program-point owner, paired with block/position below.
     pub function: u32,
     pub block: u32,
     pub position: u32,

@@ -5,15 +5,14 @@ use test_helpers::{compile_source, execute_source};
 
 fn execute_source_with_catalog(
     source: &str,
-) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).map_err(Box::new)?;
-    let source_id = bytecode.source_id.unwrap_or(runmat_hir::SourceId(0));
-    let _catalog = runmat_runtime::source_context::replace_source_catalog(vec![(
-        source_id,
-        "/tmp/integer_index_text_and_control_semantics.m".to_string(),
-        source.to_string(),
-    )]);
-    test_helpers::interpret(&bytecode).map_err(Box::new)
+    test_helpers::interpret_with_program_source(
+        &bytecode,
+        "/tmp/integer_index_text_and_control_semantics.m",
+        source,
+    )
+    .map_err(Box::new)
 }
 
 #[test]
@@ -49,12 +48,12 @@ fn compiled_inputname_bounds_and_comma_list_propagation_match_the_public_contrac
     )
     .expect("compiled inputname comma-list propagation");
     assert!(values.iter().any(|value| {
-        matches!(value, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "alpha")
+        matches!(value, runmat_value::Value::CharArray(chars) if runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 text fixture") == "alpha")
     }));
     assert!(
         values
             .iter()
-            .filter(|value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data.is_empty()))
+            .filter(|value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data().is_empty()))
             .count()
             >= 2,
         "indexed and subsequent arguments must be unnamed: {values:?}"

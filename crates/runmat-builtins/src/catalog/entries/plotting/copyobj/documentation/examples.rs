@@ -1,0 +1,36 @@
+use crate::*;
+pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "example-1",
+        title: "Copy a line to another axes",
+        program: "h = plot(1:3, [1 4 9], 'DisplayName', 'source');\nax2 = subplot(1,2,2);\nh2 = copyobj(h, ax2);\nget(h2, 'Parent') == ax2",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(h2~=h); assert(get(h2,'Parent')==ax2); assert(isequal(get(h2,'YData'),get(h,'YData'))); assert(strcmp(get(h2,'DisplayName'),'source'));" },
+    },
+    BuiltinExample {
+        id: "example-2",
+        title: "Copy a handle array to the same parent",
+        program: "h(1) = plot(1:3);\nhold on;\nh(2) = plot(3:-1:1);\nax2 = subplot(1,2,2);\nh2 = copyobj(h, ax2);\nsize(h2)",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isequal(size(h2),[1 2])); assert(all(h2~=h)); assert(get(h2(1),'Parent')==ax2); assert(get(h2(2),'Parent')==ax2);" },
+    },
+    BuiltinExample {
+        id: "example-3",
+        title: "Copy one object into two parent axes",
+        program: "h = plot(1:3);\nax1 = subplot(1,2,1);\nax2 = subplot(1,2,2);\nh2 = copyobj(h, [ax1 ax2]);\nsize(h2)",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(isequal(size(h2),[1 2])); assert(h2(1)~=h2(2)); assert(get(h2(1),'Parent')==ax1); assert(get(h2(2),'Parent')==ax2);" },
+    },
+];

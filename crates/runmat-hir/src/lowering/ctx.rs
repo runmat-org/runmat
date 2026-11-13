@@ -2,27 +2,30 @@ use crate::hir::FunctionArgumentValidation;
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
-    CallSyntax, CapturedBinding, ClassArgumentBlock, ClassDeclaration, ClassId, ClassKind,
-    ClassPropertyDefault, ClassResolution, CommandArgument, DefPath, DefPathSegment, EntrypointId,
-    EntrypointName, EntrypointOrigin, EntrypointPolicy, EnumerationDeclaration, EventDeclaration,
-    ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName,
-    FunctionOutputArity, FunctionResolution, HirAssembly, HirBinding, HirBlock, HirCall,
-    HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirError, HirExpr, HirExprKind,
-    HirFunction, HirImport, HirIndex, HirModule, HirPlace, HirStmt as HirStmtNode, HirStmtKind,
-    ImportResolution, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics,
-    InheritanceDeclaration, LoweringContext, LoweringResult, MemberAccess, MemberName,
-    MethodDeclaration, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind,
-    PropertyDeclaration, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
-    SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
-    WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
-    SPAWN_EXTENSION_NAME,
+    CallSyntax, CapturedBinding, ClassArgumentBlock, ClassDeclaration, ClassId, ClassIdentity,
+    ClassKind, ClassPropertyDefault, ClassResolution, CommandArgument, DefPath, DefPathSegment,
+    EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy, EnumerationDeclaration,
+    EventDeclaration, ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers,
+    FunctionName, FunctionOutputArity, FunctionResolution, HirAssembly, HirBinding, HirBlock,
+    HirCall, HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirError, HirErrorKind,
+    HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule, HirPlace,
+    HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
+    IndexResultContext, IndexingSemantics, InheritanceDeclaration, LoweringContext, LoweringResult,
+    MemberAccess, MemberName, MethodDeclaration, ModuleId, OperatorKind, PackageName,
+    PlaceMutation, PlaceMutationKind, PropertyDeclaration, QualifiedName, ReferenceKind,
+    ReferenceResolution, RequestedOutputCount, SourceUnitKind, Span, StmtId, StringLiteral,
+    SymbolName, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
+    NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use runmat_types::{
     FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
-    FunctionArgValidationLiteral, FunctionArgValidator,
+    FunctionArgValidationLiteral, FunctionArgValidator, ProgramSourceId,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+mod static_member;
+mod subscript_chain;
 
 const IDENT_AWAIT_EXTENSION_DISABLED: &str = "RunMat:AwaitExtensionDisabled";
 const IDENT_AWAIT_CONTEXT_INVALID: &str = "RunMat:AwaitContextInvalid";
@@ -32,11 +35,11 @@ const IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:IsolatedLexical
 const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
+const IDENT_CLASS_EVENT_ATTRIBUTE_INVALID: &str = "RunMat:ClassEventAttributeInvalid";
 const IDENT_CLASS_ACCESS_VALUE_INVALID: &str = "RunMat:ClassAccessValueInvalid";
 const IDENT_CLASS_SELF_INHERITANCE_INVALID: &str = "RunMat:ClassSelfInheritanceInvalid";
 const IDENT_CLASS_MEMBER_DUPLICATE: &str = "RunMat:ClassMemberDuplicate";
 const IDENT_CLASS_MEMBER_NAME_CONFLICT: &str = "RunMat:ClassMemberNameConflict";
-const IDENT_AGGREGATE_SHAPE_MISMATCH: &str = "RunMat:AggregateShapeMismatch";
 const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
 const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN: &str = "RunMat:FunctionArgumentValidationUnknown";
@@ -49,9 +52,21 @@ const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR: &str =
 const IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED: &str =
     "RunMat:FunctionArgumentDefaultUnsupported";
 
+fn class_method_role(
+    class_name: &str,
+    method_name: &str,
+    is_static: bool,
+) -> runmat_types::ClassMethodRole {
+    if !is_static && class_name.rsplit('.').next() == Some(method_name) {
+        runmat_types::ClassMethodRole::Constructor
+    } else {
+        runmat_types::ClassMethodRole::Ordinary
+    }
+}
+
 #[derive(Clone)]
 struct ScopeFrame {
-    owner: FunctionId,
+    owner: BindingOwner,
     bindings: HashMap<String, BindingId>,
     workspace_visibility: WorkspaceVisibility,
     external_bindings_visible: bool,
@@ -74,6 +89,8 @@ struct LoweringCtx {
     function_names: HashMap<String, FunctionId>,
     local_function_name_scopes: Vec<HashMap<String, FunctionId>>,
     class_names: HashMap<String, ClassId>,
+    class_identities: HashMap<ClassId, ClassIdentity>,
+    active_class_method: Option<(FunctionId, ClassIdentity)>,
     external_function_names: HashMap<String, FunctionId>,
     known_project_symbols: HashSet<String>,
     private_function_owners: HashMap<String, String>,
@@ -153,7 +170,11 @@ impl LoweringCtx {
             .iter()
             .find(|declaration| declaration.name.display_name().as_deref() == Some(name))
             .cloned()
-            .or_else(|| runmat_builtins::standard_class_declaration(name))
+            .or_else(|| {
+                runmat_types::ClassIdentity::new(name)
+                    .ok()
+                    .and_then(|identity| runmat_builtins::standard_class_declaration(&identity))
+            })
     }
 
     fn class_id_for_name(&self, name: &str) -> Option<ClassId> {
@@ -221,30 +242,66 @@ impl LoweringCtx {
         QualifiedName(segments)
     }
 
-    fn validate_rectangular_aggregate(
-        &self,
-        kind: &str,
-        rows: &[Vec<AstExpr>],
-    ) -> Result<(), HirError> {
-        let Some(expected_cols) = rows.first().map(Vec::len) else {
-            return Ok(());
-        };
-        if rows.iter().all(|row| row.len() == expected_cols) {
-            return Ok(());
-        }
-
-        Err(HirError::new(format!(
-            "{kind} literal rows must have consistent column counts",
-        ))
-        .with_identifier(IDENT_AGGREGATE_SHAPE_MISMATCH))
-    }
-
     fn lower_program(
         prog: &AstProgram,
         context: &LoweringContext<'_>,
     ) -> Result<(HirAssembly, HirIndex), HirError> {
+        if !context.top_level_sources.is_empty()
+            && context.top_level_sources.len() != prog.body.len()
+        {
+            return Err(HirError::new(
+                "top-level source provenance does not match the statement count",
+            ));
+        }
+        if !context.top_level_sources.is_empty() && context.primary_source.is_none() {
+            return Err(HirError::new(
+                "source-bearing statements require an admitted primary source",
+            ));
+        }
+        let primary_source = context.primary_source.unwrap_or(ProgramSourceId(0));
+        let source_for = |ordinal: usize| {
+            context
+                .top_level_sources
+                .get(ordinal)
+                .copied()
+                .unwrap_or(primary_source)
+        };
+        let mut source_units = BTreeMap::new();
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            let source = source_for(ordinal);
+            source_units.entry(source).or_insert_with(|| {
+                if source == primary_source {
+                    if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
+                        SourceUnitKind::FunctionFile
+                    } else {
+                        SourceUnitKind::ScriptFile
+                    }
+                } else {
+                    match stmt {
+                        AstStmt::Function { .. } => SourceUnitKind::FunctionFile,
+                        AstStmt::ClassDef { .. } => SourceUnitKind::ClassFile,
+                        _ => SourceUnitKind::ScriptFile,
+                    }
+                }
+            });
+        }
+        source_units.entry(primary_source).or_insert_with(|| {
+            if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
+                SourceUnitKind::FunctionFile
+            } else {
+                SourceUnitKind::ScriptFile
+            }
+        });
         let mut ctx = Self {
-            assembly: HirAssembly::default(),
+            assembly: HirAssembly {
+                bound_function_modifiers: context
+                    .function_modifiers
+                    .iter()
+                    .map(|(id, value)| (*id, value.clone()))
+                    .collect(),
+                primary_source: context.primary_source,
+                ..HirAssembly::default()
+            },
             hir_index: HirIndex::default(),
             module: ModuleId(0),
             next_expr: 0,
@@ -260,6 +317,8 @@ impl LoweringCtx {
             function_names: HashMap::new(),
             local_function_name_scopes: Vec::new(),
             class_names: HashMap::new(),
+            class_identities: HashMap::new(),
+            active_class_method: None,
             external_function_names: context.bound_functions.clone(),
             known_project_symbols: context.known_project_symbols.clone(),
             private_function_owners: context.private_function_owners.clone(),
@@ -272,28 +331,38 @@ impl LoweringCtx {
             external_class_declarations: context.external_class_declarations.to_vec(),
         };
 
-        ctx.assembly.modules.push(HirModule {
-            id: ctx.module,
-            name: QualifiedName(vec![SymbolName("main".into())]),
-            source_id: SourceId(0),
-            source_unit: SourceUnitKind::ScriptFile,
-            imports: Vec::new(),
-            top_level_functions: Vec::new(),
-            classes: Vec::new(),
-            synthetic_entry_function: None,
-            script_sections: prog
-                .sections
-                .iter()
-                .map(|section| crate::HirScriptSection {
-                    ordinal: section.ordinal,
-                    title: section.title.clone(),
-                    marker_span: section.marker_span,
-                    body_span: section.body_span,
-                })
-                .collect(),
-        });
+        let mut modules_by_source = BTreeMap::new();
+        for (source, source_unit) in source_units {
+            let id = ModuleId(ctx.assembly.modules.len());
+            modules_by_source.insert(source, id);
+            ctx.assembly.modules.push(HirModule {
+                id,
+                name: QualifiedName(vec![SymbolName("main".into())]),
+                source_id: source,
+                source_unit,
+                imports: Vec::new(),
+                top_level_functions: Vec::new(),
+                classes: Vec::new(),
+                synthetic_entry_function: None,
+                script_sections: if source == primary_source {
+                    prog.sections
+                        .iter()
+                        .map(|section| crate::HirScriptSection {
+                            ordinal: section.ordinal,
+                            title: section.title.clone(),
+                            marker_span: section.marker_span,
+                            body_span: section.body_span,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            });
+        }
+        let module_for = |ordinal: usize| modules_by_source[&source_for(ordinal)];
 
-        for stmt in &prog.body {
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            ctx.module = module_for(ordinal);
             if let AstStmt::Function { name, outputs, .. } = stmt {
                 let id = ctx.reserve_function_name_with_outputs(name, outputs);
                 ctx.assembly.modules[ctx.module.0]
@@ -318,7 +387,8 @@ impl LoweringCtx {
             }
         }
 
-        for stmt in &prog.body {
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            ctx.module = module_for(ordinal);
             if let AstStmt::Import { path, wildcard, .. } = stmt {
                 let import = HirImport {
                     path: qualified_name(path),
@@ -331,9 +401,12 @@ impl LoweringCtx {
                 ctx.assembly.modules[ctx.module.0].imports.push(import);
             }
         }
-        validate_semantic_imports(&ctx.assembly.modules[ctx.module.0].imports)?;
+        for module in &ctx.assembly.modules {
+            validate_semantic_imports(&module.imports)?;
+        }
 
-        for stmt in &prog.body {
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            ctx.module = module_for(ordinal);
             match stmt {
                 AstStmt::Function {
                     name,
@@ -387,6 +460,7 @@ impl LoweringCtx {
             .filter(|stmt| !matches!(stmt, AstStmt::Function { .. } | AstStmt::ClassDef { .. }))
             .collect();
         if !executable.is_empty() {
+            ctx.module = modules_by_source[&primary_source];
             let entry_function = ctx.take_function_id();
             ctx.assembly.modules[ctx.module.0].synthetic_entry_function = Some(entry_function);
             ctx.assembly.entrypoints.push(HirEntrypoint {
@@ -421,7 +495,7 @@ impl LoweringCtx {
                 kind: FunctionKind::SyntheticEntrypoint,
                 params: vec![],
                 outputs: vec![],
-                abi: FunctionAbi::empty(),
+                abi: FunctionAbi::default(),
                 argument_validations: vec![],
                 locals,
                 captures: vec![],
@@ -583,7 +657,9 @@ impl LoweringCtx {
     }
 
     fn alloc_parallel_region_id(&mut self) -> runmat_types::ParallelRegionId {
-        let function = self.current_scope().owner;
+        let BindingOwner::Function(function) = self.current_scope().owner else {
+            unreachable!("parallel statements require a function scope")
+        };
         let ordinal = self.next_parallel_region.entry(function).or_default();
         let id = runmat_types::ParallelRegionId(runmat_types::RegionId {
             function: runmat_types::ProgramFunctionId(
@@ -604,7 +680,7 @@ impl LoweringCtx {
         f: impl FnOnce(&mut Self) -> Result<T, HirError>,
     ) -> Result<T, HirError> {
         self.scopes.push(ScopeFrame {
-            owner,
+            owner: BindingOwner::Function(owner),
             bindings: HashMap::new(),
             workspace_visibility,
             external_bindings_visible: false,
@@ -618,12 +694,52 @@ impl LoweringCtx {
         result
     }
 
+    fn lower_class_default(&mut self, expr: &AstExpr) -> Result<HirExpr, HirError> {
+        // A class declaration need not contain a callable or script entrypoint.
+        // Its defaults still require a semantic scope for catalog constants and
+        // references; that scope belongs to the module, not a fabricated body.
+        self.scopes.push(ScopeFrame {
+            owner: BindingOwner::Module(self.module),
+            bindings: HashMap::new(),
+            workspace_visibility: WorkspaceVisibility::TopLevel,
+            external_bindings_visible: false,
+        });
+        let result = self.lower_expr_semantic(expr);
+        self.scopes.pop();
+        result
+    }
+
     fn current_allows_await(&self) -> bool {
         self.function_modifiers
             .last()
             .map(|modifiers| modifiers.is_async)
             .unwrap_or(false)
             || self.top_level_await.last().copied().unwrap_or(false)
+    }
+
+    fn bound_super_caller(&self, parsed: &str, span: Span) -> Result<ClassIdentity, HirError> {
+        let Some((function, declared)) = &self.active_class_method else {
+            return Err(HirError::new("super call has no enclosing class method").with_span(span));
+        };
+        if !self.scopes.last().is_some_and(
+            |scope| matches!(&scope.owner, BindingOwner::Function(owner) if owner == function),
+        ) {
+            return Err(
+                HirError::new("super call escapes its enclosing class method").with_span(span),
+            );
+        }
+        let parsed = ClassIdentity::new(parsed.to_string())
+            .map_err(|error| HirError::new(error.to_string()).with_span(span))?;
+        let parsed_name = parsed.qualified_name();
+        let declared_name = declared.qualified_name();
+        if parsed != *declared
+            && (parsed_name.0.len() != 1 || parsed_name.0.first() != declared_name.0.last())
+        {
+            return Err(
+                HirError::new("super call disagrees with its enclosing class").with_span(span),
+            );
+        }
+        Ok(declared.clone())
     }
 
     fn spawn_arg_captures_lexical_binding(&self, arg: &HirExpr) -> bool {
@@ -659,13 +775,17 @@ impl LoweringCtx {
         }
         let id = self.alloc_binding_id();
         let owner = self.current_scope().owner;
-        let workspace_visibility = self.current_scope().workspace_visibility.clone();
+        let workspace_visibility = if role == BindingRole::ImplicitAns {
+            WorkspaceVisibility::ImplicitAns
+        } else {
+            self.current_scope().workspace_visibility.clone()
+        };
         self.current_scope_mut()
             .bindings
             .insert(name.to_string(), id);
         self.assembly.bindings.push(HirBinding {
             id,
-            owner: BindingOwner::Function(owner),
+            owner,
             name: BindingName(name.to_string()),
             role,
             storage,
@@ -675,7 +795,7 @@ impl LoweringCtx {
         self.hir_index.bindings.push(BindingResolution {
             name: BindingName(name.to_string()),
             binding: id,
-            owner: BindingOwner::Function(owner),
+            owner,
             span,
         });
         id
@@ -721,16 +841,19 @@ impl LoweringCtx {
         self.current_scope_mut().external_bindings_visible = true;
     }
 
-    fn stmt_expr_call_loads_external_bindings(&self, expr: &AstExpr) -> Result<bool, HirError> {
+    fn stmt_expr_call_exposes_external_bindings(
+        &self,
+        expr: &AstExpr,
+    ) -> Result<Option<runmat_builtins::BuiltinWorkspaceEffect>, HirError> {
         if self.current_scope().external_bindings_visible {
-            return Ok(false);
+            return Ok(None);
         }
         let (call_name, lexical_bindings_apply, span) = match expr {
             AstExpr::Ident(name, span) | AstExpr::FuncCall(name, _, span) => {
                 (name.as_str(), true, *span)
             }
             AstExpr::CommandCall(name, _, span) => (name.as_str(), false, *span),
-            _ => return Ok(false),
+            _ => return Ok(None),
         };
 
         let Some(semantics) = runmat_builtins::builtin_catalog_entry_by_name(call_name)
@@ -741,23 +864,43 @@ impl LoweringCtx {
             })
             .or_else(|| runmat_builtins::builtin_semantics_for_name(call_name))
         else {
-            return Ok(false);
+            return Ok(None);
         };
         if !matches!(
             semantics.workspace_effect,
-            Some(runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings)
+            Some(
+                runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings
+                    | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
+            )
         ) {
-            return Ok(false);
+            return Ok(None);
         }
 
         Ok(self
             .plain_call_builtin_workspace_effect(call_name, span, lexical_bindings_apply)?
-            .is_some_and(|effect| {
+            .filter(|effect| {
                 matches!(
                     effect,
                     runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings
+                        | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
                 )
             }))
+    }
+
+    fn lower_statement_value_expr(
+        &mut self,
+        expr: &AstExpr,
+        requested_outputs: RequestedOutputCount,
+    ) -> Result<HirExpr, HirError> {
+        let exposes_current_workspace = matches!(
+            self.stmt_expr_call_exposes_external_bindings(expr)?,
+            Some(runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace)
+        );
+        let lowered = self.lower_expr_semantic_requested(expr, requested_outputs)?;
+        if exposes_current_workspace {
+            self.mark_external_bindings_visible();
+        }
+        Ok(lowered)
     }
 
     fn plain_call_builtin_workspace_effect(
@@ -793,36 +936,63 @@ impl LoweringCtx {
         Ok(None)
     }
 
-    fn requested_outputs_for_expr_stmt(&self, expr: &AstExpr) -> RequestedOutputCount {
+    fn requested_outputs_for_expr_stmt(
+        &self,
+        expr: &AstExpr,
+    ) -> Result<RequestedOutputCount, HirError> {
         let name = match expr {
             AstExpr::FuncCall(name, _, _) | AstExpr::Ident(name, _) => name,
-            _ => return RequestedOutputCount::One,
+            _ => return Ok(RequestedOutputCount::One),
         };
         if self.lookup_binding(name).is_none() {
-            if let Some(function) = self.resolve_scoped_function_name(name) {
-                if self
-                    .local_function_output_arities
-                    .get(&function)
-                    .copied()
-                    .is_some_and(FunctionOutputArity::is_declared_zero_output)
-                {
-                    return RequestedOutputCount::Zero;
-                }
-            } else if let Some(function) = self.external_function_names.get(name).copied() {
-                if self
-                    .external_function_output_arities
-                    .get(&function)
-                    .copied()
-                    .is_some_and(FunctionOutputArity::is_declared_zero_output)
-                {
-                    return RequestedOutputCount::Zero;
-                }
+            // Plain calls resolve constructors before scoped functions and builtins.
+            // A constructor's object result remains observed even when its name
+            // collides with a catalogued no-auto-output builtin.
+            if self
+                .resolve_imported_constructor_target(name, expr.span())?
+                .is_some()
+                || self.class_id_for_name(name).is_some()
+            {
+                return Ok(RequestedOutputCount::One);
             }
-            if runmat_builtins::builtin_declares_zero_outputs(name) {
-                return RequestedOutputCount::Zero;
+            if let Some(function) = self.resolve_scoped_function_name(name) {
+                return Ok(
+                    if self
+                        .local_function_output_arities
+                        .get(&function)
+                        .copied()
+                        .is_some_and(FunctionOutputArity::is_declared_zero_output)
+                    {
+                        RequestedOutputCount::Zero
+                    } else {
+                        RequestedOutputCount::One
+                    },
+                );
+            }
+            if let Some(function) = self.external_function_names.get(name).copied() {
+                return Ok(
+                    if self
+                        .external_function_output_arities
+                        .get(&function)
+                        .copied()
+                        .is_some_and(FunctionOutputArity::is_declared_zero_output)
+                    {
+                        RequestedOutputCount::Zero
+                    } else {
+                        RequestedOutputCount::One
+                    },
+                );
+            }
+            // A catalogued no-auto-output call is an unobserved statement
+            // invocation. Its own explicit console effect (if any) is still
+            // executed even when the source statement has a semicolon.
+            if runmat_builtins::builtin_declares_zero_outputs(name)
+                || runmat_builtins::suppresses_auto_output(name)
+            {
+                return Ok(RequestedOutputCount::Zero);
             }
         }
-        RequestedOutputCount::One
+        Ok(RequestedOutputCount::One)
     }
 
     fn binding_call_expr_kind(
@@ -830,6 +1000,7 @@ impl LoweringCtx {
         binding: BindingId,
         args: Vec<HirExpr>,
         requested_outputs: RequestedOutputCount,
+        indexing_context: runmat_types::ObjectIndexingContext,
         span: Span,
         force_dynamic_call_dispatch: bool,
     ) -> HirExprKind {
@@ -838,20 +1009,10 @@ impl LoweringCtx {
             kind: HirExprKind::Binding(binding),
             span,
         };
-        let needs_dynamic_call_dispatch = force_dynamic_call_dispatch
-            || requested_outputs.fixed_count() != 1
-            || args.iter().any(|arg| {
-                matches!(
-                    &arg.kind,
-                    HirExprKind::Index(_, indexing)
-                        if indexing.kind == IndexKind::Brace
-                            && matches!(
-                                indexing.result_context,
-                                IndexResultContext::FunctionArgumentExpansion
-                            )
-                )
-            });
-        if needs_dynamic_call_dispatch {
+        let needs_dynamic_call_dispatch = args.iter().any(HirExpr::expands_call_argument_sequence);
+        if force_dynamic_call_dispatch {
+            // Explicit name=value syntax selects a call, unlike ordinary
+            // parentheses whose bound receiver may be an array or callable.
             HirExprKind::Call(HirCall {
                 callee: HirCallableRef::DynamicExpr(Box::new(base)),
                 args,
@@ -860,7 +1021,7 @@ impl LoweringCtx {
                 workspace_first_name: None,
                 bare_identifier: false,
             })
-        } else {
+        } else if !needs_dynamic_call_dispatch && requested_outputs.known_count() == Some(1) {
             HirExprKind::Index(
                 Box::new(base),
                 IndexingSemantics {
@@ -869,32 +1030,57 @@ impl LoweringCtx {
                     result_context: IndexResultContext::ReadSingle,
                 },
             )
+        } else {
+            // The bound value may be an array or a callable. A requested
+            // sequence count does not establish which one it is: the shared
+            // subscript protocol selects indexing versus invocation from the
+            // actual receiver and carries the destination's output count.
+            HirExprKind::SubscriptChain(crate::HirSubscriptChain {
+                root: Box::new(base),
+                steps: vec![crate::HirSubscriptStep::Index(IndexingSemantics {
+                    kind: IndexKind::Paren,
+                    components: args
+                        .into_iter()
+                        .map(|arg| match &arg.kind {
+                            HirExprKind::Colon => IndexComponent::Colon,
+                            HirExprKind::End => IndexComponent::End {
+                                dim: None,
+                                offset: 0,
+                            },
+                            _ => IndexComponent::Expr(arg),
+                        })
+                        .collect(),
+                    result_context: IndexResultContext::ReadSingle,
+                })],
+                sequence_use: runmat_types::SequenceUse::from_requested_outputs(requested_outputs),
+                context: indexing_context,
+            })
         }
     }
 
     fn seed_existing_workspace_bindings(
         &mut self,
-        variables: &HashMap<String, usize>,
+        variables: &dyn crate::WorkspaceBindingView,
         owner: FunctionId,
     ) {
-        let mut variables = variables.iter().collect::<Vec<_>>();
-        variables.sort_by_key(|(_, slot)| **slot);
-        for (name, _) in variables {
+        variables.visit_in_slot_order(&mut |name, _| {
             if self.current_scope().bindings.contains_key(name) {
-                continue;
+                return;
             }
             let id = self.alloc_binding_id();
-            self.current_scope_mut().bindings.insert(name.clone(), id);
+            self.current_scope_mut()
+                .bindings
+                .insert(name.to_owned(), id);
             self.assembly.bindings.push(HirBinding {
                 id,
                 owner: BindingOwner::Function(owner),
-                name: BindingName(name.clone()),
-                role: BindingRole::Local,
+                name: BindingName(name.to_owned()),
+                role: BindingRole::IncomingWorkspace,
                 storage: BindingStorage::Lexical,
                 workspace_visibility: WorkspaceVisibility::TopLevel,
                 declared_span: Span { start: 0, end: 0 },
             });
-        }
+        });
     }
 
     fn binding_for_write(&mut self, name: &str, span: Span) -> BindingId {
@@ -907,7 +1093,9 @@ impl LoweringCtx {
     }
 
     fn record_capture_if_outer(&mut self, binding: BindingId) {
-        let current = self.current_scope().owner;
+        let BindingOwner::Function(current) = self.current_scope().owner else {
+            return;
+        };
         let owner = self
             .assembly
             .bindings
@@ -919,13 +1107,19 @@ impl LoweringCtx {
             });
         if let Some(owner) = owner {
             if owner != current {
-                if let Some(owner_index) = self.scopes.iter().position(|scope| scope.owner == owner)
+                if let Some(owner_index) = self
+                    .scopes
+                    .iter()
+                    .position(|scope| scope.owner == BindingOwner::Function(owner))
                 {
                     let functions = self
                         .scopes
                         .iter()
                         .skip(owner_index + 1)
-                        .map(|scope| scope.owner)
+                        .filter_map(|scope| match scope.owner {
+                            BindingOwner::Function(owner) => Some(owner),
+                            BindingOwner::Module(_) => None,
+                        })
                         .collect::<Vec<_>>();
                     for function in functions {
                         self.record_capture(function, binding, owner);
@@ -983,7 +1177,18 @@ impl LoweringCtx {
             parent,
             enclosing_class,
         } = spec;
-        self.with_private_alias_scope_for_function(name, |ctx| {
+        let active_class_method = if matches!(&kind, FunctionKind::ClassMethod { .. }) {
+            let class = enclosing_class
+                .and_then(|class| self.class_identities.get(&class))
+                .cloned()
+                .ok_or_else(|| HirError::new("class method lacks its declared class identity"))?;
+            Some((id, class))
+        } else {
+            None
+        };
+        let prior_class_method =
+            std::mem::replace(&mut self.active_class_method, active_class_method);
+        let result = self.with_private_alias_scope_for_function(name, |ctx| {
             ctx.local_function_name_scopes.push(HashMap::new());
             let result = ctx.with_scope(
                 id,
@@ -1082,7 +1287,7 @@ impl LoweringCtx {
                                     class_name = None;
                                     parser_validators.push(
                                         runmat_parser::FunctionArgValidatorDecl {
-                                            name: name.to_string(),
+                                            name: name.into(),
                                             args: Vec::new(),
                                         },
                                     );
@@ -1206,7 +1411,9 @@ impl LoweringCtx {
             );
             ctx.local_function_name_scopes.pop();
             result
-        })
+        });
+        self.active_class_method = prior_class_method;
+        result
     }
 
     fn lower_class(
@@ -1224,6 +1431,9 @@ impl LoweringCtx {
             );
         }
         let class_id = self.reserve_class_name(name);
+        let class_identity = ClassIdentity::new(name.to_string())
+            .map_err(|error| HirError::new(error.to_string()).with_span(span))?;
+        self.class_identities.insert(class_id, class_identity);
         self.assembly.modules[self.module.0].classes.push(class_id);
         let mut properties = Vec::new();
         let mut property_defaults = Vec::new();
@@ -1233,6 +1443,7 @@ impl LoweringCtx {
         let mut arguments = Vec::new();
         let mut property_names = HashSet::new();
         let mut method_names = HashSet::new();
+        let mut event_names = HashSet::new();
         let is_sealed = class_attributes
             .iter()
             .any(|attr| attr.name.eq_ignore_ascii_case("Sealed"));
@@ -1255,16 +1466,16 @@ impl LoweringCtx {
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
-                        if method_names.contains(prop_name) {
+                        if method_names.contains(prop_name) || event_names.contains(prop_name) {
                             return Err(HirError::new(format!(
-                                "Name '{prop_name}' used for both property and method in class {name}"
+                                "Name '{prop_name}' conflicts with another member in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
                         let default = property_decl
                             .default
                             .as_ref()
-                            .map(|expr| self.lower_expr_semantic(expr))
+                            .map(|expr| self.lower_class_default(expr))
                             .transpose()?;
                         let property_name = crate::MemberName(prop_name.clone());
                         if let Some(value) = default {
@@ -1349,7 +1560,10 @@ impl LoweringCtx {
                                 argument_block_kinds,
                                 body,
                                 span: *span,
-                                kind: FunctionKind::ClassMethod { is_static },
+                                kind: FunctionKind::ClassMethod {
+                                    is_static,
+                                    role: class_method_role(name, method_name, is_static),
+                                },
                                 modifiers: FunctionModifiers {
                                     isolated: *isolated,
                                     is_async: *is_async,
@@ -1364,9 +1578,11 @@ impl LoweringCtx {
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                             }
-                            if property_names.contains(method_name) {
+                            if property_names.contains(method_name)
+                                || event_names.contains(method_name)
+                            {
                                 return Err(HirError::new(format!(
-                                    "Name '{method_name}' used for both property and method in class {name}",
+                                    "Name '{method_name}' conflicts with another member in class {name}",
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                             }
@@ -1374,6 +1590,7 @@ impl LoweringCtx {
                                 function: function_id,
                                 name: crate::MethodName(method_name.clone()),
                                 is_static,
+                                role: class_method_role(name, method_name, is_static),
                                 attributes: method_attributes.clone(),
                                 declared_attributes: declared_attributes.clone(),
                                 span: *span,
@@ -1397,7 +1614,10 @@ impl LoweringCtx {
                                 argument_block_kinds: &[],
                                 body: &[],
                                 span: method_span,
-                                kind: FunctionKind::ClassMethod { is_static },
+                                kind: FunctionKind::ClassMethod {
+                                    is_static,
+                                    role: class_method_role(name, &method_name, is_static),
+                                },
                                 modifiers: FunctionModifiers::default(),
                                 parent: None,
                                 enclosing_class: Some(class_id),
@@ -1409,16 +1629,19 @@ impl LoweringCtx {
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                             }
-                            if property_names.contains(&method_name) {
+                            if property_names.contains(&method_name)
+                                || event_names.contains(&method_name)
+                            {
                                 return Err(HirError::new(format!(
-                                    "Name '{method_name}' used for both property and method in class {name}",
+                                    "Name '{method_name}' conflicts with another member in class {name}",
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                             }
                             methods.push(MethodDeclaration {
                                 function: function_id,
-                                name: crate::MethodName(method_name),
+                                name: crate::MethodName(method_name.clone()),
                                 is_static,
+                                role: class_method_role(name, &method_name, is_static),
                                 attributes: method_attributes.clone(),
                                 declared_attributes: declared_attributes.clone(),
                                 span: method_span,
@@ -1430,9 +1653,16 @@ impl LoweringCtx {
                     attributes, names, ..
                 } => {
                     let declared_attributes = semantic_attributes(attributes);
-                    let mut seen = HashSet::new();
+                    let event_attributes = event_attributes(name, attributes)?;
                     for event in names {
-                        if !seen.insert(&event.name) {
+                        if event.name == name {
+                            return Err(HirError::new(format!(
+                                "event '{}' cannot have the same name as its class",
+                                event.name
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
+                        }
+                        if !event_names.insert(event.name.clone()) {
                             return Err(HirError::new(format!(
                                 "Duplicate event '{}' in class {name}",
                                 event.name
@@ -1450,6 +1680,7 @@ impl LoweringCtx {
                         }
                         events.push(EventDeclaration {
                             name: crate::MemberName(event.name.clone()),
+                            attributes: event_attributes.clone(),
                             declared_attributes: declared_attributes.clone(),
                             span: event.span,
                         });
@@ -1540,10 +1771,18 @@ impl LoweringCtx {
             ClassKind::Value
         };
 
+        if !events.is_empty() && !matches!(kind, ClassKind::Handle) {
+            return Err(HirError::new(format!(
+                "class '{name}' must inherit from handle to declare events"
+            ))
+            .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID));
+        }
+
         Ok(HirClass {
             module: self.module,
             declaration: ClassDeclaration {
                 id: class_id,
+                source: self.assembly.modules[self.module.0].source_id,
                 name: qualified,
                 inheritance: InheritanceDeclaration {
                     declared_super_class: super_class.map(ToOwned::to_owned),
@@ -2025,11 +2264,11 @@ impl LoweringCtx {
             let Some((text, span)) = syms_argument_text(arg, allow_word_args) else {
                 continue;
             };
-            for token in runmat_types::symbolic_declaration_tokens(&text) {
+            for token in runmat_builtins::symbolic_declaration_tokens(&text) {
                 if saw_declared_symbol && is_syms_assumption_keyword(token) {
                     continue;
                 }
-                if let Ok(declaration) = runmat_types::parse_symbolic_declaration(token) {
+                if let Ok(declaration) = runmat_builtins::parse_symbolic_declaration(token) {
                     self.binding_for_write(&declaration.name, span);
                     for parameter in declaration.parameters {
                         self.binding_for_write(&parameter, span);
@@ -2053,17 +2292,50 @@ impl LoweringCtx {
                     }
                     _ => {}
                 }
-                let loads_external_bindings = self.stmt_expr_call_loads_external_bindings(expr)?;
+                let external_binding_effect =
+                    self.stmt_expr_call_exposes_external_bindings(expr)?;
+                let loads_external_bindings = matches!(
+                    external_binding_effect,
+                    Some(runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings)
+                );
                 let requested_outputs = if *suppressed || loads_external_bindings {
                     RequestedOutputCount::Zero
                 } else {
-                    self.requested_outputs_for_expr_stmt(expr)
+                    self.requested_outputs_for_expr_stmt(expr)?
                 };
-                let stmt = HirStmtKind::ExprStmt(
-                    self.lower_expr_semantic_requested(expr, requested_outputs)?,
-                    *suppressed,
-                );
-                if loads_external_bindings {
+                let lowered = self.lower_expr_semantic_requested_in_context(
+                    expr,
+                    requested_outputs,
+                    runmat_types::ObjectIndexingContext::Statement,
+                )?;
+                // Establish this scope's result binding only after resolving
+                // the expression: an initial read of ans is still undefined.
+                // Named-variable display and no-output calls never assign ans.
+                if !*suppressed
+                    && lowered.emits_statement_output()
+                    && !matches!(lowered.kind, HirExprKind::Binding(_))
+                {
+                    let binding = self.define_binding(
+                        "ans",
+                        BindingRole::ImplicitAns,
+                        BindingStorage::Lexical,
+                        span,
+                    );
+                    let BindingOwner::Function(function) = self.current_scope().owner else {
+                        return Err(HirError::new("statement result has no function owner"));
+                    };
+                    self.assembly
+                        .statement_result_bindings
+                        .insert(function, binding);
+                    self.record_mutation(
+                        HirPlace::Binding(binding),
+                        PlaceMutationKind::BindOrAssign,
+                        AssignmentCreationPolicy::CreateBinding,
+                        AssignmentShapePolicy::Exact,
+                    );
+                }
+                let stmt = HirStmtKind::ExprStmt(lowered, *suppressed);
+                if external_binding_effect.is_some() {
                     self.mark_external_bindings_visible();
                 }
                 stmt
@@ -2079,7 +2351,7 @@ impl LoweringCtx {
                 );
                 HirStmtKind::Assign(
                     place,
-                    self.lower_expr_semantic_requested(expr, RequestedOutputCount::One)?,
+                    self.lower_statement_value_expr(expr, RequestedOutputCount::One)?,
                     *suppressed,
                 )
             }
@@ -2095,12 +2367,25 @@ impl LoweringCtx {
                         creation_policy,
                         AssignmentShapePolicy::MatlabCompatible,
                     );
-                    let requested = requested_outputs_for_lvalue_assignment(lvalue, expr);
+                    if let Some(target) = sequence_target_from_place(place.clone()) {
+                        return Ok(Some(HirStmtNode {
+                            id: self.alloc_stmt_id(),
+                            kind: HirStmtKind::SequenceAssign {
+                                target,
+                                value: self.lower_statement_value_expr(
+                                    expr,
+                                    RequestedOutputCount::DestinationSequenceCardinality,
+                                )?,
+                                suppressed: *suppressed,
+                            },
+                            span,
+                        }));
+                    }
                     return Ok(Some(HirStmtNode {
                         id: self.alloc_stmt_id(),
                         kind: HirStmtKind::Assign(
                             place,
-                            self.lower_expr_semantic_requested(expr, requested)?,
+                            self.lower_statement_value_expr(expr, RequestedOutputCount::One)?,
                             *suppressed,
                         ),
                         span,
@@ -2123,20 +2408,28 @@ impl LoweringCtx {
                                     creation_policy,
                                     AssignmentShapePolicy::MatlabCompatible,
                                 );
-                                Ok(crate::OutputTarget::Place(place))
+                                Ok(sequence_target_from_place(place.clone()).map_or(
+                                    crate::OutputTarget::Place(place),
+                                    crate::OutputTarget::Sequence,
+                                ))
                             }
                         }
                     })
                     .collect::<Result<Vec<_>, HirError>>()?;
+                let has_sequence_target = lowered_targets
+                    .iter()
+                    .any(|target| matches!(target, crate::OutputTarget::Sequence(_)));
+                let requested_outputs = if has_sequence_target {
+                    RequestedOutputCount::DestinationSequenceCardinality
+                } else {
+                    RequestedOutputCount::Exactly(lowered_targets.len())
+                };
                 HirStmtKind::MultiAssign(
                     crate::OutputTargetList {
-                        requested_outputs: RequestedOutputCount::Exactly(lowered_targets.len()),
+                        requested_outputs,
                         targets: lowered_targets,
                     },
-                    self.lower_expr_semantic_requested(
-                        expr,
-                        RequestedOutputCount::Exactly(targets.len()),
-                    )?,
+                    self.lower_statement_value_expr(expr, requested_outputs)?,
                     *suppressed,
                 )
             }
@@ -2303,10 +2596,7 @@ impl LoweringCtx {
                 );
                 HirStmtKind::Assign(
                     place,
-                    self.lower_expr_semantic_requested(
-                        expr,
-                        requested_outputs_for_lvalue_assignment(lvalue, expr),
-                    )?,
+                    self.lower_statement_value_expr(expr, RequestedOutputCount::One)?,
                     *suppressed,
                 )
             }
@@ -2399,18 +2689,20 @@ impl LoweringCtx {
             }
             AstExpr::Member(base, name, _) => Ok(HirExpr {
                 id: self.alloc_expr_id(),
-                kind: HirExprKind::Member(
-                    Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
-                    crate::MemberName(name.clone()),
-                ),
+                kind: HirExprKind::Member {
+                    base: Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
+                    member: crate::MemberName(name.clone()),
+                    sequence_use: runmat_types::SequenceUse::RequireSingle,
+                },
                 span: expr.span(),
             }),
             AstExpr::MemberDynamic(base, name, _) => Ok(HirExpr {
                 id: self.alloc_expr_id(),
-                kind: HirExprKind::MemberDynamic(
-                    Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
-                    Box::new(self.lower_expr_semantic(name)?),
-                ),
+                kind: HirExprKind::MemberDynamic {
+                    base: Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
+                    member: Box::new(self.lower_expr_semantic(name)?),
+                    sequence_use: runmat_types::SequenceUse::RequireSingle,
+                },
                 span: expr.span(),
             }),
             AstExpr::Index(base, indices, _) => Ok(HirExpr {
@@ -2457,9 +2749,45 @@ impl LoweringCtx {
         expr: &AstExpr,
         requested_outputs: RequestedOutputCount,
     ) -> Result<HirExpr, HirError> {
+        self.lower_expr_semantic_requested_in_context(
+            expr,
+            requested_outputs,
+            runmat_types::ObjectIndexingContext::Expression,
+        )
+    }
+
+    fn lower_expr_semantic_requested_in_context(
+        &mut self,
+        expr: &AstExpr,
+        requested_outputs: RequestedOutputCount,
+        indexing_context: runmat_types::ObjectIndexingContext,
+    ) -> Result<HirExpr, HirError> {
+        if let AstExpr::Member(base, name, _) = expr {
+            if let Some(call) =
+                self.lower_external_static_method(base, name, &[], requested_outputs, expr.span())?
+            {
+                return Ok(call);
+            }
+        }
+        if let Some(chain) =
+            self.lower_subscript_chain(expr, requested_outputs, indexing_context)?
+        {
+            return Ok(chain);
+        }
         let span = expr.span();
         let kind = match expr {
             AstExpr::Number(value, _) => HirExprKind::Number(value.clone()),
+            AstExpr::ImaginaryNumber(value, _) => {
+                let coefficient = value
+                    .strip_suffix(&['i', 'I', 'j', 'J'][..])
+                    .filter(|coefficient| !coefficient.is_empty())
+                    .ok_or_else(|| {
+                        HirError::new("invalid imaginary numeric literal")
+                            .with_span(span)
+                            .with_identifier("RunMat:ImaginaryLiteralInvalid")
+                    })?;
+                HirExprKind::ImaginaryNumber(coefficient.to_owned())
+            }
             AstExpr::IntegerLiteral(value, _) => HirExprKind::IntegerLiteral(value.clone()),
             AstExpr::String(value, _) => HirExprKind::String(StringLiteral(value.clone())),
             AstExpr::NameValueArg(_, _, _) => {
@@ -2488,8 +2816,12 @@ impl LoweringCtx {
                             property: MemberName(name.clone()),
                         }
                     } else {
-                        let class_ref = self.classref_expr(&class_name, span)?;
-                        HirExprKind::Member(Box::new(class_ref), MemberName(name.clone()))
+                        let class_ref = self.classref_expr(class_name.display_name(), span)?;
+                        HirExprKind::Member {
+                            base: Box::new(class_ref),
+                            member: MemberName(name.clone()),
+                            sequence_use: runmat_types::SequenceUse::RequireSingle,
+                        }
                     }
                 } else if is_builtin(name)
                     || self.resolve_scoped_function_name(name).is_some()
@@ -2512,6 +2844,7 @@ impl LoweringCtx {
                 } else {
                     return Err(HirError::new(format!("undefined variable '{name}'"))
                         .with_span(span)
+                        .with_kind(HirErrorKind::UndefinedVariable)
                         .with_identifier(IDENT_UNDEFINED_VARIABLE));
                 }
             }
@@ -2566,6 +2899,7 @@ impl LoweringCtx {
                         binding,
                         args,
                         requested_outputs,
+                        indexing_context,
                         span,
                         has_name_value_args,
                     )
@@ -2574,6 +2908,17 @@ impl LoweringCtx {
                         self.call_for_name(name, args, CallSyntax::Plain, requested_outputs, span)?;
                     if self.current_scope().external_bindings_visible {
                         call.workspace_first_name = Some(SymbolName(name.clone()));
+                    }
+                    // The typed call has now been resolved after its arguments.
+                    // A nested current-workspace eval/run can expose a name to
+                    // later operands or statements just as a top-level call can;
+                    // shadowed/imported calls and evalin on another workspace
+                    // must not grant that visibility.
+                    if self
+                        .stmt_expr_call_exposes_external_bindings(expr)?
+                        .is_some()
+                    {
+                        self.mark_external_bindings_visible();
                     }
                     HirExprKind::Call(call)
                 }
@@ -2587,7 +2932,7 @@ impl LoweringCtx {
                 let lowered_args = self.lower_call_arguments(args)?;
                 HirExprKind::Call(HirCall {
                     callee: HirCallableRef::SuperConstructor {
-                        current_class: SymbolName(current_class.clone()),
+                        current_class: self.bound_super_caller(current_class, span)?,
                         super_class: qualified_name(
                             &super_class
                                 .split('.')
@@ -2612,7 +2957,7 @@ impl LoweringCtx {
                 let lowered_args = self.lower_call_arguments(args)?;
                 HirExprKind::Call(HirCall {
                     callee: HirCallableRef::SuperMethod {
-                        current_class: SymbolName(current_class.clone()),
+                        current_class: self.bound_super_caller(current_class, span)?,
                         super_class: qualified_name(
                             &super_class
                                 .split('.')
@@ -2650,6 +2995,7 @@ impl LoweringCtx {
                         ),
                         target: target.clone(),
                         span,
+                        source: Some(self.assembly.modules[self.module.0].source_id),
                     });
                 HirExprKind::FunctionHandle(target)
             }
@@ -2672,27 +3018,56 @@ impl LoweringCtx {
                                 )
                             })
                             .collect::<Vec<_>>();
+                        // `$` is not a source identifier character, so a
+                        // parameter or captured lexical binding cannot shadow
+                        // either compiler-owned result slot.
+                        let output_name = format!("__runmat$anon_outputs_{}", function_id.0);
+                        let nargout_name = format!("__runmat$anon_nargout_{}", function_id.0);
                         let output_id = ctx.define_binding(
-                            "__anon_out",
+                            &output_name,
                             BindingRole::Output,
                             BindingStorage::Lexical,
                             *span,
                         );
-                        let body_expr = ctx.lower_expr_semantic(body)?;
-                        let stmt = HirStmtNode {
-                            id: ctx.alloc_stmt_id(),
-                            kind: HirStmtKind::Assign(
-                                HirPlace::Binding(output_id),
-                                body_expr,
-                                true,
-                            ),
-                            span: *span,
-                        };
+                        let nargout_id = ctx.define_binding(
+                            &nargout_name,
+                            BindingRole::Local,
+                            BindingStorage::Lexical,
+                            *span,
+                        );
+                        // The existing typed varargout destination determines
+                        // the callback's requested count before its body call.
+                        // It also publishes each result through the same
+                        // prepared sequence and rooted function ABI as named
+                        // `[varargout{1:nargout}] = ...` forwarding.
+                        let body_span = body.span();
+                        let destination = AstStmt::MultiAssign(
+                            vec![runmat_parser::MultiAssignTarget::LValue(
+                                runmat_parser::LValue::IndexCell(
+                                    Box::new(AstExpr::Ident(output_name, body_span)),
+                                    vec![AstExpr::Range(
+                                        Box::new(AstExpr::Number("1".into(), body_span)),
+                                        None,
+                                        Box::new(AstExpr::Ident(nargout_name, body_span)),
+                                        body_span,
+                                    )],
+                                ),
+                            )],
+                            *body.clone(),
+                            true,
+                            body_span,
+                        );
+                        let stmt = ctx.lower_stmt_hir(&destination)?.ok_or_else(|| {
+                            HirError::new("anonymous result forwarding produced no statement")
+                        })?;
                         let locals = ctx.binding_ids_for_owner(function_id);
                         Ok(HirFunction {
                             id: function_id,
                             module: ctx.module,
-                            parent: Some(ctx.scopes[ctx.scopes.len() - 2].owner),
+                            parent: match ctx.scopes[ctx.scopes.len() - 2].owner {
+                                BindingOwner::Function(parent) => Some(parent),
+                                BindingOwner::Module(_) => None,
+                            },
                             enclosing_class: None,
                             name: FunctionName(format!("anonymous#{}", function_id.0)),
                             kind: FunctionKind::Anonymous,
@@ -2702,9 +3077,9 @@ impl LoweringCtx {
                                 fixed_inputs: param_ids,
                                 varargin: None,
                                 fixed_outputs: vec![output_id],
-                                varargout: None,
+                                varargout: Some(output_id),
                                 implicit_nargin: None,
-                                implicit_nargout: None,
+                                implicit_nargout: Some(nargout_id),
                             },
                             argument_validations: vec![],
                             locals,
@@ -2728,30 +3103,24 @@ impl LoweringCtx {
                 binary_op(*op),
                 Box::new(self.lower_expr_semantic(right)?),
             ),
-            AstExpr::Tensor(rows, _) => {
-                self.validate_rectangular_aggregate("tensor", rows)?;
-                HirExprKind::Tensor(
-                    rows.iter()
-                        .map(|row| {
-                            row.iter()
-                                .map(|expr| self.lower_expr_semantic(expr))
-                                .collect()
-                        })
-                        .collect::<Result<_, _>>()?,
-                )
-            }
-            AstExpr::Cell(rows, _) => {
-                self.validate_rectangular_aggregate("cell", rows)?;
-                HirExprKind::Cell(
-                    rows.iter()
-                        .map(|row| {
-                            row.iter()
-                                .map(|expr| self.lower_expr_semantic(expr))
-                                .collect()
-                        })
-                        .collect::<Result<_, _>>()?,
-                )
-            }
+            AstExpr::Tensor(rows, _) => HirExprKind::Tensor(
+                rows.iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|expr| self.lower_aggregate_element(expr))
+                            .collect()
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
+            AstExpr::Cell(rows, _) => HirExprKind::Cell(
+                rows.iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|expr| self.lower_aggregate_element(expr))
+                            .collect()
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
             AstExpr::StructLiteral(fields, _) => HirExprKind::StructLiteral(
                 fields
                     .iter()
@@ -2780,10 +3149,20 @@ impl LoweringCtx {
                     })
                     .collect::<Result<_, HirError>>()?,
             },
-            AstExpr::Index(base, indices, _) => HirExprKind::Index(
-                Box::new(self.lower_expr_semantic(base)?),
-                self.lower_indexing(indices, IndexKind::Paren)?,
-            ),
+            AstExpr::Index(base, indices, _) => {
+                let root = Box::new(self.lower_expr_semantic(base)?);
+                let indexing = self.lower_indexing(indices, IndexKind::Paren)?;
+                if indexing.components.iter().any(|component| matches!(component, IndexComponent::Expr(argument) if argument.expands_call_argument_sequence())) {
+                    HirExprKind::SubscriptChain(crate::HirSubscriptChain {
+                        root,
+                        steps: vec![crate::HirSubscriptStep::Index(indexing)],
+                        sequence_use: runmat_types::SequenceUse::from_requested_outputs(requested_outputs),
+                        context: indexing_context,
+                    })
+                } else {
+                    HirExprKind::Index(root, indexing)
+                }
+            }
             AstExpr::IndexCell(base, indices, _) => HirExprKind::Index(
                 Box::new(self.lower_expr_semantic(base)?),
                 self.lower_indexing_with_context(
@@ -2827,14 +3206,26 @@ impl LoweringCtx {
                 } else {
                     self.lower_expr_semantic(base)?
                 };
-                HirExprKind::Member(Box::new(lowered_base), crate::MemberName(name.clone()))
+                HirExprKind::Member {
+                    base: Box::new(lowered_base),
+                    member: crate::MemberName(name.clone()),
+                    sequence_use: runmat_types::SequenceUse::from_requested_outputs(
+                        requested_outputs,
+                    ),
+                }
             }
-            AstExpr::MemberDynamic(base, name, _) => HirExprKind::MemberDynamic(
-                Box::new(self.lower_expr_semantic(base)?),
-                Box::new(self.lower_expr_semantic(name)?),
-            ),
+            AstExpr::MemberDynamic(base, name, _) => HirExprKind::MemberDynamic {
+                base: Box::new(self.lower_expr_semantic(base)?),
+                member: Box::new(self.lower_expr_semantic(name)?),
+                sequence_use: runmat_types::SequenceUse::from_requested_outputs(requested_outputs),
+            },
             AstExpr::DottedInvoke(base, name, args, _)
             | AstExpr::MethodCall(base, name, args, _) => {
+                if let Some(call) =
+                    self.lower_external_static_method(base, name, args, requested_outputs, span)?
+                {
+                    return Ok(call);
+                }
                 if let AstExpr::MetaClass(class_name, _) = &**base {
                     let mut call_args = vec![self.classref_expr(class_name, base.span())?];
                     call_args.extend(self.lower_call_arguments(args)?);
@@ -2851,47 +3242,6 @@ impl LoweringCtx {
                     });
                 }
                 if let AstExpr::Ident(class_name, _) = &**base {
-                    if let Some(method) =
-                        self.external_class_declaration(class_name)
-                            .and_then(|declaration| {
-                                declaration
-                                    .methods
-                                    .into_iter()
-                                    .find(|method| method.name.0 == *name)
-                            })
-                    {
-                        if !method.is_static || method.attributes.access != MemberAccess::Public {
-                            return Err(HirError::new(format!(
-                                "method {class_name}.{name} is not accessible as a public static method"
-                            ))
-                            .with_span(span));
-                        }
-                        let mut call_args = self.lower_call_arguments(args)?;
-                        if let Some(class_argument) = method.implicit_class_argument {
-                            call_args.push(HirExpr {
-                                id: self.alloc_expr_id(),
-                                kind: HirExprKind::String(StringLiteral(class_argument)),
-                                span: base.span(),
-                            });
-                        }
-                        let Some(function_name) = method.callable.display_name() else {
-                            return Err(HirError::new(format!(
-                                "method {class_name}.{name} has no callable name"
-                            ))
-                            .with_span(span));
-                        };
-                        return Ok(HirExpr {
-                            id: self.alloc_expr_id(),
-                            kind: HirExprKind::Call(self.call_for_name(
-                                &function_name,
-                                call_args,
-                                CallSyntax::Plain,
-                                requested_outputs,
-                                span,
-                            )?),
-                            span,
-                        });
-                    }
                     if self.lookup_binding(class_name).is_none()
                         && (self.class_id_for_unqualified_name(class_name).is_some()
                             || self
@@ -2920,7 +3270,7 @@ impl LoweringCtx {
                         });
                     }
                     let qualified_name = format!("{class_name}.{name}");
-                    if is_builtin(&qualified_name) {
+                    if self.lookup_binding(class_name).is_none() && is_builtin(&qualified_name) {
                         let call_args =
                             self.lower_call_arguments_for_name(&qualified_name, args)?;
                         return Ok(HirExpr {
@@ -2992,7 +3342,23 @@ impl LoweringCtx {
         indices: &[AstExpr],
         kind: IndexKind,
     ) -> Result<IndexingSemantics, HirError> {
-        self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
+        if kind == IndexKind::Paren {
+            self.lower_parentheses_arguments(indices)
+        } else {
+            self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
+        }
+    }
+
+    fn lower_parentheses_arguments(
+        &mut self,
+        indices: &[AstExpr],
+    ) -> Result<IndexingSemantics, HirError> {
+        self.lower_indexing_with_argument_policy(
+            indices,
+            IndexKind::Paren,
+            IndexResultContext::ReadSingle,
+            true,
+        )
     }
 
     fn lower_call_arguments_for_name(
@@ -3061,7 +3427,34 @@ impl LoweringCtx {
                 span: arg.span(),
             });
         }
-        self.lower_expr_semantic_requested(arg, requested_outputs)
+        let mut lowered = self.lower_expr_semantic_requested(arg, requested_outputs)?;
+        match &mut lowered.kind {
+            HirExprKind::Member { sequence_use, .. }
+            | HirExprKind::MemberDynamic { sequence_use, .. } => {
+                *sequence_use = runmat_types::SequenceUse::ExpandAll;
+            }
+            HirExprKind::SubscriptChain(chain) if chain.terminal_expands_sequence() => {
+                chain.sequence_use = runmat_types::SequenceUse::ExpandAll;
+            }
+            _ => {}
+        }
+        Ok(lowered)
+    }
+
+    fn lower_aggregate_element(&mut self, expression: &AstExpr) -> Result<HirExpr, HirError> {
+        let mut lowered =
+            self.lower_expr_semantic_requested(expression, RequestedOutputCount::One)?;
+        match &mut lowered.kind {
+            HirExprKind::Member { sequence_use, .. }
+            | HirExprKind::MemberDynamic { sequence_use, .. } => {
+                *sequence_use = runmat_types::SequenceUse::ExpandAll;
+            }
+            HirExprKind::SubscriptChain(chain) if chain.terminal_expands_sequence() => {
+                chain.sequence_use = runmat_types::SequenceUse::ExpandAll;
+            }
+            _ => {}
+        }
+        Ok(lowered)
     }
 
     fn lower_indexing_with_context(
@@ -3069,6 +3462,21 @@ impl LoweringCtx {
         indices: &[AstExpr],
         kind: IndexKind,
         result_context: IndexResultContext,
+    ) -> Result<IndexingSemantics, HirError> {
+        self.lower_indexing_with_argument_policy(
+            indices,
+            kind,
+            result_context,
+            kind == IndexKind::Paren,
+        )
+    }
+
+    fn lower_indexing_with_argument_policy(
+        &mut self,
+        indices: &[AstExpr],
+        kind: IndexKind,
+        result_context: IndexResultContext,
+        expand_arguments: bool,
     ) -> Result<IndexingSemantics, HirError> {
         Ok(IndexingSemantics {
             kind,
@@ -3081,7 +3489,11 @@ impl LoweringCtx {
                             if let Some(offset) = ast_end_relative_offset(expr) {
                                 IndexComponent::End { dim: None, offset }
                             } else {
-                                IndexComponent::Expr(self.lower_expr_semantic(expr)?)
+                                IndexComponent::Expr(if expand_arguments {
+                                    self.lower_call_argument(expr, RequestedOutputCount::One)?
+                                } else {
+                                    self.lower_expr_semantic(expr)?
+                                })
                             }
                         }
                     })
@@ -3158,7 +3570,7 @@ impl LoweringCtx {
             (
                 HirCallableRef::ExternalFunction {
                     function: *function,
-                    display_name: name.to_string(),
+                    display_name: name.into(),
                 },
                 CallKind::DirectFunction(*function),
             )
@@ -3168,7 +3580,8 @@ impl LoweringCtx {
                 CallKind::Dynamic,
             )
         } else if is_builtin(name) {
-            let builtin = BuiltinId(name.to_string());
+            let builtin = runmat_builtins::builtin_id_by_name(name)
+                .unwrap_or_else(|| BuiltinId(name.to_string()));
             (
                 HirCallableRef::Builtin(builtin.clone()),
                 CallKind::Builtin(builtin),
@@ -3197,6 +3610,7 @@ impl LoweringCtx {
             syntax: syntax.clone(),
             requested_outputs,
             span,
+            source: Some(self.assembly.modules[self.module.0].source_id),
         });
         Ok(HirCall {
             callee,
@@ -3373,13 +3787,15 @@ impl LoweringCtx {
         &self,
         name: &str,
         span: Span,
-    ) -> Result<Option<String>, HirError> {
+    ) -> Result<Option<ClassIdentity>, HirError> {
         let imports = &self.assembly.modules[self.module.0].imports;
-        let specific_candidates: Vec<String> = imports
+        let specific_candidates: Vec<ClassIdentity> = imports
             .iter()
             .filter(|import| import.wildcard)
-            .map(|import| Self::qualified_name_string(&import.path))
-            .filter(|qualified_class| self.class_has_public_static_property(qualified_class, name))
+            .filter_map(|import| ClassIdentity::new(Self::qualified_name_string(&import.path)).ok())
+            .filter(|qualified_class| {
+                self.class_has_public_static_property(qualified_class.display_name(), name)
+            })
             .collect();
         if specific_candidates.len() == 1 {
             return Ok(specific_candidates.first().cloned());
@@ -3405,13 +3821,13 @@ impl LoweringCtx {
         if let Some(function) = self.external_function_names.get(name) {
             return Ok(crate::FunctionHandleTarget::ExternalFunction {
                 function: *function,
-                display_name: name.to_string(),
+                display_name: name.into(),
             });
         }
         if is_builtin(name) {
-            return Ok(crate::FunctionHandleTarget::Builtin(BuiltinId(
-                name.to_string(),
-            )));
+            let builtin = runmat_builtins::builtin_id_by_name(name)
+                .unwrap_or_else(|| BuiltinId(name.to_string()));
+            return Ok(crate::FunctionHandleTarget::Builtin(builtin));
         }
         if self.known_project_symbols.contains(name) {
             return Ok(crate::FunctionHandleTarget::DefPath(
@@ -3578,19 +3994,6 @@ fn def_path_for_import_path(path: &QualifiedName) -> DefPath {
     }
 }
 
-impl FunctionAbi {
-    fn empty() -> Self {
-        Self {
-            fixed_inputs: vec![],
-            varargin: None,
-            fixed_outputs: vec![],
-            varargout: None,
-            implicit_nargin: None,
-            implicit_nargout: None,
-        }
-    }
-}
-
 fn qualified_name(parts: &[String]) -> QualifiedName {
     QualifiedName(parts.iter().cloned().map(SymbolName).collect())
 }
@@ -3600,6 +4003,7 @@ fn command_argument(expr: &AstExpr) -> CommandArgument {
         AstExpr::Ident(word, _) | AstExpr::Number(word, _) => {
             CommandArgument::Word(SymbolName(word.clone()))
         }
+        AstExpr::ImaginaryNumber(value, _) => CommandArgument::Word(SymbolName(value.clone())),
         AstExpr::IntegerLiteral(value, _) => {
             CommandArgument::Word(SymbolName(value.text().to_string()))
         }
@@ -3652,97 +4056,16 @@ fn lvalue_supports_deletion(lvalue: &runmat_parser::LValue) -> bool {
     matches!(lvalue, runmat_parser::LValue::Index(_, _))
 }
 
-fn requested_outputs_for_lvalue_assignment(
-    lvalue: &runmat_parser::LValue,
-    expr: &AstExpr,
-) -> RequestedOutputCount {
-    if !matches!(expr, AstExpr::FuncCall(_, _, _) | AstExpr::Ident(_, _)) {
-        return RequestedOutputCount::One;
-    }
-    if lvalue_requires_current_nargout(lvalue) {
-        return RequestedOutputCount::CurrentFunctionNargout;
-    }
-    static_lvalue_assignment_count(lvalue)
-        .filter(|count| *count > 1)
-        .map(RequestedOutputCount::Exactly)
-        .unwrap_or(RequestedOutputCount::One)
-}
-
-fn lvalue_requires_current_nargout(lvalue: &runmat_parser::LValue) -> bool {
-    use runmat_parser::LValue;
-    let indices = match lvalue {
-        LValue::IndexCell(_, indices) => indices,
-        _ => return false,
-    };
-    indices.iter().any(expr_references_nargout)
-}
-
-fn expr_references_nargout(expr: &AstExpr) -> bool {
-    match expr {
-        AstExpr::Ident(name, _) => name == NARGOUT_BUILTIN_NAME,
-        AstExpr::Range(start, step, end, _) => {
-            expr_references_nargout(start)
-                || step.as_deref().is_some_and(expr_references_nargout)
-                || expr_references_nargout(end)
+fn sequence_target_from_place(place: HirPlace) -> Option<crate::HirSequenceTarget> {
+    match place {
+        HirPlace::Member(base, member) => Some(crate::HirSequenceTarget::Member { base, member }),
+        HirPlace::MemberDynamic(base, member) => {
+            Some(crate::HirSequenceTarget::DynamicMember { base, member })
         }
-        AstExpr::Binary(left, _, right, _) => {
-            expr_references_nargout(left) || expr_references_nargout(right)
+        HirPlace::IndexCell(base, indexing) => {
+            Some(crate::HirSequenceTarget::CellContents { base, indexing })
         }
-        AstExpr::Unary(_, inner, _) => expr_references_nargout(inner),
-        AstExpr::Tensor(rows, _) | AstExpr::Cell(rows, _) => rows
-            .iter()
-            .flat_map(|row| row.iter())
-            .any(expr_references_nargout),
-        AstExpr::Index(base, indices, _) | AstExpr::IndexCell(base, indices, _) => {
-            expr_references_nargout(base) || indices.iter().any(expr_references_nargout)
-        }
-        AstExpr::FuncCall(_, args, _)
-        | AstExpr::MethodCall(_, _, args, _)
-        | AstExpr::DottedInvoke(_, _, args, _) => args.iter().any(expr_references_nargout),
-        AstExpr::Member(base, _, _) => expr_references_nargout(base),
-        AstExpr::MemberDynamic(base, name, _) => {
-            expr_references_nargout(base) || expr_references_nargout(name)
-        }
-        AstExpr::AnonFunc { body, .. } => expr_references_nargout(body),
-        _ => false,
-    }
-}
-
-fn static_lvalue_assignment_count(lvalue: &runmat_parser::LValue) -> Option<usize> {
-    use runmat_parser::LValue;
-    match lvalue {
-        LValue::Index(_, indices) | LValue::IndexCell(_, indices) => {
-            indices.iter().try_fold(1usize, |acc, index| {
-                static_index_component_count(index).map(|count| acc.saturating_mul(count))
-            })
-        }
-        _ => None,
-    }
-}
-
-fn static_index_component_count(expr: &AstExpr) -> Option<usize> {
-    match expr {
-        AstExpr::Number(_, _)
-        | AstExpr::IntegerLiteral(_, _)
-        | AstExpr::Ident(_, _)
-        | AstExpr::EndKeyword(_) => Some(1),
-        AstExpr::Tensor(rows, _) => Some(rows.iter().map(Vec::len).sum()),
-        AstExpr::Range(start, step, end, _) => {
-            let start = static_numeric_literal(start)?;
-            let step = step
-                .as_deref()
-                .and_then(static_numeric_literal)
-                .unwrap_or_else(|| {
-                    if start <= static_numeric_literal(end).unwrap_or(start) {
-                        1.0
-                    } else {
-                        -1.0
-                    }
-                });
-            let end = static_numeric_literal(end)?;
-            static_range_count(start, step, end)
-        }
-        _ => None,
+        HirPlace::Binding(_) | HirPlace::Index(_, _) => None,
     }
 }
 
@@ -3783,16 +4106,6 @@ fn ast_integer_offset_literal(expr: &AstExpr) -> Option<isize> {
         return None;
     }
     Some(value as isize)
-}
-
-fn static_range_count(start: f64, step: f64, end: f64) -> Option<usize> {
-    if step == 0.0 || !start.is_finite() || !step.is_finite() || !end.is_finite() {
-        return None;
-    }
-    if (step > 0.0 && start > end) || (step < 0.0 && start < end) {
-        return Some(0);
-    }
-    Some(((end - start) / step).floor().max(0.0) as usize + 1)
 }
 
 fn assignment_index_context(deletion: bool) -> IndexResultContext {
@@ -3856,6 +4169,109 @@ fn semantic_attributes(attributes: &[runmat_parser::Attr]) -> Vec<crate::Semanti
             span: attribute.span,
         })
         .collect()
+}
+
+fn event_attributes(
+    class_name: &str,
+    attrs: &[runmat_parser::Attr],
+) -> Result<crate::EventAttributes, HirError> {
+    let mut result = crate::EventAttributes::default();
+    let mut seen = HashSet::new();
+    for attr in attrs {
+        let key = attr.name.to_ascii_lowercase();
+        if !seen.insert(key.clone()) {
+            return Err(HirError::new(format!(
+                "duplicate event attribute '{}' in class '{class_name}'",
+                attr.name
+            ))
+            .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID));
+        }
+        match key.as_str() {
+            "hidden" => {
+                result.is_hidden = match attr.value.as_deref().map(str::trim) {
+                    None | Some("true") => true,
+                    Some("false") => false,
+                    _ => {
+                        return Err(HirError::new(format!(
+                            "invalid Hidden value in class '{class_name}' events block"
+                        ))
+                        .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID))
+                    }
+                };
+            }
+            "listenaccess" | "notifyaccess" => {
+                let raw = attr.value.as_deref().ok_or_else(|| {
+                    HirError::new(format!(
+                        "{} requires a value in class '{class_name}' events block",
+                        attr.name
+                    ))
+                    .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID)
+                })?;
+                let access = parse_event_access_value(class_name, raw)?;
+                if key == "listenaccess" {
+                    result.listen_access = access;
+                } else {
+                    result.notify_access = access;
+                }
+            }
+            _ => {
+                return Err(HirError::new(format!(
+                    "unsupported event attribute '{}' in class '{class_name}'",
+                    attr.name
+                ))
+                .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID))
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn parse_event_access_value(class_name: &str, raw: &str) -> Result<crate::EventAccess, HirError> {
+    let invalid = || {
+        HirError::new(format!(
+            "invalid event access value '{raw}' in class '{class_name}'"
+        ))
+        .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID)
+    };
+    let trimmed = raw.trim().trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("public") {
+        return Ok(crate::EventAccess::Public);
+    }
+    if trimmed.eq_ignore_ascii_case("private") {
+        return Ok(crate::EventAccess::Private);
+    }
+    if trimmed.eq_ignore_ascii_case("protected") {
+        return Ok(crate::EventAccess::Protected);
+    }
+    let members = if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+    if members.trim().is_empty() && trimmed.starts_with('{') {
+        return Ok(crate::EventAccess::Private);
+    }
+    let mut classes = Vec::new();
+    for member in members.split(',') {
+        let name = member.trim().strip_prefix('?').ok_or_else(&invalid)?;
+        if name.is_empty()
+            || !name.split('.').all(|segment| {
+                let mut chars = segment.chars();
+                chars
+                    .next()
+                    .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                    && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+            })
+        {
+            return Err(invalid());
+        }
+        let identity = crate::ClassIdentity::new(name).map_err(|_| invalid())?;
+        if classes.contains(&identity) {
+            return Err(invalid());
+        }
+        classes.push(identity);
+    }
+    Ok(crate::EventAccess::Classes(classes))
 }
 
 fn property_attributes(

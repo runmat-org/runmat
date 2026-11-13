@@ -66,8 +66,8 @@ async fn run_tests_inner(
         match report {
             BrowserReport::Human => reporters.push(HumanReporter::default()),
             BrowserReport::Json => reporters.push(JsonReporter::default()),
-            BrowserReport::Junit => reporters.push(JunitReporter),
-            BrowserReport::Tap => reporters.push(TapReporter),
+            BrowserReport::Junit => reporters.push(JunitReporter::default()),
+            BrowserReport::Tap => reporters.push(TapReporter::default()),
         }
     }
     let mut run = coordinator

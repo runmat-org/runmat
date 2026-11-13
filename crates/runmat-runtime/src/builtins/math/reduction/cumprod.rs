@@ -1,14 +1,13 @@
 //! MATLAB-compatible `cumprod` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, ProviderNanMode, ProviderScanDirection};
+use crate::call::BuiltinArguments;
+use crate::context::RuntimeContext;
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, CumulativeKind, CumulativeMissingMode as CumprodNanMode,
+    CumulativeScanDirection as CumprodDirection, CUMPROD_DESCRIPTOR, CUMPROD_ERROR_INTERNAL,
+    CUMPROD_ERROR_INVALID_ARGUMENT, CUMPROD_ERROR_INVALID_INPUT,
+    CUMPROD_GPU_NANFLAG_EXTENSION as GPU_NANFLAG_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -20,288 +19,11 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumprod";
 
-const GPU_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cumprod-gpu-nanflag",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cumprod with an explicit missing-value flag on a GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CumprodGpuNanflagExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_NANFLAG_EXTENSION];
-
-fn cumprod_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    cumulative_numeric_type(args, ctx)
-}
-
-const CUMPROD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cumulative product result.",
-}];
-
-const CUMPROD_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar or array.",
-};
-
-const CUMPROD_PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "dim",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("[]"),
-    description: "Dimension selector (placeholder [] keeps default dimension).",
-};
-
-const CUMPROD_PARAM_DIRECTION: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "direction",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"forward\""),
-    description: "Scan direction: \"forward\" or \"reverse\".",
-};
-
-const CUMPROD_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nanflag",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"includenan\""),
-    description:
-        "Missing-value mode: \"includenan\"/\"includemissing\" or \"omitnan\"/\"omitmissing\".",
-};
-
-const CUMPROD_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [CUMPROD_PARAM_A];
-
-const CUMPROD_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [CUMPROD_PARAM_A, CUMPROD_PARAM_DIM];
-
-const CUMPROD_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] =
-    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIRECTION];
-
-const CUMPROD_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] =
-    [CUMPROD_PARAM_A, CUMPROD_PARAM_NANFLAG];
-
-const CUMPROD_INPUTS_DIM_DIRECTION: [BuiltinParamDescriptor; 3] =
-    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIM, CUMPROD_PARAM_DIRECTION];
-
-const CUMPROD_INPUTS_DIRECTION_DIM: [BuiltinParamDescriptor; 3] =
-    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIRECTION, CUMPROD_PARAM_DIM];
-
-const CUMPROD_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [CUMPROD_PARAM_A, CUMPROD_PARAM_DIM, CUMPROD_PARAM_NANFLAG];
-
-const CUMPROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] =
-    [CUMPROD_PARAM_A, CUMPROD_PARAM_NANFLAG, CUMPROD_PARAM_DIM];
-
-const CUMPROD_INPUTS_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 3] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_DIRECTION,
-    CUMPROD_PARAM_NANFLAG,
-];
-
-const CUMPROD_INPUTS_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 3] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_NANFLAG,
-    CUMPROD_PARAM_DIRECTION,
-];
-
-const CUMPROD_INPUTS_DIM_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 4] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_DIM,
-    CUMPROD_PARAM_DIRECTION,
-    CUMPROD_PARAM_NANFLAG,
-];
-
-const CUMPROD_INPUTS_DIM_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 4] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_DIM,
-    CUMPROD_PARAM_NANFLAG,
-    CUMPROD_PARAM_DIRECTION,
-];
-
-const CUMPROD_INPUTS_DIRECTION_DIM_NANFLAG: [BuiltinParamDescriptor; 4] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_DIRECTION,
-    CUMPROD_PARAM_DIM,
-    CUMPROD_PARAM_NANFLAG,
-];
-
-const CUMPROD_INPUTS_DIRECTION_NANFLAG_DIM: [BuiltinParamDescriptor; 4] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_DIRECTION,
-    CUMPROD_PARAM_NANFLAG,
-    CUMPROD_PARAM_DIM,
-];
-
-const CUMPROD_INPUTS_NANFLAG_DIM_DIRECTION: [BuiltinParamDescriptor; 4] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_NANFLAG,
-    CUMPROD_PARAM_DIM,
-    CUMPROD_PARAM_DIRECTION,
-];
-
-const CUMPROD_INPUTS_NANFLAG_DIRECTION_DIM: [BuiltinParamDescriptor; 4] = [
-    CUMPROD_PARAM_A,
-    CUMPROD_PARAM_NANFLAG,
-    CUMPROD_PARAM_DIRECTION,
-    CUMPROD_PARAM_DIM,
-];
-
-const CUMPROD_SIGNATURES: [BuiltinSignatureDescriptor; 16] = [
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A)",
-        inputs: &CUMPROD_INPUTS_CORE,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, dim)",
-        inputs: &CUMPROD_INPUTS_DIM,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, direction)",
-        inputs: &CUMPROD_INPUTS_DIRECTION,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, nanflag)",
-        inputs: &CUMPROD_INPUTS_NANFLAG,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, dim, direction)",
-        inputs: &CUMPROD_INPUTS_DIM_DIRECTION,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, direction, dim)",
-        inputs: &CUMPROD_INPUTS_DIRECTION_DIM,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, dim, nanflag)",
-        inputs: &CUMPROD_INPUTS_DIM_NANFLAG,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, nanflag, dim)",
-        inputs: &CUMPROD_INPUTS_NANFLAG_DIM,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, direction, nanflag)",
-        inputs: &CUMPROD_INPUTS_DIRECTION_NANFLAG,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, nanflag, direction)",
-        inputs: &CUMPROD_INPUTS_NANFLAG_DIRECTION,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, dim, direction, nanflag)",
-        inputs: &CUMPROD_INPUTS_DIM_DIRECTION_NANFLAG,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, dim, nanflag, direction)",
-        inputs: &CUMPROD_INPUTS_DIM_NANFLAG_DIRECTION,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, direction, dim, nanflag)",
-        inputs: &CUMPROD_INPUTS_DIRECTION_DIM_NANFLAG,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, direction, nanflag, dim)",
-        inputs: &CUMPROD_INPUTS_DIRECTION_NANFLAG_DIM,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, nanflag, dim, direction)",
-        inputs: &CUMPROD_INPUTS_NANFLAG_DIM_DIRECTION,
-        outputs: &CUMPROD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = cumprod(A, nanflag, direction, dim)",
-        inputs: &CUMPROD_INPUTS_NANFLAG_DIRECTION_DIM,
-        outputs: &CUMPROD_OUTPUT,
-    },
-];
-
-const CUMPROD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMPROD.INVALID_ARGUMENT",
-    identifier: Some("RunMat:cumprod:InvalidArgument"),
-    when: "Dimension, direction, or missing-value argument grammar is invalid.",
-    message: "cumprod: invalid argument",
-};
-
-const CUMPROD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMPROD.INVALID_INPUT",
-    identifier: Some("RunMat:cumprod:InvalidInput"),
-    when: "Input value type is unsupported for cumulative product reduction.",
-    message: "cumprod: invalid input",
-};
-
-const CUMPROD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMPROD.INTERNAL",
-    identifier: Some("RunMat:cumprod:Internal"),
-    when: "Reduction execution fails due to conversion, provider, or allocation operations.",
-    message: "cumprod: internal reduction failure",
-};
-
-const CUMPROD_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    CUMPROD_ERROR_INVALID_ARGUMENT,
-    CUMPROD_ERROR_INVALID_INPUT,
-    CUMPROD_ERROR_INTERNAL,
-];
-
-pub const CUMPROD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CUMPROD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CUMPROD_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Ordinary real arrays accept all eight integer classes; complex-integer scans remain a separately tracked conformance question.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = cumprod(A, dim, direction, nanflag)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Every prefix preserves the integer input class and shape with per-step saturating multiplication; forward/reverse and missing-value spellings share the host rule, explicit GPU nanflag use is a mode-gated extension, and provider scan order may differ.",
-    }];
-
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cumprod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -316,12 +38,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may expose device prefix-product kernels; the runtime gathers to host when hooks are absent or options are unsupported.",
+    notes: "The exact input owner may expose a class-preserving scan. Only a certified no-attempt permits admitted automatic host fallback.",
 };
-
-fn cumprod_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    cumprod_error_with_message(error.message, error)
-}
 
 fn cumprod_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -356,172 +74,100 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner currently lowers cumprod to the runtime implementation; providers can substitute specialised scan kernels.",
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CumprodDirection {
-    Forward,
-    Reverse,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CumprodNanMode {
-    Include,
-    Omit,
-}
-
 #[runtime_builtin(
     name = "cumprod",
-    category = "math/reduction",
-    summary = "Compute cumulative products.",
-    keywords = "cumprod,cumulative product,running product,reverse,omitnan,gpu",
-    accel = "reduction",
-    type_resolver(cumprod_type),
-    descriptor(crate::builtins::math::reduction::cumprod::CUMPROD_DESCRIPTOR),
-    extensions(crate::builtins::math::reduction::cumprod::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::reduction::cumprod::INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::math::reduction::cumprod"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::reduction::cumprod",
+    context = true
 )]
-async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
-        return Err(cumprod_error_with_detail(
-            &CUMPROD_ERROR_INVALID_INPUT,
-            "operations involving complex numbers with integer types are not supported",
-        ));
-    }
-    let (dim, direction, nan_mode, nanflag_explicit) = parse_arguments(&rest)?;
-    if matches!(&value, Value::GpuTensor(_)) && nanflag_explicit {
+async fn cumprod_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let _roots = super::cumulative::admission::roots(
+        runtime.as_ref(),
+        std::iter::once(&value).chain(rest.iter()),
+    )?;
+    crate::output_count::validate_fixed_outputs(
+        &CUMPROD_DESCRIPTOR,
+        &CUMPROD_ERROR_INVALID_ARGUMENT,
+        NAME,
+    )?;
+    super::cumulative::admission::input(CumulativeKind::Product, &value)?;
+    let parsed = super::cumulative::options::parse(rest.view())
+        .map_err(|e| cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_ARGUMENT, e))?;
+    if matches!(&value, Value::GpuTensor(_)) && parsed.explicit_missing {
         crate::compatibility::ensure_builtin_extension_enabled(&GPU_NANFLAG_EXTENSION, NAME)?;
     }
     match value {
-        Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode).await,
-        Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cumprod_internal_error(&e))?;
-            let target_dim = dim.unwrap_or(1);
-            let result = cumprod_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
-            Ok(complex_tensor_into_value(result))
+        Value::GpuTensor(handle) => {
+            cumprod_gpu(
+                handle,
+                parsed.dimension,
+                parsed.direction,
+                parsed.missing,
+                runtime.as_ref(),
+            )
+            .await
         }
-        Value::ComplexTensor(ct) => {
-            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&ct.shape));
-            let result = cumprod_complex_tensor(&ct, target_dim, direction, nan_mode)?;
-            Ok(complex_tensor_into_value(result))
+        other => {
+            host_value(
+                other,
+                parsed.dimension,
+                parsed.direction,
+                parsed.missing,
+                runtime.as_ref(),
+            )
+            .await
+        }
+    }
+}
+
+async fn host_value(
+    value: Value,
+    dim: Option<usize>,
+    direction: CumprodDirection,
+    nan_mode: CumprodNanMode,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<Value> {
+    super::cumulative::admission::host(CumulativeKind::Product, runtime)?;
+    match value {
+        Value::Complex(re, im) => {
+            let tensor =
+                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(cumprod_internal_error)?;
+            host_complex(&tensor, dim.unwrap_or(1), direction, nan_mode, runtime).await
+        }
+        Value::ComplexTensor(tensor) => {
+            let dimension = dim.unwrap_or_else(|| default_dimension_from_shape(tensor.shape()));
+            host_complex(&tensor, dimension, direction, nan_mode, runtime).await
         }
         other => cumprod_host(other, dim, direction, nan_mode),
     }
 }
-
-fn parse_arguments(
-    args: &[Value],
-) -> BuiltinResult<(Option<usize>, CumprodDirection, CumprodNanMode, bool)> {
-    if args.len() > 3 {
-        return Err(cumprod_error(&CUMPROD_ERROR_INVALID_ARGUMENT));
-    }
-
-    let mut dim: Option<usize> = None;
-    let mut direction = CumprodDirection::Forward;
-    let mut direction_set = false;
-    let mut nan_mode = CumprodNanMode::Include;
-    let mut nan_set = false;
-
-    for value in args {
-        match value {
-            Value::Int(_) | Value::Num(_) => {
-                if dim.is_some() {
-                    return Err(cumprod_error_with_detail(
-                        &CUMPROD_ERROR_INVALID_ARGUMENT,
-                        "dimension specified more than once",
-                    ));
-                }
-                dim = Some(tensor::parse_dimension(value, "cumprod").map_err(|err| {
-                    cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_ARGUMENT, err)
-                })?);
-            }
-            Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-                if dim.is_some() {
-                    return Err(cumprod_error_with_detail(
-                        &CUMPROD_ERROR_INVALID_ARGUMENT,
-                        "dimension specified more than once",
-                    ));
-                }
-                dim = Some(tensor::parse_dimension(value, "cumprod").map_err(|err| {
-                    cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_ARGUMENT, err)
-                })?);
-            }
-            Value::Tensor(t) if tensor::tensor_element_len(t) == 0 => {
-                // MATLAB allows [] as a placeholder for the default dimension; ignore it.
-            }
-            Value::LogicalArray(la) if la.data.is_empty() => {
-                // Treat logical [] the same way.
-            }
-            _ => {
-                if let Some(text) = tensor::value_to_string(value) {
-                    let keyword = text.trim().to_ascii_lowercase();
-                    match keyword.as_str() {
-                        "forward" => {
-                            if direction_set {
-                                return Err(cumprod_error_with_detail(
-                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
-                                    "direction specified more than once",
-                                ));
-                            }
-                            direction = CumprodDirection::Forward;
-                            direction_set = true;
-                        }
-                        "reverse" => {
-                            if direction_set {
-                                return Err(cumprod_error_with_detail(
-                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
-                                    "direction specified more than once",
-                                ));
-                            }
-                            direction = CumprodDirection::Reverse;
-                            direction_set = true;
-                        }
-                        "omitnan" | "omitmissing" => {
-                            if nan_set {
-                                return Err(cumprod_error_with_detail(
-                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
-                                    "missing-value handling specified more than once",
-                                ));
-                            }
-                            nan_mode = CumprodNanMode::Omit;
-                            nan_set = true;
-                        }
-                        "includenan" | "includemissing" => {
-                            if nan_set {
-                                return Err(cumprod_error_with_detail(
-                                    &CUMPROD_ERROR_INVALID_ARGUMENT,
-                                    "missing-value handling specified more than once",
-                                ));
-                            }
-                            nan_mode = CumprodNanMode::Include;
-                            nan_set = true;
-                        }
-                        "" => {
-                            return Err(cumprod_error_with_detail(
-                                &CUMPROD_ERROR_INVALID_ARGUMENT,
-                                "empty string option is not supported",
-                            ));
-                        }
-                        other => {
-                            return Err(cumprod_error_with_detail(
-                                &CUMPROD_ERROR_INVALID_ARGUMENT,
-                                format!("unrecognised option '{other}'"),
-                            ));
-                        }
-                    }
-                } else {
-                    return Err(cumprod_error_with_detail(
-                        &CUMPROD_ERROR_INVALID_ARGUMENT,
-                        format!("unsupported argument type {value:?}"),
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok((dim, direction, nan_mode, nan_set))
+async fn host_complex(
+    tensor: &ComplexTensor,
+    dimension: usize,
+    direction: CumprodDirection,
+    nan_mode: CumprodNanMode,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let options = super::cumulative::options::Options {
+        dimension: Some(dimension),
+        direction,
+        missing: nan_mode,
+        explicit_missing: false,
+    };
+    let result = super::cumulative::complex::cumulative(
+        tensor,
+        dimension,
+        &options,
+        CumulativeKind::Product,
+        runtime,
+    )
+    .await?;
+    Ok(complex_tensor_into_value(result))
 }
-
 fn cumprod_host(
     value: Value,
     dim: Option<usize>,
@@ -539,18 +185,18 @@ fn cumprod_host(
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Product,
             )
-            .map_err(|error| cumprod_internal_error(&error))
+            .map_err(cumprod_internal_error)
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
             crate::builtins::math::reduction::integer_native::cumulative(
                 tensor.integer_storage().expect("checked integer storage"),
-                &tensor.shape,
+                tensor.shape(),
                 target_dim,
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Product,
             )
-            .map_err(|error| cumprod_internal_error(&error))
+            .map_err(cumprod_internal_error)
         }
         other => cumprod_host_floating(other, dim, direction, nan_mode),
     }
@@ -587,99 +233,43 @@ async fn cumprod_gpu(
     dim: Option<usize>,
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
+    runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-        cumprod_error_with_detail(
-            &CUMPROD_ERROR_INVALID_INPUT,
-            "cumprod: no acceleration provider owns the input handle",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        if let Some(target) = dim {
-            if target == 0 {
-                return Err(cumprod_error_with_detail(
-                    &CUMPROD_ERROR_INVALID_ARGUMENT,
-                    "dimension must be >= 1",
-                ));
-            }
-            if target > handle.shape.len() {
-                return Ok(Value::GpuTensor(handle));
-            }
-        }
-        let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
-        if target_dim == 0 {
-            return Err(cumprod_error_with_detail(
-                &CUMPROD_ERROR_INVALID_ARGUMENT,
-                "dimension must be >= 1",
-            ));
-        }
-        let provider_direction = match direction {
-            CumprodDirection::Forward => ProviderScanDirection::Forward,
-            CumprodDirection::Reverse => ProviderScanDirection::Reverse,
-        };
-        let device_result = provider
-            .integer_cumprod_scan(&handle, target_dim - 1, provider_direction)
-            .map_err(|err| cumprod_internal_error(format!("cumprod: {err}")))?;
-        return Ok(Value::GpuTensor(device_result));
-    }
-    if matches!(direction, CumprodDirection::Reverse) && matches!(nan_mode, CumprodNanMode::Omit) {
-        let tensor = gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map_err(|err| cumprod_internal_error(err.message()))?;
-        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
-        let result = cumprod_tensor(tensor, fallback_dim, direction, nan_mode)?;
-        return Ok(tensor::tensor_into_value(result));
-    }
-
-    if let Some(target) = dim {
-        if target == 0 {
-            return Err(cumprod_error_with_detail(
-                &CUMPROD_ERROR_INVALID_ARGUMENT,
-                "dimension must be >= 1",
-            ));
-        }
-        if target > handle.shape.len() {
-            return Ok(Value::GpuTensor(handle));
-        }
-    }
-
-    let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
-    if fallback_dim == 0 {
+    let target = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
+    if target == 0 {
         return Err(cumprod_error_with_detail(
             &CUMPROD_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
+            "dimension must be positive",
         ));
     }
-
-    let zero_based_dim = fallback_dim.saturating_sub(1);
-    if zero_based_dim < handle.shape.len() {
-        let provider_direction = match direction {
-            CumprodDirection::Forward => ProviderScanDirection::Forward,
-            CumprodDirection::Reverse => ProviderScanDirection::Reverse,
-        };
-        let provider_nan_mode = match nan_mode {
-            CumprodNanMode::Include => ProviderNanMode::Include,
-            CumprodNanMode::Omit => ProviderNanMode::Omit,
-        };
-        if let Ok(device_result) = provider.cumprod_scan(
-            &handle,
-            zero_based_dim,
-            provider_direction,
-            provider_nan_mode,
-        ) {
-            return Ok(Value::GpuTensor(device_result));
-        }
+    if target > handle.shape().len() {
+        super::cumulative::provider::identity(CumulativeKind::Product, &handle, runtime)?;
+        return Ok(Value::GpuTensor(handle));
     }
-
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|err| cumprod_internal_error(err.message()))?;
-    let result = cumprod_tensor(tensor, fallback_dim, direction, nan_mode)?;
-    gpu_helpers::restore_class_preserving_value(
+    let result = super::cumulative::provider::execute(
+        CumulativeKind::Product,
         &handle,
-        tensor::tensor_into_value(result),
-        "cumprod",
+        target - 1,
+        (direction, nan_mode),
+        runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+        runtime,
     )
+    .await?;
+    if let Some(result) = result {
+        return match result {
+            super::cumulative::provider::ResultValue::Values(value) => {
+                gpu_helpers::resident_gpu_value(value)
+            }
+            other => Err(other.reject(super::cumulative::failure(
+                CumulativeKind::Product,
+                "provider returned an invalid scan result family",
+            ))),
+        };
+    }
+    let value =
+        super::cumulative::provider::fallback(CumulativeKind::Product, &handle, runtime).await?;
+    let result = host_value(value, Some(target), direction, nan_mode, runtime).await?;
+    gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
 }
 
 fn cumprod_tensor(
@@ -688,10 +278,10 @@ fn cumprod_tensor(
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
 ) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
-        .map_err(|error| cumprod_internal_error(&error))?;
+        .map_err(cumprod_internal_error)?;
     floating_cumulative_arithmetic::cumulative(
         storage,
         shape,
@@ -709,119 +299,16 @@ fn cumprod_tensor(
     .map_err(|error| cumprod_error_with_detail(&CUMPROD_ERROR_INVALID_ARGUMENT, error))
 }
 
-fn cumprod_complex_tensor(
-    tensor: &ComplexTensor,
-    dim: usize,
-    direction: CumprodDirection,
-    nan_mode: CumprodNanMode,
-) -> BuiltinResult<ComplexTensor> {
-    if dim == 0 {
-        return Err(cumprod_error_with_detail(
-            &CUMPROD_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
-        ));
-    }
-    if tensor.materialize_f64().is_empty() || dim > tensor.shape.len() {
-        return Ok(tensor.clone());
-    }
-
-    let dim_index = dim - 1;
-    let segment_len = tensor.shape[dim_index];
-    if segment_len == 0 {
-        return Ok(tensor.clone());
-    }
-
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
-    let block = stride_before * segment_len;
-    let mut output = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
-
-    for after in 0..stride_after {
-        let base = after * block;
-        for before in 0..stride_before {
-            match direction {
-                CumprodDirection::Forward => {
-                    let mut prod = (1.0f64, 0.0f64);
-                    let mut prod_is_nan = false;
-                    for k in 0..segment_len {
-                        let idx = base + before + k * stride_before;
-                        let value = tensor.materialize_f64()[idx];
-                        let value_is_nan = value.0.is_nan() || value.1.is_nan();
-                        match nan_mode {
-                            CumprodNanMode::Include => {
-                                if prod_is_nan {
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                    continue;
-                                }
-                                if value_is_nan {
-                                    prod_is_nan = true;
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                } else {
-                                    prod = complex_mul(prod, value);
-                                    output[idx] = prod;
-                                }
-                            }
-                            CumprodNanMode::Omit => {
-                                if !value_is_nan {
-                                    prod = complex_mul(prod, value);
-                                }
-                                output[idx] = prod;
-                            }
-                        }
-                    }
-                }
-                CumprodDirection::Reverse => {
-                    let mut prod = (1.0f64, 0.0f64);
-                    let mut prod_is_nan = false;
-                    for offset in (0..segment_len).rev() {
-                        let idx = base + before + offset * stride_before;
-                        let value = tensor.materialize_f64()[idx];
-                        let value_is_nan = value.0.is_nan() || value.1.is_nan();
-                        match nan_mode {
-                            CumprodNanMode::Include => {
-                                if prod_is_nan {
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                    continue;
-                                }
-                                if value_is_nan {
-                                    prod_is_nan = true;
-                                    output[idx] = (f64::NAN, f64::NAN);
-                                } else {
-                                    prod = complex_mul(prod, value);
-                                    output[idx] = prod;
-                                }
-                            }
-                            CumprodNanMode::Omit => {
-                                if !value_is_nan {
-                                    prod = complex_mul(prod, value);
-                                }
-                                output[idx] = prod;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_internal_error(&e))
-}
-
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
-    if tensor::is_scalar_complex_tensor(&tensor) && tensor.integer_storage().is_none() {
-        let value = tensor::complex_tensor_value_complex64(&tensor, 0);
-        Value::Complex(value.re, value.im)
+    if let Some([value]) = tensor.as_f64_slice() {
+        Value::Complex(value.0, value.1)
     } else {
         Value::ComplexTensor(tensor)
     }
 }
 
-fn complex_mul(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
-    (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0)
-}
-
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -835,34 +322,12 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-fn dim_product(dims: &[usize]) -> usize {
-    dims.iter()
-        .copied()
-        .fold(1usize, |acc, value| acc.saturating_mul(value))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor as BuiltinsTensor};
-
-    #[test]
-    fn cumprod_type_keeps_shape() {
-        let out = cumprod_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
-    }
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_provider;
@@ -871,7 +336,11 @@ pub(crate) mod tests {
 
     fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::cumprod_builtin(value, rest))
+        block_on(super::cumprod_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
@@ -1018,7 +487,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::Tensor(tensor), Vec::new()).expect("cumprod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 4.0, 2.0, 10.0, 3.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1033,7 +502,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::Tensor(tensor), args).expect("cumprod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 4.0, 2.0, 20.0, 6.0, 120.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1104,7 +573,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("cumprod");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[1].0 - 5.0).abs() < 1e-12);
@@ -1121,12 +590,12 @@ pub(crate) mod tests {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumprod_builtin(Value::GpuTensor(handle), Vec::new()).expect("cumprod");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), [4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 6.0, 24.0]);
         });
     }
@@ -1189,7 +658,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::Tensor(tensor), args).expect("cumprod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 4.0, 10.0, 5.0, 18.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1259,15 +728,16 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let args = vec![Value::from("omitnan")];
             {
                 let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
                 let error = block_on(super::cumprod_builtin(
+                    None,
                     Value::GpuTensor(handle.clone()),
-                    args.clone(),
+                    crate::builtins::common::test_support::builtin_arguments(args.clone()),
                 ))
                 .expect_err("MATLAB-compatible mode");
                 assert_eq!(
@@ -1277,8 +747,12 @@ pub(crate) mod tests {
             }
             {
                 let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-                block_on(super::cumprod_builtin(Value::GpuTensor(handle), args))
-                    .expect("RunMat extension mode");
+                block_on(super::cumprod_builtin(
+                    None,
+                    Value::GpuTensor(handle),
+                    crate::builtins::common::test_support::builtin_arguments(args),
+                ))
+                .expect("RunMat extension mode");
             }
         });
     }
@@ -1301,7 +775,7 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
@@ -1310,13 +784,14 @@ pub(crate) mod tests {
             Some(1),
             CumprodDirection::Forward,
             CumprodNanMode::Include,
+            None,
         ))
         .expect("cumprod gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(gathered.shape, ct.shape);
+                assert_eq!(gathered.shape(), ct.shape());
                 assert_eq!(gathered.materialize_f64(), ct.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1341,7 +816,7 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
@@ -1350,13 +825,14 @@ pub(crate) mod tests {
             Some(1),
             CumprodDirection::Reverse,
             CumprodNanMode::Omit,
+            None,
         ))
         .expect("cumprod gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(gathered.shape, ct.shape);
+                assert_eq!(gathered.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -1375,5 +851,32 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn canonical_complex_single_prefixes_do_not_widen_or_copy_input() {
+        let input =
+            ComplexTensor::from_f32(vec![(1., 1.), (2., 0.), (-1., 1.)], vec![3, 1]).unwrap();
+        let pointer = input.as_f32_slice().unwrap().as_ptr();
+        let output = block_on(super::cumprod_builtin(
+            None,
+            Value::ComplexTensor(input.clone()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
+        assert_eq!(input.as_f32_slice().unwrap().as_ptr(), pointer);
+        let Value::ComplexTensor(output) = output else {
+            panic!("complex tensor output")
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.shape(), &[3, 1]);
+        assert_eq!(
+            output.as_f32_slice().unwrap(),
+            &[
+                runmat_value::ComplexElement(1., 1.),
+                runmat_value::ComplexElement(2., 2.),
+                runmat_value::ComplexElement(-4., 0.)
+            ]
+        );
     }
 }

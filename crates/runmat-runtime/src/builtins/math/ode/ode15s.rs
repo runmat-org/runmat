@@ -1,8 +1,15 @@
 //! MATLAB-compatible `ode15s` builtin.
 
+#[cfg(test)]
+use runmat_builtins::ODE15S_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ODE15S_ERROR_INTERNAL, ODE15S_ERROR_INVALID_ARGUMENT,
+    ODE15S_ERROR_INVALID_INPUT, ODE15S_INTEGER_CALLBACK_EXTENSION as INTEGER_CALLBACK_EXTENSION,
+    ODE15S_INTEGER_OPTION_EXTENSION as INTEGER_OPTION_EXTENSION,
+    ODE15S_INTEGER_TSPAN_EXTENSION as INTEGER_TSPAN_EXTENSION,
+    ODE15S_INTEGER_Y0_EXTENSION as INTEGER_Y0_EXTENSION,
+    ODE15S_LOGICAL_NUMERIC_EXTENSION as LOGICAL_NUMERIC_EXTENSION,
+    ODE15S_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -12,152 +19,23 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::ode::common::{
-    build_ode_output, define_ode_integer_contract, ode_options_from_struct, parse_ode_input,
-    parse_options, prepare_ode_options, solve_ode, OdeMethod,
+    build_ode_output, check_cancellation, parse_ode_input, OdeCompatibilityExtensions, OdeMethod,
 };
-use crate::builtins::math::ode::type_resolvers::ode_solution_type;
+use crate::builtins::math::ode::options;
+use crate::builtins::math::ode::solver::solve_ode;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ode15s";
 
-define_ode_integer_contract!("ode15s", "Ode15s");
-
-const ODE15S_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Solution states evaluated over tspan.",
-}];
-
-const ODE15S_OUTPUT_TY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time points selected by solver.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Solution states at each returned time point.",
-    },
-];
-
-const ODE15S_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "odefun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ODE right-hand-side callback f(t,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "tspan",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time interval or monotonic time vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "y0",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Initial state vector/value.",
-    },
-];
-
-const ODE15S_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "odefun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ODE right-hand-side callback f(t,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "tspan",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time interval or monotonic time vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "y0",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Initial state vector/value.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional struct with tolerances and step controls.",
-    },
-];
-
-const ODE15S_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "y = ode15s(odefun, tspan, y0)",
-        inputs: &ODE15S_INPUTS_CORE,
-        outputs: &ODE15S_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = ode15s(odefun, tspan, y0, options)",
-        inputs: &ODE15S_INPUTS_WITH_OPTIONS,
-        outputs: &ODE15S_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[t, y] = ode15s(odefun, tspan, y0)",
-        inputs: &ODE15S_INPUTS_CORE,
-        outputs: &ODE15S_OUTPUT_TY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[t, y] = ode15s(odefun, tspan, y0, options)",
-        inputs: &ODE15S_INPUTS_WITH_OPTIONS,
-        outputs: &ODE15S_OUTPUT_TY,
-    },
-];
-
-const ODE15S_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE15S.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ode15s:InvalidArgument"),
-    when: "Input argument count/options struct grammar is invalid.",
-    message: "ode15s: invalid argument",
-};
-
-const ODE15S_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE15S.INVALID_INPUT",
-    identifier: Some("RunMat:ode15s:InvalidInput"),
-    when: "ODE input/state/callback semantics are invalid for integration.",
-    message: "ode15s: invalid input",
-};
-
-const ODE15S_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE15S.INTERNAL",
-    identifier: Some("RunMat:ode15s:Internal"),
-    when: "Internal output materialization fails.",
-    message: "ode15s: internal runtime failure",
-};
-
-const ODE15S_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ODE15S_ERROR_INVALID_ARGUMENT,
-    ODE15S_ERROR_INVALID_INPUT,
-    ODE15S_ERROR_INTERNAL,
-];
-
-pub const ODE15S_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ODE15S_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ODE15S_ERRORS,
-};
+pub(crate) const ODE_COMPATIBILITY_EXTENSIONS: OdeCompatibilityExtensions =
+    OdeCompatibilityExtensions {
+        integer_tspan: &INTEGER_TSPAN_EXTENSION,
+        integer_y0: &INTEGER_Y0_EXTENSION,
+        integer_option: &INTEGER_OPTION_EXTENSION,
+        integer_callback: &INTEGER_CALLBACK_EXTENSION,
+        logical_numeric: &LOGICAL_NUMERIC_EXTENSION,
+        resident_input: &RESIDENT_INPUT_EXTENSION,
+    };
 
 fn ode15s_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -213,41 +91,58 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "ode15s",
-    category = "math/ode",
-    summary = "Solve stiff ODE systems with adaptive implicit integration.",
-    keywords = "ode15s,ode,stiff,implicit,adaptive step",
-    accel = "sink",
-    type_resolver(ode_solution_type),
-    descriptor(crate::builtins::math::ode::ode15s::ODE15S_DESCRIPTOR),
-    extensions(crate::builtins::math::ode::ode15s::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::ode::ode15s::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::ode::ode15s"
 )]
+async fn ode15s_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    function: Value,
+    tspan: Value,
+    y0: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ode15s_in_runtime(runtime.as_ref(), function, tspan, y0, rest).await
+}
+
+#[cfg(test)]
 async fn ode15s_builtin(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    ode15s_in_runtime(None, function, tspan, y0, rest).await
+}
+
+async fn ode15s_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: Value,
+    tspan: Value,
+    y0: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    super::resource_ingress::require_unbounded(NAME, runtime)?;
+    check_cancellation(NAME, runtime)?;
     if rest.len() > 1 {
         return Err(ode15s_error_with_detail(
             &ODE15S_ERROR_INVALID_ARGUMENT,
             "too many input arguments",
         ));
     }
-    let options = parse_options(NAME, rest.first())
+    let options = options::parse(NAME, rest.into_iter().next())
         .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
-    let options = prepare_ode_options(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
+    let opts = options::admit(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
         .await
         .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
-    let opts = ode_options_from_struct(NAME, options.as_ref())
-        .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
-    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS)
+    check_cancellation(NAME, runtime)?;
+    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS, runtime)
         .await
         .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_INPUT))?;
     let result = solve_ode(NAME, OdeMethod::Ode15s, &function, &input, &opts)
         .await
         .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_INPUT))?;
+    check_cancellation(NAME, runtime)?;
     build_ode_output(NAME, result).map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INTERNAL))
 }
 
@@ -255,31 +150,41 @@ async fn ode15s_builtin(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::{StructValue, Tensor};
+    use runmat_value::Tensor;
     use std::sync::Arc;
 
     #[test]
     fn ode15s_handles_linear_stiff_decay() {
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("stiff_decay", 571)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 571);
                 let y = match &args[1] {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-15.0 * y)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -15.0 * y,
+                    ))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
+        drop(entry);
 
-        let out = block_on(ode15s_builtin(
+        let out = block_on(runtime.scope(ode15s_builtin(
             Value::FunctionHandle("stiff_decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
-        ))
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        )))
         .unwrap();
 
         match out {
@@ -296,32 +201,44 @@ mod tests {
 
     #[test]
     fn ode15s_accepts_picard_unstable_stiff_step_with_newton() {
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("very_stiff_decay", 572)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 572);
                 let y = match &args[1] {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-1000.0 * y)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -1000.0 * y,
+                    ))
+                })
             },
-        )));
-        let mut options = StructValue::new();
+        )))
+        .expect("call-port scope");
+        drop(entry);
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("RelTol", Value::Num(1.0e6));
         options.insert("AbsTol", Value::Num(1.0e6));
         options.insert("InitialStep", Value::Num(0.1));
         options.insert("MaxStep", Value::Num(0.1));
         options.insert("MaxSteps", Value::Num(2.0));
 
-        let out = block_on(ode15s_builtin(
+        let out = block_on(runtime.scope(ode15s_builtin(
             Value::FunctionHandle("very_stiff_decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 0.1], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Struct(options)],
-        ))
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+                options.finish(),
+            )]),
+        )))
         .unwrap();
 
         match out {
@@ -338,6 +255,10 @@ mod tests {
 
     #[test]
     fn ode15s_accepts_semantic_function_handle_rhs() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 57);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function, args, _requested_outputs| {
                 assert_eq!(function, 57);
@@ -345,18 +266,20 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-15.0 * y)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -15.0 * y,
+                    ))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let out = block_on(ode15s_builtin(
-            Value::BoundFunctionHandle {
-                name: "ode_stiff_decay".to_string(),
-                function: 57,
-            },
+            crate::user_functions::test_support::exact_local_value("ode_stiff_decay", binding),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
 
@@ -378,7 +301,10 @@ mod tests {
             Value::FunctionHandle("stiff_decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Num(1.0), Value::Num(2.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ]),
         ))
         .expect_err("expected too many inputs error");
         assert_eq!(err.identifier(), ODE15S_ERROR_INVALID_ARGUMENT.identifier);

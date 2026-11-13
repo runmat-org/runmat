@@ -1,17 +1,38 @@
 #[cfg(target_arch = "wasm32")]
 use anyhow::anyhow;
 use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
 use once_cell::sync::OnceCell;
+
+#[cfg(not(target_arch = "wasm32"))]
+static INSTANCE: OnceCell<&'static WgpuProvider> = OnceCell::new();
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    // The registered façade belongs to this browser worker for its lifetime.
+    static INSTANCE: std::cell::Cell<Option<&'static WgpuProvider>> = const { std::cell::Cell::new(None) };
+}
 
 mod backend;
 
 #[cfg(test)]
 pub(crate) use backend::backend_shared::host_tensor_from_value;
-pub use backend::backend_types::{WgpuProvider, WgpuProviderOptions};
+pub use backend::backend_types::{WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions};
+
+/// Read the existing registered façade without initializing a device or
+/// changing ambient provider selection.
+pub fn registered_wgpu_provider() -> Option<&'static WgpuProvider> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        INSTANCE.get().copied()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        INSTANCE.with(std::cell::Cell::get)
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register_wgpu_provider(opts: WgpuProviderOptions) -> Result<&'static WgpuProvider> {
-    static INSTANCE: OnceCell<&'static WgpuProvider> = OnceCell::new();
     let leaked: &'static WgpuProvider = *INSTANCE.get_or_try_init(move || {
         let provider = WgpuProvider::new(opts)?;
         let leaked: &'static WgpuProvider = Box::leak(Box::new(provider));
@@ -41,17 +62,20 @@ pub fn register_wgpu_provider(_opts: WgpuProviderOptions) -> Result<&'static Wgp
 pub async fn register_wgpu_provider_async(
     opts: WgpuProviderOptions,
 ) -> Result<&'static WgpuProvider> {
-    static INSTANCE: OnceCell<Box<WgpuProvider>> = OnceCell::new();
-    if INSTANCE.get().is_none() {
+    let leaked = if let Some(existing) = INSTANCE.with(std::cell::Cell::get) {
+        existing
+    } else {
         let provider = Box::new(WgpuProvider::new_async(opts).await?);
-        if INSTANCE.set(provider).is_err() {
-            log::warn!("RunMat Accelerate: WGPU provider was initialized concurrently; reusing existing instance");
+        // Another task in this worker may have initialized during the await.
+        if let Some(existing) = INSTANCE.with(std::cell::Cell::get) {
+            drop(provider);
+            existing
+        } else {
+            let retained: &'static WgpuProvider = Box::leak(provider);
+            INSTANCE.with(|cell| cell.set(Some(retained)));
+            retained
         }
-    }
-    let leaked: &'static WgpuProvider = INSTANCE
-        .get()
-        .map(|boxed| boxed.as_ref())
-        .ok_or_else(|| anyhow!("wgpu provider failed to initialize"))?;
+    };
     unsafe { runmat_accelerate_api::register_provider(leaked) };
     runmat_accelerate_api::set_thread_provider(Some(leaked));
     Ok(leaked)
@@ -84,21 +108,16 @@ mod test_session {
     use std::ops::Deref;
     use std::sync::{LazyLock, Mutex, MutexGuard};
 
-    use once_cell::sync::OnceCell;
+    use runmat_accelerate_api::ThreadProviderGuard;
 
-    use super::{WgpuProvider, WgpuProviderOptions};
+    use super::{register_wgpu_provider, WgpuProvider, WgpuProviderOptions};
 
     static TEST_PROVIDER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-    static TEST_GPU_RUNTIME: OnceCell<WgpuProvider> = OnceCell::new();
 
-    /// Exclusive access to a scoped test provider.
-    ///
-    /// Production keeps the WGPU provider alive for the runtime session. Unit
-    /// tests need independent provider state so one workload cannot contaminate
-    /// the next. The physical device remains stable across sessions because
-    /// repeatedly creating native devices can itself exhaust a backend.
+    /// Exclusive access to a scoped test provider with independent state, so
+    /// one workload cannot contaminate the next.
     pub(crate) struct WgpuTestSession {
-        provider: Option<WgpuProvider>,
+        provider: WgpuProvider,
         _guard: MutexGuard<'static, ()>,
     }
 
@@ -106,9 +125,7 @@ mod test_session {
         type Target = WgpuProvider;
 
         fn deref(&self) -> &Self::Target {
-            self.provider
-                .as_ref()
-                .expect("test provider session is active")
+            &self.provider
         }
     }
 
@@ -118,135 +135,55 @@ mod test_session {
         }
     }
 
-    impl Drop for WgpuTestSession {
-        fn drop(&mut self) {
-            if let Some(provider) = self.provider.take() {
-                let device = provider.test_device_handle();
-                drop(provider);
-                device.poll(wgpu::Maintain::Wait);
-            }
-        }
-    }
-
     pub(crate) fn register_test_wgpu_provider(
         options: WgpuProviderOptions,
     ) -> anyhow::Result<WgpuTestSession> {
         let guard = TEST_PROVIDER_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let runtime = TEST_GPU_RUNTIME.get_or_try_init(|| WgpuProvider::new(options))?;
-        let provider = runtime.new_session();
         Ok(WgpuTestSession {
-            provider: Some(provider),
+            provider: WgpuProvider::new(options)?,
+            _guard: guard,
+        })
+    }
+
+    /// Tests of registered-owner semantics share the production singleton,
+    /// exclusively with both retained and independently scoped test devices.
+    pub(crate) struct RetainedWgpuTestSession {
+        provider: &'static WgpuProvider,
+        // Restore thread selection before releasing exclusive test access.
+        _selection: ThreadProviderGuard,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl RetainedWgpuTestSession {
+        pub(crate) fn provider(&self) -> &'static WgpuProvider {
+            self.provider
+        }
+    }
+
+    pub(crate) fn register_retained_test_wgpu_provider(
+        options: WgpuProviderOptions,
+    ) -> anyhow::Result<RetainedWgpuTestSession> {
+        let guard = TEST_PROVIDER_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Registration selects its singleton on this thread, including under
+        // cfg(test). Capture the old selection first, also covering failures.
+        let selection = ThreadProviderGuard::set(None);
+        let provider = register_wgpu_provider(options)?;
+        // SAFETY: the production singleton retains this same physical owner
+        // for process lifetime. No scoped provider or borrowed façade is registered.
+        unsafe { runmat_accelerate_api::register_device_provider(provider) };
+        Ok(RetainedWgpuTestSession {
+            provider,
+            _selection: selection,
             _guard: guard,
         })
     }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) use test_session::{register_test_wgpu_provider, WgpuTestSession};
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod test_session_tests {
-    use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
-
-    use super::{register_test_wgpu_provider, WgpuProviderOptions};
-
-    #[test]
-    fn test_sessions_use_fresh_provider_state() {
-        // Use a size dedicated to this lifecycle test so unrelated tests cannot
-        // pre-populate the same physical residency key.
-        const TEST_LEN: usize = 7_919;
-        let Ok(first) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-        let handle = first
-            .zeros(&[TEST_LEN, 1])
-            .expect("allocate first session buffer through provider residency");
-        let first_buffer_ptr = first
-            .test_buffer_ptr(&handle)
-            .expect("first session owns uploaded buffer");
-        assert_eq!(first.test_buffer_count(), 1);
-        drop(handle);
-        drop(first);
-
-        let second = register_test_wgpu_provider(WgpuProviderOptions::default())
-            .expect("reopen test provider session");
-        assert_eq!(second.test_buffer_count(), 0);
-        let second_handle = second
-            .zeros(&[TEST_LEN, 1])
-            .expect("allocate second session buffer through provider residency");
-        assert_eq!(second.test_buffer_count(), 1);
-        assert_eq!(
-            second.test_buffer_ptr(&second_handle),
-            Some(first_buffer_ptr),
-            "logical sessions should reuse released physical storage"
-        );
-        drop(second_handle);
-    }
-
-    #[test]
-    fn test_sessions_reuse_upload_allocations() {
-        // Keep this key independent from other tests so the assertion verifies
-        // the upload lifecycle itself rather than incidental cache contents.
-        const TEST_LEN: usize = 7_921;
-        let data = vec![1.0; TEST_LEN];
-        let shape = [TEST_LEN, 1];
-        let Ok(first) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-        let first_handle = first
-            .upload(&HostTensorView {
-                data: &data,
-                shape: &shape,
-            })
-            .expect("upload first session tensor");
-        let first_buffer_ptr = first
-            .test_buffer_ptr(&first_handle)
-            .expect("first session owns uploaded buffer");
-        drop(first_handle);
-        drop(first);
-
-        let second = register_test_wgpu_provider(WgpuProviderOptions::default())
-            .expect("reopen test provider session");
-        let second_handle = second
-            .upload(&HostTensorView {
-                data: &data,
-                shape: &shape,
-            })
-            .expect("upload second session tensor");
-        assert_eq!(
-            second.test_buffer_ptr(&second_handle),
-            Some(first_buffer_ptr),
-            "uploads should consume storage returned by the previous logical session"
-        );
-    }
-
-    #[test]
-    fn test_session_residency_is_globally_bounded() {
-        const BASE_LEN: usize = 8_101;
-        let Ok(session) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-        let (_, max_total) = session.test_pooled_buffer_counts();
-        let mut handles = Vec::with_capacity(max_total + 8);
-        for offset in 0..(max_total + 8) {
-            handles.push(
-                session
-                    .zeros(&[BASE_LEN + offset, 1])
-                    .expect("allocate unique session buffer"),
-            );
-        }
-        drop(handles);
-        drop(session);
-
-        let next = register_test_wgpu_provider(WgpuProviderOptions::default())
-            .expect("reopen provider after returning unique allocations");
-        let (pooled, configured_max) = next.test_pooled_buffer_counts();
-        assert_eq!(configured_max, max_total);
-        assert!(
-            pooled <= configured_max,
-            "physical residency pool retained {pooled} buffers with a configured maximum of {configured_max}"
-        );
-    }
-}
+pub(crate) use test_session::{
+    register_retained_test_wgpu_provider, register_test_wgpu_provider, WgpuTestSession,
+};

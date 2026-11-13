@@ -1,0 +1,24 @@
+[package]
+name = "runmat-workspace-contracts"
+version = "0.7.1"
+edition = "2021"
+description = "Typed coherent workspace capture and conditional publication contracts"
+license-file = "../../LICENSE.md"
+
+[features]
+default = []
+ts = ["dep:ts-rs"]
+openapi = ["dep:utoipa"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+runmat-types = { workspace = true }
+serde_bytes = "0.11"
+sha2 = { workspace = true }
+uuid = { workspace = true }
+ciborium = "0.2.2"
+schemars = "0.8"
+thiserror = "2"
+ts-rs = { version = "10", optional = true }
+utoipa = { version = "4", optional = true }

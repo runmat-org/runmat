@@ -1,27 +1,31 @@
 //! MATLAB-compatible `conv2` builtin with GPU-aware semantics for RunMat.
 
+#[cfg(test)]
+#[path = "conv2/placement_tests.rs"]
+mod placement_tests;
+
 use num_complex::Complex;
 use runmat_accelerate_api::ProviderConvMode;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CONV2_ERROR_ARG_COUNT, CONV2_ERROR_BUILD_COMPLEX_OUTPUT,
+    CONV2_ERROR_BUILD_OUTPUT, CONV2_ERROR_GATHER_FAILED, CONV2_ERROR_INVALID_INPUT,
+    CONV2_ERROR_MATRIX_REQUIRED, CONV2_ERROR_SHAPE_INVALID, CONV2_ERROR_VECTOR_REQUIRED,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
+use runmat_types::ConvolutionMode as Conv2Mode;
+use runmat_value::{
+    ComplexElement, ComplexStorage, ComplexTensor, HostComplexBuffer, NumericDType, Tensor, Value,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::signal::type_resolvers::conv2_type;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::builtins::math::signal::common::SignalCooperation;
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
-const EPS: f64 = 1e-12;
+mod separable;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::conv2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,247 +55,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "conv2";
-
-const CONV2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "2-D convolution result.",
-}];
-
-const CONV2_SIG_AB_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First matrix input.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second matrix input.",
-    },
-];
-
-const CONV2_SIG_AB_SHAPE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First matrix input.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second matrix input.",
-    },
-    BuiltinParamDescriptor {
-        name: "shape",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"full\""),
-        description: "Output shape: \"full\", \"same\", or \"valid\".",
-    },
-];
-
-const CONV2_SIG_SEPARABLE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "hcol",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "hrow",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-];
-
-const CONV2_SIG_SEPARABLE_SHAPE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "hcol",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "hrow",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row vector kernel component.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "shape",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"full\""),
-        description: "Output shape: \"full\", \"same\", or \"valid\".",
-    },
-];
-
-const CONV2_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(A, B)",
-        inputs: &CONV2_SIG_AB_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(A, B, shape)",
-        inputs: &CONV2_SIG_AB_SHAPE_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(hcol, hrow, A)",
-        inputs: &CONV2_SIG_SEPARABLE_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = conv2(hcol, hrow, A, shape)",
-        inputs: &CONV2_SIG_SEPARABLE_SHAPE_INPUTS,
-        outputs: &CONV2_OUTPUT,
-    },
-];
-
-const CONV2_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.ARG_COUNT",
-    identifier: Some("RunMat:conv2:ArgCount"),
-    when: "More than four input arguments are provided.",
-    message: "conv2: expected at most four input arguments",
-};
-
-const CONV2_ERROR_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.SHAPE_INVALID",
-    identifier: Some("RunMat:conv2:ShapeInvalid"),
-    when: "Shape argument is not one of full/same/valid.",
-    message: "conv2: shape argument must be the string 'full', 'same', or 'valid'",
-};
-
-const CONV2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.INVALID_INPUT",
-    identifier: Some("RunMat:conv2:InvalidInput"),
-    when: "An operand is not numeric/logical scalar/vector/matrix compatible.",
-    message: "conv2: unsupported input type",
-};
-
-const CONV2_ERROR_VECTOR_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.VECTOR_REQUIRED",
-    identifier: Some("RunMat:conv2:VectorRequired"),
-    when: "Separable hcol/hrow inputs are not vectors.",
-    message: "conv2: vector input required",
-};
-
-const CONV2_ERROR_MATRIX_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.MATRIX_REQUIRED",
-    identifier: Some("RunMat:conv2:MatrixRequired"),
-    when: "Input matrix has non-singleton dimensions beyond 2-D.",
-    message: "conv2: input must be 2-D",
-};
-
-const CONV2_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.CONVERSION",
-    identifier: Some("RunMat:conv2:Conversion"),
-    when: "Input conversion from logical/gpu tensor into host matrix domain fails.",
-    message: "conv2: input conversion failed",
-};
-
-const CONV2_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.GATHER_FAILED",
-    identifier: Some("RunMat:conv2:GatherFailed"),
-    when: "GPU input cannot be gathered for host fallback normalization.",
-    message: "conv2: failed to gather GPU input",
-};
-
-const CONV2_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.BUILD_OUTPUT",
-    identifier: Some("RunMat:conv2:BuildOutput"),
-    when: "Output tensor allocation fails.",
-    message: "conv2: failed to build tensor",
-};
-
-const CONV2_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONV2.BUILD_COMPLEX_OUTPUT",
-    identifier: Some("RunMat:conv2:BuildComplexOutput"),
-    when: "Output complex tensor allocation fails.",
-    message: "conv2: failed to build complex tensor",
-};
-
-const CONV2_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    CONV2_ERROR_ARG_COUNT,
-    CONV2_ERROR_SHAPE_INVALID,
-    CONV2_ERROR_INVALID_INPUT,
-    CONV2_ERROR_VECTOR_REQUIRED,
-    CONV2_ERROR_MATRIX_REQUIRED,
-    CONV2_ERROR_CONVERSION,
-    CONV2_ERROR_GATHER_FAILED,
-    CONV2_ERROR_BUILD_OUTPUT,
-    CONV2_ERROR_BUILD_COMPLEX_OUTPUT,
-];
-
-pub const CONV2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CONV2_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CONV2_ERRORS,
-};
-
-const CONV2_INTEGER_AB_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight real or complex integer classes are documented and cross the floating convolution boundary before arithmetic." },
-    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Mixed integer classes are documented and converted independently to the selected floating output domain." },
-];
-const CONV2_INTEGER_SEPARABLE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "u",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The separable column kernel accepts all eight real or complex integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "v",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The separable row kernel accepts all eight real or complex integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The signal matrix accepts all eight real or complex integer classes.",
-    },
-];
-pub const CONV2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "C = conv2(integer_A, integer_B, shape?)", inputs: &CONV2_INTEGER_AB_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The output is single when any numeric input is single and double otherwise. Integer inputs never produce an integer result; resident integers gather exactly before the direct convolution boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "C = conv2(integer_u, integer_v, integer_A, shape?)", inputs: &CONV2_INTEGER_SEPARABLE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The separable form applies the same single-dominant floating output rule across all three numeric arguments and preserves documented full/same/valid shapes." },
-];
 
 fn conv2_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     conv2_error_with_message(error.message, error)
@@ -329,85 +92,358 @@ fn conv2_error_with_source(
     builder.build()
 }
 
+fn conv2_allocation_error(cause: std::collections::TryReserveError) -> RuntimeError {
+    let mut builder = build_runtime_error(CONV2_ERROR_BUILD_OUTPUT.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(cause)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = CONV2_ERROR_BUILD_OUTPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "conv2",
-    category = "math/signal",
-    summary = "Compute two-dimensional convolution.",
-    keywords = "conv2,2d convolution,image filtering,gpu",
-    accel = "custom",
-    type_resolver(conv2_type),
-    integer_capabilities(CONV2_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::signal::conv2::CONV2_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
-async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn conv2_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    a: Value,
+    b: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let mut extras = rest;
     let mode = extract_mode(&mut extras)?;
+    if extras.len() > 1 {
+        return Err(conv2_error(&CONV2_ERROR_ARG_COUNT));
+    }
+    let separable = !extras.is_empty();
+    admit_conv2_operand(&a, separable)?;
+    admit_conv2_operand(&b, separable)?;
+    if let Some(signal) = extras.first() {
+        admit_conv2_operand(signal, false)?;
+    }
+    let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    cooperation.completed(0).await?;
     let single_output =
         value_uses_single(&a) || value_uses_single(&b) || extras.iter().any(value_uses_single);
     let complex_output =
         value_is_complex(&a) || value_is_complex(&b) || extras.iter().any(value_is_complex);
-    let owner = std::iter::once(&a)
+    let resident_inputs = std::iter::once(&a)
         .chain(std::iter::once(&b))
         .chain(extras.iter())
-        .find_map(|value| match value {
+        .filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
             _ => None,
-        });
+        })
+        .collect::<Vec<_>>();
 
     match extras.len() {
         0 => {
-            if let Some(device_value) = try_conv2_gpu(&a, &b, mode, single_output)? {
+            let (device_value, mut placement) =
+                try_conv2_gpu(runtime.as_ref(), &a, &b, mode, single_output)?;
+            if let Some(device_value) = device_value {
                 return Ok(device_value);
             }
-            let left = convert_matrix(a, "conv2", "A").await?;
-            let right = convert_matrix(b, "conv2", "B").await?;
-            if mode == Conv2Mode::Full && left.cols == 1 && right.rows == 1 {
-                let result = outer_product(&left.data, &right.data, single_output);
-                let output = matrix_to_value(result, single_output, complex_output)?;
-                return restore_to_owner(output, owner.as_ref(), single_output);
+            if placement.is_none() {
+                if let Some(shape) = host_output_shape(&a, &b, None, mode) {
+                    if let Some(outputs) =
+                        super::common::convolution::placement::host_output_representations(
+                            &[shape],
+                            single_output,
+                            complex_output,
+                        )
+                    {
+                        placement = super::common::convolution::placement::select_host_variant(
+                            runtime.as_ref(),
+                            BUILTIN_NAME,
+                            "matrix.host",
+                            Some(mode),
+                            &[&a, &b],
+                            &resident_inputs,
+                            outputs,
+                            host_scratch_bound(&a, &b, None),
+                        )?;
+                    }
+                }
             }
-            let result = conv2_matrices(&left, &right, mode, single_output);
-            let output = matrix_to_value(result, single_output, complex_output)?;
-            restore_to_owner(output, owner.as_ref(), single_output)
+            let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
+            let result = async move {
+                let left = convert_matrix(a, "A", &mut cooperation).await?;
+                let right = convert_matrix(b, "B", &mut cooperation).await?;
+                if mode == Conv2Mode::Full
+                    && !left.is_empty()
+                    && !right.is_empty()
+                    && left.cols == 1
+                    && right.rows == 1
+                {
+                    let result =
+                        outer_product(&left.data, &right.data, single_output, &mut cooperation)
+                            .await?;
+                    let output =
+                        matrix_to_value(result, single_output, complex_output, &mut cooperation)
+                            .await?;
+                    return restore_to_owner(output, &resident_inputs, restore_recorder.clone());
+                }
+                let result =
+                    conv2_matrices(&left, &right, mode, single_output, &mut cooperation).await?;
+                let output =
+                    matrix_to_value(result, single_output, complex_output, &mut cooperation)
+                        .await?;
+                restore_to_owner(output, &resident_inputs, restore_recorder)
+            }
+            .await;
+            if let Some(placement) = placement {
+                placement.finish_value(&result);
+            }
+            result
         }
         1 => {
-            let signal = convert_matrix(extras.remove(0), "conv2", "A").await?;
-            let column = convert_vector(a, "conv2", "H column").await?;
-            let row = convert_vector(b, "conv2", "H row").await?;
-            let kernel = outer_product(&column, &row, single_output);
-            let result = conv2_matrices(&signal, &kernel, mode, single_output);
-            let output = matrix_to_value(result, single_output, complex_output)?;
-            restore_to_owner(output, owner.as_ref(), single_output)
+            let placement = if let Some(shape) = host_output_shape(&a, &b, extras.first(), mode) {
+                if let Some(outputs) =
+                    super::common::convolution::placement::host_output_representations(
+                        &[shape],
+                        single_output,
+                        complex_output,
+                    )
+                {
+                    super::common::convolution::placement::select_host_variant(
+                        runtime.as_ref(),
+                        BUILTIN_NAME,
+                        "separable.host",
+                        Some(mode),
+                        &[&a, &b, &extras[0]],
+                        &resident_inputs,
+                        outputs,
+                        host_scratch_bound(&a, &b, extras.first()),
+                    )?
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
+            let result = async move {
+                let signal = convert_matrix(
+                    extras.pop_front().expect("validated argument prefix"),
+                    "A",
+                    &mut cooperation,
+                )
+                .await?;
+                let column = convert_vector(a, "H column", &mut cooperation).await?;
+                let row = convert_vector(b, "H row", &mut cooperation).await?;
+                let result = separable::convolve_separable(
+                    &signal,
+                    &column,
+                    &row,
+                    mode,
+                    single_output,
+                    &mut cooperation,
+                )
+                .await?;
+                let output =
+                    matrix_to_value(result, single_output, complex_output, &mut cooperation)
+                        .await?;
+                restore_to_owner(output, &resident_inputs, restore_recorder)
+            }
+            .await;
+            if let Some(placement) = placement {
+                placement.finish_value(&result);
+            }
+            result
         }
         _ => Err(conv2_error(&CONV2_ERROR_ARG_COUNT)),
     }
 }
 
+fn host_output_shape(
+    a: &Value,
+    b: &Value,
+    signal: Option<&Value>,
+    mode: Conv2Mode,
+) -> Option<Vec<usize>> {
+    fn shape(value: &Value) -> Option<&[usize]> {
+        match value {
+            Value::Tensor(tensor) => Some(tensor.shape()),
+            Value::ComplexTensor(tensor) => Some(tensor.shape()),
+            Value::LogicalArray(array) => Some(&array.shape),
+            Value::GpuTensor(handle) => Some(handle.shape()),
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(&[1, 1]),
+            _ => None,
+        }
+    }
+    let (rows, cols, kernel_rows, kernel_cols) = if let Some(signal) = signal {
+        let (rows, cols) = conv2_dimensions(shape(signal)?)?;
+        let kernel_rows = super::common::convolution::checked_vector_elements(shape(a)?)?;
+        let kernel_cols = super::common::convolution::checked_vector_elements(shape(b)?)?;
+        (rows, cols, kernel_rows, kernel_cols)
+    } else {
+        let (rows, cols) = conv2_dimensions(shape(a)?)?;
+        let (kernel_rows, kernel_cols) = conv2_dimensions(shape(b)?)?;
+        (rows, cols, kernel_rows, kernel_cols)
+    };
+    let empty = rows == 0 || cols == 0 || kernel_rows == 0 || kernel_cols == 0;
+    let result = match mode {
+        Conv2Mode::Full if empty => (0, 0),
+        Conv2Mode::Full => (
+            rows.checked_add(kernel_rows)?.checked_sub(1)?,
+            cols.checked_add(kernel_cols)?.checked_sub(1)?,
+        ),
+        Conv2Mode::Same => (rows, cols),
+        Conv2Mode::Valid if empty => (0, 0),
+        Conv2Mode::Valid => (
+            rows.checked_sub(kernel_rows)
+                .and_then(|n| n.checked_add(1))
+                .unwrap_or(0),
+            cols.checked_sub(kernel_cols)
+                .and_then(|n| n.checked_add(1))
+                .unwrap_or(0),
+        ),
+    };
+    result.0.checked_mul(result.1)?;
+    Some(vec![result.0, result.1])
+}
+
+fn host_scratch_bound(
+    a: &Value,
+    b: &Value,
+    signal: Option<&Value>,
+) -> runmat_execution::ResourceByteBound {
+    let bound = (|| {
+        fn shape(value: &Value) -> Option<&[usize]> {
+            match value {
+                Value::Tensor(tensor) => Some(tensor.shape()),
+                Value::ComplexTensor(tensor) => Some(tensor.shape()),
+                Value::LogicalArray(array) => Some(&array.shape),
+                Value::GpuTensor(handle) => Some(handle.shape()),
+                Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
+                    Some(&[1, 1])
+                }
+                _ => None,
+            }
+        }
+        let (rows, cols, kr, kc) = if let Some(signal) = signal {
+            let (rows, cols) = conv2_dimensions(shape(signal)?)?;
+            (
+                rows,
+                cols,
+                super::common::convolution::checked_vector_elements(shape(a)?)?,
+                super::common::convolution::checked_vector_elements(shape(b)?)?,
+            )
+        } else {
+            let (rows, cols) = conv2_dimensions(shape(a)?)?;
+            let (kr, kc) = conv2_dimensions(shape(b)?)?;
+            (rows, cols, kr, kc)
+        };
+        let (rows, cols, kr, kc) = (
+            u64::try_from(rows).ok()?,
+            u64::try_from(cols).ok()?,
+            u64::try_from(kr).ok()?,
+            u64::try_from(kc).ok()?,
+        );
+        let signal_count = rows.checked_mul(cols)?;
+        let kernel_count = kr.checked_mul(kc)?;
+        let full_rows = if rows == 0 || kr == 0 {
+            0
+        } else {
+            rows.checked_add(kr)?.checked_sub(1)?
+        };
+        let full_cols = if cols == 0 || kc == 0 {
+            0
+        } else {
+            cols.checked_add(kc)?.checked_sub(1)?
+        };
+        let full = full_rows.checked_mul(full_cols)?;
+        let input_coefficients = if signal.is_some() {
+            signal_count.checked_add(kr)?.checked_add(kc)?
+        } else {
+            signal_count.checked_add(kernel_count)?
+        }
+        .checked_mul(16)?;
+        // Conservative sum of owned Matrix buffers: full result, optional
+        // sliced result, converted output, separable vertical intermediate,
+        // balanced factors, and general-kernel outer product.
+        let intermediates = full
+            .checked_mul(48)?
+            .checked_add(kernel_count.checked_mul(16)?)?
+            .checked_add(full_rows.checked_mul(cols)?.checked_mul(16)?)?
+            .checked_add(kr.checked_add(kc)?.checked_mul(16)?)?;
+        let gather =
+            [Some(a), Some(b), signal]
+                .into_iter()
+                .flatten()
+                .try_fold(0_u64, |total, value| {
+                    let bytes = match value {
+                        Value::GpuTensor(handle) => {
+                            handle.physical().requested_bytes().checked_mul(3)?
+                        }
+                        _ => 0,
+                    };
+                    total.checked_add(bytes)
+                })?;
+        input_coefficients
+            .checked_add(intermediates)?
+            .checked_add(gather)
+    })();
+    bound
+        .map(runmat_execution::ResourceByteBound::Known)
+        .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ))
+}
+
+fn admit_conv2_operand(value: &Value, vector_required: bool) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        super::common::convolution::admit_resident_operand(value, || {
+            conv2_error(&CONV2_ERROR_INVALID_INPUT)
+        })?;
+    }
+    let shape = match value {
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
+        _ => return Err(conv2_error(&CONV2_ERROR_INVALID_INPUT)),
+    };
+    let admitted = shape.is_none_or(|shape| {
+        if vector_required {
+            super::common::convolution::checked_vector_elements(shape).is_some()
+        } else {
+            super::common::convolution::checked_matrix_dims(shape).is_some()
+        }
+    });
+    if !admitted {
+        return Err(conv2_error(if vector_required {
+            &CONV2_ERROR_VECTOR_REQUIRED
+        } else {
+            &CONV2_ERROR_MATRIX_REQUIRED
+        }));
+    }
+    Ok(())
+}
+
 fn restore_to_owner(
     value: Value,
-    owner: Option<&runmat_accelerate_api::GpuTensorHandle>,
-    single_output: bool,
+    resident_inputs: &[runmat_accelerate_api::GpuTensorHandle],
+    recorder: Option<runmat_accelerate_api::observation::ProviderOperationRecorder>,
 ) -> BuiltinResult<Value> {
-    let Some(provider) = owner.and_then(runmat_accelerate_api::provider_for_handle) else {
+    let Some(source) = resident_inputs.first() else {
         return Ok(value);
     };
-    let expected = if single_output {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
-    if provider.precision() != expected {
-        return Ok(value);
-    }
-    match value {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
-            .map(gpu_helpers::resident_gpu_value)
-            .map_err(|error| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, error)),
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map(gpu_helpers::complex_gpu_value),
-        other => Ok(other),
-    }
+    let protected = resident_inputs.iter().collect::<Vec<_>>();
+    runmat_accelerate_api::observation::with_provider_observation(recorder, || {
+        gpu_helpers::restore_class_preserving_value_protecting(
+            source,
+            value,
+            BUILTIN_NAME,
+            &protected,
+        )
+    })
 }
 
 fn value_uses_single(value: &Value) -> bool {
@@ -421,22 +457,19 @@ fn value_is_complex(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_storage(handle) == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Conv2Mode {
-    Full,
-    Same,
-    Valid,
-}
-
 fn try_conv2_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     a: &Value,
     b: &Value,
     mode: Conv2Mode,
     single_output: bool,
-) -> BuiltinResult<Option<Value>> {
+) -> BuiltinResult<(
+    Option<Value>,
+    Option<super::common::convolution::placement::SelectedConvolution>,
+)> {
     let (lhs, rhs) = match (a, b) {
         (Value::GpuTensor(lhs), Value::GpuTensor(rhs)) => (lhs, rhs),
-        _ => return Ok(None),
+        _ => return Ok((None, None)),
     };
     if runmat_accelerate_api::handle_integer_type(lhs).is_some()
         || runmat_accelerate_api::handle_integer_type(rhs).is_some()
@@ -445,39 +478,38 @@ fn try_conv2_gpu(
         || value_is_complex(a)
         || value_is_complex(b)
     {
-        return Ok(None);
+        return Ok((None, None));
     }
-    if lhs.device_id != rhs.device_id {
-        return Ok(None);
+    if lhs.device_id() != rhs.device_id() {
+        return Ok((None, None));
     }
     let provider = match runmat_accelerate_api::provider_for_handle(lhs) {
         Some(p) => p,
-        None => return Ok(None),
+        None => return Ok((None, None)),
     };
     let Some(rhs_provider) = runmat_accelerate_api::provider_for_handle(rhs) else {
-        return Ok(None);
+        return Ok((None, None));
     };
-    if !std::ptr::eq(provider, rhs_provider) {
-        return Ok(None);
+    if !runmat_accelerate_api::same_provider_instance(provider, rhs_provider) {
+        return Ok((None, None));
     }
 
-    let lhs_dims = match conv2_dimensions(&lhs.shape) {
+    let lhs_dims = match conv2_dimensions(lhs.shape()) {
         Some(dims) => dims,
-        None => return Ok(None),
+        None => return Ok((None, None)),
     };
-    let rhs_dims = match conv2_dimensions(&rhs.shape) {
+    let rhs_dims = match conv2_dimensions(rhs.shape()) {
         Some(dims) => dims,
-        None => return Ok(None),
+        None => return Ok((None, None)),
     };
 
     // Keep the explicit full-mode vector kernel path on the host so it can
     // return an outer-product kernel that matches MATLAB's separable identity.
     if mode == Conv2Mode::Full && lhs_dims.1 == 1 && rhs_dims.0 == 1 {
-        return Ok(None);
+        return Ok((None, None));
     }
 
-    // If either operand is effectively empty we can still defer to the provider, which will
-    // honour MATLAB's shape rules. No additional guarding is required here.
+    let empty = lhs_dims.0 == 0 || lhs_dims.1 == 0 || rhs_dims.0 == 0 || rhs_dims.1 == 0;
     let provider_mode = match mode {
         Conv2Mode::Full => ProviderConvMode::Full,
         Conv2Mode::Same => ProviderConvMode::Same,
@@ -489,45 +521,90 @@ fn try_conv2_gpu(
     } else {
         runmat_accelerate_api::ProviderPrecision::F64
     };
-    match provider.conv2d(lhs, rhs, provider_mode) {
-        Ok(handle)
-            if native_result_matches_provider(&handle, lhs.device_id, provider, expected) =>
-        {
-            Ok(Some(Value::GpuTensor(handle)))
+    let shape = (|| match mode {
+        Conv2Mode::Full if empty => Some((0, 0)),
+        Conv2Mode::Full => Some((
+            lhs_dims.0.checked_add(rhs_dims.0)?.checked_sub(1)?,
+            lhs_dims.1.checked_add(rhs_dims.1)?.checked_sub(1)?,
+        )),
+        Conv2Mode::Same => Some(lhs_dims),
+        Conv2Mode::Valid if empty => Some((0, 0)),
+        Conv2Mode::Valid => Some((
+            lhs_dims.0.checked_sub(rhs_dims.0)?.checked_add(1)?,
+            lhs_dims.1.checked_sub(rhs_dims.1)?.checked_add(1)?,
+        )),
+    })();
+    let Some((rows, cols)) = shape else {
+        return Ok((None, None));
+    };
+    rows.checked_mul(cols)
+        .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
+    let contract = gpu_helpers::BinaryGpuOutputContract {
+        shape: vec![rows, cols],
+        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        precision: Some(expected),
+        integer: None,
+        logical: false,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+    };
+    if !matches!(
+        runmat_accelerate_api::ProviderConvolutionInputBackings::from_full_live_handles([lhs, rhs]),
+        Ok(Some(_))
+    ) {
+        return Ok((None, None));
+    }
+    let placement = super::common::convolution::placement::select_pair(
+        runtime,
+        BUILTIN_NAME,
+        [lhs, rhs],
+        mode,
+        runmat_accelerate_api::ProviderConvolutionForm::Matrix,
+        &contract.shape,
+        host_scratch_bound(a, b, None),
+    )?;
+    if placement
+        .as_ref()
+        .is_some_and(|selected| !selected.provider_route())
+    {
+        return Ok((None, placement));
+    }
+    if let Some(selected) = placement.as_ref() {
+        if !selected.revalidate([lhs, rhs])? {
+            return Err(conv2_error(&CONV2_ERROR_INVALID_INPUT));
         }
-        Ok(handle) => {
-            free_rejected_native_handle(&handle, provider);
+    }
+    let recorder = placement.as_ref().and_then(|selected| selected.recorder());
+    let hook = runmat_accelerate_api::observation::with_provider_observation(recorder, || {
+        provider.conv2d(lhs, rhs, provider_mode)
+    });
+    let result = match hook {
+        Ok(handle) => super::common::convolution::admit_binary_output(
+            handle,
+            lhs,
+            rhs,
+            provider,
+            &contract,
+            || conv2_error(&CONV2_ERROR_BUILD_OUTPUT),
+        )
+        .map(Some),
+        Err(err)
+            if gpu_helpers::provider_hook_allows_host_fallback(&err) && placement.is_none() =>
+        {
             Ok(None)
         }
         Err(err) => {
-            log::trace!("conv2: provider conv2d unavailable, falling back to host: {err}");
-            Ok(None)
+            let mut failure = crate::runtime_error::with_provider_execution_source(
+                conv2_error(&CONV2_ERROR_BUILD_OUTPUT),
+                err.into(),
+            );
+            failure.gpu_gather_retry = GpuGatherRetry::Never;
+            Err(failure)
         }
+    };
+    if let Some(placement) = placement {
+        placement.finish_hook(&result);
     }
-}
-
-fn native_result_matches_provider(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    input_device: u32,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    expected_precision: runmat_accelerate_api::ProviderPrecision,
-) -> bool {
-    handle.device_id == input_device
-        && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
-        && runmat_accelerate_api::handle_storage(handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_native_handle(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
-    if let Err(err) = owner.free(handle) {
-        log::trace!("conv2: failed to free rejected provider result: {err}");
-    }
+    result.map(|value| (value, None))
 }
 
 fn conv2_dimensions(shape: &[usize]) -> Option<(usize, usize)> {
@@ -553,12 +630,23 @@ struct Matrix {
 }
 
 impl Matrix {
-    fn zeros(rows: usize, cols: usize) -> Self {
-        Self {
-            rows,
-            cols,
-            data: vec![Complex::new(0.0, 0.0); rows.saturating_mul(cols)],
+    async fn zeros(
+        rows: usize,
+        cols: usize,
+        cooperation: &mut SignalCooperation,
+    ) -> BuiltinResult<Self> {
+        let len = rows
+            .checked_mul(cols)
+            .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(len)
+            .map_err(conv2_allocation_error)?;
+        while data.len() < len {
+            let chunk = (len - data.len()).min(super::common::SIGNAL_WORK_CHUNK as usize);
+            data.resize(data.len() + chunk, Complex::new(0.0, 0.0));
+            cooperation.completed(chunk as u64).await?;
         }
+        Ok(Self { rows, cols, data })
     }
 
     fn is_empty(&self) -> bool {
@@ -581,57 +669,79 @@ impl Matrix {
         self.data[idx] += value;
     }
 
-    fn slice(&self, row_start: usize, row_end: usize, col_start: usize, col_end: usize) -> Self {
+    async fn slice(
+        &self,
+        row_start: usize,
+        row_end: usize,
+        col_start: usize,
+        col_end: usize,
+        cooperation: &mut SignalCooperation,
+    ) -> BuiltinResult<Self> {
         let row_end = row_end.min(self.rows);
         let col_end = col_end.min(self.cols);
         if row_start >= row_end || col_start >= col_end {
             return Self::zeros(
                 row_end.saturating_sub(row_start),
                 col_end.saturating_sub(col_start),
-            );
+                cooperation,
+            )
+            .await;
         }
         let rows = row_end - row_start;
         let cols = col_end - col_start;
-        let mut data = vec![Complex::new(0.0, 0.0); rows * cols];
+        let mut sliced = Self::zeros(rows, cols, cooperation).await?;
+        let mut work = 0_u64;
         for c in 0..cols {
             for r in 0..rows {
                 let value = self.get(row_start + r, col_start + c);
-                data[c * rows + r] = value;
+                sliced.data[c * rows + r] = value;
+                work += 1;
+                if work == super::common::SIGNAL_WORK_CHUNK {
+                    cooperation.completed(work).await?;
+                    work = 0;
+                }
             }
         }
-        Self { rows, cols, data }
+        cooperation.completed(work).await?;
+        Ok(sliced)
     }
 }
 
-fn extract_mode(extras: &mut Vec<Value>) -> BuiltinResult<Conv2Mode> {
-    if let Some(mode) = extras
-        .last()
-        .and_then(|last| parse_mode_value(last).transpose())
-        .transpose()?
-    {
-        extras.pop();
-        return Ok(mode);
+fn extract_mode(extras: &mut crate::call::BuiltinArguments) -> BuiltinResult<Conv2Mode> {
+    if let Some(last) = extras.last() {
+        if let Some(mode) = parse_mode_value(last)? {
+            extras.pop();
+            return Ok(mode);
+        }
+    }
+    if extras.len() == 2 {
+        return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID));
     }
     Ok(Conv2Mode::Full)
 }
 
 fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
-    let Some(text) = tensor::value_to_string(value) else {
-        return Ok(None);
-    };
-    let lowered = text.trim().to_ascii_lowercase();
-    let mode = match lowered.as_str() {
-        "full" => Conv2Mode::Full,
-        "same" => Conv2Mode::Same,
-        "valid" => Conv2Mode::Valid,
-        _ => {
-            return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID));
-        }
-    };
+    let text =
+        match super::common::convolution::convolution_selector_text(value).map_err(|source| {
+            let mut error = conv2_error(&CONV2_ERROR_SHAPE_INVALID);
+            error.source = Some(Box::new(source));
+            error
+        })? {
+            super::common::convolution::ConvolutionSelectorText::Text(text) => text,
+            super::common::convolution::ConvolutionSelectorText::MalformedText => {
+                return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID))
+            }
+            super::common::convolution::ConvolutionSelectorText::NotText => return Ok(None),
+        };
+    let mode = Conv2Mode::decode(&text).ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID))?;
     Ok(Some(mode))
 }
 
-async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> {
+async fn convert_matrix(
+    value: Value,
+    arg: &str,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     match value {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
@@ -644,97 +754,72 @@ async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Ma
                         map_control_flow_with_builtin(flow, BUILTIN_NAME),
                     )
                 })?;
-            convert_host_matrix(gathered, name, arg)
+            convert_host_matrix(gathered, arg, cooperation).await
         }
-        other => convert_host_matrix(other, name, arg),
+        other => convert_host_matrix(other, arg, cooperation).await,
     }
 }
 
-fn convert_host_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Matrix> {
-    match value {
-        Value::Tensor(tensor) => tensor_to_matrix(tensor, name, arg),
-        Value::ComplexTensor(tensor) => complex_tensor_to_matrix(tensor, name, arg),
-        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| {
-                conv2_error_with_detail(&CONV2_ERROR_CONVERSION, format!("{name}: {err}"))
-            })
-            .and_then(|tensor| tensor_to_matrix(tensor, name, arg)),
-        Value::Num(n) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(n, 0.0)],
-        }),
-        Value::Int(i) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(i.to_f64(), 0.0)],
-        }),
-        Value::Bool(b) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(if b { 1.0 } else { 0.0 }, 0.0)],
-        }),
-        Value::Complex(re, im) => Ok(Matrix {
-            rows: 1,
-            cols: 1,
-            data: vec![Complex::new(re, im)],
-        }),
-        other => Err(conv2_error_with_detail(
-            &CONV2_ERROR_INVALID_INPUT,
-            format!("{name}/{arg}: expected numeric or logical values, got {other:?}"),
-        )),
-    }
+async fn convert_host_matrix(
+    value: Value,
+    arg: &str,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
+    let (rows, cols) = match &value {
+        Value::Tensor(tensor) => super::common::convolution::checked_matrix_dims(tensor.shape())
+            .ok_or_else(|| conv2_error(&CONV2_ERROR_MATRIX_REQUIRED))?,
+        Value::ComplexTensor(tensor) => {
+            super::common::convolution::checked_matrix_dims(tensor.shape())
+                .ok_or_else(|| conv2_error(&CONV2_ERROR_MATRIX_REQUIRED))?
+        }
+        Value::LogicalArray(array) => super::common::convolution::checked_matrix_dims(&array.shape)
+            .ok_or_else(|| conv2_error(&CONV2_ERROR_MATRIX_REQUIRED))?,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => (1, 1),
+        other => {
+            return Err(conv2_error_with_detail(
+                &CONV2_ERROR_INVALID_INPUT,
+                format!("conv2/{arg}: expected numeric or logical values, got {other:?}"),
+            ));
+        }
+    };
+    let data = super::common::convolution::materialize_host_coefficients(
+        &value,
+        cooperation,
+        || conv2_error(&CONV2_ERROR_INVALID_INPUT),
+        conv2_allocation_error,
+    )
+    .await?;
+    Ok(Matrix { rows, cols, data })
 }
 
-async fn convert_vector(value: Value, name: &str, arg: &str) -> BuiltinResult<Vec<Complex<f64>>> {
-    let matrix = convert_matrix(value, name, arg).await?;
+async fn convert_vector(
+    value: Value,
+    arg: &str,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
+    let matrix = convert_matrix(value, arg, cooperation).await?;
     if matrix.rows > 1 && matrix.cols > 1 {
         return Err(conv2_error_with_detail(
             &CONV2_ERROR_VECTOR_REQUIRED,
-            format!("{name}: {arg} got {}x{}", matrix.rows, matrix.cols),
+            format!("conv2: {arg} got {}x{}", matrix.rows, matrix.cols),
         ));
     }
     Ok(matrix.data)
 }
 
-fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
-    if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(conv2_error_with_detail(
-            &CONV2_ERROR_MATRIX_REQUIRED,
-            format!("{name}: {arg} received shape {:?}", tensor.shape),
-        ));
-    }
-    Ok(Matrix {
-        rows: tensor.rows,
-        cols: tensor.cols,
-        data: tensor::tensor_into_values_f64(tensor)
-            .into_iter()
-            .map(|re| Complex::new(re, 0.0))
-            .collect(),
-    })
-}
-
-fn complex_tensor_to_matrix(tensor: ComplexTensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
-    if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(conv2_error_with_detail(
-            &CONV2_ERROR_MATRIX_REQUIRED,
-            format!("{name}: {arg} received shape {:?}", tensor.shape),
-        ));
-    }
-    Ok(Matrix {
-        rows: tensor.rows,
-        cols: tensor.cols,
-        data: tensor::complex_tensor_into_values_complex64(tensor),
-    })
-}
-
-fn outer_product(column: &[Complex<f64>], row: &[Complex<f64>], single_output: bool) -> Matrix {
+async fn outer_product(
+    column: &[Complex<f64>],
+    row: &[Complex<f64>],
+    single_output: bool,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     let rows = column.len();
     let cols = row.len();
-    let mut data = vec![Complex::new(0.0, 0.0); rows.saturating_mul(cols)];
+    let mut matrix = Matrix::zeros(rows, cols, cooperation).await?;
+    let mut work = 0_u64;
     for c in 0..cols {
         for r in 0..rows {
-            data[c * rows + r] = if single_output {
+            matrix.data[c * rows + r] = if single_output {
                 let lhs = Complex::<f32>::new(column[r].re as f32, column[r].im as f32);
                 let rhs = Complex::<f32>::new(row[c].re as f32, row[c].im as f32);
                 let value = lhs * rhs;
@@ -742,19 +827,43 @@ fn outer_product(column: &[Complex<f64>], row: &[Complex<f64>], single_output: b
             } else {
                 column[r] * row[c]
             };
+            work += 1;
+            if work == super::common::SIGNAL_WORK_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
     }
-    Matrix { rows, cols, data }
+    cooperation.completed(work).await?;
+    Ok(matrix)
 }
 
-fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode, single_output: bool) -> Matrix {
+async fn conv2_matrices(
+    a: &Matrix,
+    b: &Matrix,
+    mode: Conv2Mode,
+    single_output: bool,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     if a.is_empty() || b.is_empty() {
-        return empty_result(a, b, mode);
+        return empty_result(a, b, mode, cooperation).await;
+    }
+    if mode == Conv2Mode::Valid && (a.rows < b.rows || a.cols < b.cols) {
+        return Matrix::zeros(0, 0, cooperation).await;
     }
 
-    let rows = a.rows + b.rows - 1;
-    let cols = a.cols + b.cols - 1;
-    let mut full = Matrix::zeros(rows, cols);
+    let rows = a
+        .rows
+        .checked_add(b.rows)
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
+    let cols = a
+        .cols
+        .checked_add(b.cols)
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(|| conv2_error(&CONV2_ERROR_BUILD_OUTPUT))?;
+    let mut full = Matrix::zeros(rows, cols, cooperation).await?;
+    let mut work = 0_u64;
     for ac in 0..a.cols {
         for ar in 0..a.rows {
             let aval = a.get(ar, ac);
@@ -774,81 +883,130 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode, single_output: bool) 
                     } else {
                         full.add_assign(out_r, out_c, aval * bval);
                     }
+                    work += 1;
+                    if work == super::common::SIGNAL_WORK_CHUNK {
+                        cooperation.completed(work).await?;
+                        work = 0;
+                    }
                 }
             }
         }
     }
+    cooperation.completed(work).await?;
 
     match mode {
-        Conv2Mode::Full => full,
+        Conv2Mode::Full => Ok(full),
         Conv2Mode::Same => {
             if a.is_empty() {
-                return Matrix::zeros(a.rows, a.cols);
+                return Matrix::zeros(a.rows, a.cols, cooperation).await;
             }
             let row_start = b.rows / 2;
             let col_start = b.cols / 2;
-            full.slice(row_start, row_start + a.rows, col_start, col_start + a.cols)
+            full.slice(
+                row_start,
+                row_start + a.rows,
+                col_start,
+                col_start + a.cols,
+                cooperation,
+            )
+            .await
         }
         Conv2Mode::Valid => {
-            if a.rows < b.rows || a.cols < b.cols {
-                return Matrix::zeros(0, 0);
-            }
             let rows = a.rows - b.rows + 1;
             let cols = a.cols - b.cols + 1;
             let row_start = b.rows - 1;
             let col_start = b.cols - 1;
-            full.slice(row_start, row_start + rows, col_start, col_start + cols)
+            full.slice(
+                row_start,
+                row_start + rows,
+                col_start,
+                col_start + cols,
+                cooperation,
+            )
+            .await
         }
     }
 }
 
-fn empty_result(a: &Matrix, _b: &Matrix, mode: Conv2Mode) -> Matrix {
+async fn empty_result(
+    a: &Matrix,
+    _b: &Matrix,
+    mode: Conv2Mode,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Matrix> {
     match mode {
-        Conv2Mode::Full | Conv2Mode::Valid => Matrix::zeros(0, 0),
-        Conv2Mode::Same => Matrix::zeros(a.rows, a.cols),
+        Conv2Mode::Full | Conv2Mode::Valid => Matrix::zeros(0, 0, cooperation).await,
+        Conv2Mode::Same => Matrix::zeros(a.rows, a.cols, cooperation).await,
     }
 }
 
-fn matrix_to_value(
+async fn matrix_to_value(
     matrix: Matrix,
     single_output: bool,
     complex_output: bool,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     let rows = matrix.rows;
     let cols = matrix.cols;
-    let all_real = matrix.data.iter().all(|c| c.im.abs() <= EPS);
+    let mut all_real = true;
+    for chunk in matrix
+        .data
+        .chunks(super::common::SIGNAL_WORK_CHUNK as usize)
+    {
+        all_real &= chunk.iter().all(|c| c.im == 0.0);
+        cooperation.completed(chunk.len() as u64).await?;
+    }
 
     if all_real && !complex_output {
         if single_output {
-            let real_data: Vec<f32> = matrix.data.into_iter().map(|c| c.re as f32).collect();
+            let real_data = map_matrix_data(matrix.data, cooperation, |c| c.re as f32).await?;
             let tensor = Tensor::from_f32(real_data, vec![rows, cols])
                 .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, &e))?;
             return Ok(tensor::tensor_into_value(tensor));
         }
-        let real_data: Vec<f64> = matrix.data.into_iter().map(|c| c.re).collect();
+        let real_data = map_matrix_data(matrix.data, cooperation, |c| c.re).await?;
         let tensor = Tensor::new(real_data, vec![rows, cols])
             .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, &e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
+    if !single_output && matrix.data.len() == 1 {
+        let value = matrix.data[0];
+        return Ok(Value::Complex(value.re, value.im));
+    }
     let storage = if single_output {
-        ComplexStorage::F32(
-            matrix
-                .data
-                .into_iter()
-                .map(|c| (c.re as f32, c.im as f32))
-                .collect(),
-        )
+        let elements = map_matrix_data(matrix.data, cooperation, |c| {
+            ComplexElement(c.re as f32, c.im as f32)
+        })
+        .await?;
+        ComplexStorage::F32(HostComplexBuffer::from_elements(elements))
     } else {
-        ComplexStorage::F64(matrix.data.into_iter().map(|c| (c.re, c.im)).collect())
+        let elements =
+            map_matrix_data(matrix.data, cooperation, |c| ComplexElement(c.re, c.im)).await?;
+        ComplexStorage::F64(HostComplexBuffer::from_elements(elements))
     };
     let tensor = ComplexTensor::from_complex_storage(storage, vec![rows, cols])
         .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
-    if !single_output && tensor.materialize_f64().len() == 1 {
-        let (re, im) = tensor.materialize_f64()[0];
-        return Ok(Value::Complex(re, im));
-    }
     Ok(Value::ComplexTensor(tensor))
+}
+
+async fn map_matrix_data<T, F>(
+    input: Vec<Complex<f64>>,
+    cooperation: &mut SignalCooperation,
+    mut convert: F,
+) -> BuiltinResult<Vec<T>>
+where
+    F: FnMut(Complex<f64>) -> T,
+{
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(input.len())
+        .map_err(conv2_allocation_error)?;
+    for chunk in input.chunks(super::common::SIGNAL_WORK_CHUNK as usize) {
+        output.extend(chunk.iter().copied().map(&mut convert));
+        cooperation.completed(chunk.len() as u64).await?;
+    }
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -857,7 +1015,6 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{ComplexStorage, IntegerStorage, LogicalArray};
 
     fn error_message(error: RuntimeError) -> String {
@@ -881,44 +1038,22 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn conv2_type_full_uses_dimensions() {
-        let out = conv2_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(3), Some(2)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(1)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(4), Some(2)])
-            }
-        );
-    }
-
-    #[test]
-    fn conv2_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("conv2 builtin");
-        let descriptor = builtin.descriptor.expect("conv2 descriptor");
-        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
-        assert!(labels.contains(&"C = conv2(A, B)"));
-        assert!(labels.contains(&"C = conv2(A, B, shape)"));
-        assert!(labels.contains(&"C = conv2(hcol, hrow, A)"));
-        assert!(labels.contains(&"C = conv2(hcol, hrow, A, shape)"));
-        assert!(descriptor
-            .errors
-            .iter()
-            .any(|err| err.code == "RM.CONV2.SHAPE_INVALID"));
-        assert_eq!(CONV2_INTEGER_CAPABILITIES.len(), 2);
-        assert!(CONV2_INTEGER_CAPABILITIES
-            .iter()
-            .flat_map(|capability| capability.inputs)
-            .all(|input| input.classes.len() == 8));
+    fn later_invalid_matrix_rejects_before_resident_download() {
+        let _serial = test_support::accel_test_lock();
+        let provider =
+            super::super::common::convolution::test_support::RejectTransferProvider::new();
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let input = provider.input(vec![1.0, 2.0], vec![2, 1]);
+        let nd = Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap();
+        let error = conv2_builtin(
+            Value::GpuTensor(input.handle.clone()),
+            Value::Tensor(nd),
+            Vec::new(),
+        )
+        .expect_err("N-D kernel is not a matrix");
+        assert_eq!(error.identifier(), CONV2_ERROR_MATRIX_REQUIRED.identifier);
+        assert_eq!(provider.downloads(), 0);
+        input.handle.allocation_lease().validate_live().unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -929,7 +1064,7 @@ pub(crate) mod tests {
         let result = conv2_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("conv2");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 let expected =
                     tensor_from_rows(3, 3, &[1.0, 3.0, 2.0, 4.0, 10.0, 6.0, 3.0, 7.0, 4.0]);
                 assert_eq!(t.materialize_f64(), expected.materialize_f64());
@@ -948,7 +1083,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), [2, 2]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 6.0, 4.0, 8.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -991,7 +1126,7 @@ pub(crate) mod tests {
             panic!("tensor")
         };
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
-        assert_eq!(output.shape, vec![3, 3]);
+        assert_eq!(output.shape(), [3, 3]);
     }
 
     #[test]
@@ -1077,7 +1212,7 @@ pub(crate) mod tests {
             panic!("tensor")
         };
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(output.shape, vec![3, 2]);
+        assert_eq!(output.shape(), [3, 2]);
         assert_eq!(
             output.materialize_f64(),
             vec![1.0, 4.0, 4.0, -1.0, -4.0, -4.0]
@@ -1087,7 +1222,7 @@ pub(crate) mod tests {
     #[test]
     fn conv2_complex_single_retains_class_and_explicit_complexity() {
         let input = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(1.0, 0.0), (2.0, 0.0)]),
+            ComplexStorage::F32(vec![(1.0, 0.0), (2.0, 0.0)].into()),
             vec![2, 1],
         )
         .unwrap();
@@ -1156,7 +1291,7 @@ pub(crate) mod tests {
         else {
             panic!("owner-restored output")
         };
-        assert_eq!(output.device_id, provider_a.device_id());
+        assert_eq!(output.device_id(), provider_a.device_id());
         let gathered = block_on(provider_a.download(&output)).unwrap();
         assert_eq!(gathered.data, vec![2.0, 4.0]);
     }
@@ -1175,13 +1310,31 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .unwrap();
-            let Value::Tensor(output) =
-                conv2_builtin(Value::GpuTensor(a), Value::GpuTensor(b), Vec::new()).unwrap()
-            else {
-                panic!("class-preserving host fallback")
+            let wrong_class = provider
+                .upload(&HostTensorView {
+                    data: &[2.0, 4.0],
+                    shape: &[2, 1],
+                })
+                .unwrap();
+            let contract = gpu_helpers::BinaryGpuOutputContract {
+                shape: vec![2, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                precision: Some(runmat_accelerate_api::ProviderPrecision::F32),
+                integer: None,
+                logical: false,
+                alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
             };
-            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
-            assert_eq!(output.materialize_f64(), vec![2.0, 4.0]);
+            let error = super::super::common::convolution::admit_binary_output(
+                wrong_class,
+                &a,
+                &b,
+                provider,
+                &contract,
+                || conv2_error(&CONV2_ERROR_BUILD_OUTPUT),
+            )
+            .expect_err("wrong-class provider output must be rejected");
+            assert_eq!(error.identifier(), CONV2_ERROR_BUILD_OUTPUT.identifier);
+            assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
         });
     }
 
@@ -1204,11 +1357,26 @@ pub(crate) mod tests {
                 shape: &[1, 1],
             })
             .unwrap();
-        assert!(!native_result_matches_provider(
+        let input = provider_a
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        let contract = gpu_helpers::BinaryGpuOutputContract {
+            shape: vec![1, 1],
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            precision: Some(runmat_accelerate_api::ProviderPrecision::F64),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        };
+        assert!(!gpu_helpers::binary_gpu_output_matches(
             &wrong_owner,
-            provider_a.device_id(),
+            &input,
+            &input,
             provider_a,
-            runmat_accelerate_api::ProviderPrecision::F64,
+            &contract,
         ));
     }
 
@@ -1225,7 +1393,7 @@ pub(crate) mod tests {
         .expect("conv2 same");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 let expected = tensor_from_rows(
                     3,
                     3,
@@ -1250,7 +1418,7 @@ pub(crate) mod tests {
         .expect("conv2 same");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 let expected =
                     tensor_from_rows(3, 3, &[7.0, 4.0, -7.0, 15.0, 6.0, -15.0, 13.0, 4.0, -13.0]);
                 assert_eq!(t.materialize_f64(), expected.materialize_f64());
@@ -1272,10 +1440,10 @@ pub(crate) mod tests {
         .expect("conv2 valid");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), [1, 1]);
                 assert_eq!(t.materialize_f64(), vec![45.0]);
             }
-            Value::Num(n) => assert!((n - 45.0).abs() <= EPS),
+            Value::Num(n) => assert_eq!(n, 45.0),
             other => panic!("expected scalar 45, got {other:?}"),
         }
     }
@@ -1307,6 +1475,65 @@ pub(crate) mod tests {
         assert_eq!(separable, explicit);
     }
 
+    #[test]
+    fn conv2_separable_numeric_and_logical_scalar_signal_are_not_shape_text() {
+        let column = tensor_from_rows(2, 1, &[1.0, 2.0]);
+        let row = tensor_from_rows(1, 2, &[1.0, 3.0]);
+        for (signal, expected) in [
+            (Value::Num(2.0), vec![2.0, 4.0, 6.0, 12.0]),
+            (Value::Bool(true), vec![1.0, 2.0, 3.0, 6.0]),
+        ] {
+            let output = conv2_builtin(
+                Value::Tensor(column.clone()),
+                Value::Tensor(row.clone()),
+                vec![signal],
+            )
+            .expect("scalar separable signal");
+            let output = test_support::gather(output).expect("host result");
+            assert_eq!(output.shape(), [2, 2]);
+            assert_eq!(output.materialize_f64(), expected);
+        }
+        let error = conv2_builtin(
+            Value::Tensor(column),
+            Value::Tensor(row),
+            vec![Value::from("circular")],
+        )
+        .expect_err("malformed text remains a shape error");
+        assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
+        for invalid_shape in [Value::Num(7.0), Value::Bool(true)] {
+            let error = conv2_builtin(
+                Value::Tensor(tensor_from_rows(2, 1, &[1.0, 2.0])),
+                Value::Tensor(tensor_from_rows(1, 2, &[1.0, 3.0])),
+                vec![Value::Num(1.0), invalid_shape],
+            )
+            .expect_err("fourth input must be shape text");
+            assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
+        }
+        let nd_text = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "same".chars().collect(),
+            vec![1, 4, 1],
+        )
+        .expect("N-D character shape");
+        let error = conv2_builtin(
+            Value::Tensor(tensor_from_rows(2, 1, &[1.0, 2.0])),
+            Value::Tensor(tensor_from_rows(1, 2, &[1.0, 3.0])),
+            vec![Value::CharArray(nd_text)],
+        )
+        .expect_err("N-D character selector");
+        assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
+    }
+
+    #[test]
+    fn conv2_empty_direct_full_does_not_take_outer_product_shortcut() {
+        let left = Tensor::new(Vec::new(), vec![0, 1]).expect("empty column");
+        let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("row");
+        let output = conv2_builtin(Value::Tensor(left), Value::Tensor(right), Vec::new())
+            .expect("empty full result");
+        let output = test_support::gather(output).expect("host result");
+        assert_eq!(output.shape(), [0, 0]);
+        assert!(output.materialize_f64().is_empty());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn conv2_complex_scaling() {
@@ -1316,10 +1543,10 @@ pub(crate) mod tests {
             conv2_builtin(Value::Tensor(tensor), Value::Complex(0.0, 2.0), Vec::new()).unwrap();
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), [2, 2]);
                 for (idx, &(re, im)) in t.materialize_f64().iter().enumerate() {
-                    assert!(re.abs() <= EPS);
-                    assert!((im - 2.0 * expected_data[idx]).abs() <= 10.0 * EPS);
+                    assert_eq!(re, 0.0);
+                    assert_eq!(im, 2.0 * expected_data[idx]);
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -1339,7 +1566,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), [0, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -1353,7 +1580,7 @@ pub(crate) mod tests {
         .unwrap();
         match same {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 3]);
+                assert_eq!(t.shape(), [0, 3]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -1400,7 +1627,7 @@ pub(crate) mod tests {
         let logical_tensor = test_support::gather(logical_result).expect("gather logical");
         let numeric_tensor = test_support::gather(numeric_result).expect("gather numeric");
 
-        assert_eq!(logical_tensor.shape, numeric_tensor.shape);
+        assert_eq!(logical_tensor.shape(), numeric_tensor.shape());
         assert_eq!(
             logical_tensor.materialize_f64(),
             numeric_tensor.materialize_f64()
@@ -1422,7 +1649,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 let expected = tensor_from_rows(
                     3,
                     3,
@@ -1447,11 +1674,11 @@ pub(crate) mod tests {
 
             let a_view = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let b_view = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
 
             let ah = provider.upload(&a_view).unwrap();
@@ -1473,13 +1700,13 @@ pub(crate) mod tests {
             .unwrap();
             let cpu_tensor = test_support::gather(cpu_result).unwrap();
 
-            assert_eq!(gathered.shape, cpu_tensor.shape);
+            assert_eq!(gathered.shape(), cpu_tensor.shape());
             assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
         });
     }
 
     #[test]
-    fn conv2_frees_rejected_native_result_before_fallback() {
+    fn conv2_rejects_malformed_native_result_without_replaying_on_host() {
         test_support::with_rejecting_native_result_provider(|provider| {
             let signal = provider
                 .upload(&HostTensorView {
@@ -1493,16 +1720,17 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .unwrap();
-            let result = conv2_builtin(
-                Value::GpuTensor(signal),
-                Value::GpuTensor(kernel),
+            let error = conv2_builtin(
+                Value::GpuTensor(signal.clone()),
+                Value::GpuTensor(kernel.clone()),
                 Vec::new(),
             )
-            .expect("conv2 fallback");
-            let result = test_support::gather(result).expect("gather fallback");
-            assert_eq!(result.shape, vec![2, 2]);
-            assert_eq!(result.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+            .expect_err("malformed provider output is terminal");
+            assert_eq!(error.identifier(), CONV2_ERROR_BUILD_OUTPUT.identifier);
+            assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
             assert_eq!(provider.free_count(), 1);
+            signal.allocation_lease().validate_live().unwrap();
+            kernel.allocation_lease().validate_live().unwrap();
         });
     }
 
@@ -1537,15 +1765,24 @@ pub(crate) mod tests {
 
         let a_view = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let b_view = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
 
         let a_handle = provider.upload(&a_view).expect("upload A");
         let b_handle = provider.upload(&b_view).expect("upload B");
+
+        let unsupported = provider
+            .conv2d(&a_handle, &b_handle, ProviderConvMode::Valid)
+            .expect_err("WGPU advertises no conv2d hook");
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &unsupported
+        ));
+        a_handle.allocation_lease().validate_live().unwrap();
+        b_handle.allocation_lease().validate_live().unwrap();
 
         let gpu_value = conv2_builtin(
             Value::GpuTensor(a_handle),
@@ -1563,11 +1800,36 @@ pub(crate) mod tests {
         .expect("conv2 cpu");
         let cpu_tensor = test_support::gather(cpu_value).expect("gather cpu");
 
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 
     fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::conv2_builtin(a, b, rest))
+        block_on(super::conv2_builtin(
+            None,
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+    }
+
+    #[test]
+    fn registered_conv2_binding_honors_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(super::conv2_builtin(
+            Some(runtime),
+            Value::Num(1.0),
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+        assert!(error.source.is_some(), "preserve execution-service cause");
     }
 }

@@ -117,7 +117,7 @@ fn mutation(
     Ok(SolverMeshAdaptationMutation {
         source_mark_identity,
         node_identity: lineage.node.identity,
-        node_coordinates_m: lineage.node.coordinates_m,
+        node_coordinates_m: lineage.node.coordinates_m.canonical_value(),
         removed_cells: cells(removed)?,
         created_cells: cells(created)?,
     })

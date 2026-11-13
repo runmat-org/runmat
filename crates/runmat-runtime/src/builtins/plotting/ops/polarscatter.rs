@@ -1,17 +1,10 @@
 //! MATLAB-compatible `polarscatter` builtin.
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{POLARSCATTER_ERROR_INTERNAL, POLARSCATTER_ERROR_INVALID_ARGUMENT};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AxesKind;
-use runmat_value::{Tensor, Value};
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -23,187 +16,16 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use super::line::handles_value;
 use super::op_common::polar::{
     evaluate_theta_rho_tensors, is_real_numeric_value, polar_to_cartesian, real_tensor_from_value,
-    tensor_is_vector, EvaluatedPolarData,
+    tensor_cols, tensor_is_vector, tensor_rows, EvaluatedPolarData,
 };
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::plotting_error;
 use super::scatter::build_scatter_plot_from_args_async;
 use super::state::{
     current_figure_handle, register_scatter_handle, render_active_plot, PlotRenderOptions,
 };
-use super::style::value_as_string;
 
 const BUILTIN_NAME: &str = "polarscatter";
-
-const POLARSCATTER_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ps",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scatter handle or row-vector of scatter handles.",
-}];
-
-const PARAM_THETA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "theta",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Angular coordinates in radians.",
-};
-
-const PARAM_RHO: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "rho",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Radial coordinates.",
-};
-
-const PARAM_SZ: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sz",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: Some("36"),
-    description: "Marker area in points squared, as scalar, vector, or matrix.",
-};
-
-const PARAM_C: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "c",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Marker color as color name, RGB triplet, scalar vector, or RGB matrix.",
-};
-
-const PARAM_ARGS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Optional marker, filled flag, axes handle, and name/value properties.",
-};
-
-const INPUT_THETA_RHO: [BuiltinParamDescriptor; 2] = [PARAM_THETA, PARAM_RHO];
-const INPUT_THETA_RHO_SZ: [BuiltinParamDescriptor; 3] = [PARAM_THETA, PARAM_RHO, PARAM_SZ];
-const INPUT_THETA_RHO_SZ_C: [BuiltinParamDescriptor; 4] =
-    [PARAM_THETA, PARAM_RHO, PARAM_SZ, PARAM_C];
-const INPUT_ARGS: [BuiltinParamDescriptor; 1] = [PARAM_ARGS];
-
-const POLARSCATTER_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "ps = polarscatter(theta, rho)",
-        inputs: &INPUT_THETA_RHO,
-        outputs: &POLARSCATTER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ps = polarscatter(theta, rho, sz)",
-        inputs: &INPUT_THETA_RHO_SZ,
-        outputs: &POLARSCATTER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ps = polarscatter(theta, rho, sz, c)",
-        inputs: &INPUT_THETA_RHO_SZ_C,
-        outputs: &POLARSCATTER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ps = polarscatter(___, mkr)",
-        inputs: &INPUT_ARGS,
-        outputs: &POLARSCATTER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ps = polarscatter(___, 'filled', Name, Value)",
-        inputs: &INPUT_ARGS,
-        outputs: &POLARSCATTER_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ps = polarscatter(pax, ___)",
-        inputs: &INPUT_ARGS,
-        outputs: &POLARSCATTER_OUTPUT_HANDLE,
-    },
-];
-
-pub const POLARSCATTER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLARSCATTER.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polarscatter:InvalidArgument"),
-    when: "Input data, size/color/style arguments, or axes targeting are invalid.",
-    message: "polarscatter: invalid argument",
-};
-
-pub const POLARSCATTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLARSCATTER.INTERNAL",
-    identifier: Some("RunMat:polarscatter:Internal"),
-    when: "Internal polar scatter construction or rendering fails unexpectedly.",
-    message: "polarscatter: internal operation failed",
-};
-
-const POLARSCATTER_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    POLARSCATTER_ERROR_INVALID_ARGUMENT,
-    POLARSCATTER_ERROR_INTERNAL,
-];
-
-pub const POLARSCATTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLARSCATTER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLARSCATTER_ERRORS,
-};
-
-const POLARSCATTER_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "theta and rho",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly lists all eight integer classes for theta and rho coordinate arrays and permits any numeric class in selected table variables.",
-    }];
-const POLARSCATTER_INTEGER_STYLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "sz and numeric c",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly lists every integer class for marker areas and numeric color data; these values enter explicit renderer metadata boundaries.",
-    }];
-const POLARSCATTER_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "thetavar, rhovar, or ColorVariable indices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Numeric table-variable indices are documented one-based structural selectors.",
-    }];
-pub const POLARSCATTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ps = polarscatter(integer_theta,integer_rho,___)",
-        inputs: &POLARSCATTER_INTEGER_COORDINATE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Authoritative coordinates gather exactly; polar conversion and rendering are explicit floating geometry boundaries.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ps = polarscatter(theta,rho,integer_sz,integer_c,___)",
-        inputs: &POLARSCATTER_INTEGER_STYLE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Marker sizing, colormap normalization, and renderer buffers are intentional floating boundaries after typed values are parsed from authoritative storage.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ps = polarscatter(tbl,integer_thetavar,integer_rhovar,___)",
-        inputs: &POLARSCATTER_INTEGER_SELECTOR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Variable selection remains exact; broader table-form implementation is a general plotting surface concern.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::polarscatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -232,42 +54,53 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "polarscatter performs rendering and terminates fusion graphs.",
 };
 
-fn polarscatter_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
-    Type::Unknown
-}
-
 #[runtime_builtin(
     name = "polarscatter",
-    category = "plotting",
-    summary = "Create scatter charts in polar coordinates.",
-    keywords = "polarscatter,polar,scatter,markers,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(polarscatter_type),
-    descriptor(crate::builtins::plotting::polarscatter::POLARSCATTER_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::plotting::polarscatter::POLARSCATTER_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::polarscatter"
 )]
-pub async fn polarscatter_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn polarscatter_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "polarscatter: too many output arguments",
+        ));
+    }
+    let work =
+        super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "polarscatter")?;
+    let _arguments = args.fork();
+    work.finish(polarscatter_impl(args, &work).await)
+}
+async fn polarscatter_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+    work.check()?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
     let parsed = parse_polarscatter_args(args)
         .await
         .map_err(map_invalid_argument)?;
-    render_polarscatter(parsed).await.map_err(map_internal)
+    render_polarscatter(work, parsed)
+        .await
+        .map_err(map_internal)
 }
 
 struct ParsedPolarScatter {
     series: Vec<EvaluatedPolarData>,
     size_arg: Option<Value>,
     color_arg: Option<Value>,
-    tail_args: Vec<Value>,
+    tail_args: crate::call::BuiltinArguments,
 }
 
-async fn parse_polarscatter_args(args: Vec<Value>) -> BuiltinResult<ParsedPolarScatter> {
+async fn parse_polarscatter_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<ParsedPolarScatter> {
     if args.len() < 2 {
         return Err(polarscatter_err(
             "expected theta and rho data after optional axes handle",
@@ -286,14 +119,14 @@ async fn parse_polarscatter_args(args: Vec<Value>) -> BuiltinResult<ParsedPolarS
         return Err(polarscatter_err("theta and rho data cannot be empty"));
     }
 
-    let mut rest = args.into_iter().skip(2).collect::<Vec<_>>();
+    let mut rest = args.into_range(2..)?;
     let size_arg = if rest.first().is_some_and(is_real_numeric_value) {
-        Some(rest.remove(0))
+        rest.pop_front()
     } else {
         None
     };
     let color_arg = if rest.first().is_some_and(is_real_numeric_value) {
-        Some(rest.remove(0))
+        rest.pop_front()
     } else {
         None
     };
@@ -306,7 +139,10 @@ async fn parse_polarscatter_args(args: Vec<Value>) -> BuiltinResult<ParsedPolarS
     })
 }
 
-async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value> {
+async fn render_polarscatter(
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+    parsed: ParsedPolarScatter,
+) -> BuiltinResult<Value> {
     let ParsedPolarScatter {
         series,
         size_arg,
@@ -334,7 +170,7 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
                 total_series,
                 data.theta.len(),
                 false,
-            ));
+            )?);
         }
         if let Some(color) = color_arg.as_ref() {
             style_args.push(series_style_value(
@@ -343,7 +179,7 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
                 total_series,
                 data.theta.len(),
                 true,
-            ));
+            )?);
         }
         style_args.extend(tail_args.iter().cloned());
         let mut plot = build_scatter_plot_from_args_async(x, y, &style_args, BUILTIN_NAME)
@@ -359,12 +195,11 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
     let mut plots_opt = Some(plots);
     let opts = PlotRenderOptions {
-        title: "Polar Scatter",
-        x_label: "",
-        y_label: "",
         axis_equal: true,
         grid: true,
+        ..Default::default()
     };
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
         figure.set_axes_kind(axes_index, AxesKind::Polar);
         figure.set_axes_axis_equal(axes_index, true);
@@ -393,8 +228,7 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
         })
         .collect();
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handles_value(handles));
         }
         return Err(err);
@@ -408,30 +242,30 @@ fn series_style_value(
     series_count: usize,
     point_count: usize,
     is_color_arg: bool,
-) -> Value {
+) -> BuiltinResult<Value> {
     let Value::Tensor(tensor) = value else {
-        return value.clone();
+        return Ok(value.clone());
     };
     if tensor_utils::tensor_element_len(tensor) <= 1 || tensor_is_vector(tensor) {
-        return value.clone();
+        return Ok(value.clone());
     }
-    if tensor.rows == point_count && tensor.cols == series_count {
+    let rows = tensor_rows(tensor);
+    let cols = tensor_cols(tensor);
+    if rows == point_count && cols == series_count {
         let start = series_idx * point_count;
         let indices: Vec<usize> = (start..start + point_count).collect();
-        let storage = tensor
-            .clone()
-            .into_numeric_storage()
-            .and_then(|storage| storage.gather(&indices))
-            .expect("series style column is valid native storage");
-        return Value::Tensor(
-            Tensor::from_numeric_storage(storage, vec![point_count, 1])
-                .expect("series style column shape"),
-        );
+        return super::op_common::line_inputs::select_native(
+            tensor,
+            &indices,
+            vec![point_count, 1],
+            BUILTIN_NAME,
+        )
+        .map(Value::Tensor);
     }
-    if is_color_arg && (tensor.cols == 3 || tensor.cols == 4) && tensor.rows == point_count {
-        return value.clone();
+    if is_color_arg && (cols == 3 || cols == 4) && rows == point_count {
+        return Ok(value.clone());
     }
-    value.clone()
+    Ok(value.clone())
 }
 
 fn polarscatter_error_with_detail(
@@ -450,30 +284,46 @@ fn map_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    polarscatter_error_with_detail(&POLARSCATTER_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped =
+        polarscatter_error_with_detail(&POLARSCATTER_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    polarscatter_error_with_detail(&POLARSCATTER_ERROR_INTERNAL, err.message)
+    let mapped = polarscatter_error_with_detail(&POLARSCATTER_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn polarscatter_err(msg: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, format!("polarscatter: {}", msg.into()))
 }
 
-#[allow(dead_code)]
-fn is_filled_token(value: &Value) -> bool {
-    value_as_string(value)
-        .map(|text| text.trim().eq_ignore_ascii_case("filled"))
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn polarscatter_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        super::polarscatter_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::point::marker_area_points2_to_diameter_px;
     use crate::builtins::plotting::set::set_builtin;
@@ -495,7 +345,7 @@ mod tests {
     #[test]
     fn series_style_value_reads_typed_integer_matrix_length_without_mirror() {
         let value = cleared_int_tensor(IntegerStorage::U8(vec![10, 20, 30, 40]), 2, 2);
-        let series = series_style_value(&value, 1, 2, 2, false);
+        let series = series_style_value(&value, 1, 2, 2, false).unwrap();
 
         let Value::Tensor(tensor) = series else {
             panic!("expected tensor");
@@ -506,6 +356,56 @@ mod tests {
             tensor.integer_storage(),
             Some(&IntegerStorage::U8(vec![30, 40]))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn polarscatter_preserves_rank_zero_and_rank_one_style_boundaries() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+
+        for (size, expected_sizes) in [
+            (
+                Value::Tensor(Tensor::new(vec![25.0], Vec::new()).unwrap()),
+                Some(vec![
+                    marker_area_points2_to_diameter_px(25.0),
+                    marker_area_points2_to_diameter_px(25.0),
+                ]),
+            ),
+            (
+                Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).unwrap()),
+                Some(vec![
+                    marker_area_points2_to_diameter_px(10.0),
+                    marker_area_points2_to_diameter_px(20.0),
+                ]),
+            ),
+        ] {
+            reset_plot_state();
+            reset_hold_state_for_run();
+            futures::executor::block_on(polarscatter_builtin(vec![
+                tensor(&[0.0, 1.0], 1, 2),
+                tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2),
+                size,
+            ]))
+            .expect("polarscatter style rank boundary");
+
+            let figure = clone_figure(current_figure_handle()).expect("figure");
+            assert_eq!(figure.plots().count(), 2);
+            for plot in figure.plots() {
+                let runmat_plot::plots::PlotElement::Scatter(scatter) = plot else {
+                    panic!("expected scatter plot");
+                };
+                let rendered_sizes: Vec<_> = (0..scatter.len())
+                    .map(|index| {
+                        scatter
+                            .per_point_sizes
+                            .as_ref()
+                            .map_or(scatter.marker_size, |sizes| sizes[index])
+                    })
+                    .collect();
+                assert_eq!(Some(rendered_sizes), expected_sizes);
+            }
+        }
     }
 
     #[test]
@@ -701,7 +601,7 @@ mod tests {
 
     #[test]
     fn descriptor_covers_matlab_compatible_forms() {
-        let labels: Vec<&str> = POLARSCATTER_DESCRIPTOR
+        let labels: Vec<&str> = runmat_builtins::POLARSCATTER_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)

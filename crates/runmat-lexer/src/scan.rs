@@ -1,19 +1,19 @@
 use crate::token::Token;
 
 pub(crate) fn last_is_value_token(tok: &Token) -> bool {
-    matches!(
-        tok,
-        Token::Ident
-            | Token::Integer
-            | Token::RadixInteger
-            | Token::Float
-            | Token::True
-            | Token::False
-            | Token::RParen
-            | Token::RBracket
-            | Token::RBrace
-            | Token::Str
-    )
+    tok.can_be_identifier()
+        || matches!(
+            tok,
+            Token::Integer
+                | Token::RadixInteger
+                | Token::Float
+                | Token::True
+                | Token::False
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Str
+        )
 }
 
 pub(crate) fn find_line_terminator(s: &str) -> Option<(usize, usize)> {
@@ -32,6 +32,19 @@ pub(crate) fn find_line_terminator(s: &str) -> Option<(usize, usize)> {
         }
     }
     None
+}
+
+/// A bare trailing decimal point belongs to the number only when it cannot
+/// begin an adjacent dot operator, nonconjugate transpose, or ellipsis.
+/// Preserve the established `1..3` split as `1.` then `.` then `3`.
+pub(crate) fn trailing_decimal_dot(s: &str) -> bool {
+    let Some(rest) = s.strip_prefix('.') else {
+        return false;
+    };
+    !matches!(
+        rest.as_bytes(),
+        [b'.', b'.', ..] | [b'*' | b'/' | b'\\' | b'^' | b'+' | b'-' | b'\'', ..]
+    )
 }
 
 pub(crate) fn scan_leading_dot_float_suffix(s: &str) -> Option<usize> {
@@ -56,7 +69,7 @@ pub(crate) fn scan_leading_dot_float_suffix(s: &str) -> Option<usize> {
         return None;
     }
 
-    if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+    if i < bytes.len() && matches!(bytes[i], b'e' | b'E' | b'd' | b'D') {
         let exp_start = i;
         i += 1;
         if i < bytes.len() && matches!(bytes[i], b'+' | b'-') {

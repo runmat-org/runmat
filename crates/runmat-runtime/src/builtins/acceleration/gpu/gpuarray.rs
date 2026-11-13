@@ -3,7 +3,6 @@
 //! Direct `gpuArray(X)` upload follows MATLAB semantics. Optional size arguments,
 //! `'like'` prototypes, and explicit dtype toggles are RunMat-mode extensions.
 
-use crate::builtins::acceleration::gpu::type_resolvers::gpuarray_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -13,12 +12,13 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 #[cfg(test)]
 use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, GPUARRAY_DTYPE_EXTENSION, GPUARRAY_ERROR_CODISTRIBUTED_UNSUPPORTED,
+    GPUARRAY_ERROR_CONFLICTING_TYPE, GPUARRAY_ERROR_CONVERSION, GPUARRAY_ERROR_INPUT_TYPE,
+    GPUARRAY_ERROR_INTERNAL, GPUARRAY_ERROR_LIKE_DUPLICATE, GPUARRAY_ERROR_LIKE_MISSING,
+    GPUARRAY_ERROR_LIKE_PROTOTYPE, GPUARRAY_ERROR_NO_PROVIDER, GPUARRAY_ERROR_OPTION_ARGUMENT,
+    GPUARRAY_ERROR_PROVIDER_IO, GPUARRAY_ERROR_RESHAPE, GPUARRAY_ERROR_SIZE_ARGUMENT,
+    GPUARRAY_ERROR_TYPED_INTEGER, GPUARRAY_ERROR_UNKNOWN_OPTION, GPUARRAY_LIKE_EXTENSION,
+    GPUARRAY_SIZE_EXTENSION, GPUARRAY_TEXT_UPLOAD_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::ComplexStorage;
@@ -30,339 +30,6 @@ use runmat_value::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "gpuArray";
-
-const GPUARRAY_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gpuarray-size-arguments",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "gpuArray size arguments are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GpuArraySizeExtension"),
-};
-
-const GPUARRAY_DTYPE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gpuarray-dtype-selector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "gpuArray dtype selectors are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GpuArrayDtypeExtension"),
-};
-
-const GPUARRAY_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gpuarray-like",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "the gpuArray \"like\" prototype selector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GpuArrayLikeExtension"),
-};
-
-const GPUARRAY_TEXT_UPLOAD_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gpuarray-text-upload",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "uploading character vectors or string scalars with gpuArray is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GpuArrayTextUploadExtension"),
-};
-
-pub const GPUARRAY_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    GPUARRAY_SIZE_EXTENSION,
-    GPUARRAY_DTYPE_EXTENSION,
-    GPUARRAY_LIKE_EXTENSION,
-    GPUARRAY_TEXT_UPLOAD_EXTENSION,
-];
-
-const GPUARRAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes upload as exact same-class real or paired-complex gpuArray storage with the original shape.",
-    }];
-
-const GPUARRAY_INTEGER_DTYPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat-only dtype selectors may explicitly convert X to any supported integer gpuArray class.",
-    }];
-
-pub const GPUARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "G = gpuArray(integer_X)",
-        inputs: &GPUARRAY_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The transfer preserves exact values, class, shape, and supported complexity. An existing gpuArray input is returned unchanged and remains valid.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "G = gpuArray(X, integer_dtype)",
-        inputs: &GPUARRAY_INTEGER_DTYPE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat-only conversion uses the requested native integer class and never consumes or invalidates a gpuArray input.",
-    },
-];
-
-const GPUARRAY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "G",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "GPU-resident handle containing uploaded/converted data.",
-}];
-
-const GPUARRAY_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to upload or recast on GPU.",
-}];
-
-const GPUARRAY_INPUTS_DIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input value to upload or recast on GPU.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reshape dimensions (scalar dims or a single size vector tensor).",
-    },
-];
-
-const GPUARRAY_INPUTS_DTYPE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input value to upload or recast on GPU.",
-    },
-    BuiltinParamDescriptor {
-        name: "dtype",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"double\""),
-        description: "Class tag such as `single`, `int32`, `uint8`, `logical`, or `double`.",
-    },
-];
-
-const GPUARRAY_INPUTS_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input value to upload or recast on GPU.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Literal keyword `\"like\"`.",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value whose class drives output conversion.",
-    },
-];
-
-const GPUARRAY_INPUTS_DIMS_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input value to upload or recast on GPU.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Reshape dimensions (scalar dims or a single size vector tensor).",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Class tags and/or `\"like\", prototype` qualifiers.",
-    },
-];
-
-const GPUARRAY_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "G = gpuArray(X)",
-        inputs: &GPUARRAY_INPUTS_BASE,
-        outputs: &GPUARRAY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "G = gpuArray(X, dim, ...)",
-        inputs: &GPUARRAY_INPUTS_DIMS,
-        outputs: &GPUARRAY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "G = gpuArray(X, dtype)",
-        inputs: &GPUARRAY_INPUTS_DTYPE,
-        outputs: &GPUARRAY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "G = gpuArray(X, \"like\", prototype)",
-        inputs: &GPUARRAY_INPUTS_LIKE,
-        outputs: &GPUARRAY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "G = gpuArray(X, dim, ..., option, ...)",
-        inputs: &GPUARRAY_INPUTS_DIMS_OPTIONS,
-        outputs: &GPUARRAY_OUTPUT,
-    },
-];
-
-const GPUARRAY_ERROR_NO_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.NO_PROVIDER",
-    identifier: Some("RunMat:gpuArray:NoProvider"),
-    when: "No acceleration provider is registered for host/device transfers.",
-    message: "gpuArray: no acceleration provider registered",
-};
-
-const GPUARRAY_ERROR_OPTION_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.OPTION_ARGUMENT",
-    identifier: Some("RunMat:gpuArray:OptionArgument"),
-    when: "Option tail contains non-text values where class tags/keywords are expected.",
-    message: "gpuArray: invalid option argument",
-};
-
-const GPUARRAY_ERROR_LIKE_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.LIKE_MISSING",
-    identifier: Some("RunMat:gpuArray:LikeMissingPrototype"),
-    when: "Keyword `like` is supplied without a following prototype value.",
-    message: "gpuArray: expected a prototype value after 'like'",
-};
-
-const GPUARRAY_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.LIKE_DUPLICATE",
-    identifier: Some("RunMat:gpuArray:LikeDuplicate"),
-    when: "Keyword `like` appears more than once.",
-    message: "gpuArray: duplicate 'like' qualifier",
-};
-
-const GPUARRAY_ERROR_CODISTRIBUTED_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.CODISTRIBUTED_UNSUPPORTED",
-    identifier: Some("RunMat:gpuArray:CodistributedUnsupported"),
-    when: "Distributed/codistributed qualifiers are requested.",
-    message: "gpuArray: codistributed arrays are not supported yet",
-};
-
-const GPUARRAY_ERROR_CONFLICTING_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.CONFLICTING_TYPE",
-    identifier: Some("RunMat:gpuArray:ConflictingTypeQualifiers"),
-    when: "Multiple incompatible class qualifiers are supplied.",
-    message: "gpuArray: conflicting type qualifiers supplied",
-};
-
-const GPUARRAY_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.UNKNOWN_OPTION",
-    identifier: Some("RunMat:gpuArray:UnknownOption"),
-    when: "Text option is not a recognized class/keyword token.",
-    message: "gpuArray: unrecognised option",
-};
-
-const GPUARRAY_ERROR_SIZE_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.SIZE_ARGUMENT",
-    identifier: Some("RunMat:gpuArray:InvalidSizeArgument"),
-    when: "Size arguments are malformed (not finite integers, negative, or invalid combinations).",
-    message: "gpuArray: invalid size argument",
-};
-
-const GPUARRAY_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.LIKE_PROTOTYPE",
-    identifier: Some("RunMat:gpuArray:InvalidLikePrototype"),
-    when: "`like` prototype is unsupported for type inference.",
-    message: "gpuArray: invalid 'like' prototype",
-};
-
-const GPUARRAY_ERROR_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.INPUT_TYPE",
-    identifier: Some("RunMat:gpuArray:UnsupportedInputType"),
-    when: "Input value type cannot be uploaded/coerced to supported gpuArray storage.",
-    message: "gpuArray: unsupported input type",
-};
-
-const GPUARRAY_ERROR_TYPED_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.TYPED_INTEGER",
-    identifier: Some("RunMat:gpuArray:TypedIntegerUnsupported"),
-    when: "A native integer value or integer GPU class is requested without matching provider storage.",
-    message: "gpuArray: native integer storage is not supported by the active acceleration provider",
-};
-
-const GPUARRAY_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.CONVERSION",
-    identifier: Some("RunMat:gpuArray:ConversionFailed"),
-    when: "Requested dtype conversion cannot be performed (for example NaN->logical).",
-    message: "gpuArray: conversion failed",
-};
-
-const GPUARRAY_ERROR_RESHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.RESHAPE",
-    identifier: Some("RunMat:gpuArray:ReshapeMismatch"),
-    when: "Requested shape does not preserve the element count.",
-    message: "gpuArray: cannot reshape gpuArray into requested size",
-};
-
-const GPUARRAY_ERROR_PROVIDER_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.PROVIDER_IO",
-    identifier: Some("RunMat:gpuArray:ProviderIO"),
-    when: "Provider upload/download interaction fails.",
-    message: "gpuArray: provider I/O failed",
-};
-
-const GPUARRAY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GPUARRAY.INTERNAL",
-    identifier: Some("RunMat:gpuArray:InternalError"),
-    when: "Internal tensor/container conversion fails.",
-    message: "gpuArray: internal error",
-};
-
-const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 15] = [
-    GPUARRAY_ERROR_NO_PROVIDER,
-    GPUARRAY_ERROR_OPTION_ARGUMENT,
-    GPUARRAY_ERROR_LIKE_MISSING,
-    GPUARRAY_ERROR_LIKE_DUPLICATE,
-    GPUARRAY_ERROR_CODISTRIBUTED_UNSUPPORTED,
-    GPUARRAY_ERROR_CONFLICTING_TYPE,
-    GPUARRAY_ERROR_UNKNOWN_OPTION,
-    GPUARRAY_ERROR_SIZE_ARGUMENT,
-    GPUARRAY_ERROR_LIKE_PROTOTYPE,
-    GPUARRAY_ERROR_INPUT_TYPE,
-    GPUARRAY_ERROR_TYPED_INTEGER,
-    GPUARRAY_ERROR_CONVERSION,
-    GPUARRAY_ERROR_RESHAPE,
-    GPUARRAY_ERROR_PROVIDER_IO,
-    GPUARRAY_ERROR_INTERNAL,
-];
-
-pub const GPUARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GPUARRAY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GPUARRAY_ERRORS,
-};
 
 fn gpu_array_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     gpu_array_error_with_message(error.message, error)
@@ -418,21 +85,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "gpuArray",
-    category = "acceleration/gpu",
-    summary = "Move data to the GPU as gpuArray values.",
-    keywords = "gpuArray,gpu,accelerate,upload,dtype,like",
-    examples = "G = gpuArray([1 2 3], 'single');",
-    accel = "array_construct",
-    type_resolver(gpuarray_type),
-    descriptor(crate::builtins::acceleration::gpu::gpuarray::GPUARRAY_DESCRIPTOR),
-    extensions(crate::builtins::acceleration::gpu::gpuarray::GPUARRAY_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::acceleration::gpu::gpuarray::GPUARRAY_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
-async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let options = parse_options(&rest)?;
+async fn gpu_array_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let options = parse_options(rest.view())?;
     if options.dims.is_some() {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GPUARRAY_SIZE_EXTENSION,
@@ -463,7 +123,12 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             // re-upload, or release the storage owned by the caller's handle.
             let explicit = handle
                 .clone()
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .map_err(|error| {
+                    provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                        error,
+                    ))
+                })?;
             return Ok(Value::GpuTensor(explicit));
         }
     }
@@ -491,26 +156,27 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         dtype,
         prepared.logical,
     ) {
-        if prepared.owns_handle {
-            let _ = prepared.provider.free(&handle);
-        }
-        return Err(error);
+        return Err(gpu_helpers::reject_gpu_output(handle, error));
     }
-    runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
-    runmat_accelerate_api::set_handle_class_name(&handle, dtype.class_name());
-    handle.descriptor.provenance = Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    handle = handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .map_err(|error| {
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
 
     Ok(Value::GpuTensor(handle))
 }
 
 fn gpu_array_value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
-        Value::ComplexTensor(tensor) => tensor.shape.clone(),
-        Value::LogicalArray(array) => array.shape.clone(),
-        Value::GpuTensor(handle) => handle.shape.clone(),
-        Value::CharArray(array) => array.shape.clone(),
-        Value::String(text) => vec![1, text.chars().count()],
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
+        Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
+        Value::LogicalArray(array) => array.shape.to_vec(),
+        Value::GpuTensor(handle) => handle.shape().to_vec(),
+        Value::CharArray(array) => array.shape().to_vec(),
+        Value::String(runmat_value::StringElement::Text(text)) => vec![1, text.chars().count()],
         _ => vec![1, 1],
     }
 }
@@ -563,6 +229,43 @@ impl DataClass {
         }
     }
 
+    fn from_class_identity(identity: &runmat_types::ClassIdentity) -> Option<Self> {
+        use runmat_types::standard;
+
+        if identity.is(standard::DOUBLE) {
+            Some(Self::Double)
+        } else if identity.is(standard::SINGLE) {
+            Some(Self::Single)
+        } else if identity.is(standard::LOGICAL) {
+            Some(Self::Logical)
+        } else if identity.is(standard::INT8) {
+            Some(Self::Int8)
+        } else if identity.is(standard::INT16) {
+            Some(Self::Int16)
+        } else if identity.is(standard::INT32) {
+            Some(Self::Int32)
+        } else if identity.is(standard::INT64) {
+            Some(Self::Int64)
+        } else if identity.is(standard::UINT8) {
+            Some(Self::UInt8)
+        } else if identity.is(standard::UINT16) {
+            Some(Self::UInt16)
+        } else if identity.is(standard::UINT32) {
+            Some(Self::UInt32)
+        } else if identity.is(standard::UINT64) {
+            Some(Self::UInt64)
+        } else {
+            None
+        }
+    }
+
+    fn class_identity(self) -> runmat_types::ClassIdentity {
+        match self {
+            Self::Logical => runmat_types::standard::LOGICAL.owned(),
+            _ => self.numeric_dtype().class_identity(),
+        }
+    }
+
     fn class_name(self) -> &'static str {
         match self {
             Self::Double => "double",
@@ -603,7 +306,7 @@ struct ParsedOptions {
     prototype: Option<Value>,
 }
 
-fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
+fn parse_options(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<ParsedOptions> {
     let (index_after_dims, dims) = parse_size_arguments(rest)?;
     let mut options = ParsedOptions {
         dims,
@@ -660,7 +363,9 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     Ok(options)
 }
 
-fn parse_size_arguments(rest: &[Value]) -> BuiltinResult<(usize, Option<Vec<usize>>)> {
+fn parse_size_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(usize, Option<Vec<usize>>)> {
     let mut idx = 0;
     let mut dims: Vec<usize> = Vec::new();
     let mut vector_consumed = false;
@@ -866,8 +571,8 @@ fn dtype_from_gpu_handle(handle: &GpuTensorHandle) -> BuiltinResult<DataClass> {
     if runmat_accelerate_api::handle_is_logical(handle) {
         return Ok(DataClass::Logical);
     }
-    if let Some(class_name) = runmat_accelerate_api::handle_class_name(handle) {
-        if let Some(dtype) = DataClass::from_tag(class_name.trim().to_ascii_lowercase().as_str()) {
+    if let Some(class_name) = runmat_accelerate_api::handle_class_identity(handle) {
+        if let Some(dtype) = DataClass::from_class_identity(&class_name) {
             return Ok(dtype);
         }
     }
@@ -893,18 +598,9 @@ struct PreparedHandle {
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     logical: bool,
     storage: runmat_accelerate_api::GpuTensorStorage,
-    owns_handle: bool,
 }
 
 fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHandle> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if runmat_accelerate_api::provider().is_none() {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let provider = runmat_accelerate_api::provider()
         .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
 
@@ -913,9 +609,9 @@ fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHa
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|err| {
                 gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
             })?;
-            upload_complex_host_value(provider, tensor, dtype)
+            upload_complex_host_value(provider, tensor, dtype, &[])
         }
-        Value::ComplexTensor(tensor) => upload_complex_host_value(provider, tensor, dtype),
+        Value::ComplexTensor(tensor) => upload_complex_host_value(provider, tensor, dtype, &[]),
         value => upload_real_host_value(provider, value, dtype),
     }
 }
@@ -932,7 +628,7 @@ fn upload_real_host_value(
                 (cast_integer_storage(&source, dtype)?, vec![1, 1])
             }
             Value::Tensor(tensor) => {
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let storage = if let Some(storage) = tensor.integer_storage().cloned() {
                     cast_integer_storage(&storage, dtype)?
                 } else {
@@ -952,7 +648,7 @@ fn upload_real_host_value(
             }
             other => {
                 let tensor = coerce_host_value(other)?;
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let values = tensor::tensor_into_values_f64(tensor);
                 let storage = Tensor::new_with_dtype(values, shape.clone(), dtype.numeric_dtype())
                     .map_err(|err| {
@@ -970,33 +666,23 @@ fn upload_real_host_value(
         let tensor = Tensor::new_integer(storage, shape).map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
         })?;
-        let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-        })?;
+        let handle = upload_real_tensor(provider, &tensor, false, &[])?;
         return Ok(PreparedHandle {
             handle,
             provider,
             logical: false,
             storage: runmat_accelerate_api::GpuTensorStorage::Real,
-            owns_handle: true,
         });
     }
     let tensor = coerce_host_value(value)?;
     let (tensor, logical) = cast_tensor(tensor, dtype)?;
-    let tensor = physical_logical_tensor(tensor, logical, provider.precision())?;
-    let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-    })?;
-    if logical {
-        runmat_accelerate_api::set_handle_logical(&new_handle, true);
-    }
+    let new_handle = upload_real_tensor(provider, &tensor, logical, &[])?;
 
     Ok(PreparedHandle {
         handle: new_handle,
         provider,
         logical,
         storage: runmat_accelerate_api::GpuTensorStorage::Real,
-        owns_handle: true,
     })
 }
 
@@ -1021,13 +707,13 @@ fn upload_complex_host_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     tensor: ComplexTensor,
     dtype: DataClass,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<PreparedHandle> {
-    let shape = tensor.shape.clone();
-    let storage = tensor.into_complex_storage();
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
     let storage = match dtype {
         DataClass::Double => match storage {
             storage @ ComplexStorage::F64(_) => storage,
-            storage => ComplexStorage::F64(storage.materialize_f64()),
+            storage => ComplexStorage::F64(storage.materialize_f64().into()),
         },
         DataClass::Single => match storage {
             storage @ ComplexStorage::F32(_) => storage,
@@ -1055,8 +741,8 @@ fn upload_complex_host_value(
             };
             ComplexStorage::Integer(
                 IntegerComplexStorage::new(
-                    cast_integer_storage(&storage.real, dtype)?,
-                    cast_integer_storage(&storage.imag, dtype)?,
+                    cast_integer_storage(storage.real(), dtype)?,
+                    cast_integer_storage(storage.imag(), dtype)?,
                 )
                 .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_CONVERSION))?,
             )
@@ -1071,15 +757,17 @@ fn upload_complex_host_value(
     let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_INPUT_TYPE))?;
 
-    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| {
-        gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
-    })?;
+    let handle = gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, protected)
+        .map_err(|err| {
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                err,
+            ))
+        })?;
     Ok(PreparedHandle {
         handle,
         provider,
         logical: false,
         storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        owns_handle: true,
     })
 }
 
@@ -1087,7 +775,7 @@ async fn convert_device_value(
     handle: GpuTensorHandle,
     dtype: DataClass,
 ) -> BuiltinResult<PreparedHandle> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+    let provider = gpu_helpers::exact_provider_for_handle(&handle)
         .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
     let was_logical = runmat_accelerate_api::handle_is_logical(&handle);
     let was_complex = runmat_accelerate_api::handle_storage(&handle)
@@ -1109,7 +797,6 @@ async fn convert_device_value(
                     } else {
                         runmat_accelerate_api::GpuTensorStorage::Real
                     },
-                    owns_handle: false,
                 });
             }
         }
@@ -1120,7 +807,6 @@ async fn convert_device_value(
                     provider,
                     logical: true,
                     storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                    owns_handle: false,
                 });
             }
         }
@@ -1139,7 +825,6 @@ async fn convert_device_value(
                     } else {
                         runmat_accelerate_api::GpuTensorStorage::Real
                     },
-                    owns_handle: false,
                 });
             }
         }
@@ -1150,7 +835,9 @@ async fn convert_device_value(
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
             .map_err(|err| {
-                gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
+                provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    err,
+                ))
             })?;
         let Value::ComplexTensor(tensor) = gathered else {
             return Err(gpu_array_error_with_message(
@@ -1158,15 +845,16 @@ async fn convert_device_value(
                 &GPUARRAY_ERROR_PROVIDER_IO,
             ));
         };
-        let prepared = upload_complex_host_value(provider, tensor, dtype)?;
+        let prepared = upload_complex_host_value(provider, tensor, dtype, &[&handle])?;
         return Ok(prepared);
     }
 
     if let Some(integer_type) = integer_type.filter(|_| dtype.is_integer()) {
-        let downloaded = provider.download_integer(&handle).await.map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-        })?;
-        if downloaded.shape != handle.shape || downloaded.data.element_type() != integer_type {
+        let downloaded = provider
+            .download_integer(&handle)
+            .await
+            .map_err(|error| provider_failure(error.into()))?;
+        if downloaded.shape != handle.shape() || downloaded.data.element_type() != integer_type {
             return Err(gpu_array_error_with_message(
                 "gpuArray: provider returned contradictory integer payload metadata",
                 &GPUARRAY_ERROR_PROVIDER_IO,
@@ -1178,38 +866,30 @@ async fn convert_device_value(
         let tensor = Tensor::new_integer(cast, shape).map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
         })?;
-        let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-        })?;
+        let new_handle = upload_real_tensor(provider, &tensor, false, &[&handle])?;
         return Ok(PreparedHandle {
             handle: new_handle,
             provider,
             logical: false,
             storage: runmat_accelerate_api::GpuTensorStorage::Real,
-            owns_handle: true,
         });
     }
 
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|err| {
-            gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                err,
+            ))
         })?;
     let (tensor, logical) = cast_tensor(tensor, dtype)?;
-    let tensor = physical_logical_tensor(tensor, logical, provider.precision())?;
-    let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-    })?;
-    if logical {
-        runmat_accelerate_api::set_handle_logical(&new_handle, true);
-    }
+    let new_handle = upload_real_tensor(provider, &tensor, logical, &[&handle])?;
 
     Ok(PreparedHandle {
         handle: new_handle,
         provider,
         logical,
         storage: runmat_accelerate_api::GpuTensorStorage::Real,
-        owns_handle: true,
     })
 }
 
@@ -1224,10 +904,7 @@ fn validate_prepared_handle(
     let expected_element = match dtype {
         DataClass::Double => runmat_accelerate_api::NumericElementType::F64,
         DataClass::Single => runmat_accelerate_api::NumericElementType::F32,
-        DataClass::Logical => match provider.precision() {
-            ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
-            ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
-        },
+        DataClass::Logical => handle.physical().element_type(),
         DataClass::Int8 => runmat_accelerate_api::NumericElementType::I8,
         DataClass::Int16 => runmat_accelerate_api::NumericElementType::I16,
         DataClass::Int32 => runmat_accelerate_api::NumericElementType::I32,
@@ -1237,24 +914,22 @@ fn validate_prepared_handle(
         DataClass::UInt32 => runmat_accelerate_api::NumericElementType::U32,
         DataClass::UInt64 => runmat_accelerate_api::NumericElementType::U64,
     };
-    let owner_matches = runmat_accelerate_api::provider_for_handle(handle)
-        .is_some_and(|owner| std::ptr::eq(owner, provider));
+    let owner_matches = gpu_helpers::exact_provider_for_handle(handle)
+        .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider));
     if !owner_matches
-        || handle.device_id != provider.device_id()
-        || handle.shape != expected_shape
-        || handle.descriptor.storage != Some(expected_storage)
-        || handle.descriptor.element_type != Some(expected_element)
+        || handle.device_id() != provider.device_id()
+        || handle.shape() != expected_shape
+        || handle.physical().storage() != expected_storage
+        || handle.physical().element_type() != expected_element
     {
         return Err(gpu_array_error_with_message(
             "gpuArray: provider returned a handle with the wrong owner or shape",
             &GPUARRAY_ERROR_PROVIDER_IO,
         ));
     }
-    let existing_class = runmat_accelerate_api::handle_class_name(handle);
-    if (runmat_accelerate_api::handle_is_logical(handle) && !logical)
-        || existing_class
-            .as_deref()
-            .is_some_and(|class_name| class_name != dtype.class_name())
+    let existing_class = runmat_accelerate_api::handle_class_identity(handle);
+    if runmat_accelerate_api::handle_is_logical(handle) != logical
+        || existing_class.is_some_and(|class_identity| class_identity != dtype.class_identity())
     {
         return Err(gpu_array_error_with_message(
             "gpuArray: provider returned contradictory class metadata",
@@ -1282,7 +957,7 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
         }),
         Value::CharArray(ca) => char_array_to_tensor(&ca),
-        Value::String(text) => {
+        Value::String(runmat_value::StringElement::Text(text)) => {
             let ca = CharArray::new_row(&text);
             char_array_to_tensor(&ca)
         }
@@ -1301,36 +976,15 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
     }
 }
 
-fn physical_logical_tensor(
-    tensor: Tensor,
-    logical: bool,
-    precision: ProviderPrecision,
-) -> BuiltinResult<Tensor> {
-    if !logical || precision == ProviderPrecision::F64 {
-        return Ok(tensor);
-    }
-    let shape = tensor.shape.clone();
-    let values = tensor
-        .into_numeric_storage()
-        .map(numeric_storage_into_f64)
-        .map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
-        })?;
-    Tensor::from_f32(
-        values.into_iter().map(|value| value as f32).collect(),
-        shape,
-    )
-    .map_err(|err| {
-        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
-    })
-}
+mod transfer;
+use transfer::{provider_failure, upload_real_tensor};
 
 fn cast_tensor(tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, bool)> {
     // This function is reached for non-integer destinations only.  Native integer
     // inputs take the native integer upload path above unless the caller explicitly
     // requested a floating or logical class, in which case this is the deliberate
     // MATLAB-style cast boundary.
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|err| {
         gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
     })?;
@@ -1411,12 +1065,19 @@ fn convert_to_single(data: &mut [f64]) {
 }
 
 fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> BuiltinResult<()> {
-    let new_elems: usize = dims.iter().product();
-    let current_elems: usize = if handle.shape.is_empty() {
-        new_elems
-    } else {
-        handle.shape.iter().product()
+    let count = |shape: &[usize]| -> BuiltinResult<usize> {
+        if shape.contains(&0) {
+            return Ok(0);
+        }
+        shape
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .ok_or_else(|| {
+                gpu_array_error_with_message("gpuArray: shape overflow", &GPUARRAY_ERROR_RESHAPE)
+            })
     };
+    let new_elems = count(dims)?;
+    let current_elems = count(handle.shape())?;
     if new_elems != current_elems {
         return Err(gpu_array_error_with_message(
             format!(
@@ -1426,7 +1087,42 @@ fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> BuiltinResult<()>
             &GPUARRAY_ERROR_RESHAPE,
         ));
     }
-    handle.shape = dims.to_vec();
+    if handle.shape() == dims {
+        return Ok(());
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
+    let reshaped = provider
+        .reshape(handle, dims)
+        .map_err(|error| provider_failure(error.into()))?;
+    if reshaped.shape() != dims
+        || reshaped.physical().element_type() != handle.physical().element_type()
+        || reshaped.physical().storage() != handle.physical().storage()
+        || runmat_accelerate_api::handle_is_logical(&reshaped)
+            != runmat_accelerate_api::handle_is_logical(handle)
+        || !gpu_helpers::exact_provider_for_handle(&reshaped)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            reshaped,
+            gpu_array_error_with_message(
+                "gpuArray: invalid provider reshape result",
+                &GPUARRAY_ERROR_RESHAPE,
+            ),
+        ));
+    }
+    *handle = reshaped
+        .with_provenance(
+            handle
+                .view()
+                .provenance()
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+        )
+        .map_err(|error| {
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
     Ok(())
 }
 
@@ -1438,15 +1134,10 @@ fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
         });
     }
-    let mut data = vec![0.0; rows * cols];
-    // Store in row-major to preserve the original character order when interpreted with column-major indexing
-    for row in 0..rows {
-        for col in 0..cols {
-            let idx_char = row * cols + col;
-            let ch = ca.data[idx_char];
-            data[row * cols + col] = ch as u32 as f64;
-        }
-    }
+    let data = ca
+        .iter_column_major()
+        .map(|unit| f64::from(unit.raw()))
+        .collect();
     Tensor::new(data, vec![rows, cols]).map_err(|err| {
         gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
     })
@@ -1458,12 +1149,14 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(gpu_array_builtin(value, rest))
+        block_on(gpu_array_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn call_with_mode(
@@ -1472,7 +1165,10 @@ pub(crate) mod tests {
         extensions_enabled: bool,
     ) -> crate::BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
-        block_on(gpu_array_builtin(value, rest))
+        block_on(gpu_array_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn gather_complex(value: Value) -> ComplexTensor {
@@ -1507,12 +1203,12 @@ pub(crate) mod tests {
             runmat_accelerate_api::register_provider(producer);
             runmat_accelerate_api::register_provider(mislabeled_owner);
         }
-        let handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: mislabeled_owner.device_id(),
-            buffer_id: 991,
-            descriptor: Default::default(),
-        };
+        let handle = mislabeled_owner
+            .upload(&HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
 
         let error = validate_prepared_handle(
             &handle,
@@ -1528,7 +1224,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gpu_array_ignores_stale_floating_annotation_on_durable_integer_handle() {
+    fn gpu_array_validates_native_integer_descriptor() {
         test_support::with_test_provider(|provider| {
             let values = [1_i32, 2_i32];
             let handle = provider
@@ -1545,8 +1241,7 @@ pub(crate) mod tests {
                 DataClass::Int32,
                 false,
             )
-            .expect("durable integer descriptor takes precedence over a stale annotation");
-            let _ = provider.free(&handle);
+            .expect("native integer descriptor validates");
         });
     }
 
@@ -1579,7 +1274,8 @@ pub(crate) mod tests {
     #[test]
     fn gpu_array_text_upload_is_gated() {
         test_support::with_test_provider(|_| {
-            let chars = CharArray::new("ab".chars().collect(), 1, 2).expect("chars");
+            let chars =
+                CharArray::from_unicode_scalars("ab".chars().collect(), 1, 2).expect("chars");
             let error = call_with_mode(Value::CharArray(chars), Vec::new(), false)
                 .expect_err("char upload is a RunMat extension");
             assert_eq!(
@@ -1605,12 +1301,48 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(handle.shape, tensor.shape);
+            assert_eq!(handle.shape(), tensor.shape());
             assert!(runmat_accelerate_api::handle_is_explicit(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather values");
-            assert_eq!(gathered.shape, tensor.shape);
+            assert_eq!(gathered.shape(), tensor.shape());
             assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn gpu_array_preserves_full_rank_zero_and_rank_one_host_geometry() {
+        test_support::with_test_provider(|_| {
+            for (values, shape) in [(vec![7.0], Vec::new()), (vec![2.0, 3.0], vec![2])] {
+                let input = Tensor::new(values.clone(), shape.clone()).expect("host tensor");
+                let Value::GpuTensor(handle) =
+                    call(Value::Tensor(input), Vec::new()).expect("gpuArray upload")
+                else {
+                    panic!("expected gpu tensor");
+                };
+                assert_eq!(handle.shape(), shape);
+                assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+                let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+                assert_eq!(gathered.shape(), shape);
+                assert_eq!(gathered.materialize_f64(), values);
+            }
+
+            let complex = ComplexTensor::new(vec![(1.5, -2.0)], Vec::new())
+                .expect("rank-zero complex tensor");
+            let Value::GpuTensor(handle) =
+                call(Value::ComplexTensor(complex), Vec::new()).expect("gpuArray complex upload")
+            else {
+                panic!("expected gpu tensor");
+            };
+            assert!(handle.shape().is_empty());
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = gather_complex(Value::GpuTensor(handle));
+            assert!(gathered.shape().is_empty());
+            assert_eq!(gathered.materialize_f64(), vec![(1.5, -2.0)]);
         });
     }
 
@@ -1624,8 +1356,8 @@ pub(crate) mod tests {
                 panic!("expected gpu tensor");
             };
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-                Some("single")
+                runmat_accelerate_api::handle_class_identity(&handle),
+                Some(runmat_types::standard::SINGLE.owned())
             );
             assert_eq!(
                 runmat_accelerate_api::handle_precision(&handle),
@@ -1651,8 +1383,8 @@ pub(crate) mod tests {
                 panic!("expected like gpu tensor");
             };
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&like_handle).as_deref(),
-                Some("single")
+                runmat_accelerate_api::handle_class_identity(&like_handle),
+                Some(runmat_types::standard::SINGLE.owned())
             );
             assert_eq!(
                 runmat_accelerate_api::handle_precision(&like_handle),
@@ -1662,7 +1394,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gpu_array_of_existing_single_handle_is_identity() {
+    fn gpu_array_of_existing_single_handle_preserves_allocation() {
         test_support::with_f32_test_provider(|_| {
             let uploaded = call(
                 Value::Tensor(Tensor::from_f32(vec![1.25, -3.5], vec![2, 1]).unwrap()),
@@ -1677,12 +1409,11 @@ pub(crate) mod tests {
             let Value::GpuTensor(identity) = identity else {
                 panic!("expected gpu tensor");
             };
+            assert!(identity.shares_allocation_with(&handle));
+            assert_eq!(identity.shape(), handle.shape());
+            assert_eq!(identity.physical(), handle.physical());
             assert_eq!(
-                runmat_accelerate_api::handle_identity(&identity),
-                runmat_accelerate_api::handle_identity(&handle)
-            );
-            assert_eq!(
-                identity.descriptor.provenance,
+                identity.view().provenance(),
                 Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             );
             let gathered = test_support::gather(Value::GpuTensor(handle.clone()))
@@ -1702,18 +1433,18 @@ pub(crate) mod tests {
             .expect("explicit gpuArray");
             let output =
                 crate::call_builtin("plus", &[input.clone(), input]).expect("direct provider plus");
-            let Value::GpuTensor(handle) = &output else {
+            let Value::GpuTensor(handle) = output.value() else {
                 panic!("expected resident plus output");
             };
             assert!(runmat_accelerate_api::handle_is_explicit(handle));
             assert_eq!(
-                handle.descriptor.provenance,
+                handle.view().provenance(),
                 Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             );
-            assert_eq!(
-                crate::call_builtin("isgpuarray", &[output]).expect("isgpuarray"),
-                Value::Bool(true)
-            );
+            let is_resident = output.with_owned(|output| {
+                crate::call_builtin("isgpuarray", &[output]).expect("isgpuarray")
+            });
+            assert_eq!(is_resident.value(), &Value::Bool(true));
         });
     }
 
@@ -1737,10 +1468,10 @@ pub(crate) mod tests {
             let Value::GpuTensor(rewrapped) = rewrapped else {
                 panic!("expected rewrapped gpu tensor");
             };
-            assert_eq!(rewrapped.buffer_id, handle.buffer_id);
+            assert!(rewrapped.shares_allocation_with(&handle));
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&rewrapped).as_deref(),
-                Some("uint64")
+                runmat_accelerate_api::handle_class_identity(&rewrapped),
+                Some(runmat_types::standard::UINT64.owned())
             );
 
             let gathered =
@@ -1775,7 +1506,7 @@ pub(crate) mod tests {
                 assert!(runmat_accelerate_api::handle_integer_type(&handle).is_none());
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle)).expect("gather uploaded tensor");
-                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.shape(), [1, 2]);
                 assert_eq!(gathered.materialize_f64(), expected, "{class_name}");
             }
         });
@@ -1814,8 +1545,8 @@ pub(crate) mod tests {
                 panic!("expected converted gpu tensor");
             };
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&converted).as_deref(),
-                Some("int16")
+                runmat_accelerate_api::handle_class_identity(&converted),
+                Some(runmat_types::standard::INT16.owned())
             );
             let gathered =
                 test_support::gather(Value::GpuTensor(converted)).expect("gather converted");
@@ -1880,7 +1611,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather logical");
-            assert_eq!(gathered.shape, logical.shape);
+            assert_eq!(gathered.shape(), logical.shape.as_slice());
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0]);
         });
     }
@@ -1900,7 +1631,7 @@ pub(crate) mod tests {
                 GpuTensorStorage::ComplexInterleaved
             );
             let gathered = gather_complex(Value::GpuTensor(handle.clone()));
-            assert_eq!(gathered.shape, complex.shape);
+            assert_eq!(gathered.shape(), complex.shape());
             assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
         });
     }
@@ -1946,7 +1677,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather bool");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0]);
         });
     }
@@ -1955,8 +1686,14 @@ pub(crate) mod tests {
     #[test]
     fn gpu_array_supports_char_arrays() {
         test_support::with_test_provider(|_| {
-            let chars = CharArray::new("row1row2".chars().collect(), 2, 4).unwrap();
-            let original: Vec<char> = chars.data.clone();
+            let chars = CharArray::from_code_units(
+                [0x0041, 0xD83D, 0xDE00, 0xD800, 0x0042, 0xDC00, 0, 0xFFFF]
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .to_vec(),
+                2,
+                4,
+            )
+            .unwrap();
             let result =
                 call(Value::CharArray(chars), Vec::new()).expect("gpuArray char array upload");
             let Value::GpuTensor(handle) = result else {
@@ -1964,18 +1701,13 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather chars");
-            assert_eq!(gathered.shape, vec![2, 4]);
-            let mut recovered = Vec::new();
-            for col in 0..4 {
-                for row in 0..2 {
-                    let idx = row + col * 2;
-                    let code = gathered.materialize_f64()[idx];
-                    let ch = char::from_u32(code as u32)
-                        .expect("valid unicode scalar from numeric code");
-                    recovered.push(ch);
-                }
-            }
-            assert_eq!(recovered, original);
+            assert_eq!(gathered.shape(), [2, 4]);
+            // Independent column-major numeric payload: valid surrogate pair,
+            // isolated high/low surrogates, NUL and noncharacter stay raw.
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![65.0, 66.0, 55357.0, 56320.0, 56832.0, 0.0, 55296.0, 65535.0]
+            );
         });
     }
 
@@ -1989,7 +1721,7 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather string");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             let expected: Vec<f64> = "gpu".chars().map(|ch| ch as u32 as f64).collect();
             assert_eq!(gathered.materialize_f64(), expected);
         });
@@ -2002,7 +1734,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let cloned = handle.clone();
@@ -2011,8 +1743,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(returned) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(returned.buffer_id, cloned.buffer_id);
-            assert_eq!(returned.shape, cloned.shape);
+            assert!(returned.shares_allocation_with(&cloned));
+            assert_eq!(returned.shape(), cloned.shape());
         });
     }
 
@@ -2027,7 +1759,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(returned) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(returned.buffer_id, handle.buffer_id);
+            assert!(returned.shares_allocation_with(&handle));
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&returned),
                 GpuTensorStorage::ComplexInterleaved
@@ -2168,7 +1900,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 0.0, -5.5], vec![3, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(
@@ -2183,8 +1915,7 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(new_handle.clone())).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
-            provider.free(&handle).ok();
-            provider.free(&new_handle).ok();
+            drop((handle, new_handle));
         });
     }
 
@@ -2192,13 +1923,15 @@ pub(crate) mod tests {
     #[test]
     fn gpu_array_gpu_logical_to_double_clears_flag() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let handle = runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[2, 1],
+                },
+                &[],
+            )
+            .expect("logical producer upload");
             let result = call(
                 Value::GpuTensor(handle.clone()),
                 vec![Value::from("double")],
@@ -2208,8 +1941,7 @@ pub(crate) mod tests {
                 panic!("expected gpu tensor");
             };
             assert!(!runmat_accelerate_api::handle_is_logical(&new_handle));
-            provider.free(&handle).ok();
-            provider.free(&new_handle).ok();
+            drop((handle, new_handle));
         });
     }
 
@@ -2226,7 +1958,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(handle.shape, vec![2, 2]);
+            assert_eq!(handle.shape(), &[2, 2]);
         });
     }
 
@@ -2237,7 +1969,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(
@@ -2248,9 +1980,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(new_handle) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(new_handle.shape, vec![2, 2]);
-            provider.free(&handle).ok();
-            provider.free(&new_handle).ok();
+            assert_eq!(new_handle.shape(), &[2, 2]);
+            drop((handle, new_handle));
         });
     }
 
@@ -2273,12 +2004,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_array_wgpu_native_integer_roundtrip() {
-        use runmat_accelerate_api::AccelProvider;
-
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
-            Ok(provider) => {
+            Ok(_) => {
                 for storage in [
                     IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
                     IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
@@ -2301,9 +2030,9 @@ pub(crate) mod tests {
                     assert!(runmat_accelerate_api::handle_integer_type(&handle).is_some());
                     let gathered = test_support::gather(Value::GpuTensor(handle.clone()))
                         .expect("wgpu integer gather");
-                    assert_eq!(gathered.shape, vec![2, 1]);
+                    assert_eq!(gathered.shape(), [2, 1]);
                     assert_eq!(gathered.integer_storage(), Some(&expected));
-                    provider.free(&handle).expect("free integer gpu buffer");
+                    drop(handle);
                 }
             }
             Err(err) => {
@@ -2367,9 +2096,7 @@ pub(crate) mod tests {
             gathered.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 0, 1_u64 << 63]))
         );
-        for handle in [&source, &selected, &target] {
-            provider.free(handle).expect("free gpu buffer");
-        }
+        drop((source, selected, target));
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 
@@ -2377,12 +2104,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_array_wgpu_complex_and_integer_roundtrip() {
-        use runmat_accelerate_api::AccelProvider;
-
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
-            Ok(provider) => {
+            Ok(_) => {
                 let complex =
                     ComplexTensor::new(vec![(1.25, -0.5), (-3.0, 4.0)], vec![1, 2]).unwrap();
                 let result = call(Value::ComplexTensor(complex.clone()), Vec::new())
@@ -2395,9 +2120,9 @@ pub(crate) mod tests {
                     GpuTensorStorage::ComplexInterleaved
                 );
                 let gathered = gather_complex(Value::GpuTensor(handle.clone()));
-                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.shape(), [1, 2]);
                 assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
-                provider.free(&handle).ok();
+                drop(handle);
 
                 let complex_integer = ComplexTensor::new_integer(
                     IntegerComplexStorage::new(
@@ -2421,7 +2146,7 @@ pub(crate) mod tests {
                     gather_complex(Value::GpuTensor(handle.clone())),
                     complex_integer
                 );
-                provider.free(&handle).ok();
+                drop(handle);
             }
             Err(err) => {
                 tracing::warn!("Skipping gpu_array_wgpu_complex_roundtrip: {err}");
@@ -2487,8 +2212,8 @@ pub(crate) mod tests {
                     Some(element_type)
                 );
                 assert_eq!(
-                    runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-                    Some(class_name)
+                    runmat_accelerate_api::handle_class_identity(&handle),
+                    Some(class_name.into())
                 );
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                 assert_eq!(gathered.integer_storage(), Some(&expected));
@@ -2528,8 +2253,8 @@ pub(crate) mod tests {
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
             assert_eq!(
-                runmat_accelerate_api::handle_class_name(&handle).as_deref(),
-                Some("uint64")
+                runmat_accelerate_api::handle_class_identity(&handle),
+                Some(runmat_types::standard::UINT64.owned())
             );
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(
@@ -2537,13 +2262,5 @@ pub(crate) mod tests {
                 Some(&IntegerStorage::U64(vec![7]))
             );
         });
-    }
-
-    #[test]
-    fn gpuarray_type_for_logical_is_logical() {
-        assert_eq!(
-            gpuarray_type(&[Type::logical()], &ResolveContext::new(Vec::new())),
-            Type::logical()
-        );
     }
 }

@@ -25,7 +25,7 @@ fn tensor_scalar_gt_mask_feeds_elementwise_multiply() {
         matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 2]
+                if tensor.shape() == vec![2, 2]
                     && tensor.materialize_f64() == vec![0.0, 30.0, 20.0, 0.0]
         )
     }));
@@ -43,10 +43,27 @@ fn uint64_comparisons_do_not_round_through_double() {
     )
     .expect("exact uint64 comparisons should execute");
 
-    assert!(vars.contains(&Value::Num(0.0)), "equality must be false");
     assert!(
-        vars.contains(&Value::Num(1.0)),
+        vars.contains(&Value::Bool(false)),
+        "equality must be logical false"
+    );
+    assert!(
+        vars.contains(&Value::Bool(true)),
         "inequality and ordering must be true"
+    );
+}
+
+#[test]
+fn scalar_comparison_operators_preserve_the_logical_type_contract() {
+    let values =
+        execute_source("a = 1 < 2; b = 1 <= 2; c = 2 > 1; d = 2 >= 1; e = 2 == 2; f = 2 ~= 1;")
+            .expect("scalar comparisons execute");
+    assert_eq!(values.len(), 6);
+    assert!(
+        values
+            .iter()
+            .all(|value| matches!(value, Value::Bool(true))),
+        "scalar comparison values must be logical: {values:?}"
     );
 }
 

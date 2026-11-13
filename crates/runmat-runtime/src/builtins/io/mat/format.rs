@@ -52,6 +52,7 @@ pub enum MatClass {
     Char,
     Cell,
     Struct,
+    Object,
     Sparse,
 }
 
@@ -73,6 +74,7 @@ impl MatClass {
             MatClass::Char => 4,
             MatClass::Cell => 1,
             MatClass::Struct => 2,
+            MatClass::Object => 3,
             MatClass::Sparse => 5,
         }
     }
@@ -93,6 +95,7 @@ impl MatClass {
             4 => Some(MatClass::Char),
             1 => Some(MatClass::Cell),
             2 => Some(MatClass::Struct),
+            3 => Some(MatClass::Object),
             5 => Some(MatClass::Sparse),
             _ => None,
         }
@@ -116,6 +119,13 @@ pub enum MatData {
         elements: Vec<MatArray>,
     },
     Struct {
+        field_names: Vec<String>,
+        field_values: Vec<MatArray>,
+    },
+    /// Level-5 mxOBJECT_CLASS: class name followed by struct-style fields.
+    /// This is a codec node, not a resolved Runtime object or class authority.
+    Object {
+        class_name: String,
         field_names: Vec<String>,
         field_values: Vec<MatArray>,
     },

@@ -1,25 +1,21 @@
 //! MATLAB-compatible `ndgrid` builtin.
+use runmat_builtins::{
+    NDGRID_ERROR_INTERNAL, NDGRID_ERROR_INVALID_AXIS, NDGRID_ERROR_MISSING_AXIS,
+    NDGRID_ERROR_TOO_MANY_OUTPUTS,
+};
 
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderNdgridAxis, ProviderNdgridRequest,
+    GpuTensorHandle, GpuTensorStorage, ProviderNdgridAxis, ProviderNdgridRequest,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType,
     NumericStorage, Tensor, Value,
 };
 
-use crate::builtins::array::type_resolvers::size_vector_len;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -58,181 +54,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "ndgrid explicitly materialises dense coordinate arrays and therefore bypasses fusion.",
 };
 
-fn ndgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Unknown;
-    }
-    let shape = if args.len() == 1 {
-        vec![size_vector_len(&args[0]), Some(1)]
-    } else {
-        args.iter().map(size_vector_len).collect::<Vec<_>>()
-    };
-    Type::Tensor { shape: Some(shape) }
-}
-
-const NDGRID_OUTPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X1",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Full grid coordinates for the first dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "X2",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Full grid coordinates for the second dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xn",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Full grid coordinates for the nth dimension.",
-    },
-];
-
-const NDGRID_SINGLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "xg",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Grid vector reused for every requested output dimension.",
-}];
-
-const NDGRID_MULTI_INPUT: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "x1",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid vector for the first dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "x2",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Grid vector for the second dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "xn",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Grid vector for the nth dimension.",
-    },
-];
-
-const NDGRID_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "[X1, X2, ..., Xn] = ndgrid(xg)",
-        inputs: &NDGRID_SINGLE_INPUT,
-        outputs: &NDGRID_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X1, X2, ..., Xn] = ndgrid(x1, x2, ..., xn)",
-        inputs: &NDGRID_MULTI_INPUT,
-        outputs: &NDGRID_OUTPUTS,
-    },
-];
-
-const NDGRID_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x1, x2, ..., xn",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every documented integer grid-vector class is replicated exactly and each corresponding output preserves that input class.",
-    }];
-
-pub const NDGRID_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[X1,...,Xn] = ndgrid(integer_x1, ..., integer_xn)",
-        inputs: &NDGRID_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host axes preserve authoritative native storage independently. MATLAB documents gpuArray axes only for single and double; explicit integer gpuArray axes reject, while automatic integer residency gathers transparently to exact host grids.",
-    }];
-
-const NDGRID_ERROR_MISSING_AXIS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NDGRID.MISSING_AXIS",
-    identifier: Some("RunMat:ndgrid:MissingAxis"),
-    when: "No grid vector inputs are provided.",
-    message: "ndgrid: at least one input vector is required",
-};
-
-const NDGRID_ERROR_INVALID_AXIS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NDGRID.INVALID_AXIS",
-    identifier: Some("RunMat:ndgrid:InvalidAxis"),
-    when: "An input is not numeric vector data.",
-    message: "ndgrid: inputs must be numeric vectors",
-};
-
-const NDGRID_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NDGRID.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:ndgrid:TooManyOutputs"),
-    when: "More outputs are requested than available input grid vectors.",
-    message: "ndgrid: too many output arguments for the supplied grid vectors",
-};
-
-const NDGRID_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NDGRID.INTERNAL",
-    identifier: Some("RunMat:ndgrid:Internal"),
-    when: "Output allocation, GPU gather, or GPU upload fails.",
-    message: "ndgrid: internal error",
-};
-
-const NDGRID_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    NDGRID_ERROR_MISSING_AXIS,
-    NDGRID_ERROR_INVALID_AXIS,
-    NDGRID_ERROR_TOO_MANY_OUTPUTS,
-    NDGRID_ERROR_INTERNAL,
-];
-
-pub const NDGRID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NDGRID_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NDGRID_ERRORS,
-};
-
 #[runtime_builtin(
     name = "ndgrid",
-    category = "array/creation",
-    summary = "Generate full coordinate arrays for an N-D rectangular grid.",
-    keywords = "ndgrid,grid,n-dimensional,coordinate arrays,gpu",
-    accel = "array_construct",
-    type_resolver(ndgrid_type),
-    descriptor(crate::builtins::array::creation::ndgrid::NDGRID_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::creation::ndgrid::NDGRID_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::ndgrid"
 )]
-async fn ndgrid_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn ndgrid_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
     if matches!(out_count, Some(0)) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
-    let eval = evaluate(&rest, out_count).await?;
+    let eval = evaluate(rest.view(), out_count).await?;
     if let Some(count) = out_count {
         let mut outputs = Vec::with_capacity(count);
         for dim in 0..count {
             outputs.push(eval.output(dim).await?);
         }
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
 
     eval.output(0).await
 }
 
 pub async fn evaluate(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     requested_outputs: Option<usize>,
 ) -> BuiltinResult<NdgridEval> {
     let parsed = ParsedNdgrid::parse(args, requested_outputs).await?;
@@ -308,37 +154,86 @@ fn try_provider_outputs(
     };
     let result = match provider.ndgrid(&request) {
         Ok(result) => result,
-        Err(_) => return Ok(None),
+        Err(cause)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&cause) =>
+        {
+            return Ok(None);
+        }
+        Err(cause) => {
+            return Err(crate::build_runtime_error(format!(
+                "ndgrid: provider expansion failed: {cause}"
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
+            .build())
+        }
     };
     if result.outputs.len() != parsed.output_count {
-        return Err(ndgrid_error_with_detail(
-            &NDGRID_ERROR_INTERNAL,
-            "provider returned wrong output count",
+        return Err(gpu_helpers::reject_gpu_outputs(
+            result.outputs,
+            ndgrid_error_with_detail(
+                &NDGRID_ERROR_INTERNAL,
+                "provider returned wrong output count",
+            ),
         ));
     }
 
-    let outputs = result
-        .outputs
-        .into_iter()
-        .enumerate()
-        .map(|(dim, handle)| {
-            annotate_provider_output(&handle, parsed.axes[dim].class());
-            NdgridOutput::Gpu(handle)
-        })
-        .collect();
-    Ok(Some(outputs))
-}
-
-fn annotate_provider_output(handle: &GpuTensorHandle, class: OutputClass) {
-    match class {
-        OutputClass::Real(_) => {
-            runmat_accelerate_api::set_handle_logical(handle, false);
+    let protected: Vec<_> = axes.iter().map(|axis| axis.handle).collect();
+    let mut outputs = Vec::with_capacity(result.outputs.len());
+    let mut remaining = result.outputs.into_iter();
+    for dim in 0..parsed.output_count {
+        let handle = remaining.next().expect("validated ndgrid output count");
+        let logical = parsed.axes[dim].class() == OutputClass::Logical;
+        let validated =
+            crate::builtins::common::random_args::validate_constructor_gpu_storage_protecting(
+                BUILTIN_NAME,
+                provider,
+                handle,
+                output_shape,
+                GpuTensorStorage::Real,
+                if logical {
+                    None
+                } else {
+                    runmat_accelerate_api::handle_precision(axes[dim].handle)
+                },
+                None,
+                logical,
+                &protected,
+            );
+        let mut handle = match validated {
+            Ok(handle) => handle,
+            Err(error) => {
+                return Err(gpu_helpers::reject_gpu_outputs(
+                    outputs
+                        .into_iter()
+                        .filter_map(|output| match output {
+                            NdgridOutput::Gpu(handle) => Some(handle),
+                            NdgridOutput::Host(_) => None,
+                        })
+                        .chain(remaining),
+                    error,
+                ))
+            }
+        };
+        if let Err(error) =
+            gpu_helpers::propagate_output_provenance(&mut handle, protected.iter().copied())
+        {
+            return Err(gpu_helpers::reject_gpu_outputs(
+                outputs
+                    .into_iter()
+                    .filter_map(|output| match output {
+                        NdgridOutput::Gpu(handle) => Some(handle),
+                        NdgridOutput::Host(_) => None,
+                    })
+                    .chain(std::iter::once(handle))
+                    .chain(remaining),
+                error,
+            ));
         }
-        OutputClass::Logical => {
-            runmat_accelerate_api::set_handle_logical(handle, true);
-        }
-        OutputClass::Complex => {}
+        runmat_accelerate_api::mark_residency(&handle);
+        outputs.push(NdgridOutput::Gpu(handle));
     }
+    Ok(Some(outputs))
 }
 
 struct ParsedNdgrid {
@@ -349,7 +244,10 @@ struct ParsedNdgrid {
 }
 
 impl ParsedNdgrid {
-    async fn parse(args: &[Value], requested_outputs: Option<usize>) -> BuiltinResult<Self> {
+    async fn parse(
+        args: crate::call::FunctionArgumentView<'_>,
+        requested_outputs: Option<usize>,
+    ) -> BuiltinResult<Self> {
         if args.is_empty() {
             return Err(ndgrid_error(&NDGRID_ERROR_MISSING_AXIS));
         }
@@ -462,7 +360,7 @@ async fn axis_from_value(
         Value::Bool(value) => Ok(logical_scalar_axis(value)),
         Value::Complex(re, im) => Ok(AxisData {
             len: 1,
-            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
+            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)].into())),
         }),
         Value::ComplexTensor(tensor) => axis_from_complex_tensor(tensor, index),
         Value::GpuTensor(handle) => {
@@ -470,20 +368,20 @@ async fn axis_from_value(
                 if runmat_accelerate_api::handle_storage(&handle)
                     == GpuTensorStorage::ComplexInterleaved
                 {
-                    if !is_vector_shape(&handle.shape) {
+                    if !is_vector_shape(handle.shape()) {
                         return Err(ndgrid_error_with_detail(
                             &NDGRID_ERROR_INVALID_AXIS,
                             format!(
                                 "argument {} must be a vector, got shape {:?}",
                                 index + 1,
-                                handle.shape
+                                handle.shape()
                             ),
                         ));
                     }
                     *prefer_gpu = true;
-                    gpu_device_id.get_or_insert(handle.device_id);
+                    gpu_device_id.get_or_insert(handle.device_id());
                     return Ok(AxisData {
-                        len: vector_len_from_shape(&handle.shape),
+                        len: vector_len_from_shape(handle.shape()),
                         storage: AxisStorage::GpuReal {
                             handle,
                             class: OutputClass::Complex,
@@ -509,8 +407,8 @@ async fn axis_from_value(
                 };
             }
             *prefer_gpu = true;
-            gpu_device_id.get_or_insert(handle.device_id);
-            if is_vector_shape(&handle.shape)
+            gpu_device_id.get_or_insert(handle.device_id());
+            if is_vector_shape(handle.shape())
                 && runmat_accelerate_api::handle_storage(&handle)
                     != GpuTensorStorage::ComplexInterleaved
             {
@@ -524,7 +422,7 @@ async fn axis_from_value(
                     )
                 };
                 return Ok(AxisData {
-                    len: vector_len_from_shape(&handle.shape),
+                    len: vector_len_from_shape(handle.shape()),
                     storage: AxisStorage::GpuReal { handle, class },
                 });
             }
@@ -538,7 +436,7 @@ async fn axis_from_value(
                 Value::Bool(value) => Ok(logical_scalar_axis(value)),
                 Value::Complex(re, im) => Ok(AxisData {
                     len: 1,
-                    storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
+                    storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)].into())),
                 }),
                 other => Err(ndgrid_error_with_detail(
                     &NDGRID_ERROR_INVALID_AXIS,
@@ -588,13 +486,13 @@ fn logical_scalar_axis(value: bool) -> AxisData {
 }
 
 fn axis_from_tensor(tensor: Tensor, index: usize) -> BuiltinResult<AxisData> {
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(ndgrid_error_with_detail(
             &NDGRID_ERROR_INVALID_AXIS,
             format!(
                 "argument {} must be a vector, got shape {:?}",
                 index + 1,
-                tensor.shape
+                tensor.shape()
             ),
         ));
     }
@@ -622,18 +520,18 @@ fn axis_from_logical(logical: LogicalArray, index: usize) -> BuiltinResult<AxisD
     let values = logical.data;
     Ok(AxisData {
         len: values.len(),
-        storage: AxisStorage::Logical(values),
+        storage: AxisStorage::Logical(values.into_vec()),
     })
 }
 
 fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> BuiltinResult<AxisData> {
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(ndgrid_error_with_detail(
             &NDGRID_ERROR_INVALID_AXIS,
             format!(
                 "argument {} must be a vector, got shape {:?}",
                 index + 1,
-                tensor.shape
+                tensor.shape()
             ),
         ));
     }
@@ -673,7 +571,7 @@ async fn axis_to_host_async(axis: &AxisData) -> BuiltinResult<AxisData> {
         Value::Bool(value) => Ok(logical_scalar_axis(value)),
         Value::Complex(re, im) => Ok(AxisData {
             len: 1,
-            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)])),
+            storage: AxisStorage::Complex(ComplexStorage::F64(vec![(re, im)].into())),
         }),
         other => Err(ndgrid_error_with_detail(
             &NDGRID_ERROR_INTERNAL,
@@ -899,7 +797,7 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
             Ok(handle) => {
                 return Ok(Value::GpuTensor(handle));
             }
-            Err(err) => return Err(ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, &err)),
+            Err(err) => return Err(err),
         }
     }
     Err(ndgrid_error_with_detail(
@@ -909,45 +807,30 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
 }
 
 fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<Value> {
-    let tensor = tensor::logical_to_tensor(&logical)
-        .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
-        let data = tensor.as_f64_slice().ok_or_else(|| {
-            ndgrid_error_with_detail(
-                &NDGRID_ERROR_INTERNAL,
-                "logical GPU upload requires double storage",
-            )
-        })?;
-        let view = HostTensorView {
-            data,
-            shape: &tensor.shape,
-        };
-        match provider.upload(&view) {
-            Ok(handle) => return Ok(gpu_helpers::logical_gpu_value(handle)),
-            Err(err) => {
-                return Err(ndgrid_error_with_detail(
-                    &NDGRID_ERROR_INTERNAL,
-                    err.to_string(),
-                ))
-            }
-        }
-    }
-    Err(ndgrid_error_with_detail(
-        &NDGRID_ERROR_INTERNAL,
-        "no acceleration provider registered for GPU output",
-    ))
+    let provider = runmat_accelerate_api::provider_for_device(device_id).ok_or_else(|| {
+        ndgrid_error_with_detail(
+            &NDGRID_ERROR_INTERNAL,
+            "no acceleration provider registered for GPU output",
+        )
+    })?;
+    let view = runmat_accelerate_api::HostLogicalTensorView {
+        data: &logical.data,
+        shape: &logical.shape,
+    };
+    let handle = provider.upload_logical(&view).map_err(|cause| {
+        crate::build_runtime_error(format!("ndgrid: logical upload failed: {cause}"))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(cause)
+            .build()
+    })?;
+    gpu_helpers::logical_gpu_value(handle)
 }
 
 fn to_complex_gpu_tensor_value(tensor: ComplexTensor, device_id: u32) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         match gpu_helpers::upload_complex_tensor(provider, &tensor) {
-            Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
-            Err(err) => {
-                return Err(ndgrid_error_with_detail(
-                    &NDGRID_ERROR_INTERNAL,
-                    err.to_string(),
-                ))
-            }
+            Ok(handle) => return gpu_helpers::complex_gpu_value(handle),
+            Err(err) => return Err(err),
         }
     }
     Err(ndgrid_error_with_detail(
@@ -1006,7 +889,10 @@ mod tests {
     use runmat_value::IntegerComplexStorage;
 
     fn eval(args: &[Value], outputs: Option<usize>) -> BuiltinResult<NdgridEval> {
-        block_on(evaluate(args, outputs))
+        block_on(evaluate(
+            crate::call::FunctionArgumentView::from_slice(args),
+            outputs,
+        ))
     }
 
     fn output(eval: &NdgridEval, dim: usize) -> BuiltinResult<Value> {
@@ -1014,12 +900,58 @@ mod tests {
     }
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
-        let _guard = crate::output_count::push_output_count(outputs);
-        block_on(ndgrid_builtin(args))
+        let _guard = crate::output_count::push_output_count(outputs).expect("output-count scope");
+        block_on(ndgrid_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Tensor {
         Tensor::new(data, shape).unwrap()
+    }
+
+    #[test]
+    fn resident_logical_axes_preserve_producer_intent_without_transfers() {
+        test_support::with_test_provider(|provider| {
+            let x = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            let y = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1],
+                    shape: &[1, 3],
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let grid = eval(
+                &[Value::GpuTensor(x.clone()), Value::GpuTensor(y.clone())],
+                Some(2),
+            )
+            .unwrap();
+            let outputs = [output(&grid, 0).unwrap(), output(&grid, 1).unwrap()];
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.upload_bytes, 0);
+            assert_eq!(telemetry.download_bytes, 0);
+            for (value, expected) in outputs.into_iter().zip([
+                vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                vec![0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            ]) {
+                let Value::GpuTensor(handle) = &value else {
+                    panic!("resident output")
+                };
+                assert!(handle.view().is_logical());
+                assert!(!handle.shares_allocation_with(&x));
+                assert!(!handle.shares_allocation_with(&y));
+                assert_eq!(handle.shape(), &[2, 3]);
+                assert_eq!(
+                    test_support::gather(value).unwrap().materialize_f64(),
+                    expected
+                );
+            }
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1029,7 +961,7 @@ mod tests {
         let eval = eval(&[Value::Tensor(x)], None).expect("ndgrid");
         assert_eq!(eval.outputs.len(), 1);
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![3, 1]);
+        assert_eq!(x_out.shape(), &[3, 1]);
         assert_eq!(x_out.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
@@ -1044,7 +976,7 @@ mod tests {
         assert_eq!(outputs.len(), 3);
 
         let x1 = test_support::gather(outputs[0].clone()).expect("x1");
-        assert_eq!(x1.shape, vec![2, 2, 2]);
+        assert_eq!(x1.shape(), &[2, 2, 2]);
         assert_eq!(
             x1.materialize_f64(),
             vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0, 10.0, 20.0]
@@ -1070,10 +1002,10 @@ mod tests {
         assert_eq!(eval.outputs.len(), 2);
 
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![3, 2]);
+        assert_eq!(x_out.shape(), &[3, 2]);
         assert_eq!(x_out.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
         let y_out = test_support::gather(output(&eval, 1).expect("Y")).expect("host");
-        assert_eq!(y_out.shape, vec![3, 2]);
+        assert_eq!(y_out.shape(), &[3, 2]);
         assert_eq!(
             y_out.materialize_f64(),
             vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0]
@@ -1094,7 +1026,7 @@ mod tests {
         assert_eq!(eval.outputs.len(), 3);
 
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![2, 3, 2]);
+        assert_eq!(x_out.shape(), &[2, 3, 2]);
         assert_eq!(
             x_out.materialize_f64(),
             vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
@@ -1115,7 +1047,7 @@ mod tests {
         let Value::ComplexTensor(out) = output(&eval, 0).expect("X") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
     }
 
@@ -1128,10 +1060,14 @@ mod tests {
             panic!("expected complex single output");
         };
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(
-            output.as_f32_slice(),
-            Some(&[(1.25, -2.5), (3.75, 4.5), (1.25, -2.5), (3.75, 4.5),][..])
+            output.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5), (3.75, 4.5), (1.25, -2.5), (3.75, 4.5),])
         );
     }
 
@@ -1145,11 +1081,11 @@ mod tests {
         let Value::ComplexTensor(x_out) = output(&eval, 0).expect("X") else {
             panic!("expected complex X");
         };
-        assert_eq!(x_out.shape, vec![2, 2]);
+        assert_eq!(x_out.shape(), &[2, 2]);
         let Value::Tensor(y_out) = output(&eval, 1).expect("Y") else {
             panic!("expected real Y");
         };
-        assert_eq!(y_out.shape, vec![2, 2]);
+        assert_eq!(y_out.shape(), &[2, 2]);
         assert_eq!(y_out.numeric_dtype(), NumericDType::F64);
         assert_eq!(y_out.materialize_f64(), vec![10.0, 10.0, 20.0, 20.0]);
     }
@@ -1217,7 +1153,7 @@ mod tests {
             let Value::Tensor(first_output) = output(&eval, 0).expect("grid output") else {
                 panic!("expected exact integer tensor");
             };
-            assert_eq!(first_output.shape, vec![2, 2]);
+            assert_eq!(first_output.shape(), &[2, 2]);
             assert_eq!(first_output.integer_storage(), Some(&expected));
             let Value::Tensor(second_output) = output(&eval, 1).expect("second grid output") else {
                 panic!("expected second exact integer tensor");
@@ -1235,8 +1171,9 @@ mod tests {
             )
             .expect("axis");
             let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated fixture provenance");
             let evaluated =
                 eval(&[Value::GpuTensor(automatic)], Some(1)).expect("automatic gather");
             let Value::Tensor(output) = output(&evaluated, 0).expect("host grid") else {
@@ -1248,8 +1185,9 @@ mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated fixture provenance");
             let error = match eval(&[Value::GpuTensor(explicit)], Some(1)) {
                 Ok(_) => panic!("explicit integer gpuArray must reject"),
                 Err(error) => error,
@@ -1274,8 +1212,9 @@ mod tests {
         .expect("axis");
 
         let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("automatic upload");
-        let automatic =
-            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .expect("validated fixture provenance");
         let evaluated = eval(&[Value::GpuTensor(automatic)], Some(1)).expect("automatic gather");
         let Value::Tensor(output) = output(&evaluated, 0).expect("exact host output") else {
             panic!("automatic integer residency must become host output");
@@ -1286,8 +1225,9 @@ mod tests {
         );
 
         let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("explicit upload");
-        let explicit =
-            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = explicit
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated fixture provenance");
         let error = match eval(&[Value::GpuTensor(explicit)], Some(1)) {
             Ok(_) => panic!("explicit integer gpuArray must reject"),
             Err(error) => error,
@@ -1311,7 +1251,7 @@ mod tests {
         let Value::Tensor(second) = output(&eval, 1).expect("second grid") else {
             panic!("expected typed integer second grid");
         };
-        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.shape(), &[2, 2]);
         assert_eq!(
             first.integer_storage(),
             Some(&IntegerStorage::U64(vec![
@@ -1346,7 +1286,7 @@ mod tests {
         let Value::ComplexTensor(first) = output(&eval, 0).expect("first grid") else {
             panic!("expected typed complex integer first grid");
         };
-        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.shape(), &[2, 2]);
         assert_eq!(
             first.integer_storage().cloned(),
             Some(
@@ -1403,7 +1343,7 @@ mod tests {
         assert_eq!(eval.outputs.len(), 1);
 
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![2, 3, 2]);
+        assert_eq!(x_out.shape(), &[2, 3, 2]);
         assert_eq!(
             x_out.materialize_f64(),
             vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
@@ -1419,7 +1359,7 @@ mod tests {
         let Value::ComplexTensor(out) = output(&eval, 0).expect("X") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(out.materialize_f64(), vec![(1.0, 0.0), (2.0, 0.0)]);
     }
 
@@ -1463,7 +1403,7 @@ mod tests {
     fn ndgrid_zero_requested_outputs_returns_empty_list() {
         let x = tensor(vec![1.0, 2.0], vec![1, 2]);
         let value = call(vec![Value::Tensor(x)], Some(0)).expect("ndgrid");
-        assert_eq!(value, Value::OutputList(Vec::new()));
+        assert_eq!(value, Value::output_list(Vec::new()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1490,7 +1430,7 @@ mod tests {
             assert_eq!(telemetry.download_bytes, 0);
             assert_eq!(telemetry.upload_bytes, 0);
             let gathered = test_support::gather(y_out).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.shape(), &[2, 3]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(
                 gathered.as_f32_slice(),
@@ -1508,13 +1448,13 @@ mod tests {
             let x_handle = provider
                 .upload(&HostTensorView {
                     data: &x.materialize_f64(),
-                    shape: &x.shape,
+                    shape: x.shape(),
                 })
                 .expect("upload x");
             let y_handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload y");
 
@@ -1532,9 +1472,9 @@ mod tests {
                 test_support::gather(Value::GpuTensor(x_handle)).expect("gather original x");
             let y_after =
                 test_support::gather(Value::GpuTensor(y_handle)).expect("gather original y");
-            assert_eq!(x_after.shape, vec![1, 2]);
+            assert_eq!(x_after.shape(), &[1, 2]);
             assert_eq!(x_after.materialize_f64(), vec![1.0, 2.0]);
-            assert_eq!(y_after.shape, vec![3, 1]);
+            assert_eq!(y_after.shape(), &[3, 1]);
             assert_eq!(y_after.materialize_f64(), vec![10.0, 20.0, 30.0]);
         });
     }
@@ -1574,15 +1514,15 @@ mod tests {
             };
             let storage = gathered.integer_storage().expect("paired storage");
             assert_eq!(
-                storage.real,
-                IntegerStorage::U64(vec![wide, u64::MAX, wide, u64::MAX])
+                storage.real(),
+                &IntegerStorage::U64(vec![wide, u64::MAX, wide, u64::MAX])
             );
             assert_eq!(
-                storage.imag,
-                IntegerStorage::U64(vec![u64::MAX, wide, u64::MAX, wide])
+                storage.imag(),
+                &IntegerStorage::U64(vec![u64::MAX, wide, u64::MAX, wide])
             );
-            provider.free(&input).expect("free input");
-            provider.free(&output).expect("free output");
+            drop(input);
+            drop(output);
         });
     }
 }

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="220" viewBox="0 0 760 220" role="img" aria-labelledby="title description">
+  <title id="title">Cantilever support and loading</title>
+  <desc id="description">A one meter beam is fixed at its x equals zero end. A downward end-face traction at x equals one meter has a resultant of one thousand newtons.</desc>
+  <defs>
+    <pattern id="support" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 8L8 0" stroke="#9ca3af" stroke-width="1.5"/></pattern>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#f6b760"/></marker>
+  </defs>
+  <rect width="760" height="220" rx="8" fill="#111318"/>
+  <g font-family="system-ui, sans-serif" font-size="15" fill="#e5e7eb">
+    <text x="38" y="32">Fixed end</text>
+    <text x="38" y="53" fill="#aeb7c4">x = 0</text>
+    <path d="M110 60V150" stroke="#79b5f8" stroke-width="4"/>
+    <rect x="88" y="60" width="20" height="90" fill="url(#support)"/>
+    <rect x="112" y="84" width="438" height="52" fill="#546c87" stroke="#a8c9ec" stroke-width="2"/>
+    <path d="M550 84V136" stroke="#f6b760" stroke-width="4"/>
+    <path d="M565 55V155" stroke="#f6b760" stroke-width="3" marker-end="url(#arrow)"/>
+    <text x="591" y="87">Downward load</text>
+    <text x="591" y="110" fill="#f6b760">1,000 N total</text>
+    <text x="591" y="133" fill="#aeb7c4">100 kPa on end face</text>
+    <path d="M112 174H550M112 167V181M550 167V181" stroke="#aeb7c4"/>
+    <text x="307" y="198">1 m</text>
+    <text x="466" y="32" fill="#aeb7c4">Free end · x = 1 m</text>
+  </g>
+</svg>

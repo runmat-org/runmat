@@ -2,27 +2,23 @@
 
 use regex::RegexBuilder;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ENDSWITH_ERROR_INTERNAL, ENDSWITH_ERROR_INVALID_INPUT,
+    ENDSWITH_ERROR_INVALID_OPTION, ENDSWITH_NUMERIC_IGNORE_CASE_EXTENSION,
+    ENDSWITH_POSITIONAL_IGNORE_CASE_EXTENSION, ENDSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
+    ENDSWITH_TEXT_IGNORE_CASE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
 use crate::builtins::strings::core::compat::pattern_regex;
-use crate::builtins::strings::type_resolvers::logical_text_match_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::endswith")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,221 +36,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "The builtin owns resident arguments so numeric text roles reject and option compatibility gates run before provider access; admitted controls gather explicitly and outputs remain host logical values.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::search::endswith")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "endsWith",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Text operation; not eligible for fusion and materialises host logical results.",
-};
-
 const BUILTIN_NAME: &str = "endsWith";
-
-const ENDSWITH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical result indicating whether each text element ends with the pattern.",
-}];
-
-const ENDSWITH_INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-];
-
-const ENDSWITH_INPUTS_IGNORE_CASE_POSITIONAL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "ignoreCase",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: Some("false"),
-        description: "Logical flag controlling case-sensitive matching.",
-    },
-];
-
-const ENDSWITH_INPUTS_IGNORE_CASE_PAIR: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"IgnoreCase\""),
-        description: "Option name (`\"IgnoreCase\"`).",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option value for `\"IgnoreCase\"`.",
-    },
-];
-
-const ENDSWITH_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = endsWith(str, pat)",
-        inputs: &ENDSWITH_INPUTS_BASE,
-        outputs: &ENDSWITH_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = endsWith(str, pat, ignoreCase)",
-        inputs: &ENDSWITH_INPUTS_IGNORE_CASE_POSITIONAL,
-        outputs: &ENDSWITH_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = endsWith(str, pat, \"IgnoreCase\", value)",
-        inputs: &ENDSWITH_INPUTS_IGNORE_CASE_PAIR,
-        outputs: &ENDSWITH_OUTPUT,
-    },
-];
-
-const ENDSWITH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ENDSWITH.INVALID_INPUT",
-    identifier: Some("RunMat:endsWith:InvalidInput"),
-    when: "Text or pattern input is not a supported text container.",
-    message: "endsWith: text and pattern inputs must be text values",
-};
-
-const ENDSWITH_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ENDSWITH.INVALID_OPTION",
-    identifier: Some("RunMat:endsWith:InvalidOption"),
-    when: "IgnoreCase option arguments are invalid or malformed.",
-    message: "endsWith: invalid option arguments",
-};
-
-const ENDSWITH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ENDSWITH.INTERNAL",
-    identifier: Some("RunMat:endsWith:InternalError"),
-    when: "Internal logical result assembly failed.",
-    message: "endsWith: internal error",
-};
-
-const ENDSWITH_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ENDSWITH_ERROR_INVALID_INPUT,
-    ENDSWITH_ERROR_INVALID_OPTION,
-    ENDSWITH_ERROR_INTERNAL,
-];
-
-pub const ENDSWITH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ENDSWITH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ENDSWITH_ERRORS,
-};
-
-const ENDSWITH_POSITIONAL_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "endswith-positional-ignore-case",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "endsWith with a positional IgnoreCase flag is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EndsWithPositionalIgnoreCaseExtension"),
-    };
-
-const ENDSWITH_NUMERIC_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "endswith-numeric-ignore-case",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "endsWith with a numeric IgnoreCase value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EndsWithNumericIgnoreCaseExtension"),
-    };
-
-const ENDSWITH_TEXT_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "endswith-text-ignore-case",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "endsWith with a textual IgnoreCase value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EndsWithTextIgnoreCaseExtension"),
-    };
-
-const ENDSWITH_RESIDENT_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "endswith-resident-ignore-case",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "endsWith with a resident IgnoreCase value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EndsWithResidentIgnoreCaseExtension"),
-    };
-
-pub const ENDSWITH_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    ENDSWITH_POSITIONAL_IGNORE_CASE_EXTENSION,
-    ENDSWITH_NUMERIC_IGNORE_CASE_EXTENSION,
-    ENDSWITH_TEXT_IGNORE_CASE_EXTENSION,
-    ENDSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
-];
-
-const ENDSWITH_INTEGER_IGNORE_CASE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "IgnoreCase",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form.",
-    }];
-
-pub const ENDSWITH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tf = endsWith(str, pat, 'IgnoreCase', integer_value)",
-        inputs: &ENDSWITH_INTEGER_IGNORE_CASE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Integer flags are compatibility-gated controls. Subject and pattern remain host text, multiple patterns are alternatives, and output has the subject shape.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tf = endsWith(str, pat, integer_ignore_case)",
-        inputs: &ENDSWITH_INTEGER_IGNORE_CASE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The positional integer flag requires both positional and numeric RunMat extension gates; a resident flag additionally requires the resident-control gate before gather.",
-    },
-];
 
 fn endswith_error_with_message(
     message: impl Into<String>,
@@ -273,29 +55,22 @@ fn remap_endswith_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "endsWith",
-    category = "strings/search",
-    summary = "Test whether text inputs end with patterns.",
-    keywords = "endswith,suffix,text,ignorecase,search",
-    accel = "sink",
-    type_resolver(logical_text_match_type),
-    descriptor(crate::builtins::strings::search::endswith::ENDSWITH_DESCRIPTOR),
-    extensions(crate::builtins::strings::search::endswith::ENDSWITH_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::strings::search::endswith::ENDSWITH_INTEGER_CAPABILITIES
-    ),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::search::endswith"
 )]
 async fn endswith_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     text: Value,
     pattern: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     reject_resident_numeric_text(&text)?;
     reject_resident_numeric_text(&pattern)?;
     let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
         endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
     })?;
-    let ignore_case = validate_endswith_options(rest).await?;
+    let ignore_case = validate_endswith_options(runtime.as_ref(), rest).await?;
     if matches!(pattern, Value::Object(_)) {
         let regex = pattern_regex(&pattern, BUILTIN_NAME).map_err(|err| {
             endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
@@ -308,7 +83,10 @@ async fn endswith_builtin(
     evaluate_endswith(&subject, &patterns, ignore_case)
 }
 
-async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
+async fn validate_endswith_options(
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<bool> {
     if rest.len() > 2 {
         return Err(endswith_error_with_message(
             "endsWith: expected at most one 'IgnoreCase' name-value pair",
@@ -316,7 +94,7 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
         ));
     }
     if rest.len() == 2 {
-        let option_name = super::text_utils::value_to_owned_string(&rest[0]);
+        let option_name = super::text_utils::value_to_owned_string(&rest[0], BUILTIN_NAME)?;
         if !option_name.is_some_and(|name| name.eq_ignore_ascii_case("IgnoreCase")) {
             return Err(endswith_error_with_message(
                 "endsWith: unknown option; supported option is 'IgnoreCase'",
@@ -324,7 +102,7 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             ));
         }
     }
-    if let Some(value) = option_value(&rest) {
+    if let Some(value) = option_value(rest.view()) {
         validate_ignore_case_shape(value)?;
     }
     let has_resident = rest
@@ -333,7 +111,7 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
     let parsed_host = if has_resident {
         None
     } else {
-        Some(parse_ignore_case(BUILTIN_NAME, &rest).map_err(|err| {
+        Some(parse_ignore_case(BUILTIN_NAME, rest.view()).map_err(|err| {
             endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_OPTION)
         })?)
     };
@@ -344,7 +122,15 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
-    let value = option_value(&rest);
+    // A resident control has its own declared extension. Check it before
+    // generic numeric classification and before gathering the borrowed handle.
+    if has_resident {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ENDSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    let value = option_value(rest.view());
     if value.is_some_and(is_numeric_ignore_case_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ENDSWITH_NUMERIC_IGNORE_CASE_EXTENSION,
@@ -357,41 +143,33 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
-    if has_resident {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &ENDSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-
     if let Some(ignore_case) = parsed_host {
         return Ok(ignore_case);
     }
 
-    let mut host = Vec::with_capacity(rest.len());
-    for value in rest {
-        host.push(
-            gather_if_needed_async(&value)
+    let host = rest
+        .try_map_preserving_roots_async(rest.len(), runtime, async |index| {
+            gather_if_needed_async(&rest[index])
                 .await
-                .map_err(remap_endswith_flow)?,
-        );
-    }
-    parse_ignore_case(BUILTIN_NAME, &host).map_err(|err| {
+                .map_err(remap_endswith_flow)
+        })
+        .await?;
+    parse_ignore_case(BUILTIN_NAME, host.view()).map_err(|err| {
         endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_OPTION)
     })
 }
 
-fn option_value(rest: &[Value]) -> Option<&Value> {
-    match rest {
-        [value] => Some(value),
-        [_, value] => Some(value),
+fn option_value(rest: crate::call::FunctionArgumentView<'_>) -> Option<&Value> {
+    match rest.len() {
+        1 => rest.get(0),
+        2 => rest.get(1),
         _ => None,
     }
 }
 
 fn validate_ignore_case_shape(value: &Value) -> BuiltinResult<()> {
     let element_count = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape),
+        Value::GpuTensor(handle) => tensor::element_count(handle.shape()),
         Value::Tensor(tensor) => tensor.len(),
         Value::LogicalArray(array) => array.data.len(),
         _ => 1,
@@ -521,11 +299,17 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
     fn run_endswith(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(endswith_builtin(text, pattern, rest))
+        futures::executor::block_on(endswith_builtin(
+            None,
+            text,
+            pattern,
+            crate::execution::RootedValues::new(rest)
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+                .into(),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -605,7 +389,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_multiple_patterns_are_alternatives_for_scalar_subject() {
-        let patterns = CharArray::new(vec!['n', 'x', 'r'], 3, 1).unwrap();
+        let patterns = CharArray::from_unicode_scalars(vec!['n', 'x', 'r'], 3, 1).unwrap();
         let result = run_endswith(
             Value::String("saturn".into()),
             Value::CharArray(patterns),
@@ -637,7 +421,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_missing_strings_false() {
-        let array = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing],
+            vec![1, 1],
+        )
+        .unwrap();
         let result = run_endswith(
             Value::StringArray(array),
             Value::String("a".into()),
@@ -769,7 +557,7 @@ pub(crate) mod tests {
             )
             .expect("endsWith");
             assert_eq!(result, Value::Bool(true));
-            provider.free(&handle).expect("free gpu flag");
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -807,7 +595,7 @@ pub(crate) mod tests {
         )
         .expect("endsWith");
         assert_eq!(result, Value::Bool(true));
-        let _ = provider.free(&handle);
+        handle.release().expect("release fixture handle");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -897,6 +685,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_integer_ignore_case_all_classes_are_exact_runmat_extensions() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -922,6 +711,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_integer_and_positional_flags_are_gated_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -950,14 +740,19 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_rejects_nested_resident_numeric_text_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
         for (text, pattern) in [
             (nested.clone(), Value::String("x".into())),
@@ -968,36 +763,56 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_resident_control_rejects_before_provider_access_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("borrowed resident control");
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
         let err = run_endswith(
             Value::String("RunMat".into()),
             Value::String("mat".into()),
-            vec![Value::String("IgnoreCase".into()), resident],
+            vec![
+                Value::String("IgnoreCase".into()),
+                Value::GpuTensor(allocation.handle.clone()),
+            ],
         )
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some("RunMat:compatibility:EndsWithNumericIgnoreCaseExtension")
+            Some("RunMat:compatibility:EndsWithResidentIgnoreCaseExtension")
         );
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_dispatch_preserves_residency_until_builtin_preflight() {
         assert_eq!(GPU_SPEC.residency, ResidencyPolicy::NewHandle);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 1,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let prepared = futures::executor::block_on(runmat_accelerate::prepare_builtin_args(
             "endsWith",
             &[resident],
@@ -1057,29 +872,19 @@ pub(crate) mod tests {
     fn endswith_missing_pattern_false() {
         let result = run_endswith(
             Value::String("alpha".into()),
-            Value::String("<missing>".into()),
+            Value::String(runmat_value::StringElement::Missing),
             Vec::new(),
         )
         .expect("endsWith");
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_accepts_pattern_object() {
         let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");
         let result =
             run_endswith(Value::String("run42".into()), pattern, Vec::new()).expect("endsWith");
         assert_eq!(result, Value::Bool(true));
-    }
-
-    #[test]
-    fn endswith_type_is_logical_match() {
-        assert_eq!(
-            logical_text_match_type(
-                &[Type::String, Type::String],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Bool
-        );
     }
 }

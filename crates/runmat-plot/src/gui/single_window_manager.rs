@@ -71,62 +71,25 @@ fn show_plot_internal(
         config.title = title;
     }
 
-    // Use existing runtime or create one if none exists
-    let handle = tokio::runtime::Handle::try_current();
-
-    match handle {
-        Ok(handle) => {
-            // Use existing runtime
-            tokio::task::block_in_place(|| {
-                handle.block_on(async {
-                    let mut window = PlotWindow::new(config)
-                        .await
-                        .map_err(|e| format!("Failed to create plot window: {e}"))?;
-
-                    if let Some(signal) = close_signal.clone() {
-                        window.install_close_signal(signal);
-                    }
-
-                    // Set the figure data
-                    window.set_figure(figure);
-
-                    // Run the window (this will consume the EventLoop)
-                    window
-                        .run()
-                        .await
-                        .map_err(|e| format!("Window execution failed: {e}"))?;
-
-                    Ok("Plot window closed successfully".to_string())
-                })
-            })
+    // Window creation and WGPU completion do not require a Tokio reactor.
+    // Keep the OS event loop on this thread without nesting a runtime or
+    // requiring Tokio's multi-thread-only block_in_place facility.
+    pollster::block_on(async move {
+        let mut window = PlotWindow::new(config)
+            .await
+            .map_err(|e| format!("Failed to create plot window: {e}"))?;
+        if let Some(signal) = close_signal {
+            window.install_close_signal(signal);
         }
-        Err(_) => {
-            // No runtime available, create one
-            let rt = tokio::runtime::Runtime::new()
-                .map_err(|e| format!("Failed to create async runtime: {e}"))?;
-
-            rt.block_on(async {
-                let mut window = PlotWindow::new(config)
-                    .await
-                    .map_err(|e| format!("Failed to create plot window: {e}"))?;
-
-                if let Some(signal) = close_signal {
-                    window.install_close_signal(signal);
-                }
-
-                // Set the figure data
-                window.set_figure(figure);
-
-                // Run the window (this will consume the EventLoop)
-                window
-                    .run()
-                    .await
-                    .map_err(|e| format!("Window execution failed: {e}"))?;
-
-                Ok("Plot window closed successfully".to_string())
-            })
-        }
-    }
+        window
+            .set_figure(figure)
+            .map_err(|error| format!("Failed to prepare plot: {error}"))?;
+        window
+            .run()
+            .await
+            .map_err(|e| format!("Window execution failed: {e}"))?;
+        Ok("Plot window closed successfully".to_string())
+    })
 }
 
 /// Check if the window system is available

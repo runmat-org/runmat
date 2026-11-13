@@ -1,9 +1,11 @@
+mod line;
 use super::super::{
-    CurveDerivatives, CurveProjection, GeometryEvaluationControl, GeometryEvaluationError,
-    GeometryEvaluationErrorKind, ParameterRange,
+    CurveDerivativeCoefficients, CurveProjectionCoefficients, GeometryEvaluationControl,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, ParameterRange,
 };
 use super::invalid_result;
 use super::vector::{distance, dot, norm, subtract};
+pub(super) use line::project_line;
 
 const MAX_NEWTON_ITERATIONS: usize = 64;
 const MAX_PROJECTION_SEEDS: usize = 1_000_000;
@@ -27,8 +29,8 @@ pub(super) fn project_curve(
     absolute_error_m: f64,
     seeds: impl IntoIterator<Item = f64>,
     control: &dyn GeometryEvaluationControl,
-    mut evaluate: impl FnMut(f64) -> Result<CurveDerivatives, GeometryEvaluationError>,
-) -> Result<CurveProjection, GeometryEvaluationError> {
+    mut evaluate: impl FnMut(f64) -> Result<CurveDerivativeCoefficients, GeometryEvaluationError>,
+) -> Result<CurveProjectionCoefficients, GeometryEvaluationError> {
     let projection = project_parametric(
         range,
         point_m,
@@ -44,7 +46,7 @@ pub(super) fn project_curve(
             })
         },
     )?;
-    Ok(CurveProjection {
+    Ok(CurveProjectionCoefficients {
         parameter: projection.parameter,
         point_m: projection.point,
         distance_m: projection.distance,
@@ -186,10 +188,13 @@ fn refine_stationary_point<const N: usize>(
     Ok(None)
 }
 
-pub(super) fn uniform_seeds(range: ParameterRange, interval_count: usize) -> Vec<f64> {
+pub(super) fn uniform_seeds(
+    range: ParameterRange,
+    interval_count: usize,
+) -> Result<Vec<f64>, GeometryEvaluationError> {
     let interval_count = interval_count.clamp(1, MAX_PROJECTION_SEEDS - 1);
     (0..=interval_count)
-        .map(|index| range.start + (range.end - range.start) * index as f64 / interval_count as f64)
+        .map(|index| range.parameter_at_fraction(index as f64 / interval_count as f64))
         .collect()
 }
 

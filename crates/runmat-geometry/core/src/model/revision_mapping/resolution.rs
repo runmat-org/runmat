@@ -17,34 +17,8 @@ impl GeometryRevisionMap {
             .map_err(GeometryRevisionMappingError::InvalidMap)?;
 
         for operation in &self.operations {
-            match operation {
-                GeometryRevisionOperation::Retain {
-                    source: candidate,
-                    target,
-                } if candidate == source => {
-                    return Ok(GeometryRevisionResolution::Retained(target.clone()));
-                }
-                GeometryRevisionOperation::Replace {
-                    source: candidate,
-                    target,
-                } if candidate == source => {
-                    return Ok(GeometryRevisionResolution::Replaced(target.clone()));
-                }
-                GeometryRevisionOperation::Split {
-                    source: candidate,
-                    targets,
-                } if candidate == source => {
-                    return Ok(GeometryRevisionResolution::Split(targets.clone()));
-                }
-                GeometryRevisionOperation::Merge { sources, target }
-                    if sources.binary_search(source).is_ok() =>
-                {
-                    return Ok(GeometryRevisionResolution::Merged(target.clone()));
-                }
-                GeometryRevisionOperation::Delete { source: candidate } if candidate == source => {
-                    return Ok(GeometryRevisionResolution::Deleted);
-                }
-                _ => {}
+            if let Some(resolution) = resolve_operation(operation, source) {
+                return Ok(resolution);
             }
         }
         Err(conflict(
@@ -60,17 +34,53 @@ impl GeometryRevisionMap {
         &self,
         source: &PersistentEntityId,
     ) -> Result<Option<PersistentEntityId>, GeometryRevisionMappingError> {
-        match self.resolve(source)? {
-            GeometryRevisionResolution::Retained(target)
-            | GeometryRevisionResolution::Replaced(target)
-            | GeometryRevisionResolution::Merged(target) => Ok(Some(target)),
-            GeometryRevisionResolution::Deleted => Ok(None),
-            GeometryRevisionResolution::Split(candidates) => Err(conflict(
-                source,
-                GeometryRevisionConflictKind::MultipleCandidates,
-                candidates,
-            )),
+        unique_resolution(source, self.resolve(source)?)
+    }
+}
+
+pub(super) fn resolve_operation(
+    operation: &GeometryRevisionOperation,
+    source: &PersistentEntityId,
+) -> Option<GeometryRevisionResolution> {
+    match operation {
+        GeometryRevisionOperation::Retain {
+            source: candidate,
+            target,
+        } if candidate == source => Some(GeometryRevisionResolution::Retained(target.clone())),
+        GeometryRevisionOperation::Replace {
+            source: candidate,
+            target,
+        } if candidate == source => Some(GeometryRevisionResolution::Replaced(target.clone())),
+        GeometryRevisionOperation::Split {
+            source: candidate,
+            targets,
+        } if candidate == source => Some(GeometryRevisionResolution::Split(targets.clone())),
+        GeometryRevisionOperation::Merge { sources, target }
+            if sources.binary_search(source).is_ok() =>
+        {
+            Some(GeometryRevisionResolution::Merged(target.clone()))
         }
+        GeometryRevisionOperation::Delete { source: candidate } if candidate == source => {
+            Some(GeometryRevisionResolution::Deleted)
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn unique_resolution(
+    source: &PersistentEntityId,
+    resolution: GeometryRevisionResolution,
+) -> Result<Option<PersistentEntityId>, GeometryRevisionMappingError> {
+    match resolution {
+        GeometryRevisionResolution::Retained(target)
+        | GeometryRevisionResolution::Replaced(target)
+        | GeometryRevisionResolution::Merged(target) => Ok(Some(target)),
+        GeometryRevisionResolution::Deleted => Ok(None),
+        GeometryRevisionResolution::Split(candidates) => Err(conflict(
+            source,
+            GeometryRevisionConflictKind::MultipleCandidates,
+            candidates,
+        )),
     }
 }
 

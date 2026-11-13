@@ -128,8 +128,8 @@ If no catch entry exists, the error leaves the interpreter.
 
 ## Semantic Function Hooks
 
-Before entering the loop, the interpreter installs thread-local semantic invoker and resolver hooks backed by the bytecode `FunctionRegistry`. This lets the runtime call back into bytecode-defined functions from several paths: direct semantic calls, closures, `feval`, object dispatch, and end-expression calls inside indexing.
+Before entering the loop, the interpreter installs scoped semantic invoker and resolver ports backed by the bytecode `FunctionRegistry` and selected `RuntimeContext`. This lets the runtime call back into bytecode-defined functions from several paths: direct semantic calls, closures, `feval`, object dispatch, and end-expression calls inside indexing. Selected callback factories return a fallible canonical continuation owner with rooted arguments/results; admission failure is terminal before the callback body is constructed, and execution failure is terminal after selection.
 
-Those hooks are scoped by guards. Bound semantic calls depend on them being active; without the interpreter-installed invoker, a semantic function ID cannot be executed by the runtime layer.
+Those ports are scoped by guards. Bound semantic calls depend on the exact-definition port and retained callable generation being active; an ordinary numeric semantic callback cannot confer that authority. Without the interpreter-installed invoker, a semantic function ID cannot be executed by the runtime layer. Legacy context-free embedding callbacks use distinct `Unscoped*` aliases and unbounded-only adapters, not the selected-context admission route.
 
 From here, call-specific behavior is covered in [Callable Resolution & Function Dispatch](/docs/runtime/vm/dispatch), and indexing-specific behavior is covered in [Indexing Subsystem](/docs/runtime/vm/indexing).

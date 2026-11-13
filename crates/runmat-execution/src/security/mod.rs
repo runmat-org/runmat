@@ -12,6 +12,19 @@ use sha2::{Digest as _, Sha256};
 
 use crate::ContractError;
 
+mod retirement;
+mod observation;
+pub use observation::{
+    NodeClockEndV1, NodeClockOwnerV1, NodeClockStartRequestV1, NodeClockStartV1,
+    MAX_CLOCK_OBSERVATIONS_PER_NODE, MAX_CLOCK_OBSERVATION_WIRE_BYTES,
+};
+pub use retirement::{
+    RetiredAttemptAccountingV1, RetiredResultInventoryV1, WorkerAttemptJournalEntryV1,
+    WorkerTreeRetirementEvidenceV1, MAX_RETIREMENT_ATTEMPTS,
+    MAX_RETIREMENT_ENCRYPTED_RECEIPT_BYTES, MAX_RETIREMENT_JOURNAL_ENTRY_BYTES,
+    MAX_RETIREMENT_WIRE_BYTES, RETIREMENT_JOURNAL_STAGING_FILE,
+};
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
@@ -254,7 +267,7 @@ impl DirectQuicEndpoint {
             && bounded_ascii(&self.server_name, 253)
             && !self.certificate_der.is_empty()
             && self.certificate_der.len() <= 16 * 1024
-            && self.certificate_sha256 == format!("{:x}", Sha256::digest(&self.certificate_der))
+            && self.certificate_sha256 == hex::encode(Sha256::digest(&self.certificate_der))
     }
 }
 
@@ -271,7 +284,7 @@ fn fingerprint(domain: &str, public_key: &[u8]) -> String {
     digest.update(domain.as_bytes());
     digest.update([0]);
     digest.update(public_key);
-    format!("{:x}", digest.finalize())
+    hex::encode(digest.finalize())
 }
 
 fn bounded_ascii(value: &str, maximum: usize) -> bool {
@@ -344,7 +357,7 @@ mod tests {
                 authority: "127.0.0.1:4433".into(),
                 server_name: "runmat.execution".into(),
                 certificate_der: vec![1, 2, 3],
-                certificate_sha256: format!("{:x}", Sha256::digest([1, 2, 3])),
+                certificate_sha256: hex::encode(Sha256::digest([1, 2, 3])),
             }],
             trust_tier: ExecutionTrustTier::CustomerTrusted,
             attestation_class: None,

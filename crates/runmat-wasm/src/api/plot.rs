@@ -41,7 +41,7 @@ use runmat_runtime::builtins::plotting::{
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
-    render_geometry_scene_snapshot as runtime_render_geometry_scene_snapshot,
+    render_geometry_scene_observation_snapshot as runtime_render_geometry_scene_observation_snapshot,
     reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure,
@@ -149,10 +149,21 @@ pub fn set_geometry_scene_presentation(
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = pickGeometrySceneRegion)]
-pub fn pick_geometry_scene_region(surface_id: u32, x: f32, y: f32) -> Result<JsValue, JsValue> {
-    let result = runtime_pick_geometry_scene_region(surface_id, x, y)
+pub fn pick_geometry_scene_region(
+    surface_id: u32,
+    x: f32,
+    y: f32,
+    mode: &str,
+) -> Result<JsValue, JsValue> {
+    let mode = match mode {
+        "edge" => runmat_plot::GeometryScenePickMode::Edge,
+        "point" => runmat_plot::GeometryScenePickMode::Point,
+        _ => runmat_plot::GeometryScenePickMode::Face,
+    };
+    let result = runtime_pick_geometry_scene_region(surface_id, x, y, mode)
         .map_err(|err| runtime_error_to_js(&err))?;
-    serde_wasm_bindgen::to_value(&result).map_err(|err| js_error(&err.to_string()))
+    serde::Serialize::serialize(&result, &serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|err| js_error(&err.to_string()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,6 +186,8 @@ struct PlotSurfaceEventPayload {
     wheel_delta_y: f32,
     #[serde(default)]
     wheel_delta_mode: u32,
+    #[serde(default)]
+    trackpad: Option<bool>,
     #[serde(default)]
     shift_key: bool,
     #[serde(default)]
@@ -225,7 +238,7 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
             buttons: payload.buttons,
             modifiers,
         },
-        "wheel" => {
+        "wheel" | "trackpadScroll" => {
             let mut wheel_delta_x = payload.wheel_delta_x;
             let mut wheel_delta_y = payload.wheel_delta_y;
             match payload.wheel_delta_mode {
@@ -242,6 +255,17 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
             }
             wheel_delta_x = -wheel_delta_x;
             wheel_delta_y = -wheel_delta_y;
+            if payload.kind == "trackpadScroll"
+                || payload.trackpad.unwrap_or(payload.wheel_delta_mode == 0)
+            {
+                return runmat_runtime::builtins::plotting::handle_surface_trackpad_scroll(
+                    surface_id,
+                    position,
+                    Vec2::new(wheel_delta_x, wheel_delta_y),
+                    modifiers,
+                )
+                .map_err(|error| runtime_error_to_js(&error));
+            }
             PlotEvent::MouseWheel {
                 position,
                 delta: Vec2::new(wheel_delta_x, wheel_delta_y),
@@ -255,6 +279,34 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
     };
 
     runtime_handle_plot_surface_event(surface_id, event).map_err(|err| runtime_error_to_js(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = configurePlotSurfaceViewer)]
+pub fn configure_plot_surface_viewer(
+    surface_id: u32,
+    navigation: JsValue,
+    antialiasing: JsValue,
+) -> Result<(), JsValue> {
+    let navigation: runmat_plot::core::NavigationOptions =
+        serde_wasm_bindgen::from_value(navigation).map_err(|error| js_error(&error.to_string()))?;
+    let antialiasing: runmat_plot::core::Antialiasing =
+        serde_wasm_bindgen::from_value(antialiasing)
+            .map_err(|error| js_error(&error.to_string()))?;
+    runmat_runtime::builtins::plotting::configure_surface_viewer(
+        surface_id,
+        navigation,
+        antialiasing,
+    )
+    .map_err(|error| runtime_error_to_js(&error))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = plotSurfaceAntialiasingModes)]
+pub fn plot_surface_antialiasing_modes(surface_id: u32) -> Result<JsValue, JsValue> {
+    let modes = runmat_runtime::builtins::plotting::surface_antialiasing_modes(surface_id)
+        .map_err(|error| runtime_error_to_js(&error))?;
+    serde_wasm_bindgen::to_value(&modes).map_err(|error| js_error(&error.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -279,10 +331,18 @@ pub fn get_plot_surface_camera_state(surface_id: u32) -> Result<JsValue, JsValue
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = "setPlotSurfaceCameraState")]
-pub fn set_plot_surface_camera_state(surface_id: u32, state: JsValue) -> Result<(), JsValue> {
+pub fn set_plot_surface_camera_state(
+    surface_id: u32,
+    state: JsValue,
+    expected_target: JsValue,
+) -> Result<(), JsValue> {
     let parsed: PlotSurfaceCameraState =
         serde_wasm_bindgen::from_value(state).map_err(|err| js_error(&err.to_string()))?;
-    runtime_set_surface_camera_state(surface_id, parsed).map_err(|err| runtime_error_to_js(&err))
+    let target: Option<runmat_plot::collaboration::PresenceTarget> =
+        serde_wasm_bindgen::from_value(expected_target)
+            .map_err(|err| js_error(&err.to_string()))?;
+    runtime_set_surface_camera_state(surface_id, parsed, target)
+        .map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -465,6 +525,18 @@ pub async fn wasm_render_geometry_scene_image(
     height: Option<u32>,
     view: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    wasm_render_geometry_scene_observation_image(handle, width, height, view, JsValue::NULL).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderGeometrySceneObservationImage)]
+pub async fn wasm_render_geometry_scene_observation_image(
+    handle: u32,
+    width: Option<u32>,
+    height: Option<u32>,
+    view: Option<String>,
+    observation: JsValue,
+) -> Result<Uint8Array, JsValue> {
     const DEFAULT_PREVIEW_WIDTH: u32 = 1024;
     const DEFAULT_PREVIEW_HEIGHT: u32 = 768;
     let _ = shared_webgpu_context();
@@ -475,10 +547,49 @@ pub async fn wasm_render_geometry_scene_image(
     } else {
         (normalized_width, normalized_height)
     };
-    let bytes = runtime_render_geometry_scene_snapshot(handle, render_width, render_height, view)
-        .await
-        .map_err(runtime_flow_to_js)?;
+    #[derive(Default, serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Observation {
+        #[serde(default)]
+        visibility: Option<serde_json::Value>,
+        #[serde(default)]
+        section: Option<serde_json::Value>,
+        #[serde(default)]
+        selected_region_ids: Vec<String>,
+    }
+    let observation: Observation = if observation.is_null() || observation.is_undefined() {
+        Observation::default()
+    } else {
+        serde_wasm_bindgen::from_value(observation).map_err(|err| js_error(&err.to_string()))?
+    };
+    let bytes = runtime_render_geometry_scene_observation_snapshot(
+        handle,
+        render_width,
+        render_height,
+        view,
+        observation.visibility,
+        observation.section,
+        observation.selected_region_ids,
+    )
+    .await
+    .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = measureGeometryScene)]
+pub fn wasm_measure_geometry_scene(
+    handle: u32,
+    kind: String,
+    region_ids: JsValue,
+) -> Result<JsValue, JsValue> {
+    let ids: Vec<String> =
+        serde_wasm_bindgen::from_value(region_ids).map_err(|err| js_error(&err.to_string()))?;
+    let result =
+        runmat_runtime::builtins::plotting::measure_geometry_scene_observation(handle, &kind, &ids)
+            .map_err(runtime_flow_to_js)?;
+    serde::Serialize::serialize(&result, &serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|err| js_error(&err.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -582,6 +693,14 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
     let payload = js_sys::Object::new();
     let message = err.to_string();
     let code = match err {
+        FigureError::ReceiverIdentity(source) => {
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("details"),
+                &JsValue::from_str(&source.to_string()),
+            );
+            "ReceiverIdentity"
+        }
         FigureError::InvalidHandle(handle) => {
             let _ = Reflect::set(
                 &payload,
@@ -623,6 +742,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
         FigureError::InvalidPlotObjectHandle => "InvalidPlotObjectHandle",
+        FigureError::StalePlotSnapshot => "StalePlotSnapshot",
         FigureError::RenderFailure { source } => {
             let details = source.to_string();
             let _ = Reflect::set(
@@ -644,6 +764,51 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         &JsValue::from_str(&message),
     );
     JsValue::from(payload)
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod error_tests {
+    use super::*;
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn stale_plot_snapshot_preserves_public_error() {
+        let error = figure_error_to_js(FigureError::StalePlotSnapshot);
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("StalePlotSnapshot")
+        );
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("message"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("plot changed while reading its GPU data")
+        );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn receiver_identity_preserves_typed_source() {
+        let error = figure_error_to_js(FigureError::ReceiverIdentity(
+            runmat_runtime::builtins::plotting::GraphicsReceiverIssueError,
+        ));
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("ReceiverIdentity")
+        );
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("details"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("graphics receiver identity space exhausted")
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -801,8 +966,7 @@ fn shared_webgpu_context() -> Option<SharedWgpuContext> {
         AccelContextHandle::Wgpu(ctx) => {
             let shared = SharedWgpuContext {
                 instance: ctx.instance.clone(),
-                device: ctx.device,
-                queue: ctx.queue,
+                access: ctx.access,
                 adapter: ctx.adapter,
                 adapter_info: ctx.adapter_info.clone(),
                 limits: ctx.limits,
@@ -813,4 +977,19 @@ fn shared_webgpu_context() -> Option<SharedWgpuContext> {
             Some(shared)
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = setSurfacePresence)]
+pub fn set_surface_presence(surface_id: u32, frame: JsValue) -> Result<(), JsValue> {
+    let frame = serde_wasm_bindgen::from_value(frame).map_err(|err| js_error(&err.to_string()))?;
+    runmat_runtime::builtins::plotting::set_surface_presence(surface_id, frame)
+        .map_err(|err| runtime_error_to_js(&err))
+}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = captureSurfacePointer)]
+pub fn capture_surface_pointer(surface_id: u32, x: f32, y: f32) -> Result<JsValue, JsValue> {
+    let point = runmat_runtime::builtins::plotting::capture_surface_pointer(surface_id, x, y)
+        .map_err(|err| runtime_error_to_js(&err))?;
+    serde_wasm_bindgen::to_value(&point).map_err(|err| js_error(&err.to_string()))
 }

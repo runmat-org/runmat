@@ -1,9 +1,9 @@
 //! MATLAB-compatible `ifftn` builtin with GPU-aware semantics for RunMat.
 
 use super::common::{
-    complex_tensor_to_real_value, download_provider_complex_tensor, ensure_wide_integer_data_exact,
-    free_rejected_provider_fft_output, gather_gpu_complex_tensor, gpu_metadata_snapshot,
-    is_wide_integer_value, parse_nd_sizes_value, parse_symflag, provider_operation_unsupported,
+    complex_tensor_to_real_value, download_owned_provider_complex_tensor,
+    download_provider_complex_tensor, ensure_wide_integer_data_exact, gather_gpu_complex_tensor,
+    gpu_metadata_snapshot, is_wide_integer_value, parse_nd_sizes_value, parse_symflag,
     restore_complex_gpu_result, restore_gpu_metadata, restore_real_gpu_result, same_gpu_handle,
     transform_complex_tensor, transform_nd_complex_tensor, valid_provider_fft_output,
     value_to_complex_tensor, TransformDirection,
@@ -13,17 +13,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::math::fft::type_resolvers::ifftn_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::*;
 use runmat_value::{ComplexTensor, Value};
 
 use runmat_macros::runtime_builtin;
@@ -56,233 +48,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ifftn";
-
-const IFFTN_WIDE_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifftn-wide-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifftn with host int64 or uint64 data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IfftnWideIntegerDataExtension"),
-};
-const IFFTN_WIDE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifftn-wide-integer-controls",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifftn with int64 or uint64 SIZE controls is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IfftnWideIntegerControlExtension"),
-};
-const IFFTN_SHORT_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifftn-short-size-vector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifftn SIZE vectors shorter than ndims(X) are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IfftnShortSizeExtension"),
-};
-const IFFTN_ZERO_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifftn-zero-size-vector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifftn SIZE vectors containing zero are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IfftnZeroSizeExtension"),
-};
-pub const IFFTN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    IFFTN_WIDE_DATA_EXTENSION,
-    IFFTN_WIDE_CONTROL_EXTENSION,
-    IFFTN_SHORT_SIZE_EXTENSION,
-    IFFTN_ZERO_SIZE_EXTENSION,
-];
-
-const IFFTN_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Documented integer arrays enter the double N-dimensional inverse-FFT domain.",
-}];
-const IFFTN_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "SIZE",
-    classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "SIZE is a positive integer vector with length at least ndims(X); logical vectors are documented.",
-}];
-const IFFTN_WIDE_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &[
-        runmat_builtins::BuiltinIntegerClass::Int64,
-        runmat_builtins::BuiltinIntegerClass::Uint64,
-    ],
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Host wide data is gated and must be exactly representable as double.",
-}];
-const IFFTN_WIDE_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "SIZE",
-    classes: &[
-        runmat_builtins::BuiltinIntegerClass::Int64,
-        runmat_builtins::BuiltinIntegerClass::Uint64,
-    ],
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
-    notes: "Wide SIZE controls are independently gated and decoded exactly.",
-}];
-pub const IFFTN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifftn(integer_X, ...)", inputs: &IFFTN_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Documented integer data produces double output; symmetric changes complexity only." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifftn(X, integer_SIZE, ...)", inputs: &IFFTN_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Documented SIZE is decoded exactly and validated before execution." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifftn(int64_or_uint64_X, ...)", inputs: &IFFTN_WIDE_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only wide host data may not silently round; resident wide data rejects before gather." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifftn(X, int64_or_uint64_SIZE, ...)", inputs: &IFFTN_WIDE_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only wide SIZE controls are independently gated; short and zero vectors have separate gates." },
-];
-
-const IFFTN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "N-D inverse FFT output.",
-}];
-
-const IFFTN_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input spectrum or signal.",
-}];
-
-const IFFTN_INPUTS_SIZE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "SIZE",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Transform sizes per dimension.",
-    },
-];
-
-const IFFTN_INPUTS_SYMFLAG: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "symflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"nonsymmetric\""),
-        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
-    },
-];
-
-const IFFTN_INPUTS_SIZE_SYMFLAG: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "SIZE",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Transform sizes per dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "symflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"nonsymmetric\""),
-        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
-    },
-];
-
-const IFFTN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = ifftn(X)",
-        inputs: &IFFTN_INPUTS_CORE,
-        outputs: &IFFTN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifftn(X, SIZE)",
-        inputs: &IFFTN_INPUTS_SIZE,
-        outputs: &IFFTN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifftn(X, symflag)",
-        inputs: &IFFTN_INPUTS_SYMFLAG,
-        outputs: &IFFTN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifftn(X, SIZE, symflag)",
-        inputs: &IFFTN_INPUTS_SIZE_SYMFLAG,
-        outputs: &IFFTN_OUTPUT,
-    },
-];
-
-const IFFTN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFTN.ARG_COUNT",
-    identifier: Some("RunMat:ifftn:ArgCount"),
-    when: "More than three input arguments are supplied.",
-    message: "ifftn: invalid argument count",
-};
-
-const IFFTN_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFTN.INVALID_SIZE",
-    identifier: Some("RunMat:ifftn:InvalidSize"),
-    when: "SIZE argument is invalid.",
-    message: "ifftn: invalid SIZE argument",
-};
-
-const IFFTN_ERROR_INVALID_SYMFLAG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFTN.INVALID_SYMFLAG",
-    identifier: Some("RunMat:ifftn:InvalidSymflag"),
-    when: "Symmetry flag is invalid or appears in an invalid position.",
-    message: "ifftn: invalid symmetry flag usage",
-};
-
-const IFFTN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFTN.INVALID_INPUT",
-    identifier: Some("RunMat:ifftn:InvalidInput"),
-    when: "Input cannot be converted to supported numeric/complex domain.",
-    message: "ifftn: invalid input",
-};
-
-const IFFTN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFTN.INTERNAL",
-    identifier: Some("RunMat:ifftn:Internal"),
-    when: "IFFTN execution or tensor shaping fails.",
-    message: "ifftn: internal error",
-};
-const IFFTN_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFTN.PROVIDER_INTEGRITY",
-    identifier: Some("RunMat:ifftn:ProviderIntegrity"),
-    when:
-        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
-    message: "ifftn: provider integrity error",
-};
-
-const IFFTN_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    IFFTN_ERROR_ARG_COUNT,
-    IFFTN_ERROR_INVALID_SIZE,
-    IFFTN_ERROR_INVALID_SYMFLAG,
-    IFFTN_ERROR_INVALID_INPUT,
-    IFFTN_ERROR_INTERNAL,
-    IFFTN_ERROR_PROVIDER_INTEGRITY,
-];
-
-pub const IFFTN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IFFTN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IFFTN_ERRORS,
-};
 
 fn ifftn_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     ifftn_error_with_message(error.message, error)
@@ -337,16 +102,13 @@ fn ifftn_provider_error(detail: impl AsRef<str>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "ifftn",
-    category = "math/fft",
-    summary = "Compute the N-dimensional inverse discrete Fourier transform (IDFT) of numeric or complex data.",
-    keywords = "ifftn,inverse nd fft,n-dimensional inverse fourier transform,gpu",
-    type_resolver(ifftn_type),
-    descriptor(crate::builtins::math::fft::ifftn::IFFTN_DESCRIPTOR),
-    extensions(crate::builtins::math::fft::ifftn::IFFTN_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::fft::ifftn::IFFTN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::ifftn"
 )]
-async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ifftn_builtin_registered(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifftn")?;
     if is_wide_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -361,7 +123,7 @@ async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let (sizes, symmetric) = parse_ifftn_arguments(&rest)?;
+    let (sizes, symmetric) = parse_ifftn_arguments(rest.view())?;
     if let Some(ref sizes) = sizes {
         if sizes.len() < ifftn_input_rank(&value) {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -380,6 +142,12 @@ async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         Value::GpuTensor(handle) => ifftn_gpu(handle, sizes, symmetric).await,
         other => ifftn_host(other, sizes, symmetric),
     }
+}
+
+#[cfg(test)]
+async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    ifftn_builtin_registered(value, rest).await
 }
 
 fn ifftn_host(value: Value, sizes: Option<Vec<usize>>, symmetric: bool) -> BuiltinResult<Value> {
@@ -412,7 +180,7 @@ async fn ifftn_gpu(
             return ifftn_gpu_fallback(handle, sizes, symmetric).await;
         }
         let mut current = handle.clone();
-        let mut logical_shape = current.shape.clone();
+        let mut logical_shape = current.shape().to_vec();
         if logical_shape.is_empty() {
             logical_shape.push(1);
         }
@@ -438,10 +206,6 @@ async fn ifftn_gpu(
                         if same_gpu_handle(&next, &handle) {
                             restore_gpu_metadata(&handle, input_metadata);
                         }
-                        free_rejected_provider_fft_output(provider, &next, &[&handle, &current]);
-                        if !same_gpu_handle(&current, &handle) {
-                            free_rejected_provider_fft_output(provider, &current, &[&handle]);
-                        }
                         return Err(ifftn_provider_error(format!(
                             "ifft_dim pass {} aliased a protected handle",
                             axis + 1
@@ -454,38 +218,25 @@ async fn ifftn_gpu(
                         runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                         precision,
                     ) {
-                        free_rejected_provider_fft_output(provider, &next, &[&handle, &current]);
-                        if !same_gpu_handle(&current, &handle) {
-                            free_rejected_provider_fft_output(provider, &current, &[&handle]);
-                        }
                         return Err(ifftn_provider_error(format!(
                             "ifft_dim pass {} returned malformed metadata",
                             axis + 1
                         )));
                     }
-                    if !same_gpu_handle(&current, &handle) {
-                        free_rejected_provider_fft_output(provider, &current, &[&handle, &next]);
-                    }
                     current = next;
                 }
-                Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {
+                Err(error) if error.is_unsupported() => {
                     let downloaded = if same_gpu_handle(&current, &handle) {
                         gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await
                     } else {
-                        let result = download_provider_complex_tensor(
-                            provider,
-                            &current,
-                            BUILTIN_NAME,
-                            false,
-                        )
-                        .await;
-                        free_rejected_provider_fft_output(provider, &current, &[&handle]);
-                        result
+                        download_provider_complex_tensor(provider, &current, BUILTIN_NAME).await
                     }
-                    .map_err(|error| {
-                        ifftn_provider_error(format!(
-                            "partial provider result download failed: {error}"
-                        ))
+                    .map_err(|source| {
+                        let mut error = ifftn_provider_error(format!(
+                            "partial provider result download failed: {source}"
+                        ));
+                        error.source = Some(Box::new(source));
+                        error
                     })?;
                     let mut transformed = downloaded;
                     for remaining_axis in axis..axis_count {
@@ -503,13 +254,10 @@ async fn ifftn_gpu(
                     return restore_ifftn_gpu_result(&handle, transformed, symmetric);
                 }
                 Err(error) => {
-                    if !same_gpu_handle(&current, &handle) {
-                        free_rejected_provider_fft_output(provider, &current, &[&handle]);
-                    }
-                    return Err(ifftn_provider_error(format!(
-                        "ifft_dim pass {} failed: {error}",
-                        axis + 1
-                    )));
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        ifftn_provider_error(format!("ifft_dim pass {} failed: {error}", axis + 1)),
+                        error,
+                    ));
                 }
             }
         }
@@ -517,10 +265,13 @@ async fn ifftn_gpu(
         if !symmetric {
             return Ok(Value::GpuTensor(current));
         }
-        let complex = download_provider_complex_tensor(provider, &current, BUILTIN_NAME, true)
+        let complex = download_owned_provider_complex_tensor(provider, current, BUILTIN_NAME)
             .await
-            .map_err(|error| {
-                ifftn_provider_error(format!("provider result download failed: {error}"))
+            .map_err(|source| {
+                let mut error =
+                    ifftn_provider_error(format!("provider result download failed: {source}"));
+                error.source = Some(Box::new(source));
+                error
             })?;
         return restore_ifftn_gpu_result(&handle, complex, true);
     }
@@ -584,7 +335,9 @@ fn finalize_ifftn_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResul
     }
 }
 
-fn parse_ifftn_arguments(args: &[Value]) -> BuiltinResult<(Option<Vec<usize>>, bool)> {
+fn parse_ifftn_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<Vec<usize>>, bool)> {
     if args.is_empty() {
         return Ok((None, false));
     }
@@ -600,8 +353,13 @@ fn parse_ifftn_arguments(args: &[Value]) -> BuiltinResult<(Option<Vec<usize>>, b
     Ok((sizes, symmetric))
 }
 
-fn split_symflag(args: &[Value]) -> BuiltinResult<(Option<bool>, &[Value])> {
-    if let Some((last, rest)) = args.split_last() {
+fn split_symflag(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<bool>, crate::call::FunctionArgumentView<'_>)> {
+    if let Some(last) = args.last() {
+        let rest = args
+            .range(..args.len() - 1)
+            .expect("bounded ifftn control range");
         if let Some(flag) = parse_symflag(last, BUILTIN_NAME).map_err(|source| {
             ifftn_error_with_source(&IFFTN_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
         })? {
@@ -659,10 +417,10 @@ fn parse_sizes_value(value: &Value) -> BuiltinResult<Vec<usize>> {
 
 fn ifftn_input_rank(value: &Value) -> usize {
     let rank = match value {
-        Value::Tensor(tensor) => tensor.shape.len(),
-        Value::ComplexTensor(tensor) => tensor.shape.len(),
+        Value::Tensor(tensor) => tensor.shape().len(),
+        Value::ComplexTensor(tensor) => tensor.shape().len(),
         Value::LogicalArray(array) => array.shape.len(),
-        Value::GpuTensor(handle) => handle.shape.len(),
+        Value::GpuTensor(handle) => handle.shape().len(),
         _ => 2,
     };
     rank.max(2)
@@ -675,7 +433,7 @@ fn validate_size_vector_shape(value: &Value) -> BuiltinResult<()> {
             || (shape.len() == 2 && (shape[0] == 1 || shape[1] == 1))
     };
     match value {
-        Value::Tensor(tensor) if !vector_shape(&tensor.shape) => Err(ifftn_error_with_detail(
+        Value::Tensor(tensor) if !vector_shape(tensor.shape()) => Err(ifftn_error_with_detail(
             &IFFTN_ERROR_INVALID_SIZE,
             "SIZE must be a row or column vector",
         )),
@@ -696,7 +454,6 @@ mod tests {
     use super::*;
     use crate::builtins::math::fft::fft::fft_complex_tensor;
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
     use runmat_value::Tensor;
 
     fn error_message(error: crate::RuntimeError) -> String {
@@ -709,8 +466,9 @@ mod tests {
 
     #[test]
     fn ifftn_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("ifftn builtin");
-        let descriptor = builtin.descriptor.expect("ifftn descriptor");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).expect("ifftn builtin");
+        let descriptor = builtin.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = ifftn(X)"));
         assert!(labels.contains(&"Y = ifftn(X, SIZE)"));
@@ -730,7 +488,7 @@ mod tests {
         let b = fft_complex_tensor(a, None, Some(2)).unwrap();
         let freq = fft_complex_tensor(b, None, Some(3)).unwrap();
         let back = ifftn_complex_tensor(freq, None).unwrap();
-        assert_eq!(back.shape, vec![2, 2, 2]);
+        assert_eq!(back.shape(), [2, 2, 2]);
         for (idx, (re, im)) in back.materialize_f64().iter().enumerate() {
             assert!((*re - input.materialize_f64()[idx]).abs() < 1e-10);
             assert!(im.abs() < 1e-10);
@@ -752,7 +510,7 @@ mod tests {
         .expect("ifftn symmetric");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2, 2]);
+                assert_eq!(t.shape(), [2, 2, 2]);
                 for (got, expected) in t
                     .materialize_f64()
                     .iter()
@@ -783,24 +541,29 @@ mod tests {
 
     #[test]
     fn ifftn_rejects_invalid_argument_count() {
-        let err = parse_ifftn_arguments(&[
+        let args = [
             Value::Num(2.0),
             Value::Num(2.0),
             Value::Num(2.0),
             Value::Num(2.0),
-        ])
-        .unwrap_err();
+        ];
+        let err = parse_ifftn_arguments(crate::call::FunctionArgumentView::from_slice(&args))
+            .unwrap_err();
         assert_eq!(error_identifier(&err), IFFTN_ERROR_ARG_COUNT.identifier);
         assert!(error_message(err).contains(IFFTN_ERROR_ARG_COUNT.message));
     }
 
     #[test]
     fn ifftn_accepts_documented_logical_size_and_rejects_complex_size() {
-        let (size, symmetric) = parse_ifftn_arguments(&[Value::Bool(true)]).unwrap();
+        let logical = [Value::Bool(true)];
+        let (size, symmetric) =
+            parse_ifftn_arguments(crate::call::FunctionArgumentView::from_slice(&logical)).unwrap();
         assert_eq!(size, Some(vec![1]));
         assert!(!symmetric);
 
-        let err = parse_ifftn_arguments(&[Value::Complex(1.0, 0.0)]).unwrap_err();
+        let complex = [Value::Complex(1.0, 0.0)];
+        let err = parse_ifftn_arguments(crate::call::FunctionArgumentView::from_slice(&complex))
+            .unwrap_err();
         assert_eq!(error_identifier(&err), IFFTN_ERROR_INVALID_SIZE.identifier);
         assert!(error_message(err).contains(IFFTN_ERROR_INVALID_SIZE.message));
     }
@@ -828,21 +591,11 @@ mod tests {
             .iter()
             .flat_map(|(real, imag)| [*real, *imag])
             .collect::<Vec<_>>();
-        let raw = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &interleaved,
-                shape: &[2, 2, 2, 2],
-            })
-            .expect("upload spectrum");
-        let source = GpuTensorHandle {
-            shape: frequency.shape.clone(),
-            device_id: raw.device_id,
-            buffer_id: raw.buffer_id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                ..raw.descriptor
-            },
-        };
+        let source = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
+            provider,
+            &interleaved,
+            frequency.shape(),
+        );
         let gpu = block_on(ifftn_builtin(Value::GpuTensor(source.clone()), Vec::new()))
             .expect("resident ifftn");
         let cpu = block_on(ifftn_builtin(Value::ComplexTensor(frequency), Vec::new()))
@@ -850,7 +603,7 @@ mod tests {
         let gpu = block_on(crate::dispatcher::gather_if_needed_async(&gpu)).expect("gather result");
         let cpu = value_to_complex_tensor(cpu, BUILTIN_NAME).expect("host complex result");
         let gpu = value_to_complex_tensor(gpu, BUILTIN_NAME).expect("gathered complex result");
-        assert_eq!(gpu.shape, cpu.shape);
+        assert_eq!(gpu.shape(), cpu.shape());
         let tolerance = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-4,
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
@@ -864,7 +617,8 @@ mod tests {
             assert!((actual.1 - expected.1).abs() < tolerance);
         }
         assert!(runmat_accelerate_api::provider_for_handle(&source).is_some());
-        provider.free(&source).ok();
-        runmat_accelerate_api::clear_residency(&source);
+        let physical = source.allocation_lease().downgrade();
+        source.release().expect("release IFFT input");
+        assert!(physical.acquire().is_none());
     }
 }

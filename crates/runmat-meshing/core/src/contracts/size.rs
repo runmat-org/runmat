@@ -5,7 +5,8 @@ use super::StageEvidence;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SizingFieldContract {
     pub field_id: String,
-    pub global_target_size_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub global_target_size_m: runmat_types::physical::Length,
     #[serde(default)]
     pub min_size_m: Option<f64>,
     #[serde(default)]

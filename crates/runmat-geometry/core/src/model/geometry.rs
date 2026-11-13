@@ -5,16 +5,19 @@ use crate::selection::EntityKind;
 
 use super::{
     MeshDescriptor, Region, RegionEntityMapping, SourceGeometry, SurfaceMesh, TessellationProfile,
-    UnitSystem,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GeometryAsset {
     pub geometry_id: String,
     pub source: GeometrySource,
     pub source_geometry: SourceGeometry,
     pub tessellation_profile: TessellationProfile,
-    pub units: UnitSystem,
+    /// Physical scale of the rendered coordinates. None means unscaled source
+    /// coordinates; a display convention is never evidence of a physical unit.
+    pub coordinate_units:
+        Option<runmat_types::physical::CoordinateUnits<runmat_types::physical::PreviewCoordinates>>,
     pub revision: u32,
     pub meshes: Vec<MeshDescriptor>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -27,8 +30,12 @@ pub struct GeometryAsset {
 
 impl GeometryAsset {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.units == UnitSystem::Unspecified {
-            return Err("geometry units must be specified");
+        self.source
+            .unit_evidence
+            .validate()
+            .map_err(|_| "invalid source-unit evidence")?;
+        if self.coordinate_units.is_some() != self.source.unit_evidence.physical_scale_resolved() {
+            return Err("preview coordinate scale must match resolved source-unit evidence");
         }
         for surface_mesh in &self.surface_meshes {
             surface_mesh.validate()?;
@@ -81,4 +88,6 @@ pub struct GeometrySource {
     pub path: String,
     pub sha256: String,
     pub importer_version: String,
+    #[serde(default)]
+    pub unit_evidence: runmat_types::physical::LengthUnitEvidence,
 }

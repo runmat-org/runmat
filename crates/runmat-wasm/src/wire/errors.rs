@@ -3,6 +3,7 @@ use js_sys::Reflect;
 use miette::{SourceOffset, SourceSpan};
 use runmat_core::RunError;
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_types::ProgramSourceId;
 use serde::Serialize;
 use wasm_bindgen::prelude::JsValue;
 
@@ -51,6 +52,12 @@ pub(crate) struct RunMatErrorPayload {
     pub(crate) identifier: Option<String>,
     pub(crate) diagnostic: String,
     pub(crate) span: Option<RunMatErrorSpanPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) source_id: Option<ProgramSourceId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) source_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) source_path: Option<String>,
     pub(crate) callstack: Vec<String>,
     pub(crate) callstack_elided: usize,
 }
@@ -60,7 +67,14 @@ pub(crate) fn js_error(message: &str) -> JsValue {
 }
 
 pub(crate) fn js_value_to_string(value: JsValue) -> String {
-    value.as_string().unwrap_or_else(|| format!("{value:?}"))
+    value
+        .as_string()
+        .or_else(|| {
+            Reflect::get(&value, &JsValue::from_str("message"))
+                .ok()
+                .and_then(|message| message.as_string())
+        })
+        .unwrap_or_else(|| format!("{value:?}"))
 }
 
 pub(crate) fn runtime_error_to_js(err: &RuntimeError) -> JsValue {
@@ -195,6 +209,23 @@ fn format_run_error(err: &RunError, source_name: Option<&str>, source: Option<&s
                 span_source.map(|(_, src)| src),
             )
         }
+        RunError::SourceCompile(bound) => {
+            let err = &bound.error;
+            let mut builder = build_runtime_error(err.message.clone());
+            if let Some(identifier) = err.identifier.as_deref() {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = err.span {
+                builder = builder.with_span(SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                ));
+            }
+            builder.build().format_diagnostic_with_source(
+                Some(&bound.source.display_name),
+                Some(&bound.source.text),
+            )
+        }
         RunError::Runtime(err) => err.format_diagnostic_with_source(
             span_source.map(|(name, _)| name),
             span_source.map(|(_, src)| src),
@@ -235,6 +266,9 @@ pub(crate) fn runtime_error_payload(
         identifier,
         diagnostic,
         span,
+        source_id: None,
+        source_name: source_name.map(ToString::to_string),
+        source_path: None,
         callstack,
         callstack_elided: err.context.call_frames_elided,
     }
@@ -263,6 +297,9 @@ pub(crate) fn run_error_payload(
                 identifier: Some("RunMat:SyntaxError".to_string()),
                 diagnostic,
                 span,
+                source_id: None,
+                source_name: source_name.map(ToString::to_string),
+                source_path: None,
                 callstack: Vec::new(),
                 callstack_elided: 0,
             }
@@ -278,6 +315,9 @@ pub(crate) fn run_error_payload(
                     span_payload_from_source(src, span.start, end)
                 })
             }),
+            source_id: None,
+            source_name: source_name.map(ToString::to_string),
+            source_path: None,
             callstack: Vec::new(),
             callstack_elided: 0,
         },
@@ -292,6 +332,27 @@ pub(crate) fn run_error_payload(
                     span_payload_from_source(src, span.start, end)
                 })
             }),
+            source_id: err.source,
+            source_name: source_name.map(ToString::to_string),
+            source_path: None,
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        },
+        RunError::SourceCompile(bound) => RunMatErrorPayload {
+            kind: RunMatErrorKind::Compile,
+            message: bound.error.message.clone(),
+            identifier: bound.error.identifier.clone(),
+            diagnostic,
+            span: bound.error.span.map(|span| {
+                span_payload_from_source(
+                    &bound.source.text,
+                    span.start,
+                    span.end.max(span.start + 1),
+                )
+            }),
+            source_id: Some(bound.source.source_id),
+            source_name: Some(bound.source.display_name.clone()),
+            source_path: Some(bound.source.relative_path.clone()),
             callstack: Vec::new(),
             callstack_elided: 0,
         },

@@ -10,7 +10,7 @@ use crate::{
 #[test]
 fn sizing_field_update_merges_bounds_and_samples() {
     let mut sizing = MeshSizingField {
-        global_target_size_m: Some(0.1),
+        global_target_size_m: Some(runmat_types::physical::Length::new(0.1)),
         min_size_m: Some(0.02),
         max_size_m: Some(0.2),
         samples: vec![SizingSample {
@@ -32,7 +32,12 @@ fn sizing_field_update_merges_bounds_and_samples() {
     }
     .apply_to(&mut sizing);
 
-    assert_eq!(sizing.global_target_size_m, Some(0.1));
+    assert_eq!(
+        sizing
+            .global_target_size_m
+            .map(|quantity| quantity.canonical_value()),
+        Some(0.1)
+    );
     assert_eq!(sizing.min_size_m, Some(0.01));
     assert_eq!(sizing.max_size_m, Some(0.25));
     assert_eq!(sizing.samples.len(), 2);
@@ -47,7 +52,7 @@ fn adaptive_iteration_summary_round_trips() {
         convergence_status: AdaptiveConvergenceStatus::Pending,
         indicators: vec![RefinementIndicatorSummary {
             namespace: "structural".to_string(),
-            name: "stress_gradient".to_string(),
+            name: "stress_gradient".into(),
             requested_mode: RefinementIndicatorMode::Auto,
             status: RefinementIndicatorStatus::Used,
             detail: Some("field available".to_string()),

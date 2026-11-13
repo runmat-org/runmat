@@ -1,4 +1,83 @@
-pub const IMFILTER_SHADER_F64: &str = r#"
+use std::borrow::Cow;
+
+/// I/O storage and arithmetic are separate facts of the admitted filter route.
+#[derive(Clone, Copy, Debug)]
+pub enum ImfilterShader {
+    Single,
+    SingleDouble,
+    Double,
+}
+
+impl ImfilterShader {
+    pub fn source(self) -> Cow<'static, str> {
+        let mut source = match self {
+            Self::Single => Cow::Borrowed(IMFILTER_SHADER_F32),
+            Self::Double => Cow::Borrowed(IMFILTER_SHADER_F64),
+            Self::SingleDouble => Cow::Owned(
+                IMFILTER_SHADER_F64
+                    .replacen("data: array<f64>,", "data: array<f32>,", 1)
+                    .replace(
+                        "sample = Image.data[linear];",
+                        "sample = f64(Image.data[linear]);",
+                    )
+                    .replace(
+                        "Output.data[global_idx] = acc;",
+                        "Output.data[global_idx] = f32(acc);",
+                    ),
+            ),
+        };
+        source
+            .to_mut()
+            .push_str(crate::wgsl::integer::POSITIVE_PERIOD_RESIDUE);
+        source
+    }
+}
+
+#[cfg(test)]
+mod recipe_tests {
+    use super::ImfilterShader;
+    use crate::backend::wgpu::shaders::validation_tests::{validate_generated, RequiredCaps};
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn recipes_parse_and_validate_with_the_backend_naga_version() {
+        for recipe in [
+            ImfilterShader::Single,
+            ImfilterShader::SingleDouble,
+            ImfilterShader::Double,
+        ] {
+            let template = recipe.source();
+            let required = match recipe {
+                ImfilterShader::Single => RequiredCaps::None,
+                ImfilterShader::SingleDouble | ImfilterShader::Double => RequiredCaps::Float64,
+            };
+            for workgroup in [1, 64, 128] {
+                validate_generated(
+                    &format!("imfilter-{recipe:?}-wg{workgroup}"),
+                    &template,
+                    workgroup,
+                    8,
+                    required,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_recipe_changes_io_only_and_retains_double_arithmetic() {
+        let mixed = ImfilterShader::SingleDouble.source();
+        assert!(mixed.contains("struct Tensor {\n    data: array<f32>"));
+        assert!(mixed.contains("struct KernelValues {\n    data: array<f64>"));
+        assert!(mixed.contains("var acc: f64"));
+        assert!(mixed.contains("constant_value: f64"));
+        assert!(mixed.contains("sample = f64(Image.data[linear]);"));
+        assert!(mixed.contains("Output.data[global_idx] = f32(acc);"));
+        assert!(!ImfilterShader::Single.source().contains("f64"));
+        assert!(!ImfilterShader::Double.source().contains("f32"));
+    }
+}
+
+const IMFILTER_SHADER_F64: &str = r#"
 const MAX_RANK: u32 = 128u;
 
 struct Tensor {
@@ -49,11 +128,7 @@ fn wrap_index(coord_in: i32, len: i32) -> u32 {
     if len <= 0 {
         return 0u;
     }
-    var coord = coord_in % len;
-    if coord < 0 {
-        coord = coord + len;
-    }
-    return u32(coord);
+    return runmat_i32_positive_period_residue(coord_in, u32(len));
 }
 
 fn reflect_index(coord_in: i32, len: i32) -> u32 {
@@ -63,15 +138,12 @@ fn reflect_index(coord_in: i32, len: i32) -> u32 {
     if len == 1 {
         return 0u;
     }
-    let period = 2 * len - 2;
-    var value = coord_in % period;
-    if value < 0 {
-        value = value + period;
-    }
-    if value >= len {
+    let period = 2u * u32(len) - 2u;
+    var value = runmat_i32_positive_period_residue(coord_in, period);
+    if value >= u32(len) {
         value = period - value;
     }
-    return u32(value);
+    return value;
 }
 
 @group(0) @binding(0) var<storage, read> Image: Tensor;
@@ -176,7 +248,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-pub const IMFILTER_SHADER_F32: &str = r#"
+const IMFILTER_SHADER_F32: &str = r#"
 const MAX_RANK: u32 = 128u;
 
 struct Tensor {
@@ -229,11 +301,7 @@ fn wrap_index(coord_in: i32, len: i32) -> u32 {
     if len <= 0 {
         return 0u;
     }
-    var coord = coord_in % len;
-    if coord < 0 {
-        coord = coord + len;
-    }
-    return u32(coord);
+    return runmat_i32_positive_period_residue(coord_in, u32(len));
 }
 
 fn reflect_index(coord_in: i32, len: i32) -> u32 {
@@ -243,15 +311,12 @@ fn reflect_index(coord_in: i32, len: i32) -> u32 {
     if len == 1 {
         return 0u;
     }
-    let period = 2 * len - 2;
-    var value = coord_in % period;
-    if value < 0 {
-        value = value + period;
-    }
-    if value >= len {
+    let period = 2u * u32(len) - 2u;
+    var value = runmat_i32_positive_period_residue(coord_in, period);
+    if value >= u32(len) {
         value = period - value;
     }
-    return u32(value);
+    return value;
 }
 
 @group(0) @binding(0) var<storage, read> Image: Tensor;

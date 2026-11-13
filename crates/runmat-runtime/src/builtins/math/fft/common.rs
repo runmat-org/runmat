@@ -7,13 +7,20 @@ use runmat_accelerate_api::{
     IntegerElementType,
 };
 use runmat_value::{
-    ComplexStorage, ComplexTensor, IntValue, NumericDType, NumericStorage, Tensor, Value,
+    ComplexElement, ComplexStorage, ComplexTensor, IntValue, NumericDType, NumericStorage, Tensor,
+    Value,
 };
 use rustfft::FftPlanner;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::mem::size_of;
 use std::sync::Arc;
+
+mod forward_output;
+pub(super) use forward_output::{admit_forward_output, validate_forward_input};
+
+#[cfg(test)]
+mod owned_download_tests;
 
 fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
@@ -125,11 +132,13 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::GpuTensor(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -141,6 +150,8 @@ pub fn parse_length(value: &Value, builtin: &str) -> BuiltinResult<Option<usize>
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(builtin_error(
             builtin,
@@ -269,12 +280,13 @@ pub fn restore_complex_gpu_result(
         return Ok(complex_tensor_into_value(tensor.clone()));
     }
     let source_metadata = gpu_metadata_snapshot(source);
-    let output = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|source| {
-        provider_integrity_error(
-            builtin,
-            format!("{builtin}: failed to restore GPU result: {source}"),
-        )
-    })?;
+    let output = gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[source])
+        .map_err(|source| {
+            build_runtime_error(format!("{builtin}: failed to restore GPU result: {source}"))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+        })?;
     if same_gpu_handle(source, &output) {
         restore_gpu_metadata(source, source_metadata);
         return Err(provider_integrity_error(
@@ -285,17 +297,19 @@ pub fn restore_complex_gpu_result(
     if !valid_provider_fft_output(
         provider,
         &output,
-        &tensor.shape,
+        tensor.shape(),
         GpuTensorStorage::ComplexInterleaved,
         precision,
     ) {
-        free_rejected_provider_fft_output(provider, &output, &[source]);
-        return Err(provider_integrity_error(
-            builtin,
-            format!("{builtin}: provider returned an invalid restored complex result"),
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            provider_integrity_error(
+                builtin,
+                format!("{builtin}: provider returned an invalid restored complex result"),
+            ),
         ));
     }
-    Ok(gpu_helpers::complex_gpu_value(output))
+    gpu_helpers::complex_gpu_value(output)
 }
 
 pub fn restore_real_gpu_result(
@@ -317,12 +331,13 @@ pub fn restore_real_gpu_result(
         return Ok(tensor::tensor_into_value(tensor.clone()));
     }
     let source_metadata = gpu_metadata_snapshot(source);
-    let output = gpu_helpers::upload_tensor(provider, tensor).map_err(|error| {
-        provider_integrity_error(
-            builtin,
-            format!("{builtin}: failed to restore GPU result: {error}"),
-        )
-    })?;
+    let output =
+        gpu_helpers::upload_tensor_protecting(provider, tensor, &[source]).map_err(|source| {
+            build_runtime_error(format!("{builtin}: failed to restore GPU result: {source}"))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+        })?;
     if same_gpu_handle(source, &output) {
         restore_gpu_metadata(source, source_metadata);
         return Err(provider_integrity_error(
@@ -333,21 +348,23 @@ pub fn restore_real_gpu_result(
     if !valid_provider_fft_output(
         provider,
         &output,
-        &tensor.shape,
+        tensor.shape(),
         GpuTensorStorage::Real,
         precision,
     ) {
-        free_rejected_provider_fft_output(provider, &output, &[source]);
-        return Err(provider_integrity_error(
-            builtin,
-            format!("{builtin}: provider returned an invalid restored real result"),
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            provider_integrity_error(
+                builtin,
+                format!("{builtin}: provider returned an invalid restored real result"),
+            ),
         ));
     }
     Ok(Value::GpuTensor(output))
 }
 
 pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+    left.shares_allocation_with(right)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -358,19 +375,36 @@ pub struct GpuMetadataSnapshot {
 
 pub fn gpu_metadata_snapshot(handle: &GpuTensorHandle) -> GpuMetadataSnapshot {
     GpuMetadataSnapshot {
-        descriptor: handle.descriptor,
+        descriptor: handle.descriptor(),
         logical: runmat_accelerate_api::handle_is_logical(handle),
     }
 }
 
 pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnapshot) {
-    debug_assert_eq!(handle.descriptor, snapshot.descriptor);
-    runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
+    debug_assert_eq!(handle.descriptor(), snapshot.descriptor);
+    debug_assert_eq!(
+        runmat_accelerate_api::handle_is_logical(handle),
+        snapshot.logical
+    );
+    // Semantic facts belong to this immutable owning view. Only the external
+    // residency marker may have changed while a provider consumed the borrow.
+    runmat_accelerate_api::mark_residency(handle);
 }
 
-pub fn provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
-    let expected = format!("{operation} not supported by provider");
-    error.chain().any(|cause| cause.to_string() == expected)
+/// Shared acceptance boundary for the two exact FFT shift permutations.
+pub fn valid_provider_shift_output(
+    provider: &dyn AccelProvider,
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    expected: GpuMetadataSnapshot,
+) -> bool {
+    output.allocation_lease().validate_live().is_ok()
+        && output.shape() == input.shape()
+        && output.device_id() == input.device_id()
+        && !same_gpu_handle(output, input)
+        && gpu_metadata_snapshot(output) == expected
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 /// Validate a provider FFT result before it crosses the public builtin boundary.
@@ -381,33 +415,14 @@ pub fn valid_provider_fft_output(
     expected_storage: GpuTensorStorage,
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    handle.shape == expected_shape
-        && handle.device_id == provider.device_id()
+    handle.shape() == crate::builtins::common::shape::normalize_scalar_shape(expected_shape)
+        && handle.device_id() == provider.device_id()
         && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(handle) == expected_storage
         && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(handle)
-}
-
-/// Release a malformed provider result without freeing an aliased input handle.
-pub fn free_rejected_provider_fft_output(
-    _provider: &dyn AccelProvider,
-    output: &GpuTensorHandle,
-    protected: &[&GpuTensorHandle],
-) {
-    if protected
-        .iter()
-        .any(|handle| same_gpu_handle(handle, output))
-    {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output) {
-        if owner.free(output).is_ok() {
-            runmat_accelerate_api::clear_residency(output);
-        }
-    }
 }
 
 /// Convert any numeric value into a `ComplexTensor`.
@@ -446,7 +461,7 @@ pub fn value_to_complex_tensor(value: Value, builtin: &str) -> BuiltinResult<Com
 
 /// Convert a real-valued tensor into a `ComplexTensor`.
 pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor
         .into_numeric_storage()
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?
@@ -470,15 +485,19 @@ pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<
 }
 
 pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => {
             NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
         }
         ComplexStorage::F32(values) => {
             NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
         }
-        ComplexStorage::Integer(storage) => NumericStorage::from(storage.real),
+        ComplexStorage::Integer(storage) => {
+            return Tensor::from_shared_host_buffer(storage.into_host_components().0, shape)
+                .map(Value::Tensor)
+                .map_err(|error| builtin_error(builtin, format!("{builtin}: {error}")));
+        }
     };
     let real = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
@@ -610,7 +629,7 @@ fn host_to_complex_tensor_with_precision(
                 .map(|(re, im)| (re as f32, im as f32))
                 .collect(),
         ),
-        runmat_accelerate_api::ProviderPrecision::F64 => ComplexStorage::F64(values),
+        runmat_accelerate_api::ProviderPrecision::F64 => ComplexStorage::F64(values.into()),
     };
     ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
@@ -620,29 +639,43 @@ pub async fn download_provider_complex_tensor(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     builtin: &str,
-    free_after_download: bool,
 ) -> BuiltinResult<ComplexTensor> {
-    let decoded = gpu_helpers::download_floating_projection_async(provider, handle)
+    gpu_helpers::download_floating_projection_async(provider, handle)
         .await
-        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
+        .map_err(|source| {
+            build_runtime_error(format!("{builtin}: {source}"))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+        })
         .and_then(|host| {
             let precision = runmat_accelerate_api::handle_precision(handle)
                 .unwrap_or_else(|| provider.precision());
             host_to_complex_tensor_with_precision(host, precision, builtin)
-        });
-    if free_after_download {
-        match provider.free(handle) {
-            Ok(()) => runmat_accelerate_api::clear_residency(handle),
-            Err(error) if decoded.is_ok() => {
-                return Err(provider_integrity_error(
-                    builtin,
-                    format!("{builtin}: failed to free downloaded provider result: {error}"),
-                ));
-            }
-            Err(_) => {}
+        })
+}
+
+/// Consume an execution-owned intermediate after readback. Borrowed inputs use
+/// the non-consuming decoder above; shared aliases retain their own leases.
+pub async fn download_owned_provider_complex_tensor(
+    provider: &dyn AccelProvider,
+    handle: GpuTensorHandle,
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    match download_provider_complex_tensor(provider, &handle, builtin).await {
+        Err(error) => Err(gpu_helpers::reject_gpu_output(handle, error)),
+        Ok(decoded) => {
+            handle.release().map_err(|source| {
+                build_runtime_error(format!(
+                    "{builtin}: provider result retirement failed: {source}"
+                ))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+            })?;
+            Ok(decoded)
         }
     }
-    decoded
 }
 
 /// Return the first non-singleton dimension (1-based), defaulting to 1.
@@ -662,6 +695,15 @@ pub fn trim_trailing_ones(shape: &mut Vec<usize>, minimum_rank: usize) {
     }
     if shape.is_empty() {
         shape.push(1);
+    }
+}
+
+/// FFT results use the public scalar shape, including after singleton trimming.
+/// Non-scalar ranks/dimensions retain the existing transform contract.
+fn trim_transform_output_shape(shape: &mut Vec<usize>, minimum_rank: usize) {
+    trim_trailing_ones(shape, minimum_rank);
+    if crate::builtins::common::shape::is_scalar_shape(shape) {
+        *shape = crate::builtins::common::shape::canonical_scalar_shape();
     }
 }
 
@@ -748,14 +790,16 @@ pub fn transform_complex_tensor(
     } else {
         NumericDType::F64
     };
-    let origin_rank = tensor.shape.len();
-    if crate::builtins::common::shape::is_scalar_shape(&tensor.shape) {
-        tensor.shape = crate::builtins::common::shape::normalize_scalar_shape(&tensor.shape);
-        tensor.rows = tensor.shape.first().copied().unwrap_or(1);
-        tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
+    let origin_rank = tensor.shape().len();
+    if crate::builtins::common::shape::is_scalar_shape(tensor.shape()) {
+        let normalized_shape =
+            crate::builtins::common::shape::normalize_scalar_shape(tensor.shape());
+        tensor
+            .reshape_in_place(normalized_shape)
+            .map_err(|error| builtin_error(builtin, error))?;
     }
 
-    let mut shape = tensor.shape.clone();
+    let mut shape = tensor.shape().to_vec();
     let dim_index = match dimension {
         Some(0) => {
             return Err(builtin_error(
@@ -776,11 +820,11 @@ pub fn transform_complex_tensor(
     if target_len == 0 {
         let mut out_shape = shape;
         out_shape[dim_index] = 0;
-        trim_trailing_ones(&mut out_shape, origin_rank);
+        trim_transform_output_shape(&mut out_shape, origin_rank);
         return ComplexTensor::from_complex_storage(
             match output_dtype {
-                NumericDType::F32 => ComplexStorage::F32(Vec::new()),
-                NumericDType::F64 => ComplexStorage::F64(Vec::new()),
+                NumericDType::F32 => ComplexStorage::F32(Vec::<ComplexElement<f32>>::new().into()),
+                NumericDType::F64 => ComplexStorage::F64(Vec::<ComplexElement<f64>>::new().into()),
                 _ => unreachable!("FFT output is single or double"),
             },
             out_shape,
@@ -795,11 +839,11 @@ pub fn transform_complex_tensor(
     if num_slices == 0 {
         let mut out_shape = shape;
         out_shape[dim_index] = target_len;
-        trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+        trim_transform_output_shape(&mut out_shape, origin_rank.max(dim_index + 1));
         return ComplexTensor::from_complex_storage(
             match output_dtype {
-                NumericDType::F32 => ComplexStorage::F32(Vec::new()),
-                NumericDType::F64 => ComplexStorage::F64(Vec::new()),
+                NumericDType::F32 => ComplexStorage::F32(Vec::<ComplexElement<f32>>::new().into()),
+                NumericDType::F64 => ComplexStorage::F64(Vec::<ComplexElement<f64>>::new().into()),
                 _ => unreachable!("FFT output is single or double"),
             },
             out_shape,
@@ -809,7 +853,7 @@ pub fn transform_complex_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = target_len;
-    trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+    trim_transform_output_shape(&mut out_shape, origin_rank.max(dim_index + 1));
 
     let storage = match tensor.into_complex_storage() {
         ComplexStorage::F32(values) => {
@@ -872,7 +916,7 @@ pub fn transform_nd_complex_tensor(
 ) -> BuiltinResult<ComplexTensor> {
     let axis_count = sizes
         .map(|v| v.len())
-        .unwrap_or_else(|| tensor.shape.len().max(1));
+        .unwrap_or_else(|| tensor.shape().len().max(1));
     for axis in 0..axis_count {
         let len = sizes.and_then(|v| v.get(axis).copied());
         tensor = transform_complex_tensor(tensor, len, Some(axis + 1), direction, builtin)?;
@@ -1027,12 +1071,24 @@ fn parse_nd_sizes_integers(data: &[IntValue], builtin: &str) -> BuiltinResult<Ve
 
 pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>> {
     let text: Option<Cow<'_, str>> = match value {
-        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(Cow::Borrowed(s.as_str())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let collected: String = ca.data.iter().collect();
+            let collected: String =
+                runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                    let mut error = builtin_error(builtin, source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?;
             Some(Cow::Owned(collected))
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(Cow::Borrowed(sa.data[0].as_str())),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            Some(Cow::Borrowed(
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str(),
+            ))
+        }
         _ => None,
     };
 
@@ -1274,7 +1330,7 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.is_empty() {
+            if !is_vector_shape(tensor.shape()) && !tensor.is_empty() {
                 return Err(builtin_error(
                     builtin,
                     format!("{builtin}: dimension vectors must be row or column vectors"),
@@ -1358,14 +1414,16 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
         | Value::SymbolicArray(_)
         | Value::Cell(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -1373,6 +1431,8 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(builtin_error(
             builtin,
@@ -1393,36 +1453,70 @@ mod tests {
     use runmat_value::IntegerStorage;
 
     #[test]
-    fn fft_gpu_handle_identity_includes_device_and_buffer() {
-        let left = GpuTensorHandle {
-            shape: vec![2],
-            device_id: 1,
-            buffer_id: 7,
-            descriptor: Default::default(),
-        };
+    fn fft_gpu_handle_identity_uses_physical_lease_not_view() {
+        use runmat_accelerate_api::{test_support::TestAllocationOwner, NumericElementType};
+        let owner = TestAllocationOwner::new();
+        let left = owner
+            .allocate_zeroed(vec![2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap()
+            .handle;
         let same = left.clone();
-        let other_device = GpuTensorHandle {
-            device_id: 2,
-            ..left.clone()
-        };
+        let view = left
+            .with_view(left.view().clone().with_shape(vec![1, 2]))
+            .unwrap();
+        let independent = owner
+            .allocate_zeroed(vec![2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap()
+            .handle;
         assert!(same_gpu_handle(&left, &same));
-        assert!(!same_gpu_handle(&left, &other_device));
+        assert!(same_gpu_handle(&left, &view));
+        assert_ne!(left.view_identity(), view.view_identity());
+        assert!(!same_gpu_handle(&left, &independent));
+    }
+
+    #[test]
+    fn fft_snapshot_restore_preserves_immutable_logical_view() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuHandleProvenance, ProviderPrecision,
+        };
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_logical_zeroed(vec![2, 1], ProviderPrecision::F32)
+            .unwrap();
+        let handle = allocation
+            .handle
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        let snapshot = gpu_metadata_snapshot(&handle);
+        let identity = handle.view_identity();
+        restore_gpu_metadata(&handle, snapshot);
+        assert_eq!(handle.view_identity(), identity);
+        assert_eq!(gpu_metadata_snapshot(&handle), snapshot);
+        assert!(runmat_accelerate_api::handle_is_logical(&handle));
+        assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 
     #[test]
     fn fft_provider_unsupported_classifier_is_exact() {
-        assert!(provider_operation_unsupported(
-            &anyhow::anyhow!("ifft_dim not supported by provider"),
-            "ifft_dim"
-        ));
-        assert!(provider_operation_unsupported(
-            &anyhow::anyhow!("ifft_dim not supported by provider").context("provider context"),
-            "ifft_dim"
-        ));
-        assert!(!provider_operation_unsupported(
-            &anyhow::anyhow!("ifft_dim failed on provider"),
-            "ifft_dim"
-        ));
+        use runmat_accelerate_api::{unsupported_provider_operation, ProviderExecutionError};
+        assert!(ProviderExecutionError::from(unsupported_provider_operation(
+            "ifft_dim not supported by provider"
+        ))
+        .is_unsupported());
+        assert!(ProviderExecutionError::from(
+            unsupported_provider_operation("ifft_dim not supported by provider")
+                .context("provider context")
+        )
+        .is_unsupported());
+        assert!(!ProviderExecutionError::from(anyhow::anyhow!(
+            "ifft_dim not supported by provider"
+        ))
+        .is_unsupported());
+        assert!(
+            !ProviderExecutionError::from(anyhow::anyhow!("ifft_dim failed on provider"))
+                .is_unsupported()
+        );
     }
 
     #[test]
@@ -1442,8 +1536,7 @@ mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(IntegerElementType::I32)
             );
-            provider.free(&handle).ok();
-            runmat_accelerate_api::clear_residency(&handle);
+            handle.release().expect("release integer source");
         });
     }
 
@@ -1462,8 +1555,7 @@ mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(IntegerElementType::U64)
             );
-            provider.free(&handle).ok();
-            runmat_accelerate_api::clear_residency(&handle);
+            handle.release().expect("release wide integer source");
         });
     }
 
@@ -1494,10 +1586,13 @@ mod tests {
         let input = Tensor::from_f32(vec![0.1, -2.0], vec![1, 2]).unwrap();
         let complex = tensor_to_complex_tensor(input, "fft").expect("complex input");
         assert_eq!(
-            complex.as_f32_slice(),
-            Some(&[(0.1_f32, 0.0), (-2.0_f32, 0.0)][..])
+            complex.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(0.1_f32, 0.0), (-2.0_f32, 0.0)])
         );
-
         let transformed =
             transform_complex_tensor(complex, None, None, TransformDirection::Forward, "fft")
                 .expect("single FFT");

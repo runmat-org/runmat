@@ -15,6 +15,9 @@ pub enum ObjectNamespace {
     DetailedEvent,
     Log,
     Checkpoint,
+    ForeignArtifact,
+    ForeignPolicy,
+    ProjectRuntimePolicy,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -28,6 +31,23 @@ pub struct ObjectDescriptor {
 }
 
 impl ObjectDescriptor {
+    /// Requested owned string capacities; the descriptor's inline storage and
+    /// object payload have separate owners.
+    pub fn owned_buffer_bytes(&self) -> ArtifactResult<u64> {
+        let Self {
+            namespace: _,
+            logical_name,
+            digest: _,
+            encoded_length: _,
+            media_type,
+        } = self;
+        logical_name
+            .capacity()
+            .checked_add(media_type.capacity())
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or_else(|| ArtifactError::Limit("object descriptor storage overflow".into()))
+    }
+
     pub fn new(
         namespace: ObjectNamespace,
         logical_name: impl Into<String>,
@@ -40,6 +60,48 @@ impl ObjectDescriptor {
             digest: Digest::sha256(bytes),
             encoded_length: bytes.len() as u64,
             media_type: media_type.into(),
+        };
+        descriptor.validate()?;
+        Ok(descriptor)
+    }
+
+    /// Requested string bytes for content_named; inline descriptor slots are separate.
+    pub fn content_named_text_bytes(prefix: &str, media_type: &str) -> ArtifactResult<u64> {
+        prefix
+            .len()
+            .checked_add(65)
+            .and_then(|length| length.checked_add(media_type.len()))
+            .and_then(|length| u64::try_from(length).ok())
+            .ok_or_else(|| ArtifactError::Limit("object descriptor text storage overflow".into()))
+    }
+
+    /// Construct metadata for an already identified content buffer. This does
+    /// not certify or read content; LogicalObject::validate remains the raw check.
+    pub fn content_named(
+        namespace: ObjectNamespace,
+        prefix: &str,
+        media_type: &str,
+        digest: Digest,
+        encoded_length: u64,
+    ) -> ArtifactResult<Self> {
+        let length = prefix
+            .len()
+            .checked_add(65)
+            .ok_or_else(|| ArtifactError::Limit("object name length overflow".into()))?;
+        let mut name = String::with_capacity(length);
+        name.push_str(prefix);
+        name.push('/');
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        for byte in digest.bytes() {
+            name.push(HEX[(byte >> 4) as usize] as char);
+            name.push(HEX[(byte & 15) as usize] as char);
+        }
+        let descriptor = Self {
+            namespace,
+            logical_name: name,
+            digest,
+            encoded_length,
+            media_type: media_type.to_owned(),
         };
         descriptor.validate()?;
         Ok(descriptor)
@@ -61,7 +123,8 @@ impl ObjectDescriptor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LogicalObject {
     pub descriptor: ObjectDescriptor,
     pub bytes: Vec<u8>,
@@ -91,7 +154,7 @@ impl LogicalObject {
     }
 }
 
-fn validate_logical_name(name: &str) -> ArtifactResult<()> {
+pub(crate) fn validate_logical_name(name: &str) -> ArtifactResult<()> {
     if name.is_empty()
         || name.len() > 4096
         || !name.is_ascii()

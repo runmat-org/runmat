@@ -1,31 +1,32 @@
-use std::borrow::Cow;
-
-pub fn create_shader_module(device: &wgpu::Device, label: &str, wgsl: &str) -> wgpu::ShaderModule {
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(label),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(wgsl)),
-    })
+pub fn create_shader_module(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    label: &str,
+    wgsl: &str,
+) -> anyhow::Result<wgpu::ShaderModule> {
+    super::super::shader_compilation::create_shader_module(emission, label, wgsl, None)
 }
 
 pub fn create_pipeline_layout_single(
-    device: &wgpu::Device,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     label: &str,
     bgl: &wgpu::BindGroupLayout,
 ) -> wgpu::PipelineLayout {
-    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some(label),
-        bind_group_layouts: &[bgl],
-        push_constant_ranges: &[],
-    })
+    emission
+        .device()
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(label),
+            bind_group_layouts: &[bgl],
+            push_constant_ranges: &[],
+        })
 }
 
 pub fn create_compute_pipeline(
-    device: &wgpu::Device,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     label: &str,
     layout: &wgpu::PipelineLayout,
     module: &wgpu::ShaderModule,
 ) -> wgpu::ComputePipeline {
-    device.create_compute_pipeline(
+    emission.device().create_compute_pipeline(
         &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
             label: Some(label),
             layout: Some(layout),
@@ -35,10 +36,15 @@ pub fn create_compute_pipeline(
     )
 }
 
-pub fn create_pipeline_layout_empty(device: &wgpu::Device, label: &str) -> wgpu::PipelineLayout {
-    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some(label),
-        bind_group_layouts: &[],
-        push_constant_ranges: &[],
-    })
+pub fn create_pipeline_layout_empty(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    label: &str,
+) -> wgpu::PipelineLayout {
+    emission
+        .device()
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(label),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        })
 }

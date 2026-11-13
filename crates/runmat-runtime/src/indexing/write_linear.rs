@@ -1,32 +1,39 @@
-use crate::builtins::common::tensor::{
-    complex_tensor_element_len, complex_tensor_value_complex64, is_scalar_tensor,
-    tensor_element_len, tensor_value_f64,
-};
+use crate::builtins::common::tensor::{is_scalar_tensor, tensor_element_len};
 use crate::indexing::integer_assignment::{
     self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
 };
 use crate::indexing::write_slice::{
-    delete_integer_complex_storage_positions, deleted_vector_shape, download_integer_tensor,
-    real_tensor_to_complex, upload_tensor_to_gpu,
+    delete_complex_at_index_in_context, delete_tensor_at_index_in_context,
+    download_integer_tensor_in_context,
 };
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 use runmat_value::{
-    ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage,
-    SparseTensor, Tensor, Value,
+    ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, SparseTensor, Tensor,
+    Value,
 };
+
+mod dense_scalar;
+mod sparse_scalar;
+use dense_scalar::ScalarShape;
 
 fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", format!("assignment: {err}"))
 }
 
-fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("AccelerationOperationFailed", format!("{context}: {err}"))
+fn dense_linear_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
 }
 
 fn is_empty_tensor(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0)
-        || matches!(value, Value::ComplexTensor(t) if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0)
+    matches!(value, Value::Tensor(t) if {
+        let (rows, cols) = dense_linear_dimensions(t.shape());
+        tensor_element_len(t) == 0 || rows == 0 || cols == 0
+    }) || matches!(value, Value::ComplexTensor(t) if t.is_empty() || t.rows() == 0 || t.cols() == 0)
 }
 
 fn integer_storage_scalar(storage: &IntegerStorage) -> IntValue {
@@ -43,6 +50,7 @@ fn integer_storage_scalar(storage: &IntegerStorage) -> IntValue {
 }
 
 async fn rhs_to_integer_assignment_scalar(
+    context: Option<&crate::context::RuntimeContext>,
     rhs: &Value,
 ) -> Result<IntegerAssignmentValue, RuntimeError> {
     match rhs {
@@ -72,7 +80,7 @@ async fn rhs_to_integer_assignment_scalar(
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
         {
-            let tensor = download_integer_tensor(handle).await?;
+            let tensor = download_integer_tensor_in_context(context, handle).await?;
             let storage = tensor
                 .integer_storage()
                 .expect("exact integer GPU gather must retain integer storage");
@@ -86,13 +94,14 @@ async fn rhs_to_integer_assignment_scalar(
                 storage,
             )))
         }
-        _ => rhs_to_real_scalar(rhs)
+        _ => rhs_to_real_numeric_scalar(context, rhs)
             .await
-            .map(IntegerAssignmentValue::Float),
+            .map(|value| IntegerAssignmentValue::Float(value.materialize_f64())),
     }
 }
 
 async fn rhs_to_complex_integer_assignment_scalar(
+    context: Option<&crate::context::RuntimeContext>,
     rhs: &Value,
 ) -> Result<ComplexIntegerAssignmentValue, RuntimeError> {
     let scalar = |real, imag| ComplexIntegerAssignmentValue {
@@ -101,217 +110,156 @@ async fn rhs_to_complex_integer_assignment_scalar(
     };
     match rhs {
         Value::Complex(real, imag) => Ok(scalar(*real, *imag)),
-        Value::ComplexTensor(tensor) if complex_tensor_element_len(tensor) == 1 => {
+        Value::ComplexTensor(tensor) if tensor.len() == 1 => {
             if let Some(storage) = &tensor.integer_storage() {
                 return Ok(ComplexIntegerAssignmentValue {
                     real: IntegerAssignmentValue::Exact(
-                        storage.real.value_at(0).expect("scalar component"),
+                        storage.real().value_at(0).expect("scalar component"),
                     ),
                     imag: IntegerAssignmentValue::Exact(
-                        storage.imag.value_at(0).expect("scalar component"),
+                        storage.imag().value_at(0).expect("scalar component"),
                     ),
                 });
             }
-            let (real, imag) = tensor.materialize_f64()[0];
-            Ok(scalar(real, imag))
+            let (real, imag) = tensor
+                .numeric_value_at(0)
+                .expect("validated scalar complex storage");
+            Ok(scalar(real.materialize_f64(), imag.materialize_f64()))
         }
         _ => Ok(ComplexIntegerAssignmentValue {
-            real: rhs_to_integer_assignment_scalar(rhs).await?,
+            real: rhs_to_integer_assignment_scalar(context, rhs).await?,
             imag: IntegerAssignmentValue::Float(0.0),
         }),
     }
 }
 
-fn assign_integer_storage(
-    storage: IntegerStorage,
-    index: usize,
-    target_len: usize,
-    rhs: &IntegerAssignmentValue,
-) -> IntegerStorage {
-    let value = integer_assignment::scalar_value(&storage, rhs);
-    match storage {
-        IntegerStorage::I8(mut values) => {
-            let IntValue::I8(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I8(values)
-        }
-        IntegerStorage::I16(mut values) => {
-            let IntValue::I16(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I16(values)
-        }
-        IntegerStorage::I32(mut values) => {
-            let IntValue::I32(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I32(values)
-        }
-        IntegerStorage::I64(mut values) => {
-            let IntValue::I64(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I64(values)
-        }
-        IntegerStorage::U8(mut values) => {
-            let IntValue::U8(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U8(values)
-        }
-        IntegerStorage::U16(mut values) => {
-            let IntValue::U16(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U16(values)
-        }
-        IntegerStorage::U32(mut values) => {
-            let IntValue::U32(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U32(values)
-        }
-        IntegerStorage::U64(mut values) => {
-            let IntValue::U64(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U64(values)
-        }
-    }
-}
-
-fn delete_tensor_linear(t: Tensor, idx: usize) -> Result<Value, RuntimeError> {
-    let total = t.rows * t.cols;
+fn delete_tensor_linear(
+    context: Option<&crate::context::RuntimeContext>,
+    t: Tensor,
+    idx: usize,
+) -> Result<Value, RuntimeError> {
+    let (rows, cols) = dense_linear_dimensions(t.shape());
+    let total = rows
+        .checked_mul(cols)
+        .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
     if idx == 0 || idx > total {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    if !(rows == 1 || cols == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
         ));
     }
-    let rows = t.rows;
-    let cols = t.cols;
-    let mut storage = t
-        .into_numeric_storage()
-        .map_err(map_assignment_shape_error)?;
-    storage
-        .remove_positions(&[idx - 1])
-        .map_err(map_assignment_shape_error)?;
-    let shape = deleted_vector_shape(rows, cols, storage.len());
-    Tensor::from_numeric_storage(storage, shape)
-        .map(Value::Tensor)
-        .map_err(map_assignment_shape_error)
+    delete_tensor_at_index_in_context(context, t, idx - 1)
 }
 
-fn delete_complex_linear(t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
-    let total = t.rows * t.cols;
+fn delete_complex_linear(
+    context: Option<&crate::context::RuntimeContext>,
+    t: ComplexTensor,
+    idx: usize,
+) -> Result<Value, RuntimeError> {
+    let total = t
+        .rows()
+        .checked_mul(t.cols())
+        .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
     if idx == 0 || idx > total {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    if !(t.rows() == 1 || t.cols() == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
         ));
     }
-    if let Some(storage) = t.integer_storage().cloned() {
-        let storage = delete_integer_complex_storage_positions(storage, &[idx - 1]);
-        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
-        return ComplexTensor::new_integer(storage, shape)
-            .map(Value::ComplexTensor)
-            .map_err(map_assignment_shape_error);
-    }
-    let dtype = t.numeric_dtype();
-    let rows = t.rows;
-    let cols = t.cols;
-    let mut values = t.materialize_f64();
-    values.remove(idx - 1);
-    let shape = deleted_vector_shape(rows, cols, values.len());
-    ComplexTensor::from_f64_values_with_dtype(values, shape, dtype)
-        .map(Value::ComplexTensor)
-        .map_err(map_assignment_shape_error)
+    delete_complex_at_index_in_context(context, t, idx - 1)
 }
 
 pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
+    let context = crate::context::legacy::active();
+    rhs_to_real_numeric_scalar(context.as_ref(), rhs)
+        .await
+        .map(|value| value.materialize_f64())
+}
+
+async fn rhs_to_real_numeric_scalar(
+    context: Option<&crate::context::RuntimeContext>,
+    rhs: &Value,
+) -> Result<NumericScalar, RuntimeError> {
+    if let Value::GpuTensor(handle) = rhs {
+        if !handle.shape().iter().all(|&extent| extent == 1) {
+            return Err(mex("ScalarRequired", "RHS must be scalar"));
+        }
+        let owner = super::plan::admission::Owner::new(context)?;
+        let host = owner
+            .await_stage(super::resident::gather_in_context(context, handle))
+            .await??;
+        return rhs_to_real_numeric_scalar_host(&host);
+    }
+    rhs_to_real_numeric_scalar_host(rhs)
+}
+
+fn rhs_to_real_numeric_scalar_host(rhs: &Value) -> Result<NumericScalar, RuntimeError> {
     match rhs {
-        Value::Num(x) => Ok(*x),
+        Value::Num(x) => Ok(NumericScalar::F64(*x)),
+        Value::Int(value) => Ok(NumericScalar::from(value.clone())),
         Value::Tensor(t2) => {
             if is_scalar_tensor(t2) {
-                Ok(tensor_value_f64(t2, 0))
+                Ok(t2.numeric_value_at(0).expect("validated scalar storage"))
             } else {
                 Err(mex("ScalarRequired", "RHS must be scalar"))
             }
         }
-        Value::GpuTensor(h2) => {
-            let total = h2.shape.iter().copied().product::<usize>();
-            if total != 1 {
-                return Err(mex("ScalarRequired", "RHS must be scalar"));
-            }
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                mex(
-                    "AccelerationProviderUnavailable",
-                    "No acceleration provider registered",
-                )
-            })?;
-            let host = provider
-                .download(h2)
-                .await
-                .map_err(|e| map_acceleration_error("gather rhs", e))?;
-            Ok(host.data[0])
-        }
-        _ => rhs
-            .try_into()
+        _ => <f64>::try_from(rhs)
+            .map(NumericScalar::F64)
             .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
     }
 }
 
 pub async fn rhs_to_complex_scalar(rhs: &Value) -> Result<(f64, f64), RuntimeError> {
+    let context = crate::context::legacy::active();
+    rhs_to_complex_numeric_scalar(context.as_ref(), rhs)
+        .await
+        .map(|(real, imag)| (real.materialize_f64(), imag.materialize_f64()))
+}
+
+async fn rhs_to_complex_numeric_scalar(
+    context: Option<&crate::context::RuntimeContext>,
+    rhs: &Value,
+) -> Result<(NumericScalar, NumericScalar), RuntimeError> {
+    if let Value::GpuTensor(handle) = rhs {
+        if !handle.shape().iter().all(|&extent| extent == 1) {
+            return Err(mex("ScalarRequired", "RHS must be scalar"));
+        }
+        let owner = super::plan::admission::Owner::new(context)?;
+        let host = owner
+            .await_stage(super::resident::gather_in_context(context, handle))
+            .await??;
+        return rhs_to_complex_numeric_scalar_host(&host);
+    }
+    rhs_to_complex_numeric_scalar_host(rhs)
+}
+
+fn rhs_to_complex_numeric_scalar_host(
+    rhs: &Value,
+) -> Result<(NumericScalar, NumericScalar), RuntimeError> {
+    let zero = NumericScalar::F64(0.0);
     match rhs {
-        Value::Complex(re, im) => Ok((*re, *im)),
-        Value::Num(n) => Ok((*n, 0.0)),
-        Value::Int(i) => Ok((i.to_f64(), 0.0)),
-        Value::Bool(b) => Ok((if *b { 1.0 } else { 0.0 }, 0.0)),
-        Value::Tensor(t) if is_scalar_tensor(t) => Ok((tensor_value_f64(t, 0), 0.0)),
-        Value::ComplexTensor(t) if complex_tensor_element_len(t) == 1 => {
-            let value = complex_tensor_value_complex64(t, 0);
-            Ok((value.re, value.im))
-        }
-        Value::GpuTensor(h) => {
-            let total = h.shape.iter().copied().product::<usize>();
-            if total != 1 {
-                return Err(mex("ScalarRequired", "RHS must be scalar"));
-            }
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                mex(
-                    "AccelerationProviderUnavailable",
-                    "No acceleration provider registered",
-                )
-            })?;
-            let host = provider
-                .download(h)
-                .await
-                .map_err(|e| map_acceleration_error("gather rhs", e))?;
-            Ok((host.data[0], 0.0))
-        }
+        Value::Complex(re, im) => Ok((NumericScalar::F64(*re), NumericScalar::F64(*im))),
+        Value::Num(n) => Ok((NumericScalar::F64(*n), zero)),
+        Value::Int(i) => Ok((NumericScalar::from(i.clone()), zero)),
+        Value::Bool(b) => Ok((NumericScalar::F64(if *b { 1.0 } else { 0.0 }), zero)),
+        Value::Tensor(t) if is_scalar_tensor(t) => Ok((
+            t.numeric_value_at(0).expect("validated scalar storage"),
+            zero,
+        )),
+        Value::ComplexTensor(t) if t.len() == 1 => Ok(t
+            .numeric_value_at(0)
+            .expect("validated scalar complex storage")),
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok((
+            NumericScalar::F64(if array.data[0] != 0 { 1.0 } else { 0.0 }),
+            zero,
+        )),
         _ => Err(mex("NumericRequired", "RHS must be numeric")),
     }
 }
@@ -322,8 +270,19 @@ pub async fn assign_tensor_scalar(
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
+    let context = crate::context::legacy::active();
+    assign_tensor_scalar_in_context(context.as_ref(), t, indices, rhs, delete).await
+}
+
+pub async fn assign_tensor_scalar_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    t: Tensor,
+    indices: &[usize],
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
     if indices.len() == 1 {
-        let total = t.rows * t.cols;
+        let total = t.len();
         let idx = indices[0];
         if idx == 0 {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -338,37 +297,43 @@ pub async fn assign_tensor_scalar(
                     "Indexed deletion requires empty RHS",
                 ));
             }
-            return delete_tensor_linear(t, idx);
+            return delete_tensor_linear(context, t, idx);
         }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-            let tensor = real_tensor_to_complex(t, "scalar complex promotion")?;
-            return assign_complex_scalar(tensor, indices, rhs, false).await;
+            return dense_scalar::assign_complex(
+                context,
+                dense_scalar::ComplexSource::Real(t),
+                indices,
+                rhs,
+                false,
+            )
+            .await;
         }
+        let (rows, cols) = dense_linear_dimensions(t.shape());
         let shape = if idx > total {
-            if !(t.rows == 1 || t.cols == 1) {
+            if !(rows == 1 || cols == 1) {
                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
             }
-            if t.rows == 1 {
-                vec![1, idx]
+            if rows == 1 {
+                ScalarShape::Growth([1, idx])
             } else {
-                vec![idx, 1]
+                ScalarShape::Growth([idx, 1])
             }
         } else {
-            t.shape.clone()
+            ScalarShape::Retained(t.shared_shape())
         };
-        assign_real_tensor_scalar(t, idx - 1, shape, rhs).await
+        dense_scalar::assign_real(context, t, idx - 1, shape, rhs).await
     } else if indices.len() == 2 {
         let i = indices[0];
         let mut j = indices[1];
-        let rows = t.rows;
-        let cols = t.cols;
+        let (rows, cols) = dense_linear_dimensions(t.shape());
         if j == 0 {
             j = 1;
         }
         if j > cols {
             j = cols;
         }
-        if i == 0 || i > rows {
+        if i == 0 || i > rows || j == 0 {
             return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
         }
         if delete {
@@ -378,12 +343,21 @@ pub async fn assign_tensor_scalar(
             ));
         }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-            let tensor = real_tensor_to_complex(t, "scalar complex promotion")?;
-            return assign_complex_scalar(tensor, indices, rhs, false).await;
+            return dense_scalar::assign_complex(
+                context,
+                dense_scalar::ComplexSource::Real(t),
+                indices,
+                rhs,
+                false,
+            )
+            .await;
         }
-        let idx = (i - 1) + (j - 1) * rows;
-        let shape = t.shape.clone();
-        assign_real_tensor_scalar(t, idx, shape, rhs).await
+        let idx = (j - 1)
+            .checked_mul(rows)
+            .and_then(|column| column.checked_add(i - 1))
+            .ok_or_else(|| mex("SubscriptOutOfBounds", "Subscript out of bounds"))?;
+        let shape = ScalarShape::Retained(t.shared_shape());
+        dense_scalar::assign_real(context, t, idx, shape, rhs).await
     } else {
         Err(mex(
             "UnsupportedAssignmentRank",
@@ -396,349 +370,106 @@ pub async fn assign_tensor_scalar(
 /// matrices without densifying its CSC representation. Selector assignment
 /// deliberately remains in the slice-assignment implementation.
 pub async fn assign_sparse_scalar(
-    sparse: SparseTensor,
+    source: SparseTensor,
     indices: &[usize],
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    if sparse.integer_storage().is_some() {
-        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
-    }
-    if delete {
-        if !is_empty_tensor(rhs) {
-            return Err(mex(
-                "DeletionRequiresEmptyRhs",
-                "Indexed deletion requires empty RHS",
-            ));
-        }
-        let updated = match indices {
-            [index] => {
-                let total = sparse
-                    .rows
-                    .checked_mul(sparse.cols)
-                    .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
-                if *index == 0 || *index > total {
-                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                }
-                if sparse.rows == 1 {
-                    sparse.with_deleted_columns(&[*index - 1])
-                } else if sparse.cols == 1 {
-                    sparse.with_deleted_rows(&[*index - 1])
-                } else {
-                    return Err(mex(
-                        "UnsupportedDeletion",
-                        "Linear sparse deletion is only supported for vectors",
-                    ));
-                }
-            }
-            [row, column] => {
-                if *row == 0 || *row > sparse.rows || *column == 0 || *column > sparse.cols {
-                    return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
-                }
-                if sparse.rows == 1 {
-                    sparse.with_deleted_columns(&[*column - 1])
-                } else if sparse.cols == 1 {
-                    sparse.with_deleted_rows(&[*row - 1])
-                } else {
-                    return Err(mex(
-                        "UnsupportedDeletion",
-                        "Sparse deletion requires selecting complete rows or columns",
-                    ));
-                }
-            }
-            _ => {
-                return Err(mex(
-                    "UnsupportedDeletion",
-                    "Sparse scalar deletion is only supported for vector indices",
-                ))
-            }
-        }
-        .map_err(map_assignment_shape_error)?;
-        return Ok(Value::SparseTensor(updated));
-    }
-    let (sparse, row, col) = match indices {
-        [index] => {
-            let total = sparse
-                .rows
-                .checked_mul(sparse.cols)
-                .ok_or_else(|| mex("IndexOutOfBounds", "Index out of bounds"))?;
-            if *index == 0 {
-                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-            }
-            if *index > total {
-                let expanded = if sparse.rows == 1 || (sparse.rows == 0 && sparse.cols == 0) {
-                    sparse.with_expanded_shape(1, *index)
-                } else if sparse.cols == 1 {
-                    sparse.with_expanded_shape(*index, 1)
-                } else {
-                    return Err(mex(
-                        "IndexOutOfBounds",
-                        "Linear sparse growth is only supported for vectors",
-                    ));
-                }
-                .map_err(map_assignment_shape_error)?;
-                if expanded.rows == 1 {
-                    (expanded, 0, *index - 1)
-                } else {
-                    (expanded, *index - 1, 0)
-                }
-            } else {
-                let rows = sparse.rows;
-                (sparse, (*index - 1) % rows, (*index - 1) / rows)
-            }
-        }
-        [row, column] => {
-            if *row == 0 || *column == 0 {
-                return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
-            }
-            let rows = sparse.rows.max(*row);
-            let cols = sparse.cols.max(*column);
-            let expanded = sparse
-                .with_expanded_shape(rows, cols)
-                .map_err(map_assignment_shape_error)?;
-            (expanded, *row - 1, *column - 1)
-        }
-        _ => {
-            return Err(mex(
-                "UnsupportedAssignmentRank",
-                "Only 1D/2D scalar assignment supported",
-            ))
-        }
-    };
-
-    let updated = if sparse.is_logical() {
-        let value = rhs_to_real_scalar(rhs).await? != 0.0;
-        sparse
-            .with_updated_logical_value(row, col, value)
-            .map_err(map_assignment_shape_error)?
-    } else if let Some(storage) = sparse.integer_storage() {
-        let rhs = rhs_to_integer_assignment_scalar(rhs).await?;
-        let value = integer_assignment::scalar_value(storage, &rhs);
-        sparse
-            .with_updated_integer_value(row, col, value)
-            .map_err(map_assignment_shape_error)?
-    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        let value = rhs_to_real_scalar(rhs).await? as f32;
-        sparse
-            .with_updated_f32_value(row, col, value)
-            .map_err(map_assignment_shape_error)?
-    } else {
-        let value = rhs_to_real_scalar(rhs).await?;
-        sparse
-            .with_updated_value(row, col, value)
-            .map_err(map_assignment_shape_error)?
-    };
-    Ok(Value::SparseTensor(updated))
+    let context = crate::context::legacy::active();
+    assign_sparse_scalar_in_context(context.as_ref(), source, indices, rhs, delete).await
 }
-
-async fn assign_real_tensor_scalar(
-    t: Tensor,
-    index: usize,
-    shape: Vec<usize>,
+pub async fn assign_sparse_scalar_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    source: SparseTensor,
+    indices: &[usize],
     rhs: &Value,
+    delete: bool,
 ) -> Result<Value, RuntimeError> {
-    let mut storage = t
-        .into_numeric_storage()
-        .map_err(map_assignment_shape_error)?;
-    let target_len = shape.iter().product();
-    storage.resize_zeroed(target_len);
-    storage = match storage.into_integer_storage() {
-        Ok(storage) => {
-            let rhs = rhs_to_integer_assignment_scalar(rhs).await?;
-            NumericStorage::from_integer_storage(assign_integer_storage(
-                storage, index, target_len, &rhs,
-            ))
-        }
-        Err(mut storage) => {
-            let rhs = rhs_to_real_scalar(rhs).await?;
-            let value = match storage.numeric_dtype() {
-                NumericDType::F64 => NumericScalar::F64(rhs),
-                NumericDType::F32 => NumericScalar::F32(rhs as f32),
-                _ => unreachable!("non-integer storage must be floating"),
-            };
-            storage
-                .set_value(index, value)
-                .map_err(map_assignment_shape_error)?;
-            storage
-        }
-    };
-    Tensor::from_numeric_storage(storage, shape)
-        .map(Value::Tensor)
-        .map_err(map_assignment_shape_error)
+    sparse_scalar::assign(context, source, indices, rhs, delete).await
 }
 
 pub async fn assign_complex_scalar(
-    mut t: ComplexTensor,
+    t: ComplexTensor,
     indices: &[usize],
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    if indices.len() == 1 {
-        let total = t.rows * t.cols;
-        let idx = indices[0];
-        if idx == 0 {
-            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-        }
-        if delete {
-            if idx > total {
-                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-            }
-            if !is_empty_tensor(rhs) {
-                return Err(mex(
-                    "DeletionRequiresEmptyRhs",
-                    "Indexed deletion requires empty RHS",
-                ));
-            }
-            return delete_complex_linear(t, idx);
-        }
-        if t.integer_storage().is_some() {
-            return assign_typed_complex_integer_scalar(t, idx, rhs).await;
-        }
-        let val = rhs_to_complex_scalar(rhs).await?;
-        let dtype = t.numeric_dtype();
-        let mut values = t.materialize_f64();
-        if idx > total {
-            if !(t.rows == 1 || t.cols == 1) {
-                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-            }
-            let target_len = idx;
-            if t.rows == 1 {
-                values.resize(target_len, (0.0, 0.0));
-                t.cols = target_len;
-                t.shape = vec![1, t.cols];
-            } else {
-                values.resize(target_len, (0.0, 0.0));
-                t.rows = target_len;
-                t.shape = vec![t.rows, 1];
-            }
-        }
-        values[idx - 1] = val;
-        ComplexTensor::from_f64_values_with_dtype(values, t.shape, dtype)
-            .map(Value::ComplexTensor)
-            .map_err(map_assignment_shape_error)
-    } else if indices.len() == 2 {
-        let i = indices[0];
-        let mut j = indices[1];
-        let rows = t.rows;
-        let cols = t.cols;
-        if j == 0 {
-            j = 1;
-        }
-        if j > cols {
-            j = cols;
-        }
-        if i == 0 || i > rows {
-            return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
-        }
-        if delete {
-            return Err(mex(
-                "UnsupportedDeletion",
-                "Indexed deletion is only supported for linear vector indices",
-            ));
-        }
-        let idx = (i - 1) + (j - 1) * rows;
-        if t.integer_storage().is_some() {
-            return assign_typed_complex_integer_scalar(t, idx + 1, rhs).await;
-        }
-        let val = rhs_to_complex_scalar(rhs).await?;
-        t.set_f64_assignment_at(idx, val.0, val.1)
-            .map_err(map_assignment_shape_error)?;
-        Ok(Value::ComplexTensor(t))
-    } else {
-        Err(mex(
-            "UnsupportedAssignmentRank",
-            "Only 1D/2D scalar assignment supported",
-        ))
-    }
+    let context = crate::context::legacy::active();
+    assign_complex_scalar_in_context(context.as_ref(), t, indices, rhs, delete).await
 }
 
-async fn assign_typed_complex_integer_scalar(
-    mut tensor: ComplexTensor,
-    index: usize,
+pub async fn assign_complex_scalar_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    t: ComplexTensor,
+    indices: &[usize],
     rhs: &Value,
+    delete: bool,
 ) -> Result<Value, RuntimeError> {
-    let total = tensor.rows * tensor.cols;
-    if index == 0 {
-        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-    }
-    if index > total {
-        if !(tensor.rows == 1 || tensor.cols == 1) {
-            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-        }
-        if tensor.rows == 1 {
-            tensor.cols = index;
-            tensor.shape = vec![1, tensor.cols];
-        } else {
-            tensor.rows = index;
-            tensor.shape = vec![tensor.rows, 1];
-        }
-    }
-    let rhs = rhs_to_complex_integer_assignment_scalar(rhs).await?;
-    let storage = tensor
-        .integer_storage()
-        .cloned()
-        .expect("typed complex assignment requires exact storage");
-    let real = assign_integer_storage(
-        storage.real,
-        index - 1,
-        tensor.rows * tensor.cols,
-        &rhs.real,
-    );
-    let imag = assign_integer_storage(
-        storage.imag,
-        index - 1,
-        tensor.rows * tensor.cols,
-        &rhs.imag,
-    );
-    runmat_value::IntegerComplexStorage::new(real, imag)
-        .and_then(|storage| ComplexTensor::new_integer(storage, tensor.shape))
-        .map(Value::ComplexTensor)
-        .map_err(map_assignment_shape_error)
+    dense_scalar::assign_complex(
+        context,
+        dense_scalar::ComplexSource::Complex(t),
+        indices,
+        rhs,
+        delete,
+    )
+    .await
 }
 
 pub async fn assign_gpu_scalar(
-    h: &runmat_accelerate_api::GpuTensorHandle,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
     indices: &[usize],
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(h).is_some() {
-        let tensor = download_integer_tensor(h).await?;
-        let Value::Tensor(updated) = assign_tensor_scalar(tensor, indices, rhs, delete).await?
-        else {
-            unreachable!("real integer scalar assignment must produce a real tensor")
-        };
-        return upload_tensor_to_gpu(&updated);
-    }
-    let host = provider
-        .download(h)
-        .await
-        .map_err(|e| map_acceleration_error("gather for assignment", e))?;
-    let t = Tensor::new(host.data, host.shape).map_err(map_assignment_shape_error)?;
-    let Value::Tensor(updated) = assign_tensor_scalar(t, indices, rhs, delete).await? else {
-        unreachable!()
+    let context = crate::context::legacy::active();
+    assign_gpu_scalar_in_context(context.as_ref(), handle, indices, rhs, delete).await
+}
+
+pub async fn assign_gpu_scalar_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    indices: &[usize],
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    let owner = super::plan::admission::Owner::new(context)?;
+    let host = owner
+        .await_stage(super::resident::gather_numeric_in_context(context, handle))
+        .await??;
+    let updated = match host {
+        Value::Tensor(tensor) => {
+            owner
+                .await_stage(assign_tensor_scalar_in_context(
+                    context, tensor, indices, rhs, delete,
+                ))
+                .await??
+        }
+        Value::ComplexTensor(tensor) => {
+            owner
+                .await_stage(assign_complex_scalar_in_context(
+                    context, tensor, indices, rhs, delete,
+                ))
+                .await??
+        }
+        _ => {
+            return Err(mex(
+                "AccelerationOperationFailed",
+                "Invalid resident assignment carrier",
+            ))
+        }
     };
-    let data = updated.materialize_f64();
-    let view = runmat_accelerate_api::HostTensorView {
-        data: &data,
-        shape: &updated.shape,
+    let protected = match rhs {
+        Value::GpuTensor(rhs) => Some(rhs),
+        _ => None,
     };
-    let new_h = provider
-        .upload(&view)
-        .map_err(|e| map_acceleration_error("reupload after assignment", e))?;
-    Ok(Value::GpuTensor(new_h))
+    owner.check()?;
+    super::resident::restore_in_context(context, handle, updated, protected.as_slice())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_complex_scalar, assign_sparse_scalar, assign_tensor_scalar, map_acceleration_error,
+        assign_complex_scalar, assign_sparse_scalar, assign_tensor_scalar,
         map_assignment_shape_error,
     };
     use futures::executor::block_on;
@@ -746,6 +477,102 @@ mod tests {
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
         NumericStorage, Tensor, Value,
     };
+
+    fn scalar_rhs_selected_context_preserves_native_projection_and_error_order() {
+        use crate::context::RuntimeContext;
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataOwned,
+            HostNumericTensorOwned,
+        };
+        use std::rc::Rc;
+        let make_context =
+            || RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+        let ambient = make_context();
+        let _ambient = ambient.enter();
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let selected = make_context().with_cancellation_token(cancellation.token());
+        assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+        assert!(selected.is_cancelled());
+        let owner = TestAllocationOwner::new();
+        let gpu = |data, shape| {
+            Value::GpuTensor(
+                owner
+                    .allocate_numeric(HostNumericTensorOwned {
+                        data,
+                        shape,
+                        storage: GpuTensorStorage::Real,
+                    })
+                    .unwrap()
+                    .handle,
+            )
+        };
+        let scalar = gpu(HostNumericDataOwned::F64(vec![1.]), vec![1, 1]);
+        for error in [
+            block_on(super::rhs_to_real_numeric_scalar(Some(&selected), &scalar)).unwrap_err(),
+            block_on(super::rhs_to_complex_numeric_scalar(
+                Some(&selected),
+                &scalar,
+            ))
+            .unwrap_err(),
+        ] {
+            assert!(error
+                .identifier()
+                .is_some_and(|id| id.ends_with(":Cancelled")));
+        }
+        // Floating GPU rank validation precedes download/control; exact
+        // integer assignment retains its original download-before-width gate.
+        let many = gpu(HostNumericDataOwned::F64(vec![1., 2.]), vec![1, 2]);
+        assert_eq!(
+            block_on(super::rhs_to_real_numeric_scalar(Some(&selected), &many))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:ScalarRequired")
+        );
+        assert_eq!(
+            block_on(super::rhs_to_complex_numeric_scalar(Some(&selected), &many))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:ScalarRequired")
+        );
+        let integers = gpu(
+            HostNumericDataOwned::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        );
+        let error = block_on(super::rhs_to_integer_assignment_scalar(
+            Some(&selected),
+            &integers,
+        ))
+        .err()
+        .expect("selected cancellation precedes integer width validation");
+        assert!(error
+            .identifier()
+            .is_some_and(|id| id.ends_with(":Cancelled")));
+        assert!(!ambient.is_cancelled());
+
+        // The synchronous host projection keeps the original native scalar,
+        // not a float round trip or a second recursive future allocation.
+        let bits = 0x7fc1_2345;
+        let single =
+            Value::Tensor(Tensor::from_f32(vec![f32::from_bits(bits)], vec![1, 1]).unwrap());
+        let runmat_value::NumericScalar::F32(value) =
+            super::rhs_to_real_numeric_scalar_host(&single).unwrap()
+        else {
+            panic!("native single projection")
+        };
+        assert_eq!(value.to_bits(), bits);
+        let exact = Value::Int(IntValue::U64(u64::MAX));
+        assert!(matches!(
+            super::rhs_to_real_numeric_scalar_host(&exact).unwrap(),
+            runmat_value::NumericScalar::U64(u64::MAX)
+        ));
+        assert!(matches!(
+            super::rhs_to_complex_numeric_scalar_host(&exact).unwrap(),
+            (
+                runmat_value::NumericScalar::U64(u64::MAX),
+                runmat_value::NumericScalar::F64(0.)
+            )
+        ));
+    }
 
     #[test]
     fn integer_linear_assignment_preserves_exact_uint64_rhs() {
@@ -781,7 +608,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(grown.numeric_dtype(), NumericDType::F32);
-        assert_eq!(grown.shape, vec![1, 4]);
+        assert_eq!(grown.shape(), [1, 4]);
         assert_eq!(
             grown.clone().into_numeric_storage(),
             Ok(NumericStorage::F32(vec![
@@ -799,7 +626,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 3]);
+        assert_eq!(deleted.shape(), [1, 3]);
         assert_eq!(
             deleted.into_numeric_storage(),
             Ok(NumericStorage::F32(vec![
@@ -823,17 +650,19 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(grown.numeric_dtype(), NumericDType::F32);
-        assert_eq!(grown.shape, vec![1, 4]);
+        assert_eq!(grown.shape(), [1, 4]);
         assert_eq!(
-            grown.as_f32_slice(),
-            Some(
-                &[
-                    (1.0, -1.0),
-                    (2.0, -2.0),
-                    (0.0, 0.0),
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                ][..]
-            )
+            grown.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.0, -1.0),
+                (2.0, -2.0),
+                (0.0, 0.0),
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+            ])
         );
 
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
@@ -844,16 +673,18 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 3]);
+        assert_eq!(deleted.shape(), [1, 3]);
         assert_eq!(
-            deleted.as_f32_slice(),
-            Some(
-                &[
-                    (1.0, -1.0),
-                    (0.0, 0.0),
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                ][..]
-            )
+            deleted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.0, -1.0),
+                (0.0, 0.0),
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+            ])
         );
     }
 
@@ -883,7 +714,7 @@ mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
                 &IntegerStorage::I64(vec![0, i64::MIN]),
@@ -991,7 +822,98 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I16(vec![7, 9]))
         );
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dense_rank_zero_and_rank_one_linear_assignment_keep_cached_geometry() {
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero tensor");
+        let growth = block_on(assign_tensor_scalar(
+            rank_zero.clone(),
+            &[2],
+            &Value::Num(9.0),
+            false,
+        ))
+        .expect_err("rank-zero tensor is not a cached-geometry vector");
+        assert_eq!(growth.identifier(), Some("RunMat:IndexOutOfBounds"));
+
+        let subscript = block_on(assign_tensor_scalar(
+            rank_zero.clone(),
+            &[1, 1],
+            &Value::Num(9.0),
+            false,
+        ))
+        .expect_err("rank-zero cached geometry has no rows");
+        assert_eq!(subscript.identifier(), Some("RunMat:SubscriptOutOfBounds"));
+
+        let deletion = block_on(assign_tensor_scalar(
+            rank_zero.clone(),
+            &[1],
+            &Value::Tensor(Tensor::zeros(vec![0, 0])),
+            true,
+        ))
+        .expect_err("rank-zero cached geometry has no deletable linear index");
+        assert_eq!(deletion.identifier(), Some("RunMat:IndexOutOfBounds"));
+
+        let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one tensor");
+        let Value::Tensor(grown) = block_on(assign_tensor_scalar(
+            rank_one,
+            &[3],
+            &Value::Num(9.0),
+            false,
+        ))
+        .expect("rank-one linear growth") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(grown.shape(), [1, 3]);
+        assert_eq!(grown.materialize_f64(), vec![1.0, 2.0, 9.0]);
+
+        let Value::Tensor(deleted) = block_on(assign_tensor_scalar(
+            grown,
+            &[2],
+            &Value::Tensor(rank_zero),
+            true,
+        ))
+        .expect("rank-zero RHS keeps legacy cached-empty deletion admission") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(deleted.shape(), [1, 2]);
+        assert_eq!(deleted.materialize_f64(), vec![1.0, 9.0]);
+    }
+
+    #[test]
+    fn integer_complex_vector_growth_uses_checked_owner_shape() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX]),
+            IntegerStorage::U64(vec![1]),
+        )
+        .expect("paired storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                    IntegerStorage::U64(vec![u64::MAX]),
+                )
+                .expect("rhs storage"),
+                vec![1, 1],
+            )
+            .expect("rhs tensor"),
+        );
+
+        let Value::ComplexTensor(grown) =
+            block_on(assign_complex_scalar(tensor, &[3], &rhs, false)).expect("growth")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(grown.shape(), [1, 3]);
+        let expected = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![1, 0, u64::MAX]),
+        )
+        .expect("expected storage");
+        assert_eq!(grown.integer_storage(), Some(&expected));
     }
 
     #[test]
@@ -1072,6 +994,34 @@ mod tests {
         assert_eq!(updated.shape(), vec![2, 2]);
         assert_eq!(updated.col_ptrs, vec![0, 0, 1]);
         assert_eq!(updated.row_indices, vec![1]);
+    }
+
+    #[test]
+    fn sparse_complex_scalar_assignment_preserves_complex_storage_and_elides_zero() {
+        let sparse = runmat_value::SparseTensor::zeros_complex(2, 2);
+        let Value::SparseTensor(updated) = block_on(assign_sparse_scalar(
+            sparse,
+            &[2, 1],
+            &Value::Complex(-0.0, 4.5),
+            false,
+        ))
+        .expect("complex sparse assignment") else {
+            panic!("expected sparse output");
+        };
+        assert!(updated.is_complex());
+        assert_eq!(updated.complex_at(1, 0), Some((-0.0, 4.5)));
+
+        let Value::SparseTensor(cleared) = block_on(assign_sparse_scalar(
+            updated,
+            &[2, 1],
+            &Value::Complex(0.0, 0.0),
+            false,
+        ))
+        .expect("zero complex sparse assignment") else {
+            panic!("expected sparse output");
+        };
+        assert!(cleared.is_complex());
+        assert_eq!(cleared.nnz(), 0);
     }
 
     #[test]
@@ -1225,8 +1175,102 @@ mod tests {
     }
 
     #[test]
+    fn dense_constructor_rejects_invalid_shape_and_assignment_keeps_rhs_error() {
+        let invalid = Tensor::new(vec![1.0, 2.0], vec![3])
+            .expect_err("the value constructor must reject mismatched shape");
+        assert_eq!(
+            map_assignment_shape_error(invalid).identifier(),
+            Some("RunMat:ShapeMismatch")
+        );
+
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        let error = block_on(assign_tensor_scalar(
+            tensor.clone(),
+            &[1],
+            &Value::String("not numeric".into()),
+            false,
+        ))
+        .expect_err("valid value must report the RHS error");
+        assert_eq!(error.identifier(), Some("RunMat:NumericRequired"));
+        assert_eq!(tensor.shape(), [1, 2]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn complex_constructors_reject_invalid_shapes_and_assignment_keeps_rhs_error() {
+        let invalid_floating = ComplexTensor::new(vec![(1.0, -1.0)], vec![2])
+            .expect_err("the complex value constructor must reject mismatched shape");
+        assert_eq!(
+            map_assignment_shape_error(invalid_floating).identifier(),
+            Some("RunMat:ShapeMismatch")
+        );
+        let floating = ComplexTensor::new(vec![(1.0, -1.0)], vec![1, 1]).expect("complex tensor");
+        let rhs_error = block_on(assign_complex_scalar(
+            floating.clone(),
+            &[1],
+            &Value::String("not numeric".into()),
+            false,
+        ))
+        .expect_err("rhs conversion remains first");
+        assert_eq!(rhs_error.identifier(), Some("RunMat:NumericRequired"));
+        assert_eq!(floating.shape(), [1, 1]);
+        assert_eq!(floating.materialize_f64(), vec![(1.0, -1.0)]);
+
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::U64(vec![1]), IntegerStorage::U64(vec![2]))
+                .expect("paired storage");
+        let invalid_exact = ComplexTensor::new_integer(storage.clone(), vec![2])
+            .expect_err("the exact complex value constructor must reject mismatched shape");
+        assert_eq!(
+            map_assignment_shape_error(invalid_exact).identifier(),
+            Some("RunMat:ShapeMismatch")
+        );
+        let exact = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+            .expect("integer complex tensor");
+        let exact_error = block_on(assign_complex_scalar(
+            exact.clone(),
+            &[1],
+            &Value::String("not numeric".into()),
+            false,
+        ))
+        .expect_err("valid exact value must report the RHS error");
+        assert_eq!(exact_error.identifier(), Some("RunMat:NumericRequired"));
+        assert_eq!(exact.shape(), [1, 1]);
+        assert_eq!(exact.integer_storage(), Some(&storage));
+
+        // Keep the original class-specific RHS-vs-growth failure order,
+        // including direct real-to-complex promotion without a mirror.
+        let nonscalar =
+            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 0.0); 2], vec![1, 2]).unwrap());
+        let floating = ComplexTensor::new(vec![(0.0, 0.0); 4], vec![2, 2]).unwrap();
+        let error = block_on(assign_complex_scalar(floating, &[5], &nonscalar, false)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:NumericRequired"));
+        let exact = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![0; 4]),
+                IntegerStorage::U64(vec![0; 4]),
+            )
+            .unwrap(),
+            vec![2, 2],
+        )
+        .unwrap();
+        let error = block_on(assign_complex_scalar(exact, &[5], &nonscalar, false)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
+        let floating = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
+        let error = block_on(assign_tensor_scalar(floating, &[5], &nonscalar, false)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:NumericRequired"));
+        let exact = Tensor::new_integer(IntegerStorage::U64(vec![0; 4]), vec![2, 2]).unwrap();
+        let error = block_on(assign_tensor_scalar(exact, &[5], &nonscalar, false)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
+    }
+
+    #[test]
     fn assignment_acceleration_error_mapping_reports_identifier() {
-        let err = map_acceleration_error("gather rhs", "provider failed");
+        let err = crate::indexing::resident::failure(
+            "gather rhs",
+            anyhow::anyhow!("provider failed").into(),
+        );
         assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
+        scalar_rhs_selected_context_preserves_native_projection_and_error_order();
     }
 }

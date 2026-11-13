@@ -1,0 +1,121 @@
+mod documentation;
+
+use self::documentation::SQRT_DOCUMENTATION;
+use super::super::support::{unary_numeric_catalog_entry, UnaryNumericCatalogSpec};
+use crate::{
+    BuiltinBindingDeclaration, BuiltinCatalogEntry, BuiltinCatalogIdentity,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinExtensionMode, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
+    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, MathInferenceRule, RootKind, ALL_INTEGER_CLASSES,
+};
+
+const SQRT_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise principal square root, promoted to complex for negative real input.",
+}];
+const SQRT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Single or double real/complex, logical, or character input; typed integer inputs require RunMat mode.",
+}];
+const SQRT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = sqrt(X)",
+    inputs: &SQRT_INPUTS,
+    outputs: &SQRT_OUTPUTS,
+}];
+pub const SQRT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQRT.INVALID_INPUT",
+    identifier: Some("RunMat:sqrt:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric, logical, character, or complex data.",
+    message: "sqrt: invalid input",
+};
+pub const SQRT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQRT.INTERNAL",
+    identifier: Some("RunMat:sqrt:Internal"),
+    when: "Internal tensor construction or provider interaction fails.",
+    message: "sqrt: internal error",
+};
+pub const SQRT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQRT.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:sqrt:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "sqrt: too many output arguments",
+};
+const SQRT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SQRT_ERROR_INVALID_INPUT,
+    SQRT_ERROR_INTERNAL,
+    SQRT_ERROR_TOO_MANY_OUTPUTS,
+];
+pub const SQRT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SQRT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SQRT_ERRORS,
+};
+pub const SQRT_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sqrt-integer-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sqrt with typed-integer input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SqrtIntegerInputExtension"),
+};
+pub const SQRT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SQRT_INTEGER_INPUT_EXTENSION];
+const SQRT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "X",
+        classes: &ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "RunMat mode accepts real typed integers whose authoritative values are exactly representable at the binary64 square-root boundary; typed complex integers remain unsupported.",
+    }];
+pub const SQRT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+    [BuiltinIntegerCapabilityDescriptor {
+        form: "Y = sqrt(integer_X)",
+        inputs: &SQRT_INTEGER_INPUTS,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::Double,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "The result is real double for nonnegative input and complex double when any value is negative. Exactness validation precedes provider access or gather.",
+    }];
+const SQRT_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
+pub const SQRT_CATALOG_ENTRY: BuiltinCatalogEntry = {
+    let mut entry = unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
+        provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
+        identity: BuiltinCatalogIdentity { name: "sqrt" },
+        documentation: SQRT_DOCUMENTATION,
+        descriptor: &SQRT_DESCRIPTOR,
+        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Root(RootKind::Principal)),
+        bindings: &SQRT_BINDINGS,
+        extensions: &SQRT_EXTENSIONS,
+        integer_capabilities: &SQRT_INTEGER_CAPABILITIES,
+        integer_audit: None,
+        fusion: BuiltinFusionPolicy::Never,
+    });
+    entry.contract.async_behavior = crate::BuiltinAsyncBehavior::MaySuspend;
+    entry.contract.effects = &[
+        runmat_types::EffectKind::MaySuspend,
+        runmat_types::EffectKind::MayThrow,
+    ];
+    entry.placement.preparation =
+        crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(0),
+            binding_variant: "default",
+            signatures: &[0],
+            data_arguments: &[0],
+            operation: crate::BuiltinPreparationOperation::RealUnary(
+                runmat_types::RealUnaryPredicate::Nonnegative,
+            ),
+            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+        }]);
+    entry
+};

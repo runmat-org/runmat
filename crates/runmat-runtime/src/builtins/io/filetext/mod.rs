@@ -1,5 +1,7 @@
 //! Text file I/O builtins.
 
+pub(crate) mod cooperation;
+pub(crate) mod encoding;
 pub mod fclose;
 pub mod feof;
 pub mod fgetl;

@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Debug)]
 pub(in crate::builtins::table) enum ImportCell {
     Empty,
+    Missing,
     Text(String),
     Number(f64),
     Logical(bool),
@@ -22,6 +23,7 @@ impl ImportCell {
     pub(in crate::builtins::table) fn display_text(&self) -> String {
         match self {
             Self::Empty => String::new(),
+            Self::Missing => runmat_value::StringElement::Missing.display().to_string(),
             Self::Text(text) => text.clone(),
             Self::Number(value) => format_key_number(*value),
             Self::Logical(value) => value.to_string(),
@@ -32,7 +34,7 @@ impl ImportCell {
 
     pub(in crate::builtins::table) fn is_missing(&self, options: &ReadTableOptions) -> bool {
         match self {
-            Self::Empty => true,
+            Self::Empty | Self::Missing => true,
             Self::Text(text) => options.is_missing(text),
             _ => false,
         }
@@ -44,7 +46,7 @@ impl ImportCell {
     ) -> bool {
         match self {
             Self::Number(_) | Self::Logical(_) | Self::DateTime(_) => true,
-            Self::Empty => false,
+            Self::Empty | Self::Missing => false,
             Self::Text(text) => {
                 let token = unquote(text.trim()).trim();
                 options.is_missing(token)

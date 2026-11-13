@@ -24,6 +24,11 @@ pub(super) struct ExactProjection {
     pub evaluators: ExactEvaluatorRegistry,
     pub model: ExactBRepModel,
     pub kernel_body_shapes: BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
+    pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    pub entity_names: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    pub entity_tags: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    pub kernel_entity_ids:
+        BTreeMap<(u64, PersistentEntityKind, u64), runmat_geometry_core::PersistentEntityId>,
 }
 
 pub(super) fn project_exact_contracts(
@@ -36,7 +41,8 @@ pub(super) fn project_exact_contracts(
     let occurrences = OccurrenceIndex::new(payload, representation_digest)?;
     let names = PersistentNameIndex::new(payload)?;
     let body_partitions = BodyPartitions::new(payload, &occurrences, &names)?;
-    let assembly_projection = occurrences.project_assemblies(&body_partitions)?;
+    let assembly_projection =
+        occurrences.project_assemblies(&body_partitions, meters_per_source_unit)?;
 
     let mut topology = ExactBRepTopology {
         schema_version: EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
@@ -57,21 +63,35 @@ pub(super) fn project_exact_contracts(
         contacts: Vec::new(),
     };
 
+    // Authored names and tags of every entity kind, keyed by the entity's persistent identity.
+    let mut entity_names = BTreeMap::new();
+    let mut entity_tags = BTreeMap::new();
     topology.vertices = payload
         .vertices
         .iter()
         .map(|vertex| {
             let path = occurrences.path(vertex.occurrence_index)?;
+            let id = names.shape_id(
+                PersistentEntityKind::Vertex,
+                vertex.shape_key,
+                vertex.occurrence_index,
+                path,
+            )?;
+            record_names(&mut entity_names, &id, &vertex.names);
+            record_names(&mut entity_tags, &id, &vertex.tags);
             Ok(ExactVertex {
-                id: names.shape_id(
-                    PersistentEntityKind::Vertex,
-                    vertex.shape_key,
-                    vertex.occurrence_index,
-                    path,
-                )?,
-                point_m: [vertex.point_x, vertex.point_y, vertex.point_z]
-                    .map(|coordinate| coordinate * meters_per_source_unit),
-                tolerance_m: vertex.tolerance * meters_per_source_unit,
+                id,
+                point_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(
+                    [vertex.point_x, vertex.point_y, vertex.point_z]
+                        .map(|coordinate| coordinate * meters_per_source_unit),
+                ),
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(vertex.tolerance * meters_per_source_unit),
             })
         })
         .collect::<Result<Vec<_>, GeometryImportError>>()?;
@@ -84,13 +104,16 @@ pub(super) fn project_exact_contracts(
         .iter()
         .map(|edge| {
             let path = occurrences.path(edge.occurrence_index)?;
+            let id = names.shape_id(
+                PersistentEntityKind::Edge,
+                edge.shape_key,
+                edge.occurrence_index,
+                path,
+            )?;
+            record_names(&mut entity_names, &id, &edge.names);
+            record_names(&mut entity_tags, &id, &edge.tags);
             Ok(ExactEdge {
-                id: names.shape_id(
-                    PersistentEntityKind::Edge,
-                    edge.shape_key,
-                    edge.occurrence_index,
-                    path,
-                )?,
+                id,
                 curve_evaluator_id: names.curve_id(edge.shape_key)?,
                 start_vertex_id: names.optional_shape_id(
                     PersistentEntityKind::Vertex,
@@ -104,6 +127,10 @@ pub(super) fn project_exact_contracts(
                     edge.occurrence_index,
                     path,
                 )?,
+                tolerance_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Length,
+                    _,
+                >::new(edge.tolerance * meters_per_source_unit),
                 is_closed: edge.closed,
                 is_periodic: edge.periodic,
                 is_degenerate: edge.degenerate,
@@ -174,6 +201,7 @@ pub(super) fn project_exact_contracts(
         .coedges
         .sort_by(|left, right| left.id.cmp(&right.id));
 
+    let mut source_face_ids = BTreeMap::new();
     topology.faces = payload
         .faces
         .iter()
@@ -192,13 +220,17 @@ pub(super) fn project_exact_contracts(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             inner_wire_ids.sort();
+            let id = names.shape_id(
+                PersistentEntityKind::Face,
+                face.shape_key,
+                face.occurrence_index,
+                path,
+            )?;
+            source_face_ids.insert(face.source_face_index, id.clone());
+            record_names(&mut entity_names, &id, &face.names);
+            record_names(&mut entity_tags, &id, &face.tags);
             Ok(ExactFace {
-                id: names.shape_id(
-                    PersistentEntityKind::Face,
-                    face.shape_key,
-                    face.occurrence_index,
-                    path,
-                )?,
+                id,
                 orientation: orientation(face.reversed),
                 surface_evaluator_id: names.surface_id(face.shape_key)?,
                 trim_classifier_id: names.trim_id(face.shape_key)?,
@@ -273,13 +305,16 @@ pub(super) fn project_exact_contracts(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             void_shell_ids.sort();
+            let id = names.shape_id(
+                PersistentEntityKind::Solid,
+                solid.shape_key,
+                solid.occurrence_index,
+                path,
+            )?;
+            record_names(&mut entity_names, &id, &solid.names);
+            record_names(&mut entity_tags, &id, &solid.tags);
             Ok(ExactSolid {
-                id: names.shape_id(
-                    PersistentEntityKind::Solid,
-                    solid.shape_key,
-                    solid.occurrence_index,
-                    path,
-                )?,
+                id,
                 outer_shell_id: names.shape_id(
                     PersistentEntityKind::Shell,
                     solid.outer_shell_key,
@@ -343,12 +378,98 @@ pub(super) fn project_exact_contracts(
     topology
         .validate_solid_shell_boundaries()
         .map_err(|error| invalid_contract("projected solid shell boundaries", error))?;
+    let kernel_entity_ids = project_kernel_entity_ids(payload, &occurrences, &names)?;
     Ok(ExactProjection {
         topology,
         evaluators,
         model,
         kernel_body_shapes: body_projection.kernel_shapes,
+        source_face_ids,
+        entity_names,
+        entity_tags,
+        kernel_entity_ids,
     })
+}
+
+/// Authored names stay in kernel precedence order; repeated names on one entity collapse.
+fn record_names(
+    entity_names: &mut BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    id: &runmat_geometry_core::PersistentEntityId,
+    authored: &[String],
+) {
+    if authored.is_empty() {
+        return;
+    }
+    let names = entity_names.entry(id.clone()).or_default();
+    for name in authored {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
+}
+
+fn project_kernel_entity_ids(
+    payload: &bridge::OcctExactShapePayload,
+    occurrences: &OccurrenceIndex,
+    names: &PersistentNameIndex,
+) -> Result<
+    BTreeMap<(u64, PersistentEntityKind, u64), runmat_geometry_core::PersistentEntityId>,
+    GeometryImportError,
+> {
+    let mut result = BTreeMap::new();
+    let inventories = [
+        (
+            PersistentEntityKind::Vertex,
+            payload
+                .vertices
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect::<Vec<_>>(),
+        ),
+        (
+            PersistentEntityKind::Edge,
+            payload
+                .edges
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect(),
+        ),
+        (
+            PersistentEntityKind::Face,
+            payload
+                .faces
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect(),
+        ),
+        (
+            PersistentEntityKind::Solid,
+            payload
+                .solids
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect(),
+        ),
+    ];
+    for (kind, entities) in inventories {
+        for (occurrence_index, shape_key) in entities {
+            let id = names.shape_id(
+                kind,
+                shape_key,
+                occurrence_index,
+                occurrences.path(occurrence_index)?,
+            )?;
+            if result
+                .insert((occurrence_index, kind, shape_key), id)
+                .is_some()
+            {
+                return Err(GeometryImportError::InvalidGeometry(
+                    "OCCT exact topology repeats a kernel entity key".into(),
+                ));
+            }
+        }
+    }
+    Ok(result)
 }
 
 fn canonicalize_cycle(ids: &mut [runmat_geometry_core::PersistentEntityId]) {
@@ -439,10 +560,12 @@ pub(super) fn mass_validation_digest(
     let mut hasher = Sha256::new();
     hasher.update(b"runmat.exact-geometry.occt-mass-validation\0");
     hasher.update(representation_digest);
-    for value in std::iter::once(properties.volume_m3)
-        .chain(std::iter::once(properties.surface_area_m2))
-        .chain(properties.centroid_m)
-        .chain(properties.inertia_about_centroid_m5)
+    for value in std::iter::once(properties.volume_m3.canonical_value())
+        .chain(std::iter::once(
+            properties.surface_area_m2.canonical_value(),
+        ))
+        .chain(properties.centroid_m.canonical_value())
+        .chain(properties.inertia_about_centroid_m5.canonical_value())
     {
         hasher.update(value.to_bits().to_be_bytes());
     }

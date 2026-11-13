@@ -1,15 +1,20 @@
 //! Executor-neutral fused evaluation for a deliberately small, exact numeric
 //! region subset. Executors build plans; Runtime owns MATLAB value semantics.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use runmat_execution::cancellation::CancellationToken;
 
 use runmat_value::{Tensor, Value};
 
-const MAX_NODES: usize = 256;
-const MAX_OUTPUTS: usize = 64;
+mod execution;
+pub mod service;
+pub use execution::{
+    execute_in_context, output_retained_bytes, NumericRegionOwnedExecution,
+    NUMERIC_REGION_EVALUATOR_ARRAY_BYTES,
+};
+
+/// Authoritative validated program limits, also bounding native metadata slots.
+pub const MAX_NODES: usize = 256;
+pub const MAX_OUTPUTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NumericUnaryOperation {
@@ -58,10 +63,11 @@ pub enum NumericRegionExecution {
 pub struct NumericRegionWorkload {
     pub elements: usize,
     pub output_bytes_per_value: u64,
+    pub output_rank: Option<usize>,
 }
 
 pub fn workload(inputs: &[&Value]) -> Option<NumericRegionWorkload> {
-    let (_, shape) = analyze_inputs(inputs)?;
+    let shape = analyze_inputs(inputs)?;
     let elements = shape
         .as_ref()
         .map(|shape| shape.iter().try_fold(1_usize, |n, dim| n.checked_mul(*dim)))
@@ -69,6 +75,7 @@ pub fn workload(inputs: &[&Value]) -> Option<NumericRegionWorkload> {
     Some(NumericRegionWorkload {
         elements,
         output_bytes_per_value: u64::try_from(elements).ok()?.checked_mul(8)?,
+        output_rank: shape.map(<[usize]>::len),
     })
 }
 
@@ -111,116 +118,54 @@ impl NumericRegionProgram {
 /// Evaluate a supported scalar/dense-double expression DAG in one element
 /// pass. Equal-shape dense arrays and scalar expansion are admitted; every
 /// other representation or broadcast shape fails closed before publication.
+/// Unbounded compatibility entrypoint; Runtime-owned execution must use
+/// `execute_in_context` so finite physical claims survive publication.
 pub fn execute(
     program: &NumericRegionProgram,
     inputs: &[&Value],
-    cancellation: &Arc<AtomicBool>,
+    cancellation: &CancellationToken,
 ) -> Result<NumericRegionExecution, &'static str> {
     program.validate(inputs.len())?;
-    let Some((input_views, output_shape)) = analyze_inputs(inputs) else {
-        return Ok(NumericRegionExecution::Ineligible);
-    };
-    let element_count = output_shape
-        .as_ref()
-        .map(|shape| shape.iter().try_fold(1_usize, |n, dim| n.checked_mul(*dim)))
-        .unwrap_or(Some(1))
-        .ok_or("numeric region output shape overflows this host")?;
-    let total_output_elements = element_count
-        .checked_mul(program.outputs.len())
-        .ok_or("numeric region output allocation overflows this host")?;
-    let mut output_values = vec![Vec::with_capacity(element_count); program.outputs.len()];
-    let mut values = vec![0.0; program.nodes.len()];
-    for element in 0..element_count {
-        if element % 1_024 == 0 && cancellation.load(Ordering::Relaxed) {
-            return Ok(NumericRegionExecution::Cancelled);
-        }
-        for (index, node) in program.nodes.iter().enumerate() {
-            values[index] = match *node {
-                NumericRegionNode::Input(input) => input_views[input].at(element),
-                NumericRegionNode::Constant(value) => value,
-                NumericRegionNode::Unary { operation, input } => match operation {
-                    NumericUnaryOperation::Plus => values[input],
-                    NumericUnaryOperation::Minus => -values[input],
-                },
-                NumericRegionNode::Binary {
-                    operation,
-                    left,
-                    right,
-                } => match operation {
-                    NumericBinaryOperation::Add => values[left] + values[right],
-                    NumericBinaryOperation::Subtract => values[left] - values[right],
-                    NumericBinaryOperation::Multiply => values[left] * values[right],
-                    NumericBinaryOperation::Divide => values[left] / values[right],
-                    NumericBinaryOperation::LeftDivide => values[right] / values[left],
-                },
-            };
-        }
-        for (output, node) in output_values.iter_mut().zip(&program.outputs) {
-            output.push(values[*node]);
+    match execution::run(program, inputs, cancellation, None)
+        .map_err(|_| "numeric region execution failed")?
+    {
+        execution::StorageExecution::Ineligible => Ok(NumericRegionExecution::Ineligible),
+        execution::StorageExecution::Cancelled => Ok(NumericRegionExecution::Cancelled),
+        execution::StorageExecution::Completed(values) => {
+            let values = values
+                .try_into_owned()
+                .map_err(|_| "numeric output storage is shared")?
+                .try_into_unbounded_vec()
+                .map_err(|_| "numeric compatibility output carries a finite claim")?;
+            Ok(NumericRegionExecution::Completed(values))
         }
     }
-    debug_assert_eq!(
-        output_values.iter().map(Vec::len).sum::<usize>(),
-        total_output_elements
-    );
-    let outputs = if let Some(shape) = output_shape {
-        output_values
-            .into_iter()
-            .map(|values| Tensor::new(values, shape.clone()).map(Value::Tensor))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "numeric region produced an invalid dense tensor")?
-    } else {
-        output_values
-            .into_iter()
-            .map(|values| Value::Num(values[0]))
-            .collect()
-    };
-    Ok(NumericRegionExecution::Completed(outputs))
 }
 
-fn analyze_inputs<'a>(inputs: &[&'a Value]) -> Option<(Vec<NumericInput<'a>>, Option<Vec<usize>>)> {
-    let mut output_shape: Option<Vec<usize>> = None;
-    let mut tensor_shape: Option<Vec<usize>> = None;
-    let mut input_views = Vec::with_capacity(inputs.len());
+/// Borrow shape metadata from the original physical owner. Validation neither
+/// collects input views nor clones a shape before admission.
+fn analyze_inputs<'a>(inputs: &[&'a Value]) -> Option<Option<&'a [usize]>> {
+    let mut output_shape: Option<&'a [usize]> = None;
+    let mut tensor_shape: Option<&'a [usize]> = None;
     for &input in inputs {
         match input {
-            Value::Num(value) => input_views.push(NumericInput::Scalar(*value)),
+            Value::Num(_) => {}
             Value::Tensor(tensor) => {
-                let values = tensor.as_f64_slice()?;
+                tensor.as_f64_slice()?;
                 if tensor.len() == 1 {
-                    output_shape.get_or_insert_with(|| tensor.shape.clone());
-                    input_views.push(NumericInput::Scalar(values[0]));
+                    output_shape.get_or_insert(tensor.shape());
                 } else {
-                    if tensor_shape
-                        .as_ref()
-                        .is_some_and(|shape| shape != &tensor.shape)
-                    {
+                    if tensor_shape.is_some_and(|shape| shape != tensor.shape()) {
                         return None;
                     }
-                    tensor_shape = Some(tensor.shape.clone());
-                    output_shape = Some(tensor.shape.clone());
-                    input_views.push(NumericInput::Dense(values));
+                    tensor_shape = Some(tensor.shape());
+                    output_shape = Some(tensor.shape());
                 }
             }
             _ => return None,
         }
     }
-    Some((input_views, output_shape))
-}
-
-#[derive(Clone, Copy)]
-enum NumericInput<'a> {
-    Scalar(f64),
-    Dense(&'a [f64]),
-}
-
-impl NumericInput<'_> {
-    fn at(self, index: usize) -> f64 {
-        match self {
-            Self::Scalar(value) => value,
-            Self::Dense(values) => values[index],
-        }
-    }
+    Some(output_shape)
 }
 
 #[cfg(test)]
@@ -230,7 +175,7 @@ mod tests {
     fn execute_values(
         program: &NumericRegionProgram,
         inputs: &[Value],
-        cancellation: &Arc<AtomicBool>,
+        cancellation: &CancellationToken,
     ) -> Result<NumericRegionExecution, &'static str> {
         let inputs = inputs.iter().collect::<Vec<_>>();
         execute(program, &inputs, cancellation)
@@ -260,7 +205,7 @@ mod tests {
         let result = execute_values(
             &program,
             &[Value::Tensor(tensor), Value::Num(1.0)],
-            &Arc::new(AtomicBool::new(false)),
+            &runmat_execution::cancellation::CancellationSource::new().token(),
         )
         .unwrap();
         let NumericRegionExecution::Completed(outputs) = result else {
@@ -292,7 +237,7 @@ mod tests {
             execute_values(
                 &program,
                 &[Value::Tensor(left), Value::Tensor(right)],
-                &Arc::new(AtomicBool::new(false)),
+                &runmat_execution::cancellation::CancellationSource::new().token(),
             )
             .unwrap(),
             NumericRegionExecution::Ineligible
@@ -314,14 +259,17 @@ mod tests {
             outputs: vec![2],
         };
         let input = Tensor::new(vec![0.0; 2_048], vec![1, 2_048]).unwrap();
-        let cancellation = Arc::new(AtomicBool::new(true));
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        source.cancel(runmat_execution::CancellationReason::User);
+        let cancellation = source.token();
         assert_eq!(
             execute_values(&program, &[Value::Tensor(input)], &cancellation).unwrap(),
             NumericRegionExecution::Cancelled
         );
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn preserves_scalar_array_shape() {
         let program = NumericRegionProgram {
             nodes: vec![
@@ -335,20 +283,30 @@ mod tests {
             ],
             outputs: vec![2],
         };
-        let input = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
-        let result = execute_values(
-            &program,
-            &[Value::Tensor(input)],
-            &Arc::new(AtomicBool::new(false)),
-        )
-        .unwrap();
-        let NumericRegionExecution::Completed(outputs) = result else {
-            panic!("eligible numeric region did not execute")
-        };
-        let Value::Tensor(output) = &outputs[0] else {
-            panic!("scalar arrays must remain arrays")
-        };
-        assert_eq!(output.shape, vec![1, 1]);
-        assert_eq!(output.materialize_f64(), vec![3.0]);
+        for shape in [Vec::new(), vec![1], vec![1, 1]] {
+            let input = Value::Tensor(Tensor::new(vec![2.0], shape.clone()).unwrap());
+            assert_eq!(
+                workload(&[&input]),
+                Some(NumericRegionWorkload {
+                    elements: 1,
+                    output_bytes_per_value: 8,
+                    output_rank: Some(shape.len()),
+                }),
+            );
+            let result = execute_values(
+                &program,
+                &[input],
+                &runmat_execution::cancellation::CancellationSource::new().token(),
+            )
+            .unwrap();
+            let NumericRegionExecution::Completed(outputs) = result else {
+                panic!("eligible numeric region did not execute")
+            };
+            let Value::Tensor(output) = &outputs[0] else {
+                panic!("scalar arrays must remain arrays")
+            };
+            assert_eq!(output.shape(), shape);
+            assert_eq!(output.materialize_f64(), vec![3.0]);
+        }
     }
 }

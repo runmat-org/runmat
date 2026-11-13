@@ -1,0 +1,225 @@
+{
+  "schema_version": 1,
+  "source_anchor": "c7a12b7b9f050f6789dda56a1024636243b7a63e",
+  "frozen_source_manifest_sha256": "f98c09650e0af8bc60c5e3e1b09589c68669d0f95fd6012fafef7713ec83af80",
+  "target": "x86_64-apple-darwin",
+  "execution_host": "Apple Silicon Air with Rosetta",
+  "cli": {
+    "sha256": "2acf88b9139b9e51b8afb4321900265eb5e07f3fe6c9e597c622c80252ce5cc6",
+    "bytes": 752459044,
+    "location": "Main:.tmp-rm1064/settings-air-r1057-release-artifacts/runmat"
+  },
+  "build": {
+    "exit_code": 0,
+    "elapsed": "14m25s",
+    "toolchain": "Rust1.90.0",
+    "profile": "release optimized; symbols stripped"
+  },
+  "products": {
+    "passed": 31,
+    "failed": 0,
+    "not_selected": 0,
+    "selection": null,
+    "backend": "metal",
+    "cases": [
+      {
+        "name": "compiled front door and machine-readable analysis",
+        "passed": true
+      },
+      {
+        "name": "authenticated named cluster join and original-identity recovery",
+        "passed": true
+      },
+      {
+        "name": "staged CLI distribution reopens independently with notices",
+        "passed": true
+      },
+      {
+        "name": "local FEA is lazy, denies signed-out effects, and meters authenticated mesh/solve",
+        "passed": true
+      },
+      {
+        "name": "in-process provider preserves exact wide integer comparisons",
+        "passed": true
+      },
+      {
+        "name": "script numerics, exact storage, compatibility and handles (VM)",
+        "passed": true
+      },
+      {
+        "name": "script numerics, exact storage, compatibility and handles (adaptive JIT)",
+        "passed": true
+      },
+      {
+        "name": "stdin script entrypoint",
+        "passed": true
+      },
+      {
+        "name": "dynamic source path and call resolution",
+        "passed": true
+      },
+      {
+        "name": "originating runtime error identity and failure exit",
+        "passed": true
+      },
+      {
+        "name": "adaptive future execution through CLI process services",
+        "passed": true
+      },
+      {
+        "name": "native future capability refusal precedes image publication",
+        "passed": true
+      },
+      {
+        "name": "compiled CLI uses real Metal provider without host-provider fallback",
+        "passed": true
+      },
+      {
+        "name": "process-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "session-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "none-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "public test runner testPasses",
+        "passed": true
+      },
+      {
+        "name": "public test runner testFails",
+        "passed": true
+      },
+      {
+        "name": "public test runner does-not-exist",
+        "passed": true
+      },
+      {
+        "name": "public test runner testHangs",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (process)",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (session)",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (none)",
+        "passed": true
+      },
+      {
+        "name": "process-isolated test worker supports VM future execution",
+        "passed": true
+      },
+      {
+        "name": "script Ctrl-C cancellation",
+        "passed": true
+      },
+      {
+        "name": "real native library callback value and originating callback error (process)",
+        "passed": true
+      },
+      {
+        "name": "real native library callback value and originating callback error (in_process)",
+        "passed": true
+      },
+      {
+        "name": "in-process native callback Ctrl-C cancellation and retirement",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_success",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_assertion",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_origin",
+        "passed": true
+      }
+    ]
+  },
+  "assessments": {
+    "commands": 8,
+    "exit_code": 0
+  },
+  "source_guards": {
+    "count": 3,
+    "matchedEach": 25871,
+    "differences": 0,
+    "absent": 0
+  },
+  "preserved_runtime_artifacts_rehashed": true,
+  "evidence": [
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/report.json",
+      "sha256": "019227719dd9a20af6437af58ea79674b21bce723387e8c0b246f6d56625cfd5"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.assessment.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.assessment.log",
+      "sha256": "b9fa15736a8a508981cebf08119798be4677a122a4515beb4fa9ad6a8dbecb26"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.build.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.build.log",
+      "sha256": "7d52a7b7268e6147ab2dfe20dcc61d99b70e9dd569853bfbee13b8ee6f98311c"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.cli.sha256",
+      "sha256": "46338d80c03a7a5f640a136ebc79fec8cbbccf7623d8b62eba34aeb4f9c2bf52"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.final-preserved-check.log",
+      "sha256": "1ff909974b47f0ff55f4ebd5b2c316ed4690eef1c01a46d4732876614d3985f9"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.postbuild.json",
+      "sha256": "6b25a063aafb0d2a6d1e71143c905d02da9a7968cbbea804eb9051b9689107d8"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.postsource.json",
+      "sha256": "6718c1fc4051800e59df2e0e0209deae27206fb195a986eb77b7aec36fc724e6"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.preserved-check.log",
+      "sha256": "1ff909974b47f0ff55f4ebd5b2c316ed4690eef1c01a46d4732876614d3985f9"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.preserved.sha256",
+      "sha256": "873104b482dba3df3d58574726f20aa6ecfe37cf90f4718f04078b5994109d10"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.presource.json",
+      "sha256": "c66faac72c5ea86dd26c98915f410a57dc16d63469536cfc6f8ac940d378691f"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.products.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-air-r1057-collected/runtime-intel-cli-suite-r1057.products.log",
+      "sha256": "3ba9e3583fccd29965840cb6496b46c19f15e34ac90beb935f5880925c7dad40"
+    }
+  ],
+  "scope": "Full original 31-case staged CLI cohort and eight assessment commands against the corrected Intel CLI, including actual Metal/worker isolation, callbacks, cancellation and public native compilation. Runtime archive/payload artifacts are preserved from R1055. Real production-router remote execution remains a separate Main requirement. Physical Intel hardware was not tested."
+}

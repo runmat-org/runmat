@@ -10,7 +10,7 @@ fn boundary_edge_split_refines_conforming_faces_and_preserves_valid_cavity() {
             .expect("boundary edge should split");
 
     assert_eq!(split_node.node_id, 4);
-    assert_eq!(split_node.coordinates_m, [0.5, 0.0, 0.0]);
+    assert_eq!(split_node.coordinates_m.canonical_value(), [0.5, 0.0, 0.0]);
     assert_eq!(
         split_cavity.boundary_faces.len(),
         cavity.boundary_faces.len() + 2
@@ -44,7 +44,10 @@ fn boundary_edge_patch_split_refines_pair_without_shared_edge_child() {
             .expect("boundary edge patch should split");
 
     assert_eq!(split_node.node_id, 4);
-    assert_eq!(split_node.coordinates_m, [0.25, 0.25, 0.25]);
+    assert_eq!(
+        split_node.coordinates_m.canonical_value(),
+        [0.25, 0.25, 0.25]
+    );
     assert_eq!(
         split_cavity.boundary_faces.len(),
         cavity.boundary_faces.len() + 2
@@ -92,7 +95,7 @@ fn boundary_edge_patch_split_honors_weighted_point() {
     .expect("weighted boundary edge patch should split");
 
     assert_eq!(split_node.node_id, 4);
-    assert_eq!(split_node.coordinates_m, [0.2, 0.3, 0.4]);
+    assert_eq!(split_node.coordinates_m.canonical_value(), [0.2, 0.3, 0.4]);
     assert!(!split_cavity
         .boundary_faces
         .iter()

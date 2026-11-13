@@ -288,7 +288,7 @@ fn complete_prefix_through_plc() -> MeshingStageArtifacts {
 fn cad_model() -> CadModel {
     CadModel {
         model_id: "generic_cube".to_string(),
-        unit_scale_to_m: 1.0,
+        coordinate_units: runmat_types::physical::CoordinateUnits::canonical(),
         vertices: vec![],
         edges: vec![],
         faces: vec![],
@@ -301,7 +301,7 @@ fn cad_model() -> CadModel {
 fn sizing_field() -> SizingFieldContract {
     SizingFieldContract {
         field_id: "sizing".to_string(),
-        global_target_size_m: 0.1,
+        global_target_size_m: runmat_types::physical::Length::new(0.1),
         min_size_m: None,
         max_size_m: None,
         growth_rate: Some(1.4),
@@ -342,7 +342,7 @@ fn protected_boundary_complex() -> ProtectedBoundaryComplex {
             watertight: true,
             manifold: true,
             shell_nesting_classified: true,
-            material_interfaces_classified: true,
+            conformal_interfaces_classified: true,
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
     }
@@ -351,7 +351,6 @@ fn protected_boundary_complex() -> ProtectedBoundaryComplex {
 fn tetrahedron_mesh(recovery_complete: bool, quality_optimized: bool) -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "tetrahedron".to_string(),
-        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![],
         elements: vec![],
         boundary_faces: vec![],

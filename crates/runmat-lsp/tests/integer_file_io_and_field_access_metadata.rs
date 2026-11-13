@@ -1,3 +1,7 @@
+mod support;
+#[path = "support/hover.rs"]
+mod hover_support;
+
 use lsp_types::{HoverContents, Position};
 use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, hover_at, signature_help_at, CompatMode,
@@ -24,68 +28,45 @@ fn builtin_metadata(
     &'static [runmat_builtins::BuiltinIntegerCapabilityDescriptor],
     Option<&'static runmat_builtins::BuiltinIntegerAuditDescriptor>,
 ) {
-    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
-        return (
-            entry.descriptor,
-            entry.extensions,
-            entry.integer_capabilities,
-            entry.integer_audit,
-        );
-    }
-    let binding = runmat_builtins::builtin_function_by_name(name)
-        .unwrap_or_else(|| panic!("catalog entry or runtime binding for {name}"));
+    let entry = runmat_builtins::builtin_catalog_entry_by_name(name)
+        .unwrap_or_else(|| panic!("canonical builtin {name}"));
     (
-        binding.descriptor.expect("public descriptor"),
-        binding.extensions,
-        binding.integer_capabilities,
-        binding.integer_audit,
+        entry.descriptor,
+        entry.extensions,
+        entry.integer_capabilities,
+        entry.integer_audit,
     )
 }
 
 #[test]
 fn file_io_and_field_access_descriptors_are_public_and_visible() {
-    for (name, source, expected_signature) in [
-        ("fopen", "fid = fopen('x');", "fid = fopen(filename)"),
-        (
-            "fprintf",
-            "n = fprintf('%d', 1);",
-            "count = fprintf(formatSpec, A...)",
-        ),
-        ("fread", "a = fread(3);", "data = fread(fid)"),
-        ("frewind", "frewind(3);", "frewind(fid)"),
-        ("fwrite", "n = fwrite(3, 1);", "count = fwrite(fid, data)"),
-        ("full", "a = full(1);", "A = full(S)"),
-        ("func2str", "s = func2str(@sin);", "name = func2str(fh)"),
-        ("functions", "s = functions(@sin);", "info = functions(fh)"),
-        ("getenv", "s = getenv('PATH');", "value = getenv(NAME)"),
-        (
-            "getfield",
-            "s = struct(); s.x = 1; v = getfield(s, 'x');",
-            "value = getfield(S, field)",
-        ),
+    for (name, source) in [
+        ("fopen", "fid = fopen('x');"),
+        ("fprintf", "n = fprintf('%d', 1);"),
+        ("fread", "a = fread(3);"),
+        ("frewind", "frewind(3);"),
+        ("fwrite", "n = fwrite(3, 1);"),
+        ("full", "a = full(1);"),
+        ("func2str", "s = func2str(@sin);"),
+        ("functions", "s = functions(@sin);"),
+        ("getenv", "s = getenv('PATH');"),
+        ("getfield", "s = struct(); s.x = 1; v = getfield(s, 'x');"),
     ] {
         let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
         assert!(analysis.syntax_error.is_none(), "{source}");
         assert!(analysis.lowering_error.is_none(), "{source}");
         assert!(analysis.compile_error.is_none(), "{source}");
-        let column = source.find(name).expect("builtin call") as u32;
-        let position = Position::new(0, column);
-        let help = signature_help_at(source, &analysis, &position)
-            .unwrap_or_else(|| panic!("signature help for {name}"));
-        assert!(help
-            .signatures
-            .iter()
-            .any(|signature| signature.label == expected_signature));
-        let hover = hover_at(source, &analysis, &position)
-            .unwrap_or_else(|| panic!("descriptor-backed hover for {name}"));
-        let markdown = match hover.contents {
-            HoverContents::Markup(markup) => markup.value,
-            other => panic!("expected Markdown hover for {name}, got {other:?}"),
+        let position = Position::new(0, source.find(name).expect("builtin call") as u32);
+        let help =
+            signature_help_at(source, &analysis, &position).expect("canonical signature help");
+        support::assert_catalog_signatures(name, &help);
+        let hover = hover_at(source, &analysis, &position).expect("canonical hover");
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected Markdown hover");
         };
-        assert!(markdown.contains(expected_signature), "{name}: {markdown}");
+        hover_support::assert_catalog_hover(name, &help, &markup.value);
     }
 }
-
 #[test]
 fn file_io_and_field_access_integer_dispositions_are_public_completions() {
     let source = "x = 1;";

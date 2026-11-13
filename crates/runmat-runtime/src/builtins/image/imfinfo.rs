@@ -5,76 +5,53 @@ use std::path::{Path, PathBuf};
 
 use image::io::Reader as ImageReader;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IMFINFO_DESCRIPTOR, IMFINFO_ERROR_ARGUMENT, IMFINFO_ERROR_DECODE, IMFINFO_ERROR_FORMAT,
+    IMFINFO_ERROR_IO, IMFINFO_ERROR_OUTPUTS,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StructValue, Value};
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-fn info_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("imfinfo").build()
+fn info_error(
+    error: &'static runmat_builtins::BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    build_runtime_error(format!("{}: {detail}", error.message))
+        .with_builtin("imfinfo")
+        .with_identifier(error.identifier.unwrap_or("RunMat:imfinfo:Internal"))
+        .build()
 }
 
-const IMFINFO_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Image file to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "fmt",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional image format hint.",
-    },
-];
-const IMFINFO_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "info",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Image metadata struct.",
-}];
-const IMFINFO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "info = imfinfo(filename, fmt)",
-    inputs: &IMFINFO_INPUTS,
-    outputs: &IMFINFO_OUTPUTS,
-}];
-pub const IMFINFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMFINFO_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(|err| info_error(format!("imfinfo: {}", err.message())))?,
-        );
-    }
-    Ok(out)
+fn info_error_with_source<E>(
+    error: &'static runmat_builtins::BuiltinErrorDescriptor,
+    source: E,
+) -> RuntimeError
+where
+    E: crate::runtime_error::RuntimeErrorSourceBound,
+{
+    build_runtime_error(format!("{}: {source}", error.message))
+        .with_builtin("imfinfo")
+        .with_identifier(error.identifier.unwrap_or("RunMat:imfinfo:Internal"))
+        .with_source(source)
+        .build()
 }
 
 fn scalar_text(value: &Value, arg: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        _ => Err(info_error(format!(
-            "imfinfo: {arg} must be a string scalar or character vector"
-        ))),
-    }
+    super::checked_text::scalar_text(value)
+        .map_err(|source| {
+            let mut error = info_error(&IMFINFO_ERROR_ARGUMENT, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?
+        .ok_or_else(|| {
+            info_error(
+                &IMFINFO_ERROR_ARGUMENT,
+                format!("{arg} must be a string scalar or character vector"),
+            )
+        })
 }
 
 fn char_value(text: &str) -> Value {
@@ -83,41 +60,69 @@ fn char_value(text: &str) -> Value {
 
 #[runtime_builtin(
     name = "imfinfo",
-    category = "image",
-    summary = "Read image file metadata.",
-    keywords = "imfinfo,image,metadata,width,height,format",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::image::imfinfo::IMFINFO_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::image::imfinfo"
 )]
-async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args(&args).await?;
+async fn imfinfo_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &IMFINFO_DESCRIPTOR,
+        &IMFINFO_ERROR_OUTPUTS,
+        "imfinfo",
+    )?;
     if args.is_empty() || args.len() > 2 {
         return Err(info_error(
-            "imfinfo: filename and optional format are expected",
+            &IMFINFO_ERROR_ARGUMENT,
+            "filename and optional format are expected",
         ));
     }
     let filename = scalar_text(&args[0], "filename")?;
-    let path = PathBuf::from(expand_user_path(filename.trim(), "imfinfo").map_err(info_error)?);
-    let bytes = vfs::read_async(&path)
-        .await
-        .map_err(|err| info_error(format!("imfinfo: {err}")))?;
+    if filename.trim().is_empty() {
+        return Err(info_error(
+            &IMFINFO_ERROR_ARGUMENT,
+            "filename must not be empty",
+        ));
+    }
+    let explicit_format = args
+        .get(1)
+        .map(|value| {
+            let hint = scalar_text(value, "fmt")?;
+            let extension = hint.trim().trim_start_matches('.');
+            image::ImageFormat::from_extension(extension.to_ascii_lowercase())
+                .map(|format| (format, extension.to_string()))
+                .ok_or_else(|| info_error(&IMFINFO_ERROR_FORMAT, "unsupported image format hint"))
+        })
+        .transpose()?;
+    let requested_path = PathBuf::from(
+        expand_user_path(filename.trim(), "imfinfo")
+            .map_err(|error| info_error(&IMFINFO_ERROR_ARGUMENT, error))?,
+    );
+    let (path, bytes) = match vfs::read_async(&requested_path).await {
+        Ok(bytes) => (requested_path, bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && explicit_format.is_some() => {
+            let suffix = &explicit_format.as_ref().expect("checked above").1;
+            let mut candidate = requested_path.as_os_str().to_os_string();
+            candidate.push(".");
+            candidate.push(suffix);
+            let candidate = PathBuf::from(candidate);
+            let bytes = vfs::read_async(&candidate)
+                .await
+                .map_err(|err| info_error_with_source(&IMFINFO_ERROR_IO, err))?;
+            (candidate, bytes)
+        }
+        Err(error) => return Err(info_error_with_source(&IMFINFO_ERROR_IO, error)),
+    };
     let mut reader = ImageReader::new(Cursor::new(bytes.as_slice()))
         .with_guessed_format()
-        .map_err(|err| info_error(format!("imfinfo: {err}")))?;
-    if let Some(fmt) = args.get(1) {
-        let hint = scalar_text(fmt, "fmt")?;
-        if let Some(format) = image::ImageFormat::from_extension(hint.trim_start_matches('.')) {
-            reader.set_format(format);
-        }
+        .map_err(|err| info_error_with_source(&IMFINFO_ERROR_DECODE, err))?;
+    if let Some((format, _)) = explicit_format {
+        reader.set_format(format);
     }
     let format = reader.format();
     let image = reader
         .decode()
-        .map_err(|err| info_error(format!("imfinfo: {err}")))?;
+        .map_err(|err| info_error_with_source(&IMFINFO_ERROR_DECODE, err))?;
     let color = image.color();
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("Filename", char_value(&path_to_string(&path)));
     st.insert("FileModDate", char_value(""));
     st.insert("FileSize", Value::Num(bytes.len() as f64));
@@ -127,7 +132,7 @@ async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     st.insert("Height", Value::Num(image.height() as f64));
     st.insert("BitDepth", Value::Num(color.bits_per_pixel() as f64));
     st.insert("ColorType", char_value(color_type_name(color)));
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 fn format_name(format: Option<image::ImageFormat>, path: &Path) -> &str {
@@ -167,7 +172,6 @@ fn color_type_name(color: image::ColorType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
@@ -175,11 +179,17 @@ mod tests {
 
     #[test]
     fn imfinfo_reports_png_dimensions() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        let path = std::env::temp_dir().join("runmat_imfinfo_test.png");
+        let _guard = runmat_filesystem::provider_override_lock();
+        let root = tempfile::TempDir::new().unwrap();
+        let path = root.path().join("image.png");
         let image = image::RgbImage::from_pixel(3, 2, image::Rgb([1, 2, 3]));
         image.save(&path).unwrap();
-        let value = run(imfinfo_builtin(vec![Value::String(path_to_string(&path))])).unwrap();
+        let value = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                path_to_string(&path).into(),
+            )]),
+        ))
+        .unwrap();
         match value {
             Value::Struct(st) => {
                 assert_eq!(st.fields.get("Width"), Some(&Value::Num(3.0)));
@@ -188,6 +198,93 @@ mod tests {
             }
             other => panic!("unexpected value {other:?}"),
         }
-        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn supported_format_adds_extension_only_when_original_path_is_missing() {
+        let _guard = runmat_filesystem::provider_override_lock();
+        let root = tempfile::TempDir::new().unwrap();
+        let bare = root.path().join("sample");
+        let with_extension = root.path().join("sample.png");
+        let image = image::RgbImage::from_pixel(3, 2, image::Rgb([1, 2, 3]));
+        image.save(&with_extension).unwrap();
+        let info = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&bare).into()),
+                Value::String("png".into()),
+            ]),
+        ))
+        .unwrap();
+        let Value::Struct(fields) = info else {
+            panic!("expected metadata struct")
+        };
+        assert_eq!(
+            fields.fields.get("Filename"),
+            Some(&char_value(&path_to_string(&with_extension)))
+        );
+        assert_eq!(fields.fields.get("Width"), Some(&Value::Num(3.0)));
+
+        std::fs::copy(&with_extension, &bare).unwrap();
+        let info = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&bare).into()),
+                Value::String("png".into()),
+            ]),
+        ))
+        .unwrap();
+        let Value::Struct(fields) = info else {
+            panic!("expected metadata struct")
+        };
+        assert_eq!(
+            fields.fields.get("Filename"),
+            Some(&char_value(&path_to_string(&bare)))
+        );
+
+        let upper = root.path().join("upper.PNG");
+        std::fs::copy(&with_extension, &upper).unwrap();
+        let info = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&root.path().join("upper")).into()),
+                Value::String("PNG".into()),
+            ]),
+        ))
+        .unwrap();
+        let Value::Struct(fields) = info else {
+            panic!("expected metadata struct")
+        };
+        assert_eq!(
+            fields.fields.get("Filename"),
+            Some(&char_value(&path_to_string(&upper)))
+        );
+    }
+
+    #[test]
+    fn invalid_output_and_format_precede_missing_file_read() {
+        let root = tempfile::TempDir::new().unwrap();
+        let missing = Value::String(path_to_string(&root.path().join("missing.png")).into());
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![missing.clone()]),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), IMFINFO_ERROR_OUTPUTS.identifier);
+        drop(_outputs);
+        let error = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                missing,
+                Value::String("not_an_image_format".into()),
+            ]),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), IMFINFO_ERROR_FORMAT.identifier);
+    }
+
+    #[test]
+    fn nontext_path_rejects_before_filesystem_access() {
+        let error = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(42.0)]),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), IMFINFO_ERROR_ARGUMENT.identifier);
     }
 }

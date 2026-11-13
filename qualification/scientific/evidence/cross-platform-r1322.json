@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "scope": "Affected qualification supporting conservation of the two retained Linux scientific workloads; final Windows shipping acceptance remains a separate release gate",
+  "implementation_commit": "2a49ca1c467256029c5a64ec165bc66ec2b35810",
+  "source_manifest_sha256": "c6db4600516e90195052591597a0b2405d5fb3b1b43ad2bd4c0e4e7005c0a1d6",
+  "scientific_inputs": {
+    "sha256": "6b953ddcdb84ca7ba8e84da21438278ec4e200ee7a94f605c0e74a64757289f9",
+    "files": 24830,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "ordinary": [
+    {
+      "platform": "macos",
+      "targets": 813,
+      "totals": {
+        "passed": 35437,
+        "failed": 0,
+        "ignored": 397,
+        "measured": 0,
+        "filtered": 45
+      },
+      "scope": "Original ordinary census with verified passing successors; retains measured source identities and excludes child-summary double counting"
+    },
+    {
+      "platform": "linux",
+      "targets": 813,
+      "totals": {
+        "passed": 35438,
+        "failed": 0,
+        "ignored": 397,
+        "measured": 0,
+        "filtered": 45
+      },
+      "scope": "Original ordinary census with verified passing successors; retains measured source identities and excludes child-summary double counting"
+    },
+    {
+      "platform": "windows",
+      "targets": 813,
+      "totals": {
+        "passed": 35310,
+        "failed": 0,
+        "ignored": 397,
+        "measured": 0,
+        "filtered": 45
+      },
+      "scope": "Original ordinary census with verified passing successors; retains measured source identities and excludes child-summary double counting"
+    }
+  ],
+  "products": [
+    {
+      "platform": "macos-arm64",
+      "passed": 31,
+      "failed": 0,
+      "omitted": 0,
+      "cli_sha256": "ade5f4693b7cf5a0c7c6c4d43f8c9d455a4b344143fb6193afdf0f56b19eca52",
+      "datasets": "Three passing interpreter/JIT/native cases retain their original measured identities; R1325 dependency review conserves these unchanged consumers"
+    },
+    {
+      "platform": "macos-intel-rosetta",
+      "passed": 31,
+      "failed": 0,
+      "omitted": 0,
+      "cli_sha256": "22c326cd123c581884ab837edad4be87e25041209a809a5de2034d80372431ae",
+      "datasets": "Three passing interpreter/JIT/native cases retain their original measured identities; R1325 dependency review conserves these unchanged consumers"
+    },
+    {
+      "platform": "linux-x86_64",
+      "passed": 31,
+      "failed": 0,
+      "omitted": 0,
+      "cli_sha256": "7790fef59aa21da831d33186e11f497ac51295a66b66fbb40dc0aeb8aa54ab33",
+      "datasets": "Three passing interpreter/JIT/native cases retain their original measured identities; R1325 dependency review conserves these unchanged consumers"
+    }
+  ],
+  "windows_native_output": {
+    "exit_code": 0,
+    "scope": "Complete output conformance, including original five-second await/readiness assertions, physical quota cancellation, console retention and cold supervisor restart",
+    "harness_sha256": "d10e3c52adf266be065f83ca552b0788e4db2ca060925d56c03bddfac5eeb536",
+    "log_sha256": "ef818a1602ac00e62a94e7b10b5a5f09a1d16432abd36e7ee47b85f0cf68e26b"
+  },
+  "browser": {
+    "cohorts": {
+      "node": {
+        "checks": 2,
+        "failed": 0
+      },
+      "pinnedData": {
+        "scenarios": 1,
+        "failed": 0
+      },
+      "chromeProducts": {
+        "cases": 10,
+        "failed": 0
+      },
+      "boundaries": {
+        "checks": 12,
+        "failed": 0
+      },
+      "input": {
+        "checks": 5,
+        "failed": 0
+      },
+      "exactCad": {
+        "assertions": 32,
+        "failed": 0
+      }
+    },
+    "runtime_sha256": "b02b8c33fbf0eba3cbc8976c1455304d2ccd58d2905efc4e132e17d3052c9239"
+  },
+  "references": [
+    {
+      "kind": "products",
+      "platform": "macos-arm64",
+      "location": ".tmp-rm1064/settings-r1345-main-qualified.json",
+      "sha256": "3e90519edfb67c3f045734cd62d9719cfa02dbe4afe163a6a0f59e131d0dd3aa"
+    },
+    {
+      "kind": "products",
+      "platform": "macos-intel-rosetta",
+      "location": ".tmp-rm1064/settings-r1344-intel-qualified-collected/collection.json",
+      "sha256": "f6267fb6db8ca5696d7b0092b995db0bce9e70bf3be40ad4a57e1dadbbaccc1c"
+    },
+    {
+      "kind": "products",
+      "platform": "linux-x86_64",
+      "location": ".tmp-rm1064/settings-r1347-linux-qualified-collected/collection.json",
+      "sha256": "c706dc17e1b8c05078f861c05661945dc93eb2e6b9a37797af8a4371effebfbf"
+    },
+    {
+      "kind": "ordinary-outcome-union",
+      "platform": "macos",
+      "location": ".tmp-rm1064/workspace-r1150-main-outcome-union.json",
+      "sha256": "08634bacde0e106d73c622d4fb634cbbc644cb0a99c50cf2029bea3ff3ff5ab1"
+    },
+    {
+      "kind": "ordinary-outcome-union",
+      "platform": "linux",
+      "location": ".tmp-rm1064/workspace-r1215-linux-outcome-union.json",
+      "sha256": "125027f05e0b18124e307d797bbaa87d44cc8fa2d34bccf87b44014fcc548098"
+    },
+    {
+      "kind": "ordinary-outcome-union",
+      "platform": "windows",
+      "location": ".tmp-rm1064/workspace-r1341-windows-outcome-union.json",
+      "sha256": "df16963fec80e4d379d78afd4a2ede0d5e9c627adedefb3286f2188907a149c9"
+    },
+    {
+      "kind": "supporting-review",
+      "location": ".tmp-rm1064/settings-r1325-runtime-component-conservation.json",
+      "sha256": "20505029f0cd2aefb91dc6139c12ed03c8702616749c64463aa91e1690158c65"
+    },
+    {
+      "kind": "supporting-review",
+      "location": ".tmp-rm1064/settings-r1302-sdk-browser-qualified.report.json",
+      "sha256": "cf7284d2c038d11f908bc0e3e984534817705d3f0bfff31055194ca415a17cb1"
+    },
+    {
+      "kind": "supporting-review",
+      "location": ".tmp-rm1064/settings-r1303-served-http.json",
+      "sha256": "8839f62c8b94b242a36c3250baba7630e80cd233aa62079151b9628de97fb59a"
+    }
+  ],
+  "exclusions": "Retain the policy exceptions and original numerical measurements. This record does not certify the pending Windows benchmark/shipping gates, fresh physical Intel hardware or a signed Desktop installer."
+}

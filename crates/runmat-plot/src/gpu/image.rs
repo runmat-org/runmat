@@ -2,7 +2,6 @@ use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::core::renderer::Vertex;
@@ -10,7 +9,7 @@ use crate::core::renderer::Vertex;
 pub struct TrueColorImageGpuInputs<'a> {
     pub x_axis: AxisData<'a>,
     pub y_axis: AxisData<'a>,
-    pub image_buffer: Arc<wgpu::Buffer>,
+    pub image_buffer: crate::gpu::GpuInputBuffer,
     pub rows: u32,
     pub cols: u32,
     pub channels: u32,
@@ -27,24 +26,27 @@ struct ImageUniforms {
 }
 
 pub fn pack_truecolor_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &TrueColorImageGpuInputs<'_>,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
-    let x_buffer = axis_storage_buffer(device, "image-x", &inputs.x_axis, inputs.scalar)?;
-    let y_buffer = axis_storage_buffer(device, "image-y", &inputs.y_axis, inputs.scalar)?;
+    let x_buffer = axis_storage_buffer(emission, "image-x", &inputs.x_axis, inputs.scalar)?;
+    let y_buffer = axis_storage_buffer(emission, "image-y", &inputs.y_axis, inputs.scalar)?;
     let vertex_count = inputs.rows as u64 * inputs.cols as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("image-gpu-vertices"),
-        size: vertex_count * std::mem::size_of::<Vertex>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("image-gpu-vertices"),
+            size: vertex_count * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let uniforms = ImageUniforms {
         rows: inputs.rows,
         cols: inputs.cols,
@@ -84,15 +86,25 @@ pub fn pack_truecolor_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: x_buffer.as_entire_binding(),
+                resource: x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: y_buffer.as_entire_binding(),
+                resource: y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: inputs.image_buffer.as_entire_binding(),
+                resource: inputs
+                    .image_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -121,7 +133,7 @@ pub fn pack_truecolor_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -129,7 +141,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::image::F32,
         ScalarType::F64 => shaders::image::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("image-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -166,7 +178,7 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 mod tests {
     use super::*;
     use pollster::FutureExt;
-    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
             || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
         {
@@ -191,45 +203,54 @@ mod tests {
             )
             .block_on()
             .ok()?;
-        Some((Arc::new(device), Arc::new(queue)))
+        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 
     #[test]
     fn gpu_packer_generates_truecolor_image_vertices() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x = [1.0f32, 2.0f32];
         let y = [1.0f32, 2.0f32];
-        let image = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("image-test-truecolor"),
-                contents: bytemuck::cast_slice(&[
-                    1.0f32, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,
-                ]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+        let image = runmat_accelerate_api::WgpuBufferOwner::new(
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("image-test-truecolor"),
+                            contents: bytemuck::cast_slice(&[
+                                1.0f32, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,
+                            ]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
-        let packed = pack_truecolor_vertices(
-            &device,
-            &queue,
-            &TrueColorImageGpuInputs {
-                x_axis: AxisData::F32(&x),
-                y_axis: AxisData::F32(&y),
-                image_buffer: image,
-                rows: 2,
-                cols: 2,
-                channels: 3,
-                scalar: ScalarType::F32,
-            },
-        )
-        .expect("image pack should succeed");
+        let packed = access
+            .with_shared(|emission| {
+                pack_truecolor_vertices(
+                    emission,
+                    &TrueColorImageGpuInputs {
+                        x_axis: AxisData::F32(&x),
+                        y_axis: AxisData::F32(&y),
+                        image_buffer: image.into(),
+                        rows: 2,
+                        cols: 2,
+                        channels: 3,
+                        scalar: ScalarType::F32,
+                    },
+                )
+            })
+            .expect("test device access")
+            .expect("image pack should succeed");
         assert_eq!(packed.vertex_count, 4);
     }
 
     #[test]
     fn gpu_truecolor_layout_matches_non_square_cpu_image_contract() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x = [10.0f32, 20.0, 30.0];
@@ -239,33 +260,45 @@ mod tests {
             0.7, 0.8, 0.9, 1.0, 0.1, 0.2, // green
             0.3, 0.4, 0.5, 0.6, 0.7, 0.8, // blue
         ];
-        let image = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("image-layout-test-truecolor"),
-                contents: bytemuck::cast_slice(&image_data),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+        let image = runmat_accelerate_api::WgpuBufferOwner::new(
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("image-layout-test-truecolor"),
+                            contents: bytemuck::cast_slice(&image_data),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
-        let packed = pack_truecolor_vertices(
-            &device,
-            &queue,
-            &TrueColorImageGpuInputs {
-                x_axis: AxisData::F32(&x),
-                y_axis: AxisData::F32(&y),
-                image_buffer: image,
-                rows: 2,
-                cols: 3,
-                channels: 3,
-                scalar: ScalarType::F32,
-            },
-        )
-        .expect("image pack should succeed");
+        let packed = access
+            .with_shared(|emission| {
+                pack_truecolor_vertices(
+                    emission,
+                    &TrueColorImageGpuInputs {
+                        x_axis: AxisData::F32(&x),
+                        y_axis: AxisData::F32(&y),
+                        image_buffer: image.into(),
+                        rows: 2,
+                        cols: 3,
+                        channels: 3,
+                        scalar: ScalarType::F32,
+                    },
+                )
+            })
+            .expect("test device access")
+            .expect("image pack should succeed");
 
         let byte_len = packed.vertex_count * std::mem::size_of::<Vertex>();
-        let bytes =
-            crate::gpu::util::copy_readback_bytes(&device, &queue, &packed.buffer, byte_len)
-                .block_on()
-                .expect("image vertices should read back");
+        let bytes = crate::gpu::util::copy_readback_bytes(
+            &access,
+            &crate::gpu::GpuInputBuffer::from(packed.buffer.clone()),
+            byte_len,
+        )
+        .block_on()
+        .expect("image vertices should read back");
         let vertices = bytes
             .chunks_exact(std::mem::size_of::<Vertex>())
             .map(bytemuck::pod_read_unaligned)

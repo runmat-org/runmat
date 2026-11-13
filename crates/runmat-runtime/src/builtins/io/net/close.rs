@@ -1,719 +1,342 @@
-//! MATLAB-compatible `close` builtin for networking resources in RunMat.
+//! TCP close admission. Public object properties never authorize a socket.
 
+use crate::context::{RuntimeContext, RuntimeTcpCloseScope, RuntimeTcpIssuer};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CloseNetworkSelector, CLOSE_NETWORK_SELECTOR_EXTENSION, CLOSE_TCP_CELL_EXTENSION,
+    TCPCLIENT_CLASS, TCPSERVER_CLASS,
 };
-use runmat_value::{StructValue, Value};
+use runmat_value::{ForeignRef, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-use super::accept::{
-    close_all_clients, close_client, close_clients_for_server, CLIENT_HANDLE_FIELD,
-};
-use super::tcpserver::{close_all_servers, close_server, HANDLE_ID_FIELD};
-
-const BUILTIN_NAME: &str = "close";
-
-const CLOSE_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "1 when at least one resource was closed, otherwise 0.",
-}];
-const CLOSE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const CLOSE_INPUTS_RESOURCE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "resource",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpclient/tcpserver handle, option string, cell container, or close target.",
-}];
-const CLOSE_INPUTS_RESOURCES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "resource",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "One or more close targets.",
-}];
-const CLOSE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "status = close()",
-        inputs: &CLOSE_INPUTS_NONE,
-        outputs: &CLOSE_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = close(resource)",
-        inputs: &CLOSE_INPUTS_RESOURCE,
-        outputs: &CLOSE_OUTPUT_STATUS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = close(resource, ...)",
-        inputs: &CLOSE_INPUTS_RESOURCES,
-        outputs: &CLOSE_OUTPUT_STATUS,
-    },
-];
-
-const CLOSE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CLOSE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:close:InvalidArgument"),
-    when: "Argument shape/type is unsupported for close.",
-    message: "close: invalid argument",
-};
-const CLOSE_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CLOSE.INVALID_HANDLE",
-    identifier: Some("RunMat:close:InvalidHandle"),
-    when: "Struct does not contain valid tcpclient/tcpserver handle fields.",
-    message: "close: invalid handle",
-};
-const CLOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CLOSE.INTERNAL",
-    identifier: None,
-    when: "Internal gather/control-flow conversion fails.",
-    message: "close: internal error",
-};
-const CLOSE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    CLOSE_ERROR_INVALID_ARGUMENT,
-    CLOSE_ERROR_INVALID_HANDLE,
-    CLOSE_ERROR_INTERNAL,
-];
-pub const CLOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CLOSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CLOSE_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::close")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "close",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Networking resources are host-only; the builtin gathers GPU values before closing handles.",
-};
-
-fn close_error_with_message(
-    message: impl Into<String>,
-    error: &'static BuiltinErrorDescriptor,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
+#[derive(Clone)]
+enum Target {
+    Endpoint(ForeignRef),
+    Scope(RuntimeTcpCloseScope),
 }
 
-fn close_error_with_detail(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-) -> RuntimeError {
-    let detail = detail.as_ref();
-    let detail = detail.strip_prefix("close: ").unwrap_or(detail);
-    close_error_with_message(format!("{}: {}", error.message, detail), error)
+fn invalid_handle() -> RuntimeError {
+    build_runtime_error("close: invalid TCP handle")
+        .with_builtin("close")
+        .with_identifier("RunMat:close:InvalidHandle")
+        .build()
 }
 
-fn close_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -> RuntimeError {
-    close_error_with_detail(error, message)
+fn invalid_argument() -> RuntimeError {
+    build_runtime_error("close: invalid networking target")
+        .with_builtin("close")
+        .with_identifier("RunMat:close:InvalidArgument")
+        .build()
 }
 
-fn map_close_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::close")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "close",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtins execute eagerly on the CPU; close participates only in host bookkeeping.",
-};
-
-pub(crate) async fn close_network_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if args.is_empty() {
-        let closed = close_everything();
-        return Ok(Value::Num(if closed { 1.0 } else { 0.0 }));
-    }
-
-    let mut any_closed = false;
-    for raw in args {
-        let gathered = gather_if_needed_async(&raw)
-            .await
-            .map_err(|flow| map_close_flow(flow, &CLOSE_ERROR_INTERNAL))?;
-        any_closed |= close_value(&gathered)?;
-    }
-
-    Ok(Value::Num(if any_closed { 1.0 } else { 0.0 }))
-}
-
-pub(crate) async fn close_if_network_targets(args: &[Value]) -> BuiltinResult<Option<f64>> {
-    if args.is_empty() {
-        return Ok(None);
-    }
-
-    let mut gathered_args = Vec::with_capacity(args.len());
-    for raw in args {
-        // Graphics figure numbers are numeric host controls. In particular, a resident numeric
-        // value can never become a networking struct or selector after gathering, so classify it
-        // before touching the provider and let the plotting dispatcher reject resident targets.
-        if !is_network_target_value(raw) {
-            return Ok(None);
-        }
-        let gathered = gather_if_needed_async(raw)
-            .await
-            .map_err(|flow| map_close_flow(flow, &CLOSE_ERROR_INTERNAL))?;
-        if !is_network_target_value(&gathered) {
-            return Ok(None);
-        }
-        gathered_args.push(gathered);
-    }
-
-    let status = close_network_builtin(gathered_args).await?;
-    match status {
-        Value::Num(value) => Ok(Some(value)),
-        other => Err(close_flow(
-            &CLOSE_ERROR_INTERNAL,
-            format!("close: internal status type mismatch {other:?}"),
-        )),
+fn selector(text: &str) -> Option<RuntimeTcpCloseScope> {
+    match CloseNetworkSelector::parse(text)? {
+        CloseNetworkSelector::Clients => Some(RuntimeTcpCloseScope::Clients),
+        CloseNetworkSelector::Servers => Some(RuntimeTcpCloseScope::Servers),
     }
 }
 
-fn close_value(value: &Value) -> BuiltinResult<bool> {
+fn selector_value(value: &Value) -> Option<RuntimeTcpCloseScope> {
+    let text = crate::builtins::common::validation::value_text_scalar_string(value)?;
+    selector(&text)
+}
+
+fn is_network_target(value: &Value) -> bool {
     match value {
-        Value::Struct(st) => close_struct(st),
-        Value::String(text) => close_command(text),
-        Value::CharArray(chars) => {
-            if chars.data.is_empty() {
-                Ok(false)
-            } else if chars.rows == 1 {
-                let text: String = chars.data.iter().collect();
-                close_command(&text)
-            } else {
-                Err(close_flow(
-                    &CLOSE_ERROR_INVALID_ARGUMENT,
-                    "close: character arrays must be a single row of text",
-                ))
-            }
+        Value::Object(object) => {
+            object.class_name().is(TCPCLIENT_CLASS) || object.class_name().is(TCPSERVER_CLASS)
         }
-        Value::StringArray(sa) => match sa.data.len() {
-            0 => Ok(false),
-            1 => close_command(&sa.data[0]),
-            _ => Err(close_flow(
-                &CLOSE_ERROR_INVALID_ARGUMENT,
-                "close: string array inputs must be scalar",
-            )),
-        },
-        Value::Cell(cell) => {
-            let mut closed = false;
-            for element in &cell.data {
-                let inner = element;
-                closed |= close_value(inner)?;
-            }
-            Ok(closed)
-        }
-        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => Ok(false),
-        Value::LogicalArray(logical) if logical.is_empty() => Ok(false),
-        _ => Err(close_flow(
-            &CLOSE_ERROR_INVALID_ARGUMENT,
-            format!("close: unsupported argument {value:?}"),
-        )),
-    }
-}
-
-fn close_struct(struct_value: &StructValue) -> BuiltinResult<bool> {
-    if let Some(id_value) = struct_value.fields.get(CLIENT_HANDLE_FIELD) {
-        let id = value_to_u64(id_value).ok_or_else(|| {
-            close_flow(
-                &CLOSE_ERROR_INVALID_HANDLE,
-                "close: tcpclient identifier is missing or invalid",
-            )
-        })?;
-        return Ok(close_client(id));
-    }
-
-    if let Some(id_value) = struct_value.fields.get(HANDLE_ID_FIELD) {
-        let id = value_to_u64(id_value).ok_or_else(|| {
-            close_flow(
-                &CLOSE_ERROR_INVALID_HANDLE,
-                "close: tcpserver identifier is missing or invalid",
-            )
-        })?;
-        let clients_closed = close_clients_for_server(id);
-        let server_closed = close_server(id);
-        return Ok(server_closed || clients_closed > 0);
-    }
-
-    Err(close_flow(
-        &CLOSE_ERROR_INVALID_HANDLE,
-        "close: expected tcpclient or tcpserver struct",
-    ))
-}
-
-fn close_command(raw: &str) -> BuiltinResult<bool> {
-    let token = raw.trim().to_ascii_lowercase();
-    match token.as_str() {
-        "all" => Ok(close_everything()),
-        "clients" | "client" => Ok(close_all_clients() > 0),
-        "servers" | "server" => Ok(close_all_servers() > 0),
-        "" => Ok(false),
-        _ => Err(close_flow(
-            &CLOSE_ERROR_INVALID_ARGUMENT,
-            format!("close: unrecognised option '{raw}'"),
-        )),
-    }
-}
-
-fn close_everything() -> bool {
-    let clients = close_all_clients();
-    let servers = close_all_servers();
-    clients > 0 || servers > 0
-}
-
-fn is_network_target_value(value: &Value) -> bool {
-    match value {
         Value::Struct(_) => true,
-        Value::String(text) => is_network_command_token(text),
-        Value::CharArray(chars) => {
-            if chars.data.is_empty() {
-                false
-            } else if chars.rows == 1 {
-                let text: String = chars.data.iter().collect();
-                is_network_command_token(&text)
-            } else {
-                false
-            }
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            selector_value(value).is_some()
         }
-        Value::StringArray(sa) => sa.data.len() == 1 && is_network_command_token(&sa.data[0]),
-        Value::Cell(cell) => {
-            !cell.data.is_empty()
-                && cell
-                    .data
-                    .iter()
-                    .all(|element| is_network_target_value(element))
-        }
+        Value::Cell(cell) => !cell.data().is_empty() && cell.data().iter().all(is_network_target),
         _ => false,
     }
 }
 
-fn is_network_command_token(raw: &str) -> bool {
-    matches!(
-        raw.trim().to_ascii_lowercase().as_str(),
-        "clients" | "client" | "servers" | "server"
-    )
-}
-
-fn value_to_u64(value: &Value) -> Option<u64> {
+fn collect(value: &Value, targets: &mut Vec<Target>) -> BuiltinResult<()> {
     match value {
-        Value::Int(int) => int.try_to_u64(),
-        Value::Num(num) => {
-            if num.is_finite() && *num >= 0.0 && *num < u64::MAX as f64 && num.fract() == 0.0 {
-                Some(*num as u64)
-            } else {
-                None
+        Value::Object(object)
+            if object.class_name().is(TCPCLIENT_CLASS)
+                || object.class_name().is(TCPSERVER_CLASS) =>
+        {
+            let authority = object.tcp_authority().cloned().ok_or_else(invalid_handle)?;
+            targets.push(Target::Endpoint(authority));
+        }
+        Value::Struct(_) => return Err(invalid_handle()),
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            let scope = selector_value(value).ok_or_else(invalid_argument)?;
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CLOSE_NETWORK_SELECTOR_EXTENSION,
+                "close",
+            )?;
+            targets.push(Target::Scope(scope));
+        }
+        Value::Cell(cell) if !cell.data().is_empty() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CLOSE_TCP_CELL_EXTENSION,
+                "close",
+            )?;
+            for value in cell.data() {
+                collect(value, targets)?;
             }
         }
-        _ => None,
+        _ => return Err(invalid_argument()),
     }
+    Ok(())
 }
+
+pub(crate) async fn close_if_network_targets(
+    runtime: Option<&RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<f64>> {
+    if args.is_empty() || !args.iter().all(is_network_target) {
+        return Ok(None);
+    }
+    let mut targets = Vec::new();
+    for value in args {
+        collect(value, &mut targets)?;
+    }
+    let service = super::transport::service(runtime, "close")?;
+    let issuer = RuntimeTcpIssuer::from_context(runtime);
+    let mut work = super::transport::NetCooperation::new(runtime, "close");
+    let mut any_closed = false;
+    for target in targets {
+        work.completed(0).await?;
+        let result = match target {
+            Target::Endpoint(endpoint) => {
+                let future = service.close(issuer.clone(), endpoint);
+                let outcome = work
+                    .await_service(future)
+                    .await
+                    .map_err(|failure| failure.into_runtime_error("close"))?;
+                outcome.map_err(transport_error)?
+            }
+            Target::Scope(scope) => {
+                let future = service.close_scope(issuer.clone(), scope);
+                let outcome = work
+                    .await_service(future)
+                    .await
+                    .map_err(|failure| failure.into_runtime_error("close"))?;
+                outcome.map_err(transport_error)? != 0
+            }
+        };
+        any_closed |= result;
+        work.completed(1).await?;
+    }
+    Ok(Some(if any_closed { 1.0 } else { 0.0 }))
+}
+
+fn transport_error(source: crate::tcp::TcpTransportError) -> RuntimeError {
+    build_runtime_error(format!("close: TCP close failed ({source})"))
+        .with_builtin("close")
+        .with_source(source)
+        .build()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "close/admission_tests.rs"]
+mod admission_tests;
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-    use crate::builtins::io::net::accept::{accept_builtin, client_handle};
-    use crate::builtins::io::net::tcpclient::tcpclient_builtin;
-    use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
-    use runmat_value::{
-        CellArray, CharArray, IntValue, IntegerStorage, StringArray, StructValue, Tensor, Value,
-    };
-    use std::net::{TcpListener, TcpStream};
-    use std::thread;
-    use std::time::Duration;
+    use runmat_value::{CellArray, CharArray, ObjectInstance, StructValue};
 
-    fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
-    }
-
-    fn client_id(value: &Value) -> u64 {
-        match value {
-            Value::Struct(st) => match st.fields.get(CLIENT_HANDLE_FIELD) {
-                Some(Value::Int(iv)) => iv.to_i64() as u64,
-                Some(Value::Num(n)) => *n as u64,
-                other => panic!("unexpected client id {other:?}"),
-            },
-            other => panic!("expected tcpclient struct, got {other:?}"),
-        }
-    }
-
-    fn assert_error_identifier(err: RuntimeError, expected: &str) {
-        assert_eq!(err.identifier(), Some(expected));
-    }
-
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn typed_network_handle_parser_rejects_negative_and_out_of_range_values() {
-        assert_eq!(
-            value_to_u64(&Value::Int(IntValue::U64(u64::MAX))),
-            Some(u64::MAX)
-        );
-        assert_eq!(value_to_u64(&Value::Int(IntValue::I8(-1))), None);
-        assert_eq!(value_to_u64(&Value::Num(u64::MAX as f64)), None);
-    }
-
-    fn run_close(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(close_network_builtin(args))
-    }
-
-    fn run_accept(server: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(accept_builtin(server, rest))
-    }
-
-    fn run_tcpclient(host: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tcpclient_builtin(host, port, rest))
-    }
-
-    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tcpserver_builtin(address, port, rest))
-    }
-
-    fn server_id(value: &Value) -> u64 {
-        match value {
-            Value::Struct(st) => match st.fields.get(HANDLE_ID_FIELD) {
-                Some(Value::Int(iv)) => iv.to_i64() as u64,
-                Some(Value::Num(n)) => *n as u64,
-                other => panic!("unexpected server id {other:?}"),
-            },
-            other => panic!("expected tcpserver struct, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn close_accepts_empty_typed_integer_tensor_without_double_mirror() {
-        let tensor =
-            Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 0]).expect("empty tensor");
-        assert!(!close_value(&Value::Tensor(tensor)).expect("close"));
-    }
-
-    #[test]
-    fn resident_numeric_target_is_not_gathered_during_network_dispatch() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        assert_eq!(
-            futures::executor::block_on(close_if_network_targets(&[resident]))
-                .expect("resident numeric target should bypass networking"),
-            None
-        );
+    fn graphics_all_and_bare_close_never_claim_tcp_scope() {
+        assert!(futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[])
+        ))
+        .unwrap()
+        .is_none());
+        assert!(futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[Value::String("all".into())])
+        ))
+        .unwrap()
+        .is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn close_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = CLOSE_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"status = close()"));
-        assert!(labels.contains(&"status = close(resource)"));
-        assert!(labels.contains(&"status = close(resource, ...)"));
-    }
-
-    fn server_address(value: &Value) -> (String, u16) {
-        match value {
-            Value::Struct(st) => {
-                let address = match st.fields.get("ServerAddress") {
-                    Some(Value::String(s)) => s.clone(),
-                    Some(Value::CharArray(ca)) if ca.rows == 1 => ca.data.iter().collect(),
-                    other => panic!("unexpected ServerAddress {other:?}"),
-                };
-                let port = match st.fields.get("ServerPort") {
-                    Some(Value::Num(value)) => *value as u16,
-                    other => panic!("unexpected ServerPort {other:?}"),
-                };
-                (address, port)
-            }
-            other => panic!("expected tcpserver struct, got {other:?}"),
+    fn scalar_selector_compatibility_precedes_browser_target_rejection() {
+        let trailing = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape("clients".chars().collect(), vec![1, 7, 1])
+                .expect("trailing singleton"),
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = futures::executor::block_on(close_if_network_targets(
+                None,
+                crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&trailing)),
+            ))
+            .expect_err("selector extension is rejected before target service");
+            assert_eq!(
+                error.identifier(),
+                CLOSE_NETWORK_SELECTOR_EXTENSION.error_identifier
+            );
         }
-    }
-
-    fn spawn_loopback_client() -> Value {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback");
-        let port = listener.local_addr().expect("local addr").port();
-        let accept_thread = thread::spawn(move || {
-            let (_stream, _) = listener.accept().expect("accept");
-            thread::sleep(Duration::from_millis(10));
-        });
-
-        let client = run_tcpclient(
-            Value::from("127.0.0.1"),
-            Value::Num(port as f64),
-            Vec::new(),
-        )
-        .expect("tcpclient");
-
-        accept_thread.join().expect("join accept thread");
-        client
-    }
-
-    fn spawn_tcp_server() -> Value {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        run_tcpserver(Value::from("127.0.0.1"), Value::Num(0.0), Vec::new()).expect("tcpserver")
-    }
-
-    fn accept_from_server(server: &Value) -> Value {
-        let (host, port) = server_address(server);
-        let connector = thread::spawn(move || {
-            let _stream = TcpStream::connect((host.as_str(), port)).expect("connect client");
-        });
-        let accepted = run_accept(server.clone(), Vec::new()).expect("accept client");
-        connector.join().expect("join connector");
-        accepted
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_tcpclient_releases_handle() {
-        let _guard = net_guard();
-
-        let client = spawn_loopback_client();
-
-        let cid = client_id(&client);
-        let status = run_close(vec![client.clone()]).expect("close");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(cid).is_none());
-
-        let second = run_close(vec![client]).expect("close again");
-        assert_eq!(second, Value::Num(0.0));
+        #[cfg(target_arch = "wasm32")]
+        {
+            let error = futures::executor::block_on(close_if_network_targets(None, &[trailing]))
+                .expect_err("native TCP is unavailable in browser");
+            assert_eq!(
+                error.identifier(),
+                runmat_builtins::NET_ERROR_UNSUPPORTED_TARGET.identifier
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = trailing;
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn close_tcpserver_releases_listener_and_clients() {
-        let _guard = net_guard();
-
-        let server = spawn_tcp_server();
-        let sid = server_id(&server);
-        let accepted = accept_from_server(&server);
-        let accepted_id = client_id(&accepted);
-
-        let status = run_close(vec![server.clone()]).expect("close server");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(accepted_id).is_none());
-        assert!(server_handle(sid).is_none());
-
-        let second = run_close(vec![server]).expect("close server again");
-        assert_eq!(second, Value::Num(0.0));
+    fn forged_tcp_class_and_legacy_struct_reject_before_service() {
+        let forged = Value::Object(ObjectInstance::new(TCPCLIENT_CLASS));
+        let error = futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[forged]),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:close:InvalidHandle"));
+        let legacy = Value::Struct(StructValue::new());
+        let error = futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[legacy]),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:close:InvalidHandle"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn close_multiple_handles_in_single_call() {
-        let _guard = net_guard();
-
-        let standalone_client = spawn_loopback_client();
-        let standalone_id = client_id(&standalone_client);
-
-        let server = spawn_tcp_server();
-        let sid = server_id(&server);
-        let accepted = accept_from_server(&server);
-        let accepted_id = client_id(&accepted);
-
-        let status = run_close(vec![
-            standalone_client.clone(),
-            accepted.clone(),
-            server.clone(),
-        ])
-        .expect("close resources");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(standalone_id).is_none());
-        assert!(client_handle(accepted_id).is_none());
-        assert!(server_handle(sid).is_none());
-
-        let second =
-            run_close(vec![standalone_client, accepted, server]).expect("close resources again");
-        assert_eq!(second, Value::Num(0.0));
+    fn nested_invalid_tcp_container_has_no_partial_close() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let cell = CellArray::new(
+            vec![
+                Value::String("clients".into()),
+                Value::Object(ObjectInstance::new(TCPSERVER_CLASS)),
+            ],
+            1,
+            2,
+        )
+        .unwrap();
+        let error = futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[Value::Cell(cell)]),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:close:InvalidHandle"));
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn close_returns_zero_when_no_resources() {
-        let _guard = net_guard();
+    fn native_service_closes_exact_session_objects_and_preserves_second_status() {
+        use crate::context::{
+            RuntimeServicePorts, RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpConnect,
+            RuntimeTcpInvocation, RuntimeTcpService,
+        };
+        use crate::tcp::NativeTcpService;
+        use std::rc::Rc;
 
-        let _ = run_close(Vec::new()).expect("initial cleanup");
-        let status = run_close(Vec::new()).expect("close without resources");
-        assert_eq!(status, Value::Num(0.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_string_clients_option() {
-        let _guard = net_guard();
-
-        let client_a = spawn_loopback_client();
-        let client_b = spawn_loopback_client();
-        let id_a = client_id(&client_a);
-        let id_b = client_id(&client_b);
-
-        let status = run_close(vec![Value::from("clients")]).expect("close clients");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(id_a).is_none());
-        assert!(client_handle(id_b).is_none());
-
-        let second = run_close(vec![Value::from("clients")]).expect("close clients again");
-        assert_eq!(second, Value::Num(0.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_string_servers_option() {
-        let _guard = net_guard();
-
-        let server = spawn_tcp_server();
-        let sid = server_id(&server);
-
-        let status = run_close(vec![Value::from("servers")]).expect("close servers");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(server_handle(sid).is_none());
-
-        let second = run_close(vec![Value::from("servers")]).expect("close servers again");
-        assert_eq!(second, Value::Num(0.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_string_all_option() {
-        let _guard = net_guard();
-
-        let standalone = spawn_loopback_client();
-        let standalone_id = client_id(&standalone);
-
-        let server = spawn_tcp_server();
-        let sid = server_id(&server);
-        let accepted = accept_from_server(&server);
-        let accepted_id = client_id(&accepted);
-
-        let status = run_close(vec![Value::from("all")]).expect("close all");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(standalone_id).is_none());
-        assert!(client_handle(accepted_id).is_none());
-        assert!(server_handle(sid).is_none());
-
-        let second = run_close(vec![Value::from("all")]).expect("close all again");
-        assert_eq!(second, Value::Num(0.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_char_array_command() {
-        let _guard = net_guard();
-
-        let client = spawn_loopback_client();
-        let cid = client_id(&client);
-        let status = run_close(vec![Value::CharArray(CharArray::new_row("clients"))])
-            .expect("close char command");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(cid).is_none());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_cell_array_arguments() {
-        let _guard = net_guard();
-
-        let client = spawn_loopback_client();
-        let client_id_value = client_id(&client);
-        let server = spawn_tcp_server();
-        let server_id_value = server_id(&server);
-        let accepted = accept_from_server(&server);
-        let accepted_id = client_id(&accepted);
-
-        let cell =
-            CellArray::new(vec![client, accepted, server, Value::from("clients")], 1, 4).unwrap();
-        let status = run_close(vec![Value::Cell(cell)]).expect("close cell inputs");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(client_id_value).is_none());
-        assert!(client_handle(accepted_id).is_none());
-        assert!(server_handle(server_id_value).is_none());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_invalid_argument_errors() {
-        let _guard = net_guard();
-
-        let err = run_close(vec![Value::Num(13.0)]).unwrap_err();
-        assert_error_identifier(err, CLOSE_ERROR_INVALID_ARGUMENT.identifier.unwrap());
-
-        let multi = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
-        let err = run_close(vec![Value::CharArray(multi)]).unwrap_err();
-        assert_error_identifier(err, CLOSE_ERROR_INVALID_ARGUMENT.identifier.unwrap());
-
-        let strings =
-            StringArray::new(vec!["clients".to_string(), "servers".to_string()], vec![2]).unwrap();
-        let err = run_close(vec![Value::StringArray(strings)]).unwrap_err();
-        assert_error_identifier(err, CLOSE_ERROR_INVALID_ARGUMENT.identifier.unwrap());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_invalid_struct_errors() {
-        let _guard = net_guard();
-
-        let st = StructValue::new();
-        let err = run_close(vec![Value::Struct(st)]).unwrap_err();
-        assert_error_identifier(err, CLOSE_ERROR_INVALID_HANDLE.identifier.unwrap());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn close_empty_array_argument_returns_zero() {
-        let _guard = net_guard();
-
-        let empty = Tensor::new(vec![], vec![0]).expect("empty tensor");
-        let status = run_close(vec![Value::Tensor(empty)]).expect("close empty tensor");
-        assert_eq!(status, Value::Num(0.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn close_with_wgpu_provider_active() {
-        let _guard = net_guard();
-
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        let driver = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("isolated TCP driver");
+        let service = Rc::new(NativeTcpService::new(driver.handle().clone()));
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
+        let server = driver
+            .block_on(service.bind(
+                RuntimeTcpInvocation::from_context(Some(&runtime)),
+                RuntimeTcpBind {
+                    address: "127.0.0.1".into(),
+                    port: 0,
+                    io_timeout: None,
+                    byte_order: RuntimeTcpByteOrder::Little,
+                },
+            ))
+            .expect("bind");
+        let client = driver
+            .block_on(service.connect(
+                RuntimeTcpInvocation::from_context(Some(&runtime)),
+                RuntimeTcpConnect {
+                    host: "127.0.0.1".into(),
+                    port: server.local_addr.port(),
+                    connect_timeout: Some(std::time::Duration::from_secs(2)),
+                    io_timeout: None,
+                    byte_order: RuntimeTcpByteOrder::Little,
+                },
+            ))
+            .expect("connect");
+        let client = Value::Object(
+            ObjectInstance::new(TCPCLIENT_CLASS).with_tcp_authority(client.authority),
         );
-
-        let client = spawn_loopback_client();
-        let cid = client_id(&client);
-
-        let status = run_close(vec![client]).expect("close with provider active");
-        assert_eq!(status, Value::Num(1.0));
-        assert!(client_handle(cid).is_none());
+        let other_session =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
+        assert!(driver
+            .block_on(close_if_network_targets(
+                Some(&other_session),
+                crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&client))
+            ))
+            .is_err());
+        let foreign = driver
+            .block_on(service.connect(
+                RuntimeTcpInvocation::from_context(Some(&other_session)),
+                RuntimeTcpConnect {
+                    host: "127.0.0.1".into(),
+                    port: server.local_addr.port(),
+                    connect_timeout: Some(std::time::Duration::from_secs(2)),
+                    io_timeout: None,
+                    byte_order: RuntimeTcpByteOrder::Little,
+                },
+            ))
+            .expect("second session connects");
+        let foreign = Value::Object(
+            ObjectInstance::new(TCPCLIENT_CLASS).with_tcp_authority(foreign.authority),
+        );
+        let error = driver
+            .block_on(close_if_network_targets(
+                Some(&runtime),
+                crate::call::FunctionArgumentView::from_slice(&[client.clone(), foreign.clone()]),
+            ))
+            .expect_err("later foreign target must not replay or roll back earlier close");
+        assert!(error.message().contains("TCP close failed"));
+        assert_eq!(
+            driver
+                .block_on(close_if_network_targets(
+                    Some(&runtime),
+                    crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&client))
+                ))
+                .unwrap(),
+            Some(0.0),
+        );
+        assert_eq!(
+            driver
+                .block_on(close_if_network_targets(
+                    Some(&runtime),
+                    crate::call::FunctionArgumentView::from_slice(&[client])
+                ))
+                .unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            driver
+                .block_on(close_if_network_targets(
+                    Some(&other_session),
+                    crate::call::FunctionArgumentView::from_slice(&[foreign])
+                ))
+                .unwrap(),
+            Some(1.0),
+        );
     }
 }

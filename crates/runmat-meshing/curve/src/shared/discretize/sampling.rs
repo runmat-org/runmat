@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
-    ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl, GeometryTransform,
+    ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl, GeometryEvaluationError,
+    GeometryTransform, ParameterRange,
 };
 use runmat_meshing_core::{MetricSourceKind, MetricTensor3};
 
@@ -41,7 +42,8 @@ pub(super) fn interval_evidence(
     left: EvaluatedPoint,
     right: EvaluatedPoint,
 ) -> Result<IntervalEvidence, SharedCurveError> {
-    let parameters = interval_parameters(left.parameter, right.parameter);
+    let parameters = interval_parameters(left.parameter, right.parameter)
+        .map_err(|error| geometry_error(cache.edge, error))?;
     let points = [
         left,
         cache.sample(parameters[1])?,
@@ -83,19 +85,11 @@ pub(super) fn interval_evidence(
     })
 }
 
-pub(super) fn interval_parameters(start: f64, end: f64) -> [f64; 9] {
-    let span = end - start;
-    [
-        start,
-        start + span * 0.125,
-        start + span * 0.25,
-        start + span * 0.375,
-        start + span * 0.5,
-        start + span * 0.625,
-        start + span * 0.75,
-        start + span * 0.875,
-        end,
-    ]
+pub(super) fn interval_parameters(
+    start: f64,
+    end: f64,
+) -> Result<[f64; 9], GeometryEvaluationError> {
+    ParameterRange { start, end }.uniform_samples::<9>()
 }
 
 pub(super) struct EvaluationCache<'a> {
@@ -142,7 +136,9 @@ impl<'a> EvaluationCache<'a> {
             .curves
             .unit_tangent(&self.edge.curve_evaluator_id, parameter, self.control)
             .map_err(|error| geometry_error(self.edge, error))?;
-        let point_m = self.transform.transform_point(local_point);
+        let point_m = self
+            .transform
+            .transform_point(local_point.canonical_value());
         let tangent =
             normalize(self.transform.transform_vector(local_tangent)).ok_or_else(|| {
                 edge_error(
@@ -220,11 +216,14 @@ impl<'a> EvaluationCache<'a> {
         &self,
         nodes: &[EvaluatedPoint],
     ) -> Result<CurveMetricResolutionEvidence, SharedCurveError> {
-        let parameter_bits = nodes
-            .windows(2)
-            .flat_map(|pair| interval_parameters(pair[0].parameter, pair[1].parameter))
-            .map(f64::to_bits)
-            .collect::<BTreeSet<_>>();
+        let mut parameter_bits = BTreeSet::new();
+        for pair in nodes.windows(2) {
+            for parameter in interval_parameters(pair[0].parameter, pair[1].parameter)
+                .map_err(|error| geometry_error(self.edge, error))?
+            {
+                parameter_bits.insert(parameter.to_bits());
+            }
+        }
         let mut source_mask = 0u16;
         let mut minimum_target_size_m = f64::INFINITY;
         let mut maximum_target_size_m: f64 = 0.0;

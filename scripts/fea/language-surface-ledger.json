@@ -1,0 +1,621 @@
+{
+  "schema": 1,
+  "scope": "Canonical typed FEA source, execution, and result contract surfaces",
+  "surfaces": [
+    {
+      "source": "crates/runmat-analysis/core/src/problem/model.rs",
+      "kind": "struct",
+      "name": "AnalysisModel",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "lowered canonical model contract",
+        "identity": "model-definition identity",
+        "validation": "analysis-core validates the complete typed model",
+        "positive_coverage": "language.lowering.model.accepts",
+        "negative_coverage": "language.lowering.model.rejects"
+      },
+      "members": {
+        "model_id": {},
+        "geometry_id": {},
+        "geometry_revision": {},
+        "units": {},
+        "frame": {},
+        "materials": {},
+        "material_assignments": {},
+        "structural": {},
+        "thermal": {
+          "cardinality": "optional_once_after_included_model_coalescing",
+          "target": "explicit authored thermal domain; no inferred reference temperature",
+          "validation": "finite nonnegative Kelvin; conflicting included declarations reject"
+        },
+        "thermo_mechanical": {
+          "cardinality": "optional_once_after_included_model_coalescing",
+          "target": "explicit authored thermomechanical domain; no inferred reference temperature",
+          "validation": "finite nonnegative Kelvin; conflicting included declarations reject"
+        },
+        "electro_thermal": {},
+        "electromagnetic": {},
+        "cfd": {},
+        "interfaces": {},
+        "constraints": {},
+        "boundaries": {},
+        "connectors": {},
+        "signals": {},
+        "excitations": {},
+        "excitation_cases": {},
+        "initial_conditions": {},
+        "response_spectra": {},
+        "random_excitations": {},
+        "sequence": {}
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/core/src/problem/domains.rs",
+      "kind": "struct",
+      "name": "ThermalDomain",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once_per_explicit_domain",
+        "default": "none",
+        "target": "model thermal reference_temperature",
+        "identity": "authored source and compiled model identity",
+        "validation": "temperature dimension, finite nonnegative Kelvin, duplicate and conflict rejection",
+        "positive_coverage": "core.model_realization.domains.root_and_included_models_preserve_both_explicit_domains",
+        "negative_coverage": "core.model_realization.domains.declarations_coalesce_without_defaults_and_conflicts_are_order_independent"
+      },
+      "members": {
+        "reference_temperature": {}
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/core/src/problem/domains.rs",
+      "kind": "struct",
+      "name": "ThermoMechanicalDomain",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once_per_explicit_domain",
+        "default": "none",
+        "target": "model thermomechanical reference_temperature",
+        "identity": "authored source and compiled model identity",
+        "validation": "temperature dimension, finite nonnegative Kelvin, duplicate and conflict rejection",
+        "positive_coverage": "core.model_realization.domains.root_and_included_models_preserve_both_explicit_domains",
+        "negative_coverage": "core.model_realization.domains.declarations_coalesce_without_defaults_and_conflicts_are_order_independent"
+      },
+      "members": {
+        "reference_temperature": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "enum",
+      "name": "AnalysisSolverOptions",
+      "defaults": {
+        "disposition": "execution_policy",
+        "cardinality": "optional_once_per_step",
+        "default": "typed procedure preset",
+        "target": "procedure-specific execution solver block",
+        "identity": "logical execution identity",
+        "validation": "variant must exactly match family, procedure, and solution space",
+        "positive_coverage": "language.execution.solver.accepts",
+        "negative_coverage": "language.execution.solver.rejects"
+      },
+      "members": {
+        "StructuralLinear": {},
+        "StructuralFrequency": {},
+        "StructuralModes": {},
+        "StructuralResponseSpectrum": {},
+        "StructuralRandomResponse": {},
+        "StructuralBuckling": {},
+        "AcousticHelmholtz": {},
+        "AcousticResponse": {
+          "default": "Fp64 with residual target 1e-8",
+          "target": "typed acoustic cavity-mode or pressure-transient study publication",
+          "validation": "publication precision and residual target must match completed numerical controls",
+          "positive_coverage": "acoustic_response_study_publication.admission.tests.publication_controls_cannot_substitute_precision_or_residual: matching Fp64/residual case",
+          "negative_coverage": "acoustic_response_study_publication.admission.tests.publication_controls_cannot_substitute_precision_or_residual: mismatched precision and residual cases"
+        },
+        "ThermalDiffusion": {},
+        "StructuralTransient": {},
+        "IncompressibleFlow": {},
+        "StructuralNonlinear": {},
+        "ElectricalStatic": {
+          "default": "none from temporal sequence alone; exact electrical equation-bound typed preparation",
+          "target": "electrostatics or steady-conduction typed execution solver block",
+          "validation": "exact static electrical equation, standalone direct solution, and governed publication",
+          "positive_coverage": "authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
+          "negative_coverage": "typed_fea.preparation.admission equation-aware static electromagnetic dispatch"
+        },
+        "LineParameters": {
+          "default": "Fp64 direct cross-section solve with residual target 1e-8",
+          "target": "electromagnetic line_parameters procedure on a cross_section geometry",
+          "validation": "authenticated compiled section and solver-mesh identity; Fp64 publication; residual at or below the selected target; typed cross-section admission",
+          "positive_coverage": "check_cli.trace_impedance_example_publishes_the_microstrip_and_pair_impedances",
+          "negative_coverage": "physics.electrical.cross_section.tests.malformed_cross_sections_are_rejected"
+        },
+        "Magnetostatic": {
+          "default": "none from temporal sequence alone; exact magnetostatic equation-bound typed preparation",
+          "target": "magnetostatic typed execution solver block",
+          "validation": "exact magnetostatic equation and assembled saddle-point GMRES; no harmonic or electrical proxy",
+          "positive_coverage": "analysis_process_conformance.magnetic_authored",
+          "negative_coverage": "solver_compatibility magnetic method and typed_fea.preparation.admission equation-aware dispatch"
+        },
+        "MaxwellHarmonic": {
+          "default": "exact harmonic Maxwell typed preparation; no vector-potential proxy",
+          "target": "harmonic Maxwell typed execution solver block",
+          "validation": "exact harmonic electromagnetic procedure and authenticated typed Maxwell completion; scientific qualification remains separate",
+          "positive_coverage": "electromagnetic_harmonic_defaults_select_genuine_maxwell_without_vector_potential",
+          "negative_coverage": "scalar_study_execution_requires_authenticated_maxwell_completion"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisExecutionStep",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once_per_step",
+        "default": "none",
+        "target": "lowered execution plan step",
+        "identity": "logical execution identity",
+        "validation": "step and solver option compatibility",
+        "positive_coverage": "language.lowering.execution_step.accepts",
+        "negative_coverage": "language.lowering.execution_step.rejects"
+      },
+      "members": {
+        "step_id": {},
+        "backend": {
+          "disposition": "execution_policy",
+          "default": "merged project and CLI policy"
+        },
+        "accelerator_admission": {
+          "disposition": "execution_policy",
+          "default": "diagnosed CPU-reference fallback when accelerator execution is unavailable",
+          "target": "typed per-step accelerator admission",
+          "validation": "required accelerator policy rejects an unavailable route instead of silently falling back"
+        },
+        "solver_options": {
+          "disposition": "execution_policy",
+          "default": "typed procedure preset"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisExecutionPlan",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "exactly_once",
+        "default": "derived from sequence plus merged policy",
+        "target": "lowered execution plan",
+        "identity": "logical execution identity",
+        "validation": "one compatible entry for every executable step",
+        "positive_coverage": "language.lowering.execution_plan.accepts",
+        "negative_coverage": "language.lowering.execution_plan.rejects"
+      },
+      "members": {
+        "steps": {}
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisStudySpec",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "lowered canonical study contract",
+        "identity": "definition, result, or logical-execution identity according to member role",
+        "validation": "runtime revalidates all lowered typed contracts",
+        "positive_coverage": "language.lowering.study.accepts",
+        "negative_coverage": "language.lowering.study.rejects"
+      },
+      "members": {
+        "study_id": {},
+        "geometry": {},
+        "model_source_evidence": {
+          "target": "module graph evidence",
+          "identity": "source and audit identity"
+        },
+        "model": {},
+        "execution": {
+          "identity": "logical execution identity"
+        },
+        "meshing_settings": {},
+        "immutable_values": {},
+        "solver_mesh_artifact_path": {
+          "disposition": "internal_only",
+          "target": "content-addressed mesh reference",
+          "identity": "attempt transport only"
+        },
+        "meshing_evidence_artifact_path": {
+          "disposition": "internal_only",
+          "target": "content-addressed evidence reference",
+          "identity": "attempt transport only"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisStudySweepSpec",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once",
+        "default": "none",
+        "target": "lowered canonical sweep contract",
+        "identity": "sweep-definition identity unless policy",
+        "validation": "ordered unique expanded study identities",
+        "positive_coverage": "language.lowering.sweep.accepts",
+        "negative_coverage": "language.lowering.sweep.rejects"
+      },
+      "members": {
+        "sweep_id": {},
+        "studies": {},
+        "fail_fast": {
+          "disposition": "execution_policy",
+          "default": "false",
+          "identity": "logical execution identity"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/execution/src/workload.rs",
+      "kind": "struct",
+      "name": "AnalysisWorkloadInput",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_input",
+        "default": "none",
+        "target": "canonical worker numerical-object reference",
+        "identity": "logical workload identity",
+        "validation": "manifest, payload, kind, length, and reference-kind closure",
+        "positive_coverage": "execution.workload_input.accepts",
+        "negative_coverage": "execution.workload_input.rejects"
+      },
+      "members": {
+        "kind": {},
+        "logical_identity": {},
+        "payload_digest": {},
+        "manifest_digest": {},
+        "manifest_encoded_length": {},
+        "reference_kind": {}
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/execution/src/workload.rs",
+      "kind": "struct",
+      "name": "AnalysisWorkloadRequest",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_task",
+        "default": "none",
+        "target": "canonical placement-neutral worker request",
+        "identity": "logical workload identity; placement excluded",
+        "validation": "schema, identity rederivation, input/output closure, and capabilities",
+        "positive_coverage": "execution.workload_request.accepts",
+        "negative_coverage": "execution.workload_request.rejects"
+      },
+      "members": {
+        "schema_version": {},
+        "study": {},
+        "step": {},
+        "execution_plan": {},
+        "identity": {},
+        "kind": {},
+        "inputs": {},
+        "outputs": {},
+        "required_capabilities": {}
+      }
+    },
+    {
+      "source": "crates/runmat-meshing/core/src/contracts/canonical/settings.rs",
+      "kind": "struct",
+      "name": "MeshingRequestSettings",
+      "defaults": {
+        "disposition": "compiler_derived",
+        "cardinality": "required_once_when_meshing",
+        "default": "explicit language values merged with project resource policy",
+        "target": "lowered canonical mesh request settings",
+        "identity": "mesh request identity except attempt-only cancellation bounds",
+        "validation": "canonical meshing request validation",
+        "positive_coverage": "language.lowering.mesh.accepts",
+        "negative_coverage": "language.lowering.mesh.rejects"
+      },
+      "members": {
+        "element_order": {},
+        "dimension": {
+          "default": "MeshDimension::Solid",
+          "target": "canonical MeshingRequest.dimension",
+          "validation": "resolved canonical request validation"
+        },
+        "cross_section": {
+          "cardinality": "optional_once_for_cross_section_geometry",
+          "default": "None for other geometry; authored triangles controls for cross-sections",
+          "target": "MeshingRequestSettings.cross_section",
+          "identity": "canonical mesh request identity",
+          "validation": "CrossSectionMeshSettings::validate and cross-section semantic validation",
+          "positive_coverage": "language.tests.cross_sections.an_inline_cross_section_lowers_to_layers_traces_and_triangle_controls",
+          "negative_coverage": "language.tests.cross_sections.cross_section_mistakes_are_named"
+        },
+        "deterministic_seed": {},
+        "target_edge_length_m": {},
+        "maximum_chordal_deviation_m": {},
+        "maximum_grading_ratio": {},
+        "limits": {
+          "disposition": "execution_policy",
+          "default": "10,000,000 nodes/elements and recursion depth 256",
+          "target": "canonical MeshingRequest.limits",
+          "identity": "canonical mesh request identity",
+          "validation": "MeshingSizeLimits::validate before request execution",
+          "positive_coverage": "contracts.canonical.settings.tests.settings_resolve_to_a_valid_canonical_request",
+          "negative_coverage": "contracts.canonical.tests: zero maximum_nodes rejected"
+        },
+        "cells_across_gap": {
+          "default": "None retains canonical two-layer proximity sizing",
+          "target": "MeshingRequest.metric.cells_across_gap",
+          "validation": "explicit values must be within 1..=64"
+        },
+        "size_controls": {
+          "default": "empty local-control list",
+          "target": "MeshingRequest.size_controls",
+          "validation": "validate_size_controls and resolved canonical request validation"
+        },
+        "cancellation": {
+          "disposition": "execution_policy",
+          "identity": "physical attempt identity"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-geometry/io/src/import/mod.rs",
+      "kind": "struct",
+      "name": "GeometryImportOptions",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_import",
+        "default": "provider policy",
+        "target": "geometry provider request",
+        "identity": "geometry realization or render identity according to member",
+        "validation": "provider capability and resource admission",
+        "positive_coverage": "geometry.import_options.accepts",
+        "negative_coverage": "geometry.import_options.rejects"
+      },
+      "members": {
+        "max_triangles": {
+          "identity": "render identity"
+        },
+        "budget_policy": {
+          "identity": "physical attempt identity"
+        },
+        "units": {
+          "identity": "geometry definition identity"
+        },
+        "source_units": {
+          "default": "None; missing source scale remains unresolved",
+          "target": "source unit evidence and coordinate conversion during geometry import",
+          "identity": "geometry definition identity",
+          "validation": "explicit source-unit fallback cannot replace contradictory declared source evidence",
+          "positive_coverage": "source_units.preview_scale_tests.explicit_source_fallback_converts_faceted_coordinates_to_preview_units",
+          "negative_coverage": "source_units.preview_scale_tests.absent_fallback_stays_unresolved_instead_of_becoming_file_declared_meters"
+        },
+        "tessellation_profile": {
+          "identity": "render identity"
+        },
+        "relative_deflection": {
+          "identity": "render identity"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-analysis/fea/src/contracts/mod.rs",
+      "kind": "struct",
+      "name": "FeaRunResult",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_solve",
+        "default": "none",
+        "target": "canonical family-neutral solver result",
+        "identity": "numerical-result or execution-attempt evidence according to member",
+        "validation": "result identity, field shapes, evidence, and convergence closure",
+        "positive_coverage": "results.fea_run.accepts",
+        "negative_coverage": "results.fea_run.rejects"
+      },
+      "members": {
+        "identity": {},
+        "requested_backend": {
+          "identity": "logical execution identity"
+        },
+        "execution_backend": {
+          "identity": "physical attempt identity"
+        },
+        "solver_backend": {
+          "identity": "physical attempt identity"
+        },
+        "solver_device_apply_k_ratio": {
+          "identity": "physical attempt evidence"
+        },
+        "solver_method": {
+          "identity": "logical execution identity"
+        },
+        "preconditioner": {
+          "identity": "logical execution identity"
+        },
+        "solver_host_sync_count": {
+          "identity": "physical attempt evidence"
+        },
+        "accelerator_evidence": {
+          "identity": "physical attempt evidence"
+        },
+        "diagnostics": {
+          "identity": "result evidence"
+        },
+        "spatial_projection_evidence": {
+          "identity": "numerical-result evidence"
+        },
+        "structural_static_balance": {
+          "cardinality": "required_once_for_structural_static_solve_only",
+          "default": "absent_for_every_other_procedure",
+          "target": "physical structural static equilibrium and work closure",
+          "identity": "numerical-result evidence",
+          "validation": "finite self-consistent work and equilibrium residuals within the declared tolerance",
+          "positive_coverage": "solve.static_balance.prescribed_beam_closed_form",
+          "negative_coverage": "contracts.fea_run.rejects_missing_tampered_or_unexpected_static_balance"
+        },
+        "structural_constraint_result": {
+          "cardinality": "required_once_for_structural_static_solve_only",
+          "default": "absent_for_every_other_procedure",
+          "target": "canonical per-group structural reactions, constraint work, and typed kinematic violations",
+          "identity": "numerical-result evidence bound to canonical constraint-plan and topology identity",
+          "validation": "aggregate evidence is rederived and the canonical result is validated against its plan and model",
+          "positive_coverage": "solve.static_balance.prescribed_beam_constraint_result",
+          "negative_coverage": "contracts.fea_run.rejects_missing_tampered_or_unexpected_constraint_result"
+        },
+        "structural_connector_result": {
+          "cardinality": "required_once_for_structural_static_solve_only",
+          "default": "absent_for_every_other_procedure",
+          "target": "canonical per-connector structural response and stored energy",
+          "identity": "numerical-result evidence bound to canonical connector-plan and topology identity",
+          "validation": "canonical response is rederived from the executed plan and validated against authored connector sources",
+          "positive_coverage": "solve.connector.grounded_spring_observation",
+          "negative_coverage": "contracts.fea_run.rejects_missing_tampered_or_unexpected_connector_result"
+        },
+        "observations": {
+          "identity": "numerical-result identity"
+        },
+        "observation_histories": {
+          "identity": "numerical-result identity"
+        },
+        "series_reductions": {
+          "identity": "numerical-result identity"
+        },
+        "fields": {
+          "identity": "numerical-result identity"
+        },
+        "structural_static_convergence": {
+          "cardinality": "required_once_for_structural_static_solve_only",
+          "default": "absent_for_every_other_procedure",
+          "target": "original algebraic convergence in the actual full, affine-reduced or saddle-point equation space",
+          "identity": "numerical-result evidence",
+          "validation": "finite nonnegative norms; successful solves require original relative residual; missing or foreign procedure rejects",
+          "positive_coverage": "adaptation.solved_source.original_both_order_static_results_retain_typed_convergence_and_scalar_observations",
+          "negative_coverage": "analysis.linear_static_result.static_admission_uses_original_typed_convergence_without_diagnostic_text"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisRunResult",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "required_once_per_run",
+        "default": "none",
+        "target": "canonical persisted public run result",
+        "identity": "result, quality, or attempt identity according to member",
+        "validation": "publication validates source closure, quality, and artifact schema",
+        "positive_coverage": "results.analysis_run.accepts",
+        "negative_coverage": "results.analysis_run.rejects"
+      },
+      "members": {
+        "run_id": {
+          "identity": "result publication identity"
+        },
+        "run": {
+          "identity": "numerical-result identity"
+        },
+        "render_topology": {
+          "identity": "render identity"
+        },
+        "modal_results": {
+          "identity": "numerical-result identity"
+        },
+        "buckling_results": {
+          "identity": "numerical-result identity"
+        },
+        "thermal_results": {
+          "identity": "numerical-result identity"
+        },
+        "transient_results": {
+          "identity": "numerical-result identity"
+        },
+        "nonlinear_results": {
+          "identity": "numerical-result identity"
+        },
+        "model_validity": {
+          "identity": "quality evidence"
+        },
+        "solver_convergence": {
+          "identity": "quality evidence"
+        },
+        "result_quality": {
+          "identity": "quality evidence"
+        },
+        "run_status": {
+          "identity": "publication state"
+        },
+        "numerically_acceptable": {
+          "identity": "quality evidence"
+        },
+        "quality_reasons": {
+          "identity": "quality evidence"
+        },
+        "provenance": {
+          "identity": "physical attempt evidence"
+        },
+        "observation_scalars": {
+          "cardinality": "zero_or_more_authenticated_observation_evidence_records",
+          "default": "empty until original numerical evidence is attached",
+          "target": "canonical original observation evidence; not a new authored declaration",
+          "identity": "original run and observation evidence binding",
+          "validation": "derived scalar evidence and original artifact authentication before metadata reads; no independent physics certification from hashes",
+          "positive_coverage": "closed_publication_commits_original_fields_and_cold_root_in_both_stores",
+          "negative_coverage": "scalar_evidence_is_derived_and_authenticated_before_metadata_reads"
+        }
+      }
+    },
+    {
+      "source": "crates/runmat-runtime/src/analysis/contracts.rs",
+      "kind": "struct",
+      "name": "AnalysisResultsQuery",
+      "defaults": {
+        "disposition": "internal_only",
+        "cardinality": "optional_once_per_read",
+        "default": "all result categories with values and diagnostics",
+        "target": "typed result accessor and paging request",
+        "identity": "read request only; never study-definition or numerical-result identity",
+        "validation": "field, mode, snapshot, and payload selection bounds",
+        "positive_coverage": "results.query.accepts",
+        "negative_coverage": "results.query.rejects"
+      },
+      "members": {
+        "include_fields": {},
+        "include_field_values": {},
+        "include_diagnostics": {},
+        "diagnostic_codes": {},
+        "include_modal_results": {},
+        "include_buckling_results": {},
+        "mode_indices": {},
+        "include_transient_results": {},
+        "transient_snapshot_indices": {},
+        "include_nonlinear_results": {}
+      }
+    }
+  ],
+  "concentration_limits": [
+    {
+      "source": "crates/runmat-runtime/src/analysis/mod.rs",
+      "maximum_lines": 8579,
+      "rationale": "no new FEA language or numerical ownership"
+    },
+    {
+      "source": "crates/runmat-runtime/src/builtins/fea/mod.rs",
+      "maximum_lines": 4963,
+      "rationale": "new language and catalog behavior belongs in focused modules"
+    }
+  ]
+}

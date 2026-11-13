@@ -22,7 +22,7 @@ fn compiled_integer_grid_imag_and_nextpow2_forms_preserve_native_classes() {
         );
         assert!(
             values.iter().any(
-                |value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage().is_some_and(|storage| storage.class_name() == constructor))
+                |value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.integer_storage().is_some_and(|storage| storage.class_name() == constructor))
             ),
             "{constructor} grid output"
         );
@@ -35,9 +35,9 @@ fn compiled_magic_uses_first_real_element_floor_and_supports_order_two() {
         execute_source("a = magic([3.9 99]); b = magic(2);").expect("compiled magic semantics");
     assert!(values
         .iter()
-        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 3])));
+        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![3, 3])));
     assert!(values.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![1.0, 4.0, 3.0, 2.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.materialize_f64() == vec![1.0, 4.0, 3.0, 2.0])
     }));
 }
 
@@ -49,14 +49,28 @@ fn compiled_mat2cell_mat2str_and_native2unicode_keep_exact_integer_boundaries() 
     )
     .expect("compiled conversion semantics");
     assert!(values.iter().any(|value| {
-        matches!(value, Value::Cell(cell) if cell.data.iter().any(|entry| matches!(entry, Value::Int(integer) if integer.decimal_string() == "18446744073709551615")))
+        matches!(value, Value::Cell(cell) if cell.data().iter().any(|entry| matches!(entry, Value::Int(integer) if integer.decimal_string() == "18446744073709551615")))
     }));
     assert!(values.iter().any(|value| {
-        matches!(value, Value::CharArray(array) if array.data.iter().collect::<String>() == "uint16([256 512])")
+        matches!(value, Value::CharArray(array) if runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "uint16([256 512])")
     }));
     assert!(values.iter().any(|value| {
-        matches!(value, Value::CharArray(array) if array.shape == vec![1, 2] && array.data.iter().collect::<String>() == "hi")
+        matches!(value, Value::CharArray(array) if array.shape == vec![1, 2] && runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "hi")
     }));
+}
+
+#[test]
+fn compiled_mat2cell_supports_nd_cell_subscripts() {
+    let values = execute_source(
+        "a = reshape(1:24, [3 4 2]); c = mat2cell(a, [1 2], [2 2], [1 1]); block = c{2,1,2};",
+    )
+    .expect("compiled N-D cell subscript");
+    assert!(
+        values.iter().any(|value| {
+            matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2, 1] && tensor.materialize_f64() == vec![14.0, 15.0, 17.0, 18.0])
+        }),
+        "unexpected compiled values: {values:?}"
+    );
 }
 
 #[test]

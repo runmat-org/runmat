@@ -1,8 +1,15 @@
 //! MATLAB-compatible `ode23` builtin.
 
+#[cfg(test)]
+use runmat_builtins::ODE23_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ODE23_ERROR_INTERNAL, ODE23_ERROR_INVALID_ARGUMENT,
+    ODE23_ERROR_INVALID_INPUT, ODE23_INTEGER_CALLBACK_EXTENSION as INTEGER_CALLBACK_EXTENSION,
+    ODE23_INTEGER_OPTION_EXTENSION as INTEGER_OPTION_EXTENSION,
+    ODE23_INTEGER_TSPAN_EXTENSION as INTEGER_TSPAN_EXTENSION,
+    ODE23_INTEGER_Y0_EXTENSION as INTEGER_Y0_EXTENSION,
+    ODE23_LOGICAL_NUMERIC_EXTENSION as LOGICAL_NUMERIC_EXTENSION,
+    ODE23_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -12,152 +19,23 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::ode::common::{
-    build_ode_output, define_ode_integer_contract, ode_options_from_struct, parse_ode_input,
-    parse_options, prepare_ode_options, solve_ode, OdeMethod,
+    build_ode_output, check_cancellation, parse_ode_input, OdeCompatibilityExtensions, OdeMethod,
 };
-use crate::builtins::math::ode::type_resolvers::ode_solution_type;
+use crate::builtins::math::ode::options;
+use crate::builtins::math::ode::solver::solve_ode;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ode23";
 
-define_ode_integer_contract!("ode23", "Ode23");
-
-const ODE23_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Solution states evaluated over tspan.",
-}];
-
-const ODE23_OUTPUT_TY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time points selected by solver.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Solution states at each returned time point.",
-    },
-];
-
-const ODE23_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "odefun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ODE right-hand-side callback f(t,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "tspan",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time interval or monotonic time vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "y0",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Initial state vector/value.",
-    },
-];
-
-const ODE23_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "odefun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ODE right-hand-side callback f(t,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "tspan",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time interval or monotonic time vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "y0",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Initial state vector/value.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional struct with tolerances and step controls.",
-    },
-];
-
-const ODE23_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "y = ode23(odefun, tspan, y0)",
-        inputs: &ODE23_INPUTS_CORE,
-        outputs: &ODE23_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = ode23(odefun, tspan, y0, options)",
-        inputs: &ODE23_INPUTS_WITH_OPTIONS,
-        outputs: &ODE23_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[t, y] = ode23(odefun, tspan, y0)",
-        inputs: &ODE23_INPUTS_CORE,
-        outputs: &ODE23_OUTPUT_TY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[t, y] = ode23(odefun, tspan, y0, options)",
-        inputs: &ODE23_INPUTS_WITH_OPTIONS,
-        outputs: &ODE23_OUTPUT_TY,
-    },
-];
-
-const ODE23_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE23.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ode23:InvalidArgument"),
-    when: "Input argument count/options struct grammar is invalid.",
-    message: "ode23: invalid argument",
-};
-
-const ODE23_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE23.INVALID_INPUT",
-    identifier: Some("RunMat:ode23:InvalidInput"),
-    when: "ODE input/state/callback semantics are invalid for integration.",
-    message: "ode23: invalid input",
-};
-
-const ODE23_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ODE23.INTERNAL",
-    identifier: Some("RunMat:ode23:Internal"),
-    when: "Internal output materialization fails.",
-    message: "ode23: internal runtime failure",
-};
-
-const ODE23_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ODE23_ERROR_INVALID_ARGUMENT,
-    ODE23_ERROR_INVALID_INPUT,
-    ODE23_ERROR_INTERNAL,
-];
-
-pub const ODE23_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ODE23_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ODE23_ERRORS,
-};
+pub(crate) const ODE_COMPATIBILITY_EXTENSIONS: OdeCompatibilityExtensions =
+    OdeCompatibilityExtensions {
+        integer_tspan: &INTEGER_TSPAN_EXTENSION,
+        integer_y0: &INTEGER_Y0_EXTENSION,
+        integer_option: &INTEGER_OPTION_EXTENSION,
+        integer_callback: &INTEGER_CALLBACK_EXTENSION,
+        logical_numeric: &LOGICAL_NUMERIC_EXTENSION,
+        resident_input: &RESIDENT_INPUT_EXTENSION,
+    };
 
 fn ode23_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -213,41 +91,58 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "ode23",
-    category = "math/ode",
-    summary = "Solve nonstiff ODE systems using adaptive Bogacki-Shampine 3(2) integration.",
-    keywords = "ode23,ode,nonstiff,bogacki-shampine,adaptive step",
-    accel = "sink",
-    type_resolver(ode_solution_type),
-    descriptor(crate::builtins::math::ode::ode23::ODE23_DESCRIPTOR),
-    extensions(crate::builtins::math::ode::ode23::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::ode::ode23::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::ode::ode23"
 )]
+async fn ode23_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    function: Value,
+    tspan: Value,
+    y0: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ode23_in_runtime(runtime.as_ref(), function, tspan, y0, rest).await
+}
+
+#[cfg(test)]
 async fn ode23_builtin(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    ode23_in_runtime(None, function, tspan, y0, rest).await
+}
+
+async fn ode23_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: Value,
+    tspan: Value,
+    y0: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    super::resource_ingress::require_unbounded(NAME, runtime)?;
+    check_cancellation(NAME, runtime)?;
     if rest.len() > 1 {
         return Err(ode23_error_with_detail(
             &ODE23_ERROR_INVALID_ARGUMENT,
             "too many input arguments",
         ));
     }
-    let options = parse_options(NAME, rest.first())
+    let options = options::parse(NAME, rest.into_iter().next())
         .map_err(|err| ode23_map_error(err, &ODE23_ERROR_INVALID_ARGUMENT))?;
-    let options = prepare_ode_options(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
+    let opts = options::admit(NAME, options, ODE_COMPATIBILITY_EXTENSIONS)
         .await
         .map_err(|err| ode23_map_error(err, &ODE23_ERROR_INVALID_ARGUMENT))?;
-    let opts = ode_options_from_struct(NAME, options.as_ref())
-        .map_err(|err| ode23_map_error(err, &ODE23_ERROR_INVALID_ARGUMENT))?;
-    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS)
+    check_cancellation(NAME, runtime)?;
+    let input = parse_ode_input(NAME, tspan, y0, ODE_COMPATIBILITY_EXTENSIONS, runtime)
         .await
         .map_err(|err| ode23_map_error(err, &ODE23_ERROR_INVALID_INPUT))?;
     let result = solve_ode(NAME, OdeMethod::Ode23, &function, &input, &opts)
         .await
         .map_err(|err| ode23_map_error(err, &ODE23_ERROR_INVALID_INPUT))?;
+    check_cancellation(NAME, runtime)?;
     build_ode_output(NAME, result).map_err(|err| ode23_map_error(err, &ODE23_ERROR_INTERNAL))
 }
 
@@ -260,27 +155,38 @@ mod tests {
 
     #[test]
     fn ode23_supports_two_output_form() {
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("decay", 551)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 551);
                 let y = match &args[1] {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-y)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -y,
+                    ))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
+        let _out_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        drop(entry);
 
-        let _out_guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(ode23_builtin(
+        let out = block_on(runtime.scope(ode23_builtin(
             Value::FunctionHandle("decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
-        ))
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        )))
         .unwrap();
 
         match out {
@@ -293,6 +199,10 @@ mod tests {
 
     #[test]
     fn ode23_accepts_semantic_function_handle_rhs() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 55);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function, args, _requested_outputs| {
                 assert_eq!(function, 55);
@@ -300,18 +210,20 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-y)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        -y,
+                    ))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let out = block_on(ode23_builtin(
-            Value::BoundFunctionHandle {
-                name: "ode_decay".to_string(),
-                function: 55,
-            },
+            crate::user_functions::test_support::exact_local_value("ode_decay", binding),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
 
@@ -333,7 +245,10 @@ mod tests {
             Value::FunctionHandle("decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Num(1.0), Value::Num(2.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ]),
         ))
         .expect_err("expected too many inputs error");
         assert_eq!(err.identifier(), ODE23_ERROR_INVALID_ARGUMENT.identifier);

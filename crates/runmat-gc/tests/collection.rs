@@ -57,8 +57,8 @@ fn test_collection_with_live_objects() {
 
         // Allocate some objects without keeping references (potential garbage)
         for i in 0..10 {
-            let _ptr =
-                gc_allocate(Value::String(format!("temp_{i}"))).expect("allocation should succeed");
+            let _ptr = gc_allocate(Value::String(format!("temp_{i}").into()))
+                .expect("allocation should succeed");
             // These objects become garbage when _ptr goes out of scope
         }
 
@@ -137,7 +137,7 @@ fn test_collection_timing() {
 
         // Allocate some objects
         for i in 0..20 {
-            let _ptr = gc_allocate(Value::String(format!("object_{i}")))
+            let _ptr = gc_allocate(Value::String(format!("object_{i}").into()))
                 .expect("allocation should succeed");
         }
 
@@ -237,7 +237,10 @@ fn test_collection_with_roots() {
         gc_configure(config).expect("configuration should succeed");
 
         // Create a root with some values
-        let root_values = vec![Value::Num(100.0), Value::String("persistent".to_string())];
+        let root_values = vec![
+            Value::Num(100.0),
+            Value::String("persistent".to_string().into()),
+        ];
         let root = Box::new(GlobalRoot::new(root_values, "test root".to_string()));
         let root_id = gc_register_root(root).expect("root registration should succeed");
 
@@ -270,12 +273,12 @@ fn test_allocation_after_collection() {
         let _collected = gc_collect_minor().expect("collection should succeed");
 
         // Should still be able to allocate after collection
-        let new_ptr = gc_allocate(Value::String("post-collection".to_string()))
+        let new_ptr = gc_allocate(Value::String("post-collection".to_string().into()))
             .expect("allocation after collection should succeed");
 
         assert_eq!(
             gc_clone_value(&new_ptr).expect("valid GC handle"),
-            Value::String("post-collection".to_string())
+            Value::String("post-collection".to_string().into())
         );
     });
 }

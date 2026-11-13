@@ -8,7 +8,7 @@ use runmat_execution::resource::{ResourceInventory, ResourceRequest};
 use runmat_execution::state::PoolState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{InlineValue, ValuePayload};
-use runmat_execution::{Digest, ExecutionScopeId, PoolId, TaskId};
+use runmat_execution::{ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_runner::driver::{DriverAction, DriverCommand, DriverConfig};
 use runmat_execution_runner::{Driver, PoolSpec, TaskSubmission, WorkerSpec};
 
@@ -65,6 +65,7 @@ pub fn fixture(worker_count: usize, max_in_flight: u32) -> Fixture {
                 id: worker,
                 pool_id: pool,
                 resources: inventory(),
+                host: host_inventory(),
             }))
             .unwrap();
         workers.push(worker);
@@ -95,18 +96,28 @@ pub fn task(
 ) -> TaskSubmission {
     TaskSubmission {
         request: TaskRequest {
+            console: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: TaskId::derive(&[name.as_bytes()]),
             scope_id: scope,
             pool_id: pool,
-            program_artifact_id: ArtifactId::derive(&[b"artifact"]),
-            callable: Callable {
-                owner_identity: "fixture".into(),
-                qualified_name: name.into(),
-                entrypoint_digest: Digest::sha256(name),
-            },
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                ArtifactId::derive(&[b"artifact"]),
+            ),
+            callable: Callable::for_program(
+                "fixture",
+                &runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(0),
+                    None,
+                ),
+            ),
+            host: host_requirement(),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources: ResourceRequest {
                 cpu_millicores: 1_000,
@@ -127,6 +138,54 @@ pub fn task(
     }
 }
 
+fn host_environment() -> runmat_execution::ProgramEnvironment {
+    runmat_execution::ProgramEnvironment::new(
+        1,
+        1,
+        runmat_execution::Digest::sha256(b"runtime"),
+        runmat_execution::Digest::sha256(b"catalog"),
+        "runmat",
+    )
+    .unwrap()
+}
+
+fn host_inventory() -> runmat_execution::host::ExecutionHostInventory {
+    let environment = host_environment();
+    runmat_execution::host::ExecutionHostInventory {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        semantic_schema: environment.semantic_schema,
+        compiler_schema: environment.compiler_schema,
+        runtime_fingerprint: environment.runtime_fingerprint,
+        catalog_fingerprint: environment.catalog_fingerprint,
+        compatibility_modes: BTreeSet::from([runmat_execution::LanguageCompatibilityMode::RunMat]),
+        target: runmat_execution::host::ExecutionHostTarget::BrowserWasm,
+        capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        adapters: Vec::new(),
+        process_stack_available: false,
+        host_bridge_available: false,
+        trust_tier: runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+    }
+}
+
+fn host_requirement() -> runmat_execution::host::ExecutionHostRequirement {
+    runmat_execution::host::ExecutionHostRequirement {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        environment: host_environment(),
+        native_target: None,
+        capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+            runmat_types::CapabilityRequirement::HostRuntime,
+        ])),
+        interop: runmat_types::InteropManifest::empty(),
+        additional_units: Vec::new(),
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
+        permitted_trust_tiers: BTreeSet::from([
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+        ]),
+    }
+}
+
 pub fn submit(
     driver: &mut Driver,
     task: TaskSubmission,
@@ -142,12 +201,19 @@ pub fn submit(
         .expect("task should be launched")
 }
 
-pub fn success() -> runmat_execution_runner::AttemptReport {
+pub fn success(
+    request: &runmat_execution_runner::AttemptRequest,
+) -> runmat_execution_runner::AttemptReport {
     runmat_execution_runner::AttemptReport::Succeeded {
-        result: runmat_execution_runner::AttemptSuccess {
-            outputs: vec![ValuePayload::Inline(Box::new(InlineValue::Null))],
-            result_objects: Vec::new(),
-        },
+        result: runmat_execution_runner::AttemptSuccess::new(
+            request,
+            vec![ValuePayload::Inline(Box::new(InlineValue::Null))],
+            Vec::new(),
+            1,
+            0,
+            0,
+        )
+        .unwrap(),
     }
 }
 

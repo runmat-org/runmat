@@ -44,7 +44,8 @@ fn test_scalar_operations() {
 fn test_matrix_transpose() {
     // Build A as 3x2 with column-major data for [[1,2],[3,4],[5,6]]
     let a = Matrix::new_2d(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], 3, 2).unwrap();
-    let b = match call_builtin("transpose", &[Value::Tensor(a)]).unwrap() {
+    let transposed = call_builtin("transpose", &[Value::Tensor(a)]).unwrap();
+    let b = match transposed.value() {
         Value::Tensor(t) => t,
         other => panic!("expected tensor transpose, got {other:?}"),
     };
@@ -220,7 +221,7 @@ fn test_builtin_dispatch() {
         ],
     )
     .unwrap();
-    if let Value::Tensor(m) = result {
+    if let Value::Tensor(m) = result.value() {
         assert_eq!(m.rows(), 2);
         assert_eq!(m.cols(), 3);
         assert_eq!(m.materialize_f64(), vec![0.0; 6]);
@@ -230,7 +231,7 @@ fn test_builtin_dispatch() {
 
     // Test eye function
     let result = call_builtin("eye", &[Value::Int(runmat_value::IntValue::I32(2))]).unwrap();
-    if let Value::Tensor(m) = result {
+    if let Value::Tensor(m) = result.value() {
         assert_eq!(m.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
     } else {
         panic!("Expected matrix result");

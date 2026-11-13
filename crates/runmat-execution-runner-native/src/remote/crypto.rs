@@ -51,7 +51,7 @@ pub(super) fn seal_object(
 }
 
 pub(super) fn ciphertext_digest(bytes: &[u8]) -> String {
-    format!("sha256:{:x}", Sha256::digest(bytes))
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
 pub(super) fn project_revision_identity(revision: &ProgramRevision) -> String {

@@ -1,6 +1,9 @@
 use crate::*;
 use runmat_gc_api::{Trace, Tracer};
 
+mod value;
+pub use value::ValueTraceWorkspace;
+
 impl Trace for CellArray {
     fn trace(&self, tracer: &mut dyn Tracer) {
         for value in &self.data {
@@ -17,24 +20,32 @@ impl Trace for StructValue {
     }
 }
 
+impl Trace for StructArray {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        self.for_each_value(|value| value.trace(tracer));
+    }
+}
+
 impl Trace for Closure {
     fn trace(&self, tracer: &mut dyn Tracer) {
         for value in &self.captures {
             value.trace(tracer);
+        }
+        if let Some(environment) = &self.lexical_environment {
+            environment.for_each_handle(|handle| tracer.mark(handle));
         }
     }
 }
 
 impl Trace for ObjectInstance {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        for value in self.properties.values() {
+        self.trace_native_payload(tracer);
+        for value in self.properties().values() {
             value.trace(tracer);
         }
-        if let Some(dynamic_properties) = &self.dynamic_properties {
-            for property in dynamic_properties.values() {
-                if let Some(metadata_handle) = property.metadata_handle {
-                    tracer.mark(metadata_handle);
-                }
+        for property in self.trace_dynamic_property_values() {
+            if let Some(metadata_handle) = property.metadata_handle {
+                tracer.mark(metadata_handle);
             }
         }
     }
@@ -53,46 +64,13 @@ impl Trace for Listener {
     }
 }
 
-impl Trace for Value {
+impl Trace for ValueSequence {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        match self {
-            Value::Cell(cells) => cells.trace(tracer),
-            Value::Struct(struct_value) => struct_value.trace(tracer),
-            Value::HandleObject(handle) => handle.trace(tracer),
-            Value::Listener(listener) => listener.trace(tracer),
-            Value::Closure(closure) => closure.trace(tracer),
-            Value::Object(object) => object.trace(tracer),
-            Value::ObjectArray(array) => array.trace(tracer),
-            Value::OutputList(values) => {
-                for value in values {
-                    value.trace(tracer);
-                }
-            }
-            Value::Int(_)
-            | Value::Num(_)
-            | Value::Complex(_, _)
-            | Value::Bool(_)
-            | Value::LogicalArray(_)
-            | Value::String(_)
-            | Value::StringArray(_)
-            | Value::CharArray(_)
-            | Value::Tensor(_)
-            | Value::SparseTensor(_)
-            | Value::ComplexTensor(_)
-            | Value::Symbolic(_)
-            | Value::SymbolicArray(_)
-            | Value::GpuTensor(_)
-            | Value::FunctionHandle(_)
-            | Value::ExternalFunctionHandle(_)
-            | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
-            | Value::ClassRef(_)
-            | Value::MException(_)
-            | Value::Future(_)
-            | Value::Task(_)
-            | Value::Pool(_)
-            | Value::Job(_)
-            | Value::Foreign(_) => {}
+        for value in self.iter() {
+            value.trace(tracer);
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

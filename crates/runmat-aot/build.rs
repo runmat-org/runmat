@@ -1,6 +1,12 @@
 use std::{env, fs, path::PathBuf};
 
 fn main() {
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // This build-time packager does not ship a debugger database. Rust's
+        // MSVC linker requests a PDB even with strip=debuginfo; disable it only
+        // for this executable, leaving archive and consumer symbols intact.
+        println!("cargo:rustc-link-arg-bin=runmat-aot-pack=/DEBUG:NONE");
+    }
     const ARCHIVE_ENV: &str = "RUNMAT_AOT_RUNTIME_ARCHIVE";
     const MANIFEST_ENV: &str = "RUNMAT_AOT_RUNTIME_MANIFEST";
     println!("cargo:rerun-if-env-changed={ARCHIVE_ENV}");

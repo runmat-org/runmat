@@ -2,6 +2,7 @@ import { dirname, normalizePath } from "../fs/path.js";
 import type { RunMatFilesystemProvider } from "../fs/provider-types.js";
 import {
   BrowserProjectResolver,
+  type CapturedProjectResolver,
   type BrowserProjectResolveRequest,
   type BrowserProjectResolverConfig,
   type BrowserProjectResolverNative,
@@ -16,6 +17,7 @@ import type {
 const LOCK_FILE_NAME = "runmat.lock";
 
 export interface BrowserProjectSessionHandle {
+  prepareCapturedProject?: CapturedProjectResolver;
   setFsProvider?(provider: RunMatFilesystemProvider): Promise<void> | void;
   installProjectHandoff(handoff: unknown): Promise<unknown>;
   clearProjectHandoff(): Promise<void>;
@@ -100,20 +102,24 @@ export class BrowserProjectSession {
         ? normalizePath(`${dirname(request.manifestPath)}/${LOCK_FILE_NAME}`)
         : request.lockPath;
     const existingLock =
-      request.existingLock ??
+      request.inputManifest ? undefined : request.existingLock ??
       (lockPath === null ? undefined : await this.readExistingLock(lockPath));
-    const project = await this.resolver.resolve({
-      manifestPath: request.manifestPath,
-      existingLock,
-      options: request.options
-    });
-
     try {
+      const project = await this.resolver.resolve({
+        manifestPath: request.manifestPath,
+        existingLock,
+        options: request.options,
+        ...(request.inputManifest ? { inputManifest: request.inputManifest } : {}),
+      }, this.config.session.prepareCapturedProject?.bind(this.config.session));
       const handoff = await this.config.native.handoffFromFrozenProject(project.frozen);
-      await this.config.session.setFsProvider?.(this.resolver.filesystem);
+      // Captured preparation already installed the provider retained by the
+      // pinned project. Reinstalling it would replace that owner's identity.
+      if (!request.inputManifest) {
+        await this.config.session.setFsProvider?.(this.resolver.filesystem);
+      }
       const revision = await this.config.session.installProjectHandoff(handoff);
       const lockWritten =
-        lockPath !== null && project.lock_decision === "write-generated"
+        !request.inputManifest && lockPath !== null && project.lock_decision === "write-generated"
           ? await this.writeLock(lockPath, project.lock)
           : false;
       this.active = {

@@ -21,7 +21,10 @@ fn star_refill_candidates_reject_exterior_interior_points() {
     let nodes = unit_tetrahedron_nodes();
     let exterior = [ConstrainedCavityNode {
         node_id: 10,
-        coordinates_m: [2.0, 2.0, 2.0],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                2.0, 2.0, 2.0,
+            ]),
     }];
 
     let err =
@@ -42,7 +45,10 @@ fn star_refill_evaluation_reports_scaled_jacobian_rejections() {
     let nodes = unit_tetrahedron_nodes();
     let near_corner = [ConstrainedCavityNode {
         node_id: 10,
-        coordinates_m: [1.0e-4, 1.0e-4, 1.0e-4],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                1.0e-4, 1.0e-4, 1.0e-4,
+            ]),
     }];
 
     let evaluation = evaluate_constrained_cavity_refill_candidates(

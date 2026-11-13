@@ -1,15 +1,19 @@
+use crate::backend::wgpu::types::NumericPrecision;
 use std::fmt::Write;
 
 pub fn build_sub2ind_shader(
-    scalar_ty: &str,
+    precision: NumericPrecision,
     dims: &[u32],
     strides: &[u32],
     scalar_mask: &[u32],
     workgroup_size: u32,
-    epsilon: &str,
 ) -> String {
     assert_eq!(dims.len(), strides.len());
     assert_eq!(dims.len(), scalar_mask.len());
+    let (scalar_ty, epsilon, max_val) = match precision {
+        NumericPrecision::F32 => ("f32", "2.220446049250313e-16", "3.4028234663852886e38"),
+        NumericPrecision::F64 => ("f64", "2.220446049250313e-16", "1.7976931348623157e308"),
+    };
 
     let mut shader = String::new();
     writeln!(shader, "struct Tensor {{ data: array<{scalar_ty}>, }};").unwrap();
@@ -46,14 +50,9 @@ pub fn build_sub2ind_shader(
     )
     .unwrap();
     writeln!(shader, "const EPSILON: {scalar_ty} = {epsilon};").unwrap();
-    let max_val = if scalar_ty == "f32" {
-        "3.4028234663852886e38"
-    } else {
-        "1.7976931348623157e308"
-    };
     writeln!(
         shader,
-        "fn isfinite_scalar(x: {scalar_ty}) -> bool {{ return (x == x) && (abs(x) < {scalar_ty}({max_val})); }}"
+        "fn isFinite(value: {scalar_ty}) -> bool {{ @IEEE_FINITE_PREDICATE@ }}\nfn isfinite_scalar(x: {scalar_ty}) -> bool {{ return isFinite(x) && (abs(x) < {scalar_ty}({max_val})); }}"
     )
     .unwrap();
     for (idx, dim) in dims.iter().enumerate() {
@@ -110,12 +109,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
             set_error(2u, {dim_id}u, 0u);
             return;
         }}
-        let int_val: i32 = i32(rounded);
-        if (int_val < 1 || int_val > i32(DIM_{idx})) {{
-            set_error(3u, {dim_id}u, u32(int_val));
+        if (rounded < {scalar_ty}(1.0) || rounded > {scalar_ty}(DIM_{idx})) {{
+            set_error(3u, {dim_id}u, u32(rounded));
             return;
         }}
-        let term: u32 = (u32(int_val) - 1u) * STRIDE_{idx};
+        let int_val: u32 = u32(rounded);
+        let term: u32 = (int_val - 1u) * STRIDE_{idx};
         offset = offset + term;
     }}"
         )
@@ -129,5 +128,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
     .unwrap();
 
-    shader
+    super::nan_predicate::inject_finite(&shader, precision)
 }

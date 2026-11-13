@@ -1,338 +1,95 @@
-import { MemoryVolume, type InMemoryFsProviderOptions, type VolumeSnapshotEntry } from "./memory.js";
+import { coerceFilesystemBytes, type InMemoryFsProviderOptions, type MemoryVolume } from "./memory.js";
 import type { RunMatFilesystemProvider } from "./provider-types.js";
+import { IndexedDbVolumeStore, openIndexedDbVolume } from "./indexeddb-store.js";
+import { captureBrowserPublication, captureBrowserWorkspace, equalBrowserInventory, mergeBrowserPublication,
+  prepareBrowserPublication, publicationDigest, publicationKey, reconcileReceipt, type BrowserWorkspaceInventory } from "./browser-workspace.js";
+import { MAX_WORKSPACE_PUBLICATION_BYTES, MAX_WORKSPACE_PUBLICATION_EDITS } from "../generated/fea-workspace-contracts.js";
 
 export interface IndexedDbProviderOptions extends InMemoryFsProviderOptions {
   dbName?: string;
   storeName?: string;
   version?: number;
+  /** Retained for callers; authoritative operations commit before resolving. */
   flushDebounceMs?: number;
 }
-
 export interface IndexedDbFsHandle {
   provider: RunMatFilesystemProvider;
   flush(): Promise<void>;
   close(): void;
 }
 
-const DEFAULT_DB_NAME = "runmat-fs";
-const DEFAULT_STORE_NAME = "entries";
-const SHARED_BACKINGS_SYMBOL = Symbol.for("runmat.fs.indexedDbBackings");
-
-interface SharedIndexedDbBacking {
-  db: IDBDatabase;
-  storeName: string;
-  volume: MemoryVolume;
-  flushDebounceMs: number;
-  options: SharedIndexedDbBackingOptions;
-  refCount: number;
-  pendingFlush: Promise<void> | null;
-  flushTimer: ReturnType<typeof setTimeout> | null;
-  closed: boolean;
-  dirty: boolean;
+function inventory(volume: MemoryVolume): BrowserWorkspaceInventory {
+  return new Map(volume.serialize().map(entry => [entry.path, entry.kind === "file"
+    ? { kind: "file", bytes: entry.data!, readonly: entry.readonly }
+    : { kind: "dir", readonly: entry.readonly }]));
 }
 
-interface SharedIndexedDbBackingOptions {
-  flushDebounceMs: number;
-  now: (() => number) | null;
-}
-
-function sharedBackings(): Map<string, Promise<SharedIndexedDbBacking>> {
-  const globalState = globalThis as typeof globalThis & {
-    [SHARED_BACKINGS_SYMBOL]?: Map<string, Promise<SharedIndexedDbBacking>>;
+export async function createIndexedDbFsHandle(options: IndexedDbProviderOptions = {}): Promise<IndexedDbFsHandle> {
+  if (typeof indexedDB === "undefined") throw new Error("indexedDB API is unavailable in this environment");
+  const storeName = options.storeName ?? "entries";
+  const db = await openIndexedDbVolume(indexedDB, options.dbName ?? "runmat-fs", storeName, options.version ?? 2);
+  const storage = new IndexedDbVolumeStore(db, storeName, `${storeName}_workspace_receipts`, options.now);
+  const read = <T>(operation: (volume: MemoryVolume) => T) => storage.transaction(false, operation);
+  const write = <T>(operation: (volume: MemoryVolume) => T) => storage.transaction(true, operation);
+  const provider: RunMatFilesystemProvider = {
+    readFile: path => storage.read([path], false, volume => volume.readFile(path)),
+    readMany: paths => storage.read(paths, false, volume => volume.readMany(paths)),
+    writeFile: (path, data) => {
+      const owned = coerceFilesystemBytes(data).slice();
+      return write(volume => volume.writeFile(path, owned));
+    },
+    atomicCreateNew: (path, data) => {
+      const owned = data.slice();
+      return write(volume => {
+        const result = volume.atomicCreateNew(path, owned);
+        return result.kind === "published" ? { kind: "published", result: { durability: "durable" } } : result;
+      });
+    },
+    removeFile: path => write(volume => volume.removeFile(path)),
+    metadata: path => storage.read([path], false, volume => volume.metadata(path)),
+    symlinkMetadata: path => storage.read([path], false, volume => volume.metadata(path)),
+    readDir: path => storage.read([path], true, volume => volume.readDir(path)),
+    canonicalize: path => storage.read([path], false, volume => volume.canonicalize(path)),
+    createDir: path => write(volume => { volume.createDir(path); }),
+    createDirAll: path => write(volume => { volume.createDirAll(path); }),
+    removeDir: path => write(volume => volume.removeDir(path)),
+    removeDirAll: path => write(volume => volume.removeDirAll(path)),
+    rename: (from, to) => write(volume => volume.rename(from, to)),
+    setReadonly: (path, readonly) => write(volume => volume.setReadonly(path, readonly)),
+    async captureWorkspace(request) {
+      const original = await read(inventory);
+      return captureBrowserWorkspace(original, request);
+    },
+    async lookupWorkspacePublication(request) {
+      request = captureBrowserPublication(request);
+      const digest = await publicationDigest(request);
+      return storage.transaction(false, (_, receipts) => reconcileReceipt(receipts.get(publicationKey(request)), digest));
+    },
+    async publishWorkspace(request) {
+      request = captureBrowserPublication(request);
+      const digest = await publicationDigest(request);
+      const key = publicationKey(request);
+      const original = await storage.transaction(false, (volume, receipts) => ({ entries: inventory(volume), prior: reconcileReceipt(receipts.get(key), digest) }));
+      if (original.prior) return original.prior;
+      const prepared = await prepareBrowserPublication(original.entries, request);
+      if (prepared.type === "conflict") return prepared.outcome;
+      const committed = await storage.transaction(true, (volume, receipts) => {
+        const prior = reconcileReceipt(receipts.get(key), digest);
+        if (prior) return prior;
+        const live = inventory(volume);
+        if (!equalBrowserInventory(original.entries, live, request)) return null;
+        if (receipts.size >= MAX_WORKSPACE_PUBLICATION_EDITS) throw new Error("Publication receipt budget exhausted");
+        volume.replaceWorkspaceInventory(mergeBrowserPublication(prepared.entries, live, request));
+        receipts.set(key, prepared.receipt);
+        return structuredClone(prepared.receipt.outcome);
+      });
+      if (committed) return committed;
+      const current = await provider.captureWorkspace!({ ...request, max_files: MAX_WORKSPACE_PUBLICATION_EDITS, max_bytes: MAX_WORKSPACE_PUBLICATION_BYTES });
+      return { type: "conflict", current: current.revision };
+    },
   };
-  if (!globalState[SHARED_BACKINGS_SYMBOL]) {
-    globalState[SHARED_BACKINGS_SYMBOL] = new Map();
-  }
-  return globalState[SHARED_BACKINGS_SYMBOL];
+  return { provider, flush: () => storage.flush(), close: () => storage.close() };
 }
-
-export async function createIndexedDbFsHandle(
-  options: IndexedDbProviderOptions = {}
-): Promise<IndexedDbFsHandle> {
-  const idb = getIndexedDb();
-  const dbName = options.dbName ?? DEFAULT_DB_NAME;
-  const storeName = options.storeName ?? DEFAULT_STORE_NAME;
-  const version = options.version ?? 1;
-  const key = sharedBackingKey(dbName, storeName, version);
-  const backingOptions = normalizeSharedBackingOptions(options);
-  const backings = sharedBackings();
-  let backingPromise = backings.get(key);
-  if (!backingPromise) {
-    backingPromise = createSharedBacking(idb, dbName, storeName, version, backingOptions).catch((error) => {
-      backings.delete(key);
-      throw error;
-    });
-    backings.set(key, backingPromise);
-  }
-  const backing = await backingPromise;
-  assertSharedBackingOptions(key, backing.options, backingOptions);
-  backing.refCount += 1;
-  return new IndexedDbHandle(key, backing);
-}
-
-export async function createIndexedDbFsProvider(
-  options?: IndexedDbProviderOptions
-): Promise<RunMatFilesystemProvider> {
-  const handle = await createIndexedDbFsHandle(options);
-  return handle.provider;
-}
-
-class IndexedDbHandle implements IndexedDbFsHandle {
-  public readonly provider: RunMatFilesystemProvider;
-  private closed = false;
-
-  constructor(
-    private readonly key: string,
-    private readonly backing: SharedIndexedDbBacking
-  ) {
-    this.provider = backing.volume.createProvider(() => this.onMutate());
-  }
-
-  async flush(): Promise<void> {
-    if (this.backing.closed) {
-      return;
-    }
-    if (this.backing.flushTimer) {
-      clearTimeout(this.backing.flushTimer);
-      this.backing.flushTimer = null;
-    }
-    this.queueFlush();
-    if (this.backing.pendingFlush) {
-      await this.backing.pendingFlush;
-    }
-  }
-
-  close(): void {
-    if (this.closed) {
-      return;
-    }
-    this.closed = true;
-    if (this.backing.closed) {
-      return;
-    }
-    this.backing.refCount = Math.max(0, this.backing.refCount - 1);
-    if (this.backing.refCount > 0) {
-      return;
-    }
-    if (this.backing.flushTimer) {
-      clearTimeout(this.backing.flushTimer);
-      this.backing.flushTimer = null;
-    }
-    this.backing.closed = true;
-    this.backing.db.close();
-    sharedBackings().delete(this.key);
-  }
-
-  private scheduleFlush(): void {
-    if (this.backing.closed) {
-      return;
-    }
-    if (this.backing.flushDebounceMs === 0) {
-      this.queueFlush();
-      return;
-    }
-    if (this.backing.flushTimer) {
-      clearTimeout(this.backing.flushTimer);
-    }
-    this.backing.flushTimer = setTimeout(() => {
-      this.backing.flushTimer = null;
-      this.queueFlush();
-    }, this.backing.flushDebounceMs);
-  }
-
-  private queueFlush(): void {
-    if (this.backing.closed || this.backing.pendingFlush) {
-      return;
-    }
-    this.backing.pendingFlush = this.persistAll().finally(() => {
-      this.backing.pendingFlush = null;
-      if (this.backing.dirty) {
-        this.queueFlush();
-      }
-    });
-  }
-
-  private onMutate(): void {
-    this.backing.dirty = true;
-    this.scheduleFlush();
-  }
-
-  private async persistAll(): Promise<void> {
-    while (!this.backing.closed) {
-      this.backing.dirty = false;
-      const snapshot = this.backing.volume.serialize();
-      await writeAllEntries(this.backing.db, this.backing.storeName, snapshot);
-      if (!this.backing.dirty) {
-        break;
-      }
-    }
-  }
-}
-
-async function createSharedBacking(
-  idb: IDBFactory,
-  dbName: string,
-  storeName: string,
-  version: number,
-  options: SharedIndexedDbBackingOptions
-): Promise<SharedIndexedDbBacking> {
-  const db = await openDatabase(idb, dbName, storeName, version);
-  const snapshot = await readAllEntries(db, storeName);
-  const volume = new MemoryVolume({ now: options.now ?? undefined });
-  volume.load(snapshot);
-  return {
-    db,
-    storeName,
-    volume,
-    flushDebounceMs: options.flushDebounceMs,
-    options,
-    refCount: 0,
-    pendingFlush: null,
-    flushTimer: null,
-    closed: false,
-    dirty: false
-  };
-}
-
-function normalizeSharedBackingOptions(options: IndexedDbProviderOptions): SharedIndexedDbBackingOptions {
-  return {
-    flushDebounceMs: options.flushDebounceMs ?? 25,
-    now: options.now ?? null
-  };
-}
-
-function assertSharedBackingOptions(
-  key: string,
-  active: SharedIndexedDbBackingOptions,
-  requested: SharedIndexedDbBackingOptions
-): void {
-  const mismatches: string[] = [];
-  if (active.flushDebounceMs !== requested.flushDebounceMs) {
-    mismatches.push("flushDebounceMs");
-  }
-  if (active.now !== requested.now) {
-    mismatches.push("now");
-  }
-  if (mismatches.length === 0) {
-    return;
-  }
-  throw new Error(
-    `IndexedDB filesystem backing '${key}' is already open with different ${mismatches.join(
-      " and "
-    )}; close existing handles before opening it with different persistence options`
-  );
-}
-
-function sharedBackingKey(dbName: string, storeName: string, version: number): string {
-  return `${dbName}\0${storeName}\0${version}`;
-}
-
-function getIndexedDb(): IDBFactory {
-  if (typeof indexedDB === "undefined") {
-    throw new Error("indexedDB API is unavailable in this environment");
-  }
-  return indexedDB;
-}
-
-function openDatabase(
-  idb: IDBFactory,
-  dbName: string,
-  storeName: string,
-  version: number
-): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = idb.open(dbName, version);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(storeName)) {
-        db.createObjectStore(storeName, { keyPath: "path" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB database"));
-    request.onblocked = () => reject(new Error("IndexedDB upgrade was blocked by another connection"));
-  });
-}
-
-function readAllEntries(db: IDBDatabase, storeName: string): Promise<VolumeSnapshotEntry[]> {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly");
-    const store = tx.objectStore(storeName);
-    const getAll = (store as any).getAll?.bind(store);
-    if (typeof getAll === "function") {
-      const request = getAll();
-      request.onsuccess = () => {
-        const raw = (request.result ?? []) as PersistedEntry[];
-        resolve(raw.map(deserializeEntry));
-      };
-      request.onerror = () => reject(request.error ?? new Error("Failed to read IndexedDB entries"));
-      return;
-    }
-    const entries: PersistedEntry[] = [];
-    const cursor = store.openCursor();
-    cursor.onsuccess = () => {
-      const result = cursor.result;
-      if (!result) {
-        resolve(entries.map(deserializeEntry));
-        return;
-      }
-      entries.push(result.value as PersistedEntry);
-      result.continue();
-    };
-    cursor.onerror = () => reject(cursor.error ?? new Error("Failed to iterate IndexedDB cursor"));
-  });
-}
-
-function writeAllEntries(
-  db: IDBDatabase,
-  storeName: string,
-  entries: VolumeSnapshotEntry[]
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const store = tx.objectStore(storeName);
-    const clearReq = store.clear();
-
-    clearReq.onerror = () =>
-      reject(clearReq.error ?? new Error("Failed to clear IndexedDB store before write"));
-    clearReq.onsuccess = () => {
-      for (const entry of entries) {
-        const record: PersistedEntry = {
-          path: entry.path,
-          kind: entry.kind,
-          readonly: entry.readonly,
-          modified: entry.modified,
-          children: entry.children ?? []
-        };
-        if (entry.kind === "file" && entry.data) {
-          record.data = entry.data.slice().buffer;
-        }
-        store.put(record);
-      }
-    };
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("Failed to persist IndexedDB entries"));
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted"));
-  });
-}
-
-interface PersistedEntry {
-  path: string;
-  kind: "file" | "dir";
-  data?: ArrayBuffer;
-  readonly: boolean;
-  modified: number;
-  children: string[];
-}
-
-function deserializeEntry(entry: PersistedEntry): VolumeSnapshotEntry {
-  return {
-    path: entry.path,
-    kind: entry.kind,
-    readonly: entry.readonly,
-    modified: entry.modified,
-    children: entry.children,
-    data: entry.data ? new Uint8Array(entry.data.slice(0)) : undefined
-  };
+export async function createIndexedDbFsProvider(options?: IndexedDbProviderOptions): Promise<RunMatFilesystemProvider> {
+  return (await createIndexedDbFsHandle(options)).provider;
 }

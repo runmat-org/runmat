@@ -99,6 +99,8 @@ impl Default for WebRendererOptions {
 /// Errors produced while initializing or rendering with the web renderer.
 #[derive(Debug, Error)]
 pub enum WebRendererError {
+    #[error("GPU device access failed: {0}")]
+    Access(#[from] runmat_accelerate_api::WgpuAccessError),
     #[error("canvas has zero area; ensure width/height attributes are set")]
     CanvasZeroArea,
     #[error("surface creation failed: {0}")]
@@ -120,13 +122,13 @@ pub enum WebRendererError {
 pub struct WebRenderer {
     canvas: WebCanvas,
     surface: wgpu::Surface<'static>,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    access: runmat_accelerate_api::WgpuDeviceAccess,
     surface_config: wgpu::SurfaceConfiguration,
     plot_renderer: PlotRenderer,
     camera_controller: CameraController,
     render_config: PlotRenderConfig,
     options: WebRendererOptions,
+    supported_antialiasing: Vec<crate::core::Antialiasing>,
     msaa_texture: Option<wgpu::Texture>,
     msaa_extent: (u32, u32),
     pixels_per_point: f32,
@@ -243,8 +245,8 @@ impl WebRenderer {
             }
         };
 
-        let (device, queue, adapter) = if let Some(ctx) = shared_ctx {
-            (ctx.device, ctx.queue, ctx.adapter)
+        let (access, adapter) = if let Some(ctx) = shared_ctx {
+            (ctx.access, ctx.adapter)
         } else {
             let adapter_raw = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
@@ -266,11 +268,46 @@ impl WebRenderer {
                     None,
                 )
                 .await?;
-            (Arc::new(device_raw), Arc::new(queue_raw), adapter)
+            (
+                runmat_accelerate_api::WgpuDeviceAccess::new(device_raw, queue_raw),
+                adapter,
+            )
         };
 
         let capabilities = surface.get_capabilities(&adapter);
         let format = pick_surface_format(&capabilities);
+        // Match the renderer's actual depth attachment format. Adapter-specific
+        // format capabilities require the corresponding enabled device feature.
+        let device_features = access.with_shared(|emission| emission.device().features())?;
+        let format_features = |format: wgpu::TextureFormat| {
+            if device_features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+                adapter.get_texture_format_features(format)
+            } else {
+                format.guaranteed_format_features(device_features)
+            }
+        };
+        let supported_antialiasing: Vec<_> = [
+            crate::core::Antialiasing::Off,
+            crate::core::Antialiasing::X2,
+            crate::core::Antialiasing::X4,
+            crate::core::Antialiasing::X8,
+        ]
+        .into_iter()
+        .filter(|mode| {
+            mode.supported_by_formats(
+                format_features(format),
+                format_features(crate::core::renderer::WgpuRenderer::depth_format()),
+            )
+        })
+        .collect();
+        let requested = crate::core::Antialiasing::from_samples(options.msaa_samples)
+            .map_err(|error| WebRendererError::Render(error.into()))?;
+        if !supported_antialiasing.contains(&requested) {
+            return Err(WebRendererError::Render(format!(
+                "{}x anti-aliasing is unsupported by the active color/depth formats",
+                requested.samples()
+            )));
+        }
         let present_mode = pick_present_mode(&capabilities, options.present_mode);
         let alpha_mode = pick_alpha_mode(&capabilities);
 
@@ -285,18 +322,23 @@ impl WebRenderer {
             desired_maximum_frame_latency: 1,
         };
 
-        surface.configure(device.as_ref(), &surface_config);
-        let plot_renderer =
-            PlotRenderer::new(device.clone(), queue.clone(), surface_config.clone())
-                .await
-                .map_err(|err| WebRendererError::PlotInit(err.to_string()))?;
+        access.with_shared(|emission| surface.configure(emission.device(), &surface_config))?;
+        let plot_renderer = PlotRenderer::new(access.clone(), surface_config.clone())
+            .await
+            .map_err(|err| WebRendererError::PlotInit(err.to_string()))?;
 
         #[cfg(feature = "egui-overlay")]
         let overlay = if options.enable_overlay {
             let egui_ctx = egui::Context::default();
             ModernDarkTheme::default().apply_to_egui(&egui_ctx);
-            let egui_renderer =
-                crate::wgpu_compat::egui_renderer_new(&device, surface_config.format, None, 1);
+            let egui_renderer = access.with_shared(|emission| {
+                crate::wgpu_compat::egui_renderer_new(
+                    emission.device(),
+                    surface_config.format,
+                    None,
+                    1,
+                )
+            })?;
             Some(WebOverlayState {
                 egui_ctx,
                 egui_renderer,
@@ -313,8 +355,7 @@ impl WebRenderer {
         let mut renderer = Self {
             canvas,
             surface,
-            device,
-            queue,
+            access: access.clone(),
             surface_config,
             plot_renderer,
             camera_controller: CameraController::new(),
@@ -325,6 +366,7 @@ impl WebRenderer {
                 ..Default::default()
             },
             options,
+            supported_antialiasing,
             msaa_texture: None,
             msaa_extent: (0, 0),
             pixels_per_point: 1.0,
@@ -337,7 +379,7 @@ impl WebRenderer {
             #[cfg(feature = "egui-overlay")]
             overlay,
         };
-        renderer.sync_renderer_config();
+        access.with_shared(|emission| renderer.sync_renderer_config(emission))?;
         Ok(renderer)
     }
 
@@ -356,6 +398,60 @@ impl WebRenderer {
 
     /// Apply a user interaction event (mouse/keyboard) to the renderer state.
     /// Returns `true` when a re-render is recommended.
+    pub fn navigation_options(&self) -> crate::core::NavigationOptions {
+        self.camera_controller.navigation_options()
+    }
+
+    pub fn set_navigation_options(
+        &mut self,
+        options: crate::core::NavigationOptions,
+    ) -> Result<(), WebRendererError> {
+        self.camera_controller
+            .set_navigation_options(options)
+            .map_err(|error| WebRendererError::Render(error.into()))
+    }
+
+    pub fn supported_antialiasing(&self) -> &[crate::core::Antialiasing] {
+        &self.supported_antialiasing
+    }
+
+    pub fn set_antialiasing(
+        &mut self,
+        mode: crate::core::Antialiasing,
+    ) -> Result<(), WebRendererError> {
+        if !self.supported_antialiasing.contains(&mode) {
+            return Err(WebRendererError::Render(format!(
+                "{}x anti-aliasing is unsupported by the active color/depth formats",
+                mode.samples()
+            )));
+        }
+        self.options.msaa_samples = mode.samples();
+        self.render_config.msaa_samples = mode.samples();
+        self.msaa_texture = None;
+        self.msaa_extent = (0, 0);
+        Ok(())
+    }
+
+    /// Host-classified two-finger scroll. Pinch (Ctrl/Cmd) remains zoom.
+    pub fn handle_trackpad_scroll(
+        &mut self,
+        position: glam::Vec2,
+        delta: glam::Vec2,
+        mut modifiers: crate::core::interaction::Modifiers,
+    ) -> bool {
+        if self.camera_controller.navigation_options().trackpad_pan
+            && !modifiers.ctrl
+            && !modifiers.meta
+        {
+            modifiers.shift = true;
+        }
+        self.handle_event(PlotEvent::MouseWheel {
+            position,
+            delta,
+            modifiers,
+        })
+    }
+
     pub fn handle_event(&mut self, event: PlotEvent) -> bool {
         #[cfg(feature = "egui-overlay")]
         let overlay_pointer_captured = self
@@ -533,7 +629,8 @@ impl WebRenderer {
         self.canvas.set_height(height);
         self.msaa_texture = None;
         self.msaa_extent = (0, 0);
-        self.reconfigure_surface()?;
+        let access = self.access.clone();
+        access.with_shared(|emission| self.reconfigure_surface(emission))??;
         self.render_current_scene()
     }
 
@@ -541,11 +638,12 @@ impl WebRenderer {
     pub fn set_pixels_per_point(&mut self, pixels_per_point: f32) {
         if pixels_per_point.is_finite() && pixels_per_point > 0.0 {
             self.pixels_per_point = pixels_per_point;
+            self.plot_renderer.wgpu_renderer.pixels_per_point = pixels_per_point;
         }
     }
 
     pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
-        self.plot_renderer.theme = theme.clone();
+        self.plot_renderer.set_theme(theme.clone());
         self.render_config.theme = theme;
         self.apply_background_policy();
     }
@@ -560,7 +658,8 @@ impl WebRenderer {
         };
         self.apply_background_policy();
         self.has_active_figure = true;
-        self.plot_renderer.set_figure(figure);
+        self.access
+            .with_shared(|emission| self.plot_renderer.set_figure(emission, figure))?;
         self.render_current_scene()
     }
 
@@ -589,6 +688,32 @@ impl WebRenderer {
         self.render_current_scene()
     }
 
+    pub fn set_presence(
+        &mut self,
+        frame: crate::collaboration::PresenceFrame,
+    ) -> Result<(), WebRendererError> {
+        self.plot_renderer
+            .set_presence(frame)
+            .map_err(WebRendererError::Render)
+    }
+
+    pub fn capture_presence_pointer(
+        &self,
+        logical_pixel: [f32; 2],
+    ) -> Option<crate::collaboration::PointerPosition> {
+        #[cfg(feature = "egui-overlay")]
+        if let Some(overlay) = &self.overlay {
+            return overlay
+                .plot_overlay
+                .presence_projections(&self.plot_renderer)
+                .iter()
+                .rev()
+                .find_map(|projection| projection.capture(logical_pixel));
+        }
+        let _ = logical_pixel;
+        None
+    }
+
     pub fn set_geometry_scene_presentation(
         &mut self,
         presentation: GeometryScenePresentation,
@@ -602,6 +727,7 @@ impl WebRenderer {
         &self,
         index: &GeometryScenePickIndex,
         position: [f32; 2],
+        mode: crate::geometry_scene::GeometryScenePickMode,
     ) -> Option<GeometryScenePickResult> {
         index.pick(GeometryScenePickRequest {
             camera: self.plot_renderer.camera().clone(),
@@ -610,6 +736,7 @@ impl WebRenderer {
                 self.surface_config.height.max(1) as f32,
             ],
             position,
+            mode,
         })
     }
 
@@ -624,8 +751,10 @@ impl WebRenderer {
             self.surface_config.width.max(1),
             self.surface_config.height.max(1),
         )];
-        self.plot_renderer
-            .set_figure(Figure::new().with_grid(false).with_legend(false));
+        self.access.with_shared(|emission| {
+            self.plot_renderer
+                .set_figure(emission, Figure::new().with_grid(false).with_legend(false))
+        })?;
         self.render_current_scene()
     }
 
@@ -686,7 +815,16 @@ impl WebRenderer {
 
     /// Redraw the last figure that was provided.
     pub fn render_current_scene(&mut self) -> Result<(), WebRendererError> {
-        self.sync_canvas_extent()?;
+        let access = self.access.clone();
+        access.with_shared(|emission| self.render_current_scene_with_emission(emission))?
+    }
+
+    #[tracing::instrument(name = "plot.present", skip_all)]
+    fn render_current_scene_with_emission(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Result<(), WebRendererError> {
+        self.sync_canvas_extent(emission)?;
         self.plot_renderer
             .wgpu_renderer
             .ensure_msaa(self.options.msaa_samples);
@@ -695,7 +833,7 @@ impl WebRenderer {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
                 debug!("runmat_plot/web: surface lost or outdated; reconfiguring");
-                self.reconfigure_surface()?;
+                self.reconfigure_surface(emission)?;
                 self.surface.get_current_texture()?
             }
             Err(wgpu::SurfaceError::Timeout) => {
@@ -715,11 +853,12 @@ impl WebRenderer {
         let use_overlay = false;
 
         let requested_samples = self.render_config.msaa_samples.max(1);
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-plot-web-encoder"),
-            });
+        let mut encoder =
+            emission
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-plot-web-encoder"),
+                });
 
         self.render_config.width = self.surface_config.width.max(1);
         self.render_config.height = self.surface_config.height.max(1);
@@ -745,16 +884,21 @@ impl WebRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            self.queue.submit(Some(encoder.finish()));
+            emission.queue().submit(Some(encoder.finish()));
             frame.present();
             return Ok(());
         }
 
+        let preparation: Vec<wgpu::CommandBuffer>;
         if !use_overlay {
             // Existing fast path: full-surface render (clears).
+            self.plot_renderer.fit_pending_figure_cameras_for_surface(
+                self.render_config.width.max(1),
+                self.render_config.height.max(1),
+            );
             let use_msaa = requested_samples > 1;
             if use_msaa {
-                self.ensure_msaa_texture()?;
+                self.ensure_msaa_texture(emission)?;
             }
             let msaa_view_holder = if use_msaa {
                 Some(
@@ -781,13 +925,19 @@ impl WebRenderer {
             if msaa_view_holder.is_some() {
                 // Keep explicit MSAA resolve target wiring in the non-overlay web fast path.
                 self.plot_renderer
-                    .render(&mut encoder, render_target, &self.render_config)
+                    .render(emission, &mut encoder, render_target, &self.render_config)
                     .map_err(|err| WebRendererError::Render(err.to_string()))?;
             } else {
                 self.plot_renderer
-                    .render_scene_to_target(&mut encoder, &frame_view, &self.render_config)
+                    .render_scene_to_target(
+                        emission,
+                        &mut encoder,
+                        &frame_view,
+                        &self.render_config,
+                    )
                     .map_err(|err| WebRendererError::Render(err.to_string()))?;
             }
+            preparation = Vec::new();
         } else {
             #[cfg(feature = "egui-overlay")]
             {
@@ -866,24 +1016,10 @@ impl WebRenderer {
                         // Make overlay text more readable in the IDE.
                         font_scale: 1.25,
                         show_axes: true,
-                        show_title: self.plot_renderer.geometry_overlay().is_none(),
-                        title: self
-                            .plot_renderer
-                            .overlay_title()
-                            .cloned()
-                            .or(Some("Plot".to_string())),
-                        x_label: self
-                            .plot_renderer
-                            .overlay_x_label()
-                            .cloned()
-                            .or(Some("X".to_string())),
-                        y_label: self
-                            .plot_renderer
-                            .overlay_y_label()
-                            .cloned()
-                            .or(Some("Y".to_string())),
-                        // Disable the heavyweight sidebar in IDE surfaces for now.
-                        show_sidebar: false,
+                        show_title: self.plot_renderer.shows_geometry_title(),
+                        title: self.plot_renderer.overlay_title().cloned(),
+                        x_label: self.plot_renderer.overlay_x_label().cloned(),
+                        y_label: self.plot_renderer.overlay_y_label().cloned(),
                         ..Default::default()
                     };
                     let overlay_metrics = OverlayMetrics {
@@ -894,7 +1030,7 @@ impl WebRenderer {
                     };
                     let frame_info = overlay.plot_overlay.render(
                         ctx,
-                        &self.plot_renderer,
+                        &mut self.plot_renderer,
                         &overlay_config,
                         overlay_metrics,
                     );
@@ -927,8 +1063,8 @@ impl WebRenderer {
 
                 for (id, image_delta) in &full_output.textures_delta.set {
                     overlay.egui_renderer.update_texture(
-                        &self.device,
-                        &self.queue,
+                        emission.device(),
+                        emission.queue(),
                         *id,
                         image_delta,
                     );
@@ -942,9 +1078,9 @@ impl WebRenderer {
                     pixels_per_point: full_output.pixels_per_point,
                 };
 
-                overlay.egui_renderer.update_buffers(
-                    &self.device,
-                    &self.queue,
+                preparation = overlay.egui_renderer.update_buffers(
+                    emission.device(),
+                    emission.queue(),
                     &mut encoder,
                     &paint_jobs,
                     &screen_descriptor,
@@ -1010,7 +1146,10 @@ impl WebRenderer {
                     })
                     .collect();
                 self.plot_renderer
-                    .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
+                    .ensure_scene_viewport_dependent_geometry_for_axes(
+                        emission,
+                        &axes_plot_sizes_px,
+                    );
                 if axes_plot_rects.len() > 1 {
                     let sw = self.surface_config.width as f32;
                     let sh = self.surface_config.height as f32;
@@ -1046,6 +1185,7 @@ impl WebRenderer {
                     self.last_axes_viewports_px = viewports.clone();
                     self.plot_renderer
                         .render_axes_to_viewports(
+                            emission,
                             &mut encoder,
                             &frame_view,
                             &viewports,
@@ -1081,6 +1221,7 @@ impl WebRenderer {
                     let _ = self
                         .plot_renderer
                         .render_camera_to_viewport(
+                            emission,
                             &mut encoder,
                             &frame_view,
                             (rvx, rvy, rvw, rvh),
@@ -1094,24 +1235,22 @@ impl WebRenderer {
 
                 // Render egui on top.
                 {
-                    let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("runmat-plot-web-egui"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &frame_view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    });
-                    #[cfg(target_arch = "wasm32")]
-                    let mut render_pass = render_pass.forget_lifetime();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let mut render_pass = render_pass;
+                    let mut render_pass = encoder
+                        .begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("runmat-plot-web-egui"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &frame_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                        })
+                        .forget_lifetime();
                     overlay
                         .egui_renderer
                         .render(&mut render_pass, &paint_jobs, &screen_descriptor);
@@ -1121,14 +1260,25 @@ impl WebRenderer {
                     overlay.egui_renderer.free_texture(id);
                 }
             }
+            #[cfg(not(feature = "egui-overlay"))]
+            {
+                preparation = Vec::new();
+            }
         }
 
-        self.queue.submit(Some(encoder.finish()));
+        emission.queue().submit(
+            preparation
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
         frame.present();
         Ok(())
     }
 
-    fn sync_canvas_extent(&mut self) -> Result<(), WebRendererError> {
+    fn sync_canvas_extent(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Result<(), WebRendererError> {
         let (width, height) =
             desired_canvas_size(&self.canvas, self.options.width, self.options.height)?;
         if width == self.surface_config.width && height == self.surface_config.height {
@@ -1141,23 +1291,27 @@ impl WebRenderer {
         self.render_config.height = height;
         self.msaa_texture = None;
         self.msaa_extent = (0, 0);
-        self.reconfigure_surface()
+        self.reconfigure_surface(emission)
     }
 
-    fn reconfigure_surface(&mut self) -> Result<(), WebRendererError> {
+    fn reconfigure_surface(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Result<(), WebRendererError> {
         if self.surface_config.width == 0 || self.surface_config.height == 0 {
             return Err(WebRendererError::CanvasZeroArea);
         }
-        self.surface.configure(&self.device, &self.surface_config);
-        self.sync_renderer_config();
+        self.surface
+            .configure(emission.device(), &self.surface_config);
+        self.sync_renderer_config(emission);
         Ok(())
     }
 
-    fn sync_renderer_config(&mut self) {
+    fn sync_renderer_config(&mut self, emission: &runmat_accelerate_api::WgpuEmission<'_>) {
         self.plot_renderer.wgpu_renderer.surface_config = self.surface_config.clone();
-        self.plot_renderer.on_surface_config_updated();
+        self.plot_renderer.on_surface_config_updated(emission);
         self.msaa_texture = None;
-        let _ = self.ensure_msaa_texture();
+        let _ = self.ensure_msaa_texture(emission);
     }
 
     fn apply_background_policy(&mut self) {
@@ -1184,7 +1338,10 @@ impl WebRenderer {
         );
     }
 
-    fn ensure_msaa_texture(&mut self) -> Result<(), WebRendererError> {
+    fn ensure_msaa_texture(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Result<(), WebRendererError> {
         if self.render_config.msaa_samples <= 1 {
             self.msaa_texture = None;
             self.msaa_extent = (0, 0);
@@ -1197,7 +1354,7 @@ impl WebRenderer {
             return Ok(());
         }
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+        let texture = emission.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("runmat-plot-msaa-target"),
             size: wgpu::Extent3d {
                 width,

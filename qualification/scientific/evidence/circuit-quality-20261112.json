@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "source_revision": "308c917931dce093ca58524993307b3a434cdd95",
+  "previous_source_revision": "3d3f0dfadcefb7b64fcc3b3957c08bdb01fe03f9",
+  "target": "windows-x86_64",
+  "toolchain": "Rust 1.90.0",
+  "source_scope": "The owned Windows 35f source tree has byte-identical circuit and direct workspace dependency inputs to 3d3f. Four individually SHA-verified circuit files were overlaid for these checks and verified unchanged afterwards. Original source files were restored and checked against their before hashes. This focused check does not qualify the complete 308c workspace or its distributed products.",
+  "checks": [
+    {
+      "command": ["cargo", "clippy", "--locked", "--offline", "-p", "runmat-circuit", "--all-targets", "--all-features", "--keep-going", "--no-deps", "--", "-D", "warnings"],
+      "exit_code": 0,
+      "seconds": 40.59,
+      "log_sha256": "bfea2291c285d9984777acab61faf6d0770521706bc0653346051ffc77ddd1d7",
+      "log_location": "gh-windows-20260330-204014:C:/Users/nallana/rm1293/logs/circuit-lint-repair-r2.clippy.log"
+    },
+    {
+      "command": ["cargo", "test", "--locked", "--offline", "-p", "runmat-circuit", "--all-features", "--lib"],
+      "exit_code": 0,
+      "passed": 104,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 0,
+      "seconds": 1.42,
+      "log_sha256": "9a2124ae73f2b9d6c9896eac5c312926ff40b53965f140afa08816b5b8aca04b",
+      "log_location": "gh-windows-20260330-204014:C:/Users/nallana/rm1293/logs/circuit-lint-repair-r2.tests.log"
+    }
+  ],
+  "review": "The existing argument-count lint annotation returns to finish, its owner at e72, after material constants displaced it. BoardSurfaces aliases exactly the existing Vec<CopperSolid> and two height-interval tuple without introducing a nominal type, conversion, allocation or ABI boundary. The board_surfaces function body is unchanged. The schematic test initializes the same cloned places field and remaining Default fields in one initializer; assertions and values are unchanged. A mechanical comparison against 3d3f requires these exact four transformations and rejects all other changes. Scientific arithmetic, model inputs, dependency lock, compiler settings, measured workloads and timing thresholds are unchanged. The separate schematic integration test was typechecked by Clippy; the library test count does not include its execution."
+}

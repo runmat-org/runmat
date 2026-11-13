@@ -1,27 +1,18 @@
 //! MATLAB-compatible `logspace` builtin with GPU-aware semantics for RunMat.
+use runmat_builtins::LOGSPACE_ERRORS;
 
-use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView, ProviderPrecision};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
-use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use runmat_builtins::ResolveContext;
 
 const LN_10: f64 = std::f64::consts::LN_10;
 
@@ -31,26 +22,29 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("generator"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[
-        ProviderHook::Custom("linspace"),
-        ProviderHook::Custom("scalar_mul"),
-        ProviderHook::Unary {
-            name: "unary_exp",
-        },
-    ],
+    provider_hooks: &[ProviderHook::Custom("sequence")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may implement a dedicated logspace path or compose it from linspace + scalar multiply + unary_exp. The runtime uploads host-generated data when hooks are unavailable.",
+    notes: "The typed sequence hook generates logarithmic interiors and publishes exact endpoints; pre-attempt absence permits class-preserving host generation and upload.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("logspace")
         .build()
+}
+
+fn provider_sequence_error(
+    stage: &str,
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    let mut result = builtin_error(format!("logspace: {stage} failed: {error}"));
+    result.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(result, error)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::logspace")]
@@ -62,165 +56,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: None,
     emits_nan: false,
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
-};
-
-fn logspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
-    row_vector_type(ctx)
-}
-
-const LOGSPACE_INTEGER_COUNT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The point count accepts an exact real integer scalar; nonpositive signed values produce an empty row and oversized values reject before allocation.",
-    }];
-const LOGSPACE_INTEGER_ENDPOINT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "start",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "Endpoints are restricted to documented single or double scalars.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "stop",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "Endpoints are restricted to documented single or double scalars.",
-    },
-];
-pub const LOGSPACE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "x = logspace(start,stop,integer_n)",
-        inputs: &LOGSPACE_INTEGER_COUNT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The exact integer count controls row length; floating endpoints determine output precision and explicit endpoint residency determines device placement.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "x = logspace(integer_start,integer_stop[,n])",
-        inputs: &LOGSPACE_INTEGER_ENDPOINT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Typed-integer endpoints are rejected on host and from resident dtype metadata before provider access.",
-    },
-];
-
-const LOGSPACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Row vector of logarithmically spaced values.",
-}];
-
-const LOGSPACE_SIG_2_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Starting exponent value.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Ending exponent value.",
-    },
-];
-
-const LOGSPACE_SIG_3_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Starting exponent value.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Ending exponent value.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("50"),
-        description: "Number of points.",
-    },
-];
-
-const LOGSPACE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "x = logspace(start, stop)",
-        inputs: &LOGSPACE_SIG_2_INPUTS,
-        outputs: &LOGSPACE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = logspace(start, stop, n)",
-        inputs: &LOGSPACE_SIG_3_INPUTS,
-        outputs: &LOGSPACE_OUTPUT,
-    },
-];
-
-const LOGSPACE_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.ARG_COUNT",
-        identifier: None,
-        when: "More than three input arguments are provided.",
-        message: "logspace: expected two or three input arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.COUNT_NOT_SCALAR",
-        identifier: None,
-        when: "The count argument is not a numeric scalar value.",
-        message: "logspace: number of points must be a scalar",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.COUNT_NOT_FINITE",
-        identifier: None,
-        when: "The count argument is NaN or infinite.",
-        message: "logspace: number of points must be finite",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.COUNT_TOO_LARGE",
-        identifier: None,
-        when: "The count argument exceeds platform limits.",
-        message: "logspace: number of points is too large for this platform",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.PROVIDER_OWNERSHIP_MISMATCH",
-        identifier: Some("RunMat:gpu:ProviderOwnershipMismatch"),
-        when: "Resident scalar inputs do not have one exact owning provider.",
-        message: "logspace: GPU scalar inputs must have the same owning provider",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.LOGSPACE.GPU_UPLOAD_FAILED",
-        identifier: Some("RunMat:logspace:GpuUploadFailed"),
-        when: "An explicitly resident result cannot be restored to its source provider.",
-        message: "logspace: failed to preserve explicit gpuArray residency",
-    },
-];
-
-pub const LOGSPACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOGSPACE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOGSPACE_ERRORS,
 };
 
 fn terminal_gpu_error(
@@ -236,24 +71,30 @@ fn terminal_gpu_error(
         .build()
 }
 
+fn sequence_upload_error(
+    source: Option<&SourceResidency>,
+    stage: &str,
+    error: runmat_accelerate_api::NumericUploadError,
+) -> crate::RuntimeError {
+    let error = error.into_execution_error();
+    if source.is_some_and(|source| source.explicit) {
+        return crate::runtime_error::with_provider_execution_source(
+            terminal_gpu_error(LOGSPACE_ERRORS[5].message, &LOGSPACE_ERRORS[5]),
+            error,
+        );
+    }
+    provider_sequence_error(stage, error)
+}
+
 #[runtime_builtin(
     name = "logspace",
-    category = "array/creation",
-    summary = "Generate logarithmically spaced row vectors.",
-    keywords = "logspace,logarithmic,vector,gpu",
-    examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
-    accel = "array_construct",
-    type_resolver(logspace_type),
-    descriptor(crate::builtins::array::creation::logspace::LOGSPACE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::array::creation::logspace::LOGSPACE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
 async fn logspace_builtin(
     start: Value,
     stop: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(builtin_error(
@@ -272,28 +113,94 @@ async fn logspace_builtin(
 
     let prefer_gpu =
         sequence_gpu_preference(count, SequenceIntent::Logspace, owner.is_some()).prefer_gpu;
-    build_sequence(start_scalar, stop_scalar, count, prefer_gpu, owner).await
+    build_sequence(start_scalar, stop_scalar, count, prefer_gpu, owner.as_ref()).await
 }
 
-#[derive(Clone, Copy)]
 struct SourceResidency {
-    owner: &'static dyn runmat_accelerate_api::AccelProvider,
     explicit: bool,
+    handles: Vec<runmat_accelerate_api::GpuTensorHandle>,
+}
+
+impl SourceResidency {
+    fn compute_owner(
+        &self,
+    ) -> crate::BuiltinResult<Option<&'static dyn runmat_accelerate_api::AccelProvider>> {
+        use gpu_helpers::ResidentComputeDecline;
+        let invalid = || {
+            terminal_gpu_error(
+                "logspace: no exact owner for GPU scalar input",
+                &LOGSPACE_ERRORS[4],
+            )
+        };
+        // Only immutable handle/lease metadata is retained between scalar
+        // readback and publication. Reauthenticate every original source.
+        for handle in &self.handles {
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+                crate::runtime_error::with_provider_execution_source(invalid(), source.into())
+            })?;
+        }
+        let handle = self.handles.first().ok_or_else(invalid)?;
+        match gpu_helpers::resolve_resident_compute_owner(handle) {
+            Ok(owner) => Ok(Some(owner)),
+            Err(ResidentComputeDecline::PolicyDenied) => Ok(None),
+            Err(decline) => Err(decline.with_domain_error(invalid())),
+        }
+    }
+}
+
+fn sequence_provider(
+    source: Option<&SourceResidency>,
+) -> crate::BuiltinResult<Option<&'static dyn runmat_accelerate_api::AccelProvider>> {
+    match source {
+        Some(source) => source.compute_owner(),
+        None => Ok(runmat_accelerate_api::provider()),
+    }
 }
 
 fn merge_source_owners(
     lhs: Option<SourceResidency>,
     rhs: Option<SourceResidency>,
 ) -> crate::BuiltinResult<Option<SourceResidency>> {
+    // Reauthenticate both original sources before comparing retained owner
+    // facade identity. No compute provider escapes this metadata check.
+    for source in [lhs.as_ref(), rhs.as_ref()].into_iter().flatten() {
+        for handle in &source.handles {
+            runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|_| {
+                terminal_gpu_error(
+                    "logspace: no exact owner for GPU scalar input",
+                    &LOGSPACE_ERRORS[4],
+                )
+            })?;
+        }
+    }
+    if let (Some(lhs), Some(rhs)) = (lhs.as_ref(), rhs.as_ref()) {
+        let invalid = || {
+            terminal_gpu_error(
+                "logspace: no exact owner for GPU scalar input",
+                &LOGSPACE_ERRORS[4],
+            )
+        };
+        let lhs = runmat_accelerate_api::numeric_readback_for_handle(
+            lhs.handles.first().ok_or_else(invalid)?,
+        )
+        .map_err(|_| invalid())?;
+        let rhs = runmat_accelerate_api::numeric_readback_for_handle(
+            rhs.handles.first().ok_or_else(invalid)?,
+        )
+        .map_err(|_| invalid())?;
+        if !lhs.same_owner(&rhs).map_err(|_| invalid())? {
+            return Err(terminal_gpu_error(
+                "logspace: GPU scalar inputs must have the same owning provider",
+                &LOGSPACE_ERRORS[4],
+            ));
+        }
+    }
     match (lhs, rhs) {
-        (Some(lhs), Some(rhs)) if !std::ptr::eq(lhs.owner, rhs.owner) => Err(terminal_gpu_error(
-            "logspace: GPU scalar inputs must have the same owning provider",
-            &LOGSPACE_ERRORS[4],
-        )),
-        (Some(lhs), Some(rhs)) => Ok(Some(SourceResidency {
-            owner: lhs.owner,
-            explicit: lhs.explicit || rhs.explicit,
-        })),
+        (Some(mut lhs), Some(rhs)) => {
+            lhs.explicit |= rhs.explicit;
+            lhs.handles.extend(rhs.handles);
+            Ok(Some(lhs))
+        }
         (Some(value), None) | (None, Some(value)) => Ok(Some(value)),
         (None, None) => Ok(None),
     }
@@ -356,17 +263,21 @@ async fn parse_scalar(
                     "{name}: endpoints must be single or double scalars"
                 )));
             }
-            let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+            runmat_accelerate_api::numeric_readback_for_handle(&handle).map_err(|_| {
                 terminal_gpu_error(
                     "logspace: no exact owner for GPU scalar input",
                     &LOGSPACE_ERRORS[4],
                 )
             })?;
             let source = Some(SourceResidency {
-                owner,
                 explicit: runmat_accelerate_api::handle_is_explicit(&handle),
+                handles: vec![handle.clone()],
             });
-            match gpu_helpers::download_value_preserving_residency_async(owner, &handle).await? {
+            let gathered = {
+                let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?
+            };
+            match gathered {
                 Value::Tensor(tensor) => {
                     tensor_scalar(name, &tensor).map(|scalar| (scalar, source))
                 }
@@ -485,18 +396,29 @@ async fn build_sequence(
     stop: Endpoint,
     count: usize,
     prefer_gpu: bool,
-    source: Option<SourceResidency>,
+    source: Option<&SourceResidency>,
 ) -> crate::BuiltinResult<Value> {
     let (start_re, start_im) = start.parts();
     let (mut stop_re, stop_im) = stop.parts();
-    if stop_im == 0.0 && stop_re == std::f64::consts::PI {
+    let pi_endpoint = stop_im == 0.0 && stop_re == std::f64::consts::PI;
+    if pi_endpoint {
         stop_re = std::f64::consts::PI.log10();
     }
     let complex = start.is_complex() || stop.is_complex();
     let single = start.single || stop.single;
+    let precision = requested_precision(single);
+    let protected = source
+        .into_iter()
+        .flat_map(|source| source.handles.iter())
+        .collect::<Vec<_>>();
 
     if complex {
-        let data = generate_complex_log_sequence(start_re, start_im, stop_re, stop_im, count);
+        let mut data = generate_complex_log_sequence(start_re, start_im, stop_re, stop_im, count)?;
+        if pi_endpoint {
+            if let Some(last) = data.last_mut() {
+                *last = (std::f64::consts::PI, 0.0);
+            }
+        }
         let tensor = if single {
             ComplexTensor::from_f32(
                 data.into_iter()
@@ -509,16 +431,36 @@ async fn build_sequence(
         }
         .map_err(|e| builtin_error(format!("logspace: {e}")))?;
         if let Some(source) = source {
-            if let Ok(handle) = gpu_helpers::upload_complex_tensor(source.owner, &tensor) {
-                if valid_uploaded_sequence_handle(
-                    &handle,
-                    count,
-                    source.owner,
-                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-                ) {
-                    return Ok(finalize_sequence_handle(handle, Some(source)));
+            if let Some(owner) = source.compute_owner()? {
+                match upload_complex_sequence(owner, &tensor, precision, &protected) {
+                    Ok(handle) => {
+                        if valid_uploaded_sequence_handle(
+                            &handle,
+                            count,
+                            owner,
+                            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                            precision,
+                            Some(source),
+                        ) {
+                            return finalize_sequence_handle(handle, Some(source));
+                        }
+                        return Err(gpu_helpers::reject_gpu_output(
+                            handle,
+                            builtin_error(
+                                "logspace: provider returned malformed complex sequence output",
+                            ),
+                        ));
+                    }
+                    Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                        if error.is_unsupported() && !source.explicit => {}
+                    Err(error) => {
+                        return Err(sequence_upload_error(
+                            Some(source),
+                            "typed complex sequence upload",
+                            error,
+                        ))
+                    }
                 }
-                gpu_helpers::free_unprotected_exact_owner(&handle, &[]);
             }
             if source.explicit {
                 return Err(terminal_gpu_error(
@@ -530,20 +472,35 @@ async fn build_sequence(
         return Ok(Value::ComplexTensor(tensor));
     }
 
-    if prefer_gpu
-        && source
-            .map(|source| source.owner)
-            .or_else(runmat_accelerate_api::provider)
-            .is_some_and(|provider| {
-                !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-            })
-    {
-        if let Some(value) = try_gpu_logspace(start_re, stop_re, count, source).await {
+    if prefer_gpu && count > 0 {
+        let first = 10f64.powf(start_re);
+        let last = if pi_endpoint {
+            std::f64::consts::PI
+        } else {
+            10f64.powf(stop_re)
+        };
+        if let Some(value) =
+            try_gpu_logspace(start_re, stop_re, count, source, precision, first, last)?
+        {
             return Ok(value);
         }
     }
 
-    let data = generate_real_log_sequence(start_re, stop_re, count);
+    let mut data = generate_real_log_sequence(start_re, stop_re, count)?;
+    if pi_endpoint {
+        if let Some(last) = data.last_mut() {
+            *last = std::f64::consts::PI;
+        }
+    }
+    let tensor = if single {
+        Tensor::from_f32(
+            data.into_iter().map(|value| value as f32).collect(),
+            vec![1, count],
+        )
+    } else {
+        Tensor::new(data, vec![1, count])
+    }
+    .map_err(|e| builtin_error(format!("logspace: {e}")))?;
     if prefer_gpu {
         #[cfg(all(test, feature = "wgpu"))]
         {
@@ -553,28 +510,42 @@ async fn build_sequence(
                 );
             }
         }
-        if let Some(provider) = source
-            .map(|source| source.owner)
-            .or_else(runmat_accelerate_api::provider)
-            .filter(|provider| {
-                !single || provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-            })
-        {
-            let shape = [1usize, count];
-            let view = HostTensorView {
-                data: &data,
-                shape: &shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                if valid_uploaded_sequence_handle(
-                    &handle,
-                    count,
-                    provider,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
-                ) {
-                    return Ok(finalize_sequence_handle(handle, source));
+        if let Some(provider) = sequence_provider(source)? {
+            if !gpu_helpers::real_sequence_upload_feasible(provider, precision, tensor.shape()) {
+                if source.is_some_and(|source| source.explicit) {
+                    return Err(terminal_gpu_error(
+                        LOGSPACE_ERRORS[5].message,
+                        &LOGSPACE_ERRORS[5],
+                    ));
                 }
-                gpu_helpers::free_unprotected_exact_owner(&handle, &[]);
+                return Ok(Value::Tensor(tensor));
+            }
+            match gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &protected) {
+                Ok(handle) => {
+                    if valid_uploaded_sequence_handle(
+                        &handle,
+                        count,
+                        provider,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                        precision,
+                        source,
+                    ) {
+                        return finalize_sequence_handle(handle, source);
+                    }
+                    return Err(gpu_helpers::reject_gpu_output(
+                        handle,
+                        builtin_error("logspace: provider returned malformed sequence output"),
+                    ));
+                }
+                Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                    if error.is_unsupported() && source.is_none_or(|source| !source.explicit) => {}
+                Err(error) => {
+                    return Err(sequence_upload_error(
+                        source,
+                        "typed sequence upload",
+                        error,
+                    ))
+                }
             }
         }
         if source.is_some_and(|source| source.explicit) {
@@ -585,24 +556,67 @@ async fn build_sequence(
         }
     }
 
-    let tensor = if single {
-        Tensor::from_f32(
-            data.into_iter().map(|value| value as f32).collect(),
-            vec![1, count],
-        )
-    } else {
-        Tensor::new(data, vec![1, count])
-    }
-    .map_err(|e| builtin_error(format!("logspace: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
-async fn try_gpu_logspace(
+fn upload_complex_sequence(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    tensor: &ComplexTensor,
+    precision: ProviderPrecision,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> runmat_accelerate_api::NumericUploadResult<runmat_accelerate_api::GpuTensorHandle> {
+    let values = tensor.materialize_f64();
+    match precision {
+        ProviderPrecision::F32 => {
+            let data = values
+                .into_iter()
+                .flat_map(|(real, imag)| [real as f32, imag as f32])
+                .collect::<Vec<_>>();
+            runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::F32(&data),
+                    shape: tensor.shape(),
+                    storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                },
+                protected,
+            )
+        }
+        ProviderPrecision::F64 => {
+            let data = values
+                .into_iter()
+                .flat_map(|(real, imag)| [real, imag])
+                .collect::<Vec<_>>();
+            runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::F64(&data),
+                    shape: tensor.shape(),
+                    storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                },
+                protected,
+            )
+        }
+    }
+}
+
+fn requested_precision(single: bool) -> ProviderPrecision {
+    if single {
+        ProviderPrecision::F32
+    } else {
+        ProviderPrecision::F64
+    }
+}
+
+fn try_gpu_logspace(
     start: f64,
     stop: f64,
     count: usize,
-    source: Option<SourceResidency>,
-) -> Option<Value> {
+    source: Option<&SourceResidency>,
+    precision: ProviderPrecision,
+    first: f64,
+    last: f64,
+) -> crate::BuiltinResult<Option<Value>> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if runmat_accelerate_api::provider().is_none() {
@@ -611,44 +625,33 @@ async fn try_gpu_logspace(
             );
         }
     }
-    let provider = source
-        .map(|source| source.owner)
-        .or_else(runmat_accelerate_api::provider)?;
-    let exponents = provider.linspace(start, stop, count).ok()?;
-    if !valid_sequence_handle(&exponents, count, provider, &[]) {
-        gpu_helpers::free_unprotected_exact_owner(&exponents, &[]);
-        return None;
+    let provider = sequence_provider(source)?;
+    let Some(provider) = provider else {
+        return Ok(None);
+    };
+    let request = runmat_accelerate_api::ProviderSequenceRequest::log10(
+        start, stop, count, precision, first, last,
+    );
+    match provider.sequence(&request) {
+        Ok(None) => Ok(None),
+        Ok(Some(handle)) => {
+            if !valid_uploaded_sequence_handle(
+                &handle,
+                count,
+                provider,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                precision,
+                source,
+            ) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    handle,
+                    builtin_error("logspace: provider returned malformed sequence output"),
+                ));
+            }
+            finalize_sequence_handle(handle, source).map(Some)
+        }
+        Err(error) => Err(provider_sequence_error("provider sequence", error)),
     }
-
-    let scaled = match provider.scalar_mul(&exponents, LN_10) {
-        Ok(handle) if valid_sequence_handle(&handle, count, provider, &[&exponents]) => handle,
-        Ok(handle) => {
-            gpu_helpers::free_unprotected_exact_owner(&handle, &[&exponents]);
-            provider.free(&exponents).ok();
-            return None;
-        }
-        Err(_) => {
-            provider.free(&exponents).ok();
-            return None;
-        }
-    };
-    provider.free(&exponents).ok();
-
-    let result = match provider.unary_exp(&scaled).await {
-        Ok(handle) if valid_sequence_handle(&handle, count, provider, &[&scaled]) => handle,
-        Ok(handle) => {
-            gpu_helpers::free_unprotected_exact_owner(&handle, &[&scaled]);
-            provider.free(&scaled).ok();
-            return None;
-        }
-        Err(_) => {
-            provider.free(&scaled).ok();
-            return None;
-        }
-    };
-    provider.free(&scaled).ok();
-
-    Some(finalize_sequence_handle(result, source))
 }
 
 fn valid_uploaded_sequence_handle(
@@ -656,62 +659,58 @@ fn valid_uploaded_sequence_handle(
     count: usize,
     owner: &'static dyn runmat_accelerate_api::AccelProvider,
     storage: runmat_accelerate_api::GpuTensorStorage,
+    precision: ProviderPrecision,
+    source: Option<&SourceResidency>,
 ) -> bool {
-    output.shape == [1, count]
-        && output.device_id == owner.device_id()
+    output.shape() == [1, count]
+        && output.device_id() == owner.device_id()
         && runmat_accelerate_api::handle_storage(output) == storage
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::handle_precision(output) == Some(owner.precision())
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|candidate| std::ptr::eq(candidate, owner))
+        && runmat_accelerate_api::handle_precision(output) == Some(precision)
+        && source.is_none_or(|source| {
+            source
+                .handles
+                .iter()
+                .all(|input| !input.shares_allocation_with(output))
+        })
+        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|candidate| {
+            runmat_accelerate_api::same_provider_instance(candidate, owner)
+        })
 }
 
 fn finalize_sequence_handle(
-    mut handle: runmat_accelerate_api::GpuTensorHandle,
-    source: Option<SourceResidency>,
-) -> Value {
+    handle: runmat_accelerate_api::GpuTensorHandle,
+    source: Option<&SourceResidency>,
+) -> crate::BuiltinResult<Value> {
     let provenance = if source.is_some_and(|source| source.explicit) {
         runmat_accelerate_api::GpuHandleProvenance::Explicit
     } else {
         runmat_accelerate_api::GpuHandleProvenance::Automatic
     };
-    runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
+    let handle = handle.with_provenance(provenance).map_err(|cause| {
+        crate::build_runtime_error(format!("logspace: cannot adopt sequence output: {cause}"))
+            .with_builtin("logspace")
+            .with_source(cause)
+            .build()
+    })?;
     gpu_helpers::resident_gpu_value(handle)
 }
 
-fn valid_sequence_handle(
-    output: &runmat_accelerate_api::GpuTensorHandle,
+fn generate_real_log_sequence(
+    start: f64,
+    stop: f64,
     count: usize,
-    owner: &'static dyn runmat_accelerate_api::AccelProvider,
-    protected: &[&runmat_accelerate_api::GpuTensorHandle],
-) -> bool {
-    let expected_precision = protected
-        .first()
-        .and_then(|input| runmat_accelerate_api::handle_precision(input))
-        .unwrap_or_else(|| owner.precision());
-    output.shape == [1, count]
-        && output.device_id == owner.device_id()
-        && protected
-            .iter()
-            .all(|input| !gpu_helpers::same_gpu_handle(output, input))
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|candidate| std::ptr::eq(candidate, owner))
-}
-
-fn generate_real_log_sequence(start: f64, stop: f64, count: usize) -> Vec<f64> {
+) -> crate::BuiltinResult<Vec<f64>> {
     if count == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if count == 1 {
-        return vec![10f64.powf(stop)];
+        return Ok(vec![10f64.powf(stop)]);
     }
-    let mut data = Vec::with_capacity(count);
+    let mut data = Vec::new();
+    data.try_reserve_exact(count)
+        .map_err(|error| builtin_error(format!("logspace: cannot reserve sequence: {error}")))?;
     let step = (stop - start) / ((count - 1) as f64);
     for idx in 0..count {
         let exponent = start + (idx as f64) * step;
@@ -723,7 +722,7 @@ fn generate_real_log_sequence(start: f64, stop: f64, count: usize) -> Vec<f64> {
     if let Some(last) = data.last_mut() {
         *last = 10f64.powf(stop);
     }
-    data
+    Ok(data)
 }
 
 fn generate_complex_log_sequence(
@@ -732,45 +731,30 @@ fn generate_complex_log_sequence(
     stop_re: f64,
     stop_im: f64,
     count: usize,
-) -> Vec<(f64, f64)> {
+) -> crate::BuiltinResult<Vec<(f64, f64)>> {
     if count == 0 {
-        return Vec::new();
-    }
-    let steps = generate_complex_sequence(start_re, start_im, stop_re, stop_im, count);
-    steps
-        .into_iter()
-        .map(|(re, im)| complex_pow10(re, im))
-        .collect()
-}
-
-fn generate_complex_sequence(
-    start_re: f64,
-    start_im: f64,
-    stop_re: f64,
-    stop_im: f64,
-    count: usize,
-) -> Vec<(f64, f64)> {
-    if count == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if count == 1 {
-        return vec![(stop_re, stop_im)];
+        return Ok(vec![complex_pow10(stop_re, stop_im)]);
     }
-    let mut data = Vec::with_capacity(count);
+    let mut data = Vec::new();
+    data.try_reserve_exact(count)
+        .map_err(|error| builtin_error(format!("logspace: cannot reserve sequence: {error}")))?;
     let step_re = (stop_re - start_re) / ((count - 1) as f64);
     let step_im = (stop_im - start_im) / ((count - 1) as f64);
     for idx in 0..count {
         let re = start_re + (idx as f64) * step_re;
         let im = start_im + (idx as f64) * step_im;
-        data.push((re, im));
+        data.push(complex_pow10(re, im));
     }
     if let Some(first) = data.first_mut() {
-        *first = (start_re, start_im);
+        *first = complex_pow10(start_re, start_im);
     }
     if let Some(last) = data.last_mut() {
-        *last = (stop_re, stop_im);
+        *last = complex_pow10(stop_re, stop_im);
     }
-    data
+    Ok(data)
 }
 
 fn complex_pow10(re: f64, im: f64) -> (f64, f64) {
@@ -786,6 +770,7 @@ fn complex_pow10(re: f64, im: f64) -> (f64, f64) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_accelerate_api::HostTensorView;
 
     #[test]
     fn count_parser_preserves_representable_uint64() {
@@ -813,7 +798,11 @@ pub(crate) mod tests {
         stop: Value,
         rest: Vec<Value>,
     ) -> crate::BuiltinResult<Value> {
-        block_on(super::logspace_builtin(start, stop, rest))
+        block_on(super::logspace_builtin(
+            start,
+            stop,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -823,12 +812,67 @@ pub(crate) mod tests {
             logspace_builtin(Value::Num(1.0), Value::Num(3.0), Vec::new()).expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 50]);
+                assert_eq!(t.shape(), vec![1, 50]);
                 assert!((t.materialize_f64()[0] - 10.0).abs() < 1e-12);
                 assert!((t.materialize_f64()[49] - 1000.0).abs() < 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn double_sequence_declines_f32_preferred_owner_without_losing_class() {
+        test_support::with_f32_test_provider(|_| {
+            let output = block_on(build_sequence(
+                Endpoint {
+                    scalar: Scalar::Real(0.0),
+                    single: false,
+                },
+                Endpoint {
+                    scalar: Scalar::Real(1.0),
+                    single: false,
+                },
+                5,
+                true,
+                None,
+            ))
+            .expect("double host fallback");
+            match output {
+                Value::Tensor(tensor) => {
+                    assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+                    assert_eq!(tensor.shape(), &[1, 5]);
+                    assert_eq!(tensor.materialize_f64()[4], 10.0);
+                }
+                other => panic!("expected class-preserving host result, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn single_sequence_can_use_native_typed_hook_on_f64_preferred_owner() {
+        test_support::with_test_provider(|_| {
+            let output = block_on(build_sequence(
+                Endpoint {
+                    scalar: Scalar::Real(0.0),
+                    single: true,
+                },
+                Endpoint {
+                    scalar: Scalar::Real(1.0),
+                    single: false,
+                },
+                5,
+                true,
+                None,
+            ))
+            .expect("single typed upload");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident single")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(ProviderPrecision::F32)
+            );
+        });
     }
 
     #[test]
@@ -884,16 +928,6 @@ pub(crate) mod tests {
         assert!(error.message().contains("single or double"));
     }
 
-    #[test]
-    fn logspace_type_is_row_vector() {
-        assert_eq!(
-            logspace_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn logspace_custom_points() {
@@ -905,7 +939,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 let expected = [1.0, 3.1622776601683795, 10.0, 31.622776601683793, 100.0];
                 for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
@@ -926,9 +960,46 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected host tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), vec![1, 2]);
         assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
         assert!((tensor.materialize_f64()[1] - std::f64::consts::PI).abs() < 1e-12);
+        assert_eq!(
+            tensor.materialize_f64()[1].to_bits(),
+            std::f64::consts::PI.to_bits()
+        );
+    }
+
+    #[test]
+    fn native_logspace_keeps_exact_pi_endpoint() {
+        test_support::with_test_provider(|_| {
+            let output = block_on(build_sequence(
+                Endpoint {
+                    scalar: Scalar::Real(0.0),
+                    single: false,
+                },
+                Endpoint {
+                    scalar: Scalar::Real(std::f64::consts::PI),
+                    single: false,
+                },
+                3,
+                true,
+                None,
+            ))
+            .expect("native logarithmic sequence");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident sequence")
+            };
+            let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
+            assert_eq!(
+                gathered.materialize_f64()[2].to_bits(),
+                std::f64::consts::PI.to_bits()
+            );
+        });
+    }
+
+    #[test]
+    fn host_logspace_rejects_unreservable_count() {
+        assert!(generate_real_log_sequence(0.0, 1.0, usize::MAX).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -942,7 +1013,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), vec![1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -968,7 +1039,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), vec![1, 1]);
                 assert!((t.materialize_f64()[0] - 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -986,9 +1057,9 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), vec![1, 4]);
                 assert_eq!(t.materialize_f64().len(), 4);
-                let expected = generate_complex_log_sequence(0.0, 1.0, 0.0, 2.0, 4);
+                let expected = generate_complex_log_sequence(0.0, 1.0, 0.0, 2.0, 4).unwrap();
                 for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual.0 - exp.0).abs() < 1e-12);
                     assert!((actual.1 - exp.1).abs() < 1e-12);
@@ -1031,8 +1102,8 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
-                let expected = generate_real_log_sequence(2.0, 3.0, 3);
+                assert_eq!(t.shape(), vec![1, 3]);
+                let expected = generate_real_log_sequence(2.0, 3.0, 3).unwrap();
                 for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
                 }
@@ -1094,7 +1165,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor")
         };
-        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.shape(), vec![1, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1109,7 +1180,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor")
         };
-        assert_eq!(tensor.shape, vec![1, 0]);
+        assert_eq!(tensor.shape(), vec![1, 0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1160,7 +1231,7 @@ pub(crate) mod tests {
             )
             .expect_err("resident integer endpoint must be rejected");
             assert!(error.message().contains("single or double"));
-            provider.free(&endpoint).ok();
+            drop(endpoint);
         });
     }
 
@@ -1196,7 +1267,7 @@ pub(crate) mod tests {
             let result =
                 logspace_builtin(lo, hi, vec![Value::Int(IntValue::I32(3))]).expect("logspace");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), vec![1, 3]);
             let expected = [10.0, 100.0, 1000.0];
             for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-6);
@@ -1246,25 +1317,35 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(ct.shape, gt.shape);
-                let (absolute_tolerance, relative_tolerance) =
-                    test_support::gpu_transcendental_tolerances(
-                        runmat_accelerate_api::provider().unwrap().precision(),
-                    );
-                for (index, (actual, expected)) in ct
+                assert_eq!(ct.shape(), gt.shape());
+                let precision = runmat_accelerate_api::provider().unwrap().precision();
+                for (index, (a, b)) in ct
                     .materialize_f64()
                     .iter()
                     .zip(gt.materialize_f64().iter())
                     .enumerate()
                 {
+                    if index == 0 || index == 4 {
+                        assert_eq!(a, b, "logspace must retain its exact endpoints");
+                        continue;
+                    }
+                    let tol = match precision {
+                        runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
+                        runmat_accelerate_api::ProviderPrecision::F32 => {
+                            // WGSL pow inherits exp2(y * log2(x)) accuracy:
+                            // 3 ULP for log2(10), correctly rounded multiply,
+                            // and (3 + 2 * |argument|) ULP for exp2. For these
+                            // exact quarter-step exponents in [1, 2], their
+                            // propagated error fits within 40 output ULP.
+                            // https://www.w3.org/TR/WGSL/#floating-point-accuracy
+                            let rounded = *a as f32;
+                            let next = f32::from_bits(rounded.to_bits() + 1);
+                            40.0 * f64::from(next - rounded)
+                        }
+                    };
                     assert!(
-                        test_support::floats_match(
-                            *actual,
-                            *expected,
-                            absolute_tolerance,
-                            relative_tolerance,
-                        ),
-                        "logspace mismatch at {index}: cpu={actual} gpu={expected}"
+                        (a - b).abs() < tol,
+                        "logspace index {index}: CPU={a:?}, GPU={b:?}, precision={precision:?}, tolerance={tol:?}"
                     );
                 }
             }

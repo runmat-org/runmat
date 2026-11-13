@@ -9,6 +9,8 @@ use runmat_types::{
     FunctionArgValidator,
 };
 use runmat_value::{CellArray, IntValue, Tensor, Value};
+mod retained;
+pub use retained::prepare_function_inputs_rooted;
 
 /// Borrowed semantic contract for one fixed function input.
 ///
@@ -27,9 +29,11 @@ pub struct FunctionInputSpec<'a> {
 pub struct PreparedFunctionInputs {
     /// One value per fixed input. `None` preserves MATLAB's unassigned state
     /// for an omitted argument that has no default.
-    pub fixed: Vec<Option<Value>>,
+    pub fixed: runmat_value::ExactArrayStorage<Option<Value>>,
     pub varargin: Option<CellArray>,
     pub nargin: usize,
+    // Physical final slots/varargin retire before the original root forest.
+    _sources: crate::call::BuiltinArguments,
 }
 
 pub fn prepare_function_inputs(
@@ -63,58 +67,52 @@ pub async fn prepare_function_inputs_async(
     accepts_varargin: bool,
     specs: &[FunctionInputSpec<'_>],
 ) -> Result<PreparedFunctionInputs, RuntimeError> {
-    if supplied.len() > fixed_input_count && !accepts_varargin {
-        return Err(semantic_error(
-            "TooManyInputs",
-            format!(
-                "semantic function {function_name} expected {fixed_input_count} inputs, got {}",
-                supplied.len()
-            ),
-        ));
-    }
-    if specs
-        .iter()
-        .any(|spec| spec.input_index >= fixed_input_count)
-    {
-        return Err(semantic_error(
-            "InvalidInputSlot",
-            "function argument slot out of bounds",
-        ));
-    }
-
-    let mut fixed = vec![None; fixed_input_count];
-    for (target, value) in fixed.iter_mut().zip(supplied) {
-        *target = Some(value.clone());
-    }
-    for spec in specs {
-        if fixed[spec.input_index].is_none() {
-            if let Some(default) = spec.default_value {
-                fixed[spec.input_index] = Some(default_value(default));
-            }
-        }
-        if let Some(value) = &fixed[spec.input_index] {
-            validate_input(function_name, spec.input_index, value, spec).await?;
-        }
-    }
-
-    let varargin = if accepts_varargin {
-        let values = supplied
-            .get(fixed_input_count..)
-            .unwrap_or_default()
-            .to_vec();
-        let columns = values.len();
-        Some(
-            CellArray::new(values, 1, columns)
-                .map_err(|error| semantic_error("VararginPack", format!("varargin: {error}")))?,
-        )
-    } else {
-        None
+    let context = crate::context::legacy::active();
+    let values = match context.as_ref() {
+        Some(runtime) => crate::execution::RootedValues::try_initialize_in_context(
+            supplied.len(),
+            runtime,
+            |index| Ok::<_, crate::RuntimeError>(supplied[index].clone()),
+        )?,
+        None => crate::execution::RootedValues::new(supplied.to_vec())
+            .map_err(|error| error.into_runtime_error())?,
     };
-    Ok(PreparedFunctionInputs {
-        fixed,
-        varargin,
-        nargin: supplied.len(),
-    })
+    prepare_function_inputs_rooted(
+        function_name,
+        values.into(),
+        fixed_input_count,
+        accepts_varargin,
+        specs,
+        context.as_ref(),
+    )
+    .await
+}
+
+/// Compatibility for callers that already own an ordinary Vec. Contextual
+/// publication adopts its physical backing; selected rooted entries never
+/// shed their existing exact owner into this adapter.
+pub async fn prepare_function_inputs_owned(
+    function_name: &str,
+    supplied: Vec<Value>,
+    fixed_input_count: usize,
+    accepts_varargin: bool,
+    specs: &[FunctionInputSpec<'_>],
+) -> Result<PreparedFunctionInputs, RuntimeError> {
+    let context = crate::context::legacy::active();
+    let supplied = match context.as_ref() {
+        Some(runtime) => crate::execution::RootedValues::in_context(supplied, runtime)?,
+        None => crate::execution::RootedValues::new(supplied)
+            .map_err(|error| error.into_runtime_error())?,
+    };
+    prepare_function_inputs_rooted(
+        function_name,
+        supplied.into(),
+        fixed_input_count,
+        accepts_varargin,
+        specs,
+        context.as_ref(),
+    )
+    .await
 }
 
 pub fn collect_function_outputs(
@@ -165,7 +163,7 @@ fn default_value(default: &FunctionArgDefaultValue) -> Value {
         FunctionArgDefaultValue::Number(value) => Value::Num(*value),
         FunctionArgDefaultValue::Integer(value) => Value::Int(IntValue::from(value)),
         FunctionArgDefaultValue::Bool(value) => Value::Bool(*value),
-        FunctionArgDefaultValue::String(value) => Value::String(value.clone()),
+        FunctionArgDefaultValue::String(value) => Value::string(value.clone()),
         FunctionArgDefaultValue::EmptyArray => Value::Tensor(
             Tensor::new(Vec::new(), vec![0, 0]).expect("empty default tensor is always valid"),
         ),
@@ -230,16 +228,20 @@ async fn validator_passes(
         V::A(names) => validation::must_be_a(value, names.clone())?,
         V::Column => validation::value_is_column(value),
         V::Finite => {
-            validation::ensure_resident_extension(value, "mustBeFinite")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_FINITE_RESIDENT_EXTENSION,
+                "mustBeFinite",
+            )?;
             validation::value_is_finite_async(value).await?
         }
         V::Float => validation::value_is_float(value),
-        V::Folder => validation::dispatch_validator_async("mustBeFolder", vec![value.clone()])
+        V::Folder => validation::value_is_folder_async(value)
             .await
-            .is_ok(),
-        V::File => validation::dispatch_validator_async("mustBeFile", vec![value.clone()])
+            .unwrap_or(false),
+        V::File => validation::value_is_file_async(value)
             .await
-            .is_ok(),
+            .unwrap_or(false),
         V::NumericOrLogical => validation::value_is_numeric_or_logical(value),
         V::Numeric => validation::value_is_numeric(value),
         V::Text => validation::value_is_text(value),
@@ -249,7 +251,11 @@ async fn validator_passes(
         V::ScalarOrEmpty => validation::value_is_scalar_or_empty(value),
         V::Real => validation::value_is_real_async(value).await?,
         V::Integer => {
-            validation::ensure_resident_extension(value, "mustBeInteger")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_INTEGER_RESIDENT_EXTENSION,
+                "mustBeInteger",
+            )?;
             validation::value_is_integer_async(value).await?
         }
         V::Vector { allow_all_empties } => {
@@ -260,22 +266,24 @@ async fn validator_passes(
         V::Nonnegative => validation::value_is_nonnegative_async(value).await?,
         V::Nonmissing => validation::value_is_nonmissing_async(value).await?,
         V::NonNan => {
-            validation::ensure_resident_extension(value, "mustBeNonNan")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_NON_NAN_RESIDENT_EXTENSION,
+                "mustBeNonNan",
+            )?;
             validation::value_is_non_nan_async(value).await?
         }
         V::Nonzero => {
-            validation::ensure_resident_extension(value, "mustBeNonzero")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_NONZERO_RESIDENT_EXTENSION,
+                "mustBeNonzero",
+            )?;
             validation::value_is_nonzero_async(value).await?
         }
         V::Nonpositive => validation::value_is_nonpositive_async(value).await?,
-        V::Nonsparse => {
-            validation::dispatch_validator_async("mustBeNonsparse", vec![value.clone()])
-                .await
-                .is_ok()
-        }
-        V::Sparse => validation::dispatch_validator_async("mustBeSparse", vec![value.clone()])
-            .await
-            .is_ok(),
+        V::Nonsparse => validation::value_satisfies_nonsparse_validator(value).unwrap_or(false),
+        V::Sparse => validation::value_satisfies_sparse_validator(value).unwrap_or(false),
         V::ValidVariableName => validation::isvarname_value(value),
         V::UnderlyingType(names) => {
             validation::value_underlying_type_matches(value, names.clone())?
@@ -387,7 +395,7 @@ mod tests {
             vec![Some(Value::Num(1.0)), Some(Value::Num(3.0))]
         );
         assert_eq!(prepared.nargin, 1);
-        assert_eq!(prepared.varargin.unwrap().data.len(), 0);
+        assert_eq!(prepared.varargin.unwrap().data().len(), 0);
     }
 
     #[test]

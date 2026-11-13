@@ -7,11 +7,17 @@ fn refill_evaluation_skips_exterior_points_and_accepts_valid_candidate() {
     let candidates = [
         ConstrainedCavityNode {
             node_id: 10,
-            coordinates_m: [2.0, 2.0, 2.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([2.0, 2.0, 2.0]),
         },
         ConstrainedCavityNode {
             node_id: 11,
-            coordinates_m: [0.25, 0.25, 0.25],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, 0.25]),
         },
     ];
 
@@ -38,11 +44,17 @@ fn refill_evaluation_skips_points_too_close_to_protected_boundary_nodes() {
     let candidates = [
         ConstrainedCavityNode {
             node_id: 10,
-            coordinates_m: [0.01, 0.01, 0.01],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.01, 0.01, 0.01]),
         },
         ConstrainedCavityNode {
             node_id: 11,
-            coordinates_m: [0.25, 0.25, 0.25],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.25, 0.25, 0.25]),
         },
     ];
 
@@ -68,7 +80,10 @@ fn refill_generation_reports_protected_boundary_distance_rejections() {
     let nodes = unit_tetrahedron_nodes();
     let candidates = [ConstrainedCavityNode {
         node_id: 10,
-        coordinates_m: [0.01, 0.01, 0.01],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.01, 0.01, 0.01,
+            ]),
     }];
 
     let err = generate_constrained_cavity_refill_candidates(
@@ -93,7 +108,10 @@ fn star_refill_candidates_reject_boundary_node_reuse() {
     let nodes = unit_tetrahedron_nodes();
     let reused = [ConstrainedCavityNode {
         node_id: 0,
-        coordinates_m: [0.25, 0.25, 0.25],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.25, 0.25, 0.25,
+            ]),
     }];
 
     let err =

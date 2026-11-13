@@ -3,14 +3,13 @@ use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack stairs vertices directly on the GPU.
 #[derive(Clone, Debug)]
 pub struct StairsGpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }
@@ -30,11 +29,12 @@ struct StairsUniforms {
 
 /// Builds a GPU-resident vertex buffer for stairs/step plots directly from provider-owned XY arrays.
 pub fn pack_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &StairsGpuInputs,
     params: &StairsGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.len < 2 {
         return Err("stairs: inputs must contain at least two points".to_string());
     }
@@ -104,15 +104,17 @@ pub fn pack_vertices_from_xy(
 
     let vertex_count = segments as u64 * 4;
     let output_size = vertex_count * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("stairs-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("stairs-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
     let uniforms = StairsUniforms {
         color: params.color.to_array(),
@@ -131,11 +133,19 @@ pub fn pack_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -167,7 +177,7 @@ pub fn pack_vertices_from_xy(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -175,7 +185,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::stairs::F32,
         ScalarType::F64 => shaders::stairs::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("stairs-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

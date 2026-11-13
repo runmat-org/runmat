@@ -1,0 +1,1078 @@
+{
+  "schema_version": 1,
+  "examples": [
+    {
+      "id": "cantilever-static",
+      "title": "Bend a steel cantilever",
+      "description": "Import a one-meter steel beam, clamp one end, and apply a downward load to the free end. Explore displacement and stress from the saved solve.",
+      "entry": "cantilever-static.fea",
+      "files": [
+        "cantilever-static.fea",
+        "cantilever-load.svg",
+        "geometry/cantilever.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in meters",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-SOLID-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import the geometry and choose the mesh",
+          "start": "geometry beam {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Choose an elastic material",
+          "start": "material steel {",
+          "end": "\nmodel loaded_beam"
+        },
+        {
+          "title": "Fix one end and apply the load",
+          "start": "model loaded_beam {",
+          "end": "\nstudy cantilever_static"
+        },
+        {
+          "title": "Request the analysis and result fields",
+          "start": "study cantilever_static {",
+          "end": null
+        }
+      ],
+      "model_illustration": {
+        "path": "cantilever-load.svg",
+        "alt": "One-meter cantilever: fixed at x = 0, with 100 kPa downward traction on the x = 1 m end face, giving a total load of 1,000 N.",
+        "caption": "Loading schematic \u00b7 the arrow shows the resultant of the distributed end-face traction.",
+        "width": 760,
+        "height": 220
+      },
+      "receipts": [
+        {
+          "id": "tip-deflection",
+          "quantity": "Tip deflection: largest displacement magnitude over the loaded end face",
+          "output": "tip_deflection",
+          "value": 0.200034,
+          "unit": "mm",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "150 mm",
+            "nodes": 2727,
+            "elements": 1510
+          },
+          "reference": {
+            "value": 0.2,
+            "unit": "mm",
+            "source": "Euler\u2013Bernoulli beam theory, FL\u00b3/3EI"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_3647e74984e5a6d7ec5a861c24ae07fab07e1d93d8e460b89b681c43f99db4f6_a18e3266a1a79a5300aa9f000"
+          }
+        },
+        {
+          "id": "top-von-mises",
+          "quantity": "Nodal von Mises stress on the top surface at x = 100 mm, y = 50 mm",
+          "output": "top_stress",
+          "value": 5.43303,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "150 mm",
+            "nodes": 2727,
+            "elements": 1510
+          },
+          "reference": {
+            "value": 5.4,
+            "unit": "MPa",
+            "source": "beam theory, M c / I with M = F (L \u2212 x) at x = 100 mm"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_3647e74984e5a6d7ec5a861c24ae07fab07e1d93d8e460b89b681c43f99db4f6_a18e3266a1a79a5300aa9f000"
+          }
+        },
+        {
+          "id": "peak-element-von-mises",
+          "quantity": "Largest element von Mises stress in the beam (at the clamped edge; does not converge)",
+          "output": "peak_element_von_mises",
+          "value": 5.39247,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "150 mm",
+            "nodes": 2727,
+            "elements": 1510
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_3647e74984e5a6d7ec5a861c24ae07fab07e1d93d8e460b89b681c43f99db4f6_a18e3266a1a79a5300aa9f000"
+          }
+        },
+        {
+          "id": "support-reaction",
+          "quantity": "Resultant reaction force at the fixed end, z component",
+          "output": "support_reaction",
+          "value": 1000.0,
+          "unit": "N",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "150 mm",
+            "nodes": 2727,
+            "elements": 1510
+          },
+          "reference": {
+            "value": 1000,
+            "unit": "N",
+            "source": "equilibrium with the 100 kPa traction on the 0.01 m\u00b2 end face"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_3647e74984e5a6d7ec5a861c24ae07fab07e1d93d8e460b89b681c43f99db4f6_a18e3266a1a79a5300aa9f000"
+          }
+        },
+        {
+          "id": "tip-deflection-tet10-75",
+          "quantity": "Tip deflection: largest displacement magnitude over the loaded end face",
+          "output": "tip_deflection",
+          "value": 0.200295,
+          "unit": "mm",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "75 mm",
+            "nodes": 2758,
+            "elements": 1353
+          },
+          "reference": {
+            "value": 0.2,
+            "unit": "mm",
+            "source": "Euler\u2013Bernoulli beam theory, FL\u00b3/3EI"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 75 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_0b4ae94c74447d811be0cd920a88f6e9895bc95ab488416cdad967e82ebd76f6_a18e32673510444300ad86000"
+          }
+        },
+        {
+          "id": "top-von-mises-tet10-75",
+          "quantity": "Nodal von Mises stress on the top surface at x = 100 mm, y = 50 mm",
+          "output": "top_stress",
+          "value": 5.42193,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "75 mm",
+            "nodes": 2758,
+            "elements": 1353
+          },
+          "reference": {
+            "value": 5.4,
+            "unit": "MPa",
+            "source": "beam theory, M c / I with M = F (L \u2212 x) at x = 100 mm"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 75 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_0b4ae94c74447d811be0cd920a88f6e9895bc95ab488416cdad967e82ebd76f6_a18e32673510444300ad86000"
+          }
+        },
+        {
+          "id": "peak-element-von-mises-tet10-75",
+          "quantity": "Largest element von Mises stress in the beam (at the clamped edge; does not converge)",
+          "output": "peak_element_von_mises",
+          "value": 5.45246,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "75 mm",
+            "nodes": 2758,
+            "elements": 1353
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 75 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_0b4ae94c74447d811be0cd920a88f6e9895bc95ab488416cdad967e82ebd76f6_a18e32673510444300ad86000"
+          }
+        },
+        {
+          "id": "support-reaction-tet10-75",
+          "quantity": "Resultant reaction force at the fixed end, z component",
+          "output": "support_reaction",
+          "value": 1000.0,
+          "unit": "N",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "75 mm",
+            "nodes": 2758,
+            "elements": 1353
+          },
+          "reference": {
+            "value": 1000,
+            "unit": "N",
+            "source": "equilibrium with the 100 kPa traction on the 0.01 m\u00b2 end face"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 75 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_0b4ae94c74447d811be0cd920a88f6e9895bc95ab488416cdad967e82ebd76f6_a18e32673510444300ad86000"
+          }
+        },
+        {
+          "id": "tip-deflection-tet10-50",
+          "quantity": "Tip deflection: largest displacement magnitude over the loaded end face",
+          "output": "tip_deflection",
+          "value": 0.200474,
+          "unit": "mm",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 0.2,
+            "unit": "mm",
+            "source": "Euler\u2013Bernoulli beam theory, FL\u00b3/3EI"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_8185ce2fd777a32d58fd8e759f648d38b4f78bb03c7daa033f2f42f50618355c_a18e3267633b3e3880ae99000"
+          }
+        },
+        {
+          "id": "top-von-mises-tet10-50",
+          "quantity": "Nodal von Mises stress on the top surface at x = 100 mm, y = 50 mm",
+          "output": "top_stress",
+          "value": 5.41287,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 5.4,
+            "unit": "MPa",
+            "source": "beam theory, M c / I with M = F (L \u2212 x) at x = 100 mm"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_8185ce2fd777a32d58fd8e759f648d38b4f78bb03c7daa033f2f42f50618355c_a18e3267633b3e3880ae99000"
+          }
+        },
+        {
+          "id": "peak-element-von-mises-tet10-50",
+          "quantity": "Largest element von Mises stress in the beam (at the clamped edge; does not converge)",
+          "output": "peak_element_von_mises",
+          "value": 5.26615,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_8185ce2fd777a32d58fd8e759f648d38b4f78bb03c7daa033f2f42f50618355c_a18e3267633b3e3880ae99000"
+          }
+        },
+        {
+          "id": "support-reaction-tet10-50",
+          "quantity": "Resultant reaction force at the fixed end, z component",
+          "output": "support_reaction",
+          "value": 1000.0,
+          "unit": "N",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 1000,
+            "unit": "N",
+            "source": "equilibrium with the 100 kPa traction on the 0.01 m\u00b2 end face"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_8185ce2fd777a32d58fd8e759f648d38b4f78bb03c7daa033f2f42f50618355c_a18e3267633b3e3880ae99000"
+          }
+        },
+        {
+          "id": "tip-deflection-tet10-25",
+          "quantity": "Tip deflection: largest displacement magnitude over the loaded end face",
+          "output": "tip_deflection",
+          "value": 0.200678,
+          "unit": "mm",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "25 mm",
+            "nodes": 32075,
+            "elements": 21062
+          },
+          "reference": {
+            "value": 0.2,
+            "unit": "mm",
+            "source": "Euler\u2013Bernoulli beam theory, FL\u00b3/3EI"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 25 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_c465cefd17560ab488b47610a08ce00d11079060e4748aebb66ed00c716f8d23_a18e3267c8ca902600af57000"
+          }
+        },
+        {
+          "id": "top-von-mises-tet10-25",
+          "quantity": "Nodal von Mises stress on the top surface at x = 100 mm, y = 50 mm",
+          "output": "top_stress",
+          "value": 5.41221,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "25 mm",
+            "nodes": 32075,
+            "elements": 21062
+          },
+          "reference": {
+            "value": 5.4,
+            "unit": "MPa",
+            "source": "beam theory, M c / I with M = F (L \u2212 x) at x = 100 mm"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 25 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_c465cefd17560ab488b47610a08ce00d11079060e4748aebb66ed00c716f8d23_a18e3267c8ca902600af57000"
+          }
+        },
+        {
+          "id": "peak-element-von-mises-tet10-25",
+          "quantity": "Largest element von Mises stress in the beam (at the clamped edge; does not converge)",
+          "output": "peak_element_von_mises",
+          "value": 5.76473,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "25 mm",
+            "nodes": 32075,
+            "elements": 21062
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 25 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_c465cefd17560ab488b47610a08ce00d11079060e4748aebb66ed00c716f8d23_a18e3267c8ca902600af57000"
+          }
+        },
+        {
+          "id": "support-reaction-tet10-25",
+          "quantity": "Resultant reaction force at the fixed end, z component",
+          "output": "support_reaction",
+          "value": 1000.0,
+          "unit": "N",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "25 mm",
+            "nodes": 32075,
+            "elements": 21062
+          },
+          "reference": {
+            "value": 1000,
+            "unit": "N",
+            "source": "equilibrium with the 100 kPa traction on the 0.01 m\u00b2 end face"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with target_size = 25 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_c465cefd17560ab488b47610a08ce00d11079060e4748aebb66ed00c716f8d23_a18e3267c8ca902600af57000"
+          }
+        },
+        {
+          "id": "tip-deflection-tet4-150",
+          "quantity": "Tip deflection: largest displacement magnitude over the loaded end face",
+          "output": "tip_deflection",
+          "value": 0.10069,
+          "unit": "mm",
+          "mesh": {
+            "order": "linear",
+            "target_size": "150 mm",
+            "nodes": 431,
+            "elements": 1510
+          },
+          "reference": {
+            "value": 0.2,
+            "unit": "mm",
+            "source": "Euler\u2013Bernoulli beam theory, FL\u00b3/3EI"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_4377a288b3f0d8fd7103bac16f67a1a3aead0f40d5f0e6097fc659ef678c9f84_a18e3267215e297400aaf1000"
+          }
+        },
+        {
+          "id": "top-von-mises-tet4-150",
+          "quantity": "Nodal von Mises stress on the top surface at x = 100 mm, y = 50 mm",
+          "output": "top_stress",
+          "value": 1.92644,
+          "unit": "MPa",
+          "mesh": {
+            "order": "linear",
+            "target_size": "150 mm",
+            "nodes": 431,
+            "elements": 1510
+          },
+          "reference": {
+            "value": 5.4,
+            "unit": "MPa",
+            "source": "beam theory, M c / I with M = F (L \u2212 x) at x = 100 mm"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_4377a288b3f0d8fd7103bac16f67a1a3aead0f40d5f0e6097fc659ef678c9f84_a18e3267215e297400aaf1000"
+          }
+        },
+        {
+          "id": "peak-element-von-mises-tet4-150",
+          "quantity": "Largest element von Mises stress in the beam (at the clamped edge; does not converge)",
+          "output": "peak_element_von_mises",
+          "value": 24.80245,
+          "unit": "MPa",
+          "mesh": {
+            "order": "linear",
+            "target_size": "150 mm",
+            "nodes": 431,
+            "elements": 1510
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_4377a288b3f0d8fd7103bac16f67a1a3aead0f40d5f0e6097fc659ef678c9f84_a18e3267215e297400aaf1000"
+          }
+        },
+        {
+          "id": "support-reaction-tet4-150",
+          "quantity": "Resultant reaction force at the fixed end, z component",
+          "output": "support_reaction",
+          "value": 1000.0,
+          "unit": "N",
+          "mesh": {
+            "order": "linear",
+            "target_size": "150 mm",
+            "nodes": 431,
+            "elements": 1510
+          },
+          "reference": {
+            "value": 1000,
+            "unit": "N",
+            "source": "equilibrium with the 100 kPa traction on the 0.01 m\u00b2 end face"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_4377a288b3f0d8fd7103bac16f67a1a3aead0f40d5f0e6097fc659ef678c9f84_a18e3267215e297400aaf1000"
+          }
+        },
+        {
+          "id": "tip-deflection-tet4-50",
+          "quantity": "Tip deflection: largest displacement magnitude over the loaded end face",
+          "output": "tip_deflection",
+          "value": 0.162496,
+          "unit": "mm",
+          "mesh": {
+            "order": "linear",
+            "target_size": "50 mm",
+            "nodes": 729,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 0.2,
+            "unit": "mm",
+            "source": "Euler\u2013Bernoulli beam theory, FL\u00b3/3EI"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear, target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_6a70b678acf0f2ca87fb65099b8a4d0e11da4a1d474a2b2316c0b82972818370_a18e326749745a8c00ae05000"
+          }
+        },
+        {
+          "id": "top-von-mises-tet4-50",
+          "quantity": "Nodal von Mises stress on the top surface at x = 100 mm, y = 50 mm",
+          "output": "top_stress",
+          "value": 3.51563,
+          "unit": "MPa",
+          "mesh": {
+            "order": "linear",
+            "target_size": "50 mm",
+            "nodes": 729,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 5.4,
+            "unit": "MPa",
+            "source": "beam theory, M c / I with M = F (L \u2212 x) at x = 100 mm"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear, target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_6a70b678acf0f2ca87fb65099b8a4d0e11da4a1d474a2b2316c0b82972818370_a18e326749745a8c00ae05000"
+          }
+        },
+        {
+          "id": "peak-element-von-mises-tet4-50",
+          "quantity": "Largest element von Mises stress in the beam (at the clamped edge; does not converge)",
+          "output": "peak_element_von_mises",
+          "value": 9.19027,
+          "unit": "MPa",
+          "mesh": {
+            "order": "linear",
+            "target_size": "50 mm",
+            "nodes": 729,
+            "elements": 2692
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear, target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_6a70b678acf0f2ca87fb65099b8a4d0e11da4a1d474a2b2316c0b82972818370_a18e326749745a8c00ae05000"
+          }
+        },
+        {
+          "id": "support-reaction-tet4-50",
+          "quantity": "Resultant reaction force at the fixed end, z component",
+          "output": "support_reaction",
+          "value": 1000.0,
+          "unit": "N",
+          "mesh": {
+            "order": "linear",
+            "target_size": "50 mm",
+            "nodes": 729,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 1000,
+            "unit": "N",
+            "source": "equilibrium with the 100 kPa traction on the 0.01 m\u00b2 end face"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "60daf3650d",
+            "date": "2026-10-29",
+            "study": "cantilever-static.fea with order = linear, target_size = 50 mm; outputs top_stress, support_reaction and peak_element_von_mises added",
+            "result": "run_remote_6a70b678acf0f2ca87fb65099b8a4d0e11da4a1d474a2b2316c0b82972818370_a18e326749745a8c00ae05000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "two-body-static",
+      "title": "Load a two-body assembly",
+      "description": "Import two STEP solids, assign steel to both, fix their support faces and apply traction to one body.",
+      "entry": "structural-static.fea",
+      "files": [
+        "structural-static.fea",
+        "geometry/two-box-assembly.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in meters",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-SOLID-001"
+      ],
+      "snapshot": false
+    },
+    {
+      "id": "steady-conduction",
+      "title": "Conduct heat through a steel bar",
+      "description": "Hold the ends of a steel bar at 300 K and 350 K and inspect temperature and heat flux.",
+      "entry": "steady-conduction.fea",
+      "files": ["steady-conduction.fea", "geometry/cantilever.step"],
+      "expected_outputs": ["Node temperature, in kelvin", "Element heat flux, in watts per square meter"],
+      "host_note": "Explore the saved results here. Open the project in RunMat Desktop to edit and solve it.",
+      "actions": ["open_source", "download"],
+      "requirements": ["FEA-THERMAL-DOMAIN-001"],
+      "snapshot": true,
+      "source_sections": [
+        {"title": "Import and mesh the bar", "start": "geometry beam {", "end": "\nmaterial steel"},
+        {"title": "Set conductivity", "start": "material steel {", "end": "\nmodel conducting_bar"},
+        {"title": "Prescribe end temperatures", "start": "model conducting_bar {", "end": "\nstudy conduction"},
+        {"title": "Request fields", "start": "study conduction {", "end": null}
+      ]
+    },
+    {
+      "id": "heatsink-steady",
+      "title": "Cool a finned electronics heat sink",
+      "description": "Apply heater power to an aluminum heat sink and inspect conduction into its air-cooled fins.",
+      "entry": "heatsink-steady.fea",
+      "files": [
+        "heatsink-steady.fea",
+        "heatsink-setup.svg",
+        "geometry/electronics-heatsink.step",
+        "geometry/KICAD-LICENSE.md",
+        "geometry/electronics-heatsink-provenance.md"
+      ],
+      "expected_outputs": [
+        "Node temperature, in kelvin",
+        "Element heat flux, in watts per square meter"
+      ],
+      "host_note": "Open or download the complete project, then run it in RunMat Desktop or the native CLI to compute temperature and heat flux.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-THERMAL-DOMAIN-001"
+      ],
+      "snapshot": false,
+      "source_sections": [
+        {
+          "title": "Import the heat sink and choose the mesh",
+          "start": "geometry heatsink {",
+          "end": "\nmaterial aluminum"
+        },
+        {
+          "title": "Choose thermal properties",
+          "start": "material aluminum {",
+          "end": "\nmodel cooled_heatsink"
+        },
+        {
+          "title": "Apply heater power and air cooling",
+          "start": "model cooled_heatsink {",
+          "end": "\nstudy heatsink_temperature"
+        },
+        {
+          "title": "Request temperature and heat-flux fields",
+          "start": "study heatsink_temperature {",
+          "end": null
+        }
+      ],
+      "model_illustration": {
+        "path": "heatsink-setup.svg",
+        "alt": "Heat enters the flat mounting face of a finned aluminum heat sink; convection exchanges heat with 25 degree Celsius air on its outer surface.",
+        "caption": "Thermal model \u00b7 distributed heater input at the mounting face and prescribed convection to ambient air.",
+        "width": 760,
+        "height": 260
+      }
+    },
+    {
+      "id": "tuning-fork-modal",
+      "title": "Explore a tuning fork\u2019s natural modes",
+      "description": "Fix the stem of an exact steel tuning fork and compare the recovered free-vibration patterns of its tines.",
+      "entry": "tuning-fork-modal.fea",
+      "files": [
+        "tuning-fork-modal.fea",
+        "tuning-fork-setup.svg",
+        "geometry/tuning-fork.step",
+        "geometry/generate-tuning-fork.cc"
+      ],
+      "expected_outputs": [
+        "Natural frequencies, in hertz",
+        "Original modal displacement vectors"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-DYNAMICS-MODAL-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import the fork and choose quadratic elements",
+          "start": "geometry fork {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Choose stiffness and mass",
+          "start": "material steel {",
+          "end": "\nmodel supported_fork"
+        },
+        {
+          "title": "Fix the stem end",
+          "start": "model supported_fork {",
+          "end": "\nstudy fork_modes"
+        },
+        {
+          "title": "Extract two modes and retain the basis",
+          "start": "study fork_modes {",
+          "end": null
+        }
+      ],
+      "model_illustration": {
+        "path": "tuning-fork-setup.svg",
+        "alt": "A 100 millimeter steel tuning fork has two free tines joined by a bridge and a fixed 8 by 6 millimeter stem end; there is no applied vibration force.",
+        "caption": "Modal model \u00b7 clamp the bottom of the stem; leave the tines free. No forcing or damping is applied.",
+        "width": 760,
+        "height": 280
+      },
+      "receipts": [
+        {
+          "id": "mode-1-frequency",
+          "quantity": "Natural frequency of mode 1, stem bottom face fixed",
+          "value": 364.85,
+          "unit": "Hz",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "30 mm",
+            "nodes": 11144
+          },
+          "run": {
+            "cli": "runmat-qsnap2-8a1ac9e2bf",
+            "commit": "8a1ac9e2bf",
+            "date": "2026-10-29",
+            "study": "tuning-fork-modal.fea (snapshot capture, q-site-examples-2)",
+            "result": "run_remote_b70b3940d87739716b244c9489b4bec0f4af3c2cf26f4e9fcc435fc9eccb195f_a18e327cbc42f6878116b6000"
+          }
+        },
+        {
+          "id": "mode-2-frequency",
+          "quantity": "Natural frequency of mode 2, stem bottom face fixed",
+          "value": 475.17,
+          "unit": "Hz",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "30 mm",
+            "nodes": 11144
+          },
+          "run": {
+            "cli": "runmat-qsnap2-8a1ac9e2bf",
+            "commit": "8a1ac9e2bf",
+            "date": "2026-10-29",
+            "study": "tuning-fork-modal.fea (snapshot capture, q-site-examples-2)",
+            "result": "run_remote_b70b3940d87739716b244c9489b4bec0f4af3c2cf26f4e9fcc435fc9eccb195f_a18e327cbc42f6878116b6000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cantilever-coarse",
+      "title": "Coarse quadratic cantilever",
+      "description": "Compare the same cantilever with a 300 mm requested mesh size.",
+      "entry": "cantilever-coarse.fea",
+      "files": [
+        "cantilever-coarse.fea",
+        "geometry/cantilever.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in meters",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-REFERENCE-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import geometry and choose the mesh",
+          "start": "geometry beam {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Define the material",
+          "start": "material steel {",
+          "end": "\nmodel loaded_beam"
+        },
+        {
+          "title": "Define the physical model",
+          "start": "model loaded_beam {",
+          "end": "\nstudy cantilever_coarse"
+        },
+        {
+          "title": "Request the analysis and fields",
+          "start": "study cantilever_coarse {",
+          "end": null
+        }
+      ]
+    },
+    {
+      "id": "cantilever-medium",
+      "title": "Medium quadratic cantilever",
+      "description": "Compare the same cantilever with a 175 mm requested mesh size.",
+      "entry": "cantilever-medium.fea",
+      "files": [
+        "cantilever-medium.fea",
+        "geometry/cantilever.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in meters",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-REFERENCE-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import geometry and choose the mesh",
+          "start": "geometry beam {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Define the material",
+          "start": "material steel {",
+          "end": "\nmodel loaded_beam"
+        },
+        {
+          "title": "Define the physical model",
+          "start": "model loaded_beam {",
+          "end": "\nstudy cantilever_medium"
+        },
+        {
+          "title": "Request the analysis and fields",
+          "start": "study cantilever_medium {",
+          "end": null
+        }
+      ]
+    },
+    {
+      "id": "heated-bar-thermal-stress",
+      "title": "Heat a clamped steel bar",
+      "description": "Clamp both ends of a one-meter steel bar, raise its temperature by 80 K, and read the thermal stress and the force on the clamps.",
+      "entry": "thermal-stress-static.fea",
+      "files": [
+        "thermal-stress-static.fea",
+        "geometry/bar.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in meters",
+        "Element stress and von Mises stress, in pascals",
+        "Clamp reaction, in newtons"
+      ],
+      "host_note": "Open the complete project in RunMat Desktop to edit the study and run it.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-COUPLING-THERMOELASTIC-001"
+      ],
+      "snapshot": false,
+      "receipts": [
+        {
+          "id": "mid-von-mises",
+          "quantity": "Nodal von Mises stress at the center of the bar (x = 500 mm)",
+          "output": "mid_von_mises",
+          "value": 197.584,
+          "unit": "MPa",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 192,
+            "unit": "MPa",
+            "source": "one-dimensional restrained bar, E \u03b1 \u0394T"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "47aafa885d",
+            "date": "2026-10-29",
+            "study": "r-heated-bar.fea: thermal-stress-static.fea with outputs mid_von_mises, clamp_reaction and largest_displacement (named end_growth in the run)",
+            "result": "run_remote_bd85757a4e6c1d02cbe8dc8612de7005f8c67f863d9ab750268f5dd618d41621_a18e332fbde059fc002fb8000"
+          }
+        },
+        {
+          "id": "clamp-reaction",
+          "quantity": "Axial reaction resultant on the clamped face at x = 0",
+          "output": "clamp_reaction",
+          "value": 1975.84,
+          "unit": "kN",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "reference": {
+            "value": 1920,
+            "unit": "kN",
+            "source": "one-dimensional restrained bar, E A \u03b1 \u0394T"
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "47aafa885d",
+            "date": "2026-10-29",
+            "study": "r-heated-bar.fea: thermal-stress-static.fea with outputs mid_von_mises, clamp_reaction and largest_displacement (named end_growth in the run)",
+            "result": "run_remote_bd85757a4e6c1d02cbe8dc8612de7005f8c67f863d9ab750268f5dd618d41621_a18e332fbde059fc002fb8000"
+          }
+        },
+        {
+          "id": "largest-displacement",
+          "quantity": "Largest displacement magnitude in the bar (sideways growth of the section corners)",
+          "output": "largest_displacement",
+          "value": 0.0905128,
+          "unit": "mm",
+          "mesh": {
+            "order": "quadratic",
+            "target_size": "50 mm",
+            "nodes": 4679,
+            "elements": 2692
+          },
+          "run": {
+            "cli": "runmat-qdocs1-60daf3650d",
+            "commit": "47aafa885d",
+            "date": "2026-10-29",
+            "study": "r-heated-bar.fea: thermal-stress-static.fea with outputs mid_von_mises, clamp_reaction and largest_displacement (named end_growth in the run)",
+            "result": "run_remote_bd85757a4e6c1d02cbe8dc8612de7005f8c67f863d9ab750268f5dd618d41621_a18e332fbde059fc002fb8000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "trace-impedance",
+      "title": "Size a 50 \u03a9 microstrip and a 100 \u03a9 pair",
+      "description": "Build a four-layer board's top-layer cross-section from its stackup and read the impedance, effective permittivity and delay of a single-ended microstrip and an edge-coupled differential pair.",
+      "entry": "trace-impedance.fea",
+      "files": [
+        "trace-impedance.fea"
+      ],
+      "expected_outputs": [
+        "Microstrip Z0, in ohms, with \u03b5eff and delay",
+        "Pair Zdiff and Zcommon, in ohms, with near- and far-end coupling and the per-length C and L matrices"
+      ],
+      "host_note": "Open the complete project in RunMat Desktop to edit the stackup or trace widths and run it.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-EM-LINE-001"
+      ],
+      "snapshot": false,
+      "receipts": [
+        {
+          "id": "microstrip-z0",
+          "quantity": "Characteristic impedance of the single-ended microstrip (0.36 mm trace)",
+          "output": "z0",
+          "value": 50.2205,
+          "unit": "\u03a9",
+          "mesh": {
+            "order": "linear",
+            "target_size": "graded from the copper edges to 0.4 mm",
+            "nodes": 165435,
+            "elements": 329104
+          },
+          "reference": {
+            "value": 50,
+            "unit": "\u03a9",
+            "source": "design target of the example stackup"
+          },
+          "run": {
+            "cli": "runmat debug build of q-trace-impedance-5",
+            "commit": "e5ddae3e92",
+            "date": "2026-11-09",
+            "study": "trace-impedance.fea --study microstrip",
+            "result": "run_remote_b2b5ebdcbb46d0673b762f727a577d475b2bec6dc9c9ed76396da0137217dc40_a18e662da11203b9805ad9000"
+          }
+        },
+        {
+          "id": "pair-zdiff",
+          "quantity": "Differential impedance of the edge-coupled pair (0.23 mm traces, 0.4 mm pitch)",
+          "output": "z_diff",
+          "value": 99.6884,
+          "unit": "\u03a9",
+          "mesh": {
+            "order": "linear",
+            "target_size": "graded from the copper edges to 0.4 mm",
+            "nodes": 231071,
+            "elements": 459888
+          },
+          "reference": {
+            "value": 100,
+            "unit": "\u03a9",
+            "source": "design target of the example stackup"
+          },
+          "run": {
+            "cli": "runmat debug build of q-trace-impedance-5",
+            "commit": "e5ddae3e92",
+            "date": "2026-11-09",
+            "study": "trace-impedance.fea --study differential_pair",
+            "result": "run_remote_a869751f3ddf9d348a4f7305d4837b01eceee6d62b7fad9057bdf29e3a44d889_a18e662e126e2e91005b0b000"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -3,17 +3,13 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+    BuiltinErrorDescriptor, DispersionControl, DispersionNormalization as VarNormalization,
+    VAR_ERROR_COMPLEX_UNSUPPORTED, VAR_ERROR_INTERNAL, VAR_ERROR_INVALID_ARGUMENT,
+    VAR_ERROR_INVALID_INPUT, VAR_TYPED_INTEGER_CONTROL_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -24,218 +20,9 @@ use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::ResolveContext;
 
 const NAME: &str = "var";
-
-const TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "var-typed-integer-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "var with a typed-integer normalization or dimension control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:VarTypedIntegerControlExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [TYPED_INTEGER_CONTROL_EXTENSION];
-
-fn var_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    reduce_numeric_type(args, ctx)
-}
-
-const VAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "V",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Variance reduction result.",
-}];
-
-const VAR_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single- or double-precision input array.",
-};
-
-const VAR_PARAM_W: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "w",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("0"),
-    description: "Normalization flag (0 sample, 1 population) or [] placeholder.",
-};
-
-const VAR_PARAM_AXES: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "axes",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("[]"),
-    description: "Dimension selector, vector of dimensions, or \"all\".",
-};
-
-const VAR_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nanflag",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"includemissing\""),
-    description:
-        "Missing-value mode: \"includemissing\"/\"includenan\" or \"omitmissing\"/\"omitnan\".",
-};
-
-const VAR_INPUTS_A: [BuiltinParamDescriptor; 1] = [VAR_PARAM_A];
-const VAR_INPUTS_A_W: [BuiltinParamDescriptor; 2] = [VAR_PARAM_A, VAR_PARAM_W];
-const VAR_INPUTS_A_W_AXES: [BuiltinParamDescriptor; 3] = [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_AXES];
-const VAR_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [VAR_PARAM_A, VAR_PARAM_NANFLAG];
-const VAR_INPUTS_A_W_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_NANFLAG];
-const VAR_INPUTS_A_W_AXES_NANFLAG: [BuiltinParamDescriptor; 4] =
-    [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_AXES, VAR_PARAM_NANFLAG];
-const VAR_INPUTS_A_W_NANFLAG_AXES: [BuiltinParamDescriptor; 4] =
-    [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_NANFLAG, VAR_PARAM_AXES];
-
-const VAR_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
-    BuiltinSignatureDescriptor {
-        label: "V = var(A)",
-        inputs: &VAR_INPUTS_A,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w)",
-        inputs: &VAR_INPUTS_A_W,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, dim)",
-        inputs: &VAR_INPUTS_A_W_AXES,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, vecdim)",
-        inputs: &VAR_INPUTS_A_W_AXES,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, \"all\")",
-        inputs: &VAR_INPUTS_A_W_AXES,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, nanflag)",
-        inputs: &VAR_INPUTS_A_NANFLAG,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, nanflag)",
-        inputs: &VAR_INPUTS_A_W_NANFLAG,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, dim, nanflag)",
-        inputs: &VAR_INPUTS_A_W_AXES_NANFLAG,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, nanflag, dim)",
-        inputs: &VAR_INPUTS_A_W_NANFLAG_AXES,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, [], nanflag)",
-        inputs: &VAR_INPUTS_A_W_AXES_NANFLAG,
-        outputs: &VAR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "V = var(A, w, nanflag, \"all\")",
-        inputs: &VAR_INPUTS_A_W_NANFLAG_AXES,
-        outputs: &VAR_OUTPUT,
-    },
-];
-
-const VAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VAR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:var:InvalidArgument"),
-    when: "Argument grammar, dimensions, normalization, or missing-value selectors are invalid.",
-    message: "var: invalid argument",
-};
-
-const VAR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VAR.INVALID_INPUT",
-    identifier: Some("RunMat:var:InvalidInput"),
-    when: "Input values are outside the supported floating var reduction domains, including integer data.",
-    message: "var: invalid input",
-};
-
-const VAR_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VAR.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:var:ComplexUnsupported"),
-    when: "Input value is complex for a path that currently supports only real reductions.",
-    message: "var: complex inputs are not supported yet",
-};
-
-const VAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VAR.INTERNAL",
-    identifier: Some("RunMat:var:Internal"),
-    when: "Execution fails due to provider, conversion, gather, or tensor allocation internals.",
-    message: "var: internal reduction failure",
-};
-
-const VAR_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    VAR_ERROR_INVALID_ARGUMENT,
-    VAR_ERROR_INVALID_INPUT,
-    VAR_ERROR_COMPLEX_UNSUPPORTED,
-    VAR_ERROR_INTERNAL,
-];
-
-pub const VAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &VAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &VAR_ERRORS,
-};
-
-const REJECTED_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single, double, table, or timetable; every typed-integer data class is rejected before host or provider dispatch.",
-    }];
-
-const INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "normalization_or_dimension",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode accepts exact host typed-integer normalization and dimension controls; MATLAB-compatible modes retain the documented floating control surface.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[V, M] = var(A, args...) with integer A",
-        inputs: &REJECTED_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer data is invalid in every compatibility mode, including resident integer data, and no integer output contract exists.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[V, M] = var(A, normalization_or_dimension, ...) with floating A",
-        inputs: &INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed-integer controls are a mode-gated RunMat extension; values are decoded exactly on the host, while the floating data reduction may still execute on a provider.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -301,12 +88,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion currently gathers to the host; future kernels can reuse the variance accumulator directly.",
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VarNormalization {
-    Sample,
-    Population,
-}
-
 #[derive(Clone, Debug)]
 enum VarAxes {
     Default,
@@ -331,25 +112,32 @@ enum NormParse {
 
 #[runtime_builtin(
     name = "var",
-    category = "math/reduction",
-    summary = "Compute sample or population variance across array data.",
-    keywords = "var,variance,statistics,gpu,omitmissing,omitnan,all",
-    accel = "reduction",
-    type_resolver(var_type),
-    descriptor(crate::builtins::math::reduction::var::VAR_DESCRIPTOR),
-    extensions(crate::builtins::math::reduction::var::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::reduction::var::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::var"
 )]
-pub(crate) async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn var_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    var_with_nan_policy(value, rest, None).await
+}
+
+pub(crate) async fn var_with_nan_policy(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+    imposed_nan_mode: Option<ReductionNaN>,
+) -> crate::BuiltinResult<Value> {
     reject_integer_data_input(&value)?;
     if rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &TYPED_INTEGER_CONTROL_EXTENSION,
+            &VAR_TYPED_INTEGER_CONTROL_EXTENSION,
             NAME,
         )?;
     }
-    let parsed = parse_arguments(&rest).await?;
+    let mut parsed = parse_arguments(rest.view()).await?;
+    if let Some(mode) = imposed_nan_mode {
+        parsed.nan_mode = mode;
+    }
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(var_complex_unsupported_default()),
@@ -382,31 +170,26 @@ fn reject_integer_data_input(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = VarAxes::Default;
     let mut axes_set = false;
     let mut normalization = VarNormalization::Sample;
     let mut normalization_consumed = false;
     let mut nan_mode = ReductionNaN::Include;
-    let tokens = tokens_from_values(args);
-
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
 
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
+        if let Some(keyword) = keyword_of(arg)? {
+            match DispersionControl::from_var_public_option(&keyword) {
+                Some(DispersionControl::Missing(mode)) => {
+                    nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(DispersionControl::All) => {
                     if axes_set && !matches!(axes, VarAxes::Default) {
                         return Err(var_invalid_argument(
                             "var: 'all' cannot be combined with an explicit dimension",
@@ -417,34 +200,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                _ => {}
-            }
-        }
-
-        if let Some(keyword) = keyword_of(arg) {
-            match keyword.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if axes_set && !matches!(axes, VarAxes::Default) {
-                        return Err(var_invalid_argument(
-                            "var: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    axes = VarAxes::All;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
-                }
-                _ => {
+                None => {
                     return Err(var_invalid_argument(format!(
                         "var: unrecognised option '{keyword}'"
                     )));
@@ -560,20 +316,17 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
             "var: normalisation flag must be finite",
         ));
     }
-    if (value - 0.0).abs() < f64::EPSILON {
-        return Ok(NormParse::Value(VarNormalization::Sample));
-    }
-    if (value - 1.0).abs() < f64::EPSILON {
-        return Ok(NormParse::Value(VarNormalization::Population));
-    }
-    Err(var_invalid_argument(
-        "var: normalisation flag must be 0, 1, or []",
-    ))
+    VarNormalization::from_finite_flag(value)
+        .map(NormParse::Value)
+        .ok_or_else(|| var_invalid_argument("var: normalisation flag must be 0, 1, or []"))
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
-    if let Some(keyword) = keyword_of(value) {
-        if keyword == "all" {
+    if let Some(keyword) = keyword_of(value)? {
+        if matches!(
+            DispersionControl::from_var_public_option(&keyword),
+            Some(DispersionControl::All)
+        ) {
             return Ok(Some(VarAxes::All));
         }
         return Ok(None);
@@ -616,13 +369,13 @@ fn var_tensor(
     normalization: VarNormalization,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
-    let (dims, _) = resolve_axes(&tensor.shape, axes)?;
+    let (dims, _) = resolve_axes(tensor.shape(), axes)?;
     if dims.is_empty() {
         if tensor::is_scalar_tensor(&tensor) {
             return var_scalar_tensor(&tensor, nan_mode);
         }
         if !matches!(axes, VarAxes::Default) {
-            return tensor::zeros_with_dtype(&tensor.shape, tensor.numeric_dtype())
+            return tensor::zeros_with_dtype(tensor.shape(), tensor.numeric_dtype())
                 .map_err(|error| var_internal_error(format!("var: {error}")));
         }
         return Ok(tensor);
@@ -642,7 +395,8 @@ fn var_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<T
             ReductionNaN::Include | ReductionNaN::Omit => 0.0,
         }
     };
-    Tensor::new(vec![result], vec![1, 1]).map_err(|e| var_internal_error(format!("var: {e}")))
+    Tensor::new_with_dtype(vec![result], vec![1, 1], tensor.numeric_dtype())
+        .map_err(|e| var_internal_error(format!("var: {e}")))
 }
 
 fn var_tensor_reduce(
@@ -658,12 +412,12 @@ fn var_tensor_reduce(
         return Ok(tensor.clone());
     }
 
-    let output_shape = reduced_shape(&tensor.shape, &dims_sorted);
+    let output_shape = reduced_shape(tensor.shape(), &dims_sorted);
     let out_len = tensor::element_count(&output_shape);
     let values = tensor::tensor_values_f64(tensor);
     if values.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape)
+        return Tensor::new_with_dtype(fill, output_shape, tensor.numeric_dtype())
             .map_err(|e| var_internal_error(format!("var: {e}")));
     }
 
@@ -671,9 +425,9 @@ fn var_tensor_reduce(
     let mut means = vec![0.0f64; out_len];
     let mut m2 = vec![0.0f64; out_len];
     let mut saw_nan = vec![false; out_len];
-    let mut coords = vec![0usize; tensor.shape.len()];
-    let mut out_coords = vec![0usize; tensor.shape.len()];
-    let mut reduce_mask = vec![false; tensor.shape.len()];
+    let mut coords = vec![0usize; tensor.shape().len()];
+    let mut out_coords = vec![0usize; tensor.shape().len()];
+    let mut reduce_mask = vec![false; tensor.shape().len()];
     for &dim in &dims_sorted {
         if dim < reduce_mask.len() {
             reduce_mask[dim] = true;
@@ -681,7 +435,7 @@ fn var_tensor_reduce(
     }
 
     for (linear, value) in values.into_iter().enumerate() {
-        linear_to_multi(linear, &tensor.shape, &mut coords);
+        linear_to_multi(linear, tensor.shape(), &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };
         }
@@ -723,7 +477,8 @@ fn var_tensor_reduce(
             };
     }
 
-    Tensor::new(output, output_shape).map_err(|e| var_internal_error(format!("var: {e}")))
+    Tensor::new_with_dtype(output, output_shape, tensor.numeric_dtype())
+        .map_err(|e| var_internal_error(format!("var: {e}")))
 }
 
 fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, bool)> {
@@ -819,8 +574,22 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 async fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(device_value) = var_gpu_reduce(provider, &handle, args).await {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        var_internal_error("var: resident input has no exact owning provider")
+    })?;
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        handle
+            .allocation_lease()
+            .validate_live()
+            .map_err(|source| {
+                let mut error = var_internal_error(format!(
+                    "var: resident input allocation is unavailable: {source}"
+                ));
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error.source = Some(Box::new(source));
+                error
+            })?;
+        if let Some(device_value) = var_gpu_reduce(provider, &handle, args).await? {
             return Ok(Value::GpuTensor(device_value));
         }
     }
@@ -828,17 +597,13 @@ async fn var_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResu
 }
 
 async fn var_gpu_reduce(
-    provider: &dyn AccelProvider,
+    provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
     args: &ParsedArguments,
-) -> Option<GpuTensorHandle> {
-    let (dims, _) = resolve_axes(&handle.shape, &args.axes).ok()?;
-    let elements = tensor::element_count(&handle.shape);
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let (dims, _) = resolve_axes(handle.shape(), &args.axes)?;
     if dims.is_empty() {
-        if elements == 1 || !matches!(args.axes, VarAxes::Default) {
-            return None;
-        }
-        return Some(handle.clone());
+        return Ok(None);
     }
 
     let normalization = match args.normalization {
@@ -850,56 +615,107 @@ async fn var_gpu_reduce(
         ReductionNaN::Omit => ProviderNanMode::Omit,
     };
 
-    let std_handle = if dims.len() == handle.shape.len() {
-        if is_scalar_shape(&handle.shape) {
-            return Some(handle.clone());
+    let expected_shape = reduced_shape(handle.shape(), &dims);
+
+    let std_handle = if dims.len() == handle.shape().len() {
+        if is_scalar_shape(handle.shape()) {
+            return Ok(None);
         }
-        provider
-            .reduce_std(handle, normalization, nan_mode)
-            .await
-            .map_err(|err| {
-                log::trace!("var: provider reduce_std fallback triggered: {err}");
-                err
-            })
-            .ok()?
+        match accepted_std_result(
+            provider,
+            handle,
+            &expected_shape,
+            "reduce_std",
+            provider.reduce_std(handle, normalization, nan_mode).await,
+        )? {
+            Some(output) => output,
+            None => return Ok(None),
+        }
     } else if dims.len() == 1 {
         let dim = dims[0] + 1;
-        reduce_std_dim_gpu(provider, handle.clone(), dim, normalization, nan_mode).await?
+        match reduce_std_dim_gpu(
+            provider,
+            handle,
+            dim,
+            normalization,
+            nan_mode,
+            &expected_shape,
+        )
+        .await?
+        {
+            Some(output) => output,
+            None => return Ok(None),
+        }
     } else {
-        return None;
+        return Ok(None);
     };
 
-    provider
-        .elem_mul(&std_handle, &std_handle)
+    gpu_cleanup::complete_std_square(provider, handle, std_handle, &expected_shape)
         .await
-        .map_err(|err| {
-            log::trace!("var: provider elem_mul fallback triggered: {err}");
-            err
-        })
-        .ok()
+        .map(Some)
+}
+
+fn accepted_std_result(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    expected_shape: &[usize],
+    operation: &'static str,
+    result: runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle>,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(output) = initial_std_result(operation, result)? else {
+        return Ok(None);
+    };
+    if !super::std::std_output_matches(provider, input, &output, expected_shape) {
+        let mut error = var_internal_error(format!(
+            "var: provider {operation} returned an invalid resident reduction"
+        ));
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(output, error));
+    }
+    Ok(Some(output))
+}
+
+fn initial_std_result(
+    operation: &'static str,
+    result: runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle>,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    match result {
+        Ok(output) => Ok(Some(output)),
+        Err(source) if source.is_unsupported() => Ok(None),
+        Err(source) => {
+            let mut error =
+                var_internal_error(format!("var: provider {operation} failed: {source}"));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(crate::runtime_error::with_provider_execution_source(
+                error, source,
+            ))
+        }
+    }
 }
 
 async fn reduce_std_dim_gpu(
-    provider: &dyn AccelProvider,
-    handle: GpuTensorHandle,
+    provider: &'static dyn AccelProvider,
+    handle: &GpuTensorHandle,
     dim: usize,
     normalization: ProviderStdNormalization,
     nan_mode: ProviderNanMode,
-) -> Option<GpuTensorHandle> {
+    expected_shape: &[usize],
+) -> BuiltinResult<Option<GpuTensorHandle>> {
     if dim == 0 {
-        return None;
+        return Ok(None);
     }
-    if handle.shape.len() < dim {
-        return Some(handle);
+    if handle.shape().len() < dim {
+        return Ok(None);
     }
-    provider
-        .reduce_std_dim(&handle, dim - 1, normalization, nan_mode)
-        .await
-        .map_err(|err| {
-            log::trace!("var: provider reduce_std_dim fallback triggered: {err}");
-            err
-        })
-        .ok()
+    accepted_std_result(
+        provider,
+        handle,
+        expected_shape,
+        "reduce_std_dim",
+        provider
+            .reduce_std_dim(handle, dim - 1, normalization, nan_mode)
+            .await,
+    )
 }
 
 async fn var_gpu_fallback(
@@ -922,6 +738,9 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
+#[path = "var/gpu_cleanup.rs"]
+mod gpu_cleanup;
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -931,7 +750,10 @@ pub(crate) mod tests {
 
     fn var_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::var_builtin(value, rest))
+        block_on(super::var_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn values(tensor: &Tensor) -> Vec<f64> {
@@ -971,6 +793,26 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn empty_axis_after_normalization_has_owner_specific_admission() {
+        let input =
+            Value::Tensor(Tensor::new((1..=12).map(f64::from).collect(), vec![3, 4]).unwrap());
+        let empty = Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap());
+        let error = var_builtin(input.clone(), vec![empty.clone(), empty.clone()])
+            .expect_err("var rejects an empty dimension vector");
+        assert_eq!(error.identifier(), VAR_ERROR_INVALID_ARGUMENT.identifier);
+        let std = block_on(super::super::std::std_builtin(
+            input,
+            crate::builtins::common::test_support::builtin_arguments(vec![empty.clone(), empty]),
+        ))
+        .expect("std accepts a default-axis placeholder");
+        let Value::Tensor(std) = std else {
+            panic!("expected row of standard deviations");
+        };
+        assert_eq!(std.shape(), [1, 4]);
+        assert_eq!(std.materialize_f64(), vec![1.0; 4]);
+    }
+
+    #[test]
     fn var_typed_integer_tensor_normalization_reads_exact_storage() {
         let normalization =
             Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("normalization");
@@ -989,7 +831,7 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(super::var_builtin(
                 Value::Tensor(tensor.clone()),
-                args.clone(),
+                crate::builtins::common::test_support::builtin_arguments(args.clone()),
             ))
             .expect_err("MATLAB-compatible mode");
             assert_eq!(
@@ -999,52 +841,12 @@ pub(crate) mod tests {
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-            block_on(super::var_builtin(Value::Tensor(tensor), args))
-                .expect("RunMat extension mode");
+            block_on(super::var_builtin(
+                Value::Tensor(tensor),
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("RunMat extension mode");
         }
-    }
-
-    #[test]
-    fn var_type_reduces_first_dim() {
-        let out = var_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(2)])
-            }
-        );
-    }
-
-    #[test]
-    fn var_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = VAR_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"V = var(A)"));
-        assert!(labels.contains(&"V = var(A, w)"));
-        assert!(labels.contains(&"V = var(A, w, dim)"));
-        assert!(labels.contains(&"V = var(A, w, vecdim)"));
-        assert!(labels.contains(&"V = var(A, w, \"all\")"));
-        assert!(labels.contains(&"V = var(A, nanflag)"));
-        assert!(labels.contains(&"V = var(A, w, nanflag)"));
-        assert!(labels.contains(&"V = var(A, w, dim, nanflag)"));
-        assert!(labels.contains(&"V = var(A, w, nanflag, dim)"));
-    }
-
-    #[test]
-    fn var_descriptor_errors_have_stable_codes() {
-        let codes: Vec<&str> = VAR_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
-        assert!(codes.contains(&"RM.VAR.INVALID_ARGUMENT"));
-        assert!(codes.contains(&"RM.VAR.INVALID_INPUT"));
-        assert!(codes.contains(&"RM.VAR.COMPLEX_UNSUPPORTED"));
-        assert!(codes.contains(&"RM.VAR.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1055,13 +857,125 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn host_single_output_boundary_preserves_class_across_scalar_empty_and_nd() {
+        let scalar = Tensor::new_with_dtype(vec![7.0], vec![1, 1], runmat_value::NumericDType::F32)
+            .expect("single scalar");
+        let Value::Tensor(scalar_out) =
+            var_builtin(Value::Tensor(scalar), Vec::new()).expect("single var scalar")
+        else {
+            panic!("single scalar result must remain a tensor")
+        };
+        assert_eq!(scalar_out.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(scalar_out.shape(), [1, 1]);
+        assert_eq!(values(&scalar_out), vec![0.0]);
+
+        let input = Tensor::new_with_dtype(
+            (1..=8).map(f64::from).collect(),
+            vec![2, 2, 2],
+            runmat_value::NumericDType::F32,
+        )
+        .expect("single N-D input");
+        let axes = Tensor::new(vec![1.0, 3.0], vec![1, 2]).expect("axes");
+        let Value::Tensor(nd) = var_builtin(
+            Value::Tensor(input),
+            vec![Value::Num(0.0), Value::Tensor(axes)],
+        )
+        .expect("single N-D var") else {
+            panic!("single N-D result must remain a tensor")
+        };
+        assert_eq!(nd.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(nd.shape(), [1, 2, 1]);
+        for value in values(&nd) {
+            assert!((value - 17.0_f64 / 3.0).abs() < 1e-6);
+        }
+
+        let empty = Tensor::new_with_dtype(Vec::new(), vec![0, 2], runmat_value::NumericDType::F32)
+            .expect("single empty input");
+        let Value::Tensor(empty_out) =
+            var_builtin(Value::Tensor(empty.clone()), Vec::new()).expect("single empty var")
+        else {
+            panic!("single empty result must remain a tensor")
+        };
+        assert_eq!(empty_out.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(empty_out.shape(), [1, 2]);
+        assert!(values(&empty_out).iter().all(|value| value.is_nan()));
+        let Value::Tensor(empty_all) = var_builtin(Value::Tensor(empty), vec![Value::from("all")])
+            .expect("single empty all var")
+        else {
+            panic!("single empty all result must remain a tensor")
+        };
+        assert_eq!(empty_all.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(empty_all.shape(), [1, 1]);
+        assert!(values(&empty_all)[0].is_nan());
+
+        let beyond =
+            Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], runmat_value::NumericDType::F32)
+                .expect("single beyond-rank input");
+        let Value::Tensor(beyond_out) = var_builtin(
+            Value::Tensor(beyond),
+            vec![Value::Num(0.0), Value::Num(4.0)],
+        )
+        .expect("single beyond-rank var") else {
+            panic!("single beyond-rank result must remain a tensor")
+        };
+        assert_eq!(beyond_out.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(beyond_out.shape(), [1, 2]);
+        assert_eq!(values(&beyond_out), vec![0.0, 0.0]);
+
+        let population = Tensor::new_with_dtype(
+            (1..=4).map(f64::from).collect(),
+            vec![2, 2],
+            runmat_value::NumericDType::F32,
+        )
+        .expect("single population input");
+        let Value::Tensor(population_out) = var_builtin(
+            Value::Tensor(population),
+            vec![Value::Num(1.0), Value::from("all")],
+        )
+        .expect("single population var") else {
+            panic!("single population result must remain a tensor")
+        };
+        assert_eq!(
+            population_out.numeric_dtype(),
+            runmat_value::NumericDType::F32
+        );
+        assert_eq!(population_out.shape(), [1, 1]);
+        assert!((values(&population_out)[0] - 1.25).abs() < 1e-6);
+
+        assert_eq!(
+            var_builtin(Value::Bool(true), Vec::new()).unwrap(),
+            Value::Num(0.0)
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn host_single_omitnan_rounds_once_at_output() {
+        let input = Tensor::new_with_dtype(
+            vec![f64::NAN, 2.0, 4.0],
+            vec![3, 1],
+            runmat_value::NumericDType::F32,
+        )
+        .expect("single NaN input");
+        let Value::Tensor(output) = var_builtin(Value::Tensor(input), vec![Value::from("omitnan")])
+            .expect("single omitnan var")
+        else {
+            panic!("single result must remain a tensor")
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.shape(), [1, 1]);
+        assert!((values(&output)[0] - 2.0).abs() < 1e-6);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn var_matrix_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let result = var_builtin(Value::Tensor(tensor), Vec::new()).expect("var");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(values(&out), vec![4.5, 4.5, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1076,7 +990,7 @@ pub(crate) mod tests {
             var_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))]).expect("var");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(values(&out), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1131,6 +1045,25 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn var_repeated_axis_vector_reduces_once() {
+        let input = Tensor::new((1..=12).map(f64::from).collect(), vec![3, 4]).unwrap();
+        let axes = Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let result = var_builtin(
+            Value::Tensor(input),
+            vec![Value::Num(0.0), Value::Tensor(axes)],
+        )
+        .expect("repeated axis vector");
+        let Value::Tensor(output) = result else {
+            panic!("expected column tensor");
+        };
+        assert_eq!(output.shape(), [3, 1]);
+        for value in values(&output) {
+            assert!((value - 15.0).abs() < 1e-12);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn var_vector_dimension_selection() {
         let tensor = Tensor::new(
             vec![
@@ -1145,7 +1078,7 @@ pub(crate) mod tests {
         let result = var_builtin(Value::Tensor(tensor), args).expect("var");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3, 1]);
+                assert_eq!(out.shape(), [1, 3, 1]);
                 for value in values(&out) {
                     assert!((value - (37.0 / 3.0)).abs() < 1e-12);
                 }
@@ -1163,7 +1096,7 @@ pub(crate) mod tests {
         let result = var_builtin(Value::Tensor(tensor), args).expect("var");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 for value in values(&out) {
                     assert!((value - 0.5).abs() < 1e-12);
                 }
@@ -1193,7 +1126,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn var_invalid_input_identifier_is_stable() {
-        let err = var_builtin(Value::String("abc".to_string()), Vec::new()).unwrap_err();
+        let err = var_builtin(Value::String("abc".to_string().into()), Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), VAR_ERROR_INVALID_INPUT.identifier);
     }
 
@@ -1208,7 +1141,7 @@ pub(crate) mod tests {
         .expect("var");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(values(&out), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1259,6 +1192,35 @@ pub(crate) mod tests {
         assert!(matches!(include_missing, Value::Num(value) if value.is_nan()));
     }
 
+    #[test]
+    fn var_typed_text_controls_preserve_owner_specific_invalid_option() {
+        let parsed = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::from("ALL")]),
+        ))
+        .expect("case-insensitive all remains valid");
+        assert!(matches!(parsed.axes, VarAxes::All));
+
+        let spaced = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::from(" all ")]),
+        ))
+        .err()
+        .expect("var does not accept spaces around all");
+        assert_eq!(spaced.identifier(), VAR_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(spaced.message().contains("unrecognised option"));
+
+        let conflict = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[
+                Value::Num(0.0),
+                Value::Num(2.0),
+                Value::from("all"),
+            ]),
+        ))
+        .err()
+        .expect("all after an explicit axis must conflict");
+        assert_eq!(conflict.identifier(), VAR_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(conflict.message().contains("'all' cannot be combined"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn var_dimension_greater_than_ndims_returns_same_shaped_zeros() {
@@ -1270,7 +1232,7 @@ pub(crate) mod tests {
         .expect("var");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_eq!(values(&out), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1285,7 +1247,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = var_builtin(Value::GpuTensor(handle), Vec::new()).expect("var");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             assert_eq!(values(&gathered), vec![4.5, 4.5, 4.5]);
         });
     }
@@ -1306,7 +1268,7 @@ pub(crate) mod tests {
             .expect_err("integer GPU data");
             assert_eq!(err.identifier(), VAR_ERROR_INVALID_INPUT.identifier);
             assert!(err.message().contains("integer data inputs"));
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 
@@ -1330,7 +1292,7 @@ pub(crate) mod tests {
             .expect("cpu var");
             match cpu {
                 Value::Tensor(expected) => {
-                    assert_eq!(gathered.shape, expected.shape);
+                    assert_eq!(gathered.shape(), expected.shape());
                     for (a, b) in values(&gathered).iter().zip(values(&expected).iter()) {
                         if b.is_nan() {
                             assert!(a.is_nan());
@@ -1342,45 +1304,5 @@ pub(crate) mod tests {
                 _ => panic!("expected tensor output from host path"),
             }
         });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn var_wgpu_dim1_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
-        let cpu = var_host(
-            Value::Tensor(tensor.clone()),
-            &ParsedArguments {
-                axes: VarAxes::Dim(1),
-                normalization: VarNormalization::Sample,
-                nan_mode: ReductionNaN::Include,
-            },
-        )
-        .unwrap();
-        let provider = runmat_accelerate_api::provider().unwrap();
-        let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-        let gpu = block_on(var_gpu(
-            handle,
-            &ParsedArguments {
-                axes: VarAxes::Dim(1),
-                normalization: VarNormalization::Sample,
-                nan_mode: ReductionNaN::Include,
-            },
-        ))
-        .unwrap();
-        let gathered = test_support::gather(gpu).expect("gather");
-        match (cpu, gathered) {
-            (Value::Tensor(ct), gt) => {
-                assert_eq!(ct.shape, gt.shape);
-                for (a, b) in values(&ct).iter().zip(values(&gt).iter()) {
-                    assert!((a - b).abs() < 1e-6);
-                }
-            }
-            _ => panic!("unexpected shapes"),
-        }
     }
 }

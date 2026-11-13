@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "cohort": "driver-recovery-physics",
+  "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
+  "measured": {
+    "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+    "exit_code": 0,
+    "passed": 18,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 464,
+    "test_seconds": 1625.63,
+    "case_names": [
+      "remote::driver_replacement_tests::active_analysis_attempt_retries_after_actual_driver_replacement",
+      "remote::driver_replacement_tests::actual_driver_restarts_from_server_checkpoint_on_a_different_worker",
+      "remote::driver_replacement_tests::authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacement",
+      "remote::driver_replacement_tests::authored_thermal_prefix_survives_driver_loss_after_its_commit",
+      "remote::driver_replacement_tests::authored_thermal_prefix_survives_lost_checkpoint_acknowledgement",
+      "remote::driver_replacement_tests::committed_structural_and_modal_work_survives_checkpoint_acknowledgement_loss",
+      "remote::driver_replacement_tests::exact_meshing_admission_deadline_expires_before_replacement_dispatch",
+      "remote::driver_replacement_tests::exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses",
+      "remote::driver_replacement_tests::exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacement",
+      "remote::driver_replacement_tests::exact_meshing_root_preserves_committed_pool_task_after_encrypted_driver_replacement",
+      "remote::driver_replacement_tests::observer::lost_original_parent_cannot_supply_a_replacement_clock_end",
+      "remote::driver_replacement_tests::observer::original_parent_observer_survives_actual_worker_loss_and_driver_replacement",
+      "remote::driver_replacement_tests::random_response_driver_replacement_replays_on_a_different_worker",
+      "remote::driver_replacement_tests::rejected_structural_and_modal_checkpoint_does_not_grant_commit_authority",
+      "remote::driver_replacement_tests::rejected_thermal_checkpoint_cannot_be_restored_as_a_committed_prefix",
+      "remote::driver_replacement_tests::response_spectrum_driver_replacement_replays_on_a_different_worker",
+      "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
+      "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
+    ],
+    "log_sha256": "8b986093598f4f214911dc7834fb0085b59f604f6fa63fde4f89732577788ac8",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.driver-recovery-physics.log",
+    "artifacts": [
+      {
+        "sha256": "cf36dc59e30a495ee9345c841f92dc19742530d41437765ad07310a4af5ad11b",
+        "bytes": 572364368,
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/driver-recovery-physics",
+        "executed_path": "/home/nallana/rm1293/targets/release/deps/runmat_execution_runner_native-255843cfc32d581f"
+      }
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat-execution-runner-native",
+      "--lib",
+      "remote::driver_replacement_tests::",
+      "--",
+      "--test-threads=1"
+    ],
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "profile": {
+      "release": true,
+      "debug": 0,
+      "strip": "symbols",
+      "cargo_build_jobs": 8,
+      "incremental": false
+    },
+    "selected_filter": "remote::driver_replacement_tests::",
+    "inputs": {
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "source_verification": {
+      "status": "verified",
+      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+      "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+      "files": 27272,
+      "before_and_after": true
+    },
+    "source_scope": "All 27,272 canonical source files match the frozen consolidated snapshot before and after the required authored, recovery and bounded exact-kernel cohorts. Retained executables have byte-verified copies. Credentials and .env files are excluded from the source transfer."
+  },
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "190b41b66e4260e756e5a6187443feb05e3d1ae4f8b261e02a9ee57b831ab6da",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Conserves the recorded scientific measurements across the reviewed process-retirement lifecycle change. Apple group-signal EPERM commits to bounded observation and retains its error; positive leader/group retirement is still required. Linux and Windows retain their previous signal/error decisions. No solver arithmetic, scientific inputs, dependencies, compiler settings or measured thresholds change. The direct in-process circuit Session workload and CAD drawing host workload do not invoke this child-retirement path. The actual Mac meshing and supervisor conformance executables pass with unchanged assertions; they qualify the affected native path separately from these conserved scientific measurements.",
+    "review": {
+      "path": "qualification/scientific/reviews/process-retirement-20261112-driver-recovery-physics.json",
+      "sha256": "861d719259bbcab69b24420f3efa70747ffc1ced9a3e61d5189ae4cf41526d81"
+    }
+  }
+}

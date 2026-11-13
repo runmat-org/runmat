@@ -23,6 +23,11 @@ pub(super) struct PersistentNameIndex {
     surfaces: BTreeMap<u64, SurfaceEvaluatorId>,
     trims: BTreeMap<u64, TrimClassifierId>,
     coedges: BTreeMap<(u64, u64), String>,
+    /// Coedge names per occurrence. Public coedge ids are scoped by the occurrence path, so
+    /// coincident faces of different parts may share a standalone name; within one occurrence a
+    /// repeated name is ambiguous.
+    coedge_occurrences: BTreeSet<(u64, String)>,
+    ambiguous_coedges: bool,
     pcurves: BTreeMap<(u64, u64), PcurveEvaluatorId>,
 }
 
@@ -34,22 +39,25 @@ impl PersistentNameIndex {
             surfaces: BTreeMap::new(),
             trims: BTreeMap::new(),
             coedges: BTreeMap::new(),
+            coedge_occurrences: BTreeSet::new(),
+            ambiguous_coedges: false,
             pcurves: BTreeMap::new(),
         };
-        for vertex in &payload.vertices {
+        let coincident = CoincidentNames::new(payload);
+        for (vertex, digest) in payload.vertices.iter().zip(&coincident.vertices) {
             index.insert_shape(
                 vertex.occurrence_index,
                 PersistentEntityKind::Vertex,
                 vertex.shape_key,
-                &vertex.identity_digest,
+                digest,
             )?;
         }
-        for edge in &payload.edges {
+        for (edge, digest) in payload.edges.iter().zip(&coincident.edges) {
             let name = index.insert_shape(
                 edge.occurrence_index,
                 PersistentEntityKind::Edge,
                 edge.shape_key,
-                &edge.identity_digest,
+                digest,
             )?;
             insert_consistent(
                 &mut index.curves,
@@ -58,12 +66,12 @@ impl PersistentNameIndex {
                 "curve persistent name",
             )?;
         }
-        for face in &payload.faces {
+        for (face, digest) in payload.faces.iter().zip(&coincident.faces) {
             let name = index.insert_shape(
                 face.occurrence_index,
                 PersistentEntityKind::Face,
                 face.shape_key,
-                &face.identity_digest,
+                digest,
             )?;
             insert_consistent(
                 &mut index.surfaces,
@@ -78,20 +86,20 @@ impl PersistentNameIndex {
                 "trim persistent name",
             )?;
         }
-        for wire in &payload.wires {
+        for (wire, digest) in payload.wires.iter().zip(&coincident.wires) {
             index.insert_shape(
                 wire.occurrence_index,
                 PersistentEntityKind::Wire,
                 wire.shape_key,
-                &wire.identity_digest,
+                digest,
             )?;
         }
-        for shell in &payload.shells {
+        for (shell, digest) in payload.shells.iter().zip(&coincident.shells) {
             index.insert_shape(
                 shell.occurrence_index,
                 PersistentEntityKind::Shell,
                 shell.shape_key,
-                &shell.identity_digest,
+                digest,
             )?;
         }
         for solid in &payload.solids {
@@ -252,7 +260,13 @@ impl PersistentNameIndex {
                 hasher.update(component.as_bytes());
             }
             hasher.update([u8::from(coedge.reversed), coedge.seam_image as u8]);
-            let name = format!("occt:{:x}", hasher.finalize());
+            let name = format!("occt:{}", hex::encode(hasher.finalize()));
+            if !self
+                .coedge_occurrences
+                .insert((coedge.occurrence_index, name.clone()))
+            {
+                self.ambiguous_coedges = true;
+            }
             insert_consistent(
                 &mut self.coedges,
                 (coedge.wire_key, coedge.coedge_key),
@@ -285,19 +299,175 @@ impl PersistentNameIndex {
         let mut names = BTreeSet::new();
         for ((occurrence, kind, _), name) in &self.shapes {
             if !names.insert((*occurrence, *kind, name)) {
-                return Err(invalid(
-                    "OCCT topology contains ambiguous coincident persistent names",
-                ));
+                return Err(invalid(format!(
+                    "OCCT topology contains ambiguous coincident persistent names: two distinct {kind:?} entities serialize identically"
+                )));
             }
         }
-        let mut coedges = BTreeSet::new();
-        for name in self.coedges.values() {
-            if !coedges.insert(name) {
-                return Err(invalid("OCCT coedge persistent names are ambiguous"));
-            }
+        if self.ambiguous_coedges {
+            return Err(invalid("OCCT coedge persistent names are ambiguous"));
         }
         Ok(())
     }
+}
+
+/// Content digests made unique within each occurrence.
+///
+/// A shape's standalone digest is its serialized content, so two distinct shapes with the same
+/// content collide: two vertices at one point (edge loops touching at a point), or the coincident
+/// faces of two solids that a STEP writer stores as separate copies (a part and the cavity of the
+/// air around it). Such shapes differ in where they are used, so a colliding shape is named by
+/// its digest together with the sorted names of the shapes that use it, resolved top-down:
+/// shells by their solids, faces by their shells, wires by their face, edges by the faces whose
+/// boundaries use them, and vertices by their edges. A shape with a unique digest keeps it.
+struct CoincidentNames {
+    vertices: Vec<Vec<u8>>,
+    edges: Vec<Vec<u8>>,
+    faces: Vec<Vec<u8>>,
+    wires: Vec<Vec<u8>>,
+    shells: Vec<Vec<u8>>,
+}
+
+impl CoincidentNames {
+    fn new(payload: &bridge::OcctExactShapePayload) -> Self {
+        let mut solid_parents = BTreeMap::<(u64, u64), Vec<Vec<u8>>>::new();
+        for solid in &payload.solids {
+            for shell in std::iter::once(&solid.outer_shell_key).chain(&solid.void_shell_keys) {
+                solid_parents
+                    .entry((solid.occurrence_index, *shell))
+                    .or_default()
+                    .push(solid.identity_digest.clone());
+            }
+        }
+        let shells = refine(
+            b"runmat.occt-coincident-shell-name\0",
+            payload.shells.iter().map(|shell| {
+                (
+                    shell.occurrence_index,
+                    shell.shape_key,
+                    &shell.identity_digest,
+                )
+            }),
+            &solid_parents,
+        );
+        let mut shell_parents = BTreeMap::<(u64, u64), Vec<Vec<u8>>>::new();
+        for (shell, digest) in payload.shells.iter().zip(&shells) {
+            for face in &shell.face_keys {
+                shell_parents
+                    .entry((shell.occurrence_index, *face))
+                    .or_default()
+                    .push(digest.clone());
+            }
+        }
+        let faces = refine(
+            b"runmat.occt-coincident-face-name\0",
+            payload
+                .faces
+                .iter()
+                .map(|face| (face.occurrence_index, face.shape_key, &face.identity_digest)),
+            &shell_parents,
+        );
+        let face_digest = payload
+            .faces
+            .iter()
+            .zip(&faces)
+            .map(|(face, digest)| ((face.occurrence_index, face.shape_key), digest.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let mut wire_parents = BTreeMap::<(u64, u64), Vec<Vec<u8>>>::new();
+        for wire in &payload.wires {
+            if let Some(digest) = face_digest.get(&(wire.occurrence_index, wire.face_key)) {
+                wire_parents
+                    .entry((wire.occurrence_index, wire.shape_key))
+                    .or_default()
+                    .push(digest.clone());
+            }
+        }
+        let wires = refine(
+            b"runmat.occt-coincident-wire-name\0",
+            payload
+                .wires
+                .iter()
+                .map(|wire| (wire.occurrence_index, wire.shape_key, &wire.identity_digest)),
+            &wire_parents,
+        );
+        let mut edge_parents = BTreeMap::<(u64, u64), Vec<Vec<u8>>>::new();
+        for coedge in &payload.coedges {
+            if let Some(digest) = face_digest.get(&(coedge.occurrence_index, coedge.face_key)) {
+                edge_parents
+                    .entry((coedge.occurrence_index, coedge.edge_key))
+                    .or_default()
+                    .push(digest.clone());
+            }
+        }
+        let edges = refine(
+            b"runmat.occt-coincident-edge-name\0",
+            payload
+                .edges
+                .iter()
+                .map(|edge| (edge.occurrence_index, edge.shape_key, &edge.identity_digest)),
+            &edge_parents,
+        );
+        let mut vertex_parents = BTreeMap::<(u64, u64), Vec<Vec<u8>>>::new();
+        for (edge, digest) in payload.edges.iter().zip(&edges) {
+            for key in [edge.start_vertex_key, edge.end_vertex_key] {
+                if key != 0 {
+                    vertex_parents
+                        .entry((edge.occurrence_index, key))
+                        .or_default()
+                        .push(digest.clone());
+                }
+            }
+        }
+        let vertices = refine(
+            b"runmat.occt-coincident-vertex-name\0",
+            payload.vertices.iter().map(|vertex| {
+                (
+                    vertex.occurrence_index,
+                    vertex.shape_key,
+                    &vertex.identity_digest,
+                )
+            }),
+            &vertex_parents,
+        );
+        Self {
+            vertices,
+            edges,
+            faces,
+            wires,
+            shells,
+        }
+    }
+}
+
+fn refine<'a>(
+    domain: &[u8],
+    shapes: impl Iterator<Item = (u64, u64, &'a Vec<u8>)> + Clone,
+    parents: &BTreeMap<(u64, u64), Vec<Vec<u8>>>,
+) -> Vec<Vec<u8>> {
+    let mut counts = BTreeMap::<(u64, &[u8]), usize>::new();
+    for (occurrence, _, digest) in shapes.clone() {
+        *counts.entry((occurrence, digest.as_slice())).or_default() += 1;
+    }
+    shapes
+        .map(|(occurrence, key, digest)| {
+            let users = parents.get(&(occurrence, key));
+            if counts[&(occurrence, digest.as_slice())] < 2 || users.is_none() {
+                // Unique, or nothing distinguishes it: the uniqueness check reports the latter.
+                return digest.clone();
+            }
+            let mut users = users.cloned().unwrap_or_default();
+            users.sort_unstable();
+            users.dedup();
+            let mut hasher = Sha256::new();
+            hasher.update(domain);
+            hasher.update(digest);
+            for user in users {
+                hasher.update((user.len() as u64).to_be_bytes());
+                hasher.update(user);
+            }
+            hasher.finalize().to_vec()
+        })
+        .collect()
 }
 
 pub(super) fn digest_name(digest: &[u8]) -> Result<String, GeometryImportError> {

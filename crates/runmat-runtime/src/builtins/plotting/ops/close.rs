@@ -2,15 +2,18 @@
 
 use std::collections::BTreeSet;
 
+#[cfg(test)]
 use runmat_value::Value;
 
-use super::op_common::figure_actions::{parse_close_action, FigureAction};
-use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
 #[cfg(test)]
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use super::op_common::figure_actions::parse_close_action;
+use super::op_common::figure_actions::{parse_close_action_view, FigureAction};
+use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
 
-pub(crate) fn close_plot_targets(rest: &[Value]) -> crate::BuiltinResult<f64> {
-    match parse_close_action(rest)? {
+pub(crate) fn close_plot_targets(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<f64> {
+    match parse_close_action_view(rest)? {
         FigureAction::Current => {
             if figure_handles().is_empty() {
                 return Ok(1.0);
@@ -53,8 +56,11 @@ pub(crate) mod tests {
         figure::figure_builtin, lock_plot_test_context, reset_hold_state_for_run, reset_plot_state,
         tests::ensure_plot_test_env, PlotTestLockGuard,
     };
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerStorage, Tensor};
+
+    fn close_plot_targets(values: &[Value]) -> crate::BuiltinResult<f64> {
+        super::close_plot_targets(crate::call::FunctionArgumentView::from_slice(values))
+    }
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_test_context();
@@ -126,7 +132,7 @@ pub(crate) mod tests {
     #[test]
     fn parse_all_flag() {
         let _guard = setup_plot_tests();
-        let values = vec![Value::String("all".to_string())];
+        let values = vec![Value::String("all".to_string().into())];
         assert!(matches!(
             parse_close_action(&values).unwrap(),
             FigureAction::All
@@ -147,13 +153,25 @@ pub(crate) mod tests {
     #[test]
     fn close_explicit_and_all_forms_return_scalar_one_on_success() {
         let _guard = setup_plot_tests();
-        figure_builtin(vec![Value::Num(7.0)]).expect("figure 7");
+        figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7.0)]),
+        )
+        .expect("figure 7");
         assert_eq!(close_plot_targets(&[Value::Num(7.0)]).unwrap(), 1.0);
 
-        figure_builtin(vec![Value::Num(8.0)]).expect("figure 8");
-        figure_builtin(vec![Value::Num(9.0)]).expect("figure 9");
+        figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(8.0)]),
+        )
+        .expect("figure 8");
+        figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(9.0)]),
+        )
+        .expect("figure 9");
         assert_eq!(
-            close_plot_targets(&[Value::String("all".to_string())]).unwrap(),
+            close_plot_targets(&[Value::String("all".to_string().into())]).unwrap(),
             1.0
         );
     }
@@ -173,10 +191,30 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn close_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::Num
+    fn close_catalog_infers_host_double_status() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(1)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 1],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::CLOSE_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Scalar);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 }

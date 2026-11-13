@@ -9,134 +9,25 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ASIN_CHARACTER_INPUT_EXTENSION, ASIN_ERROR_INTERNAL,
+    ASIN_ERROR_INVALID_INPUT, ASIN_GPU_REAL_COMPLEX_EXTENSION, ASIN_INTEGER_INPUT_EXTENSION,
+    ASIN_LOGICAL_INPUT_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{ASIN_DESCRIPTOR, ASIN_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "asin";
-const ZERO_EPS: f64 = 1e-12;
-const DOMAIN_TOL: f64 = 1e-12;
-
-const ASIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise inverse sine result.",
-}];
-
-const ASIN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions.",
-}];
-
-const ASIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = asin(X)",
-    inputs: &ASIN_INPUTS,
-    outputs: &ASIN_OUTPUT,
-}];
-
-const ASIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASIN.INVALID_INPUT",
-    identifier: Some("RunMat:asin:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/char/complex data.",
-    message: "asin: invalid input",
-};
-
-const ASIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASIN.INTERNAL",
-    identifier: Some("RunMat:asin:Internal"),
-    when: "Internal gather/reduction/conversion/allocation flow failed.",
-    message: "asin: internal error",
-};
-
-const ASIN_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASIN.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:asin:TooManyOutputs"),
-    when: "More than one output is requested.",
-    message: "asin: too many output arguments",
-};
-const ASIN_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ASIN_ERROR_INVALID_INPUT,
-    ASIN_ERROR_INTERNAL,
-    ASIN_ERROR_TOO_MANY_OUTPUTS,
-];
-
-const ASIN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "asin-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "asin with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AsinIntegerInputExtension"),
-};
-const ASIN_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "asin-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "asin with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AsinLogicalInputExtension"),
-};
-const ASIN_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "asin-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "asin with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AsinCharacterInputExtension"),
-};
-const ASIN_GPU_REAL_COMPLEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "asin-gpu-real-complex-promotion",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "asin resident real input that requires complex output is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AsinGpuRealComplexPromotionExtension"),
-};
-const ASIN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    ASIN_INTEGER_INPUT_EXTENSION,
-    ASIN_LOGICAL_INPUT_EXTENSION,
-    ASIN_CHARACTER_INPUT_EXTENSION,
-    ASIN_GPU_REAL_COMPLEX_EXTENSION,
-];
-const ASIN_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single/double; RunMat mode additionally accepts every real integer class.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = asin(integer_X)",
-        inputs: &ASIN_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Authoritative integer values enter an explicit binary64 inverse-sine boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider.",
-    }];
-
-pub const ASIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ASIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ASIN_ERRORS,
-};
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::asin")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "asin",
@@ -165,36 +56,28 @@ fn asin_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asin")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::asin",
+    host_resources = crate::builtins::math::host_resources::real_promoting_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "asin",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: Some(FusionKernelTemplate {
-        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("asin({input})"))
-        },
-    }),
+    elementwise: None,
     reduction: None,
-    emits_nan: false,
-    notes: "Fusion planner emits WGSL asin calls; providers can substitute custom kernels when available.",
+    emits_nan: true,
+    notes: "Fusion is disabled because real input outside [-1, 1] must promote to a complex result instead of producing NaN.",
 };
 
 #[runtime_builtin(
     name = "asin",
-    category = "math/trigonometry",
-    summary = "Element-wise inverse sine, with complex promotion outside [-1, 1].",
-    keywords = "asin,inverse sine,arcsin,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::asin::ASIN_DESCRIPTOR),
-    extensions(ASIN_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::trigonometry::asin::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::asin"
 )]
-async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
+async fn asin_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -203,7 +86,34 @@ async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
         &ASIN_LOGICAL_INPUT_EXTENSION,
         &ASIN_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "asin")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::ASIN_CATALOG_ENTRY.identity,
+        &runmat_builtins::ASIN_ERROR_INVALID_INPUT,
+    )?;
+    crate::builtins::common::real_unary_preparation::execute(
+        runtime.as_ref(),
+        &runmat_builtins::ASIN_CATALOG_ENTRY,
+        runmat_types::ScalarUnaryMath::Asin,
+        crate::context::preparation::RealUnaryPublication::AutomaticComplexHost,
+        super::inverse_helpers::real_fallback::adapter(
+            BUILTIN_NAME,
+            &ASIN_GPU_REAL_COMPLEX_EXTENSION,
+            &runmat_builtins::ASIN_ERROR_INTERNAL,
+        ),
+        value,
+        true,
+        |value: f32| Ok(asin_real_parts_f32(value)),
+        |value: f64| Ok(asin_real_parts(value)),
+        |value| async move {
+            let output = asin_execute(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
+    )
+    .await
+}
+
+async fn asin_execute(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => asin_gpu(handle).await,
         Value::Complex(re, im) => Ok(asin_complex_value(re, im)),
@@ -218,97 +128,85 @@ async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return super::inverse_helpers::resident_complex::compute(handle, BUILTIN_NAME, |value| {
+            match value {
+                Value::Complex(re, im) => Ok(asin_complex_value(re, im)),
+                Value::ComplexTensor(tensor) => asin_complex_tensor(tensor),
+                other => asin_real(other),
+            }
+        })
+        .await;
+    }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
-        return super::inverse_helpers::gather_compute_restore(
+        return super::inverse_helpers::real_fallback::compute(
             handle,
             BUILTIN_NAME,
+            &ASIN_GPU_REAL_COMPLEX_EXTENSION,
             asin_tensor_real,
         )
         .await;
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle).await {
-            Ok(false) => {
-                if let Ok(out) = provider.unary_asin(&handle).await {
-                    return Ok(Value::GpuTensor(out));
+        match detect_gpu_requires_complex(provider, &handle).await? {
+            Some(false) => match provider.unary_asin(&handle).await {
+                Ok(output) => {
+                    return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
+                        provider,
+                        &handle,
+                        output,
+                        BUILTIN_NAME,
+                    )
                 }
-            }
-            Ok(true) => {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &ASIN_GPU_REAL_COMPLEX_EXTENSION,
-                    BUILTIN_NAME,
-                )?;
-                return super::inverse_helpers::gather_compute_restore(
+                Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
+                Err(error) => {
+                    return Err(asin_error_with_detail(
+                        &ASIN_ERROR_INTERNAL,
+                        format!("provider unary_asin failed: {error}"),
+                    ))
+                }
+            },
+            Some(true) => {
+                return super::inverse_helpers::real_fallback::compute(
                     handle,
                     BUILTIN_NAME,
+                    &ASIN_GPU_REAL_COMPLEX_EXTENSION,
                     asin_tensor_real,
                 )
                 .await;
             }
-            Err(_) => {
+            None => {
                 // Fall back to host path below.
             }
         }
     }
-    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, asin_tensor_real).await
+    super::inverse_helpers::real_fallback::compute(
+        handle,
+        BUILTIN_NAME,
+        &ASIN_GPU_REAL_COMPLEX_EXTENSION,
+        asin_tensor_real,
+    )
+    .await
 }
 
 async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> BuiltinResult<bool> {
-    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
-        asin_error_with_detail(&ASIN_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
-    })?;
-    let max_handle = match provider.reduce_max(handle).await {
-        Ok(handle) => handle,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            return Err(asin_error_with_detail(
-                &ASIN_ERROR_INTERNAL,
-                format!("reduce_max failed: {err}"),
-            ));
-        }
-    };
-    let min_host = match gpu_helpers::download_native_values_async(provider, &min_handle).await {
-        Ok(host) => host,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(asin_error_with_detail(
-                &ASIN_ERROR_INTERNAL,
-                format!("reduce_min download failed: {err}"),
-            ));
-        }
-    };
-    let max_host = match gpu_helpers::download_native_values_async(provider, &max_handle).await {
-        Ok(host) => host,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(asin_error_with_detail(
-                &ASIN_ERROR_INTERNAL,
-                format!("reduce_max download failed: {err}"),
-            ));
-        }
-    };
-    let _ = provider.free(&min_handle);
-    let _ = provider.free(&max_handle);
-    if min_host.data.iter().any(|value| value.is_nan())
-        || max_host.data.iter().any(|value| value.is_nan())
-    {
-        return Err(asin_error_with_detail(
-            &ASIN_ERROR_INTERNAL,
-            "reduction results contained NaN",
-        ));
-    }
-    Ok(min_host
-        .data
-        .iter()
-        .chain(&max_host.data)
-        .any(|value| value.is_outside_closed_unit_interval(DOMAIN_TOL)))
+) -> BuiltinResult<Option<bool>> {
+    super::inverse_helpers::resident_range::requires_complex(
+        provider,
+        handle,
+        super::inverse_helpers::resident_range::RealDomain::ClosedUnitInterval,
+        gpu_helpers::RealProbeDiagnostic {
+            builtin: runmat_builtins::ASIN_CATALOG_ENTRY.identity,
+            internal_error: &ASIN_ERROR_INTERNAL,
+        },
+    )
+    .await
 }
 
 fn asin_real(value: Value) -> BuiltinResult<Value> {
@@ -321,20 +219,30 @@ fn asin_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     super::inverse_helpers::map_real_tensor_promoting(
         tensor,
         BUILTIN_NAME,
-        |value| {
-            let result = Complex64::new(value, 0.0).asin();
-            (zero_small(result.re), zero_small(result.im))
-        },
-        |value| {
-            let result = num_complex::Complex32::new(value, 0.0).asin();
-            (zero_small_f32(result.re), zero_small_f32(result.im))
-        },
+        asin_real_parts,
+        asin_real_parts_f32,
     )
+}
+
+fn asin_real_parts(value: f64) -> (f64, f64) {
+    if value.is_nan() || (-1.0..=1.0).contains(&value) {
+        return (value.asin(), 0.0);
+    }
+    let result = Complex64::new(value, 0.0).asin();
+    (result.re, result.im)
+}
+
+fn asin_real_parts_f32(value: f32) -> (f32, f32) {
+    if value.is_nan() || (-1.0..=1.0).contains(&value) {
+        return (value.asin(), 0.0);
+    }
+    let result = num_complex::Complex32::new(value, 0.0).asin();
+    (result.re, result.im)
 }
 
 fn asin_complex_value(re: f64, im: f64) -> Value {
     let result = Complex64::new(re, im).asin();
-    Value::Complex(zero_small(result.re), zero_small(result.im))
+    Value::Complex(result.re, result.im)
 }
 
 fn asin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -343,42 +251,29 @@ fn asin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         BUILTIN_NAME,
         |(real, imag)| {
             let result = Complex64::new(real, imag).asin();
-            (zero_small(result.re), zero_small(result.im))
+            (result.re, result.im)
         },
         |(real, imag)| {
             let result = num_complex::Complex32::new(real, imag).asin();
-            (zero_small_f32(result.re), zero_small_f32(result.im))
+            (result.re, result.im)
         },
     )?;
     Ok(crate::builtins::common::random_args::complex_tensor_into_value(tensor))
 }
 
 fn asin_char_array(ca: CharArray) -> BuiltinResult<Value> {
-    if ca.data.is_empty() {
+    if ca.data().is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
             .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = ca
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
     asin_tensor_real(tensor)
-}
-
-fn zero_small(value: f64) -> f64 {
-    if value.abs() < ZERO_EPS {
-        0.0
-    } else {
-        value
-    }
-}
-
-fn zero_small_f32(value: f32) -> f32 {
-    if value.abs() < ZERO_EPS as f32 {
-        0.0
-    } else {
-        value
-    }
 }
 
 #[cfg(test)]
@@ -386,41 +281,41 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn asin_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::asin_builtin(value))
+        block_on(super::asin_builtin(None, value)).map(|owned| owned.value().clone())
     }
 
     #[test]
     fn asin_extensions_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let integer = block_on(super::asin_builtin(Value::Int(runmat_value::IntValue::I8(
-            1,
-        ))))
+        let integer = block_on(super::asin_builtin(
+            None,
+            Value::Int(runmat_value::IntValue::I8(1)),
+        ))
         .expect_err("integer input must be gated");
         assert_eq!(
             integer.identifier(),
             ASIN_INTEGER_INPUT_EXTENSION.error_identifier
         );
-        let logical = block_on(super::asin_builtin(Value::Bool(true)))
+        let logical = block_on(super::asin_builtin(None, Value::Bool(true)))
             .expect_err("logical input must be gated");
         assert_eq!(
             logical.identifier(),
             ASIN_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
-        let character = block_on(super::asin_builtin(Value::CharArray(chars)))
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
+        let character = block_on(super::asin_builtin(None, Value::CharArray(chars)))
             .expect_err("character input must be gated");
         assert_eq!(
             character.identifier(),
             ASIN_CHARACTER_INPUT_EXTENSION.error_identifier
         );
-        let _outputs = crate::output_count::push_output_count(Some(2));
-        let arity =
-            block_on(super::asin_builtin(Value::Num(0.0))).expect_err("excess outputs must reject");
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let arity = block_on(super::asin_builtin(None, Value::Num(0.0)))
+            .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), ASIN_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
@@ -446,33 +341,7 @@ pub(crate) mod tests {
             .map(|sig| sig.label)
             .collect();
         assert!(labels.contains(&"Y = asin(X)"));
-    }
-
-    #[test]
-    fn asin_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn asin_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
+        assert!(FUSION_SPEC.elementwise.is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -483,6 +352,22 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 0.5f64.asin()).abs() < 1e-12),
             other => panic!("unexpected result {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn asin_preserves_small_real_values_and_real_nan() {
+        let tiny = 1e-13;
+        let Value::Num(result) = asin_builtin(Value::Num(tiny)).expect("tiny asin") else {
+            panic!("tiny real input must remain real")
+        };
+        assert!(result != 0.0);
+        assert!((result - tiny.asin()).abs() < 1e-28);
+
+        let Value::Num(result) = asin_builtin(Value::Num(f64::NAN)).expect("NaN asin") else {
+            panic!("real NaN input must remain real")
+        };
+        assert!(result.is_nan());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -506,7 +391,7 @@ pub(crate) mod tests {
         let result = asin_builtin(Value::Tensor(tensor)).expect("asin matrix");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [0.0, (-0.5f64).asin(), (0.75f64).asin(), 1.0f64.asin()];
                 for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
@@ -527,7 +412,7 @@ pub(crate) mod tests {
 
         match asin_builtin(Value::Tensor(tensor)).expect("asin") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [
                     -std::f64::consts::FRAC_PI_2,
                     0.0,
@@ -550,10 +435,10 @@ pub(crate) mod tests {
 
         match asin_builtin(Value::Tensor(tensor)).expect("asin") {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 let expected = Complex64::new(2.0, 0.0).asin();
-                assert!((out.materialize_f64()[0].0 - zero_small(expected.re)).abs() < 1e-12);
-                assert!((out.materialize_f64()[0].1 - zero_small(expected.im)).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].0 - expected.re).abs() < 1e-12);
+                assert!((out.materialize_f64()[0].1 - expected.im).abs() < 1e-12);
                 assert_eq!(out.materialize_f64()[1], (0.0, 0.0));
             }
             other => panic!("expected complex tensor result, got {other:?}"),
@@ -578,7 +463,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asin_char_array_complex_promotion() {
-        let chars = CharArray::new("B".chars().collect(), 1, 1).expect("char");
+        let chars = CharArray::from_unicode_scalars("B".chars().collect(), 1, 1).expect("char");
         let result = asin_builtin(Value::CharArray(chars)).expect("asin char");
         match result {
             Value::Complex(re, im) => {
@@ -604,9 +489,30 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn asin_integer_scalar() {
-        let result = asin_builtin(Value::Int(IntValue::I32(0))).expect("asin int");
-        assert_eq!(result, Value::Num(0.0));
+    fn asin_all_integer_scalar_classes_cross_the_double_boundary() {
+        for value in [
+            IntValue::I8(0),
+            IntValue::I16(0),
+            IntValue::I32(0),
+            IntValue::I64(0),
+            IntValue::U8(0),
+            IntValue::U16(0),
+            IntValue::U32(0),
+            IntValue::U64(0),
+        ] {
+            assert_eq!(
+                asin_builtin(Value::Int(value)).expect("asin int"),
+                Value::Num(0.0)
+            );
+        }
+        let Value::Complex(re, im) =
+            asin_builtin(Value::Int(IntValue::U64(u64::MAX))).expect("wide asin")
+        else {
+            panic!("wide integer should produce complex double")
+        };
+        let expected = Complex64::new(u64::MAX as f64, 0.0).asin();
+        assert!((re - expected.re).abs() < 1e-12);
+        assert!((im - expected.im).abs() < 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -630,12 +536,22 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, -0.75, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = asin_builtin(Value::GpuTensor(handle)).expect("asin gpu");
-            let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            let Value::GpuTensor(result_handle) =
+                asin_builtin(Value::GpuTensor(handle)).expect("asin gpu")
+            else {
+                panic!("expected resident result")
+            };
+            assert_eq!(result_handle.device_id(), provider.device_id());
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&result_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
+            let gathered = test_support::gather(Value::GpuTensor(result_handle)).expect("gather");
+            assert_eq!(gathered.shape(), &[2, 2]);
             let expected = [0.0, 0.5f64.asin(), (-0.75f64).asin(), 1.0f64.asin()];
             for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-12);
@@ -647,19 +563,29 @@ pub(crate) mod tests {
     #[test]
     fn asin_gpu_outside_domain_falls_back() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.2, -1.3], vec![2, 1]).unwrap();
+            let tensor = Tensor::new(vec![1.0 + 5e-13, -1.3], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = asin_builtin(Value::GpuTensor(handle)).expect("asin gpu complex");
-            assert!(matches!(result, Value::GpuTensor(_)));
+            let Value::GpuTensor(result_handle) =
+                asin_builtin(Value::GpuTensor(handle)).expect("asin gpu complex")
+            else {
+                panic!("expected resident complex result")
+            };
+            assert_eq!(result_handle.device_id(), provider.device_id());
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&result_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
+            let result = Value::GpuTensor(result_handle);
             let gathered = block_on(crate::dispatcher::gather_if_needed_async(&result))
                 .expect("gather complex result");
             match gathered {
                 Value::ComplexTensor(ct) => {
-                    assert_eq!(ct.shape, vec![2, 1]);
+                    assert_eq!(ct.shape(), &[2, 1]);
                 }
                 Value::Complex(_, _) => {}
                 other => panic!("expected complex result, got {other:?}"),
@@ -671,25 +597,23 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn asin_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
         let t = Tensor::new(vec![-1.0, -0.5, 0.0, 0.5, 1.0], vec![5, 1]).unwrap();
         let cpu = asin_real(Value::Tensor(t.clone())).expect("asin cpu");
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let h = provider.upload(&view).unwrap();
         let gpu = block_on(asin_gpu(h)).expect("asin gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                assert_eq!(gt.shape(), ct.shape());
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,
                 };

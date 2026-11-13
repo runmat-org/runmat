@@ -20,7 +20,10 @@ fn source_edge_split_recovery_evaluates_refill_after_splitting_incident_tetrahed
     .expect("source-edge split recovery should evaluate refill candidates");
 
     assert_eq!(recovery.split.split_node.node_id, 4);
-    assert_eq!(recovery.split.split_node.coordinates_m, [0.5, 0.0, 0.0]);
+    assert_eq!(
+        recovery.split.split_node.coordinates_m.canonical_value(),
+        [0.5, 0.0, 0.0]
+    );
     assert_eq!(recovery.split.source_tetrahedra.len(), 2);
     assert_eq!(recovery.split.cavity.removed_tetrahedron_ids, vec![2, 3]);
     assert!(recovery.refill_evaluation.refill.is_some());

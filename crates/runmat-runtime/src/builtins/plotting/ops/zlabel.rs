@@ -1,219 +1,26 @@
+use runmat_builtins::ZLABEL_INTEGER_AXES_EXTENSION;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    ZLABEL_DESCRIPTOR, ZLABEL_ERROR_INTERNAL, ZLABEL_ERROR_INVALID_ARGUMENT,
+    ZLABEL_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
 use runmat_value::Value;
 
-use super::op_common::{map_figure_error, parse_numeric_text_command};
+use super::op_common::{annotation_error, map_figure_error, parse_numeric_text_command};
 use super::state::set_zlabel_for_axes;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-
-const ZLABEL_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "zlabel-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Allow a typed-integer alias for an encoded axes handle",
-    error_identifier: Some("RunMat:compatibility:ZlabelIntegerAxesHandleExtension"),
-};
-pub const ZLABEL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ZLABEL_INTEGER_AXES_EXTENSION];
-const ZLABEL_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "txt",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "A scalar integer label is formatted from its exact signed or unsigned decimal value.",
-    }];
-const ZLABEL_INTEGER_FONT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "FontSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented for positive FontSize values.",
-    }];
-const ZLABEL_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
-    }];
-pub const ZLABEL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = zlabel(integer_txt)",
-        inputs: &ZLABEL_INTEGER_TEXT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact decimal spelling becomes the stored String property.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = zlabel(..., 'FontSize', integer_size)",
-        inputs: &ZLABEL_INTEGER_FONT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The validated positive size crosses the graphics scalar boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = zlabel(integer_ax, txt, ...)",
-        inputs: &ZLABEL_INTEGER_AXES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Strict mode rejects before graphics state access.",
-    },
-];
-
-const ZLABEL_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created/updated zlabel object.",
-}];
-
-const ZLABEL_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Label text (string/char/cellstr-like multiline forms).",
-}];
-
-const ZLABEL_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-];
-
-const ZLABEL_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const ZLABEL_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const ZLABEL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = zlabel(txt)",
-        inputs: &ZLABEL_INPUTS_TEXT,
-        outputs: &ZLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = zlabel(ax, txt)",
-        inputs: &ZLABEL_INPUTS_AX_TEXT,
-        outputs: &ZLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = zlabel(txt, Name, Value, ...)",
-        inputs: &ZLABEL_INPUTS_TEXT_PROPS,
-        outputs: &ZLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = zlabel(ax, txt, Name, Value, ...)",
-        inputs: &ZLABEL_INPUTS_AX_TEXT_PROPS,
-        outputs: &ZLABEL_OUTPUT_HANDLE,
-    },
-];
-
-const ZLABEL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZLABEL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:zlabel:InvalidArgument"),
-    when: "Axes handle, text payload, or property/value arguments are invalid.",
-    message: "zlabel: invalid argument",
-};
-
-const ZLABEL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZLABEL.INTERNAL",
-    identifier: Some("RunMat:zlabel:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "zlabel: internal operation failed",
-};
-
-const ZLABEL_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ZLABEL_ERROR_INVALID_ARGUMENT, ZLABEL_ERROR_INTERNAL];
-
-pub const ZLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ZLABEL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ZLABEL_ERRORS,
-};
 
 #[runtime_builtin(
     name = "zlabel",
-    category = "plotting",
-    summary = "Set z-axis label text for current or specified axes.",
-    keywords = "zlabel,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::zlabel::ZLABEL_DESCRIPTOR),
-    extensions(crate::builtins::plotting::zlabel::ZLABEL_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::zlabel::ZLABEL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::zlabel"
 )]
-pub fn zlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub fn zlabel_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &ZLABEL_DESCRIPTOR,
+        &ZLABEL_ERROR_TOO_MANY_OUTPUTS,
+        "zlabel",
+    )?;
     if args.len() >= 2
         && args.len().is_multiple_of(2)
         && args
@@ -225,14 +32,16 @@ pub fn zlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "zlabel",
         )?;
     }
-    let command = parse_numeric_text_command("zlabel", &args)?;
-    set_zlabel_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| map_figure_error("zlabel", err))
+    let command = parse_numeric_text_command("zlabel", args.view())
+        .map_err(|error| annotation_error("zlabel", &ZLABEL_ERROR_INVALID_ARGUMENT, error))?;
+    let target = command.resolve_target();
+    set_zlabel_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
+        annotation_error(
+            "zlabel",
+            &ZLABEL_ERROR_INTERNAL,
+            map_figure_error("zlabel", err),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -267,7 +76,10 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let handle = zlabel_builtin(vec![Value::String("Height".into())]).unwrap();
+        let handle = zlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Height".into())],
+        ))
+        .unwrap();
         assert_eq!(
             decode_plot_object_handle(handle).unwrap().2,
             PlotObjectKind::ZLabel
@@ -291,17 +103,16 @@ mod tests {
             1,
         ));
 
-        let handle = zlabel_builtin(vec![
-            ax,
-            Value::StringArray(StringArray {
-                data: vec!["Height".into(), "(m)".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
-            Value::String("FontWeight".into()),
-            Value::String("bold".into()),
-        ])
+        let handle = zlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                ax,
+                Value::StringArray(
+                    StringArray::new(vec!["Height".into(), "(m)".into()], vec![1, 2]).unwrap(),
+                ),
+                Value::String("FontWeight".into()),
+                Value::String("bold".into()),
+            ],
+        ))
         .unwrap();
 
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -329,5 +140,26 @@ mod tests {
             fig.axes_metadata(1).unwrap().z_label.as_deref(),
             Some("Depth\n(km)")
         );
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::zlabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:zlabel:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = super::zlabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:zlabel:TooManyOutputs"));
     }
 }

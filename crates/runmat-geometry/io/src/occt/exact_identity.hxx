@@ -13,6 +13,11 @@ namespace occt_backend {
 
 struct OcctImportOptions;
 
+std::array<std::uint8_t, 32> exact_identity_digest(
+    const TopoDS_Shape& shape,
+    const OcctImportOptions& options,
+    std::uint64_t& serialized_byte_work);
+
 class ExactIdentityContext {
 public:
   explicit ExactIdentityContext(std::uint64_t initial_byte_work = 0)

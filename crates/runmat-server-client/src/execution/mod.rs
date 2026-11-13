@@ -1,12 +1,23 @@
+mod accelerator;
+mod cluster;
 mod evidence;
+mod host;
 mod transfer;
+mod trust;
 
 use anyhow::Result;
 
 use crate::public_api;
 
+pub use accelerator::{
+    accelerator_device_from_api, accelerator_device_to_api, accelerator_request_from_api,
+    accelerator_request_to_api,
+};
+pub use cluster::{org_cluster_by_name, project_cluster_by_name};
 pub use evidence::endpoint_evidence;
+pub use host::{execution_host_inventory_from_api, execution_host_inventory_to_api};
 pub use transfer::{ExecutionArtifactUpload, ExecutionClient};
+pub use trust::RemoteEndpointTrust;
 
 pub type RunResponse = public_api::types::RunResponse;
 

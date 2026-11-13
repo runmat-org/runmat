@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -9,28 +10,37 @@ pub type BeamTransform12 = [[f64; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUN
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BeamSection {
-    pub area_m2: f64,
-    pub iy_m4: f64,
-    pub iz_m4: f64,
-    pub torsion_j_m4: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub area_m2: runmat_types::physical::Area,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iy_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub iz_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub torsion_j_m4: runmat_types::physical::SecondMomentOfArea,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub outer_fiber_y_m: f64,
+    pub outer_fiber_y_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub outer_fiber_z_m: f64,
+    pub outer_fiber_z_m: runmat_types::physical::Length,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
     #[serde(default)]
-    pub torsion_outer_radius_m: f64,
+    pub torsion_outer_radius_m: runmat_types::physical::Length,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BeamMaterial {
-    pub youngs_modulus_pa: f64,
-    pub shear_modulus_pa: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub shear_modulus_pa: runmat_types::physical::ShearModulus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BeamElementGeometry {
-    pub node_i_m: [f64; 3],
-    pub node_j_m: [f64; 3],
+    pub node_i_m: runmat_types::physical::Position,
+    pub node_j_m: runmat_types::physical::Position,
     pub reference_axis: [f64; 3],
 }
 
@@ -39,10 +49,10 @@ pub struct BeamLocalFrame {
     pub x: [f64; 3],
     pub y: [f64; 3],
     pub z: [f64; 3],
-    pub length_m: f64,
+    pub length_m: runmat_types::physical::Length,
 }
 
-#[derive(Debug, Error, Clone, PartialEq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BeamElementError {
     #[error("beam element length must be positive and finite")]
     DegenerateLength,
@@ -52,14 +62,16 @@ pub enum BeamElementError {
     InvalidSection,
     #[error("beam Young's modulus and shear modulus must be positive and finite")]
     InvalidMaterial,
+    #[error("beam numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
 }
 
 impl BeamSection {
     pub fn validate(self) -> Result<(), BeamElementError> {
-        if positive_finite(self.area_m2)
-            && positive_finite(self.iy_m4)
-            && positive_finite(self.iz_m4)
-            && positive_finite(self.torsion_j_m4)
+        if positive_finite(self.area_m2.canonical_value())
+            && positive_finite(self.iy_m4.canonical_value())
+            && positive_finite(self.iz_m4.canonical_value())
+            && positive_finite(self.torsion_j_m4.canonical_value())
         {
             Ok(())
         } else {
@@ -70,7 +82,9 @@ impl BeamSection {
 
 impl BeamMaterial {
     pub fn validate(self) -> Result<(), BeamElementError> {
-        if positive_finite(self.youngs_modulus_pa) && positive_finite(self.shear_modulus_pa) {
+        if positive_finite(self.youngs_modulus_pa.canonical_value())
+            && positive_finite(self.shear_modulus_pa.canonical_value())
+        {
             Ok(())
         } else {
             Err(BeamElementError::InvalidMaterial)
@@ -80,23 +94,54 @@ impl BeamMaterial {
 
 impl BeamElementGeometry {
     pub fn local_frame(self) -> Result<BeamLocalFrame, BeamElementError> {
-        let axis = sub(self.node_j_m, self.node_i_m);
+        // Initial edge and norm (9), normalized x (4), reference projection
+        // (11), projection norm (6), normalized y (4), cross product z (9).
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(43))
+            })
+            .transpose()?;
+        let axis = sub(
+            self.node_j_m.canonical_value(),
+            self.node_i_m.canonical_value(),
+        );
         let length_m = norm(axis);
         if !positive_finite(length_m) {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(9))?;
+            }
             return Err(BeamElementError::DegenerateLength);
         }
         let x = scale(axis, 1.0 / length_m);
         if !self.reference_axis.iter().all(|value| value.is_finite()) {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(13))?;
+            }
             return Err(BeamElementError::DegenerateReferenceAxis);
         }
         let reference_projection = sub(self.reference_axis, scale(x, dot(self.reference_axis, x)));
         let projection_norm = norm(reference_projection);
         if projection_norm <= 1.0e-12 || !projection_norm.is_finite() {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(30))?;
+            }
             return Err(BeamElementError::DegenerateReferenceAxis);
         }
         let y = scale(reference_projection, 1.0 / projection_norm);
         let z = cross(x, y);
-        Ok(BeamLocalFrame { x, y, z, length_m })
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(43))?;
+        }
+        Ok(BeamLocalFrame {
+            x,
+            y,
+            z,
+            length_m: runmat_types::physical::Length::new(length_m),
+        })
     }
 }
 
@@ -111,13 +156,26 @@ pub fn local_stiffness_matrix(
         return Err(BeamElementError::DegenerateLength);
     }
 
+    // Powers/products/divisions (8), bending coefficients (16), then 40
+    // scalar updates in the symmetric axial, torsion and bending entries.
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, OperationCount::from_operations(64))
+        })
+        .transpose()?;
+
     let l = length_m;
     let l2 = l * l;
     let l3 = l2 * l;
-    let ea_l = material.youngs_modulus_pa * section.area_m2 / l;
-    let gj_l = material.shear_modulus_pa * section.torsion_j_m4 / l;
-    let eiy = material.youngs_modulus_pa * section.iy_m4;
-    let eiz = material.youngs_modulus_pa * section.iz_m4;
+    let ea_l = material.youngs_modulus_pa.canonical_value() * section.area_m2.canonical_value() / l;
+    let gj_l =
+        material.shear_modulus_pa.canonical_value() * section.torsion_j_m4.canonical_value() / l;
+    let eiy = material.youngs_modulus_pa.canonical_value() * section.iy_m4.canonical_value();
+    let eiz = material.youngs_modulus_pa.canonical_value() * section.iz_m4.canonical_value();
 
     let mut k = [[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT];
 
@@ -131,6 +189,10 @@ pub fn local_stiffness_matrix(
 
     add_bending_z(&mut k, eiz, l, l2, l3);
     add_bending_y(&mut k, eiy, l, l2, l3);
+
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(64))?;
+    }
 
     Ok(k)
 }
@@ -155,9 +217,24 @@ pub fn global_stiffness_matrix(
     geometry: BeamElementGeometry,
 ) -> Result<BeamMatrix12, BeamElementError> {
     let frame = geometry.local_frame()?;
-    let local = local_stiffness_matrix(section, material, frame.length_m)?;
+    let local = local_stiffness_matrix(section, material, frame.length_m.canonical_value())?;
     let transform = transformation_matrix(frame);
-    Ok(transform_transpose_multiply(&transform, &local))
+    // Two dense 12x12 products, each output uses 12 products and 11 additions.
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage.ledger().reserve(
+                UsageCategory::Assembly,
+                OperationCount::from_operations(6_624),
+            )
+        })
+        .transpose()?;
+    let stiffness = transform_transpose_multiply(&transform, &local);
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(6_624))?;
+    }
+    Ok(stiffness)
 }
 
 fn add_bending_z(k: &mut BeamMatrix12, ei: f64, l: f64, l2: f64, l3: f64) {
@@ -253,37 +330,61 @@ fn norm(a: [f64; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_simulation_usage::UsageLedger;
+    use std::sync::Arc;
 
     fn section() -> BeamSection {
         BeamSection {
-            area_m2: 2.0e-4,
-            iy_m4: 1.6e-9,
-            iz_m4: 6.4e-9,
-            torsion_j_m4: 2.4e-9,
-            outer_fiber_y_m: 0.01,
-            outer_fiber_z_m: 0.005,
-            torsion_outer_radius_m: 0.011_180_339_887_498_949,
+            area_m2: runmat_types::physical::Area::new(2.0e-4),
+            iy_m4: runmat_types::physical::SecondMomentOfArea::new(1.6e-9),
+            iz_m4: runmat_types::physical::SecondMomentOfArea::new(6.4e-9),
+            torsion_j_m4: runmat_types::physical::SecondMomentOfArea::new(2.4e-9),
+            outer_fiber_y_m: runmat_types::physical::Length::new(0.01),
+            outer_fiber_z_m: runmat_types::physical::Length::new(0.005),
+            torsion_outer_radius_m: runmat_types::physical::Length::new(0.011_180_339_887_498_949),
         }
     }
 
     fn material() -> BeamMaterial {
         BeamMaterial {
-            youngs_modulus_pa: 200.0e9,
-            shear_modulus_pa: 79.3e9,
+            youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(200.0e9),
+            shear_modulus_pa: runmat_types::physical::ShearModulus::new(79.3e9),
         }
+    }
+
+    #[test]
+    fn admitted_global_beam_stiffness_conserves_geometry_local_and_transform_work() {
+        let limit = OperationCount::from_operations(43 + 64 + 6_624);
+        let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+        let context = UsageContext::new(Arc::clone(&ledger));
+        context.run_sync(|| {
+            global_stiffness_matrix(
+                section(),
+                material(),
+                BeamElementGeometry {
+                    node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                    node_j_m: runmat_types::physical::Position::new([2.0, 0.0, 0.0]),
+                    reference_axis: [0.0, 0.0, 1.0],
+                },
+            )
+            .unwrap();
+        });
+        let snapshot = ledger.snapshot().unwrap();
+        assert_eq!(snapshot.completed.assembly, limit);
+        assert_eq!(snapshot.reserved, OperationCount::ZERO);
     }
 
     #[test]
     fn beam_local_frame_is_orthonormal() {
         let frame = BeamElementGeometry {
-            node_i_m: [0.0, 0.0, 0.0],
-            node_j_m: [2.0, 0.0, 0.0],
+            node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+            node_j_m: runmat_types::physical::Position::new([2.0, 0.0, 0.0]),
             reference_axis: [0.0, 0.0, 1.0],
         }
         .local_frame()
         .expect("frame should build");
 
-        assert_close(frame.length_m, 2.0, 1.0e-12);
+        assert_close(frame.length_m.canonical_value(), 2.0, 1.0e-12);
         assert_close(dot(frame.x, frame.y), 0.0, 1.0e-12);
         assert_close(dot(frame.x, frame.z), 0.0, 1.0e-12);
         assert_close(dot(frame.y, frame.z), 0.0, 1.0e-12);
@@ -296,10 +397,16 @@ mod tests {
     fn beam_local_stiffness_matches_closed_form_terms() {
         let l = 2.5;
         let k = local_stiffness_matrix(section(), material(), l).expect("matrix should build");
-        let ea_l = material().youngs_modulus_pa * section().area_m2 / l;
-        let gj_l = material().shear_modulus_pa * section().torsion_j_m4 / l;
-        let eiy = material().youngs_modulus_pa * section().iy_m4;
-        let eiz = material().youngs_modulus_pa * section().iz_m4;
+        let ea_l = material().youngs_modulus_pa.canonical_value()
+            * section().area_m2.canonical_value()
+            / l;
+        let gj_l = material().shear_modulus_pa.canonical_value()
+            * section().torsion_j_m4.canonical_value()
+            / l;
+        let eiy =
+            material().youngs_modulus_pa.canonical_value() * section().iy_m4.canonical_value();
+        let eiz =
+            material().youngs_modulus_pa.canonical_value() * section().iz_m4.canonical_value();
 
         assert_close(k[0][0], ea_l, 1.0e-6);
         assert_close(k[0][6], -ea_l, 1.0e-6);
@@ -323,11 +430,15 @@ mod tests {
         }
     }
 
+    // witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
+    //   linear_structural/beam/numerical_kernel;
+    //   boundary: One oblique beam frame transformation orthonormality only; no mixed-model or global
+    //   beam benchmark claim.
     #[test]
     fn beam_transformation_is_block_orthonormal() {
         let frame = BeamElementGeometry {
-            node_i_m: [0.0, 0.0, 0.0],
-            node_j_m: [1.0, 1.0, 0.0],
+            node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+            node_j_m: runmat_types::physical::Position::new([1.0, 1.0, 0.0]),
             reference_axis: [0.0, 0.0, 1.0],
         }
         .local_frame()
@@ -350,8 +461,8 @@ mod tests {
             section(),
             material(),
             BeamElementGeometry {
-                node_i_m: [0.0, 0.0, 0.0],
-                node_j_m: [1.0, 1.0, 0.25],
+                node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                node_j_m: runmat_types::physical::Position::new([1.0, 1.0, 0.25]),
                 reference_axis: [0.0, 0.0, 1.0],
             },
         )
@@ -368,8 +479,8 @@ mod tests {
     fn beam_frame_rejects_degenerate_inputs() {
         assert_eq!(
             BeamElementGeometry {
-                node_i_m: [0.0, 0.0, 0.0],
-                node_j_m: [0.0, 0.0, 0.0],
+                node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                node_j_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
                 reference_axis: [0.0, 1.0, 0.0],
             }
             .local_frame()
@@ -378,8 +489,8 @@ mod tests {
         );
         assert_eq!(
             BeamElementGeometry {
-                node_i_m: [0.0, 0.0, 0.0],
-                node_j_m: [1.0, 0.0, 0.0],
+                node_i_m: runmat_types::physical::Position::new([0.0, 0.0, 0.0]),
+                node_j_m: runmat_types::physical::Position::new([1.0, 0.0, 0.0]),
                 reference_axis: [2.0, 0.0, 0.0],
             }
             .local_frame()

@@ -1,14 +1,27 @@
+use crate::backend::wgpu::types::NumericPrecision;
 use std::fmt::Write;
 
 pub fn build_ind2sub_shader(
-    scalar_ty: &str,
+    precision: NumericPrecision,
     dims: &[u32],
     strides: &[u32],
     total: u32,
     workgroup_size: u32,
-    epsilon: &str,
 ) -> String {
     assert_eq!(dims.len(), strides.len());
+    let (scalar_ty, index_ty, max_index, max_val) = match precision {
+        NumericPrecision::F32 => ("f32", "u32", "4294967040.0", "3.4028234663852886e38"),
+        NumericPrecision::F64 => (
+            "f64",
+            "u64",
+            if cfg!(target_pointer_width = "32") {
+                "4294967295.0"
+            } else {
+                "18446744073709551616.0"
+            },
+            "1.7976931348623157e308",
+        ),
+    };
 
     let mut shader = String::new();
     writeln!(shader, "struct Tensor {{ data: array<{scalar_ty}>, }};").unwrap();
@@ -50,28 +63,22 @@ pub fn build_ind2sub_shader(
         params_binding
     )
     .unwrap();
-    writeln!(shader, "const EPSILON: {scalar_ty} = {epsilon};").unwrap();
-    writeln!(shader, "const ONE: {scalar_ty} = {scalar_ty}(1.0);").unwrap();
-    let max_u32 = if scalar_ty == "f32" {
-        "4294967040.0"
-    } else {
-        "4294967295.0"
-    };
     writeln!(
         shader,
-        "const MAX_KERNEL_INDEX: {scalar_ty} = {scalar_ty}({max_u32});"
+        "const EPSILON: {scalar_ty} = 2.220446049250313e-16;"
+    )
+    .unwrap();
+    writeln!(shader, "const ONE: {scalar_ty} = {scalar_ty}(1.0);").unwrap();
+    writeln!(
+        shader,
+        "const MAX_KERNEL_INDEX_EXCLUSIVE: {scalar_ty} = {scalar_ty}({max_index});"
     )
     .unwrap();
     let _ = total;
-    // Finite check helper using x==x (not NaN) and a large bound.
-    let max_val = if scalar_ty == "f32" {
-        "3.4028234663852886e38"
-    } else {
-        "1.7976931348623157e308"
-    };
+    // Keep the original magnitude bound alongside the shared IEEE finite check.
     writeln!(
         shader,
-        "fn isfinite_scalar(x: {scalar_ty}) -> bool {{ return (x == x) && (abs(x) < {scalar_ty}({max_val})); }}"
+        "fn isFinite(value: {scalar_ty}) -> bool {{ @IEEE_FINITE_PREDICATE@ }}\nfn isfinite_scalar(x: {scalar_ty}) -> bool {{ return isFinite(x) && (abs(x) < {scalar_ty}({max_val})); }}"
     )
     .unwrap();
     for (idx, dim) in dims.iter().enumerate() {
@@ -115,35 +122,35 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         set_error(3u, 0u);
         return;
     }}
-    if (rounded > MAX_KERNEL_INDEX) {{
+    if (rounded >= MAX_KERNEL_INDEX_EXCLUSIVE) {{
         set_error(4u, 0u);
         return;
     }}
-    let rounded_u32: u32 = u32(rounded);
-    if (rounded_u32 == 0u) {{
+    let rounded_index: {index_ty} = {index_ty}(rounded);
+    if (rounded_index == {index_ty}(0u)) {{
         set_error(3u, 0u);
         return;
     }}
-    let zero_based: u32 = rounded_u32 - 1u;
+    let zero_based: {index_ty} = rounded_index - {index_ty}(1u);
 "
     )
     .unwrap();
 
     for (idx, _) in dims.iter().enumerate() {
         let expression = if idx + 1 == dims.len() {
-            format!("zero_based / STRIDE_{idx}")
+            format!("zero_based / {index_ty}(STRIDE_{idx})")
         } else {
-            format!("(zero_based / STRIDE_{idx}) % DIM_{idx}")
+            format!("(zero_based / {index_ty}(STRIDE_{idx})) % {index_ty}(DIM_{idx})")
         };
         writeln!(
             shader,
-            "    let coord_{idx}: u32 = {expression};
-    output{idx}.data[idx] = {scalar_ty}(coord_{idx} + 1u);"
+            "    let coord_{idx}: {index_ty} = {expression};
+    output{idx}.data[idx] = {scalar_ty}(coord_{idx} + {index_ty}(1u));"
         )
         .unwrap();
     }
 
     writeln!(shader, "}}").unwrap();
 
-    shader
+    super::nan_predicate::inject_finite(&shader, precision)
 }

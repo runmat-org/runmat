@@ -15,12 +15,12 @@ pub fn ensure_testing_classes() {
     REGISTERED.ensure(|| {
         register_test_case();
         register_plain_class(
-            TEST_SUITE_CLASS,
+            TEST_SUITE_CLASS.display_name(),
             None,
             &["Name", "ProcedureName", "TestFile", "Tags"],
         );
         register_plain_class(
-            TEST_RESULT_CLASS,
+            TEST_RESULT_CLASS.display_name(),
             None,
             &[
                 "Name",
@@ -59,15 +59,24 @@ pub fn ensure_testing_classes() {
             None,
             &["Identifier", "Message"],
         );
+        register_plain_class(
+            runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC.display_name(),
+            Some(runmat_types::standard::UNIT_TEST_DIAGNOSTIC.display_name()),
+            &["DiagnosticText"],
+        );
         register_plain_class("matlab.unittest.constraints.Constraint", None, &[]);
+        register_plain_class(
+            runmat_types::standard::UNIT_TEST_IS_EQUAL_TO.display_name(),
+            Some(runmat_types::standard::UNIT_TEST_CONSTRAINT.display_name()),
+            &["Expected"],
+        );
         for class_name in [
-            "matlab.unittest.constraints.IsEqualTo",
-            "matlab.unittest.constraints.IsTrue",
-            "matlab.unittest.constraints.IsFalse",
+            runmat_types::standard::UNIT_TEST_IS_TRUE,
+            runmat_types::standard::UNIT_TEST_IS_FALSE,
         ] {
             register_plain_class(
-                class_name,
-                Some("matlab.unittest.constraints.Constraint"),
+                class_name.display_name(),
+                Some(runmat_types::standard::UNIT_TEST_CONSTRAINT.display_name()),
                 &[],
             );
         }
@@ -89,26 +98,29 @@ fn register_test_case() {
         .chain(["addTeardown", "applyFixture", "log"])
         .map(|name| {
             (
-                name.to_string(),
+                name.into(),
                 RuntimeMethod {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
                     function_name: format!("{TEST_CASE_CLASS}.{name}"),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )
         })
         .collect();
     crate::class_registry::register_class(RuntimeClass {
+        events: Default::default(),
         name: TEST_CASE_CLASS.into(),
         parent: Some("handle".into()),
         properties: properties(&["Name"]),
         methods,
     });
     crate::class_registry::register_class(RuntimeClass {
+        events: Default::default(),
         name: FUNCTION_TEST_CASE_CLASS.into(),
         parent: Some(TEST_CASE_CLASS.into()),
         properties: HashMap::new(),
@@ -148,8 +160,9 @@ fn register_class_with_methods(
     method_names: &[&str],
 ) {
     crate::class_registry::register_class(RuntimeClass {
+        events: Default::default(),
         name: name.into(),
-        parent: parent.map(str::to_owned),
+        parent: parent.map(runmat_types::ClassIdentity::from),
         properties: properties(property_names),
         methods: method_names
             .iter()
@@ -164,6 +177,7 @@ fn register_class_with_methods(
                         access: MemberAccess::Public,
                         function_name: format!("{name}.{method_name}"),
                         implicit_class_argument: None,
+                        role: runmat_types::ClassMethodRole::Ordinary,
                     },
                 )
             })
@@ -171,7 +185,7 @@ fn register_class_with_methods(
     });
 }
 
-fn properties(names: &[&str]) -> HashMap<String, RuntimeProperty> {
+fn properties(names: &[&str]) -> HashMap<runmat_types::MemberName, RuntimeProperty> {
     names
         .iter()
         .map(|name| {
@@ -184,7 +198,7 @@ fn properties(names: &[&str]) -> HashMap<String, RuntimeProperty> {
                     is_dependent: false,
                     get_access: MemberAccess::Public,
                     set_access: MemberAccess::Private,
-                    default_value: Some(Value::String(String::new())),
+                    default_value: Some(Value::string(String::new())),
                 },
             )
         })
@@ -199,13 +213,17 @@ mod tests {
     fn registers_testing_inheritance_and_qualification_methods() {
         ensure_testing_classes();
         assert!(crate::class_registry::is_class_or_subclass(
-            FUNCTION_TEST_CASE_CLASS,
-            TEST_CASE_CLASS
+            &FUNCTION_TEST_CASE_CLASS.owned(),
+            &TEST_CASE_CLASS.owned()
         ));
         assert!(crate::class_registry::is_class_or_subclass(
-            TEST_CASE_CLASS,
-            "handle"
+            &TEST_CASE_CLASS.owned(),
+            &runmat_types::standard::HANDLE.owned()
         ));
-        assert!(crate::class_registry::lookup_method(TEST_CASE_CLASS, "verifyEqual").is_some());
+        assert!(crate::class_registry::lookup_method(
+            &TEST_CASE_CLASS.owned(),
+            &runmat_types::MethodName::from("verifyEqual"),
+        )
+        .is_some());
     }
 }

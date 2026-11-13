@@ -1,0 +1,105 @@
+entry adf3e088-bba6-8ca0-88c8-d324c7473c5e net /+5V
+entry 7121c88d-d850-8f9e-b387-7bb01f4f161b net /ADC0
+entry 3be0f507-50b8-832b-9720-65e557a861a3 net /ADC1
+entry be1f86d1-a7b2-8de4-a394-402faf9b53bb net /ADC2
+entry dca013cb-081c-8e18-9053-3fffc5e712e3 net /AIN0
+entry 99ba0613-327f-8960-a8ab-9f25e8bce93b net /AIN1
+entry 11bdb0dc-5b5d-8edb-be58-26c695768274 net /AIN2
+entry 35f6b219-5e22-8a78-81f5-28d43ee7d793 component /C900 designator=C900
+entry ee2b570b-2c12-883e-a5bd-e0f67af1bf41 net /GND
+entry a847228a-a504-8150-b34c-c3c81564471a component /J1 designator=J1
+entry 38070471-216e-8c11-8cb1-4e8df3c3c372 net /SHIELD
+entry ab8fc474-f907-8e0c-a3f0-bd37f72606e7 component /U9000 designator=U9000
+entry ede3b92f-a9f2-8841-b546-5ff6f8df22ee net /VNEG
+entry 2b869be3-4ef0-820b-907e-a1671c8e8189 sheet /ch[0]
+entry a063ee6e-a120-8232-b4ae-b90416d68c59 component /ch[0]/CD1 designator=C1
+entry 07a48468-79f5-83f9-8c9e-e6b1ece8c874 component /ch[0]/CD2 designator=C2
+entry 5bbd4d34-e821-8947-bac3-553c097ee0ee component /ch[0]/CF designator=C3
+entry 99caf795-2c87-87fa-8d9c-9c62a38b0528 net /ch[0]/FBK
+entry bc3d99d6-5b4b-826c-9261-d717c99a998e net /ch[0]/INF
+entry 3a16a977-7cfb-8b12-8323-272059bb159e component /ch[0]/RF designator=R1
+entry 22f8c605-6df8-846f-a52c-8678a5599af2 component /ch[0]/RG designator=R60
+entry 2ac401d3-b2c6-8f85-a548-76aea8ee0f0e component /ch[0]/RS designator=R3
+entry 4cb7708b-5c37-8eed-a1b9-e3f9a48a68d2 net /ch[0]/TIE_B
+entry e9fbd96d-b87a-855d-822b-a9153d3b2ab8 net /ch[0]/TIE_C
+entry 8c8ddeee-787c-87bb-9a36-5698aea8b18b net /ch[0]/TIE_D
+entry d4336218-b079-8e2f-88d3-b7573210831d component /ch[0]/U designator=U1
+entry c2522117-b05d-8507-94d8-b0aeded0629f sheet /ch[1]
+entry 8b27e03e-9415-835a-aa90-ec6b6b274b52 component /ch[1]/CD1 designator=C4
+entry 1b3f254e-a877-8e26-9b48-066347fb89c1 component /ch[1]/CD2 designator=C5
+entry fcdb2432-08e8-8198-a8b1-0a5d14d484e2 component /ch[1]/CF designator=C6
+entry bf3a3c8c-3bde-8da1-ab84-51f9d4928972 net /ch[1]/FBK
+entry afe4607d-37a6-8589-960a-85d6397c3118 net /ch[1]/INF
+entry 913a9d58-8bee-8100-a890-1344c3fccf3c component /ch[1]/RF designator=R4
+entry c7d71c8b-6813-8610-9c7d-c6989aa49b42 component /ch[1]/RG designator=R5
+entry 48ee48b0-cd23-8949-b6fa-6a6a6dae53cf component /ch[1]/RS designator=R6
+entry 54ddd096-e926-8e07-b0ef-c771c9011d87 net /ch[1]/TIE_B
+entry 57ea197f-9947-8def-9311-1633168cc1e0 net /ch[1]/TIE_C
+entry 6243bfa5-5a96-8352-b255-5eb2ca27c13f net /ch[1]/TIE_D
+entry cdc30aef-aa21-8b03-8b70-6df3edba2177 component /ch[1]/U designator=U2
+entry 844b635e-edfa-87a7-a70e-587141484b16 sheet /ch[2]
+entry 31bc39dd-5634-8a71-ad32-5f0427615a4b component /ch[2]/CD1 designator=C7
+entry 575732c9-b902-81b5-b24f-56095662639a component /ch[2]/CD2 designator=C8
+entry f5363745-f857-8a28-89f3-a581bddd2148 component /ch[2]/CF designator=C9
+entry 6d665d1a-79f1-8e31-beae-2b2ad079c8b6 net /ch[2]/FBK
+entry eed66c7b-fc3f-8d6b-925d-3c702cf82477 net /ch[2]/INF
+entry 5a290b1f-8d33-8928-a3aa-888e94aa3788 component /ch[2]/RF designator=R2
+entry 8ce3f1ad-5323-8407-a4e3-611b7861ba44 component /ch[2]/RG designator=R7
+entry cabc680a-f9db-8d5d-bb4f-6c6250dfeb4a component /ch[2]/RS designator=R8
+entry f795f001-2a15-8aeb-adee-d92ebd68aecb net /ch[2]/TIE_B
+entry f12fdb61-782a-8316-8873-1e8c570f03e2 net /ch[2]/TIE_C
+entry fb67d217-3203-8faa-82b0-134ab6f29273 net /ch[2]/TIE_D
+entry a740b499-5dd0-83b5-b077-67e2334fe32d component /ch[2]/U designator=U3
+alias /J100 -> /J1
+fp /+5V /C900.1,/U9000.VCCINT,/U9000.VCCIO,/ch[0]/CD1.1,/ch[0]/U.V+,/ch[1]/CD1.1,/ch[1]/U.V+,/ch[2]/CD1.1,/ch[2]/U.V+
+fp /ADC0 /U9000.IO0,/ch[0]/RF.2,/ch[0]/U.OUT
+fp /ADC1 /U9000.IO1,/ch[1]/RF.2,/ch[1]/U.OUT
+fp /ADC2 /U9000.IO2,/ch[2]/RF.2,/ch[2]/U.OUT
+fp /AIN0 /J1.1,/ch[0]/RS.1
+fp /AIN1 /J1.2,/ch[1]/RS.1
+fp /AIN2 /J1.3,/ch[2]/RS.1
+fp /C900 bfcf2077-8a50-8ff8-81e5-260809f36405|+5V,GND
+fp /GND /C900.2,/J1.10,/U9000.GND,/ch[0]/CD1.2,/ch[0]/CD2.1,/ch[0]/CF.2,/ch[0]/RG.2,/ch[0]/U.IN+,/ch[0]/U.IN+,/ch[0]/U.IN+,/ch[1]/CD1.2,/ch[1]/CD2.1,/ch[1]/CF.2,/ch[1]/RG.2,/ch[1]/U.IN+,/ch[1]/U.IN+,/ch[1]/U.IN+,/ch[2]/CD1.2,/ch[2]/CD2.1,/ch[2]/CF.2,/ch[2]/RG.2,/ch[2]/U.IN+,/ch[2]/U.IN+,/ch[2]/U.IN+
+fp /J1 ea9321e3-6e65-859b-b3bb-f20234b4af8e|AIN0,AIN1,AIN2,GND,SHIELD
+fp /SHIELD /J1.9
+fp /U9000 fb961f85-6eaf-8bfd-8fc1-42aac4d8ae41|+5V,ADC0,ADC1,ADC2,GND
+fp /VNEG /ch[0]/CD2.2,/ch[0]/U.V-,/ch[1]/CD2.2,/ch[1]/U.V-,/ch[2]/CD2.2,/ch[2]/U.V-
+fp /ch[0] channel
+fp /ch[0]/CD1 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[0]/CD2 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|GND,VNEG
+fp /ch[0]/CF ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[0]/INF,GND
+fp /ch[0]/FBK /ch[0]/RF.1,/ch[0]/RG.1,/ch[0]/U.IN-
+fp /ch[0]/INF /ch[0]/CF.1,/ch[0]/RS.2,/ch[0]/U.IN+
+fp /ch[0]/RF f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[0]/FBK,ADC0
+fp /ch[0]/RG f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[0]/FBK,GND
+fp /ch[0]/RS f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[0]/INF,AIN0
+fp /ch[0]/TIE_B /ch[0]/U.IN-,/ch[0]/U.OUT
+fp /ch[0]/TIE_C /ch[0]/U.IN-,/ch[0]/U.OUT
+fp /ch[0]/TIE_D /ch[0]/U.IN-,/ch[0]/U.OUT
+fp /ch[0]/U b9507ba5-9fa2-85dd-953a-0841a59b93f8|+5V,/ch[0]/FBK,/ch[0]/INF,/ch[0]/TIE_B,/ch[0]/TIE_C,/ch[0]/TIE_D,ADC0,GND,VNEG
+fp /ch[1] channel
+fp /ch[1]/CD1 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[1]/CD2 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|GND,VNEG
+fp /ch[1]/CF ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[1]/INF,GND
+fp /ch[1]/FBK /ch[1]/RF.1,/ch[1]/RG.1,/ch[1]/U.IN-
+fp /ch[1]/INF /ch[1]/CF.1,/ch[1]/RS.2,/ch[1]/U.IN+
+fp /ch[1]/RF f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[1]/FBK,ADC1
+fp /ch[1]/RG f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[1]/FBK,GND
+fp /ch[1]/RS f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[1]/INF,AIN1
+fp /ch[1]/TIE_B /ch[1]/U.IN-,/ch[1]/U.OUT
+fp /ch[1]/TIE_C /ch[1]/U.IN-,/ch[1]/U.OUT
+fp /ch[1]/TIE_D /ch[1]/U.IN-,/ch[1]/U.OUT
+fp /ch[1]/U b9507ba5-9fa2-85dd-953a-0841a59b93f8|+5V,/ch[1]/FBK,/ch[1]/INF,/ch[1]/TIE_B,/ch[1]/TIE_C,/ch[1]/TIE_D,ADC1,GND,VNEG
+fp /ch[2] channel
+fp /ch[2]/CD1 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+5V,GND
+fp /ch[2]/CD2 ddc2db39-4d38-8b30-ba86-5795b4cdc95d|GND,VNEG
+fp /ch[2]/CF ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[2]/INF,GND
+fp /ch[2]/FBK /ch[2]/RF.1,/ch[2]/RG.1,/ch[2]/U.IN-
+fp /ch[2]/INF /ch[2]/CF.1,/ch[2]/RS.2,/ch[2]/U.IN+
+fp /ch[2]/RF f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[2]/FBK,ADC2
+fp /ch[2]/RG f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[2]/FBK,GND
+fp /ch[2]/RS f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[2]/INF,AIN2
+fp /ch[2]/TIE_B /ch[2]/U.IN-,/ch[2]/U.OUT
+fp /ch[2]/TIE_C /ch[2]/U.IN-,/ch[2]/U.OUT
+fp /ch[2]/TIE_D /ch[2]/U.IN-,/ch[2]/U.OUT
+fp /ch[2]/U b9507ba5-9fa2-85dd-953a-0841a59b93f8|+5V,/ch[2]/FBK,/ch[2]/INF,/ch[2]/TIE_B,/ch[2]/TIE_C,/ch[2]/TIE_D,ADC2,GND,VNEG

@@ -3,6 +3,7 @@
 //! Manages memory allocation across multiple generations, with optimized
 //! allocation strategies for different object lifetimes.
 
+use crate::lexical_activation::LexicalActivation;
 use crate::Value;
 use crate::{GcConfig, GcError, GcHandle, GcStats, Result};
 use std::collections::{HashMap, HashSet};
@@ -294,10 +295,23 @@ pub struct GenerationalAllocator {
 
     /// Allocation epoch for each live pointer. Incremented before each new
     /// allocation so stale handles to reused slots do not validate.
-    live_epochs: HashMap<*const u8, usize>,
+    live_epochs: HashMap<*const u8, (usize, GcAllocationKind)>,
 
     /// Monotonic allocation epoch source.
     next_epoch: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GcAllocationKind {
+    Value,
+    LexicalActivation,
+}
+
+/// An unsuccessful allocation returns its input for destruction by the caller,
+/// after any allocator lock has been released.
+pub(crate) struct AllocationFailure {
+    pub error: GcError,
+    pub value: Value,
 }
 
 impl GenerationalAllocator {
@@ -325,14 +339,35 @@ impl GenerationalAllocator {
 
     /// Allocate a Value object
     pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcHandle> {
-        let size = self.estimate_value_size(&value);
+        self.allocate_preserving_value(value, stats)
+            .map_err(|failure| failure.error)
+    }
+
+    pub(crate) fn allocate_preserving_value(
+        &mut self,
+        value: Value,
+        stats: &GcStats,
+    ) -> std::result::Result<GcHandle, Box<AllocationFailure>> {
+        // Only the Value header lives in this heap; nested owned buffers use
+        // their own allocators and are released with the detached payload.
+        let size = std::mem::size_of::<Value>();
         let epoch = self.next_epoch;
-        let next_epoch = epoch.checked_add(1).ok_or_else(|| {
-            GcError::OutOfMemory("GC allocation epoch space exhausted".to_string())
-        })?;
+        let Some(next_epoch) = epoch.checked_add(1) else {
+            return Err(Box::new(AllocationFailure {
+                error: GcError::OutOfMemory("GC allocation epoch space exhausted".to_string()),
+                value,
+            }));
+        };
 
         // Always allocate in young generation first
-        let ptr = self.generations[0].allocate(size)?;
+        let ptr = match self.generations[0].allocate(size) {
+            Ok(ptr) => ptr,
+            Err(error) => return Err(Box::new(AllocationFailure { error, value })),
+        };
+        let handle = match value_handle_from_ptr(ptr.cast::<Value>(), epoch) {
+            Ok(handle) => handle,
+            Err(error) => return Err(Box::new(AllocationFailure { error, value })),
+        };
 
         // Initialize the memory with the value
         unsafe {
@@ -341,13 +376,54 @@ impl GenerationalAllocator {
         let raw = ptr.cast_const();
         self.next_epoch = next_epoch;
         self.live_ptrs.insert(raw);
-        self.live_epochs.insert(raw, epoch);
+        self.live_epochs
+            .insert(raw, (epoch, GcAllocationKind::Value));
 
         // Update statistics
         self.total_allocations.fetch_add(1, Ordering::Relaxed);
         stats.record_allocation(size);
 
-        value_handle_from_ptr(ptr.cast::<Value>(), epoch)
+        Ok(handle)
+    }
+
+    pub(crate) fn allocate_lexical_activation(
+        &mut self,
+        activation: LexicalActivation,
+        stats: &GcStats,
+    ) -> std::result::Result<GcHandle, (GcError, LexicalActivation)> {
+        // Typed activations use one ordinary GC slot, but never initialize or
+        // expose that slot as a language Value.
+        const {
+            assert!(std::mem::size_of::<LexicalActivation>() <= std::mem::size_of::<Value>());
+            assert!(std::mem::align_of::<LexicalActivation>() <= std::mem::align_of::<Value>());
+        }
+        let epoch = self.next_epoch;
+        let Some(next_epoch) = epoch.checked_add(1) else {
+            return Err((
+                GcError::OutOfMemory("GC allocation epoch space exhausted".into()),
+                activation,
+            ));
+        };
+        let size = std::mem::size_of::<Value>();
+        let ptr = match self.generations[0].allocate(size) {
+            Ok(ptr) => ptr,
+            Err(error) => return Err((error, activation)),
+        };
+        let handle = match value_handle_from_ptr(ptr.cast::<Value>(), epoch) {
+            Ok(handle) => handle,
+            Err(error) => return Err((error, activation)),
+        };
+        // SAFETY: the slot has Value alignment and at least Value size; no
+        // Value reference is formed for this tagged allocation.
+        unsafe { ptr.cast::<LexicalActivation>().write(activation) };
+        let raw = ptr.cast_const();
+        self.next_epoch = next_epoch;
+        self.live_ptrs.insert(raw);
+        self.live_epochs
+            .insert(raw, (epoch, GcAllocationKind::LexicalActivation));
+        self.total_allocations.fetch_add(1, Ordering::Relaxed);
+        stats.record_allocation(size);
+        Ok(handle)
     }
 
     /// Drain young-generation pointers that must be considered during the next
@@ -362,14 +438,15 @@ impl GenerationalAllocator {
             .collect()
     }
 
-    /// Return all currently live Value pointers for a major collection sweep.
+    /// Return live typed-allocation pointers for a major collection sweep.
     pub fn all_live_collection_candidates(&self) -> Vec<*const u8> {
         self.live_ptrs.iter().copied().collect()
     }
 
-    /// Drain all pointers the allocator still believes may contain initialized
-    /// Values. This is only for whole-GC teardown/reset paths.
-    pub fn take_tracked_value_ptrs_for_reset(&mut self) -> Vec<(*const Value, Option<GcHandle>)> {
+    /// Drain initialized typed allocations for whole-GC teardown/reset.
+    pub(crate) fn take_tracked_allocations_for_reset(
+        &mut self,
+    ) -> Vec<(*const u8, Option<GcHandle>, GcAllocationKind)> {
         let mut ptrs = Vec::new();
         let mut seen = HashSet::new();
 
@@ -394,10 +471,16 @@ impl GenerationalAllocator {
             }
         }
 
-        let ptrs: Vec<(*const Value, Option<GcHandle>)> = ptrs
+        let ptrs: Vec<(*const u8, Option<GcHandle>, GcAllocationKind)> = ptrs
             .into_iter()
             .filter(|ptr| self.live_ptrs.contains(ptr))
-            .map(|ptr| (ptr.cast::<Value>(), self.handle_for_live_ptr(ptr)))
+            .map(|ptr| {
+                let handle = self.handle_for_live_ptr(ptr);
+                let kind = handle
+                    .and_then(|handle| self.allocation_kind(&handle))
+                    .expect("live GC allocation has a kind");
+                (ptr, handle, kind)
+            })
             .collect();
 
         self.survival_counts.clear();
@@ -426,7 +509,7 @@ impl GenerationalAllocator {
     pub fn promote(&mut self, ptr: *const Value, _from_gen: usize) -> Result<GcHandle> {
         // Non-moving logical promotion: mark pointer as promoted for barrier/collection logic
         let raw = ptr as *const u8;
-        let Some(epoch) = self.live_epochs.get(&raw).copied() else {
+        let Some((epoch, _)) = self.live_epochs.get(&raw).copied() else {
             return Err(GcError::InvalidPointer(format!(
                 "cannot promote non-live GC value pointer {:p}",
                 ptr
@@ -474,13 +557,23 @@ impl GenerationalAllocator {
     /// Return whether a pointer names a currently initialized GC Value.
     pub fn is_live_value_ptr(&self, ptr: *const Value) -> bool {
         self.live_ptrs.contains(&ptr.cast::<u8>())
+            && self
+                .live_epochs
+                .get(&ptr.cast::<u8>())
+                .is_some_and(|(_, kind)| *kind == GcAllocationKind::Value)
     }
 
     pub fn is_live_handle(&self, handle: &GcHandle) -> bool {
         let ptr = handle.addr() as *const u8;
         self.live_epochs
             .get(&ptr)
-            .is_some_and(|epoch| *epoch == handle.epoch())
+            .is_some_and(|(epoch, _)| *epoch == handle.epoch())
+    }
+
+    pub(crate) fn allocation_kind(&self, handle: &GcHandle) -> Option<GcAllocationKind> {
+        self.live_epochs
+            .get(&(handle.addr() as *const u8))
+            .and_then(|(epoch, kind)| (*epoch == handle.epoch()).then_some(*kind))
     }
 
     pub fn has_live_allocations(&self) -> bool {
@@ -492,7 +585,7 @@ impl GenerationalAllocator {
     }
 
     pub fn handle_for_live_ptr(&self, ptr: *const u8) -> Option<GcHandle> {
-        let epoch = self.live_epochs.get(&ptr).copied()?;
+        let (epoch, _) = self.live_epochs.get(&ptr).copied()?;
         value_handle_from_ptr(ptr.cast::<Value>(), epoch).ok()
     }
 
@@ -567,16 +660,6 @@ impl GenerationalAllocator {
         // Keep promoted set to continue treating them as old
     }
 
-    /// Estimate the memory size of a Value
-    #[allow(clippy::only_used_in_recursion)]
-    fn estimate_value_size(&self, _value: &Value) -> usize {
-        // IMPORTANT: We currently allocate only the outer Value header in the GC heap.
-        // Nested payloads (Vecs, strings, tensors) are managed by Rust's allocator and
-        // dropped via drop_in_place during sweep. Estimating deep sizes over-reserves and
-        // causes artificial OOMs in tests. We'll move to GC-managed aggregates later.
-        std::mem::size_of::<Value>()
-    }
-
     /// Get allocator statistics
     pub fn stats(&self) -> AllocatorStats {
         AllocatorStats {
@@ -614,6 +697,36 @@ pub struct AllocatorStats {
 mod tests {
     use super::*;
     use crate::config::GcConfig;
+
+    #[test]
+    fn failed_allocation_returns_the_live_payload_without_retiring_it() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        for exhausted_epoch in [false, true] {
+            let config = GcConfig {
+                young_generation_size: if exhausted_epoch { 1024 } else { 0 },
+                ..GcConfig::default()
+            };
+            let mut allocator = GenerationalAllocator::new(&config);
+            if exhausted_epoch {
+                allocator.next_epoch = usize::MAX;
+            }
+            let owner = TestAllocationOwner::new();
+            let allocation = owner
+                .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let failure = allocator
+                .allocate_preserving_value(Value::GpuTensor(allocation.handle), &GcStats::new())
+                .expect_err("allocation must fail");
+            assert!(matches!(failure.error, GcError::OutOfMemory(_)));
+            assert_eq!(allocation.probe.retirements(), 0);
+            assert!(allocator.live_ptrs.is_empty());
+            drop(allocator);
+            drop(failure);
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
+    }
 
     #[test]
     fn test_size_class_classification() {
@@ -677,10 +790,10 @@ mod tests {
         let stats = GcStats::new();
 
         let first = allocator
-            .allocate(Value::String("first".to_string()), &stats)
+            .allocate(Value::String("first".to_string().into()), &stats)
             .expect("first allocation");
         let _survivor = allocator
-            .allocate(Value::String("survivor".to_string()), &stats)
+            .allocate(Value::String("survivor".to_string().into()), &stats)
             .expect("survivor allocation");
 
         let first_ptr = first.addr() as *const u8;
@@ -690,7 +803,7 @@ mod tests {
         }
 
         let reused = allocator
-            .allocate(Value::String("reused".to_string()), &stats)
+            .allocate(Value::String("reused".to_string().into()), &stats)
             .expect("dropped young slot should be reusable");
         assert_eq!(reused.addr(), first.addr());
         assert_ne!(reused.epoch(), first.epoch());

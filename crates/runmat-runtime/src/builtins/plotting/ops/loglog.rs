@@ -1,118 +1,16 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{LOGLOG_ERROR_LOG_AXIS_FAILED, LOGLOG_ERROR_PLOT_FAILED};
 use runmat_macros::runtime_builtin;
-use runmat_value::Value;
 
-use super::plot::plot_builtin;
+use super::plot::plot_builtin_with_runtime;
 use super::state::{current_axes_state, set_log_modes_for_axes, FigureError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "loglog";
-const LOGLOG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X/Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Coordinate data accept all eight integer classes and retain exact native source properties before logarithmic display scaling.",
-    }];
-pub const LOGLOG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = loglog([X,] integer_Y, ...)",
-        inputs: &LOGLOG_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The plot source and persisted graphics properties remain native; logarithmic axis transformation and renderer geometry are explicit floating boundaries.",
-    }];
-
-const LOGLOG_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Line handle.",
-}];
-const LOGLOG_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Y data vector/matrix.",
-}];
-const LOGLOG_INPUTS_XY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data vector/matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector/matrix.",
-    },
-];
-const LOGLOG_INPUTS_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Plot-style inputs: optional axes handle, style tokens, and Name/Value pairs.",
-}];
-const LOGLOG_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "h = loglog(Y)",
-        inputs: &LOGLOG_INPUTS_Y,
-        outputs: &LOGLOG_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = loglog(X, Y)",
-        inputs: &LOGLOG_INPUTS_XY,
-        outputs: &LOGLOG_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = loglog(args...)",
-        inputs: &LOGLOG_INPUTS_ARGS,
-        outputs: &LOGLOG_OUTPUT_HANDLE,
-    },
-];
-const LOGLOG_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOGLOG.PLOT_FAILED",
-    identifier: Some("RunMat:loglog:PlotFailed"),
-    when: "Underlying plot rendering/parsing fails while building the log-log plot.",
-    message: "loglog: plot operation failed",
-};
-const LOGLOG_ERROR_LOG_AXIS_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOGLOG.LOG_AXIS_FAILED",
-    identifier: Some("RunMat:loglog:LogAxisFailed"),
-    when: "Applying logarithmic axis modes fails.",
-    message: "loglog: failed to apply logarithmic axis mode",
-};
-const LOGLOG_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [LOGLOG_ERROR_PLOT_FAILED, LOGLOG_ERROR_LOG_AXIS_FAILED];
-pub const LOGLOG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOGLOG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOGLOG_ERRORS,
-};
 
 fn loglog_error_with_message(
     message: impl Into<String>,
@@ -174,18 +72,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "loglog",
-    category = "plotting",
-    summary = "Create a plot with logarithmic X and Y axes.",
-    keywords = "loglog,plotting,log",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::loglog::LOGLOG_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::loglog::LOGLOG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::loglog"
 )]
-pub async fn loglog_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let result = plot_builtin(args).await.map_err(loglog_map_plot_error)?;
+pub async fn loglog_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::LOGLOG_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "loglog",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "loglog")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(loglog_impl(runtime.as_ref(), args, &work).await)
+}
+
+async fn loglog_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
+    let result = plot_builtin_with_runtime(runtime, args)
+        .await
+        .map_err(loglog_map_plot_error)?;
+    work.check()?;
     let axes = current_axes_state();
     set_log_modes_for_axes(axes.handle, axes.active_index, true, true)
         .map_err(loglog_map_axes_error)?;
@@ -194,12 +108,19 @@ pub async fn loglog_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use runmat_builtins::LOGLOG_DESCRIPTOR;
+    async fn loglog_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::loglog_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use crate::builtins::plotting::{configure_subplot, current_figure_handle};
-    use runmat_value::Tensor;
+    use runmat_value::{Tensor, Value};
 
     fn tensor_from(data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), vec![data.len()]).expect("loglog test vector")

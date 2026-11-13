@@ -1,0 +1,19 @@
+# Numeric upload ownership
+
+`AccelProvider::upload_numeric` remains the validated numeric upload entrypoint for callers without borrowed resident operands. Ownership-sensitive internal code calls the non-overridable API function `runmat_accelerate_api::upload_numeric_protecting(provider, view, protected_handles)` directly and includes every borrowed input and output prototype that the provider could return as an alias.
+
+The shared boundary validates the host request before invoking the provider, then validates the returned device, shape, element type, storage, semantic annotations, and borrowed-handle identity. Rejecting a result releases only its owning reference through the canonical handle lease. Caller-held references keep borrowed allocations alive; a fresh rejected allocation retires through its captured owner when its last reference is released. View-cleanup and retirement failures remain attached to the error. Cleanup never uses an ambient or unrelated selected provider. Borrowed logical, class, and transpose annotations are restored on success, error, and unwinding. Fresh numeric uploads cannot carry conflicting logical/class annotations or a transpose view. The validated entrypoints do not return malformed handles.
+
+## Provider implementation migration
+
+Providers that previously overrode `upload_numeric` must rename that override to `upload_numeric_raw`. Keep the native transfer implementation, including single, complex, and exact integer handling, in that raw hook. Do not replace native transfers with conversion through legacy double storage. In-process, WGPU, and CUDA providers use this contract.
+
+The raw hook returns `ProviderExecutionResult<GpuTensorHandle>` to the shared validator. Preserve the original error with `ProviderExecutionError::from_source` for a typed driver or worker-local cause, or `ProviderExecutionError::from` for an existing `anyhow::Error`. It must not perform generic descriptor-rejection cleanup because it does not know which handles the caller borrowed. A failure inside allocation or transfer remains the provider's responsibility: release only allocations owned by that invocation. Ordinary callers should not invoke the raw hook directly.
+
+The default raw hook adapts legacy real-double and real-integer uploads. It rejects representations those hooks cannot express. Errors returned by those legacy hooks have unknown effect timing, so the adapter preserves their causes but does not authorize numerical replay. An out-of-tree native provider must migrate its override explicitly; retaining an override of the old validated method does not supply the new protected function with native transfer support. Rust permits overriding default trait methods, so implementors must not override the validated convenience method. Such an override cannot bypass the protected function used internally.
+
+## Error handling
+
+`InvalidNumericUploadResult` identifies a malformed result or borrowed alias. `is_invalid_numeric_upload_result` recognizes that error through an `anyhow::Error`. It is an execution failure, not an unsupported-operation signal, and must not be swallowed by a host fallback. `NumericUploadError::Provider` retains the platform-aware execution error and its original cause through automatic placement.
+
+Only a certified pre-effect `UnsupportedProviderOperation` permits numerical fallback. Call `after_effect()` when an error follows allocation, staging or submission; call `with_unproven_effects()` when a delegated hook does not establish whether effects occurred. Both dispositions prevent replay even if a nested cause requests fallback. Unknown timing remains distinct from a known completed effect. In WGPU, numeric uploads mark the actual buffer-creation boundary and preserve terminal failures from the observed completion fence.

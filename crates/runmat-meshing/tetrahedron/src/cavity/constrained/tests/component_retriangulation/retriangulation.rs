@@ -52,7 +52,10 @@ fn component_retriangulation_rejects_duplicate_node_ids() {
     let mut nodes = unit_tetrahedron_nodes();
     nodes.push(ConstrainedCavityNode {
         node_id: 3,
-        coordinates_m: [0.1, 0.1, 0.1],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.1, 0.1, 0.1,
+            ]),
     });
 
     let err = retriangulate_constrained_cavity_from_nodes(

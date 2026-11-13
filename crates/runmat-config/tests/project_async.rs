@@ -88,6 +88,32 @@ roots = ["src"]
             .expect("index virtual source roots");
         assert_eq!(index.files.len(), 1);
         assert_eq!(index.files[0].qualified_name, "main");
+        let mut broad = manifest.clone();
+        broad.sources.roots = vec![PathBuf::from(".")];
+        let owned = runmat_config::project::build_project_source_index_excluding_async(
+            Path::new("/workspace"),
+            &broad,
+            &[PathBuf::from("/workspace/deps/helper")],
+        )
+        .await
+        .expect("virtual graph ownership boundary");
+        assert_eq!(owned.files.len(), 2);
+        assert!(owned
+            .files
+            .iter()
+            .all(|source| !source.relative_path.starts_with("deps")));
+        broad.sources.roots = vec![PathBuf::from("deps/helper/src")];
+        assert!(
+            runmat_config::project::build_project_source_index_excluding_async(
+                Path::new("/workspace"),
+                &broad,
+                &[PathBuf::from("/workspace/deps/helper")],
+            )
+            .await
+            .unwrap()
+            .files
+            .is_empty()
+        );
 
         let entrypoint = resolve_named_entrypoint_from_async(source, "main")
             .await

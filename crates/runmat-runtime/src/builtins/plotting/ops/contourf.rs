@@ -1,361 +1,21 @@
 //! MATLAB-compatible `contourf` builtin (filled contour plot).
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{CONTOURF_ERROR_INTERNAL, CONTOURF_ERROR_INVALID_ARGUMENT};
 
-use log::warn;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 use runmat_value::Value;
 
 use super::common::tensor_to_surface_grid_matlab_xy;
 use super::contour::{
-    build_contour_fill_gpu_plot, build_contour_fill_plot, build_contour_gpu_plot,
-    build_contour_plot, parse_contour_args, ContourArgs, ContourLineColor,
-    CONTOUR_INTEGER_LINE_COLOR_EXTENSION,
+    build_contour_fill_gpu_plot, build_contour_fill_plot, build_contour_plot, parse_contour_args,
+    ContourArgs, ContourLineColor,
 };
-use super::op_common::axes_target::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::axes_target::{apply_axes_target, split_leading_axes_arguments};
 use super::state::{render_active_plot, PlotRenderOptions};
 use crate::build_runtime_error;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "contourf";
-
-const CONTOURF_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to filled contour plot.",
-}];
-
-const CONTOURF_INPUTS_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Contour height grid.",
-}];
-
-const CONTOURF_INPUTS_Z_LEVEL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour level count/value vector.",
-    },
-];
-
-const CONTOURF_INPUTS_Z_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value contour options.",
-    },
-];
-
-const CONTOURF_INPUTS_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour level count/value vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value contour options.",
-    },
-];
-
-const CONTOURF_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate vector matching Z columns or coordinate matrix matching Z.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate vector matching Z rows or coordinate matrix matching Z.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour height grid.",
-    },
-];
-
-const CONTOURF_INPUTS_X_Y_Z_LEVEL: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate vector matching Z columns or coordinate matrix matching Z.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate vector matching Z rows or coordinate matrix matching Z.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour level count/value vector.",
-    },
-];
-
-const CONTOURF_INPUTS_X_Y_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate vector matching Z columns or coordinate matrix matching Z.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate vector matching Z rows or coordinate matrix matching Z.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Contour level count/value vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value contour options.",
-    },
-];
-
-const CONTOURF_INPUTS_TARGET_ARGS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes object.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Any supported filled-contour data, level, line-specification, and property arguments.",
-    },
-];
-
-const CONTOURF_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(Z)",
-        inputs: &CONTOURF_INPUTS_Z,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(Z, V)",
-        inputs: &CONTOURF_INPUTS_Z_LEVEL,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(Z, Name, Value, ...)",
-        inputs: &CONTOURF_INPUTS_Z_PROPS,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(Z, V, Name, Value, ...)",
-        inputs: &CONTOURF_INPUTS_Z_LEVEL_PROPS,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(X, Y, Z)",
-        inputs: &CONTOURF_INPUTS_X_Y_Z,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(X, Y, Z, V)",
-        inputs: &CONTOURF_INPUTS_X_Y_Z_LEVEL,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(X, Y, Z, V, Name, Value, ...)",
-        inputs: &CONTOURF_INPUTS_X_Y_Z_LEVEL_PROPS,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = contourf(ax, ...)",
-        inputs: &CONTOURF_INPUTS_TARGET_ARGS,
-        outputs: &CONTOURF_OUTPUT_HANDLE,
-    },
-];
-
-pub const CONTOURF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONTOURF.INVALID_ARGUMENT",
-    identifier: Some("RunMat:contourf:InvalidArgument"),
-    when: "Contour input arrays, level arguments, or name/value options are invalid.",
-    message: "contourf: invalid argument",
-};
-
-pub const CONTOURF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONTOURF.INTERNAL",
-    identifier: Some("RunMat:contourf:Internal"),
-    when: "Internal filled-contour render preparation fails unexpectedly.",
-    message: "contourf: internal operation failed",
-};
-
-const CONTOURF_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [CONTOURF_ERROR_INVALID_ARGUMENT, CONTOURF_ERROR_INTERNAL];
-
-pub const CONTOURF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CONTOURF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CONTOURF_ERRORS,
-};
-
-pub const CONTOURF_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [CONTOUR_INTEGER_LINE_COLOR_EXTENSION];
-
-const fn documented_integer_input(
-    name: &'static str,
-    notes: &'static str,
-) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes,
-    }
-}
-
-const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "Z",
-    "The documented height matrix accepts every built-in integer class and must contain at least two exact distinct values.",
-)];
-const INTEGER_Z_N: [BuiltinIntegerInputCapability; 2] = [
-    documented_integer_input("Z", "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."),
-    documented_integer_input("N", "A scalar integer selects a positive bounded contour-level count through exact structural validation."),
-];
-const INTEGER_Z_V: [BuiltinIntegerInputCapability; 2] = [
-    documented_integer_input("Z", "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."),
-    documented_integer_input("V", "The documented integer level vector is checked for exact monotonic order before graphics conversion."),
-];
-const INTEGER_X_Y_Z: [BuiltinIntegerInputCapability; 3] = [
-    documented_integer_input("X", "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly for shape, orientation, and strict monotonicity."),
-    documented_integer_input("Y", "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly for shape, orientation, and strict monotonicity."),
-    documented_integer_input("Z", "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."),
-];
-const INTEGER_X_Y_Z_N: [BuiltinIntegerInputCapability; 4] = [
-    documented_integer_input("X", "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."),
-    documented_integer_input("Y", "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."),
-    documented_integer_input("Z", "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."),
-    documented_integer_input("N", "A scalar integer selects a positive bounded contour-level count through exact structural validation."),
-];
-const INTEGER_X_Y_Z_V: [BuiltinIntegerInputCapability; 4] = [
-    documented_integer_input("X", "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."),
-    documented_integer_input("Y", "The documented coordinate vector or matrix accepts every built-in integer class and is validated exactly before graphics conversion."),
-    documented_integer_input("Z", "The documented height matrix accepts every built-in integer class and is validated exactly before filled-contour geometry."),
-    documented_integer_input("V", "The documented integer level vector is checked for exact monotonic order before graphics conversion."),
-];
-const INTEGER_LEVEL_LIST: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "LevelList",
-    "The documented property accepts every built-in integer class as an exact monotonically increasing level vector.",
-)];
-const INTEGER_LEVEL_STEP: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "LevelStep",
-    "The documented property accepts every built-in integer class as a positive scalar spacing.",
-)];
-const INTEGER_LINE_WIDTH: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "LineWidth",
-    "A positive scalar integer line width crosses the explicit graphics-property boundary after scalar validation.",
-)];
-const INTEGER_LINE_COLOR: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "LineColor",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes:
-        "RunMat mode admits a typed-integer RGB triplet only when every exact component is 0 or 1.",
-}];
-
-pub const CONTOURF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 10] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(integer_Z)", inputs: &INTEGER_Z, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Authoritative integer heights are validated exactly and then cross the client filled-contour boundary; resident integer grids gather through their owning provider instead of entering the floating WGPU path." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(integer_Z, integer_N)", inputs: &INTEGER_Z_N, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Z crosses the graphics boundary after exact validation while N remains exact through positive allocation-bound validation." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(integer_Z, integer_V)", inputs: &INTEGER_Z_V, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer level order and height distinctness are established before client graphics conversion." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(integer_X, integer_Y, integer_Z)", inputs: &INTEGER_X_Y_Z, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Coordinate shape, matrix orientation, monotonicity, and height distinctness are checked from authoritative integer storage before filled-contour conversion." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(integer_X, integer_Y, integer_Z, integer_N)", inputs: &INTEGER_X_Y_Z_N, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Coordinates and heights cross the graphics boundary after exact validation; N is a bounded structural count." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(integer_X, integer_Y, integer_Z, integer_V)", inputs: &INTEGER_X_Y_Z_V, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Coordinate and level order are exact before the explicit client graphics conversion; resident integer inputs gather." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(..., 'LevelList', integer_levels)", inputs: &INTEGER_LEVEL_LIST, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "LevelList is ordered from authoritative integer storage and then crosses the floating contour-level boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(..., 'LevelStep', integer_step)", inputs: &INTEGER_LEVEL_STEP, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "LevelStep is validated as one positive scalar and then crosses the f32 graphics-property boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(..., 'LineWidth', integer_width)", inputs: &INTEGER_LINE_WIDTH, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "LineWidth is validated as one positive scalar and then crosses the f32 graphics-property boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = contourf(..., 'LineColor', integer_rgb)", inputs: &INTEGER_LINE_COLOR, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The shared RunMat-only integer RGB gate precedes owning-provider gather; exact 0/1 validation follows gather and precedes f32 conversion." },
-];
 
 fn contourf_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -373,55 +33,78 @@ fn map_contourf_invalid_argument(err: crate::RuntimeError) -> crate::RuntimeErro
     if err.identifier().is_some() {
         return err;
     }
-    contourf_error_with_detail(&CONTOURF_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = contourf_error_with_detail(&CONTOURF_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_contourf_internal(err: crate::RuntimeError) -> crate::RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    contourf_error_with_detail(&CONTOURF_ERROR_INTERNAL, err.message)
+    let mapped = contourf_error_with_detail(&CONTOURF_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "contourf",
-    category = "plotting",
-    summary = "Create filled contour plots.",
-    keywords = "contourf,plotting,filled,contour",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::contourf::CONTOURF_DESCRIPTOR),
-    extensions(crate::builtins::plotting::contourf::CONTOURF_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::contourf::CONTOURF_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::contourf"
 )]
-pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let mut all = Vec::with_capacity(rest.len() + 1);
-    all.push(first);
-    all.extend(rest);
-    let (axes_target, mut all) = if all.first().is_some_and(is_typed_integer_value) {
+pub fn contourf_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "contourf: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "contourf")?;
+    let _arguments = args.fork();
+    work.finish(contourf_impl(args, &work))
+}
+
+fn contourf_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
+    let all = args;
+    let (axes_target, all) = if all.first().is_some_and(is_typed_integer_value) {
         (None, all)
     } else {
-        split_leading_axes_handle(all, BUILTIN_NAME).map_err(map_contourf_invalid_argument)?
+        split_leading_axes_arguments(all, BUILTIN_NAME).map_err(map_contourf_invalid_argument)?
     };
     let first = all.first().cloned().ok_or_else(|| {
         contourf_error_with_detail(&CONTOURF_ERROR_INVALID_ARGUMENT, "expected Z input")
     })?;
-    let rest = all.drain(1..).collect();
+    let rest = all.view().range(1..)?;
     let mut args =
         Some(parse_contour_args(BUILTIN_NAME, first, rest).map_err(map_contourf_invalid_argument)?);
+    work.check()?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_contourf_invalid_argument)?;
     let opts = PlotRenderOptions {
-        title: "Filled Contour Plot",
-        x_label: "X",
-        y_label: "Y",
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let before = figure.plots().count();
         let ContourArgs {
@@ -436,46 +119,57 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         let color_map = ColorMap::Parula;
         let base_z = 0.0;
 
+        let x_source = super::op_common::surface_inputs::AxisSource::Host(x_axis);
+        let y_source = super::op_common::surface_inputs::AxisSource::Host(y_axis);
+        let super::op_common::surface_inputs::AxisSource::Host(x_axis) = &x_source else {
+            unreachable!()
+        };
+        let super::op_common::surface_inputs::AxisSource::Host(y_axis) = &y_source else {
+            unreachable!()
+        };
         if let Some(handle) = z_input.gpu_handle() {
-            match build_contour_fill_gpu_plot(
-                name,
-                &x_axis,
-                &y_axis,
-                handle,
-                color_map.clone(),
-                base_z,
-                &level_spec,
-            ) {
-                Ok(fill_plot) => {
-                    figure.add_contour_fill_plot_on_axes(fill_plot, axes);
-                    *plot_index_slot.borrow_mut() = Some((axes, before));
-                    if !matches!(line_color, ContourLineColor::None) {
-                        match build_contour_gpu_plot(
+            if let Some(mut prepared) = futures::executor::block_on(
+                super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(
+                    name, &x_source, &y_source, handle,
+                ),
+            )? {
+                let fill_plot = build_contour_fill_gpu_plot(
+                    name,
+                    x_axis,
+                    y_axis,
+                    handle,
+                    &mut prepared,
+                    color_map.clone(),
+                    base_z,
+                    &level_spec,
+                )?;
+                let contours = if matches!(line_color, ContourLineColor::None) {
+                    None
+                } else {
+                    Some(
+                        super::contour::build_contour_gpu_plot_prepared(
                             name,
-                            &x_axis,
-                            &y_axis,
+                            &x_source,
+                            &y_source,
                             handle,
+                            &mut prepared,
                             color_map.clone(),
                             base_z,
                             &level_spec,
                             &line_color,
-                        ) {
-                            Ok(contours) => {
-                                figure.add_contour_plot_on_axes(
-                                    contours.with_line_width(line_width),
-                                    axes,
-                                );
-                            }
-                            Err(err) => {
-                                warn!("contourf contour overlay unavailable: {err}");
-                            }
-                        }
-                    }
-                    return Ok(());
+                            super::contour::ContourZMode::Base,
+                        )?
+                        .with_line_width(line_width),
+                    )
+                };
+                // Publish the requested composite only after every required
+                // stage succeeds; never silently omit an overlay.
+                figure.add_contour_fill_plot_on_axes(fill_plot, axes);
+                *plot_index_slot.borrow_mut() = Some((axes, before));
+                if let Some(contours) = contours {
+                    figure.add_contour_plot_on_axes(contours, axes);
                 }
-                Err(err) => {
-                    warn!("contourf GPU path unavailable: {err}");
-                }
+                return Ok(());
             }
         }
 
@@ -490,34 +184,36 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         .map_err(map_contourf_invalid_argument)?;
         let fill_plot = build_contour_fill_plot(
             name,
-            &x_axis,
-            &y_axis,
+            x_axis,
+            y_axis,
             &grid,
             color_map.clone(),
             base_z,
             &level_spec,
         )
         .map_err(map_contourf_invalid_argument)?;
+        let contours = if matches!(line_color, ContourLineColor::None) {
+            None
+        } else {
+            Some(
+                build_contour_plot(
+                    name,
+                    x_axis,
+                    y_axis,
+                    &grid,
+                    color_map,
+                    base_z,
+                    &level_spec,
+                    &line_color,
+                )
+                .map_err(map_contourf_invalid_argument)?
+                .with_line_width(line_width),
+            )
+        };
         figure.add_contour_fill_plot_on_axes(fill_plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, before));
-        if !matches!(line_color, ContourLineColor::None) {
-            match build_contour_plot(
-                name,
-                &x_axis,
-                &y_axis,
-                &grid,
-                color_map,
-                base_z,
-                &level_spec,
-                &line_color,
-            ) {
-                Ok(contours) => {
-                    figure.add_contour_plot_on_axes(contours.with_line_width(line_width), axes);
-                }
-                Err(err) => {
-                    warn!("contourf overlay contour unavailable: {err}");
-                }
-            }
+        if let Some(contours) = contours {
+            figure.add_contour_plot_on_axes(contours, axes);
         }
         Ok(())
     });
@@ -530,8 +226,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         plot_index,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_contourf_internal(err));
@@ -551,12 +246,34 @@ fn is_typed_integer_value(value: &Value) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{
+        CONTOURF_DESCRIPTOR, CONTOURF_EXTENSIONS, CONTOURF_INTEGER_CAPABILITIES,
+    };
+    fn parse_contour_args(
+        name: &'static str,
+        first: Value,
+        rest: Vec<Value>,
+    ) -> crate::BuiltinResult<super::super::contour::ContourArgs> {
+        super::super::contour::parse_contour_args(
+            name,
+            first,
+            crate::call::FunctionArgumentView::from_slice(&rest),
+        )
+    }
+
+    fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
+        let args = std::iter::once(first).chain(rest).collect();
+        super::contourf_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+    }
+
     use crate::builtins::common::test_support;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::lock_plot_test_context;
     use crate::builtins::plotting::state::{clone_figure, current_figure_handle, reset_plot_state};
     use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_plot::plots::figure::PlotElement;
     use runmat_value::{IntegerStorage, Tensor};
 
@@ -660,6 +377,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contourf_requires_matching_grid() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let res = contourf_builtin(
             Value::Tensor(tensor_from(&[0.0])),
@@ -672,11 +390,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn contourf_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::Num
+    fn contourf_catalog_infers_host_double_handle() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(2)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 1],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::CONTOURF_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 
     #[test]
@@ -840,6 +578,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_target_axes_and_does_not_alias_integer_z_as_a_handle() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let ax = crate::builtins::plotting::axes::axes_builtin(Vec::new()).expect("axes");
         let z = Value::Tensor(
@@ -852,6 +591,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_invalid_grid_uses_stable_identifier() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let err = contourf_builtin(Value::Num(0.0), Vec::new()).expect_err("invalid z");
         assert_eq!(err.identifier(), CONTOURF_ERROR_INVALID_ARGUMENT.identifier);
@@ -859,6 +599,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_returns_handle() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(
@@ -872,6 +613,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_explicit_axes_and_scalar_level_count() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -889,6 +631,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_non_square_meshgrid_axes() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(matrix_from(&[10.0, 10.0, 20.0, 20.0, 30.0, 30.0], 2, 3)),

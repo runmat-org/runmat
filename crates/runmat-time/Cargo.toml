@@ -1,6 +1,6 @@
 [package]
 name = "runmat-time"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -10,6 +10,6 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 instant = { version = "0.1", default-features = false, features = ["wasm-bindgen"] }
 js-sys = "0.3"

@@ -10,11 +10,11 @@ use runmat_meshing_core::{
 use super::*;
 use crate::adaptation::{
     SolverFieldTransferEvidence, SolverFieldTransferMethod, StructuralRecoveryIndicator,
-    StructuralRecoveryStatistics,
+    StructuralRecoveryNorm, StructuralRecoveryStatistics,
 };
 use crate::assembly::solver_solid::tests::artifact;
 
-fn adaptation_fixture() -> (
+pub(in crate::adaptation) fn adaptation_fixture() -> (
     SolverMeshArtifact,
     SolverMeshArtifact,
     SolverMeshTransferMap,
@@ -23,32 +23,65 @@ fn adaptation_fixture() -> (
     let mut source = artifact(ElementOrder::Tet4);
     clear_boundaries(&mut source);
     source.seal_canonical_digest().unwrap();
+    refine_fixture(source, StableDigest::from_bytes([77; 32]))
+}
+
+fn refine_fixture(
+    source: SolverMeshArtifact,
+    inserted_identity: StableDigest,
+) -> (
+    SolverMeshArtifact,
+    SolverMeshArtifact,
+    SolverMeshTransferMap,
+    SolverMeshAdaptationLineage,
+) {
     let region = source.topology.regions[0].region_id.clone();
     let source_cell = cell(&source.topology.volume_elements[0], &source);
+    let corners = source.topology.volume_elements[0].node_ids[..4].to_vec();
+    let inserted_id = source.topology.nodes.len() as u64 + 1;
+    let position = std::array::from_fn(|axis| {
+        corners
+            .iter()
+            .map(|id| {
+                source.topology.nodes[*id as usize - 1]
+                    .coordinates_m
+                    .canonical_value()[axis]
+                    * 0.25
+            })
+            .sum()
+    });
     let mut target = source.clone();
     target
         .topology
         .nodes
         .push(runmat_meshing_core::SolverMeshNode {
-            node_id: 5,
-            stable_identity: StableDigest::from_bytes([77; 32]),
-            coordinates_m: [0.25, 0.25, 0.25],
+            node_id: inserted_id,
+            stable_identity: inserted_identity,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(position),
             provenance: vec![region.clone()],
             exact_parameters: Vec::new(),
         });
-    target.topology.volume_elements = [[5, 2, 3, 4], [1, 5, 3, 4], [1, 2, 5, 4], [1, 2, 3, 5]]
-        .into_iter()
+    let children = (0..4)
+        .map(|replace| {
+            let mut child = source.topology.volume_elements[0].clone();
+            child.node_ids[replace] = inserted_id;
+            child.stable_identity = solver_volume_element_identity(std::array::from_fn(|i| {
+                target.topology.nodes[child.node_ids[i] as usize - 1].stable_identity
+            }));
+            child
+        })
+        .collect::<Vec<_>>();
+    target.topology.volume_elements = source.topology.volume_elements[1..]
+        .iter()
+        .cloned()
+        .chain(children)
         .enumerate()
-        .map(|(index, node_ids)| SolverVolumeElement {
-            element_id: index as u64 + 1,
-            stable_identity: solver_volume_element_identity(
-                node_ids.map(|id| target.topology.nodes[id as usize - 1].stable_identity),
-            ),
-            order: ElementOrder::Tet4,
-            node_ids: node_ids.into(),
-            region_id: region.clone(),
-            material_id: "steel".into(),
-            provenance: vec![region.clone()],
+        .map(|(i, mut e)| {
+            e.element_id = i as u64 + 1;
+            e
         })
         .collect();
     target.topology.neighbors = target
@@ -63,11 +96,15 @@ fn adaptation_fixture() -> (
             })
         })
         .collect();
-    target.topology.regions[0].element_ids = vec![1, 2, 3, 4];
-    for topology in &mut target.topology.field_topologies {
+    target.topology.regions[0].element_ids =
+        (1..=target.topology.volume_elements.len() as u64).collect();
+    let topo = &mut *target.topology;
+    for topology in &mut topo.field_topologies {
         topology.ordered_entity_ids = match topology.location {
-            FieldTopologyLocation::Node => vec![1, 2, 3, 4, 5],
-            FieldTopologyLocation::VolumeElement => vec![1, 2, 3, 4],
+            FieldTopologyLocation::Node => (1..=topo.nodes.len() as u64).collect(),
+            FieldTopologyLocation::VolumeElement => {
+                (1..=topo.volume_elements.len() as u64).collect()
+            }
             FieldTopologyLocation::BoundaryFace | FieldTopologyLocation::BoundaryEdge => Vec::new(),
         };
     }
@@ -76,6 +113,13 @@ fn adaptation_fixture() -> (
         .topology
         .volume_elements
         .iter()
+        .filter(|element| {
+            !source
+                .topology
+                .volume_elements
+                .iter()
+                .any(|old| old.stable_identity == element.stable_identity)
+        })
         .map(|element| cell(element, &target))
         .collect::<Vec<_>>();
     created_cells.sort_by_key(|cell| cell.stable_identity);
@@ -85,12 +129,13 @@ fn adaptation_fixture() -> (
         target_artifact_digest: target.canonical_digest,
         geometry: source.geometry.clone(),
         node_transfers: vec![SolverEntityTransfer {
-            target_stable_identity: target.topology.nodes[4].stable_identity,
+            target_stable_identity: inserted_identity,
             method: SolverTransferMethod::BarycentricInterpolation,
             sources: source
                 .topology
                 .nodes
                 .iter()
+                .filter(|node| corners.contains(&node.node_id))
                 .map(|node| SolverTransferSource {
                     stable_identity: node.stable_identity,
                     weight: 0.25,
@@ -125,8 +170,8 @@ fn adaptation_fixture() -> (
         requested_removal_node_identities: Vec::new(),
         mutations: vec![SolverMeshAdaptationMutation {
             source_mark_identity: Some(source_cell.stable_identity),
-            node_identity: target.topology.nodes[4].stable_identity,
-            node_coordinates_m: target.topology.nodes[4].coordinates_m,
+            node_identity: inserted_identity,
+            node_coordinates_m: position,
             removed_cells: vec![source_cell],
             created_cells,
         }],
@@ -140,7 +185,7 @@ fn adaptation_fixture() -> (
 fn clear_boundaries(artifact: &mut SolverMeshArtifact) {
     artifact.topology.boundary_faces.clear();
     artifact.topology.boundary_edges.clear();
-    artifact.topology.material_interfaces.clear();
+    artifact.topology.conformal_interfaces.clear();
     artifact.topology.contacts.clear();
     for topology in &mut artifact.topology.field_topologies {
         if matches!(
@@ -163,32 +208,40 @@ fn cell(element: &SolverVolumeElement, artifact: &SolverMeshArtifact) -> SolverM
 }
 
 fn estimate(target: &SolverMeshArtifact) -> StructuralRecoveryEstimate {
-    let errors = [0.08, 0.06, 0.04, 0.02];
-    let sum = errors.iter().sum::<f64>();
-    let sum_squared = errors.iter().map(|error| error * error).sum::<f64>();
+    let errors = if target.topology.volume_elements.len() == 1 {
+        vec![0.3]
+    } else {
+        (0..target.topology.volume_elements.len())
+            .map(|i| 0.08 / (i as f64 + 1.0))
+            .collect()
+    };
     let mut indicators = target
         .topology
         .volume_elements
         .iter()
-        .zip(errors)
+        .zip(&errors)
         .map(|(element, error)| StructuralRecoveryIndicator {
             element_stable_identity: element.stable_identity,
-            error,
+            error: *error,
         })
         .collect::<Vec<_>>();
-    indicators.sort_by_key(|indicator| indicator.element_stable_identity);
+    indicators.sort_by_key(|i| i.element_stable_identity);
+    let sum = indicators.iter().map(|i| i.error).sum::<f64>();
+    let sum_squared = indicators.iter().map(|i| i.error * i.error).sum::<f64>();
     StructuralRecoveryEstimate {
+        norm: StructuralRecoveryNorm::StressTensorFrobeniusL2,
         solver_artifact_digest: target.canonical_digest,
         stress_topology_id: "elements".into(),
         total_error: sum_squared.sqrt(),
+        reference_norm: 1.0,
         marked_element_identities: vec![indicators[0].element_stable_identity],
         indicators,
         statistics: StructuralRecoveryStatistics {
-            element_count: 4,
-            minimum_error: 0.02,
-            maximum_error: 0.08,
-            mean_error: sum / 4.0,
-            root_mean_square_error: (sum_squared / 4.0).sqrt(),
+            element_count: errors.len() as u64,
+            minimum_error: errors.iter().copied().reduce(f64::min).unwrap(),
+            maximum_error: errors.iter().copied().reduce(f64::max).unwrap(),
+            mean_error: sum / errors.len() as f64,
+            root_mean_square_error: (sum_squared / errors.len() as f64).sqrt(),
         },
     }
 }
@@ -204,8 +257,8 @@ fn transfer_error(
             topology_id: "nodes".into(),
             location: FieldTopologyLocation::Node,
             component_count: 3,
-            copied_entity_count: 4,
-            projected_entity_count: 1,
+            copied_entity_count: source.topology.nodes.len(),
+            projected_entity_count: target.topology.nodes.len() - source.topology.nodes.len(),
             methods: vec![
                 SolverFieldTransferMethod::StableIdentity,
                 SolverFieldTransferMethod::BarycentricInterpolation,
@@ -218,156 +271,5 @@ fn transfer_error(
     }
 }
 
-#[test]
-fn iteration_binds_canonical_solver_mesh_lineage_transfer_and_evidence() {
-    let (source, target, transfer, lineage) = adaptation_fixture();
-    let estimator = estimate(&target);
-    let transfer_errors = [transfer_error(&source, &target)];
-    let solver = StructuralAdaptationSolverResult {
-        result_digest: StableDigest::from_bytes([101; 32]),
-        converged: true,
-        iteration_count: 8,
-        normalized_residual: 1.0e-10,
-    };
-    let quantity = StructuralTargetQuantity {
-        quantity_id: "tip_displacement".into(),
-        value: 0.01,
-    };
-    let iteration = build_structural_adaptation_iteration(
-        StructuralAdaptationIterationInput {
-            source_artifact: &source,
-            target_artifact: &target,
-            transfer_map: &transfer,
-            lineage: &lineage,
-            estimator: &estimator,
-            transfer_errors: &transfer_errors,
-            solver_result: &solver,
-            target_quantity: &quantity,
-            previous: None,
-        },
-        StructuralAdaptationPolicy::default(),
-    )
-    .unwrap();
-    assert_eq!(
-        iteration.decision.status,
-        StructuralAdaptationDecisionStatus::Continue
-    );
-    iteration
-        .validate_against(&source, &target, &transfer, &lineage)
-        .unwrap();
-    let encoded = iteration.canonical_encode().unwrap();
-    assert_eq!(
-        StructuralAdaptationIteration::canonical_decode(&encoded).unwrap(),
-        iteration
-    );
-    let chained = previous_evidence(
-        Some(&iteration),
-        target.canonical_digest,
-        &quantity.quantity_id,
-    )
-    .unwrap();
-    assert_eq!(chained.iteration_index, 1);
-    assert_eq!(
-        chained.previous_iteration_digest,
-        Some(iteration.canonical_digest().unwrap())
-    );
-    assert!(previous_evidence(
-        Some(&iteration),
-        source.canonical_digest,
-        &quantity.quantity_id,
-    )
-    .is_err());
-    let mut trailing = encoded;
-    trailing.push(0);
-    assert!(matches!(
-        StructuralAdaptationIteration::canonical_decode(&trailing),
-        Err(StructuralAdaptationIterationError::Codec(_))
-    ));
-    let mut tampered = iteration.clone();
-    tampered.estimator.total_error *= 2.0;
-    assert_eq!(
-        tampered.validate(),
-        Err(StructuralAdaptationIterationError::InvalidEstimator)
-    );
-}
-
-#[test]
-fn convergence_requires_solver_transfer_estimator_and_target_quantity_evidence() {
-    let solver = StructuralAdaptationSolverResult {
-        result_digest: StableDigest::from_bytes([1; 32]),
-        converged: true,
-        iteration_count: 3,
-        normalized_residual: 1.0e-12,
-    };
-    let mut transfer = SolverFieldTransferErrorEvidence {
-        transfer: SolverFieldTransferEvidence {
-            source_artifact_digest: StableDigest::from_bytes([2; 32]),
-            target_artifact_digest: StableDigest::from_bytes([3; 32]),
-            topology_id: "nodes".into(),
-            location: FieldTopologyLocation::Node,
-            component_count: 1,
-            copied_entity_count: 1,
-            projected_entity_count: 1,
-            methods: vec![SolverFieldTransferMethod::StableIdentity],
-        },
-        transferred_field_digest: StableDigest::from_bytes([4; 32]),
-        reference_field_digest: StableDigest::from_bytes([5; 32]),
-        absolute_l2_error: 0.0,
-        relative_l2_error: Some(0.0),
-    };
-    let policy = StructuralAdaptationPolicy::default();
-    let converged = decision::decide(
-        5.0e-4,
-        &[transfer.clone()],
-        &solver,
-        1.0 + 1.0e-7,
-        Some(1.0e-3),
-        Some(1.0),
-        policy,
-    );
-    assert_eq!(
-        converged.status,
-        StructuralAdaptationDecisionStatus::Converged
-    );
-
-    let unchanged_estimator = decision::decide(
-        1.0e-3,
-        &[transfer.clone()],
-        &solver,
-        1.0,
-        Some(1.0e-3),
-        Some(1.0),
-        policy,
-    );
-    assert_eq!(
-        unchanged_estimator.status,
-        StructuralAdaptationDecisionStatus::Rejected
-    );
-    let moving_target = decision::decide(
-        5.0e-4,
-        &[transfer.clone()],
-        &solver,
-        1.1,
-        Some(1.0e-3),
-        Some(1.0),
-        policy,
-    );
-    assert_eq!(
-        moving_target.status,
-        StructuralAdaptationDecisionStatus::Continue
-    );
-    transfer.relative_l2_error = None;
-    let invalid_transfer = decision::decide(
-        5.0e-4,
-        &[transfer],
-        &solver,
-        1.0,
-        Some(1.0e-3),
-        Some(1.0),
-        policy,
-    );
-    assert_eq!(
-        invalid_transfer.status,
-        StructuralAdaptationDecisionStatus::Rejected
-    );
-}
+mod constraint_lineage;
+pub(in crate::adaptation) mod governed;

@@ -28,7 +28,10 @@ pub(crate) fn diagnostic_boundary_node_completion(
         .into_iter()
         .map(|node_id| ConnectivityPoint {
             node_id,
-            coordinates_m: boundary_node_map[&node_id],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(boundary_node_map[&node_id]),
             is_super: false,
         })
         .collect::<Vec<_>>();
@@ -37,7 +40,7 @@ pub(crate) fn diagnostic_boundary_node_completion(
         let node_ids = tetrahedron.vertices.map(|index| points[index].node_id);
         let tetrahedron_points = tetrahedron
             .vertices
-            .map(|index| points[index].coordinates_m);
+            .map(|index| points[index].coordinates_m.canonical_value());
         if point_in_closed_triangle_surface(
             tetrahedron_centroid(tetrahedron_points),
             &boundary_triangles,
@@ -46,10 +49,12 @@ pub(crate) fn diagnostic_boundary_node_completion(
         {
             continue;
         }
-        if let Ok(tetrahedron) =
-            raw_refill_tetrahedron_with_rejection_reason(node_ids, tetrahedron_points, options)
-        {
-            refill_tetrahedra.push(tetrahedron);
+        match raw_refill_tetrahedron_with_rejection_reason(node_ids, tetrahedron_points, options) {
+            Ok(tetrahedron) => refill_tetrahedra.push(tetrahedron),
+            Err(RefillTetrahedronError::Rejected(_)) => {}
+            Err(RefillTetrahedronError::Accounting(cause)) => {
+                return Err(ConstrainedCavityRefillError::Accounting(cause));
+            }
         }
     }
     let mut aggregate =
@@ -69,7 +74,7 @@ pub(crate) fn diagnostic_boundary_node_completion(
             &boundary_triangles,
             options,
             missing_faces.len(),
-        );
+        )?;
         merge_boundary_node_completion_diagnostic(&mut aggregate, diagnostic);
         let Some(tetrahedron) = best_boundary_face_completion_tetrahedron(
             missing_face,
@@ -78,7 +83,9 @@ pub(crate) fn diagnostic_boundary_node_completion(
             &refill_tetrahedra,
             &boundary_triangles,
             options,
-        ) else {
+        )
+        .map_err(ConstrainedCavityRefillError::Validation)?
+        else {
             aggregate.reason = "boundary_node_completion_no_candidate";
             return Ok(aggregate);
         };

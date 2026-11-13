@@ -3,17 +3,19 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FitclinearOption, FitclinearSolver,
+    FITCLINEAR_ERROR_INTERNAL as ERROR_FITCLINEAR_INTERNAL,
+    FITCLINEAR_ERROR_INVALID_ARGUMENT as ERROR_FITCLINEAR_INVALID_ARGUMENT,
+    FITCLINEAR_INTEGER_NUMERIC_ARGUMENT_EXTENSION as INTEGER_NUMERIC_ARGUMENT_EXTENSION,
+    FITCLINEAR_INTEGER_PREDICTOR_EXTENSION as INTEGER_PREDICTOR_EXTENSION,
+    FITCLINEAR_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
+    PREDICT_ERROR_INTERNAL as ERROR_PREDICT_INTERNAL,
+    PREDICT_ERROR_INVALID_ARGUMENT as ERROR_PREDICT_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::IntegerClass;
 use runmat_value::{
-    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, StructValue,
+    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, StringElement,
     Tensor, Value,
 };
 
@@ -23,222 +25,43 @@ use crate::builtins::table::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-pub(crate) const CLASSIFICATION_LINEAR_CLASS: &str = "ClassificationLinear";
-
 const FITCLINEAR_NAME: &str = "fitclinear";
 const PREDICT_NAME: &str = "predict";
 const DEFAULT_ITERATIONS: usize = 500;
 const EPS: f64 = 1.0e-12;
 
-const INTEGER_PREDICTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitclinear-integer-predictors",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitclinear with typed-integer predictors is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitclinearIntegerPredictorExtension"),
+mod training;
+use training::fit_models;
+mod header;
+use header::{
+    preflight_matrix_rank, preflight_response_shape, FitclinearArguments, HeaderInspection,
+    NamedOption, PreparedOption,
 };
-const INTEGER_NUMERIC_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitclinear-integer-numeric-arguments",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitclinear with typed-integer weights or numeric controls is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitclinearIntegerNumericArgumentExtension"),
+mod admission;
+mod options;
+mod prediction;
+mod projection;
+use admission::{build_fit_spec, classification_matrix_dimensions, is_table_value};
+use options::{
+    class_priors, decode_fit_option, parse_fit_options, parse_formula, FitclinearAction,
 };
-const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitclinear-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitclinear host fitting from provider-resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitclinearResidentInputExtension"),
+pub(crate) use prediction::predict_classification_linear_object;
+use projection::fit_info_value;
+mod labels;
+mod values;
+use labels::{
+    is_missing_label, label_kind_name, label_vector, labels_from_value, labels_value,
+    numeric_vector_property, predicted_labels_value, same_label, score_transform,
+    score_transform_property, string_array_property, tensor_property, unique_labels,
+    validate_class_names,
 };
-pub const FITCLINEAR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_PREDICTOR_EXTENSION,
-    INTEGER_NUMERIC_ARGUMENT_EXTENSION,
-    RESIDENT_INPUT_EXTENSION,
-];
-
-const INTEGER_PREDICTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer predictors must be exactly representable in binary64 before host fitting; values that would round are rejected.",
-    }];
-const INTEGER_LABEL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Y or ClassNames",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Grouping labels retain their exact integer class and identity through model storage and prediction, including above flintmax.",
-    }];
-const INTEGER_NUMERIC_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Weights or numeric option",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer statistical inputs are independently gated and must cross the binary64 boundary exactly.",
-    }];
-pub const FITCLINEAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Mdl = fitclinear(integer_X, Y, ___)",
-        inputs: &INTEGER_PREDICTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Matrix and table predictor roles share the same exact conversion boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Mdl = fitclinear(X, integer_Y, ClassNames=integer_names)",
-        inputs: &INTEGER_LABEL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Class grouping never passes through floating point.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Mdl = fitclinear(X, Y, Weights=integer_W, numericOption=integer_value)",
-        inputs: &INTEGER_NUMERIC_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer weights and numeric controls are RunMat-only extensions and reject rather than round.",
-    },
-];
-
-const OUTPUT_MDL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Mdl",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "ClassificationLinear object containing coefficients, class names, and fit metadata.",
-}];
-
-const OUTPUT_MDL_FITINFO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Mdl",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ClassificationLinear object.",
-    },
-    BuiltinParamDescriptor {
-        name: "FitInfo",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Training diagnostics for each Lambda value.",
-    },
-];
-
-const PARAM_TBL_OR_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "tblOrX",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input table or predictor matrix.",
+use values::{
+    beta_value, char_rows, columns_to_tensor, columns_to_tensor_predict, dot_row,
+    ensure_integer_tensor_exact, ensure_integer_tensor_exact_predict, logical_scalar,
+    numeric_scalar, numeric_vector, positive_integer, predict_scalar_text, row_tensor,
+    rows_to_tensor, scalar_text, sigmoid, soft_threshold, text_list, vector_values,
+    vector_values_predict, x_value,
 };
-
-const PARAM_Y_OR_RESPONSE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "yOrResponse",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Response vector, response variable name, or table formula.",
-};
-
-const PARAM_REST: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value options such as Learner, Lambda, Regularization, Solver, ObservationsIn, FitBias, ClassNames, PredictorNames, ResponseName, Weights, Prior, and ScoreTransform.",
-};
-
-const FITCLINEAR_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_TBL_OR_X, PARAM_Y_OR_RESPONSE];
-const FITCLINEAR_INPUTS_FULL: [BuiltinParamDescriptor; 3] =
-    [PARAM_TBL_OR_X, PARAM_Y_OR_RESPONSE, PARAM_REST];
-
-const FITCLINEAR_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(X, Y)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(Tbl, ResponseVarName)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(Tbl, formula)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(Tbl, Y)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(___, Name, Value)",
-        inputs: &FITCLINEAR_INPUTS_FULL,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Mdl, FitInfo] = fitclinear(___)",
-        inputs: &FITCLINEAR_INPUTS_FULL,
-        outputs: &OUTPUT_MDL_FITINFO,
-    },
-];
-
-const ERROR_FITCLINEAR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITCLINEAR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:fitclinear:InvalidArgument"),
-    when: "Inputs, binary response labels, dimensions, or name-value options are malformed or unsupported.",
-    message: "fitclinear: invalid argument",
-};
-
-const ERROR_FITCLINEAR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITCLINEAR.INTERNAL",
-    identifier: Some("RunMat:fitclinear:Internal"),
-    when: "RunMat cannot construct the ClassificationLinear result.",
-    message: "fitclinear: internal error",
-};
-
-const ERROR_PREDICT_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:predict:InvalidArgument"),
-    when: "Linear-classifier prediction inputs are malformed or incompatible with the model.",
-    message: "predict: invalid argument",
-};
-
-const ERROR_PREDICT_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INTERNAL",
-    identifier: Some("RunMat:predict:Internal"),
-    when: "Linear-classifier prediction cannot construct its output.",
-    message: "predict: internal error",
-};
-
-const FITCLINEAR_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ERROR_FITCLINEAR_INVALID_ARGUMENT, ERROR_FITCLINEAR_INTERNAL];
-
-pub const FITCLINEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FITCLINEAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FITCLINEAR_ERRORS,
-};
-
-fn fitclinear_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn fitclinear_error(
     message: impl Into<String>,
@@ -342,7 +165,7 @@ impl ScoreTransform {
 enum ClassLabel {
     Numeric(f64),
     Integer(IntValue),
-    Text(String),
+    Text(StringElement),
     Logical(bool),
 }
 
@@ -352,18 +175,6 @@ enum LabelKind {
     Integer(IntegerClass),
     Text,
     Logical,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum IntegerClass {
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
 }
 
 #[derive(Clone, Debug)]
@@ -383,7 +194,7 @@ struct FitOptions {
     learner: Learner,
     lambdas: Option<Vec<f64>>,
     regularization: Regularization,
-    solver: String,
+    solver: FitclinearSolver,
     observations_in: ObservationsIn,
     fit_bias: bool,
     class_names: Option<Vec<ClassLabel>>,
@@ -403,7 +214,7 @@ impl Default for FitOptions {
             learner: Learner::Svm,
             lambdas: None,
             regularization: Regularization::Ridge,
-            solver: "auto".to_string(),
+            solver: FitclinearSolver::Auto,
             observations_in: ObservationsIn::Rows,
             fit_bias: true,
             class_names: None,
@@ -449,26 +260,29 @@ struct FitResult {
 
 #[runtime_builtin(
     name = "fitclinear",
-    category = "stats/ml",
-    summary = "Fit a binary linear classification model.",
-    keywords = "fitclinear,classification linear,svm,logistic regression,machine learning,statistics",
-    type_resolver(fitclinear_type),
-    descriptor(crate::builtins::stats::ml::classification_linear::FITCLINEAR_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::classification_linear::FITCLINEAR_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::stats::ml::classification_linear::FITCLINEAR_INTEGER_CAPABILITIES
-    ),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::classification_linear"
 )]
-pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_fitclinear_extensions(&first, &rest)?;
+pub(crate) async fn fitclinear_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let inspection = HeaderInspection::inspect(&first, rest.view())?;
+    ensure_fitclinear_extensions(&first, rest.view(), &inspection)?;
+    preflight_matrix_rank(&first)?;
+    let arguments = inspection
+        .validate(rest.len())?
+        .preflight_values(rest.view())?;
+    preflight_response_shape(&first, rest.view(), &arguments)?;
     let first = gather(first).await?;
-    let rest = gather_all(rest).await?;
-    let spec = build_fit_spec(first, rest)?;
-    let result = fit_models(&spec)?;
+    let rest = gather_all(rest, &arguments, runtime.as_ref()).await?;
+    let spec = build_fit_spec(first, rest.view(), arguments)?;
+    let result = fit_models(runtime.as_ref(), &spec)?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Object(result.object)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Object(result.object)])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![Value::Object(result.object), result.fit_info],
@@ -488,35 +302,38 @@ fn typed_integer_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-fn ensure_fitclinear_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_fitclinear_extensions(
+    first: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    inspection: &HeaderInspection,
+) -> BuiltinResult<()> {
     if crate::dispatcher::value_contains_gpu(first)
         || rest.iter().any(crate::dispatcher::value_contains_gpu)
     {
         enable_extension(&RESIDENT_INPUT_EXTENSION)?;
     }
-    let option_start = if is_table_value(first) {
-        ensure_table_integer_extensions(first, rest)?
-    } else {
-        if typed_integer_value(first) {
-            enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
-        }
-        1
-    };
-    let options = &rest[option_start.min(rest.len())..];
-    for pair in options.chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]) else {
-            continue;
-        };
-        if typed_integer_value(&pair[1]) && !name.eq_ignore_ascii_case("ClassNames") {
+    if is_table_value(first) {
+        ensure_table_integer_extensions(first, rest, inspection)?;
+    } else if typed_integer_value(first) {
+        enable_extension(&INTEGER_PREDICTOR_EXTENSION)?;
+    }
+    for (index, identity) in inspection.known_options() {
+        if rest.get(index + 1).is_some_and(typed_integer_value)
+            && identity != FitclinearOption::ClassNames
+        {
             enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
         }
     }
     Ok(())
 }
 
-fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<usize> {
+fn ensure_table_integer_extensions(
+    first: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    inspection: &HeaderInspection,
+) -> BuiltinResult<()> {
     let Value::Object(object) = first else {
-        return Ok(0);
+        return Ok(());
     };
     let names = table_variable_names_from_object(object)
         .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))?;
@@ -525,10 +342,8 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
     let mut response = names.last().cloned().unwrap_or_default();
     let mut predictors: Option<Vec<String>> = None;
     let mut external_y = false;
-    let mut option_start = 0;
-    if let Some(arg) = rest.first().filter(|arg| !is_name_value_option(arg)) {
-        option_start = 1;
-        if let Some(text) = scalar_text(arg) {
+    if let Some(arg) = rest.first().filter(|_| inspection.option_start == 1) {
+        if let Some(text) = scalar_text(arg)? {
             if let Some((lhs, rhs)) = text.split_once('~') {
                 response = lhs.trim().to_string();
                 predictors = Some(
@@ -545,20 +360,21 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
             external_y = true;
         }
     }
-    let options = &rest[option_start..];
     let mut weight_variable = None;
-    for pair in options.chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]) else {
+    for (index, identity) in inspection.known_options() {
+        let Some(value) = rest.get(index + 1) else {
             continue;
         };
-        match name.to_ascii_lowercase().as_str() {
-            "responsename" if !external_y => {
-                if let Some(value) = scalar_text(&pair[1]) {
+        match identity {
+            FitclinearOption::ResponseName if !external_y => {
+                if let Some(value) = scalar_text(value)? {
                     response = value;
                 }
             }
-            "predictornames" => predictors = text_list(&pair[1], "PredictorNames").ok(),
-            "weights" => weight_variable = scalar_text(&pair[1]),
+            FitclinearOption::PredictorNames => {
+                predictors = Some(text_list(value, "PredictorNames")?)
+            }
+            FitclinearOption::Weights => weight_variable = scalar_text(value)?,
             _ => {}
         }
     }
@@ -584,961 +400,36 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
     {
         enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
     }
-    Ok(option_start)
-}
-
-async fn gather(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))
-}
-
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
-    }
-    Ok(out)
-}
-
-fn build_fit_spec(first: Value, mut rest: Vec<Value>) -> BuiltinResult<FitSpec> {
-    if is_table_value(&first) {
-        build_table_fit_spec(first, rest)
-    } else {
-        if rest.is_empty() {
-            return Err(fitclinear_invalid(
-                "fitclinear: matrix input requires response vector Y",
-            ));
-        }
-        let y = rest.remove(0);
-        build_matrix_fit_spec(first, y, rest)
-    }
-}
-
-fn is_table_value(value: &Value) -> bool {
-    matches!(value, Value::Object(object) if is_tabular_object(object))
-}
-
-fn build_matrix_fit_spec(
-    x_value: Value,
-    y_value: Value,
-    rest: Vec<Value>,
-) -> BuiltinResult<FitSpec> {
-    let mut options = FitOptions::default();
-    parse_fit_options(&rest, &mut options)?;
-    if let Some(WeightSpec::Variable(_)) = options.weights {
-        return Err(fitclinear_invalid(
-            "fitclinear: weights variable names require table input",
-        ));
-    }
-    let x = normalize_observation_matrix(numeric_matrix_for_fit(x_value)?, &options)?;
-    let labels = label_vector(y_value, "Y")?;
-    if labels.labels.len() != x.rows {
-        return Err(fitclinear_invalid(
-            "fitclinear: length(Y) must match the number of observations in X",
-        ));
-    }
-    let predictor_names = if let Some(names) = options.predictor_names.clone() {
-        if names.len() != x.cols {
-            return Err(fitclinear_invalid(format!(
-                "fitclinear: PredictorNames must contain {} names",
-                x.cols
-            )));
-        }
-        names
-    } else {
-        (1..=x.cols).map(|idx| format!("x{idx}")).collect()
-    };
-    let response_name = options
-        .response_name
-        .clone()
-        .unwrap_or_else(|| "Y".to_string());
-    let weights = match &options.weights {
-        Some(WeightSpec::Values(values)) => values.clone(),
-        Some(WeightSpec::Variable(_)) => unreachable!("checked above"),
-        None => vec![1.0; x.rows],
-    };
-    finalize_fit_spec(x, labels, predictor_names, response_name, weights, options)
-}
-
-fn build_table_fit_spec(first: Value, rest: Vec<Value>) -> BuiltinResult<FitSpec> {
-    let object = match first {
-        Value::Object(object) => object,
-        _ => unreachable!("table checked"),
-    };
-    let variable_names = table_variable_names_from_object(&object)
-        .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))?;
-    if variable_names.len() < 2 {
-        return Err(fitclinear_invalid(
-            "fitclinear: table input must contain at least one predictor and one response",
-        ));
-    }
-    let variables =
-        table_variables(&object).map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))?;
-    let mut options = FitOptions::default();
-    let mut rest_start = 0usize;
-    let mut response_name = variable_names
-        .last()
-        .cloned()
-        .ok_or_else(|| fitclinear_invalid("fitclinear: response variable missing"))?;
-    let mut external_y = None;
-    let mut formula_predictors = None;
-    if let Some(first_arg) = rest.first() {
-        if !is_name_value_option(first_arg) {
-            if let Some(text) = scalar_text(first_arg) {
-                if text.contains('~') {
-                    let parsed = parse_formula(&text, &variable_names)?;
-                    response_name = parsed.0;
-                    formula_predictors = Some(parsed.1);
-                } else {
-                    response_name = text;
-                }
-            } else {
-                external_y = Some(label_vector(first_arg.clone(), "Y")?);
-                response_name = options
-                    .response_name
-                    .clone()
-                    .unwrap_or_else(|| "Y".to_string());
-            }
-            rest_start = 1;
-        }
-    }
-    parse_fit_options(&rest[rest_start..], &mut options)?;
-    if options.observations_in == ObservationsIn::Columns {
-        return Err(fitclinear_invalid(
-            "fitclinear: ObservationsIn='columns' is not supported for table input",
-        ));
-    }
-    response_name = options.response_name.clone().unwrap_or(response_name);
-    let has_external_y = external_y.is_some();
-    let labels = if let Some(labels) = external_y {
-        labels
-    } else {
-        let value = variables.fields.get(&response_name).ok_or_else(|| {
-            fitclinear_invalid(format!(
-                "fitclinear: response variable '{response_name}' is not in the table"
-            ))
-        })?;
-        label_vector(value.clone(), &response_name)?
-    };
-    let predictor_names = if let Some(names) = options.predictor_names.clone() {
-        names
-    } else if let Some(names) = formula_predictors {
-        names
-    } else {
-        let weight_variable = match &options.weights {
-            Some(WeightSpec::Variable(name)) => Some(name.as_str()),
-            _ => None,
-        };
-        variable_names
-            .iter()
-            .filter(|name| {
-                (has_external_y || **name != response_name)
-                    && weight_variable != Some(name.as_str())
-            })
-            .cloned()
-            .collect()
-    };
-    if predictor_names.is_empty() {
-        return Err(fitclinear_invalid(
-            "fitclinear: at least one predictor variable is required",
-        ));
-    }
-    let mut columns = Vec::with_capacity(predictor_names.len());
-    for name in &predictor_names {
-        let value = variables.fields.get(name).ok_or_else(|| {
-            fitclinear_invalid(format!(
-                "fitclinear: predictor variable '{name}' is not in the table"
-            ))
-        })?;
-        let tensor = numeric_matrix_for_fit(value.clone()).map_err(|_| {
-            fitclinear_invalid(format!(
-                "fitclinear: predictor variable '{name}' must be numeric"
-            ))
-        })?;
-        columns.push(vector_values(&tensor, name)?);
-    }
-    let x = columns_to_tensor(columns)?;
-    let weights = match &options.weights {
-        Some(WeightSpec::Values(values)) => values.clone(),
-        Some(WeightSpec::Variable(name)) => {
-            let value = variables.fields.get(name).ok_or_else(|| {
-                fitclinear_invalid(format!(
-                    "fitclinear: weights variable '{name}' is not in the table"
-                ))
-            })?;
-            numeric_vector(value, "Weights")?
-        }
-        None => vec![1.0; x.rows],
-    };
-    finalize_fit_spec(x, labels, predictor_names, response_name, weights, options)
-}
-
-fn finalize_fit_spec(
-    x: Tensor,
-    labels: LabelVector,
-    predictor_names: Vec<String>,
-    response_name: String,
-    weights: Vec<f64>,
-    mut options: FitOptions,
-) -> BuiltinResult<FitSpec> {
-    if labels.labels.len() != x.rows {
-        return Err(fitclinear_invalid(
-            "fitclinear: response length must match the number of observations",
-        ));
-    }
-    if weights.len() != x.rows {
-        return Err(fitclinear_invalid(
-            "fitclinear: Weights length must match the number of observations",
-        ));
-    }
-    if predictor_names.len() != x.cols {
-        return Err(fitclinear_invalid(format!(
-            "fitclinear: PredictorNames must contain {} names",
-            x.cols
-        )));
-    }
-    for weight in &weights {
-        if !weight.is_finite() || *weight < 0.0 {
-            return Err(fitclinear_invalid(
-                "fitclinear: weights must be nonnegative finite values",
-            ));
-        }
-    }
-    let class_names = if let Some(names) = options.class_names.clone() {
-        validate_class_names(names, labels.kind)?
-    } else {
-        unique_labels(&labels.labels, labels.kind)
-    };
-    if class_names.len() != 2 {
-        return Err(fitclinear_invalid(
-            "fitclinear: exactly two classes are required",
-        ));
-    }
-    let mut clean_rows = Vec::new();
-    let mut clean_classes = Vec::new();
-    let mut clean_weights = Vec::new();
-    for row in 0..x.rows {
-        let weight = weights[row];
-        if weight == 0.0 || is_missing_label(&labels.labels[row]) {
-            continue;
-        }
-        let class_index = class_names
-            .iter()
-            .position(|label| same_label(label, &labels.labels[row]))
-            .ok_or_else(|| {
-                fitclinear_invalid("fitclinear: response contains a class outside ClassNames")
-            })?;
-        let mut row_values = Vec::with_capacity(x.cols);
-        let mut complete = true;
-        for col in 0..x.cols {
-            let value = x_value(&x, row, col);
-            if value.is_infinite() {
-                return Err(fitclinear_invalid(
-                    "fitclinear: predictor values must not contain Inf",
-                ));
-            }
-            if value.is_nan() {
-                complete = false;
-                break;
-            }
-            row_values.push(value);
-        }
-        if complete {
-            clean_rows.push(row_values);
-            clean_classes.push(class_index);
-            clean_weights.push(weight);
-        }
-    }
-    if clean_classes.is_empty() {
-        return Err(fitclinear_invalid(
-            "fitclinear: at least one complete weighted observation is required",
-        ));
-    }
-    if !(clean_classes.contains(&0) && clean_classes.contains(&1)) {
-        return Err(fitclinear_invalid(
-            "fitclinear: both classes must be observed after removing missing rows",
-        ));
-    }
-    let clean_x = rows_to_tensor(clean_rows)?;
-    let lambdas = options
-        .lambdas
-        .clone()
-        .unwrap_or_else(|| vec![1.0 / clean_x.rows.max(1) as f64]);
-    if lambdas.is_empty() {
-        return Err(fitclinear_invalid(
-            "fitclinear: Lambda must contain at least one value",
-        ));
-    }
-    for lambda in &lambdas {
-        if !lambda.is_finite() || *lambda < 0.0 {
-            return Err(fitclinear_invalid(
-                "fitclinear: Lambda values must be nonnegative finite scalars",
-            ));
-        }
-    }
-    options.lambdas = Some(lambdas);
-    if let Some(beta0) = &options.beta0 {
-        if beta0.len() != clean_x.cols {
-            return Err(fitclinear_invalid(format!(
-                "fitclinear: Beta must contain {} coefficients",
-                clean_x.cols
-            )));
-        }
-    }
-    let priors = class_priors(&clean_classes, &clean_weights, options.prior.clone())?;
-    Ok(FitSpec {
-        x: clean_x,
-        class_indices: clean_classes,
-        class_names,
-        class_kind: labels.kind,
-        predictor_names,
-        response_name,
-        weights: clean_weights,
-        priors,
-        options,
-    })
-}
-
-fn class_priors(
-    class_indices: &[usize],
-    weights: &[f64],
-    explicit: Option<Vec<f64>>,
-) -> BuiltinResult<Vec<f64>> {
-    if let Some(prior) = explicit {
-        if prior.len() != 2 {
-            return Err(fitclinear_invalid(
-                "fitclinear: Prior must contain two class probabilities",
-            ));
-        }
-        if prior.iter().any(|value| !value.is_finite() || *value < 0.0) {
-            return Err(fitclinear_invalid(
-                "fitclinear: Prior values must be nonnegative finite values",
-            ));
-        }
-        let sum = prior.iter().sum::<f64>();
-        if sum <= 0.0 {
-            return Err(fitclinear_invalid(
-                "fitclinear: Prior values must have positive total",
-            ));
-        }
-        return Ok(prior.into_iter().map(|value| value / sum).collect());
-    }
-    let mut counts = [0.0, 0.0];
-    for (idx, weight) in class_indices.iter().zip(weights.iter()) {
-        counts[*idx] += *weight;
-    }
-    let total = counts[0] + counts[1];
-    Ok(vec![counts[0] / total, counts[1] / total])
-}
-
-fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResult<()> {
-    if !values.len().is_multiple_of(2) {
-        return Err(fitclinear_invalid(
-            "fitclinear: name-value options must be paired",
-        ));
-    }
-    let mut index = 0usize;
-    while index < values.len() {
-        let name = scalar_text(&values[index])
-            .ok_or_else(|| fitclinear_invalid("fitclinear: option name must be text"))?;
-        let value = &values[index + 1];
-        match name.to_ascii_lowercase().as_str() {
-            "learner" => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| fitclinear_invalid("fitclinear: Learner must be text"))?;
-                options.learner = match text.to_ascii_lowercase().as_str() {
-                    "svm" => Learner::Svm,
-                    "logistic" => Learner::Logistic,
-                    other => {
-                        return Err(fitclinear_invalid(format!(
-                            "fitclinear: unsupported Learner '{other}'"
-                        )));
-                    }
-                };
-            }
-            "lambda" => options.lambdas = Some(numeric_vector(value, "Lambda")?),
-            "regularization" => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| fitclinear_invalid("fitclinear: Regularization must be text"))?;
-                options.regularization = match text.to_ascii_lowercase().as_str() {
-                    "ridge" => Regularization::Ridge,
-                    "lasso" => Regularization::Lasso,
-                    other => {
-                        return Err(fitclinear_invalid(format!(
-                            "fitclinear: unsupported Regularization '{other}'"
-                        )));
-                    }
-                };
-            }
-            "solver" => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| fitclinear_invalid("fitclinear: Solver must be text"))?;
-                match text.to_ascii_lowercase().as_str() {
-                    "auto" | "sgd" | "asgd" | "bfgs" | "lbfgs" | "sparsa" | "dual" => {
-                        options.solver = text.to_ascii_lowercase();
-                    }
-                    other => {
-                        return Err(fitclinear_invalid(format!(
-                            "fitclinear: unsupported Solver '{other}'"
-                        )));
-                    }
-                }
-            }
-            "observationsin" => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| fitclinear_invalid("fitclinear: ObservationsIn must be text"))?;
-                options.observations_in = match text.to_ascii_lowercase().as_str() {
-                    "rows" => ObservationsIn::Rows,
-                    "columns" => ObservationsIn::Columns,
-                    other => {
-                        return Err(fitclinear_invalid(format!(
-                            "fitclinear: unsupported ObservationsIn '{other}'"
-                        )));
-                    }
-                };
-            }
-            "fitbias" => options.fit_bias = logical_scalar(value, "FitBias")?,
-            "classnames" => {
-                let labels = label_vector(value.clone(), "ClassNames")?;
-                options.class_names = Some(labels.labels);
-            }
-            "predictornames" => {
-                options.predictor_names = Some(text_list(value, "PredictorNames")?);
-            }
-            "responsename" => {
-                options.response_name =
-                    Some(scalar_text(value).ok_or_else(|| {
-                        fitclinear_invalid("fitclinear: ResponseName must be text")
-                    })?);
-            }
-            "weights" => {
-                options.weights = Some(if let Some(name) = scalar_text(value) {
-                    WeightSpec::Variable(name)
-                } else {
-                    WeightSpec::Values(numeric_vector(value, "Weights")?)
-                });
-            }
-            "prior" => {
-                if let Some(text) = scalar_text(value) {
-                    match text.to_ascii_lowercase().as_str() {
-                        "empirical" => options.prior = None,
-                        "uniform" => options.prior = Some(vec![0.5, 0.5]),
-                        other => {
-                            return Err(fitclinear_invalid(format!(
-                                "fitclinear: unsupported Prior '{other}'"
-                            )));
-                        }
-                    }
-                } else {
-                    options.prior = Some(numeric_vector(value, "Prior")?);
-                }
-            }
-            "scoretransform" => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| fitclinear_invalid("fitclinear: ScoreTransform must be text"))?;
-                options.score_transform = Some(match text.to_ascii_lowercase().as_str() {
-                    "none" => ScoreTransform::None,
-                    "logit" => ScoreTransform::Logit,
-                    other => {
-                        return Err(fitclinear_invalid(format!(
-                            "fitclinear: unsupported ScoreTransform '{other}'"
-                        )));
-                    }
-                });
-            }
-            "iterationlimit" | "passlimit" => {
-                options.iteration_limit = positive_integer(value, &name)?;
-            }
-            "beta" => options.beta0 = Some(numeric_vector(value, "Beta")?),
-            "bias" => options.bias0 = Some(numeric_scalar(value, "Bias")?),
-            "batchlimit"
-            | "betatolerance"
-            | "deltagradienttolerance"
-            | "gradienttolerance"
-            | "numcheckconvergence"
-            | "postfitbias"
-            | "verbose" => {
-                // Accepted for script compatibility. The CPU solver below is deterministic
-                // batch gradient descent and records convergence diagnostics in FitInfo.
-            }
-            "cost"
-            | "crossval"
-            | "cvpartition"
-            | "holdout"
-            | "kfold"
-            | "leaveout"
-            | "optimizehyperparameters"
-            | "hyperparameteroptimizationoptions" => {
-                return Err(fitclinear_invalid(format!(
-                    "fitclinear: option '{name}' is not supported yet"
-                )));
-            }
-            other => {
-                return Err(fitclinear_invalid(format!(
-                    "fitclinear: unknown option '{other}'"
-                )))
-            }
-        }
-        index += 2;
-    }
     Ok(())
 }
 
-fn parse_formula(text: &str, variables: &[String]) -> BuiltinResult<(String, Vec<String>)> {
-    let Some((lhs, rhs)) = text.split_once('~') else {
-        return Err(fitclinear_invalid("fitclinear: formula must contain '~'"));
-    };
-    let response = lhs.trim().to_string();
-    if response.is_empty() {
-        return Err(fitclinear_invalid("fitclinear: formula response is empty"));
-    }
-    let mut predictors = Vec::new();
-    for term in rhs.split('+') {
-        let term = term.trim();
-        if term.is_empty() || term == "1" {
-            continue;
-        }
-        if term.contains('*') || term.contains(':') || term.contains('^') {
-            return Err(fitclinear_invalid(
-                "fitclinear: formula interactions are not supported yet",
-            ));
-        }
-        if !variables.iter().any(|name| name == term) {
-            return Err(fitclinear_invalid(format!(
-                "fitclinear: formula predictor '{term}' is not in the table"
-            )));
-        }
-        predictors.push(term.to_string());
-    }
-    if predictors.is_empty() {
-        return Err(fitclinear_invalid(
-            "fitclinear: formula must contain at least one predictor",
-        ));
-    }
-    Ok((response, predictors))
+async fn gather(value: Value) -> BuiltinResult<Value> {
+    gather_if_needed_async(&value).await
 }
 
-fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
-    let lambdas = spec
-        .options
-        .lambdas
-        .as_ref()
-        .expect("lambdas populated during finalize");
-    let mut models = Vec::with_capacity(lambdas.len());
-    for lambda in lambdas {
-        models.push(train_for_lambda(spec, *lambda)?);
+async fn gather_all(
+    values: crate::call::BuiltinArguments,
+    arguments: &FitclinearArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !values.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(values);
     }
-    let beta_value = beta_value(&models, spec.x.cols)?;
-    let bias_value = row_tensor(models.iter().map(|model| model.bias).collect())?;
-    let mut object = ObjectInstance::new(CLASSIFICATION_LINEAR_CLASS.to_string());
-    object
-        .properties
-        .insert("Beta".to_string(), beta_value.clone());
-    object
-        .properties
-        .insert("Bias".to_string(), bias_value.clone());
-    object
-        .properties
-        .insert("Lambda".to_string(), row_tensor(lambdas.clone())?);
-    object.properties.insert(
-        "Learner".to_string(),
-        Value::String(spec.options.learner.as_str().to_string()),
-    );
-    object.properties.insert(
-        "Regularization".to_string(),
-        Value::String(spec.options.regularization.as_str().to_string()),
-    );
-    object.properties.insert(
-        "Solver".to_string(),
-        Value::String(spec.options.solver.clone()),
-    );
-    object.properties.insert(
-        "ScoreTransform".to_string(),
-        Value::String(score_transform(spec).as_str().to_string()),
-    );
-    object
-        .properties
-        .insert("FitBias".to_string(), Value::Bool(spec.options.fit_bias));
-    object.properties.insert(
-        "ResponseName".to_string(),
-        Value::String(spec.response_name.clone()),
-    );
-    object.properties.insert(
-        "PredictorNames".to_string(),
-        Value::StringArray(StringArray {
-            data: spec.predictor_names.clone(),
-            shape: vec![1, spec.predictor_names.len()],
-            rows: 1,
-            cols: spec.predictor_names.len(),
-        }),
-    );
-    object.properties.insert(
-        "ClassNames".to_string(),
-        labels_value(&spec.class_names, spec.class_kind)?,
-    );
-    object
-        .properties
-        .insert("Prior".to_string(), row_tensor(spec.priors.clone())?);
-    object.properties.insert(
-        "NumObservations".to_string(),
-        Value::Num(spec.x.rows as f64),
-    );
-    object
-        .properties
-        .insert("NumPredictors".to_string(), Value::Num(spec.x.cols as f64));
-    object.properties.insert(
-        "__RunMatLinearClassKind".to_string(),
-        Value::String(label_kind_name(spec.class_kind).to_string()),
-    );
-    let mut parameters = StructValue::new();
-    parameters.insert(
-        "Learner",
-        Value::String(spec.options.learner.as_str().to_string()),
-    );
-    parameters.insert(
-        "Regularization",
-        Value::String(spec.options.regularization.as_str().to_string()),
-    );
-    parameters.insert("Solver", Value::String(spec.options.solver.clone()));
-    parameters.insert(
-        "ObservationsIn",
-        Value::String(spec.options.observations_in.as_str().to_string()),
-    );
-    parameters.insert("FitBias", Value::Bool(spec.options.fit_bias));
-    parameters.insert(
-        "IterationLimit",
-        Value::Num(spec.options.iteration_limit as f64),
-    );
-    object
-        .properties
-        .insert("ModelParameters".to_string(), Value::Struct(parameters));
-    let fit_info = fit_info_value(spec, lambdas, &models)?;
-    Ok(FitResult { object, fit_info })
-}
-
-fn train_for_lambda(spec: &FitSpec, lambda: f64) -> BuiltinResult<TrainedModel> {
-    let predictors = spec.x.cols;
-    let mut beta = spec
-        .options
-        .beta0
-        .clone()
-        .unwrap_or_else(|| vec![0.0; predictors]);
-    let mut bias = spec.options.bias0.unwrap_or_else(|| {
-        if spec.options.fit_bias {
-            (spec.priors[1] / spec.priors[0]).ln() / 2.0
-        } else {
-            0.0
-        }
-    });
-    let total_weight = spec.weights.iter().sum::<f64>().max(EPS);
-    let base_step = if spec.options.learner == Learner::Logistic {
-        0.25
-    } else {
-        0.15
-    };
-    let mut last_grad_norm = f64::INFINITY;
-    for iter in 0..spec.options.iteration_limit.max(1) {
-        let mut grad_beta = vec![0.0; predictors];
-        let mut grad_bias = 0.0;
-        for row in 0..spec.x.rows {
-            let y = if spec.class_indices[row] == 1 {
-                1.0
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            let is_option_name = index >= arguments.option_start
+                && (index - arguments.option_start).is_multiple_of(2);
+            let is_ignored_value = arguments
+                .options
+                .iter()
+                .any(|option| option.name.index + 1 == index && option.name.identity.ignored());
+            if is_option_name || is_ignored_value {
+                Ok(values[index].clone())
             } else {
-                -1.0
-            };
-            let margin = dot_row(&spec.x, row, &beta) + bias;
-            let coeff = match spec.options.learner {
-                Learner::Logistic => {
-                    let ym = (y * margin).clamp(-40.0, 40.0);
-                    -y / (1.0 + ym.exp())
-                }
-                Learner::Svm => {
-                    if y * margin < 1.0 {
-                        -y
-                    } else {
-                        0.0
-                    }
-                }
-            } * spec.weights[row]
-                / total_weight;
-            if coeff != 0.0 {
-                for (col, grad) in grad_beta.iter_mut().enumerate() {
-                    *grad += coeff * x_value(&spec.x, row, col);
-                }
-                if spec.options.fit_bias {
-                    grad_bias += coeff;
-                }
+                gather(values[index].clone()).await
             }
-        }
-        match spec.options.regularization {
-            Regularization::Ridge => {
-                for (grad, coef) in grad_beta.iter_mut().zip(beta.iter()) {
-                    *grad += lambda * *coef;
-                }
-            }
-            Regularization::Lasso => {}
-        }
-        last_grad_norm = grad_beta
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt()
-            .hypot(grad_bias.abs());
-        let step = base_step / (1.0 + lambda + 0.01 * iter as f64).sqrt();
-        for (coef, grad) in beta.iter_mut().zip(grad_beta.iter()) {
-            *coef -= step * *grad;
-            if spec.options.regularization == Regularization::Lasso && lambda > 0.0 {
-                *coef = soft_threshold(*coef, step * lambda);
-            }
-        }
-        if spec.options.fit_bias {
-            bias -= step * grad_bias;
-        } else {
-            bias = 0.0;
-        }
-        if last_grad_norm < 1.0e-7 {
-            break;
-        }
-    }
-    Ok(TrainedModel {
-        objective: objective(spec, &beta, bias, lambda),
-        beta,
-        bias,
-        iterations: spec.options.iteration_limit.max(1),
-        gradient_norm: last_grad_norm,
-    })
-}
-
-fn objective(spec: &FitSpec, beta: &[f64], bias: f64, lambda: f64) -> f64 {
-    let total_weight = spec.weights.iter().sum::<f64>().max(EPS);
-    let mut loss = 0.0;
-    for row in 0..spec.x.rows {
-        let y = if spec.class_indices[row] == 1 {
-            1.0
-        } else {
-            -1.0
-        };
-        let margin = dot_row(&spec.x, row, beta) + bias;
-        let row_loss = match spec.options.learner {
-            Learner::Logistic => (1.0 + (-y * margin).clamp(-40.0, 40.0).exp()).ln(),
-            Learner::Svm => (1.0 - y * margin).max(0.0),
-        };
-        loss += spec.weights[row] * row_loss / total_weight;
-    }
-    let penalty = match spec.options.regularization {
-        Regularization::Ridge => 0.5 * lambda * beta.iter().map(|value| value * value).sum::<f64>(),
-        Regularization::Lasso => lambda * beta.iter().map(|value| value.abs()).sum::<f64>(),
-    };
-    loss + penalty
-}
-
-fn fit_info_value(
-    spec: &FitSpec,
-    lambdas: &[f64],
-    models: &[TrainedModel],
-) -> BuiltinResult<Value> {
-    let mut info = StructValue::new();
-    info.insert("Lambda", row_tensor(lambdas.to_vec())?);
-    info.insert(
-        "Objective",
-        row_tensor(models.iter().map(|model| model.objective).collect())?,
-    );
-    info.insert(
-        "NumIterations",
-        row_tensor(models.iter().map(|model| model.iterations as f64).collect())?,
-    );
-    info.insert(
-        "NumPasses",
-        row_tensor(models.iter().map(|model| model.iterations as f64).collect())?,
-    );
-    info.insert(
-        "GradientNorm",
-        row_tensor(models.iter().map(|model| model.gradient_norm).collect())?,
-    );
-    info.insert("PassLimit", Value::Num(spec.options.iteration_limit as f64));
-    info.insert("Solver", Value::String(spec.options.solver.clone()));
-    info.insert(
-        "Learner",
-        Value::String(spec.options.learner.as_str().to_string()),
-    );
-    info.insert(
-        "Regularization",
-        Value::String(spec.options.regularization.as_str().to_string()),
-    );
-    info.insert("TerminationCode", row_tensor(vec![1.0; models.len()])?);
-    info.insert(
-        "TerminationStatus",
-        Value::String("Iteration limit reached or gradient tolerance satisfied".to_string()),
-    );
-    Ok(Value::Struct(info))
-}
-
-pub(crate) fn predict_classification_linear_object(
-    object: ObjectInstance,
-    xnew: Value,
-    rest: Vec<Value>,
-) -> BuiltinResult<Vec<Value>> {
-    let options = parse_predict_options(&rest)?;
-    let predictor_names = string_array_property(&object, "PredictorNames")?;
-    let x = predictors_for_prediction(xnew, &predictor_names, options.observations_in)?;
-    let beta = tensor_property(&object, "Beta")?;
-    if beta.shape.len() > 2 || beta.rows != predictor_names.len() {
-        return Err(predict_invalid("predict: model Beta has invalid shape"));
-    }
-    let bias = numeric_vector_property(&object, "Bias")?;
-    if bias.len() != beta.cols {
-        return Err(predict_invalid(
-            "predict: model Bias length does not match Beta",
-        ));
-    }
-    let class_names = labels_from_value(
-        object
-            .properties
-            .get("ClassNames")
-            .cloned()
-            .ok_or_else(|| predict_invalid("predict: model is missing ClassNames"))?,
-        "ClassNames",
-    )?;
-    if class_names.labels.len() != 2 {
-        return Err(predict_invalid(
-            "predict: model must contain two class names",
-        ));
-    }
-    let score_transform = score_transform_property(&object)?;
-    let mut label_indices = Vec::with_capacity(x.rows * beta.cols);
-    let mut score_data = Vec::with_capacity(x.rows * 2 * beta.cols);
-    let beta_values = beta.materialize_f64();
-    for model_idx in 0..beta.cols {
-        let model_beta = (0..beta.rows)
-            .map(|row| beta_values[row + model_idx * beta.rows])
-            .collect::<Vec<_>>();
-        for row in 0..x.rows {
-            let margin = dot_row(&x, row, &model_beta) + bias[model_idx];
-            label_indices.push(if margin >= 0.0 { 1 } else { 0 });
-        }
-        for class_col in 0..2 {
-            for row in 0..x.rows {
-                let margin = dot_row(&x, row, &model_beta) + bias[model_idx];
-                let value = match score_transform {
-                    ScoreTransform::Logit => {
-                        let p = sigmoid(margin);
-                        if class_col == 0 {
-                            1.0 - p
-                        } else {
-                            p
-                        }
-                    }
-                    ScoreTransform::None => {
-                        if class_col == 0 {
-                            -margin
-                        } else {
-                            margin
-                        }
-                    }
-                };
-                score_data.push(value);
-            }
-        }
-    }
-    let label = predicted_labels_value(
-        &class_names.labels,
-        class_names.kind,
-        &label_indices,
-        x.rows,
-        beta.cols,
-    )?;
-    let score_shape = if beta.cols == 1 {
-        vec![x.rows, 2]
-    } else {
-        vec![x.rows, 2, beta.cols]
-    };
-    let score = Value::Tensor(
-        Tensor::new(score_data, score_shape)
-            .map_err(|err| predict_internal(format!("predict: {err}")))?,
-    );
-    Ok(vec![label, score])
-}
-
-#[derive(Clone, Copy, Debug)]
-struct PredictOptions {
-    observations_in: ObservationsIn,
-}
-
-fn parse_predict_options(values: &[Value]) -> BuiltinResult<PredictOptions> {
-    if !values.len().is_multiple_of(2) {
-        return Err(predict_invalid(
-            "predict: name-value options must be paired",
-        ));
-    }
-    let mut options = PredictOptions {
-        observations_in: ObservationsIn::Rows,
-    };
-    let mut index = 0usize;
-    while index < values.len() {
-        let name = scalar_text(&values[index])
-            .ok_or_else(|| predict_invalid("predict: option name must be text"))?;
-        let value = &values[index + 1];
-        match name.to_ascii_lowercase().as_str() {
-            "observationsin" => {
-                let text = scalar_text(value)
-                    .ok_or_else(|| predict_invalid("predict: ObservationsIn must be text"))?;
-                options.observations_in = match text.to_ascii_lowercase().as_str() {
-                    "rows" => ObservationsIn::Rows,
-                    "columns" => ObservationsIn::Columns,
-                    other => {
-                        return Err(predict_invalid(format!(
-                            "predict: unsupported ObservationsIn '{other}'"
-                        )));
-                    }
-                };
-            }
-            other => {
-                return Err(predict_invalid(format!(
-                    "predict: unknown option '{other}'"
-                )));
-            }
-        }
-        index += 2;
-    }
-    Ok(options)
-}
-
-fn predictors_for_prediction(
-    value: Value,
-    predictor_names: &[String],
-    observations_in: ObservationsIn,
-) -> BuiltinResult<Tensor> {
-    if let Value::Object(object) = &value {
-        if is_tabular_object(object) {
-            if observations_in == ObservationsIn::Columns {
-                return Err(predict_invalid(
-                    "predict: ObservationsIn='columns' is not supported for table input",
-                ));
-            }
-            let variables = table_variables(object)
-                .map_err(|err| predict_invalid(format!("predict: {err}")))?;
-            let mut columns = Vec::with_capacity(predictor_names.len());
-            for name in predictor_names {
-                let raw = variables.fields.get(name).ok_or_else(|| {
-                    predict_invalid(format!("predict: missing predictor '{name}'"))
-                })?;
-                let tensor = numeric_matrix_for_predict(raw.clone()).map_err(|_| {
-                    predict_invalid(format!("predict: predictor '{name}' must be numeric"))
-                })?;
-                columns.push(vector_values_predict(&tensor, name)?);
-            }
-            return columns_to_tensor_predict(columns);
-        }
-    }
-    let tensor = normalize_prediction_matrix(numeric_matrix_for_predict(value)?, observations_in)?;
-    if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
-        return Err(predict_invalid(format!(
-            "predict: X must have {} predictor columns",
-            predictor_names.len()
-        )));
-    }
-    Ok(tensor)
+        })
+        .await
 }
 
 fn numeric_matrix_for_fit(value: Value) -> BuiltinResult<Tensor> {
@@ -1574,7 +465,7 @@ fn normalize_prediction_matrix(
     x: Tensor,
     observations_in: ObservationsIn,
 ) -> BuiltinResult<Tensor> {
-    if x.shape.len() > 2 {
+    if x.shape().len() > 2 {
         return Err(predict_invalid("predict: X must be a 2-D numeric matrix"));
     }
     match observations_in {
@@ -1586,1077 +477,15 @@ fn normalize_prediction_matrix(
 }
 
 fn transpose_tensor(x: &Tensor) -> Result<Tensor, String> {
-    let mut data = vec![0.0; x.rows * x.cols];
-    for row in 0..x.rows {
-        for col in 0..x.cols {
-            data[col + row * x.cols] = x_value(x, row, col);
+    let (rows, columns) = classification_matrix_dimensions(x);
+    let mut data = vec![0.0; rows * columns];
+    for row in 0..rows {
+        for col in 0..columns {
+            data[col + row * columns] = x_value(x, row, col);
         }
     }
-    Tensor::new(data, vec![x.cols, x.rows])
-}
-
-fn label_vector(value: Value, name: &str) -> BuiltinResult<LabelVector> {
-    labels_from_value(value, name).map_err(|err| fitclinear_invalid(err.message))
-}
-
-fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
-    match value {
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
-                return Err(predict_invalid(format!("predict: {name} must be a vector")));
-            }
-            let storage = tensor.integer_storage().expect("checked above");
-            Ok(LabelVector {
-                labels: storage
-                    .exact_values()
-                    .into_iter()
-                    .map(ClassLabel::Integer)
-                    .collect(),
-                kind: LabelKind::Integer(integer_class(storage)),
-            })
-        }
-        Value::Tensor(tensor) => Ok(LabelVector {
-            labels: vector_values_predict(&tensor, name)?
-                .into_iter()
-                .map(ClassLabel::Numeric)
-                .collect(),
-            kind: LabelKind::Numeric,
-        }),
-        Value::Num(value) => Ok(LabelVector {
-            labels: vec![ClassLabel::Numeric(value)],
-            kind: LabelKind::Numeric,
-        }),
-        Value::Int(value) => Ok(LabelVector {
-            kind: LabelKind::Integer(integer_class_for_value(&value)),
-            labels: vec![ClassLabel::Integer(value)],
-        }),
-        Value::String(text) => Ok(LabelVector {
-            labels: vec![ClassLabel::Text(text)],
-            kind: LabelKind::Text,
-        }),
-        Value::CharArray(array) => Ok(LabelVector {
-            labels: char_rows(&array).into_iter().map(ClassLabel::Text).collect(),
-            kind: LabelKind::Text,
-        }),
-        Value::StringArray(array) => Ok(LabelVector {
-            labels: array.data.into_iter().map(ClassLabel::Text).collect(),
-            kind: LabelKind::Text,
-        }),
-        Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
-                labels.push(ClassLabel::Text(scalar_text(&item).ok_or_else(|| {
-                    predict_invalid(format!("predict: {name} cell entries must be text"))
-                })?));
-            }
-            Ok(LabelVector {
-                labels,
-                kind: LabelKind::Text,
-            })
-        }
-        Value::Bool(value) => Ok(LabelVector {
-            labels: vec![ClassLabel::Logical(value)],
-            kind: LabelKind::Logical,
-        }),
-        Value::LogicalArray(array) => Ok(LabelVector {
-            labels: array
-                .data
-                .into_iter()
-                .map(|value| ClassLabel::Logical(value != 0))
-                .collect(),
-            kind: LabelKind::Logical,
-        }),
-        other => Err(predict_invalid(format!(
-            "predict: {name} must be numeric, logical, string, character, or cellstr labels; got {other:?}"
-        ))),
-    }
-}
-
-fn validate_class_names(names: Vec<ClassLabel>, kind: LabelKind) -> BuiltinResult<Vec<ClassLabel>> {
-    if names.len() != 2 {
-        return Err(fitclinear_invalid(
-            "fitclinear: ClassNames must contain exactly two values",
-        ));
-    }
-    let mut out = Vec::new();
-    for name in names {
-        if is_missing_label(&name) {
-            return Err(fitclinear_invalid(
-                "fitclinear: ClassNames must not contain missing values",
-            ));
-        }
-        if label_kind(&name) != kind {
-            return Err(fitclinear_invalid(
-                "fitclinear: ClassNames must have the same type as the response",
-            ));
-        }
-        if out.iter().any(|existing| same_label(existing, &name)) {
-            return Err(fitclinear_invalid(
-                "fitclinear: ClassNames must contain unique values",
-            ));
-        }
-        out.push(name);
-    }
-    Ok(out)
-}
-
-fn unique_labels(labels: &[ClassLabel], kind: LabelKind) -> Vec<ClassLabel> {
-    let mut out = Vec::new();
-    for label in labels {
-        if is_missing_label(label) {
-            continue;
-        }
-        if !out.iter().any(|existing| same_label(existing, label)) {
-            out.push(label.clone());
-        }
-    }
-    match kind {
-        LabelKind::Numeric => out.sort_by(|left, right| match (left, right) {
-            (ClassLabel::Numeric(a), ClassLabel::Numeric(b)) => {
-                a.partial_cmp(b).unwrap_or(Ordering::Equal)
-            }
-            _ => Ordering::Equal,
-        }),
-        LabelKind::Integer(_) => out.sort_by(|left, right| match (left, right) {
-            (ClassLabel::Integer(a), ClassLabel::Integer(b)) => integer_cmp(a, b),
-            _ => Ordering::Equal,
-        }),
-        LabelKind::Text => out.sort_by(|left, right| match (left, right) {
-            (ClassLabel::Text(a), ClassLabel::Text(b)) => a.cmp(b),
-            _ => Ordering::Equal,
-        }),
-        LabelKind::Logical => out.sort_by_key(|label| match label {
-            ClassLabel::Logical(value) => *value,
-            _ => false,
-        }),
-    }
-    out
-}
-
-fn label_kind(label: &ClassLabel) -> LabelKind {
-    match label {
-        ClassLabel::Numeric(_) => LabelKind::Numeric,
-        ClassLabel::Integer(value) => LabelKind::Integer(integer_class_for_value(value)),
-        ClassLabel::Text(_) => LabelKind::Text,
-        ClassLabel::Logical(_) => LabelKind::Logical,
-    }
-}
-
-fn label_kind_name(kind: LabelKind) -> &'static str {
-    match kind {
-        LabelKind::Numeric => "numeric",
-        LabelKind::Integer(class) => integer_class_name(class),
-        LabelKind::Text => "text",
-        LabelKind::Logical => "logical",
-    }
-}
-
-fn same_label(left: &ClassLabel, right: &ClassLabel) -> bool {
-    match (left, right) {
-        (ClassLabel::Numeric(a), ClassLabel::Numeric(b)) => (a == b) || (a.is_nan() && b.is_nan()),
-        (ClassLabel::Integer(a), ClassLabel::Integer(b)) => a == b,
-        (ClassLabel::Text(a), ClassLabel::Text(b)) => a == b,
-        (ClassLabel::Logical(a), ClassLabel::Logical(b)) => a == b,
-        _ => false,
-    }
-}
-
-fn is_missing_label(label: &ClassLabel) -> bool {
-    matches!(label, ClassLabel::Numeric(value) if value.is_nan())
-}
-
-fn integer_class(storage: &IntegerStorage) -> IntegerClass {
-    match storage {
-        IntegerStorage::I8(_) => IntegerClass::I8,
-        IntegerStorage::I16(_) => IntegerClass::I16,
-        IntegerStorage::I32(_) => IntegerClass::I32,
-        IntegerStorage::I64(_) => IntegerClass::I64,
-        IntegerStorage::U8(_) => IntegerClass::U8,
-        IntegerStorage::U16(_) => IntegerClass::U16,
-        IntegerStorage::U32(_) => IntegerClass::U32,
-        IntegerStorage::U64(_) => IntegerClass::U64,
-    }
-}
-
-fn integer_class_for_value(value: &IntValue) -> IntegerClass {
-    match value {
-        IntValue::I8(_) => IntegerClass::I8,
-        IntValue::I16(_) => IntegerClass::I16,
-        IntValue::I32(_) => IntegerClass::I32,
-        IntValue::I64(_) => IntegerClass::I64,
-        IntValue::U8(_) => IntegerClass::U8,
-        IntValue::U16(_) => IntegerClass::U16,
-        IntValue::U32(_) => IntegerClass::U32,
-        IntValue::U64(_) => IntegerClass::U64,
-    }
-}
-
-fn integer_class_name(class: IntegerClass) -> &'static str {
-    match class {
-        IntegerClass::I8 => "int8",
-        IntegerClass::I16 => "int16",
-        IntegerClass::I32 => "int32",
-        IntegerClass::I64 => "int64",
-        IntegerClass::U8 => "uint8",
-        IntegerClass::U16 => "uint16",
-        IntegerClass::U32 => "uint32",
-        IntegerClass::U64 => "uint64",
-    }
-}
-
-fn integer_cmp(left: &IntValue, right: &IntValue) -> Ordering {
-    match (left, right) {
-        (IntValue::I8(a), IntValue::I8(b)) => a.cmp(b),
-        (IntValue::I16(a), IntValue::I16(b)) => a.cmp(b),
-        (IntValue::I32(a), IntValue::I32(b)) => a.cmp(b),
-        (IntValue::I64(a), IntValue::I64(b)) => a.cmp(b),
-        (IntValue::U8(a), IntValue::U8(b)) => a.cmp(b),
-        (IntValue::U16(a), IntValue::U16(b)) => a.cmp(b),
-        (IntValue::U32(a), IntValue::U32(b)) => a.cmp(b),
-        (IntValue::U64(a), IntValue::U64(b)) => a.cmp(b),
-        _ => Ordering::Equal,
-    }
-}
-
-fn integer_storage(class: IntegerClass, values: Vec<IntValue>) -> Result<IntegerStorage, String> {
-    match class {
-        IntegerClass::I8 => collect_integer_values(values, "int8", |v| match v {
-            IntValue::I8(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::I8),
-        IntegerClass::I16 => collect_integer_values(values, "int16", |v| match v {
-            IntValue::I16(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::I16),
-        IntegerClass::I32 => collect_integer_values(values, "int32", |v| match v {
-            IntValue::I32(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::I32),
-        IntegerClass::I64 => collect_integer_values(values, "int64", |v| match v {
-            IntValue::I64(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::I64),
-        IntegerClass::U8 => collect_integer_values(values, "uint8", |v| match v {
-            IntValue::U8(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::U8),
-        IntegerClass::U16 => collect_integer_values(values, "uint16", |v| match v {
-            IntValue::U16(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::U16),
-        IntegerClass::U32 => collect_integer_values(values, "uint32", |v| match v {
-            IntValue::U32(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::U32),
-        IntegerClass::U64 => collect_integer_values(values, "uint64", |v| match v {
-            IntValue::U64(v) => Some(v),
-            _ => None,
-        })
-        .map(IntegerStorage::U64),
-    }
-}
-
-fn collect_integer_values<T>(
-    values: Vec<IntValue>,
-    expected: &str,
-    convert: impl Fn(IntValue) -> Option<T>,
-) -> Result<Vec<T>, String> {
-    values
-        .into_iter()
-        .map(|value| {
-            let actual = value.class_name();
-            convert(value).ok_or_else(|| {
-                format!("integer label invariant expected {expected}, found {actual}")
-            })
-        })
-        .collect()
-}
-
-fn labels_value(labels: &[ClassLabel], kind: LabelKind) -> BuiltinResult<Value> {
-    predicted_labels_value(
-        labels,
-        kind,
-        &(0..labels.len()).collect::<Vec<_>>(),
-        labels.len(),
-        1,
-    )
-}
-
-fn predicted_labels_value(
-    labels: &[ClassLabel],
-    kind: LabelKind,
-    indices: &[usize],
-    rows: usize,
-    cols: usize,
-) -> BuiltinResult<Value> {
-    let shape = vec![rows, cols];
-    match kind {
-        LabelKind::Numeric => Ok(Value::Tensor(
-            Tensor::new(
-                indices
-                    .iter()
-                    .map(|idx| match labels.get(*idx) {
-                        Some(ClassLabel::Numeric(value)) => *value,
-                        _ => f64::NAN,
-                    })
-                    .collect(),
-                shape,
-            )
-            .map_err(|err| predict_internal(format!("predict: {err}")))?,
-        )),
-        LabelKind::Integer(class) => {
-            let values = indices
-                .iter()
-                .map(|idx| match labels.get(*idx) {
-                    Some(ClassLabel::Integer(value)) => Ok(value.clone()),
-                    Some(_) => Err(predict_internal(
-                        "predict: integer class metadata does not match stored labels",
-                    )),
-                    None => Err(predict_internal(
-                        "predict: predicted class index is out of range",
-                    )),
-                })
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            Ok(Value::Tensor(
-                Tensor::new_integer(
-                    integer_storage(class, values).map_err(predict_internal)?,
-                    shape,
-                )
-                .map_err(|err| predict_internal(format!("predict: {err}")))?,
-            ))
-        }
-        LabelKind::Text => Ok(Value::StringArray(StringArray {
-            data: indices
-                .iter()
-                .map(|idx| match labels.get(*idx) {
-                    Some(ClassLabel::Text(value)) => value.clone(),
-                    _ => String::new(),
-                })
-                .collect(),
-            shape,
-            rows,
-            cols,
-        })),
-        LabelKind::Logical => Ok(Value::LogicalArray(
-            LogicalArray::new(
-                indices
-                    .iter()
-                    .map(|idx| match labels.get(*idx) {
-                        Some(ClassLabel::Logical(value)) if *value => 1,
-                        _ => 0,
-                    })
-                    .collect(),
-                shape,
-            )
-            .map_err(|err| predict_internal(format!("predict: {err}")))?,
-        )),
-    }
-}
-
-fn score_transform(spec: &FitSpec) -> ScoreTransform {
-    spec.options
-        .score_transform
-        .unwrap_or(match spec.options.learner {
-            Learner::Logistic => ScoreTransform::Logit,
-            Learner::Svm => ScoreTransform::None,
-        })
-}
-
-fn score_transform_property(object: &ObjectInstance) -> BuiltinResult<ScoreTransform> {
-    match object.properties.get("ScoreTransform") {
-        Some(Value::String(text)) if text.eq_ignore_ascii_case("none") => Ok(ScoreTransform::None),
-        Some(Value::String(text)) if text.eq_ignore_ascii_case("logit") => {
-            Ok(ScoreTransform::Logit)
-        }
-        _ => Err(predict_invalid(
-            "predict: model has unsupported ScoreTransform",
-        )),
-    }
-}
-
-fn string_array_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<String>> {
-    match object.properties.get(name) {
-        Some(Value::StringArray(array)) => Ok(array.data.clone()),
-        Some(Value::String(text)) => Ok(vec![text.clone()]),
-        _ => Err(predict_invalid(format!("predict: model is missing {name}"))),
-    }
-}
-
-fn tensor_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Tensor> {
-    match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
-        Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1])
-            .map_err(|err| predict_internal(format!("predict: {err}"))),
-        _ => Err(predict_invalid(format!("predict: model is missing {name}"))),
-    }
-}
-
-fn numeric_vector_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
-    match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) => vector_values_predict(tensor, name),
-        Some(Value::Num(value)) => Ok(vec![*value]),
-        _ => Err(predict_invalid(format!("predict: model is missing {name}"))),
-    }
-}
-
-fn scalar_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
-    }
-}
-
-fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
-    match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::CharArray(array) => Ok(char_rows(array)),
-        Value::StringArray(array) => Ok(array.data.clone()),
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .map(|value| {
-                scalar_text(value).ok_or_else(|| {
-                    fitclinear_invalid(format!("fitclinear: {name} entries must be text"))
-                })
-            })
-            .collect(),
-        _ => Err(fitclinear_invalid(format!(
-            "fitclinear: {name} must be text or a text collection"
-        ))),
-    }
-}
-
-fn char_rows(array: &CharArray) -> Vec<String> {
-    let mut out = Vec::with_capacity(array.rows);
-    for row in 0..array.rows {
-        let start = row * array.cols;
-        out.push(array.data[start..start + array.cols].iter().collect());
-    }
-    out
-}
-
-fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
-    match value {
-        Value::Num(value) => Ok(vec![*value]),
-        Value::Int(value) => {
-            ensure_int_exact_f64(value, name)?;
-            Ok(vec![value.to_f64()])
-        }
-        Value::Tensor(tensor) => {
-            ensure_integer_tensor_exact(tensor, name)?;
-            vector_values(tensor, name)
-        }
-        Value::LogicalArray(array) => Ok(array
-            .data
-            .iter()
-            .map(|value| if *value == 0 { 0.0 } else { 1.0 })
-            .collect()),
-        Value::Bool(value) => Ok(vec![if *value { 1.0 } else { 0.0 }]),
-        _ => Err(fitclinear_invalid(format!(
-            "fitclinear: {name} must be numeric"
-        ))),
-    }
-}
-
-fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    vector_values_predict(tensor, name).map_err(|err| fitclinear_invalid(err.message))
-}
-
-fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
-        return Err(predict_invalid(format!("predict: {name} must be a vector")));
-    }
-    Ok(tensor::tensor_values_f64(tensor))
-}
-
-fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
-    if let Some(integer) = tensor::scalar_integer_value(value) {
-        ensure_int_exact_f64(&integer, name)?;
-        return Ok(integer.to_f64());
-    }
-    match value {
-        Value::Num(value) => Ok(*value),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            Ok(tensor::tensor_values_f64(tensor)[0])
-        }
-        Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
-        _ => Err(fitclinear_invalid(format!(
-            "fitclinear: {name} must be a numeric scalar"
-        ))),
-    }
-}
-
-fn ensure_integer_tensor_exact(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
-    if let Some(storage) = tensor.integer_storage() {
-        for value in storage.exact_values() {
-            ensure_int_exact_f64(&value, name)?;
-        }
-    }
-    Ok(())
-}
-
-fn ensure_integer_tensor_exact_predict(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
-    if let Some(storage) = tensor.integer_storage() {
-        for value in storage.exact_values() {
-            if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
-                return Err(predict_invalid(format!(
-                    "predict: integer {name} must be exactly representable as double"
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn ensure_int_exact_f64(value: &IntValue, name: &str) -> BuiltinResult<()> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
-        Ok(())
-    } else {
-        Err(fitclinear_invalid(format!(
-            "fitclinear: integer {name} must be exactly representable as double"
-        )))
-    }
-}
-
-fn logical_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
-    if let Some(integer) = tensor::scalar_integer_value(value) {
-        return match integer.try_to_usize() {
-            Some(0) => Ok(false),
-            Some(1) => Ok(true),
-            _ => Err(fitclinear_invalid(format!(
-                "fitclinear: {name} must be logical scalar"
-            ))),
-        };
-    }
-    match value {
-        Value::Bool(value) => Ok(*value),
-        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
-        Value::Num(value) if *value == 0.0 || *value == 1.0 => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            let raw = tensor::tensor_values_f64(tensor)[0];
-            if raw == 0.0 || raw == 1.0 {
-                Ok(raw != 0.0)
-            } else {
-                Err(fitclinear_invalid(format!(
-                    "fitclinear: {name} must be logical scalar"
-                )))
-            }
-        }
-        _ => Err(fitclinear_invalid(format!(
-            "fitclinear: {name} must be logical scalar"
-        ))),
-    }
-}
-
-fn positive_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
-    let value = numeric_scalar(value, name)?;
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
-        return Err(fitclinear_invalid(format!(
-            "fitclinear: {name} must be a positive integer"
-        )));
-    }
-    Ok(value as usize)
-}
-
-fn is_name_value_option(value: &Value) -> bool {
-    scalar_text(value).is_some_and(|text| {
-        matches!(
-            text.to_ascii_lowercase().as_str(),
-            "batchlimit"
-                | "beta"
-                | "betatolerance"
-                | "bias"
-                | "classnames"
-                | "cost"
-                | "crossval"
-                | "cvpartition"
-                | "deltagradienttolerance"
-                | "fitbias"
-                | "gradienttolerance"
-                | "holdout"
-                | "hyperparameteroptimizationoptions"
-                | "iterationlimit"
-                | "kfold"
-                | "lambda"
-                | "learner"
-                | "leaveout"
-                | "numcheckconvergence"
-                | "observationsin"
-                | "optimizehyperparameters"
-                | "passlimit"
-                | "postfitbias"
-                | "predictornames"
-                | "prior"
-                | "regularization"
-                | "responsename"
-                | "scoretransform"
-                | "solver"
-                | "verbose"
-                | "weights"
-        )
-    })
-}
-
-fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
-    if columns.is_empty() {
-        return Err(fitclinear_invalid("fitclinear: no predictor columns"));
-    }
-    let rows = columns[0].len();
-    let cols = columns.len();
-    let mut data = Vec::with_capacity(rows * cols);
-    for column in columns {
-        if column.len() != rows {
-            return Err(fitclinear_invalid(
-                "fitclinear: predictor variables must have the same height",
-            ));
-        }
-        data.extend(column);
-    }
-    Tensor::new(data, vec![rows, cols])
-        .map_err(|err| fitclinear_internal(format!("fitclinear: {err}")))
-}
-
-fn columns_to_tensor_predict(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
-    columns_to_tensor(columns).map_err(|err| predict_invalid(err.message))
-}
-
-fn rows_to_tensor(rows: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
-    if rows.is_empty() {
-        return Err(fitclinear_invalid("fitclinear: no complete predictor rows"));
-    }
-    let row_count = rows.len();
-    let col_count = rows[0].len();
-    let mut data = Vec::with_capacity(row_count * col_count);
-    for col in 0..col_count {
-        for row in &rows {
-            data.push(row[col]);
-        }
-    }
-    Tensor::new(data, vec![row_count, col_count])
-        .map_err(|err| fitclinear_internal(format!("fitclinear: {err}")))
-}
-
-fn beta_value(models: &[TrainedModel], predictors: usize) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(predictors * models.len());
-    for model in models {
-        data.extend(model.beta.iter().copied());
-    }
-    Ok(Value::Tensor(
-        Tensor::new(data, vec![predictors, models.len()])
-            .map_err(|err| fitclinear_internal(format!("fitclinear: {err}")))?,
-    ))
-}
-
-fn row_tensor(values: Vec<f64>) -> BuiltinResult<Value> {
-    let cols = values.len();
-    Ok(Value::Tensor(Tensor::new(values, vec![1, cols]).map_err(
-        |err| fitclinear_internal(format!("fitclinear: {err}")),
-    )?))
-}
-
-fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
-    tensor::tensor_value_f64(x, row + col * x.rows)
-}
-
-fn dot_row(x: &Tensor, row: usize, beta: &[f64]) -> f64 {
-    beta.iter()
-        .enumerate()
-        .map(|(col, coef)| x_value(x, row, col) * coef)
-        .sum()
-}
-
-fn soft_threshold(value: f64, threshold: f64) -> f64 {
-    if value > threshold {
-        value - threshold
-    } else if value < -threshold {
-        value + threshold
-    } else {
-        0.0
-    }
-}
-
-fn sigmoid(value: f64) -> f64 {
-    if value >= 0.0 {
-        1.0 / (1.0 + (-value).exp())
-    } else {
-        let exp_value = value.exp();
-        exp_value / (1.0 + exp_value)
-    }
+    Tensor::new(data, vec![columns, rows])
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::builtins::table::table_from_columns;
-    use runmat_value::IntegerStorage;
-
-    fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new(data, shape).unwrap())
-    }
-
-    fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let tensor = Tensor::new_integer(storage, shape).unwrap();
-        Value::Tensor(tensor)
-    }
-
-    #[test]
-    fn scalar_option_parsers_read_all_integer_storage_variants() {
-        let storages = [
-            IntegerStorage::I8(vec![1]),
-            IntegerStorage::I16(vec![1]),
-            IntegerStorage::I32(vec![1]),
-            IntegerStorage::I64(vec![1]),
-            IntegerStorage::U8(vec![1]),
-            IntegerStorage::U16(vec![1]),
-            IntegerStorage::U32(vec![1]),
-            IntegerStorage::U64(vec![1]),
-        ];
-        for storage in storages {
-            let value = poisoned_int_tensor(storage, vec![1, 1]);
-            assert_eq!(numeric_scalar(&value, "Bias").unwrap(), 1.0);
-            assert!(logical_scalar(&value, "FitBias").unwrap());
-            assert_eq!(positive_integer(&value, "BatchLimit").unwrap(), 1);
-        }
-    }
-
-    #[tokio::test]
-    async fn fitclinear_svm_predicts_binary_numeric_labels() {
-        let model = fitclinear_builtin(
-            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-            vec![
-                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
-                Value::String("Lambda".into()),
-                Value::Num(0.0),
-            ],
-        )
-        .await
-        .unwrap();
-        let outputs = predict_classification_linear_object(
-            match model {
-                Value::Object(object) => object,
-                _ => panic!("expected object"),
-            },
-            tensor(vec![0.2, 2.8], vec![2, 1]),
-            Vec::new(),
-        )
-        .unwrap();
-        match &outputs[0] {
-            Value::Tensor(labels) => assert_eq!(labels.materialize_f64(), vec![0.0, 1.0]),
-            other => panic!("expected labels, got {other:?}"),
-        }
-        match &outputs[1] {
-            Value::Tensor(score) => assert_eq!(score.shape, vec![2, 2]),
-            other => panic!("expected score, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn fitclinear_and_predict_read_typed_integer_storage_exactly() {
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let model = fitclinear_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
-            vec![
-                poisoned_int_tensor(IntegerStorage::U8(vec![0, 0, 1, 1]), vec![4, 1]),
-                Value::String("Lambda".into()),
-                Value::Num(0.0),
-                Value::String("FitBias".into()),
-                poisoned_int_tensor(IntegerStorage::U8(vec![1]), vec![1, 1]),
-                Value::String("IterationLimit".into()),
-                poisoned_int_tensor(IntegerStorage::U16(vec![25]), vec![1, 1]),
-                Value::String("Bias".into()),
-                poisoned_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
-            ],
-        )
-        .await
-        .unwrap();
-        let outputs = predict_classification_linear_object(
-            match model {
-                Value::Object(object) => object,
-                _ => panic!("expected object"),
-            },
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 3]), vec![2, 1]),
-            Vec::new(),
-        )
-        .unwrap();
-        match &outputs[0] {
-            Value::Tensor(labels) => assert_eq!(labels.materialize_f64(), vec![0.0, 1.0]),
-            other => panic!("expected labels, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn integer_grouping_labels_round_trip_all_classes() {
-        let storages = [
-            IntegerStorage::I8(vec![-1, 1]),
-            IntegerStorage::I16(vec![-1, 1]),
-            IntegerStorage::I32(vec![-1, 1]),
-            IntegerStorage::I64(vec![-1, 1]),
-            IntegerStorage::U8(vec![0, 1]),
-            IntegerStorage::U16(vec![0, 1]),
-            IntegerStorage::U32(vec![0, 1]),
-            IntegerStorage::U64(vec![0, 1]),
-        ];
-        for storage in storages {
-            let expected = storage.clone();
-            let labels = labels_from_value(
-                Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap()),
-                "Y",
-            )
-            .unwrap();
-            let Value::Tensor(round_trip) = labels_value(&labels.labels, labels.kind).unwrap()
-            else {
-                panic!("expected integer tensor");
-            };
-            assert_eq!(round_trip.integer_storage(), Some(&expected));
-        }
-    }
-
-    #[tokio::test]
-    async fn fitclinear_preserves_adjacent_wide_uint64_classes() {
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let base = 9_007_199_254_740_992_u64;
-        let labels = IntegerStorage::U64(vec![base, base, base + 1, base + 1]);
-        let model = fitclinear_builtin(
-            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-            vec![
-                poisoned_int_tensor(labels, vec![4, 1]),
-                Value::from("Lambda"),
-                Value::Num(0.0),
-            ],
-        )
-        .await
-        .unwrap();
-        let Value::Object(object) = model else {
-            panic!("expected model");
-        };
-        assert_eq!(
-            object
-                .properties
-                .get("ClassNames")
-                .and_then(|value| match value {
-                    Value::Tensor(tensor) => tensor.integer_storage(),
-                    _ => None,
-                }),
-            Some(&IntegerStorage::U64(vec![base, base + 1]))
-        );
-        let outputs = predict_classification_linear_object(
-            object,
-            tensor(vec![0.0, 3.0], vec![2, 1]),
-            Vec::new(),
-        )
-        .unwrap();
-        assert_eq!(
-            match &outputs[0] {
-                Value::Tensor(tensor) => tensor.integer_storage(),
-                _ => None,
-            },
-            Some(&IntegerStorage::U64(vec![base, base + 1]))
-        );
-    }
-
-    #[tokio::test]
-    async fn fitclinear_strict_mode_rejects_integer_numeric_extensions() {
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = fitclinear_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
-            vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])],
-        )
-        .await
-        .expect_err("integer predictor extension");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:FitclinearIntegerPredictorExtension")
-        );
-
-        let error = fitclinear_builtin(
-            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-            vec![
-                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
-                Value::from("IterationLimit"),
-                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
-            ],
-        )
-        .await
-        .expect_err("integer control extension");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:FitclinearIntegerNumericArgumentExtension")
-        );
-
-        let poison = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![4, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        let error = fitclinear_builtin(poison, vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])])
-            .await
-            .expect_err("resident gate before gather");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:FitclinearResidentInputExtension")
-        );
-    }
-
-    #[tokio::test]
-    async fn fitclinear_rejects_inexact_integer_predictors_and_weights() {
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let inexact = 9_007_199_254_740_993_u64;
-        let error = fitclinear_builtin(
-            poisoned_int_tensor(IntegerStorage::U64(vec![0, 1, 2, inexact]), vec![4, 1]),
-            vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])],
-        )
-        .await
-        .expect_err("inexact predictor");
-        assert!(error.message.contains("exactly representable"));
-
-        let error = fitclinear_builtin(
-            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-            vec![
-                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
-                Value::from("Weights"),
-                poisoned_int_tensor(IntegerStorage::U64(vec![1, 1, 1, inexact]), vec![4, 1]),
-            ],
-        )
-        .await
-        .expect_err("inexact weights");
-        assert!(error.message.contains("exactly representable"));
-    }
-
-    #[tokio::test]
-    async fn fitclinear_logistic_returns_fitinfo_and_probability_scores() {
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let value = fitclinear_builtin(
-            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-            vec![
-                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
-                Value::String("Learner".into()),
-                Value::String("logistic".into()),
-                Value::String("Lambda".into()),
-                Value::Num(0.0),
-            ],
-        )
-        .await
-        .unwrap();
-        let (object, info) = match value {
-            Value::OutputList(mut outputs) => {
-                let info = outputs.pop().unwrap();
-                let object = match outputs.pop().unwrap() {
-                    Value::Object(object) => object,
-                    other => panic!("expected object, got {other:?}"),
-                };
-                (object, info)
-            }
-            other => panic!("expected outputs, got {other:?}"),
-        };
-        assert!(matches!(info, Value::Struct(_)));
-        let outputs = predict_classification_linear_object(
-            object,
-            tensor(vec![0.2, 2.8], vec![2, 1]),
-            Vec::new(),
-        )
-        .unwrap();
-        match &outputs[1] {
-            Value::Tensor(score) => {
-                assert_eq!(score.shape, vec![2, 2]);
-                assert!(
-                    (score.materialize_f64()[0] + score.materialize_f64()[2] - 1.0).abs() < 1.0e-8
-                );
-            }
-            other => panic!("expected score, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn fitclinear_observations_in_columns_and_text_classnames() {
-        let model = fitclinear_builtin(
-            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]),
-            vec![
-                Value::StringArray(StringArray {
-                    data: vec!["low".into(), "low".into(), "high".into(), "high".into()],
-                    shape: vec![4, 1],
-                    rows: 4,
-                    cols: 1,
-                }),
-                Value::String("ObservationsIn".into()),
-                Value::String("columns".into()),
-                Value::String("ClassNames".into()),
-                Value::StringArray(StringArray {
-                    data: vec!["low".into(), "high".into()],
-                    shape: vec![2, 1],
-                    rows: 2,
-                    cols: 1,
-                }),
-            ],
-        )
-        .await
-        .unwrap();
-        let outputs = predict_classification_linear_object(
-            match model {
-                Value::Object(object) => object,
-                _ => panic!("expected object"),
-            },
-            tensor(vec![0.2, 2.8], vec![1, 2]),
-            vec![
-                Value::String("ObservationsIn".into()),
-                Value::String("columns".into()),
-            ],
-        )
-        .unwrap();
-        match &outputs[0] {
-            Value::StringArray(labels) => assert_eq!(labels.data, vec!["low", "high"]),
-            other => panic!("expected string labels, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn fitclinear_rejects_multiclass_response() {
-        let err = fitclinear_builtin(
-            tensor(vec![0.0, 1.0, 2.0], vec![3, 1]),
-            vec![tensor(vec![0.0, 1.0, 2.0], vec![3, 1])],
-        )
-        .await
-        .unwrap_err();
-        assert!(err.message.contains("exactly two classes"));
-    }
-
-    #[tokio::test]
-    async fn fitclinear_table_external_y_honors_response_name() {
-        let table = table_from_columns(
-            vec!["A".into(), "B".into()],
-            vec![
-                tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-                tensor(vec![1.0, 1.0, 1.0, 1.0], vec![4, 1]),
-            ],
-        )
-        .unwrap();
-        let model = fitclinear_builtin(
-            table,
-            vec![
-                tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
-                Value::String("ResponseName".into()),
-                Value::String("Outcome".into()),
-            ],
-        )
-        .await
-        .unwrap();
-        match model {
-            Value::Object(object) => {
-                assert_eq!(
-                    object.properties.get("ResponseName"),
-                    Some(&Value::String("Outcome".into()))
-                );
-            }
-            other => panic!("expected object, got {other:?}"),
-        }
-    }
-}
+mod tests;

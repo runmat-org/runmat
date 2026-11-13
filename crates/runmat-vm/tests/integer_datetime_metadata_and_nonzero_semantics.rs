@@ -23,13 +23,13 @@ fn compiled_datetime_metadata_and_nonzero_forms_cover_every_integer_class() {
             "{constructor} nnz and ndims outputs"
         );
         assert!(values.iter().any(|value| {
-            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.integer_storage().is_some_and(|storage| storage.exact_values().iter().map(|value| value.to_f64()).collect::<Vec<_>>() == vec![1.0, 2.0]))
+            matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 1] && tensor.integer_storage().is_some_and(|storage| storage.exact_values().iter().map(|value| value.to_f64()).collect::<Vec<_>>() == vec![1.0, 2.0]))
         }), "{constructor} nonzeros output");
         assert!(values.iter().any(|value| {
-            matches!(value, Value::Cell(cell) if cell.data.get(1).is_some_and(|value| matches!(value, Value::Int(integer) if integer.to_f64() == 2.0)))
+            matches!(value, Value::Cell(cell) if cell.data().get(1).is_some_and(|value| matches!(value, Value::Int(integer) if integer.to_f64() == 2.0)))
         }), "{constructor} namedargs2cell payload");
         assert!(values.iter().any(|value| {
-            matches!(value, Value::StringArray(array) if array.shape == vec![1, 2] && array.data.len() == 2)
+            matches!(value, Value::StringArray(array) if array.shape == vec![1, 2] && array.data().len() == 2)
         }), "{constructor} shaped missing output");
     }
 }
@@ -58,7 +58,7 @@ fn compiled_legacy_nargoutchk_integer_forms_return_text_and_structures() {
         );
         let values = execute_source(&source).expect("compiled legacy nargoutchk");
         assert!(values.iter().any(|value| {
-            matches!(value, Value::CharArray(array) if array.data.iter().collect::<String>().contains("Too many"))
+            matches!(value, Value::CharArray(array) if runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture").contains("Too many"))
         }));
         assert!(values.iter().any(|value| {
             matches!(value, Value::Struct(structure) if structure.fields.contains_key("message") && structure.fields.contains_key("identifier"))

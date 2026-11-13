@@ -1,11 +1,295 @@
 use crate::*;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/executable_roots.rs"]
+mod executable_roots;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/genetic_solver.rs"]
+mod genetic_solver;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_arity.rs"]
+mod native_arity;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_audio.rs"]
+mod native_audio;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_data_session.rs"]
+mod native_data_session;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_deal.rs"]
+mod native_deal;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_debug_frames.rs"]
+mod native_debug_frames;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_deep_learning.rs"]
+mod native_deep_learning;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_definition_identity.rs"]
+mod native_definition_identity;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_diary.rs"]
+mod native_diary;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_matrix_solve.rs"]
+mod native_matrix_solve;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_max.rs"]
+mod native_max;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_memmap.rs"]
+mod native_memmap;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_method_expansion.rs"]
+mod native_method_expansion;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_object_indexing.rs"]
+mod native_object_indexing;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_optional_profile.rs"]
+mod native_optional_profile;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_resolution_events.rs"]
+mod native_resolution_events;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_semantic_suspension.rs"]
+mod native_semantic_suspension;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_textlines.rs"]
+mod native_textlines;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_workspace_reconciliation.rs"]
+mod native_workspace_reconciliation;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/parfor_placement.rs"]
+mod parfor_placement;
+#[path = "tests/portable_entrypoint.rs"]
+mod portable_entrypoint;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/private_product_attachment.rs"]
+mod private_product_attachment;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/project_test_services.rs"]
+mod project_test_services;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/runtime_contract_transfers.rs"]
+mod runtime_contract_transfers;
+#[path = "tests/timers.rs"]
+mod timers;
+
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
+
+fn assert_single_output(sequence: &runmat_value::ValueSequence, expected: runmat_value::Value) {
+    assert_eq!(sequence.kind(), runmat_value::ValueSequenceKind::Single);
+    assert_eq!(sequence.as_slice(), std::slice::from_ref(&expected));
+}
+
+fn assert_output_values(sequence: &runmat_value::ValueSequence, expected: &[runmat_value::Value]) {
+    assert_eq!(
+        sequence.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
+    );
+    assert_eq!(sequence.as_slice(), expected);
+}
+
+struct InProcessMultiLabExecutionService {
+    serial: runmat_runtime::execution::RuntimeExecutionService,
+    maximum_labs: u32,
+    pool: std::sync::Mutex<Option<runmat_execution::PoolSnapshot>>,
+    submitted_revisions: std::sync::Mutex<Vec<Option<runmat_execution::ProgramRevision>>>,
+}
+
+impl InProcessMultiLabExecutionService {
+    fn new(maximum_labs: u32) -> Self {
+        Self {
+            serial: runmat_runtime::execution::RuntimeExecutionService::new(),
+            maximum_labs,
+            pool: std::sync::Mutex::new(None),
+            submitted_revisions: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn submitted_revisions(&self) -> Vec<Option<runmat_execution::ProgramRevision>> {
+        self.submitted_revisions
+            .lock()
+            .expect("test submission revisions poisoned")
+            .clone()
+    }
+}
+
+impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabExecutionService {
+    fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&runmat_value::Value) -> Option<()>,
+    ) -> Option<()> {
+        runmat_runtime::execution::RuntimeExecutionServices::visit_retained_values(
+            &self.serial,
+            visitor,
+        )
+    }
+
+    fn scope_id(&self) -> runmat_execution::ExecutionScopeId {
+        runmat_runtime::execution::RuntimeExecutionServices::scope_id(&self.serial)
+    }
+
+    fn current_pool(
+        &self,
+    ) -> Result<
+        Option<runmat_execution::PoolSnapshot>,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        Ok(self.pool.lock().expect("test pool state poisoned").clone())
+    }
+
+    fn ensure_pool(
+        &self,
+        request: runmat_execution::PoolRequest,
+    ) -> Result<runmat_execution::PoolSnapshot, runmat_runtime::execution::ExecutionServiceError>
+    {
+        let workers = request.workers.unwrap_or(self.maximum_labs);
+        if workers == 0 || workers > self.maximum_labs {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Failed(
+                format!(
+                    "test pool lab count must be between 1 and {}",
+                    self.maximum_labs
+                ),
+            ));
+        }
+        let scope_id = self.scope_id();
+        let snapshot = runmat_execution::PoolSnapshot {
+            handle: runmat_execution::PoolHandle {
+                id: runmat_execution::PoolId::derive(&[scope_id.bytes(), b"in-process-test"]),
+                scope_id,
+                generation: 1,
+            },
+            backend: runmat_execution::PoolBackend::LocalProcesses,
+            workers,
+            state: runmat_execution::PoolState::Ready,
+        };
+        *self.pool.lock().expect("test pool state poisoned") = Some(snapshot.clone());
+        Ok(snapshot)
+    }
+
+    fn close_pool(
+        &self,
+        pool: &runmat_execution::PoolHandle,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        let mut current = self.pool.lock().expect("test pool state poisoned");
+        match current.as_ref() {
+            Some(snapshot) if snapshot.handle == *pool => {
+                *current = None;
+                Ok(())
+            }
+            Some(snapshot) if snapshot.handle.scope_id != pool.scope_id => {
+                Err(runmat_runtime::execution::ExecutionServiceError::ForeignScope)
+            }
+            _ => Err(runmat_runtime::execution::ExecutionServiceError::UnknownHandle),
+        }
+    }
+
+    fn create_future(
+        &self,
+        call: runmat_runtime::execution::DeferredCall,
+    ) -> Result<runmat_execution::FutureHandle, runmat_runtime::execution::ExecutionServiceError>
+    {
+        self.submitted_revisions
+            .lock()
+            .expect("test submission revisions poisoned")
+            .push(call.program_revision.clone());
+        runmat_runtime::execution::RuntimeExecutionServices::create_future(&self.serial, call)
+    }
+
+    fn spawn(
+        &self,
+        future: &runmat_execution::FutureHandle,
+    ) -> Result<runmat_execution::TaskHandle, runmat_runtime::execution::ExecutionServiceError>
+    {
+        runmat_runtime::execution::RuntimeExecutionServices::spawn(&self.serial, future)
+    }
+
+    fn inspect_future(
+        &self,
+        future: &runmat_execution::FutureHandle,
+    ) -> Result<
+        runmat_execution::ExecutionHandleSnapshot,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        runmat_runtime::execution::RuntimeExecutionServices::inspect_future(&self.serial, future)
+    }
+
+    fn inspect_task(
+        &self,
+        task: &runmat_execution::TaskHandle,
+    ) -> Result<
+        runmat_execution::ExecutionHandleSnapshot,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        runmat_runtime::execution::RuntimeExecutionServices::inspect_task(&self.serial, task)
+    }
+
+    fn claim_next_task_result(
+        &self,
+        tasks: &[runmat_value::SharedTaskHandle],
+    ) -> Result<runmat_execution::TaskResultClaim, runmat_runtime::execution::ExecutionServiceError>
+    {
+        runmat_runtime::execution::RuntimeExecutionServices::claim_next_task_result(
+            &self.serial,
+            tasks,
+        )
+    }
+
+    fn mark_task_result_read(
+        &self,
+        task: &runmat_execution::TaskHandle,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        runmat_runtime::execution::RuntimeExecutionServices::mark_task_result_read(
+            &self.serial,
+            task,
+        )
+    }
+
+    fn begin_await(
+        &self,
+        value: runmat_value::Value,
+    ) -> Result<
+        runmat_runtime::execution::AwaitAction,
+        runmat_runtime::execution::ExecutionServiceError,
+    > {
+        runmat_runtime::execution::RuntimeExecutionServices::begin_await(&self.serial, value)
+    }
+
+    fn complete_future(
+        &self,
+        future: runmat_runtime::execution::FutureCompletionRef<'_>,
+        result: Result<
+            runmat_runtime::execution::RootedValueSequence,
+            runmat_runtime::execution::ExecutionServiceError,
+        >,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        runmat_runtime::execution::RuntimeExecutionServices::complete_future(
+            &self.serial,
+            future,
+            result,
+        )
+    }
+
+    fn cancel(
+        &self,
+        value: &runmat_value::Value,
+        reason: runmat_execution::CancellationReason,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        runmat_runtime::execution::RuntimeExecutionServices::cancel(&self.serial, value, reason)
+    }
+
+    fn drain_scope(&self, reason: runmat_execution::CancellationReason) {
+        runmat_runtime::execution::RuntimeExecutionServices::drain_scope(&self.serial, reason);
+    }
+}
 
 const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
 static TIMER_CORE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-struct CwdGuard {
+pub(crate) struct CwdGuard {
     original: PathBuf,
 }
 
@@ -25,11 +309,12 @@ impl Drop for CwdGuard {
 
 impl Drop for PathStateGuard {
     fn drop(&mut self) {
-        runmat_runtime::builtins::common::path_state::set_path_string(&self.previous);
+        runmat_runtime::builtins::common::path_state::set_path_string(&self.previous)
+            .expect("test search path update");
     }
 }
 
-fn push_cwd(path: &Path) -> CwdGuard {
+pub(crate) fn push_cwd(path: &Path) -> CwdGuard {
     let original = std::env::current_dir().expect("read cwd");
     std::env::set_current_dir(path).expect("set cwd");
     CwdGuard { original }
@@ -37,7 +322,8 @@ fn push_cwd(path: &Path) -> CwdGuard {
 
 fn push_path_state(path: &str) -> PathStateGuard {
     let previous = runmat_runtime::builtins::common::path_state::current_path_string();
-    runmat_runtime::builtins::common::path_state::set_path_string(path);
+    runmat_runtime::builtins::common::path_state::set_path_string(path)
+        .expect("test search path update");
     PathStateGuard { previous }
 }
 
@@ -52,64 +338,10 @@ fn run_deep_semantic_test(f: impl FnOnce() + Send + 'static) {
     }
 }
 
-fn end_expr_contains_display_name(expr: &runmat_runtime::indexing::EndExpr, name: &str) -> bool {
-    use runmat_runtime::indexing::EndExpr;
-    match expr {
-        EndExpr::ResolvedCall { identity, args, .. } => {
-            identity.display_name().as_deref() == Some(name)
-                || args
-                    .iter()
-                    .any(|arg| end_expr_contains_display_name(arg, name))
-        }
-        EndExpr::Add(lhs, rhs)
-        | EndExpr::Sub(lhs, rhs)
-        | EndExpr::Mul(lhs, rhs)
-        | EndExpr::Div(lhs, rhs)
-        | EndExpr::LeftDiv(lhs, rhs)
-        | EndExpr::Pow(lhs, rhs) => {
-            end_expr_contains_display_name(lhs, name) || end_expr_contains_display_name(rhs, name)
-        }
-        EndExpr::Neg(inner)
-        | EndExpr::Pos(inner)
-        | EndExpr::Floor(inner)
-        | EndExpr::Ceil(inner)
-        | EndExpr::Round(inner)
-        | EndExpr::Fix(inner) => end_expr_contains_display_name(inner, name),
-        EndExpr::End | EndExpr::Const(_) | EndExpr::Var(_) => false,
-    }
-}
-
-fn end_expr_contains_external_function(expr: &runmat_runtime::indexing::EndExpr) -> bool {
-    use runmat_runtime::indexing::EndExpr;
-    match expr {
-        EndExpr::ResolvedCall { identity, args, .. } => {
-            matches!(
-                identity,
-                runmat_hir::CallableIdentity::ExternalFunction { .. }
-            ) || args.iter().any(end_expr_contains_external_function)
-        }
-        EndExpr::Add(lhs, rhs)
-        | EndExpr::Sub(lhs, rhs)
-        | EndExpr::Mul(lhs, rhs)
-        | EndExpr::Div(lhs, rhs)
-        | EndExpr::LeftDiv(lhs, rhs)
-        | EndExpr::Pow(lhs, rhs) => {
-            end_expr_contains_external_function(lhs) || end_expr_contains_external_function(rhs)
-        }
-        EndExpr::Neg(inner)
-        | EndExpr::Pos(inner)
-        | EndExpr::Floor(inner)
-        | EndExpr::Ceil(inner)
-        | EndExpr::Round(inner)
-        | EndExpr::Fix(inner) => end_expr_contains_external_function(inner),
-        EndExpr::End | EndExpr::Const(_) | EndExpr::Var(_) => false,
-    }
-}
-
 fn execute_text_request(
     session: &mut RunMatSession,
     source_text: &str,
-) -> Result<abi::ExecutionOutcome, RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<abi::ExecutionOutcome>, RunError> {
     execute_text_request_named_source(session, "<test>", source_text)
 }
 
@@ -117,10 +349,10 @@ fn execute_text_request_named_source(
     session: &mut RunMatSession,
     source_name: &str,
     source_text: &str,
-) -> Result<abi::ExecutionOutcome, RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<abi::ExecutionOutcome>, RunError> {
     let request = abi::ExecutionRequest::for_source(
         abi::SourceInput::Text {
-            name: source_name.to_string(),
+            name: source_name.into(),
             text: source_text.to_string(),
         },
         session.compat_mode(),
@@ -133,7 +365,7 @@ fn execute_text_request_named_source(
 fn execute_path_request(
     session: &mut RunMatSession,
     source_path: &str,
-) -> Result<abi::ExecutionOutcome, RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<abi::ExecutionOutcome>, RunError> {
     let request = abi::ExecutionRequest::for_source(
         abi::SourceInput::Path(source_path.to_string()),
         session.compat_mode(),
@@ -143,22 +375,59 @@ fn execute_path_request(
     block_on(session.execute_request(request)).result
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn system_executes_from_ordinary_core_without_a_tokio_caller() {
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let _serial = runmat_filesystem::provider_override_lock();
+    let _native = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::NativeFsProvider,
+    ));
+    let mut session = RunMatSession::with_options(false, false).expect("session");
+    let outcome = execute_text_request(
+        &mut session,
+        "[status, output] = system('echo runmat'); assert(status == 0); assert(contains(output, 'runmat'));",
+    )
+    .expect("ordinary Core execution must drive native process I/O");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "status",
+        &runmat_value::Value::Num(0.0)
+    ));
+}
+
 fn outcome_has_named_upsert(
     outcome: &abi::ExecutionOutcome,
     name: &str,
     expected: &runmat_value::Value,
 ) -> bool {
-    outcome.workspace_delta.upserts.iter().any(|upsert| {
-        let matches_name = match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive {
-                name: binding_name, ..
-            } => binding_name.0 == name,
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        };
-        matches_name && upsert.value == *expected
-    })
+    let matched = outcome
+        .workspace_delta
+        .upserts
+        .iter()
+        .any(|upsert| upsert.name.0 == name && upsert.value == *expected);
+    if !matched {
+        let actual = outcome
+            .workspace_delta
+            .upserts
+            .iter()
+            .find(|upsert| upsert.name.0 == name);
+        eprintln!(
+            "workspace assertion for {name}: expected {expected}, actual {:?}; diagnostics {:?}",
+            actual.map(|upsert| upsert.value.to_string()),
+            outcome
+                .diagnostics
+                .iter()
+                .map(|diagnostic| (
+                    &diagnostic.code,
+                    &diagnostic.message,
+                    &diagnostic.span,
+                    &diagnostic.callstack,
+                ))
+                .collect::<Vec<_>>()
+        );
+    }
+    matched
 }
 
 fn stdout_text(outcome: &abi::ExecutionOutcome) -> String {
@@ -204,17 +473,12 @@ fn outcome_named_upsert_value<'a>(
     outcome: &'a abi::ExecutionOutcome,
     name: &str,
 ) -> Option<&'a runmat_value::Value> {
-    outcome.workspace_delta.upserts.iter().find_map(|upsert| {
-        let matches_name = match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive {
-                name: binding_name, ..
-            } => binding_name.0 == name,
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        };
-        matches_name.then_some(&upsert.value)
-    })
+    outcome
+        .workspace_delta
+        .upserts
+        .iter()
+        .find(|upsert| upsert.name.0 == name)
+        .map(|upsert| &upsert.value)
 }
 
 fn comparable_path_text(path: &str) -> String {
@@ -248,14 +512,7 @@ fn outcome_has_upsert_name(outcome: &abi::ExecutionOutcome, name: &str) -> bool 
         .workspace_delta
         .upserts
         .iter()
-        .any(|upsert| match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive {
-                name: binding_name, ..
-            } => binding_name.0 == name,
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        })
+        .any(|upsert| upsert.name.0 == name)
 }
 
 #[test]
@@ -364,12 +621,16 @@ fn execute_text_request_enforces_function_arguments_size_and_class() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "sid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationSize"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationClass"
+        ))
     ));
 }
 
@@ -417,7 +678,9 @@ fn execute_text_request_enforces_arguments_must_be_finite_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "fid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -437,7 +700,9 @@ fn execute_text_request_treats_single_token_arguments_constraint_as_class_name()
     assert!(outcome_has_named_upsert(
         &outcome,
         "cid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationClass"
+        ))
     ));
 }
 
@@ -469,7 +734,9 @@ fn execute_text_request_must_be_finite_accepts_char_and_logical() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "zid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -507,7 +774,9 @@ fn execute_text_request_enforces_arguments_must_be_text_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -540,12 +809,16 @@ fn execute_text_request_enforces_arguments_must_be_nonempty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid1",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid2",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -577,7 +850,9 @@ fn execute_text_request_enforces_arguments_must_be_scalar_or_empty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -609,7 +884,9 @@ fn execute_text_request_enforces_arguments_must_be_real_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -641,7 +918,9 @@ fn execute_text_request_enforces_arguments_must_be_integer_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -668,12 +947,16 @@ fn execute_text_request_enforces_arguments_must_be_positive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -705,7 +988,9 @@ fn execute_text_request_enforces_arguments_must_be_nonnegative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -731,7 +1016,9 @@ fn execute_text_request_enforces_arguments_must_be_nonzero_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -763,7 +1050,9 @@ fn execute_text_request_enforces_arguments_must_be_nonpositive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -790,12 +1079,16 @@ fn execute_text_request_enforces_arguments_must_be_negative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -827,7 +1120,9 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_or_equal_validat
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -853,7 +1148,9 @@ fn execute_text_request_enforces_arguments_must_be_less_than_or_equal_validator(
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -879,7 +1176,9 @@ fn execute_text_request_arguments_validator_threshold_supports_unary_minus_liter
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -918,12 +1217,16 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_and_less_than_va
     assert!(outcome_has_named_upsert(
         &outcome,
         "e1",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "e2",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -1201,7 +1504,7 @@ fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_c
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
         c = {0, 0};
-        c{1:2} = pair(10);
+        [c{1:2}] = pair(10);
         a = c{1};
         b = c{2};
         function varargout = pair(x)
@@ -1220,6 +1523,15 @@ fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_c
         "b",
         &runmat_value::Value::Num(12.0)
     ));
+    let bare = execute_text_request(&mut session, "c{1:2} = pair(20);")
+        .expect("bare assignment reports its language error");
+    assert!(
+        bare.diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "RunMat:CellAssignmentArityMismatch" }),
+        "bare assignment must not request multiple outputs: {:?}",
+        bare.diagnostics
+    );
 }
 
 #[test]
@@ -1280,7 +1592,7 @@ fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_
     let source = r#"
         [a,b] = outer(5);
         function varargout = outer(x)
-            [varargout{1:nargout}] = feval('inner', x);
+            [varargout{1:nargout}] = feval(@inner, x);
             function varargout = inner(v)
                 varargout{1} = v + 10;
                 varargout{2} = v + 20;
@@ -1415,17 +1727,19 @@ fn execute_text_request_supports_arity_check_helpers() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_in",
-        &runmat_value::Value::String("RunMat:TooManyInputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyInputs"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_out_low",
-        &runmat_value::Value::String("RunMat:NotEnoughOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:NotEnoughOutputs"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_out_high",
-        &runmat_value::Value::String("RunMat:TooManyOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyOutputs"))
     ));
 }
 
@@ -1475,12 +1789,12 @@ fn execute_text_request_supports_dynamic_arity_check_helpers() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "in_eid",
-        &runmat_value::Value::String("RunMat:TooManyInputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyInputs"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "out_eid",
-        &runmat_value::Value::String("RunMat:TooManyOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyOutputs"))
     ));
 }
 
@@ -1517,7 +1831,7 @@ fn execute_path_request_supports_mfilename_name_and_fullpath() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "full",
-        &runmat_value::Value::String(expected_full.to_string_lossy().to_string())
+        &runmat_value::Value::String(expected_full.to_string_lossy().to_string().into())
     ));
 }
 
@@ -1559,7 +1873,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "outside",
-        &runmat_value::Value::String(String::new())
+        &runmat_value::Value::String(String::new().into())
     ));
 }
 
@@ -1638,7 +1952,7 @@ roots = ["."]
         let actual = outcome_named_upsert_value(&outcome, name)
             .and_then(|value| {
                 if let runmat_value::Value::String(text) = value {
-                    Some(text.as_str())
+                    text.as_str()
                 } else {
                     None
                 }
@@ -1745,7 +2059,9 @@ fn execute_text_request_supports_inputname_builtin() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "f2",
-        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
+        &runmat_value::Value::CharArray(
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).unwrap()
+        )
     ));
 }
 
@@ -1846,12 +2162,16 @@ fn execute_text_request_inputname_handles_nested_and_expanded_arguments() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_name",
-        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
+        &runmat_value::Value::CharArray(
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).unwrap()
+        )
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_feval_name",
-        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
+        &runmat_value::Value::CharArray(
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).unwrap()
+        )
     ));
 }
 
@@ -1885,7 +2205,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-syntax-semantic.m".to_string(),
+            name: "command-syntax-semantic.m".into(),
             text: "hold on; h = true; axis off;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -1896,13 +2216,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
     .result
     .expect("command syntax should execute");
     let h_is_logical_scalar = outcome.workspace_delta.upserts.iter().any(|upsert| {
-        let is_h = match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive { name, .. } => name.0 == "h",
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == "h",
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        };
-        if !is_h {
+        if upsert.name.0 != "h" {
             return false;
         }
         match &upsert.value {
@@ -1936,6 +2250,11 @@ fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
         elapsedDrain = toc();
     "#;
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    let stdout = stdout_text(&outcome);
+    assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
+    assert!(stdout.starts_with("Elapsed time is "), "{stdout:?}");
+    assert!(stdout.ends_with(" seconds.\n"), "{stdout:?}");
+    assert!(!stdout.contains("ans =") && !stdout.contains("timerVal ="));
     for name in [
         "elapsedParen",
         "elapsedBare",
@@ -1943,15 +2262,7 @@ fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
         "elapsedDrain",
     ] {
         let elapsed = outcome.workspace_delta.upserts.iter().find_map(|upsert| {
-            let matches_name = match &upsert.key {
-                abi::WorkspaceBindingKey::Interactive {
-                    name: binding_name, ..
-                } => binding_name.0 == name,
-                abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-                abi::WorkspaceBindingKey::Global { .. }
-                | abi::WorkspaceBindingKey::Persistent { .. } => false,
-            };
-            if !matches_name {
+            if upsert.name.0 != name {
                 return None;
             }
             match upsert.value {
@@ -1972,7 +2283,7 @@ fn execute_request_rejects_command_syntax_in_strict_mode() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-syntax-strict.m".to_string(),
+            name: "command-syntax-strict.m".into(),
             text: "hold on".to_string(),
         },
         compatibility: CompatMode::Strict,
@@ -1999,7 +2310,7 @@ fn execute_request_supports_warning_off_all_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-warning-off-all.m".to_string(),
+            name: "command-warning-off-all.m".into(),
             text: "warning off all; warning('hello from test'); ok = 1;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2022,7 +2333,7 @@ fn execute_request_supports_clearvars_name_command_rewrite() {
     let outcome = block_on(
         session.execute_request(abi::ExecutionRequest {
             source: abi::SourceInput::Text {
-                name: "command-clearvars-name.m".to_string(),
+                name: "command-clearvars-name.m".into(),
                 text: "x = 1; y = 2; clearvars x; ex = exist('x', 'var'); ey = exist('y', 'var');"
                     .to_string(),
             },
@@ -2051,7 +2362,7 @@ fn execute_request_supports_close_all_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-close-all.m".to_string(),
+            name: "command-close-all.m".into(),
             text: "close all; ok = 1;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2090,7 +2401,7 @@ fn execute_request_supports_clearvars_except_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-clearvars-except.m".to_string(),
+            name: "command-clearvars-except.m".into(),
             text:
                 "x = 1; y = 2; z = 3; clearvars -except y; ex = exist('x', 'var'); ey = exist('y', 'var'); ez = exist('z', 'var');"
                     .to_string(),
@@ -2124,7 +2435,7 @@ fn execute_request_rejects_clearvars_except_without_names_command_rewrite() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-clearvars-except-missing.m".to_string(),
+            name: "command-clearvars-except-missing.m".into(),
             text: "clearvars -except".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2210,7 +2521,7 @@ fn execute_request_supports_format_command_rewrite_through_semantic_pipeline() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "command-format-long.m".to_string(),
+            name: "command-format-long.m".into(),
             text: "format long; x = 1;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2474,11 +2785,11 @@ fn execute_outcome_exposes_workspace_removals_and_effects() {
     execute_text_request(&mut session, "x = 1; y = 2;").expect("seed workspace");
     let outcome = execute_text_request(&mut session, "clear x;").expect("clear succeeds");
 
-    assert!(outcome.workspace_delta.removals.iter().any(|key| {
-        matches!(key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x")
+    assert!(outcome.workspace_delta.removals.iter().any(|binding| {
+        binding.name.0 == "x" && matches!(&binding.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x")
     }));
-    assert!(!outcome.workspace_delta.removals.iter().any(|key| {
-        matches!(key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+    assert!(!outcome.workspace_delta.removals.iter().any(|binding| {
+        binding.name.0 == "y" || matches!(&binding.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
     }));
     assert!(outcome.effects.iter().any(|effect| {
         matches!(
@@ -2494,7 +2805,7 @@ fn execute_request_uses_request_workspace_handle() {
     let workspace = abi::WorkspaceHandle(uuid::Uuid::from_u128(7));
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "request-test.m".to_string(),
+            name: "request-test.m".into(),
             text: "requested = 7;".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2519,7 +2830,7 @@ fn execute_request_honors_zero_requested_outputs() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "request-zero-output.m".to_string(),
+            name: "request-zero-output.m".into(),
             text: "1 + 1".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2620,7 +2931,7 @@ fn execute_request_runtime_diagnostic_preserves_span_and_callstack() {
     let source = "x = [1];\ny = x(2);\n";
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "runtime-span.m".to_string(),
+            name: "runtime-span.m".into(),
             text: source.to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -2651,7 +2962,7 @@ fn execute_request_honors_top_level_await_host_policy() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let err = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "request-await-policy.m".to_string(),
+            name: "request-await-policy.m".into(),
             text: "y = await(1);".to_string(),
         },
         compatibility: CompatMode::RunMat,
@@ -2726,7 +3037,7 @@ roots = ["."]
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input_for_source_name(&source_name, "import stats.*; y = summarize(1);")
+        .compile_input_for_source_path(&source_name, "import stats.*; y = summarize(1);")
         .expect("compile");
 
     let calls = &prepared.lowering().hir_index.calls;
@@ -3211,7 +3522,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:getfield:InvalidHandle".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:getfield:InvalidHandle"
+        ))
     ));
 }
 
@@ -3285,7 +3598,7 @@ classdef CB
     Count = 0;
   end
   methods(Static)
-    function on_tick(src)
+    function on_tick(src, eventData)
       CB.Count = CB.Count + 1;
     end
   end
@@ -3389,7 +3702,7 @@ classdef CB
     Count = 0;
   end
   methods(Static)
-    function on_tick(src)
+    function on_tick(src, eventData)
       CB.Count = CB.Count + 1;
     end
   end
@@ -3491,7 +3804,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedFunction"
+        ))
     ));
 }
 
@@ -3578,7 +3893,7 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "a = H(); a.x = 1; b = a; a = call_method(a, 'subsasgn', '.', 'x', 9); y = b.x;",
+        "a = H(); a.x = 1; b = a; s = struct('type', '.', 'subs', 'x'); a = call_method(a, 'subsasgn', s, 9); y = b.x;",
     )
     .expect("write script source");
 
@@ -3611,7 +3926,7 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "a = H(); a.x = 11; y = call_method(a, 'subsref', '.', 'x');",
+        "a = H(); a.x = 11; s = struct('type', '.', 'subs', 'x'); y = call_method(a, 'subsref', s);",
     )
     .expect("write script source");
 
@@ -4003,7 +4318,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -4056,7 +4371,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -4098,7 +4413,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyReadOnly".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyReadOnly"
+        ))
     ));
     assert!(outcome_has_named_upsert(&outcome, "b", &empty));
 }
@@ -4283,7 +4600,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyPrivateAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -4618,7 +4937,8 @@ classdef A
       obj.x = v;
     end
     function y = f(obj, n)
-      y = obj.x + n;
+      peer = SuperCallPeer(0);
+      y = obj.x + n + peer.x;
     end
   end
 end
@@ -4626,12 +4946,17 @@ end
     )
     .expect("write class source");
     std::fs::write(
+        tmp.path().join("SuperCallPeer.m"),
+        "classdef SuperCallPeer\nproperties\nx\nend\nmethods\nfunction obj = SuperCallPeer(v)\nobj.x = v;\nend\nend\nend\n",
+    ).expect("write independent receiver class");
+    std::fs::write(
         tmp.path().join("B.m"),
         r#"
 classdef B < pkg.sub.A
   methods
     function obj = B(v)
       obj@pkg.sub.A(v + 1);
+      obj.x = f@pkg.sub.A(obj, 0);
     end
     function y = f(obj, n)
       y = f@pkg.sub.A(obj, n + 2);
@@ -4643,35 +4968,95 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "b = B(4); x = b.x; y = b.f(3); cls = class(b); isaA = isa(b,'pkg.sub.A');",
+        "b = B(4); x = b.x; y = b.f(3); cls = class(b); isaA = isa(b,'pkg.sub.A'); pending = parfeval(@(receiver) receiver.f(3), 1, b); workerY = fetchOutputs(pending);",
     )
     .expect("write script source");
 
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_path = tmp.path().join("main.m");
-    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-        .expect("execute script");
+    let native_path = tmp.path().join("native_main.m");
+    std::fs::write(
+        &native_path,
+        "b = B(4); x = b.x; y = b.f(3); cls = class(b); isaA = isa(b,'pkg.sub.A');",
+    )
+    .expect("write native method witness");
+    for enable_jit in [false, true] {
+        if enable_jit && !cfg!(all(feature = "jit", not(target_arch = "wasm32"))) {
+            continue;
+        }
+        let mut session = RunMatSession::with_options(enable_jit, false).expect("session init");
+        #[cfg(not(target_arch = "wasm32"))]
+        session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+            generic_hot_threshold: 1,
+            specialized_hot_threshold: 100,
+            deterministic: true,
+            ..Default::default()
+        });
+        let mut used_native = false;
+        for _ in 0..if enable_jit { 5 } else { 1 } {
+            let selected_path = if enable_jit {
+                &native_path
+            } else {
+                &source_path
+            };
+            let outcome =
+                execute_path_request(&mut session, selected_path.to_string_lossy().as_ref())
+                    .expect("execute script");
+            used_native |= outcome.used_jit;
+            for (name, expected) in [
+                ("x", runmat_value::Value::Num(5.0)),
+                ("y", runmat_value::Value::Num(10.0)),
+                ("cls", runmat_value::Value::String("B".to_string().into())),
+                ("isaA", runmat_value::Value::Bool(true)),
+            ] {
+                assert!(outcome_has_named_upsert(&outcome, name, &expected));
+            }
+            if !enable_jit {
+                assert!(outcome_has_named_upsert(
+                    &outcome,
+                    "workerY",
+                    &runmat_value::Value::Num(10.0)
+                ));
+            }
+        }
+        assert_eq!(
+            used_native, enable_jit,
+            "exercise the selected execution tier"
+        );
+    }
+}
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "x",
-        &runmat_value::Value::Num(5.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "y",
-        &runmat_value::Value::Num(10.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "cls",
-        &runmat_value::Value::String("B".to_string())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "isaA",
-        &runmat_value::Value::Bool(true)
-    ));
+#[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
+#[test]
+fn adaptive_native_future_calls_decline_before_prefix_effects() {
+    let mut session = RunMatSession::with_options(true, false).expect("session init");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..Default::default()
+    });
+    execute_text_request(&mut session, "runs = 0;").expect("seed prefix counter");
+    for attempt in 1..=3 {
+        let outcome = execute_text_request(
+            &mut session,
+            "runs = runs + 1; pending = parfeval(@(n) n + 1, 1, runs); answer = fetchOutputs(pending);",
+        )
+        .expect("adaptive future execution");
+        assert!(outcome.diagnostics.is_empty(), "{outcome:#?}");
+        assert!(
+            !outcome.used_jit,
+            "executor-only calls decline before native entry"
+        );
+        let workspace = session.get_variables().expect("workspace");
+        assert_eq!(
+            workspace.get("runs"),
+            Some(&runmat_value::Value::Num(f64::from(attempt)))
+        );
+        assert_eq!(
+            workspace.get("answer"),
+            Some(&runmat_value::Value::Num(f64::from(attempt + 1)))
+        );
+    }
 }
 
 #[test]
@@ -4769,7 +5154,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -4814,7 +5199,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -4887,7 +5272,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -5026,7 +5411,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedFunction"
+        ))
     ));
 }
 
@@ -5372,7 +5759,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyPrivateAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -5417,7 +5806,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -5484,12 +5873,14 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "p",
-        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyPrivateAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "m",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodProtected"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -5949,7 +6340,7 @@ total = c.amount;
                 outcome_has_named_upsert(
                     &outcome,
                     "t",
-                    &runmat_value::Value::String("Vec2".to_string())
+                    &runmat_value::Value::String("Vec2".to_string().into())
                 ),
                 "class() should preserve source class identity"
             );
@@ -6027,7 +6418,7 @@ ux = u.x;
         outcome_has_named_upsert(
             &outcome,
             "t",
-            &runmat_value::Value::String("pkg.Vec2".to_string())
+            &runmat_value::Value::String("pkg.Vec2".to_string().into())
         ),
         "class() should preserve qualified source class identity"
     );
@@ -6163,16 +6554,18 @@ end
     let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
         .expect("execute script");
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "a",
-        &runmat_value::Value::Num(6.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "b",
-        &runmat_value::Value::Num(13.0)
-    ));
+    assert!(
+        outcome_has_named_upsert(&outcome, "a", &runmat_value::Value::Num(6.0)),
+        "upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "b", &runmat_value::Value::Num(13.0)),
+        "upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
 }
 
 #[test]
@@ -6676,12 +7069,18 @@ fn execute_path_request_supports_imported_static_listener_callback_dispatch() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
+        tmp.path().join("EventPoint.m"),
+        "classdef EventPoint < handle\n properties\n x = 0\n end\n events\n changed\n end\nend",
+    )
+    .expect("write event source");
+    std::fs::write(
         tmp.path().join("+pkg").join("CB.m"),
         r#"
 classdef CB
   methods(Static)
-    function k(src, v)
-      src.x = v + 1;
+    function k(src, eventData)
+      assert(isa(eventData, 'event.EventData'));
+      src.x = src.x + 1;
     end
   end
 end
@@ -6690,7 +7089,7 @@ end
     .expect("write class source");
     std::fs::write(
         tmp.path().join("main.m"),
-        "import pkg.CB; __register_test_classes(); h = new_handle_object('Point'); addlistener(h, 'changed', @CB.k); notify(h, 'changed', 42); y = h.x;",
+        "import pkg.CB; h = EventPoint(); h.x = 42; addlistener(h, 'changed', @CB.k); notify(h, 'changed'); y = h.x;",
     )
     .expect("write script source");
 
@@ -6748,7 +7147,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -6808,7 +7207,7 @@ end
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "id",
-                &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
+                &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
             ));
         })
         .expect("spawn protected-getmethod-subclass test thread")
@@ -6931,7 +7330,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -6970,7 +7369,7 @@ p = Vec2(3, 4); c = class(p); m = p.magnitude(); ok = isa(p, 'Vec2');
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_value::Value::String("Vec2".to_string())
+        &runmat_value::Value::String("Vec2".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -7002,7 +7401,7 @@ fn execute_path_request_supports_new_object_builtin_for_registered_classes() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_value::Value::String("Point".to_string())
+        &runmat_value::Value::String("Point".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -7221,12 +7620,16 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyStaticAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyStaticAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id2",
-        &runmat_value::Value::String("RunMat:PropertyStaticAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyStaticAccess"
+        ))
     ));
     let empty = runmat_value::Value::Tensor(
         runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
@@ -7523,7 +7926,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "direct_eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
         ),
         "sibling source should not resolve parent private helper directly; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7533,7 +7936,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "dyn_eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
         ),
         "sibling source should not resolve parent private helper through str2func/feval; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7585,7 +7988,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &sibling_outcome,
             "eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
         ),
         "sibling source should not resolve private helper through session registry; upserts={:?}, diagnostics={:?}",
         sibling_outcome.workspace_delta.upserts,
@@ -7875,6 +8278,8 @@ roots = ["."]
     .expect("freeze project")
     .expect("project exists");
     let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
+    #[cfg(not(target_arch = "wasm32"))]
+    let handoff_for_failed_clear = handoff.clone();
     let expected_revision = handoff.revision();
 
     // A broken manifest proves compilation consumes the installed snapshot
@@ -7883,15 +8288,25 @@ roots = ["."]
         .expect("invalidate manifest after freeze");
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    assert_eq!(
-        session
-            .install_project_handoff(handoff)
-            .expect("install handoff"),
-        expected_revision
-    );
+    #[cfg(not(target_arch = "wasm32"))]
+    let project_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("project lifecycle test runtime");
+    #[cfg(not(target_arch = "wasm32"))]
+    let installed = project_runtime.block_on(session.install_project_handoff(handoff));
+    #[cfg(target_arch = "wasm32")]
+    let installed = session.install_project_handoff(handoff);
+    assert_eq!(installed.expect("install handoff"), expected_revision);
     assert_eq!(session.project_revision(), Some(expected_revision.clone()));
 
     let _cwd = push_cwd(tmp.path());
+    #[cfg(not(target_arch = "wasm32"))]
+    let outcome = {
+        let _entered = project_runtime.enter();
+        execute_path_request(&mut session, "main.m").expect("execute frozen project")
+    };
+    #[cfg(target_arch = "wasm32")]
     let outcome = execute_path_request(&mut session, "main.m").expect("execute frozen project");
     assert!(
         outcome_has_named_upsert(&outcome, "r", &runmat_value::Value::Num(42.0)),
@@ -7900,8 +8315,28 @@ roots = ["."]
         outcome.diagnostics
     );
 
-    session.clear_project_handoff();
+    #[cfg(not(target_arch = "wasm32"))]
+    let cleared = project_runtime.block_on(session.clear_project_handoff());
+    #[cfg(target_arch = "wasm32")]
+    let cleared = session.clear_project_handoff();
+    cleared.expect("clear handoff");
     assert_eq!(session.project_revision(), None);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        project_runtime
+            .block_on(session.install_project_handoff(handoff_for_failed_clear))
+            .expect("reinstall handoff before retirement failure");
+        session.shutdown_local_tasks();
+        let error = project_runtime
+            .block_on(session.clear_project_handoff())
+            .expect_err("closed lifecycle host cannot retire MEX modules");
+        assert!(error
+            .to_string()
+            .contains("could not clear loaded MEX modules"));
+        assert_eq!(session.project_revision(), Some(expected_revision));
+        assert!(session.project_handoff().is_some());
+    }
 }
 
 #[test]
@@ -8024,7 +8459,7 @@ roots = ["."]
             outcome_has_named_upsert(
                 &outcome,
                 "leak_eid",
-                &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+                &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
             ),
             "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
@@ -8337,6 +8772,86 @@ fn execute_path_request_resolves_sibling_function_file() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn execute_path_request_resolves_and_invokes_platform_c_mex_module() {
+    let _guard = cwd_lock();
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let source = tmp.path().join("native_add.c");
+    std::fs::write(
+        &source,
+        r#"
+#include "mex.h"
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+    if (nlhs != 2 || nrhs != 1 || !mxIsUint64(prhs[0])) {
+        mexErrMsgTxt("native_add expects one uint64 input and two outputs");
+    }
+    plhs[0] = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    mxGetUint64s(plhs[0])[0] = mxGetUint64s(prhs[0])[0] + 1;
+    mxArray *callback_inputs[2] = {(mxArray *)prhs[0], (mxArray *)prhs[0]};
+    if (mexCallMATLAB(1, &plhs[1], 2, callback_inputs, "plus") != 0) {
+        mexErrMsgTxt("plus callback failed");
+    }
+    if (mexPutVariable("base", "from_mex", plhs[0]) != 0) {
+        mexErrMsgTxt("base workspace update failed");
+    }
+}
+"#,
+    )
+    .expect("write C MEX source");
+    runmat_mex::MexBuild::new(&source, tmp.path())
+        .compile()
+        .expect("compile C MEX fixture");
+    std::fs::write(
+        tmp.path().join("native_add.m"),
+        "function out = native_add(~); out = uint64(7); end",
+    )
+    .expect("write lower-precedence MATLAB function");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "[result, doubled] = native_add(uint64(41));",
+    )
+    .expect("write main source");
+
+    let _cwd = push_cwd(tmp.path());
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    for enable_jit in [false, true] {
+        let mut session = RunMatSession::with_options(enable_jit, false).expect("session init");
+        let repetitions = if enable_jit { 24 } else { 1 };
+        for _ in 0..repetitions {
+            let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
+            assert!(
+                outcome_has_named_upsert(
+                    &outcome,
+                    "result",
+                    &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
+                ),
+                "C MEX should take precedence over a same-name MATLAB function and retain uint64 storage; diagnostics={:?}, upserts={:?}",
+                outcome.diagnostics,
+                outcome.workspace_delta.upserts
+            );
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "doubled",
+                &runmat_value::Value::Int(runmat_value::IntValue::U64(82)),
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "from_mex",
+                &runmat_value::Value::Int(runmat_value::IntValue::U64(42)),
+            ));
+        }
+        #[cfg(feature = "jit")]
+        if enable_jit {
+            assert!(
+                session.stats().jit_compiled > 0,
+                "MEX call site never crossed into native execution: {:?}",
+                session.stats()
+            );
+        }
+    }
+}
+
 #[test]
 fn execute_path_request_resolves_sibling_function_with_arguments_block_validation() {
     let _guard = cwd_lock();
@@ -8366,7 +8881,9 @@ fn execute_path_request_resolves_sibling_function_with_arguments_block_validatio
         outcome_has_named_upsert(
             &outcome,
             "eid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:ArgumentValidationClass"
+            ))
         ),
         "typed sibling function should enforce arguments class validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8413,7 +8930,9 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "sid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:ArgumentValidationSize"
+            ))
         ),
         "package typed function should enforce size validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8422,7 +8941,9 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "fid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:ArgumentValidationFunction"
+            ))
         ),
         "package typed function should enforce mustBeFinite validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8486,7 +9007,10 @@ roots = ["."]
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let error = execute_text_request_named_source(&mut session, &source_name, "v = 1;")
+    // Naming inline input after a real file does not grant file/project access.
+    execute_text_request_named_source(&mut session, &source_name, "v = 1;")
+        .expect("inline display name must not discover the adjacent invalid helper");
+    let error = execute_path_request(&mut session, &source_name)
         .expect_err("invalid graph-declared source must fail composition");
     let RunError::Runtime(error) = error else {
         panic!("expected project composition runtime error");
@@ -8498,6 +9022,25 @@ roots = ["."]
     assert!(error
         .message
         .contains("failed to parse graph-declared source"));
+}
+
+#[test]
+fn inline_source_display_names_do_not_require_host_path_syntax() {
+    for name in [
+        "<stdin>",
+        "<test>",
+        "remote:logical/main.m",
+        "display|only?name.m",
+    ] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let outcome = execute_text_request_named_source(&mut session, name, "answer = 42;")
+            .expect("inline input must not perform filesystem lookup using its display name");
+        assert!(outcome_has_named_upsert(
+            &outcome,
+            "answer",
+            &runmat_value::Value::Num(42.0)
+        ));
+    }
 }
 
 #[test]
@@ -8709,7 +9252,7 @@ roots = ["."]
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input_for_source_name(&source_name, "import statsdep.*; y = summarize(1);")
+        .compile_input_for_source_path(&source_name, "import statsdep.*; y = summarize(1);")
         .expect("compile");
 
     let calls = &prepared.lowering().hir_index.calls;
@@ -8764,7 +9307,7 @@ roots = ["."]
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input_for_source_name(&source_name, "import statsdep.*; f = @summarize;")
+        .compile_input_for_source_path(&source_name, "import statsdep.*; f = @summarize;")
         .expect("compile");
 
     assert!(
@@ -8780,11 +9323,11 @@ roots = ["."]
                 if name == "summarize" || name.ends_with(".summarize")
         ) || matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name)
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _)
                 if name == "summarize" || name.ends_with(".summarize")
         ) || matches!(
             instr,
-            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name)
+            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name, _)
                 if name == "summarize" || name.ends_with(".summarize")
         )),
         "wildcard dependency-alias function handle should lower to exact alias-qualified external function-handle bytecode"
@@ -9214,6 +9757,23 @@ fn global_statement_uses_semantic_vm() {
 }
 
 #[test]
+fn global_alias_survives_base_workspace_reconciliation_at_reentry() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(&mut session, "g = 1;").expect("seed same-named base binding");
+
+    let outcome = execute_text_request(
+        &mut session,
+        "global g; g = 9; unrelated = 2; who; observed = g;",
+    )
+    .expect("global alias should remain authoritative across workspace reentry");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "observed",
+        &runmat_value::Value::Num(9.0)
+    ));
+}
+
+#[test]
 fn range_slice_uses_semantic_vm() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; B = A(2:3); y = B(2);";
@@ -9223,12 +9783,11 @@ fn range_slice_uses_semantic_vm() {
         "range slice should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::IndexSlice(..) | runmat_vm::Instr::IndexSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::IndexSlice(..)) }),
         "range indexing should lower to slice bytecode"
     );
 
@@ -9249,12 +9808,10 @@ fn end_expression_user_function_call_uses_semantic_identity() {
     let prepared = session
         .compile_input(source)
         .expect("compile end-expression function call");
-    let saw_end_numeric_expr = prepared.bytecode.instructions.iter().any(|instr| {
+    let saw_contextual_end = prepared.bytecode.instructions.iter().any(|instr| {
         matches!(
             instr,
-            runmat_vm::Instr::IndexSliceExpr {
-                end_numeric_exprs, ..
-            } if !end_numeric_exprs.is_empty()
+            runmat_vm::Instr::LoadContextualIndexEnd { component: 0 }
         )
     });
     let saw_semantic_call = prepared.bytecode.instructions.iter().any(|instr| {
@@ -9273,13 +9830,7 @@ fn end_expression_user_function_call_uses_semantic_identity() {
         )
     });
     assert!(
-        (prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
-                if end_numeric_exprs
-                    .iter()
-                    .any(|(_, expr)| end_expr_contains_display_name(expr, "pick"))
-        ))) || (saw_end_numeric_expr && saw_semantic_call),
+        saw_contextual_end && saw_semantic_call,
         "end-expression user calls should carry semantic function identity"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
@@ -9301,12 +9852,10 @@ fn end_expression_session_function_call_uses_semantic_identity() {
     let prepared = session
         .compile_input(source)
         .expect("compile session end-expression function call");
-    let saw_end_numeric_expr = prepared.bytecode.instructions.iter().any(|instr| {
+    let saw_contextual_end = prepared.bytecode.instructions.iter().any(|instr| {
         matches!(
             instr,
-            runmat_vm::Instr::IndexSliceExpr {
-                end_numeric_exprs, ..
-            } if !end_numeric_exprs.is_empty()
+            runmat_vm::Instr::LoadContextualIndexEnd { component: 0 }
         )
     });
     let saw_semantic_call = prepared.bytecode.instructions.iter().any(|instr| {
@@ -9325,16 +9874,7 @@ fn end_expression_session_function_call_uses_semantic_identity() {
         )
     });
     assert!(
-        (prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
-                if end_numeric_exprs
-                    .iter()
-                    .any(|(_, expr)| {
-                        end_expr_contains_display_name(expr, "pick")
-                            || end_expr_contains_external_function(expr)
-                    })
-        ))) || (saw_end_numeric_expr && saw_semantic_call),
+        saw_contextual_end && saw_semantic_call,
         "session end-expression user calls should carry semantic function identity"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
@@ -9468,12 +10008,11 @@ fn range_assignment_uses_semantic_vm() {
         "range assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
         "range assignment should lower to slice store bytecode"
     );
     assert!(
@@ -9506,12 +10045,11 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
         "range vector assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
         "range vector assignment should lower to slice store bytecode"
     );
     assert!(
@@ -9544,13 +10082,11 @@ fn range_deletion_uses_semantic_vm() {
         "range deletion should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSliceDelete(..)
-                    | runmat_vm::Instr::StoreSliceExprDelete { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSliceDelete(..)) }),
         "range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -9717,12 +10253,11 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
         "cell range paren assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
         "cell range paren assignment should lower to slice store bytecode"
     );
     assert!(
@@ -9755,13 +10290,11 @@ fn cell_range_deletion_uses_semantic_vm() {
         "cell range deletion should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSliceDelete(..)
-                    | runmat_vm::Instr::StoreSliceExprDelete { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSliceDelete(..)) }),
         "cell range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -9888,7 +10421,7 @@ fn dynamic_workspace_evalc_returns_empty_capture_for_silent_source() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "captured",
-        &runmat_value::Value::String(String::new())
+        &runmat_value::Value::String(String::new().into())
     ));
 
     let outcome = execute_text_request(&mut session, "silent_x").expect("read workspace");
@@ -9902,14 +10435,21 @@ fn dynamic_workspace_evalc_returns_empty_capture_for_silent_source() {
 #[test]
 fn dynamic_workspace_evalc_captures_implicit_expression_display() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let outcome =
-        execute_text_request(&mut session, "captured = evalc('2 + 3');").expect("exec succeeds");
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "captured",
-        &runmat_value::Value::String("5\n".into())
-    ));
-    assert_eq!(stdout_text(&outcome), "");
+    for (source, expected) in [
+        ("2 + 3", "5\n"),
+        ("disp(4); 2 + 3", "4\n5\n"),
+        ("2 + 3;", ""),
+    ] {
+        let outcome = execute_text_request(&mut session, &format!("captured = evalc('{source}');"))
+            .expect("exec succeeds");
+        let expected = runmat_value::Value::String(expected.into());
+        assert_eq!(
+            outcome_named_upsert_value(&outcome, "captured"),
+            Some(&expected),
+            "evalc capture differs for source `{source}`"
+        );
+        assert_eq!(stdout_text(&outcome), "");
+    }
 }
 
 #[test]
@@ -9946,13 +10486,13 @@ fn runtests_runs_script_test_file_and_restores_workspace() {
     let runmat_value::Value::Object(obj) = results else {
         panic!("expected scalar TestResult object, got {results:?}");
     };
-    assert!(obj.is_class("matlab.unittest.TestResult"));
+    assert!(obj.is_class(runmat_runtime::testing::TEST_RESULT_CLASS));
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
     assert_eq!(
-        obj.properties.get("Failed"),
+        obj.properties().get("Failed"),
         Some(&runmat_value::Value::Bool(false))
     );
     assert!(outcome_has_named_upsert(
@@ -9989,14 +10529,18 @@ fn runtests_records_failing_script_test_as_result() {
         panic!("expected scalar TestResult object, got {results:?}");
     };
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(false))
     );
     assert_eq!(
-        obj.properties.get("Failed"),
+        obj.properties().get("Failed"),
         Some(&runmat_value::Value::Bool(true))
     );
-    let details = obj.properties.get("Details").expect("details").to_string();
+    let details = obj
+        .properties()
+        .get("Details")
+        .expect("details")
+        .to_string();
     assert!(details.contains("boom"), "details were {details:?}");
 }
 
@@ -10023,13 +10567,15 @@ fn runtests_discovers_subfolder_tests_when_requested() {
         panic!("expected TestResult object array, got {results:?}");
     };
     assert_eq!(array.shape(), &[1, 2]);
-    assert_eq!(array.class_name(), "matlab.unittest.TestResult");
+    assert!(array
+        .class_name()
+        .is(runmat_runtime::testing::TEST_RESULT_CLASS));
     for value in array.data() {
         let runmat_value::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
         };
         assert_eq!(
-            obj.properties.get("Passed"),
+            obj.properties().get("Passed"),
             Some(&runmat_value::Value::Bool(true))
         );
     }
@@ -10058,7 +10604,7 @@ fn runtests_no_arg_discovers_current_folder_without_recursing() {
         panic!("expected only root TestResult object, got {results:?}");
     };
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
 }
@@ -10085,11 +10631,11 @@ fn runtests_basefolder_constrains_relative_target_resolution() {
         panic!("expected suite TestResult object, got {results:?}");
     };
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
     let test_file = obj
-        .properties
+        .properties()
         .get("TestFile")
         .expect("test file")
         .to_string();
@@ -10148,13 +10694,15 @@ end
         panic!("expected function TestResult object array, got {results:?}");
     };
     assert_eq!(array.shape(), &[1, 2]);
-    assert_eq!(array.class_name(), "matlab.unittest.TestResult");
+    assert!(array
+        .class_name()
+        .is(runmat_runtime::testing::TEST_RESULT_CLASS));
     for value in array.data() {
         let runmat_value::Value::Object(obj) = value else {
             panic!("expected TestResult object, got {value:?}");
         };
         assert_eq!(
-            obj.properties.get("Passed"),
+            obj.properties().get("Passed"),
             Some(&runmat_value::Value::Bool(true))
         );
     }
@@ -10199,7 +10747,7 @@ end
         panic!("expected selected scalar TestSuite, got {suite:?}");
     };
     assert_eq!(
-        suite.properties.get("ProcedureName"),
+        suite.properties().get("ProcedureName"),
         Some(&runmat_value::Value::String("testBeta".into()))
     );
     let results =
@@ -10208,7 +10756,7 @@ end
         panic!("expected selected scalar TestResult, got {results:?}");
     };
     assert_eq!(
-        result.properties.get("Passed"),
+        result.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
 }
@@ -10222,102 +10770,6 @@ fn runtests_rejects_parallel_execution_option() {
         diagnostic.code == "RunMat:runtests:UnsupportedOption"
             && diagnostic.message.contains("UseParallel=true")
     }));
-}
-
-#[test]
-fn timer_constructs_finds_starts_and_deletes_through_vm() {
-    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = r#"
-        t = timer('Name', 'clientTimer', 'Tag', 'clientBatch', 'TimerFcn', @(src, evt) 0);
-        f = timerfind('Tag', 'clientBatch');
-        foundName = f.Name;
-        start(t);
-        tasks = t.TasksExecuted;
-        running = t.Running;
-        delete(t);
-        validAfterDelete = isvalid(t);
-    "#;
-    let outcome = execute_text_request(&mut session, source).expect("timer workflow succeeds");
-    assert!(
-        outcome.diagnostics.is_empty(),
-        "timer workflow diagnostics: {:?}; upserts: {:?}",
-        outcome.diagnostics,
-        outcome.workspace_delta.upserts
-    );
-
-    assert_eq!(
-        outcome_named_upsert_value(&outcome, "foundName"),
-        Some(&runmat_value::Value::String("clientTimer".into()))
-    );
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "tasks",
-        &runmat_value::Value::Num(1.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "running",
-        &runmat_value::Value::String("off".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "validAfterDelete",
-        &runmat_value::Value::Bool(false)
-    ));
-}
-
-#[test]
-fn timer_member_method_start_works_through_vm() {
-    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = r#"
-        t = timer('TimerFcn', @(src, evt) 0);
-        t.start();
-        tasks = t.TasksExecuted;
-        running = t.Running;
-    "#;
-    let outcome = execute_text_request(&mut session, source).expect("timer member start succeeds");
-    assert!(
-        outcome.diagnostics.is_empty(),
-        "timer member workflow diagnostics: {:?}; upserts: {:?}",
-        outcome.diagnostics,
-        outcome.workspace_delta.upserts
-    );
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "tasks",
-        &runmat_value::Value::Num(1.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "running",
-        &runmat_value::Value::String("off".into())
-    ));
-}
-
-#[test]
-fn timer_rejects_invalid_post_construction_assignments_through_vm() {
-    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
-    for (source, expected) in [
-        ("t = timer; t.Period = 0;", "Period must be a finite scalar"),
-        (
-            "t = timer; t.TimerFcn = 42;",
-            "TimerFcn must be text, a function handle, or a callback cell array",
-        ),
-    ] {
-        let mut session = RunMatSession::with_options(false, false).expect("session init");
-        let outcome =
-            execute_text_request(&mut session, source).expect("assignment failure is diagnostic");
-        assert!(
-            outcome
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains(expected)),
-            "missing timer assignment diagnostic containing {expected:?}; diagnostics: {:?}",
-            outcome.diagnostics
-        );
-    }
 }
 
 #[test]
@@ -10337,7 +10789,7 @@ fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_value::Value::String("RunMat:eval:boom".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:eval:boom"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -10557,7 +11009,7 @@ fn dynamic_workspace_eval_preserves_source_context_in_path_source() {
         let actual = outcome_named_upsert_value(&outcome, name)
             .and_then(|value| {
                 if let runmat_value::Value::String(text) = value {
-                    Some(text.as_str())
+                    text.as_str()
                 } else {
                     None
                 }
@@ -10678,7 +11130,9 @@ fn dynamic_workspace_eval_does_not_discover_files_outside_active_registry() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedFunction"
+        ))
     ));
     assert!(
         !outcome_has_upsert_name(&outcome, "hidden_value"),
@@ -10691,7 +11145,7 @@ fn dynamic_workspace_execute_request_can_disable_dynamic_eval_host_policy() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "dynamic-eval-policy.m".to_string(),
+            name: "dynamic-eval-policy.m".into(),
             text: "eval('policy_x = 1');".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -10717,7 +11171,7 @@ fn dynamic_workspace_execute_request_dynamic_eval_policy_does_not_block_assignin
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "dynamic-eval-policy-assignin.m".to_string(),
+            name: "dynamic-eval-policy-assignin.m".into(),
             text: "assignin('base', 'policy_assign', 12);".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -10753,7 +11207,9 @@ fn dynamic_workspace_evalin_invalid_selector_is_catchable() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_value::Value::String("RunMat:DynamicWorkspaceSelector".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:DynamicWorkspaceSelector"
+        ))
     ));
 }
 
@@ -11097,7 +11553,7 @@ fn addpath_makes_function_callable_in_same_execution() {
     ));
     let located = outcome_named_upsert_value(&outcome, "located")
         .and_then(|value| match value {
-            runmat_value::Value::String(value) => Some(value.clone()),
+            runmat_value::Value::String(value) => value.as_str().map(str::to_owned),
             runmat_value::Value::CharArray(value) => value.row_string(),
             _ => None,
         })
@@ -11281,6 +11737,58 @@ fn path_function_cache_recompiles_changed_source() {
 }
 
 #[test]
+fn rehash_path_invalidates_session_source_cache_without_clearing_workspace() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let functions = temp.path().join("functions");
+    std::fs::create_dir_all(&functions).expect("create functions dir");
+    let source = functions.join("changing_value.m");
+    std::fs::write(&source, "function y = changing_value()\n  y = 1;\nend\n")
+        .expect("initial function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "addpath('functions'); kept = 9; y = changing_value();",
+    )
+    .expect("populate source cache");
+    assert_eq!(session.cached_source_count(), 1);
+    let before = session
+        .runtime_context()
+        .search_path()
+        .expect("session search path")
+        .generation();
+    std::fs::write(&source, "function y = changing_value()\n  y = 2;\nend\n")
+        .expect("updated function");
+    execute_text_request(&mut session, "rehash('path');").expect("refresh source cache");
+    assert_eq!(session.cached_source_count(), 0);
+    let outcome = execute_text_request(&mut session, "y = changing_value();")
+        .expect("call updated function after refresh");
+    assert_eq!(session.cached_source_count(), 1);
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_value::Value::Num(2.0)
+    ));
+    assert_eq!(
+        session
+            .runtime_context()
+            .search_path()
+            .expect("session search path")
+            .generation(),
+        before + 1,
+    );
+    let outcome = execute_text_request(&mut session, "kept_out = kept;")
+        .expect("rehash must not clear workspace values");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "kept_out",
+        &runmat_value::Value::Num(9.0)
+    ));
+}
+
+#[test]
 fn path_function_cache_recompiles_changed_project_companion() {
     let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
@@ -11426,7 +11934,7 @@ fn run_preserves_script_source_context() {
     let actual = outcome_named_upsert_value(&outcome, "run_full")
         .and_then(|value| {
             if let runmat_value::Value::String(text) = value {
-                Some(text.as_str())
+                text.as_str()
             } else {
                 None
             }
@@ -11475,7 +11983,7 @@ fn run_error_commits_script_mutations_before_the_error() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "run_err",
-        &runmat_value::Value::String("RunMat:run:testBoom".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:run:testBoom"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -11486,6 +11994,51 @@ fn run_error_commits_script_mutations_before_the_error() {
         &outcome,
         "partial_run_value",
         &runmat_value::Value::Num(99.0)
+    ));
+}
+
+#[test]
+fn top_level_error_preserves_prior_base_workspace_assignment() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "published_before_error = 73; error('RunMat:test:boom', 'boom');",
+    )
+    .expect("runtime failure is reported in the execution outcome");
+
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RunMat:test:boom"));
+    assert_eq!(
+        session
+            .get_variables()
+            .unwrap()
+            .get("published_before_error"),
+        Some(&runmat_value::Value::Num(73.0))
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "published_before_error",
+        &runmat_value::Value::Num(73.0)
+    ));
+}
+
+#[test]
+fn workspace_delta_includes_assignments_published_at_intermediate_effect_safepoints() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "before_effect = 1; who; after_effect = 2;")
+        .expect("workspace reads should not hide earlier assignments from the result delta");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "before_effect",
+        &runmat_value::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_effect",
+        &runmat_value::Value::Num(2.0)
     ));
 }
 
@@ -11529,17 +12082,23 @@ fn run_missing_file_and_output_errors_are_catchable() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "missing_err",
-        &runmat_value::Value::String("RunMat:run:FileNotFound".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:run:FileNotFound"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "output_err",
-        &runmat_value::Value::String("RunMat:run:TooManyOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:run:TooManyOutputs"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "missing_after_run_err",
-        &runmat_value::Value::String("RunMat:UndefinedVariable".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedVariable"
+        ))
     ));
     assert!(
         !outcome_has_upsert_name(&outcome, "ok_value"),
@@ -11561,7 +12120,7 @@ fn run_respects_dynamic_eval_host_policy() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let outcome = block_on(session.execute_request(abi::ExecutionRequest {
         source: abi::SourceInput::Text {
-            name: "run-policy.m".to_string(),
+            name: "run-policy.m".into(),
             text: "run('policy_worker');".to_string(),
         },
         compatibility: CompatMode::Matlab,
@@ -12182,8 +12741,8 @@ fn cell_end_offset_range_paren_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExpr { .. })),
-        "cell end-offset range paren assignment should lower to expression slice store bytecode"
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
+        "cell end-offset range paren assignment should lower to slice store bytecode"
     );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12211,8 +12770,8 @@ fn cell_end_offset_range_paren_deletion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExprDelete { .. })),
-        "cell end-offset range paren deletion should lower to expression slice deletion bytecode"
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))),
+        "cell end-offset range paren deletion should lower to slice deletion bytecode"
     );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12240,8 +12799,8 @@ fn end_offset_range_deletion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExprDelete { .. })),
-        "end-offset range deletion should lower to expression slice deletion bytecode"
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))),
+        "end-offset range deletion should lower to slice deletion bytecode"
     );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12286,18 +12845,18 @@ fn feval_anonymous_handle_uses_semantic_vm() {
 }
 
 #[test]
-fn feval_string_local_function_uses_semantic_handle() {
+fn feval_string_local_function_uses_semantic_registry() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "y = feval('inc', 2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
         .expect("compile feval string local function call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "local feval string callee should lower to a semantic function handle"
+        "textual feval keeps runtime name selection instead of freezing a handle"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -12379,14 +12938,14 @@ fn local_function_handle_uses_semantic_handle() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "local function handles should lower to semantic function handles"
     );
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0, _) if name == "inc"
         )),
         "zero-capture local function handles should not lower as closures"
     );
@@ -12554,20 +13113,13 @@ fn try_catch_binding_uses_semantic_vm() {
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    let y_message = outcome
-        .workspace_delta
-        .upserts
-        .iter()
-        .find_map(|upsert| match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y" => {
-                Some(upsert.value.to_string())
-            }
-            _ => None,
-        })
-        .expect("try/catch binding should materialize y");
     assert!(
-        y_message == "'boom'",
-        "unexpected catch message payload: {y_message:?}"
+        outcome_has_named_upsert(
+            &outcome,
+            "y",
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("boom")),
+        ),
+        "try/catch binding should materialize the exact exception text"
     );
 }
 
@@ -12583,13 +13135,12 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
         "indexed member slice assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
-        "indexed member slice assignment should lower to typed slice store bytecode"
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::BeginFixedAssignment { .. }) }),
+        "indexed member slice assignment should retain its typed prepared destination"
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12613,12 +13164,10 @@ fn dotted_member_index_call_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallMethodOrMemberIndexMulti {
-                identity,
-                arg_count: 1,
-                out_count: 1,
+            runmat_vm::Instr::ReadSubscriptPath {
+                selection: runmat_types::SequenceUse::RequireSingle,
                 ..
-            } if identity.display_name().as_deref() == Some("a")
+            }
         )),
         "dotted member index call should lower to typed method/member-index bytecode"
     );
@@ -12644,8 +13193,10 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { identity, out_count: 1, .. }
-                if identity.display_name().as_deref() == Some("a")
+            runmat_vm::Instr::ReadSubscriptPath {
+                selection: runmat_types::SequenceUse::RequireSingle,
+                ..
+            }
         )),
         "expanded dotted member index call should lower to typed expansion bytecode"
     );
@@ -12757,11 +13308,11 @@ fn cellfun_named_local_function_uses_semantic_callback() {
         "local callback target should be available as semantic function bytecode"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "local string callback should be bound to a semantic function handle"
+        "textual callbacks retain runtime name selection rather than freezing a handle"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -12780,7 +13331,7 @@ fn cellfun_runtime_string_callback_uses_semantic_resolver() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "runtime string callback variables should not be compile-time literal rewrites"
     );
@@ -12828,16 +13379,16 @@ fn cellfun_session_function_uses_semantic_registry() {
         prepared
             .bytecode
             .function_registry
-            .functions_for_source(inc_source)
+            .functions_for_source_ref(inc_source)
             .contains(&inc_id),
         "session semantic callback target should be indexed by source ownership"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "session string callback should be bound to a semantic function handle"
+        "textual session callbacks retain runtime name selection"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -12849,17 +13400,18 @@ fn cellfun_session_function_uses_semantic_registry() {
 #[test]
 fn arrayfun_named_local_function_uses_semantic_callback() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let source =
         "A = [2, 3]; B = arrayfun('inc', A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
     let prepared = session
         .compile_input(source)
         .expect("compile named local arrayfun callback");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "local arrayfun string callback should be bound to a semantic function handle"
+        "textual arrayfun callbacks retain runtime name selection"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -12871,6 +13423,7 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
 #[test]
 fn arrayfun_session_function_uses_semantic_registry() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
     execute_text_request(
         &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
@@ -12882,11 +13435,11 @@ fn arrayfun_session_function_uses_semantic_registry() {
         .compile_input(source)
         .expect("compile session arrayfun callback");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
-        "session arrayfun string callback should be bound to a semantic function handle"
+        "textual session arrayfun callbacks retain runtime name selection"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -12906,7 +13459,7 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "runtime arrayfun string callback variables should not be compile-time literal rewrites"
     );
@@ -13419,7 +13972,7 @@ fn session_function_handle_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "session function handles should carry semantic identity"
     );
@@ -13439,7 +13992,7 @@ fn session_function_handle_uses_semantic_registry() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "name",
-        &runmat_value::Value::String("inc".to_string())
+        &runmat_value::Value::String("inc".to_string().into())
     ));
 }
 
@@ -13481,7 +14034,7 @@ fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "first_name",
-        &runmat_value::Value::String("Name".to_string())
+        &runmat_value::Value::String("Name".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -13491,12 +14044,12 @@ fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "second_name",
-        &runmat_value::Value::String("Mode".to_string())
+        &runmat_value::Value::String("Mode".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "second_value",
-        &runmat_value::Value::String("fast".to_string())
+        &runmat_value::Value::String("fast".to_string().into())
     ));
 }
 
@@ -13613,11 +14166,11 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
         .compile_input("[a, b] = feval('pair', 2);")
         .expect("compile feval string multi-output session call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
         )),
-        "session feval string callee should carry semantic identity"
+        "textual feval must not freeze a session definition into a handle"
     );
     assert!(
         prepared
@@ -13680,11 +14233,11 @@ fn session_feval_string_expansion_uses_semantic_registry() {
         .compile_input("C = {2, 3}; y = feval('add2', C{:});")
         .expect("compile feval string expansion session call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "add2"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "add2"
         )),
-        "session feval string expansion callee should carry semantic identity"
+        "textual feval expansion must not freeze a session definition into a handle"
     );
     assert!(
         prepared
@@ -13748,11 +14301,11 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
         .compile_input("C = {2}; [a, b] = feval('pair', C{:});")
         .expect("compile feval string expansion multi-output session call");
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
         )),
-        "session feval string expansion multi-output callee should carry semantic identity"
+        "textual feval expansion must not freeze a session definition into a handle"
     );
     assert!(
         prepared
@@ -13945,9 +14498,9 @@ fn indexed_cell_member_assignment_uses_semantic_vm() {
 }
 
 #[test]
-fn cell_member_access_uses_semantic_vm() {
+fn cell_member_access_requires_indexing_the_cell_contents() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = "C = {struct(), struct()}; C{1}.a = 5; C{2}.a = 6; D = C.a; y = D{2};";
+    let source = "C = {struct(), struct()}; C{1}.a = 5; C{2}.a = 6; D = C.a;";
     let prepared = session
         .compile_input(source)
         .expect("compile cell member access");
@@ -13957,16 +14510,20 @@ fn cell_member_access_uses_semantic_vm() {
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
-            && upsert.value.to_string() == "6"
-    }));
+    assert_eq!(outcome.diagnostics.len(), 1);
+    assert_eq!(outcome.diagnostics[0].code, "RunMat:LoadMember");
+    let verification = execute_text_request(
+        &mut session,
+        "assert(iscell(C)); assert(C{1}.a == 5); assert(C{2}.a == 6);",
+    )
+    .expect("inspect the preserved cells after rejection");
+    assert!(!verification.has_errors(), "{:?}", verification.diagnostics);
 }
 
 #[test]
-fn cell_member_assignment_uses_semantic_vm() {
+fn cell_member_assignment_does_not_reclassify_cells_as_structure_arrays() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = "C = {struct(), struct()}; C.a = 9; y = C{2}.a;";
+    let source = "C = {struct(), struct()}; C.a = 9;";
     let prepared = session
         .compile_input(source)
         .expect("compile cell member assignment");
@@ -13976,10 +14533,14 @@ fn cell_member_assignment_uses_semantic_vm() {
     );
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
-            && upsert.value.to_string() == "9"
-    }));
+    assert_eq!(outcome.diagnostics.len(), 1);
+    assert_eq!(outcome.diagnostics[0].code, "RunMat:StoreMember");
+    let verification = execute_text_request(
+        &mut session,
+        "assert(iscell(C)); assert(isempty(fieldnames(C{1}))); assert(isempty(fieldnames(C{2})));",
+    )
+    .expect("inspect the unchanged cells after rejection");
+    assert!(!verification.has_errors(), "{:?}", verification.diagnostics);
 }
 
 #[test]
@@ -14120,30 +14681,74 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .functions()
         .resolve_name("nativeCacheCaller")
         .expect("published function identity");
-    let published_program_function = runmat_types::ProgramFunctionId(
-        u32::try_from(published_function.0).expect("portable function identity"),
-    );
+    let analysis_function = first_unit
+        .functions()
+        .get(published_function)
+        .unwrap()
+        .portable_function;
     assert!(first_unit.mir().bodies.contains_key(&published_function));
-    assert!(first_unit
-        .analysis()
-        .function(published_program_function)
-        .is_some());
+    assert!(first_unit.analysis().function(analysis_function).is_some());
     assert!(first_unit
         .vm_layout()
         .functions
         .contains_key(&published_function));
+    let published_portable_function = first_unit
+        .functions()
+        .get(published_function)
+        .expect("published function body")
+        .portable_function;
+    let envelope = first_unit
+        .portable_envelope_for(Some("nativeCacheCaller"))
+        .expect("portable product");
     assert_eq!(
         first_unit
-            .portable_envelope_for(Some("nativeCacheCaller"))
-            .expect("portable product")
-            .manifest
-            .identity
-            .entrypoint_function,
-        published_program_function
+            .functions()
+            .get(published_function)
+            .expect("published function body")
+            .binding_origin,
+        Some(
+            runmat_execution::FunctionBindingOrigin::from_revision(
+                &envelope.manifest.identity.program,
+                published_portable_function,
+            )
+            .expect("published immutable origin")
+        )
     );
+    assert_eq!(
+        envelope.manifest.identity.entrypoint_function.unwrap(),
+        published_portable_function
+    );
+    assert_eq!(
+        runmat_vm::admit_executable_unit(
+            &envelope
+                .canonical_bytes()
+                .expect("canonical portable bytes")
+        )
+        .expect("admit portable product")
+        .entrypoint_origin()
+        .expect("admitted exact entrypoint"),
+        runmat_execution::FunctionBindingOrigin::from_revision(
+            &envelope.manifest.identity.program,
+            published_portable_function,
+        )
+        .expect("entrypoint origin")
+    );
+    let mut mismatched_entrypoint = envelope.clone();
+    mismatched_entrypoint.manifest.identity.entrypoint_function = Some(
+        runmat_types::ProgramFunctionId(published_portable_function.0.saturating_add(10_000)),
+    );
+    let mismatch = runmat_vm::admit_executable_unit(
+        &mismatched_entrypoint
+            .canonical_bytes()
+            .expect("canonical mismatched portable bytes"),
+    )
+    .expect_err("manifest entrypoint must match the admitted body");
+    assert!(mismatch
+        .to_string()
+        .contains("executable entrypoint identity disagrees"));
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCacheCaller".into()),
-        arguments: vec![runmat_value::Value::Num(2.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(2.0)]),
         requested_outputs: 1,
     };
     let first = block_on(session.invoke_executable(
@@ -14152,7 +14757,7 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         &InvocationControl::default().force_generic_native(),
     ))
     .expect("invoke first publication");
-    assert_eq!(first, runmat_value::Value::Num(3.0));
+    assert_single_output(&first, runmat_value::Value::Num(3.0));
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
 
     let repeated = block_on(session.invoke_executable(
@@ -14193,8 +14798,1488 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         &InvocationControl::default().force_generic_native(),
     ))
     .expect("invoke replacement publication");
-    assert_eq!(second, runmat_value::Value::Num(12.0));
+    assert_single_output(&second, runmat_value::Value::Num(12.0));
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
+}
+
+#[test]
+fn executable_function_interface_preserves_source_parameters_and_static_facts() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "function-interface-test@1",
+        "signals.m",
+        "function y = signals(amplitude, width)\narguments\n  amplitude (1,1) double\n  width (1,1) double = 0.5\nend\ny = amplitude * width;\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let interface = unit
+        .primary_function_interface("signals")
+        .expect("primary function interface");
+
+    assert_eq!(
+        interface
+            .inputs
+            .iter()
+            .map(|input| (input.name.as_str(), input.arity))
+            .collect::<Vec<_>>(),
+        vec![
+            ("amplitude", runmat_types::OperationParameterArity::Required),
+            ("width", runmat_types::OperationParameterArity::Optional),
+        ]
+    );
+    assert_eq!(interface.outputs.len(), 1);
+    assert!(unit.primary_function_interface("missing").is_err());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn portable_entrypoint_rejects_matching_function_id_from_another_revision() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "entrypoint-origin-test@1",
+        "entrypointOrigin.m",
+        "function y = entrypointOrigin(x)\ny = x + 1;\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile canonical executable unit");
+    let mut envelope = unit
+        .portable_envelope_for(Some("entrypointOrigin"))
+        .expect("portable function product");
+    let portable_function = envelope.manifest.identity.entrypoint_function.unwrap();
+    let wrong_revision = runmat_execution::ProgramRevision::new(
+        *envelope.manifest.identity.program.graph_digest(),
+        runmat_execution::Digest::sha256(b"different-entrypoint-source-revision"),
+        envelope.manifest.identity.program.environment(),
+    )
+    .expect("valid distinct revision");
+    let wrong_origin =
+        runmat_execution::FunctionBindingOrigin::from_revision(&wrong_revision, portable_function)
+            .expect("valid wrong-revision origin");
+
+    let payload = envelope
+        .payloads
+        .iter_mut()
+        .find(|payload| payload.kind == runmat_execution::ExecutableComponentKind::FunctionRegistry)
+        .expect("function registry payload");
+    let mut registry: runmat_vm::FunctionRegistry =
+        serde_json::from_slice(&payload.bytes).expect("canonical function registry");
+    let function = registry
+        .resolve_name("entrypointOrigin")
+        .expect("entrypoint function");
+    let body = registry
+        .functions
+        .get_mut(&function)
+        .expect("entrypoint body");
+    assert_eq!(body.portable_function, portable_function);
+    body.binding_origin = Some(wrong_origin);
+    payload.bytes = serde_json::to_vec(&registry).expect("re-encode function registry");
+    let descriptor = envelope
+        .manifest
+        .components
+        .iter_mut()
+        .find(|descriptor| {
+            descriptor.kind == runmat_execution::ExecutableComponentKind::FunctionRegistry
+        })
+        .expect("function registry descriptor");
+    *descriptor = runmat_execution::ExecutableComponentDescriptor::from_payload(
+        descriptor.kind,
+        descriptor.schema_version,
+        &payload.bytes,
+    )
+    .expect("updated function registry descriptor");
+
+    let error = runmat_vm::admit_executable_unit(
+        &envelope
+            .canonical_bytes()
+            .expect("canonical mismatched executable"),
+    )
+    .expect_err("matching portable ID from another revision is not entrypoint authority");
+    assert!(
+        error
+            .to_string()
+            .contains("executable entrypoint identity disagrees with its admitted function body: original origin is absent"),
+        "{error}"
+    );
+}
+
+#[test]
+fn portable_product_preserves_and_validates_explicit_interop_contract() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-interop-manifest-test@1",
+            "interop_manifest.m",
+            "answer = localPlusOne(41);\nfunction output = localPlusOne(input)\noutput = input + 1;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile portable unit");
+    let interop = runmat_types::InteropManifest {
+        schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+        foreign_types: Vec::new(),
+        adapters: vec![runmat_types::ForeignAdapterRequirement {
+            adapter: runmat_types::ForeignAdapterId::new("native-test").unwrap(),
+            minimum_version: 1,
+            capabilities: runmat_types::CapabilitySet(std::collections::BTreeSet::from([
+                runmat_types::CapabilityRequirement::NativeCode,
+            ])),
+            execution_stack: runmat_types::ExecutionStackRequirement::Process,
+            artifact_identities: vec![runmat_types::ForeignArtifactIdentity::new(
+                "native-test:fixture",
+            )
+            .unwrap()],
+        }],
+        adapter_contracts: Vec::new(),
+    };
+
+    let first = unit
+        .portable_envelope_for_with_interop(None, interop.clone())
+        .expect("explicit interop product");
+    let second = unit
+        .portable_envelope_for_with_interop(None, interop.clone())
+        .expect("deterministic explicit interop product");
+    assert_eq!(first.manifest.interop, interop);
+    assert_eq!(
+        first.manifest.identity.entrypoint_kind,
+        runmat_execution::ExecutableEntrypointKind::Script
+    );
+    let registry_payload = first
+        .component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+        .expect("script function registry");
+    let registry: runmat_vm::FunctionRegistry =
+        serde_json::from_slice(&registry_payload.bytes).expect("decode script function registry");
+    assert!(registry.resolve_name("localPlusOne").is_some());
+    assert!(registry.functions.values().all(|function| {
+        Some(function.portable_function) != first.manifest.identity.entrypoint_function
+    }));
+    assert!(first
+        .manifest
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::ForeignRuntime));
+    assert!(first
+        .manifest
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::NativeCode));
+    assert_eq!(
+        first.canonical_bytes().unwrap(),
+        second.canonical_bytes().unwrap()
+    );
+    let admitted_script = runmat_vm::admit_executable_unit(
+        &first
+            .canonical_bytes()
+            .expect("canonical script executable"),
+    )
+    .expect("admit script executable with its synthetic body identity");
+    assert_eq!(
+        admitted_script.entrypoint_origin().unwrap(),
+        runmat_execution::FunctionBindingOrigin::from_revision(
+            &first.manifest.identity.program,
+            first.manifest.identity.entrypoint_function.unwrap(),
+        )
+        .unwrap()
+    );
+
+    let mut invalid = first.manifest.interop;
+    invalid.schema_version += 1;
+    assert!(unit
+        .portable_envelope_for_with_interop(None, invalid)
+        .unwrap_err()
+        .contains("interop.schema_version"));
+}
+
+#[test]
+fn portable_product_binds_explicit_accelerator_requirements_from_analysis() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-accelerator-manifest-test@1",
+            "accelerator_manifest.m",
+            "function output = onDevice(input)\noutput = gpuArray(input);\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile accelerator unit");
+
+    let envelope = unit
+        .portable_envelope_for(Some("onDevice"))
+        .expect("portable accelerator product");
+    assert!(envelope
+        .manifest
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::Accelerator));
+    let function = unit
+        .functions()
+        .resolve_name("onDevice")
+        .and_then(|function| unit.functions().get(function))
+        .expect("compiled function");
+    assert!(function
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::Accelerator));
+    let requests = runmat_execution::resource::accelerator_requirements_for_capabilities(
+        &envelope.manifest.capabilities,
+    )
+    .expect("typed accelerator requirements");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].class.as_str(), "gpu");
+    assert_eq!(requests[0].count, 1);
+    assert!(requests[0].provider.is_none());
+}
+
+#[test]
+fn portable_product_preserves_analyzed_parfor_contracts() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-parfor-manifest-test@1",
+            "parallel_manifest.m",
+            "input = ones(1, 4); output = zeros(1, 4); parfor (index = 1:4, 2); output(index) = input(index); end;\n",
+        ),
+        None,
+    ))
+    .expect("compile portable unit");
+
+    let envelope = unit.portable_envelope().expect("portable parallel product");
+    assert_eq!(envelope.manifest.parallel.parfor_regions.len(), 1);
+    assert_eq!(
+        envelope.manifest.parallel.parfor_regions[0].maximum_workers,
+        Some(runmat_types::LabCount(2))
+    );
+    let executable = unit
+        .bytecode()
+        .parfor_regions
+        .first()
+        .expect("compiled parfor executable");
+    assert_eq!(
+        executable.contract,
+        envelope.manifest.parallel.parfor_regions[0]
+    );
+    assert_ne!(executable.header.pc, executable.body.pc);
+    assert_ne!(executable.header.pc, executable.exit.pc);
+    assert_eq!(
+        executable
+            .variables
+            .iter()
+            .find(|variable| variable.contract.value == executable.contract.loop_variable)
+            .map(|variable| variable.slot),
+        Some(executable.loop_slot)
+    );
+    envelope
+        .manifest
+        .validate()
+        .expect("parallel contract remains valid in the executable manifest");
+    let mut altered = envelope.clone();
+    altered.manifest.parallel.parfor_regions[0].maximum_workers = Some(runmat_types::LabCount(3));
+    let altered = altered
+        .canonical_bytes()
+        .expect("structurally valid altered parallel manifest");
+    let error = runmat_vm::admit_executable_unit(&altered)
+        .expect_err("worker must reject a manifest that differs from compiled parfor bytecode");
+    assert!(
+        error
+            .to_string()
+            .contains("selected parfor manifest differs from its compiled region contracts"),
+        "unexpected parallel import error: {error}"
+    );
+}
+
+#[test]
+fn parfor_break_is_rejected_before_execution() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let error = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-parfor-legality-test@1",
+            "parallel_legality.m",
+            "parfor index = 1:2; break; end;\n",
+        ),
+        None,
+    ))
+    .expect_err("an unclassified parfor must not produce executable bytecode");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("break cannot leave a parfor region"),
+        "unexpected parfor compilation error: {rendered}"
+    );
+}
+
+#[test]
+fn parfor_has_a_deterministic_serial_execution_fallback() {
+    for source in [
+        "total = 0; parfor index = 1:4; total = total + index; end;",
+        "total = 0; parfor (index = 1:4, 0); total = total + index; end;",
+    ] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        execute_text_request(&mut session, source)
+            .expect("execute parfor through serial scheduler fallback");
+        assert_eq!(
+            session.get_variables().unwrap().get("total"),
+            Some(&runmat_value::Value::Num(10.0)),
+            "serial parfor source: {source}"
+        );
+    }
+}
+
+#[test]
+fn spmd_executes_in_an_isolated_rank_context_and_retains_composite_outputs() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-spmd-test@1",
+            "spmd_test.m",
+            "spmd; workerIndex = spmdIndex(); workerCount = spmdSize(); labBarrier(); end;",
+        ),
+        None,
+    ))
+    .expect("compile compiler-bound SPMD region");
+    assert_eq!(unit.bytecode().spmd_regions[0].outputs.len(), 2);
+    execute_text_request(
+        &mut session,
+        "spmd; workerIndex = spmdIndex(); workerCount = spmdSize(); labBarrier(); end;",
+    )
+    .expect("execute compiler-bound SPMD region");
+
+    let variables = session.get_variables().unwrap();
+    let Some(runmat_value::Value::Composite(index)) = variables.get("workerIndex") else {
+        panic!(
+            "SPMD worker index must leave a Composite in the driver workspace: {:?}",
+            variables
+        );
+    };
+    let Some(runmat_value::Value::Composite(count)) = variables.get("workerCount") else {
+        panic!("SPMD worker count must leave a Composite in the driver workspace");
+    };
+    assert_eq!(index.gang.labs, runmat_types::LabCount(1));
+    assert_eq!(count.gang, index.gang);
+    assert_eq!(count.owner_region, index.owner_region);
+    assert_ne!(count.id, index.id);
+}
+
+#[test]
+fn modern_spmd_point_to_point_surface_executes_through_typed_bytecode() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "spmd; spmdSend(0x0020000000000001u64, 1, 7); [received, source, tag] = spmdReceive(\"any\", 7); exchanged = spmdSendReceive(1, 1, uint16(5)); total = spmdPlus(uint32(2)); spmdBarrier(); end;",
+    )
+    .expect("execute modern SPMD point-to-point and reduction operations");
+    for name in ["received", "source", "tag", "exchanged", "total"] {
+        assert!(
+            matches!(
+                session.get_variables().unwrap().get(name),
+                Some(runmat_value::Value::Composite(_))
+            ),
+            "{name} must be retained as a compiler-declared Composite output: {:?}",
+            session.get_variables().unwrap()
+        );
+    }
+    execute_text_request(
+        &mut session,
+        "receivedValue = received{1}; sourceValue = source{1}; tagValue = tag{1}; exchangedValue = exchanged{1}; totalValue = total{1};",
+    )
+    .expect("read retained Composite entries through explicit driver indexing");
+    let variables = session.get_variables().unwrap();
+    assert_eq!(
+        variables.get("receivedValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(
+            9_007_199_254_740_993,
+        )))
+    );
+    assert_eq!(
+        variables.get("sourceValue"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("tagValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(7)))
+    );
+    assert_eq!(
+        variables.get("exchangedValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U16(5)))
+    );
+    assert_eq!(
+        variables.get("totalValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U32(2)))
+    );
+}
+
+#[test]
+fn modern_and_legacy_spmd_aggregate_surfaces_use_runtime_language_semantics() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = "spmd; modernCat = spmdCat(uint16([1, 2]), 2); modernReduce = spmdReduce(@plus, uint32(3)); legacyCat = gcat(int16([4, 5]), 2, 1); legacyReduce = gop(@plus, uint64(6), 1); end;";
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new("core-spmd-aggregate-test@1", "aggregate_spmd.m", source),
+        None,
+    ))
+    .expect("compile aggregate SPMD surface");
+    assert_eq!(unit.bytecode().spmd_regions[0].outputs.len(), 4);
+    let outcome = execute_text_request(&mut session, source)
+        .expect("execute rank-ordered concatenation and callable reductions");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "aggregate SPMD execution diagnostics: {:?}",
+        outcome.diagnostics
+    );
+    for name in ["modernCat", "modernReduce", "legacyCat", "legacyReduce"] {
+        assert!(
+            matches!(
+                session.get_variables().unwrap().get(name),
+                Some(runmat_value::Value::Composite(_))
+            ),
+            "{name} must be retained as a Composite output: {:?}",
+            session.get_variables().unwrap()
+        );
+    }
+    execute_text_request(
+        &mut session,
+        "modernCatValue = modernCat{1}; modernReduceValue = modernReduce{1}; legacyCatValue = legacyCat{1}; legacyReduceValue = legacyReduce{1};",
+    )
+    .expect("read aggregate Composite entries");
+    let variables = session.get_variables().unwrap();
+    assert_eq!(
+        variables.get("modernCatValue"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U16(vec![1, 2]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("modernReduceValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U32(3)))
+    );
+    assert_eq!(
+        variables.get("legacyCatValue"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::I16(vec![4, 5]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("legacyReduceValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(6)))
+    );
+}
+
+#[test]
+fn local_multi_rank_spmd_preserves_rank_order_and_collective_results() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(3)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(3); spmd; labNumber = spmdIndex(); joined = spmdCat(uint16(labNumber), 2); total = spmdReduce(@plus, uint32(labNumber)); end;",
+    )
+    .expect("execute a three-rank SPMD region");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    for name in ["labNumber", "joined", "total"] {
+        assert!(
+            matches!(
+                session.get_variables().unwrap().get(name),
+                Some(runmat_value::Value::Composite(_))
+            ),
+            "{name} must be retained as a compiler-declared Composite output: {:?}",
+            session.get_variables().unwrap()
+        );
+    }
+    execute_text_request(
+        &mut session,
+        "firstRank = labNumber{1}; secondRank = labNumber{2}; thirdRank = labNumber{3}; joinedValue = joined{1}; totalValue = total{1};",
+    )
+    .expect("read rank-ordered multi-lab Composite entries");
+    let variables = session.get_variables().unwrap();
+    assert_eq!(
+        variables.get("firstRank"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("secondRank"),
+        Some(&runmat_value::Value::Num(2.0))
+    );
+    assert_eq!(
+        variables.get("thirdRank"),
+        Some(&runmat_value::Value::Num(3.0))
+    );
+    assert_eq!(
+        variables.get("joinedValue"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U16(vec![1, 2, 3]),
+                vec![1, 3],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("totalValue"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U32(6)))
+    );
+}
+
+#[test]
+fn spmd_context_names_share_one_rank_and_size_contract() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    execute_text_request(
+        &mut session,
+        "serialIndex = spmdIndex(); serialSize = spmdSize(); pool = parpool(2); spmd; rank = labindex; count = numlabs; end; firstRank = rank{1}; secondRank = rank{2}; firstCount = count{1}; secondCount = count{2};",
+    )
+    .expect("execute compatible SPMD context names");
+
+    let variables = session.get_variables().unwrap();
+    for (name, expected) in [
+        ("serialIndex", 1.0),
+        ("serialSize", 1.0),
+        ("firstRank", 1.0),
+        ("secondRank", 2.0),
+        ("firstCount", 2.0),
+        ("secondCount", 2.0),
+    ] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Num(expected)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn local_spmd_reports_a_typed_collective_deadlock_without_a_timeout() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; value = spmdReceive(2, 7); else; spmdBarrier(); end; end;",
+    )
+    .expect("deadlocked SPMD execution returns a structured diagnostic");
+    assert!(
+        outcome.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:parallel:Collective"
+                && diagnostic.message.contains("SPMD collective deadlock")
+                && diagnostic.message.contains("waits for labs")
+        }),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn local_spmd_detects_a_collective_wait_after_its_peer_finishes() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; value = spmdReceive(2, 7); else; value = uint16(2); end; end;",
+    )
+    .expect("completed-peer deadlock returns a structured diagnostic");
+    assert!(
+        outcome.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:parallel:Collective"
+                && diagnostic.message.contains("SPMD collective deadlock")
+                && diagnostic.message.contains("completed labs 2")
+        }),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn local_spmd_preserves_the_originating_rank_failure_while_releasing_waiting_peers() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; value = spmdReceive(2, 7); else; values = [1, 2]; value = values(3); end; end;",
+    )
+    .expect("a rank failure returns a structured diagnostic without stranding its peer");
+    assert!(
+        outcome.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:IndexOutOfBounds"
+                && diagnostic.message.contains("out of bounds")
+        }),
+        "originating failure was not retained: {:?}",
+        outcome.diagnostics
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "RunMat:parallel:Collective"),
+        "peer termination replaced the originating rank failure: {:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = uint64([1, 9007199254740993]); value = distributed(source); local = getLocalPart(value);",
+    )
+    .expect("execute compiler-bound distributed operations");
+    let variables = session.get_variables().unwrap();
+    assert!(matches!(
+        variables.get("value"),
+        Some(runmat_value::Value::Distributed(_))
+    ));
+    assert_eq!(variables.get("local"), variables.get("source"));
+}
+
+#[test]
+fn distributed_builtin_mapping_retains_partition_facts_in_the_compiled_unit() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-distributed-fact-test@1",
+            "mappedDistributed.m",
+            "function y = mappedDistributed(); source = distributed(int16([-1, 2])); y = abs(source); end",
+        ),
+        None,
+    ))
+    .expect("compile distributed mapping unit");
+    let function = unit
+        .functions()
+        .resolve_name("mappedDistributed")
+        .expect("mappedDistributed identity");
+    let analysis = unit
+        .analysis()
+        .function(unit.functions().get(function).unwrap().portable_function)
+        .expect("mappedDistributed analysis");
+    let runmat_types::ValueKindFact::Distributed(distributed) = &analysis.outputs[0].kind else {
+        panic!("mapped output must remain a distributed fact");
+    };
+    assert_eq!(
+        distributed.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Int16,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        distributed.value.shape,
+        runmat_types::ShapeFact::from(vec![Some(1), Some(2)])
+    );
+}
+
+#[test]
+fn codistributor_factory_and_codistributed_inspection_use_canonical_runtime_values() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "defaultCodist = codistributor(); blockCodist = codistributor('2dbc', uint32([1, 1]), uint64(8)); completeCodist = codistributor1d(uint32(1), uint64(4), uint64([4, 1])); defaultComplete = isComplete(defaultCodist); complete = isComplete(completeCodist); plain = iscodistributed(uint16(7)); value = distributed(uint16([1, 2])); distributedFlag = iscodistributed(value);",
+    )
+    .expect("execute codistributor factory and handle inspection surface");
+    let variables = session.get_variables().unwrap();
+    assert!(matches!(
+        variables.get("defaultCodist"),
+        Some(runmat_value::Value::Object(object)) if object.class_name().is(runmat_types::StaticClassIdentity::new("codistributor1d"))
+    ));
+    assert!(matches!(
+        variables.get("blockCodist"),
+        Some(runmat_value::Value::Object(object)) if object.class_name().is(runmat_types::StaticClassIdentity::new("codistributor2dbc"))
+    ));
+    assert_eq!(
+        variables.get("defaultComplete"),
+        Some(&runmat_value::Value::Bool(false))
+    );
+    assert_eq!(
+        variables.get("complete"),
+        Some(&runmat_value::Value::Bool(true))
+    );
+    assert_eq!(
+        variables.get("plain"),
+        Some(&runmat_value::Value::Bool(false))
+    );
+    assert_eq!(
+        variables.get("distributedFlag"),
+        Some(&runmat_value::Value::Bool(true))
+    );
+}
+
+#[test]
+fn compatible_codistributed_client_construction_preserves_exact_indices() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = uint64([1, 9007199254740993]); value = codistributed(source); local = getLocalPart(value); indices = globalIndices(value, uint32(2), uint32(1)); [first, last] = globalIndices(value, uint32(2), uint32(1)); codist = getCodistributor(value);",
+    )
+    .expect("execute compatible client codistributed construction");
+    let variables = session.get_variables().unwrap();
+    assert_eq!(variables.get("local"), variables.get("source"));
+    assert_eq!(
+        variables.get("indices"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![1, 2]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("first"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(1)))
+    );
+    assert_eq!(
+        variables.get("last"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(2)))
+    );
+    assert!(matches!(
+        variables.get("codist"),
+        Some(runmat_value::Value::Object(object)) if object.class_name().is(runmat_types::StaticClassIdentity::new("codistributor1d"))
+    ));
+}
+
+#[test]
+fn cooperative_codistributed_build_keeps_partition_payloads_worker_owned() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    execute_text_request(
+        &mut session,
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; local = uint64([1, 2]); onlyFirst = uint64([9, 10]); else; local = uint64([3, 4]); end; codist = codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])); value = codistributed.build(local, codist); part = getLocalPart(value); indices = globalIndices(value, uint32(2)); end; assembled = gather(value); part1 = part{1}; part2 = part{2}; firstPartial = onlyFirst{1}; indices1 = indices{1}; indices2 = indices{2};",
+    )
+    .expect("build a codistributed value from worker-local partitions");
+    let variables = session.get_variables().unwrap();
+    assert!(matches!(
+        variables.get("value"),
+        Some(runmat_value::Value::Distributed(_))
+    ));
+    assert_eq!(
+        variables.get("assembled"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![1, 2, 3, 4]),
+                vec![1, 4],
+            )
+            .unwrap()
+        ))
+    );
+    for (name, values) in [
+        ("part1", vec![1, 2]),
+        ("part2", vec![3, 4]),
+        ("firstPartial", vec![9, 10]),
+    ] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(values),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+    for (name, values) in [("indices1", vec![1, 2]), ("indices2", vec![3, 4])] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(values),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+}
+
+#[test]
+fn cooperative_codistributed_construction_selects_the_typed_source_mode() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(2); shared = uint64([1, 0x0020000000000001u64]); spmd(2); rank = spmdIndex(); local = uint64([10 * rank + 1, 10 * rank + 2]); codist = codistributor1d(uint32(2), uint64([1, 1]), uint64([1, 2])); replicated = codistributed(shared, codist); fromSecond = codistributed(local, uint32(2)); fromFirstWithCodist = codistributed(local, uint32(1), codist); end; replicatedValue = gather(replicated); secondValue = gather(fromSecond); firstValue = gather(fromFirstWithCodist);",
+    )
+    .expect("construct codistributed values through each worker-scoped source mode");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "codistributed construction diagnostics: {:?}",
+        outcome.diagnostics
+    );
+    let variables = session.get_variables().unwrap();
+    for (name, expected) in [
+        ("replicatedValue", vec![1, 9_007_199_254_740_993]),
+        ("secondValue", vec![21, 22]),
+        ("firstValue", vec![11, 12]),
+    ] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(expected),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+}
+
+#[test]
+fn two_dimensional_global_indices_use_the_authoritative_block_cyclic_layout() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(4)));
+    execute_text_request(
+        &mut session,
+        "pool = parpool(4); source = uint64(reshape(1:16, 4, 4)); original = distributed(source); codist = codistributor2dbc(uint32([2, 2]), uint64(1), 'row', uint64([4, 4])); value = redistribute(original, codist); rows1 = globalIndices(value, uint32(1), uint32(1)); columns1 = globalIndices(value, uint32(2), uint32(1)); rows2 = globalIndices(value, uint32(1), uint32(2)); columns2 = globalIndices(value, uint32(2), uint32(2));",
+    )
+    .expect("inspect exact block-cyclic global indices");
+    let variables = session.get_variables().unwrap();
+    for (name, expected) in [
+        ("rows1", vec![1, 3]),
+        ("columns1", vec![1, 3]),
+        ("rows2", vec![1, 3]),
+        ("columns2", vec![2, 4]),
+    ] {
+        assert_eq!(
+            variables.get(name),
+            Some(&runmat_value::Value::Tensor(
+                runmat_value::Tensor::new_integer(
+                    runmat_value::IntegerStorage::U64(expected),
+                    vec![1, 2],
+                )
+                .unwrap()
+            ))
+        );
+    }
+}
+
+#[test]
+fn global_indices_preserve_empty_partition_endpoints() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(3)));
+    let outcome = execute_text_request(
+        &mut session,
+        "pool = parpool(3); value = distributed(uint64(7)); indices = globalIndices(value, uint32(1), uint32(3)); [first, last] = globalIndices(value, uint32(1), uint32(3));",
+    )
+    .expect("inspect an empty distributed partition");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    let variables = session.get_variables().unwrap();
+    assert_eq!(
+        variables.get("indices"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(Vec::new()),
+                vec![1, 0],
+            )
+            .unwrap()
+        ))
+    );
+    assert_eq!(
+        variables.get("first"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(1)))
+    );
+    assert_eq!(
+        variables.get("last"),
+        Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(0)))
+    );
+}
+
+#[test]
+fn distributed_builtin_policy_maps_admitted_operations_and_materializes_gather() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = int16([-32768, 2]); distributedSource = distributed(source); mapped = abs(distributedSource); mappedAgain = abs(distributedSource); materialized = gather(mapped);",
+    )
+    .expect("execute catalog-admitted distributed builtin operations");
+    let variables = session.get_variables().unwrap();
+    let Some(runmat_value::Value::Distributed(source)) = variables.get("distributedSource") else {
+        panic!("distributedSource must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(mapped)) = variables.get("mapped") else {
+        panic!("mapped must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(mapped_again)) = variables.get("mappedAgain") else {
+        panic!("mappedAgain must retain a distributed handle");
+    };
+    assert_eq!(mapped.scheme, source.scheme);
+    assert_eq!(mapped.partition_count, source.partition_count);
+    assert_eq!(mapped.pool, source.pool);
+    assert!(mapped.generation > source.generation);
+    assert_eq!(mapped_again, mapped);
+    assert_eq!(
+        mapped.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Int16,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        variables.get("materialized"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::I16(vec![i16::MAX, 2]),
+                vec![1, 2],
+            )
+            .unwrap()
+        ))
+    );
+}
+
+#[test]
+fn distributed_builtin_mapping_preserves_each_requested_log2_output() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = single([1, -3]); distributedSource = distributed(source); [fraction, exponent] = log2(distributedSource); gatheredFraction = gather(fraction); gatheredExponent = gather(exponent);",
+    )
+    .expect("execute two-output distributed log2");
+    let variables = session.get_variables().unwrap();
+    let Some(runmat_value::Value::Distributed(fraction)) = variables.get("fraction") else {
+        panic!("fraction must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(exponent)) = variables.get("exponent") else {
+        panic!("exponent must retain a distributed handle");
+    };
+    assert_ne!(fraction.id, exponent.id);
+    assert_eq!(fraction.scheme, exponent.scheme);
+    assert_eq!(
+        variables
+            .get("gatheredFraction")
+            .and_then(|value| match value {
+                runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+                _ => None,
+            }),
+        Some(&[0.5, -0.75][..])
+    );
+    assert_eq!(
+        variables
+            .get("gatheredExponent")
+            .and_then(|value| match value {
+                runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+                _ => None,
+            }),
+        Some(&[1.0, 2.0][..])
+    );
+}
+
+#[test]
+fn distributed_numeric_limit_like_preserves_class_without_materializing_the_prototype() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "floatingSource = distributed(single([1, 2])); floatingLimit = realmax(like=floatingSource); gatheredFloating = gather(floatingLimit); integerSource = distributed(uint64([1, 2])); integerLimit = intmax(like=integerSource); gatheredInteger = gather(integerLimit);",
+    )
+    .expect("execute distributed numeric limit like forms");
+    let variables = session.get_variables().unwrap();
+    let Some(runmat_value::Value::Distributed(floating)) = variables.get("floatingLimit") else {
+        panic!("floating limit must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(integer)) = variables.get("integerLimit") else {
+        panic!("integer limit must retain a distributed handle");
+    };
+    assert_eq!(floating.global_shape, vec![1, 1]);
+    assert_eq!(integer.global_shape, vec![1, 1]);
+    assert_eq!(
+        floating.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Single,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        integer.value.kind,
+        runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::UInt64,
+            domain: runmat_types::NumericDomain::Real,
+        })
+    );
+    assert_eq!(
+        variables
+            .get("gatheredFloating")
+            .and_then(|value| match value {
+                runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+                _ => None,
+            }),
+        Some(&[f32::MAX][..])
+    );
+    assert_eq!(
+        variables.get("gatheredInteger"),
+        Some(&runmat_value::Value::Tensor(
+            runmat_value::Tensor::new_integer(
+                runmat_value::IntegerStorage::U64(vec![u64::MAX]),
+                vec![1, 1],
+            )
+            .unwrap()
+        ))
+    );
+}
+
+#[test]
+fn distributed_eps_maps_values_and_retains_scalar_like_owner() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = distributed(single([0, 1, 2])); mapped = eps(source); scalar = eps(like=source); mappedValues = gather(mapped); scalarValue = gather(scalar);",
+    )
+    .expect("execute both distributed eps forms");
+    let variables = session.get_variables().unwrap();
+    let Some(runmat_value::Value::Distributed(mapped)) = variables.get("mapped") else {
+        panic!("eps(source) must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(scalar)) = variables.get("scalar") else {
+        panic!("eps(like=source) must retain a distributed handle");
+    };
+    assert_eq!(mapped.global_shape, vec![1, 3]);
+    assert_eq!(scalar.global_shape, vec![1, 1]);
+    assert_eq!(mapped.owner, scalar.owner);
+    assert_eq!(
+        variables.get("mappedValues").and_then(|value| match value {
+            runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+            _ => None,
+        }),
+        Some(&[f32::from_bits(1), f32::EPSILON, 2.0 * f32::EPSILON][..])
+    );
+    assert_eq!(
+        variables.get("scalarValue").and_then(|value| match value {
+            runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+            _ => None,
+        }),
+        Some(&[f32::EPSILON][..])
+    );
+}
+
+#[test]
+fn distributed_builtin_policy_rejects_unclassified_operations() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "distributedSource = distributed([1, 2]); unsupported = full(distributedSource);",
+    )
+    .expect("executable code retains the runtime placement guard");
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| { diagnostic.code == "RunMat:parallel:DistributedBuiltinUnsupported" }));
+
+    // Direct session-owned calls still require the runtime placement guard
+    // when there is no statically analyzed input fact.
+    execute_text_request(&mut session, "distributedSource = distributed([1, 2]);")
+        .expect("construct the distributed input");
+    let variables = session.get_variables().expect("session variables");
+    let argument = variables
+        .get("distributedSource")
+        .expect("distributed input");
+    let error = block_on(runmat_runtime::dispatcher::call_builtin_async_in_context(
+        session.runtime_context(),
+        "full",
+        std::slice::from_ref(argument),
+    ))
+    .expect_err("dynamic distributed inputs retain the runtime placement guard");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:parallel:DistributedBuiltinUnsupported")
+    );
+}
+
+#[test]
+fn closing_a_pool_retires_distributed_and_composite_leases() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    execute_text_request(
+        &mut session,
+        "pool = parpool(2); distributedValue = distributed(uint16([1, 2])); spmd(2); rankValue = uint32(spmdIndex()); end; delete(pool);",
+    )
+    .expect("create and retire parallel values");
+
+    let distributed = execute_text_request(&mut session, "local = getLocalPart(distributedValue);")
+        .expect("stale distributed use returns a diagnostic");
+    assert!(distributed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:parallel:StaleDistributedLease"
+            && diagnostic.message.contains("pool is closed")
+    }));
+
+    let composite = execute_text_request(&mut session, "rank = rankValue{1};")
+        .expect("stale Composite use returns a diagnostic");
+    assert!(composite.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:parallel:StaleDistributedLease"
+            && diagnostic.message.contains("pool is closed")
+    }));
+}
+
+#[test]
+fn typed_codistributors_redistribute_exact_arrays_through_mir_and_bytecode() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(4)));
+    let outcome = execute_text_request(
+        &mut session,
+        r#"
+pool = parpool(4);
+input = uint64([1, 2, 3, 0x0020000000000001u64; 5, 6, 7, 8; 9, 10, 11, 12; 13, 14, 15, 16]);
+original = distributed(input);
+columnDistributor = codistributor1d(uint32(2), uint64([1, 1, 1, 1]), uint64([4, 4]));
+byColumn = redistribute(original, columnDistributor);
+resolved = getCodistributor(byColumn);
+assert(resolved.Dimension == uint64(2));
+assert(all(resolved.Partition == uint64([1, 1, 1, 1])));
+assert(all(gather(byColumn) == input, "all"));
+gridDistributor = codistributor2dbc(uint32([2, 2]), uint64(1), "col", uint64([4, 4]));
+onGrid = redistribute(byColumn, gridDistributor);
+grid = getCodistributor(onGrid);
+assert(grid.BlockSize == uint64(1));
+assert(grid.Orientation == "col");
+assert(all(gather(onGrid) == input, "all"));
+"#,
+    )
+    .expect("typed redistribution executes");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn generic_native_deoptimizes_at_the_exact_parfor_boundary() {
+    run_deep_semantic_test(|| {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "core-native-parfor-test@1",
+                "nativeParfor.m",
+                "function [values, total] = nativeParfor(n)\nvalues = zeros(1, n);\ntotal = 0;\nparfor index = 1:n\nvalues(index) = index * 2;\ntotal = total + index;\nend\nend\n",
+            ),
+            None,
+        ))
+        .expect("compile native parfor unit");
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeParfor".into()),
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
+            requested_outputs: 2,
+        };
+        let established = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established parfor execution");
+        let native = block_on(session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("generic-native parfor execution");
+        assert_eq!(native, established);
+        let outputs = native.as_slice();
+        assert_eq!(outputs.len(), 2, "expected two parfor outputs");
+        assert!(matches!(
+            &outputs[0],
+            runmat_value::Value::Tensor(value)
+                if value.materialize_f64() == vec![2.0, 4.0, 6.0, 8.0]
+        ));
+        assert_eq!(outputs[1], runmat_value::Value::Num(10.0));
+    });
+}
+
+#[test]
+fn parallel_pool_and_future_surface_uses_the_session_execution_service() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "pool = parpool(); current = gcp('nocreate'); workerCount = pool.NumWorkers; callable = @(x) x + 1; requestedOutputs = 1; future = parfeval(pool, callable, requestedOutputs, 4); answer = fetchOutputs(future); futureState = future.State; outputCount = future.NumOutputArguments; cancelledFuture = parfeval(pool, callable, requestedOutputs, 8); cancelStatus = cancel(cancelledFuture); cancelledState = cancelledFuture.State; delete(pool); afterClose = gcp('nocreate');",
+    )
+    .expect("execute pool-backed future");
+
+    let variables = session.get_variables().unwrap();
+    assert!(matches!(
+        variables.get("pool"),
+        Some(runmat_value::Value::Pool(_))
+    ));
+    assert_eq!(variables.get("current"), variables.get("pool"));
+    assert_eq!(
+        variables.get("workerCount"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert!(matches!(
+        variables.get("future"),
+        Some(runmat_value::Value::Object(object))
+            if object.class_name().is(runmat_runtime::parallel::future::FEVAL_FUTURE_CLASS)
+    ));
+    assert_eq!(
+        variables.get("answer"),
+        Some(&runmat_value::Value::Num(5.0))
+    );
+    assert_eq!(
+        variables.get("futureState"),
+        Some(&runmat_value::Value::String("finished".into()))
+    );
+    assert_eq!(
+        variables.get("outputCount"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("cancelStatus"),
+        Some(&runmat_value::Value::Num(0.0))
+    );
+    assert_eq!(
+        variables.get("cancelledState"),
+        Some(&runmat_value::Value::String("cancelled".into()))
+    );
+    assert!(matches!(
+        variables.get("afterClose"),
+        Some(runmat_value::Value::Tensor(value)) if value.is_empty()
+    ));
+}
+
+#[test]
+fn loose_source_parallel_submissions_keep_the_core_program_environment() {
+    run_deep_semantic_test(|| {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        assert!(session.runtime_context().program_revision().is_none());
+        let service = std::rc::Rc::new(InProcessMultiLabExecutionService::new(2));
+        session.install_execution_services(service.clone());
+
+        execute_text_request(
+        &mut session,
+        "pool = parpool(2); future = parfeval(pool, @(x) x + 1, 1, 4); answer = fetchOutputs(future);",
+    )
+    .expect("submit a loose-source asynchronous call");
+        assert_eq!(
+            session.get_variables().unwrap().get("answer"),
+            Some(&runmat_value::Value::Num(5.0))
+        );
+        let asynchronous = service.submitted_revisions();
+        assert_eq!(
+            asynchronous.len(),
+            1,
+            "parfeval must submit one deferred call"
+        );
+
+        execute_text_request(
+            &mut session,
+            "values = zeros(1, 2); parfor (index = 1:2, 2); values(index) = index; end;",
+        )
+        .expect("submit loose-source parallel iterations");
+        let submissions = service.submitted_revisions();
+        assert!(
+            submissions.len() > asynchronous.len(),
+            "parfor must submit deferred calls"
+        );
+        let expected_environment = program_environment(session.compat_mode());
+        for revision in submissions {
+            let revision =
+                revision.expect("Core must attach a program revision to each deferred call");
+            assert_eq!(revision.environment(), expected_environment);
+        }
+    });
+}
+
+#[test]
+fn testing_diagnostic_log_resolves_function_and_instance_method_calls() {
+    for invocation in ["log(testCase, diagnostic)", "testCase.log(diagnostic)"] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let source = format!(
+            "testCase = matlab.unittest.TestCase(); diagnostic = matlab.unittest.diagnostics.StringDiagnostic('ready'); {invocation};"
+        );
+        let outcome = execute_text_request(&mut session, &source)
+            .expect("language errors are published in the execution outcome");
+        assert!(
+            outcome.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "RunMat:Testing:InvalidDiagnostic"
+                    && diagnostic.message.contains("active test lifecycle")
+            }),
+            "{invocation} must dispatch to the testing log method"
+        );
+    }
+}
+
+#[test]
+fn overlapping_companion_fetch_next_compile_error_keeps_its_source() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("companion directory");
+    let primary = "function y = entry_a(); y = fetchNext(1); end";
+    let companion = "function y = entry_b(); y = fetchNext(); end";
+    assert_eq!(primary.find("fetchNext"), companion.find("fetchNext"));
+    std::fs::write(temp.path().join("entry_a.m"), primary).expect("write primary source");
+    std::fs::write(temp.path().join("entry_b.m"), companion).expect("write companion source");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let error = block_on(session.compile_executable_unit(
+        ExecutableSource::frozen(
+            "core-companion-compile@1",
+            "entry_a.m",
+            temp.path().join("entry_a.m").to_string_lossy(),
+            primary,
+        ),
+        None,
+    ))
+    .expect_err("invalid companion fetchNext call must fail compilation");
+    let RunError::SourceCompile(bound) = error else {
+        panic!("companion VM error must retain its distinct source: {error}");
+    };
+    assert_eq!(
+        bound.error.identifier.as_deref(),
+        Some("RunMat:fetchNext:InvalidInput")
+    );
+    assert_eq!(bound.source.relative_path, "entry_b.m");
+    assert_eq!(bound.source.text, companion);
+    let span = bound.error.span.expect("companion call source span");
+    assert!(companion[span.start..span.end].contains("fetchNext"));
+}
+
+#[test]
+fn fetch_outputs_preserves_multiple_requested_outputs() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "pool = parpool(); callable = @pair; requestedOutputs = 2; future = parfeval(pool, callable, requestedOutputs, 3, 4); [sumValue, productValue] = fetchOutputs(future); function [sumValue, productValue] = pair(left, right); sumValue = left + right; productValue = left * right; end;",
+    )
+    .expect("fetch multiple future outputs");
+
+    let variables = session.get_variables().unwrap();
+    assert_eq!(
+        variables.get("sumValue"),
+        Some(&runmat_value::Value::Num(7.0))
+    );
+    assert_eq!(
+        variables.get("productValue"),
+        Some(&runmat_value::Value::Num(12.0))
+    );
+}
+
+#[test]
+fn parfeval_without_explicit_pool_and_fetch_next_use_typed_future_state() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "pool = parpool(); first = parfeval(@(x) x + 1, 1, 4); second = parfeval(@(x) x + 2, 1, 8); futures = first; futures(2) = second; futureCount = numel(futures); beforeRead = first.Read; [firstIndex, firstValue] = fetchNext(futures); afterRead = first.Read; [secondIndex, secondValue] = fetchNext(futures);",
+    )
+    .expect("fetch future results in completion order");
+
+    let variables = session.get_variables().unwrap();
+    assert_eq!(
+        variables.get("beforeRead"),
+        Some(&runmat_value::Value::Bool(false))
+    );
+    assert_eq!(
+        variables.get("firstIndex"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert_eq!(
+        variables.get("firstValue"),
+        Some(&runmat_value::Value::Num(5.0))
+    );
+    assert_eq!(
+        variables.get("afterRead"),
+        Some(&runmat_value::Value::Bool(true))
+    );
+    assert_eq!(
+        variables.get("secondIndex"),
+        Some(&runmat_value::Value::Num(2.0))
+    );
+    assert_eq!(
+        variables.get("secondValue"),
+        Some(&runmat_value::Value::Num(10.0))
+    );
+}
+
+#[test]
+fn parfeval_on_all_returns_one_aggregate_future() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
+    execute_text_request(
+        &mut session,
+        "pool = parpool(2); future = parfevalOnAll(pool, @(x) x + 2, 1, 5); workerCount = pool.NumWorkers; futureCount = numel(future); answer = fetchOutputs(future); answerCount = numel(answer); answersMatch = all(answer(:) == 7);",
+    )
+    .expect("execute one invocation per pool worker");
+
+    let variables = session.get_variables().unwrap();
+    assert_eq!(
+        variables.get("workerCount"),
+        Some(&runmat_value::Value::Num(2.0))
+    );
+    assert_eq!(
+        variables.get("futureCount"),
+        Some(&runmat_value::Value::Num(1.0))
+    );
+    assert!(matches!(
+        variables.get("future"),
+        Some(runmat_value::Value::Object(object))
+            if object.class_name().is(runmat_runtime::parallel::future::FEVAL_ON_ALL_FUTURE_CLASS)
+    ));
+    assert_eq!(
+        variables.get("answerCount"),
+        Some(&runmat_value::Value::Num(2.0))
+    );
+    assert_eq!(
+        variables.get("answersMatch"),
+        Some(&runmat_value::Value::Bool(true))
+    );
+}
+
+#[test]
+fn fetch_outputs_can_return_nonuniform_future_arrays_as_cells() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "first = parfeval(@(x) x + 1, 1, 4); second = parfeval(@(x) x + 2, 1, 8); futures = first; futures(2) = second; answers = fetchOutputs(futures, \"UniformOutput\", false); onAll = parfevalOnAll(@(x) x + 3, 1, 9); onAllAnswer = fetchOutputs(onAll);",
+    )
+    .expect("fetch nonuniform outputs and schedule on the automatic pool");
+
+    let variables = session.get_variables().unwrap();
+    let answers = match variables.get("answers") {
+        Some(runmat_value::Value::Cell(answers)) => answers,
+        other => panic!("expected a cell array, got {other:?}"),
+    };
+    assert_eq!(answers.shape, vec![2, 1]);
+    assert_eq!(
+        answers.data(),
+        vec![
+            runmat_value::Value::Num(5.0),
+            runmat_value::Value::Num(10.0)
+        ]
+    );
+    assert_eq!(
+        variables.get("onAllAnswer"),
+        Some(&runmat_value::Value::Num(12.0))
+    );
+}
+
+#[test]
+fn portable_product_derives_python_runtime_and_browser_rejection_contracts() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-python-interop-test@1",
+            "python_interop.m",
+            "answer = py.math.sqrt(9);\n",
+        ),
+        None,
+    ))
+    .expect("compile Python-bearing unit");
+    assert!(unit.requires_python_runtime());
+    let envelope = unit.portable_envelope().expect("portable Python product");
+    let python_type = envelope
+        .manifest
+        .interop
+        .foreign_types
+        .iter()
+        .find(|requirement| requirement.type_identity.family == "python")
+        .expect("Python foreign-type requirement");
+    assert_eq!(python_type.wasm, runmat_types::WasmInteropPolicy::Reject);
+    assert!(envelope
+        .manifest
+        .interop
+        .adapters
+        .iter()
+        .any(|requirement| requirement.adapter.as_str() == "python"));
+
+    let error = runmat_runtime::foreign::admit_interop_manifest(
+        &envelope.manifest.interop,
+        &std::collections::BTreeMap::new(),
+        runmat_runtime::foreign::ForeignPlatform::Wasm {
+            host_bridge_available: false,
+        },
+    )
+    .expect_err("native CPython must reject before browser execution");
+    assert_eq!(error.identifier(), Some("RunMat:Foreign:UnsupportedOnWasm"));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14221,7 +16306,7 @@ fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeTier".into()),
-                arguments: vec![runmat_value::Value::Num(4.0)],
+                arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
@@ -14229,16 +16314,16 @@ fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {
         .expect("invoke tiered procedure")
     };
 
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
     assert_eq!(session.generic_native_cache_counts(), (0, 0));
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
 
     for _ in 0..32 {
-        assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+        assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
         assert_eq!(session.generic_native_cache_counts(), (1, 1));
     }
 
@@ -14265,7 +16350,7 @@ fn deterministic_interactive_tiering_commits_workspace_transactionally() {
         .expect("cold interactive execution");
     assert!(!first.used_jit);
     assert_eq!(
-        session.get_variables().get("counter"),
+        session.get_variables().unwrap().get("counter"),
         Some(&runmat_value::Value::Num(41.0))
     );
 
@@ -14275,7 +16360,7 @@ fn deterministic_interactive_tiering_commits_workspace_transactionally() {
         .expect("native interactive execution");
     assert!(second.used_jit || third.used_jit);
     assert_eq!(
-        session.get_variables().get("counter"),
+        session.get_variables().unwrap().get("counter"),
         Some(&runmat_value::Value::Num(43.0))
     );
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
@@ -14299,15 +16384,15 @@ fn deterministic_interactive_tiering_preserves_clear_removals() {
             .expect("clear execution");
         used_native |= outcome.used_jit;
         assert!(
-            !session.get_variables().contains_key("doomed"),
+            !session.get_variables().unwrap().contains_key("doomed"),
             "clear outcome: {outcome:#?}; workspace: {:?}; cache: {:?}",
-            session.get_variables(),
+            session.get_variables().unwrap(),
             session.generic_native_cache_counts()
         );
     }
     assert!(used_native);
     assert_eq!(
-        session.get_variables().get("survivor"),
+        session.get_variables().unwrap().get("survivor"),
         Some(&runmat_value::Value::Num(3.0))
     );
 }
@@ -14335,7 +16420,7 @@ fn deterministic_interactive_tiering_preserves_expression_display_and_ans() {
     }
     assert!(used_native);
     assert_eq!(
-        session.get_variables().get("ans"),
+        session.get_variables().unwrap().get("ans"),
         Some(&runmat_value::Value::Num(42.0))
     );
 }
@@ -14362,7 +16447,7 @@ fn deterministic_interactive_tiering_exposes_the_complete_workspace_to_dynamic_b
         used_native |= outcome.used_jit;
         if outcome.used_jit {
             assert_eq!(
-                session.get_variables().get("workspace_visibility"),
+                session.get_variables().unwrap().get("workspace_visibility"),
                 Some(&runmat_value::Value::Num(1.0))
             );
         }
@@ -14373,7 +16458,7 @@ fn deterministic_interactive_tiering_exposes_the_complete_workspace_to_dynamic_b
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
+fn deterministic_interactive_tiering_preserves_completed_prefix_without_replay_after_error() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
         generic_hot_threshold: 1,
@@ -14382,7 +16467,7 @@ fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
         ..runmat_jit::tiering::TieringConfig::default()
     });
     execute_text_request(&mut session, "counter = 0;").expect("seed workspace");
-    for _ in 0..3 {
+    for attempt in 0..3 {
         let outcome = execute_text_request(&mut session, "counter = counter + 1; assert(false);")
             .expect("runtime failures are reported in the execution outcome");
         assert!(outcome
@@ -14390,8 +16475,9 @@ fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
             .iter()
             .any(|diagnostic| diagnostic.message.to_ascii_lowercase().contains("assert")));
         assert_eq!(
-            session.get_variables().get("counter"),
-            Some(&runmat_value::Value::Num(0.0))
+            session.get_variables().unwrap().get("counter"),
+            Some(&runmat_value::Value::Num(f64::from(attempt + 1))),
+            "completed assignments survive a later error exactly once"
         );
     }
     // Failed native attempts intentionally report `used_jit = false`, but a published
@@ -14420,7 +16506,7 @@ fn deterministic_interactive_tiering_invalidates_redefined_session_functions() {
             .expect("invoke first helper");
         used_native |= outcome.used_jit;
         assert_eq!(
-            session.get_variables().get("answer"),
+            session.get_variables().unwrap().get("answer"),
             Some(&runmat_value::Value::Num(2.0)),
             "{outcome:#?}"
         );
@@ -14428,14 +16514,17 @@ fn deterministic_interactive_tiering_invalidates_redefined_session_functions() {
     assert!(used_native);
     let compilations_before_redefinition = session.generic_native_cache_counts().0;
 
-    execute_text_request(
+    let redefinition = execute_text_request(
         &mut session,
         "definition_epoch = 2;\nfunction y = hotHelper(x)\ny = x + 10;\nend",
     )
     .expect("redefine helper");
-    execute_text_request(&mut session, "answer = hotHelper(1);").expect("invoke redefined helper");
+    assert!(!redefinition.has_errors(), "{redefinition:#?}");
+    let invocation = execute_text_request(&mut session, "answer = hotHelper(1);")
+        .expect("invoke redefined helper");
+    assert!(!invocation.has_errors(), "{invocation:#?}");
     assert_eq!(
-        session.get_variables().get("answer"),
+        session.get_variables().unwrap().get("answer"),
         Some(&runmat_value::Value::Num(11.0))
     );
     assert_eq!(
@@ -14467,19 +16556,17 @@ fn background_native_tiering_publishes_once_without_blocking_the_hot_invocation(
     .expect("compile background tiering fixture");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("backgroundTier".into()),
-        arguments: vec![runmat_value::Value::Num(6.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(6.0)]),
         requested_outputs: 1,
     };
 
-    assert_eq!(
-        block_on(session.invoke_executable(
-            &unit,
-            invocation.clone(),
-            &InvocationControl::default(),
-        ))
-        .unwrap(),
-        runmat_value::Value::Num(12.0)
-    );
+    let first = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .unwrap();
+    assert_single_output(&first, runmat_value::Value::Num(12.0));
     assert_eq!(session.generic_native_cache_counts(), (0, 0));
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -14490,7 +16577,7 @@ fn background_native_tiering_publishes_once_without_blocking_the_hot_invocation(
             &InvocationControl::default(),
         ))
         .unwrap();
-        assert_eq!(value, runmat_value::Value::Num(12.0));
+        assert_single_output(&value, runmat_value::Value::Num(12.0));
         if session.generic_native_cache_counts() == (1, 1) {
             break;
         }
@@ -14523,7 +16610,7 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("specializedTier".into()),
-                arguments: vec![value],
+                arguments: crate::ProcedureArguments::Source(vec![value]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
@@ -14531,10 +16618,8 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
     };
 
     for _ in 0..4 {
-        assert_eq!(
-            invoke(&mut session, runmat_value::Value::Num(4.0)).unwrap(),
-            runmat_value::Value::Num(5.0)
-        );
+        let output = invoke(&mut session, runmat_value::Value::Num(4.0)).unwrap();
+        assert_single_output(&output, runmat_value::Value::Num(5.0));
     }
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
@@ -14551,6 +16636,10 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
 #[test]
 fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_placement() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
+    // Hotness publishes a version; complete-call placement independently
+    // chooses whether to enter it. Control that outer choice while retaining
+    // the real numerical-region comparison and feedback below.
+    let ready_placement = session.use_specialized_ready_route_for_testing();
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
         generic_hot_threshold: 1,
         specialized_hot_threshold: 3,
@@ -14576,24 +16665,31 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
             &[runmat_value::Value::Tensor(input.clone())],
         ) >= 1
     );
-    for _ in 0..4 {
+    // Publication on call four follows the ready-at-start snapshot. Call five
+    // must select and execute the already-ready specialization.
+    for _ in 0..5 {
         let value = block_on(session.invoke_executable(
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("vectorRegion".into()),
-                arguments: vec![runmat_value::Value::Tensor(input.clone())],
+                arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Tensor(
+                    input.clone(),
+                )]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
         ))
         .expect("invoke vectorized region fixture");
-        let runmat_value::Value::Tensor(output) = value else {
+        let [runmat_value::Value::Tensor(output)] = value.as_slice() else {
             panic!("vectorized region must return a dense tensor")
         };
-        assert_eq!(output.shape, vec![1, 4096]);
+        assert_eq!(output.shape(), &[1, 4096]);
         assert_eq!(output.as_f64_slice().unwrap()[0], 6.0);
         assert_eq!(output.as_f64_slice().unwrap()[4095], 8196.0);
     }
+    assert!(ready_placement
+        .chosen_kinds()
+        .contains(&runmat_execution::ExecutionCandidateKind::SpecializedNativeCpu));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
     assert!(
         session.vectorized_native_region_count_for_testing() >= 2,
@@ -14607,6 +16703,7 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
 #[test]
 fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
+    let ready_placement = session.use_specialized_ready_route_for_testing();
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
         generic_hot_threshold: 1,
         specialized_hot_threshold: 3,
@@ -14630,26 +16727,37 @@ fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() 
             &[runmat_value::Value::Tensor(input.clone())],
         ) >= 1
     );
-    for _ in 0..4 {
+    // Publication on call four follows the ready-at-start snapshot. Call five
+    // must select and execute the already-ready specialization.
+    for _ in 0..5 {
         let value = block_on(session.invoke_executable(
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("vectorRegionFallback".into()),
-                arguments: vec![runmat_value::Value::Tensor(input.clone())],
+                arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Tensor(
+                    input.clone(),
+                )]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
         ))
         .expect("invoke numeric-region fallback fixture");
-        let runmat_value::Value::Tensor(output) = value else {
+        let [runmat_value::Value::Tensor(output)] = value.as_slice() else {
             panic!("ordinary specialized execution must return a dense tensor")
         };
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(output.materialize_f64(), vec![2.0, 8.0, 18.0]);
     }
+    assert!(ready_placement
+        .chosen_kinds()
+        .contains(&runmat_execution::ExecutionCandidateKind::SpecializedNativeCpu));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
     assert_eq!(session.vectorized_native_region_count_for_testing(), 0);
-    assert!(session.placement_profile_snapshot().feedback.is_empty());
+    assert!(session
+        .placement_profile_snapshot()
+        .feedback
+        .iter()
+        .all(|series| series.signature.region.is_none()));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14674,19 +16782,17 @@ fn native_tiering_records_exact_loop_header_backedges() {
     .expect("compile loop feedback fixture");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("loopTier".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     for _ in 0..2 {
-        assert_eq!(
-            block_on(session.invoke_executable(
-                &unit,
-                invocation.clone(),
-                &InvocationControl::default(),
-            ))
-            .unwrap(),
-            runmat_value::Value::Num(6.0)
-        );
+        let output = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .unwrap();
+        assert_single_output(&output, runmat_value::Value::Num(6.0));
     }
 
     let snapshot = session.native_tiering_snapshot_for_testing();
@@ -14703,11 +16809,10 @@ fn native_tiering_records_exact_loop_header_backedges() {
         .expect("function aggregate feedback");
     assert_eq!(function_site.backedges, 3);
 
-    assert_eq!(
-        block_on(session.invoke_executable(&unit, invocation, &InvocationControl::default(),))
-            .unwrap(),
-        runmat_value::Value::Num(6.0)
-    );
+    let output =
+        block_on(session.invoke_executable(&unit, invocation, &InvocationControl::default()))
+            .unwrap();
+    assert_single_output(&output, runmat_value::Value::Num(6.0));
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
     assert_eq!(session.native_osr_transfer_count_for_testing(), 1);
@@ -14725,7 +16830,7 @@ fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCore".into()),
-        arguments: vec![runmat_value::Value::Num(5.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(5.0)]),
         requested_outputs: 2,
     };
     let established = block_on(session.invoke_executable(
@@ -14741,18 +16846,18 @@ fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls
     ))
     .expect("forced generic-native execution");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(35.0),
             runmat_value::Value::Num(6.0),
-        ])
+        ],
     );
 
     for requested_outputs in [0, 1] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeCore".into()),
-            arguments: vec![runmat_value::Value::Num(5.0)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(5.0)]),
             requested_outputs,
         };
         let established = block_on(session.invoke_executable(
@@ -14768,6 +16873,11 @@ fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls
         ))
         .expect("native reduced-output execution");
         assert_eq!(native, established);
+        if requested_outputs == 0 {
+            assert_output_values(&native, &[]);
+        } else {
+            assert_single_output(&native, runmat_value::Value::Num(35.0));
+        }
     }
 }
 
@@ -14789,22 +16899,16 @@ fn forced_generic_native_executable_lane_matches_session_state_across_calls() {
     for (delta, expected) in [
         (
             2.0,
-            runmat_value::Value::OutputList(vec![
-                runmat_value::Value::Num(2.0),
-                runmat_value::Value::Num(1.0),
-            ]),
+            vec![runmat_value::Value::Num(2.0), runmat_value::Value::Num(1.0)],
         ),
         (
             3.0,
-            runmat_value::Value::OutputList(vec![
-                runmat_value::Value::Num(5.0),
-                runmat_value::Value::Num(2.0),
-            ]),
+            vec![runmat_value::Value::Num(5.0), runmat_value::Value::Num(2.0)],
         ),
     ] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeState".into()),
-            arguments: vec![runmat_value::Value::Num(delta)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(delta)]),
             requested_outputs: 2,
         };
         let established = block_on(established_session.invoke_executable(
@@ -14820,7 +16924,7 @@ fn forced_generic_native_executable_lane_matches_session_state_across_calls() {
         ))
         .expect("native state execution");
         assert_eq!(native, established);
-        assert_eq!(native, expected);
+        assert_output_values(&native, &expected);
     }
 }
 
@@ -14840,7 +16944,7 @@ fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
         RunMatSession::with_options(false, false).expect("native session init");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeExpansion".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     let established = block_on(established_session.invoke_executable(
@@ -14856,7 +16960,88 @@ fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
     ))
     .expect("native expansion execution");
     assert_eq!(native, established);
-    assert_eq!(native, runmat_value::Value::Num(60.0));
+    assert_single_output(&native, runmat_value::Value::Num(60.0));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
+    let source = ExecutableSource::new(
+        "core-native-inputname@1",
+        "nativeInputname.m",
+        "function [first, second, third, fourth, fifth, sixth] = nativeInputname(alpha)\nfirst = probe(alpha);\nsecond = probe(alpha + 1);\nh = @probe;\nthird = h(alpha);\nfourth = h(alpha + 1);\nfifth = feval(@probe, alpha);\nsixth = feval(@probe, alpha + 1);\nend\nfunction out = probe(value)\nout = inputname(1);\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile native caller inputname unit");
+    let result = block_on(session.invoke_executable(
+        &unit,
+        ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeInputname".into()),
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(7.0)]),
+            requested_outputs: 6,
+        },
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native caller inputname execution");
+    assert_output_values(
+        &result,
+        &[
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
+            ),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
+            ),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
+            ),
+        ],
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_native_caller_preserves_inputname_through_cold_and_warm_file_load() {
+    let _guard = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(temp.path());
+    std::fs::write(
+        temp.path().join("externalProbe.m"),
+        "function out = externalProbe(value)\nout = inputname(1);\nend\n",
+    )
+    .expect("write external function");
+    let source = ExecutableSource::new(
+        "core-native-cold-inputname@1",
+        temp.path().join("nativeColdInputname.m").to_string_lossy(),
+        "function [first, second] = nativeColdInputname(alpha)\nfirst = externalProbe(alpha);\nsecond = externalProbe(alpha + 1);\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile cold-load native caller");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeColdInputname".into()),
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(7.0)]),
+        requested_outputs: 2,
+    };
+    let expected = [
+        runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+        runmat_value::Value::CharArray(
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
+        ),
+    ];
+    for _ in 0..2 {
+        let actual = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native cold/warm file invocation");
+        assert_output_values(&actual, &expected);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14877,24 +17062,24 @@ fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_c
     for (arguments, expected) in [
         (
             Vec::new(),
-            runmat_value::Value::OutputList(vec![
+            vec![
                 runmat_value::Value::Num(6.0),
                 runmat_value::Value::Num(0.0),
                 runmat_value::Value::Num(3.0),
-            ]),
+            ],
         ),
         (
             vec![runmat_value::Value::Num(4.0)],
-            runmat_value::Value::OutputList(vec![
+            vec![
                 runmat_value::Value::Num(8.0),
                 runmat_value::Value::Num(1.0),
                 runmat_value::Value::Num(3.0),
-            ]),
+            ],
         ),
     ] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeFunctionAbi".into()),
-            arguments,
+            arguments: crate::ProcedureArguments::Source(arguments),
             requested_outputs: 3,
         };
         let established = block_on(established_session.invoke_executable(
@@ -14910,12 +17095,12 @@ fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_c
         ))
         .expect("native function ABI execution");
         assert_eq!(native, established);
-        assert_eq!(native, expected);
+        assert_output_values(&native, &expected);
     }
 
     let invalid = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeFunctionAbi".into()),
-        arguments: vec![runmat_value::Value::Num(-1.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(-1.0)]),
         requested_outputs: 1,
     };
     let established = block_on(established_session.invoke_executable(
@@ -14953,7 +17138,10 @@ fn forced_generic_native_executable_lane_matches_varargin_and_varargout() {
         RunMatSession::with_options(false, false).expect("native session init");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeVariadicAbi".into()),
-        arguments: vec![runmat_value::Value::Num(4.0), runmat_value::Value::Num(9.0)],
+        arguments: crate::ProcedureArguments::Source(vec![
+            runmat_value::Value::Num(4.0),
+            runmat_value::Value::Num(9.0),
+        ]),
         requested_outputs: 3,
     };
     let established = block_on(established_session.invoke_executable(
@@ -14969,14 +17157,99 @@ fn forced_generic_native_executable_lane_matches_varargin_and_varargout() {
     ))
     .expect("native variadic execution");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(2.0),
             runmat_value::Value::Num(4.0),
             runmat_value::Value::Num(9.0),
-        ])
+        ],
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_matches_prepared_cell_sequence_assignment() {
+    let source = ExecutableSource::new(
+        "core-native-sequence-assignment-test@1",
+        "nativeSequenceAssign.m",
+        "function [dst, members] = nativeSequenceAssign(src)\n\
+         dst = {8, 9};\n\
+         members = struct('value', {8, 9});\n\
+         try\n\
+           [dst{:}] = src{:};\n\
+         catch\n\
+         end\n\
+         try\n\
+           [members.value] = src{:};\n\
+         catch\n\
+         end\n\
+         end\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile prepared sequence assignment unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+
+    for (input, expected) in [
+        (
+            runmat_value::Value::Cell(
+                runmat_value::CellArray::new(
+                    vec![runmat_value::Value::Num(1.0), runmat_value::Value::Num(2.0)],
+                    1,
+                    2,
+                )
+                .expect("two-element cell input"),
+            ),
+            vec![runmat_value::Value::Num(1.0), runmat_value::Value::Num(2.0)],
+        ),
+        (
+            runmat_value::Value::Cell(
+                runmat_value::CellArray::new(vec![runmat_value::Value::Num(1.0)], 1, 1)
+                    .expect("one-element cell input"),
+            ),
+            vec![runmat_value::Value::Num(8.0), runmat_value::Value::Num(9.0)],
+        ),
+    ] {
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeSequenceAssign".into()),
+            arguments: crate::ProcedureArguments::Source(vec![input]),
+            requested_outputs: 2,
+        };
+        let established = block_on(established_session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established prepared sequence assignment");
+        let native = block_on(native_session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native prepared sequence assignment");
+        assert_eq!(native, established);
+        let [runmat_value::Value::Cell(cell), members] = native.as_slice() else {
+            panic!("expected cell and structure outputs, got {native:?}");
+        };
+        assert_eq!(cell.data(), expected);
+        let member_values = match members {
+            runmat_value::Value::Struct(value) => value
+                .fields
+                .get("value")
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            runmat_value::Value::StructArray(values) => values
+                .elements()
+                .map(|value| value.fields.get("value").cloned().expect("value field"))
+                .collect::<Vec<_>>(),
+            other => panic!("expected structure output, got {other:?}"),
+        };
+        assert_eq!(member_values, expected);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14995,7 +17268,7 @@ fn forced_generic_native_executable_lane_matches_console_effects_exactly_once() 
         RunMatSession::with_options(false, false).expect("native session init");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeConsole".into()),
-        arguments: vec![runmat_value::Value::Num(7.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(7.0)]),
         requested_outputs: 1,
     };
 
@@ -15012,7 +17285,7 @@ fn forced_generic_native_executable_lane_matches_console_effects_exactly_once() 
         &InvocationControl::default().force_generic_native(),
     );
     assert_eq!(native, established);
-    assert_eq!(native.0, runmat_value::Value::Num(8.0));
+    assert_single_output(&native.0, runmat_value::Value::Num(8.0));
     assert_eq!(native.1.len(), 1, "disp must execute exactly once");
 }
 
@@ -15023,8 +17296,11 @@ fn invoke_executable_with_console(
     invocation: ProcedureInvocation,
     control: &InvocationControl,
 ) -> (
-    runmat_value::Value,
-    Vec<(runmat_runtime::console::ConsoleStream, String)>,
+    runmat_runtime::execution::RootedValueSequence,
+    Vec<(
+        runmat_runtime::console::ConsoleStream,
+        runmat_runtime::console::ConsoleText,
+    )>,
 ) {
     {
         let _runtime = session.runtime_context().enter();
@@ -15061,13 +17337,13 @@ fn forced_generic_native_executable_lane_matches_runtime_cancellation() {
         RunMatSession::with_options(false, false).expect("native session init");
     established_session
         .interrupt_handle()
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+        .cancel(runmat_execution::CancellationReason::User);
     native_session
         .interrupt_handle()
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+        .cancel(runmat_execution::CancellationReason::User);
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCancel".into()),
-        arguments: vec![runmat_value::Value::Num(2.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(2.0)]),
         requested_outputs: 1,
     };
     let established = block_on(established_session.invoke_executable(
@@ -15104,7 +17380,7 @@ fn forced_generic_native_executable_lane_preserves_error_identity_and_source_spa
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeBounds".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     let established = block_on(session.invoke_executable(
@@ -15126,9 +17402,12 @@ fn forced_generic_native_executable_lane_preserves_error_identity_and_source_spa
         panic!("native failure must be runtime semantic error");
     };
     assert_eq!(native.identifier(), established.identifier());
-    assert!(
-        established.span.is_none(),
-        "record the current established executable-invocation baseline"
+    assert_eq!(established.identifier(), Some("RunMat:IndexOutOfBounds"));
+    // Both executable lanes retain the source statement that performed the
+    // failed selection, not the enclosing call or a stale interpreter PC.
+    assert_eq!(
+        established.span.as_ref().map(|span| span.offset()),
+        Some(45)
     );
     assert_eq!(native.span.as_ref().map(|span| span.offset()), Some(45));
     assert!(!native.context.call_frames.is_empty());
@@ -15146,7 +17425,7 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let no_error = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeTryOk".into()),
-        arguments: vec![runmat_value::Value::Num(4.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
         requested_outputs: 1,
     };
     let established_no_error =
@@ -15159,11 +17438,11 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     ))
     .expect("native no-error try path");
     assert_eq!(native_no_error, established_no_error);
-    assert_eq!(native_no_error, runmat_value::Value::Num(5.0));
+    assert_single_output(&native_no_error, runmat_value::Value::Num(5.0));
 
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeTry".into()),
-        arguments: vec![runmat_value::Value::Num(-1.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(-1.0)]),
         requested_outputs: 2,
     };
     let established = block_on(session.invoke_executable(
@@ -15179,17 +17458,19 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     ))
     .expect("native caught-error path");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(-1.0),
-            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-        ])
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:IndexOutOfBounds",
+            )),
+        ],
     );
 
     let nested = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeNestedTry".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 2,
     };
     let established_nested =
@@ -15202,33 +17483,34 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     ))
     .expect("native nested catch/rethrow path");
     assert_eq!(native_nested, established_nested);
-    assert_eq!(
-        native_nested,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native_nested,
+        &[
             runmat_value::Value::Num(7.0),
-            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-        ])
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:IndexOutOfBounds",
+            )),
+        ],
     );
 
     for (argument, expected) in [
         (
             -1.0,
-            runmat_value::Value::OutputList(vec![
+            vec![
                 runmat_value::Value::Num(0.0),
-                runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-            ]),
+                runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                    "RunMat:IndexOutOfBounds",
+                )),
+            ],
         ),
         (
             4.0,
-            runmat_value::Value::OutputList(vec![
-                runmat_value::Value::Num(5.0),
-                runmat_value::Value::Num(0.0),
-            ]),
+            vec![runmat_value::Value::Num(5.0), runmat_value::Value::Num(0.0)],
         ),
     ] {
         let nested_control = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeNestedControl".into()),
-            arguments: vec![runmat_value::Value::Num(argument)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(argument)]),
             requested_outputs: 2,
         };
         let established = block_on(session.invoke_executable(
@@ -15244,7 +17526,61 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
         ))
         .expect("native nested-control try path");
         assert_eq!(native, established);
-        assert_eq!(native, expected);
+        assert_output_values(&native, &expected);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_rethrow_shorthand_preserves_lexical_catch() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
+    let source = ExecutableSource::new(
+        "core-native-rethrow@1",
+        "nativeRethrow.m",
+        "function id = nativeRethrow()\ntry\ntry\nvalues = [1, 2];\nvalue = values(3);\ncatch\ncallbackRethrow();\nend\ncatch outer\nid = outer.identifier;\nend\nend\nfunction id = callbackRethrow()\nrethrow();\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeRethrow".into()),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
+        requested_outputs: 1,
+    };
+    let established = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("VM rethrow shorthand");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native rethrow shorthand");
+    assert_eq!(native, established);
+    assert_single_output(
+        &native,
+        runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:IndexOutOfBounds")),
+    );
+    for control in [
+        InvocationControl::default(),
+        InvocationControl::default().force_generic_native(),
+    ] {
+        let error = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("callbackRethrow".into()),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
+                requested_outputs: 1,
+            },
+            &control,
+        ))
+        .expect_err("the prior invocation's catch must not escape into a later callback");
+        let RunError::Runtime(error) = error else {
+            panic!("missing active catch must remain a runtime error");
+        };
+        assert_eq!(error.identifier(), Some("RunMat:rethrow:NoActiveCatch"));
     }
 }
 
@@ -15263,7 +17599,7 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
     for function in ["nativeAwait", "nativeSpawnAwait"] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function(function.into()),
-            arguments: vec![runmat_value::Value::Num(4.0)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
             requested_outputs: 1,
         };
         let established = block_on(session.invoke_executable(
@@ -15279,17 +17615,17 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
         ))
         .expect("native async path");
         assert_eq!(native, established);
-        assert_eq!(native, runmat_value::Value::Num(5.0));
+        assert_single_output(&native, runmat_value::Value::Num(5.0));
     }
 
     let reset = ProcedureInvocation {
         target: ProcedureTarget::Function("resetAsyncCount".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 0,
     };
     let no_replay = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeNoReplay".into()),
-        arguments: vec![runmat_value::Value::Num(4.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
         requested_outputs: 2,
     };
     block_on(session.invoke_executable(&unit, reset.clone(), &InvocationControl::default()))
@@ -15309,17 +17645,14 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
     ))
     .expect("native no-replay async path");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
-            runmat_value::Value::Num(5.0),
-            runmat_value::Value::Num(1.0),
-        ])
+    assert_output_values(
+        &native,
+        &[runmat_value::Value::Num(5.0), runmat_value::Value::Num(1.0)],
     );
 
     let caught = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeAwaitCatch".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 2,
     };
     let established =
@@ -15332,12 +17665,14 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
     ))
     .expect("native caught async failure");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(7.0),
-            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-        ])
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:IndexOutOfBounds",
+            )),
+        ],
     );
 }
 
@@ -15349,14 +17684,50 @@ fn forced_generic_native_executable_lane_matches_lexical_capture_calls_and_handl
     let source = ExecutableSource::new(
         "core-native-captures-test@1",
         "nativeCaptures.m",
-        "function [direct, sharedAfter, handled, anonymous, recursive, escaped] = nativeCaptures(x)\nshared = x;\nfunction y = bump(delta)\nshared = shared + delta;\ny = shared;\nend\ndirect = bump(2);\nsharedAfter = shared;\nhandle = @bump;\nhandled = feval(handle, 3);\noffset = 10;\nclosure = @(value) value + offset;\nanonymous = feval(closure, 1);\nrecursive = nestedRecursive(3);\nreturned = makeAdder(7);\nescaped = feval(returned, 2);\nfunction y = nestedRecursive(n)\nif n <= 1\ny = shared;\nelse\ny = shared + nestedRecursive(n - 1);\nend\nend\nfunction result = makeAdder(base)\nfunction y = add(value)\ny = base + value;\nend\nresult = @add;\nend\nend\n",
+        r#"function [direct, sharedAfter, handled, anonymous, recursive, escaped, transit] = nativeCaptures(x)
+shared = x;
+function y = bump(delta)
+shared = shared + delta;
+y = shared;
+end
+direct = bump(2);
+sharedAfter = shared;
+handle = @bump;
+handled = feval(handle, 3);
+offset = 10;
+closure = @(value) value + offset;
+anonymous = feval(closure, 1);
+recursive = nestedRecursive(3);
+returned = makeAdder(7);
+escaped = feval(returned, 2);
+reader = @() nestedRead() + shared;
+bump(1);
+transit = reader();
+function y = nestedRead()
+y = shared;
+end
+function y = nestedRecursive(n)
+if n <= 1
+y = shared;
+else
+y = shared + nestedRecursive(n - 1);
+end
+end
+function result = makeAdder(base)
+function y = add(value)
+y = base + value;
+end
+result = @add;
+end
+end
+"#,
     );
     let unit =
         block_on(session.compile_executable_unit(source, None)).expect("compile capture unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCaptures".into()),
-        arguments: vec![runmat_value::Value::Num(4.0)],
-        requested_outputs: 6,
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
+        requested_outputs: 7,
     };
     let established = block_on(session.invoke_executable(
         &unit,
@@ -15371,15 +17742,17 @@ fn forced_generic_native_executable_lane_matches_lexical_capture_calls_and_handl
     ))
     .expect("native capture path");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(6.0),
             runmat_value::Value::Num(6.0),
             runmat_value::Value::Num(9.0),
             runmat_value::Value::Num(11.0),
-            runmat_value::Value::Num(18.0),
+            // feval published shared = 9; three recursive reads sum to 27.
+            runmat_value::Value::Num(27.0),
             runmat_value::Value::Num(9.0),
-        ])
+            runmat_value::Value::Num(19.0),
+        ],
     );
 }

@@ -1,3 +1,7 @@
+mod support;
+#[path = "support/hover.rs"]
+mod hover_support;
+
 use lsp_types::{HoverContents, Position};
 use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, hover_at, signature_help_at, CompatMode,
@@ -29,77 +33,33 @@ const INTEGER_EMPTY_BUILTINS: [&str; 8] = [
 
 #[test]
 fn ecdf_to_erasebetween_descriptors_are_visible_to_signature_help_and_hover() {
-    for (name, source, expected_signature) in [
-        ("ecdf", "[f, x] = ecdf(uint8([1 2]));", "[f, x] = ecdf(y)"),
-        ("eig", "d = eig(uint8(1));", "d = eig(A)"),
-        ("eigs", "d = eigs(uint8(1));", "d = eigs(A)"),
-        ("empty", "a = empty(0);", "A = ClassName.empty"),
-        (
-            "encode",
-            "counts = encode(1, 'word');",
-            "counts = encode(bag, documentsOrWords, Name, Value, ...)",
-        ),
-        (
-            "endsWith",
-            "tf = endsWith('runmat', 'mat');",
-            "tf = endsWith(str, pat)",
-        ),
-        (
-            "envelope",
-            "upper = envelope(uint8([1 2]));",
-            "yupper = envelope(x)",
-        ),
-        ("eq", "tf = eq(uint8(1), uint8(1));", "tf = eq(A, B)"),
-        (
-            "erase",
-            "out = erase('runmat', 'run');",
-            "newStr = erase(str, pattern)",
-        ),
-        (
-            "eraseBetween",
-            "out = eraseBetween('runmat', 1, 3);",
-            "newText = eraseBetween(str, start, end)",
-        ),
+    for (name, source) in [
+        ("ecdf", "[f, x] = ecdf(uint8([1 2]));"),
+        ("eig", "d = eig(uint8(1));"),
+        ("eigs", "d = eigs(uint8(1));"),
+        ("empty", "a = empty(0);"),
+        ("encode", "counts = encode(1, 'word');"),
+        ("endsWith", "tf = endsWith('runmat', 'mat');"),
+        ("envelope", "upper = envelope(uint8([1 2]));"),
+        ("eq", "tf = eq(uint8(1), uint8(1));"),
+        ("erase", "out = erase('runmat', 'run');"),
+        ("eraseBetween", "out = eraseBetween('runmat', 1, 3);"),
     ] {
         let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
         assert!(analysis.syntax_error.is_none(), "{source}");
         assert!(analysis.lowering_error.is_none(), "{source}");
         assert!(analysis.compile_error.is_none(), "{source}");
-
-        let column = source.find(name).expect("builtin call") as u32;
-        let position = Position::new(0, column);
-        let help = signature_help_at(source, &analysis, &position)
-            .unwrap_or_else(|| panic!("descriptor-backed signature help for {name}"));
-        assert!(
-            help.signatures
-                .iter()
-                .any(|signature| signature.label == expected_signature),
-            "expected {expected_signature} for {name}, got {:?}",
-            help.signatures
-                .iter()
-                .map(|signature| signature.label.as_str())
-                .collect::<Vec<_>>()
-        );
-
-        let hover = hover_at(source, &analysis, &position)
-            .unwrap_or_else(|| panic!("descriptor-backed hover for {name}"));
-        let markdown = match hover.contents {
-            HoverContents::Markup(markup) => markup.value,
-            other => panic!("expected Markdown hover for {name}, got {other:?}"),
+        let position = Position::new(0, source.find(name).expect("builtin call") as u32);
+        let help =
+            signature_help_at(source, &analysis, &position).expect("canonical signature help");
+        support::assert_catalog_signatures(name, &help);
+        let hover = hover_at(source, &analysis, &position).expect("canonical hover");
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected Markdown hover");
         };
-        assert!(
-            markdown.contains(expected_signature),
-            "expected descriptor signature in {name} hover, got:\n{markdown}"
-        );
-        assert!(
-            markdown
-                .to_ascii_lowercase()
-                .contains(&name.to_ascii_lowercase()),
-            "expected {name} documentation in hover, got:\n{markdown}"
-        );
+        hover_support::assert_catalog_hover(name, &help, &markup.value);
     }
 }
-
 #[test]
 fn ecdf_to_erasebetween_builtins_are_public_completions_with_integer_metadata() {
     let source = "x = 1;";
@@ -107,10 +67,9 @@ fn ecdf_to_erasebetween_builtins_are_public_completions_with_integer_metadata() 
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in ECDF_TO_ERASEBETWEEN_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} must expose a descriptor"));
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
@@ -144,11 +103,9 @@ fn integer_empty_static_registrations_follow_the_public_completion_policy() {
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in INTEGER_EMPTY_BUILTINS {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
-            .unwrap_or_else(|| panic!("registered static builtin {name}"));
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} must expose a descriptor"));
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("canonical static builtin {name}"));
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
@@ -194,7 +151,8 @@ fn matlab_mode_keeps_ecdf_to_erasebetween_extension_metadata_visible() {
         let analysis = analyze_document_with_compat(&source, CompatMode::Matlab);
         assert!(analysis.syntax_error.is_none(), "{source}");
 
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.extensions.iter().any(|extension| {
                 extension.id == extension_id
@@ -204,11 +162,81 @@ fn matlab_mode_keeps_ecdf_to_erasebetween_extension_metadata_visible() {
         );
     }
 
-    for name in ["eq", "erase"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+    {
+        let name = "eq";
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.extensions.is_empty(),
             "{name} has settled integer capability metadata but no compatibility extension"
         );
     }
+    let erase = runmat_builtins::builtin_catalog_entry_by_name("erase").unwrap();
+    let actual = erase
+        .extensions
+        .iter()
+        .map(|extension| {
+            assert_eq!(
+                extension.mode,
+                runmat_builtins::BuiltinExtensionMode::RunMatOnly
+            );
+            (extension.id, extension.error_identifier)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        [
+            (
+                "erase-char-matrix",
+                Some("RunMat:compatibility:EraseCharMatrixExtension")
+            ),
+            (
+                "erase-string-cell",
+                Some("RunMat:compatibility:EraseStringCellExtension")
+            ),
+        ]
+    );
+    let [capability] = erase.integer_capabilities else {
+        panic!("erase has one rejected-input contract")
+    };
+    assert_eq!(
+        capability.backend,
+        runmat_builtins::BuiltinIntegerBackendRule::HostOnly
+    );
+    assert_eq!(
+        capability.computation_domain,
+        runmat_builtins::BuiltinIntegerComputationDomain::FunctionSpecific
+    );
+    assert_eq!(
+        capability.overload,
+        runmat_builtins::BuiltinIntegerOverloadKind::FunctionSpecific
+    );
+    assert_eq!(
+        capability.output_class,
+        runmat_builtins::BuiltinIntegerOutputClassRule::NotApplicable
+    );
+    assert_eq!(
+        capability.overflow,
+        runmat_builtins::BuiltinIntegerOverflowRule::NotApplicable
+    );
+    assert_eq!(
+        capability
+            .inputs
+            .iter()
+            .map(|input| input.name)
+            .collect::<Vec<_>>(),
+        ["str", "match"]
+    );
+    for input in capability.inputs {
+        assert_eq!(input.classes, &runmat_builtins::ALL_INTEGER_CLASSES);
+        assert_eq!(
+            input.availability,
+            runmat_builtins::BuiltinIntegerInputAvailability::Rejected
+        );
+        assert_eq!(
+            input.scalar_double,
+            runmat_builtins::BuiltinIntegerScalarDoubleRule::Rejected
+        );
+    }
+    assert!(capability.notes.contains("rejected without gathering"));
 }

@@ -4,13 +4,14 @@ mod sampler;
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator,
-    GeometryEvaluationControl, GeometryTransform, ParameterRange,
+    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl,
+    GeometryTransform, ParameterRange,
 };
 
 use super::{
     discretize::{
-        edge_error, geometry_error, sub, validate_options, world_arc_length, CurveMetricField,
+        edge_error, face_uses_for_parameters, geometry_error, sub, validate_options,
+        world_arc_length, CurveMetricField, ExactFacePcurveEvaluator,
         SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
     },
     SharedCurve, SharedCurveError, SharedCurveErrorKind, SharedCurveMesh,
@@ -29,7 +30,7 @@ pub fn validate_shared_curve_geometry(
     mesh: &SharedCurveMesh,
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
+    pcurves: &dyn ExactFacePcurveEvaluator,
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
@@ -90,19 +91,13 @@ fn validate_curve(
     validate_nodes(
         curve,
         edge,
+        context.topology,
         context.curves,
         context.control,
         transform,
         options,
     )?;
-    validate_pcurves(
-        curve,
-        edge,
-        context.topology,
-        context.pcurves,
-        context.control,
-        options,
-    )?;
+    validate_pcurves(curve, edge, context, options)?;
     if edge.is_degenerate {
         validate_degenerate_geometry(
             curve,
@@ -110,7 +105,7 @@ fn validate_curve(
             context.curves,
             context.control,
             transform,
-            options.geometry_absolute_error_m,
+            options.geometry_absolute_error_m.canonical_value(),
         )?;
         return Ok(0);
     }
@@ -135,11 +130,13 @@ fn validate_curve(
     }
     let requested = curve.requested;
     if maximum_chordal_deviation_m
-        > requested.maximum_chordal_deviation_m + options.geometry_absolute_error_m
+        > requested.maximum_chordal_deviation_m.canonical_value()
+            + options.geometry_absolute_error_m.canonical_value()
         || maximum_tangent_change_rad > requested.maximum_tangent_change_rad + 1.0e-12
         || minimum_metric_edge_length + 1.0e-12 < requested.minimum_metric_edge_length
         || maximum_metric_edge_length > requested.maximum_metric_edge_length + 1.0e-12
-        || curve.achieved.maximum_chordal_deviation_m + options.geometry_absolute_error_m
+        || curve.achieved.maximum_chordal_deviation_m.canonical_value()
+            + options.geometry_absolute_error_m.canonical_value()
             < maximum_chordal_deviation_m
         || curve.achieved.maximum_tangent_change_rad + 1.0e-12 < maximum_tangent_change_rad
         || curve.achieved.minimum_metric_edge_length > minimum_metric_edge_length + 1.0e-12
@@ -158,19 +155,33 @@ fn validate_curve(
 fn validate_nodes(
     curve: &SharedCurve,
     edge: &ExactEdge,
+    topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
     control: &dyn GeometryEvaluationControl,
     transform: GeometryTransform,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<(), SharedCurveError> {
-    let segment_error = options.arc_length_absolute_error_m / (curve.nodes.len() - 1) as f64;
+    let segment_error =
+        options.arc_length_absolute_error_m.canonical_value() / (curve.nodes.len() - 1) as f64;
     let mut arc_length_m = 0.0;
     for (index, node) in curve.nodes.iter().enumerate() {
         let point_m = curves
             .point(&edge.curve_evaluator_id, node.parameter, control)
-            .map(|point| transform.transform_point(point))
+            .map(|point| transform.transform_point(point.canonical_value()))
             .map_err(|error| geometry_error(edge, error))?;
-        if length(sub(point_m, node.coordinates_m)) > options.geometry_absolute_error_m {
+        let coordinate_tolerance_m = node
+            .source_vertex_id
+            .as_ref()
+            .and_then(|vertex_id| {
+                topology
+                    .vertices
+                    .binary_search_by(|vertex| vertex.id.cmp(vertex_id))
+                    .ok()
+                    .map(|index| topology.vertices[index].tolerance_m.canonical_value())
+            })
+            .unwrap_or(0.0)
+            .max(options.geometry_absolute_error_m.canonical_value());
+        if length(sub(point_m, node.coordinates_m.canonical_value())) > coordinate_tolerance_m {
             return Err(mismatch(
                 edge,
                 "curve node coordinates",
@@ -191,7 +202,9 @@ fn validate_nodes(
                 options.maximum_subdivision_depth,
             )?;
         }
-        if (arc_length_m - node.arc_length_m).abs() > options.arc_length_absolute_error_m {
+        if (arc_length_m - node.arc_length_m.canonical_value()).abs()
+            > options.arc_length_absolute_error_m.canonical_value()
+        {
             return Err(mismatch(
                 edge,
                 "curve node arc length",
@@ -202,35 +215,42 @@ fn validate_nodes(
     Ok(())
 }
 
+/// Stored face-use coordinates must equal an independent derivation from the exact pcurves:
+/// interior nodes evaluate their own pcurve, and endpoints on non-periodic faces take the
+/// vertex's canonical coordinate admitted against the vertex tolerance.
 fn validate_pcurves(
     curve: &SharedCurve,
     edge: &ExactEdge,
-    topology: &ExactBRepTopology,
-    pcurves: &dyn ExactPcurveEvaluator,
-    control: &dyn GeometryEvaluationControl,
+    context: SharedCurveEvaluationContext<'_>,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<(), SharedCurveError> {
-    let coedge_by_id = topology
-        .coedges
+    let parameters = curve
+        .nodes
         .iter()
-        .map(|coedge| (&coedge.id, coedge))
+        .map(|node| node.parameter)
+        .collect::<Vec<_>>();
+    let expected =
+        face_uses_for_parameters(context, edge, curve.parameter_range, &parameters, options)?;
+    let expected_by_coedge = expected
+        .iter()
+        .map(|face_use| (&face_use.coedge_id, face_use))
         .collect::<BTreeMap<_, _>>();
     for face_use in &curve.face_uses {
-        let coedge = coedge_by_id[&face_use.coedge_id];
-        let range = pcurves
-            .parameter_range(&coedge.pcurve_evaluator_id)
-            .map_err(|error| geometry_error(edge, error))?;
-        if range != curve.parameter_range {
+        let Some(exact) = expected_by_coedge.get(&face_use.coedge_id) else {
             return Err(mismatch(
                 edge,
-                "pcurve parameter range",
-                "pcurve and shared edge ranges differ",
+                "curve face-use UV",
+                "stored face use has no exact coedge",
+            ));
+        };
+        if exact.node_uv.len() != face_use.node_uv.len() {
+            return Err(mismatch(
+                edge,
+                "curve face-use UV",
+                "stored face use node count differs from the curve",
             ));
         }
-        for (node, stored_uv) in curve.nodes.iter().zip(&face_use.node_uv) {
-            let exact_uv = pcurves
-                .point(&coedge.pcurve_evaluator_id, node.parameter, control)
-                .map_err(|error| geometry_error(edge, error))?;
+        for (exact_uv, stored_uv) in exact.node_uv.iter().zip(&face_use.node_uv) {
             if ((exact_uv[0] - stored_uv[0]).powi(2) + (exact_uv[1] - stored_uv[1]).powi(2)).sqrt()
                 > options.pcurve_absolute_error
             {

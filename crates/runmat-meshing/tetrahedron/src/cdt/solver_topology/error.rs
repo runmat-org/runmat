@@ -2,11 +2,15 @@ use super::DelaunayVolumeMeshErrorKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunaySolverTopologyErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidGeometry,
     InvalidMesh,
-    InvalidMaterials,
     ResourceLimit,
+    MemoryBudgetExceeded,
+    TimeBudgetExceeded,
+    SearchWorkBudgetExceeded,
+    IterationBudgetExceeded,
     Cancelled,
 }
 
@@ -43,6 +47,9 @@ pub(super) fn volume(
     reason: impl Into<String>,
 ) -> DelaunaySolverTopologyError {
     let mapped = match kind {
+        DelaunayVolumeMeshErrorKind::Accounting(cause) => {
+            DelaunaySolverTopologyErrorKind::Accounting(cause)
+        }
         DelaunayVolumeMeshErrorKind::InvalidOptions => {
             DelaunaySolverTopologyErrorKind::InvalidOptions
         }
@@ -88,12 +95,18 @@ pub(super) fn geometry(
 
     let kind = match error.kind {
         GeometryEvaluationErrorKind::Cancelled => DelaunaySolverTopologyErrorKind::Cancelled,
+        GeometryEvaluationErrorKind::AllocationBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::MemoryBudgetExceeded
+        }
+        GeometryEvaluationErrorKind::TimeBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::TimeBudgetExceeded
+        }
         GeometryEvaluationErrorKind::BudgetExceeded
-        | GeometryEvaluationErrorKind::TimeBudgetExceeded
-        | GeometryEvaluationErrorKind::AllocationBudgetExceeded
-        | GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
-        | GeometryEvaluationErrorKind::IterationBudgetExceeded => {
-            DelaunaySolverTopologyErrorKind::ResourceLimit
+        | GeometryEvaluationErrorKind::SearchWorkBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::SearchWorkBudgetExceeded
+        }
+        GeometryEvaluationErrorKind::IterationBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::IterationBudgetExceeded
         }
         GeometryEvaluationErrorKind::UnknownEvaluator
         | GeometryEvaluationErrorKind::ParameterOutsideDomain

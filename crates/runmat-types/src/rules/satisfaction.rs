@@ -1,6 +1,6 @@
 use crate::{
-    AliasFact, CallableFact, CellFact, ClassReferenceFact, ContiguityFact, DimensionFact,
-    DistributedFact, ExceptionFact, ExecutionFact, ForeignAffinityFact, ForeignFact,
+    AliasFact, CallableFact, CellFact, ClassReferenceFact, CompositeFact, ContiguityFact,
+    DimensionFact, DistributedFact, ExceptionFact, ExecutionFact, ForeignAffinityFact, ForeignFact,
     ForeignLifetimeFact, ForeignOwnershipFact, FutureStateFact, LayoutFact, MutationFact,
     ObjectFact, OutputListFact, ResidencyFact, ShapeFact, StorageFact, StructFact, ValueFact,
     ValueKindFact, ViewFact,
@@ -48,6 +48,7 @@ impl FactSatisfaction for ValueKindFact {
             (Self::Exception(actual), Self::Exception(expected)) => actual.satisfies(expected),
             (Self::Execution(actual), Self::Execution(expected)) => actual.satisfies(expected),
             (Self::Distributed(actual), Self::Distributed(expected)) => actual.satisfies(expected),
+            (Self::Composite(actual), Self::Composite(expected)) => actual.satisfies(expected),
             (Self::Foreign(actual), Self::Foreign(expected)) => actual.satisfies(expected),
             _ => self == expected,
         }
@@ -103,8 +104,27 @@ impl FactSatisfaction for StructFact {
             self.fields_complete,
             &expected.fields,
             expected.fields_complete,
+        ) && struct_elements_satisfy(
+            &self.elements,
+            self.elements_complete,
+            &expected.elements,
+            expected.elements_complete,
         )
     }
+}
+
+fn struct_elements_satisfy(
+    actual: &[std::collections::BTreeMap<String, ValueFact>],
+    actual_complete: bool,
+    expected: &[std::collections::BTreeMap<String, ValueFact>],
+    expected_complete: bool,
+) -> bool {
+    (!expected_complete || (actual_complete && actual.len() == expected.len()))
+        && actual.len() >= expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| fields_satisfy(actual, true, expected, true))
 }
 
 impl FactSatisfaction for ObjectFact {
@@ -131,6 +151,7 @@ impl FactSatisfaction for ClassReferenceFact {
 impl FactSatisfaction for CallableFact {
     fn satisfies(&self, expected: &Self) -> bool {
         option_satisfies(&self.identity, &expected.identity)
+            && expected.capabilities.0.is_subset(&self.capabilities.0)
             && self.variadic_inputs == expected.variadic_inputs
             && self.variadic_outputs == expected.variadic_outputs
             && sequence_satisfies(
@@ -215,6 +236,14 @@ impl FactSatisfaction for DistributedFact {
             && option_satisfies(&self.scheme, &expected.scheme)
             && self.value.satisfies(&expected.value)
             && self.materializable == expected.materializable
+    }
+}
+
+impl FactSatisfaction for CompositeFact {
+    fn satisfies(&self, expected: &Self) -> bool {
+        self.owner == expected.owner
+            && self.labs == expected.labs
+            && self.value.satisfies(&expected.value)
     }
 }
 
@@ -304,7 +333,9 @@ fn normalize_dimensions(dimensions: &mut Vec<DimensionFact>) {
     while dimensions.len() > 2 && dimensions.last() == Some(&DimensionFact::Known(1)) {
         dimensions.pop();
     }
-    dimensions.resize(2, DimensionFact::Known(1));
+    if dimensions.len() < 2 {
+        dimensions.resize(2, DimensionFact::Known(1));
+    }
 }
 
 #[cfg(test)]
@@ -338,6 +369,14 @@ mod tests {
         expected.kind = ValueKindFact::Logical;
         expected.residency = ResidencyFact::Device { provider: None };
         assert!(!actual.satisfies(&expected));
+
+        let mut nd_actual = ValueFact::scalar(ValueKindFact::Logical);
+        nd_actual.shape = ShapeFact::from(vec![Some(2), Some(1), Some(3)]);
+        let mut matrix_expected = nd_actual.clone();
+        matrix_expected.shape = ShapeFact::from(vec![Some(2), Some(1)]);
+        assert!(!nd_actual.satisfies(&matrix_expected));
+        matrix_expected.shape = ShapeFact::from(vec![Some(2), Some(1), Some(3), Some(1)]);
+        assert!(nd_actual.satisfies(&matrix_expected));
     }
 
     #[test]

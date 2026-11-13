@@ -1,59 +1,49 @@
+use runmat_types::physical::Quantity;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
 use chrono::Utc;
-use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
-    HostTensorView,
-};
+use runmat_accelerate_api::{AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep,
-    AnalysisStepKind, BeamElementModel, BeamSectionModel, BoundaryCondition, BoundaryConditionKind,
-    CfdSolveFamily, ConductivityFrequencyPoint, ElectromagneticDomain, EvidenceConfidence,
-    LoadCase, LoadKind, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialThermalModel, ReferenceFrame, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode,
+    AnalysisExcitation, AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId,
+    AnalysisProcedure, AnalysisSequence, BeamElementModel, BeamSectionModel, CoordinateFrame,
+    CoupledPhysicsFamily, Direction, DynamicViscosity, ElectricPotential, ElectromagneticDomain,
+    EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
+    ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
+    Frequency, MassDensity, MaterialAssignment, MaterialElasticityModel, MaterialElectricalModel,
+    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicalSignal, PhysicsFamily,
+    ProcedureStep, ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence,
+    SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot, SignalOrdinate,
+    SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
+    StructuralElement, StructuralElementKind, StructuralModel, StructuralNode, TabulatedSignal,
+    TabulatedSignalDomain, Temperature, TurbulenceIntensity, Velocity,
 };
+use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
-    fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
-    fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
-    fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
-    fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
-    fea_fsi_coupling_iteration_count_field_id, fea_fsi_fluid_pressure_field_id,
-    fea_fsi_fluid_velocity_field_id, fea_fsi_interface_displacement_field_id,
-    fea_fsi_interface_pressure_field_id, fea_fsi_interface_residual_field_id,
-    fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
-    fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
-    fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
-    fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
-    fea_nonlinear_residual_norm_field_id, fea_nonlinear_rotation_field_id,
-    fea_nonlinear_von_mises_field_id, fea_thermal_boundary_heat_flux_field_id,
-    fea_thermal_heat_flux_field_id, fea_thermal_heat_source_field_id,
-    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
-    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
-    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
-    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
-    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-    fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
-    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
-    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
-    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
-    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    fea_acoustic_frequency_response_field_id, fea_cht_interface_heat_flux_field_id,
+    fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
+    fea_nonlinear_contact_pressure_field_id, fea_thermal_energy_storage_rate_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_temperature_gradient_field_id,
+    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
+    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
+    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
+    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
+    fea_transient_angular_velocity_field_id, fea_transient_damping_dissipation_field_id,
+    fea_transient_energy_balance_residual_field_id, fea_transient_external_work_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_reaction_force_field_id,
+    fea_transient_relative_energy_balance_error_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_rotation_field_id, fea_transient_strain_energy_density_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_strain_field_id,
+    fea_transient_stress_field_id, fea_transient_support_work_field_id,
+    fea_transient_velocity_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
@@ -70,159 +60,279 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
-    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MaterialEvidence,
-    MaterialEvidenceConfidence, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
-    SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile, UnitSystem,
-};
-use runmat_meshing_core::fixtures::{
-    nested_tetrahedron_shell_geometry, split_material_through_hole_plate_geometry,
-    through_hole_plate_geometry,
+    EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
+    RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
 };
 use runmat_meshing_core::{
-    contracts::artifact::ANALYSIS_MESH_SCHEMA_VERSION, AnalysisBoundaryFace,
-    AnalysisFieldTopologyDescriptor, AnalysisFieldTopologyLocation, AnalysisMeshArtifact,
-    AnalysisMeshNode, AnalysisMeshProvenance, AnalysisMeshQualityReport, AnalysisVolumeElement,
-    BoundaryElementKind, MeshEntityProvenance, MeshSizingField, SourceEntityKind,
-    VolumeElementKind, ANALYSIS_MESH_FIELD_TOPOLOGY_ID, TETRAHEDRON4_FIELD_ELEMENT_KIND,
+    CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
 };
 
 use super::*;
 
-const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
-const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
+mod admission_roots;
+mod admission_validation;
+mod nonlinear_physical;
+mod persisted_record_shape;
+mod static_admission;
+mod structural_study_intent;
+mod structural_study_storage;
+mod topology_identity;
+mod transient_assessments;
 
-fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn test_linear_workload_identity(
+    workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> runmat_analysis_fea::execution::AnalysisWorkloadIdentity {
+    use runmat_analysis_fea::execution::{
+        AnalysisWorkKind, AnalysisWorkloadIdentity, ConstraintPlanIdentity, DiscretizationIdentity,
+        ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity, ProblemIdentity,
+        SequenceIdentity, StepIdentity, StudyIdentity,
+    };
+    let digest = runmat_execution::Digest::sha256(b"runtime-linear-completion-test");
+    let study = StudyIdentity::from_authored_digest(digest, None).unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap();
+    let step =
+        StepIdentity::from_solver_contract(sequence, workload.procedure_step().unwrap()).unwrap();
+    let constraints = ConstraintPlanIdentity::new(step, digest, digest).unwrap();
+    let problem = ProblemIdentity::new(step, digest, None, constraints, Vec::new()).unwrap();
+    let mesh_digest = runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let discretization = DiscretizationIdentity::new(problem, mesh_digest, digest).unwrap();
+    let operator = OperatorIdentity::new(discretization, digest).unwrap();
+    let numerical = NumericalPlanIdentity::new(operator, digest).unwrap();
+    let execution = ExecutionPlanIdentity::new(numerical, digest).unwrap();
+    AnalysisWorkloadIdentity::new(
+        study,
+        step,
+        execution,
+        AnalysisWorkKind::Solve,
+        digest,
+        vec![
+            runmat_execution::Digest::sha256(workload.canonical_bytes().unwrap()),
+            mesh_digest,
+        ],
+    )
+    .unwrap()
 }
 
-fn sample_analysis_run_prep_context() -> AnalysisRunPrepContext {
-    AnalysisRunPrepContext {
-        prepared_mesh_count: 1,
-        prepared_node_count: 16,
-        prepared_element_count: 20,
-        mapped_region_count: 3,
-        min_scaled_jacobian: 0.86,
-        mean_aspect_ratio: 1.5,
-        inverted_element_count: 0,
-        mapped_load_count: 1,
-        mapped_bc_count: 3,
-        layout_seed: 29,
-        topology_dof_multiplier: 1.2,
-        topology_bandwidth_estimate: 4,
-        mapped_region_participation_ratio: 0.9,
-        topology_surface_patch_ratio: 0.35,
-        topology_volume_core_ratio: 0.55,
-        topology_mixed_family_ratio: 0.05,
-        topology_region_span_mean: 5.0,
-        topology_region_block_count: 3,
-        topology_region_mesh_mean: 4.0,
-        topology_region_mesh_variance: 0.5,
-        topology_triangle_family_ratio: 0.2,
-        topology_quad_family_ratio: 0.3,
-        topology_tetrahedron_family_ratio: 0.25,
-        topology_hex_family_ratio: 0.25,
-        coordinate_span_x_m: 2.4,
-        coordinate_span_y_m: 0.6,
-        coordinate_span_z_m: 0.4,
-        coordinate_active_dimension_count: 3,
-        coordinate_characteristic_length_m: 0.2,
-        element_geometry_node_count: 4,
-        element_geometry_edge_count: 5,
-        mean_element_edge_length_m: 0.2,
-        mean_element_area_m2: 0.04,
-        element_geometry_coverage_ratio: 1.0,
-        reference_element_coordinates_m: [[0.0, 0.0, 0.0], [0.4, 0.0, 0.0], [0.0, 0.2, 0.0]],
-        reference_element_area_m2: 0.04,
-        control_volume_cell_count: 15,
-        control_volume_face_count: 19,
-        control_volume_internal_face_count: 11,
-        control_volume_boundary_face_count: 8,
-        control_volume_connectivity_coverage_ratio: 1.0,
-        element_topology_sample_element_count: 2,
-        element_topology_sample_edge_count: 5,
-        element_topology_sample_edge_nodes: [
-            [0, 1],
-            [1, 2],
-            [0, 2],
-            [2, 3],
-            [0, 3],
-            [0, 0],
-            [0, 0],
-            [0, 0],
-        ],
-        element_topology_sample_node_coordinates_m: [
-            [0.0, 0.0, 0.0],
-            [0.4, 0.0, 0.0],
-            [0.0, 0.2, 0.0],
-            [0.4, 0.2, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-        ],
-        element_topology_sample_element_edges: [[0, 1, 2], [2, 3, 4], [0, 0, 0], [0, 0, 0]],
-        element_topology_sample_element_orientations: [
-            [1, 1, -1],
-            [1, 1, -1],
-            [0, 0, 0],
-            [0, 0, 0],
-        ],
-        element_topology_sample_element_areas_m2: [0.04, 0.04, 0.0, 0.0],
-        element_topology_node_coordinates_m: vec![
-            [0.0, 0.0, 0.0],
-            [0.4, 0.0, 0.0],
-            [0.0, 0.2, 0.0],
-            [0.4, 0.2, 0.0],
-        ],
-        element_topology_edge_nodes: vec![[0, 1], [1, 2], [0, 2], [2, 3], [0, 3]],
-        element_topology_element_edges: vec![[0, 1, 2], [2, 3, 4]],
-        element_topology_element_orientations: vec![[1, 1, -1], [1, 1, -1]],
-        element_topology_element_areas_m2: vec![0.04, 0.04],
+fn test_structural_sequence_result(
+    spec: &AnalysisStudySpec,
+    workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
+) -> StructuralStudyNumericalResult {
+    let _study = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
+        analysis_study_content_digest(spec),
+        None,
+    )
+    .unwrap();
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+        &workload.model.sequence,
+    )
+    .unwrap();
+    let step = workload.procedure_step().unwrap();
+    let producer =
+        runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, step).unwrap();
+    let source_workload = test_linear_workload_identity(workload, mesh);
+    let numerical_receipt =
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
+            source_workload,
+            &result,
+        )
+        .unwrap();
+    let solver_result_identity = numerical_receipt.source_result();
+    let fields = result
+        .run
+        .fields
+        .iter()
+        .filter(|field| !field.is_empty() && field.as_host_f64().is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+    let states = step
+        .state_outputs
+        .iter()
+        .map(|declaration| {
+            CanonicalSemanticState::new(CanonicalSemanticStateInput {
+                producer,
+                declaration: declaration.clone(),
+                topology_digest: runmat_execution::Digest::from_bytes(
+                    *mesh.canonical_digest.bytes(),
+                ),
+                source_result: solver_result_identity,
+                payload: runmat_analysis_fea::execution::CanonicalSemanticStatePayload::Fields {
+                    fields: fields.clone(),
+                },
+            })
+            .unwrap()
+        })
+        .collect();
+    StructuralStudyNumericalResult::LinearSequence(StructuralStudySequenceNumericalResult {
+        frozen_project_digest: None,
+        effective_memory_ceiling_bytes: None,
+        steps: vec![StructuralStudyStepNumericalResult {
+            step_id: workload.step_id.clone(),
+            solver_result_identity,
+            result,
+            numerical_receipt,
+            static_solve_path: None,
+        }],
+        states,
+    })
+}
+
+fn fixed_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: id.into(),
+            frame: CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                target: runmat_analysis_core::RegionTarget::authored(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(&region.into()),
+                ),
+            },
+        },
+    )
+}
+
+fn sample_cfd_constraints(
+    inlet_velocity_m_per_s: [f64; 3],
+) -> Vec<runmat_analysis_core::AnalysisConstraint> {
+    let fluid = |id: &str, kind| {
+        runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
+            constraint_id: id.to_string(),
+            kind,
+        })
+    };
+    vec![
+        fluid(
+            "bc_cfd_inlet",
+            runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_inlet"),
+                ),
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    inlet_velocity_m_per_s.map(runmat_analysis_core::Velocity::new),
+                ),
+            },
+        ),
+        fluid(
+            "bc_cfd_outlet",
+            runmat_analysis_core::FluidConstraintKind::PressureReference {
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_outlet"),
+                ),
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    runmat_analysis_core::Pressure::new(0.0),
+                ),
+            },
+        ),
+        fluid(
+            "bc_cfd_wall_upper",
+            runmat_analysis_core::FluidConstraintKind::NoSlipWall {
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_wall_upper"),
+                ),
+            },
+        ),
+        fluid(
+            "bc_cfd_wall_lower",
+            runmat_analysis_core::FluidConstraintKind::NoSlipWall {
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_wall_lower"),
+                ),
+            },
+        ),
+    ]
+}
+
+/// Explicit test host: numerical tests opt into admission while holding the same
+/// lock used for their process-wide artifact store and runtime configuration.
+pub(super) struct AnalysisTestHost {
+    // Restore admission before releasing the shared host-state lock (field drop order).
+    _admission: fea_run_admission::FeaRunAdmissionGuard,
+    _storage: storage::test_support::IsolatedArtifactStore,
+}
+
+pub(super) fn analysis_test_guard() -> AnalysisTestHost {
+    let storage = storage::test_support::isolated_artifact_store();
+    let admission = fea_run_admission::replace_fea_run_admission(Some(
+        fea_run_admission::entrypoints::test_admission(),
+    ))
+    .expect("install explicit numerical-test FEA host");
+    AnalysisTestHost {
+        _admission: admission,
+        _storage: storage,
     }
 }
 
-fn sample_model() -> AnalysisModel {
-    AnalysisModel {
+fn test_electrical_material() -> MaterialElectricalModel {
+    MaterialElectricalModel {
+        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(1.0),
+        resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(0.0),
+        relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+        relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
+        conductivity_frequency_response: Vec::new(),
+    }
+}
+
+pub(super) fn sample_model() -> AnalysisModel {
+    let mut model = AnalysisModel {
         model_id: AnalysisModelId("beam_model".to_string()),
         geometry_id: "geo:beam".to_string(),
         geometry_revision: 1,
-        units: UnitSystem::Meter,
-        frame: ReferenceFrame::Global,
+        units: runmat_types::physical::CoordinateUnits::canonical(),
+        frame: CoordinateFrame::Global,
         materials: vec![MaterialModel {
+            fluid: None,
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
-            mechanical: MaterialMechanicalModel {
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-                density_kg_per_m3: 7850.0,
-            },
-            thermal: MaterialThermalModel {
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -2.5e-4,
-                ..MaterialThermalModel::default()
-            },
+            provenance: runmat_analysis_core::MaterialProvenance::Authored,
+            mass_density_kg_per_m3: Some(Quantity::new(7850.0)),
+            elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+                MaterialMechanicalModel {
+                    youngs_modulus_pa: Quantity::new(200e9),
+                    poisson_ratio: Quantity::new(0.3),
+                },
+            )),
+            damping: None,
+            thermal: Some(MaterialThermalModel {
+                reference_temperature_k: Quantity::new(293.15),
+                modulus_temp_coeff_per_k: Quantity::new(-2.5e-4),
+                conductivity_w_per_mk: Quantity::new(45.0),
+                specific_heat_j_per_kgk: Quantity::new(500.0),
+                expansion_coefficient_per_k: Quantity::new(1.2e-5),
+            }),
             acoustic: None,
             electrical: None,
             plastic: None,
         }],
-        material_assignments: Vec::new(),
+        material_assignments: vec![MaterialAssignment {
+            target: runmat_analysis_core::PropertyRegionTarget::beam(
+                runmat_meshing_core::fixtures::fixture_edge("beam_span"),
+            ),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        }],
         structural: Some(StructuralModel {
             nodes: vec![
                 StructuralNode {
                     node_id: 1,
-                    coordinates_m: [0.0, 0.0, 0.0],
+                    coordinates_m: Quantity::new([0.0, 0.0, 0.0]),
+                    solid_attachment: None,
                 },
                 StructuralNode {
                     node_id: 2,
-                    coordinates_m: [1.0, 0.0, 0.0],
+                    coordinates_m: Quantity::new([1.0, 0.0, 0.0]),
+                    solid_attachment: None,
                 },
             ],
             elements: vec![StructuralElement {
                 element_id: "beam_1".to_string(),
-                region_id: "beam_span".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_edge("beam_span"),
                 kind: StructuralElementKind::Beam(BeamElementModel {
                     node_ids: [1, 2],
                     section_id: "rect".to_string(),
@@ -231,86 +341,103 @@ fn sample_model() -> AnalysisModel {
             }],
             beam_sections: vec![BeamSectionModel {
                 section_id: "rect".to_string(),
-                area_m2: 2.0e-4,
-                iy_m4: 1.6e-9,
-                iz_m4: 6.4e-9,
-                torsion_j_m4: 2.4e-9,
-                outer_fiber_y_m: 0.01,
-                outer_fiber_z_m: 0.005,
-                torsion_outer_radius_m: 0.011_180_339_887_498_949,
+                area_m2: Quantity::new(2.0e-4),
+                iy_m4: Quantity::new(1.6e-9),
+                iz_m4: Quantity::new(6.4e-9),
+                torsion_j_m4: Quantity::new(2.4e-9),
+                outer_fiber_y_m: Quantity::new(0.01),
+                outer_fiber_z_m: Quantity::new(0.005),
+                torsion_outer_radius_m: Quantity::new(0.011_180_339_887_498_949),
             }],
             shell_sections: Vec::new(),
         }),
+        thermal: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
         cfd: None,
         interfaces: Vec::new(),
-        boundary_conditions: vec![BoundaryCondition {
-            bc_id: "bc_root".to_string(),
-            region_id: "node:1".to_string(),
-            kind: BoundaryConditionKind::Fixed,
-        }],
-        loads: vec![LoadCase {
-            load_id: "load_tip".to_string(),
-            region_id: "node:2".to_string(),
-            kind: LoadKind::Force {
-                fx: 0.0,
-                fy: -1000.0,
-                fz: 0.0,
-            },
-        }],
-        steps: vec![AnalysisStep {
-            step_id: "step_static".to_string(),
-            kind: AnalysisStepKind::Static,
-        }],
-    }
+        constraints: vec![fixed_constraint("bc_root", "node:1")],
+        boundaries: Vec::new(),
+        connectors: Vec::new(),
+        signals: Vec::new(),
+        excitations: Vec::new(),
+        excitation_cases: Vec::new(),
+        initial_conditions: Vec::new(),
+        response_spectra: Vec::new(),
+        random_excitations: Vec::new(),
+        sequence: AnalysisSequence::from_steps(
+            "sample_sequence",
+            vec![ProcedureStep::structural_static("step_static")],
+        ),
+    };
+    append_constant_excitation(
+        &mut model,
+        "load_tip",
+        "node:2",
+        ConstantExcitation::Force([0.0, -1000.0, 0.0]),
+    );
+    let runmat_analysis_core::ExcitationTarget::Region(target) =
+        &mut model.excitations[0].excitation_mut().target
+    else {
+        panic!("expected region excitation target");
+    };
+    *target = runmat_analysis_core::RegionTarget::point("node:2");
+    model
 }
 
-fn sample_solid_model() -> AnalysisModel {
+pub(super) fn sample_solid_model() -> AnalysisModel {
     let mut model = sample_model();
     model.model_id = AnalysisModelId("solid_model".to_string());
     model.geometry_id = "geo:closed_cube".to_string();
     model.geometry_revision = 1;
     model.structural = None;
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_root".to_string(),
-        region_id: "root".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
-    model.loads = vec![LoadCase {
-        load_id: "load_tip".to_string(),
-        region_id: "tip".to_string(),
-        kind: LoadKind::Force {
-            fx: 0.0,
-            fy: -1000.0,
-            fz: 0.0,
-        },
-    }];
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("region"),
+    );
+    model.constraints = vec![fixed_constraint("bc_root", "root")];
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_constant_excitation(
+        &mut model,
+        "load_tip",
+        runmat_meshing_core::fixtures::fixture_face("tip"),
+        ConstantExcitation::Force([0.0, -1000.0, 0.0]),
+    );
     model
 }
 
 fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     let mut model = sample_model();
     model.materials.push(MaterialModel {
+        fluid: None,
         material_id: "mat_polymer".to_string(),
         name: "Polymer".to_string(),
-        mechanical: MaterialMechanicalModel {
-            youngs_modulus_pa: 3.2e9,
-            poisson_ratio: 0.37,
-            density_kg_per_m3: 1150.0,
-        },
-        thermal: MaterialThermalModel {
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -7.0e-4,
-            ..MaterialThermalModel::default()
-        },
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
+        mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(1150.0)),
+        elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+            MaterialMechanicalModel {
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(3.2e9),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.37),
+            },
+        )),
+        damping: None,
+        thermal: Some(MaterialThermalModel {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(-7.0e-4),
+            conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(45.0),
+            specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(500.0),
+            expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(1.2e-5),
+        }),
         acoustic: None,
         electrical: None,
         plastic: None,
     });
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "beam_span".to_string(),
+        target: runmat_analysis_core::PropertyRegionTarget::beam(
+            runmat_meshing_core::fixtures::fixture_edge("beam_span"),
+        ),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Verified,
@@ -318,236 +445,490 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     model
 }
 
-fn sample_cfd_domain(
-    solve_family: CfdSolveFamily,
-    enabled: bool,
-) -> runmat_analysis_core::CfdDomain {
+fn sample_cfd_domain() -> runmat_analysis_core::CfdDomain {
     runmat_analysis_core::CfdDomain {
-        enabled,
-        solve_family,
-        reference_density_kg_per_m3: 1.225,
-        dynamic_viscosity_pa_s: 1.81e-5,
-        inlet_velocity_m_per_s: 5.0,
-        turbulence_intensity: 0.06,
-        time_profile: Vec::new(),
+        density: MassDensity::new(1.225),
+        dynamic_viscosity: DynamicViscosity::new(1.81e-5),
+        turbulence_intensity: TurbulenceIntensity::new(0.06),
+        rheology: None,
+        porous_zones: Vec::new(),
     }
 }
 
-fn sample_moment_load(load_id: &str) -> LoadCase {
-    LoadCase {
-        load_id: load_id.to_string(),
-        region_id: "tip".to_string(),
-        kind: LoadKind::Moment {
-            mx: 1.0,
-            my: 2.0,
-            mz: 3.0,
+fn append_scalar_history_excitation<Q>(
+    model: &mut AnalysisModel,
+    id: &str,
+    axis: Vec<f64>,
+    values: Vec<Q>,
+    target: ExcitationTarget,
+    direction: Option<Direction>,
+    signal: impl FnOnce(Signal<Q>) -> PhysicalSignal,
+    action: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    let case_id = ExcitationCaseId(format!("{id}.case"));
+    let sample_count = values.len();
+    model.signals.push(signal(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Tabulated(TabulatedSignal {
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: axis
+                .into_iter()
+                .zip(values)
+                .map(|(abscissa, value)| {
+                    SignalKnot::continuous(
+                        abscissa,
+                        SignalOrdinate::Real(SignalValue::Scalar(value)),
+                    )
+                })
+                .collect(),
+            interpolation: SignalInterpolation::Linear,
+            extrapolation: SignalExtrapolation::HoldEndpoint,
+        }),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count,
         },
-    }
+        provenance: SignalProvenance::Authored,
+    }));
+    let excitation_id = ExcitationId(id.to_string());
+    model.excitations.push(action(AnalysisExcitation {
+        excitation_id: excitation_id.clone(),
+        target,
+        frame: CoordinateFrame::Global,
+        direction,
+        distribution: ExcitationDistribution::TopologyField,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: false,
+            preserve_moment: false,
+            relative_tolerance: 1.0e-10,
+        },
+    }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: vec![excitation_id],
+        activation: ExcitationCaseActivation::Always,
+    });
 }
 
-fn sample_cfd_boundary_conditions(inlet_velocity_m_per_s: f64) -> Vec<BoundaryCondition> {
-    vec![
-        BoundaryCondition {
-            bc_id: "bc_cfd_inlet".to_string(),
-            region_id: "fluid_inlet".to_string(),
-            kind: BoundaryConditionKind::CfdInletVelocity {
-                velocity_m_per_s: inlet_velocity_m_per_s,
-            },
+fn append_scalar_constant_excitation<Q>(
+    model: &mut AnalysisModel,
+    id: &str,
+    value: Q,
+    target: ExcitationTarget,
+    direction: Option<Direction>,
+    signal: impl FnOnce(Signal<Q>) -> PhysicalSignal,
+    action: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    let case_id = ExcitationCaseId(format!("{id}.case"));
+    model.signals.push(signal(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(value)),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count: 1,
         },
-        BoundaryCondition {
-            bc_id: "bc_cfd_outlet".to_string(),
-            region_id: "fluid_outlet".to_string(),
-            kind: BoundaryConditionKind::CfdOutletPressure { pressure_pa: 0.0 },
+        provenance: SignalProvenance::Authored,
+    }));
+    let excitation_id = ExcitationId(id.to_string());
+    model.excitations.push(action(AnalysisExcitation {
+        excitation_id: excitation_id.clone(),
+        target,
+        frame: CoordinateFrame::Global,
+        direction,
+        distribution: ExcitationDistribution::TopologyField,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: false,
+            preserve_moment: false,
+            relative_tolerance: 1.0e-10,
         },
-        BoundaryCondition {
-            bc_id: "bc_cfd_wall_upper".to_string(),
-            region_id: "fluid_wall_upper".to_string(),
-            kind: BoundaryConditionKind::CfdNoSlipWall,
+    }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: vec![excitation_id],
+        activation: ExcitationCaseActivation::Always,
+    });
+}
+
+fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str) {
+    use runmat_analysis_core::{
+        AnalysisExcitation, ExcitationCase, ExcitationCaseActivation, ExcitationCaseId,
+        ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget, Moment,
+        ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence, SignalId,
+        SignalPrecision, SignalProvenance, SignalShape,
+    };
+
+    let signal_id = SignalId(format!("{excitation_id}.signal"));
+    let case_id = ExcitationCaseId(format!("{excitation_id}.case"));
+    model.signals = vec![PhysicalSignal::Moment(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Constant(SignalValue::Vector3([
+            Moment::new(1.0),
+            Moment::new(2.0),
+            Moment::new(3.0),
+        ])),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count: 1,
         },
-        BoundaryCondition {
-            bc_id: "bc_cfd_wall_lower".to_string(),
-            region_id: "fluid_wall_lower".to_string(),
-            kind: BoundaryConditionKind::CfdNoSlipWall,
+        provenance: SignalProvenance::Authored,
+    })];
+    model.excitations = vec![ExcitationAction::Moment(AnalysisExcitation {
+        excitation_id: ExcitationId(excitation_id.to_string()),
+        target: ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("tip"),
+        )),
+        frame: CoordinateFrame::Global,
+        direction: None,
+        distribution: ExcitationDistribution::PreserveResultant,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: true,
+            preserve_moment: true,
+            relative_tolerance: 1.0e-10,
         },
-    ]
+    })];
+    model.excitation_cases = vec![ExcitationCase {
+        case_id,
+        action_ids: vec![ExcitationId(excitation_id.to_string())],
+        activation: ExcitationCaseActivation::Always,
+    }];
 }
 
 fn sample_cht_model() -> AnalysisModel {
     let mut model = sample_solid_model();
-    model.steps = vec![
-        AnalysisStep {
-            step_id: "cht_flow".to_string(),
-            kind: AnalysisStepKind::Cfd,
-        },
-        AnalysisStep {
-            step_id: "cht_thermal".to_string(),
-            kind: AnalysisStepKind::Thermal,
-        },
-    ];
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    model.sequence = AnalysisSequence::from_steps(
+        "cht_sequence",
+        vec![ProcedureStep::coupled(
+            "cht",
+            CoupledPhysicsFamily::ConjugateHeatTransfer,
+            AnalysisProcedure::TransientResponse,
+        )],
+    );
+    model.cfd = Some(sample_cfd_domain());
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 60.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
-                temperature_delta_k: 70.0,
-            }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.5,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(60.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
+            region_temperature_deltas: Vec::new(),
         },
     );
     model
 }
 
+#[derive(Clone)]
+struct TestThermoRegionTemperatureDelta {
+    region_id: String,
+    temperature_delta_k: f64,
+}
+
+#[derive(Clone)]
+struct TestThermoMechanicalCoupling {
+    reference_temperature_k: runmat_types::physical::Temperature,
+    applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
+    thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion,
+    region_temperature_deltas: Vec<TestThermoRegionTemperatureDelta>,
+}
+
+#[derive(Clone, Copy)]
+struct TestElectroThermalCoupling {
+    reference_temperature_k: runmat_types::physical::Temperature,
+    applied_voltage_v: f64,
+    base_electrical_conductivity_s_per_m: f64,
+    resistive_heating_coefficient: runmat_types::physical::InverseTemperature,
+}
+
 fn sample_fsi_model() -> AnalysisModel {
     let mut model = sample_model();
-    model.steps = vec![
-        AnalysisStep {
-            step_id: "fsi_structure".to_string(),
-            kind: AnalysisStepKind::Transient,
-        },
-        AnalysisStep {
-            step_id: "fsi_flow".to_string(),
-            kind: AnalysisStepKind::Cfd,
-        },
-    ];
-    model.cfd = Some(runmat_analysis_core::CfdDomain {
-        enabled: true,
-        solve_family: CfdSolveFamily::Transient,
-        reference_density_kg_per_m3: 1.225,
-        dynamic_viscosity_pa_s: 1.81e-5,
-        inlet_velocity_m_per_s: 4.0,
-        turbulence_intensity: 0.06,
-        time_profile: vec![
-            runmat_analysis_core::CfdTimeProfilePoint {
-                normalized_time: 0.0,
-                inlet_scale: 0.6,
-            },
-            runmat_analysis_core::CfdTimeProfilePoint {
-                normalized_time: 1.0,
-                inlet_scale: 1.0,
-            },
-        ],
-    });
+    model.sequence = AnalysisSequence::from_steps(
+        "fsi_sequence",
+        vec![ProcedureStep::coupled(
+            "fsi",
+            CoupledPhysicsFamily::FluidStructureInteraction,
+            AnalysisProcedure::TransientResponse,
+        )],
+    );
+    append_scalar_history_excitation(
+        &mut model,
+        "fsi_inlet_velocity",
+        vec![0.0, 1.0],
+        vec![Velocity::new(2.4), Velocity::new(4.0)],
+        ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("inlet"),
+        )),
+        Some(Direction {
+            vector: [1.0, 0.0, 0.0],
+        }),
+        PhysicalSignal::Velocity,
+        ExcitationAction::InletVelocity,
+    );
+    model.cfd = Some(sample_cfd_domain());
     model
 }
 
-fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
+#[derive(Clone, Copy)]
+enum TestModelKind {
+    LinearStaticStructural,
+    ModalStructural,
+    AcousticHarmonic,
+    ElectromagneticHarmonic,
+}
+
+struct TestModelSpec {
+    model_id: String,
+    kind: TestModelKind,
+}
+
+fn test_model_for_geometry(
+    geometry: &GeometryAsset,
+    spec: TestModelSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisModel>, OperationErrorEnvelope> {
+    let mut model = sample_solid_model();
+    model.model_id = AnalysisModelId(spec.model_id);
+    model.geometry_id = geometry.geometry_id.clone();
+    model.geometry_revision = geometry.revision;
+    model.units = runmat_types::physical::CoordinateUnits::canonical();
+    model.material_assignments = vec![MaterialAssignment {
+        target: match spec.kind {
+            TestModelKind::AcousticHarmonic | TestModelKind::ElectromagneticHarmonic => {
+                runmat_analysis_core::PropertyRegionTarget::all_cells()
+            }
+            _ => runmat_analysis_core::PropertyRegionTarget::all_solids(),
+        },
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    match spec.kind {
+        TestModelKind::LinearStaticStructural => {
+            model.sequence = AnalysisSequence::from_steps(
+                "test_linear_static",
+                vec![ProcedureStep::structural_static("step_default_static")],
+            );
+        }
+        TestModelKind::ModalStructural => {
+            model.sequence = AnalysisSequence::from_steps(
+                "test_modal",
+                vec![ProcedureStep::structural_modal("step_default_modal")],
+            );
+            model.signals.clear();
+            model.excitations.clear();
+            model.excitation_cases.clear();
+        }
+        TestModelKind::AcousticHarmonic => {
+            for material in &mut model.materials {
+                material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
+                    speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+                    damping_ratio: runmat_types::physical::DampingRatio::new(0.02),
+                });
+            }
+            model.sequence = AnalysisSequence::from_steps(
+                "test_acoustic_harmonic",
+                vec![ProcedureStep::acoustic_harmonic(
+                    "step_default_acoustic_harmonic",
+                )],
+            );
+            model.constraints.clear();
+            model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
+                boundary_id: "bc_default_acoustic_rigid_wall".to_string(),
+                target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("root")),
+                operator: runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
+            }];
+            model.signals.clear();
+            model.excitations.clear();
+            model.excitation_cases.clear();
+            append_constant_excitation(
+                &mut model,
+                "excitation_default_acoustic_pressure",
+                runmat_meshing_core::fixtures::fixture_face("tip"),
+                ConstantExcitation::AcousticPressure(1.0),
+            );
+        }
+        TestModelKind::ElectromagneticHarmonic => {
+            for material in &mut model.materials {
+                material.electrical = Some(test_electrical_material());
+            }
+            model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
+                reference_frequency: Frequency::new(60.0),
+            });
+            model.sequence = AnalysisSequence::from_steps(
+                "test_electromagnetic_harmonic",
+                vec![ProcedureStep::electromagnetic_harmonic(
+                    "step_default_electromagnetic",
+                )],
+            );
+            model.sequence.steps[0].independent_domain =
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![60.0]);
+            model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Electrical(
+                runmat_analysis_core::ElectricalConstraint {
+                    constraint_id: "bc_default_em_pec".to_string(),
+                    kind:
+                        runmat_analysis_core::ElectricalConstraintKind::ElectricPerfectConductor {
+                            target: RegionTarget::boundary(
+                                runmat_meshing_core::fixtures::fixture_face("root"),
+                            ),
+                        },
+                },
+            )];
+            model.boundaries.clear();
+            model.signals.clear();
+            model.excitations.clear();
+            model.excitation_cases.clear();
+            append_constant_excitation(
+                &mut model,
+                "excitation_default_em_current",
+                "tip",
+                ConstantExcitation::ElectricCurrent {
+                    real_amperes: 100.0,
+                    imaginary_amperes: 0.0,
+                    frequency_hz: None,
+                },
+            );
+        }
+    }
+    Ok(OperationEnvelope::new(
+        "test.explicit_model",
+        "test.explicit_model/v1",
+        &context,
+        model,
+    ))
+}
+
+fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: TestThermoMechanicalCoupling) {
+    for material in &mut model.materials {
+        let thermal = material.thermal.as_mut().expect("thermal fixture material");
+        thermal.reference_temperature_k = runmat_types::physical::Temperature::new(
+            coupling.reference_temperature_k.canonical_value(),
+        );
+        thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(
+            coupling.thermal_expansion_coefficient.canonical_value(),
+        );
+    }
+    append_scalar_constant_excitation(
+        model,
+        "thermo_temperature",
+        Temperature::new(
+            coupling.reference_temperature_k.canonical_value()
+                + coupling.applied_temperature_delta_k.canonical_value(),
+        ),
+        ExcitationTarget::WholeModel,
+        None,
+        PhysicalSignal::Temperature,
+        ExcitationAction::TemperatureField,
+    );
+    for (index, delta) in coupling.region_temperature_deltas.iter().enumerate() {
+        append_scalar_constant_excitation(
+            model,
+            &format!("thermo_region_temperature_{index}"),
+            Temperature::new(
+                coupling.reference_temperature_k.canonical_value() + delta.temperature_delta_k,
+            ),
+            ExcitationTarget::Region(RegionTarget::volume(&delta.region_id)),
+            None,
+            PhysicalSignal::Temperature,
+            ExcitationAction::TemperatureField,
+        );
+    }
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
-        enabled: coupling.enabled,
-        reference_temperature_k: coupling.reference_temperature_k,
-        applied_temperature_delta_k: coupling.applied_temperature_delta_k,
-        field_artifact_id: coupling.field_artifact_id,
-        field_source: coupling
-            .field_source
-            .map(|source| runmat_analysis_core::ThermoFieldSource {
-                source_id: source.source_id,
-                revision: source.revision,
-                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
-                    ThermoFieldInterpolationMode::Linear => {
-                        runmat_analysis_core::ThermoFieldInterpolationMode::Linear
-                    }
-                    ThermoFieldInterpolationMode::Step => {
-                        runmat_analysis_core::ThermoFieldInterpolationMode::Step
-                    }
-                }),
-                expected_region_ids: source.expected_region_ids,
-            }),
-        region_temperature_deltas: coupling
-            .region_temperature_deltas
-            .into_iter()
-            .map(|delta| runmat_analysis_core::ThermoRegionTemperatureDelta {
-                region_id: delta.region_id,
-                temperature_delta_k: delta.temperature_delta_k,
-            })
-            .collect(),
-        time_profile: coupling
-            .time_profile
-            .into_iter()
-            .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
-                normalized_time: point.normalized_time,
-                scale: point.scale,
-            })
-            .collect(),
+        reference_temperature: Temperature::new(coupling.reference_temperature_k.canonical_value()),
     });
 }
 
-fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroThermalCouplingOptions) {
+fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: TestElectroThermalCoupling) {
     for material in &mut model.materials {
         material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-            reference_temperature_k: coupling.reference_temperature_k,
-            conductivity_s_per_m: coupling.base_electrical_conductivity_s_per_m,
-            resistive_heating_coefficient: coupling.resistive_heating_coefficient,
-            relative_permittivity: 1.0,
-            relative_permeability: 1.0,
+            reference_temperature_k: runmat_types::physical::Temperature::new(
+                coupling.reference_temperature_k.canonical_value(),
+            ),
+            conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                coupling.base_electrical_conductivity_s_per_m,
+            ),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                coupling.resistive_heating_coefficient.canonical_value(),
+            ),
+            relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+            relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
             conductivity_frequency_response: Vec::new(),
         });
     }
+    append_scalar_constant_excitation(
+        model,
+        "electro_thermal_potential",
+        ElectricPotential::new(coupling.applied_voltage_v),
+        ExcitationTarget::Region(RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("tip"),
+        )),
+        None,
+        PhysicalSignal::ElectricPotential,
+        ExcitationAction::TerminalVoltage,
+    );
     model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
-        enabled: coupling.enabled,
-        reference_temperature_k: coupling.reference_temperature_k,
-        applied_voltage_v: coupling.applied_voltage_v,
-        region_conductivity_scales: coupling
-            .region_conductivity_scales
-            .into_iter()
-            .map(
-                |scale| runmat_analysis_core::ElectroRegionConductivityScale {
-                    region_id: scale.region_id,
-                    conductivity_scale: scale.conductivity_scale,
-                },
-            )
-            .collect(),
-        time_profile: coupling
-            .time_profile
-            .into_iter()
-            .map(|point| runmat_analysis_core::ElectroTimeProfilePoint {
-                normalized_time: point.normalized_time,
-                current_scale: point.current_scale,
-            })
-            .collect(),
+        reference_temperature: Temperature::new(coupling.reference_temperature_k.canonical_value()),
     });
 }
 
-fn set_model_plasticity(model: &mut AnalysisModel, plasticity: PlasticityConstitutiveOptions) {
-    if !plasticity.enabled {
-        return;
-    }
+fn set_model_plasticity(
+    model: &mut AnalysisModel,
+    plasticity: runmat_analysis_core::MaterialPlasticModel,
+) {
     for material in &mut model.materials {
-        material.plastic = Some(runmat_analysis_core::MaterialPlasticModel {
-            yield_strain: plasticity.yield_strain,
-            hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
-            saturation_exponent: plasticity.saturation_exponent,
-        });
+        material.plastic = Some(plasticity.clone());
     }
 }
 
-fn set_model_contact(model: &mut AnalysisModel, contact: ContactInterfaceOptions) {
-    if !contact.enabled {
-        return;
-    }
+fn set_model_contact(model: &mut AnalysisModel, friction_coefficient: f64) {
     model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
         interface_id: "contact_1".to_string(),
-        primary_region_id: "root".to_string(),
-        secondary_region_id: "tip".to_string(),
+        primary: runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("root"),
+        ),
+        secondary: runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("tip"),
+        ),
         kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
             runmat_analysis_core::ContactInterfaceModel {
-                penalty_stiffness_scale: contact.penalty_stiffness_scale,
-                max_penetration_ratio: contact.max_penetration_ratio,
-                friction_coefficient: contact.friction_coefficient,
+                friction: if friction_coefficient == 0.0 {
+                    runmat_analysis_core::ContactFriction::Frictionless
+                } else {
+                    runmat_analysis_core::ContactFriction::Coulomb {
+                        coefficient: runmat_analysis_core::FrictionCoefficient::new(
+                            friction_coefficient,
+                        ),
+                    }
+                },
             },
         ),
     }];
@@ -557,6 +938,7 @@ fn sample_geometry_asset() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo:beam".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/fixtures/beam.stl".to_string(),
             sha256: "hash-beam".to_string(),
             importer_version: "stl/v1".to_string(),
@@ -565,10 +947,11 @@ fn sample_geometry_asset() -> GeometryAsset {
             kind: SourceGeometryKind::Mesh,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 2,
         meshes: vec![MeshDescriptor {
             mesh_id: "mesh_1".to_string(),
@@ -583,7 +966,7 @@ fn sample_geometry_asset() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "region_default".to_string(),
-            name: "Default Region".to_string(),
+            name: "Default Region".into(),
             tag: Some("mesh_default".to_string()),
             cad_ownership: None,
         }],
@@ -600,6 +983,10 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo:closed_cube".to_string(),
         source: GeometrySource {
+            unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                runmat_geometry_core::LengthUnit::Meter,
+                "canonical solver fixture",
+            ),
             path: "/fixtures/closed_cube.step".to_string(),
             sha256: "hash-closed-cube".to_string(),
             importer_version: "test".to_string(),
@@ -608,10 +995,11 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
             kind: SourceGeometryKind::Cad,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "cube_surface".to_string(),
@@ -649,13 +1037,13 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
         regions: vec![
             Region {
                 region_id: "root".to_string(),
-                name: "root".to_string(),
+                name: "root".into(),
                 tag: Some("fixed".to_string()),
                 cad_ownership: None,
             },
             Region {
                 region_id: "tip".to_string(),
-                name: "tip".to_string(),
+                name: "tip".into(),
                 tag: Some("load".to_string()),
                 cad_ownership: None,
             },
@@ -678,722 +1066,118 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
     }
 }
 
-fn split_material_through_hole_study_geometry() -> GeometryAsset {
-    let mut geometry = split_material_through_hole_plate_geometry();
-    add_through_hole_study_boundary_regions(&mut geometry);
-    geometry
+fn sample_linear_static_study_spec() -> AnalysisStudySpec {
+    linear_static_study_spec_for_geometry(closed_cube_geometry_asset())
 }
 
-fn through_hole_study_geometry() -> GeometryAsset {
-    let mut geometry = through_hole_plate_geometry();
-    add_through_hole_study_boundary_regions(&mut geometry);
-    geometry
-}
-
-fn nested_tetrahedron_shell_study_geometry() -> GeometryAsset {
-    let mut geometry = nested_tetrahedron_shell_geometry();
-    geometry.regions.extend([
-        Region {
-            region_id: "root".to_string(),
-            name: "root".to_string(),
-            tag: Some("fixed".to_string()),
-            cad_ownership: None,
-        },
-        Region {
-            region_id: "tip".to_string(),
-            name: "tip".to_string(),
-            tag: Some("load".to_string()),
-            cad_ownership: None,
-        },
-    ]);
-    geometry.region_entity_mappings.extend([
-        RegionEntityMapping::new(
-            "root",
-            "nested_tetrahedron_shell_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(0, 1)],
-        ),
-        RegionEntityMapping::new(
-            "tip",
-            "nested_tetrahedron_shell_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(1, 1)],
-        ),
-    ]);
-    geometry
-}
-
-fn add_through_hole_study_boundary_regions(geometry: &mut GeometryAsset) {
-    geometry.regions.extend([
-        Region {
-            region_id: "root".to_string(),
-            name: "root".to_string(),
-            tag: Some("fixed".to_string()),
-            cad_ownership: None,
-        },
-        Region {
-            region_id: "tip".to_string(),
-            name: "tip".to_string(),
-            tag: Some("load".to_string()),
-            cad_ownership: None,
-        },
-    ]);
-    geometry.region_entity_mappings.extend([
-        RegionEntityMapping::new(
-            "root",
-            "through_hole_plate_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(8, 4)],
-        ),
-        RegionEntityMapping::new(
-            "tip",
-            "through_hole_plate_surface",
-            EntityKind::Face,
-            vec![EntityIdRange::new(0, 4)],
-        ),
-    ]);
-}
-
-fn sample_prep_artifact_id_for_model(model: &AnalysisModel) -> String {
-    let mut geometry = sample_geometry_asset();
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-    let prep = crate::geometry::geometry_prep_for_analysis_op(
+fn linear_static_study_spec_for_geometry(geometry: GeometryAsset) -> AnalysisStudySpec {
+    let procedure_step = ProcedureStep::structural_static("step_default_static");
+    let model = test_model_for_geometry(
         &geometry,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
+        TestModelSpec {
+            model_id: "study_model_linear_static_001".to_string(),
+            kind: TestModelKind::LinearStaticStructural,
+        },
         OperationContext::new(None, None),
     )
-    .expect("prep should succeed");
-    prep.data.prep_artifact_id
-}
-
-fn sample_step_like_geometry_asset() -> GeometryAsset {
-    let mut asset = sample_geometry_asset();
-    asset.source_geometry.kind = SourceGeometryKind::Cad;
-    asset.source_geometry.material_evidence = vec![MaterialEvidence {
-        source_key: "STEP:MATERIAL".to_string(),
-        normalized_key: "material_name".to_string(),
-        value: "Aluminum 6061".to_string(),
-        confidence: MaterialEvidenceConfidence::High,
-        unit_basis: None,
-        assumptions: vec!["imported".to_string()],
-    }];
-    asset.regions = vec![
-        Region {
-            region_id: "region_root".to_string(),
-            name: "Base_Mount".to_string(),
-            tag: Some("fixed".to_string()),
-            cad_ownership: None,
-        },
-        Region {
-            region_id: "region_tip".to_string(),
-            name: "Tip_Load".to_string(),
-            tag: Some("load".to_string()),
-            cad_ownership: None,
-        },
-    ];
-    asset.region_entity_mappings = vec![
-        RegionEntityMapping::all_faces("region_root", "mesh_1", 1),
-        RegionEntityMapping::all_faces("region_tip", "mesh_1", 1),
-    ];
-    asset
-}
-
-fn sample_linear_static_study_spec() -> AnalysisStudySpec {
+    .expect("explicit structural test model")
+    .data;
     AnalysisStudySpec {
         study_id: "study_linear_static_001".to_string(),
-        geometry: closed_cube_geometry_asset(),
-        create_model_intent: AnalysisCreateModelIntentSpec {
-            model_id: "study_model_linear_static_001".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
+        geometry,
+        model_source_evidence: None,
+        model,
+        execution: AnalysisExecutionPlan {
+            steps: vec![AnalysisExecutionStep {
+                step_id: procedure_step.step_id.clone(),
+                backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
+                solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
+            }],
         },
-        model: None,
-        run_kind: AnalysisRunKind::LinearStatic,
-        backend: ComputeBackend::Cpu,
-        mesh_options: Some(runmat_meshing_core::VolumeMeshingOptions::default()),
-        outputs: Vec::new(),
-        analysis_mesh_artifact_path: None,
-        analysis_mesh_evidence_artifact_path: None,
-        linear_static_run_options: None,
-        modal_run_options: None,
-        acoustic_run_options: None,
-        thermal_run_options: None,
-        transient_run_options: None,
-        cfd_run_options: None,
-        cht_run_options: None,
-        fsi_run_options: None,
-        nonlinear_run_options: None,
-        electromagnetic_run_options: None,
+        meshing_settings: Some(runmat_meshing_core::MeshingRequestSettings::default()),
+        immutable_values: Vec::new(),
+        solver_mesh_artifact_path: None,
+        meshing_evidence_artifact_path: None,
     }
 }
 
 fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
+    let procedure_step = ProcedureStep::electromagnetic_harmonic("step_default_electromagnetic");
+    let geometry = sample_geometry_asset();
+    let model = test_model_for_geometry(
+        &geometry,
+        TestModelSpec {
+            model_id: "study_model_electromagnetic_001".to_string(),
+            kind: TestModelKind::ElectromagneticHarmonic,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("explicit electromagnetic test model")
+    .data;
     AnalysisStudySpec {
         study_id: "study_electromagnetic_001".to_string(),
-        geometry: sample_geometry_asset(),
-        create_model_intent: AnalysisCreateModelIntentSpec {
-            model_id: "study_model_electromagnetic_001".to_string(),
-            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
-            prep_context: None,
+        geometry,
+        model_source_evidence: None,
+        model,
+        execution: AnalysisExecutionPlan {
+            steps: vec![AnalysisExecutionStep {
+                step_id: procedure_step.step_id.clone(),
+                backend: ComputeBackend::Cpu,
+                accelerator_admission: Default::default(),
+                solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
+            }],
         },
-        model: None,
-        run_kind: AnalysisRunKind::Electromagnetic,
-        backend: ComputeBackend::Cpu,
-        mesh_options: None,
-        outputs: Vec::new(),
-        analysis_mesh_artifact_path: None,
-        analysis_mesh_evidence_artifact_path: None,
-        linear_static_run_options: None,
-        modal_run_options: None,
-        acoustic_run_options: None,
-        thermal_run_options: None,
-        transient_run_options: None,
-        cfd_run_options: None,
-        cht_run_options: None,
-        fsi_run_options: None,
-        nonlinear_run_options: None,
-        electromagnetic_run_options: None,
+        meshing_settings: None,
+        immutable_values: Vec::new(),
+        solver_mesh_artifact_path: None,
+        meshing_evidence_artifact_path: None,
     }
 }
 
 #[test]
-fn fea_document_resolves_study_geometry_and_run_options() {
-    let _guard = analysis_test_guard();
-    let tmp = tempfile::tempdir().expect("tempdir should be created");
-    fs::write(tmp.path().join("part.stl"), TRIANGLE_STL).expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: bracket_static
-geometry:
-  path: part.stl
-  units: meter
-model:
-  profile: linear_static_structural
-run:
-  backend: cpu
-  options:
-    deterministic_mode: true
-    precision_mode: fp64
-    preconditioner_mode: jacobi
-    quality_policy: strict
-outputs:
-  - id: displacement_view
-    field: structural.displacement
-    location: nodes
-    kind: vector
-"#;
+fn study_content_digest_excludes_artifact_destinations() {
+    let mut first = sample_linear_static_study_spec();
+    first.solver_mesh_artifact_path = Some("first/solver-mesh.rmmesh".to_string());
+    first.meshing_evidence_artifact_path = Some("first/meshing-evidence.json".to_string());
+    let mut second = first.clone();
+    second.solver_mesh_artifact_path = Some("second/solver-mesh.rmmesh".to_string());
+    second.meshing_evidence_artifact_path = Some("second/meshing-evidence.json".to_string());
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect("FEA study document should resolve");
-
-    let FeaResolvedDocument::Study(spec) = resolved else {
-        panic!("expected resolved study");
-    };
-    assert_eq!(spec.study_id, "bracket_static");
-    assert_eq!(spec.geometry.units, UnitSystem::Meter);
-    assert!(spec.geometry.source.path.ends_with("part.stl"));
     assert_eq!(
-        spec.create_model_intent.profile,
-        AnalysisCreateModelProfile::LinearStaticStructural
+        analysis_study_content_digest(&first),
+        analysis_study_content_digest(&second)
     );
-    assert_eq!(spec.create_model_intent.model_id, "bracket_static_model");
-    assert_eq!(spec.run_kind, AnalysisRunKind::LinearStatic);
-    assert_eq!(spec.backend, ComputeBackend::Cpu);
-    assert_eq!(spec.outputs.len(), 1);
-    assert_eq!(spec.outputs[0].id, "displacement_view");
-    assert_eq!(spec.outputs[0].field_id, "structural.displacement");
-    assert_eq!(spec.outputs[0].location.as_deref(), Some("nodes"));
-    assert_eq!(spec.outputs[0].kind.as_deref(), Some("vector"));
-    assert!(spec.model.is_none());
-    let mesh_options = spec
-        .mesh_options
-        .as_ref()
-        .expect("linear static structural studies should default to solid analysis mesh options");
-    assert_eq!(
-        mesh_options.kind,
-        runmat_meshing_core::MeshKindRequest::Solid
-    );
-    assert_eq!(
-        mesh_options.element,
-        runmat_meshing_core::VolumeElementKind::Tetrahedron4
-    );
-    assert_eq!(
-        mesh_options.profile,
-        runmat_meshing_core::MeshProfile::AnalysisReady
-    );
-
-    let options = spec
-        .linear_static_run_options
-        .expect("linear static options should parse");
-    assert!(options.deterministic_mode);
-    assert_eq!(options.precision_mode, PrecisionMode::Fp64);
-    assert_eq!(options.preconditioner_mode, PreconditionerMode::Jacobi);
-    assert_eq!(options.quality_policy, QualityPolicy::Strict);
-}
-
-#[test]
-fn mesh_options_convert_study_unit_lengths_to_si_before_meshing() {
-    let options = runmat_meshing_core::VolumeMeshingOptions {
-        target_size: runmat_meshing_core::MeshTargetSize::LengthM(15.0),
-        min_size_m: Some(2.0),
-        max_size_m: Some(25.0),
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-
-    let converted = mesh_options_in_si_units(options, UnitSystem::Millimeter);
-
-    assert_eq!(
-        converted.target_size,
-        runmat_meshing_core::MeshTargetSize::LengthM(0.015)
-    );
-    assert_eq!(converted.min_size_m, Some(0.002));
-    assert_eq!(converted.max_size_m, Some(0.025));
-}
-
-#[test]
-fn fea_document_rejects_legacy_run_kind_profile_mismatch() {
-    let _guard = analysis_test_guard();
-    let tmp = tempfile::tempdir().expect("tempdir should be created");
-    fs::write(tmp.path().join("part.stl"), TRIANGLE_STL).expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: bracket_thermal
-geometry:
-  path: part.stl
-  units: meter
-model:
-  profile: thermal_standalone
-run:
-  kind: linear_static
-  backend: cpu
-"#;
-
-    let err = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect_err("mismatched legacy run.kind should fail");
-
-    assert!(err.contains("run.kind"));
-    assert!(err.contains("model.profile"));
-}
-
-#[test]
-fn fea_document_resolves_explicit_model_and_sweep() {
-    let _guard = analysis_test_guard();
-    let tmp = tempfile::tempdir().expect("tempdir should be created");
-    fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
-        .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: sweep
-id: bracket_sweep
-fail_fast: false
-studies:
-  - version: 1
-    id: bracket_static_a
-    geometry:
-      path: assembly.step
-      units: millimeter
-    model:
-      id: bracket_model
-      profile: linear_static_structural
-      defaults: none
-      frame: global
-    regions:
-      bracket:
-        selector: "name:Bracket_A"
-    materials:
-      aluminum:
-        name: Aluminum 6061
-        mechanical:
-          youngs_modulus_pa: 69000000000.0
-          poisson_ratio: 0.33
-    material_assignments:
-      - region: bracket
-        material: aluminum
-    boundary_conditions:
-      - id: fixed_bracket
-        region: bracket
-        kind: fixed
-    loads:
-      - id: pressure_load
-        region: bracket
-        type: pressure
-        magnitude_pa: 1200.0
-    steps:
-      - id: static_step
-        kind: static
-    run:
-      backend: cpu
-"#;
-
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect("FEA sweep document should resolve");
-
-    let FeaResolvedDocument::Sweep(sweep) = resolved else {
-        panic!("expected resolved sweep");
-    };
-    assert_eq!(sweep.sweep_id, "bracket_sweep");
-    assert!(!sweep.fail_fast);
-    assert_eq!(sweep.studies.len(), 1);
-
-    let study = &sweep.studies[0];
-    assert_eq!(study.study_id, "bracket_static_a");
-    assert_eq!(study.create_model_intent.model_id, "bracket_model");
-    assert_eq!(study.geometry.units, UnitSystem::Millimeter);
-    let model = study.model.as_ref().expect("explicit model should resolve");
-    assert_eq!(model.model_id.0, "bracket_model");
-    assert_eq!(model.materials.len(), 1);
-    assert_eq!(model.material_assignments.len(), 1);
-    assert_eq!(model.material_assignments[0].region_id, "region_1");
-    assert_eq!(model.boundary_conditions.len(), 1);
-    assert_eq!(model.loads.len(), 1);
-    assert_eq!(model.steps.len(), 1);
-}
-
-#[test]
-fn fea_document_resolves_moment_loads() {
-    let _guard = analysis_test_guard();
-    let tmp = tempfile::tempdir().expect("tempdir should be created");
-    fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
-        .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: beam_static
-geometry:
-  path: assembly.step
-  units: meter
-model:
-  id: beam_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  tip:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-material_assignments:
-  - region: tip
-    material: steel
-boundary_conditions:
-  - id: fixed_tip
-    region: tip
-    kind: fixed
-loads:
-  - id: tip_moment
-    region: tip
-    type: moment
-    vector: [10.0, 20.0, 30.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
-
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect("FEA study document should resolve");
-
-    let FeaResolvedDocument::Study(study) = resolved else {
-        panic!("expected resolved study");
-    };
-    let model = study.model.as_ref().expect("explicit model should resolve");
-    assert_eq!(model.loads.len(), 1);
-    assert!(matches!(
-        model.loads[0].kind,
-        LoadKind::Moment {
-            mx: 10.0,
-            my: 20.0,
-            mz: 30.0
-        }
-    ));
-}
-
-#[test]
-fn fea_document_resolves_prescribed_rotation_boundary_conditions() {
-    let tmp = tempfile::tempdir().expect("tempdir should be created");
-    let geometry_path = tmp.path().join("part.step");
-    std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
-
-    let input = r#"
-version: 1
-kind: study
-id: rotation_bc_static
-geometry:
-  path: part.step
-  units: meter
-model:
-  id: rotation_bc_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  tip:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-material_assignments:
-  - region: tip
-    material: steel
-boundary_conditions:
-  - id: tip_rotation
-    region: tip
-    type: prescribed_rotation
-    rx: 0.1
-    ry: 0.2
-    rz: 0.3
-loads:
-  - id: tip_force
-    region: tip
-    type: force
-    vector: [0.0, -1000.0, 0.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
-
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect("FEA study document should resolve");
-
-    let FeaResolvedDocument::Study(study) = resolved else {
-        panic!("expected resolved study");
-    };
-    let model = study.model.as_ref().expect("explicit model should resolve");
-    assert_eq!(model.boundary_conditions.len(), 1);
-    assert!(matches!(
-        model.boundary_conditions[0].kind,
-        BoundaryConditionKind::PrescribedRotation {
-            rx: 0.1,
-            ry: 0.2,
-            rz: 0.3
-        }
-    ));
-}
-
-#[test]
-fn fea_document_resolves_beam_structural_model_data() {
-    let tmp = tempfile::tempdir().expect("tempdir should be created");
-    std::fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
-        .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: beam_static
-geometry:
-  path: assembly.step
-  units: meter
-model:
-  id: beam_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  beam_span:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-material_assignments:
-  - region: beam_span
-    material: steel
-nodes:
-  - id: 1
-    coordinates_m: [0.0, 0.0, 0.0]
-  - id: 2
-    coordinates_m: [1.0, 0.0, 0.0]
-elements:
-  - id: beam_1
-    region: beam_span
-    type: beam
-    nodes: [1, 2]
-    section: rect_20x10
-    reference_axis: [0.0, 0.0, 1.0]
-sections:
-  - id: rect_20x10
-    area_m2: 2.0e-4
-    iy_m4: 1.6e-9
-    iz_m4: 6.4e-9
-    torsion_j_m4: 2.4e-9
-    outer_fiber_y_m: 0.01
-    outer_fiber_z_m: 0.005
-    torsion_outer_radius_m: 0.011180339887498949
-boundary_conditions:
-  - id: fixed_root
-    region: beam_span
-    kind: fixed
-loads:
-  - id: tip_force
-    region: beam_span
-    type: force
-    vector: [0.0, -1000.0, 0.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
-
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect("FEA study document should resolve");
-
-    let FeaResolvedDocument::Study(study) = resolved else {
-        panic!("expected resolved study");
-    };
-    let model = study.model.as_ref().expect("explicit model should resolve");
-    let structural = model
-        .structural
-        .as_ref()
-        .expect("structural model should resolve");
-    assert_eq!(structural.nodes.len(), 2);
-    assert_eq!(structural.elements.len(), 1);
-    assert_eq!(structural.beam_sections.len(), 1);
-    assert_eq!(structural.elements[0].region_id, "region_1");
-    let beam = match &structural.elements[0].kind {
-        StructuralElementKind::Beam(beam) => beam,
-        StructuralElementKind::Shell(_) => panic!("expected beam element"),
-    };
-    assert_eq!(beam.node_ids, [1, 2]);
-    assert_eq!(beam.section_id, "rect_20x10");
-    assert_eq!(beam.reference_axis, [0.0, 0.0, 1.0]);
-    assert_eq!(structural.beam_sections[0].outer_fiber_y_m, 0.01);
-    assert_eq!(structural.beam_sections[0].outer_fiber_z_m, 0.005);
-    assert_eq!(
-        structural.beam_sections[0].torsion_outer_radius_m,
-        0.011_180_339_887_498_949
+    second.execution.steps[0].backend = ComputeBackend::Gpu;
+    assert_ne!(
+        analysis_study_content_digest(&first),
+        analysis_study_content_digest(&second)
     );
 }
 
 #[test]
-fn fea_document_resolves_shell_structural_model_data() {
-    let tmp = tempfile::tempdir().expect("tempdir should be created");
-    std::fs::write(tmp.path().join("assembly.step"), SIMPLE_STEP)
-        .expect("fixture geometry should write");
-    let input = r#"
-version: 1
-kind: study
-id: shell_static
-geometry:
-  path: assembly.step
-  units: meter
-model:
-  id: shell_model
-  profile: linear_static_structural
-  defaults: none
-regions:
-  shell_panel:
-    selector: "name:Bracket_A"
-materials:
-  steel:
-    mechanical:
-      youngs_modulus_pa: 200000000000.0
-      poisson_ratio: 0.30
-      density_kg_per_m3: 7850.0
-material_assignments:
-  - region: shell_panel
-    material: steel
-nodes:
-  - id: 1
-    coordinates_m: [0.0, 0.0, 0.0]
-  - id: 2
-    coordinates_m: [1.0, 0.0, 0.0]
-  - id: 3
-    coordinates_m: [0.0, 1.0, 0.0]
-elements:
-  - id: shell_1
-    region: shell_panel
-    type: shell
-    nodes: [1, 2, 3]
-    section: panel_2mm
-    reference_axis: [1.0, 0.0, 0.0]
-sections:
-  - id: panel_2mm
-    type: shell
-    thickness_m: 0.002
-    shear_correction: 0.8333333333333334
-    drilling_stiffness_scale: 0.0001
-boundary_conditions:
-  - id: fixed_edge
-    region: shell_panel
-    kind: fixed
-loads:
-  - id: edge_moment
-    region: shell_panel
-    type: moment
-    vector: [0.0, 5.0, 0.0]
-steps:
-  - id: static_step
-    kind: static
-run:
-  backend: cpu
-"#;
+fn runtime_contracts_reject_retired_mesh_artifact_field_names() {
+    let mut study = serde_json::to_value(sample_linear_static_study_spec())
+        .expect("study contract should serialize");
+    study
+        .as_object_mut()
+        .expect("study should serialize as an object")
+        .insert(
+            "analysis_mesh_artifact_path".to_owned(),
+            serde_json::Value::String("retired.json".to_owned()),
+        );
+    assert!(serde_json::from_value::<AnalysisStudySpec>(study).is_err());
 
-    let resolved = pollster::block_on(parse_and_resolve_fea_document(input, tmp.path()))
-        .expect("FEA shell study document should resolve");
-
-    let FeaResolvedDocument::Study(study) = resolved else {
-        panic!("expected resolved study");
-    };
-    let structural = study
-        .model
-        .as_ref()
-        .and_then(|model| model.structural.as_ref())
-        .expect("structural model should resolve");
-    assert_eq!(structural.nodes.len(), 3);
-    assert_eq!(structural.elements.len(), 1);
-    assert_eq!(structural.beam_sections.len(), 0);
-    assert_eq!(structural.shell_sections.len(), 1);
-    let shell = match &structural.elements[0].kind {
-        StructuralElementKind::Shell(shell) => shell,
-        StructuralElementKind::Beam(_) => panic!("expected shell element"),
-    };
-    assert_eq!(shell.node_ids, [1, 2, 3]);
-    assert_eq!(shell.section_id, "panel_2mm");
-    assert_eq!(shell.reference_axis, [1.0, 0.0, 0.0]);
-    assert_eq!(structural.shell_sections[0].thickness_m, 0.002);
-    assert_eq!(structural.shell_sections[0].shear_correction, 5.0 / 6.0);
-    assert_eq!(
-        structural.shell_sections[0].drilling_stiffness_scale,
-        1.0e-4
-    );
-}
-
-#[test]
-fn analysis_create_model_returns_v1_envelope() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "model_from_geo".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
-        },
-        OperationContext::new(Some("trace-create-1".to_string()), None),
-    )
-    .expect("create model should pass");
-
-    assert_eq!(envelope.operation, "fea.create_model");
-    assert_eq!(envelope.op_version, "fea.create_model/v1");
-    assert_eq!(envelope.data.model_id.0, "model_from_geo");
-    assert_eq!(envelope.data.geometry_id, "geo:beam");
-    assert_eq!(envelope.data.geometry_revision, 2);
-    assert_eq!(envelope.data.units, UnitSystem::Meter);
-    assert_eq!(envelope.data.frame, ReferenceFrame::Global);
-    assert!(!envelope.data.materials.is_empty());
-    assert!(!envelope.data.boundary_conditions.is_empty());
-    assert!(!envelope.data.loads.is_empty());
-    assert!(!envelope.data.steps.is_empty());
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Static);
+    let mut options =
+        serde_json::to_value(AnalysisRunOptions::default()).expect("run options should serialize");
+    options
+        .as_object_mut()
+        .expect("run options should serialize as an object")
+        .insert(
+            "analysis_mesh_artifact_path".to_owned(),
+            serde_json::Value::String("retired.json".to_owned()),
+        );
+    assert!(serde_json::from_value::<AnalysisRunOptions>(options).is_err());
 }
 
 #[test]
@@ -1403,19 +1187,30 @@ fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let solid = AnalysisTransientRunOptions::solid_recommended();
     let high_accuracy = AnalysisTransientRunOptions::high_accuracy();
 
-    assert!(coarse.step_count < balanced.step_count);
-    assert!(balanced.step_count < high_accuracy.step_count);
-
-    assert!(coarse.tolerance > balanced.tolerance);
-    assert!(balanced.tolerance > high_accuracy.tolerance);
-
-    assert!(coarse.time_step_s > balanced.time_step_s);
-    assert!(balanced.time_step_s > high_accuracy.time_step_s);
+    assert!(coarse.time_step_policy.interval_count() < balanced.time_step_policy.interval_count());
+    assert!(
+        balanced.time_step_policy.interval_count()
+            < high_accuracy.time_step_policy.interval_count()
+    );
+    assert!(coarse.residual_target > balanced.residual_target);
+    assert!(balanced.residual_target > high_accuracy.residual_target);
+    let serialized = serde_json::to_value(&balanced).unwrap();
+    assert!(serialized.get("time_step_policy").is_some());
+    assert!(serialized.get("adaptive_time_step").is_none());
+    assert!(serialized.get("precision_mode").is_none());
+    let mut with_ignored_precision = serialized;
+    with_ignored_precision
+        .as_object_mut()
+        .expect("transient options should serialize as an object")
+        .insert("precision_mode".to_string(), serde_json::json!("fp32"));
+    assert!(serde_json::from_value::<AnalysisTransientRunOptions>(with_ignored_precision).is_err());
 
     assert_eq!(solid.quality_policy, QualityPolicy::Balanced);
     assert!(solid.deterministic_mode);
-    assert_eq!(solid.precision_mode, PrecisionMode::Fp64);
-    assert_eq!(solid.dt_bucket_rel_tolerance, 0.01);
+    assert_eq!(
+        solid.time_step_policy,
+        AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 10 }
+    );
 }
 
 #[test]
@@ -1424,10 +1219,24 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let balanced = AnalysisModalRunOptions::balanced();
     let high_accuracy = AnalysisModalRunOptions::high_accuracy();
 
-    assert!(coarse.mode_count < balanced.mode_count);
-    assert!(balanced.mode_count < high_accuracy.mode_count);
-    assert!(coarse.residual_warn_threshold > balanced.residual_warn_threshold);
-    assert!(balanced.residual_warn_threshold > high_accuracy.residual_warn_threshold);
+    assert!(coarse.truncation.requested_mode_count() < balanced.truncation.requested_mode_count());
+    assert!(
+        balanced.truncation.requested_mode_count()
+            < high_accuracy.truncation.requested_mode_count()
+    );
+    assert!(coarse.convergence.algebraic_tolerance() > balanced.convergence.algebraic_tolerance());
+    assert!(
+        balanced.convergence.algebraic_tolerance()
+            > high_accuracy.convergence.algebraic_tolerance()
+    );
+    assert!(
+        coarse.convergence.maximum_subspace_iterations()
+            < balanced.convergence.maximum_subspace_iterations()
+    );
+    assert!(
+        balanced.convergence.maximum_subspace_iterations()
+            < high_accuracy.convergence.maximum_subspace_iterations()
+    );
 }
 
 #[test]
@@ -1454,384 +1263,6 @@ fn nonlinear_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     assert_eq!(solid.precision_mode, PrecisionMode::Fp64);
     assert!(solid.line_search);
     assert!(solid.max_line_search_backtracks >= balanced.max_line_search_backtracks);
-}
-
-#[test]
-fn analysis_create_model_maps_invalid_intent_error() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let err = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "   ".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("create model should fail");
-
-    assert_eq!(err.error_code, "RM.FEA.CREATE_MODEL.INVALID_INTENT");
-    assert_eq!(err.operation, "fea.create_model");
-    assert_eq!(err.op_version, "fea.create_model/v1");
-}
-
-#[test]
-fn analysis_create_model_supports_nonlinear_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "nonlinear_model".to_string(),
-            profile: AnalysisCreateModelProfile::NonlinearStructural,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear profile should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "nonlinear_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Nonlinear);
-    assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_nonlinear_force"
-    );
-}
-
-#[test]
-fn analysis_create_model_accepts_prep_context_and_validates_model() {
-    let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let prep = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep for analysis should succeed");
-
-    let created = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "prep_model".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: Some(AnalysisCreateModelPrepContext {
-                source_geometry_id: prep.data.prep.provenance.source_geometry_id.clone(),
-                source_geometry_revision: prep.data.prep.provenance.source_geometry_revision,
-                region_mappings: prep.data.prep.region_mappings.clone(),
-            }),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("create model with prep context should succeed");
-
-    analysis_validate(
-        &created.data,
-        geometry.units,
-        &ReferenceFrame::Global,
-        OperationContext::new(None, None),
-    )
-    .expect("prep-aware created model should validate");
-    assert_eq!(created.data.boundary_conditions[0].region_id, "region_root");
-    assert_eq!(created.data.loads[0].region_id, "region_tip");
-    assert!(created
-        .data
-        .material_assignments
-        .iter()
-        .all(|assignment| assignment.confidence
-            == runmat_analysis_core::EvidenceConfidence::Verified));
-}
-
-#[test]
-fn analysis_create_model_rejects_mismatched_prep_context() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let error = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "bad_prep_model".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: Some(AnalysisCreateModelPrepContext {
-                source_geometry_id: "geo:other".to_string(),
-                source_geometry_revision: geometry.revision,
-                region_mappings: Vec::new(),
-            }),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("mismatched prep context should fail");
-    assert_eq!(error.error_code, "RM.FEA.CREATE_MODEL.PREP_MISMATCH");
-}
-
-#[test]
-fn analysis_create_model_supports_transient_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "transient_model".to_string(),
-            profile: AnalysisCreateModelProfile::TransientStructural,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("transient profile should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "transient_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
-    assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_transient_force"
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_modal_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "modal_model".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("modal profile should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "modal_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
-    assert_eq!(envelope.data.loads[0].load_id, "load_default_modal_seed");
-}
-
-#[test]
-fn analysis_create_model_supports_acoustic_harmonic_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "acoustic_harmonic_model".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("acoustic harmonic profile should be supported");
-
-    assert_eq!(envelope.data.model_id.0, "acoustic_harmonic_model");
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
-    assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_acoustic_harmonic_seed"
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_electromagnetic_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "electromagnetic_profile_model".to_string(),
-            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
-            prep_context: None,
-        },
-        OperationContext::new(Some("trace-create-em-profile".to_string()), None),
-    )
-    .expect("electromagnetic profile model creation should succeed");
-
-    assert_eq!(
-        envelope.data.steps[0].kind,
-        AnalysisStepKind::Electromagnetic
-    );
-    let domain = envelope
-        .data
-        .electromagnetic
-        .as_ref()
-        .expect("electromagnetic domain should be populated");
-    assert!(domain.enabled);
-    assert_eq!(domain.reference_frequency_hz, 60.0);
-    assert_eq!(domain.applied_current_a, 100.0);
-}
-
-#[test]
-fn analysis_create_model_supports_electro_thermal_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "electro_thermal_profile_model".to_string(),
-            profile: AnalysisCreateModelProfile::ElectroThermalCoupled,
-            prep_context: None,
-        },
-        OperationContext::new(
-            Some("trace-create-electro-thermal-profile".to_string()),
-            None,
-        ),
-    )
-    .expect("electro-thermal profile model creation should succeed");
-
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
-    assert_eq!(
-        envelope.data.boundary_conditions[0].kind,
-        BoundaryConditionKind::VectorPotentialGround
-    );
-    assert_eq!(
-        envelope.data.loads[0].load_id,
-        "load_default_electro_thermal_current"
-    );
-    let domain = envelope
-        .data
-        .electro_thermal
-        .as_ref()
-        .expect("electro-thermal domain should be populated");
-    assert!(domain.enabled);
-    assert_eq!(domain.reference_temperature_k, 293.15);
-    assert_eq!(domain.applied_voltage_v, 24.0);
-    assert_eq!(domain.time_profile.len(), 2);
-    assert!(envelope
-        .data
-        .materials
-        .iter()
-        .all(|material| material.electrical.is_some()));
-}
-
-#[test]
-fn analysis_create_model_supports_cfd_steady_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "cfd_steady_model".to_string(),
-            profile: AnalysisCreateModelProfile::CfdSteadyState,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cfd steady profile should be supported");
-
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Cfd);
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::SteadyState);
-    assert!(cfd.time_profile.is_empty());
-}
-
-#[test]
-fn analysis_create_model_supports_cfd_transient_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "cfd_transient_model".to_string(),
-            profile: AnalysisCreateModelProfile::CfdTransient,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cfd transient profile should be supported");
-
-    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Cfd);
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd.time_profile.len(), 2);
-    assert_eq!(cfd.time_profile[0].normalized_time, 0.0);
-    assert_eq!(cfd.time_profile[1].normalized_time, 1.0);
-}
-
-#[test]
-fn analysis_create_model_supports_cht_coupled_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "cht_coupled_model".to_string(),
-            profile: AnalysisCreateModelProfile::ChtCoupled,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cht coupled profile should be supported");
-
-    assert_eq!(envelope.data.steps.len(), 2);
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Cfd));
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Thermal));
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated for cht profile");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd.time_profile.len(), 2);
-    assert!(
-        envelope
-            .data
-            .thermo_mechanical
-            .as_ref()
-            .expect("thermo-mechanical domain should be populated")
-            .enabled
-    );
-}
-
-#[test]
-fn analysis_create_model_supports_fsi_coupled_profile_template() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "fsi_coupled_model".to_string(),
-            profile: AnalysisCreateModelProfile::FsiCoupled,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("fsi coupled profile should be supported");
-
-    assert_eq!(envelope.data.steps.len(), 2);
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Transient));
-    assert!(envelope
-        .data
-        .steps
-        .iter()
-        .any(|step| step.kind == AnalysisStepKind::Cfd));
-    assert_eq!(envelope.data.loads[0].load_id, "load_default_fsi_seed");
-    let cfd = envelope
-        .data
-        .cfd
-        .as_ref()
-        .expect("cfd domain should be populated for fsi profile");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd.time_profile.len(), 2);
-    assert!(envelope.data.thermo_mechanical.is_none());
 }
 
 #[test]
@@ -1865,44 +1296,39 @@ fn analysis_validate_study_reports_invalid_study_id() {
     assert!(envelope
         .data
         .evidence_artifact_path
-        .ends_with("validate.json"));
+        .contains("validate_sha256_"));
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
-fn analysis_validate_study_rejects_unused_electromagnetic_options() {
+fn analysis_validate_study_preserves_typed_model_failure_detail() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();
-    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions::default());
+    let mut model = sample_model();
+    model.materials.clear();
+    spec.model = model;
 
     let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
         .expect("study validation should return typed output");
 
-    assert!(!envelope.data.valid);
-    assert!(envelope
+    let issue = envelope
         .data
-        .issue_codes
+        .issues
         .iter()
-        .any(|code| code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"));
-    assert!(envelope.data.issues.iter().any(|issue| {
-        issue.code == "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH"
-            && issue.message.contains("solver selected by model.profile")
-    }));
+        .find(|issue| issue.code == "RM.FEA.STUDY.MODEL_INVALID")
+        .expect("model validation issue");
+    assert!(issue
+        .message
+        .contains("ANALYSIS_VALIDATION_MISSING_MATERIALS"));
 }
 
 #[test]
-fn analysis_validate_study_rejects_invalid_electromagnetic_options() {
+fn analysis_validate_study_rejects_solver_options_for_a_different_procedure() {
     let _guard = analysis_test_guard();
-    let mut spec = sample_electromagnetic_study_spec();
-    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions {
-        sweep_enabled: true,
-        sweep_frequency_hz: vec![60.0, -10.0],
-        residual_target: 0.0,
-        harmonic_tolerance: f64::NAN,
-        harmonic_max_iterations: 0,
-        ..AnalysisElectromagneticRunOptions::default()
-    });
+    let mut spec = sample_linear_static_study_spec();
+    spec.execution.steps[0].solver_options =
+        AnalysisSolverOptions::MaxwellHarmonic(AnalysisMaxwellRunOptions::default());
 
     let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
         .expect("study validation should return typed output");
@@ -1912,27 +1338,10 @@ fn analysis_validate_study_rejects_invalid_electromagnetic_options() {
         .data
         .issue_codes
         .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID"));
-    assert!(envelope
-        .data
-        .issue_codes
-        .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID"));
-    assert!(envelope
-        .data
-        .issue_codes
-        .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID"));
-    assert!(envelope
-        .data
-        .issue_codes
-        .iter()
-        .any(|code| code == "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"));
+        .any(|code| code == "RM.FEA.STUDY.EXECUTION_PLAN_INVALID"));
     assert!(envelope.data.issues.iter().any(|issue| {
-        issue.code == "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"
-            && issue
-                .message
-                .contains("must contain finite positive values")
+        issue.code == "RM.FEA.STUDY.EXECUTION_PLAN_INVALID"
+            && issue.message.contains("canonical model procedure step")
     }));
 }
 
@@ -1954,43 +1363,34 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     assert_eq!(envelope.operation, "fea.plan_study");
     assert_eq!(envelope.op_version, "fea.plan_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
-    assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
-    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
-    assert_eq!(envelope.data.run_op_version, "fea.run_linear_static/v1");
-    assert!(envelope.data.electromagnetic_run_options.is_none());
+    assert_eq!(envelope.data.model_id, spec.model.model_id.0);
+    assert_eq!(envelope.data.steps.len(), 1);
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_linear_static"
+    );
+    assert_eq!(
+        envelope.data.steps[0].run_op_version,
+        "fea.run_linear_static/v1"
+    );
+    assert!(matches!(
+        envelope.data.steps[0].execution.solver_options,
+        AnalysisSolverOptions::StructuralLinear(_)
+    ));
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
-            "fea.create_model/v1".to_string(),
             "fea.validate/v1".to_string(),
             "fea.run_linear_static/v1".to_string(),
         ]
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
-    assert!(envelope.data.evidence_artifact_path.ends_with("plan.json"));
+    assert!(envelope
+        .data
+        .evidence_artifact_path
+        .contains("plan_sha256_"));
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_plan_study_surfaces_electromagnetic_run_operation_and_options() {
-    let _guard = analysis_test_guard();
-    let mut spec = sample_electromagnetic_study_spec();
-    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions {
-        sweep_enabled: true,
-        sweep_frequency_hz: vec![40.0, 60.0, 120.0],
-        ..AnalysisElectromagneticRunOptions::default()
-    });
-
-    let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study plan should succeed");
-
-    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
-    assert_eq!(
-        envelope.data.electromagnetic_run_options,
-        spec.electromagnetic_run_options
-    );
 }
 
 #[test]
@@ -2032,12 +1432,18 @@ fn analysis_plan_study_sweep_returns_typed_plan_entries() {
         .data
         .plan_entries
         .iter()
-        .any(|entry| entry.run_kind == AnalysisRunKind::LinearStatic));
+        .any(
+            |entry| entry.steps[0].procedure_step.family == PhysicsFamily::Structural
+                && entry.steps[0].procedure_step.procedure == AnalysisProcedure::Static
+        ));
     assert!(envelope
         .data
         .plan_entries
         .iter()
-        .any(|entry| entry.run_kind == AnalysisRunKind::Electromagnetic));
+        .any(
+            |entry| entry.steps[0].procedure_step.family == PhysicsFamily::Electromagnetic
+                && entry.steps[0].procedure_step.procedure == AnalysisProcedure::HarmonicResponse
+        ));
     assert!(envelope.data.evidence_artifact_path.ends_with("plan.json"));
     assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
     drop(env_guard);
@@ -2063,6 +1469,9 @@ fn analysis_plan_study_sweep_rejects_empty_study_set() {
 #[test]
 fn analysis_plan_study_sweep_can_continue_on_study_failure() {
     let _guard = analysis_test_guard();
+    let root = temp_artifact_root("plan-study-sweep-continue-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
     let mut invalid = sample_linear_static_study_spec();
     invalid.study_id = "   ".to_string();
     let spec = AnalysisStudySweepSpec {
@@ -2084,6 +1493,7 @@ fn analysis_plan_study_sweep_can_continue_on_study_failure() {
         envelope.data.failure_entries[0].error_code,
         "RM.FEA.PLAN_STUDY.INVALID_SPEC"
     );
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -2097,7 +1507,10 @@ fn analysis_run_study_executes_linear_static_path() {
         previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
     std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
-    let spec = sample_linear_static_study_spec();
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("run-study-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("study run should succeed");
@@ -2105,71 +1518,101 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.operation, "fea.run_study");
     assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
-    assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(envelope.data.model_id, spec.model.model_id.0);
     assert_eq!(
-        envelope.data.model_profile,
-        AnalysisCreateModelProfile::LinearStaticStructural
+        envelope.data.steps[0].procedure_step.family,
+        PhysicsFamily::Structural
     );
-    assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
-    assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
-    assert!(envelope.data.electromagnetic_run_options.is_none());
-    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
-    assert_eq!(envelope.data.run_op_version, "fea.run_linear_static/v1");
+    assert_eq!(
+        envelope.data.steps[0].procedure_step.procedure,
+        AnalysisProcedure::Static
+    );
+    assert_eq!(
+        envelope.data.steps[0].execution.backend,
+        ComputeBackend::Cpu
+    );
+    assert!(matches!(
+        envelope.data.steps[0].execution.solver_options,
+        AnalysisSolverOptions::StructuralLinear(_)
+    ));
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_linear_static"
+    );
+    assert_eq!(
+        envelope.data.steps[0].run_op_version,
+        "fea.run_linear_static/v1"
+    );
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
-            "fea.create_model/v1".to_string(),
             "fea.validate/v1".to_string(),
             "fea.run_linear_static/v1".to_string(),
         ]
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
-    assert!(envelope.data.run_id.starts_with("run_"));
-    let prep_artifact_id = envelope
-        .data
-        .prep_artifact_id
-        .as_ref()
-        .expect("study run should persist generated prep artifact id");
+    assert!(envelope.data.steps[0].run_id.starts_with("run_"));
+    let evidence_path = Path::new(&envelope.data.evidence_artifact_path);
     assert_eq!(
-        envelope.data.run_options["prep_artifact_id"].as_str(),
-        Some(prep_artifact_id.as_str())
+        evidence_path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str()),
+        Some(
+            format!(
+                "sha256_{}",
+                envelope
+                    .data
+                    .study_fingerprint
+                    .trim_start_matches("sha256:")
+            )
+            .as_str()
+        )
     );
-    assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
+    let evidence_file_name = evidence_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("evidence file name");
+    let evidence_digest = evidence_file_name
+        .strip_prefix("sequence-run_sha256_")
+        .and_then(|suffix| suffix.strip_suffix(".json"))
+        .expect("sequence evidence is content addressed");
+    assert_eq!(evidence_digest.len(), 64);
+    assert!(evidence_digest
+        .bytes()
+        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
 
-    let persisted = storage::load_run_result(&envelope.data.run_id)
+    let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
-    assert_eq!(persisted.run_id, envelope.data.run_id);
+    assert_eq!(persisted.run_id, envelope.data.steps[0].run_id);
     assert_eq!(persisted.run_status, envelope.data.run_status);
-    assert_eq!(persisted.publishable, envelope.data.publishable);
+    assert_eq!(
+        persisted.numerically_acceptable,
+        envelope.data.numerically_acceptable
+    );
     assert_eq!(
         persisted.solver_convergence,
         envelope.data.solver_convergence
     );
     assert_eq!(persisted.result_quality, envelope.data.result_quality);
-    assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
-    assert_eq!(persisted.provenance, envelope.data.provenance);
-    let analysis_mesh_artifact_path = envelope
+    assert_eq!(
+        persisted.quality_reasons,
+        envelope.data.steps[0].quality_reasons
+    );
+    assert_eq!(persisted.provenance, envelope.data.steps[0].provenance);
+    let solver_mesh_artifact_path = envelope
         .data
-        .analysis_mesh_artifact_path
+        .solver_mesh_artifact_path
         .as_ref()
-        .expect("study run should persist generated analysis mesh artifact");
-    let analysis_mesh_payload: serde_json::Value = serde_json::from_slice(
-        &fs::read(analysis_mesh_artifact_path).expect("read generated analysis mesh artifact"),
+        .expect("study run should preserve the canonical solver mesh artifact");
+    let solver_mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+        &fs::read(solver_mesh_artifact_path).expect("read canonical solver mesh artifact"),
     )
-    .expect("parse generated analysis mesh artifact");
-    let solver_node_count = analysis_mesh_payload["mesh"]["nodes"]
-        .as_array()
-        .expect("solver mesh nodes")
-        .len();
-    let solver_boundary_face_count = analysis_mesh_payload["mesh"]["boundary_faces"]
-        .as_array()
-        .expect("solver mesh boundary faces")
-        .len();
-    let solver_volume_element_count = analysis_mesh_payload["mesh"]["volume_elements"]
-        .as_array()
-        .expect("solver mesh volume elements")
-        .len();
+    .expect("decode canonical solver mesh artifact");
+    let solver_node_count = solver_mesh.topology.nodes.len();
+    let solver_boundary_face_count = solver_mesh.topology.boundary_faces.len();
+    let solver_volume_element_count = solver_mesh.topology.volume_elements.len();
     let render_topology = persisted
         .render_topology
         .as_ref()
@@ -2193,16 +1636,475 @@ fn analysis_run_study_executes_linear_static_path() {
         &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
     )
     .expect("parse run evidence artifact");
+    assert_eq!(run_evidence_payload["$evidence"]["stage"], "sequence-run");
     assert_eq!(
-        run_evidence_payload["model_profile"].as_str(),
-        Some("linear_static_structural")
+        run_evidence_payload["$evidence"]["study_fingerprint"],
+        envelope.data.study_fingerprint
     );
+    assert_eq!(
+        run_evidence_payload["$evidence"]["content_digest"],
+        format!("sha256:{evidence_digest}")
+    );
+    assert!(run_evidence_payload.get("model_template").is_none());
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
 }
 
 #[test]
-fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
+fn fea_step_result_selects_one_procedure_step_by_authored_id() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("step-result-selection");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("step-result-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed");
+    let step = &envelope.data.steps[0];
+    let run = crate::builtins::fea::run_results::run_result_object_for_tests(&envelope.data);
+
+    let selected = futures::executor::block_on(crate::builtins::fea::run_results::step_result(
+        run.clone(),
+        step.procedure_step.step_id.0.clone(),
+    ))
+    .expect("the authored step id should select its result");
+    let runmat_value::Value::Object(object) = &selected else {
+        panic!("expected a fea.StepRunResult object");
+    };
+    assert_eq!(object.class_name().display_name(), "fea.StepRunResult");
+    assert_eq!(
+        object.properties().get("run_id"),
+        Some(&runmat_value::Value::String(step.run_id.clone().into()))
+    );
+
+    let missing = futures::executor::block_on(crate::builtins::fea::run_results::step_result(
+        run,
+        "not_a_step".to_string(),
+    ))
+    .expect_err("an unknown step id must be rejected");
+    assert_eq!(missing.identifier(), Some("RunMat:fea:InvalidInput"));
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+struct CanonicalStructuralExecutor {
+    calls: AtomicU64,
+}
+
+impl StructuralLinearExecutor for CanonicalStructuralExecutor {
+    fn execute(
+        &self,
+        workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+    ) -> Result<runmat_analysis_fea::execution::StructuralLinearWorkloadResult, String> {
+        use runmat_meshing_core::CanonicalMeshingContract;
+
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        let workload =
+            runmat_analysis_fea::execution::StructuralLinearWorkload::from_canonical_bytes(
+                &workload
+                    .canonical_bytes()
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        let mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+            &mesh.canonical_encode().map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        let run = runmat_analysis_fea::run_linear_static_with_options(
+            &workload.model,
+            workload.backend,
+            runmat_analysis_fea::LinearStaticSolveOptions {
+                preconditioner_kind: workload.preconditioner,
+                algebra_backend_kind: workload.algebra_backend,
+                solver_mesh_artifact_path: None,
+                solver_mesh: Some(mesh.clone()),
+                require_solver_mesh_for_solid: workload.require_solver_mesh_for_solid,
+                initial_displacement: None,
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        let constraint_plan =
+            runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile(
+                &workload.model,
+                &mesh,
+            )
+            .map_err(|error| error.to_string())?;
+        let constraint_result =
+            runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult::recover(
+                &constraint_plan,
+                &mesh,
+                &run.fields,
+            )
+            .map_err(|error| error.to_string())?;
+        runmat_analysis_fea::execution::StructuralLinearWorkloadResult::from_canonical_bytes(
+            &runmat_analysis_fea::execution::StructuralLinearWorkloadResult::new(
+                run,
+                constraint_result,
+            )
+            .map_err(|error| error.to_string())?
+            .canonical_bytes()
+            .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())
+    }
+}
+
+struct CanonicalStudyPlacement {
+    reverse_results: bool,
+}
+
+impl StructuralStudyPlacementExecutor for CanonicalStudyPlacement {
+    fn allocated_cpu_millicores(&self, _study_count: usize) -> u32 {
+        1000
+    }
+    fn execute<'a>(
+        &'a self,
+        entries: &'a [StructuralStudyPlacementEntry<'a>],
+    ) -> StructuralStudyPlacementFuture<'a> {
+        Box::pin(async move {
+            let solver = CanonicalStructuralExecutor {
+                calls: AtomicU64::new(0),
+            };
+            let mut results = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence {
+                    workloads,
+                } = entry.prepared.workloads()
+                else {
+                    return Err("prepared placement study is not a linear sequence".to_string());
+                };
+                let workload = workloads
+                    .into_values()
+                    .next()
+                    .ok_or_else(|| "prepared placement study has no workload".to_string())?;
+                let run = solver.execute(&workload, entry.prepared.solver_mesh())?;
+                results.push(StructuralStudyPlacementResult {
+                    study_index: entry.study_index,
+                    outcome: Ok(test_structural_sequence_result(
+                        entry.study,
+                        &workload,
+                        entry.prepared.solver_mesh(),
+                        run,
+                    )),
+                });
+            }
+            if self.reverse_results {
+                results.reverse();
+            }
+            Ok(results)
+        })
+    }
+}
+
+struct CancelledStudyPlacement;
+
+impl StructuralStudyPlacementExecutor for CancelledStudyPlacement {
+    fn allocated_cpu_millicores(&self, _study_count: usize) -> u32 {
+        1000
+    }
+    fn execute<'a>(
+        &'a self,
+        entries: &'a [StructuralStudyPlacementEntry<'a>],
+    ) -> StructuralStudyPlacementFuture<'a> {
+        Box::pin(async move {
+            Ok(entries
+                .iter()
+                .map(|entry| StructuralStudyPlacementResult {
+                    study_index: entry.study_index,
+                    outcome: Err(StructuralStudyExecutionFailure::Cancelled),
+                })
+                .collect())
+        })
+    }
+}
+
+struct FailingStudyPlacement {
+    calls: AtomicU64,
+}
+
+impl StructuralStudyPlacementExecutor for FailingStudyPlacement {
+    fn allocated_cpu_millicores(&self, _study_count: usize) -> u32 {
+        1000
+    }
+    fn execute<'a>(
+        &'a self,
+        entries: &'a [StructuralStudyPlacementEntry<'a>],
+    ) -> StructuralStudyPlacementFuture<'a> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async move {
+            Ok(entries
+                .iter()
+                .map(|entry| StructuralStudyPlacementResult {
+                    study_index: entry.study_index,
+                    outcome: Err(StructuralStudyExecutionFailure::Failed(
+                        "injected placement failure".to_string(),
+                    )),
+                })
+                .collect())
+        })
+    }
+}
+
+#[test]
+fn placement_lifecycle_restores_authored_sweep_order_before_publication() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("placement-lifecycle-sweep");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("placement-lifecycle-solver-mesh");
+    let mut first = sample_linear_static_study_spec();
+    first.study_id = "placement_first".to_string();
+    first.model.model_id = AnalysisModelId("placement_first_model".to_string());
+    first.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let mut second = first.clone();
+    second.study_id = "placement_second".to_string();
+    second.model.model_id = AnalysisModelId("placement_second_model".to_string());
+    let sweep = AnalysisStudySweepSpec {
+        sweep_id: "placement_order_sweep".to_string(),
+        studies: vec![first, second],
+        fail_fast: false,
+    };
+
+    let envelope = pollster::block_on(analysis_execute_structural_sweep_with_placement(
+        &sweep,
+        OperationContext::new(None, None),
+        &CanonicalStudyPlacement {
+            reverse_results: true,
+        },
+    ))
+    .expect("placement lifecycle should publish the complete sweep");
+
+    assert_eq!(envelope.data.run_entries.len(), 2);
+    assert_eq!(envelope.data.run_entries[0].study_id, "placement_first");
+    assert_eq!(envelope.data.run_entries[1].study_id, "placement_second");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn placement_lifecycle_preserves_cancelled_terminal() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("placement-lifecycle-cancelled");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("placement-cancelled-solver-mesh");
+    let mut spec = sample_linear_static_study_spec();
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+
+    let error = pollster::block_on(analysis_execute_structural_study_with_placement(
+        &spec,
+        OperationContext::new(None, None),
+        &CancelledStudyPlacement,
+    ))
+    .expect_err("cancelled placement must remain cancelled");
+
+    assert_eq!(error.error_type, OperationErrorType::Cancelled);
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_CANCELLED"
+    );
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn placement_lifecycle_owns_fail_fast_admission() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("placement-lifecycle-fail-fast");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("placement-fail-fast-solver-mesh");
+    let mut first = sample_linear_static_study_spec();
+    first.study_id = "placement_fail_fast_first".to_string();
+    first.model.model_id = AnalysisModelId("placement_fail_fast_first_model".to_string());
+    first.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let mut second = first.clone();
+    second.study_id = "placement_fail_fast_second".to_string();
+    second.model.model_id = AnalysisModelId("placement_fail_fast_second_model".to_string());
+    let sweep = AnalysisStudySweepSpec {
+        sweep_id: "placement_fail_fast_sweep".to_string(),
+        studies: vec![first, second],
+        fail_fast: true,
+    };
+    let placement = FailingStudyPlacement {
+        calls: AtomicU64::new(0),
+    };
+
+    let error = pollster::block_on(analysis_execute_structural_sweep_with_placement(
+        &sweep,
+        OperationContext::new(None, None),
+        &placement,
+    ))
+    .expect_err("fail-fast sweep must stop at its first failed study");
+
+    assert_eq!(placement.calls.load(Ordering::Relaxed), 1);
+    assert_eq!(error.error_code, "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn portable_structural_study_reenters_shared_runtime_persistence() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("portable-run-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("portable-run-study-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let executor = CanonicalStructuralExecutor {
+        calls: AtomicU64::new(0),
+    };
+
+    let envelope = analysis_run_study_with_structural_executor_op(
+        &spec,
+        OperationContext::new(None, None),
+        &executor,
+    )
+    .expect("portable structural study should succeed");
+
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert_eq!(envelope.operation, "fea.run_study");
+    let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
+        .expect("portable run load should succeed")
+        .expect("portable run should be persisted");
+    assert_eq!(persisted.run.identity, envelope.data.steps[0].identity);
+    assert_eq!(persisted.run_status, envelope.data.run_status);
+    assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn portable_structural_study_executes_every_independent_step_in_authored_order() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("portable-multi-step-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("portable-multi-step-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let first = ProcedureStep::structural_static("step_static_first");
+    let second = ProcedureStep::structural_static("step_static_second");
+    let mut model = spec.model.clone();
+    model.sequence = AnalysisSequence::from_steps(
+        "sequence_two_independent_static_steps",
+        vec![first.clone(), second.clone()],
+    );
+    spec.model = model;
+    spec.execution = AnalysisExecutionPlan::for_sequence(
+        &AnalysisSequence::from_steps(
+            "sequence_two_independent_static_steps",
+            vec![first.clone(), second.clone()],
+        ),
+        ComputeBackend::Cpu,
+    )
+    .expect("two-step execution plan should be valid");
+    let executor = CanonicalStructuralExecutor {
+        calls: AtomicU64::new(0),
+    };
+
+    let envelope = analysis_run_study_with_structural_executor_op(
+        &spec,
+        OperationContext::new(None, None),
+        &executor,
+    )
+    .expect("independent structural sequence should succeed");
+
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 2);
+    assert_eq!(envelope.data.steps.len(), 2);
+    assert_eq!(envelope.data.steps[0].procedure_step.step_id, first.step_id);
+    assert_eq!(
+        envelope.data.steps[1].procedure_step.step_id,
+        second.step_id
+    );
+    assert_ne!(envelope.data.steps[0].run_id, envelope.data.steps[1].run_id);
+    for step in &envelope.data.steps {
+        assert!(storage::load_run_result(&step.run_id)
+            .expect("step run load should succeed")
+            .is_some());
+    }
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn prepared_structural_study_completes_without_reinterpreting_the_study() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("prepared-run-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("prepared-run-study-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let prepared = analysis_prepare_structural_study_op(
+        &spec,
+        OperationContext::new(
+            Some("trace-prepared".into()),
+            Some("request-prepared".into()),
+        ),
+    )
+    .expect("structural study preparation should succeed");
+    let executor = CanonicalStructuralExecutor {
+        calls: AtomicU64::new(0),
+    };
+
+    let runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence { workloads } =
+        prepared.workloads()
+    else {
+        panic!("prepared static study is not a linear sequence");
+    };
+    let workload = workloads.into_values().next().unwrap();
+    let numerical_result = executor
+        .execute(&workload, prepared.solver_mesh())
+        .expect("prepared numerical solve should succeed");
+    let numerical_result =
+        test_structural_sequence_result(&spec, &workload, prepared.solver_mesh(), numerical_result);
+    let envelope = analysis_complete_structural_study_op(prepared, Ok(numerical_result))
+        .expect("prepared structural study completion should succeed");
+
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert_eq!(envelope.trace_id.as_deref(), Some("trace-prepared"));
+    assert_eq!(envelope.request_id.as_deref(), Some("request-prepared"));
+    assert_eq!(envelope.data.study_id, spec.study_id);
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_linear_static"
+    );
+    assert!(storage::load_run_result(&envelope.data.steps[0].run_id)
+        .expect("prepared run lookup should succeed")
+        .is_some());
+    assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("run-study-analysis-mesh");
@@ -2213,1707 +2115,36 @@ fn analysis_run_study_persists_requested_analysis_mesh_artifact() {
     let mut model = sample_solid_model();
     model.geometry_id = spec.geometry.geometry_id.clone();
     model.geometry_revision = spec.geometry.revision;
-    model.units = spec.geometry.units;
+    model.units = runmat_types::physical::CoordinateUnits::canonical();
     model.material_assignments = vec![MaterialAssignment {
-        region_id: "body".to_string(),
+        target: runmat_analysis_core::PropertyRegionTarget::solid(
+            runmat_meshing_core::fixtures::fixture_region("region"),
+        ),
         expected_material_id: "mat_steel".to_string(),
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
     }];
-    spec.model = Some(model);
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::StructuredGridTetrahedron,
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
-        min_scaled_jacobian: 0.0,
-        max_aspect_ratio: 1.0e9,
-        ..runmat_meshing_core::QualityThresholds::default()
-    };
-    spec.mesh_options = Some(mesh_options);
+    spec.execution.steps[0].step_id = model.sequence.steps[0].step_id.clone();
+    spec.model = model;
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("requested-canonical-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
         .expect("study run should succeed");
 
     let artifact_path = envelope
         .data
-        .analysis_mesh_artifact_path
+        .solver_mesh_artifact_path
         .as_ref()
-        .expect("study run should persist analysis mesh artifact path");
-    assert!(artifact_path.ends_with("analysis_mesh.json"));
-    let evidence_path = envelope
-        .data
-        .analysis_mesh_evidence_artifact_path
-        .as_ref()
-        .expect("study run should persist mesh evidence artifact path");
-    assert!(evidence_path.ends_with("mesh_evidence.json"));
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    assert_eq!(
-        payload["schema_version"].as_str(),
-        Some("fea_study_analysis_mesh_artifact/v1")
-    );
-    assert_eq!(
-        payload["mesh"]["schema_version"].as_str(),
-        Some("analysis-mesh/v1")
-    );
-    assert_eq!(
-        payload["mesh_evidence_artifact_path"].as_str(),
-        Some(evidence_path.as_str())
-    );
-    assert_eq!(
-        payload["mesh_validation_options"]["required_boundary_region_ids"]
-            .as_array()
-            .expect("required boundary region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["root", "tip"]
-    );
-    assert_eq!(
-        payload["mesh_validation_options"]["required_material_region_ids"]
-            .as_array()
-            .expect("required material region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["body"]
-    );
-    assert!(payload["mesh"]["volume_elements"]
-        .as_array()
-        .expect("volume elements")
-        .iter()
-        .all(|element| element["material_region_id"].as_str() == Some("body")));
-    let evidence_payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
-            .expect("parse mesh evidence artifact");
-    assert_eq!(
-        evidence_payload["schema_version"].as_str(),
-        Some("fea_study_mesh_evidence_artifact/v1")
-    );
-    assert_eq!(
-        evidence_payload["mesh_validation_options"]["required_boundary_region_ids"]
-            .as_array()
-            .expect("evidence required boundary region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["root", "tip"]
-    );
-    assert_eq!(
-        evidence_payload["mesh_validation_options"]["required_material_region_ids"]
-            .as_array()
-            .expect("evidence required material region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["body"]
-    );
-    assert_eq!(
-        evidence_payload["mesh_evidence"]["schema_version"].as_str(),
-        Some("mesh-evidence/v1")
-    );
-    assert_eq!(
-        evidence_payload["mesh_authoring_summary"]["schema_version"].as_str(),
-        Some("mesh-authoring-summary/v1")
-    );
-    assert_eq!(
-        evidence_payload["mesh_authoring_summary"]["mesh_id"].as_str(),
-        evidence_payload["mesh_evidence"]["mesh_id"].as_str()
-    );
-    assert_eq!(
-        evidence_payload["mesh_authoring_summary"]["solve_ready"].as_bool(),
-        Some(true)
-    );
-    assert_eq!(
-        evidence_payload["mesh_authoring_summary"]["regions"]["required_boundary_region_ids"]
-            .as_array()
-            .expect("authoring required boundary region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["root", "tip"]
-    );
-    assert_eq!(
-        evidence_payload["mesh_authoring_summary"]["regions"]["required_material_region_ids"]
-            .as_array()
-            .expect("authoring required material region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["body"]
-    );
-    assert!(evidence_payload["mesh_authoring_summary"]
-        .get("debug")
-        .is_none());
-    assert!(evidence_payload["mesh_authoring_summary"]
-        .get("mesh")
-        .is_none());
-    assert_eq!(
-        evidence_payload["mesh_evidence"]["topology"]["node_count"].as_u64(),
-        payload["mesh"]["nodes"]
-            .as_array()
-            .map(|nodes| nodes.len() as u64)
-    );
-    assert!(
-        payload["mesh"]["volume_elements"]
-            .as_array()
-            .expect("volume elements")
-            .len()
-            > spec.geometry.surface_meshes[0].triangles.len()
-    );
-    assert!(payload["mesh"]["boundary_faces"]
-        .as_array()
-        .expect("boundary faces")
-        .iter()
-        .any(|face| face["region_ids"]
-            .as_array()
-            .expect("region ids")
-            .iter()
-            .any(|region| region.as_str() == Some("root"))));
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(adaptive_iterations.len(), 2);
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    assert_eq!(
-        adaptive_iterations[0]["node_count"].as_u64(),
-        payload["mesh"]["nodes"]
-            .as_array()
-            .map(|nodes| nodes.len() as u64)
-    );
-    assert!(adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators")
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("stress_gradient")
-                && indicator["status"].as_str() == Some("skipped_missing_field")
-        ));
-    assert_eq!(
-        adaptive_iterations[1]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    assert!(adaptive_iterations[1]["indicators"]
-        .as_array()
-        .expect("solved adaptive indicators")
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("stress_gradient")
-                && indicator["status"].as_str() == Some("used")
-        ));
-    assert!(!adaptive_iterations[1]["markers"]
-        .as_array()
-        .expect("solved adaptive markers")
-        .is_empty());
-    let refined_artifact_path = envelope
-        .data
-        .refined_analysis_mesh_artifact_path
-        .as_ref()
-        .expect("pending adaptive sizing should persist refined mesh artifact path");
-    assert!(refined_artifact_path.ends_with("analysis_mesh_refined.json"));
-    let refined_evidence_path = envelope
-        .data
-        .refined_analysis_mesh_evidence_artifact_path
-        .as_ref()
-        .expect("pending adaptive sizing should persist refined mesh evidence artifact path");
-    assert!(refined_evidence_path.ends_with("mesh_evidence_refined.json"));
-    let refined_payload: serde_json::Value = serde_json::from_slice(
-        &fs::read(refined_artifact_path).expect("read refined mesh artifact"),
+        .expect("study run should preserve solver mesh artifact path");
+    assert_eq!(artifact_path, &solver_mesh_path.display().to_string());
+    let decoded = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+        &fs::read(artifact_path).expect("read canonical solver mesh artifact"),
     )
-    .expect("parse refined mesh artifact");
-    let refined_boundary_faces = refined_payload["mesh"]["boundary_faces"]
-        .as_array()
-        .expect("refined boundary faces");
-    assert!(refined_boundary_faces.iter().any(|face| face["region_ids"]
-        .as_array()
-        .expect("refined face region ids")
-        .iter()
-        .any(|region| region.as_str() == Some("root"))));
-    assert!(refined_boundary_faces.iter().any(|face| face["region_ids"]
-        .as_array()
-        .expect("refined face region ids")
-        .iter()
-        .any(|region| region.as_str() == Some("tip"))));
-    assert_eq!(
-        refined_payload["source_analysis_mesh_artifact_path"].as_str(),
-        Some(artifact_path.as_str())
-    );
-    assert_eq!(
-        refined_payload["mesh_evidence_artifact_path"].as_str(),
-        Some(refined_evidence_path.as_str())
-    );
-    let refined_evidence_payload: serde_json::Value = serde_json::from_slice(
-        &fs::read(refined_evidence_path).expect("read refined mesh evidence artifact"),
-    )
-    .expect("parse refined mesh evidence artifact");
-    assert_eq!(
-        refined_evidence_payload["mesh_evidence"]["topology"]["adaptive_iteration_count"].as_u64(),
-        refined_payload["mesh"]["adaptive_iterations"]
-            .as_array()
-            .map(|iterations| iterations.len() as u64)
-    );
-    assert_eq!(
-        refined_evidence_payload["mesh_evidence"]["sizing"]["applied_sample_count"].as_u64(),
-        refined_payload["mesh"]["sizing"]["applied_samples"]
-            .as_array()
-            .map(|samples| samples.len() as u64)
-    );
-    let refined_volume_element_count = refined_payload["mesh"]["volume_elements"]
-        .as_array()
-        .expect("refined volume elements")
-        .len();
-    let initial_volume_element_count = payload["mesh"]["volume_elements"]
-        .as_array()
-        .expect("initial volume elements")
-        .len();
-    let solid_mesh = payload["mesh"]["backend"]["backend"].as_str() == Some("solid");
-    if solid_mesh {
-        assert!(refined_volume_element_count >= initial_volume_element_count);
-        assert!(!refined_payload["mesh"]["sizing"]["applied_samples"]
-            .as_array()
-            .expect("refined sizing applications")
-            .is_empty());
-    } else {
-        assert!(refined_volume_element_count > initial_volume_element_count);
-    }
-    assert_eq!(
-        refined_payload["mesh"]["adaptive_iterations"]
-            .as_array()
-            .expect("refined adaptive iterations")
-            .len(),
-        adaptive_iterations.len() + 1
-    );
-    assert_eq!(
-        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
-        Some(refined_artifact_path.as_str())
-    );
-
-    let run_payload: serde_json::Value = serde_json::from_slice(
-        &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
-    )
-    .expect("parse run evidence artifact");
-    assert_eq!(
-        run_payload["analysis_mesh_artifact_path"].as_str(),
-        Some(artifact_path.as_str())
-    );
-    assert_eq!(
-        run_payload["analysis_mesh_evidence_artifact_path"].as_str(),
-        Some(evidence_path.as_str())
-    );
-    assert_eq!(
-        run_payload["refined_analysis_mesh_artifact_path"].as_str(),
-        Some(refined_artifact_path.as_str())
-    );
-    assert_eq!(
-        run_payload["refined_analysis_mesh_evidence_artifact_path"].as_str(),
-        Some(refined_evidence_path.as_str())
-    );
-    if solid_mesh {
-        assert_eq!(
-            run_payload["refinement_effect"]["topology_changed"].as_bool(),
-            Some(false)
-        );
-        assert_eq!(
-            run_payload["refinement_effect"]["element_count_delta"].as_i64(),
-            Some(0)
-        );
-    } else {
-        assert_eq!(
-            run_payload["refinement_effect"]["topology_changed"].as_bool(),
-            Some(true)
-        );
-        assert!(run_payload["refinement_effect"]["element_count_delta"]
-            .as_i64()
-            .is_some_and(|delta| delta > 0));
-    }
-    let persisted = storage::load_run_result(&envelope.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let render_topology = persisted
-        .render_topology
-        .as_ref()
-        .expect("analysis mesh backed run should persist render topology");
-    assert_eq!(
-        render_topology.source,
-        AnalysisRenderTopologySource::AnalysisMesh
-    );
-    let render_mesh = render_topology
-        .meshes
-        .first()
-        .expect("render topology should contain analysis mesh boundary surface");
-    assert_eq!(
-        render_mesh.vertices.len(),
-        refined_payload["mesh"]["nodes"]
-            .as_array()
-            .expect("refined mesh nodes")
-            .len()
-    );
-    assert_eq!(
-        render_mesh.triangles.len(),
-        refined_payload["mesh"]["boundary_faces"]
-            .as_array()
-            .expect("refined boundary faces")
-            .len()
-    );
-    assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
-            && diagnostic.message.contains(refined_artifact_path)
-            && diagnostic
-                .message
-                .contains("analysis_mesh_volume_element_count=")
-    }));
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_uses_mesh_authoring_summary_regions() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("author-study-mesh-summary");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
-    summary.tetrahedron_generation_family = "star_shaped_polyhedron".to_string();
-    summary.tetrahedron_generation_attempted_family_count = 5;
-    summary.tetrahedron_generation_rejected_family_count = 4;
-    summary.tetrahedron_generation_selected_family_index = 5;
-    summary.tetrahedron_generation_interior_support_candidate_count = 29;
-    summary.tetrahedron_generation_interior_support_accepted_count = 1;
-
-    let authored = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "authored_static".to_string(),
-            model_id: None,
-            geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            run_kind: AnalysisRunKind::LinearStatic,
-            backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
-            material_region_id: None,
-            boundary_condition_region_id: None,
-            driving_condition_region_id: None,
-            structural_force_n: Some([25.0, -50.0, 0.0]),
-            diagram_observation: None,
-        },
-        OperationContext::new(Some("trace-author-study".to_string()), None),
-    )
-    .expect("authoring should produce a valid study");
-
-    let study = &authored.data.study;
-    let model = study
-        .model
-        .as_ref()
-        .expect("authored study should include model");
-    assert_eq!(model.material_assignments[0].region_id, "solid");
-    assert_eq!(model.boundary_conditions[0].region_id, "root");
-    assert_eq!(model.loads[0].region_id, "tip");
-    assert_eq!(
-        model.loads[0].kind,
-        LoadKind::Force {
-            fx: 25.0,
-            fy: -50.0,
-            fz: 0.0
-        }
-    );
-    assert_eq!(
-        authored.data.evidence.selected_material_region_id,
-        "solid".to_string()
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_boundary_condition_region_id
-            .as_deref(),
-        Some("root")
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_region_id
-            .as_deref(),
-        Some("tip")
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_kind
-            .as_deref(),
-        Some("force")
-    );
-    assert_eq!(
-        authored.data.evidence.selected_structural_force_n,
-        Some([25.0, -50.0, 0.0])
-    );
-    assert_eq!(
-        authored.data.evidence.tetrahedron_generation_family,
-        "star_shaped_polyhedron"
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .tetrahedron_generation_attempted_family_count,
-        5
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .tetrahedron_generation_rejected_family_count,
-        4
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .tetrahedron_generation_selected_family_index,
-        5
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .tetrahedron_generation_interior_support_candidate_count,
-        29
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .tetrahedron_generation_interior_support_accepted_count,
-        1
-    );
-
-    let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
-        .expect("authored study should validate");
-    assert!(validation.data.valid);
-
-    let artifact: serde_json::Value = serde_json::from_slice(
-        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
-    )
-    .expect("parse authoring artifact");
-    assert_eq!(
-        artifact["schema_version"].as_str(),
-        Some("fea_study_authoring_artifact/v1")
-    );
-    assert_eq!(
-        artifact["evidence"]["selected_driving_condition_region_id"].as_str(),
-        Some("tip")
-    );
-    assert_eq!(
-        artifact["evidence"]["tetrahedron_generation_family"].as_str(),
-        Some("star_shaped_polyhedron")
-    );
-    assert_eq!(
-        artifact["evidence"]["tetrahedron_generation_attempted_family_count"].as_u64(),
-        Some(5)
-    );
-    assert_eq!(
-        artifact["evidence"]["tetrahedron_generation_rejected_family_count"].as_u64(),
-        Some(4)
-    );
-    assert_eq!(
-        artifact["evidence"]["tetrahedron_generation_selected_family_index"].as_u64(),
-        Some(5)
-    );
-    assert_eq!(
-        artifact["evidence"]["tetrahedron_generation_interior_support_candidate_count"].as_u64(),
-        Some(29)
-    );
-    assert_eq!(
-        artifact["evidence"]["tetrahedron_generation_interior_support_accepted_count"].as_u64(),
-        Some(1)
-    );
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_preserves_non_structural_profile_defaults() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("author-study-electromagnetic");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-
-    let mesh = analysis_mesh_with_boundary_regions(&["ground"], &["coil"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["ground".to_string(), "coil".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
-
-    let authored = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "authored_em".to_string(),
-            model_id: None,
-            geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
-            run_kind: AnalysisRunKind::Electromagnetic,
-            backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
-            material_region_id: Some("solid".to_string()),
-            boundary_condition_region_id: Some("ground".to_string()),
-            driving_condition_region_id: Some("coil".to_string()),
-            structural_force_n: Some([25.0, -50.0, 0.0]),
-            diagram_observation: None,
-        },
-        OperationContext::new(Some("trace-author-em".to_string()), None),
-    )
-    .expect("authoring should support non-structural physics profiles");
-
-    let study = &authored.data.study;
-    assert_eq!(study.run_kind, AnalysisRunKind::Electromagnetic);
-    let model = study
-        .model
-        .as_ref()
-        .expect("authored study should include model");
-    assert_eq!(model.material_assignments[0].region_id, "solid");
-    assert_eq!(model.boundary_conditions[0].region_id, "ground");
-    assert_eq!(
-        model.boundary_conditions[0].kind,
-        BoundaryConditionKind::VectorPotentialGround
-    );
-    assert_eq!(model.loads[0].region_id, "coil");
-    assert!(matches!(model.loads[0].kind, LoadKind::CoilCurrent { .. }));
-    assert!(matches!(
-        model.steps[0].kind,
-        AnalysisStepKind::Electromagnetic
-    ));
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_region_id
-            .as_deref(),
-        Some("coil")
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_kind
-            .as_deref(),
-        Some("coil_current")
-    );
-    assert_eq!(authored.data.evidence.selected_structural_force_n, None);
-
-    let validation = analysis_validate_study_op(study, OperationContext::new(None, None))
-        .expect("authored electromagnetic study should validate");
-    assert!(validation.data.valid);
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_records_modal_driver_without_structural_force_evidence() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("author-study-modal-generic-driver");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
-
-    let authored = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "authored_modal".to_string(),
-            model_id: None,
-            geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::ModalStructural,
-            run_kind: AnalysisRunKind::Modal,
-            backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
-            material_region_id: Some("solid".to_string()),
-            boundary_condition_region_id: Some("root".to_string()),
-            driving_condition_region_id: Some("tip".to_string()),
-            structural_force_n: Some([99.0, 88.0, 77.0]),
-            diagram_observation: None,
-        },
-        OperationContext::new(Some("trace-author-modal".to_string()), None),
-    )
-    .expect("modal authoring should preserve generic driving-condition evidence");
-
-    let model = authored
-        .data
-        .study
-        .model
-        .as_ref()
-        .expect("authored modal study should include model");
-    assert_eq!(model.boundary_conditions[0].region_id, "root");
-    assert_eq!(model.loads[0].region_id, "tip");
-    assert!(matches!(model.loads[0].kind, LoadKind::BodyForce { .. }));
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_boundary_condition_region_id
-            .as_deref(),
-        Some("root")
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_region_id
-            .as_deref(),
-        Some("tip")
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .selected_driving_condition_kind
-            .as_deref(),
-        Some("body_force")
-    );
-    assert_eq!(authored.data.evidence.selected_structural_force_n, None);
-
-    let validation =
-        analysis_validate_study_op(&authored.data.study, OperationContext::new(None, None))
-            .expect("authored modal study should validate");
-    assert!(validation.data.valid);
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_persists_nested_shell_generation_evidence() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("author-study-nested-shell-evidence");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let geometry = nested_tetrahedron_shell_study_geometry();
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
-        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-    mesh_options.refinement.max_iterations = 0;
-    let mesh = runmat_meshing::generate_analysis_mesh(&geometry, mesh_options)
-        .expect("nested-shell fixture should generate an analysis mesh");
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["body".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    assert!(summary.solve_ready);
-    assert_eq!(
-        summary.tetrahedron_generation_family,
-        "nested_tetrahedron_shell"
-    );
-    assert!(summary.nested_tetrahedron_shell.outer_node_count > 0);
-    assert!(summary.nested_tetrahedron_shell.inner_node_count > 0);
-
-    let authored = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "authored_nested_shell_static".to_string(),
-            model_id: None,
-            geometry,
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            run_kind: AnalysisRunKind::LinearStatic,
-            backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
-            material_region_id: Some("body".to_string()),
-            boundary_condition_region_id: Some("root".to_string()),
-            driving_condition_region_id: Some("tip".to_string()),
-            structural_force_n: Some([0.0, -125.0, 25.0]),
-            diagram_observation: None,
-        },
-        OperationContext::new(Some("trace-author-nested-shell".to_string()), None),
-    )
-    .expect("authoring should preserve nested-shell mesh evidence");
-
-    assert_eq!(
-        authored.data.evidence.tetrahedron_generation_family,
-        "nested_tetrahedron_shell"
-    );
-    assert!(
-        authored
-            .data
-            .evidence
-            .nested_tetrahedron_shell
-            .outer_node_count
-            > 0
-    );
-    assert!(
-        authored
-            .data
-            .evidence
-            .nested_tetrahedron_shell
-            .inner_node_count
-            > 0
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .nested_tetrahedron_shell
-            .boundary_exact_cover_refill_count
-            + authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .boundary_centroid_refinement_refill_count
-            + authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .barycentric_partition_refill_count,
-        1
-    );
-
-    let artifact: serde_json::Value = serde_json::from_slice(
-        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
-    )
-    .expect("parse authoring artifact");
-    assert_eq!(
-        artifact["evidence"]["nested_tetrahedron_shell"]["outer_node_count"].as_u64(),
-        Some(
-            authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .outer_node_count as u64
-        )
-    );
-    assert_eq!(
-        artifact["evidence"]["nested_tetrahedron_shell"]["inner_facet_count"].as_u64(),
-        Some(
-            authored
-                .data
-                .evidence
-                .nested_tetrahedron_shell
-                .inner_facet_count as u64
-        )
-    );
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_run_consumes_supplied_generated_solid_artifact() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("author-study-generated-solid-artifact");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let artifact_root = root.join("supplied_mesh");
-    let (mesh_path, evidence_path, summary) =
-        write_generated_through_hole_analysis_mesh_artifacts(&artifact_root);
-    let geometry = through_hole_study_geometry();
-
-    let authored = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "authored_generated_solid_static".to_string(),
-            model_id: None,
-            geometry,
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            run_kind: AnalysisRunKind::LinearStatic,
-            backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            analysis_mesh_evidence_artifact_path: Some(evidence_path.display().to_string()),
-            material_region_id: Some("body".to_string()),
-            boundary_condition_region_id: Some("root".to_string()),
-            driving_condition_region_id: Some("tip".to_string()),
-            structural_force_n: Some([0.0, -250.0, 25.0]),
-            diagram_observation: None,
-        },
-        OperationContext::new(Some("trace-author-generated-solid".to_string()), None),
-    )
-    .expect("authoring should produce a study from generated solid mesh evidence");
-    assert_eq!(
-        authored.data.study.analysis_mesh_artifact_path.as_deref(),
-        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .analysis_mesh_artifact_path
-            .as_deref(),
-        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
-    );
-
-    let run = analysis_run_study_op(&authored.data.study, OperationContext::new(None, None))
-        .expect("authored generated solid study should run from supplied artifact");
-    assert_eq!(
-        run.data.analysis_mesh_artifact_path.as_deref(),
-        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
-    );
-    assert_eq!(
-        run.data.analysis_mesh_evidence_artifact_path.as_deref(),
-        Some(
-            evidence_path
-                .to_str()
-                .expect("evidence path should be utf-8")
-        )
-    );
-    assert_eq!(run.data.refined_analysis_mesh_artifact_path, None);
-    assert_eq!(
-        run.data.run_options["analysis_mesh_artifact_path"].as_str(),
-        Some(mesh_path.to_str().expect("mesh path should be utf-8"))
-    );
-
-    let mesh_payload: serde_json::Value = serde_json::from_slice(
-        &fs::read(&mesh_path).expect("read supplied analysis mesh artifact"),
-    )
-    .expect("parse supplied analysis mesh artifact");
-    assert_eq!(
-        mesh_payload["mesh_options"]["refinement"]["strategy"].as_str(),
-        Some("auto")
-    );
-    assert!(!mesh_payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("supplied artifact should collect solved adaptive evidence")
-        .is_empty());
-    assert!(!mesh_payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("supplied artifact should retain solved sizing samples")
-        .is_empty());
-    let volume_element_count = mesh_payload["mesh"]["volume_elements"]
-        .as_array()
-        .expect("supplied volume elements")
-        .len();
-    let persisted = storage::load_run_result(&run.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let von_mises = persisted
-        .run
-        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-        .expect("authored generated solid run should persist von Mises field");
-    assert_eq!(von_mises.shape, vec![volume_element_count]);
-    assert!(persisted.run.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "FEA_ANALYSIS_MESH_REFERENCE"
-            && diagnostic
-                .message
-                .contains(mesh_path.to_str().expect("mesh path should be utf-8"))
-    }));
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_uses_diagram_observation_when_regions_are_not_requested() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("author-study-diagram-observation");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let validation = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["solid".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation);
-    let mut summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    summary.solve_ready = true;
-    summary.validation_error_code = None;
-    summary.validation_error_message = None;
-
-    let authored = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "authored_from_diagram".to_string(),
-            model_id: None,
-            geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            run_kind: AnalysisRunKind::LinearStatic,
-            backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
-            material_region_id: None,
-            boundary_condition_region_id: None,
-            driving_condition_region_id: None,
-            structural_force_n: None,
-            diagram_observation: Some(AnalysisStudyDiagramObservation {
-                artifact_path: Some("diagram://fixture/free-body.png".to_string()),
-                source_mime_type: Some("image/png".to_string()),
-                summary: Some(
-                    "boundary condition on tip and driving condition on root".to_string(),
-                ),
-                material_region_id: Some("solid".to_string()),
-                boundary_condition_region_id: Some("tip".to_string()),
-                driving_condition_region_id: Some("root".to_string()),
-                structural_force_n: Some([12.0, -3.0, 4.0]),
-                confidence: Some(0.82),
-            }),
-        },
-        OperationContext::new(Some("trace-author-diagram".to_string()), None),
-    )
-    .expect("diagram observation should author a valid study");
-
-    let model = authored
-        .data
-        .study
-        .model
-        .as_ref()
-        .expect("authored study should include model");
-    assert_eq!(model.material_assignments[0].region_id, "solid");
-    assert_eq!(model.boundary_conditions[0].region_id, "tip");
-    assert_eq!(model.loads[0].region_id, "root");
-    assert_eq!(
-        model.loads[0].kind,
-        LoadKind::Force {
-            fx: 12.0,
-            fy: -3.0,
-            fz: 4.0
-        }
-    );
-    assert_eq!(authored.data.evidence.material_region_source, "diagram");
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .boundary_condition_region_source
-            .as_deref(),
-        Some("diagram")
-    );
-    assert_eq!(
-        authored
-            .data
-            .evidence
-            .driving_condition_region_source
-            .as_deref(),
-        Some("diagram")
-    );
-    assert_eq!(
-        authored.data.evidence.diagram_artifact_path.as_deref(),
-        Some("diagram://fixture/free-body.png")
-    );
-    assert_eq!(
-        authored.data.evidence.diagram_source_mime_type.as_deref(),
-        Some("image/png")
-    );
-    assert_eq!(
-        authored.data.evidence.diagram_summary.as_deref(),
-        Some("boundary condition on tip and driving condition on root")
-    );
-    assert_eq!(authored.data.evidence.diagram_confidence, Some(0.82));
-
-    let artifact: serde_json::Value = serde_json::from_slice(
-        &fs::read(&authored.data.evidence_artifact_path).expect("read authoring artifact"),
-    )
-    .expect("parse authoring artifact");
-    assert_eq!(
-        artifact["evidence"]["diagram_artifact_path"].as_str(),
-        Some("diagram://fixture/free-body.png")
-    );
-    assert_eq!(
-        artifact["evidence"]["boundary_condition_region_source"].as_str(),
-        Some("diagram")
-    );
-    assert_eq!(
-        artifact["evidence"]["driving_condition_region_source"].as_str(),
-        Some("diagram")
-    );
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_author_study_rejects_not_solve_ready_mesh_summary() {
-    let _guard = analysis_test_guard();
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
-        &mesh,
-        &runmat_meshing_core::AnalysisMeshValidationOptions {
-            required_boundary_region_ids: vec!["missing".to_string()],
-            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-        },
-    );
-    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-
-    let err = analysis_author_study_op(
-        AnalysisStudyAuthoringIntent {
-            study_id: "rejected_static".to_string(),
-            model_id: None,
-            geometry: closed_cube_geometry_asset(),
-            mesh_authoring_summary: summary,
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            run_kind: AnalysisRunKind::LinearStatic,
-            backend: ComputeBackend::Cpu,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh_evidence_artifact_path: None,
-            material_region_id: None,
-            boundary_condition_region_id: None,
-            driving_condition_region_id: None,
-            structural_force_n: None,
-            diagram_observation: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("not solve-ready summary should fail closed");
-
-    assert_eq!(err.error_code, "RM.FEA.AUTHOR_STUDY.MESH_NOT_SOLVE_READY");
-}
-
-#[test]
-fn analysis_run_study_persists_solid_backend_analysis_mesh_artifact() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("run-study-solid-analysis-mesh");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let mut spec = sample_linear_static_study_spec();
-    spec.geometry = closed_cube_geometry_asset();
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-    mesh_options.refinement.max_iterations = 0;
-    spec.mesh_options = Some(mesh_options);
-
-    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("study run should succeed with solid mesh backend");
-
-    let artifact_path = envelope
-        .data
-        .analysis_mesh_artifact_path
-        .as_ref()
-        .expect("study run should persist solid analysis mesh artifact path");
-    let evidence_path = envelope
-        .data
-        .analysis_mesh_evidence_artifact_path
-        .as_ref()
-        .expect("study run should persist solid mesh evidence artifact path");
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let persisted = storage::load_run_result(&envelope.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let von_mises = persisted
-        .run
-        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-        .expect("solid mesh run should persist von Mises field");
-    assert_eq!(
-        von_mises.shape,
-        vec![payload["mesh"]["volume_elements"]
-            .as_array()
-            .expect("volume elements")
-            .len()]
-    );
-    assert_eq!(
-        payload["mesh"]["provenance"]["algorithm"].as_str(),
-        Some("plc_tetrahedron/v1")
-    );
-    let volume_element_count = payload["mesh"]["volume_elements"]
-        .as_array()
-        .expect("volume elements")
-        .len();
-    assert!(volume_element_count > 0);
-    assert_eq!(
-        payload["mesh"]["backend"]["tetrahedron_element_count"].as_u64(),
-        Some(volume_element_count as u64)
-    );
-    assert_eq!(
-        payload["mesh"]["backend"]["tetrahedron_unrecovered_component_count"].as_u64(),
-        Some(0)
-    );
-    assert_eq!(
-        payload["mesh"]["backend"]["tetrahedron_recovered_component_ratio"].as_f64(),
-        Some(1.0)
-    );
-    assert_eq!(
-        payload["mesh"]["backend"]["volume_component_count"].as_u64(),
-        Some(1)
-    );
-    let evidence_payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(evidence_path).expect("read mesh evidence artifact"))
-            .expect("parse mesh evidence artifact");
-    assert_eq!(
-        evidence_payload["mesh_evidence"]["backend"]["backend"].as_str(),
-        Some("solid")
-    );
-    assert_eq!(
-        evidence_payload["mesh_evidence"]["validation"]["volume_component_count"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        evidence_payload["mesh_evidence"]["validation"]["max_volume_component_count"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        evidence_payload["mesh_evidence"]["validation"]
-            ["require_no_unrecovered_tetrahedron_components"]
-            .as_bool(),
-        Some(true)
-    );
-    assert_eq!(
-        evidence_payload["mesh_evidence"]["validation"]["boundary_recovery"]
-            ["boundary_face_recovery_ratio"]
-            .as_f64(),
-        Some(1.0)
-    );
-    assert_eq!(envelope.data.refined_analysis_mesh_artifact_path, None);
-    assert_eq!(
-        envelope.data.refined_analysis_mesh_evidence_artifact_path,
-        None
-    );
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_run_study_consumes_generated_nested_shell_solid_artifact() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("run-study-nested-shell-solid");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let geometry = nested_tetrahedron_shell_study_geometry();
-    let mut model = sample_solid_model();
-    model.geometry_id = geometry.geometry_id.clone();
-    model.geometry_revision = geometry.revision;
-    model.units = geometry.units;
-    model.material_assignments = vec![MaterialAssignment {
-        region_id: "body".to_string(),
-        expected_material_id: "mat_steel".to_string(),
-        assigned_material_id: "mat_steel".to_string(),
-        confidence: EvidenceConfidence::Verified,
-    }];
-    model.loads = vec![LoadCase {
-        load_id: "load_tip".to_string(),
-        region_id: "tip".to_string(),
-        kind: LoadKind::Force {
-            fx: 0.0,
-            fy: -250.0,
-            fz: 25.0,
-        },
-    }];
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
-        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-    mesh_options.refinement.max_iterations = 0;
-    let mut spec = sample_linear_static_study_spec();
-    spec.geometry = geometry;
-    spec.model = Some(model);
-    spec.mesh_options = Some(mesh_options);
-
-    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("nested-shell solid study should run from generated artifact");
-
-    let artifact_path = envelope
-        .data
-        .analysis_mesh_artifact_path
-        .as_ref()
-        .expect("study run should persist nested-shell analysis mesh artifact");
-    assert_eq!(
-        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
-        Some(artifact_path.as_str())
-    );
-    assert_eq!(envelope.data.refined_analysis_mesh_artifact_path, None);
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let mesh_payload = &payload["mesh"];
-    assert_eq!(
-        mesh_payload["backend"]["tetrahedron_generation_family"].as_str(),
-        Some("nested_tetrahedron_shell")
-    );
-    assert_eq!(
-        mesh_payload["backend"]["plc_input_nested_shell_count"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        mesh_payload["backend"]["plc_input_max_shell_nesting_depth"].as_u64(),
-        Some(1)
-    );
-    assert!(
-        mesh_payload["backend"]["tetrahedron_generation_nested_shell_outer_node_count"]
-            .as_u64()
-            .unwrap_or_default()
-            > 0
-    );
-    assert!(
-        mesh_payload["backend"]["tetrahedron_generation_nested_shell_inner_node_count"]
-            .as_u64()
-            .unwrap_or_default()
-            > 0
-    );
-    assert_eq!(
-        mesh_payload["backend"]["tetrahedron_missing_recovery_item_count"].as_u64(),
-        Some(0)
-    );
-    assert!(
-        mesh_payload["backend"]["tetrahedron_min_exact_scaled_jacobian"]
-            .as_f64()
-            .unwrap_or_default()
-            >= 0.15
-    );
-    let strategy_count = mesh_payload["backend"]
-        ["tetrahedron_generation_nested_shell_boundary_exact_cover_refill_count"]
-        .as_u64()
-        .unwrap_or_default()
-        + mesh_payload["backend"]
-            ["tetrahedron_generation_nested_shell_boundary_centroid_refinement_refill_count"]
-            .as_u64()
-            .unwrap_or_default()
-        + mesh_payload["backend"]
-            ["tetrahedron_generation_nested_shell_barycentric_partition_refill_count"]
-            .as_u64()
-            .unwrap_or_default();
-    assert_eq!(strategy_count, 1);
-    let volume_element_count = mesh_payload["volume_elements"]
-        .as_array()
-        .expect("nested-shell volume elements")
-        .len();
-    let boundary_face_count = mesh_payload["boundary_faces"]
-        .as_array()
-        .expect("nested-shell boundary faces")
-        .len();
-
-    let persisted = storage::load_run_result(&envelope.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let von_mises = persisted
-        .run
-        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-        .expect("nested-shell run should persist von Mises field");
-    assert_eq!(von_mises.shape, vec![volume_element_count]);
-    let topology = persisted
-        .render_topology
-        .as_ref()
-        .expect("run should persist nested-shell solver render topology");
-    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
-    assert_eq!(
-        topology
-            .meshes
-            .iter()
-            .map(|mesh| mesh.triangles.len())
-            .sum::<usize>(),
-        boundary_face_count
-    );
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_run_study_persists_solid_boundary_focus_sizing_evidence() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("run-study-solid-boundary-focus");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let mut spec = sample_linear_static_study_spec();
-    spec.geometry = closed_cube_geometry_asset();
-    let mut model = sample_solid_model();
-    model.geometry_id = spec.geometry.geometry_id.clone();
-    model.geometry_revision = spec.geometry.revision;
-    model.units = spec.geometry.units;
-    model.material_assignments = vec![MaterialAssignment {
-        region_id: "body".to_string(),
-        expected_material_id: "mat_steel".to_string(),
-        assigned_material_id: "mat_steel".to_string(),
-        confidence: EvidenceConfidence::Verified,
-    }];
-    spec.model = Some(model);
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Fine;
-    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
-    spec.mesh_options = Some(mesh_options);
-
-    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("study run should succeed with solid boundary-focus mesh");
-
-    let initial_artifact_path = envelope
-        .data
-        .analysis_mesh_artifact_path
-        .as_ref()
-        .expect("study run should persist solid analysis mesh artifact path");
-    let payload: serde_json::Value = serde_json::from_slice(
-        &fs::read(initial_artifact_path).expect("read initial analysis mesh artifact"),
-    )
-    .expect("parse analysis mesh artifact");
-
-    let active_artifact_path = envelope
-        .data
-        .refined_analysis_mesh_artifact_path
-        .as_ref()
-        .unwrap_or(initial_artifact_path);
-    assert_eq!(
-        envelope.data.run_options["analysis_mesh_artifact_path"].as_str(),
-        Some(active_artifact_path.as_str())
-    );
-    let active_payload: serde_json::Value = serde_json::from_slice(
-        &fs::read(active_artifact_path).expect("read active analysis mesh artifact"),
-    )
-    .expect("parse active analysis mesh artifact");
-    if active_artifact_path != initial_artifact_path {
-        assert_eq!(
-            active_payload["source_analysis_mesh_artifact_path"].as_str(),
-            Some(initial_artifact_path.as_str())
-        );
-    }
-    let active_volume_element_count = active_payload["mesh"]["volume_elements"]
-        .as_array()
-        .expect("volume elements")
-        .len();
-    let persisted = storage::load_run_result(&envelope.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let von_mises = persisted
-        .run
-        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-        .expect("solid boundary-focus run should persist von Mises field");
-    assert_eq!(von_mises.shape, vec![active_volume_element_count]);
-
-    let applied_samples = payload["mesh"]["sizing"]["applied_samples"]
-        .as_array()
-        .expect("sizing applied samples");
-    for reason in ["structural.load_regions", "structural.constraint_regions"] {
-        assert!(
-            applied_samples
-                .iter()
-                .any(|sample| sample["reason"].as_str() == Some(reason)
-                    && sample["inserted_breakpoint_count"]
-                        .as_u64()
-                        .unwrap_or_default()
-                        > 0),
-            "expected boundary-focus sizing application for {reason}"
-        );
-        assert!(
-            payload["sizing_applications"]["by_reason"][reason]
-                .as_u64()
-                .unwrap_or_default()
-                > 0,
-            "expected persisted sizing application summary for {reason}"
-        );
-    }
-    assert_eq!(
-        payload["sizing_rejections"]["total"].as_u64(),
-        Some(0),
-        "boundary-focus sizing samples should be accepted for the closed cube fixture"
-    );
-    assert_eq!(
-        payload["refinement_context"]["boundary_load_region_ids"]
-            .as_array()
-            .expect("load region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["tip"]
-    );
-    assert_eq!(
-        payload["refinement_context"]["boundary_constraint_region_ids"]
-            .as_array()
-            .expect("constraint region ids")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["root"]
-    );
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_mesh_validation_options_use_geometry_bounds_and_boundary_regions() {
-    let mut spec = sample_linear_static_study_spec();
-    spec.geometry = closed_cube_geometry_asset();
-    spec.geometry.units = UnitSystem::Millimeter;
-    let mut model = sample_solid_model();
-    model.material_assignments = vec![
-        MaterialAssignment {
-            region_id: "body".to_string(),
-            expected_material_id: "mat_steel".to_string(),
-            assigned_material_id: "mat_steel".to_string(),
-            confidence: EvidenceConfidence::Verified,
-        },
-        MaterialAssignment {
-            region_id: "body".to_string(),
-            expected_material_id: "mat_steel".to_string(),
-            assigned_material_id: "mat_steel".to_string(),
-            confidence: EvidenceConfidence::Verified,
-        },
-    ];
-    spec.model = Some(model);
-
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        max_elements: 42_000,
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.validation.max_volume_component_count = Some(3);
-    mesh_options.validation.min_bounds_coverage_ratio = 0.95;
-    mesh_options.validation.min_boundary_face_recovery_ratio = 0.98;
-    mesh_options.validation.quality = runmat_meshing_core::QualityThresholds {
-        min_scaled_jacobian: 0.25,
-        max_aspect_ratio: 10.0,
-        max_boundary_projection_error_m: runmat_meshing_core::QualityThresholds::default()
-            .max_boundary_projection_error_m,
-        allow_inverted_elements: false,
-    };
-    let options = analysis_mesh_validation_options_for_study(&spec, &mesh_options);
-
-    assert_eq!(
-        options.expected_bounds_m,
-        Some([[0.0, 0.0, 0.0], [0.001, 0.001, 0.001]])
-    );
-    assert!(
-        (options.expected_volume_m3.expect("expected volume") - 1.0e-9).abs() < 1.0e-18,
-        "unexpected expected volume: {:?}",
-        options.expected_volume_m3
-    );
-    assert!(
-        (options
-            .expected_boundary_area_m2
-            .expect("expected boundary area")
-            - 6.0e-6)
-            .abs()
-            < 1.0e-15,
-        "unexpected expected boundary area: {:?}",
-        options.expected_boundary_area_m2
-    );
-    assert_eq!(
-        options.required_boundary_region_ids,
-        vec!["root".to_string(), "tip".to_string()]
-    );
-    assert_eq!(
-        options.required_material_region_ids,
-        vec!["body".to_string()]
-    );
-    assert_eq!(options.min_bounds_coverage_ratio, 0.95);
-    assert_eq!(options.max_volume_element_count, Some(42_000));
-    assert_eq!(options.max_volume_component_count, Some(3));
-    assert_eq!(options.min_boundary_face_recovery_ratio, 0.98);
-    assert_eq!(
-        options.quality,
-        runmat_meshing_core::QualityThresholds {
-            min_scaled_jacobian: 0.25,
-            max_aspect_ratio: 10.0,
-            max_boundary_projection_error_m: runmat_meshing_core::QualityThresholds::default()
-                .max_boundary_projection_error_m,
-            allow_inverted_elements: false,
-        }
-    );
-}
-
-#[test]
-fn generated_solid_mesh_validation_requires_strict_recovery() {
-    let spec = sample_linear_static_study_spec();
-    let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    let mut mesh = minimal_analysis_mesh();
-    mesh.backend.backend = "solid".to_string();
-    mesh.backend.volume_component_count = 2;
-    mesh.backend.plc_input_protected_edge_count = 6;
-    mesh.nodes[0].provenance.push(MeshEntityProvenance {
-        source_geometry_id: "geo:test".to_string(),
-        source_geometry_revision: 1,
-        source_entity_kind: SourceEntityKind::Body,
-        source_entity_id: "seed_1".to_string(),
-        region_ids: Vec::new(),
-    });
-
-    let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
-
-    assert!(options.require_no_unrecovered_tetrahedron_components);
-    assert!(options.require_no_unrepaired_exact_quality);
-    assert!(options.require_boundary_source_edge_provenance);
-    assert_eq!(options.max_volume_component_count, Some(2));
-    assert_eq!(options.coverage_sample_points_m, vec![[0.0, 0.0, 0.0]]);
-    assert_eq!(options.min_coverage_sample_ratio, 1.0);
-}
-
-#[test]
-fn loaded_solid_mesh_validation_requires_source_edge_provenance_for_protected_plc_edges() {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.backend.backend = "solid".to_string();
-    mesh.backend.plc_input_protected_edge_count = 6;
-    let payload = serde_json::json!({
-        "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-    });
-
-    let options = analysis_mesh_validation_options_for_loaded_artifact(&payload, &mesh)
-        .expect("loaded validation options should parse");
-
-    assert!(options.require_no_unrecovered_tetrahedron_components);
-    assert!(options.require_no_unrepaired_exact_quality);
-    assert!(options.require_boundary_source_edge_provenance);
-}
-
-#[test]
-fn generated_solid_mesh_validation_caps_body_coverage_samples() {
-    let spec = sample_linear_static_study_spec();
-    let mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    let mut mesh = minimal_analysis_mesh();
-    mesh.backend.backend = "solid".to_string();
-    mesh.nodes = (0..70)
-        .map(|index| {
-            let mut node = analysis_mesh_node(index + 1, [index as f64 * 1.0e-3, 0.0, 0.0]);
-            node.provenance.push(MeshEntityProvenance {
-                source_geometry_id: "geo:test".to_string(),
-                source_geometry_revision: 1,
-                source_entity_kind: SourceEntityKind::Body,
-                source_entity_id: format!("seed_{index}"),
-                region_ids: Vec::new(),
-            });
-            node
-        })
-        .collect();
-
-    let options = analysis_mesh_validation_options_for_generated_mesh(&spec, &mesh_options, &mesh);
-
-    assert_eq!(options.coverage_sample_points_m.len(), 64);
-    assert_eq!(options.coverage_sample_points_m[0], [0.0, 0.0, 0.0]);
-    assert_eq!(options.coverage_sample_points_m[63], [0.063, 0.0, 0.0]);
-}
-
-#[test]
-fn analysis_run_study_honors_electromagnetic_run_options() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let mut spec = sample_electromagnetic_study_spec();
-    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions {
-        sweep_enabled: true,
-        sweep_frequency_hz: vec![30.0, 60.0, 120.0],
-        residual_target: 5.0e-7,
-        harmonic_tolerance: 1.2345e-4,
-        harmonic_max_iterations: 64,
-        ..AnalysisElectromagneticRunOptions::default()
-    });
-
-    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study run should succeed");
-
-    assert_eq!(envelope.operation, "fea.run_study");
-    assert_eq!(envelope.op_version, "fea.run_study/v1");
-    assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
-    assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
-    let resolved_options = envelope
-        .data
-        .electromagnetic_run_options
-        .as_ref()
-        .expect("electromagnetic study should return resolved options");
-    let requested_options = spec
-        .electromagnetic_run_options
-        .as_ref()
-        .expect("test should configure electromagnetic options");
-    assert_eq!(
-        resolved_options.sweep_enabled,
-        requested_options.sweep_enabled
-    );
-    assert_eq!(
-        resolved_options.sweep_frequency_hz,
-        requested_options.sweep_frequency_hz
-    );
-    assert_eq!(
-        resolved_options.residual_target,
-        requested_options.residual_target
-    );
-    assert_eq!(
-        resolved_options.harmonic_tolerance,
-        requested_options.harmonic_tolerance
-    );
-    assert_eq!(
-        resolved_options.harmonic_max_iterations,
-        requested_options.harmonic_max_iterations
-    );
-    assert_eq!(
-        resolved_options.prep_artifact_id.as_deref(),
-        envelope.data.prep_artifact_id.as_deref()
-    );
-    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
-
-    let persisted = storage::load_run_result(&envelope.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let em_payload = persisted
-        .electromagnetic_results
-        .as_ref()
-        .expect("electromagnetic payload should be present");
-    assert_eq!(em_payload.sweep_frequency_hz.len(), 3);
-    assert_eq!(em_payload.sweep_peak_flux_density.len(), 3);
-    assert_eq!(em_payload.sweep_solve_quality.len(), 3);
-    let harmonic_diag = persisted
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_HARMONIC_COUPLING")
-        .expect("harmonic coupling diagnostic should be present");
-    assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
-    assert!(harmonic_diag.message.contains("iterations="));
-    assert_eq!(
-        persisted.solver_convergence,
-        envelope.data.solver_convergence
-    );
-    assert_eq!(persisted.result_quality, envelope.data.result_quality);
-    assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
-    assert_eq!(persisted.provenance, envelope.data.provenance);
-}
-
-#[test]
-fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let spec = sample_electromagnetic_study_spec();
-
-    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study run should succeed");
-
-    assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
-    let expected_options = AnalysisElectromagneticRunOptions {
-        prep_artifact_id: envelope.data.prep_artifact_id.clone(),
-        ..Default::default()
-    };
-    assert_eq!(
-        envelope.data.electromagnetic_run_options,
-        Some(expected_options)
-    );
-    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
+    .expect("decode canonical solver mesh artifact");
+    assert_eq!(decoded.topology.volume_elements.len(), 1);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
 }
 
 #[test]
@@ -3927,11 +2158,15 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
         previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
     };
     std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
-    let linear = sample_linear_static_study_spec();
-    let electromagnetic = sample_electromagnetic_study_spec();
+    let mut linear = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("run-study-sweep-solver-mesh");
+    linear.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let mut secondary = linear.clone();
+    secondary.study_id = "study_secondary_structural".into();
     let sweep_spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_001".to_string(),
-        studies: vec![linear, electromagnetic],
+        studies: vec![linear, secondary],
         fail_fast: true,
     };
 
@@ -3950,20 +2185,27 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
         .data
         .run_entries
         .iter()
-        .any(|entry| entry.run_kind == AnalysisRunKind::LinearStatic));
+        .any(
+            |entry| entry.result.steps[0].procedure_step.family == PhysicsFamily::Structural
+                && entry.result.steps[0].procedure_step.procedure == AnalysisProcedure::Static
+        ));
     assert!(envelope
         .data
         .run_entries
         .iter()
-        .any(|entry| entry.run_kind == AnalysisRunKind::Electromagnetic));
+        .any(
+            |entry| entry.result.steps[0].procedure_step.family == PhysicsFamily::Structural
+                && entry.result.steps[0].procedure_step.procedure == AnalysisProcedure::Static
+        ));
     assert!(envelope
         .data
         .run_entries
         .iter()
-        .all(|entry| entry.run_id.starts_with("run_")));
+        .all(|entry| entry.result.steps[0].run_id.starts_with("run_")));
     assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
 }
 
 #[test]
@@ -3980,6 +2222,176 @@ fn analysis_run_study_sweep_rejects_empty_study_set() {
     assert_eq!(err.operation, "fea.run_study_sweep");
     assert_eq!(err.op_version, "fea.run_study_sweep/v1");
     assert_eq!(err.error_code, "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC");
+}
+
+#[test]
+fn analysis_complete_study_sweep_rejects_missing_and_substituted_outcomes() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let context = OperationContext::new(None, None);
+    let mut actual = sample_linear_static_study_spec();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("sweep-substitution-mesh");
+    actual.solver_mesh_artifact_path = Some(mesh_path.display().to_string());
+    let run = analysis_run_study_op(&actual, context.clone())
+        .expect("structural study should produce a composable result");
+    let mut expected = actual;
+    expected.study_id = "different_authored_study".into();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "substituted_sweep".into(),
+        studies: vec![expected],
+        fail_fast: false,
+    };
+
+    let missing = analysis_complete_study_sweep_op(&spec, context.clone(), Vec::new())
+        .expect_err("missing sweep outcomes must fail closed");
+    assert_eq!(
+        missing.error_code,
+        "RM.FEA.RUN_STUDY_SWEEP.OUTCOME_CARDINALITY"
+    );
+
+    let substituted = analysis_complete_study_sweep_op(
+        &spec,
+        context,
+        vec![AnalysisStudySweepRunOutcome::Succeeded(Box::new(run))],
+    )
+    .expect_err("a result from a different authored study must fail closed");
+    assert_eq!(
+        substituted.error_code,
+        "RM.FEA.RUN_STUDY_SWEEP.RESULT_SUBSTITUTED"
+    );
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
+fn analysis_complete_study_sweep_rejects_duplicate_logical_studies() {
+    let _guard = analysis_test_guard();
+    let study = sample_electromagnetic_study_spec();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "duplicate_study_sweep".into(),
+        studies: vec![study.clone(), study],
+        fail_fast: false,
+    };
+
+    let error = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect_err("duplicate logical studies must not receive a sweep identity");
+
+    assert_eq!(error.error_code, "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC");
+    assert_eq!(
+        error.context.get("issue_codes").map(String::as_str),
+        Some("RM.FEA.STUDY_SWEEP.IDENTITY_INVALID")
+    );
+}
+
+#[test]
+fn analysis_study_sweep_identity_binds_authored_order_and_composition_policy() {
+    let context = OperationContext::new(None, None);
+    let first = sample_linear_static_study_spec();
+    let second = sample_electromagnetic_study_spec();
+    let collect_all = AnalysisStudySweepSpec {
+        sweep_id: "identity_sweep".into(),
+        studies: vec![first.clone(), second.clone()],
+        fail_fast: false,
+    };
+    let reversed = AnalysisStudySweepSpec {
+        studies: vec![second, first],
+        ..collect_all.clone()
+    };
+    let fail_fast = AnalysisStudySweepSpec {
+        fail_fast: true,
+        ..collect_all.clone()
+    };
+
+    let collect_all_identity = analysis_study_sweep_identity(&collect_all, &context).unwrap();
+    assert_ne!(
+        collect_all_identity,
+        analysis_study_sweep_identity(&reversed, &context).unwrap()
+    );
+    assert_ne!(
+        collect_all_identity,
+        analysis_study_sweep_identity(&fail_fast, &context).unwrap()
+    );
+}
+
+#[test]
+fn analysis_complete_study_sweep_finds_the_authored_fail_fast_error_before_not_run_entries() {
+    let _guard = analysis_test_guard();
+    let context = OperationContext::new(None, None);
+    let first = sample_linear_static_study_spec();
+    let mut invalid = sample_linear_static_study_spec();
+    invalid.study_id = "   ".into();
+    let error = analysis_run_study_op(&invalid, context.clone())
+        .expect_err("invalid authored study must fail preparation");
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "prepared_fail_fast_sweep".into(),
+        studies: vec![first, invalid],
+        fail_fast: true,
+    };
+
+    let composed = analysis_complete_study_sweep_op(
+        &spec,
+        context,
+        vec![
+            AnalysisStudySweepRunOutcome::NotRun,
+            AnalysisStudySweepRunOutcome::Failed(error),
+        ],
+    )
+    .expect_err("the authored preparation failure must determine fail-fast completion");
+    assert_eq!(composed.error_code, "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED");
+    assert_eq!(
+        composed.context.get("study_index").map(String::as_str),
+        Some("1")
+    );
+}
+
+#[test]
+fn analysis_complete_study_sweep_preserves_indeterminate_terminal_kind() {
+    let _guard = analysis_test_guard();
+    let context = OperationContext::new(None, None);
+    let study = sample_linear_static_study_spec();
+    let mut invalid = study.clone();
+    invalid.study_id = "   ".into();
+    let error = analysis_run_study_op(&invalid, context.clone())
+        .expect_err("invalid authored study must provide a representative operation error");
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "indeterminate_sweep".into(),
+        studies: vec![study],
+        fail_fast: false,
+    };
+
+    let composed = analysis_complete_study_sweep_op(
+        &spec,
+        context.clone(),
+        vec![AnalysisStudySweepRunOutcome::Indeterminate(error.clone())],
+    )
+    .expect("non-fail-fast sweep must publish indeterminate evidence");
+
+    assert_eq!(composed.data.failure_entries.len(), 1);
+    assert_eq!(
+        composed.data.failure_entries[0].kind,
+        AnalysisStudySweepFailureKind::Indeterminate
+    );
+
+    let fail_fast = AnalysisStudySweepSpec {
+        sweep_id: "indeterminate_fail_fast_sweep".into(),
+        studies: spec.studies,
+        fail_fast: true,
+    };
+    let terminal = analysis_complete_study_sweep_op(
+        &fail_fast,
+        context,
+        vec![AnalysisStudySweepRunOutcome::Indeterminate(error)],
+    )
+    .expect_err("fail-fast sweep must preserve an indeterminate terminal");
+    assert_eq!(
+        terminal.error_code,
+        "RM.FEA.RUN_STUDY_SWEEP.STUDY_INDETERMINATE"
+    );
+    assert_eq!(terminal.error_type, OperationErrorType::Validation);
+    assert_eq!(
+        terminal.context.get("failure_kind").map(String::as_str),
+        Some("indeterminate")
+    );
 }
 
 #[test]
@@ -4006,9 +2418,13 @@ fn analysis_run_study_sweep_can_continue_on_study_failure() {
     storage::reset_artifact_store_for_tests();
     let mut invalid = sample_linear_static_study_spec();
     invalid.study_id = "   ".to_string();
+    let mut valid = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("run-study-sweep-continue-solver-mesh");
+    valid.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
     let spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_continue".to_string(),
-        studies: vec![sample_linear_static_study_spec(), invalid],
+        studies: vec![valid, invalid],
         fail_fast: false,
     };
 
@@ -4026,6 +2442,7 @@ fn analysis_run_study_sweep_can_continue_on_study_failure() {
         "RM.FEA.RUN_STUDY.INVALID_SPEC"
     );
     assert!(envelope.data.failure_entries[0].study_id.trim().is_empty());
+    let _ = fs::remove_dir_all(&solver_mesh_root);
 }
 
 #[test]
@@ -4107,45 +2524,12 @@ fn analysis_validate_study_sweep_reports_sweep_and_study_issue_details() {
 }
 
 #[test]
-fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence() {
-    let _guard = analysis_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let envelope = analysis_create_model_op(
-        &geometry,
-        AnalysisCreateModelIntentSpec {
-            model_id: "model_from_step_like".to_string(),
-            profile: AnalysisCreateModelProfile::LinearStaticStructural,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("create model should succeed");
-
-    assert!(envelope
-        .data
-        .materials
-        .iter()
-        .any(|material| material.material_id == "mat_aluminum"));
-    assert_eq!(envelope.data.material_assignments.len(), 2);
-    assert!(envelope
-        .data
-        .material_assignments
-        .iter()
-        .all(|assignment| assignment.assigned_material_id == "mat_aluminum"));
-    assert_eq!(
-        envelope.data.boundary_conditions[0].region_id,
-        "region_root"
-    );
-    assert_eq!(envelope.data.loads[0].region_id, "region_tip");
-}
-
-#[test]
 fn analysis_validate_returns_typed_envelope() {
     let _guard = analysis_test_guard();
     let model = sample_model();
     let context =
         OperationContext::new(Some("trace-a1".to_string()), Some("request-a1".to_string()));
-    let envelope = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+    let envelope = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect("validation should pass");
 
     assert_eq!(envelope.operation, "fea.validate");
@@ -4160,7 +2544,7 @@ fn analysis_validate_maps_typed_error_code() {
     let mut model = sample_model();
     model.materials.clear();
     let context = OperationContext::new(None, None);
-    let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+    let error = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect_err("validation should fail");
 
     assert_eq!(error.error_code, "RM.FEA.VALIDATE.MISSING_MATERIALS");
@@ -4169,32 +2553,33 @@ fn analysis_validate_maps_typed_error_code() {
 }
 
 #[test]
-fn analysis_validate_maps_invalid_moment_error_code() {
+fn analysis_validate_maps_invalid_moment_signal_error_code() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.loads[0].kind = LoadKind::Moment {
-        mx: f64::INFINITY,
-        my: 0.0,
-        mz: 1.0,
+    replace_with_moment_excitation(&mut model, "load_tip");
+    let PhysicalSignal::Moment(signal) = &mut model.signals[0] else {
+        panic!("expected moment signal");
     };
+    signal.representation = SignalRepresentation::Constant(SignalValue::Vector3([
+        runmat_analysis_core::Moment::new(f64::INFINITY),
+        runmat_analysis_core::Moment::new(0.0),
+        runmat_analysis_core::Moment::new(1.0),
+    ]));
     let context = OperationContext::new(None, None);
-    let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+    let error = analysis_validate(&model, &CoordinateFrame::Global, context)
         .expect_err("validation should fail");
 
-    assert_eq!(error.error_code, "RM.FEA.VALIDATE.INVALID_MOMENT");
+    assert_eq!(error.error_code, "RM.FEA.VALIDATE.INVALID_SIGNAL");
     assert_eq!(
-        error.context.get("load_id").map(String::as_str),
-        Some("load_tip")
+        error.context.get("signal_id").map(String::as_str),
+        Some("load_tip.signal")
     );
 }
 
 #[test]
 fn analysis_run_linear_static_returns_typed_envelope() {
     let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    crate::geometry::reset_prep_artifact_store_for_tests();
     let model = sample_model();
-    let prep_artifact_id = sample_prep_artifact_id_for_model(&model);
     let context =
         OperationContext::new(Some("trace-a2".to_string()), Some("request-a2".to_string()));
     let envelope = analysis_run_linear_static_with_options(
@@ -4205,10 +2590,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: Some(sample_analysis_run_prep_context()),
-            prep_artifact_id: Some(prep_artifact_id),
-            analysis_mesh_artifact_path: None,
-            prep_calibration_profile: None,
+            solver_mesh_artifact_path: None,
         },
         context,
     )
@@ -4216,23 +2598,30 @@ fn analysis_run_linear_static_returns_typed_envelope() {
 
     assert_eq!(envelope.operation, "fea.run_linear_static");
     assert_eq!(envelope.op_version, "fea.run_linear_static/v1");
-    assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
+    assert_eq!(envelope.data.run.requested_backend, ComputeBackend::Cpu);
     assert!(!envelope
         .data
         .run
         .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
         .expect("structural displacement field should be present")
         .is_empty());
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Completed);
+    assert!(envelope.data.numerically_acceptable);
     assert_eq!(envelope.data.result_quality, QualityGate::Pass);
     assert!(envelope.data.quality_reasons.is_empty());
     assert!(envelope.data.modal_results.is_none());
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
-    assert_eq!(envelope.data.provenance.solver_method, "dense_direct");
-    assert_eq!(envelope.data.provenance.preconditioner, "none");
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        SolverMethod::SparseDirectCholesky
+    );
+    assert_eq!(
+        envelope.data.provenance.preconditioner,
+        SolverPreconditioner::None
+    );
+    assert!(envelope.data.provenance.fallback_events.is_empty());
     assert_eq!(envelope.data.provenance.quality_policy, "balanced");
     assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
@@ -4243,17 +2632,18 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("linear-thermo-fields");
     let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "linear_thermo_mechanical",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Static,
+    )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 65.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
         },
     );
 
@@ -4265,14 +2655,16 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
         },
         OperationContext::new(Some("trace-linear-thermo-fields".to_string()), None),
     )
     .expect("thermo-mechanical linear static run should pass");
+
+    assert_eq!(
+        envelope.data.run.identity.family(),
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+    );
 
     assert!(envelope
         .data
@@ -4326,7 +2718,8 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     ] {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
+        // Typed layouts count one component per scalar value.
+        assert_eq!(descriptor.component_count, Some(1));
     }
     let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
     assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
@@ -4339,6 +2732,42 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
         assert_eq!(descriptor.kind, AnalysisFieldKind::Tensor);
         assert_eq!(descriptor.component_count, Some(6));
     }
+    let _ = fs::remove_dir_all(&mesh_root);
+}
+
+#[test]
+fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("linear-structural-step-thermo-context");
+    let mut model = sample_solid_model();
+    set_model_thermo_coupling(
+        &mut model,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
+            region_temperature_deltas: Vec::new(),
+        },
+    );
+
+    let error = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("a structural step must not silently execute coupled assembly math");
+
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
+    );
+    assert!(error.message.contains("requests Structural"));
+    assert!(error.message.contains("realizes Coupled(Thermomechanical)"));
     let _ = fs::remove_dir_all(&mesh_root);
 }
 
@@ -4360,9 +2789,10 @@ fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_prov
     .expect("configure provider-backed filesystem artifact store");
 
     let model = sample_model();
-    let envelope = analysis_run_linear_static_op(
+    let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(Some("trace-provider-artifact".to_string()), None),
     )
     .expect("run should pass");
@@ -4392,12 +2822,15 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let cancelled = Arc::new(AtomicBool::new(true));
-    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(cancelled));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(
+        runmat_execution::CancellationToken::from_shared(cancelled),
+    ));
     let model = sample_model();
 
-    let err = analysis_run_linear_static_op(
+    let err = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(Some("trace-cancel".to_string()), None),
     )
     .expect_err("cancelled run should fail");
@@ -4407,6 +2840,35 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
     assert_eq!(err.severity, OperationErrorSeverity::Warning);
     assert!(!err.retryable);
     storage::reset_artifact_store_for_tests();
+}
+
+#[test]
+fn analysis_run_linear_static_cancellation_after_preparation_stops_assembly() {
+    let _guard = analysis_test_guard();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(
+        runmat_execution::CancellationToken::from_shared(Arc::clone(&cancelled)),
+    ));
+    let cancellation_on_assembly = Arc::clone(&cancelled);
+    let _progress_guard = replace_fea_progress_handler(Some(Arc::new(move |event| {
+        if event.phase == FeaProgressPhase::ModelAssembly
+            && event.status == FeaProgressStatus::Started
+        {
+            cancellation_on_assembly.store(true, Ordering::Relaxed);
+        }
+    })));
+
+    let error = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        AnalysisRunOptions::default(),
+        OperationContext::new(Some("trace-cancel-after-preparation".to_string()), None),
+    )
+    .expect_err("cancellation at the assembly boundary must stop the inline solve");
+
+    assert_eq!(error.error_code, "RM.FEA.RUN_LINEAR_STATIC.CANCELLED");
+    assert_eq!(error.error_type, OperationErrorType::Cancelled);
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -4423,9 +2885,10 @@ fn analysis_run_linear_static_emits_solver_and_artifact_progress_events() {
     })));
     let model = sample_model();
 
-    analysis_run_linear_static_op(
+    analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(Some("trace-progress".to_string()), None),
     )
     .expect("run should pass");
@@ -4453,150 +2916,178 @@ fn analysis_run_linear_static_emits_solver_and_artifact_progress_events() {
 }
 
 #[test]
-fn gpu_run_without_provider_records_fallback_event() {
+fn host_progress_handler_observes_direct_solver_progress() {
     let _guard = analysis_test_guard();
-    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_op(
-        &model,
-        ComputeBackend::Gpu,
-        OperationContext::new(None, None),
-    )
-    .expect("run should pass");
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_for_handler = Arc::clone(&events);
+    let _progress_guard = replace_fea_progress_handler(Some(Arc::new(move |event| {
+        events_for_handler
+            .lock()
+            .expect("progress event lock should not be poisoned")
+            .push(event);
+    })));
 
-    if envelope.data.provenance.solver_backend == "cpu_reference" {
-        assert!(envelope
-            .data
-            .provenance
-            .fallback_events
-            .iter()
-            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
-        assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
-        assert!(matches!(
-            envelope
-                .data
-                .run
-                .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-                .expect("structural displacement field should be present")
-                .values,
-            AnalysisFieldValues::HostF64(_)
-        ));
-    } else {
-        assert_eq!(envelope.data.provenance.solver_backend, "runtime_tensor");
-    }
+    runmat_analysis_fea::emit_fea_progress_phase(
+        "fea.run_checked_study",
+        FeaProgressPhase::MeshPrep,
+        FeaProgressStatus::Advanced,
+        "Generated 42 elements",
+        Some(42),
+        Some(100),
+    );
+
+    let events = events
+        .lock()
+        .expect("progress event lock should not be poisoned");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].operation, "fea.run_checked_study");
+    assert_eq!(events[0].phase, FeaProgressPhase::MeshPrep);
+    assert_eq!(events[0].fraction, Some(0.42));
 }
 
 #[test]
-fn gpu_run_with_provider_emits_device_refs() {
+fn native_sparse_fea_cancellation_is_terminal_and_releases_resources() {
     let _guard = analysis_test_guard();
-    static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1000);
-
-    struct AnalysisTestProvider;
-
-    impl AccelProvider for AnalysisTestProvider {
-        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: 7,
-                buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
-                descriptor: Default::default(),
-            })
-        }
-
-        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn device_info(&self) -> String {
-            "analysis-test-provider".to_string()
-        }
-
-        fn device_id(&self) -> u32 {
-            7
-        }
-
-        fn device_info_struct(&self) -> ApiDeviceInfo {
-            ApiDeviceInfo {
-                device_id: 7,
-                name: "analysis-test-provider".to_string(),
-                vendor: "runmat-tests".to_string(),
-                memory_bytes: None,
-                backend: Some("test_gpu".to_string()),
-            }
-        }
-    }
-
-    static PROVIDER: AnalysisTestProvider = AnalysisTestProvider;
-    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
-
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_op(
-        &model,
-        ComputeBackend::Gpu,
-        OperationContext::new(None, None),
-    )
-    .expect("run should pass");
-
-    assert!(!envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| event.starts_with("BACKEND_NO_PROVIDER")
-            || event.starts_with("BACKEND_UPLOAD_FAILED")));
-    assert!(matches!(
-        envelope.data.provenance.solver_backend.as_str(),
-        "runtime_tensor" | "cpu_reference"
-    ));
-    if envelope.data.provenance.solver_backend == "cpu_reference" {
-        assert!(envelope
-            .data
-            .provenance
-            .fallback_events
-            .iter()
-            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
-    }
-    assert!(
-        (0.0..=1.0).contains(&envelope.data.provenance.solver_device_apply_k_ratio),
-        "ratio must be in [0,1]"
+    let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+        Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
     );
-    assert!(matches!(
-        envelope
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let cancellation = runmat_analysis_fea::FeaCancellationToken::new();
+    cancellation.cancel();
+    let _progress_guard = runmat_analysis_fea::replace_fea_progress_context(
+        runmat_analysis_fea::FeaProgressContext {
+            handler: None,
+            cancellation,
+            attempt_id: Some(runmat_execution::identity::AttemptId::derive(&[
+                b"cancelled-fea-solve",
+            ])),
+        },
+    );
+    let dimension = 32;
+    let stiffness = runmat_analysis_fea::algebra::RealSparseMatrix::diagonal(
+        vec![2.0; dimension],
+        runmat_analysis_fea::algebra::OperatorRole::Stiffness,
+        runmat_analysis_fea::algebra::MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .expect("stiffness");
+    let mass = runmat_analysis_fea::algebra::RealSparseMatrix::diagonal(
+        vec![1.0; dimension],
+        runmat_analysis_fea::algebra::OperatorRole::Mass,
+        runmat_analysis_fea::algebra::MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .expect("mass");
+    let damping = runmat_analysis_fea::algebra::RealSparseMatrix::diagonal(
+        vec![0.0; dimension],
+        runmat_analysis_fea::algebra::OperatorRole::Damping,
+        runmat_analysis_fea::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .expect("damping");
+    let operators =
+        runmat_analysis_fea::algebra::CanonicalRealOperators::try_new(stiffness, mass, damping)
+            .expect("operators");
+    let system = runmat_analysis_fea::algebra::AssembledRealSystem::try_new(
+        operators,
+        vec![false; dimension],
+        vec![1.0; dimension],
+    )
+    .expect("system");
+
+    let result = runmat_analysis_fea::solve::linear::solve_operator_system(
+        &system,
+        runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::Accelerator,
+        &runmat_analysis_fea::solve::backend::cpu_reference::CpuReferenceBackend,
+        None,
+    )
+    .expect("cancelled coercivity fixture returns a diagnostic outcome");
+
+    assert!(!result.converged);
+    assert!(result.solution.iter().all(|value| *value == 0.0));
+    // The coercivity proof runs on the host before any provider dispatch and observes the
+    // cancellation first: the solve is terminal, the provider is never engaged, and no
+    // provider evidence or resources exist for it.
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "FEA_SOLVER_CANCELLED"),
+        "diagnostics={:?}",
+        result.diagnostics
+    );
+    assert!(result.accelerator_evidence.is_none());
+    assert_eq!(result.host_sync_count, 0);
+    assert_eq!(result.device_apply_k_count, 0);
+    assert_eq!(provider.placement_resources().live_bytes, 0);
+}
+
+#[test]
+fn native_sparse_provider_preserves_modal_fallback_and_transient_device_evidence() {
+    let _guard = analysis_test_guard();
+    let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+        Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+    );
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+
+    let mut modal_model = sample_model();
+    modal_model.sequence.steps = vec![ProcedureStep::structural_modal("modal-native-sparse")];
+    let modal = analysis_run_modal_with_options_op(
+        &modal_model,
+        ComputeBackend::Gpu,
+        Default::default(),
+        OperationContext::new(Some("trace-modal-native-sparse".to_string()), None),
+    )
+    .expect("native sparse modal solve");
+    assert_eq!(
+        modal.data.run.solver_backend,
+        LinearAlgebraBackendKind::CpuReference
+    );
+    assert!(modal.data.run.accelerator_evidence.is_empty());
+    assert_eq!(
+        modal
             .data
             .run
-            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-            .expect("structural displacement field should be present")
-            .values,
-        AnalysisFieldValues::DeviceRef(_)
-    ));
-    assert!(matches!(
-        envelope
-            .data
-            .run
-            .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-            .expect("structural von Mises field should be present")
-            .values,
-        AnalysisFieldValues::DeviceRef(_)
-    ));
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code
+                == runmat_analysis_fea::accelerator_admission::ACCELERATOR_ADMISSION_FALLBACK_CODE)
+            .count(),
+        1
+    );
+    assert_eq!(provider.placement_resources().live_bytes, 0);
+
+    let mut transient_model = sample_model();
+    transient_model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient-native-sparse",
+    )];
+    let transient = analysis_run_transient_with_options_op(
+        &transient_model,
+        ComputeBackend::Gpu,
+        Default::default(),
+        OperationContext::new(Some("trace-transient-native-sparse".to_string()), None),
+    )
+    .expect("native sparse transient solve");
+    assert_eq!(
+        transient.data.run.solver_backend,
+        LinearAlgebraBackendKind::Accelerator
+    );
+    assert!(!transient.data.run.accelerator_evidence.is_empty());
+    assert!(transient
+        .data
+        .run
+        .accelerator_evidence
+        .iter()
+        .all(|evidence| evidence.validate().is_ok() && evidence.satisfies_tolerance()));
+    assert_eq!(provider.placement_resources().live_bytes, 0);
 }
 
 #[test]
 fn analysis_results_returns_filtered_fields_and_metadata() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let run = analysis_run_linear_static_op(
+    let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(Some("trace-results-1".to_string()), None),
     )
     .expect("run should pass");
@@ -4610,11 +3101,11 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
             include_diagnostics: false,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-2".to_string()), None),
     )
@@ -4702,27 +3193,6 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Element,
         ),
         (
-            fea_thermal_boundary_heat_flux_field_id(0),
-            "thermal",
-            "boundary_heat_flux",
-            Some("W/m^2"),
-            AnalysisFieldLocation::BoundaryFace,
-        ),
-        (
-            FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
-            "em",
-            "vector_potential_real",
-            Some("Wb/m"),
-            AnalysisFieldLocation::Edge,
-        ),
-        (
-            FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL.to_string(),
-            "em",
-            "electric_flux_density_real",
-            Some("C/m^2"),
-            AnalysisFieldLocation::Element,
-        ),
-        (
             FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
             "electro_thermal",
             "joule_heat",
@@ -4787,20 +3257,28 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
         ),
     ];
 
-    for (field_id, family, quantity, unit, location) in cases {
+    // Family and unit follow the field id; location and quantity are the publisher's
+    // declared layout (see `field_descriptors_project_the_declared_layout`).
+    for (field_id, family, _published_name, unit, _location) in cases {
         let descriptor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
             &field_id,
+            runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
             vec![1],
             vec![0.0],
         ));
         assert_eq!(descriptor.family, family, "{field_id} family");
-        assert_eq!(descriptor.quantity, quantity, "{field_id} quantity");
         assert_eq!(descriptor.unit.as_deref(), unit, "{field_id} unit");
-        assert_eq!(descriptor.location, location, "{field_id} location");
     }
 
     let membrane = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+        runmat_analysis_core::AnalysisFieldLayout::canonical(
+            runmat_analysis_core::ObservationQuantity::ShellMembraneForce,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1, 3],
         vec![0.0, 0.0, 0.0],
     ));
@@ -4808,6 +3286,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(membrane.component_count, Some(3));
     let shear = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+        runmat_analysis_core::AnalysisFieldLayout::canonical(
+            runmat_analysis_core::ObservationQuantity::ShellTransverseShear,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1, 2],
         vec![0.0, 0.0],
     ));
@@ -4815,14 +3297,22 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(shear.component_count, Some(2));
     let von_mises = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::ShellVonMises,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1],
         vec![0.0],
     ));
     assert_eq!(von_mises.kind, AnalysisFieldKind::Scalar);
-    assert_eq!(von_mises.component_count, None);
+    assert_eq!(von_mises.component_count, Some(1));
 
     let displacement = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        runmat_analysis_core::AnalysisFieldLayout::vector3(
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::FieldLocation::Node,
+        ),
         vec![4, 3],
         vec![0.0; 12],
     ));
@@ -4835,6 +3325,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(displacement.component_count, Some(3));
     let nodal_von_mises = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::VonMisesStress,
+            runmat_analysis_core::FieldLocation::Node,
+        ),
         vec![4],
         vec![0.0; 4],
     ));
@@ -4847,9 +3341,13 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(nodal_von_mises.entity_count, 4);
     assert_eq!(nodal_von_mises.value_count, 4);
     assert_eq!(nodal_von_mises.element_count, 4);
-    assert_eq!(nodal_von_mises.component_count, None);
+    assert_eq!(nodal_von_mises.component_count, Some(1));
     let solid_stress = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRESS,
+        runmat_analysis_core::AnalysisFieldLayout::symmetric_tensor3(
+            runmat_analysis_core::ObservationQuantity::Stress,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1, 6],
         vec![0.0; 6],
     ));
@@ -4862,6 +3360,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(solid_stress.component_count, Some(6));
     let strain_energy_density = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::StrainEnergyDensity,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1],
         vec![0.0],
     ));
@@ -4885,6 +3387,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(membrane.value_count, 3);
     let energy = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::StrainEnergy,
+            runmat_analysis_core::FieldLocation::Global,
+        ),
         vec![1],
         vec![0.0],
     ));
@@ -4895,12 +3401,133 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
 }
 
 #[test]
+fn statistical_field_descriptors_preserve_statistic_units_and_locations() {
+    let cases = [
+        (
+            "structural.response_spectrum.nodal.absolute_acceleration",
+            "absolute_acceleration",
+            Some(runmat_analysis_core::FieldStatistic::ComponentMagnitudeEnvelope),
+            Some("m/s^2"),
+            AnalysisFieldLocation::Node,
+        ),
+        (
+            "structural.response_spectrum.envelope.stress",
+            "stress",
+            Some(runmat_analysis_core::FieldStatistic::ComponentMagnitudeEnvelope),
+            Some("Pa"),
+            AnalysisFieldLocation::Element,
+        ),
+        (
+            "structural.random_response.rms.displacement",
+            "displacement",
+            Some(runmat_analysis_core::FieldStatistic::RootMeanSquare),
+            Some("m"),
+            AnalysisFieldLocation::Node,
+        ),
+        (
+            "structural.random_response.variance.stress",
+            "stress",
+            Some(runmat_analysis_core::FieldStatistic::Variance),
+            Some("Pa^2"),
+            AnalysisFieldLocation::Element,
+        ),
+    ];
+    for (field_id, _published_name, statistic, unit, location) in cases {
+        let field_location = match location {
+            AnalysisFieldLocation::Node => runmat_analysis_core::FieldLocation::Node,
+            _ => runmat_analysis_core::FieldLocation::Element,
+        };
+        // The producer declares the statistic on the layout; the descriptor projects it.
+        let mut layout = runmat_analysis_core::AnalysisFieldLayout::vector3(
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            field_location,
+        );
+        layout.statistic = statistic;
+        let descriptor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+            field_id,
+            layout,
+            vec![2, 3],
+            vec![0.0; 6],
+        ));
+        assert_eq!(descriptor.statistic, statistic, "{field_id}");
+        assert_eq!(descriptor.unit.as_deref(), unit, "{field_id}");
+        assert_eq!(descriptor.location, location, "{field_id}");
+    }
+}
+
+/// A descriptor reports exactly what the publisher declared: quantity, location, components,
+/// representation and ordinal, and counts entities from the declared layout. The same field
+/// id published with different layouts (element-constant vs nodal temperature) is described
+/// by each publisher's declaration, never by its name.
+#[test]
+fn field_descriptors_project_the_declared_layout() {
+    use runmat_analysis_core::{
+        AnalysisFieldLayout, ComplexRepresentation, FieldLocation, FieldOrdinal,
+        ObservationQuantity as Q,
+    };
+    let element_temperature = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "thermo_mechanical.temperature.0",
+        AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Element).step(0),
+        vec![3],
+        vec![300.0; 3],
+    ));
+    assert_eq!(element_temperature.location, AnalysisFieldLocation::Element);
+    assert_eq!(element_temperature.entity_count, 3);
+    assert_eq!(element_temperature.component_count, Some(1));
+    assert_eq!(element_temperature.layout.ordinal, FieldOrdinal::Step(0));
+    let nodal_temperature = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "thermo_mechanical.temperature.0",
+        AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Node).step(0),
+        vec![5],
+        vec![300.0; 5],
+    ));
+    assert_eq!(nodal_temperature.location, AnalysisFieldLocation::Node);
+    assert_eq!(nodal_temperature.entity_count, 5);
+    let acoustic_mode = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "acoustic.mode_shape.1",
+        AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node).mode(0),
+        vec![4],
+        vec![1.0; 4],
+    ));
+    assert_eq!(acoustic_mode.kind, AnalysisFieldKind::Scalar);
+    assert_eq!(acoustic_mode.component_count, Some(1));
+    assert_eq!(acoustic_mode.entity_count, 4);
+    assert_eq!(acoustic_mode.layout.quantity, Q::AcousticPressure);
+    let phasor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "acoustic.pressure",
+        AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node)
+            .representation(ComplexRepresentation::Complex),
+        vec![4, 2],
+        vec![1.0; 8],
+    ));
+    assert_eq!(phasor.entity_count, 4);
+    assert_eq!(phasor.component_count, Some(1));
+    let points = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "structural.integration_point_stress",
+        AnalysisFieldLayout::symmetric_tensor3(Q::Stress, FieldLocation::IntegrationPoint),
+        vec![8, 6],
+        vec![0.0; 48],
+    ));
+    assert_eq!(points.location, AnalysisFieldLocation::IntegrationPoint);
+    assert_eq!(points.entity_count, 8);
+    assert_eq!(points.kind, AnalysisFieldKind::Tensor);
+    let json = serde_json::to_value(&acoustic_mode).unwrap();
+    assert_eq!(json["layout"]["quantity"], "acoustic_pressure");
+    assert_eq!(json["layout"]["ordinal"]["kind"], "mode");
+}
+
+#[test]
 fn analysis_results_describes_structural_l2_fields() {
     let _guard = analysis_test_guard();
-    let model = sample_model();
-    let run = analysis_run_linear_static_op(
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("structural-l2-fields");
+    let model = sample_solid_model();
+    let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisRunOptions::default()
+        },
         OperationContext::new(Some("trace-results-structural-fields-1".to_string()), None),
     )
     .expect("run should pass");
@@ -4920,11 +3547,11 @@ fn analysis_results_describes_structural_l2_fields() {
             include_diagnostics: false,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-structural-fields-2".to_string()), None),
     )
@@ -4975,6 +3602,7 @@ fn analysis_results_describes_structural_l2_fields() {
         descriptor(FEA_FIELD_STRUCTURAL_EQUATION_SCALE).kind,
         AnalysisFieldKind::Scalar
     );
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
@@ -4983,9 +3611,10 @@ fn analysis_results_describes_beam_resultant_fields() {
     let model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
     );
-    let run = analysis_run_linear_static_op(
+    let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(Some("trace-results-beam-fields-1".to_string()), None),
     )
     .expect("beam run should pass");
@@ -5022,11 +3651,11 @@ fn analysis_results_describes_beam_resultant_fields() {
             include_diagnostics: false,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-beam-fields-2".to_string()), None),
     )
@@ -5086,12 +3715,13 @@ fn analysis_results_describes_beam_resultant_fields() {
 }
 
 #[test]
-fn analysis_results_unknown_field_maps_typed_error() {
+fn analysis_results_unavailable_beam_continuum_field_maps_typed_error() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let run = analysis_run_linear_static_op(
+    let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(Some("trace-results-3".to_string()), None),
     )
     .expect("run should pass");
@@ -5099,25 +3729,103 @@ fn analysis_results_unknown_field_maps_typed_error() {
     let err = analysis_results_op(
         &run.data,
         AnalysisResultsQuery {
-            include_fields: vec!["strain_energy".to_string()],
+            include_fields: vec![FEA_FIELD_STRUCTURAL_STRAIN.to_string()],
             include_field_values: true,
 
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-4".to_string()), None),
     )
-    .expect_err("results should fail");
+    .expect_err("a beam run must not invent continuum strain");
 
     assert_eq!(err.operation, "fea.results");
     assert_eq!(err.op_version, "fea.results/v1");
     assert_eq!(err.error_code, "RM.FEA.RESULTS.FIELD_NOT_FOUND");
+    assert_eq!(
+        err.context.get("requested_field"),
+        Some(&FEA_FIELD_STRUCTURAL_STRAIN.to_string())
+    );
+}
+
+#[test]
+fn explicit_field_values_are_returned_beyond_the_default_inline_budget() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let model = sample_model();
+    let mut run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        Default::default(),
+        OperationContext::new(Some("trace-results-explicit-values".to_string()), None),
+    )
+    .expect("run should pass")
+    .data;
+    // One field past the default inline budget, as a large mesh produces.
+    let entries = (RESULTS_INLINE_FIELD_BYTES / 8 + 1) as usize;
+    run.run_id = format!("{}-large", run.run_id);
+    run.run.fields.push(AnalysisField::host_f64(
+        "test.large_nodal_field",
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::Temperature,
+            runmat_analysis_core::FieldLocation::Node,
+        ),
+        vec![entries],
+        (0..entries).map(|index| index as f64).collect(),
+    ));
+    storage::persist_run_result(&run).expect("large run should persist");
+    let field_count = run.run.fields.len();
+
+    let bounded =
+        bounded_default_results_query(&run.run_id, AnalysisResultsQuery::default()).unwrap();
+    assert!(
+        !bounded.include_field_values,
+        "the default view opens bounded"
+    );
+    let default_view =
+        analysis_results_by_run_id_op(&run.run_id, bounded, OperationContext::new(None, None))
+            .expect("bounded results");
+    assert!(default_view.data.fields.is_empty());
+    assert_eq!(default_view.data.field_descriptors.len(), field_count);
+
+    // A selection that fits the budget keeps its values in the default view.
+    let small = bounded_default_results_query(
+        &run.run_id,
+        AnalysisResultsQuery {
+            include_fields: vec![FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()],
+            ..AnalysisResultsQuery::default()
+        },
+    )
+    .unwrap();
+    assert!(small.include_field_values);
+
+    let explicit = analysis_results_by_run_id_op(
+        &run.run_id,
+        AnalysisResultsQuery {
+            include_field_values: true,
+            ..AnalysisResultsQuery::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("explicit field values");
+    assert_eq!(explicit.data.fields.len(), field_count);
+    let large = explicit
+        .data
+        .fields
+        .iter()
+        .find(|field| field.field_id == "test.large_nodal_field")
+        .expect("the large field is returned");
+    let AnalysisFieldValues::HostF64(values) = &large.values else {
+        panic!("host values expected");
+    };
+    assert_eq!(values.len(), entries);
+    assert_eq!(values[entries - 1], (entries - 1) as f64);
 }
 
 #[test]
@@ -5125,9 +3833,10 @@ fn analysis_results_by_run_id_roundtrip_works() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let model = sample_model();
-    let run = analysis_run_linear_static_op(
+    let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(Some("trace-results-by-id-run".to_string()), None),
     )
     .expect("run should pass");
@@ -5202,101 +3911,41 @@ fn analysis_results_by_run_id_missing_maps_typed_error() {
 }
 
 #[test]
-fn analysis_results_compare_reports_typed_deltas() {
+fn analysis_results_compare_reports_typed_deltas_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    let baseline = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            max_newton_iters: 1,
-            line_search: false,
-            ..AnalysisNonlinearRunOptions::balanced()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("baseline nonlinear run should succeed");
-    let candidate = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::solid_recommended(),
-        OperationContext::new(None, None),
-    )
-    .expect("candidate nonlinear run should succeed");
-
-    let compare = analysis_results_compare_op(
-        AnalysisResultsCompareQuery {
-            baseline_run_id: baseline.data.run_id.clone(),
-            candidate_run_id: candidate.data.run_id.clone(),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("compare operation should succeed");
-
-    assert_eq!(compare.operation, "fea.results_compare");
-    assert_eq!(compare.op_version, "fea.results_compare/v1");
-    assert!(compare.data.failed_increment_delta.is_some());
-    assert!(compare.data.max_iteration_delta.is_some());
-    assert!(compare.data.solve_ms_delta.is_some());
-
-    storage::reset_artifact_store_for_tests();
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_trends_summarizes_recent_nonlinear_runs() {
+fn analysis_trends_summarizes_recent_nonlinear_runs_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    for _ in 0..4 {
-        let _ = analysis_run_nonlinear_op(
-            &model,
-            ComputeBackend::Cpu,
-            OperationContext::new(None, None),
-        )
-        .expect("nonlinear run should persist for trends");
-    }
-
-    let trends = analysis_trends_op(
-        AnalysisTrendsQuery { window_size: 3 },
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("trends should succeed");
-
-    assert_eq!(trends.operation, "fea.trends");
-    assert_eq!(trends.op_version, "fea.trends/v1");
-    let nonlinear = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
-        .expect("nonlinear trend summary should exist");
-    assert_eq!(nonlinear.sample_count, 3);
-    assert!(nonlinear.median_solve_ms.is_some());
-    assert!(nonlinear.p95_solve_ms.is_some());
-    assert!(nonlinear.failed_increment_rate.is_some());
-    assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
-    assert!(nonlinear.thermo_transient_warn_rate.is_none());
-    assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
-    assert!(nonlinear.thermo_spread_breach_rate.is_none());
-    assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
-    assert!(nonlinear.electro_thermal_coupling_enabled_rate.is_none());
-    assert!(nonlinear.electro_transient_warn_rate.is_none());
-    assert!(nonlinear.electro_nonlinear_warn_rate.is_none());
-    assert!(nonlinear.plastic_nonlinear_warn_rate.is_none());
-    assert!(nonlinear.contact_nonlinear_warn_rate.is_none());
-
-    storage::reset_artifact_store_for_tests();
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -5305,20 +3954,20 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
     storage::reset_artifact_store_for_tests();
 
     let geometry = sample_geometry_asset();
-    let acoustic_model = analysis_create_model_op(
+    let acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_trend_model".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created");
     for _ in 0..3 {
-        let _ = analysis_run_acoustic_op(
+        let _ = analysis_run_acoustic_with_options_op(
             &acoustic_model.data,
             ComputeBackend::Cpu,
+            Default::default(),
             OperationContext::new(None, None),
         )
         .expect("acoustic run should persist for trends");
@@ -5334,7 +3983,7 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Acoustic)
+        .find(|summary| summary.identity.family() == PhysicsFamily::Acoustic)
         .expect("acoustic trend summary should exist");
     assert_eq!(acoustic.sample_count, 2);
     assert!(acoustic.median_solve_ms.is_some());
@@ -5344,7 +3993,7 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Modal);
+        .find(|summary| summary.identity.procedure() == AnalysisProcedure::ModalExtraction);
     assert!(
         modal.is_none(),
         "acoustic runs should not classify as modal"
@@ -5354,23 +4003,22 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
 }
 
 #[test]
-fn analysis_trends_classifies_cfd_runs_separately() {
+fn analysis_trends_never_records_rejected_reduced_cfd_as_a_run() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
 
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "cfd_1".to_string(),
-        kind: AnalysisStepKind::Cfd,
-    }];
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
+    model.cfd = Some(sample_cfd_domain());
     for _ in 0..3 {
-        let _ = analysis_run_cfd_op(
+        let error = analysis_run_cfd_with_options_op(
             &model,
             ComputeBackend::Cpu,
+            Default::default(),
             OperationContext::new(None, None),
         )
-        .expect("cfd run should persist for trends");
+        .expect_err("the removed reduced CFD endpoint must not persist a fabricated run");
+        assert_eq!(error.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
     }
 
     let trends = analysis_trends_op(
@@ -5379,459 +4027,197 @@ fn analysis_trends_classifies_cfd_runs_separately() {
     )
     .expect("trends should succeed");
 
-    let cfd = trends
+    assert!(trends
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Cfd)
-        .expect("cfd trend summary should exist");
-    assert_eq!(cfd.sample_count, 2);
-    assert!(cfd.median_solve_ms.is_some());
-    assert!(cfd.p95_solve_ms.is_some());
-    assert!(cfd.failed_increment_rate.is_none());
+        .all(|summary| summary.identity.family() != PhysicsFamily::Fluid));
 
     storage::reset_artifact_store_for_tests();
 }
 
 #[test]
-fn analysis_trends_classifies_cht_runs_separately() {
+fn analysis_trends_omit_rejected_coupled_flow_runs() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
-
-    let model = sample_cht_model();
     for _ in 0..3 {
-        let _ = analysis_run_cht_op(
-            &model,
-            ComputeBackend::Cpu,
-            OperationContext::new(None, None),
-        )
-        .expect("cht run should persist for trends");
+        analysis_run_cht_op(&sample_cht_model(), OperationContext::new(None, None))
+            .expect_err("rejected CHT runs are not persisted");
+        analysis_run_fsi_op(&sample_fsi_model(), OperationContext::new(None, None))
+            .expect_err("rejected FSI runs are not persisted");
     }
-
     let trends = analysis_trends_op(
         AnalysisTrendsQuery { window_size: 2 },
         OperationContext::new(None, None),
     )
     .expect("trends should succeed");
-
-    let cht = trends
+    assert!(trends
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Cht)
-        .expect("cht trend summary should exist");
-    assert_eq!(cht.sample_count, 2);
-    assert!(cht.median_solve_ms.is_some());
-    assert!(cht.p95_solve_ms.is_some());
-    assert!(cht.failed_increment_rate.is_none());
-
-    let cfd = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Cfd);
-    assert!(cfd.is_none(), "cht runs should not classify as cfd");
-
+        .all(|summary| !matches!(summary.identity.family(), PhysicsFamily::Coupled(_))));
     storage::reset_artifact_store_for_tests();
 }
 
 #[test]
-fn analysis_trends_classifies_fsi_runs_separately() {
+fn analysis_run_transient_rejects_configured_thermomechanical_step() {
     let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-
-    let model = sample_fsi_model();
-    for _ in 0..3 {
-        let _ = analysis_run_fsi_op(
-            &model,
-            ComputeBackend::Cpu,
-            OperationContext::new(None, None),
-        )
-        .expect("fsi run should persist for trends");
-    }
-
-    let trends = analysis_trends_op(
-        AnalysisTrendsQuery { window_size: 2 },
-        OperationContext::new(None, None),
-    )
-    .expect("trends should succeed");
-
-    let fsi = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Fsi)
-        .expect("fsi trend summary should exist");
-    assert_eq!(fsi.sample_count, 2);
-    assert!(fsi.median_solve_ms.is_some());
-    assert!(fsi.p95_solve_ms.is_some());
-    assert!(fsi.failed_increment_rate.is_none());
-
-    let transient = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Transient);
-    assert!(
-        transient.is_none(),
-        "fsi runs should not classify as transient"
-    );
-
-    storage::reset_artifact_store_for_tests();
-}
-
-#[test]
-fn analysis_results_summary_surfaces_thermo_transient_metrics() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "transient_thermo_mechanical",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::TransientResponse,
+    )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 65.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
         },
     );
-    set_model_electro_coupling(
-        &mut model,
-        ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 36.0,
-            base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_transient_with_options_op(
+    let error = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
-    .expect("transient run should succeed");
+    .expect_err("thermomechanical transient response is not an admitted solver family");
 
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("results should succeed");
-
-    assert_eq!(results.data.summary.thermo_coupling_enabled, None);
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_temperature_factor
-        .is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_effective_modulus_scale
-        .is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_material_spread_ratio
-        .is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_assignment_heterogeneity_index
-        .is_none());
-    assert!(results.data.summary.thermo_transient_severity.is_some());
-    assert!(results.data.summary.thermo_nonlinear_severity.is_none());
-    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
-    assert!(results
-        .data
-        .summary
-        .electro_thermal_coupling_fingerprint
-        .is_none());
-    assert!(results.data.summary.electro_joule_heating_scale.is_none());
-    assert!(results
-        .data
-        .summary
-        .electro_conductivity_spread_ratio
-        .is_none());
-    assert!(results.data.summary.electro_transient_severity.is_some());
-    assert!(results.data.summary.electro_nonlinear_severity.is_none());
-    assert!(results.data.summary.plastic_nonlinear_severity.is_none());
-    assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
-        fea_electro_thermal_temperature_field_id(0),
-        fea_electro_thermal_thermal_residual_field_id(0),
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
-    ] {
-        assert!(run.data.run.field(&field_id).is_none());
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
-    }
-    let transient = run
-        .data
-        .transient_results
-        .as_ref()
-        .expect("transient results should be present");
-    assert!(transient.electro_thermal_temperature_snapshots.is_empty());
-    assert!(transient
-        .electro_thermal_thermal_residual_snapshots
-        .is_empty());
+    assert_eq!(error.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_MODEL");
 }
 
 #[test]
 fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_invalid_electro_voltage".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_invalid_electro_voltage".to_string(),
+    )];
     set_model_electro_coupling(
         &mut model,
-        ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
+        TestElectroThermalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(4.0e-4),
         },
     );
 
-    let err = analysis_run_transient_op(
+    let err = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("transient run should reject invalid electro-thermal voltage");
 
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
-    );
-    assert_eq!(
-        err.context.get("applied_voltage_v").map(String::as_str),
-        Some("NaN")
-    );
+    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID");
+    assert!(err.message.contains("signal"));
 }
 
 #[test]
-fn analysis_run_transient_rejects_invalid_electro_thermal_conductivity_scale() {
+fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_invalid_electro_conductivity".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_with_unsupported_electro_thermal_context".to_string(),
+    )];
     set_model_electro_coupling(
         &mut model,
-        ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
+        TestElectroThermalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: vec![ElectroRegionConductivityScale {
-                region_id: "tip".to_string(),
-                conductivity_scale: 0.0,
-            }],
-            time_profile: Vec::new(),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(4.0e-4),
         },
     );
 
-    let err = analysis_run_transient_op(
+    let error = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("transient run should reject invalid electro-thermal conductivity scale");
+    .expect_err("structural transient execution must reject electro-thermal context");
 
     assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
+        error.error_code,
+        "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID"
     );
-    assert_eq!(
-        err.context.get("conductivity_scale").map(String::as_str),
-        Some("0")
+    assert!(
+        error
+            .message
+            .contains("structural pipelines do not implement an electrothermal"),
+        "{}",
+        error.message
     );
 }
 
 #[test]
-fn analysis_run_transient_rejects_unmapped_electro_thermal_region() {
+fn analysis_results_summary_surfaces_thermo_nonlinear_metrics_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_unmapped_electro_region".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-    set_model_electro_coupling(
-        &mut model,
-        ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 36.0,
-            base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: vec![ElectroRegionConductivityScale {
-                region_id: "not_a_model_region".to_string(),
-                conductivity_scale: 1.0,
-            }],
-            time_profile: Vec::new(),
-        },
-    );
-
-    let err = analysis_run_transient_op(
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "unsupported_coupled",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Nonlinear,
+    )];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect_err("transient run should reject unmapped electro-thermal regions");
-
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
     assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
     );
-    assert_eq!(
-        err.context.get("region_id").map(String::as_str),
-        Some("not_a_model_region")
-    );
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
+fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupling() {
     let _guard = analysis_test_guard();
+    let published = storage::list_run_metadata().unwrap().len();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "nonlinear_explicit_thermo_mechanical",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Nonlinear,
+    )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 80.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(80.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-    set_model_electro_coupling(
-        &mut model,
-        ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 82.0,
-            base_electrical_conductivity_s_per_m: 2.6e7,
-            resistive_heating_coefficient: 6.0e-4,
-            region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
         },
     );
 
-    let run = analysis_run_nonlinear_with_options_op(
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should succeed");
+    .expect_err("explicit connectivity must not silently discard thermo coupling");
 
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("results should succeed");
-
-    assert_eq!(results.data.summary.thermo_coupling_enabled, None);
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_temperature_factor
-        .is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_effective_modulus_scale
-        .is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_material_spread_ratio
-        .is_none());
-    assert!(results
-        .data
-        .summary
-        .thermo_assignment_heterogeneity_index
-        .is_none());
-    assert!(results.data.summary.thermo_nonlinear_severity.is_some());
-    assert!(results.data.summary.thermo_transient_severity.is_some());
-    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
-    assert!(results
-        .data
-        .summary
-        .electro_thermal_coupling_fingerprint
-        .is_none());
-    assert!(results.data.summary.electro_joule_heating_scale.is_none());
-    assert!(results
-        .data
-        .summary
-        .electro_conductivity_spread_ratio
-        .is_none());
-    assert!(results.data.summary.electro_nonlinear_severity.is_some());
-    assert!(results.data.summary.electro_transient_severity.is_some());
-    assert!(results.data.summary.plastic_nonlinear_severity.is_none());
-    assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    let nonlinear = run
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear results should be present");
-    assert!(nonlinear.electro_thermal_temperature_snapshots.is_empty());
-    assert!(nonlinear
-        .electro_thermal_thermal_residual_snapshots
-        .is_empty());
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
-        fea_electro_thermal_temperature_field_id(0),
-        fea_electro_thermal_thermal_residual_field_id(0),
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
-    ] {
-        assert!(run.data.run.field(&field_id).is_none());
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
-    }
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
+    );
+    // This authored nonlinear coupled family has no available formulation.
+    // It must fail before attempting to substitute the structural realization.
+    assert!(!error.retryable);
+    assert_eq!(storage::list_run_metadata().unwrap().len(), published);
 }
 
 #[test]
-fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
+fn analysis_trends_ignore_noncanonical_artifacts() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("trends-mixed-schema");
@@ -5841,25 +4227,19 @@ fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    let run = analysis_run_nonlinear_op(
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
+    let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        options,
         OperationContext::new(None, None),
     )
     .expect("seed nonlinear run should succeed");
 
-    let run_path = root.join("runs").join(format!("{}.json", run.data.run_id));
-    let raw = fs::read_to_string(&run_path).expect("read wrapped artifact");
-    let wrapped: serde_json::Value = serde_json::from_str(&raw).expect("parse wrapped artifact");
-    let mut legacy = wrapped
-        .get("run")
-        .cloned()
-        .expect("wrapped artifact should have run payload");
+    // Deliberately omit the canonical persisted-artifact envelope. Derive this
+    // invalid legacy record from the typed result, not the current envelope's
+    // implementation fields, and leave the valid canonical record untouched.
+    let mut legacy = serde_json::to_value(&run.data).expect("encode unwrapped run result");
     legacy["run_id"] = serde_json::json!(format!("{}_legacy", run.data.run_id));
     fs::write(
         root.join("runs")
@@ -5872,14 +4252,14 @@ fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
         AnalysisTrendsQuery { window_size: 8 },
         OperationContext::new(None, None),
     )
-    .expect("trends should succeed on mixed schema artifacts");
+    .expect("trends should ignore noncanonical artifacts");
     let nonlinear = trends
         .data
         .summaries
         .iter()
-        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
+        .find(|summary| summary.identity.procedure() == AnalysisProcedure::Nonlinear)
         .expect("nonlinear summary should be present");
-    assert!(nonlinear.sample_count >= 2);
+    assert_eq!(nonlinear.sample_count, 1);
     assert!(nonlinear.p95_solve_ms.unwrap_or(0.0) >= nonlinear.median_solve_ms.unwrap_or(0.0));
 
     storage::reset_artifact_store_for_tests();
@@ -5909,14 +4289,7 @@ impl Drop for EnvVarRestoreGuard {
     }
 }
 
-fn scoped_thermo_field_artifact_root(root: &Path) -> EnvVarRestoreGuard {
-    const KEY: &str = "RUNMAT_THERMO_FIELD_ARTIFACT_ROOT";
-    let previous = std::env::var(KEY).ok();
-    std::env::set_var(KEY, root.display().to_string());
-    EnvVarRestoreGuard { key: KEY, previous }
-}
-
-struct FeaRuntimeConfigRestoreGuard {
+pub(super) struct FeaRuntimeConfigRestoreGuard {
     previous: FeaRuntimeConfig,
 }
 
@@ -5926,7 +4299,7 @@ impl Drop for FeaRuntimeConfigRestoreGuard {
     }
 }
 
-fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
+pub(super) fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
     let previous = current_fea_runtime_config();
     configure_fea_runtime(FeaRuntimeConfig {
         study_artifact_root: Some(root.to_path_buf()),
@@ -5936,103 +4309,284 @@ fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
     FeaRuntimeConfigRestoreGuard { previous }
 }
 
+fn scoped_fea_artifact_roots(root: &Path) -> FeaRuntimeConfigRestoreGuard {
+    let previous = current_fea_runtime_config();
+    configure_fea_runtime(FeaRuntimeConfig {
+        artifact_root: Some(root.to_path_buf()),
+        study_artifact_root: Some(root.join("studies")),
+        ..Default::default()
+    })
+    .expect("configure FEA artifact roots");
+    FeaRuntimeConfigRestoreGuard { previous }
+}
+
 fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, PathBuf) {
+    write_ready_analysis_mesh_artifact(test_name, &ready_minimal_analysis_mesh())
+}
+
+/// The minimal tetrahedron with canonical CAD face provenance (`root`, `tip`), shaped like the
+/// output of the runner-native exact meshing provider.
+fn ready_minimal_analysis_mesh() -> SolverMeshArtifact {
+    let mut mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    mesh.topology.boundary_faces[0]
+        .provenance
+        .push(persistent_face("root"));
+    mesh.topology.boundary_faces[1]
+        .provenance
+        .push(persistent_face("tip"));
+    for face in &mut mesh.topology.boundary_faces {
+        face.provenance.sort();
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .expect("seal canonical solver mesh fixture");
+    mesh
+}
+
+fn write_ready_analysis_mesh_artifact(
+    test_name: &str,
+    mesh: &SolverMeshArtifact,
+) -> (PathBuf, PathBuf) {
     let root = temp_artifact_root(test_name);
     let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create analysis mesh artifact root");
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    let evidence =
-        runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation_options);
-    let evidence_path = root.join("mesh_evidence.json");
-    fs::write(
-        &evidence_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_mesh_evidence_artifact/v1",
-            "mesh_validation_options": validation_options.clone(),
-            "mesh_evidence": evidence,
-        }))
-        .expect("encode mesh evidence artifact"),
-    )
-    .expect("write mesh evidence artifact");
-    let mesh_path = root.join("analysis_mesh.json");
+    fs::create_dir_all(&root).expect("create solver mesh artifact root");
+    let mesh_path = root.join("solver_mesh.cbor");
     fs::write(
         &mesh_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
-            "mesh_validation_options": validation_options.clone(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
+        mesh.canonical_encode()
+            .expect("encode canonical solver mesh artifact"),
     )
-    .expect("write analysis mesh artifact");
+    .expect("write canonical solver mesh artifact");
     (root, mesh_path)
 }
 
-fn write_generated_through_hole_analysis_mesh_artifacts(
-    root: &Path,
-) -> (
-    PathBuf,
-    PathBuf,
-    runmat_meshing_evidence::MeshAuthoringSummary,
-) {
-    let _ = fs::remove_dir_all(root);
-    fs::create_dir_all(root).expect("create generated analysis mesh artifact root");
-    let geometry = through_hole_study_geometry();
-    let options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    let mesh = runmat_meshing::generate_analysis_mesh(&geometry, options.clone())
-        .expect("through-hole fixture should generate an analysis mesh");
-    let validation_options = runmat_meshing_core::AnalysisMeshValidationOptions {
-        required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-        required_material_region_ids: vec!["body".to_string()],
-        ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-    };
-    runmat_meshing_core::validate_analysis_mesh_with_options(&mesh, validation_options.clone())
-        .expect("generated through-hole mesh should validate");
-    let evidence =
-        runmat_meshing_evidence::build_mesh_evidence_artifact(&mesh, &validation_options);
-    let summary = runmat_meshing_evidence::build_mesh_authoring_summary(&evidence);
-    let evidence_path = root.join("mesh_evidence.json");
-    fs::write(
-        &evidence_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_mesh_evidence_artifact/v1",
-            "mesh_validation_options": validation_options.clone(),
-            "mesh_authoring_summary": summary,
-            "mesh_evidence": evidence,
-        }))
-        .expect("encode generated mesh evidence artifact"),
+fn persistent_face(source_topology_id: &str) -> PersistentEntityId {
+    PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        source_topology_id.to_owned(),
+        vec!["root".to_owned()],
     )
-    .expect("write generated mesh evidence artifact");
-    let mesh_path = root.join("analysis_mesh.json");
-    fs::write(
-        &mesh_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
-            "mesh_options": options,
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "mesh_validation_options": validation_options,
-            "mesh": mesh,
-        }))
-        .expect("encode generated analysis mesh artifact"),
-    )
-    .expect("write generated analysis mesh artifact");
-    (mesh_path, evidence_path, summary)
+}
+
+fn run_study_through_meshing_provider(
+    spec: &AnalysisStudySpec,
+) -> Result<AnalysisStudyRunData, String> {
+    let mesh = ready_minimal_analysis_mesh();
+    let evidence = runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&mesh);
+    let _provider = crate::meshing::replace_meshing_execution_provider(Some(std::sync::Arc::new(
+        move |_request: &crate::meshing::MeshingExecutionRequest| {
+            Ok(crate::meshing::MeshingExecutionOutput {
+                artifact: mesh.clone(),
+                evidence: evidence.clone(),
+            })
+        },
+    )))
+    .expect("install meshing provider");
+    analysis_run_study_op(spec, OperationContext::new(None, None))
+        .map(|envelope| envelope.data)
+        .map_err(|error| format!("{error:?}"))
 }
 
 #[test]
-fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
+fn provider_meshing_output_runs_the_study_by_canonical_selectors_only() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("provider-meshing-canonical-selectors");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let mut spec = sample_linear_static_study_spec();
+    spec.geometry.source.sha256 = "ab".repeat(32);
+    let canonical = |target: &mut RegionTarget| {
+        if matches!(target.region_id.as_str(), "root" | "tip") {
+            target.region_id = persistent_face(&target.region_id)
+                .analysis_selection_id()
+                .unwrap();
+        }
+    };
+    for constraint in &mut spec.model.constraints {
+        constraint.visit_targets_mut(canonical);
+    }
+    for action in &mut spec.model.excitations {
+        if let ExcitationTarget::Region(target) = &mut action.excitation_mut().target {
+            canonical(target);
+        }
+    }
+    assert!(spec.solver_mesh_artifact_path.is_none());
+    assert!(spec.meshing_settings.is_some());
+
+    // The provider's mesh carries canonical CAD identities; the model names them directly.
+    let run = run_study_through_meshing_provider(&spec)
+        .expect("canonical selectors resolve against the provider mesh");
+    assert!(run.solver_mesh_artifact_path.is_some());
+
+    // A legacy importer ordinal is not an identity: nothing maps it, so the study is rejected.
+    let mut legacy = spec.clone();
+    legacy.model.constraints[0].visit_targets_mut(|target| {
+        *target = RegionTarget::boundary("face_000001");
+    });
+    let error = run_study_through_meshing_provider(&legacy)
+        .expect_err("a legacy face_000001 selector must be rejected");
+    assert!(error.contains("face_000001"), "{error}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn one_analysis_material_requires_and_uses_an_explicit_solid_assignment() {
+    let model = sample_solid_model();
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+
+    assert_eq!(
+        linear_static_result::property_compilation_quality_reason(&model, &mesh),
+        None
+    );
+}
+
+#[test]
+fn solid_material_quality_uses_resolved_occurrence_provenance() {
+    let mut model = sample_solid_model();
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let source_solid = mesh.topology.volume_elements[0].provenance[0].clone();
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::solid(
+        runmat_meshing_core::fixtures::fixture_region("authored_body"),
+    );
+    model.material_assignments[0]
+        .target
+        .bind_resolved_entities(vec![source_solid.clone()])
+        .expect("resolve authored solid");
+    assert_eq!(
+        linear_static_result::property_compilation_quality_reason(&model, &mesh),
+        None
+    );
+
+    let mut other_occurrence = source_solid;
+    other_occurrence
+        .assembly_path
+        .push("other-instance".to_string());
+    model.material_assignments[0]
+        .target
+        .bind_resolved_entities(vec![other_occurrence])
+        .expect("resolve another occurrence");
+    let reason = linear_static_result::property_compilation_quality_reason(&model, &mesh)
+        .expect("different occurrence must fail compiled property coverage");
+    assert_eq!(
+        reason.code,
+        QualityReasonCode::StructuralPropertyCompilationFailed
+    );
+    assert!(reason
+        .detail
+        .contains("requires exactly one compatible material assignment"));
+}
+
+#[test]
+fn compiled_solid_property_quality_rejects_gaps_and_overlaps() {
+    let mut model = sample_solid_model();
+    model.material_assignments.clear();
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+
+    let gap = linear_static_result::property_compilation_quality_reason(&model, &mesh)
+        .expect("compiled property coverage is required");
+    assert_eq!(
+        gap.code,
+        QualityReasonCode::StructuralPropertyCompilationFailed
+    );
+    assert!(gap.detail.contains("found 0"));
+
+    model.material_assignments = vec![MaterialAssignment {
+        target: runmat_analysis_core::PropertyRegionTarget::solid(
+            runmat_meshing_core::fixtures::fixture_region("region"),
+        ),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    assert_eq!(
+        linear_static_result::property_compilation_quality_reason(&model, &mesh),
+        None
+    );
+    model.material_assignments.push(MaterialAssignment {
+        target: runmat_analysis_core::PropertyRegionTarget::all_solids(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    });
+    let overlap = linear_static_result::property_compilation_quality_reason(&model, &mesh)
+        .expect("overlapping compiled property owners must fail");
+    assert_eq!(
+        overlap.code,
+        QualityReasonCode::StructuralPropertyCompilationFailed
+    );
+    assert!(overlap.detail.contains("found 2"));
+}
+
+#[test]
+fn static_completion_rejects_result_with_unowned_solid_elements() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("completion-property-coverage");
+    let model = sample_solid_model();
+    let options = AnalysisRunOptions {
+        solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+        ..AnalysisRunOptions::default()
+    };
+    let solved = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        options.clone(),
+        OperationContext::new(Some("trace-completion-property-coverage".to_string()), None),
+    )
+    .expect("valid solid solve");
+    assert_eq!(solved.data.run_status, RunStatus::Completed);
+    let mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+        &fs::read(&mesh_path).expect("read solver mesh"),
+    )
+    .expect("decode solver mesh");
+    let mut unowned = model.clone();
+    unowned.material_assignments.clear();
+    let published = linear_static_result::admit_linear_static_result(
+        linear_static_result::LinearStaticResultInput {
+            model: &unowned,
+            solver_mesh: Some(&mesh),
+            requested_backend: ComputeBackend::Cpu,
+            options: &options,
+            assigned_run_id: Some("rejected-property-coverage"),
+            placement: Default::default(),
+        },
+        solved.data.run.clone(),
+    )
+    .expect("completion must publish an attributable rejection");
+    assert_eq!(published.run_status, RunStatus::Rejected);
+    assert!(!published.numerically_acceptable);
+    assert!(published.quality_reasons.iter().any(|reason| {
+        reason.code == QualityReasonCode::StructuralPropertyCompilationFailed
+            && reason.detail.contains("found 0")
+    }));
+
+    let mut thermal_only = model;
+    thermal_only.materials[0].elasticity = None;
+    let published = linear_static_result::admit_linear_static_result(
+        linear_static_result::LinearStaticResultInput {
+            model: &thermal_only,
+            solver_mesh: Some(&mesh),
+            requested_backend: ComputeBackend::Cpu,
+            options: &options,
+            assigned_run_id: Some("rejected-structural-capability"),
+            placement: Default::default(),
+        },
+        solved.data.run,
+    )
+    .expect("completion must reject a solid without structural capabilities");
+    assert_eq!(published.run_status, RunStatus::Rejected);
+    assert!(!published.numerically_acceptable);
+    assert!(published.quality_reasons.iter().any(|reason| {
+        reason.code == QualityReasonCode::StructuralPropertyCompilationFailed
+            && reason.detail.contains("IsotropicLinearElasticity")
+    }));
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
+fn analysis_results_by_run_id_rejects_unwrapped_artifacts() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("legacy-loadable");
@@ -6042,14 +4596,11 @@ fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    let run = analysis_run_nonlinear_op(
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
+    let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        options,
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -6076,24 +4627,20 @@ fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
     )
     .expect("write legacy artifact");
 
-    let fetched = analysis_results_by_run_id_op(
+    let error = analysis_results_by_run_id_op(
         &run_id,
         AnalysisResultsQuery::default(),
         OperationContext::new(None, None),
     )
-    .expect("legacy nonlinear artifact should still load");
-    assert_eq!(fetched.data.summary.failed_increment_count, Some(0));
-    assert_eq!(
-        fetched.data.summary.nonlinear_iteration_spike_count,
-        Some(0)
-    );
+    .expect_err("unwrapped analysis artifacts must not enter the live schema");
+    assert_eq!(error.error_type, OperationErrorType::Internal);
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
-fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
+fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("future-extra-fields");
@@ -6103,53 +4650,101 @@ fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    let run = analysis_run_nonlinear_op(
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
+    let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        options,
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
     let run_id = run.data.run_id.clone();
     let run_path = root.join("runs").join(format!("{run_id}.json"));
 
-    let mut wrapped = serde_json::json!({
-        "schema_version": "analysis_run_artifact/v1",
+    let wrapped = serde_json::json!({
+        "schema_version": "analysis_run_artifact/unknown",
         "created_at": Utc::now().to_rfc3339(),
         "op_version": "fea.run_nonlinear/v1",
         "run": run.data,
-        "future_metadata": {
-            "schema_hint": "analysis_run_artifact/v2",
-            "opaque": [1, 2, 3]
-        }
     });
-    wrapped["run"]["nonlinear_results"]["future_spatial_difficulty"] =
-        serde_json::json!([0.1, 0.2, 0.3]);
     fs::write(
         &run_path,
         serde_json::to_vec_pretty(&wrapped).expect("encode future artifact"),
     )
     .expect("write future artifact");
 
-    let fetched = analysis_results_by_run_id_op(
+    let error = analysis_results_by_run_id_op(
         &run_id,
         AnalysisResultsQuery::default(),
         OperationContext::new(None, None),
     )
-    .expect("future nonlinear artifact should still load");
-    assert!(fetched.data.summary.increment_count > 0);
-    assert!(fetched.data.summary.max_nonlinear_iteration_count.is_some());
+    .expect_err("unknown analysis artifact schemas must be rejected");
+    assert_eq!(error.error_type, OperationErrorType::Internal);
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: a thermal steady run with no observations, staged in a publication (its field
+//   chunks stream to the spill area), reads back through the staged-record reader with every
+//   temperature and heat-flux field unchanged; this is the read thermal observation binding uses.
 #[test]
-fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
+fn staged_thermal_steady_run_reads_back_its_streamed_fields() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("staged-thermal");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::thermal_steady("staged_thermal".to_string())];
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    set_model_thermo_coupling(
+        &mut model,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Quantity::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::Quantity::new(20.0),
+            thermal_expansion_coefficient: runmat_types::physical::Quantity::new(1.2e-5),
+            region_temperature_deltas: Vec::new(),
+        },
+    );
+    let run = analysis_run_thermal_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("thermal steady run should succeed")
+    .data;
+    assert!(run.run.observations.is_empty() && run.run.series_reductions.is_empty());
+    let fields = crate::analysis::operations::collect_analysis_result_fields(&run);
+    assert!(
+        !fields.is_empty(),
+        "a thermal steady run carries temperature fields"
+    );
+
+    let (restored, spilled) = storage::publication::stage_and_read_back_for_tests(&run)
+        .expect("a staged thermal run reads back with its streamed field chunks");
+    assert!(
+        spilled > 0,
+        "staging streams the thermal field chunks to the spill area"
+    );
+    assert_eq!(
+        crate::analysis::operations::collect_analysis_result_fields(&restored),
+        fields
+    );
+    assert_eq!(restored.run.observations, run.run.observations);
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&mesh_root);
+}
+
+#[test]
+fn analysis_artifacts_record_family_specific_op_versions() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("family-op-version");
@@ -6158,46 +4753,50 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         root: root.clone(),
     })
     .expect("configure filesystem artifact store");
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("family-op-version");
 
-    let mut cfd_model = sample_model();
-    cfd_model.steps[0].kind = AnalysisStepKind::Cfd;
-    cfd_model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-    let cfd = analysis_run_cfd_op(
-        &cfd_model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect("cfd run should succeed");
-
-    let cht = analysis_run_cht_op(
-        &sample_cht_model(),
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect("cht run should succeed");
-
-    let fsi = analysis_run_fsi_op(
-        &sample_fsi_model(),
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect("fsi run should succeed");
-    let acoustic_model = analysis_create_model_op(
+    let acoustic_model = test_model_for_geometry(
         &sample_geometry_asset(),
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_op_version_model".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created");
-    let acoustic = analysis_run_acoustic_op(
+    let acoustic = analysis_run_acoustic_with_options_op(
         &acoustic_model.data,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("acoustic run should succeed");
+    let mut thermal_model = sample_solid_model();
+    thermal_model.sequence.steps = vec![ProcedureStep::thermal_transient(
+        "thermal_op_version".to_string(),
+    )];
+    thermal_model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    set_model_thermo_coupling(
+        &mut thermal_model,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(20.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
+            region_temperature_deltas: Vec::new(),
+        },
+    );
+    let thermal = analysis_run_thermal_with_options_op(
+        &thermal_model,
+        ComputeBackend::Cpu,
+        AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("thermal run should succeed");
 
     let read_op_version = |run_id: &str| -> String {
         let path = root.join("runs").join(format!("{run_id}.json"));
@@ -6211,9 +4810,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
             .to_string()
     };
 
-    assert_eq!(read_op_version(&cfd.data.run_id), "fea.run_cfd/v1");
-    assert_eq!(read_op_version(&cht.data.run_id), "fea.run_cht/v1");
-    assert_eq!(read_op_version(&fsi.data.run_id), "fea.run_fsi/v1");
+    assert_eq!(read_op_version(&thermal.data.run_id), "fea.run_thermal/v1");
     assert_eq!(
         read_op_version(&acoustic.data.run_id),
         "fea.run_acoustic/v1"
@@ -6221,6 +4818,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
@@ -6236,16 +4834,13 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
     std::env::set_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND", "2");
     std::env::remove_var("RUNMAT_FEA_ARTIFACT_MAX_RUNS");
 
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
     let mut run_ids = Vec::new();
     for _ in 0..5 {
-        let run = analysis_run_nonlinear_op(
+        let run = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
+            options.clone(),
             OperationContext::new(None, None),
         )
         .expect("nonlinear run should succeed");
@@ -6284,14 +4879,11 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
     })
     .expect("configure filesystem artifact store");
 
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    let run = analysis_run_nonlinear_op(
+    let (model, options) = nonlinear_physical::artifact_seed(&root);
+    let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        options,
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -6311,7 +4903,10 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
 
     assert_eq!(first.data.summary, second.data.summary);
     assert_eq!(first.data.run_status, second.data.run_status);
-    assert_eq!(first.data.publishable, second.data.publishable);
+    assert_eq!(
+        first.data.numerically_acceptable,
+        second.data.numerically_acceptable
+    );
     assert_eq!(first.data.quality_reasons, second.data.quality_reasons);
 
     storage::reset_artifact_store_for_tests();
@@ -6319,7 +4914,7 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
 }
 
 #[test]
-fn requested_preconditioner_fallback_is_recorded() {
+fn requested_amg_preconditioner_records_execution_without_a_false_fallback() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("preconditioner-fallback");
@@ -6332,27 +4927,74 @@ fn requested_preconditioner_fallback_is_recorded() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Amg,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
     )
     .expect("run should succeed");
 
-    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
-    assert!(envelope
+    assert_eq!(
+        envelope.data.provenance.preconditioner,
+        SolverPreconditioner::Amg
+    );
+    assert!(!envelope
         .data
         .provenance
         .fallback_events
         .iter()
-        .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+        .any(|event| event.reason == FallbackReason::RequestedPreconditionerUnavailable));
     let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
-fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
+fn solver_mesh_geometry_revision_must_match_the_analysis_model() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("geometry-revision-mismatch");
+    let model = sample_solid_model();
+    let mut mesh = SolverMeshArtifact::canonical_decode(
+        &fs::read(&mesh_path).expect("read solver mesh fixture"),
+    )
+    .expect("decode solver mesh fixture");
+    mesh.geometry.geometry_revision = u64::from(model.geometry_revision) + 1;
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .expect("reseal mismatched solver mesh");
+    fs::write(
+        &mesh_path,
+        mesh.canonical_encode()
+            .expect("encode mismatched solver mesh"),
+    )
+    .expect("write mismatched solver mesh");
+
+    let error = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("stale solver mesh should be rejected");
+
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID"
+    );
+    assert_eq!(
+        error.context.get("model_geometry_revision"),
+        Some(&model.geometry_revision.to_string())
+    );
+    assert_eq!(
+        error.context.get("solver_mesh_geometry_revision"),
+        Some(&(u64::from(model.geometry_revision) + 1).to_string())
+    );
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
+fn ilu_preconditioner_provenance_reports_the_executed_ilu_solver() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("preconditioner-ilu");
     let model = sample_solid_model();
@@ -6364,35 +5006,34 @@ fn ilu_preconditioner_fallback_is_recorded_when_solver_uses_jacobi() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Ilu,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
     .expect("run should succeed");
 
-    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
-    assert!(envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+    assert_eq!(
+        envelope.data.provenance.preconditioner,
+        SolverPreconditioner::Ilu0
+    );
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        SolverMethod::AssembledPcg
+    );
+    assert!(envelope.data.provenance.fallback_events.is_empty());
+    assert!(envelope.data.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_SOLVER_METHOD"
+            && diagnostic
+                .message
+                .contains("solver=pcg preconditioner=ilu0")
+    }));
     let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
-fn quality_policy_exploratory_allows_publishable_warn_path() {
+fn quality_policy_exploratory_allows_numerically_acceptable_warn_path() {
     let _guard = analysis_test_guard();
-    let mut model = runmat_analysis_fea::fixtures::fixture_model(
-        runmat_analysis_fea::fixtures::FixtureId::MultiMaterialAssembly,
-    );
-    let beam_model = sample_model();
-    model.structural = beam_model.structural;
-    model.boundary_conditions = beam_model.boundary_conditions;
-    model.loads = beam_model.loads;
+    let model = sample_model_with_material_assignment_mismatch();
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -6401,17 +5042,14 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Exploratory,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
-            prep_calibration_profile: None,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
     )
     .expect("run should succeed");
 
-    assert!(envelope.data.publishable);
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.numerically_acceptable);
+    assert_eq!(envelope.data.run_status, RunStatus::Completed);
     assert!(envelope
         .data
         .quality_reasons
@@ -6421,463 +5059,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
 }
 
 #[test]
-fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
-    let _guard = analysis_test_guard();
-
-    struct UploadFailProvider;
-
-    impl AccelProvider for UploadFailProvider {
-        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Err(anyhow::anyhow!("forced-upload-failure"))
-        }
-
-        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn device_info(&self) -> String {
-            "upload-fail-provider".to_string()
-        }
-    }
-
-    static PROVIDER: UploadFailProvider = UploadFailProvider;
-    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
-
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_with_options(
-        &model,
-        ComputeBackend::Gpu,
-        AnalysisRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            preconditioner_mode: PreconditionerMode::Auto,
-            quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
-    )
-    .expect("run should succeed");
-
-    assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
-    assert!(envelope.data.publishable);
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert_eq!(envelope.data.provenance.quality_policy, "balanced");
-}
-
-#[test]
-fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
-    let _guard = analysis_test_guard();
-
-    struct UploadFailProvider;
-
-    impl AccelProvider for UploadFailProvider {
-        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Err(anyhow::anyhow!("forced-upload-failure"))
-        }
-
-        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn device_info(&self) -> String {
-            "upload-fail-provider".to_string()
-        }
-    }
-
-    static PROVIDER: UploadFailProvider = UploadFailProvider;
-    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
-
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_with_options(
-        &model,
-        ComputeBackend::Gpu,
-        AnalysisRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            preconditioner_mode: PreconditionerMode::Auto,
-            quality_policy: QualityPolicy::Strict,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
-    )
-    .expect("run should succeed");
-
-    assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
-    assert!(!envelope.data.publishable);
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert_eq!(envelope.data.provenance.quality_policy, "strict");
-}
-
-#[test]
-fn mesh_validation_evidence_quality_reasons_fail_closed_on_not_solve_ready() {
-    let mesh = minimal_analysis_mesh();
-    let mut evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
-        &mesh,
-        &runmat_meshing_core::AnalysisMeshValidationOptions::default(),
-    )
-    .validation;
-    evidence.solve_ready = false;
-    evidence.validation_error_code = Some("coverage_sample_failed".to_string());
-    evidence.validation_error_message = Some("coverage sample was outside the solid".to_string());
-    evidence.unrecovered_tetrahedron_component_count = 1;
-    evidence.unrepaired_exact_quality_total_count = 3;
-    evidence.unrepaired_exact_quality_general_cavity_count = 1;
-    evidence.unrepaired_exact_quality_boundary_adjacent_count = 2;
-    evidence.unrepaired_exact_quality_node_adjacent_count = 4;
-
-    let reasons = mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(
-        Box::new(evidence.clone()),
-    ));
-
-    assert_eq!(reasons.len(), 1);
-    assert_eq!(
-        reasons[0].code,
-        QualityReasonCode::SolidMeshValidationEvidenceFailed
-    );
-    assert!(reasons[0]
-        .detail
-        .contains("validation_error_code=coverage_sample_failed"));
-    assert!(reasons[0]
-        .detail
-        .contains("coverage sample was outside the solid"));
-    assert!(reasons[0]
-        .detail
-        .contains("unrecovered_tetrahedron_component_count=1"));
-    assert!(reasons[0]
-        .detail
-        .contains("unrepaired_exact_quality_total_count=3"));
-    assert!(reasons[0]
-        .detail
-        .contains("unrepaired_exact_quality_general_cavity_count=1"));
-    assert!(reasons[0]
-        .detail
-        .contains("unrepaired_exact_quality_boundary_adjacent_count=2"));
-    assert!(reasons[0]
-        .detail
-        .contains("unrepaired_exact_quality_node_adjacent_count=4"));
-
-    evidence.solve_ready = true;
-    assert!(
-        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Present(Box::new(
-            evidence,
-        )))
-        .is_empty()
-    );
-    assert!(
-        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::NotRequested)
-            .is_empty()
-    );
-
-    let missing =
-        mesh_validation_evidence_quality_reasons(&MeshValidationEvidenceStatus::Missing {
-            detail: "analysis mesh artifact has no mesh_evidence_artifact_path".to_string(),
-        });
-    assert_eq!(missing.len(), 1);
-    assert_eq!(
-        missing[0].code,
-        QualityReasonCode::SolidMeshValidationEvidenceMissing
-    );
-    assert!(missing[0].detail.contains("mesh_evidence_artifact_path"));
-}
-
-#[test]
-fn analysis_mesh_evidence_failure_rejects_direct_run() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("mesh-evidence-rejects-direct-run");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create artifact root");
-
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let evidence = runmat_meshing_evidence::build_mesh_evidence_artifact(
-        &mesh,
-        &runmat_meshing_core::AnalysisMeshValidationOptions {
-            coverage_sample_points_m: vec![[9.0, 9.0, 9.0]],
-            min_coverage_sample_ratio: 1.0,
-            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-        },
-    );
-    assert!(!evidence.validation.solve_ready);
-
-    let evidence_path = root.join("mesh_evidence.json");
-    fs::write(
-        &evidence_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_mesh_evidence_artifact/v1",
-            "mesh_evidence": evidence,
-        }))
-        .expect("encode mesh evidence"),
-    )
-    .expect("write mesh evidence");
-
-    let mesh_path = root.join("analysis_mesh.json");
-    fs::write(
-        &mesh_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh"),
-    )
-    .expect("write analysis mesh");
-
-    let envelope = analysis_run_linear_static_with_options(
-        &sample_solid_model(),
-        ComputeBackend::Cpu,
-        AnalysisRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            preconditioner_mode: PreconditionerMode::Auto,
-            quality_policy: QualityPolicy::Exploratory,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(
-            Some("trace-mesh-evidence-rejects-direct-run".to_string()),
-            None,
-        ),
-    )
-    .expect("run should complete and reject on mesh evidence");
-
-    assert_eq!(envelope.data.result_quality, QualityGate::Fail);
-    assert_eq!(envelope.data.run_status, RunStatus::Rejected);
-    assert!(!envelope.data.publishable);
-    let reason = envelope
-        .data
-        .quality_reasons
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshValidationEvidenceFailed)
-        .expect("failed mesh evidence should be reported");
-    assert!(reason
-        .detail
-        .contains("validation_error_code=coverage_sample_failed"));
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn loaded_analysis_mesh_artifact_enforces_persisted_required_regions() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("mesh-required-region-rejects-direct-run");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create artifact root");
-
-    let mesh_path = root.join("analysis_mesh.json");
-    fs::write(
-        &mesh_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "mesh_validation_options": runmat_meshing_core::AnalysisMeshValidationOptions {
-                required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-                ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-            },
-            "mesh": analysis_mesh_with_boundary_regions(&["root"], &[]),
-        }))
-        .expect("encode analysis mesh"),
-    )
-    .expect("write analysis mesh");
-
-    let err = analysis_run_linear_static_with_options(
-        &sample_solid_model(),
-        ComputeBackend::Cpu,
-        AnalysisRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            preconditioner_mode: PreconditionerMode::Auto,
-            quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(
-            Some("trace-mesh-required-region-rejects-direct-run".to_string()),
-            None,
-        ),
-    )
-    .expect_err("loaded mesh artifact should enforce persisted required regions");
-
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_LINEAR_STATIC.ANALYSIS_MESH_INVALID"
-    );
-    assert_eq!(
-        err.context
-            .get("mesh_validation_code")
-            .map(|value| value.as_str()),
-        Some("missing_required_boundary_region")
-    );
-    assert!(err.message.contains("tip"));
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn mesh_evidence_refresh_uses_persisted_validation_options() {
-    let root = temp_artifact_root("mesh-evidence-refresh-validation-policy");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create artifact root");
-
-    let evidence_path = root.join("mesh_evidence.json");
-    fs::write(
-        &evidence_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_mesh_evidence_artifact/v1",
-            "mesh_evidence": {
-                "schema_version": "mesh-evidence/v1"
-            }
-        }))
-        .expect("encode stale evidence"),
-    )
-    .expect("write stale evidence");
-
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &[]);
-    let payload = serde_json::json!({
-        "schema_version": "fea_study_analysis_mesh_artifact/v1",
-        "mesh_evidence_artifact_path": evidence_path.display().to_string(),
-        "mesh_validation_options": runmat_meshing_core::AnalysisMeshValidationOptions {
-            required_boundary_region_ids: vec!["root".to_string(), "tip".to_string()],
-            ..runmat_meshing_core::AnalysisMeshValidationOptions::default()
-        },
-        "mesh": mesh,
-    });
-    let mesh: AnalysisMeshArtifact =
-        serde_json::from_value(payload["mesh"].clone()).expect("decode mesh");
-
-    update_mesh_evidence_from_analysis_mesh_payload(&payload, &mesh)
-        .expect("evidence refresh should succeed");
-
-    let refreshed: serde_json::Value =
-        serde_json::from_slice(&fs::read(&evidence_path).expect("read refreshed evidence"))
-            .expect("parse refreshed evidence");
-    assert_eq!(
-        refreshed["mesh_validation_options"]["required_boundary_region_ids"]
-            .as_array()
-            .expect("persisted required boundary regions")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["root", "tip"]
-    );
-    assert_eq!(
-        refreshed["mesh_evidence"]["validation"]["validation_error_code"].as_str(),
-        Some("missing_required_boundary_region")
-    );
-    assert_eq!(
-        refreshed["mesh_evidence"]["validation"]["solve_ready"].as_bool(),
-        Some(false)
-    );
-    assert_eq!(
-        refreshed["mesh_authoring_summary"]["schema_version"].as_str(),
-        Some("mesh-authoring-summary/v1")
-    );
-    assert_eq!(
-        refreshed["mesh_authoring_summary"]["solve_ready"].as_bool(),
-        Some(false)
-    );
-    assert_eq!(
-        refreshed["mesh_authoring_summary"]["regions"]["missing_required_boundary_region_ids"]
-            .as_array()
-            .expect("authoring missing boundary regions")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["tip"]
-    );
-    assert!(
-        refreshed["mesh_evidence"]["validation"]["validation_error_message"]
-            .as_str()
-            .expect("validation message")
-            .contains("tip")
-    );
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn analysis_mesh_missing_evidence_rejects_direct_run() {
-    let _guard = analysis_test_guard();
-    let root = temp_artifact_root("mesh-evidence-missing-rejects-direct-run");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create artifact root");
-
-    let mesh_path = root.join("analysis_mesh.json");
-    fs::write(
-        &mesh_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "mesh": analysis_mesh_with_boundary_regions(&["root"], &["tip"]),
-        }))
-        .expect("encode analysis mesh"),
-    )
-    .expect("write analysis mesh");
-
-    let envelope = analysis_run_linear_static_with_options(
-        &sample_solid_model(),
-        ComputeBackend::Cpu,
-        AnalysisRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            preconditioner_mode: PreconditionerMode::Auto,
-            quality_policy: QualityPolicy::Exploratory,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(
-            Some("trace-mesh-evidence-missing-rejects-direct-run".to_string()),
-            None,
-        ),
-    )
-    .expect("run should complete and reject on missing mesh evidence");
-
-    assert_eq!(envelope.data.result_quality, QualityGate::Fail);
-    assert_eq!(envelope.data.run_status, RunStatus::Rejected);
-    assert!(!envelope.data.publishable);
-    let reason = envelope
-        .data
-        .quality_reasons
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshValidationEvidenceMissing)
-        .expect("missing mesh evidence should be reported");
-    assert!(reason.detail.contains("mesh_evidence_artifact_path"));
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn direct_solid_run_without_analysis_mesh_fails_closed() {
+fn direct_solid_run_without_solver_mesh_fails_closed() {
     let _guard = analysis_test_guard();
     let err = analysis_run_linear_static_with_options(
         &sample_solid_model(),
@@ -6887,2166 +5069,30 @@ fn direct_solid_run_without_analysis_mesh_fails_closed() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            prep_context: None,
-            prep_artifact_id: None,
-            analysis_mesh_artifact_path: None,
-            prep_calibration_profile: None,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(
-            Some("trace-direct-solid-run-requires-analysis-mesh".to_string()),
+            Some("trace-direct-solid-run-requires-solver-mesh".to_string()),
             None,
         ),
     )
-    .expect_err("direct solid solve must require an analysis mesh");
+    .expect_err("direct solid solve must require a solver mesh");
 
     assert_eq!(
         err.error_code,
         "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
     );
-    assert!(err.message.contains("require an analysis mesh"));
-}
-
-#[test]
-fn field_topology_quality_reasons_detect_primary_solver_field_mismatch() {
-    let mesh = minimal_analysis_mesh();
-    let fields = vec![
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![4, 3], vec![0.0; 12]),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![2, 6], vec![0.0; 12]),
-    ];
-
-    let reasons = field_topology_quality_reasons(&fields, Some(&mesh));
-
-    assert_eq!(reasons.len(), 1);
-    assert_eq!(reasons[0].code, QualityReasonCode::FieldTopologyMismatch);
-    assert!(reasons[0].detail.contains(FEA_FIELD_STRUCTURAL_STRESS));
-    assert!(reasons[0].detail.contains("expected_entity_count=1"));
-    assert!(reasons[0].detail.contains("actual_entity_count=2"));
-}
-
-#[test]
-fn field_topology_quality_reasons_use_analysis_mesh_descriptors() {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.field_topology = vec![AnalysisFieldTopologyDescriptor {
-        topology_id: ANALYSIS_MESH_FIELD_TOPOLOGY_ID.to_string(),
-        location: AnalysisFieldTopologyLocation::VolumeElement,
-        entity_count: 3,
-        element_kind: Some(TETRAHEDRON4_FIELD_ELEMENT_KIND.to_string()),
-    }];
-    let fields = vec![AnalysisField::host_f64(
-        FEA_FIELD_STRUCTURAL_STRESS,
-        vec![2, 6],
-        vec![0.0; 12],
-    )];
-
-    let reasons = field_topology_quality_reasons(&fields, Some(&mesh));
-
-    assert_eq!(reasons.len(), 1);
-    assert_eq!(reasons[0].code, QualityReasonCode::FieldTopologyMismatch);
-    assert!(reasons[0].detail.contains(FEA_FIELD_STRUCTURAL_STRESS));
-    assert!(reasons[0].detail.contains("expected_entity_count=3"));
-    assert!(reasons[0].detail.contains("actual_entity_count=2"));
-}
-
-#[test]
-fn solid_mesh_quality_reasons_report_volume_kind_and_quality_failures() {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.volume_elements[0].kind = VolumeElementKind::Hex8;
-    mesh.volume_elements[0].node_ids = vec![1, 2, 3, 4, 1, 2, 3, 4];
-    mesh.quality.min_scaled_jacobian = 0.01;
-    mesh.quality.max_aspect_ratio = 30.0;
-
-    let reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&mesh));
-
-    assert!(reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::SolidMeshUnsupportedElementKind));
-    assert!(reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::SolidMeshQualityMinJacobianFailed));
-    assert!(reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::SolidMeshQualityAspectRatioWarn));
-
-    let mut projected = minimal_analysis_mesh();
-    projected.sizing.global_target_size_m = Some(0.1);
-    projected.quality.max_boundary_projection_error_m = 0.06;
-    let projection_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&projected));
-    let projection_reason = projection_reasons
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshBoundaryProjectionWarn)
-        .expect("boundary projection error should be reported");
-    assert!(projection_reason
-        .detail
-        .contains("max_boundary_projection_error_m=0.06"));
-    assert!(projection_reason.detail.contains("thresholds max=0.05"));
-    assert!(projection_reason.detail.contains("mean=0.025"));
-
-    let mut empty = minimal_analysis_mesh();
-    empty.volume_elements.clear();
-    let empty_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&empty));
-    assert!(empty_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::SolidMeshNoVolumeElements));
-}
-
-#[test]
-fn solid_mesh_quality_reasons_require_renderable_volume_attributed_boundary() {
-    let no_boundary = minimal_analysis_mesh();
-    let no_boundary_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&no_boundary));
-    let no_boundary_reason = no_boundary_reasons
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
-        .expect("missing boundary render topology should be reported");
-    assert!(no_boundary_reason
-        .detail
-        .contains("no renderable Tri3 boundary faces"));
-
-    let mut unmapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    unmapped.boundary_faces[0]
-        .adjacent_volume_element_ids
-        .clear();
-    unmapped.boundary_faces[1].adjacent_volume_element_ids =
-        vec!["missing_tetrahedron".to_string()];
-
-    let unmapped_reasons = solid_mesh_quality_reasons(&sample_solid_model(), Some(&unmapped));
-    let unmapped_reason = unmapped_reasons
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshRenderTopologyIncomplete)
-        .expect("unmapped boundary render topology should be reported");
-    assert!(unmapped_reason
-        .detail
-        .contains("field_mapping_error=boundary face"));
-
-    let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    assert!(
-        solid_mesh_quality_reasons(&sample_solid_model(), Some(&mapped))
-            .iter()
-            .all(|reason| reason.code != QualityReasonCode::SolidMeshRenderTopologyIncomplete)
-    );
-}
-
-#[test]
-fn analysis_mesh_render_topology_requires_solver_field_mapping() {
-    let mapped = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    assert!(render_topology_from_analysis_mesh(Some(&mapped)).is_some());
-
-    let mut stale_node = mapped.clone();
-    stale_node.boundary_faces[0].node_ids[0] = 99;
-    assert_eq!(render_topology_from_analysis_mesh(Some(&stale_node)), None);
-
-    let mut stale_element = mapped;
-    stale_element.boundary_faces[0].adjacent_volume_element_ids =
-        vec!["missing_tetrahedron".to_string()];
-    assert_eq!(
-        render_topology_from_analysis_mesh(Some(&stale_element)),
-        None
-    );
-}
-
-#[test]
-fn analysis_mesh_render_topology_preserves_boundary_regions() {
-    let mut mesh = analysis_mesh_with_boundary_regions(&["fixed", "shared"], &["loaded", "shared"]);
-    mesh.boundary_faces.push(analysis_boundary_face(
-        "face_fixed_2",
-        vec![2, 3, 4],
-        &["fixed"],
-    ));
-    mesh.refresh_field_topology();
-
-    let topology = render_topology_from_analysis_mesh(Some(&mesh))
-        .expect("mapped analysis mesh should produce render topology");
-    let render_mesh = topology
-        .meshes
-        .first()
-        .expect("render topology should contain boundary mesh");
-
-    let fixed = render_mesh
-        .regions
-        .iter()
-        .find(|region| region.region_id == "fixed")
-        .expect("fixed boundary region should be preserved");
-    assert_eq!(fixed.tag.as_deref(), Some("boundary"));
-    assert_eq!(fixed.triangle_ranges.len(), 2);
-    assert_eq!(fixed.triangle_ranges[0].start, 0);
-    assert_eq!(fixed.triangle_ranges[0].count, 1);
-    assert_eq!(fixed.triangle_ranges[1].start, 2);
-    assert_eq!(fixed.triangle_ranges[1].count, 1);
-
-    let shared = render_mesh
-        .regions
-        .iter()
-        .find(|region| region.region_id == "shared")
-        .expect("shared boundary region should be preserved");
-    assert_eq!(shared.triangle_ranges.len(), 1);
-    assert_eq!(shared.triangle_ranges[0].start, 0);
-    assert_eq!(shared.triangle_ranges[0].count, 2);
-}
-
-#[test]
-fn solid_mesh_material_coverage_uses_region_assignments() {
-    let mesh = minimal_analysis_mesh();
-    let mut single_material = sample_model();
-    single_material.material_assignments = vec![MaterialAssignment {
-        region_id: "boundary_face".to_string(),
-        expected_material_id: "mat_steel".to_string(),
-        assigned_material_id: "mat_steel".to_string(),
-        confidence: EvidenceConfidence::Verified,
-    }];
-    assert!(solid_mesh_quality_reasons(&single_material, Some(&mesh))
-        .iter()
-        .all(|reason| reason.code != QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
-
-    let mut multi_material = sample_model();
-    multi_material.materials.push(MaterialModel {
-        material_id: "mat_aluminum".to_string(),
-        name: "Aluminum".to_string(),
-        mechanical: MaterialMechanicalModel {
-            youngs_modulus_pa: 70e9,
-            poisson_ratio: 0.33,
-            density_kg_per_m3: 2700.0,
-        },
-        thermal: MaterialThermalModel::default(),
-        acoustic: None,
-        electrical: None,
-        plastic: None,
-    });
-
-    let missing = solid_mesh_quality_reasons(&multi_material, Some(&mesh));
-    assert!(missing
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
-
-    multi_material.material_assignments = vec![MaterialAssignment {
-        region_id: "solid".to_string(),
-        expected_material_id: "mat_steel".to_string(),
-        assigned_material_id: "mat_steel".to_string(),
-        confidence: EvidenceConfidence::Verified,
-    }];
-    assert!(solid_mesh_quality_reasons(&multi_material, Some(&mesh))
-        .iter()
-        .all(|reason| reason.code != QualityReasonCode::SolidMeshMaterialCoverageIncomplete));
-
-    multi_material.material_assignments[0].region_id = "other_region".to_string();
-    let uncovered = solid_mesh_quality_reasons(&multi_material, Some(&mesh));
-    let reason = uncovered
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshMaterialCoverageIncomplete)
-        .expect("uncovered mesh material region should be reported");
-    assert!(reason.detail.contains("solid"));
-}
-
-#[test]
-fn solid_mesh_boundary_region_mapping_checks_loads_and_constraints() {
-    let model = sample_solid_model();
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
-        .iter()
-        .all(
-            |reason| reason.code != QualityReasonCode::SolidMeshUnmappedLoadRegion
-                && reason.code != QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion
-        ));
-
-    let missing_load = analysis_mesh_with_boundary_regions(&["root"], &["other_tip"]);
-    let missing_load_reasons = solid_mesh_quality_reasons(&model, Some(&missing_load));
-    let load_reason = missing_load_reasons
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshUnmappedLoadRegion)
-        .expect("unmapped load region should be reported");
-    assert!(load_reason.detail.contains("load_tip"));
-    assert!(load_reason.detail.contains("tip"));
-
-    let missing_constraint = analysis_mesh_with_boundary_regions(&["other_root"], &["tip"]);
-    let missing_constraint_reasons = solid_mesh_quality_reasons(&model, Some(&missing_constraint));
-    let bc_reason = missing_constraint_reasons
-        .iter()
-        .find(|reason| reason.code == QualityReasonCode::SolidMeshUnmappedBoundaryConditionRegion)
-        .expect("unmapped boundary condition region should be reported");
-    assert!(bc_reason.detail.contains("bc_root"));
-    assert!(bc_reason.detail.contains("root"));
-}
-
-#[test]
-fn study_analysis_mesh_attaches_requested_boundary_regions_from_source_geometry() {
-    let mut spec = sample_linear_static_study_spec();
-    spec.geometry = closed_cube_geometry_asset();
-    spec.model = Some(sample_solid_model());
-    spec.model.as_mut().expect("sample study has model").loads[0].region_id = "root".to_string();
-    spec.model
-        .as_mut()
-        .expect("sample study has model")
-        .boundary_conditions[0]
-        .region_id = "root".to_string();
-    let mut mesh = minimal_analysis_mesh();
-    mesh.boundary_faces = vec![analysis_boundary_face(
-        "nearest_generated_face",
-        vec![1, 2, 3],
-        &["other_region"],
-    )];
-
-    attach_requested_boundary_regions_to_analysis_mesh(&spec, &mut mesh);
-
-    assert!(mesh
-        .boundary_faces
-        .iter()
-        .any(|face| { face.region_ids.iter().any(|region| region == "root") }));
-}
-
-#[test]
-fn study_analysis_mesh_stamps_single_material_assignment_region() {
-    let mut spec = sample_linear_static_study_spec();
-    let mut model = sample_model();
-    model.material_assignments = vec![MaterialAssignment {
-        region_id: "body".to_string(),
-        expected_material_id: "mat_steel".to_string(),
-        assigned_material_id: "mat_steel".to_string(),
-        confidence: EvidenceConfidence::Verified,
-    }];
-    spec.model = Some(model);
-    let mut mesh = minimal_analysis_mesh();
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 4],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-
-    attach_single_material_assignment_to_analysis_mesh(&spec, &mut mesh);
-
-    assert!(mesh
-        .volume_elements
-        .iter()
-        .all(|element| element.material_region_id == "body"));
-}
-
-#[test]
-fn study_analysis_mesh_does_not_guess_multiple_material_regions() {
-    let mut spec = sample_linear_static_study_spec();
-    let mut model = sample_model();
-    model.material_assignments = vec![
-        MaterialAssignment {
-            region_id: "core".to_string(),
-            expected_material_id: "mat_steel".to_string(),
-            assigned_material_id: "mat_steel".to_string(),
-            confidence: EvidenceConfidence::Verified,
-        },
-        MaterialAssignment {
-            region_id: "skin".to_string(),
-            expected_material_id: "mat_steel".to_string(),
-            assigned_material_id: "mat_steel".to_string(),
-            confidence: EvidenceConfidence::Verified,
-        },
-    ];
-    spec.model = Some(model);
-    let mut mesh = minimal_analysis_mesh();
-    mesh.volume_elements[0].material_region_id = "solid".to_string();
-
-    attach_single_material_assignment_to_analysis_mesh(&spec, &mut mesh);
-
-    assert_eq!(mesh.volume_elements[0].material_region_id, "solid");
-}
-
-#[test]
-fn solid_mesh_boundary_region_mapping_ignores_volumetric_loads() {
-    let mut model = sample_model();
-    model.loads = vec![LoadCase {
-        load_id: "gravity".to_string(),
-        region_id: "volume_region".to_string(),
-        kind: LoadKind::BodyForce {
-            gx: 0.0,
-            gy: 0.0,
-            gz: -9.81,
-        },
-    }];
-
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &[]);
-    assert!(solid_mesh_quality_reasons(&model, Some(&mesh))
-        .iter()
-        .all(|reason| reason.code != QualityReasonCode::SolidMeshUnmappedLoadRegion));
-}
-
-#[test]
-fn structural_stress_gradient_samples_use_adjacent_tetrahedron_differences() {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-
-    let samples = structural_stress_gradient_samples(&mesh, &[10.0, 25.0]);
-
-    assert_eq!(samples.len(), 2);
-    assert_eq!(samples[0].entity_id, "tetrahedron_1");
-    assert_eq!(samples[0].indicator_value, 15.0);
-    assert_eq!(samples[1].entity_id, "tetrahedron_2");
-    assert_eq!(samples[1].indicator_value, 15.0);
-    assert!(samples
-        .iter()
-        .all(|sample| sample.current_size_m.is_finite() && sample.current_size_m > 0.0));
-}
-
-#[test]
-fn structural_boundary_region_samples_use_adjacent_volume_elements() {
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-
-    let samples = structural_boundary_region_samples(&mesh, &["tip".to_string()]);
-
-    assert_eq!(samples.len(), 1);
-    assert_eq!(samples[0].entity_id, "tetrahedron_1");
-    assert_eq!(samples[0].indicator_value, 1.0);
-    assert!(
-        samples[0].current_size_m.is_finite() && samples[0].current_size_m > 0.0,
-        "sample should carry a valid local element size"
-    );
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_host_von_mises_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![AnalysisField::host_f64(
-        FEA_FIELD_STRUCTURAL_VON_MISES,
-        vec![2],
-        vec![10.0, 1000.0],
-    )];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(adaptive_iterations.len(), 1);
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    assert!(adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators")
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("stress_gradient")
-                && indicator["status"].as_str() == Some("used")
-        ));
-    assert!(!adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers")
-        .is_empty());
-    assert!(!payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples")
-        .is_empty());
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_refreshes_adaptive_evidence() {
-    let root = temp_artifact_root("append-solved-adaptive-evidence-refresh");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let evidence_path = root.join("mesh_evidence.json");
-    fs::write(
-        &evidence_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_mesh_evidence_artifact/v1",
-            "mesh_evidence": {
-                "schema_version": "mesh-evidence/v1"
-            }
-        }))
-        .expect("encode stale evidence"),
-    )
-    .expect("write stale evidence");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "mesh_evidence_artifact_path": evidence_path.display().to_string(),
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![AnalysisField::host_f64(
-        FEA_FIELD_STRUCTURAL_VON_MISES,
-        vec![2],
-        vec![10.0, 1000.0],
-    )];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let refreshed: serde_json::Value =
-        serde_json::from_slice(&fs::read(&evidence_path).expect("read refreshed evidence"))
-            .expect("parse refreshed evidence");
-    let adaptive = &refreshed["mesh_evidence"]["adaptive"];
-    assert_eq!(adaptive["iteration_count"].as_u64(), Some(1));
-    assert_eq!(
-        adaptive["latest_convergence_status"].as_str(),
-        Some("pending")
-    );
-    assert_eq!(adaptive["latest_indicator_count"].as_u64(), Some(4));
-    assert_eq!(adaptive["latest_used_indicator_count"].as_u64(), Some(1));
-    assert_eq!(adaptive["latest_marker_count"].as_u64(), Some(2));
-    assert_eq!(
-        adaptive["latest_marker_by_reason"]["structural.stress_gradient"].as_u64(),
-        Some(2)
-    );
-    assert_eq!(
-        adaptive["latest_sizing_update_by_reason"]["structural.stress_gradient"].as_u64(),
-        Some(2)
-    );
-    assert_eq!(
-        adaptive["latest_indicator_status_counts"]["used"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        adaptive["latest_indicator_status_counts"]["skipped_missing_field"].as_u64(),
-        Some(3)
-    );
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_boundary_region_context() {
-    let root = temp_artifact_root("append-solved-adaptive-boundary-region-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "refinement_context": {
-                "boundary_load_region_ids": ["tip"],
-                "boundary_constraint_region_ids": ["root"]
-            },
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    assert!(indicators
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("load_regions")
-                && indicator["status"].as_str() == Some("used")
-        ));
-    assert!(indicators
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("constraint_regions")
-                && indicator["status"].as_str() == Some("used")
-        ));
-    let markers = adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers");
-    assert!(markers
-        .iter()
-        .any(|marker| marker["reason"].as_str() == Some("structural.load_regions")));
-    assert!(markers
-        .iter()
-        .any(|marker| marker["reason"].as_str() == Some("structural.constraint_regions")));
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    assert!(samples
-        .iter()
-        .any(|sample| sample["reason"].as_str() == Some("structural.load_regions")));
-    assert!(samples
-        .iter()
-        .any(|sample| sample["reason"].as_str() == Some("structural.constraint_regions")));
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_converges_boundary_region_context() {
-    let root = temp_artifact_root("append-solved-adaptive-boundary-region-convergence");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.refinement.convergence.field_change_tolerance = 1.0;
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "refinement_context": {
-                "boundary_load_region_ids": ["tip"],
-                "boundary_constraint_region_ids": ["root"]
-            },
-            "mesh_options": mesh_options,
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("converged")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    for name in ["load_regions", "constraint_regions"] {
-        assert!(indicators
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("structural")
-                    && indicator["name"].as_str() == Some(name)
-                    && indicator["status"].as_str() == Some("used")
-            ));
-    }
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_honors_boundary_focus_levels() {
-    let root = temp_artifact_root("append-solved-adaptive-boundary-focus-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Normal;
-    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "refinement_context": {
-                "boundary_load_region_ids": ["tip"],
-                "boundary_constraint_region_ids": ["root"]
-            },
-            "mesh_options": mesh_options,
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    let load_target = samples
-        .iter()
-        .find(|sample| sample["reason"].as_str() == Some("structural.load_regions"))
-        .and_then(|sample| sample["target_size_m"].as_f64())
-        .expect("load-region target size");
-    let constraint_target = samples
-        .iter()
-        .find(|sample| sample["reason"].as_str() == Some("structural.constraint_regions"))
-        .and_then(|sample| sample["target_size_m"].as_f64())
-        .expect("constraint-region target size");
-
-    assert!(
-        constraint_target < load_target,
-        "fine constraint focus should request a smaller target size than normal load focus"
-    );
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_disables_boundary_focus_off() {
-    let root = temp_artifact_root("append-solved-adaptive-boundary-focus-off-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Off;
-    mesh_options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Normal;
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "refinement_context": {
-                "boundary_load_region_ids": ["tip"],
-                "boundary_constraint_region_ids": ["root"]
-            },
-            "mesh_options": mesh_options,
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    assert!(indicators
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("load_regions")
-                && indicator["status"].as_str() == Some("skipped_not_applicable")
-        ));
-    assert!(indicators
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("constraint_regions")
-                && indicator["status"].as_str() == Some("used")
-        ));
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    assert!(!samples
-        .iter()
-        .any(|sample| sample["reason"].as_str() == Some("structural.load_regions")));
-    assert!(samples
-        .iter()
-        .any(|sample| sample["reason"].as_str() == Some("structural.constraint_regions")));
-}
-
-#[test]
-fn initial_boundary_focus_sizing_field_uses_load_and_constraint_regions() {
-    let mut spec = sample_linear_static_study_spec();
-    spec.model = Some(sample_solid_model());
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let options = runmat_meshing_core::VolumeMeshingOptions::default();
-
-    let sizing = initial_boundary_focus_sizing_field(&spec, &options, &mesh)
-        .expect("boundary load and constraint regions should seed initial sizing");
-
-    assert!(sizing
-        .samples
-        .iter()
-        .any(|sample| sample.reason.as_deref() == Some("structural.load_regions")));
-    assert!(sizing
-        .samples
-        .iter()
-        .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
-    assert!(sizing
-        .samples
-        .iter()
-        .all(|sample| sample.target_size_m.is_finite() && sample.target_size_m > 0.0));
-}
-
-#[test]
-fn initial_boundary_focus_sizing_field_honors_focus_off() {
-    let mut spec = sample_linear_static_study_spec();
-    spec.model = Some(sample_solid_model());
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
-    options.refinement.focus.loads = runmat_meshing_core::RefinementFocusLevel::Off;
-    options.refinement.focus.constraints = runmat_meshing_core::RefinementFocusLevel::Fine;
-
-    let sizing = initial_boundary_focus_sizing_field(&spec, &options, &mesh)
-        .expect("constraint focus should still seed initial sizing");
-
-    assert!(!sizing
-        .samples
-        .iter()
-        .any(|sample| sample.reason.as_deref() == Some("structural.load_regions")));
-    assert!(sizing
-        .samples
-        .iter()
-        .any(|sample| sample.reason.as_deref() == Some("structural.constraint_regions")));
-}
-
-#[test]
-fn initial_boundary_focus_sizing_field_skips_disabled_refinement() {
-    let mut spec = sample_linear_static_study_spec();
-    spec.model = Some(sample_model());
-    let mesh = analysis_mesh_with_boundary_regions(&["root"], &["tip"]);
-    let mut options = runmat_meshing_core::VolumeMeshingOptions::default();
-    options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-
-    assert!(initial_boundary_focus_sizing_field(&spec, &options, &mesh).is_none());
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_strain_energy_density_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-energy-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![AnalysisField::host_f64(
-        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-        vec![2],
-        vec![1.0, 100.0],
-    )];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    assert!(adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators")
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("strain_energy_density")
-                && indicator["status"].as_str() == Some("used")
-        ));
-    assert!(adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers")
-        .iter()
-        .any(|marker| marker["reason"].as_str() == Some("structural.strain_energy_density")));
-    assert!(payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples")
-        .iter()
-        .any(|sample| sample["reason"].as_str() == Some("structural.strain_energy_density")));
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_thermal_element_vector_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-thermal-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "thermal_standalone",
-            "run_kind": "thermal",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![
-        AnalysisField::host_f64(
-            fea_thermal_temperature_gradient_field_id(0),
-            vec![2, 3],
-            vec![1.0, 0.0, 0.0, 10.0, 0.0, 0.0],
-        ),
-        AnalysisField::host_f64(
-            fea_thermal_temperature_gradient_field_id(1),
-            vec![2, 3],
-            vec![2.0, 0.0, 0.0, 20.0, 0.0, 0.0],
-        ),
-        AnalysisField::host_f64(
-            fea_thermal_heat_flux_field_id(0),
-            vec![2, 3],
-            vec![3.0, 4.0, 0.0, 0.0, 12.0, 5.0],
-        ),
-    ];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("thermal")
-            && indicator["name"].as_str() == Some("temperature_gradient")
-            && indicator["status"].as_str() == Some("used")
-    ));
-    assert!(indicators.iter().any(
-        |indicator| indicator["namespace"].as_str() == Some("thermal")
-            && indicator["name"].as_str() == Some("heat_flux_gradient")
-            && indicator["status"].as_str() == Some("used")
-    ));
-    let markers = adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers");
-    assert!(markers
-        .iter()
-        .any(|marker| marker["reason"].as_str() == Some("thermal.temperature_gradient")));
-    assert!(markers
-        .iter()
-        .any(|marker| marker["reason"].as_str() == Some("thermal.heat_flux_gradient")));
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    assert!(samples
-        .iter()
-        .any(|sample| sample["reason"].as_str() == Some("thermal.temperature_gradient")));
-    assert!(samples
-        .iter()
-        .any(|sample| sample["reason"].as_str() == Some("thermal.heat_flux_gradient")));
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_converges_thermal_gradient_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-thermal-gradient-convergence");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.refinement.convergence.field_change_tolerance = 1.0;
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "thermal_standalone",
-            "run_kind": "thermal",
-            "mesh_options": mesh_options,
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![
-        AnalysisField::host_f64(
-            fea_thermal_temperature_gradient_field_id(0),
-            vec![2, 3],
-            vec![1.0, 0.0, 0.0, 10.0, 0.0, 0.0],
-        ),
-        AnalysisField::host_f64(
-            fea_thermal_heat_flux_field_id(0),
-            vec![2, 3],
-            vec![3.0, 4.0, 0.0, 0.0, 12.0, 5.0],
-        ),
-    ];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("converged")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    for name in ["temperature_gradient", "heat_flux_gradient"] {
-        assert!(indicators
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("thermal")
-                    && indicator["name"].as_str() == Some(name)
-                    && indicator["status"].as_str() == Some("used")
-            ));
-    }
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_electromagnetic_element_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-electromagnetic-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "electromagnetic_static",
-            "run_kind": "electromagnetic",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-            vec![2],
-            vec![1.0, 10.0],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-            vec![2, 3],
-            vec![0.0, 3.0, 4.0, 0.0, 0.0, 13.0],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-            vec![2, 3],
-            vec![1.0, 2.0, 2.0, 2.0, 3.0, 6.0],
-        ),
-        AnalysisField::host_f64(FEA_FIELD_EM_ENERGY_DENSITY, vec![2], vec![2.0, 18.0]),
-    ];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    for name in [
-        "flux_density_gradient",
-        "electric_field_gradient",
-        "current_density_gradient",
-        "energy_density",
-    ] {
-        assert!(indicators
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("electromagnetic")
-                    && indicator["name"].as_str() == Some(name)
-                    && indicator["status"].as_str() == Some("used")
-            ));
-    }
-    let markers = adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers");
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    for reason in [
-        "electromagnetic.flux_density_gradient",
-        "electromagnetic.electric_field_gradient",
-        "electromagnetic.current_density_gradient",
-        "electromagnetic.energy_density",
-    ] {
-        assert!(markers
-            .iter()
-            .any(|marker| marker["reason"].as_str() == Some(reason)));
-        assert!(samples
-            .iter()
-            .any(|sample| sample["reason"].as_str() == Some(reason)));
-    }
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_converges_electromagnetic_gradient_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-electromagnetic-gradient-convergence");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.refinement.convergence.field_change_tolerance = 1.0;
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "electromagnetic_static",
-            "run_kind": "electromagnetic",
-            "mesh_options": mesh_options,
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-            vec![2],
-            vec![1.0, 10.0],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-            vec![2, 3],
-            vec![0.0, 3.0, 4.0, 0.0, 0.0, 13.0],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-            vec![2, 3],
-            vec![1.0, 2.0, 2.0, 2.0, 3.0, 6.0],
-        ),
-    ];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("converged")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    for name in [
-        "flux_density_gradient",
-        "electric_field_gradient",
-        "current_density_gradient",
-    ] {
-        assert!(indicators
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("electromagnetic")
-                    && indicator["name"].as_str() == Some(name)
-                    && indicator["status"].as_str() == Some("used")
-            ));
-    }
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_acoustic_pressure_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-acoustic-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "acoustic_harmonic",
-            "run_kind": "acoustic",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![AnalysisField::host_f64(
-        FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-        vec![2],
-        vec![0.25, 2.5],
-    )];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    for name in ["pressure_gradient", "pressure_curvature"] {
-        assert!(indicators
-            .iter()
-            .any(
-                |indicator| indicator["namespace"].as_str() == Some("acoustic")
-                    && indicator["name"].as_str() == Some(name)
-                    && indicator["status"].as_str() == Some("used")
-            ));
-    }
-    let markers = adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers");
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    for reason in ["acoustic.pressure_gradient", "acoustic.pressure_curvature"] {
-        assert!(markers
-            .iter()
-            .any(|marker| marker["reason"].as_str() == Some(reason)));
-        assert!(samples
-            .iter()
-            .any(|sample| sample["reason"].as_str() == Some(reason)));
-    }
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_cfd_element_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-cfd-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "fluid".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "cfd_steady_state",
-            "run_kind": "cfd",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_CFD_VELOCITY,
-            vec![2, 3],
-            vec![1.0, 0.0, 0.0, 0.0, 12.0, 5.0],
-        ),
-        AnalysisField::host_f64(FEA_FIELD_CFD_PRESSURE, vec![2], vec![1.0, 20.0]),
-        AnalysisField::host_f64(
-            FEA_FIELD_CFD_VORTICITY,
-            vec![2, 3],
-            vec![0.0, 3.0, 4.0, 2.0, 3.0, 6.0],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-            vec![2, 3],
-            vec![1.0, 2.0, 2.0, 0.0, 8.0, 15.0],
-        ),
-    ];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    for name in [
-        "velocity_gradient",
-        "pressure_gradient",
-        "vorticity",
-        "wall_shear",
-    ] {
-        assert!(indicators
-            .iter()
-            .any(|indicator| indicator["namespace"].as_str() == Some("cfd")
-                && indicator["name"].as_str() == Some(name)
-                && indicator["status"].as_str() == Some("used")));
-    }
-    let markers = adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers");
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    for reason in [
-        "cfd.velocity_gradient",
-        "cfd.pressure_gradient",
-        "cfd.vorticity",
-        "cfd.wall_shear",
-    ] {
-        assert!(markers
-            .iter()
-            .any(|marker| marker["reason"].as_str() == Some(reason)));
-        assert!(samples
-            .iter()
-            .any(|sample| sample["reason"].as_str() == Some(reason)));
-    }
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_cht_element_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-cht-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "coupled".to_string(),
-        provenance: Vec::new(),
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "cht_coupled",
-            "run_kind": "cht",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![
-        AnalysisField::host_f64(
-            fea_cht_interface_heat_flux_field_id(0),
-            vec![2, 3],
-            vec![1.0, 2.0, 2.0, 0.0, 12.0, 5.0],
-        ),
-        AnalysisField::host_f64(
-            fea_cht_interface_temperature_jump_field_id(0),
-            vec![2],
-            vec![0.5, 9.5],
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_CHT_FLUID_VELOCITY,
-            vec![2, 3],
-            vec![0.0, 3.0, 4.0, 2.0, 3.0, 6.0],
-        ),
-    ];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    for name in [
-        "interface_heat_flux_jump",
-        "interface_temperature_jump",
-        "fluid_boundary_layer",
-    ] {
-        assert!(indicators
-            .iter()
-            .any(|indicator| indicator["namespace"].as_str() == Some("cht")
-                && indicator["name"].as_str() == Some(name)
-                && indicator["status"].as_str() == Some("used")));
-    }
-    assert!(indicators
-        .iter()
-        .any(|indicator| indicator["namespace"].as_str() == Some("cht")
-            && indicator["name"].as_str() == Some("solid_heat_flux_gradient")
-            && indicator["status"].as_str() == Some("skipped_missing_field")));
-    let markers = adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers");
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    for reason in [
-        "cht.interface_heat_flux_jump",
-        "cht.interface_temperature_jump",
-        "cht.fluid_boundary_layer",
-    ] {
-        assert!(markers
-            .iter()
-            .any(|marker| marker["reason"].as_str() == Some(reason)));
-        assert!(samples
-            .iter()
-            .any(|sample| sample["reason"].as_str() == Some(reason)));
-    }
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_without_fields_remains_pending() {
-    let root = temp_artifact_root("append-solved-adaptive-missing-fields-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mesh = minimal_analysis_mesh();
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    assert!(adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators")
-        .iter()
-        .all(|indicator| indicator["status"].as_str() == Some("skipped_missing_field")));
-    assert!(adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers")
-        .is_empty());
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_rejects_missing_analysis_profile() {
-    let root = temp_artifact_root("append-solved-adaptive-missing-profile");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "run_kind": "thermal",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": minimal_analysis_mesh(),
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    let err = append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect_err("missing analysis_profile should not fall back to structural");
-
-    assert!(err.contains("missing analysis_profile"));
-    assert!(err.contains("typed .fea study"));
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_rejects_missing_run_kind() {
-    let root = temp_artifact_root("append-solved-adaptive-missing-run-kind");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "thermal_standalone",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": minimal_analysis_mesh(),
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    let err = append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect_err("missing run_kind should not fall back to linear static");
-
-    assert!(err.contains("missing run_kind"));
-    assert!(err.contains("typed .fea study"));
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uses_persisted_analysis_context() {
-    let root = temp_artifact_root("append-solved-adaptive-modal-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mesh = minimal_analysis_mesh();
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "modal_structural",
-            "run_kind": "modal",
-            "mesh_options": runmat_meshing_core::VolumeMeshingOptions::default(),
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    let indicators = adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators");
-    assert!(indicators
-        .iter()
-        .any(|indicator| indicator["namespace"].as_str() == Some("modal")
-            && indicator["name"].as_str() == Some("mode_shape_curvature")
-            && indicator["status"].as_str() == Some("skipped_missing_field")));
-    assert!(!indicators
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("stress_gradient")
-        ));
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_enforces_element_budget() {
-    let root = temp_artifact_root("append-solved-adaptive-budget-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    let mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        max_elements: 2,
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "linear_static_structural",
-            "run_kind": "linear_static",
-            "mesh_options": mesh_options,
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-    let fields = vec![AnalysisField::host_f64(
-        FEA_FIELD_STRUCTURAL_VON_MISES,
-        vec![2],
-        vec![1.0, 100.0],
-    )];
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &fields)
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("element_budget_reached")
-    );
-    assert!(adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators")
-        .iter()
-        .any(
-            |indicator| indicator["namespace"].as_str() == Some("structural")
-                && indicator["name"].as_str() == Some("stress_gradient")
-                && indicator["status"].as_str() == Some("skipped_budget")
-        ));
-    assert!(adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers")
-        .is_empty());
-    assert!(payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples")
-        .is_empty());
-}
-
-#[test]
-fn append_solved_adaptive_mesh_summary_uniform_strategy_marks_elements_without_fields() {
-    let root = temp_artifact_root("append-solved-adaptive-uniform-summary");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.nodes.push(analysis_mesh_node(5, [1.0, 1.0, 1.0]));
-    mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![1, 2, 3, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions::default();
-    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::Uniform;
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "fea_study_analysis_mesh_artifact/v1",
-            "analysis_profile": "thermal_standalone",
-            "run_kind": "thermal",
-            "mesh_options": mesh_options,
-            "mesh": mesh,
-        }))
-        .expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    append_solved_adaptive_mesh_summary(artifact_path.to_str(), &[])
-        .expect("adaptive summary should append");
-
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let adaptive_iterations = payload["mesh"]["adaptive_iterations"]
-        .as_array()
-        .expect("adaptive iteration summaries");
-    assert_eq!(
-        adaptive_iterations[0]["convergence_status"].as_str(),
-        Some("pending")
-    );
-    assert!(adaptive_iterations[0]["indicators"]
-        .as_array()
-        .expect("adaptive indicators")
-        .is_empty());
-    let markers = adaptive_iterations[0]["markers"]
-        .as_array()
-        .expect("adaptive markers");
-    assert_eq!(markers.len(), 2);
-    assert!(markers
-        .iter()
-        .all(|marker| marker["reason"].as_str() == Some("mesh.uniform_refinement")));
-    let samples = payload["mesh"]["sizing"]["samples"]
-        .as_array()
-        .expect("sizing samples");
-    assert_eq!(samples.len(), 2);
-    assert!(samples
-        .iter()
-        .all(|sample| sample["reason"].as_str() == Some("mesh.uniform_refinement")));
-}
-
-#[test]
-fn sizing_application_summary_groups_reasons_and_breakpoints() {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.sizing.applied_samples = vec![
-        runmat_meshing_core::SizingSampleApplication {
-            position_m: [0.1, 0.2, 0.3],
-            target_size_m: 0.01,
-            inserted_breakpoint_count: 3,
-            reason: Some("structural.stress_gradient".to_string()),
-            detail: Some("inserted 3 local sizing breakpoints".to_string()),
-        },
-        runmat_meshing_core::SizingSampleApplication {
-            position_m: [0.2, 0.2, 0.3],
-            target_size_m: 0.02,
-            inserted_breakpoint_count: 2,
-            reason: Some("structural.stress_gradient".to_string()),
-            detail: None,
-        },
-        runmat_meshing_core::SizingSampleApplication {
-            position_m: [0.5, 0.2, 0.3],
-            target_size_m: 0.01,
-            inserted_breakpoint_count: 0,
-            reason: None,
-            detail: None,
-        },
-    ];
-    mesh.backend.tetrahedron_requested_refinement_point_count = 4;
-    mesh.backend
-        .tetrahedron_accepted_requested_refinement_location_count = 4;
-    mesh.backend
-        .tetrahedron_accepted_requested_refinement_point_count = 3;
-    mesh.backend
-        .tetrahedron_accepted_requested_refinement_interpolated_point_count = 2;
-    mesh.backend
-        .tetrahedron_rejected_requested_refinement_point_count = 1;
-    mesh.backend
-        .tetrahedron_requested_refinement_rejected_by_reason
-        .insert("quality_or_recovery".to_string(), 1);
-    mesh.backend
-        .tetrahedron_dropped_requested_refinement_point_count = 1;
-    mesh.backend
-        .tetrahedron_requested_refinement_dropped_by_reason
-        .insert("not_retained_after_repair".to_string(), 1);
-    mesh.sizing.anisotropic_samples = vec![
-        runmat_meshing_core::AnisotropicSizingSample {
-            position_m: [0.2, 0.2, 0.2],
-            target_sizes_m: [0.02, 0.04, 0.08],
-            directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            reason: Some("boundary_layer".to_string()),
-        },
-        runmat_meshing_core::AnisotropicSizingSample {
-            position_m: [0.3, 0.2, 0.2],
-            target_sizes_m: [0.02, -0.04, 0.08],
-            directions: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            reason: Some("cad.proximity".to_string()),
-        },
-    ];
-
-    let summary = sizing_application_summary(&mesh);
-
-    assert_eq!(summary["total"].as_u64(), Some(3));
-    assert_eq!(summary["inserted_breakpoint_count"].as_u64(), Some(5));
-    assert_eq!(
-        summary["by_reason"]["structural.stress_gradient"].as_u64(),
-        Some(2)
-    );
-    assert_eq!(summary["by_reason"]["unspecified"].as_u64(), Some(1));
-    assert_eq!(
-        summary["inserted_breakpoints_by_reason"]["structural.stress_gradient"].as_u64(),
-        Some(5)
-    );
-    assert_eq!(
-        summary["uninserted_by_reason"]["unspecified"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["requested_count"].as_u64(),
-        Some(4)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["accepted_count"].as_u64(),
-        Some(3)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["accepted_location_count"].as_u64(),
-        Some(4)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["accepted_exact_count"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["accepted_interpolated_count"].as_u64(),
-        Some(2)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["rejected_count"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["rejected_by_reason"]["quality_or_recovery"]
-            .as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["dropped_count"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["dropped_by_reason"]
-            ["not_retained_after_repair"]
-            .as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["acceptance_ratio"].as_f64(),
-        Some(0.75)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["rejection_ratio"].as_f64(),
-        Some(0.25)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["drop_ratio"].as_f64(),
-        Some(0.25)
-    );
-    assert_eq!(
-        summary["requested_tetrahedron_refinement"]["interpolated_ratio"].as_f64(),
-        Some(2.0 / 3.0)
-    );
-    assert_eq!(summary["anisotropic"]["total"].as_u64(), Some(2));
-    assert_eq!(summary["anisotropic"]["valid_count"].as_u64(), Some(1));
-    assert_eq!(summary["anisotropic"]["invalid_count"].as_u64(), Some(1));
-    assert_eq!(
-        summary["anisotropic"]["by_reason"]["boundary_layer"].as_u64(),
-        Some(1)
-    );
-    assert_eq!(
-        summary["anisotropic"]["invalid_by_reason"]["cad.proximity"].as_u64(),
-        Some(1)
-    );
-}
-
-#[test]
-fn sizing_rejection_summary_groups_statuses_and_reasons() {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.sizing.rejected_samples = vec![
-        runmat_meshing_core::SizingSampleRejection {
-            position_m: [0.1, 0.2, 0.3],
-            target_size_m: 0.01,
-            status: "skipped_quality".to_string(),
-            reason: Some("structural.stress_gradient".to_string()),
-            detail: Some("mesh quality guard prevented local sizing breakpoint".to_string()),
-        },
-        runmat_meshing_core::SizingSampleRejection {
-            position_m: [0.2, 0.2, 0.3],
-            target_size_m: 0.02,
-            status: "skipped_quality".to_string(),
-            reason: Some("structural.stress_gradient".to_string()),
-            detail: None,
-        },
-        runmat_meshing_core::SizingSampleRejection {
-            position_m: [0.5, 0.2, 0.3],
-            target_size_m: 0.01,
-            status: "skipped_budget".to_string(),
-            reason: None,
-            detail: None,
-        },
-    ];
-
-    let summary = sizing_rejection_summary(&mesh);
-
-    assert_eq!(summary["total"].as_u64(), Some(3));
-    assert_eq!(summary["by_status"]["skipped_quality"].as_u64(), Some(2));
-    assert_eq!(summary["by_status"]["skipped_budget"].as_u64(), Some(1));
-    assert_eq!(
-        summary["by_reason"]["structural.stress_gradient"].as_u64(),
-        Some(2)
-    );
-    assert_eq!(summary["by_reason"]["unspecified"].as_u64(), Some(1));
-}
-
-#[test]
-fn refinement_effect_summary_reports_topology_deltas() {
-    let source_mesh = minimal_analysis_mesh();
-    let mut refined_mesh = minimal_analysis_mesh();
-    refined_mesh
-        .nodes
-        .push(analysis_mesh_node(5, [0.25, 0.25, 0.25]));
-    refined_mesh.volume_elements.push(AnalysisVolumeElement {
-        element_id: "tetrahedron_2".to_string(),
-        kind: VolumeElementKind::Tetrahedron4,
-        node_ids: vec![2, 3, 4, 5],
-        material_region_id: "solid".to_string(),
-        provenance: Vec::new(),
-    });
-
-    let summary = refinement_effect_summary(&source_mesh, &refined_mesh);
-
-    assert_eq!(summary["source_node_count"].as_u64(), Some(4));
-    assert_eq!(summary["source_element_count"].as_u64(), Some(1));
-    assert_eq!(summary["refined_node_count"].as_u64(), Some(5));
-    assert_eq!(summary["refined_element_count"].as_u64(), Some(2));
-    assert_eq!(summary["node_count_delta"].as_i64(), Some(1));
-    assert_eq!(summary["element_count_delta"].as_i64(), Some(1));
-    assert_eq!(summary["topology_changed"].as_bool(), Some(true));
-
-    let no_op = refinement_effect_summary(&source_mesh, &source_mesh);
-    assert_eq!(no_op["node_count_delta"].as_i64(), Some(0));
-    assert_eq!(no_op["element_count_delta"].as_i64(), Some(0));
-    assert_eq!(no_op["topology_changed"].as_bool(), Some(false));
-}
-
-#[test]
-fn no_topology_growth_marks_latest_adaptive_iteration_converged() {
-    let root = temp_artifact_root("adaptive-no-topology-growth");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create temp artifact root");
-    let artifact_path = root.join("analysis_mesh.json");
-    let mut mesh = minimal_analysis_mesh();
-    mesh.adaptive_iterations
-        .push(runmat_meshing_core::AdaptiveIterationSummary {
-            iteration_index: 0,
-            node_count: mesh.nodes.len(),
-            element_count: mesh.volume_elements.len(),
-            convergence_status: runmat_meshing_core::AdaptiveConvergenceStatus::Pending,
-            indicators: vec![runmat_meshing_core::RefinementIndicatorSummary {
-                namespace: "structural".to_string(),
-                name: "stress_gradient".to_string(),
-                requested_mode: runmat_meshing_core::RefinementIndicatorMode::Auto,
-                status: runmat_meshing_core::RefinementIndicatorStatus::Used,
-                detail: None,
-            }],
-            markers: Vec::new(),
-            sizing_update: runmat_meshing_core::SizingFieldUpdate::default(),
-        });
-    let payload = serde_json::json!({
-        "schema_version": "fea_study_analysis_mesh_artifact/v1",
-        "mesh": mesh,
-    });
-    fs::write(
-        &artifact_path,
-        serde_json::to_vec_pretty(&payload).expect("encode analysis mesh artifact"),
-    )
-    .expect("write analysis mesh artifact");
-
-    let decoded_mesh: AnalysisMeshArtifact =
-        serde_json::from_value(payload["mesh"].clone()).expect("decode mesh");
-    mark_latest_adaptive_iteration_converged(
-        &artifact_path,
-        payload,
-        decoded_mesh,
-        "adaptive refinement produced no topology growth",
-    )
-    .expect("mark convergence");
-
-    let persisted: serde_json::Value =
-        serde_json::from_slice(&fs::read(&artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let iteration = &persisted["mesh"]["adaptive_iterations"][0];
-    assert_eq!(iteration["convergence_status"].as_str(), Some("converged"));
-    assert_eq!(
-        iteration["indicators"][0]["detail"].as_str(),
-        Some("adaptive refinement produced no topology growth")
-    );
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-fn analysis_mesh_with_boundary_regions(
-    boundary_condition_region_ids: &[&str],
-    driving_condition_region_ids: &[&str],
-) -> AnalysisMeshArtifact {
-    let mut mesh = minimal_analysis_mesh();
-    mesh.boundary_faces = vec![
-        analysis_boundary_face(
-            "face_boundary_condition",
-            vec![1, 2, 3],
-            boundary_condition_region_ids,
-        ),
-        analysis_boundary_face(
-            "face_driving_condition",
-            vec![1, 2, 4],
-            driving_condition_region_ids,
-        ),
-    ];
-    mesh.refresh_field_topology();
-    mesh
-}
-
-fn analysis_boundary_face(
-    face_id: &str,
-    node_ids: Vec<u32>,
-    region_ids: &[&str],
-) -> AnalysisBoundaryFace {
-    AnalysisBoundaryFace {
-        face_id: face_id.to_string(),
-        kind: BoundaryElementKind::Tri3,
-        node_ids,
-        adjacent_volume_element_ids: vec!["tetrahedron_1".to_string()],
-        region_ids: region_ids
-            .iter()
-            .map(|region| (*region).to_string())
-            .collect(),
-        provenance: Vec::new(),
-    }
-}
-
-fn minimal_analysis_mesh() -> AnalysisMeshArtifact {
-    let mut mesh = AnalysisMeshArtifact {
-        schema_version: ANALYSIS_MESH_SCHEMA_VERSION.to_string(),
-        mesh_id: "unit_tetrahedron".to_string(),
-        nodes: vec![
-            analysis_mesh_node(1, [0.0, 0.0, 0.0]),
-            analysis_mesh_node(2, [1.0, 0.0, 0.0]),
-            analysis_mesh_node(3, [0.0, 1.0, 0.0]),
-            analysis_mesh_node(4, [0.0, 0.0, 1.0]),
-        ],
-        volume_elements: vec![AnalysisVolumeElement {
-            element_id: "tetrahedron_1".to_string(),
-            kind: VolumeElementKind::Tetrahedron4,
-            node_ids: vec![1, 2, 3, 4],
-            material_region_id: "solid".to_string(),
-            provenance: Vec::new(),
-        }],
-        boundary_faces: Vec::new(),
-        boundary_edges: Vec::new(),
-        quality: AnalysisMeshQualityReport::default(),
-        sizing: MeshSizingField::default(),
-        field_topology: Vec::new(),
-        backend: Default::default(),
-        adaptive_iterations: Vec::new(),
-        provenance: AnalysisMeshProvenance {
-            algorithm: "test".to_string(),
-            source_geometry_id: "geo:test".to_string(),
-            source_geometry_revision: 1,
-            source_geometry_sha256: None,
-        },
-    };
-    mesh.refresh_field_topology();
-    mesh
-}
-
-fn analysis_mesh_node(node_id: u32, coordinates_m: [f64; 3]) -> AnalysisMeshNode {
-    AnalysisMeshNode {
-        node_id,
-        coordinates_m,
-        provenance: Vec::new(),
-    }
+    assert!(err.message.contains("require a canonical solver mesh"));
 }
 
 #[test]
 fn analysis_run_modal_rejects_models_without_modal_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let err = analysis_run_modal_op(
+    let err = analysis_run_modal_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("modal run should fail for missing modal step");
@@ -9057,12 +5103,13 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
 }
 
 #[test]
-fn analysis_run_acoustic_rejects_models_without_modal_step() {
+fn analysis_run_acoustic_rejects_models_without_acoustic_harmonic_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let err = analysis_run_acoustic_op(
+    let err = analysis_run_acoustic_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("acoustic run should fail for missing acoustic harmonic step marker");
@@ -9076,30 +5123,30 @@ fn analysis_run_acoustic_rejects_models_without_modal_step() {
 fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let mut acoustic_model = analysis_create_model_op(
+    let mut acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_missing_source".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created")
     .data;
-    acoustic_model.loads = vec![LoadCase {
-        load_id: "load_structural_force_not_acoustic_source".to_string(),
-        region_id: "region_default".to_string(),
-        kind: LoadKind::Force {
-            fx: 1.0,
-            fy: 0.0,
-            fz: 0.0,
-        },
-    }];
+    acoustic_model.signals.clear();
+    acoustic_model.excitations.clear();
+    acoustic_model.excitation_cases.clear();
+    append_constant_excitation(
+        &mut acoustic_model,
+        "load_structural_force_not_acoustic_source",
+        "region_default",
+        ConstantExcitation::Force([1.0, 0.0, 0.0]),
+    );
 
-    let err = analysis_run_acoustic_op(
+    let err = analysis_run_acoustic_with_options_op(
         &acoustic_model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("acoustic run should reject models without acoustic pressure sources");
@@ -9111,28 +5158,28 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
 }
 
 #[test]
-fn analysis_run_acoustic_rejects_moment_loads() {
+fn analysis_run_acoustic_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let mut acoustic_model = analysis_create_model_op(
+    let mut acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_with_moment".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created")
     .data;
-    acoustic_model.loads = vec![sample_moment_load("acoustic_moment")];
+    replace_with_moment_excitation(&mut acoustic_model, "acoustic_moment");
 
-    let err = analysis_run_acoustic_op(
+    let err = analysis_run_acoustic_with_options_op(
         &acoustic_model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("acoustic run should reject structural moment loads");
+    .expect_err("acoustic run should reject structural moment excitations");
 
     assert_eq!(
         err.error_code,
@@ -9144,26 +5191,26 @@ fn analysis_run_acoustic_rejects_moment_loads() {
 fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let mut acoustic_model = analysis_create_model_op(
+    let mut acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_missing_boundary".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created")
     .data;
-    acoustic_model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_structural_fixed_not_acoustic_boundary".to_string(),
-        region_id: "region_default".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
+    acoustic_model.boundaries.clear();
+    acoustic_model.constraints = vec![fixed_constraint(
+        "bc_structural_fixed_not_acoustic_boundary",
+        "region_default",
+    )];
 
-    let err = analysis_run_acoustic_op(
+    let err = analysis_run_acoustic_with_options_op(
         &acoustic_model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("acoustic run should reject models without acoustic boundary conditions");
@@ -9178,9 +5225,10 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
 fn analysis_run_transient_rejects_models_without_transient_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let err = analysis_run_transient_op(
+    let err = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("transient run should fail for missing transient step");
@@ -9194,80 +5242,66 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
 fn analysis_run_cfd_rejects_models_without_cfd_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let err = analysis_run_cfd_op(
+    let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("cfd run should fail for missing cfd step");
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]
 fn analysis_run_cfd_rejects_model_without_cfd_domain() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
-    let err = analysis_run_cfd_op(
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
+    let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("cfd run should fail when cfd domain is missing");
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_MODEL");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]
-fn analysis_run_cfd_rejects_disabled_cfd_domain() {
+fn analysis_run_cfd_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, false));
-    let err = analysis_run_cfd_op(
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
+    model.cfd = Some(sample_cfd_domain());
+    replace_with_moment_excitation(&mut model, "cfd_moment");
+
+    let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("cfd run should fail for disabled cfd domain");
+    .expect_err("cfd run should reject structural moment excitations");
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_OPTIONS");
-}
-
-#[test]
-fn analysis_run_cfd_rejects_moment_loads() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-    model.loads = vec![sample_moment_load("cfd_moment")];
-
-    let err = analysis_run_cfd_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("cfd run should reject structural moment loads");
-
-    assert_eq!(err.operation, "fea.run_cfd");
-    assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_LOAD");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]
 fn analysis_run_thermal_rejects_models_without_thermal_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let err = analysis_run_thermal_op(
+    let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("thermal run should fail for missing thermal step");
@@ -9281,15 +5315,19 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
 fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_invalid_material".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
-    model.materials[0].thermal.conductivity_w_per_mk = 0.0;
+    model.sequence.steps = vec![ProcedureStep::thermal_transient(
+        "thermal_invalid_material".to_string(),
+    )];
+    model.materials[0]
+        .thermal
+        .as_mut()
+        .expect("thermal fixture material")
+        .conductivity_w_per_mk = runmat_types::physical::ThermalConductivity::new(0.0);
 
-    let err = analysis_run_thermal_op(
+    let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("thermal run should reject nonpositive thermal material values");
@@ -9304,44 +5342,47 @@ fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
 fn analysis_run_thermal_rejects_invalid_heat_source_values() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_invalid_source".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
-    model.loads = vec![LoadCase {
-        load_id: "load_invalid_heat_source".to_string(),
-        region_id: "thermal_core".to_string(),
-        kind: LoadKind::HeatSource {
-            volumetric_w_per_m3: f64::INFINITY,
-        },
-    }];
+    model.sequence.steps = vec![ProcedureStep::thermal_transient(
+        "thermal_invalid_source".to_string(),
+    )];
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_constant_excitation(
+        &mut model,
+        "load_invalid_heat_source",
+        "thermal_core",
+        ConstantExcitation::HeatGeneration(f64::INFINITY),
+    );
 
-    let err = analysis_run_thermal_op(
+    let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("thermal run should reject non-finite heat source values");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE");
+    assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.SOLVER_MODEL_INVALID");
+    assert!(err.message.contains("signal"));
 }
 
 #[test]
-fn analysis_run_thermal_rejects_moment_loads() {
+fn analysis_run_thermal_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_moment".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
-    model.loads = vec![sample_moment_load("thermal_moment")];
+    model.sequence.steps = vec![ProcedureStep::thermal_transient(
+        "thermal_moment".to_string(),
+    )];
+    replace_with_moment_excitation(&mut model, "thermal_moment");
 
-    let err = analysis_run_thermal_op(
+    let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("thermal run should reject structural moment loads");
+    .expect_err("thermal run should reject structural moment excitations");
 
     assert_eq!(err.error_code, "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE");
 }
@@ -9350,22 +5391,27 @@ fn analysis_run_thermal_rejects_moment_loads() {
 fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_invalid_boundary".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_invalid_convection".to_string(),
-        region_id: "thermal_open_wall".to_string(),
-        kind: BoundaryConditionKind::ThermalConvection {
-            ambient_temperature_k: 293.15,
-            coefficient_w_per_m2k: f64::NAN,
+    model.sequence.steps = vec![ProcedureStep::thermal_transient(
+        "thermal_invalid_boundary".to_string(),
+    )];
+    model.constraints.clear();
+    model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
+        boundary_id: "bc_invalid_convection".to_string(),
+        target: runmat_analysis_core::RegionTarget::boundary(
+            runmat_meshing_core::fixtures::fixture_face("thermal_open_wall"),
+        ),
+        operator: runmat_analysis_core::BoundaryOperator::ThermalConvection {
+            ambient_temperature: runmat_analysis_core::PrescribedValue::Constant(
+                runmat_analysis_core::Temperature::new(293.15),
+            ),
+            coefficient: runmat_analysis_core::HeatTransferCoefficient::new(f64::NAN),
         },
     }];
 
-    let err = analysis_run_thermal_op(
+    let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("thermal run should reject non-finite thermal boundary values");
@@ -9377,865 +5423,53 @@ fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
 }
 
 #[test]
-fn analysis_run_cht_rejects_models_without_cfd_step() {
+fn analysis_run_cht_requires_an_authored_study() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_1".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 50.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-    let err = analysis_run_cht_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should fail for missing cfd step");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_MODEL");
-}
-
-#[test]
-fn analysis_run_cht_rejects_models_without_thermal_step() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "cfd_1".to_string(),
-        kind: AnalysisStepKind::Cfd,
-    }];
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
-    let err = analysis_run_cht_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should fail for missing thermal step");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_MODEL");
-}
-
-#[test]
-fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_cht_model();
-    model
-        .cfd
-        .as_mut()
-        .expect("cht model should include cfd")
-        .dynamic_viscosity_pa_s = 0.0;
-    let err = analysis_run_cht_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should fail for invalid cfd domain values");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_OPTIONS");
-}
-
-#[test]
-fn analysis_run_cht_rejects_moment_loads() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_cht_model();
-    model.loads = vec![sample_moment_load("cht_moment")];
-
-    let err = analysis_run_cht_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should reject structural moment loads");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_LOAD");
-}
-
-#[test]
-fn analysis_run_cht_rejects_contact_interface_mapping() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_cht_model();
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 1.0,
-            max_penetration_ratio: 0.01,
-            friction_coefficient: 0.0,
-        },
-    );
-    let err = analysis_run_cht_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should fail for contact interface mapping");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING");
-}
-
-#[test]
-fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_cht_model();
-    model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
-        interface_id: "cht_channel_slab_interface".to_string(),
-        primary_region_id: "fluid_channel".to_string(),
-        secondary_region_id: "solid_slab".to_string(),
-        kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
-            runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
-                thermal_conductance_w_per_m2k: 750.0,
-                contact_resistance_m2k_per_w: 0.0,
-                relaxation_factor: 0.5,
-            },
-        ),
-    }];
-
-    let envelope = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisChtRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cht run should accept authored conjugate heat-transfer interface");
-
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CHT_INTERFACE_CLOSURE"
-            && diag.message.contains("interface_conductance_w_per_m2k=750")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CHT_COUPLING"
-            && diag.message.contains("authored_interface_count=1")));
-}
-
-#[test]
-fn analysis_run_fsi_rejects_models_without_transient_step() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "cfd_1".to_string(),
-        kind: AnalysisStepKind::Cfd,
-    }];
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
-    let err = analysis_run_fsi_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should fail for missing transient step");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_MODEL");
-}
-
-#[test]
-fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    model
-        .cfd
-        .as_mut()
-        .expect("fsi model should include cfd")
-        .dynamic_viscosity_pa_s = 0.0;
-    let err = analysis_run_fsi_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should fail for invalid cfd domain values");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_OPTIONS");
-}
-
-#[test]
-fn analysis_run_fsi_rejects_moment_loads() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    model.loads = vec![sample_moment_load("fsi_moment")];
-
-    let err = analysis_run_fsi_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should reject structural moment loads");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_LOAD");
-}
-
-#[test]
-fn analysis_run_fsi_rejects_contact_interface_mapping() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 1.0,
-            max_penetration_ratio: 0.01,
-            friction_coefficient: 0.0,
-        },
-    );
-    let err = analysis_run_fsi_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should fail for contact interface mapping");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING");
-}
-
-#[test]
-fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
-        interface_id: "fsi_pipe_plate_interface".to_string(),
-        primary_region_id: "fluid_pipe".to_string(),
-        secondary_region_id: "plate_wall".to_string(),
-        kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
-            runmat_analysis_core::FluidStructureInterfaceModel {
-                normal_stiffness_pa_per_m: 8.0e8,
-                damping_ratio: 0.04,
-                relaxation_factor: 0.5,
-            },
-        ),
-    }];
-
-    let envelope = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisFsiRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("fsi run should accept authored fluid-structure interface");
-
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_FSI_INTERFACE_CLOSURE"
-            && diag
-                .message
-                .contains("interface_stiffness_pa_per_m=800000000")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING"
-            && diag.message.contains("authored_interface_count=1")));
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_models_without_em_step() {
-    let model = sample_model();
-    let err = analysis_run_electromagnetic_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-em-run-missing-step".to_string()), None),
-    )
-    .expect_err("electromagnetic run should fail without electromagnetic step");
-    assert_eq!(err.operation, "fea.run_electromagnetic");
-    assert_eq!(err.op_version, "fea.run_electromagnetic/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP");
-}
-
-fn configure_valid_em_authoring(model: &mut AnalysisModel) {
-    for material in &mut model.materials {
-        if material.electrical.is_none() {
-            material.electrical = Some(MaterialElectricalModel::default());
-        }
+    let mut thermal_only = sample_model();
+    thermal_only.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
+    let mut moment = sample_cht_model();
+    replace_with_moment_excitation(&mut moment, "cht_moment");
+    for model in [sample_cht_model(), thermal_only, moment] {
+        let err = analysis_run_cht_op(&model, OperationContext::new(None, None))
+            .expect_err("the removed reduced CHT endpoint must not fabricate a coupled run");
+        assert_eq!(err.operation, "fea.run_cht");
+        assert_eq!(err.op_version, "fea.run_cht/v1");
+        assert_eq!(err.error_code, "RM.FEA.RUN_CHT.AUTHORED_STUDY_REQUIRED");
     }
-    model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
-    });
-    model.boundary_conditions = vec![
-        BoundaryCondition {
-            bc_id: "em_ground".to_string(),
-            region_id: "em_region".to_string(),
-            kind: BoundaryConditionKind::VectorPotentialGround,
-        },
-        BoundaryCondition {
-            bc_id: "em_insulation".to_string(),
-            region_id: "em_region".to_string(),
-            kind: BoundaryConditionKind::MagneticInsulation,
-        },
-    ];
-    model.loads = vec![LoadCase {
-        load_id: "em_source".to_string(),
-        region_id: "em_region".to_string(),
-        kind: LoadKind::CoilCurrent {
-            current_a: 120.0,
-            phase_rad: 0.0,
-            amplitude_scale: 1.0,
-        },
-    }];
 }
 
 #[test]
-fn analysis_run_electromagnetic_rejects_missing_electrical_material() {
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
-    configure_valid_em_authoring(&mut model);
-    for material in &mut model.materials {
-        material.electrical = None;
-    }
-
-    let err = analysis_run_electromagnetic_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-em-run-missing-material".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject missing electrical material");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_missing_current_source() {
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
-    configure_valid_em_authoring(&mut model);
-    model.loads = vec![LoadCase {
-        load_id: "structural_force".to_string(),
-        region_id: "em_region".to_string(),
-        kind: LoadKind::Force {
-            fx: 1.0,
-            fy: 0.0,
-            fz: 0.0,
-        },
-    }];
-
-    let err = analysis_run_electromagnetic_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-em-run-missing-source".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject missing current source");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_moment_loads() {
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
-    configure_valid_em_authoring(&mut model);
-    model.loads = vec![sample_moment_load("em_moment")];
-
-    let err = analysis_run_electromagnetic_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-em-run-moment-load".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject structural moment loads");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_SOURCE"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_missing_em_boundary() {
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
-    configure_valid_em_authoring(&mut model);
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "structural_fixed".to_string(),
-        region_id: "em_region".to_string(),
-        kind: BoundaryConditionKind::Fixed,
-    }];
-
-    let err = analysis_run_electromagnetic_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-em-run-missing-boundary".to_string()), None),
-    )
-    .expect_err("electromagnetic run should reject missing EM boundary");
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY"
-    );
-}
-
-#[test]
-fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
-    model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 5.8e7,
-        resistive_heating_coefficient: 0.0039,
-        relative_permittivity: 3.2,
-        relative_permeability: 1.8,
-        conductivity_frequency_response: vec![
-            ConductivityFrequencyPoint {
-                frequency_hz: 40.0,
-                conductivity_scale: 1.06,
-                dispersive_loss_scale: Some(0.02),
-                relative_permittivity_scale: Some(1.04),
-                relative_permeability_scale: Some(1.02),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 60.0,
-                conductivity_scale: 1.0,
-                dispersive_loss_scale: Some(0.03),
-                relative_permittivity_scale: Some(1.0),
-                relative_permeability_scale: Some(1.0),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 240.0,
-                conductivity_scale: 0.91,
-                dispersive_loss_scale: Some(0.04),
-                relative_permittivity_scale: Some(0.96),
-                relative_permeability_scale: Some(0.98),
-            },
-        ],
-    });
-    model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
-    });
-    configure_valid_em_authoring(&mut model);
-    let envelope = analysis_run_electromagnetic_op(
-        &model,
-        ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-em-run-static".to_string()), None),
-    )
-    .expect("electromagnetic run should return static EM payload");
-    assert_eq!(envelope.operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.op_version, "fea.run_electromagnetic/v1");
-    assert_ne!(envelope.data.run_status, RunStatus::Rejected);
-    assert_eq!(
-        envelope.data.run.solver_method,
-        "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"
-    );
-    assert!(envelope.data.electromagnetic_results.is_some());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_EM_STATIC"));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_HARMONIC_COUPLING"
-            && diag.message.contains("formulation=edge_curl_curl_harmonic")
-            && diag.message.contains("edge_dof_count=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_MAXWELL_EDGE_TOPOLOGY"
-            && diag.message.contains("incidence_element_count=")
-            && diag.message.contains("incidence_orientation_count=")
-            && diag
-                .message
-                .contains("incidence_operator_pair_coverage_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_FORMULATION"
-            && diag
-                .message
-                .contains("formulation_family=frequency_domain_maxwell")
-            && diag
-                .message
-                .contains("active_formulation=full_wave_harmonic")
-            && diag
-                .message
-                .contains("includes_magnetostatic_curl_curl=true")
-            && diag
-                .message
-                .contains("includes_magnetoquasistatic_eddy_current=true")
-            && diag
-                .message
-                .contains("includes_full_wave_displacement_current=true")
-            && diag.message.contains("formulation_coverage_ratio=1")
-            && diag
-                .message
-                .contains("material_frequency_response_coverage_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_SOURCE_ENERGY"
-            && diag.message.contains("source_region_coverage_ratio=")
-            && diag
-                .message
-                .contains("source_region_energy_consistency_ratio=")
-            && diag.message.contains("energy_imbalance_ratio=")
-            && diag.message.contains("boundary_energy_ratio=")
-    }));
-    let em_cost_diag = envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_COST")
-        .expect("EM cost diagnostic must be present");
-    assert!(em_cost_diag.message.contains("prepared_build_ms="));
-    assert!(em_cost_diag.message.contains("solve_ms="));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_EM_SWEEP"));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_EM_KNOWN_ANSWER"
-            && diag.message.contains("basis=homogeneous_current_line")
-            && diag
-                .message
-                .contains("homogeneous_material_residual_ratio=")
-            && diag
-                .message
-                .contains("source_energy_consistency_residual_ratio=")
-            && diag.message.contains("gauge_anchor_residual_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    let em_payload = envelope
-        .data
-        .electromagnetic_results
-        .as_ref()
-        .expect("electromagnetic payload expected");
-    assert_eq!(em_payload.sweep_frequency_hz.len(), 1);
-    assert_eq!(em_payload.sweep_peak_flux_density.len(), 1);
-    assert_eq!(em_payload.sweep_solve_quality.len(), 1);
-    assert!(em_payload.resonance_peak_frequency_hz.is_some());
-    assert!(em_payload.resonance_peak_flux_density.is_some());
-    assert_eq!(
-        em_payload.vector_potential_real.field_id,
-        FEA_FIELD_EM_VECTOR_POTENTIAL_REAL
-    );
-    assert_eq!(
-        em_payload.vector_potential_imag.field_id,
-        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG
-    );
-    assert_eq!(em_payload.vector_potential_real.shape.len(), 2);
-    assert_eq!(em_payload.vector_potential_real.shape[1], 3);
-    assert_eq!(
-        em_payload.vector_potential_imag.shape,
-        em_payload.vector_potential_real.shape
-    );
-    match &em_payload.vector_potential_real.values {
-        AnalysisFieldValues::HostF64(values) => {
-            assert_eq!(
-                values.len(),
-                em_payload
-                    .vector_potential_real
-                    .shape
-                    .iter()
-                    .product::<usize>()
-            );
-        }
-        AnalysisFieldValues::DeviceRef(_) => {
-            panic!("CPU EM vector potential should be returned as host values")
-        }
-    }
-    assert_eq!(
-        em_payload.magnetic_flux_density_real.field_id,
-        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL
-    );
-    assert_eq!(
-        em_payload.current_density_real.field_id,
-        FEA_FIELD_EM_CURRENT_DENSITY_REAL
-    );
-    assert_eq!(
-        em_payload.electric_field_real.field_id,
-        FEA_FIELD_EM_ELECTRIC_FIELD_REAL
-    );
-    assert_eq!(
-        em_payload.energy_density.field_id,
-        FEA_FIELD_EM_ENERGY_DENSITY
-    );
-    assert_eq!(
-        em_payload.residual_real.field_id,
-        FEA_FIELD_EM_RESIDUAL_REAL
-    );
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("em results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("EM descriptor should be present")
-    };
-    for field_id in [
-        FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-        FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-        FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
-        FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-        FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-        FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
-        FEA_FIELD_EM_POYNTING_VECTOR_REAL,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
-    }
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE).component_count,
-        None
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_ENERGY_DENSITY).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(FEA_FIELD_EM_RESIDUAL_REAL).kind,
-        AnalysisFieldKind::Scalar
-    );
-    let em_diag = envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_STATIC")
-        .expect("EM static diagnostic must be present");
-    assert!(em_diag.message.contains("relative_permittivity_mean="));
-    assert!(em_diag.message.contains("relative_permeability_mean="));
-    assert!(em_diag
-        .message
-        .contains("conductivity_frequency_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("conductivity_frequency_response_coverage_ratio="));
-    assert!(em_diag
-        .message
-        .contains("relative_permittivity_frequency_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("relative_permittivity_frequency_response_coverage_ratio="));
-    assert!(em_diag
-        .message
-        .contains("relative_permeability_frequency_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("relative_permeability_frequency_response_coverage_ratio="));
-    assert!(em_diag.message.contains("dispersive_loss_scale_mean="));
-    assert!(em_diag
-        .message
-        .contains("dispersive_phase_attenuation_mean="));
-    assert!(em_diag
-        .message
-        .contains("dispersive_phase_conductivity_attenuation_ratio="));
-}
-
-#[test]
-fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
-    model.materials[0].electrical = Some(MaterialElectricalModel {
-        reference_temperature_k: 293.15,
-        conductivity_s_per_m: 5.8e7,
-        resistive_heating_coefficient: 0.0039,
-        relative_permittivity: 3.2,
-        relative_permeability: 1.8,
-        conductivity_frequency_response: vec![
-            ConductivityFrequencyPoint {
-                frequency_hz: 40.0,
-                conductivity_scale: 1.06,
-                dispersive_loss_scale: Some(0.02),
-                relative_permittivity_scale: Some(1.04),
-                relative_permeability_scale: Some(1.02),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 60.0,
-                conductivity_scale: 1.0,
-                dispersive_loss_scale: Some(0.03),
-                relative_permittivity_scale: Some(1.0),
-                relative_permeability_scale: Some(1.0),
-            },
-            ConductivityFrequencyPoint {
-                frequency_hz: 240.0,
-                conductivity_scale: 0.91,
-                dispersive_loss_scale: Some(0.04),
-                relative_permittivity_scale: Some(0.96),
-                relative_permeability_scale: Some(0.98),
-            },
-        ],
-    });
-    model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
-    });
-    configure_valid_em_authoring(&mut model);
-    let envelope = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisElectromagneticRunOptions {
-            sweep_enabled: true,
-            sweep_frequency_hz: vec![20.0, 40.0, 60.0, 120.0, 240.0],
-            residual_target: 5.0e-7,
-            harmonic_tolerance: 1.2345e-4,
-            harmonic_max_iterations: 64,
-            ..AnalysisElectromagneticRunOptions::default()
-        },
-        OperationContext::new(Some("trace-em-run-sweep".to_string()), None),
-    )
-    .expect("electromagnetic sweep run should succeed");
-    let payload = envelope
-        .data
-        .electromagnetic_results
-        .as_ref()
-        .expect("electromagnetic payload expected");
-    assert_eq!(payload.sweep_frequency_hz.len(), 5);
-    assert_eq!(payload.sweep_peak_flux_density.len(), 5);
-    assert_eq!(payload.sweep_solve_quality.len(), 5);
-    assert!(payload.resonance_peak_frequency_hz.is_some());
-    assert!(payload.resonance_peak_flux_density.is_some());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .filter(|diag| diag.code == "FEA_EM_SWEEP")
-        .any(|diag| diag.message.contains("sweep_count=5")));
-    let harmonic_diag = envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_EM_HARMONIC_COUPLING")
-        .expect("harmonic coupling diagnostic should be present");
-    assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
-    assert!(harmonic_diag.message.contains("iterations="));
-}
-
-#[test]
-fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
+fn analysis_run_fsi_requires_an_authored_study() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
-    model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
-    });
-    let err = analysis_run_electromagnetic_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisElectromagneticRunOptions {
-            harmonic_max_iterations: 0,
-            ..AnalysisElectromagneticRunOptions::default()
-        },
-        OperationContext::new(
-            Some("trace-em-run-invalid-harmonic-controls".to_string()),
-            None,
-        ),
-    )
-    .expect_err("electromagnetic run should reject zero harmonic_max_iterations");
-    assert_eq!(err.operation, "fea.run_electromagnetic");
-    assert_eq!(err.op_version, "fea.run_electromagnetic/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS");
+    let mut fluid_only = sample_model();
+    fluid_only.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
+    fluid_only.cfd = Some(sample_cfd_domain());
+    let mut moment = sample_fsi_model();
+    replace_with_moment_excitation(&mut moment, "fsi_moment");
+    for model in [sample_fsi_model(), fluid_only, moment] {
+        let err = analysis_run_fsi_op(&model, OperationContext::new(None, None))
+            .expect_err("the removed reduced FSI endpoint must not fabricate a coupled run");
+        assert_eq!(err.operation, "fea.run_fsi");
+        assert_eq!(err.op_version, "fea.run_fsi/v1");
+        assert_eq!(err.error_code, "RM.FEA.RUN_FSI.AUTHORED_STUDY_REQUIRED");
+    }
 }
 
 #[test]
 fn analysis_run_thermal_returns_temperature_payload() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_1".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 60.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
-                temperature_delta_k: 70.0,
-            }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.5,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
-        },
-    );
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("thermal-payload");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
     let run = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisThermalRunOptions {
-            step_count: 6,
+            snapshot_count: 6,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisThermalRunOptions::default()
         },
         OperationContext::new(None, None),
@@ -10246,26 +5480,23 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(run.op_version, "fea.run_thermal/v1");
     assert!(run.data.thermal_results.is_some());
     assert!(run.data.transient_results.is_none());
-    assert!(run.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_THERMAL_HEAT_BALANCE"
-            && diag.message.contains("input_heat=")
-            && diag.message.contains("boundary_heat=")
-            && diag.message.contains("stored_energy=")
-            && diag.message.contains("numerical_loss=")
-            && diag.message.contains("heat_balance_residual_ratio=")
-    }));
+    assert!(!run
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY"));
     assert!(run.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_THERMAL_FIELD_RECOVERY"
-            && diag.message.contains("recovery_dimensions=")
-            && diag.message.contains("boundary_face_count=6")
+            && diag.message.contains("basis=physical_quadrature")
+            && diag.message.contains("boundary_face_count=4")
     }));
-    assert!(run.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_THERMAL_KNOWN_ANSWER"
-            && diag.message.contains("slab_linear_profile_rms_ratio=")
-            && diag.message.contains("slab_monotonic_edge_fraction=")
-            && diag.message.contains("lumped_response_error_ratio=")
-            && diag.message.contains("source_response_sign_alignment=")
-    }));
+    assert!(!run
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_THERMAL_KNOWN_ANSWER"));
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery::default(),
@@ -10281,8 +5512,10 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(thermal.temperature_snapshots.len(), 6);
     assert_eq!(thermal.temperature_gradient_snapshots.len(), 6);
     assert_eq!(thermal.heat_flux_snapshots.len(), 6);
-    assert_eq!(thermal.heat_source_snapshots.len(), 6);
-    assert_eq!(thermal.boundary_heat_flux_snapshots.len(), 6);
+    assert_eq!(thermal.energy_storage_rate_snapshots.len(), 6);
+    let initial_state = &thermal.initial_state;
+    assert_eq!(initial_state.procedure_step_id, "thermal_1");
+    assert_eq!(initial_state.reference_node_count, 4);
     assert_eq!(thermal.temperature_gradient_snapshots[0].shape.len(), 2);
     assert_eq!(thermal.temperature_gradient_snapshots[0].shape[1], 3);
     assert_eq!(
@@ -10290,10 +5523,9 @@ fn analysis_run_thermal_returns_temperature_payload() {
         thermal.temperature_gradient_snapshots[0].shape
     );
     assert_eq!(
-        thermal.heat_source_snapshots[0].shape,
+        thermal.energy_storage_rate_snapshots[0].shape,
         vec![thermal.temperature_gradient_snapshots[0].shape[0]]
     );
-    assert_eq!(thermal.boundary_heat_flux_snapshots[0].shape, vec![6]);
     let field_ids = results
         .data
         .field_descriptors
@@ -10302,8 +5534,7 @@ fn analysis_run_thermal_returns_temperature_payload() {
         .collect::<Vec<_>>();
     assert!(field_ids.contains(&fea_thermal_temperature_gradient_field_id(0).as_str()));
     assert!(field_ids.contains(&fea_thermal_heat_flux_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_thermal_heat_source_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_thermal_boundary_heat_flux_field_id(0).as_str()));
+    assert!(field_ids.contains(&fea_thermal_energy_storage_rate_field_id(0).as_str()));
     let descriptor = |field_id: &str| {
         results
             .data
@@ -10320,103 +5551,141 @@ fn analysis_run_thermal_returns_temperature_payload() {
         descriptor(&fea_thermal_heat_flux_field_id(0)).component_count,
         Some(3)
     );
-    assert_eq!(
-        descriptor(&fea_thermal_boundary_heat_flux_field_id(0)).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(&fea_thermal_boundary_heat_flux_field_id(0)).component_count,
-        None
-    );
     assert_eq!(results.data.summary.snapshot_count, 6);
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
+fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
+    let _guard = analysis_test_guard();
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("thermal-gpu-provenance");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::thermal_transient(
+        "thermal_execution_provenance",
+    )];
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+
+    let run = analysis_run_thermal_with_options_op(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisThermalRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("thermal run should complete");
+
+    assert_eq!(run.data.provenance.requested_backend, ComputeBackend::Gpu);
+    assert_eq!(run.data.provenance.execution_backend, ExecutionBackend::Cpu);
+    assert_eq!(run.data.run.execution_backend, ExecutionBackend::Cpu);
+    assert_eq!(
+        run.data.provenance.solver_backend,
+        LinearAlgebraBackendKind::CpuReference
+    );
+    assert!(run
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(FallbackEvent::is_solver_backend_fallback));
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
 fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "thermal_1".to_string(),
-        kind: AnalysisStepKind::Thermal,
-    }];
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let (mesh_root, mesh_path) =
+        write_ready_analysis_mesh_artifact("thermal-constitutive-spread", &mesh);
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
     model.materials.push(MaterialModel {
+        fluid: None,
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
-        mechanical: MaterialMechanicalModel {
-            youngs_modulus_pa: 5.0e9,
-            poisson_ratio: 0.33,
-            density_kg_per_m3: 1800.0,
-        },
-        thermal: MaterialThermalModel {
-            reference_temperature_k: 293.15,
-            conductivity_w_per_mk: 1200.0,
-            specific_heat_j_per_kgk: 160.0,
-            ..MaterialThermalModel::default()
-        },
+        provenance: runmat_analysis_core::MaterialProvenance::Authored,
+        mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(1800.0)),
+        elasticity: Some(MaterialElasticityModel::IsotropicLinear(
+            MaterialMechanicalModel {
+                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(5.0e9),
+                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.33),
+            },
+        )),
+        damping: None,
+        thermal: Some(MaterialThermalModel {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(-2.5e-4),
+            conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(1200.0),
+            specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(160.0),
+            expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(1.2e-5),
+        }),
         acoustic: None,
         electrical: None,
         plastic: None,
     });
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 80.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
-                    region_id: "tip".to_string(),
-                    temperature_delta_k: 95.0,
-                },
-                ThermoRegionTemperatureDelta {
-                    region_id: "root".to_string(),
-                    temperature_delta_k: 60.0,
-                },
-            ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.3,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
-        },
-    );
+    model.material_assignments = [
+        ("mid_aluminum", "mat_steel"),
+        ("polymer_segment", "mat_poly_high_k"),
+        ("tip_steel", "mat_steel"),
+    ]
+    .into_iter()
+    .map(|(region, material)| MaterialAssignment {
+        target: runmat_analysis_core::PropertyRegionTarget::solid(
+            runmat_meshing_core::fixtures::fixture_region(region),
+        ),
+        expected_material_id: material.into(),
+        assigned_material_id: material.into(),
+        confidence: EvidenceConfidence::Verified,
+    })
+    .collect();
 
     let run = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisThermalRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            step_count: 8,
+            snapshot_count: 8,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisThermalRunOptions::default()
         },
         OperationContext::new(None, None),
     )
     .expect("thermal run should execute");
 
-    assert!(!run.data.publishable);
+    assert_eq!(mesh.topology.volume_elements.len(), 3);
+    let conductivity_spread = diagnostic_metric(
+        &run.data.run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "conductivity_spread_ratio",
+    )
+    .expect("active heterogeneous materials should report conductivity spread");
+    assert!((conductivity_spread - 1200.0 / 45.0).abs() < 1.0e-12);
+    assert!(!run.data.numerically_acceptable);
     assert_eq!(run.data.run_status, RunStatus::Degraded);
     assert!(run
         .data
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ThermalConstitutiveSpreadHigh));
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
 fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let err = analysis_run_nonlinear_op(
+    let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("nonlinear run should reject models without nonlinear step");
@@ -10426,594 +5695,163 @@ fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
 }
 
 #[test]
-fn analysis_run_nonlinear_returns_native_nonlinear_result() {
+fn analysis_run_nonlinear_returns_native_nonlinear_result_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    let envelope = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            increment_count: 16,
-            ..AnalysisNonlinearRunOptions::balanced()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should succeed");
-
-    assert_eq!(envelope.operation, "fea.run_nonlinear");
-    assert_eq!(envelope.op_version, "fea.run_nonlinear/v1");
-    let nonlinear = envelope
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear payload should exist");
-    assert_eq!(nonlinear.method, NonlinearMethod::IncrementalNewtonRaphson);
-    assert_eq!(nonlinear.load_factors.len(), 16);
-    assert_eq!(nonlinear.load_factors.len(), nonlinear.residual_norms.len());
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
     assert_eq!(
-        nonlinear.residual_norms.len(),
-        nonlinear.increment_norms.len()
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
     );
-    assert_eq!(
-        nonlinear.residual_norms.len(),
-        nonlinear.iteration_counts.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.von_mises_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.plastic_strain_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.equivalent_plastic_strain_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.contact_pressure_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.contact_gap_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.load_factor_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.residual_norm_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.von_mises_snapshots[0].field_id,
-        fea_nonlinear_von_mises_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.plastic_strain_snapshots[0].field_id,
-        fea_nonlinear_plastic_strain_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.equivalent_plastic_strain_snapshots[0].field_id,
-        fea_nonlinear_equivalent_plastic_strain_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.contact_pressure_snapshots[0].field_id,
-        fea_nonlinear_contact_pressure_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.contact_gap_snapshots[0].field_id,
-        fea_nonlinear_contact_gap_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.load_factor_snapshots[0].field_id,
-        fea_nonlinear_load_factor_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.residual_norm_snapshots[0].field_id,
-        fea_nonlinear_residual_norm_field_id(0)
-    );
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("nonlinear descriptor should be present")
-    };
-    for field_id in [
-        fea_nonlinear_von_mises_field_id(0),
-        fea_nonlinear_equivalent_plastic_strain_field_id(0),
-        fea_nonlinear_contact_pressure_field_id(0),
-        fea_nonlinear_contact_gap_field_id(0),
-        fea_nonlinear_load_factor_field_id(0),
-        fea_nonlinear_residual_norm_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let plastic_strain_descriptor = descriptor(&fea_nonlinear_plastic_strain_field_id(0));
-    assert_eq!(plastic_strain_descriptor.kind, AnalysisFieldKind::Tensor);
-    assert_eq!(plastic_strain_descriptor.component_count, Some(6));
-    assert!(nonlinear.tangent_rebuild_count > 0);
-    assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
-    assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_run_nonlinear_exposes_beam_rotation_snapshots() {
+fn analysis_run_nonlinear_exposes_beam_rotation_snapshots_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
     );
-    model.steps = vec![AnalysisStep {
-        step_id: "beam_moment_nonlinear".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-
-    let envelope = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            increment_count: 8,
-            ..AnalysisNonlinearRunOptions::balanced()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("beam nonlinear run should succeed");
-    let nonlinear = envelope
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear payload should exist");
-
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
     assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.rotation_snapshots.len()
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
     );
-    assert_eq!(
-        nonlinear.rotation_snapshots[0].field_id,
-        fea_nonlinear_rotation_field_id(0)
-    );
-    assert_eq!(nonlinear.rotation_snapshots[0].shape, vec![2, 3]);
-
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear beam results should be queryable");
-    let descriptor = results
-        .data
-        .field_descriptors
-        .iter()
-        .find(|descriptor| descriptor.field_id == fea_nonlinear_rotation_field_id(0))
-        .expect("nonlinear rotation descriptor should be present");
-    assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(descriptor.component_count, Some(3));
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
+fn nonlinear_strict_iteration_controls_do_not_admit_an_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-
-    let envelope = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Strict,
             max_newton_iters: 1,
-            line_search: false,
             ..AnalysisNonlinearRunOptions::balanced()
         },
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should produce envelope");
-
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_missing_prep_artifact_reference() {
+fn nonlinear_quality_policy_cannot_override_formulation_admission() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-
-    let error = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some("prep:missing".to_string()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("missing prep artifact reference should fail");
-    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.NOT_FOUND");
-}
-
-#[test]
-fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
-    let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    let geometry = sample_step_like_geometry_asset();
-    let prep = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep should succeed");
-
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-
-    let error = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("mismatched prep artifact reference should fail");
-    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.MISMATCH");
-}
-
-#[test]
-fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists() {
-    let _guard = analysis_test_guard();
-    let _prep_guard = crate::geometry::prep_artifact_test_guard();
-    crate::geometry::reset_prep_artifact_store_for_tests();
-    crate::geometry::configure_prep_artifacts(crate::geometry::GeometryPrepArtifactConfig {
-        require_latest_revision: Some(true),
-        ..crate::geometry::GeometryPrepArtifactConfig::default()
-    })
-    .expect("prep artifact config should be configurable");
-
-    let mut geometry_v1 = sample_step_like_geometry_asset();
-    geometry_v1.revision = 1;
-    let mut geometry_v2 = geometry_v1.clone();
-    geometry_v2.revision = 2;
-
-    let prep_v1 = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry_v1,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep v1 should succeed");
-    let _prep_v2 = crate::geometry::geometry_prep_for_analysis_op(
-        &geometry_v2,
-        crate::geometry::GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep v2 should succeed");
-
-    let created = analysis_create_model_op(
-        &geometry_v1,
-        AnalysisCreateModelIntentSpec {
-            model_id: "stale_prep_model".to_string(),
-            profile: AnalysisCreateModelProfile::NonlinearStructural,
-            prep_context: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("create model should succeed");
-
-    let error = analysis_run_nonlinear_with_options_op(
-        &created.data,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect_err("stale prep artifact should fail");
-    assert_eq!(error.error_code, "RM.FEA.RUN_PREP.STALE");
-
-    let health = crate::geometry::geometry_prep_artifact_health_op(
-        crate::geometry::GeometryPrepArtifactHealthQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("prep health should be queryable");
-    assert!(health.data.metrics.stale_reject_count >= 1);
-
-    crate::geometry::reset_prep_artifact_store_for_tests();
-}
-
-#[test]
-fn nonlinear_quality_policy_diverges_for_increment_failures() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-
-    let run_with_policy = |quality_policy| {
-        analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    for quality_policy in [
+        QualityPolicy::Strict,
+        QualityPolicy::Balanced,
+        QualityPolicy::Exploratory,
+    ] {
+        let error = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
             AnalysisNonlinearRunOptions {
                 quality_policy,
-                max_newton_iters: 1,
-                line_search: false,
-                max_line_search_backtracks: 0,
                 ..AnalysisNonlinearRunOptions::balanced()
             },
             OperationContext::new(None, None),
         )
-        .expect("nonlinear run should return envelope")
-    };
-
-    let exploratory = run_with_policy(QualityPolicy::Exploratory);
-    let balanced = run_with_policy(QualityPolicy::Balanced);
-    let strict = run_with_policy(QualityPolicy::Strict);
-
-    assert!(exploratory.data.publishable);
-    assert_eq!(exploratory.data.run_status, RunStatus::Publishable);
-    assert!(balanced
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
-    assert!(!balanced.data.publishable);
-    assert_eq!(balanced.data.run_status, RunStatus::Degraded);
-
-    assert!(strict
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
-    assert!(!strict.data.publishable);
-    assert_eq!(strict.data.run_status, RunStatus::Degraded);
-}
-
-#[test]
-fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    for material in &mut model.materials {
-        material.thermal.expansion_coefficient_per_k = 1.0e-3;
-    }
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.0e-3,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear run should return envelope");
-
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalNonlinearStress));
-
-    let nonlinear = run
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear results should be present");
-    assert!(nonlinear.thermo_mechanical_temperature_snapshots.is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_thermal_strain_snapshots
-        .is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_thermal_stress_snapshots
-        .is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_displacement_snapshots
-        .is_empty());
-    assert!(nonlinear.thermo_mechanical_von_mises_snapshots.is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_coupling_residual_snapshots
-        .is_empty());
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("thermo-mechanical nonlinear results should be queryable");
-    for field_id in [
-        fea_thermo_mechanical_temperature_field_id(0),
-        fea_thermo_mechanical_von_mises_field_id(0),
-        fea_thermo_mechanical_coupling_residual_field_id(0),
-        fea_thermo_mechanical_displacement_field_id(0),
-        fea_thermo_mechanical_thermal_strain_field_id(0),
-        fea_thermo_mechanical_thermal_stress_field_id(0),
-    ] {
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
+        .expect_err(
+            "an unsupported envelope must not publish nonlinear snapshots or quality metrics",
+        );
+        assert_eq!(
+            error.error_code,
+            "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+        );
+        assert!(!error.retryable);
     }
 }
 
 #[test]
-fn nonlinear_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
+fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high_rejects_unsupported_envelope(
+) {
     let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_nonlinear_with_options_op(
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "unsupported_coupled",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Nonlinear,
+    )];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should return envelope");
-
-    assert!(run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Publishable);
-    assert!(!run.data.quality_reasons.iter().any(|reason| {
-        reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
-            || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
-    }));
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_results_query_can_exclude_nonlinear_payload() {
+fn nonlinear_balanced_does_not_report_thermo_stress_below_severity_threshold_rejects_unsupported_envelope(
+) {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    let run = analysis_run_nonlinear_op(
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "unsupported_coupled",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Nonlinear,
+    )];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should succeed");
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
+    );
+    assert!(!error.retryable);
+}
 
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery {
-            include_fields: Vec::new(),
-            include_field_values: true,
-
-            include_diagnostics: true,
-            diagnostic_codes: Vec::new(),
-            include_modal_results: true,
-            mode_indices: Vec::new(),
-            include_transient_results: true,
-            transient_snapshot_indices: Vec::new(),
-            include_nonlinear_results: false,
-            include_electromagnetic_results: false,
-        },
+#[test]
+fn analysis_results_query_can_exclude_nonlinear_payload_rejects_unsupported_envelope() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("results should succeed");
-
-    assert!(results.data.nonlinear_results.is_none());
-    assert!(results.data.summary.increment_count > 0);
-    assert!(results.data.summary.failed_increment_count.is_some());
-    assert!(results.data.summary.max_nonlinear_residual_norm.is_some());
-    assert!(results.data.summary.max_nonlinear_increment_norm.is_some());
-    assert!(results.data.summary.max_nonlinear_iteration_count.is_some());
-    assert!(results.data.summary.final_increment_converged.is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_line_search_backtracks
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_max_backtracks_per_increment
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_tangent_rebuild_count
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_iteration_spike_count
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_convergence_stall_count
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_backtrack_burst_count
-        .is_some());
-    let field_ids = results
-        .data
-        .field_descriptors
-        .iter()
-        .map(|descriptor| descriptor.field_id.as_str())
-        .collect::<Vec<_>>();
-    assert!(field_ids.contains(&fea_nonlinear_von_mises_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_plastic_strain_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_equivalent_plastic_strain_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_contact_pressure_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_contact_gap_field_id(0).as_str()));
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -11048,24 +5886,31 @@ fn nonlinear_results_deserialize_with_missing_new_fields() {
 fn analysis_run_transient_returns_native_transient_result() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
-    let envelope = analysis_run_transient_op(
+    let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("transient run should return envelope");
 
     assert_eq!(envelope.operation, "fea.run_transient");
     assert_eq!(envelope.op_version, "fea.run_transient/v1");
-    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
-    assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope.data.publishable);
+    assert_eq!(
+        envelope.data.run.solver_method,
+        SolverMethod::NewmarkAverageAccelerationPcg
+    );
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        SolverMethod::NewmarkAverageAccelerationPcg
+    );
+    assert_eq!(envelope.data.provenance.precision_mode, "fp64");
+    assert_eq!(envelope.data.run_status, RunStatus::Completed);
+    assert!(envelope.data.numerically_acceptable);
     assert!(envelope
         .data
         .run
@@ -11079,7 +5924,7 @@ fn analysis_run_transient_returns_native_transient_result() {
         .expect("transient payload should exist");
     assert_eq!(
         transient.integration_method,
-        TransientIntegrationMethod::ImplicitEuler
+        TransientIntegrationMethod::NewmarkAverageAcceleration
     );
     assert!(!transient.time_points_s.is_empty());
     assert_eq!(
@@ -11094,10 +5939,10 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.time_points_s.len(),
         transient.acceleration_snapshots.len()
     );
-    assert_eq!(
-        transient.time_points_s.len(),
-        transient.von_mises_snapshots.len()
-    );
+    assert!(transient.strain_snapshots.is_empty());
+    assert!(transient.stress_snapshots.is_empty());
+    assert!(transient.strain_energy_density_snapshots.is_empty());
+    assert!(transient.von_mises_snapshots.is_empty());
     assert_eq!(
         transient.time_points_s.len(),
         transient.kinetic_energy_snapshots.len()
@@ -11111,16 +5956,40 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.residual_norm_snapshots.len()
     );
     assert_eq!(
+        transient.time_points_s.len(),
+        transient.reaction_force_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.external_work_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.support_work_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.damping_dissipation_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.energy_balance_residual_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.relative_energy_balance_error_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.dynamic_balance_snapshots.len()
+    );
+    assert_eq!(
         transient.velocity_snapshots[1].field_id,
         fea_transient_velocity_field_id(1)
     );
     assert_eq!(
         transient.acceleration_snapshots[1].field_id,
         fea_transient_acceleration_field_id(1)
-    );
-    assert_eq!(
-        transient.von_mises_snapshots[1].field_id,
-        fea_transient_von_mises_field_id(1)
     );
     assert_eq!(
         transient.kinetic_energy_snapshots[1].field_id,
@@ -11133,6 +6002,10 @@ fn analysis_run_transient_returns_native_transient_result() {
     assert_eq!(
         transient.residual_norm_snapshots[1].field_id,
         fea_transient_residual_norm_field_id(1)
+    );
+    assert_eq!(
+        transient.reaction_force_snapshots[1].field_id,
+        fea_transient_reaction_force_field_id(1)
     );
     let results = analysis_results_op(
         &envelope.data,
@@ -11151,20 +6024,25 @@ fn analysis_run_transient_returns_native_transient_result() {
     for field_id in [
         fea_transient_velocity_field_id(1),
         fea_transient_acceleration_field_id(1),
+        fea_transient_reaction_force_field_id(1),
     ] {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
         assert_eq!(descriptor.component_count, Some(3));
     }
     for field_id in [
-        fea_transient_von_mises_field_id(1),
         fea_transient_kinetic_energy_field_id(1),
         fea_transient_strain_energy_field_id(1),
         fea_transient_residual_norm_field_id(1),
+        fea_transient_external_work_field_id(1),
+        fea_transient_support_work_field_id(1),
+        fea_transient_damping_dissipation_field_id(1),
+        fea_transient_energy_balance_residual_field_id(1),
+        fea_transient_relative_energy_balance_error_field_id(1),
     ] {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
+        assert_eq!(descriptor.component_count, Some(1));
     }
 }
 
@@ -11174,14 +6052,14 @@ fn analysis_run_transient_exposes_beam_rotational_snapshots() {
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
     );
-    model.steps = vec![AnalysisStep {
-        step_id: "beam_moment_transient".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "beam_moment_transient".to_string(),
+    )];
 
-    let envelope = analysis_run_transient_op(
+    let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("beam transient run should return envelope");
@@ -11239,804 +6117,160 @@ fn analysis_run_transient_exposes_beam_rotational_snapshots() {
 }
 
 #[test]
-fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
+fn analysis_run_cfd_rejects_vector_boundaries_without_fabricated_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.boundary_conditions = sample_cfd_boundary_conditions(4.25);
-    model
-        .boundary_conditions
-        .retain(|boundary| boundary.bc_id != "bc_cfd_wall_lower");
-    if let Some(wall) = model
-        .boundary_conditions
-        .iter_mut()
-        .find(|boundary| boundary.bc_id == "bc_cfd_wall_upper")
-    {
-        wall.kind = BoundaryConditionKind::CfdSlipWall;
-    }
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-
-    let envelope = analysis_run_cfd_with_options_op(
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
+    model.boundaries.clear();
+    model.constraints = sample_cfd_constraints([4.25, 0.0, 0.0]);
+    model.cfd = Some(sample_cfd_domain());
+    let runmat_analysis_core::AnalysisConstraint::Fluid(inlet) = &model.constraints[0] else {
+        panic!("explicit vector inlet fixture");
+    };
+    assert!(matches!(&inlet.kind,
+        runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+            value: runmat_analysis_core::PrescribedValue::Constant(velocity), ..
+        } if velocity.map(|component| component.canonical_value()) == [4.25, 0.0, 0.0]
+    ));
+    let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisCfdRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
-        },
+        AnalysisCfdRunOptions::default(),
         OperationContext::new(None, None),
     )
-    .expect("cfd run should return envelope");
-
-    assert_eq!(envelope.operation, "fea.run_cfd");
-    assert_eq!(envelope.op_version, "fea.run_cfd/v1");
-    assert_eq!(
-        envelope.data.run.solver_method,
-        "cfd_velocity_pressure_finite_volume"
-    );
-    assert_eq!(
-        envelope.data.provenance.solver_method,
-        "cfd_velocity_pressure_finite_volume"
-    );
-    assert!(envelope.data.transient_results.is_none());
-    let velocity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_VELOCITY)
-        .expect("cfd velocity field should be present");
-    let pressure = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_PRESSURE)
-        .expect("cfd pressure field should be present");
-    let vorticity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_VORTICITY)
-        .expect("cfd vorticity field should be present");
-    let wall_shear = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_WALL_SHEAR_STRESS)
-        .expect("cfd wall-shear field should be present");
-    assert_eq!(velocity.shape.len(), 2);
-    assert_eq!(velocity.shape[1], 3);
-    assert_eq!(pressure.shape, vec![velocity.shape[0]]);
-    assert_eq!(vorticity.shape, velocity.shape);
-    assert_eq!(wall_shear.shape, vec![1, 3]);
-    assert_ne!(wall_shear.shape[0], velocity.shape[0]);
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"
-            && diag.message.contains("inlet_velocity=4.25")
-            && diag.message.contains("reynolds_number=")
-            && diag.message.contains("solve_family=steady_state")
-            && diag.message.contains("topology_basis=implicit_channel")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_RESIDUAL"
-            && diag.message.contains("max_momentum_residual=")
-            && diag.message.contains("max_continuity_residual=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag
-                .message
-                .contains("basis=finite_volume_velocity_pressure")
-            && diag.message.contains("topology_basis=implicit_channel")
-            && diag
-                .message
-                .contains("topology_geometry_source=implicit_channel")
-            && diag.message.contains("domain_length_m=")
-            && diag.message.contains("face_area_m2=")
-            && diag.message.contains("control_volume_volume_m3=")
-            && diag.message.contains("nominal_mass_flow_rate_kg_per_s=")
-            && diag.message.contains("courant_number=")
-            && diag.message.contains("mass_balance_residual=")
-            && diag.message.contains("pressure_drop_pa=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_BOUNDARY_CONDITIONS"
-            && diag.message.contains("boundary_source=authored")
-            && diag.message.contains("authored_boundary_count=3")
-            && diag.message.contains("inlet_boundary_count=1")
-            && diag.message.contains("outlet_boundary_count=1")
-            && diag.message.contains("wall_boundary_count=1")
-            && diag.message.contains("no_slip_wall_boundary_count=0")
-            && diag.message.contains("slip_wall_boundary_count=1")
-            && diag.message.contains("boundary_coverage_ratio=1")
-            && diag.message.contains("nominal_inlet_velocity_m_per_s=4.25")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_PRESSURE_CORRECTION"
-            && diag.message.contains("iteration_count=")
-            && diag.message.contains("max_linear_iters=64")
-            && diag.message.contains("tolerance=0.00000001")
-            && diag.message.contains("pressure_correction_residual_ratio=")
-            && diag.message.contains("velocity_correction_residual_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_TRANSIENT_EVOLUTION"
-            && diag.message.contains("solve_family=steady_state")
-            && diag.message.contains("transient_scale_variation=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_KNOWN_ANSWER"
-            && diag.message.contains("pressure_drop_balance_ratio=")
-            && diag.message.contains("mass_flux_uniformity_ratio=")
-            && diag.message.contains("pressure_monotonic_cell_fraction=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("cfd results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("CFD descriptor should be present")
-    };
-    for field_id in [
-        FEA_FIELD_CFD_VELOCITY,
-        FEA_FIELD_CFD_VORTICITY,
-        FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
-    }
-    for field_id in [
-        FEA_FIELD_CFD_PRESSURE,
-        FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
-        FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
-        FEA_FIELD_CFD_REYNOLDS_NUMBER,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
+    .expect_err("reduced channel execution cannot publish an exact vector CFD solution");
+    assert_eq!(err.operation, "fea.run_cfd");
+    assert_eq!(err.op_version, "fea.run_cfd/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
+    assert!(err
+        .message
+        .contains("canonical finite-volume execution requires an authored steady fluid study"));
 }
 
 #[test]
-fn analysis_run_cfd_uses_prep_control_volume_topology() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.boundary_conditions = sample_cfd_boundary_conditions(3.0);
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-
-    let run = solve_cfd_finite_volume_run(
-        &model,
-        model.cfd.as_ref().expect("cfd domain should exist"),
-        ComputeBackend::Cpu,
-        &AnalysisCfdRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 2,
-            max_linear_iters: 32,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            prep_context: Some(sample_analysis_run_prep_context()),
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
-        },
-        Some(&sample_analysis_run_prep_context()),
+fn canonical_cfd_wire_options_reject_channel_controls_and_nonfluid_procedures() {
+    let options = AnalysisCfdRunOptions::default();
+    let encoded = serde_json::to_value(&options).unwrap();
+    assert_eq!(
+        serde_json::from_value::<AnalysisCfdRunOptions>(encoded.clone()).unwrap(),
+        options
     );
+    for removed in [
+        "sample_count",
+        "max_linear_iters",
+        "tolerance",
+        "residual_warn_threshold",
+        "solver_mesh_artifact_path",
+    ] {
+        let mut invalid = encoded.clone();
+        invalid[removed] = serde_json::json!(1);
+        assert!(serde_json::from_value::<AnalysisCfdRunOptions>(invalid).is_err());
+    }
+    let mut step = ProcedureStep::fluid_static("flow");
+    assert!(AnalysisSolverOptions::defaults_for(&step).is_ok());
+    step.procedure = AnalysisProcedure::TransientResponse;
+    assert!(AnalysisSolverOptions::defaults_for(&step).is_ok());
+    assert!(AnalysisSolverOptions::IncompressibleFlow(options.clone()).supports(&step));
+    let structural = ProcedureStep::structural_modal("not-fluid");
+    assert!(!AnalysisSolverOptions::IncompressibleFlow(options).supports(&structural));
+}
 
-    let velocity = run
-        .field(FEA_FIELD_CFD_VELOCITY)
-        .expect("cfd velocity field should be present");
-    assert_eq!(velocity.shape, vec![15, 3]);
-    assert!(run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag
-                .message
-                .contains("topology_basis=prep_control_volume_connectivity")
-            && diag
-                .message
-                .contains("topology_geometry_source=prep_element_geometry")
-            && diag.message.contains("control_volume_count=15")
-            && diag.message.contains("control_volume_face_count=19")
-            && diag
-                .message
-                .contains("control_volume_internal_face_count=11")
-            && diag
-                .message
-                .contains("control_volume_boundary_face_count=8")
-            && diag
-                .message
-                .contains("control_volume_connectivity_coverage_ratio=1")
-            && diag.message.contains("domain_length_m=2.4")
-            && diag.message.contains("face_area_m2=0.04")
-            && diag.message.contains("face_area_m2=")
-            && diag.message.contains("control_volume_volume_m3=")
-            && diag.message.contains("courant_number=")
-            && diag.message.contains("active_dimension_count=3")
-            && diag.message.contains("element_geometry_node_count=4")
-            && diag.message.contains("element_geometry_edge_count=5")
-            && diag.message.contains("element_geometry_coverage_ratio=1")
-            && diag
-                .message
-                .contains("element_topology_sample_element_count=2")
-            && diag
-                .message
-                .contains("element_topology_sample_edge_count=5")
-    }));
+#[test]
+fn analysis_run_cfd_mesh_counts_do_not_qualify_a_reduced_vector_solve() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cfd-solver-mesh");
+    // Independently verify the actual source artifact's topology. Aggregate source counts
+    // are not evidence that a conservative pressure-velocity operator was assembled.
+    let mesh = SolverMeshArtifact::canonical_decode(&fs::read(&mesh_path).unwrap()).unwrap();
+    let source = CfdDomainTopology::from_solver_mesh(&mesh);
+    assert_eq!(source.control_volume_count, 1);
+    assert_eq!(source.control_volume_boundary_face_count, 4);
+    assert_eq!(source.control_volume_internal_face_count, 0);
+    let mut model = sample_model();
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
+    model.boundaries.clear();
+    model.constraints = sample_cfd_constraints([4.25, 0.0, 0.0]);
+    model.cfd = Some(sample_cfd_domain());
+    let err = analysis_run_cfd_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisCfdRunOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .expect_err("having a mesh must not turn reduced channel physics into canonical CFD");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
+    assert!(err
+        .message
+        .contains("canonical finite-volume execution requires an authored steady fluid study"));
+    let _ = fs::remove_dir_all(mesh_root);
+}
+
+#[test]
+fn canonical_boundary_faces_define_complete_tetrahedral_interface_connectivity() {
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let topology = CfdDomainTopology::from_solver_mesh(&mesh);
+
+    let (edges, mesh_coverage) =
+        runmat_analysis_fea::physics::cfd::interface_graph_edges(&topology, 4);
+
+    assert_eq!(edges.len(), 6);
+    assert_eq!(mesh_coverage, 1.0);
+    assert!(edges.contains(&(0, 1)));
+    assert!(edges.contains(&(2, 3)));
 }
 
 #[test]
 fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps[0].kind = AnalysisStepKind::Cfd;
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
-    model.boundary_conditions = vec![BoundaryCondition {
-        bc_id: "bc_cfd_inlet_only".to_string(),
-        region_id: "fluid_inlet".to_string(),
-        kind: BoundaryConditionKind::CfdInletVelocity {
-            velocity_m_per_s: 4.25,
+    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
+    model.cfd = Some(sample_cfd_domain());
+    model.boundaries.clear();
+    model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Fluid(
+        runmat_analysis_core::FluidConstraint {
+            constraint_id: "bc_cfd_inlet_only".to_string(),
+            kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                target: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_inlet"),
+                ),
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    [4.25, -1.0, 0.0].map(runmat_analysis_core::Velocity::new),
+                ),
+            },
         },
-    }];
+    )];
 
-    let err = analysis_run_cfd_op(
+    let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect_err("partial authored cfd boundaries should fail validation");
 
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS");
-}
-
-#[test]
-fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
-    let _guard = analysis_test_guard();
-    let model = sample_cht_model();
-
-    let envelope = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisChtRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cht run should return envelope");
-
-    assert_eq!(envelope.operation, "fea.run_cht");
-    assert_eq!(envelope.op_version, "fea.run_cht/v1");
-    assert_eq!(envelope.data.run.solver_method, "cht_conjugate_projection");
-    assert!(envelope.data.transient_results.is_none());
-    assert!(envelope.data.thermal_results.is_some());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"
-            && diag.message.contains("reynolds_number=")
-            && diag.message.contains("topology_basis=implicit_channel")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag.message.contains("topology_basis=implicit_channel")
-            && diag.message.contains("control_volume_count=")
-            && diag.message.contains("domain_length_m=")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CHT_COUPLING"
-            && diag.message.contains("applied_temperature_delta_k=60")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CHT_INTERFACE_CLOSURE"
-            && diag.message.contains("interface_face_count=")
-            && diag.message.contains("max_temperature_jump_k=")
-            && diag.message.contains("max_energy_residual=")
-            && diag.message.contains("heat_flux_balance_ratio=")
-            && diag.message.contains("thermal_transport_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_temperature_continuity_ratio=")
-            && diag.message.contains("max_advection_temperature_shift_k=")
-            && diag.message.contains("interface_conductance_w_per_m2k=")
-            && diag
-                .message
-                .contains("flux_temperature_law_residual_ratio=")
-            && diag
-                .message
-                .contains("heat_flux_realization_residual_ratio=")
-            && diag.message.contains("coupled_interface_iteration_count=")
-            && diag.message.contains("coupled_interface_residual_ratio=")
-            && diag.message.contains("thermal_network_node_count=")
-            && diag.message.contains("thermal_network_edge_count=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("full_topology_edge_count=")
-            && diag.message.contains("full_topology_element_count=")
-            && diag.message.contains("thermal_network_residual_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CHT_KNOWN_ANSWER"
-            && diag.message.contains("basis=heated_channel_conjugate_slab")
-            && diag
-                .message
-                .contains("heated_channel_energy_residual_ratio=")
-            && diag
-                .message
-                .contains("conjugate_slab_flux_law_residual_ratio=")
-            && diag.message.contains("advection_shift_coverage_ratio=")
-            && diag.message.contains("coupled_interface_residual_ratio=")
-            && diag
-                .message
-                .contains("heat_flux_realization_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("thermal_network_residual_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    let thermal = envelope
-        .data
-        .thermal_results
-        .as_ref()
-        .expect("thermal payload should exist");
-    assert_eq!(thermal.time_points_s.len(), 4);
-    let fluid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_fluid_temperature_field_id(0))
-        .expect("cht fluid temperature field should be present");
-    let solid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_solid_temperature_field_id(0))
-        .expect("cht solid temperature field should be present");
-    let interface_heat_flux = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_heat_flux_field_id(0))
-        .expect("cht interface heat-flux field should be present");
-    let interface_temperature_jump = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_temperature_jump_field_id(0))
-        .expect("cht interface temperature jump field should be present");
-    let thermal_flux_face_count = thermal
-        .heat_flux_snapshots
-        .first()
-        .and_then(|field| field.shape.first().copied())
-        .expect("thermal heat-flux snapshot should carry a recovery domain");
-    let expected_interface_face_count =
-        fluid_interface_face_count(&CfdDomainTopology::from_model(&model, None));
-    assert_eq!(solid_temperature.shape, fluid_temperature.shape);
-    assert!(expected_interface_face_count >= thermal_flux_face_count);
-    assert_eq!(
-        interface_heat_flux.shape,
-        vec![expected_interface_face_count]
-    );
-    assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("cht results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("CHT descriptor should be present")
-    };
-    let velocity_descriptor = descriptor(FEA_FIELD_CHT_FLUID_VELOCITY);
-    assert_eq!(velocity_descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(velocity_descriptor.component_count, Some(3));
-    for field_id in [
-        FEA_FIELD_CHT_FLUID_PRESSURE.to_string(),
-        fea_cht_fluid_temperature_field_id(0),
-        fea_cht_solid_temperature_field_id(0),
-        fea_cht_interface_temperature_jump_field_id(0),
-        fea_cht_energy_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let interface_heat_flux_descriptor = descriptor(&fea_cht_interface_heat_flux_field_id(0));
-    assert_eq!(
-        interface_heat_flux_descriptor.kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(interface_heat_flux_descriptor.component_count, None);
-}
-
-#[test]
-fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
-    let _guard = analysis_test_guard();
-    let model = sample_fsi_model();
-
-    let envelope = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisFsiRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("fsi run should return envelope");
-
-    assert_eq!(envelope.operation, "fea.run_fsi");
-    assert_eq!(envelope.op_version, "fea.run_fsi/v1");
-    assert_eq!(
-        envelope.data.run.solver_method,
-        "fsi_partitioned_projection"
-    );
-    assert!(envelope.data.transient_results.is_none());
-    assert!(envelope.data.thermal_results.is_none());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"
-            && diag.message.contains("reynolds_number=")
-            && diag.message.contains("topology_basis=implicit_channel")));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_RESIDUAL"
-            && diag.message.contains("max_momentum_residual=")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag.message.contains("topology_basis=implicit_channel")
-            && diag.message.contains("control_volume_count=")
-            && diag.message.contains("domain_length_m=")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"
-            && diag.message.contains("max_interface_residual=")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_FSI_INTERFACE_CLOSURE"
-            && diag.message.contains("interface_node_count=")
-            && diag.message.contains("interface_face_count=")
-            && diag.message.contains("force_balance_ratio=")
-            && diag
-                .message
-                .contains("max_displacement_transfer_residual_m=")
-            && diag.message.contains("max_coupling_iteration_count=")
-            && diag.message.contains("pressure_feedback_residual_ratio=")
-            && diag.message.contains("two_way_interface_residual_ratio=")
-            && diag
-                .message
-                .contains("structural_traction_update_residual_ratio=")
-            && diag
-                .message
-                .contains("pressure_displacement_law_residual_ratio=")
-            && diag.message.contains("structural_solve_residual_ratio=")
-            && diag.message.contains("interface_work_j_per_m2=")
-            && diag.message.contains("structural_strain_energy_j_per_m2=")
-            && diag
-                .message
-                .contains("interface_work_energy_residual_ratio=")
-            && diag.message.contains("structural_coupling_edge_count=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("full_topology_edge_count=")
-            && diag.message.contains("full_topology_element_count=")
-            && diag.message.contains("interface_stiffness_pa_per_m=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_FSI_KNOWN_ANSWER"
-            && diag
-                .message
-                .contains("basis=pressure_loaded_wall_partitioned")
-            && diag
-                .message
-                .contains("pressure_loaded_wall_displacement_law_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_traction_balance_residual_ratio=")
-            && diag
-                .message
-                .contains("partitioned_pressure_feedback_residual_ratio=")
-            && diag.message.contains("two_way_interface_residual_ratio=")
-            && diag
-                .message
-                .contains("structural_traction_update_residual_ratio=")
-            && diag.message.contains("structural_solve_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_work_energy_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING"
-            && diag.message.contains("cfd_profile_point_count=2")
-            && diag.message.contains("authored_interface_count=")
-            && diag.message.contains("interface_node_count=")
-            && diag.message.contains("interface_face_count=")));
-    let interface_pressure = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_pressure_field_id(0))
-        .expect("fsi interface pressure field should be present");
-    let interface_traction = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_traction_field_id(0))
-        .expect("fsi interface traction field should be present");
-    let interface_displacement = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_displacement_field_id(0))
-        .expect("fsi interface displacement field should be present");
-    assert_eq!(interface_pressure.shape.len(), 1);
-    assert_eq!(
-        interface_traction.shape,
-        vec![interface_pressure.shape[0], 3]
-    );
-    assert_eq!(interface_displacement.shape.len(), 2);
-    assert_eq!(interface_displacement.shape[1], 3);
-    assert_eq!(
-        interface_displacement.shape[0],
-        interface_pressure.shape[0] + 1
-    );
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("fsi results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("FSI descriptor should be present")
-    };
-    for field_id in [
-        fea_fsi_fluid_velocity_field_id(0),
-        fea_fsi_structural_displacement_field_id(0),
-        fea_fsi_interface_traction_field_id(0),
-        fea_fsi_interface_displacement_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
-    }
-    for field_id in [
-        fea_fsi_fluid_pressure_field_id(0),
-        fea_fsi_interface_pressure_field_id(0),
-        fea_fsi_interface_residual_field_id(0),
-        fea_fsi_coupling_iteration_count_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-}
-
-#[test]
-fn cht_prepared_topology_uses_boundary_faces_for_interface_fields() {
-    let _guard = analysis_test_guard();
-    let model = sample_cht_model();
-    let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
-    let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let thermo_context = to_fea_thermo_mechanical_context(model_thermo_coupling_options(&model));
-    let thermal_run = run_thermal_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        ThermalSolveOptions {
-            step_count: 4,
-            time_step_s: 1.0e-3,
-            residual_target: 1.0e-4,
-            prep_context: to_fea_prep_context(Some(&prep_context), None),
-            thermo_mechanical_context: thermo_context,
-        },
-    )
-    .expect("thermal run should succeed");
-
-    let (fields, closure) = build_cht_run_fields(
-        cfd_domain,
-        &topology,
-        &thermal_run,
-        cht_interface_conductance_w_per_m2k(&model),
-        64,
-        1.0e-8,
-    );
-    let heat_flux = fields
-        .iter()
-        .find(|field| field.field_id == fea_cht_interface_heat_flux_field_id(0))
-        .expect("CHT heat flux field should be present");
-    let temperature_jump = fields
-        .iter()
-        .find(|field| field.field_id == fea_cht_interface_temperature_jump_field_id(0))
-        .expect("CHT temperature jump field should be present");
-
-    assert_eq!(
-        topology.basis,
-        CfdDomainTopologyBasis::PrepControlVolumeConnectivity
-    );
-    assert_eq!(fluid_interface_face_count(&topology), 8);
-    assert_eq!(closure.interface_face_count, 8);
-    assert_eq!(closure.thermal_network_node_count, 8);
-    assert_eq!(closure.thermal_network_edge_count, 11);
-    assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
-    assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
-    assert_eq!(closure.full_topology_edge_count, 5);
-    assert_eq!(closure.full_topology_element_count, 2);
-    assert_eq!(heat_flux.shape, vec![8]);
-    assert_eq!(temperature_jump.shape, vec![8]);
-}
-
-#[test]
-fn prepared_coupled_interface_graph_uses_element_topology_sample() {
-    let model = sample_cht_model();
-    let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let edges = coupled_interface_graph_edges_for_topology(
-        &topology,
-        fluid_interface_face_count(&topology),
-    );
-
-    assert!(edges.contains(&(0, 1)));
-    assert!(edges.contains(&(1, 2)));
-    assert!(edges.contains(&(0, 2)));
-    assert!(edges.contains(&(2, 3)));
-    assert!(edges.contains(&(3, 4)));
-    assert!(edges.contains(&(2, 4)));
-    assert_eq!(edges.len(), topology.control_volume_internal_face_count);
-}
-
-#[test]
-fn fsi_prepared_topology_uses_boundary_faces_for_interface_fields() {
-    let _guard = analysis_test_guard();
-    let model = sample_fsi_model();
-    let cfd_domain = model.cfd.as_ref().expect("cfd domain should exist");
-    let prep_context = sample_analysis_run_prep_context();
-    let topology = CfdDomainTopology::from_model(&model, Some(&prep_context));
-    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(cfd_domain, &topology, 0);
-    let (residual_momentum, residual_continuity) =
-        cfd_residual_norms(&fluid_velocity, &fluid_pressure, cfd_domain, &topology, 4);
-    let (fields, closure) = build_fsi_run_fields(
-        cfd_domain,
-        &topology,
-        4,
-        fsi_structural_compliance_per_pa(&model),
-        64,
-        1.0e-8,
-        &residual_momentum,
-        &residual_continuity,
-    );
-    let pressure = fields
-        .iter()
-        .find(|field| field.field_id == fea_fsi_interface_pressure_field_id(0))
-        .expect("FSI interface pressure field should be present");
-    let traction = fields
-        .iter()
-        .find(|field| field.field_id == fea_fsi_interface_traction_field_id(0))
-        .expect("FSI interface traction field should be present");
-
-    assert_eq!(
-        topology.basis,
-        CfdDomainTopologyBasis::PrepControlVolumeConnectivity
-    );
-    assert_eq!(fluid_interface_face_count(&topology), 8);
-    assert_eq!(closure.interface_face_count, 8);
-    assert_eq!(closure.structural_coupling_edge_count, 11);
-    assert_eq!(closure.interface_connectivity_coverage_ratio, 1.0);
-    assert_eq!(closure.mesh_backed_interface_connectivity_ratio, 1.0);
-    assert_eq!(closure.full_topology_edge_count, 5);
-    assert_eq!(closure.full_topology_element_count, 2);
-    assert_eq!(pressure.shape, vec![8]);
-    assert_eq!(traction.shape, vec![8, 3]);
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
 }
 
 #[test]
 fn analysis_run_transient_with_options_controls_timeline() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
 
     let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisTransientRunOptions {
             deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 2.0e-3,
-            min_time_step_s: 2.0e-3,
-            max_time_step_s: 2.0e-3,
-            step_count: 3,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
+            time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed { interval_count: 3 },
             residual_target: 1.0e-6,
-            adaptive_time_step: false,
-            max_step_retries: 0,
-            adapt_min_scale: 0.8,
-            adapt_max_scale: 1.25,
-            adapt_growth_exponent: 0.35,
-            adapt_retry_growth_cap: 1.05,
-            adapt_nonconverged_shrink: 0.75,
-            dt_bucket_rel_tolerance: 0.0,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
+            maximum_intervals_per_block: 256,
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -12049,113 +6283,80 @@ fn analysis_run_transient_with_options_controls_timeline() {
         .expect("transient payload should exist");
     assert_eq!(transient.time_points_s.len(), 4);
     assert_eq!(transient.time_points_s[0], 0.0);
-    assert!((transient.time_points_s[3] - 6.0e-3).abs() < 1.0e-12);
+    assert!((transient.time_points_s[3] - 1.0).abs() < 1.0e-12);
     assert!(envelope.data.provenance.deterministic_mode);
 }
 
 #[test]
-fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
+fn analysis_run_linear_static_thermomechanical_rejects_unknown_temperature_field_region() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("linear-thermo-temperature-target");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "linear_thermo_temperature_target",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Static,
+    )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: None,
-            field_source: Some(ThermoFieldSource {
-                source_id: "field/transient-a".to_string(),
-                revision: 1,
-                interpolation_mode: Some(ThermoFieldInterpolationMode::Linear),
-                expected_region_ids: vec!["tip".to_string()],
-            }),
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
-                temperature_delta_k: 70.0,
+        TestThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(80.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
+            region_temperature_deltas: vec![TestThermoRegionTemperatureDelta {
+                region_id: "missing_region".to_string(),
+                temperature_delta_k: 80.0,
             }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.8,
-                    scale: 1.0,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.5,
-                    scale: 0.9,
-                },
-            ],
         },
     );
 
-    let err = analysis_run_transient_with_options_op(
+    let published = storage::list_run_metadata()
+        .expect("list existing runs")
+        .len();
+    let err = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("non-monotonic thermo time profile should be rejected");
-
-    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS");
-}
-
-#[test]
-fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 80.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: Some(ThermoFieldSource {
-                source_id: "field/nonlinear-a".to_string(),
-                revision: 2,
-                interpolation_mode: Some(ThermoFieldInterpolationMode::Step),
-                expected_region_ids: vec!["missing_region".to_string()],
-            }),
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
+        AnalysisRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
         },
-    );
-
-    let err = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
     .expect_err("unknown thermo expected region should be rejected");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID"
+    );
+    assert_eq!(err.error_type, OperationErrorType::Validation);
+    assert!(
+        err.message
+            .contains("temperature field targets unknown model region missing_region"),
+        "expected unknown temperature region diagnostic, got: {err:?}"
+    );
+    assert_eq!(
+        storage::list_run_metadata()
+            .expect("list runs after rejection")
+            .len(),
+        published,
+        "invalid temperature region must not publish a run"
+    );
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
+fn analysis_run_nonlinear_rejects_invalid_plastic_material() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_plasticity(
         &mut model,
-        PlasticityConstitutiveOptions {
-            enabled: true,
-            yield_strain: -1.0,
-            hardening_modulus_ratio: 0.1,
-            saturation_exponent: 1.0,
+        runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening {
+            yield_stress_pa: runmat_types::physical::YieldStress::new(-1.0),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         },
     );
 
@@ -12165,444 +6366,61 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
         AnalysisNonlinearRunOptions::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("nonlinear run should reject invalid plasticity options");
+    .expect_err("nonlinear run should reject invalid authored plastic material");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
+    assert_eq!(err.error_type, OperationErrorType::Validation);
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_invalid_contact_interface_options() {
+fn nonlinear_solver_rejects_invalid_contact_enforcement_options() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.0,
-            max_penetration_ratio: 0.01,
-            friction_coefficient: 0.0,
-        },
-    );
-
-    let err = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("nonlinear run should reject invalid contact options");
-
-    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
+    let error = validate_contact_interface_options(&runmat_analysis_fea::FeaContactEnforcement {
+        penalty_stiffness_scale: 0.0,
+        max_penetration_ratio: 0.01,
+    })
+    .expect_err("nonlinear solver should reject an invalid contact penalty");
+    assert!(error.0.contains("penalty_stiffness_scale"));
 }
 
 #[test]
-fn analysis_run_transient_can_resolve_thermo_field_artifact() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-
-    let root = temp_artifact_root("transient-thermo-resolve").join("thermo-fields");
-    let _root_guard = scoped_thermo_field_artifact_root(&root);
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create thermo field artifact root");
-    let mut field_artifact = serde_json::json!({
-        "schema_version": "fea_thermo_field_artifact/v1",
-        "source_geometry_id": model.geometry_id,
-        "source_geometry_revision": model.geometry_revision,
-        "artifact_status": "approved",
-        "approved_by": "release-bot",
-        "field_source": {
-            "source_id": "artifact/transient-field",
-            "revision": 1,
-            "interpolation_mode": "linear",
-            "expected_region_ids": [],
-        },
-        "region_temperature_deltas": [
-            {"region_id": "beam_span", "temperature_delta_k": 72.0}
-        ],
-        "time_profile": [
-            {"normalized_time": 0.0, "scale": 0.5},
-            {"normalized_time": 1.0, "scale": 1.0}
-        ]
-    });
-    let artifact_hash = thermo_field_payload_hash(
-        &serde_json::from_value(field_artifact.clone()).expect("decode artifact struct"),
+fn nonlinear_policy_wire_contract_rejects_removed_proxy_controls() {
+    let options = AnalysisNonlinearRunOptions::default();
+    let encoded = serde_json::to_value(&options).unwrap();
+    assert_eq!(encoded["linear_tolerance"], 1e-10);
+    assert_eq!(encoded["max_load_cutbacks"], 8);
+    assert_eq!(encoded["minimum_load_increment"], 1e-8);
+    assert_eq!(encoded["max_accepted_increments"], 4096);
+    assert_eq!(
+        serde_json::from_value::<AnalysisNonlinearRunOptions>(encoded.clone()).unwrap(),
+        options
     );
-    field_artifact["payload_hash"] = serde_json::Value::String(artifact_hash.clone());
-    field_artifact["signature"] = serde_json::Value::String(thermo_field_signature(
-        &artifact_hash,
-        "release-bot",
-        "runmat-dev-thermo-signing-key",
-    ));
-    fs::write(
-        root.join("field_ok.json"),
-        serde_json::to_vec_pretty(&field_artifact).expect("encode thermo field artifact"),
-    )
-    .expect("write thermo field artifact");
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: Some("field_ok".to_string()),
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-    let run = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("transient run should resolve thermo field artifact");
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("results should succeed");
-
-    let _ = fs::remove_dir_all(&root);
-
-    assert!(results.data.summary.thermo_spatial_coverage_ratio.is_none());
-    assert_eq!(results.data.summary.thermo_region_delta_count, None);
-}
-
-#[test]
-fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-
-    let root = temp_artifact_root("transient-thermo-missing").join("thermo-fields");
-    let _root_guard = scoped_thermo_field_artifact_root(&root);
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create empty thermo field artifact root");
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: Some("missing".to_string()),
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-
-    let err = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("missing thermo field artifact should be rejected");
-    let _ = fs::remove_dir_all(&root);
-
-    assert_eq!(err.error_code, "RM.FEA.RUN_THERMO_FIELD.NOT_FOUND");
-}
-
-#[test]
-fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-
-    let root = temp_artifact_root("transient-thermo-inline-parity").join("thermo-fields");
-    let _root_guard = scoped_thermo_field_artifact_root(&root);
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create thermo field artifact root");
-    let mut inline_equivalent_artifact = serde_json::json!({
-        "schema_version": "fea_thermo_field_artifact/v1",
-        "source_geometry_id": model.geometry_id,
-        "source_geometry_revision": model.geometry_revision,
-        "artifact_status": "approved",
-        "approved_by": "release-bot",
-        "field_source": {
-            "source_id": "artifact/inline-equivalent",
-            "revision": 1,
-            "interpolation_mode": "linear",
-            "expected_region_ids": []
-        },
-        "region_temperature_deltas": [
-            {"region_id": "beam_span", "temperature_delta_k": 90.0}
-        ],
-        "time_profile": [
-            {"normalized_time": 0.0, "scale": 0.4},
-            {"normalized_time": 1.0, "scale": 1.0}
-        ]
-    });
-    let inline_hash = thermo_field_payload_hash(
-        &serde_json::from_value(inline_equivalent_artifact.clone())
-            .expect("decode inline artifact struct"),
-    );
-    inline_equivalent_artifact["payload_hash"] = serde_json::Value::String(inline_hash.clone());
-    inline_equivalent_artifact["signature"] = serde_json::Value::String(thermo_field_signature(
-        &inline_hash,
-        "release-bot",
-        "runmat-dev-thermo-signing-key",
-    ));
-    fs::write(
-        root.join("inline_equivalent.json"),
-        serde_json::to_vec_pretty(&inline_equivalent_artifact).expect("encode artifact"),
-    )
-    .expect("write artifact");
-
-    let mut inline_model = model.clone();
-    set_model_thermo_coupling(
-        &mut inline_model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "beam_span".to_string(),
-                temperature_delta_k: 90.0,
-            }],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.4,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
-        },
-    );
-    let inline = analysis_run_transient_with_options_op(
-        &inline_model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("inline thermo run should succeed");
-
-    let mut artifact_model = model;
-    set_model_thermo_coupling(
-        &mut artifact_model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: Some("inline_equivalent".to_string()),
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-    let artifact_backed = analysis_run_transient_with_options_op(
-        &artifact_model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("artifact-backed thermo run should succeed");
-    let _ = fs::remove_dir_all(&root);
-
-    let inline_transient = inline
-        .data
-        .transient_results
-        .as_ref()
-        .expect("inline transient payload");
-    let artifact_transient = artifact_backed
-        .data
-        .transient_results
-        .as_ref()
-        .expect("artifact transient payload");
-    let inline_final = inline_transient
-        .displacement_snapshots
-        .last()
-        .and_then(|field| field.as_host_f64())
-        .expect("inline host displacement");
-    let artifact_final = artifact_transient
-        .displacement_snapshots
-        .last()
-        .and_then(|field| field.as_host_f64())
-        .expect("artifact host displacement");
-    assert_eq!(inline_final.len(), artifact_final.len());
-    let mut max_abs = 0.0_f64;
-    for (lhs, rhs) in inline_final.iter().zip(artifact_final.iter()) {
-        max_abs = max_abs.max((lhs - rhs).abs());
-    }
-    assert!(max_abs <= 1.0e-12);
-}
-
-#[test]
-fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-    for material in &mut model.materials {
-        material.thermal.expansion_coefficient_per_k = 1.0e-3;
-    }
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.0e-3,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            adaptive_time_step: true,
-            step_count: 8,
-            ..AnalysisTransientRunOptions::default()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("transient run should return envelope");
-
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalTransientStress));
-
-    let transient = run
-        .data
-        .transient_results
-        .as_ref()
-        .expect("transient results should be present");
-    assert!(transient.thermo_mechanical_temperature_snapshots.is_empty());
-    assert!(transient
-        .thermo_mechanical_thermal_strain_snapshots
-        .is_empty());
-    assert!(transient
-        .thermo_mechanical_thermal_stress_snapshots
-        .is_empty());
-    assert!(transient
-        .thermo_mechanical_displacement_snapshots
-        .is_empty());
-    assert!(transient.thermo_mechanical_von_mises_snapshots.is_empty());
-    assert!(transient
-        .thermo_mechanical_coupling_residual_snapshots
-        .is_empty());
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("thermo-mechanical transient results should be queryable");
-    for field_id in [
-        fea_thermo_mechanical_temperature_field_id(0),
-        fea_thermo_mechanical_von_mises_field_id(0),
-        fea_thermo_mechanical_coupling_residual_field_id(0),
-        fea_thermo_mechanical_displacement_field_id(0),
-        fea_thermo_mechanical_thermal_strain_field_id(0),
-        fea_thermo_mechanical_thermal_stress_field_id(0),
+    for removed in [
+        "residual_convergence_factor",
+        "increment_norm_tolerance",
+        "tangent_refresh_interval",
     ] {
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
+        let mut invalid = encoded.clone();
+        invalid[removed] = serde_json::json!(1);
+        assert!(serde_json::from_value::<AnalysisNonlinearRunOptions>(invalid).is_err());
     }
 }
 
 #[test]
-fn transient_balanced_keeps_beam_publishable_when_thermo_heterogeneity_is_below_threshold() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            adaptive_time_step: true,
-            step_count: 8,
-            ..AnalysisTransientRunOptions::default()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("transient run should return envelope");
-
-    assert!(run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Publishable);
-    assert!(!run.data.quality_reasons.iter().any(|reason| {
-        reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
-            || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
-    }));
-}
-
-#[test]
-fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
+fn nonlinear_plasticity_rejects_noncanonical_synthetic_model() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
     set_model_plasticity(
         &mut model,
-        PlasticityConstitutiveOptions {
-            enabled: true,
-            yield_strain: 2.0e-4,
-            hardening_modulus_ratio: 0.2,
-            saturation_exponent: 4.0,
+        runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening {
+            yield_stress_pa: runmat_types::physical::YieldStress::new(250e6),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         },
     );
 
-    let run = analysis_run_nonlinear_with_options_op(
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
@@ -12611,85 +6429,54 @@ fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
         },
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should return envelope");
-
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::PlasticityNonlinearStress));
-    assert!(run
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_PLASTIC_NONLINEAR"));
+    .expect_err("physical J2 must not run through a synthetic model");
+    assert!(!error.retryable);
 }
 
 #[test]
-fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
+fn nonlinear_contact_is_rejected_outside_the_j2_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "nonlinear_1".to_string(),
-        kind: AnalysisStepKind::Nonlinear,
-    }];
-    set_model_contact(
-        &mut model,
-        ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.15,
-            max_penetration_ratio: 0.035,
-            friction_coefficient: 0.9,
-        },
-    );
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
+        "nonlinear_1".to_string(),
+    )];
+    set_model_contact(&mut model, 0.9);
 
-    let run = analysis_run_nonlinear_with_options_op(
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
+            contact_enforcement: Some(ContactEnforcementOptions {
+                penalty_stiffness_scale: 0.15,
+                max_penetration_ratio: 0.035,
+            }),
             ..AnalysisNonlinearRunOptions::balanced()
         },
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should return envelope");
-
-    assert!(!run.data.publishable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ContactNonlinearStress));
-    assert!(run
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CONTACT_NONLINEAR"));
+    .expect_err("contact requires a separately qualified physical formulation");
+    assert!(!error.retryable);
 }
 
 #[test]
 fn analysis_run_modal_returns_native_modal_result() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_run".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
     .expect("modal model should be created");
 
-    let envelope = analysis_run_modal_op(
+    let envelope = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("modal run should produce modal result");
@@ -12698,32 +6485,39 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(envelope.op_version, "fea.run_modal/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "matrix_free_subspace_iteration"
+        SolverMethod::ShiftInvertBlockLanczos
     );
     assert_eq!(
         envelope.data.provenance.solver_method,
-        "matrix_free_subspace_iteration"
+        SolverMethod::ShiftInvertBlockLanczos
     );
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Completed);
+    assert!(envelope.data.numerically_acceptable);
     let modal = envelope
         .data
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert!(!modal.frequencies_hz().is_empty());
+    assert_eq!(modal.frequencies_hz().len(), modal.mode_shapes.len());
     assert_eq!(
         modal.mode_shapes[0].field_id,
         fea_modal_mode_shape_field_id(1)
     );
     assert_eq!(modal.mode_shapes[0].shape.len(), 2);
     assert_eq!(modal.mode_shapes[0].shape[1], 3);
-    assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
-    assert!(modal.residual_norms.iter().all(|value| value.is_finite()));
-    assert_eq!(modal.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal.frequencies_hz().len(), modal.residual_norms().len());
+    assert!(modal.residual_norms().iter().all(|value| value.is_finite()));
+    assert_eq!(modal.mode_indices.len(), modal.basis.modes().len());
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
+    let declaration = &modal_model.data.sequence.steps[0].state_outputs[0];
+    let payload = semantic_state_payload(&envelope.data, declaration)
+        .expect("modal result should materialize its typed basis state");
+    assert_eq!(
+        payload.modal_basis().unwrap().identity(),
+        modal.basis.identity()
+    );
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),
@@ -12752,10 +6546,14 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(orthogonality_descriptor.kind, AnalysisFieldKind::Tensor);
     assert_eq!(
         orthogonality_descriptor.shape,
-        vec![modal.eigenvalues_hz.len(), modal.eigenvalues_hz.len()]
+        vec![modal.frequencies_hz().len(), modal.frequencies_hz().len()]
     );
-    assert_eq!(orthogonality_descriptor.component_count, None);
-    assert!(envelope
+    // One global mode-by-mode matrix: every entry is a component of the single tensor.
+    assert_eq!(
+        orthogonality_descriptor.component_count,
+        Some(modal.frequencies_hz().len() * modal.frequencies_hz().len())
+    );
+    assert!(!envelope
         .data
         .quality_reasons
         .iter()
@@ -12772,20 +6570,20 @@ fn analysis_run_modal_returns_native_modal_result() {
 fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let acoustic_model = analysis_create_model_op(
+    let acoustic_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "acoustic_model_run".to_string(),
-            profile: AnalysisCreateModelProfile::AcousticHarmonic,
-            prep_context: None,
+            kind: TestModelKind::AcousticHarmonic,
         },
         OperationContext::new(None, None),
     )
     .expect("acoustic model should be created");
 
-    let envelope = analysis_run_acoustic_op(
+    let envelope = analysis_run_acoustic_with_options_op(
         &acoustic_model.data,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("acoustic run should produce acoustic fields");
@@ -12794,7 +6592,7 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     assert_eq!(envelope.op_version, "fea.run_acoustic/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        "acoustic_domain_graph_helmholtz_harmonic"
+        SolverMethod::AcousticDomainGraphHelmholtzHarmonic
     );
     assert!(envelope.data.modal_results.is_none());
     assert!(envelope
@@ -12894,15 +6692,100 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
 }
 
 #[test]
+fn analysis_run_acoustic_realizes_complex_frequency_pressure() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let mut complex_model = test_model_for_geometry(
+        &geometry,
+        TestModelSpec {
+            model_id: "acoustic_complex_frequency_source".to_string(),
+            kind: TestModelKind::AcousticHarmonic,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created")
+    .data;
+    let PhysicalSignal::Pressure(signal) = &mut complex_model.signals[0] else {
+        panic!("acoustic template should author a pressure signal");
+    };
+    signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+        domain: TabulatedSignalDomain::FrequencyHertz,
+        knots: vec![
+            SignalKnot::continuous(
+                50.0,
+                SignalOrdinate::Complex {
+                    real: SignalValue::Scalar(runmat_analysis_core::Pressure::new(1.0)),
+                    imaginary: SignalValue::Scalar(runmat_analysis_core::Pressure::new(0.25)),
+                },
+            ),
+            SignalKnot::continuous(
+                20_000.0,
+                SignalOrdinate::Complex {
+                    real: SignalValue::Scalar(runmat_analysis_core::Pressure::new(2.0)),
+                    imaginary: SignalValue::Scalar(runmat_analysis_core::Pressure::new(0.5)),
+                },
+            ),
+        ],
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::HoldEndpoint,
+    });
+    signal.precision = SignalPrecision::Complex128;
+    signal.evidence.sample_count = 2;
+
+    let mut real_model = complex_model.clone();
+    let PhysicalSignal::Pressure(signal) = &mut real_model.signals[0] else {
+        panic!("acoustic template should author a pressure signal");
+    };
+    let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
+        panic!("test should have authored a tabulated pressure signal");
+    };
+    for knot in &mut table.knots {
+        let runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Complex {
+            imaginary,
+            ..
+        }) = &mut knot.value
+        else {
+            panic!("test should have authored complex pressure knots");
+        };
+        *imaginary = SignalValue::Scalar(runmat_analysis_core::Pressure::new(0.0));
+    }
+
+    let run = |model: &AnalysisModel| {
+        analysis_run_acoustic_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            Default::default(),
+            OperationContext::new(None, None),
+        )
+        .expect("frequency-domain acoustic source should be realized")
+        .data
+        .run
+    };
+    let complex_run = run(&complex_model);
+    let real_run = run(&real_model);
+    let complex_imag = complex_run
+        .field(FEA_FIELD_ACOUSTIC_PRESSURE_IMAG)
+        .and_then(AnalysisField::as_host_f64)
+        .expect("complex acoustic solve should return imaginary pressure");
+    let real_imag = real_run
+        .field(FEA_FIELD_ACOUSTIC_PRESSURE_IMAG)
+        .and_then(AnalysisField::as_host_f64)
+        .expect("real acoustic solve should return imaginary pressure");
+    assert!(complex_imag
+        .iter()
+        .zip(real_imag)
+        .any(|(complex, real)| (complex - real).abs() > 1.0e-10));
+}
+
+#[test]
 fn analysis_run_modal_with_options_controls_requested_mode_count() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_run_opts".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
@@ -12915,11 +6798,10 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            mode_count: 2,
-            residual_warn_threshold: 1.0e-2,
-            prep_context: None,
-            prep_artifact_id: None,
-            prep_calibration_profile: None,
+            truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(2),
+            convergence: runmat_analysis_fea::ModalConvergencePolicy::production(),
+            residual_vector_directions: Vec::new(),
+            solver_mesh_artifact_path: None,
         },
         OperationContext::new(None, None),
     )
@@ -12930,8 +6812,8 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         .modal_results
         .as_ref()
         .expect("modal payload should exist");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert!(modal.eigenvalues_hz.len() <= 2);
+    assert!(!modal.frequencies_hz().is_empty());
+    assert!(modal.frequencies_hz().len() >= 2);
     assert!(envelope.data.provenance.deterministic_mode);
 }
 
@@ -12939,20 +6821,20 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
 fn analysis_results_include_modal_payload_for_modal_runs() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_results".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
     .expect("modal model should be created");
 
-    let run = analysis_run_modal_op(
+    let run = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("modal run should succeed");
@@ -12969,12 +6851,12 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .modal_results
         .as_ref()
         .expect("modal payload should propagate to results");
-    assert!(!modal.eigenvalues_hz.is_empty());
-    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert!(!modal.frequencies_hz().is_empty());
+    assert_eq!(modal.frequencies_hz().len(), modal.mode_shapes.len());
     assert_eq!(modal.mode_shapes[0].shape.len(), 2);
     assert_eq!(modal.mode_shapes[0].shape[1], 3);
-    assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
-    assert_eq!(modal.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal.frequencies_hz().len(), modal.residual_norms().len());
+    assert_eq!(modal.mode_indices.len(), modal.basis.modes().len());
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
     assert!(results.data.summary.mode_count > 0);
@@ -12992,19 +6874,19 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
 fn analysis_results_query_can_exclude_modal_payload() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_results_filter".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
     .expect("modal model should be created");
-    let run = analysis_run_modal_op(
+    let run = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("modal run should succeed");
@@ -13018,11 +6900,11 @@ fn analysis_results_query_can_exclude_modal_payload() {
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: false,
+            include_buckling_results: false,
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -13035,19 +6917,19 @@ fn analysis_results_query_can_exclude_modal_payload() {
 fn analysis_results_query_rejects_unknown_modal_mode_index() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    let modal_model = analysis_create_model_op(
+    let modal_model = test_model_for_geometry(
         &geometry,
-        AnalysisCreateModelIntentSpec {
+        TestModelSpec {
             model_id: "modal_model_results_index".to_string(),
-            profile: AnalysisCreateModelProfile::ModalStructural,
-            prep_context: None,
+            kind: TestModelKind::ModalStructural,
         },
         OperationContext::new(None, None),
     )
     .expect("modal model should be created");
-    let run = analysis_run_modal_op(
+    let run = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("modal run should succeed");
@@ -13061,11 +6943,11 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: vec![10],
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -13079,14 +6961,19 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
 #[test]
 fn analysis_results_include_transient_payload_for_transient_runs() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-    let run = analysis_run_transient_op(
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("transient-results-physical-fields");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
+    let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
         OperationContext::new(None, None),
     )
     .expect("transient run should succeed");
@@ -13105,407 +6992,84 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
         .expect("transient payload should propagate");
     assert_eq!(
         transient.integration_method,
-        TransientIntegrationMethod::ImplicitEuler
+        TransientIntegrationMethod::NewmarkAverageAcceleration
     );
     assert!(!transient.time_points_s.is_empty());
     assert_eq!(
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
     );
-}
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.strain_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.stress_snapshots.len()
+    );
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.strain_energy_density_snapshots.len()
+    );
 
-#[test]
-fn analysis_results_include_electromagnetic_fields_for_em_runs() {
-    let _guard = analysis_test_guard();
-    let spec = sample_electromagnetic_study_spec();
-    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study should run");
-
-    let results = analysis_results_by_run_id_op(
+    let snapshot_query = AnalysisResultsQuery {
+        transient_snapshot_indices: vec![1],
+        ..AnalysisResultsQuery::default()
+    };
+    let selected = analysis_results_by_run_id_op(
         &run.data.run_id,
-        AnalysisResultsQuery::default(),
+        snapshot_query,
         OperationContext::new(None, None),
     )
-    .expect("electromagnetic results should load");
-    let field_ids = results
+    .expect("persisted transient physical fields should support indexed hydration");
+    let selected = selected
         .data
-        .field_descriptors
-        .iter()
-        .map(|field| field.field_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(field_ids.contains(&FEA_FIELD_EM_VECTOR_POTENTIAL_REAL));
-    assert!(field_ids.contains(&FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE));
-}
-
-#[cfg(feature = "plot-core")]
-fn solver_topology_counts(run_id: &str) -> (usize, usize) {
-    let persisted = storage::load_run_result(run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let topology = persisted
-        .render_topology
-        .as_ref()
-        .expect("run should persist render topology");
-    (
-        topology
-            .meshes
-            .iter()
-            .map(|mesh| mesh.vertices.len())
-            .sum::<usize>(),
-        topology
-            .meshes
-            .iter()
-            .map(|mesh| mesh.triangles.len())
-            .sum::<usize>(),
-    )
-}
-
-#[cfg(feature = "plot-core")]
-fn assert_any_solver_topology_overlay(figures: &[AnalysisGeneratedFigure], run_id: &str) {
-    let (vertex_count, triangle_count) = solver_topology_counts(run_id);
-    let overlay_counts = figures
-        .iter()
-        .filter(|figure| matches!(figure.kind, AnalysisGeneratedFigureKind::MeshResult))
-        .flat_map(|figure| figure.figure.plots())
-        .filter_map(|plot| match plot {
-            runmat_plot::plots::PlotElement::Mesh(mesh) => Some(mesh),
-            _ => None,
-        })
-        .map(|mesh| {
-            mesh.scalar_field()
-                .map(|field| field.values.len())
-                .or_else(|| mesh.vector_field().map(|field| field.vectors.len()))
-                .unwrap_or(0)
-        })
-        .filter(|count| *count > 0)
-        .collect::<Vec<_>>();
-    assert!(
-        overlay_counts
-            .iter()
-            .any(|count| *count == vertex_count || *count == triangle_count),
-        "expected at least one overlay count to match solver topology vertices={} or triangles={}, got {:?}",
-        vertex_count,
-        triangle_count,
-        overlay_counts
-    );
-}
-
-#[cfg(feature = "plot-core")]
-#[test]
-fn analysis_generate_study_run_figures_returns_mesh_figures() {
-    let _guard = analysis_test_guard();
-    let spec = sample_linear_static_study_spec();
-    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("linear static study should run");
-
-    let figures = analysis_generate_study_run_figures(
-        &spec,
-        &run.data.run_id,
-        AnalysisFigureGenerationOptions {
-            include_comparison: false,
-            include_trends: false,
-            ..AnalysisFigureGenerationOptions::default()
-        },
-    )
-    .expect("study figures should be generated");
-
-    assert!(figures
-        .iter()
-        .any(|figure| matches!(figure.kind, AnalysisGeneratedFigureKind::MeshResult)));
-    assert!(figures.iter().any(|figure| !figure.figure.is_empty()));
-    let stress_figure = figures
-        .iter()
-        .find(|figure| {
-            figure
-                .field_ids
-                .iter()
-                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
-        })
-        .expect("von Mises figure should be generated");
-    assert!(stress_figure
-        .topology_ids
-        .iter()
-        .any(|topology_id| topology_id == "analysis_mesh"));
-    let persisted = storage::load_run_result(&run.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let topology = persisted
-        .render_topology
-        .as_ref()
-        .expect("run should persist render topology");
-    let solver_triangle_count = topology
-        .meshes
-        .iter()
-        .map(|mesh| mesh.triangles.len())
-        .sum::<usize>();
-    let overlay_triangle_count = stress_figure
-        .figure
-        .plots()
-        .filter_map(|plot| match plot {
-            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
-            _ => None,
-        })
-        .filter(|field| {
-            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
-                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
-        })
-        .map(|field| field.values.len())
-        .sum::<usize>();
-    assert_eq!(overlay_triangle_count, solver_triangle_count);
-}
-
-#[cfg(feature = "plot-core")]
-#[test]
-fn analysis_generate_study_run_figures_uses_generated_solid_through_hole_topology() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("figures-solid-through-hole");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let geometry = split_material_through_hole_study_geometry();
-    let mut model = sample_solid_model();
-    model.geometry_id = geometry.geometry_id.clone();
-    model.geometry_revision = geometry.revision;
-    model.units = geometry.units;
-    model.material_assignments = vec![
-        MaterialAssignment {
-            region_id: "region_base".to_string(),
-            expected_material_id: "mat_steel".to_string(),
-            assigned_material_id: "mat_steel".to_string(),
-            confidence: EvidenceConfidence::Verified,
-        },
-        MaterialAssignment {
-            region_id: "region_cap".to_string(),
-            expected_material_id: "mat_steel".to_string(),
-            assigned_material_id: "mat_steel".to_string(),
-            confidence: EvidenceConfidence::Verified,
-        },
-    ];
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-    mesh_options.refinement.max_iterations = 0;
-    let mut spec = sample_linear_static_study_spec();
-    spec.geometry = geometry;
-    spec.model = Some(model);
-    spec.mesh_options = Some(mesh_options);
-
-    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("split-material through-hole solid study should run");
-    let figures = analysis_generate_study_run_figures(
-        &spec,
-        &run.data.run_id,
-        AnalysisFigureGenerationOptions {
-            include_comparison: false,
-            include_trends: false,
-            ..AnalysisFigureGenerationOptions::default()
-        },
-    )
-    .expect("study figures should be generated");
-
-    let artifact_path = run
-        .data
-        .analysis_mesh_artifact_path
-        .as_ref()
-        .expect("solid study should persist analysis mesh artifact");
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    let persisted = storage::load_run_result(&run.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let topology = persisted
-        .render_topology
-        .as_ref()
-        .expect("run should persist analysis mesh render topology");
-    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
-    let solver_triangle_count = topology
-        .meshes
-        .iter()
-        .map(|mesh| mesh.triangles.len())
-        .sum::<usize>();
+        .transient_results
+        .expect("selected transient payload");
+    assert_eq!(selected.time_points_s.len(), 1);
     assert_eq!(
-        solver_triangle_count,
-        payload["mesh"]["boundary_faces"]
-            .as_array()
-            .expect("analysis mesh boundary faces")
-            .len()
+        selected.strain_snapshots[0].field_id,
+        fea_transient_strain_field_id(1)
     );
-    let stress_figure = figures
-        .iter()
-        .find(|figure| {
-            figure
-                .field_ids
-                .iter()
-                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
-        })
-        .expect("von Mises figure should be generated");
-    let overlay_triangle_count = stress_figure
-        .figure
-        .plots()
-        .filter_map(|plot| match plot {
-            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
-            _ => None,
-        })
-        .filter(|field| {
-            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
-                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
-        })
-        .map(|field| field.values.len())
-        .sum::<usize>();
-    assert_eq!(overlay_triangle_count, solver_triangle_count);
-
-    let _ = fs::remove_dir_all(&root);
+    assert_eq!(
+        selected.stress_snapshots[0].field_id,
+        fea_transient_stress_field_id(1)
+    );
+    assert_eq!(
+        selected.strain_energy_density_snapshots[0].field_id,
+        fea_transient_strain_energy_density_field_id(1)
+    );
+    assert_eq!(
+        selected.strain_energy_snapshots[0].field_id,
+        fea_transient_strain_energy_field_id(1)
+    );
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[cfg(feature = "plot-core")]
 #[test]
-fn analysis_generate_study_run_figures_uses_generated_nested_shell_topology() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("figures-solid-nested-shell");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_study_artifact_root(&root);
-    let geometry = nested_tetrahedron_shell_study_geometry();
-    let mut model = sample_solid_model();
-    model.geometry_id = geometry.geometry_id.clone();
-    model.geometry_revision = geometry.revision;
-    model.units = geometry.units;
-    model.material_assignments = vec![MaterialAssignment {
-        region_id: "body".to_string(),
-        expected_material_id: "mat_steel".to_string(),
-        assigned_material_id: "mat_steel".to_string(),
-        confidence: EvidenceConfidence::Verified,
-    }];
-    model.loads = vec![LoadCase {
-        load_id: "load_tip".to_string(),
-        region_id: "tip".to_string(),
-        kind: LoadKind::Force {
-            fx: 0.0,
-            fy: -250.0,
-            fz: 25.0,
-        },
-    }];
-    let mut mesh_options = runmat_meshing_core::VolumeMeshingOptions {
-        backend: runmat_meshing_core::MeshBackendKind::Solid,
-        target_size: runmat_meshing_core::MeshTargetSize::LengthM(10.0),
-        ..runmat_meshing_core::VolumeMeshingOptions::default()
-    };
-    mesh_options.refinement.strategy = runmat_meshing_core::RefinementStrategy::None;
-    mesh_options.refinement.max_iterations = 0;
-    let mut spec = sample_linear_static_study_spec();
-    spec.geometry = geometry;
-    spec.model = Some(model);
-    spec.mesh_options = Some(mesh_options);
-
-    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("nested-shell solid study should run");
-    let figures = analysis_generate_study_run_figures(
-        &spec,
-        &run.data.run_id,
-        AnalysisFigureGenerationOptions {
-            include_comparison: false,
-            include_trends: false,
-            ..AnalysisFigureGenerationOptions::default()
-        },
-    )
-    .expect("nested-shell study figures should be generated");
-
-    let artifact_path = run
-        .data
-        .analysis_mesh_artifact_path
-        .as_ref()
-        .expect("nested-shell study should persist analysis mesh artifact");
-    let payload: serde_json::Value =
-        serde_json::from_slice(&fs::read(artifact_path).expect("read analysis mesh artifact"))
-            .expect("parse analysis mesh artifact");
-    assert_eq!(
-        payload["mesh"]["backend"]["tetrahedron_generation_family"].as_str(),
-        Some("nested_tetrahedron_shell")
-    );
-    let persisted = storage::load_run_result(&run.data.run_id)
-        .expect("run load should succeed")
-        .expect("run should be persisted");
-    let topology = persisted
-        .render_topology
-        .as_ref()
-        .expect("run should persist analysis mesh render topology");
-    assert_eq!(topology.source, AnalysisRenderTopologySource::AnalysisMesh);
-    let solver_triangle_count = topology
-        .meshes
-        .iter()
-        .map(|mesh| mesh.triangles.len())
-        .sum::<usize>();
-    assert_eq!(
-        solver_triangle_count,
-        payload["mesh"]["boundary_faces"]
-            .as_array()
-            .expect("analysis mesh boundary faces")
-            .len()
-    );
-    let stress_figure = figures
-        .iter()
-        .find(|figure| {
-            figure
-                .field_ids
-                .iter()
-                .any(|field_id| field_id == FEA_FIELD_STRUCTURAL_VON_MISES)
-        })
-        .expect("von Mises figure should be generated");
-    let overlay_triangle_count = stress_figure
-        .figure
-        .plots()
-        .filter_map(|plot| match plot {
-            runmat_plot::plots::PlotElement::Mesh(mesh) => mesh.scalar_field(),
-            _ => None,
-        })
-        .filter(|field| {
-            field.field_id == FEA_FIELD_STRUCTURAL_VON_MISES
-                && field.location == runmat_plot::plots::MeshFieldLocation::Triangle
-        })
-        .map(|field| field.values.len())
-        .sum::<usize>();
-    assert_eq!(overlay_triangle_count, solver_triangle_count);
-
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[cfg(feature = "plot-core")]
-#[test]
-fn analysis_generate_study_run_figures_uses_solver_topology_for_em_fields() {
+fn analysis_generate_study_run_mesh_figure_requires_typed_maxwell_completion() {
     let _guard = analysis_test_guard();
     let spec = sample_electromagnetic_study_spec();
-    let run = analysis_run_study_op(&spec, OperationContext::new(None, None))
-        .expect("electromagnetic study should run");
-
-    let figures = analysis_generate_study_run_figures(
-        &spec,
-        &run.data.run_id,
-        AnalysisFigureGenerationOptions {
-            include_comparison: false,
-            include_trends: false,
-            ..AnalysisFigureGenerationOptions::default()
-        },
-    )
-    .expect("study figures should be generated");
-
-    assert_any_solver_topology_overlay(&figures, &run.data.run_id);
+    let error = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect_err("no EM plot may be synthesized from the retired scalar proxy");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_STUDY.STATIC_EM_TYPED_EXECUTION_REQUIRED"
+    );
 }
 
 #[test]
 fn analysis_results_query_can_exclude_transient_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-    let run = analysis_run_transient_op(
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
+    let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("transient run should succeed");
@@ -13519,11 +7083,11 @@ fn analysis_results_query_can_exclude_transient_payload() {
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: Vec::new(),
             include_transient_results: false,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -13541,13 +7105,13 @@ fn analysis_results_query_can_exclude_transient_payload() {
 fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.steps = vec![AnalysisStep {
-        step_id: "transient_1".to_string(),
-        kind: AnalysisStepKind::Transient,
-    }];
-    let run = analysis_run_transient_op(
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_1".to_string(),
+    )];
+    let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
+        Default::default(),
         OperationContext::new(None, None),
     )
     .expect("transient run should succeed");
@@ -13561,11 +7125,11 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
             include_diagnostics: true,
             diagnostic_codes: Vec::new(),
             include_modal_results: true,
+            include_buckling_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: vec![999],
             include_nonlinear_results: true,
-            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -13578,3 +7142,44 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
     assert_eq!(err.operation, "fea.results");
     assert_eq!(err.op_version, "fea.results/v1");
 }
+
+#[test]
+fn retired_electromagnetic_proxy_solver_contract_is_rejected() {
+    let old = serde_json::json!({
+        "solver": "electromagnetic_potential",
+        "options": {
+            "deterministic_mode": true, "precision_mode": "fp64",
+            "quality_policy": "strict", "residual_target": 1e-6,
+            "harmonic_tolerance": 1e-7, "harmonic_max_iterations": 96,
+            "sweep_enabled": false, "sweep_frequency_hz": []
+        }
+    });
+    assert!(serde_json::from_value::<AnalysisSolverOptions>(old).is_err());
+}
+
+#[test]
+fn scalar_study_execution_requires_authenticated_maxwell_completion() {
+    let _guard = analysis_test_guard();
+    let spec = sample_electromagnetic_study_spec();
+    assert!(matches!(
+        spec.execution.steps[0].solver_options,
+        AnalysisSolverOptions::MaxwellHarmonic(_)
+    ));
+    let error = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect_err("scalar model path must not synthesize Maxwell fields");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_STUDY.STATIC_EM_TYPED_EXECUTION_REQUIRED"
+    );
+}
+
+#[test]
+fn electromagnetic_harmonic_defaults_select_genuine_maxwell_without_vector_potential() {
+    let step = ProcedureStep::electromagnetic_harmonic("phasor");
+    assert!(matches!(
+        AnalysisSolverOptions::defaults_for(&step).unwrap(),
+        AnalysisSolverOptions::MaxwellHarmonic(_)
+    ));
+}
+
+mod study_step_execution;

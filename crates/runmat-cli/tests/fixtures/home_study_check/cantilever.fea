@@ -1,0 +1,39 @@
+geometry beam {
+    file = "./geometry/cantilever.step"
+    units = mm
+    region body : solid { select name "Beam"; expect exactly_one }
+    region fixed : face { select name "Fixed end"; expect exactly_one }
+    region tip : face { select name "Loaded end"; expect exactly_one }
+}
+
+mesh beam on geometry.beam {
+    tetrahedra {
+        order = quadratic
+        target_size = 0.15 m
+        maximum_deviation = 0.001 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model loaded_beam {
+    assign material.steel to geometry.beam.region.body
+    load end_traction {
+        traction on geometry.beam.region.tip = [0, 0, -100000] N
+    }
+}
+
+study cantilever_static {
+    geometry = geometry.beam
+    mesh = mesh.beam
+    model = model.loaded_beam
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+}

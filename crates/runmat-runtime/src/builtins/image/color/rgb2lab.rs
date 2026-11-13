@@ -1,23 +1,24 @@
 //! MATLAB-compatible `rgb2lab` color-space conversion.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinErrorDescriptor,
+    BuiltinPreparationFormId, Rgb2LabOptionName, RgbColorSpace, RgbWhitePoint, RGB2LAB_DESCRIPTOR,
+    RGB2LAB_ERROR_INTERNAL, RGB2LAB_ERROR_INVALID_INPUT, RGB2LAB_ERROR_INVALID_OPTION,
+    RGB2LAB_ERROR_TOO_MANY_INPUTS, RGB2LAB_ERROR_TOO_MANY_OUTPUTS, RGB2LAB_EXTENSIONS,
 };
+#[cfg(test)]
+use runmat_builtins::{BuiltinIntegerInputAvailability, RGB2LAB_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
+use crate::builtins::image::color::color_presentation::{
+    self, ColorHostRoute, ColorHostUpload, SelectedColorPresentation,
+};
 use crate::builtins::image::color::common;
-use crate::builtins::image::color::type_resolvers::same_shape_type;
+use crate::context::preparation::{
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rgb2lab";
@@ -26,126 +27,6 @@ const YN: f64 = 1.0;
 const ZN: f64 = 1.08883;
 const EPSILON: f64 = 216.0 / 24389.0;
 const KAPPA: f64 = 24389.0 / 27.0;
-
-const RGB2LAB_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "LAB",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "CIE L*a*b* image or colormap converted from RGB input.",
-}];
-
-const RGB2LAB_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "RGB",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "RGB image, image stack, or c-by-3 colormap values.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "ColorSpace or WhitePoint name-value options.",
-    },
-];
-
-const RGB2LAB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "LAB = rgb2lab(RGB, Name=Value)",
-    inputs: &RGB2LAB_INPUTS,
-    outputs: &RGB2LAB_OUTPUT,
-}];
-
-const RGB2LAB_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RGB2LAB.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:rgb2lab:TooManyInputs"),
-    when: "More than the two supported name-value pairs are supplied.",
-    message: "rgb2lab: too many input arguments",
-};
-
-const RGB2LAB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RGB2LAB.INVALID_INPUT",
-    identifier: Some("RunMat:rgb2lab:InvalidInput"),
-    when: "Input cannot be interpreted as an MxNx3 RGB image or Nx3 RGB colormap.",
-    message: "rgb2lab: invalid input",
-};
-
-const RGB2LAB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RGB2LAB.INTERNAL",
-    identifier: Some("RunMat:rgb2lab:Internal"),
-    when: "L*a*b* output tensor construction fails internally.",
-    message: "rgb2lab: internal conversion failure",
-};
-
-const RGB2LAB_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RGB2LAB.INVALID_OPTION",
-    identifier: Some("RunMat:rgb2lab:InvalidOption"),
-    when: "A ColorSpace or WhitePoint name-value argument is malformed or unsupported.",
-    message: "rgb2lab: invalid name-value option",
-};
-
-const RGB2LAB_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    RGB2LAB_ERROR_TOO_MANY_INPUTS,
-    RGB2LAB_ERROR_INVALID_INPUT,
-    RGB2LAB_ERROR_INTERNAL,
-    RGB2LAB_ERROR_INVALID_OPTION,
-];
-
-pub const RGB2LAB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RGB2LAB_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RGB2LAB_ERRORS,
-};
-
-const RGB2LAB_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rgb2lab-explicit-gpu",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rgb2lab with an explicitly requested gpuArray input is a RunMat extension because the compatibility target documents no interactive GPU Arrays capability",
-    error_identifier: Some("RunMat:compatibility:Rgb2labExplicitGpuExtension"),
-};
-pub const RGB2LAB_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RGB2LAB_EXPLICIT_GPU_EXTENSION];
-
-const RGB2LAB_DOCUMENTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "RGB",
-        classes: &common::DOCUMENTED_IMAGE_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "uint8 and uint16 RGB images, MxNx3xP stacks, and c-by-3 colormaps are documented and scale to double L*a*b* output.",
-    }];
-const RGB2LAB_REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "RGB",
-        classes: &common::REJECTED_IMAGE_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Signed integer and uint32/uint64 RGB values are outside the documented surface and reject before resident download.",
-    }];
-pub const RGB2LAB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "LAB = rgb2lab(integer_RGB)",
-        inputs: &RGB2LAB_DOCUMENTED_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Authoritative uint8/uint16 samples are normalized by their full class range before the documented floating color-space conversion and produce double output. Automatic residency may gather to the documented host implementation; the separately gated explicit-gpuArray extension restores output to the exact owner or errors.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "rgb2lab(unsupported_integer_RGB)",
-        inputs: &RGB2LAB_REJECTED_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Unsupported integer classes reject consistently on host and from resident dtype metadata.",
-    },
-];
 
 fn rgb2lab_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rgb2lab_error_with_message(error.message, error)
@@ -166,66 +47,142 @@ fn rgb2lab_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
     if err.identifier().is_some() {
         err
     } else {
-        rgb2lab_error_with_message(err.message().to_string(), fallback)
+        build_runtime_error(err.message().to_string())
+            .with_builtin(NAME)
+            .with_identifier(fallback.identifier.expect("closed RGB to Lab error"))
+            .with_source(err)
+            .build()
     }
 }
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::color::rgb2lab")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: NAME,
-    op_kind: GpuOpKind::Custom("rgb2lab"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host implementation supports documented sRGB, Adobe RGB (1998), ProPhoto RGB, linear sRGB, and reference-white conversion paths.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::color::rgb2lab")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not fused yet; conversion is channel-coupled and piecewise.",
-};
-
 #[runtime_builtin(
     name = "rgb2lab",
-    category = "image/color",
-    summary = "Convert RGB image or colormap values to CIE L*a*b*.",
-    keywords = "rgb2lab,rgb,lab,cielab,color,image,colormap",
-    accel = "sink",
-    type_resolver(same_shape_type),
-    descriptor(crate::builtins::image::color::rgb2lab::RGB2LAB_DESCRIPTOR),
-    extensions(crate::builtins::image::color::rgb2lab::RGB2LAB_EXTENSIONS),
-    integer_capabilities(crate::builtins::image::color::rgb2lab::RGB2LAB_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::rgb2lab"
 )]
-async fn rgb2lab_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let options = parse_rgb2lab_options(&rest)?;
-    let mut resident_sources = Vec::new();
-    if let Value::GpuTensor(handle) = &rgb {
-        if runmat_accelerate_api::handle_is_explicit(handle) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &RGB2LAB_EXPLICIT_GPU_EXTENSION,
-                NAME,
-            )?;
+async fn rgb2lab_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    rgb: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let options = parse_rgb2lab_options(rest.view())?;
+    crate::output_count::validate_fixed_outputs(
+        &RGB2LAB_DESCRIPTOR,
+        &RGB2LAB_ERROR_TOO_MANY_OUTPUTS,
+        NAME,
+    )?;
+    let admitted = admit_rgb(&rgb)?;
+    let resident_sources = match &rgb {
+        Value::GpuTensor(handle) => vec![handle.clone()],
+        _ => Vec::new(),
+    };
+    let selected = match &rgb {
+        Value::GpuTensor(handle) => {
+            let output_dtype = if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+            {
+                NumericDType::F32
+            } else {
+                NumericDType::F64
+            };
+            let color_space = match options.color_space {
+                RgbColorSpace::Srgb => 0u8,
+                RgbColorSpace::AdobeRgb1998 => 1,
+                RgbColorSpace::ProphotoRgb => 2,
+                RgbColorSpace::LinearRgb => 3,
+            };
+            color_presentation::select(
+                runtime.as_ref(),
+                ColorHostUpload {
+                    route: ColorHostRoute::RgbToLab,
+                    sources: &resident_sources,
+                    output_shape: handle.shape().to_vec(),
+                    output_dtype,
+                    host_compute_scratch: color_presentation::checked_scratch(
+                        color_presentation::checked_elements(handle.shape()),
+                        16,
+                    ),
+                    control_facts: runmat_execution::Digest::sha256(
+                        serde_json::to_vec(&(color_space, options.white_point))
+                            .expect("typed RGB to Lab facts serialize"),
+                    ),
+                },
+            )?
         }
-        validate_resident_rgb(handle)?;
-        resident_sources.push(handle.clone());
+        _ => None,
+    };
+    if !admitted {
+        return rgb2lab_execute(rgb, options, resident_sources, selected).await;
     }
-    let resident_guard = common::protect_resident_inputs(&resident_sources);
-    let tensor = common::gather_tensor(NAME, rgb)
+    let request = AdmittedBuiltinPreparation::new(
+        BuiltinPreparationAdmission {
+            binding: BuiltinBindingIdentity {
+                builtin: BuiltinCatalogIdentity { name: NAME },
+                variant: "default",
+            },
+            form: BuiltinPreparationFormId(0),
+            signature: 0,
+            input_count: rest.len() + 1,
+            requested_outputs: crate::output_count::current_output_count(),
+        },
+        vec![rgb],
+    )?;
+    let execute = |mut operands: Vec<Value>| async move {
+        rgb2lab_execute(
+            operands.pop().expect("admitted RGB operand"),
+            options,
+            resident_sources,
+            selected,
+        )
         .await
-        .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
+    };
+    execute_request(runtime.as_ref(), request, execute).await
+}
+
+fn admit_rgb(rgb: &Value) -> BuiltinResult<bool> {
+    match rgb {
+        Value::Tensor(tensor) => {
+            common::stacked_color_layout(tensor, NAME)
+                .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
+            if !matches!(
+                tensor.numeric_dtype(),
+                NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
+            ) {
+                return Err(rgb2lab_error_with_message(
+                    format!("rgb2lab: {} input is not supported; expected single, double, uint8, or uint16", tensor.numeric_dtype().class_name()),
+                    &RGB2LAB_ERROR_INVALID_INPUT,
+                ));
+            }
+            Ok(true)
+        }
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_is_explicit(handle) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &RGB2LAB_EXTENSIONS[0],
+                    NAME,
+                )?;
+            }
+            validate_resident_rgb(handle)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+async fn rgb2lab_execute(
+    rgb: Value,
+    options: Rgb2LabOptions,
+    resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
+    mut selected: Option<SelectedColorPresentation>,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let resident_guard = common::protect_resident_inputs(&resident_sources);
+    let tensor = match rgb {
+        Value::Tensor(tensor) => tensor,
+        other => common::gather_tensor(NAME, other)
+            .await
+            .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?,
+    };
     resident_guard.restore();
     let layout = common::stacked_color_layout(&tensor, NAME)
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
@@ -266,22 +223,26 @@ async fn rgb2lab_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INTERNAL))?;
-    common::restore_resident_numeric_result_for_sources(
-        &resident_sources,
-        common::image_value_from_tensor(out),
-        NAME,
-    )
+    let output = color_presentation::publish(&mut selected, || {
+        common::restore_resident_numeric_result_for_sources(
+            &resident_sources,
+            common::image_value_from_tensor(out),
+            NAME,
+        )
+    })?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| rgb2lab_map_error(err.into_runtime_error(), &RGB2LAB_ERROR_INTERNAL))
 }
 
 fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {
     let dtype = common::resident_numeric_dtype(handle, NAME)
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
-    let image_shape = handle.shape.len() >= 3
-        && handle.shape[0] > 0
-        && handle.shape[1] > 0
-        && handle.shape.get(2) == Some(&3);
+    let image_shape = handle.shape().len() >= 3
+        && handle.shape()[0] > 0
+        && handle.shape()[1] > 0
+        && handle.shape().get(2) == Some(&3);
     let colormap_shape =
-        handle.shape.len() == 2 && handle.shape[0] > 0 && handle.shape.get(1) == Some(&3);
+        handle.shape().len() == 2 && handle.shape()[0] > 0 && handle.shape().get(1) == Some(&3);
     let supported = (image_shape || colormap_shape)
         && matches!(
             dtype,
@@ -292,7 +253,7 @@ fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> Bui
             format!(
                 "rgb2lab: unsupported resident class {} or shape {:?}",
                 dtype.class_name(),
-                handle.shape
+                handle.shape()
             ),
             &RGB2LAB_ERROR_INVALID_INPUT,
         ));
@@ -300,30 +261,24 @@ fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> Bui
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InputColorSpace {
-    Srgb,
-    AdobeRgb1998,
-    ProphotoRgb,
-    LinearRgb,
-}
-
 #[derive(Clone, Copy, Debug)]
 struct Rgb2LabOptions {
-    color_space: InputColorSpace,
+    color_space: RgbColorSpace,
     white_point: [f64; 3],
 }
 
 impl Default for Rgb2LabOptions {
     fn default() -> Self {
         Self {
-            color_space: InputColorSpace::Srgb,
+            color_space: RgbColorSpace::Srgb,
             white_point: [XN, YN, ZN],
         }
     }
 }
 
-fn parse_rgb2lab_options(rest: &[Value]) -> BuiltinResult<Rgb2LabOptions> {
+fn parse_rgb2lab_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Rgb2LabOptions> {
     if rest.len() > 4 {
         return Err(rgb2lab_error(&RGB2LAB_ERROR_TOO_MANY_INPUTS));
     }
@@ -336,22 +291,17 @@ fn parse_rgb2lab_options(rest: &[Value]) -> BuiltinResult<Rgb2LabOptions> {
     let mut options = Rgb2LabOptions::default();
     for pair in rest.chunks_exact(2) {
         let name = tensor::value_to_string(&pair[0])
-            .ok_or_else(|| rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION))?
-            .to_ascii_lowercase();
-        match name.as_str() {
-            "colorspace" => {
+            .ok_or_else(|| rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION))?;
+        match Rgb2LabOptionName::from_name(&name) {
+            Some(Rgb2LabOptionName::ColorSpace) => {
                 let value = tensor::value_to_string(&pair[1])
-                    .ok_or_else(|| rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION))?
-                    .to_ascii_lowercase();
-                options.color_space = match value.as_str() {
-                    "srgb" => InputColorSpace::Srgb,
-                    "adobe-rgb-1998" => InputColorSpace::AdobeRgb1998,
-                    "prophoto-rgb" => InputColorSpace::ProphotoRgb,
-                    "linear-rgb" => InputColorSpace::LinearRgb,
-                    _ => return Err(rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION)),
-                };
+                    .ok_or_else(|| rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION))?;
+                options.color_space = RgbColorSpace::from_name(&value)
+                    .ok_or_else(|| rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION))?;
             }
-            "whitepoint" => options.white_point = parse_white_point(&pair[1])?,
+            Some(Rgb2LabOptionName::WhitePoint) => {
+                options.white_point = parse_white_point(&pair[1])?
+            }
             _ => return Err(rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION)),
         }
     }
@@ -360,21 +310,14 @@ fn parse_rgb2lab_options(rest: &[Value]) -> BuiltinResult<Rgb2LabOptions> {
 
 fn parse_white_point(value: &Value) -> BuiltinResult<[f64; 3]> {
     if let Some(name) = tensor::value_to_string(value) {
-        return match name.to_ascii_lowercase().as_str() {
-            "a" => Ok([1.0985, 1.0, 0.3558]),
-            "c" => Ok([0.9807, 1.0, 1.1822]),
-            "e" => Ok([1.0, 1.0, 1.0]),
-            "d50" => Ok([0.9642, 1.0, 0.8251]),
-            "d55" => Ok([0.9568, 1.0, 0.9214]),
-            "d65" => Ok([XN, YN, ZN]),
-            "icc" => Ok([31595.0 / 32768.0, 1.0, 27030.0 / 32768.0]),
-            _ => Err(rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION)),
-        };
+        return RgbWhitePoint::from_name(&name)
+            .map(RgbWhitePoint::coordinates)
+            .ok_or_else(|| rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION));
     }
     let Value::Tensor(tensor) = value else {
         return Err(rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION));
     };
-    if tensor.shape != [1, 3]
+    if tensor.shape() != [1, 3]
         || !matches!(
             tensor.numeric_dtype(),
             NumericDType::F32 | NumericDType::F64
@@ -394,13 +337,13 @@ fn parse_white_point(value: &Value) -> BuiltinResult<[f64; 3]> {
 
 fn rgb_to_lab(r: f64, g: f64, b: f64, options: Rgb2LabOptions) -> (f64, f64, f64) {
     let (linear, matrix, source_white) = match options.color_space {
-        InputColorSpace::Srgb => (
+        RgbColorSpace::Srgb => (
             [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b)],
             SRGB_TO_XYZ,
             [XN, YN, ZN],
         ),
-        InputColorSpace::LinearRgb => ([r, g, b], SRGB_TO_XYZ, [XN, YN, ZN]),
-        InputColorSpace::AdobeRgb1998 => (
+        RgbColorSpace::LinearRgb => ([r, g, b], SRGB_TO_XYZ, [XN, YN, ZN]),
+        RgbColorSpace::AdobeRgb1998 => (
             [
                 r.powf(563.0 / 256.0),
                 g.powf(563.0 / 256.0),
@@ -409,7 +352,7 @@ fn rgb_to_lab(r: f64, g: f64, b: f64, options: Rgb2LabOptions) -> (f64, f64, f64
             ADOBE_TO_XYZ,
             [XN, YN, ZN],
         ),
-        InputColorSpace::ProphotoRgb => (
+        RgbColorSpace::ProphotoRgb => (
             [
                 prophoto_to_linear(r),
                 prophoto_to_linear(g),
@@ -500,282 +443,4 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::builtins::common::{gpu_helpers, test_support};
-    use futures::executor::block_on;
-    use runmat_value::{IntegerStorage, Tensor};
-
-    fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
-        let Value::Tensor(out) =
-            block_on(rgb2lab_builtin(Value::Tensor(tensor), Vec::new())).expect("rgb2lab")
-        else {
-            panic!("expected tensor");
-        };
-        Ok(out)
-    }
-
-    fn assert_close(actual: f64, expected: f64, tolerance: f64) {
-        assert!(
-            (actual - expected).abs() <= tolerance,
-            "expected {expected}, got {actual}"
-        );
-    }
-
-    fn values(tensor: &Tensor) -> Vec<f64> {
-        tensor.materialize_f64()
-    }
-
-    #[test]
-    fn converts_white_to_lab_reference() {
-        let rgb = Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
-        let out = call(rgb).unwrap();
-        let values = values(&out);
-        assert_close(values[0], 100.0, 1e-4);
-        assert_close(values[1], 0.0, 1e-3);
-        assert_close(values[2], 0.0, 1e-3);
-    }
-
-    #[test]
-    fn rgb2lab_preserves_single_output_class() {
-        let rgb = Tensor::from_f32(vec![1.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
-        let out = call(rgb).expect("single RGB");
-        assert_eq!(out.numeric_dtype(), NumericDType::F32);
-        let values = values(&out);
-        assert_close(values[0], 100.0, 1e-4);
-        assert_close(values[1], 0.0, 1e-3);
-        assert_close(values[2], 0.0, 1e-3);
-    }
-
-    #[test]
-    fn converts_rgb_colormap_to_lab_references() {
-        let rgb = Tensor::new(
-            vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-            vec![4, 3],
-        )
-        .unwrap();
-        let out = call(rgb).unwrap();
-        assert_eq!(out.shape, vec![4, 3]);
-        let expected = vec![
-            0.0, 53.2408, 87.7347, 32.2970, 0.0, 80.0925, -86.1827, 79.1875, 0.0, 67.2032, 83.1793,
-            -107.8602,
-        ];
-        for (actual, expected) in values(&out).iter().zip(expected) {
-            assert_close(*actual, expected, 1e-3);
-        }
-    }
-
-    #[test]
-    fn accepts_documented_single_uint8_and_uint16_colormaps() {
-        let single = Tensor::from_f32(vec![1.0, 1.0, 1.0], vec![1, 3]).unwrap();
-        assert_eq!(call(single).unwrap().numeric_dtype(), NumericDType::F32);
-        for storage in [
-            IntegerStorage::U8(vec![255, 255, 255]),
-            IntegerStorage::U16(vec![65535, 65535, 65535]),
-        ] {
-            let out = call(Tensor::new_integer(storage, vec![1, 3]).unwrap()).unwrap();
-            assert_eq!(out.numeric_dtype(), NumericDType::F64);
-            assert_close(values(&out)[0], 100.0, 1e-4);
-        }
-    }
-
-    #[test]
-    fn supports_documented_color_space_and_white_point_options() {
-        let rgb = Tensor::new(vec![0.2, 0.3, 0.4], vec![1, 3]).unwrap();
-        let Value::Tensor(adobe) = block_on(rgb2lab_builtin(
-            Value::Tensor(rgb.clone()),
-            vec![
-                Value::String("ColorSpace".into()),
-                Value::String("adobe-rgb-1998".into()),
-            ],
-        ))
-        .expect("Adobe RGB option") else {
-            panic!("expected tensor")
-        };
-        for (actual, expected) in values(&adobe).iter().zip([30.1783, -5.6902, -20.8223]) {
-            assert_close(*actual, expected, 2e-2);
-        }
-
-        let Value::Tensor(d50) = block_on(rgb2lab_builtin(
-            Value::Tensor(rgb),
-            vec![
-                Value::String("WhitePoint".into()),
-                Value::String("d50".into()),
-            ],
-        ))
-        .expect("D50 option") else {
-            panic!("expected tensor")
-        };
-        for (actual, expected) in values(&d50).iter().zip([31.3294, -4.0732, -18.1750]) {
-            assert_close(*actual, expected, 2e-2);
-        }
-    }
-
-    #[test]
-    fn converts_m_by_n_by_three_by_p_image_stacks_without_crossing_planes() {
-        let rgb = Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0], vec![1, 1, 3, 2]).unwrap();
-        let out = call(rgb).expect("stacked RGB");
-        assert_eq!(out.shape, vec![1, 1, 3, 2]);
-        let values = values(&out);
-        assert_close(values[0], 100.0, 1e-4);
-        assert_close(values[1], 0.0, 1e-3);
-        assert_close(values[2], 0.0, 1e-3);
-        assert_close(values[3], 53.2408, 1e-3);
-        assert_close(values[4], 80.0925, 1e-3);
-        assert_close(values[5], 67.2032, 1e-3);
-    }
-
-    #[test]
-    fn scales_uint8_rgb_before_lab_conversion() {
-        let rgb =
-            Tensor::new_with_dtype(vec![255.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::U8).unwrap();
-        let out = call(rgb).unwrap();
-        assert_eq!(out.numeric_dtype(), NumericDType::F64);
-        let values = values(&out);
-        assert_close(values[0], 53.2408, 1e-3);
-        assert_close(values[1], 80.0925, 1e-3);
-        assert_close(values[2], 67.2032, 1e-3);
-    }
-
-    #[test]
-    fn rgb2lab_reads_typed_integer_rgb_storage_exactly() {
-        let rgb = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]).unwrap();
-
-        let out = call(rgb).unwrap();
-
-        assert_eq!(out.numeric_dtype(), NumericDType::F64);
-        let values = values(&out);
-        assert_close(values[0], 53.2408, 1e-3);
-        assert_close(values[1], 80.0925, 1e-3);
-        assert_close(values[2], 67.2032, 1e-3);
-    }
-
-    #[test]
-    fn rgb2lab_accepts_uint16_and_rejects_other_integer_classes() {
-        let white =
-            Tensor::new_integer(IntegerStorage::U16(vec![65535; 3]), vec![1, 1, 3]).unwrap();
-        let out = call(white).expect("uint16 RGB");
-        assert_eq!(out.numeric_dtype(), NumericDType::F64);
-        let values = values(&out);
-        assert_close(values[0], 100.0, 1e-4);
-        assert_close(values[1], 0.0, 1e-3);
-        assert_close(values[2], 0.0, 1e-3);
-
-        for storage in [
-            IntegerStorage::I8(vec![0; 3]),
-            IntegerStorage::I16(vec![0; 3]),
-            IntegerStorage::I32(vec![0; 3]),
-            IntegerStorage::I64(vec![0; 3]),
-            IntegerStorage::U32(vec![0; 3]),
-            IntegerStorage::U64(vec![0; 3]),
-        ] {
-            let input = Tensor::new_integer(storage, vec![1, 1, 3]).unwrap();
-            let err = block_on(rgb2lab_builtin(Value::Tensor(input), Vec::new()))
-                .expect_err("unsupported integer class");
-            assert_eq!(err.identifier(), RGB2LAB_ERROR_INVALID_INPUT.identifier);
-        }
-    }
-
-    #[test]
-    fn rgb2lab_descriptor_signatures_cover_surface() {
-        let labels: Vec<&str> = RGB2LAB_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|signature| signature.label)
-            .collect();
-        assert_eq!(labels, vec!["LAB = rgb2lab(RGB, Name=Value)"]);
-    }
-
-    #[test]
-    fn rgb2lab_integer_capabilities_record_supported_and_rejected_classes() {
-        assert_eq!(RGB2LAB_INTEGER_CAPABILITIES.len(), 2);
-        assert_eq!(
-            RGB2LAB_INTEGER_CAPABILITIES[0].inputs[0].availability,
-            BuiltinIntegerInputAvailability::Documented
-        );
-        assert_eq!(
-            RGB2LAB_INTEGER_CAPABILITIES[1].inputs[0].availability,
-            BuiltinIntegerInputAvailability::Rejected
-        );
-        assert_eq!(
-            RGB2LAB_INTEGER_CAPABILITIES[0].output_class,
-            BuiltinIntegerOutputClassRule::Double
-        );
-    }
-
-    #[test]
-    fn rgb2lab_explicit_gpu_form_is_extension_gated_before_download() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 3],
-            device_id: u32::MAX - 13,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
-        let err = block_on(rgb2lab_builtin(
-            Value::GpuTensor(handle.clone()),
-            Vec::new(),
-        ))
-        .expect_err("explicit GPU form must be gated");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
-        assert_eq!(
-            err.identifier(),
-            RGB2LAB_EXPLICIT_GPU_EXTENSION.error_identifier
-        );
-    }
-
-    #[test]
-    fn rgb2lab_enabled_explicit_gpu_form_restores_output_to_exact_owner() {
-        test_support::with_test_provider(|provider| {
-            let rgb = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3])
-                .expect("RGB");
-            let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload RGB");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-            let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-            let value = block_on(rgb2lab_builtin(
-                Value::GpuTensor(source.clone()),
-                Vec::new(),
-            ))
-            .expect("explicit resident rgb2lab");
-            let Value::GpuTensor(output) = value else {
-                panic!("explicit gpuArray output must remain resident");
-            };
-            assert_eq!(output.device_id, source.device_id);
-            assert_ne!(output.buffer_id, source.buffer_id);
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&output),
-                Some(runmat_accelerate_api::ProviderPrecision::F64)
-            );
-            assert!(runmat_accelerate_api::handle_is_explicit(&output));
-            provider.free(&output).expect("free output");
-            provider.free(&source).expect("free source");
-            runmat_accelerate_api::clear_handle_metadata(&output);
-            runmat_accelerate_api::clear_handle_metadata(&source);
-        });
-    }
-
-    #[test]
-    fn rgb2lab_descriptor_errors_have_stable_codes() {
-        let codes: Vec<&str> = RGB2LAB_DESCRIPTOR
-            .errors
-            .iter()
-            .map(|error| error.code)
-            .collect();
-        assert!(codes.contains(&"RM.RGB2LAB.TOO_MANY_INPUTS"));
-        assert!(codes.contains(&"RM.RGB2LAB.INVALID_INPUT"));
-        assert!(codes.contains(&"RM.RGB2LAB.INTERNAL"));
-    }
-
-    #[test]
-    fn rgb2lab_malformed_name_value_uses_stable_identifier() {
-        let err = block_on(rgb2lab_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-            .expect_err("expected argument error");
-        assert_eq!(err.identifier(), RGB2LAB_ERROR_INVALID_OPTION.identifier);
-    }
-}
+mod tests;

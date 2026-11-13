@@ -1,0 +1,85 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("textscan"),
+    slug: Some("textscan"),
+    summary: "Parse formatted text from a string or file identifier.",
+    description: "`C = textscan(textOrFileID, formatSpec)` parses host text or consumes bytes from the current position of a file identifier opened by `fopen`.",
+    keywords: &["textscan", "formatted text", "format specifier", "delimiter", "header", "csv", "log import"],
+    related: &["fopen", "fclose", "importdata", "readmatrix"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Input and format", paragraphs: &[
+            "The first input is scalar string/character text to parse, or a real numeric file identifier. A file identifier uses its existing encoding and advances to the consumed byte position. A filename string is parsed as text, not opened as a file. Optional repeat count N precedes name-value controls.",
+            "Floating conversions include %f32 and %f64. Decimal %d, %i, and %u, hexadecimal %x, and binary %b support size and signedness suffixes selecting exact int8 through int64 or uint8 through uint64. Unsuffixed decimal signed/unsigned results are int32/uint32; unsuffixed hexadecimal and binary results are uint64. %* skips a field, and widths such as %5f or %10s limit a conversion.",
+            "Text conversions return cell columns of strings. Numeric columns retain native integer class or physical single/double precision. CollectOutput groups only adjacent numeric columns with the same class into a column-major matrix.",
+        ] },
+        BuiltinDocumentationSection { heading: "Options and errors", paragraphs: &[
+            "Supported controls are Delimiter, MultipleDelimsAsOne, HeaderLines, TreatAsEmpty, CommentStyle, CollectOutput, ReturnOnError, and Whitespace. Line and block comments are ignored and blank records skipped after header/comment processing. ReturnOnError defaults to true and returns the prefix parsed before an incompatible token; false raises a parse error.",
+            "Typed-integer file identifiers, repeat counts, and numeric controls are RunMat-only extensions. MATLAB compatibility mode rejects them before scanning; documented integer format conversions remain available in both modes. Unsupported named controls report an argument error rather than being silently ignored.",
+        ] },
+        BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
+            "Formatted parsing is a host fusion boundary and returns a host cell array; it does not launch an accelerator kernel. Existing admitted resident controls are materialized by their exact provider before parsing. A file identifier refers to a session-local open handle, not a transferable file snapshot; worker execution needs its own valid handle and filesystem capability.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample {
+            id: "mixed", title: "Parse numeric and text columns",
+            program: "txt = sprintf('1 alpha\\n2 beta\\n');\nC = textscan(txt, '%f %s');\nnums = C{1};\nlabels = C{2};\nnums",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(nums, [1; 2])); assert(strcmp(labels{1}, 'alpha')); assert(strcmp(labels{2}, 'beta'));" },
+        },
+        BuiltinExample {
+            id: "csv-missing", title: "Parse CSV with header and missing tokens",
+            program: "txt = sprintf('name,value\\nA,1.5\\nB,NA\\n');\nC = textscan(txt, '%s %f', 'Delimiter', ',', 'HeaderLines', 1, 'TreatAsEmpty', 'NA');\nC{2}",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(C{1}{1}, 'A')); assert(strcmp(C{1}{2}, 'B')); assert(C{2}(1) == 1.5); assert(isnan(C{2}(2)));" },
+        },
+        BuiltinExample {
+            id: "file-id", title: "Read from a file identifier",
+            program: "fid = fopen('log.txt', 'r');\nassert(fid >= 3);\nC = textscan(fid, '%f %s', 'HeaderLines', 1);\nstatus = fclose(fid);\nC{1}",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::NativeFilesystem,
+            fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "file-id" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "log.txt", content: BuiltinFixtureContent::Utf8("value name\n10 ten\n20 twenty\n") }] }),
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(C{1}, [10; 20])); assert(strcmp(C{2}{1}, 'ten')); assert(strcmp(C{2}{2}, 'twenty')); assert(status == 0);" },
+        },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Does textscan read filenames directly?", answer: "No. A text scalar is parsed as its contents. Open a file with fopen and pass its identifier." },
+        BuiltinDocumentationFaq { question: "How are text and numeric results represented?", answer: "Text conversions are cell columns of strings; numeric conversions are dense tensors in the selected class, without a double detour for exact integers." },
+        BuiltinDocumentationFaq { question: "When should I use readmatrix instead?", answer: "Use readmatrix for simple numeric files. Use textscan for explicit mixed formats, comments, skips, and widths." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "fopen", target: BuiltinDocumentationLinkTarget::Builtin("fopen") },
+        BuiltinDocumentationLink { label: "fclose", target: BuiltinDocumentationLinkTarget::Builtin("fclose") },
+        BuiltinDocumentationLink { label: "importdata", target: BuiltinDocumentationLinkTarget::Builtin("importdata") },
+        BuiltinDocumentationLink { label: "readmatrix", target: BuiltinDocumentationLinkTarget::Builtin("readmatrix") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Textscan invocation and output contract", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan.rs") },
+            BuiltinDocumentationLink { label: "Pre-effect input and option admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan/admission.rs") },
+            BuiltinDocumentationLink { label: "Format conversion grammar", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan/format.rs") },
+            BuiltinDocumentationLink { label: "File cursor and decoder", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan/input.rs") },
+            BuiltinDocumentationLink { label: "Option controls", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan/options.rs") },
+            BuiltinDocumentationLink { label: "Formatted parsing cases", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan/tests/parsing.rs") },
+            BuiltinDocumentationLink { label: "File cursor cases", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/textscan/tests/file.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Format, integer, options, and file cursor behavior", location: "builtins::io::textscan::tests" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

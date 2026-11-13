@@ -14,6 +14,7 @@ impl ExactPcurveEvaluator for OcctExactEvaluator {
         let value = ffi::bridge::exact_pcurve_range(
             self.session_id,
             key.face,
+            key.face_reversed,
             key.wire,
             key.position,
             key.seam_image,
@@ -27,7 +28,8 @@ impl ExactPcurveEvaluator for OcctExactEvaluator {
         id: &PcurveEvaluatorId,
         parameter: f64,
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 2], GeometryEvaluationError> {
+    ) -> Result<[runmat_geometry_core::GeometryParameterCoordinate; 2], GeometryEvaluationError>
+    {
         Ok(self.pcurve_derivatives(id, parameter, control)?.point_uv)
     }
 
@@ -66,6 +68,7 @@ impl OcctExactEvaluator {
         let value = ffi::bridge::exact_pcurve_derivatives(
             self.session_id,
             key.face,
+            key.face_reversed,
             key.wire,
             key.position,
             key.seam_image,
@@ -74,21 +77,37 @@ impl OcctExactEvaluator {
         .map_err(query_error)?;
         control.checkpoint()?;
         valid_range(value.range_start, value.range_end)?;
-        let result = PcurveDerivatives {
-            point_uv: [value.point_u, value.point_v],
-            first_uv: [value.first_u, value.first_v],
-            second_uv: [value.second_u, value.second_v],
-        };
-        if result
-            .point_uv
-            .into_iter()
-            .chain(result.first_uv)
-            .chain(result.second_uv)
-            .any(|component| !component.is_finite())
-        {
-            return Err(invalid("OCCT pcurve derivatives are not finite"));
-        }
-        Ok(result)
+        let surface = self
+            .bindings
+            .surface_by_face
+            .get(&key.face)
+            .map(|surface| format!("occt:{}:{}", self.session_id, surface.as_str()))
+            .unwrap_or_else(|| format!("occt:{}:face:{}", self.session_id, key.face));
+        let u = super::evaluator::parameter_frame(
+            value.u_parameter_unit,
+            value.parameter_scale,
+            surface.clone(),
+            runmat_geometry_core::GeometryParameterAxis::SurfaceU,
+        )?;
+        let v = super::evaluator::parameter_frame(
+            value.v_parameter_unit,
+            value.parameter_scale,
+            surface,
+            runmat_geometry_core::GeometryParameterAxis::SurfaceV,
+        )?;
+        let parameter = super::evaluator::parameter_frame(
+            value.parameter_unit,
+            value.parameter_scale,
+            format!("occt:{}:{}", self.session_id, id.as_str()),
+            runmat_geometry_core::GeometryParameterAxis::Pcurve,
+        )?;
+        PcurveDerivatives::from_parameter_coefficients(
+            [value.point_u, value.point_v],
+            [value.first_u, value.first_v],
+            [value.second_u, value.second_v],
+            [u, v],
+            parameter,
+        )
     }
 }
 

@@ -1,0 +1,28 @@
+[package]
+name = "runmat-sparse-solvers"
+version = "0.7.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Shared value-free sparse linear algebra for RunMat: sparse storage, direct factorizations, Krylov methods, multigrid and eigensolvers"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+num-complex = { version = "0.4.6", default-features = false, features = ["std"] }
+libm = "0.2"
+rayon = "1.11"
+runmat-cpu-execution = { workspace = true }
+runmat-simulation-usage = { workspace = true }
+thiserror = { workspace = true }
+
+# Threaded factorizations run on the caller's admitted Rayon pool natively; the browser build
+# stays sequential (spindle's futex waits are unavailable on wasm32).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg", "sparse-linalg", "rayon"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg", "sparse-linalg"] }
+
+[dev-dependencies]
+libc = "0.2"

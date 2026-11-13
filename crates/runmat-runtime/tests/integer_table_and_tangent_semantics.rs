@@ -1,7 +1,10 @@
 use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerStorage, NumericDType, StringArray, Tensor, Value};
 
-fn call(name: &str, args: Vec<Value>) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+fn call(
+    name: &str,
+    args: Vec<Value>,
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     block_on(runmat_runtime::call_builtin_async(name, &args)).map_err(Box::new)
 }
 
@@ -72,7 +75,8 @@ fn packet_metadata_is_complete_and_extensions_are_independent() {
         ("tanh", 1, 3),
     ];
     for (name, capabilities, extensions) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), capabilities, "{name}");
         assert_eq!(builtin.extensions.len(), extensions, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
@@ -110,10 +114,11 @@ fn table_preallocation_decodes_every_integer_size_class_and_allocates_native_col
             ],
         )
         .expect("preallocated table");
-        let Value::Tensor(array) = call("table2array", vec![table]).expect("table2array") else {
+        let array = call("table2array", vec![table.value().clone()]).expect("table2array");
+        let Value::Tensor(array) = array.value() else {
             panic!("expected numeric array")
         };
-        assert_eq!(array.shape, vec![2, 1], "size class {size_dtype:?}");
+        assert_eq!(array.shape(), &[2, 1], "size class {size_dtype:?}");
         assert_eq!(array.numeric_dtype(), output_dtype, "{type_name}");
         assert!(array
             .integer_storage()
@@ -130,12 +135,14 @@ fn table_conversions_preserve_wide_integer_payloads() {
     let storage = IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]);
     let table = call("table", vec![integer(storage.clone(), &[2, 1])]).expect("table");
 
-    let Value::Tensor(array) = call("table2array", vec![table.clone()]).expect("array") else {
+    let array = call("table2array", vec![table.value().clone()]).expect("array");
+    let Value::Tensor(array) = array.value() else {
         panic!("expected tensor")
     };
     assert_eq!(array.integer_storage(), Some(&storage));
 
-    let Value::Cell(cells) = call("table2cell", vec![table.clone()]).expect("cell") else {
+    let cells = call("table2cell", vec![table.value().clone()]).expect("cell");
+    let Value::Cell(cells) = cells.value() else {
         panic!("expected cell")
     };
     assert_eq!(
@@ -147,11 +154,16 @@ fn table_conversions_preserve_wide_integer_payloads() {
         Value::Int(IntValue::U64(u64::MAX))
     );
 
-    let Value::Struct(structure) = call(
+    let structure = call(
         "table2struct",
-        vec![table.clone(), Value::from("ToScalar"), Value::Bool(true)],
+        vec![
+            table.value().clone(),
+            Value::from("ToScalar"),
+            Value::Bool(true),
+        ],
     )
-    .expect("scalar struct") else {
+    .expect("scalar struct");
+    let Value::Struct(structure) = structure.value() else {
         panic!("expected scalar struct")
     };
     let Value::Tensor(field) = structure.fields.get("Var1").expect("Var1") else {
@@ -163,7 +175,7 @@ fn table_conversions_preserve_wide_integer_payloads() {
     let timetable = call(
         "table2timetable",
         vec![
-            table.clone(),
+            table.value().clone(),
             Value::from("RowTimes"),
             integer(numeric_times.clone(), &[2, 1]),
         ],
@@ -171,11 +183,15 @@ fn table_conversions_preserve_wide_integer_payloads() {
     .expect("numeric row-time extension");
     let table_with_times = call(
         "timetable2table",
-        vec![timetable, Value::from("ConvertRowTimes"), Value::Bool(true)],
+        vec![
+            timetable.value().clone(),
+            Value::from("ConvertRowTimes"),
+            Value::Bool(true),
+        ],
     )
     .expect("row times to table");
-    let Value::Tensor(with_times) = call("table2array", vec![table_with_times]).expect("array")
-    else {
+    let with_times = call("table2array", vec![table_with_times.value().clone()]).expect("array");
+    let Value::Tensor(with_times) = with_times.value() else {
         panic!("expected integer array")
     };
     assert_eq!(
@@ -191,14 +207,14 @@ fn table_conversions_preserve_wide_integer_payloads() {
     let timetable = call(
         "table2timetable",
         vec![
-            table,
+            table.value().clone(),
             Value::from("SampleRate"),
             Value::Int(IntValue::U16(4)),
         ],
     )
     .expect("timetable");
-    let Value::Tensor(round_trip) = call("table2array", vec![timetable]).expect("round trip")
-    else {
+    let round_trip = call("table2array", vec![timetable.value().clone()]).expect("round trip");
+    let Value::Tensor(round_trip) = round_trip.value() else {
         panic!("expected integer timetable data")
     };
     assert_eq!(round_trip.integer_storage(), Some(&storage));
@@ -217,7 +233,11 @@ fn strict_mode_rejects_tangent_extensions_and_integer_toscalar() {
     let table = call("table", vec![Value::Num(1.0)]).expect("table");
     let error = call(
         "table2struct",
-        vec![table, Value::from("ToScalar"), Value::Int(IntValue::U8(1))],
+        vec![
+            table.value().clone(),
+            Value::from("ToScalar"),
+            Value::Int(IntValue::U8(1)),
+        ],
     )
     .expect_err("integer ToScalar must be gated");
     assert_eq!(
@@ -234,7 +254,7 @@ fn strict_mode_rejects_tangent_extensions_and_integer_toscalar() {
     let error = call(
         "table2timetable",
         vec![
-            table,
+            table.value().clone(),
             Value::from("RowTimes"),
             integer(IntegerStorage::I64(vec![1, 2]), &[2, 1]),
         ],
@@ -251,7 +271,8 @@ fn tangent_extensions_preserve_single_and_handle_wide_integer_boundaries_deliber
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for name in ["tan", "tand", "tanh"] {
         let single = Value::Tensor(Tensor::from_f32(vec![0.0, 0.5], vec![1, 2]).unwrap());
-        let Value::Tensor(output) = call(name, vec![single]).expect("single tangent") else {
+        let output = call(name, vec![single]).expect("single tangent");
+        let Value::Tensor(output) = output.value() else {
             panic!("expected single tensor")
         };
         assert_eq!(output.numeric_dtype(), NumericDType::F32, "{name}");
@@ -263,10 +284,10 @@ fn tangent_extensions_preserve_single_and_handle_wide_integer_boundaries_deliber
             .expect_err("lossy binary64 boundary must reject");
     }
     let expected = ((wide % 360) as f64).to_radians().tan();
-    let Value::Num(actual) =
-        call("tand", vec![Value::Int(IntValue::U64(wide))]).expect("wide exact degree reduction")
-    else {
+    let actual =
+        call("tand", vec![Value::Int(IntValue::U64(wide))]).expect("wide exact degree reduction");
+    let Value::Num(actual) = actual.value() else {
         panic!("expected double scalar")
     };
-    assert!((actual - expected).abs() < 1e-12);
+    assert!((*actual - expected).abs() < 1e-12);
 }

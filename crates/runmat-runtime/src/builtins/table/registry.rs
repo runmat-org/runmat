@@ -37,17 +37,17 @@ pub fn ensure_table_class_registered() {
                 "ReadMode",
             ],
         );
-        register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files"]);
+        register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files", "ReadSize", "BlockSize"]);
         register_plain_object_class(UITABLE_CLASS, &["Data", "ColumnName", "RowName"]);
     });
 }
 
-fn register_tabular_class(name: &str) {
+fn register_tabular_class(name: runmat_types::StaticClassIdentity) {
     let mut properties = HashMap::new();
     properties.insert(
-        PROPERTIES_MEMBER.to_string(),
+        PROPERTIES_MEMBER.into(),
         crate::class_registry::RuntimeProperty {
-            name: PROPERTIES_MEMBER.to_string(),
+            name: PROPERTIES_MEMBER.into(),
             is_static: false,
             is_constant: false,
             is_dependent: false,
@@ -64,34 +64,39 @@ fn register_tabular_class(name: &str) {
     let mut methods = HashMap::new();
     for method_name in [OBJECT_SUBSREF_METHOD, OBJECT_SUBSASGN_METHOD] {
         methods.insert(
-            method_name.to_string(),
+            method_name.into(),
             crate::class_registry::RuntimeMethod {
-                name: method_name.to_string(),
+                name: method_name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
                 function_name: format!("{TABLE_CLASS}.{method_name}"),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
     }
 
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: name.to_string(),
-        parent: None,
-        properties,
-        methods,
-    });
+    crate::class_registry::register_builtin_class(
+        name,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: name.into(),
+            parent: None,
+            properties,
+            methods,
+        },
+    );
 }
 
-fn register_plain_object_class(name: &str, property_names: &[&str]) {
+fn register_plain_object_class(name: runmat_types::StaticClassIdentity, property_names: &[&str]) {
     let mut properties = HashMap::new();
     for property_name in property_names {
         properties.insert(
-            (*property_name).to_string(),
+            (*property_name).into(),
             crate::class_registry::RuntimeProperty {
-                name: (*property_name).to_string(),
+                name: (*property_name).into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -101,21 +106,25 @@ fn register_plain_object_class(name: &str, property_names: &[&str]) {
             },
         );
     }
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: name.to_string(),
-        parent: None,
-        properties,
-        methods: HashMap::new(),
-    });
+    crate::class_registry::register_builtin_class(
+        name,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: name.into(),
+            parent: None,
+            properties,
+            methods: HashMap::new(),
+        },
+    );
 }
 
 fn register_dictionary_class() {
     let mut properties = HashMap::new();
     for property_name in ["Keys", "Values"] {
         properties.insert(
-            property_name.to_string(),
+            property_name.into(),
             crate::class_registry::RuntimeProperty {
-                name: property_name.to_string(),
+                name: property_name.into(),
                 is_static: false,
                 is_constant: false,
                 is_dependent: false,
@@ -128,22 +137,27 @@ fn register_dictionary_class() {
     let mut methods = HashMap::new();
     for method_name in [OBJECT_SUBSREF_METHOD, OBJECT_SUBSASGN_METHOD] {
         methods.insert(
-            method_name.to_string(),
+            method_name.into(),
             crate::class_registry::RuntimeMethod {
-                name: method_name.to_string(),
+                name: method_name.into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
                 function_name: format!("{DICTIONARY_CLASS}.{method_name}"),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
     }
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: DICTIONARY_CLASS.to_string(),
-        parent: None,
-        properties,
-        methods,
-    });
+    crate::class_registry::register_builtin_class(
+        DICTIONARY_CLASS,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: DICTIONARY_CLASS.into(),
+            parent: None,
+            properties,
+            methods,
+        },
+    );
 }

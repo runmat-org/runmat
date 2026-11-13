@@ -114,7 +114,10 @@ pub(super) fn complete_missing_boundary_face_tetrahedra(
             return Ok(Err("boundary_node_completion_no_candidate"));
         };
         for split_node in split_nodes {
-            refined_boundary_nodes.insert(split_node.node_id, split_node.coordinates_m);
+            refined_boundary_nodes.insert(
+                split_node.node_id,
+                split_node.coordinates_m.canonical_value(),
+            );
             inserted_nodes.push(split_node);
         }
         refined_cavity = split_cavity;

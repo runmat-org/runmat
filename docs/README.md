@@ -116,17 +116,21 @@ If you want to understand how the runtime works internally, start with the [Comp
 
 ## FEA on Geometry
 
-- [FEA on Geometry](./fea/index.md)
-- [Using FEA](./fea/using-fea.md)
-- [Geometry](./fea/geometry.md)
-- [Models](./fea/models.md)
-- [Physics Families](./fea/physics.md)
-- [Solves, Studies, and Sweeps](./fea/solves.md)
-- [Evidence & Artifacts](./fea/evidence.md)
-- [Verification & Validation](./fea/validation.md)
-- [Results & Trust](./fea/trust.md)
-- [Current Status](./fea/status.md)
-- [Operation Reference](./fea/operation-reference.md)
+- [FEA on Geometry](./simulation/index.md)
+- [Get started with FEA](./simulation/get-started.md)
+- [Geometry](./simulation/geometry.md)
+- [Meshing](./simulation/meshing.md)
+- [Models](./simulation/models.md)
+- [Study contracts](./simulation/study-contracts.md)
+- [Physics guides](./simulation/physics/)
+- [Constraint guides](./simulation/constraints/)
+- [Load and excitation guides](./simulation/loads/)
+- [Solves, Studies, and Sweeps](./simulation/solves.md)
+- [Evidence & Artifacts](./simulation/evidence.md)
+- [Validation methodology](./simulation/validation/methodology.md)
+- [Results & Trust](./simulation/trust.md)
+- [Validation Status](./simulation/validation/status.md)
+- [Operation Reference](./simulation/operation-reference.md)
 
 ## Filesystem
 

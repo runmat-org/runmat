@@ -57,6 +57,7 @@ pub struct ExactFaceDelaunayError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExactFaceDelaunayErrorKind {
+    GeometryEvaluation(runmat_geometry_core::GeometryEvaluationErrorKind),
     InvalidPslg,
     InvalidOptions,
     InvalidTopology,

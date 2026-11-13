@@ -1,136 +1,32 @@
-//! MATLAB-compatible `magic` builtin.
-
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+mod algorithm;
+use algorithm::{magic_doubly_even, magic_odd, magic_singly_even};
+// Magic square construction. Contracts and inference live in the typed catalog.
+use crate::build_runtime_error;
+use crate::builtins::common::tensor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
-
-use crate::build_runtime_error;
-use crate::builtins::common::{gpu_helpers, tensor};
-
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("magic").build()
 }
-
-fn magic_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    if args.len() != 1 {
-        return Type::Unknown;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    Type::tensor()
-}
-
-const MAGIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "n-by-n magic square matrix.",
-}];
-
-const MAGIC_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric input whose floored first real element selects the square order.",
-}];
-
-const MAGIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "A = magic(n)",
-    inputs: &MAGIC_SIG_N_INPUTS,
-    outputs: &MAGIC_OUTPUT,
-}];
-
-const MAGIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are accepted; the first element is read exactly as the square order.",
-    }];
-
-pub const MAGIC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "A = magic(integer_n)",
-        inputs: &MAGIC_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The first real element selects the order and the result is a host double matrix; explicit gpuArray input is unsupported while automatic residency gathers transparently.",
-    }];
-
-const MAGIC_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    BuiltinErrorDescriptor {
-        code: "RM.MAGIC.ARG_COUNT",
-        identifier: None,
-        when: "The builtin is called with a number of arguments other than one.",
-        message: "magic: requires exactly one input argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.MAGIC.EMPTY_INPUT",
-        identifier: None,
-        when: "The input has no numeric elements.",
-        message: "magic: input must contain a numeric value",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.MAGIC.NON_FINITE",
-        identifier: None,
-        when: "The order argument is non-finite.",
-        message: "magic: dimension must be finite",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.MAGIC.NEGATIVE",
-        identifier: None,
-        when: "The floored order argument is negative.",
-        message: "magic: dimension must be non-negative",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.MAGIC.EXPLICIT_GPU",
-        identifier: None,
-        when: "The order is supplied as an explicit gpuArray.",
-        message: "magic: gpuArray input is not supported",
-    },
-];
-
-pub const MAGIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MAGIC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MAGIC_ERRORS,
-};
-
 #[runtime_builtin(
     name = "magic",
-    category = "array/creation",
-    summary = "Generate an n-by-n magic square.",
-    keywords = "magic,magic square,array",
-    accel = "array_construct",
-    type_resolver(magic_type),
-    descriptor(crate::builtins::array::creation::magic::MAGIC_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::creation::magic::MAGIC_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::magic"
 )]
-async fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn magic_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        let error = &runmat_builtins::MAGIC_ERROR_TOO_MANY_OUTPUTS;
+        return Err(build_runtime_error(error.message)
+            .with_builtin("magic")
+            .with_identifier(error.identifier.expect("output error identifier"))
+            .build());
+    }
     let n = parse_order(args).await?;
     let tensor = magic_tensor(n)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-async fn parse_order(args: Vec<Value>) -> crate::BuiltinResult<usize> {
+async fn parse_order(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<usize> {
     if args.len() != 1 {
         return Err(builtin_error("magic: requires exactly one input argument"));
     }
@@ -142,10 +38,10 @@ async fn parse_order_value(value: &Value) -> crate::BuiltinResult<usize> {
         if runmat_accelerate_api::handle_is_explicit(handle) {
             return Err(builtin_error("magic: gpuArray input is not supported"));
         }
-        let tensor = gpu_helpers::gather_tensor_async(handle)
+        let host = crate::gather_if_needed_async(value)
             .await
             .map_err(|err| builtin_error(format!("magic: {err}")))?;
-        return parse_order_host(&Value::Tensor(tensor)).await;
+        return parse_order_host(&host).await;
     }
     parse_order_host(value).await
 }
@@ -175,7 +71,7 @@ async fn parse_order_host(value: &Value) -> crate::BuiltinResult<usize> {
         if let Some(storage) = tensor.integer_storage() {
             return parse_integer_order(
                 &storage
-                    .real
+                    .real()
                     .value_at(0)
                     .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?,
             );
@@ -197,9 +93,9 @@ async fn parse_order_host(value: &Value) -> crate::BuiltinResult<usize> {
     }
     if let Value::CharArray(array) = value {
         let raw = array
-            .data
+            .data()
             .first()
-            .map(|value| *value as u32 as f64)
+            .map(|value| f64::from(value.raw()))
             .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?;
         return parse_floating_order(raw);
     }
@@ -259,312 +155,5 @@ fn magic_tensor(n: usize) -> Result<Tensor, crate::RuntimeError> {
     Tensor::new(data, vec![n, n]).map_err(|err| builtin_error(format!("magic: {err}")))
 }
 
-fn magic_odd(n: usize) -> Result<Vec<usize>, String> {
-    let size = n
-        .checked_mul(n)
-        .ok_or_else(|| "magic: dimension is too large".to_string())?;
-    let mut data = vec![0usize; size];
-    let mut row = 0usize;
-    let mut col = n / 2;
-    for val in 1..=size {
-        data[idx(row, col, n)] = val;
-        let next_row = (row + n - 1) % n;
-        let next_col = (col + 1) % n;
-        if data[idx(next_row, next_col, n)] != 0 {
-            row = (row + 1) % n;
-        } else {
-            row = next_row;
-            col = next_col;
-        }
-    }
-    Ok(data)
-}
-
-fn magic_doubly_even(n: usize) -> Result<Vec<usize>, String> {
-    let size = n
-        .checked_mul(n)
-        .ok_or_else(|| "magic: dimension is too large".to_string())?;
-    let mut data = vec![0usize; size];
-
-    for row in 0..n {
-        for col in 0..n {
-            let value = row * n + col + 1;
-            let row_mod = row % 4;
-            let col_mod = col % 4;
-            let swap = row_mod == col_mod || row_mod + col_mod == 3;
-            let final_value = if swap { size + 1 - value } else { value };
-            data[idx(row, col, n)] = final_value;
-        }
-    }
-
-    Ok(data)
-}
-
-fn magic_singly_even(n: usize) -> Result<Vec<usize>, String> {
-    let size = n
-        .checked_mul(n)
-        .ok_or_else(|| "magic: dimension is too large".to_string())?;
-    let m = n / 2;
-    let m_sq = m
-        .checked_mul(m)
-        .ok_or_else(|| "magic: dimension is too large".to_string())?;
-    let base = magic_odd(m)?;
-    let mut data = vec![0usize; size];
-
-    for row in 0..m {
-        for col in 0..m {
-            let value = base[idx(row, col, m)];
-            data[idx(row, col, n)] = value;
-            data[idx(row, col + m, n)] = value + 2 * m_sq;
-            data[idx(row + m, col, n)] = value + 3 * m_sq;
-            data[idx(row + m, col + m, n)] = value + m_sq;
-        }
-    }
-
-    let k = (m - 1) / 2;
-
-    for row in 0..m {
-        if row == k {
-            continue;
-        }
-        for col in 0..k {
-            swap_cells(&mut data, n, row, col, row + m, col);
-        }
-    }
-
-    if k > 0 {
-        let start = m - k + 1;
-        for row in 0..m {
-            for col in start..m {
-                swap_cells(&mut data, n, row, col + m, row + m, col + m);
-            }
-        }
-    }
-
-    // Center row `k`: swap columns 1..=k (instead of 0..k-1 used for other rows).
-    for col in 1..=k {
-        swap_cells(&mut data, n, k, col, k + m, col);
-    }
-
-    Ok(data)
-}
-
-fn idx(row: usize, col: usize, n: usize) -> usize {
-    row + col * n
-}
-
-fn swap_cells(
-    data: &mut [usize],
-    n: usize,
-    row_a: usize,
-    col_a: usize,
-    row_b: usize,
-    col_b: usize,
-) {
-    let idx_a = idx(row_a, col_a, n);
-    let idx_b = idx(row_b, col_b, n);
-    data.swap(idx_a, idx_b);
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::ComplexTensor;
-    use runmat_value::IntegerStorage;
-
-    fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::magic_builtin(args))
-    }
-
-    #[test]
-    fn magic_two_matches_documented_degenerate_square() {
-        let value = magic_builtin(vec![Value::Num(2.0)]).expect("magic(2)");
-        let Value::Tensor(tensor) = value else {
-            panic!("expected tensor");
-        };
-        assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(tensor.materialize_f64(), vec![1.0, 4.0, 3.0, 2.0]);
-    }
-
-    #[test]
-    fn magic_uses_floor_of_real_first_element() {
-        let input = Tensor::new(vec![3.9, 99.0], vec![1, 2]).expect("input");
-        let value = magic_builtin(vec![Value::Tensor(input)]).expect("magic");
-        let Value::Tensor(tensor) = value else {
-            panic!("expected tensor");
-        };
-        assert_eq!(tensor.shape, vec![3, 3]);
-
-        let complex =
-            ComplexTensor::new(vec![(4.8, 7.0), (12.0, 0.0)], vec![1, 2]).expect("complex input");
-        let value = magic_builtin(vec![Value::ComplexTensor(complex)]).expect("magic");
-        let Value::Tensor(tensor) = value else {
-            panic!("expected tensor");
-        };
-        assert_eq!(tensor.shape, vec![4, 4]);
-
-        let logical =
-            runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical input");
-        assert_eq!(
-            block_on(parse_order_value(&Value::LogicalArray(logical))).unwrap(),
-            1
-        );
-        assert_eq!(
-            block_on(parse_order_value(&Value::CharArray(
-                runmat_value::CharArray::new_row("\u{3}\u{7}"),
-            )))
-            .unwrap(),
-            3
-        );
-    }
-
-    #[test]
-    fn magic_zero_is_empty() {
-        let value = magic_builtin(vec![Value::Num(0.0)]).expect("magic");
-        match value {
-            Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![0, 0]);
-                assert!(tensor.materialize_f64().is_empty());
-            }
-            other => panic!("expected empty tensor, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn magic_parses_all_integer_classes_without_f64_rounding() {
-        let values = [
-            IntValue::I8(3),
-            IntValue::I16(3),
-            IntValue::I32(3),
-            IntValue::I64(3),
-            IntValue::U8(3),
-            IntValue::U16(3),
-            IntValue::U32(3),
-            IntValue::U64(3),
-        ];
-        for value in values {
-            assert!(matches!(
-                block_on(parse_order_value(&Value::Int(value))),
-                Ok(3)
-            ));
-        }
-
-        let exact = 9_007_199_254_740_993_u64;
-        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1])
-            .expect("typed scalar");
-        assert!(matches!(
-            block_on(parse_order_value(&Value::Tensor(tensor))),
-            Ok(value) if value == exact as usize
-        ));
-    }
-
-    #[test]
-    fn magic_three_matches_matlab() {
-        let value = magic_builtin(vec![Value::Num(3.0)]).expect("magic");
-        let tensor = match value {
-            Value::Tensor(tensor) => tensor,
-            other => panic!("expected tensor, got {other:?}"),
-        };
-        assert_eq!(tensor.shape, vec![3, 3]);
-        let expected = vec![8.0, 3.0, 4.0, 1.0, 5.0, 9.0, 6.0, 7.0, 2.0];
-        assert_eq!(tensor.materialize_f64(), expected);
-    }
-
-    #[test]
-    fn magic_four_matches_matlab() {
-        let value = magic_builtin(vec![Value::Num(4.0)]).expect("magic");
-        let tensor = match value {
-            Value::Tensor(tensor) => tensor,
-            other => panic!("expected tensor, got {other:?}"),
-        };
-        assert_eq!(tensor.shape, vec![4, 4]);
-        let expected = vec![
-            16.0, 5.0, 9.0, 4.0, 2.0, 11.0, 7.0, 14.0, 3.0, 10.0, 6.0, 15.0, 13.0, 8.0, 12.0, 1.0,
-        ];
-        assert_eq!(tensor.materialize_f64(), expected);
-    }
-
-    /// Verify that every value 1..=n² appears exactly once and that all rows,
-    /// columns, and both diagonals sum to the magic constant n*(n²+1)/2.
-    fn assert_magic_properties(data: &[f64], n: usize) {
-        let n_sq = n * n;
-        let magic_const = n * (n_sq + 1) / 2;
-
-        // All values 1..=n² present
-        let mut sorted: Vec<u64> = data.iter().map(|&v| v as u64).collect();
-        sorted.sort();
-        let expected: Vec<u64> = (1..=n_sq as u64).collect();
-        assert_eq!(
-            sorted, expected,
-            "magic({n}): not a permutation of 1..={n_sq}"
-        );
-
-        // Row sums (column-major storage: element (r,c) = data[r + c*n])
-        for r in 0..n {
-            let row_sum: f64 = (0..n).map(|c| data[r + c * n]).sum();
-            assert_eq!(
-                row_sum as usize, magic_const,
-                "magic({n}): row {r} sum mismatch"
-            );
-        }
-        // Column sums
-        for c in 0..n {
-            let col_sum: f64 = (0..n).map(|r| data[r + c * n]).sum();
-            assert_eq!(
-                col_sum as usize, magic_const,
-                "magic({n}): col {c} sum mismatch"
-            );
-        }
-        // Main diagonal
-        let diag1: f64 = (0..n).map(|i| data[i + i * n]).sum();
-        assert_eq!(
-            diag1 as usize, magic_const,
-            "magic({n}): main diagonal sum mismatch"
-        );
-        // Anti-diagonal
-        let diag2: f64 = (0..n).map(|i| data[i + (n - 1 - i) * n]).sum();
-        assert_eq!(
-            diag2 as usize, magic_const,
-            "magic({n}): anti-diagonal sum mismatch"
-        );
-    }
-
-    #[test]
-    fn magic_six_matches_matlab() {
-        let value = magic_builtin(vec![Value::Num(6.0)]).expect("magic");
-        let tensor = match value {
-            Value::Tensor(tensor) => tensor,
-            other => panic!("expected tensor, got {other:?}"),
-        };
-        assert_eq!(tensor.shape, vec![6, 6]);
-        let expected = vec![
-            35.0, 3.0, 31.0, 8.0, 30.0, 4.0, 1.0, 32.0, 9.0, 28.0, 5.0, 36.0, 6.0, 7.0, 2.0, 33.0,
-            34.0, 29.0, 26.0, 21.0, 22.0, 17.0, 12.0, 13.0, 19.0, 23.0, 27.0, 10.0, 14.0, 18.0,
-            24.0, 25.0, 20.0, 15.0, 16.0, 11.0,
-        ];
-        assert_eq!(tensor.materialize_f64(), expected);
-    }
-
-    #[test]
-    fn magic_ten_is_valid_magic_square() {
-        let value = magic_builtin(vec![Value::Num(10.0)]).expect("magic");
-        let tensor = match value {
-            Value::Tensor(tensor) => tensor,
-            other => panic!("expected tensor, got {other:?}"),
-        };
-        assert_eq!(tensor.shape, vec![10, 10]);
-        assert_magic_properties(&tensor.materialize_f64(), 10);
-    }
-
-    #[test]
-    fn magic_fourteen_is_valid_magic_square() {
-        let value = magic_builtin(vec![Value::Num(14.0)]).expect("magic");
-        let tensor = match value {
-            Value::Tensor(tensor) => tensor,
-            other => panic!("expected tensor, got {other:?}"),
-        };
-        assert_eq!(tensor.shape, vec![14, 14]);
-        assert_magic_properties(&tensor.materialize_f64(), 14);
-    }
-}
+mod tests;

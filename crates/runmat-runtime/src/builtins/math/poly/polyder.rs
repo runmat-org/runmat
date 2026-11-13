@@ -1,14 +1,11 @@
 //! MATLAB-compatible `polyder` builtin with GPU-aware semantics for RunMat.
 
-use log::trace;
 use num_complex::Complex64;
+#[cfg(test)]
+use runmat_builtins::POLYDER_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, POLYDER_ERROR_INVALID_ARGUMENT, POLYDER_ERROR_INVALID_INPUT,
+    POLYDER_INTEGER_COEFFICIENTS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -19,143 +16,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{tensor, tensor::tensor_into_value};
-use crate::builtins::math::poly::type_resolvers::polyder_type;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyder";
-
-const POLYDER_OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "d",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Derivative coefficient vector.",
-}];
-
-const POLYDER_OUTPUT_NUM_DEN: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "num",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Quotient-rule numerator coefficients.",
-    },
-    BuiltinParamDescriptor {
-        name: "den",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Quotient-rule denominator coefficients.",
-    },
-];
-
-const POLYDER_INPUTS_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Polynomial coefficient vector.",
-}];
-
-const POLYDER_INPUTS_BINARY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second polynomial coefficient vector.",
-    },
-];
-
-const POLYDER_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "d = polyder(p)",
-        inputs: &POLYDER_INPUTS_SINGLE,
-        outputs: &POLYDER_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = polyder(a, b)",
-        inputs: &POLYDER_INPUTS_BINARY,
-        outputs: &POLYDER_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[num, den] = polyder(u, v)",
-        inputs: &POLYDER_INPUTS_BINARY,
-        outputs: &POLYDER_OUTPUT_NUM_DEN,
-    },
-];
-
-const POLYDER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYDER.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polyder:InvalidArgument"),
-    when: "Input arity/output mode combination is invalid.",
-    message: "polyder: invalid argument",
-};
-
-const POLYDER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYDER.INVALID_INPUT",
-    identifier: Some("RunMat:polyder:InvalidInput"),
-    when: "Inputs cannot be interpreted as numeric coefficient vectors.",
-    message: "polyder: invalid input",
-};
-
-const POLYDER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYDER.INTERNAL",
-    identifier: Some("RunMat:polyder:Internal"),
-    when: "Runtime fails while building derivative outputs or provider fallback paths.",
-    message: "polyder: internal runtime failure",
-};
-
-const POLYDER_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    POLYDER_ERROR_INVALID_ARGUMENT,
-    POLYDER_ERROR_INVALID_INPUT,
-    POLYDER_ERROR_INTERNAL,
-];
-
-pub const POLYDER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLYDER_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLYDER_ERRORS,
-};
-
-const POLYDER_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "polyder-integer-coefficients",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "polyder accepts typed-integer coefficient vectors as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PolyderIntegerCoefficientsExtension"),
-    };
-pub const POLYDER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [POLYDER_INTEGER_COEFFICIENTS_EXTENSION];
-const POLYDER_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p, a, or b",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double polynomial coefficients. RunMat admits typed integers only after exact conversion to the floating polynomial domain.",
-    }];
-pub const POLYDER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "d = polyder(integer_p) or d = polyder(integer_a,b) or [q,d] = polyder(integer_a,b)",
-        inputs: &POLYDER_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Every integer coefficient operand is checked before provider dispatch; derivative, convolution, and quotient arithmetic then use the selected floating precision domain.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -209,16 +73,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polyder",
-    category = "math/poly",
-    summary = "Differentiate polynomials, products, and ratios.",
-    keywords = "polyder,polynomial,derivative,product,quotient",
-    type_resolver(polyder_type),
-    descriptor(crate::builtins::math::poly::polyder::POLYDER_DESCRIPTOR),
-    extensions(crate::builtins::math::poly::polyder::POLYDER_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::poly::polyder::POLYDER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
-async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyder_builtin(
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(polyder_argument_error("polyder: too many input arguments"));
     }
@@ -230,9 +91,9 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
                 _ => unreachable!("input count validated above"),
             }?;
             if out_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
-            return Ok(Value::OutputList(vec![result]));
+            return Ok(Value::output_list(vec![result]));
         }
         if rest.len() != 1 {
             return Err(polyder_argument_error(
@@ -252,60 +113,9 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
     }
 }
 
-async fn try_gpu_derivative_single(value: &Value) -> BuiltinResult<Option<Value>> {
-    let Value::GpuTensor(handle) = value else {
-        return Ok(None);
-    };
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(None);
-    };
-    match provider.polyder_single(handle).await {
-        Ok(out) => Ok(Some(Value::GpuTensor(out))),
-        Err(err) => {
-            trace!("polyder: provider polyder_single fallback: {err}");
-            Ok(None)
-        }
-    }
-}
-
-async fn try_gpu_derivative_product(first: &Value, second: &Value) -> BuiltinResult<Option<Value>> {
-    match (first, second) {
-        (Value::GpuTensor(p), Value::GpuTensor(q)) => {
-            let Some(provider) = runmat_accelerate_api::provider() else {
-                return Ok(None);
-            };
-            match provider.polyder_product(p, q).await {
-                Ok(out) => Ok(Some(Value::GpuTensor(out))),
-                Err(err) => {
-                    trace!("polyder: provider polyder_product fallback: {err}");
-                    Ok(None)
-                }
-            }
-        }
-        _ => Ok(None),
-    }
-}
-
-async fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderEval>> {
-    match (u, v) {
-        (Value::GpuTensor(uh), Value::GpuTensor(vh)) => {
-            let Some(provider) = runmat_accelerate_api::provider() else {
-                return Ok(None);
-            };
-            match provider.polyder_quotient(uh, vh).await {
-                Ok(result) => Ok(Some(PolyderEval {
-                    numerator: Value::GpuTensor(result.numerator),
-                    denominator: Value::GpuTensor(result.denominator),
-                })),
-                Err(err) => {
-                    trace!("polyder: provider polyder_quotient fallback: {err}");
-                    Ok(None)
-                }
-            }
-        }
-        _ => Ok(None),
-    }
-}
+#[path = "polyder/resident.rs"]
+mod resident;
+use resident::{try_gpu_derivative_product, try_gpu_derivative_single, try_gpu_quotient};
 
 /// Evaluate the quotient rule derivative `[num, den] = polyder(u, v)`.
 pub async fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {
@@ -459,7 +269,7 @@ fn poly_sub(a: &[Complex64], b: &[Complex64]) -> Vec<Complex64> {
 fn trim_leading_zeros(coeffs: &[Complex64]) -> Vec<Complex64> {
     let mut first = None;
     for (idx, coeff) in coeffs.iter().enumerate() {
-        if coeff.norm() > EPS {
+        if coeff.re != 0.0 || coeff.im != 0.0 {
             first = Some(idx);
             break;
         }
@@ -471,7 +281,7 @@ fn trim_leading_zeros(coeffs: &[Complex64]) -> Vec<Complex64> {
 }
 
 fn coeffs_to_value(coeffs: &[Complex64], orientation: Orientation) -> BuiltinResult<Value> {
-    if coeffs.iter().all(|c| c.im.abs() <= EPS) {
+    if coeffs.iter().all(|c| c.im == 0.0) {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let shape = orientation.shape_for_len(data.len());
         let tensor =
@@ -490,8 +300,8 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let (coeffs, orientation) = match gathered {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
-            let orientation = orientation_from_shape(&tensor.shape);
+            ensure_vector_shape(context, label, tensor.shape())?;
+            let orientation = orientation_from_shape(tensor.shape());
             if tensor::tensor_element_len(&tensor) == 0 {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
@@ -505,8 +315,8 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
             }
         }
         Value::ComplexTensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
-            let orientation = orientation_from_shape(&tensor.shape);
+            ensure_vector_shape(context, label, tensor.shape())?;
+            let orientation = orientation_from_shape(tensor.shape());
             if tensor::complex_tensor_element_len(&tensor) == 0 {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
@@ -518,8 +328,8 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyder_error)?;
-            ensure_vector_shape(context, label, &tensor.shape)?;
-            let orientation = orientation_from_shape(&tensor.shape);
+            ensure_vector_shape(context, label, tensor.shape())?;
+            let orientation = orientation_from_shape(tensor.shape());
             if tensor.is_empty() {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
@@ -604,6 +414,28 @@ struct Polynomial {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn resident_nd_vector_preserves_host_derivative_orientation() {
+        test_support::with_test_provider(|provider| {
+            let source = Tensor::new(vec![3.0, 2.0, 1.0], vec![1, 1, 3]).unwrap();
+            let expected = derivative_single(Value::Tensor(source.clone())).unwrap();
+            let input =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &source).unwrap();
+            let output = derivative_single(Value::GpuTensor(input.clone())).unwrap();
+            let Value::GpuTensor(output) = output else {
+                panic!("resident derivative required")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            let actual = test_support::gather(Value::GpuTensor(output)).unwrap();
+            let Value::Tensor(expected) = expected else {
+                panic!("host derivative tensor required")
+            };
+            assert_eq!(actual.shape(), expected.shape());
+            assert_eq!(actual.shape(), &[2, 1]);
+            assert_eq!(actual.materialize_f64(), vec![6.0, 2.0]);
+        });
+    }
+
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
@@ -648,7 +480,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -667,7 +499,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -711,7 +543,7 @@ pub(crate) mod tests {
             derivative_product(Value::Tensor(p), Value::Tensor(a)).expect("polyder product");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -731,7 +563,7 @@ pub(crate) mod tests {
             derivative_product(Value::Tensor(p), Value::Tensor(a)).expect("polyder product");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -751,7 +583,7 @@ pub(crate) mod tests {
         let eval = evaluate_quotient(Value::Tensor(u), Value::Tensor(v)).expect("polyder quotient");
         match eval.numerator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -762,7 +594,7 @@ pub(crate) mod tests {
         }
         match eval.denominator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -781,7 +613,7 @@ pub(crate) mod tests {
         let eval = evaluate_quotient(Value::Tensor(u), Value::Tensor(v)).expect("polyder quotient");
         match eval.numerator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -793,7 +625,7 @@ pub(crate) mod tests {
         }
         match eval.denominator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -812,7 +644,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder column");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -831,7 +663,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::ComplexTensor(tensor)).expect("polyder complex");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let expected = [Complex64::new(2.0, 4.0), Complex64::new(-3.0, 0.0)];
                 assert!(t.materialize_f64().iter().zip(expected.iter()).all(
                     |((re, im), expected)| {
@@ -841,6 +673,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiny_nonzero_derivative_and_imaginary_component_survive() {
+        let real = derivative_single(Value::Tensor(
+            Tensor::new(vec![1.0e-13, 0.0], vec![1, 2]).unwrap(),
+        ))
+        .expect("tiny derivative");
+        assert_eq!(real, Value::Num(1.0e-13));
+        let complex = derivative_single(Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 1.0e-13), (0.0, 0.0)], vec![1, 2]).unwrap(),
+        ))
+        .expect("tiny complex derivative");
+        assert_eq!(complex, Value::Complex(1.0, 1.0e-13));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -881,7 +727,7 @@ pub(crate) mod tests {
 
             let view_p = runmat_accelerate_api::HostTensorView {
                 data: &p.materialize_f64(),
-                shape: &p.shape,
+                shape: p.shape(),
             };
             let handle_p = provider.upload(&view_p).expect("upload p");
             let result = derivative_product(Value::GpuTensor(handle_p), Value::Tensor(q))
@@ -889,7 +735,7 @@ pub(crate) mod tests {
             let Value::Tensor(host_tensor) = result else {
                 panic!("expected host tensor result");
             };
-            assert_eq!(host_tensor.shape, cpu_tensor.shape);
+            assert_eq!(host_tensor.shape(), cpu_tensor.shape());
             assert!(host_tensor
                 .materialize_f64()
                 .iter()
@@ -903,7 +749,10 @@ pub(crate) mod tests {
     fn builtin_rejects_too_many_inputs() {
         let err = futures::executor::block_on(super::polyder_builtin(
             Value::Num(1.0),
-            vec![Value::Num(2.0), Value::Num(3.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+            ]),
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), POLYDER_ERROR_INVALID_ARGUMENT.identifier);
@@ -917,7 +766,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 0.0, -5.0, 4.0], vec![1, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = derivative_single(Value::GpuTensor(handle)).expect("polyder gpu");
@@ -925,7 +774,7 @@ pub(crate) mod tests {
                 panic!("expected GPU tensor result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out_handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert!(gathered
                 .materialize_f64()
                 .iter()
@@ -948,11 +797,11 @@ pub(crate) mod tests {
 
             let view_p = runmat_accelerate_api::HostTensorView {
                 data: &p.materialize_f64(),
-                shape: &p.shape,
+                shape: p.shape(),
             };
             let view_q = runmat_accelerate_api::HostTensorView {
                 data: &q.materialize_f64(),
-                shape: &q.shape,
+                shape: q.shape(),
             };
             let handle_p = provider.upload(&view_p).expect("upload p");
             let handle_q = provider.upload(&view_q).expect("upload q");
@@ -963,7 +812,7 @@ pub(crate) mod tests {
                 panic!("expected GPU tensor");
             };
             let gathered = test_support::gather(Value::GpuTensor(gpu_handle)).expect("gather");
-            assert_eq!(gathered.shape, expected_tensor.shape);
+            assert_eq!(gathered.shape(), expected_tensor.shape());
             assert!(gathered
                 .materialize_f64()
                 .iter()
@@ -989,11 +838,11 @@ pub(crate) mod tests {
 
             let view_u = runmat_accelerate_api::HostTensorView {
                 data: &u.materialize_f64(),
-                shape: &u.shape,
+                shape: u.shape(),
             };
             let view_v = runmat_accelerate_api::HostTensorView {
                 data: &v.materialize_f64(),
-                shape: &v.shape,
+                shape: v.shape(),
             };
             let handle_u = provider.upload(&view_u).expect("upload u");
             let handle_v = provider.upload(&view_v).expect("upload v");
@@ -1002,8 +851,8 @@ pub(crate) mod tests {
                     .expect("gpu quotient");
             let gpu_num = test_support::gather(gpu_eval.numerator()).expect("gather num");
             let gpu_den = test_support::gather(gpu_eval.denominator()).expect("gather den");
-            assert_eq!(gpu_num.shape, expected_num.shape);
-            assert_eq!(gpu_den.shape, expected_den.shape);
+            assert_eq!(gpu_num.shape(), expected_num.shape());
+            assert_eq!(gpu_den.shape(), expected_den.shape());
             assert!(gpu_num
                 .materialize_f64()
                 .iter()
@@ -1032,12 +881,12 @@ pub(crate) mod tests {
         };
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_result = derivative_single(Value::GpuTensor(handle)).expect("gpu polyder");
         let gathered = test_support::gather(gpu_result).expect("gather");
-        assert_eq!(gathered.shape, expected_tensor.shape);
+        assert_eq!(gathered.shape(), expected_tensor.shape());
         assert!(gathered
             .materialize_f64()
             .iter()
@@ -1062,18 +911,18 @@ pub(crate) mod tests {
         };
         let view_p = runmat_accelerate_api::HostTensorView {
             data: &p.materialize_f64(),
-            shape: &p.shape,
+            shape: p.shape(),
         };
         let view_q = runmat_accelerate_api::HostTensorView {
             data: &q.materialize_f64(),
-            shape: &q.shape,
+            shape: q.shape(),
         };
         let handle_p = provider.upload(&view_p).expect("upload p");
         let handle_q = provider.upload(&view_q).expect("upload q");
         let gpu_result = derivative_product(Value::GpuTensor(handle_p), Value::GpuTensor(handle_q))
             .expect("gpu product");
         let gathered = test_support::gather(gpu_result).expect("gather");
-        assert_eq!(gathered.shape, expected_tensor.shape);
+        assert_eq!(gathered.shape(), expected_tensor.shape());
         assert!(gathered
             .materialize_f64()
             .iter()
@@ -1103,11 +952,11 @@ pub(crate) mod tests {
         };
         let view_u = runmat_accelerate_api::HostTensorView {
             data: &u.materialize_f64(),
-            shape: &u.shape,
+            shape: u.shape(),
         };
         let view_v = runmat_accelerate_api::HostTensorView {
             data: &v.materialize_f64(),
-            shape: &v.shape,
+            shape: v.shape(),
         };
         let handle_u = provider.upload(&view_u).expect("upload u");
         let handle_v = provider.upload(&view_v).expect("upload v");
@@ -1115,8 +964,8 @@ pub(crate) mod tests {
             .expect("gpu quotient");
         let gpu_num = test_support::gather(gpu_eval.numerator()).expect("gather num");
         let gpu_den = test_support::gather(gpu_eval.denominator()).expect("gather den");
-        assert_eq!(gpu_num.shape, expected_num.shape);
-        assert_eq!(gpu_den.shape, expected_den.shape);
+        assert_eq!(gpu_num.shape(), expected_num.shape());
+        assert_eq!(gpu_den.shape(), expected_den.shape());
         assert!(gpu_num
             .materialize_f64()
             .iter()

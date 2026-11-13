@@ -10,7 +10,8 @@ const PACKET: [(&str, usize, &str); 2] = [
 #[test]
 fn symbolic_and_financial_integer_metadata_is_explicit() {
     for (name, expected_forms, _) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(builtin
@@ -19,7 +20,7 @@ fn symbolic_and_financial_integer_metadata_is_explicit() {
             .flat_map(|capability| capability.inputs)
             .all(|input| input.classes.len() == 8));
     }
-    let limit = runmat_builtins::builtin_function_by_name("limit").expect("limit");
+    let limit = runmat_builtins::builtin_catalog_entry_by_name("limit").expect("limit");
     assert_eq!(
         limit.integer_capabilities[0].inputs[0].availability,
         BuiltinIntegerInputAvailability::RunMatOnly
@@ -35,7 +36,7 @@ fn symbolic_and_financial_integer_metadata_is_explicit() {
     assert!(limit.integer_capabilities[1]
         .notes
         .contains("convert exactly"));
-    let macd = runmat_builtins::builtin_function_by_name("macd").expect("macd");
+    let macd = runmat_builtins::builtin_catalog_entry_by_name("macd").expect("macd");
     assert!(macd
         .integer_capabilities
         .iter()

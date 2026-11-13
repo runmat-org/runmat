@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use runmat_execution::Digest;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::invalidation::DependencySnapshot;
 use runmat_native_executor::NativeExecutor;
@@ -9,13 +10,49 @@ use runmat_native_executor::NativeExecutor;
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EntryKey(pub String);
 
+impl std::borrow::Borrow<str> for EntryKey {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct PublishedEntry {
     pub executor: Rc<NativeExecutor>,
-    pub entrypoint: ProgramFunctionId,
-    pub dependencies: DependencySnapshot,
+    /// Local compiled coordinate in this exact executor, not a portable owner.
+    pub entrypoint: FunctionId,
+    /// Frozen publication authority. Cloning a ready product must not copy
+    /// its dependency map or create a second mutable snapshot.
+    pub dependencies: Arc<DependencySnapshot>,
     pub publication: u64,
     pub tier: PublishedTier,
+    /// Complete Core preparation, lowering, code generation, and binding time
+    /// for this exact published product. Ready execution never pays it again.
+    pub compilation: NativeCompilationEvidence,
+}
+
+/// Metadata for the last budget-retired specialization in this entry. It
+/// cannot execute code or restore a publication; it can only price preparing
+/// the identical recipe again while its dependency generations remain current.
+#[derive(Clone)]
+pub struct NativePreparationQuote {
+    pub entrypoint: FunctionId,
+    pub dependencies: Arc<DependencySnapshot>,
+    pub publication: u64,
+    pub tier: PublishedTier,
+    pub compilation: NativeCompilationEvidence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeCompilationEvidence {
+    pub prepare_ns: u64,
+    pub lower_codegen_bind_ns: u64,
+}
+
+impl NativeCompilationEvidence {
+    pub fn total_ns(self) -> Option<u64> {
+        self.prepare_ns.checked_add(self.lower_codegen_bind_ns)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,11 +61,33 @@ pub enum PublishedTier {
     Specialized { profile: Digest },
 }
 
+/// Publication identities observed for one entry before tiering may prepare
+/// another product. This snapshot does not authenticate dependencies or pin
+/// executable code; resolution must still validate the selected publication.
+#[derive(Clone, Copy, Default)]
+pub struct EntryPublications {
+    generic: Option<u64>,
+    specialized: Option<(Digest, u64)>,
+}
+
+impl EntryPublications {
+    /// Compare a subsequently resolved product from the same registry entry.
+    pub fn contains(self, entry: &PublishedEntry) -> bool {
+        match entry.tier {
+            PublishedTier::Generic => self.generic == Some(entry.publication),
+            PublishedTier::Specialized { profile } => {
+                self.specialized == Some((profile, entry.publication))
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct EntryState {
     publication: u64,
     generic: Option<PublishedEntry>,
     specialized: BTreeMap<Digest, PublishedEntry>,
+    retired_preparation: Option<NativePreparationQuote>,
 }
 
 /// Stable indirection retained while compiled targets are replaced or retired.
@@ -50,6 +109,19 @@ impl EntryCell {
         &self.key
     }
 
+    pub(crate) fn publications(&self, profile: Option<Digest>) -> EntryPublications {
+        let state = self.state.borrow();
+        EntryPublications {
+            generic: state.generic.as_ref().map(|entry| entry.publication),
+            specialized: profile.and_then(|profile| {
+                state
+                    .specialized
+                    .get(&profile)
+                    .map(|entry| (profile, entry.publication))
+            }),
+        }
+    }
+
     pub fn resolve(&self, current: &DependencySnapshot) -> Option<PublishedEntry> {
         self.state
             .borrow()
@@ -59,11 +131,29 @@ impl EntryCell {
             .cloned()
     }
 
+    pub(crate) fn resolve_current(
+        &self,
+        current: &crate::invalidation::DependencyTracker,
+        profile: Option<runmat_execution::Digest>,
+    ) -> Option<PublishedEntry> {
+        let state = self.state.borrow();
+        let entry = match profile {
+            Some(profile) => state.specialized.get(&profile),
+            None => state.generic.as_ref(),
+        }?;
+        let dependencies_current = entry
+            .dependencies
+            .iter()
+            .all(|(key, generation)| current.generation(key) == Some(generation));
+        dependencies_current.then(|| entry.clone())
+    }
+
     pub(crate) fn publish(
         &self,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
         if dependencies.is_empty() {
             return Err("published native entry must declare dependencies");
@@ -76,9 +166,10 @@ impl EntryCell {
         let target = PublishedEntry {
             executor,
             entrypoint,
-            dependencies,
+            dependencies: Arc::new(dependencies),
             publication: state.publication,
             tier: PublishedTier::Generic,
+            compilation,
         };
         state.generic = Some(target.clone());
         Ok(target)
@@ -88,8 +179,9 @@ impl EntryCell {
         &self,
         profile: Digest,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
         if dependencies.is_empty() {
             return Err("published native entry must declare dependencies");
@@ -102,9 +194,10 @@ impl EntryCell {
         let target = PublishedEntry {
             executor,
             entrypoint,
-            dependencies,
+            dependencies: Arc::new(dependencies),
             publication: state.publication,
             tier: PublishedTier::Specialized { profile },
+            compilation,
         };
         state.specialized.insert(profile, target.clone());
         Ok(target)
@@ -125,6 +218,13 @@ impl EntryCell {
 
     pub(crate) fn invalidate_if_changed(&self, current: &DependencySnapshot) -> bool {
         let mut state = self.state.borrow_mut();
+        if state
+            .retired_preparation
+            .as_ref()
+            .is_some_and(|quote| !quote.dependencies.is_satisfied_by(current))
+        {
+            state.retired_preparation = None;
+        }
         let generic_invalid = state
             .generic
             .as_ref()
@@ -205,8 +305,31 @@ impl EntryCell {
                     target.executor.retained_code_bytes(),
                 )
             })?;
-        state.specialized.remove(&profile);
+        let retired = state.specialized.remove(&profile)?;
+        state.retired_preparation = Some(NativePreparationQuote {
+            entrypoint: retired.entrypoint,
+            dependencies: retired.dependencies,
+            publication: retired.publication,
+            tier: retired.tier,
+            compilation: retired.compilation,
+        });
         Some((publication, bytes))
+    }
+
+    pub(crate) fn preparation_quote(
+        &self,
+        profile: Digest,
+        current: &DependencySnapshot,
+    ) -> Option<NativePreparationQuote> {
+        self.state
+            .borrow()
+            .retired_preparation
+            .as_ref()
+            .filter(|quote| {
+                quote.tier == (PublishedTier::Specialized { profile })
+                    && quote.dependencies.is_satisfied_by(current)
+            })
+            .cloned()
     }
 
     pub(crate) fn oldest_specialized_publication(&self) -> Option<u64> {

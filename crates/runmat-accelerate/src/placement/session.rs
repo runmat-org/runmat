@@ -1,17 +1,53 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use runmat_execution::{
-    Digest, EstimateConfidence, EstimateSource, ExecutionCostComponents, PlacementDecision,
-    PlacementFeedback, PlacementInvalidation, PlacementPlanRequest, SelectedExecutionCandidate,
+    CandidateCostUnavailable, CandidateObservationEvidence, Digest, DigestStream, EstimateSource,
+    ExecutionCandidateKind, ExecutionCostComponents, PlacementDecision, PlacementFeedback,
+    PlacementInvalidation, PlacementPlanRequest, PlacementSignature, SelectedExecutionCandidate,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
+mod evidence;
+mod feedback_observation;
+mod exploration;
+#[cfg(test)]
+mod graph_permit_fixture;
+mod managed_feedback;
+mod observation_permits;
+mod pending;
+mod prepared_request;
+mod whole_work;
+pub(super) use prepared_request::PreparedPlacementRequest;
+pub(crate) use whole_work::select_unobserved;
+pub(in crate::placement) use whole_work::unobserved_admitted_record_bytes;
+pub(super) use whole_work::{candidate_resources_admitted, no_resource_candidate};
+#[cfg(test)]
+#[path = "session/authority_tests.rs"]
+mod authority_tests;
+mod runtime_binding_authority;
 
-pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 1;
+pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 3;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum FeedbackCandidateKey {
+    Canonical(Digest),
+    Text(Digest),
+}
+
+fn feedback_candidate_key(candidate: &str) -> FeedbackCandidateKey {
+    if let Some(identity) = Digest::parse_canonical(candidate) {
+        return FeedbackCandidateKey::Canonical(identity);
+    }
+    let mut identity = DigestStream::new();
+    identity.update(b"runmat.placement.feedback-candidate.v1\0");
+    identity.update(candidate.as_bytes());
+    FeedbackCandidateKey::Text(identity.finish())
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExplorationMode {
@@ -27,6 +63,15 @@ pub struct PlacementSessionConfig {
     pub leave_relative_margin_basis_points: u32,
     pub exploration: ExplorationMode,
     pub exploration_max_overhead_basis_points: u32,
+}
+
+/// Explicit session setup capacities for requested Rust-managed backing.
+/// These are slot counts and serialized-signature bytes, not an RSS estimate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ManagedPlacementCapacity {
+    pub in_flight_slots: usize,
+    pub feedback_series: usize,
+    pub signature_bytes_per_series: usize,
 }
 
 impl Default for PlacementSessionConfig {
@@ -61,6 +106,7 @@ pub struct PlacementProfileSnapshot {
 pub struct PlacementFeedbackSeries {
     pub signature: runmat_execution::PlacementSignature,
     pub candidate: String,
+    pub kind: ExecutionCandidateKind,
     #[serde(with = "u64_decimal")]
     pub samples: u64,
     #[serde(with = "u64_decimal")]
@@ -115,20 +161,11 @@ mod u128_decimal {
 
 impl PlacementFeedbackSeries {
     pub fn mean_ns(&self) -> Option<u64> {
-        (self.samples > 0).then(|| {
-            u64::try_from(self.total_elapsed_ns / u128::from(self.samples)).unwrap_or(u64::MAX)
-        })
+        evidence::FeedbackNumbers::from_series(self).mean_ns()
     }
 
     pub fn variance_ns2(&self) -> Option<u128> {
-        if self.samples < 2 {
-            return None;
-        }
-        let mean = self.total_elapsed_ns / u128::from(self.samples);
-        Some(
-            (self.total_squared_elapsed_ns / u128::from(self.samples))
-                .saturating_sub(mean.saturating_mul(mean)),
-        )
+        evidence::FeedbackNumbers::from_series(self).variance_ns2()
     }
 
     pub fn estimated_p95_ns(&self) -> Option<u64> {
@@ -149,12 +186,19 @@ struct CachedDecision {
 struct PlacementSessionState {
     tick: u64,
     decisions: BTreeMap<Digest, CachedDecision>,
-    feedback: BTreeMap<(Digest, String), PlacementFeedbackSeries>,
+    feedback:
+        BTreeMap<(Digest, FeedbackCandidateKey, ExecutionCandidateKind), PlacementFeedbackSeries>,
 }
 
 pub struct PlacementSession {
+    runtime_binding_session: runtime_binding_authority::SessionRuntimeBindingAuthority,
     config: PlacementSessionConfig,
     state: RefCell<PlacementSessionState>,
+    pending: pending::PendingFeedback,
+    observation_permits: observation_permits::ObservationPermits,
+    managed_observations: Option<runmat_runtime::context::ManagedObservationPool>,
+    managed_feedback: Option<managed_feedback::ManagedFeedbackPool>,
+    whole_work_probes: Arc<Mutex<BTreeSet<whole_work::ProbeKey>>>,
 }
 
 impl Default for PlacementSession {
@@ -166,32 +210,61 @@ impl Default for PlacementSession {
 impl PlacementSession {
     pub fn new(config: PlacementSessionConfig) -> Self {
         Self {
+            runtime_binding_session: runtime_binding_authority::SessionRuntimeBindingAuthority::new(
+            ),
             config,
             state: RefCell::new(PlacementSessionState::default()),
+            pending: pending::PendingFeedback::default(),
+            observation_permits: observation_permits::ObservationPermits::default(),
+            managed_observations: None,
+            managed_feedback: None,
+            whole_work_probes: Arc::default(),
         }
+    }
+
+    /// Install a finite in-flight observation backing at session setup. The
+    /// existing unbounded/external constructor retains its dynamic registry.
+    pub fn new_with_managed_observations(
+        config: PlacementSessionConfig,
+        ledger: &runmat_runtime::context::host_effect::ManagedHostEffectLedger,
+        capacity: ManagedPlacementCapacity,
+    ) -> Result<Self, runmat_runtime::context::host_effect::HostEffectAllocationError> {
+        let managed_observations =
+            runmat_runtime::context::ManagedObservationPool::new(ledger, capacity.in_flight_slots)?;
+        let managed_feedback = managed_feedback::ManagedFeedbackPool::new(
+            ledger,
+            capacity.feedback_series,
+            capacity.signature_bytes_per_series,
+        )?;
+        let mut session = Self::new(config);
+        session.managed_observations = Some(managed_observations);
+        session.managed_feedback = Some(managed_feedback);
+        Ok(session)
     }
 
     pub fn plan(
         &self,
-        mut request: PlacementPlanRequest,
+        request: PlacementPlanRequest,
     ) -> Result<PlacementDecision, PlacementPlanError> {
-        request.validate().map_err(|message| PlacementPlanError {
-            code: "RunMat:Placement:InvalidRequest",
-            message: message.into(),
-        })?;
-        let key = request.signature.cache_key();
+        self.drain_observations();
+        let mut prepared =
+            PreparedPlacementRequest::new(request).map_err(|message| PlacementPlanError {
+                code: "RunMat:Placement:InvalidRequest",
+                message: message.into(),
+            })?;
+        let key = prepared.request().signature.cache_key();
         let mut state = self.state.borrow_mut();
         state.decisions.retain(|_, entry| {
-            entry.decision.signature.operation != request.signature.operation
-                || entry.decision.signature.revision == request.signature.revision
+            entry.decision.signature.operation != prepared.request().signature.operation
+                || entry.decision.signature.revision == prepared.request().signature.revision
         });
         state.tick = state.tick.saturating_add(1);
         let tick = state.tick;
-        apply_feedback_estimates(&mut request, key, tick, &state.feedback);
+        prepared.apply_feedback(key, tick, &state.feedback);
         let partition =
-            solve_partition(&request, PlacementPolicy::default()).map_err(|message| {
+            solve_partition(&prepared, PlacementPolicy::default()).map_err(|message| {
                 PlacementPlanError {
-                    code: if request.resources.cancellation_requested {
+                    code: if prepared.request().resources.cancellation_requested {
                         "RunMat:Placement:Cancelled"
                     } else {
                         "RunMat:Placement:NoLegalCandidate"
@@ -199,13 +272,14 @@ impl PlacementSession {
                     message: message.into(),
                 }
             })?;
-        let mut fresh = decision_from_partition(&request, &partition);
+        let request = prepared.request();
+        let mut fresh = decision_from_partition(request, &partition);
         if let Some(cached) = state.decisions.get_mut(&key) {
             if cached.resources == request.resources
                 && cached.decision.signature.revision == request.signature.revision
             {
                 if let Some(incumbent_ns) =
-                    evaluate_selections(&request, &cached.decision.selections)
+                    evaluate_selections(&prepared, &cached.decision.selections)
                 {
                     if !clears_leave_margin(incumbent_ns, fresh.predicted_total_ns, self.config) {
                         cached.last_used = tick;
@@ -218,23 +292,23 @@ impl PlacementSession {
             }
         }
         if should_explore(self.config, tick, request.deterministic) {
-            if let Some((selections, alternate_ns)) = partition.alternate.as_ref() {
-                if alternate_is_transactional(&request, &partition.selections, selections)
-                    && within_exploration_bound(
-                        partition.total_ns,
-                        *alternate_ns,
-                        self.config.exploration_max_overhead_basis_points,
-                    )
-                {
-                    fresh = decision_from_selections(
-                        &request,
-                        selections,
-                        *alternate_ns,
-                        partition.explored_states,
-                        partition.pruned_states,
-                        false,
-                    );
-                }
+            if let Some((selections, alternate_ns)) = exploration::choose_alternate(
+                request,
+                &partition,
+                self.config,
+                key,
+                &state.feedback,
+                self.managed_feedback.as_ref(),
+                tick,
+            ) {
+                fresh = decision_from_selections(
+                    request,
+                    selections,
+                    *alternate_ns,
+                    partition.explored_states,
+                    partition.pruned_states,
+                    false,
+                );
             }
         }
         state.decisions.insert(
@@ -250,6 +324,86 @@ impl PlacementSession {
     }
 
     pub fn observe(&self, feedback: PlacementFeedback) -> Result<(), PlacementPlanError> {
+        self.drain_observations();
+        self.record_feedback(feedback)
+    }
+
+    pub fn observed_candidate_duration(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+    ) -> CandidateObservationEvidence {
+        self.observed_candidate_duration_key(signature, feedback_candidate_key(candidate), kind)
+    }
+
+    fn observed_candidate_duration_digest(
+        &self,
+        signature: runmat_execution::PlacementSignatureRef<'_>,
+        candidate: Digest,
+        kind: ExecutionCandidateKind,
+        drain_pending: bool,
+    ) -> CandidateObservationEvidence {
+        self.observed_candidate_duration_key_digest(
+            signature.cache_key(),
+            FeedbackCandidateKey::Canonical(candidate),
+            kind,
+            drain_pending,
+        )
+    }
+
+    fn observed_candidate_duration_key(
+        &self,
+        signature: &PlacementSignature,
+        candidate: FeedbackCandidateKey,
+        kind: ExecutionCandidateKind,
+    ) -> CandidateObservationEvidence {
+        self.observed_candidate_duration_key_with_drain(signature, candidate, kind, true)
+    }
+
+    fn observed_candidate_duration_key_with_drain(
+        &self,
+        signature: &PlacementSignature,
+        candidate: FeedbackCandidateKey,
+        kind: ExecutionCandidateKind,
+        drain_pending: bool,
+    ) -> CandidateObservationEvidence {
+        self.observed_candidate_duration_key_digest(
+            signature.cache_key(),
+            candidate,
+            kind,
+            drain_pending,
+        )
+    }
+
+    fn observed_candidate_duration_key_digest(
+        &self,
+        signature: Digest,
+        candidate: FeedbackCandidateKey,
+        kind: ExecutionCandidateKind,
+        drain_pending: bool,
+    ) -> CandidateObservationEvidence {
+        if drain_pending {
+            self.drain_observations();
+        }
+        let state = self.state.borrow();
+        if let FeedbackCandidateKey::Canonical(candidate_digest) = candidate {
+            if let Some(observation) = self
+                .managed_feedback
+                .as_ref()
+                .and_then(|pool| pool.observed(signature, candidate_digest, kind, state.tick))
+            {
+                return observation;
+            }
+        }
+        let key = (signature, candidate, kind);
+        state.feedback.get(&key).map_or(
+            CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
+            |series| evidence::from_series(series, state.tick),
+        )
+    }
+
+    fn record_feedback(&self, feedback: PlacementFeedback) -> Result<(), PlacementPlanError> {
         if feedback.signature.validate().is_err()
             || feedback.candidate.is_empty()
             || feedback.candidate.len() > 128
@@ -263,49 +417,35 @@ impl PlacementSession {
         let mut state = self.state.borrow_mut();
         let observation_tick = state.tick;
         let signature_key = feedback.signature.cache_key();
-        let key = (signature_key, feedback.candidate.clone());
+        let key = (
+            signature_key,
+            feedback_candidate_key(&feedback.candidate),
+            feedback.kind,
+        );
         let series = state
             .feedback
             .entry(key)
             .or_insert_with(|| PlacementFeedbackSeries {
                 signature: feedback.signature.clone(),
                 candidate: feedback.candidate.clone(),
+                kind: feedback.kind,
                 samples: 0,
                 failures: 0,
                 total_elapsed_ns: 0,
                 total_squared_elapsed_ns: 0,
                 latest_tick: 0,
             });
-        if feedback.succeeded {
-            if series.samples >= MAX_FEEDBACK_OBSERVATIONS {
-                series.samples = series.samples.div_ceil(2);
-                series.total_elapsed_ns = series.total_elapsed_ns.div_ceil(2);
-                series.total_squared_elapsed_ns = series.total_squared_elapsed_ns.div_ceil(2);
-            }
-            let elapsed_ns = if series.samples >= 4 {
-                let mean = series.mean_ns().unwrap_or(feedback.total_elapsed_ns).max(1);
-                feedback
-                    .total_elapsed_ns
-                    .clamp((mean / 4).max(1), mean.saturating_mul(4))
-            } else {
-                feedback.total_elapsed_ns.max(1)
-            };
-            series.samples = series.samples.saturating_add(1);
-            series.total_elapsed_ns = series
-                .total_elapsed_ns
-                .saturating_add(u128::from(elapsed_ns));
-            series.total_squared_elapsed_ns = series
-                .total_squared_elapsed_ns
-                .saturating_add(u128::from(elapsed_ns).saturating_mul(u128::from(elapsed_ns)));
-        } else {
-            series.failures = series
-                .failures
-                .saturating_add(1)
-                .min(MAX_FEEDBACK_OBSERVATIONS);
-        }
-        series.latest_tick = observation_tick;
-        let needs_replan =
-            !feedback.succeeded || series.samples <= 2 || series.samples.is_power_of_two();
+        let mut numbers = evidence::FeedbackNumbers::from_series(series);
+        let needs_replan = numbers.record(
+            feedback.total_elapsed_ns,
+            feedback.succeeded,
+            observation_tick,
+        );
+        series.samples = numbers.samples;
+        series.failures = numbers.failures;
+        series.total_elapsed_ns = numbers.total_elapsed_ns;
+        series.total_squared_elapsed_ns = numbers.total_squared_elapsed_ns;
+        series.latest_tick = numbers.latest_tick;
         if needs_replan {
             state.decisions.remove(&signature_key);
         }
@@ -314,6 +454,16 @@ impl PlacementSession {
     }
 
     pub fn invalidate(&self, invalidation: PlacementInvalidation) {
+        self.runtime_binding_session
+            .invalidate_vm_generations(&invalidation);
+        self.observation_permits.invalidate(&invalidation);
+        if let Some(pool) = &self.managed_observations {
+            pool.invalidate(&invalidation);
+        }
+        if let Some(pool) = &self.managed_feedback {
+            pool.invalidate(&invalidation);
+        }
+        self.pending.invalidate(&invalidation);
         let mut state = self.state.borrow_mut();
         match invalidation {
             PlacementInvalidation::All => {
@@ -329,12 +479,37 @@ impl PlacementSession {
                 });
             }
             PlacementInvalidation::Provider { digest } => {
+                let provider = PlacementInvalidation::Provider { digest };
                 state
                     .decisions
-                    .retain(|_, entry| entry.decision.signature.revision.provider != digest);
+                    .retain(|_, entry| !provider.matches_signature(&entry.decision.signature));
                 state
                     .feedback
-                    .retain(|_, series| series.signature.revision.provider != digest);
+                    .retain(|_, series| !provider.matches_signature(&series.signature));
+            }
+            PlacementInvalidation::HostService { digest } => {
+                state.decisions.retain(|_, entry| {
+                    entry.decision.signature.revision.authority
+                        != runmat_execution::PlacementExecutionAuthorityRevision::HostService(
+                            digest,
+                        )
+                });
+                state.feedback.retain(|_, series| {
+                    series.signature.revision.authority
+                        != runmat_execution::PlacementExecutionAuthorityRevision::HostService(
+                            digest,
+                        )
+                });
+            }
+            PlacementInvalidation::RuntimeBindingSession { digest } => {
+                state.decisions.retain(|_, entry| {
+                    entry.decision.signature.revision.authority
+                        != runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(digest)
+                });
+                state.feedback.retain(|_, series| {
+                    series.signature.revision.authority
+                        != runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(digest)
+                });
             }
             PlacementInvalidation::Policy { digest } => {
                 state
@@ -353,10 +528,37 @@ impl PlacementSession {
         }
     }
 
+    /// Inspect ordinary session-local measurements without the persistence
+    /// filter. Binding-session feedback must never enter an exported profile.
+    #[cfg(test)]
+    pub(crate) fn ordinary_feedback_for_test(&self) -> Vec<PlacementFeedbackSeries> {
+        self.drain_observations();
+        self.state.borrow().feedback.values().cloned().collect()
+    }
+
     pub fn profile_snapshot(&self) -> PlacementProfileSnapshot {
+        self.drain_observations();
+        let mut feedback: Vec<_> = self.state.borrow().feedback.values().cloned().collect();
+        if let Some(pool) = &self.managed_feedback {
+            let managed = pool.profile_snapshot();
+            feedback.retain(|ordinary| {
+                !managed.iter().any(|series| {
+                    ordinary.signature.cache_key() == series.signature.cache_key()
+                        && ordinary.candidate == series.candidate
+                        && ordinary.kind == series.kind
+                })
+            });
+            feedback.extend(managed);
+        }
+        feedback.retain(|series| {
+            !matches!(
+                series.signature.revision.authority,
+                runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+            )
+        });
         PlacementProfileSnapshot {
             schema_version: PLACEMENT_PROFILE_SCHEMA_VERSION,
-            feedback: self.state.borrow().feedback.values().cloned().collect(),
+            feedback,
         }
     }
 
@@ -382,6 +584,7 @@ impl PlacementSession {
                 .cmp(&right.latest_tick)
                 .then_with(|| left.signature.cache_key().cmp(&right.signature.cache_key()))
                 .then_with(|| left.candidate.cmp(&right.candidate))
+                .then_with(|| left.kind.cmp(&right.kind))
         });
         let mut restored = BTreeMap::new();
         let mut restored_tick = 0_u64;
@@ -394,13 +597,31 @@ impl PlacementSession {
             }
             restored_tick = restored_tick.saturating_add(1);
             series.latest_tick = restored_tick;
-            let key = (series.signature.cache_key(), series.candidate.clone());
+            let key = (
+                series.signature.cache_key(),
+                feedback_candidate_key(&series.candidate),
+                series.kind,
+            );
             if restored.insert(key, series).is_some() {
                 return Err(PlacementPlanError {
                     code: "RunMat:Placement:ProfileEntry",
                     message: "placement profile contains a duplicate feedback series".into(),
                 });
             }
+        }
+        // A successful import replaces the observation epoch. In-flight samples
+        // from the previous profile must not repopulate the replacement later.
+        // Validate the entire import first, so rejected imports change nothing.
+        self.runtime_binding_session
+            .invalidate_vm_generations(&PlacementInvalidation::All);
+        self.pending.invalidate(&PlacementInvalidation::All);
+        self.observation_permits
+            .invalidate(&PlacementInvalidation::All);
+        if let Some(pool) = &self.managed_observations {
+            pool.invalidate(&PlacementInvalidation::All);
+        }
+        if let Some(pool) = &self.managed_feedback {
+            pool.invalidate(&PlacementInvalidation::All);
         }
         let mut state = self.state.borrow_mut();
         state.tick = restored_tick;
@@ -412,7 +633,12 @@ impl PlacementSession {
 }
 
 fn valid_profile_series(series: &PlacementFeedbackSeries) -> bool {
-    series.signature.validate().is_ok()
+    series.signature.provider_provenance.is_none()
+        && !matches!(
+            series.signature.revision.authority,
+            runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+        )
+        && series.signature.validate().is_ok()
         && !series.candidate.is_empty()
         && series.candidate.len() <= 128
         && !series.candidate.chars().any(char::is_control)
@@ -431,11 +657,248 @@ fn valid_profile_series(series: &PlacementFeedbackSeries) -> bool {
 }
 
 impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
+    fn whole_work_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        provider: Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        Some(super::revision::whole_work(program, provider, self.config))
+    }
+
+    fn whole_work_revision_ref<'a>(
+        &self,
+        program: Option<&'a runmat_execution::ProgramRevision>,
+        provider: Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
+        Some(super::revision::whole_work_ref(
+            program,
+            provider,
+            self.config,
+        ))
+    }
+
+    fn whole_work_runtime_binding_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        binding: runmat_builtins::BuiltinBindingIdentity,
+        registration: Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        let (revision, replaced) = self.runtime_binding_session.revision_and_replaced(
+            program,
+            binding,
+            registration,
+            self.config,
+        );
+        if let Some(digest) = replaced {
+            self.invalidate(PlacementInvalidation::RuntimeBindingSession { digest });
+        }
+        Some(revision)
+    }
+
+    fn whole_work_vm_fusion_region_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        region: runmat_runtime::context::VmFusionRegionRegistration,
+        liveness: std::sync::Weak<()>,
+    ) -> Option<runmat_runtime::context::VmFusionSessionRegistration> {
+        self.runtime_binding_session
+            .vm_registration(program, region, liveness, self.config)
+    }
+
+    fn whole_work_host_service_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        host_service: Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        Some(super::revision::whole_work_host_service(
+            program,
+            host_service,
+            self.config,
+        ))
+    }
+
+    fn whole_work_host_service_revision_ref<'a>(
+        &self,
+        program: Option<&'a runmat_execution::ProgramRevision>,
+        host_service: Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
+        Some(super::revision::whole_work_host_service_ref(
+            program,
+            host_service,
+            self.config,
+        ))
+    }
+
+    fn select_whole_work(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequest,
+    ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, runmat_runtime::RuntimeError>
+    {
+        PlacementSession::select_whole_work(self, request).map_err(runtime_error)
+    }
+
+    fn try_select_whole_work(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequest,
+    ) -> Result<
+        Option<runmat_runtime::context::RuntimeWholeWorkSelection>,
+        runmat_runtime::RuntimeError,
+    > {
+        PlacementSession::try_select_whole_work(self, request).map_err(runtime_error)
+    }
+
+    fn try_select_whole_work_borrowed_managed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<
+        Option<runmat_runtime::context::RuntimeManagedWholeWorkSelection>,
+        runmat_runtime::RuntimeError,
+    > {
+        PlacementSession::try_select_whole_work_borrowed_managed(self, request)
+            .map_err(runtime_error)
+    }
+
+    fn select_whole_work_borrowed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, runmat_runtime::RuntimeError>
+    {
+        PlacementSession::select_whole_work_borrowed(self, request).map_err(runtime_error)
+    }
+
+    fn select_whole_work_borrowed_managed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<
+        runmat_runtime::context::RuntimeManagedWholeWorkSelection,
+        runmat_runtime::RuntimeError,
+    > {
+        PlacementSession::select_whole_work_borrowed_managed(self, request).map_err(runtime_error)
+    }
+
+    fn managed_whole_work_available(&self) -> bool {
+        self.managed_observations.is_some() && self.managed_feedback.is_some()
+    }
+
+    fn observed_candidate_duration(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+    ) -> CandidateObservationEvidence {
+        PlacementSession::observed_candidate_duration(self, signature, candidate, kind)
+    }
+    fn observe_selected_whole_work(
+        &self,
+        selected: &runmat_runtime::context::RuntimeWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        if !selected.observation_is_current()
+            || matches!(
+                outcome,
+                runmat_execution::WholeWorkObservationOutcome::Cancelled
+                    | runmat_execution::WholeWorkObservationOutcome::Abandoned
+            )
+        {
+            return Ok(());
+        }
+        self.observe_whole_work(runmat_execution::WholeWorkObservation {
+            signature: selected.decision.signature.clone(),
+            selected: selected.decision.selected.clone(),
+            elapsed_ns,
+            outcome,
+        })
+    }
+    fn observe_managed_whole_work(
+        &self,
+        selected: &runmat_runtime::context::RuntimeManagedWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        if !selected.observation_is_current()
+            || matches!(
+                outcome,
+                runmat_execution::WholeWorkObservationOutcome::Cancelled
+                    | runmat_execution::WholeWorkObservationOutcome::Abandoned
+            )
+        {
+            return Ok(());
+        }
+        let pool = self.managed_observations.as_ref().ok_or_else(|| {
+            runtime_error(PlacementPlanError {
+                code: "RunMat:Placement:InvalidFeedback",
+                message: "managed observation owner is absent".into(),
+            })
+        })?;
+        if !selected.observation_lease.same_owner(pool) {
+            return Err(runtime_error(PlacementPlanError {
+                code: "RunMat:Placement:InvalidFeedback",
+                message: "managed observation belongs to another session".into(),
+            }));
+        }
+        let key = managed_feedback::Key {
+            signature: selected.identity.signature,
+            permit: selected.identity,
+            candidate: selected.selected.candidate,
+            kind: selected.selected.kind,
+        };
+        let tick = self.state.borrow().tick;
+        let needs_replan = self
+            .managed_feedback
+            .as_ref()
+            .expect("managed feedback backing")
+            .record(
+                key,
+                elapsed_ns,
+                matches!(
+                    outcome,
+                    runmat_execution::WholeWorkObservationOutcome::Success
+                ),
+                tick,
+            )
+            .map_err(|source| {
+                runtime_error(PlacementPlanError {
+                    code: "RunMat:Placement:InvalidFeedback",
+                    message: source.to_string(),
+                })
+            })?;
+        if needs_replan {
+            self.state.borrow_mut().decisions.remove(&key.signature);
+        }
+        Ok(())
+    }
+    fn defer_feedback(
+        &self,
+        source: Box<dyn runmat_runtime::context::RuntimePlacementFeedbackSource>,
+    ) -> Result<(), Box<dyn runmat_runtime::context::RuntimePlacementFeedbackSource>> {
+        self.drain_observations();
+        self.pending.push(source)
+    }
+
+    fn drain_feedback(&self) {
+        self.drain_observations();
+    }
     fn plan(
         &self,
         request: PlacementPlanRequest,
     ) -> Result<PlacementDecision, runmat_runtime::RuntimeError> {
         PlacementSession::plan(self, request).map_err(runtime_error)
+    }
+
+    fn plan_with_observation_permit(
+        &self,
+        request: PlacementPlanRequest,
+    ) -> Result<runmat_runtime::context::RuntimeGraphPlacementSelection, runmat_runtime::RuntimeError>
+    {
+        let decision = PlacementSession::plan(self, request).map_err(runtime_error)?;
+        // Both operations run on this Rc-owned service before it returns to
+        // the executor. No effect/publication can interleave this boundary.
+        let observation_permit = self.observation_permits.register_graph(&decision);
+        Ok(runmat_runtime::context::RuntimeGraphPlacementSelection {
+            decision,
+            observation_permit,
+        })
     }
 
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), runmat_runtime::RuntimeError> {
@@ -447,6 +910,28 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
     }
 }
 
+impl PlacementSession {
+    fn drain_observations(&self) {
+        for feedback in self.pending.take_ready() {
+            if let Err(error) =
+                runmat_runtime::context::RuntimePlacementService::observe_deferred_feedback(
+                    self, feedback,
+                )
+            {
+                log::warn!("placement observation rejected: {error}");
+            }
+        }
+    }
+}
+
+impl Drop for PlacementSession {
+    fn drop(&mut self) {
+        self.drain_observations();
+        self.runtime_binding_session
+            .invalidate_vm_generations(&PlacementInvalidation::All);
+    }
+}
+
 fn runtime_error(error: PlacementPlanError) -> runmat_runtime::RuntimeError {
     runmat_runtime::build_runtime_error(error.message)
         .with_builtin("placement")
@@ -454,49 +939,45 @@ fn runtime_error(error: PlacementPlanError) -> runmat_runtime::RuntimeError {
         .build()
 }
 
-fn apply_feedback_estimates(
+fn apply_feedback_evidence(
     request: &mut PlacementPlanRequest,
     signature_key: Digest,
     tick: u64,
-    feedback: &BTreeMap<(Digest, String), PlacementFeedbackSeries>,
+    feedback: &BTreeMap<
+        (Digest, FeedbackCandidateKey, ExecutionCandidateKind),
+        PlacementFeedbackSeries,
+    >,
 ) {
     for node in &mut request.graph.nodes {
-        for candidate in &mut node.candidates {
-            let key = (signature_key, candidate.descriptor.identity.clone());
+        node.candidates.retain_mut(|candidate| {
+            let key = (
+                signature_key,
+                feedback_candidate_key(&candidate.descriptor.identity),
+                candidate.descriptor.kind,
+            );
             let Some(series) = feedback.get(&key) else {
-                continue;
+                return true;
             };
-            if tick.saturating_sub(series.latest_tick) > 1_024 {
-                continue;
-            }
-            if series.failures >= 2 && candidate.descriptor.kind.is_provider() {
-                candidate.resources.queue_slots = u32::MAX;
-                continue;
-            }
-            if series.samples >= 2 {
-                if let Some(mean) = series.mean_ns() {
+            match evidence::from_series(series, tick) {
+                CandidateObservationEvidence::Observed(duration) => {
                     candidate.descriptor.cost.components = ExecutionCostComponents {
-                        execution_ns: mean,
+                        execution_ns: duration.elapsed_ns,
                         ..ExecutionCostComponents::default()
                     };
-                    let deviation = integer_sqrt(series.variance_ns2().unwrap_or(0));
-                    let variation_basis_points = if mean == 0 {
-                        u128::MAX
-                    } else {
-                        deviation.saturating_mul(10_000) / u128::from(mean)
-                    };
-                    candidate.descriptor.cost.confidence =
-                        if series.samples >= 8 && variation_basis_points <= 1_000 {
-                            EstimateConfidence::High
-                        } else if variation_basis_points > 5_000 {
-                            EstimateConfidence::Low
-                        } else {
-                            EstimateConfidence::Medium
-                        };
+                    candidate.descriptor.cost.confidence = duration.confidence;
                     candidate.descriptor.cost.source = EstimateSource::Observation;
                 }
+                CandidateObservationEvidence::Unavailable(
+                    CandidateCostUnavailable::RepeatedFailures { .. },
+                ) if candidate.descriptor.kind.is_provider() => {
+                    // Failure evidence makes this route ineligible. It is not
+                    // a claim about queue capacity or resource demand.
+                    return false;
+                }
+                CandidateObservationEvidence::Unavailable(_) => {}
             }
-        }
+            true
+        });
     }
 }
 
@@ -617,7 +1098,7 @@ fn evict_oldest_feedback(state: &mut PlacementSessionState, limit: usize) {
             .feedback
             .iter()
             .min_by_key(|(_, series)| series.latest_tick)
-            .map(|(key, _)| key.clone())
+            .map(|(key, _)| *key)
         else {
             break;
         };
@@ -631,10 +1112,11 @@ mod tests {
 
     use runmat_execution::{
         CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
-        CandidateResourceDemand, ExecutionCandidateDescriptor, ExecutionCandidateKind,
-        ExecutionCostComponents, ExecutionCostEstimate, PlacementGraph, PlacementGraphCandidate,
-        PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode, PlacementResourceSnapshot,
-        PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
+        CandidateResourceDemand, EstimateConfidence, ExecutionCandidateDescriptor,
+        ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate, PlacementGraph,
+        PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode,
+        PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
+        SourceOutputOrdinal,
     };
 
     use super::*;
@@ -643,22 +1125,93 @@ mod tests {
         Digest::sha256(token.as_bytes())
     }
 
-    fn signature(token: &str) -> PlacementSignature {
+    pub(super) fn signature(token: &str) -> PlacementSignature {
         PlacementSignature {
             region: None,
             operation: token.into(),
             runtime_facts: digest(token),
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None,
                 catalog: digest("catalog"),
                 compiler: digest("compiler"),
-                provider: digest("provider"),
+                authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest(
+                    "provider",
+                )),
                 policy: digest("policy"),
             },
         }
     }
 
-    fn candidate(
+    #[test]
+    fn typed_feedback_key_preserves_exact_profile_candidate_text() {
+        let session = PlacementSession::default();
+        let signature = signature("feedback");
+        let candidate = "candidate-λ";
+        session
+            .observe(PlacementFeedback {
+                signature: signature.clone(),
+                candidate: candidate.into(),
+                kind: ExecutionCandidateKind::SharedRuntime,
+                total_elapsed_ns: 17,
+                succeeded: true,
+            })
+            .expect("record candidate");
+        assert!(matches!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            CandidateObservationEvidence::Unavailable(
+                CandidateCostUnavailable::InsufficientObservations {
+                    successful: 1,
+                    failed: 0
+                }
+            )
+        ));
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                "candidate-other",
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
+        );
+        assert_eq!(session.profile_snapshot().feedback[0].candidate, candidate);
+    }
+
+    #[test]
+    fn canonical_candidate_digest_uses_the_same_observation_key_without_text() {
+        let session = PlacementSession::default();
+        let signature = signature("whole-work");
+        let candidate = digest("typed-route");
+        session
+            .observe(PlacementFeedback {
+                signature: signature.clone(),
+                candidate: candidate.to_string(),
+                kind: ExecutionCandidateKind::SharedRuntime,
+                total_elapsed_ns: 31,
+                succeeded: true,
+            })
+            .expect("record canonical candidate");
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                &candidate.to_string(),
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            session.observed_candidate_duration_digest(
+                (&signature).into(),
+                candidate,
+                ExecutionCandidateKind::SharedRuntime,
+                true,
+            ),
+        );
+    }
+
+    pub(super) fn candidate(
         identity: &str,
         kind: ExecutionCandidateKind,
         cost_ns: u64,
@@ -681,7 +1234,7 @@ mod tests {
                         execution_ns: cost_ns,
                         ..ExecutionCostComponents::default()
                     },
-                    scratch_bytes: 0,
+                    scratch_bytes: Some(0),
                     confidence: EstimateConfidence::Exact,
                     source: EstimateSource::Synthetic,
                 },
@@ -690,19 +1243,24 @@ mod tests {
                 } else {
                     CandidateOutputResidency::Host
                 },
+                presentation: runmat_execution::CandidateOutputPresentation::Direct,
                 guards: Vec::new(),
             },
             resources: CandidateResourceDemand {
                 cpu_millicores: if kind.is_provider() { 0 } else { 1_000 },
-                retained_bytes,
-                scratch_bytes: 0,
+                retained_bytes: retained_bytes.into(),
+                scratch_bytes: 0.into(),
+                provider_host_workspace: None,
+                provider_input_stages: None,
                 queue_slots: if kind.is_provider() { 1 } else { 0 },
+                peak_live: None,
             },
+            output_facts: None,
             transactional_results: transactional,
         }
     }
 
-    fn resources(capacity: u64) -> PlacementResourceSnapshot {
+    pub(super) fn resources(capacity: u64) -> PlacementResourceSnapshot {
         PlacementResourceSnapshot {
             cpu_millicores_available: 1_000,
             memory_available_bytes: None,
@@ -773,6 +1331,7 @@ mod tests {
                 edges: vec![PlacementGraphEdge {
                     from: 0,
                     to: 1,
+                    source_output: None,
                     bytes: 64,
                     host_to_provider_ns: 100_000,
                     provider_to_host_ns: 100_000,
@@ -784,6 +1343,35 @@ mod tests {
             deterministic: true,
             require_transactional_results: true,
         }
+    }
+
+    #[test]
+    fn transactional_provider_only_whole_work_needs_no_fake_host_baseline() {
+        let mut request = two_node_request("provider-only", (100_000, 1_000), (100_000, 1_000));
+        request.graph.nodes.truncate(1);
+        request.graph.edges.clear();
+        request.graph.nodes[0]
+            .candidates
+            .retain(|candidate| candidate.descriptor.kind.is_provider());
+        let selected = PlacementSession::default()
+            .plan(request.clone())
+            .expect("one executable transactional provider route");
+        assert_eq!(selected.selections.len(), 1);
+        assert!(selected.selections[0].kind.is_provider());
+        assert!(!selected.used_local_fallback);
+
+        request.resources.providers[0].lost = true;
+        let error = PlacementSession::default()
+            .plan(request.clone())
+            .expect_err("lost provider has no executable route");
+        assert_eq!(error.code, "RunMat:Placement:NoLegalCandidate");
+
+        request.resources.providers[0].lost = false;
+        request.resources.cancellation_requested = true;
+        let error = PlacementSession::default()
+            .plan(request)
+            .expect_err("cancellation cannot select an invented host route");
+        assert_eq!(error.code, "RunMat:Placement:Cancelled");
     }
 
     #[test]
@@ -858,7 +1446,7 @@ mod tests {
         let session = PlacementSession::default();
         let mut request = two_node_request("memory", (100_000, 1_000), (100_000, 1_000));
         for node in &mut request.graph.nodes {
-            node.candidates[1].resources.retained_bytes = 2_048;
+            node.candidates[1].resources.retained_bytes = 2_048.into();
         }
         let decision = session.plan(request).unwrap();
         assert!(decision
@@ -875,7 +1463,7 @@ mod tests {
         for node in &mut request.graph.nodes {
             node.candidates[1].descriptor.output_residency =
                 CandidateOutputResidency::Mirrored { device_id: 7 };
-            node.candidates[1].resources.retained_bytes = 600;
+            node.candidates[1].resources.retained_bytes = 600.into();
         }
 
         let decision = session.plan(request).unwrap();
@@ -996,6 +1584,7 @@ mod tests {
             PlacementGraphEdge {
                 from: 0,
                 to: 2,
+                source_output: None,
                 bytes: 600,
                 host_to_provider_ns: 0,
                 provider_to_host_ns: 0,
@@ -1004,6 +1593,7 @@ mod tests {
             PlacementGraphEdge {
                 from: 1,
                 to: 2,
+                source_output: None,
                 bytes: 600,
                 host_to_provider_ns: 0,
                 provider_to_host_ns: 0,
@@ -1013,10 +1603,10 @@ mod tests {
         request.resources = resources(1_000);
         request.graph.nodes[0].candidates[1]
             .resources
-            .retained_bytes = 600;
+            .retained_bytes = 600.into();
         request.graph.nodes[1].candidates[1]
             .resources
-            .retained_bytes = 600;
+            .retained_bytes = 600.into();
 
         let decision = session.plan(request).unwrap();
         let provider_count = decision
@@ -1110,11 +1700,12 @@ mod tests {
         let initial = session.plan(request.clone()).unwrap();
         assert!(initial.selections[0].kind.is_provider());
         for _ in 1..=2 {
-            for candidate in ["gpu.first", "gpu.second"] {
+            for selected in &initial.selections {
                 session
                     .observe(PlacementFeedback {
                         signature: request.signature.clone(),
-                        candidate: candidate.into(),
+                        candidate: selected.candidate.clone(),
+                        kind: selected.kind,
                         total_elapsed_ns: 250_000,
                         succeeded: true,
                     })
@@ -1130,10 +1721,408 @@ mod tests {
         let encoded = serde_json::to_string(&session.profile_snapshot()).unwrap();
         assert!(encoded.contains("\"total_elapsed_ns\":\""));
         assert!(encoded.contains("\"samples\":\"2\""));
+        assert!(encoded.contains("\"kind\":\"provider_fusion\""));
         let snapshot: PlacementProfileSnapshot = serde_json::from_str(&encoded).unwrap();
         let restored = PlacementSession::default();
-        restored.restore_profile(snapshot).unwrap();
+        restored.restore_profile(snapshot.clone()).unwrap();
         assert_eq!(restored.profile_snapshot().feedback.len(), 2);
+        let mut legacy = serde_json::to_value(snapshot).unwrap();
+        legacy["schema_version"] = serde_json::json!(1);
+        legacy["feedback"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("kind");
+        assert!(serde_json::from_value::<PlacementProfileSnapshot>(legacy).is_err());
+    }
+
+    #[test]
+    fn replanning_and_profile_restore_do_not_mix_same_label_across_candidate_kinds() {
+        use runmat_execution::{CandidateCostUnavailable, CandidateObservationEvidence};
+
+        let mut request = two_node_request("kind-separated", (10_000, 100_000), (100_000, 10_000));
+        let edge = &mut request.graph.edges[0];
+        edge.host_to_provider_ns = 0;
+        edge.provider_to_host_ns = 0;
+        edge.cross_provider_ns = 0;
+        let host = &request.graph.nodes[0].candidates[0].descriptor;
+        let shared_label = host.identity.clone();
+        let host_kind = host.kind;
+        let provider = &mut request.graph.nodes[1].candidates[1].descriptor;
+        provider.identity = shared_label.clone();
+        let provider_kind = provider.kind;
+        assert_ne!(host_kind, provider_kind);
+
+        let session = PlacementSession::default();
+        let initial = session.plan(request.clone()).unwrap();
+        assert_eq!(initial.selections[0].kind, host_kind);
+        assert_eq!(initial.selections[1].kind, provider_kind);
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: request.signature.clone(),
+                    candidate: shared_label.clone(),
+                    kind: provider_kind,
+                    total_elapsed_ns: 250_000,
+                    succeeded: true,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            session.observed_candidate_duration(&request.signature, &shared_label, host_kind),
+            CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
+        );
+        let replanned = session.plan(request.clone()).unwrap();
+        assert_eq!(replanned.selections[0].kind, host_kind);
+        assert_eq!(replanned.selections[1].kind, host_kind);
+
+        let restored = PlacementSession::default();
+        restored
+            .restore_profile(session.profile_snapshot())
+            .unwrap();
+        let restored_plan = restored.plan(request).unwrap();
+        assert_eq!(restored_plan.selections[0].kind, host_kind);
+        assert_eq!(restored_plan.selections[1].kind, host_kind);
+    }
+
+    #[test]
+    fn observed_duration_requires_two_successes_and_tracks_revision_invalidation() {
+        use runmat_execution::{
+            CandidateCostUnavailable as Missing, CandidateObservationEvidence as E,
+        };
+
+        let session = PlacementSession::default();
+        let signature = signature("whole-route");
+        let candidate = "provider.whole-route";
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+        session
+            .observe(PlacementFeedback {
+                signature: signature.clone(),
+                candidate: candidate.into(),
+                kind: ExecutionCandidateKind::ProviderGraph,
+                total_elapsed_ns: 8,
+                succeeded: false,
+            })
+            .unwrap();
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::InsufficientObservations {
+                successful: 0,
+                failed: 1
+            })
+        );
+        for elapsed_ns in [100, 120] {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::ProviderGraph,
+                    total_elapsed_ns: elapsed_ns,
+                    succeeded: true,
+                })
+                .unwrap();
+            if elapsed_ns == 100 {
+                assert_eq!(
+                    session.observed_candidate_duration(
+                        &signature,
+                        candidate,
+                        ExecutionCandidateKind::ProviderGraph
+                    ),
+                    E::Unavailable(Missing::InsufficientObservations {
+                        successful: 1,
+                        failed: 1
+                    })
+                );
+            }
+        }
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Observed(runmat_execution::ObservedCandidateDuration {
+                elapsed_ns: 110,
+                confidence: EstimateConfidence::Medium,
+            })
+        );
+        let port: &dyn runmat_runtime::context::RuntimePlacementService = &session;
+        assert_eq!(
+            port.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            )
+        );
+        let series = session.profile_snapshot().feedback.pop().unwrap();
+        assert_eq!(
+            evidence::from_series(&series, series.latest_tick + 1_025),
+            E::Unavailable(Missing::StaleObservations)
+        );
+        for _ in 0..6 {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::ProviderGraph,
+                    total_elapsed_ns: 110,
+                    succeeded: true,
+                })
+                .unwrap();
+        }
+        assert!(matches!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Observed(runmat_execution::ObservedCandidateDuration {
+                confidence: EstimateConfidence::High,
+                ..
+            })
+        ));
+        let mut different_revision = signature.clone();
+        different_revision.revision.authority =
+            runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest("new-provider"));
+        assert_eq!(
+            session.observed_candidate_duration(
+                &different_revision,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+        session.invalidate(PlacementInvalidation::Provider {
+            digest: match signature.revision.authority {
+                runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest) => digest,
+                runmat_execution::PlacementExecutionAuthorityRevision::HostService(_)
+                | runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_) =>
+                {
+                    unreachable!("provider fixture")
+                }
+            },
+        });
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+    }
+
+    #[test]
+    fn repeated_failures_suppress_observation_without_fabricating_cost() {
+        use runmat_execution::{
+            CandidateCostUnavailable as Missing, CandidateObservationEvidence as E,
+        };
+
+        let session = PlacementSession::default();
+        let signature = signature("failed-route");
+        let candidate = "provider.failed-route";
+        for succeeded in [true, true, false, false] {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::ProviderGraph,
+                    total_elapsed_ns: 100,
+                    succeeded,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::RepeatedFailures { failed: 2 })
+        );
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::SharedRuntime,
+                    total_elapsed_ns: 75,
+                    succeeded: true,
+                })
+                .unwrap();
+        }
+        assert!(matches!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            E::Observed(_)
+        ));
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::RepeatedFailures { failed: 2 })
+        );
+    }
+
+    #[test]
+    fn failed_provider_is_ineligible_with_unknown_queue_bounds_until_evidence_stales() {
+        let mut request =
+            two_node_request("failed-eligibility", (100_000, 10_000), (100_000, 10_000));
+        request.resources.providers[0].queue_depth = None;
+        request.resources.providers[0].queue_limit = None;
+        let edge = &mut request.graph.edges[0];
+        edge.host_to_provider_ns = 0;
+        edge.provider_to_host_ns = 0;
+        edge.cross_provider_ns = 0;
+        let failed = &request.graph.nodes[0].candidates[1].descriptor;
+        let failed_label = failed.identity.clone();
+        let failed_kind = failed.kind;
+        request.graph.nodes[1].candidates[0].descriptor.identity = failed_label.clone();
+
+        let session = PlacementSession::default();
+        let initial = session.plan(request.clone()).unwrap();
+        assert!(initial
+            .selections
+            .iter()
+            .all(|selected| selected.kind.is_provider()));
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: request.signature.clone(),
+                    candidate: failed_label.clone(),
+                    kind: failed_kind,
+                    total_elapsed_ns: 0,
+                    succeeded: false,
+                })
+                .unwrap();
+        }
+        let key = request.signature.cache_key();
+        let mut admitted = request.clone();
+        {
+            let mut state = session.state.borrow_mut();
+            apply_feedback_evidence(&mut admitted, key, state.tick, &state.feedback);
+            // A stale cached provider ticket must also fail revalidation.
+            let tick = state.tick;
+            state.decisions.insert(
+                key,
+                CachedDecision {
+                    decision: initial,
+                    resources: request.resources.clone(),
+                    last_used: tick,
+                },
+            );
+        }
+        assert_eq!(admitted.graph.nodes[0].candidates.len(), 1);
+        assert_eq!(
+            admitted.graph.nodes[0].candidates[0].resources.queue_slots,
+            0
+        );
+        assert_eq!(admitted.graph.nodes[1].candidates.len(), 2);
+        assert_eq!(
+            admitted.graph.nodes[1].candidates[1].resources.queue_slots,
+            1
+        );
+
+        let after_failure = session.plan(request.clone()).unwrap();
+        assert!(!after_failure.from_cache);
+        assert!(!after_failure.selections[0].kind.is_provider());
+        assert!(after_failure.selections[1].kind.is_provider());
+
+        let restored = PlacementSession::default();
+        restored
+            .restore_profile(session.profile_snapshot())
+            .unwrap();
+        let restored_plan = restored.plan(request.clone()).unwrap();
+        assert!(!restored_plan.selections[0].kind.is_provider());
+        assert!(restored_plan.selections[1].kind.is_provider());
+
+        let latest = session.profile_snapshot().feedback[0].latest_tick;
+        session.state.borrow_mut().tick = latest + 1_025;
+        let readmitted = session.plan(request).unwrap();
+        assert!(readmitted
+            .selections
+            .iter()
+            .all(|selected| selected.kind.is_provider()));
+    }
+
+    #[test]
+    fn graph_output_authority_separates_failure_profiles_and_cached_decisions() {
+        let mut old = two_node_request("output-feedback", (100_000, 10_000), (100_000, 10_000));
+        old.resources.providers[0].queue_depth = None;
+        old.resources.providers[0].queue_limit = None;
+        old.graph.edges[0].host_to_provider_ns = 0;
+        old.graph.edges[0].provider_to_host_ns = 0;
+        old.graph.edges[0].cross_provider_ns = 0;
+        let failed = &old.graph.nodes[0].candidates[1].descriptor;
+        let candidate = failed.identity.clone();
+        let kind = failed.kind;
+        let session = PlacementSession::default();
+        assert!(session.plan(old.clone()).unwrap().selections[0]
+            .kind
+            .is_provider());
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: old.signature.clone(),
+                    candidate: candidate.clone(),
+                    kind,
+                    total_elapsed_ns: 0,
+                    succeeded: false,
+                })
+                .unwrap();
+        }
+        assert!(!session.plan(old.clone()).unwrap().selections[0]
+            .kind
+            .is_provider());
+        let mut changed = old;
+        changed.graph.edges[0].source_output = Some(SourceOutputOrdinal::new(0));
+        assert_eq!(
+            session.plan(changed.clone()).unwrap_err().code,
+            "RunMat:Placement:InvalidRequest"
+        );
+        changed.bind_graph_output_authority();
+        assert_ne!(
+            changed.signature.cache_key(),
+            session.profile_snapshot().feedback[0].signature.cache_key()
+        );
+        assert!(session.plan(changed.clone()).unwrap().selections[0]
+            .kind
+            .is_provider());
+        let restored = PlacementSession::default();
+        restored
+            .restore_profile(session.profile_snapshot())
+            .unwrap();
+        assert!(restored.plan(changed).unwrap().selections[0]
+            .kind
+            .is_provider());
     }
 
     #[test]
@@ -1146,7 +2135,11 @@ mod tests {
         session
             .observe(PlacementFeedback {
                 signature: request.signature.clone(),
-                candidate: "gpu.first".into(),
+                candidate: request.graph.nodes[0].candidates[1]
+                    .descriptor
+                    .identity
+                    .clone(),
+                kind: request.graph.nodes[0].candidates[1].descriptor.kind,
                 total_elapsed_ns: 20_000,
                 succeeded: true,
             })
@@ -1171,11 +2164,13 @@ mod tests {
     fn failure_only_feedback_survives_profile_round_trip() {
         let request = two_node_request("failed-profile", (100_000, 20_000), (100_000, 20_000));
         let session = PlacementSession::default();
+        let provider = &request.graph.nodes[0].candidates[1].descriptor;
         for _ in 1..=2 {
             session
                 .observe(PlacementFeedback {
                     signature: request.signature.clone(),
-                    candidate: "gpu.first".into(),
+                    candidate: provider.identity.clone(),
+                    kind: provider.kind,
                     total_elapsed_ns: 0,
                     succeeded: false,
                 })

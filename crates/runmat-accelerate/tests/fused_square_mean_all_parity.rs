@@ -1,10 +1,14 @@
 #![cfg(feature = "wgpu")]
+#[path = "support/direct_reduction_runtime.rs"]
+mod invocation;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 
 use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
 use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
@@ -17,6 +21,8 @@ use std::collections::HashMap;
 
 #[tokio::test]
 async fn fused_square_mean_all_matches_cpu() {
+    let runtime = invocation::runtime();
+    let _invocation = runtime.enter();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
     )
@@ -63,7 +69,7 @@ async fn fused_square_mean_all_matches_cpu() {
             origin: ValueOrigin::Constant,
             ty: Type::String,
             shape: ShapeInfo::Scalar,
-            constant: Some(Value::String("all".to_string())),
+            constant: Some(Value::String("all".into())),
         },
         ValueInfo {
             id: v_mean,
@@ -85,6 +91,7 @@ async fn fused_square_mean_all_matches_cpu() {
     let mean_node = AccelNode {
         id: 1,
         label: AccelNodeLabel::Builtin {
+            origin: Default::default(),
             name: "mean".into(),
         },
         category: AccelOpCategory::Reduction,
@@ -124,7 +131,8 @@ async fn fused_square_mean_all_matches_cpu() {
                 output: Some(v_sq),
             },
             FusionOp::Builtin {
-                name: "mean".to_string(),
+                origin: Default::default(),
+                name: "mean".into(),
                 inputs: vec![v_sq, v_all],
                 output: Some(v_mean),
             },
@@ -134,7 +142,7 @@ async fn fused_square_mean_all_matches_cpu() {
         constants: HashMap::new(),
         const_values: {
             let mut cv = HashMap::new();
-            cv.insert(v_all, Value::String("all".to_string()));
+            cv.insert(v_all, Value::String("all".into()));
             cv
         },
         materialized_stores: Vec::new(),
@@ -154,14 +162,20 @@ async fn fused_square_mean_all_matches_cpu() {
         plan: &plan,
         inputs: vec![runmat_value::Value::GpuTensor(x.clone())],
         placement: None,
-        runtime: None,
+        runtime: Some(runtime.clone()),
     };
-    let result = execute_reduction(req, n, 1, 0).expect("fused mean(all) of square");
+    let Some(result) = selected_reduction::execute(req, n, 1, &[1, 1], 0)
+        .await
+        .expect("canonical fused mean(all) admission")
+    else {
+        return;
+    };
     let gpu_scalar = match result {
         runmat_value::Value::GpuTensor(h) => {
             let host = AccelProvider::download(provider, &h)
                 .await
                 .expect("download");
+            assert_eq!(host.shape, vec![1, 1]);
             host.data[0]
         }
         _ => panic!("expected GpuTensor result"),

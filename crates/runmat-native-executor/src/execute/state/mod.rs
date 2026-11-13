@@ -2,16 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use runmat_native_codegen::{
-    NativeBlockId, NativeEdge, NativeFunction, NativeLocalKind, NativeTerminatorKind, NativeValueId,
+    NativeBlockId, NativeEdge, NativeFunction, NativeTerminatorKind, NativeValueId,
 };
-use runmat_runtime::call::function_abi::{prepare_function_inputs, FunctionInputSpec};
 use runmat_runtime::native::{NativeRoot, NativeRootKind, NativeRootSet, NativeValueRef};
 use runmat_runtime::{context::RuntimeContext, RuntimeError};
 
 use crate::deopt::{
     DeoptimizationPolicy, FaultInjection, MaterializedFrame, NativeMaterializationContext,
 };
-use crate::memory::{ScopedValueRoots, ValueArena};
+use crate::memory::ValueArena;
 use crate::specialization::{GuardFailure, GuardFailureKind};
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -27,12 +26,13 @@ pub(super) struct ActiveExceptionHandler {
 
 pub(super) struct HostStateInput {
     pub function: NativeFunction,
-    pub arguments: Vec<runmat_value::Value>,
+    pub inputs: NativeFunctionInputs,
     pub requested_outputs: usize,
     pub runtime: RuntimeContext,
     pub program_capture: Option<Vec<u8>>,
     pub functions: Arc<Vec<NativeFunction>>,
-    pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub captures: Vec<NativeCaptureInput>,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub deoptimization: DeoptimizationPolicy,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
@@ -41,29 +41,137 @@ pub(super) struct HostStateInput {
     pub workspace: Option<super::workspace::NativeWorkspaceInput>,
 }
 
+// Keep the rooted prepared owner inline: boxing it would introduce a new
+// allocation at retained entry. The source control preserves legacy validation
+// and preparation order without copying either input forest.
+pub(super) struct NativeFunctionInputs {
+    source: NativeInputSource,
+    prepared: Option<runmat_runtime::call::function_abi::PreparedFunctionInputs>,
+}
+
+enum NativeInputSource {
+    Legacy(Vec<runmat_value::Value>),
+    Prepared,
+}
+
+impl NativeFunctionInputs {
+    pub(super) fn legacy(arguments: Vec<runmat_value::Value>) -> Self {
+        Self {
+            source: NativeInputSource::Legacy(arguments),
+            prepared: None,
+        }
+    }
+
+    pub(super) fn prepared(
+        prepared: runmat_runtime::call::function_abi::PreparedFunctionInputs,
+    ) -> Self {
+        Self {
+            source: NativeInputSource::Prepared,
+            prepared: Some(prepared),
+        }
+    }
+
+    pub(super) fn legacy_arguments(&self) -> Option<&[runmat_value::Value]> {
+        match &self.source {
+            NativeInputSource::Legacy(arguments) => Some(arguments),
+            NativeInputSource::Prepared => None,
+        }
+    }
+
+    pub(super) fn input_count(&self) -> usize {
+        match &self.source {
+            NativeInputSource::Legacy(arguments) => arguments.len(),
+            NativeInputSource::Prepared => {
+                self.prepared
+                    .as_ref()
+                    .expect("prepared input source owns its prepared inputs")
+                    .nargin
+            }
+        }
+    }
+
+    /// Extract prepared inputs, returning the original source arguments when
+    /// this entry still requires legacy preparation.
+    pub(super) fn try_into_prepared(
+        self,
+    ) -> Result<runmat_runtime::call::function_abi::PreparedFunctionInputs, Vec<runmat_value::Value>>
+    {
+        match self.source {
+            NativeInputSource::Legacy(arguments) => Err(arguments),
+            NativeInputSource::Prepared => Ok(self
+                .prepared
+                .expect("prepared input source owns its prepared inputs")),
+        }
+    }
+}
+
+pub(super) enum NativeCaptureInput {
+    Owned(runmat_runtime::call::lexical::LexicalCapture),
+    Retained {
+        binding: runmat_types::BindingId,
+        local: runmat_native_codegen::NativeLocalId,
+        value: runmat_runtime::call::CapturedValueLease,
+    },
+}
+
 pub(super) struct HostState {
+    pub liveness: Option<
+        runmat_execution::resource::ExactShared<runmat_native_codegen::NativeProgramLiveness>,
+    >,
     pub function: NativeFunction,
     pub functions: Arc<Vec<NativeFunction>>,
     pub runtime: RuntimeContext,
-    pub arena: ValueArena,
+    inherited_catch: Option<std::rc::Rc<runmat_value::MException>>,
     pub locals: Vec<NativeValueRef>,
     pub values: BTreeMap<NativeValueId, NativeValueRef>,
-    pub roots: Vec<NativeRoot>,
-    pub last_error: Option<RuntimeError>,
+    pub roots: roots::NativeRoots,
+    pub last_error: Option<runmat_runtime::runtime_error::RuntimeErrorOwner>,
     pub host_failure: Option<NativeExecutorError>,
+    pub retirement_failure: Option<NativeExecutorError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,
+    pub pending_assign: Option<super::mutation::PendingAssign>,
+    pub pending_place_prepare: Option<super::mutation::PendingPlacePrepare>,
+    pub pending_plain_multi: Option<super::mutation::PendingPlainMulti>,
     pub program_capture: Option<Vec<u8>>,
     pub pending_await: Option<super::awaiting::PendingAwait>,
+    pub pending_call: Option<super::call_suspension::PendingCall>,
+    pub completed_call: Option<super::call_suspension::CompletedCall>,
+    /// Typed one-producer/one-consumer channel between a sequence-assignment
+    /// rvalue site and its immediately following statement site.
+    pub sequence_assignment_register: Option<super::mutation::PreparedSequenceAssignment>,
+    pub pending_sequence_rvalue: Option<super::mutation::PreparedSequenceRvalue>,
+    pub pending_sequence_assign: Option<super::mutation::PendingSequenceAssign>,
+    pub prepared_multi_assignment: Option<super::mutation::PreparedMultiAssignment>,
+    pub pending_multi_preparation: Option<super::mutation::PendingMultiPreparation>,
+    pub contextual_index_extents: Vec<usize>,
+    pub subscript_end_receivers: Vec<(
+        runmat_runtime::object::protocol::PreparedSubscriptReceiver,
+        usize,
+        usize,
+    )>,
+    contextual_regions: expression_regions::ExpressionRegionState,
+    pub current_request: Option<runmat_runtime::native::NativeSiteRequest>,
     resume_target: Option<runmat_runtime::native::NativeSiteRequest>,
     current_block: Option<NativeBlockId>,
-    global_bindings: BTreeMap<usize, String>,
-    persistent_bindings: BTreeMap<usize, String>,
+    global_bindings: runmat_runtime::workspace::bindings::FrameGlobalBindings,
+    global_seen_revision: BTreeMap<
+        usize,
+        (
+            runmat_runtime::workspace::GlobalBindingTarget,
+            runmat_runtime::workspace::session::GlobalRevision,
+        ),
+    >,
+    persistent_seen_revision:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentRevision>,
+    persistent_bindings:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentBindingContinuation>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
     loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     osr_point: Option<runmat_types::ProgramPointId>,
     osr_entry: Option<runmat_types::ProgramPointId>,
     active_exception_handlers: Vec<ActiveExceptionHandler>,
+    catch_exceptions: BTreeMap<runmat_mir::CatchScopeId, std::rc::Rc<runmat_value::MException>>,
     next_await_continuation: u64,
     deoptimization: DeoptimizationPolicy,
     retired_guards: BTreeSet<runmat_types::RegionGuardId>,
@@ -73,209 +181,24 @@ pub(super) struct HostState {
     supplied_inputs: usize,
     requested_outputs: usize,
     missing_input_locals: Vec<runmat_native_codegen::NativeLocalId>,
-    optimized_regions: BTreeMap<crate::region::SiteIdentity, crate::region::OptimizedRegionPlan>,
-    disabled_optimized_regions: BTreeSet<runmat_types::RegionId>,
+    optimized_regions:
+        BTreeMap<crate::region::SiteIdentity, crate::region::OptimizedRegionPlanLease>,
+    pub(super) region_observation: Option<super::region::observation::GenericRegionObservation>,
     skipped_optimized_sites: BTreeSet<crate::region::SiteIdentity>,
     vectorized_regions: u64,
     workspace: Option<super::workspace::NativeWorkspaceState>,
     last_expression: Option<NativeValueRef>,
+    // Fields drop in declaration order. Pending work/service destructors may
+    // trace or collect values, so retain the arena's GC roots until every
+    // execution-owned future, capture, receiver and workspace has been dropped.
+    // The invocation's execution lease keeps runtime activation alive outside
+    // this owner while its fields are destroyed.
+    pub arena: ValueArena,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    pub(super) _lexical_roots: Vec<runmat_gc::ExplicitRoot>,
 }
 
 impl HostState {
-    pub fn new(input: HostStateInput) -> NativeExecutorResult<(Self, Vec<NativeValueRef>)> {
-        let HostStateInput {
-            function,
-            arguments,
-            requested_outputs,
-            runtime,
-            program_capture,
-            functions,
-            captures,
-            deoptimization,
-            interpreter_resume_points,
-            coverage_sites,
-            osr_point,
-            optimized_regions,
-            workspace,
-        } = input;
-        let construction_values = arguments
-            .iter()
-            .cloned()
-            .chain(captures.iter().map(|capture| capture.value.clone()))
-            .collect();
-        let _construction_roots =
-            ScopedValueRoots::register(construction_values, "native_invocation_construction")?;
-        let input_specs = function
-            .argument_validations
-            .iter()
-            .map(|validation| {
-                let input_index = function
-                    .abi
-                    .fixed_inputs
-                    .iter()
-                    .position(|local| *local == validation.input)
-                    .ok_or_else(|| {
-                        NativeExecutorError::Host(
-                            "native argument validation does not name a fixed input".into(),
-                        )
-                    })?;
-                Ok(FunctionInputSpec {
-                    input_index,
-                    size: validation.size.as_ref(),
-                    class_name: validation.class_name.as_deref(),
-                    validators: &validation.validators,
-                    default_value: validation.default_value.as_ref(),
-                })
-            })
-            .collect::<NativeExecutorResult<Vec<_>>>()?;
-        let supplied_inputs = arguments.len();
-        let prepared = prepare_function_inputs(
-            &function.name,
-            &arguments,
-            function.abi.fixed_inputs.len(),
-            function.abi.varargin.is_some(),
-            &input_specs,
-        )?;
-        let missing_input_locals = function
-            .abi
-            .fixed_inputs
-            .iter()
-            .zip(&prepared.fixed)
-            .filter_map(|(local, value)| value.is_none().then_some(*local))
-            .collect();
-        let workspace = if let Some(input) = workspace {
-            super::workspace::NativeWorkspaceState::new(&function, input)?
-        } else {
-            super::workspace::NativeWorkspaceState::function_frame(&function)
-        };
-        let ports = runtime
-            .service_ports()
-            .clone()
-            .with_workspace(workspace.service());
-        let runtime = runtime.with_service_ports(ports);
-        let mut arena = ValueArena::new()?;
-        let argument_refs = arguments
-            .into_iter()
-            .map(|value| arena.insert(value))
-            .collect::<Vec<_>>();
-        let mut locals = vec![NativeValueRef::NULL; function.local_count()];
-        let capture_locals = function
-            .locals
-            .iter()
-            .filter(|local| local.kind == NativeLocalKind::Capture)
-            .collect::<Vec<_>>();
-        if capture_locals.len() != captures.len() {
-            return Err(NativeExecutorError::Host(format!(
-                "native lexical entry expected {} captures but received {}",
-                capture_locals.len(),
-                captures.len()
-            )));
-        }
-        for local in capture_locals {
-            let binding = local.binding.ok_or_else(|| {
-                NativeExecutorError::Host("native capture local has no semantic binding".into())
-            })?;
-            let capture = captures
-                .iter()
-                .find(|capture| capture.binding == binding)
-                .ok_or_else(|| {
-                    NativeExecutorError::Host("native lexical capture binding is missing".into())
-                })?;
-            locals[local.id.0 as usize] = arena.insert(capture.value.clone());
-        }
-        for (local, value) in function.abi.fixed_inputs.iter().zip(&prepared.fixed) {
-            let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
-                NativeExecutorError::Host("function ABI input local is out of bounds".into())
-            })?;
-            if let Some(value) = value {
-                *slot = arena.insert(value.clone());
-            }
-        }
-        if let (Some(local), Some(varargin)) = (function.abi.varargin, prepared.varargin) {
-            locals[local.0 as usize] = arena.insert(runmat_value::Value::Cell(varargin));
-        }
-        if let Some(local) = function.abi.varargout {
-            let empty = runmat_value::CellArray::new(Vec::new(), 1, 0)
-                .map_err(|error| NativeExecutorError::Host(format!("varargout: {error}")))?;
-            locals[local.0 as usize] = arena.insert(runmat_value::Value::Cell(empty));
-        }
-        if let Some(local) = function.abi.implicit_nargin {
-            locals[local.0 as usize] =
-                arena.insert(runmat_value::Value::Num(prepared.nargin as f64));
-        }
-        if let Some(local) = function.abi.implicit_nargout {
-            locals[local.0 as usize] =
-                arena.insert(runmat_value::Value::Num(requested_outputs as f64));
-        }
-        for (slot, local) in locals.iter_mut().enumerate() {
-            if let Some(value) = workspace.initial_value(slot) {
-                *local = arena.insert(value);
-            }
-            let reference = *local;
-            if !reference.is_null() {
-                workspace.synchronize_local(slot, arena.get(reference)?.clone());
-            }
-        }
-        let roots = locals
-            .iter()
-            .enumerate()
-            .map(|(slot, value)| NativeRoot {
-                value: *value,
-                kind: NativeRootKind::LOCAL,
-                slot: slot as u32,
-            })
-            .collect::<Vec<_>>();
-        let source = function.source.0;
-        let mut state = Self {
-            function,
-            functions,
-            runtime,
-            arena,
-            locals,
-            values: BTreeMap::new(),
-            roots,
-            last_error: None,
-            host_failure: None,
-            current_source: runmat_runtime::native::NativeSourceLocation {
-                source,
-                ..runmat_runtime::native::NativeSourceLocation::default()
-            },
-            active_for_loops: BTreeMap::new(),
-            loop_backedges: BTreeMap::new(),
-            osr_point,
-            osr_entry: None,
-            pending_place_mutation: None,
-            program_capture,
-            pending_await: None,
-            resume_target: None,
-            current_block: None,
-            global_bindings: BTreeMap::new(),
-            persistent_bindings: BTreeMap::new(),
-            active_exception_handlers: Vec::new(),
-            next_await_continuation: 1,
-            deoptimization,
-            retired_guards: BTreeSet::new(),
-            pending_deoptimization: None,
-            interpreter_resume_points,
-            coverage_sites,
-            supplied_inputs,
-            requested_outputs,
-            missing_input_locals,
-            optimized_regions: optimized_regions
-                .iter()
-                .cloned()
-                .map(|plan| (plan.entry, plan))
-                .collect(),
-            disabled_optimized_regions: BTreeSet::new(),
-            skipped_optimized_sites: BTreeSet::new(),
-            vectorized_regions: 0,
-            workspace: Some(workspace),
-            last_expression: None,
-        };
-        state.enter_block(state.function.entry)?;
-        Ok((state, argument_refs))
-    }
-
     pub fn hit_coverage(&self, site: &runmat_native_codegen::NativeMirSite) {
         if let Some(sites) = self.coverage_sites.get(site) {
             runmat_runtime::coverage::hit_sites_in(&self.runtime, sites);
@@ -284,9 +207,16 @@ impl HostState {
 }
 
 mod captures;
+mod construction;
+pub(super) use construction::function_input_specs;
 mod continuation;
 mod control;
+#[path = "contextual_regions.rs"]
+mod expression_regions;
+mod roots;
 mod workspace;
+
+pub(crate) use expression_regions::EmbeddedOperationIdentity;
 
 fn optimized_site_identity(
     request: runmat_runtime::native::NativeSiteRequest,

@@ -1,15 +1,66 @@
+use runmat_gc::{Trace, Tracer};
 use runmat_hir::{BindingName, DefPath, Span};
 use runmat_parser::CompatMode;
 use runmat_value::Value;
 use uuid::Uuid;
 
-use crate::execution::{ExecutionProfiling, ExecutionStreamEntry, StdinEvent};
+use crate::execution::{ExecutionProfiling, StdinEvent};
 use crate::fusion::FusionPlanSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceInput {
     Path(String),
-    Text { name: String, text: String },
+    Text {
+        name: String,
+        text: String,
+    },
+    /// Exact bytes read once through the canonical path-source reader. Unlike
+    /// Text's display name, this carries an issued source access path.
+    CapturedPath(CapturedPathSource),
+}
+
+impl SourceInput {
+    /// Exact captured bytes only; never reread a path for identity reporting.
+    pub fn captured_text(&self) -> Option<&str> {
+        match self {
+            Self::CapturedPath(source) => Some(source.text()),
+            Self::Text { text, .. } => Some(text),
+            Self::Path(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CapturedPathSource {
+    display_name: String,
+    access_path: String,
+    text: std::sync::Arc<str>,
+}
+
+impl CapturedPathSource {
+    pub(crate) fn new(display_name: String, access_path: String, text: String) -> Self {
+        Self {
+            display_name,
+            access_path,
+            text: text.into(),
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (String, String, String) {
+        (self.display_name, self.access_path, self.text.to_string())
+    }
+
+    pub(crate) fn access_path(&self) -> &str {
+        &self.access_path
+    }
+
+    pub(crate) fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,16 +126,41 @@ impl ExecutionSourceContext {
 
 #[derive(Debug)]
 pub struct ExecutionResponse {
+    /// Canonical lock for the dependency graph actually used by captured execution.
+    pub dependency_lock: Option<String>,
     pub source_context: ExecutionSourceContext,
-    pub result: std::result::Result<ExecutionOutcome, crate::RunError>,
+    pub result: std::result::Result<
+        runmat_runtime::execution::RootedResult<ExecutionOutcome>,
+        crate::RunError,
+    >,
 }
 
-#[derive(Debug, Clone)]
+impl Trace for ExecutionOutcome {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        match &self.flow {
+            RuntimeFlow::Single(value) => value.trace(tracer),
+            RuntimeFlow::OutputList(values) => {
+                for value in values {
+                    value.trace(tracer);
+                }
+            }
+            RuntimeFlow::NoValue | RuntimeFlow::DynamicList(_) => {}
+        }
+        for update in &self.workspace_delta.upserts {
+            update.value.trace(tracer);
+        }
+        for event in &self.display_events {
+            event.value.trace(tracer);
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct ExecutionOutcome {
     pub flow: RuntimeFlow,
     pub workspace_delta: WorkspaceDelta,
     pub display_events: Vec<DisplayEvent>,
-    pub streams: Vec<ExecutionStreamEntry>,
+    pub streams: runmat_runtime::console::CapturedConsoleEntries,
     pub diagnostics: Vec<RuntimeDiagnostic>,
     pub effects: Vec<ObservedEffect>,
     pub suspension: Option<Suspension>,
@@ -97,13 +173,23 @@ pub struct ExecutionOutcome {
     pub fusion_plan: Option<FusionPlanSnapshot>,
 }
 
+impl ExecutionOutcome {
+    /// Language failures can be reported with committed workspace effects in
+    /// an otherwise successfully delivered response.
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    }
+}
+
 impl Default for ExecutionOutcome {
     fn default() -> Self {
         Self {
             flow: RuntimeFlow::NoValue,
             workspace_delta: WorkspaceDelta::default(),
             display_events: Vec::new(),
-            streams: Vec::new(),
+            streams: Default::default(),
             diagnostics: Vec::new(),
             effects: Vec::new(),
             suspension: None,
@@ -122,12 +208,15 @@ impl Default for ExecutionOutcome {
 pub enum RuntimeFlow {
     NoValue,
     Single(Value),
-    OutputList(Vec<Value>),
-    CommaList(Vec<Value>),
+    OutputList(runmat_value::OutputListStorage),
     DynamicList(DynamicListHandle),
 }
 
 impl RuntimeFlow {
+    pub fn output_list(values: Vec<Value>) -> Self {
+        Self::OutputList(runmat_value::OutputListStorage::unbounded(values))
+    }
+
     pub fn is_no_value(&self) -> bool {
         matches!(self, Self::NoValue)
     }
@@ -135,7 +224,7 @@ impl RuntimeFlow {
     pub fn durable_workspace_value(&self) -> Option<&Value> {
         match self {
             Self::Single(value) => Some(value),
-            Self::NoValue | Self::OutputList(_) | Self::CommaList(_) | Self::DynamicList(_) => None,
+            Self::NoValue | Self::OutputList(_) | Self::DynamicList(_) => None,
         }
     }
 }
@@ -164,6 +253,10 @@ pub enum WorkspaceBindingKey {
         scope: GlobalScopeKey,
         name: BindingName,
     },
+    GlobalSlot {
+        scope: GlobalScopeKey,
+        slot: usize,
+    },
     Persistent {
         function: DefPath,
         name: BindingName,
@@ -176,17 +269,32 @@ pub enum GlobalScopeKey {
     Package(String),
 }
 
+impl WorkspaceBindingKey {
+    pub(crate) fn is_global(&self) -> bool {
+        matches!(self, Self::Global { .. } | Self::GlobalSlot { .. })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkspaceBindingValue {
+    /// Storage identity, which may differ from the workspace spelling.
     pub key: WorkspaceBindingKey,
+    pub name: BindingName,
     pub value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceBindingRemoval {
+    /// The retired identity; `name` identifies the visible workspace entry.
+    pub key: WorkspaceBindingKey,
+    pub name: BindingName,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkspaceDelta {
     pub version: u64,
     pub upserts: Vec<WorkspaceBindingValue>,
-    pub removals: Vec<WorkspaceBindingKey>,
+    pub removals: Vec<WorkspaceBindingRemoval>,
     pub full_snapshot_required: bool,
 }
 
@@ -287,10 +395,7 @@ mod tests {
         assert!(RuntimeFlow::Single(value)
             .durable_workspace_value()
             .is_some());
-        assert!(RuntimeFlow::OutputList(vec![Value::Num(1.0)])
-            .durable_workspace_value()
-            .is_none());
-        assert!(RuntimeFlow::CommaList(vec![Value::Num(1.0)])
+        assert!(RuntimeFlow::output_list(vec![Value::Num(1.0)])
             .durable_workspace_value()
             .is_none());
     }

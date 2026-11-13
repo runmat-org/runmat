@@ -16,16 +16,17 @@ pub(in crate::builtins::table) fn resolve_path(value: &Value) -> BuiltinResult<P
 }
 
 pub(in crate::builtins::table) async fn read_table_from_file(
+    runtime: Option<&crate::context::RuntimeContext>,
     path: &Path,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
     match options.file_type {
-        ImportFileType::Spreadsheet => read_spreadsheet_table(path, options).await,
-        ImportFileType::Text => read_text_table(path, options).await,
+        ImportFileType::Spreadsheet => read_spreadsheet_table(runtime, path, options).await,
+        ImportFileType::Text => read_text_table(runtime, path, options).await,
         ImportFileType::Auto if is_spreadsheet_path(path) => {
-            read_spreadsheet_table(path, options).await
+            read_spreadsheet_table(runtime, path, options).await
         }
-        ImportFileType::Auto => read_text_table(path, options).await,
+        ImportFileType::Auto => read_text_table(runtime, path, options).await,
     }
 }
 
@@ -44,6 +45,7 @@ pub(in crate::builtins::table) async fn read_cell_from_file(
 }
 
 pub(in crate::builtins::table) async fn read_text_table(
+    runtime: Option<&crate::context::RuntimeContext>,
     path: &Path,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
@@ -72,7 +74,9 @@ pub(in crate::builtins::table) async fn read_text_table(
     if let Some(range) = options.range {
         rows = apply_import_range(rows, range);
     }
-    import_rows_to_table(rows, options)
+    let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let projected = options.projected_for_rows(column_count)?;
+    import_rows_to_table(runtime, rows, &projected)
 }
 
 pub(in crate::builtins::table) async fn read_text_cells(
@@ -103,6 +107,7 @@ pub(in crate::builtins::table) async fn read_text_cells(
 }
 
 pub(in crate::builtins::table) async fn read_spreadsheet_table(
+    runtime: Option<&crate::context::RuntimeContext>,
     path: &Path,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
@@ -148,7 +153,9 @@ pub(in crate::builtins::table) async fn read_spreadsheet_table(
             })?,
     };
     let rows = spreadsheet_range_to_rows(&range, options)?;
-    import_rows_to_table(rows, options)
+    let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let projected = options.projected_for_rows(column_count)?;
+    import_rows_to_table(runtime, rows, &projected)
 }
 
 pub(in crate::builtins::table) async fn read_spreadsheet_cells(

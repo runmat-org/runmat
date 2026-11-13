@@ -1,14 +1,7 @@
 //! MATLAB-compatible `ribbon` builtin.
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{RIBBON_ERROR_INTERNAL, RIBBON_ERROR_INVALID_ARGUMENT};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
@@ -20,200 +13,15 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::{parse_surface_style_args, value_as_string, SurfaceStyle, SurfaceStyleDefaults};
+use super::style::{parse_surface_style_args, SurfaceStyle, SurfaceStyleDefaults};
 
 const BUILTIN_NAME: &str = "ribbon";
 const DEFAULT_RIBBON_WIDTH: f64 = 0.75;
-
-const OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Surface handle or row vector of surface handles for the rendered ribbons.",
-}];
-
-const INPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Ribbon heights. Each matrix column becomes one ribbon.",
-}];
-
-const INPUT_Y_WIDTH: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Ribbon heights. Each matrix column becomes one ribbon.",
-    },
-    BuiltinParamDescriptor {
-        name: "width",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0.75"),
-        description: "Ribbon width around each column center.",
-    },
-];
-
-const INPUT_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates for the rows of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Ribbon heights. Each matrix column becomes one ribbon.",
-    },
-];
-
-const INPUT_X_Y_WIDTH: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates for the rows of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Ribbon heights. Each matrix column becomes one ribbon.",
-    },
-    BuiltinParamDescriptor {
-        name: "width",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0.75"),
-        description: "Ribbon width around each column center.",
-    },
-];
-
-const INPUT_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Optional axes target and surface style name/value pairs.",
-}];
-
-const RIBBON_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "h = ribbon(Y)",
-        inputs: &INPUT_Y,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ribbon(Y, width)",
-        inputs: &INPUT_Y_WIDTH,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ribbon(X, Y)",
-        inputs: &INPUT_X_Y,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ribbon(X, Y, width)",
-        inputs: &INPUT_X_Y_WIDTH,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ribbon(___, Name, Value, ...)",
-        inputs: &INPUT_ARGS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = ribbon(ax, ___)",
-        inputs: &INPUT_ARGS,
-        outputs: &OUTPUT_HANDLE,
-    },
-];
-
-const RIBBON_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RIBBON.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ribbon:InvalidArgument"),
-    when: "Ribbon data, x coordinates, width, axes target, or style arguments are invalid.",
-    message: "ribbon: invalid argument",
-};
-
-const RIBBON_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RIBBON.INTERNAL",
-    identifier: Some("RunMat:ribbon:Internal"),
-    when: "Internal ribbon surface construction or rendering fails.",
-    message: "ribbon: internal operation failed",
-};
-
-const RIBBON_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [RIBBON_ERROR_INVALID_ARGUMENT, RIBBON_ERROR_INTERNAL];
-
-pub const RIBBON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RIBBON_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RIBBON_ERRORS,
-};
-const RIBBON_INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public numeric coordinate surface admits integer vectors; native source storage remains authoritative for XData.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Integer ribbon heights retain their native storage and class as authoritative ZData.",
-    },
-];
-const RIBBON_INTEGER_WIDTH_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "width",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The numeric width scalar is a rendering control and is materialized only at the ribbon-geometry boundary.",
-    }];
-pub const RIBBON_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = ribbon(integer_Y) or ribbon(integer_X,integer_Y,...)",
-        inputs: &RIBBON_INTEGER_COORDINATE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Rendering deliberately materializes floating geometry, while graphics properties reconstruct XData and ZData from duplicated exact native source storage; the returned graphics handles are double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = ribbon(X,Y,integer_width)",
-        inputs: &RIBBON_INTEGER_WIDTH_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Width is validated as a positive finite scalar before floating strip geometry is generated.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::ribbon")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -244,19 +52,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "ribbon",
-    category = "plotting",
-    summary = "Create 3-D ribbon plots from columns of data.",
-    keywords = "ribbon,plotting,3d,surface",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::ribbon::RIBBON_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::ribbon::RIBBON_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::ribbon"
 )]
-pub fn ribbon_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub fn ribbon_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "ribbon: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "ribbon")?;
+    let _arguments = args.fork();
+    work.finish(ribbon_impl(args, &work))
+}
+fn ribbon_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+    work.check()?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
 
     let parsed = parse_ribbon_args(args)?;
@@ -267,7 +87,7 @@ pub fn ribbon_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         surfaces.push(surface);
     }
 
-    render_ribbons(surfaces).map_err(map_internal)
+    render_ribbons(work, surfaces).map_err(map_internal)
 }
 
 struct RibbonData {
@@ -283,12 +103,13 @@ struct ParsedRibbon {
     style: SurfaceStyle,
 }
 
-fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
+fn parse_ribbon_args(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedRibbon> {
     if args.is_empty() {
         return Err(invalid_argument("expected Y data"));
     }
-    let property_start = find_property_start(&args);
-    let (positional, rest) = args.split_at(property_start);
+    let property_start = find_property_start(args.view());
+    let positional = args.view().range(..property_start)?;
+    let rest = args.view().range(property_start..)?;
     if positional.is_empty() || positional.len() > 3 {
         return Err(invalid_argument(
             "expected ribbon(Y), ribbon(Y,width), ribbon(X,Y), or ribbon(X,Y,width)",
@@ -348,16 +169,25 @@ fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
     Ok(ParsedRibbon { x, y, width, style })
 }
 
+fn ribbon_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
     let tensor = Tensor::try_from(value)
         .map_err(|err| invalid_argument(format!("Y must be numeric: {err}")))?;
     if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(invalid_argument("Y must be non-empty"));
     }
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(invalid_argument("Y must be a vector or 2-D matrix"));
     }
-    if tensor.shape.len() == 1 || tensor.rows == 1 || tensor.cols == 1 {
+    let (rows, cols) = ribbon_matrix_dimensions(&tensor);
+    if tensor.shape().len() == 1 || rows == 1 || cols == 1 {
         let storage = tensor.into_numeric_storage().map_err(invalid_argument)?;
         return Ok(RibbonData {
             rows: storage.len(),
@@ -365,8 +195,6 @@ fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
             storage,
         });
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
     let storage = tensor.into_numeric_storage().map_err(invalid_argument)?;
     Ok(RibbonData {
         rows,
@@ -378,7 +206,8 @@ fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<NumericStorage> {
     let tensor =
         Tensor::try_from(value).map_err(|err| invalid_argument(format!("{name}: {err}")))?;
-    if tensor.shape.len() > 2 || (tensor.rows > 1 && tensor.cols > 1) {
+    let (rows, cols) = ribbon_matrix_dimensions(&tensor);
+    if tensor.shape().len() > 2 || (rows > 1 && cols > 1) {
         return Err(invalid_argument(format!("{name} must be a vector")));
     }
     tensor.into_numeric_storage().map_err(invalid_argument)
@@ -396,9 +225,9 @@ fn scalar_f64(value: &Value) -> Option<f64> {
     }
 }
 
-fn find_property_start(args: &[Value]) -> usize {
+fn find_property_start(args: crate::call::FunctionArgumentView<'_>) -> usize {
     args.iter()
-        .position(|value| value_as_string(value).is_some())
+        .position(|value| matches!(value, Value::String(_) | Value::CharArray(_)))
         .unwrap_or(args.len())
 }
 
@@ -412,10 +241,14 @@ fn build_ribbon_surface(
     let lower = center - width / 2.0;
     let upper = center + width / 2.0;
     let x_values = x.materialize_f64();
-    let y_values = y.storage.materialize_f64();
-    let heights = (0..y.rows)
-        .map(|row| y_values[row + col * y.rows])
+    let column_indices = (0..y.rows)
+        .map(|row| row + col * y.rows)
         .collect::<Vec<_>>();
+    let heights = y
+        .storage
+        .gather(&column_indices)
+        .map_err(invalid_argument)?
+        .materialize_f64();
     let x_grid = vec![x_values.clone(), x_values];
     let y_grid = vec![vec![lower; y.rows], vec![upper; y.rows]];
     let z_grid = vec![heights.clone(), heights];
@@ -445,17 +278,18 @@ fn build_ribbon_surface(
     Ok(surface)
 }
 
-fn render_ribbons(surfaces: Vec<SurfacePlot>) -> BuiltinResult<Value> {
+fn render_ribbons(
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+    surfaces: Vec<SurfacePlot>,
+) -> BuiltinResult<Value> {
     let mut surfaces = Some(surfaces);
     let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Ribbon Plot",
-            x_label: "X",
-            y_label: "Ribbon",
             axis_equal: false,
             ..Default::default()
         },
@@ -478,8 +312,7 @@ fn render_ribbons(surfaces: Vec<SurfacePlot>) -> BuiltinResult<Value> {
         return render_result.map(|_| Value::Num(f64::NAN));
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !lower.contains("plotting is unavailable") && !lower.contains("non-main thread") {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(err);
         }
     }
@@ -521,14 +354,28 @@ fn map_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    error_with_detail(&RIBBON_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = error_with_detail(&RIBBON_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    error_with_detail(&RIBBON_ERROR_INTERNAL, err.message)
+    let mapped = error_with_detail(&RIBBON_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
@@ -538,6 +385,13 @@ fn invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn ribbon_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        super::ribbon_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
@@ -554,6 +408,24 @@ mod tests {
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
         let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         Value::Tensor(tensor)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn ribbon_data_preserves_dense_rank_boundaries() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        let parsed = ribbon_data_from_value(&scalar).unwrap();
+        assert_eq!((parsed.rows, parsed.cols), (0, 0));
+        assert_eq!(parsed.storage.materialize_f64(), vec![7.0]);
+        assert_eq!(
+            numeric_vector(&scalar, "X").unwrap().materialize_f64(),
+            vec![7.0]
+        );
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let parsed = ribbon_data_from_value(&vector).unwrap();
+        assert_eq!((parsed.rows, parsed.cols), (3, 1));
+        assert_eq!(parsed.storage.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -700,7 +572,7 @@ mod tests {
                 Value::String("DisplayName".into())
             ])
             .unwrap(),
-            Value::String(String::new())
+            Value::String(String::new().into())
         );
     }
 
@@ -747,7 +619,7 @@ mod tests {
         );
         assert_eq!(
             get_builtin(vec![Value::Num(handle), Value::String("FaceColor".into())]).unwrap(),
-            Value::String("r".into())
+            Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap())
         );
         assert_eq!(
             get_builtin(vec![Value::Num(handle), Value::String("EdgeColor".into())]).unwrap(),

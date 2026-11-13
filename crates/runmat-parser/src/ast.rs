@@ -8,6 +8,8 @@ pub use parallel::SpmdHeader;
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Number(String, Span),
+    /// A numeric literal immediately suffixed by i or j; never a name lookup.
+    ImaginaryNumber(String, Span),
     IntegerLiteral(IntegerLiteral, Span),
     String(String, Span),
     Ident(String, Span),
@@ -56,6 +58,7 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Number(_, span)
+            | Expr::ImaginaryNumber(_, span)
             | Expr::IntegerLiteral(_, span)
             | Expr::String(_, span)
             | Expr::Ident(_, span)
@@ -88,6 +91,7 @@ impl Expr {
     pub fn with_span(self, span: Span) -> Expr {
         match self {
             Expr::Number(value, _) => Expr::Number(value, span),
+            Expr::ImaginaryNumber(value, _) => Expr::ImaginaryNumber(value, span),
             Expr::IntegerLiteral(value, _) => Expr::IntegerLiteral(value, span),
             Expr::String(value, _) => Expr::String(value, span),
             Expr::Ident(value, _) => Expr::Ident(value, span),

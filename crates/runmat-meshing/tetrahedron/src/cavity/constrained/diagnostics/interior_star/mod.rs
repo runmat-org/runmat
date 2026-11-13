@@ -50,7 +50,7 @@ pub(crate) fn diagnostic_interior_star_quality(
         if !candidate_respects_protected_boundary_distance(
             cavity,
             &boundary_node_map,
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             options,
         ) {
             *diagnostic
@@ -60,7 +60,7 @@ pub(crate) fn diagnostic_interior_star_quality(
             continue;
         }
         if point_in_closed_triangle_surface(
-            node.coordinates_m,
+            node.coordinates_m.canonical_value(),
             &boundary_triangles,
             MeshingTolerance::default(),
         ) != PointInClosedSurface::Inside
@@ -99,7 +99,7 @@ pub(crate) fn diagnostic_interior_star_quality(
                     {
                         let points = worst_tetrahedron.node_ids.map(|node_id| {
                             if node_id == node.node_id {
-                                node.coordinates_m
+                                node.coordinates_m.canonical_value()
                             } else {
                                 boundary_node_map[&node_id]
                             }
@@ -138,7 +138,10 @@ pub(crate) fn diagnostic_interior_star_quality(
             Err(err) => {
                 *diagnostic
                     .rejected_by_reason
-                    .entry(boundary_node_refill_validation_reason(&err))
+                    .entry(
+                        boundary_node_refill_validation_reason(&err)
+                            .map_err(ConstrainedCavityRefillError::Accounting)?,
+                    )
                     .or_default() += 1;
             }
         }

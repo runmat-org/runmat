@@ -1,28 +1,62 @@
-pub fn build_two_pass_shaders(scalar_ty: &str, wg: u32) -> (String, String) {
-    let zero = if scalar_ty == "f64" {
-        "f64(0.0)"
-    } else {
-        "0.0"
+#[path = "reduction/ordered_mean.rs"]
+pub(crate) mod ordered_mean;
+
+#[path = "reduction/global_extrema.rs"]
+mod global_extrema;
+
+#[cfg(test)]
+#[path = "reduction/two_pass_tests.rs"]
+mod two_pass_tests;
+
+#[cfg(test)]
+#[path = "reduction/f64_special_tests.rs"]
+mod f64_special_tests;
+
+use crate::backend::wgpu::types::NumericPrecision;
+
+/// The global reduction uses the same IEEE Max comparator as ordinary
+/// elementwise Max, with a matching Min comparator. The selected shader is
+/// complete before pipeline creation; no caller can select the raw template.
+pub(crate) fn global_source(precision: NumericPrecision) -> String {
+    global_extrema::source(precision)
+}
+
+pub(crate) fn two_pass_tile_bytes(precision: NumericPrecision, workgroup_size: u32) -> Option<u64> {
+    let element_bytes = match precision {
+        NumericPrecision::F32 => 4u64,
+        NumericPrecision::F64 => 8u64,
     };
-    let cast = if scalar_ty == "f64" { "f64(" } else { "" };
+    u64::from(workgroup_size).checked_mul(element_bytes)
+}
+
+pub fn build_two_pass_shaders(precision: NumericPrecision, wg: u32) -> (String, String) {
+    let scalar_ty = match precision {
+        NumericPrecision::F32 => "f32",
+        NumericPrecision::F64 => "f64",
+    };
+    let zero = match precision {
+        NumericPrecision::F32 => "0.0",
+        NumericPrecision::F64 => "f64(0.0)",
+    };
     let half = wg / 2;
     let pass1 = format!(
-        "struct Tensor {{ data: array<{st}> }};\nstruct P1Params {{ nrows:u32,ncols:u32,ld:u32,flags:u32,chunks:u32,chunk_stride:u32,chunk_rows:u32,_pad:u32 }}\n@group(0) @binding(0) var<storage,read> input0: Tensor;\n@group(0) @binding(1) var<storage,read_write> partials: Tensor;\n@group(0) @binding(2) var<uniform> params: P1Params;\nvar<workgroup> tile: array<f32,{wg}>;\nfn isNan(x: {st}) -> bool {{ return x != x; }}\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x;\n  let chunk_tile = wid.z;\n  let chunk = chunk_tile * params.chunk_stride + wid.y;\n  if (slice >= params.ncols || chunk >= params.chunks) {{ return; }}\n  let start = chunk * params.chunk_rows;\n  let end = min(params.nrows, start + params.chunk_rows);\n  var acc: {st} = {zero};\n  var i = start + lid.x;\n  loop {{ if (i >= end) {{ break; }} let v = input0.data[(slice * params.ld) + i]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} i += {wg}u; }}\n  tile[lid.x] = acc; workgroupBarrier();\n  var off: u32 = {half}u; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ partials.data[(slice * params.chunks) + chunk] = {cast}tile[0u]; }}\n}}",
+        "struct Tensor {{ data: array<{st}> }};\nstruct P1Params {{ nrows:u32,ncols:u32,ld:u32,flags:u32,chunks:u32,chunk_stride:u32,chunk_rows:u32,_pad:u32 }}\n@group(0) @binding(0) var<storage,read> input0: Tensor;\n@group(0) @binding(1) var<storage,read_write> partials: Tensor;\n@group(0) @binding(2) var<uniform> params: P1Params;\nvar<workgroup> tile: array<{st},{wg}>;\nfn isNan(value: {st}) -> bool {{ @IEEE_NAN_PREDICATE@ }}\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x;\n  let chunk_tile = wid.z;\n  let chunk = chunk_tile * params.chunk_stride + wid.y;\n  if (slice >= params.ncols || chunk >= params.chunks) {{ return; }}\n  let start = chunk * params.chunk_rows;\n  let end = min(params.nrows, start + params.chunk_rows);\n  var acc: {st} = {zero};\n  var i = start + lid.x;\n  loop {{ if (i >= end) {{ break; }} let v = input0.data[(slice * params.ld) + i]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} i += {wg}u; }}\n  tile[lid.x] = acc; workgroupBarrier();\n  var off: u32 = {half}u; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ partials.data[(slice * params.chunks) + chunk] = tile[0u]; }}\n}}",
         st = scalar_ty,
         wg = wg,
         zero = zero,
-        half = half,
-        cast = cast
+        half = half
     );
     let pass2 = format!(
-        "struct Tensor {{ data: array<{st}> }};\nstruct P2Params {{ ncols:u32,chunks:u32,flags:u32,scale:{st} }}\n@group(0) @binding(0) var<storage,read> partials: Tensor;\n@group(0) @binding(1) var<storage,read_write> output: Tensor;\n@group(0) @binding(2) var<uniform> params: P2Params;\nvar<workgroup> tile: array<f32,{wg}>;\nfn isNan(x: {st}) -> bool {{ return x != x; }}\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; if (slice >= params.ncols) {{ return; }}\n  var acc: {st} = {zero}; var c = lid.x;\n  loop {{ if (c >= params.chunks) {{ break; }} let v = partials.data[(slice * params.chunks) + c]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} c += {wg}u; }}\n  tile[lid.x] = acc; workgroupBarrier();\n  var off: u32 = {half}u; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ output.data[slice] = ({cast}tile[0u]) * params.scale; }}\n}}",
+        "struct Tensor {{ data: array<{st}> }};\nstruct P2Params {{ ncols:u32,chunks:u32,flags:u32,scale:{st} }}\n@group(0) @binding(0) var<storage,read> partials: Tensor;\n@group(0) @binding(1) var<storage,read_write> output: Tensor;\n@group(0) @binding(2) var<uniform> params: P2Params;\nvar<workgroup> tile: array<{st},{wg}>;\nfn isNan(value: {st}) -> bool {{ @IEEE_NAN_PREDICATE@ }}\n@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n  let slice = wid.x; if (slice >= params.ncols) {{ return; }}\n  var acc: {st} = {zero}; var c = lid.x;\n  loop {{ if (c >= params.chunks) {{ break; }} let v = partials.data[(slice * params.chunks) + c]; if ((params.flags & 1u)==1u) {{ if (!isNan(v)) {{ acc = acc + v; }} }} else {{ if (isNan(v)) {{ acc = v; }} else {{ acc = acc + v; }} }} c += {wg}u; }}\n  tile[lid.x] = acc; workgroupBarrier();\n  var off: u32 = {half}u; loop {{ if (off==0u) {{ break; }} if (lid.x < off) {{ let a = tile[lid.x]; let b = tile[lid.x+off]; tile[lid.x] = a + b; }} workgroupBarrier(); off = off/2u; }}\n  if (lid.x==0u) {{ output.data[slice] = (tile[0u]) * params.scale; }}\n}}",
         st = scalar_ty,
         wg = wg,
         zero = zero,
-        half = half,
-        cast = cast
+        half = half
     );
-    (pass1, pass2)
+    (
+        super::nan_predicate::inject(&pass1, precision),
+        super::nan_predicate::inject(&pass2, precision),
+    )
 }
 
 pub const REDUCE_GLOBAL_SHADER_F64: &str = r#"
@@ -44,26 +78,23 @@ struct Params {
 var<workgroup> tile: array<f64, @WG@>;
 
 fn pos_inf_f64() -> f64 {
-    var bits: u64 = 0x7ff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff00000u);
 }
 
 fn neg_inf_f64() -> f64 {
-    var bits: u64 = 0xfff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0xfff00000u);
 }
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 fn combine(a: f64, b: f64, op: u32) -> f64 {
     switch op {
         case 0u: { return a + b; }
         case 1u: { return a * b; }
-        case 2u: { if b < a { return b; } return a; }
-        case 3u: { if b > a { return b; } return a; }
+        case 2u: { return runmat_real_min(a, b); }
+        case 3u: { return runmat_real_max(a, b); }
         case 4u: { return a + b; }
         default: { return a; }
     }
@@ -71,20 +102,22 @@ fn combine(a: f64, b: f64, op: u32) -> f64 {
 
 fn identity(op: u32) -> f64 {
     switch op {
-        case 0u: { return 0.0; }
-        case 1u: { return 1.0; }
+        case 0u: { return f64(0.0); }
+        case 1u: { return f64(1.0); }
         case 2u: { return pos_inf_f64(); }
         case 3u: { return neg_inf_f64(); }
-        case 4u: { return 0.0; }
-        default: { return 0.0; }
+        case 4u: { return f64(0.0); }
+        default: { return f64(0.0); }
     }
 }
 
+fn isNan(value: f64) -> bool { @IEEE_NAN_PREDICATE@ }
+
 fn map_value(v: f64, op: u32) -> f64 {
     if op == 4u {
-        if v != v { return 1.0; }
-        if v != 0.0 { return 1.0; }
-        return 0.0;
+        if isNan(v) { return f64(1.0); }
+        if v != f64(0.0) { return f64(1.0); }
+        return f64(0.0);
     }
     return v;
 }
@@ -162,8 +195,8 @@ fn combine(a: f32, b: f32, op: u32) -> f32 {
     switch op {
         case 0u: { return a + b; }
         case 1u: { return a * b; }
-        case 2u: { return select(a, b, b < a); }
-        case 3u: { return select(a, b, b > a); }
+        case 2u: { return runmat_real_min(a, b); }
+        case 3u: { return runmat_real_max(a, b); }
         case 4u: { return a + b; }
         default: { return a; }
     }
@@ -180,9 +213,11 @@ fn identity(op: u32) -> f32 {
     }
 }
 
+fn isNan(value: f32) -> bool { @IEEE_NAN_PREDICATE@ }
+
 fn map_value(v: f32, op: u32) -> f32 {
     if op == 4u {
-        if v != v { return 1.0f; }
+        if isNan(v) { return 1.0f; }
         if v != 0.0f { return 1.0f; }
         return 0.0f;
     }
@@ -241,11 +276,10 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn isNan(x: f64) -> bool { return x != x; }
+fn isNan(value: f64) -> bool { @IEEE_NAN_PREDICATE@ }
 
 fn nan_f64() -> f64 {
-    var bits: u64 = 0x7ff8000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff80000u);
 }
 
 @compute @workgroup_size(@WG@)
@@ -261,12 +295,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if params.dim == 1u {
         if idx >= params.cols { return; }
         if op_nnz {
-            var count: f64 = 0.0;
+            var count: f64 = f64(0.0);
             for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
                 let linear = r + idx * params.rows;
                 let v = InBuf.data[linear];
-                if isNan(v) || v != 0.0 {
-                    count = count + 1.0;
+                if isNan(v) || v != f64(0.0) {
+                    count = count + f64(1.0);
                 }
             }
             OutBuf.data[idx] = count;
@@ -278,18 +312,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let linear = r + idx * params.rows;
                 let v = InBuf.data[linear];
                 if op_any_include {
-                    if isNan(v) || v != 0.0 {
+                    if isNan(v) || v != f64(0.0) {
                         any_true = true;
                         break;
                     }
                 } else {
-                    if (!isNan(v)) && v != 0.0 {
+                    if (!isNan(v)) && v != f64(0.0) {
                         any_true = true;
                         break;
                     }
                 }
             }
-            if any_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            if any_true { OutBuf.data[idx] = f64(1.0); } else { OutBuf.data[idx] = f64(0.0); }
             return;
         }
         if is_all {
@@ -306,7 +340,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     }
                 }
                 saw_value = true;
-                if v == 0.0 {
+                if v == f64(0.0) {
                     all_true = false;
                     break;
                 }
@@ -314,11 +348,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if op_all_omit && !saw_value {
                 all_true = true;
             }
-            if all_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            if all_true { OutBuf.data[idx] = f64(1.0); } else { OutBuf.data[idx] = f64(0.0); }
             return;
         }
-        var acc: f64 = 0.0;
-        if params.op == 2u { acc = 1.0; }
+        var acc: f64 = f64(0.0);
+        if params.op == 2u { acc = f64(1.0); }
         var saw_nan: bool = false;
         var any: bool = false;
         for (var r: u32 = 0u; r < params.rows; r = r + 1u) {
@@ -337,7 +371,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         } else if params.op == 1u {
             OutBuf.data[idx] = acc / f64(params.rows);
         } else if params.op == 2u {
-            if (!any) { OutBuf.data[idx] = 1.0; }
+            if (!any) { OutBuf.data[idx] = f64(1.0); }
             else { OutBuf.data[idx] = acc; }
         } else {
             OutBuf.data[idx] = acc;
@@ -345,12 +379,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     } else {
         if idx >= params.rows { return; }
         if op_nnz {
-            var count: f64 = 0.0;
+            var count: f64 = f64(0.0);
             for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
                 let linear = idx + c * params.rows;
                 let v = InBuf.data[linear];
-                if isNan(v) || v != 0.0 {
-                    count = count + 1.0;
+                if isNan(v) || v != f64(0.0) {
+                    count = count + f64(1.0);
                 }
             }
             OutBuf.data[idx] = count;
@@ -362,18 +396,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let linear = idx + c * params.rows;
                 let v = InBuf.data[linear];
                 if op_any_include {
-                    if isNan(v) || v != 0.0 {
+                    if isNan(v) || v != f64(0.0) {
                         any_true = true;
                         break;
                     }
                 } else {
-                    if (!isNan(v)) && v != 0.0 {
+                    if (!isNan(v)) && v != f64(0.0) {
                         any_true = true;
                         break;
                     }
                 }
             }
-            if any_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            if any_true { OutBuf.data[idx] = f64(1.0); } else { OutBuf.data[idx] = f64(0.0); }
             return;
         }
         if is_all {
@@ -390,7 +424,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     }
                 }
                 saw_value = true;
-                if v == 0.0 {
+                if v == f64(0.0) {
                     all_true = false;
                     break;
                 }
@@ -398,11 +432,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if op_all_omit && !saw_value {
                 all_true = true;
             }
-            if all_true { OutBuf.data[idx] = 1.0; } else { OutBuf.data[idx] = 0.0; }
+            if all_true { OutBuf.data[idx] = f64(1.0); } else { OutBuf.data[idx] = f64(0.0); }
             return;
         }
-        var acc: f64 = 0.0;
-        if params.op == 2u { acc = 1.0; }
+        var acc: f64 = f64(0.0);
+        if params.op == 2u { acc = f64(1.0); }
         var saw_nan: bool = false;
         var any: bool = false;
         for (var c: u32 = 0u; c < params.cols; c = c + 1u) {
@@ -421,7 +455,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         } else if params.op == 1u {
             OutBuf.data[idx] = acc / f64(params.cols);
         } else if params.op == 2u {
-            if (!any) { OutBuf.data[idx] = 1.0; }
+            if (!any) { OutBuf.data[idx] = f64(1.0); }
             else { OutBuf.data[idx] = acc; }
         } else {
             OutBuf.data[idx] = acc;
@@ -446,7 +480,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> OutBuf: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn isNan(x: f32) -> bool { return x != x; }
+fn isNan(value: f32) -> bool { @IEEE_NAN_PREDICATE@ }
 
 fn nan_f32() -> f32 {
     var bits: u32 = 0x7fc00000u;
@@ -653,18 +687,39 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn better(current: f64, candidate: f64, op: u32) -> bool {
+    // Fixed Include-NaN: first NaN wins; strict ordering retains first ties.
+    if extrema_is_nan(current) { return false; }
+    if extrema_is_nan(candidate) { return true; }
+    let current_zero = extrema_zero_rank(current);
+    let candidate_zero = extrema_zero_rank(candidate);
+    if current_zero != 0 && candidate_zero != 0 {
+        if op == 0u { return candidate_zero < current_zero; }
+        return candidate_zero > current_zero;
+    }
     if op == 0u { return candidate < current; }
     return candidate > current;
 }
 
+fn extrema_is_nan(value: f64) -> bool {
+    let low = runmat_f64_low(value);
+    let high = runmat_f64_high(value);
+    let magnitude = high & 0x7fffffffu;
+    return magnitude > 0x7ff00000u || (magnitude == 0x7ff00000u && low != 0u);
+}
+
+fn extrema_zero_rank(value: f64) -> i32 {
+    let low = runmat_f64_low(value);
+    let high = runmat_f64_high(value);
+    if (high & 0x7fffffffu) != 0u || low != 0u { return 0; }
+    return select(1, -1, (high & 0x80000000u) != 0u);
+}
+
 fn pos_inf_f64() -> f64 {
-    var bits: u64 = 0x7ff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff00000u);
 }
 
 fn neg_inf_f64() -> f64 {
-    var bits: u64 = 0xfff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0xfff00000u);
 }
 
 @compute @workgroup_size(@WG@)
@@ -716,8 +771,27 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn better(current: f32, candidate: f32, op: u32) -> bool {
+    // Fixed Include-NaN: first NaN wins; strict ordering retains first ties.
+    if extrema_is_nan(current) { return false; }
+    if extrema_is_nan(candidate) { return true; }
+    let current_zero = extrema_zero_rank(current);
+    let candidate_zero = extrema_zero_rank(candidate);
+    if current_zero != 0 && candidate_zero != 0 {
+        if op == 0u { return candidate_zero < current_zero; }
+        return candidate_zero > current_zero;
+    }
     if op == 0u { return candidate < current; }
     return candidate > current;
+}
+
+fn extrema_is_nan(value: f32) -> bool {
+    return (bitcast<u32>(value) & 0x7fffffffu) > 0x7f800000u;
+}
+
+fn extrema_zero_rank(value: f32) -> i32 {
+    let bits = bitcast<u32>(value);
+    if (bits & 0x7fffffffu) != 0u { return 0; }
+    return select(1, -1, (bits & 0x80000000u) != 0u);
 }
 
 fn pos_inf_f32() -> f32 {

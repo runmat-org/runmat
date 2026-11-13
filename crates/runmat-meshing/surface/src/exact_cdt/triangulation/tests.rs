@@ -10,7 +10,7 @@ use runmat_meshing_curve::{
 use super::*;
 
 #[test]
-fn exact_circle_has_one_deterministic_strict_delaunay_topology() {
+fn exact_circle_has_one_deterministic_cocircular_topology() {
     let (boundary, pslg) = fixture();
     let options = ExactFaceDelaunayOptions::default();
     let first = triangulate_exact_face_pslg(&pslg, &boundary, &NeverCancelled, options).unwrap();
@@ -91,7 +91,7 @@ fn independent_validation_rejects_orientation_tampering() {
     assert_eq!(error.kind, ExactFaceDelaunayErrorKind::InvalidTopology);
 }
 
-fn fixture() -> (crate::ExactFaceBoundary, crate::ExactFacePslg) {
+pub(super) fn fixture() -> (crate::ExactFaceBoundary, crate::ExactFacePslg) {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
     let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
         panic!("fixture must be exact")
@@ -106,16 +106,16 @@ fn fixture() -> (crate::ExactFaceBoundary, crate::ExactFacePslg) {
         &Control,
         SharedCurveDiscretizationOptions {
             resolution: CurveResolutionPolicy {
-                maximum_chordal_deviation_m: 0.01,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(0.01),
                 maximum_tangent_change_rad: 0.2,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 1.0,
             },
             maximum_nodes_per_edge: 1_024,
             maximum_subdivision_depth: 20,
-            geometry_absolute_error_m: 1.0e-10,
+            geometry_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
             pcurve_absolute_error: 1.0e-10,
-            arc_length_absolute_error_m: 1.0e-10,
+            arc_length_absolute_error_m: runmat_types::physical::Length::new(1.0e-10),
         },
     )
     .unwrap();
@@ -148,4 +148,51 @@ impl MeshingCancellationSignal for Cancelled {
     fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
+}
+
+// witness: FEA-MESH-DISCRETIZATION-001/surface_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Regression: a point just inside a hull edge keeps the hull edge in the exact face
+//   triangulation; the dense-surface and many-trim cases are separate tests.
+#[test]
+fn a_point_just_inside_a_hull_edge_keeps_the_hull_edge() {
+    let (_, pslg) = fixture();
+    let segment = pslg.segments[0].vertex_indices;
+    let [a, b] = segment.map(|index| pslg.vertices[index as usize].uv);
+    let centroid = pslg.vertices.iter().fold([0.0, 0.0], |sum, vertex| {
+        [
+            sum[0] + vertex.uv[0] / pslg.vertices.len() as f64,
+            sum[1] + vertex.uv[1] / pslg.vertices.len() as f64,
+        ]
+    });
+    let middle = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+    // A millionth of the edge length inside: the sliver's circumcircle is far larger than the
+    // finite super triangle.
+    let inward = [centroid[0] - middle[0], centroid[1] - middle[1]];
+    let length = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+    let scale = 1.0e-6 * length / (inward[0].powi(2) + inward[1].powi(2)).sqrt();
+    let uv = [middle[0] + inward[0] * scale, middle[1] + inward[1] * scale];
+    let addition = crate::ExactFacePslgVertex {
+        node_id: runmat_meshing_core::StableDigest::from_bytes([7; 32]),
+        seam_image: None,
+        uv,
+    };
+    let (refined, _) = super::super::pslg::insert_pslg_vertices(&pslg, &[addition]).unwrap();
+    let options = ExactFaceDelaunayOptions::default();
+    let triangulation =
+        triangulate_validated_face_pslg(&refined, &NeverCancelled, options).unwrap();
+    let hull_edge = {
+        let mut edge = refined.segments[0].vertex_indices;
+        edge.sort_unstable();
+        edge
+    };
+    assert!(triangulation.triangles.iter().any(|triangle| {
+        let [x, y, z] = triangle.vertex_indices;
+        [[x, y], [y, z], [z, x]].into_iter().any(|mut edge| {
+            edge.sort_unstable();
+            edge == hull_edge
+        })
+    }));
+    // Every original vertex is on the hull; the new one is interior.
+    assert_eq!(triangulation.triangles.len(), refined.vertices.len() - 1);
 }

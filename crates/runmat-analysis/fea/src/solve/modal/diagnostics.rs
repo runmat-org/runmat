@@ -1,27 +1,34 @@
 use crate::{
+    algebra::{apply_m, AssembledRealSystem},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_m, OperatorSystem},
 };
 
 use super::math::dot;
 
 pub(super) fn push_modal_quality_diagnostics(
     diagnostics: &mut Vec<FeaDiagnostic>,
-    system: &OperatorSystem,
-    eigenvalues_hz: &[f64],
+    system: &AssembledRealSystem,
+    frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
     residual_norms: &[f64],
+    backward_errors: &[f64],
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
 ) {
     if !residual_norms.is_empty() {
         let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+        let max_backward_error = backward_errors.iter().copied().fold(0.0_f64, f64::max);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_RESIDUAL".to_string(),
-            severity: if max_residual <= 1.0e-3 {
+            severity: if convergence.gated_residual(max_residual, max_backward_error)
+                <= convergence.algebraic_tolerance()
+            {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
-            message: format!("max_modal_residual_norm={max_residual}"),
+            message: format!(
+                "max_modal_backward_error={max_backward_error} max_modal_residual_norm={max_residual}"
+            ),
         });
     }
 
@@ -37,21 +44,20 @@ pub(super) fn push_modal_quality_diagnostics(
             message: format!("max_m_orthogonality_offdiag={max_offdiag}"),
         });
 
-        let min_separation = modal_min_frequency_separation(eigenvalues_hz);
+        // Repeated and closely spaced frequencies are physical (symmetric sections, cyclic
+        // parts). Residual and M-orthogonality gates above certify the computed subspace, so the
+        // separation is reported, not treated as a numerical defect.
+        let min_separation = modal_min_frequency_separation(frequencies_hz);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_SEPARATION".to_string(),
-            severity: if min_separation >= 1.0e-3 {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Warning
-            },
+            severity: FeaDiagnosticSeverity::Info,
             message: format!("min_relative_frequency_separation={min_separation}"),
         });
-        diagnostics.push(modal_cluster_diagnostic(eigenvalues_hz));
+        diagnostics.push(modal_cluster_diagnostic(frequencies_hz));
     }
 }
 
-fn modal_max_m_orthogonality_offdiag(system: &OperatorSystem, modes: &[Vec<f64>]) -> f64 {
+fn modal_max_m_orthogonality_offdiag(system: &AssembledRealSystem, modes: &[Vec<f64>]) -> f64 {
     let mut max_offdiag = 0.0_f64;
     for i in 0..modes.len() {
         for j in 0..modes.len() {
@@ -157,6 +163,79 @@ fn relative_frequency_separation(a: f64, b: f64) -> f64 {
     let a = a.abs().max(1.0e-12);
     let b = b.abs().max(1.0e-12);
     (b - a).abs() / a.max(b)
+}
+
+/// Each mode's frequency, backward error and relative residual under the gate's measure.
+pub(super) fn modal_accuracy_diagnostic(
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    frequencies_hz: &[f64],
+    backward_errors: &[f64],
+    residual_norms: &[f64],
+) -> Option<FeaDiagnostic> {
+    if frequencies_hz.is_empty() {
+        return None;
+    }
+    let modes = frequencies_hz
+        .iter()
+        .zip(backward_errors)
+        .zip(residual_norms)
+        .enumerate()
+        .map(|(index, ((frequency, backward), relative))| {
+            format!(
+                "{{mode={} frequency_hz={frequency} backward_error={backward:e} relative_residual={relative:e}}}",
+                index + 1
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(FeaDiagnostic {
+        code: "FEA_MODAL_ACCURACY".into(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "measure={} tolerance={} modes=[{modes}]",
+            convergence.algebraic_measure().label(),
+            convergence.algebraic_tolerance(),
+        ),
+    })
+}
+
+/// The figures `FEA_MODAL_CONVERGENCE` reports for one modal search.
+pub(super) struct ModalConvergenceFigures {
+    pub requested_mode_count: usize,
+    pub solved_mode_count: usize,
+    pub subspace_dimension: usize,
+    pub iteration_count: usize,
+    pub maximum_gated_residual: f64,
+    pub maximum_backward_error: f64,
+    pub maximum_relative_residual: f64,
+    pub converged: bool,
+}
+
+pub(super) fn modal_convergence_diagnostic(
+    convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    figures: ModalConvergenceFigures,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_MODAL_CONVERGENCE".to_string(),
+        severity: if figures.converged {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "mode_count_requested={} mode_count_solved={} subspace_dimension={} iteration_count={} measure={} tolerance={} maximum_gated_residual={} maximum_backward_error={} maximum_relative_residual={} converged={}",
+            figures.requested_mode_count,
+            figures.solved_mode_count,
+            figures.subspace_dimension,
+            figures.iteration_count,
+            convergence.algebraic_measure().label(),
+            convergence.algebraic_tolerance(),
+            figures.maximum_gated_residual,
+            figures.maximum_backward_error,
+            figures.maximum_relative_residual,
+            figures.converged
+        ),
+    }
 }
 
 #[cfg(test)]

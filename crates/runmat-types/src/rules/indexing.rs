@@ -1,7 +1,51 @@
 use crate::{
-    CellFact, DynamicReason, FactInference, IndexKind, IndexResultContext, IndexSelectorFact,
-    OutputListFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CellFact, CertaintyFact, DynamicReason, FactInference, IndexKind, IndexResultContext,
+    IndexSelectorFact, OutputListFact, SequenceFactInference, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact, ValueSequenceFact,
 };
+
+pub fn infer_index_sequence(
+    base: &ValueFact,
+    kind: IndexKind,
+    selectors: &[IndexSelectorFact],
+    context: IndexResultContext,
+) -> SequenceFactInference {
+    if let (ValueKindFact::Composite(composite), IndexKind::Brace) = (&base.kind, kind) {
+        let result = composite_contents(composite, selectors);
+        return SequenceFactInference {
+            sequence: ValueSequenceFact::single(result.fact),
+            diagnostics: result.diagnostics,
+        };
+    }
+    if let Some(diagnostic) = selector_bounds_diagnostic(&base.shape, selectors, context) {
+        return SequenceFactInference {
+            sequence: ValueSequenceFact::dynamic(),
+            diagnostics: vec![diagnostic],
+        };
+    }
+    match (&base.kind, kind) {
+        (ValueKindFact::Cell(cell), IndexKind::Brace) => {
+            infer_cell_contents_sequence(cell, &base.shape, selectors)
+        }
+        (ValueKindFact::Unknown, IndexKind::Brace) => {
+            SequenceFactInference::exact(ValueSequenceFact::dynamic())
+        }
+        (_, IndexKind::Brace) => SequenceFactInference {
+            sequence: ValueSequenceFact::dynamic(),
+            diagnostics: vec![crate::InferenceDiagnostic::error(
+                "RM-TYPE-BRACE-INDEX",
+                "brace indexing requires a cell-like value",
+            )],
+        },
+        _ => {
+            let inference = infer_index(base, kind, selectors, context);
+            SequenceFactInference {
+                sequence: ValueSequenceFact::single(inference.fact),
+                diagnostics: inference.diagnostics,
+            }
+        }
+    }
+}
 
 pub fn infer_index(
     base: &ValueFact,
@@ -9,6 +53,9 @@ pub fn infer_index(
     selectors: &[IndexSelectorFact],
     context: IndexResultContext,
 ) -> FactInference {
+    if let (ValueKindFact::Composite(composite), IndexKind::Brace) = (&base.kind, kind) {
+        return composite_contents(composite, selectors);
+    }
     if let Some(diagnostic) = selector_bounds_diagnostic(&base.shape, selectors, context) {
         return FactInference {
             fact: ValueFact::unknown(DynamicReason::ConflictingControlFlow),
@@ -24,13 +71,25 @@ pub fn infer_index(
         }
         (ValueKindFact::Struct(structure), IndexKind::Paren) => {
             let mut result = container_result(base, selectors);
-            result.kind = ValueKindFact::Struct(structure.clone());
+            result.kind = if let Some(index) =
+                known_linear_index(&base.shape, selectors).filter(|_| structure.elements_complete)
+            {
+                structure.elements.get(index).map_or_else(
+                    || ValueKindFact::Struct(structure.clone()),
+                    |fields| ValueKindFact::Struct(crate::StructFact::scalar(fields.clone(), true)),
+                )
+            } else {
+                ValueKindFact::Struct(structure.clone())
+            };
             return FactInference::exact(result);
         }
         (ValueKindFact::Object(object), IndexKind::Paren) => {
             let mut result = container_result(base, selectors);
             result.kind = ValueKindFact::Object(object.clone());
             return FactInference::exact(result);
+        }
+        (ValueKindFact::Unknown, IndexKind::Brace) => {
+            return FactInference::exact(ValueFact::unknown(dynamic_reason(base)))
         }
         (_, IndexKind::Brace) => {
             return FactInference {
@@ -71,40 +130,91 @@ pub fn infer_index(
     FactInference::exact(result)
 }
 
+fn composite_contents(
+    composite: &crate::CompositeFact,
+    selectors: &[IndexSelectorFact],
+) -> FactInference {
+    let valid = match selectors {
+        [IndexSelectorFact::KnownOneBasedIndex(index)] => {
+            *index > 0 && usize::try_from(composite.labs.0).is_ok_and(|labs| *index <= labs)
+        }
+        [IndexSelectorFact::Numeric(value) | IndexSelectorFact::Logical(value)] => {
+            value.shape.element_count().is_none_or(|count| count == 1)
+        }
+        [IndexSelectorFact::Scalar | IndexSelectorFact::Unknown | IndexSelectorFact::End { .. }] => {
+            true
+        }
+        _ => false,
+    };
+    if valid {
+        return FactInference::exact((*composite.value).clone());
+    }
+    FactInference {
+        fact: ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+        diagnostics: vec![crate::InferenceDiagnostic::error(
+            "RM-TYPE-COMPOSITE-INDEX",
+            "Composite brace indexing requires one scalar lab index within the SPMD gang",
+        )],
+    }
+}
+
+fn dynamic_reason(fact: &ValueFact) -> DynamicReason {
+    match &fact.certainty {
+        CertaintyFact::Dynamic(reason) => reason.clone(),
+        CertaintyFact::Proven | CertaintyFact::Symbolic => DynamicReason::RuntimeValue,
+    }
+}
+
 fn infer_cell_contents(
     cell: &CellFact,
     shape: &ShapeFact,
     selectors: &[IndexSelectorFact],
     context: IndexResultContext,
 ) -> FactInference {
-    if let Some(index) = known_linear_index(shape, selectors) {
-        if let Some(value) = cell.elements.get(index) {
-            return FactInference::exact(value.clone());
-        }
-    }
+    let inference = infer_cell_contents_sequence(cell, shape, selectors);
     if matches!(
         context,
         IndexResultContext::ReadCommaList | IndexResultContext::FunctionArgumentExpansion
     ) {
-        let (outputs, variadic) = if cell.elements_complete {
-            match selectors {
-                [IndexSelectorFact::Colon] => (cell.elements.clone(), false),
-                [IndexSelectorFact::Numeric(selector)] => selector
-                    .shape
-                    .element_count()
-                    .map_or((Vec::new(), true), |count| {
-                        (vec![(*cell.element).clone(); count], false)
-                    }),
-                _ => (Vec::new(), true),
-            }
-        } else {
-            (Vec::new(), true)
+        return FactInference {
+            fact: ValueFact::scalar(ValueKindFact::OutputList(OutputListFact {
+                outputs: inference.sequence.outputs,
+                variadic: inference.sequence.variadic,
+            })),
+            diagnostics: inference.diagnostics,
         };
-        return FactInference::exact(ValueFact::scalar(ValueKindFact::OutputList(
-            OutputListFact { outputs, variadic },
-        )));
     }
-    FactInference::exact((*cell.element).clone())
+    FactInference {
+        fact: inference.sequence.first_or_else(|| (*cell.element).clone()),
+        diagnostics: inference.diagnostics,
+    }
+}
+
+fn infer_cell_contents_sequence(
+    cell: &CellFact,
+    shape: &ShapeFact,
+    selectors: &[IndexSelectorFact],
+) -> SequenceFactInference {
+    if let Some(index) = known_linear_index(shape, selectors) {
+        if let Some(value) = cell.elements.get(index) {
+            return SequenceFactInference::exact(ValueSequenceFact::single(value.clone()));
+        }
+    }
+    let (outputs, variadic) = if cell.elements_complete {
+        match selectors {
+            [IndexSelectorFact::Colon] => (cell.elements.clone(), false),
+            [IndexSelectorFact::Numeric(selector)] => selector
+                .shape
+                .element_count()
+                .map_or((Vec::new(), true), |count| {
+                    (vec![(*cell.element).clone(); count], false)
+                }),
+            _ => (Vec::new(), true),
+        }
+    } else {
+        (Vec::new(), true)
+    };
+    SequenceFactInference::exact(ValueSequenceFact { outputs, variadic })
 }
 
 fn cell_container_result(
@@ -193,7 +303,9 @@ fn index_shape(base: &ShapeFact, selectors: &[IndexSelectorFact]) -> ShapeFact {
             IndexSelectorFact::Unknown => output.push(crate::DimensionFact::Unknown),
         }
     }
-    output.resize(2, crate::DimensionFact::Known(1));
+    if output.len() < 2 {
+        output.resize(2, crate::DimensionFact::Known(1));
+    }
     ShapeFact::Shaped { dims: output }
 }
 
@@ -216,7 +328,21 @@ fn dimensions(shape: &ShapeFact, rank: usize) -> Vec<crate::DimensionFact> {
         ShapeFact::Ranked { rank } => vec![crate::DimensionFact::Unknown; *rank],
         ShapeFact::Shaped { dims } => dims.clone(),
     };
-    dimensions.resize(rank, crate::DimensionFact::Known(1));
+    if dimensions.len() > rank && rank > 0 {
+        let collapsed = dimensions[rank - 1..]
+            .iter()
+            .try_fold(1usize, |product, dim| {
+                let crate::DimensionFact::Known(extent) = dim else {
+                    return None;
+                };
+                product.checked_mul(*extent)
+            });
+        dimensions.truncate(rank);
+        dimensions[rank - 1] =
+            collapsed.map_or(crate::DimensionFact::Unknown, crate::DimensionFact::Known);
+    } else if dimensions.len() < rank {
+        dimensions.resize(rank, crate::DimensionFact::Known(1));
+    }
     dimensions
 }
 

@@ -63,7 +63,8 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &BTreeSet::new(),
         &mut control,
     )
-    .unwrap());
+    .unwrap()
+    .is_ok());
     assert_eq!(triangles.len(), delaunay.triangles.len());
     assert!(triangle_edges(&triangles).contains(&target));
     super::planarity::validate_planar_edges(
@@ -71,6 +72,7 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &pslg,
         &NeverCancelled,
         options,
+        None,
     )
     .unwrap();
 
@@ -84,7 +86,8 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &BTreeSet::new(),
         &mut repeated_control,
     )
-    .unwrap());
+    .unwrap()
+    .is_ok());
     assert_eq!(repeated, triangles);
 
     let mut second_attempt = delaunay.triangles.clone();
@@ -218,9 +221,35 @@ fn sorted(mut edge: [u32; 2]) -> [u32; 2] {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
+}
+
+#[test]
+fn planarity_pair_search_observes_cancellation_before_more_predicates() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    struct CancelAtPair(AtomicU64);
+    impl runmat_meshing_core::MeshingCancellationSignal for CancelAtPair {
+        fn is_cancelled(&self) -> bool {
+            self.0.fetch_add(1, Ordering::Relaxed) >= 1
+        }
     }
+    let (boundary, pslg) = concave_fixture();
+    let options = ExactFaceDelaunayOptions::default();
+    let delaunay = triangulate_exact_face_pslg(&pslg, &boundary, &NeverCancelled, options).unwrap();
+    let edges = super::super::topology::edge_uses(&delaunay.triangles);
+    let signal = CancelAtPair(AtomicU64::new(0));
+    let error = super::planarity::validate_planar_edges(
+        &edges,
+        &pslg,
+        &signal,
+        ExactFaceDelaunayOptions {
+            maximum_predicate_evaluations: 1,
+            ..options
+        },
+        None,
+    )
+    .unwrap_err();
+    // Cancellation must win before this pair consumes its four predicates.
+    assert_eq!(error.kind, crate::ExactFaceDelaunayErrorKind::Cancelled);
+    assert_eq!(signal.0.load(Ordering::Relaxed), 2);
 }

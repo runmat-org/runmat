@@ -99,7 +99,7 @@ fn propagate_to_plot_crate(context: &WgpuContextHandle) {
     //
     // This is required for zero-copy GPU-resident plotting:
     // - plot builtins export provider buffers
-    // - plot GPU packers need an Arc<Device/Queue> to build vertex buffers
+    // - plot GPU packers share the provider's emission authority
     //
     // Note: `runmat-plot` owns its own global context store; we install into it whenever
     // a provider exports a plotting-capable WGPU context.
@@ -115,8 +115,7 @@ fn propagate_to_plot_crate(context: &WgpuContextHandle) {
         use runmat_plot::gpu::tuning as plot_tuning;
         install_plot_context(SharedWgpuContext {
             instance: context.instance.clone(),
-            device: context.device.clone(),
-            queue: context.queue.clone(),
+            access: context.access.clone(),
             adapter: context.adapter.clone(),
             adapter_info: context.adapter_info.clone(),
             limits: context.limits.clone(),
@@ -167,6 +166,7 @@ pub(crate) mod tests {
                     label: Some("plotting-context-test-device"),
                     required_features: adapter_features,
                     required_limits: adapter_limits.clone(),
+                    memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             )
@@ -177,8 +177,7 @@ pub(crate) mod tests {
         };
         let handle = WgpuContextHandle {
             instance: instance.clone(),
-            device: Arc::new(device),
-            queue: Arc::new(queue),
+            access: runmat_accelerate_api::WgpuDeviceAccess::new(device, queue),
             adapter: adapter.clone(),
             adapter_info,
             limits: adapter_limits.clone(),
@@ -187,5 +186,9 @@ pub(crate) mod tests {
         install_wgpu_context(&handle);
         assert!(shared_wgpu_context().is_some());
         assert!(runmat_plot::shared_wgpu_context().is_some());
+        assert!(runmat_plot::shared_wgpu_context()
+            .unwrap()
+            .access
+            .same_device(&handle.access));
     }
 }

@@ -3,12 +3,8 @@
 use glam::Vec4;
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ROOTS_ERROR_INVALID_INPUT, ZPLANE_ERROR_INTERNAL,
+    ZPLANE_ERROR_INVALID_ARGUMENT, ZPLANE_NONFLOATING_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::scatter::MarkerStyle;
@@ -22,8 +18,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::poly::roots;
 use crate::builtins::math::signal::common::{value_to_complex_vector, ComplexVectorInput};
-use crate::builtins::math::signal::type_resolvers::zplane_type;
-use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_arguments};
 use crate::builtins::plotting::plotting_error;
 use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -33,115 +28,6 @@ const UNIT_CIRCLE_POINTS: usize = 257;
 const ZERO_COLOR: Vec4 = Vec4::new(0.10, 0.45, 0.85, 1.0);
 const POLE_COLOR: Vec4 = Vec4::new(0.85, 0.18, 0.16, 1.0);
 const GUIDE_COLOR: Vec4 = Vec4::new(0.55, 0.55, 0.55, 0.70);
-
-const ZPLANE_NONFLOATING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor { id: "zplane-nonfloating-input", mode: BuiltinExtensionMode::RunMatOnly, description: "Allow typed-integer filter coefficients, zero or pole locations, SOS entries, gain, or encoded axes aliases", error_identifier: Some("RunMat:compatibility:ZplaneNonfloatingInputExtension") };
-pub const ZPLANE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ZPLANE_NONFLOATING_EXTENSION];
-const ZPLANE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "b/a, z/p/k, sos, or encoded axes alias", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The public numeric contract is single or double; typed integers are a separately gated convenience." }];
-pub const ZPLANE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "h = zplane(integer_input, ...)", inputs: &ZPLANE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Extension mode performs one checked conversion into the floating root and graphics domain; strict mode rejects before provider or graphics state access." }];
-
-const ZPLANE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Graphics handles for zeros, poles, unit circle, and axes guides.",
-}];
-
-const ZPLANE_INPUTS_BA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerator coefficient vector or zero locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Denominator coefficient vector or pole locations.",
-    },
-];
-
-const ZPLANE_INPUTS_ZPK: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Zero locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pole locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "System gain; accepted for zpk compatibility and ignored for plotting.",
-    },
-];
-
-const ZPLANE_INPUTS_SOS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sos",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Second-order-section matrix with six columns [b0 b1 b2 a0 a1 a2].",
-}];
-
-const ZPLANE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "zplane(b, a)",
-        inputs: &ZPLANE_INPUTS_BA,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "zplane(z, p, k)",
-        inputs: &ZPLANE_INPUTS_ZPK,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "zplane(sos)",
-        inputs: &ZPLANE_INPUTS_SOS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = zplane(...)",
-        inputs: &ZPLANE_INPUTS_BA,
-        outputs: &ZPLANE_OUTPUT,
-    },
-];
-
-const ZPLANE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZPLANE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:zplane:InvalidArgument"),
-    when: "Inputs cannot be interpreted as filter coefficients, zero/pole vectors, or SOS rows.",
-    message: "zplane: invalid argument",
-};
-
-const ZPLANE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ZPLANE.INTERNAL",
-    identifier: Some("RunMat:zplane:Internal"),
-    when: "Internal plotting state or tensor construction fails.",
-    message: "zplane: internal operation failed",
-};
-
-const ZPLANE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ZPLANE_ERROR_INVALID_ARGUMENT, ZPLANE_ERROR_INTERNAL];
-
-pub const ZPLANE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ZPLANE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ZPLANE_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::zplane")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -172,22 +58,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "zplane",
-    category = "math/signal",
-    summary = "Plot zeros and poles of a digital filter.",
-    keywords = "zplane,zero pole plot,digital filter,signal processing",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(zplane_type),
-    descriptor(crate::builtins::math::signal::zplane::ZPLANE_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::zplane::ZPLANE_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::zplane::ZPLANE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::zplane"
 )]
-async fn zplane_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn zplane_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args).await
 }
 
-pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    preflight_obvious_forms(args.view())?;
+    // This includes an ambiguous leading axes candidate: complex integer
+    // storage cannot encode an axes handle or enter the floating root kernel.
+    // Check every authoritative class before exactness can download the first
+    // resident integer value for axes decoding.
+    for value in &args {
+        if crate::builtins::common::validation::is_typed_complex_integer(value) {
+            return Err(zplane_error(
+                &ZPLANE_ERROR_INVALID_ARGUMENT,
+                "typed complex integer input is not supported",
+            ));
+        }
+    }
     if args
         .iter()
         .any(crate::builtins::common::validation::value_has_native_integer_class)
@@ -197,14 +88,181 @@ pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
+    // The shared axes decoder accepts typed integer aliases through an f64
+    // scalar projection. Certify the first value before that decoder can
+    // round a wide handle or a first coefficient.
+    if let Some(first) = args.first() {
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            first,
+            &ZPLANE_NONFLOATING_EXTENSION,
+            BUILTIN_NAME,
+            "leading input",
+        )
+        .await
+        .map_err(map_invalid_argument)?;
+    }
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
-    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
-    for value in &args {
-        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+    preflight_zplane_inputs(args.view())?;
+    for (index, value) in args.iter().enumerate() {
+        crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)
+            .map_err(map_invalid_argument)?;
+        if index != 0 || axes_target.is_some() {
+            crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+                value,
+                &ZPLANE_NONFLOATING_EXTENSION,
+                BUILTIN_NAME,
+                "numeric input",
+            )
+            .await
+            .map_err(map_invalid_argument)?;
+        }
     }
     let data = parse_zero_pole_data(args).await?;
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
     render_zero_pole_plot(data)
+}
+
+/// Reject malformed authoritative metadata before any numeric readback. A
+/// three-argument call may be either ax/b/a or z/p/k, so only facts invalid
+/// under both readings are checked before resolving the possible axes handle.
+fn preflight_obvious_forms(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    match args.len() {
+        1 => preflight_sos(args.first().expect("one zplane argument")),
+        2 => {
+            let first = args.get(0).expect("first zplane argument");
+            let second = args.get(1).expect("second zplane argument");
+            // Could be ax,SOS. Only prove a coefficient form when the first
+            // carrier cannot encode a scalar axes handle.
+            if value_shape(first).is_some_and(|shape| {
+                shape
+                    .iter()
+                    .try_fold(1usize, |count, &dim| count.checked_mul(dim))
+                    != Some(1)
+            }) {
+                preflight_vector(first)?;
+                preflight_vector(second)?;
+            }
+            Ok(())
+        }
+        3 => {
+            let first = args.get(0).expect("first zplane argument");
+            let second = args.get(1).expect("second zplane argument");
+            let third = args.get(2).expect("third zplane argument");
+            preflight_vector(second)?;
+            preflight_vector(third)?;
+            if value_shape(first).is_some_and(|shape| shape.iter().any(|&n| n > 1)) {
+                preflight_vector(first)?;
+                preflight_gain(third)?;
+            }
+            Ok(())
+        }
+        4 => {
+            let zeros = args.get(1).expect("zplane zeros argument");
+            let poles = args.get(2).expect("zplane poles argument");
+            let gain = args.get(3).expect("zplane gain argument");
+            preflight_vector(zeros)?;
+            preflight_vector(poles)?;
+            preflight_gain(gain)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn preflight_zplane_inputs(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    match args.len() {
+        1 => preflight_sos(args.first().expect("one zplane input")),
+        2 => {
+            let first = args.get(0).expect("first zplane input");
+            let second = args.get(1).expect("second zplane input");
+            preflight_vector(first)?;
+            preflight_vector(second)
+        }
+        3 => {
+            let zeros = args.get(0).expect("zeros input");
+            let poles = args.get(1).expect("poles input");
+            let gain = args.get(2).expect("gain input");
+            preflight_vector(zeros)?;
+            preflight_vector(poles)?;
+            preflight_gain(gain)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn value_shape(value: &Value) -> Option<&[usize]> {
+    match value {
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
+        Value::LogicalArray(array) => Some(&array.shape),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        _ => None,
+    }
+}
+
+fn preflight_sos(value: &Value) -> BuiltinResult<()> {
+    let supported = matches!(value, Value::Tensor(_) | Value::ComplexTensor(_))
+        || matches!(value, Value::GpuTensor(handle) if !runmat_accelerate_api::handle_is_logical(handle));
+    if !supported {
+        return Err(zplane_error(
+            &ZPLANE_ERROR_INVALID_ARGUMENT,
+            "SOS input must be a numeric matrix",
+        ));
+    }
+    let shape = value_shape(value).expect("matrix carrier has shape");
+    if shape.is_empty() || shape.len() > 2 {
+        return Err(zplane_error(
+            &ZPLANE_ERROR_INVALID_ARGUMENT,
+            "SOS input must be a 2-D matrix",
+        ));
+    }
+    let (_, cols) = sos_dense_dimensions(shape);
+    if cols != 6 {
+        return Err(zplane_error(
+            &ZPLANE_ERROR_INVALID_ARGUMENT,
+            "SOS matrix must have exactly six columns",
+        ));
+    }
+    Ok(())
+}
+
+fn preflight_vector(value: &Value) -> BuiltinResult<()> {
+    if let Some(shape) = value_shape(value) {
+        if shape.iter().filter(|&&dimension| dimension > 1).count() > 1 {
+            return Err(zplane_error(
+                &ZPLANE_ERROR_INVALID_ARGUMENT,
+                "filter data must be a vector",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn preflight_gain(value: &Value) -> BuiltinResult<()> {
+    let supported = matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Complex(_, _)
+            | Value::Tensor(_)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    );
+    if !supported
+        || value_shape(value).is_some_and(|shape| {
+            shape
+                .iter()
+                .try_fold(1usize, |count, &dim| count.checked_mul(dim))
+                != Some(1)
+        })
+    {
+        return Err(zplane_error(
+            &ZPLANE_ERROR_INVALID_ARGUMENT,
+            "gain must be a finite numeric scalar",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -213,13 +271,14 @@ struct ZeroPoleData {
     poles: Vec<Complex<f64>>,
 }
 
-async fn parse_zero_pole_data(args: Vec<Value>) -> BuiltinResult<ZeroPoleData> {
+async fn parse_zero_pole_data(
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<ZeroPoleData> {
     match args.len() {
-        1 => zeros_poles_from_sos(args.into_iter().next().expect("one arg")).await,
+        1 => zeros_poles_from_sos(args.pop_front().expect("one arg")).await,
         2 => {
-            let mut iter = args.into_iter();
-            let first = vector_input("first", iter.next().expect("first arg")).await?;
-            let second = vector_input("second", iter.next().expect("second arg")).await?;
+            let first = vector_input("first", args.pop_front().expect("first arg")).await?;
+            let second = vector_input("second", args.pop_front().expect("second arg")).await?;
             if treat_as_explicit_zero_pole_vectors(&first, &second) {
                 Ok(ZeroPoleData {
                     zeros: first.data,
@@ -230,10 +289,9 @@ async fn parse_zero_pole_data(args: Vec<Value>) -> BuiltinResult<ZeroPoleData> {
             }
         }
         3 => {
-            let mut iter = args.into_iter();
-            let zeros = vector_input("zeros", iter.next().expect("zeros arg")).await?;
-            let poles = vector_input("poles", iter.next().expect("poles arg")).await?;
-            validate_gain(&iter.next().expect("gain arg"))?;
+            let zeros = vector_input("zeros", args.pop_front().expect("zeros arg")).await?;
+            let poles = vector_input("poles", args.pop_front().expect("poles arg")).await?;
+            validate_gain(args.pop_front().expect("gain arg")).await?;
             Ok(ZeroPoleData {
                 zeros: zeros.data,
                 poles: poles.data,
@@ -247,9 +305,10 @@ async fn parse_zero_pole_data(args: Vec<Value>) -> BuiltinResult<ZeroPoleData> {
 }
 
 async fn vector_input(label: &str, value: Value) -> BuiltinResult<ComplexVectorInput> {
+    preflight_vector(&value)?;
     value_to_complex_vector(BUILTIN_NAME, label, value)
         .await
-        .map_err(|err| zplane_error(&ZPLANE_ERROR_INVALID_ARGUMENT, err.message()))
+        .map_err(map_invalid_argument)
 }
 
 fn treat_as_explicit_zero_pole_vectors(
@@ -301,7 +360,17 @@ async fn roots_from_coefficients(input: ComplexVectorInput) -> BuiltinResult<Vec
                 .map_err(|e| zplane_error(&ZPLANE_ERROR_INTERNAL, e))?,
         )
     };
-    roots_value_to_complex(roots::roots_value(value).await?)
+    // Retained L14 math/poly dependency: roots owns companion-matrix policy.
+    // A domain-owned shared kernel extraction belongs to that closure, not to
+    // a second zplane numerical implementation.
+    roots_value_to_complex(roots::roots_value(value).await.map_err(|source| {
+        let owner = if source.identifier() == ROOTS_ERROR_INVALID_INPUT.identifier {
+            &ZPLANE_ERROR_INVALID_ARGUMENT
+        } else {
+            &ZPLANE_ERROR_INTERNAL
+        };
+        zplane_error_with_source(owner, source)
+    })?)
 }
 
 async fn zeros_poles_from_sos(value: Value) -> BuiltinResult<ZeroPoleData> {
@@ -353,16 +422,14 @@ impl ComplexMatrixInput {
 }
 
 async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
+    preflight_sos(&value)?;
     let value = crate::gather_if_needed_async(&value)
         .await
-        .map_err(|flow| {
-            crate::builtins::common::map_control_flow_with_builtin(flow, BUILTIN_NAME)
-        })?;
+        .map_err(map_internal)?;
     match value {
         Value::Tensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.len())?;
-            let rows = tensor.rows;
-            let cols = tensor.cols;
+            validate_sos_matrix_shape(tensor.shape(), tensor.len())?;
+            let (rows, cols) = sos_dense_dimensions(tensor.shape());
             let values = tensor::tensor_into_values_f64(tensor);
             Ok(ComplexMatrixInput {
                 rows,
@@ -372,9 +439,9 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
             })
         }
         Value::ComplexTensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.materialize_f64().len())?;
-            let rows = tensor.shape.first().copied().unwrap_or(0);
-            let cols = tensor.shape.get(1).copied().unwrap_or(1);
+            validate_sos_matrix_shape(tensor.shape(), tensor.materialize_f64().len())?;
+            let rows = tensor.shape().first().copied().unwrap_or(0);
+            let cols = tensor.shape().get(1).copied().unwrap_or(1);
             Ok(ComplexMatrixInput {
                 data: tensor::complex_tensor_into_values_complex64(tensor),
                 rows,
@@ -386,6 +453,14 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
             &ZPLANE_ERROR_INVALID_ARGUMENT,
             format!("SOS input must be a numeric matrix, got {other:?}"),
         )),
+    }
+}
+
+fn sos_dense_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
     }
 }
 
@@ -407,8 +482,12 @@ fn validate_sos_matrix_shape(shape: &[usize], data_len: usize) -> BuiltinResult<
     Ok(())
 }
 
-fn validate_gain(value: &Value) -> BuiltinResult<()> {
-    match value {
+async fn validate_gain(value: Value) -> BuiltinResult<()> {
+    preflight_gain(&value)?;
+    let value = crate::gather_if_needed_async(&value)
+        .await
+        .map_err(map_internal)?;
+    match &value {
         Value::Num(n) if n.is_finite() => Ok(()),
         Value::Int(_) | Value::Bool(_) => Ok(()),
         Value::Complex(re, im) if re.is_finite() && im.is_finite() => Ok(()),
@@ -446,196 +525,8 @@ fn roots_value_to_complex(value: Value) -> BuiltinResult<Vec<Complex<f64>>> {
     }
 }
 
-fn render_zero_pole_plot(data: ZeroPoleData) -> BuiltinResult<Value> {
-    let mut plots = build_zplane_plots(&data)?;
-    let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let handles_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(bool, usize, usize)>::new()));
-    let handles_slot = std::rc::Rc::clone(&handles_out);
-    let opts = PlotRenderOptions {
-        title: "Zero-Pole Plot",
-        x_label: "Real Part",
-        y_label: "Imaginary Part",
-        grid: true,
-        axis_equal: true,
-    };
-    let limits = zplane_limits(&data);
-    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        figure.set_axes_limits(axes, Some(limits), Some(limits));
-        for plot in plots.lines.drain(..) {
-            let plot_index = figure.add_line_plot_on_axes(plot, axes);
-            handles_slot.borrow_mut().push((true, axes, plot_index));
-        }
-        for plot in plots.scatters.drain(..) {
-            let plot_index = figure.add_scatter_plot_on_axes(plot, axes);
-            handles_slot.borrow_mut().push((false, axes, plot_index));
-        }
-        Ok(())
-    });
-
-    let handles = handles_out
-        .borrow()
-        .iter()
-        .map(|(is_line, axes, plot_index)| {
-            if *is_line {
-                crate::builtins::plotting::state::register_line_handle(
-                    figure_handle,
-                    *axes,
-                    *plot_index,
-                )
-            } else {
-                crate::builtins::plotting::state::register_scatter_handle(
-                    figure_handle,
-                    *axes,
-                    *plot_index,
-                )
-            }
-        })
-        .collect::<Vec<_>>();
-    if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
-            return Err(map_internal(err));
-        }
-    }
-    handles_value(handles)
-}
-
-struct ZPlanePlots {
-    lines: Vec<LinePlot>,
-    scatters: Vec<ScatterPlot>,
-}
-
-fn build_zplane_plots(data: &ZeroPoleData) -> BuiltinResult<ZPlanePlots> {
-    let limits = zplane_limits(data);
-    let mut lines = vec![
-        line_plot(
-            unit_circle_x(),
-            unit_circle_y(),
-            GUIDE_COLOR,
-            LineStyle::Dotted,
-            "Unit Circle",
-        )?,
-        line_plot(
-            vec![limits.0, limits.1],
-            vec![0.0, 0.0],
-            GUIDE_COLOR,
-            LineStyle::Solid,
-            "Real Axis",
-        )?,
-        line_plot(
-            vec![0.0, 0.0],
-            vec![limits.0, limits.1],
-            GUIDE_COLOR,
-            LineStyle::Solid,
-            "Imaginary Axis",
-        )?,
-    ];
-    for line in &mut lines[1..] {
-        line.set_line_width(0.75);
-    }
-    let mut scatters = Vec::new();
-    if !data.zeros.is_empty() {
-        scatters.push(scatter_plot(
-            &data.zeros,
-            ZERO_COLOR,
-            MarkerStyle::Circle,
-            "Zeros",
-            false,
-        )?);
-    }
-    if !data.poles.is_empty() {
-        scatters.push(scatter_plot(
-            &data.poles,
-            POLE_COLOR,
-            MarkerStyle::Cross,
-            "Poles",
-            false,
-        )?);
-    }
-    Ok(ZPlanePlots { lines, scatters })
-}
-
-fn line_plot(
-    x: Vec<f64>,
-    y: Vec<f64>,
-    color: Vec4,
-    style: LineStyle,
-    label: &str,
-) -> BuiltinResult<LinePlot> {
-    LinePlot::new(x, y)
-        .map(|plot| plot.with_style(color, 1.25, style).with_label(label))
-        .map_err(|err| plotting_error(BUILTIN_NAME, format!("zplane: {err}")))
-}
-
-fn scatter_plot(
-    points: &[Complex<f64>],
-    color: Vec4,
-    marker: MarkerStyle,
-    label: &str,
-    filled: bool,
-) -> BuiltinResult<ScatterPlot> {
-    let x = points.iter().map(|z| z.re).collect::<Vec<_>>();
-    let y = points.iter().map(|z| z.im).collect::<Vec<_>>();
-    let mut plot = ScatterPlot::new(x, y)
-        .map(|plot| plot.with_style(color, 9.0, marker).with_label(label))
-        .map_err(|err| plotting_error(BUILTIN_NAME, format!("zplane: {err}")))?;
-    plot.filled = filled;
-    plot.set_edge_color(color);
-    Ok(plot)
-}
-
-fn unit_circle_x() -> Vec<f64> {
-    (0..UNIT_CIRCLE_POINTS)
-        .map(|idx| {
-            let theta = std::f64::consts::TAU * idx as f64 / (UNIT_CIRCLE_POINTS - 1) as f64;
-            theta.cos()
-        })
-        .collect()
-}
-
-fn unit_circle_y() -> Vec<f64> {
-    (0..UNIT_CIRCLE_POINTS)
-        .map(|idx| {
-            let theta = std::f64::consts::TAU * idx as f64 / (UNIT_CIRCLE_POINTS - 1) as f64;
-            theta.sin()
-        })
-        .collect()
-}
-
-fn zplane_limits(data: &ZeroPoleData) -> (f64, f64) {
-    let extent = data
-        .zeros
-        .iter()
-        .chain(data.poles.iter())
-        .flat_map(|z| [z.re.abs(), z.im.abs()])
-        .filter(|v| v.is_finite())
-        .fold(1.0_f64, f64::max);
-    let pad = (extent * 0.12).max(0.15);
-    let limit = (extent + pad).max(1.15);
-    (-limit, limit)
-}
-
-fn handles_value(handles: Vec<f64>) -> BuiltinResult<Value> {
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count == 1 {
-            return Ok(Value::OutputList(vec![handles_tensor(handles)?]));
-        }
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![handles_tensor(handles)?],
-        ));
-    }
-    handles_tensor(handles)
-}
-
-fn handles_tensor(handles: Vec<f64>) -> BuiltinResult<Value> {
-    Tensor::new(handles.clone(), vec![1, handles.len()])
-        .map(Value::Tensor)
-        .map_err(|e| zplane_error(&ZPLANE_ERROR_INTERNAL, e))
-}
+mod presentation;
+use presentation::render_zero_pole_plot;
 
 fn zplane_error(
     error: &'static BuiltinErrorDescriptor,
@@ -649,177 +540,31 @@ fn zplane_error(
     builder.build()
 }
 
-fn map_invalid_argument(err: RuntimeError) -> RuntimeError {
-    if err.identifier().is_some() {
-        err
-    } else {
-        zplane_error(&ZPLANE_ERROR_INVALID_ARGUMENT, err.message())
+fn zplane_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let retry = source.gpu_gather_retry;
+    let span = source.span;
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, source.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .with_gpu_gather_retry(retry);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
     }
+    let mut owner = builder.build();
+    owner.span = span;
+    owner
+}
+
+fn map_invalid_argument(err: RuntimeError) -> RuntimeError {
+    zplane_error_with_source(&ZPLANE_ERROR_INVALID_ARGUMENT, err)
 }
 
 fn map_internal(err: RuntimeError) -> RuntimeError {
-    if err.identifier().is_some() {
-        err
-    } else {
-        zplane_error(&ZPLANE_ERROR_INTERNAL, err.message())
-    }
+    zplane_error_with_source(&ZPLANE_ERROR_INTERNAL, err)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
-    use runmat_value::IntegerStorage;
-
-    fn row(values: &[f64]) -> Value {
-        Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())
-    }
-
-    fn col(values: &[f64]) -> Value {
-        Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
-    }
-
-    #[test]
-    fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("zplane builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
-        assert!(descriptor
-            .signatures
-            .iter()
-            .any(|sig| sig.label == "zplane(b, a)"));
-    }
-
-    #[test]
-    fn row_vectors_are_filter_coefficients() {
-        let data = block_on(parse_zero_pole_data(vec![row(&[1.0]), row(&[1.0, -0.8])]))
-            .expect("zero-pole data");
-        assert!(data.zeros.is_empty());
-        assert_eq!(data.poles.len(), 1);
-        assert!((data.poles[0].re - 0.8).abs() < 1e-10);
-        assert!(data.poles[0].im.abs() < 1e-10);
-    }
-
-    #[test]
-    fn column_vectors_are_explicit_zero_pole_locations() {
-        let data = block_on(parse_zero_pole_data(vec![col(&[0.2, 0.4]), col(&[0.8])]))
-            .expect("zero-pole data");
-        assert_eq!(data.zeros.len(), 2);
-        assert_eq!(data.poles.len(), 1);
-        assert!((data.zeros[0].re - 0.2).abs() < 1e-12);
-        assert!((data.poles[0].re - 0.8).abs() < 1e-12);
-    }
-
-    #[test]
-    fn sos_rows_expand_to_zeros_and_poles() {
-        let sos =
-            Value::Tensor(Tensor::new(vec![1.0, 1.0, 0.0, 1.0, -0.8, 0.0], vec![1, 6]).unwrap());
-        let data = block_on(parse_zero_pole_data(vec![sos])).expect("sos");
-        assert_eq!(data.zeros.len(), 2);
-        assert_eq!(data.poles.len(), 2);
-        assert!(data.poles.iter().any(|z| (z.re - 0.8).abs() < 1e-10));
-    }
-
-    #[test]
-    fn sos_reads_typed_integer_storage_exactly() {
-        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 1, 0, 1, -1, 0]), vec![1, 6])
-            .expect("integer sos");
-
-        let data = block_on(parse_zero_pole_data(vec![Value::Tensor(tensor)])).expect("sos");
-
-        assert_eq!(data.zeros.len(), 2);
-        assert_eq!(data.poles.len(), 2);
-        assert!(data
-            .poles
-            .iter()
-            .any(|z| (z.re - 1.0).abs() < 1e-10 && z.im.abs() < 1e-10));
-    }
-
-    #[test]
-    fn sos_rejects_rank_greater_than_two() {
-        let sos =
-            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 0.0); 12], vec![1, 6, 2]).unwrap());
-        let err = block_on(parse_zero_pole_data(vec![sos])).expect_err("rank-3 sos rejected");
-        assert!(err.message().contains("2-D matrix"));
-    }
-
-    #[test]
-    fn explicit_zpk_accepts_complex_scalar_gain() {
-        let data = block_on(parse_zero_pole_data(vec![
-            col(&[0.2, 0.4]),
-            col(&[0.8]),
-            Value::Complex(1.0, 0.25),
-        ]))
-        .expect("complex gain accepted");
-        assert_eq!(data.zeros.len(), 2);
-        assert_eq!(data.poles.len(), 1);
-    }
-
-    #[test]
-    fn explicit_zpk_gain_reads_typed_integer_storage_exactly() {
-        let gain =
-            Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer gain");
-
-        let data = block_on(parse_zero_pole_data(vec![
-            col(&[0.2, 0.4]),
-            col(&[0.8]),
-            Value::Tensor(gain),
-        ]))
-        .expect("integer gain accepted");
-
-        assert_eq!(data.zeros.len(), 2);
-        assert_eq!(data.poles.len(), 1);
-    }
-
-    #[test]
-    fn zplane_limits_include_unit_circle_and_points() {
-        let limits = zplane_limits(&ZeroPoleData {
-            zeros: vec![Complex::new(2.0, -0.5)],
-            poles: vec![Complex::new(0.0, -3.0)],
-        });
-        assert!(limits.0 < -3.0);
-        assert!(limits.1 > 3.0);
-        assert!((limits.0 + limits.1).abs() < 1e-12);
-    }
-
-    #[test]
-    fn evaluate_returns_graphics_handles_without_interactive_backend() {
-        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
-        let value =
-            block_on(evaluate(vec![row(&[1.0]), row(&[1.0, -0.8])])).expect("zplane render");
-        let Value::Tensor(handles) = value else {
-            panic!("expected handle tensor");
-        };
-        assert_eq!(handles.shape, vec![1, 4]);
-        assert!(handles
-            .materialize_f64()
-            .iter()
-            .all(|handle| handle.is_finite()));
-    }
-
-    #[test]
-    fn evaluate_honors_zero_requested_outputs() {
-        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
-        let _out_guard = crate::output_count::push_output_count(Some(0));
-        let value =
-            block_on(evaluate(vec![row(&[1.0]), row(&[1.0, -0.8])])).expect("zplane render");
-        let Value::OutputList(values) = value else {
-            panic!("expected output list");
-        };
-        assert!(values.is_empty());
-    }
-
-    #[test]
-    fn zplane_integer_extension_rejects_before_plot_state() {
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let coefficients = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("coefficients"),
-        );
-        let error =
-            block_on(evaluate(vec![coefficients, row(&[1.0, -0.8])])).expect_err("strict gate");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:ZplaneNonfloatingInputExtension")
-        );
-    }
-}
+mod tests;

@@ -1,338 +1,35 @@
 //! MATLAB-compatible `readmatrix` builtin for RunMat.
 
 use runmat_value::NumericScalar;
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use encoding_rs::Encoding;
+#[cfg(test)]
+use runmat_builtins::READMATRIX_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ReadMatrixControl, ReadMatrixOutputClass, READMATRIX_ERROR_ARG_CONFIG,
+    READMATRIX_ERROR_FILENAME, READMATRIX_ERROR_FILENAME_EMPTY, READMATRIX_ERROR_IO_OPEN,
+    READMATRIX_ERROR_IO_READ, READMATRIX_ERROR_NON_NUMERIC_TOKEN, READMATRIX_ERROR_OPTION_NAME,
+    READMATRIX_ERROR_OPTION_VALUE, READMATRIX_ERROR_OUTPUT_TYPE, READMATRIX_ERROR_RANGE,
+    READMATRIX_ERROR_TENSOR_BUILD, READMATRIX_LIKE_EXTENSION,
+    READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION,
 };
-use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
+use super::cooperation::{await_io, TabularCooperation};
+use super::import_options::{ImportOptions, VariableImportOptions};
+use super::path::{BorrowedTabularReadPath, TabularFsOwner, TabularReadPath, TabularReadSource};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::helpers::decode_bytes;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "readmatrix";
 const MAX_READMATRIX_TEXT_BYTES: u64 = 512 * 1024 * 1024;
-
-const READMATRIX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Imported matrix output (numeric/logical, and may preserve gpuArray residency with Like).",
-}];
-const READMATRIX_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Delimited text file path.",
-}];
-const READMATRIX_INPUTS_FILENAME_OPTIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimited text file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Options struct containing readmatrix name/value fields.",
-    },
-];
-const READMATRIX_INPUTS_FILENAME_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimited text file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name.",
-    },
-    BuiltinParamDescriptor {
-        name: "optionValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value for the preceding option name.",
-    },
-];
-const READMATRIX_INPUTS_FILENAME_OPTIONS_NAME_VALUE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimited text file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Options struct containing readmatrix name/value fields.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name.",
-    },
-    BuiltinParamDescriptor {
-        name: "optionValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value for the preceding option name.",
-    },
-];
-const READMATRIX_INPUTS_FILENAME_NAME_VALUE_PAIRS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimited text file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValuePairs...",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option pairs.",
-    },
-];
-const READMATRIX_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "M = readmatrix(filename)",
-        inputs: &READMATRIX_INPUTS_FILENAME,
-        outputs: &READMATRIX_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = readmatrix(filename, options)",
-        inputs: &READMATRIX_INPUTS_FILENAME_OPTIONS,
-        outputs: &READMATRIX_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = readmatrix(filename, name, optionValue)",
-        inputs: &READMATRIX_INPUTS_FILENAME_NAME_VALUE,
-        outputs: &READMATRIX_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = readmatrix(filename, options, name, optionValue)",
-        inputs: &READMATRIX_INPUTS_FILENAME_OPTIONS_NAME_VALUE,
-        outputs: &READMATRIX_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = readmatrix(filename, nameValuePairs...)",
-        inputs: &READMATRIX_INPUTS_FILENAME_NAME_VALUE_PAIRS,
-        outputs: &READMATRIX_OUTPUT,
-    },
-];
-const READMATRIX_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.ARG_CONFIG",
-    identifier: None,
-    when: "Argument list is malformed for readmatrix call forms.",
-    message: "readmatrix: invalid argument configuration",
-};
-const READMATRIX_ERROR_OPTION_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.OPTION_NAME",
-    identifier: None,
-    when: "Option name is not a scalar string/char vector.",
-    message: "readmatrix: invalid option name",
-};
-const READMATRIX_ERROR_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.OPTION_VALUE",
-    identifier: None,
-    when: "A provided option value is invalid.",
-    message: "readmatrix: invalid option value",
-};
-const READMATRIX_ERROR_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.RANGE",
-    identifier: None,
-    when: "Range specification is malformed or semantically invalid.",
-    message: "readmatrix: invalid range",
-};
-const READMATRIX_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.FILENAME",
-    identifier: None,
-    when: "Filename argument is not a scalar string/char vector.",
-    message: "readmatrix: invalid filename input",
-};
-const READMATRIX_ERROR_FILENAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.FILENAME_EMPTY",
-    identifier: None,
-    when: "Filename resolves to an empty path.",
-    message: "readmatrix: filename must not be empty",
-};
-const READMATRIX_ERROR_IO_OPEN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.IO_OPEN",
-    identifier: None,
-    when: "Input file cannot be opened.",
-    message: "readmatrix: unable to read file",
-};
-const READMATRIX_ERROR_IO_READ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.IO_READ",
-    identifier: None,
-    when: "Input file cannot be read.",
-    message: "readmatrix: failed to read file",
-};
-const READMATRIX_ERROR_NON_NUMERIC_TOKEN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.NON_NUMERIC_TOKEN",
-    identifier: None,
-    when: "A token cannot be parsed as numeric in the selected import region.",
-    message: "readmatrix: nonnumeric token encountered",
-};
-const READMATRIX_ERROR_OUTPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.OUTPUT_TYPE",
-    identifier: None,
-    when: "OutputType/Like output coercion configuration is invalid.",
-    message: "readmatrix: invalid output type configuration",
-};
-const READMATRIX_ERROR_TENSOR_BUILD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READMATRIX.TENSOR_BUILD",
-    identifier: None,
-    when: "Internal tensor/logical output materialization fails.",
-    message: "readmatrix: unable to construct output matrix",
-};
-const READMATRIX_ERRORS: [BuiltinErrorDescriptor; 11] = [
-    READMATRIX_ERROR_ARG_CONFIG,
-    READMATRIX_ERROR_OPTION_NAME,
-    READMATRIX_ERROR_OPTION_VALUE,
-    READMATRIX_ERROR_RANGE,
-    READMATRIX_ERROR_FILENAME,
-    READMATRIX_ERROR_FILENAME_EMPTY,
-    READMATRIX_ERROR_IO_OPEN,
-    READMATRIX_ERROR_IO_READ,
-    READMATRIX_ERROR_NON_NUMERIC_TOKEN,
-    READMATRIX_ERROR_OUTPUT_TYPE,
-    READMATRIX_ERROR_TENSOR_BUILD,
-];
-pub const READMATRIX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &READMATRIX_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &READMATRIX_ERRORS,
-};
-
-const READMATRIX_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "readmatrix-like-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "readmatrix accepts a Like prototype and optional resident result as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ReadmatrixLikeOutputExtension"),
-};
-const READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "readmatrix-typed-integer-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "readmatrix accepts typed-integer range, header, size, empty-value, and related numeric controls as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ReadmatrixTypedIntegerControlExtension"),
-    };
-pub const READMATRIX_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    READMATRIX_LIKE_EXTENSION,
-    READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION,
-];
-const READMATRIX_INTEGER_OUTPUT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "OutputType integer class selector",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented OutputType selector names any of the eight integer classes. Decimal integer tokens are parsed directly into native storage, including exact int64 and uint64 endpoints, while fractional and exceptional values follow saturating cast rules.",
-    }];
-const READMATRIX_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Range, NumHeaderLines, ExpectedNumVariables, EmptyValue, or related numeric option",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target's public datatype tables constrain implemented numeric controls to single/double. RunMat mode retains the typed-integer extension and reads structural values exactly; compatibility mode rejects before gather or file access.",
-    }];
-const READMATRIX_INTEGER_LIKE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Like integer prototype",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Like is not a documented readmatrix option. RunMat mode uses the exact prototype class and owner; integer text is parsed directly in that class rather than through binary64.",
-    }];
-pub const READMATRIX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = readmatrix(filename, 'OutputType', integer_class)",
-        inputs: &READMATRIX_INTEGER_OUTPUT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "File I/O and parsing are host operations. Every integer OutputType produces the requested integer class and preserves exactly representable parsed values.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = readmatrix(filename, typed_integer_controls...)",
-        inputs: &READMATRIX_INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed controls are an independently gated extension; ordinary automatic residency may gather transparently for host file I/O.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = readmatrix(filename, 'Like', integer_prototype)",
-        inputs: &READMATRIX_INTEGER_LIKE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Compatibility mode rejects the whole Like extension. RunMat mode preserves host class and attempts explicit owner-resident restoration only when the provider can represent the exact class.",
-    },
-];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "readmatrix",
-    op_kind: GpuOpKind::Custom("io-readmatrix"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "File I/O and parsing run on the host. The gated Like extension may perform a typed upload through the exact provider that owns the prototype.",
-};
 
 fn readmatrix_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     readmatrix_error_with(error, error.message)
@@ -355,7 +52,7 @@ fn readmatrix_error_with_source<E>(
     source: E,
 ) -> RuntimeError
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: crate::runtime_error::RuntimeErrorSourceBound,
 {
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -378,36 +75,19 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::readmatrix")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "readmatrix",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; executes as a standalone host operation.",
-};
-
 #[runtime_builtin(
     name = "readmatrix",
-    category = "io/tabular",
-    summary = "Import numeric data from delimited text files into a RunMat matrix.",
-    keywords = "readmatrix,csv,delimited text,numeric import,table",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::readmatrix_type),
-    descriptor(crate::builtins::io::tabular::readmatrix::READMATRIX_DESCRIPTOR),
-    extensions(crate::builtins::io::tabular::readmatrix::READMATRIX_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::io::tabular::readmatrix::READMATRIX_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::tabular::readmatrix"
 )]
 pub(crate) async fn readmatrix_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     path: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    if raw_args_contain_option(&rest, "Like") {
+    let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    if raw_args_contain_option(rest.view(), ReadMatrixControl::Like) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &READMATRIX_LIKE_EXTENSION,
             BUILTIN_NAME,
@@ -419,14 +99,102 @@ pub(crate) async fn readmatrix_builtin(
             BUILTIN_NAME,
         )?;
     }
-    let path_value = gather_if_needed_async(&path)
-        .await
-        .map_err(map_control_flow)?;
-    let options = parse_options(&rest).await?;
+    preflight_host_options(runtime.as_ref(), rest.view())?;
+    if admission::finite_budget(runtime.as_ref()) {
+        if matches!(&path, Value::String(runmat_value::StringElement::Text(raw)) if raw.is_empty())
+        {
+            return Err(readmatrix_error(&READMATRIX_ERROR_FILENAME_EMPTY));
+        }
+        if let (Some(runtime), Value::String(runmat_value::StringElement::Text(raw))) =
+            (runtime.as_ref(), &path)
+        {
+            let provider = runmat_filesystem::current_provider();
+            let borrowed = Path::new(raw.as_str());
+            if rest.is_empty()
+                && provider.path_namespace().is_absolute(borrowed)
+                && crate::output_count::current_output_count().is_none_or(|count| count == 1)
+            {
+                let stage = admission::admit_default_absolute(runtime, borrowed, &provider)?;
+                let selected = BorrowedTabularReadPath::capture_absolute_on(provider, borrowed)
+                    .map_err(|source| {
+                        readmatrix_error_with_source(
+                            &READMATRIX_ERROR_IO_OPEN,
+                            "readmatrix: unable to capture admitted filesystem source",
+                            source,
+                        )
+                    })?;
+                return reader::read_default_staged(
+                    runtime,
+                    &mut cooperation,
+                    &selected,
+                    selected.provider(),
+                    stage,
+                )
+                .await;
+            }
+        }
+        return Err(build_runtime_error(
+            "readmatrix: finite admission for these path, control, or output forms is unavailable",
+        )
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+        .build());
+    }
+    let known_path = if matches!(path, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(resolve_path(&path)?)
+    };
+    let owner = TabularFsOwner::capture(known_path.as_deref()).map_err(|source| {
+        readmatrix_error_with_source(
+            &READMATRIX_ERROR_IO_OPEN,
+            "readmatrix: unable to capture filesystem authority",
+            source,
+        )
+    })?;
+    let path_value = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        gather_if_needed_async(&path),
+    )
+    .await?
+    .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
+    let options = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        parse_options(runtime.as_ref(), rest.view()),
+    )
+    .await??;
+    cooperation.completed(0).await?;
     options.validate()?;
     let resolved = resolve_path(&path_value)?;
-    let tensor = read_numeric_matrix(&resolved, &options).await?;
-    finalize_output(tensor, &options)
+    let selected = owner.path(resolved).map_err(|source| {
+        readmatrix_error_with_source(
+            &READMATRIX_ERROR_IO_OPEN,
+            "readmatrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    let tensor =
+        read_numeric_matrix(runtime.as_ref(), &mut cooperation, &selected, &options).await?;
+    cooperation.completed(0).await?;
+    selected.check().map_err(|source| {
+        readmatrix_error_with_source(
+            &READMATRIX_ERROR_IO_READ,
+            "readmatrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    let output = finalize_output(tensor, &options)?;
+    selected.check().map_err(|source| {
+        readmatrix_error_with_source(
+            &READMATRIX_ERROR_IO_READ,
+            "readmatrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    Ok(output)
 }
 
 fn value_contains_typed_integer(value: &Value) -> bool {
@@ -434,37 +202,68 @@ fn value_contains_typed_integer(value: &Value) -> bool {
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
         || matches!(value, Value::Struct(structure) if structure.fields.values().any(value_contains_typed_integer))
-        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
+        || matches!(value, Value::Object(object) if object.properties().values().any(value_contains_typed_integer))
+        || matches!(value, Value::Cell(cell) if cell.data().iter().any(value_contains_typed_integer))
 }
 
-fn raw_args_contain_option(args: &[Value], sought: &str) -> bool {
-    if let Some(Value::Struct(structure)) = args.first() {
-        if structure
-            .fields
-            .keys()
-            .any(|name| name.eq_ignore_ascii_case(sought))
-        {
-            return true;
+fn raw_args_contain_option(
+    args: crate::call::FunctionArgumentView<'_>,
+    sought: ReadMatrixControl,
+) -> bool {
+    let first_pair = match args.first() {
+        Some(Value::Struct(structure)) => {
+            if structure
+                .fields
+                .keys()
+                .any(|name| ReadMatrixControl::parse(name) == sought)
+            {
+                return true;
+            }
+            1
         }
-    }
-    args.windows(2)
-        .any(|pair| raw_scalar_text(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case(sought)))
+        Some(Value::Object(object)) => {
+            if object
+                .properties()
+                .keys()
+                .any(|name| ReadMatrixControl::parse(name) == sought)
+            {
+                return true;
+            }
+            1
+        }
+        _ => 0,
+    };
+    (first_pair..args.len()).step_by(2).any(|index| {
+        raw_scalar_text(&args[index]).is_some_and(|name| ReadMatrixControl::parse(&name) == sought)
+    })
 }
 
 fn raw_scalar_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(value.clone()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
-        _ => None,
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value)
 }
 
-async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
+async fn parse_options(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ReadMatrixOptions> {
     let mut options = ReadMatrixOptions::default();
     let mut index = 0usize;
-    if let Some(Value::Struct(struct_value)) = args.get(index) {
-        parse_struct_options(struct_value, &mut options).await?;
+    if let Some(source) = args
+        .get(index)
+        .filter(|value| matches!(value, Value::Struct(_) | Value::Object(_)))
+    {
+        match source {
+            Value::Struct(structure) => parse_struct_options(structure, &mut options).await?,
+            _ => {
+                let import = ImportOptions::decode(runtime, source)?.ok_or_else(|| {
+                    readmatrix_error_with(
+                        &READMATRIX_ERROR_ARG_CONFIG,
+                        "readmatrix: expected tabular import options",
+                    )
+                })?;
+                options.apply_import_options(&import).await?;
+            }
+        }
         index += 1;
     }
     while index < args.len() {
@@ -500,69 +299,136 @@ async fn apply_option(
     name: &str,
     value: &Value,
 ) -> BuiltinResult<()> {
-    let lowered = name.trim().to_ascii_lowercase();
-    let is_like = lowered == "like";
-    let effective_value = if is_like {
+    let control = ReadMatrixControl::parse(name);
+    let effective = if control == ReadMatrixControl::Like {
         value.clone()
     } else {
         gather_if_needed_async(value)
             .await
             .map_err(map_control_flow)?
     };
-    if name.eq_ignore_ascii_case("Delimiter") {
-        let delimiter = parse_delimiter(&effective_value)?;
-        options.delimiter = Some(delimiter);
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("NumHeaderLines") {
-        let header_lines = value_to_usize(&effective_value, "NumHeaderLines")?;
-        options.num_header_lines = header_lines;
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("TreatAsMissing") {
-        let tokens = parse_treat_as_missing(&effective_value).await?;
-        for token in tokens {
+    if control == ReadMatrixControl::TreatAsMissing {
+        for token in parse_treat_as_missing(&effective).await? {
             options.add_missing_token(&token);
         }
         return Ok(());
     }
-    if name.eq_ignore_ascii_case("DecimalSeparator") {
-        let sep = parse_separator_char(&effective_value, "DecimalSeparator")?;
-        options.decimal_separator = sep;
-        return Ok(());
+    apply_decoded_control(options, control, effective)
+}
+
+fn apply_decoded_control(
+    options: &mut ReadMatrixOptions,
+    control: ReadMatrixControl,
+    value: Value,
+) -> BuiltinResult<()> {
+    match control {
+        ReadMatrixControl::Delimiter => options.delimiter = Some(parse_delimiter(&value)?),
+        ReadMatrixControl::NumHeaderLines => {
+            options.num_header_lines = value_to_usize(&value, "NumHeaderLines")?;
+        }
+        ReadMatrixControl::DecimalSeparator => {
+            options.decimal_separator = parse_separator_char(&value, "DecimalSeparator")?;
+        }
+        ReadMatrixControl::ThousandsSeparator => {
+            options.thousands_separator = Some(parse_separator_char(&value, "ThousandsSeparator")?);
+        }
+        ReadMatrixControl::EmptyValue => {
+            options.empty_value = Some(value_to_numeric_scalar(&value, "EmptyValue")?);
+        }
+        ReadMatrixControl::OutputType => {
+            options.set_output_type(&value_to_string_scalar(&value, "OutputType")?)?;
+        }
+        ReadMatrixControl::Range => options.range = Some(parse_range(&value)?),
+        ReadMatrixControl::Encoding => {
+            let encoding = value_to_string_scalar(&value, "Encoding")?;
+            validate_encoding_label(&encoding)?;
+            options.encoding = Cow::Owned(encoding);
+        }
+        ReadMatrixControl::Like => options.set_like(value)?,
+        ReadMatrixControl::TreatAsMissing | ReadMatrixControl::Unknown => {}
     }
-    if name.eq_ignore_ascii_case("ThousandsSeparator") {
-        let sep = parse_separator_char(&effective_value, "ThousandsSeparator")?;
-        options.thousands_separator = Some(sep);
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("EmptyValue") {
-        let numeric = value_to_numeric_scalar(&effective_value, "EmptyValue")?;
-        options.empty_value = Some(numeric);
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("OutputType") {
-        let text = value_to_string_scalar(&effective_value, "OutputType")?;
-        options.set_output_type(&text)?;
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("Range") {
-        let range = parse_range(&effective_value)?;
-        options.range = Some(range);
-        return Ok(());
-    }
-    if name.eq_ignore_ascii_case("Encoding") {
-        let encoding = value_to_string_scalar(&effective_value, "Encoding")?;
-        validate_encoding_label(&encoding)?;
-        options.encoding = encoding;
-        return Ok(());
-    }
-    if is_like {
-        options.set_like(effective_value)?;
-        return Ok(());
-    }
-    // Unknown options are ignored for forward compatibility.
     Ok(())
+}
+
+fn preflight_host_options(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    let mut options = ReadMatrixOptions::default();
+    let mut index = 0;
+    if let Some(source) = args
+        .first()
+        .filter(|value| matches!(value, Value::Struct(_) | Value::Object(_)))
+    {
+        match source {
+            Value::Struct(structure) => {
+                for (name, value) in &structure.fields {
+                    preflight_host_option(&mut options, ReadMatrixControl::parse(name), value)?;
+                }
+            }
+            _ => {
+                let import = ImportOptions::decode(runtime, source)?.ok_or_else(|| {
+                    readmatrix_error_with(
+                        &READMATRIX_ERROR_ARG_CONFIG,
+                        "readmatrix: expected tabular import options",
+                    )
+                })?;
+                options.preflight_import_options(&import)?;
+            }
+        }
+        index = 1;
+    }
+    while index < args.len() {
+        if index + 1 >= args.len() {
+            return Err(readmatrix_error_with(
+                &READMATRIX_ERROR_ARG_CONFIG,
+                "readmatrix: name/value inputs must appear in pairs",
+            ));
+        }
+        if !matches!(args[index], Value::GpuTensor(_)) {
+            let name = option_name_from_value(&args[index])?;
+            preflight_host_option(
+                &mut options,
+                ReadMatrixControl::parse(&name),
+                &args[index + 1],
+            )?;
+        }
+        index += 2;
+    }
+    options.validate()
+}
+
+fn preflight_host_option(
+    options: &mut ReadMatrixOptions,
+    control: ReadMatrixControl,
+    value: &Value,
+) -> BuiltinResult<()> {
+    if control == ReadMatrixControl::TreatAsMissing {
+        return validate_host_missing_tokens(value);
+    }
+    if !matches!(value, Value::GpuTensor(_)) {
+        apply_decoded_control(options, control, value.clone())?;
+    }
+    Ok(())
+}
+
+fn validate_host_missing_tokens(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::GpuTensor(_) | Value::String(_) | Value::Num(_) | Value::Int(_) => Ok(()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(()),
+        Value::StringArray(_) => Ok(()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => Ok(()),
+        Value::Cell(cell) => {
+            for item in cell.data() {
+                validate_host_missing_tokens(item)?;
+            }
+            Ok(())
+        }
+        _ => Err(readmatrix_error_with(
+            &READMATRIX_ERROR_OPTION_VALUE,
+            "readmatrix: TreatAsMissing values must be strings or numeric scalars",
+        )),
+    }
 }
 
 fn option_name_from_value(value: &Value) -> BuiltinResult<String> {
@@ -621,24 +487,19 @@ fn parse_separator_char(value: &Value, option_name: &str) -> BuiltinResult<char>
 }
 
 fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Ok(sa.data[0].clone())
-            } else {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: {context} must be a scalar string array"),
-                ))
-            }
-        }
-        _ => Err(readmatrix_error_with(
-            &READMATRIX_ERROR_OPTION_VALUE,
-            format!("readmatrix: expected {context} as a string scalar or character vector"),
-        )),
+    if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
+        return Ok(text);
     }
+    if matches!(value, Value::StringArray(_)) {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_OPTION_VALUE,
+            format!("readmatrix: {context} must be a scalar string array"),
+        ));
+    }
+    Err(readmatrix_error_with(
+        &READMATRIX_ERROR_OPTION_VALUE,
+        format!("readmatrix: expected {context} as a string scalar or character vector"),
+    ))
 }
 
 fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {
@@ -718,9 +579,23 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
     let mut stack = vec![value.clone()];
     while let Some(value) = stack.pop() {
         match value {
-            Value::String(s) => out.push(s),
-            Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect()),
-            Value::StringArray(sa) => out.extend(sa.data),
+            Value::String(runmat_value::StringElement::Text(s)) => {
+                out.push(s.into_string_unbounded())
+            }
+            Value::CharArray(ca) if ca.rows == 1 => out.push(
+                crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                    readmatrix_error_with(
+                        &READMATRIX_ERROR_OPTION_VALUE,
+                        "readmatrix: TreatAsMissing contains malformed UTF-16 text",
+                    )
+                })?,
+            ),
+            Value::StringArray(sa) if sa.data().iter().all(|text| !text.is_missing()) => out
+                .extend(
+                    sa.data()
+                        .iter()
+                        .map(|text| text.as_str().expect("checked nonmissing string").to_owned()),
+                ),
             Value::Num(n) => out.push(format_numeric_token(n)),
             Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {
@@ -739,7 +614,7 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
                 }
             }
             Value::Cell(cell) => {
-                for handle in &cell.data {
+                for handle in cell.data() {
                     let inner = handle;
                     let gathered = gather_if_needed_async(inner)
                         .await
@@ -768,34 +643,101 @@ fn format_numeric_token(value: f64) -> String {
 
 #[derive(Clone)]
 struct ReadMatrixOptions {
+    variable_options: Vec<VariableImportOptions>,
+    variable_source_origin: Option<usize>,
     delimiter: Option<Delimiter>,
     num_header_lines: usize,
     decimal_separator: char,
     thousands_separator: Option<char>,
-    treat_as_missing: HashSet<String>,
+    treat_as_missing: BTreeSet<String>,
     empty_value: Option<NumericScalar>,
     range: Option<RangeSpec>,
     output_template: OutputTemplate,
-    encoding: String,
+    output_type_seen: bool,
+    encoding: Cow<'static, str>,
 }
 
 impl Default for ReadMatrixOptions {
     fn default() -> Self {
         Self {
+            variable_options: Vec::new(),
+            variable_source_origin: None,
             delimiter: None,
             num_header_lines: 0,
             decimal_separator: '.',
             thousands_separator: None,
-            treat_as_missing: HashSet::new(),
+            treat_as_missing: BTreeSet::new(),
             empty_value: None,
             range: None,
             output_template: OutputTemplate::Numeric(NumericDType::F64),
-            encoding: "utf-8".to_string(),
+            output_type_seen: false,
+            encoding: Cow::Borrowed("utf-8"),
         }
     }
 }
 
 impl ReadMatrixOptions {
+    fn preflight_import_options(&mut self, import: &ImportOptions) -> BuiltinResult<()> {
+        if import.source() != super::import_options::ImportSource::DelimitedText {
+            return Err(readmatrix_error_with(
+                &READMATRIX_ERROR_ARG_CONFIG,
+                "readmatrix: spreadsheet import options require a spreadsheet reader",
+            ));
+        }
+        for variable in import.variables() {
+            if !variable.type_name.eq_ignore_ascii_case("auto")
+                && ReadMatrixOutputClass::parse(&variable.type_name).is_none()
+            {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    format!("readmatrix: variable '{}' is not numeric", variable.name),
+                ));
+            }
+            if variable.input_format.is_some() {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    "readmatrix: InputFormat requires a datetime table variable",
+                ));
+            }
+            variable.numeric_fill()?;
+        }
+        self.variable_options = import.variables().to_vec();
+        self.variable_source_origin = import.source_origin();
+        for (name, value) in &import.base().fields {
+            let control = ReadMatrixControl::parse(name);
+            if control != ReadMatrixControl::Unknown {
+                preflight_host_option(self, control, value)?;
+            }
+        }
+        self.validate()
+    }
+
+    async fn apply_import_options(&mut self, import: &ImportOptions) -> BuiltinResult<()> {
+        self.preflight_import_options(import)?;
+        for (name, value) in &import.base().fields {
+            let control = ReadMatrixControl::parse(name);
+            if control != ReadMatrixControl::Unknown {
+                apply_option(self, name, value).await?;
+            }
+        }
+        Ok(())
+    }
+
+    fn variable(&self, column: MatrixFieldColumn) -> Option<&VariableImportOptions> {
+        column.selected_index()?;
+        let selected_width = self
+            .range
+            .as_ref()
+            .and_then(|range| range.end_col?.checked_sub(range.start_col)?.checked_add(1));
+        let projection = super::import_options::ImportColumnProjection::new(
+            self.variable_source_origin,
+            self.range.as_ref().map_or(0, |range| range.start_col),
+        )
+        .with_selected_width(self.variable_options.len(), selected_width);
+        self.variable_options
+            .get(projection.metadata_index_for_source(column.source_index())?)
+    }
+
     fn add_missing_token(&mut self, token: &str) {
         let normalized = normalize_missing_token(token);
         self.treat_as_missing.insert(normalized);
@@ -809,12 +751,45 @@ impl ReadMatrixOptions {
         self.treat_as_missing.contains(&norm)
     }
 
+    fn is_missing_token_for(&self, token: &str, column: MatrixFieldColumn) -> bool {
+        self.is_missing_token(token)
+            || self
+                .variable(column)
+                .is_some_and(|variable| variable.is_missing(token))
+    }
+
     fn empty_value(&self) -> NumericScalar {
         self.empty_value.unwrap_or(NumericScalar::F64(f64::NAN))
     }
 
     fn empty_value_f64(&self) -> f64 {
         self.empty_value().materialize_f64()
+    }
+
+    fn empty_value_for(&self, column: MatrixFieldColumn) -> BuiltinResult<NumericScalar> {
+        match self.variable(column) {
+            Some(variable) => {
+                if variable.empty_field_rule == super::import_options::EmptyFieldRule::Error {
+                    return Err(readmatrix_error_with(
+                        &READMATRIX_ERROR_OPTION_VALUE,
+                        format!("readmatrix: empty field in variable '{}'", variable.name),
+                    ));
+                }
+                Ok(variable
+                    .numeric_fill()?
+                    .unwrap_or_else(|| self.empty_value()))
+            }
+            None => Ok(self.empty_value()),
+        }
+    }
+
+    fn missing_value_for(&self, column: MatrixFieldColumn) -> BuiltinResult<NumericScalar> {
+        match self.variable(column) {
+            Some(variable) => Ok(variable
+                .numeric_fill()?
+                .unwrap_or(NumericScalar::F64(f64::NAN))),
+            None => Ok(NumericScalar::F64(f64::NAN)),
+        }
     }
 
     fn validate(&self) -> BuiltinResult<()> {
@@ -829,6 +804,21 @@ impl ReadMatrixOptions {
                 ));
             }
         }
+        for variable in &self.variable_options {
+            let decimal = variable.decimal_separator.unwrap_or(self.decimal_separator);
+            let thousands = variable
+                .thousands_separator
+                .unwrap_or(self.thousands_separator);
+            if thousands == Some(decimal) {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!(
+                        "readmatrix: numeric separators coincide for variable '{}'",
+                        variable.name
+                    ),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -839,29 +829,28 @@ impl ReadMatrixOptions {
                 "readmatrix: cannot combine 'Like' with OutputType",
             ));
         }
-        if spec.eq_ignore_ascii_case("logical") {
-            self.output_template = OutputTemplate::Logical;
-            return Ok(());
-        }
-        let dtype = match spec.to_ascii_lowercase().as_str() {
-            "double" => NumericDType::F64,
-            "single" => NumericDType::F32,
-            "int8" => NumericDType::I8,
-            "int16" => NumericDType::I16,
-            "int32" => NumericDType::I32,
-            "int64" => NumericDType::I64,
-            "uint8" => NumericDType::U8,
-            "uint16" => NumericDType::U16,
-            "uint32" => NumericDType::U32,
-            "uint64" => NumericDType::U64,
-            _ => {
-                return Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OUTPUT_TYPE,
-                    format!("readmatrix: unsupported OutputType '{}'", spec),
-                ));
-            }
+        let kind = ReadMatrixOutputClass::parse(spec).ok_or_else(|| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_OUTPUT_TYPE,
+                format!("readmatrix: unsupported OutputType '{}'", spec),
+            )
+        })?;
+        self.output_template = match kind {
+            ReadMatrixOutputClass::Logical => OutputTemplate::Logical,
+            ReadMatrixOutputClass::Numeric(class) => OutputTemplate::Numeric(match class {
+                runmat_types::NumericClass::Double => NumericDType::F64,
+                runmat_types::NumericClass::Single => NumericDType::F32,
+                runmat_types::NumericClass::Int8 => NumericDType::I8,
+                runmat_types::NumericClass::Int16 => NumericDType::I16,
+                runmat_types::NumericClass::Int32 => NumericDType::I32,
+                runmat_types::NumericClass::Int64 => NumericDType::I64,
+                runmat_types::NumericClass::UInt8 => NumericDType::U8,
+                runmat_types::NumericClass::UInt16 => NumericDType::U16,
+                runmat_types::NumericClass::UInt32 => NumericDType::U32,
+                runmat_types::NumericClass::UInt64 => NumericDType::U64,
+            }),
         };
-        self.output_template = OutputTemplate::Numeric(dtype);
+        self.output_type_seen = true;
         Ok(())
     }
 
@@ -872,10 +861,12 @@ impl ReadMatrixOptions {
                 "readmatrix: multiple 'Like' specifications are not supported",
             ));
         }
-        if !matches!(
-            self.output_template,
-            OutputTemplate::Numeric(NumericDType::F64)
-        ) {
+        if self.output_type_seen
+            || !matches!(
+                self.output_template,
+                OutputTemplate::Numeric(NumericDType::F64)
+            )
+        {
             return Err(readmatrix_error_with(
                 &READMATRIX_ERROR_OUTPUT_TYPE,
                 "readmatrix: cannot combine 'Like' with OutputType overrides",
@@ -886,7 +877,7 @@ impl ReadMatrixOptions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 enum Delimiter {
     Char(char),
     String(String),
@@ -900,1097 +891,45 @@ enum OutputTemplate {
     Like(Value),
 }
 
-#[derive(Clone)]
-struct RangeSpec {
-    start_row: usize,
-    start_col: usize,
-    end_row: Option<usize>,
-    end_col: Option<usize>,
-}
+mod admission;
+mod column;
+mod range;
+use column::MatrixFieldColumn;
+#[cfg(test)]
+use range::parse_range_numeric;
+use range::{apply_range, parse_range, RangeSpec};
 
-impl RangeSpec {
-    fn validate(&self) -> BuiltinResult<()> {
-        if let Some(end_row) = self.end_row {
-            if end_row < self.start_row {
-                return Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_RANGE,
-                    "readmatrix: Range end row must be >= start row",
-                ));
-            }
-        }
-        if let Some(end_col) = self.end_col {
-            if end_col < self.start_col {
-                return Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_RANGE,
-                    "readmatrix: Range end column must be >= start column",
-                ));
-            }
-        }
-        Ok(())
-    }
-}
+mod output;
+use output::finalize_output;
+#[cfg(test)]
+use output::{finalize_like, tensor_to_gpu};
 
-fn normalize_missing_token(token: &str) -> String {
-    token.trim().to_ascii_lowercase()
-}
-
-fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
-    match value {
-        Value::String(s) => parse_range_string(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            parse_range_string(&text)
-        }
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                parse_range_string(&sa.data[0])
-            } else {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_RANGE,
-                    "readmatrix: Range string array inputs must be scalar",
-                ))
-            }
-        }
-        Value::Tensor(_) => parse_range_numeric(value),
-        _ => Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range must be provided as a string or numeric vector",
-        )),
-    }
-}
-
-fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range string cannot be empty",
-        ));
-    }
-    let parts: Vec<&str> = trimmed.split(':').collect();
-    if parts.len() > 2 {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            format!("readmatrix: invalid Range specification '{}'", text),
-        ));
-    }
-    let start = parse_cell_reference(parts[0])?;
-    if start.col.is_none() {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range must specify a starting column",
-        ));
-    }
-    let end_ref = if parts.len() == 2 {
-        Some(parse_cell_reference(parts[1])?)
-    } else {
-        None
-    };
-    if let Some(ref end) = end_ref {
-        if end.col.is_none() {
-            return Err(readmatrix_error_with(
-                &READMATRIX_ERROR_RANGE,
-                "readmatrix: Range end must include a column reference",
-            ));
-        }
-    }
-    let start_row = start.row.unwrap_or(0);
-    let start_col = start.col.unwrap();
-    let end_row = end_ref.as_ref().and_then(|r| r.row);
-    let end_col = end_ref.as_ref().and_then(|r| r.col);
-    Ok(RangeSpec {
-        start_row,
-        start_col,
-        end_row,
-        end_col,
-    })
-}
-
-fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
-    let elements = match value {
-        Value::Tensor(t) => tensor::tensor_values_f64(t),
-        _ => {
-            return Err(readmatrix_error_with(
-                &READMATRIX_ERROR_RANGE,
-                "readmatrix: numeric Range must be provided as a vector with 2 or 4 elements",
-            ))
-        }
-    };
-    if elements.len() != 2 && elements.len() != 4 {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: numeric Range must contain exactly 2 or 4 elements",
-        ));
-    }
-    let mut indices = Vec::with_capacity(elements.len());
-    for (idx, value) in elements.iter().enumerate() {
-        let converted = positive_index(*value, idx)?;
-        indices.push(converted);
-    }
-    let start_row = indices[0];
-    let start_col = indices[1];
-    let (end_row, end_col) = if indices.len() == 4 {
-        (Some(indices[2]), Some(indices[3]))
-    } else {
-        (None, None)
-    };
-    Ok(RangeSpec {
-        start_row,
-        start_col,
-        end_row,
-        end_col,
-    })
-}
-
-fn positive_index(value: f64, position: usize) -> BuiltinResult<usize> {
-    if !value.is_finite() {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range indices must be finite",
-        ));
-    }
-    if value < 1.0 {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range indices must be >= 1",
-        ));
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range indices must be integers",
-        ));
-    }
-    let zero_based = (rounded as i64) - 1;
-    if zero_based < 0 {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range indices must be >= 1",
-        ));
-    }
-    usize::try_from(zero_based).map_err(|_| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            format!(
-                "readmatrix: Range index {} is too large to fit in usize",
-                position + 1
-            ),
-        )
-    })
-}
-
-#[derive(Clone, Copy)]
-struct CellReference {
-    row: Option<usize>,
-    col: Option<usize>,
-}
-
-fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
-    let mut letters = String::new();
-    let mut digits = String::new();
-    for ch in token.trim().chars() {
-        if ch == '$' {
-            continue;
-        }
-        if ch.is_ascii_alphabetic() {
-            letters.push(ch.to_ascii_uppercase());
-        } else if ch.is_ascii_digit() {
-            digits.push(ch);
-        } else {
-            return Err(readmatrix_error_with(
-                &READMATRIX_ERROR_RANGE,
-                format!("readmatrix: invalid Range component '{}'", token),
-            ));
-        }
-    }
-    if letters.is_empty() && digits.is_empty() {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range references cannot be empty",
-        ));
-    }
-    let col = if letters.is_empty() {
-        None
-    } else {
-        Some(column_index_from_letters(&letters)?)
-    };
-    let row = if digits.is_empty() {
-        None
-    } else {
-        let parsed = digits.parse::<usize>().map_err(|_| {
-            readmatrix_error_with(
-                &READMATRIX_ERROR_RANGE,
-                format!(
-                    "readmatrix: invalid row index '{}' in Range component '{}'",
-                    digits, token
-                ),
-            )
-        })?;
-        if parsed == 0 {
-            return Err(readmatrix_error_with(
-                &READMATRIX_ERROR_RANGE,
-                "readmatrix: Range rows must be >= 1",
-            ));
-        }
-        Some(parsed - 1)
-    };
-    Ok(CellReference { row, col })
-}
-
-fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
-    let mut value: usize = 0;
-    for ch in letters.chars() {
-        if !ch.is_ascii_uppercase() {
-            return Err(readmatrix_error_with(
-                &READMATRIX_ERROR_RANGE,
-                format!(
-                    "readmatrix: invalid column designator '{}' in Range",
-                    letters
-                ),
-            ));
-        }
-        let digit = (ch as u8 - b'A' + 1) as usize;
-        value = value
-            .checked_mul(26)
-            .and_then(|v| v.checked_add(digit))
-            .ok_or_else(|| {
-                readmatrix_error_with(
-                    &READMATRIX_ERROR_RANGE,
-                    "readmatrix: Range column index overflowed",
-                )
-            })?;
-    }
-    value.checked_sub(1).ok_or_else(|| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_RANGE,
-            "readmatrix: Range column index underflowed",
-        )
-    })
-}
-
-fn apply_range<T: Clone>(
-    rows: &[Vec<T>],
-    max_cols: usize,
-    range: &RangeSpec,
-    default_fill: T,
-) -> (Vec<Vec<T>>, usize) {
-    if rows.is_empty() || max_cols == 0 {
-        return (Vec::new(), 0);
-    }
-    if range.start_row >= rows.len() || range.start_col >= max_cols {
-        return (Vec::new(), 0);
-    }
-    let last_row = rows.len().saturating_sub(1);
-    let mut end_row = range.end_row.unwrap_or(last_row);
-    if end_row > last_row {
-        end_row = last_row;
-    }
-    if end_row < range.start_row {
-        return (Vec::new(), 0);
-    }
-
-    let last_col = max_cols.saturating_sub(1);
-    let mut end_col = range.end_col.unwrap_or(last_col);
-    if end_col > last_col {
-        end_col = last_col;
-    }
-    if end_col < range.start_col {
-        return (Vec::new(), 0);
-    }
-
-    let mut subset = Vec::new();
-    let mut subset_max_cols = 0usize;
-    for row_idx in range.start_row..=end_row {
-        if row_idx >= rows.len() {
-            break;
-        }
-        let row = &rows[row_idx];
-        let mut extracted = Vec::with_capacity(end_col - range.start_col + 1);
-        for col_idx in range.start_col..=end_col {
-            if col_idx >= max_cols {
-                break;
-            }
-            let value = row
-                .get(col_idx)
-                .cloned()
-                .unwrap_or_else(|| default_fill.clone());
-            extracted.push(value);
-        }
-        subset_max_cols = subset_max_cols.max(extracted.len());
-        subset.push(extracted);
-    }
-
-    if subset_max_cols == 0 {
-        (Vec::new(), 0)
-    } else {
-        (subset, subset_max_cols)
-    }
-}
-
-fn finalize_output(tensor: Tensor, options: &ReadMatrixOptions) -> BuiltinResult<Value> {
-    match &options.output_template {
-        OutputTemplate::Numeric(dtype) => {
-            let tensor = tensor::coerce_tensor_dtype(tensor, *dtype);
-            Ok(Value::Tensor(tensor))
-        }
-        OutputTemplate::Logical => tensor_to_logical(tensor),
-        OutputTemplate::Like(proto) => finalize_like(tensor, proto),
-    }
-}
-
-fn tensor_to_logical(tensor: Tensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let storage = tensor.into_numeric_storage().map_err(|error| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_TENSOR_BUILD,
-            format!("readmatrix: {error}"),
-        )
-    })?;
-    let NumericStorage::F64(values) = storage else {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_TENSOR_BUILD,
-            "readmatrix: parsed logical source was not double",
-        ));
-    };
-    let data = values
-        .into_iter()
-        .map(|value| if value == 0.0 { 0 } else { 1 })
-        .collect();
-    let logical = LogicalArray::new(data, shape).map_err(|e| {
-        readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
-    })?;
-    Ok(Value::LogicalArray(logical))
-}
-
-fn finalize_like(tensor: Tensor, proto: &Value) -> BuiltinResult<Value> {
-    match proto {
-        Value::LogicalArray(_) | Value::Bool(_) => tensor_to_logical(tensor),
-        Value::GpuTensor(handle) => tensor_to_gpu(tensor, handle),
-        Value::Tensor(prototype) => Ok(Value::Tensor(tensor::coerce_tensor_dtype(
-            tensor,
-            prototype.numeric_dtype(),
-        ))),
-        Value::Int(value) => {
-            tensor_to_integer_like(tensor, &IntegerStorage::from_scalar(value.clone()))
-        }
-        Value::Num(_) => Ok(Value::Tensor(tensor)),
-        Value::ComplexTensor(_) | Value::Complex(_, _) => Ok(Value::Tensor(tensor)),
-        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => Ok(Value::Tensor(tensor)),
-        Value::Cell(_) => Ok(Value::Tensor(tensor)),
-        _ => Ok(Value::Tensor(tensor)),
-    }
-}
-
-fn tensor_to_integer_like(tensor: Tensor, prototype: &IntegerStorage) -> BuiltinResult<Value> {
-    if tensor.numeric_dtype() == prototype.numeric_dtype() {
-        return Ok(Value::Tensor(tensor));
-    }
-    let shape = tensor.shape.clone();
-    let storage = tensor.into_numeric_storage().map_err(|e| {
-        readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
-    })?;
-    let NumericStorage::F64(values) = storage else {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_TENSOR_BUILD,
-            "readmatrix: parsed integer-like source was not double",
-        ));
-    };
-    let tensor =
-        crate::builtins::common::tensor::integer_tensor_from_f64_like(prototype, values, &shape)
-            .map_err(|e| {
-                readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
-            })?;
-    Ok(Value::Tensor(tensor))
-}
-
-fn tensor_to_gpu(
-    tensor: Tensor,
-    prototype: &runmat_accelerate_api::GpuTensorHandle,
-) -> BuiltinResult<Value> {
-    use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
-
-    let owner = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_OUTPUT_TYPE,
-            "readmatrix: no acceleration provider owns the Like prototype",
-        )
-    })?;
-    let expected_integer = runmat_accelerate_api::handle_integer_type(prototype);
-    let expected_logical = runmat_accelerate_api::handle_is_logical(prototype);
-    let expected_precision = if expected_integer.is_some() {
-        None
-    } else {
-        runmat_accelerate_api::handle_precision(prototype)
-    };
-    let target_dtype = if let Some(integer) = expected_integer {
-        integer_element_dtype(integer)
-    } else {
-        match expected_precision {
-            Some(ProviderPrecision::F32) => NumericDType::F32,
-            Some(ProviderPrecision::F64) => NumericDType::F64,
-            None => {
-                return Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OUTPUT_TYPE,
-                    "readmatrix: the Like prototype is missing numeric class metadata",
-                ))
-            }
-        }
-    };
-    let tensor = if tensor.numeric_dtype() == target_dtype {
-        tensor
-    } else {
-        tensor::coerce_tensor_dtype(tensor, target_dtype)
-    };
-    let expected_shape = tensor.shape.clone();
-    let mut uploaded = gpu_helpers::upload_tensor(owner, &tensor).map_err(|error| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_OUTPUT_TYPE,
-            format!("readmatrix: failed to restore Like output to its owning provider: {error}"),
-        )
-    })?;
-    if expected_logical {
-        runmat_accelerate_api::set_handle_logical(&uploaded, true);
-    }
-    runmat_accelerate_api::set_handle_provenance(
-        &mut uploaded,
-        runmat_accelerate_api::GpuHandleProvenance::Explicit,
-    );
-    let valid = uploaded.buffer_id != prototype.buffer_id
-        && uploaded.device_id == prototype.device_id
-        && uploaded.shape == expected_shape
-        && gpu_helpers::exact_provider_for_handle(&uploaded)
-            .is_some_and(|uploaded_owner| std::ptr::eq(uploaded_owner, owner))
-        && runmat_accelerate_api::handle_storage(&uploaded) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(&uploaded) == expected_integer
-        && runmat_accelerate_api::handle_precision(&uploaded) == expected_precision
-        && runmat_accelerate_api::handle_is_logical(&uploaded) == expected_logical;
-    if !valid {
-        let _ = owner.free(&uploaded);
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_OUTPUT_TYPE,
-            "readmatrix: the Like provider returned an invalid class, shape, owner, or storage representation",
-        ));
-    }
-    Ok(Value::GpuTensor(uploaded))
-}
-
-fn integer_element_dtype(integer: runmat_accelerate_api::IntegerElementType) -> NumericDType {
-    use runmat_accelerate_api::IntegerElementType;
-    match integer {
-        IntegerElementType::I8 => NumericDType::I8,
-        IntegerElementType::I16 => NumericDType::I16,
-        IntegerElementType::I32 => NumericDType::I32,
-        IntegerElementType::I64 => NumericDType::I64,
-        IntegerElementType::U8 => NumericDType::U8,
-        IntegerElementType::U16 => NumericDType::U16,
-        IntegerElementType::U32 => NumericDType::U32,
-        IntegerElementType::U64 => NumericDType::U64,
-    }
-}
-
-async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> BuiltinResult<Tensor> {
-    let bytes = read_file_bytes(path).await?;
-    let text = strip_utf8_bom(decode_text_bytes(&bytes, &options.encoding)?);
-    let mut data_lines: Vec<(usize, String)> = Vec::new();
-    for (idx, line) in text.lines().enumerate() {
-        let line_number = idx + 1;
-        let cleaned = line.trim_end_matches('\r');
-        if line_number <= options.num_header_lines {
-            continue;
-        }
-        if cleaned.trim().is_empty() {
-            continue;
-        }
-        data_lines.push((line_number, cleaned.to_string()));
-    }
-
-    if data_lines.is_empty() {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| {
-            readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
-        });
-    }
-
-    if let Some((_, first_line)) = data_lines.first_mut() {
-        if first_line.starts_with('\u{FEFF}') {
-            let stripped = first_line.trim_start_matches('\u{FEFF}').to_string();
-            *first_line = stripped;
-        }
-    }
-
-    let delimiter = options
-        .delimiter
-        .clone()
-        .or_else(|| detect_delimiter(&data_lines))
-        .unwrap_or(Delimiter::Whitespace);
-    let integer_dtype = integer_output_dtype(&options.output_template);
-
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut max_cols = 0usize;
-
-    for (line_number, text) in &data_lines {
-        let fields = split_fields(text, &delimiter);
-        if fields.is_empty() {
-            continue;
-        }
-        let mut row = Vec::with_capacity(fields.len());
-        for (index, field) in fields.iter().enumerate() {
-            if let Some(dtype) = integer_dtype {
-                parse_integer_numeric_token(field, options, dtype, *line_number, index + 1)?;
-            } else {
-                validate_numeric_token(field, options, *line_number, index + 1)?;
-            }
-            row.push(field.clone());
-        }
-        if row.len() > max_cols {
-            max_cols = row.len();
-        }
-        rows.push(row);
-    }
-
-    if rows.is_empty() {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| {
-            readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
-        });
-    }
-
-    if let Some(range) = &options.range {
-        let (subset_rows, subset_cols) = apply_range(&rows, max_cols, range, String::new());
-        rows = subset_rows;
-        max_cols = subset_cols;
-    }
-
-    if rows.is_empty() || max_cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| {
-            readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
-        });
-    }
-    let row_count = rows.len();
-    if let Some(dtype) = integer_dtype {
-        let mut storage = NumericStorage::zeros(dtype, row_count * max_cols);
-        for (row_index, row) in rows.iter().enumerate() {
-            for col_index in 0..max_cols {
-                let token = row.get(col_index).map(String::as_str).unwrap_or("");
-                let value = parse_integer_numeric_token(
-                    token,
-                    options,
-                    dtype,
-                    row_index + 1,
-                    col_index + 1,
-                )?;
-                storage
-                    .set_value(col_index * row_count + row_index, value)
-                    .map_err(|error| {
-                        readmatrix_error_with(
-                            &READMATRIX_ERROR_TENSOR_BUILD,
-                            format!("readmatrix: {error}"),
-                        )
-                    })?;
-            }
-        }
-        return Tensor::from_numeric_storage(storage, vec![row_count, max_cols]).map_err(|error| {
-            readmatrix_error_with(
-                &READMATRIX_ERROR_TENSOR_BUILD,
-                format!("readmatrix: {error}"),
-            )
-        });
-    }
-
-    let default_fill = options.empty_value_f64();
-    let mut data = vec![default_fill; row_count * max_cols];
-    for (row_index, row) in rows.iter().enumerate() {
-        for col_index in 0..max_cols {
-            let token = row.get(col_index).map(String::as_str).unwrap_or("");
-            data[col_index * row_count + row_index] =
-                parse_numeric_token(token, options, row_index + 1, col_index + 1)?;
-        }
-    }
-    Tensor::new(data, vec![row_count, max_cols]).map_err(|error| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_TENSOR_BUILD,
-            format!("readmatrix: {error}"),
-        )
-    })
-}
-
-async fn read_file_bytes(path: &Path) -> BuiltinResult<Vec<u8>> {
-    let file = File::open_async(path).await.map_err(|err| {
-        readmatrix_error_with_source(
-            &READMATRIX_ERROR_IO_OPEN,
-            format!("readmatrix: unable to read '{}': {err}", path.display()),
-            err,
-        )
-    })?;
-    let mut limited = file.take(MAX_READMATRIX_TEXT_BYTES + 1);
-    let mut bytes = Vec::new();
-    limited.read_to_end(&mut bytes).map_err(|err| {
-        readmatrix_error_with_source(
-            &READMATRIX_ERROR_IO_READ,
-            format!("readmatrix: error reading '{}': {err}", path.display()),
-            err,
-        )
-    })?;
-    if bytes.len() as u64 > MAX_READMATRIX_TEXT_BYTES {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_IO_READ,
-            format!(
-                "readmatrix: file exceeds maximum supported text size of {MAX_READMATRIX_TEXT_BYTES} bytes"
-            ),
-        ));
-    }
-    Ok(bytes)
-}
-
-fn validate_encoding_label(label: &str) -> BuiltinResult<()> {
-    let label = label.trim();
-    if label.eq_ignore_ascii_case("auto") || label.eq_ignore_ascii_case("unicode") {
-        return Ok(());
-    }
-    decode_bytes(&[], normalized_encoding_label(label), BUILTIN_NAME)
-        .map(|_| ())
-        .map_err(|_| {
-            readmatrix_error_with(
-                &READMATRIX_ERROR_OPTION_VALUE,
-                format!("readmatrix: unsupported Encoding '{label}'"),
-            )
-        })
-}
-
-fn decode_text_bytes(bytes: &[u8], encoding: &str) -> BuiltinResult<String> {
-    let label = encoding.trim();
-    let normalized = normalized_encoding_label(label);
-    let chars = if normalized.eq_ignore_ascii_case("auto") {
-        if let Some((encoding, bom_len)) = Encoding::for_bom(bytes) {
-            decode_bom_bytes(bytes, encoding, bom_len)
-        } else {
-            decode_bytes(bytes, "utf-8", BUILTIN_NAME)
-        }
-    } else {
-        decode_bytes(bytes, normalized, BUILTIN_NAME)
-    }
-    .map_err(|err| readmatrix_error_with(&READMATRIX_ERROR_IO_READ, err.message()))?;
-    Ok(chars.into_iter().collect())
-}
-
-fn decode_bom_bytes(
-    bytes: &[u8],
-    encoding: &'static Encoding,
-    bom_len: usize,
-) -> BuiltinResult<Vec<char>> {
-    let (decoded, had_errors) = encoding.decode_without_bom_handling(&bytes[bom_len..]);
-    if had_errors {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_IO_READ,
-            "readmatrix: file contains bytes that are invalid for the detected Encoding",
-        ));
-    }
-    Ok(decoded.chars().collect())
-}
-
-fn normalized_encoding_label(label: &str) -> &str {
-    if label.eq_ignore_ascii_case("unicode") {
-        "utf-8"
-    } else if label.eq_ignore_ascii_case("default") || label.eq_ignore_ascii_case("native") {
-        "system"
-    } else {
-        label
-    }
-}
-
-fn strip_utf8_bom(text: String) -> String {
-    text.strip_prefix('\u{FEFF}')
-        .map(ToString::to_string)
-        .unwrap_or(text)
-}
-
-fn detect_delimiter(lines: &[(usize, String)]) -> Option<Delimiter> {
-    if lines.is_empty() {
-        return None;
-    }
-    let sample: Vec<&str> = lines
-        .iter()
-        .take(32)
-        .map(|(_, line)| line.as_str())
-        .collect();
-    let candidates = [',', '\t', ';', '|'];
-    let mut best: Option<(f64, Delimiter)> = None;
-
-    for candidate in candidates {
-        let mut counts = Vec::new();
-        for line in &sample {
-            if !line.contains(candidate) {
-                continue;
-            }
-            let fields = line.split(candidate).count();
-            if fields >= 2 {
-                counts.push(fields);
-            }
-        }
-        if counts.is_empty() {
-            continue;
-        }
-        let average = counts.iter().copied().sum::<usize>() as f64 / counts.len() as f64;
-        if average < 2.0 {
-            continue;
-        }
-        if best
-            .as_ref()
-            .map(|(best_avg, _)| average > *best_avg)
-            .unwrap_or(true)
-        {
-            best = Some((average, Delimiter::Char(candidate)));
-        }
-    }
-
-    if let Some((_, delimiter)) = best {
-        return Some(delimiter);
-    }
-
-    let mut whitespace_hits = 0usize;
-    for line in &sample {
-        if line.split_whitespace().count() > 1 {
-            whitespace_hits += 1;
-        }
-    }
-    if whitespace_hits > 0 {
-        Some(Delimiter::Whitespace)
-    } else {
-        None
-    }
-}
-
-fn split_fields(line: &str, delimiter: &Delimiter) -> Vec<String> {
-    match delimiter {
-        Delimiter::Char(ch) => split_with_char_delim(line, *ch),
-        Delimiter::String(pattern) => line.split(pattern).map(|s| s.to_string()).collect(),
-        Delimiter::Whitespace => line.split_whitespace().map(|s| s.to_string()).collect(),
-    }
-}
-
-fn split_with_char_delim(line: &str, delimiter: char) -> Vec<String> {
-    let mut fields = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' {
-            if in_quotes && chars.peek() == Some(&'"') {
-                current.push('"');
-                chars.next();
-            } else {
-                in_quotes = !in_quotes;
-            }
-            continue;
-        }
-        if ch == delimiter && !in_quotes {
-            fields.push(current.clone());
-            current.clear();
-        } else {
-            current.push(ch);
-        }
-    }
-    fields.push(current);
-    fields
-}
-
-fn parse_numeric_token(
-    token: &str,
-    options: &ReadMatrixOptions,
-    line_number: usize,
-    column_number: usize,
-) -> BuiltinResult<f64> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return Ok(options.empty_value_f64());
-    }
-    let unquoted = unquote(trimmed);
-    let inner = unquoted.trim();
-    if inner.is_empty() {
-        return Ok(options.empty_value_f64());
-    }
-    if options.is_missing_token(inner) {
-        return Ok(f64::NAN);
-    }
-    let normalized = normalize_numeric_token(inner, options);
-    if normalized.is_empty() {
-        return Ok(options.empty_value_f64());
-    }
-    let lower = normalized.to_ascii_lowercase();
-    if lower == "nan" {
-        return Ok(f64::NAN);
-    }
-    if matches!(lower.as_str(), "inf" | "+inf" | "infinity" | "+infinity") {
-        return Ok(f64::INFINITY);
-    }
-    if matches!(lower.as_str(), "-inf" | "-infinity") {
-        return Ok(f64::NEG_INFINITY);
-    }
-    normalized.parse::<f64>().map_err(|_| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_NON_NUMERIC_TOKEN,
-            format!(
-                "readmatrix: unable to parse numeric value '{}' on line {} column {}",
-                inner, line_number, column_number
-            ),
-        )
-    })
-}
-
-fn validate_numeric_token(
-    token: &str,
-    options: &ReadMatrixOptions,
-    line_number: usize,
-    column_number: usize,
-) -> BuiltinResult<()> {
-    parse_numeric_token(token, options, line_number, column_number).map(|_| ())
-}
-
-fn integer_output_dtype(template: &OutputTemplate) -> Option<NumericDType> {
-    let dtype = match template {
-        OutputTemplate::Numeric(dtype) => *dtype,
-        OutputTemplate::Like(Value::Tensor(tensor)) => tensor.numeric_dtype(),
-        OutputTemplate::Like(Value::Int(value)) => {
-            IntegerStorage::from_scalar(value.clone()).numeric_dtype()
-        }
-        OutputTemplate::Like(Value::GpuTensor(handle)) => {
-            integer_element_dtype(runmat_accelerate_api::handle_integer_type(handle)?)
-        }
-        OutputTemplate::Logical | OutputTemplate::Like(_) => return None,
-    };
-    matches!(
-        dtype,
-        NumericDType::I8
-            | NumericDType::I16
-            | NumericDType::I32
-            | NumericDType::I64
-            | NumericDType::U8
-            | NumericDType::U16
-            | NumericDType::U32
-            | NumericDType::U64
-    )
-    .then_some(dtype)
-}
-
-fn parse_integer_numeric_token(
-    token: &str,
-    options: &ReadMatrixOptions,
-    dtype: NumericDType,
-    line_number: usize,
-    column_number: usize,
-) -> BuiltinResult<NumericScalar> {
-    let trimmed = token.trim();
-    let unquoted = unquote(trimmed);
-    let inner = unquoted.trim();
-    if inner.is_empty() {
-        return Ok(integer_scalar_from_numeric(dtype, options.empty_value()));
-    }
-    if options.is_missing_token(inner) {
-        return Ok(integer_scalar_from_f64(dtype, f64::NAN));
-    }
-    let normalized = normalize_numeric_token(inner, options);
-    if normalized.is_empty() {
-        return Ok(integer_scalar_from_numeric(dtype, options.empty_value()));
-    }
-    let lower = normalized.to_ascii_lowercase();
-    if lower == "nan" {
-        return Ok(integer_scalar_from_f64(dtype, f64::NAN));
-    }
-    if matches!(lower.as_str(), "inf" | "+inf" | "infinity" | "+infinity") {
-        return Ok(integer_scalar_from_f64(dtype, f64::INFINITY));
-    }
-    if matches!(lower.as_str(), "-inf" | "-infinity") {
-        return Ok(integer_scalar_from_f64(dtype, f64::NEG_INFINITY));
-    }
-    let invalid = || {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_NON_NUMERIC_TOKEN,
-            format!(
-                "readmatrix: unable to parse numeric value '{}' on line {} column {}",
-                inner, line_number, column_number
-            ),
-        )
-    };
-    if normalized.chars().any(|ch| matches!(ch, '.' | 'e' | 'E')) {
-        return normalized
-            .parse::<f64>()
-            .map(|value| integer_scalar_from_f64(dtype, value))
-            .map_err(|_| invalid());
-    }
-    parse_decimal_integer_saturating(&normalized, dtype).ok_or_else(invalid)
-}
-
-fn parse_decimal_integer_saturating(text: &str, dtype: NumericDType) -> Option<NumericScalar> {
-    let (negative, digits) = match text.as_bytes().first() {
-        Some(b'-') => (true, &text[1..]),
-        Some(b'+') => (false, &text[1..]),
-        Some(_) => (false, text),
-        None => return None,
-    };
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let magnitude = digits.parse::<u128>().ok();
-    Some(if negative {
-        match magnitude {
-            Some(value) if value <= i128::MAX as u128 => {
-                integer_scalar_from_signed(dtype, -(value as i128))
-            }
-            _ => integer_scalar_from_signed(dtype, i128::MIN),
-        }
-    } else {
-        integer_scalar_from_unsigned(dtype, magnitude.unwrap_or(u128::MAX))
-    })
-}
-
-fn integer_scalar_from_numeric(dtype: NumericDType, value: NumericScalar) -> NumericScalar {
-    match value {
-        NumericScalar::F64(value) => integer_scalar_from_f64(dtype, value),
-        NumericScalar::F32(value) => integer_scalar_from_f64(dtype, f64::from(value)),
-        NumericScalar::I8(value) => integer_scalar_from_signed(dtype, i128::from(value)),
-        NumericScalar::I16(value) => integer_scalar_from_signed(dtype, i128::from(value)),
-        NumericScalar::I32(value) => integer_scalar_from_signed(dtype, i128::from(value)),
-        NumericScalar::I64(value) => integer_scalar_from_signed(dtype, i128::from(value)),
-        NumericScalar::U8(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
-        NumericScalar::U16(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
-        NumericScalar::U32(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
-        NumericScalar::U64(value) => integer_scalar_from_unsigned(dtype, u128::from(value)),
-    }
-}
-
-fn integer_scalar_from_signed(dtype: NumericDType, value: i128) -> NumericScalar {
-    match dtype {
-        NumericDType::I8 | NumericDType::I16 | NumericDType::I32 | NumericDType::I64 => {
-            integer_scalar_from_i128(dtype, value)
-        }
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::U64 => {
-            integer_scalar_from_u128(dtype, value.max(0) as u128)
-        }
-        NumericDType::F64 | NumericDType::F32 => {
-            unreachable!("integer conversion requested floating dtype")
-        }
-    }
-}
-
-fn integer_scalar_from_unsigned(dtype: NumericDType, value: u128) -> NumericScalar {
-    match dtype {
-        NumericDType::I8 | NumericDType::I16 | NumericDType::I32 | NumericDType::I64 => {
-            integer_scalar_from_i128(dtype, value.min(i128::MAX as u128) as i128)
-        }
-        NumericDType::U8 | NumericDType::U16 | NumericDType::U32 | NumericDType::U64 => {
-            integer_scalar_from_u128(dtype, value)
-        }
-        NumericDType::F64 | NumericDType::F32 => {
-            unreachable!("integer conversion requested floating dtype")
-        }
-    }
-}
-
-fn integer_scalar_from_i128(dtype: NumericDType, value: i128) -> NumericScalar {
-    match dtype {
-        NumericDType::I8 => NumericScalar::I8(value.clamp(i8::MIN as i128, i8::MAX as i128) as i8),
-        NumericDType::I16 => {
-            NumericScalar::I16(value.clamp(i16::MIN as i128, i16::MAX as i128) as i16)
-        }
-        NumericDType::I32 => {
-            NumericScalar::I32(value.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
-        }
-        NumericDType::I64 => {
-            NumericScalar::I64(value.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
-        }
-        _ => unreachable!("signed conversion requested non-signed dtype"),
-    }
-}
-
-fn integer_scalar_from_u128(dtype: NumericDType, value: u128) -> NumericScalar {
-    match dtype {
-        NumericDType::U8 => NumericScalar::U8(value.min(u8::MAX as u128) as u8),
-        NumericDType::U16 => NumericScalar::U16(value.min(u16::MAX as u128) as u16),
-        NumericDType::U32 => NumericScalar::U32(value.min(u32::MAX as u128) as u32),
-        NumericDType::U64 => NumericScalar::U64(value.min(u64::MAX as u128) as u64),
-        _ => unreachable!("unsigned conversion requested non-unsigned dtype"),
-    }
-}
-
-fn integer_scalar_from_f64(dtype: NumericDType, value: f64) -> NumericScalar {
-    if value.is_nan() {
-        return match dtype {
-            NumericDType::I8 => NumericScalar::I8(0),
-            NumericDType::I16 => NumericScalar::I16(0),
-            NumericDType::I32 => NumericScalar::I32(0),
-            NumericDType::I64 => NumericScalar::I64(0),
-            NumericDType::U8 => NumericScalar::U8(0),
-            NumericDType::U16 => NumericScalar::U16(0),
-            NumericDType::U32 => NumericScalar::U32(0),
-            NumericDType::U64 => NumericScalar::U64(0),
-            _ => unreachable!("integer conversion requested floating dtype"),
-        };
-    }
-    let rounded = value.round();
-    match dtype {
-        NumericDType::I8 => NumericScalar::I8(rounded.clamp(i8::MIN as f64, i8::MAX as f64) as i8),
-        NumericDType::I16 => {
-            NumericScalar::I16(rounded.clamp(i16::MIN as f64, i16::MAX as f64) as i16)
-        }
-        NumericDType::I32 => {
-            NumericScalar::I32(rounded.clamp(i32::MIN as f64, i32::MAX as f64) as i32)
-        }
-        NumericDType::I64 => {
-            NumericScalar::I64(rounded.clamp(i64::MIN as f64, i64::MAX as f64) as i64)
-        }
-        NumericDType::U8 => NumericScalar::U8(rounded.clamp(0.0, u8::MAX as f64) as u8),
-        NumericDType::U16 => NumericScalar::U16(rounded.clamp(0.0, u16::MAX as f64) as u16),
-        NumericDType::U32 => NumericScalar::U32(rounded.clamp(0.0, u32::MAX as f64) as u32),
-        NumericDType::U64 => NumericScalar::U64(rounded.clamp(0.0, u64::MAX as f64) as u64),
-        NumericDType::F64 | NumericDType::F32 => {
-            unreachable!("integer conversion requested floating dtype")
-        }
-    }
-}
-
-fn normalize_numeric_token(token: &str, options: &ReadMatrixOptions) -> String {
-    let mut text = token.to_string();
-    if let Some(thousands) = options.thousands_separator {
-        if thousands != options.decimal_separator {
-            text = text.chars().filter(|ch| *ch != thousands).collect();
-        }
-    }
-    if options.decimal_separator != '.' {
-        text = text.replace(options.decimal_separator, ".");
-    }
-    text
-}
-
-fn unquote(token: &str) -> &str {
-    if token.len() >= 2 {
-        let bytes = token.as_bytes();
-        if (bytes[0] == b'"' && bytes[token.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[token.len() - 1] == b'\'')
-        {
-            return &token[1..token.len() - 1];
-        }
-    }
-    token
-}
+mod reader;
+use range::normalize_missing_token;
+#[cfg(test)]
+use reader::parse_integer_numeric_token;
+use reader::read_numeric_matrix;
+use reader::validate_encoding_label;
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
-        Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
+        Value::String(runmat_value::StringElement::Text(s)) => normalize_path(s),
+        Value::CharArray(_) => {
+            match crate::builtins::common::validation::value_text_scalar_string(value) {
+                Some(text) => normalize_path(&text),
+                None => Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_FILENAME,
+                    "readmatrix: expected a 1-by-N character vector for the file name",
+                )),
+            }
         }
-        Value::CharArray(_) => Err(readmatrix_error_with(
-            &READMATRIX_ERROR_FILENAME,
-            "readmatrix: expected a 1-by-N character vector for the file name",
-        )),
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                normalize_path(&sa.data[0])
-            } else {
-                Err(readmatrix_error_with(
+        Value::StringArray(_) => {
+            match crate::builtins::common::validation::value_text_scalar_string(value) {
+                Some(text) => normalize_path(&text),
+                None => Err(readmatrix_error_with(
                     &READMATRIX_ERROR_FILENAME,
                     "readmatrix: string array inputs must be scalar",
-                ))
+                )),
             }
         }
         other => Err(readmatrix_error_with(
@@ -2010,822 +949,5 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_time::unix_timestamp_ms;
-    use std::fs;
-
-    use crate::builtins::common::test_support;
-    use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
-
-    fn unique_path(prefix: &str) -> PathBuf {
-        let millis = unix_timestamp_ms();
-        let mut path = std::env::temp_dir();
-        path.push(format!("runmat_{prefix}_{}_{}", std::process::id(), millis));
-        path
-    }
-
-    fn values(tensor: &Tensor) -> Vec<f64> {
-        tensor.materialize_f64()
-    }
-
-    #[test]
-    fn readmatrix_like_preserves_every_exact_integer_class() {
-        let prototypes = [
-            IntegerStorage::I8(vec![0]),
-            IntegerStorage::I16(vec![0]),
-            IntegerStorage::I32(vec![0]),
-            IntegerStorage::I64(vec![0]),
-            IntegerStorage::U8(vec![0]),
-            IntegerStorage::U16(vec![0]),
-            IntegerStorage::U32(vec![0]),
-            IntegerStorage::U64(vec![0]),
-        ];
-
-        for storage in prototypes {
-            let expected = storage
-                .from_same_class_values(
-                    [1.0, 2.5, -3.0]
-                        .into_iter()
-                        .map(|value| storage.cast_f64_assignment(value))
-                        .collect(),
-                )
-                .expect("expected storage");
-            let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
-            let prototype = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
-            let output = finalize_like(source, &prototype).expect("integer like output");
-            let Value::Tensor(output) = output else {
-                panic!("expected tensor output");
-            };
-            assert_eq!(output.integer_storage(), Some(&expected));
-        }
-
-        let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
-        let prototype = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
-        let output = finalize_like(source, &prototype).expect("single like output");
-        let Value::Tensor(output) = output else {
-            panic!("expected single tensor output");
-        };
-        assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(values(&output), vec![1.0, 2.5, -3.0]);
-    }
-
-    #[test]
-    fn readmatrix_output_type_supports_every_numeric_class() {
-        let cases = [
-            ("int8", IntegerStorage::I8(vec![1, 3, -3])),
-            ("int16", IntegerStorage::I16(vec![1, 3, -3])),
-            ("int32", IntegerStorage::I32(vec![1, 3, -3])),
-            ("int64", IntegerStorage::I64(vec![1, 3, -3])),
-            ("uint8", IntegerStorage::U8(vec![1, 3, 0])),
-            ("uint16", IntegerStorage::U16(vec![1, 3, 0])),
-            ("uint32", IntegerStorage::U32(vec![1, 3, 0])),
-            ("uint64", IntegerStorage::U64(vec![1, 3, 0])),
-        ];
-        for (class_name, expected) in cases {
-            let mut options = ReadMatrixOptions::default();
-            options
-                .set_output_type(class_name)
-                .expect("numeric output type");
-            let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
-            let Value::Tensor(output) = finalize_output(source, &options).expect("numeric output")
-            else {
-                panic!("expected numeric tensor output");
-            };
-            assert_eq!(output.integer_storage(), Some(&expected));
-        }
-
-        let mut single_options = ReadMatrixOptions::default();
-        single_options
-            .set_output_type("single")
-            .expect("single output type");
-        let source = Tensor::new(vec![1.0, 2.5, -3.0], vec![3, 1]).unwrap();
-        let Value::Tensor(single) =
-            finalize_output(source, &single_options).expect("single output")
-        else {
-            panic!("expected single tensor output");
-        };
-        assert_eq!(single.numeric_dtype(), NumericDType::F32);
-        assert_eq!(values(&single), vec![1.0, 2.5, -3.0]);
-    }
-
-    #[test]
-    fn readmatrix_output_type_parses_wide_integer_text_without_binary64() {
-        let path = unique_path("readmatrix_wide_integer");
-        fs::write(
-            &path,
-            "9007199254740993,18446744073709551615\n9223372036854775808,7\n",
-        )
-        .expect("write sample file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![Value::from("OutputType"), Value::from("uint64")],
-        ))
-        .expect("readmatrix");
-        let Value::Tensor(result) = result else {
-            panic!("expected tensor");
-        };
-        assert_eq!(
-            result.integer_storage(),
-            Some(&IntegerStorage::U64(vec![
-                9_007_199_254_740_993,
-                1_u64 << 63,
-                u64::MAX,
-                7,
-            ]))
-        );
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn readmatrix_documented_integer_output_remains_enabled_in_matlab_mode() {
-        let path = unique_path("readmatrix_integer_matlab_mode");
-        fs::write(&path, "9007199254740993\n").expect("write sample file");
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![Value::from("OutputType"), Value::from("uint64")],
-        ))
-        .expect("documented integer output");
-        let Value::Tensor(result) = result else {
-            panic!("expected integer tensor");
-        };
-        assert_eq!(
-            result.integer_storage(),
-            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
-        );
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn readmatrix_compatibility_gates_extensions_before_file_access() {
-        let missing = Value::from("runmat_missing_readmatrix_input.csv");
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-
-        let like_error = block_on(readmatrix_builtin(
-            missing.clone(),
-            vec![Value::from("Like"), Value::Int(IntValue::U8(0))],
-        ))
-        .expect_err("Like must be gated");
-        assert_eq!(
-            like_error.identifier(),
-            READMATRIX_LIKE_EXTENSION.error_identifier
-        );
-
-        let control_error = block_on(readmatrix_builtin(
-            missing,
-            vec![Value::from("NumHeaderLines"), Value::Int(IntValue::U8(1))],
-        ))
-        .expect_err("typed control must be gated");
-        assert_eq!(
-            control_error.identifier(),
-            READMATRIX_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
-        );
-    }
-
-    #[test]
-    fn readmatrix_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = READMATRIX_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(
-            labels.contains(&"M = readmatrix(filename)"),
-            "missing core readmatrix signature label"
-        );
-        assert!(
-            labels.contains(&"M = readmatrix(filename, options)"),
-            "missing options-struct readmatrix signature label"
-        );
-        assert!(
-            labels.contains(&"M = readmatrix(filename, name, optionValue)"),
-            "missing name-value readmatrix signature label"
-        );
-        assert!(
-            labels.contains(&"M = readmatrix(filename, options, name, optionValue)"),
-            "missing options+name-value readmatrix signature label"
-        );
-        assert!(
-            labels.contains(&"M = readmatrix(filename, nameValuePairs...)"),
-            "missing variadic name-value readmatrix signature label"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_reads_csv_data() {
-        let path = unique_path("readmatrix_csv");
-        fs::write(&path, "1,2,3\n4,5,6\n").expect("write sample file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn treat_as_missing_preserves_exact_uint64_text() {
-        let tokens = block_on(parse_treat_as_missing(&Value::Int(IntValue::U64(u64::MAX))))
-            .expect("TreatAsMissing token");
-        assert_eq!(tokens, vec!["18446744073709551615"]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn treat_as_missing_reads_typed_integer_tensor_storage_exactly() {
-        let wide = (1_u64 << 53) + 1;
-        let tensor =
-            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("token");
-
-        let tokens =
-            block_on(parse_treat_as_missing(&Value::Tensor(tensor))).expect("TreatAsMissing token");
-        assert_eq!(tokens, vec!["9007199254740993"]);
-    }
-
-    #[test]
-    fn empty_value_reads_typed_integer_tensor_storage_exactly() {
-        assert!(matches!(
-            value_to_numeric_scalar(&Value::Num(f64::NAN), "EmptyValue"),
-            Ok(NumericScalar::F64(value)) if value.is_nan()
-        ));
-        let wide = 9_007_199_254_740_993_u64;
-        let tensor =
-            Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("empty value");
-        let value =
-            value_to_numeric_scalar(&Value::Tensor(tensor), "EmptyValue").expect("EmptyValue");
-        assert_eq!(value, NumericScalar::U64(wide));
-
-        let mut options = ReadMatrixOptions {
-            empty_value: Some(value),
-            ..ReadMatrixOptions::default()
-        };
-        assert_eq!(
-            parse_integer_numeric_token("", &options, NumericDType::U64, 1, 1).unwrap(),
-            NumericScalar::U64(wide)
-        );
-        options.add_missing_token("NA");
-        assert_eq!(
-            parse_integer_numeric_token("NA", &options, NumericDType::U64, 1, 1).unwrap(),
-            NumericScalar::U64(0)
-        );
-        assert_eq!(
-            parse_integer_numeric_token(
-                "999999999999999999999999999999999999999999999999",
-                &options,
-                NumericDType::U64,
-                1,
-                1,
-            )
-            .unwrap(),
-            NumericScalar::U64(u64::MAX)
-        );
-        assert_eq!(
-            parse_integer_numeric_token(
-                "-999999999999999999999999999999999999999999999999",
-                &options,
-                NumericDType::I64,
-                1,
-                1,
-            )
-            .unwrap(),
-            NumericScalar::I64(i64::MIN)
-        );
-    }
-
-    #[test]
-    fn numeric_range_reads_typed_integer_tensor_storage_exactly() {
-        let tensor =
-            Tensor::new_integer(IntegerStorage::U16(vec![2, 3, 4, 5]), vec![1, 4]).expect("range");
-
-        let range = parse_range_numeric(&Value::Tensor(tensor)).expect("range");
-        assert_eq!(range.start_row, 1);
-        assert_eq!(range.start_col, 2);
-        assert_eq!(range.end_row, Some(3));
-        assert_eq!(range.end_col, Some(4));
-    }
-
-    #[test]
-    fn option_usize_preserves_representable_uint64_values() {
-        assert_eq!(
-            value_to_usize(&Value::Int(IntValue::U64(u64::MAX)), "option").ok(),
-            usize::try_from(u64::MAX).ok()
-        );
-        assert!(value_to_usize(&Value::Int(IntValue::I64(-1)), "option").is_err());
-
-        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![9]), vec![1, 1]).expect("option");
-        assert_eq!(value_to_usize(&Value::Tensor(tensor), "option").unwrap(), 9);
-
-        let negative =
-            Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("option");
-        assert!(value_to_usize(&Value::Tensor(negative), "option").is_err());
-        assert!(value_to_usize(&Value::Num(1.0e300), "option").is_err());
-    }
-
-    #[test]
-    fn option_usize_reads_every_integer_class_exactly() {
-        let classes = [
-            IntegerStorage::I8(vec![7]),
-            IntegerStorage::I16(vec![7]),
-            IntegerStorage::I32(vec![7]),
-            IntegerStorage::I64(vec![7]),
-            IntegerStorage::U8(vec![7]),
-            IntegerStorage::U16(vec![7]),
-            IntegerStorage::U32(vec![7]),
-            IntegerStorage::U64(vec![7]),
-        ];
-
-        for storage in classes {
-            let value = Tensor::new_integer(storage, vec![1, 1]).expect("typed option");
-            assert_eq!(value_to_usize(&Value::Tensor(value), "option").unwrap(), 7);
-        }
-
-        let too_wide =
-            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("wide");
-        assert_eq!(
-            value_to_usize(&Value::Tensor(too_wide), "option").ok(),
-            usize::try_from(u64::MAX).ok()
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_skips_header_lines() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let path = unique_path("readmatrix_header");
-        fs::write(&path, "time,value\n0,10\n1,12\n").expect("write sample file");
-        let args = vec![Value::from("NumHeaderLines"), Value::Int(IntValue::I32(1))];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(values(&t), vec![0.0, 1.0, 10.0, 12.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_respects_delimiter_option() {
-        let path = unique_path("readmatrix_tab");
-        fs::write(&path, "1\t2\t3\n4\t5\t6\n").expect("write sample file");
-        let args = vec![Value::from("Delimiter"), Value::from("tab")];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_respects_range_string() {
-        let path = unique_path("readmatrix_range_string");
-        fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
-        let args = vec![Value::from("Range"), Value::from("B2:C3")];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_respects_range_numeric_vector() {
-        let path = unique_path("readmatrix_range_numeric");
-        fs::write(&path, "11,12,13\n21,22,23\n31,32,33\n").expect("write sample file");
-        let range = Tensor::new(vec![2.0, 2.0, 3.0, 3.0], vec![1, 4]).expect("range tensor");
-        let args = vec![Value::from("Range"), Value::Tensor(range)];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_treats_custom_missing_tokens() {
-        let path = unique_path("readmatrix_missing");
-        fs::write(&path, "1,NA,3\nNA,5,missing\n").expect("write file");
-        let strings = StringArray::new(vec!["NA".to_string(), "missing".to_string()], vec![1, 2])
-            .expect("string array");
-        let args = vec![Value::from("TreatAsMissing"), Value::StringArray(strings)];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                let values = values(&t);
-                assert!(values[1].is_nan()); // column 1, row 2
-                assert!(values[2].is_nan()); // column 2, row 1
-                assert!(values[5].is_nan()); // column 3, row 2
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_uses_decimal_and_thousands_separators() {
-        let path = unique_path("readmatrix_decimal");
-        fs::write(&path, "1.234,56;7.890,12\n").expect("write sample file");
-        let args = vec![
-            Value::from("Delimiter"),
-            Value::from(";"),
-            Value::from("DecimalSeparator"),
-            Value::from(","),
-            Value::from("ThousandsSeparator"),
-            Value::from("."),
-        ];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                let values = values(&t);
-                assert!((values[0] - 1234.56).abs() < 1e-9);
-                assert!((values[1] - 7890.12).abs() < 1e-9);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_applies_empty_value() {
-        let path = unique_path("readmatrix_empty_value");
-        fs::write(&path, "1,,3\n4,,6\n").expect("write sample file");
-        let args = vec![Value::from("EmptyValue"), Value::Num(0.0)];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(values(&t), vec![1.0, 4.0, 0.0, 0.0, 3.0, 6.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_accepts_struct_options() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let path = unique_path("readmatrix_struct_opts");
-        fs::write(&path, "header1,header2\n9,10\n11,12\n").expect("write sample file");
-        let mut options_struct = runmat_value::StructValue::new();
-        options_struct
-            .fields
-            .insert("Delimiter".to_string(), Value::from(","));
-        options_struct
-            .fields
-            .insert("NumHeaderLines".to_string(), Value::Int(IntValue::I32(1)));
-        let args = vec![Value::Struct(options_struct)];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(values(&t), vec![9.0, 11.0, 10.0, 12.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_errors_on_non_numeric_field() {
-        let path = unique_path("readmatrix_error");
-        fs::write(&path, "1,abc,3\n").expect("write sample file");
-        let err = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect_err("readmatrix should fail");
-        let message = err.message().to_string();
-        assert!(
-            message.contains("unable to parse numeric value"),
-            "unexpected error message: {message}"
-        );
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_returns_empty_on_no_data() {
-        let path = unique_path("readmatrix_empty");
-        File::create(&path).expect("create file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.is_empty());
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_output_type_logical() {
-        let path = unique_path("readmatrix_output_logical");
-        fs::write(&path, "0,1,-3\nNaN,0,5\n").expect("write sample file");
-        let args = vec![Value::from("OutputType"), Value::from("logical")];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::LogicalArray(arr) => {
-                assert_eq!(arr.shape, vec![2, 3]);
-                assert_eq!(arr.data, vec![0, 1, 1, 0, 1, 1]);
-            }
-            other => panic!("expected logical array, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_like_logical_proto() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let path = unique_path("readmatrix_like_logical");
-        fs::write(&path, "1,0\n0,5\n").expect("write sample file");
-        let proto = LogicalArray::new(vec![1], vec![1]).expect("logical prototype");
-        let args = vec![Value::from("Like"), Value::LogicalArray(proto)];
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            args,
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::LogicalArray(arr) => {
-                assert_eq!(arr.shape, vec![2, 2]);
-                assert_eq!(arr.data, vec![1, 0, 0, 1]);
-            }
-            other => panic!("expected logical array, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_like_gpu_proto() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        test_support::with_test_provider(|provider| {
-            let path = unique_path("readmatrix_like_gpu");
-            fs::write(&path, "1,2\n3,4\n").expect("write sample file");
-            let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
-            let handle =
-                gpu_helpers::upload_tensor(provider, &proto_tensor).expect("upload prototype");
-            let args = vec![Value::from("Like"), Value::GpuTensor(handle.clone())];
-            let result = block_on(readmatrix_builtin(
-                Value::from(path.to_string_lossy().to_string()),
-                args,
-            ))
-            .expect("readmatrix");
-            let Value::GpuTensor(output) = &result else {
-                panic!("expected GPU tensor result, got {result:?}");
-            };
-            assert!(gpu_helpers::exact_provider_for_handle(output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(output),
-                Some(runmat_accelerate_api::ProviderPrecision::F64)
-            );
-            assert_eq!(
-                runmat_accelerate_api::handle_provenance(output),
-                Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
-            );
-            let gathered = test_support::gather(result).expect("gather result");
-            assert_eq!(gathered.shape, vec![2, 2]);
-            assert_eq!(values(&gathered), vec![1.0, 3.0, 2.0, 4.0]);
-            let _ = fs::remove_file(&path);
-        });
-    }
-
-    #[test]
-    fn readmatrix_integer_gpu_like_preserves_wide_storage_and_exact_owner() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        test_support::with_test_provider(|provider| {
-            let path = unique_path("readmatrix_integer_gpu_like");
-            fs::write(&path, "9007199254740993,18446744073709551615\n").expect("write sample file");
-            let prototype = Tensor::new_integer(IntegerStorage::U64(vec![0]), vec![1, 1])
-                .expect("integer prototype");
-            let prototype =
-                gpu_helpers::upload_tensor(provider, &prototype).expect("upload integer prototype");
-            let result = block_on(readmatrix_builtin(
-                Value::from(path.to_string_lossy().to_string()),
-                vec![Value::from("Like"), Value::GpuTensor(prototype)],
-            ))
-            .expect("integer Like readmatrix");
-            let Value::GpuTensor(output) = &result else {
-                panic!("expected resident integer output");
-            };
-            assert!(gpu_helpers::exact_provider_for_handle(output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
-            assert_eq!(
-                runmat_accelerate_api::handle_integer_type(output),
-                Some(runmat_accelerate_api::IntegerElementType::U64)
-            );
-            let gathered = test_support::gather(result).expect("gather integer output");
-            assert_eq!(
-                gathered.integer_storage(),
-                Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
-            );
-            let _ = fs::remove_file(path);
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_accepts_character_vector_path() {
-        let path = unique_path("readmatrix_char_path");
-        fs::write(&path, "1 2 3\n").expect("write sample file");
-        let text = path.to_string_lossy().to_string();
-        let chars: Vec<char> = text.chars().collect();
-        let len = chars.len();
-        let char_array = CharArray::new(chars, 1, len).expect("char array");
-        let result = block_on(readmatrix_builtin(Value::CharArray(char_array), Vec::new()))
-            .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_handles_quoted_fields() {
-        let path = unique_path("readmatrix_quotes");
-        fs::write(&path, "\"1\",\"2\",\"3\"\n").expect("write sample file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
-                assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_preserves_negative_infinity() {
-        let path = unique_path("readmatrix_infinity");
-        fs::write(&path, "-Inf,Inf,NaN\n").expect("write sample file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
-                let values = values(&t);
-                assert!(values[0].is_infinite() && values[0].is_sign_negative());
-                assert!(values[1].is_infinite() && values[1].is_sign_positive());
-                assert!(values[2].is_nan());
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_accepts_shift_jis_encoding_label() {
-        let path = unique_path("readmatrix_shift_jis");
-        fs::write(&path, b"1,2\n3,4\n").expect("write sample file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![Value::from("Encoding"), Value::from("shift_jis")],
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_auto_detects_utf16_bom() {
-        let path = unique_path("readmatrix_utf16_auto");
-        let mut bytes = vec![0xFF, 0xFE];
-        for unit in "1,2\n3,4\n".encode_utf16() {
-            bytes.extend_from_slice(&unit.to_le_bytes());
-        }
-        fs::write(&path, bytes).expect("write sample file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            vec![Value::from("Encoding"), Value::from("auto")],
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn readmatrix_supports_whitespace_delimiter() {
-        let path = unique_path("readmatrix_whitespace");
-        fs::write(&path, "1 2 3\n4 5 6\n").expect("write sample file");
-        let result = block_on(readmatrix_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect("readmatrix");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
-            }
-            other => panic!("expected tensor result, got {other:?}"),
-        }
-        let _ = fs::remove_file(&path);
-    }
-}
+#[path = "readmatrix/tests.rs"]
+pub(crate) mod tests;

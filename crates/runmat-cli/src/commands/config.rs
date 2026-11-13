@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use log::error;
-use runmat_config::runtime::{ConfigLoader, RunMatRuntimeConfig};
+use runmat_config::runtime::{
+    ApplicationSettingsDirectory, ConfigLoader, RunMatRuntimeConfig, UserSettingsDocument,
+};
 use std::path::Path;
 
-use crate::cli::{ConfigCommand, ConfigFormat};
+use crate::cli::{ConfigCommand, ConfigFormat, ConfigUserCommand};
 use crate::presentation;
 
 pub async fn execute_config_command(
@@ -11,7 +13,7 @@ pub async fn execute_config_command(
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     match config_command {
-        ConfigCommand::Show { format } => {
+        ConfigCommand::Show { format, .. } => {
             let rendered = render_runtime_config(config, format)?;
             println!("{rendered}");
         }
@@ -66,7 +68,7 @@ pub async fn execute_config_command(
             println!("{}", styles.heading("User config:"));
             if let Some(home_dir) = dirs::home_dir() {
                 let config_dir = home_dir.join(".config/runmat");
-                for name in &["config.toml", "config.json"] {
+                for name in &["settings-v1.json", "config.toml", "config.json"] {
                     let path = config_dir.join(name);
                     let exists = if path.exists() { " (exists)" } else { "" };
                     println!(
@@ -76,6 +78,36 @@ pub async fn execute_config_command(
                     );
                 }
             }
+        }
+        ConfigCommand::User { command } => execute_user_command(command)?,
+    }
+    Ok(())
+}
+
+fn execute_user_command(command: ConfigUserCommand) -> Result<()> {
+    let file = match &command {
+        ConfigUserCommand::Show { file }
+        | ConfigUserCommand::Set { file, .. }
+        | ConfigUserCommand::Reset { file, .. } => file,
+    };
+    let path = file
+        .clone()
+        .or_else(|| {
+            ApplicationSettingsDirectory::discover().map(|directory| directory.settings_file())
+        })
+        .context("user settings directory unavailable; supply --file")?;
+    let mut document = UserSettingsDocument::load(&path)?;
+    match command {
+        ConfigUserCommand::Show { .. } => print!("{}", document.source()),
+        ConfigUserCommand::Set { field, value, .. } => {
+            let value: serde_json::Value =
+                serde_json::from_str(&value).context("--value must be a typed JSON value")?;
+            document.set(&field.iter().map(String::as_str).collect::<Vec<_>>(), value)?;
+            document.save(&path)?;
+        }
+        ConfigUserCommand::Reset { field, .. } => {
+            document.reset(&field.iter().map(String::as_str).collect::<Vec<_>>())?;
+            document.save(&path)?;
         }
     }
     Ok(())

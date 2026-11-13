@@ -6,8 +6,9 @@ use runmat_thread_local::runmat_thread_local;
 use serde::Serialize;
 use serde_wasm_bindgen;
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Once;
 use wasm_bindgen::prelude::*;
 
@@ -17,6 +18,10 @@ use crate::core::analysis::{
     hover_at, quick_information_at, references_locations_at_async, semantic_document_facts,
     semantic_tokens_full, semantic_tokens_lexical, signature_help_at, CompatMode, DocumentAnalysis,
 };
+use crate::core::design::{
+    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues,
+};
+use crate::core::fea::{is_fea_uri, resolve_project_facts, FeaDocumentAnalysis};
 use crate::core::workspace::workspace_symbols_with_project_async;
 
 #[derive(Default)]
@@ -27,9 +32,13 @@ struct DocStore {
 #[derive(Clone)]
 struct DocEntry {
     version: u64,
+    revision: u64,
     text: String,
     lexical_tokens: lsp_types::SemanticTokens,
     analysis: Option<DocumentAnalysis>,
+    fea_analysis: Option<FeaDocumentAnalysis>,
+    fea_error: Option<String>,
+    design_analysis: Option<DesignDocumentAnalysis>,
     compat: CompatMode,
 }
 
@@ -39,6 +48,36 @@ runmat_thread_local! {
 
 runmat_thread_local! {
     static DOCS: RefCell<DocStore> = RefCell::new(DocStore::default());
+}
+
+runmat_thread_local! {
+    static NEXT_DOCUMENT_REVISION: Cell<u64> = Cell::new(0);
+}
+
+runmat_thread_local! {
+    /// Texts of the files design documents read that aren't open (their circuit, lock, parts),
+    /// as the host supplied them with `setDesignFiles`.
+    static DESIGN_FILES: RefCell<DesignFiles> = RefCell::new(DesignFiles::new());
+}
+
+runmat_thread_local! {
+    /// Per design document (by URI), the folders and files its dependencies name that the host
+    /// is still loading, as supplied with `setDesignPending`.
+    static DESIGN_PENDING: RefCell<BTreeMap<String, Vec<String>>> = RefCell::new(BTreeMap::new());
+}
+
+runmat_thread_local! {
+    /// `.m` call results by call key, as the host ran them in the RunMat runtime and supplied
+    /// them with `setDesignValues`.
+    static DESIGN_VALUES: RefCell<DesignValues> = RefCell::new(DesignValues::new());
+}
+
+/// The most call results the server keeps. Keys carry the sources' text, so edits leave old
+/// results behind; past this many, the oldest-keyed go first.
+const DESIGN_VALUES_LIMIT: usize = 4096;
+
+runmat_thread_local! {
+    static WORKSPACE_REVISION: Cell<u64> = Cell::new(0);
 }
 
 static BUILTIN_REGISTRY: Once = Once::new();
@@ -183,18 +222,37 @@ pub fn update_document_lexical(
 ) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let compat = COMPAT_MODE.with(|c| c.get());
-    let lexical_tokens = semantic_tokens_lexical(&text).unwrap_or_else(|| SemanticTokens {
-        result_id: None,
-        data: Vec::new(),
+    let revision = NEXT_DOCUMENT_REVISION.with(|next| {
+        let revision = next.get().saturating_add(1);
+        next.set(revision);
+        revision
     });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    let parsed_uri = Url::parse(&uri).ok();
+    let is_fea = parsed_uri.as_ref().is_some_and(is_fea_uri);
+    let design = parsed_uri.as_ref().and_then(design_dialect);
+    let lexical_tokens = if let Some(dialect) = design {
+        DesignDocumentAnalysis::lexical_semantic_tokens(dialect, &text)
+    } else if is_fea {
+        FeaDocumentAnalysis::lexical_semantic_tokens(&text)
+    } else {
+        semantic_tokens_lexical(&text).unwrap_or_else(|| SemanticTokens {
+            result_id: None,
+            data: Vec::new(),
+        })
+    };
     DOCS.with(|d| {
         d.borrow_mut().docs.insert(
             uri,
             DocEntry {
                 version,
+                revision,
                 text,
                 lexical_tokens: lexical_tokens.clone(),
                 analysis: None,
+                fea_analysis: None,
+                fea_error: None,
+                design_analysis: None,
                 compat,
             },
         );
@@ -214,24 +272,74 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
     if entry.version != version {
         return Ok(JsValue::NULL);
     }
-    let source_name = source_name_from_uri(&uri);
-    let analysis = analyze_document_with_compat_and_source_async(
-        &entry.text,
-        entry.compat,
-        source_name.as_deref(),
-    )
-    .await;
-    let tokens =
-        semantic_tokens_full(&entry.text, &analysis).unwrap_or(entry.lexical_tokens.clone());
+    let workspace_revision = WORKSPACE_REVISION.with(Cell::get);
+    let parsed_uri = Url::parse(&uri).ok();
+    let is_fea = parsed_uri.as_ref().is_some_and(is_fea_uri);
+    if let Some(dialect) = parsed_uri.as_ref().and_then(design_dialect) {
+        let files = design_files();
+        let values = DESIGN_VALUES.with(|v| v.borrow().clone());
+        let analysis = DesignDocumentAnalysis::analyze(
+            parsed_uri.as_ref().expect("a parsed design uri"),
+            dialect,
+            &entry.text,
+            &files,
+            &values,
+        )
+        .with_pending(&DESIGN_PENDING.with(|p| p.borrow().get(&uri).cloned().unwrap_or_default()));
+        let tokens = analysis.semantic_tokens();
+        let committed = DOCS.with(|d| {
+            let mut docs = d.borrow_mut();
+            let Some(current) = docs.docs.get_mut(&uri) else {
+                return false;
+            };
+            if current.version != version || current.revision != entry.revision {
+                return false;
+            }
+            current.design_analysis = Some(analysis);
+            true
+        });
+        return if committed {
+            to_js(&tokens)
+        } else {
+            Ok(JsValue::NULL)
+        };
+    }
+    let (analysis, fea_analysis, fea_error, tokens) = if is_fea {
+        match analyze_fea_document(&uri, &entry) {
+            Ok(analysis) => {
+                let tokens = analysis
+                    .semantic_tokens(&entry.text)
+                    .unwrap_or_else(|| entry.lexical_tokens.clone());
+                (None, Some(analysis), None, tokens)
+            }
+            Err(error) => (None, None, Some(error), entry.lexical_tokens.clone()),
+        }
+    } else {
+        let source_name = source_name_from_uri(&uri);
+        let analysis = analyze_document_with_compat_and_source_async(
+            &entry.text,
+            entry.compat,
+            source_name.as_deref(),
+        )
+        .await;
+        let tokens = semantic_tokens_full(&entry.text, &analysis)
+            .unwrap_or_else(|| entry.lexical_tokens.clone());
+        (Some(analysis), None, None, tokens)
+    };
     let committed = DOCS.with(|d| {
         let mut docs = d.borrow_mut();
         let Some(current) = docs.docs.get_mut(&uri) else {
             return false;
         };
-        if current.version != version {
+        if current.version != version || current.revision != entry.revision {
             return false;
         }
-        current.analysis = Some(analysis);
+        if is_fea && WORKSPACE_REVISION.with(Cell::get) != workspace_revision {
+            return false;
+        }
+        current.analysis = analysis;
+        current.fea_analysis = fea_analysis;
+        current.fea_error = fea_error;
         true
     });
     if committed {
@@ -241,11 +349,188 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
     }
 }
 
+/// The files design documents read: open documents' current text over the files the host
+/// supplied.
+fn design_files() -> DesignFiles {
+    let mut files = DESIGN_FILES.with(|f| f.borrow().clone());
+    DOCS.with(|documents| {
+        for (uri, document) in documents.borrow().docs.iter() {
+            if let Some(path) = Url::parse(uri).ok().as_ref().and_then(wasm_file_path) {
+                files.insert(path.to_string_lossy().into_owned(), document.text.clone());
+            }
+        }
+    });
+    files
+}
+
+/// The files a design document reads beyond itself (workspace paths), so the host can supply
+/// those that aren't open with `setDesignFiles`.
+#[wasm_bindgen(js_name = "designDependencies")]
+pub fn design_dependencies_of(uri: String, text: String) -> Result<JsValue, JsValue> {
+    let Some(parsed) = Url::parse(&uri).ok() else {
+        return to_js(&Vec::<String>::new());
+    };
+    let Some(dialect) = design_dialect(&parsed) else {
+        return to_js(&Vec::<String>::new());
+    };
+    to_js(&design_dependencies(dialect, parsed.path(), &text))
+}
+
+/// Supplies `.m` call results the host ran (`{ "<call key>": [6.58e-3] }`, or
+/// `{ "<call key>": { "error": "…" } }`), over the ones supplied before. A design document's
+/// next analysis reads them: the hover shows a value computed by an `.m` function.
+#[wasm_bindgen(js_name = "setDesignValues")]
+pub fn set_design_values(values: JsValue) -> Result<JsValue, JsValue> {
+    let values: DesignValues = serde_wasm_bindgen::from_value(values)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_VALUES.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        stored.extend(values);
+        while stored.len() > DESIGN_VALUES_LIMIT {
+            stored.pop_first();
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
+/// Supplies the texts of files design documents read (`{ "/p/io.circuit": "…" }`); a `null`
+/// text forgets a file. Open documents always win over these.
+#[wasm_bindgen(js_name = "setDesignFiles")]
+pub fn set_design_files(files: JsValue) -> Result<JsValue, JsValue> {
+    let files: BTreeMap<String, Option<String>> = serde_wasm_bindgen::from_value(files)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_FILES.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        for (path, text) in files {
+            match text {
+                Some(text) => {
+                    stored.insert(path, text);
+                }
+                None => {
+                    stored.remove(&path);
+                }
+            }
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
+/// Names the folders (`/p/cabin/`) and files design document `uri` reads that the host is still
+/// loading; an empty list clears them. While any are pending, the document's compile problems
+/// wait and the `use` lines naming them say they aren't loaded yet; the host supplies the files
+/// with `setDesignFiles` and clears the list once they arrive.
+#[wasm_bindgen(js_name = "setDesignPending")]
+pub fn set_design_pending(uri: String, paths: JsValue) -> Result<JsValue, JsValue> {
+    let paths: Vec<String> = serde_wasm_bindgen::from_value(paths)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_PENDING.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        if paths.is_empty() {
+            stored.remove(&uri);
+        } else {
+            stored.insert(uri, paths);
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
+fn analyze_fea_document(uri: &str, entry: &DocEntry) -> Result<FeaDocumentAnalysis, String> {
+    let physical_path = Url::parse(uri)
+        .ok()
+        .and_then(|url| wasm_file_path(&url))
+        .ok_or_else(|| "FEA language tooling requires a file-backed document".to_string())?;
+    let (overlays, source_overlays) = DOCS.with(|documents| {
+        let documents = documents.borrow();
+        let source_overlays: BTreeMap<PathBuf, String> = documents
+            .docs
+            .iter()
+            .filter_map(|(document_uri, document)| {
+                let path = wasm_file_path(&Url::parse(document_uri).ok()?)?;
+                Some((path, document.text.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let overlays = source_overlays
+            .iter()
+            .filter(|(path, _)| {
+                path.extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("fea"))
+            })
+            .map(|(path, source)| (path.clone(), source.as_bytes().to_vec()))
+            .collect::<Vec<_>>();
+        (overlays, source_overlays)
+    });
+    let source_root = source_overlays.keys().fold(
+        physical_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/")),
+        |root, path| common_ancestor(&root, path),
+    );
+    let prepared = FeaDocumentAnalysis::prepare_with_overlays(
+        &entry.text,
+        &physical_path,
+        &[source_root],
+        &overlays,
+    )?;
+    let requests = prepared.function_requests()?;
+    let facts = resolve_project_facts(
+        prepared.source_root(),
+        &requests,
+        &physical_path,
+        entry.compat,
+        &source_overlays,
+    )?;
+    prepared
+        .check(facts.functions, facts.profiles)
+        .map(|checked| FeaDocumentAnalysis::from_checked(checked, facts.function_sources))
+}
+
+fn common_ancestor(left: &Path, right: &Path) -> PathBuf {
+    left.ancestors()
+        .find(|candidate| right.starts_with(candidate))
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+fn wasm_file_path(uri: &Url) -> Option<PathBuf> {
+    if uri.scheme() != "file" {
+        return None;
+    }
+    let encoded = uri.path().as_bytes();
+    let mut decoded = Vec::with_capacity(encoded.len());
+    let mut index = 0;
+    while index < encoded.len() {
+        if encoded[index] == b'%' && index + 2 < encoded.len() {
+            let high = hex_value(encoded[index + 1])?;
+            let low = hex_value(encoded[index + 2])?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(encoded[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok().map(PathBuf::from)
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
 #[wasm_bindgen]
 pub fn close_document(uri: String) {
     DOCS.with(|d| {
         d.borrow_mut().docs.remove(&uri);
     });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
 }
 
 #[wasm_bindgen]
@@ -256,6 +541,18 @@ pub fn completion(_uri: String, _line: u32, _character: u32) -> Result<JsValue, 
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&CompletionList {
+            is_incomplete: false,
+            items: analysis.completion_items(&position),
+        });
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return to_js(&CompletionList {
+            is_incomplete: false,
+            items: analysis.completion_items(),
+        });
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return to_js(&CompletionList {
             is_incomplete: true,
@@ -278,6 +575,16 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return analysis
+            .hover(&position)
+            .map_or(Ok(JsValue::NULL), |hover| to_js(&hover));
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return analysis
+            .hover(&doc.text, &position)
+            .map_or(Ok(JsValue::NULL), |hover| to_js(&hover));
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
@@ -295,6 +602,9 @@ pub fn quick_information(uri: String, line: u32, character: u32) -> Result<JsVal
     let Some(document) = entry else {
         return Ok(JsValue::NULL);
     };
+    if document.fea_analysis.is_some() || document.design_analysis.is_some() {
+        return Ok(JsValue::NULL);
+    }
     let Some(analysis) = document.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
@@ -310,6 +620,9 @@ pub fn semantic_facts(uri: String) -> Result<JsValue, JsValue> {
     let Some(document) = entry else {
         return Ok(JsValue::NULL);
     };
+    if document.fea_analysis.is_some() || document.design_analysis.is_some() {
+        return Ok(JsValue::NULL);
+    }
     let Some(analysis) = document.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
@@ -325,6 +638,22 @@ pub async fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsV
     };
     let position = Position::new(_line, _character);
     let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(
+            &analysis
+                .definition(&position)
+                .into_iter()
+                .collect::<Vec<_>>(),
+        );
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return to_js(
+            &analysis
+                .definition(&doc.text, &position)
+                .into_iter()
+                .collect::<Vec<_>>(),
+        );
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
@@ -341,6 +670,12 @@ pub async fn references(_uri: String, _line: u32, _character: u32) -> Result<JsV
     };
     let position = Position::new(_line, _character);
     let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.references(&position, true));
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return to_js(&analysis.references(&doc.text, &position));
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
@@ -356,6 +691,14 @@ pub fn signature_help(_uri: String, _line: u32, _character: u32) -> Result<JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
+    if doc.design_analysis.is_some() {
+        return Ok(JsValue::NULL);
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return analysis
+            .signature_help(&doc.text, &position)
+            .map_or(Ok(JsValue::NULL), |help| to_js(&help));
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
@@ -374,9 +717,19 @@ pub fn semantic_tokens(_uri: String) -> Result<JsValue, JsValue> {
         return Ok(JsValue::NULL);
     };
     let tokens = doc
-        .analysis
+        .design_analysis
         .as_ref()
-        .and_then(|analysis| semantic_tokens_full(&doc.text, analysis))
+        .map(DesignDocumentAnalysis::semantic_tokens)
+        .or_else(|| {
+            doc.fea_analysis
+                .as_ref()
+                .and_then(|analysis| analysis.semantic_tokens(&doc.text))
+        })
+        .or_else(|| {
+            doc.analysis
+                .as_ref()
+                .and_then(|analysis| semantic_tokens_full(&doc.text, analysis))
+        })
         .unwrap_or(doc.lexical_tokens);
     to_js(&tokens)
 }
@@ -388,6 +741,12 @@ pub fn document_symbols(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.document_symbols());
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return to_js(&analysis.document_symbols(&doc.text));
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return to_js(&Vec::<DocumentSymbol>::new());
     };
@@ -399,8 +758,9 @@ pub fn document_symbols(_uri: String) -> Result<JsValue, JsValue> {
 pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let compat = COMPAT_MODE.with(|c| c.get());
-    let docs = DOCS.with(|d| {
-        d.borrow()
+    let (docs, fea_analyses) = DOCS.with(|d| {
+        let documents = d.borrow();
+        let docs = documents
             .docs
             .iter()
             .map(|(uri, doc)| {
@@ -411,10 +771,40 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
                 )
             })
             .filter_map(|(uri, text, analysis)| analysis.map(|analysis| (uri, text, analysis)))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        let fea_analyses = documents
+            .docs
+            .values()
+            .filter_map(|document| document.fea_analysis.clone())
+            .collect::<Vec<_>>();
+        let design_symbols = documents
+            .docs
+            .values()
+            .filter_map(|document| document.design_analysis.as_ref())
+            .flat_map(|analysis| analysis.workspace_symbols(None))
+            .collect::<Vec<_>>();
+        (docs, (fea_analyses, design_symbols))
     });
-    let syms: Vec<SymbolInformation> =
+    let (fea_analyses, design_symbols) = fea_analyses;
+    let mut syms: Vec<SymbolInformation> =
         workspace_symbols_with_project_async(&docs, compat, None).await;
+    syms.extend(
+        fea_analyses
+            .iter()
+            .flat_map(|analysis| analysis.workspace_symbols(None)),
+    );
+    syms.extend(design_symbols);
+    syms.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.location.uri.as_str().cmp(right.location.uri.as_str()))
+            .then_with(|| left.location.range.start.cmp(&right.location.range.start))
+    });
+    syms.dedup_by(|left, right| {
+        left.name == right.name
+            && left.location.uri == right.location.uri
+            && left.location.range == right.location.range
+    });
     to_js(&syms)
 }
 
@@ -425,6 +815,12 @@ pub fn formatting(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.formatting_edits());
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return to_js(&analysis.formatting_edits(&doc.text));
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return to_js(&Vec::<TextEdit>::new());
     };
@@ -439,11 +835,67 @@ pub fn diagnostics(_uri: String) -> Result<JsValue, JsValue> {
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return to_js(&analysis.diagnostics());
+    }
+    if let Some(analysis) = doc.fea_analysis.as_ref() {
+        return to_js(&analysis.diagnostics(&doc.text));
+    }
+    if let Some(error) = doc.fea_error.as_ref() {
+        return to_js(&vec![Diagnostic {
+            range: lsp_types::Range::new(Position::new(0, 0), Position::new(0, 0)),
+            severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+            code: Some(lsp_types::NumberOrString::String(
+                "FEA_ANALYSIS_UNAVAILABLE".to_string(),
+            )),
+            source: Some("runmat-fea".to_string()),
+            message: error.clone(),
+            ..Diagnostic::default()
+        }]);
+    }
     let Some(analysis) = doc.analysis.as_ref() else {
         return to_js(&Vec::<Diagnostic>::new());
     };
     let diags: Vec<Diagnostic> = diagnostics_for_document(&doc.text, analysis);
     to_js(&diags)
+}
+
+/// The renamable name under the cursor in a design document: `{ range, placeholder }`.
+#[wasm_bindgen(js_name = "prepareRename")]
+pub fn prepare_rename(uri: String, line: u32, character: u32) -> Result<JsValue, JsValue> {
+    let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
+    let Some(analysis) = entry.and_then(|doc| doc.design_analysis) else {
+        return Ok(JsValue::NULL);
+    };
+    match analysis.prepare_rename(&Position::new(line, character)) {
+        Some((range, placeholder)) => to_js(&serde_json::json!({
+            "range": range,
+            "placeholder": placeholder,
+        })),
+        None => Ok(JsValue::NULL),
+    }
+}
+
+/// Renames a design document's symbol at its declaration and every use (a workspace edit).
+#[wasm_bindgen]
+pub fn rename(
+    uri: String,
+    line: u32,
+    character: u32,
+    new_name: String,
+) -> Result<JsValue, JsValue> {
+    let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
+    let Some(analysis) = entry.and_then(|doc| doc.design_analysis) else {
+        return Ok(JsValue::NULL);
+    };
+    match analysis.rename(&Position::new(line, character), &new_name) {
+        // `changes` is a map keyed by URI: a plain object, as LSP clients read a WorkspaceEdit.
+        Ok(Some(edit)) => edit
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsValue::from_str(&e.to_string())),
+        Ok(None) => Ok(JsValue::NULL),
+        Err(message) => Err(JsValue::from_str(&message)),
+    }
 }
 
 #[wasm_bindgen(js_name = "setCompatMode")]
@@ -524,10 +976,7 @@ mod tests {
                 elements: vec![unknown()],
                 elements_complete: true,
             }),
-            ValueKindFact::Struct(runmat_types::StructFact {
-                fields: BTreeMap::new(),
-                fields_complete: true,
-            }),
+            ValueKindFact::Struct(runmat_types::StructFact::scalar(BTreeMap::new(), true)),
             ValueKindFact::Object(runmat_types::ObjectFact {
                 class: None,
                 runtime_class: None,
@@ -541,6 +990,7 @@ mod tests {
             }),
             ValueKindFact::Callable(runmat_types::CallableFact {
                 identity: None,
+                capabilities: Default::default(),
                 parameters: vec![unknown()],
                 parameters_complete: false,
                 outputs: vec![unknown()],
@@ -558,16 +1008,16 @@ mod tests {
                 identifier: Some("RunMat:test".to_string()),
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Future {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
                 state: runmat_types::FutureStateFact::Lazy,
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Task {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
                 spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Pool),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Job {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
             }),
             ValueKindFact::Distributed(runmat_types::DistributedFact {
                 id: runmat_types::DistributedValueId {

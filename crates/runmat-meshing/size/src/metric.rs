@@ -4,6 +4,23 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use serde::{Deserialize, Serialize};
 
+mod directional;
+mod exact_faces;
+pub use exact_faces::{ExactFaceMetricResolutionError, ExactFaceSizing};
+mod subspace;
+pub use subspace::DirectionalMetricEnvelope;
+mod index;
+mod intersection;
+mod uniform;
+mod local;
+mod located;
+mod point_field;
+pub use local::{LocalMetricSource, MetricEntitySupport};
+pub use located::{
+    canonicalize_located, compare_located, LocatedMetricSample, LocatedMetricSource,
+};
+pub use point_field::{integrated_edge_length, intersect_metrics, SurfaceMetricSource};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetricContractError {
     pub field: String,
@@ -91,17 +108,21 @@ impl MetricTensor3 {
         Ok(())
     }
 
-    pub fn conservative_minimum_length_m(&self) -> Result<f64, MetricContractError> {
-        self.validate()?;
-        // The maximum absolute row sum bounds the largest eigenvalue from above. Its reciprocal
-        // square root is therefore a conservative lower bound on the finest directional length.
-        let maximum_density = [
+    pub(crate) fn maximum_row_density(&self) -> f64 {
+        [
             self.xx + self.xy.abs() + self.xz.abs(),
             self.yy + self.xy.abs() + self.yz.abs(),
             self.zz + self.xz.abs() + self.yz.abs(),
         ]
         .into_iter()
-        .fold(0.0_f64, f64::max);
+        .fold(0.0_f64, f64::max)
+    }
+
+    pub fn conservative_minimum_length_m(&self) -> Result<f64, MetricContractError> {
+        self.validate()?;
+        // The maximum absolute row sum bounds the largest eigenvalue from above. Its reciprocal
+        // square root is therefore a conservative lower bound on the finest directional length.
+        let maximum_density = self.maximum_row_density();
         let length = maximum_density.sqrt().recip();
         if !length.is_finite() || length <= 0.0 {
             return Err(MetricContractError::invalid(
@@ -205,6 +226,44 @@ pub struct MetricFieldRequest {
     pub maximum_grading_ratio: f64,
     #[serde(default)]
     pub contributions: Vec<MetricContribution>,
+    /// World-space supports of entity-local contribution scopes, ordered by entity identity.
+    /// A supported scope is graded by distance instead of applying across incident faces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_supports: Vec<MetricEntitySupport>,
+    /// Entity-local sizing that applies only along part of its entity, with a size that varies
+    /// along its own support (a gap that narrows at one place). Canonically ordered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub located_sources: Vec<LocatedMetricSource>,
+    /// Requested element layers across a thin gap between non-incident boundary entities.
+    /// `None` keeps existing request identities: two layers across gaps between edges, and one
+    /// layer across gaps between facing faces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells_across_gap: Option<u32>,
+}
+
+impl MetricFieldRequest {
+    /// Canonical element layers across a thin gap when none is requested.
+    pub const DEFAULT_CELLS_ACROSS_GAP: u32 = 2;
+
+    /// Element layers proximity sizing resolves across a thin gap.
+    pub fn resolved_cells_across_gap(&self) -> u32 {
+        self.cells_across_gap
+            .unwrap_or(Self::DEFAULT_CELLS_ACROSS_GAP)
+    }
+
+    /// Element layers across the gap between two facing faces of a meshed solid when none is
+    /// requested. With one layer, the faces of a layer `t` thick get surface edges no longer
+    /// than `t`. Each boundary segment's diametral ball (radius at most `t / 2`) then stays clear
+    /// of the opposite face, so the two faces' segments and facets never encroach each other,
+    /// and the volume mesher recovers both faces without splitting across the layer.
+    pub const DEFAULT_CELLS_ACROSS_FACE_GAP: u32 = 1;
+
+    /// Element layers face proximity sizing resolves across the gap between facing faces: the
+    /// requested `cells_across_gap`, or one layer.
+    pub fn resolved_cells_across_face_gap(&self) -> u32 {
+        self.cells_across_gap
+            .unwrap_or(Self::DEFAULT_CELLS_ACROSS_FACE_GAP)
+    }
 }
 
 impl MetricFieldRequest {
@@ -224,6 +283,17 @@ impl MetricFieldRequest {
         }
         for contribution in &self.contributions {
             contribution.validate()?;
+        }
+        local::validate_supports(&self.entity_supports)?;
+        located::validate_located(&self.located_sources)?;
+        if self
+            .cells_across_gap
+            .is_some_and(|cells| !(1..=64).contains(&cells))
+        {
+            return Err(MetricContractError::invalid(
+                "cells across gap",
+                "must be between 1 and 64",
+            ));
         }
         if self
             .contributions
@@ -255,6 +325,26 @@ impl MetricFieldRequest {
         resolved.validate()?;
         Ok(resolved)
     }
+
+    /// Applies one coordinate-basis transform to every metric tensor and
+    /// restores canonical contribution order in the transformed basis.
+    pub fn transform_metrics(
+        &self,
+        mut transform: impl FnMut(MetricTensor3) -> MetricTensor3,
+    ) -> Result<Self, MetricContractError> {
+        let mut transformed = self.clone();
+        transformed.global_metric = transform(transformed.global_metric);
+        for contribution in &mut transformed.contributions {
+            contribution.metric = transform(contribution.metric);
+        }
+        for located in &mut transformed.located_sources {
+            located.metric = transform(located.metric);
+        }
+        transformed.contributions.sort_by(compare_contributions);
+        located::canonicalize_located(&mut transformed.located_sources);
+        transformed.validate()?;
+        Ok(transformed)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -271,42 +361,50 @@ pub struct ResolvedMetricEvaluation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedMetricField {
     request: MetricFieldRequest,
+    index: index::ContributionIndex,
+    /// Every entity-local source of the request, in canonical entity order. They grade the field
+    /// by distance at every point, whichever stage evaluates it (see [`Self::evaluate_at`]).
+    entity_local: Vec<LocalMetricSource>,
 }
 
 impl ResolvedMetricField {
     pub fn new(request: &MetricFieldRequest) -> Result<Self, MetricContractError> {
         request.validate()?;
-        Ok(Self {
+        let mut field = Self {
             request: request.clone(),
-        })
+            index: index::ContributionIndex::new(request),
+            entity_local: Vec::new(),
+        };
+        let entities = request
+            .entity_supports
+            .iter()
+            .map(|support| support.entity_id.clone())
+            .collect();
+        field.entity_local = field.local_sources(&entities)?;
+        for index in 0..request.located_sources.len() {
+            let source = field.located_source(index)?;
+            field.entity_local.push(source);
+        }
+        Ok(field)
     }
 
     pub fn resolve(
         &self,
         incident_entities: &BTreeSet<PersistentEntityId>,
     ) -> Result<ResolvedMetricEvaluation, MetricContractError> {
-        let mut metric = self.request.global_metric;
+        let mut applicable = self.index.applicable(&self.request, incident_entities);
         let mut sources = BTreeMap::from([(
             MetricSourceKind::Global.canonical_rank(),
             MetricSourceKind::Global,
         )]);
         let mut applied_contribution_count = 0u32;
-        for contribution in &self.request.contributions {
-            let entity_id = match &contribution.scope {
-                MetricContributionScope::Region { region_id } => region_id,
-                MetricContributionScope::Entity { entity_id } => entity_id,
-            };
-            if incident_entities.contains(entity_id) {
-                metric = add_metric(metric, contribution.metric).ok_or_else(|| {
-                    MetricContractError::invalid(
-                        "resolved metric intersection",
-                        "applicable tensors overflow their conservative intersection",
-                    )
-                })?;
-                sources.insert(contribution.source.canonical_rank(), contribution.source);
-                applied_contribution_count = applied_contribution_count.saturating_add(1);
-            }
+        for &index in &applicable {
+            let contribution = &self.request.contributions[index];
+            sources.insert(contribution.source.canonical_rank(), contribution.source);
+            applied_contribution_count = applied_contribution_count.saturating_add(1);
         }
+        intersection::deduplicate(&self.request, &mut applicable);
+        let metric = intersection::combine(&self.request, &applicable)?;
         metric.validate()?;
         Ok(ResolvedMetricEvaluation {
             metric,
@@ -316,28 +414,6 @@ impl ResolvedMetricField {
             rejected_contribution_count: 0,
         })
     }
-}
-
-fn add_metric(left: MetricTensor3, right: MetricTensor3) -> Option<MetricTensor3> {
-    let values = [
-        left.xx + right.xx,
-        left.yy + right.yy,
-        left.zz + right.zz,
-        left.xy + right.xy,
-        left.xz + right.xz,
-        left.yz + right.yz,
-    ];
-    values
-        .iter()
-        .all(|value| value.is_finite())
-        .then_some(MetricTensor3 {
-            xx: values[0],
-            yy: values[1],
-            zz: values[2],
-            xy: values[3],
-            xz: values[4],
-            yz: values[5],
-        })
 }
 
 fn compare_contributions(left: &MetricContribution, right: &MetricContribution) -> Ordering {

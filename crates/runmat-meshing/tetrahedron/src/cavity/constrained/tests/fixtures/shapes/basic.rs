@@ -57,19 +57,31 @@ pub(in crate::cavity::constrained::tests) fn unit_tetrahedron_nodes() -> Vec<Con
     vec![
         ConstrainedCavityNode {
             node_id: 0,
-            coordinates_m: [0.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 1,
-            coordinates_m: [1.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 2,
-            coordinates_m: [0.0, 1.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 3,
-            coordinates_m: [0.0, 0.0, 1.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 0.0, 1.0]),
         },
     ]
 }

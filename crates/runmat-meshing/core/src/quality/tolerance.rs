@@ -2,14 +2,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MeshingTolerance {
-    pub absolute_m: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub absolute_m: runmat_types::physical::Length,
     pub relative: f64,
 }
 
 impl Default for MeshingTolerance {
     fn default() -> Self {
         Self {
-            absolute_m: 1.0e-12,
+            absolute_m: runmat_types::physical::Length::new(1.0e-12),
             relative: 1.0e-10,
         }
     }
@@ -23,7 +24,7 @@ impl MeshingTolerance {
             .fold(0.0_f64, f64::max)
             .max(1.0);
         Self {
-            absolute_m: (span * 1.0e-10).max(1.0e-12),
+            absolute_m: runmat_types::physical::Length::new((span * 1.0e-10).max(1.0e-12)),
             relative: 1.0e-10,
         }
     }
@@ -34,7 +35,9 @@ impl MeshingTolerance {
         } else {
             1.0
         };
-        self.absolute_m.max(scale_m * self.relative)
+        self.absolute_m
+            .canonical_value()
+            .max(scale_m * self.relative)
     }
 
     pub fn volume_epsilon(self, scale_m: f64) -> f64 {
@@ -58,7 +61,7 @@ mod tests {
     fn tolerance_scales_from_bounds() {
         let tolerance = MeshingTolerance::from_bounds([0.0, 0.0, 0.0], [10.0, 2.0, 1.0]);
 
-        assert!(tolerance.absolute_m >= 1.0e-9);
+        assert!(tolerance.absolute_m.canonical_value() >= 1.0e-9);
         assert!(tolerance.nearly_equal(1.0, 1.0 + 1.0e-10, 10.0));
         assert!(!tolerance.nearly_equal(1.0, 1.0 + 1.0e-4, 10.0));
     }

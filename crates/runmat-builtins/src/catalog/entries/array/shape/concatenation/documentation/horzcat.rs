@@ -1,0 +1,61 @@
+use super::*;
+
+pub(in super::super) const HORZ_DOC: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("horzcat"), slug: Some("horzcat"),
+    summary: "Concatenate arrays horizontally in MATLAB and RunMat.",
+    description: "`horzcat(A1, A2, ...)` concatenates inputs along dimension 2, matching MATLAB square-bracket syntax `[A1 A2 ...]`. Size compatibility and type coercion follow MATLAB semantics.",
+    keywords: &["horzcat", "horizontal concatenation", "square brackets", "array building", "gpu"],
+    related: &["cat", "vertcat", "reshape", "gpuArray", "gather", "circshift", "diag", "flip", "fliplr", "flipud", "ipermute", "kron", "permute", "repmat", "rot90", "squeeze", "tril", "triu"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+            "Operates on numeric, logical, complex, character, string, and cell arrays with MATLAB-compatible type checking.",
+            "All inputs must have the same number of rows (dimension 1). Higher dimensions are padded with singleton sizes where necessary.",
+            "Scalars act as `1×1` building blocks, so `horzcat(1, 2, 3)` produces the row vector `[1 2 3]`.",
+            "Empty inputs participate naturally. With no operands, the result is the canonical `0×0` double; nonzero all-empty operands retain compatible geometry and the applicable input class.",
+            "When the trailing `'like', prototype` pair is supplied, the output matches the prototype's residency (host or GPU) and numeric category.",
+            "Compatible mixed `gpuArray` and host numeric operands use exact gather/concatenate/restore fallback; convert explicitly with `gpuArray` or `gather` when you need a specific placement.",
+        ] },
+        BuiltinDocumentationSection { heading: "GPU execution", paragraphs: &[
+            "`horzcat` delegates to `cat(dim = 2, …)`. When the owning acceleration provider implements the `cat` hook for the operands, concatenation runs on the GPU. Otherwise RunMat gathers, concatenates on host, and attempts to upload the result; if upload is unavailable, floating output can remain on host.",
+            "Delegates to cat with dim=2; provider execution is used where supported, otherwise exact gather/host assembly and attempted restoration apply.",
+            "GPU floating precisions are f32 and f64; there is no broadcasting, elementwise or reduction fusion, and constants may be inlined.",
+        ] },
+        BuiltinDocumentationSection { heading: "Placement and options", paragraphs: &[
+        "Numeric, logical, complex, character, string, and cell arrays use MATLAB-compatible class checks. Inputs have matching row counts; higher dimensions are singleton-padded. Scalars are 1-by-1 building blocks. With no operands, the result is the canonical 0-by-0 double; nonzero all-empty operands retain compatible geometry and the applicable input class.",
+        "A trailing 'like', prototype pair selects output residency and numeric category. Compatible mixed host and gpuArray numeric operands use the delegated cat fallback; convert explicitly with gpuArray or gather to control placement.",
+        "The operation delegates to cat(dim=2). An owning provider with a cat hook executes on device for supported f32/f64 data; otherwise exact values gather to host for concatenation and are restored through that owner. There is no broadcasting, elementwise/reduction fusion, or independent horzcat kernel.",
+    ] }],
+    examples: &[
+        example!("columns", "Concatenating matrices by columns", "A = [1 2; 3 4];\nB = [10 20; 30 40];\nC = horzcat(A, B)", Some("C =\n     1     2    10    20\n     3     4    30    40"), "assert(isequal(C, [1 2 10 20; 3 4 30 40]));", BuiltinExampleHarness::Portable),
+        example!("scalars", "Building a row vector from scalars", "row = horzcat(1, 2, 3, 4)", Some("row = [1 2 3 4]"), "assert(isequal(row, [1 2 3 4]));", BuiltinExampleHarness::Portable),
+        example!("characters", "Extending character arrays into words", "lhs = ['Run' ; 'GPU'];\nrhs = ['Mat' ; 'Fun'];\nwords = horzcat(lhs, rhs)", Some("words =\n    RunMat\n    GPUFun"), "assert(isequal(words, ['RunMat'; 'GPUFun']));", BuiltinExampleHarness::Portable),
+        example!("resident", "Keeping gpuArray inputs resident on the device", "G1 = gpuArray(rand(256, 128));\nG2 = gpuArray(rand(256, 64));\nwide = horzcat(G1, G2)", None, "assert(isgpuarray(wide)); assert(isequal(size(wide), [256 192]));", BuiltinExampleHarness::Wgpu),
+        example!("empties", "Preserving empties when all inputs are empty", "emptyBlock = zeros(0, 3);\nresult = horzcat(emptyBlock, emptyBlock)", None, "assert(isequal(size(result), [0 6]));", BuiltinExampleHarness::Portable),
+        example!("like", "Matching an output prototype with the `'like'` syntax", "proto = gpuArray.zeros(5, 1);\ncombo = horzcat(ones(5, 1), zeros(5, 1), \"like\", proto)", None, "assert(isgpuarray(combo)); assert(isequal(size(combo), [5 2]));", BuiltinExampleHarness::Wgpu),
+    ],
+    example_exemption: None, faqs: &[],
+    links: &[
+        BuiltinDocumentationLink { label: "`cat`", target: BuiltinDocumentationLinkTarget::Builtin("cat") },
+        BuiltinDocumentationLink { label: "`vertcat`", target: BuiltinDocumentationLinkTarget::Builtin("vertcat") },
+        BuiltinDocumentationLink { label: "`reshape`", target: BuiltinDocumentationLinkTarget::Builtin("reshape") },
+        BuiltinDocumentationLink { label: "`gpuArray`", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "`gather`", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+        BuiltinDocumentationLink { label: "circshift", target: BuiltinDocumentationLinkTarget::Builtin("circshift") },
+        BuiltinDocumentationLink { label: "diag", target: BuiltinDocumentationLinkTarget::Builtin("diag") },
+        BuiltinDocumentationLink { label: "flip", target: BuiltinDocumentationLinkTarget::Builtin("flip") },
+        BuiltinDocumentationLink { label: "fliplr", target: BuiltinDocumentationLinkTarget::Builtin("fliplr") },
+        BuiltinDocumentationLink { label: "flipud", target: BuiltinDocumentationLinkTarget::Builtin("flipud") },
+        BuiltinDocumentationLink { label: "ipermute", target: BuiltinDocumentationLinkTarget::Builtin("ipermute") },
+        BuiltinDocumentationLink { label: "kron", target: BuiltinDocumentationLinkTarget::Builtin("kron") },
+        BuiltinDocumentationLink { label: "permute", target: BuiltinDocumentationLinkTarget::Builtin("permute") },
+        BuiltinDocumentationLink { label: "repmat", target: BuiltinDocumentationLinkTarget::Builtin("repmat") },
+        BuiltinDocumentationLink { label: "rot90", target: BuiltinDocumentationLinkTarget::Builtin("rot90") },
+        BuiltinDocumentationLink { label: "squeeze", target: BuiltinDocumentationLinkTarget::Builtin("squeeze") },
+        BuiltinDocumentationLink { label: "tril", target: BuiltinDocumentationLinkTarget::Builtin("tril") },
+        BuiltinDocumentationLink { label: "triu", target: BuiltinDocumentationLinkTarget::Builtin("triu") }, HORZ_SOURCE,
+    ],
+    media: &[], evidence: BuiltinDocumentationEvidence { implementation: &[HORZ_SOURCE], verification: HORZ_TESTS, notes: &[
+        "Examples cover host arrays, gpuArray execution, empty geometry, and a like-prototype request. Provider execution and fallback depend on the delegated cat hook.",
+    ] }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

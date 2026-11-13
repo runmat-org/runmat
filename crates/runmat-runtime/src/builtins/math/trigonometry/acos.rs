@@ -8,135 +8,25 @@
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ACOS_CHARACTER_INPUT_EXTENSION, ACOS_ERROR_INTERNAL,
+    ACOS_ERROR_INVALID_INPUT, ACOS_GPU_REAL_COMPLEX_EXTENSION, ACOS_INTEGER_INPUT_EXTENSION,
+    ACOS_LOGICAL_INPUT_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{ACOS_DESCRIPTOR, ACOS_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::context::RuntimeContext;
+use crate::execution::{RootedValue, RootedValueLease};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "acos";
-const ZERO_EPS: f64 = 1e-12;
-const DOMAIN_TOL: f64 = 1e-12;
-
-const ACOS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise inverse cosine result.",
-}];
-
-const ACOS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single/double real or complex input; integer, logical, and character forms are RunMat-only extensions.",
-}];
-
-const ACOS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = acos(X)",
-    inputs: &ACOS_INPUTS,
-    outputs: &ACOS_OUTPUT,
-}];
-
-const ACOS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACOS.INVALID_INPUT",
-    identifier: Some("RunMat:acos:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/char/complex data.",
-    message: "acos: invalid input",
-};
-
-const ACOS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACOS.INTERNAL",
-    identifier: Some("RunMat:acos:Internal"),
-    when: "Internal gather/reduction/conversion/allocation flow failed.",
-    message: "acos: internal error",
-};
-
-const ACOS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACOS.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:acos:TooManyOutputs"),
-    when: "More than one output is requested.",
-    message: "acos: too many output arguments",
-};
-
-const ACOS_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ACOS_ERROR_INVALID_INPUT,
-    ACOS_ERROR_INTERNAL,
-    ACOS_ERROR_TOO_MANY_OUTPUTS,
-];
-
-const ACOS_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acos-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acos with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcosIntegerInputExtension"),
-};
-const ACOS_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acos-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acos with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcosLogicalInputExtension"),
-};
-const ACOS_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acos-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acos with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcosCharacterInputExtension"),
-};
-const ACOS_GPU_REAL_COMPLEX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "acos-gpu-real-complex-promotion",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "acos resident real input that requires complex output is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AcosGpuRealComplexPromotionExtension"),
-};
-const ACOS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    ACOS_INTEGER_INPUT_EXTENSION,
-    ACOS_LOGICAL_INPUT_EXTENSION,
-    ACOS_CHARACTER_INPUT_EXTENSION,
-    ACOS_GPU_REAL_COMPLEX_EXTENSION,
-];
-
-const ACOS_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single/double; RunMat mode additionally accepts every real integer class.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = acos(integer_X)",
-        inputs: &ACOS_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Authoritative integer values enter an explicit binary64 inverse-cosine boundary. Resident integer input gathers exactly and the double or complex-double result returns to the owning provider.",
-    }];
-
-pub const ACOS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ACOS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ACOS_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -166,36 +56,28 @@ fn acos_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acos")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acos",
+    host_resources = crate::builtins::math::host_resources::real_promoting_map
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "acos",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: Some(FusionKernelTemplate {
-        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("acos({input})"))
-        },
-    }),
+    elementwise: None,
     reduction: None,
-    emits_nan: false,
-    notes: "Fusion planner emits WGSL acos calls; providers can substitute custom kernels when available.",
+    emits_nan: true,
+    notes: "Fusion is disabled because real input outside [-1, 1] must promote to a complex result instead of producing NaN.",
 };
 
 #[runtime_builtin(
     name = "acos",
-    category = "math/trigonometry",
-    summary = "Element-wise inverse cosine, with complex promotion outside [-1, 1].",
-    keywords = "acos,inverse cosine,arccos,gpu",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::acos::ACOS_DESCRIPTOR),
-    extensions(ACOS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::trigonometry::acos::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::trigonometry::acos"
 )]
-async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
+async fn acos_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<RootedValue> {
+    let _input = RootedValueLease::for_values(std::iter::once(&value))
+        .map_err(|cause| cause.into_runtime_error())?;
     super::inverse_helpers::reject_excess_outputs(BUILTIN_NAME)?;
     super::inverse_helpers::ensure_input_extensions(
         &value,
@@ -204,7 +86,34 @@ async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
         &ACOS_LOGICAL_INPUT_EXTENSION,
         &ACOS_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "acos")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::ACOS_CATALOG_ENTRY.identity,
+        &runmat_builtins::ACOS_ERROR_INVALID_INPUT,
+    )?;
+    crate::builtins::common::real_unary_preparation::execute(
+        runtime.as_ref(),
+        &runmat_builtins::ACOS_CATALOG_ENTRY,
+        runmat_types::ScalarUnaryMath::Acos,
+        crate::context::preparation::RealUnaryPublication::AutomaticComplexHost,
+        super::inverse_helpers::real_fallback::adapter(
+            BUILTIN_NAME,
+            &ACOS_GPU_REAL_COMPLEX_EXTENSION,
+            &runmat_builtins::ACOS_ERROR_INTERNAL,
+        ),
+        value,
+        true,
+        |value: f32| Ok(acos_real_matlab_f32(value)),
+        |value: f64| Ok(acos_real_matlab(value)),
+        |value| async move {
+            let output = acos_execute(value).await?;
+            RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
+        },
+    )
+    .await
+}
+
+async fn acos_execute(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => acos_gpu(handle).await,
         Value::Complex(re, im) => Ok(acos_complex_value(re, im)),
@@ -219,97 +128,85 @@ async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return super::inverse_helpers::resident_complex::compute(handle, BUILTIN_NAME, |value| {
+            match value {
+                Value::Complex(re, im) => Ok(acos_complex_value(re, im)),
+                Value::ComplexTensor(tensor) => acos_complex_tensor(tensor),
+                other => acos_real(other),
+            }
+        })
+        .await;
+    }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
-        return super::inverse_helpers::gather_compute_restore(
+        return super::inverse_helpers::real_fallback::compute(
             handle,
             BUILTIN_NAME,
+            &ACOS_GPU_REAL_COMPLEX_EXTENSION,
             acos_tensor_real,
         )
         .await;
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle).await {
-            Ok(false) => {
-                if let Ok(out) = provider.unary_acos(&handle).await {
-                    return Ok(Value::GpuTensor(out));
+        match detect_gpu_requires_complex(provider, &handle).await? {
+            Some(false) => match provider.unary_acos(&handle).await {
+                Ok(output) => {
+                    return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
+                        provider,
+                        &handle,
+                        output,
+                        BUILTIN_NAME,
+                    )
                 }
-            }
-            Ok(true) => {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &ACOS_GPU_REAL_COMPLEX_EXTENSION,
-                    BUILTIN_NAME,
-                )?;
-                return super::inverse_helpers::gather_compute_restore(
+                Err(error) if gpu_helpers::provider_hook_allows_host_fallback(&error) => {}
+                Err(error) => {
+                    return Err(acos_error_with_detail(
+                        &ACOS_ERROR_INTERNAL,
+                        format!("provider unary_acos failed: {error}"),
+                    ))
+                }
+            },
+            Some(true) => {
+                return super::inverse_helpers::real_fallback::compute(
                     handle,
                     BUILTIN_NAME,
+                    &ACOS_GPU_REAL_COMPLEX_EXTENSION,
                     acos_tensor_real,
                 )
                 .await;
             }
-            Err(_) => {
+            None => {
                 // Fall back to host path below.
             }
         }
     }
-    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, acos_tensor_real).await
+    super::inverse_helpers::real_fallback::compute(
+        handle,
+        BUILTIN_NAME,
+        &ACOS_GPU_REAL_COMPLEX_EXTENSION,
+        acos_tensor_real,
+    )
+    .await
 }
 
 async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> BuiltinResult<bool> {
-    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
-        acos_error_with_detail(&ACOS_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
-    })?;
-    let max_handle = match provider.reduce_max(handle).await {
-        Ok(handle) => handle,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            return Err(acos_error_with_detail(
-                &ACOS_ERROR_INTERNAL,
-                format!("reduce_max failed: {err}"),
-            ));
-        }
-    };
-    let min_host = match gpu_helpers::download_native_values_async(provider, &min_handle).await {
-        Ok(host) => host,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(acos_error_with_detail(
-                &ACOS_ERROR_INTERNAL,
-                format!("reduce_min download failed: {err}"),
-            ));
-        }
-    };
-    let max_host = match gpu_helpers::download_native_values_async(provider, &max_handle).await {
-        Ok(host) => host,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(acos_error_with_detail(
-                &ACOS_ERROR_INTERNAL,
-                format!("reduce_max download failed: {err}"),
-            ));
-        }
-    };
-    let _ = provider.free(&min_handle);
-    let _ = provider.free(&max_handle);
-    if min_host.data.iter().any(|value| value.is_nan())
-        || max_host.data.iter().any(|value| value.is_nan())
-    {
-        return Err(acos_error_with_detail(
-            &ACOS_ERROR_INTERNAL,
-            "reduction results contained NaN",
-        ));
-    }
-    Ok(min_host
-        .data
-        .iter()
-        .chain(&max_host.data)
-        .any(|value| value.is_outside_closed_unit_interval(DOMAIN_TOL)))
+) -> BuiltinResult<Option<bool>> {
+    super::inverse_helpers::resident_range::requires_complex(
+        provider,
+        handle,
+        super::inverse_helpers::resident_range::RealDomain::ClosedUnitInterval,
+        gpu_helpers::RealProbeDiagnostic {
+            builtin: runmat_builtins::ACOS_CATALOG_ENTRY.identity,
+            internal_error: &ACOS_ERROR_INTERNAL,
+        },
+    )
+    .await
 }
 
 fn acos_real(value: Value) -> BuiltinResult<Value> {
@@ -322,14 +219,8 @@ fn acos_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     super::inverse_helpers::map_real_tensor_promoting(
         tensor,
         BUILTIN_NAME,
-        |value| {
-            let (real, imag) = acos_real_matlab(value);
-            (zero_small(real), zero_small(imag))
-        },
-        |value| {
-            let (real, imag) = acos_real_matlab_f32(value);
-            (zero_small_f32(real), zero_small_f32(imag))
-        },
+        acos_real_matlab,
+        acos_real_matlab_f32,
     )
 }
 
@@ -372,7 +263,7 @@ fn acos_real_matlab_f32(x: f32) -> (f32, f32) {
 
 fn acos_complex_value(re: f64, im: f64) -> Value {
     let result = Complex64::new(re, im).acos();
-    Value::Complex(zero_small(result.re), zero_small(result.im))
+    Value::Complex(result.re, result.im)
 }
 
 fn acos_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -381,42 +272,29 @@ fn acos_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         BUILTIN_NAME,
         |(real, imag)| {
             let result = Complex64::new(real, imag).acos();
-            (zero_small(result.re), zero_small(result.im))
+            (result.re, result.im)
         },
         |(real, imag)| {
             let result = num_complex::Complex32::new(real, imag).acos();
-            (zero_small_f32(result.re), zero_small_f32(result.im))
+            (result.re, result.im)
         },
     )?;
     Ok(crate::builtins::common::random_args::complex_tensor_into_value(tensor))
 }
 
 fn acos_char_array(ca: CharArray) -> BuiltinResult<Value> {
-    if ca.data.is_empty() {
+    if ca.data().is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
             .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = ca
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| acos_error_with_detail(&ACOS_ERROR_INTERNAL, e))?;
     acos_tensor_real(tensor)
-}
-
-fn zero_small(value: f64) -> f64 {
-    if value.abs() < ZERO_EPS {
-        0.0
-    } else {
-        value
-    }
-}
-
-fn zero_small_f32(value: f32) -> f32 {
-    if value.abs() < ZERO_EPS as f32 {
-        0.0
-    } else {
-        value
-    }
 }
 
 #[cfg(test)]
@@ -424,41 +302,82 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn acos_builtin(value: Value) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::acos_builtin(value))
+        block_on(super::acos_builtin(None, value)).map(|owned| owned.value().clone())
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn acos_preserves_low_rank_real_and_complex_promotion_shapes() {
+        let scalar = acos_builtin(Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()))
+            .expect("rank-zero real acos");
+        let Value::Num(scalar) = scalar else {
+            panic!("expected real scalar")
+        };
+        assert!((scalar - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+
+        let vector = acos_builtin(Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()))
+            .expect("rank-one real acos");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one real tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        let real_values = vector.materialize_f64();
+        assert!((real_values[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert_eq!(real_values[1], 0.0);
+
+        let promoted_scalar =
+            acos_builtin(Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()))
+                .expect("rank-zero complex promotion");
+        let Value::Complex(real, imaginary) = promoted_scalar else {
+            panic!("expected complex scalar")
+        };
+        assert_eq!(real, 0.0);
+        assert_eq!(imaginary, -2.0f64.acosh());
+
+        let promoted = acos_builtin(Value::Tensor(Tensor::new(vec![0.0, 2.0], vec![2]).unwrap()))
+            .expect("rank-one complex promotion");
+        let Value::ComplexTensor(promoted) = promoted else {
+            panic!("expected rank-one complex tensor")
+        };
+        assert_eq!(promoted.shape(), &[2]);
+        let values = promoted.materialize_f64();
+        assert!((values[0].0 - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert_eq!(values[0].1, 0.0);
+        assert_eq!(values[1], (0.0, -2.0f64.acosh()));
     }
 
     #[test]
     fn acos_extensions_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let integer = block_on(super::acos_builtin(Value::Int(runmat_value::IntValue::I8(
-            1,
-        ))))
+        let integer = block_on(super::acos_builtin(
+            None,
+            Value::Int(runmat_value::IntValue::I8(1)),
+        ))
         .expect_err("integer input must be gated");
         assert_eq!(
             integer.identifier(),
             ACOS_INTEGER_INPUT_EXTENSION.error_identifier
         );
-        let logical = block_on(super::acos_builtin(Value::Bool(true)))
+        let logical = block_on(super::acos_builtin(None, Value::Bool(true)))
             .expect_err("logical input must be gated");
         assert_eq!(
             logical.identifier(),
             ACOS_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
-        let character = block_on(super::acos_builtin(Value::CharArray(chars)))
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
+        let character = block_on(super::acos_builtin(None, Value::CharArray(chars)))
             .expect_err("character input must be gated");
         assert_eq!(
             character.identifier(),
             ACOS_CHARACTER_INPUT_EXTENSION.error_identifier
         );
-        let _outputs = crate::output_count::push_output_count(Some(2));
-        let arity =
-            block_on(super::acos_builtin(Value::Num(0.0))).expect_err("excess outputs must reject");
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let arity = block_on(super::acos_builtin(None, Value::Num(0.0)))
+            .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), ACOS_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
@@ -486,33 +405,6 @@ pub(crate) mod tests {
         assert!(labels.contains(&"Y = acos(X)"));
     }
 
-    #[test]
-    fn acos_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn acos_type_scalar_tensor_returns_num() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Num);
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acos_scalar_within_domain() {
@@ -521,6 +413,26 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 0.5f64.acos()).abs() < 1e-12),
             other => panic!("unexpected result {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn acos_preserves_real_nan_and_small_complex_components() {
+        let Value::Num(result) = acos_builtin(Value::Num(f64::NAN)).expect("NaN acos") else {
+            panic!("real NaN input must remain real")
+        };
+        assert!(result.is_nan());
+
+        let input = Complex64::new(1.0, 1e-14);
+        let expected = input.acos();
+        let Value::Complex(real, imag) =
+            acos_builtin(Value::Complex(input.re, input.im)).expect("complex acos")
+        else {
+            panic!("complex input must remain complex")
+        };
+        assert_eq!(real, expected.re);
+        assert_eq!(imag, expected.im);
+        assert_ne!(imag, 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -599,7 +511,7 @@ pub(crate) mod tests {
         let result = acos_builtin(Value::Tensor(tensor)).expect("acos matrix");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [
                     0.0f64.acos(),
                     (-0.5f64).acos(),
@@ -625,7 +537,7 @@ pub(crate) mod tests {
 
         match acos_builtin(Value::Tensor(tensor)).expect("acos") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [std::f64::consts::PI, std::f64::consts::FRAC_PI_2, 0.0];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -644,7 +556,7 @@ pub(crate) mod tests {
 
         match acos_builtin(Value::Tensor(tensor)).expect("acos") {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 let expected = acos_real_matlab(2.0);
                 assert!((out.materialize_f64()[0].0 - expected.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - expected.1).abs() < 1e-12);
@@ -692,7 +604,7 @@ pub(crate) mod tests {
     fn acos_char_array_complex_promotion() {
         // 'B' has ASCII code 66, which is > 1, so complex promotion is required.
         // MATLAB: acos(66) = 0 - i * acosh(66)
-        let chars = CharArray::new("B".chars().collect(), 1, 1).expect("char");
+        let chars = CharArray::from_unicode_scalars("B".chars().collect(), 1, 1).expect("char");
         let result = acos_builtin(Value::CharArray(chars)).expect("acos char");
         match result {
             Value::Complex(re, im) => {
@@ -734,12 +646,30 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn acos_integer_scalar() {
-        let result = acos_builtin(Value::Int(IntValue::I32(1))).expect("acos int");
-        match result {
-            Value::Num(v) => assert!(v.abs() < 1e-12),
-            other => panic!("unexpected result {other:?}"),
+    fn acos_all_integer_scalar_classes_cross_the_double_boundary() {
+        for value in [
+            IntValue::I8(1),
+            IntValue::I16(1),
+            IntValue::I32(1),
+            IntValue::I64(1),
+            IntValue::U8(1),
+            IntValue::U16(1),
+            IntValue::U32(1),
+            IntValue::U64(1),
+        ] {
+            assert_eq!(
+                acos_builtin(Value::Int(value)).expect("acos int"),
+                Value::Num(0.0)
+            );
         }
+        let Value::Complex(real, imag) =
+            acos_builtin(Value::Int(IntValue::U64(u64::MAX))).expect("wide acos")
+        else {
+            panic!("wide integer should produce complex double")
+        };
+        let expected = acos_real_matlab(u64::MAX as f64);
+        assert_eq!(real, expected.0);
+        assert_eq!(imag, expected.1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -763,12 +693,22 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, -0.75, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = acos_builtin(Value::GpuTensor(handle)).expect("acos gpu");
-            let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            let Value::GpuTensor(result_handle) =
+                acos_builtin(Value::GpuTensor(handle)).expect("acos gpu")
+            else {
+                panic!("expected resident result")
+            };
+            assert_eq!(result_handle.device_id(), provider.device_id());
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&result_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
+            let gathered = test_support::gather(Value::GpuTensor(result_handle)).expect("gather");
+            assert_eq!(gathered.shape(), &[2, 2]);
             let expected = [
                 0.0f64.acos(),
                 0.5f64.acos(),
@@ -785,19 +725,29 @@ pub(crate) mod tests {
     #[test]
     fn acos_gpu_outside_domain_falls_back() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.2, -1.3], vec![2, 1]).unwrap();
+            let tensor = Tensor::new(vec![1.0 + 5e-13, -1.3], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let result = acos_builtin(Value::GpuTensor(handle)).expect("acos gpu complex");
-            assert!(matches!(result, Value::GpuTensor(_)));
+            let Value::GpuTensor(result_handle) =
+                acos_builtin(Value::GpuTensor(handle)).expect("acos gpu complex")
+            else {
+                panic!("expected resident complex result")
+            };
+            assert_eq!(result_handle.device_id(), provider.device_id());
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&result_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
+            let result = Value::GpuTensor(result_handle);
             let gathered = block_on(crate::dispatcher::gather_if_needed_async(&result))
                 .expect("gather complex result");
             match gathered {
                 Value::ComplexTensor(ct) => {
-                    assert_eq!(ct.shape, vec![2, 1]);
+                    assert_eq!(ct.shape(), &[2, 1]);
                 }
                 Value::Complex(_, _) => {}
                 other => panic!("expected complex result, got {other:?}"),
@@ -809,25 +759,23 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn acos_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
         let t = Tensor::new(vec![-1.0, -0.5, 0.0, 0.5, 1.0], vec![5, 1]).unwrap();
         let cpu = acos_real(Value::Tensor(t.clone())).expect("acos cpu");
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let h = provider.upload(&view).unwrap();
         let gpu = block_on(acos_gpu(h)).expect("acos gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                assert_eq!(gt.shape(), ct.shape());
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,
                 };

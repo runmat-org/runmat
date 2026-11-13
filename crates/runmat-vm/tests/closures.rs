@@ -5,7 +5,7 @@ use test_helpers::execute_source;
 
 fn execute_source_with_extensions(
     source: &str,
-) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(source).map_err(Box::new)
 }
@@ -46,8 +46,10 @@ fn feval_with_string_handle() {
 
 #[test]
 fn feval_with_string_handle_resolves_local_semantic_function() {
-    let vars =
-        execute_source("function y = inc(x); y = x + 1; end; r = feval('@inc', 2);").unwrap();
+    let vars = execute_source_with_extensions(
+        "function y = inc(x); y = x + 1; end; r = feval('@inc', 2);",
+    )
+    .unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -444,7 +446,7 @@ fn lsqcurvefit_accepts_anonymous_curve_model() {
     )
     .unwrap();
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 1.0).abs() < 1e-5)
+        matches!(v, runmat_value::Value::Tensor(t) if t.shape() == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 1.0).abs() < 1e-5)
     }));
 }
 
@@ -453,7 +455,7 @@ fn lsqnonlin_accepts_anonymous_residual_function() {
     let vars =
         execute_source("r = @(x) [x(1)-2; x(2)-3; x(1)+x(2)-5]; x = lsqnonlin(r, [0;0]);").unwrap();
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 3.0).abs() < 1e-5)
+        matches!(v, runmat_value::Value::Tensor(t) if t.shape() == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 3.0).abs() < 1e-5)
     }));
 }
 
@@ -491,8 +493,11 @@ fn fminbnd_accepts_optimset_options() {
 
 #[test]
 fn fsolve_accepts_anonymous_vector_function() {
+    // The symmetric diagonal has a singular Jacobian and can terminate at a
+    // stationary non-root. Use the same nonsingular seed as the runtime's
+    // semantic callback witness; keep both original root residual oracles.
     let vars =
-        execute_source("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);")
+        execute_source("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1.5; 0.5]);")
             .unwrap();
     assert!(vars.iter().any(|v| {
         if let runmat_value::Value::Tensor(t) = v {

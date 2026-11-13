@@ -1,116 +1,19 @@
 //! MATLAB-compatible `strlength` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRLENGTH_DESCRIPTOR, STRLENGTH_ERROR_INTERNAL,
+    STRLENGTH_ERROR_INVALID_CELL_ELEMENT, STRLENGTH_ERROR_INVALID_INPUT,
+    STRLENGTH_ERROR_TOO_MANY_OUTPUTS,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::{
-    contains_numeric_or_resident_text_input, is_missing_string,
-};
-use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strlength")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "strlength",
-    op_kind: GpuOpKind::Custom("string-metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Measures string lengths on the CPU; any GPU-resident inputs are gathered before evaluation.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strlength")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "strlength",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: true,
-    notes: "Metadata-only builtin; not eligible for fusion and never emits GPU kernels.",
-};
-
 const BUILTIN_NAME: &str = "strlength";
-
-const STRLENGTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "L",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Character counts for each text element.",
-}];
-
-const STRLENGTH_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String array, character array, or cell array of text scalars.",
-}];
-
-const STRLENGTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "L = strlength(str)",
-    inputs: &STRLENGTH_INPUT,
-    outputs: &STRLENGTH_OUTPUT,
-}];
-
-const STRLENGTH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRLENGTH.INVALID_INPUT",
-    identifier: Some("RunMat:strlength:InvalidInput"),
-    when: "Input is not a string array, character array, or cell array of text scalars.",
-    message: "strlength: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const STRLENGTH_ERROR_INVALID_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRLENGTH.INVALID_CELL_ELEMENT",
-    identifier: Some("RunMat:strlength:InvalidCellElement"),
-    when: "A cell-array element is not a character row vector or scalar string.",
-    message: "strlength: cell array elements must be character vectors or string scalars",
-};
-
-const STRLENGTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRLENGTH.INTERNAL",
-    identifier: Some("RunMat:strlength:InternalError"),
-    when: "Internal tensor construction failed while building length results.",
-    message: "strlength: internal error",
-};
-
-const STRLENGTH_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STRLENGTH_ERROR_INVALID_INPUT,
-    STRLENGTH_ERROR_INVALID_CELL_ELEMENT,
-    STRLENGTH_ERROR_INTERNAL,
-];
-
-pub const STRLENGTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRLENGTH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRLENGTH_ERRORS,
-};
-
-pub const STRLENGTH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "strlength measures string, character, and cellstr input and returns double character counts. Integer and resident numeric inputs reject before provider access and are never interpreted as character codes.",
-    };
 
 fn strlength_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strlength_error_with_message(error.message, error)
@@ -133,16 +36,15 @@ fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strlength",
-    category = "strings/core",
-    summary = "Count characters in each element of text inputs.",
-    keywords = "strlength,string length,text,count,characters",
-    accel = "sink",
-    type_resolver(numeric_text_scalar_or_tensor_type),
-    descriptor(crate::builtins::strings::core::strlength::STRLENGTH_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::strlength::STRLENGTH_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
 async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &STRLENGTH_DESCRIPTOR,
+        &STRLENGTH_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if contains_numeric_or_resident_text_input(&value) {
         return Err(strlength_error(&STRLENGTH_ERROR_INVALID_INPUT));
     }
@@ -151,7 +53,7 @@ async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
         .map_err(remap_strlength_flow)?;
     match gathered {
         Value::StringArray(array) => strlength_string_array(array),
-        Value::String(text) => Ok(Value::Num(string_scalar_length(&text))),
+        Value::String(text) => Ok(Value::Num(string_scalar_length(text.as_str()))),
         Value::CharArray(array) => strlength_char_array(array),
         Value::Cell(cell) => strlength_cell_array(cell),
         _ => Err(strlength_error(&STRLENGTH_ERROR_INVALID_INPUT)),
@@ -159,10 +61,10 @@ async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn strlength_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let mut lengths = Vec::with_capacity(data.len());
     for text in &data {
-        lengths.push(string_scalar_length(text));
+        lengths.push(string_scalar_length(text.as_str()));
     }
     let tensor =
         Tensor::new(lengths, shape).map_err(|_| strlength_error(&STRLENGTH_ERROR_INTERNAL))?;
@@ -186,17 +88,17 @@ fn strlength_char_array(array: CharArray) -> BuiltinResult<Value> {
 }
 
 fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut lengths = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {
             let idx = row * cols + col;
             let value: &Value = &data[idx];
             let length = match value {
-                Value::String(text) => string_scalar_length(text),
-                Value::StringArray(sa) if sa.data.len() == 1 => string_scalar_length(&sa.data[0]),
+                Value::String(text) => string_scalar_length(text.as_str()),
+                Value::StringArray(sa) if sa.data().len() == 1 => {
+                    string_scalar_length(sa.data()[0].as_str())
+                }
                 Value::CharArray(char_vec) if char_vec.rows == 1 => char_vec.cols as f64,
                 Value::CharArray(_) => {
                     return Err(strlength_error(&STRLENGTH_ERROR_INVALID_CELL_ELEMENT));
@@ -211,11 +113,10 @@ fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn string_scalar_length(text: &str) -> f64 {
-    if is_missing_string(text) {
-        f64::NAN
-    } else {
-        text.chars().count() as f64
+fn string_scalar_length(text: Option<&str>) -> f64 {
+    match text {
+        None => f64::NAN,
+        Some(text) => text.chars().count() as f64,
     }
 }
 
@@ -223,8 +124,8 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
     let cols = array.cols;
     let mut end = cols;
     while end > 0 {
-        let ch = array.data[row * cols + end - 1];
-        if ch == ' ' {
+        let ch = array.data()[row * cols + end - 1];
+        if ch.raw() == u16::from(b' ') {
             end -= 1;
         } else {
             break;
@@ -236,7 +137,6 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn strlength_builtin(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::strlength_builtin(value))
@@ -244,6 +144,18 @@ pub(crate) mod tests {
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strlength_rejects_excess_outputs_before_measuring() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error =
+            strlength_builtin(Value::String("text".into())).expect_err("fixed output bound");
+        assert_eq!(
+            error.identifier(),
+            STRLENGTH_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -256,11 +168,15 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strlength_string_array_with_missing() {
-        let array = StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![2, 1]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec!["alpha".into(), runmat_value::StringElement::Missing],
+            vec![2, 1],
+        )
+        .unwrap();
         let result = strlength_builtin(Value::StringArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64().len(), 2);
                 assert_eq!(tensor.materialize_f64()[0], 5.0);
                 assert!(tensor.materialize_f64()[1].is_nan());
@@ -273,11 +189,11 @@ pub(crate) mod tests {
     #[test]
     fn strlength_char_array_multiple_rows() {
         let data: Vec<char> = vec!['c', 'a', 't', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
-        let array = CharArray::new(data, 2, 5).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 5).unwrap();
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -288,7 +204,7 @@ pub(crate) mod tests {
     #[test]
     fn strlength_char_vector_retains_explicit_spaces() {
         let data: Vec<char> = "hi   ".chars().collect();
-        let array = CharArray::new(data, 1, 5).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 1, 5).unwrap();
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         assert_eq!(result, Value::Num(5.0));
     }
@@ -308,7 +224,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::Cell(cell)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape(), &[1, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -322,7 +238,7 @@ pub(crate) mod tests {
             vec![
                 Value::String("alpha".into()),
                 Value::String("beta".into()),
-                Value::String("<missing>".into()),
+                Value::String(runmat_value::StringElement::Missing),
             ],
             1,
             3,
@@ -331,7 +247,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::Cell(cell)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), &[1, 3]);
                 assert_eq!(tensor.materialize_f64().len(), 3);
                 assert_eq!(tensor.materialize_f64()[0], 5.0);
                 assert_eq!(tensor.materialize_f64()[1], 4.0);
@@ -352,7 +268,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::StringArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 2]);
+                assert_eq!(tensor.shape(), &[2, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 3.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -363,11 +279,11 @@ pub(crate) mod tests {
     #[test]
     fn strlength_char_array_trims_padding() {
         let data: Vec<char> = vec!['d', 'o', 'g', ' ', ' ', 'h', 'o', 'r', 's', 'e'];
-        let array = CharArray::new(data, 2, 5).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 5).unwrap();
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -392,13 +308,5 @@ pub(crate) mod tests {
         .unwrap();
         let err = error_message(strlength_builtin(Value::Cell(cell)).unwrap_err());
         assert_eq!(err, STRLENGTH_ERROR_INVALID_CELL_ELEMENT.message);
-    }
-
-    #[test]
-    fn strlength_type_is_numeric_text_scalar_or_tensor() {
-        assert_eq!(
-            numeric_text_scalar_or_tensor_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::Num
-        );
     }
 }

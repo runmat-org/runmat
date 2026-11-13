@@ -120,6 +120,324 @@ fn async_frozen_handoff_matches_native_stable_state() {
 }
 
 #[test]
+fn broad_source_roots_respect_only_loaded_package_ownership_boundaries() {
+    for right_relative in ["deps/left/nested/right", "deps/right"] {
+        let temp = TempDir::new().unwrap();
+        for (name, relative, number) in [("left", "deps/left", 10), ("right", right_relative, 20)] {
+            let root = temp.path().join(relative);
+            fs::create_dir_all(&root).unwrap();
+            fs::write(
+                root.join("runmat.toml"),
+                format!(
+                    "[package]\nname = '{name}'\n[sources]\nroots = {}\n",
+                    if cfg!(unix) && name == "left" {
+                        "['.', 'shared-src']"
+                    } else {
+                        "['.']"
+                    }
+                ),
+            )
+            .unwrap();
+            fs::write(
+                root.join("shared.m"),
+                format!("function y = shared(x); y = x + {number}; end"),
+            )
+            .unwrap();
+        }
+        fs::create_dir_all(temp.path().join("ordinary")).unwrap();
+        // An unreferenced manifest is not an admitted package boundary.
+        fs::write(
+            temp.path().join("ordinary/runmat.toml"),
+            "not a loaded manifest",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("ordinary/helper.m"),
+            "function y = helper(); y = 1; end",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("main.m"),
+            "r = left.shared(1) + right.shared(1);",
+        )
+        .unwrap();
+        let roots = if cfg!(unix) {
+            "['.', 'dep-alias', 'ordinary-alias']"
+        } else {
+            "['.']"
+        };
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(temp.path().join("deps/left"), temp.path().join("dep-alias"))
+            .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            temp.path().join(right_relative),
+            temp.path().join("deps/left/shared-src"),
+        )
+        .unwrap();
+        // An intentional source-root link into an ordinary, unloaded directory
+        // still belongs to this package; not every resolved alias is excluded.
+        #[cfg(unix)]
+        let ordinary_link = TempDir::new().unwrap();
+        #[cfg(unix)]
+        {
+            fs::write(
+                ordinary_link.path().join("linked_helper.m"),
+                "function y=linked_helper(); y=7; end",
+            )
+            .unwrap();
+            fs::write(
+                ordinary_link.path().join("runmat.toml"),
+                "not a loaded manifest",
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(ordinary_link.path(), temp.path().join("ordinary-alias"))
+                .unwrap();
+        }
+        let manifest_path = temp.path().join("runmat.toml");
+        fs::write(&manifest_path, format!(
+        "[package]\nname = 'app'\n[sources]\nroots = {roots}\n[dependencies]\nleft = {{ path = 'deps/left' }}\nright = {{ path = '{right_relative}' }}\n"
+    )).unwrap();
+        let sync = build_frozen_project(&manifest_path, BTreeSet::new()).unwrap();
+        let asynchronous =
+            block_on(build_frozen_project_async(&manifest_path, BTreeSet::new())).unwrap();
+        assert_eq!(sync.sources, asynchronous.sources);
+        assert_eq!(sync.graph, asynchronous.graph);
+        let own_sources = if cfg!(unix) { 3 } else { 2 };
+        assert_eq!(sync.all_sources().count(), own_sources + 2);
+        assert_eq!(
+            sync.access_paths.values().collect::<BTreeSet<_>>().len(),
+            own_sources + 2
+        );
+        for package in sync.sources.packages.values() {
+            assert_eq!(
+                package.sources.len(),
+                if package.local_name == "app" {
+                    own_sources
+                } else {
+                    1
+                }
+            );
+            assert!(package
+                .sources
+                .iter()
+                .all(|source| source.function_qualified_name().is_none()));
+        }
+        let symbols =
+            runmat_package::source_symbols_from_frozen(&sync, &temp.path().join("main.m"));
+        assert!(symbols.symbols.contains("left.shared"));
+        assert!(symbols.symbols.contains("right.shared"));
+        assert!(!symbols.symbols.contains("shared"));
+        // The native walker obeys the identical graph-supplied boundary contract.
+        let manifest = runmat_config::project::load_project_manifest(&manifest_path).unwrap();
+        let index = runmat_config::project::build_project_source_index_excluding(
+            &temp.path().canonicalize().unwrap(),
+            &manifest,
+            &[
+                temp.path().join("deps/left").canonicalize().unwrap(),
+                temp.path().join(right_relative).canonicalize().unwrap(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(index.files.len(), own_sources);
+    }
+}
+
+#[test]
+fn native_interface_artifacts_are_frozen_across_dependency_packages() {
+    let (temp, manifest) = fixture();
+    let helper = temp.path().join("deps/helper");
+    fs::create_dir_all(helper.join("native")).unwrap();
+    fs::write(helper.join("native/helper.json"), b"manifest").unwrap();
+    fs::write(helper.join("native/helper.bin"), b"library").unwrap();
+    let dependency_manifest = fs::read_to_string(helper.join("runmat.toml")).unwrap();
+    fs::write(
+        helper.join("runmat.toml"),
+        format!(
+            "{dependency_manifest}\n[native-interfaces.helper]\nmanifest = \"native/helper.json\"\nlibrary = \"native/helper.bin\"\n"
+        ),
+    )
+    .unwrap();
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::NativeLibrary]),
+    )
+    .unwrap();
+    let [interface] = frozen.native_interfaces.as_slice() else {
+        panic!("expected one dependency-owned native interface");
+    };
+    assert_eq!(interface.name, "helper");
+    assert_eq!(
+        interface.manifest_path,
+        helper.join("native/helper.json").canonicalize().unwrap()
+    );
+    assert_eq!(
+        interface.library_path,
+        helper.join("native/helper.bin").canonicalize().unwrap()
+    );
+    assert_eq!(
+        interface.manifest_digest,
+        runmat_package::ContentDigest::sha256(b"manifest")
+    );
+    assert_eq!(
+        interface.library_digest,
+        runmat_package::ContentDigest::sha256(b"library")
+    );
+}
+
+#[test]
+fn native_interface_packages_require_native_library_capability() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::create_dir_all(temp.path().join("native")).unwrap();
+    fs::write(temp.path().join("src/main.m"), "x = 1;\n").unwrap();
+    fs::write(temp.path().join("native/interface.json"), b"manifest").unwrap();
+    fs::write(temp.path().join("native/library.bin"), b"library").unwrap();
+    fs::write(
+        temp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "native-package"
+
+[sources]
+roots = ["src"]
+
+[native-interfaces.fixture]
+manifest = "native/interface.json"
+library = "native/library.bin"
+"#,
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&temp.path().join("runmat.toml"), BTreeSet::new())
+        .expect_err("portable host must reject native package");
+    assert!(error.to_string().contains("native-library"));
+}
+
+#[test]
+fn java_artifacts_are_frozen_and_require_a_jvm() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("lib")).unwrap();
+    fs::write(temp.path().join("lib/fixture.jar"), b"exact-jar").unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!("{root_manifest}\n[java-artifacts.fixture]\npath = \"lib/fixture.jar\"\n"),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a JVM package");
+    assert!(error.to_string().contains("jvm"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Jvm]),
+    )
+    .unwrap();
+    let [artifact] = frozen.java_artifacts.as_slice() else {
+        panic!("expected one Java artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(
+        artifact.digest,
+        runmat_package::ContentDigest::sha256(b"exact-jar")
+    );
+    assert_eq!(
+        artifact.path,
+        temp.path().join("lib/fixture.jar").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn python_artifacts_are_frozen_and_require_python() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("python")).unwrap();
+    fs::write(
+        temp.path().join("python/fixture-1.0-py3-none-any.whl"),
+        b"exact-wheel",
+    )
+    .unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{root_manifest}\n[python-artifacts.fixture]\npath = \"python/fixture-1.0-py3-none-any.whl\"\nmodule = \"fixture\"\n"
+        ),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a Python package");
+    assert!(error.to_string().contains("python"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Python]),
+    )
+    .unwrap();
+    let [artifact] = frozen.python_artifacts.as_slice() else {
+        panic!("expected one Python artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(artifact.module, "fixture");
+    assert_eq!(
+        artifact.digest,
+        runmat_package::ContentDigest::sha256(b"exact-wheel")
+    );
+    assert_eq!(
+        artifact.path,
+        temp.path()
+            .join("python/fixture-1.0-py3-none-any.whl")
+            .canonicalize()
+            .unwrap()
+    );
+}
+
+#[test]
+fn mex_artifacts_are_frozen_and_require_mex_capability() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("mex")).unwrap();
+    fs::write(temp.path().join("mex/fixture.mex.runmat.json"), b"manifest").unwrap();
+    fs::write(temp.path().join("mex/fixture.mex"), b"module").unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{root_manifest}\n[mex-artifacts.fixture]\nmanifest = \"mex/fixture.mex.runmat.json\"\nmodule = \"mex/fixture.mex\"\n"
+        ),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a MEX package");
+    assert!(error.to_string().contains("mex"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Mex]),
+    )
+    .unwrap();
+    let [artifact] = frozen.mex_artifacts.as_slice() else {
+        panic!("expected one MEX artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(
+        artifact.manifest_digest,
+        runmat_package::ContentDigest::sha256(b"manifest")
+    );
+    assert_eq!(
+        artifact.module_digest,
+        runmat_package::ContentDigest::sha256(b"module")
+    );
+    assert_eq!(
+        artifact.module_path,
+        temp.path().join("mex/fixture.mex").canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn missing_dependency_manifest_is_a_package_loader_error() {
     let temp = TempDir::new().unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();

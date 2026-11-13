@@ -1,11 +1,17 @@
 use runmat_value::Value;
 
 use crate::builtins::math::signal::common::{parse_scalar_f64, value_to_complex_vector};
+use crate::RuntimeError;
 
 const EPS: f64 = 1.0e-12;
 const GOLDEN_RATIO_CONJUGATE: f64 = 0.381_966_011_250_105_1;
 const DB_TO_NEPER: f64 = std::f64::consts::LN_10 / 10.0;
 pub(crate) const MAX_ORDER: usize = 1024;
+
+pub(crate) enum OrderEdgeError {
+    Invalid(String),
+    Operational(Box<RuntimeError>),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FilterKind {
@@ -25,24 +31,28 @@ pub(crate) async fn real_edges(
     builtin_name: &'static str,
     label: &'static str,
     value: Value,
-) -> Result<Vec<f64>, String> {
+) -> Result<Vec<f64>, OrderEdgeError> {
     let input = value_to_complex_vector(builtin_name, label, value)
         .await
-        .map_err(|err| err.message().to_string())?;
+        .map_err(|source| OrderEdgeError::Operational(Box::new(source)))?;
     if input.data.len() != 1 && input.data.len() != 2 {
-        return Err(format!("{label} must be a scalar or two-element vector"));
+        return Err(OrderEdgeError::Invalid(format!(
+            "{label} must be a scalar or two-element vector"
+        )));
     }
     let mut out = Vec::with_capacity(input.data.len());
     for value in input.data {
         if value.im.abs() > EPS || !value.re.is_finite() || value.re <= 0.0 {
-            return Err(format!(
+            return Err(OrderEdgeError::Invalid(format!(
                 "{label} entries must be positive finite real values"
-            ));
+            )));
         }
         out.push(value.re);
     }
     if out.len() == 2 && out[0] >= out[1] {
-        return Err(format!("{label} edge vector must be strictly increasing"));
+        return Err(OrderEdgeError::Invalid(format!(
+            "{label} edge vector must be strictly increasing"
+        )));
     }
     Ok(out)
 }
@@ -60,22 +70,27 @@ pub(crate) fn parse_positive_db(
     Ok(parsed)
 }
 
-pub(crate) fn option_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.trim().to_ascii_lowercase()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].trim().to_ascii_lowercase())
+pub(crate) fn option_text(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Some(text.trim().to_ascii_lowercase())
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .trim()
+                    .to_ascii_lowercase(),
+            )
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
-            chars
-                .data
-                .iter()
-                .collect::<String>()
+            runmat_value::decode_utf16_code_units(chars.data())?
                 .trim()
                 .to_ascii_lowercase(),
         ),
         _ => None,
-    }
+    })
 }
 
 pub(crate) fn classify_kind(wp: &[f64], ws: &[f64]) -> Result<FilterKind, String> {

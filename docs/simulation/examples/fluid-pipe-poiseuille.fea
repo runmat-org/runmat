@@ -1,0 +1,48 @@
+// Hagen-Poiseuille flow in a round pipe of radius 0.05 m: developed u = 2 U (1 - r^2/R^2) and
+// dp/dx = -8 mu U / R^2.
+geometry pipe {
+    file = "./geometry/pipe.step"
+    units = m
+    region fluid : cell { select result; expect exactly_one }
+    region wall : face { select name "Wall"; expect exactly_one }
+    region outlet : face { select name "Outlet"; expect exactly_one }
+    region inlet : face { select name "Inlet"; expect exactly_one }
+}
+
+mesh pipe on geometry.pipe {
+    tetrahedra {
+        order = linear
+        target_size = 0.008 m
+        maximum_deviation = 0.0005 m
+    }
+}
+
+material oil {
+    mass_density = 1000 kg/m^3
+    fluid {
+        law = incompressible_newtonian
+        dynamic_viscosity = 1 Pa*s
+    }
+}
+
+model round_pipe {
+    assign material.oil to geometry.pipe.region.fluid
+    constraint inlet {
+        fluid.velocity { target = geometry.pipe.region.inlet; value = [0.01 m/s, 0 m/s, 0 m/s] }
+    }
+    constraint wall { fluid.no_slip_wall { target = geometry.pipe.region.wall } }
+    load outlet {
+        fluid.outlet_pressure { target = geometry.pipe.region.outlet; value = 0 Pa }
+    }
+}
+
+study pipe_poiseuille {
+    geometry = geometry.pipe
+    mesh = mesh.pipe
+    model = model.round_pipe
+    analysis flow { fluid steady {} }
+    output velocity = analysis.flow.field.cell.fluid_velocity
+    output pressure = analysis.flow.field.cell.fluid_pressure
+    output peak_speed = max(magnitude(output.velocity), over = geometry.pipe.region.fluid)
+    output inlet_pressure = max(output.pressure, over = geometry.pipe.region.fluid)
+}

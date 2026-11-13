@@ -1,0 +1,54 @@
+// Lid-driven cavity at Re = 100 (Ghia, Ghia and Shin 1982). A unit square section with a thin
+// spanwise slab closed by symmetry planes, so the flow is the two-dimensional benchmark flow.
+geometry cavity {
+    file = "./geometry/cavity-slab.step"
+    units = m
+    region fluid : cell { select result; expect exactly_one }
+    region left : face { select name "Left wall"; expect exactly_one }
+    region right : face { select name "Right wall"; expect exactly_one }
+    region bottom : face { select name "Bottom wall"; expect exactly_one }
+    region lid : face { select name "Lid"; expect exactly_one }
+    region back : face { select name "Back"; expect exactly_one }
+    region front : face { select name "Front"; expect exactly_one }
+}
+
+mesh cavity on geometry.cavity {
+    tetrahedra {
+        order = linear
+        target_size = 0.02 m
+        maximum_deviation = 0.001 m
+    }
+}
+
+material benchmark_fluid {
+    mass_density = 1 kg/m^3
+    fluid {
+        law = incompressible_newtonian
+        dynamic_viscosity = 0.01 Pa*s
+    }
+}
+
+model driven_cavity {
+    assign material.benchmark_fluid to geometry.cavity.region.fluid
+    constraint lid {
+        fluid.moving_wall { target = geometry.cavity.region.lid; value = [1 m/s, 0 m/s, 0 m/s] }
+    }
+    constraint left { fluid.no_slip_wall { target = geometry.cavity.region.left } }
+    constraint right { fluid.no_slip_wall { target = geometry.cavity.region.right } }
+    constraint bottom { fluid.no_slip_wall { target = geometry.cavity.region.bottom } }
+    constraint back { fluid.symmetry { target = geometry.cavity.region.back } }
+    constraint front { fluid.symmetry { target = geometry.cavity.region.front } }
+    constraint datum {
+        fluid.pressure_reference { target = geometry.cavity.region.bottom; value = 0 Pa }
+    }
+}
+
+study cavity_re100 {
+    geometry = geometry.cavity
+    mesh = mesh.cavity
+    model = model.driven_cavity
+    analysis flow { fluid steady {} }
+    output velocity = analysis.flow.field.cell.fluid_velocity
+    output pressure = analysis.flow.field.cell.fluid_pressure
+    output peak_speed = max(magnitude(output.velocity), over = geometry.cavity.region.fluid)
+}

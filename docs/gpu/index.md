@@ -62,7 +62,11 @@ Feasible CPU and provider candidates are compared using complete component costs
 
 For multi-region work, the same planner partitions a bounded, topologically ordered candidate graph and includes transfer costs between each producer's output residency and each consumer's execution location. Admission accounts for simultaneously live intermediates, scratch memory, reclaimable allocations, known queue capacity, cancellation, and the host allocation supplied by the execution scheduler. Search limits fail safely to a legal local plan. Repeated decisions and timing feedback are owned by one `RunMatSession`, use exact program/provider/policy/runtime-fact and resource snapshots, and apply confidence, variance, hysteresis, and optional bounded transactional exploration without sharing mutable policy between sessions.
 
-Embedding hosts can explicitly snapshot and restore the session's bounded placement profile. The portable profile contains only digests, candidate identities, aggregate timings, counts, and logical ticks; it contains no source text, paths, tensor contents, user identity, or wall-clock timestamp, and RunMat does not persist or transmit it implicitly.
+These budgets govern admitted RunMat-managed allocations, not total process
+memory. Internal shader-compiler, graphics-driver and browser allocations are
+outside that host-byte limit. See the [memory budget boundary](/docs/runtime/gpu/wgpu#memory-budget-boundary).
+
+Embedding hosts can explicitly snapshot and restore the session's bounded placement profile. The portable profile contains digests, typed candidate kinds, aggregate timings, counts, logical ticks, and caller-supplied operation and candidate labels. Keep sensitive data out of those labels. RunMat adds no dedicated source, path, tensor-content, user-identity, or wall-clock fields and does not persist or transmit the profile implicitly. Timings are matched by signature key, candidate identity, and candidate kind, so CPU and provider observations remain separate. Restoring an unsupported profile schema returns an error; RunMat does not infer missing candidate kinds from names.
 
 The Rust API exposes `placement_report()` for local diagnostics. Reports correlate candidate, selection, transfer, completion, and fallback events, retain bounded histories, and use stable reason tokens and numeric attributes. They do not include source text, paths, tensor contents, user identifiers, or arbitrary provider error messages.
 
@@ -73,6 +77,8 @@ Fusion reduces synchronization and memory traffic by grouping compatible operati
 For the VM-side fusion planner, stack layout, and handle cleanup behavior, see [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion).
 
 ## wgpu Backend
+
+Provider implementors should also read [Numeric upload ownership](/docs/runtime/gpu/numeric-upload) for typed transfers, borrowed-handle protection, rejection cleanup, and the `upload_numeric_raw` implementation contract.
 
 The `WgpuProvider` owns the active `wgpu::Device`, `wgpu::Queue`, adapter metadata, pipeline caches, buffer table, and operation modules. It implements the `AccelProvider` trait and exposes provider-owned buffers for zero-copy consumers such as plotting when the backend supports it.
 

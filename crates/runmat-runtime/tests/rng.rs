@@ -30,7 +30,7 @@ fn randn_single_stats_are_unit() {
     )
     .expect("randn single");
 
-    let Value::Tensor(tensor) = tensor_value else {
+    let Value::Tensor(tensor) = tensor_value.value() else {
         panic!("expected tensor result from randn single");
     };
     assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
@@ -50,7 +50,7 @@ fn randn_double_stats_are_unit() {
     let tensor_value = runmat_runtime::call_builtin("randn", &[Value::Num(count), Value::Num(1.0)])
         .expect("randn double");
 
-    let Value::Tensor(tensor) = tensor_value else {
+    let Value::Tensor(tensor) = tensor_value.value() else {
         panic!("expected tensor result from randn double");
     };
     assert_eq!(tensor.numeric_dtype(), NumericDType::F64);

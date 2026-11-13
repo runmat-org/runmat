@@ -9,13 +9,15 @@ use runmat_meshing_core::{
 };
 
 mod lineage;
+mod node_projection;
 mod point_location;
 mod preserved_boundary;
 #[cfg(test)]
 mod tests;
 
 use lineage::{build_coarsening_lineage, build_refinement_lineage};
-use point_location::build_volume_element_transfers;
+use node_projection::build_node_transfers;
+use point_location::{build_volume_element_transfers, PointLocationWork};
 use preserved_boundary::require_unchanged_boundaries;
 
 use super::{
@@ -44,10 +46,12 @@ impl Default for DelaunayAdaptiveTransferOptions {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayAdaptiveTransferErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidLineage,
     InvalidArtifact,
     UnsupportedBoundaryChange,
+    UnsupportedGeometry,
     ProjectionFailure,
     ResourceLimit,
     Cancelled,
@@ -111,6 +115,9 @@ pub fn build_refinement_solver_adaptation(
     )
     .map_err(|failure| {
         let kind = match failure.kind {
+            DelaunayAdaptiveRefinementErrorKind::Accounting(cause) => {
+                DelaunayAdaptiveTransferErrorKind::Accounting(cause)
+            }
             DelaunayAdaptiveRefinementErrorKind::InvalidOptions => {
                 DelaunayAdaptiveTransferErrorKind::InvalidOptions
             }
@@ -179,6 +186,9 @@ pub fn build_coarsening_solver_adaptation(
     )
     .map_err(|failure| {
         let kind = match failure.kind {
+            DelaunayAdaptiveCoarseningErrorKind::Accounting(cause) => {
+                DelaunayAdaptiveTransferErrorKind::Accounting(cause)
+            }
             DelaunayAdaptiveCoarseningErrorKind::InvalidOptions => {
                 DelaunayAdaptiveTransferErrorKind::InvalidOptions
             }
@@ -244,8 +254,15 @@ fn build_map(
         ));
     }
 
+    let mut work = PointLocationWork::new(options, cancellation);
+    if source_artifact.resolved_request.element_order == runmat_meshing_core::ElementOrder::Tet10
+        || target_artifact.resolved_request.element_order
+            == runmat_meshing_core::ElementOrder::Tet10
+    {
+        node_transfers = build_node_transfers(source_artifact, target_artifact, &mut work)?;
+    }
     let volume_element_transfers =
-        build_volume_element_transfers(source_artifact, target_artifact, options, cancellation)?;
+        build_volume_element_transfers(source_artifact, target_artifact, &mut work)?;
     let transfer = SolverMeshTransferMap {
         schema_version: SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
         source_artifact_digest: source_artifact.canonical_digest,
@@ -283,13 +300,11 @@ fn validate_projection(
         .topology
         .nodes
         .iter()
-        .map(|node| (node.stable_identity, node.coordinates_m))
+        .map(|node| (node.stable_identity, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
-    if topology
-        .nodes
-        .iter()
-        .any(|node| artifact_nodes.get(&node.identity).copied() != Some(node.coordinates_m))
-    {
+    if topology.nodes.iter().any(|node| {
+        artifact_nodes.get(&node.identity).copied() != Some(node.coordinates_m.canonical_value())
+    }) {
         return Err(invalid_artifact(
             "solver corner coordinates do not exactly project the adaptive CDT nodes",
         ));

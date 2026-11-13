@@ -1,3 +1,5 @@
+pub(crate) mod read_buffers;
+
 use std::collections::HashMap;
 
 use runmat_execution::Digest;
@@ -31,6 +33,40 @@ impl MemoryCache {
 }
 
 impl CacheImport for MemoryCache {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if let Some(bytes) = self.objects.get(&digest) {
+            if maximum_bytes == 0 || bytes.len() as u64 > maximum_bytes {
+                return Err(runmat_execution_artifact::ArtifactError::Limit(
+                    "test read exceeds admitted bound".into(),
+                ));
+            }
+            admit(bytes.len() as u64)?;
+            return Ok(Some(bytes.clone()));
+        }
+        Ok(None)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if maximum_bytes == 0
+            || self
+                .objects
+                .get(&digest)
+                .is_some_and(|bytes| bytes.len() as u64 > maximum_bytes)
+        {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "test read exceeds admitted bound".into(),
+            ));
+        }
+        Ok(self.objects.get(&digest).cloned())
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.objects.get(&digest).cloned())
     }

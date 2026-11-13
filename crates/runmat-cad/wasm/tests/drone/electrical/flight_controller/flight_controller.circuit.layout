@@ -1,0 +1,1593 @@
+runmat 0.7
+std 1
+
+use circuit flight_controller
+
+layout flight_controller {
+    stackup rigid {
+        finish = ENIG
+        layer "F.Mask" = { kind = mask, thickness = 0.02, material = solder_mask }
+        layer "F.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "dielectric 1" = { kind = prepreg, thickness = 0.48521, material = { name = "FR-4 prepreg", dk = 4.1, df = 0.02, conductivity = 0, k_inplane = 0.8, k_through = 0.3, density = 1850, cp = 1100, cte_ppm = 14 } }
+        layer "In1.Cu" = { kind = copper, thickness = 0.017395, weight = 0.5, material = copper }
+        layer "dielectric 2" = { kind = core, thickness = 0.48521, material = fr4 }
+        layer "In2.Cu" = { kind = copper, thickness = 0.017395, weight = 0.5, material = copper }
+        layer "dielectric 3" = { kind = prepreg, thickness = 0.48521, material = { name = "FR-4 prepreg", dk = 4.1, df = 0.02, conductivity = 0, k_inplane = 0.8, k_through = 0.3, density = 1850, cp = 1100, cte_ppm = 14 } }
+        layer "B.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "B.Mask" = { kind = mask, thickness = 0.02, material = solder_mask }
+    }
+    outline = [[-17, -18], [17, -18], [18, -17], [18, 17], [17, 18], [-17, 18], [-18, 17], [-18, -17]]
+    limits = { clearance = 0.1, track = 0.1, via_diameter = 0.45, drill = 0.2, annular = 0.1, hole_to_hole = 0.25, copper_to_edge = 0.3, silk_to_pad = 0.1, microvia_drill = 0.1 }
+    fabrication = { preset = fab_house, part_number = "CD-EL-710", zip = true }
+    net_class digital = { track_width = 0.1 mm, clearance = 0.1 mm }
+    net_class power = { track_width = 0.4 mm, clearance = 0.15 mm }
+    net_class supply = { track_width = 0.25 mm, clearance = 0.1 mm }
+    net "/mcu/OSC_IN"
+    net GND : supply
+    net "/mcu/OSC_OUT"
+    net "+3V3" : supply
+    net "/mcu/VCAP"
+    net "/mcu/NRST"
+    net VBAT : power
+    net "/pwr/BST"
+    net "/pwr/SW" : power
+    net "+5V" : power
+    net "/pwr/FB"
+    net VBAT_SENSE
+    net "/mcu/LED1_K"
+    net "/mcu/LED2_K"
+    net "/conn/VBUS"
+    net "/conn/CC1"
+    net USB_DP
+    net USB_DN
+    net "/conn/CC2"
+    net RC_RX
+    net RC_TX
+    net CURR
+    net TLM
+    net M1
+    net M2
+    net M3
+    net M4
+    net VTX_TX
+    net VTX_RX
+    net GPS_VCC : supply
+    net GPS_TX
+    net GPS_RX
+    net I2C_SCL
+    net I2C_SDA
+    net "/mcu/BOOT0"
+    net "/mcu/LED1"
+    net "/mcu/LED2"
+    net "/pwr/EN"
+    net IMU_INT
+    net IMU_CS
+    net SPI_SCK
+    net SPI_MISO
+    net SPI_MOSI
+    footprint C1 = { package = C_0402_1005Metric_IPCN, at = [-7.8, 11.2], value = "12 pF ±5%", pads = { "1" = "/mcu/OSC_IN", "2" = GND }, properties = { "param:capacitance" = "12 pF ±5%", "param:voltage_rating" = "50 V" } }
+    footprint C2 = { package = C_0402_1005Metric_IPCN, at = [-7.8, 9.6], value = "12 pF ±5%", pads = { "1" = "/mcu/OSC_OUT", "2" = GND }, properties = { "param:capacitance" = "12 pF ±5%", "param:voltage_rating" = "50 V" } }
+    footprint C3 = { package = C_0402_1005Metric_IPCN, at = [1, 7.9], value = "100 nF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C4 = { package = C_0402_1005Metric_IPCN, at = [6.9, 2], rotation = 90, value = "100 nF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C5 = { package = C_0402_1005Metric_IPCN, at = [1, -3.9], value = "100 nF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C6 = { package = C_0402_1005Metric_IPCN, at = [-4.9, 2], rotation = 90, value = "100 nF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C7 = { package = C_0402_1005Metric_IPCN, at = [2.6, 7.9], value = "1 µF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "1 µF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C8 = { package = C_0402_1005Metric_IPCN, at = [-4.9, 4], rotation = 90, value = "100 nF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C9 = { package = C_0402_1005Metric_IPCN, at = [-5.5, 0], rotation = 90, value = "1 µF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "1 µF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C10 = { package = C_0603_1608Metric_IPCN, at = [7.2, -1.6], rotation = 90, value = "4.7 µF ±10%", pads = { "1" = "/mcu/VCAP", "2" = GND }, properties = { "param:capacitance" = "4.7 µF ±10%", "param:voltage_rating" = "25 V" } }
+    footprint C11 = { package = C_0402_1005Metric_IPCN, at = [-4.9, -1.8], rotation = 90, value = "100 nF ±10%", pads = { "1" = "/mcu/NRST", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C12 = { package = C_1206_3216Metric_IPCN, at = [-11.6, -7.8], rotation = 90, value = "10 µF ±10%", pads = { "1" = VBAT, "2" = GND }, properties = { "param:capacitance" = "10 µF ±10%", "param:voltage_rating" = "50 V" } }
+    footprint C13 = { package = C_1206_3216Metric_IPCN, at = [-11.6, -2.8], rotation = 90, value = "10 µF ±10%", pads = { "1" = VBAT, "2" = GND }, properties = { "param:capacitance" = "10 µF ±10%", "param:voltage_rating" = "50 V" } }
+    footprint C14 = { package = C_0402_1005Metric_IPCN, at = [-5.4, -10.2], rotation = 90, value = "100 nF ±10%", pads = { "1" = "/pwr/BST", "2" = "/pwr/SW" }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C15 = { package = C_0805_2012Metric_IPCN, at = [-4.6, -13.4], rotation = 90, value = "22 µF ±20%", pads = { "1" = "+5V", "2" = GND }, properties = { "param:capacitance" = "22 µF ±20%", "param:voltage_rating" = "10 V" } }
+    footprint C16 = { package = C_0805_2012Metric_IPCN, at = [-2.4, -13.4], rotation = 90, value = "22 µF ±20%", pads = { "1" = "+5V", "2" = GND }, properties = { "param:capacitance" = "22 µF ±20%", "param:voltage_rating" = "10 V" } }
+    footprint C17 = { package = C_0402_1005Metric_IPCN, at = [-6.4, -5.2], rotation = 90, value = "220 pF ±5%", pads = { "1" = "+5V", "2" = "/pwr/FB" }, properties = { "param:capacitance" = "220 pF ±5%", "param:voltage_rating" = "50 V" } }
+    footprint C18 = { package = C_0402_1005Metric_IPCN, at = [-8, 3.4], value = "1 µF ±10%", pads = { "1" = "+5V", "2" = GND }, properties = { "param:capacitance" = "1 µF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C19 = { package = C_0402_1005Metric_IPCN, at = [-8, -1.4], value = "1 µF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "1 µF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C20 = { package = C_0402_1005Metric_IPCN, at = [-11.4, 5.6], rotation = 90, value = "100 nF ±10%", pads = { "1" = VBAT_SENSE, "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C21 = { package = C_0402_1005Metric_IPCN, at = [10, 7], value = "100 nF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C22 = { package = C_0402_1005Metric_IPCN, at = [10, 2.2], value = "1 µF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "1 µF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C23 = { package = C_0402_1005Metric_IPCN, at = [8.2, -4.3], rotation = 90, value = "100 nF ±10%", pads = { "1" = "+3V3", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint D1 = { package = LED_0603_1608Metric_IPCN, at = [7, 10.8], pads = { "1" = "/mcu/LED1_K", "2" = GND } }
+    footprint D2 = { package = LED_0603_1608Metric_IPCN, at = [10.6, 10.8], pads = { "1" = "/mcu/LED2_K", "2" = GND } }
+    footprint D3 = { package = D_1206_3216Metric_IPCN, at = [13.6, -8.6], rotation = 90, pads = { "1" = "+5V", "2" = "/conn/VBUS" } }
+    footprint H1 = { package = "MountingHole_3.6mm_Pad4.6mm", at = [-15.25, -15.25] }
+    footprint H2 = { package = "MountingHole_3.6mm_Pad4.6mm", at = [15.25, -15.25] }
+    footprint H3 = { package = "MountingHole_3.6mm_Pad4.6mm", at = [15.25, 15.25] }
+    footprint H4 = { package = "MountingHole_3.6mm_Pad4.6mm", at = [-15.25, 15.25] }
+    footprint J1 = { package = "USB-C_1x12_P0.5mm", at = [4, -13.5], pads = { "1" = GND, "11" = "/conn/VBUS", "12" = GND, "2" = "/conn/VBUS", "3" = "/conn/CC1", "4" = USB_DP, "5" = USB_DN, "6" = USB_DP, "7" = USB_DN, "9" = "/conn/CC2", MP1 = GND, MP2 = GND } }
+    footprint J2 = { package = "JST-SH_1x04_P1mm", at = [-14.8, 6.5], rotation = 270, pads = { "1" = "+5V", "2" = GND, "3" = RC_RX, "4" = RC_TX } }
+    footprint J3 = { package = "JST-SH_1x08_P1mm", at = [0, 14.8], rotation = 180, pads = { "1" = VBAT, "2" = GND, "3" = CURR, "4" = TLM, "5" = M1, "6" = M2, "7" = M3, "8" = M4 } }
+    footprint J4 = { package = "JST-SH_1x04_P1mm", at = [14.8, 8], rotation = 90, pads = { "1" = "+5V", "2" = GND, "3" = VTX_TX, "4" = VTX_RX } }
+    footprint J5 = { package = "JST-SH_1x06_P1mm", at = [14.8, -1], rotation = 90, pads = { "1" = GPS_VCC, "2" = GPS_TX, "3" = GPS_RX, "4" = I2C_SCL, "5" = I2C_SDA, "6" = GND } }
+    footprint L1 = { package = L_1210_3225Metric_IPCN, at = [-8.3, -13.4], value = "10 µH ±20%", pads = { "1" = "/pwr/SW", "2" = "+5V" }, properties = { "param:inductance" = "10 µH ±20%" } }
+    footprint R1 = { package = R_0402_1005Metric_IPCN, at = [5, 7.9], value = "10 kΩ ±1%", pads = { "1" = "/mcu/BOOT0", "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint R2 = { package = R_0402_1005Metric_IPCN, at = [-1.8, -8.8], rotation = 90, value = "5.1 kΩ ±1%", pads = { "1" = "/conn/CC1", "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "5.1 kΩ ±1%" } }
+    footprint R3 = { package = R_0402_1005Metric_IPCN, at = [10, -9], rotation = 90, value = "5.1 kΩ ±1%", pads = { "1" = "/conn/CC2", "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "5.1 kΩ ±1%" } }
+    footprint R4 = { package = R_0402_1005Metric_IPCN, at = [7, 12.6], value = "1 kΩ ±1%", pads = { "1" = "/mcu/LED1", "2" = "/mcu/LED1_K" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "1 kΩ ±1%" } }
+    footprint R5 = { package = R_0402_1005Metric_IPCN, at = [10.6, 12.6], value = "1 kΩ ±1%", pads = { "1" = "/mcu/LED2", "2" = "/mcu/LED2_K" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "1 kΩ ±1%" } }
+    footprint R6 = { package = R_0402_1005Metric_IPCN, at = [-5.2, -5.2], rotation = 90, value = "52.3 kΩ ±1%", pads = { "1" = "+5V", "2" = "/pwr/FB" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "52.3 kΩ ±1%" } }
+    footprint R7 = { package = R_0402_1005Metric_IPCN, at = [-4, -5.2], rotation = 90, value = "10 kΩ ±1%", pads = { "1" = "/pwr/FB", "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint R8 = { package = R_0402_1005Metric_IPCN, at = [-12.6, -11.2], rotation = 90, value = "100 kΩ ±1%", pads = { "1" = VBAT, "2" = "/pwr/EN" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "100 kΩ ±1%" } }
+    footprint R9 = { package = R_0402_1005Metric_IPCN, at = [-11.4, 1.4], rotation = 90, value = "200 kΩ ±1%", pads = { "1" = VBAT, "2" = VBAT_SENSE }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "200 kΩ ±1%" } }
+    footprint R10 = { package = R_0402_1005Metric_IPCN, at = [-11.4, 3.6], rotation = 90, value = "10 kΩ ±1%", pads = { "1" = VBAT_SENSE, "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint R11 = { package = R_0402_1005Metric_IPCN, at = [8.6, -5.6], value = "4.7 kΩ ±1%", pads = { "1" = "+3V3", "2" = I2C_SCL }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "4.7 kΩ ±1%" } }
+    footprint R12 = { package = R_0402_1005Metric_IPCN, at = [10.4, -5.6], value = "4.7 kΩ ±1%", pads = { "1" = "+3V3", "2" = I2C_SDA }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "4.7 kΩ ±1%" } }
+    footprint R13 = { package = R_0402_1005Metric_IPCN, at = [-6.2, -1.8], rotation = 90, value = "10 kΩ ±1%", pads = { "1" = "/mcu/NRST", "2" = "+3V3" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint U1 = { package = "LQFP-48_7x7mm_P0.5mm_IPCN", at = [1, 2], pads = { "1" = "+3V3", "10" = VBAT_SENSE, "11" = IMU_INT, "12" = RC_TX, "13" = RC_RX, "14" = IMU_CS, "15" = SPI_SCK, "16" = SPI_MISO, "17" = SPI_MOSI, "19" = CURR, "2" = "/mcu/LED1", "21" = TLM, "22" = "/mcu/VCAP", "23" = GND, "24" = "+3V3", "25" = GPS_TX, "26" = GPS_RX, "3" = "/mcu/LED2", "30" = VTX_TX, "31" = VTX_RX, "32" = USB_DN, "33" = USB_DP, "35" = GND, "36" = "+3V3", "40" = M3, "41" = M4, "42" = M1, "43" = M2, "44" = "/mcu/BOOT0", "45" = I2C_SCL, "46" = I2C_SDA, "47" = GND, "48" = "+3V3", "5" = "/mcu/OSC_IN", "6" = "/mcu/OSC_OUT", "7" = "/mcu/NRST", "8" = GND, "9" = "+3V3" } }
+    footprint U2 = { package = "SOT-23-6_IPCN", at = [-8, -8.4], pads = { "1" = "/pwr/BST", "2" = GND, "3" = "/pwr/FB", "4" = "/pwr/EN", "5" = VBAT, "6" = "/pwr/SW" } }
+    footprint U3 = { package = "SOT-23-5_IPCN", at = [-8, 1], pads = { "1" = "+5V", "2" = GND, "3" = "+5V", "5" = "+3V3" } }
+    footprint U4 = { package = "DFN-14_3x2.5mm_P0.5mm_IPCN", at = [10, 4.6], pads = { "1" = SPI_MISO, "13" = SPI_SCK, "14" = IMU_CS, "2" = SPI_MOSI, "4" = IMU_INT, "5" = "+3V3", "6" = GND, "7" = GND, "8" = "+3V3" } }
+    footprint U5 = { package = "DFN-8_2x2.5mm_P0.65mm_IPCN", at = [10.4, -2.4], pads = { "1" = GND, "2" = "+3V3", "3" = I2C_SDA, "4" = I2C_SCL, "5" = GND, "6" = "+3V3", "7" = GND, "8" = "+3V3" } }
+    footprint Y1 = { package = C_1210_3225Metric_IPCN, at = [-4, 10.4], value = "16 MHz ±0.002%", pads = { "1" = "/mcu/OSC_IN", "2" = "/mcu/OSC_OUT" }, properties = { "param:frequency" = "16 MHz ±0.002%", "param:load_capacitance" = "10 pF" } }
+    track USB_DP = { layer = F.Cu, width = 0.12, from = [2.75, -17.15], to = [2.75, -15.6] }
+    track USB_DP = { layer = F.Cu, width = 0.12, from = [3.75, -17.15], to = [3.75, -14.6] }
+    track USB_DP = { layer = B.Cu, width = 0.12, from = [2.75, -15.6], to = [2.75, -14.6] }
+    track USB_DP = { layer = B.Cu, width = 0.12, from = [2.75, -14.6], to = [3.75, -14.6] }
+    track USB_DN = { layer = F.Cu, width = 0.12, from = [3.25, -17.15], to = [3.25, -13.6] }
+    track USB_DN = { layer = F.Cu, width = 0.12, from = [4.25, -17.15], to = [4.25, -13.6] }
+    track USB_DN = { layer = F.Cu, width = 0.12, from = [4.25, -13.6], to = [3.25, -13.6] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-3.125, 0.75], to = [-4.6, 0.75] }
+    track USB_DN = { layer = F.Cu, width = 0.2, from = [5.125, 2.75], to = [4.325, 2.65] }
+    track USB_DN = { layer = F.Cu, width = 0.2, from = [4.325, 2.65], to = [4.225, 2.65] }
+    track USB_DN = { layer = F.Cu, width = 0.2, from = [4.225, 2.65], to = [4.025, 2.45] }
+    track USB_DN = { layer = F.Cu, width = 0.2, from = [4.025, 2.45], to = [4.025, -1.1] }
+    track USB_DN = { layer = F.Cu, width = 0.2, from = [4.025, -1.1], to = [4.225, -1.3] }
+    track USB_DN = { layer = F.Cu, width = 0.2, from = [4.225, -1.3], to = [4.225, -13.55] }
+    track USB_DN = { layer = F.Cu, width = 0.2, from = [4.225, -13.55], to = [4.25, -13.6] }
+    track USB_DP = { layer = F.Cu, width = 0.2, from = [5.125, 3.25], to = [5.925, 3.15] }
+    track USB_DP = { layer = F.Cu, width = 0.2, from = [5.925, 3.15], to = [6.025, 3.15] }
+    track USB_DP = { layer = F.Cu, width = 0.2, from = [6.025, 3.15], to = [6.225, 2.95] }
+    track USB_DP = { layer = F.Cu, width = 0.2, from = [6.225, 2.95], to = [6.225, -12.15] }
+    track USB_DP = { layer = F.Cu, width = 0.2, from = [6.225, -12.15], to = [4.675, -13.7] }
+    track USB_DP = { layer = B.Cu, width = 0.2, from = [4.675, -13.7], to = [3.875, -14.5] }
+    track USB_DP = { layer = B.Cu, width = 0.2, from = [3.875, -14.5], to = [3.75, -14.6] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.5, 16.925], to = [0.7, 16.175] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.7, 16.175], to = [0.7, 11.025] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [0.7, 11.025], to = [4.15, 7.575] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [4.15, 7.575], to = [4.15, 5.075] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [4.15, 5.075], to = [2.35, 3.275] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [2.35, 3.275], to = [2.35, -1.325] }
+    track TLM = { layer = F.Cu, width = 0.2, from = [2.35, -1.325], to = [2.25, -2.125] }
+    track IMU_CS = { layer = F.Cu, width = 0.19, from = [-1.25, -2.125], to = [-1.15, -1.325] }
+    track IMU_CS = { layer = F.Cu, width = 0.2, from = [-1.15, -1.325], to = [-1.15, -1.225] }
+    track IMU_CS = { layer = F.Cu, width = 0.2, from = [-1.15, -1.225], to = [1.9, 1.825] }
+    track IMU_CS = { layer = B.Cu, width = 0.2, from = [1.9, 1.825], to = [5.3, 5.225] }
+    track IMU_CS = { layer = F.Cu, width = 0.2, from = [5.3, 5.225], to = [6.55, 6.475] }
+    track IMU_CS = { layer = F.Cu, width = 0.2, from = [6.55, 6.475], to = [9.45, 6.475] }
+    track IMU_CS = { layer = F.Cu, width = 0.2, from = [9.45, 6.475], to = [9.8, 6.125] }
+    track IMU_CS = { layer = F.Cu, width = 0.2, from = [9.8, 6.125], to = [10.6, 6.125] }
+    track IMU_CS = { layer = F.Cu, width = 0.19, from = [10.6, 6.125], to = [11, 6.125] }
+    track IMU_CS = { layer = F.Cu, width = 0.19, from = [11, 6.125], to = [11.4025, 6.1] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [8.9775, -5.6], to = [9.1775, -5.35] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [9.1775, -5.35], to = [9.4775, -5.05] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [9.4775, -5.05], to = [9.4775, -3.5] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [9.4775, -3.5], to = [9.4975, -3.375] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [16.925, -0.5], to = [16.175, -0.7] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [16.175, -0.7], to = [13.075, -3.8] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [13.075, -3.8], to = [10.325, -3.8] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [10.325, -3.8], to = [9.925, -3.4] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [9.925, -3.4], to = [9.4975, -3.375] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [-0.25, 6.125], to = [-0.15, 5.325] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [-0.15, 5.325], to = [-0.15, 3.175] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [-0.15, 3.175], to = [1.2, 1.825] }
+    track I2C_SCL = { layer = B.Cu, width = 0.2, from = [1.2, 1.825], to = [6.3, -3.275] }
+    track I2C_SCL = { layer = B.Cu, width = 0.2, from = [6.3, -3.275], to = [6.7, -3.275] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [6.7, -3.275], to = [9.1, -3.275] }
+    track I2C_SCL = { layer = F.Cu, width = 0.2, from = [9.1, -3.275], to = [9.4975, -3.375] }
+    track VTX_TX = { layer = F.Cu, width = 0.2, from = [16.925, 8.5], to = [16.175, 8.3] }
+    track VTX_TX = { layer = F.Cu, width = 0.2, from = [16.175, 8.3], to = [12.625, 8.3] }
+    track VTX_TX = { layer = F.Cu, width = 0.2, from = [12.625, 8.3], to = [10.875, 6.55] }
+    track VTX_TX = { layer = B.Cu, width = 0.2, from = [10.875, 6.55], to = [10.575, 6.55] }
+    track VTX_TX = { layer = B.Cu, width = 0.2, from = [10.575, 6.55], to = [5.775, 1.75] }
+    track VTX_TX = { layer = F.Cu, width = 0.2, from = [5.775, 1.75], to = [5.125, 1.75] }
+    track VTX_RX = { layer = F.Cu, width = 0.2, from = [16.925, 9.5], to = [16.175, 9.3] }
+    track VTX_RX = { layer = F.Cu, width = 0.2, from = [16.175, 9.3], to = [12.575, 9.3] }
+    track VTX_RX = { layer = F.Cu, width = 0.2, from = [12.575, 9.3], to = [10.825, 7.55] }
+    track VTX_RX = { layer = B.Cu, width = 0.2, from = [10.825, 7.55], to = [5.525, 2.25] }
+    track VTX_RX = { layer = F.Cu, width = 0.2, from = [5.525, 2.25], to = [5.125, 2.25] }
+    track IMU_INT = { layer = F.Cu, width = 0.19, from = [-3.125, -0.25], to = [-2.325, -0.15] }
+    track IMU_INT = { layer = F.Cu, width = 0.2, from = [-2.325, -0.15], to = [-1.475, -0.15] }
+    track IMU_INT = { layer = F.Cu, width = 0.2, from = [-1.475, -0.15], to = [0.525, 1.85] }
+    track IMU_INT = { layer = B.Cu, width = 0.2, from = [0.525, 1.85], to = [4.375, 5.7] }
+    track IMU_INT = { layer = B.Cu, width = 0.2, from = [4.375, 5.7], to = [5.525, 5.7] }
+    track IMU_INT = { layer = B.Cu, width = 0.2, from = [5.525, 5.7], to = [5.975, 5.25] }
+    track IMU_INT = { layer = F.Cu, width = 0.2, from = [5.975, 5.25], to = [7.575, 5.25] }
+    track IMU_INT = { layer = F.Cu, width = 0.2, from = [7.575, 5.25], to = [7.875, 4.95] }
+    track IMU_INT = { layer = F.Cu, width = 0.19, from = [7.875, 4.95], to = [8.175, 4.65] }
+    track IMU_INT = { layer = F.Cu, width = 0.19, from = [8.175, 4.65], to = [8.5975, 4.6] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-7.4225, 11.2], to = [-6.84, 11.2] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-7.4225, 9.6], to = [-6.84, 9.6] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [0.6225, 7.9], to = [0.04, 7.9] }
+    track GND = { layer = F.Cu, width = 0.25, from = [1.3775, 7.9], to = [1.3775, 8.51] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [6.9, 1.6225], to = [6.9, 1.04] }
+    track GND = { layer = F.Cu, width = 0.25, from = [6.9, 2.3775], to = [7.51, 2.3775] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [0.6225, -3.9], to = [0.04, -3.9] }
+    track GND = { layer = F.Cu, width = 0.25, from = [1.3775, -3.9], to = [1.96, -3.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-4.9, 1.6225], to = [-4.9, 0.09] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-4.9, 2.3775], to = [-4.9, 2.96] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [2.2225, 7.9], to = [2.2225, 8.51] }
+    track GND = { layer = F.Cu, width = 0.25, from = [2.9775, 7.9], to = [2.9775, 7.29] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-4.9, 3.6225], to = [-4.29, 3.6225] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-4.9, 4.3775], to = [-4.9, 4.96] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-5.5, -0.3775], to = [-5.5, -0.96] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-5.5, 0.3775], to = [-5.5, 0.96] }
+    track GND = { layer = F.Cu, width = 0.25, from = [7.2, -0.85], to = [7.2, -0.045] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-4.9, -1.4225], to = [-4.9, -0.84] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-11.6, -6.375], to = [-11.6, -5.42] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-11.6, -1.375], to = [-11.6, -0.42] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-4.6, -14.225], to = [-4.6, -15.18] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-4.6, -12.575], to = [-4.6, -11.62] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-2.4, -14.225], to = [-2.4, -15.18] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-2.4, -12.575], to = [-2.4, -11.62] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-6.4, -5.5775], to = [-6.4, -6.16] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-8.3775, 3.4], to = [-8.96, 3.4] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-7.6225, 3.4], to = [-7.04, 3.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-8.3775, -1.4], to = [-8.96, -1.4] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-7.6225, -1.4], to = [-7.04, -1.4] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-11.4, 5.9775], to = [-11.4, 6.56] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [9.6225, 7], to = [9.04, 7] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [9.6225, 2.2], to = [9.04, 2.2] }
+    track GND = { layer = F.Cu, width = 0.25, from = [10.3775, 2.2], to = [10.96, 2.2] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [8.2, -4.6775], to = [8.2, -5.26] }
+    track GND = { layer = F.Cu, width = 0.25, from = [8.2, -3.9225], to = [8.81, -3.9225] }
+    track GND = { layer = F.Cu, width = 0.25, from = [7.75, 10.8], to = [8.555, 10.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [11.35, 10.8], to = [12.155, 10.8] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [13.6, -10.025], to = [13.6, -10.98] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-6.875, -13.4], to = [-5.92, -13.4] }
+    track GND = { layer = F.Cu, width = 0.25, from = [5.3775, 7.9], to = [5.96, 7.9] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-1.8, -8.4225], to = [-1.8, -7.84] }
+    track GND = { layer = F.Cu, width = 0.25, from = [10, -8.6225], to = [10, -8.04] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-5.2, -5.5775], to = [-5.2, -6.16] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-4, -4.8225], to = [-4, -4.24] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-11.4, 3.9775], to = [-11.4, 4.56] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [8.2225, -5.6], to = [7.64, -5.6] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [10.0225, -5.6], to = [10.0225, -4.99] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-6.2, -1.4225], to = [-6.2, -0.84] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-3.125, 4.75], to = [-4.28, 4.75] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [3.75, -2.125], to = [3.75, -3.28] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [5.125, 4.75], to = [6.28, 4.75] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-1.75, 6.125], to = [-1.75, 7.28] }
+    track GND = { layer = F.Cu, width = 0.25, from = [3.25, -2.125], to = [3.25, -3.53] }
+    track GND = { layer = F.Cu, width = 0.25, from = [5.125, 4.25], to = [6.53, 4.25] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-1.25, 6.125], to = [-1.25, 7.53] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-3.125, 1.25], to = [-4.28, 1.25] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-8.885, -8.4], to = [-10, -8.4] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-8.885, 1.95], to = [-8.885, 2.56] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-8.885, 0.05], to = [-8.885, -0.56] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-7.115, 1.95], to = [-7.115, 2.56] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-8.885, 1], to = [-10, 1] }
+    track GND = { layer = F.Cu, width = 0.25, from = [8.5975, 3.1], to = [8.5975, 2.68] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [11.4025, 3.1], to = [11.4025, 2.68] }
+    track GND = { layer = F.Cu, width = 0.25, from = [8.5975, 3.6], to = [8.5975, 3.18] }
+    track GND = { layer = F.Cu, width = 0.25, from = [9.4975, -1.425], to = [9.4975, -0.965] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [11.3025, -1.425], to = [11.3025, -0.965] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [9.4975, -2.075], to = [8.74, -2.075] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [11.3025, -2.725], to = [12.06, -2.725] }
+    track GND = { layer = F.Cu, width = 0.25, from = [11.3025, -2.075], to = [12.06, -2.075] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-8.96, 3.4], to = [-8.86, 3.2] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-8.86, 3.2], to = [-8.86, 2.75] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-8.86, 2.75], to = [-8.885, 2.56] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-6.4, -4.8225], to = [-5.2, -4.8225] }
+    track GND = { layer = F.Cu, width = 0.25, from = [11.3025, -3.375], to = [10.9025, -3.275] }
+    track GND = { layer = F.Cu, width = 0.25, from = [10.9025, -3.275], to = [10.6025, -2.975] }
+    track GND = { layer = F.Cu, width = 0.25, from = [10.6025, -2.975], to = [10.6025, -2.475] }
+    track GND = { layer = F.Cu, width = 0.25, from = [10.6025, -2.475], to = [10.9025, -2.175] }
+    track GND = { layer = F.Cu, width = 0.25, from = [10.9025, -2.175], to = [11.3025, -2.075] }
+    track "/mcu/NRST" = { layer = F.Cu, width = 0.2, from = [-4.9, -2.1775], to = [-6.2, -2.1775] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-5.2, -4.8225], to = [-4.95, -5.0225] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-4.95, -5.0225], to = [-4.7, -5.0225] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-4.7, -5.0225], to = [-4.25, -5.4725] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-4.25, -5.4725], to = [-4, -5.5775] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-11.4, 1.7775], to = [-11.4, 3.2225] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-8.885, 1.95], to = [-9.635, 1.75] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-9.635, 1.75], to = [-10.135, 1.75] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-10.135, 1.75], to = [-10.635, 1.25] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-10.635, 1.25], to = [-10.635, 0.75] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-10.635, 0.75], to = [-9.935, 0.05] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-9.935, 0.05], to = [-8.885, 0.05] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [8.5975, 4.1], to = [8.9975, 4.05] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [8.9975, 4.05], to = [9.2975, 3.75] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [9.2975, 3.75], to = [9.2975, 3.7] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [9.2975, 3.7], to = [9.2975, 3] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [9.2975, 3], to = [9.2975, 2.65] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [9.2975, 2.65], to = [9.0475, 2.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.19, from = [9.0475, 2.4], to = [9.04, 2.2] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-11.4, 5.2225], to = [-11.15, 5.0225] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-11.15, 5.0225], to = [-10.85, 4.7225] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-10.85, 4.7225], to = [-10.85, 3.6725] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-10.85, 3.6725], to = [-11.15, 3.3725] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-11.15, 3.3725], to = [-11.4, 3.2225] }
+    track "/mcu/LED1_K" = { layer = F.Cu, width = 0.2, from = [6.25, 10.8], to = [6.6, 11.25] }
+    track "/mcu/LED1_K" = { layer = F.Cu, width = 0.2, from = [6.6, 11.25], to = [7.35, 12] }
+    track "/mcu/LED1_K" = { layer = F.Cu, width = 0.2, from = [7.35, 12], to = [7.35, 12.35] }
+    track "/mcu/LED1_K" = { layer = F.Cu, width = 0.2, from = [7.35, 12.35], to = [7.3775, 12.6] }
+    track "/mcu/LED2_K" = { layer = F.Cu, width = 0.2, from = [9.85, 10.8], to = [10.2, 11.25] }
+    track "/mcu/LED2_K" = { layer = F.Cu, width = 0.2, from = [10.2, 11.25], to = [10.95, 12] }
+    track "/mcu/LED2_K" = { layer = F.Cu, width = 0.2, from = [10.95, 12], to = [10.95, 12.35] }
+    track "/mcu/LED2_K" = { layer = F.Cu, width = 0.2, from = [10.95, 12.35], to = [10.9775, 12.6] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.6, -9.225], to = [-11.9, -9.825] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.9, -9.825], to = [-11.9, -11.175] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.9, -11.175], to = [-12.3, -11.575] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-12.3, -11.575], to = [-12.35, -11.575] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-12.35, -11.575], to = [-12.6, -11.5775] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-8.1775, 11.2], to = [-8.0275, 10.95] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-8.0275, 10.95], to = [-7.7275, 10.65] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-7.7275, 10.65], to = [-6.0275, 10.65] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-6.0275, 10.65], to = [-5.425, 10.4] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-5.4, -9.8225], to = [-5.55, -9.5725] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-5.55, -9.5725], to = [-5.55, -8.3725] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-5.55, -8.3725], to = [-6.35, -7.5725] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-6.35, -7.5725], to = [-7.115, -7.45] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [10.7775, -5.6], to = [10.5775, -5.35] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [10.5775, -5.35], to = [10.5775, -4.7] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [10.5775, -4.7], to = [9.9275, -4.05] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [9.9275, -4.05], to = [9.9275, -3.15] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [9.9275, -3.15], to = [9.6775, -2.9] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [9.6775, -2.9], to = [9.6275, -2.85] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [9.6275, -2.85], to = [9.4975, -2.725] }
+    track GND = { layer = F.Cu, width = 0.19, from = [10.3775, 7], to = [10.1775, 7.25] }
+    track GND = { layer = F.Cu, width = 0.19, from = [10.1775, 7.25], to = [9.8275, 7.6] }
+    track GND = { layer = F.Cu, width = 0.25, from = [9.8275, 7.6], to = [8.9275, 7.6] }
+    track GND = { layer = F.Cu, width = 0.25, from = [8.9275, 7.6], to = [8.2775, 6.95] }
+    track GND = { layer = B.Cu, width = 0.25, from = [8.2775, 6.95], to = [7.3775, 6.05] }
+    track GND = { layer = B.Cu, width = 0.25, from = [7.3775, 6.05], to = [7.3775, 4.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [7.3775, 4.8], to = [7.3775, 4.45] }
+    track GND = { layer = F.Cu, width = 0.25, from = [7.3775, 4.45], to = [7.8775, 3.95] }
+    track GND = { layer = F.Cu, width = 0.19, from = [7.8775, 3.95], to = [8.1775, 3.65] }
+    track GND = { layer = F.Cu, width = 0.19, from = [8.1775, 3.65], to = [8.5975, 3.6] }
+    track GND = { layer = F.Cu, width = 0.25, from = [1.25, -17.15], to = [1.2, -16.65] }
+    track GND = { layer = F.Cu, width = 0.25, from = [1.2, -16.65], to = [-0.3, -15.15] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-0.3, -15.15], to = [-0.3, -14.5] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-0.3, -14.5], to = [-0.32, -13.5] }
+    track GND = { layer = F.Cu, width = 0.25, from = [6.75, -17.15], to = [6.8, -16.65] }
+    track GND = { layer = F.Cu, width = 0.25, from = [6.8, -16.65], to = [8.3, -15.15] }
+    track GND = { layer = F.Cu, width = 0.25, from = [8.3, -15.15], to = [8.3, -14.5] }
+    track GND = { layer = F.Cu, width = 0.25, from = [8.3, -14.5], to = [8.32, -13.5] }
+    track "/mcu/NRST" = { layer = F.Cu, width = 0.2, from = [-4.9, -2.1775], to = [-4.65, -2.0275] }
+    track "/mcu/NRST" = { layer = F.Cu, width = 0.2, from = [-4.65, -2.0275], to = [-4.3, -1.6775] }
+    track "/mcu/NRST" = { layer = F.Cu, width = 0.2, from = [-4.3, -1.6775], to = [-4.3, 0.2725] }
+    track "/mcu/NRST" = { layer = B.Cu, width = 0.2, from = [-4.3, 0.2725], to = [-3.15, 1.4225] }
+    track "/mcu/NRST" = { layer = B.Cu, width = 0.2, from = [-3.15, 1.4225], to = [-3.15, 1.7225] }
+    track "/mcu/NRST" = { layer = F.Cu, width = 0.2, from = [-3.15, 1.7225], to = [-3.125, 1.75] }
+    track "/mcu/VCAP" = { layer = F.Cu, width = 0.2, from = [7.2, -2.35], to = [6.75, -2.1] }
+    track "/mcu/VCAP" = { layer = F.Cu, width = 0.2, from = [6.75, -2.1], to = [6.7, -2.1] }
+    track "/mcu/VCAP" = { layer = B.Cu, width = 0.2, from = [6.7, -2.1], to = [5.75, -2.1] }
+    track "/mcu/VCAP" = { layer = F.Cu, width = 0.2, from = [5.75, -2.1], to = [4.9, -2.1] }
+    track "/mcu/VCAP" = { layer = F.Cu, width = 0.2, from = [4.9, -2.1], to = [4.7, -2.3] }
+    track "/mcu/VCAP" = { layer = B.Cu, width = 0.2, from = [4.7, -2.3], to = [2.9, -2.3] }
+    track "/mcu/VCAP" = { layer = B.Cu, width = 0.2, from = [2.9, -2.3], to = [2.75, -2.15] }
+    track "/mcu/VCAP" = { layer = F.Cu, width = 0.2, from = [2.75, -2.15], to = [2.75, -2.125] }
+    track "/conn/VBUS" = { layer = B.Cu, width = 0.2, from = [1.75, -17.15], to = [6.25, -17.15] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.6, -9.225], to = [-10.7, -9.025] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-10.7, -9.025], to = [-10.05, -9.025] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-10.05, -9.025], to = [-8.1, -9.025] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-8.1, -9.025], to = [-7.7, -8.625] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-7.7, -8.625], to = [-7.115, -8.4] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-5.4, -10.5775], to = [-5.15, -10.3775] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-5.15, -10.3775], to = [-5.05, -10.3775] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-5.05, -10.3775], to = [-4.8, -10.1275] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-4.8, -10.1275], to = [-4.8, -8.3275] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-4.8, -8.3275], to = [-6.3, -6.8275] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-6.3, -6.8275], to = [-7.9, -6.8275] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-7.9, -6.8275], to = [-8.25, -7.1775] }
+    track "/pwr/BST" = { layer = F.Cu, width = 0.2, from = [-8.25, -7.1775], to = [-8.885, -7.45] }
+    track "/mcu/BOOT0" = { layer = F.Cu, width = 0.2, from = [4.6225, 7.9], to = [4.3725, 8] }
+    track "/mcu/BOOT0" = { layer = B.Cu, width = 0.2, from = [4.3725, 8], to = [2.7725, 8] }
+    track "/mcu/BOOT0" = { layer = B.Cu, width = 0.2, from = [2.7725, 8], to = [2.0225, 7.25] }
+    track "/mcu/BOOT0" = { layer = F.Cu, width = 0.2, from = [2.0225, 7.25], to = [0.5725, 7.25] }
+    track "/mcu/BOOT0" = { layer = F.Cu, width = 0.2, from = [0.5725, 7.25], to = [0.2725, 6.95] }
+    track "/mcu/BOOT0" = { layer = F.Cu, width = 0.2, from = [0.2725, 6.95], to = [0.25, 6.125] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.6, -9.225], to = [-12.3, -8.625] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-12.3, -8.625], to = [-12.9, -8.025] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-12.9, -8.025], to = [-12.9, -5.525] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-12.9, -5.525], to = [-11.6, -4.225] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-6.4, -4.8225], to = [-6.65, -5.0225] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-6.65, -5.0225], to = [-6.75, -5.0225] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-6.75, -5.0225], to = [-7.15, -5.4225] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-7.15, -5.4225], to = [-7.15, -6.3725] }
+    track "/pwr/FB" = { layer = B.Cu, width = 0.2, from = [-7.15, -6.3725], to = [-7.15, -8.8225] }
+    track "/pwr/FB" = { layer = B.Cu, width = 0.2, from = [-7.15, -8.8225], to = [-7.95, -9.6225] }
+    track "/pwr/FB" = { layer = B.Cu, width = 0.2, from = [-7.95, -9.6225], to = [-8.25, -9.6225] }
+    track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-8.25, -9.6225], to = [-8.885, -9.35] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.6, -4.225], to = [-10.9, -3.625] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-10.9, -3.625], to = [-10.3, -3.025] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-10.3, -3.025], to = [-10.3, -0.425] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-10.3, -0.425], to = [-11.25, 0.525] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.25, 0.525], to = [-11.25, 0.775] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.25, 0.775], to = [-11.4, 1.0225] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-16.925, 7], to = [-16.175, 6.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-16.175, 6.8], to = [-11.675, 6.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-11.675, 6.8], to = [-11.575, 6.7] }
+    track GND = { layer = F.Cu, width = 0.25, from = [-11.575, 6.7], to = [-11.4, 6.56] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-6.4, -5.5775], to = [-6.45, -5.4775] }
+    track "+5V" = { layer = B.Cu, width = 0.4, from = [-6.45, -5.4775], to = [-6.45, -3.0275] }
+    track "+5V" = { layer = B.Cu, width = 0.4, from = [-6.45, -3.0275], to = [-8.75, -0.7275] }
+    track "+5V" = { layer = B.Cu, width = 0.4, from = [-8.75, -0.7275], to = [-8.885, -0.56] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-5.4, -9.8225], to = [-5.65, -9.9225] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-5.65, -9.9225], to = [-5.8, -9.9225] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-5.8, -9.9225], to = [-9.1, -13.2225] }
+    track "/pwr/SW" = { layer = F.Cu, width = 0.4, from = [-9.1, -13.2225], to = [-9.725, -13.4] }
+    track "/mcu/OSC_OUT" = { layer = F.Cu, width = 0.2, from = [-8.1775, 9.6], to = [-8.0275, 9.35] }
+    track "/mcu/OSC_OUT" = { layer = F.Cu, width = 0.2, from = [-8.0275, 9.35], to = [-7.4775, 8.8] }
+    track "/mcu/OSC_OUT" = { layer = F.Cu, width = 0.2, from = [-7.4775, 8.8], to = [-4.1775, 8.8] }
+    track "/mcu/OSC_OUT" = { layer = F.Cu, width = 0.2, from = [-4.1775, 8.8], to = [-3.1775, 9.8] }
+    track "/mcu/OSC_OUT" = { layer = F.Cu, width = 0.2, from = [-3.1775, 9.8], to = [-2.575, 10.4] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-12.6, -10.8225], to = [-12.85, -11.0225] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-12.85, -11.0225], to = [-12.95, -11.0225] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-12.95, -11.0225], to = [-13.2, -11.2725] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-13.2, -11.2725], to = [-13.2, -11.8725] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-13.2, -11.8725], to = [-12.9, -12.1725] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-12.9, -12.1725], to = [-11.15, -12.1725] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-11.15, -12.1725], to = [-9.1, -10.1225] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-9.1, -10.1225], to = [-7.9, -10.1225] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-7.9, -10.1225], to = [-7.4, -9.6225] }
+    track "/pwr/EN" = { layer = F.Cu, width = 0.2, from = [-7.4, -9.6225], to = [-7.115, -9.35] }
+    track GND = { layer = F.Cu, width = 0.25, from = [16.925, 7.5], to = [16.175, 7.7] }
+    track GND = { layer = F.Cu, width = 0.25, from = [16.175, 7.7], to = [16.025, 7.85] }
+    track GND = { layer = F.Cu, width = 0.25, from = [16.025, 7.85], to = [15.075, 7.85] }
+    track GND = { layer = B.Cu, width = 0.25, from = [15.075, 7.85], to = [12.275, 10.65] }
+    track GND = { layer = B.Cu, width = 0.25, from = [12.275, 10.65], to = [12.155, 10.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [16.925, 7.5], to = [16.225, 7.25] }
+    track GND = { layer = F.Cu, width = 0.25, from = [16.225, 7.25], to = [15.825, 6.85] }
+    track GND = { layer = F.Cu, width = 0.25, from = [15.825, 6.85], to = [15.825, 2.9] }
+    track GND = { layer = F.Cu, width = 0.25, from = [15.825, 2.9], to = [16.925, 1.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [16.925, 1.8], to = [16.925, 1.5] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-3.125, 2.75], to = [-2.325, 2.85] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-2.325, 2.85], to = [-2.225, 2.85] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-2.225, 2.85], to = [-2.025, 3.05] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-2.025, 3.05], to = [-2.025, 5.05] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-2.025, 5.05], to = [-5.325, 8.35] }
+    track "/mcu/OSC_IN" = { layer = B.Cu, width = 0.2, from = [-5.325, 8.35], to = [-5.325, 9.25] }
+    track "/mcu/OSC_IN" = { layer = F.Cu, width = 0.2, from = [-5.325, 9.25], to = [-5.425, 10.4] }
+    track GND = { layer = F.Cu, width = 0.25, from = [7.75, 10.8], to = [7.95, 11.25] }
+    track GND = { layer = F.Cu, width = 0.25, from = [7.95, 11.25], to = [7.95, 12.9] }
+    track GND = { layer = F.Cu, width = 0.25, from = [7.95, 12.9], to = [5.05, 15.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [5.05, 15.8], to = [3.15, 15.8] }
+    track GND = { layer = F.Cu, width = 0.25, from = [3.15, 15.8], to = [2.75, 16.2] }
+    track GND = { layer = F.Cu, width = 0.25, from = [2.75, 16.2], to = [2.5, 16.925] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [16.925, 0.5], to = [16.175, 0.3] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [16.175, 0.3], to = [11.875, 0.3] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [11.875, 0.3], to = [10.175, -1.4] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [10.175, -1.4], to = [10.175, -2.3] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [10.175, -2.3], to = [9.875, -2.6] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [9.875, -2.6], to = [9.4975, -2.725] }
+    track "/mcu/OSC_OUT" = { layer = F.Cu, width = 0.2, from = [-3.125, 2.25], to = [-2.575, 2.25] }
+    track "/mcu/OSC_OUT" = { layer = B.Cu, width = 0.2, from = [-2.575, 2.25], to = [-2.575, 6.25] }
+    track "/mcu/OSC_OUT" = { layer = F.Cu, width = 0.2, from = [-2.575, 6.25], to = [-2.575, 10.4] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-11.4, 1.7775], to = [-11.15, 1.6775] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-11.15, 1.6775], to = [-11.05, 1.6775] }
+    track VBAT_SENSE = { layer = B.Cu, width = 0.2, from = [-11.05, 1.6775], to = [-9.4, 1.6775] }
+    track VBAT_SENSE = { layer = B.Cu, width = 0.2, from = [-9.4, 1.6775], to = [-6.25, -1.4725] }
+    track VBAT_SENSE = { layer = B.Cu, width = 0.2, from = [-6.25, -1.4725], to = [-4.85, -1.4725] }
+    track VBAT_SENSE = { layer = B.Cu, width = 0.2, from = [-4.85, -1.4725], to = [-3.15, 0.2275] }
+    track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-3.15, 0.2275], to = [-3.125, 0.25] }
+    track "/conn/CC1" = { layer = F.Cu, width = 0.2, from = [2.25, -17.15], to = [2.2, -16.65] }
+    track "/conn/CC1" = { layer = F.Cu, width = 0.2, from = [2.2, -16.65], to = [2.2, -13.2] }
+    track "/conn/CC1" = { layer = F.Cu, width = 0.2, from = [2.2, -13.2], to = [-1.6, -9.4] }
+    track "/conn/CC1" = { layer = F.Cu, width = 0.2, from = [-1.6, -9.4], to = [-1.8, -9.1775] }
+    track "/conn/CC2" = { layer = F.Cu, width = 0.2, from = [5.25, -17.15], to = [5.3, -16.65] }
+    track "/conn/CC2" = { layer = F.Cu, width = 0.2, from = [5.3, -16.65], to = [5.3, -14.25] }
+    track "/conn/CC2" = { layer = F.Cu, width = 0.2, from = [5.3, -14.25], to = [9.95, -9.6] }
+    track "/conn/CC2" = { layer = F.Cu, width = 0.2, from = [9.95, -9.6], to = [10, -9.3775] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-16.925, 8], to = [-16.175, 7.8] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-16.175, 7.8], to = [-11.725, 7.8] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-11.725, 7.8], to = [-9.025, 5.1] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-9.025, 5.1], to = [-9.025, 3.6] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-9.025, 3.6], to = [-8.96, 3.4] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-0.5, 16.925], to = [-0.3, 16.175] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-0.3, 16.175], to = [-0.3, 9.625] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [-0.3, 9.625], to = [0.8, 8.525] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [0.8, 8.525], to = [0.8, 7.225] }
+    track M1 = { layer = B.Cu, width = 0.2, from = [0.8, 7.225], to = [1.25, 6.775] }
+    track M1 = { layer = F.Cu, width = 0.2, from = [1.25, 6.775], to = [1.25, 6.125] }
+    track M2 = { layer = F.Cu, width = 0.2, from = [-1.5, 16.925], to = [-1.3, 16.175] }
+    track M2 = { layer = F.Cu, width = 0.2, from = [-1.3, 16.175], to = [-1.3, 8.575] }
+    track M2 = { layer = F.Cu, width = 0.2, from = [-1.3, 8.575], to = [-0.05, 7.325] }
+    track M2 = { layer = B.Cu, width = 0.2, from = [-0.05, 7.325], to = [0.75, 6.525] }
+    track M2 = { layer = F.Cu, width = 0.2, from = [0.75, 6.525], to = [0.75, 6.125] }
+    track SPI_MOSI = { layer = F.Cu, width = 0.19, from = [0.25, -2.125], to = [0.15, -1.325] }
+    track SPI_MOSI = { layer = F.Cu, width = 0.2, from = [0.15, -1.325], to = [0.15, -0.575] }
+    track SPI_MOSI = { layer = B.Cu, width = 0.2, from = [0.15, -0.575], to = [0.05, -0.475] }
+    track SPI_MOSI = { layer = B.Cu, width = 0.2, from = [0.05, -0.475], to = [0.05, 2.075] }
+    track SPI_MOSI = { layer = B.Cu, width = 0.2, from = [0.05, 2.075], to = [4.05, 6.075] }
+    track SPI_MOSI = { layer = B.Cu, width = 0.2, from = [4.05, 6.075], to = [6.1, 6.075] }
+    track SPI_MOSI = { layer = B.Cu, width = 0.2, from = [6.1, 6.075], to = [6.45, 5.725] }
+    track SPI_MOSI = { layer = F.Cu, width = 0.2, from = [6.45, 5.725], to = [7.8, 5.725] }
+    track SPI_MOSI = { layer = F.Cu, width = 0.19, from = [7.8, 5.725], to = [8.45, 5.725] }
+    track SPI_MOSI = { layer = F.Cu, width = 0.19, from = [8.45, 5.725], to = [8.5, 5.675] }
+    track SPI_MOSI = { layer = F.Cu, width = 0.19, from = [8.5, 5.675], to = [8.5975, 5.6] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [-2.5, 16.925], to = [-2.3, 16.175] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [-2.3, 16.175], to = [-1.7, 15.575] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [-1.7, 15.575], to = [-1.7, 8.775] }
+    track M3 = { layer = F.Cu, width = 0.2, from = [-1.7, 8.775], to = [-1.75, 8.725] }
+    track M3 = { layer = B.Cu, width = 0.2, from = [-1.75, 8.725], to = [-0.75, 7.725] }
+    track M3 = { layer = B.Cu, width = 0.2, from = [-0.75, 7.725], to = [-0.75, 7.325] }
+    track M3 = { layer = B.Cu, width = 0.2, from = [-0.75, 7.325], to = [0.55, 6.025] }
+    track M3 = { layer = B.Cu, width = 0.2, from = [0.55, 6.025], to = [2.15, 6.025] }
+    track M3 = { layer = B.Cu, width = 0.2, from = [2.15, 6.025], to = [2.25, 6.125] }
+    track GPS_RX = { layer = F.Cu, width = 0.2, from = [16.925, -1.5], to = [16.175, -1.45] }
+    track GPS_RX = { layer = F.Cu, width = 0.2, from = [16.175, -1.45], to = [16.075, -1.45] }
+    track GPS_RX = { layer = B.Cu, width = 0.2, from = [16.075, -1.45], to = [6.975, -1.45] }
+    track GPS_RX = { layer = B.Cu, width = 0.2, from = [6.975, -1.45], to = [5.775, -0.25] }
+    track GPS_RX = { layer = F.Cu, width = 0.2, from = [5.775, -0.25], to = [5.125, -0.25] }
+    track GPS_TX = { layer = F.Cu, width = 0.2, from = [16.925, -2.5], to = [16.575, -2.2] }
+    track GPS_TX = { layer = F.Cu, width = 0.2, from = [16.575, -2.2], to = [16.575, -2.15] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [16.575, -2.15], to = [16.575, -1.25] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [16.575, -1.25], to = [15.825, -0.5] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [15.825, -0.5], to = [8.775, -0.5] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [8.775, -0.5], to = [8.725, -0.55] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [8.725, -0.55], to = [6.775, -0.55] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [6.775, -0.55], to = [5.975, 0.25] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [5.975, 0.25], to = [5.575, 0.25] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [5.575, 0.25], to = [5.125, -0.2] }
+    track GPS_TX = { layer = B.Cu, width = 0.2, from = [5.125, -0.2], to = [5.125, -0.75] }
+    track M4 = { layer = F.Cu, width = 0.2, from = [-3.5, 16.925], to = [-3.55, 16.175] }
+    track M4 = { layer = F.Cu, width = 0.2, from = [-3.55, 16.175], to = [-3.55, 10.075] }
+    track M4 = { layer = B.Cu, width = 0.2, from = [-3.55, 10.075], to = [-3.55, 8.375] }
+    track M4 = { layer = B.Cu, width = 0.2, from = [-3.55, 8.375], to = [-0.75, 5.575] }
+    track M4 = { layer = B.Cu, width = 0.2, from = [-0.75, 5.575], to = [1.75, 5.575] }
+    track M4 = { layer = F.Cu, width = 0.2, from = [1.75, 5.575], to = [1.75, 6.125] }
+    track SPI_MISO = { layer = F.Cu, width = 0.19, from = [-0.25, -2.125], to = [-0.3, -1.325] }
+    track SPI_MISO = { layer = F.Cu, width = 0.2, from = [-0.3, -1.325], to = [-0.3, -1.275] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [-0.3, -1.275], to = [2, -1.275] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [2, -1.275], to = [2.8, -0.475] }
+    track SPI_MISO = { layer = F.Cu, width = 0.2, from = [2.8, -0.475], to = [3.55, 0.275] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [3.55, 0.275], to = [5.1, 0.275] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [5.1, 0.275], to = [6.7, 1.875] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [6.7, 1.875], to = [7.7, 1.875] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [7.7, 1.875], to = [8.1, 2.275] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [8.1, 2.275], to = [8.1, 3.375] }
+    track SPI_MISO = { layer = B.Cu, width = 0.2, from = [8.1, 3.375], to = [9.4, 4.675] }
+    track SPI_MISO = { layer = F.Cu, width = 0.2, from = [9.4, 4.675], to = [9.4, 5.675] }
+    track SPI_MISO = { layer = F.Cu, width = 0.2, from = [9.4, 5.675], to = [9.35, 5.725] }
+    track SPI_MISO = { layer = F.Cu, width = 0.19, from = [9.35, 5.725], to = [9, 6.075] }
+    track SPI_MISO = { layer = F.Cu, width = 0.19, from = [9, 6.075], to = [8.5975, 6.1] }
+    track "/conn/VBUS" = { layer = F.Cu, width = 0.2, from = [13.6, -7.175], to = [12.7, -7.525] }
+    track "/conn/VBUS" = { layer = F.Cu, width = 0.2, from = [12.7, -7.525], to = [7.85, -12.375] }
+    track "/conn/VBUS" = { layer = F.Cu, width = 0.2, from = [7.85, -12.375], to = [7.8, -12.375] }
+    track "/conn/VBUS" = { layer = F.Cu, width = 0.2, from = [7.8, -12.375], to = [6.35, -13.825] }
+    track "/conn/VBUS" = { layer = F.Cu, width = 0.2, from = [6.35, -13.825], to = [6.35, -16.675] }
+    track "/conn/VBUS" = { layer = F.Cu, width = 0.2, from = [6.35, -16.675], to = [6.25, -17.15] }
+    track "/mcu/LED1" = { layer = F.Cu, width = 0.2, from = [6.6225, 12.6], to = [6.3725, 12.45] }
+    track "/mcu/LED1" = { layer = F.Cu, width = 0.2, from = [6.3725, 12.45], to = [2.4225, 12.45] }
+    track "/mcu/LED1" = { layer = F.Cu, width = 0.2, from = [2.4225, 12.45], to = [1.1725, 11.2] }
+    track "/mcu/LED1" = { layer = B.Cu, width = 0.2, from = [1.1725, 11.2], to = [-0.3275, 11.2] }
+    track "/mcu/LED1" = { layer = B.Cu, width = 0.2, from = [-0.3275, 11.2], to = [-3.0275, 8.5] }
+    track "/mcu/LED1" = { layer = F.Cu, width = 0.2, from = [-3.0275, 8.5], to = [-3.0275, 6.7] }
+    track "/mcu/LED1" = { layer = B.Cu, width = 0.2, from = [-3.0275, 6.7], to = [-3.1275, 6.6] }
+    track "/mcu/LED1" = { layer = B.Cu, width = 0.2, from = [-3.1275, 6.6], to = [-3.1275, 4.25] }
+    track "/mcu/LED1" = { layer = F.Cu, width = 0.2, from = [-3.1275, 4.25], to = [-3.125, 4.25] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [-0.75, 6.125], to = [-0.8, 5.325] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [-0.8, 5.325], to = [-0.8, 1.175] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [-0.8, 1.175], to = [-0.8, -1.475] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [-0.8, -1.475], to = [0.5, -2.775] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [0.5, -2.775], to = [5.3, -2.775] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [5.3, -2.775], to = [6.3, -3.775] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [6.3, -3.775], to = [7.05, -3.775] }
+    track I2C_SDA = { layer = B.Cu, width = 0.2, from = [7.05, -3.775], to = [8, -2.825] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [8, -2.825], to = [9.1, -2.825] }
+    track I2C_SDA = { layer = F.Cu, width = 0.2, from = [9.1, -2.825], to = [9.4975, -2.725] }
+    track SPI_SCK = { layer = F.Cu, width = 0.19, from = [-0.75, -2.125], to = [-0.65, -2.925] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [-0.65, -2.925], to = [-0.65, -3.025] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [-0.65, -3.025], to = [-0.35, -3.325] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [-0.35, -3.325], to = [2.35, -3.325] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [2.35, -3.325], to = [3.15, -4.125] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [3.15, -4.125], to = [3.75, -4.125] }
+    track SPI_SCK = { layer = B.Cu, width = 0.2, from = [3.75, -4.125], to = [7.4, -4.125] }
+    track SPI_SCK = { layer = B.Cu, width = 0.2, from = [7.4, -4.125], to = [8.5, -3.025] }
+    track SPI_SCK = { layer = B.Cu, width = 0.2, from = [8.5, -3.025], to = [8.5, -2.575] }
+    track SPI_SCK = { layer = B.Cu, width = 0.2, from = [8.5, -2.575], to = [8.2, -2.275] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [8.2, -2.275], to = [8.2, -1.225] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [8.2, -1.225], to = [12.1, 2.675] }
+    track SPI_SCK = { layer = F.Cu, width = 0.2, from = [12.1, 2.675], to = [12.1, 5.175] }
+    track SPI_SCK = { layer = F.Cu, width = 0.19, from = [12.1, 5.175], to = [12.1, 5.275] }
+    track SPI_SCK = { layer = F.Cu, width = 0.19, from = [12.1, 5.275], to = [11.8, 5.575] }
+    track SPI_SCK = { layer = F.Cu, width = 0.19, from = [11.8, 5.575], to = [11.4025, 5.6] }
+    track RC_TX = { layer = F.Cu, width = 0.2, from = [-16.925, 5], to = [-16.325, 4.7] }
+    track RC_TX = { layer = F.Cu, width = 0.2, from = [-16.325, 4.7], to = [-16.325, 4.6] }
+    track RC_TX = { layer = F.Cu, width = 0.2, from = [-16.325, 4.6], to = [-11.825, 0.1] }
+    track RC_TX = { layer = B.Cu, width = 0.2, from = [-11.825, 0.1], to = [-11.125, 0.1] }
+    track RC_TX = { layer = B.Cu, width = 0.2, from = [-11.125, 0.1], to = [-9.675, -1.35] }
+    track RC_TX = { layer = F.Cu, width = 0.2, from = [-9.675, -1.35], to = [-8.325, -2.7] }
+    track RC_TX = { layer = F.Cu, width = 0.2, from = [-8.325, -2.7], to = [-4.575, -2.7] }
+    track RC_TX = { layer = F.Cu, width = 0.2, from = [-4.575, -2.7], to = [-3.125, -1.25] }
+    track RC_TX = { layer = F.Cu, width = 0.2, from = [-3.125, -1.25], to = [-3.125, -0.75] }
+    track "/mcu/LED2" = { layer = F.Cu, width = 0.2, from = [10.2225, 12.6], to = [9.9725, 12.45] }
+    track "/mcu/LED2" = { layer = F.Cu, width = 0.2, from = [9.9725, 12.45], to = [9.1725, 12.45] }
+    track "/mcu/LED2" = { layer = F.Cu, width = 0.2, from = [9.1725, 12.45], to = [8.4225, 11.7] }
+    track "/mcu/LED2" = { layer = B.Cu, width = 0.2, from = [8.4225, 11.7], to = [-2.6275, 11.7] }
+    track "/mcu/LED2" = { layer = B.Cu, width = 0.2, from = [-2.6275, 11.7], to = [-4.0275, 10.3] }
+    track "/mcu/LED2" = { layer = B.Cu, width = 0.2, from = [-4.0275, 10.3], to = [-4.0275, 5.2] }
+    track "/mcu/LED2" = { layer = B.Cu, width = 0.2, from = [-4.0275, 5.2], to = [-3.6275, 4.8] }
+    track "/mcu/LED2" = { layer = B.Cu, width = 0.2, from = [-3.6275, 4.8], to = [-3.6275, 4] }
+    track "/mcu/LED2" = { layer = B.Cu, width = 0.2, from = [-3.6275, 4], to = [-3.3775, 3.75] }
+    track "/mcu/LED2" = { layer = F.Cu, width = 0.2, from = [-3.3775, 3.75], to = [-3.125, 3.75] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-2.4, -14.225], to = [-1.75, -13.725] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-1.75, -13.725], to = [-1.25, -13.225] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-1.25, -13.225], to = [-1.25, -12.575] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-1.25, -12.575], to = [-0.7, -12.025] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [-0.7, -12.025], to = [0.3, -12.025] }
+    track "+5V" = { layer = B.Cu, width = 0.4, from = [0.3, -12.025], to = [1.25, -11.075] }
+    track "+5V" = { layer = B.Cu, width = 0.4, from = [1.25, -11.075], to = [13.4, -11.075] }
+    track "+5V" = { layer = B.Cu, width = 0.4, from = [13.4, -11.075], to = [13.6, -10.98] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [13.6, -10.025], to = [14.3, -9.425] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [14.3, -9.425], to = [17.2, -6.525] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [17.2, -6.525], to = [17.2, -4.225] }
+    track "+5V" = { layer = B.Cu, width = 0.4, from = [17.2, -4.225], to = [17.2, 2.275] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [17.2, 2.275], to = [17.2, 6.225] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [17.2, 6.225], to = [16.925, 6.5] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-16.925, 6], to = [-16.225, 5.75] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-16.225, 5.75], to = [-14.975, 4.5] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-14.975, 4.5], to = [-14.975, 3.9] }
+    track RC_RX = { layer = B.Cu, width = 0.2, from = [-14.975, 3.9], to = [-14.975, 2.25] }
+    track RC_RX = { layer = B.Cu, width = 0.2, from = [-14.975, 2.25], to = [-10.725, -2] }
+    track RC_RX = { layer = B.Cu, width = 0.2, from = [-10.725, -2], to = [-9.675, -2] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-9.675, -2], to = [-8.625, -3.05] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-8.625, -3.05], to = [-2.675, -3.05] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-2.675, -3.05], to = [-1.75, -2.125] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [1.5, 16.925], to = [1.3, 16.175] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [1.3, 16.175], to = [1.15, 16.025] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [1.15, 16.025], to = [0.25, 15.125] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [0.25, 15.125], to = [0.25, 10.825] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [0.25, 10.825], to = [2, 9.075] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [2, 9.075], to = [4, 9.075] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [4, 9.075], to = [4.85, 8.225] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [4.85, 8.225], to = [4.85, 7.525] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [4.85, 7.525], to = [-1.3, 1.375] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [-1.3, 1.375], to = [-1.3, -0.475] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [-1.3, -0.475], to = [-1.25, -0.525] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [-1.25, -0.525], to = [0.35, 1.075] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [0.35, 1.075], to = [0.5, 1.075] }
+    track CURR = { layer = B.Cu, width = 0.2, from = [0.5, 1.075], to = [1.15, 0.425] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [1.15, 0.425], to = [1.15, -1.325] }
+    track CURR = { layer = F.Cu, width = 0.2, from = [1.15, -1.325], to = [1.25, -2.125] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [3.5, 16.925], to = [3.2, 16.525] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [3.2, 16.525], to = [0.25, 13.575] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [0.25, 13.575], to = [-1.9, 13.575] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-1.9, 13.575], to = [-9.8, 5.675] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-9.8, 5.675], to = [-9.8, 3.825] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-9.8, 3.825], to = [-11.7, 1.925] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-11.7, 1.925], to = [-11.7, 1.325] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-11.7, 1.325], to = [-11.5, 1.125] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.5, 1.125], to = [-11.4, 1.0225] }
+    via USB_DP = { at = [2.75, -15.6], size = 0.45, drill = 0.2 }
+    via USB_DP = { at = [3.75, -14.6], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-4.6, 0.75], size = 0.45, drill = 0.2 }
+    via USB_DP = { at = [4.675, -13.7], size = 0.45, drill = 0.2 }
+    via IMU_CS = { at = [1.9, 1.825], size = 0.45, drill = 0.2 }
+    via IMU_CS = { at = [5.3, 5.225], size = 0.45, drill = 0.2 }
+    via I2C_SCL = { at = [1.2, 1.825], size = 0.45, drill = 0.2 }
+    via I2C_SCL = { at = [6.7, -3.275], size = 0.45, drill = 0.2 }
+    via VTX_TX = { at = [10.875, 6.55], size = 0.45, drill = 0.2 }
+    via VTX_TX = { at = [5.775, 1.75], size = 0.45, drill = 0.2 }
+    via VTX_RX = { at = [10.825, 7.55], size = 0.45, drill = 0.2 }
+    via VTX_RX = { at = [5.525, 2.25], size = 0.45, drill = 0.2 }
+    via IMU_INT = { at = [0.525, 1.85], size = 0.45, drill = 0.2 }
+    via IMU_INT = { at = [5.975, 5.25], size = 0.45, drill = 0.2 }
+    via GND = { at = [-6.84, 11.2], size = 0.45, drill = 0.2 }
+    via GND = { at = [-6.84, 9.6], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [0.04, 7.9], size = 0.45, drill = 0.2 }
+    via GND = { at = [1.3775, 8.51], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [6.9, 1.04], size = 0.45, drill = 0.2 }
+    via GND = { at = [7.51, 2.3775], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [0.04, -3.9], size = 0.45, drill = 0.2 }
+    via GND = { at = [1.96, -3.9], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-4.9, 0.09], size = 0.45, drill = 0.2 }
+    via GND = { at = [-4.9, 2.96], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [2.2225, 8.51], size = 0.45, drill = 0.2 }
+    via GND = { at = [2.9775, 7.29], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-4.29, 3.6225], size = 0.45, drill = 0.2 }
+    via GND = { at = [-4.9, 4.96], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-5.5, -0.96], size = 0.45, drill = 0.2 }
+    via GND = { at = [-5.5, 0.96], size = 0.45, drill = 0.2 }
+    via GND = { at = [7.2, -0.045], size = 0.45, drill = 0.2 }
+    via GND = { at = [-4.9, -0.84], size = 0.45, drill = 0.2 }
+    via GND = { at = [-11.6, -5.42], size = 0.45, drill = 0.2 }
+    via GND = { at = [-11.6, -0.42], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-4.6, -15.18], size = 0.45, drill = 0.2 }
+    via GND = { at = [-4.6, -11.62], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-2.4, -15.18], size = 0.45, drill = 0.2 }
+    via GND = { at = [-2.4, -11.62], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-6.4, -6.16], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-8.96, 3.4], size = 0.45, drill = 0.2 }
+    via GND = { at = [-7.04, 3.4], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-8.96, -1.4], size = 0.45, drill = 0.2 }
+    via GND = { at = [-7.04, -1.4], size = 0.45, drill = 0.2 }
+    via GND = { at = [-11.4, 6.56], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [9.04, 7], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [9.04, 2.2], size = 0.45, drill = 0.2 }
+    via GND = { at = [10.96, 2.2], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [8.2, -5.26], size = 0.45, drill = 0.2 }
+    via GND = { at = [8.81, -3.9225], size = 0.45, drill = 0.2 }
+    via GND = { at = [8.555, 10.8], size = 0.45, drill = 0.2 }
+    via GND = { at = [12.155, 10.8], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [13.6, -10.98], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-5.92, -13.4], size = 0.45, drill = 0.2 }
+    via GND = { at = [5.96, 7.9], size = 0.45, drill = 0.2 }
+    via GND = { at = [-1.8, -7.84], size = 0.45, drill = 0.2 }
+    via GND = { at = [10, -8.04], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-5.2, -6.16], size = 0.45, drill = 0.2 }
+    via GND = { at = [-4, -4.24], size = 0.45, drill = 0.2 }
+    via GND = { at = [-11.4, 4.56], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [7.64, -5.6], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [10.0225, -4.99], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-6.2, -0.84], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-4.28, 4.75], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [3.75, -3.28], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [6.28, 4.75], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-1.75, 7.28], size = 0.45, drill = 0.2 }
+    via GND = { at = [3.25, -3.53], size = 0.45, drill = 0.2 }
+    via GND = { at = [6.53, 4.25], size = 0.45, drill = 0.2 }
+    via GND = { at = [-1.25, 7.53], size = 0.45, drill = 0.2 }
+    via GND = { at = [-4.28, 1.25], size = 0.45, drill = 0.2 }
+    via GND = { at = [-10, -8.4], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-8.885, 2.56], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-8.885, -0.56], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-7.115, 2.56], size = 0.45, drill = 0.2 }
+    via GND = { at = [-10, 1], size = 0.45, drill = 0.2 }
+    via GND = { at = [8.5975, 2.68], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [11.4025, 2.68], size = 0.45, drill = 0.2 }
+    via GND = { at = [8.5975, 3.18], size = 0.45, drill = 0.2 }
+    via GND = { at = [9.4975, -0.965], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [11.3025, -0.965], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [8.74, -2.075], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [12.06, -2.725], size = 0.45, drill = 0.2 }
+    via GND = { at = [12.06, -2.075], size = 0.45, drill = 0.2 }
+    via I2C_SDA = { at = [9.9275, -4.05], size = 0.45, drill = 0.2 }
+    via I2C_SDA = { at = [9.6775, -2.9], size = 0.45, drill = 0.2 }
+    via GND = { at = [8.2775, 6.95], size = 0.45, drill = 0.2 }
+    via GND = { at = [7.3775, 4.8], size = 0.45, drill = 0.2 }
+    via "/mcu/NRST" = { at = [-4.3, 0.2725], size = 0.45, drill = 0.2 }
+    via "/mcu/NRST" = { at = [-3.15, 1.7225], size = 0.45, drill = 0.2 }
+    via "/mcu/VCAP" = { at = [6.7, -2.1], size = 0.45, drill = 0.2 }
+    via "/mcu/VCAP" = { at = [5.75, -2.1], size = 0.45, drill = 0.2 }
+    via "/mcu/VCAP" = { at = [4.7, -2.3], size = 0.45, drill = 0.2 }
+    via "/mcu/VCAP" = { at = [2.75, -2.15], size = 0.45, drill = 0.2 }
+    via "/conn/VBUS" = { at = [1.75, -17.15], size = 0.45, drill = 0.2 }
+    via "/conn/VBUS" = { at = [6.25, -17.15], size = 0.45, drill = 0.2 }
+    via VBAT = { at = [-10.05, -9.025], size = 0.45, drill = 0.2 }
+    via VBAT = { at = [-7.7, -8.625], size = 0.45, drill = 0.2 }
+    via "/mcu/BOOT0" = { at = [4.3725, 8], size = 0.45, drill = 0.2 }
+    via "/mcu/BOOT0" = { at = [2.0225, 7.25], size = 0.45, drill = 0.2 }
+    via "/pwr/FB" = { at = [-7.15, -6.3725], size = 0.45, drill = 0.2 }
+    via "/pwr/FB" = { at = [-8.25, -9.6225], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [-6.45, -5.4775], size = 0.45, drill = 0.2 }
+    via GND = { at = [15.075, 7.85], size = 0.45, drill = 0.2 }
+    via "/mcu/OSC_IN" = { at = [-5.325, 8.35], size = 0.45, drill = 0.2 }
+    via "/mcu/OSC_IN" = { at = [-5.325, 9.25], size = 0.45, drill = 0.2 }
+    via "/mcu/OSC_OUT" = { at = [-2.575, 2.25], size = 0.45, drill = 0.2 }
+    via "/mcu/OSC_OUT" = { at = [-2.575, 6.25], size = 0.45, drill = 0.2 }
+    via VBAT_SENSE = { at = [-11.05, 1.6775], size = 0.45, drill = 0.2 }
+    via VBAT_SENSE = { at = [-3.15, 0.2275], size = 0.45, drill = 0.2 }
+    via M1 = { at = [0.8, 8.525], size = 0.45, drill = 0.2 }
+    via M1 = { at = [1.25, 6.775], size = 0.45, drill = 0.2 }
+    via M2 = { at = [-0.05, 7.325], size = 0.45, drill = 0.2 }
+    via M2 = { at = [0.75, 6.525], size = 0.45, drill = 0.2 }
+    via SPI_MOSI = { at = [0.15, -0.575], size = 0.45, drill = 0.2 }
+    via SPI_MOSI = { at = [6.45, 5.725], size = 0.45, drill = 0.2 }
+    via M3 = { at = [-1.75, 8.725], size = 0.45, drill = 0.2 }
+    via M3 = { at = [2.25, 6.125], size = 0.45, drill = 0.2 }
+    via GPS_RX = { at = [16.075, -1.45], size = 0.45, drill = 0.2 }
+    via GPS_RX = { at = [5.775, -0.25], size = 0.45, drill = 0.2 }
+    via GPS_TX = { at = [16.575, -2.15], size = 0.45, drill = 0.2 }
+    via GPS_TX = { at = [5.125, -0.75], size = 0.45, drill = 0.2 }
+    via M4 = { at = [-3.55, 10.075], size = 0.45, drill = 0.2 }
+    via M4 = { at = [1.75, 5.575], size = 0.45, drill = 0.2 }
+    via SPI_MISO = { at = [-0.3, -1.275], size = 0.45, drill = 0.2 }
+    via SPI_MISO = { at = [2.8, -0.475], size = 0.45, drill = 0.2 }
+    via SPI_MISO = { at = [3.55, 0.275], size = 0.45, drill = 0.2 }
+    via SPI_MISO = { at = [9.4, 4.675], size = 0.45, drill = 0.2 }
+    via "/mcu/LED1" = { at = [1.1725, 11.2], size = 0.45, drill = 0.2 }
+    via "/mcu/LED1" = { at = [-3.0275, 8.5], size = 0.45, drill = 0.2 }
+    via "/mcu/LED1" = { at = [-3.0275, 6.7], size = 0.45, drill = 0.2 }
+    via "/mcu/LED1" = { at = [-3.1275, 4.25], size = 0.45, drill = 0.2 }
+    via I2C_SDA = { at = [-0.8, 1.175], size = 0.45, drill = 0.2 }
+    via I2C_SDA = { at = [8, -2.825], size = 0.45, drill = 0.2 }
+    via SPI_SCK = { at = [3.75, -4.125], size = 0.45, drill = 0.2 }
+    via SPI_SCK = { at = [8.2, -2.275], size = 0.45, drill = 0.2 }
+    via RC_TX = { at = [-11.825, 0.1], size = 0.45, drill = 0.2 }
+    via RC_TX = { at = [-9.675, -1.35], size = 0.45, drill = 0.2 }
+    via "/mcu/LED2" = { at = [8.4225, 11.7], size = 0.45, drill = 0.2 }
+    via "/mcu/LED2" = { at = [-3.3775, 3.75], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [0.3, -12.025], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [17.2, -4.225], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [17.2, 2.275], size = 0.45, drill = 0.2 }
+    via RC_RX = { at = [-14.975, 3.9], size = 0.45, drill = 0.2 }
+    via RC_RX = { at = [-9.675, -2], size = 0.45, drill = 0.2 }
+    via CURR = { at = [1.15, 16.025], size = 0.45, drill = 0.2 }
+    via CURR = { at = [0.25, 15.125], size = 0.45, drill = 0.2 }
+    via CURR = { at = [2, 9.075], size = 0.45, drill = 0.2 }
+    via CURR = { at = [-1.25, -0.525], size = 0.45, drill = 0.2 }
+    via CURR = { at = [0.5, 1.075], size = 0.45, drill = 0.2 }
+    via CURR = { at = [1.15, 0.425], size = 0.45, drill = 0.2 }
+    via VBAT = { at = [3.2, 16.525], size = 0.45, drill = 0.2 }
+    via VBAT = { at = [-11.5, 1.125], size = 0.45, drill = 0.2 }
+    pour GND = { layers = [In1.Cu], outline = [[-17.6, -16.6], [-16.6, -17.6], [16.6, -17.6], [17.6, -16.6], [17.6, 16.6], [16.6, 17.6], [-16.6, 17.6], [-17.6, 16.6]] }
+    pour "+3V3" = { layers = [In2.Cu], outline = [[-17.6, -16.6], [-16.6, -17.6], [16.6, -17.6], [17.6, -16.6], [17.6, 16.6], [16.6, 17.6], [-16.6, 17.6], [-17.6, 16.6]] }
+    pour GND = { layers = [B.Cu], outline = [[-17.6, -16.6], [-16.6, -17.6], [16.6, -17.6], [17.6, -16.6], [17.6, 16.6], [16.6, 17.6], [-16.6, 17.6], [-17.6, 16.6]], connect = thermal_tht }
+    pour "+5V" = { layers = [In2.Cu], outline = [[-17.6, -16.6], [-16.6, -17.6], [0.6, -17.6], [0.6, -5], [-17.6, -5]], priority = 1 }
+    package C_0402_1005Metric_IPCN = {
+        description = "C chip 0402 (1005 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.515, 0.57], at = [-0.3775, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [0.515, 0.57], at = [0.3775, 0], layers = smd }
+        ],
+        courtyard = rect([-0.79, -0.44], [0.79, 0.44]),
+        fab = [rect([-0.5, -0.25], [0.5, 0.25]), text([0, 0], "${REFERENCE}", size = 0.2)],
+        body = { height = 0.35, model = "${RUNMAT_3DMODELS}/C_0402_1005Metric_IPCN.step" }
+    }
+    package C_0603_1608Metric_IPCN = {
+        description = "C chip 0603 (1608 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.96, 0.96], at = [-0.75, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [0.96, 0.96], at = [0.75, 0], layers = smd }
+        ],
+        courtyard = rect([-1.48, -0.73], [1.48, 0.73]),
+        fab = [rect([-0.8, -0.4], [0.8, 0.4]), text([0, 0], "${REFERENCE}", size = 0.32)],
+        body = { height = 0.45, model = "${RUNMAT_3DMODELS}/C_0603_1608Metric_IPCN.step" }
+    }
+    package C_1206_3216Metric_IPCN = {
+        description = "C chip 1206 (3216 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.26, 1.81], at = [-1.425, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.26, 1.81], at = [1.425, 0], layers = smd }
+        ],
+        courtyard = rect([-2.31, -1.16], [2.31, 1.16]),
+        silk = [line([-0.535, -0.91], [0.535, -0.91]), line([-0.535, 0.91], [0.535, 0.91])],
+        fab = [rect([-1.6, -0.8], [1.6, 0.8]), text([0, 0], "${REFERENCE}", size = 0.64)],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/C_1206_3216Metric_IPCN.step" }
+    }
+    package C_0805_2012Metric_IPCN = {
+        description = "C chip 0805 (2012 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.26, 1.46], at = [-0.825, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.26, 1.46], at = [0.825, 0], layers = smd }
+        ],
+        courtyard = rect([-1.71, -0.98], [1.71, 0.98]),
+        fab = [rect([-1, -0.625], [1, 0.625]), text([0, 0], "${REFERENCE}", size = 0.5)],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/C_0805_2012Metric_IPCN.step" }
+    }
+    package LED_0603_1608Metric_IPCN = {
+        description = "LED chip 0603 (1608 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.96, 0.96], at = [-0.75, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [0.96, 0.96], at = [0.75, 0], layers = smd }
+        ],
+        courtyard = rect([-1.48, -0.73], [1.48, 0.73]),
+        silk = [circle([-1.53, 0], 0.1, fill = true)],
+        fab = [rect([-0.8, -0.4], [0.8, 0.4]), text([0, 0], "${REFERENCE}", size = 0.32)],
+        body = { height = 0.45, model = "${RUNMAT_3DMODELS}/LED_0603_1608Metric_IPCN.step" }
+    }
+    package D_1206_3216Metric_IPCN = {
+        description = "D chip 1206 (3216 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.26, 1.81], at = [-1.425, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.26, 1.81], at = [1.425, 0], layers = smd }
+        ],
+        courtyard = rect([-2.31, -1.16], [2.31, 1.16]),
+        silk = [
+            line([-0.535, -0.91], [0.535, -0.91]),
+            line([-0.535, 0.91], [0.535, 0.91]),
+            circle([-2.355, 0], 0.1, fill = true)
+        ],
+        fab = [rect([-1.6, -0.8], [1.6, 0.8]), text([0, 0], "${REFERENCE}", size = 0.64)],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/D_1206_3216Metric_IPCN.step" }
+    }
+    package "MountingHole_3.6mm_Pad4.6mm" = {
+        description = "Mounting hole, drill 3.6 mm, plated pad 4.6 mm",
+        pads = [
+            { number = "1", shape = circle, size = [4.6, 4.6], at = [0, 0], layers = through, drill = 3.6 }
+        ],
+        courtyard = rect([-2.55, -2.55], [2.55, 2.55]),
+        fab = [rect([-2.3, -2.3], [2.3, 2.3]), text([0, 0], "${REFERENCE}")],
+        body = { model = "${RUNMAT_3DMODELS}/MountingHole_3.6mm_Pad4.6mm.step" }
+    }
+    package "USB-C_1x12_P0.5mm" = {
+        description = "USB-C 12 pins",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.3, 1], at = [-2.75, -3.65], layers = smd },
+            { number = "2", shape = roundrect, size = [0.3, 1], at = [-2.25, -3.65], layers = smd },
+            { number = "3", shape = roundrect, size = [0.3, 1], at = [-1.75, -3.65], layers = smd },
+            { number = "4", shape = roundrect, size = [0.3, 1], at = [-1.25, -3.65], layers = smd },
+            { number = "5", shape = roundrect, size = [0.3, 1], at = [-0.75, -3.65], layers = smd },
+            { number = "6", shape = roundrect, size = [0.3, 1], at = [-0.25, -3.65], layers = smd },
+            { number = "7", shape = roundrect, size = [0.3, 1], at = [0.25, -3.65], layers = smd },
+            { number = "8", shape = roundrect, size = [0.3, 1], at = [0.75, -3.65], layers = smd },
+            { number = "9", shape = roundrect, size = [0.3, 1], at = [1.25, -3.65], layers = smd },
+            { number = "10", shape = roundrect, size = [0.3, 1], at = [1.75, -3.65], layers = smd },
+            { number = "11", shape = roundrect, size = [0.3, 1], at = [2.25, -3.65], layers = smd },
+            { number = "12", shape = roundrect, size = [0.3, 1], at = [2.75, -3.65], layers = smd },
+            { number = "MP1", shape = oval, size = [1, 2.1], at = [-4.32, 0], layers = through, drill = 0.6 },
+            { number = "MP2", shape = oval, size = [1, 2.1], at = [4.32, 0], layers = through, drill = 0.6 }
+        ],
+        courtyard = rect([-5.32, -4.65], [5.32, 4.15]),
+        silk = [
+            line([-4.58, -3.76], [-3.16, -3.76]),
+            line([3.16, -3.76], [4.58, -3.76]),
+            line([4.58, -3.76], [4.58, -1.31]),
+            line([4.58, 1.31], [4.58, 3.76]),
+            line([-4.58, 3.76], [4.58, 3.76]),
+            line([-4.58, -3.76], [-4.58, -1.31]),
+            line([-4.58, 1.31], [-4.58, 3.76])
+        ],
+        fab = [rect([-4.47, -3.65], [4.47, 3.65]), text([0, 0], "${REFERENCE}")],
+        body = { height = 3, model = "${RUNMAT_3DMODELS}/USB-C_1x12_P0.5mm.step" }
+    }
+    package "JST-SH_1x04_P1mm" = {
+        description = "JST-SH 4 pins",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.6, 1.55], at = [-1.5, -2.125], layers = smd },
+            { number = "2", shape = roundrect, size = [0.6, 1.55], at = [-0.5, -2.125], layers = smd },
+            { number = "3", shape = roundrect, size = [0.6, 1.55], at = [0.5, -2.125], layers = smd },
+            { number = "4", shape = roundrect, size = [0.6, 1.55], at = [1.5, -2.125], layers = smd },
+            { number = "MP1", shape = roundrect, size = [1.2, 1.8], at = [-2.85, 1.1], layers = smd },
+            { number = "MP2", shape = roundrect, size = [1.2, 1.8], at = [2.85, 1.1], layers = smd }
+        ],
+        courtyard = rect([-3.95, -3.4], [3.95, 2.63]),
+        silk = [
+            line([-3.11, -2.235], [-2.06, -2.235]),
+            line([2.06, -2.235], [3.11, -2.235]),
+            line([3.11, -2.235], [3.11, -0.06]),
+            line([-1.99, 2.235], [1.99, 2.235]),
+            line([-3.11, -2.235], [-3.11, -0.06])
+        ],
+        fab = [rect([-3, -2.125], [3, 2.125]), text([0, 0], "${REFERENCE}")],
+        body = { height = 3, model = "${RUNMAT_3DMODELS}/JST-SH_1x04_P1mm.step" }
+    }
+    package "JST-SH_1x08_P1mm" = {
+        description = "JST-SH 8 pins",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.6, 1.55], at = [-3.5, -2.125], layers = smd },
+            { number = "2", shape = roundrect, size = [0.6, 1.55], at = [-2.5, -2.125], layers = smd },
+            { number = "3", shape = roundrect, size = [0.6, 1.55], at = [-1.5, -2.125], layers = smd },
+            { number = "4", shape = roundrect, size = [0.6, 1.55], at = [-0.5, -2.125], layers = smd },
+            { number = "5", shape = roundrect, size = [0.6, 1.55], at = [0.5, -2.125], layers = smd },
+            { number = "6", shape = roundrect, size = [0.6, 1.55], at = [1.5, -2.125], layers = smd },
+            { number = "7", shape = roundrect, size = [0.6, 1.55], at = [2.5, -2.125], layers = smd },
+            { number = "8", shape = roundrect, size = [0.6, 1.55], at = [3.5, -2.125], layers = smd },
+            { number = "MP1", shape = roundrect, size = [1.2, 1.8], at = [-4.85, 1.1], layers = smd },
+            { number = "MP2", shape = roundrect, size = [1.2, 1.8], at = [4.85, 1.1], layers = smd }
+        ],
+        courtyard = rect([-5.95, -3.4], [5.95, 2.63]),
+        silk = [
+            line([-5.11, -2.235], [-4.06, -2.235]),
+            line([4.06, -2.235], [5.11, -2.235]),
+            line([5.11, -2.235], [5.11, -0.06]),
+            line([-3.99, 2.235], [3.99, 2.235]),
+            line([-5.11, -2.235], [-5.11, -0.06])
+        ],
+        fab = [rect([-5, -2.125], [5, 2.125]), text([0, 0], "${REFERENCE}")],
+        body = { height = 3, model = "${RUNMAT_3DMODELS}/JST-SH_1x08_P1mm.step" }
+    }
+    package "JST-SH_1x06_P1mm" = {
+        description = "JST-SH 6 pins",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.6, 1.55], at = [-2.5, -2.125], layers = smd },
+            { number = "2", shape = roundrect, size = [0.6, 1.55], at = [-1.5, -2.125], layers = smd },
+            { number = "3", shape = roundrect, size = [0.6, 1.55], at = [-0.5, -2.125], layers = smd },
+            { number = "4", shape = roundrect, size = [0.6, 1.55], at = [0.5, -2.125], layers = smd },
+            { number = "5", shape = roundrect, size = [0.6, 1.55], at = [1.5, -2.125], layers = smd },
+            { number = "6", shape = roundrect, size = [0.6, 1.55], at = [2.5, -2.125], layers = smd },
+            { number = "MP1", shape = roundrect, size = [1.2, 1.8], at = [-3.85, 1.1], layers = smd },
+            { number = "MP2", shape = roundrect, size = [1.2, 1.8], at = [3.85, 1.1], layers = smd }
+        ],
+        courtyard = rect([-4.95, -3.4], [4.95, 2.63]),
+        silk = [
+            line([-4.11, -2.235], [-3.06, -2.235]),
+            line([3.06, -2.235], [4.11, -2.235]),
+            line([4.11, -2.235], [4.11, -0.06]),
+            line([-2.99, 2.235], [2.99, 2.235]),
+            line([-4.11, -2.235], [-4.11, -0.06])
+        ],
+        fab = [rect([-4, -2.125], [4, 2.125]), text([0, 0], "${REFERENCE}")],
+        body = { height = 3, model = "${RUNMAT_3DMODELS}/JST-SH_1x06_P1mm.step" }
+    }
+    package L_1210_3225Metric_IPCN = {
+        description = "L chip 1210 (3225 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.26, 2.71], at = [-1.425, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.26, 2.71], at = [1.425, 0], layers = smd }
+        ],
+        courtyard = rect([-2.31, -1.61], [2.31, 1.61]),
+        silk = [line([-0.535, -1.36], [0.535, -1.36]), line([-0.535, 1.36], [0.535, 1.36])],
+        fab = [rect([-1.6, -1.25], [1.6, 1.25]), text([0, 0], "${REFERENCE}")],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/L_1210_3225Metric_IPCN.step" }
+    }
+    package R_0402_1005Metric_IPCN = {
+        description = "R chip 0402 (1005 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.515, 0.57], at = [-0.3775, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [0.515, 0.57], at = [0.3775, 0], layers = smd }
+        ],
+        courtyard = rect([-0.79, -0.44], [0.79, 0.44]),
+        fab = [rect([-0.5, -0.25], [0.5, 0.25]), text([0, 0], "${REFERENCE}", size = 0.2)],
+        body = { height = 0.35, model = "${RUNMAT_3DMODELS}/R_0402_1005Metric_IPCN.step" }
+    }
+    package "LQFP-48_7x7mm_P0.5mm_IPCN" = {
+        description = "LQFP 48 pins, pitch 0.5 mm, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.66, 0.25], at = [-4.125, 2.75], layers = smd },
+            { number = "2", shape = roundrect, size = [1.66, 0.25], at = [-4.125, 2.25], layers = smd },
+            { number = "3", shape = roundrect, size = [1.66, 0.25], at = [-4.125, 1.75], layers = smd },
+            { number = "4", shape = roundrect, size = [1.66, 0.25], at = [-4.125, 1.25], layers = smd },
+            { number = "5", shape = roundrect, size = [1.66, 0.25], at = [-4.125, 0.75], layers = smd },
+            { number = "6", shape = roundrect, size = [1.66, 0.25], at = [-4.125, 0.25], layers = smd },
+            { number = "7", shape = roundrect, size = [1.66, 0.25], at = [-4.125, -0.25], layers = smd },
+            { number = "8", shape = roundrect, size = [1.66, 0.25], at = [-4.125, -0.75], layers = smd },
+            { number = "9", shape = roundrect, size = [1.66, 0.25], at = [-4.125, -1.25], layers = smd },
+            { number = "10", shape = roundrect, size = [1.66, 0.25], at = [-4.125, -1.75], layers = smd },
+            { number = "11", shape = roundrect, size = [1.66, 0.25], at = [-4.125, -2.25], layers = smd },
+            { number = "12", shape = roundrect, size = [1.66, 0.25], at = [-4.125, -2.75], layers = smd },
+            { number = "13", shape = roundrect, size = [0.25, 1.66], at = [-2.75, -4.125], layers = smd },
+            { number = "14", shape = roundrect, size = [0.25, 1.66], at = [-2.25, -4.125], layers = smd },
+            { number = "15", shape = roundrect, size = [0.25, 1.66], at = [-1.75, -4.125], layers = smd },
+            { number = "16", shape = roundrect, size = [0.25, 1.66], at = [-1.25, -4.125], layers = smd },
+            { number = "17", shape = roundrect, size = [0.25, 1.66], at = [-0.75, -4.125], layers = smd },
+            { number = "18", shape = roundrect, size = [0.25, 1.66], at = [-0.25, -4.125], layers = smd },
+            { number = "19", shape = roundrect, size = [0.25, 1.66], at = [0.25, -4.125], layers = smd },
+            { number = "20", shape = roundrect, size = [0.25, 1.66], at = [0.75, -4.125], layers = smd },
+            { number = "21", shape = roundrect, size = [0.25, 1.66], at = [1.25, -4.125], layers = smd },
+            { number = "22", shape = roundrect, size = [0.25, 1.66], at = [1.75, -4.125], layers = smd },
+            { number = "23", shape = roundrect, size = [0.25, 1.66], at = [2.25, -4.125], layers = smd },
+            { number = "24", shape = roundrect, size = [0.25, 1.66], at = [2.75, -4.125], layers = smd },
+            { number = "25", shape = roundrect, size = [1.66, 0.25], at = [4.125, -2.75], layers = smd },
+            { number = "26", shape = roundrect, size = [1.66, 0.25], at = [4.125, -2.25], layers = smd },
+            { number = "27", shape = roundrect, size = [1.66, 0.25], at = [4.125, -1.75], layers = smd },
+            { number = "28", shape = roundrect, size = [1.66, 0.25], at = [4.125, -1.25], layers = smd },
+            { number = "29", shape = roundrect, size = [1.66, 0.25], at = [4.125, -0.75], layers = smd },
+            { number = "30", shape = roundrect, size = [1.66, 0.25], at = [4.125, -0.25], layers = smd },
+            { number = "31", shape = roundrect, size = [1.66, 0.25], at = [4.125, 0.25], layers = smd },
+            { number = "32", shape = roundrect, size = [1.66, 0.25], at = [4.125, 0.75], layers = smd },
+            { number = "33", shape = roundrect, size = [1.66, 0.25], at = [4.125, 1.25], layers = smd },
+            { number = "34", shape = roundrect, size = [1.66, 0.25], at = [4.125, 1.75], layers = smd },
+            { number = "35", shape = roundrect, size = [1.66, 0.25], at = [4.125, 2.25], layers = smd },
+            { number = "36", shape = roundrect, size = [1.66, 0.25], at = [4.125, 2.75], layers = smd },
+            { number = "37", shape = roundrect, size = [0.25, 1.66], at = [2.75, 4.125], layers = smd },
+            { number = "38", shape = roundrect, size = [0.25, 1.66], at = [2.25, 4.125], layers = smd },
+            { number = "39", shape = roundrect, size = [0.25, 1.66], at = [1.75, 4.125], layers = smd },
+            { number = "40", shape = roundrect, size = [0.25, 1.66], at = [1.25, 4.125], layers = smd },
+            { number = "41", shape = roundrect, size = [0.25, 1.66], at = [0.75, 4.125], layers = smd },
+            { number = "42", shape = roundrect, size = [0.25, 1.66], at = [0.25, 4.125], layers = smd },
+            { number = "43", shape = roundrect, size = [0.25, 1.66], at = [-0.25, 4.125], layers = smd },
+            { number = "44", shape = roundrect, size = [0.25, 1.66], at = [-0.75, 4.125], layers = smd },
+            { number = "45", shape = roundrect, size = [0.25, 1.66], at = [-1.25, 4.125], layers = smd },
+            { number = "46", shape = roundrect, size = [0.25, 1.66], at = [-1.75, 4.125], layers = smd },
+            { number = "47", shape = roundrect, size = [0.25, 1.66], at = [-2.25, 4.125], layers = smd },
+            { number = "48", shape = roundrect, size = [0.25, 1.66], at = [-2.75, 4.125], layers = smd }
+        ],
+        courtyard = rect([-5.21, -5.21], [5.21, 5.21]),
+        silk = [
+            line([-3.61, -3.61], [-3.135, -3.61]),
+            line([3.135, -3.61], [3.61, -3.61]),
+            line([3.61, -3.61], [3.61, -3.135]),
+            line([3.61, 3.135], [3.61, 3.61]),
+            line([-3.61, 3.61], [-3.135, 3.61]),
+            line([3.135, 3.61], [3.61, 3.61]),
+            line([-3.61, -3.61], [-3.61, -3.135]),
+            line([-3.61, 3.135], [-3.61, 3.61]),
+            circle([-5.255, 2.75], 0.1, fill = true)
+        ],
+        fab = [rect([-3.5, -3.5], [3.5, 3.5]), text([0, 0], "${REFERENCE}")],
+        body = { height = 1.6, model = "${RUNMAT_3DMODELS}/LQFP-48_7x7mm_P0.5mm_IPCN.step" }
+    }
+    package "SOT-23-6_IPCN" = {
+        description = "SOT-23 6 pins, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.58, 0.57], at = [-0.885, 0.95], layers = smd },
+            { number = "2", shape = roundrect, size = [1.58, 0.57], at = [-0.885, 0], layers = smd },
+            { number = "3", shape = roundrect, size = [1.58, 0.57], at = [-0.885, -0.95], layers = smd },
+            { number = "4", shape = roundrect, size = [1.58, 0.57], at = [0.885, -0.95], layers = smd },
+            { number = "5", shape = roundrect, size = [1.58, 0.57], at = [0.885, 0], layers = smd },
+            { number = "6", shape = roundrect, size = [1.58, 0.57], at = [0.885, 0.95], layers = smd }
+        ],
+        courtyard = rect([-1.93, -1.7], [1.93, 1.7]),
+        silk = [
+            line([-0.91, -1.56], [0.91, -1.56]),
+            line([-0.91, 1.56], [0.91, 1.56]),
+            circle([-1.975, 0.95], 0.1, fill = true)
+        ],
+        fab = [rect([-0.8, -1.45], [0.8, 1.45]), text([0, 0], "${REFERENCE}", size = 0.64)],
+        body = { height = 1.1, model = "${RUNMAT_3DMODELS}/SOT-23-6_IPCN.step" }
+    }
+    package "SOT-23-5_IPCN" = {
+        description = "SOT-23 5 pins, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.58, 0.57], at = [-0.885, 0.95], layers = smd },
+            { number = "2", shape = roundrect, size = [1.58, 0.57], at = [-0.885, 0], layers = smd },
+            { number = "3", shape = roundrect, size = [1.58, 0.57], at = [-0.885, -0.95], layers = smd },
+            { number = "4", shape = roundrect, size = [1.58, 0.57], at = [0.885, -0.95], layers = smd },
+            { number = "5", shape = roundrect, size = [1.58, 0.57], at = [0.885, 0.95], layers = smd }
+        ],
+        courtyard = rect([-1.93, -1.7], [1.93, 1.7]),
+        silk = [
+            line([-0.91, -1.56], [0.91, -1.56]),
+            line([0.91, -0.405], [0.91, 0.405]),
+            line([-0.91, 1.56], [0.91, 1.56]),
+            circle([-1.975, 0.95], 0.1, fill = true)
+        ],
+        fab = [rect([-0.8, -1.45], [0.8, 1.45]), text([0, 0], "${REFERENCE}", size = 0.64)],
+        body = { height = 1.1, model = "${RUNMAT_3DMODELS}/SOT-23-5_IPCN.step" }
+    }
+    package "DFN-14_3x2.5mm_P0.5mm_IPCN" = {
+        description = "DFN 14 pins, pitch 0.5 mm, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.865, 0.19], at = [-1.4025, 1.5], layers = smd },
+            { number = "2", shape = roundrect, size = [0.865, 0.19], at = [-1.4025, 1], layers = smd },
+            { number = "3", shape = roundrect, size = [0.865, 0.19], at = [-1.4025, 0.5], layers = smd },
+            { number = "4", shape = roundrect, size = [0.865, 0.19], at = [-1.4025, 0], layers = smd },
+            { number = "5", shape = roundrect, size = [0.865, 0.19], at = [-1.4025, -0.5], layers = smd },
+            { number = "6", shape = roundrect, size = [0.865, 0.19], at = [-1.4025, -1], layers = smd },
+            { number = "7", shape = roundrect, size = [0.865, 0.19], at = [-1.4025, -1.5], layers = smd },
+            { number = "8", shape = roundrect, size = [0.865, 0.19], at = [1.4025, -1.5], layers = smd },
+            { number = "9", shape = roundrect, size = [0.865, 0.19], at = [1.4025, -1], layers = smd },
+            { number = "10", shape = roundrect, size = [0.865, 0.19], at = [1.4025, -0.5], layers = smd },
+            { number = "11", shape = roundrect, size = [0.865, 0.19], at = [1.4025, 0], layers = smd },
+            { number = "12", shape = roundrect, size = [0.865, 0.19], at = [1.4025, 0.5], layers = smd },
+            { number = "13", shape = roundrect, size = [0.865, 0.19], at = [1.4025, 1], layers = smd },
+            { number = "14", shape = roundrect, size = [0.865, 0.19], at = [1.4025, 1.5], layers = smd }
+        ],
+        courtyard = rect([-2.09, -1.85], [2.09, 1.85]),
+        silk = [
+            line([-0.71, -1.36], [0.71, -1.36]),
+            line([-0.71, 1.36], [0.71, 1.36]),
+            circle([-2.135, 1.5], 0.1, fill = true)
+        ],
+        fab = [rect([-1.5, -1.25], [1.5, 1.25]), text([0, 0], "${REFERENCE}")],
+        body = { height = 0.8, model = "${RUNMAT_3DMODELS}/DFN-14_3x2.5mm_P0.5mm_IPCN.step" }
+    }
+    package "DFN-8_2x2.5mm_P0.65mm_IPCN" = {
+        description = "DFN 8 pins, pitch 0.65 mm, IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [0.865, 0.27], at = [-0.9025, 0.975], layers = smd },
+            { number = "2", shape = roundrect, size = [0.865, 0.27], at = [-0.9025, 0.325], layers = smd },
+            { number = "3", shape = roundrect, size = [0.865, 0.27], at = [-0.9025, -0.325], layers = smd },
+            { number = "4", shape = roundrect, size = [0.865, 0.27], at = [-0.9025, -0.975], layers = smd },
+            { number = "5", shape = roundrect, size = [0.865, 0.27], at = [0.9025, -0.975], layers = smd },
+            { number = "6", shape = roundrect, size = [0.865, 0.27], at = [0.9025, -0.325], layers = smd },
+            { number = "7", shape = roundrect, size = [0.865, 0.27], at = [0.9025, 0.325], layers = smd },
+            { number = "8", shape = roundrect, size = [0.865, 0.27], at = [0.9025, 0.975], layers = smd }
+        ],
+        courtyard = rect([-1.59, -1.5], [1.59, 1.5]),
+        silk = [
+            line([-0.21, -1.36], [0.21, -1.36]),
+            line([-0.21, 1.36], [0.21, 1.36]),
+            circle([-1.635, 0.975], 0.1, fill = true)
+        ],
+        fab = [rect([-1, -1.25], [1, 1.25]), text([0, 0], "${REFERENCE}", size = 0.8)],
+        body = { height = 0.8, model = "${RUNMAT_3DMODELS}/DFN-8_2x2.5mm_P0.65mm_IPCN.step" }
+    }
+    package C_1210_3225Metric_IPCN = {
+        description = "C chip 1210 (3225 metric), IPC-7351B density B",
+        pads = [
+            { number = "1", shape = roundrect, size = [1.26, 2.71], at = [-1.425, 0], layers = smd },
+            { number = "2", shape = roundrect, size = [1.26, 2.71], at = [1.425, 0], layers = smd }
+        ],
+        courtyard = rect([-2.31, -1.61], [2.31, 1.61]),
+        silk = [line([-0.535, -1.36], [0.535, -1.36]), line([-0.535, 1.36], [0.535, 1.36])],
+        fab = [rect([-1.6, -1.25], [1.6, 1.25]), text([0, 0], "${REFERENCE}")],
+        body = { height = 0.6, model = "${RUNMAT_3DMODELS}/C_1210_3225Metric_IPCN.step" }
+    }
+    sync {
+        version = 1
+        compare = {
+            ignore = [],
+            ignored_parameters = [],
+            remove_unlinked_footprints = true,
+            relink_by_designator = true,
+            rooms_per_channel = true,
+            classes_per_channel = true
+        }
+        footprint C1 = "/mcu/C1"
+        footprint C10 = "/mcu/C10"
+        footprint C11 = "/mcu/C11"
+        footprint C12 = "/pwr/C12"
+        footprint C13 = "/pwr/C13"
+        footprint C14 = "/pwr/C14"
+        footprint C15 = "/pwr/C15"
+        footprint C16 = "/pwr/C16"
+        footprint C17 = "/pwr/C17"
+        footprint C18 = "/pwr/C18"
+        footprint C19 = "/pwr/C19"
+        footprint C2 = "/mcu/C2"
+        footprint C20 = "/pwr/C20"
+        footprint C21 = "/sens/C21"
+        footprint C22 = "/sens/C22"
+        footprint C23 = "/sens/C23"
+        footprint C3 = "/mcu/C3"
+        footprint C4 = "/mcu/C4"
+        footprint C5 = "/mcu/C5"
+        footprint C6 = "/mcu/C6"
+        footprint C7 = "/mcu/C7"
+        footprint C8 = "/mcu/C8"
+        footprint C9 = "/mcu/C9"
+        footprint D1 = "/mcu/D1"
+        footprint D2 = "/mcu/D2"
+        footprint D3 = "/conn/D3"
+        footprint H1 = "/conn/H1"
+        footprint H2 = "/conn/H2"
+        footprint H3 = "/conn/H3"
+        footprint H4 = "/conn/H4"
+        footprint J1 = "/conn/J1"
+        footprint J2 = "/conn/J2"
+        footprint J3 = "/conn/J3"
+        footprint J4 = "/conn/J4"
+        footprint J5 = "/conn/J5"
+        footprint L1 = "/pwr/L1"
+        footprint R1 = "/mcu/R1"
+        footprint R10 = "/pwr/R10"
+        footprint R11 = "/sens/R11"
+        footprint R12 = "/sens/R12"
+        footprint R13 = "/mcu/R13"
+        footprint R2 = "/conn/R2"
+        footprint R3 = "/conn/R3"
+        footprint R4 = "/mcu/R4"
+        footprint R5 = "/mcu/R5"
+        footprint R6 = "/pwr/R6"
+        footprint R7 = "/pwr/R7"
+        footprint R8 = "/pwr/R8"
+        footprint R9 = "/pwr/R9"
+        footprint U1 = "/mcu/U1"
+        footprint U2 = "/pwr/U2"
+        footprint U3 = "/pwr/U3"
+        footprint U4 = "/sens/U4"
+        footprint U5 = "/sens/U5"
+        footprint Y1 = "/mcu/Y1"
+        component "/conn/D3" = {
+            designator = D3,
+            package = D_1206_3216Metric_IPCN,
+            pads = { "1" = "+5V", "2" = "/conn/VBUS" }
+        }
+        component "/conn/H1" = { designator = H1, package = "MountingHole_3.6mm_Pad4.6mm", pads = {} }
+        component "/conn/H2" = { designator = H2, package = "MountingHole_3.6mm_Pad4.6mm", pads = {} }
+        component "/conn/H3" = { designator = H3, package = "MountingHole_3.6mm_Pad4.6mm", pads = {} }
+        component "/conn/H4" = { designator = H4, package = "MountingHole_3.6mm_Pad4.6mm", pads = {} }
+        component "/conn/J1" = {
+            designator = J1,
+            package = "USB-C_1x12_P0.5mm",
+            pads = {
+                "1" = GND,
+                "11" = "/conn/VBUS",
+                "12" = GND,
+                "2" = "/conn/VBUS",
+                "3" = "/conn/CC1",
+                "4" = USB_DP,
+                "5" = USB_DN,
+                "6" = USB_DP,
+                "7" = USB_DN,
+                "9" = "/conn/CC2",
+                MP1 = GND,
+                MP2 = GND
+            }
+        }
+        component "/conn/J2" = {
+            designator = J2,
+            package = "JST-SH_1x04_P1mm",
+            pads = { "1" = "+5V", "2" = GND, "3" = RC_RX, "4" = RC_TX }
+        }
+        component "/conn/J3" = {
+            designator = J3,
+            package = "JST-SH_1x08_P1mm",
+            pads = {
+                "1" = VBAT,
+                "2" = GND,
+                "3" = CURR,
+                "4" = TLM,
+                "5" = M1,
+                "6" = M2,
+                "7" = M3,
+                "8" = M4
+            }
+        }
+        component "/conn/J4" = {
+            designator = J4,
+            package = "JST-SH_1x04_P1mm",
+            pads = { "1" = "+5V", "2" = GND, "3" = VTX_TX, "4" = VTX_RX }
+        }
+        component "/conn/J5" = {
+            designator = J5,
+            package = "JST-SH_1x06_P1mm",
+            pads = {
+                "1" = GPS_VCC,
+                "2" = GPS_TX,
+                "3" = GPS_RX,
+                "4" = I2C_SCL,
+                "5" = I2C_SDA,
+                "6" = GND
+            }
+        }
+        component "/conn/R2" = {
+            designator = R2,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/conn/CC1", "2" = GND }
+        }
+        component "/conn/R3" = {
+            designator = R3,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/conn/CC2", "2" = GND }
+        }
+        component "/mcu/C1" = {
+            designator = C1,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "/mcu/OSC_IN", "2" = GND }
+        }
+        component "/mcu/C10" = {
+            designator = C10,
+            package = C_0603_1608Metric_IPCN,
+            pads = { "1" = "/mcu/VCAP", "2" = GND }
+        }
+        component "/mcu/C11" = {
+            designator = C11,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "/mcu/NRST", "2" = GND }
+        }
+        component "/mcu/C2" = {
+            designator = C2,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "/mcu/OSC_OUT", "2" = GND }
+        }
+        component "/mcu/C3" = {
+            designator = C3,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/mcu/C4" = {
+            designator = C4,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/mcu/C5" = {
+            designator = C5,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/mcu/C6" = {
+            designator = C6,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/mcu/C7" = {
+            designator = C7,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/mcu/C8" = {
+            designator = C8,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/mcu/C9" = {
+            designator = C9,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/mcu/D1" = {
+            designator = D1,
+            package = LED_0603_1608Metric_IPCN,
+            pads = { "1" = "/mcu/LED1_K", "2" = GND }
+        }
+        component "/mcu/D2" = {
+            designator = D2,
+            package = LED_0603_1608Metric_IPCN,
+            pads = { "1" = "/mcu/LED2_K", "2" = GND }
+        }
+        component "/mcu/R1" = {
+            designator = R1,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/mcu/BOOT0", "2" = GND }
+        }
+        component "/mcu/R13" = {
+            designator = R13,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/mcu/NRST", "2" = "+3V3" }
+        }
+        component "/mcu/R4" = {
+            designator = R4,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/mcu/LED1", "2" = "/mcu/LED1_K" }
+        }
+        component "/mcu/R5" = {
+            designator = R5,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/mcu/LED2", "2" = "/mcu/LED2_K" }
+        }
+        component "/mcu/U1" = {
+            designator = U1,
+            package = "LQFP-48_7x7mm_P0.5mm_IPCN",
+            pads = {
+                "1" = "+3V3",
+                "10" = VBAT_SENSE,
+                "11" = IMU_INT,
+                "12" = RC_TX,
+                "13" = RC_RX,
+                "14" = IMU_CS,
+                "15" = SPI_SCK,
+                "16" = SPI_MISO,
+                "17" = SPI_MOSI,
+                "19" = CURR,
+                "2" = "/mcu/LED1",
+                "21" = TLM,
+                "22" = "/mcu/VCAP",
+                "23" = GND,
+                "24" = "+3V3",
+                "25" = GPS_TX,
+                "26" = GPS_RX,
+                "3" = "/mcu/LED2",
+                "30" = VTX_TX,
+                "31" = VTX_RX,
+                "32" = USB_DN,
+                "33" = USB_DP,
+                "35" = GND,
+                "36" = "+3V3",
+                "40" = M3,
+                "41" = M4,
+                "42" = M1,
+                "43" = M2,
+                "44" = "/mcu/BOOT0",
+                "45" = I2C_SCL,
+                "46" = I2C_SDA,
+                "47" = GND,
+                "48" = "+3V3",
+                "5" = "/mcu/OSC_IN",
+                "6" = "/mcu/OSC_OUT",
+                "7" = "/mcu/NRST",
+                "8" = GND,
+                "9" = "+3V3"
+            }
+        }
+        component "/mcu/Y1" = {
+            designator = Y1,
+            package = C_1210_3225Metric_IPCN,
+            pads = { "1" = "/mcu/OSC_IN", "2" = "/mcu/OSC_OUT" }
+        }
+        component "/pwr/C12" = {
+            designator = C12,
+            package = C_1206_3216Metric_IPCN,
+            pads = { "1" = VBAT, "2" = GND }
+        }
+        component "/pwr/C13" = {
+            designator = C13,
+            package = C_1206_3216Metric_IPCN,
+            pads = { "1" = VBAT, "2" = GND }
+        }
+        component "/pwr/C14" = {
+            designator = C14,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "/pwr/BST", "2" = "/pwr/SW" }
+        }
+        component "/pwr/C15" = {
+            designator = C15,
+            package = C_0805_2012Metric_IPCN,
+            pads = { "1" = "+5V", "2" = GND }
+        }
+        component "/pwr/C16" = {
+            designator = C16,
+            package = C_0805_2012Metric_IPCN,
+            pads = { "1" = "+5V", "2" = GND }
+        }
+        component "/pwr/C17" = {
+            designator = C17,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+5V", "2" = "/pwr/FB" }
+        }
+        component "/pwr/C18" = {
+            designator = C18,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+5V", "2" = GND }
+        }
+        component "/pwr/C19" = {
+            designator = C19,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/pwr/C20" = {
+            designator = C20,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = VBAT_SENSE, "2" = GND }
+        }
+        component "/pwr/L1" = {
+            designator = L1,
+            package = L_1210_3225Metric_IPCN,
+            pads = { "1" = "/pwr/SW", "2" = "+5V" }
+        }
+        component "/pwr/R10" = {
+            designator = R10,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = VBAT_SENSE, "2" = GND }
+        }
+        component "/pwr/R6" = {
+            designator = R6,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "+5V", "2" = "/pwr/FB" }
+        }
+        component "/pwr/R7" = {
+            designator = R7,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/pwr/FB", "2" = GND }
+        }
+        component "/pwr/R8" = {
+            designator = R8,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = VBAT, "2" = "/pwr/EN" }
+        }
+        component "/pwr/R9" = {
+            designator = R9,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = VBAT, "2" = VBAT_SENSE }
+        }
+        component "/pwr/U2" = {
+            designator = U2,
+            package = "SOT-23-6_IPCN",
+            pads = {
+                "1" = "/pwr/BST",
+                "2" = GND,
+                "3" = "/pwr/FB",
+                "4" = "/pwr/EN",
+                "5" = VBAT,
+                "6" = "/pwr/SW"
+            }
+        }
+        component "/pwr/U3" = {
+            designator = U3,
+            package = "SOT-23-5_IPCN",
+            pads = { "1" = "+5V", "2" = GND, "3" = "+5V", "5" = "+3V3" }
+        }
+        component "/sens/C21" = {
+            designator = C21,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/sens/C22" = {
+            designator = C22,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/sens/C23" = {
+            designator = C23,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = GND }
+        }
+        component "/sens/R11" = {
+            designator = R11,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = I2C_SCL }
+        }
+        component "/sens/R12" = {
+            designator = R12,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "+3V3", "2" = I2C_SDA }
+        }
+        component "/sens/U4" = {
+            designator = U4,
+            package = "DFN-14_3x2.5mm_P0.5mm_IPCN",
+            pads = {
+                "1" = SPI_MISO,
+                "13" = SPI_SCK,
+                "14" = IMU_CS,
+                "2" = SPI_MOSI,
+                "4" = IMU_INT,
+                "5" = "+3V3",
+                "6" = GND,
+                "7" = GND,
+                "8" = "+3V3"
+            }
+        }
+        component "/sens/U5" = {
+            designator = U5,
+            package = "DFN-8_2x2.5mm_P0.65mm_IPCN",
+            pads = {
+                "1" = GND,
+                "2" = "+3V3",
+                "3" = I2C_SDA,
+                "4" = I2C_SCL,
+                "5" = GND,
+                "6" = "+3V3",
+                "7" = GND,
+                "8" = "+3V3"
+            }
+        }
+        net_class digital = { track_width = "0.10 mm" }
+        net_class power = { track_width = "0.40 mm" }
+        net_class supply = { track_width = "0.25 mm" }
+    }
+}

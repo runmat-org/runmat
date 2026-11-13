@@ -16,16 +16,52 @@ fn tf_constructs_object_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "tf")));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name().is(runmat_types::StaticClassIdentity::new("tf")))));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "tf")));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.materialize_f64() == vec![20.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![1, 1] && tensor.materialize_f64() == vec![20.0])
     }));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 2] && tensor.materialize_f64() == vec![1.0, 5.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![1, 2] && tensor.materialize_f64() == vec![1.0, 5.0])
     }));
+}
+
+#[test]
+fn compiled_model_property_indexing_retains_colon_selectors() {
+    execute_source(
+        r#"
+        G = ss([0 1; -2 -3], [0;1], [1 0], 0);
+        assert(isequal(G.A(:), [0;-2;1;-3]));
+        assert(isequal(G.A(:,2), [1;-3]));
+        holder = struct('model', G);
+        assert(isequal(holder.model.A(:), [0;-2;1;-3]));
+        "#,
+    )
+    .expect("property indexing resolves selectors after distinguishing stored values from calls");
+}
+
+#[test]
+fn compiled_ss_integer_precision_boundary_reports_owning_identifiers() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    for (source, identifier) in [
+        (
+            "wide=uint64(9007199254740992)+uint64(1); S=ss(wide,1,1,1);",
+            "RunMat:ss:InvalidMatrix",
+        ),
+        (
+            "wide=uint64(9007199254740992)+uint64(1); S=ss(1,1,1,1,wide);",
+            "RunMat:ss:InvalidSampleTime",
+        ),
+    ] {
+        let error = execute_source(source).expect_err("inexact integer ss input");
+        assert_eq!(error.identifier(), Some(identifier), "{source}: {error}");
+    }
+    execute_source(
+        "wide=uint64(9007199254740992); S=ss(wide,1,1,1,wide); assert(S.A==double(wide)); assert(S.Ts==double(wide));",
+    )
+    .expect("exact wide integer ss inputs");
 }
 
 #[test]
@@ -72,6 +108,86 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
         assert(hd(2) == 0);
     "#;
     execute_source(program).unwrap();
+}
+
+#[test]
+fn stepinfo_tf_model_form_executes_through_compiled_vm_call() {
+    let program = r#"
+        H = tf(1, [1 1]);
+        info = stepinfo(H);
+        [y, t] = step(H);
+        sampled = stepinfo(y, t, dcgain(H));
+        assert(abs(info.SteadyStateValue - 1) < 1e-12);
+        assert(abs(info.SteadyStateValue - sampled.SteadyStateValue) < 1e-12);
+        assert(abs(info.RiseTime - sampled.RiseTime) < 1e-10);
+        assert(info.Overshoot == 0);
+    "#;
+    execute_source(program).expect("compiled tf model-form stepinfo call");
+}
+
+#[test]
+fn stepinfo_ss_model_form_reports_owning_unsupported_model_error_in_vm() {
+    let error = execute_source("S = ss(-1, 1, 1, 0); info = stepinfo(S);")
+        .expect_err("stepinfo currently supports tf models, not ss models");
+    assert_eq!(error.identifier(), Some("RunMat:stepinfo:UnsupportedModel"));
+}
+
+#[test]
+fn tf_wide_integer_gain_rounds_only_at_model_arithmetic_boundary_in_vm() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let program = r#"
+        wide = uint64(9007199254740992) + uint64(1);
+        assert(wide ~= uint64(9007199254740992));
+        H = tf(0, 1);
+        left = wide + H;
+        right = H + wide;
+        ln = left.Numerator;
+        rn = right.Numerator;
+        assert(isa(ln, 'double') && isa(rn, 'double'));
+        assert(ln(1) == 9007199254740992);
+        assert(rn(1) == 9007199254740992);
+    "#;
+    execute_source(program).expect("compiled scalar model arithmetic admits rounded wide gain");
+}
+
+#[test]
+fn tf_constructor_rejects_inexact_integer_coefficients_through_vm() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    for source in [
+        "wide = uint64(9007199254740992) + uint64(1); H = tf(wide, 1);",
+        "wide = uint64(9007199254740992) + uint64(1); H = tf(1, [wide uint64(1)]);",
+    ] {
+        let error = execute_source(source).expect_err("inexact coefficient must be rejected");
+        assert!(
+            error.message().contains("exactly representable"),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tf_minimum_signed_integer_power_preserves_scalar_identity_in_vm() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let program = r#"
+        exponent = intmin('int64');
+        positive = tf(1, 1);
+        negative = tf(-1, 1);
+        p_pos = positive .^ exponent;
+        m_pos = positive ^ exponent;
+        p_neg = negative .^ exponent;
+        m_neg = negative ^ exponent;
+        assert(isa(p_pos, 'tf') && isa(m_pos, 'tf'));
+        assert(isa(p_neg, 'tf') && isa(m_neg, 'tf'));
+        pn = p_pos.Numerator; pd = p_pos.Denominator;
+        mn = m_pos.Numerator; md = m_pos.Denominator;
+        nn = p_neg.Numerator; nd = p_neg.Denominator;
+        qn = m_neg.Numerator; qd = m_neg.Denominator;
+        assert(pn(1) == 1 && pd(1) == 1);
+        assert(mn(1) == 1 && md(1) == 1);
+        assert(nn(1) == 1 && nd(1) == 1);
+        assert(qn(1) == 1 && qd(1) == 1);
+    "#;
+    execute_source(program).expect("compiled power and mpower accept exact i64 minimum");
 }
 
 #[test]
@@ -210,15 +326,15 @@ fn ss_constructs_object_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == "ss")));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name().is(runmat_types::StaticClassIdentity::new("ss")))));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "ss")));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![0.0, -2.0, 1.0, -3.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.materialize_f64() == vec![0.0, -2.0, 1.0, -3.0])
     }));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![0.0, 1.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 1] && tensor.materialize_f64() == vec![0.0, 1.0])
     }));
     assert!(vars
         .iter()
@@ -235,14 +351,14 @@ fn step_returns_siso_response_through_vm_dispatch() {
 
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1]
+            if tensor.shape() == vec![3, 1]
                 && (tensor.materialize_f64()[0] - 0.0).abs() < 1.0e-8
                 && (tensor.materialize_f64()[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5
                 && (tensor.materialize_f64()[2] - (1.0 - (-2.0_f64).exp())).abs() < 1.0e-5)
     }));
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 1.0, 2.0])
+            if tensor.shape() == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 1.0, 2.0])
     }));
 }
 
@@ -256,7 +372,7 @@ fn step_single_output_assignment_returns_response() {
 
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1]
+            if tensor.shape() == vec![3, 1]
                 && (tensor.materialize_f64()[0] - 0.0).abs() < 1.0e-8
                 && (tensor.materialize_f64()[2] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5)
     }));
@@ -293,7 +409,7 @@ fn impulse_returns_siso_response_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
+        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![3, 1]) }));
     assert!(vars.iter().any(|value| match value {
         Value::Num(n) => (*n - 20.0).abs() < 1.0e-8,
         _ => false,
@@ -321,7 +437,7 @@ fn impulse_discrete_response_through_vm_dispatch() {
     let vars = execute_source(discrete).unwrap();
     assert!(vars
         .iter()
-        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![6, 1]) }));
+        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![6, 1]) }));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if n.abs() < 1.0e-12)));
@@ -362,7 +478,7 @@ fn nyquist_returns_frequency_response_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
+        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![3, 1]) }));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (n - 1.0).abs() < 1.0e-12)));

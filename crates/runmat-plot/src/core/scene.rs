@@ -7,7 +7,6 @@ use crate::core::renderer::{PipelineType, Vertex};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Unique identifier for scene nodes
 pub type NodeId = u64;
@@ -38,6 +37,10 @@ pub struct SceneNode {
     // Level of detail settings
     pub lod_levels: Vec<LodLevel>,
     pub current_lod: usize,
+
+    /// Placements when the node is instanced: `render_data` is then in the placed mesh's own
+    /// coordinates and draws once per visible placement.
+    pub instances: Option<std::sync::Arc<crate::core::NodeInstances>>,
 }
 
 /// Rendering data for a scene node
@@ -72,7 +75,7 @@ impl RenderData {
 /// Optional GPU-resident vertex storage supplied by higher-level systems.
 #[derive(Debug, Clone)]
 pub struct GpuVertexBuffer {
-    pub buffer: Arc<wgpu::Buffer>,
+    pub buffer: runmat_accelerate_api::WgpuBufferOwner,
     pub vertex_count: usize,
     /// Optional indirect draw arguments buffer (GPU-driven vertex count).
     ///
@@ -82,7 +85,7 @@ pub struct GpuVertexBuffer {
 }
 
 impl GpuVertexBuffer {
-    pub fn new(buffer: Arc<wgpu::Buffer>, vertex_count: usize) -> Self {
+    pub fn new(buffer: runmat_accelerate_api::WgpuBufferOwner, vertex_count: usize) -> Self {
         Self {
             buffer,
             vertex_count,
@@ -91,9 +94,9 @@ impl GpuVertexBuffer {
     }
 
     pub fn with_indirect(
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         vertex_count: usize,
-        indirect_args: Arc<wgpu::Buffer>,
+        indirect_args: runmat_accelerate_api::WgpuBufferOwner,
     ) -> Self {
         Self {
             buffer,
@@ -109,7 +112,7 @@ impl GpuVertexBuffer {
 /// GPU-driven draw call arguments for `draw_indirect`.
 #[derive(Debug, Clone)]
 pub struct GpuIndirectDraw {
-    pub args: Arc<wgpu::Buffer>,
+    pub args: runmat_accelerate_api::WgpuBufferOwner,
     pub offset: u64,
 }
 
@@ -298,6 +301,12 @@ impl BoundingBox {
     }
 }
 
+/// A blended triangle surface: drawn after opaque items when the scene asks for it.
+pub fn is_translucent_surface(data: &RenderData) -> bool {
+    data.pipeline_type == super::PipelineType::Triangles
+        && data.material.alpha_mode == AlphaMode::Blend
+}
+
 /// Scene graph managing hierarchical plot objects
 pub struct Scene {
     nodes: HashMap<NodeId, SceneNode>,
@@ -311,6 +320,9 @@ pub struct Scene {
     // Culling and LOD
     frustum: Option<Frustum>,
     camera_position: Vec3,
+
+    /// Draw blended surfaces after every opaque item (see [`Scene::set_translucent_last`]).
+    translucent_last: bool,
 }
 
 impl Default for Scene {
@@ -329,7 +341,20 @@ impl Scene {
             bounds_dirty: true,
             frustum: None,
             camera_position: Vec3::ZERO,
+            translucent_last: false,
         }
+    }
+
+    /// Draw blended surfaces after every opaque item, without depth writes, so translucent
+    /// context geometry composites over the opaque geometry behind it and never hides it.
+    /// Geometry scenes set this; figures keep their creation order, which MATLAB plots
+    /// depend on in 2-D.
+    pub fn set_translucent_last(&mut self, translucent_last: bool) {
+        self.translucent_last = translucent_last;
+    }
+
+    pub fn translucent_last(&self) -> bool {
+        self.translucent_last
     }
 
     /// Add a new node to the scene
@@ -501,12 +526,32 @@ impl Scene {
 
     /// Get visible nodes for rendering (with frustum culling)
     pub fn get_visible_nodes(&self) -> Vec<&SceneNode> {
-        self.nodes
+        let mut nodes: Vec<_> = self
+            .nodes
             .values()
             .filter(|node| {
                 node.visible && node.render_data.is_some() && self.is_node_in_frustum(node)
             })
-            .collect()
+            .collect();
+        // HashMap iteration is not a draw order. See-through surfaces (glass, a clear lid)
+        // blend over what is behind them, so they draw after every opaque node; depth-free
+        // annotations must be composited after surfaces, never underneath them. Node IDs
+        // preserve insertion order within each layer.
+        nodes.sort_by_key(|node| {
+            let data = node.render_data.as_ref();
+            let overlay = data
+                .map(|data| data.pipeline_type.is_depth_free_overlay())
+                .unwrap_or(false);
+            let see_through = data
+                .map(|data| {
+                    data.pipeline_type == crate::core::PipelineType::Triangles
+                        && (data.material.albedo.w < 0.95
+                            || matches!(data.material.alpha_mode, crate::core::AlphaMode::Blend))
+                })
+                .unwrap_or(false);
+            (overlay, see_through, node.id)
+        });
+        nodes
     }
 
     fn is_node_in_frustum(&self, node: &SceneNode) -> bool {
@@ -708,7 +753,7 @@ mod tests {
 
         let parent_node = SceneNode {
             id: 0,
-            name: "Parent".to_string(),
+            name: "Parent".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: true,
@@ -720,13 +765,14 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let parent_id = scene.add_node(parent_node);
 
         let child_node = SceneNode {
             id: 0,
-            name: "Child".to_string(),
+            name: "Child".into(),
             transform: Mat4::from_translation(Vec3::new(1.0, 0.0, 0.0)),
             visible: true,
             cast_shadows: true,
@@ -738,6 +784,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let child_id = scene.add_node(child_node);
@@ -757,7 +804,7 @@ mod tests {
 
         let node = SceneNode {
             id: explicit_id,
-            name: "Stable".to_string(),
+            name: "Stable".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: false,
@@ -769,6 +816,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let inserted_id = scene.add_node_preserving_id(node);
@@ -778,7 +826,7 @@ mod tests {
 
         let generated_id = scene.add_node(SceneNode {
             id: explicit_id,
-            name: "Generated".to_string(),
+            name: "Generated".into(),
             transform: Mat4::IDENTITY,
             visible: true,
             cast_shadows: false,
@@ -790,6 +838,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         });
 
         assert_ne!(generated_id, explicit_id);

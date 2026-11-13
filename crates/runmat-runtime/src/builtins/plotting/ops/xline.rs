@@ -1,17 +1,13 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, XLINE_DESCRIPTOR, XLINE_ERROR_INTERNAL, XLINE_ERROR_INVALID_ARGUMENT,
+    XLINE_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ReferenceLine, ReferenceLineOrientation};
 use runmat_value::NumericScalar;
 use runmat_value::{Tensor, Value};
 
+use super::op_common::annotation_error;
 use super::plotting_error;
 use super::state::{append_active_plot, register_reference_line_handle, PlotRenderOptions};
 use super::style::{
@@ -19,203 +15,51 @@ use super::style::{
     LineAppearance, LineStyleParseOptions,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "xline";
 
-const XLINE_INTEGER_COORDINATE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are documented for reference-line coordinates.",
-    }];
-const XLINE_INTEGER_COLOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Color",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer RGB components are accepted when every component is in the documented interval from zero through one.",
-    }];
-const XLINE_INTEGER_LINE_WIDTH_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "LineWidth",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Integer line widths are accepted when the scalar is finite and positive.",
-    }];
-const XLINE_INTEGER_VISIBLE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Visible",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Numeric visibility values must be exactly zero or one.",
-    }];
-pub const XLINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = xline(integer_x, ...)", inputs: &XLINE_INTEGER_COORDINATE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Coordinates cross the graphics floating-point boundary after numeric classification; returned graphics handles are double." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = xline(..., 'Color', integer_rgb)", inputs: &XLINE_INTEGER_COLOR_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Validated RGB components cross the renderer color boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = xline(..., 'LineWidth', integer_width)", inputs: &XLINE_INTEGER_LINE_WIDTH_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The validated positive width crosses the renderer scalar boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = xline(..., 'Visible', integer_visible)", inputs: &XLINE_INTEGER_VISIBLE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The integer is classified exactly as zero or one before the graphics state is updated." },
-];
-
-const XLINE_OUTPUT_HANDLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Reference line handle scalar or row vector when multiple coordinates are provided.",
-}];
-
-const XLINE_INPUTS_COORD: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "X-coordinate scalar or numeric vector of vertical line positions.",
-}];
-
-const XLINE_INPUTS_COORD_STYLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X-coordinate scalar or numeric vector of vertical line positions.",
-    },
-    BuiltinParamDescriptor {
-        name: "style_or_label",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "LineSpec token (for example '--r') or label text.",
-    },
-];
-
-const XLINE_INPUTS_COORD_STYLE_LABEL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X-coordinate scalar or numeric vector of vertical line positions.",
-    },
-    BuiltinParamDescriptor {
-        name: "linespec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style token (for example '--r').",
-    },
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reference line label text.",
-    },
-];
-
-const XLINE_INPUTS_COORD_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X-coordinate scalar or numeric vector of vertical line positions.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Style arguments and Name/Value pairs (Color, LineWidth, LineStyle, LabelOrientation, Visible).",
-    },
-];
-
-const XLINE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = xline(x)",
-        inputs: &XLINE_INPUTS_COORD,
-        outputs: &XLINE_OUTPUT_HANDLES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = xline(x, styleOrLabel)",
-        inputs: &XLINE_INPUTS_COORD_STYLE,
-        outputs: &XLINE_OUTPUT_HANDLES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = xline(x, LineSpec, label)",
-        inputs: &XLINE_INPUTS_COORD_STYLE_LABEL,
-        outputs: &XLINE_OUTPUT_HANDLES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = xline(x, Name, Value, ...)",
-        inputs: &XLINE_INPUTS_COORD_PROPS,
-        outputs: &XLINE_OUTPUT_HANDLES,
-    },
-];
-
-const XLINE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XLINE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:xline:InvalidArgument"),
-    when: "Coordinate input, style arguments, or Name/Value pairs are invalid.",
-    message: "xline: invalid argument",
-};
-
-const XLINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XLINE.INTERNAL",
-    identifier: Some("RunMat:xline:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "xline: internal operation failed",
-};
-
-const XLINE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [XLINE_ERROR_INVALID_ARGUMENT, XLINE_ERROR_INTERNAL];
-
-pub const XLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &XLINE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &XLINE_ERRORS,
-};
-
 #[runtime_builtin(
     name = "xline",
-    category = "plotting",
-    summary = "Draw vertical reference lines on the current axes.",
-    keywords = "xline,reference,line,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::xline::XLINE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::xline::XLINE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::xline"
 )]
-pub fn xline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    reference_line_builtin(BUILTIN_NAME, ReferenceLineOrientation::Vertical, args)
+pub fn xline_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &XLINE_DESCRIPTOR,
+        &XLINE_ERROR_TOO_MANY_OUTPUTS,
+        "xline",
+    )?;
+    reference_line_builtin(
+        BUILTIN_NAME,
+        ReferenceLineOrientation::Vertical,
+        &XLINE_ERROR_INVALID_ARGUMENT,
+        &XLINE_ERROR_INTERNAL,
+        args,
+    )
 }
 
 pub(crate) fn reference_line_builtin(
     builtin: &'static str,
     orientation: ReferenceLineOrientation,
-    args: Vec<Value>,
+    invalid: &'static BuiltinErrorDescriptor,
+    internal: &'static BuiltinErrorDescriptor,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(reference_line_error(
+        return Err(annotation_error(
             builtin,
-            "expected a coordinate argument",
+            invalid,
+            reference_line_error(builtin, "expected a coordinate argument"),
         ));
     }
-    let coords = coordinates_from_value(&args[0], builtin)?;
-    let options = parse_reference_line_options(builtin, &args[1..])?;
-    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let coords = coordinates_from_value(&args[0], builtin)
+        .map_err(|error| annotation_error(builtin, invalid, error))?;
+    let options = parse_reference_line_options(
+        builtin,
+        args.view().range(1..).expect("reference-line option tail"),
+    )
+    .map_err(|error| annotation_error(builtin, invalid, error))?;
     let mut lines = coords
         .iter()
         .map(|&value| {
@@ -230,16 +74,17 @@ pub(crate) fn reference_line_builtin(
             line.display_name = options.display_name.clone();
             line.label_orientation = options.label_orientation.clone();
             line.visible = options.visible;
+            line.color_auto = options.color_auto;
             Ok(line)
         })
-        .collect::<BuiltinResult<Vec<_>>>()?;
+        .collect::<BuiltinResult<Vec<_>>>()
+        .map_err(|error| annotation_error(builtin, invalid, error))?;
+
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
 
     let plot_indices = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices);
     let opts = PlotRenderOptions {
-        title: "",
-        x_label: "",
-        y_label: "",
         ..Default::default()
     };
     let axes_index_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -254,9 +99,8 @@ pub(crate) fn reference_line_builtin(
     });
 
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
-            return Err(err);
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
+            return Err(annotation_error(builtin, internal, err));
         }
     }
 
@@ -269,9 +113,9 @@ pub(crate) fn reference_line_builtin(
     if handles.len() == 1 {
         Ok(Value::Num(handles[0]))
     } else {
+        let count = handles.len();
         Ok(Value::Tensor(
-            Tensor::new(handles.clone(), vec![1, handles.len()])
-                .expect("reference line handle row"),
+            Tensor::new(handles, vec![1, count]).expect("reference line handle row"),
         ))
     }
 }
@@ -283,11 +127,13 @@ struct ReferenceLineOptions {
     display_name: Option<String>,
     label_orientation: String,
     visible: bool,
+    /// No color given: the line uses the theme's axes color, as MATLAB's default does.
+    color_auto: bool,
 }
 
 fn parse_reference_line_options(
     builtin: &'static str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<ReferenceLineOptions> {
     let mut style_args = Vec::new();
     let mut label = None;
@@ -298,7 +144,14 @@ fn parse_reference_line_options(
 
     let mut idx = 0usize;
     while idx < args.len() {
-        let Some(text) = value_as_string(&args[idx]) else {
+        let Some(text) = value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             return Err(reference_line_error(
                 builtin,
                 "style and option names must be strings",
@@ -314,7 +167,14 @@ fn parse_reference_line_options(
             }
             match lower.as_str() {
                 "labelorientation" => {
-                    let Some(value) = value_as_string(&args[idx + 1]) else {
+                    let Some(value) = value_as_string(&args[idx + 1]).map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    else {
                         return Err(reference_line_error(
                             builtin,
                             "LabelOrientation must be a string",
@@ -382,7 +242,8 @@ fn parse_reference_line_options(
 
     let mut parsed = parse_line_style_args(&style_args, &LineStyleParseOptions::generic(builtin))?;
     if !color_explicit {
-        parsed.appearance.color = glam::Vec4::new(0.0, 0.0, 0.0, 1.0);
+        // MATLAB's default; drawn in the theme's axes color (`color_auto`).
+        parsed.appearance.color = glam::Vec4::new(0.15, 0.15, 0.15, 1.0);
     }
     if !width_explicit {
         parsed.appearance.line_width = 1.0;
@@ -397,6 +258,7 @@ fn parse_reference_line_options(
         display_name: parsed.label,
         label_orientation,
         visible,
+        color_auto: !color_explicit,
     })
 }
 
@@ -413,11 +275,16 @@ fn visible_from_value(value: &Value) -> Option<bool> {
         Value::Tensor(tensor) if tensor.len() == 1 => {
             visible_from_numeric_scalar(tensor.numeric_value_at(0)?)
         }
-        _ => match value_as_string(value)?.trim().to_ascii_lowercase().as_str() {
-            "on" => Some(true),
-            "off" => Some(false),
-            _ => None,
-        },
+        _ => {
+            if crate::builtins::plotting::style::value_text_equals_ascii(value, "on", true) {
+                Some(true)
+            } else if crate::builtins::plotting::style::value_text_equals_ascii(value, "off", true)
+            {
+                Some(false)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -469,8 +336,7 @@ fn coordinates_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
         }
         _ => {}
     }
-    let tensor =
-        Tensor::try_from(value).map_err(|err| reference_line_error(builtin, err.to_string()))?;
+    let tensor = Tensor::try_from(value).map_err(|err| reference_line_error(builtin, err))?;
     if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(reference_line_error(
             builtin,
@@ -541,7 +407,10 @@ mod tests {
             Value::Tensor(tensor(&[2.0, 3.0])),
         ]))
         .unwrap();
-        let handle = xline_builtin(vec![Value::Num(0.5), Value::String("--r".into())]).unwrap();
+        let handle = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(0.5), Value::String("--r".into())],
+        ))
+        .unwrap();
         assert!(matches!(handle, Value::Num(_)));
         let figure = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(figure.len(), 2);
@@ -550,15 +419,17 @@ mod tests {
     #[test]
     fn xline_supports_label_and_name_value_style() {
         let _guard = setup();
-        let handle = xline_builtin(vec![
-            Value::Num(5.0),
-            Value::String("--".into()),
-            Value::String("Threshold".into()),
-            Value::String("LineWidth".into()),
-            Value::Num(3.0),
-            Value::String("LabelOrientation".into()),
-            Value::String("horizontal".into()),
-        ])
+        let handle = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(5.0),
+                Value::String("--".into()),
+                Value::String("Threshold".into()),
+                Value::String("LineWidth".into()),
+                Value::Num(3.0),
+                Value::String("LabelOrientation".into()),
+                Value::String("horizontal".into()),
+            ],
+        ))
         .unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected scalar handle");
@@ -576,7 +447,10 @@ mod tests {
     #[test]
     fn xline_vector_returns_handle_vector() {
         let _guard = setup();
-        let handles = xline_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))]).unwrap();
+        let handles = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))],
+        ))
+        .unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
         assert_eq!(tensor.materialize_f64().len(), 3);
     }
@@ -584,7 +458,10 @@ mod tests {
     #[test]
     fn xline_reads_typed_integer_coordinates_exactly() {
         let _guard = setup();
-        let handles = xline_builtin(vec![Value::Tensor(integer_tensor(&[1, 2, 3]))]).unwrap();
+        let handles = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Tensor(integer_tensor(&[1, 2, 3]))],
+        ))
+        .unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
         assert_eq!(tensor.materialize_f64().len(), 3);
     }
@@ -592,17 +469,21 @@ mod tests {
     #[test]
     fn xline_visible_accepts_only_exact_numeric_zero_or_one() {
         let _guard = setup();
-        xline_builtin(vec![
-            Value::Num(1.0),
-            Value::String("Visible".into()),
-            Value::Int(runmat_value::IntValue::U64(1)),
-        ])
+        xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(1.0),
+                Value::String("Visible".into()),
+                Value::Int(runmat_value::IntValue::U64(1)),
+            ],
+        ))
         .expect("integer one is visible");
-        let error = xline_builtin(vec![
-            Value::Num(2.0),
-            Value::String("Visible".into()),
-            Value::Int(runmat_value::IntValue::I8(2)),
-        ])
+        let error = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(2.0),
+                Value::String("Visible".into()),
+                Value::Int(runmat_value::IntValue::I8(2)),
+            ],
+        ))
         .expect_err("integer two is not a visibility value");
         assert!(error.message.contains("0, or 1"));
     }
@@ -610,11 +491,38 @@ mod tests {
     #[test]
     fn xline_preserves_existing_axis_labels() {
         let _guard = setup();
-        xlabel_builtin(vec![Value::String("Time".into())]).unwrap();
-        xline_builtin(vec![Value::Num(5.0)]).unwrap();
+        xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Time".into())],
+        ))
+        .unwrap();
+        xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(5.0)],
+        ))
+        .unwrap();
 
         let figure = clone_figure(current_figure_handle()).unwrap();
         let meta = figure.axes_metadata(0).unwrap();
         assert_eq!(meta.x_label.as_deref(), Some("Time"));
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:xline:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = super::xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:xline:TooManyOutputs"));
     }
 }

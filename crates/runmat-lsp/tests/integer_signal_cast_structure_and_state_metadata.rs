@@ -22,32 +22,34 @@ const CAPABILITY_PACKET: [(&str, usize, &str); 14] = [
 #[test]
 fn signal_cast_structure_and_state_metadata_is_explicit() {
     for (name, expected_forms, _) in CAPABILITY_PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
-        assert!(builtin
-            .integer_capabilities
+        let metadata =
+            runmat_builtins::builtin_integer_metadata_by_name(name).expect("known builtin");
+        assert_eq!(metadata.capabilities.len(), expected_forms, "{name}");
+        assert!(metadata.audit.is_none(), "{name}");
+        assert!(metadata
+            .capabilities
             .iter()
             .flat_map(|capability| capability.inputs)
             .all(|input| input.classes.len() == 8));
     }
     for name in ["second", "sendmail"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(builtin.integer_capabilities.is_empty(), "{name}");
+        let metadata =
+            runmat_builtins::builtin_integer_metadata_by_name(name).expect("known builtin");
+        assert!(metadata.capabilities.is_empty(), "{name}");
         assert_eq!(
-            builtin.integer_audit.expect("integer audit").kind,
+            metadata.audit.expect("integer audit").kind,
             BuiltinIntegerAuditKind::NotApplicable,
             "{name}"
         );
     }
-    let sin = runmat_builtins::builtin_function_by_name("sin").expect("sin");
+    let sin = runmat_builtins::builtin_integer_metadata_by_name("sin").expect("sin");
     assert_eq!(
-        sin.integer_capabilities[0].inputs[0].availability,
+        sin.capabilities[0].inputs[0].availability,
         BuiltinIntegerInputAvailability::RunMatOnly
     );
-    let sign = runmat_builtins::builtin_function_by_name("sign").expect("sign");
+    let sign = runmat_builtins::builtin_integer_metadata_by_name("sign").expect("sign");
     assert_eq!(
-        sign.integer_capabilities[0].inputs[0].availability,
+        sign.capabilities[0].inputs[0].availability,
         BuiltinIntegerInputAvailability::Documented
     );
 }

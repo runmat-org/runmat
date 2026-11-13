@@ -15,7 +15,7 @@ pub(crate) fn display_path_from_base(path: &Path, base: &Path) -> String {
 
 pub(crate) fn resolve_against_base(path: &str, base: &Path) -> PathBuf {
     let path = PathBuf::from(path);
-    if path.is_absolute() {
+    if host_path_is_absolute(&path) {
         path
     } else {
         base.join(path)
@@ -103,6 +103,20 @@ fn windows_display_key(path: &Path) -> String {
 fn is_windows_drive_root(path: &str) -> bool {
     let bytes = path.as_bytes();
     bytes.len() == 3 && bytes[1] == b':' && bytes[2] == b'\\'
+}
+
+/// Absolute-path test for the host's own path grammar. Browser providers use
+/// rooted virtual paths, and `Path::is_absolute` is false for every path on
+/// wasm32-unknown-unknown because that target has no prefix grammar.
+pub(crate) fn host_path_is_absolute(path: &std::path::Path) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        runmat_filesystem::FsPathNamespace::VirtualRooted.is_absolute(path)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        path.is_absolute()
+    }
 }
 
 #[cfg(test)]

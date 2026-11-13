@@ -2,7 +2,8 @@ use aes_gcm::aead::{Aead as _, KeyInit as _, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+// HMAC/HKDF 0.12 take the digest-0.10 SHA-256.
+use sha2_mac::Sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::{
@@ -223,7 +224,7 @@ impl RunObjectEncryption {
     }
 }
 
-fn derive(
+pub(super) fn derive(
     run_key: &RunKeyMaterial,
     salt: &[u8],
     context: &EncryptionContext,

@@ -1,5 +1,8 @@
 //! MATLAB-compatible `diag` builtin.
 
+use crate::builtins::common::integer_conversion::{
+    cast_complex_value, CastError, IntegerClass, IntegerClassExt,
+};
 use crate::builtins::common::{
     gpu_helpers,
     spec::{
@@ -8,20 +11,9 @@ use crate::builtins::common::{
     },
     tensor,
 };
-use crate::builtins::math::elementwise::integer_cast::{
-    cast_complex_value, CastError, IntegerTarget,
-};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType,
@@ -29,235 +21,6 @@ use runmat_value::{
 };
 
 const BUILTIN_NAME: &str = "diag";
-
-const DIAG_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-explicit-size",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with an explicit output size is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagExplicitSizeExtension"),
-};
-const DIAG_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-vector-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with the 'vector' option is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagVectorOptionExtension"),
-};
-const DIAG_CLASS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-output-class",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with an output-class override is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagOutputClassExtension"),
-};
-const DIAG_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-like",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with a 'like' prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagLikeExtension"),
-};
-const DIAG_TRAILING_SINGLETON_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-trailing-singleton-dimensions",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with more than two trailing singleton dimensions is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagTrailingSingletonDimensionsExtension"),
-};
-pub const DIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    DIAG_SIZE_EXTENSION,
-    DIAG_VECTOR_EXTENSION,
-    DIAG_CLASS_EXTENSION,
-    DIAG_LIKE_EXTENSION,
-    DIAG_TRAILING_SINGLETON_EXTENSION,
-];
-
-const DIAG_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "v or A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight real integer classes are documented input data and preserve exact class, shape semantics, and values through diagonal construction or extraction.",
-    }];
-const DIAG_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "v or A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer data remains authoritative and is never converted through binary64 during structural placement or extraction.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The real scalar diagonal number is read exactly from every integer class; integer-valued host double remains accepted and out-of-range values reject before shape arithmetic.",
-    },
-];
-pub const DIAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = diag(integer_v) or x = diag(integer_A)",
-        inputs: &DIAG_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Vector input constructs a same-class diagonal matrix and matrix input extracts a same-class column vector; resident integer data exact-gathers and re-uploads to its owning provider until native integer structural hooks exist.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = diag(integer_v,k) or x = diag(integer_A,k)",
-        inputs: &DIAG_INTEGER_OFFSET_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "k controls only diagonal placement or extraction. Host data and controls remain exact; resident integer data preserves class, owner, and residency through exact fallback.",
-    },
-];
-
-fn diag_type(args: &[Type], context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-
-    let vector_len = vector_len_from_type(input);
-    let vector_mode = literal_keyword_at(context, 1).as_deref() == Some("vector")
-        || literal_keyword_at(context, 2).as_deref() == Some("vector");
-    let size_override = literal_size_override(context);
-    let offset = literal_offset(context).unwrap_or(0);
-
-    let mut output_is_logical = matches!(input, Type::Logical { .. } | Type::Bool);
-    for idx in 1..context.literal_args.len() {
-        match literal_keyword_at(context, idx).as_deref() {
-            Some("double") => output_is_logical = false,
-            Some("logical") => output_is_logical = true,
-            _ => {}
-        }
-    }
-
-    let mk_type = |rows: Option<usize>, cols: Option<usize>| {
-        if output_is_logical {
-            Type::Logical {
-                shape: Some(vec![rows, cols]),
-            }
-        } else {
-            Type::Tensor {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-    };
-
-    if vector_mode {
-        if let Some(len) = vector_len {
-            return mk_type(Some(len), Some(1));
-        }
-        return if output_is_logical {
-            Type::logical()
-        } else {
-            Type::tensor()
-        };
-    }
-
-    if let Some((rows, cols)) = size_override {
-        if vector_len.is_some() {
-            return mk_type(Some(rows), Some(cols));
-        }
-    }
-
-    if let Some(len) = vector_len {
-        let shift = offset.unsigned_abs();
-        if let Some(size) = len.checked_add(shift) {
-            return mk_type(Some(size), Some(size));
-        }
-        return if output_is_logical {
-            Type::logical()
-        } else {
-            Type::tensor()
-        };
-    }
-
-    if output_is_logical {
-        Type::logical()
-    } else {
-        Type::tensor()
-    }
-}
-
-fn vector_len_from_type(input: &Type) -> Option<usize> {
-    match input {
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            if shape.len() == 1 {
-                return shape[0];
-            }
-            let rows = shape.first().copied().flatten();
-            let cols = shape.get(1).copied().flatten();
-            match (rows, cols) {
-                (Some(1), Some(c)) => Some(c),
-                (Some(r), Some(1)) => Some(r),
-                _ => None,
-            }
-        }
-        Type::Num | Type::Int | Type::Bool => Some(1),
-        _ => None,
-    }
-}
-
-fn literal_keyword_at(context: &ResolveContext, idx: usize) -> Option<String> {
-    context.literal_string_at(idx)
-}
-
-fn literal_size_override(context: &ResolveContext) -> Option<(usize, usize)> {
-    parse_literal_size(context.literal_vector_at(1).as_deref())
-        .or_else(|| parse_literal_size(context.literal_vector_at(2).as_deref()))
-}
-
-fn parse_literal_size(values: Option<&[LiteralValue]>) -> Option<(usize, usize)> {
-    let values = values?;
-    let dims: Vec<usize> = values
-        .iter()
-        .map(|value| match value {
-            LiteralValue::Number(num) => {
-                if !num.is_finite() {
-                    return None;
-                }
-                let rounded = num.round();
-                if (rounded - num).abs() > 1e-9 || rounded < 0.0 {
-                    return None;
-                }
-                Some(rounded as usize)
-            }
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    match dims.as_slice() {
-        [m] => Some((*m, *m)),
-        [m, n] => Some((*m, *n)),
-        _ => None,
-    }
-}
-
-fn literal_offset(context: &ResolveContext) -> Option<isize> {
-    literal_offset_at(context, 1).or_else(|| literal_offset_at(context, 2))
-}
-
-fn literal_offset_at(context: &ResolveContext, idx: usize) -> Option<isize> {
-    let literal = context.literal_args.get(idx)?;
-    match literal {
-        LiteralValue::Number(value) => {
-            if !value.is_finite() {
-                return None;
-            }
-            let rounded = value.round();
-            if (rounded - value).abs() > f64::EPSILON {
-                return None;
-            }
-            Some(rounded as isize)
-        }
-        LiteralValue::Bool(flag) => Some(if *flag { 1 } else { 0 }),
-        _ => None,
-    }
-}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -279,7 +42,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Real and logical gpuArray inputs use provider diag hooks for native vector placement, rectangular placement, vector mode, and matrix diagonal extraction. Complex, character, and conversion-heavy template forms use the host fallback.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Diagonal)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "diag",
     shape: ShapeRequirements::Any,
@@ -290,210 +53,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "diag uses provider hooks for supported real/logical gpuArray shape operations and otherwise falls back to the runtime host path.",
 };
 
-const DIAG_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Diagonal matrix or diagonal vector extracted from the input.",
-}];
-
-const DIAG_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, vector, or matrix.",
-}];
-
-const DIAG_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal offset index.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_SZ: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "sz",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output matrix size override as [m n] or scalar n.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_K_SZ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal offset index.",
-    },
-    BuiltinParamDescriptor {
-        name: "sz",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output matrix size override as [m n] or scalar n.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_VECTOR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"vector\""),
-        description: "Vector extraction option ('vector').",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_CLASS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "class",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output class override ('logical', 'double', or integer class).",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Literal option name ('like').",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value controlling output class/residency.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_ARGS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional offset/size/options parsed by diag argument grammar.",
-    },
-];
-
-const DIAG_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "D = diag(v)",
-        inputs: &DIAG_INPUTS_A,
-        outputs: &DIAG_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "D = diag(v, k)",
-        inputs: &DIAG_INPUTS_A_K,
-        outputs: &DIAG_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = diag(A)",
-        inputs: &DIAG_INPUTS_A,
-        outputs: &DIAG_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = diag(A, k)",
-        inputs: &DIAG_INPUTS_A_K,
-        outputs: &DIAG_OUTPUT,
-    },
-];
-
-const DIAG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIAG.INVALID_INPUT",
-    identifier: Some("RunMat:diag:InvalidInput"),
-    when: "Input type, option grammar, size override, or output conversion is invalid.",
-    message: "diag: invalid input argument",
-};
-
-const DIAG_ERROR_INVALID_OFFSET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIAG.INVALID_OFFSET",
-    identifier: Some("RunMat:diag:InvalidOffset"),
-    when: "Diagonal offset is not a finite integer scalar.",
-    message: "diag: invalid diagonal offset",
-};
-
-const DIAG_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [DIAG_ERROR_INVALID_INPUT, DIAG_ERROR_INVALID_OFFSET];
-
 const MESSAGE_ID_INVALID_INPUT: &BuiltinErrorDescriptor = &DIAG_ERROR_INVALID_INPUT;
 const MESSAGE_ID_INVALID_OFFSET: &BuiltinErrorDescriptor = &DIAG_ERROR_INVALID_OFFSET;
-
-pub const DIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DIAG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DIAG_ERRORS,
-};
 
 fn diag_error(error: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
@@ -508,7 +69,7 @@ enum OutputTemplate {
     Native,
     Logical,
     Double,
-    Integer(IntegerTarget),
+    Integer(IntegerClass),
     Like(Value),
 }
 
@@ -516,7 +77,7 @@ enum OutputTemplate {
 enum ClassOverride {
     Logical,
     Double,
-    Integer(IntegerTarget),
+    Integer(IntegerClass),
 }
 
 struct ParsedDiagArgs {
@@ -527,7 +88,7 @@ struct ParsedDiagArgs {
 }
 
 impl ParsedDiagArgs {
-    async fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut offset: Option<isize> = None;
         let mut size_override: Option<(usize, usize)> = None;
         let mut vector_mode = false;
@@ -537,7 +98,9 @@ impl ParsedDiagArgs {
         let mut idx = 0;
         while idx < args.len() {
             let arg = &args[idx];
-            if let Some(keyword) = keyword_of(arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(arg, "diag")?
+            {
                 match keyword.as_str() {
                     "vector" => {
                         if vector_mode {
@@ -660,71 +223,8 @@ impl ParsedDiagArgs {
     }
 }
 
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
-fn integer_target_from_keyword(keyword: &str) -> Option<IntegerTarget> {
-    match keyword {
-        "int8" => Some(IntegerTarget::I8),
-        "int16" => Some(IntegerTarget::I16),
-        "int32" => Some(IntegerTarget::I32),
-        "int64" => Some(IntegerTarget::I64),
-        "uint8" => Some(IntegerTarget::U8),
-        "uint16" => Some(IntegerTarget::U16),
-        "uint32" => Some(IntegerTarget::U32),
-        "uint64" => Some(IntegerTarget::U64),
-        _ => None,
-    }
-}
-
-fn integer_target_from_dtype(dtype: NumericDType) -> Option<IntegerTarget> {
-    match dtype {
-        NumericDType::I8 => Some(IntegerTarget::I8),
-        NumericDType::I16 => Some(IntegerTarget::I16),
-        NumericDType::I32 => Some(IntegerTarget::I32),
-        NumericDType::I64 => Some(IntegerTarget::I64),
-        NumericDType::U8 => Some(IntegerTarget::U8),
-        NumericDType::U16 => Some(IntegerTarget::U16),
-        NumericDType::U32 => Some(IntegerTarget::U32),
-        NumericDType::U64 => Some(IntegerTarget::U64),
-        NumericDType::F32 | NumericDType::F64 => None,
-    }
-}
-
-fn integer_target_from_storage(storage: &IntegerStorage) -> IntegerTarget {
-    match storage {
-        IntegerStorage::I8(_) => IntegerTarget::I8,
-        IntegerStorage::I16(_) => IntegerTarget::I16,
-        IntegerStorage::I32(_) => IntegerTarget::I32,
-        IntegerStorage::I64(_) => IntegerTarget::I64,
-        IntegerStorage::U8(_) => IntegerTarget::U8,
-        IntegerStorage::U16(_) => IntegerTarget::U16,
-        IntegerStorage::U32(_) => IntegerTarget::U32,
-        IntegerStorage::U64(_) => IntegerTarget::U64,
-    }
-}
-
-fn integer_target_from_int(value: &runmat_value::IntValue) -> IntegerTarget {
-    use runmat_value::IntValue;
-    match value {
-        IntValue::I8(_) => IntegerTarget::I8,
-        IntValue::I16(_) => IntegerTarget::I16,
-        IntValue::I32(_) => IntegerTarget::I32,
-        IntValue::I64(_) => IntegerTarget::I64,
-        IntValue::U8(_) => IntegerTarget::U8,
-        IntValue::U16(_) => IntegerTarget::U16,
-        IntValue::U32(_) => IntegerTarget::U32,
-        IntValue::U64(_) => IntegerTarget::U64,
-    }
+fn integer_target_from_keyword(keyword: &str) -> Option<IntegerClass> {
+    IntegerClass::from_class_name(keyword)
 }
 
 async fn try_parse_offset(value: &Value) -> BuiltinResult<Option<isize>> {
@@ -768,26 +268,48 @@ async fn try_parse_size_override(value: &Value) -> BuiltinResult<Option<(usize, 
 
 #[runtime_builtin(
     name = "diag",
-    category = "array/shape",
-    summary = "Create diagonal matrices or extract diagonals.",
-    keywords = "diag,diagonal,matrix",
-    type_resolver(diag_type),
-    descriptor(crate::builtins::array::shape::diag::DIAG_DESCRIPTOR),
-    extensions(crate::builtins::array::shape::diag::DIAG_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::diag::DIAG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::diag"
 )]
-async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_diag_compatibility(&value, &rest)?;
-    let parsed = ParsedDiagArgs::parse(rest).await?;
+async fn diag_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &DIAG_DESCRIPTOR,
+        &DIAG_ERROR_INVALID_INPUT,
+        BUILTIN_NAME,
+    )?;
+    ensure_diag_compatibility(&value, rest.view())?;
+    let parsed = ParsedDiagArgs::parse(rest.view()).await?;
     if let Value::GpuTensor(handle) = value {
         return diag_resident(handle, &parsed).await;
     }
     evaluate_diag_host(value, &parsed).await
 }
 
-fn ensure_diag_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    let keywords: Vec<String> = rest.iter().filter_map(keyword_of).collect();
+fn ensure_diag_compatibility(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    let shape = match value {
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        _ => None,
+    };
+    ensure_diag_geometry_compatibility(shape, rest)
+}
+fn ensure_diag_geometry_compatibility(
+    shape: Option<&[usize]>,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    let mut keywords = Vec::new();
+    for argument in rest.iter() {
+        if let Some(keyword) =
+            crate::builtins::common::arg_tokens::scalar_keyword_of(argument, BUILTIN_NAME)?
+        {
+            keywords.push(keyword);
+        }
+    }
     let like_only = rest.len() == 2 && keywords.iter().any(|keyword| keyword == "like");
     if rest.iter().enumerate().any(|(index, arg)| {
         matches!(arg, Value::Bool(_) | Value::LogicalArray(_)) && !(like_only && index == 1)
@@ -843,13 +365,7 @@ fn ensure_diag_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()>
     if has_size_vector || (rest.len() > 1 && !like_only) {
         crate::compatibility::ensure_builtin_extension_enabled(&DIAG_SIZE_EXTENSION, BUILTIN_NAME)?;
     }
-    let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::LogicalArray(array) => Some(array.shape.as_slice()),
-        Value::GpuTensor(handle) => Some(handle.shape.as_slice()),
-        _ => None,
-    };
+
     if shape.is_some_and(|shape| shape.len() > 2 && shape[2..].iter().all(|dim| *dim == 1)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DIAG_TRAILING_SINGLETON_EXTENSION,
@@ -871,8 +387,7 @@ async fn evaluate_diag_host(value: Value, parsed: &ParsedDiagArgs) -> BuiltinRes
 }
 
 async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let input_device = handle.device_id;
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+    let provider = gpu_helpers::require_resident_compute_owner(&handle, || {
         diag_error(
             MESSAGE_ID_INVALID_INPUT,
             "diag: no owning acceleration provider",
@@ -888,7 +403,8 @@ async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> Buil
             return Ok(output);
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    let gathered =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
     let host = evaluate_diag_host(gathered, parsed).await?;
     if matches!(parsed.template, OutputTemplate::Double)
         && provider.precision() != ProviderPrecision::F64
@@ -898,171 +414,82 @@ async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> Buil
             "diag: the owning provider cannot restore a true double-precision result",
         ));
     }
-    upload_diag_result(provider, input_device, input_precision, host)
+    upload_diag_result(provider, &handle, input_precision, host)
 }
 
 fn upload_diag_result(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    input_device: u32,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
     input_precision: ProviderPrecision,
     value: Value,
 ) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
+    let mut output = match value {
+        Value::GpuTensor(handle) => {
+            if handle.shares_allocation_with(input) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    handle,
+                    diag_error(
+                        MESSAGE_ID_INVALID_INPUT,
+                        "diag: restored result aliases borrowed input",
+                    ),
+                ));
+            }
+            return Ok(Value::GpuTensor(handle));
+        }
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let integer_type = tensor.integer_storage().map(integer_storage_element_type);
-            let precision = match tensor.numeric_dtype() {
-                NumericDType::F32 => ProviderPrecision::F32,
-                _ => provider.precision(),
-            };
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &shape,
-                GpuTensorStorage::Real,
-                integer_type,
-                false,
-                precision,
-            )?;
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])?
         }
         Value::LogicalArray(array) => {
-            let shape = array.shape.clone();
-            let storage = match input_precision {
-                ProviderPrecision::F32 => NumericStorage::F32(
-                    array
-                        .data
-                        .iter()
-                        .map(|value| f32::from(*value != 0))
-                        .collect(),
-                ),
-                ProviderPrecision::F64 => NumericStorage::F64(
-                    array
-                        .data
-                        .iter()
-                        .map(|value| f64::from(*value != 0))
-                        .collect(),
-                ),
-            };
-            let tensor = Tensor::from_numeric_storage(storage, shape.clone())
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &shape,
-                GpuTensorStorage::Real,
-                None,
-                true,
-                input_precision,
-            )?;
-            Ok(gpu_helpers::logical_gpu_value(handle))
+            upload_diag_logical(provider, &array.data, &array.shape, input)?
+        }
+        Value::Bool(value) => upload_diag_logical(provider, &[u8::from(value)], &[1, 1], input)?,
+        Value::Int(value) => {
+            let host = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])?;
+            gpu_helpers::upload_tensor_protecting(provider, &host, &[input])?
+        }
+        Value::Num(value) => {
+            let host = Tensor::new(vec![value], vec![1, 1])?;
+            gpu_helpers::upload_tensor_protecting(provider, &host, &[input])?
         }
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let precision = input_precision;
-            let expected_dtype = provider_precision_to_dtype(precision);
-            let tensor = if tensor.numeric_dtype() == expected_dtype {
-                tensor
-            } else {
-                ComplexTensor::from_f64_values_with_dtype(
-                    tensor.materialize_f64(),
-                    shape.clone(),
-                    expected_dtype,
-                )
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?
-            };
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &shape,
-                GpuTensorStorage::ComplexInterleaved,
-                None,
-                false,
-                precision,
-            )?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])?
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::from_f64_values_with_dtype(
+            let host = ComplexTensor::from_f64_values_with_dtype(
                 vec![(re, im)],
                 vec![1, 1],
                 provider_precision_to_dtype(input_precision),
-            )
-            .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &[1, 1],
-                GpuTensorStorage::ComplexInterleaved,
-                None,
-                false,
-                input_precision,
             )?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::upload_complex_tensor_protecting(provider, &host, &[input])?
         }
-        other => Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            format!("diag: cannot restore resident result {other:?}"),
-        )),
-    }
+        other => {
+            return Err(diag_error(
+                MESSAGE_ID_INVALID_INPUT,
+                format!("diag: cannot restore resident result {other:?}"),
+            ))
+        }
+    };
+    output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
+    gpu_helpers::resident_gpu_value(output)
 }
 
-fn integer_storage_element_type(
-    storage: &IntegerStorage,
-) -> runmat_accelerate_api::IntegerElementType {
-    use runmat_accelerate_api::IntegerElementType;
-    match storage {
-        IntegerStorage::I8(_) => IntegerElementType::I8,
-        IntegerStorage::I16(_) => IntegerElementType::I16,
-        IntegerStorage::I32(_) => IntegerElementType::I32,
-        IntegerStorage::I64(_) => IntegerElementType::I64,
-        IntegerStorage::U8(_) => IntegerElementType::U8,
-        IntegerStorage::U16(_) => IntegerElementType::U16,
-        IntegerStorage::U32(_) => IntegerElementType::U32,
-        IntegerStorage::U64(_) => IntegerElementType::U64,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn validate_uploaded_diag_result(
-    handle: &GpuTensorHandle,
+fn upload_diag_logical(
     provider: &dyn runmat_accelerate_api::AccelProvider,
-    input_device: u32,
-    expected_shape: &[usize],
-    expected_storage: GpuTensorStorage,
-    expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
-    expected_logical: bool,
-    expected_precision: ProviderPrecision,
-) -> BuiltinResult<()> {
-    let valid = handle.device_id == input_device
-        && handle.shape == expected_shape
-        && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(handle) == expected_storage
-        && runmat_accelerate_api::handle_integer_type(handle) == expected_integer
-        && runmat_accelerate_api::handle_is_logical(handle) == expected_logical
-        && (expected_integer.is_some()
-            || runmat_accelerate_api::handle_precision(handle) == Some(expected_precision));
-    if valid {
-        return Ok(());
-    }
-    free_rejected_diag_output(handle, provider);
-    Err(diag_error(
-        MESSAGE_ID_INVALID_INPUT,
-        "diag: acceleration provider returned incompatible fallback storage",
-    ))
+    data: &[u8],
+    shape: &[usize],
+    input: &GpuTensorHandle,
+) -> BuiltinResult<GpuTensorHandle> {
+    runmat_accelerate_api::upload_logical_protecting(
+        provider,
+        &runmat_accelerate_api::HostLogicalTensorView { data, shape },
+        &[input],
+    )
+    .map_err(|cause| {
+        crate::build_runtime_error(format!("diag: logical upload failed: {cause}"))
+            .with_builtin("diag")
+            .with_source(cause)
+            .build()
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -1076,9 +503,7 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
         return Ok(None);
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
-        .or_else(runmat_accelerate_api::provider)
-    else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
         return Ok(None);
     };
 
@@ -1091,7 +516,12 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
         return Ok(None);
     };
 
-    let (rows, cols) = matrix_dims(&handle.shape)?;
+    if template.logical != input_logical
+        || (!input_logical && template.precision != input_precision)
+    {
+        return Ok(None);
+    }
+    let (rows, cols) = matrix_dims(handle.shape())?;
     let is_vector = rows == 1 || cols == 1;
     validate_vector_mode(is_vector, parsed)?;
 
@@ -1105,10 +535,10 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
     };
 
     let result = if parsed.vector_mode {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         provider.reshape(&handle, &[len, 1])
     } else if is_vector {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         let (out_rows, out_cols) = vector_output_dims(len, parsed)?;
         if parsed.size_override.is_some() {
             provider.diag_from_vector_sized(&handle, parsed.offset, out_rows, out_cols)
@@ -1123,21 +553,36 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
     };
 
     match result {
-        Ok(out)
-            if native_diag_output_matches(&handle, &out, provider, &expected_shape, template) =>
+        Ok(mut output)
+            if native_diag_output_matches(
+                &handle,
+                &output,
+                provider,
+                &expected_shape,
+                template,
+            ) && (parsed.vector_mode || !output.shares_allocation_with(&handle)) =>
         {
-            runmat_accelerate_api::set_handle_logical(&out, template.logical);
-            Ok(Some(Value::GpuTensor(out)))
+            output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
+            Ok(Some(Value::GpuTensor(output)))
         }
-        Ok(out) => {
-            free_rejected_diag_output(&out, provider);
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            diag_error(
+                MESSAGE_ID_INVALID_INPUT,
+                "diag: invalid provider diagonal output",
+            ),
+        )),
+        Err(cause)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&cause) =>
+        {
             Ok(None)
         }
-        Err(err) if is_unsupported_diag_provider(&err) => Ok(None),
-        Err(err) => Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            format!("diag: provider diagonal operation failed: {err}"),
-        )),
+        Err(cause) => Err(crate::build_runtime_error(format!(
+            "diag: provider diagonal operation failed: {cause}"
+        ))
+        .with_builtin("diag")
+        .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
+        .build()),
     }
 }
 
@@ -1158,23 +603,15 @@ fn native_diag_output_matches(
     expected_shape: &[usize],
     template: GpuDiagTemplate,
 ) -> bool {
-    output.device_id == input.device_id
-        && output.shape == expected_shape
+    output.device_id() == input.device_id()
+        && output.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && runmat_accelerate_api::handle_precision(output) == Some(template.precision)
-}
-
-fn free_rejected_diag_output(
-    output: &GpuTensorHandle,
-    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(invoked_provider);
-    if let Err(error) = owner.free(output) {
-        log::trace!("diag: failed to free rejected provider result: {error}");
-    }
+        && output.view().is_logical() == template.logical
+        && (template.logical
+            || (runmat_accelerate_api::handle_integer_type(output).is_none()
+                && runmat_accelerate_api::handle_precision(output) == Some(template.precision)))
 }
 
 fn gpu_diag_template(
@@ -1215,13 +652,6 @@ fn gpu_diag_template(
     }
 }
 
-fn is_unsupported_diag_provider(err: &anyhow::Error) -> bool {
-    let text = err.to_string();
-    text.contains("diag_from_vector not supported")
-        || text.contains("diag_from_vector_sized not supported")
-        || text.contains("diag_extract not supported")
-}
-
 enum DiagInput {
     Tensor(Tensor),
     Logical(LogicalArray),
@@ -1259,7 +689,7 @@ fn coerce_diag_input(value: Value) -> BuiltinResult<DiagInput> {
 }
 
 fn evaluate_tensor(tensor: Tensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
@@ -1303,26 +733,26 @@ fn evaluate_logical(array: LogicalArray, args: &ParsedDiagArgs) -> BuiltinResult
 }
 
 fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let input_shape = tensor.shape.clone();
-    let (storage, shape) = match tensor.into_complex_storage() {
+    let (storage, input_shape) = tensor.into_complex_storage_and_shape();
+    let (storage, shape) = match storage {
         ComplexStorage::F64(values) => {
             let (values, shape) =
-                evaluate_column_major_diag(&values, &input_shape, args, (0.0f64, 0.0f64))?;
-            (ComplexStorage::F64(values), shape)
+                evaluate_column_major_diag(&values, &input_shape, args, (0.0f64, 0.0f64).into())?;
+            (ComplexStorage::F64(values.into()), shape)
         }
         ComplexStorage::F32(values) => {
             let (values, shape) =
-                evaluate_column_major_diag(&values, &input_shape, args, (0.0f32, 0.0f32))?;
-            (ComplexStorage::F32(values), shape)
+                evaluate_column_major_diag(&values, &input_shape, args, (0.0f32, 0.0f32).into())?;
+            (ComplexStorage::F32(values.into()), shape)
         }
         ComplexStorage::Integer(storage) => {
             let zero = storage
-                .real
+                .real()
                 .zeros_like(1)
                 .value_at(0)
                 .expect("one typed integer zero");
             let (_, shape) = evaluate_column_major_diag(
-                &storage.real.exact_values(),
+                &storage.real().exact_values(),
                 &input_shape,
                 args,
                 zero.clone(),
@@ -1350,25 +780,25 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
     validate_vector_mode(is_vector, args)?;
 
     if args.vector_mode {
-        let len = rows.max(cols);
-        let data = vector_copy(&array.data, len);
-        let out = CharArray::new(data, len, 1)
+        let len = vector_length(rows, cols);
+        let data = vector_copy(array.data(), len);
+        let out = CharArray::from_code_units(data, len, 1)
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
         return Ok(Value::CharArray(out));
     }
 
     if is_vector {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         let (out_rows, out_cols) = vector_output_dims(len, args)?;
         let data = diag_matrix_from_vector_row_major(
-            &array.data,
+            array.data(),
             len,
             args.offset,
             out_rows,
             out_cols,
-            ' ',
+            runmat_value::Utf16CodeUnit::from_raw(0x20),
         )?;
-        let out = CharArray::new(data, out_rows, out_cols)
+        let out = CharArray::from_code_units(data, out_rows, out_cols)
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
         return Ok(Value::CharArray(out));
     }
@@ -1380,9 +810,9 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
         ));
     }
 
-    let diag = diag_vector_from_matrix_row_major(&array.data, rows, cols, args.offset);
+    let diag = diag_vector_from_matrix_row_major(array.data(), rows, cols, args.offset);
     let len = diag.len();
-    let out = CharArray::new(diag, len, 1)
+    let out = CharArray::from_code_units(diag, len, 1)
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
     Ok(Value::CharArray(out))
 }
@@ -1399,12 +829,12 @@ fn evaluate_column_major_diag<T: Clone>(
     validate_vector_mode(is_vector, args)?;
 
     if args.vector_mode {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         return Ok((vector_copy(data, len), vec![len, 1]));
     }
 
     if is_vector {
-        let len = rows.max(cols);
+        let len = vector_length(rows, cols);
         let (out_rows, out_cols) = vector_output_dims(len, args)?;
         let out =
             diag_matrix_from_vector_col_major(data, len, args.offset, out_rows, out_cols, zero)?;
@@ -1672,7 +1102,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
         }
         Value::ComplexTensor(proto_tensor) => {
             if let Some(storage) = proto_tensor.integer_storage() {
-                let target = integer_target_from_storage(&storage.real);
+                let target = storage.real().integer_class();
                 integer_value_from_value(value, target)
             } else {
                 complex_tensor_from_value_with_dtype(value, proto_tensor.numeric_dtype())
@@ -1683,7 +1113,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
             .map(Value::ComplexTensor),
         Value::Tensor(proto_tensor) => {
             let dtype = proto_tensor.numeric_dtype();
-            if let Some(target) = integer_target_from_dtype(dtype) {
+            if let Some(target) = dtype.integer_class() {
                 integer_value_from_value(value, target)
             } else {
                 floating_value_from_value(value, dtype)
@@ -1691,7 +1121,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
         }
         Value::Num(_) => double_value_from_value(value),
         Value::Int(prototype) => {
-            integer_value_from_value(value, integer_target_from_int(&prototype))
+            integer_value_from_value(value, prototype.integer_class())
         }
         Value::CharArray(_) => tensor_from_value(value).map(Value::Tensor),
         other => Err(diag_error(
@@ -1734,7 +1164,7 @@ async fn apply_gpu_like_template(
     let precision =
         runmat_accelerate_api::handle_precision(prototype).unwrap_or(provider.precision());
     let integer_target =
-        runmat_accelerate_api::handle_integer_type(prototype).map(integer_target_from_element_type);
+        runmat_accelerate_api::handle_integer_type(prototype).map(IntegerClass::from);
     let complex_target =
         runmat_accelerate_api::handle_storage(prototype) == GpuTensorStorage::ComplexInterleaved;
 
@@ -1751,88 +1181,7 @@ async fn apply_gpu_like_template(
         floating_value_from_value(value, provider_precision_to_dtype(precision))?
     };
 
-    if integer_target.is_none() && provider.precision() != precision {
-        return Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            "diag: the prototype owner cannot upload the prototype's recorded precision",
-        ));
-    }
-
-    let (uploaded, expected_shape, expected_storage, expected_integer) = match converted {
-        Value::LogicalArray(array) => {
-            let shape = array.shape.clone();
-            let tensor = tensor::logical_to_tensor(&array)
-                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
-            (handle, shape, GpuTensorStorage::Real, None)
-        }
-        Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let expected_integer = tensor.integer_storage().map(integer_storage_element_type);
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
-            (handle, shape, GpuTensorStorage::Real, expected_integer)
-        }
-        Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let expected_integer = tensor
-                .integer_storage()
-                .map(|storage| integer_storage_element_type(&storage.real));
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            (
-                handle,
-                shape,
-                GpuTensorStorage::ComplexInterleaved,
-                expected_integer,
-            )
-        }
-        other => {
-            return Err(diag_error(
-                MESSAGE_ID_INVALID_INPUT,
-                format!("diag: cannot upload gpuArray 'like' result {other:?}"),
-            ));
-        }
-    };
-
-    runmat_accelerate_api::set_handle_logical(&uploaded, logical_target);
-    let valid = uploaded.device_id == prototype.device_id
-        && uploaded.shape == expected_shape
-        && runmat_accelerate_api::provider_for_handle(&uploaded)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(&uploaded) == expected_storage
-        && runmat_accelerate_api::handle_integer_type(&uploaded) == expected_integer
-        && runmat_accelerate_api::handle_is_logical(&uploaded) == logical_target
-        && (expected_integer.is_some()
-            || runmat_accelerate_api::handle_precision(&uploaded) == Some(precision));
-    if !valid {
-        free_rejected_diag_output(&uploaded, provider);
-        return Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            "diag: prototype owner returned incompatible gpuArray 'like' storage",
-        ));
-    }
-    Ok(match expected_storage {
-        GpuTensorStorage::ComplexInterleaved => gpu_helpers::complex_gpu_value(uploaded),
-        GpuTensorStorage::Real if logical_target => gpu_helpers::logical_gpu_value(uploaded),
-        GpuTensorStorage::Real => gpu_helpers::resident_gpu_value(uploaded),
-    })
-}
-
-fn integer_target_from_element_type(
-    element_type: runmat_accelerate_api::IntegerElementType,
-) -> IntegerTarget {
-    use runmat_accelerate_api::IntegerElementType;
-    match element_type {
-        IntegerElementType::I8 => IntegerTarget::I8,
-        IntegerElementType::I16 => IntegerTarget::I16,
-        IntegerElementType::I32 => IntegerTarget::I32,
-        IntegerElementType::I64 => IntegerTarget::I64,
-        IntegerElementType::U8 => IntegerTarget::U8,
-        IntegerElementType::U16 => IntegerTarget::U16,
-        IntegerElementType::U32 => IntegerTarget::U32,
-        IntegerElementType::U64 => IntegerTarget::U64,
-    }
+    upload_diag_result(provider, prototype, precision, converted)
 }
 
 fn provider_precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
@@ -1849,7 +1198,7 @@ fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tenso
     Ok(tensor::coerce_tensor_dtype(tensor, dtype))
 }
 
-fn integer_value_from_value(value: Value, target: IntegerTarget) -> BuiltinResult<Value> {
+fn integer_value_from_value(value: Value, target: IntegerClass) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => target
             .cast_tensor(tensor)
@@ -1906,6 +1255,14 @@ fn diag_cast_error(context: &str, err: CastError) -> RuntimeError {
         CastError::Internal(message) => {
             diag_error(MESSAGE_ID_INVALID_INPUT, format!("{context}: {message}"))
         }
+        CastError::Runtime(source) => {
+            let mut contextual = diag_error(
+                MESSAGE_ID_INVALID_INPUT,
+                format!("{context}: {}", source.message()),
+            );
+            contextual.source = Some(source);
+            contextual
+        }
     }
 }
 
@@ -1926,16 +1283,16 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
                         })
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            LogicalArray::new(data, tensor.shape)
+            LogicalArray::new(data, tensor.shape().to_vec())
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
         Value::ComplexTensor(tensor) => {
             let data: Vec<u8> = if let Some(storage) = &tensor.integer_storage() {
                 storage
-                    .real
+                    .real()
                     .exact_values()
                     .into_iter()
-                    .zip(storage.imag.exact_values())
+                    .zip(storage.imag().exact_values())
                     .map(|(re, im)| if re.is_zero() && im.is_zero() { 0 } else { 1 })
                     .collect()
             } else {
@@ -1945,14 +1302,13 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
                     .map(|(re, im)| if *re != 0.0 || *im != 0.0 { 1 } else { 0 })
                     .collect()
             };
-            LogicalArray::new(data, tensor.shape)
+            LogicalArray::new(data, tensor.shape().to_vec())
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
         Value::CharArray(chars) => {
             let data: Vec<u8> = chars
-                .data
-                .iter()
-                .map(|ch| if (*ch as u32) != 0 { 1 } else { 0 })
+                .iter_column_major()
+                .map(|ch| if ch.raw() != 0 { 1 } else { 0 })
                 .collect();
             LogicalArray::new(data, vec![chars.rows, chars.cols])
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
@@ -2019,7 +1375,7 @@ fn complex_tensor_from_value(value: Value) -> BuiltinResult<ComplexTensor> {
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data: Vec<(f64, f64)> = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|re| (re, 0.0))
@@ -2038,9 +1394,8 @@ fn complex_tensor_from_value(value: Value) -> BuiltinResult<ComplexTensor> {
         }
         Value::CharArray(chars) => {
             let data: Vec<(f64, f64)> = chars
-                .data
-                .iter()
-                .map(|ch| (*ch as u32 as f64, 0.0))
+                .iter_column_major()
+                .map(|ch| (f64::from(ch.raw()), 0.0))
                 .collect();
             ComplexTensor::new(data, vec![chars.rows, chars.cols])
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
@@ -2073,8 +1428,12 @@ fn complex_tensor_from_value_with_dtype(
     }
     ensure_integer_exact_for_complex_float(&value, dtype)?;
     let tensor = complex_tensor_from_value(value)?;
-    ComplexTensor::from_f64_values_with_dtype(tensor.materialize_f64(), tensor.shape, dtype)
-        .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+    ComplexTensor::from_f64_values_with_dtype(
+        tensor.materialize_f64(),
+        tensor.shape().to_vec(),
+        dtype,
+    )
+    .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
 }
 
 fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) -> BuiltinResult<()> {
@@ -2085,8 +1444,8 @@ fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) ->
             .integer_storage()
             .is_none_or(|storage| storage.exact_values().iter().all(exact)),
         Value::ComplexTensor(tensor) => tensor.integer_storage().is_none_or(|storage| {
-            storage.real.exact_values().iter().all(exact)
-                && storage.imag.exact_values().iter().all(exact)
+            storage.real().exact_values().iter().all(exact)
+                && storage.imag().exact_values().iter().all(exact)
         }),
         _ => true,
     };
@@ -2108,7 +1467,7 @@ fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) ->
 }
 
 fn integer_exact_for_float(value: &runmat_value::IntValue, dtype: NumericDType) -> bool {
-    if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if !crate::builtins::common::validation::integer_is_exact_f64(value) {
         return false;
     }
     if dtype == NumericDType::F64 {
@@ -2119,9 +1478,24 @@ fn integer_exact_for_float(value: &runmat_value::IntValue, dtype: NumericDType) 
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data.iter().map(|ch| *ch as u32 as f64).collect();
+    let data: Vec<f64> = chars
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     Tensor::new(data, vec![chars.rows, chars.cols])
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+}
+
+#[path = "diag/geometry.rs"]
+mod geometry;
+pub(in crate::builtins) use geometry::{diagonal_geometry, DiagonalGeometry};
+
+fn vector_length(rows: usize, columns: usize) -> usize {
+    if rows == 0 || columns == 0 {
+        0
+    } else {
+        rows.max(columns)
+    }
 }
 
 #[cfg(test)]
@@ -2133,7 +1507,10 @@ mod tests {
     use runmat_value::{IntValue, IntegerComplexStorage};
 
     fn run_diag(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(diag_builtin(value, rest))
+        block_on(diag_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn size_vector(rows: usize, cols: usize) -> Value {
@@ -2174,33 +1551,6 @@ mod tests {
     }
 
     #[test]
-    fn diag_type_vector_to_square() {
-        let out = diag_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(4), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(4), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn diag_type_matrix_falls_back_tensor() {
-        let out = diag_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::tensor());
-    }
-
-    #[test]
     fn diag_vector_mode_returns_column_vector() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap());
@@ -2208,8 +1558,17 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.shape(), &[3, 1]);
         assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0, 30.0]);
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
+        let Value::Tensor(out) = run_diag(empty.clone(), Vec::new()).unwrap() else {
+            panic!("empty diagonal matrix")
+        };
+        assert_eq!(out.shape(), &[0, 0]);
+        let Value::Tensor(out) = run_diag(empty, vec![Value::from("vector")]).unwrap() else {
+            panic!("empty vector mode")
+        };
+        assert_eq!(out.shape(), &[0, 1]);
     }
 
     #[test]
@@ -2220,7 +1579,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 4]);
+        assert_eq!(tensor.shape(), &[2, 4]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]
@@ -2235,7 +1594,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![3, 4]);
+        assert_eq!(tensor.shape(), &[3, 4]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]
@@ -2253,7 +1612,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert_eq!(tensor.materialize_f64(), vec![4.0, 8.0]);
     }
 
@@ -2291,7 +1650,7 @@ mod tests {
             else {
                 panic!("expected exact integer matrix");
             };
-            assert_eq!(matrix.shape, vec![3, 3]);
+            assert_eq!(matrix.shape(), &[3, 3]);
             assert_eq!(matrix.integer_storage(), Some(&expected));
 
             let Value::Tensor(extracted) =
@@ -2299,7 +1658,7 @@ mod tests {
             else {
                 panic!("expected exact integer vector");
             };
-            assert_eq!(extracted.shape, vec![3, 1]);
+            assert_eq!(extracted.shape(), &[3, 1]);
             assert_eq!(extracted.integer_storage(), Some(&storage));
         }
 
@@ -2322,7 +1681,7 @@ mod tests {
         else {
             panic!("expected single matrix");
         };
-        assert_eq!(matrix.shape, vec![2, 2]);
+        assert_eq!(matrix.shape(), &[2, 2]);
         assert_eq!(
             matrix
                 .clone()
@@ -2336,7 +1695,7 @@ mod tests {
         else {
             panic!("expected single vector");
         };
-        assert_eq!(vector.shape, vec![2, 1]);
+        assert_eq!(vector.shape(), &[2, 1]);
         assert_eq!(
             vector.into_numeric_storage().expect("vector storage"),
             NumericStorage::F32(vec![1.25, -2.5])
@@ -2353,7 +1712,10 @@ mod tests {
         };
         assert_eq!(matrix.rows, 2);
         assert_eq!(matrix.cols, 4);
-        assert_eq!(matrix.data, vec!['a', ' ', ' ', ' ', ' ', 'b', ' ', ' ']);
+        assert_eq!(
+            matrix.data(),
+            runmat_value::encode_utf16_code_units("a    b  ")
+        );
 
         let extracted = run_diag(Value::CharArray(matrix), Vec::new()).expect("diag extract");
         let Value::CharArray(vector) = extracted else {
@@ -2361,7 +1723,7 @@ mod tests {
         };
         assert_eq!(vector.rows, 2);
         assert_eq!(vector.cols, 1);
-        assert_eq!(vector.data, vec!['a', 'b']);
+        assert_eq!(vector.data(), runmat_value::encode_utf16_code_units("ab"));
     }
 
     #[test]
@@ -2372,7 +1734,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
     }
 
@@ -2453,7 +1815,7 @@ mod tests {
             let Value::Tensor(tensor) = out else {
                 panic!("expected tensor output for {class_name}");
             };
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(tensor.integer_storage(), Some(&expected), "{class_name}");
         }
     }
@@ -2471,7 +1833,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::I64(vec![i64::MAX, 0, 0, i64::MAX]))
@@ -2489,10 +1851,10 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         let storage = tensor.integer_storage().expect("complex integer storage");
-        assert_eq!(storage.real, IntegerStorage::U8(vec![2, 0, 0, u8::MAX]));
-        assert_eq!(storage.imag, IntegerStorage::U8(vec![0, 0, 0, 5]));
+        assert_eq!(storage.real(), &IntegerStorage::U8(vec![2, 0, 0, u8::MAX]));
+        assert_eq!(storage.imag(), &IntegerStorage::U8(vec![0, 0, 0, 5]));
     }
 
     #[test]
@@ -2504,7 +1866,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0, 0.0, 0.0]);
     }
 
@@ -2627,7 +1989,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
@@ -2647,7 +2009,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(-3.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
@@ -2661,7 +2023,7 @@ mod tests {
             let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
                 data: &proto_tensor.materialize_f64(),
-                shape: &proto_tensor.shape,
+                shape: proto_tensor.shape(),
             };
             let proto = provider.upload(&view).expect("upload");
 
@@ -2674,7 +2036,7 @@ mod tests {
             let Value::GpuTensor(output) = output else {
                 panic!("expected resident result");
             };
-            assert_eq!(output.device_id, proto.device_id);
+            assert_eq!(output.device_id(), proto.device_id());
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&output),
                 GpuTensorStorage::Real
@@ -2683,14 +2045,63 @@ mod tests {
                 runmat_accelerate_api::handle_precision(&output),
                 Some(provider.precision())
             );
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
             let gathered = test_support::gather(Value::GpuTensor(output.clone())).unwrap();
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
-            provider.free(&proto).expect("free prototype");
-            provider.free(&output).expect("free output");
+
+            drop(proto);
+
+            drop(output);
+        });
+    }
+
+    #[test]
+    fn diag_resident_fallback_preserves_paired_uint64_without_like() {
+        test_support::with_test_provider(|provider| {
+            let wide = (1u64 << 53) + 1;
+            let host = ComplexTensor::new_integer(
+                runmat_value::IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide, u64::MAX]),
+                    IntegerStorage::U64(vec![u64::MAX, wide]),
+                )
+                .unwrap(),
+                vec![2, 1],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &host).unwrap();
+            let value = run_diag(Value::GpuTensor(input.clone()), Vec::new()).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident paired diagonal")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                output.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::U64
+            );
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&value)).unwrap()
+            else {
+                panic!("paired host output")
+            };
+            assert_eq!(result.shape(), &[2, 2]);
+            let storage = result.integer_storage().unwrap();
+            assert_eq!(
+                storage.real(),
+                &IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
+            );
+            assert_eq!(
+                storage.imag(),
+                &IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
+            );
+            let Value::ComplexTensor(original) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(input))).unwrap()
+            else {
+                panic!("paired original")
+            };
+            assert_eq!(original.integer_storage(), host.integer_storage());
         });
     }
 
@@ -2744,15 +2155,17 @@ mod tests {
             };
             let storage = gathered.integer_storage().expect("paired storage");
             assert_eq!(
-                storage.real,
-                IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
+                storage.real(),
+                &IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
             );
             assert_eq!(
-                storage.imag,
-                IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
+                storage.imag(),
+                &IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
             );
-            provider.free(&prototype).expect("free prototype");
-            provider.free(&output).expect("free output");
+
+            drop(prototype);
+
+            drop(output);
         });
     }
 
@@ -2760,13 +2173,12 @@ mod tests {
     fn diag_resident_logical_like_preserves_logical_metadata() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
-            let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-            let view = HostTensorView {
-                data: &proto_tensor.materialize_f64(),
-                shape: &proto_tensor.shape,
-            };
-            let proto = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_logical(&proto, true);
+            let proto = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0],
+                    shape: &[1, 1],
+                })
+                .expect("logical upload");
 
             let value = Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap());
             let output = run_diag(
@@ -2778,13 +2190,15 @@ mod tests {
                 panic!("expected resident logical result");
             };
             assert!(runmat_accelerate_api::handle_is_logical(&output));
-            assert_eq!(output.device_id, proto.device_id);
-            assert!(std::ptr::eq(
+            assert_eq!(output.device_id(), proto.device_id());
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
-            provider.free(&proto).expect("free prototype");
-            provider.free(&output).expect("free output");
+
+            drop(proto);
+
+            drop(output);
         });
     }
 
@@ -2796,7 +2210,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &vector.materialize_f64(),
-                    shape: &vector.shape,
+                    shape: vector.shape(),
                 })
                 .expect("upload");
 
@@ -2806,7 +2220,7 @@ mod tests {
                 "native diag(gpuArray(vector)) should remain resident"
             );
             let gathered = test_support::gather(square).expect("gather square");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
 
             let rectangular = run_diag(
@@ -2819,7 +2233,7 @@ mod tests {
                 "rectangular diag(gpuArray(vector), k, sz) should remain resident"
             );
             let gathered = test_support::gather(rectangular).expect("gather rectangular");
-            assert_eq!(gathered.shape, vec![3, 4]);
+            assert_eq!(gathered.shape(), &[3, 4]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]
@@ -2849,8 +2263,10 @@ mod tests {
             assert!(!runmat_accelerate_api::handle_is_logical(&output));
             let gathered = test_support::gather(Value::GpuTensor(output.clone())).unwrap();
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
-            provider.free(&input_handle).unwrap();
-            provider.free(&output).unwrap();
+
+            drop(input_handle);
+
+            drop(output);
         });
     }
 
@@ -2866,7 +2282,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &matrix.materialize_f64(),
-                    shape: &matrix.shape,
+                    shape: matrix.shape(),
                 })
                 .expect("upload matrix");
             let extracted =
@@ -2876,12 +2292,21 @@ mod tests {
                 "diag(gpuArray(matrix), k) should remain resident"
             );
             let gathered = test_support::gather(extracted).expect("gather extracted");
-            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.shape(), &[2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![4.0, 8.0]);
 
-            let logical = Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap();
-            let logical_handle = gpu_helpers::upload_tensor(provider, &logical).unwrap();
-            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let logical_handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            // This reference provider encodes logical payloads in native F64;
+            // the logical class is independent of its physical encoding.
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&logical_handle),
+                Some(ProviderPrecision::F64)
+            );
             let logical_out = run_diag(
                 Value::GpuTensor(logical_handle),
                 vec![Value::from("logical")],
@@ -2893,11 +2318,11 @@ mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&logical_result));
             assert_eq!(
                 runmat_accelerate_api::handle_precision(&logical_result),
-                Some(ProviderPrecision::F32)
+                Some(ProviderPrecision::F64)
             );
             let gathered =
                 test_support::gather(Value::GpuTensor(logical_result)).expect("gather logical");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 0.0]);
         });
     }
@@ -2920,7 +2345,7 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &vector.materialize_f64(),
-                shape: &vector.shape,
+                shape: vector.shape(),
             })
             .expect("upload vector");
         let placed = run_diag(
@@ -2930,7 +2355,7 @@ mod tests {
         .expect("diag placed");
         assert!(matches!(placed, Value::GpuTensor(_)));
         let gathered = test_support::gather(placed).expect("gather placed");
-        assert_eq!(gathered.shape, vec![5, 3]);
+        assert_eq!(gathered.shape(), &[5, 3]);
         assert_eq!(
             gathered.materialize_f64(),
             vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0]
@@ -2944,14 +2369,14 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &matrix.materialize_f64(),
-                shape: &matrix.shape,
+                shape: matrix.shape(),
             })
             .expect("upload matrix");
         let extracted =
             run_diag(Value::GpuTensor(handle), vec![Value::Num(1.0)]).expect("diag extract");
         assert!(matches!(extracted, Value::GpuTensor(_)));
         let gathered = test_support::gather(extracted).expect("gather extracted");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![2.0, 6.0]);
 
         let matrix = Tensor::new(
@@ -2962,13 +2387,13 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &matrix.materialize_f64(),
-                shape: &matrix.shape,
+                shape: matrix.shape(),
             })
             .expect("upload matrix");
         let empty = run_diag(Value::GpuTensor(handle), vec![Value::Num(10.0)]).expect("diag empty");
         assert!(matches!(empty, Value::GpuTensor(_)));
         let gathered = test_support::gather(empty).expect("gather empty");
-        assert_eq!(gathered.shape, vec![0, 1]);
+        assert_eq!(gathered.shape(), &[0, 1]);
         assert!(gathered.materialize_f64().is_empty());
     }
 
@@ -3041,14 +2466,16 @@ mod tests {
                 };
                 let owner = runmat_accelerate_api::provider_for_handle(&output_handle)
                     .expect("output owner");
-                assert!(std::ptr::eq(owner, provider));
+                assert!(runmat_accelerate_api::same_provider_instance(
+                    owner, provider
+                ));
                 assert_eq!(
                     runmat_accelerate_api::handle_integer_type(&output_handle),
                     runmat_accelerate_api::handle_integer_type(&input_for_cleanup)
                 );
                 let gathered = test_support::gather(Value::GpuTensor(output_handle.clone()))
                     .expect("exact gather");
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), &[2, 2]);
                 let zero = storage.zeros_like(1).value_at(0).unwrap();
                 let values = storage.exact_values();
                 let expected = storage
@@ -3060,8 +2487,10 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(gathered.integer_storage(), Some(&expected));
-                provider.free(&input_for_cleanup).unwrap();
-                provider.free(&output_handle).unwrap();
+
+                drop(input_for_cleanup);
+
+                drop(output_handle);
             }
         });
     }
@@ -3084,12 +2513,14 @@ mod tests {
                 runmat_accelerate_api::handle_precision(&output),
                 Some(ProviderPrecision::F32)
             );
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
-            provider.free(&input_for_cleanup).unwrap();
-            provider.free(&output).unwrap();
+
+            drop(input_for_cleanup);
+
+            drop(output);
         });
     }
 
@@ -3113,30 +2544,38 @@ mod tests {
             trailing_err.identifier.as_deref(),
             Some("RunMat:compatibility:DiagTrailingSingletonDimensionsExtension")
         );
-        let resident_control = Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident_control = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("genuine unregistered allocation")
+                .handle,
+        );
         let control_err = run_diag(vector(), vec![resident_control]).unwrap_err();
         assert_eq!(
             control_err.identifier(),
             MESSAGE_ID_INVALID_INPUT.identifier
         );
-        let resident_like = Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 1,
-            descriptor: Default::default(),
-        });
+        let resident_like = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("genuine unregistered allocation")
+                .handle,
+        );
         let like_err = run_diag(vector(), vec![Value::from("like"), resident_like]).unwrap_err();
         assert_eq!(like_err.identifier(), DIAG_LIKE_EXTENSION.error_identifier);
     }
 
     #[test]
     fn diag_descriptor_declares_only_public_forms_and_integer_contract() {
-        assert_eq!(DIAG_DESCRIPTOR.signatures.len(), 4);
+        assert_eq!(DIAG_DESCRIPTOR.signatures.len(), 9);
         assert_eq!(DIAG_EXTENSIONS.len(), 5);
         assert_eq!(DIAG_INTEGER_CAPABILITIES.len(), 2);
     }

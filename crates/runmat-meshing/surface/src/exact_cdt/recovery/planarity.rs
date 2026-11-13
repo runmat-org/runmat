@@ -13,44 +13,111 @@ pub(super) fn validate_planar_edges(
     pslg: &ExactFacePslg,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
 ) -> Result<u64, ExactFaceDelaunayError> {
-    let mut ordered = edges.keys().copied().collect::<Vec<_>>();
-    ordered.sort_by(|left, right| {
-        minimum(left, 0, pslg)
-            .total_cmp(&minimum(right, 0, pslg))
-            .then_with(|| left.cmp(right))
-    });
-    let mut predicates = 0u64;
-    for left_index in 0..ordered.len() {
-        if cancellation.is_cancelled() {
-            return Err(error(
+    use runmat_geometry_core::{GeometryAllocationScope, GeometryEvaluationControl};
+    use runmat_meshing_core::quality::spatial_index::{
+        Aabb3, PackedBoundsSpatialIndex, SpatialEntry,
+    };
+    checkpoint(cancellation, pslg)?;
+    let storage = geometry_control.map(GeometryAllocationScope::new);
+    let profile =
+        PackedBoundsSpatialIndex::<[u32; 2]>::storage_profile(edges.len()).ok_or_else(|| {
+            error(
                 pslg,
-                ExactFaceDelaunayErrorKind::Cancelled,
-                "planarity validation cancelled",
-            ));
-        }
-        let left = ordered[left_index];
-        let left_maximum_x = maximum(&left, 0, pslg);
-        for right in &ordered[left_index + 1..] {
-            if minimum(right, 0, pslg) > left_maximum_x {
-                break;
-            }
-            if !bounds_overlap(&left, right, pslg) {
-                continue;
-            }
-            predicates = consume(predicates, 4, options, pslg)?;
-            if !segments_intersect(left, *right, pslg)? {
-                continue;
-            }
-            predicates = consume(predicates, 2, options, pslg)?;
-            if !intersection_is_shared_endpoint(left, *right, pslg)? {
-                return Err(error(
-                    pslg,
-                    ExactFaceDelaunayErrorKind::InvalidTopology,
-                    format!("triangulation edges {left:?} and {right:?} intersect"),
-                ));
-            }
-        }
+                ExactFaceDelaunayErrorKind::ElementLimit,
+                "planarity index storage overflow",
+            )
+        })?;
+    let input_bytes = edges
+        .len()
+        .checked_mul(std::mem::size_of::<SpatialEntry<[u32; 2]>>())
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| {
+            error(
+                pslg,
+                ExactFaceDelaunayErrorKind::ElementLimit,
+                "planarity entry storage overflow",
+            )
+        })?;
+    let scratch = input_bytes
+        .checked_add(profile.construction_scratch_bytes)
+        .ok_or_else(|| {
+            error(
+                pslg,
+                ExactFaceDelaunayErrorKind::ElementLimit,
+                "planarity scratch storage overflow",
+            )
+        })?;
+    let total = scratch.checked_add(profile.retained_bytes).ok_or_else(|| {
+        error(
+            pslg,
+            ExactFaceDelaunayErrorKind::ElementLimit,
+            "planarity storage overflow",
+        )
+    })?;
+    let map_control = |failure: runmat_geometry_core::GeometryEvaluationError| {
+        error(
+            pslg,
+            ExactFaceDelaunayErrorKind::GeometryEvaluation(failure.kind),
+            failure.reason,
+        )
+    };
+    if let Some(storage) = &storage {
+        storage
+            .consume_allocation_bytes(total)
+            .map_err(map_control)?;
+    }
+    let edge_bounds = |edge: [u32; 2]| Aabb3 {
+        min_m: [minimum(&edge, 0, pslg), minimum(&edge, 1, pslg), 0.0],
+        max_m: [maximum(&edge, 0, pslg), maximum(&edge, 1, pslg), 0.0],
+    };
+    let entries = edges
+        .keys()
+        .map(|edge| SpatialEntry {
+            bounds: edge_bounds(*edge),
+            payload: *edge,
+        })
+        .collect();
+    let mut probes = 0u32;
+    let index = PackedBoundsSpatialIndex::from_entries_with_checkpoint(entries, &mut || {
+        sampled_checkpoint(&mut probes, cancellation, pslg)
+    })?
+    .ok_or_else(|| {
+        error(
+            pslg,
+            ExactFaceDelaunayErrorKind::InvalidTopology,
+            "planarity index bounds invalid",
+        )
+    })?;
+    if let Some(storage) = &storage {
+        storage.release_allocation_bytes(scratch);
+    }
+    let mut predicates = 0;
+    for left in edges.keys() {
+        checkpoint(cancellation, pslg)?;
+        index.try_visit_bounds_with_checkpoint(
+            edge_bounds(*left),
+            &mut |entry| {
+                let right = entry.payload;
+                if right <= *left || !bounds_overlap(left, &right, pslg) {
+                    return Ok(());
+                }
+                predicates = consume(predicates, 4, options, pslg)?;
+                if segments_intersect(*left, right, pslg)? {
+                    predicates = consume(predicates, 2, options, pslg)?;
+                    if !intersection_is_shared_endpoint(*left, right, pslg)? {
+                        return Err(error(
+                            pslg,
+                            ExactFaceDelaunayErrorKind::InvalidTopology,
+                            format!("triangulation edges {left:?} and {right:?} intersect"),
+                        ));
+                    }
+                }
+                Ok(())
+            },
+            &mut || sampled_checkpoint(&mut probes, cancellation, pslg),
+        )?;
     }
     Ok(predicates)
 }
@@ -174,3 +241,38 @@ fn error(
 ) -> ExactFaceDelaunayError {
     ExactFaceDelaunayError::new(kind, &pslg.source_face_id, reason)
 }
+
+/// Index callbacks fire for every visited node, including empty subtrees. Each edge query
+/// already starts with a full probe; inside a query, probe cancellation every 256 callbacks.
+/// A probe reads the execution clock, and per-node probes dominated large face validations.
+fn sampled_checkpoint(
+    probes: &mut u32,
+    cancellation: &dyn MeshingCancellationSignal,
+    pslg: &ExactFacePslg,
+) -> Result<(), ExactFaceDelaunayError> {
+    *probes = probes.wrapping_add(1);
+    if (*probes).is_multiple_of(256) {
+        checkpoint(cancellation, pslg)
+    } else {
+        Ok(())
+    }
+}
+
+#[track_caller]
+fn checkpoint(
+    cancellation: &dyn MeshingCancellationSignal,
+    pslg: &ExactFacePslg,
+) -> Result<(), ExactFaceDelaunayError> {
+    if cancellation.is_cancelled() {
+        return Err(error(
+            pslg,
+            ExactFaceDelaunayErrorKind::Cancelled,
+            "planarity validation cancelled",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "planarity/tests.rs"]
+mod tests;

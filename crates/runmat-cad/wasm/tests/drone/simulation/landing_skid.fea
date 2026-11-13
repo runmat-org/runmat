@@ -1,0 +1,69 @@
+// A landing skid's stress in a hard touchdown. The skids must carry a 1 m/s touchdown, the
+// descent limit. Stopped over the skids' 2 mm of compliance (as in arm_landing.fea), 1 m/s is
+// 1^2 / (2 x 0.002) = 250 m/s^2, about 25 g. The drone weighs 777 g all up and lands level on
+// both skids, so each takes 0.777 kg x 250 m/s^2 / 2 = 97 N up through its sole.
+//
+// Geometry: ./geometry/landing_skid.step, exported from ../mechanical/body/landing_skid.part at
+// its defaults (the skid at y = 34 mm, a 3.5 mm rail). The struts' tops are bonded and screwed
+// to the belly, so they are held. `rail_thickness` in the part is the wall to change.
+//
+// Material: 30% glass-filled nylon, conditioned (it takes up moisture in service): E = 7.5 GPa,
+// 1360 kg/m^3. Its conditioned tensile strength is about 110 MPa; with a factor of 2 for weld
+// lines and repeated landings, the limit is 55 MPa.
+//
+// Hand estimate: the rail as a 7 x 3.5 mm beam fixed at the two struts (58 mm apart) under a
+// uniform 97 N, M = wL/12 = 469 N mm at the struts, Z = b h^2 / 6 = 14.3 mm^3, so about 33 MPa
+// where the rail meets the struts: 1.7 x margin on 55 MPa. A 2.5 mm rail (Z = 7.3 mm^3) would
+// reach about 64 MPa, over the limit.
+
+geometry skid {
+    file = "./geometry/landing_skid.step"
+    units = mm
+    region body : solid { select name "landing_skid"; expect exactly_one }
+    region mount : face { select name "mount"; expect one_or_more }
+    region sole : face { select name "sole"; expect exactly_one }
+}
+
+mesh skid on geometry.skid {
+    tetrahedra {
+        order = quadratic
+        target_size = 2 mm
+        maximum_deviation = 0.2 mm
+    }
+}
+
+material nylon_gf30 {
+    mass_density = 1360 kg/m^3
+    elastic {
+        youngs_modulus = 7.5 GPa
+        poisson_ratio = 0.35
+    }
+}
+
+model landing {
+    assign material.nylon_gf30 to geometry.skid.region.body
+    constraint belly {
+        structural.fixed { target = geometry.skid.region.mount }
+    }
+    load ground {
+        force on geometry.skid.region.sole = [0, 0, 97] N
+    }
+    load_case touchdown { include load.ground }
+}
+
+study skid_landing {
+    geometry = geometry.skid
+    mesh = mesh.skid
+    model = model.landing
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+    output peak_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.skid.region.body)
+    output sole_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.skid.region.sole)
+    output peak_displacement = max(magnitude(analysis.static.field.node.displacement), over = geometry.skid.region.body)
+    assessment stays_below_55_mpa {
+        value = output.peak_stress
+        maximum = 55 MPa
+        evidence = authored_samples
+    }
+}

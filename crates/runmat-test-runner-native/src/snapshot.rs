@@ -8,6 +8,7 @@ use crate::{NativeRunnerError, NativeRunnerResult};
 
 #[derive(Clone, Debug)]
 pub struct NativeSnapshotInput {
+    pub compat_mode: runmat_core::CompatMode,
     pub project_root: PathBuf,
     pub catalog_roots: Vec<PathBuf>,
     pub graph_digest: String,
@@ -35,7 +36,7 @@ pub fn freeze_native_snapshot(
     FrozenTestRunSnapshot::freeze(
         input.graph_digest,
         base_source_digest,
-        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        runmat_core::program_environment(input.compat_mode),
         input.test_config_digest,
         sources,
         input.unsaved_buffers,
@@ -79,7 +80,7 @@ pub fn source_catalog_digest(sources: &[SavedRunSource]) -> String {
             hasher.update(field);
         }
     }
-    format!("sha256:{:x}", hasher.finalize())
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 pub fn source_prefix(project_root: &Path, target: &Path) -> Option<String> {
@@ -124,8 +125,8 @@ fn source_identity(project_root: &Path, path: &Path) -> (String, String) {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     (
         format!(
-            "path:external:{:x}",
-            Sha256::digest(parent.to_string_lossy().as_bytes())
+            "path:external:{}",
+            hex::encode(Sha256::digest(parent.to_string_lossy().as_bytes())),
         ),
         path.file_name()
             .unwrap_or_default()
@@ -154,6 +155,7 @@ mod tests {
         fs::write(root.path().join("tests/a.m"), "%% a\n").unwrap();
         fs::write(root.path().join("tests/readme.txt"), "ignored").unwrap();
         let snapshot = freeze_native_snapshot(NativeSnapshotInput {
+            compat_mode: runmat_core::CompatMode::Matlab,
             project_root: root.path().to_path_buf(),
             catalog_roots: vec![root.path().join("tests")],
             graph_digest: digest("graph"),
@@ -173,6 +175,7 @@ mod tests {
         let root = tempdir().unwrap();
         fs::write(root.path().join("test.m"), "%% test\n").unwrap();
         let snapshot = freeze_native_snapshot(NativeSnapshotInput {
+            compat_mode: runmat_core::CompatMode::RunMat,
             project_root: root.path().to_path_buf(),
             catalog_roots: vec![root.path().to_path_buf()],
             graph_digest: digest("graph"),
@@ -183,5 +186,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(snapshot.base_source_digest, "sha256:project-source");
+        assert_eq!(
+            snapshot.program_revision.environment().compatibility_mode,
+            runmat_execution::LanguageCompatibilityMode::RunMat,
+        );
     }
 }

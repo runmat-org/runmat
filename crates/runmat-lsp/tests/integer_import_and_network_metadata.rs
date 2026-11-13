@@ -15,12 +15,10 @@ fn import_and_network_integer_dispositions_are_public_and_complete() {
         ("spreadsheetImportOptions", 2),
         ("textscan", 2),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(
-            builtin
-                .descriptor
-                .expect("public descriptor")
-                .completion_policy,
+            builtin.descriptor.completion_policy,
             runmat_builtins::BuiltinCompletionPolicy::Public,
             "{name}"
         );
@@ -32,7 +30,7 @@ fn import_and_network_integer_dispositions_are_public_and_complete() {
         assert!(builtin.integer_audit.is_none(), "{name}");
     }
 
-    let readline = runmat_builtins::builtin_function_by_name("readline").expect("readline");
+    let readline = runmat_builtins::builtin_catalog_entry_by_name("readline").expect("readline");
     assert!(readline.integer_capabilities.is_empty());
     assert_eq!(
         readline.integer_audit.expect("readline integer audit").kind,
@@ -59,7 +57,8 @@ fn import_extension_metadata_publishes_independent_compatibility_gates() {
         ),
         ("textscan", &["textscan-typed-integer-control"][..]),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         for extension_id in extension_ids {
             assert!(
                 builtin.extensions.iter().any(|extension| {

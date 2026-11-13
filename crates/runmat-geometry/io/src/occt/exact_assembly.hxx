@@ -11,6 +11,7 @@ namespace occt_backend {
 
 struct OcctExactShapePayload;
 struct OcctImportOptions;
+class ExactNameTable;
 
 std::string serialize_exact_shape(const TopoDS_Shape& shape,
                                   const OcctImportOptions& options);
@@ -19,6 +20,8 @@ void append_exact_occurrences(OcctExactShapePayload& result,
                               const Handle(XCAFDoc_ShapeTool)& shape_tool,
                               bool has_xcaf,
                               const std::string& representation,
+                              // Names for the root shape when it carries no XCAF document.
+                              const ExactNameTable* root_names,
                               const OcctImportOptions& options);
 
 } // namespace occt_backend

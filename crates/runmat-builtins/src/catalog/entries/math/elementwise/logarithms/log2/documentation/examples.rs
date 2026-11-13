@@ -1,0 +1,110 @@
+use crate::{
+    BuiltinExample, BuiltinExampleCompatibility, BuiltinExampleHarness, BuiltinExampleVerification,
+};
+
+pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision and array pages",
+        program: "input = reshape(single([1 8]), [1 1 2]);\nresult = log2(input);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(result), 'single'));\nassert(isequal(size(result), [1 1 2]));\nassert(max(abs(double(result(:)) - [0; 3])) < 1e-6);",
+        },
+    },
+    BuiltinExample {
+        id: "powers-of-two",
+        title: "Compute logarithms of powers of two",
+        program: "values = [1 2 4 8];\npowers = log2(values)",
+        display_output: Some("powers = [0 1 2 3]"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(max(abs(powers - [0 1 2 3])) < 1e-12);",
+        },
+    },
+    BuiltinExample {
+        id: "zero",
+        title: "Evaluate the base-2 logarithm at zero",
+        program: "z = log2(0)",
+        display_output: Some("z = -Inf"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isinf(z) && z < 0);",
+        },
+    },
+    BuiltinExample {
+        id: "negative-values",
+        title: "Promote negative real values to complex results",
+        program: "neg = [-1 -2];\nout = log2(neg)",
+        display_output: Some("out = [0.0000 + 4.5324i 1.0000 + 4.5324i]"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "expected = [0 1] + (pi/log(2))*1i;\nassert(max(abs(out - expected)) < 1e-12);",
+        },
+    },
+    BuiltinExample {
+        id: "matrix-exponents",
+        title: "Find power-of-two exponents for a matrix",
+        program: "A = [64 128; 256 512];\nexponents = log2(A)",
+        display_output: Some("exponents = [6 7; 8 9]"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "expected = [6 7; 8 9];\nassert(max(abs(exponents(:) - expected(:))) < 1e-12);",
+        },
+    },
+    BuiltinExample {
+        id: "dissection",
+        title: "Dissect values into binary fractions and exponents",
+        program: "X = [1 -3 0 Inf];\n[F,E] = log2(X)",
+        display_output: Some("F = [0.5 -0.75 0 Inf]\nE = [1 2 0 0]"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(F, [0.5 -0.75 0 Inf]));\nassert(isequal(E, [1 2 0 0]));",
+        },
+    },
+    BuiltinExample {
+        id: "gpu-array",
+        title: "Apply the base-2 logarithm to provider-resident data",
+        program: "G = gpuArray([1 4 16 64]);\nresult = log2(G);\nhost = gather(result)",
+        display_output: Some("host = [0 2 4 6]"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(max(abs(host - [0 2 4 6])) < 1e-12);",
+        },
+    },
+    BuiltinExample {
+        id: "character-codes",
+        title: "Use character code points in RunMat mode",
+        program: "C = 'ABC';\nvalues = log2(C)",
+        display_output: Some("values = [6.0224 6.0444 6.0661]"),
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "expected = log2([65 66 67]);\nassert(max(abs(values - expected)) < 1e-12);",
+        },
+    },
+];

@@ -8,6 +8,8 @@ VCPKG_MARKER="${VCPKG_ROOT}/.runmat-vcpkg-ref"
 LOCK_DIR="${VCPKG_ROOT}.lock"
 LOCK_ACQUIRED=0
 OVERLAY_TRIPLETS="${VCPKG_ROOT}/triplets/runmat"
+REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+OVERLAY_PORTS="${REPOSITORY_ROOT}/infra/vcpkg-linux-ports"
 
 mkdir -p "$(dirname "${VCPKG_ROOT}")"
 
@@ -39,7 +41,10 @@ fi
 if [[ ! -x "${VCPKG_ROOT}/vcpkg" ]]; then
   echo "Cloning vcpkg ${VCPKG_REF} into ${VCPKG_ROOT}"
   git clone --depth 1 --branch "${VCPKG_REF}" https://github.com/microsoft/vcpkg.git "${VCPKG_ROOT}"
-  "${VCPKG_ROOT}/bootstrap-vcpkg.sh" -disableMetrics
+  if ! "${VCPKG_ROOT}/bootstrap-vcpkg.sh" -disableMetrics; then
+    echo "Direct vcpkg bootstrap failed; retrieving the pinned tool through GitHub's asset API"
+    node "${REPOSITORY_ROOT}/infra/scripts/bootstrap-vcpkg-tool.mjs" "${VCPKG_ROOT}"
+  fi
   echo "${VCPKG_REF}" > "${VCPKG_MARKER}"
 fi
 
@@ -58,6 +63,12 @@ PREFIX="${VCPKG_ROOT}/installed/${VCPKG_TRIPLET}"
 INCLUDE_DIR="${PREFIX}/include/opencascade"
 LIB_DIR="${PREFIX}/lib"
 
+if [[ -z "${X_VCPKG_ASSET_SOURCES:-}" ]] && command -v node >/dev/null && command -v gh >/dev/null; then
+  asset_source="$(node "${REPOSITORY_ROOT}/infra/scripts/github-release-asset-cache.mjs" --config)"
+  export X_VCPKG_ASSET_SOURCES="${asset_source}"
+  export VCPKG_KEEP_ENV_VARS="${VCPKG_KEEP_ENV_VARS:+${VCPKG_KEEP_ENV_VARS};}GH_TOKEN"
+fi
+
 has_occt() {
   [[ -d "${INCLUDE_DIR}" ]] &&
     [[ -e "${LIB_DIR}/libTKBRep.so" ]] &&
@@ -67,7 +78,8 @@ has_occt() {
 
 if ! has_occt; then
   echo "Installing OpenCASCADE via vcpkg (${VCPKG_TRIPLET})"
-  "${VCPKG_ROOT}/vcpkg" install "opencascade:${VCPKG_TRIPLET}" --overlay-triplets="${OVERLAY_TRIPLETS}"
+  "${VCPKG_ROOT}/vcpkg" install "opencascade:${VCPKG_TRIPLET}" \
+    --overlay-triplets="${OVERLAY_TRIPLETS}" --overlay-ports="${OVERLAY_PORTS}"
 fi
 
 if ! has_occt; then

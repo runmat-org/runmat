@@ -6,56 +6,87 @@ use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionRequest, HostExecutionPolicy, SourceInput},
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
-use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::cli::Cli;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::create_session;
+use crate::commands::session::{create_session, drive_with_graphics_callbacks};
 use crate::diagnostics::format_frontend_error;
 use crate::presentation;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
 
+mod report;
+
 pub async fn execute_benchmark(
     file: PathBuf,
     iterations: u32,
     jit: bool,
+    warmup: u32,
+    report_path: Option<PathBuf>,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
+    let mut report = report_path
+        .as_deref()
+        .map(report::Report::create)
+        .transpose()?;
+    anyhow::ensure!(
+        iterations != 0,
+        "benchmark iterations must be greater than zero"
+    );
     let file = resolve_benchmark_input(file)?;
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");
 
-    let content = fs::read_to_string(&file)
-        .with_context(|| format!("Failed to read script file: {file:?}"))?;
+    let captured_source = SourceInput::capture_path(file.to_string_lossy().into_owned())
+        .await
+        .with_context(|| format!("Failed to capture benchmark script: {file:?}"))?;
+    if let Some(report) = &mut report {
+        report.header(&captured_source, jit, warmup, iterations, config)?;
+    }
 
     let mut engine = create_session(jit, false, config, "Failed to create execution engine")?;
     let _project_lease = install_project_for_source(&mut engine, &file, cli).await?;
+    let local_tasks = engine.local_task_driver();
     let mut bench_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Benchmark,
         jit_enabled: jit,
         accelerate_enabled: config.accelerate.enabled,
     });
-    let source_name = file.to_string_lossy().to_string();
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
     let mut interpreter_executions: u64 = 0;
 
     println!("{}", presentation::stdout().info("Warming up..."));
-    for _ in 0..3 {
+    // Only report mode adds a cold-first invocation. Default execution retains
+    // the existing three warmups and the existing measured-loop behavior.
+    let cold = report.as_ref().map(|_| report::Phase::ColdFirst);
+    for phase in cold
+        .into_iter()
+        .chain((0..warmup).map(|_| report::Phase::Warmup))
+    {
         let request = ExecutionRequest::for_source(
-            SourceInput::Text {
-                name: source_name.clone(),
-                text: content.clone(),
-            },
+            captured_source.clone(),
             crate::diagnostics::parser_compat(config.language.compat),
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        let response = engine.execute_request(request).await;
+        let callbacks = engine.graphics_callback_queue().cloned();
+        let sample = report
+            .as_ref()
+            .map(|_| report::SampleStart::capture(&engine, phase));
+        let response = local_tasks
+            .drive_until(drive_with_graphics_callbacks(
+                callbacks,
+                engine.execute_request(request),
+            ))
+            .await
+            .context("Local callback driver stopped during benchmark warm-up")??;
+        if let (Some(report), Some(sample)) = (&mut report, sample) {
+            report.sample(sample, &engine, &response)?;
+        }
         match response.result {
             Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
             Ok(outcome) => {
@@ -78,8 +109,9 @@ pub async fn execute_benchmark(
                     });
                 }
                 eprintln!(
-                    "{}: {error}",
-                    presentation::stderr().error("Benchmark error")
+                    "{}: {}",
+                    presentation::stderr().error("Benchmark error"),
+                    benchmark_error_display(&outcome.diagnostics)
                 );
                 return Err(AlreadyReportedCliError.into());
             }
@@ -101,9 +133,11 @@ pub async fn execute_benchmark(
                         provider: capture_provider_snapshot(),
                     });
                 }
-                if let Some(diag) = response.source_context.source_text().and_then(|source| {
-                    format_frontend_error(&err, response.source_context.source_name(), source)
-                }) {
+                if let Some(diag) = format_frontend_error(
+                    &err,
+                    response.source_context.source_name(),
+                    response.source_context.source_text(),
+                ) {
                     eprintln!("{diag}");
                 } else {
                     eprintln!("{}: {err}", presentation::stderr().error("Benchmark error"));
@@ -116,15 +150,25 @@ pub async fn execute_benchmark(
     println!("{}", presentation::stdout().info("Running benchmark..."));
     for i in 1..=iterations {
         let request = ExecutionRequest::for_source(
-            SourceInput::Text {
-                name: source_name.clone(),
-                text: content.clone(),
-            },
+            captured_source.clone(),
             crate::diagnostics::parser_compat(config.language.compat),
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        let response = engine.execute_request(request).await;
+        let callbacks = engine.graphics_callback_queue().cloned();
+        let sample = report
+            .as_ref()
+            .map(|_| report::SampleStart::capture(&engine, report::Phase::Warm));
+        let response = local_tasks
+            .drive_until(drive_with_graphics_callbacks(
+                callbacks,
+                engine.execute_request(request),
+            ))
+            .await
+            .context("Local callback driver stopped during benchmark execution")??;
+        if let (Some(report), Some(sample)) = (&mut report, sample) {
+            report.sample(sample, &engine, &response)?;
+        }
         let outcome = match response.result {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -146,9 +190,11 @@ pub async fn execute_benchmark(
                         provider: capture_provider_snapshot(),
                     });
                 }
-                if let Some(diag) = response.source_context.source_text().and_then(|source| {
-                    format_frontend_error(&err, response.source_context.source_name(), source)
-                }) {
+                if let Some(diag) = format_frontend_error(
+                    &err,
+                    response.source_context.source_name(),
+                    response.source_context.source_text(),
+                ) {
                     eprintln!("{diag}");
                 } else {
                     eprintln!("{}: {err}", presentation::stderr().error("Benchmark error"));
@@ -177,7 +223,10 @@ pub async fn execute_benchmark(
                     provider: capture_provider_snapshot(),
                 });
             }
-            error!("Benchmark iteration {i} failed: {error}");
+            error!(
+                "Benchmark iteration {i} failed: {}",
+                benchmark_error_display(&outcome.diagnostics)
+            );
             return Err(AlreadyReportedCliError.into());
         }
 
@@ -234,7 +283,23 @@ pub async fn execute_benchmark(
         });
     }
 
+    if let Some(report) = &mut report {
+        report.finish()?;
+    }
     Ok(())
+}
+
+fn benchmark_error_display(diagnostics: &[runmat_core::abi::RuntimeDiagnostic]) -> String {
+    match diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
+        Some(diagnostic) if !diagnostic.message.is_empty() => {
+            format!("{}: {}", diagnostic.code, diagnostic.message)
+        }
+        Some(diagnostic) => diagnostic.code.clone(),
+        None => "runtime_error".to_string(),
+    }
 }
 
 fn resolve_benchmark_input(file: PathBuf) -> Result<PathBuf> {
@@ -252,10 +317,37 @@ fn resolve_benchmark_input(file: PathBuf) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_benchmark_input;
+    use super::{benchmark_error_display, resolve_benchmark_input};
     use crate::test_support::ScopedCurrentDir;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn benchmark_errors_display_message_without_changing_stable_code() {
+        use runmat_core::abi::{DiagnosticSeverity, RuntimeDiagnostic};
+        let mut diagnostic = RuntimeDiagnostic {
+            code: "RunMat:NativeExecution".to_string(),
+            severity: DiagnosticSeverity::Error,
+            message: "native value reference is stale or invalid".to_string(),
+            span: None,
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        };
+        let mut warning = diagnostic.clone();
+        warning.severity = DiagnosticSeverity::Warning;
+        warning.message = "not the failure".to_string();
+        assert_eq!(
+            benchmark_error_display(&[warning, diagnostic.clone()]),
+            "RunMat:NativeExecution: native value reference is stale or invalid"
+        );
+        assert_eq!(diagnostic.code, "RunMat:NativeExecution");
+        diagnostic.message.clear();
+        assert_eq!(
+            benchmark_error_display(&[diagnostic]),
+            "RunMat:NativeExecution"
+        );
+        assert_eq!(benchmark_error_display(&[]), "runtime_error");
+    }
 
     #[test]
     fn resolves_named_entrypoint_to_manifest_path_target() {

@@ -9,113 +9,24 @@
 use runmat_accelerate_api::GpuTensorHandle;
 #[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
+#[cfg(test)]
+use runmat_builtins::TAND_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, TAND_CHARACTER_INPUT_EXTENSION, TAND_ERROR_INTERNAL,
+    TAND_ERROR_INVALID_INPUT, TAND_INTEGER_INPUT_EXTENSION, TAND_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, IntValue, NumericDType};
-use runmat_value::{ComplexTensor, Tensor, Value};
+use runmat_value::{
+    CharArray, ComplexStorage, ComplexTensor, IntValue, NumericDType, Tensor, Value,
+};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::trigonometry::degree_helpers::reduce_degrees;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tand";
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
-
-pub const TAND_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tand-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tand with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TandIntegerInputExtension"),
-};
-pub const TAND_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tand-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tand with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TandLogicalInputExtension"),
-};
-pub const TAND_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tand-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tand with character input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TandCharacterInputExtension"),
-};
-pub const TAND_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    TAND_INTEGER_INPUT_EXTENSION,
-    TAND_LOGICAL_INPUT_EXTENSION,
-    TAND_CHARACTER_INPUT_EXTENSION,
-];
-const TAND_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "RunMat admits all eight real integer classes and reduces every value exactly modulo 360 before entering the floating degree-tangent kernel.",
-}];
-pub const TAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = tand(integer_X)",
-        inputs: &TAND_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Exact integer modular reduction makes wide int64 and uint64 inputs unambiguous and preserves canonical zero, unit, and pole results; resident input gathers exactly through its owning provider.",
-    }];
-
-const TAND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise tangent result with degree input semantics.",
-}];
-
-const TAND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, logical array, complex value, or gpuArray.",
-}];
-
-const TAND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = tand(X)",
-    inputs: &TAND_INPUTS,
-    outputs: &TAND_OUTPUT,
-}];
-
-const TAND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAND.INVALID_INPUT",
-    identifier: Some("RunMat:tand:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/logical/complex data.",
-    message: "tand: invalid input",
-};
-
-const TAND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TAND.INTERNAL",
-    identifier: Some("RunMat:tand:Internal"),
-    when: "Internal gather/conversion/allocation flow failed.",
-    message: "tand: internal error",
-};
-
-const TAND_ERRORS: [BuiltinErrorDescriptor; 2] = [TAND_ERROR_INVALID_INPUT, TAND_ERROR_INTERNAL];
-
-pub const TAND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TAND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TAND_ERRORS,
-};
 
 fn tand_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
@@ -175,19 +86,21 @@ fn tand_complex(re: f64, im: f64) -> (f64, f64) {
 
 #[runtime_builtin(
     name = "tand",
-    category = "math/trigonometry",
-    summary = "Compute element-wise tangent values for degree-based angles.",
-    keywords = "tand,tangent,degrees,trigonometry",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::tand::TAND_DESCRIPTOR),
-    extensions(TAND_EXTENSIONS),
-    integer_capabilities(TAND_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::tand"
 )]
 async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::TAND_DESCRIPTOR,
+        &runmat_builtins::TAND_ERROR_TOO_MANY_OUTPUTS,
+        "tand",
+    )?;
     ensure_tand_extensions(&value)?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "tand")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::TAND_CATALOG_ENTRY.identity,
+        &runmat_builtins::TAND_ERROR_INVALID_INPUT,
+    )?;
     match value {
         Value::GpuTensor(handle) => tand_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -195,9 +108,20 @@ async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
             Ok(Value::Complex(out_re, out_im))
         }
         Value::ComplexTensor(ct) => tand_complex_tensor(ct),
+        Value::CharArray(array) => tand_char_array(array),
         Value::String(_) | Value::StringArray(_) => Err(tand_error(&TAND_ERROR_INVALID_INPUT)),
         other => tand_real(other),
     }
+}
+
+fn tand_char_array(array: CharArray) -> BuiltinResult<Value> {
+    let data = array
+        .iter_column_major()
+        .map(|value| tand_scalar(f64::from(u32::from(value))))
+        .collect();
+    let tensor = Tensor::new(data, array.shape)
+        .map_err(|error| tand_error_with_detail(&TAND_ERROR_INTERNAL, error))?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 fn ensure_tand_extensions(value: &Value) -> BuiltinResult<()> {
@@ -235,13 +159,13 @@ async fn tand_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             Ok(Value::Complex(out_re, out_im))
         }
         Value::ComplexTensor(tensor) => tand_complex_tensor(tensor),
-        Value::Tensor(tensor) => tand_tensor(tensor).map(tensor::tensor_into_value),
-        Value::Num(value) => Ok(Value::Num(tand_scalar(value))),
-        other => Err(tand_error_with_detail(
-            &TAND_ERROR_INVALID_INPUT,
-            format!("unsupported gathered gpuArray value {other:?}"),
-        )),
+        other => tand_real(other),
     }?;
+    let host = crate::builtins::math::resident_real_unary::preserve_elementwise_scalar_shape(
+        host,
+        source.shape(),
+        BUILTIN_NAME,
+    )?;
     gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
 }
 
@@ -261,7 +185,7 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(tand_integer_scalar)
             .collect();
-        return Tensor::new(data, tensor.shape.clone())
+        return Tensor::new(data, tensor.shape().to_vec())
             .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err));
     }
     if tensor.numeric_dtype() == NumericDType::F32 {
@@ -271,20 +195,20 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| tand_scalar(f64::from(value)) as f32)
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| tand_scalar(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err))
 }
 
 fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let converted = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let converted = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -327,7 +251,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn tand_builtin(value: Value) -> BuiltinResult<Value> {
@@ -353,22 +276,6 @@ pub(crate) mod tests {
             Value::Num(v) => v,
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn tand_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -406,16 +313,29 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn tand_int_input_returns_exact() {
+    fn tand_integer_and_character_extensions_are_exact_and_gated() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = tand_builtin(Value::Int(IntValue::U64(u64::MAX)))
+            .expect_err("strict mode rejects integer extension");
+        assert_eq!(
+            err.identifier(),
+            TAND_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        drop(_strict);
+
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        assert_eq!(
-            expect_num(tand_builtin(Value::Int(IntValue::I32(45))).unwrap()),
-            1.0,
-        );
-        assert_eq!(
-            expect_num(tand_builtin(Value::Int(IntValue::I32(0))).unwrap()),
-            0.0,
-        );
+        for value in [
+            IntValue::I8(0),
+            IntValue::I16(0),
+            IntValue::I32(0),
+            IntValue::I64(0),
+            IntValue::U8(0),
+            IntValue::U16(0),
+            IntValue::U32(0),
+            IntValue::U64(0),
+        ] {
+            assert_eq!(expect_num(tand_builtin(Value::Int(value)).unwrap()), 0.0);
+        }
         assert_eq!(
             expect_num(tand_builtin(Value::Int(IntValue::I32(90))).unwrap()),
             f64::INFINITY,
@@ -424,6 +344,19 @@ pub(crate) mod tests {
             expect_num(tand_builtin(Value::Int(IntValue::I64(-90))).unwrap()),
             f64::NEG_INFINITY,
         );
+        let expected = tand_scalar((u64::MAX % 360) as f64);
+        assert_eq!(
+            expect_num(tand_builtin(Value::Int(IntValue::U64(u64::MAX))).unwrap()),
+            expected
+        );
+
+        let Value::Tensor(chars) =
+            tand_builtin(Value::CharArray(CharArray::new_row("-Z"))).unwrap()
+        else {
+            panic!("expected character result tensor")
+        };
+        assert_eq!(chars.shape(), &[1, 2]);
+        assert_eq!(chars.materialize_f64(), vec![1.0, f64::INFINITY]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -442,7 +375,7 @@ pub(crate) mod tests {
         let result = tand_builtin(Value::Tensor(tensor)).expect("tand");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64()[0], 0.0);
                 assert_eq!(t.materialize_f64()[1], 1.0);
                 assert_eq!(t.materialize_f64()[2], f64::INFINITY);
@@ -450,6 +383,42 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn tand_preserves_real_and_complex_rank_projection() {
+        assert_eq!(
+            tand_builtin(Value::Tensor(Tensor::new(vec![45.0], Vec::new()).unwrap())).unwrap(),
+            Value::Num(1.0)
+        );
+        let Value::Tensor(real) = tand_builtin(Value::Tensor(
+            Tensor::new(vec![0.0, 45.0], vec![2]).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected rank-one real tensor");
+        };
+        assert_eq!(real.shape(), &[2]);
+        assert_eq!(real.materialize_f64(), vec![0.0, 1.0]);
+
+        let Value::Complex(re, im) = tand_builtin(Value::ComplexTensor(
+            ComplexTensor::new(vec![(0.0, 0.0)], Vec::new()).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected complex scalar");
+        };
+        assert_eq!((re, im), (0.0, 0.0));
+        let Value::ComplexTensor(complex) = tand_builtin(Value::ComplexTensor(
+            ComplexTensor::new(vec![(0.0, 0.0), (45.0, 0.0)], vec![2]).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected rank-one complex tensor");
+        };
+        assert_eq!(complex.shape(), &[2]);
+        let values = complex.materialize_f64();
+        assert_eq!(values[0], (0.0, 0.0));
+        assert!((values[1].0 - 1.0).abs() < 1.0e-12);
+        assert_eq!(values[1].1, 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -462,7 +431,7 @@ pub(crate) mod tests {
 
         match tand_builtin(Value::Tensor(tensor)).expect("tand") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 let expected = [0.0, 1.0];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -481,7 +450,7 @@ pub(crate) mod tests {
         let result = tand_builtin(Value::LogicalArray(logical)).expect("tand");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 assert_eq!(t.materialize_f64()[0], 0.0);
                 let expected = (1.0_f64 * DEG_TO_RAD).tan();
                 assert!((t.materialize_f64()[1] - expected).abs() < 1e-12);
@@ -500,16 +469,16 @@ pub(crate) mod tests {
                     shape: &[3, 1],
                 })
                 .expect("upload");
-            let source_device = source.device_id;
+            let source_device = source.device_id();
             let result =
                 block_on(super::tand_builtin(Value::GpuTensor(source))).expect("tand fallback");
             let Value::GpuTensor(handle) = &result else {
                 panic!("expected resident result")
             };
-            assert_eq!(handle.device_id, source_device);
+            assert_eq!(handle.device_id(), source_device);
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
-            assert_eq!(gathered.shape, vec![3, 1]);
+            assert_eq!(gathered.shape(), &[3, 1]);
         });
     }
 

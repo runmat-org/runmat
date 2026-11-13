@@ -4,7 +4,7 @@ use runmat_geometry_core::{
     build_faceted_solid_closure, EncodedFacetedSolidClosure, FacetedSolidModel, GeometryDigest,
     GeometryDocument, GeometryHealingPolicy, GeometryModel, GeometryObjectRef,
     GeometryRevisionIdentity, GeometrySourceFormat, GeometrySourceIdentity,
-    GeometryTolerancePolicy, UnitSystem, FACETED_SOLID_MEDIA_TYPE,
+    GeometryTolerancePolicy, LengthUnit, FACETED_SOLID_MEDIA_TYPE,
     GEOMETRY_DOCUMENT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
@@ -23,28 +23,28 @@ const MAX_FACETED_TRIANGLES: u64 = u32::MAX as u64 / 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FacetedSolidImportOptions {
-    pub source_units: UnitSystem,
+    pub source_units: Option<LengthUnit>,
     pub revision: GeometryRevisionIdentity,
-    pub source_tolerance_m: f64,
-    pub absolute_tolerance_floor_m: f64,
+    pub source_tolerance_m: runmat_types::physical::Length,
+    pub absolute_tolerance_floor_m: runmat_types::physical::Length,
     pub model_relative_tolerance: f64,
-    pub requested_deviation_m: f64,
+    pub requested_deviation_m: runmat_types::physical::Length,
     pub max_triangles: u64,
 }
 
 impl Default for FacetedSolidImportOptions {
     fn default() -> Self {
         Self {
-            source_units: UnitSystem::Meter,
+            source_units: None,
             revision: GeometryRevisionIdentity {
                 revision: 1,
                 persistent_mapping_version: 1,
                 parent_document_digest: None,
             },
-            source_tolerance_m: 0.0,
-            absolute_tolerance_floor_m: 1.0e-12,
+            source_tolerance_m: runmat_types::physical::Length::new(0.0),
+            absolute_tolerance_floor_m: runmat_types::physical::Length::new(1.0e-12),
             model_relative_tolerance: 1.0e-12,
-            requested_deviation_m: 1.0e-4,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-4),
             max_triangles: 16_000_000,
         }
     }
@@ -65,7 +65,12 @@ pub fn import_faceted_solid(
     context.check_cancelled()?;
     let format = detect_geometry_format(source_name, bytes);
     let source_format = source_format(format)?;
-    let meters_per_source_unit = meters_per_unit(options.source_units)?;
+    let source_unit = options.source_units.ok_or_else(|| {
+        GeometryImportError::InvalidOptions(
+            "faceted geometry requires an explicit source length unit".into(),
+        )
+    })?;
+    let meters_per_source_unit = source_unit.meters_per_unit();
     validate_options(options)?;
     let imported = import_geometry_with_context(
         source_name,
@@ -73,7 +78,8 @@ pub fn import_faceted_solid(
         GeometryImportOptions {
             max_triangles: Some(options.max_triangles),
             budget_policy: GeometryImportBudgetPolicy::Strict,
-            units: options.source_units,
+            units: source_unit,
+            source_units: Some(source_unit),
             tessellation_profile: Default::default(),
             relative_deflection: false,
         },
@@ -91,16 +97,27 @@ pub fn import_faceted_solid(
             format: source_format,
             importer_version: "runmat-faceted-import/1".into(),
             kernel_version: None,
-            source_units: options.source_units,
-            meters_per_source_unit,
+            unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                source_unit,
+                "explicit faceted-import source units",
+            ),
+            representation_units: runmat_geometry_core::physical::CoordinateUnits::new(
+                LengthUnit::Meter,
+            ),
         },
         revision: options.revision.clone(),
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: options.source_tolerance_m,
-            absolute_floor_m: options.absolute_tolerance_floor_m,
+            source_tolerance_m: runmat_types::physical::Length::new(
+                options.source_tolerance_m.canonical_value(),
+            ),
+            absolute_floor_m: runmat_types::physical::Length::new(
+                options.absolute_tolerance_floor_m.canonical_value(),
+            ),
             model_relative_term: options.model_relative_tolerance,
-            requested_deviation_m: options.requested_deviation_m,
-            maximum_healing_displacement_m: 0.0,
+            requested_deviation_m: runmat_types::physical::Length::new(
+                options.requested_deviation_m.canonical_value(),
+            ),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(0.0),
         },
         healing: GeometryHealingPolicy {
             algorithm_version: "none/1".into(),
@@ -109,6 +126,7 @@ pub fn import_faceted_solid(
             consolidate_duplicates: false,
             repair_tolerance_scale_gaps: false,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::FacetedSolid {
             model: FacetedSolidModel {
@@ -146,17 +164,6 @@ fn source_format(format: GeometryFormat) -> Result<GeometrySourceFormat, Geometr
     }
 }
 
-fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {
-    match units {
-        UnitSystem::Meter => Ok(1.0),
-        UnitSystem::Millimeter => Ok(0.001),
-        UnitSystem::Inch => Ok(0.0254),
-        UnitSystem::Unspecified => Err(GeometryImportError::InvalidOptions(
-            "faceted solid source units must be explicit".into(),
-        )),
-    }
-}
-
 fn validate_options(options: &FacetedSolidImportOptions) -> Result<(), GeometryImportError> {
     if options.max_triangles == 0 || options.max_triangles > MAX_FACETED_TRIANGLES {
         return Err(GeometryImportError::InvalidOptions(
@@ -164,11 +171,17 @@ fn validate_options(options: &FacetedSolidImportOptions) -> Result<(), GeometryI
         ));
     }
     GeometryTolerancePolicy {
-        source_tolerance_m: options.source_tolerance_m,
-        absolute_floor_m: options.absolute_tolerance_floor_m,
+        source_tolerance_m: runmat_types::physical::Length::new(
+            options.source_tolerance_m.canonical_value(),
+        ),
+        absolute_floor_m: runmat_types::physical::Length::new(
+            options.absolute_tolerance_floor_m.canonical_value(),
+        ),
         model_relative_term: options.model_relative_tolerance,
-        requested_deviation_m: options.requested_deviation_m,
-        maximum_healing_displacement_m: 0.0,
+        requested_deviation_m: runmat_types::physical::Length::new(
+            options.requested_deviation_m.canonical_value(),
+        ),
+        maximum_healing_displacement_m: runmat_types::physical::Length::new(0.0),
     }
     .validate()
     .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;

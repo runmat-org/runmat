@@ -1,87 +1,208 @@
-use std::collections::BTreeMap;
+mod checkpoint;
+use checkpoint::emit_progress_checkpoint;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::{
-    insert_delaunay_volume_refinement_candidate,
+    batch::{insert_independent_refinement_batch, RefinementBatchOutcome},
+    insertion::insert_delaunay_volume_refinement_candidate_from_admitted_input,
     insertion::{error, insertion_error, quality_error},
-    select_delaunay_volume_refinement_candidate, DelaunayVolumeRefinement,
-    DelaunayVolumeRefinementInput, DelaunayVolumeRefinementMutation,
-    DelaunayVolumeRefinementOptions, DelaunayVolumeRefinementStepError,
-    DelaunayVolumeRefinementStepErrorKind,
+    select_delaunay_volume_refinement_candidate_excluding_from_admitted_input,
+    DelaunayVolumeRefinement, DelaunayVolumeRefinementInput, DelaunayVolumeRefinementOptions,
+    DelaunayVolumeRefinementStepError, DelaunayVolumeRefinementStepErrorKind,
 };
 use crate::cdt::{
-    insertion::validate_constrained_delaunay_volume_topology, treat_delaunay_volume_slivers,
-    validate_delaunay_volume_quality, DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind,
+    insertion::validate_conforming_volume_topology, validate_delaunay_volume_quality,
 };
 
-pub fn refine_delaunay_volume(
-    input: DelaunayVolumeRefinementInput<'_>,
+const MAXIMUM_REFINEMENT_BATCH_SIZE: u64 = 128;
+const PROGRESS_INSERTION_INTERVAL: u64 = 32;
+
+mod entry;
+pub use entry::refine_delaunay_volume;
+#[cfg(test)]
+pub(in crate::cdt) use entry::refine_owned_until_stalled;
+pub(in crate::cdt) use entry::{DelaunayVolumeRefinementProgress, RefinementSchedule};
+
+pub(in crate::cdt) fn refine_owned_with_schedule(
+    mut topology: crate::cdt::DelaunayVolumeTopology,
+    mut quality: crate::cdt::DelaunayVolumeQuality,
+    context: super::context::RefinementContext<'_>,
     options: DelaunayVolumeRefinementOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayVolumeRefinement, DelaunayVolumeRefinementStepError> {
+    schedule: RefinementSchedule,
+) -> Result<DelaunayVolumeRefinementProgress, DelaunayVolumeRefinementStepError> {
     validate_options(options)?;
-    let mut topology = input.topology.clone();
-    let mut quality = input.quality.clone();
-    let mut mutations = Vec::new();
+    let mut insertions = Vec::new();
+    let mut unusable_node_identities = BTreeSet::new();
     let mut insertion_count = 0u64;
-    loop {
-        let current = DelaunayVolumeRefinementInput {
-            topology: &topology,
-            metric_request: input.metric_request,
-            provenance: input.provenance,
-            quality: &quality,
-            quality_options: input.quality_options,
-        };
-        if quality.tetrahedra.iter().any(|tetrahedron| {
-            tetrahedron.metric_scaled_jacobian
-                < input.quality_options.minimum_metric_scaled_jacobian
-        }) {
-            match treat_delaunay_volume_slivers(current, options.sliver, cancellation) {
-                Ok(treatment) => {
-                    mutations.extend(
-                        treatment
-                            .relocations
-                            .into_iter()
-                            .map(DelaunayVolumeRefinementMutation::Relocated),
-                    );
-                    topology = treatment.topology;
-                    quality = treatment.quality;
-                    continue;
-                }
-                Err(failure)
-                    if failure.kind == DelaunayVolumeSliverErrorKind::NoAdmissibleRelocation => {}
-                Err(failure) => return Err(sliver_error(failure)),
-            }
-        }
-        let Some(candidate) = select_delaunay_volume_refinement_candidate(
-            current,
-            options.step.candidate,
-            cancellation,
-        )
-        .map_err(super::insertion::candidate_error)?
-        else {
-            let refinement = DelaunayVolumeRefinement {
+    let mut maximum_batch_size = MAXIMUM_REFINEMENT_BATCH_SIZE;
+    let mut next_progress_insertion = PROGRESS_INSERTION_INTERVAL;
+    emit_progress_checkpoint(insertion_count, &topology, &quality, "started");
+    if quality.worst_refinement_tetrahedron.is_none() {
+        emit_progress_checkpoint(insertion_count, &topology, &quality, "completed");
+        return Ok(DelaunayVolumeRefinementProgress {
+            refinement: DelaunayVolumeRefinement {
                 topology,
                 quality,
-                mutations,
+                insertions,
+            },
+            stalled: false,
+        });
+    }
+    let mut queries = super::CandidateQueries::new(&topology, cancellation)
+        .map_err(super::insertion::candidate_error)?;
+    let mut frontier = super::batch::sources::Frontier::default();
+    loop {
+        let current = context.with_state(&topology, &quality);
+        let remaining_insertions = options.maximum_insertions.saturating_sub(insertion_count);
+        if remaining_insertions >= 2 {
+            let maximum_batch = remaining_insertions.min(maximum_batch_size) as usize;
+            let prior_frontier = frontier;
+            match insert_independent_refinement_batch(
+                current,
+                &queries,
+                super::batch::RefinementBatchOptions {
+                    step: options.step,
+                    maximum_insertions: maximum_batch,
+                    frontier: &mut frontier,
+                },
+                &mut unusable_node_identities,
+                cancellation,
+            )? {
+                RefinementBatchOutcome::Admitted(batch) => {
+                    queries
+                        .append(&batch.inserted_nodes, cancellation)
+                        .map_err(super::insertion::candidate_error)?;
+                    maximum_batch_size = maximum_batch_size
+                        .saturating_mul(2)
+                        .min(MAXIMUM_REFINEMENT_BATCH_SIZE);
+                    insertion_count += batch.inserted_nodes.len() as u64;
+                    insertions.extend(batch.inserted_nodes);
+                    topology = batch.step.topology;
+                    quality = batch.step.quality;
+                    // Candidate admission depends on the current Delaunay cavity.
+                    // A point rejected against the preceding topology must be
+                    // reconsidered after an admitted mutation changes that cavity.
+                    unusable_node_identities.clear();
+                    if insertion_count >= next_progress_insertion {
+                        emit_progress_checkpoint(insertion_count, &topology, &quality, "refining");
+                        next_progress_insertion =
+                            insertion_count.saturating_add(PROGRESS_INSERTION_INTERVAL);
+                    }
+                    if schedule == RefinementSchedule::Cooperative {
+                        return Ok(DelaunayVolumeRefinementProgress {
+                            refinement: DelaunayVolumeRefinement {
+                                topology,
+                                quality,
+                                insertions,
+                            },
+                            stalled: false,
+                        });
+                    }
+                    continue;
+                }
+                RefinementBatchOutcome::MoreSources => continue,
+                RefinementBatchOutcome::RetrySmaller if maximum_batch > 2 => {
+                    frontier = prior_frontier;
+                    maximum_batch_size = ((maximum_batch / 2).max(2)) as u64;
+                    continue;
+                }
+                RefinementBatchOutcome::Unavailable | RefinementBatchOutcome::RetrySmaller => {}
+            }
+        }
+        // A shape defect can block every floor-preserving batch candidate.
+        // Hand it back to the shape owner; this is an intermediate checkpoint,
+        // never a convergence or publication verdict.
+        if schedule == RefinementSchedule::Cooperative
+            && quality.worst_optimization_tetrahedron.is_some()
+        {
+            return Ok(DelaunayVolumeRefinementProgress {
+                refinement: DelaunayVolumeRefinement {
+                    topology,
+                    quality,
+                    insertions,
+                },
+                stalled: false,
+            });
+        }
+        let candidate =
+            match select_delaunay_volume_refinement_candidate_excluding_from_admitted_input(
+                current,
+                options.step.candidate,
+                &unusable_node_identities,
+                cancellation,
+                &queries,
+            ) {
+                Ok(candidate) => candidate,
+                Err(failure)
+                    if failure.kind
+                        == crate::cdt::DelaunayVolumeRefinementCandidateErrorKind::NumericalFailure =>
+                {
+                    return Ok(DelaunayVolumeRefinementProgress {
+                        refinement: DelaunayVolumeRefinement {
+                            topology,
+                            quality,
+                            insertions,
+                        },
+                        stalled: true,
+                    });
+                }
+                Err(failure) => return Err(super::insertion::candidate_error(failure)),
             };
-            validate_delaunay_volume_refinement(input, &refinement, options, cancellation)?;
-            return Ok(refinement);
+        let Some(candidate) = candidate else {
+            emit_progress_checkpoint(insertion_count, &topology, &quality, "completed");
+            return Ok(DelaunayVolumeRefinementProgress {
+                refinement: DelaunayVolumeRefinement {
+                    topology,
+                    quality,
+                    insertions,
+                },
+                stalled: false,
+            });
         };
         if insertion_count >= options.maximum_insertions {
             break;
         }
-        let step = insert_delaunay_volume_refinement_candidate(
+        let step = match insert_delaunay_volume_refinement_candidate_from_admitted_input(
             current,
             &candidate,
             options.step,
             cancellation,
-        )?;
+        ) {
+            Ok(step) => step,
+            Err(failure)
+                if failure.kind == DelaunayVolumeRefinementStepErrorKind::InvalidQuality =>
+            {
+                unusable_node_identities.insert(candidate.node.identity);
+                continue;
+            }
+            Err(failure) => return Err(failure),
+        };
         insertion_count += 1;
-        mutations.push(DelaunayVolumeRefinementMutation::Inserted(candidate.node));
+        queries
+            .append(std::slice::from_ref(&candidate.node), cancellation)
+            .map_err(super::insertion::candidate_error)?;
+        insertions.push(candidate.node);
         topology = step.topology;
         quality = step.quality;
+        unusable_node_identities.clear();
+        if schedule == RefinementSchedule::Cooperative {
+            return Ok(DelaunayVolumeRefinementProgress {
+                refinement: DelaunayVolumeRefinement {
+                    topology,
+                    quality,
+                    insertions,
+                },
+                stalled: false,
+            });
+        }
+        if insertion_count >= next_progress_insertion {
+            emit_progress_checkpoint(insertion_count, &topology, &quality, "refining");
+            next_progress_insertion = insertion_count.saturating_add(PROGRESS_INSERTION_INTERVAL);
+        }
     }
     let last_violation = quality
         .tetrahedra
@@ -90,6 +211,7 @@ pub fn refine_delaunay_volume(
         .map(|tetrahedron| tetrahedron.refinement_violation_ratio)
         .max_by(f64::total_cmp)
         .unwrap_or(1.0);
+    emit_progress_checkpoint(insertion_count, &topology, &quality, "exhausted");
     Err(error(
         DelaunayVolumeRefinementStepErrorKind::ResourceLimit,
         format!(
@@ -115,7 +237,7 @@ pub fn validate_delaunay_volume_refinement(
     if input.quality.worst_refinement_tetrahedron.is_none()
         && (refinement.topology != *input.topology
             || refinement.quality != *input.quality
-            || !refinement.mutations.is_empty())
+            || !refinement.insertions.is_empty())
     {
         return Err(error(
             DelaunayVolumeRefinementStepErrorKind::InvalidInput,
@@ -129,7 +251,7 @@ pub fn validate_delaunay_volume_refinement(
         .iter()
         .map(|facet| facet.node_identities)
         .collect::<Vec<_>>();
-    validate_constrained_delaunay_volume_topology(
+    validate_conforming_volume_topology(
         &refinement.topology,
         &protected_faces,
         options.step.insertion,
@@ -158,7 +280,6 @@ fn validate_options(
         ));
     }
     super::super::insertion::validate_options(options.step.insertion).map_err(insertion_error)?;
-    super::super::volume_sliver::validate_options(options.sliver).map_err(sliver_error)?;
     Ok(())
 }
 
@@ -167,16 +288,7 @@ fn validate_mutation_lineage(
     refinement: &DelaunayVolumeRefinement,
     options: DelaunayVolumeRefinementOptions,
 ) -> Result<(), DelaunayVolumeRefinementStepError> {
-    let insertion_count = refinement
-        .mutations
-        .iter()
-        .filter(|mutation| matches!(mutation, DelaunayVolumeRefinementMutation::Inserted(_)))
-        .count() as u64;
-    let relocation_count = refinement.mutations.len() as u64 - insertion_count;
-    let maximum_relocations = insertion_count
-        .saturating_add(1)
-        .saturating_mul(options.sliver.maximum_passes);
-    if insertion_count > options.maximum_insertions || relocation_count > maximum_relocations {
+    if refinement.insertions.len() as u64 > options.maximum_insertions {
         return Err(error(
             DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
             "refinement mutation evidence exceeds its configured hard limits",
@@ -188,36 +300,16 @@ fn validate_mutation_lineage(
         .iter()
         .map(|node| (node.identity, *node))
         .collect::<BTreeMap<_, _>>();
-    for mutation in &refinement.mutations {
-        match mutation {
-            DelaunayVolumeRefinementMutation::Inserted(node) => {
-                if node.identity == StableDigest::ZERO
-                    || node.coordinates_m.iter().any(|value| !value.is_finite())
-                    || nodes.insert(node.identity, *node).is_some()
-                {
-                    return Err(invalid_lineage());
-                }
-            }
-            DelaunayVolumeRefinementMutation::Relocated(relocation) => {
-                if !relocation
-                    .source_tetrahedron_node_identities
-                    .contains(&relocation.source_node_identity)
-                    || relocation
-                        .source_tetrahedron_node_identities
-                        .iter()
-                        .any(|identity| !nodes.contains_key(identity))
-                    || !super::super::volume_sliver::relocation_identity_is_valid(relocation)
-                    || nodes.remove(&relocation.source_node_identity).is_none()
-                    || nodes
-                        .insert(
-                            relocation.replacement_node.identity,
-                            relocation.replacement_node,
-                        )
-                        .is_some()
-                {
-                    return Err(invalid_lineage());
-                }
-            }
+    for node in &refinement.insertions {
+        if node.identity == StableDigest::ZERO
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
+            || nodes.insert(node.identity, *node).is_some()
+        {
+            return Err(invalid_lineage());
         }
     }
     if nodes.values().copied().collect::<Vec<_>>() != refinement.topology.nodes {
@@ -229,36 +321,6 @@ fn validate_mutation_lineage(
 fn invalid_lineage() -> DelaunayVolumeRefinementStepError {
     error(
         DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
-        "refinement topology does not exactly match its ordered insertion and relocation lineage",
+        "refinement topology does not exactly match its ordered insertion lineage",
     )
-}
-
-fn sliver_error(failure: DelaunayVolumeSliverError) -> DelaunayVolumeRefinementStepError {
-    let kind = match failure.kind {
-        DelaunayVolumeSliverErrorKind::InvalidOptions => {
-            DelaunayVolumeRefinementStepErrorKind::InvalidOptions
-        }
-        DelaunayVolumeSliverErrorKind::InvalidInput => {
-            DelaunayVolumeRefinementStepErrorKind::InvalidInput
-        }
-        DelaunayVolumeSliverErrorKind::InvalidTopology => {
-            DelaunayVolumeRefinementStepErrorKind::InvalidTopology
-        }
-        DelaunayVolumeSliverErrorKind::InvalidProvenance => {
-            DelaunayVolumeRefinementStepErrorKind::InvalidProvenance
-        }
-        DelaunayVolumeSliverErrorKind::InvalidQuality => {
-            DelaunayVolumeRefinementStepErrorKind::InvalidQuality
-        }
-        DelaunayVolumeSliverErrorKind::NoAdmissibleRelocation => {
-            DelaunayVolumeRefinementStepErrorKind::InvalidQuality
-        }
-        DelaunayVolumeSliverErrorKind::ResourceLimit => {
-            DelaunayVolumeRefinementStepErrorKind::ResourceLimit
-        }
-        DelaunayVolumeSliverErrorKind::Cancelled => {
-            DelaunayVolumeRefinementStepErrorKind::Cancelled
-        }
-    };
-    error(kind, failure.to_string())
 }

@@ -1,0 +1,62 @@
+use super::*;
+
+pub(in super::super) const VERT_DOC: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("vertcat"), slug: Some("vertcat"),
+    summary: "Concatenate inputs vertically along the first dimension with MATLAB semicolon semantics.",
+    description: "`vertcat(A1, A2, ...)` stacks inputs top-to-bottom along dimension 1, equivalent to MATLAB semicolon syntax `[A1; A2; ...]` with compatible shape rules.",
+    keywords: &["vertcat", "vertical concatenation", "stack rows", "square brackets", "gpu"],
+    related: &["cat", "horzcat", "reshape", "gpuArray", "gather", "circshift", "diag", "flip", "fliplr", "flipud", "ipermute", "kron", "permute", "repmat", "rot90", "squeeze", "tril", "triu"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+            "Hard-codes `dim = 1`. All inputs must agree on every dimension except the first.",
+            "Accepts numeric, logical, complex, character, string, and cell arrays with the same class-dominance rules as `cat(...,1)`. Real integer mixtures preserve the leftmost participating integer class with saturating conversion.",
+            "Scalars are treated as `1×1`, enabling concise column-building such as `vertcat(1, 2, 3)`.",
+            "Empty inputs participate naturally. If any shared dimension is zero, the result is empty with the expected shape.",
+            "Compatible host and resident numeric inputs use the owning provider when possible; otherwise RunMat gathers exact values, concatenates on the host, and restores the result when the owner can preserve its class.",
+        ] },
+        BuiltinDocumentationSection { heading: "GPU execution", paragraphs: &[
+            "`vertcat` delegates to `cat(dim = 1, …)`. When the owning acceleration provider implements the `cat` hook for the operands, concatenation runs on the GPU. Otherwise RunMat gathers, concatenates on host, and attempts to upload the result; if upload is unavailable, floating output can remain on host.",
+            "Delegates to cat with dim=1; provider execution is used where supported, otherwise exact gather/host assembly and attempted restoration apply.",
+            "GPU floating precisions are f32 and f64; there is no broadcasting, elementwise or reduction fusion, and constants may be inlined.",
+        ] },
+        BuiltinDocumentationSection { heading: "Placement and options", paragraphs: &[
+        "Dimension 1 is concatenated and every other dimension must agree. Numeric, logical, complex, character, string, and cell arrays follow cat class dominance; real integer mixtures retain the leftmost participating integer class with saturating conversion. Scalars are 1-by-1. Empty inputs retain their compatible shape, including zero shared dimensions.",
+        "Host and resident numeric inputs use the owning provider's cat hook where supported; otherwise exact values gather, concatenate on host, and restore to the owner where class and explicit placement allow. No broadcasting or elementwise/reduction fusion is declared.",
+    ] }],
+    examples: &[
+        example!("rows", "Stacking matrices by adding rows", "A = [1 2; 3 4];\nB = [5 6; 7 8];\nC = vertcat(A, B)", Some("C =\n     1     2\n     3     4\n     5     6\n     7     8"), "assert(isequal(C, [1 2; 3 4; 5 6; 7 8]));", BuiltinExampleHarness::Portable),
+        example!("scalars", "Building a column vector from scalars", "col = vertcat(1, 2, 3, 4)", Some("col =\n     1\n     2\n     3\n     4"), "assert(isequal(col, [1;2;3;4]));", BuiltinExampleHarness::Portable),
+        example!("characters", "Combining character arrays into taller text blocks", "top = ['RunMat'];\nbottom = ['Rocks!'];\nbanner = vertcat(top, bottom)", None, "assert(isequal(banner, ['RunMat'; 'Rocks!']));", BuiltinExampleHarness::Portable),
+        example!("strings", "Joining string arrays into multi-row tables", "header = [\"Name\" \"Score\"];\nrows = [\"Alice\" \"98\"; \"Bob\" \"92\"];\ntable = vertcat(header, rows)", None, "assert(isequal(size(table), [3 2]));", BuiltinExampleHarness::Portable),
+        example!("logical", "Preserving logical masks when stacking", "mask1 = logical([1 0 1]);\nmask2 = logical([0 1 0]);\nstacked = vertcat(mask1, mask2)", None, "assert(islogical(stacked)); assert(isequal(size(stacked), [2 3]));", BuiltinExampleHarness::Portable),
+        example!("cells", "Extending cell arrays downwards", "row1 = {1, \"low\"};\nrow2 = {2, \"high\"};\ngrid = vertcat(row1, row2)", None, "assert(iscell(grid)); assert(isequal(size(grid), [2 2]));", BuiltinExampleHarness::Portable),
+        example!("resident", "Keeping gpuArray inputs resident on the device", "G1 = gpuArray(rand(128, 256));\nG2 = gpuArray(rand(64, 256));\nstacked = vertcat(G1, G2)", None, "assert(isgpuarray(stacked)); assert(isequal(size(stacked), [192 256]));", BuiltinExampleHarness::Wgpu),
+        example!("empties", "Working with empty rows without surprises", "empty = zeros(0, 3);\ncombo = vertcat(empty, empty)", None, "assert(isequal(size(combo), [0 3]));", BuiltinExampleHarness::Portable),
+        example!("complex", "Stacking complex matrices preserves imaginary parts", "z1 = complex([1 2], [3 4]);\nz2 = complex([5 6], [7 8]);\njoined = vertcat(z1, z2)", None, "assert(isequal(joined, [z1;z2]));", BuiltinExampleHarness::Portable),
+    ],
+    example_exemption: None, faqs: &[],
+    links: &[
+        BuiltinDocumentationLink { label: "`cat`", target: BuiltinDocumentationLinkTarget::Builtin("cat") },
+        BuiltinDocumentationLink { label: "`horzcat`", target: BuiltinDocumentationLinkTarget::Builtin("horzcat") },
+        BuiltinDocumentationLink { label: "`reshape`", target: BuiltinDocumentationLinkTarget::Builtin("reshape") },
+        BuiltinDocumentationLink { label: "`gpuArray`", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "`gather`", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+        BuiltinDocumentationLink { label: "circshift", target: BuiltinDocumentationLinkTarget::Builtin("circshift") },
+        BuiltinDocumentationLink { label: "diag", target: BuiltinDocumentationLinkTarget::Builtin("diag") },
+        BuiltinDocumentationLink { label: "flip", target: BuiltinDocumentationLinkTarget::Builtin("flip") },
+        BuiltinDocumentationLink { label: "fliplr", target: BuiltinDocumentationLinkTarget::Builtin("fliplr") },
+        BuiltinDocumentationLink { label: "flipud", target: BuiltinDocumentationLinkTarget::Builtin("flipud") },
+        BuiltinDocumentationLink { label: "ipermute", target: BuiltinDocumentationLinkTarget::Builtin("ipermute") },
+        BuiltinDocumentationLink { label: "kron", target: BuiltinDocumentationLinkTarget::Builtin("kron") },
+        BuiltinDocumentationLink { label: "permute", target: BuiltinDocumentationLinkTarget::Builtin("permute") },
+        BuiltinDocumentationLink { label: "repmat", target: BuiltinDocumentationLinkTarget::Builtin("repmat") },
+        BuiltinDocumentationLink { label: "rot90", target: BuiltinDocumentationLinkTarget::Builtin("rot90") },
+        BuiltinDocumentationLink { label: "squeeze", target: BuiltinDocumentationLinkTarget::Builtin("squeeze") },
+        BuiltinDocumentationLink { label: "tril", target: BuiltinDocumentationLinkTarget::Builtin("tril") },
+        BuiltinDocumentationLink { label: "triu", target: BuiltinDocumentationLinkTarget::Builtin("triu") }, VERT_SOURCE,
+    ],
+    media: &[], evidence: BuiltinDocumentationEvidence { implementation: &[VERT_SOURCE], verification: VERT_TESTS, notes: &[
+        "Examples cover host arrays, gpuArray execution, empty rows, and complex data. GPU kernel execution and fallback are delegated to cat.",
+    ] }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

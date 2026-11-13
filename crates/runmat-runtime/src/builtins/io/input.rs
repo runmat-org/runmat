@@ -1,20 +1,20 @@
 //! MATLAB-compatible `input` builtin for line-oriented console interaction.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, InputStringMode, INPUT_ERROR_EVAL_FAILED,
+    INPUT_ERROR_INTERACTION_FAILED, INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
+    INPUT_ERROR_INVALID_PROMPT_TYPE, INPUT_ERROR_INVALID_STRING_FLAG,
+    INPUT_ERROR_PROMPT_ROW_VECTOR, INPUT_ERROR_PROMPT_SCALAR_STRING, INPUT_ERROR_TOO_MANY_INPUTS,
+    INPUT_ERROR_TOO_MANY_OUTPUTS, INPUT_NO_PROMPT_EXTENSION, INPUT_SWAPPED_ARGUMENTS_EXTENSION,
 };
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
+    BuiltinIntegerAuditKind, INPUT_DESCRIPTOR, INPUT_EXTENSIONS, INPUT_INTEGER_AUDIT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, LogicalArray, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
+use crate::execution::RootedValue;
 use crate::interaction;
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
@@ -22,160 +22,6 @@ use crate::{
 
 const DEFAULT_PROMPT: &str = "Input: ";
 const BUILTIN_NAME: &str = "input";
-
-const INPUT_NO_PROMPT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "input-no-prompt",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "input() with RunMat's default prompt is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:InputNoPromptExtension"),
-};
-const INPUT_SWAPPED_ARGUMENTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "input-swapped-arguments",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "input('s', prompt) argument order is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:InputSwappedArgumentsExtension"),
-};
-pub const INPUT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [INPUT_NO_PROMPT_EXTENSION, INPUT_SWAPPED_ARGUMENTS_EXTENSION];
-pub const INPUT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "input accepts only a text prompt and the text flag 's'. In expression mode the entered expression is evaluated normally, so any integer result retains the class and shape produced by that expression rather than serving as an integer input role of input itself.",
-};
-
-const INPUT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Parsed scalar/matrix value, or raw text when using string mode.",
-}];
-const INPUT_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const INPUT_INPUTS_PROMPT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "prompt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Prompt text shown to the user.",
-}];
-const INPUT_INPUTS_PROMPT_FLAG: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "prompt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prompt text shown to the user.",
-    },
-    BuiltinParamDescriptor {
-        name: "stringFlag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Set to 's' to return the raw input text.",
-    },
-];
-const INPUT_INPUTS_FLAG_PROMPT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "stringFlag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Set to 's' to return the raw input text.",
-    },
-    BuiltinParamDescriptor {
-        name: "prompt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prompt text shown to the user.",
-    },
-];
-const INPUT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "value = input()",
-        inputs: &INPUT_INPUTS_NONE,
-        outputs: &INPUT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = input(prompt)",
-        inputs: &INPUT_INPUTS_PROMPT,
-        outputs: &INPUT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = input(prompt, stringFlag)",
-        inputs: &INPUT_INPUTS_PROMPT_FLAG,
-        outputs: &INPUT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = input(stringFlag, prompt)",
-        inputs: &INPUT_INPUTS_FLAG_PROMPT,
-        outputs: &INPUT_OUTPUT,
-    },
-];
-const INPUT_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:input:TooManyInputs"),
-    when: "More than two input arguments are passed to input.",
-    message: "input: too many inputs",
-};
-const INPUT_ERROR_INVALID_STRING_FLAG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.INVALID_STRING_FLAG",
-    identifier: Some("RunMat:input:InvalidStringFlag"),
-    when: "The string mode flag is not a scalar string/char 's'.",
-    message: "input: invalid string flag",
-};
-const INPUT_ERROR_PROMPT_ROW_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.PROMPT_ROW_VECTOR",
-    identifier: Some("RunMat:input:PromptMustBeRowVector"),
-    when: "Prompt char array is not 1-by-N.",
-    message: "input: prompt must be a row vector",
-};
-const INPUT_ERROR_PROMPT_SCALAR_STRING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.PROMPT_SCALAR_STRING",
-    identifier: Some("RunMat:input:PromptMustBeScalarString"),
-    when: "Prompt string array is not scalar.",
-    message: "input: prompt must be a scalar string",
-};
-const INPUT_ERROR_INVALID_PROMPT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.INVALID_PROMPT_TYPE",
-    identifier: Some("RunMat:input:InvalidPromptType"),
-    when: "Prompt is not a string scalar or row char vector.",
-    message: "input: invalid prompt type",
-};
-const INPUT_ERROR_INTERACTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.INTERACTION_FAILED",
-    identifier: Some("RunMat:input:InteractionFailed"),
-    when: "Interactive prompt callback fails.",
-    message: "input: interaction failed",
-};
-const INPUT_ERROR_EVAL_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.EVAL_FAILED",
-    identifier: Some("RunMat:input:EvalFailed"),
-    when: "Expression evaluation hook rejects the input expression.",
-    message: "input: invalid expression",
-};
-const INPUT_ERROR_INVALID_NUMERIC_EXPRESSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUT.INVALID_NUMERIC_EXPRESSION",
-    identifier: Some("RunMat:input:InvalidNumericExpression"),
-    when: "Numeric fallback parser rejects the input expression.",
-    message: "input: invalid numeric expression",
-};
-const INPUT_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    INPUT_ERROR_TOO_MANY_INPUTS,
-    INPUT_ERROR_INVALID_STRING_FLAG,
-    INPUT_ERROR_PROMPT_ROW_VECTOR,
-    INPUT_ERROR_PROMPT_SCALAR_STRING,
-    INPUT_ERROR_INVALID_PROMPT_TYPE,
-    INPUT_ERROR_INTERACTION_FAILED,
-    INPUT_ERROR_EVAL_FAILED,
-    INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
-];
-pub const INPUT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INPUT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INPUT_ERRORS,
-};
 
 fn input_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     input_error_with(error, error.message)
@@ -206,43 +52,15 @@ fn input_error_with_source(
     builder.build()
 }
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::input")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "input",
-    op_kind: GpuOpKind::Custom("interaction"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Prompts execute on the host. Interactive resident prompt and flag values are rejected before provider access; expression results retain the residency established by the entered expression itself.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::input")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "input",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Side-effecting builtin; excluded from fusion plans.",
-};
-
 #[runtime_builtin(
     name = "input",
-    summary = "Prompt users for interactive input.",
-    extensions(INPUT_EXTENSIONS),
-    integer_audit(crate::builtins::io::input::INPUT_INTEGER_AUDIT),
-    type_resolver(crate::builtins::io::type_resolvers::input_type),
-    descriptor(crate::builtins::io::input::INPUT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::input"
 )]
-async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn input_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<RootedValue> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(input_error(&INPUT_ERROR_TOO_MANY_OUTPUTS));
+    }
     if args.len() > 2 {
         return Err(input_error(&INPUT_ERROR_TOO_MANY_INPUTS));
     }
@@ -258,7 +76,7 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
-    let mut parsed_flag: Option<bool> = None;
+    let mut parsed_flag: Option<InputStringMode> = None;
 
     if let Some(idx) = if args.len() == 2 { Some(1usize) } else { None } {
         match parse_string_flag(&args[idx]).await {
@@ -290,7 +108,7 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         DEFAULT_PROMPT.to_string()
     };
-    let return_string = parsed_flag.unwrap_or(false);
+    let return_string = parsed_flag.is_some();
     loop {
         let line = interaction::request_line_async(&prompt, true)
             .await
@@ -303,31 +121,39 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 )
             })?;
         if return_string {
-            return Ok(Value::CharArray(CharArray::new_row(&line)));
+            return RootedValue::new(Value::CharArray(CharArray::new_row(&line)))
+                .map_err(|error| error.into_runtime_error());
         }
-        if let Ok(value) = parse_numeric_response(&line).await {
-            return Ok(value);
+        match parse_numeric_response(&line).await {
+            Ok(value) => return Ok(value),
+            Err(error)
+                if error.failure_origin()
+                    == crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation =>
+            {
+                crate::console::record_console_line(
+                    crate::console::ConsoleStream::Stderr,
+                    error.format_diagnostic(),
+                )?;
+            }
+            Err(error) => return Err(error),
         }
     }
 }
 
 async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
     let gathered = gather_if_needed_async(value).await?;
-    match gathered {
-        Value::CharArray(ca) => {
-            if ca.rows != 1 {
-                Err(input_error(&INPUT_ERROR_PROMPT_ROW_VECTOR))
-            } else {
-                Ok(ca.data.iter().collect())
-            }
+    match &gathered {
+        Value::CharArray(_) => {
+            crate::builtins::common::validation::value_text_scalar_string(&gathered)
+                .ok_or_else(|| input_error(&INPUT_ERROR_PROMPT_ROW_VECTOR))
         }
-        Value::String(text) => Ok(text),
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Ok(sa.data[0].clone())
-            } else {
-                Err(input_error(&INPUT_ERROR_PROMPT_SCALAR_STRING))
-            }
+        Value::String(runmat_value::StringElement::Text(_)) => {
+            crate::builtins::common::validation::value_text_scalar_string(&gathered)
+                .ok_or_else(|| input_error(&INPUT_ERROR_INVALID_PROMPT_TYPE))
+        }
+        Value::StringArray(_) => {
+            crate::builtins::common::validation::value_text_scalar_string(&gathered)
+                .ok_or_else(|| input_error(&INPUT_ERROR_PROMPT_SCALAR_STRING))
         }
         other => Err(input_error_with(
             &INPUT_ERROR_INVALID_PROMPT_TYPE,
@@ -336,46 +162,41 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
     }
 }
 
-async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
+async fn parse_string_flag(value: &Value) -> Result<InputStringMode, RuntimeError> {
     let gathered = gather_if_needed_async(value).await?;
-    let text = match gathered {
-        Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect::<String>(),
-        Value::String(s) => s,
-        Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-        other => {
-            return Err(input_error_with(
+    let text = crate::builtins::common::validation::value_text_scalar_string(&gathered)
+        .ok_or_else(|| {
+            input_error_with(
                 &INPUT_ERROR_INVALID_STRING_FLAG,
-                format!("input: invalid string flag ({other:?})"),
-            ))
-        }
-    };
-    if text == "s" {
-        Ok(true)
-    } else {
-        Err(input_error_with(
+                format!("input: invalid string flag ({gathered:?})"),
+            )
+        })?;
+    InputStringMode::decode(&text).ok_or_else(|| {
+        input_error_with(
             &INPUT_ERROR_INVALID_STRING_FLAG,
             format!("input: invalid string flag ({text})"),
-        ))
-    }
+        )
+    })
 }
 
-async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
+async fn parse_numeric_response(line: &str) -> Result<RootedValue, RuntimeError> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed == "[]" {
-        return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
+        return RootedValue::new(Value::Tensor(Tensor::zeros(vec![0, 0])))
+            .map_err(|error| error.into_runtime_error());
     }
 
     // Fast path 1: scalar literals, named constants, and logical keywords.
     // Handles the vast majority of input() use cases without touching the VM.
     if let Some(v) = parse_scalar_value(trimmed) {
-        return Ok(v);
+        return RootedValue::new(v).map_err(|error| error.into_runtime_error());
     }
 
     // Fast path 2: matrix/vector literals like `[1 2 3]`, `[1;2;3]`, `[true false]`.
     // Avoids recursive interpret() calls for this common case.
     if trimmed.starts_with('[') && trimmed.ends_with(']') {
         if let Some(v) = parse_matrix_literal(trimmed) {
-            return Ok(v);
+            return RootedValue::new(v).map_err(|error| error.into_runtime_error());
         }
     }
 
@@ -384,18 +205,22 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     // polls (e.g. the WASM async runtime). On native the fast paths above cover
     // the common cases; truly complex expressions fall back to str2double here.
     if let Some(hook) = interaction::current_eval_hook() {
-        return hook(trimmed.to_string()).await.map_err(|err| {
+        let outcome = hook(trimmed.to_string()).await.map_err(|err| {
             let message = err.message().to_string();
             input_error_with_source(
                 &INPUT_ERROR_EVAL_FAILED,
-                format!("input: invalid expression ({message})"),
+                format!("input: expression evaluation failed ({message})"),
                 err,
             )
-        });
+        })?;
+        return match outcome {
+            interaction::EvalHookOutcome::Value(value) => Ok(value),
+            interaction::EvalHookOutcome::InvalidExpression(error) => Err(error),
+        };
     }
 
     // Fallback when no eval hook is installed (unit tests, native REPL).
-    let parsed = call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
+    let parsed = call_builtin_async("str2double", &[Value::string(trimmed.to_string())])
         .await
         .map_err(|err| {
             let message = err.message().to_string();
@@ -405,11 +230,13 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
                 err,
             )
         })?;
-    if matches!(parsed, Value::Num(value) if value.is_nan()) {
-        return Err(input_error_with(
+    if matches!(parsed.value(), Value::Num(value) if value.is_nan()) {
+        let mut error = input_error_with(
             &INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
             INPUT_ERROR_INVALID_NUMERIC_EXPRESSION.message,
-        ));
+        );
+        error.failure_origin = crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation;
+        return Err(error);
     }
     Ok(parsed)
 }
@@ -535,268 +362,5 @@ fn parse_matrix_literal(s: &str) -> Option<Value> {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::interaction::{push_queued_response, InteractionResponse};
-
-    fn input_with_empty_prompt() -> BuiltinResult<Value> {
-        futures::executor::block_on(input_builtin(vec![Value::String(String::new())]))
-    }
-
-    #[test]
-    fn input_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = INPUT_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"value = input()"));
-        assert!(labels.contains(&"value = input(prompt)"));
-        assert!(labels.contains(&"value = input(prompt, stringFlag)"));
-        assert!(labels.contains(&"value = input(stringFlag, prompt)"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn numeric_input_parses_scalar() {
-        push_queued_response(Ok(InteractionResponse::Line("41".into())));
-        let value = input_with_empty_prompt().expect("input");
-        assert_eq!(value, Value::Num(41.0));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn string_mode_returns_char_row() {
-        push_queued_response(Ok(InteractionResponse::Line("RunMat".into())));
-        let prompt = Value::CharArray(CharArray::new_row("Name: "));
-        let mode = Value::String("s".to_string());
-        let value = futures::executor::block_on(input_builtin(vec![prompt, mode])).expect("input");
-        assert_eq!(value, Value::CharArray(CharArray::new_row("RunMat")));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn empty_response_returns_empty_tensor() {
-        push_queued_response(Ok(InteractionResponse::Line("   ".into())));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::Tensor(t) => assert!(t.materialize_f64().is_empty()),
-            other => panic!("expected empty tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn matrix_literal_parses_without_eval_hook() {
-        // The fast-path parser handles `[1 2 3]` directly, so no eval hook (and
-        // therefore no recursive interpret() call) is needed.
-        push_queued_response(Ok(InteractionResponse::Line("[1 2 3]".into())));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::Tensor(t) => {
-                assert_eq!(t.rows, 1);
-                assert_eq!(t.cols, 3);
-                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
-            }
-            other => panic!("expected 1×3 tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn named_constants_parse_without_eval_hook() {
-        push_queued_response(Ok(InteractionResponse::Line("pi".into())));
-        let value = input_with_empty_prompt().expect("input");
-        assert_eq!(value, Value::Num(std::f64::consts::PI));
-    }
-
-    /// `e` is not a MATLAB built-in constant. The fast-path parser must not map
-    /// it to Euler's number; it should fall through so the eval hook or
-    /// `str2double` can handle it (which will NaN or error on an unknown identifier).
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn bare_e_is_not_eulers_number() {
-        assert_eq!(parse_scalar_value("e"), None);
-        assert_eq!(parse_scalar_value("E"), None);
-    }
-
-    /// `[1 e 3]` must not silently produce `[1.0, 2.718…, 3.0]`.
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn matrix_with_bare_e_does_not_parse() {
-        assert_eq!(parse_matrix_literal("[1 e 3]"), None);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn true_input_returns_logical_not_double() {
-        push_queued_response(Ok(InteractionResponse::Line("true".into())));
-        let value = input_with_empty_prompt().expect("input");
-        assert_eq!(value, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn false_input_returns_logical_not_double() {
-        push_queued_response(Ok(InteractionResponse::Line("false".into())));
-        let value = input_with_empty_prompt().expect("input");
-        assert_eq!(value, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn bool_input_is_case_insensitive() {
-        push_queued_response(Ok(InteractionResponse::Line("TRUE".into())));
-        let value = input_with_empty_prompt().expect("input");
-        assert_eq!(value, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn column_vector_parses_without_eval_hook() {
-        push_queued_response(Ok(InteractionResponse::Line("[1;2;3]".into())));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::Tensor(t) => {
-                assert_eq!(t.rows, 3);
-                assert_eq!(t.cols, 1);
-                assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
-            }
-            other => panic!("expected 3×1 tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn logical_row_vector_parses_as_logical_array() {
-        push_queued_response(Ok(InteractionResponse::Line("[true false]".into())));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::LogicalArray(la) => {
-                assert_eq!(la.shape, vec![1, 2]);
-                assert_eq!(la.data, vec![1, 0]);
-            }
-            other => panic!("expected LogicalArray, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn logical_column_vector_parses_as_logical_array() {
-        push_queued_response(Ok(InteractionResponse::Line("[true; false]".into())));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::LogicalArray(la) => {
-                assert_eq!(la.shape, vec![2, 1]);
-                assert_eq!(la.data, vec![1, 0]);
-            }
-            other => panic!("expected LogicalArray, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn mixed_logical_and_numeric_coerces_to_double_tensor() {
-        push_queued_response(Ok(InteractionResponse::Line("[true 2.0]".into())));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::Tensor(t) => {
-                assert_eq!(t.rows, 1);
-                assert_eq!(t.cols, 2);
-                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
-            }
-            other => panic!("expected Tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn matrix_2x2_column_major_layout() {
-        // [1 2; 3 4] → get2(r,c) must return element at row r, col c, not the transpose.
-        // Column-major storage: data = [1, 3, 2, 4] (not the row-major [1, 2, 3, 4]).
-        push_queued_response(Ok(InteractionResponse::Line("[1 2; 3 4]".into())));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::Tensor(t) => {
-                assert_eq!(t.rows, 2);
-                assert_eq!(t.cols, 2);
-                assert_eq!(t.get2(0, 0).unwrap(), 1.0, "(0,0) should be 1");
-                assert_eq!(t.get2(0, 1).unwrap(), 2.0, "(0,1) should be 2");
-                assert_eq!(t.get2(1, 0).unwrap(), 3.0, "(1,0) should be 3");
-                assert_eq!(t.get2(1, 1).unwrap(), 4.0, "(1,1) should be 4");
-            }
-            other => panic!("expected 2×2 tensor, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn logical_matrix_2x2_column_major_layout() {
-        // [true false; false true] → column-major data = [1, 0, 0, 1].
-        push_queued_response(Ok(InteractionResponse::Line(
-            "[true false; false true]".into(),
-        )));
-        let value = input_with_empty_prompt().expect("input");
-        match value {
-            Value::LogicalArray(la) => {
-                assert_eq!(la.shape, vec![2, 2]);
-                // column-major: col 0 first ([true, false]), then col 1 ([false, true])
-                assert_eq!(la.data, vec![1, 0, 0, 1]);
-            }
-            other => panic!("expected 2×2 LogicalArray, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn invalid_string_flag_errors_before_prompt() {
-        push_queued_response(Ok(InteractionResponse::Line("ignored".into())));
-        let prompt = Value::String("Ready?".to_string());
-        let bad_flag = Value::String("not-string-mode".to_string());
-        let err = futures::executor::block_on(input_builtin(vec![prompt, bad_flag])).unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:input:InvalidStringFlag"));
-    }
-
-    #[test]
-    fn strict_mode_gates_runmat_only_call_forms_before_interaction() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let no_prompt = futures::executor::block_on(input_builtin(vec![])).unwrap_err();
-        assert_eq!(
-            no_prompt.identifier(),
-            INPUT_NO_PROMPT_EXTENSION.error_identifier
-        );
-        let swapped = futures::executor::block_on(input_builtin(vec![
-            Value::String("s".into()),
-            Value::String("Prompt: ".into()),
-        ]))
-        .unwrap_err();
-        assert_eq!(
-            swapped.identifier(),
-            INPUT_SWAPPED_ARGUMENTS_EXTENSION.error_identifier
-        );
-    }
-
-    #[test]
-    fn resident_prompt_rejects_without_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        let error = futures::executor::block_on(input_builtin(vec![resident])).unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            INPUT_ERROR_INVALID_PROMPT_TYPE.identifier
-        );
-    }
-
-    #[test]
-    fn input_integer_audit_is_explicitly_not_applicable() {
-        assert_eq!(
-            INPUT_INTEGER_AUDIT.kind,
-            BuiltinIntegerAuditKind::NotApplicable
-        );
-        assert_eq!(INPUT_EXTENSIONS.len(), 2);
-    }
-}
+#[path = "input/tests.rs"]
+pub(crate) mod tests;

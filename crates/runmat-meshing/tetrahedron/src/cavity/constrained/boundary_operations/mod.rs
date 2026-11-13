@@ -30,7 +30,7 @@ pub fn split_constrained_cavity_boundary_edge(
     let target_edge = sorted_edge(edge);
     let boundary_node_map = boundary_nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     for node_id in target_edge {
         if !boundary_node_map.contains_key(&node_id) {

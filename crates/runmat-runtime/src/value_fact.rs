@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use runmat_types::{
     AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
@@ -9,6 +10,9 @@ use runmat_types::{
     ShapeFact, StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact, ViewFact,
 };
 use runmat_value::{IntValue, NumericDType, Value};
+
+mod borrowed;
+pub use borrowed::BorrowedValueFacts;
 
 /// Adapt one live runtime value into the dependency-neutral static fact schema.
 ///
@@ -27,24 +31,34 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::CharArray(value) => dense(ValueKindFact::Character, &value.shape),
         Value::Tensor(value) => dense(
             numeric_kind(dtype_class(value.numeric_dtype()), NumericDomain::Real),
-            &value.shape,
+            value.shape(),
         ),
         Value::SparseTensor(value) => {
             let kind = value
                 .numeric_dtype()
                 .map_or(ValueKindFact::Logical, |dtype| {
-                    numeric_kind(dtype_class(dtype), NumericDomain::Real)
+                    numeric_kind(
+                        dtype_class(dtype),
+                        if value.is_complex() {
+                            NumericDomain::Complex
+                        } else {
+                            NumericDomain::Real
+                        },
+                    )
                 });
             sparse(kind, &value.shape())
         }
         Value::ComplexTensor(value) => dense(
             numeric_kind(dtype_class(value.numeric_dtype()), NumericDomain::Complex),
-            &value.shape,
+            value.shape(),
         ),
         Value::Symbolic(_) => scalar(ValueKindFact::Symbolic),
         Value::SymbolicArray(value) => dense(ValueKindFact::Symbolic, &value.shape),
         Value::Cell(value) => {
-            let elements = value.data.iter().map(value_fact).collect::<Vec<_>>();
+            let elements = value
+                .iter_column_major()
+                .map(value_fact)
+                .collect::<Vec<_>>();
             let element = elements
                 .iter()
                 .cloned()
@@ -59,25 +73,58 @@ pub fn value_fact(value: &Value) -> ValueFact {
                 &value.shape,
             )
         }
-        Value::Struct(value) => scalar(ValueKindFact::Struct(StructFact {
-            fields: value
+        Value::Struct(value) => scalar(ValueKindFact::Struct(StructFact::scalar(
+            value
                 .fields
                 .iter()
-                .map(|(name, value)| (name.clone(), value_fact(value)))
+                .map(|(name, value)| (name.to_owned(), value_fact(value)))
                 .collect(),
-            fields_complete: true,
-        })),
+            true,
+        ))),
+        Value::StructArray(value) => {
+            let fields = value
+                .field_names()
+                .map(|name| {
+                    let joined = value
+                        .field_values(name)
+                        .into_iter()
+                        .flatten()
+                        .map(value_fact)
+                        .reduce(|left, right| runmat_types::FactJoin::join(&left, &right))
+                        .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue));
+                    (name.to_owned(), joined)
+                })
+                .collect();
+            dense(
+                ValueKindFact::Struct(StructFact::array(
+                    fields,
+                    true,
+                    value
+                        .elements()
+                        .map(|element| {
+                            element
+                                .fields
+                                .iter()
+                                .map(|(name, value)| (name.to_owned(), value_fact(value)))
+                                .collect()
+                        })
+                        .collect(),
+                    true,
+                )),
+                value.shape(),
+            )
+        }
         Value::GpuTensor(value) => {
             let kind = gpu_kind(value);
             ValueFact {
                 kind: kind.clone().unwrap_or(ValueKindFact::Unknown),
-                shape: shape(&value.shape),
+                shape: shape(value.shape()),
                 storage: StorageFact::Opaque,
                 layout: LayoutFact::Unknown,
                 contiguity: ContiguityFact::Unknown,
                 view: ViewFact::Unknown,
                 residency: ResidencyFact::Device {
-                    provider: Some(format!("device:{}", value.device_id)),
+                    provider: Some(device_provider_name(value.device_id())),
                 },
                 alias: AliasFact::Identity,
                 mutation: MutationFact::HandleSemantics,
@@ -89,19 +136,34 @@ pub fn value_fact(value: &Value) -> ValueFact {
                 invalidation: InvalidationVector::default(),
             }
         }
+        Value::Object(value) if value.optimization_variable_shape().is_some() => object(
+            value.class_name().clone(),
+            BTreeMap::new(),
+            false,
+            true,
+            ShapeFact::from(
+                value
+                    .optimization_variable_shape()
+                    .expect("native reference shape")
+                    .iter()
+                    .copied()
+                    .map(Some)
+                    .collect::<Vec<_>>(),
+            ),
+        ),
         Value::Object(value) => object(
-            &value.class_name,
+            value.class_name().clone(),
             value
-                .properties
+                .properties()
                 .iter()
-                .map(|(name, value)| (name.clone(), value_fact(value)))
+                .map(|(name, value)| (name.to_owned(), value_fact(value)))
                 .collect(),
             true,
             false,
             ShapeFact::Scalar,
         ),
         Value::ObjectArray(value) => object(
-            value.class_name(),
+            value.class_name().clone(),
             BTreeMap::new(),
             false,
             value
@@ -111,14 +173,14 @@ pub fn value_fact(value: &Value) -> ValueFact {
             shape(value.shape()),
         ),
         Value::HandleObject(value) => object(
-            &value.class_name,
+            value.class_name.as_identity().clone(),
             BTreeMap::new(),
             false,
             true,
             ShapeFact::Scalar,
         ),
         Value::Listener(value) => object(
-            &value.target_class_name,
+            value.target_class_name.as_identity().clone(),
             BTreeMap::new(),
             false,
             true,
@@ -128,21 +190,33 @@ pub fn value_fact(value: &Value) -> ValueFact {
             outputs: values.iter().map(value_fact).collect(),
             variadic: false,
         })),
-        Value::FunctionHandle(name) => {
-            callable(CallableIdentity::DynamicName(SymbolName(name.clone())))
-        }
+        Value::ScopedFunctionHandle(_) => scalar(ValueKindFact::Callable(CallableFact {
+            identity: None,
+            capabilities: Default::default(),
+            parameters: Vec::new(),
+            parameters_complete: false,
+            outputs: Vec::new(),
+            outputs_complete: false,
+            variadic_inputs: true,
+            variadic_outputs: true,
+            captures: Vec::new(),
+            captures_complete: false,
+        })),
+        Value::FunctionHandle(name) => callable(CallableIdentity::DynamicName(SymbolName(
+            name.name().to_owned(),
+        ))),
         Value::ExternalFunctionHandle(name) => {
             callable(CallableIdentity::ExternalName(qualified_name(name)))
         }
         Value::MethodFunctionHandle(name) => callable(CallableIdentity::Method(
-            runmat_types::MethodId(name.clone()),
+            runmat_types::MethodId(name.name().to_owned()),
         )),
-        Value::BoundFunctionHandle { function, .. } => callable(CallableIdentity::BoundFunction(
-            runmat_types::FunctionId(*function),
+        Value::BoundFunctionHandle(handle) => callable(CallableIdentity::BoundFunction(
+            runmat_types::FunctionId(handle.function),
         )),
         Value::Closure(value) => {
             let mut fact = callable_kind(CallableIdentity::DynamicName(SymbolName(
-                value.function_name.clone(),
+                value.function_name.to_string(),
             )));
             fact.captures = value.captures.iter().map(value_fact).collect();
             scalar(ValueKindFact::Callable(fact))
@@ -150,24 +224,57 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::ClassRef(name) => scalar(ValueKindFact::ClassReference(
             runmat_types::ClassReferenceFact {
                 class: None,
-                runtime_class: Some(qualified_name(name)),
+                runtime_class: Some(name.as_identity().clone()),
             },
         )),
         Value::MException(value) => scalar(ValueKindFact::Exception(ExceptionFact {
-            identifier: Some(value.identifier.clone()),
+            identifier: Some(value.identifier.to_string()),
         })),
         Value::Future(_) => execution(ExecutionFact::Future {
-            output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            output: runmat_types::ValueSequenceFact::single(ValueFact::unknown(
+                DynamicReason::RuntimeValue,
+            )),
             state: runmat_types::FutureStateFact::Unknown,
         }),
         Value::Task(_) => execution(ExecutionFact::Task {
-            output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            output: runmat_types::ValueSequenceFact::single(ValueFact::unknown(
+                DynamicReason::RuntimeValue,
+            )),
             spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
         }),
         Value::Pool(_) => execution(ExecutionFact::Pool),
         Value::Job(_) => execution(ExecutionFact::Job {
-            output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            output: runmat_types::ValueSequenceFact::single(ValueFact::unknown(
+                DynamicReason::RuntimeValue,
+            )),
         }),
+        Value::Distributed(handle) => ValueFact {
+            kind: ValueKindFact::Distributed(runmat_types::DistributedFact {
+                id: handle.contract,
+                owner: handle.owner,
+                scheme: Some(handle.scheme.clone()),
+                value: Box::new(handle.value.clone()),
+                materializable: handle.materializable,
+            }),
+            shape: shape_u64(&handle.global_shape),
+            storage: StorageFact::Opaque,
+            layout: LayoutFact::Unknown,
+            contiguity: ContiguityFact::Unknown,
+            view: ViewFact::Unknown,
+            residency: ResidencyFact::Remote {
+                pool: Some(handle.pool.id.to_string()),
+            },
+            alias: AliasFact::Identity,
+            mutation: MutationFact::HandleSemantics,
+            certainty: CertaintyFact::Proven,
+            invalidation: InvalidationVector::default(),
+        },
+        Value::Composite(handle) => runmat_types::composite_fact(
+            handle.owner_region,
+            handle.gang.labs,
+            handle.value.clone(),
+            Some(handle.gang.pool.id.to_string()),
+        ),
         Value::Foreign(reference) => {
             let mut fact = fact(
                 ValueKindFact::Foreign(ForeignFact {
@@ -202,8 +309,23 @@ pub fn value_fact(value: &Value) -> ValueFact {
     }
 }
 
+fn device_provider_name(device_id: u32) -> String {
+    // `device:` plus the maximum ten decimal digits of u32. A checked
+    // request-local resource preflight can reserve this exact requested
+    // capacity before a resident ValueFact is constructed.
+    let mut name = String::with_capacity(17);
+    write!(&mut name, "device:{device_id}").expect("writing to String cannot fail");
+    name
+}
+
 fn numeric_scalar(class: NumericClass, domain: NumericDomain) -> ValueFact {
     scalar(numeric_kind(class, domain))
+}
+
+/// Describe one host scalar read from numeric runtime storage without cloning
+/// or materializing the value that owns that storage.
+pub(crate) fn numeric_storage_scalar_fact(class: NumericDType, domain: NumericDomain) -> ValueFact {
+    numeric_scalar(dtype_class(class), domain)
 }
 
 fn numeric_kind(class: NumericClass, domain: NumericDomain) -> ValueKindFact {
@@ -216,6 +338,20 @@ fn scalar(kind: ValueKindFact) -> ValueFact {
 
 fn dense(kind: ValueKindFact, dimensions: &[usize]) -> ValueFact {
     fact(kind, shape(dimensions), StorageFact::Dense)
+}
+
+fn shape_u64(dimensions: &[u64]) -> ShapeFact {
+    ShapeFact::Shaped {
+        dims: dimensions
+            .iter()
+            .copied()
+            .map(|dimension| {
+                usize::try_from(dimension)
+                    .map(DimensionFact::Known)
+                    .unwrap_or(DimensionFact::Unknown)
+            })
+            .collect(),
+    }
 }
 
 fn sparse(kind: ValueKindFact, dimensions: &[usize]) -> ValueFact {
@@ -239,7 +375,7 @@ fn fact(kind: ValueKindFact, shape: ShapeFact, storage: StorageFact) -> ValueFac
 }
 
 fn object(
-    class_name: &str,
+    class_name: runmat_types::ClassIdentity,
     properties: BTreeMap<String, ValueFact>,
     properties_complete: bool,
     handle_semantics: bool,
@@ -248,7 +384,7 @@ fn object(
     let mut fact = fact(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(qualified_name(class_name)),
+            runtime_class: Some(class_name),
             properties,
             properties_complete,
             handle_semantics: Some(handle_semantics),
@@ -268,8 +404,13 @@ fn callable(identity: CallableIdentity) -> ValueFact {
 }
 
 fn callable_kind(identity: CallableIdentity) -> CallableFact {
+    let capabilities = match &identity {
+        CallableIdentity::Builtin(name) => runmat_builtins::builtin_required_capabilities(&name.0),
+        _ => Default::default(),
+    };
     CallableFact {
         identity: Some(identity),
+        capabilities,
         parameters: Vec::new(),
         parameters_complete: false,
         outputs: Vec::new(),
@@ -354,11 +495,9 @@ fn gpu_kind(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<ValueKind
         .or_else(|| match runmat_accelerate_api::handle_precision(handle) {
             Some(ProviderPrecision::F32) => Some(NumericClass::Single),
             Some(ProviderPrecision::F64) => Some(NumericClass::Double),
-            None => match runmat_accelerate_api::handle_class_name(handle).as_deref() {
-                Some("single") => Some(NumericClass::Single),
-                Some("double") => Some(NumericClass::Double),
-                _ => None,
-            },
+            None => runmat_accelerate_api::handle_class_identity(handle)
+                .as_ref()
+                .and_then(NumericClass::from_class_identity),
         })?;
     let domain = match runmat_accelerate_api::handle_storage(handle) {
         GpuTensorStorage::Real => NumericDomain::Real,
@@ -370,10 +509,65 @@ fn gpu_kind(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<ValueKind
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::{
-        clear_handle_metadata, GpuTensorHandle, GpuTensorStorage, NumericElementType,
+    use runmat_accelerate_api::test_support::TestAllocationOwner;
+    use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
+    use runmat_value::{
+        CellArray, ComplexTensor, ForeignRef, ForeignResourceKey, SparseTensor, Tensor,
     };
-    use runmat_value::{CellArray, ForeignRef, Tensor};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn numeric_facts_preserve_storage_class_shape_and_domain() {
+        for dimensions in [Vec::new(), vec![2]] {
+            let len = dimensions.iter().product::<usize>();
+            let real = Value::Tensor(Tensor::from_f32(vec![1.0; len], dimensions.clone()).unwrap());
+            let complex = Value::ComplexTensor(
+                ComplexTensor::new(vec![(1.0, 2.0); len], dimensions.clone()).unwrap(),
+            );
+            for (value, class, domain) in [
+                (real, NumericClass::Single, NumericDomain::Real),
+                (complex, NumericClass::Double, NumericDomain::Complex),
+            ] {
+                let fact = value_fact(&value);
+                assert_eq!(fact.shape, shape(&dimensions));
+                assert_eq!(
+                    fact.kind,
+                    ValueKindFact::Numeric(NumericFact { class, domain })
+                );
+                assert_eq!(fact.storage, StorageFact::Dense);
+            }
+        }
+        for (rows, columns) in [(0, 2), (2, 3)] {
+            for (value, class, domain) in [
+                (
+                    SparseTensor::zeros(rows, columns),
+                    NumericClass::Double,
+                    NumericDomain::Real,
+                ),
+                (
+                    SparseTensor::zeros_f32(rows, columns),
+                    NumericClass::Single,
+                    NumericDomain::Real,
+                ),
+                (
+                    SparseTensor::zeros_complex(rows, columns),
+                    NumericClass::Double,
+                    NumericDomain::Complex,
+                ),
+                (
+                    SparseTensor::zeros_complex_f32(rows, columns),
+                    NumericClass::Single,
+                    NumericDomain::Complex,
+                ),
+            ] {
+                let fact = value_fact(&Value::SparseTensor(value));
+                assert_eq!(fact.kind, numeric_kind(class, domain));
+                assert_eq!(fact.shape, shape(&[rows, columns]));
+                assert_eq!(fact.storage, StorageFact::Sparse);
+                assert_eq!(fact.residency, ResidencyFact::Host);
+            }
+        }
+    }
 
     #[test]
     fn preserves_recursive_numeric_class_and_shape() {
@@ -405,10 +599,14 @@ mod tests {
 
     #[test]
     fn preserves_device_integer_class_domain_shape_and_residency() {
-        let handle = GpuTensorHandle::new(vec![2, 3], 71, 9).with_numeric_descriptor(
-            NumericElementType::U64,
-            GpuTensorStorage::ComplexInterleaved,
-        );
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 3],
+                NumericElementType::U64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        let handle = allocation.handle;
         let fact = value_fact(&Value::GpuTensor(handle.clone()));
         assert_eq!(
             fact.kind,
@@ -421,40 +619,54 @@ mod tests {
         assert_eq!(
             fact.residency,
             ResidencyFact::Device {
-                provider: Some("device:71".into())
+                provider: Some(format!("device:{}", handle.device_id()))
             }
         );
         assert_eq!(fact.certainty, CertaintyFact::Proven);
-        clear_handle_metadata(&handle);
+        drop(handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
-    fn unknown_device_element_type_is_an_explicit_dynamic_boundary() {
-        let handle = GpuTensorHandle::new(vec![1, 4], 73, 11);
-        clear_handle_metadata(&handle);
-        let fact = value_fact(&Value::GpuTensor(handle));
-        assert_eq!(fact.kind, ValueKindFact::Unknown);
+    fn device_class_remains_authoritative_when_another_view_is_released() {
+        // Owning handles cannot represent missing physical type metadata.
+        // Releasing one view must not erase the surviving view's type facts.
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(vec![1, 4], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let alias = allocation.handle.clone();
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
+        let fact = value_fact(&Value::GpuTensor(alias));
         assert_eq!(
-            fact.certainty,
-            CertaintyFact::Dynamic(DynamicReason::UnsupportedRepresentation)
+            fact.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Real,
+            })
         );
+        assert_eq!(fact.shape, shape(&[1, 4]));
+        assert_eq!(fact.certainty, CertaintyFact::Proven);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
     fn foreign_reference_preserves_static_type_and_lifecycle_without_live_identity() {
-        let value = Value::Foreign(ForeignRef {
-            host_identity: "worker-7".into(),
-            handle: 91,
-            generation: 4,
-            type_identity: runmat_types::ForeignTypeIdentity {
+        let value = Value::Foreign(ForeignRef::detached(
+            ForeignResourceKey {
+                host_identity: "worker-7".into(),
+                handle: 91,
+                generation: 4,
+            },
+            runmat_types::ForeignTypeIdentity {
                 family: "java".into(),
                 name: "java.lang.StringBuilder".into(),
                 version: 2,
             },
-            ownership: ForeignOwnership::Shared,
-            affinity: ForeignAffinity::OriginProcess,
-            lifetime: ForeignLifetime::Session,
-        });
+            ForeignOwnership::Shared,
+            ForeignAffinity::OriginProcess,
+            ForeignLifetime::Session,
+        ));
 
         let fact = value_fact(&value);
         assert_eq!(

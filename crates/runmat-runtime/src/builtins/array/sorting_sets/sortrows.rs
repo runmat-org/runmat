@@ -1,6 +1,15 @@
 //! MATLAB-compatible `sortrows` builtin with GPU-aware semantics.
 
 #[cfg(test)]
+use super::type_resolvers::tensor_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    SORTROWS_DESCRIPTOR, SORTROWS_ERROR_COMPARISON_METHOD_UNKNOWN, SORTROWS_ERROR_INTERNAL,
+    SORTROWS_ERROR_INVALID_ARGUMENT, SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+    SORTROWS_ERROR_MATRIX_REQUIRED, SORTROWS_ERROR_MISSING_PLACEMENT_UNKNOWN,
+    SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE, SORTROWS_INTEGER_CAPABILITIES,
+};
+#[cfg(test)]
 use runmat_value::IntegerComplexStorage;
 use std::cmp::Ordering;
 
@@ -8,21 +17,17 @@ use runmat_accelerate_api::{
     GpuTensorHandle, SortComparison as ProviderSortComparison, SortOrder as ProviderSortOrder,
     SortResult as ProviderSortResult, SortRowsColumnSpec as ProviderSortRowsColumnSpec,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericScalar,
     NumericStorage, Tensor, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -62,317 +67,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "sortrows";
 
-const SORTROWS_OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sorted input rows.",
-}];
-
-const SORTROWS_OUTPUT_BI: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sorted input rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Permutation indices mapping sorted rows to original rows.",
-    },
-];
-
-const SORTROWS_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix to sort by rows.",
-}];
-
-const SORTROWS_INPUTS_A_COLUMNS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to sort by rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "column",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column specification vector (negative entries request descending order).",
-    },
-];
-
-const SORTROWS_INPUTS_A_DIRECTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to sort by rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ascend\""),
-        description: "Global row direction override: 'ascend' or 'descend'.",
-    },
-];
-
-const SORTROWS_INPUTS_A_COLUMNS_DIRECTION: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to sort by rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "column",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column specification vector (negative entries request descending order).",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ascend\""),
-        description: "Global row direction override: 'ascend' or 'descend'.",
-    },
-];
-
-const SORTROWS_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to sort by rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional column and direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ComparisonMethod\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Comparison method: 'auto', 'real', or 'abs'.",
-    },
-];
-
-const SORTROWS_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to sort by rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional column and direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"MissingPlacement\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "placement",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "NaN placement policy: 'auto', 'first', or 'last'.",
-    },
-];
-
-const SORTROWS_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
-    BuiltinSignatureDescriptor {
-        label: "B = sortrows(A)",
-        inputs: &SORTROWS_INPUTS_A,
-        outputs: &SORTROWS_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sortrows(A, column)",
-        inputs: &SORTROWS_INPUTS_A_COLUMNS,
-        outputs: &SORTROWS_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sortrows(A, direction)",
-        inputs: &SORTROWS_INPUTS_A_DIRECTION,
-        outputs: &SORTROWS_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sortrows(A, column, direction)",
-        inputs: &SORTROWS_INPUTS_A_COLUMNS_DIRECTION,
-        outputs: &SORTROWS_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sortrows(A, ..., \"ComparisonMethod\", method)",
-        inputs: &SORTROWS_INPUTS_COMPARISON_METHOD,
-        outputs: &SORTROWS_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = sortrows(A, ..., \"MissingPlacement\", placement)",
-        inputs: &SORTROWS_INPUTS_MISSING_PLACEMENT,
-        outputs: &SORTROWS_OUTPUT_B,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sortrows(A)",
-        inputs: &SORTROWS_INPUTS_A,
-        outputs: &SORTROWS_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sortrows(A, column)",
-        inputs: &SORTROWS_INPUTS_A_COLUMNS,
-        outputs: &SORTROWS_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sortrows(A, direction)",
-        inputs: &SORTROWS_INPUTS_A_DIRECTION,
-        outputs: &SORTROWS_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sortrows(A, column, direction)",
-        inputs: &SORTROWS_INPUTS_A_COLUMNS_DIRECTION,
-        outputs: &SORTROWS_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sortrows(A, ..., \"ComparisonMethod\", method)",
-        inputs: &SORTROWS_INPUTS_COMPARISON_METHOD,
-        outputs: &SORTROWS_OUTPUT_BI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[B, I] = sortrows(A, ..., \"MissingPlacement\", placement)",
-        inputs: &SORTROWS_INPUTS_MISSING_PLACEMENT,
-        outputs: &SORTROWS_OUTPUT_BI,
-    },
-];
-
-const SORTROWS_ERROR_INVALID_COLUMN_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORTROWS.INVALID_COLUMN_INDEX",
-    identifier: Some("RunMat:sortrows:InvalidColumnIndex"),
-    when: "Column specification indices are out of range, zero, or otherwise invalid.",
-    message: "sortrows: invalid column index",
-};
-
-const SORTROWS_ERROR_MISSING_PLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORTROWS.MISSING_PLACEMENT_UNKNOWN",
-    identifier: Some("RunMat:sortrows:MissingPlacementUnknown"),
-    when: "MissingPlacement option value is unsupported.",
-    message: "sortrows: unsupported MissingPlacement value",
-};
-
-const SORTROWS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORTROWS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:sortrows:InvalidArgument"),
-    when: "Option parsing receives invalid argument kinds or malformed name-value pairs.",
-    message: "sortrows: invalid argument",
-};
-
-const SORTROWS_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORTROWS.COMPARISON_METHOD_UNKNOWN",
-    identifier: Some("RunMat:sortrows:ComparisonMethodUnknown"),
-    when: "ComparisonMethod option value is unsupported.",
-    message: "sortrows: unsupported ComparisonMethod value",
-};
-
-const SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORTROWS.UNSUPPORTED_INPUT_TYPE",
-    identifier: Some("RunMat:sortrows:UnsupportedInputType"),
-    when: "Input cannot be converted to numeric, logical, complex, or char matrix domain.",
-    message: "sortrows: unsupported input type",
-};
-
-const SORTROWS_ERROR_MATRIX_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORTROWS.MATRIX_REQUIRED",
-    identifier: Some("RunMat:sortrows:MatrixRequired"),
-    when: "Input has rank greater than 2 where matrix input is required.",
-    message: "sortrows: input must be a 2-D matrix",
-};
-
-const SORTROWS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SORTROWS.INTERNAL",
-    identifier: Some("RunMat:sortrows:Internal"),
-    when: "Internal conversion/allocation/provider decode fails.",
-    message: "sortrows: internal operation failed",
-};
-
-const SORTROWS_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    SORTROWS_ERROR_INVALID_COLUMN_INDEX,
-    SORTROWS_ERROR_MISSING_PLACEMENT_UNKNOWN,
-    SORTROWS_ERROR_INVALID_ARGUMENT,
-    SORTROWS_ERROR_COMPARISON_METHOD_UNKNOWN,
-    SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE,
-    SORTROWS_ERROR_MATRIX_REQUIRED,
-    SORTROWS_ERROR_INTERNAL,
-];
-
-const SORTROWS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented sortable matrix domain includes all eight real integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "column",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented nonzero integer column scalar or vector accepts every integer class and integer-valued double.",
-    },
-];
-
-const SORTROWS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[B, I] = sortrows(integer_A, integer_columns, direction, options)",
-        inputs: &SORTROWS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "B preserves A's exact integer class and stable equal-row order; optional I is one-based double. Resident integer input uses exact typed gather fallback and restores both outputs to the owning provider.",
-    }];
-
-pub const SORTROWS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SORTROWS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SORTROWS_ERRORS,
-};
-
 fn sortrows_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -394,19 +88,10 @@ fn sortrows_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "sortrows",
-    category = "array/sorting_sets",
-    summary = "Sort matrix rows lexicographically with column and direction controls.",
-    keywords = "sortrows,row sort,lexicographic,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(tensor_output_type),
-    descriptor(crate::builtins::array::sorting_sets::sortrows::SORTROWS_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::array::sorting_sets::sortrows::SORTROWS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::sortrows"
 )]
-async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn sortrows_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
         return Err(sortrows_error_with(
             &SORTROWS_ERROR_INVALID_ARGUMENT,
@@ -414,10 +99,10 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         ));
     }
     let provider = super::output_provider(&value);
-    let eval = evaluate(value, &rest).await?;
+    let eval = evaluate_view(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let (sorted, indices) = eval.into_values();
         let outputs = if out_count == 1 {
@@ -425,7 +110,7 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         } else {
             vec![sorted, indices]
         };
-        return Ok(Value::OutputList(super::restore_set_outputs(
+        return Ok(Value::output_list(super::restore_set_outputs(
             provider,
             BUILTIN_NAME,
             outputs,
@@ -443,6 +128,13 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 
 /// Evaluate the `sortrows` builtin once and expose both outputs.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+    evaluate_view(value, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    value: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<SortRowsEvaluation> {
     match value {
         Value::GpuTensor(handle) => sortrows_gpu(handle, rest).await,
         other => sortrows_host(other, rest),
@@ -451,30 +143,26 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<Sort
 
 async fn sortrows_gpu(
     handle: GpuTensorHandle,
-    rest: &[Value],
+    rest: FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
-    ensure_matrix_shape(&handle.shape)?;
-    let (_, cols) = rows_cols_from_shape(&handle.shape);
+    ensure_matrix_shape(handle.shape())?;
+    let (_, cols) = rows_cols_from_shape(handle.shape());
     let args = SortRowsArgs::parse(rest, cols)?;
 
-    let plain_real = runmat_accelerate_api::handle_integer_type(&handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&handle)
-        && runmat_accelerate_api::handle_storage(&handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real;
+    let plain_real = super::provider_result::plain_real(&handle);
     if plain_real && args.missing_is_auto() {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
             .or_else(runmat_accelerate_api::provider)
         {
             let provider_columns = args.to_provider_columns();
             let provider_comparison = args.provider_comparison();
-            match provider
-                .sort_rows(&handle, &provider_columns, provider_comparison)
-                .await
+            if let Some(result) = super::provider_result::attempt(
+                provider.sort_rows(&handle, &provider_columns, provider_comparison),
+                sortrows_internal_error,
+            )
+            .await?
             {
-                Ok(result) => return sortrows_from_provider_result(result),
-                Err(_err) => {
-                    // fall back to host path when provider cannot service the request
-                }
+                return sortrows_from_provider_result(result, &handle);
             }
         }
     }
@@ -485,20 +173,26 @@ async fn sortrows_gpu(
 
 fn sortrows_from_provider_result(
     result: ProviderSortResult,
+    input: &GpuTensorHandle,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
-    let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
-    let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
+    let (sorted_tensor, indices_tensor) = super::provider_result::sort(
+        result,
+        input,
+        super::provider_result::SortGeometry::Rows,
+        sortrows_internal_error,
+    )?;
     Ok(SortRowsEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
         indices: indices_tensor,
     })
 }
 
-fn sortrows_host(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
+fn sortrows_host(
+    value: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<SortRowsEvaluation> {
     if matches!(&value, Value::Object(obj) if obj.is_class(crate::builtins::table::TABLE_CLASS)) {
-        let (sorted, indices) = crate::builtins::table::sortrows_table(value, rest)?;
+        let (sorted, indices) = crate::builtins::table::sortrows_table_view(value, rest)?;
         return Ok(SortRowsEvaluation::from_parts(sorted, indices));
     }
     let shape = value_shape(&value);
@@ -545,11 +239,11 @@ fn sortrows_host_with_args(
 
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
-        Value::LogicalArray(logical) => logical.shape.clone(),
-        Value::ComplexTensor(tensor) => tensor.shape.clone(),
-        Value::CharArray(array) => array.shape.clone(),
-        Value::GpuTensor(handle) => handle.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
+        Value::LogicalArray(logical) => logical.shape.to_vec(),
+        Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
+        Value::CharArray(array) => array.shape().to_vec(),
+        Value::GpuTensor(handle) => handle.shape().to_vec(),
         _ => vec![1, 1],
     }
 }
@@ -559,13 +253,13 @@ fn sortrows_logical_with_args(
     args: &SortRowsArgs,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
     let shape = logical.shape.clone();
-    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+    let tensor = Tensor::new_integer(IntegerStorage::U8(logical.data.into_vec()), shape)
         .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?;
     let evaluation = sortrows_real_tensor_with_args(tensor, args)?;
     let sorted = match evaluation.sorted {
         Value::Int(integer) => Value::Bool(integer.to_i64() != 0),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?
@@ -599,7 +293,7 @@ fn sortrows_real_tensor_with_args(
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
@@ -629,10 +323,9 @@ fn sortrows_complex_tensor_with_args(
     tensor: ComplexTensor,
     args: &SortRowsArgs,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let shape = tensor.shape.clone();
-    let storage = tensor.into_complex_storage();
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
 
     if rows <= 1 || cols == 0 || storage.is_empty() || args.columns.is_empty() {
         let indices = identity_indices(rows)?;
@@ -680,19 +373,19 @@ fn compare_complex_integer_rows(
         let a_index = a + spec.index * rows;
         let b_index = b + spec.index * rows;
         let a_real = storage
-            .real
+            .real()
             .value_at(a_index)
             .expect("validated complex row index");
         let a_imag = storage
-            .imag
+            .imag()
             .value_at(a_index)
             .expect("validated complex row index");
         let b_real = storage
-            .real
+            .real()
             .value_at(b_index)
             .expect("validated complex row index");
         let b_imag = storage
-            .imag
+            .imag()
             .value_at(b_index)
             .expect("validated complex row index");
         let ordering = integer_order::compare_complex(
@@ -715,7 +408,7 @@ fn sortrows_char_array_with_args(
     let rows = ca.rows;
     let cols = ca.cols;
 
-    if rows <= 1 || cols == 0 || ca.data.is_empty() || args.columns.is_empty() {
+    if rows <= 1 || cols == 0 || ca.data().is_empty() || args.columns.is_empty() {
         let indices = identity_indices(rows)?;
         return Ok(SortRowsEvaluation {
             sorted: Value::CharArray(ca),
@@ -872,8 +565,8 @@ fn floating_column_to_i64(value: f64) -> crate::BuiltinResult<i64> {
     })
 }
 
-fn compare_complex_rows<T: SetFloat>(
-    values: &[(T, T)],
+fn compare_complex_rows<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     rows: usize,
     cols: usize,
     args: &SortRowsArgs,
@@ -886,8 +579,8 @@ fn compare_complex_rows<T: SetFloat>(
         }
         let idx_a = a + spec.index * rows;
         let idx_b = b + spec.index * rows;
-        let va = values[idx_a];
-        let vb = values[idx_b];
+        let va = values.pair_at(idx_a);
+        let vb = values.pair_at(idx_b);
         let missing = args.missing_for_direction(spec.direction);
         let ord = compare_complex_scalars(va, vb, spec.direction, args.comparison, missing);
         if ord != Ordering::Equal {
@@ -904,8 +597,8 @@ fn compare_char_rows(ca: &CharArray, args: &SortRowsArgs, a: usize, b: usize) ->
         }
         let idx_a = a * ca.cols + spec.index;
         let idx_b = b * ca.cols + spec.index;
-        let va = ca.data[idx_a];
-        let vb = ca.data[idx_b];
+        let va = ca.data()[idx_a];
+        let vb = ca.data()[idx_b];
         let ord = match spec.direction {
             SortDirection::Ascend => va.cmp(&vb),
             SortDirection::Descend => vb.cmp(&va),
@@ -919,7 +612,7 @@ fn compare_char_rows(ca: &CharArray, args: &SortRowsArgs, a: usize, b: usize) ->
 
 fn reorder_complex_rows(
     storage: ComplexStorage,
-    shape: Vec<usize>,
+    shape: runmat_value::SharedShape,
     rows: usize,
     cols: usize,
     order: &[usize],
@@ -941,15 +634,16 @@ fn reorder_char_rows(
     cols: usize,
     order: &[usize],
 ) -> crate::BuiltinResult<CharArray> {
-    let mut data = vec!['\0'; ca.data.len()];
+    let mut data = vec![runmat_value::Utf16CodeUnit::from_raw(0); ca.data().len()];
     for (dest_row, &src_row) in order.iter().enumerate() {
         for col in 0..cols {
             let src_idx = src_row * cols + col;
             let dst_idx = dest_row * cols + col;
-            data[dst_idx] = ca.data[src_idx];
+            data[dst_idx] = ca.data()[src_idx];
         }
     }
-    CharArray::new(data, rows, cols).map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
+    CharArray::from_code_units(data, rows, cols)
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
 }
 
 fn compare_real_scalars<T: SetFloat>(
@@ -1178,7 +872,7 @@ struct SortRowsArgs {
 }
 
 impl SortRowsArgs {
-    fn parse(rest: &[Value], num_cols: usize) -> crate::BuiltinResult<Self> {
+    fn parse(rest: FunctionArgumentView<'_>, num_cols: usize) -> crate::BuiltinResult<Self> {
         let mut columns: Option<Vec<ColumnSpec>> = None;
         let mut override_directions: Option<Vec<SortDirection>> = None;
         let mut comparison = ComparisonMethod::Auto;
@@ -1359,7 +1053,7 @@ fn parse_column_vector(
             parse_single_column(column, num_cols).map(Some)
         }
         Value::Tensor(tensor) => {
-            if !is_vector(&tensor.shape) {
+            if !is_vector(tensor.shape()) {
                 return Err(sortrows_error_with(
                     &SORTROWS_ERROR_INVALID_ARGUMENT,
                     "sortrows: column specification must be a vector",
@@ -1440,22 +1134,36 @@ fn parse_single_column_i64(value: i64, num_cols: usize) -> crate::BuiltinResult<
 }
 
 fn parse_directions(value: &Value) -> crate::BuiltinResult<Option<Vec<SortDirection>>> {
+    use std::borrow::Cow;
     let strings = match value {
-        Value::StringArray(array) => Some(array.data.clone()),
+        Value::StringArray(array) => Some(
+            array
+                .data()
+                .iter()
+                .map(|text| {
+                    text.as_str().map(Cow::Borrowed).ok_or_else(|| {
+                        sortrows_error_with(
+                            &SORTROWS_ERROR_INVALID_ARGUMENT,
+                            "sortrows: directions must be strings",
+                        )
+                    })
+                })
+                .collect::<crate::BuiltinResult<Vec<_>>>()?,
+        ),
         Value::Cell(cell) => {
-            let mut strings = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut strings = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 let Some(direction) = tensor::value_to_string(value) else {
                     return Err(sortrows_error_with(
                         &SORTROWS_ERROR_INVALID_ARGUMENT,
                         "sortrows: direction cell arrays must contain character vectors or strings",
                     ));
                 };
-                strings.push(direction);
+                strings.push(Cow::Owned(direction));
             }
             Some(strings)
         }
-        _ => tensor::value_to_string(value).map(|value| vec![value]),
+        _ => tensor::value_to_string(value).map(|value| vec![Cow::Owned(value)]),
     };
     let Some(strings) = strings else {
         return Ok(None);
@@ -1556,7 +1264,10 @@ pub(crate) mod tests {
     }
 
     fn builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(sortrows_builtin(value, rest))
+        futures::executor::block_on(sortrows_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn assert_double_values(tensor: &Tensor, expected: &[f64]) {
@@ -1574,7 +1285,7 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_double_values(&t, &[1.0, 2.0, 3.0, 1.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1786,7 +1497,8 @@ pub(crate) mod tests {
             .expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &integer).expect("typed upload");
             {
-                let _guard = crate::output_count::push_output_count(Some(2));
+                let _guard =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 let Value::OutputList(outputs) =
                     builtin(Value::GpuTensor(handle), Vec::new()).expect("resident sortrows")
                 else {
@@ -1809,19 +1521,35 @@ pub(crate) mod tests {
                 );
             }
 
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1, 0, 1, 0],
+                    shape: &[3, 2],
+                })
+                .expect("logical producer upload");
+            let input_lease = handle.allocation_lease().downgrade();
             let logical =
-                Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![3, 2]).expect("logical input");
-            let handle = gpu_helpers::upload_tensor(provider, &logical).expect("logical upload");
-            let logical = gpu_helpers::logical_gpu_value(handle);
+                gpu_helpers::logical_gpu_value(handle.clone()).expect("adopt logical producer");
             let Value::GpuTensor(output) =
                 builtin(logical, Vec::new()).expect("resident logical sortrows")
             else {
                 panic!("expected resident logical output");
             };
             assert!(runmat_accelerate_api::handle_is_logical(&output));
+            let output_lease = output.allocation_lease().downgrade();
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("logical payload");
+            assert_eq!(gathered.shape(), &[3, 2]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![0.0, 1.0, 1.0, 1.0, 0.0, 0.0]
+            );
+            assert!(input_lease.acquire().is_some());
+            drop(handle);
+            assert!(input_lease.acquire().is_none());
+            assert!(output_lease.acquire().is_none());
         });
 
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = builtin(Value::Num(1.0), Vec::new()).expect_err("excess outputs must reject");
         assert_eq!(err.identifier(), SORTROWS_ERROR_INVALID_ARGUMENT.identifier);
     }
@@ -1969,7 +1697,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sortrows_char_array() {
-        let chars = CharArray::new(
+        let chars = CharArray::from_unicode_scalars(
             "bob "
                 .chars()
                 .chain("al  ".chars())
@@ -1987,9 +1715,10 @@ pub(crate) mod tests {
                 assert_eq!(ca.cols, 4);
                 let strings: Vec<String> = (0..ca.rows)
                     .map(|r| {
-                        ca.data[r * ca.cols..(r + 1) * ca.cols]
-                            .iter()
-                            .collect::<String>()
+                        runmat_value::decode_utf16_code_units(
+                            &ca.data()[r * ca.cols..(r + 1) * ca.cols],
+                        )
+                        .expect("valid UTF-16 row")
                     })
                     .collect();
                 assert_eq!(
@@ -2040,17 +1769,19 @@ pub(crate) mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(
-            sorted.as_f32_slice(),
-            Some(
-                &[
-                    (1.0, 0.0),
-                    (0.0, 2.0),
-                    (3.0, 4.0),
-                    (10.0, 1.0),
-                    (20.0, 1.0),
-                    (30.0, 1.0),
-                ][..]
-            )
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.0, 0.0),
+                (0.0, 2.0),
+                (3.0, 4.0),
+                (10.0, 1.0),
+                (20.0, 1.0),
+                (30.0, 1.0),
+            ])
         );
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
@@ -2067,7 +1798,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(sorted) = sorted else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(sorted.as_f32_slice(), Some(&[(1.25, -2.5)][..]));
+        assert_eq!(
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5)])
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2161,7 +1899,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0, 4.0, 1.0, 5.0], vec![3, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: tensor.as_f64_slice().expect("double upload tensor"),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
@@ -2199,7 +1937,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: tensor.as_f64_slice().expect("double upload tensor"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
@@ -2214,11 +1952,17 @@ pub(crate) mod tests {
             other => panic!("expected tensor indices, got {other:?}"),
         };
 
-        assert_eq!(gpu_sorted.shape, cpu_sorted.shape);
-        assert_eq!(gpu_sorted.as_f64_slice(), cpu_sorted.as_f64_slice());
-        assert_eq!(gpu_indices.shape, cpu_indices.shape);
+        assert_eq!(gpu_sorted.shape(), cpu_sorted.shape());
+        let expected_dtype = match runmat_accelerate_api::handle_precision(&handle) {
+            Some(runmat_accelerate_api::ProviderPrecision::F32) => runmat_value::NumericDType::F32,
+            Some(runmat_accelerate_api::ProviderPrecision::F64) => runmat_value::NumericDType::F64,
+            None => panic!("real uploaded sort fixture must have a floating class"),
+        };
+        assert_eq!(gpu_sorted.numeric_dtype(), expected_dtype);
+        assert_eq!(gpu_sorted.materialize_f64(), cpu_sorted.materialize_f64());
+        assert_eq!(gpu_indices.shape(), cpu_indices.shape());
         assert_eq!(gpu_indices.as_f64_slice(), cpu_indices.as_f64_slice());
 
-        let _ = provider.free(&handle);
+        drop(handle);
     }
 }

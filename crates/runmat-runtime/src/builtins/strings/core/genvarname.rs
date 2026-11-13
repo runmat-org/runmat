@@ -1,119 +1,38 @@
 //! MATLAB-compatible legacy `genvarname` builtin.
 
+use runmat_builtins::{
+    BuiltinErrorDescriptor, GENVARNAME_DESCRIPTOR, GENVARNAME_ERROR_INTERNAL as ERROR_INTERNAL,
+    GENVARNAME_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
+    GENVARNAME_ERROR_INVALID_OPTION as ERROR_INVALID_OPTION, GENVARNAME_ERROR_TOO_MANY_OUTPUTS,
+};
+
 use std::collections::HashSet;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
+use runmat_value::{
+    decode_utf16_code_units, CellArray, CharArray, StringArray, Utf16CodeUnit, Value,
 };
-use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::identifiers::{
     is_matlab_keyword, is_valid_varname, MATLAB_NAME_LENGTH_MAX,
 };
-use crate::builtins::common::map_control_flow_with_builtin;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "genvarname";
 
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varname",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Valid variable name text with the same container form as the input.",
-}];
-
-const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text, string array, character array, or cell array of text scalars.",
-}];
-
-const INPUTS_EXCLUSIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text, string array, character array, or cell array of text scalars.",
-    },
-    BuiltinParamDescriptor {
-        name: "exclusions",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Names that generated output must not match.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "varname = genvarname(str)",
-        inputs: &INPUTS_ONE,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "varname = genvarname(str, exclusions)",
-        inputs: &INPUTS_EXCLUSIONS,
-        outputs: &OUTPUT,
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GENVARNAME.INVALID_INPUT",
-    identifier: Some("RunMat:genvarname:InvalidInput"),
-    when: "Input is not text-compatible or cell elements are not text scalars.",
-    message: "genvarname: input must be text or a cell array of text",
-};
-
-const ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GENVARNAME.INVALID_OPTION",
-    identifier: Some("RunMat:genvarname:InvalidOption"),
-    when: "More than one exclusions argument is supplied.",
-    message: "genvarname: expected str or str,exclusions",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GENVARNAME.INTERNAL",
-    identifier: Some("RunMat:genvarname:Internal"),
-    when: "Internal string, cell, or character array construction failed.",
-    message: "genvarname: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_INVALID_INPUT, ERROR_INVALID_OPTION, ERROR_INTERNAL];
-
-pub const GENVARNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const GENVARNAME_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "genvarname accepts host text names and exclusions only. All eight integer classes and provider-resident numeric values reject without implicit text conversion, gather, or provider access.",
-    };
-
-#[runtime_builtin(
+#[runmat_macros::runtime_builtin(
     name = "genvarname",
-    category = "strings/core",
-    summary = "Construct valid, unique MATLAB variable names from text.",
-    keywords = "genvarname,variable name,identifier,legacy,makeValidName,makeUniqueStrings",
-    accel = "gather",
-    type_resolver(genvarname_type),
-    descriptor(crate::builtins::strings::core::genvarname::GENVARNAME_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::genvarname::GENVARNAME_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::genvarname"
 )]
-async fn genvarname_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn genvarname_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GENVARNAME_DESCRIPTOR,
+        &GENVARNAME_ERROR_TOO_MANY_OUTPUTS,
+        "genvarname",
+    )?;
     if rest.len() > 1 {
         return Err(error(
             &ERROR_INVALID_OPTION,
@@ -126,18 +45,12 @@ async fn genvarname_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
         reject_numeric_text_input(value, "exclusions")?;
     }
 
-    let input = gather_if_needed_async(&value)
-        .await
-        .map_err(remap_genvarname_flow)?;
     let exclusions = if let Some(value) = rest.first() {
-        let host = gather_if_needed_async(value)
-            .await
-            .map_err(remap_genvarname_flow)?;
-        text_list(&host, TextListContext::Exclusions)?
+        text_list(value, TextListContext::Exclusions)?
     } else {
         Vec::new()
     };
-    genvarname_value(input, exclusions)
+    genvarname_value(value, exclusions)
 }
 
 fn reject_numeric_text_input(value: &Value, role: &str) -> BuiltinResult<()> {
@@ -169,9 +82,15 @@ fn numeric_or_resident(value: &Value) -> bool {
 fn contains_numeric_or_resident(value: &Value) -> bool {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::StructArray(array) => array
+            .any_value(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
         _ => false,
     }
 }
@@ -179,19 +98,19 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
 fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Value> {
     let mut used = exclusions.into_iter().collect::<HashSet<_>>();
     match value {
-        Value::String(text) => Ok(Value::String(unique_name(&text, &mut used))),
+        Value::String(text) => Ok(Value::string(unique_name(required_name_text(&text)?, &mut used))),
         Value::StringArray(array) => {
-            let StringArray { data, shape, .. } = array;
+let (data, shape, _, _) = array.into_parts();
             let out = data
                 .iter()
-                .map(|text| unique_name(text, &mut used))
-                .collect::<Vec<_>>();
-            StringArray::new(out, shape)
+                .map(|text| required_name_text(text).map(|text| unique_name(text, &mut used)))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            StringArray::new(out, shape.to_vec())
                 .map(Value::StringArray)
                 .map_err(|err| error(&ERROR_INTERNAL, format!("genvarname: {err}")))
         }
-        Value::CharArray(chars) if chars.rows <= 1 => {
-            let text = chars.data.iter().collect::<String>();
+        Value::CharArray(chars) if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) => {
+            let text = decode_chars(chars.data())?;
             Ok(Value::CharArray(CharArray::new_row(&unique_name(
                 &text, &mut used,
             ))))
@@ -201,7 +120,8 @@ fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Valu
             "genvarname: character array input must be a character vector; use a cell array for multiple names",
         )),
         Value::Cell(cell) => {
-            let CellArray { data, shape, .. } = cell;
+            let shape = cell.shape().to_vec();
+            let data = cell.into_column_major().map_err(|err| error(&ERROR_INTERNAL, err))?;
             let mut out = Vec::with_capacity(data.len());
             for value in &data {
                 let text = text_scalar(value, TextListContext::Input)?;
@@ -209,7 +129,7 @@ fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Valu
                     &text, &mut used,
                 ))));
             }
-            CellArray::new_with_shape(out, shape)
+            CellArray::from_column_major(out, shape)
                 .map(Value::Cell)
                 .map_err(|err| error(&ERROR_INTERNAL, format!("genvarname: {err}")))
         }
@@ -228,17 +148,23 @@ enum TextListContext {
 
 fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
-        Value::CharArray(chars) if chars.rows <= 1 => {
-            Ok(vec![chars.data.iter().collect::<String>()])
+        Value::String(text) => Ok(vec![required_name_text(text)?.to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| required_name_text(text).map(str::to_owned))
+            .collect::<BuiltinResult<Vec<_>>>()?),
+        Value::CharArray(chars)
+            if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
+        {
+            Ok(vec![decode_chars(chars.data())?])
         }
         Value::CharArray(_) => Err(error(
             &ERROR_INVALID_INPUT,
             "genvarname: multiple names must be supplied as a string array or cell array",
         )),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| text_scalar(value, context))
             .collect(),
@@ -251,9 +177,15 @@ fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<Strin
 
 fn text_scalar(value: &Value, context: TextListContext) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
+        Value::String(text) => Ok(required_name_text(text)?.to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(required_name_text(&array.data()[0])?.to_owned())
+        }
+        Value::CharArray(chars)
+            if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
+        {
+            decode_chars(chars.data())
+        }
         _ => {
             let message = match context {
                 TextListContext::Input => {
@@ -363,14 +295,6 @@ fn keyword_to_variable_name(keyword: &str) -> String {
     truncate_chars(&out, MATLAB_NAME_LENGTH_MAX)
 }
 
-fn genvarname_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::String) => Type::String,
-        Some(Type::Unknown) | None => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 fn error(descriptor: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = descriptor.identifier {
@@ -379,17 +303,80 @@ fn error(descriptor: &'static BuiltinErrorDescriptor, message: impl Into<String>
     builder.build()
 }
 
-fn remap_genvarname_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, BUILTIN_NAME)
+fn decode_chars(units: &[Utf16CodeUnit]) -> BuiltinResult<String> {
+    decode_utf16_code_units(units).map_err(|source| {
+        let mut builder = build_runtime_error("genvarname: malformed UTF-16 character input")
+            .with_builtin(BUILTIN_NAME)
+            .with_source(source);
+        if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })
+}
+
+fn required_name_text(text: &runmat_value::StringElement) -> BuiltinResult<&str> {
+    text.as_str().ok_or_else(|| {
+        error(
+            &ERROR_INVALID_INPUT,
+            "genvarname: names must not be missing",
+        )
+    })
+}
+
+#[cfg(test)]
+pub(crate) async fn genvarname_builtin_source(
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    genvarname_builtin(
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{BuiltinIntegerAuditKind, GENVARNAME_INTEGER_AUDIT};
+
+    #[test]
+    fn duplicate_suffixes_follow_column_major_order_in_nd_cells() {
+        let cell = CellArray::from_column_major(vec![Value::from("A"); 8], vec![2, 2, 2]).unwrap();
+        let Value::Cell(result) = call(Value::Cell(cell), vec![]) else {
+            panic!("cell output")
+        };
+        assert_eq!(result.shape, vec![2, 2, 2]);
+        let values = result.into_column_major().unwrap();
+        for (index, value) in values.iter().enumerate() {
+            let expected = if index == 0 {
+                "A".to_string()
+            } else {
+                format!("A{index}")
+            };
+            assert_eq!(*value, Value::CharArray(CharArray::new_row(&expected)));
+        }
+    }
+
+    #[test]
+    fn nd_character_input_and_excess_outputs_reject() {
+        let chars =
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+        let error =
+            block_on(genvarname_builtin_source(Value::CharArray(chars), vec![])).unwrap_err();
+        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = block_on(genvarname_builtin_source(Value::from("A"), vec![])).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            GENVARNAME_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
+    }
 
     fn call(value: Value, rest: Vec<Value>) -> Value {
-        block_on(genvarname_builtin(value, rest)).expect("genvarname")
+        block_on(genvarname_builtin_source(value, rest)).expect("genvarname")
     }
 
     #[test]
@@ -410,7 +397,7 @@ mod tests {
             panic!("expected string array")
         };
         assert_eq!(array.shape, vec![1, 3]);
-        assert_eq!(array.data, vec!["A", "A1", "A2"]);
+        assert_eq!(array.data(), vec!["A", "A1", "A2"]);
     }
 
     #[test]
@@ -418,17 +405,17 @@ mod tests {
         let exclusions = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("A")),
-                Value::String("A1".to_string()),
+                Value::String("A1".to_string().into()),
             ],
             1,
             2,
         )
         .unwrap();
         let out = call(
-            Value::String("A".to_string()),
+            Value::String("A".to_string().into()),
             vec![Value::Cell(exclusions)],
         );
-        assert_eq!(out, Value::String("A2".to_string()));
+        assert_eq!(out, Value::String("A2".to_string().into()));
     }
 
     #[test]
@@ -447,18 +434,26 @@ mod tests {
             panic!("expected cell array")
         };
         assert_eq!(cell.shape, vec![2, 1]);
-        assert_eq!(cell.data[0], Value::CharArray(CharArray::new_row("xFor")));
+        assert_eq!(cell.data()[0], Value::CharArray(CharArray::new_row("xFor")));
         assert_eq!(
-            cell.data[1],
+            cell.data()[1],
             Value::CharArray(CharArray::new_row("hasSpace"))
         );
     }
 
     #[test]
     fn multirow_char_array_is_not_a_multiple_name_container() {
-        let input =
-            CharArray::new(vec!['a', ' ', ' ', 'a', ' ', ' ', '1', ' ', ' '], 3, 3).unwrap();
-        assert!(block_on(genvarname_builtin(Value::CharArray(input), Vec::new())).is_err());
+        let input = CharArray::from_unicode_scalars(
+            vec!['a', ' ', ' ', 'a', ' ', ' ', '1', ' ', ' '],
+            3,
+            3,
+        )
+        .unwrap();
+        assert!(block_on(genvarname_builtin_source(
+            Value::CharArray(input),
+            Vec::new()
+        ))
+        .is_err());
     }
 
     #[test]
@@ -469,15 +464,32 @@ mod tests {
         let Value::StringArray(array) = out else {
             panic!("expected string array")
         };
-        assert_eq!(array.data[0].chars().count(), MATLAB_NAME_LENGTH_MAX);
-        assert_eq!(array.data[1].chars().count(), MATLAB_NAME_LENGTH_MAX);
-        assert_ne!(array.data[0], array.data[1]);
-        assert!(array.data[1].ends_with('1'));
+        assert_eq!(
+            array.data()[0]
+                .as_str()
+                .expect("nonmissing generated name")
+                .chars()
+                .count(),
+            MATLAB_NAME_LENGTH_MAX
+        );
+        assert_eq!(
+            array.data()[1]
+                .as_str()
+                .expect("nonmissing generated name")
+                .chars()
+                .count(),
+            MATLAB_NAME_LENGTH_MAX
+        );
+        assert_ne!(array.data()[0], array.data()[1]);
+        assert!(array.data()[1]
+            .as_str()
+            .expect("nonmissing generated name")
+            .ends_with('1'));
     }
 
     #[test]
     fn rejects_non_text_input_and_non_scalar_cell_elements() {
-        assert!(block_on(genvarname_builtin(Value::Num(1.0), Vec::new())).is_err());
+        assert!(block_on(genvarname_builtin_source(Value::Num(1.0), Vec::new())).is_err());
         let bad = CellArray::new(
             vec![Value::StringArray(
                 StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap(),
@@ -486,7 +498,7 @@ mod tests {
             1,
         )
         .unwrap();
-        assert!(block_on(genvarname_builtin(Value::Cell(bad), Vec::new())).is_err());
+        assert!(block_on(genvarname_builtin_source(Value::Cell(bad), Vec::new())).is_err());
     }
 
     #[test]
@@ -505,10 +517,10 @@ mod tests {
             Value::Int(runmat_value::IntValue::U32(1)),
             Value::Int(runmat_value::IntValue::U64(1)),
         ] {
-            let error = block_on(genvarname_builtin(value.clone(), Vec::new()))
+            let error = block_on(genvarname_builtin_source(value.clone(), Vec::new()))
                 .expect_err("integer name input");
             assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
-            let error = block_on(genvarname_builtin(
+            let error = block_on(genvarname_builtin_source(
                 Value::String("name".into()),
                 vec![value],
             ))
@@ -517,17 +529,21 @@ mod tests {
         }
 
         let resident = || {
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX,
-                descriptor: Default::default(),
-            })
+            Value::GpuTensor(
+                runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                    .allocate_zeroed(
+                        vec![1, 1],
+                        runmat_accelerate_api::NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .expect("admit unregistered resident fixture")
+                    .handle,
+            )
         };
-        let error =
-            block_on(genvarname_builtin(resident(), Vec::new())).expect_err("resident name input");
+        let error = block_on(genvarname_builtin_source(resident(), Vec::new()))
+            .expect_err("resident name input");
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
-        let error = block_on(genvarname_builtin(
+        let error = block_on(genvarname_builtin_source(
             Value::String("name".into()),
             vec![resident()],
         ))

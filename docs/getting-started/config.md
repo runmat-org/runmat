@@ -1,6 +1,6 @@
 # Configuration Reference
 
-RunMat utilizes a hierarchical configuration system that manages project-level metadata, source organization, and runtime execution parameters. The configuration is primarily driven by a manifest file (`runmat.toml` or `runmat.json`) and can be overridden by environment variables and CLI arguments.
+RunMat reads project metadata and runtime settings from `runmat.toml` or `runmat.json`. User settings supply defaults for fields a project leaves unset; environment variables and CLI arguments can override them.
 
 For a user-facing guide to project layout, source roots, dependencies, and named entrypoints, see [Projects](/docs/runtime/getting-started/projects). This page is the reference for manifest and runtime settings.
 
@@ -8,10 +8,16 @@ For a user-facing guide to project layout, source roots, dependencies, and named
 
 RunMat resolves configuration settings using a specific precedence. Lower-numbered levels are overridden by higher-numbered levels:
 
-1. Built-in Defaults
-2. Project Manifest: Settings found in `runmat.toml` or `runmat.json`. The system automatically discovers this file by walking up the directory tree from the source file being executed
-3. Environment Variables: Variables such as `RUNMAT_CONFIG` or `RUNMAT_JIT_THRESHOLD`
-4. CLI Arguments: Explicit flags passed to the `runmat` binary (e.g., `--no-jit` or `--gc-preset`)
+1. Built-in defaults.
+2. User settings in `~/.config/runmat/settings-v1.json`, or the settings document supplied by the host. If that file is absent, native discovery checks `config.toml` and `config.json` in the same directory.
+3. The nearest project manifest, discovered by walking upward from the project directory.
+4. Explicit configuration files: `RUNMAT_CONFIG`, then the CLI's `--config` file when supplied.
+5. Field-specific environment overrides, such as `RUNMAT_JIT_THRESHOLD`.
+6. Individual CLI arguments, such as `--no-jit` or `--gc-preset`.
+
+Tables merge recursively, arrays replace, and an omitted field inherits its lower-layer value. `runmat config show --provenance` reports each effective field's source. `runmat config user show`, `runmat config user set jit enabled --value false`, and `runmat config user reset jit enabled` inspect or change only the user layer; edits preserve unrelated fields and comments where supported. `RUNMAT_USER_SETTINGS` selects another user settings path.
+
+Browser hosts supply a JSON user document instead of a home-directory file. Cluster runs carry only project settings and built-in defaults: neither the submitter's nor the worker's personal settings or environment become run policy. Worker resource limits and device assignments remain authoritative.
 
 ## Example Project Manifest (`runmat.toml`)
 
@@ -163,7 +169,7 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 
 | Key               | Type    | Default | Notes                                                                                    |
 | ----------------- | ------- | ------- | ---------------------------------------------------------------------------------------- |
-| `callstack_limit` | integer | `200`   | Max retained call stack frames for diagnostics.                                          |
+| `callstack_limit` | integer | `200`   | Session call-stack limit.                                          |
 | `error_namespace` | string  | `""`    | Error ID namespace. Empty value is normalized at startup by [language compatibility mode](/docs/runtime/matlab-compatibility) (set to `RunMat` in `compat = "runmat"` mode). |
 | `verbose`         | boolean | `false` | Enables verbose execution output.                                                        |
 
@@ -178,14 +184,96 @@ All runtime settings are under `[runtime]`. Runtime settings control the behavio
 
 See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the compatibility modes and [MATLAB Language Extensions](/docs/runtime/getting-started/language-extensions) for the RunMat-only behavior controlled by those modes.
 
+### `[runtime.foreign.mex]`
+
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `unmanifested` | string | `"isolate"` | `isolate`, `deny` | Runs supported unmanifested modules in a local extension-host process, or rejects them before startup. |
+| `timeout_ms` | positive integer | unset | — | Terminates an isolated host when an invocation or lifecycle callback exceeds the configured duration. An unset value applies no automatic invocation deadline; clear and shutdown retain a 30-second teardown ceiling. Cancellation also terminates the host. |
+
+Modules with a valid RunMat build manifest retain exact admission and run in the owning session. The `unmanifested` setting applies only to the separately checked binary-compatibility tier; it does not bypass architecture, suffix, or adapter-ABI checks.
+
+A configured MEX deadline is rejected before loading a manifested in-process module: arbitrary native instructions cannot be safely preempted. The default has no invocation deadline. Supported isolated routes enforce their configured deadlines by terminating the host.
+
+Use `[mex-artifacts.<name>]` for a RunMat-built MEX module that belongs to the project. The declaration names the module and its canonical sidecar manifest relative to the package root. RunMat freezes both files, validates their shared identity for the current target, and carries them through packages, native compilation, and remote execution:
+
+```toml
+[mex-artifacts.filters]
+manifest = "mex/filters.mexa64.runmat.json"
+module = "mex/filters.mexa64"
+```
+
+The table name must match the module name recorded by the manifest. The filename suffix remains platform-specific, so packages that support several native targets should select target-specific dependencies or artifacts rather than presenting one binary as portable. Browser resolution rejects packages that require MEX before execution.
+
+### `[runtime.foreign.native]`
+
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `isolation` | string | `"process"` | `process`, `in_process` | Runs shared-library calls in a same-executable child host by default. `in_process` is an explicit trusted-code opt-in. |
+| `timeout_ms` | positive integer | unset | — | Terminates the isolated native-library host when one invocation exceeds the configured duration. An unset value applies no automatic invocation deadline; cancellation still terminates the host. |
+| `timeout` | table | unset | `{ secs = ..., nanos = ... }` | An exact-duration alternative to `timeout_ms`. The duration must be positive and `nanos` must be below 1,000,000,000. Specify only one timeout representation. |
+
+Process isolation contains native crashes and hangs but does not reduce the library's operating-system permissions. Packaged standalone programs and distributed workers always use the process boundary. See [Native Library Interfaces](/docs/execution/native-libraries) for preparation, packaging, callbacks, and pointer lifetime behavior.
+
+### `[runtime.foreign.java]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `home` | path | unset | Uses this Java installation instead of `JAVA_HOME` or platform discovery. The path must identify a complete installation with a loadable JVM library. |
+| `minimum_version` | positive integer | `8` | Rejects an older Java runtime before JVM startup. |
+| `maximum_version` | positive integer | unset | Rejects a newer Java runtime before JVM startup. |
+| `classpath` | array of paths | `[]` | Project-owned Java directories and JARs. These form the session's static project classpath; `javaaddpath` manages a separate dynamic layer. |
+| `options` | array of strings | `[]` | JVM startup options. They are immutable after the process JVM starts. |
+
+RunMat starts Java lazily on the first operation that needs the JVM. `jenv` reports the selected installation and load state without starting it, and `javaclasspath` can inspect the configured project and dynamic layers. A process can host only one JVM configuration; a later session must use the same installation and startup options once Java has started.
+
+The Desktop host enables `javaObjectEDT` and `javaMethodEDT` for synchronous AWT Event Dispatch Thread calls. CLI, server, and browser sessions reject EDT operations explicitly. See [Java Interoperability](/docs/runtime/execution/java) for value conversion, classloader, callback, and EDT behavior.
+
+Use `[java-artifacts.<name>]` for JARs that are part of the project rather than local machine configuration. Each entry has one project-relative `path`; RunMat freezes its exact bytes for package, native compilation, and remote execution:
+
+```toml
+[java-artifacts.analysis]
+path = "lib/analysis.jar"
+```
+
+### `[runtime.foreign.python]`
+
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `executable` | path | unset | — | Selects a specific CPython executable. |
+| `version` | string | unset | `major.minor` | Requests one CPython feature version. |
+| `minimum_version` | string | `"3.9"` | `major.minor` | Rejects an older interpreter before startup. |
+| `maximum_version` | string | unset | `major.minor` | Rejects a newer interpreter before startup. |
+| `execution_mode` | string | `"in_process"` | `in_process`, `out_of_process` | Chooses direct in-process execution or an isolated child mode of the same `runmat` executable. |
+| `exact_version` | table | unset | `{ major = ..., minor = ..., patch = ... }` | Pins the complete CPython version, in addition to the feature-version bounds. |
+| `required_abi_tag` | string | unset | — | Requires the ABI tag reported by the selected interpreter. |
+| `required_platform_tag` | string | unset | — | Requires the platform tag reported by the selected interpreter. |
+| `module_paths` | array of paths | `[]` | — | Adds host-local import roots. Custom roots are not portable package artifacts; remote execution rejects paths it cannot authenticate and materialize. |
+
+Use `[python-artifacts.<name>]` for a wheel that belongs to the project. `path` is a project-relative `.whl` file and `module` is its top-level import name:
+
+```toml
+[python-artifacts.analysis]
+path = "python/analysis-1.0-py3-none-any.whl"
+module = "analysis"
+```
+
+RunMat freezes and revalidates declared wheels, carries them through packages, native compilation, and remote execution, and materializes them into a session-owned import root. Native wheels remain target-specific. Browser/WASM products reject native CPython requirements before execution. See [Python Interoperability](/docs/runtime/execution/python) for value conversion, isolation, callbacks, datetime behavior, and packaging details.
+
+The isolated extension host contains crashes and can be terminated on cancellation or timeout, but it is not an operating-system security sandbox. An admitted native module has the extension-host process's permissions. Use `unmanifested = "deny"` when only exact, manifest-bound RunMat artifacts should be allowed.
+
 ### `[runtime.jit]`
 
 
 | Key                  | Type    | Default   | Notes                                   |
 | -------------------- | ------- | --------- | --------------------------------------- |
 | `enabled`            | boolean | `true`    | Enables JIT compilation.                |
-| `threshold`          | integer | `10`      | Executions before JIT tiering triggers. |
-| `optimization_level` | string  | `"speed"` | `none`, `size`, `speed`, `aggressive`.  |
+| `threshold`          | positive integer | `10`      | Base activity threshold for native tiering. |
+| `optimization_level` | string  | `"speed"` | `none`, `size`, `speed`, `aggressive`. |
+
+For threshold N, native tiering uses N for generic compilation, 2N for specialization and 4N for loops. `aggressive` specializes at N. Runtime representation profiles and compilation budgets also govern eligibility; placement separately selects eligible implementations. See [JIT Compilation Pipeline](/docs/runtime/jit/pipeline).
+
+`none`, `size` and `speed` select the native compiler's corresponding optimization policy; `aggressive` uses speed optimization with earlier specialization. Changing JIT policy creates a fresh compiler-cache generation without discarding active executors. Browser execution has no native JIT backend.
 
 
 ### `[runtime.gc]`
@@ -195,8 +283,10 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 | --------------- | ------- | ------- | -------------------------------------------------------- |
 | `preset`        | string  | unset   | `low-latency`, `high-throughput`, `low-memory`, `debug`. |
 | `young_size_mb` | integer | unset   | Young generation size override (MB).                     |
-| `threads`       | integer | unset   | GC worker thread override.                               |
-| `collect_stats` | boolean | `false` | Enables GC statistics collection.                        |
+| `threads`       | integer | unset   | Explicit collector thread count; only `1` is supported. Other counts reject. |
+| `collect_stats` | boolean | `false` | Retained statistics preference; existing collector counters are maintained independently of this flag. |
+
+The collector is serial; this setting does not limit numerical kernels or FEA worker threads. Desktop GC configuration belongs to the process. Its first runtime selects the policy; a different later GC request requires a Desktop restart rather than silently changing another window's collector. Cluster workers also check GC settings against their admitted CPU and memory resources.
 
 
 ### `[runtime.accelerate]`
@@ -210,6 +300,8 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 | `wgpu_power_preference`       | string  | `"auto"` | `auto`, `high-performance`, `low-power`.                      |
 | `wgpu_force_fallback_adapter` | boolean | `false`  | Forces WGPU fallback adapter selection.                       |
 
+Desktop retains a provider for each physical settings tuple and reuses it across sessions with matching settings. Runtime acceleration and fallback restrictions remain invocation-scoped. Disabling computation does not invalidate the owner of an existing GPU value: an authorized readback can still gather it, but cannot grant new device computation.
+
 
 #### `[runtime.accelerate.auto_offload]`
 
@@ -217,9 +309,10 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 | Key            | Type    | Default   | Notes                                                    |
 | -------------- | ------- | --------- | -------------------------------------------------------- |
 | `enabled`      | boolean | `true`    | Enables auto-offload planner.                            |
-| `calibrate`    | boolean | `true`    | Enables calibration mode for planner profile generation. |
-| `profile_path` | string  | unset     | Optional profile cache path.                             |
+| `calibrate`    | boolean | `true`    | Enables the runtime's automatic calibration templates.    |
 | `log_level`    | string  | `"trace"` | `off`, `info`, `trace`.                                  |
+
+The former `profile_path` setting is removed; delete it from existing configuration files. Category-only GPU profile JSON and `RUNMAT_ACCEL_PROFILE` are not placement authorities. Matched measurements use the canonical placement session; `runmat accel-calibrate --refresh` refreshes the current provider/precision's calibration cache.
 
 
 ### `[runtime.plotting]`
@@ -243,6 +336,17 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 | `height`    | integer | `800`   | Default GUI window height. |
 | `vsync`     | boolean | `true`  | Enables VSync.             |
 | `maximized` | boolean | `false` | Starts window maximized.   |
+| `maximum_pending_opens` | positive integer | `64` | Maximum queued native-window open requests. |
+| `maximum_windows` | positive integer | `64` | Maximum live native windows owned by the host. |
+| `maximum_snapshot_bytes` | positive integer | `268435456` | Upper bound on the retained Figure scene batch admitted for native presentation. |
+| `maximum_pending_callbacks` | positive integer | `1024` | Maximum queued graphics callback events. A full queue reports backpressure. |
+| `maximum_callback_registrations` | positive integer | `1024` | Maximum callback registrations in a session's graphics queue. |
+
+These live-GUI limits must be nonzero. They bound open requests, retained scene
+batches and callback queues independently; they do not bound renderer/GPU or
+whole-process memory. `maximum_snapshot_bytes` is separate from the serialized
+export/replay limit `runtime.plotting.export.scene_budget_bytes`. Raise an
+individual limit only when the application needs the corresponding capacity.
 
 
 #### `[runtime.plotting.export]`
@@ -258,7 +362,7 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 
 ### `[runtime.fea]`
 
-FEA settings configure study execution, run artifact storage, geometry prep artifacts, and coupled-field artifact roots.
+FEA settings configure study execution and run artifact storage.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -267,12 +371,6 @@ FEA settings configure study execution, run artifact storage, geometry prep arti
 | `artifact_max_runs` | integer | unset | Optional global retained run limit. |
 | `artifact_max_runs_per_kind` | integer | unset | Optional retained run limit per physics family. |
 | `study_artifact_root` | string | `"artifacts/studies"` | Study validate, plan, run, and sweep evidence root. |
-| `geometry_prep_artifact_root` | string | `"artifacts/geometry-prep"` | Geometry prep artifact root. |
-| `geometry_prep_max_artifacts` | integer | unset | Optional global retained prep artifact limit. |
-| `geometry_prep_max_artifacts_per_geometry` | integer | unset | Optional retained prep artifact limit per geometry id. |
-| `geometry_prep_max_age_seconds` | integer | unset | Optional prep artifact age limit. |
-| `geometry_prep_require_latest_revision` | boolean | unset | When true, prep-aware runs reject stale geometry revisions. |
-| `thermo_field_artifact_root` | string | `"artifacts/thermo-fields"` | Thermo-field artifact root for coupled thermal paths. |
 
 Example:
 
@@ -283,12 +381,6 @@ artifact_root = "artifacts"
 artifact_max_runs = 1000
 artifact_max_runs_per_kind = 100
 study_artifact_root = "artifacts/studies"
-geometry_prep_artifact_root = "artifacts/geometry-prep"
-geometry_prep_max_artifacts = 500
-geometry_prep_max_artifacts_per_geometry = 20
-geometry_prep_max_age_seconds = 2592000
-geometry_prep_require_latest_revision = true
-thermo_field_artifact_root = "artifacts/thermo-fields"
 ```
 
 
@@ -315,7 +407,25 @@ thermo_field_artifact_root = "artifacts/thermo-fields"
 | ------- | ------- | -------- | ------------------------------------------------------------------------- |
 | `level` | string  | `"warn"` | `error`, `warn`, `info`, `debug`, `trace`.                                |
 | `debug` | boolean | `false`  | Forces debug logging path.                                                |
-| `file`  | string  | unset    | Reserved log file path option (runtime currently logs to process logger). |
+| `file`  | string  | unset    | Native append-log path; unsupported by the browser host. |
+
+Desktop's local file/filter selection is process-owned. Its owning window can change it; a different window with conflicting settings receives an explicit error. Collector export is separate from both local logging and RunMat product telemetry.
+
+#### `[runtime.logging.otel]`
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `enabled` | `false` | Enables export to the user's collector. |
+| `endpoint` | `"http://localhost:4318"` | OTLP base URL; HTTP appends `/v1/traces` and `/v1/logs`. |
+| `protocol` | `"http/protobuf"` | Native supports `http/protobuf` and `grpc`; browsers require HTTP and collector CORS permission. |
+| `signals` | `["traces", "logs"]` | Requested signals. Metrics are unsupported and reject at startup. |
+| `headers_from_env` | `"RUNMAT_OTEL_HEADERS"` | Name of the startup environment variable containing collector headers, not the headers themselves. Desktop supplies secrets from its keychain. |
+| `service_name` | `"runmat"` | Service resource name. |
+| `resource_attributes` | `{}` | String-valued resource attributes. |
+
+Export uses bounded queues and counts dropped records instead of waiting for collector networking on the execution path. A process owns one collector configuration; incompatible later selections require a restart. The test-export operation waits for an actual collector acknowledgement, not only queue insertion. Logs carry trace/span IDs where a trace context exists. Never put authorization headers in project or user settings.
+
+Standard `OTEL_EXPORTER_OTLP_*`, `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` variables are supported. Per-signal HTTP endpoints are complete URLs. `RUNMAT_OTEL_ENDPOINT` is a shortcut that enables export; `RUNMAT_OTEL_ENABLED=false` explicitly disables it. Cluster runs do not carry personal collector settings or secrets; workers use an administrator-selected collector or none.
 
 
 ## Environment Variables
@@ -323,6 +433,9 @@ thermo_field_artifact_root = "artifacts/thermo-fields"
 ### Config Selection
 
 - `RUNMAT_CONFIG`: absolute or relative path to `runmat.toml` / `runmat.json`
+- `RUNMAT_USER_SETTINGS`: explicit native user settings file
+
+Runtime fields also accept `RUNMAT_RUNTIME__<SECTION>__<FIELD>` overrides, for example `RUNMAT_RUNTIME__ACCELERATE__AUTO_OFFLOAD__ENABLED=false`. Values are JSON literals, with plain text accepted for strings. Arrays replace their lower-layer values.
 
 ### Service/Auth
 
@@ -344,12 +457,6 @@ FEA runtime config is preferred. These environment variables are supported as fa
 - `RUNMAT_FEA_ARTIFACT_MAX_RUNS`
 - `RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND`
 - `RUNMAT_FEA_STUDY_ARTIFACT_ROOT`
-- `RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT`
-- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS`
-- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY`
-- `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS`
-- `RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION`
-- `RUNMAT_THERMO_FIELD_ARTIFACT_ROOT`
 
 ## Full Reference Example
 
@@ -380,10 +487,23 @@ verbose = false
 [runtime.language]
 compat = "runmat"
 
+[runtime.foreign.mex]
+unmanifested = "isolate"
+# timeout_ms = 300000
+
+[runtime.foreign.native]
+isolation = "process"
+# timeout_ms = 300000
+
+[runtime.foreign.java]
+minimum_version = 8
+# maximum_version = 21
+# home = "/path/to/java/home"
+classpath = []
+options = []
+
 [runtime.jit]
 enabled = true
-threshold = 10
-optimization_level = "speed"
 
 [runtime.gc]
 preset = "low-latency"
@@ -401,7 +521,6 @@ wgpu_force_fallback_adapter = false
 [runtime.accelerate.auto_offload]
 enabled = true
 calibrate = true
-profile_path = ".runmat/auto_offload.json"
 log_level = "trace"
 
 [runtime.plotting]
@@ -416,6 +535,11 @@ width = 1200
 height = 800
 vsync = true
 maximized = false
+maximum_pending_opens = 64
+maximum_windows = 64
+maximum_snapshot_bytes = 268435456
+maximum_pending_callbacks = 1024
+maximum_callback_registrations = 1024
 
 [runtime.plotting.export]
 format = "png"
@@ -428,12 +552,6 @@ artifact_root = "artifacts"
 artifact_max_runs = 1000
 artifact_max_runs_per_kind = 100
 study_artifact_root = "artifacts/studies"
-geometry_prep_artifact_root = "artifacts/geometry-prep"
-geometry_prep_max_artifacts = 500
-geometry_prep_max_artifacts_per_geometry = 20
-geometry_prep_max_age_seconds = 2592000
-geometry_prep_require_latest_revision = true
-thermo_field_artifact_root = "artifacts/thermo-fields"
 
 [runtime.telemetry]
 enabled = true

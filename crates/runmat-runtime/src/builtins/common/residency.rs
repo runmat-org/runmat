@@ -1,10 +1,32 @@
 //! Shared heuristics for deciding when newly constructed arrays should prefer
 //! GPU residency, even when none of their inputs already live on the device.
 
-use runmat_accelerate_api::{provider, sequence_threshold_hint};
+use runmat_accelerate_api::{automatic_offload_enabled, provider, sequence_threshold_hint};
 
 const DEFAULT_SEQUENCE_MIN_LEN: usize = 4_096;
 const MIN_THRESHOLD: usize = 1_024;
+
+/// A host-only consumer may undo authenticated automatic placement, not
+/// reinterpret explicit or missing device intent as permission to download.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HostGatherIntent {
+    AutomaticOrHost,
+    ExplicitOrUnproven,
+}
+pub(crate) fn host_gather_intent(
+    value: &runmat_value::Value,
+) -> crate::BuiltinResult<HostGatherIntent> {
+    let mut intent = HostGatherIntent::AutomaticOrHost;
+    // Exactly the gather owner's leaves; no separate object/capture traversal.
+    crate::dispatcher::try_visit_gathered_gpu_handles(value, &mut |handle| {
+        if runmat_accelerate_api::handle_provenance(handle)
+            != Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        {
+            intent = HostGatherIntent::ExplicitOrUnproven;
+        }
+    })?;
+    Ok(intent)
+}
 
 /// Kinds of sequence-producing builtins that can consult the residency helper.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +55,7 @@ impl SequenceIntent {
 pub enum ResidencyReason {
     ExplicitGpuInput,
     DisabledByEnv,
+    AutomaticOffloadDisabled,
     ProviderUnavailable,
     ZeroLength,
     BelowThreshold,
@@ -84,6 +107,10 @@ pub fn sequence_gpu_preference(
         return ResidencyDecision::cpu(ResidencyReason::DisabledByEnv);
     }
 
+    if !automatic_offload_enabled() {
+        return ResidencyDecision::cpu(ResidencyReason::AutomaticOffloadDisabled);
+    }
+
     if provider().is_none() {
         return ResidencyDecision::cpu(ResidencyReason::ProviderUnavailable);
     }
@@ -129,6 +156,7 @@ pub(crate) mod tests {
     fn reset_env() {
         std::env::remove_var("RUNMAT_SEQUENCE_GPU_DISABLE");
         std::env::remove_var("RUNMAT_SEQUENCE_GPU_MIN");
+        std::env::remove_var("RUNMAT_ACCEL_AUTO_OFFLOAD");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -157,11 +185,33 @@ pub(crate) mod tests {
     fn env_min_len_controls_threshold() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_env();
+        runmat_accelerate::ensure_residency_hooks();
         simple_provider::register_inprocess_provider();
+        std::env::set_var("RUNMAT_ACCEL_AUTO_OFFLOAD", "1");
         std::env::set_var("RUNMAT_SEQUENCE_GPU_MIN", "8192");
         let decision = sequence_gpu_preference(10_000, SequenceIntent::Linspace, false);
         assert!(decision.prefer_gpu);
         assert_eq!(decision.reason, ResidencyReason::ThresholdHint);
+        reset_env();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn configured_auto_offload_controls_only_implicit_sequence_residency() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_env();
+        runmat_accelerate::ensure_residency_hooks();
+        simple_provider::register_inprocess_provider();
+        std::env::set_var("RUNMAT_SEQUENCE_GPU_MIN", "4096");
+        std::env::set_var("RUNMAT_ACCEL_AUTO_OFFLOAD", "0");
+        let implicit = sequence_gpu_preference(8760, SequenceIntent::Colon, false);
+        assert!(!implicit.prefer_gpu);
+        assert_eq!(implicit.reason, ResidencyReason::AutomaticOffloadDisabled);
+        let explicit = sequence_gpu_preference(8760, SequenceIntent::Colon, true);
+        assert!(explicit.prefer_gpu);
+        assert_eq!(explicit.reason, ResidencyReason::ExplicitGpuInput);
+        std::env::set_var("RUNMAT_ACCEL_AUTO_OFFLOAD", "1");
+        assert!(sequence_gpu_preference(8760, SequenceIntent::Colon, false).prefer_gpu);
         reset_env();
     }
 }

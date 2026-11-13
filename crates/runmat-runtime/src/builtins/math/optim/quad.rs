@@ -1,15 +1,18 @@
 //! MATLAB-compatible legacy `quad` builtin for finite scalar quadrature.
 
+#[cfg(test)]
+use runmat_builtins::QUAD_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, QUAD_ERROR_INVALID_ARGUMENT,
+    QUAD_ERROR_INVALID_INPUT, QUAD_ERROR_TOO_MANY_OUTPUTS,
+    QUAD_INTEGER_BOUND_EXTENSION as INTEGER_BOUND_EXTENSION,
+    QUAD_INTEGER_CALLBACK_EXTENSION as INTEGER_CALLBACK_EXTENSION,
+    QUAD_INTEGER_TOLERANCE_EXTENSION as INTEGER_TOLERANCE_EXTENSION,
+    QUAD_LOGICAL_NUMERIC_EXTENSION as LOGICAL_NUMERIC_EXTENSION,
+    QUAD_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{LogicalArray, Value};
+use runmat_value::{LogicalArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -17,248 +20,16 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::math::optim::common::{call_function, value_to_scalar};
-use crate::builtins::math::optim::type_resolvers::numerical_integral_type;
+use crate::builtins::math::optim::quadrature::{
+    integrate, midpoint, AdaptiveSimpsonResult, QuadratureArithmeticError, QuadratureCooperation,
+    QuadratureEvaluator, QuadratureIdentity, ScaledEstimate,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "quad";
 const DEFAULT_TOL: f64 = 1.0e-6;
 const MAX_DEPTH: usize = 30;
 const MAX_FUN_EVALS: usize = 100_000;
-
-const INTEGER_BOUND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "quad-integer-bound",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "quad with native-class integer integration bounds is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QuadIntegerBoundExtension"),
-};
-const INTEGER_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "quad-integer-tolerance",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "quad with a native-class integer tolerance is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QuadIntegerToleranceExtension"),
-};
-const INTEGER_CALLBACK_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "quad-integer-callback-result",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "quad with a native-class integer integrand result is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QuadIntegerCallbackExtension"),
-};
-const LOGICAL_NUMERIC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "quad-logical-numeric",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "quad with logical bounds, tolerance, or integrand values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QuadLogicalNumericExtension"),
-};
-const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "quad-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "quad host fallback for explicit gpuArray values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:QuadResidentInputExtension"),
-};
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    INTEGER_BOUND_EXTENSION,
-    INTEGER_TOLERANCE_EXTENSION,
-    INTEGER_CALLBACK_EXTENSION,
-    LOGICAL_NUMERIC_EXTENSION,
-    RESIDENT_INPUT_EXTENSION,
-];
-
-const INTEGER_BOUND_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "a or b",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The compatibility target documents single and double finite limits; typed integer bounds are gated and cross binary64 exactly.",
-}];
-const INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "tol",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double tolerance; typed integer tolerance is a checked RunMat extension.",
-    }];
-const INTEGER_TRACE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "trace",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The documented nonzero trace toggle reads integer scalars structurally without floating conversion.",
-}];
-const INTEGER_PARAMETER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p1, p2, ...",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Additional parameterized-function arguments are passed to the integrand unchanged and retain exact native integer storage.",
-    }];
-const INTEGER_CALLBACK_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fun result",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer integrand results are gated and must cross the quadrature's binary64 boundary exactly.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
-    BuiltinIntegerCapabilityDescriptor { form: "q = quad(fun, integer_a, integer_b, ___)", inputs: &INTEGER_BOUND_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer limits are RunMat-only and enter adaptive Simpson arithmetic only after exact checked conversion." },
-    BuiltinIntegerCapabilityDescriptor { form: "q = quad(fun, a, b, integer_tol, ___)", inputs: &INTEGER_TOLERANCE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer tolerance is a RunMat-only checked floating control." },
-    BuiltinIntegerCapabilityDescriptor { form: "q = quad(fun, a, b, tol, integer_trace, ___)", inputs: &INTEGER_TRACE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Trace compares exact integer zero/nonzero state and never materializes the selector as floating point." },
-    BuiltinIntegerCapabilityDescriptor { form: "q = quad(fun, a, b, tol, trace, integer_p1, ___)", inputs: &INTEGER_PARAMETER_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Parameter arguments are callback payload and preserve native integer class/storage exactly." },
-    BuiltinIntegerCapabilityDescriptor { form: "q = quad(integer_returning_fun, a, b, ___)", inputs: &INTEGER_CALLBACK_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only integer integrand results convert exactly before quadrature arithmetic." },
-];
-
-const QUAD_OUTPUT_Q: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "q",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numerical integral estimate.",
-}];
-
-const QUAD_OUTPUT_Q_FCNT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "q",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerical integral estimate.",
-    },
-    BuiltinParamDescriptor {
-        name: "fcnt",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Number of integrand evaluations.",
-    },
-];
-
-const QUAD_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "fun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar integrand callback.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Lower integration bound.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper integration bound.",
-    },
-];
-
-const QUAD_INPUTS_TOL_TRACE_ARGS: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "fun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar integrand callback.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Lower integration bound.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper integration bound.",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1e-6"),
-        description: "Absolute error tolerance. Empty uses the default.",
-    },
-    BuiltinParamDescriptor {
-        name: "trace",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("false"),
-        description: "Nonzero value prints legacy [fcnEvals, a, b-a, Q] trace rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional arguments forwarded to the integrand.",
-    },
-];
-
-const QUAD_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "q = quad(fun, a, b)",
-        inputs: &QUAD_INPUTS_CORE,
-        outputs: &QUAD_OUTPUT_Q,
-    },
-    BuiltinSignatureDescriptor {
-        label: "q = quad(fun, a, b, tol, trace, p1, p2, ...)",
-        inputs: &QUAD_INPUTS_TOL_TRACE_ARGS,
-        outputs: &QUAD_OUTPUT_Q,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[q, fcnt] = quad(fun, a, b)",
-        inputs: &QUAD_INPUTS_CORE,
-        outputs: &QUAD_OUTPUT_Q_FCNT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[q, fcnt] = quad(fun, a, b, tol, trace, p1, p2, ...)",
-        inputs: &QUAD_INPUTS_TOL_TRACE_ARGS,
-        outputs: &QUAD_OUTPUT_Q_FCNT,
-    },
-];
-
-const QUAD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QUAD.INVALID_ARGUMENT",
-    identifier: Some("RunMat:quad:InvalidArgument"),
-    when: "Tolerance, trace flag, or argument grammar is invalid.",
-    message: "quad: invalid argument",
-};
-
-const QUAD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QUAD.INVALID_INPUT",
-    identifier: Some("RunMat:quad:InvalidInput"),
-    when: "Bounds, integrand values, or adaptive solver semantics are invalid.",
-    message: "quad: invalid input",
-};
-
-const QUAD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QUAD.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:quad:TooManyOutputs"),
-    when: "`quad` is called with more than two requested output arguments.",
-    message: "quad: too many output arguments",
-};
-
-const QUAD_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    QUAD_ERROR_INVALID_ARGUMENT,
-    QUAD_ERROR_INVALID_INPUT,
-    QUAD_ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const QUAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &QUAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &QUAD_ERRORS,
-};
 
 fn quad_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -281,7 +52,31 @@ fn quad_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) 
     if err.identifier().is_some() {
         err
     } else {
-        quad_error_with_detail(fallback, err.message())
+        let mut mapped = quad_error_with_detail(fallback, err.message());
+        mapped.span = err.span;
+        mapped.context = err.context.clone();
+        mapped.context.builtin = Some(NAME.to_string());
+        mapped.gpu_gather_retry = err.gpu_gather_retry;
+        mapped.source = Some(Box::new(err));
+        mapped
+    }
+}
+
+fn quad_arithmetic_error(error: QuadratureArithmeticError) -> RuntimeError {
+    match error {
+        QuadratureArithmeticError::Resource(source) => {
+            build_runtime_error("quad: could not reserve quadrature workspace")
+                .with_identifier("RunMat:Internal")
+                .with_builtin(NAME)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        }
+        QuadratureArithmeticError::InconsistentComponents => quad_error_with_detail(
+            &QUAD_ERROR_INVALID_INPUT,
+            "callback changed its output size",
+        ),
+        QuadratureArithmeticError::Execution(source) => *source,
     }
 }
 
@@ -325,31 +120,51 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "quad",
-    category = "math/optim",
-    summary = "Approximate finite scalar definite integrals using legacy adaptive Simpson quadrature.",
-    keywords = "quad,numerical integration,adaptive simpson,quadrature,function handle",
-    accel = "sink",
-    type_resolver(numerical_integral_type),
-    descriptor(crate::builtins::math::optim::quad::QUAD_DESCRIPTOR),
-    extensions(crate::builtins::math::optim::quad::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::optim::quad::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::optim::quad"
 )]
-async fn quad_builtin(
+async fn quad_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
     function: Value,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    quad_in_runtime(runtime.as_ref(), function, a, b, rest).await
+}
+
+#[cfg(test)]
+pub(super) async fn quad_builtin(
+    function: Value,
+    a: Value,
+    b: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    quad_in_runtime(None, function, a, b, rest).await
+}
+
+async fn quad_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: Value,
+    a: Value,
+    b: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Quad, runtime);
+    cooperation.completed(0).await?;
     validate_requested_outputs()?;
-    ensure_quad_extensions(&a, &b, &rest)?;
-    let options = QuadOptions::parse(rest)
+    ensure_quad_extensions(&a, &b, rest.view())?;
+    preflight_quad_inputs(&a, &b, rest.view())?;
+    crate::call::admission::admit_feval_target(&function)?;
+    authenticate_quad_residents(&a, &b, rest.view())?;
+    let options = QuadOptions::parse(rest, &mut cooperation)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_ARGUMENT))?;
-    let a = scalar_real("lower bound", a)
+    let a = scalar_real("lower bound", a, &mut cooperation)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
-    let b = scalar_real("upper bound", b)
+    let b = scalar_real("upper bound", b, &mut cooperation)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
 
@@ -362,17 +177,186 @@ async fn quad_builtin(
         let sign = if b < a { -1.0 } else { 1.0 };
         let lo = a.min(b);
         let hi = a.max(b);
-        let mut result = integrate_quad(&function, lo, hi, &options)
-            .await
-            .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
+        let mut result = {
+            let mut evaluator = QuadEvaluator::new(&function, options, &mut cooperation)?;
+            let AdaptiveSimpsonResult { q, evaluations } = integrate(&mut evaluator, lo, hi)
+                .await
+                .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_INPUT))?;
+            QuadResult {
+                q,
+                func_count: evaluations,
+            }
+        };
         result.q *= sign;
         result
     };
 
+    cooperation.completed(0).await?;
     finalize(result)
 }
 
-fn ensure_quad_extensions(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn preflight_quad_inputs(
+    a: &Value,
+    b: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    preflight_quad_scalar(QuadScalarRole::LowerBound, a)?;
+    preflight_quad_scalar(QuadScalarRole::UpperBound, b)?;
+    if let Some(tol) = rest.first() {
+        preflight_quad_scalar(QuadScalarRole::Tolerance, tol)?;
+    }
+    if let Some(trace) = rest.get(1) {
+        preflight_quad_scalar(QuadScalarRole::Trace, trace)?;
+    }
+    Ok(())
+}
+
+fn authenticate_quad_residents(
+    a: &Value,
+    b: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    for (role, value) in [
+        (QuadScalarRole::LowerBound, Some(a)),
+        (QuadScalarRole::UpperBound, Some(b)),
+        (QuadScalarRole::Tolerance, rest.first()),
+        (QuadScalarRole::Trace, rest.get(1)),
+    ] {
+        let Some(Value::GpuTensor(handle)) = value else {
+            continue;
+        };
+        handle
+            .allocation_lease()
+            .validate_live()
+            .map_err(|source| {
+                build_runtime_error(format!(
+                    "quad: {} has an invalid resident lease",
+                    role.label()
+                ))
+                .with_builtin(NAME)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+            })?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum QuadScalarRole {
+    LowerBound,
+    UpperBound,
+    Tolerance,
+    Trace,
+}
+
+impl QuadScalarRole {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::LowerBound => "lower bound",
+            Self::UpperBound => "upper bound",
+            Self::Tolerance => "tolerance",
+            Self::Trace => "trace",
+        }
+    }
+
+    const fn error(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::LowerBound | Self::UpperBound => &QUAD_ERROR_INVALID_INPUT,
+            Self::Tolerance | Self::Trace => &QUAD_ERROR_INVALID_ARGUMENT,
+        }
+    }
+
+    const fn allows_empty(self) -> bool {
+        matches!(self, Self::Tolerance | Self::Trace)
+    }
+
+    const fn needs_exact_float(self) -> bool {
+        !matches!(self, Self::Trace)
+    }
+}
+
+fn preflight_quad_scalar(role: QuadScalarRole, value: &Value) -> BuiltinResult<()> {
+    let label = role.label();
+    let error = role.error();
+    let count = match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(1),
+        Value::Tensor(tensor) => Some(tensor.len()),
+        Value::LogicalArray(array) => Some(array.data.len()),
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(quad_error_with_detail(
+                    error,
+                    format!("{label} must be real"),
+                ));
+            }
+            handle
+                .shape()
+                .iter()
+                .try_fold(1_usize, |total, dim| total.checked_mul(*dim))
+        }
+        _ => None,
+    };
+    if count != Some(1) && !(role.allows_empty() && count == Some(0)) {
+        return Err(quad_error_with_detail(
+            error,
+            format!(
+                "{label} must be a finite real scalar{}",
+                if role.allows_empty() { " or empty" } else { "" }
+            ),
+        ));
+    }
+    if count == Some(0) || matches!(value, Value::GpuTensor(_)) {
+        return Ok(());
+    }
+    if role.needs_exact_float()
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64(value)
+    {
+        return Err(quad_error_with_detail(
+            error,
+            format!("integer {label} must be exactly representable as double"),
+        ));
+    }
+    let finite = match value {
+        Value::Num(number) => number.is_finite(),
+        Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => true,
+        Value::Tensor(tensor) => tensor::tensor_value_f64(tensor, 0).is_finite(),
+        Value::GpuTensor(_) => true,
+        _ => false,
+    };
+    if !finite {
+        return Err(quad_error_with_detail(
+            error,
+            format!("{label} must be finite"),
+        ));
+    }
+    if role == QuadScalarRole::Tolerance {
+        let positive = match value {
+            Value::Num(number) => *number > 0.0,
+            Value::Int(integer) => integer.to_f64() > 0.0,
+            Value::Bool(flag) => *flag,
+            Value::LogicalArray(array) => array.data[0] != 0,
+            Value::Tensor(tensor) => tensor::tensor_value_f64(tensor, 0) > 0.0,
+            Value::GpuTensor(_) => true,
+            _ => false,
+        };
+        if !positive {
+            return Err(quad_error_with_detail(
+                error,
+                "tolerance must be a positive finite scalar",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_quad_extensions(
+    a: &Value,
+    b: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for bound in [a, b] {
         if crate::builtins::common::validation::value_contains_native_integer_class(bound) {
             crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_BOUND_EXTENSION, NAME)?;
@@ -418,23 +402,52 @@ async fn prepare_quad_floating_value(
     label: &str,
     value: Value,
     integer_extension: &'static BuiltinExtensionDescriptor,
+    cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_native_integer_class(&value) {
+    let has_integer =
+        crate::builtins::common::validation::value_contains_native_integer_class(&value);
+    if has_integer {
         crate::compatibility::ensure_builtin_extension_enabled(integer_extension, NAME)?;
-        if !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
-            .await?
-        {
+    }
+    let prepared = if has_integer {
+        let prepared = cooperation.prepare_integer_boundary(&value).await?;
+        if !prepared.is_exact() {
             return Err(quad_error_with_detail(
                 &QUAD_ERROR_INVALID_ARGUMENT,
                 format!("integer {label} must be exactly representable as double"),
             ));
         }
-    }
+        Some(prepared)
+    } else {
+        None
+    };
     if is_logical_numeric(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_NUMERIC_EXTENSION, NAME)?;
     }
     if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(&RESIDENT_INPUT_EXTENSION, NAME)?;
+    }
+    if let Some(prepared) = prepared {
+        if let Some(payload) = prepared.into_resident_payload() {
+            return match payload {
+                crate::builtins::common::validation::PreparedIntegerPayload::Real(gathered) => {
+                    Tensor::new_integer(
+                        crate::builtins::common::gpu_helpers::integer_storage_from_owned(
+                            gathered.data,
+                        ),
+                        gathered.shape,
+                    )
+                    .map(Value::Tensor)
+                    .map_err(|detail| quad_error_with_detail(&QUAD_ERROR_INVALID_INPUT, detail))
+                }
+                crate::builtins::common::validation::PreparedIntegerPayload::Complex(_) => {
+                    Err(quad_error_with_detail(
+                        &QUAD_ERROR_INVALID_INPUT,
+                        format!("{label} must be real"),
+                    ))
+                }
+            };
+        }
     }
     crate::dispatcher::gather_if_needed_async(&value).await
 }
@@ -446,10 +459,13 @@ struct QuadOptions {
 }
 
 impl QuadOptions {
-    async fn parse(rest: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(
+        rest: crate::call::BuiltinArguments,
+        cooperation: &mut QuadratureCooperation,
+    ) -> BuiltinResult<Self> {
         let mut values = rest.into_iter();
         let tol = match values.next() {
-            Some(value) => parse_optional_tol(value).await?,
+            Some(value) => parse_optional_tol(value, cooperation).await?,
             None => DEFAULT_TOL,
         };
         let trace = match values.next() {
@@ -464,9 +480,17 @@ impl QuadOptions {
     }
 }
 
-async fn parse_optional_tol(value: Value) -> BuiltinResult<f64> {
-    let value =
-        prepare_quad_floating_value("tolerance", value, &INTEGER_TOLERANCE_EXTENSION).await?;
+async fn parse_optional_tol(
+    value: Value,
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<f64> {
+    let value = prepare_quad_floating_value(
+        "tolerance",
+        value,
+        &INTEGER_TOLERANCE_EXTENSION,
+        cooperation,
+    )
+    .await?;
     if is_empty_value(&value) {
         return Ok(DEFAULT_TOL);
     }
@@ -491,14 +515,19 @@ async fn parse_optional_trace(value: Value) -> BuiltinResult<bool> {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).is_empty(),
+        Value::Tensor(tensor) => tensor.is_empty(),
         Value::LogicalArray(LogicalArray { data, .. }) => data.is_empty(),
         _ => false,
     }
 }
 
-async fn scalar_real(label: &str, value: Value) -> BuiltinResult<f64> {
-    let value = prepare_quad_floating_value(label, value, &INTEGER_BOUND_EXTENSION).await?;
+async fn scalar_real(
+    label: &str,
+    value: Value,
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<f64> {
+    let value =
+        prepare_quad_floating_value(label, value, &INTEGER_BOUND_EXTENSION, cooperation).await?;
     scalar_real_sync(label, value, &QUAD_ERROR_INVALID_INPUT)
 }
 
@@ -565,156 +594,157 @@ struct QuadResult {
     func_count: usize,
 }
 
-async fn integrate_quad(
-    function: &Value,
-    a: f64,
-    b: f64,
-    options: &QuadOptions,
-) -> BuiltinResult<QuadResult> {
-    let fa = call_integrand(function, a, &options.extra_args).await?;
-    let c = midpoint(a, b);
-    let fc = call_integrand(function, c, &options.extra_args).await?;
-    let fb = call_integrand(function, b, &options.extra_args).await?;
-    let whole = simpson(a, b, fa, fc, fb);
-    let mut func_count = 3usize;
-    let mut trace = options.trace.then_some(QuadTrace);
-    let q = adaptive_simpson(
-        function,
-        &options.extra_args,
-        SimpsonState {
-            a,
-            b,
-            fa,
-            fc,
-            fb,
-            whole,
-            tol: options.tol,
-            depth: MAX_DEPTH,
-        },
-        &mut func_count,
-        &mut trace,
-    )
-    .await?;
-    Ok(QuadResult { q, func_count })
+struct QuadEvaluator<'a> {
+    function: &'a Value,
+    tolerance: f64,
+    arguments: Vec<Value>,
+    cooperation: &'a mut QuadratureCooperation,
+    trace: Option<QuadTrace>,
 }
 
-#[derive(Clone, Copy)]
-struct SimpsonState {
-    a: f64,
-    b: f64,
-    fa: f64,
-    fc: f64,
-    fb: f64,
-    whole: f64,
-    tol: f64,
-    depth: usize,
+impl<'a> QuadEvaluator<'a> {
+    fn new(
+        function: &'a Value,
+        options: QuadOptions,
+        cooperation: &'a mut QuadratureCooperation,
+    ) -> BuiltinResult<Self> {
+        let capacity = options.extra_args.len().checked_add(1).ok_or_else(|| {
+            build_runtime_error("quad: callback argument count overflow")
+                .with_identifier("RunMat:Internal")
+                .with_builtin(NAME)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
+        let mut arguments = Vec::new();
+        arguments.try_reserve_exact(capacity).map_err(|source| {
+            build_runtime_error("quad: could not reserve callback arguments")
+                .with_identifier("RunMat:Internal")
+                .with_builtin(NAME)
+                .with_source(source)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        })?;
+        arguments.push(Value::Num(0.0));
+        arguments.extend(options.extra_args);
+        Ok(Self {
+            function,
+            tolerance: options.tol,
+            arguments,
+            cooperation,
+            trace: options.trace.then_some(QuadTrace),
+        })
+    }
 }
 
-#[async_recursion::async_recursion(?Send)]
-async fn adaptive_simpson(
-    function: &Value,
-    extra_args: &[Value],
-    state: SimpsonState,
-    func_count: &mut usize,
-    trace: &mut Option<QuadTrace>,
-) -> BuiltinResult<f64> {
-    if *func_count + 2 > MAX_FUN_EVALS {
-        return Err(quad_error_with_detail(
+impl QuadratureEvaluator for QuadEvaluator<'_> {
+    type Sample = f64;
+
+    async fn checkpoint(&mut self) -> BuiltinResult<()> {
+        self.cooperation.completed(0).await
+    }
+
+    async fn evaluate(&mut self, x: f64) -> BuiltinResult<f64> {
+        call_integrand(self.function, x, &mut self.arguments, self.cooperation).await
+    }
+
+    fn midpoint(&self, a: f64, b: f64) -> f64 {
+        midpoint(a, b)
+    }
+
+    fn tolerances(&self) -> (f64, f64) {
+        (self.tolerance, 0.0)
+    }
+
+    fn max_evaluations(&self) -> usize {
+        MAX_FUN_EVALS
+    }
+
+    fn max_depth(&self) -> usize {
+        MAX_DEPTH
+    }
+
+    fn evaluation_limit_error(&self) -> RuntimeError {
+        quad_error_with_detail(
             &QUAD_ERROR_INVALID_INPUT,
             "exceeded maximum function evaluations",
-        ));
+        )
     }
 
-    let c = midpoint(state.a, state.b);
-    let d = midpoint(state.a, c);
-    let e = midpoint(c, state.b);
-    let fd = call_integrand(function, d, extra_args).await?;
-    let fe = call_integrand(function, e, extra_args).await?;
-    *func_count += 2;
-
-    let left = simpson(state.a, c, state.fa, fd, state.fc);
-    let right = simpson(c, state.b, state.fc, fe, state.fb);
-    let refined = left + right;
-    let error = refined - state.whole;
-    if let Some(trace) = trace {
-        trace.record(*func_count, state.a, state.b, refined, error);
-    }
-    if error.abs() <= 15.0 * state.tol {
-        return Ok(refined + error / 15.0);
-    }
-    if state.depth == 0 {
-        return Err(quad_error_with_detail(
+    fn convergence_error(&self) -> RuntimeError {
+        quad_error_with_detail(
             &QUAD_ERROR_INVALID_INPUT,
             "adaptive Simpson quadrature did not converge",
-        ));
+        )
     }
 
-    let left_value = adaptive_simpson(
-        function,
-        extra_args,
-        SimpsonState {
-            a: state.a,
-            b: c,
-            fa: state.fa,
-            fc: fd,
-            fb: state.fc,
-            whole: left,
-            tol: state.tol * 0.5,
-            depth: state.depth - 1,
-        },
-        func_count,
-        trace,
-    )
-    .await?;
-    let right_value = adaptive_simpson(
-        function,
-        extra_args,
-        SimpsonState {
-            a: c,
-            b: state.b,
-            fa: state.fc,
-            fc: fe,
-            fb: state.fb,
-            whole: right,
-            tol: state.tol * 0.5,
-            depth: state.depth - 1,
-        },
-        func_count,
-        trace,
-    )
-    .await?;
-    Ok(left_value + right_value)
+    fn nonrepresentable_error(&self) -> RuntimeError {
+        quad_error_with_detail(
+            &QUAD_ERROR_INVALID_INPUT,
+            "quadrature estimate is not representable as a finite double",
+        )
+    }
+
+    fn arithmetic_error(&self, error: QuadratureArithmeticError) -> RuntimeError {
+        quad_arithmetic_error(error)
+    }
+
+    fn refined(
+        &mut self,
+        evals: usize,
+        a: f64,
+        b: f64,
+        estimate: &ScaledEstimate,
+        error: &ScaledEstimate,
+    ) -> BuiltinResult<()> {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.record(evals, a, b, estimate.trace_f64(), error.trace_f64())?;
+        }
+        Ok(())
+    }
 }
 
-fn midpoint(a: f64, b: f64) -> f64 {
-    a + (b - a) * 0.5
-}
-
-fn simpson(a: f64, b: f64, fa: f64, fm: f64, fb: f64) -> f64 {
-    (b - a) * (fa + 4.0 * fm + fb) / 6.0
-}
-
-async fn call_integrand(function: &Value, x: f64, extra_args: &[Value]) -> BuiltinResult<f64> {
-    let mut args = Vec::with_capacity(1 + extra_args.len());
-    args.push(Value::Num(x));
-    args.extend(extra_args.iter().cloned());
-    let value = call_function(function, args).await?;
-    let value =
-        prepare_quad_floating_value("integrand result", value, &INTEGER_CALLBACK_EXTENSION).await?;
-    value_to_scalar(NAME, value)
+async fn call_integrand(
+    function: &Value,
+    x: f64,
+    arguments: &mut [Value],
+    cooperation: &mut QuadratureCooperation,
+) -> BuiltinResult<f64> {
+    cooperation.completed(0).await?;
+    arguments[0] = Value::Num(x);
+    let value = call_function(function, &*arguments).await?;
+    cooperation.completed(1).await?;
+    value
+        .with_owned_async(|value| async move {
+            let value = prepare_quad_floating_value(
+                "integrand result",
+                value,
+                &INTEGER_CALLBACK_EXTENSION,
+                cooperation,
+            )
+            .await?;
+            value_to_scalar(NAME, value)
+        })
+        .await
 }
 
 struct QuadTrace;
 
 impl QuadTrace {
-    fn record(&mut self, func_count: usize, a: f64, b: f64, q: f64, _err: f64) {
+    fn record(
+        &mut self,
+        func_count: usize,
+        a: f64,
+        b: f64,
+        q: f64,
+        _err: f64,
+    ) -> BuiltinResult<()> {
         crate::console::record_console_line(
             crate::console::ConsoleStream::Stdout,
             format!(
                 "    {func_count:>5}    {a:13.6e} {width:13.6e} {q:13.6e}",
                 width = b - a,
             ),
-        );
+        )
     }
 }
 
@@ -723,7 +753,7 @@ fn finalize(result: QuadResult) -> BuiltinResult<Value> {
     let fcnt = Value::Num(result.func_count as f64);
     match crate::output_count::current_output_count() {
         None => Ok(q),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(crate::output_count::output_list_with_padding(1, vec![q])),
         Some(2) => Ok(crate::output_count::output_list_with_padding(
             2,
@@ -745,13 +775,34 @@ mod tests {
     use runmat_value::{IntegerStorage, Tensor};
     use std::sync::Arc;
 
+    fn selected_integrand(
+        function: usize,
+        name: &str,
+    ) -> (
+        crate::context::RuntimeContext,
+        Value,
+        crate::user_functions::BoundFunctionInvokerGuard,
+    ) {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, function);
+        let entry = runtime.enter();
+        let forwarder =
+            crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(entry);
+        (
+            runtime,
+            crate::user_functions::test_support::exact_local_value(name, binding),
+            forwarder,
+        )
+    }
+
     #[test]
     fn quad_integrates_sine_with_default_tolerance() {
         let result = block_on(quad_builtin(
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(std::f64::consts::PI),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("quad");
         match result {
@@ -762,26 +813,31 @@ mod tests {
 
     #[test]
     fn quad_respects_tighter_tolerance_on_polynomial() {
+        let (runtime, integrand, _bound) = selected_integrand(7, "square");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 7);
                 assert_eq!(requested_outputs, 1);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected x, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(x * x)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        x * x,
+                    ))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "square".to_string(),
-                function: 7,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Num(1.0e-10)],
-        ))
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0e-10)]),
+        )))
         .expect("quad");
         match result {
             Value::Num(value) => assert!((value - (1.0 / 3.0)).abs() < 1.0e-10),
@@ -791,12 +847,12 @@ mod tests {
 
     #[test]
     fn quad_two_outputs_include_function_count() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(quad_builtin(
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(std::f64::consts::PI),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("quad");
         match result {
@@ -816,15 +872,21 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(std::f64::consts::PI),
-            vec![Value::Num(1.0e-6), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0e-6),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("quad");
         assert!(matches!(result, Value::Num(_)));
 
-        let joined = crate::console::take_thread_buffer()
-            .into_iter()
-            .map(|entry| entry.text)
-            .collect::<String>();
+        let joined = crate::console::take_thread_buffer().into_iter().fold(
+            String::new(),
+            |mut text, entry| {
+                text.push_str(entry.text.as_str());
+                text
+            },
+        );
         let first_row: Vec<&str> = joined
             .lines()
             .next()
@@ -851,7 +913,10 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Tensor(tol), Value::Tensor(trace)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(tol),
+                Value::Tensor(trace),
+            ]),
         ))
         .expect("quad");
         assert!(matches!(result, Value::Num(_)));
@@ -870,7 +935,9 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Tensor(tolerance)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                tolerance,
+            )]),
         ))
         .expect_err("integer tolerance is a RunMat-only extension");
 
@@ -890,7 +957,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Tensor(bound),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("wide integer bound cannot cross exactly");
 
@@ -907,10 +974,10 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Tensor(trace),
-            ],
+            ]),
         ))
         .expect("documented integer trace selector");
 
@@ -920,10 +987,13 @@ mod tests {
 
     #[test]
     fn quad_passes_wide_integer_extra_parameter_exactly() {
+        let (runtime, integrand, _bound) = selected_integrand(902, "parameterized");
+        let _entry = runtime.enter();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let expected = u64::MAX;
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 902);
                 let Value::Tensor(parameter) = &args[1] else {
                     panic!("expected integer parameter")
                 };
@@ -934,25 +1004,25 @@ mod tests {
                 let Value::Num(x) = args[0] else {
                     panic!("expected scalar quadrature point")
                 };
-                Box::pin(async move { Ok(Value::Num(x)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(x))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let parameter =
             Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "parameterized".to_string(),
-                function: 902,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Num(0.0),
                 Value::Tensor(parameter),
-            ],
-        ))
+            ]),
+        )))
         .expect("exact callback parameter");
 
         assert!(matches!(result, Value::Num(value) if (value - 0.5).abs() < 1.0e-6));
@@ -969,13 +1039,14 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let result = block_on(quad_builtin(
                 Value::FunctionHandle("sin".into()),
                 Value::Num(0.0),
                 Value::GpuTensor(automatic),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("automatic resident bound gathers");
             assert!(matches!(result, Value::Num(_)));
@@ -986,14 +1057,15 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(quad_builtin(
                 Value::FunctionHandle("sin".into()),
                 Value::Num(0.0),
                 Value::GpuTensor(explicit),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect_err("explicit resident bound is gated before fallback");
             assert_eq!(
@@ -1005,6 +1077,8 @@ mod tests {
 
     #[test]
     fn quad_forwards_extra_arguments_after_tol_and_trace() {
+        let (runtime, integrand, _bound) = selected_integrand(42, "scaled_line");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 42);
@@ -1018,23 +1092,25 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scale, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(scale * x)) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        scale * x,
+                    ))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "scaled_line".to_string(),
-                function: 42,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(2.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Num(3.0),
-            ],
-        ))
+            ]),
+        )))
         .expect("quad");
         match result {
             Value::Num(value) => assert!((value - 6.0).abs() < 1.0e-8),
@@ -1048,7 +1124,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(2.0 * std::f64::consts::PI),
-            vec![Value::Num(1.0e-8)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0e-8)]),
         ))
         .expect("quad");
         match result {
@@ -1059,25 +1135,30 @@ mod tests {
 
     #[test]
     fn quad_handles_integrable_endpoint_shape() {
+        let (runtime, integrand, _bound) = selected_integrand(9, "sqrt_fn");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 9);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected x, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(x.sqrt())) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        x.sqrt(),
+                    ))
+                })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "sqrt_fn".to_string(),
-                function: 9,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Num(1.0e-7)],
-        ))
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0e-7)]),
+        )))
         .expect("quad");
         match result {
             Value::Num(value) => assert!((value - (2.0 / 3.0)).abs() < 1.0e-6),
@@ -1091,7 +1172,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(std::f64::consts::PI),
             Value::Num(0.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("quad");
         match result {
@@ -1102,12 +1183,12 @@ mod tests {
 
     #[test]
     fn quad_rejects_more_than_two_outputs() {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = block_on(quad_builtin(
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("too many outputs should fail");
         assert_eq!(err.identifier(), Some("RunMat:quad:TooManyOutputs"));
@@ -1143,5 +1224,57 @@ mod tests {
                 "RM.QUAD.TOO_MANY_OUTPUTS",
             ]
         );
+    }
+
+    #[test]
+    fn invalid_host_tolerance_is_rejected_before_callback() {
+        let error = block_on(quad_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-1.0)]),
+        ))
+        .expect_err("negative tolerance");
+        assert_eq!(error.identifier(), QUAD_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn invalid_callback_is_rejected_during_admission() {
+        let error = block_on(quad_builtin(
+            Value::Num(7.0),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("invalid callback");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED.identifier,
+        );
+    }
+
+    #[test]
+    fn registered_quad_observes_preexisting_cancellation_before_callback() {
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::rc::Rc;
+
+        let source = CancellationSource::new();
+        source.cancel(CancellationReason::User);
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let error = block_on(quad_builtin_registered(
+            Some(runtime),
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(error.source.is_some());
     }
 }

@@ -4,52 +4,141 @@ use crate::{
 };
 use runmat_geometry_core::{AssemblyNode, CadRegionOwnership};
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 use runmat_geometry_core::{
     CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadSemanticKind,
 };
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 use std::collections::BTreeMap;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) mod evaluator;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod evaluator_bindings;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod evaluator_mass;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod evaluator_pcurve;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod evaluator_surface;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod evaluator_trim;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
+mod edge_tolerance_admission;
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_healing_projection;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_persistent_names;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_projection;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_projection_evaluators;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_projection_identity;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_projection_interfaces;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod exact_projection_occurrence;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
+pub(crate) mod feature;
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
+mod feature_history;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "occt-native"))]
+mod feature_profile_tests;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "occt-native"))]
+mod feature_tests;
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod ffi;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod import_validation;
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+/// K1: the geometry engine (`runmat-geometry-kernel` contract) on OCCT. Without the native
+/// backend every operation reports `NotSupported`.
+pub mod kernel;
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-kernel"
+))]
+mod kernel_ffi;
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 mod native;
 #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
 mod wasm;
+
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
+pub(crate) fn exact_kernel_abi() -> String {
+    ffi::bridge::exact_kernel_abi()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OcctCadFormat {
@@ -115,7 +204,10 @@ pub(crate) struct OcctCadPreviewSessionChunk {
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 pub(crate) struct OcctRawTopology {
@@ -135,7 +227,10 @@ pub(crate) struct OcctRawTopology {
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 pub(crate) struct OcctRawFaceSemantic {
@@ -168,7 +263,10 @@ pub(crate) struct OcctRawFaceEvaluationSample {
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 pub(crate) struct OcctRawAssemblyNode {
@@ -177,12 +275,18 @@ pub(crate) struct OcctRawAssemblyNode {
     pub label: String,
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) fn native_cad_backend_was_used() -> bool {
     native::native_cad_backend_was_used()
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) fn import_cad_topology(
     path: &str,
     bytes: &[u8],
@@ -193,7 +297,10 @@ pub(crate) fn import_cad_topology(
     native::import_cad_topology(path, bytes, format, options, context).map(Some)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) fn import_exact_cad_shape(
     path: &str,
     bytes: &[u8],
@@ -204,7 +311,20 @@ pub(crate) fn import_exact_cad_shape(
     native::import_exact_cad_shape(path, bytes, format, options, context)
 }
 
-#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+#[cfg(all(
+    target_arch = "wasm32",
+    feature = "occt-wasm-host",
+    not(feature = "occt-native")
+))]
+pub(crate) use wasm::{import_exact_cad_shape, import_geometry_host};
+
+#[cfg(not(any(
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
+    all(target_arch = "wasm32", feature = "occt-wasm-host")
+)))]
 pub(crate) fn import_exact_cad_shape(
     path: &str,
     bytes: &[u8],
@@ -230,7 +350,10 @@ pub(crate) fn import_cad_topology(
 }
 
 #[cfg(not(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 )))]
 pub(crate) fn import_cad_topology(
@@ -244,7 +367,10 @@ pub(crate) fn import_cad_topology(
     Ok(None)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) fn start_cad_preview_session(
     path: &str,
     bytes: &[u8],
@@ -255,7 +381,10 @@ pub(crate) fn start_cad_preview_session(
     native::start_cad_preview_session(path, bytes, format, options, context)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) fn read_cad_preview_session_chunk(
     session_id: u64,
     target_triangles: u64,
@@ -272,7 +401,10 @@ pub(crate) fn read_cad_preview_session_chunk(
     )
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-native"
+))]
 pub(crate) fn close_cad_preview_session(session_id: u64) {
     native::close_cad_preview_session(session_id);
 }
@@ -309,7 +441,10 @@ pub(crate) fn read_cad_preview_session_chunk(
 pub(crate) fn close_cad_preview_session(_session_id: u64) {}
 
 #[cfg(not(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 )))]
 pub(crate) fn start_cad_preview_session(
@@ -326,7 +461,10 @@ pub(crate) fn start_cad_preview_session(
 }
 
 #[cfg(not(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 )))]
 pub(crate) fn read_cad_preview_session_chunk(
@@ -343,13 +481,19 @@ pub(crate) fn read_cad_preview_session_chunk(
 }
 
 #[cfg(not(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 )))]
 pub(crate) fn close_cad_preview_session(_session_id: u64) {}
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 pub(crate) fn topology_from_raw(
@@ -459,7 +603,10 @@ pub(crate) fn topology_from_raw(
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 fn face_ownership_by_id(
@@ -515,7 +662,10 @@ fn face_ownership_by_id(
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 fn cad_label_ref(entry: String, name: String, kind: String) -> Option<CadLabelRef> {
@@ -528,7 +678,10 @@ fn cad_label_ref(entry: String, name: String, kind: String) -> Option<CadLabelRe
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 fn parse_cad_kind(kind: &str) -> CadSemanticKind {
@@ -549,7 +702,10 @@ fn parse_cad_kind(kind: &str) -> CadSemanticKind {
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 fn build_assembly(
@@ -585,7 +741,10 @@ fn build_assembly(
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 fn build_assembly_children(
@@ -622,7 +781,10 @@ fn build_assembly_children(
 }
 
 #[cfg(any(
-    all(not(target_arch = "wasm32"), feature = "occt-native"),
+    all(
+        any(not(target_arch = "wasm32"), target_os = "emscripten"),
+        feature = "occt-native"
+    ),
     all(target_arch = "wasm32", feature = "occt-wasm-host")
 ))]
 fn non_empty(value: String) -> Option<String> {

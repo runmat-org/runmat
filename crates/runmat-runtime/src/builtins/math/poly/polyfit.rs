@@ -1,19 +1,20 @@
 //! MATLAB-compatible `polyfit` builtin with GPU-aware semantics for RunMat.
 
-use log::{trace, warn};
+use log::warn;
 use num_complex::Complex64;
-use runmat_accelerate_api::ProviderPolyfitResult;
+use runmat_accelerate_api::{ProviderPolyfitOutputs, ProviderPolyfitResult};
+#[cfg(test)]
+use runmat_builtins::POLYFIT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, PolyfitStatField, POLYFIT_ERROR_INTERNAL,
+    POLYFIT_ERROR_INVALID_ARGUMENT, POLYFIT_ERROR_INVALID_INPUT, POLYFIT_ERROR_PROVIDER_FAILED,
+    POLYFIT_INTEGER_WEIGHTS_EXTENSION, POLYFIT_INTEGER_X_EXTENSION, POLYFIT_INTEGER_Y_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
+use super::normalization;
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -22,281 +23,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::math::poly::type_resolvers::polyfit_type;
 
-const EPS: f64 = 1.0e-12;
-const EPS_NAN: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyfit";
-
-const POLYFIT_OUTPUT_P: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Polynomial coefficient vector ordered from highest power to constant term.",
-}];
-
-const POLYFIT_OUTPUT_PS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector ordered from highest power to constant term.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Fit statistics structure with fields R, df, and normr.",
-    },
-];
-
-const POLYFIT_OUTPUT_PSMU: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector ordered from highest power to constant term.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Fit statistics structure with fields R, df, and normr.",
-    },
-    BuiltinParamDescriptor {
-        name: "mu",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Centering and scaling vector [mean(x), std(x)].",
-    },
-];
-
-const POLYFIT_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample x-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample y-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial degree.",
-    },
-];
-
-const POLYFIT_INPUTS_WEIGHTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample x-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample y-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial degree.",
-    },
-    BuiltinParamDescriptor {
-        name: "weights",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional nonnegative weight vector matching X and Y length.",
-    },
-];
-
-const POLYFIT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "p = polyfit(X, Y, n)",
-        inputs: &POLYFIT_INPUTS,
-        outputs: &POLYFIT_OUTPUT_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = polyfit(X, Y, n, weights)",
-        inputs: &POLYFIT_INPUTS_WEIGHTS,
-        outputs: &POLYFIT_OUTPUT_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S] = polyfit(X, Y, n)",
-        inputs: &POLYFIT_INPUTS,
-        outputs: &POLYFIT_OUTPUT_PS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S] = polyfit(X, Y, n, weights)",
-        inputs: &POLYFIT_INPUTS_WEIGHTS,
-        outputs: &POLYFIT_OUTPUT_PS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S, mu] = polyfit(X, Y, n)",
-        inputs: &POLYFIT_INPUTS,
-        outputs: &POLYFIT_OUTPUT_PSMU,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S, mu] = polyfit(X, Y, n, weights)",
-        inputs: &POLYFIT_INPUTS_WEIGHTS,
-        outputs: &POLYFIT_OUTPUT_PSMU,
-    },
-];
-
-const POLYFIT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYFIT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polyfit:InvalidArgument"),
-    when: "Degree/weight arguments are malformed or unsupported.",
-    message: "polyfit: invalid argument",
-};
-
-const POLYFIT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYFIT.INVALID_INPUT",
-    identifier: Some("RunMat:polyfit:InvalidInput"),
-    when: "Input vectors or values cannot be processed for polynomial fitting.",
-    message: "polyfit: invalid input",
-};
-
-const POLYFIT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYFIT.INTERNAL",
-    identifier: Some("RunMat:polyfit:Internal"),
-    when: "Runtime fails while constructing fit outputs or provider payloads.",
-    message: "polyfit: internal runtime failure",
-};
-
-const POLYFIT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    POLYFIT_ERROR_INVALID_ARGUMENT,
-    POLYFIT_ERROR_INVALID_INPUT,
-    POLYFIT_ERROR_INTERNAL,
-];
-
-pub const POLYFIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLYFIT_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLYFIT_ERRORS,
-};
-
-const POLYFIT_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyfit-integer-x",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyfit accepts typed-integer sample locations as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyfitIntegerXExtension"),
-};
-const POLYFIT_INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyfit-integer-y",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyfit accepts typed-integer sample values as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyfitIntegerYExtension"),
-};
-const POLYFIT_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyfit-integer-weights",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyfit accepts typed-integer observation weights as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyfitIntegerWeightsExtension"),
-};
-pub const POLYFIT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    POLYFIT_INTEGER_X_EXTENSION,
-    POLYFIT_INTEGER_Y_EXTENSION,
-    POLYFIT_INTEGER_WEIGHTS_EXTENSION,
-];
-
-const POLYFIT_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved.",
-    }];
-const POLYFIT_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary.",
-    }];
-const POLYFIT_INTEGER_DEGREE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public degree is a nonnegative integer scalar. Native integer scalars are decoded directly to usize and never materialized through binary64.",
-    }];
-const POLYFIT_INTEGER_WEIGHTS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "weights",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The implemented weighted overload is a RunMat extension and typed weights cross its checked binary64 least-squares boundary.",
-    }];
-pub const POLYFIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(integer_X,Y,n,___)",
-        inputs: &POLYFIT_INTEGER_X_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer X is independently gated before provider dispatch and QR fitting.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(X,integer_Y,n,___)",
-        inputs: &POLYFIT_INTEGER_Y_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer Y is independently gated before provider dispatch and QR fitting.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(X,Y,integer_n,___)",
-        inputs: &POLYFIT_INTEGER_DEGREE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Degree remains exact and structural; it selects Vandermonde width but does not enter numeric fitting data.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(X,Y,n,integer_weights)",
-        inputs: &POLYFIT_INTEGER_WEIGHTS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer weights are independently gated before weighted least squares.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -314,6 +42,25 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes:
         "Providers may gather to the host and invoke the shared Householder QR solver; WGPU implements this path today.",
 };
+
+#[path = "polyfit/kernel_error.rs"]
+pub mod kernel_error;
+use kernel_error::{PolyfitKernelError, PolyfitKernelResult};
+#[path = "polyfit/geometry.rs"]
+mod geometry;
+use geometry::SolverGeometry;
+#[path = "polyfit/column_scale.rs"]
+mod column_scale;
+#[path = "polyfit/response_scale.rs"]
+mod response_scale;
+#[path = "polyfit/solver.rs"]
+mod solver;
+#[path = "polyfit/provider_output.rs"]
+mod provider_output;
+use provider_output::{failure as provider_output_failure, ProviderOutputFault};
+#[cfg(test)]
+use solver::{compute_scale, householder_qr, scaled_coordinates, solve_upper, stable_l2};
+use solver::{solve_polyfit, validate_weights};
 
 fn polyfit_error_with(
     message: impl Into<String>,
@@ -351,31 +98,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polyfit",
-    category = "math/poly",
-    summary = "Fit polynomials to data using least squares.",
-    keywords = "polyfit,polynomial,least-squares,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(polyfit_type),
-    descriptor(crate::builtins::math::poly::polyfit::POLYFIT_DESCRIPTOR),
-    extensions(crate::builtins::math::poly::polyfit::POLYFIT_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::poly::polyfit::POLYFIT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 async fn polyfit_builtin(
     x: Value,
     y: Value,
     degree: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(x, y, degree, &rest).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
+    let requested_count = crate::output_count::current_output_count();
+    let outputs = requested_outputs(requested_count);
+    let eval = evaluate_requested(x, y, degree, rest.view(), outputs).await?;
+    if let Some(out_count) = requested_count {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = vec![eval.coefficients()];
         if out_count >= 2 {
-            outputs.push(eval.stats());
+            outputs.push(eval.stats().ok_or_else(|| {
+                polyfit_internal_error("polyfit: requested statistics were not produced")
+            })?);
         }
         if out_count >= 3 {
             outputs.push(eval.mu());
@@ -387,13 +130,52 @@ async fn polyfit_builtin(
     Ok(eval.coefficients())
 }
 
-/// Evaluate `polyfit`, returning the multi-output envelope used by the VM.
+fn requested_outputs(requested_count: Option<usize>) -> ProviderPolyfitOutputs {
+    match requested_count {
+        Some(count) if count >= 3 => ProviderPolyfitOutputs::StatisticsAndNormalization,
+        Some(count) if count >= 2 => ProviderPolyfitOutputs::Statistics,
+        _ => ProviderPolyfitOutputs::Coefficients,
+    }
+}
+
+/// Evaluate `polyfit` with statistics available to direct callers. The
+/// registered binding uses the captured requested-output count instead.
 pub async fn evaluate(
     x: Value,
     y: Value,
     degree: Value,
     rest: &[Value],
 ) -> BuiltinResult<PolyfitEval> {
+    let count = crate::output_count::current_output_count()
+        .unwrap_or(2)
+        .max(2);
+    let outputs = requested_outputs(Some(count));
+    evaluate_requested(
+        x,
+        y,
+        degree,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        outputs,
+    )
+    .await
+}
+
+async fn evaluate_requested(
+    x: Value,
+    y: Value,
+    degree: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    outputs: ProviderPolyfitOutputs,
+) -> BuiltinResult<PolyfitEval> {
+    if rest.len() > 1 {
+        return Err(polyfit_argument_error("polyfit: too many input arguments"));
+    }
+    let deg = parse_degree(&degree)?;
+    gpu_helpers::require_resident_compute_values(
+        &[&x, &y, rest.first().unwrap_or(&x)],
+        false,
+        || polyfit_internal_error("polyfit: no exact owner for resident input"),
+    )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&x, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&y, "polyfit")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&degree, "polyfit")?;
@@ -423,9 +205,7 @@ pub async fn evaluate(
         )
         .await?;
     }
-    let deg = parse_degree(&degree)?;
-
-    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest).await? {
+    if let Some(eval) = try_gpu_polyfit(&x, &y, deg, rest, outputs).await? {
         return Ok(eval);
     }
 
@@ -445,7 +225,7 @@ pub async fn evaluate(
             "polyfit: X and Y must contain at least one sample",
         ));
     }
-    if deg + 1 > x_data.len() && x_data.len() > 1 {
+    if deg >= x_data.len() && x_data.len() > 1 {
         warn!(
             "polyfit: polynomial degree {} is ill-conditioned for {} data points; results may be inaccurate",
             deg,
@@ -453,8 +233,8 @@ pub async fn evaluate(
         );
     }
 
-    let weights = parse_weights(rest, x_data.len()).await?;
-    let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref())?;
+    let weights = parse_weights(rest, x_data.len(), deg, outputs).await?;
+    let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref(), outputs)?;
     if is_complex_input {
         solution.is_complex = true;
     }
@@ -466,13 +246,9 @@ async fn try_gpu_polyfit(
     x: &Value,
     y: &Value,
     degree: usize,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
+    outputs: ProviderPolyfitOutputs,
 ) -> BuiltinResult<Option<PolyfitEval>> {
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
     let x_handle = match x {
         Value::GpuTensor(handle) => handle,
         _ => return Ok(None),
@@ -491,48 +267,186 @@ async fn try_gpu_polyfit(
         Some(_) => return Ok(None),
         None => None,
     };
+    let inputs = [Some(x_handle), Some(y_handle), weight_handle]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let mut count = None;
+    for input in &inputs {
+        ensure_vector_shape("polyfit", "input", input.shape())?;
+        let len = if input.shape().contains(&0) {
+            0
+        } else {
+            input
+                .shape()
+                .iter()
+                .try_fold(1usize, |n, d| n.checked_mul(*d))
+                .ok_or_else(|| polyfit_error("polyfit: input size overflow"))?
+        };
+        if len == 0 || count.is_some_and(|count| count != len) {
+            return Err(polyfit_error(
+                "polyfit: input vectors must have matching nonempty lengths",
+            ));
+        }
+        count = Some(len);
+    }
+    SolverGeometry::for_outputs(
+        count.expect("x and y lengths were validated"),
+        degree,
+        outputs,
+    )?;
+    gpu_helpers::require_resident_compute_owners(&inputs, false, || {
+        polyfit_internal_error("polyfit: no exact owner for resident input")
+    })?;
+    let provider = gpu_helpers::require_resident_compute_owner(x_handle, || {
+        polyfit_internal_error("polyfit: no exact owner for resident input")
+    })?;
+    for input in &inputs {
+        let owner = gpu_helpers::require_resident_compute_owner(input, || {
+            polyfit_internal_error("polyfit: no exact owner for resident input")
+        })?;
+        if !runmat_accelerate_api::same_provider_instance(owner, provider)
+            || input.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(input)
+            || runmat_accelerate_api::handle_precision(input) != Some(provider.precision())
+        {
+            return Ok(None);
+        }
+    }
+    let _residency = inputs
+        .iter()
+        .map(|input| gpu_helpers::ResidencyRestoreGuard::new(input))
+        .collect::<Vec<_>>();
 
     let result = match provider
-        .polyfit(x_handle, y_handle, degree, weight_handle)
+        .polyfit(x_handle, y_handle, degree, weight_handle, outputs)
         .await
     {
         Ok(res) => res,
-        Err(err) => {
-            trace!("polyfit: provider path unavailable ({err}); falling back to host");
-            return Ok(None);
+        Err(error)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&error) =>
+        {
+            return Ok(None)
+        }
+        Err(error) => {
+            return Err(kernel_error::with_provider_source(
+                polyfit_internal_error(format!("polyfit: provider execution failed: {error}")),
+                runmat_accelerate_api::ProviderExecutionError::from(error),
+            ))
         }
     };
-
-    let solution = PolyfitSolution::from_provider(result)?;
+    let solution = PolyfitSolution::from_provider(
+        result,
+        outputs,
+        degree,
+        count.expect("resident input count validated"),
+    )?;
     PolyfitEval::from_solution(solution).map(Some)
 }
 
 #[derive(Clone, Debug)]
 struct PolyfitSolution {
     coeffs: Vec<Complex64>,
-    r_matrix: Vec<f64>,
+    r_matrix: Option<Vec<f64>>,
     mu_mean: f64,
     mu_scale: f64,
-    normr: f64,
+    normr: Option<f64>,
     df: f64,
     cols: usize,
     is_complex: bool,
 }
 
 impl PolyfitSolution {
-    fn from_provider(result: ProviderPolyfitResult) -> BuiltinResult<Self> {
+    fn from_provider(
+        result: ProviderPolyfitResult,
+        outputs: ProviderPolyfitOutputs,
+        degree: usize,
+        rows: usize,
+    ) -> BuiltinResult<Self> {
         let cols = result.coefficients.len();
-        if cols == 0 {
-            return Err(polyfit_internal_error(
-                "polyfit: provider returned empty coefficient vector",
+        let expected_cols = degree.checked_add(1).ok_or_else(|| {
+            provider_output_failure(ProviderOutputFault::CoefficientCount {
+                expected: usize::MAX,
+                observed: cols,
+            })
+        })?;
+        if cols != expected_cols {
+            return Err(provider_output_failure(
+                ProviderOutputFault::CoefficientCount {
+                    expected: expected_cols,
+                    observed: cols,
+                },
             ));
         }
-        if result.r_matrix.len() != cols * cols {
-            return Err(polyfit_internal_error(
-                "polyfit: provider returned malformed R matrix",
+        if let Some(index) = result
+            .coefficients
+            .iter()
+            .position(|value| !value.is_finite())
+        {
+            return Err(provider_output_failure(
+                ProviderOutputFault::NonFiniteCoefficient { index },
+            ));
+        }
+        if result.r_matrix.is_some() != outputs.wants_statistics() {
+            return Err(provider_output_failure(
+                ProviderOutputFault::StatisticsPresence,
+            ));
+        }
+        if result.normr.is_some() != outputs.wants_statistics() {
+            return Err(provider_output_failure(
+                ProviderOutputFault::ResidualPresence,
+            ));
+        }
+        if let Some(r) = &result.r_matrix {
+            let expected = cols.checked_mul(cols).ok_or_else(|| {
+                provider_output_failure(ProviderOutputFault::RLength {
+                    expected: usize::MAX,
+                    observed: r.len(),
+                })
+            })?;
+            if r.len() != expected {
+                return Err(provider_output_failure(ProviderOutputFault::RLength {
+                    expected,
+                    observed: r.len(),
+                }));
+            }
+            if let Some(index) = r.iter().position(|value| !value.is_finite()) {
+                return Err(provider_output_failure(ProviderOutputFault::NonFiniteR {
+                    index,
+                }));
+            }
+        }
+        if result
+            .normr
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(provider_output_failure(
+                ProviderOutputFault::NonFiniteResidual,
+            ));
+        }
+        let expected_df = rows.saturating_sub(cols) as f64;
+        if result.df != expected_df {
+            return Err(provider_output_failure(
+                ProviderOutputFault::DegreesOfFreedom {
+                    expected: expected_df,
+                    observed: result.df,
+                },
             ));
         }
         let [mu_mean, mu_scale] = result.mu;
+        let valid_mu = match outputs.basis() {
+            runmat_accelerate_api::ProviderPolyfitBasis::Original => {
+                mu_mean == 0.0 && mu_scale == 1.0
+            }
+            runmat_accelerate_api::ProviderPolyfitBasis::CenteredScaled => {
+                mu_mean.is_finite() && mu_scale.is_finite() && mu_scale > 0.0
+            }
+        };
+        if !valid_mu {
+            return Err(provider_output_failure(
+                ProviderOutputFault::InvalidNormalization,
+            ));
+        }
         Ok(Self {
             coeffs: result
                 .coefficients
@@ -554,7 +468,7 @@ impl PolyfitSolution {
 #[derive(Debug)]
 pub struct PolyfitEval {
     coefficients: Value,
-    stats: Value,
+    stats: Option<Value>,
     mu: Value,
     is_complex: bool,
 }
@@ -562,12 +476,15 @@ pub struct PolyfitEval {
 impl PolyfitEval {
     fn from_solution(solution: PolyfitSolution) -> BuiltinResult<Self> {
         let coefficients = coefficients_to_value(&solution.coeffs)?;
-        let stats = build_stats(
-            &solution.r_matrix,
-            solution.cols,
-            solution.normr,
-            solution.df,
-        )?;
+        let stats = match (&solution.r_matrix, solution.normr) {
+            (Some(r), Some(normr)) => Some(build_stats(r, solution.cols, normr, solution.df)?),
+            (None, None) => None,
+            _ => {
+                return Err(polyfit_internal_error(
+                    "polyfit: QR statistics and residual norm must be returned together",
+                ))
+            }
+        };
         let mu = build_mu(solution.mu_mean, solution.mu_scale)?;
         Ok(Self {
             coefficients,
@@ -582,8 +499,8 @@ impl PolyfitEval {
         self.coefficients.clone()
     }
 
-    /// Structure `S` containing fields `R`, `df`, and `normr`.
-    pub fn stats(&self) -> Value {
+    /// Structure `S` containing fields `R`, `df`, and `normr`, if requested.
+    pub fn stats(&self) -> Option<Value> {
         self.stats.clone()
     }
 
@@ -610,7 +527,7 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
                 return Err(polyfit_argument_error("polyfit: degree must be finite"));
             }
             let rounded = n.round();
-            if (rounded - n).abs() > EPS {
+            if rounded != *n {
                 return Err(polyfit_argument_error("polyfit: degree must be an integer"));
             }
             if rounded < 0.0 {
@@ -645,12 +562,12 @@ fn fits_platform_usize(value: f64) -> bool {
 async fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::Num(n) => Ok(vec![n]),
@@ -678,7 +595,7 @@ async fn complex_vector(
 ) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             let all_real = true;
             let data = tensor::tensor_values_f64(&tensor)
                 .into_iter()
@@ -687,13 +604,10 @@ async fn complex_vector(
             Ok((data, all_real))
         }
         Value::ComplexTensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
-            let is_complex = tensor
-                .materialize_f64()
-                .iter()
-                .any(|&(_, im)| im.abs() > EPS);
-            let data = tensor
-                .materialize_f64()
+            ensure_vector_shape(context, label, tensor.shape())?;
+            let values = tensor.materialize_f64();
+            let is_complex = values.iter().any(|&(_, im)| im != 0.0);
+            let data = values
                 .into_iter()
                 .map(|(re, im)| Complex64::new(re, im))
                 .collect::<Vec<_>>();
@@ -701,7 +615,7 @@ async fn complex_vector(
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             Ok((
                 tensor::tensor_values_f64(&tensor)
                     .iter()
@@ -713,7 +627,7 @@ async fn complex_vector(
         Value::Num(n) => Ok((vec![Complex64::new(n, 0.0)], false)),
         Value::Int(i) => Ok((vec![Complex64::new(i.to_f64(), 0.0)], false)),
         Value::Bool(b) => Ok((vec![Complex64::new(if b { 1.0 } else { 0.0 }, 0.0)], false)),
-        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im.abs() > EPS)),
+        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im != 0.0)),
         Value::GpuTensor(handle) => {
             let gathered =
                 crate::builtins::common::gpu_helpers::gather_tensor_async(&handle).await?;
@@ -725,7 +639,12 @@ async fn complex_vector(
     }
 }
 
-async fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f64>>> {
+async fn parse_weights(
+    rest: crate::call::FunctionArgumentView<'_>,
+    len: usize,
+    degree: usize,
+    outputs: ProviderPolyfitOutputs,
+) -> BuiltinResult<Option<Vec<f64>>> {
     match rest.len() {
         0 => Ok(None),
         1 => {
@@ -736,184 +655,12 @@ async fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f
                     "polyfit: weight vector must match the size of X",
                 ));
             }
+            SolverGeometry::for_outputs(len, degree, outputs)?;
             validate_weights(&data)?;
             Ok(Some(data))
         }
         _ => Err(polyfit_argument_error("polyfit: too many input arguments")),
     }
-}
-
-fn validate_weights(weights: &[f64]) -> BuiltinResult<()> {
-    for (idx, w) in weights.iter().enumerate() {
-        if !w.is_finite() {
-            return Err(polyfit_argument_error(format!(
-                "polyfit: weight at position {} must be finite",
-                idx + 1
-            )));
-        }
-        if *w < 0.0 {
-            return Err(polyfit_argument_error(
-                "polyfit: weights must be non-negative",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn solve_polyfit(
-    x_data: &[f64],
-    y_data: &[Complex64],
-    degree: usize,
-    weights: Option<&[f64]>,
-) -> BuiltinResult<PolyfitSolution> {
-    if x_data.len() != y_data.len() {
-        return Err(polyfit_error(
-            "polyfit: X and Y vectors must be the same length",
-        ));
-    }
-    if x_data.is_empty() {
-        return Err(polyfit_error(
-            "polyfit: X and Y must contain at least one sample",
-        ));
-    }
-    if let Some(w) = weights {
-        if w.len() != x_data.len() {
-            return Err(polyfit_argument_error(
-                "polyfit: weight vector must match the size of X",
-            ));
-        }
-        validate_weights(w)?;
-    }
-
-    let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
-    if !mean.is_finite() {
-        return Err(polyfit_error("polyfit: mean of X must be finite"));
-    }
-    let scale = compute_scale(x_data, mean)?;
-    let scaled: Vec<f64> = x_data.iter().map(|&v| (v - mean) / scale).collect();
-
-    let mut rhs = y_data.to_vec();
-    for (idx, value) in rhs.iter().enumerate() {
-        if !value.re.is_finite() || !value.im.is_finite() {
-            return Err(polyfit_error(format!(
-                "polyfit: Y must contain finite values (encountered NaN/Inf at position {})",
-                idx + 1
-            )));
-        }
-    }
-    if let Some(w) = weights {
-        apply_weights_rhs(&mut rhs, w)?;
-    }
-
-    let rows = scaled.len();
-    let cols = degree + 1;
-    let mut vandermonde = build_vandermonde(&scaled, cols);
-    if let Some(w) = weights {
-        apply_weights_matrix(&mut vandermonde, rows, cols, w)?;
-    }
-
-    let mut transformed_rhs = rhs.clone();
-    householder_qr(&mut vandermonde, rows, cols, &mut transformed_rhs)?;
-    let coeff_scaled = solve_upper(&vandermonde, rows, cols, &transformed_rhs)?;
-    let coeff_original = transform_coefficients(&coeff_scaled, mean, scale);
-
-    let normr = residual_norm(&transformed_rhs, rows, cols);
-    let df = if rows > cols {
-        (rows - cols) as f64
-    } else {
-        0.0
-    };
-    let r_matrix = extract_upper(&vandermonde, rows, cols);
-    let is_complex = coeff_original.iter().any(|c| c.im.abs() > EPS_NAN);
-
-    Ok(PolyfitSolution {
-        coeffs: coeff_original,
-        r_matrix,
-        mu_mean: mean,
-        mu_scale: scale,
-        normr,
-        df,
-        cols,
-        is_complex,
-    })
-}
-
-fn compute_scale(data: &[f64], mean: f64) -> BuiltinResult<f64> {
-    if data.len() <= 1 {
-        return Ok(1.0);
-    }
-    let mut acc = 0.0;
-    for &value in data {
-        if !value.is_finite() {
-            return Err(polyfit_error("polyfit: X must contain finite values"));
-        }
-        let diff = value - mean;
-        acc += diff * diff;
-    }
-    let denom = (data.len() as f64 - 1.0).max(1.0);
-    let std = (acc / denom).sqrt();
-    let scale = if std.abs() <= EPS { 1.0 } else { std };
-    if !scale.is_finite() {
-        return Err(polyfit_error(
-            "polyfit: failed to compute a stable scaling factor",
-        ));
-    }
-    Ok(scale)
-}
-
-fn build_vandermonde(u: &[f64], cols: usize) -> Vec<f64> {
-    let rows = u.len();
-    let mut matrix = vec![0.0; rows * cols];
-    if cols == 0 {
-        return matrix;
-    }
-    for (row_idx, &value) in u.iter().enumerate() {
-        let mut powers = vec![0.0; cols];
-        powers[cols - 1] = 1.0;
-        for idx in (0..cols - 1).rev() {
-            powers[idx] = powers[idx + 1] * value;
-        }
-        for col_idx in 0..cols {
-            matrix[row_idx + col_idx * rows] = powers[col_idx];
-        }
-    }
-    matrix
-}
-
-fn apply_weights_matrix(
-    matrix: &mut [f64],
-    rows: usize,
-    cols: usize,
-    weights: &[f64],
-) -> BuiltinResult<()> {
-    for (row, weight) in weights.iter().enumerate().take(rows) {
-        let sqrt_w = weight.sqrt();
-        if !sqrt_w.is_finite() {
-            return Err(polyfit_error(format!(
-                "polyfit: weight at position {} must be finite",
-                row + 1
-            )));
-        }
-        for col in 0..cols {
-            let idx = row + col * rows;
-            matrix[idx] *= sqrt_w;
-        }
-    }
-    Ok(())
-}
-
-fn apply_weights_rhs(rhs: &mut [Complex64], weights: &[f64]) -> BuiltinResult<()> {
-    for (idx, (value, weight)) in rhs.iter_mut().zip(weights.iter()).enumerate() {
-        let sqrt_w = weight.sqrt();
-        if !sqrt_w.is_finite() {
-            return Err(polyfit_error(format!(
-                "polyfit: weight at position {} must be finite",
-                idx + 1
-            )));
-        }
-        *value *= sqrt_w;
-    }
-    Ok(())
 }
 
 fn ensure_vector_shape(context: &str, label: &str, shape: &[usize]) -> BuiltinResult<()> {
@@ -929,145 +676,8 @@ fn is_vector_shape(shape: &[usize]) -> bool {
     shape.iter().copied().filter(|&dim| dim > 1).count() <= 1
 }
 
-fn householder_qr(
-    matrix: &mut [f64],
-    rows: usize,
-    cols: usize,
-    rhs: &mut [Complex64],
-) -> BuiltinResult<()> {
-    let min_dim = rows.min(cols);
-    for k in 0..min_dim {
-        let mut norm_sq = 0.0;
-        for row in k..rows {
-            let val = matrix[row + k * rows];
-            norm_sq += val * val;
-        }
-        if norm_sq <= EPS {
-            continue;
-        }
-        let norm = norm_sq.sqrt();
-        let x0 = matrix[k + k * rows];
-        let alpha = if x0 >= 0.0 { -norm } else { norm };
-        let mut v = vec![0.0; rows - k];
-        v[0] = x0 - alpha;
-        for row in (k + 1)..rows {
-            v[row - k] = matrix[row + k * rows];
-        }
-        let v_norm_sq: f64 = v.iter().map(|&x| x * x).sum();
-        if v_norm_sq <= EPS {
-            continue;
-        }
-        let beta = 2.0 / v_norm_sq;
-        matrix[k + k * rows] = alpha;
-        for row in (k + 1)..rows {
-            matrix[row + k * rows] = 0.0;
-        }
-        for col in (k + 1)..cols {
-            let mut dot = 0.0;
-            for (idx, &vi) in v.iter().enumerate() {
-                let row_idx = k + idx;
-                dot += vi * matrix[row_idx + col * rows];
-            }
-            let factor = beta * dot;
-            for (idx, &vi) in v.iter().enumerate() {
-                let row_idx = k + idx;
-                matrix[row_idx + col * rows] -= factor * vi;
-            }
-        }
-        let mut dot = Complex64::new(0.0, 0.0);
-        for (idx, &vi) in v.iter().enumerate() {
-            let row_idx = k + idx;
-            dot += rhs[row_idx] * vi;
-        }
-        let factor = Complex64::new(beta, 0.0) * dot;
-        for (idx, &vi) in v.iter().enumerate() {
-            let row_idx = k + idx;
-            rhs[row_idx] -= factor * vi;
-        }
-    }
-    Ok(())
-}
-
-fn solve_upper(
-    matrix: &[f64],
-    rows: usize,
-    cols: usize,
-    rhs: &[Complex64],
-) -> BuiltinResult<Vec<Complex64>> {
-    if rhs.len() < rows {
-        return Err(polyfit_error(
-            "polyfit internal error: RHS dimension mismatch",
-        ));
-    }
-    let mut coeffs = vec![Complex64::new(0.0, 0.0); cols];
-    for col in (0..cols).rev() {
-        let diag = if col < rows {
-            matrix[col + col * rows]
-        } else {
-            0.0
-        };
-        if diag.abs() <= EPS {
-            coeffs[col] = Complex64::new(0.0, 0.0);
-            continue;
-        }
-        let mut acc = if col < rows {
-            rhs[col]
-        } else {
-            Complex64::new(0.0, 0.0)
-        };
-        for next in (col + 1)..cols {
-            let idx = if col < rows {
-                matrix[col + next * rows]
-            } else {
-                0.0
-            };
-            acc -= Complex64::new(idx, 0.0) * coeffs[next];
-        }
-        coeffs[col] = acc / Complex64::new(diag, 0.0);
-    }
-    Ok(coeffs)
-}
-
-fn residual_norm(rhs: &[Complex64], rows: usize, cols: usize) -> f64 {
-    let tail_start = rows.min(cols);
-    let mut acc = 0.0;
-    for value in rhs.iter().skip(tail_start) {
-        acc += value.norm_sqr();
-    }
-    acc.sqrt()
-}
-
-fn extract_upper(matrix: &[f64], rows: usize, cols: usize) -> Vec<f64> {
-    let mut output = vec![0.0; cols * cols];
-    for col in 0..cols {
-        for row in 0..=col {
-            if row < rows {
-                output[row + col * cols] = matrix[row + col * rows];
-            }
-        }
-    }
-    output
-}
-
-fn transform_coefficients(coeffs: &[Complex64], mean: f64, scale: f64) -> Vec<Complex64> {
-    let mut poly: Vec<Complex64> = Vec::new();
-    for &coeff in coeffs {
-        let mut next = vec![Complex64::new(0.0, 0.0); poly.len() + 1];
-        for (idx, &value) in poly.iter().enumerate() {
-            next[idx + 1] += value / scale;
-            next[idx] -= value * (mean / scale);
-        }
-        next[0] += coeff;
-        poly = next;
-    }
-    poly.reverse();
-    poly
-}
-
 fn coefficients_to_value(coeffs: &[Complex64]) -> BuiltinResult<Value> {
-    let all_real = coeffs
-        .iter()
-        .all(|c| c.im.abs() <= EPS_NAN && c.re.is_finite());
+    let all_real = coeffs.iter().all(|c| c.im == 0.0 && c.re.is_finite());
     if all_real {
         let data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
         let tensor = Tensor::new(data, vec![1, coeffs.len()])
@@ -1084,15 +694,24 @@ fn coefficients_to_value(coeffs: &[Complex64]) -> BuiltinResult<Value> {
 fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> BuiltinResult<Value> {
     let tensor =
         Tensor::new(r.to_vec(), vec![n, n]).map_err(|e| polyfit_error(format!("polyfit: {e}")))?;
-    let mut st = StructValue::new();
-    st.fields.insert("R".to_string(), Value::Tensor(tensor));
-    st.fields.insert("df".to_string(), Value::Num(df));
-    st.fields.insert("normr".to_string(), Value::Num(normr));
-    Ok(Value::Struct(st))
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
+    st.fields.insert(
+        PolyfitStatField::R.public_name().to_string(),
+        Value::Tensor(tensor),
+    );
+    st.fields.insert(
+        PolyfitStatField::DegreesOfFreedom.public_name().to_string(),
+        Value::Num(df),
+    );
+    st.fields.insert(
+        PolyfitStatField::ResidualNorm.public_name().to_string(),
+        Value::Num(normr),
+    );
+    Ok(Value::Struct(st.finish()))
 }
 
 fn build_mu(mean: f64, scale: f64) -> BuiltinResult<Value> {
-    if !scale.is_finite() || scale.abs() <= EPS {
+    if !scale.is_finite() || scale == 0.0 {
         return Err(polyfit_error("polyfit: mu(2) must be non-zero and finite"));
     }
     let tensor = Tensor::new(vec![mean, scale], vec![1, 2])
@@ -1103,9 +722,9 @@ fn build_mu(mean: f64, scale: f64) -> BuiltinResult<Value> {
 #[derive(Debug, Clone)]
 pub struct PolyfitHostRealResult {
     pub coefficients: Vec<f64>,
-    pub r_matrix: Vec<f64>,
+    pub r_matrix: Option<Vec<f64>>,
     pub mu: [f64; 2],
-    pub normr: f64,
+    pub normr: Option<f64>,
     pub df: f64,
 }
 
@@ -1114,22 +733,30 @@ pub fn polyfit_host_real_for_provider(
     y: &[f64],
     degree: usize,
     weights: Option<&[f64]>,
-) -> BuiltinResult<PolyfitHostRealResult> {
+    outputs: ProviderPolyfitOutputs,
+) -> PolyfitKernelResult<PolyfitHostRealResult> {
     if x.len() != y.len() {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit: X and Y vectors must be the same length",
         ));
     }
     if let Some(w) = weights {
         if w.len() != x.len() {
-            return Err(polyfit_error(
+            return Err(PolyfitKernelError::input(
                 "polyfit: weight vector must match the size of X",
             ));
         }
+    }
+    // Check the complex RHS conversion as well as the downstream matrix
+    // allocations before allocating any provider-fallback workspace.
+    if !x.is_empty() {
+        SolverGeometry::for_outputs(x.len(), degree, outputs)?;
+    }
+    if let Some(w) = weights {
         validate_weights(w)?;
     }
     let complex_y: Vec<Complex64> = y.iter().copied().map(|v| Complex64::new(v, 0.0)).collect();
-    let solution = solve_polyfit(x, &complex_y, degree, weights)?;
+    let solution = solve_polyfit(x, &complex_y, degree, weights, outputs)?;
     let PolyfitSolution {
         coeffs,
         r_matrix,
@@ -1141,7 +768,7 @@ pub fn polyfit_host_real_for_provider(
         is_complex,
     } = solution;
     if is_complex {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit: provider fallback produced complex coefficients for real data",
         ));
     }
@@ -1157,540 +784,5 @@ pub fn polyfit_host_real_for_provider(
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    #[test]
-    fn degree_parser_preserves_representable_uint64() {
-        assert_eq!(
-            parse_degree(&Value::Int(IntValue::U64(u64::MAX))).ok(),
-            usize::try_from(u64::MAX).ok()
-        );
-        assert!(parse_degree(&Value::Int(IntValue::I64(-1))).is_err());
-    }
-
-    #[test]
-    fn degree_parser_reads_typed_integer_scalar_storage_exactly() {
-        let degree =
-            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("typed degree");
-
-        assert_eq!(parse_degree(&Value::Tensor(degree)).unwrap(), 3);
-
-        let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
-            .expect("negative degree");
-        assert!(parse_degree(&Value::Tensor(negative)).is_err());
-    }
-
-    #[test]
-    fn degree_parser_rejects_unrepresentable_double_boundary() {
-        let boundary = if usize::BITS == 64 {
-            usize::MAX as f64
-        } else {
-            (usize::MAX as f64) + 1.0
-        };
-        assert!(parse_degree(&Value::Num(boundary)).is_err());
-    }
-
-    use crate::builtins::common::test_support;
-    use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
-
-    fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
-        assert!(
-            err.message().contains(needle),
-            "expected error containing '{needle}', got '{}'",
-            err.message()
-        );
-    }
-
-    #[test]
-    fn polyfit_rejects_typed_complex_integer_inputs() {
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let typed_complex = Value::ComplexTensor(
-            ComplexTensor::new_integer(
-                IntegerComplexStorage::new(
-                    IntegerStorage::I64(vec![i64::MAX]),
-                    IntegerStorage::I64(vec![-1]),
-                )
-                .expect("storage"),
-                vec![1, 1],
-            )
-            .expect("tensor"),
-        );
-        let err = evaluate(
-            typed_complex,
-            Value::Num(1.0),
-            Value::Int(IntValue::I32(0)),
-            &[],
-        )
-        .expect_err("typed complex integer input must reject");
-        assert_error_contains(err, "complex numbers with integer types");
-    }
-
-    fn evaluate(
-        x: Value,
-        y: Value,
-        degree: Value,
-        rest: &[Value],
-    ) -> Result<PolyfitEval, RuntimeError> {
-        block_on(super::evaluate(x, y, degree, rest))
-    }
-
-    #[test]
-    fn polyfit_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = POLYFIT_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|signature| signature.label)
-            .collect();
-        assert!(labels.contains(&"p = polyfit(X, Y, n)"));
-        assert!(labels.contains(&"p = polyfit(X, Y, n, weights)"));
-        assert!(labels.contains(&"[p, S] = polyfit(X, Y, n)"));
-        assert!(labels.contains(&"[p, S, mu] = polyfit(X, Y, n, weights)"));
-    }
-
-    #[test]
-    fn polyfit_descriptor_errors_have_stable_codes() {
-        let codes: Vec<&str> = POLYFIT_DESCRIPTOR
-            .errors
-            .iter()
-            .map(|error| error.code)
-            .collect();
-        assert!(codes.contains(&"RM.POLYFIT.INVALID_ARGUMENT"));
-        assert!(codes.contains(&"RM.POLYFIT.INVALID_INPUT"));
-        assert!(codes.contains(&"RM.POLYFIT.INTERNAL"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn fits_linear_data() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
-        let mut y_vals = Vec::new();
-        for i in 0..4 {
-            y_vals.push(1.5 * i as f64 + 2.0);
-        }
-        let y = Tensor::new(y_vals, vec![4, 1]).unwrap();
-        let eval = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(1)),
-            &[],
-        )
-        .expect("polyfit");
-        match eval.coefficients() {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.materialize_f64()[0] - 1.5).abs() < 1e-10);
-                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
-            }
-            other => panic!("expected tensor coefficients, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactly() {
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let x = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![4, 1]).unwrap();
-        let y = Tensor::new_integer(IntegerStorage::I16(vec![2, 4, 6, 8]), vec![4, 1]).unwrap();
-        let degree = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-        let weights =
-            Tensor::new_integer(IntegerStorage::U16(vec![1, 1, 1, 1]), vec![1, 4]).unwrap();
-        let eval = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Tensor(degree),
-            &[Value::Tensor(weights)],
-        )
-        .expect("polyfit");
-        match eval.coefficients() {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.materialize_f64()[0] - 2.0).abs() < 1e-10);
-                assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
-                assert!(t.integer_storage().is_none());
-            }
-            other => panic!("expected tensor coefficients, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn returns_struct_and_mu() {
-        let x = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 0.0, 1.0], vec![3, 1]).unwrap();
-        let eval = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[],
-        )
-        .expect("polyfit");
-        match eval.stats() {
-            Value::Struct(s) => {
-                assert!(s.fields.contains_key("R"));
-                assert!(s.fields.contains_key("df"));
-                assert!(s.fields.contains_key("normr"));
-            }
-            other => panic!("expected struct, got {other:?}"),
-        }
-        match eval.mu() {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert!((t.materialize_f64()[0]).abs() < 1e-10);
-                assert!(t.materialize_f64()[1].abs() > 0.0);
-            }
-            other => panic!("expected tensor mu, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn weighted_fit_matches_unweighted_when_weights_equal() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
-        let weights = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
-        let eval_unweighted = evaluate(
-            Value::Tensor(x.clone()),
-            Value::Tensor(y.clone()),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[],
-        )
-        .expect("polyfit");
-        let eval_weighted = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[Value::Tensor(weights)],
-        )
-        .expect("polyfit");
-        assert_eq!(eval_unweighted.coefficients(), eval_weighted.coefficients());
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn accepts_logical_degree_scalar() {
-        let x = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
-        let logical = runmat_value::LogicalArray::new(vec![1], vec![1, 1]).unwrap();
-        let eval = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::LogicalArray(logical),
-            &[],
-        )
-        .expect("polyfit");
-        assert!(matches!(eval.coefficients(), Value::Tensor(_)));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn rejects_non_integer_degree() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
-        let err = evaluate(Value::Tensor(x), Value::Tensor(y), Value::Num(1.5), &[])
-            .expect_err("polyfit should reject non-integer degree");
-        assert_eq!(err.identifier(), POLYFIT_ERROR_INVALID_ARGUMENT.identifier);
-        assert_error_contains(err, "integer");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn rejects_infinite_weights() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
-        let weights = Tensor::new(vec![1.0, f64::INFINITY, 1.0], vec![3, 1]).unwrap();
-        let err = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[Value::Tensor(weights)],
-        )
-        .expect_err("polyfit should reject infinite weights");
-        assert_error_contains(err, "weight at position 2");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn gpu_inputs_are_gathered() {
-        test_support::with_test_provider(|provider| {
-            let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-            let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &x.materialize_f64(),
-                shape: &x.shape,
-            };
-            let x_handle = provider.upload(&view).expect("upload");
-            let view_y = runmat_accelerate_api::HostTensorView {
-                data: &y.materialize_f64(),
-                shape: &y.shape,
-            };
-            let y_handle = provider.upload(&view_y).expect("upload");
-            let eval = evaluate(
-                Value::GpuTensor(x_handle),
-                Value::GpuTensor(y_handle),
-                Value::Int(runmat_value::IntValue::I32(2)),
-                &[],
-            )
-            .expect("polyfit");
-            assert!(matches!(eval.coefficients(), Value::Tensor(_)));
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn gpu_weights_are_gathered() {
-        test_support::with_test_provider(|provider| {
-            let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-            let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
-            let weights = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-
-            let x_view = runmat_accelerate_api::HostTensorView {
-                data: &x.materialize_f64(),
-                shape: &x.shape,
-            };
-            let y_view = runmat_accelerate_api::HostTensorView {
-                data: &y.materialize_f64(),
-                shape: &y.shape,
-            };
-            let w_view = runmat_accelerate_api::HostTensorView {
-                data: &weights.materialize_f64(),
-                shape: &weights.shape,
-            };
-
-            let x_handle = provider.upload(&x_view).expect("upload x");
-            let y_handle = provider.upload(&y_view).expect("upload y");
-            let w_handle = provider.upload(&w_view).expect("upload weights");
-
-            let cpu_eval = evaluate(
-                Value::Tensor(x.clone()),
-                Value::Tensor(y.clone()),
-                Value::Int(runmat_value::IntValue::I32(2)),
-                &[Value::Tensor(weights.clone())],
-            )
-            .expect("cpu polyfit");
-
-            let gpu_eval = evaluate(
-                Value::GpuTensor(x_handle.clone()),
-                Value::GpuTensor(y_handle.clone()),
-                Value::Int(runmat_value::IntValue::I32(2)),
-                &[Value::GpuTensor(w_handle.clone())],
-            )
-            .expect("gpu polyfit with weights");
-
-            assert_eq!(cpu_eval.coefficients(), gpu_eval.coefficients());
-            assert_eq!(cpu_eval.mu(), gpu_eval.mu());
-
-            let _ = provider.free(&x_handle);
-            let _ = provider.free(&y_handle);
-            let _ = provider.free(&w_handle);
-        });
-    }
-
-    #[cfg(feature = "wgpu")]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn polyfit_wgpu_matches_cpu() {
-        let options = runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default();
-        let _provider =
-            match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(options) {
-                Ok(p) => p,
-                Err(err) => {
-                    warn!("polyfit_wgpu_matches_cpu: skipping test ({err})");
-                    return;
-                }
-            };
-        let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0, 7.0, 13.0], vec![4, 1]).unwrap();
-
-        let cpu_eval = evaluate(
-            Value::Tensor(x.clone()),
-            Value::Tensor(y.clone()),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[],
-        )
-        .expect("cpu polyfit");
-
-        let trait_provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
-        let x_view = runmat_accelerate_api::HostTensorView {
-            data: &x.materialize_f64(),
-            shape: &x.shape,
-        };
-        let y_view = runmat_accelerate_api::HostTensorView {
-            data: &y.materialize_f64(),
-            shape: &y.shape,
-        };
-        let x_handle = trait_provider.upload(&x_view).expect("upload x");
-        let y_handle = trait_provider.upload(&y_view).expect("upload y");
-
-        let gpu_eval = evaluate(
-            Value::GpuTensor(x_handle.clone()),
-            Value::GpuTensor(y_handle.clone()),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[],
-        )
-        .expect("gpu polyfit");
-
-        let _ = trait_provider.free(&x_handle);
-        let _ = trait_provider.free(&y_handle);
-
-        let cpu_coeff = match cpu_eval.coefficients() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor coefficients, got {other:?}"),
-        };
-        let gpu_coeff = match gpu_eval.coefficients() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor coefficients, got {other:?}"),
-        };
-        assert_eq!(cpu_coeff.shape, gpu_coeff.shape);
-        for (a, b) in cpu_coeff
-            .materialize_f64()
-            .iter()
-            .zip(gpu_coeff.materialize_f64().iter())
-        {
-            assert!((a - b).abs() < 1e-9, "coeff mismatch {a} vs {b}");
-        }
-
-        let cpu_mu = match cpu_eval.mu() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor mu, got {other:?}"),
-        };
-        let gpu_mu = match gpu_eval.mu() {
-            Value::Tensor(t) => t,
-            other => panic!("expected tensor mu, got {other:?}"),
-        };
-        assert_eq!(cpu_mu.shape, gpu_mu.shape);
-        for (a, b) in cpu_mu
-            .materialize_f64()
-            .iter()
-            .zip(gpu_mu.materialize_f64().iter())
-        {
-            assert!((a - b).abs() < 1e-9, "mu mismatch {a} vs {b}");
-        }
-
-        let cpu_stats = match cpu_eval.stats() {
-            Value::Struct(s) => s,
-            other => panic!("expected struct stats, got {other:?}"),
-        };
-        let gpu_stats = match gpu_eval.stats() {
-            Value::Struct(s) => s,
-            other => panic!("expected struct stats, got {other:?}"),
-        };
-        let cpu_r = match cpu_stats.fields.get("R").expect("R present") {
-            Value::Tensor(t) => t.clone(),
-            other => panic!("expected tensor R, got {other:?}"),
-        };
-        let gpu_r = match gpu_stats.fields.get("R").expect("R present") {
-            Value::Tensor(t) => t.clone(),
-            other => panic!("expected tensor R, got {other:?}"),
-        };
-        assert_eq!(cpu_r.shape, gpu_r.shape);
-        for (a, b) in cpu_r
-            .materialize_f64()
-            .iter()
-            .zip(gpu_r.materialize_f64().iter())
-        {
-            assert!((a - b).abs() < 1e-9, "R mismatch {a} vs {b}");
-        }
-        let cpu_df = match cpu_stats.fields.get("df").expect("df present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric df, got {other:?}"),
-        };
-        let gpu_df = match gpu_stats.fields.get("df").expect("df present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric df, got {other:?}"),
-        };
-        assert!((cpu_df - gpu_df).abs() < 1e-9);
-        let cpu_normr = match cpu_stats.fields.get("normr").expect("normr present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric normr, got {other:?}"),
-        };
-        let gpu_normr = match gpu_stats.fields.get("normr").expect("normr present") {
-            Value::Num(n) => *n,
-            other => panic!("expected numeric normr, got {other:?}"),
-        };
-        assert!((cpu_normr - gpu_normr).abs() < 1e-9);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn rejects_mismatched_lengths() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(1)),
-            &[],
-        )
-        .expect_err("polyfit should reject mismatched vector lengths");
-        assert_error_contains(err, "same length");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn rejects_non_vector_inputs() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
-        let y = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
-        let err = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(1)),
-            &[],
-        )
-        .expect_err("polyfit should reject non-vector X");
-        assert_error_contains(err, "vector");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn rejects_weight_length_mismatch() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
-        let weights = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
-        let err = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[Value::Tensor(weights)],
-        )
-        .expect_err("polyfit should reject mismatched weights");
-        assert_error_contains(err, "weight vector must match");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn rejects_negative_weights() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-        let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
-        let weights = Tensor::new(vec![1.0, -1.0, 1.0], vec![3, 1]).unwrap();
-        let err = evaluate(
-            Value::Tensor(x),
-            Value::Tensor(y),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[Value::Tensor(weights)],
-        )
-        .expect_err("polyfit should reject negative weights");
-        assert_error_contains(err, "non-negative");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn fits_complex_data() {
-        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
-        let complex_values =
-            ComplexTensor::new(vec![(0.0, 1.0), (1.0, 0.5), (4.0, -0.25)], vec![3, 1]).unwrap();
-        let eval = evaluate(
-            Value::Tensor(x),
-            Value::ComplexTensor(complex_values),
-            Value::Int(runmat_value::IntValue::I32(2)),
-            &[],
-        )
-        .expect("polyfit complex");
-        match eval.coefficients() {
-            Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
-            }
-            other => panic!("expected complex tensor coefficients, got {other:?}"),
-        }
-    }
-}
+#[path = "polyfit/tests.rs"]
+pub(crate) mod tests;

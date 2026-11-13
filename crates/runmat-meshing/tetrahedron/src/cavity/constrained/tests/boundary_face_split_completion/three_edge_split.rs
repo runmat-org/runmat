@@ -32,7 +32,7 @@ fn boundary_face_three_edge_split_completion_reports_inserted_nodes_and_refined_
     );
     assert!(inserted_nodes
         .iter()
-        .all(|node| node.coordinates_m[2].abs() <= 1.0e-12));
+        .all(|node| node.coordinates_m.canonical_value()[2].abs() <= 1.0e-12));
     assert_eq!(split_tetrahedra.len(), 4);
     assert!(split_tetrahedra.iter().all(|tetrahedron| {
         inserted_nodes

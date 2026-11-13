@@ -5,7 +5,7 @@ use runmat_value::{IntegerStorage, Value};
 use runmat_vm::Instr;
 use test_helpers::{compile_source, interpret};
 
-fn execute_program(source: &str) -> Vec<Value> {
+fn execute_program(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }
@@ -13,7 +13,7 @@ fn execute_program(source: &str) -> Vec<Value> {
 fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::Tensor(left), Value::Tensor(right)) => {
-            assert_eq!(left.shape, right.shape);
+            assert_eq!(left.shape(), right.shape());
             assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Num(left), Value::Num(right)) => {
@@ -26,7 +26,7 @@ fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {
 fn assert_same_complex_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::ComplexTensor(left), Value::ComplexTensor(right)) => {
-            assert_eq!(left.shape, right.shape);
+            assert_eq!(left.shape(), right.shape());
             assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Complex(lr, li), Value::Complex(rr, ri)) => {
@@ -166,7 +166,7 @@ fn matrix_and_elementwise_object_overloads_dispatch_separately() {
     let vars = execute_program(
         "__register_test_classes(); \
          o = new_object('OverIdx'); \
-         o = call_method(o, 'subsasgn', '.', 'k', 5); \
+         o = call_method(o, 'subsasgn', struct('type', '.', 'subs', 'k'), 5); \
          a = o / 2; \
          b = o \\ 2; \
          c = o ./ 2; \

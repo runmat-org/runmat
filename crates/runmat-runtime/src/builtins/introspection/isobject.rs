@@ -1,92 +1,10 @@
-//! MATLAB-compatible `isobject` builtin.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::type_resolvers::isobject_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+//! Runtime binding for canonical object predicate.
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-use runmat_value::{IntValue, IntegerStorage};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isobject")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "isobject",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Metadata predicate; explicit gpuArray inputs stay resident and return logical true, while internal automatic residency remains an invisible numeric implementation detail.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isobject")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "isobject",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Object/type predicate that does not participate in fusion planning.",
-};
-
-const ISOBJECT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input is a MATLAB object.",
-}];
-
-const ISOBJECT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to inspect.",
-}];
-
-const ISOBJECT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isobject(A)",
-    inputs: &ISOBJECT_INPUTS,
-    outputs: &ISOBJECT_OUTPUT,
-}];
-
-const ISOBJECT_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const ISOBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISOBJECT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISOBJECT_ERRORS,
-};
-pub const ISOBJECT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "isobject is a universal object-type predicate; host integers and internally auto-resident integers return scalar false, while an explicitly constructed integer gpuArray returns true without payload access.",
-    };
 
 #[runtime_builtin(
     name = "isobject",
-    category = "introspection",
-    summary = "Return true when a value is a MATLAB object.",
-    keywords = "isobject,object,handle,metaclass,type checking",
-    accel = "metadata",
-    type_resolver(isobject_type),
-    descriptor(crate::builtins::introspection::isobject::ISOBJECT_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::isobject::ISOBJECT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::isobject"
 )]
 fn isobject_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -113,10 +31,9 @@ pub(crate) fn isobject_value(value: &Value) -> bool {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
-        CellArray, CharArray, Closure, HandleRef, Listener, MException, ObjectInstance,
-        StructValue, Tensor,
+        CellArray, CharArray, Closure, HandleRef, IntValue, IntegerStorage, Listener, MException,
+        ObjectInstance, Tensor,
     };
 
     fn handle_target() -> runmat_gc::GcHandle {
@@ -127,20 +44,20 @@ mod tests {
     fn runmat_object_variants_report_true() {
         let object = Value::Object(ObjectInstance::new("pkg.Point".to_string()));
         let handle = Value::HandleObject(HandleRef {
-            class_name: "pkg.PointHandle".to_string(),
+            class_name: "pkg.PointHandle".into(),
             target: handle_target(),
             valid: true,
         });
         let listener = Value::Listener(Listener {
             id: 1,
             target: handle_target(),
-            target_class_name: "pkg.Target".to_string(),
-            event_name: "Changed".to_string(),
+            target_class_name: "pkg.Target".into(),
+            event_name: "Changed".into(),
             callback: handle_target(),
             enabled: true,
             valid: true,
         });
-        let class_ref = Value::ClassRef("pkg.Point".to_string());
+        let class_ref = Value::ClassRef("pkg.Point".into());
         let exception = Value::MException(MException::new(
             "RunMat:Test".to_string(),
             "failure".to_string(),
@@ -156,22 +73,25 @@ mod tests {
 
     #[test]
     fn non_object_values_report_false() {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.insert("x", Value::Num(1.0));
         let values = vec![
             Value::Num(1.0),
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor")),
             Value::Bool(true),
-            Value::String("text".to_string()),
+            Value::String("text".to_string().into()),
             Value::CharArray(CharArray::new_row("text")),
             Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell")),
-            Value::Struct(st),
-            Value::FunctionHandle("sin".to_string()),
-            Value::Closure(Closure {
-                function_name: "anon".to_string(),
-                bound_function: None,
-                captures: Vec::new(),
-            }),
+            Value::Struct(st.finish()),
+            Value::FunctionHandle("sin".into()),
+            Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                lexical_environment: None,
+                function_name: "anon".into(),
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+                captures: Vec::new().into(),
+            })),
         ];
 
         for value in values {
@@ -208,16 +128,28 @@ mod tests {
                 .expect("integer tensor");
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload integer");
+            let caller_alias = handle.clone();
+            let original = handle.wire_descriptor();
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
             assert_eq!(
                 isobject_builtin(Value::GpuTensor(handle.clone())).unwrap(),
                 Value::Bool(false)
             );
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit immutable view");
+            drop(handle);
+            let handle = explicit;
             assert_eq!(
                 isobject_builtin(Value::GpuTensor(handle)).unwrap(),
                 Value::Bool(true)
             );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(caller_alias.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            drop(caller_alias);
+            assert!(lease.acquire().is_none());
         });
     }
 }

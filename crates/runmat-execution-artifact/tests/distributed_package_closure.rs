@@ -106,6 +106,10 @@ fn every_source_kind_converges_into_one_portable_credential_free_closure() {
             revision: source_revision,
         },
         access_paths,
+        native_interfaces: Vec::new(),
+        mex_artifacts: Vec::new(),
+        java_artifacts: Vec::new(),
+        python_artifacts: Vec::new(),
     };
     let handoff = FrozenProjectHandoff::new(project.clone());
     handoff.validate().unwrap();
@@ -115,7 +119,7 @@ fn every_source_kind_converges_into_one_portable_credential_free_closure() {
         .unwrap()
         .with_materialized_program(
             recipe,
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"portable-bytecode".to_vec(),
         )
         .build()
@@ -295,12 +299,16 @@ fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         entrypoint: "root_answer".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("portable-package-closure-v1"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     }
 }

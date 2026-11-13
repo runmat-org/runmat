@@ -18,19 +18,31 @@ fn boundary_steiner_exact_cover_diagnostic_reports_centroid_candidate_coverage()
     nodes.extend([
         ConstrainedCavityNode {
             node_id: 4,
-            coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 1.0 / 3.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 5,
-            coordinates_m: [1.0 / 3.0, 0.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 0.0, 1.0 / 3.0]),
         },
         ConstrainedCavityNode {
             node_id: 6,
-            coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]),
         },
         ConstrainedCavityNode {
             node_id: 7,
-            coordinates_m: [0.0, 1.0 / 3.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0 / 3.0, 1.0 / 3.0]),
         },
     ]);
 
@@ -62,19 +74,31 @@ fn boundary_patch_steiner_exact_cover_diagnostic_reports_boundary_complete_fixtu
     nodes.extend([
         ConstrainedCavityNode {
             node_id: 4,
-            coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 1.0 / 3.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 5,
-            coordinates_m: [1.0 / 3.0, 0.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 0.0, 1.0 / 3.0]),
         },
         ConstrainedCavityNode {
             node_id: 6,
-            coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]),
         },
         ConstrainedCavityNode {
             node_id: 7,
-            coordinates_m: [0.0, 1.0 / 3.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0 / 3.0, 1.0 / 3.0]),
         },
     ]);
 

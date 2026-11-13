@@ -30,9 +30,19 @@ fn plane_answers_complete_queries_and_clamps_projection_to_bounds() {
     assert_eq!(evaluator.periodicity(&id).unwrap(), [None, None]);
     let derivatives =
         ExactSurfaceEvaluator::derivatives(&evaluator, &id, [1.0, -1.0], &control).unwrap();
-    assert_eq!(derivatives.point_m, [1.0, -1.0, 0.0]);
-    assert_eq!(derivatives.du_m, [1.0, 0.0, 0.0]);
-    assert_eq!(derivatives.dv_m, [0.0, 1.0, 0.0]);
+    assert_eq!(derivatives.point_m.canonical_value(), [1.0, -1.0, 0.0]);
+    assert_eq!(
+        derivatives
+            .du_m
+            .with_canonical_storage(|values, _frames| *values),
+        [1.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        derivatives
+            .dv_m
+            .with_canonical_storage(|values, _frames| *values),
+        [0.0, 1.0, 0.0]
+    );
     assert_eq!(
         evaluator.unit_normal(&id, [0.0, 0.0], &control).unwrap(),
         [0.0, 0.0, 1.0]
@@ -40,14 +50,29 @@ fn plane_answers_complete_queries_and_clamps_projection_to_bounds() {
     let curvature = evaluator
         .principal_curvature(&id, [0.0, 0.0], &control)
         .unwrap();
-    assert_eq!(curvature.minimum_1_per_m, 0.0);
-    assert_eq!(curvature.maximum_1_per_m, 0.0);
+    assert_eq!(curvature.minimum_1_per_m.canonical_value(), 0.0);
+    assert_eq!(curvature.maximum_1_per_m.canonical_value(), 0.0);
     let projection = evaluator
-        .closest_point(&id, [3.0, -3.0, 2.0], 1.0e-10, &control)
+        .closest_point(
+            &id,
+            crate::physical::Position::new([3.0, -3.0, 2.0]),
+            crate::physical::Length::new(1.0e-10),
+            &control,
+        )
         .unwrap();
-    assert_eq!(projection.uv, [2.0, -2.0]);
-    assert_eq!(projection.point_m, [2.0, -2.0, 0.0]);
-    assert_near(projection.distance_m, 6.0f64.sqrt(), 1.0e-12);
+    assert_eq!(
+        projection
+            .uv
+            .each_ref()
+            .map(|coordinate| coordinate.with_native_coordinate(|value, _frame| value)),
+        [2.0, -2.0]
+    );
+    assert_eq!(projection.point_m.canonical_value(), [2.0, -2.0, 0.0]);
+    assert_near(
+        projection.distance_m.canonical_value(),
+        6.0f64.sqrt(),
+        1.0e-12,
+    );
 }
 
 #[test]
@@ -61,11 +86,14 @@ fn analytic_surfaces_produce_exact_partials_normals_and_curvature() {
     ];
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Cylinder {
-            origin_m: [0.0; 3],
+            origin_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             axis_m_per_v: [0.0, 0.0, 1.0],
-            radius_m: 2.0,
+            radius_m: runmat_types::physical::Length::new(2.0),
             domains,
         },
     };
@@ -78,9 +106,19 @@ fn analytic_surfaces_produce_exact_partials_normals_and_curvature() {
     );
     let cylinder =
         ExactSurfaceEvaluator::derivatives(&evaluator, &id, [0.0, 0.5], &control).unwrap();
-    assert_eq!(cylinder.point_m, [2.0, 0.0, 0.5]);
-    assert_eq!(cylinder.du_m, [0.0, 2.0, 0.0]);
-    assert_eq!(cylinder.dvv_m, [0.0; 3]);
+    assert_eq!(cylinder.point_m.canonical_value(), [2.0, 0.0, 0.5]);
+    assert_eq!(
+        cylinder
+            .du_m
+            .with_canonical_storage(|values, _frames| *values),
+        [0.0, 2.0, 0.0]
+    );
+    assert_eq!(
+        cylinder
+            .dvv_m
+            .with_canonical_storage(|values, _frames| *values),
+        [0.0; 3]
+    );
     assert_eq!(
         evaluator.unit_normal(&id, [0.0, 0.5], &control).unwrap(),
         [1.0, 0.0, 0.0]
@@ -88,16 +126,16 @@ fn analytic_surfaces_produce_exact_partials_normals_and_curvature() {
     let curvature = evaluator
         .principal_curvature(&id, [0.0, 0.5], &control)
         .unwrap();
-    assert_near(curvature.minimum_1_per_m, -0.5, 1.0e-14);
-    assert_eq!(curvature.maximum_1_per_m, 0.0);
+    assert_near(curvature.minimum_1_per_m.canonical_value(), -0.5, 1.0e-14);
+    assert_eq!(curvature.maximum_1_per_m.canonical_value(), 0.0);
 
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Cone {
-            apex_m: [0.0; 3],
+            apex_m: runmat_types::physical::Quantity::new([0.0; 3]),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             axis: [0.0, 0.0, 1.0],
-            semi_angle_rad: std::f64::consts::FRAC_PI_4,
+            semi_angle_rad: runmat_types::physical::Angle::new(std::f64::consts::FRAC_PI_4),
             domains: [
                 range(-std::f64::consts::PI, std::f64::consts::PI),
                 range(0.5, 3.0),
@@ -106,20 +144,39 @@ fn analytic_surfaces_produce_exact_partials_normals_and_curvature() {
     };
     let evaluator = PortableExactEvaluator::new(&registry, &topology, &model()).unwrap();
     let cone = ExactSurfaceEvaluator::derivatives(&evaluator, &id, [0.0, 2.0], &control).unwrap();
-    assert_near(cone.point_m[0], 2.0f64.sqrt(), 1.0e-14);
-    assert_near(cone.point_m[2], 2.0f64.sqrt(), 1.0e-14);
-    assert_near(cone.du_m[1], 2.0f64.sqrt(), 1.0e-14);
-    assert_near(cone.dv_m[0], std::f64::consts::FRAC_1_SQRT_2, 1.0e-14);
-    assert_near(cone.dv_m[2], std::f64::consts::FRAC_1_SQRT_2, 1.0e-14);
-    assert_near(cone.duv_m[1], std::f64::consts::FRAC_1_SQRT_2, 1.0e-14);
+    assert_near(cone.point_m.canonical_value()[0], 2.0f64.sqrt(), 1.0e-14);
+    assert_near(cone.point_m.canonical_value()[2], 2.0f64.sqrt(), 1.0e-14);
+    assert_near(
+        cone.du_m.with_canonical_storage(|values, _frames| *values)[1],
+        2.0f64.sqrt(),
+        1.0e-14,
+    );
+    assert_near(
+        cone.dv_m.with_canonical_storage(|values, _frames| *values)[0],
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0e-14,
+    );
+    assert_near(
+        cone.dv_m.with_canonical_storage(|values, _frames| *values)[2],
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0e-14,
+    );
+    assert_near(
+        cone.duv_m.with_canonical_storage(|values, _frames| *values)[1],
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0e-14,
+    );
 
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Sphere {
-            center_m: [0.0; 3],
+            center_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             z_axis: [0.0, 0.0, 1.0],
-            radius_m: 2.0,
+            radius_m: runmat_types::physical::Length::new(2.0),
             domains: [
                 range(-std::f64::consts::PI, std::f64::consts::PI),
                 range(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
@@ -128,28 +185,38 @@ fn analytic_surfaces_produce_exact_partials_normals_and_curvature() {
     };
     let evaluator = PortableExactEvaluator::new(&registry, &topology, &model()).unwrap();
     assert_eq!(
-        ExactSurfaceEvaluator::point(&evaluator, &id, [0.0, 0.0], &control).unwrap(),
+        ExactSurfaceEvaluator::point(&evaluator, &id, [0.0, 0.0], &control)
+            .unwrap()
+            .canonical_value(),
         [2.0, 0.0, 0.0]
     );
     let curvature = evaluator
         .principal_curvature(&id, [0.0, 0.0], &control)
         .unwrap();
-    assert_near(curvature.minimum_1_per_m, -0.5, 1.0e-14);
-    assert_near(curvature.maximum_1_per_m, -0.5, 1.0e-14);
+    assert_near(curvature.minimum_1_per_m.canonical_value(), -0.5, 1.0e-14);
+    assert_near(curvature.maximum_1_per_m.canonical_value(), -0.5, 1.0e-14);
     let projection = evaluator
-        .closest_point(&id, [3.0, 0.0, 0.0], 1.0e-10, &control)
+        .closest_point(
+            &id,
+            crate::physical::Position::new([3.0, 0.0, 0.0]),
+            crate::physical::Length::new(1.0e-10),
+            &control,
+        )
         .unwrap();
-    assert_near(projection.distance_m, 1.0, 1.0e-12);
+    assert_near(projection.distance_m.canonical_value(), 1.0, 1.0e-12);
 
     topology.faces[0].periodic_v = true;
     registry.surfaces[0].implementation = ExactSurfaceImplementation::Portable {
         definition: ExactSurfaceDefinition::Torus {
-            center_m: [0.0; 3],
+            center_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [0.0; 3],
+                ),
             x_axis: [1.0, 0.0, 0.0],
             y_axis: [0.0, 1.0, 0.0],
             z_axis: [0.0, 0.0, 1.0],
-            major_radius_m: 3.0,
-            minor_radius_m: 1.0,
+            major_radius_m: runmat_types::physical::Length::new(3.0),
+            minor_radius_m: runmat_types::physical::Length::new(1.0),
             domains: [
                 range(-std::f64::consts::PI, std::f64::consts::PI),
                 range(-std::f64::consts::PI, std::f64::consts::PI),
@@ -158,14 +225,16 @@ fn analytic_surfaces_produce_exact_partials_normals_and_curvature() {
     };
     let evaluator = PortableExactEvaluator::new(&registry, &topology, &model()).unwrap();
     assert_eq!(
-        ExactSurfaceEvaluator::point(&evaluator, &id, [0.0, 0.0], &control).unwrap(),
+        ExactSurfaceEvaluator::point(&evaluator, &id, [0.0, 0.0], &control)
+            .unwrap()
+            .canonical_value(),
         [4.0, 0.0, 0.0]
     );
     let curvature = evaluator
         .principal_curvature(&id, [0.0, 0.0], &control)
         .unwrap();
-    assert_near(curvature.minimum_1_per_m, -1.0, 1.0e-14);
-    assert_near(curvature.maximum_1_per_m, -0.25, 1.0e-14);
+    assert_near(curvature.minimum_1_per_m.canonical_value(), -1.0, 1.0e-14);
+    assert_near(curvature.maximum_1_per_m.canonical_value(), -0.25, 1.0e-14);
 }
 
 #[test]
@@ -180,12 +249,15 @@ fn tensor_product_rational_surface_derivatives_are_deterministic() {
                 v_knots: vec![0.0, 0.0, 1.0, 1.0],
                 u_control_count: 2,
                 v_control_count: 2,
-                control_points_m: vec![
+                control_points_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(vec![
                     [0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0],
                     [1.0, 0.0, 0.0],
                     [1.0, 1.0, 1.0],
-                ],
+                ]),
                 weights: vec![1.0, 1.0, 1.0, 2.0],
                 domains: [range(0.0, 1.0), range(0.0, 1.0)],
                 periodic_u: false,
@@ -199,25 +271,67 @@ fn tensor_product_rational_surface_derivatives_are_deterministic() {
     let value =
         ExactSurfaceEvaluator::derivatives(&evaluator, &id, [0.5, 0.5], &BudgetControl::generous())
             .unwrap();
-    assert_eq!(value.point_m, [0.6, 0.6, 0.4]);
-    assert_near(value.du_m[0], 0.96, 1.0e-14);
-    assert_near(value.du_m[1], 0.16, 1.0e-14);
-    assert_near(value.du_m[2], 0.64, 1.0e-14);
-    assert_near(value.dv_m[0], 0.16, 1.0e-14);
-    assert_near(value.dv_m[1], 0.96, 1.0e-14);
-    assert_near(value.dv_m[2], 0.64, 1.0e-14);
+    assert_eq!(value.point_m.canonical_value(), [0.6, 0.6, 0.4]);
+    assert_near(
+        value.du_m.with_canonical_storage(|values, _frames| *values)[0],
+        0.96,
+        1.0e-14,
+    );
+    assert_near(
+        value.du_m.with_canonical_storage(|values, _frames| *values)[1],
+        0.16,
+        1.0e-14,
+    );
+    assert_near(
+        value.du_m.with_canonical_storage(|values, _frames| *values)[2],
+        0.64,
+        1.0e-14,
+    );
+    assert_near(
+        value.dv_m.with_canonical_storage(|values, _frames| *values)[0],
+        0.16,
+        1.0e-14,
+    );
+    assert_near(
+        value.dv_m.with_canonical_storage(|values, _frames| *values)[1],
+        0.96,
+        1.0e-14,
+    );
+    assert_near(
+        value.dv_m.with_canonical_storage(|values, _frames| *values)[2],
+        0.64,
+        1.0e-14,
+    );
     let repeated =
         ExactSurfaceEvaluator::derivatives(&evaluator, &id, [0.5, 0.5], &BudgetControl::generous())
             .unwrap();
     assert_eq!(value, repeated);
-    let normal = normalize(&cross(&value.du_m, &value.dv_m)).unwrap();
-    let query = std::array::from_fn(|axis| value.point_m[axis] + 0.1 * normal[axis]);
+    let normal = normalize(&cross(
+        &value.du_m.with_canonical_storage(|values, _frames| *values),
+        &value.dv_m.with_canonical_storage(|values, _frames| *values),
+    ))
+    .unwrap();
+    let query =
+        std::array::from_fn(|axis| value.point_m.canonical_value()[axis] + 0.1 * normal[axis]);
     let projection = evaluator
-        .closest_point(&id, query, 1.0e-10, &BudgetControl::generous())
+        .closest_point(
+            &id,
+            crate::physical::Position::new(query),
+            crate::physical::Length::new(1.0e-10),
+            &BudgetControl::generous(),
+        )
         .unwrap();
-    assert_near(projection.uv[0], 0.5, 1.0e-10);
-    assert_near(projection.uv[1], 0.5, 1.0e-10);
-    assert_near(projection.distance_m, 0.1, 1.0e-10);
+    assert_near(
+        projection.uv[0].with_native_coordinate(|value, _frame| value),
+        0.5,
+        1.0e-10,
+    );
+    assert_near(
+        projection.uv[1].with_native_coordinate(|value, _frame| value),
+        0.5,
+        1.0e-10,
+    );
+    assert_near(projection.distance_m.canonical_value(), 0.1, 1.0e-10);
     let error = ExactSurfaceEvaluator::derivatives(
         &evaluator,
         &id,
@@ -259,10 +373,41 @@ fn surface_failures_preserve_domain_kernel_and_budget_categories() {
     let error = evaluator
         .closest_point(
             &id,
-            [0.0, 0.0, 1.0],
-            1.0e-10,
+            crate::physical::Position::new([0.0, 0.0, 1.0]),
+            crate::physical::Length::new(1.0e-10),
             &BudgetControl::with_limits(u64::MAX, 0, u64::MAX),
         )
         .unwrap_err();
     assert_eq!(error.kind, GeometryEvaluationErrorKind::BudgetExceeded);
+}
+
+#[test]
+fn cone_typed_position_and_angle_preserve_canonical_numeric_definition_wire() {
+    let definition = ExactSurfaceDefinition::Cone {
+        apex_m: runmat_types::physical::Quantity::new([1.0, 2.0, 3.0]),
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+        axis: [0.0, 0.0, 1.0],
+        semi_angle_rad: runmat_types::physical::Angle::new(std::f64::consts::FRAC_PI_4),
+        domains: [
+            ParameterRange {
+                start: 0.0,
+                end: std::f64::consts::TAU,
+            },
+            ParameterRange {
+                start: 0.0,
+                end: 2.0,
+            },
+        ],
+    };
+    let wire = serde_json::to_value(&definition).unwrap();
+    assert_eq!(wire["apex_m"], serde_json::json!([1.0, 2.0, 3.0]));
+    assert_eq!(
+        wire["semi_angle_rad"],
+        serde_json::json!(std::f64::consts::FRAC_PI_4)
+    );
+    assert_eq!(
+        serde_json::from_value::<ExactSurfaceDefinition>(wire).unwrap(),
+        definition
+    );
 }

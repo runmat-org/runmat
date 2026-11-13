@@ -2,6 +2,7 @@ use super::{
     GeometryHealingFailure, GeometryHealingOperation, GeometryHealingOperationKind,
     GeometryHealingReport, GEOMETRY_HEALING_REPORT_SCHEMA_VERSION,
 };
+use crate::model::{revision_mapping::RevisionIndex, validation_storage::ValidationWork};
 use crate::{
     model::analysis_identity::validate_token, GeometryContractError, GeometryHealingPolicy,
 };
@@ -11,6 +12,16 @@ const MAX_AFFECTED_ENTITIES: usize = 1_000_000;
 
 impl GeometryHealingReport {
     pub fn validate(&self) -> Result<(), GeometryContractError> {
+        self.validate_admitted(ValidationWork(None))
+    }
+    pub fn validate_with_control(
+        &self,
+        control: &dyn crate::GeometryEvaluationControl,
+    ) -> Result<(), GeometryContractError> {
+        self.validate_admitted(ValidationWork(Some(control)))
+    }
+    fn validate_admitted(&self, work: ValidationWork<'_>) -> Result<(), GeometryContractError> {
+        work.checkpoint()?;
         if self.schema_version != GEOMETRY_HEALING_REPORT_SCHEMA_VERSION {
             return Err(invalid(
                 "geometry healing report schema",
@@ -19,7 +30,7 @@ impl GeometryHealingReport {
         }
         self.policy.validate()?;
         self.tolerance.validate()?;
-        self.revision_map.validate()?;
+        let revision_index = self.revision_map.validated_index(work)?;
         self.original_topology_digest
             .validate_nonzero("original topology digest")?;
         self.healed_topology_digest
@@ -39,6 +50,7 @@ impl GeometryHealingReport {
             ));
         }
         for (index, operation) in self.operations.iter().enumerate() {
+            work.checkpoint()?;
             if operation.sequence != index as u64 {
                 return Err(invalid(
                     "geometry healing operation sequence",
@@ -48,8 +60,10 @@ impl GeometryHealingReport {
             validate_operation(
                 operation,
                 &self.policy,
-                self.tolerance.maximum_healing_displacement_m,
-                &self.revision_map,
+                self.tolerance
+                    .maximum_healing_displacement_m
+                    .canonical_value(),
+                &revision_index,
             )?;
         }
         if self.operations[0].before_validity != self.original_validity
@@ -127,7 +141,7 @@ fn validate_operation(
     operation: &GeometryHealingOperation,
     policy: &GeometryHealingPolicy,
     maximum_healing_displacement_m: f64,
-    revision_map: &crate::GeometryRevisionMap,
+    revision_index: &RevisionIndex<'_>,
 ) -> Result<(), GeometryContractError> {
     validate_entity_list(
         "healing affected-before entities",
@@ -144,19 +158,15 @@ fn validate_operation(
         ),
     )?;
     for source in &operation.affected_before {
-        revision_map.resolve(source).map_err(|_| {
-            invalid(
+        if !revision_index.contains_source(source) {
+            return Err(invalid(
                 "healing affected-before mapping",
                 "every affected source must have an explicit revision-map disposition",
-            )
-        })?;
+            ));
+        }
     }
     for target in &operation.affected_after {
-        if !revision_map
-            .operations
-            .iter()
-            .any(|mapping| mapping.targets().binary_search(target).is_ok())
-        {
+        if !revision_index.contains_target(target) {
             return Err(invalid(
                 "healing affected-after mapping",
                 "every affected target must be produced by the revision map",

@@ -1,0 +1,71 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("csvread"),
+    slug: Some("csvread"),
+    summary: "Read numeric data from comma-separated text files.",
+    description: "`csvread(filename)` imports real or complex numeric CSV text as a dense host double matrix. Row and column offsets are zero-based; `readmatrix` is the broader import interface.",
+    keywords: &["csvread", "csv", "comma-separated values", "numeric import", "range", "header"],
+    related: &["readmatrix", "writematrix", "csvwrite", "dlmread", "dlmwrite", "gpuArray", "gather"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Forms and ranges", paragraphs: &[
+            "The filename is a character row or string scalar, including a one-element string array. `csvread(filename,row,col)` skips zero-based rows and columns; the range form takes `[r1 c1 r2 c2]` or an inclusive A1 range such as `\"B2..D6\"`. Colon-separated A1 ranges and two-element numeric ranges require their separate RunMat extensions.",
+            "Empty fields, including a trailing comma, become zero. Case-insensitive NaN, Inf, and -Inf are accepted. Numeric fields may be quoted. A nonnumeric token raises an error with its row and column. Input bytes in skipped headers or label columns need not be valid UTF-8.",
+            "An empty file returns a 0-by-0 double tensor. A complex token (`a+bi`, `a+bj`, or a pure imaginary value) produces complex-double storage even when its imaginary component is zero; ordinary real data remains double. General quoted-field CSV escaping is outside this narrow reader; use `readmatrix` or `readtable` for mixed data.",
+        ] },
+        BuiltinDocumentationSection { heading: "Filesystem and residency", paragraphs: &[
+            "Relative paths use the captured working directory; `~` expands to the home directory before opening, without changing that directory. The selected filesystem provider and any advertised resource lease remain attached across suspension and parsing. A provider without a usable lease cannot silently fall back to ambient I/O.",
+            "Parsing and output construction occur on the host and form a fusion boundary. Public host controls need no acceleration provider. Resident filename, offset, or range controls require the `csvread-resident-control-inputs` extension and are gathered through their owning provider; the result remains on the host. Apply `gpuArray(csvread(...))` if a device copy is wanted.",
+            "A worker requires its own accessible filesystem source; the filename is not a transferable snapshot. CPU work cooperates with the installed execution service, but finite complete-call memory evidence for file bytes, parsed rows, and output remains a shared resource-admission requirement.",
+            "Historical home-directory illustration (retained but not run by the isolated example harness):\n`homePath = fullfile(getenv(\"HOME\"), \"runmat_csvread_home.csv\");\nfid = fopen(homePath, \"w\");\nfprintf(fid, \"9,10\\n11,12\\n\");\nfclose(fid);\nM = csvread(fullfile(\"~\", \"runmat_csvread_home.csv\"), 0, 0);\ndisp(M);\ndelete(homePath);`\nDisplayed output: `M =\n     9    10\n    11    12`. The executable gallery uses isolated workspace fixtures rather than creating files in the user's real home directory.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "whole", title: "Import an entire CSV file", program: "M = csvread('scores.csv');\nM", display_output: Some("M =\n     1     2     3\n     4     5     6"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "whole" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "scores.csv", content: BuiltinFixtureContent::Utf8("1,2,3\n4,5,6\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(M,[1 2 3;4 5 6]));" } },
+        BuiltinExample { id: "header", title: "Skip a header row and label column", program: "M = csvread('with_header.csv',1,1);\nM", display_output: Some("M =\n     1     2\n     3     4"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "header" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "with_header.csv", content: BuiltinFixtureContent::Utf8("Name,Jan,Feb\nalpha,1,2\nbeta,3,4\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(M,[1 2;3 4]));" } },
+        BuiltinExample { id: "numeric-range", title: "Select a numeric rectangle", program: "block = csvread('measurements.csv',0,0,[1 1 2 3])", display_output: Some("block =\n    15    16    17\n    19    20    21"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "numeric-range" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "measurements.csv", content: BuiltinFixtureContent::Utf8("10,11,12,13\n14,15,16,17\n18,19,20,21\n22,23,24,25\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(block,[15 16 17;19 20 21]));" } },
+        BuiltinExample { id: "a1-range", title: "Use an Excel-style range", program: "sub = csvread('measurements2.csv',0,0,'B2:C3')", display_output: Some("sub =\n    15    16\n    19    20"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "a1-range" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "measurements2.csv", content: BuiltinFixtureContent::Utf8("10,11,12\n14,15,16\n18,19,20\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(sub,[15 16;19 20]));" } },
+        BuiltinExample { id: "blanks", title: "Interpret empty fields as zero", program: "M = csvread('with_blanks.csv')", display_output: Some("M =\n     1     0     3\n     0     5     0\n     7     8     0"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "blanks" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "with_blanks.csv", content: BuiltinFixtureContent::Utf8("1,,3\n,5,\n7,8,\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(M,[1 0 3;0 5 0;7 8 0]));" } },
+        BuiltinExample { id: "nonnumeric", title: "Report a nonnumeric field", program: "try\n    csvread('bad.csv');\ncatch err\n    disp(err.message);\nend", display_output: Some("csvread: nonnumeric token error at row 2 column 2"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "nonnumeric" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "bad.csv", content: BuiltinFixtureContent::Utf8("1,2,3\n4,error,6\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(contains(err.message,'row 2 column 2'));" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Why does csvread complain about text?", answer: "It accepts numeric CSV fields, not arbitrary mixed text. Use readmatrix or readtable for broader imports." },
+        BuiltinDocumentationFaq { question: "Are row and column offsets zero-based?", answer: "Yes; they count rows and columns skipped from the beginning." },
+        BuiltinDocumentationFaq { question: "How are Excel-style ranges interpreted?", answer: "The public double-dot A1 form includes both endpoints. Colon notation is separately gated as a RunMat extension." },
+        BuiltinDocumentationFaq { question: "Can quoted numeric fields be read?", answer: "Yes; general quoted CSV escaping is not part of this narrow numeric reader." },
+        BuiltinDocumentationFaq { question: "What happens to empty fields?", answer: "They become zero, including trailing fields." },
+        BuiltinDocumentationFaq { question: "Does csvread support custom delimiters?", answer: "No; it uses commas. Use dlmread or readmatrix for other delimiters." },
+        BuiltinDocumentationFaq { question: "How can a result be moved to a GPU?", answer: "The reader returns a host tensor. Call gpuArray on it afterward." },
+        BuiltinDocumentationFaq { question: "What if the file is empty?", answer: "The result is a 0-by-0 double tensor." },
+        BuiltinDocumentationFaq { question: "Does csvread change the working directory?", answer: "No; relative paths use its captured value without modifying it." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "readmatrix", target: BuiltinDocumentationLinkTarget::Builtin("readmatrix") },
+        BuiltinDocumentationLink { label: "writematrix", target: BuiltinDocumentationLinkTarget::Builtin("writematrix") },
+        BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+        BuiltinDocumentationLink { label: "csvwrite", target: BuiltinDocumentationLinkTarget::Builtin("csvwrite") },
+        BuiltinDocumentationLink { label: "dlmread", target: BuiltinDocumentationLinkTarget::Builtin("dlmread") },
+        BuiltinDocumentationLink { label: "dlmwrite", target: BuiltinDocumentationLinkTarget::Builtin("dlmwrite") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "CSV reader and output", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvread.rs") },
+            BuiltinDocumentationLink { label: "CSV row parser", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvread/reader.rs") },
+            BuiltinDocumentationLink { label: "Range and output construction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvread/range.rs") },
+            BuiltinDocumentationLink { label: "Output geometry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvread/output.rs") },
+            BuiltinDocumentationLink { label: "Captured filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/path.rs") },
+            BuiltinDocumentationLink { label: "Execution-service cooperation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/cooperation.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CSV parsing, ranges, numeric classes and provider gather", location: "builtins::io::tabular::csvread::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Home path expansion without a live example", location: "builtins::io::tabular::csvread::tests::csvread_expands_home_directory_without_file_access" },
+        ],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

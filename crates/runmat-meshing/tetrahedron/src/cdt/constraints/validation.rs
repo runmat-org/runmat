@@ -28,7 +28,11 @@ pub fn validate_delaunay_constraints(
     for (index, node) in constraints.nodes.iter().enumerate() {
         checkpoint(index, options, cancellation)?;
         if node.identity == StableDigest::ZERO
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
             || index > 0 && constraints.nodes[index - 1].identity >= node.identity
         {
             return Err(invalid_identity(

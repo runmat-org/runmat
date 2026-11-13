@@ -1,4 +1,10 @@
+import { MemoryWorkspaceAuthority } from "./workspace-memory.js";
+import type { BrowserWorkspaceEntry } from "./browser-workspace.js";
+import type { WorkspaceCaptureRequest, WorkspacePublicationRequest } from "../generated/fea-workspace-contracts.js";
+import type { AtomicCreateResult } from "../generated/collaboration-contracts.js";
 import { basename, dirname, isSubPath, normalizePath } from "./path.js";
+import { notifyCommittedMutation } from "./mutation-notification.js";
+import { notFound } from "./errors.js";
 import type {
   RunMatFilesystemDirEntry,
   RunMatFilesystemMetadata,
@@ -6,6 +12,11 @@ import type {
 } from "./provider-types.js";
 
 type Entry = FileEntry | DirEntry;
+
+enum RenamePolicy {
+  PreserveDestination,
+  ReplaceCompatible,
+}
 
 interface FileEntry {
   kind: "file";
@@ -22,6 +33,7 @@ interface DirEntry {
 }
 
 export interface InMemoryFsProviderOptions {
+  /** Bootstrap files; missing parent directories are created only while seeding. */
   initialFiles?: Record<string, Uint8Array | ArrayBuffer | ArrayBufferView | string>;
   now?: () => number;
 }
@@ -36,7 +48,13 @@ export interface VolumeSnapshotEntry {
 }
 
 export class MemoryVolume {
-  private readonly entries = new Map<string, Entry>();
+  private entries = new Map<string, Entry>();
+  readonly workspace = new MemoryWorkspaceAuthority(
+    () => new Map([...this.entries].map(([path, entry]): [string, BrowserWorkspaceEntry] =>
+      [path, entry.kind === "file" ? { kind: "file", bytes: entry.data, readonly: entry.readonly }
+        : { kind: "dir", readonly: entry.readonly }])),
+    entries => this.replaceWorkspaceInventory(entries),
+  );
   private readonly now: () => number;
   private readonly encoder = new TextEncoder();
 
@@ -45,13 +63,20 @@ export class MemoryVolume {
     this.entries.set("/", this.makeDirEntry());
     if (opts.initialFiles) {
       for (const [path, value] of Object.entries(opts.initialFiles)) {
+        // Seed paths describe a ready-to-use tree; ordinary writeFile still
+        // requires its parent directory to exist.
+        this.createDirAll(dirname(normalizeAbsolute(path)));
         this.writeFile(path, this.coerceBuffer(value));
       }
     }
   }
 
-  createProvider(onMutate?: () => void): RunMatFilesystemProvider {
-    return new MemoryProvider(this, onMutate);
+  /** Observers run synchronously after commit; their errors use a separate reporting sink. */
+  createProvider(
+    onMutate?: () => void,
+    onObserverError?: (error: unknown) => void
+  ): RunMatFilesystemProvider {
+    return new MemoryProvider(this, onMutate, onObserverError);
   }
 
   serialize(): VolumeSnapshotEntry[] {
@@ -121,6 +146,18 @@ export class MemoryVolume {
     });
   }
 
+  atomicCreateNew(path: string, data: Uint8Array): AtomicCreateResult {
+    const normalized = normalizeAbsolute(path);
+    const existing = this.entries.get(normalized);
+    if (existing) {
+      if (existing.kind !== "file") throw new Error(`Path ${normalized} is a directory`);
+      return { kind: "existing", result: Array.from(existing.data) };
+    }
+    // No await: observation and insertion belong to one volume operation.
+    this.writeFile(normalized, data);
+    return { kind: "published", result: { durability: "atomic_visibility" } };
+  }
+
   writeFile(path: string, data: Uint8Array, readonly = false, modified?: number): void {
     const normalized = normalizeAbsolute(path);
     if (readonly) {
@@ -154,7 +191,7 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`File not found: ${normalized}`);
+      throw notFound(normalized, "File");
     }
     if (entry.kind !== "file") {
       throw new Error(`Path ${normalized} is not a file`);
@@ -171,7 +208,7 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`Path not found: ${normalized}`);
+      throw notFound(normalized);
     }
     if (entry.kind === "file") {
       return {
@@ -301,28 +338,46 @@ export class MemoryVolume {
   }
 
   rename(from: string, to: string): void {
+    this.renameWithPolicy(from, to, RenamePolicy.PreserveDestination);
+  }
+
+  renameReplace(from: string, to: string): void {
+    this.renameWithPolicy(from, to, RenamePolicy.ReplaceCompatible);
+  }
+
+  private renameWithPolicy(from: string, to: string, policy: RenamePolicy): void {
     const src = normalizeAbsolute(from);
     const dst = normalizeAbsolute(to);
+    const entry = this.entries.get(src);
+    if (!entry) {
+      throw notFound(src);
+    }
     if (src === dst) {
       return;
     }
-    const entry = this.entries.get(src);
-    if (!entry) {
-      throw new Error(`Path not found: ${src}`);
+    if (src === "/" || dst === "/") {
+      throw new Error("Cannot rename the filesystem root");
     }
     if (entry.readonly) {
       throw new Error(`Path is readonly: ${src}`);
     }
-    if (this.entries.has(dst)) {
-      throw new Error(`Destination exists: ${dst}`);
+    const destination = this.entries.get(dst);
+    if (destination) {
+      if (policy === RenamePolicy.PreserveDestination) {
+        throw new Error(`Destination exists: ${dst}`);
+      }
+      if (destination.readonly || destination.kind !== entry.kind) {
+        throw new Error("Destination is readonly or has an incompatible type");
+      }
+      if (destination.kind === "dir" && destination.children.size !== 0) {
+        throw new Error("Destination directory is not empty");
+      }
     }
     if (entry.kind === "dir" && isSubPath(dst, src)) {
       throw new Error("Cannot move directory into its own subtree");
     }
     const parentFrom = this.getDir(dirname(src));
     const parentTo = this.getDir(dirname(dst));
-    parentFrom.children.delete(basename(src));
-    parentTo.children.add(basename(dst));
 
     const updates: Array<{ oldPath: string; newPath: string }> = [];
     for (const key of this.entries.keys()) {
@@ -332,6 +387,8 @@ export class MemoryVolume {
       }
     }
     updates.sort((a, b) => depth(a.oldPath) - depth(b.oldPath));
+    parentFrom.children.delete(basename(src));
+    parentTo.children.add(basename(dst));
     for (const { oldPath, newPath } of updates) {
       const current = this.entries.get(oldPath);
       if (!current) {
@@ -346,10 +403,33 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`Path not found: ${normalized}`);
+      throw notFound(normalized);
     }
     entry.readonly = readonly;
     entry.modified = this.now();
+  }
+
+  replaceWorkspaceInventory(inventory: Map<string, BrowserWorkspaceEntry>): void {
+    const next = new Map<string, Entry>();
+    const timestamp = this.now();
+    for (const [path, entry] of inventory) {
+      const previous = this.entries.get(path);
+      if (entry.kind === "dir") {
+        next.set(path, { kind: "dir", readonly: !!entry.readonly,
+          modified: previous?.modified ?? timestamp, children: new Set() });
+      } else {
+        const unchanged = previous?.kind === "file" && previous.data.length === entry.bytes.length
+          && previous.data.every((byte, index) => byte === entry.bytes[index]);
+        next.set(path, { kind: "file", data: entry.bytes.slice(), readonly: !!entry.readonly,
+          modified: unchanged ? previous.modified : timestamp });
+      }
+    }
+    for (const path of next.keys()) if (path !== "/") {
+      const parent = next.get(dirname(path));
+      if (parent?.kind !== "dir") throw new Error(`Workspace parent missing: ${path}`);
+      parent.children.add(basename(path));
+    }
+    this.entries = next;
   }
 
   private coerceBuffer(value: Uint8Array | ArrayBuffer | ArrayBufferView | string): Uint8Array {
@@ -371,8 +451,11 @@ export class MemoryVolume {
   private getFile(path: string): FileEntry {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
-    if (!entry || entry.kind !== "file") {
-      throw new Error(`File not found: ${normalized}`);
+    if (!entry) {
+      throw notFound(normalized, "File");
+    }
+    if (entry.kind !== "file") {
+      throw new Error(`Path is not a file: ${normalized}`);
     }
     return entry;
   }
@@ -381,7 +464,7 @@ export class MemoryVolume {
     const normalized = normalizeAbsolute(path);
     const entry = this.entries.get(normalized);
     if (!entry) {
-      throw new Error(`Directory not found: ${normalized}`);
+      throw notFound(normalized, "Directory");
     }
     if (entry.kind !== "dir") {
       throw new Error(`Path is not a directory: ${normalized}`);
@@ -401,7 +484,27 @@ export class MemoryVolume {
 }
 
 class MemoryProvider implements RunMatFilesystemProvider {
-  constructor(private readonly volume: MemoryVolume, private readonly onMutate?: () => void) {}
+  constructor(
+    private readonly volume: MemoryVolume,
+    private readonly onMutate?: () => void,
+    private readonly onObserverError?: (error: unknown) => void
+  ) {}
+
+  private notifyMutation(): void {
+    notifyCommittedMutation(this.onMutate, this.onObserverError);
+  }
+
+  captureWorkspace(request: WorkspaceCaptureRequest) {
+    return this.volume.workspace.captureWorkspace(request);
+  }
+  lookupWorkspacePublication(request: WorkspacePublicationRequest) {
+    return this.volume.workspace.lookupWorkspacePublication(request);
+  }
+  async publishWorkspace(request: WorkspacePublicationRequest) {
+    const result = await this.volume.workspace.publishWorkspace(request);
+    if (result.type === "published") this.notifyMutation();
+    return result;
+  }
 
   readFile(path: string): Uint8Array {
     return this.volume.readFile(path);
@@ -411,14 +514,20 @@ class MemoryProvider implements RunMatFilesystemProvider {
     return this.volume.readMany(paths);
   }
 
+  atomicCreateNew(path: string, data: Uint8Array): AtomicCreateResult {
+    const result = this.volume.atomicCreateNew(path, data);
+    if (result.kind === "published") this.notifyMutation();
+    return result;
+  }
+
   writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): void {
-    this.volume.writeFile(path, coerce(data));
-    this.onMutate?.();
+    this.volume.writeFile(path, coerceFilesystemBytes(data));
+    this.notifyMutation();
   }
 
   removeFile(path: string): void {
     this.volume.removeFile(path);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 
   metadata(path: string): RunMatFilesystemMetadata {
@@ -440,35 +549,40 @@ class MemoryProvider implements RunMatFilesystemProvider {
   createDir(path: string): void {
     const changed = this.volume.createDir(path);
     if (changed) {
-      this.onMutate?.();
+      this.notifyMutation();
     }
   }
 
   createDirAll(path: string): void {
     const changed = this.volume.createDirAll(path);
     if (changed) {
-      this.onMutate?.();
+      this.notifyMutation();
     }
   }
 
   removeDir(path: string): void {
     this.volume.removeDir(path);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 
   removeDirAll(path: string): void {
     this.volume.removeDirAll(path);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 
   rename(from: string, to: string): void {
     this.volume.rename(from, to);
-    this.onMutate?.();
+    this.notifyMutation();
+  }
+
+  renameReplace(from: string, to: string): void {
+    this.volume.renameReplace(from, to);
+    this.notifyMutation();
   }
 
   setReadonly(path: string, readonly: boolean): void {
     this.volume.setReadonly(path, readonly);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 }
 
@@ -477,7 +591,7 @@ export function createInMemoryFsProvider(options?: InMemoryFsProviderOptions): R
   return volume.createProvider();
 }
 
-function coerce(value: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
+export function coerceFilesystemBytes(value: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
   if (value instanceof Uint8Array) {
     return value;
   }

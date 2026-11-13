@@ -3,30 +3,45 @@ use runmat_value::Value;
 use super::axis_ticks::TickAxis;
 use super::properties::{resolve_plot_handle, PlotHandle};
 use super::state::{
-    axis_tick_angles_snapshot, axis_tick_angles_snapshot_for_axes, decode_axes_handle,
-    set_axis_tick_angles, set_axis_tick_angles_for_axes,
+    axis_tick_angles_snapshot_for_axes_for_property, decode_axes_handle,
+    set_axis_tick_angles_for_axes_for_property,
 };
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
-#[derive(Clone, Debug)]
 enum TickAngleTarget {
     Current,
     Axes(Vec<(super::state::FigureHandle, usize)>),
+    Native(super::op_common::axes_target::PreparedAxesTarget),
 }
 
 pub fn axis_tick_angle_builtin(
+    runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let (target, args) = split_optional_axes_target(builtin, args)?;
-    match args.as_slice() {
-        [] => query_angle(builtin, axis, target),
-        [value] => {
+    let (target, args) = prepare_call(runtime, builtin, args)?;
+    match args.len() {
+        0 => {
+            let mut targets = prepared_targets(runtime, target).into_iter();
+            let first = targets.next().expect("current or nonempty admitted axes");
+            if targets.next().is_some() {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: query form requires a scalar axes handle"),
+                ));
+            }
+            query_angle(builtin, axis, &first.resolve(builtin)?)
+        }
+        1 => {
+            let value = args.first().expect("one angle argument");
             let angle = angle_from_value(value, builtin)?;
-            set_angle(builtin, axis, target, angle)?;
+            super::op_common::axes_output::validate_setter_output(builtin)?;
+            for target in prepared_targets(runtime, target) {
+                set_angle(builtin, axis, &target.resolve(builtin)?, angle)?;
+            }
             Ok(Value::Num(angle))
         }
         _ => Err(plotting_error(
@@ -36,19 +51,54 @@ pub fn axis_tick_angle_builtin(
     }
 }
 
+fn prepare_call(
+    runtime: Option<&crate::context::RuntimeContext>,
+    builtin: &'static str,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(TickAngleTarget, crate::call::BuiltinArguments)> {
+    if let Some(first) = args
+        .first()
+        .filter(|value| matches!(value, Value::Object(_) | Value::HandleObject(_)))
+    {
+        if let Some(prepared) =
+            super::op_common::axes_target::prepare_graphics_target(runtime, builtin, first)?
+        {
+            return Ok((
+                TickAngleTarget::Native(prepared.into_axes(builtin)?),
+                args.into_range(1..).expect("nonempty axes arguments"),
+            ));
+        }
+    }
+    split_optional_axes_target(builtin, args)
+}
+
+fn prepared_targets(
+    runtime: Option<&crate::context::RuntimeContext>,
+    target: TickAngleTarget,
+) -> Vec<super::op_common::axes_target::PreparedAxesTarget> {
+    use super::op_common::axes_target::PreparedAxesTarget;
+    match target {
+        TickAngleTarget::Current => vec![PreparedAxesTarget::current(runtime)],
+        TickAngleTarget::Axes(targets) => targets
+            .into_iter()
+            .map(|(handle, index)| PreparedAxesTarget::alias(runtime, handle, index))
+            .collect(),
+        TickAngleTarget::Native(target) => vec![target],
+    }
+}
+
 fn split_optional_axes_target(
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(TickAngleTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((TickAngleTarget::Current, Vec::new()));
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(TickAngleTarget, crate::call::BuiltinArguments)> {
+    let Some(first) = args.first() else {
+        return Ok((TickAngleTarget::Current, args));
     };
-    match resolve_plot_handle(&first, builtin) {
+    match resolve_plot_handle(first, builtin) {
         Ok(PlotHandle::Axes(handle, axes_index)) => {
             return Ok((
                 TickAngleTarget::Axes(vec![(handle, axes_index)]),
-                iter.collect(),
+                args.into_range(1..).expect("nonempty axes arguments"),
             ));
         }
         Ok(
@@ -64,13 +114,13 @@ fn split_optional_axes_target(
         }
         Ok(PlotHandle::Root | PlotHandle::Figure(_)) | Err(_) => {}
     }
-    if let Some(targets) = axes_array_targets(&first) {
-        return Ok((TickAngleTarget::Axes(targets), iter.collect()));
+    if let Some(targets) = axes_array_targets(first) {
+        return Ok((
+            TickAngleTarget::Axes(targets),
+            args.into_range(1..).expect("nonempty axes arguments"),
+        ));
     }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((TickAngleTarget::Current, rest))
+    Ok((TickAngleTarget::Current, args))
 }
 
 fn axes_array_targets(value: &Value) -> Option<Vec<(super::state::FigureHandle, usize)>> {
@@ -97,62 +147,33 @@ fn axes_array_targets(value: &Value) -> Option<Vec<(super::state::FigureHandle, 
 fn query_angle(
     builtin: &'static str,
     axis: TickAxis,
-    target: TickAngleTarget,
+    target: &super::state::ResolvedAxesTarget,
 ) -> BuiltinResult<Value> {
-    let (x_angle, y_angle) = match target {
-        TickAngleTarget::Axes(targets) if targets.len() == 1 => {
-            let (handle, axes_index) = targets[0];
-            axis_tick_angles_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-            })?
-        }
-        TickAngleTarget::Axes(_) => {
-            return Err(plotting_error(
-                builtin,
-                format!("{builtin}: query form requires a scalar axes handle"),
-            ))
-        }
-        TickAngleTarget::Current => axis_tick_angles_snapshot(),
-    };
+    let (handle, index) = target.coordinates();
+    let (x, y) = axis_tick_angles_snapshot_for_axes_for_property(target.authority(), handle, index)
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
     Ok(Value::Num(match axis {
-        TickAxis::X => x_angle.unwrap_or(0.0),
-        TickAxis::Y => y_angle.unwrap_or(0.0),
+        TickAxis::X => x.unwrap_or(0.0),
+        TickAxis::Y => y.unwrap_or(0.0),
     }))
 }
 
 fn set_angle(
     builtin: &'static str,
     axis: TickAxis,
-    target: TickAngleTarget,
+    target: &super::state::ResolvedAxesTarget,
     angle: f64,
 ) -> BuiltinResult<()> {
-    match target {
-        TickAngleTarget::Axes(targets) => {
-            for (handle, axes_index) in targets {
-                let (x_angle, y_angle) = axis_tick_angles_snapshot_for_axes(handle, axes_index)
-                    .map_err(|err| {
-                        plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                    })?;
-                let (x, y) = match axis {
-                    TickAxis::X => (Some(angle), y_angle),
-                    TickAxis::Y => (x_angle, Some(angle)),
-                };
-                set_axis_tick_angles_for_axes(handle, axes_index, x, y).map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            }
-            Ok(())
-        }
-        TickAngleTarget::Current => {
-            let (x_angle, y_angle) = axis_tick_angles_snapshot();
-            let (x, y) = match axis {
-                TickAxis::X => (Some(angle), y_angle),
-                TickAxis::Y => (x_angle, Some(angle)),
-            };
-            set_axis_tick_angles(x, y);
-            Ok(())
-        }
-    }
+    let (handle, index) = target.coordinates();
+    let property = target.authority();
+    let (x, y) = axis_tick_angles_snapshot_for_axes_for_property(property, handle, index)
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+    let (x, y) = match axis {
+        TickAxis::X => (Some(angle), y),
+        TickAxis::Y => (x, Some(angle)),
+    };
+    set_axis_tick_angles_for_axes_for_property(property, handle, index, x, y)
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))
 }
 
 fn angle_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<f64> {

@@ -29,7 +29,7 @@ pub fn split_refill_tetrahedra_across_shared_face_at_barycentric(
     }
     let node_map = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     for tetrahedron in tetrahedra {
         for node_id in tetrahedron.node_ids {
@@ -74,20 +74,24 @@ pub fn split_refill_tetrahedra_across_shared_face_at_barycentric(
     let face_points = target_face.map(|node_id| node_map[&node_id]);
     let split_node = ConstrainedCavityNode {
         node_id: split_node_id,
-        coordinates_m: [
-            face_points[0][0] * barycentric[0]
-                + face_points[1][0] * barycentric[1]
-                + face_points[2][0] * barycentric[2],
-            face_points[0][1] * barycentric[0]
-                + face_points[1][1] * barycentric[1]
-                + face_points[2][1] * barycentric[2],
-            face_points[0][2] * barycentric[0]
-                + face_points[1][2] * barycentric[1]
-                + face_points[2][2] * barycentric[2],
-        ],
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                face_points[0][0] * barycentric[0]
+                    + face_points[1][0] * barycentric[1]
+                    + face_points[2][0] * barycentric[2],
+                face_points[0][1] * barycentric[0]
+                    + face_points[1][1] * barycentric[1]
+                    + face_points[2][1] * barycentric[2],
+                face_points[0][2] * barycentric[0]
+                    + face_points[1][2] * barycentric[1]
+                    + face_points[2][2] * barycentric[2],
+            ]),
     };
     let mut split_node_map = node_map;
-    split_node_map.insert(split_node.node_id, split_node.coordinates_m);
+    split_node_map.insert(
+        split_node.node_id,
+        split_node.coordinates_m.canonical_value(),
+    );
     let incident_tetrahedron_indices = incident_tetrahedron_indices
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -125,13 +129,18 @@ pub fn split_refill_tetrahedra_across_shared_face_at_barycentric(
             let points = child_node_ids.map(|node_id| split_node_map[&node_id]);
             match raw_refill_tetrahedron_with_rejection_reason(child_node_ids, points, options) {
                 Ok(child) => split_tetrahedra.push(child),
-                Err(reason) => {
+                Err(RefillTetrahedronError::Rejected(reason)) => {
                     return Err(
                         ConstrainedCavityRefillTetrahedronSplitError::RejectedChildTetrahedron {
                             node_ids: child_node_ids,
                             reason,
                         },
                     );
+                }
+                Err(RefillTetrahedronError::Accounting(error)) => {
+                    return Err(ConstrainedCavityRefillTetrahedronSplitError::Accounting(
+                        error,
+                    ));
                 }
             }
         }

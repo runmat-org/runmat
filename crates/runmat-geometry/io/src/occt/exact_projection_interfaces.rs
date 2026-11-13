@@ -50,10 +50,19 @@ pub(super) fn project_regions_and_interfaces(
             let Some(owner) = owner else {
                 continue;
             };
+            // A cavity shell is used reversed by its solid; the side a face bounds is the face
+            // use composed with its shell's orientation.
+            let orientation = match shell.orientation {
+                TopologicalOrientation::Forward => face_use.orientation,
+                TopologicalOrientation::Reversed => match face_use.orientation {
+                    TopologicalOrientation::Forward => TopologicalOrientation::Reversed,
+                    TopologicalOrientation::Reversed => TopologicalOrientation::Forward,
+                },
+            };
             face_uses
                 .entry(&face_use.entity_id)
                 .or_default()
-                .push((owner, face_use.orientation));
+                .push((owner, orientation));
         }
     }
 
@@ -119,11 +128,11 @@ fn region_id(solid_id: &PersistentEntityId) -> PersistentEntityId {
         digest.update((segment.len() as u64).to_be_bytes());
         digest.update(segment.as_bytes());
     }
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: format!("solid-region:{:x}", digest.finalize()),
-        assembly_path: solid_id.assembly_path.clone(),
-    }
+    PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        format!("solid-region:{}", hex::encode(digest.finalize())),
+        solid_id.assembly_path.clone(),
+    )
 }
 
 fn invalid(reason: &str) -> GeometryImportError {
@@ -231,10 +240,6 @@ mod tests {
     }
 
     fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind,
-            source_topology_id: name.into(),
-            assembly_path: vec!["part".into()],
-        }
+        PersistentEntityId::new(kind, name.into(), vec!["part".into()])
     }
 }

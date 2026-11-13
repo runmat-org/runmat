@@ -1,10 +1,15 @@
+mod classification;
+mod influence;
+pub(crate) use classification::{
+    classify_exact_face_refinement_candidates_in_parameterization, classify_with_context,
+};
 use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl};
 use runmat_meshing_core::MetricFieldRequest;
 use runmat_meshing_curve::SharedCurveSegmentSplit;
 
 use crate::{
     exact_face_chart_cut_node_id, ExactFaceChartParameterization, ExactFaceMetricError,
-    ExactFacePslg, ExactFacePslgSegmentSource, ResolvedFaceMetricField,
+    ExactFacePslg, ExactFacePslgSegmentSource,
 };
 
 use super::{
@@ -13,12 +18,20 @@ use super::{
     ExactProtectedSegmentSplit,
 };
 
+pub(crate) struct ExactFaceCandidateClassifications {
+    pub protected_splits: Vec<ExactProtectedSegmentSplit>,
+    pub chart_cut_splits: Vec<ExactChartCutSplit>,
+    pub insertions: Vec<ExactFaceRefinementCandidate>,
+    /// Shape-only candidates lying on a shared exact curve; see `ExactFaceCandidateDisposition`.
+    pub withdrawn: usize,
+}
+
 pub fn classify_exact_face_refinement_candidate(
     candidate: &ExactFaceRefinementCandidate,
     pslg: &ExactFacePslg,
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
-    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
     classify_exact_face_refinement_candidate_in_parameterization(
@@ -38,121 +51,124 @@ pub(crate) fn classify_exact_face_refinement_candidate_in_parameterization(
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
     parameterization: &ExactFaceChartParameterization,
-    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
-    if candidate.source_face_id != pslg.source_face_id
-        || candidate.uv.iter().any(|value| !value.is_finite())
+    let mut classifications = classify_exact_face_refinement_candidates_in_parameterization(
+        std::slice::from_ref(candidate),
+        pslg,
+        topology,
+        request,
+        parameterization,
+        evaluator,
+        control,
+    )?;
+    if let Some(split) = classifications.protected_splits.pop() {
+        Ok(ExactFaceCandidateDisposition::SplitProtectedSegment(
+            Box::new(split),
+        ))
+    } else if let Some(split) = classifications.chart_cut_splits.pop() {
+        Ok(ExactFaceCandidateDisposition::SplitChartCut(Box::new(
+            split,
+        )))
+    } else if classifications.insertions.len() == 1 {
+        Ok(ExactFaceCandidateDisposition::Insert)
+    } else if classifications.withdrawn == 1 {
+        Ok(ExactFaceCandidateDisposition::Withdraw)
+    } else {
+        Err(invalid(
+            &pslg.source_face_id,
+            "candidate classification is empty",
+        ))
+    }
+}
+
+/// Conservatively classifies a point against the closed diametral disk in the
+/// local metric. The error bound covers the four products and their summation;
+/// values indistinguishable from the boundary are treated as encroaching so
+/// equivalent CAD parameterizations cannot choose opposite refinement paths
+/// from roundoff alone.
+pub(super) fn metric_diametral_disk_contains(
+    candidate: [f64; 2],
+    first: [f64; 2],
+    second: [f64; 2],
+    metric: crate::ParametricMetricTensor,
+) -> Option<bool> {
+    let left = [candidate[0] - first[0], candidate[1] - first[1]];
+    let right = [candidate[0] - second[0], candidate[1] - second[1]];
+    let terms = [
+        left[0] * metric.uu * right[0],
+        left[0] * metric.uv * right[1],
+        left[1] * metric.uv * right[0],
+        left[1] * metric.vv * right[1],
+    ];
+    if terms.iter().any(|term| !term.is_finite()) {
+        return None;
+    }
+    let product = terms.into_iter().sum::<f64>();
+    let magnitude = terms.into_iter().map(f64::abs).sum::<f64>();
+    let roundoff_bound = 32.0 * f64::EPSILON * magnitude;
+    (product.is_finite() && roundoff_bound.is_finite()).then_some(product <= roundoff_bound)
+}
+
+fn split_protected_segment(
+    pslg: &ExactFacePslg,
+    segment_index: usize,
+    first: &crate::ExactFacePslgVertex,
+    second: &crate::ExactFacePslgVertex,
+) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
+    let segment = &pslg.segments[segment_index];
+    let (source_coedge_id, source_edge_id) = match &segment.source {
+        ExactFacePslgSegmentSource::ExactTrim {
+            source_coedge_id,
+            source_edge_id,
+        } => (source_coedge_id, source_edge_id),
+        ExactFacePslgSegmentSource::ChartCut { cut_id } => {
+            return chart_cut_split(pslg, segment_index, *cut_id);
+        }
+    };
+    let Some(segment_parameters) = segment.edge_parameters else {
+        return Err(invalid(
+            &pslg.source_face_id,
+            "exact trim segment is missing curve parameters",
+        ));
+    };
+    let (endpoint_node_ids, edge_parameters) = if segment_parameters[0] < segment_parameters[1] {
+        ([first.node_id, second.node_id], segment_parameters)
+    } else if segment_parameters[1] < segment_parameters[0] {
+        (
+            [second.node_id, first.node_id],
+            [segment_parameters[1], segment_parameters[0]],
+        )
+    } else {
+        return Err(invalid(
+            &pslg.source_face_id,
+            "protected segment edge parameters are not distinct",
+        ));
+    };
+    let split_parameter = edge_parameters[0] * 0.5 + edge_parameters[1] * 0.5;
+    if !split_parameter.is_finite()
+        || split_parameter == edge_parameters[0]
+        || split_parameter == edge_parameters[1]
     {
         return Err(invalid(
             &pslg.source_face_id,
-            "candidate face or UV is inconsistent with the PSLG",
+            "protected segment has no representable interior split parameter",
         ));
     }
-    let field = ResolvedFaceMetricField::new(topology, request)
-        .map_err(|error| metric(&pslg.source_face_id, error))?;
-    for (segment_index, segment) in pslg.segments.iter().enumerate() {
-        control.checkpoint().map_err(|error| {
-            ExactFaceRefinementError::new(
-                ExactFaceRefinementErrorKind::Metric(
-                    crate::ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
-                ),
-                &pslg.source_face_id,
-                error.reason,
-            )
-        })?;
-        let endpoints = segment
-            .vertex_indices
-            .map(|index| pslg.vertices.get(index as usize));
-        let [Some(first), Some(second)] = endpoints else {
-            return Err(invalid(
-                &pslg.source_face_id,
-                "protected segment references an absent PSLG vertex",
-            ));
-        };
-        let midpoint = [
-            (first.uv[0] + second.uv[0]) * 0.5,
-            (first.uv[1] + second.uv[1]) * 0.5,
-        ];
-        let metric = field
-            .evaluate_parameterized(
-                &pslg.source_face_id,
-                midpoint,
-                parameterization,
-                evaluator,
-                control,
-            )
-            .map_err(|error| metric(&pslg.source_face_id, error))?
-            .sizing_metric;
-        let left = [candidate.uv[0] - first.uv[0], candidate.uv[1] - first.uv[1]];
-        let right = [
-            candidate.uv[0] - second.uv[0],
-            candidate.uv[1] - second.uv[1],
-        ];
-        let diametral_product = left[0] * (metric.uu * right[0] + metric.uv * right[1])
-            + left[1] * (metric.uv * right[0] + metric.vv * right[1]);
-        if !diametral_product.is_finite() {
-            return Err(invalid(
-                &pslg.source_face_id,
-                "protected-segment encroachment measure is not finite",
-            ));
-        }
-        if diametral_product <= 0.0 {
-            let (source_coedge_id, source_edge_id) = match &segment.source {
-                ExactFacePslgSegmentSource::ExactTrim {
-                    source_coedge_id,
-                    source_edge_id,
-                } => (source_coedge_id, source_edge_id),
-                ExactFacePslgSegmentSource::ChartCut { cut_id } => {
-                    return chart_cut_split(pslg, segment_index, *cut_id);
-                }
-            };
-            let Some(segment_parameters) = segment.edge_parameters else {
-                return Err(invalid(
-                    &pslg.source_face_id,
-                    "exact trim segment is missing curve parameters",
-                ));
-            };
-            let (endpoint_node_ids, edge_parameters) =
-                if segment_parameters[0] < segment_parameters[1] {
-                    ([first.node_id, second.node_id], segment_parameters)
-                } else if segment_parameters[1] < segment_parameters[0] {
-                    (
-                        [second.node_id, first.node_id],
-                        [segment_parameters[1], segment_parameters[0]],
-                    )
-                } else {
-                    return Err(invalid(
-                        &pslg.source_face_id,
-                        "protected segment edge parameters are not distinct",
-                    ));
-                };
-            let split_parameter = edge_parameters[0] * 0.5 + edge_parameters[1] * 0.5;
-            if !split_parameter.is_finite()
-                || split_parameter == edge_parameters[0]
-                || split_parameter == edge_parameters[1]
-            {
-                return Err(invalid(
-                    &pslg.source_face_id,
-                    "protected segment has no representable interior split parameter",
-                ));
-            }
-            return Ok(ExactFaceCandidateDisposition::SplitProtectedSegment(
-                Box::new(ExactProtectedSegmentSplit {
-                    source_face_id: pslg.source_face_id.clone(),
-                    pslg_segment_index: segment_index as u32,
-                    source_coedge_id: source_coedge_id.clone(),
-                    curve_split: SharedCurveSegmentSplit {
-                        source_edge_id: source_edge_id.clone(),
-                        endpoint_node_ids,
-                        edge_parameters,
-                        split_parameter,
-                    },
-                }),
-            ));
-        }
-    }
-    Ok(ExactFaceCandidateDisposition::Insert)
+    Ok(ExactFaceCandidateDisposition::SplitProtectedSegment(
+        Box::new(ExactProtectedSegmentSplit {
+            source_face_id: pslg.source_face_id.clone(),
+            pslg_segment_index: segment_index as u32,
+            source_coedge_id: source_coedge_id.clone(),
+            curve_split: SharedCurveSegmentSplit {
+                source_edge_id: source_edge_id.clone(),
+                endpoint_node_ids,
+                edge_parameters,
+                split_parameter,
+            },
+        }),
+    ))
 }
 
 fn chart_cut_split(

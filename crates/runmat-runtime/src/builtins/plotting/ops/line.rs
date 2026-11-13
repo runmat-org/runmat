@@ -1,21 +1,12 @@
 //! MATLAB-compatible low-level `line` builtin.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{Figure, Line3Plot, LinePlot, NumericPlotData};
 use runmat_value::{Tensor, Value};
 
 use super::common::{numeric_plot_data, numeric_plot_data_pair, numeric_plot_data_triplet};
 use super::op_common::line_inputs::NumericInput;
-use super::op_common::{apply_axes_target, split_leading_axes_handle, AxesTarget};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments, AxesTarget};
 use super::plot::build_line_plot_from_numeric_data_for_builtin;
 use super::plot3::build_line3_plot_from_numeric_data_for_builtin;
 use super::plotting_error;
@@ -30,151 +21,41 @@ use super::style::{
     LineStyleParseOptions,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "line";
-const LINE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "XData/YData/ZData",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Line coordinate properties accept all eight integer classes and retain their native class, shape, and exact values.",
-    }];
-pub const LINE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = line(integer_coordinates, ...)",
-        inputs: &LINE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native numeric storage is authoritative for coordinate properties and figure persistence; only renderer geometry materialization crosses to floating point.",
-    }];
+
 type Series2D = (NumericPlotData, NumericPlotData);
 type Series3D = (NumericPlotData, NumericPlotData, NumericPlotData);
 
-const LINE_OUTPUT_HANDLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Line graphics handle scalar or row vector when matrix data creates multiple lines.",
-}];
-
-const LINE_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-];
-
-const LINE_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z data.",
-    },
-];
-
-const LINE_INPUTS_PROPS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "props",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name/value pairs such as XData, YData, ZData, Color, LineWidth, and DisplayName.",
-}];
-
-const LINE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = line(X, Y)",
-        inputs: &LINE_INPUTS_X_Y,
-        outputs: &LINE_OUTPUT_HANDLES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = line(X, Y, Z)",
-        inputs: &LINE_INPUTS_X_Y_Z,
-        outputs: &LINE_OUTPUT_HANDLES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = line(X, Y, Name, Value, ...)",
-        inputs: &LINE_INPUTS_PROPS,
-        outputs: &LINE_OUTPUT_HANDLES,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = line(Name, Value, ...)",
-        inputs: &LINE_INPUTS_PROPS,
-        outputs: &LINE_OUTPUT_HANDLES,
-    },
-];
-
-const LINE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:line:InvalidArgument"),
-    when: "Line data, axes target, style arguments, or Name/Value pairs are invalid.",
-    message: "line: invalid argument",
-};
-
-const LINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINE.INTERNAL",
-    identifier: Some("RunMat:line:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "line: internal operation failed",
-};
-
-const LINE_ERRORS: [BuiltinErrorDescriptor; 2] = [LINE_ERROR_INVALID_ARGUMENT, LINE_ERROR_INTERNAL];
-
-pub const LINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LINE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LINE_ERRORS,
-};
-
 #[runtime_builtin(
     name = "line",
-    category = "plotting",
-    summary = "Create low-level 2-D or 3-D line graphics objects.",
-    keywords = "line,graphics,plotting,2d,3d",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::line::LINE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::line::LINE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::line"
 )]
-pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (leading_axes, args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
-    let parsed = parse_line_args(leading_axes, args).await?;
+pub async fn line_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::LINE_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "line",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "line")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(line_impl(args, &work).await)
+}
+
+async fn line_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
+    let (leading_axes, args) = split_leading_axes_arguments(args, BUILTIN_NAME)?;
+    let parsed = parse_line_args(leading_axes, args.view()).await?;
+    work.check()?;
     apply_axes_target(parsed.axes_target, BUILTIN_NAME)?;
 
     let figure_handle = current_figure_handle();
@@ -183,6 +64,7 @@ pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let axes_index_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let axes_index_out = std::rc::Rc::clone(&axes_index_slot);
     let mut objects = Some(parsed.objects);
+    work.check()?;
     let render_result = append_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions::default(),
@@ -210,8 +92,7 @@ pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .collect::<Vec<_>>();
 
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(plotting_error(BUILTIN_NAME, err.to_string()));
         }
     }
@@ -256,7 +137,7 @@ struct LineOptions {
 
 pub(super) async fn parse_line_args(
     leading_axes: AxesTarget,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<ParsedLineCall> {
     let mut options = if args.is_empty() {
         LineOptions {
@@ -267,10 +148,10 @@ pub(super) async fn parse_line_args(
             style_tokens: Vec::new(),
             visible: None,
         }
-    } else if begins_with_name_value(&args) {
-        parse_property_constructor(leading_axes, &args)?
+    } else if begins_with_name_value(args)? {
+        parse_property_constructor(leading_axes, args)?
     } else {
-        parse_positional_constructor(leading_axes, &args)?
+        parse_positional_constructor(leading_axes, args)?
     };
 
     let parsed_style = parse_line_style_args(
@@ -325,7 +206,7 @@ pub(super) async fn parse_line_args(
 
 fn parse_positional_constructor(
     mut axes_target: AxesTarget,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<LineOptions> {
     let mut idx = 0usize;
     let x = args
@@ -361,8 +242,15 @@ fn parse_positional_constructor(
             return Err(line_err("style and option names must be strings"));
         }
         idx += 1;
-        let token_text =
-            value_as_string(&token).ok_or_else(|| line_err("style tokens must be strings"))?;
+        let token_text = value_as_string(&token)
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "line",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .ok_or_else(|| line_err("style tokens must be strings"))?;
         let lower = token_text.trim().to_ascii_lowercase();
         if lower == "parent" {
             if idx >= args.len() {
@@ -410,7 +298,7 @@ fn parse_positional_constructor(
 
 fn parse_property_constructor(
     axes_target: AxesTarget,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<LineOptions> {
     if !args.len().is_multiple_of(2) {
         return Err(line_err("name-value arguments must come in pairs"));
@@ -425,6 +313,13 @@ fn parse_property_constructor(
     };
     for pair in args.chunks_exact(2) {
         let key = value_as_string(&pair[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "line",
+                    source.to_string(),
+                    source,
+                )
+            })?
             .ok_or_else(|| line_err("option names must be char arrays or strings"))?;
         match key.trim().to_ascii_lowercase().as_str() {
             "xdata" => options.x = Some(pair[1].clone()),
@@ -471,28 +366,22 @@ async fn build_2d_objects(
     }
 
     if let (Some(x_gpu), Some(y_gpu)) = (x.gpu_handle(), y.gpu_handle()) {
-        if x.len() == y.len()
-            && x.len() >= 2
-            && is_gpu_vector_shape(&x_gpu.shape)
-            && is_gpu_vector_shape(&y_gpu.shape)
+        if let Some(mut plot) = super::plot::build_line_gpu_plot_async_for_builtin(
+            BUILTIN_NAME,
+            x_gpu,
+            y_gpu,
+            label,
+            &base_appearance,
+        )
+        .await?
         {
-            if let Ok(mut plot) = super::plot::build_line_gpu_plot_async_for_builtin(
-                BUILTIN_NAME,
-                x_gpu,
-                y_gpu,
-                label,
-                &base_appearance,
-            )
-            .await
-            {
-                if label.is_empty() {
-                    plot.label = None;
-                }
-                if let Some(visible) = visible {
-                    plot.set_visible(visible);
-                }
-                return Ok(vec![LineObject::TwoD(plot)]);
+            if label.is_empty() {
+                plot.label = None;
             }
+            if let Some(visible) = visible {
+                plot.set_visible(visible);
+            }
+            return Ok(vec![LineObject::TwoD(plot)]);
         }
     }
 
@@ -613,16 +502,15 @@ fn expand_xyz_series(x: &Tensor, y: &Tensor, z: &Tensor) -> BuiltinResult<Vec<Se
 }
 
 fn column(tensor: &Tensor, col: usize) -> BuiltinResult<NumericPlotData> {
-    let indices = (0..tensor.rows())
-        .map(|row| row + col * tensor.rows())
-        .collect::<Vec<_>>();
-    let storage = tensor
-        .clone()
-        .into_numeric_storage()
-        .map_err(line_err)?
-        .gather(&indices)
-        .map_err(line_err)?;
-    NumericPlotData::new(storage, vec![tensor.rows(), 1]).map_err(line_err)
+    let rows = tensor.rows();
+    let indices: Vec<_> = (0..rows).map(|row| col * rows + row).collect();
+    let selected = super::op_common::line_inputs::select_native(
+        tensor,
+        &indices,
+        vec![rows, 1],
+        BUILTIN_NAME,
+    )?;
+    numeric_plot_data(selected)
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
@@ -652,15 +540,31 @@ fn vector_value(data: &[f64]) -> Value {
     )
 }
 
-fn begins_with_name_value(args: &[Value]) -> bool {
-    let Some(first) = args.first().and_then(value_as_string) else {
-        return false;
-    };
-    looks_like_option_name(&first.trim().to_ascii_lowercase())
-        || matches!(
-            first.trim().to_ascii_lowercase().as_str(),
-            "xdata" | "ydata" | "zdata" | "parent"
-        )
+fn begins_with_name_value(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<bool> {
+    Ok({
+        let Some(first) = args
+            .first()
+            .map(value_as_string)
+            .transpose()
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "line",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .flatten()
+        else {
+            return Ok(false);
+        };
+        looks_like_option_name(&first.trim().to_ascii_lowercase())
+            || matches!(
+                first.trim().to_ascii_lowercase().as_str(),
+                "xdata" | "ydata" | "zdata" | "parent"
+            )
+    })
 }
 
 fn is_numeric_value(value: &Value) -> bool {
@@ -670,10 +574,6 @@ fn is_numeric_value(value: &Value) -> bool {
     )
 }
 
-fn is_gpu_vector_shape(shape: &[usize]) -> bool {
-    shape.len() <= 1 || shape.iter().filter(|&&dim| dim > 1).count() <= 1
-}
-
 fn line_err(message: impl Into<String>) -> crate::RuntimeError {
     plotting_error(BUILTIN_NAME, format!("line: {}", message.into()))
 }
@@ -681,6 +581,14 @@ fn line_err(message: impl Into<String>) -> crate::RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::LINE_DESCRIPTOR;
+    async fn line_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        super::line_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::plot::plot_builtin;
     use crate::builtins::plotting::set::set_builtin;
@@ -796,7 +704,7 @@ mod tests {
                 Value::String("DisplayName".into())
             ])
             .unwrap(),
-            Value::String(String::new())
+            Value::String(String::new().into())
         );
     }
 

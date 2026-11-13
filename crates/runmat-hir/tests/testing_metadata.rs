@@ -57,6 +57,7 @@ fn external_superclass_uses_shared_immutable_hierarchy_metadata() {
         is_abstract: false,
         properties: Vec::new(),
         methods: Vec::new(),
+        array_shape: None,
     };
     let program = runmat_parser::parse("classdef SampleTest < runmat.testing.MetadataBase\nend")
         .expect("parse source");

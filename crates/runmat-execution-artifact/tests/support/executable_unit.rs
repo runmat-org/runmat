@@ -11,7 +11,7 @@ use runmat_types::{
     CapabilityRequirement, CapabilitySet, CollectiveContract, CollectiveId, CollectiveOperation,
     DistributedValueContract, DistributedValueId, DistributionScheme, ForeignAffinity,
     ForeignCapability, ForeignLifetime, ForeignOwnership, ForeignRequirement, ForeignTypeIdentity,
-    InteropManifest, LabCount, LabRank, ParallelAccess, ParallelManifest, ParallelRandomnessPolicy,
+    InteropManifest, LabCount, ParallelAccess, ParallelManifest, ParallelRandomnessPolicy,
     ParallelRegionId, ParallelVariableContract, ParallelVariableRole, ParforContract,
     ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionId,
     RegionProvenance, RegionValueId, SpmdContract, SpmdLabRequirement, ValueFact,
@@ -19,9 +19,13 @@ use runmat_types::{
 };
 
 pub fn recipe(mut recipe: ProgramBuildRecipe) -> ProgramBuildRecipe {
-    recipe.entrypoint = "0".into();
+    recipe.entrypoint = "main".into();
     recipe.target =
-        runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3");
+        runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v4");
+    let envelope =
+        ExecutableUnitEnvelope::from_canonical_bytes(&bytes(recipe.program_revision.clone()))
+            .unwrap();
+    recipe.interop = envelope.manifest.interop;
     recipe
 }
 
@@ -60,7 +64,8 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                 program: revision,
                 root_package: "artifact-fixture@1.0.0".into(),
                 entrypoint: "main".into(),
-                entrypoint_function: function,
+                entrypoint_function: Some(function),
+                declaration_class: None,
                 entrypoint_kind: ExecutableEntrypointKind::Function,
                 source_digest: Digest::sha256(b"src/main.m"),
             },
@@ -80,6 +85,7 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                 parallel_schema: runmat_types::PARALLEL_MANIFEST_SCHEMA_VERSION,
             },
             components,
+            dependencies: Vec::new(),
             capabilities: CapabilitySet(BTreeSet::from([
                 CapabilityRequirement::ForeignRuntime,
                 CapabilityRequirement::ParallelRuntime,
@@ -101,6 +107,7 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                     wasm: WasmInteropPolicy::HostBridge,
                 }],
                 adapters: Vec::new(),
+                adapter_contracts: Vec::new(),
             },
             parallel: ParallelManifest {
                 schema_version: runmat_types::PARALLEL_MANIFEST_SCHEMA_VERSION,
@@ -113,9 +120,11 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                         role: ParallelVariableRole::Loop,
                         access: ParallelAccess::ReadWrite,
                         fact: dynamic_fact(),
-                        transferable: true,
+                        transferability:
+                            runmat_types::ParallelTransferability::RequiresRuntimeValidation,
                     }],
                     maximum_workers: Some(LabCount(4)),
+                    effects: Default::default(),
                     capabilities: Default::default(),
                     randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
                 }],
@@ -126,13 +135,18 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                         maximum: LabCount(4),
                     },
                     captures: Vec::new(),
+                    outputs: Vec::new(),
+                    effects: Default::default(),
                     capabilities: Default::default(),
                 }],
                 distributed_values: vec![DistributedValueContract {
                     id: distributed,
                     value: dynamic_fact(),
-                    scheme: DistributionScheme::Block { dimension: 0 },
-                    owner_region: spmd,
+                    construction: runmat_types::DistributedConstruction::Fixed {
+                        scheme: DistributionScheme::Block { dimension: 1 },
+                    },
+                    owner: runmat_types::DistributedOwner::Region(spmd),
+                    coordination: None,
                     materializable: true,
                 }],
                 collectives: vec![CollectiveContract {
@@ -140,11 +154,15 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                         region: spmd,
                         ordinal: 0,
                     },
-                    operation: CollectiveOperation::Broadcast {
-                        input: distributed,
-                        output: distributed,
-                        root: LabRank(0),
-                    },
+                    operation: CollectiveOperation::Broadcast,
+                    input: Some(dynamic_fact()),
+                    output: Some(dynamic_fact()),
+                    root: Some(dynamic_fact()),
+                    source: None,
+                    destination: None,
+                    tag: None,
+                    dimension: None,
+                    reducer: None,
                 }],
             },
             optional_sections: Vec::new(),

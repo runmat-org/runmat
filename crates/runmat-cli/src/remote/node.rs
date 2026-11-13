@@ -1,35 +1,110 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context as _, Result};
 use runmat_node_agent::enrollment::CredentialStore;
 use runmat_node_agent::service::{HttpNodeControlPlane, NodeAgentService, Shutdown};
 use runmat_node_agent::{AgentConfig, AgentFileConfig};
 
-use crate::cli::{NodeJoinArgs, NodeJoinCommand, NodeServiceCommand, NodeTrustTier};
+use crate::cli::{
+    ClusterJoinArgs, NodeArgs, NodeCommand, NodeOptions, NodeServiceCommand, NodeTrustTier,
+};
 
-pub(super) async fn execute(args: NodeJoinArgs) -> Result<()> {
-    match &args.command {
-        NodeJoinCommand::Inventory => {
-            let inventory = runmat_node_agent::inventory::collect()?;
+pub(super) async fn join(args: ClusterJoinArgs) -> Result<()> {
+    use runmat_node_agent::config::ServerEndpoint;
+    use runmat_node_agent::enrollment::{register_authenticated, RegistrationTarget};
+    use runmat_server_client::auth::{build_public_client, resolve_auth_token, RemoteConfig};
+
+    let config = config(&args.options, args.service)?;
+    let endpoint = ServerEndpoint::parse(&config.server_url)?;
+    let mut account = RemoteConfig::load()?;
+    let token = resolve_auth_token(&mut account, endpoint.as_str()).await?;
+    let client = build_public_client(endpoint.as_str(), &token)?;
+    let org = super::organization::resolve(&client, &account, args.org, false).await?;
+    let cluster =
+        runmat_server_client::execution::org_cluster_by_name(&client, &org, &args.cluster).await?;
+    register_authenticated(
+        &CredentialStore::new(&config.state_directory),
+        RegistrationTarget::new(endpoint, org, cluster),
+        runmat_node_agent::inventory::collect(config.trust_tier)?,
+        config.heartbeat_ttl.as_secs(),
+        &token,
+    )
+    .await?;
+    // Account authority is bootstrap-only. The foreground/service agent loads
+    // its own endpoint-bound machine credential from the registered directory.
+    drop(client);
+    drop(token);
+    if args.service {
+        install_service(&args.options, false)
+    } else {
+        run(config).await
+    }
+}
+
+pub(super) async fn execute(args: NodeArgs) -> Result<()> {
+    let NodeArgs {
+        options: args,
+        command,
+    } = args;
+    match &command {
+        NodeCommand::Status => {
+            #[derive(serde::Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct RegistrationStatus<'a> {
+                server: &'a runmat_node_agent::config::ServerEndpoint,
+                node_id: &'a str,
+                cluster_id: &'a str,
+                org_id: &'a str,
+            }
+            let config = config(&args, false)?;
+            let credential = CredentialStore::new(&config.state_directory).load()?;
+            println!(
+                "{}",
+                serde_json::to_string(&RegistrationStatus {
+                    server: &credential.server_endpoint,
+                    node_id: &credential.node_id,
+                    cluster_id: &credential.cluster_id,
+                    org_id: &credential.org_id,
+                })?
+            );
+            Ok(())
+        }
+        NodeCommand::Inventory => {
+            let inventory = runmat_node_agent::inventory::collect(trust_tier(&args))?;
             println!("{}", serde_json::to_string_pretty(&inventory)?);
             Ok(())
         }
-        NodeJoinCommand::Enroll { token } => {
+        NodeCommand::Enroll { token, token_stdin } => {
+            let token = if *token_stdin {
+                use std::io::Read as _;
+                let mut value = String::new();
+                std::io::stdin()
+                    .take(16 * 1024 + 1)
+                    .read_to_string(&mut value)?;
+                if value.len() > 16 * 1024 || value.trim().is_empty() {
+                    anyhow::bail!("stdin enrollment token is empty or exceeds 16 KiB");
+                }
+                value.trim().to_owned()
+            } else {
+                token.clone().context("an enrollment token is required")?
+            };
             let config = config(&args, false)?;
+            let inventory = runmat_node_agent::inventory::collect(config.trust_tier)?;
             let control = Arc::new(HttpNodeControlPlane::new(config.server_url.clone())?);
             runmat_node_agent::enrollment::enroll(
                 control,
                 &CredentialStore::new(&config.state_directory),
-                token.clone(),
-                runmat_node_agent::inventory::collect()?,
+                runmat_node_agent::config::ServerEndpoint::parse(&config.server_url)?,
+                token,
+                inventory,
                 config.heartbeat_ttl.as_secs(),
             )
             .await?;
             println!("node enrolled");
             Ok(())
         }
-        NodeJoinCommand::Run => run(config(&args, false)?).await,
-        NodeJoinCommand::RotateCredential => {
+        NodeCommand::Run => run(config(&args, false)?).await,
+        NodeCommand::RotateCredential => {
             let config = config(&args, false)?;
             let control = Arc::new(HttpNodeControlPlane::new(config.server_url.clone())?);
             let mut service = NodeAgentService::load(config, control)?;
@@ -37,8 +112,8 @@ pub(super) async fn execute(args: NodeJoinArgs) -> Result<()> {
             println!("node credential rotated");
             Ok(())
         }
-        NodeJoinCommand::Service { command } => execute_service(&args, command),
-        NodeJoinCommand::WindowsServiceRun => {
+        NodeCommand::Service { command } => execute_service(&args, command),
+        NodeCommand::WindowsServiceRun => {
             #[cfg(windows)]
             {
                 runmat_node_agent::dispatch_windows_service(config(&args, false)?)
@@ -65,7 +140,7 @@ async fn run(config: AgentConfig) -> Result<()> {
     result.map_err(Into::into)
 }
 
-fn config(args: &NodeJoinArgs, service_defaults: bool) -> Result<AgentConfig> {
+fn config(args: &NodeOptions, service_defaults: bool) -> Result<AgentConfig> {
     let mut config = if let Some(path) = &args.node_config {
         AgentFileConfig::load(path)?.into_runtime()?
     } else {
@@ -75,10 +150,10 @@ fn config(args: &NodeJoinArgs, service_defaults: bool) -> Result<AgentConfig> {
             } else {
                 AgentConfig::default_state_directory()?
             },
-            server_url: args
-                .server
-                .clone()
-                .ok_or_else(|| anyhow!("--server or RUNMAT_SERVER_URL is required"))?,
+            server_url: runmat_server_client::auth::resolve_server_url(
+                &runmat_server_client::auth::RemoteConfig::load()?,
+                args.server.clone(),
+            )?,
             runmat_executable: args.runmat.clone().unwrap_or(std::env::current_exe()?),
             heartbeat_interval: AgentConfig::DEFAULT_HEARTBEAT_INTERVAL,
             heartbeat_ttl: AgentConfig::DEFAULT_HEARTBEAT_TTL,
@@ -110,7 +185,18 @@ fn config(args: &NodeJoinArgs, service_defaults: bool) -> Result<AgentConfig> {
     Ok(config)
 }
 
-fn execute_service(args: &NodeJoinArgs, command: &NodeServiceCommand) -> Result<()> {
+fn trust_tier(args: &NodeOptions) -> runmat_execution::security::ExecutionTrustTier {
+    match args.trust_tier {
+        Some(NodeTrustTier::HostedOrdinary) => {
+            runmat_execution::security::ExecutionTrustTier::HostedOrdinary
+        }
+        Some(NodeTrustTier::CustomerTrusted) | None => {
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted
+        }
+    }
+}
+
+fn execute_service(args: &NodeOptions, command: &NodeServiceCommand) -> Result<()> {
     match command {
         NodeServiceCommand::Install { dry_run } => install_service(args, *dry_run),
         NodeServiceCommand::Print => install_service(args, true),
@@ -127,7 +213,7 @@ fn execute_service(args: &NodeJoinArgs, command: &NodeServiceCommand) -> Result<
     }
 }
 
-fn install_service(args: &NodeJoinArgs, dry_run: bool) -> Result<()> {
+fn install_service(args: &NodeOptions, dry_run: bool) -> Result<()> {
     let config = config(args, true)?;
     let file_config = AgentFileConfig::from_runtime(&config);
     let plan =
@@ -135,6 +221,16 @@ fn install_service(args: &NodeJoinArgs, dry_run: bool) -> Result<()> {
     if dry_run {
         println!("{}", serde_json::to_string_pretty(&plan)?);
     } else {
+        let credential = CredentialStore::new(&config.state_directory)
+            .load()
+            .context(
+            "enroll this machine using the same --state-directory before installing its service",
+        )?;
+        if credential.server_endpoint
+            != runmat_node_agent::config::ServerEndpoint::parse(&config.server_url)?
+        {
+            anyhow::bail!("node credentials belong to a different Server; service configuration was not installed");
+        }
         runmat_node_agent::service_install::apply_install(&plan, &config.state_directory)?;
         println!("installed and started RunMat execution-node service");
     }
@@ -145,30 +241,51 @@ fn install_service(args: &NodeJoinArgs, dry_run: bool) -> Result<()> {
 mod tests {
     use clap::Parser as _;
 
-    use crate::cli::{Cli, ClusterCommand, Commands, NodeJoinCommand};
+    use crate::cli::{Cli, ClusterCommand, Commands, NodeCommand};
 
     #[test]
-    fn cluster_join_parses_node_lifecycle_commands() {
+    fn named_join_and_node_lifecycle_have_distinct_entrypoints() {
         let cli = Cli::try_parse_from([
             "runmat",
-            "cluster",
-            "join",
+            "node",
             "--server",
             "https://api.runmat.com",
             "enroll",
             "--token",
             "secret",
         ])
-        .expect("cluster join command");
-        let Some(Commands::Cluster {
-            cluster_command: ClusterCommand::Join(args),
-        }) = cli.command
-        else {
-            panic!("expected cluster join command");
+        .expect("node enrollment command");
+        let Some(Commands::Node(args)) = cli.command else {
+            panic!("expected node command");
         };
         assert!(matches!(
             args.command,
-            NodeJoinCommand::Enroll { token } if token == "secret"
+            NodeCommand::Enroll { token: Some(token), token_stdin: false } if token == "secret"
         ));
+        for service in [false, true] {
+            let mut argv = vec!["runmat", "cluster", "join", "engineering"];
+            if service {
+                argv.push("--service");
+            }
+            let cli = Cli::try_parse_from(argv).expect("named join command");
+            let Some(Commands::Cluster {
+                cluster_command: ClusterCommand::Join(args),
+            }) = cli.command
+            else {
+                panic!("expected named join");
+            };
+            assert_eq!(args.cluster, "engineering");
+            assert_eq!(args.service, service);
+            assert!(args.org.is_none());
+        }
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "cluster",
+            "join",
+            "engineering",
+            "--service",
+            "--foreground",
+        ])
+        .is_err());
     }
 }

@@ -1,4 +1,7 @@
+mod boundary_coordinates;
 mod evaluate;
+pub(crate) mod storage;
+pub use boundary_coordinates::ExactBoundaryNodeCoordinates;
 mod types;
 mod validate;
 

@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "source_anchor": "c7a12b7b9f050f6789dda56a1024636243b7a63e",
+  "frozen_source_manifest_sha256": "edfb84acf630b94709eb247f7f3c5fea3fdd6b94b3e4fe05881b0776b7c18a02",
+  "target": "x86_64-unknown-linux-gnu",
+  "execution_host": "gh-linux-20260327-125436, NVIDIA T4/Vulkan",
+  "cli": {
+    "sha256": "b45cf823f46b98f7b3c15f3084c878de2f801f53885d4cb232bde8022838e2e5",
+    "bytes": 797271192,
+    "location": "Main:.tmp-rm1064/settings-linux-r1057-release-artifacts/runmat"
+  },
+  "build": {
+    "exit_code": 0,
+    "controller_exit": 0,
+    "elapsed": "82m05s",
+    "toolchain": "Rust1.90.0",
+    "profile": "release optimized; symbols stripped"
+  },
+  "products": {
+    "passed": 31,
+    "failed": 0,
+    "not_selected": 0,
+    "selection": null,
+    "backend": "vulkan",
+    "cases": [
+      {
+        "name": "compiled front door and machine-readable analysis",
+        "passed": true
+      },
+      {
+        "name": "authenticated named cluster join and original-identity recovery",
+        "passed": true
+      },
+      {
+        "name": "staged CLI distribution reopens independently with notices",
+        "passed": true
+      },
+      {
+        "name": "local FEA is lazy, denies signed-out effects, and meters authenticated mesh/solve",
+        "passed": true
+      },
+      {
+        "name": "in-process provider preserves exact wide integer comparisons",
+        "passed": true
+      },
+      {
+        "name": "script numerics, exact storage, compatibility and handles (VM)",
+        "passed": true
+      },
+      {
+        "name": "script numerics, exact storage, compatibility and handles (adaptive JIT)",
+        "passed": true
+      },
+      {
+        "name": "stdin script entrypoint",
+        "passed": true
+      },
+      {
+        "name": "dynamic source path and call resolution",
+        "passed": true
+      },
+      {
+        "name": "originating runtime error identity and failure exit",
+        "passed": true
+      },
+      {
+        "name": "adaptive future execution through CLI process services",
+        "passed": true
+      },
+      {
+        "name": "native future capability refusal precedes image publication",
+        "passed": true
+      },
+      {
+        "name": "compiled CLI uses real Vulkan provider without host-provider fallback",
+        "passed": true
+      },
+      {
+        "name": "process-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "session-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "none-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "public test runner testPasses",
+        "passed": true
+      },
+      {
+        "name": "public test runner testFails",
+        "passed": true
+      },
+      {
+        "name": "public test runner does-not-exist",
+        "passed": true
+      },
+      {
+        "name": "public test runner testHangs",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (process)",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (session)",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (none)",
+        "passed": true
+      },
+      {
+        "name": "process-isolated test worker supports VM future execution",
+        "passed": true
+      },
+      {
+        "name": "script Ctrl-C cancellation",
+        "passed": true
+      },
+      {
+        "name": "real native library callback value and originating callback error (process)",
+        "passed": true
+      },
+      {
+        "name": "real native library callback value and originating callback error (in_process)",
+        "passed": true
+      },
+      {
+        "name": "in-process native callback Ctrl-C cancellation and retirement",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_success",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_assertion",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_origin",
+        "passed": true
+      }
+    ]
+  },
+  "source_guards": {
+    "count": 6,
+    "matchedEach": 25871,
+    "differences": 0,
+    "absent": 0
+  },
+  "preserved_runtime_artifacts_rehashed": true,
+  "remote_local_receipt_hashes_matched": 20,
+  "evidence": [
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.build.log",
+      "sha256": "42fc9660df862284def1257ef20bbff26ed1f5165bf16005a0938a878b5b6bfb"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.build.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.controller.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.cli.sha256",
+      "sha256": "730e85518453ba321ffe43f9f47656d867f87597a6828b04ade76f24d711fa40"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.presource.json",
+      "sha256": "82d6f5ce1d7b81f314c2bca16b3ede35691fd73492ee17473eb3703490cfba45"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.postbuild.json",
+      "sha256": "0d9712ebdb8e3cb87a42c5d4f6c602e240bf26e61851ede4148659b385ac2abf"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.postsource.json",
+      "sha256": "324dc99b517cfbb4eeec6da065dbcfdadcd7bf1efde52af4b2f1bf454a409956"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.preserved.sha256",
+      "sha256": "a134cff818b137eac61e14055386f950914e1e45c8af519272c05a5a63d1a935"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.preserved-check.log",
+      "sha256": "7ed2bd6150d56fdda21404d8f69b7a9bcbe954b451b2c9cbd1260d9da724b46a"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-cli-suite-r1057.loader.txt",
+      "sha256": "4ed8fc6a477d10a1ebca86d81b1680b1e1fdf34426f403a1f57dc0ec79f96575"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.products.log",
+      "sha256": "9fa83082f71e8a2f09d90c7f42dc9affab14850638c56a4d9de7cfe71a653742"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.products.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.controller.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.presource.json",
+      "sha256": "3ac5b06464b7d42a6be3819d7c6e3c954cf3f807f478cabcb461af6b8c33c3d6"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.products.postsource.json",
+      "sha256": "a91a908bcc10dd9d2e7c10b8af0adcb5c6e3450f16a605e6fae71d5136583615"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.postsource.json",
+      "sha256": "988c5f92fe63e309ab6dfef9466325b52dee02fc8ffc4da231ed4eca3540f0b8"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.inputs.sha256",
+      "sha256": "0dabf841c28484553e951fa8160845e9acd3e0dc9979b77816b7f128a9112d34"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.inputs-verified.log",
+      "sha256": "a3a1bfe5b7c8b60c094678672082923c0cb7ad0e3b0b1415aeee75a42dce9022"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/settings-linux-r1057-cli-products.results.sha256",
+      "sha256": "a6d914d4c27b4b116ed1c638615c80e4d8b825759413f90e521ceaf120089a1e"
+    },
+    {
+      "path": ".tmp-rm1064/settings-linux-r1057-collected/report.json",
+      "sha256": "dafd14b5a8652ed086dd88a116d71f3096097b8039504b29b7f4134c7955643a"
+    }
+  ],
+  "scope": "Full original staged CLI product cohort with actual Vulkan workers, callbacks, cancellation and independent public native compile/link. The previously measured scientific and full GPU inventories retain separate receipts and conservation; they were not repeated for this CLI metadata-only correction."
+}

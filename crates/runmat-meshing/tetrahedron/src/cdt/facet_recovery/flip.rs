@@ -1,19 +1,24 @@
+#[cfg(test)]
+use super::node_index;
+#[cfg(test)]
+use super::{DelaunaySegmentRecovery, DelaunayVolumeTopology};
+mod local;
+pub(super) use local::recover as try_recover_facet_with_local_edge_flip;
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_meshing_core::{
-    quality::predicate::{orient3d, PredicateSign},
-    StableDigest,
-};
+#[cfg(test)]
+use runmat_meshing_core::quality::predicate::orient3d;
+use runmat_meshing_core::{quality::predicate::PredicateSign, StableDigest};
 
-use super::{
-    error, node_index, DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind,
-    DelaunaySegmentRecovery, DelaunayVolumeTopology, FacetRecoveryWork,
-};
+use super::{error, DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, FacetRecoveryWork};
+#[cfg(test)]
 use crate::cdt::{
-    topology::build_delaunay_volume_topology_with_regions, validate_delaunay_volume_topology,
-    DelaunayInsertionErrorKind, DelaunayTopologyErrorKind,
+    insertion::validate_constrained_delaunay_volume_topology,
+    topology::build_delaunay_volume_topology_with_regions, DelaunayInsertionErrorKind,
+    DelaunayTopologyErrorKind,
 };
 
+#[cfg(test)]
 pub(super) fn try_recover_facet_with_edge_flip(
     recovery: &DelaunaySegmentRecovery,
     facet: [StableDigest; 3],
@@ -124,8 +129,22 @@ pub(super) fn try_recover_facet_with_edge_flip(
                 _ => continue,
             },
         };
-        match validate_delaunay_volume_topology(
+        let mut protected_faces = protected_facets
+            .iter()
+            .map(|protected| {
+                let mut identities = protected.node_identities;
+                identities.sort_unstable();
+                identities
+            })
+            .collect::<Vec<_>>();
+        let mut recovered_face = facet;
+        recovered_face.sort_unstable();
+        protected_faces.push(recovered_face);
+        protected_faces.sort_unstable();
+        protected_faces.dedup();
+        match validate_constrained_delaunay_volume_topology(
             &candidate,
+            &protected_faces,
             work.options.segment_recovery.insertion,
             work.cancellation,
         ) {
@@ -152,6 +171,7 @@ pub(super) fn try_recover_facet_with_edge_flip(
     Ok(None)
 }
 
+#[cfg(test)]
 fn edge_stars(
     topology: &DelaunayVolumeTopology,
     constraint_index: u32,
@@ -177,6 +197,7 @@ fn edge_stars(
     Ok(stars)
 }
 
+#[cfg(test)]
 fn protected_segment_edges(
     recovery: &DelaunaySegmentRecovery,
     constraint_index: u32,
@@ -200,13 +221,18 @@ fn protected_segment_edges(
         .collect()
 }
 
+#[cfg(test)]
 fn opposite_sides(
     topology: &DelaunayVolumeTopology,
     edge: [u32; 2],
     facet: [u32; 3],
     constraint_index: u32,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let coordinates = |index: u32| topology.nodes[index as usize].coordinates_m;
+    let coordinates = |index: u32| {
+        topology.nodes[index as usize]
+            .coordinates_m
+            .canonical_value()
+    };
     let left = orient3d([facet[0], facet[1], facet[2], edge[0]].map(coordinates)).map_err(
         |predicate| {
             error(
@@ -240,6 +266,7 @@ fn invalid_topology(constraint_index: u32, reason: &'static str) -> DelaunayFace
     )
 }
 
+#[cfg(test)]
 fn resource_or_cancelled(
     kind: DelaunayFacetRecoveryErrorKind,
     constraint_index: u32,

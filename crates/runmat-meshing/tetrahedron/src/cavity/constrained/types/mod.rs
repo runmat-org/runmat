@@ -10,6 +10,7 @@ use runmat_meshing_core::{
         TETRAHEDRON_OPTIMIZATION_LOCAL_RECONNECTION_REJECTION_PREFIX,
     },
     quality::predicate::Point3,
+    quality::tolerance::MeshingTolerance,
 };
 
 #[cfg(test)]
@@ -60,6 +61,7 @@ pub struct ConstrainedCavityRefillOptions {
     pub min_scaled_jacobian: f64,
     pub volume_relative_tolerance: f64,
     pub min_protected_node_distance_m: f64,
+    pub classification_tolerance: MeshingTolerance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +114,7 @@ impl Default for ConstrainedCavityRefillOptions {
             min_scaled_jacobian: 0.15,
             volume_relative_tolerance: 1.0e-9,
             min_protected_node_distance_m: 0.0,
+            classification_tolerance: MeshingTolerance::default(),
         }
     }
 }
@@ -119,7 +122,9 @@ impl Default for ConstrainedCavityRefillOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstrainedCavityNode {
     pub node_id: u32,
-    pub coordinates_m: Point3,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, Point3>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,7 +151,8 @@ pub struct CavityTetrahedron {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ConnectivityPoint {
     pub(super) node_id: u32,
-    pub(super) coordinates_m: Point3,
+    pub(super) coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, Point3>,
     pub(super) is_super: bool,
 }
 

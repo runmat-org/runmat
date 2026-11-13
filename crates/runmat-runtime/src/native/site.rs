@@ -24,6 +24,8 @@ impl NativeSitePhase {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeSiteRequest {
+    /// Portable program-point owner in the active NativeFunction, not its
+    /// session-local compiled coordinate or function-resolver index.
     pub function: u32,
     pub block: u32,
     pub position: u32,

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "scope": "Targeted Linux qualification of native console-consumer ordering. This record conserves the existing scientific measurements; it does not qualify newly built dev distribution products.",
+  "repair_commit": "b9435ff48d83361558075dfea685a1812b9b666e",
+  "accepted_inputs": {
+    "sha256": "d07d8e67d874d8d3f648050a96bbd50fa5d30ce4291e56f2e07eb4b2c7c0c23d",
+    "files": 24831,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "source_review": "Durable consumers refresh the original page after observing terminal closure or discovering a late journal header. Direct consumers observe completion before reading stream heads. These changes prevent older snapshots from falsely rejecting newer verified output. Original process-retirement writers, numerical kernels, resource charges, scientific fixtures and thresholds are unchanged. Missing journals and unverified retirement still fail. Fresh pages are delivered by the existing pump without advancing unread cursors or cloning workspaces.",
+  "platform": "linux-x86_64",
+  "toolchain": "Rust 1.90.0",
+  "builder": "gh-linux-20260327-125436",
+  "candidate": "/home/nallana/rm1293/candidates/settings-r964-linux",
+  "candidate_scope": "Existing warm qualification snapshot with the five repair files byte-matched to repair_commit. This is a targeted overlay check, not a full-source rebuild of repair_commit.",
+  "source_sha256": {
+    "crates/runmat-execution-runner-native/src/service/job_output.rs": "6a8dec49cf42deee568c757d53c8952de615fa66c36d6e77f39efa332805d011",
+    "crates/runmat-execution-runner-native/src/service/job_output/tests.rs": "a9b3e4811bc94d34a4245b5683110a8be2193f57209c0d146d26430eb025e6d0",
+    "crates/runmat-execution-runner-native/src/service/output.rs": "ece345b740d5086b556dac6669c7cfadafcf81ea836446f5c723011f12e34757",
+    "crates/runmat-execution-runner-native/tests/output_process_conformance.rs": "d3a855c9f12a6fdc553cf15f2c36c31f96a326204a713647837535220ee9419a",
+    "crates/runmat-execution-runner-native/tests/output_process_conformance/durable_poll.rs": "1602f05d366a7de7256cdf212203121072d9eb9f28a9099261986567579605e4"
+  },
+  "checks": [
+    {
+      "command": ["cargo", "test", "-p", "runmat-execution-runner-native", "--all-features", "--lib", "service::job_output::tests::"],
+      "exit_code": 0,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 482,
+      "log_location": "/home/nallana/rm1293/logs/dev-ci-durable-retirement-linux-r7.unit.log",
+      "log_sha256": "8a4f247710d2d02da37bd2022d3c19433ee06794dbfa75feba96b41da1666255",
+      "artifact_sha256": "e3da04978e46912aad4897de3ad3a08515d14346650a9cde9ebeb0cce5e179f9"
+    },
+    {
+      "command": ["cargo", "test", "-p", "runmat-execution-runner-native", "--all-features", "--test", "output_process_conformance"],
+      "exit_code": 0,
+      "harness": "custom process-conformance executable; no libtest case total",
+      "coverage": ["fixture unwind cleanup", "parent-loss process retirement", "original V4 captures and semantic functions", "producer exit and cold durable attachment", "pending await and quota cancellation", "live UTF-8/control prefix across abrupt publisher loss and restart", "zero/one/multiple outputs"],
+      "log_location": "/home/nallana/rm1293/logs/dev-ci-durable-retirement-linux-r7.full.log",
+      "log_sha256": "bd6e4affea7fa7b05295ccc4f47269a0a18933ff18be76c11a796fba52938655",
+      "artifact_sha256": "ef598f92e3751602cd5f283f8c85c0198e5fda10fce9be09357c2a4c3fba8ee1"
+    }
+  ],
+  "diagnostic_run": "The preceding r6 full target exited 101 with a five-second supervisor readiness timeout while debugger sampling had paused the supervisor. It is excluded from passing evidence. The unchanged, uninstrumented r7 target passed. The earlier r5 variant also passed four isolated durable runs and full output conformance; it lacked the subsequent direct-reader/header follow-up and does not qualify those additions.",
+  "limits": "Original scientific totals and executed artifact identities remain unchanged. Cross-platform ordinary CI and distributed-product acceptance must still pass on the consolidated dev source."
+}

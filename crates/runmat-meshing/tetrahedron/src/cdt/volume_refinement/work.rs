@@ -23,6 +23,20 @@ impl<'a> CandidateWork<'a> {
         }
     }
 
+    /// Construction currently charges its two stages before returning a point.
+    /// Batch selection can hand off ready work before requesting a unit beyond
+    /// the caller's unchanged evaluation ceiling.
+    pub(super) fn can_construct(&self) -> bool {
+        self.options
+            .maximum_candidate_evaluations
+            .saturating_sub(self.evaluations)
+            >= 2
+    }
+
+    pub(super) fn evaluations(&self) -> u64 {
+        self.evaluations
+    }
+
     pub(super) fn evaluate(&mut self) -> Result<(), DelaunayVolumeRefinementCandidateError> {
         if self
             .evaluations

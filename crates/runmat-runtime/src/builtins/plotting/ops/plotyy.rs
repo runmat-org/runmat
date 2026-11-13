@@ -1,14 +1,9 @@
 //! MATLAB-compatible legacy `plotyy` builtin.
+use runmat_builtins::{
+    PLOTYY_ERROR_INTERNAL as ERROR_INTERNAL,
+    PLOTYY_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -17,141 +12,10 @@ use super::state::{
     append_active_plot, current_axes_state, prepare_plotyy_axes, register_line3_handle,
     register_line_handle, select_axes_for_figure, set_log_modes_for_axes, PlotRenderOptions,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "plotyy";
-const PLOTYY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X1/Y1/X2/Y2",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Both coordinate pairs accept all eight integer classes and retain native source properties on their line objects.",
-    }];
-pub const PLOTYY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[ax,h1,h2] = plotyy(integer_X1, integer_Y1, integer_X2, integer_Y2, ...)",
-        inputs: &PLOTYY_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each delegated line retains exact native source and persisted property data; dual-axis display and rendering are explicit floating boundaries.",
-    }];
-
-const OUTPUT_AX_H1_H2: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Two axes handles [left right].",
-    },
-    BuiltinParamDescriptor {
-        name: "h1",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line handle or handles for the left axes.",
-    },
-    BuiltinParamDescriptor {
-        name: "h2",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line handle or handles for the right axes.",
-    },
-];
-
-const INPUTS_X1_Y1_X2_Y2: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X1",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data for the left axes.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y1",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data for the left axes.",
-    },
-    BuiltinParamDescriptor {
-        name: "X2",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X data for the right axes.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y2",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data for the right axes.",
-    },
-];
-
-const INPUTS_WITH_FUN: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "X1, Y1, X2, Y2 followed by one plotting function selector.",
-}];
-
-const INPUTS_WITH_FUNS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "X1, Y1, X2, Y2 followed by left and right plotting function selectors.",
-}];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "[ax,h1,h2] = plotyy(X1,Y1,X2,Y2)",
-        inputs: &INPUTS_X1_Y1_X2_Y2,
-        outputs: &OUTPUT_AX_H1_H2,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ax,h1,h2] = plotyy(X1,Y1,X2,Y2,fun)",
-        inputs: &INPUTS_WITH_FUN,
-        outputs: &OUTPUT_AX_H1_H2,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ax,h1,h2] = plotyy(X1,Y1,X2,Y2,fun1,fun2)",
-        inputs: &INPUTS_WITH_FUNS,
-        outputs: &OUTPUT_AX_H1_H2,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PLOTYY.INVALID_ARGUMENT",
-    identifier: Some("RunMat:plotyy:InvalidArgument"),
-    when: "Input count, plotting function selector, or line data is invalid.",
-    message: "plotyy: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PLOTYY.INTERNAL",
-    identifier: Some("RunMat:plotyy:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "plotyy: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const PLOTYY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[derive(Clone, Copy, Debug)]
 enum PlotSelector {
@@ -163,17 +27,29 @@ enum PlotSelector {
 
 #[runtime_builtin(
     name = "plotyy",
-    category = "plotting",
-    summary = "Plot two data sets with independent left and right Y axes.",
-    keywords = "plotyy,plotting,dual y axis,legacy",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::plotyy::PLOTYY_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::plotyy::PLOTYY_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::plotyy"
 )]
-pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn plotyy_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "plotyy: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "plotyy")?;
+    let _arguments = args.fork();
+    work.finish(plotyy_impl(runtime.as_ref(), args, &work).await)
+}
+async fn plotyy_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
     if args.len() < 4 || args.len() > 6 {
         return Err(invalid(
             "expected X1, Y1, X2, Y2 and optional plotting functions",
@@ -198,10 +74,24 @@ pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     };
 
     let current_axes = current_axes_state();
-    let left_line = parse_plot_line(current_axes.handle, current_axes.active_index, x1, y1).await?;
-    let right_line =
-        parse_plot_line(current_axes.handle, current_axes.active_index, x2, y2).await?;
+    let left_line = parse_plot_line(
+        runtime,
+        current_axes.handle,
+        current_axes.active_index,
+        x1,
+        y1,
+    )
+    .await?;
+    let right_line = parse_plot_line(
+        runtime,
+        current_axes.handle,
+        current_axes.active_index,
+        x2,
+        y2,
+    )
+    .await?;
 
+    work.check()?;
     let (figure, left_axes_index, right_axes_index, left_axes, right_axes) =
         prepare_plotyy_axes().map_err(map_internal)?;
     apply_selector_modes(figure, left_axes_index, left_selector)?;
@@ -213,6 +103,7 @@ pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let right_plot_indices_slot = std::rc::Rc::clone(&right_plot_indices);
     let mut left_objects = Some(left_line.objects);
     let mut right_objects = Some(right_line.objects);
+    work.check()?;
     let render_result = append_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions::default(),
@@ -241,8 +132,7 @@ pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         },
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(map_internal(err));
         }
     }
@@ -279,12 +169,15 @@ pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn parse_plot_line(
+    runtime: Option<&crate::context::RuntimeContext>,
     figure: super::state::FigureHandle,
     axes_index: usize,
     x: Value,
     y: Value,
 ) -> BuiltinResult<super::line::ParsedLineCall> {
-    parse_line_args(Some((figure, axes_index)), vec![x, y])
+    let coordinates = [x, y];
+    let arguments = crate::call::BuiltinArguments::from_borrowed(&coordinates, runtime)?;
+    parse_line_args(Some((figure, axes_index)), arguments.view())
         .await
         .map_err(|err| {
             RuntimeError::from(
@@ -300,7 +193,7 @@ async fn parse_plot_line(
 fn outputs(ax: Value, h1: Value, h2: Value) -> BuiltinResult<Value> {
     let values = vec![ax, h1, h2];
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(count) => {
             if count > 3 {
                 return Err(invalid("requested more than three outputs"));
@@ -313,11 +206,19 @@ fn outputs(ax: Value, h1: Value, h2: Value) -> BuiltinResult<Value> {
 
 fn selector_from_value(value: &Value) -> BuiltinResult<PlotSelector> {
     let text = match value {
-        Value::String(text) => text.clone(),
-        Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect::<String>(),
-        Value::FunctionHandle(name) => name.clone(),
-        Value::ExternalFunctionHandle(name) => name.clone(),
-        Value::MethodFunctionHandle(name) => name.clone(),
+        Value::String(runmat_value::StringElement::Text(text)) => text.as_str().to_owned(),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "plotyy",
+                    source.to_string(),
+                    source,
+                )
+            })?
+        }
+        Value::FunctionHandle(name) => name.name().to_owned(),
+        Value::ExternalFunctionHandle(name) => name.name().to_owned(),
+        Value::MethodFunctionHandle(name) => name.name().to_owned(),
         _ => {
             return Err(invalid(
                 "plotting function must be a function handle or function name",
@@ -366,7 +267,7 @@ fn invalid(message: impl Into<String>) -> RuntimeError {
     builder.build()
 }
 
-fn map_internal(err: impl std::error::Error + Send + Sync + 'static) -> RuntimeError {
+fn map_internal(err: impl crate::runtime_error::RuntimeErrorSourceBound) -> RuntimeError {
     let mut builder = crate::build_runtime_error(format!("{}: {err}", ERROR_INTERNAL.message))
         .with_builtin(BUILTIN_NAME);
     if let Some(identifier) = ERROR_INTERNAL.identifier {
@@ -378,6 +279,14 @@ fn map_internal(err: impl std::error::Error + Send + Sync + 'static) -> RuntimeE
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn plotyy_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        super::plotyy_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, current_axes_state, reset_hold_state_for_run};
@@ -427,7 +336,7 @@ mod tests {
     #[test]
     fn plotyy_returns_three_outputs_when_requested() {
         let _guard = setup();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let out = block_on(plotyy_builtin(vec![
             tensor(&[1.0, 2.0]),
             tensor(&[3.0, 4.0]),

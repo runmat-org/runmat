@@ -60,11 +60,27 @@ impl PoolRecord {
         }
     }
 
+    /// Minimum workers is a provisioning/resize floor, not a loss-induced veto
+    /// on healthy capacity. Explicit shutdown/failure states remain authoritative.
+    pub fn worker_availability_state(&self) -> PoolState {
+        if matches!(
+            self.state,
+            PoolState::Draining | PoolState::Stopped | PoolState::Failed
+        ) {
+            return self.state;
+        }
+        if self.workers.values().any(WorkerRecord::accepts_work) {
+            PoolState::Ready
+        } else {
+            PoolState::Creating
+        }
+    }
+
     pub fn accepts_work(&self) -> bool {
         self.state == PoolState::Ready && self.active_attempts < self.spec.max_in_flight
     }
 
     pub fn fits(&self, request: &runmat_execution::resource::ResourceRequest) -> bool {
-        crate::scheduler::fits(&self.spec.resource_limit, &self.allocated, request)
+        crate::scheduler::scalar_resources_fit(&self.spec.resource_limit, &self.allocated, request)
     }
 }

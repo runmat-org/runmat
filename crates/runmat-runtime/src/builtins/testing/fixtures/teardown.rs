@@ -4,29 +4,42 @@ use crate::{build_runtime_error, BuiltinResult};
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.addTeardown",
-    category = "testing/fixtures",
-    summary = "Register a callback that runs when the active test scope is torn down.",
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::testing::fixtures::teardown"
 )]
-fn add_teardown(receiver: Value, callback: Value, arguments: Vec<Value>) -> BuiltinResult<Value> {
+fn add_teardown(
+    runtime: Option<crate::context::RuntimeContext>,
+    receiver: Value,
+    callback: Value,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     validate_test_case(&receiver)?;
-    crate::testing::record_runtime_teardown(callback, arguments).map_err(|message| {
-        build_runtime_error(message)
-            .with_identifier("RunMat:Testing:AddTeardown")
-            .with_builtin("addTeardown")
-            .build()
-    })?;
+    crate::testing::record_runtime_teardown(runtime.as_ref(), callback, arguments).map_err(
+        |source| {
+            build_runtime_error(source.message())
+                .with_identifier("RunMat:Testing:AddTeardown")
+                .with_builtin("addTeardown")
+                .with_source(source)
+                .build()
+        },
+    )?;
     empty_value()
 }
 
 fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => "",
+        Value::Object(object) => Some(object.class_name()),
+        Value::HandleObject(handle) => Some(&*handle.class_name),
+        _ => None,
     };
-    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if class_name.is_some_and(|identity| {
+        crate::class_registry::is_class_or_subclass(
+            identity,
+            &crate::testing::TEST_CASE_CLASS.owned(),
+        )
+    }) {
         Ok(())
     } else {
         Err(
@@ -80,14 +93,47 @@ mod tests {
             ProtocolLimits::default(),
         );
         add_teardown(
+            None,
             crate::testing::test_case_object("test", false),
             Value::FunctionHandle("cleanup".into()),
-            vec![Value::Num(1.0)],
+            crate::execution::RootedValues::new(vec![Value::Num(1.0)])
+                .unwrap()
+                .into(),
         )
         .unwrap();
         assert_eq!(guard.handle().commands().len(), 1);
         let callbacks = guard.handle().runtime_teardowns();
         assert_eq!(callbacks.len(), 1);
-        assert_eq!(callbacks[0].arguments, vec![Value::Num(1.0)]);
+        assert_eq!(
+            callbacks[0].arguments.iter().cloned().collect::<Vec<_>>(),
+            vec![Value::Num(1.0)]
+        );
+        // A retained carrier alias must keep managed argument identities alive
+        // after the registering frame and lifecycle's original record retire.
+        let child = runmat_gc::gc_allocate_rooted(Value::Object(
+            runmat_value::ObjectInstance::new("TeardownArgument"),
+        ))
+        .unwrap();
+        let handle = child.handle();
+        let argument = Value::HandleObject(runmat_value::HandleRef {
+            class_name: "TeardownArgument".into(),
+            target: handle,
+            valid: true,
+        });
+        add_teardown(
+            None,
+            crate::testing::test_case_object("test", false),
+            Value::FunctionHandle("cleanup".into()),
+            crate::call::BuiltinArguments::from_borrowed(&[argument], None).unwrap(),
+        )
+        .unwrap();
+        let aliases = guard.handle().runtime_teardowns();
+        drop(guard.handle().take_runtime_teardowns());
+        drop(child);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        drop(aliases);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
     }
 }

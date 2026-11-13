@@ -1,19 +1,11 @@
 use super::*;
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 fn part_id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into(), "instance".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into(), "instance".into()])
 }
 
 fn curve_evaluator(name: &str) -> CurveEvaluatorId {
@@ -131,14 +123,15 @@ pub(super) fn topology() -> ExactBRepTopology {
             curve_evaluator_id: curve_evaluator("curve:1"),
             start_vertex_id: Some(vertex.clone()),
             end_vertex_id: Some(vertex.clone()),
+            tolerance_m: crate::physical::Length::new(1.0e-8),
             is_closed: true,
             is_periodic: true,
             is_degenerate: false,
         }],
         vertices: vec![ExactVertex {
             id: vertex,
-            point_m: [1.0, 0.0, 0.0],
-            tolerance_m: 1.0e-8,
+            point_m: crate::physical::Position::new([1.0, 0.0, 0.0]),
+            tolerance_m: crate::physical::Length::new(1.0e-8),
         }],
         interfaces: Vec::new(),
         contacts: Vec::new(),
@@ -265,14 +258,15 @@ fn add_independent_contact_face(topology: &mut ExactBRepTopology) -> PersistentE
         curve_evaluator_id: curve_evaluator("curve:contact"),
         start_vertex_id: Some(vertex.clone()),
         end_vertex_id: Some(vertex.clone()),
+        tolerance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(1.0e-8),
         is_closed: true,
         is_periodic: true,
         is_degenerate: false,
     });
     topology.vertices.push(ExactVertex {
         id: vertex,
-        point_m: [1.0, 0.0, 0.0],
-        tolerance_m: 1.0e-8,
+        point_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new([1.0, 0.0, 0.0]),
+        tolerance_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Length,_>::new(1.0e-8),
     });
     face
 }
@@ -318,6 +312,67 @@ fn assembly_occurrences_are_rooted_owned_and_affine() {
     let mut orphaned_body = topology();
     orphaned_body.assemblies[0].body_ids.clear();
     assert!(orphaned_body.validate_against(&model()).is_err());
+}
+
+#[test]
+fn large_assembly_validates_canonical_occurrence_ownership() {
+    const INSTANCE_COUNT: usize = 512;
+    let mut topology = topology();
+    let root_id = topology.root_assembly_id.clone();
+    let mut children = vec![topology.assemblies[0].clone()];
+    let mut instances = vec![topology.instances[0].clone()];
+    for index in 1..INSTANCE_COUNT {
+        let path = vec!["root".into(), format!("instance:{index:04}")];
+        let assembly_id = PersistentEntityId::new(
+            PersistentEntityKind::Assembly,
+            format!("assembly:{index:04}"),
+            path.clone(),
+        );
+        children.push(ExactAssembly {
+            id: assembly_id.clone(),
+            definition_digest: [(index % 251 + 1) as u8; 32],
+            body_ids: Vec::new(),
+            child_instance_ids: Vec::new(),
+        });
+        let mut transform = GeometryTransform([
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+        transform.0[3] = index as f64 * 2.0;
+        instances.push(ExactInstance {
+            id: PersistentEntityId::new(
+                PersistentEntityKind::Instance,
+                format!("instance:{index:04}"),
+                path,
+            ),
+            parent_assembly_id: root_id.clone(),
+            instantiated_assembly_id: assembly_id,
+            transform,
+        });
+    }
+    let root = topology.assemblies.pop().unwrap();
+    let mut root = ExactAssembly {
+        child_instance_ids: instances
+            .iter()
+            .map(|instance| instance.id.clone())
+            .collect(),
+        ..root
+    };
+    root.child_instance_ids.sort();
+    children.push(root);
+    children.sort_by(|left, right| left.id.cmp(&right.id));
+    topology.assemblies = children;
+    instances.sort_by(|left, right| left.id.cmp(&right.id));
+    topology.instances = instances;
+
+    let mut summary = model();
+    summary.assembly_count = INSTANCE_COUNT as u64 + 1;
+    summary.instance_count = INSTANCE_COUNT as u64;
+    topology.validate_against(&summary).unwrap();
+    assert_eq!(topology.assemblies[0].body_ids.len(), 1);
+    assert!(topology
+        .instances
+        .windows(2)
+        .all(|pair| pair[0].id < pair[1].id));
 }
 
 #[test]
@@ -558,8 +613,11 @@ fn noncanonical_order_and_summary_substitution_fail() {
     let mut noncanonical = topology();
     noncanonical.vertices.push(ExactVertex {
         id: id(PersistentEntityKind::Vertex, "a-before-existing"),
-        point_m: [1.0, 0.0, 0.0],
-        tolerance_m: 0.0,
+        point_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+            [1.0, 0.0, 0.0],
+        ),
+        tolerance_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Length, _>::new(0.0),
     });
     let mut summary = model();
     summary.vertex_count = 2;
@@ -585,11 +643,11 @@ fn occurrence_transform_resolves_world_points_and_vectors() {
         [-4.0, 2.0, 6.0]
     );
 
-    let unknown = PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: "unknown".into(),
-        assembly_path: vec!["absent".into()],
-    };
+    let unknown = PersistentEntityId::new(
+        PersistentEntityKind::Edge,
+        "unknown".into(),
+        vec!["absent".into()],
+    );
     assert!(topology.world_transform_for(&unknown).is_err());
 }
 

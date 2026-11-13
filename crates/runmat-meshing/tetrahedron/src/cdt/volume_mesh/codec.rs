@@ -7,17 +7,24 @@ use serde::{Deserialize, Serialize};
 
 use super::{validate_delaunay_volume_mesh, DelaunayVolumeMesh, DelaunayVolumeMeshOptions};
 
-pub const DELAUNAY_VOLUME_MESH_SCHEMA_VERSION: u16 = 1;
+pub(in crate::cdt) mod admission;
+pub(super) mod control;
+mod indexed;
+pub use indexed::VolumeMeshEncoding;
+pub const DELAUNAY_VOLUME_MESH_SCHEMA_VERSION: u16 = 5;
 
-const CODEC_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v1\0";
-const CONTRACT_DOMAIN: &str = "delaunay-volume-mesh/v1";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 50_000_000, 1024 * 1024, 64);
+const CODEC_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v4\0";
+const CONTRACT_DOMAIN: &str = "delaunay-volume-mesh/v4";
+const LEGACY_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v3\0";
+const LEGACY_DOMAIN: &str = "delaunay-volume-mesh/v3";
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeMeshCodecErrorKind {
     InvalidEncoding,
     InvalidMesh,
+    Cancelled,
+    ResourceLimit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +45,7 @@ impl std::fmt::Display for DelaunayVolumeMeshCodecError {
 
 impl std::error::Error for DelaunayVolumeMeshCodecError {}
 
+#[cfg(test)]
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
 struct DelaunayVolumeMeshEnvelope<'a> {
@@ -50,6 +58,48 @@ struct DelaunayVolumeMeshEnvelope<'a> {
 struct DecodedDelaunayVolumeMeshEnvelope {
     schema_version: u16,
     mesh: DelaunayVolumeMesh,
+}
+
+/// Construction-only authority. Immutable access preserves the complete final
+/// CAD/surface/quality admission through publication; deserialization cannot
+/// manufacture this token and callers cannot mutate its mesh.
+pub struct ValidatedDelaunayVolumeMesh(DelaunayVolumeMesh);
+impl std::ops::Deref for ValidatedDelaunayVolumeMesh {
+    type Target = DelaunayVolumeMesh;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl ValidatedDelaunayVolumeMesh {
+    pub(super) fn new(mesh: DelaunayVolumeMesh) -> Self {
+        Self(mesh)
+    }
+    pub fn into_mesh(self) -> DelaunayVolumeMesh {
+        self.0
+    }
+    /// Requested flat dictionary and cooperative-sort workspace. Admit before preparation.
+    pub fn encoding_preparation_storage_bytes(&self) -> Result<u64, DelaunayVolumeMeshCodecError> {
+        VolumeMeshEncoding::preparation_bytes(&self.0)
+    }
+    pub fn prepare_encoding(
+        &self,
+        control: &dyn runmat_canonical_codec::CanonicalCodecControl,
+    ) -> Result<VolumeMeshEncoding<'_>, DelaunayVolumeMeshCodecError> {
+        VolumeMeshEncoding::new(&self.0, control)
+    }
+    pub fn encoding_profile(
+        &self,
+        control: &dyn runmat_canonical_codec::CanonicalCodecControl,
+    ) -> Result<runmat_canonical_codec::CanonicalEncodingProfile, DelaunayVolumeMeshCodecError>
+    {
+        self.prepare_encoding(control)?.encoding_profile(control)
+    }
+    pub fn encode(
+        &self,
+        control: &dyn runmat_canonical_codec::CanonicalCodecControl,
+    ) -> Result<Vec<u8>, DelaunayVolumeMeshCodecError> {
+        self.prepare_encoding(control)?.encode(control)
+    }
 }
 
 pub fn encode_delaunay_volume_mesh(
@@ -69,16 +119,10 @@ pub fn encode_delaunay_volume_mesh(
         cancellation,
     )
     .map_err(invalid_mesh)?;
-    runmat_canonical_codec::encode_contract(
-        CODEC_PREFIX,
-        CONTRACT_DOMAIN,
-        &DelaunayVolumeMeshEnvelope {
-            schema_version: DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
-            mesh,
-        },
-        CONTRACT_LIMITS,
-    )
-    .map_err(invalid_encoding)
+    let control = control::Control::new(cancellation);
+    VolumeMeshEncoding::new(mesh, &control)?
+        .encode(&control)
+        .map_err(|error| control.classify(error))
 }
 
 pub fn decode_delaunay_volume_mesh(
@@ -96,7 +140,7 @@ pub fn decode_delaunay_volume_mesh(
         metric_request,
         options,
         cancellation,
-        CONTRACT_LIMITS,
+        CONTRACT_LIMITS.into(),
     )
 }
 
@@ -107,27 +151,68 @@ fn decode_with_limits(
     metric_request: &MetricFieldRequest,
     options: DelaunayVolumeMeshOptions,
     cancellation: &dyn MeshingCancellationSignal,
-    limits: CanonicalLimits,
+    policy: admission::DecodePolicy<'_>,
 ) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshCodecError> {
-    let artifact: DecodedDelaunayVolumeMeshEnvelope =
-        runmat_canonical_codec::decode_contract(CODEC_PREFIX, CONTRACT_DOMAIN, bytes, limits)
-            .map_err(invalid_encoding)?;
-    if artifact.schema_version != DELAUNAY_VOLUME_MESH_SCHEMA_VERSION {
+    let limits = policy.limits;
+    if bytes.len() > limits.maximum_encoded_bytes {
         return Err(DelaunayVolumeMeshCodecError {
             kind: DelaunayVolumeMeshCodecErrorKind::InvalidEncoding,
-            reason: "unsupported Delaunay volume artifact schema".to_owned(),
+            reason: "volume artifact exceeds its encoded byte ceiling".into(),
         });
     }
+    super::validate_option_consistency(options).map_err(invalid_mesh)?;
+    let control = control::Control::new(cancellation);
+    let mesh = if bytes.starts_with(LEGACY_PREFIX) {
+        let artifact: DecodedDelaunayVolumeMeshEnvelope =
+            runmat_canonical_codec::decode_contract_with_admission(
+                LEGACY_PREFIX,
+                LEGACY_DOMAIN,
+                bytes,
+                limits,
+                &control,
+                |_| policy.admit_legacy(bytes, &control),
+            )
+            .map_err(|error| control.classify(invalid_encoding(error)))?;
+        if artifact.schema_version != 3 {
+            return Err(unsupported_schema());
+        }
+        artifact.mesh
+    } else {
+        let expansion = match policy.allocations {
+            // The governed route charges each actual expanded inventory to the
+            // caller's original resource ceiling instead of a second loose bound.
+            Some(_) => u64::MAX,
+            None => runmat_canonical_codec::canonical_chunked_payload_materialization_resident_bytes_estimate([bytes], &control)
+                .map_err(|error| control.classify(invalid_encoding(error)))?,
+        };
+        let artifact: indexed::DecodedEnvelope =
+            runmat_canonical_codec::decode_contract_with_admission(
+                CODEC_PREFIX,
+                CONTRACT_DOMAIN,
+                bytes,
+                limits,
+                &control,
+                |value| policy.admit_indexed(value, &control),
+            )
+            .map_err(|error| control.classify(invalid_encoding(error)))?;
+        if artifact.schema_version != DELAUNAY_VOLUME_MESH_SCHEMA_VERSION {
+            return Err(unsupported_schema());
+        }
+        artifact
+            .mesh
+            .into_mesh(options, cancellation, expansion, policy.allocations)
+            .map_err(invalid_mesh)?
+    };
     validate_delaunay_volume_mesh(
         topology,
         surface,
         metric_request,
-        &artifact.mesh,
+        &mesh,
         options,
         cancellation,
     )
     .map_err(invalid_mesh)?;
-    Ok(artifact.mesh)
+    Ok(mesh)
 }
 
 #[cfg(test)]
@@ -147,7 +232,7 @@ pub(super) fn decode_delaunay_volume_mesh_with_byte_limit(
         metric_request,
         options,
         cancellation,
-        CanonicalLimits::new(maximum_encoded_bytes, 50_000_000, 1024 * 1024, 64),
+        CanonicalLimits::content_bounded(maximum_encoded_bytes, 1024 * 1024, 64).into(),
     )
 }
 
@@ -157,8 +242,8 @@ pub(super) fn encode_delaunay_volume_mesh_with_schema_version(
     schema_version: u16,
 ) -> Result<Vec<u8>, DelaunayVolumeMeshCodecError> {
     runmat_canonical_codec::encode_contract(
-        CODEC_PREFIX,
-        CONTRACT_DOMAIN,
+        LEGACY_PREFIX,
+        LEGACY_DOMAIN,
         &DelaunayVolumeMeshEnvelope {
             schema_version,
             mesh,
@@ -170,14 +255,33 @@ pub(super) fn encode_delaunay_volume_mesh_with_schema_version(
 
 fn invalid_encoding(error: CanonicalCodecError) -> DelaunayVolumeMeshCodecError {
     DelaunayVolumeMeshCodecError {
-        kind: DelaunayVolumeMeshCodecErrorKind::InvalidEncoding,
+        kind: if error.kind == runmat_canonical_codec::CanonicalCodecErrorKind::ResourceLimit {
+            DelaunayVolumeMeshCodecErrorKind::ResourceLimit
+        } else {
+            DelaunayVolumeMeshCodecErrorKind::InvalidEncoding
+        },
         reason: format!("{}: {}", error.field, error.reason),
     }
 }
 
 fn invalid_mesh(error: super::DelaunayVolumeMeshError) -> DelaunayVolumeMeshCodecError {
     DelaunayVolumeMeshCodecError {
-        kind: DelaunayVolumeMeshCodecErrorKind::InvalidMesh,
+        kind: match error.kind {
+            super::DelaunayVolumeMeshErrorKind::Cancelled => {
+                DelaunayVolumeMeshCodecErrorKind::Cancelled
+            }
+            super::DelaunayVolumeMeshErrorKind::ResourceLimit => {
+                DelaunayVolumeMeshCodecErrorKind::ResourceLimit
+            }
+            _ => DelaunayVolumeMeshCodecErrorKind::InvalidMesh,
+        },
         reason: error.to_string(),
+    }
+}
+
+fn unsupported_schema() -> DelaunayVolumeMeshCodecError {
+    DelaunayVolumeMeshCodecError {
+        kind: DelaunayVolumeMeshCodecErrorKind::InvalidEncoding,
+        reason: "unsupported Delaunay volume artifact schema".into(),
     }
 }

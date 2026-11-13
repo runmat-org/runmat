@@ -1,0 +1,15 @@
+mod descriptor;
+mod documentation;
+mod entry;
+mod inference;
+#[cfg(test)]
+mod tests;
+
+pub use descriptor::{
+    POLYVAL_DESCRIPTOR, POLYVAL_ERROR_INVALID_ARGUMENT, POLYVAL_ERROR_INVALID_INPUT,
+    POLYVAL_EXTENSIONS, POLYVAL_INTEGER_CAPABILITIES, POLYVAL_INTEGER_COEFFICIENTS_EXTENSION,
+    POLYVAL_INTEGER_OPTIONS_EXTENSION, POLYVAL_INTEGER_POINTS_EXTENSION,
+};
+pub use entry::POLYVAL_CATALOG_ENTRY;
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&POLYVAL_CATALOG_ENTRY];

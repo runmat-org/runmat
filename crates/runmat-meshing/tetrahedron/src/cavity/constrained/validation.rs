@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{OperationCount, UsageCategory, UsageContext};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
@@ -90,18 +91,42 @@ pub fn validate_constrained_cavity_refill_volume(
     if !target_volume_m3.is_finite() || target_volume_m3 <= 0.0 {
         return Err(ConstrainedCavityValidationError::InvalidTargetVolume { target_volume_m3 });
     }
-    let tolerance_m3 = target_volume_m3.max(1.0e-18) * relative_tolerance.max(0.0);
-    if !candidate_volume_m3.is_finite()
-        || candidate_volume_m3 <= 0.0
-        || (candidate_volume_m3 - target_volume_m3).abs() > tolerance_m3
-    {
-        return Err(ConstrainedCavityValidationError::InvalidRefillVolume {
-            target_volume_m3,
-            candidate_volume_m3,
-            tolerance_m3,
-        });
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Meshing, OperationCount::from_operations(2))
+        })
+        .transpose()
+        .map_err(ConstrainedCavityValidationError::Accounting)?;
+    let mut completed = 0;
+    let result = (|| {
+        let tolerance_m3 = target_volume_m3.max(1.0e-18) * relative_tolerance.max(0.0);
+        completed += 1;
+        let invalid_candidate = !candidate_volume_m3.is_finite() || candidate_volume_m3 <= 0.0;
+        let deviation = if invalid_candidate {
+            0.0
+        } else {
+            completed += 1;
+            (candidate_volume_m3 - target_volume_m3).abs()
+        };
+        if invalid_candidate || deviation > tolerance_m3 {
+            return Err(ConstrainedCavityValidationError::InvalidRefillVolume {
+                target_volume_m3,
+                candidate_volume_m3,
+                tolerance_m3,
+            });
+        }
+        Ok(())
+    })();
+    if let Some(batch) = &mut batch {
+        batch
+            .complete(OperationCount::from_operations(completed))
+            .map_err(ConstrainedCavityValidationError::Accounting)?;
     }
-    Ok(())
+    result
 }
 
 pub fn validate_constrained_cavity_boundary_preserved(
@@ -200,6 +225,18 @@ pub(super) fn validate_refill_options(
         || options.volume_relative_tolerance < 0.0
         || !options.min_protected_node_distance_m.is_finite()
         || options.min_protected_node_distance_m < 0.0
+        || !options
+            .classification_tolerance
+            .absolute_m
+            .canonical_value()
+            .is_finite()
+        || options
+            .classification_tolerance
+            .absolute_m
+            .canonical_value()
+            < 0.0
+        || !options.classification_tolerance.relative.is_finite()
+        || options.classification_tolerance.relative < 0.0
     {
         return Err(ConstrainedCavityRefillError::InvalidOptions);
     }

@@ -1,6 +1,6 @@
 [package]
 name = "runmat-wasm"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -13,8 +13,10 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["gpu"]
+# Session-free saved-scene playback; uses the same renderer implementation.
+graphics-replay = []
 jit = ["runmat-core/jit"]
-gpu = ["runmat-accelerate/wgpu"]
+gpu = ["runmat-accelerate/wgpu", "dep:wgpu"]
 occt-wasm-host = [
     "runmat-core/occt-wasm-host",
     "runmat-geometry-io/occt-wasm-host",
@@ -22,16 +24,26 @@ occt-wasm-host = [
 ]
 
 [dependencies]
+runmat-analysis-core = { workspace = true }
+runmat-analysis-execution = { workspace = true }
+runmat-analysis-fea = { workspace = true }
+runmat-meshing-core = { workspace = true }
+
 runmat-value = { workspace = true }
+runmat-time = { workspace = true }
+runmat-types = { workspace = true }
+runmat-fea-source = { workspace = true }
 runmat-core = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
+wgpu = { workspace = true, optional = true }
 runmat-vm = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-config = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
 runmat-package = { workspace = true }
@@ -40,6 +52,7 @@ runmat-test = { workspace = true }
 runmat-test-runner = { workspace = true }
 runmat-test-runner-execution = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 runmat-thread-local = { workspace = true }
 glam = "0.24"
 futures = "0.3"
@@ -49,7 +62,7 @@ serde-wasm-bindgen = "0.6"
 wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Crypto", "Document", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "OffscreenCanvas", "CanvasRenderingContext2d", "ImageData", "console"] }
+web-sys = { version = "0.3", features = ["Window", "Crypto", "Document", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "OffscreenCanvas", "CanvasRenderingContext2d", "ImageData", "MessageChannel", "MessagePort", "MessageEvent", "console"] }
 log = { workspace = true }
 miette = { workspace = true }
 console_error_panic_hook = "0.1"
@@ -58,11 +71,12 @@ base64 = "0.22"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
 zeroize = "1"
-runmat-logging = { path = "../runmat-logging", version = "=0.6.2" }
+runmat-logging = { path = "../runmat-logging", version = "=0.7.1", features = ["browser-otlp"] }
 tracing = "0.1"
 runmat-telemetry = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+runmat-analysis-language = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-geometry-io = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-web"] }

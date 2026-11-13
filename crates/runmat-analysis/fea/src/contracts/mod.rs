@@ -1,275 +1,30 @@
-use runmat_analysis_core::AnalysisField;
-use runmat_meshing_core::AnalysisMeshArtifact;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
+mod static_convergence;
+pub use static_convergence::{
+    SpectralErrorEstimate, StaticOperatorProof, StructuralStaticConvergence,
+};
+pub mod accelerator_admission;
+pub mod canonical_digest;
+mod field_ids;
+mod run_error;
+mod solver_compatibility;
+mod thermal_state;
 
+pub use field_ids::*;
+pub use run_error::FeaRunError;
+pub use thermal_state::*;
+
+pub use solver_compatibility::{
+    validate_solver_formulation_compatibility, SolverFormulationCompatibilityError,
+};
+
+use runmat_analysis_core::AnalysisField;
+use runmat_meshing_core::SolverMeshArtifact;
+use serde::{Deserialize, Serialize};
+
+use crate::planning::resource::LocalExecutionPlan;
 use crate::solve::{
     backend::kind::LinearAlgebraBackendKind, preconditioner::SpdPreconditionerKind,
 };
-
-pub const FEA_FIELD_STRUCTURAL_DISPLACEMENT: &str = "structural.displacement";
-pub const FEA_FIELD_STRUCTURAL_ROTATION: &str = "structural.rotation";
-pub const FEA_FIELD_STRUCTURAL_VON_MISES: &str = "structural.von_mises";
-pub const FEA_FIELD_STRUCTURAL_NODAL_VON_MISES: &str = "structural.nodal_von_mises";
-pub const FEA_FIELD_STRUCTURAL_STRAIN: &str = "structural.strain";
-pub const FEA_FIELD_STRUCTURAL_STRESS: &str = "structural.stress";
-pub const FEA_FIELD_STRUCTURAL_REACTION_FORCE: &str = "structural.reaction_force";
-pub const FEA_FIELD_STRUCTURAL_REACTION_MOMENT: &str = "structural.reaction_moment";
-pub const FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY: &str = "structural.strain_energy_density";
-pub const FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY: &str = "structural.total_strain_energy";
-pub const FEA_FIELD_STRUCTURAL_RESIDUAL_NORM: &str = "structural.residual_norm";
-pub const FEA_FIELD_STRUCTURAL_EQUATION_SCALE: &str = "structural.equation_scale";
-pub const FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE: &str = "structural.beam_axial_force";
-pub const FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE: &str = "structural.beam_shear_force";
-pub const FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT: &str = "structural.beam_torsion_moment";
-pub const FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT: &str = "structural.beam_bending_moment";
-pub const FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS: &str = "structural.beam_bending_stress";
-pub const FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS: &str = "structural.beam_torsion_stress";
-pub const FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE: &str = "structural.shell_membrane_force";
-pub const FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT: &str = "structural.shell_bending_moment";
-pub const FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR: &str = "structural.shell_transverse_shear";
-pub const FEA_FIELD_STRUCTURAL_SHELL_VON_MISES: &str = "structural.shell_von_mises";
-pub const FEA_FIELD_EM_VECTOR_POTENTIAL_REAL: &str = "em.vector_potential_real";
-pub const FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG: &str = "em.vector_potential_imag";
-pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL: &str = "em.magnetic_flux_density_real";
-pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_IMAG: &str = "em.magnetic_flux_density_imag";
-pub const FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE: &str = "em.magnetic_flux_density_magnitude";
-pub const FEA_FIELD_EM_MAGNETIC_FIELD_REAL: &str = "em.magnetic_field_real";
-pub const FEA_FIELD_EM_MAGNETIC_FIELD_IMAG: &str = "em.magnetic_field_imag";
-pub const FEA_FIELD_EM_CURRENT_DENSITY_REAL: &str = "em.current_density_real";
-pub const FEA_FIELD_EM_CURRENT_DENSITY_IMAG: &str = "em.current_density_imag";
-pub const FEA_FIELD_EM_ELECTRIC_FIELD_REAL: &str = "em.electric_field_real";
-pub const FEA_FIELD_EM_ELECTRIC_FIELD_IMAG: &str = "em.electric_field_imag";
-pub const FEA_FIELD_EM_POWER_LOSS_DENSITY: &str = "em.power_loss_density";
-pub const FEA_FIELD_EM_ENERGY_DENSITY: &str = "em.energy_density";
-pub const FEA_FIELD_EM_RESIDUAL_REAL: &str = "em.residual_real";
-pub const FEA_FIELD_EM_RESIDUAL_IMAG: &str = "em.residual_imag";
-pub const FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL: &str = "em.electric_flux_density_real";
-pub const FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_IMAG: &str = "em.electric_flux_density_imag";
-pub const FEA_FIELD_EM_POYNTING_VECTOR_REAL: &str = "em.poynting_vector_real";
-pub const FEA_FIELD_EM_POYNTING_VECTOR_IMAG: &str = "em.poynting_vector_imag";
-
-pub fn fea_modal_mode_shape_field_id(mode_number: usize) -> String {
-    format!("modal.mode_shape.{mode_number}")
-}
-
-pub const FEA_FIELD_MODAL_FREQUENCY_HZ: &str = "modal.frequency_hz";
-pub const FEA_FIELD_MODAL_EIGENVALUE: &str = "modal.eigenvalue";
-pub const FEA_FIELD_MODAL_MODAL_MASS: &str = "modal.modal_mass";
-pub const FEA_FIELD_MODAL_MODAL_STIFFNESS: &str = "modal.modal_stiffness";
-pub const FEA_FIELD_MODAL_PARTICIPATION_FACTOR: &str = "modal.participation_factor";
-pub const FEA_FIELD_MODAL_RESIDUAL_NORM: &str = "modal.residual_norm";
-pub const FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION: &str =
-    "modal.relative_frequency_separation";
-pub const FEA_FIELD_MODAL_M_ORTHOGONALITY: &str = "modal.m_orthogonality";
-
-pub const FEA_FIELD_ACOUSTIC_PRESSURE_REAL: &str = "acoustic.pressure_real";
-pub const FEA_FIELD_ACOUSTIC_PRESSURE_IMAG: &str = "acoustic.pressure_imag";
-pub const FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE: &str = "acoustic.pressure_magnitude";
-pub const FEA_FIELD_ACOUSTIC_PHASE: &str = "acoustic.phase";
-pub const FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB: &str = "acoustic.sound_pressure_level_db";
-pub const FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY: &str = "acoustic.particle_velocity";
-
-pub fn fea_acoustic_frequency_response_field_id(frequency_hz: f64) -> String {
-    let scaled_hz = (frequency_hz.max(0.0) * 1_000.0).round() as u64;
-    format!("acoustic.frequency_response.hz_x1000_{scaled_hz}")
-}
-
-pub const FEA_FIELD_CFD_VELOCITY: &str = "cfd.velocity";
-pub const FEA_FIELD_CFD_PRESSURE: &str = "cfd.pressure";
-pub const FEA_FIELD_CFD_VORTICITY: &str = "cfd.vorticity";
-pub const FEA_FIELD_CFD_WALL_SHEAR_STRESS: &str = "cfd.wall_shear_stress";
-pub const FEA_FIELD_CFD_RESIDUAL_MOMENTUM: &str = "cfd.residual_momentum";
-pub const FEA_FIELD_CFD_RESIDUAL_CONTINUITY: &str = "cfd.residual_continuity";
-pub const FEA_FIELD_CFD_REYNOLDS_NUMBER: &str = "cfd.reynolds_number";
-
-pub const FEA_FIELD_CHT_FLUID_VELOCITY: &str = "cht.fluid_velocity";
-pub const FEA_FIELD_CHT_FLUID_PRESSURE: &str = "cht.fluid_pressure";
-
-pub fn fea_cht_fluid_temperature_field_id(step_index: usize) -> String {
-    format!("cht.fluid_temperature.{step_index}")
-}
-
-pub fn fea_cht_solid_temperature_field_id(step_index: usize) -> String {
-    format!("cht.solid_temperature.{step_index}")
-}
-
-pub fn fea_cht_interface_heat_flux_field_id(step_index: usize) -> String {
-    format!("cht.interface_heat_flux.{step_index}")
-}
-
-pub fn fea_cht_interface_temperature_jump_field_id(step_index: usize) -> String {
-    format!("cht.interface_temperature_jump.{step_index}")
-}
-
-pub fn fea_cht_energy_residual_field_id(step_index: usize) -> String {
-    format!("cht.energy_residual.{step_index}")
-}
-
-pub fn fea_fsi_fluid_velocity_field_id(step_index: usize) -> String {
-    format!("fsi.fluid_velocity.{step_index}")
-}
-
-pub fn fea_fsi_fluid_pressure_field_id(step_index: usize) -> String {
-    format!("fsi.fluid_pressure.{step_index}")
-}
-
-pub fn fea_fsi_structural_displacement_field_id(step_index: usize) -> String {
-    format!("fsi.structural_displacement.{step_index}")
-}
-
-pub fn fea_fsi_interface_pressure_field_id(step_index: usize) -> String {
-    format!("fsi.interface_pressure.{step_index}")
-}
-
-pub fn fea_fsi_interface_traction_field_id(step_index: usize) -> String {
-    format!("fsi.interface_traction.{step_index}")
-}
-
-pub fn fea_fsi_interface_displacement_field_id(step_index: usize) -> String {
-    format!("fsi.interface_displacement.{step_index}")
-}
-
-pub fn fea_fsi_interface_residual_field_id(step_index: usize) -> String {
-    format!("fsi.interface_residual.{step_index}")
-}
-
-pub fn fea_fsi_coupling_iteration_count_field_id(step_index: usize) -> String {
-    format!("fsi.coupling_iteration_count.{step_index}")
-}
-
-pub fn fea_thermal_temperature_field_id(snapshot_index: usize) -> String {
-    format!("thermal.temperature.{snapshot_index}")
-}
-
-pub fn fea_thermal_temperature_gradient_field_id(snapshot_index: usize) -> String {
-    format!("thermal.temperature_gradient.{snapshot_index}")
-}
-
-pub fn fea_thermal_heat_flux_field_id(snapshot_index: usize) -> String {
-    format!("thermal.heat_flux.{snapshot_index}")
-}
-
-pub fn fea_thermal_heat_source_field_id(snapshot_index: usize) -> String {
-    format!("thermal.heat_source.{snapshot_index}")
-}
-
-pub fn fea_thermal_boundary_heat_flux_field_id(snapshot_index: usize) -> String {
-    format!("thermal.boundary_heat_flux.{snapshot_index}")
-}
-
-pub fn fea_transient_displacement_field_id(snapshot_index: usize) -> String {
-    format!("transient.displacement.{snapshot_index}")
-}
-
-pub fn fea_transient_rotation_field_id(snapshot_index: usize) -> String {
-    format!("transient.rotation.{snapshot_index}")
-}
-
-pub fn fea_transient_velocity_field_id(snapshot_index: usize) -> String {
-    format!("transient.velocity.{snapshot_index}")
-}
-
-pub fn fea_transient_angular_velocity_field_id(snapshot_index: usize) -> String {
-    format!("transient.angular_velocity.{snapshot_index}")
-}
-
-pub fn fea_transient_acceleration_field_id(snapshot_index: usize) -> String {
-    format!("transient.acceleration.{snapshot_index}")
-}
-
-pub fn fea_transient_angular_acceleration_field_id(snapshot_index: usize) -> String {
-    format!("transient.angular_acceleration.{snapshot_index}")
-}
-
-pub fn fea_transient_von_mises_field_id(snapshot_index: usize) -> String {
-    format!("transient.von_mises.{snapshot_index}")
-}
-
-pub fn fea_transient_kinetic_energy_field_id(snapshot_index: usize) -> String {
-    format!("transient.kinetic_energy.{snapshot_index}")
-}
-
-pub fn fea_transient_strain_energy_field_id(snapshot_index: usize) -> String {
-    format!("transient.strain_energy.{snapshot_index}")
-}
-
-pub fn fea_transient_residual_norm_field_id(snapshot_index: usize) -> String {
-    format!("transient.residual_norm.{snapshot_index}")
-}
-
-pub fn fea_nonlinear_displacement_field_id(increment_index: usize) -> String {
-    format!("nonlinear.displacement.{increment_index}")
-}
-
-pub fn fea_nonlinear_rotation_field_id(increment_index: usize) -> String {
-    format!("nonlinear.rotation.{increment_index}")
-}
-
-pub fn fea_nonlinear_von_mises_field_id(increment_index: usize) -> String {
-    format!("nonlinear.von_mises.{increment_index}")
-}
-
-pub fn fea_nonlinear_plastic_strain_field_id(increment_index: usize) -> String {
-    format!("nonlinear.plastic_strain.{increment_index}")
-}
-
-pub fn fea_nonlinear_equivalent_plastic_strain_field_id(increment_index: usize) -> String {
-    format!("nonlinear.equivalent_plastic_strain.{increment_index}")
-}
-
-pub fn fea_nonlinear_contact_pressure_field_id(increment_index: usize) -> String {
-    format!("nonlinear.contact_pressure.{increment_index}")
-}
-
-pub fn fea_nonlinear_contact_gap_field_id(increment_index: usize) -> String {
-    format!("nonlinear.contact_gap.{increment_index}")
-}
-
-pub fn fea_nonlinear_load_factor_field_id(increment_index: usize) -> String {
-    format!("nonlinear.load_factor.{increment_index}")
-}
-
-pub fn fea_nonlinear_residual_norm_field_id(increment_index: usize) -> String {
-    format!("nonlinear.residual_norm.{increment_index}")
-}
-
-pub fn fea_thermo_mechanical_temperature_field_id(step_index: usize) -> String {
-    format!("thermo_mechanical.temperature.{step_index}")
-}
-
-pub fn fea_thermo_mechanical_thermal_strain_field_id(step_index: usize) -> String {
-    format!("thermo_mechanical.thermal_strain.{step_index}")
-}
-
-pub fn fea_thermo_mechanical_thermal_stress_field_id(step_index: usize) -> String {
-    format!("thermo_mechanical.thermal_stress.{step_index}")
-}
-
-pub fn fea_thermo_mechanical_displacement_field_id(step_index: usize) -> String {
-    format!("thermo_mechanical.displacement.{step_index}")
-}
-
-pub fn fea_thermo_mechanical_von_mises_field_id(step_index: usize) -> String {
-    format!("thermo_mechanical.von_mises.{step_index}")
-}
-
-pub fn fea_thermo_mechanical_coupling_residual_field_id(step_index: usize) -> String {
-    format!("thermo_mechanical.coupling_residual.{step_index}")
-}
-
-pub const FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL: &str = "electro_thermal.electric_potential";
-pub const FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD: &str = "electro_thermal.electric_field";
-pub const FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY: &str = "electro_thermal.current_density";
-pub const FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT: &str = "electro_thermal.joule_heat";
-
-pub fn fea_electro_thermal_temperature_field_id(step_index: usize) -> String {
-    format!("electro_thermal.temperature.{step_index}")
-}
-
-pub fn fea_electro_thermal_thermal_residual_field_id(step_index: usize) -> String {
-    format!("electro_thermal.thermal_residual.{step_index}")
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -278,307 +33,247 @@ pub enum ComputeBackend {
     Gpu,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionBackend {
+    Cpu,
+    Accelerator,
+}
+
+impl ExecutionBackend {
+    pub(crate) fn from_solver_backend(solver_backend: LinearAlgebraBackendKind) -> Self {
+        match solver_backend {
+            LinearAlgebraBackendKind::CpuReference => Self::Cpu,
+            LinearAlgebraBackendKind::Accelerator => Self::Accelerator,
+        }
+    }
+}
+
+mod solver_method;
+pub use solver_method::SolverMethod;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SolverPreconditioner {
+    None,
+    Jacobi,
+    Ilu0,
+    /// Smoothed-aggregation algebraic multigrid V-cycle.
+    Amg,
+    /// Exact sparse Cholesky factor (the inner solve of a composite method is direct).
+    SparseCholesky,
+    BlockJacobi,
+    FiniteVolumePressureBalance,
+}
+
+impl SolverPreconditioner {
+    pub const fn from_spd(kind: SpdPreconditionerKind) -> Self {
+        match kind {
+            SpdPreconditionerKind::Jacobi => Self::Jacobi,
+            SpdPreconditionerKind::Ilu0 => Self::Ilu0,
+            SpdPreconditionerKind::Amg => Self::Amg,
+            SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => Self::SparseCholesky,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Jacobi => "jacobi",
+            Self::Ilu0 => "ilu0",
+            Self::Amg => "amg",
+            Self::SparseCholesky => "sparse_cholesky",
+            Self::BlockJacobi => "block_jacobi",
+            Self::FiniteVolumePressureBalance => "finite_volume_pressure_balance",
+        }
+    }
+}
+
+impl std::fmt::Display for SolverPreconditioner {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "solver_compatibility::FeaRunResultWire")]
 pub struct FeaRunResult {
-    pub backend: ComputeBackend,
-    pub solver_backend: String,
+    pub identity: crate::admission::AnalysisRunIdentity,
+    pub requested_backend: ComputeBackend,
+    pub execution_backend: ExecutionBackend,
+    pub solver_backend: LinearAlgebraBackendKind,
     pub solver_device_apply_k_ratio: f64,
-    pub solver_method: String,
-    pub preconditioner: String,
+    pub solver_method: SolverMethod,
+    pub preconditioner: SolverPreconditioner,
     pub solver_host_sync_count: u32,
+    pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
     pub diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
+    #[serde(default)]
+    pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structural_static_convergence: Option<StructuralStaticConvergence>,
+    #[serde(default)]
+    pub structural_static_balance: Option<Box<crate::solve::StructuralStaticBalanceEvidence>>,
+    #[serde(default)]
+    pub structural_constraint_result:
+        Option<Box<crate::constraints::CanonicalStructuralConstraintResult>>,
+    #[serde(default)]
+    pub structural_connector_result:
+        Option<Box<crate::connectors::CanonicalStructuralConnectorResult>>,
+    #[serde(default)]
+    pub observations: Vec<crate::results::observation::ObservationResult>,
+    pub observation_histories: Vec<crate::results::observation::ObservationHistory>,
+    pub series_reductions: Vec<crate::results::observation::SeriesReductionResult>,
     pub fields: Vec<AnalysisField>,
 }
 
 impl FeaRunResult {
     pub fn field(&self, field_id: &str) -> Option<&AnalysisField> {
-        self.fields.iter().find(|field| field.field_id == field_id)
+        self.fields
+            .iter()
+            .find(|field| field.field_id == field_id)
+            .or_else(|| {
+                self.series_reductions
+                    .iter()
+                    .find_map(|reduction| reduction.payload.field(field_id))
+            })
     }
 
     pub fn fields_are_empty(&self) -> bool {
-        self.fields.is_empty() || self.fields.iter().all(AnalysisField::is_empty)
+        self.fields.iter().all(AnalysisField::is_empty)
+            && self
+                .series_reductions
+                .iter()
+                .flat_map(|reduction| reduction.payload.fields())
+                .flatten()
+                .all(AnalysisField::is_empty)
     }
 
     pub fn field_ids(&self) -> Vec<String> {
         self.fields
             .iter()
+            .chain(
+                self.series_reductions
+                    .iter()
+                    .flat_map(|reduction| reduction.payload.fields())
+                    .flatten(),
+            )
             .map(|field| field.field_id.clone())
             .collect()
     }
 }
 
-fn default_prep_coordinate_span_m() -> f64 {
-    1.0
-}
-
-fn default_prep_coordinate_secondary_span_m() -> f64 {
-    0.0
-}
-
-fn default_prep_coordinate_active_dimension_count() -> usize {
-    1
-}
-
-fn default_prep_coordinate_characteristic_length_m() -> f64 {
-    1.0
-}
-
-fn default_zero_usize() -> usize {
-    0
-}
-
-fn default_zero_f64() -> f64 {
-    0.0
-}
-
-fn default_reference_element_coordinates_m() -> [[f64; 3]; 3] {
-    [[0.0; 3]; 3]
-}
-
-fn default_element_topology_sample_edge_nodes() -> [[u32; 2]; 8] {
-    [[0; 2]; 8]
-}
-
-fn default_element_topology_sample_node_coordinates_m() -> [[f64; 3]; 8] {
-    [[0.0; 3]; 8]
-}
-
-fn default_element_topology_sample_element_edges() -> [[u32; 3]; 4] {
-    [[0; 3]; 4]
-}
-
-fn default_element_topology_sample_element_orientations() -> [[i8; 3]; 4] {
-    [[0; 3]; 4]
-}
-
-fn default_element_topology_sample_element_areas_m2() -> [f64; 4] {
-    [0.0; 4]
-}
-
-fn default_element_topology_node_coordinates_m() -> Vec<[f64; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_edge_nodes() -> Vec<[u32; 2]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_edges() -> Vec<[u32; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_orientations() -> Vec<[i8; 3]> {
-    Vec::new()
-}
-
-fn default_element_topology_element_areas_m2() -> Vec<f64> {
-    Vec::new()
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaPrepContext {
-    pub prepared_mesh_count: usize,
-    pub prepared_node_count: usize,
-    pub prepared_element_count: usize,
-    pub mapped_region_count: usize,
-    pub min_scaled_jacobian: f64,
-    pub mean_aspect_ratio: f64,
-    pub inverted_element_count: usize,
-    pub mapped_load_count: usize,
-    pub mapped_bc_count: usize,
-    pub layout_seed: u64,
-    pub topology_dof_multiplier: f64,
-    pub topology_bandwidth_estimate: u32,
-    pub mapped_region_participation_ratio: f64,
-    pub topology_surface_patch_ratio: f64,
-    pub topology_volume_core_ratio: f64,
-    pub topology_mixed_family_ratio: f64,
-    pub topology_region_span_mean: f64,
-    pub topology_region_block_count: usize,
-    pub topology_region_mesh_mean: f64,
-    pub topology_region_mesh_variance: f64,
-    pub topology_triangle_family_ratio: f64,
-    pub topology_quad_family_ratio: f64,
-    pub topology_tetrahedron_family_ratio: f64,
-    pub topology_hex_family_ratio: f64,
-    #[serde(default = "default_prep_coordinate_span_m")]
-    pub coordinate_span_x_m: f64,
-    #[serde(default = "default_prep_coordinate_secondary_span_m")]
-    pub coordinate_span_y_m: f64,
-    #[serde(default = "default_prep_coordinate_secondary_span_m")]
-    pub coordinate_span_z_m: f64,
-    #[serde(default = "default_prep_coordinate_active_dimension_count")]
-    pub coordinate_active_dimension_count: usize,
-    #[serde(default = "default_prep_coordinate_characteristic_length_m")]
-    pub coordinate_characteristic_length_m: f64,
-    #[serde(default = "default_zero_usize")]
-    pub element_geometry_node_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub element_geometry_edge_count: usize,
-    #[serde(default = "default_zero_f64")]
-    pub mean_element_edge_length_m: f64,
-    #[serde(default = "default_zero_f64")]
-    pub mean_element_area_m2: f64,
-    #[serde(default = "default_zero_f64")]
-    pub element_geometry_coverage_ratio: f64,
-    #[serde(default = "default_reference_element_coordinates_m")]
-    pub reference_element_coordinates_m: [[f64; 3]; 3],
-    #[serde(default = "default_zero_f64")]
-    pub reference_element_area_m2: f64,
-    #[serde(default = "default_zero_usize")]
-    pub element_topology_sample_element_count: usize,
-    #[serde(default = "default_zero_usize")]
-    pub element_topology_sample_edge_count: usize,
-    #[serde(default = "default_element_topology_sample_edge_nodes")]
-    pub element_topology_sample_edge_nodes: [[u32; 2]; 8],
-    #[serde(default = "default_element_topology_sample_node_coordinates_m")]
-    pub element_topology_sample_node_coordinates_m: [[f64; 3]; 8],
-    #[serde(default = "default_element_topology_sample_element_edges")]
-    pub element_topology_sample_element_edges: [[u32; 3]; 4],
-    #[serde(default = "default_element_topology_sample_element_orientations")]
-    pub element_topology_sample_element_orientations: [[i8; 3]; 4],
-    #[serde(default = "default_element_topology_sample_element_areas_m2")]
-    pub element_topology_sample_element_areas_m2: [f64; 4],
-    #[serde(default = "default_element_topology_node_coordinates_m")]
-    pub element_topology_node_coordinates_m: Vec<[f64; 3]>,
-    #[serde(default = "default_element_topology_edge_nodes")]
-    pub element_topology_edge_nodes: Vec<[u32; 2]>,
-    #[serde(default = "default_element_topology_element_edges")]
-    pub element_topology_element_edges: Vec<[u32; 3]>,
-    #[serde(default = "default_element_topology_element_orientations")]
-    pub element_topology_element_orientations: Vec<[i8; 3]>,
-    #[serde(default = "default_element_topology_element_areas_m2")]
-    pub element_topology_element_areas_m2: Vec<f64>,
-    pub calibration_profile_override: Option<FeaPrepCalibrationProfile>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoRegionTemperatureDelta {
-    pub region_id: String,
+    /// The authored volume target with its resolved entities; solver elements match it through
+    /// their region or CAD provenance, never through the authored alias alone.
+    pub target: runmat_analysis_core::RegionTarget,
     pub temperature_delta_k: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaThermoTimeProfilePoint {
-    pub normalized_time: f64,
-    pub scale: f64,
-}
+impl FeaThermoRegionTemperatureDelta {
+    pub fn region_id(&self) -> &str {
+        &self.target.region_id
+    }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeaThermoFieldInterpolationMode {
-    Linear,
-    Step,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaThermoFieldSource {
-    pub source_id: String,
-    pub revision: u32,
-    pub interpolation_mode: Option<FeaThermoFieldInterpolationMode>,
-    pub expected_region_ids: Vec<String>,
+    /// Whether a solver element with this region and provenance lies in the target.
+    pub fn contains_element(
+        &self,
+        region: &runmat_meshing_core::PersistentEntityId,
+        provenance: &[runmat_meshing_core::PersistentEntityId],
+    ) -> bool {
+        self.target.matches_persistent_entity(region)
+            || provenance
+                .iter()
+                .any(|entity| self.target.matches_persistent_entity(entity))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoMechanicalContext {
-    pub enabled: bool,
-    pub reference_temperature_k: f64,
-    pub applied_temperature_delta_k: f64,
-    pub thermal_expansion_coefficient: f64,
-    pub field_source: Option<FeaThermoFieldSource>,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion,
     pub region_temperature_deltas: Vec<FeaThermoRegionTemperatureDelta>,
-    pub time_profile: Vec<FeaThermoTimeProfilePoint>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaElectroRegionConductivityScale {
-    pub region_id: String,
-    pub conductivity_scale: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaElectroTimeProfilePoint {
-    pub normalized_time: f64,
-    pub current_scale: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaElectroThermalContext {
-    pub enabled: bool,
-    pub reference_temperature_k: f64,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub reference_temperature_k: runmat_types::physical::Temperature,
     pub applied_voltage_v: f64,
     pub base_electrical_conductivity_s_per_m: f64,
-    pub resistive_heating_coefficient: f64,
-    pub region_conductivity_scales: Vec<FeaElectroRegionConductivityScale>,
-    pub time_profile: Vec<FeaElectroTimeProfilePoint>,
+    #[serde(with = "runmat_types::physical::canonical_scalar")]
+    pub resistive_heating_coefficient: runmat_types::physical::InverseTemperature,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaPlasticityConstitutiveContext {
-    pub enabled: bool,
-    pub yield_strain: f64,
-    pub hardening_modulus_ratio: f64,
-    pub saturation_exponent: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaContactInterfaceContext {
-    pub enabled: bool,
+/// Run controls of penalty contact enforcement. The interfaces, their surfaces and their
+/// friction law come from the analysis model only.
+#[serde(deny_unknown_fields)]
+pub struct FeaContactEnforcement {
+    /// Multiplier on the default normal penalty `10 E_min / h` (h: mean secondary face size).
     pub penalty_stiffness_scale: f64,
+    /// Admitted initial penetration as a fraction of h.
     pub max_penetration_ratio: f64,
-    pub friction_coefficient: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeaPrepCalibrationProfile {
-    Fast,
-    Balanced,
-    Conservative,
+impl Default for FeaContactEnforcement {
+    fn default() -> Self {
+        Self {
+            penalty_stiffness_scale: 1.0,
+            max_penetration_ratio: 0.05,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
-    pub prep_context: Option<FeaPrepContext>,
-    pub analysis_mesh_artifact_path: Option<String>,
-    pub analysis_mesh: Option<AnalysisMeshArtifact>,
-    pub require_analysis_mesh_for_solid: bool,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    pub electro_thermal_context: Option<FeaElectroThermalContext>,
+    pub solver_mesh_artifact_path: Option<String>,
+    pub solver_mesh: Option<SolverMeshArtifact>,
+    pub require_solver_mesh_for_solid: bool,
+    /// Complete displacement state used only to initialize an iterative linear solve.
+    pub initial_displacement: Option<Vec<f64>>,
+    /// Admitted CPU concurrency for deterministic local numerical execution.
+    pub local_execution: LocalExecutionPlan,
 }
 
 impl Default for LinearStaticSolveOptions {
     fn default() -> Self {
         Self {
-            preconditioner_kind: SpdPreconditionerKind::Jacobi,
+            preconditioner_kind: SpdPreconditionerKind::Auto,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
-            prep_context: None,
-            analysis_mesh_artifact_path: None,
-            analysis_mesh: None,
-            require_analysis_mesh_for_solid: true,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
+            solver_mesh_artifact_path: None,
+            solver_mesh: None,
+            require_solver_mesh_for_solid: true,
+            initial_displacement: None,
+            local_execution: LocalExecutionPlan::serial(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
-    pub mode_count: usize,
-    pub prep_context: Option<FeaPrepContext>,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    pub electro_thermal_context: Option<FeaElectroThermalContext>,
+    pub truncation: crate::pipeline::modal_governance::ModalTruncationPolicy,
+    pub convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
+    /// Global base-acceleration directions whose load-dependent residual vectors are retained in
+    /// the modal basis for later response-spectrum analysis.
+    pub residual_vector_directions: Vec<runmat_analysis_core::SpectrumDirection>,
+    pub solver_mesh: Option<SolverMeshArtifact>,
 }
 
 impl Default for ModalSolveOptions {
     fn default() -> Self {
         Self {
-            mode_count: 3,
-            prep_context: None,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
+            truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::default(),
+            convergence: crate::pipeline::modal_governance::ModalConvergencePolicy::default(),
+            residual_vector_directions: Vec::new(),
+            solver_mesh: None,
         }
     }
 }
@@ -586,14 +281,59 @@ impl Default for ModalSolveOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaModalRunResult {
     pub run: FeaRunResult,
-    pub eigenvalues_hz: Vec<f64>,
+    pub basis: crate::pipeline::modal_basis::ModalBasisArtifact,
     pub mode_shapes: Vec<AnalysisField>,
+    pub rotation_mode_shapes: Vec<AnalysisField>,
+    pub recovered_modes: Vec<ModalRecoveredMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaBucklingRunResult {
+    pub run: FeaRunResult,
+    pub load_factors: Vec<f64>,
     pub residual_norms: Vec<f64>,
+    pub mode_shapes: Vec<AnalysisField>,
+    pub rotation_mode_shapes: Vec<AnalysisField>,
+    pub recovered_modes: Vec<ModalRecoveredMode>,
+}
+
+impl FeaModalRunResult {
+    pub fn frequencies_hz(&self) -> Vec<f64> {
+        self.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.frequency_hz())
+            .collect()
+    }
+
+    pub fn residual_norms(&self) -> Vec<f64> {
+        self.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.residual_norm())
+            .collect()
+    }
+
+    pub fn backward_errors(&self) -> Vec<f64> {
+        self.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.backward_error())
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModalRecoveredMode {
+    pub mode_index: usize,
+    pub fields: Vec<AnalysisField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaTransientRunResult {
     pub run: FeaRunResult,
+    pub initial_state: StructuralInitialStateEvidence,
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     pub rotation_snapshots: Vec<AnalysisField>,
@@ -601,105 +341,76 @@ pub struct FeaTransientRunResult {
     pub angular_velocity_snapshots: Vec<AnalysisField>,
     pub acceleration_snapshots: Vec<AnalysisField>,
     pub angular_acceleration_snapshots: Vec<AnalysisField>,
+    pub strain_snapshots: Vec<AnalysisField>,
+    pub stress_snapshots: Vec<AnalysisField>,
     pub von_mises_snapshots: Vec<AnalysisField>,
+    pub strain_energy_density_snapshots: Vec<AnalysisField>,
     pub kinetic_energy_snapshots: Vec<AnalysisField>,
     pub strain_energy_snapshots: Vec<AnalysisField>,
     pub residual_norm_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_temperature_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_thermal_strain_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_thermal_stress_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_displacement_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
+    pub reaction_force_snapshots: Vec<AnalysisField>,
+    pub reaction_moment_snapshots: Vec<AnalysisField>,
+    pub connector_results: Vec<crate::connectors::CanonicalStructuralConnectorResult>,
+    pub connector_force_snapshots: Vec<AnalysisField>,
+    pub connector_stored_energy_snapshots: Vec<AnalysisField>,
+    pub external_work_snapshots: Vec<AnalysisField>,
+    pub support_work_snapshots: Vec<AnalysisField>,
+    pub damping_dissipation_snapshots: Vec<AnalysisField>,
+    pub energy_balance_residual_snapshots: Vec<AnalysisField>,
+    pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,
+    pub dynamic_balance_snapshots: Vec<StructuralDynamicBalanceSnapshot>,
     pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
     pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaThermalRunResult {
-    pub run: FeaRunResult,
-    pub time_points_s: Vec<f64>,
-    pub temperature_snapshots: Vec<AnalysisField>,
-    pub temperature_gradient_snapshots: Vec<AnalysisField>,
-    pub heat_flux_snapshots: Vec<AnalysisField>,
-    pub heat_source_snapshots: Vec<AnalysisField>,
-    pub boundary_heat_flux_snapshots: Vec<AnalysisField>,
-    pub residual_norms: Vec<f64>,
-    pub reference_temperature_k: f64,
+#[serde(deny_unknown_fields)]
+pub struct StructuralDynamicBalanceSnapshot {
+    pub applied_load: Vec<f64>,
+    pub inertia_force: Vec<f64>,
+    pub damping_force: Vec<f64>,
+    pub elastic_force: Vec<f64>,
+    pub equilibrium_residual: Vec<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaElectromagneticRunResult {
-    pub run: FeaRunResult,
-    pub reference_frequency_hz: f64,
-    pub applied_current_a: f64,
-    pub vector_potential_real_field: AnalysisField,
-    pub vector_potential_imag_field: AnalysisField,
-    pub magnetic_flux_density_real_field: AnalysisField,
-    pub magnetic_flux_density_imag_field: AnalysisField,
-    pub magnetic_flux_density_magnitude_field: AnalysisField,
-    pub magnetic_field_real_field: AnalysisField,
-    pub magnetic_field_imag_field: AnalysisField,
-    pub current_density_real_field: AnalysisField,
-    pub current_density_imag_field: AnalysisField,
-    pub electric_field_real_field: AnalysisField,
-    pub electric_field_imag_field: AnalysisField,
-    pub power_loss_density_field: AnalysisField,
-    pub energy_density_field: AnalysisField,
-    pub residual_real_field: AnalysisField,
-    pub residual_imag_field: AnalysisField,
-    pub electric_flux_density_real_field: AnalysisField,
-    pub electric_flux_density_imag_field: AnalysisField,
-    pub poynting_vector_real_field: AnalysisField,
-    pub poynting_vector_imag_field: AnalysisField,
-    pub max_residual_norm: f64,
-    pub solve_quality: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ElectromagneticSolveOptions {
-    pub prep_context: Option<FeaPrepContext>,
-    pub residual_target: f64,
-    pub harmonic_tolerance: f64,
-    pub harmonic_max_iterations: usize,
-}
-
-impl Default for ElectromagneticSolveOptions {
-    fn default() -> Self {
-        Self {
-            prep_context: None,
-            residual_target: 1.0e-6,
-            harmonic_tolerance: 1.0e-7,
-            harmonic_max_iterations: 96,
+impl StructuralDynamicBalanceSnapshot {
+    pub fn validate(&self) -> Result<(), FeaRunError> {
+        let dof_count = self.applied_load.len();
+        if self.inertia_force.len() != dof_count
+            || self.damping_force.len() != dof_count
+            || self.elastic_force.len() != dof_count
+            || self.equilibrium_residual.len() != dof_count
+            || self
+                .applied_load
+                .iter()
+                .chain(&self.inertia_force)
+                .chain(&self.damping_force)
+                .chain(&self.elastic_force)
+                .chain(&self.equilibrium_residual)
+                .any(|value| !value.is_finite())
+        {
+            return Err(FeaRunError::Solve(
+                "structural dynamic-balance snapshot is malformed".into(),
+            ));
         }
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ThermalSolveOptions {
-    pub step_count: usize,
-    pub time_step_s: f64,
-    pub residual_target: f64,
-    pub prep_context: Option<FeaPrepContext>,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-}
-
-impl Default for ThermalSolveOptions {
-    fn default() -> Self {
-        Self {
-            step_count: 10,
-            time_step_s: 1.0e-2,
-            residual_target: 1.0e-4,
-            prep_context: None,
-            thermo_mechanical_context: None,
-        }
-    }
-}
+mod structural_initial_state;
+pub use structural_initial_state::{
+    AppliedStructuralInitialConditionEvidence, StructuralInitialConditionQuantity,
+    StructuralInitialStateEvidence, StructuralInitialStateEvidenceBasis,
+    StructuralInitialValueSourceEvidence,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaNonlinearRunResult {
     pub run: FeaRunResult,
+    /// Complete original converged point history. Element fields are projections,
+    /// not restart authority; deserialization alone does not admit continuation.
+    pub accepted_state: crate::solve::nonlinear::AcceptedSolidState,
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     pub rotation_snapshots: Vec<AnalysisField>,
@@ -728,14 +439,4 @@ pub struct FeaNonlinearRunResult {
     pub iteration_spike_count: usize,
     pub convergence_stall_count: usize,
     pub backtrack_burst_count: usize,
-}
-
-#[derive(Debug, Error)]
-pub enum FeaRunError {
-    #[error("FEA_MODEL_INVALID: {0}")]
-    InvalidModel(String),
-    #[error("FEA_ASSEMBLY_FAILED: {0}")]
-    Assembly(String),
-    #[error("FEA_CANCELLED: execution cancelled by user")]
-    Cancelled,
 }

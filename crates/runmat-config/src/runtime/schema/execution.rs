@@ -24,10 +24,12 @@ pub struct JitConfig {
     /// Enable JIT compilation
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// JIT compilation threshold
+    /// Native generic hot threshold; specialized/loop thresholds are derived
+    /// as 2x/4x, or 1x/4x for aggressive eager specialization.
     #[serde(default = "default_jit_threshold")]
     pub threshold: u32,
-    /// JIT optimization level
+    /// Native backend optimization and specialization policy. Browser hosts
+    /// retain this setting for cluster preparation but have no native JIT.
     #[serde(default)]
     pub optimization_level: JitOptLevel,
 }

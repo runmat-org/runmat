@@ -2,83 +2,10 @@ use super::{CanonicalPackageId, ContentDigest, PackageVersion, RegistryOrigin, R
 use crate::IdentityError;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use std::path::Path;
 use std::str::FromStr;
 use url::Url;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct NormalizedRelativePath(String);
-
-impl NormalizedRelativePath {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, IdentityError> {
-        let path = path.as_ref();
-        let Some(raw) = path.to_str() else {
-            return Err(invalid_path(&path.to_string_lossy(), "must be valid UTF-8"));
-        };
-        let portable = raw.replace('\\', "/");
-        if portable.is_empty() {
-            return Ok(Self(".".to_string()));
-        }
-        if portable.starts_with('/') || portable.as_bytes().get(1).is_some_and(|byte| *byte == b':')
-        {
-            return Err(invalid_path(&portable, "must be relative"));
-        }
-        let mut segments = Vec::new();
-        for segment in portable.split('/') {
-            match segment {
-                "" | "." => {}
-                ".." => {
-                    return Err(invalid_path(&portable, "must not contain parent traversal"));
-                }
-                _ if segment
-                    .chars()
-                    .any(|character| character.is_control() || character == ':') =>
-                {
-                    return Err(invalid_path(&portable, "contains a non-portable character"));
-                }
-                _ => segments.push(segment),
-            }
-        }
-        Ok(Self(if segments.is_empty() {
-            ".".to_string()
-        } else {
-            segments.join("/")
-        }))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for NormalizedRelativePath {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl FromStr for NormalizedRelativePath {
-    type Err = IdentityError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::new(Path::new(value))
-    }
-}
-
-impl TryFrom<String> for NormalizedRelativePath {
-    type Error = IdentityError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
-}
-
-impl From<NormalizedRelativePath> for String {
-    fn from(value: NormalizedRelativePath) -> Self {
-        value.0
-    }
-}
+pub use runmat_types::NormalizedRelativePath;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PathSourceId {
@@ -400,12 +327,5 @@ fn normalize_default_port(url: &mut Url) {
     );
     if is_default {
         let _ = url.set_port(None);
-    }
-}
-
-fn invalid_path(value: &str, reason: &'static str) -> IdentityError {
-    IdentityError::InvalidRelativePath {
-        value: value.to_string(),
-        reason,
     }
 }

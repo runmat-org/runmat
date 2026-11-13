@@ -2,18 +2,17 @@ use runmat_accelerate_api::AccelProvider;
 
 use anyhow::{ensure, Result};
 use log::{debug, info};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use std::borrow::Cow;
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, WgpuEmission};
 use std::sync::Arc;
 
 use super::backend_shared::gpu_per_buffer_limit_error;
 use super::backend_types::{ImageNormalizeKey, ImageNormalizeTuning, WgpuProvider};
+use super::pipeline_cache::{CacheLookup, PipelineAllocation, PipelineCache, PipelineOwner};
 use crate::backend::wgpu::cache::{key as cache_key, persist as cache_persist};
-use crate::backend::wgpu::residency::BufferUsageClass;
-use crate::backend::wgpu::shaders::image_normalize::{
-    IMAGE_NORMALIZE_SHADER_F32, IMAGE_NORMALIZE_SHADER_F64,
-};
+use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
+use crate::backend::wgpu::shaders::image_normalize::{self, ImageNormalizeShaderGeometry};
 use crate::backend::wgpu::types::NumericPrecision;
+use runmat_execution::resource::ProviderHostMetadataAdmission;
 
 impl WgpuProvider {
     pub(super) fn precision_tag(&self) -> &'static str {
@@ -51,12 +50,33 @@ impl WgpuProvider {
 
     pub(super) fn create_storage_buffer_checked_with_usage(
         &self,
+        emission: &WgpuEmission<'_>,
         len: usize,
         label: &str,
         usage: BufferUsageClass,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
+        self.create_storage_buffer_checked_with_element_size(
+            emission,
+            len,
+            label,
+            usage,
+            self.element_size,
+        )
+    }
+
+    /// Same checked pool owner, with the operation's admitted native element
+    /// size rather than the provider's preferred floating representation.
+    pub(super) fn create_storage_buffer_checked_with_element_size(
+        &self,
+        emission: &WgpuEmission<'_>,
+        len: usize,
+        label: &str,
+        usage: BufferUsageClass,
+        element_size: usize,
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         // Centralised guard + warning for oversized allocations
-        let size_bytes = (len as u64) * self.element_size as u64;
+        let size_bytes = BufferResidency::requested_bytes(len, element_size)
+            .ok_or_else(|| anyhow::anyhow!("{label}: allocation byte extent overflow"))?;
         if size_bytes > self.adapter_limits.max_buffer_size {
             return Err(gpu_per_buffer_limit_error(
                 label,
@@ -64,7 +84,10 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size,
             ));
         }
-        let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
+        emission.ensure_device(&self.access)?;
+        let (buffer, reused) =
+            self.allocations
+                .acquire(emission, usage, len, element_size, label)?;
         if reused && std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
             log::debug!(
                 "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
@@ -87,17 +110,16 @@ impl WgpuProvider {
 
     pub(super) fn create_storage_buffer_checked(
         &self,
+        emission: &WgpuEmission<'_>,
         len: usize,
         label: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
-        self.create_storage_buffer_checked_with_usage(len, label, BufferUsageClass::Generic)
-    }
-
-    pub(super) fn image_normalize_vector_width(&self) -> u32 {
-        match self.precision {
-            NumericPrecision::F64 => 2,
-            NumericPrecision::F32 => 4,
-        }
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
+        self.create_storage_buffer_checked_with_usage(
+            emission,
+            len,
+            label,
+            BufferUsageClass::Generic,
+        )
     }
 
     pub(super) fn round_up_to_multiple(value: u32, mult: u32) -> u32 {
@@ -139,8 +161,16 @@ impl WgpuProvider {
         } else {
             4
         };
+        let mut batch_tile = if plane >= 8192 {
+            batches.min(16)
+        } else {
+            batches.min(32)
+        };
+        if batches <= 4 {
+            batch_tile = batches;
+        }
         let tuning = ImageNormalizeTuning {
-            batch_tile: 1,
+            batch_tile: batch_tile.max(1),
             values_per_thread,
             lane_count: lane,
             spatial_tile,
@@ -233,141 +263,239 @@ impl WgpuProvider {
 
     pub(super) fn image_normalize_pipeline(
         &self,
+        emission: &WgpuEmission<'_>,
         tuning: &ImageNormalizeTuning,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
-        if let Ok(cache) = self.device_caches.image_norm_pipelines.lock() {
-            if let Some(existing) = cache.get(tuning) {
-                return Ok(existing.clone());
-            }
+        emission.ensure_device(&self.access)?;
+        let observation = super::pipeline_observation::PipelineObservation::begin();
+        let cached = self
+            .image_norm_pipeline_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(tuning).cloned());
+        if let Some(existing) = cached {
+            observation.finish(runmat_execution::CandidatePreparationState::Warm);
+            return Ok(existing);
         }
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
         info!(
             "Compiling image_normalize pipeline tuning: batch_tile={} values/thread={} lane={} spatial={}",
             tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
         );
-        let template = match self.precision {
-            NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
-            NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
-        };
-        let shader_src = template
-            .replace("@BT@", &tuning.batch_tile.to_string())
-            .replace("@VP@", &tuning.values_per_thread.to_string())
-            .replace("@WG@", &tuning.lane_count.to_string())
-            .replace("@ST@", &tuning.spatial_tile.to_string())
-            .replace("@BV@", &self.image_normalize_vector_width().to_string());
-        let module = self
-            .device_ref()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-image-normalize-shader-dyn"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader_src)),
-            });
+        let shader_src = image_normalize::materialize(
+            self.precision,
+            ImageNormalizeShaderGeometry {
+                batch_tile: tuning.batch_tile,
+                values_per_thread: tuning.values_per_thread,
+                lane_count: tuning.lane_count,
+                spatial_tile: tuning.spatial_tile,
+            },
+        );
+        let module = crate::backend::wgpu::shader_compilation::create_shader_module(
+            emission,
+            "runmat-image-normalize-shader-dyn",
+            &shader_src,
+            None,
+        )?;
         let pipeline_layout = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
-            self.device_ref(),
+            emission,
             "runmat-image-normalize-pipeline-dyn",
-            &self.pipelines.image_normalize.layout,
+            &self.pipelines.image_normalize.get(emission)?.layout,
         );
         let pipeline = crate::backend::wgpu::cache::factory::create_compute_pipeline(
-            self.device_ref(),
+            emission,
             "runmat-image-normalize-pipeline-dyn",
             &pipeline_layout,
             &module,
         );
         let arc = Arc::new(pipeline);
-        if let Ok(mut cache) = self.device_caches.image_norm_pipelines.lock() {
+        if let Ok(mut cache) = self.image_norm_pipeline_cache.lock() {
             cache.insert(*tuning, arc.clone());
         }
+        observation.finish(runmat_execution::CandidatePreparationState::Cold);
         Ok(arc)
     }
     pub fn device_id(&self) -> u32 {
+        self.runtime_device_id
+    }
+
+    /// Hardware identifier used to partition persistent pipeline caches.
+    /// It is not the process-local owner identity carried by tensor handles.
+    pub fn pipeline_cache_device_id(&self) -> u32 {
         self.cache_device_id
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn warmup_from_disk(&self) {
         if std::env::var("RUNMAT_DISABLE_PIPELINE_WARMUP").is_ok() {
             return;
         }
+        // The legacy disk records contain WGSL but no typed shader-feature
+        // requirement. Do not compile an unidentified F64 record when IEEE
+        // word shaders are unavailable. Selected reduction caches carry their
+        // own typed requirement and remain independently available.
+        if !self.ieee_words_available(self.precision) {
+            return;
+        }
         crate::backend::wgpu::warmup::warmup_from_disk(
-            &self.device,
             self.pipeline_cache_dir.as_deref(),
             self.precision,
+            self.access.enabled_features(),
             |bytes, tag, wg| self.compute_pipeline_hash_bytes(bytes, tag, wg),
-            |key, pl, module, label, src, tag, wg| {
-                self.get_or_create_pipeline(key, pl, module, label, src, tag, wg)
-            },
-            |pipeline| {
-                crate::backend::wgpu::warmup::noop_after_create(&self.device, &self.queue, pipeline)
+            |key, tag, src, _bytes, workgroup| {
+                // Build under the device's exclusive validation scopes, but
+                // resolve their detached receipt only after releasing access.
+                // Never publish an invalid driver object into the shared cache.
+                let receipt = self.access.with_profiled_scoped(
+                    &self.emission_authority,
+                    |emission| -> Result<Option<_>> {
+                        let Some(bgl) =
+                            crate::backend::wgpu::bindings::build_bgl_for_layout_tag(emission, tag)
+                        else {
+                            return Ok(None);
+                        };
+                        let bgl = Arc::new(bgl);
+                        let pl =
+                            crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                                emission,
+                                "warmup-pipeline-layout",
+                                bgl.as_ref(),
+                            );
+                        let module = crate::backend::wgpu::pipelines::create_shader_module(
+                            emission,
+                            "warmup-shader-module",
+                            src,
+                        )?;
+                        Ok(Some((
+                            bgl,
+                            crate::backend::wgpu::cache::factory::create_compute_pipeline(
+                                emission,
+                                "warmup-precompiled-pipeline",
+                                &pl,
+                                &module,
+                            ),
+                        )))
+                    },
+                )?;
+                let Some((layout, pipeline)) = pollster::block_on(receipt.resolve())?? else {
+                    return Ok(false);
+                };
+                let pipeline = PipelineOwner::unbounded(pipeline);
+                let warmed = if let Some(workgroup) = workgroup {
+                    let recipe = super::pipeline_recipe::PipelineRecipe {
+                        shader: src.to_owned(),
+                        layout: tag.to_owned(),
+                        workgroup,
+                    };
+                    anyhow::ensure!(recipe.key() == key, "warmup recipe key changed");
+                    Some(Arc::new(super::validated_fusion::WarmedPipelineReceipt {
+                        recipe,
+                        layout,
+                        pipeline: pipeline.clone(),
+                    }))
+                } else {
+                    None
+                };
+                // Both locks are acquired only after the scoped receipt has
+                // resolved; a poisoned cache publishes neither half.
+                let mut raw_cache = self
+                    .fused_pipeline_cache
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("warmup pipeline cache is poisoned"))?;
+                let mut warmed_cache = self
+                    .warmed_pipeline_cache
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("warmed pipeline cache is poisoned"))?;
+                let (_, retired) = raw_cache.insert_unbounded(key, &pipeline)?;
+                if let Some(warmed) = warmed {
+                    warmed_cache.entry(key).or_insert(warmed);
+                }
+                drop(warmed_cache);
+                drop(raw_cache);
+                drop(retired);
+                Ok(true)
             },
         );
     }
 
     pub(super) fn cached_bind_group_layout<F>(
         &self,
+        emission: &WgpuEmission<'_>,
         key: &str,
         build: F,
-    ) -> Arc<wgpu::BindGroupLayout>
+    ) -> Result<Arc<wgpu::BindGroupLayout>>
     where
-        F: FnOnce(&wgpu::Device) -> wgpu::BindGroupLayout,
+        F: FnOnce(&WgpuEmission<'_>) -> wgpu::BindGroupLayout,
     {
-        if let Ok(cache) = self.device_caches.bind_group_layouts.lock() {
+        emission.ensure_device(&self.access)?;
+        if let Ok(cache) = self.bind_group_layout_cache.lock() {
             if let Some(layout) = cache.get(key).cloned() {
-                return layout;
+                return Ok(layout);
             }
         }
-        let layout = Arc::new(build(self.device_ref()));
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
+        let layout = Arc::new(build(emission));
         let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
-        if let Ok(mut tags) = self.device_caches.bind_group_layout_tags.lock() {
+        if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
             tags.entry(ptr).or_insert_with(|| key.to_string());
         }
-        if let Ok(mut cache) = self.device_caches.bind_group_layouts.lock() {
+        if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
             cache.insert(key.to_string(), layout.clone());
         }
-        layout
+        Ok(layout)
     }
 
     pub(super) fn cached_bind_group_layout_for_tag(
         &self,
+        emission: &WgpuEmission<'_>,
         tag: &str,
-    ) -> Option<Arc<wgpu::BindGroupLayout>> {
-        if let Ok(cache) = self.device_caches.bind_group_layouts.lock() {
+    ) -> Result<Option<Arc<wgpu::BindGroupLayout>>> {
+        emission.ensure_device(&self.access)?;
+        if let Ok(cache) = self.bind_group_layout_cache.lock() {
             if let Some(layout) = cache.get(tag).cloned() {
-                return Some(layout);
+                return Ok(Some(layout));
             }
         }
-        let layout =
-            crate::backend::wgpu::bindings::build_bgl_for_layout_tag(self.device_ref(), tag)?;
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
+        let Some(layout) = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(emission, tag)
+        else {
+            return Ok(None);
+        };
         let layout = Arc::new(layout);
         let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
-        if let Ok(mut tags) = self.device_caches.bind_group_layout_tags.lock() {
+        if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
             tags.entry(ptr).or_insert_with(|| tag.to_string());
         }
-        if let Ok(mut cache) = self.device_caches.bind_group_layouts.lock() {
+        if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
             cache.insert(tag.to_string(), layout.clone());
         }
-        Some(layout)
+        Ok(Some(layout))
     }
 
     pub(super) fn cached_fusion_bind_group_layout(
         &self,
+        emission: &WgpuEmission<'_>,
         inputs_len: usize,
-    ) -> Arc<wgpu::BindGroupLayout> {
+    ) -> Result<Arc<wgpu::BindGroupLayout>> {
         let key = format!("runmat-fusion-layout-{}", inputs_len);
-        self.cached_bind_group_layout(&key, |device| {
-            crate::backend::wgpu::bindings::build_fusion_bgl(device, inputs_len)
+        self.cached_bind_group_layout(emission, &key, |emission| {
+            crate::backend::wgpu::bindings::build_fusion_bgl(emission, inputs_len)
         })
     }
 
     pub fn try_compile_kernel(&self, label: &str, wgsl_src: &str) -> Result<()> {
-        crate::backend::wgpu::debug::try_compile_kernel(&self.device, label, wgsl_src);
+        self.with_emission(|emission, _| {
+            crate::backend::wgpu::debug::try_compile_kernel(emission, label, wgsl_src)
+        })??;
         Ok(())
     }
 
     pub fn probe_kernel_with_buffers(&self, label: &str, wgsl_src: &str, wg: u32) -> Result<()> {
-        crate::backend::wgpu::debug::probe_kernel_with_buffers(
-            &self.device,
-            &self.queue,
-            label,
-            wgsl_src,
-            wg,
-        );
+        self.with_emission(|emission, pending| {
+            crate::backend::wgpu::debug::probe_kernel_with_buffers(
+                emission, pending, label, wgsl_src, wg,
+            )
+        })??;
         Ok(())
     }
 
@@ -384,6 +512,63 @@ impl WgpuProvider {
             desc.epsilon >= 0.0,
             "image_normalize: epsilon must be non-negative"
         );
+
+        if input.physical().element_type() == runmat_accelerate_api::NumericElementType::F32 {
+            use runmat_accelerate_api::{
+                GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
+            };
+            let host = <Self as AccelProvider>::download_numeric(self, input).await?;
+            ensure!(
+                host.shape == [desc.batch, desc.height, desc.width],
+                "image_normalize: descriptor dimensions do not match native single input"
+            );
+            let HostNumericDataOwned::F32(data) = host.data else {
+                return Err(anyhow::anyhow!(
+                    "image_normalize: provider lost native single input precision"
+                ));
+            };
+            let batch = desc.batch;
+            let plane = desc.height * desc.width;
+            let mut output = vec![0.0f32; data.len()];
+            if plane != 0 {
+                for b in 0..batch {
+                    let mut sum = 0.0f32;
+                    for index in 0..plane {
+                        sum += data[b + batch * index];
+                    }
+                    let mean = sum / plane as f32;
+                    let mut squared_sum = 0.0f32;
+                    for index in 0..plane {
+                        let diff = data[b + batch * index] - mean;
+                        squared_sum += diff * diff;
+                    }
+                    let sigma = (squared_sum / plane as f32 + desc.epsilon as f32).sqrt();
+                    let inverse_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+                    for index in 0..plane {
+                        let offset = b + batch * index;
+                        let mut value = (data[offset] - mean) * inverse_sigma;
+                        if let Some(gain) = desc.gain {
+                            value *= gain as f32;
+                        }
+                        if let Some(bias) = desc.bias {
+                            value += bias as f32;
+                        }
+                        if desc.clamp_zero {
+                            value = value.max(0.0);
+                        }
+                        if let Some(gamma) = desc.gamma {
+                            value = value.powf(gamma as f32);
+                        }
+                        output[offset] = value;
+                    }
+                }
+            }
+            return self.upload_numeric_exec(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&output),
+                shape: &host.shape,
+                storage: GpuTensorStorage::Real,
+            });
+        }
 
         let mut host = <Self as AccelProvider>::download(self, input).await?;
         ensure!(
@@ -477,6 +662,7 @@ impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn get_or_create_pipeline(
         &self,
+        emission: &WgpuEmission<'_>,
         hash_key: u64,
         pipeline_layout: &wgpu::PipelineLayout,
         module: &wgpu::ShaderModule,
@@ -484,38 +670,119 @@ impl WgpuProvider {
         persist_wgsl_src: Option<&[u8]>,
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
-    ) -> Arc<wgpu::ComputePipeline> {
-        if let Some(p) = self
-            .device_caches
-            .fused_pipelines
-            .try_lock()
-            .ok()
-            .and_then(|guard| guard.get(&hash_key).cloned())
-        {
-            self.metrics.inc_hit();
-            return p;
+    ) -> Result<PipelineOwner> {
+        emission.ensure_device(&self.access)?;
+        self.get_or_create_pipeline_with(
+            emission,
+            None,
+            hash_key, label, persist_wgsl_src, persist_layout_tag, persist_workgroup_size,
+            || Ok(emission.device().create_compute_pipeline(
+                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                    label: Some(label), layout: Some(pipeline_layout), module: module, entry_point: "main",
+                },
+            )),
+        )
+    }
+
+    pub(super) fn recipe_pipeline(
+        &self,
+        emission: &WgpuEmission<'_>,
+        recipe: &super::pipeline_recipe::PipelineRecipe,
+        bindings: &wgpu::BindGroupLayout,
+        label: &str,
+    ) -> Result<PipelineOwner> {
+        emission.ensure_device(&self.access)?;
+        self.get_or_create_pipeline_with(emission, None, recipe.key(), label, Some(recipe.shader.as_bytes()),
+            Some(&recipe.layout), Some(recipe.workgroup), || {
+                let prepared = crate::backend::wgpu::shader_compilation::prepare(
+                    &recipe.shader, self.access.enabled_features(), None)?;
+                let layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                    emission, label, bindings);
+                let module = crate::backend::wgpu::shader_compilation::create_prepared(
+                    emission, label, &prepared)?;
+                Ok(emission.device().create_compute_pipeline(
+                    &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                        label: Some(label), layout: Some(&layout), module: &module, entry_point: "main",
+                    },
+                ))
+            })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn get_or_create_pipeline_with(
+        &self,
+        emission: &WgpuEmission<'_>,
+        metadata: Option<&dyn ProviderHostMetadataAdmission>,
+        hash_key: u64,
+        label: &str,
+        persist_wgsl_src: Option<&[u8]>,
+        persist_layout_tag: Option<&str>,
+        persist_workgroup_size: Option<u32>,
+        create: impl FnOnce() -> Result<wgpu::ComputePipeline>,
+    ) -> Result<PipelineOwner> {
+        emission.ensure_device(&self.access)?;
+        if let (Some(source), Some(layout_tag)) = (persist_wgsl_src, persist_layout_tag) {
+            ensure!(
+                !cache_key::has_unresolved_launch_tokens(source),
+                "{label}: persisted shader source has unresolved launch tokens"
+            );
+            ensure!(
+                hash_key
+                    == self.compute_pipeline_hash_bytes(source, layout_tag, persist_workgroup_size),
+                "{label}: persisted shader source does not match its pipeline cache key"
+            );
         }
+        let observation = super::pipeline_observation::PipelineObservation::begin();
+        let reservation =
+            match PipelineCache::reserve(&self.fused_pipeline_cache, hash_key, metadata) {
+                Ok(CacheLookup::Hit(p)) => {
+                    self.metrics.inc_hit();
+                    observation.finish(runmat_execution::CandidatePreparationState::Warm);
+                    return Ok(p);
+                }
+                Ok(CacheLookup::Miss(reservation)) => Some(reservation),
+                // Historical unmanaged poison behavior is an uncached pipeline.
+                // Managed calls never bypass their actual table admission.
+                Err(error) if metadata.is_none() && self.fused_pipeline_cache.is_poisoned() => {
+                    drop(error);
+                    super::pipeline_observation::poisoned_cache();
+                    None
+                }
+                Err(error) => return Err(error),
+            };
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
+        let allocation = PipelineAllocation::prepare(metadata)?;
+        // Admission failure must precede publication and all driver creation.
+        let persistence = self
+            .pipeline_cache_dir
+            .as_ref()
+            .map(|dir| cache_persist::PreparedPipelinePersistence::prepare(dir, hash_key, metadata))
+            .transpose()?;
         self.metrics.inc_miss();
-        // Persist WGSL + meta for warmup on next run
-        self.persist_pipeline_meta(
-            hash_key,
-            label,
-            persist_layout_tag,
-            persist_workgroup_size,
-            persist_wgsl_src,
-        );
-        let p = Arc::new(self.device.create_compute_pipeline(
-            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                label: Some(label),
-                layout: Some(pipeline_layout),
-                module: module,
-                entry_point: "main",
-            },
-        ));
-        if let Ok(mut guard) = self.device_caches.fused_pipelines.try_lock() {
-            guard.insert(hash_key, p.clone());
+        // Cache lock is released before any driver/compiler callback.
+        let p = allocation.allocate(create()?)?;
+        let (p, loser, inserted) = if let Some(reservation) = reservation {
+            reservation.publish(p)?
+        } else {
+            (p, None, true)
+        };
+        // A concurrent winner retains its identity. Neither loser destruction
+        // nor metadata callbacks/persistence run under the table mutex.
+        drop(loser);
+        if inserted {
+            if let (Some(prepared), Some(dir)) = (persistence, self.pipeline_cache_dir.as_ref()) {
+                prepared.write(
+                    dir,
+                    label,
+                    persist_layout_tag,
+                    persist_workgroup_size,
+                    self.precision,
+                    persist_wgsl_src,
+                );
+            }
         }
-        p
+        observation.finish(runmat_execution::CandidatePreparationState::Cold);
+        Ok(p)
     }
 
     pub fn compute_pipeline_hash_bytes(

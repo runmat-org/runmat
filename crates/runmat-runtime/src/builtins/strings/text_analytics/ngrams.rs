@@ -3,14 +3,8 @@ use runmat_types::MemberAccess;
 
 use std::collections::{HashMap, HashSet};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
+use runmat_builtins::BAG_OF_NGRAMS_ERROR_INVALID_INPUT;
+pub use runmat_builtins::{BAG_OF_NGRAMS_DESCRIPTOR, BAG_OF_NGRAMS_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, IntegerStorage, NumericScalar, ObjectInstance, StringArray, Tensor, Value,
@@ -25,173 +19,15 @@ use crate::builtins::strings::text_analytics::documents::{
 };
 use crate::{build_runtime_error, BuiltinResult};
 
-pub const BAG_OF_NGRAMS_CLASS: &str = "bagOfNgrams";
+pub const BAG_OF_NGRAMS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("bagOfNgrams");
 
 static BAG_OF_NGRAMS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(BAG_OF_NGRAMS_CLASS);
 
-const OUT_BAG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bag",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bag-of-n-grams model object.",
-}];
-
-const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Tokenized documents or a single-document word vector.",
-}];
-
-const IN_DOCUMENTS_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Tokenized documents or a single-document word vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option: NgramLengths.",
-    },
-];
-
-const IN_NGRAMS_COUNTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "uniqueNgrams",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique n-gram string matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "counts",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "N-gram counts per document.",
-    },
-];
-
-const IN_NGRAMS_COUNTS_REST: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "uniqueNgrams",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique n-gram string matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "counts",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "N-gram counts per document.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option: NgramLengths.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS_NGRAMS.INVALID_INPUT",
-    identifier: Some("RunMat:bagOfNgrams:InvalidInput"),
-    when: "Inputs do not match a supported bagOfNgrams form.",
-    message: "bagOfNgrams: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const BAG_OF_NGRAMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfNgrams",
-            inputs: &[],
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfNgrams(documents)",
-            inputs: &IN_DOCUMENTS,
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfNgrams(___, 'NgramLengths', lengths)",
-            inputs: &IN_DOCUMENTS_REST,
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfNgrams(uniqueNgrams, counts)",
-            inputs: &IN_NGRAMS_COUNTS,
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfNgrams(uniqueNgrams, counts, 'NgramLengths', lengths)",
-            inputs: &IN_NGRAMS_COUNTS_REST,
-            outputs: &OUT_BAG,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const BAG_OF_NGRAMS_COUNTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "counts",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Explicit count matrices accept every integer class and require nonnegative values.",
-    }];
-const BAG_OF_NGRAMS_LENGTHS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "lengths",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "NgramLengths accepts positive integer scalars or vectors from every integer class.",
-    }];
-pub const BAG_OF_NGRAMS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "bag = bagOfNgrams(uniqueNgrams, integer_counts, ...)",
-        inputs: &BAG_OF_NGRAMS_COUNTS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Counts remain authoritative through nonnegative-integer validation and column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "bag = bagOfNgrams(..., \"NgramLengths\", integer_lengths)",
-        inputs: &BAG_OF_NGRAMS_LENGTHS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Lengths are converted exactly into bounded host indices and returned as double object metadata; the result has no integer-class output.",
-    },
-];
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 fn ngrams_error(message: impl Into<String>) -> crate::RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin("bagOfNgrams");
-    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+    if let Some(identifier) = BAG_OF_NGRAMS_ERROR_INVALID_INPUT.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -208,20 +44,24 @@ fn ensure_bag_of_ngrams_class_registered() {
             "NumNgrams",
             "NumDocuments",
         ] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: BAG_OF_NGRAMS_CLASS.to_string(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        crate::class_registry::register_builtin_class(
+            BAG_OF_NGRAMS_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: BAG_OF_NGRAMS_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+            },
+        );
     });
 }
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
@@ -233,18 +73,14 @@ fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
 
 #[runtime_builtin(
     name = "bagOfNgrams",
-    category = "strings/text_analytics",
-    summary = "Create bag-of-n-grams model objects.",
-    keywords = "bagOfNgrams,text analytics,n-grams,word counts",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::ngrams::BAG_OF_NGRAMS_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::ngrams::BAG_OF_NGRAMS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::ngrams"
 )]
-async fn bag_of_ngrams_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn bag_of_ngrams_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
         return Err(ngrams_error(
             "bagOfNgrams: GPU-resident inputs are not supported",
@@ -252,13 +88,17 @@ async fn bag_of_ngrams_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let parsed = parse_args(args)?;
     match parsed.source {
-        NgramSource::Empty => bag_object(Vec::new(), parsed.lengths, Vec::new(), 0),
-        NgramSource::Documents(documents) => bag_from_documents(documents, parsed.lengths),
+        NgramSource::Empty => {
+            bag_object(runtime.as_ref(), Vec::new(), parsed.lengths, Vec::new(), 0)
+        }
+        NgramSource::Documents(documents) => {
+            bag_from_documents(runtime.as_ref(), documents, parsed.lengths)
+        }
         NgramSource::Unique {
             ngrams,
             counts,
             requested_lengths,
-        } => bag_from_unique_ngrams(ngrams, counts, requested_lengths),
+        } => bag_from_unique_ngrams(runtime.as_ref(), ngrams, counts, requested_lengths),
     }
 }
 
@@ -271,13 +111,13 @@ enum NgramSource {
     Empty,
     Documents(Vec<Vec<String>>),
     Unique {
-        ngrams: Vec<Vec<String>>,
+        ngrams: Vec<Vec<runmat_value::StringElement>>,
         counts: Tensor,
         requested_lengths: Option<Vec<usize>>,
     },
 }
 
-fn parse_args(args: Vec<Value>) -> BuiltinResult<ParsedArgs> {
+fn parse_args(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedArgs> {
     if args.is_empty() {
         return Ok(ParsedArgs {
             source: NgramSource::Empty,
@@ -287,7 +127,7 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<ParsedArgs> {
 
     let first_is_option = is_option_name(&args[0], "NgramLengths");
     if first_is_option {
-        let lengths = parse_options(&args, 0)?.unwrap_or_else(|| vec![2]);
+        let lengths = parse_options(args.view(), 0)?.unwrap_or_else(|| vec![2]);
         return Ok(ParsedArgs {
             source: NgramSource::Empty,
             lengths,
@@ -308,18 +148,18 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<ParsedArgs> {
                 )))
             }
         };
-        let lengths = parse_options(&args, 2)?;
+        let lengths = parse_options(args.view(), 2)?;
         return Ok(ParsedArgs {
             lengths: lengths.clone().unwrap_or_else(|| vec![2]),
             source: NgramSource::Unique {
-                ngrams: unique_ngrams_from_value(&args[0], counts.cols)?,
+                ngrams: unique_ngrams_from_value(&args[0], count_matrix_dimensions(&counts).1)?,
                 counts,
                 requested_lengths: lengths,
             },
         });
     }
 
-    let lengths = parse_options(&args, 1)?.unwrap_or_else(|| vec![2]);
+    let lengths = parse_options(args.view(), 1)?.unwrap_or_else(|| vec![2]);
     Ok(ParsedArgs {
         source: NgramSource::Documents(documents_from_value(&args[0])?),
         lengths,
@@ -332,7 +172,10 @@ fn is_option_name(value: &Value, expected: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn parse_options(args: &[Value], start: usize) -> BuiltinResult<Option<Vec<usize>>> {
+fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+    start: usize,
+) -> BuiltinResult<Option<Vec<usize>>> {
     if start >= args.len() {
         return Ok(None);
     }
@@ -421,7 +264,7 @@ fn documents_from_value(value: &Value) -> BuiltinResult<Vec<Vec<String>>> {
         }
         Value::Object(object) => Err(ngrams_error(format!(
             "bagOfNgrams: expected tokenizedDocument object, got {}",
-            object.class_name
+            object.class_name()
         ))),
         other => {
             validate_row_word_vector(other)?;
@@ -451,7 +294,11 @@ fn validate_row_word_vector(value: &Value) -> BuiltinResult<()> {
     }
 }
 
-fn bag_from_documents(documents: Vec<Vec<String>>, lengths: Vec<usize>) -> BuiltinResult<Value> {
+fn bag_from_documents(
+    runtime: Option<&crate::context::RuntimeContext>,
+    documents: Vec<Vec<String>>,
+    lengths: Vec<usize>,
+) -> BuiltinResult<Value> {
     let mut ngrams = Vec::new();
     let mut positions: HashMap<Vec<String>, usize> = HashMap::new();
     let rows = documents.len();
@@ -478,18 +325,20 @@ fn bag_from_documents(documents: Vec<Vec<String>>, lengths: Vec<usize>) -> Built
         }
     }
 
-    bag_object(ngrams, lengths, counts, rows)
+    bag_object(runtime, ngrams, lengths, counts, rows)
 }
 
 fn bag_from_unique_ngrams(
-    raw_ngrams: Vec<Vec<String>>,
+    runtime: Option<&crate::context::RuntimeContext>,
+    raw_ngrams: Vec<Vec<runmat_value::StringElement>>,
     counts: Tensor,
     requested_lengths: Option<Vec<usize>>,
 ) -> BuiltinResult<Value> {
-    if counts.cols != raw_ngrams.len() {
+    let (count_rows, count_cols) = count_matrix_dimensions(&counts);
+    if count_cols != raw_ngrams.len() {
         return Err(ngrams_error(format!(
             "bagOfNgrams: counts columns ({}) must match uniqueNgrams rows ({})",
-            counts.cols,
+            count_cols,
             raw_ngrams.len()
         )));
     }
@@ -515,6 +364,10 @@ fn bag_from_unique_ngrams(
         if ngram.iter().any(|word| is_missing_string(word)) {
             continue;
         }
+        let ngram = ngram
+            .iter()
+            .filter_map(|word| word.as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
         if ngram.is_empty() {
             return Err(ngrams_error(
                 "bagOfNgrams: each n-gram must contain at least one word",
@@ -537,18 +390,30 @@ fn bag_from_unique_ngrams(
     }
 
     let mut filtered_counts = Vec::with_capacity(checked_count_len(
-        counts.rows,
+        count_rows,
         keep_cols.len(),
         "bagOfNgrams",
     )?);
     let values = tensor_utils::tensor_values_f64_cow(&counts);
     for col in keep_cols {
-        for row in 0..counts.rows {
-            filtered_counts.push(values[row + col * counts.rows]);
+        for row in 0..count_rows {
+            filtered_counts.push(values[row + col * count_rows]);
         }
     }
     let lengths = requested_lengths.unwrap_or_else(|| infer_ngram_lengths(&ngrams));
-    bag_object(ngrams, lengths, filtered_counts, counts.rows)
+    bag_object(runtime, ngrams, lengths, filtered_counts, count_rows)
+}
+
+/// `bagOfNgrams` treats a numeric vector of counts as one document row. This
+/// is the matrix projection historically carried by dense tensor metadata,
+/// rather than the public vector projection used by general array APIs.
+fn count_matrix_dimensions(counts: &Tensor) -> (usize, usize) {
+    let shape = counts.shape();
+    match shape {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
 }
 
 fn infer_ngram_lengths(ngrams: &[Vec<String>]) -> Vec<usize> {
@@ -568,7 +433,7 @@ fn infer_ngram_lengths(ngrams: &[Vec<String>]) -> Vec<usize> {
 fn unique_ngrams_from_value(
     value: &Value,
     expected_rows: usize,
-) -> BuiltinResult<Vec<Vec<String>>> {
+) -> BuiltinResult<Vec<Vec<runmat_value::StringElement>>> {
     match value {
         Value::StringArray(array) => {
             if array.rows != expected_rows {
@@ -582,17 +447,17 @@ fn unique_ngrams_from_value(
                 let mut ngram = Vec::new();
                 let mut row_has_missing = false;
                 for col in 0..array.cols {
-                    let word = array.data[row + col * array.rows].clone();
+                    let word = array.data()[row + col * array.rows].clone();
                     if is_missing_string(&word) {
                         row_has_missing = true;
                         break;
                     }
-                    if !word.is_empty() {
+                    if word.as_str().is_some_and(|word| !word.is_empty()) {
                         ngram.push(word);
                     }
                 }
                 if row_has_missing {
-                    out.push(vec!["<missing>".to_string()]);
+                    out.push(vec![runmat_value::StringElement::Missing]);
                 } else {
                     out.push(ngram);
                 }
@@ -612,18 +477,25 @@ fn unique_ngrams_from_value(
                 let mut row_has_missing = false;
                 for col in 0..cell.cols {
                     let idx = row + col * cell.rows;
-                    let word = scalar_text(&cell.data[idx], "bagOfNgrams")
-                        .map_err(|err| ngrams_error(err.to_string()))?;
+                    let word = match &cell.data()[idx] {
+                        Value::String(text) => text.clone(),
+                        Value::StringArray(array) if array.data().len() == 1 => {
+                            array.data()[0].clone()
+                        }
+                        value => scalar_text(value, "bagOfNgrams")
+                            .map(runmat_value::StringElement::text)
+                            .map_err(|err| ngrams_error(err.to_string()))?,
+                    };
                     if is_missing_string(&word) {
                         row_has_missing = true;
                         break;
                     }
-                    if !word.is_empty() {
+                    if word.as_str().is_some_and(|word| !word.is_empty()) {
                         ngram.push(word);
                     }
                 }
                 if row_has_missing {
-                    out.push(vec!["<missing>".to_string()]);
+                    out.push(vec![runmat_value::StringElement::Missing]);
                 } else {
                     out.push(ngram);
                 }
@@ -639,13 +511,14 @@ fn unique_ngrams_from_value(
             }
             Ok(vec![words
                 .into_iter()
-                .filter(|word| !word.is_empty())
+                .filter(|word| word.as_str().is_none_or(|word| !word.is_empty()))
                 .collect()])
         }
     }
 }
 
 fn bag_object(
+    runtime: Option<&crate::context::RuntimeContext>,
     ngrams: Vec<Vec<String>>,
     lengths: Vec<usize>,
     counts: Vec<f64>,
@@ -664,52 +537,48 @@ fn bag_object(
         )));
     }
     let max_len = ngrams.iter().map(Vec::len).max().unwrap_or(0);
-    let mut object = ObjectInstance::new(BAG_OF_NGRAMS_CLASS.to_string());
-    object.properties.insert(
-        "Ngrams".to_string(),
-        Value::StringArray(ngram_array(&ngrams, max_len)?),
-    );
-    object.properties.insert(
-        "Counts".to_string(),
-        Value::Tensor(Tensor::new(counts, vec![rows, cols]).map_err(|err| ngrams_error(err))?),
-    );
-    object.properties.insert(
-        "NgramLengths".to_string(),
-        Value::Tensor(
-            Tensor::new(
-                lengths.iter().map(|length| *length as f64).collect(),
-                vec![1, lengths.len()],
-            )
-            .map_err(|err| ngrams_error(err))?,
+    let fields = [
+        ("Ngrams", Value::StringArray(ngram_array(&ngrams, max_len)?)),
+        (
+            "Counts",
+            Value::Tensor(Tensor::new(counts, vec![rows, cols]).map_err(|err| ngrams_error(err))?),
         ),
-    );
-    object.properties.insert(
-        "Vocabulary".to_string(),
-        Value::StringArray(vocabulary_array(&ngrams)?),
-    );
-    object
-        .properties
-        .insert("NumNgrams".to_string(), Value::Num(cols as f64));
-    object
-        .properties
-        .insert("NumDocuments".to_string(), Value::Num(rows as f64));
-    Ok(Value::Object(object))
+        (
+            "NgramLengths",
+            Value::Tensor(
+                Tensor::new(
+                    lengths.iter().map(|length| *length as f64).collect(),
+                    vec![1, lengths.len()],
+                )
+                .map_err(|err| ngrams_error(err))?,
+            ),
+        ),
+        ("Vocabulary", Value::StringArray(vocabulary_array(&ngrams)?)),
+        ("NumNgrams", Value::Num(cols as f64)),
+        ("NumDocuments", Value::Num(rows as f64)),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        BAG_OF_NGRAMS_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(in crate::builtins::strings::text_analytics) fn ngrams_from_bag(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Vec<Vec<String>>> {
-    match object.properties.get("Ngrams") {
+    match object.properties().get("Ngrams") {
         Some(Value::StringArray(array)) => {
             let mut ngrams = Vec::with_capacity(array.rows);
             let mut seen = HashSet::new();
             for row in 0..array.rows {
                 let mut ngram = Vec::new();
                 for col in 0..array.cols {
-                    let word = &array.data[row + col * array.rows];
-                    if !word.is_empty() && !is_missing_string(word) {
-                        ngram.push(word.clone());
+                    let word = &array.data()[row + col * array.rows];
+                    if let Some(word) = word.as_str().filter(|word| !word.is_empty()) {
+                        ngram.push(word.to_owned());
                     }
                 }
                 if ngram.is_empty() {
@@ -765,7 +634,10 @@ mod tests {
     use runmat_value::{CellArray, IntegerStorage, NumericStorage};
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(bag_of_ngrams_builtin(args))
+        futures::executor::block_on(bag_of_ngrams_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -791,7 +663,7 @@ mod tests {
             .collect::<Vec<_>>();
         let rows = values.len();
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Documents".to_string(),
             Value::Cell(CellArray::new(values, rows, 1).unwrap()),
         );
@@ -882,15 +754,22 @@ mod tests {
 
     #[test]
     fn rejects_resident_inputs_before_provider_access() {
-        let resident = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_362_001,
-            descriptor: Default::default(),
-        };
-        let error = run(vec![Value::GpuTensor(resident)])
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident numeric admission fixture");
+        let caller_alias = allocation.handle.clone();
+        let error = run(vec![Value::GpuTensor(allocation.handle)])
             .expect_err("resident text-model input must reject");
         assert_eq!(error.identifier(), Some("RunMat:bagOfNgrams:InvalidInput"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        caller_alias.allocation_lease().validate_live().unwrap();
+        drop(error);
+        drop(caller_alias);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
@@ -921,14 +800,14 @@ mod tests {
     }
 
     fn string_array_property(object: &ObjectInstance, name: &str) -> StringArray {
-        let Some(Value::StringArray(array)) = object.properties.get(name) else {
+        let Some(Value::StringArray(array)) = object.properties().get(name) else {
             panic!("expected string array property {name}");
         };
         array.clone()
     }
 
     fn tensor_property(object: &ObjectInstance, name: &str) -> Tensor {
-        let Some(Value::Tensor(tensor)) = object.properties.get(name) else {
+        let Some(Value::Tensor(tensor)) = object.properties().get(name) else {
             panic!("expected tensor property {name}");
         };
         tensor.clone()
@@ -944,21 +823,21 @@ mod tests {
             ])])
             .expect("bag"),
         );
-        assert_eq!(bag.class_name, BAG_OF_NGRAMS_CLASS);
-        assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
-        assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(3.0)));
+        assert!(bag.class_name().is(BAG_OF_NGRAMS_CLASS));
+        assert_eq!(bag.properties().get("NumDocuments"), Some(&Value::Num(2.0)));
+        assert_eq!(bag.properties().get("NumNgrams"), Some(&Value::Num(3.0)));
 
         let ngrams = string_array_property(&bag, "Ngrams");
         assert_eq!(ngrams.shape, vec![3, 2]);
         assert_eq!(
-            ngrams.data,
+            ngrams.data(),
             vec!["a", "b", "b", "b", "a", "c"]
                 .into_iter()
                 .map(str::to_string)
                 .collect::<Vec<_>>()
         );
         let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 3]);
+        assert_eq!(counts.shape(), [2, 3]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -971,14 +850,14 @@ mod tests {
                 Value::StringArray(
                     StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![1, 3]).unwrap(),
                 ),
-                Value::String("NgramLengths".to_string()),
+                Value::String("NgramLengths".to_string().into()),
                 Value::Tensor(lengths),
             ])
             .expect("bag"),
         );
         let ngram_lengths = tensor_property(&bag, "NgramLengths");
         assert_eq!(ngram_lengths.materialize_f64(), vec![1.0, 3.0]);
-        assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(4.0)));
+        assert_eq!(bag.properties().get("NumNgrams"), Some(&Value::Num(4.0)));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -992,15 +871,16 @@ mod tests {
         let counts = Tensor::new(vec![2.0, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let bag =
             object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
-        assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
-        assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(2.0)));
+        assert_eq!(bag.properties().get("NumDocuments"), Some(&Value::Num(2.0)));
+        assert_eq!(bag.properties().get("NumNgrams"), Some(&Value::Num(2.0)));
         assert_eq!(
             tensor_property(&bag, "NgramLengths").materialize_f64(),
             vec![2.0]
         );
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn accepts_native_single_and_rejects_negative_exact_integer_counts() {
         let ngrams = StringArray::new(
             vec!["a".into(), "b".into(), "b".into(), "c".into()],
@@ -1023,6 +903,18 @@ mod tests {
 
         let negative = Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
         assert!(run(vec![Value::StringArray(ngrams), Value::Tensor(negative),]).is_err());
+
+        let one_ngram = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+        let rank_zero = Tensor::new(vec![1.0], Vec::new()).expect("rank-zero counts");
+        let error = run(vec![
+            Value::StringArray(one_ngram),
+            Value::Tensor(rank_zero),
+        ])
+        .expect_err("rank-zero counts retain zero-column matrix geometry");
+        assert!(
+            error.message().contains("counts columns (0)"),
+            "unexpected error: {error}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1057,12 +949,15 @@ mod tests {
             run(vec![
                 Value::StringArray(ngrams),
                 Value::Tensor(counts),
-                Value::String("NgramLengths".to_string()),
+                Value::String("NgramLengths".to_string().into()),
                 Value::Num(2.0),
             ])
             .expect("bag"),
         );
-        assert_eq!(filtered.properties.get("NumNgrams"), Some(&Value::Num(2.0)));
+        assert_eq!(
+            filtered.properties().get("NumNgrams"),
+            Some(&Value::Num(2.0))
+        );
         assert_eq!(
             tensor_property(&filtered, "NgramLengths").materialize_f64(),
             vec![2.0]
@@ -1089,7 +984,7 @@ mod tests {
         let bag = object(run(vec![Value::Cell(ngrams), Value::Tensor(counts)]).expect("bag"));
         let ngrams = string_array_property(&bag, "Ngrams");
         assert_eq!(
-            ngrams.data,
+            ngrams.data(),
             vec!["a", "c", "e", "b", "d", "f"]
                 .into_iter()
                 .map(str::to_string)
@@ -1114,8 +1009,8 @@ mod tests {
     #[test]
     fn reports_bag_of_ngrams_identifier() {
         let err = run(vec![
-            Value::String("a b c".to_string()),
-            Value::String("NgramLengths".to_string()),
+            Value::String("a b c".to_string().into()),
+            Value::String("NgramLengths".to_string().into()),
             Value::Num(0.0),
         ])
         .expect_err("expected bad length rejection");
@@ -1128,18 +1023,29 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn drops_missing_unique_ngram_and_count_column() {
-        let ngrams = StringArray::new(
-            vec!["a".into(), "<missing>".into(), "b".into(), "ignored".into()],
-            vec![2, 2],
-        )
-        .unwrap();
-        let counts = Tensor::new(vec![4.0, 9.0, 5.0, 9.0], vec![2, 2]).unwrap();
-        let bag =
-            object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
-        assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(1.0)));
-        let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 1]);
-        assert_eq!(counts.materialize_f64(), vec![4.0, 9.0]);
+        for element in [runmat_value::StringElement::Missing, "<missing>".into()] {
+            let missing = element.is_missing();
+            let ngrams = StringArray::from_elements_unbounded(
+                vec!["a".into(), element, "b".into(), "ignored".into()],
+                vec![2, 2],
+            )
+            .unwrap();
+            let original = vec![4.0, 9.0, 5.0, 9.0];
+            let counts = Tensor::new(original.clone(), vec![2, 2]).unwrap();
+            let bag =
+                object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
+            let columns = if missing { 1 } else { 2 };
+            assert_eq!(
+                bag.properties().get("NumNgrams"),
+                Some(&Value::Num(columns as f64))
+            );
+            let counts = tensor_property(&bag, "Counts");
+            assert_eq!(counts.shape(), [2, columns]);
+            assert_eq!(
+                counts.materialize_f64(),
+                if missing { vec![4.0, 9.0] } else { original }
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1156,8 +1062,8 @@ mod tests {
         assert!(err.to_string().contains("duplicate"));
 
         let err = run(vec![
-            Value::String("a b c".to_string()),
-            Value::String("NgramLengths".to_string()),
+            Value::String("a b c".to_string().into()),
+            Value::String("NgramLengths".to_string().into()),
             Value::Num(0.0),
         ])
         .expect_err("expected bad length rejection");

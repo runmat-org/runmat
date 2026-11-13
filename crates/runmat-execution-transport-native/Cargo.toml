@@ -1,6 +1,6 @@
 [package]
 name = "runmat-execution-transport-native"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -15,16 +15,19 @@ chrono = { workspace = true }
 futures-util = "0.3"
 minicbor = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-server-client = { workspace = true }
 rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 quinn = "0.11"
 rustls = "0.23"
 sha2 = { workspace = true }
+hex = { workspace = true }
+socket2 = "0.6"
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "net", "sync", "time", "rt-multi-thread"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
 [dev-dependencies]

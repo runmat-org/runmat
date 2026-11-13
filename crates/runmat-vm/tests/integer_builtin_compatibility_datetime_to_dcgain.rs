@@ -89,9 +89,9 @@ fn compiled_integer_decomposition_dispatches_transpose_and_both_solves() {
         matches!(
             value,
             Value::Object(object)
-                if object.class_name == "decomposition"
+                if object.class_name().is(runmat_types::StaticClassIdentity::new("decomposition"))
                     && matches!(
-                        object.properties.get("__matrix"),
+                        object.properties().get("__matrix"),
                         Some(Value::Tensor(tensor))
                             if tensor.integer_storage()
                                 == Some(&IntegerStorage::U64(vec![2, 1, 0, 4]))
@@ -106,7 +106,7 @@ fn compiled_integer_decomposition_dispatches_transpose_and_both_solves() {
             .iter()
             .filter(|value| {
                 matches!(value, Value::Tensor(tensor)
-                    if matches!(tensor.shape.as_slice(), [2, 1] | [1, 2])
+                    if matches!(tensor.shape(), [2, 1] | [1, 2])
                         && tensor.materialize_f64().iter().all(|entry| (*entry - 2.0).abs() < 1.0e-12))
             })
             .count(),
@@ -185,6 +185,17 @@ fn compiled_deal_enforces_counts_and_accepts_zero_outputs() {
     );
 
     execute_source("deal(uint32(7));").expect("single-input zero-output deal");
+}
+
+#[test]
+fn compiled_deal_discarded_output_keeps_exact_selected_integer() {
+    let values = execute_source(
+        "u = uint64(9007199254740992) + uint64(1); [~, selected] = deal(int8(-7), u); assert(isa(selected, 'uint64')); assert(selected == u);",
+    )
+    .expect("compiled deal with discarded first output");
+    assert!(values
+        .iter()
+        .any(|value| matches!(value, Value::Int(IntValue::U64(9_007_199_254_740_993)))));
 }
 
 #[test]

@@ -1,0 +1,589 @@
+{
+  "schema_version": 1,
+  "documents": [
+    {
+      "id": "doc:runtime/getting-started/install",
+      "path": "docs/getting-started/install.md"
+    },
+    {
+      "id": "doc:runtime/getting-started/cli",
+      "path": "docs/getting-started/cli.md"
+    },
+    {
+      "id": "doc:runtime/getting-started/projects",
+      "path": "docs/getting-started/projects.md"
+    },
+    {
+      "id": "doc:runtime/getting-started/hello-world",
+      "path": "docs/getting-started/hello-world.md"
+    },
+    {
+      "id": "doc:runtime/getting-started/config",
+      "path": "docs/getting-started/config.md"
+    },
+    {
+      "id": "doc:runtime/matlab-compatibility",
+      "path": "docs/getting-started/compatability.md"
+    },
+    {
+      "id": "doc:changelog",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "id": "doc:runtime/values",
+      "path": "docs/VALUES.md"
+    },
+    {
+      "id": "doc:runtime/classes",
+      "path": "docs/CLASSES.md"
+    },
+    {
+      "id": "doc:runtime/functions",
+      "path": "docs/FUNCTIONS.md"
+    },
+    {
+      "id": "doc:runtime/glossary",
+      "path": "docs/GLOSSARY.md"
+    },
+    {
+      "id": "doc:runtime/compiler",
+      "path": "docs/compiler/index.md"
+    },
+    {
+      "id": "doc:runtime/compiler/lexer-and-parser",
+      "path": "docs/compiler/lexer-and-parser.md"
+    },
+    {
+      "id": "doc:runtime/compiler/hir",
+      "path": "docs/compiler/hir.md"
+    },
+    {
+      "id": "doc:runtime/compiler/modules",
+      "path": "docs/compiler/modules.md"
+    },
+    {
+      "id": "doc:runtime/compiler/mir",
+      "path": "docs/compiler/mir.md"
+    },
+    {
+      "id": "doc:runtime/compiler/static-analysis",
+      "path": "docs/compiler/static-analysis.md"
+    },
+    {
+      "id": "doc:runtime/vm",
+      "path": "docs/vm/index.md"
+    },
+    {
+      "id": "doc:runtime/vm/bytecode",
+      "path": "docs/vm/bytecode.md"
+    },
+    {
+      "id": "doc:runtime/vm/interpreter",
+      "path": "docs/vm/interpreter.md"
+    },
+    {
+      "id": "doc:runtime/vm/indexing",
+      "path": "docs/vm/indexing.md"
+    },
+    {
+      "id": "doc:runtime/vm/dispatch",
+      "path": "docs/vm/dispatch.md"
+    },
+    {
+      "id": "doc:runtime/gpu",
+      "path": "docs/gpu/index.md"
+    },
+    {
+      "id": "doc:runtime/gpu/fusion",
+      "path": "docs/gpu/fusion.md"
+    },
+    {
+      "id": "doc:runtime/gpu/wgpu",
+      "path": "docs/gpu/wgpu.md"
+    },
+    {
+      "id": "doc:runtime/plotting",
+      "path": "docs/plotting/index.md"
+    },
+    {
+      "id": "doc:runtime/plotting/state-and-handles",
+      "path": "docs/plotting/state-and-handles.md"
+    },
+    {
+      "id": "doc:runtime/plotting/rendering",
+      "path": "docs/plotting/rendering.md"
+    },
+    {
+      "id": "doc:runtime/plotting/replay-and-export",
+      "path": "docs/plotting/replay-and-export.md"
+    },
+    {
+      "id": "doc:runtime/plotting/host-integration",
+      "path": "docs/plotting/host-integration.md"
+    },
+    {
+      "id": "doc:runtime/builtins",
+      "path": "docs/builtins/index.md"
+    },
+    {
+      "id": "doc:runtime/builtins/authoring",
+      "path": "docs/builtins/authoring.md"
+    },
+    {
+      "id": "doc:fea",
+      "path": "docs/simulation/index.md"
+    },
+    {
+      "id": "doc:fea/guides/what-is-finite-element-analysis",
+      "path": "docs/simulation/guides/what-is-finite-element-analysis.md"
+    },
+    {
+      "id": "doc:fea/get-started",
+      "path": "docs/simulation/get-started.md"
+    },
+    {
+      "id": "doc:fea/usage-accounting",
+      "path": "docs/simulation/usage-accounting.md"
+    },
+    {
+      "id": "doc:fea/usage-accounting-reference",
+      "path": "docs/simulation/usage-accounting-reference.md"
+    },
+    {
+      "id": "doc:fea/geometry",
+      "path": "docs/simulation/geometry.md"
+    },
+    {
+      "id": "doc:fea/meshing",
+      "path": "docs/simulation/meshing.md"
+    },
+    {
+      "id": "doc:fea/models",
+      "path": "docs/simulation/models.md"
+    },
+    {
+      "id": "doc:fea/materials",
+      "path": "docs/simulation/materials.md"
+    },
+    {
+      "id": "doc:fea/study-contracts",
+      "path": "docs/simulation/study-contracts.md"
+    },
+    {
+      "id": "doc:fea/physics",
+      "path": "docs/simulation/physics/index.md"
+    },
+    {
+      "id": "doc:fea/physics/structural",
+      "path": "docs/simulation/physics/structural.md"
+    },
+    {
+      "id": "doc:fea/physics/thermal",
+      "path": "docs/simulation/physics/thermal.md"
+    },
+    {
+      "id": "doc:fea/physics/electromagnetic",
+      "path": "docs/simulation/physics/electromagnetic.md"
+    },
+    {
+      "id": "doc:fea/physics/trace-impedance",
+      "path": "docs/simulation/physics/trace-impedance.md"
+    },
+    {
+      "id": "doc:fea/physics/acoustic",
+      "path": "docs/simulation/physics/acoustic.md"
+    },
+    {
+      "id": "doc:fea/physics/fluid",
+      "path": "docs/simulation/physics/fluid.md"
+    },
+    {
+      "id": "doc:fea/physics/thermomechanical",
+      "path": "docs/simulation/physics/thermomechanical.md"
+    },
+    {
+      "id": "doc:fea/physics/electrothermal",
+      "path": "docs/simulation/physics/electrothermal.md"
+    },
+    {
+      "id": "doc:fea/physics/conjugate-heat-transfer",
+      "path": "docs/simulation/physics/conjugate-heat-transfer.md"
+    },
+    {
+      "id": "doc:fea/physics/fluid-structure-interaction",
+      "path": "docs/simulation/physics/fluid-structure-interaction.md"
+    },
+    {
+      "id": "doc:fea/constraints",
+      "path": "docs/simulation/constraints/index.md"
+    },
+    {
+      "id": "doc:fea/constraints/structural",
+      "path": "docs/simulation/constraints/structural.md"
+    },
+    {
+      "id": "doc:fea/constraints/thermal",
+      "path": "docs/simulation/constraints/thermal.md"
+    },
+    {
+      "id": "doc:fea/constraints/electromagnetic",
+      "path": "docs/simulation/constraints/electromagnetic.md"
+    },
+    {
+      "id": "doc:fea/constraints/acoustic",
+      "path": "docs/simulation/constraints/acoustic.md"
+    },
+    {
+      "id": "doc:fea/constraints/fluid",
+      "path": "docs/simulation/constraints/fluid.md"
+    },
+    {
+      "id": "doc:fea/constraints/connectors",
+      "path": "docs/simulation/constraints/connectors.md"
+    },
+    {
+      "id": "doc:fea/constraints/interfaces",
+      "path": "docs/simulation/constraints/interfaces.md"
+    },
+    {
+      "id": "doc:fea/constraints/initial-conditions",
+      "path": "docs/simulation/constraints/initial-conditions.md"
+    },
+    {
+      "id": "doc:fea/loads",
+      "path": "docs/simulation/loads/index.md"
+    },
+    {
+      "id": "doc:fea/loads/structural",
+      "path": "docs/simulation/loads/structural.md"
+    },
+    {
+      "id": "doc:fea/loads/thermal",
+      "path": "docs/simulation/loads/thermal.md"
+    },
+    {
+      "id": "doc:fea/loads/electromagnetic",
+      "path": "docs/simulation/loads/electromagnetic.md"
+    },
+    {
+      "id": "doc:fea/loads/acoustic",
+      "path": "docs/simulation/loads/acoustic.md"
+    },
+    {
+      "id": "doc:fea/loads/fluid",
+      "path": "docs/simulation/loads/fluid.md"
+    },
+    {
+      "id": "doc:fea/solves",
+      "path": "docs/simulation/solves.md"
+    },
+    {
+      "id": "doc:fea/evidence",
+      "path": "docs/simulation/evidence.md"
+    },
+    {
+      "id": "doc:fea/trust",
+      "path": "docs/simulation/trust.md"
+    },
+    {
+      "id": "doc:fea/glossary",
+      "path": "docs/simulation/glossary.md"
+    },
+    {
+      "id": "doc:fea/operation-reference",
+      "path": "docs/simulation/operation-reference.md"
+    },
+    {
+      "id": "doc:fea/language",
+      "path": "docs/simulation/language/index.md"
+    },
+    {
+      "id": "doc:fea/language/files-modules-and-imports",
+      "path": "docs/simulation/language/files-modules-and-imports.md"
+    },
+    {
+      "id": "doc:fea/language/types-units-and-expressions",
+      "path": "docs/simulation/language/types-units-and-expressions.md"
+    },
+    {
+      "id": "doc:fea/language/geometry-models-and-assignments",
+      "path": "docs/simulation/language/geometry-models-and-assignments.md"
+    },
+    {
+      "id": "doc:fea/language/studies-analyses-and-state",
+      "path": "docs/simulation/language/studies-analyses-and-state.md"
+    },
+    {
+      "id": "doc:fea/language/inputs-sweeps-and-cases",
+      "path": "docs/simulation/language/inputs-sweeps-and-cases.md"
+    },
+    {
+      "id": "doc:fea/language/outputs-fields-and-observations",
+      "path": "docs/simulation/language/outputs-fields-and-observations.md"
+    },
+    {
+      "id": "doc:fea/language/execution-parallel-and-distributed",
+      "path": "docs/simulation/language/execution-parallel-and-distributed.md"
+    },
+    {
+      "id": "doc:fea/language/runmat-function-integration",
+      "path": "docs/simulation/language/runmat-function-integration.md"
+    },
+    {
+      "id": "doc:fea/language/diagnostics-and-tooling",
+      "path": "docs/simulation/language/diagnostics-and-tooling.md"
+    },
+    {
+      "id": "doc:fea/language/guides/first-static-study",
+      "path": "docs/simulation/language/guides/first-static-study.md"
+    },
+    {
+      "id": "doc:fea/language/guides/reusable-parameterized-model",
+      "path": "docs/simulation/language/guides/reusable-parameterized-model.md"
+    },
+    {
+      "id": "doc:fea/language/guides/transient-study-with-generated-inputs",
+      "path": "docs/simulation/language/guides/transient-study-with-generated-inputs.md"
+    },
+    {
+      "id": "doc:fea/language/guides/modal-and-response-spectrum-study",
+      "path": "docs/simulation/language/guides/modal-and-response-spectrum-study.md"
+    },
+    {
+      "id": "doc:fea/language/guides/running-and-plotting-a-sweep",
+      "path": "docs/simulation/language/guides/running-and-plotting-a-sweep.md"
+    },
+    {
+      "id": "doc:fea/language/guides/scaling-from-local-to-cluster",
+      "path": "docs/simulation/language/guides/scaling-from-local-to-cluster.md"
+    },
+    {
+      "id": "doc:fea/language/guides/publishing-and-reading-large-results",
+      "path": "docs/simulation/language/guides/publishing-and-reading-large-results.md"
+    },
+    {
+      "id": "doc:fea/language/reference/grammar",
+      "path": "docs/simulation/language/reference/grammar.md"
+    },
+    {
+      "id": "doc:fea/language/reference/declarations",
+      "path": "docs/simulation/language/reference/declarations.md"
+    },
+    {
+      "id": "doc:fea/language/reference/fluid-materials",
+      "path": "docs/simulation/language/reference/fluid-materials.md"
+    },
+    {
+      "id": "doc:fea/language/reference/procedures",
+      "path": "docs/simulation/language/reference/procedures.md"
+    },
+    {
+      "id": "doc:fea/language/reference/constraints-loads-and-interfaces",
+      "path": "docs/simulation/language/reference/constraints-loads-and-interfaces.md"
+    },
+    {
+      "id": "doc:fea/language/reference/operations-and-output-queries",
+      "path": "docs/simulation/language/reference/operations-and-output-queries.md"
+    },
+    {
+      "id": "doc:fea/language/reference/geometry-features-and-ap242",
+      "path": "docs/simulation/language/reference/geometry-features-and-ap242.md"
+    },
+    {
+      "id": "doc:fea/validation/status",
+      "path": "docs/simulation/validation/status.md"
+    },
+    {
+      "id": "doc:fea/validation/structural",
+      "path": "docs/simulation/validation/structural.md"
+    },
+    {
+      "id": "doc:fea/validation/thermal",
+      "path": "docs/simulation/validation/thermal.md"
+    },
+    {
+      "id": "doc:fea/validation/electromagnetic",
+      "path": "docs/simulation/validation/electromagnetic.md"
+    },
+    {
+      "id": "doc:fea/validation/acoustic",
+      "path": "docs/simulation/validation/acoustic.md"
+    },
+    {
+      "id": "doc:fea/validation/fluid",
+      "path": "docs/simulation/validation/fluid.md"
+    },
+    {
+      "id": "doc:fea/validation/thermomechanical",
+      "path": "docs/simulation/validation/thermomechanical.md"
+    },
+    {
+      "id": "doc:fea/validation/electrothermal",
+      "path": "docs/simulation/validation/electrothermal.md"
+    },
+    {
+      "id": "doc:fea/validation/conjugate-heat-transfer",
+      "path": "docs/simulation/validation/conjugate-heat-transfer.md"
+    },
+    {
+      "id": "doc:fea/validation/fluid-structure-interaction",
+      "path": "docs/simulation/validation/fluid-structure-interaction.md"
+    },
+    {
+      "id": "doc:runtime/wasm",
+      "path": "docs/wasm/index.md"
+    },
+    {
+      "id": "doc:runtime/lsp",
+      "path": "docs/lsp/index.md"
+    },
+    {
+      "id": "doc:runtime/lsp/diagnostics-and-highlighting",
+      "path": "docs/lsp/diagnostics-and-highlighting.md"
+    },
+    {
+      "id": "doc:runtime/lsp/features",
+      "path": "docs/lsp/features.md"
+    },
+    {
+      "id": "doc:runtime/jit",
+      "path": "docs/jit/index.md"
+    },
+    {
+      "id": "doc:runtime/jit/pipeline",
+      "path": "docs/jit/pipeline.md"
+    },
+    {
+      "id": "doc:runtime/session",
+      "path": "docs/session/index.md"
+    },
+    {
+      "id": "doc:runtime/session/execution-requests",
+      "path": "docs/session/execution-requests.md"
+    },
+    {
+      "id": "doc:runtime/session/workspace",
+      "path": "docs/session/workspace.md"
+    },
+    {
+      "id": "doc:runtime/session/variable-inspection",
+      "path": "docs/session/variable-inspection.md"
+    },
+    {
+      "id": "doc:runtime/session/workspace-replay",
+      "path": "docs/session/workspace-replay.md"
+    },
+    {
+      "id": "doc:runtime/session/interaction-and-streams",
+      "path": "docs/session/interaction-and-streams.md"
+    },
+    {
+      "id": "doc:runtime/session/host-integration",
+      "path": "docs/session/host-integration.md"
+    },
+    {
+      "id": "doc:runtime/gc",
+      "path": "docs/gc/index.md"
+    },
+    {
+      "id": "doc:runtime/execution",
+      "path": "docs/execution/index.md"
+    },
+    {
+      "id": "doc:runtime/execution/async",
+      "path": "docs/execution/async.md"
+    },
+    {
+      "id": "doc:runtime/execution/errors",
+      "path": "docs/execution/errors.md"
+    },
+    {
+      "id": "doc:runtime/fs",
+      "path": "docs/fs/index.md"
+    },
+    {
+      "id": "doc:runtime/fs/datasets",
+      "path": "docs/fs/datasets.md"
+    },
+    {
+      "id": "doc:runtime/development",
+      "path": "docs/development/index.md"
+    },
+    {
+      "id": "doc:runtime/development/build-system",
+      "path": "docs/development/build-system.md"
+    },
+    {
+      "id": "doc:runtime/development/supported-architectures",
+      "path": "docs/development/supported-architectures.md"
+    },
+    {
+      "id": "doc:runtime/development/testing",
+      "path": "docs/development/testing.md"
+    },
+    {
+      "id": "doc:runtime/development/benchmarking",
+      "path": "docs/development/benchmarking.md"
+    },
+    {
+      "id": "doc:runtime/development/telemetry",
+      "path": "docs/development/telemetry.md"
+    },
+    {
+      "id": "doc:runtime/getting-started/language-extensions",
+      "path": "docs/getting-started/language-extensions.md"
+    },
+    {
+      "id": "doc:runtime/packages",
+      "path": "docs/packages/index.md"
+    },
+    {
+      "id": "doc:runtime/packages/registry",
+      "path": "docs/packages/registry.md"
+    },
+    {
+      "id": "doc:runtime/packages/publishing",
+      "path": "docs/packages/publishing.md"
+    },
+    {
+      "id": "doc:runtime/packages/security",
+      "path": "docs/packages/security.md"
+    },
+    {
+      "id": "doc:runtime/packages/migration",
+      "path": "docs/packages/migration.md"
+    },
+    {
+      "id": "doc:runtime/packages/ci",
+      "path": "docs/packages/ci.md"
+    },
+    {
+      "id": "doc:runtime/interop/python",
+      "path": "docs/execution/python.md"
+    },
+    {
+      "id": "doc:runtime/interop/mex",
+      "path": "docs/execution/mex.md"
+    },
+    {
+      "id": "doc:runtime/interop/java",
+      "path": "docs/execution/java.md"
+    },
+    {
+      "id": "doc:runtime/interop/native-libraries",
+      "path": "docs/execution/native-libraries.md"
+    },
+    {
+      "id": "doc:runtime/execution/parallel",
+      "path": "docs/execution/parallel.md"
+    },
+    {
+      "id": "doc:runtime/development/extensions",
+      "path": "docs/development/extensions.md"
+    },
+    {
+      "id": "doc:runtime/execution/remote",
+      "path": "docs/execution/remote.md"
+    }
+  ]
+}

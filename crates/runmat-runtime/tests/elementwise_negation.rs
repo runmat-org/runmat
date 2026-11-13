@@ -72,7 +72,7 @@ fn test_zero_negation() {
 #[test]
 fn test_unsupported_type() {
     // Test string negation should fail
-    let string_val = Value::String("test".to_string());
+    let string_val = Value::String("test".to_string().into());
     let result = elementwise_neg(&string_val);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Negation not supported"));

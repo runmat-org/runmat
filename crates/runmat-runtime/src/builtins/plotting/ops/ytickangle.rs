@@ -1,170 +1,42 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    YTICKANGLE_DESCRIPTOR, YTICKANGLE_ERROR_TOO_MANY_OUTPUTS, YTICKANGLE_INTEGER_AXES_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_tick_angle::axis_tick_angle_builtin;
 use super::axis_ticks::TickAxis;
-use crate::builtins::plotting::type_resolvers::get_type;
-
-const YTICKANGLE_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ytickangle-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Allow a typed-integer alias for an encoded axes handle",
-    error_identifier: Some("RunMat:compatibility:YtickangleIntegerAxesHandleExtension"),
-};
-pub const YTICKANGLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [YTICKANGLE_INTEGER_AXES_EXTENSION];
-const YTICKANGLE_INTEGER_ANGLE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "angle",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public numeric-scalar rotation contract accepts integer degree values.",
-    }];
-const YTICKANGLE_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer aliases for encoded axes handles are separately gated.",
-    }];
-pub const YTICKANGLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ytickangle(integer_angle)",
-        inputs: &YTICKANGLE_INTEGER_ANGLE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The finite angle crosses the graphics rotation boundary; queries return double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ytickangle(integer_ax, angle)",
-        inputs: &YTICKANGLE_INTEGER_AXES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Strict mode rejects before graphics state access.",
-    },
-];
-
-const OUTPUT_ANGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "angle",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current Y-axis tick label rotation in degrees.",
-}];
-const NO_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_ANGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "angle",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Y-axis tick label rotation in degrees.",
-}];
-
-const INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::AxesHandle,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scalar target axes handle.",
-}];
-
-const INPUTS_AX_ANGLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle or array of axes handles.",
-    },
-    BuiltinParamDescriptor {
-        name: "angle",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y-axis tick label rotation in degrees.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "angle = ytickangle()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_ANGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ytickangle(angle)",
-        inputs: &INPUTS_ANGLE,
-        outputs: &NO_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "angle = ytickangle(ax)",
-        inputs: &INPUTS_AX,
-        outputs: &OUTPUT_ANGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ytickangle(ax, angle)",
-        inputs: &INPUTS_AX_ANGLE,
-        outputs: &NO_OUTPUTS,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.YTICKANGLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ytickangle:InvalidArgument"),
-    when: "Argument count, angle value, or axes handle is invalid.",
-    message: "ytickangle: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.YTICKANGLE.INTERNAL",
-    identifier: Some("RunMat:ytickangle:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "ytickangle: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const YTICKANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[runtime_builtin(
     name = "ytickangle",
-    category = "plotting",
-    summary = "Query or set Y-axis tick label rotation.",
-    keywords = "ytickangle,plotting,axes,tick angle",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::ytickangle::YTICKANGLE_DESCRIPTOR),
-    extensions(crate::builtins::plotting::ytickangle::YTICKANGLE_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::ytickangle::YTICKANGLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::ytickangle"
 )]
+pub fn ytickangle_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    ytickangle_with_runtime(runtime.as_ref(), args)
+}
+
+#[cfg(test)]
 pub fn ytickangle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    ytickangle_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+}
+
+fn ytickangle_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &YTICKANGLE_DESCRIPTOR,
+        &YTICKANGLE_ERROR_TOO_MANY_OUTPUTS,
+        "ytickangle",
+    )?;
     if args.len() == 2
         && args
             .first()
@@ -175,7 +47,7 @@ pub fn ytickangle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "ytickangle",
         )?;
     }
-    axis_tick_angle_builtin("ytickangle", TickAxis::Y, args)
+    axis_tick_angle_builtin(runtime, "ytickangle", TickAxis::Y, args)
 }
 
 #[cfg(test)]

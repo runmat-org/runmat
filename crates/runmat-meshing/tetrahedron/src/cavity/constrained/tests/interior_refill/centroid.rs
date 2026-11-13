@@ -45,19 +45,31 @@ fn centroid_interior_refill_candidate_recovers_split_boundary_tetrahedron_cavity
     nodes.extend([
         ConstrainedCavityNode {
             node_id: 4,
-            coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 1.0 / 3.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 5,
-            coordinates_m: [1.0 / 3.0, 0.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 0.0, 1.0 / 3.0]),
         },
         ConstrainedCavityNode {
             node_id: 6,
-            coordinates_m: [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]),
         },
         ConstrainedCavityNode {
             node_id: 7,
-            coordinates_m: [0.0, 1.0 / 3.0, 1.0 / 3.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0 / 3.0, 1.0 / 3.0]),
         },
     ]);
 

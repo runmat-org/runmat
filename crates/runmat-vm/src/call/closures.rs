@@ -3,7 +3,7 @@ use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 pub fn create_closure(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     func_name: String,
     capture_count: usize,
 ) -> Result<(), RuntimeError> {
@@ -12,33 +12,85 @@ pub fn create_closure(
         captures.push(pop_value(stack)?);
     }
     captures.reverse();
-    stack.push(runmat_runtime::call::closures::closure_value(
+    stack.try_push(runmat_runtime::call::closures::closure_value(
         func_name, captures,
-    ));
-    Ok(())
+    ))
 }
 
 pub fn create_semantic_closure(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     function: runmat_hir::FunctionId,
     display_name: String,
     capture_count: usize,
+    source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Result<(), RuntimeError> {
     let mut captures = Vec::with_capacity(capture_count);
     for _ in 0..capture_count {
         captures.push(pop_value(stack)?);
     }
     captures.reverse();
-    stack.push(runmat_runtime::call::closures::semantic_closure_value(
+    stack.try_push(runmat_runtime::call::closures::semantic_closure_value(
         function,
         display_name,
         captures,
-    ));
-    Ok(())
+        source_role,
+        lexical_environment,
+    ))
+}
+
+/// Issue a closure from a function-only selected product. The binding and
+/// source presentation were authenticated against that product before this
+/// stack is changed; ambient numeric lookup cannot replace either one.
+pub fn create_selected_semantic_closure(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    binding: runmat_value::BoundFunctionBinding,
+    display_name: String,
+    source_file: Option<String>,
+    capture_count: usize,
+    source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<(), RuntimeError> {
+    let mut captures = Vec::with_capacity(capture_count);
+    for _ in 0..capture_count {
+        captures.push(pop_value(stack)?);
+    }
+    captures.reverse();
+    create_selected_semantic_closure_with_captures(
+        stack,
+        binding,
+        display_name,
+        source_file,
+        captures,
+        source_role,
+        lexical_environment,
+    )
+}
+
+/// Publish compiler-ordered captures that were read and rooted at this exact
+/// issuance point. The caller holds their root lease until this pushes the
+/// closure into the traced VM stack.
+pub fn create_selected_semantic_closure_with_captures(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    binding: runmat_value::BoundFunctionBinding,
+    display_name: String,
+    source_file: Option<String>,
+    captures: Vec<Value>,
+    source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<(), RuntimeError> {
+    stack.try_push(Value::Closure(runmat_value::Closure::new(
+        display_name,
+        Some(binding),
+        source_role,
+        source_file,
+        captures,
+        lexical_environment,
+    )))
 }
 
 pub fn collect_method_args(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     arg_count: usize,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
     let args = pop_args(stack, arg_count)?;
@@ -59,10 +111,12 @@ mod tests {
 
     #[test]
     fn classref_external_method_uses_external_boundary_semantic_resolution() {
-        let class_name = "ClassRefExternalMethodResolutionTest".to_string();
+        let class_name =
+            runmat_types::ClassIdentity::new("ClassRefExternalMethodResolutionTest").unwrap();
         let resolved_name = format!("{class_name}.remote_inc");
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: class_name.clone(),
                 parent: None,
                 properties: HashMap::new(),
@@ -72,17 +126,25 @@ mod tests {
         let _resolver_guard =
             runmat_runtime::user_functions::install_semantic_function_resolver(Some(Arc::new(
                 move |name| (name == resolved_name).then_some(7331),
-            )));
+            )))
+            .expect("call-port scope");
         let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
             Some(Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 7331);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(2.0)]);
-                Box::pin(async { Ok(Value::Num(3.0)) })
+                Box::pin(async {
+                    runmat_runtime::execution::RootedValueSequence::new(
+                        runmat_value::ValueSequence::single(Value::Num(3.0))
+                            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+                    )
+                    .map_err(|error| error.into_runtime_error())
+                })
             })),
-        );
+        )
+        .expect("call-port scope");
         let value = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef(class_name),
+            Value::ClassRef(class_name.into()),
             CallableIdentity::Method(MethodId("remote_inc".to_string())),
             vec![Value::Num(2.0)],
             1,
@@ -90,13 +152,13 @@ mod tests {
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect("classref external call should resolve through semantic resolver");
-        assert_eq!(value, Value::Num(3.0));
+        assert_eq!(value.value().as_slice(), &[Value::Num(3.0)]);
     }
 
     #[test]
     fn classref_external_method_without_resolver_remains_unresolved() {
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             CallableIdentity::Method(MethodId("sqrt".to_string())),
             vec![Value::Num(9.0)],
             1,
@@ -110,7 +172,7 @@ mod tests {
     #[test]
     fn method_member_call_rejects_identity_without_method_name() {
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             CallableIdentity::AnonymousFunction(runmat_hir::FunctionId(12)),
             vec![Value::Num(9.0)],
             1,
@@ -124,7 +186,7 @@ mod tests {
     #[test]
     fn method_member_call_rejects_imported_identity_with_identifier() {
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             CallableIdentity::Imported(runmat_hir::DefPath {
                 package: runmat_hir::PackageName("Point".to_string()),
                 module: runmat_hir::QualifiedName(vec![
@@ -147,7 +209,7 @@ mod tests {
     #[test]
     fn method_member_call_rejects_multisegment_external_identity_with_identifier() {
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
                 runmat_hir::SymbolName("pkg".to_string()),
                 runmat_hir::SymbolName("remote".to_string()),
@@ -164,7 +226,7 @@ mod tests {
     #[test]
     fn method_member_call_rejects_whitespace_method_identity_with_identifier() {
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             CallableIdentity::Method(MethodId("   ".to_string())),
             vec![Value::Num(9.0)],
             1,
@@ -178,7 +240,7 @@ mod tests {
     #[test]
     fn method_member_call_rejects_whitespace_single_segment_external_identity_with_identifier() {
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
                 runmat_hir::SymbolName("   ".to_string()),
             ])),
@@ -195,22 +257,24 @@ mod tests {
 
     #[test]
     fn classref_nonstatic_method_reports_identifier() {
-        let class_name = "ClosureMethodNotStaticTest".to_string();
+        let class_name = runmat_types::ClassIdentity::new("ClosureMethodNotStaticTest").unwrap();
         let mut methods = HashMap::new();
         methods.insert(
-            "inst".to_string(),
+            "inst".into(),
             runmat_runtime::class_registry::RuntimeMethod {
-                name: "inst".to_string(),
+                name: "inst".into(),
                 is_static: false,
                 is_abstract: false,
                 is_sealed: false,
                 access: MemberAccess::Public,
-                function_name: "inst".to_string(),
+                function_name: "inst".into(),
                 implicit_class_argument: None,
+                role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: class_name.clone(),
                 parent: None,
                 properties: HashMap::new(),
@@ -219,7 +283,7 @@ mod tests {
         );
 
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef(class_name),
+            Value::ClassRef(class_name.into()),
             CallableIdentity::Method(MethodId("inst".to_string())),
             vec![],
             1,
@@ -233,7 +297,7 @@ mod tests {
     #[test]
     fn load_method_unknown_static_method_reports_identifier() {
         let err = load_method_closure(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef("Point".into()),
             "definitely_missing_static_method".to_string(),
             None,
         )

@@ -14,7 +14,7 @@ fn compiled_null_accepts_every_integer_class_in_runmat_mode() {
         let values = execute_source(&source).expect("compiled integer null-space semantics");
         assert!(
             values.iter().any(|value| {
-                matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64 && tensor.shape == vec![2, 1])
+                matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64 && tensor.shape() == vec![2, 1])
             }),
             "{constructor}"
         );

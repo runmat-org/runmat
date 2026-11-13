@@ -27,7 +27,7 @@ pub(in crate::builtins::table) struct TimetableConstructorOptions {
 }
 
 pub(in crate::builtins::table) fn parse_table2timetable_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Table2TimetableOptions> {
     let mut options = Table2TimetableOptions::default();
     let mut idx = 0usize;
@@ -89,13 +89,18 @@ pub(in crate::builtins::table) fn table2timetable_generated_row_times(
     array2timetable_row_times(&array_options, height).map(Some)
 }
 
-pub(in crate::builtins::table) fn split_timetable_constructor_args(
-    args: Vec<Value>,
-) -> BuiltinResult<(Option<Value>, Vec<Value>, TimetableConstructorOptions)> {
+pub(in crate::builtins::table) async fn split_timetable_constructor_args(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<(
+    Option<Value>,
+    crate::call::BuiltinArguments,
+    TimetableConstructorOptions,
+)> {
     if args.is_empty() {
-        return Ok((None, Vec::new(), TimetableConstructorOptions::default()));
+        return Ok((None, args.fork(), TimetableConstructorOptions::default()));
     }
-    let mut variables = Vec::new();
+    let mut variable_count = 0usize;
     let mut row_times = None;
     let mut options = TimetableConstructorOptions::default();
     let mut idx = 0usize;
@@ -108,6 +113,7 @@ pub(in crate::builtins::table) fn split_timetable_constructor_args(
         row_times = Some(args[0].clone());
         idx = 1;
     }
+    let variable_start = idx;
     while idx < args.len() {
         if idx + 1 < args.len() {
             if let Ok(name) = scalar_text(&args[idx], "timetable option") {
@@ -153,9 +159,20 @@ pub(in crate::builtins::table) fn split_timetable_constructor_args(
                 }
             }
         }
-        variables.push(args[idx].clone());
+        variable_count += 1;
         idx += 1;
     }
+    let mut cursor = variable_start;
+    let variables = args
+        .try_map_preserving_roots_async(variable_count, runtime, |_| {
+            while cursor + 1 < args.len() && is_timetable_option_token(&args[cursor]) {
+                cursor += 2;
+            }
+            let value = args[cursor].clone();
+            cursor += 1;
+            std::future::ready(Ok(value))
+        })
+        .await?;
     Ok((row_times, variables, options))
 }
 
@@ -177,12 +194,12 @@ pub(in crate::builtins::table) fn is_timetable_option_token(value: &Value) -> bo
 pub(in crate::builtins::table) fn is_time_like_value(value: &Value) -> bool {
     matches!(
         value,
-        Value::Object(obj) if obj.is_class("datetime") || obj.is_class("duration")
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) || obj.is_class(runmat_types::standard::DURATION)
     )
 }
 
 pub(in crate::builtins::table) fn parse_array2timetable_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Array2TimetableOptions> {
     let mut options = Array2TimetableOptions::default();
     let mut idx = 0usize;
@@ -367,7 +384,9 @@ fn fixed_step_row_times(
             }
             (
                 crate::builtins::common::tensor::tensor_value_f64(&tensor, 0),
-                TimeKind::Duration(crate::builtins::duration::duration_format_from_value(value)),
+                TimeKind::Duration(crate::builtins::duration::duration_format_from_value(
+                    value,
+                )?),
             )
         }
         Some(value) if crate::builtins::datetime::is_datetime_object(value) => {
@@ -379,7 +398,9 @@ fn fixed_step_row_times(
             }
             (
                 crate::builtins::common::tensor::tensor_value_f64(&tensor, 0),
-                TimeKind::Datetime(crate::builtins::datetime::datetime_format_from_value(value)),
+                TimeKind::Datetime(crate::builtins::datetime::datetime_format_from_value(
+                    value,
+                )?),
             )
         }
         Some(_) => {
@@ -405,15 +426,16 @@ fn fixed_step_row_times(
         .map_err(|error| invalid_argument(error.to_string()))?;
     match kind {
         TimeKind::Duration(format) => {
-            crate::builtins::duration::duration_object_from_days_tensor(tensor, format)
+            crate::builtins::duration::duration_object_from_days_tensor(None, tensor, format)
         }
         TimeKind::Datetime(format) => {
-            crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, format)
+            crate::builtins::datetime::datetime_object_from_serial_tensor(None, tensor, format)
         }
     }
 }
 
 pub(in crate::builtins::table) fn set_timetable_row_times(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &mut ObjectInstance,
     row_times: Option<Value>,
 ) -> BuiltinResult<()> {
@@ -433,26 +455,40 @@ pub(in crate::builtins::table) fn set_timetable_row_times(
             "timetable: RowTimes has {rows} rows but timetable has {height}"
         )));
     }
-    let mut props = table_public_properties(object)?;
-    props.insert(ROW_TIMES, times);
-    props.insert(
-        DIMENSION_NAMES,
-        Value::StringArray(
-            StringArray::new(
-                vec!["Time".to_string(), DEFAULT_VARIABLE_DIM_NAME.to_string()],
-                vec![1, 2],
-            )
-            .map_err(invalid_variable)?,
-        ),
+    let props = table_public_properties(object)?;
+    let dimension_names = Value::StringArray(
+        StringArray::new(
+            vec!["Time".to_string(), DEFAULT_VARIABLE_DIM_NAME.to_string()],
+            vec![1, 2],
+        )
+        .map_err(invalid_variable)?,
     );
-    sync_table_properties(object, props);
+    let (props, _roots) = replace_struct_fields(
+        runtime,
+        &props,
+        &[(ROW_TIMES, times), (DIMENSION_NAMES, dimension_names)],
+    )?;
+    sync_table_properties(runtime, object, props)?;
     Ok(())
 }
 
 pub(crate) fn timetable_row_times(object: &ObjectInstance) -> BuiltinResult<Option<Value>> {
+    timetable_row_times_ref(object).map(|value| value.cloned())
+}
+
+pub(in crate::builtins::table) fn timetable_row_times_ref(
+    object: &ObjectInstance,
+) -> BuiltinResult<Option<&Value>> {
     if !object.is_class(TIMETABLE_CLASS) {
         return Ok(None);
     }
-    let props = table_public_properties(object)?;
-    Ok(props.fields.get(ROW_TIMES).cloned())
+    match object
+        .properties()
+        .get(TABLE_PROPERTIES_FIELD)
+        .or_else(|| object.properties().get(PROPERTIES_MEMBER))
+    {
+        Some(Value::Struct(props)) => Ok(props.fields.get(ROW_TIMES)),
+        Some(_) => Err(invalid_variable("timetable: invalid Properties storage")),
+        None => Ok(None),
+    }
 }

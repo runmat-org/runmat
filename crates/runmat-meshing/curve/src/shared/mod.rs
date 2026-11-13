@@ -1,6 +1,7 @@
 mod batch;
 mod batch_codec;
 mod codec;
+mod codec_admission;
 mod discretize;
 mod error;
 mod geometric_validation;
@@ -14,11 +15,17 @@ mod validation;
 pub use batch::{
     curve_partition_descriptors, discretize_shared_curve_partition, join_shared_curve_batches,
 };
-pub use batch_codec::{decode_shared_curve_batch, encode_shared_curve_batch};
-pub use codec::{decode_shared_curve_mesh, encode_shared_curve_mesh};
+pub use batch_codec::{
+    decode_shared_curve_batch, encode_shared_curve_batch, encode_shared_curve_batch_admitted,
+};
+pub use codec::{
+    decode_shared_curve_mesh, decode_shared_curve_mesh_with_cancellation, encode_shared_curve_mesh,
+    encode_shared_curve_mesh_admitted,
+};
 pub use discretize::{
     discretize_shared_curves, CurveMetricEvaluation, CurveMetricField, CurveMetricQuery,
-    SharedCurveDiscretizationOptions, SharedCurveEvaluationContext, UniformCurveMetric,
+    ExactFacePcurveEvaluator, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
+    UniformCurveMetric,
 };
 pub use error::{SharedCurveError, SharedCurveErrorKind};
 pub use geometric_validation::{
@@ -29,6 +36,7 @@ pub use identity::{shared_curve_interior_node_id, shared_curve_vertex_node_id};
 pub use resolved_metric::ResolvedCurveMetricField;
 pub use split::{
     apply_shared_curve_splits, canonicalize_shared_curve_splits, validate_shared_curve_split_set,
+    validate_shared_curve_split_set_with_cancellation,
 };
 pub use types::{
     CurveMetricResolutionEvidence, CurveResolutionEvidence, CurveResolutionPolicy, SharedCurve,

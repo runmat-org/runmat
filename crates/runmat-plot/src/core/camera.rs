@@ -3,8 +3,12 @@
 //! Provides both perspective and orthographic cameras with smooth
 //! navigation controls for interactive plotting.
 
+mod controller;
+#[cfg(test)]
+mod tests;
 use crate::core::interaction::Modifiers;
 use crate::core::{ClipPolicy, DepthMode};
+use crate::core::{NavigationOptions, NavigationPreset, OrbitCenter};
 use glam::{Mat4, Quat, Vec2, Vec3};
 
 /// Camera projection type
@@ -69,6 +73,17 @@ pub struct Camera {
     pub zoom_sensitivity: f32,
     pub rotate_sensitivity: f32,
 
+    /// Per-axis scale from data units to the space the camera views. 3-D axes stretch each
+    /// axis to fill a cube, as MATLAB's default plot box does; `ONE` keeps data units.
+    pub axis_scale: Vec3,
+
+    /// A 3-D view drawn as a parallel (orthographic) projection: the perspective camera's
+    /// position, target and field of view still define the view, and the visible height is the
+    /// perspective view's height at the target (`2 · distance · tan(fov / 2)`), so orbit, zoom
+    /// (dolly), fit and standard views keep working and switching modes keeps the framing.
+    /// The 2-D plot camera (`ProjectionType::Orthographic`) is separate.
+    pub parallel: bool,
+
     // Cached matrices
     view_matrix: Mat4,
     projection_matrix: Mat4,
@@ -97,6 +112,8 @@ impl Camera {
             pan_sensitivity: 0.01,
             zoom_sensitivity: 0.1,
             rotate_sensitivity: 0.005,
+            axis_scale: Vec3::ONE,
+            parallel: false,
             view_matrix: Mat4::IDENTITY,
             projection_matrix: Mat4::IDENTITY,
             view_proj_dirty: true,
@@ -133,6 +150,8 @@ impl Camera {
             pan_sensitivity: 0.01,
             zoom_sensitivity: 0.1,
             rotate_sensitivity: 0.0, // Disable rotation for 2D
+            axis_scale: Vec3::ONE,
+            parallel: false,
             view_matrix: Mat4::IDENTITY,
             projection_matrix: Mat4::IDENTITY,
             view_proj_dirty: true,
@@ -152,7 +171,7 @@ impl Camera {
         if self.view_proj_dirty {
             self.update_matrices();
         }
-        self.projection_matrix * self.view_matrix
+        self.projection_matrix * self.view_matrix * Mat4::from_scale(self.axis_scale)
     }
 
     /// Mark the camera matrices as dirty (call after manually modifying projection)
@@ -299,11 +318,18 @@ impl Camera {
         self.view_proj_dirty = true;
     }
 
-    pub fn set_view_angles_deg(&mut self, azimuth_deg: f32, elevation_deg: f32) {
-        let distance = (self.position - self.target).length().max(0.1);
+    /// The unit direction from the target to the viewpoint of MATLAB's `view(az, el)`: azimuth
+    /// is measured from the negative y-axis, counterclockwise seen from +z, so `view(0, 0)`
+    /// looks along +y, `view(90, 0)` along -x, and the default `view(-37.5, 30)` from -x, -y.
+    pub fn view_direction_deg(azimuth_deg: f32, elevation_deg: f32) -> Vec3 {
         let az = azimuth_deg.to_radians();
         let el = elevation_deg.to_radians();
-        let dir = Vec3::new(el.cos() * az.cos(), el.cos() * az.sin(), el.sin());
+        Vec3::new(el.cos() * az.sin(), -el.cos() * az.cos(), el.sin())
+    }
+
+    pub fn set_view_angles_deg(&mut self, azimuth_deg: f32, elevation_deg: f32) {
+        let distance = (self.position - self.target).length().max(0.1);
+        let dir = Self::view_direction_deg(azimuth_deg, elevation_deg);
         self.up = Vec3::Z;
         self.position = self.target + dir * distance;
         self.view_proj_dirty = true;
@@ -328,16 +354,53 @@ impl Camera {
 
     /// Fit the camera to show all data within the given bounds
     pub fn fit_bounds(&mut self, min_bounds: Vec3, max_bounds: Vec3) {
+        // Fit in the camera's (axis-scaled) view space.
+        let (min_bounds, max_bounds) = (min_bounds * self.axis_scale, max_bounds * self.axis_scale);
         let center = (min_bounds + max_bounds) / 2.0;
         let size = max_bounds - min_bounds;
 
         match &mut self.projection {
-            ProjectionType::Perspective { near, far, .. } => {
-                let max_size = size.x.max(size.y).max(size.z);
-                let distance = max_size * 2.0; // Ensure everything fits
-
+            ProjectionType::Perspective { fov, near, far } => {
+                // Keep the current viewing direction; read it before moving the target.
+                let direction = match (self.position - self.target).normalize_or_zero() {
+                    d if d == Vec3::ZERO => Vec3::new(1.0, -1.0, 1.0).normalize(),
+                    d => d,
+                };
                 self.target = center;
-                let direction = (self.position - self.target).normalize();
+                // Back off just far enough that all eight box corners project inside the
+                // view with a small margin, so the plot fills its axes like MATLAB's.
+                let up = if direction.cross(self.up).length_squared() > 1.0e-8 {
+                    self.up
+                } else {
+                    Vec3::Z
+                };
+                let right = up.cross(direction).normalize();
+                let true_up = direction.cross(right).normalize();
+                let fill = 0.92;
+                let tan_y = (*fov * 0.5).tan() * fill;
+                let tan_x = tan_y * self.aspect_ratio.max(1.0e-3);
+                let half = size * 0.5;
+                let mut distance: f32 = 1.0e-3;
+                for i in 0..8 {
+                    let corner = Vec3::new(
+                        if i & 1 == 0 { -half.x } else { half.x },
+                        if i & 2 == 0 { -half.y } else { half.y },
+                        if i & 4 == 0 { -half.z } else { half.z },
+                    );
+                    // Depth toward the camera, and offsets across the view. A parallel view's
+                    // image doesn't grow with depth, so only the offsets count.
+                    let toward = if self.parallel {
+                        0.0
+                    } else {
+                        corner.dot(direction)
+                    };
+                    let u = corner.dot(right).abs();
+                    let v = corner.dot(true_up).abs();
+                    distance = distance.max(toward + u / tan_x).max(toward + v / tan_y);
+                }
+                if !distance.is_finite() {
+                    distance = size.x.max(size.y).max(size.z) * 2.0;
+                }
                 self.position = self.target + direction * distance;
 
                 // Keep clip planes sane relative to the new view distance.
@@ -377,6 +440,76 @@ impl Camera {
         self.view_proj_dirty = true;
     }
 
+    /// Fit a Figure's perspective camera to every displayed box corner at its plot-rect aspect.
+    /// This deliberately does not alter the legacy geometry-scene `fit_bounds` policy.
+    pub fn fit_figure_perspective_bounds(
+        &mut self,
+        min_bounds: Vec3,
+        max_bounds: Vec3,
+        viewport: (u32, u32),
+    ) -> bool {
+        let ProjectionType::Perspective { fov, .. } = self.projection else {
+            return false;
+        };
+        // The view-projection matrix scales data coordinates before applying the
+        // camera. Fit in that same space, including the target and clip planes.
+        let min_bounds = min_bounds * self.axis_scale;
+        let max_bounds = max_bounds * self.axis_scale;
+        if !min_bounds.is_finite()
+            || !max_bounds.is_finite()
+            || min_bounds.cmpgt(max_bounds).any()
+            || viewport.0 == 0
+            || viewport.1 == 0
+        {
+            return false;
+        }
+        let center = (min_bounds + max_bounds) * 0.5;
+        let direction = (self.position - self.target).normalize_or_zero();
+        let forward = -direction;
+        let right = forward.cross(self.up).normalize_or_zero();
+        let screen_up = right.cross(forward).normalize_or_zero();
+        if direction.length_squared() < 0.5
+            || right.length_squared() < 0.5
+            || !fov.is_finite()
+            || fov <= 0.0
+            || fov >= std::f32::consts::PI
+        {
+            return false;
+        }
+        let aspect = viewport.0 as f32 / viewport.1 as f32;
+        let tangent = (fov * 0.5).tan();
+        let mut distance = 0.0_f32;
+        let mut closest = f32::NEG_INFINITY;
+        let mut farthest = f32::INFINITY;
+        for x in [min_bounds.x, max_bounds.x] {
+            for y in [min_bounds.y, max_bounds.y] {
+                for z in [min_bounds.z, max_bounds.z] {
+                    let offset = Vec3::new(x, y, z) - center;
+                    let toward_eye = offset.dot(direction);
+                    closest = closest.max(toward_eye);
+                    farthest = farthest.min(toward_eye);
+                    let horizontal = offset.dot(right).abs() / (tangent * aspect);
+                    let vertical = offset.dot(screen_up).abs() / tangent;
+                    distance = distance.max(toward_eye + horizontal.max(vertical));
+                }
+            }
+        }
+        let radius = (max_bounds - min_bounds).length() * 0.5;
+        distance = distance.max(closest + radius * 0.01).max(1.0e-3) * 1.1;
+        if !distance.is_finite() {
+            return false;
+        }
+        self.target = center;
+        self.position = center + direction * distance;
+        self.aspect_ratio = aspect;
+        if let ProjectionType::Perspective { near, far, .. } = &mut self.projection {
+            *near = (distance - closest).max(1.0e-3) * 0.5;
+            *far = ((distance - farthest) * 1.5).max(*near + 1.0);
+        }
+        self.view_proj_dirty = true;
+        true
+    }
+
     pub fn set_clip_planes(&mut self, near: f32, far: f32) {
         match &mut self.projection {
             ProjectionType::Perspective {
@@ -413,8 +546,9 @@ impl Camera {
             return;
         };
 
-        // View space from current pose (independent of projection).
-        let view = Mat4::look_at_rh(self.position, self.target, self.up);
+        // View space from current pose (independent of projection), after the axis scale.
+        let view = Mat4::look_at_rh(self.position, self.target, self.up)
+            * Mat4::from_scale(self.axis_scale);
         let corners = [
             Vec3::new(world_min.x, world_min.y, world_min.z),
             Vec3::new(world_max.x, world_min.y, world_min.z),
@@ -456,15 +590,27 @@ impl Camera {
         self.set_clip_planes(near, far);
     }
 
-    /// Convert screen coordinates to world coordinates (for picking)
+    /// Unproject to data coordinates, including inverse axis scaling, for picking.
     pub fn screen_to_world(&mut self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
+        self.screen_to_render(screen_pos, screen_size, depth) / self.axis_scale
+    }
+
+    /// Unproject to the axis-scaled coordinates used by camera positions and targets. `depth`
+    /// runs from the near plane (0) to the far plane (1) in either depth mode, so a ray from
+    /// depth 0 to depth 1 points away from the eye.
+    pub fn screen_to_render(&mut self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
         if self.view_proj_dirty {
             self.update_matrices();
         }
         // Convert screen coordinates to normalized device coordinates
         let ndc_x = (2.0 * screen_pos.x) / screen_size.x - 1.0;
         let ndc_y = 1.0 - (2.0 * screen_pos.y) / screen_size.y;
-        let ndc = Vec3::new(ndc_x, ndc_y, depth * 2.0 - 1.0);
+        // The projections map depth to 0..1 (near to far, or far to near under reversed-Z).
+        let ndc_z = match self.depth_mode {
+            DepthMode::Standard => depth,
+            DepthMode::ReversedZ => 1.0 - depth,
+        };
+        let ndc = Vec3::new(ndc_x, ndc_y, ndc_z);
 
         // Unproject to world coordinates
         let view_proj_inv = (self.projection_matrix * self.view_matrix).inverse();
@@ -477,6 +623,16 @@ impl Camera {
         }
     }
 
+    /// Reset a perspective view around a data-space center, preserving render-space distance.
+    pub(crate) fn reset_perspective_orientation(&mut self, data_center: Option<Vec3>) {
+        let center = data_center.map_or(self.target, |point| point * self.axis_scale);
+        let distance = self.position.distance(self.target).max(0.1);
+        self.target = center;
+        self.up = Vec3::Z;
+        self.position = center + Vec3::new(1.0, -1.0, 1.0).normalize() * distance;
+        self.mark_dirty();
+    }
+
     /// Update the view and projection matrices
     fn update_matrices(&mut self) {
         // Update view matrix
@@ -484,6 +640,27 @@ impl Camera {
 
         // Update projection matrix
         self.projection_matrix = match self.projection {
+            ProjectionType::Perspective { fov, far, .. } if self.parallel => {
+                let distance = (self.position - self.target).length().max(1.0e-6);
+                let half_height = distance * (0.5 * fov).tan();
+                let half_width = half_height * self.aspect_ratio.max(1e-6);
+                // Geometry behind the eye still draws (a view zoomed into a part), so the box
+                // runs from `far` behind the eye to `far` in front of it.
+                let far = far.max(distance * 2.0);
+                let (near, far) = match self.depth_mode {
+                    DepthMode::Standard => (-far, far),
+                    // Reversed-Z: near->1, far->0.
+                    DepthMode::ReversedZ => (far, -far),
+                };
+                Mat4::orthographic_rh(
+                    -half_width,
+                    half_width,
+                    -half_height,
+                    half_height,
+                    near,
+                    far,
+                )
+            }
             ProjectionType::Perspective { fov, near, far } => {
                 match self.depth_mode {
                     DepthMode::Standard => Mat4::perspective_rh(fov, self.aspect_ratio, near, far),
@@ -530,383 +707,5 @@ impl Camera {
     }
 }
 
-/// Camera controller for handling input events
-#[derive(Debug, Default)]
-pub struct CameraController {
-    pub active_button: Option<MouseButton>,
-    pub last_mouse_pos: Vec2,
-    pub mouse_delta: Vec2,
-}
-
-impl CameraController {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Handle mouse press
-    pub fn mouse_press(&mut self, position: Vec2, button: MouseButton, _modifiers: Modifiers) {
-        self.last_mouse_pos = position;
-        self.active_button = Some(button);
-    }
-
-    /// Handle mouse release
-    pub fn mouse_release(&mut self, _position: Vec2, button: MouseButton, _modifiers: Modifiers) {
-        if self.active_button == Some(button) {
-            self.active_button = None;
-        }
-    }
-
-    /// Handle mouse movement
-    ///
-    /// For 3D (perspective) cameras:
-    /// - left drag: orbit/rotate
-    /// - right drag: pan
-    ///
-    /// For 2D (orthographic) cameras, we treat drag as pan by shifting the
-    /// orthographic bounds in data-space. We avoid translating the view matrix in X/Y
-    /// because the ortho bounds already live in data coordinates.
-    pub fn mouse_move(
-        &mut self,
-        position: Vec2,
-        delta: Vec2,
-        viewport_px: (u32, u32),
-        modifiers: Modifiers,
-        camera: &mut Camera,
-    ) {
-        let Some(button) = self.active_button else {
-            self.last_mouse_pos = position;
-            return;
-        };
-        // Prefer the host-provided delta; fall back to position diff.
-        self.mouse_delta = if delta.length_squared() > 0.0 {
-            delta
-        } else {
-            position - self.last_mouse_pos
-        };
-
-        match camera.projection {
-            ProjectionType::Perspective { .. } => {
-                // CAD-like bindings (support common schemes simultaneously):
-                // - MMB drag: orbit; Shift+MMB: pan
-                // - RMB drag: orbit; Shift+RMB: pan
-                // - Alt+LMB: orbit; Alt+MMB: pan; Alt+RMB: dolly/zoom
-                //
-                // Also keep LMB orbit + Shift+LMB pan as a convenient fallback.
-                let fine = if modifiers.ctrl || modifiers.meta {
-                    0.35
-                } else {
-                    1.0
-                };
-                let d = self.mouse_delta * fine;
-
-                if modifiers.alt {
-                    match button {
-                        MouseButton::Left => camera.rotate(d),
-                        MouseButton::Middle => camera.pan(d),
-                        MouseButton::Right => {
-                            // Alt+RMB drag zoom (dolly). Positive drag up should zoom in.
-                            let zoom_delta = (-d.y / 120.0).clamp(-5.0, 5.0);
-                            self.mouse_wheel(
-                                Vec2::new(0.0, zoom_delta),
-                                position,
-                                viewport_px,
-                                modifiers,
-                                camera,
-                            );
-                        }
-                    }
-                } else {
-                    let want_pan = modifiers.shift;
-                    match button {
-                        MouseButton::Middle | MouseButton::Right => {
-                            if want_pan {
-                                camera.pan(d);
-                            } else if modifiers.ctrl || modifiers.meta {
-                                // Ctrl/Cmd + (MMB/RMB) drag: zoom/dolly (very common in CAD/DCC).
-                                let zoom_delta = (-d.y / 120.0).clamp(-5.0, 5.0);
-                                self.mouse_wheel(
-                                    Vec2::new(0.0, zoom_delta),
-                                    position,
-                                    viewport_px,
-                                    modifiers,
-                                    camera,
-                                );
-                            } else {
-                                camera.rotate(d);
-                            }
-                        }
-                        MouseButton::Left => {
-                            if want_pan {
-                                camera.pan(d);
-                            } else if modifiers.ctrl || modifiers.meta {
-                                let zoom_delta = (-d.y / 120.0).clamp(-5.0, 5.0);
-                                self.mouse_wheel(
-                                    Vec2::new(0.0, zoom_delta),
-                                    position,
-                                    viewport_px,
-                                    modifiers,
-                                    camera,
-                                );
-                            } else {
-                                camera.rotate(d);
-                            }
-                        }
-                    }
-                }
-            }
-            ProjectionType::Orthographic {
-                ref mut left,
-                ref mut right,
-                ref mut bottom,
-                ref mut top,
-                ..
-            } => {
-                // For 2D, treat any drag (and Shift-drag) as panning the ortho bounds.
-                let _ = (button, modifiers);
-                {
-                    let (vw, vh) = (viewport_px.0.max(1) as f32, viewport_px.1.max(1) as f32);
-                    let width = (*right - *left).abs().max(1e-6);
-                    let height = (*top - *bottom).abs().max(1e-6);
-
-                    // Convert pixel delta to data-space delta.
-                    // Screen +X should move the view right; dragging right should move the data left,
-                    // so we subtract.
-                    let dx = -self.mouse_delta.x * (width / vw);
-                    // Screen +Y is down in most DOM coordinate systems; dragging down should move
-                    // the data up, so we add.
-                    let dy = self.mouse_delta.y * (height / vh);
-
-                    *left += dx;
-                    *right += dx;
-                    *bottom += dy;
-                    *top += dy;
-                    camera.mark_dirty();
-                }
-            }
-        }
-
-        self.last_mouse_pos = position;
-    }
-
-    /// Handle mouse wheel
-    pub fn mouse_wheel(
-        &mut self,
-        delta: Vec2,
-        position_px: Vec2,
-        viewport_px: (u32, u32),
-        modifiers: Modifiers,
-        camera: &mut Camera,
-    ) {
-        // CAD-ish wheel semantics:
-        // - default: zoom/dolly to cursor using vertical wheel component
-        // - Shift: pan (screen-space) using both wheel components
-        //
-        // Don't treat Ctrl/Cmd as "fine wheel" because macOS trackpad pinch-to-zoom gestures
-        // report Ctrl as pressed. Keeping wheel zoom consistent feels more natural.
-        let delta_y = delta.y;
-
-        match &mut camera.projection {
-            ProjectionType::Perspective { .. } => {
-                if modifiers.shift {
-                    // Wheel-pan in the view plane. Scale by distance for a consistent feel.
-                    // Positive wheel deltas should pan "with" the gesture (down scroll moves view down).
-                    // NOTE: `Camera::pan` already scales by camera distance; don't multiply by distance here.
-                    let pan_px = Vec2::new(delta.x, -delta.y);
-                    camera.pan(pan_px * 6.0);
-                    return;
-                }
-
-                let sens = camera.zoom_sensitivity;
-                let mut factor = 1.0 - delta_y * sens;
-                if factor.abs() < 1e-3 {
-                    return;
-                }
-                factor = factor.clamp(0.2, 5.0);
-
-                let (vw, vh) = (viewport_px.0.max(1) as f32, viewport_px.1.max(1) as f32);
-                let screen_size = Vec2::new(vw, vh);
-                let pos = Vec2::new(position_px.x.clamp(0.0, vw), position_px.y.clamp(0.0, vh));
-
-                // Build a ray from the cursor through the view frustum.
-                let p_near = camera.screen_to_world(pos, screen_size, 0.0);
-                let p_far = camera.screen_to_world(pos, screen_size, 1.0);
-                let dir = (p_far - p_near).normalize_or_zero();
-                if dir.length_squared() < 1e-9 {
-                    return;
-                }
-
-                // Anchor zoom to a plane through the current target and perpendicular to the view
-                // direction. A global Z=0 plane feels natural for flat plots, but CAD models can
-                // sit anywhere in model space; using the view target keeps close-range wheel zoom
-                // responsive and cursor-local.
-                let origin = camera.position;
-                let mut pivot = None;
-                let forward = (camera.target - camera.position).normalize_or_zero();
-                if forward.length_squared() > 1e-9 {
-                    let denom = dir.dot(forward);
-                    if denom.abs() > 1e-6 {
-                        let t = (camera.target - origin).dot(forward) / denom;
-                        if t.is_finite() && t > 0.0 {
-                            pivot = Some(origin + dir * t);
-                        }
-                    }
-                }
-                if pivot.is_none() && dir.z.abs() > 1e-6 {
-                    let t = (-origin.z) / dir.z;
-                    if t.is_finite() && t > 0.0 {
-                        pivot = Some(origin + dir * t);
-                    }
-                }
-                let pivot = pivot.unwrap_or(camera.target);
-
-                let s = (pivot - origin).length().max(1e-3);
-                let new_s = (s * factor).clamp(0.005, 1.0e9);
-                let delta_dist = s - new_s;
-                let translate = dir * delta_dist;
-
-                // Dolly along the cursor ray while keeping orientation stable (translate both
-                // position + target so the cursor stays anchored).
-                camera.position += translate;
-                camera.target += translate;
-                camera.view_proj_dirty = true;
-            }
-            ProjectionType::Orthographic {
-                left,
-                right,
-                bottom,
-                top,
-                ..
-            } => {
-                if modifiers.shift {
-                    // Wheel-pan in 2D (treat wheel deltas as pixel-ish movement).
-                    let vw = viewport_px.0.max(1) as f32;
-                    let vh = viewport_px.1.max(1) as f32;
-                    let w = (*right - *left).max(1e-6);
-                    let h = (*top - *bottom).max(1e-6);
-                    let dx = -delta.x * (w / vw);
-                    let dy = delta.y * (h / vh);
-                    *left += dx;
-                    *right += dx;
-                    *bottom += dy;
-                    *top += dy;
-                    camera.mark_dirty();
-                    return;
-                }
-
-                let sens = camera.zoom_sensitivity;
-                let mut factor = 1.0 - delta_y * sens;
-                if factor.abs() < 1e-3 {
-                    return;
-                }
-                factor = factor.clamp(0.2, 5.0);
-
-                // Cursor-anchored 2D zoom: scale the ortho bounds around the cursor.
-                let w = (*right - *left).max(1e-6);
-                let h = (*top - *bottom).max(1e-6);
-                let vw = viewport_px.0.max(1) as f32;
-                let vh = viewport_px.1.max(1) as f32;
-                let tx = (position_px.x / vw).clamp(0.0, 1.0);
-                let ty = (position_px.y / vh).clamp(0.0, 1.0);
-                let pivot_x = *left + tx * w;
-                let pivot_y = *top - ty * h;
-                let new_left = pivot_x - (pivot_x - *left) * factor;
-                let new_right = pivot_x + (*right - pivot_x) * factor;
-                let new_bottom = pivot_y - (pivot_y - *bottom) * factor;
-                let new_top = pivot_y + (*top - pivot_y) * factor;
-                *left = new_left;
-                *right = new_right;
-                *bottom = new_bottom;
-                *top = new_top;
-                camera.mark_dirty();
-            }
-        }
-    }
-}
-
-/// Mouse button enum for camera control
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MouseButton {
-    Left,
-    Right,
-    Middle,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_camera_creation() {
-        let camera = Camera::new();
-        assert_eq!(camera.position, Vec3::new(3.5, 3.5, 3.5));
-        assert_eq!(camera.target, Vec3::ZERO);
-        assert_eq!(camera.up, Vec3::Z);
-    }
-
-    #[test]
-    fn test_2d_camera() {
-        let camera = Camera::new_2d((-10.0, 10.0, -10.0, 10.0));
-        assert_eq!(camera.position, Vec3::new(0.0, 0.0, 1.0));
-        assert_eq!(camera.target, Vec3::new(0.0, 0.0, 0.0));
-        match camera.projection {
-            ProjectionType::Orthographic {
-                left,
-                right,
-                bottom,
-                top,
-                ..
-            } => {
-                assert_eq!(left, -10.0);
-                assert_eq!(right, 10.0);
-                assert_eq!(bottom, -10.0);
-                assert_eq!(top, 10.0);
-            }
-            _ => panic!("Expected orthographic projection"),
-        }
-    }
-
-    #[test]
-    fn test_camera_bounds_fitting() {
-        let mut camera = Camera::new_2d((-1.0, 1.0, -1.0, 1.0));
-        let min_bounds = Vec3::new(-5.0, -3.0, 0.0);
-        let max_bounds = Vec3::new(5.0, 3.0, 0.0);
-
-        camera.fit_bounds(min_bounds, max_bounds);
-
-        // Check that the bounds were expanded appropriately
-        match camera.projection {
-            ProjectionType::Orthographic {
-                left,
-                right,
-                bottom,
-                top,
-                ..
-            } => {
-                assert!(left <= -5.0);
-                assert!(right >= 5.0);
-                assert!(bottom <= -3.0);
-                assert!(top >= 3.0);
-            }
-            _ => panic!("Expected orthographic projection"),
-        }
-    }
-
-    #[test]
-    fn test_2d_camera_tracks_non_origin_bounds_center() {
-        let camera = Camera::new_2d((10.0, 30.0, -2.0, 2.0));
-        assert_eq!(camera.position, Vec3::new(20.0, 0.0, 1.0));
-        assert_eq!(camera.target, Vec3::new(20.0, 0.0, 0.0));
-    }
-
-    #[test]
-    fn test_set_view_angles_preserves_distance() {
-        let mut camera = Camera::new();
-        camera.target = Vec3::new(1.0, 2.0, 3.0);
-        camera.position = camera.target + Vec3::new(2.0, 0.0, 0.0);
-        camera.set_view_angles_deg(90.0, 0.0);
-        let offset = camera.position - camera.target;
-        assert!((offset.length() - 2.0).abs() < 1e-5);
-        assert!(offset.x.abs() < 1e-4);
-        assert!((offset.y - 2.0).abs() < 1e-4);
-    }
-}
+#[allow(unused_imports)]
+pub use controller::*;

@@ -1,105 +1,41 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{YSCALE_DESCRIPTOR, YSCALE_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_scale::axis_scale_builtin;
 use super::axis_ticks::TickAxis;
-use crate::builtins::plotting::type_resolvers::get_type;
-
-const YSCALE_OUTPUT_SCALE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "scale",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current Y-axis scale, 'linear' or 'log'.",
-}];
-
-const YSCALE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const YSCALE_INPUTS_SCALE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "scale",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scale string: 'linear' or 'log'.",
-}];
-
-const YSCALE_INPUTS_AX_SCALE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "scale",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scale string: 'linear' or 'log'.",
-    },
-];
-
-const YSCALE_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const YSCALE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "scale = yscale()",
-        inputs: &YSCALE_INPUTS_NONE,
-        outputs: &YSCALE_OUTPUT_SCALE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "yscale(scale)",
-        inputs: &YSCALE_INPUTS_SCALE,
-        outputs: &YSCALE_OUTPUTS_NONE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "yscale(ax, scale)",
-        inputs: &YSCALE_INPUTS_AX_SCALE,
-        outputs: &YSCALE_OUTPUTS_NONE,
-    },
-];
-
-const YSCALE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.YSCALE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:yscale:InvalidArgument"),
-    when: "Argument count, scale value, or axes handle is invalid.",
-    message: "yscale: invalid argument",
-};
-
-const YSCALE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.YSCALE.INTERNAL",
-    identifier: Some("RunMat:yscale:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "yscale: internal operation failed",
-};
-
-const YSCALE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [YSCALE_ERROR_INVALID_ARGUMENT, YSCALE_ERROR_INTERNAL];
-
-pub const YSCALE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &YSCALE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &YSCALE_ERRORS,
-};
 
 #[runtime_builtin(
     name = "yscale",
-    category = "plotting",
-    summary = "Query or set Y-axis scale.",
-    keywords = "yscale,plotting,axes,log,linear",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::yscale::YSCALE_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::yscale"
 )]
+pub fn yscale_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    yscale_with_runtime(runtime.as_ref(), args)
+}
+
+#[cfg(test)]
 pub fn yscale_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    axis_scale_builtin("yscale", TickAxis::Y, args)
+    yscale_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+}
+
+fn yscale_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &YSCALE_DESCRIPTOR,
+        &YSCALE_ERROR_TOO_MANY_OUTPUTS,
+        "yscale",
+    )?;
+    axis_scale_builtin(runtime, "yscale", TickAxis::Y, args)
 }
 
 #[cfg(test)]
@@ -201,8 +137,10 @@ mod tests {
     #[test]
     fn yscale_descriptor_only_advertises_query_output() {
         let signatures = YSCALE_DESCRIPTOR.signatures;
-        assert_eq!(signatures[0].outputs.len(), 1);
-        assert!(signatures[1].outputs.is_empty());
-        assert!(signatures[2].outputs.is_empty());
+        assert_eq!(
+            signatures.iter().map(|signature| signature.outputs.len()).collect::<Vec<_>>(),
+            [1, 1, 0, 0],
+            "both current/explicit-axes queries return a value; neither setter advertises an output",
+        );
     }
 }

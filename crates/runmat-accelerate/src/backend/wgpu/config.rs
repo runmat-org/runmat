@@ -1,11 +1,18 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
-pub const WORKGROUP_SIZE: u32 = 512;
+pub const WORKGROUP_SIZE: u32 = crate::backend::wgpu_geometry::WORKGROUP_SIZE;
 pub const REDUCE_WORKGROUP_SIZE: u32 = 512;
 pub const DEFAULT_TWO_PASS_THRESHOLD: usize = 262_144;
 pub const DEFAULT_REDUCTION_WG: u32 = 512;
 pub const MATMUL_TILE: u32 = 32;
-pub const MAX_DISPATCH_WORKGROUPS: u32 = 65_535;
+pub const MAX_DISPATCH_WORKGROUPS: u32 = crate::backend::wgpu_geometry::MAX_DISPATCH_WORKGROUPS;
+
+/// Logical elements addressable by one elementwise dispatch. Callers use the
+/// same selected workgroup size for shader compilation and dispatch counting.
+/// The uniform ABI also bounds each chunk length to a u32.
+pub(crate) fn elementwise_chunk_capacity(workgroup_size: u32) -> Option<u64> {
+    crate::backend::wgpu_geometry::elementwise_chunk_capacity(workgroup_size)
+}
 
 static EFFECTIVE_WG_OVERRIDE: AtomicU32 = AtomicU32::new(0);
 static EFFECTIVE_MATMUL_TILE_OVERRIDE: AtomicU32 = AtomicU32::new(0);
@@ -68,6 +75,50 @@ pub fn effective_matmul_tile() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elementwise_chunks_cover_boundaries_without_exceeding_dispatch_limits() {
+        assert_eq!(elementwise_chunk_capacity(0), None);
+        for workgroup in [64, 256, 512] {
+            let capacity = elementwise_chunk_capacity(workgroup).unwrap();
+            assert_eq!(
+                capacity,
+                u64::from(MAX_DISPATCH_WORKGROUPS) * u64::from(workgroup)
+            );
+            for length in [
+                0,
+                1,
+                capacity - 1,
+                capacity,
+                capacity + 1,
+                2 * capacity + 1,
+                u64::from(u32::MAX),
+            ] {
+                let mut offset = 0;
+                let mut chunks = 0;
+                while offset < length {
+                    let chunk = (length - offset).min(capacity);
+                    let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                        chunk as u32,
+                        workgroup,
+                    );
+                    assert!((1..=MAX_DISPATCH_WORKGROUPS).contains(&groups));
+                    let covered = u64::from(groups) * u64::from(workgroup);
+                    assert!(covered >= chunk && covered - chunk < u64::from(workgroup));
+                    // The next uniform offset starts exactly after this chunk;
+                    // any padded lanes are excluded by the shader's len guard.
+                    offset += chunk;
+                    chunks += 1;
+                }
+                assert_eq!(offset, length);
+                assert_eq!(chunks, length.div_ceil(capacity));
+            }
+        }
+        assert_eq!(
+            elementwise_chunk_capacity(u32::MAX),
+            Some(u64::from(u32::MAX))
+        );
+    }
 
     #[test]
     fn test_env_helpers_parse() {

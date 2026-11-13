@@ -15,8 +15,8 @@ fn test_variable_persistence_basic() {
         // Define a variable
         let result1 = runmat_core::execute_text_request_for_testing(&mut engine, "a = 10").unwrap();
         assert!(result1.error.is_none());
-        if let Some(Value::Num(val)) = result1.value {
-            assert_eq!(val, 10.0);
+        if let Some(Value::Num(val)) = result1.value.as_ref() {
+            assert_eq!(*val, 10.0);
         } else {
             panic!("Expected Num(10.0), got {:?}", result1.value);
         }
@@ -24,8 +24,8 @@ fn test_variable_persistence_basic() {
         // Use the variable in an expression
         let result2 = runmat_core::execute_text_request_for_testing(&mut engine, "a + 5").unwrap();
         assert!(result2.error.is_none());
-        if let Some(Value::Num(val)) = result2.value {
-            assert_eq!(val, 15.0); // This should be 15.0!
+        if let Some(Value::Num(val)) = result2.value.as_ref() {
+            assert_eq!(*val, 15.0); // This should be 15.0!
         } else {
             panic!("Expected Num(15.0), got {:?}", result2.value);
         }
@@ -33,8 +33,8 @@ fn test_variable_persistence_basic() {
         // Access the variable directly
         let result3 = runmat_core::execute_text_request_for_testing(&mut engine, "a").unwrap();
         assert!(result3.error.is_none());
-        if let Some(Value::Num(val)) = result3.value {
-            assert_eq!(val, 10.0);
+        if let Some(Value::Num(val)) = result3.value.as_ref() {
+            assert_eq!(*val, 10.0);
         } else {
             panic!("Expected Num(10.0), got {:?}", result3.value);
         }
@@ -60,8 +60,8 @@ fn test_variable_persistence_multiple_variables() {
         let result4 =
             runmat_core::execute_text_request_for_testing(&mut engine, "x + y + z").unwrap();
         assert!(result4.error.is_none());
-        if let Some(Value::Num(val)) = result4.value {
-            assert_eq!(val, 10.0); // 5 + 3 + 2 = 10
+        if let Some(Value::Num(val)) = result4.value.as_ref() {
+            assert_eq!(*val, 10.0); // 5 + 3 + 2 = 10
         } else {
             panic!("Expected Num(10.0), got {:?}", result4.value);
         }
@@ -69,8 +69,8 @@ fn test_variable_persistence_multiple_variables() {
         let result5 =
             runmat_core::execute_text_request_for_testing(&mut engine, "x * y * z").unwrap();
         assert!(result5.error.is_none());
-        if let Some(Value::Num(val)) = result5.value {
-            assert_eq!(val, 30.0); // 5 * 3 * 2 = 30
+        if let Some(Value::Num(val)) = result5.value.as_ref() {
+            assert_eq!(*val, 30.0); // 5 * 3 * 2 = 30
         } else {
             panic!("Expected Num(30.0), got {:?}", result5.value);
         }
@@ -114,8 +114,8 @@ fn test_expression_result_printing() {
         // Constants should show results
         let result1 = runmat_core::execute_text_request_for_testing(&mut engine, "42").unwrap();
         assert!(result1.error.is_none());
-        if let Some(Value::Num(val)) = result1.value {
-            assert_eq!(val, 42.0);
+        if let Some(Value::Num(val)) = result1.value.as_ref() {
+            assert_eq!(*val, 42.0);
         } else {
             panic!("Expected Num(42.0), got {:?}", result1.value);
         }
@@ -124,8 +124,8 @@ fn test_expression_result_printing() {
         let result2 =
             runmat_core::execute_text_request_for_testing(&mut engine, "10 + 20").unwrap();
         assert!(result2.error.is_none());
-        if let Some(Value::Num(val)) = result2.value {
-            assert_eq!(val, 30.0);
+        if let Some(Value::Num(val)) = result2.value.as_ref() {
+            assert_eq!(*val, 30.0);
         } else {
             panic!("Expected Num(30.0), got {:?}", result2.value);
         }
@@ -135,8 +135,8 @@ fn test_expression_result_printing() {
             runmat_core::execute_text_request_for_testing(&mut engine, "(5 + 3) * (10 - 2)")
                 .unwrap();
         assert!(result3.error.is_none());
-        if let Some(Value::Num(val)) = result3.value {
-            assert_eq!(val, 64.0); // (5 + 3) * (10 - 2) = 8 * 8 = 64
+        if let Some(Value::Num(val)) = result3.value.as_ref() {
+            assert_eq!(*val, 64.0); // (5 + 3) * (10 - 2) = 8 * 8 = 64
         } else {
             panic!("Expected Num(64.0), got {:?}", result3.value);
         }
@@ -158,8 +158,8 @@ fn test_mixed_assignments_and_expressions() {
         // Expression with variables
         let result3 = runmat_core::execute_text_request_for_testing(&mut engine, "a * b").unwrap();
         assert!(result3.error.is_none());
-        if let Some(Value::Num(val)) = result3.value {
-            assert_eq!(val, 21.0); // 7 * 3 = 21
+        if let Some(Value::Num(val)) = result3.value.as_ref() {
+            assert_eq!(*val, 21.0); // 7 * 3 = 21
         } else {
             panic!("Expected Num(21.0), got {:?}", result3.value);
         }
@@ -168,8 +168,8 @@ fn test_mixed_assignments_and_expressions() {
         let result4 =
             runmat_core::execute_text_request_for_testing(&mut engine, "c = a + b").unwrap();
         assert!(result4.error.is_none());
-        if let Some(Value::Num(val)) = result4.value {
-            assert_eq!(val, 10.0); // 7 + 3 = 10
+        if let Some(Value::Num(val)) = result4.value.as_ref() {
+            assert_eq!(*val, 10.0); // 7 + 3 = 10
         } else {
             panic!("Expected Num(10.0), got {:?}", result4.value);
         }
@@ -177,8 +177,8 @@ fn test_mixed_assignments_and_expressions() {
         // Use the new variable
         let result5 = runmat_core::execute_text_request_for_testing(&mut engine, "c * 2").unwrap();
         assert!(result5.error.is_none());
-        if let Some(Value::Num(val)) = result5.value {
-            assert_eq!(val, 20.0); // 10 * 2 = 20
+        if let Some(Value::Num(val)) = result5.value.as_ref() {
+            assert_eq!(*val, 20.0); // 10 * 2 = 20
         } else {
             panic!("Expected Num(20.0), got {:?}", result5.value);
         }
@@ -187,8 +187,8 @@ fn test_mixed_assignments_and_expressions() {
         let result6 =
             runmat_core::execute_text_request_for_testing(&mut engine, "a + b + c").unwrap();
         assert!(result6.error.is_none());
-        if let Some(Value::Num(val)) = result6.value {
-            assert_eq!(val, 20.0); // 7 + 3 + 10 = 20
+        if let Some(Value::Num(val)) = result6.value.as_ref() {
+            assert_eq!(*val, 20.0); // 7 + 3 + 10 = 20
         } else {
             panic!("Expected Num(20.0), got {:?}", result6.value);
         }

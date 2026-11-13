@@ -11,6 +11,30 @@ use crate::{
 use super::*;
 
 #[test]
+fn carving_observes_cancellation_during_protected_inventory_walk() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CancelDuringCarving(AtomicUsize);
+    impl runmat_meshing_core::MeshingCancellationSignal for CancelDuringCarving {
+        fn is_cancelled(&self) -> bool {
+            // Ignore prerequisite validators: exercise the carving operation itself.
+            std::path::Path::new(std::panic::Location::caller().file())
+                .ends_with(std::path::Path::new("domain/carve.rs"))
+                && self.0.fetch_add(1, Ordering::Relaxed) >= 2
+        }
+    }
+    let boundary = boundary(
+        &[[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]],
+        &[vec![[-4.0, -2.0], [4.0, -2.0], [0.0, 3.0]]],
+    );
+    let (pslg, constrained, options) = constrained(&boundary);
+    let cancellation = CancelDuringCarving(AtomicUsize::new(0));
+    let failure = carve_exact_face_domain(&constrained, &pslg, &boundary, &cancellation, options)
+        .unwrap_err();
+    assert_eq!(failure.kind, crate::ExactFaceDelaunayErrorKind::Cancelled);
+    assert_eq!(cancellation.0.load(Ordering::Relaxed), 3);
+}
+
+#[test]
 fn oriented_hole_is_removed_by_protected_component_traversal() {
     let boundary = boundary(
         &[[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]],
@@ -49,6 +73,36 @@ fn hole_carving_is_independent_of_parametric_loop_winding() {
 
     assert!(trimmed.removed_hole_triangle_count > 0);
     assert_eq!(boundary_edges(&trimmed.triangles), pslg_edges(&pslg));
+}
+
+#[test]
+fn many_trim_inventory_loops_are_recovered_and_carved() {
+    let boundary = boundary(
+        &[[-20.0, -20.0], [20.0, -20.0], [20.0, 20.0], [-20.0, 20.0]],
+        &[
+            vec![[-15.0, -15.0], [-9.0, -14.0], [-13.0, -9.0]],
+            vec![[9.0, -14.0], [15.0, -15.0], [13.0, -9.0]],
+            vec![[10.0, 10.0], [15.0, 11.0], [12.0, 16.0]],
+            vec![[-15.0, 11.0], [-10.0, 10.0], [-12.0, 16.0]],
+            vec![[-3.0, -2.0], [4.0, -1.0], [1.0, 5.0]],
+        ],
+    );
+    let (pslg, constrained, options) = constrained(&boundary);
+    let trimmed =
+        carve_exact_face_domain(&constrained, &pslg, &boundary, &NeverCancelled, options).unwrap();
+
+    assert_eq!(boundary.inner_loops.len(), 5);
+    assert!(trimmed.removed_hole_triangle_count >= 5);
+    assert_eq!(boundary_edges(&trimmed.triangles), pslg_edges(&pslg));
+    validate_exact_face_trimmed_delaunay(
+        &trimmed,
+        &constrained,
+        &pslg,
+        &boundary,
+        &NeverCancelled,
+        options,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -214,9 +268,5 @@ fn sorted(mut edge: [u32; 2]) -> [u32; 2] {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }

@@ -1,0 +1,699 @@
+runmat 0.7
+std 1
+
+part features {
+    feature bolt = hole(
+        face = feature.body.face.end,
+        at = { b = point(40 mm, 25 mm, input.thickness) },
+        through_all,
+        spec = { standard = iso, size = M6 },
+        series = { end = { hole = tapped, modelled = true } }
+    )
+    feature row = pattern(
+        features = [h],
+        layout = linear(direction = origin.x, spacing = 15 mm, count = 4),
+        skip = [{ instance = linear, step = 2 }]
+    )
+    feature lf = loft(profiles = [sketch.s_l0, sketch.s_l1, sketch.s_l2])
+    sketch s1 on origin.xy {
+        l1 = line(start = l4.end, end = [input.width, 0 mm])
+        l2 = line(start = l1.end, end = [input.width, input.depth])
+        l3 = line(start = l2.end, end = [0 mm, input.depth])
+        l4 = line(start = l3.end, end = [0 mm, 0 mm])
+        constrain fix(l1.start)
+        constrain horizontal(l1)
+        constrain vertical(l2)
+        constrain horizontal(l3)
+        constrain vertical(l4)
+        constrain length(l1) = input.width
+    }
+    feature boss = extrude(profile = sketch.s2, up_to_next, mode = add)
+    feature skin = surface.sweep(profile = sketch.c, path = sketch.p)
+    feature sw = sweep(profile = sketch.s_swp, path = sketch.s_path, suppressed)
+    feature groove = revolve(profile = sketch.s_gr, axis = axis.gaxis, angle = 360 deg, mode = cut, suppressed)
+    feature body = extrude(
+        profile = sketch.s1,
+        distance = { form = published, file = "interfaces/skeleton.part", name = pitch }
+    )
+    feature r_bad = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],
+        radius = let.twice
+    )
+    feature base = sheet_metal.base_flange(
+        profile = sketch.s_chain,
+        depth = 40 mm,
+        rules = { thickness = 2 mm, bend_radius = 3 mm, rule = k_factor(k = 0.44) }
+    )
+    feature cut = extrude(profile = sketch.s_cut, through_all, mode = cut, suppressed)
+    feature members = weldment.structural_member(
+        groups = [
+            {
+                sketch = layout,
+                segments = [bottom, right, top, left],
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 2 mm),
+                material = S235
+            }
+        ]
+    )
+    sketch pts on feature.body.face.end {
+        p1 = point(at = [6 mm, 6 mm])
+        p2 = point(at = [36 mm, 6 mm])
+        p3 = point(at = [60 mm, 30 mm])
+    }
+    feature m6_thread = thread(
+        face = feature.tap.face.wall(m6),
+        spec = { designation = M6x1, pitch = 1 mm, depth = 0.54 mm, class = "6H" }
+    )
+    feature drop = body_op.delete(bodies = [feature.halve.body.body(side = negative)])
+    feature mc = mate_connector(
+        placement = { on = frame, frame = { frame = on_face, face = feature.body.face.end } },
+        offset = [0 mm, 0 mm, 2 mm]
+    )
+    feature step = import(source = "supplier/housing.step", digest = d2)
+    feature h = hole(
+        face = feature.body.face.end,
+        at = { p = sketch.marks.p.at },
+        diameter = 6 mm,
+        depth = 3 mm
+    )
+    feature copies = pattern(
+        bodies = [feature.body.body],
+        layout = table(rows = [{ key = aft, dx = 0 mm, dy = 100 mm, dz = 0 mm }])
+    )
+    feature patch = surface.planar(profile = sketch.s)
+    feature sheet = surface.planar(profile = sketch.s_sheet)
+    feature lp1 = plane.offset(base = origin.xy, distance = 20 mm + input.lz)
+    feature ch = chamfer(
+        edges = [
+            edges_between(feature.r1.face.blend(between = [feature.body.face.side(s1.l1), feature.body.face.end]), feature.body.face.end)
+        ],
+        distance = 0.5 mm
+    )
+    feature logo = emboss(profile = sketch.s_logo, face = feature.body.face.end, height = 1 mm)
+    sketch s on origin.xy {
+        a = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])
+        b = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])
+        c = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])
+        e = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])
+        h1 = line(start = [10 mm, 5 mm], end = [20 mm, 5 mm])
+        h2 = line(start = [20 mm, 5 mm], end = [20 mm, 15 mm])
+        h3 = line(start = [20 mm, 15 mm], end = [10 mm, 15 mm])
+        h4 = line(start = [10 mm, 15 mm], end = [10 mm, 5 mm])
+    }
+    feature pull = direct.move_faces(
+        faces = [feature.body.face.end],
+        motion = offset(distance = 5 mm),
+        keep = [{ keep = parallel, a = feature.body.face.end, b = feature.body.face.start }]
+    )
+    feature skin_1 = surface.loft(profiles = [sketch.a, sketch.b])
+    feature pat = pattern(features = [pocket], layout = sketch(sketch = pts))
+    feature mir = mirror(features = [pk2], plane = plane.mp, suppressed)
+    feature trim = extrude(profile = sketch.s_trim, through_all, mode = cut)
+    sketch s_pk on plane.top_plane {
+        c1 = circle(center = [40 mm, 25 mm], radius = input.pr)
+    }
+    feature boss1 = library(def = "feature_def.boss", args = { h = 8 mm }, mode = add)
+    feature tool = extrude(profile = sketch.s_t, distance = input.tz)
+    feature p = hole(
+        face = feature.body.face.end,
+        at = { p = point(40 mm, 25 mm, input.thickness) },
+        through_all,
+        form = pipe_tap,
+        spec = { standard = npt, size = "1/8" }
+    )
+    feature cb = hole(
+        face = feature.body.face.end,
+        at = { c = point(40 mm, 25 mm, input.thickness) },
+        through_all,
+        form = counterbore,
+        spec = { standard = iso, size = M6 }
+    )
+    feature pocket = extrude(profile = sketch.sp, distance = input.pd, reverse, mode = cut)
+    feature pk2 = extrude(profile = sketch.s_pk2, distance = input.md, reverse, mode = cut)
+    feature x = extrude(profile = sketch.open, distance = 1 mm)
+    feature nub = extrude(profile = sketch.s_nub, distance = 4 mm)
+    feature low = extrude(profile = sketch.s_low, distance = 10 mm, reverse)
+    feature roof = extrude(profile = sketch.s_roof, distance = 50 mm)
+    feature boss_renamed = extrude(profile = sketch.s_boss, distance = input.h, mode = add)
+    feature pocket_renamed = extrude(profile = sketch.s_pk, distance = input.pd, reverse, mode = cut)
+    feature spin = revolve(profile = sketch.s_rev, axis = origin.z, angle = input.ang, suppressed)
+    sketch s_rev on origin.xy {
+        r1 = line(start = [0 mm, 60 mm], end = [10 mm, 60 mm])
+        r2 = line(start = [10 mm, 60 mm], end = [10 mm, 70 mm])
+        r3 = line(start = [10 mm, 70 mm], end = [0 mm, 70 mm])
+        r4 = line(start = [0 mm, 70 mm], end = [0 mm, 60 mm])
+    }
+    sketch s_boss on origin.xy {
+        m1 = line(start = [50 mm, 0 mm], end = [70 mm, 0 mm])
+        m2 = line(start = [70 mm, 0 mm], end = [70 mm, 50 mm])
+        m3 = line(start = [70 mm, 50 mm], end = [50 mm, 50 mm])
+        m4 = line(start = [50 mm, 50 mm], end = [50 mm, 0 mm])
+    }
+    sketch s2 on origin.xy {
+        n1 = line(start = [20 mm, 20 mm], end = [40 mm, 20 mm])
+        n2 = line(start = [40 mm, 20 mm], end = [40 mm, 30 mm])
+        n3 = line(start = [40 mm, 30 mm], end = [20 mm, 30 mm])
+        n4 = line(start = [20 mm, 30 mm], end = [20 mm, 20 mm])
+    }
+    sketch s_roof on origin.zx {
+        under = line(start = [20 mm, 0 mm], end = [40 mm, 80 mm])
+        end = line(start = [40 mm, 80 mm], end = [45 mm, 80 mm])
+        over = line(start = [45 mm, 80 mm], end = [25 mm, 0 mm])
+        start = line(start = [25 mm, 0 mm], end = [20 mm, 0 mm])
+    }
+    sketch s_trim on origin.xy {
+        t1 = line(start = [60 mm, -10 mm], end = [100 mm, -10 mm])
+        t2 = line(start = [100 mm, -10 mm], end = [100 mm, 60 mm])
+        t3 = line(start = [100 mm, 60 mm], end = [60 mm, 60 mm])
+        t4 = line(start = [60 mm, 60 mm], end = [60 mm, -10 mm])
+    }
+    sketch s_slot on plane.top_plane {
+        k1 = line(start = [50 mm, -10 mm], end = [60 mm, -10 mm])
+        k2 = line(start = [60 mm, -10 mm], end = [60 mm, 60 mm])
+        k3 = line(start = [60 mm, 60 mm], end = [50 mm, 60 mm])
+        k4 = line(start = [50 mm, 60 mm], end = [50 mm, -10 mm])
+    }
+    feature hex = extrude(profile = sketch.s_hex, distance = 20 mm, reverse, mode = cut, suppressed)
+    sketch layout on origin.xy {
+        bottom = line(start = [0 mm, 0 mm], end = [200 mm, 0 mm])
+        right = line(start = [200 mm, 0 mm], end = [200 mm, 100 mm])
+        top = line(start = [200 mm, 100 mm], end = [0 mm, 100 mm])
+        left = line(start = [0 mm, 100 mm], end = [0 mm, 0 mm])
+    }
+    sketch s_sheet on plane.lvl {
+        sa = line(start = [-10 mm, -10 mm], end = [100 mm, -10 mm])
+        sb = line(start = [100 mm, -10 mm], end = [100 mm, 70 mm])
+        sc = line(start = [100 mm, 70 mm], end = [-10 mm, 70 mm])
+        sd = line(start = [-10 mm, 70 mm], end = [-10 mm, -10 mm])
+    }
+    feature pin = extrude(profile = sketch.s_pin, distance = 5 mm, mode = add)
+    feature lip = extrude(profile = sketch.s_lip, distance = 4 mm, mode = add)
+    feature slot = hole(
+        face = feature.body.face.end,
+        at = { s = point(40 mm, 25 mm, input.thickness) },
+        diameter = 6 mm,
+        through_all,
+        form = slot(length = 20 mm)
+    )
+    feature post = extrude(profile = sketch.s_post, distance = 20 mm, mode = add)
+    feature notch = extrude(profile = sketch.s_notch, distance = 12 mm, mode = cut)
+    feature halve = split(body = feature.body.body, tool = plane.cutp, suppressed)
+    sketch s_logo on feature.body.face.end {
+        g1 = line(start = [10 mm, 10 mm], end = [20 mm, 10 mm])
+        g2 = line(start = [20 mm, 10 mm], end = [20 mm, 15 mm])
+        g3 = line(start = [20 mm, 15 mm], end = [10 mm, 15 mm])
+        g4 = line(start = [10 mm, 15 mm], end = [10 mm, 10 mm])
+    }
+    feature hollow = shell(body = feature.body.body, thickness = 2 mm)
+    feature cs = hole(
+        face = feature.body.face.end,
+        at = { a = point(60 mm, 25 mm, input.thickness) },
+        diameter = 6 mm,
+        depth = 8 mm,
+        form = countersink(diameter = input.csd, angle = input.csa),
+        suppressed
+    )
+    feature vc = chamfer(
+        edges = [
+            vertex_of(feature.body.face.end, feature.body.face.side(s1.l1), feature.body.face.side(s1.l2))
+        ],
+        distances = [input.vd, input.vd, input.vd],
+        suppressed
+    )
+    feature bad = extrude(profile = sketch.s2, distance = 4 mm, symmetric, second = blind(distance = 1 mm))
+    feature shrink = mold.shrink(bodies = [feature.body.body], x = 0.005, y = 0.005, z = 0.005)
+    feature ring = pattern(
+        features = [pin],
+        layout = circular(axis = axis.cax, count = input.n, angle = 360 deg),
+        suppressed
+    )
+    feature uni = boolean.union(target = feature.body.body, tools = [feature.tool.body], suppressed)
+    sketch s_cut on origin.xy {
+        c1 = line(start = [20 mm, 20 mm], end = [40 mm, 20 mm])
+        c2 = line(start = [40 mm, 20 mm], end = [40 mm, 30 mm])
+        c3 = line(start = [40 mm, 30 mm], end = [20 mm, 30 mm])
+        c4 = line(start = [20 mm, 30 mm], end = [20 mm, 20 mm])
+    }
+    feature jog = sheet_metal.fold()
+    sketch s_boss_1 on plane.top_plane {
+        lb = line(start = [40 mm - input.len, 25 mm - input.rad], end = [40 mm + input.len, 25 mm - input.rad])
+        lt = line(start = [40 mm + input.len, 25 mm + input.rad], end = [40 mm - input.len, 25 mm + input.rad])
+        al = arc(center = [40 mm - input.len, 25 mm], start = [40 mm - input.len, 25 mm + input.rad], end = [40 mm - input.len, 25 mm - input.rad])
+        ar1 = line(start = [40 mm + input.len, 25 mm - input.rad], end = [40 mm + input.len + input.rad, 25 mm])
+        ar2 = line(start = [40 mm + input.len + input.rad, 25 mm], end = [40 mm + input.len, 25 mm + input.rad])
+    }
+    feature ff = face_fillet(first = [feature.body.face.end], second = [feature.body.face.side(s1.l1)], radius = 3 mm)
+    feature cax = axis.through(a = point(40 mm, 25 mm, 0 mm), b = point(40 mm, 25 mm, 10 mm))
+    feature coil = curve.helix(axis = origin.z, start = point(10 mm, 0 mm, 0 mm), pitch = 2 mm, turns = 3)
+    feature dr = draft(
+        faces = [feature.body.face.side(s1.l1), feature.body.face.side(s1.l3)],
+        neutral = origin.xy,
+        angle = input.da,
+        suppressed
+    )
+    feature fr = full_round(
+        first = [feature.rib.face.side(s.l1)],
+        center = [feature.rib.face.end],
+        second = [feature.rib.face.side(s.l3)]
+    )
+    feature pat_1 = pattern(
+        features = [pocket],
+        layout = fill(
+            boundary = sketch.fill,
+            spacing = 10 mm,
+            margin = 1 mm,
+            seed = point(6 mm, 6 mm, input.thickness)
+        )
+    )
+    feature tap = hole(
+        face = feature.body.face.end,
+        at = { m6 = point(40 mm, 25 mm, 10 mm) },
+        diameter = 5 mm,
+        through_all
+    )
+    sketch s_chain on origin.zx {
+        up = line(start = [0 mm, 30 mm], end = [0 mm, 0 mm])
+        base = line(start = [0 mm, 0 mm], end = [50 mm, 0 mm])
+        back = line(start = [50 mm, 0 mm], end = [50 mm, 30 mm])
+    }
+    feature da = chamfer(
+        edges = [edges_between(feature.body.face.end, feature.body.face.side(s1.l1))],
+        distance = 2 mm,
+        angle = 30 deg,
+        flip
+    )
+    feature pat_2 = pattern(
+        features = [pocket],
+        layout = curve(
+            curve = {
+                curve = edge,
+                edge = edges_between(feature.body.face.end, feature.body.face.side(s1.l1))
+            },
+            count = 3,
+            spacing = 30 mm
+        )
+    )
+    feature body_1 = loft(profiles = [sketch.s0, sketch.s1])
+    feature sw_renamed = sweep(profile = sketch.s_swp, path = sketch.s_path)
+    feature lf_renamed = loft(profiles = [sketch.s_l0, sketch.s_l1])
+    feature mir_renamed = mirror(features = [pk2], plane = plane.mp)
+    feature cutp = plane.offset(base = origin.yz, distance = input.sx)
+    feature lvl = plane.offset(base = origin.xy, distance = input.level)
+    feature top_plane = plane.offset(base = origin.xy, distance = input.thickness)
+    feature aux = plane.offset(base = origin.xy, distance = 1 mm, suppressed)
+    feature swp = plane.offset(base = origin.xy, distance = 20 mm)
+    feature lp0 = plane.offset(base = origin.xy, distance = 20 mm)
+    feature mid = plane.offset(base = origin.yz, distance = 40 mm)
+    feature nubp = plane.offset(base = origin.xy, distance = 20 mm)
+    feature level = plane.offset(base = origin.xy, distance = 4 mm)
+    feature pathp = plane.offset(base = origin.zx, distance = 23 mm)
+    feature gplane = plane.offset(base = origin.zx, distance = 25 mm)
+    feature station = plane.offset(base = origin.xy, distance = 25 mm)
+    feature cutplane = plane.offset(base = origin.yz, distance = 40 mm)
+    sketch p_1 on origin.xy {
+        run = line(start = [0 mm, 0 mm], end = [0 mm, 25 mm])
+        turn = line(start = [0 mm, 25 mm], end = [20 mm, 45 mm])
+    }
+    sketch c on origin.zx {
+        floor = line(start = [0 mm, 0 mm], end = [30 mm, 0 mm])
+        wall = line(start = [30 mm, 0 mm], end = [30 mm, 20 mm])
+    }
+    feature plate = extrude(profile = sketch.s1, distance = input.thickness)
+    sketch s1_1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l7 = line(start = [input.width, input.depth], end = [40 mm, input.depth])
+        l8 = line(start = [40 mm, input.depth], end = [40 mm, 40 mm])
+        l9 = line(start = [40 mm, 40 mm], end = [0 mm, 40 mm])
+        l4 = line(start = [0 mm, 40 mm], end = [0 mm, 0 mm])
+    }
+    feature rib = extrude(profile = sketch.s, distance = 20 mm)
+    feature ear = extrude(profile = sketch.s2, distance = 10 mm)
+    feature tab = extrude(profile = sketch.s2, distance = 10 mm)
+    feature ghost = extrude(profile = sketch.s1, distance = 5 mm, suppressed)
+    feature tab2 = extrude(profile = sketch.s2, distance = 20 mm, reverse)
+    feature pocket_tool = extrude(profile = sketch.s2, distance = 30 mm)
+    feature pocket_1 = extrude(profile = sketch.s_p, distance = 8 mm, reverse, mode = cut)
+    feature slot_1 = extrude(profile = sketch.s_slot, distance = 4 mm, reverse, mode = cut)
+    feature spin_renamed = revolve(profile = sketch.s_rev, axis = origin.z, angle = input.ang)
+    feature pocket_2 = extrude(profile = sketch.s_pocket, distance = 4 mm, reverse, mode = cut)
+    feature round = fillet(edges = [feature.missing.face.end], radius = 2 mm)
+    feature hex_renamed = extrude(profile = sketch.s_hex, distance = 20 mm, reverse, mode = cut)
+    feature flat = sheet_metal.flat_pattern(fixed_face = feature.base.face.sheet(base, ordinal = 0))
+    feature halve_renamed = split(body = feature.body.body, tool = plane.cutp)
+    feature sh = shell(body = feature.body.body, thickness = 2 mm, outward)
+    feature holes = hole(
+        face = feature.tab.face.end,
+        at = {
+            a = point(105 mm, 10 mm, 10 mm),
+            b = point(115 mm, 10 mm, 10 mm),
+            c = point(105 mm, 40 mm, 10 mm),
+            d = point(115 mm, 40 mm, 10 mm)
+        },
+        diameter = 4 mm,
+        through_all
+    )
+    feature mp = plane.angle(base = origin.yz, axis = origin.z, angle = -45 deg)
+    feature groove_renamed = revolve(profile = sketch.s_gr, axis = axis.gaxis, angle = 360 deg, mode = cut)
+    feature lp2 = plane.offset(base = origin.xy, distance = 40 mm + input.lz)
+    feature solid = surface.thicken(bodies = [feature.patch.body], thickness = 3 mm)
+    feature grow = surface.extend(edges = [feature.patch.edge.boundary(s.b)], distance = 10 mm)
+    feature box = extrude(profile = sketch.s, distance = 10 mm, thin = { thickness = 2 mm })
+    feature row_renamed = pattern(features = [h], layout = linear(direction = origin.x, spacing = input.sp, count = input.n))
+    feature ring_renamed = pattern(features = [pin], layout = circular(axis = axis.cax, count = input.n, angle = 360 deg))
+    feature join = boolean.union(target = feature.body.body, tools = [feature.ear.body])
+    feature fence = surface.ruled(edges = [feature.patch.edge.boundary(s.b)], distance = 10 mm)
+    feature draft_check = mold.parting_line(body = feature.body.body, pull = origin.z, min_draft = 1 deg)
+    feature uni_renamed = boolean.union(target = feature.body.body, tools = [feature.tool.body])
+    feature post_1 = extrude(
+        profile = sketch.s2,
+        extent = offset_from_face(face = feature.body.face.end, offset = 2 mm)
+    )
+    feature trim_renamed = surface.cut_with_surface(body = feature.body.body, surface = feature.sheet.body, keep = negative)
+    feature shift = body_op.translate(bodies = [feature.body.body], dx = 5 mm, dy = 0 mm, dz = 0 mm)
+    feature sh_renamed = shell(body = feature.body.body, open_faces = [feature.body.face.end], thickness = input.wall)
+    feature osh = shell(
+        body = feature.body.body,
+        open_faces = [feature.body.face.end],
+        thickness = input.wall,
+        outward,
+        suppressed
+    )
+    feature osh_renamed = shell(
+        body = feature.body.body,
+        open_faces = [feature.body.face.end],
+        thickness = input.wall,
+        outward
+    )
+    sketch s_pocket on feature.body.face.end {
+        p1 = line(start = [20 mm, 10 mm], end = [40 mm, 10 mm])
+        p2 = line(start = [40 mm, 10 mm], end = [40 mm, 30 mm])
+        p3 = line(start = [40 mm, 30 mm], end = [20 mm, 30 mm])
+        p4 = line(start = [20 mm, 30 mm], end = [20 mm, 10 mm])
+    }
+    feature rnd = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],
+        radius = input.fr,
+        suppressed
+    )
+    feature rnd_renamed = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],
+        radius = input.fr
+    )
+    feature r_ok = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l3), feature.body.face.end)],
+        radius = 1 mm
+    )
+    feature bring = pattern(
+        bodies = [feature.nub.body],
+        layout = circular(axis = axis.cax, count = input.n, angle = 360 deg),
+        suppressed
+    )
+    feature round_body = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],
+        radius = 1 mm
+    )
+    feature after = chamfer(
+        edges = [edges_between(feature.round_spin.face.blend, feature.body.face.end)],
+        distance = 0.5 mm
+    )
+    feature round_missing = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l9), feature.body.face.end)],
+        radius = 1 mm
+    )
+    feature bring_renamed = pattern(
+        bodies = [feature.nub.body],
+        layout = circular(axis = axis.cax, count = input.n, angle = 360 deg)
+    )
+    feature round_spin = fillet(
+        edges = [edges_between(feature.spin.face.side(s_rev.r1), feature.spin.face.start)],
+        radius = 1 mm
+    )
+    feature chf = chamfer(
+        edges = [edges_between(feature.body.face.side(s1.l2), feature.body.face.end)],
+        distance = input.cd,
+        suppressed
+    )
+    feature gaxis = axis.through(a = point(40 mm, 25 mm, 0 mm), b = point(40 mm, 25 mm, 10 mm))
+    feature chf_renamed = chamfer(
+        edges = [edges_between(feature.body.face.side(s1.l2), feature.body.face.end)],
+        distance = input.cd
+    )
+    feature boss_1 = extrude(
+        profile = sketch.s2,
+        up_to = feature.roof.face.side(s_roof.under),
+        mode = add(targets = [feature.body.body])
+    )
+    sketch marks on feature.body.face.end {
+        p = point(at = [30 mm, 20 mm])
+    }
+    feature dr_renamed = draft(
+        faces = [feature.body.face.side(s1.l1), feature.body.face.side(s1.l3)],
+        neutral = origin.xy,
+        angle = input.da
+    )
+    feature row_1 = pattern(
+        features = [h],
+        layout = grid(
+            first = origin.x,
+            first_spacing = 6 mm,
+            first_count = 3,
+            second = origin.y,
+            second_spacing = 8 mm,
+            second_count = 2
+        )
+    )
+    sketch s1_2 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, 20 mm])
+        l5 = line(start = [input.width, 20 mm], end = [30 mm, 20 mm])
+        l6 = line(start = [30 mm, 20 mm], end = [30 mm, input.depth])
+        l3 = line(start = [30 mm, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature h_renamed = hole(
+        face = feature.body.face.end,
+        at = { a = point(20 mm, 25 mm, input.thickness) },
+        diameter = input.hd,
+        depth = input.hdep
+    )
+    sketch a on origin.xy {
+        edge = line(start = [0 mm, 0 mm], end = [30 mm, 0 mm])
+    }
+    feature tilted = plane.three_point(a = point(0 mm, 0 mm, 0 mm), b = point(10 mm, 0 mm, 0 mm), c = point(0 mm, 10 mm, 10 mm))
+    feature slope = plane.three_point(a = point(0 mm, 0 mm, 30 mm), b = point(20 mm, 0 mm, 40 mm), c = point(0 mm, 20 mm, 30 mm))
+    feature vr = fillet(
+        edges = [edges_between(feature.body.face.end, feature.body.face.side(s1.l1))],
+        radius = 2 mm,
+        variable = [{ at = 0, radius = 2 mm }, { at = 1, radius = 4 mm }]
+    )
+    feature pat_3 = pattern(
+        features = [pocket],
+        layout = variable(
+            instances = [
+                { key = b, dx = 20 mm, dy = 0 mm, dz = 0 mm, values = { pd = 4 mm } },
+                { key = c, dx = 40 mm, dy = 0 mm, dz = 0 mm, values = { pd = 6 mm } }
+            ]
+        )
+    )
+    feature cb_renamed = hole(
+        face = feature.body.face.end,
+        at = { a = point(50 mm, 25 mm, input.thickness) },
+        diameter = 6 mm,
+        depth = 8 mm,
+        form = counterbore(diameter = input.cbd, depth = input.cbh)
+    )
+    feature cs_renamed = hole(
+        face = feature.body.face.end,
+        at = { a = point(60 mm, 25 mm, input.thickness) },
+        diameter = 6 mm,
+        depth = 8 mm,
+        form = countersink(diameter = input.csd, angle = input.csa)
+    )
+    feature pull_1 = direct.move_faces(
+        faces = [feature.body.face.end],
+        motion = rotate(axis = origin.x, angle = 5 deg),
+        keep = [{ keep = parallel, a = feature.body.face.end, b = feature.body.face.start }]
+    )
+    feature vc_renamed = chamfer(
+        edges = [
+            vertex_of(feature.body.face.end, feature.body.face.side(s1.l1), feature.body.face.side(s1.l2))
+        ],
+        distances = [input.vd, input.vd, input.vd]
+    )
+    sketch s_hex on plane.top_plane {
+        h1 = line(start = [40 mm + 1 * input.hr, 25 mm + 0 * input.hr], end = [40 mm + 0.5000000000000001 * input.hr, 25 mm + 0.8660254037844386 * input.hr])
+        h2 = line(start = [40 mm + 0.5000000000000001 * input.hr, 25 mm + 0.8660254037844386 * input.hr], end = [40 mm + -0.49999999999999983 * input.hr, 25 mm + 0.8660254037844387 * input.hr])
+        h3 = line(start = [40 mm + -0.49999999999999983 * input.hr, 25 mm + 0.8660254037844387 * input.hr], end = [40 mm + -1 * input.hr, 25 mm + 1.2246467991473532e-16 * input.hr])
+        h4 = line(start = [40 mm + -1 * input.hr, 25 mm + 1.2246467991473532e-16 * input.hr], end = [40 mm + -0.5000000000000004 * input.hr, 25 mm + -0.8660254037844384 * input.hr])
+        h5 = line(start = [40 mm + -0.5000000000000004 * input.hr, 25 mm + -0.8660254037844384 * input.hr], end = [40 mm + 0.5000000000000001 * input.hr, 25 mm + -0.8660254037844386 * input.hr])
+        h6 = line(start = [40 mm + 0.5000000000000001 * input.hr, 25 mm + -0.8660254037844386 * input.hr], end = [40 mm + 1 * input.hr, 25 mm + 0 * input.hr])
+    }
+    feature close = surface.delete_hole(
+        edges = [
+            feature.patch.edge.boundary(s.h1),
+            feature.patch.edge.boundary(s.h2),
+            feature.patch.edge.boundary(s.h3),
+            feature.patch.edge.boundary(s.h4)
+        ]
+    )
+    feature plug = surface.fill(
+        boundary = [
+            { edge = feature.patch.edge.boundary(s.h1) },
+            { edge = feature.patch.edge.boundary(s.h2) },
+            { edge = feature.patch.edge.boundary(s.h3) },
+            { edge = feature.patch.edge.boundary(s.h4) }
+        ]
+    )
+    feature heal = direct.delete_faces(
+        faces = [
+            feature.pocket.face.side(s_pocket.p1),
+            feature.pocket.face.side(s_pocket.p2),
+            feature.pocket.face.side(s_pocket.p3),
+            feature.pocket.face.side(s_pocket.p4),
+            feature.pocket.face.end
+        ]
+    )
+    sketch s_boss_2 on plane.top_plane {
+        ar = arc(center = [40 mm + input.len, 25 mm], start = [40 mm + input.len, 25 mm - input.rad], end = [40 mm + input.len, 25 mm + input.rad])
+        lt = line(start = [40 mm + input.len, 25 mm + input.rad], end = [40 mm - input.len, 25 mm + input.rad])
+        al = arc(center = [40 mm - input.len, 25 mm], start = [40 mm - input.len, 25 mm + input.rad], end = [40 mm - input.len, 25 mm - input.rad])
+        lb = line(start = [40 mm - input.len, 25 mm - input.rad], end = [40 mm, 25 mm - input.rad])
+        lb2 = line(start = [40 mm, 25 mm - input.rad], end = [40 mm + input.len, 25 mm - input.rad])
+    }
+    sketch open on origin.xy {
+        a = line(start = [0 mm, 100 mm], end = [10 mm, 100 mm])
+        b = line(start = [10 mm, 100 mm], end = [10 mm, 110 mm])
+        c = line(start = [10 mm, 110 mm], end = [0 mm, 110 mm])
+    }
+    sketch s_path on plane.pathp {
+        p1 = line(start = [20 mm, 63 mm], end = [20 mm + input.rise, 63 mm])
+        p2 = line(start = [20 mm + input.rise, 63 mm], end = [20 mm + input.rise + 10 mm, 63 mm + input.run])
+    }
+    sketch s1_3 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3b = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    sketch s0 on origin.xy {
+        a = line(start = [0 mm, 0 mm], end = [20 mm, 0 mm])
+        b = line(start = [20 mm, 0 mm], end = [20 mm, 20 mm])
+        c = line(start = [20 mm, 20 mm], end = [0 mm, 20 mm])
+        e = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])
+    }
+    sketch s_low on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])
+        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])
+        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])
+    }
+    sketch s_swp on plane.swp {
+        l1 = line(start = [60 mm, 20 mm], end = [66 mm, 20 mm])
+        l2 = line(start = [66 mm, 20 mm], end = [66 mm, 26 mm])
+        l3 = line(start = [66 mm, 26 mm], end = [60 mm, 26 mm])
+        l4 = line(start = [60 mm, 26 mm], end = [60 mm, 20 mm])
+    }
+    sketch s_notch on origin.xy {
+        n1 = line(start = [-1 mm, 46 mm], end = [4 mm, 46 mm])
+        n2 = line(start = [4 mm, 46 mm], end = [4 mm, 51 mm])
+        n3 = line(start = [4 mm, 51 mm], end = [-1 mm, 51 mm])
+        n4 = line(start = [-1 mm, 51 mm], end = [-1 mm, 46 mm])
+    }
+    sketch s_t on origin.xy {
+        l1 = line(start = [70 mm, 10 mm], end = [90 mm, 10 mm])
+        l2 = line(start = [90 mm, 10 mm], end = [90 mm, 20 mm])
+        l3 = line(start = [90 mm, 20 mm], end = [70 mm, 20 mm])
+        l4 = line(start = [70 mm, 20 mm], end = [70 mm, 10 mm])
+    }
+    sketch s_nub on plane.nubp {
+        l1 = line(start = [60 mm, 23 mm], end = [64 mm, 23 mm])
+        l2 = line(start = [64 mm, 23 mm], end = [64 mm, 27 mm])
+        l3 = line(start = [64 mm, 27 mm], end = [60 mm, 27 mm])
+        l4 = line(start = [60 mm, 27 mm], end = [60 mm, 23 mm])
+    }
+    sketch s_pk2 on plane.top_plane {
+        l1 = line(start = [25 mm, 5 mm], end = [35 mm, 5 mm])
+        l2 = line(start = [35 mm, 5 mm], end = [35 mm, 15 mm])
+        l3 = line(start = [35 mm, 15 mm], end = [25 mm, 15 mm])
+        l4 = line(start = [25 mm, 15 mm], end = [25 mm, 5 mm])
+    }
+    sketch s_pin on plane.top_plane {
+        l1 = line(start = [55 mm, 23 mm], end = [59 mm, 23 mm])
+        l2 = line(start = [59 mm, 23 mm], end = [59 mm, 27 mm])
+        l3 = line(start = [59 mm, 27 mm], end = [55 mm, 27 mm])
+        l4 = line(start = [55 mm, 27 mm], end = [55 mm, 23 mm])
+    }
+    sketch sp on feature.body.face.end {
+        l1 = line(start = [4 mm, 4 mm], end = [8 mm, 4 mm])
+        l2 = line(start = [8 mm, 4 mm], end = [8 mm, 8 mm])
+        l3 = line(start = [8 mm, 8 mm], end = [4 mm, 8 mm])
+        l4 = line(start = [4 mm, 8 mm], end = [4 mm, 4 mm])
+    }
+    sketch fill on feature.body.face.end {
+        l1 = line(start = [1 mm, 1 mm], end = [51 mm, 1 mm])
+        l2 = line(start = [51 mm, 1 mm], end = [51 mm, 31 mm])
+        l3 = line(start = [51 mm, 31 mm], end = [1 mm, 31 mm])
+        l4 = line(start = [1 mm, 31 mm], end = [1 mm, 1 mm])
+    }
+    sketch s_p on feature.body.face.end {
+        l1 = line(start = [10 mm, 10 mm], end = [40 mm, 10 mm])
+        l2 = line(start = [40 mm, 10 mm], end = [40 mm, 11.5 mm])
+        l3 = line(start = [40 mm, 11.5 mm], end = [10 mm, 11.5 mm])
+        l4 = line(start = [10 mm, 11.5 mm], end = [10 mm, 10 mm])
+    }
+    sketch s_lip on feature.post.face.end {
+        l1 = line(start = [30 mm, 10 mm], end = [60 mm, 10 mm])
+        l2 = line(start = [60 mm, 10 mm], end = [60 mm, 40 mm])
+        l3 = line(start = [60 mm, 40 mm], end = [30 mm, 40 mm])
+        l4 = line(start = [30 mm, 40 mm], end = [30 mm, 10 mm])
+    }
+    sketch s_post on feature.body.face.end {
+        l1 = line(start = [30 mm, 10 mm], end = [40 mm, 10 mm])
+        l2 = line(start = [40 mm, 10 mm], end = [40 mm, 40 mm])
+        l3 = line(start = [40 mm, 40 mm], end = [30 mm, 40 mm])
+        l4 = line(start = [30 mm, 40 mm], end = [30 mm, 10 mm])
+    }
+    feature dr_1 = draft(
+        faces = [
+            feature.body.face.side(s.l1),
+            feature.body.face.side(s.l2),
+            feature.body.face.side(s.l3),
+            feature.body.face.side(s.l4)
+        ],
+        neutral = origin.xy,
+        angle = 4 deg,
+        kind = parting_line(
+            edges = [
+                edges_between(feature.body.face.end, feature.body.face.side(s.l1)),
+                edges_between(feature.body.face.end, feature.body.face.side(s.l2)),
+                edges_between(feature.body.face.end, feature.body.face.side(s.l3)),
+                edges_between(feature.body.face.end, feature.body.face.side(s.l4))
+            ]
+        )
+    )
+    sketch s_gr on plane.gplane {
+        l1 = line(start = [input.thickness - input.gdep, 40 mm + input.gi], end = [input.thickness + 2 mm, 40 mm + input.gi])
+        l2 = line(start = [input.thickness + 2 mm, 40 mm + input.gi], end = [input.thickness + 2 mm, 40 mm + input.go])
+        l3 = line(start = [input.thickness + 2 mm, 40 mm + input.go], end = [input.thickness - input.gdep, 40 mm + input.go])
+        l4 = line(start = [input.thickness - input.gdep, 40 mm + input.go], end = [input.thickness - input.gdep, 40 mm + input.gi])
+    }
+    sketch s_l0 on plane.lp0 {
+        l1 = line(start = [20 mm - 0.5 * input.la, 25 mm - 0.5 * input.la], end = [20 mm + 0.5 * input.la, 25 mm - 0.5 * input.la])
+        l2 = line(start = [20 mm + 0.5 * input.la, 25 mm - 0.5 * input.la], end = [20 mm + 0.5 * input.la, 25 mm + 0.5 * input.la])
+        l3 = line(start = [20 mm + 0.5 * input.la, 25 mm + 0.5 * input.la], end = [20 mm - 0.5 * input.la, 25 mm + 0.5 * input.la])
+        l4 = line(start = [20 mm - 0.5 * input.la, 25 mm + 0.5 * input.la], end = [20 mm - 0.5 * input.la, 25 mm - 0.5 * input.la])
+    }
+    sketch s_l1 on plane.lp1 {
+        l1 = line(start = [20 mm - 0.5 * input.lb, 25 mm - 0.5 * input.lb], end = [20 mm + 0.5 * input.lb, 25 mm - 0.5 * input.lb])
+        l2 = line(start = [20 mm + 0.5 * input.lb, 25 mm - 0.5 * input.lb], end = [20 mm + 0.5 * input.lb, 25 mm + 0.5 * input.lb])
+        l3 = line(start = [20 mm + 0.5 * input.lb, 25 mm + 0.5 * input.lb], end = [20 mm - 0.5 * input.lb, 25 mm + 0.5 * input.lb])
+        l4 = line(start = [20 mm - 0.5 * input.lb, 25 mm + 0.5 * input.lb], end = [20 mm - 0.5 * input.lb, 25 mm - 0.5 * input.lb])
+    }
+    sketch s_l2 on plane.lp2 {
+        l1 = line(start = [20 mm - 0.5 * input.la, 25 mm - 0.5 * input.la], end = [20 mm + 0.5 * input.la, 25 mm - 0.5 * input.la])
+        l2 = line(start = [20 mm + 0.5 * input.la, 25 mm - 0.5 * input.la], end = [20 mm + 0.5 * input.la, 25 mm + 0.5 * input.la])
+        l3 = line(start = [20 mm + 0.5 * input.la, 25 mm + 0.5 * input.la], end = [20 mm - 0.5 * input.la, 25 mm + 0.5 * input.la])
+        l4 = line(start = [20 mm - 0.5 * input.la, 25 mm + 0.5 * input.la], end = [20 mm - 0.5 * input.la, 25 mm - 0.5 * input.la])
+    }
+}

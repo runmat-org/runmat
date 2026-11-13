@@ -11,7 +11,8 @@ use runmat_package::{
     RecipientEncryptionKey, RecipientKeyAlgorithm, RegistrySourceId, AES_256_GCM_NONCE_BYTE_LEN,
     PACKAGE_KEY_ENVELOPE_SCHEMA_VERSION,
 };
-use sha2::Sha256;
+// HMAC/HKDF 0.12 take the digest-0.10 SHA-256.
+use sha2_mac::Sha256;
 use zeroize::Zeroizing;
 
 const CONTENT_KEY_BYTE_LEN: usize = 32;

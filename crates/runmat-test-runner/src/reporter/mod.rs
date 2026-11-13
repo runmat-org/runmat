@@ -3,6 +3,7 @@ mod human;
 mod json;
 mod junit;
 mod location;
+mod process_output;
 mod summary;
 mod tap;
 

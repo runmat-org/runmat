@@ -1,95 +1,10 @@
-//! MATLAB-compatible `isstring` builtin with GPU-aware semantics for RunMat.
-//!
-//! Determines whether a value is a MATLAB string array (including string scalars) without moving
-//! data between host and device memory.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
-use crate::builtins::introspection::type_resolvers::isstring_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+//! Runtime binding for canonical string-array predicate.
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-use runmat_value::{IntValue, IntegerStorage};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isstring")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "isstring",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Metadata-only predicate; gpuArray inputs stay on device while the result is returned on the host.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isstring")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "isstring",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Type-check predicate that does not participate in fusion planning.",
-};
-
-const ISSTRING_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input is a string scalar or string array.",
-}];
-
-const ISSTRING_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to inspect.",
-}];
-
-const ISSTRING_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isstring(A)",
-    inputs: &ISSTRING_INPUTS,
-    outputs: &ISSTRING_OUTPUT,
-}];
-
-const ISSTRING_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const ISSTRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISSTRING_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISSTRING_ERRORS,
-};
-pub const ISSTRING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "isstring is a universal type predicate; integer host or resident values return scalar false from value metadata without reading payload data.",
-    };
 
 #[runtime_builtin(
     name = "isstring",
-    category = "introspection",
-    summary = "Return true when a value is a MATLAB string array.",
-    keywords = "isstring,string array,string scalar,type checking,introspection",
-    accel = "metadata",
-    type_resolver(isstring_type),
-    descriptor(crate::builtins::introspection::isstring::ISSTRING_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::isstring::ISSTRING_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::isstring"
 )]
 fn isstring_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -107,14 +22,14 @@ pub(crate) mod tests {
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
-        CellArray, CharArray, Closure, ComplexTensor, LogicalArray, MException, ObjectInstance,
-        StringArray, StructValue, Tensor,
+        CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
+        MException, ObjectInstance, StringArray, StructValue, Tensor,
     };
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_scalar_reports_true() {
-        let value = Value::String("RunMat".to_string());
+        let value = Value::String("RunMat".to_string().into());
         let result = isstring_builtin(value).expect("isstring");
         assert_eq!(result, Value::Bool(true));
     }
@@ -127,17 +42,20 @@ pub(crate) mod tests {
             ComplexTensor::new(vec![(0.0, 1.0), (2.0, -2.5)], vec![2, 1]).expect("complex tensor"),
         );
         let object = Value::Object(ObjectInstance::new("ExampleClass".to_string()));
-        let closure = Value::Closure(Closure {
-            function_name: "some_func".to_string(),
-            bound_function: None,
-            captures: Vec::new(),
-        });
-        let class_ref = Value::ClassRef("pkg.Type".to_string());
+        let closure = Value::Closure(Closure::from_data(runmat_value::ClosureData {
+            lexical_environment: None,
+            function_name: "some_func".into(),
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
+            captures: Vec::new().into(),
+        }));
+        let class_ref = Value::ClassRef("pkg.Type".into());
         let exception = Value::MException(MException::new(
             "RunMat:Test".to_string(),
             "example".to_string(),
         ));
-        let function_handle = Value::FunctionHandle("sin".to_string());
+        let function_handle = Value::FunctionHandle("sin".into());
 
         for candidate in vec![
             complex_scalar,
@@ -258,7 +176,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = isstring_builtin(Value::GpuTensor(handle)).expect("isstring");
@@ -274,7 +192,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).expect("tensor");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()

@@ -5,7 +5,6 @@ use super::{
     PcurveEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
 };
 use crate::GeometryContractError;
-use std::collections::BTreeSet;
 
 pub const EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION: u16 = 4;
 
@@ -43,28 +42,38 @@ pub enum ExactCurveDefinition {
     /// Degenerate B-Rep edges use this definition while their face-use pcurves retain
     /// the nonzero parameter traversal needed to describe a singular trim.
     Degenerate {
-        point_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        point_m: runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         domain: ParameterRange,
     },
     Line {
-        origin_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        origin_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         direction_m_per_parameter: [f64; 3],
         domain: ParameterRange,
     },
     Circle {
-        center_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        center_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         x_axis: [f64; 3],
         y_axis: [f64; 3],
-        radius_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        radius_m: runmat_types::physical::Length,
         domain: ParameterRange,
         periodic: bool,
     },
     Ellipse {
-        center_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        center_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         x_axis: [f64; 3],
         y_axis: [f64; 3],
-        major_radius_m: f64,
-        minor_radius_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        major_radius_m: runmat_types::physical::Length,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        minor_radius_m: runmat_types::physical::Length,
         domain: ParameterRange,
         periodic: bool,
     },
@@ -125,42 +134,56 @@ pub enum ExactSurfaceImplementation {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExactSurfaceDefinition {
     Plane {
-        origin_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        origin_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         u_axis_m_per_parameter: [f64; 3],
         v_axis_m_per_parameter: [f64; 3],
         domains: [ParameterRange; 2],
     },
     Cylinder {
-        origin_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        origin_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         x_axis: [f64; 3],
         y_axis: [f64; 3],
         axis_m_per_v: [f64; 3],
-        radius_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        radius_m: runmat_types::physical::Length,
         domains: [ParameterRange; 2],
     },
     Cone {
-        apex_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        apex_m: runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         x_axis: [f64; 3],
         y_axis: [f64; 3],
         axis: [f64; 3],
-        semi_angle_rad: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        semi_angle_rad: runmat_types::physical::Angle,
         domains: [ParameterRange; 2],
     },
     Sphere {
-        center_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        center_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         x_axis: [f64; 3],
         y_axis: [f64; 3],
         z_axis: [f64; 3],
-        radius_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        radius_m: runmat_types::physical::Length,
         domains: [ParameterRange; 2],
     },
     Torus {
-        center_m: [f64; 3],
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        center_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
         x_axis: [f64; 3],
         y_axis: [f64; 3],
         z_axis: [f64; 3],
-        major_radius_m: f64,
-        minor_radius_m: f64,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        major_radius_m: runmat_types::physical::Length,
+        #[serde(with = "runmat_types::physical::canonical_scalar")]
+        minor_radius_m: runmat_types::physical::Length,
         domains: [ParameterRange; 2],
     },
     Nurbs {
@@ -173,7 +196,9 @@ pub enum ExactSurfaceDefinition {
 pub struct NurbsCurve3 {
     pub degree: u8,
     pub knots: Vec<f64>,
-    pub control_points_m: Vec<[f64; 3]>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub control_points_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, Vec<[f64; 3]>>,
     pub weights: Vec<f64>,
     pub domain: ParameterRange,
     pub periodic: bool,
@@ -199,8 +224,10 @@ pub struct NurbsSurface3 {
     pub v_knots: Vec<f64>,
     pub u_control_count: u32,
     pub v_control_count: u32,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     /// U-major tensor grid: `control_points_m[u * v_control_count + v]`.
-    pub control_points_m: Vec<[f64; 3]>,
+    pub control_points_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, Vec<[f64; 3]>>,
     /// Uses the same U-major tensor-grid order as `control_points_m`.
     pub weights: Vec<f64>,
     pub domains: [ParameterRange; 2],
@@ -241,7 +268,7 @@ impl ExactEvaluatorRegistry {
     /// A registry cannot span representations because entity tokens are meaningful only
     /// within the representation whose digest namespaces them.
     pub fn kernel_representation_digest(&self) -> Result<Option<[u8; 32]>, GeometryContractError> {
-        let mut digests = BTreeSet::new();
+        let mut required = None;
         for digest in
             self.curves
                 .iter()
@@ -288,15 +315,15 @@ impl ExactEvaluatorRegistry {
                     },
                 ))
         {
-            digests.insert(digest);
+            if required.is_some_and(|previous| previous != digest) {
+                return Err(GeometryContractError::invalid(
+                    "kernel evaluator representation",
+                    "one exact evaluator registry cannot reference multiple kernel representations",
+                ));
+            }
+            required = Some(digest);
         }
-        if digests.len() > 1 {
-            return Err(GeometryContractError::invalid(
-                "kernel evaluator representation",
-                "one exact evaluator registry cannot reference multiple kernel representations",
-            ));
-        }
-        Ok(digests.into_iter().next())
+        Ok(required)
     }
 }
 

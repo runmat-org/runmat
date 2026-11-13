@@ -1,0 +1,18 @@
+(version 1)
+(rule "HV clearance"
+	(constraint clearance (min 1.5mm))
+	(condition "A.NetClass == 'HV' && B.NetClass != 'HV'"))
+(rule "power width"
+	(layer outer)
+	(constraint track_width (min 0.4mm) (opt 0.5mm))
+	(condition "A.NetClass == 'power'"))
+(rule "usb pairs"
+	(constraint diff_pair_gap (opt 0.15mm))
+	(constraint skew (max 0.1mm))
+	(condition "A.inDiffPair('USB*')"))
+(rule "via ring"
+	(constraint annular_width (min 0.15mm))
+	(condition "A.Type == 'Via'"))
+(rule "exotic"
+	(constraint clearance (min 0.5mm))
+	(condition "A.intersectsArea('keepout1')"))

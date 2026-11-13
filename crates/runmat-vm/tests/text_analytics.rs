@@ -1,12 +1,13 @@
-use runmat_value::{StringArray, Value};
+use runmat_value::Value;
 
 #[path = "support/mod.rs"]
 mod test_helpers;
 use test_helpers::execute_source;
 
 fn has_object_class(vars: &[Value], class_name: &str) -> bool {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     vars.iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name == class_name))
+        .any(|value| matches!(value, Value::Object(object) if object.class_name() == &class_name))
 }
 
 fn has_num(vars: &[Value], expected: f64) -> bool {
@@ -17,7 +18,7 @@ fn has_num(vars: &[Value], expected: f64) -> bool {
 fn has_text(vars: &[Value], expected: &str) -> bool {
     vars.iter().any(|value| match value {
         Value::String(text) => text == expected,
-        Value::StringArray(StringArray { data, .. }) => data.iter().any(|text| text == expected),
+        Value::StringArray(array) => array.data().iter().any(|text| text == expected),
         _ => false,
     })
 }

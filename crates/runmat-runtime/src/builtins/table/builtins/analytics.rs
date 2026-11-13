@@ -1,361 +1,89 @@
 use super::*;
+#[cfg(test)]
+use runmat_builtins::BuiltinIntegerInputAvailability;
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    GROUPSUMMARY_INTEGER_CONTROL_EXTENSION, GROUPSUMMARY_RESIDENT_INPUT_EXTENSION,
+    GRPSTATS_INTEGER_ALPHA_EXTENSION, GRPSTATS_INTEGER_DATA_EXTENSION,
+    GRPSTATS_INTEGER_SELECTOR_EXTENSION, GRPSTATS_RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar};
 
-const GROUPSUMMARY_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "groupsummary-resident-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "groupsummary on interactive resident GPU data is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:GroupsummaryResidentInputExtension"),
-    };
-const GROUPSUMMARY_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "groupsummary-integer-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "groupsummary with a native-class integer name-value control is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:GroupsummaryIntegerControlExtension"),
-    };
-pub const GROUPSUMMARY_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    GROUPSUMMARY_RESIDENT_INPUT_EXTENSION,
-    GROUPSUMMARY_INTEGER_CONTROL_EXTENSION,
-];
-
-const GRPSTATS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "grpstats-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "grpstats on interactive resident GPU data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GrpstatsResidentInputExtension"),
-};
-const GRPSTATS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "grpstats-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "grpstats with a native-class integer matrix X is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GrpstatsIntegerDataExtension"),
-};
-const GRPSTATS_INTEGER_ALPHA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "grpstats-integer-alpha",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "grpstats with a native-class integer Alpha value is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GrpstatsIntegerAlphaExtension"),
-};
-const GRPSTATS_INTEGER_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "grpstats-integer-selector",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "grpstats with a native-class integer table selector is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:GrpstatsIntegerSelectorExtension"),
-    };
-pub const GRPSTATS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    GRPSTATS_RESIDENT_INPUT_EXTENSION,
-    GRPSTATS_INTEGER_DATA_EXTENSION,
-    GRPSTATS_INTEGER_ALPHA_EXTENSION,
-    GRPSTATS_INTEGER_SELECTOR_EXTENSION,
-];
-
-const PIVOT_INTEGER_GROUP_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer grouping or DataVariable table columns",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract.",
-    }];
-const PIVOT_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Columns, Rows, or DataVariable indices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public variable-index selectors are exact one-based structural values; logical selectors remain a distinct documented form.",
-    }];
-const PIVOT_INTEGER_BIN_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ColumnsBinMethod or RowsBinMethod count/edges",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation.",
-    }];
-const PIVOT_INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "IncludeTotals, IncludeMissingGroups, or IncludeEmptyGroups",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public controls admit numeric zero or one alongside logical values and are structural rather than aggregation data.",
-    }];
-pub const PIVOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(table_with_integer_group_or_data_variables,___)",
-        inputs: &PIVOT_INTEGER_GROUP_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Implemented grouping keys retain exact native values above flintmax; aggregation crosses only the selected method's explicit result domain.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(T,Columns=integer_indices,Rows=integer_indices,DataVariable=integer_index,___)",
-        inputs: &PIVOT_INTEGER_SELECTOR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Implemented selector parsing reads native integer storage directly; unsupported portions of the newer name-value grammar remain general pivot surface gaps.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(T,ColumnsBinMethod=integer_bins,RowsBinMethod=integer_bins,___)",
-        inputs: &PIVOT_INTEGER_BIN_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The documented contract is recorded without treating unimplemented general binning syntax as an implicit integer-to-floating boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(T,IncludeTotals=integer_flag,IncludeMissingGroups=integer_flag,IncludeEmptyGroups=integer_flag,___)",
-        inputs: &PIVOT_INTEGER_BOOLEAN_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Only exact zero/one values are compatible; unsupported general options reject before aggregation.",
-    },
-];
-
-const GROUPSUMMARY_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer grouping variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer table grouping variables are compared exactly and preserve class in the output table.",
-    }];
-const GROUPSUMMARY_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer data variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer table data variables are numeric and are valid data-variable selections; exact-class extrema and explicit floating statistics preserve the documented method contract.",
-    }];
-const GROUPSUMMARY_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "native-class integer bin count or boolean name-value control",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Native integer scalars in these structurally ambiguous control positions are accepted only in RunMat extension mode.",
-    }];
-pub const GROUPSUMMARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "groupsummary(T_or_A,integer_groupvars,method,___)",
-        inputs: &GROUPSUMMARY_INTEGER_GROUP_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Table and array grouping is exact. Table grouping columns and array BG preserve class, while GroupCount/BC and summaries are function-specific.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "groupsummary(integer_A,groupvars,method) or table integer data variables",
-        inputs: &GROUPSUMMARY_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Documented integer array and table data uses exact native-class min and max plus explicit floating computation for mean, sum, median, and counts. One-group numeric-edge and scalar-count forms compare integers exactly; multi-group bin specifications, time bins, additional named methods, and function handles currently reject explicitly.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "groupsummary(T,groupvars,integer_numbins,method,___) or integer boolean controls",
-        inputs: &GROUPSUMMARY_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "This is an explicitly gated input-form extension; equivalent scalar-double and logical controls remain available in strict compatibility mode.",
-    },
-];
-
-const GRPSTATS_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "group",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Statistics grouping variables explicitly admit signed and unsigned integer classes and are compared exactly.",
-    }];
-const GRPSTATS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented matrix X datatype list excludes signed and unsigned integer data; RunMat admission is independently mode-gated.",
-    }];
-const GRPSTATS_INTEGER_TABLE_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer table data variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Table variables may be numeric, so selected native integer variables use the documented table form.",
-    }];
-pub const GRPSTATS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "stats = grpstats(X,integer_group,___)",
-        inputs: &GRPSTATS_INTEGER_GROUP_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer grouping keys remain exact, including above flintmax; summary output is governed by X and whichstats.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "stats = grpstats(integer_X,group,___)",
-        inputs: &GRPSTATS_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer matrix data crosses a checked binary64 boundary after its compatibility gate; values that cannot be represented exactly reject rather than silently rounding.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tblstats = grpstats(tbl,groupvars,___) with integer DataVars",
-        inputs: &GRPSTATS_INTEGER_TABLE_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Selected integer table variables are documented numeric data; extrema retain exact integer values while floating statistics enter their explicit computation domain.",
-    },
-];
-
 #[runtime_builtin(
     name = "grpstats",
-    category = "stats/summary",
-    summary = "Compute summary statistics organized by group.",
-    keywords = "grpstats,group,statistics,mean,std,confidence interval,table",
-    accel = "cpu",
-    descriptor(crate::builtins::table::GRPSTATS_DESCRIPTOR),
-    extensions(crate::builtins::table::builtins::analytics::GRPSTATS_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::table::builtins::analytics::GRPSTATS_INTEGER_CAPABILITIES
-    ),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn grpstats_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
     group: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    ensure_grpstats_extensions(&value, &group, &rest)?;
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let group = gather_if_needed_async(&group)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    grpstats_impl(value, group, rest)
+    ensure_grpstats_extensions(&value, &group, rest.view())?;
+    let value = gather_retained_value(&value, runtime.as_ref()).await?;
+    let group = gather_retained_value(&group, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    grpstats_impl(value, group, rest.view())
 }
 
 #[runtime_builtin(
     name = "pivot",
-    category = "table",
-    summary = "Pivot or summarize table data by grouping variables.",
-    keywords = "pivot,table,reshape,groupsummary",
-    accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
-    integer_capabilities(crate::builtins::table::builtins::analytics::PIVOT_INTEGER_CAPABILITIES),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn pivot_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     table: Value,
     rowvars: Value,
     colvars: Value,
     datavar: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let table = gather_if_needed_async(&table)
-        .await
-        .map_err(map_control_flow)?;
-    let rowvars = gather_if_needed_async(&rowvars)
-        .await
-        .map_err(map_control_flow)?;
-    let colvars = gather_if_needed_async(&colvars)
-        .await
-        .map_err(map_control_flow)?;
-    let datavar = gather_if_needed_async(&datavar)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let method = parse_named_text_option(&rest, "Method", "sum", "pivot")?;
+    let table = gather_retained_value(&table, runtime.as_ref()).await?;
+    let rowvars = gather_retained_value(&rowvars, runtime.as_ref()).await?;
+    let colvars = gather_retained_value(&colvars, runtime.as_ref()).await?;
+    let datavar = gather_retained_value(&datavar, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let method = parse_named_text_option(rest.view(), "Method", "sum", "pivot")?;
     pivot_impl(table, rowvars, colvars, datavar, &method)
 }
 
 #[runtime_builtin(
     name = "groupsummary",
-    category = "table",
-    summary = "Group table rows and compute summary statistics for data variables.",
-    keywords = "groupsummary,group,table,mean,sum,count,median,min,max",
-    accel = "cpu",
-    descriptor(crate::builtins::table::GROUPSUMMARY_DESCRIPTOR),
-    extensions(crate::builtins::table::builtins::analytics::GROUPSUMMARY_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::table::builtins::analytics::GROUPSUMMARY_INTEGER_CAPABILITIES
-    ),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn groupsummary_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     table: Value,
     groupvars: Value,
     method: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    ensure_groupsummary_extensions(&table, &groupvars, &method, &rest)?;
-    let table = gather_if_needed_async(&table)
-        .await
-        .map_err(map_control_flow)?;
-    let groupvars = gather_if_needed_async(&groupvars)
-        .await
-        .map_err(map_control_flow)?;
-    let method = gather_if_needed_async(&method)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
+    ensure_groupsummary_extensions(&table, &groupvars, &method, rest.view())?;
+    let table = gather_retained_value(&table, runtime.as_ref()).await?;
+    let groupvars = gather_retained_value(&groupvars, runtime.as_ref()).await?;
+    let method = gather_retained_value(&method, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
     if matches!(&table, Value::Object(object) if is_tabular_object(object)) {
-        groupsummary_with_numeric_bins(table, groupvars, method, rest)
+        groupsummary_with_numeric_bins(runtime.as_ref(), table, groupvars, method, rest).await
     } else {
-        groupsummary_array(table, groupvars, method, rest)
+        groupsummary_array(runtime.as_ref(), table, groupvars, method, rest).await
     }
 }
 
-fn groupsummary_array(
+async fn groupsummary_array(
+    runtime: Option<&crate::context::RuntimeContext>,
     data: Value,
     groupvars: Value,
     method_or_bins: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let data = groupsummary_array_columns(data, "input array")?;
+    let data = groupsummary_array_columns(&data, "input array")?;
     let groups = groupsummary_group_columns(groupvars)?;
     let rows = data.first().map(value_row_count).transpose()?.unwrap_or(0);
     for value in &groups {
@@ -384,18 +112,20 @@ fn groupsummary_array(
                 .map_err(invalid_variable)?,
         )
     };
-    let result = groupsummary_with_numeric_bins(table, group_selector, method_or_bins, rest)?;
+    let result =
+        groupsummary_with_numeric_bins(runtime, table, group_selector, method_or_bins, rest)
+            .await?;
     groupsummary_array_outputs(result, &group_names)
 }
 
-fn groupsummary_array_columns(value: Value, role: &str) -> BuiltinResult<Vec<Value>> {
+fn groupsummary_array_columns(value: &Value, role: &str) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Tensor(tensor) => (0..tensor.cols())
-            .map(|column| groupsummary_tensor_column(&tensor, column).map(Value::Tensor))
+            .map(|column| groupsummary_tensor_column(tensor, column).map(Value::Tensor))
             .collect(),
         Value::Cell(cell) => {
             let mut columns = Vec::new();
-            for value in cell.data {
+            for value in cell.data().iter() {
                 let mut nested = groupsummary_array_columns(value, role)?;
                 columns.append(&mut nested);
             }
@@ -413,7 +143,7 @@ fn groupsummary_array_columns(value: Value, role: &str) -> BuiltinResult<Vec<Val
 }
 
 fn groupsummary_group_columns(value: Value) -> BuiltinResult<Vec<Value>> {
-    groupsummary_array_columns(value, "groupvars")
+    groupsummary_array_columns(&value, "groupvars")
 }
 
 fn groupsummary_tensor_column(tensor: &Tensor, column: usize) -> BuiltinResult<Tensor> {
@@ -578,7 +308,7 @@ fn groupsummary_concat_columns(columns: Vec<Value>) -> BuiltinResult<Value> {
 fn groupsummary_multi_output(outputs: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count, outputs,
@@ -587,7 +317,7 @@ fn groupsummary_multi_output(outputs: Vec<Value>) -> BuiltinResult<Value> {
     Ok(outputs
         .into_iter()
         .next()
-        .unwrap_or(Value::OutputList(Vec::new())))
+        .unwrap_or(Value::output_list(Vec::new())))
 }
 
 fn value_is_native_integer(value: &Value) -> bool {
@@ -595,20 +325,30 @@ fn value_is_native_integer(value: &Value) -> bool {
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
-fn option_name(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(value.clone()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+fn option_name(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
+        Value::String(value) => value.as_str().map(str::to_owned),
+        Value::CharArray(value) if value.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(value.data()).map_err(|error| {
+                table_error_with_source(
+                    &TABLE_ERROR_INVALID_ARGUMENT,
+                    format!("table option name is not valid UTF-16 text: {error}"),
+                    error,
+                )
+            })?,
+        ),
+        Value::StringArray(value) if value.data().len() == 1 => {
+            value.data()[0].as_str().map(str::to_owned)
+        }
         _ => None,
-    }
+    })
 }
 
 fn ensure_groupsummary_extensions(
     table: &Value,
     groupvars: &Value,
     method: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if groupsummary_contains_explicit_gpu(table)
         || groupsummary_contains_explicit_gpu(groupvars)
@@ -620,12 +360,21 @@ fn ensure_groupsummary_extensions(
             "groupsummary",
         )?;
     }
-    if rest.windows(2).any(|pair| {
-        option_name(&pair[0]).is_some_and(|name| {
+    let mut has_integer_extension_control = false;
+    for index in 0..rest.len().saturating_sub(1) {
+        let pair = rest
+            .range(index..index + 2)
+            .expect("bounded adjacent option view");
+        if option_name(&pair[0])?.is_some_and(|name| {
             name.eq_ignore_ascii_case("IncludeMissingGroups")
                 || name.eq_ignore_ascii_case("IncludeEmptyGroups")
         }) && value_is_native_integer(&pair[1])
-    }) {
+        {
+            has_integer_extension_control = true;
+            break;
+        }
+    }
+    if has_integer_extension_control {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GROUPSUMMARY_INTEGER_CONTROL_EXTENSION,
             "groupsummary",
@@ -643,20 +392,20 @@ fn ensure_groupsummary_extensions(
 fn groupsummary_typed_integer_scalar(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.len() == 1 && tensor.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() == 1 && runmat_accelerate_api::handle_integer_type(handle).is_some())
-        || matches!(value, Value::Cell(cell) if cell.data.len() == 1 && groupsummary_typed_integer_scalar(&cell.data[0]))
+        || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().all(|&dimension| dimension == 1) && runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::Cell(cell) if cell.data().len() == 1 && groupsummary_typed_integer_scalar(&cell.data()[0]))
 }
 
 fn groupsummary_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(groupsummary_contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(groupsummary_contains_explicit_gpu),
         Value::Struct(value) => value
             .fields
             .values()
             .any(groupsummary_contains_explicit_gpu),
         Value::Object(value) => value
-            .properties
+            .properties()
             .values()
             .any(groupsummary_contains_explicit_gpu),
         Value::Closure(value) => value
@@ -668,23 +417,24 @@ fn groupsummary_contains_explicit_gpu(value: &Value) -> bool {
     }
 }
 
-fn groupsummary_with_numeric_bins(
+async fn groupsummary_with_numeric_bins(
+    runtime: Option<&crate::context::RuntimeContext>,
     table: Value,
     groupvars: Value,
     method_or_bins: Value,
-    mut rest: Vec<Value>,
+    mut rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    if !groupsummary_is_numeric_bins(&method_or_bins) {
-        return groupsummary_impl(table, groupvars, method_or_bins, rest);
+    if !groupsummary_is_numeric_bins(&method_or_bins)? {
+        return groupsummary_impl(table, groupvars, method_or_bins, rest.view());
     }
     if rest.is_empty() {
         return Err(invalid_argument(
             "groupsummary: a computation method must follow groupbins",
         ));
     }
-    let method = rest.remove(0);
+    let method = rest.pop_front().expect("nonempty computation method");
     let bin_spec = match &method_or_bins {
-        Value::Cell(cell) if cell.data.len() == 1 => &cell.data[0],
+        Value::Cell(cell) if cell.data().len() == 1 => &cell.data()[0],
         Value::Cell(_) => {
             return Err(invalid_argument(
                 "groupsummary: a cell groupbins argument must contain exactly one specification for one grouping variable",
@@ -707,23 +457,26 @@ fn groupsummary_with_numeric_bins(
         .ok_or_else(|| invalid_variable("groupsummary: missing grouping variable"))?;
     let values = groupsummary_numeric_scalars(group_value)?;
     if scalar_text(bin_spec, "groupbins").is_ok_and(|text| text.eq_ignore_ascii_case("none")) {
-        let (_, _, forwarded) = groupsummary_bin_options(rest)?;
-        return groupsummary_impl(Value::Object(object), groupvars, method, forwarded);
+        let (_, _, forwarded) = groupsummary_bin_options(rest, runtime).await?;
+        return groupsummary_impl(Value::Object(object), groupvars, method, forwarded.view());
     }
-    let (included_right, include_empty, forwarded) = groupsummary_bin_options(rest)?;
+    let (included_right, include_empty, forwarded) =
+        groupsummary_bin_options(rest, runtime).await?;
     let (assignments, labels) = groupsummary_bin_assignments(&values, bin_spec, included_right)?;
     let internal = assignments
         .into_iter()
         .map(|bin| {
-            bin.map(|index| format!("{index:08}|{}", labels[index]))
-                .unwrap_or_else(|| "<missing>".to_string())
+            bin.map(|index| {
+                runmat_value::StringElement::text(format!("{index:08}|{}", labels[index]))
+            })
+            .unwrap_or(runmat_value::StringElement::Missing)
         })
         .collect::<Vec<_>>();
     let mut replaced = Vec::with_capacity(names.len());
     for name in &names {
         if name == &selected[0] {
             replaced.push(Value::StringArray(
-                StringArray::new(internal.clone(), vec![internal.len(), 1])
+                StringArray::from_elements_unbounded(internal.clone(), vec![internal.len(), 1])
                     .map_err(invalid_variable)?,
             ));
         } else {
@@ -737,31 +490,43 @@ fn groupsummary_with_numeric_bins(
         }
     }
     let binned_table = table_from_columns(names, replaced)?;
-    let result = groupsummary_impl(binned_table, groupvars, method, forwarded)?;
+    let result = groupsummary_impl(binned_table, groupvars, method, forwarded.view())?;
     groupsummary_finalize_bins(result, &selected[0], &labels, include_empty)
 }
 
-fn groupsummary_is_numeric_bins(value: &Value) -> bool {
-    matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
-        || matches!(value, Value::Cell(cell) if cell.data.len() == 1 && groupsummary_is_numeric_bins(&cell.data[0]))
-        || matches!(value, Value::String(text) if text.eq_ignore_ascii_case("none"))
-        || matches!(value, Value::CharArray(chars) if chars.data.iter().collect::<String>().eq_ignore_ascii_case("none"))
+fn groupsummary_is_numeric_bins(value: &Value) -> BuiltinResult<bool> {
+    Ok(match value {
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) => true,
+        Value::Cell(cell) if cell.data().len() == 1 => {
+            groupsummary_is_numeric_bins(&cell.data()[0])?
+        }
+        Value::String(text) => text
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("none")),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            option_name(value)?.is_some_and(|text| text.eq_ignore_ascii_case("none"))
+        }
+        _ => false,
+    })
 }
 
-fn groupsummary_bin_options(rest: Vec<Value>) -> BuiltinResult<(bool, bool, Vec<Value>)> {
+async fn groupsummary_bin_options(
+    rest: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<(bool, bool, crate::call::BuiltinArguments)> {
     let mut included_right = false;
     let mut include_empty = false;
-    let mut forwarded = Vec::with_capacity(rest.len());
+    let mut forwarded_count = 0usize;
     let mut index = 0;
-    if rest.first().is_some_and(|value| {
-        !option_name(value).is_some_and(|name| {
+    if let Some(value) = rest.first() {
+        if !option_name(value)?.is_some_and(|name| {
             name.eq_ignore_ascii_case("IncludedEdge")
                 || name.eq_ignore_ascii_case("IncludeEmptyGroups")
                 || name.eq_ignore_ascii_case("IncludeMissingGroups")
-        })
-    }) {
-        forwarded.push(rest[0].clone());
-        index = 1;
+        }) {
+            forwarded_count += 1;
+            index = 1;
+        }
     }
     while index < rest.len() {
         if index + 1 >= rest.len() {
@@ -786,11 +551,49 @@ fn groupsummary_bin_options(rest: Vec<Value>) -> BuiltinResult<(bool, bool, Vec<
         } else if name.eq_ignore_ascii_case("IncludeEmptyGroups") {
             include_empty = zero_one_bool_scalar(&rest[index + 1], "IncludeEmptyGroups")?;
         } else {
-            forwarded.push(rest[index].clone());
-            forwarded.push(rest[index + 1].clone());
+            forwarded_count += 2;
         }
         index += 2;
     }
+    // The read-only pass above validates all pairs before destination admission.
+    // Only forwarded headers are initialized; all payload/root owners stay shared.
+    let has_selector = match rest.first() {
+        Some(value) => !option_name(value)?.is_some_and(|name| {
+            name.eq_ignore_ascii_case("IncludedEdge")
+                || name.eq_ignore_ascii_case("IncludeEmptyGroups")
+                || name.eq_ignore_ascii_case("IncludeMissingGroups")
+        }),
+        None => false,
+    };
+    let mut cursor = 0usize;
+    let mut pair_value = false;
+    let forwarded = rest
+        .try_map_preserving_roots_async(forwarded_count, runtime, async |_| {
+            if has_selector && cursor == 0 {
+                cursor = 1;
+                return Ok(rest[0].clone());
+            }
+            loop {
+                if pair_value {
+                    let value = rest[cursor].clone();
+                    cursor += 1;
+                    pair_value = false;
+                    return Ok(value);
+                }
+                let name = scalar_text(&rest[cursor], "groupsummary option name")?;
+                if name.eq_ignore_ascii_case("IncludedEdge")
+                    || name.eq_ignore_ascii_case("IncludeEmptyGroups")
+                {
+                    cursor += 2;
+                    continue;
+                }
+                let value = rest[cursor].clone();
+                cursor += 1;
+                pair_value = true;
+                return Ok(value);
+            }
+        })
+        .await?;
     Ok((included_right, include_empty, forwarded))
 }
 
@@ -1094,7 +897,7 @@ fn groupsummary_finalize_bins(
         ));
     };
     let existing = groups
-        .data
+        .data()
         .iter()
         .enumerate()
         .map(|(row, label)| (label.clone(), row))
@@ -1102,17 +905,25 @@ fn groupsummary_finalize_bins(
     let mut desired = labels
         .iter()
         .enumerate()
-        .map(|(index, label)| (format!("{index:08}|{label}"), label.clone()))
+        .map(|(index, label)| {
+            (
+                runmat_value::StringElement::text(format!("{index:08}|{label}")),
+                runmat_value::StringElement::text(label.clone()),
+            )
+        })
         .filter(|(internal, _)| include_empty || existing.contains_key(internal))
         .collect::<Vec<_>>();
-    if existing.contains_key("<missing>") {
-        desired.push(("<missing>".to_string(), "<missing>".to_string()));
+    if existing.contains_key(&runmat_value::StringElement::Missing) {
+        desired.push((
+            runmat_value::StringElement::Missing,
+            runmat_value::StringElement::Missing,
+        ));
     }
     let mut output = Vec::with_capacity(names.len());
     for name in &names {
         if name == group_name {
             output.push(Value::StringArray(
-                StringArray::new(
+                StringArray::from_elements_unbounded(
                     desired.iter().map(|(_, label)| label.clone()).collect(),
                     vec![desired.len(), 1],
                 )
@@ -1162,7 +973,11 @@ fn groupsummary_finalize_bins(
     table_from_columns(names, output)
 }
 
-fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_grpstats_extensions(
+    value: &Value,
+    group: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if crate::value_contains_gpu(value)
         || crate::value_contains_gpu(group)
         || rest.iter().any(crate::value_contains_gpu)
@@ -1179,24 +994,13 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
             "grpstats",
         )?;
     }
-    if rest.first().is_some_and(value_is_native_integer)
-        || rest.windows(2).any(|pair| {
-            option_name(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("Alpha"))
-                && value_is_native_integer(&pair[1])
-        })
-    {
+    if rest.first().is_some_and(value_is_native_integer) || has_integer_option(&rest, "Alpha")? {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GRPSTATS_INTEGER_ALPHA_EXTENSION,
             "grpstats",
         )?;
     }
-    if table_input
-        && (value_is_native_integer(group)
-            || rest.windows(2).any(|pair| {
-                option_name(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("DataVars"))
-                    && value_is_native_integer(&pair[1])
-            }))
-    {
+    if table_input && (value_is_native_integer(group) || has_integer_option(&rest, "DataVars")?) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GRPSTATS_INTEGER_SELECTOR_EXTENSION,
             "grpstats",
@@ -1205,9 +1009,63 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
     Ok(())
 }
 
+fn has_integer_option(
+    rest: &crate::call::FunctionArgumentView<'_>,
+    expected: &str,
+) -> BuiltinResult<bool> {
+    for index in 0..rest.len().saturating_sub(1) {
+        let pair = rest
+            .range(index..index + 2)
+            .expect("bounded adjacent option view");
+        if option_name(&pair[0])?.is_some_and(|name| name.eq_ignore_ascii_case(expected))
+            && value_is_native_integer(&pair[1])
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod integer_compatibility_tests {
     use super::*;
+    fn ensure_grpstats_extensions(
+        value: &Value,
+        group: &Value,
+        rest: &[Value],
+    ) -> BuiltinResult<()> {
+        super::ensure_grpstats_extensions(
+            value,
+            group,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        )
+    }
+    fn ensure_groupsummary_extensions(
+        table: &Value,
+        groups: &Value,
+        method: &Value,
+        rest: &[Value],
+    ) -> BuiltinResult<()> {
+        super::ensure_groupsummary_extensions(
+            table,
+            groups,
+            method,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        )
+    }
+    async fn groupsummary_builtin(
+        table: Value,
+        groups: Value,
+        method: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+        super::groupsummary_builtin(None, table, groups, method, rest).await
+    }
+    use runmat_builtins::{
+        GROUPSUMMARY_EXTENSIONS, GROUPSUMMARY_INTEGER_CAPABILITIES, GRPSTATS_EXTENSIONS,
+        GRPSTATS_INTEGER_CAPABILITIES,
+    };
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
@@ -1241,13 +1099,17 @@ mod integer_compatibility_tests {
     #[test]
     fn grouping_strict_mode_gates_resident_inputs_before_provider_access() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let handle = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let resident = Value::GpuTensor(handle.clone());
         let group_summary =
             ensure_groupsummary_extensions(&resident, &Value::from("G"), &Value::from("mean"), &[])
@@ -1262,7 +1124,10 @@ mod integer_compatibility_tests {
             grpstats.identifier(),
             GRPSTATS_RESIDENT_INPUT_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop((resident, handle));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
@@ -1396,7 +1261,7 @@ mod integer_compatibility_tests {
             Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1])
                 .unwrap(),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = futures::executor::block_on(groupsummary_builtin(
             data,
             groups,
@@ -1439,7 +1304,7 @@ mod integer_compatibility_tests {
             )
             .unwrap(),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = futures::executor::block_on(groupsummary_builtin(
             data,
             groups,
@@ -1470,24 +1335,30 @@ mod integer_compatibility_tests {
 
     #[test]
     fn groupsummary_residency_gate_only_applies_to_explicit_handles() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 426,
-            descriptor: Default::default(),
-        };
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
         ensure_groupsummary_extensions(
-            &Value::GpuTensor(handle.clone()),
+            &Value::GpuTensor(automatic.clone()),
             &Value::from("G"),
             &Value::from("mean"),
             &[],
         )
         .expect("automatic residency remains transparent");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let error = ensure_groupsummary_extensions(
-            &Value::GpuTensor(handle.clone()),
+            &Value::GpuTensor(explicit.clone()),
             &Value::from("G"),
             &Value::from("mean"),
             &[],
@@ -1497,6 +1368,9 @@ mod integer_compatibility_tests {
             error.identifier(),
             GROUPSUMMARY_RESIDENT_INPUT_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop((automatic, explicit));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

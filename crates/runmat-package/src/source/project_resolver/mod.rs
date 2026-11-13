@@ -12,3 +12,4 @@ pub use model::{
     RegistryPackageMount, ResolvedProject, ServerProjectPackageMount,
 };
 pub use resolver::resolve_project_async;
+pub(super) use resolver::resolve_project_with_provider_async;

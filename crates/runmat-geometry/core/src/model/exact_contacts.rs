@@ -122,16 +122,28 @@ fn validate_exact_contact_definitions(
     Ok(())
 }
 
-pub(super) fn expected_contact_pair(
-    root_assembly_path: &[String],
-    side_a_face_ids: &[PersistentEntityId],
-    side_b_face_ids: &[PersistentEntityId],
-) -> ExactContactPair {
-    contact_pair(
-        root_assembly_path,
-        side_a_face_ids.to_vec(),
-        side_b_face_ids.to_vec(),
-    )
+/// Check the same source-derived identity as construction without copying sides.
+pub(super) fn contact_pair_matches(root: &[String], pair: &ExactContactPair) -> bool {
+    let pairing = pairing_digest(&pair.side_a_face_ids, &pair.side_b_face_ids);
+    let identity = contact_identity_digest(&pairing);
+    let mut token = [0u8; 72];
+    token[..8].copy_from_slice(b"contact:");
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for (index, byte) in identity.into_iter().enumerate() {
+        token[8 + index * 2] = HEX[(byte >> 4) as usize];
+        token[9 + index * 2] = HEX[(byte & 15) as usize];
+    }
+    pair.id.kind == PersistentEntityKind::Contact
+        && pair.id.assembly_path == root
+        && pair.id.source_topology_id.as_bytes() == token
+        && pair.pairing_schema_version == EXACT_CONTACT_PAIRING_SCHEMA_VERSION
+        && pair.pairing_contract_digest == pairing
+}
+fn contact_identity_digest(pairing: &[u8; 32]) -> sha2::digest::Output<Sha256> {
+    let mut identity = Sha256::new();
+    identity.update(b"runmat.exact-contact-identity\0");
+    identity.update(pairing);
+    identity.finalize()
 }
 
 fn canonical_side(
@@ -164,15 +176,13 @@ fn contact_pair(
     side_b_face_ids: Vec<PersistentEntityId>,
 ) -> ExactContactPair {
     let pairing_contract_digest = pairing_digest(&side_a_face_ids, &side_b_face_ids);
-    let mut identity = Sha256::new();
-    identity.update(b"runmat.exact-contact-identity\0");
-    identity.update(pairing_contract_digest);
+    let identity = contact_identity_digest(&pairing_contract_digest);
     ExactContactPair {
-        id: PersistentEntityId {
-            kind: PersistentEntityKind::Contact,
-            source_topology_id: format!("contact:{:x}", identity.finalize()),
-            assembly_path: root_assembly_path.to_vec(),
-        },
+        id: PersistentEntityId::new(
+            PersistentEntityKind::Contact,
+            format!("contact:{}", hex::encode(identity)),
+            root_assembly_path.to_vec(),
+        ),
         side_a_face_ids,
         side_b_face_ids,
         pairing_schema_version: EXACT_CONTACT_PAIRING_SCHEMA_VERSION,

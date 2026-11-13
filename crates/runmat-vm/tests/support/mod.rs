@@ -2,9 +2,11 @@
 
 use futures::executor::block_on;
 use runmat_hir::LoweringContext;
+use runmat_runtime::execution::RootedValues;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
+#[cfg(not(target_arch = "wasm32"))]
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
 
 struct VmThreadStateGuard;
@@ -24,7 +26,14 @@ impl Drop for VmThreadStateGuard {
 
 fn run_with_stack<T>(f: impl FnOnce() -> T) -> Result<T, RuntimeError> {
     let _state_guard = VmThreadStateGuard::enter();
-    Ok(stacker::grow(EXEC_STACK_BYTES, f))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Ok(stacker::grow(EXEC_STACK_BYTES, f))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        Ok(f())
+    }
 }
 
 pub fn compile_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError> {
@@ -38,13 +47,101 @@ pub fn compile_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError>
 }
 
 #[allow(dead_code)]
-pub fn execute_source(source: &str) -> Result<Vec<Value>, RuntimeError> {
+pub fn execute_source(source: &str) -> Result<RootedValues, RuntimeError> {
     let bc = compile_source(source)?;
     interpret(&bc)
 }
 
 #[allow(dead_code)]
-pub fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
+pub fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<RootedValues, RuntimeError> {
     let bytecode = bytecode.clone();
     run_with_stack(move || block_on(runmat_vm::interpret(&bytecode)))?
+}
+
+#[allow(dead_code)]
+pub fn interpret_with_program_source(
+    bytecode: &runmat_vm::Bytecode,
+    name: &str,
+    text: &str,
+) -> Result<RootedValues, RuntimeError> {
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_program_sources([runmat_runtime::source_context::ProgramSourceRecord {
+        ordinal: runmat_types::ProgramSourceId(0),
+        name: std::sync::Arc::from(name),
+        fullpath_name: None,
+        text: std::sync::Arc::from(text),
+    }])
+    .map_err(|error| RuntimeError::new(error.to_string()))?;
+    interpret_in_context(bytecode, runtime)
+}
+
+#[allow(dead_code)]
+pub fn interpret_with_base_workspace(
+    bytecode: &runmat_vm::Bytecode,
+) -> Result<RootedValues, RuntimeError> {
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let workspace = std::rc::Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(owner));
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_workspace(workspace.clone())
+        .with_base_workspace(workspace);
+    // A selected script/base workspace is a publishing top-level frame, not
+    // the transient procedure frame used by the ordinary interpreter helper.
+    // Start with unassigned slots; executing the script publishes each write.
+    let admission = runmat_vm::workspace_admission(
+        bytecode
+            .var_names
+            .iter()
+            .map(|(slot, name)| (name.clone(), *slot))
+            .collect(),
+        std::collections::HashSet::new(),
+    );
+    interpret_in_context_with_admission(
+        bytecode,
+        runtime.with_service_ports(ports),
+        Some(admission),
+    )
+}
+
+pub(super) fn interpret_in_context(
+    bytecode: &runmat_vm::Bytecode,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<RootedValues, RuntimeError> {
+    interpret_in_context_with_admission(bytecode, runtime, None)
+}
+
+fn interpret_in_context_with_admission(
+    bytecode: &runmat_vm::Bytecode,
+    runtime: runmat_runtime::context::RuntimeContext,
+    admission: Option<runmat_vm::PendingWorkspaceAdmission>,
+) -> Result<RootedValues, RuntimeError> {
+    let bytecode = bytecode.clone();
+    run_with_stack(move || {
+        let vars = vec![Value::Num(0.0); bytecode.var_count];
+        let execution = block_on(runmat_vm::interpret_workspace(
+            &bytecode,
+            runmat_vm::InterpreterVars::from_owned(vars),
+            Some("<main>"),
+            runtime,
+            admission,
+            None,
+        ));
+        let outcome = execution.outcome?;
+        // The completed workspace aliases the same frame. Retire that unused
+        // host snapshot before consuming the outcome's original value owner.
+        drop(execution.workspace);
+        let runmat_vm::InterpreterOutcome::Completed(completion) = outcome;
+        completion.with_owned(|completion| {
+            let values = completion.values.into_owned().map_err(|_| {
+                RuntimeError::new("ordinary test execution retained a workspace-owned frame")
+            })?;
+            RootedValues::new(values).map_err(|error| error.into_runtime_error())
+        })
+    })?
 }

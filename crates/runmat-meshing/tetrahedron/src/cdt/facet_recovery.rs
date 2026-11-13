@@ -1,4 +1,7 @@
+use std::collections::VecDeque;
+
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
+use serde::{Deserialize, Serialize};
 
 use super::{
     DelaunayConstraints, DelaunaySegmentRecovery, DelaunaySegmentRecoveryError,
@@ -6,24 +9,56 @@ use super::{
 };
 
 mod cavity;
+mod conforming_split;
+mod execution;
+mod facet_delaunay;
 mod flip;
+mod protection;
 mod support;
+mod support_refinement;
 mod validation;
 mod work;
+mod working;
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
+pub(super) use execution::construct_delaunay_facet_recovery;
+use execution::support_edge_exists;
+use protection::FacetProtection;
+use working::FacetRecoveryWorking;
 
-use cavity::try_recover_facet_with_cavity;
-use flip::try_recover_facet_with_edge_flip;
-use support::facet_support;
+use cavity::{
+    try_recover_facet_patch_in_place, try_recover_facet_with_cavity,
+    try_recover_facet_with_cavity_in_place,
+};
+use flip::try_recover_facet_with_local_edge_flip;
+use support::facet_support_on;
+use support_refinement::{
+    ensure_support_triangle_edges, ensure_support_triangle_edges_in_place, interior_support_node,
+    recovered_segment_edges, refine_support_triangle_interior,
+    refine_support_triangle_interior_in_place, split_segment_encroached_by_apex,
+    split_segment_encroached_by_interior_node, split_segment_encroached_by_support_edge,
+    triangle_has_positive_area_on, PendingSupportTriangle, SupportRefinementContext,
+    SupportTriangleEdgeState,
+};
 pub use validation::validate_delaunay_facet_recovery;
 use validation::{face_exists, validate_inputs};
 use work::FacetRecoveryWork;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::cdt) fn facet_steiner_identity(
+    support: [StableDigest; 3],
+    insertion_round: u64,
+    candidate_rank: u64,
+) -> StableDigest {
+    cavity::steiner_identity(support, insertion_round, candidate_rank)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayFacetRecoveryOptions {
     pub segment_recovery: DelaunaySegmentRecoveryOptions,
     pub maximum_search_steps: u64,
     pub maximum_flip_attempts: u64,
     pub maximum_support_steps: u64,
+    pub maximum_pending_support_triangles: u64,
     pub maximum_cavity_steps: u64,
     pub maximum_cavity_tetrahedra: u64,
     pub maximum_cavity_nodes: u64,
@@ -45,6 +80,7 @@ impl Default for DelaunayFacetRecoveryOptions {
             maximum_search_steps: 1_000_000_000,
             maximum_flip_attempts: 100_000_000,
             maximum_support_steps: 100_000_000,
+            maximum_pending_support_triangles: 100_000,
             maximum_cavity_steps: 100_000_000,
             maximum_cavity_tetrahedra: 10_000,
             maximum_cavity_nodes: 10_000,
@@ -72,17 +108,31 @@ pub struct DelaunayRecoveredFacet {
     pub triangles: Vec<DelaunayRecoveredFacetTriangle>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelaunayFacetSteinerInsertion {
+    pub constraint_index: u32,
+    pub support_node_identities: [StableDigest; 3],
+    pub insertion_round: u64,
+    pub candidate_rank: u64,
+    pub node_identity: StableDigest,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DelaunayFacetRecovery {
     /// Immutable prerequisite used to replay this stage independently.
     pub segment_recovery: DelaunaySegmentRecovery,
+    /// Final recovered segment chains after conforming facet recovery split any encroached edge.
+    pub recovered_segments: Vec<super::DelaunayRecoveredSegment>,
     /// Canonical topology after every recovered facet has been inserted.
     pub topology: DelaunayVolumeTopology,
     pub facets: Vec<DelaunayRecoveredFacet>,
+    pub steiner_insertions: Vec<DelaunayFacetSteinerInsertion>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayFacetRecoveryErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidConstraints,
     InvalidTopology,
@@ -131,70 +181,19 @@ pub fn recover_delaunay_facets(
     Ok(recovery)
 }
 
-pub(super) fn construct_delaunay_facet_recovery(
-    segment_recovery: DelaunaySegmentRecovery,
-    constraints: &DelaunayConstraints,
-    options: DelaunayFacetRecoveryOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayFacetRecovery, DelaunayFacetRecoveryError> {
-    let mut working = segment_recovery.clone();
-    let mut work = FacetRecoveryWork::new(options, cancellation);
-    let mut facets = Vec::with_capacity(constraints.facets.len());
-    let mut protected_triangles = Vec::new();
-    for constraint_index in 0..constraints.facets.len() {
-        let support = facet_support(&working, constraints, constraint_index as u32, &mut work)?;
-        for triangle in &support {
-            if !face_exists(
-                &working.topology,
-                triangle.node_identities,
-                constraint_index as u32,
-                &mut work,
-            )? {
-                let updated = if let Some(updated) = try_recover_facet_with_edge_flip(
-                    &working,
-                    triangle.node_identities,
-                    &protected_triangles,
-                    constraint_index as u32,
-                    &mut work,
-                )? {
-                    updated
-                } else if let Some(updated) = try_recover_facet_with_cavity(
-                    &working,
-                    triangle.node_identities,
-                    &protected_triangles,
-                    constraint_index as u32,
-                    &mut work,
-                )? {
-                    updated
-                } else {
-                    return Err(error(
-                        DelaunayFacetRecoveryErrorKind::UnsatisfiableConstraint,
-                        Some(constraint_index as u32),
-                        "facet support is absent and no legal protected flip or edge-star cavity recovers it",
-                    ));
-                };
-                working.topology = updated;
-            }
-            protected_triangles.push(*triangle);
-        }
-        facets.push(DelaunayRecoveredFacet {
-            constraint_index: constraint_index as u32,
-            triangles: support,
-        });
-    }
-    let recovery = DelaunayFacetRecovery {
-        segment_recovery,
-        topology: working.topology,
-        facets,
-    };
-    Ok(recovery)
+fn triangle_edges(triangle: [StableDigest; 3]) -> [[StableDigest; 2]; 3] {
+    [
+        [triangle[0], triangle[1]],
+        [triangle[1], triangle[2]],
+        [triangle[2], triangle[0]],
+    ]
 }
 
-fn node_index(topology: &DelaunayVolumeTopology, identity: StableDigest) -> Option<usize> {
-    topology
-        .nodes
-        .binary_search_by_key(&identity, |node| node.identity)
-        .ok()
+fn node_index(
+    topology: &impl crate::cdt::insertion::topology_access::TetrahedralTopology,
+    identity: StableDigest,
+) -> Option<usize> {
+    topology.node_index(identity).map(|index| index as usize)
 }
 
 fn validate_options(
@@ -203,6 +202,7 @@ fn validate_options(
     if options.maximum_search_steps == 0
         || options.maximum_flip_attempts == 0
         || options.maximum_support_steps == 0
+        || options.maximum_pending_support_triangles == 0
         || options.maximum_cavity_steps == 0
         || options.maximum_cavity_tetrahedra == 0
         || options.maximum_cavity_nodes == 0
@@ -220,6 +220,21 @@ fn validate_options(
             DelaunayFacetRecoveryErrorKind::InvalidOptions,
             None,
             "facet recovery limits must be nonzero",
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_pending_capacity(
+    pending: &VecDeque<PendingSupportTriangle>,
+    additional: usize,
+    maximum: u64,
+    constraint_index: u32,
+) -> Result<(), DelaunayFacetRecoveryError> {
+    if (pending.len() as u64).saturating_add(additional as u64) > maximum {
+        return Err(resource(
+            constraint_index,
+            "facet support queue exceeded its configured triangle limit",
         ));
     }
     Ok(())

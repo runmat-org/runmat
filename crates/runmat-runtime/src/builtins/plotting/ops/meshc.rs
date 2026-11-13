@@ -1,18 +1,9 @@
 //! MATLAB-compatible `meshc` builtin (mesh with contour).
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{MESHC_ERROR_INTERNAL, MESHC_ERROR_INVALID_ARGUMENT};
 
-use log::warn;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
-use runmat_value::Value;
 #[cfg(test)]
 use runmat_value::{IntegerStorage, Tensor};
 
@@ -31,183 +22,10 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot_with_bounds_async;
 use crate::build_runtime_error;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::RuntimeError;
 use std::sync::Arc;
 
 const BUILTIN_NAME: &str = "meshc";
-
-const INTEGER_X: [BuiltinIntegerInputCapability; 1] = [meshc_integer_input("X")];
-const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = [meshc_integer_input("Y")];
-const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = [meshc_integer_input("Z")];
-
-const fn meshc_integer_input(name: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "The compatibility target explicitly lists every built-in integer class for this surface coordinate role.",
-    }
-}
-
-const fn meshc_integer_capability(
-    form: &'static str,
-    inputs: &'static [BuiltinIntegerInputCapability],
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native class, exact values, and shape remain authoritative on the primary Surface object and in RunMat scene persistence; surface rendering, contour generation, and client-side GPU handling are explicit floating boundaries. The documented independent C color-array form is a general unimplemented graphics gap.",
-    }
-}
-
-pub const MESHC_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    meshc_integer_capability("s = meshc(integer_X, Y, Z, ...)", &INTEGER_X),
-    meshc_integer_capability("s = meshc(X, integer_Y, Z, ...)", &INTEGER_Y),
-    meshc_integer_capability("s = meshc(X, Y, integer_Z, ...)", &INTEGER_Z),
-];
-
-const MESHC_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered mesh surface (with contour overlay).",
-}];
-
-const MESHC_INPUTS_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Surface height grid.",
-}];
-
-const MESHC_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X axis vector/meshgrid matrix matching Z columns.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y axis vector/meshgrid matrix matching Z rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Surface height grid.",
-    },
-];
-
-const MESHC_INPUTS_Z_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Surface height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const MESHC_INPUTS_X_Y_Z_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X axis vector/meshgrid matrix matching Z columns.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y axis vector/meshgrid matrix matching Z rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Surface height grid.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const MESHC_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = meshc(Z)",
-        inputs: &MESHC_INPUTS_Z,
-        outputs: &MESHC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = meshc(X, Y, Z)",
-        inputs: &MESHC_INPUTS_X_Y_Z,
-        outputs: &MESHC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = meshc(Z, Name, Value, ...)",
-        inputs: &MESHC_INPUTS_Z_PROPS,
-        outputs: &MESHC_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = meshc(X, Y, Z, Name, Value, ...)",
-        inputs: &MESHC_INPUTS_X_Y_Z_PROPS,
-        outputs: &MESHC_OUTPUT_HANDLE,
-    },
-];
-
-pub const MESHC_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MESHC.INVALID_ARGUMENT",
-    identifier: Some("RunMat:meshc:InvalidArgument"),
-    when: "Surface/grid/axis inputs or style name/value arguments are invalid.",
-    message: "meshc: invalid argument",
-};
-
-pub const MESHC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MESHC.INTERNAL",
-    identifier: Some("RunMat:meshc:Internal"),
-    when: "Internal surface/contour construction or render preparation fails unexpectedly.",
-    message: "meshc: internal operation failed",
-};
-
-const MESHC_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [MESHC_ERROR_INVALID_ARGUMENT, MESHC_ERROR_INTERNAL];
-
-pub const MESHC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MESHC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MESHC_ERRORS,
-};
 
 fn meshc_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -225,29 +43,55 @@ fn map_meshc_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    meshc_error_with_detail(&MESHC_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = meshc_error_with_detail(&MESHC_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_meshc_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    meshc_error_with_detail(&MESHC_ERROR_INTERNAL, err.message)
+    let mapped = meshc_error_with_detail(&MESHC_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "meshc",
-    category = "plotting",
-    summary = "Render a MATLAB-compatible mesh with contour overlay.",
-    keywords = "meshc,plotting,mesh,contour",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::meshc::MESHC_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::meshc::MESHC_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::meshc"
 )]
-pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn meshc_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "meshc: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "meshc")?;
+    let _arguments = args.fork();
+    work.finish(meshc_impl(args, &work).await)
+}
+
+async fn meshc_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)
         .map_err(map_meshc_invalid_argument)?;
     let source_x = numeric_plot_data_from_value(&x, BUILTIN_NAME)
@@ -274,7 +118,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = Arc::new(
         parse_surface_style_args(
             "meshc",
-            &rest,
+            rest.view(),
             SurfaceStyleDefaults::new(
                 ColorMap::Turbo,
                 ShadingMode::Faceted,
@@ -287,77 +131,51 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .map_err(map_meshc_invalid_argument)?,
     );
     let opts = PlotRenderOptions {
-        title: "Mesh with Contours",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: false,
         ..Default::default()
     };
     let level_spec = ContourLevelSpec::Count(default_level_count());
     let contour_map = style.colormap.clone();
     let (mut surface, contour) = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
-        match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
-            Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
-                BUILTIN_NAME,
-                &x_axis,
-                &y_axis,
-                &z_gpu,
-                min_z,
-                max_z,
-                style.colormap.clone(),
-                style.alpha,
-                style.flatten_z,
-            )
-            .await
-            {
-                Ok(surface_gpu) => {
-                    let mut surface = surface_gpu.with_wireframe(true);
-                    style.apply_to_plot(&mut surface);
-                    let base_z = surface.bounds().min.z;
-                    let contour = contour_for_surface_axes_input(
-                        BUILTIN_NAME,
-                        &x_axis,
-                        &y_axis,
-                        &z_input,
-                        Some(z_gpu),
-                        contour_map,
-                        base_z,
-                        &level_spec,
-                    )
-                    .await
-                    .map_err(map_meshc_invalid_argument)?;
-                    (surface, contour)
-                }
-                Err(err) => {
-                    warn!("meshc surface GPU path unavailable: {err}");
-                    let (x_host, y_host) =
-                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                    let z_tensor = super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME)
-                        .await
-                        .map_err(map_meshc_invalid_argument)?;
-                    let grid = tensor_to_surface_grid_matlab_xy(z_tensor, rows, cols, BUILTIN_NAME)
-                        .map_err(map_meshc_invalid_argument)?;
-                    let mut surface =
-                        build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())
-                            .map_err(map_meshc_invalid_argument)?;
-                    style.apply_to_plot(&mut surface);
-                    let base_z = surface.bounds().min.z;
-                    let contour = build_contour_plot(
-                        BUILTIN_NAME,
-                        &x_host,
-                        &y_host,
-                        &grid,
-                        contour_map,
-                        base_z,
-                        &level_spec,
-                        &ContourLineColor::Auto,
-                    )
-                    .map_err(map_meshc_invalid_argument)?;
-                    (surface, contour)
-                }
-            },
-            Err(err) => {
-                warn!("meshc GPU bounds unavailable: {err}");
+        match super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(
+            BUILTIN_NAME,
+            &x_axis,
+            &y_axis,
+            &z_gpu,
+        )
+        .await?
+        {
+            Some(mut prepared) => {
+                let (min_z, max_z) = prepared.z_bounds;
+                let mut surface = build_surface_gpu_plot_with_bounds_async(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &z_gpu,
+                    &mut prepared,
+                    min_z,
+                    max_z,
+                    style.colormap.clone(),
+                    style.alpha,
+                    style.flatten_z,
+                )
+                .await?
+                .with_wireframe(true);
+                style.apply_to_plot(&mut surface);
+                let base_z = surface.bounds().min.z;
+                let contour = contour_for_surface_axes_input(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &z_gpu,
+                    &mut prepared,
+                    contour_map,
+                    base_z,
+                    &level_spec,
+                )?;
+                (surface, contour)
+            }
+            None => {
                 let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
                     .await
                     .map_err(map_meshc_invalid_argument)?;
@@ -426,6 +244,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let surface = surface_opt.take().expect("meshc surface consumed once");
         let contour = contour_opt.take().expect("meshc contour consumed once");
@@ -440,8 +259,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_surface_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_meshc_internal(err));
@@ -452,10 +270,19 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{MESHC_DESCRIPTOR, MESHC_INTEGER_CAPABILITIES};
+    use runmat_value::Value;
+    async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::meshc_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -478,14 +305,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn meshc_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(
-                &[Type::tensor(), Type::tensor(), Type::tensor()],
-                &ResolveContext::new(Vec::new())
-            ),
-            Type::Num
+    fn meshc_catalog_infers_host_double_handle() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(2)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 3],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::MESHC_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 
     #[test]
@@ -543,7 +387,7 @@ pub(crate) mod tests {
                 .expect("meshc ZData");
 
             assert!(
-                matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+                matches!(value, Value::Tensor(tensor) if tensor.shape() == [2, 2] && tensor.integer_storage() == Some(&expected))
             );
         });
     }

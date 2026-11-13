@@ -1,0 +1,61 @@
+// Engineering physics belongs in the importing study.
+
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
+
+    region body : solid { select id "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"; expect exactly_one }
+    region support : face { select id "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"; expect exactly_one }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.75 m
+        maximum_deviation = 0.05 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model launch_bracket {
+    assign material.steel to geometry.bracket.region.body
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    response_spectrum qualification_x {
+        frequencies = [0.1, 100, 1000, 10000, 100000] Hz
+        ordinates = [1.2, 1.2, 2.5, 1.8, 0.7] g
+        damping_ratio = 0.05
+        response = pseudo_acceleration
+        direction = [1, 0, 0]
+        modal_combination = cqc
+        directional_combination = srss
+        minimum_cumulative_mass_ratio = 0.9
+        truncation_correction = none
+        rigid_response = disabled
+    }
+}
+
+study modal_response_spectrum {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.launch_bracket
+    analysis modes {
+        structural modal { modes = 30 }
+        retain basis
+    }
+    analysis response_spectrum after analysis.modes {
+        structural modal_response_spectrum {
+            basis = analysis.modes.state.basis
+            spectra = [model.response_spectrum.qualification_x]
+        }
+    }
+    output displacement = analysis.response_spectrum.field.node.displacement
+}

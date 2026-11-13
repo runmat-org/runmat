@@ -1,16 +1,15 @@
-//! MATLAB-compatible `interp2` builtin for gridded dense real data.
+//! MATLAB-compatible `interp2` builtin for gridded dense numeric data.
 
+#[cfg(test)]
+use runmat_builtins::INTERP2_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, INTERP2_ERROR_INTERNAL, INTERP2_ERROR_INVALID_ARGUMENT,
+    INTERP2_ERROR_INVALID_INPUT, INTERP2_INTEGER_EXTRAPOLATION_EXTENSION,
+    INTERP2_INTEGER_QUERY_EXTENSION, INTERP2_INTEGER_SAMPLE_EXTENSION,
+    INTERP2_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -25,408 +24,20 @@ use super::pp::{
     query_points, vector_from_value, Extrapolation, InterpMethod,
 };
 
+#[path = "interp2/allocation.rs"]
+mod allocation;
+#[path = "interp2/spline_grid.rs"]
+mod spline_grid;
+
 const NAME: &str = "interp2";
 
-const INTERP2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Vq",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Interpolated values over a 2-D grid.",
-}];
-
-const INTERP2_INPUTS_Z_XQ_YQ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid sample matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Yq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query Y coordinates.",
-    },
-];
-
-const INTERP2_INPUTS_X_Y_Z_XQ_YQ: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid X axis vector or mesh.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid Y axis vector or mesh.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid sample matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Yq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query Y coordinates.",
-    },
-];
-
-const INTERP2_INPUTS_Z_XQ_YQ_METHOD: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid sample matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Yq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\" or \"nearest\".",
-    },
-];
-
-const INTERP2_INPUTS_Z_XQ_YQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid sample matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Yq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\" or \"nearest\".",
-    },
-    BuiltinParamDescriptor {
-        name: "extrap",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("NaN"),
-        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
-    },
-];
-
-const INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid X axis vector or mesh.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid Y axis vector or mesh.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid sample matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Yq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\" or \"nearest\".",
-    },
-];
-
-const INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 7] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid X axis vector or mesh.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid Y axis vector or mesh.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid sample matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Yq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\" or \"nearest\".",
-    },
-    BuiltinParamDescriptor {
-        name: "extrap",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("NaN"),
-        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
-    },
-];
-
-const INTERP2_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(Z, Xq, Yq)",
-        inputs: &INTERP2_INPUTS_Z_XQ_YQ,
-        outputs: &INTERP2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(X, Y, Z, Xq, Yq)",
-        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ,
-        outputs: &INTERP2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(Z, Xq, Yq, method)",
-        inputs: &INTERP2_INPUTS_Z_XQ_YQ_METHOD,
-        outputs: &INTERP2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(X, Y, Z, Xq, Yq, method)",
-        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD,
-        outputs: &INTERP2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(Z, Xq, Yq, extrap)",
-        inputs: &INTERP2_INPUTS_Z_XQ_YQ_METHOD,
-        outputs: &INTERP2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(X, Y, Z, Xq, Yq, extrap)",
-        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD,
-        outputs: &INTERP2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(Z, Xq, Yq, method, extrap)",
-        inputs: &INTERP2_INPUTS_Z_XQ_YQ_METHOD_EXTRAP,
-        outputs: &INTERP2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Vq = interp2(X, Y, Z, Xq, Yq, method, extrap)",
-        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD_EXTRAP,
-        outputs: &INTERP2_OUTPUT,
-    },
-];
-
-const INTERP2_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INTERP2.INVALID_ARGUMENT",
-    identifier: Some("RunMat:interp2:InvalidArgument"),
-    when: "Argument count, method/extrapolation options, or axis/query compatibility is invalid.",
-    message: "interp2: invalid argument",
-};
-
-const INTERP2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INTERP2.INVALID_INPUT",
-    identifier: Some("RunMat:interp2:InvalidInput"),
-    when: "Grid or query values cannot be converted to numeric interpolation domains.",
-    message: "interp2: invalid input",
-};
-
-const INTERP2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INTERP2.INTERNAL",
-    identifier: Some("RunMat:interp2:Internal"),
-    when: "Interpolation output construction fails due to internal tensor assembly paths.",
-    message: "interp2: internal interpolation failure",
-};
-
-const INTERP2_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    INTERP2_ERROR_INVALID_ARGUMENT,
-    INTERP2_ERROR_INVALID_INPUT,
-    INTERP2_ERROR_INTERNAL,
-];
-
-pub const INTERP2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INTERP2_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INTERP2_ERRORS,
-};
-
-const INTERP2_INTEGER_SAMPLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "interp2-integer-sample",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interp2 with typed-integer sample grids or values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Interp2IntegerSampleExtension"),
-};
-const INTERP2_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "interp2-integer-query",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interp2 with typed-integer query coordinates is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Interp2IntegerQueryExtension"),
-};
-const INTERP2_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "interp2-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interp2 with logical numeric input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Interp2LogicalInputExtension"),
-};
-const INTERP2_INTEGER_EXTRAPOLATION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "interp2-integer-extrapolation",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "interp2 with a typed-integer extrapolation value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:Interp2IntegerExtrapolationExtension"),
-    };
-pub const INTERP2_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    INTERP2_INTEGER_SAMPLE_EXTENSION,
-    INTERP2_INTEGER_QUERY_EXTENSION,
-    INTERP2_LOGICAL_INPUT_EXTENSION,
-    INTERP2_INTEGER_EXTRAPOLATION_EXTENSION,
-];
-const INTERP2_INTEGER_SAMPLE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X, Y, or V",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer grids and values must be exactly representable before interpolation.",
-    }];
-const INTERP2_INTEGER_QUERY_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Xq or Yq",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer query coordinates must be exactly representable before interpolation.",
-    }];
-const INTERP2_INTEGER_EXTRAPOLATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "extrapolation value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The scalar fill value must be exactly representable before interpolation.",
-    }];
-pub const INTERP2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = interp2(integer_X_Y_or_V, ...)",
-        inputs: &INTERP2_INTEGER_SAMPLE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer samples cross one checked binary64 boundary; MATLAB-compatible modes retain documented single/double grids and values.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = interp2(X, Y, V, integer_Xq_or_Yq)",
-        inputs: &INTERP2_INTEGER_QUERY_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer queries are gated before provider access and converted only after exactness validation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = interp2(..., method, integer_extrapolation_value)",
-        inputs: &INTERP2_INTEGER_EXTRAPOLATION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "RunMat accepts this broader scalar fill form only after compatibility and exactness checks that precede provider access or gather.",
-    },
-];
+fn interp2_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
 
 fn interp2_error_with_message(
     message: impl Into<String>,
@@ -498,41 +109,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "interp2 is currently a runtime sink.",
 };
 
-fn interp2_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let query = match args.len() {
-        0..=2 => return Type::tensor(),
-        3 | 4 => args.get(1),
-        _ => args.get(3),
-    };
-    match query {
-        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        _ => Type::tensor(),
-    }
-}
-
 #[runtime_builtin(
     name = "interp2",
-    category = "math/interpolation",
-    summary = "Interpolate two-dimensional gridded data.",
-    keywords = "interp2,interpolation,bilinear,nearest,grid,meshgrid",
-    accel = "sink",
-    sink = true,
-    type_resolver(interp2_type),
-    descriptor(crate::builtins::math::interpolation::interp2::INTERP2_DESCRIPTOR),
-    extensions(crate::builtins::math::interpolation::interp2::INTERP2_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::interpolation::interp2::INTERP2_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::math::interpolation::interp2"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::interpolation::interp2",
+    context = true
 )]
-async fn interp2_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    preflight_interp2_inputs(&args).await?;
-    let parsed = ParsedInterp2::parse(args)
+async fn interp2_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let allocation = allocation::admit_before_gather(args.view(), runtime.as_ref())?;
+    preflight_interp2_inputs(args.view()).await?;
+    if let (Some(receipt), Some(runtime)) = (allocation.as_ref(), runtime.as_ref()) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(|error| super::pp::host_allocation_error(NAME, error))?;
+    }
+    let parsed = ParsedInterp2::parse(args, runtime.as_ref())
         .await
         .map_err(|err| interp2_map_error(err, &INTERP2_ERROR_INVALID_INPUT))?;
+    if let (Some(receipt), Some(runtime)) = (allocation.as_ref(), runtime.as_ref()) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(|error| super::pp::host_allocation_error(NAME, error))?;
+    }
+    if parsed.method == InterpMethod::Spline {
+        return spline_grid::evaluate(&parsed, runtime.as_ref(), allocation.as_ref()).await;
+    }
     let data =
         evaluate_grid(&parsed).map_err(|err| interp2_map_error(err, &INTERP2_ERROR_INTERNAL))?;
     if data.len() == 1 {
@@ -544,7 +148,15 @@ async fn interp2_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::Tensor(tensor))
 }
 
-async fn preflight_interp2_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
+#[cfg(test)]
+async fn interp2_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    interp2_builtin_registered(None, args).await
+}
+
+async fn preflight_interp2_inputs(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<()> {
     use crate::builtins::common::validation::{
         native_integer_value_is_exact_f64_async, value_has_logical_class,
         value_has_native_integer_class,
@@ -552,11 +164,17 @@ async fn preflight_interp2_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
     if args.len() < 3 {
         return Ok(());
     }
-    let explicit = args.len() >= 5 && !is_option_arg(&args[3]);
+    let explicit = args.len() >= 5 && !is_option_arg(&args[3])?;
     let (samples, queries) = if explicit {
-        (&args[..3], &args[3..5])
+        (
+            args.range(..3).expect("interp2 samples"),
+            args.range(3..5).expect("interp2 queries"),
+        )
     } else {
-        (&args[..1], &args[1..3])
+        (
+            args.range(..1).expect("interp2 samples"),
+            args.range(1..3).expect("interp2 queries"),
+        )
     };
     for value in samples {
         if value_has_native_integer_class(value) {
@@ -620,7 +238,7 @@ async fn preflight_interp2_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
 struct ParsedInterp2 {
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
-    z: Tensor,
+    z: GridSamples,
     xq: Vec<f64>,
     yq: Vec<f64>,
     output_shape: Vec<usize>,
@@ -629,7 +247,10 @@ struct ParsedInterp2 {
 }
 
 impl ParsedInterp2 {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(
+        mut args: crate::call::BuiltinArguments,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> crate::BuiltinResult<Self> {
         if args.len() < 3 {
             return Err(interp2_invalid_argument(
                 "expected Z, Xq, and Yq or X, Y, Z, Xq, and Yq",
@@ -638,45 +259,49 @@ impl ParsedInterp2 {
 
         let mut method = InterpMethod::Linear;
         let mut extrap = Extrapolation::Nan;
-        let explicit_axes = args.len() >= 5 && !is_option_arg(&args[3]);
+        let mut explicit_extrap = false;
+        let explicit_axes = args.len() >= 5 && !is_option_arg(&args[3])?;
         let (x_axis, y_axis, z, xq_value, yq_value, options) = if explicit_axes {
-            let mut iter = args.into_iter();
-            let x = iter.next().expect("X");
-            let y = iter.next().expect("Y");
-            let z_value = iter.next().expect("Z");
-            let z = z_tensor(z_value).await?;
-            let (x_axis, y_axis) = axes_from_values(x, y, z.rows, z.cols).await?;
-            let xq = iter.next().expect("Xq");
-            let yq = iter.next().expect("Yq");
-            (x_axis, y_axis, z, xq, yq, iter.collect::<Vec<_>>())
+            let x = args.pop_front().expect("X");
+            let y = args.pop_front().expect("Y");
+            let z_value = args.pop_front().expect("Z");
+            let z = grid_samples(z_value).await?;
+            let (rows, cols) = z.dimensions();
+            let (x_axis, y_axis) = axes_from_values(x, y, rows, cols, runtime).await?;
+            let xq = args.pop_front().expect("Xq");
+            let yq = args.pop_front().expect("Yq");
+            (x_axis, y_axis, z, xq, yq, args)
         } else {
-            let mut iter = args.into_iter();
-            let z_value = iter.next().expect("Z");
-            let z = z_tensor(z_value).await?;
-            let x_axis: Vec<f64> = (1..=z.cols).map(|v| v as f64).collect();
-            let y_axis: Vec<f64> = (1..=z.rows).map(|v| v as f64).collect();
-            let xq = iter.next().expect("Xq");
-            let yq = iter.next().expect("Yq");
-            (x_axis, y_axis, z, xq, yq, iter.collect::<Vec<_>>())
+            let z_value = args.pop_front().expect("Z");
+            let z = grid_samples(z_value).await?;
+            let (rows, cols) = z.dimensions();
+            let x_axis: Vec<f64> = (1..=cols).map(|v| v as f64).collect();
+            let y_axis: Vec<f64> = (1..=rows).map(|v| v as f64).collect();
+            let xq = args.pop_front().expect("Xq");
+            let yq = args.pop_front().expect("Yq");
+            (x_axis, y_axis, z, xq, yq, args)
         };
 
-        validate_axis(&x_axis, "X")?;
-        validate_axis(&y_axis, "Y")?;
+        validate_axis(&x_axis, "X", runtime).await?;
+        validate_axis(&y_axis, "Y", runtime).await?;
         let xq = query_points(xq_value, NAME).await?;
         let yq = query_points(yq_value, NAME).await?;
-        let (xq_values, yq_values, output_shape) = align_queries(xq, yq)?;
+        let (xq_values, yq_values, output_shape) = align_queries(xq, yq, runtime).await?;
 
         for option in &options {
             if let Some(parsed) = parse_extrapolation(option, NAME).await? {
                 extrap = parsed;
+                explicit_extrap = true;
                 continue;
             }
             if let Some(parsed) = parse_method(option, NAME)? {
                 match parsed {
-                    InterpMethod::Linear | InterpMethod::Nearest => method = parsed,
+                    InterpMethod::Linear | InterpMethod::Nearest | InterpMethod::Spline => {
+                        method = parsed
+                    }
                     _ => {
                         return Err(interp2_invalid_argument(
-                            "only linear and nearest methods are supported",
+                            "only linear, nearest, and spline methods are supported",
                         ));
                     }
                 }
@@ -686,6 +311,22 @@ impl ParsedInterp2 {
                 "interp2: unsupported interpolation option",
                 &INTERP2_ERROR_INVALID_ARGUMENT,
             ));
+        }
+
+        if method != InterpMethod::Spline && z.is_complex() {
+            return Err(interp2_invalid_input(
+                "complex Z requires the spline method in this implementation",
+            ));
+        }
+        if method == InterpMethod::Spline {
+            if !matches!(z.dtype(), NumericDType::F32 | NumericDType::F64) {
+                return Err(interp2_invalid_input(
+                    "spline sample values must be single or double",
+                ));
+            }
+            if !explicit_extrap {
+                extrap = Extrapolation::Extrapolate;
+            }
         }
 
         Ok(Self {
@@ -701,18 +342,93 @@ impl ParsedInterp2 {
     }
 }
 
-fn is_option_arg(value: &Value) -> bool {
-    crate::builtins::common::random_args::keyword_of(value).is_some()
+fn is_option_arg(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok(crate::builtins::common::random_args::keyword_of(value)?.is_some())
 }
 
-async fn z_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
+enum GridSamples {
+    Real(Tensor),
+    Complex(ComplexTensor),
+}
+
+impl GridSamples {
+    fn dimensions(&self) -> (usize, usize) {
+        let shape = match self {
+            Self::Real(t) => t.shape(),
+            Self::Complex(t) => t.shape(),
+        };
+        match shape {
+            [] => (0, 0),
+            [columns] => (1, *columns),
+            [rows, columns, ..] => (*rows, *columns),
+        }
+    }
+
+    fn is_complex(&self) -> bool {
+        matches!(self, Self::Complex(_))
+    }
+
+    fn dtype(&self) -> NumericDType {
+        match self {
+            Self::Real(t) => t.numeric_dtype(),
+            Self::Complex(t) => t.numeric_dtype(),
+        }
+    }
+
+    fn at(&self, index: usize, imaginary: bool) -> f64 {
+        match self {
+            Self::Real(t) => {
+                if imaginary {
+                    0.0
+                } else {
+                    tensor::tensor_value_f64(t, index)
+                }
+            }
+            Self::Complex(t) => {
+                if let Some(values) = t.as_f64_slice() {
+                    let v = values[index];
+                    if imaginary {
+                        v.1
+                    } else {
+                        v.0
+                    }
+                } else if let Some(values) = t.as_f32_slice() {
+                    let v = values[index];
+                    if imaginary {
+                        f64::from(v.1)
+                    } else {
+                        f64::from(v.0)
+                    }
+                } else {
+                    unreachable!("floating complex samples admitted")
+                }
+            }
+        }
+    }
+}
+
+async fn grid_samples(value: Value) -> crate::BuiltinResult<GridSamples> {
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
-    let z =
-        tensor::value_into_tensor_for(NAME, gathered).map_err(|err| interp2_invalid_input(&err))?;
-    if z.shape.len() > 2 {
+    let z = match gathered {
+        Value::ComplexTensor(t)
+            if matches!(t.numeric_dtype(), NumericDType::F32 | NumericDType::F64) =>
+        {
+            GridSamples::Complex(t)
+        }
+        other => GridSamples::Real(
+            tensor::value_into_tensor_for(NAME, other)
+                .map_err(|err| interp2_invalid_input(&err))?,
+        ),
+    };
+    let rank = match &z {
+        GridSamples::Real(t) => t.shape().len(),
+        GridSamples::Complex(t) => t.shape().len(),
+    };
+    if rank > 2 {
         return Err(interp2_invalid_argument("Z must be a 2-D matrix"));
     }
-    if z.rows < 2 || z.cols < 2 {
+    let (rows, cols) = z.dimensions();
+    if rows < 2 || cols < 2 {
         return Err(interp2_invalid_argument(
             "Z must have at least two rows and two columns",
         ));
@@ -725,9 +441,10 @@ async fn axes_from_values(
     y: Value,
     rows: usize,
     cols: usize,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>)> {
-    let x_axis = axis_from_value(x, rows, cols, true).await?;
-    let y_axis = axis_from_value(y, rows, cols, false).await?;
+    let x_axis = axis_from_value(x, rows, cols, true, runtime).await?;
+    let y_axis = axis_from_value(y, rows, cols, false, runtime).await?;
     Ok((x_axis, y_axis))
 }
 
@@ -736,11 +453,12 @@ async fn axis_from_value(
     rows: usize,
     cols: usize,
     is_x: bool,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<Vec<f64>> {
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let tensor_value = tensor::value_into_tensor_for(NAME, gathered.clone());
     if let Ok(t) = tensor_value {
-        if is_vector_shape(&t.shape) {
+        if is_vector_shape(t.shape()) {
             let expected = if is_x { cols } else { rows };
             if t.len() != expected {
                 return Err(interp2_invalid_argument(
@@ -749,35 +467,68 @@ async fn axis_from_value(
             }
             return Ok(tensor::tensor_into_values_f64(t));
         }
-        if t.rows == rows && t.cols == cols {
-            return if is_x {
-                Ok((0..cols)
+        if interp2_matrix_dimensions(&t) == (rows, cols) {
+            let axis: Vec<f64> = if is_x {
+                (0..cols)
                     .map(|col| tensor::tensor_value_f64(&t, col * rows))
-                    .collect())
+                    .collect()
             } else {
-                Ok((0..rows)
+                (0..rows)
                     .map(|row| tensor::tensor_value_f64(&t, row))
-                    .collect())
+                    .collect()
             };
+            let mut budget = runtime.map(crate::context::RuntimeContext::cpu_cooperation);
+            for col in 0..cols {
+                for row in 0..rows {
+                    if (row + col * rows).is_multiple_of(4096) {
+                        if let Some(budget) = budget.as_mut() {
+                            budget
+                                .checkpoint(if row == 0 && col == 0 { 0 } else { 4096 })
+                                .await
+                                .map_err(|source| source.into_runtime_error())?;
+                        }
+                    }
+                    let expected = if is_x { axis[col] } else { axis[row] };
+                    if tensor::tensor_value_f64(&t, row + col * rows) != expected {
+                        return Err(interp2_invalid_input(
+                            "X and Y matrices must be full meshgrid coordinates",
+                        ));
+                    }
+                }
+            }
+            return Ok(axis);
         }
     }
     let label = if is_x { "X" } else { "Y" };
     vector_from_value(gathered, label, NAME).await
 }
 
-fn validate_axis(axis: &[f64], label: &str) -> crate::BuiltinResult<()> {
+async fn validate_axis(
+    axis: &[f64],
+    label: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<()> {
     if axis.len() < 2 {
         return Err(interp2_invalid_argument(format!(
             "{label} axis must contain at least two points"
         )));
     }
-    if axis.iter().any(|v| !v.is_finite()) {
-        return Err(interp2_invalid_argument(format!(
-            "{label} axis must be finite"
-        )));
-    }
-    for pair in axis.windows(2) {
-        if pair[1] <= pair[0] {
+    let mut budget = runtime.map(crate::context::RuntimeContext::cpu_cooperation);
+    for (index, &point) in axis.iter().enumerate() {
+        if index.is_multiple_of(4096) {
+            if let Some(budget) = budget.as_mut() {
+                budget
+                    .checkpoint(if index == 0 { 0 } else { 4096 })
+                    .await
+                    .map_err(|source| source.into_runtime_error())?;
+            }
+        }
+        if !point.is_finite() {
+            return Err(interp2_invalid_argument(format!(
+                "{label} axis must be finite"
+            )));
+        }
+        if index > 0 && point <= axis[index - 1] {
             return Err(interp2_invalid_argument(format!(
                 "{label} axis must be strictly increasing"
             )));
@@ -786,14 +537,53 @@ fn validate_axis(axis: &[f64], label: &str) -> crate::BuiltinResult<()> {
     Ok(())
 }
 
-fn align_queries(
+async fn align_queries(
     xq: super::pp::QueryPoints,
     yq: super::pp::QueryPoints,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
     match (xq.values.len(), yq.values.len()) {
         (1, 1) => Ok((xq.values, yq.values, vec![1, 1])),
         (1, len) => Ok((vec![xq.values[0]; len], yq.values, yq.shape)),
         (len, 1) => Ok((xq.values, vec![yq.values[0]; len], xq.shape)),
+        (columns, rows)
+            if xq.shape.as_slice() == [1, columns] && yq.shape.as_slice() == [rows, 1] =>
+        {
+            let count = rows
+                .checked_mul(columns)
+                .ok_or_else(|| interp2_invalid_argument("query grid size overflow"))?;
+            let mut xs = Vec::new();
+            let mut ys = Vec::new();
+            xs.try_reserve_exact(count)
+                .map_err(|_| interp2_invalid_argument("query grid exceeds memory"))?;
+            ys.try_reserve_exact(count)
+                .map_err(|_| interp2_invalid_argument("query grid exceeds memory"))?;
+            let mut budget = runtime.map(crate::context::RuntimeContext::cpu_cooperation);
+            let mut completed = 0u64;
+            for &x in &xq.values {
+                for &y in &yq.values {
+                    xs.push(x);
+                    ys.push(y);
+                    completed += 1;
+                    if completed == 4096 {
+                        if let Some(budget) = budget.as_mut() {
+                            budget
+                                .checkpoint(completed)
+                                .await
+                                .map_err(|source| source.into_runtime_error())?;
+                        }
+                        completed = 0;
+                    }
+                }
+            }
+            if let Some(budget) = budget.as_mut() {
+                budget
+                    .checkpoint(completed)
+                    .await
+                    .map_err(|source| source.into_runtime_error())?;
+            }
+            Ok((xs, ys, vec![rows, columns]))
+        }
         (left, right) if left == right && xq.shape == yq.shape => {
             Ok((xq.values, yq.values, xq.shape))
         }
@@ -853,8 +643,8 @@ fn eval_nearest(parsed: &ParsedInterp2, xq: f64, yq: f64) -> f64 {
     z_at(&parsed.z, row, col)
 }
 
-fn z_at(z: &Tensor, row: usize, col: usize) -> f64 {
-    tensor::tensor_value_f64(z, row + col * z.rows)
+fn z_at(z: &GridSamples, row: usize, col: usize) -> f64 {
+    z.at(row + col * z.dimensions().0, false)
 }
 
 fn nearest_index(axis: &[f64], q: f64, extrap: &Extrapolation) -> Option<usize> {
@@ -884,6 +674,40 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::IntegerStorage;
+    use std::rc::Rc;
+
+    struct SplineManagedParallel(crate::context::host_effect::ManagedHostEffectLedger);
+
+    impl crate::context::RuntimeParallelService for SplineManagedParallel {
+        fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            crate::context::RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..crate::context::RuntimeParallelResources::default()
+            }
+        }
+        fn managed_host_effect_ledger(
+            &self,
+        ) -> Option<crate::context::host_effect::ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
+    fn managed_runtime(
+        ledger: crate::context::host_effect::ManagedHostEffectLedger,
+    ) -> crate::context::RuntimeContext {
+        crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            crate::context::RuntimeServicePorts::default()
+                .with_parallel(Rc::new(SplineManagedParallel(ledger))),
+        )
+    }
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
@@ -892,6 +716,31 @@ mod tests {
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn interp2_sample_grid_preserves_dense_rank_boundaries() {
+        for (data, shape, dimensions) in [
+            (vec![7.0], Vec::new(), (0, 0)),
+            (vec![1.0, 2.0, 3.0, 4.0], vec![4], (1, 4)),
+        ] {
+            let z = Tensor::new(data, shape).unwrap();
+            assert_eq!(interp2_matrix_dimensions(&z), dimensions);
+            let error = block_on(interp2_builtin(vec![
+                Value::Tensor(z),
+                Value::Num(1.5),
+                Value::Num(1.5),
+            ]))
+            .expect_err("Z needs two rows and two columns");
+            assert_eq!(
+                error.identifier(),
+                INTERP2_ERROR_INVALID_ARGUMENT.identifier
+            );
+            assert!(error
+                .message()
+                .contains("at least two rows and two columns"));
+        }
     }
 
     #[test]
@@ -914,10 +763,182 @@ mod tests {
             z,
             Value::Num(18.0),
             Value::Num(120.0),
-            Value::String("nearest".to_string()),
+            Value::String("nearest".to_string().into()),
         ]))
         .expect("interp2");
         assert_eq!(value, Value::Num(2.0));
+    }
+
+    #[test]
+    fn interp2_spline_reproduces_independent_bivariate_quadratic() {
+        let x = [0.0, 0.7, 2.0, 4.0];
+        let y = [-1.0, 0.0, 1.5, 3.0];
+        let polynomial = |x: f64, y: f64| x * x + 3.0 * x * y + 2.0 * y * y;
+        let z: Vec<f64> = x
+            .iter()
+            .flat_map(|&col| y.iter().map(move |&row| polynomial(col, row)))
+            .collect();
+        let result = block_on(interp2_builtin(vec![
+            row(&x),
+            row(&y),
+            Value::Tensor(Tensor::new(z.clone(), vec![4, 4]).unwrap()),
+            Value::Num(1.2),
+            Value::Num(0.4),
+            Value::String("spline".into()),
+        ]))
+        .expect("tensor-product spline");
+        let Value::Num(actual) = result else {
+            panic!("double scalar expected")
+        };
+        assert!((actual - polynomial(1.2, 0.4)).abs() < 1e-9);
+        let single = block_on(interp2_builtin(vec![
+            row(&x),
+            row(&y),
+            Value::Tensor(
+                Tensor::from_f32(
+                    z.into_iter().map(|value| value as f32).collect(),
+                    vec![4, 4],
+                )
+                .unwrap(),
+            ),
+            Value::Num(1.2),
+            Value::Num(0.4),
+            Value::String("spline".into()),
+        ]))
+        .expect("single spline");
+        let Value::Tensor(single) = single else {
+            panic!("single scalar must retain its tensor class")
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.shape(), &[1, 1]);
+        assert!((single.materialize_f64()[0] - polynomial(1.2, 0.4)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn interp2_spline_preserves_complex_single_and_query_meshgrid_shape() {
+        let x = [0.0, 1.0, 2.0, 3.0];
+        let y = [0.0, 1.0, 2.0, 3.0];
+        let z: Vec<(f32, f32)> = x
+            .iter()
+            .flat_map(|&col| {
+                y.iter()
+                    .map(move |&row| ((col + row) as f32, (2.0 * col - row) as f32))
+            })
+            .collect();
+        let samples = ComplexTensor::from_f32(z, vec![4, 4]).unwrap();
+        let result = block_on(interp2_builtin(vec![
+            row(&x),
+            row(&y),
+            Value::ComplexTensor(samples),
+            row(&[0.5, 1.5, 2.5]),
+            Value::Tensor(Tensor::new(vec![0.25, 1.25], vec![2, 1]).unwrap()),
+            Value::String("spline".into()),
+        ]))
+        .expect("complex single spline");
+        let Value::ComplexTensor(output) = result else {
+            panic!("complex output expected")
+        };
+        assert_eq!(output.shape(), &[2, 3]);
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        let values = output.materialize_f64();
+        assert!((values[0].0 - 0.75).abs() < 1e-5);
+        assert!((values[0].1 - 0.75).abs() < 1e-5);
+        assert!((values[5].0 - 3.75).abs() < 1e-5);
+        assert!((values[5].1 - 3.75).abs() < 1e-5);
+    }
+
+    #[test]
+    fn interp2_finite_spline_retains_only_the_exact_complex_output_claim() {
+        let ledger =
+            crate::context::host_effect::ManagedHostEffectLedger::new_with_epoch(1_000_000, 17);
+        let runtime = managed_runtime(ledger.clone());
+        let samples = ComplexTensor::from_f32(
+            (0..16).map(|n| (n as f32, -(n as f32))).collect(),
+            vec![4, 4],
+        )
+        .unwrap();
+        let args = || {
+            vec![
+                Value::ComplexTensor(samples.clone()),
+                row(&[1.25, 2.25, 3.25]),
+                Value::Tensor(Tensor::new(vec![1.5, 2.5], vec![2, 1]).unwrap()),
+                Value::String("spline".into()),
+            ]
+        };
+        let output = block_on(interp2_builtin_registered(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(args()),
+        ))
+        .expect("managed complex spline");
+        let Value::ComplexTensor(output) = output else {
+            panic!("complex output expected")
+        };
+        assert_eq!(output.shape(), &[2, 3]);
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        let retained =
+            crate::context::host_allocation::HostAllocationPlan::retained_complex_tensor_bytes(
+                NumericDType::F32,
+                &[2, 3],
+            )
+            .unwrap();
+        assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, retained);
+        drop(output);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+        let narrow = crate::context::host_effect::ManagedHostEffectLedger::new_with_epoch(32, 18);
+        let failure = block_on(interp2_builtin_registered(
+            Some(managed_runtime(narrow.clone())),
+            crate::builtins::common::test_support::builtin_arguments(args()),
+        ))
+        .expect_err("finite admission must precede spline materialization");
+        assert_eq!(
+            failure.identifier(),
+            Some("RunMat:Interpolation:HostAllocation")
+        );
+        assert_eq!(narrow.snapshot().live_reserved_bytes, 0);
+
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let resident = owner
+            .allocate_zeroed(
+                vec![4, 4],
+                runmat_accelerate_api::NumericElementType::F32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let failure = block_on(interp2_builtin_registered(
+            Some(managed_runtime(narrow.clone())),
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(resident.handle),
+                Value::Num(1.5),
+                Value::Num(1.5),
+                Value::String("spline".into()),
+            ]),
+        ))
+        .expect_err("finite capacity must reject before provider download");
+        assert_eq!(
+            failure.identifier(),
+            Some("RunMat:Interpolation:HostAllocation")
+        );
+        assert_eq!(narrow.snapshot().live_reserved_bytes, 0);
+    }
+
+    #[test]
+    fn interp2_rejects_nonrectilinear_full_meshgrid() {
+        let x = Tensor::new(vec![0.0, 0.0, 1.0, 1.1], vec![2, 2]).unwrap();
+        let y = Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let z = Tensor::new(vec![0.0, 1.0, 1.0, 2.0], vec![2, 2]).unwrap();
+        let error = block_on(interp2_builtin(vec![
+            Value::Tensor(x),
+            Value::Tensor(y),
+            Value::Tensor(z),
+            Value::Num(0.5),
+            Value::Num(0.5),
+            Value::String("spline".into()),
+        ]))
+        .expect_err("malformed meshgrid must not be sampled by first row only");
+        assert!(error.message().contains("full meshgrid"));
     }
 
     #[test]
@@ -929,7 +950,7 @@ mod tests {
                 integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
                 Value::Num(18.0),
                 Value::Num(120.0),
-                Value::String("nearest".to_string()),
+                Value::String("nearest".to_string().into()),
             ]
         };
         let error =
@@ -955,7 +976,7 @@ mod tests {
             integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
             Value::Num(18.0),
             Value::Num(120.0),
-            Value::String("nearest".to_string()),
+            Value::String("nearest".to_string().into()),
         ]))
         .expect("interp2");
 
@@ -969,7 +990,7 @@ mod tests {
                 Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor")),
                 Value::Num(0.0),
                 Value::Num(0.0),
-                Value::String("linear".to_string()),
+                Value::String("linear".to_string().into()),
                 Value::Int(runmat_value::IntValue::I16(99)),
             ]
         };

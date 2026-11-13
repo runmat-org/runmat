@@ -2,67 +2,39 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    storage: TensorStorage,
-    pub shape: Vec<usize>, // Column-major layout
-    pub rows: usize,       // Compatibility for 2D usage
-    pub cols: usize,       // Compatibility for 2D usage
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum TensorStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
-    Integer(IntegerStorage),
+    shape: SharedShape, // Column-major layout
+    // Payload and immutable shape each retain their own allocation claim.
+    storage: HostNumericBuffer,
 }
 
 impl Tensor {
-    pub fn new(data: Vec<f64>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn new(data: Vec<f64>, shape: impl Into<HostShapeInput>) -> Result<Self, String> {
         Self::from_numeric_storage(NumericStorage::F64(data), shape)
     }
 
     /// Constructs a dense tensor from one authoritative native numeric buffer.
     pub fn from_numeric_storage(
         storage: NumericStorage,
-        shape: Vec<usize>,
+        shape: impl Into<HostShapeInput>,
     ) -> Result<Self, String> {
-        storage.validate_shape(&shape)?;
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        let storage = match storage {
-            NumericStorage::F64(values) => TensorStorage::F64(values),
-            NumericStorage::F32(values) => TensorStorage::F32(values),
-            storage @ (NumericStorage::I8(_)
-            | NumericStorage::I16(_)
-            | NumericStorage::I32(_)
-            | NumericStorage::I64(_)
-            | NumericStorage::U8(_)
-            | NumericStorage::U16(_)
-            | NumericStorage::U32(_)
-            | NumericStorage::U64(_)) => {
-                let integer_data = storage
-                    .into_integer_storage()
-                    .expect("integer NumericStorage variant");
-                TensorStorage::Integer(integer_data)
+        match shape.into() {
+            HostShapeInput::Owned(shape) => {
+                Ok(NumericTensorAdmission::from_numeric_storage(storage, shape)
+                    .finish_synchronously()?
+                    .into_tensor())
             }
-        };
-        Ok(Tensor {
-            storage,
-            shape,
-            rows,
-            cols,
-        })
+            HostShapeInput::Shared(shape) => Self::from_shared_host_buffer(
+                HostNumericBuffer::from_numeric_storage(storage),
+                shape,
+            ),
+        }
     }
 
     pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new(data, vec![rows, cols])
     }
 
-    pub fn from_f32(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn from_f32(data: Vec<f32>, shape: impl Into<HostShapeInput>) -> Result<Self, String> {
         Self::from_numeric_storage(NumericStorage::F32(data), shape)
     }
 
@@ -72,9 +44,10 @@ impl Tensor {
 
     pub fn new_with_dtype(
         data: Vec<f64>,
-        shape: Vec<usize>,
+        shape: impl Into<HostShapeInput>,
         dtype: NumericDType,
     ) -> Result<Self, String> {
+        let shape = shape.into();
         match dtype {
             NumericDType::F64 => Self::from_numeric_storage(NumericStorage::F64(data), shape),
             NumericDType::F32 => Self::from_numeric_storage(
@@ -94,32 +67,61 @@ impl Tensor {
     }
 
     /// Construct a tensor backed by an exact homogeneous integer buffer.
-    pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn new_integer(
+        storage: IntegerStorage,
+        shape: impl Into<HostShapeInput>,
+    ) -> Result<Self, String> {
         Self::from_numeric_storage(NumericStorage::from_integer_storage(storage), shape)
     }
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
-        match &self.storage {
-            TensorStorage::Integer(storage) => Some(storage),
-            TensorStorage::F64(_) | TensorStorage::F32(_) => None,
+        self.storage.integer_storage()
+    }
+
+    pub fn host_buffer(&self) -> &HostNumericBuffer {
+        &self.storage
+    }
+
+    pub fn from_host_buffer(
+        storage: HostNumericBuffer,
+        shape: impl Into<HostShapeInput>,
+    ) -> Result<Self, String> {
+        match shape.into() {
+            HostShapeInput::Owned(shape) => {
+                Ok(NumericTensorAdmission::from_host_buffer(storage, shape)
+                    .finish_synchronously()?
+                    .into_tensor())
+            }
+            HostShapeInput::Shared(shape) => Self::from_shared_host_buffer(storage, shape),
+        }
+    }
+
+    /// Reuses an already admitted shape owner without materializing a second
+    /// dimension vector or retaining the source payload's quota claim.
+    pub fn from_shared_host_buffer(
+        storage: HostNumericBuffer,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        let tensor = Self { shape, storage };
+        tensor.validate_shape()?;
+        Ok(tensor)
+    }
+
+    pub(super) fn from_validated_parts(parts: ValidatedNumericTensorParts) -> Self {
+        let (storage, shape, _, _) = parts.into_components();
+        Self {
+            storage,
+            shape: SharedShape::new_unmanaged(shape),
         }
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
-        match &self.storage {
-            TensorStorage::F64(_) => NumericDType::F64,
-            TensorStorage::F32(_) => NumericDType::F32,
-            TensorStorage::Integer(storage) => storage.numeric_dtype(),
-        }
+        self.storage.numeric_dtype()
     }
 
     /// Returns the authoritative number of stored numeric elements.
     pub fn len(&self) -> usize {
-        match &self.storage {
-            TensorStorage::F64(values) => values.len(),
-            TensorStorage::F32(values) => values.len(),
-            TensorStorage::Integer(storage) => storage.len(),
-        }
+        self.storage.len()
     }
 
     /// Returns whether the authoritative numeric storage contains no elements.
@@ -128,39 +130,40 @@ impl Tensor {
     }
 
     /// Borrows native double storage when this tensor's authoritative class is double.
+    /// Borrow unique native storage without growing it or triggering a COW copy.
+    pub fn try_as_f64_slice_mut_unique(&mut self) -> Option<&mut [f64]> {
+        self.storage.try_as_f64_slice_mut_unique()
+    }
+
+    /// Borrow the existing native payload without allocation or implicit COW.
+    pub fn try_unique_numeric_mutation(&mut self) -> Option<super::UniqueHostNumericMutation<'_>> {
+        self.storage.try_unique_mutation()
+    }
+
+    /// Borrow unique native storage without growing it or triggering a COW copy.
+    pub fn try_as_f32_slice_mut_unique(&mut self) -> Option<&mut [f32]> {
+        self.storage.try_as_f32_slice_mut_unique()
+    }
+
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
-        match &self.storage {
-            TensorStorage::F64(values) => Some(values),
-            TensorStorage::F32(_) | TensorStorage::Integer(_) => None,
-        }
+        self.storage.as_f64_slice()
     }
 
     /// Borrows native single storage when this tensor's authoritative class is single.
     pub fn as_f32_slice(&self) -> Option<&[f32]> {
-        match &self.storage {
-            TensorStorage::F32(values) => Some(values),
-            TensorStorage::F64(_) | TensorStorage::Integer(_) => None,
-        }
+        self.storage.as_f32_slice()
     }
 
     /// Explicitly materializes this tensor in the `f64` computation domain.
     ///
     /// Integer values outside the exact binary64 range may lose precision.
     pub fn materialize_f64(&self) -> Vec<f64> {
-        match &self.storage {
-            TensorStorage::F64(values) => values.clone(),
-            TensorStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
-            TensorStorage::Integer(storage) => storage.to_f64_vec(),
-        }
+        self.storage.materialize_f64()
     }
 
     /// Read one element without routing an integer through floating-point storage.
     pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
-        match &self.storage {
-            TensorStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
-            TensorStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
-            TensorStorage::Integer(storage) => storage.value_at(index).map(NumericScalar::from),
-        }
+        self.storage.value_at(index)
     }
 
     /// Assign one numeric scalar using the destination array's class semantics.
@@ -172,85 +175,96 @@ impl Tensor {
         index: usize,
         value: NumericScalar,
     ) -> Result<(), String> {
-        match &mut self.storage {
-            TensorStorage::F64(values) => {
-                let value = match value {
-                    NumericScalar::F64(value) => value,
-                    NumericScalar::F32(value) => f64::from(value),
-                    value => value
-                        .into_int_value()
-                        .expect("non-floating numeric scalar is integer")
-                        .to_f64(),
-                };
-                let destination = values
-                    .get_mut(index)
-                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
-                *destination = value;
-            }
-            TensorStorage::F32(values) => {
-                let value = match value {
-                    NumericScalar::F64(value) => value as f32,
-                    NumericScalar::F32(value) => value,
-                    value => value
-                        .into_int_value()
-                        .expect("non-floating numeric scalar is integer")
-                        .to_f64() as f32,
-                };
-                let destination = values
-                    .get_mut(index)
-                    .ok_or_else(|| format!("Tensor index {index} out of bounds"))?;
-                *destination = value;
-            }
-            TensorStorage::Integer(storage) => {
-                let exact = match value {
-                    NumericScalar::F64(value) => storage.cast_f64_assignment(value),
-                    NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
-                    value => storage.cast_exact_assignment(
-                        &value
-                            .into_int_value()
-                            .expect("non-floating numeric scalar is integer"),
-                    ),
-                };
-                storage.set_value(index, exact)?;
-            }
-        }
-        Ok(())
+        self.storage.set_value(index, value)
     }
 
     /// Consumes this tensor into one public all-class native numeric buffer.
     pub fn into_numeric_storage(self) -> Result<NumericStorage, String> {
-        let storage = match self.storage {
-            TensorStorage::F64(values) => NumericStorage::F64(values),
-            TensorStorage::F32(values) => NumericStorage::F32(values),
-            TensorStorage::Integer(storage) => NumericStorage::from_integer_storage(storage),
-        };
+        let storage = self.storage.into_numeric_storage();
         storage.validate_shape(&self.shape)?;
         Ok(storage)
     }
 
-    /// Change only shape metadata while retaining the underlying numeric storage.
-    pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
-        let expected = shape.iter().product::<usize>();
+    /// Validate retained dimensions against the current payload without
+    /// cloning either owner. This preserves the pre-mutation guard used by
+    /// indexing while dimension fields remain publicly writable.
+    pub fn validate_shape(&self) -> Result<(), String> {
+        let expected = BorrowedShapeAdmission::new(&self.shape).finish_synchronously(|shape| {
+            format!("numeric tensor shape {shape:?} overflows usize")
+        })?;
         if self.len() != expected {
             return Err(format!(
-                "{} tensor data length {} doesn't match shape {:?} ({} elements)",
+                "{} storage length {} doesn't match shape {:?} ({} elements)",
                 self.numeric_dtype().class_name(),
                 self.len(),
-                shape,
+                self.shape,
                 expected
             ));
         }
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        self.shape = shape;
-        self.rows = rows;
-        self.cols = cols;
+        Ok(())
+    }
+
+    /// Change only shape metadata while retaining the underlying numeric storage.
+    pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
+        self.reshape_in_place(shape)?;
         Ok(self)
+    }
+
+    /// Installs shape metadata admitted by the *current* operation. The
+    /// source tensor's retained claim does not authorize this new shape.
+    pub fn reshape_with_shared_shape(&mut self, shape: SharedShape) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let expected = BorrowedShapeAdmission::new(&shape).finish_synchronously(|dimensions| {
+            format!("{class} tensor shape {dimensions:?} overflows usize")
+        })?;
+        if expected != self.len() {
+            return Err(format!(
+                "{class} tensor data length {} doesn't match shape {:?} ({expected} elements)",
+                self.len(),
+                shape
+            ));
+        }
+        self.shape = shape;
+        Ok(())
+    }
+
+    /// Atomically replace shape metadata after canonical checked admission.
+    ///
+    /// A failed admission leaves both the payload and existing dimensions
+    /// unchanged.
+    pub fn reshape_in_place(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let len = self.len();
+        let shape = admit_shape(
+            shape,
+            len,
+            |shape| format!("{class} tensor shape {shape:?} overflows usize"),
+            |shape, expected| {
+                format!(
+                    "{class} tensor data length {len} doesn't match shape {shape:?} ({expected} elements)"
+                )
+            },
+        )?;
+        self.apply_validated_shape(shape);
+        Ok(())
+    }
+
+    /// Resize in the current numeric class and atomically publish the admitted
+    /// shape after storage growth succeeds.
+    pub fn resize_zeroed_for_shape(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let shape = admit_shape_for_resize(shape, |shape| {
+            format!("{class} tensor shape {shape:?} overflows usize")
+        })?;
+        let target_len = shape.elements();
+        self.storage.resize_zeroed(target_len);
+        self.apply_validated_shape(shape);
+        Ok(())
+    }
+
+    fn apply_validated_shape(&mut self, shape: ValidatedShape) {
+        let (shape, _, _) = shape.into_components();
+        self.shape = SharedShape::new_unmanaged(shape);
     }
 
     pub fn zeros(shape: Vec<usize>) -> Self {
@@ -278,6 +292,22 @@ impl Tensor {
     }
     pub fn cols(&self) -> usize {
         self.shape.get(1).copied().unwrap_or(1)
+    }
+
+    /// Borrows the authoritative column-major dimensions.
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    /// Share the immutable dimension allocation with another value. This
+    /// carries only the shape claim, never this tensor's payload claim.
+    pub fn shared_shape(&self) -> SharedShape {
+        self.shape.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shape_capacity_for_testing(&self) -> usize {
+        self.shape.capacity()
     }
 
     pub fn get2(&self, row: usize, col: usize) -> Result<f64, String> {

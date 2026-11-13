@@ -1,14 +1,5 @@
 //! Pole extraction for transfer-function and state-space control models.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -17,81 +8,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{
-    control_error, output_complex_column, ss_poles_from_object, TfModel, SS_CLASS, TF_CLASS,
+    control_error, output_complex_column, ss_poles_from_object_async, TfModel, SS_CLASS, TF_CLASS,
 };
-use crate::builtins::control::type_resolvers::pole_type;
-use crate::{dispatcher, BuiltinResult};
-
-const POLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Poles of the SISO tf or ss model as a column vector.",
-}];
-const POLE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf model or ss state-space model.",
-}];
-const POLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "p = pole(sys)",
-    inputs: &POLE_INPUTS,
-    outputs: &POLE_OUTPUT,
-}];
-const POLE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.POLE.INVALID_MODEL",
-        identifier: Some("RunMat:pole:InvalidModel"),
-        when: "Input system is not a valid SISO tf or ss object.",
-        message: "pole: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.POLE.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:pole:UnsupportedModel"),
-        when: "Model form is unsupported.",
-        message: "pole: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.POLE.INVALID_ARGUMENT",
-        identifier: Some("RunMat:pole:InvalidArgument"),
-        when: "Model metadata or arguments are malformed.",
-        message: "pole: invalid argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.POLE.INTERNAL",
-        identifier: Some("RunMat:pole:Internal"),
-        when: "Root calculation or output construction failed.",
-        message: "pole: internal error",
-    },
-];
-pub const POLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLE_ERRORS,
-};
-const POLE_INTEGER_MODEL_INDEX_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "J1,...,JN model-array indices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents positive-integer model-array subscripts. They are structural selectors and do not enter pole computation.",
-    }];
-pub const POLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "P = pole(sys,integer_J1,...,integer_JN)",
-        inputs: &POLE_INTEGER_MODEL_INDEX_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The compatibility contract is exact one-based model selection. RunMat currently implements singular tf/ss objects only, so the broader model-array overload rejects before any integer conversion can occur.",
-    }];
+use crate::BuiltinResult;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::pole")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -122,22 +41,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "pole",
-    category = "control",
-    summary = "Return poles of transfer-function and state-space control models.",
-    keywords = "pole,poles,control system,stability,transfer function,state space,tf,ss",
-    type_resolver(pole_type),
-    descriptor(crate::builtins::control::pole::POLE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::control::pole::POLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::pole"
 )]
 async fn pole_builtin(sys: Value) -> BuiltinResult<Value> {
-    let gathered = dispatcher::gather_if_needed_async(&sys).await?;
-    let poles = match gathered {
+    let poles = match sys {
         Value::Object(object) if object.is_class(TF_CLASS) => {
-            TfModel::from_value(Value::Object(object), "pole")?.poles()?
+            TfModel::from_value_async(Value::Object(object), "pole")
+                .await?
+                .poles()?
         }
         Value::Object(object) if object.is_class(SS_CLASS) => {
-            ss_poles_from_object(&object, "pole")?.0
+            ss_poles_from_object_async(&object, "pole").await?.0
         }
         Value::Object(object) => {
             return Err(control_error(
@@ -145,7 +60,7 @@ async fn pole_builtin(sys: Value) -> BuiltinResult<Value> {
                 "RunMat:pole:UnsupportedModel",
                 format!(
                     "pole: unsupported model class '{}'; supported classes are tf and ss",
-                    object.class_name
+                    object.class_name()
                 ),
             ));
         }
@@ -164,7 +79,35 @@ async fn pole_builtin(sys: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::Tensor;
+    use runmat_value::{ObjectInstance, Tensor};
+
+    #[test]
+    fn state_space_preflights_properties_before_resident_download() {
+        let a = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &a)
+                .expect("upload state matrix");
+            let mut incomplete = ObjectInstance::new(SS_CLASS.to_string());
+            incomplete.replace_property_unbounded("A".into(), Value::GpuTensor(resident.clone()));
+            provider.reset_telemetry();
+            let error = block_on(pole_builtin(Value::Object(incomplete))).expect_err("missing Ts");
+            assert_eq!(error.identifier(), Some("RunMat:pole:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let mut complete = ObjectInstance::new(SS_CLASS.to_string());
+            complete.replace_property_unbounded("A".into(), Value::GpuTensor(resident));
+            complete.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            provider.reset_telemetry();
+            let Value::Tensor(poles) =
+                block_on(pole_builtin(Value::Object(complete))).expect("resident A")
+            else {
+                panic!("expected real poles");
+            };
+            assert_eq!(poles.shape(), &[1, 1]);
+            assert!((poles.materialize_f64()[0] + 2.0).abs() < 1e-8);
+            assert!(provider.telemetry_snapshot().download_bytes > 0);
+        });
+    }
 
     #[test]
     fn pole_returns_roots_of_denominator() {
@@ -176,10 +119,13 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::Tensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::Tensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected real poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -200,10 +146,13 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::Tensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::Tensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected real poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -220,10 +169,13 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::ComplexTensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::ComplexTensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected complex poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -250,10 +202,13 @@ mod tests {
             ],
         ))
         .expect("ss");
-        let Value::ComplexTensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
+        let Value::ComplexTensor(poles) = sys
+            .with_owned(|sys| block_on(pole_builtin(sys)))
+            .expect("pole")
+        else {
             panic!("expected complex poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()

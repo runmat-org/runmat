@@ -14,8 +14,12 @@ mod tree;
 mod vendor;
 
 pub(crate) use resolve::{
-    install_project_for_source, resolve_for_source, resolve_for_test_manifest,
+    executable_source, install_project_for_source, resolve_for_source, resolve_for_test_manifest,
     NativeResolvedProject,
+};
+pub(crate) use runmat_core::foreign_artifacts::{
+    prepare_foreign_artifacts, prepare_foreign_artifacts_for_selection, prepare_python_runtime,
+    PreparedForeignArtifacts,
 };
 
 use crate::cli::{Cli, PackageCommand};

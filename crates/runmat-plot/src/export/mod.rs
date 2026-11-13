@@ -5,3 +5,5 @@ pub mod image;
 pub mod native_surface;
 
 pub use image::*;
+
+mod geometry_callouts;

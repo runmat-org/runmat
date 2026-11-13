@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "measured_source_revision": "c816a5927360e6355120f4de1c3690a4d914fb99",
+  "accepted_source_anchor": "df7032c639a59ed795c2edb1b60c2fa5cdc4f39e",
+  "target": "aarch64-apple-darwin",
+  "toolchain": "Rust1.90.0; Apple Command Line Tools",
+  "applications_passed": 2,
+  "semantic_controls_passed": 7,
+  "unexpected_failures": 0,
+  "reopened_applications_passed": 2,
+  "reopened_semantic_controls_passed": 7,
+  "preparation_sha256": "d8eb5d3f4aa66afbace75fc478e25b9691c408323dd4d3ff58ff0dd4deb3fb9e",
+  "preparation_review_sha256": "4f25299035c11b8ea3b725858dffb7b97c375254f3f3a11e4f8300bc8d2e392a",
+  "acceptance_sha256": "528b1e608213d1b034b6f51504620daee22dceb37963664a11068c611f6a4692",
+  "final_source_guard_sha256": "f41d2663161207b25434b60afe25f771b71e02df780ee93faa65fe0c3e19f5af",
+  "archive": {
+    "sha256": "f46a29c0eb1c0d710bd67317258253e05dae6d24c1fa565d3910516d1c46b4e7",
+    "bytes": 529832896,
+    "max_bytes": 536870912,
+    "defined_symbols": 278423,
+    "undefined_symbols": 93936,
+    "operation": "Pinned LLVM objcopy removes only __LLVM,__bitcode and __LLVM,__cmdline; native symbol sets match the original archive using nm --no-llvm-bc."
+  },
+  "families": [
+    {
+      "family": "pure",
+      "controls": 3,
+      "reports": [
+        {
+          "sha256": "2e1d34a541a08c959a05a58263d9cd35890b4a1f2231854a166c8e6f1f40bf8c",
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/pure-installation-r6/native-paired-qualification-v1.json",
+          "application": {
+            "exit_code": 0,
+            "exit_signal": null,
+            "stdout_digest": "sha256:babb3db877cb14b6caa3ea7ef5b21fb85e638c595068e15941e6b56782c11d46",
+            "stdout_bytes": 36
+          },
+          "semantic_controls": [
+            {
+              "test": "v1:sha256:1dc326ba839dbbceccb6790728b959ef4209ce26de46935a602f060bdfc322e9",
+              "expected": {
+                "failed": "language_exception"
+              },
+              "actual": {
+                "failed": "language_exception"
+              }
+            },
+            {
+              "test": "v1:sha256:3109f296f580556726575312dbf426162adb02620e1b4240341d466cc0cbfd30",
+              "expected": {
+                "failed": "assertion"
+              },
+              "actual": {
+                "failed": "assertion"
+              }
+            },
+            {
+              "test": "v1:sha256:d7ac098174319d094675611a52d4d92e2013b0b283374a247b286d4e154f2b66",
+              "expected": "passed",
+              "actual": "passed"
+            }
+          ]
+        },
+        {
+          "sha256": "fb7a61416755f41faf480db9743d3a28f9fedcb2f025db4a4abe4a3240a8203d",
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/pure-installation-r6/reopen-qualification-r7.json",
+          "application": {
+            "exit_code": 0,
+            "exit_signal": null,
+            "stdout_digest": "sha256:babb3db877cb14b6caa3ea7ef5b21fb85e638c595068e15941e6b56782c11d46",
+            "stdout_bytes": 36
+          },
+          "semantic_controls": [
+            {
+              "test": "v1:sha256:1dc326ba839dbbceccb6790728b959ef4209ce26de46935a602f060bdfc322e9",
+              "expected": {
+                "failed": "language_exception"
+              },
+              "actual": {
+                "failed": "language_exception"
+              }
+            },
+            {
+              "test": "v1:sha256:3109f296f580556726575312dbf426162adb02620e1b4240341d466cc0cbfd30",
+              "expected": {
+                "failed": "assertion"
+              },
+              "actual": {
+                "failed": "assertion"
+              }
+            },
+            {
+              "test": "v1:sha256:d7ac098174319d094675611a52d4d92e2013b0b283374a247b286d4e154f2b66",
+              "expected": "passed",
+              "actual": "passed"
+            }
+          ]
+        }
+      ],
+      "installation_review_sha256": "2c0e0c182e0eb0daf9ab3c03f46530471292cd9220d9d3cc9b1583ed657a206a",
+      "artifacts": [
+        {
+          "name": "paired-application",
+          "sha256": "6bc6bd5fb24c497b08caba3b75b19162203246481c351e365b48afb79e84ad13",
+          "bytes": 355063496,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/pure-installation-r6/paired-application"
+        },
+        {
+          "name": "paired-tests",
+          "sha256": "18a33f217abd3f43a015ea5c335fe55d267329b1c90c9fd0001c0fa518e37f31",
+          "bytes": 355113192,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/pure-installation-r6/paired-tests"
+        },
+        {
+          "name": "application-admission.json",
+          "sha256": "abf36826075f9fb72e710516107f3a847087f136d038988b450c0fa62bebfdbf",
+          "bytes": 6142,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/pure-installation-r6/application-admission.json"
+        },
+        {
+          "name": "tests-admission.json",
+          "sha256": "c810a3547c103aecf1ea561ed09e2751b85d61248d0ec317ae7c556008f72211",
+          "bytes": 6130,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/pure-installation-r6/tests-admission.json"
+        }
+      ]
+    },
+    {
+      "family": "callback",
+      "controls": 4,
+      "reports": [
+        {
+          "sha256": "89a390ffacd96eee00c474f2030d6c6acf305e1f69c483ec99ceac201dc3a2e1",
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/callback-installation-r7/native-paired-qualification-v1.json",
+          "application": {
+            "exit_code": 0,
+            "exit_signal": null,
+            "stdout_digest": "sha256:babb3db877cb14b6caa3ea7ef5b21fb85e638c595068e15941e6b56782c11d46",
+            "stdout_bytes": 36
+          },
+          "semantic_controls": [
+            {
+              "test": "v1:sha256:529f65c078e25c5a61670596fe807647b7b47baf71a25cf2d077265b5f0ae125",
+              "expected": {
+                "failed": "language_exception"
+              },
+              "actual": {
+                "failed": "language_exception"
+              }
+            },
+            {
+              "test": "v1:sha256:5f35992f85ac86c40ca2da46ee958c05ff70015cc7524ee88f5118e14d781682",
+              "expected": {
+                "failed": "language_exception"
+              },
+              "actual": {
+                "failed": "language_exception"
+              }
+            },
+            {
+              "test": "v1:sha256:77f65fb16501f8510c035b6e7f5d1452ae2e0315d7b1483bf106c5844a86d7fe",
+              "expected": "passed",
+              "actual": "passed"
+            },
+            {
+              "test": "v1:sha256:bba8337836112ae975b9465c07442a14bada9fa63dc57e262b1713ae87160e52",
+              "expected": {
+                "failed": "assertion"
+              },
+              "actual": {
+                "failed": "assertion"
+              }
+            }
+          ]
+        },
+        {
+          "sha256": "479dda867db7895cd3096a2335a93aee1cdcb8f79b2583f32db466252b091dab",
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/callback-installation-r7/reopen-qualification.json",
+          "application": {
+            "exit_code": 0,
+            "exit_signal": null,
+            "stdout_digest": "sha256:babb3db877cb14b6caa3ea7ef5b21fb85e638c595068e15941e6b56782c11d46",
+            "stdout_bytes": 36
+          },
+          "semantic_controls": [
+            {
+              "test": "v1:sha256:529f65c078e25c5a61670596fe807647b7b47baf71a25cf2d077265b5f0ae125",
+              "expected": {
+                "failed": "language_exception"
+              },
+              "actual": {
+                "failed": "language_exception"
+              }
+            },
+            {
+              "test": "v1:sha256:5f35992f85ac86c40ca2da46ee958c05ff70015cc7524ee88f5118e14d781682",
+              "expected": {
+                "failed": "language_exception"
+              },
+              "actual": {
+                "failed": "language_exception"
+              }
+            },
+            {
+              "test": "v1:sha256:77f65fb16501f8510c035b6e7f5d1452ae2e0315d7b1483bf106c5844a86d7fe",
+              "expected": "passed",
+              "actual": "passed"
+            },
+            {
+              "test": "v1:sha256:bba8337836112ae975b9465c07442a14bada9fa63dc57e262b1713ae87160e52",
+              "expected": {
+                "failed": "assertion"
+              },
+              "actual": {
+                "failed": "assertion"
+              }
+            }
+          ]
+        }
+      ],
+      "installation_review_sha256": "802a49ceb5a9c6e51f6dffc994fae59460dc930ae94778407861ba7064ee25e5",
+      "artifacts": [
+        {
+          "name": "paired-application",
+          "sha256": "795bd70106ebf0000c70ea6361db3200a8b71e075ae8b43c8fa6a17706c0de5f",
+          "bytes": 355212216,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/callback-installation-r7/paired-application"
+        },
+        {
+          "name": "paired-tests",
+          "sha256": "13a06f9499362fdb6f167e94b6cf45551e560cb12dc1968ef69cd8449968f2bb",
+          "bytes": 355278552,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/callback-installation-r7/paired-tests"
+        },
+        {
+          "name": "application-admission.json",
+          "sha256": "b328be9ff62f71d8ec83f5f78c784c2c75c4cea24a3aab74a9c3976842da47b8",
+          "bytes": 6142,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/callback-installation-r7/application-admission.json"
+        },
+        {
+          "name": "tests-admission.json",
+          "sha256": "9c2f47d98e52334187cd45d21ba80de34d31e3320caaac38470d102027476a37",
+          "bytes": 6130,
+          "location": "Main:.tmp-rm1064/native-closure-prep-r1055-artifacts/callback-installation-r7/tests-admission.json"
+        }
+      ]
+    }
+  ],
+  "conservation": {
+    "changed_compiler_inputs": [
+      "crates/runmat-filesystem/src/native/private_windows.rs",
+      "crates/runmat-filesystem/src/native/private_windows/directory.rs",
+      "crates/runmat-filesystem/src/native/private_windows/tests.rs",
+      "docs/CHANGELOG.md",
+      "docs/compiler/native-compilation.md",
+      "docs/simulation/status.md"
+    ],
+    "reason": "Three Windows-only private filesystem inputs are excluded by cfg(windows) on this target. The other three inputs are changelog/guide prose with no executable-source changes. Native source, ABI, contracts, dependencies, controls and expected results are unchanged."
+  },
+  "limitations": [
+    "Physical deployment-slot materialization is outside this paired acceptance scope.",
+    "Desktop and other platforms retain their separate qualification records."
+  ],
+  "preserved_attempts": [
+    "Original sandbox-denied process-control attempt retained.",
+    "First pure reopen exceeded30s during macOS launch-policy delay; direct diagnostic completed in69.41s with0.06s CPU, sampled at dyld startup. Successful renewed reopen retains30s bounds and full controls."
+  ]
+}

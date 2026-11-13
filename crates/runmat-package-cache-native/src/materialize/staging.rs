@@ -1,7 +1,7 @@
 use super::download::read_verified;
 use crate::filesystem::atomic_write;
 use crate::NativeCacheError;
-use runmat_package_cache::{CacheBackend, TreeEntryKind, TreeManifest};
+use runmat_package_cache::{relative_link_target, CacheBackend, TreeEntryKind, TreeManifest};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -87,10 +87,7 @@ pub(super) async fn assemble<B: CacheBackend>(
             .as_ref()
             .expect("validated symlink has target");
         create_symlink(
-            &relative_target(
-                parent.strip_prefix(staging).unwrap_or(Path::new("")),
-                target.as_str(),
-            ),
+            &relative_link_target(&entry.path, target),
             &path,
             staging.join(target.as_str()).is_dir(),
         )?;
@@ -100,25 +97,6 @@ pub(super) async fn assemble<B: CacheBackend>(
 
 fn create_directory(path: &Path) -> Result<(), NativeCacheError> {
     std::fs::create_dir_all(path).map_err(|error| NativeCacheError::io(path, error))
-}
-
-fn relative_target(parent: &Path, target: &str) -> PathBuf {
-    let parent_components: Vec<_> = parent.components().collect();
-    let target_path = Path::new(target);
-    let target_components: Vec<_> = target_path.components().collect();
-    let common = parent_components
-        .iter()
-        .zip(&target_components)
-        .take_while(|(left, right)| left == right)
-        .count();
-    let mut relative = PathBuf::new();
-    for _ in common..parent_components.len() {
-        relative.push("..");
-    }
-    for component in &target_components[common..] {
-        relative.push(component.as_os_str());
-    }
-    relative
 }
 
 #[cfg(unix)]

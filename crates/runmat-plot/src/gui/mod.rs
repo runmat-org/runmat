@@ -6,6 +6,11 @@
 #[cfg(feature = "gui")]
 pub mod controls;
 
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub mod frame_command;
+#[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+pub mod host_loop;
+
 #[cfg(feature = "gui")]
 pub mod lifecycle;
 pub mod native_window;

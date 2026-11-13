@@ -34,7 +34,7 @@ fn contains_integer_storage(values: &[Value], expected: &IntegerStorage) -> bool
 fn contains_numeric_tensor(values: &[Value], shape: &[usize], expected: &[f64]) -> bool {
     values.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == shape && tensor.materialize_f64() == expected)
+            if tensor.shape() == shape && tensor.materialize_f64() == expected)
     })
 }
 
@@ -95,7 +95,10 @@ fn compiled_integer_controls_cover_dividerand_dot_doc2sequence_and_duration() {
         assert!(
             values.iter().any(|value| match value {
                 Value::CharArray(array) => {
-                    array.data.iter().collect::<String>().trim_end() == "01:15:00"
+                    runmat_value::decode_utf16_code_units(array.data())
+                        .expect("valid UTF-16 text fixture")
+                        .trim_end()
+                        == "01:15:00"
                 }
                 _ => false,
             }),

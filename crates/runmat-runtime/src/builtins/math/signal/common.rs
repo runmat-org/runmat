@@ -1,23 +1,40 @@
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
+use runmat_builtins::WindowOption;
+pub(crate) use runmat_builtins::{WindowOutputType, WindowSampling};
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+pub(crate) mod convolution;
+mod cooperation;
+mod iir_boundary;
+pub(super) mod output_precision;
+mod waveform_boundary;
+mod waveform_control;
+mod waveform_map;
+#[cfg(test)]
+pub(crate) mod waveform_restore_fixture;
+mod waveform_sample;
+mod window_generation;
+pub(crate) mod window_provider;
+pub(crate) use cooperation::{SignalCooperation, SIGNAL_WORK_CHUNK};
+pub(crate) use iir_boundary::preflight as preflight_iir_operands;
+pub(crate) use iir_boundary::{
+    IirAdmissionFault, IirAdmittedGeometry, IirFaultKind, IirForm, IirOperand,
+};
+pub(crate) use waveform_boundary::{
+    admit_resident_waveform_operand, prepared_real_integer_tensor, waveform_input_tensor,
+};
+pub(crate) use waveform_control::{PreparedWaveformControl, WaveformControlError};
+pub(crate) use waveform_map::{map_real_waveform, WaveformMapError, WaveformOutputMode};
+pub(crate) use waveform_sample::{admit_real_waveform_sample, WaveformSampleError};
+pub(crate) use window_generation::{
+    hamming_coefficient, symmetric_window_values, window_allocation_error, window_tensor,
+};
+
 const EPS: f64 = 1.0e-12;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WindowSampling {
-    Symmetric,
-    Periodic,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WindowOutputType {
-    Double,
-    Single,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WindowOptions {
@@ -26,11 +43,20 @@ pub(crate) struct WindowOptions {
     pub output_type: WindowOutputType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WindowControls {
+    pub sampling: WindowSampling,
+    pub output_type: WindowOutputType,
+}
+
+#[derive(Debug)]
 pub(crate) enum WindowArgError {
+    TooManyOptions,
     InvalidLength,
     InvalidOptionType,
+    Text(runmat_value::Utf16DecodeError),
     UnknownOption(String),
+    Allocation(std::collections::TryReserveError),
     TensorBuild(String),
 }
 
@@ -60,22 +86,43 @@ pub(crate) async fn value_to_complex_vector(
     value: Value,
 ) -> BuiltinResult<ComplexVectorInput> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, builtin)?;
-    match value {
+    let (value, gpu_handle) = match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            let provider = super::resident_output::owner(&handle, || {
+                signal_error(
+                    builtin,
+                    None,
+                    format!("{builtin}: invalid resident {label}"),
+                )
+            })?;
+            let value = gpu_helpers::download_value_preserving_residency_async(provider, &handle)
                 .await
-                .map_err(|flow| {
-                    let source = map_control_flow_with_builtin(flow, builtin);
-                    signal_error(
-                        builtin,
-                        None,
-                        format!("{builtin}: failed to gather {label}: {}", source.message()),
-                    )
+                .map_err(|source| {
+                    let mut error = build_runtime_error(format!(
+                        "{builtin}: failed to gather {label}: {}",
+                        source.message()
+                    ))
+                    .with_builtin(builtin)
+                    .with_source(source)
+                    .build();
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
                 })?;
-            let mut input = tensor_to_complex_vector(builtin, label, tensor)?;
-            input.gpu_handle = Some(handle);
-            Ok(input)
+            (value, Some(handle))
         }
+        value => (value, None),
+    };
+    let mut input = host_value_to_complex_vector(builtin, label, value)?;
+    input.gpu_handle = gpu_handle;
+    Ok(input)
+}
+
+fn host_value_to_complex_vector(
+    builtin: &'static str,
+    label: &str,
+    value: Value,
+) -> BuiltinResult<ComplexVectorInput> {
+    match value {
         Value::Tensor(tensor) => tensor_to_complex_vector(builtin, label, tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_complex_vector(builtin, label, tensor),
         Value::LogicalArray(logical) => {
@@ -121,13 +168,14 @@ fn tensor_to_complex_vector(
     label: &str,
     tensor: Tensor,
 ) -> BuiltinResult<ComplexVectorInput> {
-    ensure_vector_shape(builtin, label, &tensor.shape)?;
+    ensure_vector_shape(builtin, label, tensor.shape())?;
+    let shape = tensor.shape().to_vec();
     Ok(ComplexVectorInput {
         data: tensor::tensor_values_f64(&tensor)
             .into_iter()
             .map(|re| Complex::new(re, 0.0))
             .collect(),
-        shape: tensor.shape,
+        shape,
         is_complex: false,
         gpu_handle: None,
     })
@@ -138,8 +186,8 @@ fn complex_tensor_to_complex_vector(
     label: &str,
     tensor: ComplexTensor,
 ) -> BuiltinResult<ComplexVectorInput> {
-    ensure_vector_shape(builtin, label, &tensor.shape)?;
-    let shape = tensor.shape.clone();
+    ensure_vector_shape(builtin, label, tensor.shape())?;
+    let shape = tensor.shape().to_vec();
     Ok(ComplexVectorInput {
         data: tensor::complex_tensor_into_values_complex64(tensor),
         shape,
@@ -173,11 +221,11 @@ pub(crate) fn gpu_vector_len(
     label: &str,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<usize> {
-    ensure_vector_shape(builtin, label, &handle.shape)?;
-    if handle.shape.contains(&0) {
+    ensure_vector_shape(builtin, label, handle.shape())?;
+    if handle.shape().contains(&0) {
         return Ok(0);
     }
-    Ok(handle.shape.iter().copied().max().unwrap_or(1))
+    Ok(handle.shape().iter().copied().max().unwrap_or(1))
 }
 
 pub(crate) fn gpu_matrix_shape(
@@ -185,15 +233,15 @@ pub(crate) fn gpu_matrix_shape(
     label: &str,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<(usize, usize)> {
-    if handle.shape.len() > 2 {
+    if handle.shape().len() > 2 {
         return Err(signal_error(
             builtin,
             None,
             format!("{builtin}: {label} must be a vector or 2-D matrix"),
         ));
     }
-    let rows = handle.shape.first().copied().unwrap_or(1);
-    let cols = handle.shape.get(1).copied().unwrap_or(1);
+    let rows = handle.shape().first().copied().unwrap_or(1);
+    let cols = handle.shape().get(1).copied().unwrap_or(1);
     if rows == 0 || cols == 0 {
         return Err(signal_error(
             builtin,
@@ -342,7 +390,7 @@ pub(crate) fn parse_nonnegative_integer(
     Ok(rounded as usize)
 }
 
-pub(crate) fn keyword(value: &Value) -> Option<String> {
+pub(crate) fn keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     string_keyword(value)
 }
 
@@ -354,6 +402,9 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
         Value::Num(n) => n,
         Value::Int(i) => i.to_f64(),
         Value::Bool(b) => usize::from(b) as f64,
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            usize::from(array.data[0] != 0) as f64
+        }
         Value::Tensor(t) if tensor::is_scalar_tensor(&t) => tensor::tensor_value_f64(&t, 0),
         _ => return Err(WindowArgError::InvalidLength),
     };
@@ -367,56 +418,64 @@ pub(crate) fn scalar_length_arg(value: Value) -> Result<usize, WindowArgError> {
     Ok(rounded as usize)
 }
 
-pub(crate) fn window_tensor(
-    options: WindowOptions,
-    coeff: impl Fn(usize, usize) -> f64,
-) -> Result<Value, WindowArgError> {
-    let len = options.len;
-    if len == 0 {
-        return Tensor::new_with_dtype(Vec::new(), vec![0, 1], dtype_for(options.output_type))
-            .map(Value::Tensor)
-            .map_err(|e| WindowArgError::TensorBuild(e.to_string()));
-    }
-    if len == 1 {
-        return Tensor::new_with_dtype(vec![1.0], vec![1, 1], dtype_for(options.output_type))
-            .map(Value::Tensor)
-            .map_err(|e| WindowArgError::TensorBuild(e.to_string()));
-    }
-    let effective_len = match options.sampling {
-        WindowSampling::Symmetric => len,
-        WindowSampling::Periodic => len.checked_add(1).ok_or(WindowArgError::InvalidLength)?,
-    };
-    let mut data = (0..effective_len)
-        .map(|idx| coeff(idx, effective_len))
-        .collect::<Vec<_>>();
-    if matches!(options.sampling, WindowSampling::Periodic) {
-        data.pop();
-    }
-    Tensor::new_with_dtype(data, vec![len, 1], dtype_for(options.output_type))
-        .map(Value::Tensor)
-        .map_err(|e| WindowArgError::TensorBuild(e.to_string()))
+pub(crate) fn is_scalar_logical_window_length(value: &Value) -> bool {
+    matches!(value, Value::Bool(_))
+        || matches!(value, Value::LogicalArray(array) if array.data.len() == 1)
 }
 
-pub(crate) fn parse_window_options(
-    len_value: Value,
+#[cfg(test)]
+pub(crate) fn parse_window_controls(
     rest: &[Value],
     allow_type_name: bool,
-) -> Result<WindowOptions, WindowArgError> {
-    let len = scalar_length_arg(len_value)?;
+) -> Result<WindowControls, WindowArgError> {
+    parse_window_controls_view(
+        crate::call::FunctionArgumentView::from_slice(rest),
+        allow_type_name,
+    )
+}
+
+pub(crate) fn parse_window_controls_view(
+    rest: crate::call::FunctionArgumentView<'_>,
+    allow_type_name: bool,
+) -> Result<WindowControls, WindowArgError> {
+    if rest.len() > 2 {
+        return Err(WindowArgError::TooManyOptions);
+    }
+    let keywords = rest
+        .iter()
+        .map(|arg| {
+            window_keyword(arg)
+                .map_err(WindowArgError::Text)?
+                .ok_or(WindowArgError::InvalidOptionType)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let mut sampling = WindowSampling::Symmetric;
     let mut output_type = WindowOutputType::Double;
-    for arg in rest {
-        let Some(keyword) = string_keyword(arg) else {
-            return Err(WindowArgError::InvalidOptionType);
-        };
-        match keyword.as_str() {
-            "symmetric" => sampling = WindowSampling::Symmetric,
-            "periodic" => sampling = WindowSampling::Periodic,
-            "double" if allow_type_name => output_type = WindowOutputType::Double,
-            "single" if allow_type_name => output_type = WindowOutputType::Single,
+    for (index, keyword) in keywords.into_iter().enumerate() {
+        match (index, WindowOption::parse(&keyword)) {
+            (0, Some(WindowOption::Sampling(value))) => sampling = value,
+            (0, Some(WindowOption::OutputType(value))) if allow_type_name && rest.len() == 1 => {
+                output_type = value
+            }
+            (1, Some(WindowOption::OutputType(value))) if allow_type_name => output_type = value,
             _ => return Err(WindowArgError::UnknownOption(keyword)),
         }
     }
+    Ok(WindowControls {
+        sampling,
+        output_type,
+    })
+}
+
+pub(crate) fn window_options_from_length(
+    len_value: Value,
+    controls: WindowControls,
+) -> Result<WindowOptions, WindowArgError> {
+    let len = scalar_length_arg(len_value)?;
+    let WindowControls {
+        sampling,
+        output_type,
+    } = controls;
     if matches!(sampling, WindowSampling::Periodic) && len.checked_add(1).is_none() {
         return Err(WindowArgError::InvalidLength);
     }
@@ -427,40 +486,49 @@ pub(crate) fn parse_window_options(
     })
 }
 
-pub(crate) fn dtype_for(output_type: WindowOutputType) -> NumericDType {
-    match output_type {
-        WindowOutputType::Double => NumericDType::F64,
-        WindowOutputType::Single => NumericDType::F32,
-    }
+#[cfg(test)]
+pub(crate) fn parse_window_options(
+    len_value: Value,
+    rest: &[Value],
+    allow_type_name: bool,
+) -> Result<WindowOptions, WindowArgError> {
+    window_options_from_length(len_value, parse_window_controls(rest, allow_type_name)?)
 }
 
-pub(crate) fn provider_precision_matches(output_type: WindowOutputType) -> bool {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return false;
-    };
-    matches!(
-        (provider.precision(), output_type),
-        (
-            runmat_accelerate_api::ProviderPrecision::F64,
-            WindowOutputType::Double
-        ) | (
-            runmat_accelerate_api::ProviderPrecision::F32,
-            WindowOutputType::Single
-        )
-    )
-}
-
-fn string_keyword(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect::<String>().to_ascii_lowercase()),
+fn string_keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.to_ascii_lowercase()),
+        Value::CharArray(chars) => {
+            Some(runmat_value::decode_utf16_code_units(chars.data())?.to_ascii_lowercase())
+        }
         _ => None,
-    }
+    })
+}
+
+fn window_keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(text)) => Some(text.to_ascii_lowercase()),
+        Value::StringArray(values)
+            if values.data().len() == 1 && !values.data()[0].is_missing() =>
+        {
+            Some(
+                values.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .to_ascii_lowercase(),
+            )
+        }
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Some(runmat_value::decode_utf16_code_units(chars.data())?.to_ascii_lowercase())
+        }
+        _ => None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GpuGatherRetry;
     use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
     fn first_unrepresentable_usize_double() -> f64 {
@@ -483,7 +551,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected real tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), [1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
     }
 
@@ -554,7 +622,7 @@ mod tests {
         let err = scalar_length_arg(Value::Num((usize::MAX as f64) * 2.0))
             .expect_err("out-of-range length should fail");
 
-        assert_eq!(err, WindowArgError::InvalidLength);
+        assert!(matches!(err, WindowArgError::InvalidLength));
     }
 
     #[test]
@@ -562,7 +630,7 @@ mod tests {
         let err = scalar_length_arg(Value::Num(first_unrepresentable_usize_double()))
             .expect_err("unrepresentable length should fail");
 
-        assert_eq!(err, WindowArgError::InvalidLength);
+        assert!(matches!(err, WindowArgError::InvalidLength));
     }
 
     #[test]
@@ -593,17 +661,79 @@ mod tests {
         )
         .expect_err("periodic effective length must not overflow");
 
-        assert_eq!(error, WindowArgError::InvalidLength);
+        assert!(matches!(error, WindowArgError::InvalidLength));
+    }
+
+    #[test]
+    fn window_controls_decode_scalar_text_once_and_reject_invalid_roles() {
+        use runmat_value::{CharArray, StringArray};
+        let single =
+            Value::StringArray(StringArray::new(vec!["single".into()], vec![1, 1]).unwrap());
+        let periodic = Value::CharArray(CharArray::new_row("periodic"));
+        let controls = parse_window_controls(&[periodic, single], true).unwrap();
+        assert_eq!(controls.sampling, WindowSampling::Periodic);
+        assert_eq!(controls.output_type, WindowOutputType::Single);
+        let misplaced =
+            parse_window_controls(&[Value::from("single"), Value::from("periodic")], true);
+        assert!(matches!(misplaced, Err(WindowArgError::UnknownOption(_))));
+        let multirow = Value::CharArray(
+            CharArray::from_unicode_scalars("periodic".chars().collect(), 2, 4).unwrap(),
+        );
+        assert!(matches!(
+            parse_window_controls(&[multirow], true),
+            Err(WindowArgError::InvalidOptionType)
+        ));
+    }
+
+    #[test]
+    fn window_host_capacity_overflow_preserves_original_resource_cause() {
+        use runmat_builtins::{
+            BLACKMAN_ERROR_INTERNAL, HAMMING_ERROR_INTERNAL, HANN_ERROR_INTERNAL,
+        };
+        let options = WindowOptions {
+            len: usize::MAX,
+            sampling: WindowSampling::Symmetric,
+            output_type: WindowOutputType::Double,
+        };
+        let WindowArgError::Allocation(cause) = futures::executor::block_on(window_tensor(
+            options,
+            |_, _| panic!("capacity overflow must precede coefficients"),
+            &mut SignalCooperation::new(None, "hann"),
+        ))
+        .expect("capacity validation is a domain failure")
+        .expect_err("impossible host vector capacity") else {
+            panic!("expected original allocation error");
+        };
+        for (builtin, descriptor) in [
+            ("blackman", &BLACKMAN_ERROR_INTERNAL),
+            ("hamming", &HAMMING_ERROR_INTERNAL),
+            ("hann", &HANN_ERROR_INTERNAL),
+        ] {
+            let synthetic = Vec::<f64>::new()
+                .try_reserve_exact(usize::MAX)
+                .expect_err("impossible host vector capacity");
+            let error = window_allocation_error(builtin, descriptor, synthetic);
+            assert_eq!(error.identifier(), descriptor.identifier);
+            assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+            let source = error.source.as_ref().expect("typed allocation cause");
+            assert!(source
+                .as_ref()
+                .downcast_ref::<std::collections::TryReserveError>()
+                .is_some());
+        }
+        assert!(!cause.to_string().is_empty());
     }
 
     #[test]
     fn gpu_vector_len_reports_zero_for_empty_vector_shape() {
-        let handle = GpuTensorHandle {
-            shape: vec![1, 0],
-            device_id: 0,
-            buffer_id: 0,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 0],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
         let len = gpu_vector_len("test", "x", &handle).expect("vector length");
         assert_eq!(len, 0);
     }

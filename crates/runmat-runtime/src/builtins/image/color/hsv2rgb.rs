@@ -1,101 +1,25 @@
 //! MATLAB-compatible `hsv2rgb` conversion.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinErrorDescriptor,
+    BuiltinPreparationFormId, HSV2RGB_DESCRIPTOR, HSV2RGB_ERROR_INTERNAL,
+    HSV2RGB_ERROR_INVALID_INPUT, HSV2RGB_ERROR_TOO_MANY_INPUTS, HSV2RGB_ERROR_TOO_MANY_OUTPUTS,
 };
+#[cfg(test)]
+use runmat_builtins::{BuiltinIntegerInputAvailability, HSV2RGB_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+use crate::builtins::image::color::color_presentation::{
+    self, ColorHostRoute, ColorHostUpload, SelectedColorPresentation,
 };
 use crate::builtins::image::color::common;
-use crate::builtins::image::color::type_resolvers::same_shape_type;
+use crate::context::preparation::{
+    execute_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "hsv2rgb";
-
-const HSV2RGB_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "RGB",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "RGB image or colormap converted from HSV input.",
-}];
-
-const HSV2RGB_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "HSV",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "HSV image or Nx3 HSV colormap values.",
-}];
-
-const HSV2RGB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "RGB = hsv2rgb(HSV)",
-    inputs: &HSV2RGB_INPUTS,
-    outputs: &HSV2RGB_OUTPUT,
-}];
-
-const HSV2RGB_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HSV2RGB.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:hsv2rgb:TooManyInputs"),
-    when: "More than one input argument is supplied.",
-    message: "hsv2rgb: too many input arguments",
-};
-
-const HSV2RGB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HSV2RGB.INVALID_INPUT",
-    identifier: Some("RunMat:hsv2rgb:InvalidInput"),
-    when: "Input cannot be interpreted as an MxNx3 HSV image or Nx3 HSV colormap.",
-    message: "hsv2rgb: invalid input",
-};
-
-const HSV2RGB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HSV2RGB.INTERNAL",
-    identifier: Some("RunMat:hsv2rgb:Internal"),
-    when: "RGB output tensor construction fails internally.",
-    message: "hsv2rgb: internal conversion failure",
-};
-
-const HSV2RGB_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    HSV2RGB_ERROR_TOO_MANY_INPUTS,
-    HSV2RGB_ERROR_INVALID_INPUT,
-    HSV2RGB_ERROR_INTERNAL,
-];
-
-pub const HSV2RGB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HSV2RGB_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HSV2RGB_ERRORS,
-};
-
-const HSV2RGB_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "HSV",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented HSV image surface accepts double, single, or logical and the colormap surface accepts double; every typed-integer class is rejected.",
-    }];
-pub const HSV2RGB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "hsv2rgb(integer_HSV)",
-        inputs: &HSV2RGB_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host integer storage and resident integer dtype metadata reject before conversion; RunMat mode does not widen the documented input-class surface.",
-    }];
 
 fn hsv2rgb_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     hsv2rgb_error_with_message(error.message, error)
@@ -116,52 +40,164 @@ fn hsv2rgb_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
     if err.identifier().is_some() {
         err
     } else {
-        hsv2rgb_error_with_message(err.message().to_string(), fallback)
+        build_runtime_error(err.message().to_string())
+            .with_builtin(NAME)
+            .with_identifier(fallback.identifier.expect("closed HSV conversion error"))
+            .with_source(err)
+            .build()
     }
 }
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::color::hsv2rgb")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: NAME,
-    op_kind: GpuOpKind::Custom("hsv2rgb"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host implementation; float RGB/HSV GPU providers are tracked separately.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::image::color::hsv2rgb")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not fused yet; conversion operates across HSV channels.",
-};
-
 #[runtime_builtin(
     name = "hsv2rgb",
-    category = "image/color",
-    summary = "Convert HSV values to RGB.",
-    keywords = "hsv2rgb,hsv,rgb,color,image,colormap",
-    accel = "sink",
-    type_resolver(same_shape_type),
-    descriptor(crate::builtins::image::color::hsv2rgb::HSV2RGB_DESCRIPTOR),
-    integer_capabilities(crate::builtins::image::color::hsv2rgb::HSV2RGB_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::image::color::hsv2rgb"
 )]
-async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn hsv2rgb_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    hsv: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(hsv2rgb_error(&HSV2RGB_ERROR_TOO_MANY_INPUTS));
     }
+    crate::output_count::validate_fixed_outputs(
+        &HSV2RGB_DESCRIPTOR,
+        &HSV2RGB_ERROR_TOO_MANY_OUTPUTS,
+        NAME,
+    )?;
+    let admitted = admit_hsv(&hsv)?;
+    let resident_sources = match &hsv {
+        Value::GpuTensor(handle) => vec![handle.clone()],
+        _ => Vec::new(),
+    };
+    let selected = match &hsv {
+        Value::GpuTensor(handle) => {
+            let output_dtype = if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F32)
+                && !runmat_accelerate_api::handle_is_logical(handle)
+            {
+                NumericDType::F32
+            } else {
+                NumericDType::F64
+            };
+            color_presentation::select(
+                runtime.as_ref(),
+                ColorHostUpload {
+                    route: ColorHostRoute::HsvToRgb,
+                    sources: &resident_sources,
+                    output_shape: handle.shape().to_vec(),
+                    output_dtype,
+                    host_compute_scratch: color_presentation::checked_scratch(
+                        color_presentation::checked_elements(handle.shape()),
+                        16,
+                    ),
+                    control_facts: runmat_execution::Digest::sha256(b"hsv2rgb.default"),
+                },
+            )?
+        }
+        _ => None,
+    };
+    if !admitted {
+        return hsv2rgb_execute(hsv, resident_sources, selected).await;
+    }
+    let request = AdmittedBuiltinPreparation::new(
+        BuiltinPreparationAdmission {
+            binding: BuiltinBindingIdentity {
+                builtin: BuiltinCatalogIdentity { name: NAME },
+                variant: "default",
+            },
+            form: BuiltinPreparationFormId(0),
+            signature: 0,
+            input_count: 1,
+            requested_outputs: crate::output_count::current_output_count(),
+        },
+        vec![hsv],
+    )?;
+    let execute = |mut operands: Vec<Value>| async move {
+        hsv2rgb_execute(
+            operands.pop().expect("one admitted HSV operand"),
+            resident_sources,
+            selected,
+        )
+        .await
+    };
+    execute_request(runtime.as_ref(), request, execute).await
+}
+
+fn admit_hsv(hsv: &Value) -> BuiltinResult<bool> {
+    match hsv {
+        Value::Tensor(tensor) => {
+            common::color_layout(tensor, NAME)
+                .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
+            if !matches!(
+                tensor.numeric_dtype(),
+                NumericDType::F32 | NumericDType::F64
+            ) {
+                return Err(hsv2rgb_error_with_message(
+                    format!(
+                        "hsv2rgb: {} input is not supported; expected single, double, or logical",
+                        tensor.numeric_dtype().class_name()
+                    ),
+                    &HSV2RGB_ERROR_INVALID_INPUT,
+                ));
+            }
+            Ok(true)
+        }
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                return Err(hsv2rgb_error_with_message(
+                    "hsv2rgb: integer gpuArray input is not supported; expected single, double, or logical",
+                    &HSV2RGB_ERROR_INVALID_INPUT,
+                ));
+            }
+            if runmat_accelerate_api::handle_is_logical(handle) {
+                super::resident_owner::validate_live(handle, NAME)
+                    .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
+                let shape = handle.shape();
+                if shape.len() != 3 || shape[2] != 3 || shape[0] == 0 || shape[1] == 0 {
+                    return Err(hsv2rgb_error_with_message(
+                        "hsv2rgb: logical input is supported only for nonempty MxNx3 HSV images",
+                        &HSV2RGB_ERROR_INVALID_INPUT,
+                    ));
+                }
+                return Ok(false);
+            }
+            let dtype = common::resident_numeric_dtype(handle, NAME)
+                .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
+            let shape = handle.shape();
+            let valid = (shape.len() == 3 && shape[2] == 3 && shape[0] > 0 && shape[1] > 0)
+                || (shape.len() == 2 && shape[1] == 3 && shape[0] > 0);
+            if !valid || !matches!(dtype, NumericDType::F32 | NumericDType::F64) {
+                return Err(hsv2rgb_error_with_message(
+                    "hsv2rgb: invalid resident HSV class or shape",
+                    &HSV2RGB_ERROR_INVALID_INPUT,
+                ));
+            }
+            Ok(true)
+        }
+        Value::LogicalArray(array) => {
+            let shape = &array.shape;
+            if shape.len() != 3 || shape[2] != 3 || shape[0] == 0 || shape[1] == 0 {
+                return Err(hsv2rgb_error_with_message(
+                    "hsv2rgb: logical input is supported only for nonempty MxNx3 HSV images",
+                    &HSV2RGB_ERROR_INVALID_INPUT,
+                ));
+            }
+            Ok(false)
+        }
+        Value::Bool(_) => Ok(false),
+        _ => Ok(false),
+    }
+}
+
+async fn hsv2rgb_execute(
+    hsv: Value,
+    resident_sources: Vec<runmat_accelerate_api::GpuTensorHandle>,
+    mut selected: Option<SelectedColorPresentation>,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let resident_guard = common::protect_resident_inputs(&resident_sources);
     if matches!(&hsv, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
     {
         return Err(hsv2rgb_error_with_message(
@@ -174,9 +210,13 @@ async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
         _ => false,
     };
-    let tensor = common::gather_tensor(NAME, hsv)
-        .await
-        .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
+    let tensor = match hsv {
+        Value::Tensor(tensor) => tensor,
+        other => common::gather_tensor(NAME, other)
+            .await
+            .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?,
+    };
+    resident_guard.restore();
     let layout = common::color_layout(&tensor, NAME)
         .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
     if logical_input && matches!(layout, common::ColorLayout::Colormap { .. }) {
@@ -219,7 +259,15 @@ async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
         .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INTERNAL))?;
-    Ok(common::image_value_from_tensor(out))
+    let output = color_presentation::publish(&mut selected, || {
+        common::restore_resident_numeric_result_for_sources(
+            &resident_sources,
+            common::image_value_from_tensor(out),
+            NAME,
+        )
+    })?;
+    crate::execution::RootedValue::new(output)
+        .map_err(|err| hsv2rgb_map_error(err.into_runtime_error(), &HSV2RGB_ERROR_INTERNAL))
 }
 
 pub(crate) fn hsv_to_rgb_unit(h: f64, s: f64, v: f64) -> (f64, f64, f64) {
@@ -253,12 +301,29 @@ fn cast_float(value: f64, dtype: NumericDType) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Terminal numerical test projection; these color outputs have no
+    // GC-managed children and do not escape into asynchronous work.
+    async fn hsv2rgb_builtin(
+        runtime: Option<crate::context::RuntimeContext>,
+        hsv: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        super::hsv2rgb_builtin(
+            runtime,
+            hsv,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        )
+        .await
+        .map(|owned| owned.with_owned(|value| value))
+    }
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
     fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) =
-            block_on(hsv2rgb_builtin(Value::Tensor(tensor), Vec::new())).expect("hsv2rgb")
+            block_on(hsv2rgb_builtin(None, Value::Tensor(tensor), Vec::new())).expect("hsv2rgb")
         else {
             panic!("expected tensor");
         };
@@ -294,7 +359,7 @@ mod tests {
         )
         .unwrap();
         let out = call(hsv).unwrap();
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), &[3, 3]);
         let expected = vec![0.0, 1.0, 0.25, 1.0, 0.0, 0.25, 0.0, 1.0, 0.25];
         for (actual, expected) in values(&out).iter().zip(expected) {
             assert_close(*actual, expected);
@@ -319,10 +384,12 @@ mod tests {
         assert_eq!(values(&single_out), vec![1.0, 0.0, 0.0]);
 
         let logical = LogicalArray::new(vec![0, 1, 1], vec![1, 1, 3]).unwrap();
-        let Value::Tensor(logical_out) =
-            block_on(hsv2rgb_builtin(Value::LogicalArray(logical), Vec::new()))
-                .expect("logical HSV")
-        else {
+        let Value::Tensor(logical_out) = block_on(hsv2rgb_builtin(
+            None,
+            Value::LogicalArray(logical),
+            Vec::new(),
+        ))
+        .expect("logical HSV") else {
             panic!("expected logical HSV tensor output");
         };
         assert_eq!(logical_out.numeric_dtype(), NumericDType::F64);
@@ -342,7 +409,7 @@ mod tests {
             IntegerStorage::U64(vec![0; 3]),
         ] {
             let input = Tensor::new_integer(storage, vec![1, 1, 3]).unwrap();
-            let err = block_on(hsv2rgb_builtin(Value::Tensor(input), Vec::new()))
+            let err = block_on(hsv2rgb_builtin(None, Value::Tensor(input), Vec::new()))
                 .expect_err("integer HSV input");
             assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
         }
@@ -351,9 +418,51 @@ mod tests {
     #[test]
     fn hsv2rgb_rejects_logical_colormap_shape() {
         let logical = LogicalArray::new(vec![0, 1, 1], vec![1, 3]).unwrap();
-        let err = block_on(hsv2rgb_builtin(Value::LogicalArray(logical), Vec::new()))
-            .expect_err("logical colormap input");
+        let err = block_on(hsv2rgb_builtin(
+            None,
+            Value::LogicalArray(logical),
+            Vec::new(),
+        ))
+        .expect_err("logical colormap input");
         assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn hsv2rgb_rejects_unsupported_resident_class_before_download() {
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1, 3],
+                runmat_accelerate_api::NumericElementType::U32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
+        let err = block_on(hsv2rgb_builtin(None, Value::GpuTensor(handle), Vec::new()))
+            .expect_err("unsupported resident integer");
+        assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn hsv2rgb_rejects_logical_resident_colormap_before_download() {
+        test_support::with_test_provider(|provider| {
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1],
+                    shape: &[1, 3],
+                })
+                .expect("upload logical fixture");
+            provider.reset_telemetry();
+            let err = block_on(hsv2rgb_builtin(
+                None,
+                Value::GpuTensor(handle.clone()),
+                Vec::new(),
+            ))
+            .expect_err("logical colormap geometry");
+            assert_eq!(err.identifier(), HSV2RGB_ERROR_INVALID_INPUT.identifier);
+            assert!(err.message().contains("nonempty MxNx3"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(handle.allocation_lease().validate_live().is_ok());
+        });
     }
 
     #[test]
@@ -385,14 +494,19 @@ mod tests {
             .map(|error| error.code)
             .collect();
         assert!(codes.contains(&"RM.HSV2RGB.TOO_MANY_INPUTS"));
+        assert!(codes.contains(&"RM.HSV2RGB.TOO_MANY_OUTPUTS"));
         assert!(codes.contains(&"RM.HSV2RGB.INVALID_INPUT"));
         assert!(codes.contains(&"RM.HSV2RGB.INTERNAL"));
     }
 
     #[test]
     fn hsv2rgb_too_many_args_uses_stable_identifier() {
-        let err = block_on(hsv2rgb_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-            .expect_err("expected argument error");
+        let err = block_on(hsv2rgb_builtin(
+            None,
+            Value::Num(1.0),
+            vec![Value::Num(2.0)],
+        ))
+        .expect_err("expected argument error");
         assert_eq!(err.identifier(), HSV2RGB_ERROR_TOO_MANY_INPUTS.identifier);
     }
 }

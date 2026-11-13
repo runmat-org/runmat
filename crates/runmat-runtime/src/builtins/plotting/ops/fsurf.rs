@@ -1,13 +1,17 @@
 //! MATLAB-compatible `fsurf` builtin.
-
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
+pub use runmat_builtins::{
+    FSURF_ERROR_EVALUATION, FSURF_ERROR_INTERNAL, FSURF_ERROR_INVALID_ARGUMENT,
+    FSURF_INTEGER_AXES_EXTENSION as INTEGER_AXES_EXTENSION,
+    FSURF_INTEGER_CALLBACK_OUTPUT_EXTENSION as INTEGER_CALLBACK_OUTPUT_EXTENSION,
+    FSURF_INTEGER_DOMAIN_EXTENSION as INTEGER_DOMAIN_EXTENSION,
+    FSURF_INTEGER_MESH_DENSITY_EXTENSION as INTEGER_MESH_DENSITY_EXTENSION,
+    FSURF_INTEGER_STYLE_PROPERTY_EXTENSION as INTEGER_STYLE_PROPERTY_EXTENSION,
+    FSURF_LOGICAL_NUMERIC_INPUT_EXTENSION as LOGICAL_NUMERIC_INPUT_EXTENSION,
+    FSURF_RESIDENT_CALLBACK_OUTPUT_EXTENSION as RESIDENT_CALLBACK_OUTPUT_EXTENSION,
+    FSURF_SINGLE_NUMERIC_INPUT_EXTENSION as SINGLE_NUMERIC_INPUT_EXTENSION,
 };
+
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 use runmat_value::{IntValue, NumericDType, Value};
@@ -17,11 +21,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::math::optim::common::call_function;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-use super::op_common::{apply_axes_target, split_leading_axes_handle, AxesTarget};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments, AxesTarget};
 use super::plotting_error;
 use super::state::PlotRenderOptions;
 use super::state::{
@@ -39,316 +42,6 @@ const DEFAULT_DOMAIN: Domain = Domain {
 };
 const DEFAULT_MESH_DENSITY: usize = 35;
 const MAX_MESH_DENSITY: usize = 400;
-
-const INTEGER_DOMAIN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-integer-domain",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fsurf with a typed-integer domain vector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfIntegerDomainExtension"),
-};
-const LOGICAL_NUMERIC_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-logical-numeric-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "fsurf with a logical numeric domain, control, or callback sample is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfLogicalNumericInputExtension"),
-};
-const SINGLE_NUMERIC_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-single-numeric-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fsurf with a single-precision numeric domain, control, or callback sample is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfSingleNumericInputExtension"),
-};
-const INTEGER_MESH_DENSITY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-integer-mesh-density",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fsurf with a typed-integer MeshDensity is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfIntegerMeshDensityExtension"),
-};
-const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fsurf with a typed-integer numeric axes alias is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfIntegerAxesHandleExtension"),
-};
-const INTEGER_CALLBACK_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-integer-callback-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fsurf with a callback returning typed-integer samples is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfIntegerCallbackOutputExtension"),
-};
-const INTEGER_STYLE_PROPERTY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-integer-style-property",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fsurf with a typed-integer surface style property is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfIntegerStylePropertyExtension"),
-};
-const RESIDENT_CALLBACK_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fsurf-resident-callback-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fsurf with a provider-resident callback result is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FsurfResidentCallbackOutputExtension"),
-};
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
-    INTEGER_DOMAIN_EXTENSION,
-    LOGICAL_NUMERIC_INPUT_EXTENSION,
-    SINGLE_NUMERIC_INPUT_EXTENSION,
-    INTEGER_MESH_DENSITY_EXTENSION,
-    INTEGER_AXES_EXTENSION,
-    INTEGER_CALLBACK_OUTPUT_EXTENSION,
-    INTEGER_STYLE_PROPERTY_EXTENSION,
-    RESIDENT_CALLBACK_OUTPUT_EXTENSION,
-];
-
-const fn integer_input(name: &'static str, notes: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes,
-    }
-}
-
-const INTEGER_DOMAIN_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "xyinterval or uvinterval",
-    "RunMat admits exact typed-integer domain bounds only when every value is exactly representable at the binary64 sampling boundary.",
-)];
-const INTEGER_MESH_DENSITY_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "MeshDensity",
-    "RunMat admits all eight integer classes as exact bounded host sampling counts.",
-)];
-const INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "ax",
-    "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension.",
-)];
-const INTEGER_CALLBACK_OUTPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "callback result",
-    "RunMat admits scalar typed-integer callback samples only when exactly representable at the binary64 surface-geometry boundary.",
-)];
-const INTEGER_STYLE_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "surface style property",
-    "RunMat accepts typed-integer RGB, alpha, and boolean-style controls only behind one independent surface-property gate and validates exact plotting conversion before sampling.",
-)];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fsurf(f, integer_xyinterval)",
-        inputs: &INTEGER_DOMAIN_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The independently gated bounds cross one checked binary64 plotting-domain boundary; the result is an opaque graphics handle.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fsurf(..., 'MeshDensity', integer_density)",
-        inputs: &INTEGER_MESH_DENSITY_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The independently gated exact count controls bounded host callback sampling and does not become integer output.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fsurf(integer_ax, ...)",
-        inputs: &INTEGER_AXES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The compatibility extension gate runs before axes selection and sampling.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fsurf(f_returning_integer, ...)",
-        inputs: &INTEGER_CALLBACK_OUTPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Each independently gated authoritative callback sample crosses one checked binary64 surface-geometry boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fsurf(..., property_name, integer_property_value)",
-        inputs: &INTEGER_STYLE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The independently gated value is validated from authoritative storage before callback sampling and then crosses the applicable renderer-property boundary.",
-    },
-];
-
-const FSURF_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered function surface.",
-}];
-
-const FSURF_INPUTS_F: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "f",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function of two variables, z = f(x,y).",
-}];
-
-const FSURF_INPUTS_F_DOMAIN: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function of two variables, z = f(x,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "xyinterval",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[-5 5 -5 5]"),
-        description: "Two- or four-element domain vector.",
-    },
-];
-
-const FSURF_INPUTS_PARAMETRIC: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "fx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Parametric x-coordinate function.",
-    },
-    BuiltinParamDescriptor {
-        name: "fy",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Parametric y-coordinate function.",
-    },
-    BuiltinParamDescriptor {
-        name: "fz",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Parametric z-coordinate function.",
-    },
-];
-
-const FSURF_INPUTS_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function-handle and optional domain arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "MeshDensity and surface style name/value arguments.",
-    },
-];
-
-const FSURF_INPUTS_AX_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function-handle and optional domain arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "MeshDensity and surface style name/value arguments.",
-    },
-];
-
-const FSURF_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "h = fsurf(f)",
-        inputs: &FSURF_INPUTS_F,
-        outputs: &FSURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fsurf(f, xyinterval)",
-        inputs: &FSURF_INPUTS_F_DOMAIN,
-        outputs: &FSURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fsurf(fx, fy, fz)",
-        inputs: &FSURF_INPUTS_PARAMETRIC,
-        outputs: &FSURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fsurf(fx, fy, fz, uvinterval)",
-        inputs: &FSURF_INPUTS_PROPS,
-        outputs: &FSURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fsurf(___, Name, Value, ...)",
-        inputs: &FSURF_INPUTS_PROPS,
-        outputs: &FSURF_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fsurf(ax, ___)",
-        inputs: &FSURF_INPUTS_AX_PROPS,
-        outputs: &FSURF_OUTPUT_HANDLE,
-    },
-];
-
-pub const FSURF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FSURF.INVALID_ARGUMENT",
-    identifier: Some("RunMat:fsurf:InvalidArgument"),
-    when:
-        "Function handles, domains, mesh density, axes target, or surface properties are invalid.",
-    message: "fsurf: invalid argument",
-};
-
-pub const FSURF_ERROR_EVALUATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FSURF.EVALUATION",
-    identifier: Some("RunMat:fsurf:EvaluationFailed"),
-    when: "A sampled function handle fails or does not return a scalar numeric value.",
-    message: "fsurf: function evaluation failed",
-};
-
-pub const FSURF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FSURF.INTERNAL",
-    identifier: Some("RunMat:fsurf:Internal"),
-    when: "Surface construction or rendering fails unexpectedly.",
-    message: "fsurf: internal operation failed",
-};
-
-const FSURF_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    FSURF_ERROR_INVALID_ARGUMENT,
-    FSURF_ERROR_EVALUATION,
-    FSURF_ERROR_INTERNAL,
-];
-
-pub const FSURF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FSURF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FSURF_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::fsurf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -379,25 +72,37 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fsurf",
-    category = "plotting",
-    summary = "Plot a function surface over a 2-D domain.",
-    keywords = "fsurf,function surface,parametric surface,plotting,3d",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::fsurf::FSURF_DESCRIPTOR),
-    extensions(crate::builtins::plotting::fsurf::EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::fsurf::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::fsurf"
 )]
-pub async fn fsurf_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
-    preflight_fsurf_extensions(&args)?;
-    let parsed = parse_fsurf_args(args).map_err(map_fsurf_invalid)?;
-    let surface = sample_surface(&parsed).await?;
-    render_fsurf(surface, &parsed).map_err(map_fsurf_internal)
+pub async fn fsurf_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "fsurf: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "fsurf")?;
+    let _arguments = args.fork();
+    work.finish(fsurf_impl(runtime.as_ref(), args, &work).await)
 }
 
-fn preflight_fsurf_extensions(args: &[Value]) -> BuiltinResult<()> {
+async fn fsurf_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
+    preflight_fsurf_extensions(args.view())?;
+    let parsed = parse_fsurf_args(args).map_err(map_fsurf_invalid)?;
+    let surface = sample_surface(&parsed, runtime, work).await?;
+    render_fsurf(surface, &parsed, runtime, work).map_err(map_fsurf_internal)
+}
+
+fn preflight_fsurf_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     gate_typed_integer_axes_alias(args)?;
     let mut values = args
         .iter()
@@ -405,7 +110,7 @@ fn preflight_fsurf_extensions(args: &[Value]) -> BuiltinResult<()> {
         .skip_while(|value| is_function_handle(value));
     if let Some(value) = values
         .next()
-        .filter(|value| value_as_string(value).is_none())
+        .filter(|value| !matches!(value, Value::String(_) | Value::CharArray(_)))
     {
         if is_typed_integer_value(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -426,8 +131,16 @@ fn preflight_fsurf_extensions(args: &[Value]) -> BuiltinResult<()> {
             )?;
         }
     }
-    for pair in args.windows(2) {
-        let Some(key) = value_as_string(&pair[0]) else {
+    for index in 0..args.len().saturating_sub(1) {
+        let pair = args.range(index..index + 2)?;
+        let Some(key) = value_as_string(&pair[0]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "fsurf",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             continue;
         };
         if key.trim().eq_ignore_ascii_case("MeshDensity") {
@@ -501,7 +214,7 @@ fn is_typed_integer_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-fn gate_typed_integer_axes_alias(args: &[Value]) -> BuiltinResult<()> {
+fn gate_typed_integer_axes_alias(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let Some(first) = args.first() else {
         return Ok(());
     };
@@ -588,48 +301,72 @@ fn map_fsurf_invalid(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fsurf_error_with_detail(&FSURF_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = fsurf_error_with_detail(&FSURF_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_fsurf_eval(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fsurf_error_with_detail(&FSURF_ERROR_EVALUATION, err.message)
+    let mapped = fsurf_error_with_detail(&FSURF_ERROR_EVALUATION, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_fsurf_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fsurf_error_with_detail(&FSURF_ERROR_INTERNAL, err.message)
+    let mapped = fsurf_error_with_detail(&FSURF_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn parse_fsurf_args(args: Vec<Value>) -> BuiltinResult<ParsedFsurf> {
+fn parse_fsurf_args(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedFsurf> {
     if args.is_empty() {
         return Err(fsurf_invalid("expected a function handle"));
     }
 
-    let (target_axes, mut values) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    let (target_axes, mut values) = split_leading_axes_arguments(args, BUILTIN_NAME)?;
     if values.is_empty() {
         return Err(fsurf_invalid(
             "expected a function handle after axes handle",
         ));
     }
 
-    let mut function_values = Vec::new();
-    while function_values.len() < 3 && values.first().map(is_function_handle).unwrap_or(false) {
-        function_values.push(values.remove(0));
+    let mut function_values = [None, None, None];
+    for slot in &mut function_values {
+        if !values.first().is_some_and(is_function_handle) {
+            break;
+        }
+        *slot = values.pop_front();
     }
 
-    let function = match function_values.len() {
-        1 => SurfaceFunction::Explicit(function_values.remove(0)),
-        3 => SurfaceFunction::Parametric {
-            x: Box::new(function_values.remove(0)),
-            y: Box::new(function_values.remove(0)),
-            z: Box::new(function_values.remove(0)),
+    let function = match function_values {
+        [Some(function), None, None] => SurfaceFunction::Explicit(function),
+        [Some(x), Some(y), Some(z)] => SurfaceFunction::Parametric {
+            x: Box::new(x),
+            y: Box::new(y),
+            z: Box::new(z),
         },
-        0 => return Err(fsurf_invalid("expected a function handle")),
+        [None, None, None] => return Err(fsurf_invalid("expected a function handle")),
         _ => {
             return Err(fsurf_invalid(
                 "expected either one function handle or three parametric function handles",
@@ -639,7 +376,7 @@ fn parse_fsurf_args(args: Vec<Value>) -> BuiltinResult<ParsedFsurf> {
 
     let mut domain = DEFAULT_DOMAIN;
     if values.first().is_some_and(is_numeric_domain_value) {
-        domain = parse_domain(&values.remove(0))?;
+        domain = parse_domain(&values.pop_front().expect("checked argument prefix"))?;
     }
     let (mesh_density, style_args) = split_mesh_density(values)?;
 
@@ -655,10 +392,11 @@ fn parse_fsurf_args(args: Vec<Value>) -> BuiltinResult<ParsedFsurf> {
 fn is_function_handle(value: &Value) -> bool {
     matches!(
         value,
-        Value::FunctionHandle(_)
+        Value::ScopedFunctionHandle(_)
+            | Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }
@@ -729,7 +467,7 @@ fn numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
 }
 
 fn checked_integer_f64(value: &IntValue, role: &str) -> BuiltinResult<f64> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {
         Err(fsurf_invalid(format!(
@@ -738,12 +476,19 @@ fn checked_integer_f64(value: &IntValue, role: &str) -> BuiltinResult<f64> {
     }
 }
 
-fn split_mesh_density(args: Vec<Value>) -> BuiltinResult<(usize, Vec<Value>)> {
+fn split_mesh_density(args: crate::call::BuiltinArguments) -> BuiltinResult<(usize, Vec<Value>)> {
     let mut mesh_density = DEFAULT_MESH_DENSITY;
     let mut style_args = Vec::new();
     let mut idx = 0usize;
     while idx < args.len() {
-        let Some(key) = value_as_string(&args[idx]) else {
+        let Some(key) = value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "fsurf",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             return Err(fsurf_invalid("name-value option names must be strings"));
         };
         if idx + 1 >= args.len() {
@@ -820,7 +565,11 @@ fn parse_mesh_density_integer(value: &IntValue) -> BuiltinResult<usize> {
     Ok(density)
 }
 
-async fn sample_surface(parsed: &ParsedFsurf) -> BuiltinResult<SurfacePlot> {
+async fn sample_surface(
+    parsed: &ParsedFsurf,
+    runtime: Option<&crate::context::RuntimeContext>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<SurfacePlot> {
     let x_axis = linspace(
         parsed.domain.x_min,
         parsed.domain.x_max,
@@ -839,7 +588,7 @@ async fn sample_surface(parsed: &ParsedFsurf) -> BuiltinResult<SurfacePlot> {
         SurfaceFunction::Explicit(function) => {
             for (i, &x) in x_axis.iter().enumerate() {
                 for (j, &y) in y_axis.iter().enumerate() {
-                    z_grid[i][j] = call_surface_function(function, x, y).await?;
+                    z_grid[i][j] = call_surface_function(runtime, work, function, x, y).await?;
                 }
             }
         }
@@ -848,9 +597,9 @@ async fn sample_surface(parsed: &ParsedFsurf) -> BuiltinResult<SurfacePlot> {
             y_grid = vec![vec![0.0; y_axis.len()]; x_axis.len()];
             for (i, &u) in x_axis.iter().enumerate() {
                 for (j, &v) in y_axis.iter().enumerate() {
-                    x_grid[i][j] = call_surface_function(x, u, v).await?;
-                    y_grid[i][j] = call_surface_function(y, u, v).await?;
-                    z_grid[i][j] = call_surface_function(z, u, v).await?;
+                    x_grid[i][j] = call_surface_function(runtime, work, x, u, v).await?;
+                    y_grid[i][j] = call_surface_function(runtime, work, y, u, v).await?;
+                    z_grid[i][j] = call_surface_function(runtime, work, z, u, v).await?;
                 }
             }
         }
@@ -864,8 +613,12 @@ async fn sample_surface(parsed: &ParsedFsurf) -> BuiltinResult<SurfacePlot> {
         false,
         true,
     );
-    let style = parse_surface_style_args(BUILTIN_NAME, &parsed.style_args, defaults)
-        .map_err(map_fsurf_invalid)?;
+    let style = parse_surface_style_args(
+        BUILTIN_NAME,
+        crate::call::FunctionArgumentView::from_slice(&parsed.style_args),
+        defaults,
+    )
+    .map_err(map_fsurf_invalid)?;
     let mut surface = match &parsed.function {
         SurfaceFunction::Explicit(_) => SurfacePlot::new(x_axis, y_axis, z_grid)
             .map_err(|err| plotting_error(BUILTIN_NAME, format!("fsurf: {err}")))?,
@@ -878,27 +631,46 @@ async fn sample_surface(parsed: &ParsedFsurf) -> BuiltinResult<SurfacePlot> {
     Ok(surface)
 }
 
-async fn call_surface_function(function: &Value, a: f64, b: f64) -> BuiltinResult<f64> {
-    let value = call_function(function, vec![Value::Num(a), Value::Num(b)])
-        .await
-        .map_err(map_fsurf_eval)?;
-    if matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+async fn call_surface_function(
+    runtime: Option<&crate::context::RuntimeContext>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+    function: &Value,
+    a: f64,
+    b: f64,
+) -> BuiltinResult<f64> {
+    work.check()?;
+    let callback = crate::canonicalize_callback_handle_for_semantic_resolution(function.clone())?;
+    let arguments = [Value::Num(a), Value::Num(b)];
+    let value = match runtime {
+        Some(runtime) => {
+            crate::call_feval_async_with_outputs_in_context(runtime, callback, &arguments, 1).await
+        }
+        None => crate::call_feval_async_with_outputs(callback, &arguments, 1).await,
+    }
+    .map_err(map_fsurf_eval)?;
+    work.check()?;
+    if matches!(value.value(), Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &INTEGER_CALLBACK_OUTPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    if matches!(&value, Value::GpuTensor(_)) {
+    if matches!(value.value(), Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &RESIDENT_CALLBACK_OUTPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    let value = crate::dispatcher::gather_if_needed_async(&value)
+    value
+        .with_owned_async(|value| async move {
+            let value = crate::dispatcher::gather_if_needed_async(&value)
+                .await
+                .map_err(map_fsurf_eval)?;
+            work.check()?;
+            surface_value_to_scalar(value).map_err(map_fsurf_eval)
+        })
         .await
-        .map_err(map_fsurf_eval)?;
-    surface_value_to_scalar(value).map_err(map_fsurf_eval)
 }
 
 fn surface_value_to_scalar(value: Value) -> BuiltinResult<f64> {
@@ -942,7 +714,7 @@ fn checked_integer_callback_f64(value: &IntValue) -> BuiltinResult<f64> {
         &INTEGER_CALLBACK_OUTPUT_EXTENSION,
         BUILTIN_NAME,
     )?;
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {
         Err(fsurf_error_with_detail(
@@ -960,8 +732,15 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     (0..count).map(|idx| start + step * idx as f64).collect()
 }
 
-fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64> {
+fn render_fsurf(
+    surface: SurfacePlot,
+    parsed: &ParsedFsurf,
+    runtime: Option<&crate::context::RuntimeContext>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<f64> {
+    work.check()?;
     apply_axes_target(parsed.target_axes, BUILTIN_NAME)?;
+    let function_state = function_surface_state(runtime, &parsed.function)?;
     let mut surface = Some(surface);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
@@ -970,9 +749,6 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Function Surface",
-            x_label: "X",
-            y_label: "Y",
             axis_equal: false,
             ..Default::default()
         },
@@ -994,11 +770,10 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
         parsed.mesh_density,
         (parsed.domain.x_min, parsed.domain.x_max),
         (parsed.domain.y_min, parsed.domain.y_max),
-        function_surface_state(&parsed.function),
+        function_state,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(err);
@@ -1006,45 +781,68 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
     Ok(handle)
 }
 
-fn function_surface_state(function: &SurfaceFunction) -> FunctionSurfaceFunctionState {
+fn function_surface_state(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: &SurfaceFunction,
+) -> BuiltinResult<FunctionSurfaceFunctionState> {
     match function {
-        SurfaceFunction::Explicit(function) => {
-            FunctionSurfaceFunctionState::Explicit(function_surface_ref(function))
+        SurfaceFunction::Explicit(function) => Ok(FunctionSurfaceFunctionState::Explicit(
+            function_surface_ref(runtime, function, BUILTIN_NAME)?,
+        )),
+        SurfaceFunction::Parametric { x, y, z } => {
+            let x = function_surface_ref(runtime, x, BUILTIN_NAME)?;
+            let y = function_surface_ref(runtime, y, BUILTIN_NAME)?;
+            let z = function_surface_ref(runtime, z, BUILTIN_NAME)?;
+            Ok(FunctionSurfaceFunctionState::Parametric { x, y, z })
         }
-        SurfaceFunction::Parametric { x, y, z } => FunctionSurfaceFunctionState::Parametric {
-            x: function_surface_ref(x),
-            y: function_surface_ref(y),
-            z: function_surface_ref(z),
-        },
     }
 }
 
-pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionRef {
-    match function {
-        Value::FunctionHandle(name) => FunctionSurfaceFunctionRef::FunctionHandle(name.clone()),
+pub(crate) fn function_surface_ref(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<FunctionSurfaceFunctionRef> {
+    Ok(match function {
+        Value::FunctionHandle(name) => {
+            FunctionSurfaceFunctionRef::FunctionHandle(name.name().to_owned())
+        }
         Value::ExternalFunctionHandle(name) => {
-            FunctionSurfaceFunctionRef::ExternalFunctionHandle(name.clone())
+            FunctionSurfaceFunctionRef::ExternalFunctionHandle(name.name().to_owned())
         }
         Value::MethodFunctionHandle(name) => {
-            FunctionSurfaceFunctionRef::MethodFunctionHandle(name.clone())
+            FunctionSurfaceFunctionRef::MethodFunctionHandle(name.name().to_owned())
         }
-        Value::BoundFunctionHandle { name, function } => {
-            FunctionSurfaceFunctionRef::BoundFunctionHandle {
-                name: name.clone(),
-                function: *function,
-            }
+        Value::BoundFunctionHandle(_) | Value::Closure(_) => {
+            FunctionSurfaceFunctionRef::OwnedCallable(super::state::callbacks::retain_in_context(
+                runtime,
+                function.clone(),
+                builtin,
+            )?)
         }
-        Value::Closure(closure) => FunctionSurfaceFunctionRef::ClosureSummary {
-            function_name: closure.function_name.clone(),
-            bound_function: closure.bound_function,
-        },
         _ => FunctionSurfaceFunctionRef::FunctionHandle("<invalid>".into()),
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{
+        FSURF_DESCRIPTOR, FSURF_EXTENSIONS as EXTENSIONS,
+        FSURF_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
+    };
+    fn preflight_fsurf_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
+        super::preflight_fsurf_extensions(crate::call::FunctionArgumentView::from_slice(args))
+    }
+
+    async fn fsurf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::fsurf_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
@@ -1052,12 +850,50 @@ mod tests {
     use runmat_plot::plots::PlotElement;
     use std::sync::Arc;
 
+    struct TestFunctions {
+        runtime: crate::context::RuntimeContext,
+        bindings: Vec<runmat_value::BoundFunctionBinding>,
+        _bound: crate::user_functions::BoundFunctionInvokerGuard,
+    }
+
+    impl TestFunctions {
+        fn value(&self, name: &str, function: usize) -> Value {
+            let binding = self
+                .bindings
+                .iter()
+                .find(|binding| binding.function == function)
+                .expect("selected surface callback");
+            crate::user_functions::test_support::exact_local_value(name, binding.clone())
+        }
+    }
+
+    fn selected_functions(functions: &[usize]) -> TestFunctions {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let bindings = functions
+            .iter()
+            .map(|function| {
+                crate::user_functions::test_support::exact_local_binding(&runtime, *function)
+            })
+            .collect::<Vec<_>>();
+        let entry = runtime.enter();
+        let bound = crate::user_functions::test_support::install_bound_forwarders(bindings.clone());
+        drop(entry);
+        TestFunctions {
+            runtime,
+            bindings,
+            _bound: bound,
+        }
+    }
+
     fn with_test_function(
         f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
-    ) -> crate::user_functions::FunctionInvokerGuard {
+    ) -> (TestFunctions, crate::user_functions::FunctionInvokerGuard) {
+        let fixture = selected_functions(&[1]);
+        let entry = fixture.runtime.enter();
         let f = Arc::new(f);
-        crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+        let numeric = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 1);
                 let f = Arc::clone(&f);
                 let a = match &args[0] {
                     Value::Num(value) => *value,
@@ -1067,9 +903,16 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(f(a, b))) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        f(a, b),
+                    ))
+                })
             },
         )))
+        .expect("call-port scope");
+        drop(entry);
+        (fixture, numeric)
     }
 
     #[test]
@@ -1095,10 +938,15 @@ mod tests {
 
     #[test]
     fn fsurf_gates_integer_forms_independently() {
-        let function = Value::BoundFunctionHandle {
-            name: "surface".into(),
-            function: 1,
-        };
+        let function = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "surface".into(),
+                function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        ));
         let domain = Value::Tensor(
             runmat_value::Tensor::new_integer(
                 runmat_value::IntegerStorage::I16(vec![-2, 2]),
@@ -1132,10 +980,15 @@ mod tests {
         );
 
         let padded_mesh_err = preflight_fsurf_extensions(&[
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String(" MeshDensity ".into()),
             Value::Int(IntValue::U8(35)),
         ])
@@ -1146,10 +999,15 @@ mod tests {
         );
 
         let style_err = preflight_fsurf_extensions(&[
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String("FaceAlpha".into()),
             Value::Int(IntValue::U8(1)),
         ])
@@ -1216,10 +1074,15 @@ mod tests {
         let Value::Num(encoded) = axes else {
             panic!("numeric axes representation");
         };
-        let function = Value::BoundFunctionHandle {
-            name: "surface".into(),
-            function: 1,
-        };
+        let function = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "surface".into(),
+                function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        ));
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = preflight_fsurf_extensions(&[
@@ -1240,32 +1103,40 @@ mod tests {
 
     #[test]
     fn fsurf_resident_integer_callback_is_gated_before_provider_access() {
+        let fixture = selected_functions(&[1]);
+        let _entry = fixture.runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, _args, _requested_outputs| {
+            |function, _args, _requested_outputs| {
+                assert_eq!(function, 1);
                 Box::pin(async {
-                    let handle = runmat_accelerate_api::GpuTensorHandle {
-                        shape: vec![1, 1],
-                        device_id: 999_992,
-                        buffer_id: 999_992,
-                        descriptor: Default::default(),
-                    }
-                    .with_numeric_descriptor(
-                        runmat_accelerate_api::NumericElementType::U64,
-                        runmat_accelerate_api::GpuTensorStorage::Real,
-                    );
-                    Ok(Value::GpuTensor(handle))
+                    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                        .allocate_zeroed(
+                            vec![1, 1],
+                            runmat_accelerate_api::NumericElementType::U64,
+                            runmat_accelerate_api::GpuTensorStorage::Real,
+                        )
+                        .unwrap()
+                        .handle;
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        Value::GpuTensor(handle),
+                    )
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(call_surface_function(
-            &Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let work = super::super::coordinate_admission::CoordinateWork::admit(
+            Some(&fixture.runtime),
+            "fsurf",
+        )
+        .unwrap();
+        let error = block_on(fixture.runtime.scope(call_surface_function(
+            Some(&fixture.runtime),
+            &work,
+            &fixture.value("surface", 1),
             0.0,
             0.0,
-        ))
+        )))
         .expect_err("resident integer callback is rejected before gather");
         assert_eq!(
             error.identifier(),
@@ -1315,12 +1186,12 @@ mod tests {
         );
         let style = parse_surface_style_args(
             BUILTIN_NAME,
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::String("FaceAlpha".into()),
                 Value::Int(IntValue::U8(1)),
                 Value::String("Visible".into()),
                 Value::Int(IntValue::U64(u64::MAX)),
-            ],
+            ]),
             defaults,
         )
         .expect("enabled supported integer styles");
@@ -1333,23 +1204,31 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| x * x + y);
+        let (fixture, _numeric) = with_test_function(|x, y| x * x + y);
+        let _entry = fixture.runtime.enter();
+        let prior_roots = fixture.runtime.plot_callback_root_count();
+        let prior_direct_roots = super::super::state::callbacks::direct_root_count();
 
-        let handle = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let handle = block_on(fixture.runtime.scope(fsurf_builtin(vec![
+            fixture.value("surface", 1),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(3.0),
             Value::String("DisplayName".into()),
             Value::String("parabola".into()),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
         assert_eq!(ty, Value::String("functionsurface".into()));
+        let callback = get_builtin(vec![Value::Num(handle), Value::String("Function".into())])
+            .expect("owning session callback");
+        assert_eq!(callback, fixture.value("surface", 1));
+        assert_eq!(
+            super::super::state::callbacks::direct_root_count(),
+            prior_direct_roots
+        );
+        assert_eq!(fixture.runtime.plot_callback_root_count(), prior_roots + 1);
         let mesh_density = get_builtin(vec![
             Value::Num(handle),
             Value::String("MeshDensity".into()),
@@ -1365,6 +1244,36 @@ mod tests {
         assert_eq!(surface.label.as_deref(), Some("parabola"));
         let z = surface.z_data.as_ref().unwrap();
         assert!((z[2][2] - 3.0).abs() < 1.0e-12);
+        clear_figure(Some(current_figure_handle())).expect("clear callback scene");
+        assert_eq!(fixture.runtime.plot_callback_root_count(), prior_roots);
+    }
+
+    #[test]
+    fn sibling_session_clear_revokes_scene_callback_without_owning_its_value() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        let _ = clear_figure(None);
+        let (fixture, _numeric) = with_test_function(|x, y| x + y);
+        let first = fixture.runtime.clone();
+        let second = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let handle = block_on(first.scope(fsurf_builtin(vec![
+            fixture.value("surface", 1),
+            Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
+            Value::String("MeshDensity".into()),
+            Value::Num(3.0),
+        ])))
+        .expect("first session surface");
+        assert_eq!(first.plot_callback_root_count(), 1);
+        {
+            let _active = second.enter();
+            let error = get_builtin(vec![Value::Num(handle), Value::String("Function".into())])
+                .expect_err("sibling cannot observe original callable");
+            assert!(error.message().contains("another or ended session"));
+            clear_figure(Some(current_figure_handle())).expect("sibling clears shared scene");
+        }
+        assert_eq!(first.plot_callback_root_count(), 0);
     }
 
     #[test]
@@ -1378,8 +1287,10 @@ mod tests {
             Value::Num(2.0),
         )
         .unwrap();
+        let fixture = selected_functions(&[11, 12, 13]);
+        let _entry = fixture.runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
                 let u = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected first scalar argument, got {other:?}"),
@@ -1389,36 +1300,30 @@ mod tests {
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
                 Box::pin(async move {
-                    Ok(match _function {
-                        11 => Value::Num(u),
-                        12 => Value::Num(v),
-                        13 => Value::Num(u + v),
-                        other => panic!("unexpected function id {other}"),
-                    })
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        match function {
+                            11 => Value::Num(u),
+                            12 => Value::Num(v),
+                            13 => Value::Num(u + v),
+                            other => panic!("unexpected function id {other}"),
+                        },
+                    )
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
-        let handle = block_on(fsurf_builtin(vec![
+        let handle = block_on(fixture.runtime.scope(fsurf_builtin(vec![
             Value::Num(ax),
-            Value::BoundFunctionHandle {
-                name: "x".into(),
-                function: 11,
-            },
-            Value::BoundFunctionHandle {
-                name: "y".into(),
-                function: 12,
-            },
-            Value::BoundFunctionHandle {
-                name: "z".into(),
-                function: 13,
-            },
+            fixture.value("x", 11),
+            fixture.value("y", 12),
+            fixture.value("z", 13),
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, 2.0, 4.0], vec![1, 4]).unwrap(),
             ),
             Value::String("MeshDensity".into()),
             Value::Num(2.0),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1440,23 +1345,21 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| {
+        let (fixture, _numeric) = with_test_function(|x, y| {
             if x == 0.0 && y == 0.0 {
                 f64::NAN
             } else {
                 x + y
             }
         });
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let handle = block_on(fixture.runtime.scope(fsurf_builtin(vec![
+            fixture.value("surface", 1),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(2.0),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1474,15 +1377,21 @@ mod tests {
     fn fsurf_rejects_invalid_mesh_density() {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
-        let _invoker = with_test_function(|x, y| x + y);
-        let err = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let (fixture, _numeric) = with_test_function(|x, y| x + y);
+        let _entry = fixture.runtime.enter();
+        let err = block_on(fixture.runtime.scope(fsurf_builtin(vec![
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String("MeshDensity".into()),
             Value::Num(1.0),
-        ]))
+        ])))
         .expect_err("expected mesh-density validation error");
         assert_eq!(err.identifier(), FSURF_ERROR_INVALID_ARGUMENT.identifier);
     }

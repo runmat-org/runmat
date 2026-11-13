@@ -75,6 +75,25 @@ impl CancellationTree {
         self.cancelled.get(&scope).copied()
     }
 
+    /// Ancestry of registered scopes; malformed imported cycles never establish ancestry.
+    pub fn is_ancestor(&self, ancestor: ExecutionScopeId, descendant: ExecutionScopeId) -> bool {
+        let mut cursor = Some(descendant);
+        let mut visited = BTreeSet::new();
+        while let Some(scope) = cursor {
+            if !visited.insert(scope) {
+                return false;
+            }
+            let Some(parent) = self.parents.get(&scope) else {
+                return false;
+            };
+            if scope == ancestor {
+                return true;
+            }
+            cursor = *parent;
+        }
+        false
+    }
+
     pub fn contains(&self, scope: ExecutionScopeId) -> bool {
         self.parents.contains_key(&scope)
     }

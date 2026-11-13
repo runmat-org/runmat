@@ -5,11 +5,11 @@ use runmat_execution::{Digest, ProgramRevision};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ArtifactError, ArtifactResult, BundleCodeClosure, LogicalObject, ObjectDescriptor,
-    ProgramArtifact, ProgramBuildRecipe,
+    ArtifactError, ArtifactResult, BundleCodeClosure, ForeignArtifactClosure, LogicalObject,
+    ObjectDescriptor, ProgramArtifact, ProgramBuildRecipe,
 };
 
-pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 3;
+pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +42,10 @@ pub struct BundleManifest {
     pub project_revision: ProjectRevisionRecord,
     pub code_closure: BundleCodeClosure,
     pub sources: Vec<ObjectDescriptor>,
+    pub foreign_artifacts: Vec<ObjectDescriptor>,
+    pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
+    /// Project-only Config policy; mandatory at cluster admission, optional for local bundles.
+    pub project_runtime_policy: Option<ObjectDescriptor>,
     pub callables: Vec<BundleCallable>,
     pub recipes: Vec<ProgramBuildRecipe>,
     pub artifacts: Vec<ProgramArtifact>,
@@ -57,6 +61,47 @@ pub struct ExecutionBundle {
 }
 
 impl ExecutionBundle {
+    /// Attach one explicitly captured project-only policy; never reads worker CWD or ambient config.
+    pub fn with_project_runtime_policy_object(
+        mut self,
+        object: LogicalObject,
+    ) -> ArtifactResult<Self> {
+        if self.manifest.project_runtime_policy.is_some()
+            || self.objects.iter().any(|value| {
+                value.descriptor.namespace == crate::ObjectNamespace::ProjectRuntimePolicy
+            })
+        {
+            return Err(ArtifactError::Invalid(
+                "bundle already carries a project runtime policy".into(),
+            ));
+        }
+        crate::validate_project_runtime_policy_object(&object)?;
+        self.manifest.project_runtime_policy = Some(object.descriptor.clone());
+        self.objects.push(object);
+        self.objects
+            .sort_by(|left, right| left.descriptor.cmp(&right.descriptor));
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub fn project_runtime_policy_object(&self) -> ArtifactResult<Option<&LogicalObject>> {
+        self.validate()?;
+        self.manifest
+            .project_runtime_policy
+            .as_ref()
+            .map(|descriptor| {
+                self.objects
+                    .iter()
+                    .find(|object| &object.descriptor == descriptor)
+                    .ok_or_else(|| {
+                        ArtifactError::Identity(
+                            "bundle project runtime policy object is missing".into(),
+                        )
+                    })
+            })
+            .transpose()
+    }
+
     pub fn validate(&self) -> ArtifactResult<()> {
         super::validator::validate(self)
     }
@@ -80,7 +125,7 @@ impl ExecutionBundle {
                 "compiled execution bundle has no source project to materialize".into(),
             ));
         };
-        let mut handoff = handoff.clone();
+        let mut handoff = handoff.as_ref().clone();
         handoff.project.workspace_root = root.to_path_buf();
         handoff.project.manifest_path = root.join("runmat.toml");
         for path in handoff.project.access_paths.values_mut() {
@@ -99,5 +144,15 @@ impl ExecutionBundle {
             self.manifest.code_closure,
             BundleCodeClosure::SourceProject { .. }
         )
+    }
+
+    pub fn requires_materialization(&self) -> bool {
+        self.requires_source_project()
+            || !self.manifest.foreign_artifacts.is_empty()
+            || self
+                .manifest
+                .recipes
+                .iter()
+                .any(|recipe| recipe.foreign_policy.is_some())
     }
 }

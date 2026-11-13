@@ -16,7 +16,8 @@ pub use validation::validate_delaunay_carving;
 use validation::{validate_inputs, validate_options};
 use work::CarvingWork;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayCarvingOptions {
     pub facet_recovery: DelaunayFacetRecoveryOptions,
     pub maximum_flood_steps: u64,
@@ -48,6 +49,7 @@ pub struct DelaunayCarvedFacet {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayCarvingErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidConstraints,
     InvalidTopology,
@@ -91,6 +93,9 @@ pub fn carve_delaunay_volume(
 
 fn facet_error(error_value: DelaunayFacetRecoveryError) -> DelaunayCarvingError {
     let kind = match error_value.kind {
+        DelaunayFacetRecoveryErrorKind::Accounting(cause) => {
+            DelaunayCarvingErrorKind::Accounting(cause)
+        }
         DelaunayFacetRecoveryErrorKind::InvalidOptions => DelaunayCarvingErrorKind::InvalidOptions,
         DelaunayFacetRecoveryErrorKind::ResourceLimit => DelaunayCarvingErrorKind::ResourceLimit,
         DelaunayFacetRecoveryErrorKind::Cancelled => DelaunayCarvingErrorKind::Cancelled,

@@ -63,12 +63,12 @@ pub fn refine_exact_face_chart_until_blocked(
                 chart_cut_split_count,
             })),
         ),
-        ExactFaceRefinementOutcome::RequiresCurveSplit {
-            split,
+        ExactFaceRefinementOutcome::RequiresCurveSplits {
+            splits,
             completed_interior_insertions,
-        } => Ok(ExactFaceChartRefinementOutcome::RequiresCurveSplit {
+        } => Ok(ExactFaceChartRefinementOutcome::RequiresCurveSplits {
             chart_id: chart.chart_id,
-            split,
+            splits,
             completed_interior_insertions,
             completed_chart_cut_splits: chart_cut_split_count,
         }),

@@ -92,12 +92,13 @@ impl Parser {
 
     pub(super) fn is_simple_assignment_ahead(&self) -> bool {
         // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment.
-        self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
+        self.peek_token().is_some_and(Token::can_be_identifier)
+            && self.peek_token_at(1) == Some(&Token::Assign)
     }
 
     pub(super) fn try_parse_lvalue_assign(&mut self) -> Result<Option<Stmt>, SyntaxError> {
         let save = self.pos;
-        let lvalue = if self.peek_token() == Some(&Token::Ident) {
+        let lvalue = if self.peek_token().is_some_and(Token::can_be_identifier) {
             let base_token = self.next().unwrap();
             self.parse_lvalue_base_with_postfix(base_token)?
         } else {
@@ -134,9 +135,9 @@ impl Parser {
         Ok(Some(stmt))
     }
 
-    pub(super) fn try_parse_multi_assign(&mut self) -> Result<Stmt, String> {
+    pub(super) fn try_parse_multi_assign(&mut self) -> Result<Stmt, SyntaxError> {
         if !self.consume(&Token::LBracket) {
-            return Err("not a multi-assign".into());
+            return Err(self.error("not a multi-assign"));
         }
         let start = self.tokens[self.pos.saturating_sub(1)].position;
         let mut targets = Vec::new();
@@ -145,28 +146,26 @@ impl Parser {
             targets.push(self.parse_multi_assign_target()?);
         }
         if !self.consume(&Token::RBracket) {
-            return Err("expected ']'".into());
+            return Err(self.error("expected ']'"));
         }
         if !self.consume(&Token::Assign) {
-            return Err("expected '='".into());
+            return Err(self.error("expected '='"));
         }
-        let rhs = self.parse_expr().map_err(|e| e.message)?;
+        let rhs = self.parse_expr()?;
         let span = self.span_from(start, rhs.span().end);
         Ok(Stmt::MultiAssign(targets, rhs, false, span))
     }
 
-    fn parse_multi_assign_target(&mut self) -> Result<MultiAssignTarget, String> {
+    fn parse_multi_assign_target(&mut self) -> Result<MultiAssignTarget, SyntaxError> {
         if self.consume(&Token::Tilde) {
             return Ok(MultiAssignTarget::Discard);
         }
-        if self.peek_token() != Some(&Token::Ident) {
-            return Err("expected multi-assignment target".into());
+        if !self.peek_token().is_some_and(Token::can_be_identifier) {
+            return Err(self.error("expected multi-assignment target"));
         }
         let base_token = self.next().unwrap();
-        let expr = self
-            .parse_lvalue_base_with_postfix(base_token)
-            .map_err(|e| e.message)?;
-        let lvalue = self.expr_to_lvalue(expr).map_err(|e| e.message)?;
+        let expr = self.parse_lvalue_base_with_postfix(base_token)?;
+        let lvalue = self.expr_to_lvalue(expr)?;
         Ok(MultiAssignTarget::LValue(lvalue))
     }
 }

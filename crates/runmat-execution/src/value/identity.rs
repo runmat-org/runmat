@@ -1,12 +1,33 @@
 use minicbor::Encoder;
 
-use super::{ExceptionValue, InlineValue, RegisteredData, ValueLimits, ValuePayload};
+use super::{
+    CharacterEncoding, ExceptionFailureOrigin, ExceptionFrameSource, ExceptionGpuGatherRetry,
+    ExceptionRuntimeMetadata, ExceptionValue, InlineValue, RegisteredData, ValueLimits,
+    ValuePayload,
+};
 use crate::{ContractError, Digest};
 
 pub(super) fn logical_digest(payload: &ValuePayload) -> Result<Digest, ContractError> {
     payload.validate(ValueLimits::default())?;
-    if let ValuePayload::Object(reference) = payload {
-        return Ok(reference.logical_digest);
+    match payload {
+        ValuePayload::Object(reference) => return Ok(reference.logical_digest),
+        ValuePayload::Distributed(handle) => {
+            return Ok(handle_digest(
+                b"runmat-distributed-value-v1\0",
+                handle.scope_id.bytes(),
+                handle.id.bytes(),
+                handle.generation,
+            ));
+        }
+        ValuePayload::Composite(handle) => {
+            return Ok(handle_digest(
+                b"runmat-composite-value-v1\0",
+                handle.scope_id.bytes(),
+                handle.id.bytes(),
+                handle.generation,
+            ));
+        }
+        ValuePayload::Inline(_) => {}
     }
     let mut bytes = b"runmat-logical-value-v1\0".to_vec();
     encode_payload(&mut Encoder::new(&mut bytes), payload)?;
@@ -31,7 +52,47 @@ fn encode_payload(
             .and_then(|encoder| encoder.bytes(reference.logical_digest.bytes()))
             .map(|_| ())
             .map_err(encoding),
+        ValuePayload::Distributed(handle) => encode_handle(
+            encoder,
+            2,
+            handle.scope_id.bytes(),
+            handle.id.bytes(),
+            handle.generation,
+        ),
+        ValuePayload::Composite(handle) => encode_handle(
+            encoder,
+            3,
+            handle.scope_id.bytes(),
+            handle.id.bytes(),
+            handle.generation,
+        ),
     }
+}
+
+fn handle_digest(domain: &[u8], scope: &[u8], id: &[u8], generation: u64) -> Digest {
+    let mut bytes = Vec::with_capacity(domain.len() + scope.len() + id.len() + 8);
+    bytes.extend_from_slice(domain);
+    bytes.extend_from_slice(scope);
+    bytes.extend_from_slice(id);
+    bytes.extend_from_slice(&generation.to_be_bytes());
+    Digest::sha256(bytes)
+}
+
+fn encode_handle(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    tag: u8,
+    scope: &[u8],
+    id: &[u8],
+    generation: u64,
+) -> Result<(), ContractError> {
+    encoder
+        .array(4)
+        .and_then(|encoder| encoder.u8(tag))
+        .and_then(|encoder| encoder.bytes(scope))
+        .and_then(|encoder| encoder.bytes(id))
+        .and_then(|encoder| encoder.u64(generation))
+        .map(|_| ())
+        .map_err(encoding)
 }
 
 fn encode_inline(
@@ -61,16 +122,28 @@ fn encode_inline(
             .and_then(|encoder| encoder.u64(*imaginary))
             .map(|_| ())
             .map_err(encoding),
-        InlineValue::String(value) => scalar(encoder, 12, |encoder| encoder.str(value).map(|_| ())),
-        InlineValue::Char { shape, code_points } => {
+        InlineValue::String(value) => scalar(encoder, 12, |encoder| match value.as_str() {
+            Some(text) => encoder.str(text).map(|_| ()),
+            None => encoder.null().map(|_| ()),
+        }),
+        InlineValue::Char {
+            encoding: character_encoding,
+            shape,
+            code_units,
+        } => {
             encoder
-                .array(3)
+                .array(4)
                 .and_then(|encoder| encoder.u8(13))
                 .map_err(encoding)?;
+            encoder
+                .u8(match character_encoding {
+                    CharacterEncoding::Utf16CodeUnitsV1 => 1,
+                })
+                .map_err(encoding)?;
             encode_u64_array(encoder, shape)?;
-            encoder.array(code_points.len() as u64).map_err(encoding)?;
-            for value in code_points {
-                encoder.u32(*value).map_err(encoding)?;
+            encoder.array(code_units.len() as u64).map_err(encoding)?;
+            for value in code_units {
+                encoder.u16(*value).map_err(encoding)?;
             }
             Ok(())
         }
@@ -82,7 +155,10 @@ fn encode_inline(
             encode_u64_array(encoder, shape)?;
             encoder.array(values.len() as u64).map_err(encoding)?;
             for value in values {
-                encoder.str(value).map_err(encoding)?;
+                match value.as_str() {
+                    Some(text) => encoder.str(text).map_err(encoding)?,
+                    None => encoder.null().map_err(encoding)?,
+                };
             }
             Ok(())
         }
@@ -137,25 +213,56 @@ fn encode_inline(
             }
             Ok(())
         }
-        InlineValue::OutputList(values) => {
-            encoder
-                .array(2)
-                .and_then(|encoder| encoder.u8(20))
-                .map_err(encoding)?;
-            encode_payloads(encoder, values)
-        }
         InlineValue::Exception(value) => encode_exception(encoder, value),
         InlineValue::Callable(value) => {
             encoder
-                .array(5)
+                .array(8)
                 .and_then(|encoder| encoder.u8(22))
-                .and_then(|encoder| encoder.str(&value.owner_identity))
-                .and_then(|encoder| encoder.str(&value.qualified_name))
-                .and_then(|encoder| encoder.bytes(value.callable_digest.bytes()))
                 .map_err(encoding)?;
+            match value.owner {
+                super::CallableOwner::Workspace => {
+                    encoder.array(1).and_then(|e| e.u8(0)).map_err(encoding)?;
+                }
+                super::CallableOwner::External => {
+                    encoder.array(1).and_then(|e| e.u8(1)).map_err(encoding)?;
+                }
+                super::CallableOwner::Method => {
+                    encoder.array(1).and_then(|e| e.u8(2)).map_err(encoding)?;
+                }
+                super::CallableOwner::Bound(origin) => {
+                    encoder
+                        .array(3)
+                        .and_then(|e| e.u8(3))
+                        .and_then(|e| e.bytes(origin.program.bytes()))
+                        .and_then(|e| e.u32(origin.function.0))
+                        .map_err(encoding)?;
+                }
+            }
+            encoder
+                .str(&value.qualified_name)
+                .and_then(|encoder| encoder.bytes(value.callable_digest.bytes()))
+                .and_then(|encoder| {
+                    encoder.u8(match value.form {
+                        super::CallableForm::Handle => 0,
+                        super::CallableForm::Closure => 1,
+                    })
+                })
+                .and_then(|encoder| encoder.u8(value.source_role as u8))
+                .map_err(encoding)?;
+            match &value.source_file {
+                Some(path) => encoder.str(path).map_err(encoding)?,
+                None => encoder.null().map_err(encoding)?,
+            };
             encode_payloads(encoder, &value.captures)
         }
         InlineValue::ImmutableValueClass(value) => encode_registered(encoder, 23, value),
+        InlineValue::DurableOrderedStruct(_)
+        | InlineValue::DurablePlainObject(_)
+        | InlineValue::DurableStructArray(_)
+        | InlineValue::DurableObjectArray(_) => Err(ContractError::invalid(
+            "V2 execution value",
+            "durable preference aggregates require a preference document",
+        )),
     }
 }
 
@@ -199,7 +306,105 @@ fn encode_exception(
     for cause in &value.causes {
         encode_exception(encoder, cause)?;
     }
-    encoder.null().map(|_| ()).map_err(encoding)
+    match &value.runtime {
+        Some(runtime) => encode_exception_runtime(encoder, runtime),
+        None => encoder.null().map(|_| ()).map_err(encoding),
+    }
+}
+
+fn encode_exception_runtime(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    runtime: &ExceptionRuntimeMetadata,
+) -> Result<(), ContractError> {
+    encoder.array(9).map_err(encoding)?;
+    encode_optional_span(encoder, runtime.span)?;
+    encode_optional_text(encoder, runtime.builtin.as_deref())?;
+    encode_optional_text(encoder, runtime.task_id.as_deref())?;
+    encoder
+        .array(runtime.call_frames.len() as u64)
+        .map_err(encoding)?;
+    for frame in &runtime.call_frames {
+        encoder
+            .array(
+                if matches!(&frame.source, ExceptionFrameSource::Detached(_)) {
+                    6
+                } else {
+                    3
+                },
+            )
+            .and_then(|encoder| encoder.str(&frame.function))
+            .map_err(encoding)?;
+        match &frame.source {
+            ExceptionFrameSource::Admitted(source_id) => {
+                encoder.u32(source_id.0).map(|_| ()).map_err(encoding)?;
+            }
+            ExceptionFrameSource::Unknown | ExceptionFrameSource::Detached(_) => {
+                encoder.null().map(|_| ()).map_err(encoding)?;
+            }
+        }
+        encode_optional_span(encoder, frame.span)?;
+        if let ExceptionFrameSource::Detached(presentation) = &frame.source {
+            encoder.str(&presentation.display_name).map_err(encoding)?;
+            if let Some(line) = presentation.line {
+                encoder.u64(line).map_err(encoding)?;
+            } else {
+                encoder.null().map_err(encoding)?;
+            }
+            if let Some(column) = presentation.column {
+                encoder.u64(column).map_err(encoding)?;
+            } else {
+                encoder.null().map_err(encoding)?;
+            }
+        }
+    }
+    encoder.u64(runtime.call_frames_elided).map_err(encoding)?;
+    encoder
+        .array(runtime.call_stack.len() as u64)
+        .map_err(encoding)?;
+    for frame in &runtime.call_stack {
+        encoder.str(frame).map_err(encoding)?;
+    }
+    encode_optional_text(encoder, runtime.phase.as_deref())?;
+    encoder
+        .u8(match runtime.gpu_gather_retry {
+            ExceptionGpuGatherRetry::Legacy => 0,
+            ExceptionGpuGatherRetry::Never => 1,
+            ExceptionGpuGatherRetry::Requested => 2,
+        })
+        .map_err(encoding)?;
+    encoder
+        .u8(match runtime.failure_origin {
+            ExceptionFailureOrigin::Unclassified => 0,
+            ExceptionFailureOrigin::LanguageEvaluation => 1,
+            ExceptionFailureOrigin::ExecutionControlCancellation => 2,
+        })
+        .map(|_| ())
+        .map_err(encoding)
+}
+
+fn encode_optional_span(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    span: Option<(u64, u64)>,
+) -> Result<(), ContractError> {
+    match span {
+        Some((start, length)) => encoder
+            .array(2)
+            .and_then(|encoder| encoder.u64(start))
+            .and_then(|encoder| encoder.u64(length))
+            .map(|_| ())
+            .map_err(encoding),
+        None => encoder.null().map(|_| ()).map_err(encoding),
+    }
+}
+
+fn encode_optional_text(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    text: Option<&str>,
+) -> Result<(), ContractError> {
+    match text {
+        Some(text) => encoder.str(text).map(|_| ()).map_err(encoding),
+        None => encoder.null().map(|_| ()).map_err(encoding),
+    }
 }
 
 fn encode_payloads(

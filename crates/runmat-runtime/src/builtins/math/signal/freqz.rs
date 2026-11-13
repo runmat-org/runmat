@@ -2,12 +2,12 @@
 
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FREQZ_ERROR_ARG_COUNT,
+    FREQZ_ERROR_INTERNAL, FREQZ_ERROR_INVALID_COEFFICIENTS, FREQZ_ERROR_INVALID_FS,
+    FREQZ_ERROR_INVALID_N, FREQZ_INTEGER_COEFFICIENT_EXTENSION, FREQZ_INTEGER_FS_EXTENSION,
+    FREQZ_INTEGER_N_EXTENSION, FREQZ_LOGICAL_COEFFICIENT_EXTENSION, FREQZ_LOGICAL_FS_EXTENSION,
+    FREQZ_LOGICAL_N_EXTENSION, FREQZ_RESIDENT_INPUT_EXTENSION, FREQZ_SINGLE_FS_EXTENSION,
+    FREQZ_SINGLE_N_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
@@ -17,12 +17,18 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::signal::common::{
-    parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector,
+    parse_nonnegative_integer, parse_scalar_f64, value_to_complex_vector, SignalCooperation,
+    SIGNAL_WORK_CHUNK,
 };
-use crate::builtins::math::signal::type_resolvers::freqz_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+#[cfg(feature = "plot-core")]
+use runmat_builtins::FREQZ_ERROR_PLOT;
+
 const BUILTIN_NAME: &str = "freqz";
+
+#[cfg(feature = "plot-core")]
+mod presentation;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::freqz")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,325 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "freqz materialises response vectors and is not fused.",
 };
 
-const FREQZ_OUTPUT_H: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "H",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Complex frequency response.",
-}];
-
-const FREQZ_OUTPUT_H_W: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "H",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Complex frequency response.",
-    },
-    BuiltinParamDescriptor {
-        name: "w",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Frequencies in radians/sample or Hz when fs is supplied.",
-    },
-];
-
-const FREQZ_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerator coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Denominator coefficient vector.",
-    },
-];
-
-const FREQZ_INPUTS_N: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerator coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Denominator coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("512"),
-        description: "Number of response samples.",
-    },
-];
-
-const FREQZ_INPUTS_N_FS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerator coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Denominator coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("512"),
-        description: "Number of response samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "fs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Sampling frequency for output frequencies in Hz.",
-    },
-];
-
-const FREQZ_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "H = freqz(b, a)",
-        inputs: &FREQZ_INPUTS_CORE,
-        outputs: &FREQZ_OUTPUT_H,
-    },
-    BuiltinSignatureDescriptor {
-        label: "H = freqz(b, a, n)",
-        inputs: &FREQZ_INPUTS_N,
-        outputs: &FREQZ_OUTPUT_H,
-    },
-    BuiltinSignatureDescriptor {
-        label: "H = freqz(b, a, n, fs)",
-        inputs: &FREQZ_INPUTS_N_FS,
-        outputs: &FREQZ_OUTPUT_H,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[H, w] = freqz(b, a)",
-        inputs: &FREQZ_INPUTS_CORE,
-        outputs: &FREQZ_OUTPUT_H_W,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[H, w] = freqz(b, a, n)",
-        inputs: &FREQZ_INPUTS_N,
-        outputs: &FREQZ_OUTPUT_H_W,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[H, w] = freqz(b, a, n, fs)",
-        inputs: &FREQZ_INPUTS_N_FS,
-        outputs: &FREQZ_OUTPUT_H_W,
-    },
-];
-
-const FREQZ_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FREQZ.ARG_COUNT",
-    identifier: Some("RunMat:freqz:ArgCount"),
-    when: "The argument count is outside supported forms.",
-    message: "freqz: expected freqz(b, a, [n, [fs]])",
-};
-
-const FREQZ_ERROR_INVALID_COEFFICIENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FREQZ.INVALID_COEFFICIENTS",
-    identifier: Some("RunMat:freqz:InvalidCoefficients"),
-    when: "Coefficient inputs are empty or not numeric vectors.",
-    message: "freqz: invalid coefficient input",
-};
-
-const FREQZ_ERROR_INVALID_N: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FREQZ.INVALID_N",
-    identifier: Some("RunMat:freqz:InvalidN"),
-    when: "The response length is not an integer scalar greater than or equal to two.",
-    message: "freqz: n must be an integer greater than or equal to 2",
-};
-
-const FREQZ_ERROR_INVALID_FS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FREQZ.INVALID_FS",
-    identifier: Some("RunMat:freqz:InvalidFs"),
-    when: "The sampling frequency is not a positive finite scalar.",
-    message: "freqz: fs must be a positive finite scalar",
-};
-
-const FREQZ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FREQZ.INTERNAL",
-    identifier: Some("RunMat:freqz:Internal"),
-    when: "Response tensor construction fails internally.",
-    message: "freqz: internal error",
-};
-
-const FREQZ_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FREQZ_ERROR_ARG_COUNT,
-    FREQZ_ERROR_INVALID_COEFFICIENTS,
-    FREQZ_ERROR_INVALID_N,
-    FREQZ_ERROR_INVALID_FS,
-    FREQZ_ERROR_INTERNAL,
-];
-
-macro_rules! freqz_extension {
-    ($name:ident, $id:literal, $description:literal, $error:literal) => {
-        const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: $description,
-            error_identifier: Some($error),
-        };
-    };
-}
-
-freqz_extension!(
-    FREQZ_INTEGER_COEFFICIENT_EXTENSION,
-    "freqz-integer-coefficients",
-    "freqz with typed-integer transfer-function coefficients is a RunMat extension",
-    "RunMat:compatibility:FreqzIntegerCoefficientExtension"
-);
-freqz_extension!(
-    FREQZ_LOGICAL_COEFFICIENT_EXTENSION,
-    "freqz-logical-coefficients",
-    "freqz with logical transfer-function coefficients is a RunMat extension",
-    "RunMat:compatibility:FreqzLogicalCoefficientExtension"
-);
-freqz_extension!(FREQZ_INTEGER_N_EXTENSION, "freqz-integer-point-count", "freqz with a typed-integer point count is a provisional RunMat extension because the public core documentation does not publish its accepted classes", "RunMat:compatibility:FreqzIntegerPointCountExtension");
-freqz_extension!(
-    FREQZ_LOGICAL_N_EXTENSION,
-    "freqz-logical-point-count",
-    "freqz with a logical point count is a RunMat extension",
-    "RunMat:compatibility:FreqzLogicalPointCountExtension"
-);
-freqz_extension!(
-    FREQZ_SINGLE_N_EXTENSION,
-    "freqz-single-point-count",
-    "freqz with a single-precision point count is a provisional RunMat extension",
-    "RunMat:compatibility:FreqzSinglePointCountExtension"
-);
-freqz_extension!(
-    FREQZ_INTEGER_FS_EXTENSION,
-    "freqz-integer-sample-rate",
-    "freqz with a typed-integer sample rate is a RunMat extension",
-    "RunMat:compatibility:FreqzIntegerSampleRateExtension"
-);
-freqz_extension!(
-    FREQZ_LOGICAL_FS_EXTENSION,
-    "freqz-logical-sample-rate",
-    "freqz with a logical sample rate is a RunMat extension",
-    "RunMat:compatibility:FreqzLogicalSampleRateExtension"
-);
-freqz_extension!(
-    FREQZ_SINGLE_FS_EXTENSION,
-    "freqz-single-sample-rate",
-    "freqz with a single-precision sample rate is a RunMat extension",
-    "RunMat:compatibility:FreqzSingleSampleRateExtension"
-);
-freqz_extension!(
-    FREQZ_RESIDENT_INPUT_EXTENSION,
-    "freqz-resident-input",
-    "freqz with an interactive resident input is a RunMat extension",
-    "RunMat:compatibility:FreqzResidentInputExtension"
-);
-
-pub const FREQZ_EXTENSIONS: [BuiltinExtensionDescriptor; 9] = [
-    FREQZ_INTEGER_COEFFICIENT_EXTENSION,
-    FREQZ_LOGICAL_COEFFICIENT_EXTENSION,
-    FREQZ_INTEGER_N_EXTENSION,
-    FREQZ_LOGICAL_N_EXTENSION,
-    FREQZ_SINGLE_N_EXTENSION,
-    FREQZ_INTEGER_FS_EXTENSION,
-    FREQZ_LOGICAL_FS_EXTENSION,
-    FREQZ_SINGLE_FS_EXTENSION,
-    FREQZ_RESIDENT_INPUT_EXTENSION,
-];
-
-const FREQZ_INTEGER_COEFFICIENT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "b",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer numerator coefficients must be exactly representable at the binary64 response boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "a",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer denominator coefficients must be exactly representable at the binary64 response boundary.",
-    },
-];
-const FREQZ_INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Core freqz documents a positive integer scalar but publishes no datatype list; RunMat provisionally gates typed n and parses it exactly.",
-    }];
-const FREQZ_INTEGER_FS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented sample-rate class is double; admitted typed values require exact binary64 representation.",
-    }];
-
-pub const FREQZ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[h,w] = freqz(integer_b,integer_a,...)",
-        inputs: &FREQZ_INTEGER_COEFFICIENT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Authoritative integer coefficients cross one checked binary64 boundary; integer-only responses are complex double and frequencies are double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[h,w] = freqz(b,a,integer_n,...)",
-        inputs: &FREQZ_INTEGER_N_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Point count is decoded exactly in every supported integer class, must be at least two, and selects the response shape.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[h,f] = freqz(b,a,n,integer_fs)",
-        inputs: &FREQZ_INTEGER_FS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Sample rate crosses one checked binary64 boundary; response precision follows documented coefficient precision and f remains host double.",
-    },
-];
-
-pub const FREQZ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FREQZ_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FREQZ_ERRORS,
-};
-
 fn freqz_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     freqz_error_with_message(error.message, error)
 }
@@ -379,6 +66,20 @@ fn freqz_error_with_detail(
     detail: impl AsRef<str>,
 ) -> RuntimeError {
     freqz_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn freqz_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, source.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn freqz_error_with_message(
@@ -394,22 +95,55 @@ fn freqz_error_with_message(
 
 #[runtime_builtin(
     name = "freqz",
-    category = "math/signal",
-    summary = "Evaluate digital filter frequency response.",
-    keywords = "freqz,frequency response,filter,FIR,IIR,signal processing",
-    type_resolver(freqz_type),
-    descriptor(crate::builtins::math::signal::freqz::FREQZ_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::freqz::FREQZ_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::freqz::FREQZ_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::freqz"
 )]
-async fn freqz_builtin(b: Value, a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(b, a, &rest).await
+async fn freqz_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    b: Value,
+    a: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    evaluate_in_runtime(runtime.as_ref(), b, a, rest.view()).await
 }
 
 pub async fn evaluate(b: Value, a: Value, rest: &[Value]) -> BuiltinResult<Value> {
+    evaluate_in_runtime(
+        None,
+        b,
+        a,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
+}
+
+async fn evaluate_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    b: Value,
+    a: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    evaluate_with_cooperation(b, a, rest, &mut cooperation).await
+}
+
+async fn evaluate_with_cooperation(
+    b: Value,
+    a: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    cooperation.completed(0).await?;
     if rest.len() > 2 {
         return Err(freqz_error(&FREQZ_ERROR_ARG_COUNT));
+    }
+    let plot_requested = matches!(crate::output_count::current_output_count(), Some(0))
+        || (crate::output_context::requested_output_count() == Some(0)
+            && crate::output_count::current_output_count().is_none());
+    #[cfg(not(feature = "plot-core"))]
+    if plot_requested {
+        return Err(crate::plotting_hooks::unavailable_presentation());
     }
     ensure_input_extensions(&b, &a, rest)?;
     let single_response = is_single_value(&b) || is_single_value(&a);
@@ -425,11 +159,11 @@ pub async fn evaluate(b: Value, a: Value, rest: &[Value]) -> BuiltinResult<Value
     ensure_exact_integer_boundary(&a, "denominator", &FREQZ_ERROR_INVALID_COEFFICIENTS)?;
     let b = value_to_complex_vector(BUILTIN_NAME, "numerator", b)
         .await
-        .map_err(|err| freqz_error_with_detail(&FREQZ_ERROR_INVALID_COEFFICIENTS, err.message()))?
+        .map_err(|err| freqz_error_with_source(&FREQZ_ERROR_INVALID_COEFFICIENTS, err))?
         .data;
     let a = value_to_complex_vector(BUILTIN_NAME, "denominator", a)
         .await
-        .map_err(|err| freqz_error_with_detail(&FREQZ_ERROR_INVALID_COEFFICIENTS, err.message()))?
+        .map_err(|err| freqz_error_with_source(&FREQZ_ERROR_INVALID_COEFFICIENTS, err))?
         .data;
     if b.is_empty() || a.is_empty() {
         return Err(freqz_error_with_detail(
@@ -442,7 +176,7 @@ pub async fn evaluate(b: Value, a: Value, rest: &[Value]) -> BuiltinResult<Value
             512
         } else {
             let parsed = parse_nonnegative_integer(BUILTIN_NAME, "n", value)
-                .map_err(|err| freqz_error_with_detail(&FREQZ_ERROR_INVALID_N, err.message()))?;
+                .map_err(|err| freqz_error_with_source(&FREQZ_ERROR_INVALID_N, err))?;
             if parsed < 2 {
                 return Err(freqz_error(&FREQZ_ERROR_INVALID_N));
             }
@@ -454,7 +188,7 @@ pub async fn evaluate(b: Value, a: Value, rest: &[Value]) -> BuiltinResult<Value
     let fs = if let Some(value) = rest.get(1) {
         ensure_exact_integer_boundary(value, "fs", &FREQZ_ERROR_INVALID_FS)?;
         let fs = parse_scalar_f64(BUILTIN_NAME, "fs", value)
-            .map_err(|err| freqz_error_with_detail(&FREQZ_ERROR_INVALID_FS, err.message()))?;
+            .map_err(|err| freqz_error_with_source(&FREQZ_ERROR_INVALID_FS, err))?;
         if fs <= 0.0 {
             return Err(freqz_error(&FREQZ_ERROR_INVALID_FS));
         }
@@ -463,13 +197,17 @@ pub async fn evaluate(b: Value, a: Value, rest: &[Value]) -> BuiltinResult<Value
         None
     };
 
-    let eval = evaluate_response(&b, &a, n, fs, single_response)?;
+    let eval = evaluate_response(&b, &a, n, fs, single_response, cooperation).await?;
+    #[cfg(feature = "plot-core")]
+    if plot_requested {
+        presentation::plot_response(&eval, fs.is_some())?;
+        return Ok(Value::output_list(Vec::new()));
+    }
+    #[cfg(not(feature = "plot-core"))]
+    let _ = plot_requested;
     if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.h_value()?]));
+            return Ok(Value::output_list(vec![eval.h_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -504,26 +242,37 @@ impl FreqzEvaluation {
     }
 }
 
-fn evaluate_response(
+async fn evaluate_response(
     b: &[Complex<f64>],
     a: &[Complex<f64>],
     n: usize,
     fs: Option<f64>,
     single_response: bool,
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<FreqzEvaluation> {
-    let mut h = Vec::with_capacity(n);
-    let mut w = Vec::with_capacity(n);
+    let mut h = Vec::new();
+    h.try_reserve_exact(n)
+        .map_err(|cause| freqz_error_with_detail(&FREQZ_ERROR_INTERNAL, cause.to_string()))?;
+    let mut w = Vec::new();
+    w.try_reserve_exact(n)
+        .map_err(|cause| freqz_error_with_detail(&FREQZ_ERROR_INTERNAL, cause.to_string()))?;
     for idx in 0..n {
         let omega = std::f64::consts::PI * idx as f64 / n as f64;
         let point = Complex::new(omega.cos(), -omega.sin());
-        let numerator = polynomial_in_z_inverse(b, point);
-        let denominator = polynomial_in_z_inverse(a, point);
+        let numerator = polynomial_in_z_inverse(b, point, cooperation).await?;
+        let denominator = polynomial_in_z_inverse(a, point, cooperation).await?;
         h.push(numerator / denominator);
         w.push(match fs {
             Some(fs) => fs * idx as f64 / (2.0 * n as f64),
             None => omega,
         });
+        if (idx + 1) % SIGNAL_WORK_CHUNK as usize == 0 {
+            cooperation.completed(SIGNAL_WORK_CHUNK).await?;
+        }
     }
+    cooperation
+        .completed((n % SIGNAL_WORK_CHUNK as usize) as u64)
+        .await?;
     Ok(FreqzEvaluation {
         h,
         w,
@@ -562,7 +311,11 @@ fn ensure_extension_if(
     Ok(())
 }
 
-fn ensure_input_extensions(b: &Value, a: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_input_extensions(
+    b: &Value,
+    a: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for coefficient in [b, a] {
         ensure_extension_if(
             is_typed_integer_value(coefficient),
@@ -596,13 +349,15 @@ async fn gather_freqz_value(value: Value) -> BuiltinResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
         crate::builtins::common::gpu_helpers::gather_value_async(&value)
             .await
-            .map_err(|err| freqz_error_with_detail(&FREQZ_ERROR_INTERNAL, err.message()))
+            .map_err(|err| freqz_error_with_source(&FREQZ_ERROR_INTERNAL, err))
     } else {
         Ok(value)
     }
 }
 
-async fn gather_freqz_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_freqz_values(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(values.len());
     for value in values {
         gathered.push(gather_freqz_value(value.clone()).await?);
@@ -619,7 +374,7 @@ fn ensure_exact_integer_boundary(
     role: &str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let representable = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor
@@ -637,25 +392,38 @@ fn ensure_exact_integer_boundary(
     }
 }
 
-fn polynomial_in_z_inverse(coeffs: &[Complex<f64>], point: Complex<f64>) -> Complex<f64> {
+async fn polynomial_in_z_inverse(
+    coeffs: &[Complex<f64>],
+    point: Complex<f64>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Complex<f64>> {
     let mut acc = Complex::new(0.0, 0.0);
     let mut power = Complex::new(1.0, 0.0);
-    for coeff in coeffs {
+    for (idx, coeff) in coeffs.iter().enumerate() {
         acc += *coeff * power;
         power *= point;
+        if (idx + 1) % SIGNAL_WORK_CHUNK as usize == 0 {
+            cooperation.completed(SIGNAL_WORK_CHUNK).await?;
+        }
     }
-    acc
+    cooperation
+        .completed((coeffs.len() % SIGNAL_WORK_CHUNK as usize) as u64)
+        .await?;
+    Ok(acc)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::{builtin_function_by_name, REQUIRED_DEFAULT_BINDING};
     use runmat_value::{IntValue, IntegerStorage};
 
     fn call(b: Value, a: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
-        let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+        let _guard = outputs
+            .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
+            .expect("output-count scope");
         block_on(evaluate(b, a, rest))
     }
 
@@ -665,15 +433,25 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("freqz builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
+    fn canonical_descriptor_and_default_binding_are_registered() {
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+            .expect("canonical freqz builtin");
+        assert_eq!(builtin.bindings, &REQUIRED_DEFAULT_BINDING);
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            builtin.binding_identity(&builtin.bindings[0])
+        );
+        let descriptor = builtin.descriptor;
         assert!(descriptor
             .signatures
             .iter()
             .any(|sig| sig.label == "[H, w] = freqz(b, a, n, fs)"));
-        assert_eq!(FREQZ_INTEGER_CAPABILITIES.len(), 3);
-        assert!(FREQZ_EXTENSIONS
+        assert_eq!(builtin.integer_capabilities.len(), 3);
+        assert!(builtin
+            .extensions
             .iter()
             .any(|extension| extension.id == "freqz-resident-input"));
     }
@@ -690,7 +468,7 @@ mod tests {
         let Value::ComplexTensor(h) = h else {
             panic!("expected complex response");
         };
-        assert_eq!(h.shape, vec![4, 1]);
+        assert_eq!(h.shape(), [4, 1]);
         assert!((h.materialize_f64()[0].0 - 2.0).abs() < 1e-12);
         assert!((h.materialize_f64()[2].0 - 1.0).abs() < 1e-12);
         assert!((h.materialize_f64()[2].1 + 1.0).abs() < 1e-12);
@@ -715,7 +493,7 @@ mod tests {
             panic!("expected w");
         };
         assert!((h.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
-        assert_eq!(w.shape, vec![8, 1]);
+        assert_eq!(w.shape(), [8, 1]);
         assert!((w.materialize_f64()[1] - 62.5).abs() < 1e-12);
     }
 
@@ -731,24 +509,15 @@ mod tests {
         let Value::Tensor(w) = &values[1] else {
             panic!("expected w");
         };
-        assert_eq!(h.shape, vec![512, 1]);
-        assert_eq!(w.shape, vec![512, 1]);
+        assert_eq!(h.shape(), [512, 1]);
+        assert_eq!(w.shape(), [512, 1]);
         let frequencies = w.materialize_f64();
         assert_eq!(frequencies[0], 0.0);
         assert!((frequencies[511] - std::f64::consts::PI * 511.0 / 512.0).abs() < 1e-12);
     }
 
     #[test]
-    fn output_count_zero_and_padding_are_respected() {
-        let out = call(
-            Value::Num(1.0),
-            Value::Num(1.0),
-            &[Value::Num(2.0)],
-            Some(0),
-        )
-        .unwrap();
-        assert_eq!(out, Value::OutputList(Vec::new()));
-
+    fn output_count_padding_is_respected() {
         let out = call(
             Value::Num(1.0),
             Value::Num(1.0),
@@ -763,6 +532,121 @@ mod tests {
         assert!(matches!(values[0], Value::ComplexTensor(_)));
         assert!(matches!(values[1], Value::Tensor(_)));
         assert_eq!(values[2], Value::Num(0.0));
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn zero_output_publishes_magnitude_and_phase_only_after_valid_response() {
+        use crate::builtins::plotting::state::{
+            clone_figure, current_figure_handle, lock_plot_test_registry, reset_plot_state,
+        };
+        let _plot_guard = lock_plot_test_registry();
+        reset_plot_state();
+        let invalid = call(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            &[Value::Num(1.0)],
+            Some(0),
+        );
+        assert_error_identifier(invalid, "RunMat:freqz:InvalidN");
+        let figure = current_figure_handle();
+        assert!(clone_figure(figure).is_none());
+        let output = call(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            &[Value::Num(8.0)],
+            Some(0),
+        )
+        .unwrap();
+        assert_eq!(output, Value::output_list(Vec::new()));
+        let plotted = clone_figure(figure).expect("figure");
+        assert_eq!(plotted.len(), 2);
+        assert_eq!(
+            plotted
+                .axes_metadata(0)
+                .and_then(|axes| axes.y_label.as_deref()),
+            Some("Magnitude (dB)")
+        );
+        assert_eq!(
+            plotted
+                .axes_metadata(1)
+                .and_then(|axes| axes.y_label.as_deref()),
+            Some("Phase (rad)")
+        );
+        reset_plot_state();
+        assert!(clone_figure(current_figure_handle()).is_none());
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn cancelled_response_does_not_mutate_the_figure() {
+        use crate::builtins::plotting::state::{
+            capture_figure_persistence_snapshot, clone_figure, current_figure_handle,
+            lock_plot_test_registry, reset_plot_state,
+        };
+        use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::num::NonZeroU64;
+        use std::rc::Rc;
+
+        let _plot_guard = lock_plot_test_registry();
+        reset_plot_state();
+        call(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            &[Value::Num(8.0)],
+            Some(0),
+        )
+        .expect("seed frequency response");
+        let figure = current_figure_handle();
+        let before = capture_figure_persistence_snapshot(&[figure], 1, 1024 * 1024)
+            .expect("bounded fixture snapshot");
+        let source = Rc::new(CancellationSource::new());
+        let cancel_on_turn = Rc::clone(&source);
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(SIGNAL_WORK_CHUNK).unwrap()),
+            source.token(),
+            move || {
+                cancel_on_turn.cancel(CancellationReason::User);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let mut cooperation = SignalCooperation::with_budget(budget, BUILTIN_NAME);
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+        let error = block_on(evaluate_with_cooperation(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(SIGNAL_WORK_CHUNK as f64)]),
+            &mut cooperation,
+        ))
+        .expect_err("cancelled response must not publish graphics");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(current_figure_handle(), figure);
+        let after = capture_figure_persistence_snapshot(&[figure], 1, 1024 * 1024)
+            .expect("unchanged fixture snapshot");
+        assert!(before.entries[0]
+            .scene_lease
+            .shares_lease(&after.entries[0].scene_lease));
+        assert_eq!(clone_figure(figure).expect("retained figure").len(), 2);
+        reset_plot_state();
+        assert!(clone_figure(current_figure_handle()).is_none());
+    }
+
+    #[cfg(not(feature = "plot-core"))]
+    #[test]
+    fn zero_output_refuses_before_response_when_plotting_is_unavailable() {
+        let error = call(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            &[Value::Num(8.0)],
+            Some(0),
+        )
+        .expect_err("zero-output form requires graphics");
+        assert_eq!(
+            error.identifier(),
+            crate::plotting_hooks::unavailable_presentation().identifier()
+        );
     }
 
     #[test]
@@ -826,7 +710,7 @@ mod tests {
         let Value::ComplexTensor(output) = output else {
             panic!("expected response");
         };
-        assert_eq!(output.shape, vec![512, 1]);
+        assert_eq!(output.shape(), [512, 1]);
     }
 
     #[test]
@@ -931,12 +815,16 @@ mod tests {
 
     #[test]
     fn resident_extension_rejects_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit owned fixture")
+                .handle,
+        );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(resident, Value::Num(1.0), &[], None)
             .expect_err("resident call must reject before gather");

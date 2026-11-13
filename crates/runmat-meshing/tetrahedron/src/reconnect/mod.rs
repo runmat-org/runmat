@@ -1,3 +1,5 @@
+mod boundary_links;
+pub(crate) use boundary_links::BoundaryEdgeStarCandidates;
 pub mod local_flip;
 pub use local_flip::*;
 

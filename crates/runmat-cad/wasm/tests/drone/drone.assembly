@@ -1,0 +1,131 @@
+runmat 0.7
+std 1
+
+// A generic foldable camera drone, 249 g class to 900 g class by its battery: one lofted upper
+// and lower shell split along the body's waist; four folding arms on tilted hinge pins (the rear
+// arms fold forward and down under the body, the front arms back and up over them); cowled motor
+// pods with folding two-blade props; a 3-axis gimbal under the nose; two landing skids under the
+// belly; a battery mid-body over the props' thrust centre, its lid part of the shell; downward
+// and forward vision sensors; and the 4-in-1 ESC and flight controller inside on the ESC heatsink's standoffs. The
+// fold inputs stow it: drone_folded.assembly sets them.
+assembly drone {
+    input fold_front : angle = 0 deg
+    input fold_rear : angle = 0 deg
+    input blade_a : angle = 0 deg
+    input blade_b : angle = 180 deg
+    input rear_blade_a : angle = 0 deg
+    input rear_blade_b : angle = 180 deg
+    input pitch : angle = -12 deg
+
+    // Body: the two shells, the battery in its bay and the status window.
+    use part body_bottom from "./mechanical/body" as body_bottom
+    use part body_top from "./mechanical/body" as body_top
+    use part battery from "./mechanical/body" as battery
+    use part light_pipe from "./mechanical/body" as light_pipe
+
+    // Landing gear: a skid under each side of the belly, either side of the heatsink's fins.
+    use part landing_skid from "./mechanical/body" as skid_left {
+        configuration = { select = inputs, values = { side = 34 mm } }
+    }
+    use part landing_skid from "./mechanical/body" as skid_right {
+        configuration = { select = inputs, values = { side = -34 mm } }
+    }
+
+    // The radio's two antennas, upright inside the side walls behind the board stack.
+    use part antenna from "./mechanical/body" as antenna_left {
+        placement = { placement = offset, offset = { translation = [-25 mm, 38 mm, 14 mm] } }
+    }
+    use part antenna from "./mechanical/body" as antenna_right {
+        placement = { placement = offset, offset = { translation = [-25 mm, -38 mm, 14 mm] } }
+    }
+
+    // The arms on their hinges. Each station's arm is arm.part's `length` plus a length offset:
+    // -6.66 mm front and +2.407 mm rear, so at the 88.2 mm nominal (81.54 mm front, 90.607 mm
+    // rear) the motors sit on the 300 mm diagonal with the props 55 mm above the belly, and a
+    // change of the arm's length moves all four motors along their arms. Both hinges are tilted: the front pins lean 20 deg so the
+    // front arms rise as they swing back over the rear ones, and the rear pins lean 28 deg so the
+    // rear arms drop as they swing forward under them. The right arms are the left ones'
+    // mirror images, so their blade inputs are mirrored too.
+    use assembly arm_station from "./mechanical/arm" as arm_front_left {
+        configuration = { select = inputs, values = { fold = input.fold_front, length_offset = -6.66 mm, rise = 5.79 mm, pod_tilt = -20 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+        placement = { placement = offset, offset = { translation = [44 mm, 52 mm, 24 mm], rotation = { rotation = euler, yaw = 56.324 deg, pitch = 0 deg, roll = 20 deg } } }
+    }
+    use assembly arm_station from "./mechanical/arm" as arm_front_right {
+        configuration = { select = inputs, values = { fold = -input.fold_front, length_offset = -6.66 mm, rise = 5.79 mm, pod_tilt = 20 deg, blade_a = -input.blade_b - 180 deg, blade_b = -input.blade_a - 180 deg } }
+        placement = { placement = offset, offset = { translation = [44 mm, -52 mm, 24 mm], rotation = { rotation = euler, yaw = -56.324 deg, pitch = 0 deg, roll = -20 deg } } }
+    }
+    use assembly arm_station from "./mechanical/arm" as arm_rear_left {
+        configuration = { select = inputs, values = { fold = -input.fold_rear, length_offset = 2.407 mm, rise = 18.878 mm, pod_tilt = -28 deg, blade_a = input.rear_blade_a, blade_b = input.rear_blade_b } }
+        placement = { placement = offset, offset = { translation = [-66 mm, 44 mm, 13 mm], rotation = { rotation = euler, yaw = 124.168 deg, pitch = 0 deg, roll = 28 deg } } }
+    }
+    use assembly arm_station from "./mechanical/arm" as arm_rear_right {
+        configuration = { select = inputs, values = { fold = input.fold_rear, length_offset = 2.407 mm, rise = 18.878 mm, pod_tilt = 28 deg, blade_a = -input.rear_blade_b - 180 deg, blade_b = -input.rear_blade_a - 180 deg } }
+        placement = { placement = offset, offset = { translation = [-66 mm, -44 mm, 13 mm], rotation = { rotation = euler, yaw = -124.168 deg, pitch = 0 deg, roll = -28 deg } } }
+    }
+
+    // The 3-axis gimbal and camera under the nose.
+    use assembly gimbal from "./mechanical/gimbal" as gimbal {
+        configuration = { select = inputs, values = { pitch = input.pitch } }
+        placement = { placement = offset, offset = { translation = [74 mm, 0 mm, 11 mm] } }
+    }
+
+    // Vision sensors: a forward stereo pair in the nose and a downward pair under the belly.
+    use part vision_sensor from "./mechanical/body" as vision_front_left {
+        placement = { placement = offset, offset = { translation = [97 mm, 6 mm, 31 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
+    }
+    use part vision_sensor from "./mechanical/body" as vision_front_right {
+        placement = { placement = offset, offset = { translation = [97 mm, -6 mm, 31 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
+    }
+    use part vision_sensor from "./mechanical/body" as vision_down_left {
+        placement = { placement = offset, offset = { translation = [-28 mm, 11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
+    }
+    use part vision_sensor from "./mechanical/body" as vision_down_right {
+        placement = { placement = offset, offset = { translation = [-28 mm, -11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
+    }
+
+    // The ESC's heatsink in the belly window (its fins in the downwash) and the gap pad on its
+    // pedestal. The boards stand on the heatsink's standoffs: the 4-in-1 ESC on their tops, the
+    // flight controller 10 mm above it on nylon spacers, both held by four M3 x 18 screws into
+    // the standoffs' tapped holes (4.8 mm of thread engaged, 1.6 x the diameter).
+    use part esc_heatsink from "./electrical/esc" as esc_heatsink {
+        placement = { placement = offset, offset = { translation = [25 mm, 0 mm, 0 mm] } }
+    }
+    use part thermal_pad from "./electrical/esc" as thermal_pad {
+        placement = { placement = offset, offset = { translation = [25 mm, 0 mm, 9.5 mm] } }
+    }
+    use circuit esc from "./electrical/esc" as esc {
+        placement = { placement = offset, offset = { translation = [25 mm, 0 mm, 10 mm] } }
+    }
+    use circuit flight_controller from "./electrical/flight_controller" as flight_controller {
+        placement = { placement = offset, offset = { translation = [25 mm, 0 mm, 21.6 mm] } }
+    }
+    use part spacer from "./mechanical/+hardware" as spacer {
+        configuration = { select = inputs, values = { height = 10 mm } }
+        placement = { placement = offset, offset = { translation = [9.75 mm, -15.25 mm, 11.6 mm] } }
+    }
+    use part screw from "./mechanical/+hardware" as stack_screw {
+        configuration = { select = inputs, values = { length = 18 mm } }
+        placement = { placement = offset, offset = { translation = [9.75 mm, -15.25 mm, 23.2 mm] } }
+    }
+    pattern stack = grid(seeds = [spacer, stack_screw], first = [1, 0, 0], first_spacing = 30.5 mm, first_count = 2, second = [0, 1, 0], second_spacing = 30.5 mm, second_count = 2)
+
+    exploded service = {
+        steps = [
+            { id = lift_top, occurrences = [[{ name = body_top }], [{ name = light_pipe }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, 1] }, distance = 95 mm } },
+            { id = battery_out, occurrences = [[{ name = battery }]], motion = { motion = "translate", direction = { direction = "vector", vector = [-9, 0, 20] }, distance = 165 mm } },
+            { id = lift_fc, occurrences = [[{ name = flight_controller }], [{ name = stack_screw }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, 1] }, distance = 50 mm } },
+            { id = lift_esc, occurrences = [[{ name = esc }], [{ name = spacer }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, 1] }, distance = 25 mm } },
+            { id = gimbal_down, occurrences = [[{ name = gimbal }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, -1] }, distance = 40 mm } }
+        ],
+        lines = [
+            { id = trail_top, occurrence = [{ name = body_top }] },
+            { id = trail_battery, occurrence = [{ name = battery }] },
+            { id = trail_fc, occurrence = [{ name = flight_controller }] },
+            { id = trail_esc, occurrence = [{ name = esc }] },
+            { id = trail_gimbal, occurrence = [{ name = gimbal }] }
+        ]
+    }
+
+    // Opens three-quarters from the front left, above, so the nose, gimbal and all four props read.
+    view hero = { from = [0.78, 0.62, 0.42], up = [0, 0, 1], default = true }
+}

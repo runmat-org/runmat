@@ -62,6 +62,33 @@ fn run_repl_with_piped_input(
     Ok(output)
 }
 
+fn run_script_with_piped_input(
+    args: &[&str],
+    input: &str,
+) -> Result<std::process::Output, Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let config_path = write_test_config(temp_dir.path());
+    let mut child = Command::new(get_binary_path())
+        .args(args)
+        .current_dir(temp_dir.path())
+        .env("RUNMAT_CONFIG", &config_path)
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp_dir.path().join("execution-state"),
+        )
+        .env("NO_GUI", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .expect("stdin should be piped")
+        .write_all(input.as_bytes())?;
+    Ok(child.wait_with_output()?)
+}
+
 fn write_test_config(dir: &Path) -> PathBuf {
     let config_path = dir.join("runmat.toml");
     fs::write(
@@ -74,6 +101,71 @@ provider = "inprocess"
     )
     .expect("failed to write test config");
     config_path
+}
+
+// Exercise the actual script command: the session returns both console streams
+// and a structured value, but only the streams are program output.
+fn run_output_contract_script(source: &str, verbose: bool) -> std::process::Output {
+    let directory = TempDir::new().unwrap();
+    let script = directory.path().join("output_contract.m");
+    fs::write(&script, source).unwrap();
+    let mut args = vec!["--no-jit"];
+    if verbose {
+        args.push("--verbose");
+    }
+    args.extend(["run", script.to_str().unwrap()]);
+    run_runmat(&args)
+}
+
+#[test]
+fn script_output_contract_values_are_rendered_once() {
+    for (source, expected) in [
+        ("x = 42", "x = 42\n"),
+        ("2 + 3", "ans = 5\n"),
+        (
+            "syms Y(X)\ncondition = eq(Y(0), 0)",
+            "condition = Y(0) == 0\n",
+        ),
+        ("disp(5); disp(5); 5", "5\n5\nans = 5\n"),
+        ("x = 42;", ""),
+        ("2 + 3;", ""),
+        ("disp(5); x = 42;", "5\n"),
+        ("fprintf('a'); fprintf('a');", "aa"),
+    ] {
+        let output = run_output_contract_script(source, false);
+        assert!(
+            output.status.success(),
+            "{source}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn script_output_contract_verbose_result_is_diagnostic_only() {
+    let output = run_output_contract_script("x = 42", true);
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "x = 42\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Execution result:"));
+
+    let suppressed = run_output_contract_script("x = 42;", true);
+    assert!(suppressed.status.success(), "{:?}", suppressed);
+    assert!(suppressed.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&suppressed.stderr).contains("Execution result:"));
+}
+
+#[test]
+fn script_output_contract_preserves_output_before_failure() {
+    let output =
+        run_output_contract_script("disp('before'); error('output-contract-failure');", false);
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "before\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("output-contract-failure"));
 }
 
 #[test]
@@ -483,6 +575,35 @@ fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ans = 2"));
+    Ok(())
+}
+
+#[test]
+fn stdin_without_command_executes_one_fail_fast_script() -> Result<(), Box<dyn std::error::Error>> {
+    let output = run_script_with_piped_input(
+        &["--no-jit"],
+        "disp('before');\nerror('stdin-stop');\ndisp('after');\n",
+    )?;
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "before\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("stdin-stop"), "{stderr}");
+    assert!(!stderr.contains("runmat>"), "{stderr}");
+    Ok(())
+}
+
+#[test]
+fn dash_aliases_compile_multiline_stdin_as_one_script() -> Result<(), Box<dyn std::error::Error>> {
+    for args in [&["--no-jit", "-"][..], &["--no-jit", "run", "-"][..]] {
+        let output =
+            run_script_with_piped_input(args, "value = [1 2;\n3 4];\ndisp(value(2,2));\n")?;
+        assert!(
+            output.status.success(),
+            "args={args:?}, stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "4\n");
+    }
     Ok(())
 }
 

@@ -307,7 +307,7 @@ fn compact_wasm_vertices(
     }
 
     let mut vertices = Vec::with_capacity(remap.len().saturating_mul(3));
-    for (source_index, _) in &remap {
+    for source_index in remap.keys() {
         let start = *source_index as usize * 3;
         vertices.extend_from_slice(&payload.vertices[start..start + 3]);
     }
@@ -350,4 +350,104 @@ fn js_error_message(value: JsValue) -> String {
         .and_then(|message| message.as_string())
         .filter(|message| !message.is_empty())
         .unwrap_or_else(|| format!("{value:?}"))
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_name = __runmatOcctImportExactCad)]
+    fn exact_host(path: &str, bytes: &[u8], options: &str) -> Result<String, JsValue>;
+    #[wasm_bindgen(catch, js_name = __runmatOcctImportGeometry)]
+    fn preview_host(path: &str, bytes: &[u8], options: &str) -> Result<String, JsValue>;
+}
+pub(crate) fn import_geometry_host(
+    path: &str,
+    bytes: &[u8],
+    options: &GeometryImportOptions,
+    context: &GeometryImportContext,
+) -> Result<Option<crate::ImportResult>, GeometryImportError> {
+    // Keep compatibility with embedders that provide only the legacy preview API.
+    let host = js_sys::Reflect::get(
+        &js_sys::global(),
+        &JsValue::from_str("__runmatOcctImportGeometry"),
+    )
+    .unwrap_or(JsValue::UNDEFINED);
+    if !host.is_function() {
+        return Ok(None);
+    }
+    let options_json = serde_json::to_string(options)
+        .map_err(|e| GeometryImportError::InvalidOptions(e.to_string()))?;
+    let payload = preview_host(path, bytes, &options_json).map_err(|e| host_import_error(e))?;
+    context.check_cancelled()?;
+    let imported: crate::ImportResult = serde_json::from_str(&payload).map_err(|e| {
+        GeometryImportError::InvalidGeometry(format!("invalid native OCCT preview response: {e}"))
+    })?;
+    imported
+        .asset
+        .validate()
+        .map_err(|e| GeometryImportError::InvalidGeometry(e.into()))?;
+    if imported.asset.coordinate_units
+        != Some(runmat_geometry_core::physical::CoordinateUnits::new(
+            options.units,
+        ))
+    {
+        return Err(GeometryImportError::InvalidGeometry(
+            "OCCT preview units differ from the import request".into(),
+        ));
+    }
+    Ok(Some(imported))
+}
+pub(crate) fn import_exact_cad_shape(
+    path: &str,
+    bytes: &[u8],
+    format: OcctCadFormat,
+    options: &crate::ExactCadImportOptions,
+    context: &GeometryImportContext,
+) -> Result<crate::ImportedExactCad, GeometryImportError> {
+    context.check_cancelled()?;
+    let (expected_evidence, expected_kernel_units) =
+        crate::exact::exact_import_units(path, bytes, format, options)?;
+    let options_json = serde_json::to_string(options)
+        .map_err(|e| GeometryImportError::InvalidOptions(e.to_string()))?;
+    let payload = exact_host(path, bytes, &options_json).map_err(|e| host_import_error(e))?;
+    context.check_cancelled()?;
+    let imported: crate::ImportedExactCad = serde_json::from_str(&payload).map_err(|e| {
+        GeometryImportError::InvalidGeometry(format!("invalid exact OCCT host response: {e}"))
+    })?;
+    use sha2::Digest;
+    if imported.source_digest
+        != runmat_geometry_core::GeometryDigest::from_bytes(sha2::Sha256::digest(bytes).into())
+        || imported.source_unit_evidence != expected_evidence
+        || imported.kernel_units != expected_kernel_units
+        || imported.source_format
+            != match format {
+                OcctCadFormat::Step => runmat_geometry_core::GeometrySourceFormat::Step,
+                OcctCadFormat::Iges => runmat_geometry_core::GeometrySourceFormat::Iges,
+                OcctCadFormat::Brep => runmat_geometry_core::GeometrySourceFormat::Brep,
+            }
+        || imported.analysis_options() != &options.analysis
+    {
+        return Err(GeometryImportError::InvalidGeometry(
+            "exact OCCT import does not match the requested source or analysis policy".into(),
+        ));
+    }
+    imported
+        .build_closure()
+        .map_err(|e| GeometryImportError::InvalidGeometry(e.to_string()))?;
+    Ok(imported)
+}
+
+fn host_import_error(error: JsValue) -> GeometryImportError {
+    if let Ok(cause) = js_sys::Reflect::get(&error, &JsValue::from_str("occtImportError")) {
+        if let Ok(json) = js_sys::JSON::stringify(&cause) {
+            if let Some(json) = json.as_string() {
+                if let Ok(error) = serde_json::from_str::<GeometryImportError>(&json) {
+                    return error;
+                }
+            }
+        }
+    }
+    GeometryImportError::BackendUnavailable(format!(
+        "OCCT browser host: {}",
+        js_error_message(error)
+    ))
 }

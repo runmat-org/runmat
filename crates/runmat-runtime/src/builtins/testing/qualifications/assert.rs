@@ -6,15 +6,14 @@ use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.assertEqual",
-    category = "testing/qualifications",
-    summary = "Assert equality and abort the current test on failure.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::assert"
 )]
 async fn assert_equal(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "assertEqual",
@@ -30,14 +29,13 @@ async fn assert_equal(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.assertTrue",
-    category = "testing/qualifications",
-    summary = "Assert logical truth and abort the current test on failure.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::assert"
 )]
 async fn assert_true(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "assertTrue",
@@ -52,15 +50,14 @@ async fn assert_true(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.assertThat",
-    category = "testing/qualifications",
-    summary = "Assert that a value satisfies a compatible constraint.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::assert"
 )]
 fn assert_that(
     receiver: Value,
     actual: Value,
     constraint: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_that(
         "assertThat",

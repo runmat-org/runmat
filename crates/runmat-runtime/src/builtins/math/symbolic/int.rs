@@ -1,14 +1,13 @@
 //! MATLAB-compatible scalar symbolic `int` builtin.
 
+use crate::{
+    call::{BuiltinArguments, FunctionArgumentView},
+    context::RuntimeContext,
+};
 use num_traits::Zero;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, SymbolicIntegrationOption, SymbolicScalarOperation, INT_DESCRIPTOR,
+    INT_ERRORS, INT_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{SymbolicExpr, SymbolicFunction, Value};
@@ -24,177 +23,6 @@ use super::{
 const BUILTIN_NAME: &str = "int";
 const ZERO_EPSILON: f64 = 1.0e-12;
 
-const INT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "F",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scalar symbolic indefinite or definite integral result.",
-}];
-
-const INT_INPUTS_EXPR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "expr",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scalar symbolic or numeric expression to integrate.",
-}];
-
-const INT_INPUTS_EXPR_VAR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "expr",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar symbolic or numeric expression to integrate.",
-    },
-    BuiltinParamDescriptor {
-        name: "var",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("symvar(expr, 1)"),
-        description: "Integration variable as a symbolic variable or text scalar.",
-    },
-];
-
-const INT_INPUTS_EXPR_A_B: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "expr",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar symbolic or numeric expression to integrate.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Lower integration bound.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Upper integration bound.",
-    },
-];
-
-const INT_INPUTS_EXPR_VAR_A_B: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "expr",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar symbolic or numeric expression to integrate.",
-    },
-    BuiltinParamDescriptor {
-        name: "var",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("symvar(expr, 1)"),
-        description: "Integration variable as a symbolic variable or text scalar.",
-    },
-    BuiltinParamDescriptor {
-        name: "a",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Lower integration bound.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Upper integration bound.",
-    },
-];
-
-const INT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "F = int(expr)",
-        inputs: &INT_INPUTS_EXPR,
-        outputs: &INT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = int(expr, var)",
-        inputs: &INT_INPUTS_EXPR_VAR,
-        outputs: &INT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = int(expr, a, b)",
-        inputs: &INT_INPUTS_EXPR_A_B,
-        outputs: &INT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "F = int(expr, var, a, b)",
-        inputs: &INT_INPUTS_EXPR_VAR_A_B,
-        outputs: &INT_OUTPUT,
-    },
-];
-
-const INT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    BuiltinErrorDescriptor {
-        code: "RM.INT.INVALID_EXPR",
-        identifier: Some("RunMat:int:InvalidExpression"),
-        when: "The expression cannot be represented as a scalar symbolic expression.",
-        message: "int: expected a scalar symbolic or numeric expression",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.INT.INVALID_VARIABLE",
-        identifier: Some("RunMat:int:InvalidVariable"),
-        when: "The integration variable cannot be inferred or is not a symbolic variable/text scalar.",
-        message: "int: invalid symbolic variable",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.INT.INVALID_BOUND",
-        identifier: Some("RunMat:int:InvalidBound"),
-        when: "A definite integration bound cannot be represented as a scalar symbolic expression.",
-        message: "int: invalid integration bound",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.INT.INVALID_OPTION",
-        identifier: Some("RunMat:int:InvalidOption"),
-        when: "A name-value option is unknown or its value is not scalar.",
-        message: "int: invalid option",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.INT.ARG_COUNT",
-        identifier: Some("RunMat:int:ArgCount"),
-        when: "The argument grammar does not match int(expr), int(expr,var), int(expr,a,b), or int(expr,var,a,b).",
-        message: "int: invalid number of input arguments",
-    },
-];
-
-pub const INT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INT_ERRORS,
-};
-
-const INT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "expr, a, or b",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Scalar numeric constants are admitted only when the current symbolic constant representation can retain them exactly.",
-    }];
-pub const INT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "F = int(integer_expr_or_bound, ...)",
-        inputs: &INT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "This is symbolic integration of a numeric constant, not the integer datatype conversion surface. Wide constants that cannot enter the current symbolic binary64 constant node exactly reject rather than aliasing.",
-    }];
-
 #[derive(Debug)]
 struct IntArgs {
     variable: String,
@@ -204,20 +32,38 @@ struct IntArgs {
 
 #[runtime_builtin(
     name = "int",
-    category = "math/symbolic",
-    summary = "Evaluate scalar symbolic indefinite and definite integrals.",
-    keywords = "int,symbolic,integration,calculus,definite integral",
-    descriptor(crate::builtins::math::symbolic::int::INT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::symbolic::int::INT_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::math::symbolic::int"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::symbolic::int",
+    context = true
 )]
-async fn int_builtin(expr: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn int_builtin(
+    runtime: Option<RuntimeContext>,
+    expr: Value,
+    rest: BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &INT_DESCRIPTOR,
+        &INT_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )
+    .map_err(super::invocation::terminal)?;
+    super::invocation::validate(SymbolicScalarOperation::Integrate, 0, rest.len() + 1, &expr)?;
+    validate_int_grammar(rest.view())?;
+    for (index, value) in rest.iter().enumerate() {
+        super::invocation::validate(
+            SymbolicScalarOperation::Integrate,
+            index + 1,
+            rest.len() + 1,
+            value,
+        )?;
+    }
     ensure_exact_symbolic_integer(&expr, &INT_ERRORS[0])?;
-    for value in &rest {
+    for value in rest.iter() {
         ensure_exact_symbolic_integer(value, &INT_ERRORS[2])?;
     }
+    super::invocation::admit(SymbolicScalarOperation::Integrate, runtime.as_ref(), true)?;
     let expr = value_to_symbolic_scalar(&expr).ok_or_else(|| int_error(&INT_ERRORS[0]))?;
-    let args = parse_int_args(&expr, &rest)?;
+    let args = parse_int_args(&expr, rest.view())?;
     let result = if let Some(integral) = integrate_expr(&expr, &args.variable) {
         match (args.lower, args.upper) {
             (Some(lower), Some(upper)) => {
@@ -249,9 +95,8 @@ fn ensure_exact_symbolic_integer(
     Ok(())
 }
 
-fn parse_int_args(expr: &SymbolicExpr, rest: &[Value]) -> BuiltinResult<IntArgs> {
-    let primary_len = strip_name_value_options(rest)?;
-    let primary = &rest[..primary_len];
+fn parse_int_args(expr: &SymbolicExpr, rest: FunctionArgumentView<'_>) -> BuiltinResult<IntArgs> {
+    let primary = rest;
     match primary.len() {
         0 => Ok(IntArgs {
             variable: infer_default_variable(expr),
@@ -260,6 +105,11 @@ fn parse_int_args(expr: &SymbolicExpr, rest: &[Value]) -> BuiltinResult<IntArgs>
         }),
         1 => Ok(IntArgs {
             variable: symbolic_variable_name_from_value(&primary[0])
+                .map_err(|source| {
+                    let mut error = int_error(&INT_ERRORS[1]);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
                 .ok_or_else(|| int_error(&INT_ERRORS[1]))?,
             lower: None,
             upper: None,
@@ -271,6 +121,11 @@ fn parse_int_args(expr: &SymbolicExpr, rest: &[Value]) -> BuiltinResult<IntArgs>
         }),
         3 => Ok(IntArgs {
             variable: symbolic_variable_name_from_value(&primary[0])
+                .map_err(|source| {
+                    let mut error = int_error(&INT_ERRORS[1]);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
                 .ok_or_else(|| int_error(&INT_ERRORS[1]))?,
             lower: Some(bound_expr(&primary[1])?),
             upper: Some(bound_expr(&primary[2])?),
@@ -279,50 +134,60 @@ fn parse_int_args(expr: &SymbolicExpr, rest: &[Value]) -> BuiltinResult<IntArgs>
     }
 }
 
-fn strip_name_value_options(rest: &[Value]) -> BuiltinResult<usize> {
+fn validate_int_grammar(rest: FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let len = rest.len();
     if len >= 2 {
-        let Some(name) = text_scalar(&rest[len - 2]) else {
-            return validate_remaining_int_args(rest, len);
-        };
-        if !is_known_option(name.trim()) {
-            return validate_remaining_int_args(rest, len);
+        if known_option(&rest[len - 2]).is_none() {
+            return validate_remaining_int_args(len);
         }
         validate_option_value(&rest[len - 1])?;
+        let name = text_scalar(&rest[len - 2])
+            .map_err(|source| {
+                let mut error = int_error(&INT_ERRORS[1]);
+                error.source = Some(Box::new(source));
+                error
+            })?
+            .expect("decoded scalar text option");
         return Err(int_error_with_detail(
             &INT_ERRORS[3],
             format!("option '{}' is not yet supported", name.trim()),
         ));
     }
-    validate_remaining_int_args(rest, len)
+    validate_remaining_int_args(len)
 }
 
-fn validate_remaining_int_args(rest: &[Value], len: usize) -> BuiltinResult<usize> {
+fn validate_remaining_int_args(len: usize) -> BuiltinResult<()> {
     if len > 3 {
         return Err(int_error(&INT_ERRORS[4]));
     }
-    if rest[len..].chunks_exact(2).any(|pair| {
-        text_scalar(&pair[0])
-            .map(|name| !is_known_option(name.trim()))
-            .unwrap_or(true)
-    }) {
-        return Err(int_error(&INT_ERRORS[3]));
-    }
-    Ok(len)
+    Ok(())
 }
 
-fn is_known_option(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "ignoreanalyticconstraints" | "principalvalue" | "ignorespecialcases" | "hold"
-    )
+fn known_option(value: &Value) -> Option<SymbolicIntegrationOption> {
+    if !super::invocation::is_text(value) {
+        return None;
+    }
+    match value {
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            SymbolicIntegrationOption::from_public_option(s.as_str())
+        }
+        Value::StringArray(a) => a
+            .data()
+            .first()?
+            .as_str()
+            .and_then(SymbolicIntegrationOption::from_public_option),
+        Value::CharArray(a) => SymbolicIntegrationOption::from_public_code_units(
+            a.data().iter().map(|unit| unit.raw()),
+        ),
+        _ => None,
+    }
 }
 
 fn validate_option_value(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Bool(_) | Value::Num(_) | Value::Int(_) | Value::String(_) => Ok(()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => Ok(()),
-        _ if text_scalar(value).is_some() => Ok(()),
+        _ if super::invocation::is_text(value) => Ok(()),
         _ => Err(int_error(&INT_ERRORS[3])),
     }
 }
@@ -500,7 +365,7 @@ fn exact_rational_is_minus_one(expr: &SymbolicExpr) -> bool {
         SymbolicExpr::Rational {
             numerator,
             denominator,
-        } => !denominator.is_zero() && numerator == &(-denominator.clone()),
+        } => !denominator.is_zero() && numerator.as_ref() == &(-denominator.as_ref()),
         _ => false,
     }
 }
@@ -551,7 +416,9 @@ fn int_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl Into<String>,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(detail).with_builtin(BUILTIN_NAME);
+    let mut builder = build_runtime_error(detail)
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -577,7 +444,13 @@ mod tests {
     #[tokio::test]
     async fn integrates_polynomial_with_default_variable() {
         let expr = SymbolicExpr::pow_expr(x(), SymbolicExpr::constant(2.0));
-        let result = int_builtin(Value::Symbolic(expr), vec![]).await.unwrap();
+        let result = int_builtin(
+            None,
+            Value::Symbolic(expr),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .await
+        .unwrap();
         assert_eq!(value_text(result), "x^3/3");
     }
 
@@ -585,8 +458,12 @@ mod tests {
     async fn integrates_trig_definite_with_inferred_variable() {
         let expr = SymbolicExpr::function(SymbolicFunction::Sin, x());
         let result = int_builtin(
+            None,
             Value::Symbolic(expr),
-            vec![Value::Num(0.0), Value::Num(std::f64::consts::PI)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(std::f64::consts::PI),
+            ]),
         )
         .await
         .unwrap();
@@ -597,8 +474,11 @@ mod tests {
     async fn integrates_exp_with_explicit_variable() {
         let expr = SymbolicExpr::function(SymbolicFunction::Exp, x());
         let result = int_builtin(
+            None,
             Value::Symbolic(expr),
-            vec![Value::Symbolic(SymbolicExpr::variable("x"))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Symbolic(
+                SymbolicExpr::variable("x"),
+            )]),
         )
         .await
         .unwrap();
@@ -608,12 +488,13 @@ mod tests {
     #[tokio::test]
     async fn integrates_constant_definite() {
         let result = int_builtin(
+            None,
             Value::Num(3.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Symbolic(SymbolicExpr::variable("x")),
                 Value::Num(1.0),
                 Value::Num(4.0),
-            ],
+            ]),
         )
         .await
         .unwrap();
@@ -623,8 +504,11 @@ mod tests {
     #[tokio::test]
     async fn integrates_independent_symbolic_variable_in_display_order() {
         let result = int_builtin(
+            None,
             Value::Symbolic(SymbolicExpr::variable("y")),
-            vec![Value::Symbolic(SymbolicExpr::variable("x"))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Symbolic(
+                SymbolicExpr::variable("x"),
+            )]),
         )
         .await
         .unwrap();
@@ -634,7 +518,13 @@ mod tests {
     #[tokio::test]
     async fn default_variable_prefers_x_in_multi_variable_expression() {
         let expr = SymbolicExpr::mul_expr(SymbolicExpr::variable("a"), x());
-        let result = int_builtin(Value::Symbolic(expr), vec![]).await.unwrap();
+        let result = int_builtin(
+            None,
+            Value::Symbolic(expr),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .await
+        .unwrap();
         assert_eq!(value_text(result), "a*(x^2/2)");
     }
 
@@ -642,8 +532,12 @@ mod tests {
     async fn rejects_unsupported_name_value_options() {
         let expr = SymbolicExpr::function(SymbolicFunction::Cos, x());
         let err = int_builtin(
+            None,
             Value::Symbolic(expr),
-            vec![Value::String("PrincipalValue".into()), Value::Bool(true)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("PrincipalValue".into()),
+                Value::Bool(true),
+            ]),
         )
         .await
         .unwrap_err();
@@ -657,8 +551,12 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1]).expect("option value");
 
         let err = int_builtin(
+            None,
             Value::Symbolic(expr),
-            vec![Value::String("Hold".into()), Value::Tensor(option_value)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("Hold".into()),
+                Value::Tensor(option_value),
+            ]),
         )
         .await
         .unwrap_err();
@@ -669,21 +567,39 @@ mod tests {
     #[tokio::test]
     async fn returns_formal_integral_for_unsupported_symbolic_form() {
         let expr = SymbolicExpr::function(SymbolicFunction::Tan, x());
-        let result = int_builtin(Value::Symbolic(expr), vec![]).await.unwrap();
+        let result = int_builtin(
+            None,
+            Value::Symbolic(expr),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .await
+        .unwrap();
         assert_eq!(value_text(result), "int(tan(x), x)");
     }
 
     #[tokio::test]
     async fn returns_formal_integral_for_variable_dependent_power_exponent() {
         let expr = SymbolicExpr::pow_expr(x(), x());
-        let result = int_builtin(Value::Symbolic(expr), vec![]).await.unwrap();
+        let result = int_builtin(
+            None,
+            Value::Symbolic(expr),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .await
+        .unwrap();
         assert_eq!(value_text(result), "int(x^x, x)");
     }
 
     #[tokio::test]
     async fn returns_formal_integral_for_exponential_power() {
         let expr = SymbolicExpr::pow_expr(SymbolicExpr::constant(2.0), x());
-        let result = int_builtin(Value::Symbolic(expr), vec![]).await.unwrap();
+        let result = int_builtin(
+            None,
+            Value::Symbolic(expr),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .await
+        .unwrap();
         assert_eq!(value_text(result), "int(2^x, x)");
     }
 
@@ -691,8 +607,12 @@ mod tests {
     async fn returns_formal_definite_integral_for_unsupported_symbolic_form() {
         let expr = SymbolicExpr::function(SymbolicFunction::Tan, x());
         let result = int_builtin(
+            None,
             Value::Symbolic(expr),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         )
         .await
         .unwrap();

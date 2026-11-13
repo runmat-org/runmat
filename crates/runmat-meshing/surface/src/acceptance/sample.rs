@@ -1,14 +1,14 @@
+use super::ExactFaceRefinedMeshView;
 use runmat_meshing_core::SurfaceQualityTargets;
 
 use crate::{
     validate_exact_face_geometry_in_parameterization, ExactFaceChartParameterization,
-    ExactFaceGeometryContext, ExactFaceMetricError, ExactFaceRefinedMesh,
-    ExactFaceRefinementContext, ResolvedFaceMetricField,
+    ExactFaceMetricError, ExactFaceRefinedMesh, ExactFaceRefinementContext,
 };
 
 use super::{
     ExactFaceAcceptanceError, ExactFaceAcceptanceErrorKind, ExactFaceAcceptanceOptions,
-    ExactFaceAcceptanceReport, ExactFaceTriangleAcceptance,
+    ExactFaceAcceptanceReport, ExactFaceAcceptanceViolation, ExactFaceTriangleAcceptance,
 };
 
 pub fn accept_exact_face_mesh(
@@ -18,7 +18,8 @@ pub fn accept_exact_face_mesh(
     options: ExactFaceAcceptanceOptions,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
     let parameterization = ExactFaceChartParameterization::EvaluatorParameters;
-    let report = sample(mesh, context, quality, options, &parameterization)?;
+    let report = sample(mesh.into(), context, quality, options, &parameterization)?;
+    enforce_report(mesh.into(), &report, quality)?;
     validate_exact_face_acceptance_in_parameterization(
         &report,
         mesh,
@@ -54,16 +55,19 @@ pub(crate) fn accept_exact_face_mesh_in_parameterization(
     options: ExactFaceAcceptanceOptions,
     parameterization: &ExactFaceChartParameterization,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
-    let report = sample(mesh, context, quality, options, parameterization)?;
-    validate_exact_face_acceptance_in_parameterization(
-        &report,
-        mesh,
-        context,
-        quality,
-        options,
-        parameterization,
-    )?;
+    let report = sample(mesh.into(), context, quality, options, parameterization)?;
+    enforce_report(mesh.into(), &report, quality)?;
     Ok(report)
+}
+
+pub(crate) fn sample_exact_face_mesh_in_parameterization(
+    mesh: ExactFaceRefinedMeshView<'_>,
+    context: ExactFaceRefinementContext<'_>,
+    quality: SurfaceQualityTargets,
+    options: ExactFaceAcceptanceOptions,
+    parameterization: &ExactFaceChartParameterization,
+) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
+    sample(mesh, context, quality, options, parameterization)
 }
 
 pub(crate) fn validate_exact_face_acceptance_in_parameterization(
@@ -74,26 +78,55 @@ pub(crate) fn validate_exact_face_acceptance_in_parameterization(
     options: ExactFaceAcceptanceOptions,
     parameterization: &ExactFaceChartParameterization,
 ) -> Result<(), ExactFaceAcceptanceError> {
-    let expected = sample(mesh, context, quality, options, parameterization)?;
+    let expected = sample(mesh.into(), context, quality, options, parameterization)?;
     if report != &expected {
         return Err(error(
-            mesh,
+            mesh.into(),
             ExactFaceAcceptanceErrorKind::InvalidInput,
             "acceptance report differs from independent exact-surface resampling",
         ));
     }
+    enforce_report(mesh.into(), report, quality)?;
     Ok(())
 }
 
 fn sample(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     context: ExactFaceRefinementContext<'_>,
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
     parameterization: &ExactFaceChartParameterization,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
-    validate_inputs(mesh, context, quality, options, parameterization)?;
-    let field = ResolvedFaceMetricField::new(context.topology, context.metric_request)
+    validate_inputs(mesh, quality, options)?;
+    // Reject an impossible work envelope before independent geometry evaluation
+    // or allocating the report, rather than spending the entire sample cap first.
+    if options
+        .minimum_sample_count(mesh.geometry.triangles.len() as u64)
+        .is_none_or(|minimum| minimum > options.maximum_samples)
+    {
+        return Err(error(
+            mesh,
+            ExactFaceAcceptanceErrorKind::ResourceLimit,
+            "minimum adaptive acceptance samples exceed the admitted work budget",
+        ));
+    }
+    validate_exact_face_geometry_in_parameterization(
+        mesh.geometry,
+        &mesh.topology.trimmed,
+        &mesh.topology.pslg,
+        parameterization,
+        context.geometry_context(),
+    )
+    .map_err(|failure| {
+        error(
+            mesh,
+            ExactFaceAcceptanceErrorKind::Geometry(failure.kind),
+            failure.reason,
+        )
+    })?;
+    let field = context
+        .geometry_context()
+        .resolve_metric()
         .map_err(|failure| map_metric(mesh, failure))?;
     let mut budget = SampleBudget::new(mesh, options.maximum_samples);
     let mut triangle_reports = Vec::with_capacity(mesh.geometry.triangles.len());
@@ -105,10 +138,21 @@ fn sample(
             .vertex_indices
             .map(|index| &mesh.geometry.vertices[index as usize]);
         let original_uv = corners.map(|corner| corner.evaluation.uv);
-        let original_points = corners.map(|corner| corner.evaluation.point_m);
+        let original_points = corners.map(|corner| corner.point_m);
         let before = budget.consumed;
         let mut triangle_chordal = SampleMaximum::default();
         let mut triangle_normal = SampleMaximum::default();
+        for corner in corners {
+            if corner.point_m != corner.evaluation.point_m {
+                budget.consume()?;
+                let chordal = distance(corner.evaluation.point_m, corner.point_m);
+                let normal = angle(evidence.unit_normal, corner.unit_normal);
+                triangle_chordal.observe(chordal, corner.evaluation.uv);
+                triangle_normal.observe(normal, corner.evaluation.uv);
+                face_chordal.observe(chordal, corner.evaluation.uv);
+                face_normal.observe(normal, corner.evaluation.uv);
+            }
+        }
         let mut cells = vec![(original_uv, 0u8)];
         while let Some((cell, depth)) = cells.pop() {
             let mut cell_chordal = 0.0_f64;
@@ -170,7 +214,8 @@ fn sample(
             if depth < options.minimum_subdivision_depth
                 || (depth < options.maximum_subdivision_depth
                     && (cell_chordal
-                        > quality.maximum_chordal_deviation_m * options.refinement_margin_ratio
+                        > quality.maximum_chordal_deviation_m.canonical_value()
+                            * options.refinement_margin_ratio
                         || cell_normal
                             > quality.maximum_normal_deviation_degrees.to_radians()
                                 * options.refinement_margin_ratio))
@@ -180,37 +225,55 @@ fn sample(
                 }
             }
         }
-        enforce_quality(
-            mesh,
-            evidence.triangle,
-            triangle_chordal,
-            triangle_normal,
-            quality,
-        )?;
         triangle_reports.push(ExactFaceTriangleAcceptance {
             triangle: evidence.triangle,
             sample_count: budget.consumed - before,
-            maximum_chordal_deviation_m: triangle_chordal.value,
+            maximum_chordal_deviation_m: runmat_types::physical::Length::new(
+                triangle_chordal.value,
+            ),
+            maximum_chordal_deviation_uv: triangle_chordal.uv,
             maximum_normal_deviation_rad: triangle_normal.value,
+            maximum_normal_deviation_uv: triangle_normal.uv,
         });
     }
     Ok(ExactFaceAcceptanceReport {
         source_face_id: mesh.geometry.source_face_id.clone(),
         triangles: triangle_reports,
         sample_count: budget.consumed,
-        maximum_chordal_deviation_m: face_chordal.value,
+        maximum_chordal_deviation_m: runmat_types::physical::Length::new(face_chordal.value),
         maximum_chordal_deviation_uv: face_chordal.uv,
         maximum_normal_deviation_rad: face_normal.value,
         maximum_normal_deviation_uv: face_normal.uv,
     })
 }
 
+fn enforce_report(
+    mesh: ExactFaceRefinedMeshView<'_>,
+    report: &ExactFaceAcceptanceReport,
+    quality: SurfaceQualityTargets,
+) -> Result<(), ExactFaceAcceptanceError> {
+    for triangle in &report.triangles {
+        enforce_quality(
+            mesh,
+            triangle.triangle,
+            SampleMaximum {
+                value: triangle.maximum_chordal_deviation_m.canonical_value(),
+                uv: triangle.maximum_chordal_deviation_uv,
+            },
+            SampleMaximum {
+                value: triangle.maximum_normal_deviation_rad,
+                uv: triangle.maximum_normal_deviation_uv,
+            },
+            quality,
+        )?;
+    }
+    Ok(())
+}
+
 fn validate_inputs(
-    mesh: &ExactFaceRefinedMesh,
-    context: ExactFaceRefinementContext<'_>,
+    mesh: ExactFaceRefinedMeshView<'_>,
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
-    parameterization: &ExactFaceChartParameterization,
 ) -> Result<(), ExactFaceAcceptanceError> {
     quality.validate().map_err(|failure| {
         error(
@@ -231,41 +294,27 @@ fn validate_inputs(
             "acceptance depths, refinement margin, or sample bound are invalid",
         ));
     }
-    validate_exact_face_geometry_in_parameterization(
-        &mesh.geometry,
-        &mesh.topology.trimmed,
-        &mesh.topology.pslg,
-        parameterization,
-        ExactFaceGeometryContext::new(
-            context.topology,
-            context.metric_request,
-            context.evaluator,
-            context.geometry_control,
-        ),
-    )
-    .map_err(|failure| {
-        error(
-            mesh,
-            ExactFaceAcceptanceErrorKind::Geometry(failure.kind),
-            failure.reason,
-        )
-    })
+    Ok(())
 }
 
 fn enforce_quality(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     triangle: crate::ExactFaceDelaunayTriangle,
     chordal: SampleMaximum,
     normal: SampleMaximum,
     quality: SurfaceQualityTargets,
 ) -> Result<(), ExactFaceAcceptanceError> {
-    if chordal.value > quality.maximum_chordal_deviation_m {
+    if chordal.value > quality.maximum_chordal_deviation_m.canonical_value() {
         return Err(error(
             mesh,
             ExactFaceAcceptanceErrorKind::UnsatisfiedQuality,
             "adaptive exact-surface samples exceed the chordal-deviation target",
         )
-        .with_witness(triangle, chordal.uv));
+        .with_witness(
+            triangle,
+            chordal.uv,
+            ExactFaceAcceptanceViolation::ChordalDeviation,
+        ));
     }
     if normal.value > quality.maximum_normal_deviation_degrees.to_radians() {
         return Err(error(
@@ -273,7 +322,11 @@ fn enforce_quality(
             ExactFaceAcceptanceErrorKind::UnsatisfiedQuality,
             "adaptive exact-surface samples exceed the normal-deviation target",
         )
-        .with_witness(triangle, normal.uv));
+        .with_witness(
+            triangle,
+            normal.uv,
+            ExactFaceAcceptanceViolation::NormalDeviation,
+        ));
     }
     Ok(())
 }
@@ -354,7 +407,7 @@ fn angle(left: [f64; 3], right: [f64; 3]) -> f64 {
 }
 
 fn map_metric(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     failure: ExactFaceMetricError,
 ) -> ExactFaceAcceptanceError {
     error(
@@ -365,7 +418,7 @@ fn map_metric(
 }
 
 fn error(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     kind: ExactFaceAcceptanceErrorKind,
     reason: impl Into<String>,
 ) -> ExactFaceAcceptanceError {
@@ -388,13 +441,13 @@ impl SampleMaximum {
 }
 
 struct SampleBudget<'a> {
-    mesh: &'a ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'a>,
     maximum: u64,
     consumed: u64,
 }
 
 impl<'a> SampleBudget<'a> {
-    fn new(mesh: &'a ExactFaceRefinedMesh, maximum: u64) -> Self {
+    fn new(mesh: ExactFaceRefinedMeshView<'a>, maximum: u64) -> Self {
         Self {
             mesh,
             maximum,

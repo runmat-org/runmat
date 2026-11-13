@@ -5,6 +5,7 @@ mod history;
 mod login;
 mod node;
 mod orgs;
+mod organization;
 mod projects;
 mod retention;
 mod shared;
@@ -76,8 +77,12 @@ pub async fn execute_cluster_command(command: ClusterCommand) -> Result<()> {
             state,
             json,
         } => clusters::set_node_state(org, cluster, node, state, json).await,
-        ClusterCommand::Join(args) => node::execute(args).await,
+        ClusterCommand::Join(args) => node::join(args).await,
     }
+}
+
+pub async fn execute_node_command(args: crate::cli::NodeArgs) -> Result<()> {
+    node::execute(args).await
 }
 
 pub async fn execute_project_command(command: ProjectCommand) -> Result<()> {

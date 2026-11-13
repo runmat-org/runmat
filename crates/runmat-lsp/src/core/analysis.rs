@@ -395,11 +395,20 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
 
     // Canonical catalog entries are executor-neutral and remain available even
     // when no runtime implementation is linked into the language server.
-    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&ident) {
+    let call_site = super::signatures::CallSite::at(analysis, token.start)
+        .filter(|site| site.callee_range.contains(&token.start));
+    let builtin_name = call_site
+        .as_ref()
+        .map_or(ident.as_str(), |site| site.name.as_str());
+    if let Some(entry) = runmat_builtins::public_builtin_catalog_entry_by_name(builtin_name) {
+        let selected = call_site
+            .as_ref()
+            .map(|site| site.best(entry.descriptor.signatures))
+            .unwrap_or_default();
         return Some(Hover {
             contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
                 kind: lsp_types::MarkupKind::Markdown,
-                value: docs::build_catalog_hover(entry),
+                value: docs::build_catalog_hover_with_signatures(entry, &selected),
             }),
             range: Some(
                 TextRange {
@@ -414,7 +423,7 @@ pub fn hover_at(text: &str, analysis: &DocumentAnalysis, position: &Position) ->
     // Legacy built-in functions (rich docs)
     if let Some(func) = runmat_builtins::builtin_functions()
         .into_iter()
-        .find(|f| f.name.eq_ignore_ascii_case(&ident))
+        .find(|f| f.name.eq_ignore_ascii_case(builtin_name))
     {
         return Some(Hover {
             contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
@@ -644,6 +653,67 @@ pub fn references_locations_at(
     locations
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct RenameSubject {
+    pub name: String,
+    pub is_local: bool,
+    pub parameter_owner: Option<String>,
+    pub range: Range,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn rename_subject_at(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+) -> Option<RenameSubject> {
+    let symbol = symbol_name_at(text, analysis, position)?;
+    let offset = position_to_offset(text, position);
+    let token = token_at_offset(&analysis.tokens, offset)?;
+    let parameter_owner = analysis.semantic.as_ref().and_then(|semantic| {
+        let function = semantic.function_at_offset(offset)?;
+        function
+            .variables
+            .get(&symbol.name)
+            .is_some_and(|variable| variable.kind == VariableKind::Parameter)
+            .then(|| function.name.clone())
+    });
+    Some(RenameSubject {
+        name: symbol.name,
+        is_local: symbol.is_local,
+        parameter_owner,
+        range: TextRange {
+            start: token.start,
+            end: token.end,
+        }
+        .to_lsp_range(text),
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn rename_subject_has_collision(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+    new_name: &str,
+) -> bool {
+    let Some(subject) = symbol_name_at(text, analysis, position) else {
+        return true;
+    };
+    if !subject.is_local || subject.name == new_name {
+        return false;
+    }
+    let offset = position_to_offset(text, position);
+    let Some(semantic) = analysis.semantic.as_ref() else {
+        return true;
+    };
+    if let Some(function) = semantic.function_at_offset(offset) {
+        return function.variables.contains_key(new_name);
+    }
+    semantic.globals.contains_key(new_name)
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub async fn references_locations_at_async(
     text: &str,
@@ -695,45 +765,29 @@ pub fn signature_help_at(
     _position: &Position,
 ) -> Option<SignatureHelp> {
     let offset = position_to_offset(_text, _position);
-    let name = qualified_call_name_at_offset(&_analysis.tokens, offset)?;
-    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
-        if let Some(labels) = docs::catalog_signature_labels(entry) {
-            let signatures = labels
-                .into_iter()
-                .map(|label| lsp_types::SignatureInformation {
-                    label,
-                    documentation: None,
-                    parameters: None,
-                    active_parameter: None,
-                })
-                .collect();
-            return Some(SignatureHelp {
-                signatures,
-                active_signature: Some(0),
-                active_parameter: None,
-            });
+    let site = super::signatures::CallSite::at(_analysis, offset);
+    let name = site
+        .as_ref()
+        .map(|site| site.name.clone())
+        .or_else(|| qualified_call_name_at_offset(&_analysis.tokens, offset))?;
+    if let Some(entry) = runmat_builtins::public_builtin_catalog_entry_by_name(&name) {
+        if !entry.descriptor.signatures.is_empty() {
+            return Some(super::signatures::help(
+                entry.descriptor.signatures,
+                site.as_ref(),
+            ));
         }
     }
-    if let Some(func) = runmat_builtins::builtin_functions()
+    if let Some(descriptor) = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|builtin| builtin.name.eq_ignore_ascii_case(&name))
+        .and_then(|builtin| builtin.descriptor)
+        .filter(|descriptor| !descriptor.signatures.is_empty())
     {
-        if let Some(labels) = docs::signature_labels(func) {
-            let signatures = labels
-                .into_iter()
-                .map(|label| lsp_types::SignatureInformation {
-                    label,
-                    documentation: None,
-                    parameters: None,
-                    active_parameter: None,
-                })
-                .collect();
-            return Some(SignatureHelp {
-                signatures,
-                active_signature: Some(0),
-                active_parameter: None,
-            });
-        }
+        return Some(super::signatures::help(
+            descriptor.signatures,
+            site.as_ref(),
+        ));
     }
 
     let semantic = _analysis.semantic.as_ref()?;
@@ -793,30 +847,40 @@ pub fn signature_help_at(
     Some(SignatureHelp {
         signatures: sigs,
         active_signature: Some(0),
-        active_parameter: None,
+        active_parameter: site.as_ref().map(|site| site.active_argument as u32),
     })
 }
 
-pub fn document_symbols(_text: &str, _analysis: &DocumentAnalysis) -> Vec<DocumentSymbol> {
-    let semantic = match &_analysis.semantic {
-        Some(s) => s,
-        None => return vec![],
-    };
-    let mut symbols = Vec::new();
-    for func in &semantic.functions {
-        #[allow(deprecated)]
-        symbols.push(DocumentSymbol {
-            name: func.signature.name.clone(),
-            detail: Some(func.signature.display()),
-            kind: lsp_types::SymbolKind::FUNCTION,
-            tags: None,
-            deprecated: None,
-            range: func.range.to_lsp_range(_text),
-            selection_range: func.selection.to_lsp_range(_text),
-            children: None,
-        });
+/// The `.m` outline: `%%` sections, script variables with their inferred types, functions with
+/// inputs and outputs, and classes ([`crate::core::semantic::outline`]).
+pub fn document_symbols(text: &str, analysis: &DocumentAnalysis) -> Vec<DocumentSymbol> {
+    crate::core::semantic::outline::document_outline(
+        text,
+        analysis.lowering.as_ref(),
+        analysis.semantic.as_ref(),
+    )
+}
+
+pub(crate) fn make_document_symbol(
+    name: String,
+    detail: Option<String>,
+    kind: lsp_types::SymbolKind,
+    range: Range,
+    selection_range: Range,
+) -> DocumentSymbol {
+    // lsp-types 0.94 requires this deprecated wire field in the struct literal;
+    // omitting it is not possible until the shared protocol dependency advances.
+    #[allow(deprecated)]
+    DocumentSymbol {
+        name,
+        detail,
+        kind,
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range,
+        children: None,
     }
-    symbols
 }
 
 pub fn semantic_tokens_legend() -> lsp_types::SemanticTokensLegend {
@@ -1313,6 +1377,41 @@ pub fn function_references_in_document(
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn function_rename_references_in_document(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    symbol_name: &str,
+) -> Vec<Range> {
+    let Some(lowering) = analysis.lowering.as_ref() else {
+        return Vec::new();
+    };
+    let leaf = symbol_name.rsplit('.').next().unwrap_or(symbol_name);
+    lowering
+        .hir_index
+        .calls
+        .iter()
+        .filter(|call| call_resolution_matches_symbol(call, symbol_name))
+        .filter_map(|call| {
+            analysis
+                .tokens
+                .iter()
+                .take_while(|token| token.start < call.span.end)
+                .filter(|token| call.span.start <= token.start)
+                .take_while(|token| token.token != Token::LParen)
+                .filter(|token| token.token == Token::Ident && token.lexeme == leaf)
+                .last()
+        })
+        .map(|token| {
+            TextRange {
+                start: token.start,
+                end: token.end,
+            }
+            .to_lsp_range(text)
+        })
+        .collect()
+}
+
 fn call_resolution_matches_symbol(call: &runmat_hir::CallResolution, symbol_name: &str) -> bool {
     let Some(display) = call.name.display_name() else {
         return false;
@@ -1346,6 +1445,7 @@ fn find_symbol_range(
 
 fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<CompletionItem> {
     let mut items = Vec::new();
+    let mut builtin_names = std::collections::BTreeSet::new();
     for var in semantic.globals.values() {
         items.push(variable_completion(var, semantic, offset));
     }
@@ -1355,16 +1455,33 @@ fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<Comp
         }
         items.push(function_completion(func));
     }
-    for entry in runmat_builtins::builtin_catalog_entries() {
+    for entry in runmat_builtins::public_builtin_catalog_entries() {
         if entry.descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal {
             continue;
         }
+        builtin_names.insert(entry.identity.name.to_ascii_lowercase());
         items.push(catalog_completion(entry));
+    }
+    for alias in runmat_builtins::builtin_catalog_aliases() {
+        let Some(entry) =
+            runmat_builtins::public_builtin_catalog_entry_by_name(alias.canonical.name)
+        else {
+            continue;
+        };
+        if entry.descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal
+            || !builtin_names.insert(alias.alias.name.to_ascii_lowercase())
+        {
+            continue;
+        }
+        items.push(catalog_alias_completion(alias.alias.name, entry));
     }
     for func in runmat_builtins::builtin_functions() {
         if func.descriptor.is_some_and(|descriptor| {
             descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal
         }) {
+            continue;
+        }
+        if !builtin_names.insert(func.name.to_ascii_lowercase()) {
             continue;
         }
         items.push(builtin_completion(func));
@@ -1373,6 +1490,18 @@ fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<Comp
         items.push(constant_completion(constant));
     }
     items
+}
+
+fn catalog_alias_completion(
+    alias: &str,
+    entry: &runmat_builtins::BuiltinCatalogEntry,
+) -> CompletionItem {
+    let mut completion = catalog_completion(entry);
+    completion.label = alias.to_string();
+    completion.detail = completion
+        .detail
+        .map(|detail| format!("{detail} (alias of {})", entry.identity.name));
+    completion
 }
 
 fn catalog_completion(entry: &runmat_builtins::BuiltinCatalogEntry) -> CompletionItem {
@@ -1534,6 +1663,33 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // The catalog owns spellings and overloads; this consumer checks that each
+    // source call projects the complete descriptor for the correct identity.
+    fn assert_catalog_signature_projection(text: &str, identity: &str) {
+        let entry = runmat_builtins::public_builtin_catalog_entry_by_name(identity)
+            .unwrap_or_else(|| panic!("missing canonical identity {identity}"));
+        let expected: Vec<&str> = entry
+            .descriptor
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(!expected.is_empty(), "missing descriptor for {identity}");
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let actual = signature_help_at(text, &analysis, &position)
+            .unwrap_or_else(|| panic!("missing signature projection for {text}"));
+        let labels: Vec<&str> = actual
+            .signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect();
+        assert_eq!(labels, expected, "wrong canonical descriptor for {text}");
+        assert!(actual
+            .active_signature
+            .is_some_and(|index| (index as usize) < actual.signatures.len()));
+    }
+
     #[test]
     fn hover_returns_builtin_docs() {
         let text = "plot(1, 2);";
@@ -1551,17 +1707,7 @@ mod tests {
             !analysis.tokens.is_empty(),
             "expected tokenize_detailed to produce tokens"
         );
-        let builtin_names: Vec<&str> = runmat_builtins::builtin_functions()
-            .iter()
-            .map(|f| f.name)
-            .collect();
-        assert!(
-            builtin_names
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case("plot")),
-            "plot builtin should be registered for hover tests (registered: {:?})",
-            builtin_names
-        );
+        assert!(runmat_builtins::public_builtin_catalog_entry_by_name("plot").is_some());
         let position = lsp_types::Position::new(0, 0);
         let offset = position_to_offset(text, &position);
         let token = token_at_offset(&analysis.tokens, offset)
@@ -1674,6 +1820,7 @@ mod tests {
                 "normrnd(0, 1, 3, 4);",
                 "r = normrnd(mu, sigma, sz1, sz2, ...)",
             ),
+            ("gamrnd(2, 3, 3, 4);", "r = gamrnd(a, b, sz1, sz2, ...)"),
             ("unifrnd(0, 1, [3 4]);", "r = unifrnd(a, b, sz)"),
             ("rng();", "s = rng()"),
         ];
@@ -1808,23 +1955,14 @@ mod tests {
     #[test]
     fn signature_help_uses_plotting_limit_descriptors() {
         let cases = [
-            ("xlim([0 1]);", "limits = xlim([xmin xmax])"),
-            ("ylim([0 1]);", "limits = ylim([ymin ymax])"),
-            ("zlim([0 1]);", "limits = zlim([zmin zmax])"),
-            ("clim([0 1]);", "limits = clim([cmin cmax])"),
-            ("caxis([0 1]);", "limits = caxis([cmin cmax])"),
+            ("xlim([0 1]);", "xlim"),
+            ("ylim([0 1]);", "ylim"),
+            ("zlim([0 1]);", "zlim"),
+            ("clim([0 1]);", "clim"),
+            ("caxis([0 1]);", "caxis"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -1878,21 +2016,9 @@ mod tests {
 
     #[test]
     fn signature_help_uses_plotting_control_descriptors() {
-        let cases = [
-            ("drawnow();", "ok = drawnow()"),
-            ("hold('on');", "hold(mode)"),
-        ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        let cases = [("drawnow();", "drawnow"), ("hold('on');", "hold")];
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -1994,22 +2120,9 @@ mod tests {
 
     #[test]
     fn signature_help_uses_empty_and_magic_descriptors() {
-        let cases = [
-            ("empty(0, 3);", "A = ClassName.empty(sz1, ..., szN)"),
-            ("magic(5);", "A = magic(n)"),
-        ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position)
-                .unwrap_or_else(|| panic!("expected signature help for strings-core case: {text}"));
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        let cases = [("empty(0, 3);", "empty"), ("magic(5);", "magic")];
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2040,13 +2153,17 @@ mod tests {
     fn signature_help_uses_introspection_descriptors() {
         let cases = [
             ("isempty([]);", "tf = isempty(A)"),
+            ("iscolumn([1; 2]);", "tf = iscolumn(A)"),
             ("ismatrix([1 2; 3 4]);", "tf = ismatrix(A)"),
+            ("isrow([1 2]);", "tf = isrow(A)"),
             ("isscalar(1);", "tf = isscalar(A)"),
             ("isvector([1 2 3]);", "tf = isvector(A)"),
             ("length([1 2 3]);", "n = length(A)"),
             ("ndims(ones(2,2,2));", "n = ndims(A)"),
-            ("numel([1 2; 3 4], 1, 2);", "n = numel(A, dim, ...)"),
-            ("size([1 2; 3 4], 1);", "d = size(A, dim)"),
+            ("height([1 2; 3 4]);", "n = height(A)"),
+            ("width([1 2; 3 4]);", "n = width(A)"),
+            ("numel([1 2; 3 4], 1, 2);", "n = numel(A, dim1, dim2, ...)"),
+            ("size([1 2; 3 4], 1);", "sz = size(A, dim)"),
         ];
 
         for (text, expected_label) in cases {
@@ -2193,46 +2310,29 @@ mod tests {
     #[test]
     fn signature_help_uses_gpu_acceleration_descriptors() {
         let cases = [
-            ("arrayfun(\"sin\", 1);", "B = arrayfun(func, A1, An...)"),
-            ("gather(1);", "X = gather(X)"),
-            ("gpuArray(1);", "G = gpuArray(X)"),
-            ("gpuDevice();", "info = gpuDevice()"),
-            ("gpuDevice(1);", "info = gpuDevice(arg)"),
-            ("gpuInfo();", "summary = gpuInfo()"),
-            ("pagefun(\"mtimes\", 1, 1);", "Y = pagefun(func, A, B)"),
+            ("arrayfun(\"sin\", 1);", "arrayfun"),
+            ("gather(1);", "gather"),
+            ("gpuArray(1);", "gpuArray"),
+            ("gpuDevice();", "gpuDevice"),
+            ("gpuDevice(1);", "gpuDevice"),
+            ("gpuInfo();", "gpuInfo"),
+            ("pagefun(\"mtimes\", 1, 1);", "pagefun"),
         ];
 
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
     #[test]
     fn signature_help_uses_array_indexing_descriptors() {
         let cases = [
-            ("find([1 0 2]);", "idx = find(X)"),
-            ("ind2sub([3 4], 7);", "subs = ind2sub(sz, ind)"),
-            ("sub2ind([3 4], 2, 3);", "ind = sub2ind(sz, I1, In...)"),
+            ("find([1 0 2]);", "find"),
+            ("ind2sub([3 4], 7);", "ind2sub"),
+            ("sub2ind([3 4], 2, 3);", "sub2ind"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2603,93 +2703,48 @@ mod tests {
     #[test]
     fn signature_help_uses_io_repl_fs_descriptors() {
         let cases = [
-            ("addpath(\"toolbox\");", "oldpath = addpath(folder1)"),
-            (
-                "addpath(\"toolbox\", \"utils\", \"-end\");",
-                "oldpath = addpath(folder1, ..., position)",
-            ),
-            (
-                "addpath(\"toolbox\", \"-frozen\");",
-                "oldpath = addpath(folder1, ..., \"-frozen\")",
-            ),
-            ("pwd();", "folder = pwd()"),
-            ("cd();", "folder = cd()"),
-            ("cd(\"tmp\");", "folder = cd(folder)"),
-            ("rmpath(\"toolbox\");", "oldpath = rmpath(folder1)"),
-            (
-                "rmpath(\"toolbox\", \"utils\");",
-                "oldpath = rmpath(folder1, folder2, ...)",
-            ),
-            ("genpath();", "pathstr = genpath()"),
-            ("genpath(\"toolbox\");", "pathstr = genpath(folder)"),
-            (
-                "genpath(\"toolbox\", \"private\");",
-                "pathstr = genpath(folder, excludes)",
-            ),
-            ("path();", "oldpath = path()"),
-            ("path(\"a\");", "oldpath = path(path1)"),
-            ("path(\"a\", \"b\");", "oldpath = path(path1, path2)"),
-            ("savepath();", "status = savepath()"),
-            ("savepath(\"pathdef.m\");", "status = savepath(filename)"),
-            ("tempdir();", "folder = tempdir()"),
-            ("tempname();", "filename = tempname()"),
-            ("tempname(\"tmp\");", "filename = tempname(folder)"),
-            ("getenv();", "env = getenv()"),
-            ("getenv(\"PATH\");", "value = getenv(NAME)"),
-            ("setenv(\"A\", \"B\");", "status = setenv(NAME, VALUE)"),
-            (
-                "fullfile(\"a\", \"b\");",
-                "file = fullfile(part1, part2, ...)",
-            ),
-            ("exist(\"sin\");", "typeID = exist(name)"),
-            (
-                "exist(\"sin\", \"builtin\");",
-                "typeID = exist(name, searchType)",
-            ),
-            ("dir();", "listing = dir()"),
-            ("dir(\".\");", "listing = dir(name)"),
-            ("ls();", "listing = ls()"),
-            ("ls(\".\");", "listing = ls(name)"),
-            ("mkdir(\"tmp\");", "status = mkdir(folderName)"),
-            (
-                "mkdir(\"parent\", \"child\");",
-                "status = mkdir(parentFolder, folderName)",
-            ),
-            ("rmdir(\"tmp\");", "status = rmdir(folderName)"),
-            ("rmdir(\"tmp\", \"s\");", "status = rmdir(folderName, flag)"),
-            (
-                "copyfile(\"a\", \"b\");",
-                "status = copyfile(source, destination)",
-            ),
-            (
-                "copyfile(\"a\", \"b\", \"f\");",
-                "status = copyfile(source, destination, flag)",
-            ),
-            (
-                "movefile(\"a\", \"b\");",
-                "status = movefile(source, destination)",
-            ),
-            (
-                "movefile(\"a\", \"b\", \"f\");",
-                "status = movefile(source, destination, flag)",
-            ),
-            ("delete(\"a.txt\");", "delete(filename)"),
-            (
-                "delete(\"a.txt\", \"b.txt\");",
-                "delete(filename1, filename2, ...)",
-            ),
+            ("addpath(\"toolbox\");", "addpath"),
+            ("addpath(\"toolbox\", \"utils\", \"-end\");", "addpath"),
+            ("addpath(\"toolbox\", \"-frozen\");", "addpath"),
+            ("pwd();", "pwd"),
+            ("cd();", "cd"),
+            ("cd(\"tmp\");", "cd"),
+            ("rmpath(\"toolbox\");", "rmpath"),
+            ("rmpath(\"toolbox\", \"utils\");", "rmpath"),
+            ("genpath();", "genpath"),
+            ("genpath(\"toolbox\");", "genpath"),
+            ("genpath(\"toolbox\", \"private\");", "genpath"),
+            ("path();", "path"),
+            ("path(\"a\");", "path"),
+            ("path(\"a\", \"b\");", "path"),
+            ("savepath();", "savepath"),
+            ("savepath(\"pathdef.m\");", "savepath"),
+            ("tempdir();", "tempdir"),
+            ("tempname();", "tempname"),
+            ("tempname(\"tmp\");", "tempname"),
+            ("getenv();", "getenv"),
+            ("getenv(\"PATH\");", "getenv"),
+            ("setenv(\"A\", \"B\");", "setenv"),
+            ("fullfile(\"a\", \"b\");", "fullfile"),
+            ("exist(\"sin\");", "exist"),
+            ("exist(\"sin\", \"builtin\");", "exist"),
+            ("dir();", "dir"),
+            ("dir(\".\");", "dir"),
+            ("ls();", "ls"),
+            ("ls(\".\");", "ls"),
+            ("mkdir(\"tmp\");", "mkdir"),
+            ("mkdir(\"parent\", \"child\");", "mkdir"),
+            ("rmdir(\"tmp\");", "rmdir"),
+            ("rmdir(\"tmp\", \"s\");", "rmdir"),
+            ("copyfile(\"a\", \"b\");", "copyfile"),
+            ("copyfile(\"a\", \"b\", \"f\");", "copyfile"),
+            ("movefile(\"a\", \"b\");", "movefile"),
+            ("movefile(\"a\", \"b\", \"f\");", "movefile"),
+            ("delete(\"a.txt\");", "delete"),
+            ("delete(\"a.txt\", \"b.txt\");", "delete"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2789,23 +2844,14 @@ mod tests {
     #[test]
     fn signature_help_uses_io_console_descriptors() {
         let cases = [
-            ("disp(42);", "disp(X)"),
-            ("clc();", "clc()"),
-            ("format('long');", "format(mode)"),
-            ("input('Value: ');", "value = input(prompt)"),
-            ("input('s', 'Name: ');", "value = input(stringFlag, prompt)"),
+            ("disp(42);", "disp"),
+            ("clc();", "clc"),
+            ("format('long');", "format"),
+            ("input('Value: ');", "input"),
+            ("input('s', 'Name: ');", "input"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2867,7 +2913,7 @@ mod tests {
             ),
             (
                 "DataTransaction.write(tx, \"A\", [1 3], [1 2 3]);",
-                "tf = DataTransaction.write(tx, arrayName, sliceSpec, values, Name, Value, ...)",
+                "tf = DataTransaction.write(tx, arrayName, sliceSpec, values)",
             ),
             (
                 "DataTransaction.commit(tx);",
@@ -2925,34 +2971,20 @@ mod tests {
     #[test]
     fn signature_help_uses_datetime_duration_descriptors() {
         let cases = [
-            ("datetime();", "t = datetime()"),
-            (
-                "datetime(2024, 4, 9, 13, 30, 0);",
-                "t = datetime(year, month, day, hour, minute, second)",
-            ),
+            ("datetime();", "datetime"),
+            ("datetime(2024, 4, 9, 13, 30, 0);", "datetime"),
             (
                 "datetime(738000, \"ConvertFrom\", \"datenum\");",
-                "t = datetime(serialDateNumbers, \"ConvertFrom\", \"datenum\")",
+                "datetime",
             ),
-            ("year(t);", "X = year(t)"),
-            ("datetime.plus(t, 1);", "out = datetime.op(lhs, rhs)"),
-            (
-                "duration(1, 30, 45);",
-                "t = duration(hours, minutes, seconds)",
-            ),
-            ("duration.plus(d1, d2);", "out = duration.op(lhs, rhs)"),
+            ("year(t);", "year"),
+            ("datetime.plus(t, 1);", "datetime.plus"),
+            ("duration(1, 30, 45);", "duration"),
+            ("duration.plus(d1, d2);", "duration.plus"),
         ];
 
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -3041,38 +3073,20 @@ mod tests {
     #[test]
     fn signature_help_uses_io_mat_descriptors() {
         let cases = [
-            ("load();", "S = load()"),
-            ("load(\"vars.mat\");", "S = load(filename)"),
-            (
-                "load(\"vars.mat\", \"A\", \"B\");",
-                "S = load(filename, varName1, varName2, ...)",
-            ),
-            (
-                "load(\"vars.mat\", \"-regexp\", \"^A\");",
-                "S = load(filename, \"-regexp\", pattern1, ...)",
-            ),
-            ("save();", "status = save()"),
-            ("save(\"vars.mat\");", "status = save(filename)"),
-            (
-                "save(\"vars.mat\", \"A\", \"B\");",
-                "status = save(filename, varName1, varName2, ...)",
-            ),
+            ("load();", "load"),
+            ("load(\"vars.mat\");", "load"),
+            ("load(\"vars.mat\", \"A\", \"B\");", "load"),
+            ("load(\"vars.mat\", \"-regexp\", \"^A\");", "load"),
+            ("save();", "save"),
+            ("save(\"vars.mat\");", "save"),
+            ("save(\"vars.mat\", \"A\", \"B\");", "save"),
             (
                 "save(\"vars.mat\", \"-struct\", \"opts\", \"alpha\");",
-                "status = save(filename, \"-struct\", structVar, field1, ...)",
+                "save",
             ),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -3129,64 +3143,44 @@ mod tests {
     #[test]
     fn signature_help_uses_math_reduction_cumulative_descriptors() {
         let cases = [
-            ("sum([1,2,3]);", "S = sum(A)"),
-            ("sum([1,2,3], \"all\");", "S = sum(A, \"all\")"),
-            ("mean([1,2,3]);", "M = mean(A)"),
-            ("mean([1,2,3], \"all\");", "M = mean(A, \"all\")"),
-            ("max([1,2,3]);", "M = max(A)"),
-            ("max([1,2,3], [3,2,1]);", "M = max(A, B)"),
-            ("max([1,2,3], [], 1);", "M = max(A, [], dim)"),
-            ("min([1,2,3]);", "M = min(A)"),
-            ("min([1,2,3], [3,2,1]);", "M = min(A, B)"),
-            ("min([1,2,3], [], 1);", "M = min(A, [], dim)"),
-            ("median([1,2,3]);", "M = median(A)"),
-            ("median([1,2,3], 1);", "M = median(A, dim)"),
-            (
-                "median([1,2,3], \"omitnan\");",
-                "M = median(A, missingflag)",
-            ),
-            ("std([1,2,3]);", "S = std(A)"),
-            ("std([1,2,3], 0, 1);", "S = std(A, w, dim)"),
-            ("var([1,2,3]);", "V = var(A)"),
-            ("var([1,2,3], 0, 1);", "V = var(A, w, dim)"),
-            ("var([1,2,3], \"omitnan\");", "V = var(A, nanflag)"),
-            ("diff([1,2,3]);", "B = diff(X)"),
-            ("diff([1,2,3], 2, 1);", "B = diff(X, n, dim)"),
-            ("gradient([1,2,3]);", "G = gradient(F)"),
-            ("gradient([1,2,3], 0.5);", "G = gradient(F, h)"),
-            ("cumsum([1,2,3]);", "B = cumsum(A)"),
-            ("cumsum([1,2,3], \"reverse\");", "B = cumsum(A, direction)"),
-            ("cumprod([1,2,3]);", "B = cumprod(A)"),
-            (
-                "cumprod([1,2,3], \"omitnan\", \"reverse\");",
-                "B = cumprod(A, nanflag, direction)",
-            ),
-            ("cummax([1,2,3]);", "M = cummax(A)"),
-            ("cummin([1,2,3]);", "M = cummin(A)"),
-            (
-                "cummax([1,2,3], \"omitnan\", \"reverse\");",
-                "M = cummax(A, nanflag, direction)",
-            ),
-            (
-                "cummin([1,2,3], \"omitnan\", \"reverse\");",
-                "M = cummin(A, nanflag, direction)",
-            ),
-            ("trapz([1,2,3]);", "Q = trapz(Y)"),
-            ("trapz([0,1,2], [1,2,3]);", "Q = trapz(X, Y)"),
-            ("cumtrapz([1,2,3]);", "Q = cumtrapz(Y)"),
-            ("cumtrapz([0,1,2], [1,2,3], 2);", "Q = cumtrapz(X, Y, dim)"),
+            ("sum([1,2,3]);", "sum"),
+            ("sum([1,2,3], \"all\");", "sum"),
+            ("mean([1,2,3]);", "mean"),
+            ("mean([1,2,3], \"all\");", "mean"),
+            ("max([1,2,3]);", "max"),
+            ("max([1,2,3], [3,2,1]);", "max"),
+            ("max([1,2,3], [], 1);", "max"),
+            ("min([1,2,3]);", "min"),
+            ("min([1,2,3], [3,2,1]);", "min"),
+            ("min([1,2,3], [], 1);", "min"),
+            ("median([1,2,3]);", "median"),
+            ("median([1,2,3], 1);", "median"),
+            ("median([1,2,3], \"omitnan\");", "median"),
+            ("std([1,2,3]);", "std"),
+            ("std([1,2,3], 0, 1);", "std"),
+            ("var([1,2,3]);", "var"),
+            ("var([1,2,3], 0, 1);", "var"),
+            ("var([1,2,3], \"omitnan\");", "var"),
+            ("diff([1,2,3]);", "diff"),
+            ("diff([1,2,3], 2, 1);", "diff"),
+            ("gradient([1,2,3]);", "gradient"),
+            ("gradient([1,2,3], 0.5);", "gradient"),
+            ("cumsum([1,2,3]);", "cumsum"),
+            ("cumsum([1,2,3], \"reverse\");", "cumsum"),
+            ("cumprod([1,2,3]);", "cumprod"),
+            ("cumprod([1,2,3], \"omitnan\", \"reverse\");", "cumprod"),
+            ("cummax([1,2,3]);", "cummax"),
+            ("cummin([1,2,3]);", "cummin"),
+            ("cummax([1,2,3], \"omitnan\", \"reverse\");", "cummax"),
+            ("cummin([1,2,3], \"omitnan\", \"reverse\");", "cummin"),
+            ("trapz([1,2,3]);", "trapz"),
+            ("trapz([0,1,2], [1,2,3]);", "trapz"),
+            ("cumtrapz([1,2,3]);", "cumtrapz"),
+            ("cumtrapz([0,1,2], [1,2,3], 2);", "cumtrapz"),
         ];
 
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -3225,29 +3219,20 @@ mod tests {
     #[test]
     fn signature_help_uses_math_linalg_ops_descriptors() {
         let cases = [
-            ("transpose([1,2;3,4]);", "B = transpose(A)"),
-            ("ctranspose([1,2;3,4]);", "B = ctranspose(A)"),
-            ("trace([1,2;3,4]);", "t = trace(A)"),
-            ("dot([1,2], [3,4]);", "C = dot(A, B)"),
-            ("dot([1,2], [3,4], 2);", "C = dot(A, B, dim)"),
-            ("cross([1,0,0], [0,1,0]);", "C = cross(A, B)"),
-            ("cross([1,0,0], [0,1,0], 2);", "C = cross(A, B, dim)"),
-            ("mldivide([1,2;3,4], [5;6]);", "X = mldivide(A, B)"),
-            ("mrdivide([1,2], [1,2;3,4]);", "X = mrdivide(A, B)"),
-            ("mtimes([1,2;3,4], [5;6]);", "C = mtimes(A, B)"),
-            ("mpower([1,2;3,4], 2);", "B = mpower(A, p)"),
+            ("transpose([1,2;3,4]);", "transpose"),
+            ("ctranspose([1,2;3,4]);", "ctranspose"),
+            ("trace([1,2;3,4]);", "trace"),
+            ("dot([1,2], [3,4]);", "dot"),
+            ("dot([1,2], [3,4], 2);", "dot"),
+            ("cross([1,0,0], [0,1,0]);", "cross"),
+            ("cross([1,0,0], [0,1,0], 2);", "cross"),
+            ("mldivide([1,2;3,4], [5;6]);", "mldivide"),
+            ("mrdivide([1,2], [1,2;3,4]);", "mrdivide"),
+            ("mtimes([1,2;3,4], [5;6]);", "mtimes"),
+            ("mpower([1,2;3,4], 2);", "mpower"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -4259,6 +4244,7 @@ mod tests {
             ("log(2);", "Y = log(X)"),
             ("log1p(2);", "Y = log1p(X)"),
             ("log2(8);", "Y = log2(X)"),
+            ("log2(8);", "[F,E] = log2(X)"),
             ("log10(100);", "Y = log10(X)"),
             ("sqrt(4);", "Y = sqrt(X)"),
         ];
@@ -4310,71 +4296,51 @@ mod tests {
     #[test]
     fn signature_help_uses_math_elementwise_special_descriptors() {
         let cases = [
-            ("complex(1);", "Z = complex(A)"),
-            ("complex(1, 2);", "Z = complex(A, B)"),
-            ("factorial(5);", "Y = factorial(X)"),
-            (
-                "factorial(5, \"like\", 1);",
-                "Y = factorial(X, \"like\", prototype)",
-            ),
-            ("gamma(5);", "Y = gamma(X)"),
-            ("hypot(3, 4);", "R = hypot(X, Y)"),
-            ("nextpow2(9);", "p = nextpow2(X)"),
-            ("pow2(3);", "Y = pow2(X)"),
-            ("pow2(1.5, 2);", "Y = pow2(F, E)"),
-            ("sign(-7);", "Y = sign(X)"),
+            ("complex(1);", "complex"),
+            ("complex(1, 2);", "complex"),
+            ("factorial(5);", "factorial"),
+            ("factorial(5, \"like\", 1);", "factorial"),
+            ("gamma(5);", "gamma"),
+            ("gammaln(5);", "gammaln"),
+            ("hypot(3, 4);", "hypot"),
+            ("nextpow2(9);", "nextpow2"),
+            ("pow2(3);", "pow2"),
+            ("pow2(1.5, 2);", "pow2"),
+            ("sign(-7);", "sign"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
     #[test]
     fn signature_help_uses_math_trigonometry_descriptors() {
         let cases = [
-            ("asin(0.5);", "Y = asin(X)"),
-            ("acos(0.5);", "Y = acos(X)"),
-            ("atan(1);", "Y = atan(X)"),
-            ("atan(1, \"like\", 1);", "Y = atan(X, \"like\", P)"),
-            ("sinh(1);", "Y = sinh(X)"),
-            ("cosh(1);", "Y = cosh(X)"),
-            ("tanh(1);", "Y = tanh(X)"),
-            ("asinh(1);", "Y = asinh(X)"),
-            ("acosh(2);", "Y = acosh(X)"),
-            ("atanh(0.5);", "Y = atanh(X)"),
-            ("sind(90);", "Y = sind(X)"),
-            ("cosd(90);", "Y = cosd(X)"),
-            ("tand(45);", "Y = tand(X)"),
-            ("deg2rad(180);", "Y = deg2rad(X)"),
-            ("rad2deg(pi);", "Y = rad2deg(X)"),
-            ("sin(1);", "Y = sin(X)"),
-            ("sin(1, \"like\", 1);", "Y = sin(X, \"like\", P)"),
-            ("cos(1);", "Y = cos(X)"),
-            ("cos(1, \"like\", 1);", "Y = cos(X, \"like\", P)"),
-            ("tan(1);", "Y = tan(X)"),
-            ("tan(1, \"like\", 1);", "Y = tan(X, \"like\", P)"),
-            ("atan2(1, 1);", "Z = atan2(Y, X)"),
+            ("asin(0.5);", "asin"),
+            ("acos(0.5);", "acos"),
+            ("atan(1);", "atan"),
+            ("atan(1, \"like\", 1);", "atan"),
+            ("sinh(1);", "sinh"),
+            ("cosh(1);", "cosh"),
+            ("tanh(1);", "tanh"),
+            ("asinh(1);", "asinh"),
+            ("acosh(2);", "acosh"),
+            ("atanh(0.5);", "atanh"),
+            ("sind(90);", "sind"),
+            ("cosd(90);", "cosd"),
+            ("tand(45);", "tand"),
+            ("deg2rad(180);", "deg2rad"),
+            ("rad2deg(pi);", "rad2deg"),
+            ("sin(1);", "sin"),
+            ("sin(1, \"like\", 1);", "sin"),
+            ("cos(1);", "cos"),
+            ("cos(1, \"like\", 1);", "cos"),
+            ("tan(1);", "tan"),
+            ("tan(1, \"like\", 1);", "tan"),
+            ("atan2(1, 1);", "atan2"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -4541,100 +4507,54 @@ mod tests {
     #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
-            ("fieldnames(struct());", "names = fieldnames(S)"),
-            (
-                "getfield(struct('a', 1), 'a');",
-                "value = getfield(S, field)",
-            ),
-            ("isfield(struct('a', 1), 'a');", "tf = isfield(S, name)"),
-            ("orderfields(struct('a', 1));", "S = orderfields(S)"),
-            (
-                "setfield(struct(), 'a', 1);",
-                "S = setfield(S, field, value)",
-            ),
-            ("struct('a', 1);", "S = struct(field, value, ...)"),
-            ("rmfield(struct('a', 1), 'a');", "S = rmfield(S, field)"),
+            ("fieldnames(struct());", "fieldnames"),
+            ("getfield(struct('a', 1), 'a');", "getfield"),
+            ("isfield(struct('a', 1), 'a');", "isfield"),
+            ("orderfields(struct('a', 1));", "orderfields"),
+            ("setfield(struct(), 'a', 1);", "setfield"),
+            ("struct('a', 1);", "struct"),
+            ("rmfield(struct('a', 1), 'a');", "rmfield"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
     #[test]
     fn signature_help_uses_cells_core_descriptors() {
         let cases = [
-            ("cell();", "C = cell()"),
-            ("cell(2, 3);", "C = cell(m, n, ...)"),
-            (
-                "cell([2, 3], \"like\", zeros(1));",
-                "C = cell(sz, \"like\", prototype)",
-            ),
-            ("cell2mat(cell(1, 1));", "A = cell2mat(C)"),
-            ("cellfun(@length, cell(1, 1));", "Y = cellfun(func, C)"),
-            ("cellstr(\"RunMat\");", "C = cellstr(str)"),
+            ("cell();", "cell"),
+            ("cell(2, 3);", "cell"),
+            ("cell([2, 3], \"like\", zeros(1));", "cell"),
+            ("cell2mat(cell(1, 1));", "cell2mat"),
+            ("cellfun(@length, cell(1, 1));", "cellfun"),
+            ("cellstr(\"RunMat\");", "cellstr"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position)
-                .unwrap_or_else(|| panic!("expected signature help for cells-core case: {text}"));
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
     #[test]
     fn signature_help_uses_containers_map_descriptors() {
         let cases = [
-            ("containers.Map();", "M = containers.Map()"),
-            ("containers.Map.keys(m);", "K = containers.Map.keys(M)"),
-            ("containers.Map.values(m);", "V = containers.Map.values(M)"),
-            (
-                "containers.Map.values(m, {'a'});",
-                "V = containers.Map.values(M, keySet)",
-            ),
-            (
-                "containers.Map.isKey(m, \"a\");",
-                "tf = containers.Map.isKey(M, keySet)",
-            ),
-            (
-                "containers.Map.remove(m, \"a\");",
-                "containers.Map.remove(M, keySet)",
-            ),
+            ("containers.Map();", "containers.Map"),
+            ("containers.Map.keys(m);", "containers.Map.keys"),
+            ("containers.Map.values(m);", "containers.Map.values"),
+            ("containers.Map.values(m, {'a'});", "containers.Map.values"),
+            ("containers.Map.isKey(m, \"a\");", "containers.Map.isKey"),
+            ("containers.Map.remove(m, \"a\");", "containers.Map.remove"),
             (
                 "containers.Map.subsref(m, \"()\", {\"a\"});",
-                "value = containers.Map.subsref(M, kind, payload)",
+                "containers.Map.subsref",
             ),
             (
                 "containers.Map.subsasgn(m, \"()\", {\"a\"}, 1);",
-                "M = containers.Map.subsasgn(M, kind, payload, rhs)",
+                "containers.Map.subsasgn",
             ),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -5100,15 +5020,24 @@ end
 
     #[test]
     fn parse_failures_keep_the_shared_frontend_code() {
-        let text = "value = ;";
-        let analysis = analyze_document_with_compat(text, CompatMode::default());
-        let diagnostics = diagnostics_for_document(text, &analysis);
-        assert!(diagnostics.iter().any(|diagnostic| {
-            matches!(
+        for (text, expected) in [
+            ("value = ;", Position::new(0, 8)),
+            ("if true\n    value = ;\nend", Position::new(1, 12)),
+            ("function out = f()\nif true\n    value = ;\nend\nend", Position::new(2, 12)),
+            ("% 😀é\nclassdef C\nmethods\nfunction out = f(obj)\nif true\n    value = ;\nend\nend\nend\nend", Position::new(5, 12)),
+            ("if true\n    label = \"😀é\"; value = ;\nend", Position::new(1, 27)),
+        ] {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let syntax = analysis.syntax_error.as_ref().expect("syntax failure");
+            assert_eq!(syntax.position, text.find("value = ;").unwrap() + "value = ".len(), "{text}");
+            let diagnostics = diagnostics_for_document(text, &analysis);
+            let diagnostic = diagnostics.iter().find(|diagnostic| matches!(
                 &diagnostic.code,
                 Some(lsp_types::NumberOrString::String(code)) if code == "RunMat:ParseError"
-            )
-        }));
+            )).expect("shared parse diagnostic");
+            assert_eq!(diagnostic.range.start, expected, "{text}");
+            assert_eq!(diagnostic.range.end, Position::new(expected.line, expected.character + 1), "{text}");
+        }
     }
 
     #[test]
@@ -5186,6 +5115,36 @@ end
             foo_call,
             lsp_types::SemanticTokenType::FUNCTION,
         );
+    }
+
+    #[test]
+    fn rename_subject_retains_parameter_owner() {
+        let source = "function y = impactPulse(t, scale)\n    y = t * scale;\nend\n";
+        let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
+        let offset = source.find("scale").unwrap();
+        let subject = rename_subject_at(source, &analysis, &offset_to_position(source, offset))
+            .expect("parameter should be renameable");
+        assert_eq!(subject.name, "scale");
+        assert!(subject.is_local);
+        assert_eq!(subject.parameter_owner.as_deref(), Some("impactPulse"));
+    }
+
+    #[test]
+    fn rename_subject_rejects_a_name_already_bound_in_its_scope() {
+        let source =
+            "function y = impactPulse(t, scale)\n    gain = 2;\n    y = t * scale * gain;\nend\n";
+        let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
+        let offset = source.find("scale").unwrap();
+        let position = offset_to_position(source, offset);
+        assert!(rename_subject_has_collision(
+            source, &analysis, &position, "gain"
+        ));
+        assert!(!rename_subject_has_collision(
+            source,
+            &analysis,
+            &position,
+            "amplitude"
+        ));
     }
 
     #[test]
@@ -5294,6 +5253,15 @@ roots = ["."]
                     definition.package_instance.is_some() && definition.source_id.is_some()
                 })
         }));
+        let rename_ranges =
+            function_rename_references_in_document(source_text, &analysis, "summarize");
+        assert_eq!(rename_ranges.len(), 1);
+        let rename_range = rename_ranges[0];
+        assert_eq!(
+            &source_text[position_to_offset(source_text, &rename_range.start)
+                ..position_to_offset(source_text, &rename_range.end)],
+            "summarize"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

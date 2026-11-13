@@ -1,18 +1,19 @@
 [package]
 name = "runmat-native-executor"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
-license-file = "../LICENSE.md"
+license-file = "../../LICENSE.md"
 description = "Native IR invocation lifecycle and semantic execution host for RunMat"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+allocator-api2 = "=0.2.21"
 futures = "0.3"
+hashbrown = "=0.16.1"
 runmat-execution = { workspace = true }
-runmat-hir = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, default-features = false }
 runmat-native-codegen = { workspace = true, default-features = false }
 runmat-time = { workspace = true }
 runmat-types = { workspace = true }

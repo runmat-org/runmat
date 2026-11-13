@@ -14,7 +14,7 @@ pub fn solve_3x3(
                 pivot_row = row;
             }
         }
-        if a[pivot_row][pivot].abs() <= tolerance.absolute_m {
+        if a[pivot_row][pivot].abs() <= tolerance.absolute_m.canonical_value() {
             return None;
         }
         if pivot_row != pivot {

@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use runmat_value::{IntValue, Tensor, Value};
+use runmat_value::{IntValue, Value};
 
 /// Returns an exact ordering whenever either scalar needs integer-aware
 /// comparison. `None` leaves ordinary floating-point comparison untouched.
@@ -14,46 +14,6 @@ pub(crate) fn scalar_order(left: &Value, right: &Value) -> Option<Ordering> {
             integer_f64_order(right, *left).map(Ordering::reverse)
         }
         _ => None,
-    }
-}
-
-pub(crate) fn tensor_elements_equal(left: &Tensor, right: &Tensor, index: usize) -> bool {
-    let left = left
-        .numeric_value_at(index)
-        .expect("left tensor storage index");
-    let right = right
-        .numeric_value_at(index)
-        .expect("right tensor storage index");
-    match (left.into_int_value(), right.into_int_value()) {
-        (Some(left), Some(right)) => integer_order(&left, &right) == Ordering::Equal,
-        (Some(left), None) => {
-            integer_f64_order(&left, right.materialize_f64()) == Some(Ordering::Equal)
-        }
-        (None, Some(right)) => {
-            integer_f64_order(&right, left.materialize_f64()).map(Ordering::reverse)
-                == Some(Ordering::Equal)
-        }
-        (None, None) => left.materialize_f64() == right.materialize_f64(),
-    }
-}
-
-pub(crate) fn tensor_element_equals_scalar(tensor: &Tensor, index: usize, scalar: &Value) -> bool {
-    let value = tensor
-        .numeric_value_at(index)
-        .expect("tensor storage index");
-    match (value, scalar) {
-        (value, Value::Int(scalar)) => match value.into_int_value() {
-            Some(value) => integer_order(&value, scalar) == Ordering::Equal,
-            None => {
-                integer_f64_order(scalar, value.materialize_f64()).map(Ordering::reverse)
-                    == Some(Ordering::Equal)
-            }
-        },
-        (value, Value::Num(scalar)) => match value.into_int_value() {
-            Some(value) => integer_f64_order(&value, *scalar) == Some(Ordering::Equal),
-            None => value.materialize_f64() == *scalar,
-        },
-        _ => false,
     }
 }
 
@@ -115,7 +75,6 @@ fn integer_f64_order(integer: &IntValue, float: f64) -> Option<Ordering> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::IntegerStorage;
 
     #[test]
     fn scalar_comparisons_preserve_64_bit_integer_precision() {
@@ -140,53 +99,5 @@ mod tests {
             ),
             Some(Ordering::Equal)
         );
-    }
-
-    #[test]
-    fn tensor_comparisons_read_exact_integer_storage() {
-        let integer = Tensor::new_integer(
-            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
-            vec![1, 2],
-        )
-        .expect("integer tensor");
-        let rounded = Tensor::new(
-            vec![(1_u64 << 53) as f64, 18_446_744_073_709_551_616.0],
-            vec![1, 2],
-        )
-        .expect("double tensor");
-
-        assert!(!tensor_elements_equal(&integer, &rounded, 0));
-        assert!(!tensor_elements_equal(&integer, &rounded, 1));
-        assert!(!tensor_element_equals_scalar(
-            &integer,
-            0,
-            &Value::Num((1_u64 << 53) as f64)
-        ));
-        assert!(tensor_element_equals_scalar(
-            &integer,
-            1,
-            &Value::Int(IntValue::U64(u64::MAX))
-        ));
-    }
-
-    #[test]
-    fn floating_tensor_equality_is_exact_and_native_single_aware() {
-        let left = Tensor::new(vec![1.0, f64::MIN_POSITIVE], vec![1, 2]).expect("left");
-        let right = Tensor::new(
-            vec![1.0 + f64::EPSILON, f64::MIN_POSITIVE + f64::from_bits(1)],
-            vec![1, 2],
-        )
-        .expect("right");
-        assert!(!tensor_elements_equal(&left, &right, 0));
-        assert!(!tensor_elements_equal(&left, &right, 1));
-
-        let single = Tensor::from_f32(vec![0.1], vec![1, 1]).expect("single");
-        let double = Tensor::new(vec![f64::from(0.1_f32)], vec![1, 1]).expect("double");
-        assert!(tensor_elements_equal(&single, &double, 0));
-        assert!(!tensor_element_equals_scalar(
-            &single,
-            0,
-            &Value::Num(0.1_f64)
-        ));
     }
 }

@@ -1,0 +1,112 @@
+use crate::*;
+
+const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+        "Accepts text inputs as string scalars/arrays, character vectors/arrays, or cell arrays of character vectors.",
+        "Accepts patterns in the same formats; scalar inputs expand across the other argument following MATLAB broadcast rules.",
+        "Typed missing strings (displayed as `<missing>`) never match any pattern.",
+        "Empty patterns (`\"\"` or `''`) always match non-missing text elements.",
+        "Typed missing pattern elements never match and therefore return `false`; literal `<missing>` patterns are ordinary text.",
+        "Character arrays treat each row as an independent element; zero-row character arrays yield empty outputs.",
+        "MATLAB-compatible mode accepts the documented `'IgnoreCase', logicalValue` name-value form. RunMat mode additionally accepts positional, numeric, textual, and resident scalar flag forms behind explicit compatibility extensions.",
+        "All eight integer classes are read exactly as RunMat-only IgnoreCase controls: zero is false and every nonzero value is true.",
+        "Returns a logical scalar when the broadcasted size is one element, otherwise returns a logical array.",
+    ] },
+    BuiltinDocumentationSection { heading: "Placement and effects", paragraphs: &[
+        "Matching operates on host text. The builtin has no text GPU kernel or fusion form; numeric and resident text-role inputs reject before provider access. It may throw for malformed arguments and options, but does not mutate workspace state or access files, network, randomness, or time.",
+        "An unused result is still evaluated and discarded. Ordinary host-text distribution is distinct from distributed-input support for this builtin.",
+    ] },
+];
+
+const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "example-1", title: "Determine whether a string starts with a prefix",
+        program: "tf = startsWith(\"RunMat Accelerate\", \"RunMat\")", display_output: Some("tf = logical\n   1"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, true));" },
+    },
+    BuiltinExample {
+        id: "example-2", title: "Perform a case-insensitive prefix check",
+        program: "tf = startsWith(\"RunMat\", \"run\", 'IgnoreCase', true)", display_output: Some("tf = logical\n   1"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, true));" },
+    },
+    BuiltinExample {
+        id: "example-3", title: "Ignoring case with a positional flag",
+        program: "tf = startsWith(\"RUNMAT\", \"run\", true)", display_output: Some("tf = logical\n   1"),
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, true));" },
+    },
+    BuiltinExample {
+        id: "example-4", title: "Apply a scalar prefix to every element of a string array",
+        program: "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = startsWith(labels, \"a\")", display_output: Some("tf = 1×3 logical array\n   1   0   0"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, logical([1 0 0])));" },
+    },
+    BuiltinExample {
+        id: "example-5", title: "Match element-wise prefixes with implicit expansion",
+        program: "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nprefixes = [\"hyd\"; \"hel\"; \"lit\"];\ntf = startsWith(names, prefixes)", display_output: Some("tf = 3×1 logical array\n   1\n   1\n   1"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, logical([1; 1; 1])));" },
+    },
+    BuiltinExample {
+        id: "example-6", title: "Test prefixes for a cell array of character vectors",
+        program: "C = {'Mercury', 'Venus', 'Mars'};\ntf = startsWith(C, 'M')", display_output: Some("tf = 1×3 logical array\n   1   0   1"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, logical([1 0 1])));" },
+    },
+    BuiltinExample {
+        id: "example-7", title: "Provide multiple prefixes as a column vector",
+        program: "tf = startsWith(\"saturn\", ['s'; 'n'; 'x'])", display_output: Some("tf = 3×1 logical array\n   1\n   0\n   0"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, logical([1; 0; 0])));" },
+    },
+    BuiltinExample {
+        id: "example-8", title: "Handle empty and missing values",
+        program: "texts = [\"\", string(missing)];\ntf = startsWith(texts, \"\")", display_output: Some("tf = 1×2 logical array\n   1   0"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(tf, logical([1 0])));" },
+    },
+];
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog, title: Some("startsWith"), slug: Some("startsWith"),
+    summary: "Test whether text values start with specified prefixes using MATLAB-compatible broadcasting and case options.", description: "`startsWith(str, pattern)` returns logical results indicating whether each text element begins with a corresponding prefix. It supports MATLAB-compatible string, char, and cellstr containers plus implicit expansion rules.",
+    keywords: &["startswith", "prefix", "string array", "ignorecase", "text search"],
+    related: &["contains", "endsWith", "regexp", "regexpi", "strfind"],
+    sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq { question: "What types can I pass to `startsWith`?", answer: "Use string scalars/arrays, character vectors/arrays, or cell arrays of character vectors for both arguments. Mixed combinations are accepted, and RunMat performs MATLAB-style implicit expansion when the array sizes differ." },
+        BuiltinDocumentationFaq { question: "How do I ignore letter case?", answer: "For MATLAB-compatible code, supply `'IgnoreCase', true`. RunMat mode also accepts textual, numeric, positional, and resident scalar extensions; the default remains case-sensitive." },
+        BuiltinDocumentationFaq { question: "What happens with empty patterns?", answer: "Empty patterns (`\"\"` or `''`) always match non-missing text elements. When the text element is missing (`<missing>`), the result is `false`." },
+        BuiltinDocumentationFaq { question: "Can I provide multiple prefixes at once?", answer: "Yes. Provide `pattern` as a string array, character array, or cell array of character vectors. RunMat applies implicit expansion so that scalar inputs expand across the other argument automatically." },
+        BuiltinDocumentationFaq { question: "How are missing strings treated?", answer: "Missing string scalars (displayed as `<missing>`) never match any pattern and produce `false` in the result. Use `ismissing` if you need to handle missing values separately." },
+        BuiltinDocumentationFaq { question: "Does `startsWith` run on the GPU?", answer: "Text matching runs on the host and has no GPU text kernel. Numeric or resident values in text roles are rejected before provider access; supported scalar controls are handled separately." },
+        BuiltinDocumentationFaq { question: "Does `startsWith` preserve the input shape?", answer: "Yes. The output is a logical array whose shape reflects the MATLAB-style implicit expansion result. When that shape contains exactly one element, the builtin returns a logical scalar." }],
+    links: &[BuiltinDocumentationLink { label: "`contains`", target: BuiltinDocumentationLinkTarget::Builtin("contains") },
+        BuiltinDocumentationLink { label: "`endsWith`", target: BuiltinDocumentationLinkTarget::Builtin("endsWith") },
+        BuiltinDocumentationLink { label: "`regexp`", target: BuiltinDocumentationLinkTarget::Builtin("regexp") },
+        BuiltinDocumentationLink { label: "`regexpi`", target: BuiltinDocumentationLinkTarget::Builtin("regexpi") },
+        BuiltinDocumentationLink { label: "strfind", target: BuiltinDocumentationLinkTarget::Builtin("strfind") },
+        BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/startswith.rs") }], media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/search/startswith.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "runtime semantics", location: "builtins::strings::search::startswith::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "integrated behavior", location: "integer_pattern_and_string_transform_semantics" }],
+        notes: &["Legacy behavior, examples, FAQs, links, source and tested fields are reconciled here. Examples have value assertions; integrated native and browser execution remains to be verified."],
+    }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

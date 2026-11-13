@@ -15,10 +15,20 @@ use super::convert::{
     save_file_request_to_js,
 };
 
+#[cfg(test)]
+mod replacement_tests;
+
 #[derive(Clone)]
 pub(super) struct JsFsFuncs {
     bindings: JsValue,
     read_file: Option<Function>,
+    read_version: Option<Function>,
+    atomic_create_new: Option<Function>,
+    capture_workspace: Option<Function>,
+    lookup_workspace_publication: Option<Function>,
+    publish_workspace: Option<Function>,
+    publish_output: Option<Function>,
+    remove_output: Option<Function>,
     read_many: Option<Function>,
     write_file: Option<Function>,
     remove_file: Option<Function>,
@@ -31,12 +41,22 @@ pub(super) struct JsFsFuncs {
     remove_dir: Option<Function>,
     remove_dir_all: Option<Function>,
     rename: Option<Function>,
+    rename_replace: Option<Function>,
     set_readonly: Option<Function>,
     select_file_open: Option<Function>,
     select_file_save: Option<Function>,
 }
 
 impl JsFsFuncs {
+    pub(super) fn supports_workspace_transactions(&self) -> bool {
+        self.capture_workspace.is_some()
+            && self.publish_workspace.is_some()
+            && self.lookup_workspace_publication.is_some()
+    }
+    pub(super) fn supports_read(&self) -> bool {
+        self.read_file.is_some()
+    }
+
     pub(super) fn new(bindings: &JsValue) -> Result<Self, JsValue> {
         if !bindings.is_object() {
             return Err(js_error("fsProvider must be an object"));
@@ -44,6 +64,13 @@ impl JsFsFuncs {
         Ok(Self {
             bindings: bindings.clone(),
             read_file: get_fn(bindings, "readFile")?,
+            read_version: get_fn(bindings, "readVersion")?,
+            atomic_create_new: get_fn(bindings, "atomicCreateNew")?,
+            capture_workspace: get_fn(bindings, "captureWorkspace")?,
+            lookup_workspace_publication: get_fn(bindings, "lookupWorkspacePublication")?,
+            publish_workspace: get_fn(bindings, "publishWorkspace")?,
+            publish_output: get_fn(bindings, "publishOutput")?,
+            remove_output: get_fn(bindings, "removeOutput")?,
             read_many: get_fn(bindings, "readMany")?,
             write_file: get_fn(bindings, "writeFile")?,
             remove_file: get_fn(bindings, "removeFile")?,
@@ -56,6 +83,7 @@ impl JsFsFuncs {
             remove_dir: get_fn(bindings, "removeDir")?,
             remove_dir_all: get_fn(bindings, "removeDirAll")?,
             rename: get_fn(bindings, "rename")?,
+            rename_replace: get_fn(bindings, "renameReplace")?,
             set_readonly: get_fn(bindings, "setReadonly")?,
             select_file_open: get_fn(bindings, "selectFileOpen")?,
             select_file_save: get_fn(bindings, "selectFileSave")?,
@@ -80,6 +108,88 @@ impl JsFsFuncs {
             .map_err(|err| map_js_error("readFile", err))?;
         let resolved = resolve_maybe_promise(value, "readFile").await?;
         js_value_to_bytes(resolved, "readFile")
+    }
+
+    pub(super) async fn publish_output_async(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String> {
+        let func = self.require_fn(&self.publish_output, "publishOutput")?;
+        let bytes = js_sys::Uint8Array::from(data);
+        let expected = expected.map(JsValue::from).unwrap_or(JsValue::NULL);
+        let value = func
+            .call3(
+                &self.bindings,
+                &JsValue::from(path_to_string(path)),
+                &bytes,
+                &expected,
+            )
+            .map_err(|error| map_js_error("publishOutput", error))?;
+        resolve_maybe_promise(value, "publishOutput")
+            .await?
+            .as_string()
+            .filter(|version| !version.is_empty() && version.len() <= 160)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid output version response",
+                )
+            })
+    }
+
+    pub(super) async fn remove_output_async(&self, path: &Path, expected: &str) -> io::Result<()> {
+        let func = self.require_fn(&self.remove_output, "removeOutput")?;
+        let value = func
+            .call2(
+                &self.bindings,
+                &JsValue::from(path_to_string(path)),
+                &JsValue::from(expected),
+            )
+            .map_err(|error| map_js_error("removeOutput", error))?;
+        resolve_maybe_promise(value, "removeOutput").await?;
+        Ok(())
+    }
+
+    pub(super) async fn atomic_create_new_async(
+        &self,
+        path: &Path,
+        data: &[u8],
+    ) -> io::Result<runmat_filesystem::AtomicCreateResult> {
+        let func = self.require_fn(&self.atomic_create_new, "atomicCreateNew")?;
+        let bytes = js_sys::Uint8Array::from(data);
+        let value = func
+            .call2(&self.bindings, &JsValue::from(path_to_string(path)), &bytes)
+            .map_err(|error| map_js_error("atomicCreateNew", error))?;
+        let value = resolve_maybe_promise(value, "atomicCreateNew").await?;
+        serde_wasm_bindgen::from_value(value)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+    }
+
+    pub(super) async fn read_version_async(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        let func = self.require_fn(&self.read_version, "readVersion")?;
+        let value = func
+            .apply(
+                &self.bindings,
+                &js_sys::Array::of4(
+                    &JsValue::from(path_to_string(path)),
+                    &JsValue::from(version),
+                    &JsValue::from_f64(size as f64),
+                    &JsValue::from(snapshot),
+                ),
+            )
+            .map_err(|error| map_js_error("readVersion", error))?;
+        js_value_to_bytes(
+            resolve_maybe_promise(value, "readVersion").await?,
+            "readVersion",
+        )
     }
 
     pub(super) fn write_file(&self, path: &Path, data: &[u8]) -> io::Result<()> {
@@ -284,6 +394,19 @@ impl JsFsFuncs {
         }
     }
 
+    pub(super) async fn rename_replace_async(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let func = self.require_fn(&self.rename_replace, "renameReplace")?;
+        let value = func
+            .call2(
+                &self.bindings,
+                &JsValue::from(path_to_string(from)),
+                &JsValue::from(path_to_string(to)),
+            )
+            .map_err(|error| map_js_error("renameReplace", error))?;
+        resolve_maybe_promise(value, "renameReplace").await?;
+        Ok(())
+    }
+
     pub(super) async fn set_readonly_async(&self, path: &Path, readonly: bool) -> io::Result<()> {
         if let Some(func) = &self.set_readonly {
             let js_path = JsValue::from(path_to_string(path));
@@ -329,6 +452,51 @@ impl JsFsFuncs {
             .map_err(|err| map_js_error("selectFileSave", err))?;
         let value = resolve_maybe_promise(value, "selectFileSave").await?;
         parse_save_file_selection(value)
+    }
+
+    pub(super) async fn capture_workspace(
+        &self,
+        request: &runmat_filesystem::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
+        self.call_contract(&self.capture_workspace, "captureWorkspace", request)
+            .await
+    }
+
+    pub(super) async fn lookup_workspace_publication(
+        &self,
+        request: &runmat_filesystem::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<runmat_filesystem::workspace::WorkspacePublicationOutcome>> {
+        self.call_contract(
+            &self.lookup_workspace_publication,
+            "lookupWorkspacePublication",
+            request,
+        )
+        .await
+    }
+
+    pub(super) async fn publish_workspace(
+        &self,
+        request: &runmat_filesystem::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<runmat_filesystem::workspace::WorkspacePublicationOutcome> {
+        self.call_contract(&self.publish_workspace, "publishWorkspace", request)
+            .await
+    }
+
+    async fn call_contract<I: serde::Serialize, O: serde::de::DeserializeOwned>(
+        &self,
+        function: &Option<Function>,
+        operation: &'static str,
+        request: &I,
+    ) -> io::Result<O> {
+        let function = self.require_fn(function, operation)?;
+        let request = serde_wasm_bindgen::to_value(request)
+            .map_err(|error| io::Error::new(ErrorKind::InvalidInput, error.to_string()))?;
+        let response = function
+            .call1(&self.bindings, &request)
+            .map_err(|error| map_js_error(operation, error))?;
+        let response = resolve_maybe_promise(response, operation).await?;
+        serde_wasm_bindgen::from_value(response)
+            .map_err(|error| io::Error::new(ErrorKind::InvalidData, error.to_string()))
     }
 
     fn require_fn<'a>(

@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "cohort": "cad-airliner-drawing-memory",
+  "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
+  "measured": {
+    "source_revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat-geometry-wasm-host",
+      "--test",
+      "cad_airliner_drawing",
+      "--",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "profile": {
+      "release": true,
+      "debug": 0,
+      "cargo_build_jobs": 8,
+      "incremental": false
+    },
+    "log_sha256": "1e377f693fb92ff957db5b4d995911117e9b1cce3d3fa8d4b8e3fc95b283193b",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-35f5a6c647-airliner-receipt.tests.log",
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0,
+    "exit_code": 0,
+    "case_names": [
+      "the_airliner_general_arrangement_compiles_within_the_host_memory"
+    ],
+    "selected_filter": null,
+    "inputs": {
+      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+      "files": 26112,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "artifacts": [
+      {
+        "sha256": "27ba3f86ce8b7067787da66c5efc52dde2f5dbb0b2399139dfcbd353f40168d3",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/cad-airliner-35f5a6c647-qualified"
+      }
+    ],
+    "source_verification": {
+      "status": "verified",
+      "files": 27265,
+      "before_and_after": true
+    },
+    "test_seconds": 243.84,
+    "rust_heap_peak_mib": {
+      "sheet": 2,
+      "front": 331,
+      "top": 373,
+      "right": 346
+    }
+  },
+  "scope": "The complete staged drawing passes the unchanged Rust-heap ceiling through the optimized native browser-host adapter. Measurements exclude the C++ allocator and operating-system RSS. Distributed browser artifact acceptance is separate.",
+  "comparison_runs": [
+    {
+      "source_revision": "80226433e07bba08d7f002da89db5cc3a4a3ef25",
+      "profile": "unoptimized test with the broader package feature union",
+      "exit_code": 101,
+      "termination": "Owner-controlled SIGTERM of the exact test process after 19m28s while the last view was computing; incomplete, not a passing measurement or an observed assertion failure.",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-80226433e0-airliner-r2.tests.log"
+    }
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+      "files": 26112,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "190b41b66e4260e756e5a6187443feb05e3d1ae4f8b261e02a9ee57b831ab6da",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Conserves the recorded scientific measurements across the reviewed process-retirement lifecycle change. Apple group-signal EPERM commits to bounded observation and retains its error; positive leader/group retirement is still required. Linux and Windows retain their previous signal/error decisions. No solver arithmetic, scientific inputs, dependencies, compiler settings or measured thresholds change. The direct in-process circuit Session workload and CAD drawing host workload do not invoke this child-retirement path. The actual Mac meshing and supervisor conformance executables pass with unchanged assertions; they qualify the affected native path separately from these conserved scientific measurements.",
+    "review": {
+      "path": "qualification/scientific/reviews/process-retirement-20261112-cad-airliner-drawing-memory.json",
+      "sha256": "cc1c30f896cfd910865822fcc9194c53c53d2e07c4b2e91e3c3f043db048499a"
+    }
+  }
+}

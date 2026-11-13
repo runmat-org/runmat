@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{GeometryDocument, PersistentEntityId};
 
-pub use codec::{decode_faceted_solid, encode_faceted_solid};
-pub use construction::{admit_faceted_solid, build_faceted_solid_closure};
+pub use codec::{decode_faceted_solid, decode_faceted_solid_with_control, encode_faceted_solid};
+pub use construction::{
+    admit_faceted_solid, admit_faceted_solid_with_control, build_faceted_solid_closure,
+};
 
 pub const FACETED_SOLID_SCHEMA_VERSION: u16 = 2;
 
@@ -27,13 +29,26 @@ impl FacetedSolid {
     ) -> Result<(), super::GeometryContractError> {
         validation::validate_faceted_solid(self, model)
     }
+    pub fn validate_against_with_control(
+        &self,
+        model: &super::FacetedSolidModel,
+        control: &dyn crate::GeometryEvaluationControl,
+    ) -> Result<(), super::GeometryContractError> {
+        validation::validate_admitted(
+            self,
+            model,
+            crate::model::validation_storage::ValidationWork(Some(control)),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FacetedVertex {
     pub id: PersistentEntityId,
-    pub coordinates_m: [f64; 3],
+    #[serde(with = "runmat_types::physical::canonical_storage")]
+    pub coordinates_m:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,26 +1,32 @@
+use super::AnalysisFigureMeshSource;
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, BoundaryConditionKind, LoadKind,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
+    ExcitationAction, PhysicsFamily, PrescribedValue, Pressure, SignalRepresentation, SignalValue,
 };
 use runmat_analysis_fea::contracts::{
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
     FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
 };
-use runmat_geometry_core::UnitSystem;
+use runmat_analysis_fea::AnalysisRunIdentity;
+use runmat_geometry_core::LengthUnit;
 use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
     MeshRegion, MeshScalarField, MeshTriangleRange, MeshVectorField, PlotElement,
 };
+use std::path::Path;
 
 use super::contracts::{
     AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisRenderTopology,
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunKind, AnalysisRunResult,
-    AnalysisStudySpec, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisRunResult, AnalysisStudySpec,
+    AnalysisTrendsData, AnalysisTrendsQuery,
 };
+use super::storage;
 use super::{analysis_results_compare_op, analysis_trends_op, collect_analysis_result_fields};
-use super::{run_kind, storage};
 use crate::geometry::{geometry_preview_figure, GeometryPreviewFigureOptions};
 use crate::operations::OperationContext;
+
+mod field_artifact;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisGeneratedFigureKind {
@@ -41,14 +47,6 @@ pub struct AnalysisGeneratedFigure {
     pub topology_ids: Vec<String>,
     pub warnings: Vec<String>,
     pub figure: Figure,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnalysisFigureMeshSource {
-    Auto,
-    Solver,
-    Cad,
-    CadReference,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,8 +121,7 @@ pub fn analysis_generate_study_run_figures(
 ) -> Result<Vec<AnalysisGeneratedFigure>, String> {
     let current = storage::load_run_result(run_id)?
         .ok_or_else(|| format!("FEA run_id '{run_id}' was not found"))?;
-    let mut figures =
-        generate_run_figures(&study.geometry, study.model.as_ref(), &current, options);
+    let mut figures = generate_run_figures(&study.geometry, Some(&study.model), &current, options);
 
     if options.include_comparison {
         if let Some(previous) = previous_run_of_kind(&current)? {
@@ -154,6 +151,84 @@ pub fn analysis_generate_study_run_figures(
     Ok(figures)
 }
 
+/// Generates figures for one explicitly selected persisted field without materializing that
+/// field into the language driver. Page-bounded numerical reads are verified and assembled only
+/// inside the plotting boundary, where rendering necessarily needs the selected field.
+pub fn analysis_generate_study_field_figures(
+    study: &AnalysisStudySpec,
+    run_id: &str,
+    selection: &super::AnalysisFieldSelection,
+    options: AnalysisFigureGenerationOptions,
+) -> Result<Vec<AnalysisGeneratedFigure>, String> {
+    field_artifact::generate(study, run_id, selection, options)
+}
+
+pub fn analysis_generate_study_run_mesh_figure(
+    study: &AnalysisStudySpec,
+    run_id: &str,
+    options: AnalysisFigureGenerationOptions,
+) -> Result<AnalysisGeneratedFigure, String> {
+    let run = storage::load_run_result(run_id)?;
+    if run.is_none() && storage::load_structural_frequency_result(run_id)?.is_none() {
+        return Err(format!("FEA run_id '{run_id}' was not found"));
+    }
+    let stored_topology = run
+        .as_ref()
+        .and_then(|run| run.render_topology.as_ref())
+        .filter(|topology| render_topology_has_meshes(topology));
+    let study_topology = if stored_topology.is_none() {
+        render_topology_from_study_mesh(study)?
+    } else {
+        None
+    };
+    let render_topology = stored_topology
+        .or(study_topology.as_ref())
+        .filter(|topology| render_topology_has_meshes(topology));
+    let title = match options.mesh_source {
+        AnalysisFigureMeshSource::Solver => "FEA solver mesh",
+        AnalysisFigureMeshSource::Cad => "FEA CAD geometry",
+        AnalysisFigureMeshSource::CadReference => "FEA mesh and CAD reference",
+        AnalysisFigureMeshSource::Auto => "FEA mesh",
+    };
+    let figure = base_mesh_figure_for_run_source(&study.geometry, render_topology, title, options)
+        .ok_or_else(|| "FEA run does not contain renderable mesh topology".to_string())?;
+    Ok(AnalysisGeneratedFigure {
+        kind: AnalysisGeneratedFigureKind::MeshResult,
+        title: title.to_string(),
+        field_ids: Vec::new(),
+        topology_ids: Vec::new(),
+        warnings: Vec::new(),
+        figure,
+    })
+}
+
+pub(super) fn render_topology_from_study_mesh(
+    study: &AnalysisStudySpec,
+) -> Result<Option<AnalysisRenderTopology>, String> {
+    let solver_mesh = study
+        .solver_mesh_artifact_path
+        .as_deref()
+        .map(Path::new)
+        .map(super::solver_mesh_artifact::load_solver_mesh_artifact)
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    Ok(super::render_topology_from_solver_mesh(
+        solver_mesh.as_ref(),
+    ))
+}
+
+pub(super) fn render_topology_for_persisted_run(
+    study: &AnalysisStudySpec,
+    run_id: &str,
+) -> Result<Option<AnalysisRenderTopology>, String> {
+    if let Some(topology) =
+        storage::load_render_topology(run_id)?.filter(render_topology_has_meshes)
+    {
+        return Ok(Some(topology));
+    }
+    render_topology_from_study_mesh(study)
+}
+
 fn generate_run_figures(
     geometry: &runmat_geometry_core::GeometryAsset,
     model: Option<&AnalysisModel>,
@@ -177,6 +252,25 @@ fn mesh_result_figures(
         .render_topology
         .as_ref()
         .filter(|topology| render_topology_has_meshes(topology));
+    let fields = collect_analysis_result_fields(run);
+    mesh_result_figures_from_fields(
+        geometry,
+        model,
+        render_topology,
+        &fields,
+        &run.run_id,
+        options,
+    )
+}
+
+pub(super) fn mesh_result_figures_from_fields(
+    geometry: &runmat_geometry_core::GeometryAsset,
+    model: Option<&AnalysisModel>,
+    render_topology: Option<&AnalysisRenderTopology>,
+    fields: &[AnalysisField],
+    run_label: &str,
+    options: AnalysisFigureGenerationOptions,
+) -> Vec<AnalysisGeneratedFigure> {
     if (render_topology.is_none() && geometry.surface_meshes.is_empty())
         || options.max_mesh_result_figures == 0
     {
@@ -196,7 +290,6 @@ fn mesh_result_figures(
         ));
     }
 
-    let fields = collect_analysis_result_fields(run);
     let probe =
         match base_mesh_figure_for_run_source(geometry, render_topology, "FEA result", options) {
             Some(figure) => figure,
@@ -237,7 +330,7 @@ fn mesh_result_figures(
                     kind: AnalysisGeneratedFigureKind::MeshResult,
                     title: format!("FEA deformed shape: {}", deformation.field_id),
                     field_ids: vec![deformation.field_id.clone()],
-                    topology_ids: topology_ids_for_field_ids([deformation.field_id.as_str()]),
+                    topology_ids: vec!["analysis_mesh".to_string()],
                     warnings,
                     figure,
                 });
@@ -246,7 +339,7 @@ fn mesh_result_figures(
     }
 
     let mut topology_warnings = Vec::new();
-    for field in &fields {
+    for field in fields {
         if figures.len() >= per_run_mesh_figure_limit {
             break;
         }
@@ -282,7 +375,7 @@ fn mesh_result_figures(
         });
     }
 
-    for field in &fields {
+    for field in fields {
         if figures.len() >= per_run_mesh_figure_limit {
             break;
         }
@@ -341,12 +434,12 @@ fn mesh_result_figures(
         if let Some(figure) = base_mesh_figure(
             geometry,
             render_topology,
-            format!("FEA geometry result: {}", run.run_id),
+            format!("FEA geometry result: {run_label}"),
             options,
         ) {
             figures.push(AnalysisGeneratedFigure {
                 kind: AnalysisGeneratedFigureKind::MeshResult,
-                title: format!("FEA geometry result: {}", run.run_id),
+                title: format!("FEA geometry result: {run_label}"),
                 field_ids: Vec::new(),
                 topology_ids: Vec::new(),
                 warnings: shared_warnings,
@@ -435,27 +528,40 @@ struct AuthoredBoundaryRegion {
 
 fn authored_boundary_regions(model: &AnalysisModel) -> Vec<AuthoredBoundaryRegion> {
     let mut regions = Vec::<AuthoredBoundaryRegion>::new();
-    for load in &model.loads {
-        if !load_kind_requires_boundary_region(&load.kind) {
+    for action in &model.excitations {
+        let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target
+        else {
+            continue;
+        };
+        if target.entity_dimension == runmat_analysis_core::EntityDimension::Volume {
             continue;
         }
         push_authored_boundary_region(
             &mut regions,
-            &load.region_id,
-            "load",
+            &target.region_id,
+            "excitation",
             Vec4::new(0.98, 0.30, 0.54, 1.0),
-            load_vector_for_kind(&load.kind),
-            pressure_sign_for_kind(&load.kind),
+            excitation_vector(model, action),
+            excitation_pressure_sign(model, action),
         );
     }
-    for boundary_condition in &model.boundary_conditions {
-        if !boundary_condition_kind_uses_boundary_region(&boundary_condition.kind) {
-            continue;
+    for constraint in &model.constraints {
+        if let Some(target) = constraint.target() {
+            push_authored_boundary_region(
+                &mut regions,
+                &target.region_id,
+                "constraint",
+                Vec4::new(0.18, 0.78, 0.48, 1.0),
+                None,
+                None,
+            );
         }
+    }
+    for boundary in &model.boundaries {
         push_authored_boundary_region(
             &mut regions,
-            &boundary_condition.region_id,
-            "constraint",
+            &boundary.target.region_id,
+            "boundary",
             Vec4::new(0.18, 0.78, 0.48, 1.0),
             None,
             None,
@@ -472,11 +578,19 @@ fn push_authored_boundary_region(
     load_vector: Option<Vec3>,
     pressure_sign: Option<f32>,
 ) {
-    if region_id.trim().is_empty()
-        || regions
-            .iter()
-            .any(|existing| existing.region_id == region_id && existing.role == role)
+    if region_id.trim().is_empty() {
+        return;
+    }
+    if let Some(existing) = regions
+        .iter_mut()
+        .find(|existing| existing.region_id == region_id && existing.role == role)
     {
+        if existing.load_vector.is_none() {
+            existing.load_vector = load_vector;
+        }
+        if existing.pressure_sign.is_none() {
+            existing.pressure_sign = pressure_sign;
+        }
         return;
     }
     regions.push(AuthoredBoundaryRegion {
@@ -488,58 +602,109 @@ fn push_authored_boundary_region(
     });
 }
 
-fn load_kind_requires_boundary_region(kind: &LoadKind) -> bool {
-    matches!(
-        kind,
-        LoadKind::Force { .. }
-            | LoadKind::Moment { .. }
-            | LoadKind::Wrench { .. }
-            | LoadKind::Pressure { .. }
-    )
-}
-
-fn boundary_condition_kind_uses_boundary_region(_kind: &BoundaryConditionKind) -> bool {
-    true
-}
-
-fn load_vector_for_kind(kind: &LoadKind) -> Option<Vec3> {
-    let vector = match kind {
-        LoadKind::Force { fx, fy, fz } => {
-            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+fn excitation_vector(model: &AnalysisModel, action: &ExcitationAction) -> Option<Vec3> {
+    let signal = model
+        .signals
+        .iter()
+        .find(|signal| signal.signal_id() == &action.excitation().signal_id)?;
+    let components = match (action, signal) {
+        (ExcitationAction::Force(_), runmat_analysis_core::PhysicalSignal::Force(signal)) => {
+            constant_vector(&signal.representation, |value| value.canonical_value())
         }
-        LoadKind::Moment { mx, my, mz } => {
-            Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?)
+        (ExcitationAction::Moment(_), runmat_analysis_core::PhysicalSignal::Moment(signal)) => {
+            constant_vector(&signal.representation, |value| value.canonical_value())
         }
-        LoadKind::Wrench { fx, fy, fz, .. } => {
-            Vec3::new(f64_to_f32(*fx)?, f64_to_f32(*fy)?, f64_to_f32(*fz)?)
+        (ExcitationAction::Traction(_), runmat_analysis_core::PhysicalSignal::Traction(signal)) => {
+            constant_vector(&signal.representation, |value| value.canonical_value())
         }
-        _ => return None,
+        (
+            ExcitationAction::BodyForce(_),
+            runmat_analysis_core::PhysicalSignal::BodyForceDensity(signal),
+        ) => constant_vector(&signal.representation, |value| value.canonical_value()),
+        _ => None,
     };
-    if vector.length_squared().is_finite() && vector.length_squared() > f32::EPSILON {
-        Some(vector.normalize())
-    } else if let LoadKind::Wrench { mx, my, mz, .. } = kind {
-        let moment = Vec3::new(f64_to_f32(*mx)?, f64_to_f32(*my)?, f64_to_f32(*mz)?);
-        if moment.length_squared().is_finite() && moment.length_squared() > f32::EPSILON {
-            Some(moment.normalize())
+    let direction_applies = matches!(
+        action,
+        ExcitationAction::Force(_)
+            | ExcitationAction::Moment(_)
+            | ExcitationAction::Traction(_)
+            | ExcitationAction::BodyForce(_)
+    );
+    let vector = components.or_else(|| {
+        if direction_applies {
+            action.excitation().direction.map(|direction| {
+                direction
+                    .vector
+                    .map(|component| component * constant_scalar_sign(signal).unwrap_or(1.0))
+            })
         } else {
             None
         }
+    })?;
+    normalized_vec3(vector)
+}
+
+fn constant_vector<Q>(
+    representation: &SignalRepresentation<Q>,
+    component: impl Fn(&Q) -> f64,
+) -> Option<[f64; 3]> {
+    let SignalRepresentation::Constant(SignalValue::Vector3(values)) = representation else {
+        return None;
+    };
+    Some([
+        component(&values[0]),
+        component(&values[1]),
+        component(&values[2]),
+    ])
+}
+
+fn constant_scalar_sign(signal: &runmat_analysis_core::PhysicalSignal) -> Option<f64> {
+    macro_rules! scalar_sign {
+        ($signal:expr, $field:ident) => {{
+            let SignalRepresentation::Constant(SignalValue::Scalar(value)) =
+                &$signal.representation
+            else {
+                return None;
+            };
+            Some(value.canonical_value().signum())
+        }};
+    }
+    match signal {
+        runmat_analysis_core::PhysicalSignal::Force(signal) => scalar_sign!(signal, newtons),
+        runmat_analysis_core::PhysicalSignal::Moment(signal) => {
+            scalar_sign!(signal, newton_meters)
+        }
+        runmat_analysis_core::PhysicalSignal::Traction(signal) => scalar_sign!(signal, pascals),
+        runmat_analysis_core::PhysicalSignal::BodyForceDensity(signal) => {
+            scalar_sign!(signal, newtons_per_cubic_meter)
+        }
+        _ => None,
+    }
+}
+
+fn normalized_vec3(values: [f64; 3]) -> Option<Vec3> {
+    let vector = Vec3::new(
+        f64_to_f32(values[0])?,
+        f64_to_f32(values[1])?,
+        f64_to_f32(values[2])?,
+    );
+    if vector.length_squared().is_finite() && vector.length_squared() > f32::EPSILON {
+        Some(vector.normalize())
     } else {
         None
     }
 }
 
-fn pressure_sign_for_kind(kind: &LoadKind) -> Option<f32> {
-    match kind {
-        LoadKind::Pressure { magnitude_pa } => {
-            let magnitude = f64_to_f32(*magnitude_pa)?;
-            if magnitude.is_finite() && magnitude.abs() > f32::EPSILON {
-                Some(-magnitude.signum())
-            } else {
-                None
-            }
-        }
-        _ => None,
+fn excitation_pressure_sign(model: &AnalysisModel, action: &ExcitationAction) -> Option<f32> {
+    if !matches!(action, ExcitationAction::Pressure(_)) {
+        return None;
+    }
+    let prescribed = PrescribedValue::<Pressure>::Signal(action.excitation().signal_id.clone());
+    let magnitude = f64_to_f32(prescribed.study_constant(&model.signals)?.canonical_value())?;
+    if magnitude.abs() > f32::EPSILON {
+        Some(-magnitude.signum())
+    } else {
+        None
     }
 }
 
@@ -664,11 +829,13 @@ fn structural_result_summary_figure(fields: &[AnalysisField]) -> Option<Analysis
 fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> {
     let mut figures = Vec::new();
     if let Some(modal) = run.modal_results.as_ref() {
-        if !modal.eigenvalues_hz.is_empty() {
-            let labels = (1..=modal.eigenvalues_hz.len())
+        let frequencies_hz = modal.frequencies_hz();
+        let residual_norms = modal.residual_norms();
+        if !frequencies_hz.is_empty() {
+            let labels = (1..=frequencies_hz.len())
                 .map(|idx| format!("Mode {idx}"))
                 .collect::<Vec<_>>();
-            if let Ok(mut chart) = BarChart::new(labels, modal.eigenvalues_hz.clone()) {
+            if let Ok(mut chart) = BarChart::new(labels, frequencies_hz) {
                 chart.label = Some("Frequency".to_string());
                 chart.color = Vec4::new(0.33, 0.66, 0.96, 1.0);
                 let mut figure = Figure::new()
@@ -690,7 +857,7 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                 });
             }
         }
-        if !modal.residual_norms.is_empty() {
+        if !residual_norms.is_empty() {
             figures.push(line_figure(
                 AnalysisGeneratedFigureKind::Convergence,
                 "FEA modal residuals",
@@ -698,8 +865,8 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
                 "Residual norm",
                 vec![(
                     "Residual".to_string(),
-                    index_axis(modal.residual_norms.len(), 1.0),
-                    modal.residual_norms.clone(),
+                    index_axis(residual_norms.len(), 1.0),
+                    residual_norms,
                     Vec4::new(0.93, 0.48, 0.26, 1.0),
                 )],
                 Vec::new(),
@@ -805,47 +972,6 @@ fn convergence_figures(run: &AnalysisRunResult) -> Vec<AnalysisGeneratedFigure> 
         }
     }
 
-    if let Some(em) = run.electromagnetic_results.as_ref() {
-        if !em.sweep_frequency_hz.is_empty() && !em.sweep_peak_flux_density.is_empty() {
-            figures.push(line_figure(
-                AnalysisGeneratedFigureKind::Electromagnetic,
-                "FEA electromagnetic sweep",
-                "Frequency (Hz)",
-                "Peak flux density",
-                vec![(
-                    "Peak flux".to_string(),
-                    axis_or_index(&em.sweep_frequency_hz, em.sweep_peak_flux_density.len()),
-                    em.sweep_peak_flux_density.clone(),
-                    Vec4::new(0.28, 0.74, 0.57, 1.0),
-                )],
-                vec![
-                    em.vector_potential_real.field_id.clone(),
-                    em.magnetic_flux_density_magnitude.field_id.clone(),
-                ],
-                false,
-            ));
-        }
-        if !em.sweep_frequency_hz.is_empty() && !em.sweep_solve_quality.is_empty() {
-            figures.push(line_figure(
-                AnalysisGeneratedFigureKind::Electromagnetic,
-                "FEA electromagnetic solve quality",
-                "Frequency (Hz)",
-                "Solve quality",
-                vec![(
-                    "Solve quality".to_string(),
-                    axis_or_index(&em.sweep_frequency_hz, em.sweep_solve_quality.len()),
-                    em.sweep_solve_quality.clone(),
-                    Vec4::new(0.92, 0.68, 0.28, 1.0),
-                )],
-                vec![
-                    em.vector_potential_real.field_id.clone(),
-                    em.magnetic_flux_density_magnitude.field_id.clone(),
-                ],
-                false,
-            ));
-        }
-    }
-
     figures
 }
 
@@ -886,8 +1012,12 @@ fn comparison_figure(data: &AnalysisResultsCompareData) -> Option<AnalysisGenera
     push_bar_value(
         &mut labels,
         &mut values,
-        "Publishable changed",
-        Some(if data.publishable_changed { 1.0 } else { 0.0 }),
+        "Numerical acceptance changed",
+        Some(if data.numerically_acceptable_changed {
+            1.0
+        } else {
+            0.0
+        }),
     );
     push_bar_value(
         &mut labels,
@@ -921,7 +1051,7 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
     let labels = data
         .summaries
         .iter()
-        .map(|summary| run_kind_label(summary.run_kind).to_string())
+        .map(|summary| run_identity_label(&summary.identity))
         .collect::<Vec<_>>();
     if labels.is_empty() {
         return figures;
@@ -952,22 +1082,22 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
         }
     }
 
-    let publishable_values = data
+    let numerically_acceptable_values = data
         .summaries
         .iter()
-        .map(|summary| summary.publishable_rate * 100.0)
+        .map(|summary| summary.numerically_acceptable_rate * 100.0)
         .collect::<Vec<_>>();
-    if let Ok(mut chart) = BarChart::new(labels, publishable_values) {
-        chart.label = Some("Publishable rate".to_string());
-        chart.color = Vec4::new(0.32, 0.74, 0.56, 1.0);
+    if let Ok(mut numerical_chart) = BarChart::new(labels, numerically_acceptable_values) {
+        numerical_chart.label = Some("Numerically acceptable".to_string());
+        numerical_chart.color = Vec4::new(0.31, 0.62, 0.91, 1.0);
         let mut figure = Figure::new()
-            .with_title("FEA publishable result trends")
-            .with_labels("Run family", "Publishable (%)")
+            .with_title("FEA result disposition trends")
+            .with_labels("Run family", "Runs (%)")
             .with_grid(true);
-        figure.add_bar_chart(chart);
+        figure.add_bar_chart(numerical_chart);
         figures.push(AnalysisGeneratedFigure {
             kind: AnalysisGeneratedFigureKind::Trend,
-            title: "FEA publishable result trends".to_string(),
+            title: "FEA result disposition trends".to_string(),
             field_ids: Vec::new(),
             topology_ids: Vec::new(),
             warnings: Vec::new(),
@@ -1056,7 +1186,7 @@ fn cad_reference_mesh_figure(
         },
     )
     .ok()?;
-    normalize_geometry_meshes_to_solver_units(&mut figure, geometry.units);
+    normalize_geometry_meshes_to_solver_units(&mut figure, geometry.coordinate_units?.unit());
     if let Some(topology) = render_topology {
         if let Ok(solver) = render_topology_figure(topology, title, options) {
             append_mesh_plots(&mut figure, &solver);
@@ -1065,7 +1195,7 @@ fn cad_reference_mesh_figure(
     Some(figure)
 }
 
-fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSystem) {
+fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: LengthUnit) {
     let scale = geometry_unit_scale_to_meters(units);
     if (scale - 1.0).abs() <= f32::EPSILON {
         return;
@@ -1083,12 +1213,8 @@ fn normalize_geometry_meshes_to_solver_units(figure: &mut Figure, units: UnitSys
     }
 }
 
-fn geometry_unit_scale_to_meters(units: UnitSystem) -> f32 {
-    match units {
-        UnitSystem::Unspecified | UnitSystem::Meter => 1.0,
-        UnitSystem::Millimeter => 0.001,
-        UnitSystem::Inch => 0.0254,
-    }
+fn geometry_unit_scale_to_meters(units: LengthUnit) -> f32 {
+    units.meters_per_unit() as f32
 }
 
 fn append_mesh_plots(target: &mut Figure, source: &Figure) {
@@ -1250,7 +1376,7 @@ fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts])
     }
     let descriptor = AnalysisFieldDescriptor::from_field(field);
     let topology_id = descriptor.topology_id.as_deref()?;
-    let actual_entities = field_entity_count(field, &descriptor, values.len());
+    let actual_entities = descriptor.entity_count;
     if topology_id == "analysis_mesh" {
         match descriptor.location {
             AnalysisFieldLocation::Element => {
@@ -1274,6 +1400,7 @@ fn field_topology_mismatch_warning(field: &AnalysisField, meshes: &[MeshCounts])
             ("element", total_triangles)
         }
         AnalysisFieldLocation::Edge
+        | AnalysisFieldLocation::IntegrationPoint
         | AnalysisFieldLocation::InterfaceFace
         | AnalysisFieldLocation::Mode
         | AnalysisFieldLocation::Global
@@ -1318,25 +1445,6 @@ fn node_field_maps_to_render_vertices(meshes: &[MeshCounts], node_count: usize) 
                 .iter()
                 .all(|index| index.is_some_and(|index| index < node_count))
     })
-}
-
-fn field_entity_count(
-    field: &AnalysisField,
-    descriptor: &AnalysisFieldDescriptor,
-    value_count: usize,
-) -> usize {
-    if matches!(
-        descriptor.location,
-        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
-    ) {
-        return value_count;
-    }
-    if let Some(first_dim) = field.shape.first().copied() {
-        if field.shape.len() > 1 || descriptor.component_count.is_some() {
-            return first_dim;
-        }
-    }
-    value_count
 }
 
 fn scalar_overlay(
@@ -1461,7 +1569,7 @@ fn scalar_overlay_from_element_values(
     let descriptor = AnalysisFieldDescriptor::from_field(field);
     if descriptor.location != AnalysisFieldLocation::Element
         || descriptor.topology_id.as_deref() != Some("analysis_mesh")
-        || field_entity_count(field, &descriptor, values.len()) != values.len()
+        || descriptor.entity_count != values.len()
     {
         return None;
     }
@@ -1503,7 +1611,7 @@ fn scalar_overlay_from_node_values(
     let descriptor = AnalysisFieldDescriptor::from_field(field);
     if descriptor.location != AnalysisFieldLocation::Node
         || descriptor.topology_id.as_deref() != Some("analysis_mesh")
-        || field_entity_count(field, &descriptor, values.len()) != values.len()
+        || descriptor.entity_count != values.len()
     {
         return None;
     }
@@ -1864,7 +1972,8 @@ fn line_figure(
     AnalysisGeneratedFigure {
         kind,
         title: title.to_string(),
-        topology_ids: topology_ids_for_field_ids(field_ids.iter().map(String::as_str)),
+        // Line series plot values against a sample axis, not over a mesh topology.
+        topology_ids: Vec::new(),
         field_ids,
         warnings,
         figure,
@@ -1906,19 +2015,10 @@ fn topology_ids_for_fields<'a>(fields: impl IntoIterator<Item = &'a AnalysisFiel
     ids
 }
 
-fn topology_ids_for_field_ids<'a>(field_ids: impl IntoIterator<Item = &'a str>) -> Vec<String> {
-    let fields = field_ids
-        .into_iter()
-        .map(|field_id| AnalysisField::host_f64(field_id, vec![1], vec![0.0]))
-        .collect::<Vec<_>>();
-    topology_ids_for_fields(fields.iter())
-}
-
 fn previous_run_of_kind(current: &AnalysisRunResult) -> Result<Option<AnalysisRunResult>, String> {
-    let current_kind = run_kind(current);
     let mut candidates = storage::list_run_results()?
         .into_iter()
-        .filter(|run| run.run_id != current.run_id && run_kind(run) == current_kind)
+        .filter(|run| run.run_id != current.run_id && run.run.identity == current.run.identity)
         .collect::<Vec<_>>();
     candidates.sort_by(|a, b| b.run_id.cmp(&a.run_id));
     Ok(candidates.into_iter().next())
@@ -2169,82 +2269,96 @@ fn render_topology_mesh_bytes(topology: &AnalysisRenderTopology) -> usize {
         .sum()
 }
 
-fn run_kind_label(kind: AnalysisRunKind) -> &'static str {
-    match kind {
-        AnalysisRunKind::LinearStatic => "Linear static",
-        AnalysisRunKind::Modal => "Modal",
-        AnalysisRunKind::Acoustic => "Acoustic",
-        AnalysisRunKind::Thermal => "Thermal",
-        AnalysisRunKind::Transient => "Transient",
-        AnalysisRunKind::Cfd => "CFD",
-        AnalysisRunKind::Cht => "CHT",
-        AnalysisRunKind::Fsi => "FSI",
-        AnalysisRunKind::Nonlinear => "Nonlinear",
-        AnalysisRunKind::Electromagnetic => "Electromagnetic",
-    }
+fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
+    let family = match identity.family() {
+        PhysicsFamily::Structural => "Structural",
+        PhysicsFamily::Thermal => "Thermal",
+        PhysicsFamily::Electromagnetic => "Electromagnetic",
+        PhysicsFamily::Acoustic => "Acoustic",
+        PhysicsFamily::Fluid => "Fluid",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical) => "Thermomechanical",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal) => "Electrothermal",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => "CHT",
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => "FSI",
+    };
+    let procedure = match identity.procedure() {
+        AnalysisProcedure::Static => "static",
+        AnalysisProcedure::ModalExtraction => "modal extraction",
+        AnalysisProcedure::PrestressedModalExtraction => "prestressed modal extraction",
+        AnalysisProcedure::EigenvalueBuckling => "eigenvalue buckling",
+        AnalysisProcedure::TransientResponse => "transient response",
+        AnalysisProcedure::HarmonicResponse => "harmonic response",
+        AnalysisProcedure::PrestressedHarmonicResponse => "prestressed harmonic response",
+        AnalysisProcedure::ModalResponseSpectrum => "modal response spectrum",
+        AnalysisProcedure::RandomResponse => "random response",
+        AnalysisProcedure::Nonlinear => "nonlinear",
+        AnalysisProcedure::Adaptive => "adaptive",
+        AnalysisProcedure::LineParameters => "line parameters",
+    };
+    format!("{family} {procedure}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_analysis_core::{
-        AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition, LoadCase,
-        ReferenceFrame,
+        AnalysisConstraint, AnalysisExcitation, AnalysisModelId, AnalysisSequence,
+        BodyForceDensity, CoordinateFrame, ExcitationCase, ExcitationCaseActivation,
+        ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics,
+        ExcitationTarget, Force, Moment, PhysicalSignal, ProcedureStep, ProjectionRequirement,
+        RegionTarget, Signal, SignalApproximationEvidence, SignalId, SignalPrecision,
+        SignalProvenance, SignalShape, StructuralConstraint, StructuralConstraintKind,
     };
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
-    fn simple_run_result(
-        fields: Vec<AnalysisField>,
-        render_topology: AnalysisRenderTopology,
-    ) -> AnalysisRunResult {
-        AnalysisRunResult {
-            run_id: "run_test".to_string(),
-            run: runmat_analysis_fea::FeaRunResult {
-                backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                solver_backend: "cpu".to_string(),
-                solver_device_apply_k_ratio: 0.0,
-                solver_method: "test_solver".to_string(),
-                preconditioner: "none".to_string(),
-                solver_host_sync_count: 0,
-                diagnostics: Vec::new(),
-                fields,
+    fn test_run_identity() -> AnalysisRunIdentity {
+        let assembly = runmat_analysis_core::StructuralFormulationRealization::new(
+            runmat_analysis_core::StructuralOperatorImplementation::Tet4LinearElasticity,
+            Some(runmat_analysis_core::StructuralRecoveryImplementation::Tet4ConstantStrain),
+        );
+        let realization = runmat_analysis_fea::admission::structural_exact_realization(
+            runmat_analysis_fea::admission::StructuralRealizationInput {
+                assemblies: vec![assembly],
+                procedure: runmat_analysis_core::AnalysisProcedure::Static,
+                kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
+                coupling: runmat_analysis_core::CouplingImplementation::Uncoupled,
+                sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
+                boundary_transfers: vec![
+                    runmat_analysis_core::BoundaryTransferImplementation::NotApplicable,
+                ],
             },
-            render_topology: Some(render_topology),
-            modal_results: None,
-            thermal_results: None,
-            transient_results: None,
-            nonlinear_results: None,
-            electromagnetic_results: None,
-            model_validity: crate::analysis::contracts::QualityGate::Pass,
-            solver_convergence: crate::analysis::contracts::QualityGate::Pass,
-            result_quality: crate::analysis::contracts::QualityGate::Pass,
-            run_status: crate::analysis::contracts::RunStatus::Publishable,
-            publishable: true,
-            quality_reasons: Vec::new(),
-            provenance: crate::analysis::contracts::RunProvenance {
-                backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                solver_backend: "cpu".to_string(),
-                solver_device_apply_k_ratio: 0.0,
-                solver_host_sync_count: 0,
-                precision_mode: "double".to_string(),
-                deterministic_mode: true,
-                solver_method: "test_solver".to_string(),
-                preconditioner: "none".to_string(),
-                quality_policy: "strict".to_string(),
-                fallback_events: Vec::new(),
+        )
+        .expect("test structural formulation must be valid");
+        runmat_analysis_fea::admission::admit_formulation(
+            runmat_analysis_fea::admission::FormulationAdmissionRequest {
+                family: runmat_analysis_core::PhysicsFamily::Structural,
+                procedure: runmat_analysis_core::AnalysisProcedure::Static,
+                solution_space: runmat_analysis_core::SolutionSpace::Direct,
+                realization,
             },
-        }
+        )
+        .expect("test structural formulation must be admitted")
+        .into_identity()
     }
 
+    mod result_fixture;
+    use result_fixture::simple_run_result;
+
     fn simple_geometry_asset() -> runmat_geometry_core::GeometryAsset {
-        simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Meter)
+        simple_geometry_asset_with_units(runmat_geometry_core::LengthUnit::Meter)
     }
 
     fn simple_geometry_asset_with_units(
-        units: runmat_geometry_core::UnitSystem,
+        units: runmat_geometry_core::LengthUnit,
     ) -> runmat_geometry_core::GeometryAsset {
         runmat_geometry_core::GeometryAsset {
             geometry_id: "geometry".to_string(),
             source: runmat_geometry_core::GeometrySource {
+                unit_evidence:
+                    runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                        units,
+                        "explicit fixture source scale",
+                    ),
                 path: "/tmp/generic.step".to_string(),
                 sha256: "hash".to_string(),
                 importer_version: "test/v1".to_string(),
@@ -2253,10 +2367,11 @@ mod tests {
                 kind: runmat_geometry_core::SourceGeometryKind::Mesh,
                 assembly: None,
                 material_evidence: Vec::new(),
+                exchange: None,
                 cad_evaluators: Vec::new(),
             },
             tessellation_profile: runmat_geometry_core::TessellationProfile::default(),
-            units,
+            coordinate_units: Some(runmat_geometry_core::physical::CoordinateUnits::new(units)),
             revision: 1,
             meshes: vec![runmat_geometry_core::MeshDescriptor {
                 mesh_id: "cad_surface".to_string(),
@@ -2280,99 +2395,244 @@ mod tests {
             model_id: AnalysisModelId("model".to_string()),
             geometry_id: "geometry".to_string(),
             geometry_revision: 1,
-            units: runmat_geometry_core::UnitSystem::Meter,
-            frame: ReferenceFrame::Global,
+            units: runmat_types::physical::CoordinateUnits::canonical(),
+            frame: CoordinateFrame::Global,
             materials: Vec::new(),
             material_assignments: Vec::new(),
             structural: None,
+            thermal: None,
             thermo_mechanical: None,
             electro_thermal: None,
             electromagnetic: None,
             cfd: None,
             interfaces: Vec::new(),
-            boundary_conditions: vec![BoundaryCondition {
-                bc_id: "fixed_bc".to_string(),
-                region_id: "fixed".to_string(),
-                kind: BoundaryConditionKind::Fixed,
-            }],
-            loads: vec![
-                LoadCase {
-                    load_id: "force_load".to_string(),
-                    region_id: "loaded".to_string(),
-                    kind: LoadKind::Force {
-                        fx: 0.0,
-                        fy: 0.0,
-                        fz: -1.0,
-                    },
+            constraints: vec![AnalysisConstraint::Structural(StructuralConstraint {
+                constraint_id: "fixed_bc".to_string(),
+                frame: CoordinateFrame::Global,
+                kind: StructuralConstraintKind::Fixed {
+                    target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face(
+                        "fixed",
+                    )),
                 },
-                LoadCase {
-                    load_id: "body_force".to_string(),
-                    region_id: "volume_only".to_string(),
-                    kind: LoadKind::BodyForce {
-                        gx: 0.0,
-                        gy: 0.0,
-                        gz: -9.81,
-                    },
-                },
+            })],
+            boundaries: Vec::new(),
+            connectors: Vec::new(),
+            signals: vec![
+                PhysicalSignal::Force(test_vector_signal(
+                    "force_load.signal",
+                    [Force::new(0.0), Force::new(0.0), Force::new(-1.0)],
+                )),
+                PhysicalSignal::BodyForceDensity(test_vector_signal(
+                    "body_force.signal",
+                    [
+                        BodyForceDensity::new(0.0),
+                        BodyForceDensity::new(0.0),
+                        BodyForceDensity::new(-9.81),
+                    ],
+                )),
             ],
-            steps: vec![AnalysisStep {
-                step_id: "static_step".to_string(),
-                kind: AnalysisStepKind::Static,
-            }],
+            excitations: vec![
+                test_action(
+                    "force_load",
+                    "loaded",
+                    "force_load.signal",
+                    ExcitationDistribution::PreserveResultant,
+                    ExcitationAction::Force,
+                    None,
+                ),
+                test_action(
+                    "body_force",
+                    "volume_only",
+                    "body_force.signal",
+                    ExcitationDistribution::IntensityPerVolume,
+                    ExcitationAction::BodyForce,
+                    None,
+                ),
+            ],
+            excitation_cases: vec![test_case("force_load"), test_case("body_force")],
+            initial_conditions: Vec::new(),
+            response_spectra: Vec::new(),
+            random_excitations: Vec::new(),
+            sequence: AnalysisSequence::from_steps(
+                "figure_sequence",
+                vec![ProcedureStep::structural_static("static_step")],
+            ),
         }
     }
 
     fn simple_pressure_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
-        model.boundary_conditions.clear();
-        model.loads = vec![LoadCase {
-            load_id: "pressure_load".to_string(),
-            region_id: "pressurized".to_string(),
-            kind: LoadKind::Pressure { magnitude_pa: 5.0 },
-        }];
+        model.constraints.clear();
+        replace_test_excitation(
+            &mut model,
+            PhysicalSignal::Pressure(test_scalar_signal(
+                "pressure_load.signal",
+                Pressure::new(5.0),
+            )),
+            test_action(
+                "pressure_load",
+                "pressurized",
+                "pressure_load.signal",
+                ExcitationDistribution::IntensityPerArea,
+                ExcitationAction::Pressure,
+                None,
+            ),
+        );
         model
     }
 
     fn simple_moment_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
-        model.boundary_conditions.clear();
-        model.loads = vec![LoadCase {
-            load_id: "axis_load".to_string(),
-            region_id: "axis_region".to_string(),
-            kind: LoadKind::Moment {
-                mx: 0.0,
-                my: 2.0,
-                mz: 0.0,
-            },
-        }];
+        model.constraints.clear();
+        replace_test_excitation(
+            &mut model,
+            PhysicalSignal::Moment(test_vector_signal(
+                "axis_load.signal",
+                [Moment::new(0.0), Moment::new(2.0), Moment::new(0.0)],
+            )),
+            test_action(
+                "axis_load",
+                "axis_region",
+                "axis_load.signal",
+                ExcitationDistribution::PreserveResultant,
+                ExcitationAction::Moment,
+                None,
+            ),
+        );
         model
     }
 
     fn simple_wrench_moment_region_model() -> AnalysisModel {
         let mut model = simple_boundary_region_model();
-        model.boundary_conditions.clear();
-        model.loads = vec![LoadCase {
-            load_id: "wrench_axis_load".to_string(),
-            region_id: "wrench_axis_region".to_string(),
-            kind: LoadKind::Wrench {
-                fx: 0.0,
-                fy: 0.0,
-                fz: 0.0,
-                mx: 0.0,
-                my: 0.0,
-                mz: 4.0,
-                px: 0.0,
-                py: 0.0,
-                pz: 0.0,
-            },
+        model.constraints.clear();
+        model.signals.clear();
+        model.excitations.clear();
+        model.excitation_cases.clear();
+        model.signals.push(PhysicalSignal::Force(test_vector_signal(
+            "wrench_force.signal",
+            [Force::new(0.0), Force::new(0.0), Force::new(0.0)],
+        )));
+        model
+            .signals
+            .push(PhysicalSignal::Moment(test_vector_signal(
+                "wrench_moment.signal",
+                [Moment::new(0.0), Moment::new(0.0), Moment::new(4.0)],
+            )));
+        let wrench_force = test_action(
+            "wrench_force",
+            "wrench_axis_region",
+            "wrench_force.signal",
+            ExcitationDistribution::PreserveResultant,
+            ExcitationAction::Force,
+            Some("wrench"),
+        );
+        let wrench_moment = test_action(
+            "wrench_moment",
+            "wrench_axis_region",
+            "wrench_moment.signal",
+            ExcitationDistribution::PreserveResultant,
+            ExcitationAction::Moment,
+            Some("wrench"),
+        );
+        model.excitations.extend([wrench_force, wrench_moment]);
+        model.excitation_cases = vec![ExcitationCase {
+            case_id: ExcitationCaseId("wrench.case".to_string()),
+            action_ids: vec![
+                ExcitationId("wrench_force".to_string()),
+                ExcitationId("wrench_moment".to_string()),
+            ],
+            activation: ExcitationCaseActivation::Always,
         }];
         model
+    }
+
+    fn replace_test_excitation(
+        model: &mut AnalysisModel,
+        signal: PhysicalSignal,
+        action: ExcitationAction,
+    ) {
+        let id = action.excitation().excitation_id.0.clone();
+        model.signals = vec![signal];
+        model.excitations = vec![action];
+        model.excitation_cases = vec![test_case(&id)];
+    }
+
+    fn test_action(
+        id: &str,
+        region_id: &str,
+        signal_id: &str,
+        distribution: ExcitationDistribution,
+        wrap: fn(AnalysisExcitation) -> ExcitationAction,
+        combination_group: Option<&str>,
+    ) -> ExcitationAction {
+        let mut action = wrap(AnalysisExcitation {
+            excitation_id: ExcitationId(id.to_string()),
+            target: ExcitationTarget::Region(
+                if matches!(distribution, ExcitationDistribution::IntensityPerVolume) {
+                    RegionTarget::volume(region_id)
+                } else {
+                    RegionTarget::boundary(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(region_id),
+                    )
+                },
+            ),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId(signal_id.to_string()),
+            active_step_ids: Vec::new(),
+            combination_group: combination_group.map(str::to_string),
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1.0e-10,
+            },
+        });
+        if matches!(action, ExcitationAction::Moment(_)) {
+            action.excitation_mut().projection.preserve_moment = true;
+        }
+        action
+    }
+
+    fn test_case(id: &str) -> ExcitationCase {
+        ExcitationCase {
+            case_id: ExcitationCaseId(format!("{id}.case")),
+            action_ids: vec![ExcitationId(id.to_string())],
+            activation: ExcitationCaseActivation::Always,
+        }
+    }
+
+    fn test_vector_signal<Q>(id: &str, values: [Q; 3]) -> Signal<Q> {
+        test_signal(id, SignalShape::Vector3, SignalValue::Vector3(values))
+    }
+
+    fn test_scalar_signal<Q>(id: &str, value: Q) -> Signal<Q> {
+        test_signal(id, SignalShape::Scalar, SignalValue::Scalar(value))
+    }
+
+    fn test_signal<Q>(id: &str, shape: SignalShape, value: SignalValue<Q>) -> Signal<Q> {
+        Signal {
+            signal_id: SignalId(id.to_string()),
+            shape,
+            frame: Some(CoordinateFrame::Global),
+            representation: SignalRepresentation::Constant(value),
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: None,
+                max_relative_error: None,
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+            provenance: SignalProvenance::Authored,
+        }
     }
 
     fn simple_render_topology() -> AnalysisRenderTopology {
         AnalysisRenderTopology {
             schema_version: "analysis_render_topology/v1".to_string(),
             source: crate::analysis::contracts::AnalysisRenderTopologySource::SolverPrep,
+            volume_element_count: 1,
             meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
                 mesh_id: "analysis_mesh".to_string(),
                 vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -2391,6 +2651,7 @@ mod tests {
         AnalysisRenderTopology {
             schema_version: "analysis_render_topology/v1".to_string(),
             source: crate::analysis::contracts::AnalysisRenderTopologySource::AnalysisMesh,
+            volume_element_count: 1,
             meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
                 mesh_id: "analysis_mesh".to_string(),
                 vertices: vec![
@@ -2612,7 +2873,7 @@ mod tests {
     #[test]
     fn auto_layered_result_scales_geometry_context_to_solver_meters() {
         let mut geometry =
-            simple_geometry_asset_with_units(runmat_geometry_core::UnitSystem::Millimeter);
+            simple_geometry_asset_with_units(runmat_geometry_core::LengthUnit::Millimeter);
         geometry.surface_meshes[0].vertices =
             vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 1000.0, 0.0]];
         let topology = simple_render_topology();
@@ -2660,6 +2921,10 @@ mod tests {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
                 "structural.von_mises",
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
                 vec![3],
                 vec![10.0, 20.0, 30.0],
             )],
@@ -2695,6 +2960,10 @@ mod tests {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
                 "structural.von_mises",
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
                 vec![3],
                 vec![10.0, 20.0, 30.0],
             )],
@@ -2745,6 +3014,10 @@ mod tests {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
                 "structural.displacement",
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                ),
                 vec![4, 3],
                 vec![
                     1.0, 0.0, 0.0, //
@@ -2816,6 +3089,10 @@ mod tests {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
                 "structural.von_mises",
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
                 vec![3],
                 vec![10.0, 20.0, 30.0],
             )],
@@ -2843,13 +3120,15 @@ mod tests {
 
     #[test]
     fn mesh_result_figures_include_authored_boundary_region_figure() {
+        let loaded_region = runmat_meshing_core::fixtures::fixture_face("loaded");
+        let fixed_region = runmat_meshing_core::fixtures::fixture_face("fixed");
         let run = simple_run_result(Vec::new(), {
             let mut topology = mapped_render_topology(
                 vec![Some(0), Some(1), Some(2), Some(3)],
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "loaded".to_string(),
+                region_id: loaded_region.clone(),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
@@ -2869,20 +3148,19 @@ mod tests {
 
         assert_eq!(figures.len(), 1);
         assert_eq!(figures[0].title, "FEA boundary regions");
-        assert!(figures[0]
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("authored constraint region 'fixed'")));
+        assert!(figures[0].warnings.iter().any(
+            |warning| warning.contains(&format!("authored constraint region '{fixed_region}'"))
+        ));
         assert!(!figures[0]
             .warnings
             .iter()
             .any(|warning| warning.contains("volume_only")));
         let plot = analysis_mesh_plot(&figures[0].figure);
-        assert_eq!(plot.highlighted_region_id(), Some("loaded"));
+        assert_eq!(plot.highlighted_region_id(), Some(loaded_region.as_str()));
         assert_eq!(
             plot.region_for_triangle(1)
                 .map(|region| region.region_id.as_str()),
-            Some("loaded")
+            Some(loaded_region.as_str())
         );
         let vector_field = plot
             .vector_field()
@@ -2903,7 +3181,7 @@ mod tests {
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "axis_region".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("axis_region"),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
@@ -2942,7 +3220,7 @@ mod tests {
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "wrench_axis_region".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("wrench_axis_region"),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
@@ -2981,7 +3259,7 @@ mod tests {
                 vec![Some(0), Some(0), Some(0)],
             );
             topology.meshes[0].regions = vec![crate::analysis::contracts::AnalysisRenderRegion {
-                region_id: "pressurized".to_string(),
+                region_id: runmat_meshing_core::fixtures::fixture_face("pressurized"),
                 label: None,
                 tag: Some("boundary".to_string()),
                 triangle_ranges: vec![crate::analysis::contracts::AnalysisRenderTriangleRange {
@@ -3014,7 +3292,15 @@ mod tests {
 
     #[test]
     fn field_topology_warning_reports_solver_mesh_mismatch() {
-        let field = AnalysisField::host_f64("structural.von_mises", vec![1], vec![42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![1],
+            vec![42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 4,
@@ -3035,7 +3321,15 @@ mod tests {
 
     #[test]
     fn field_topology_warning_accepts_mapped_solver_element_fields() {
-        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![2],
+            vec![10.0, 42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3051,6 +3345,7 @@ mod tests {
     fn field_topology_warning_accepts_mapped_solver_node_fields() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3073,6 +3368,7 @@ mod tests {
     fn field_topology_warning_rejects_unmapped_solver_vertices() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3099,6 +3395,7 @@ mod tests {
     fn field_topology_warning_rejects_stale_solver_vertex_indices() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3123,7 +3420,15 @@ mod tests {
 
     #[test]
     fn field_topology_warning_rejects_unmapped_solver_triangles() {
-        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![2],
+            vec![10.0, 42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3141,7 +3446,15 @@ mod tests {
 
     #[test]
     fn scalar_overlay_projects_element_values_to_boundary_triangles() {
-        let field = AnalysisField::host_f64("structural.von_mises", vec![2], vec![10.0, 42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![2],
+            vec![10.0, 42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3159,8 +3472,15 @@ mod tests {
 
     #[test]
     fn scalar_overlay_prefers_solver_element_mapping_when_counts_match() {
-        let field =
-            AnalysisField::host_f64("structural.von_mises", vec![3], vec![10.0, 20.0, 30.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![3],
+            vec![10.0, 20.0, 30.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3181,16 +3501,37 @@ mod tests {
         let fields = vec![
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::ReactionForce,
+                    FieldLocation::Node,
+                ),
                 vec![2, 3],
                 vec![3.0, 4.0, 0.0, 0.0, 0.0, 12.0],
             ),
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::ReactionMoment,
+                    FieldLocation::Node,
+                ),
                 vec![1, 3],
                 vec![0.0, 0.0, 2.0],
             ),
-            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, vec![1], vec![7.5]),
-            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, vec![1], vec![0.001]),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::StrainEnergy,
+                    FieldLocation::Global,
+                ),
+                vec![1],
+                vec![7.5],
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+                AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+                vec![1],
+                vec![0.001],
+            ),
         ];
 
         assert_eq!(
@@ -3220,6 +3561,7 @@ mod tests {
     fn scalar_overlay_projects_node_values_to_render_vertices() {
         let field = AnalysisField::host_f64(
             "structural.nodal_von_mises",
+            AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
             vec![4],
             vec![1.0, 2.0, 3.0, 4.0],
         );
@@ -3240,8 +3582,12 @@ mod tests {
 
     #[test]
     fn scalar_overlay_prefers_solver_node_mapping_when_counts_match() {
-        let field =
-            AnalysisField::host_f64("structural.nodal_von_mises", vec![3], vec![1.0, 2.0, 3.0]);
+        let field = AnalysisField::host_f64(
+            "structural.nodal_von_mises",
+            AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
+            vec![3],
+            vec![1.0, 2.0, 3.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 3,
@@ -3261,6 +3607,7 @@ mod tests {
     fn scalar_overlay_prefers_solver_node_mapping_for_vector_magnitude_when_counts_match() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3287,6 +3634,7 @@ mod tests {
     fn vector_overlay_projects_node_values_to_render_vertices() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![4, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3321,6 +3669,7 @@ mod tests {
     fn vector_overlay_prefers_solver_node_mapping_when_counts_match() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3354,6 +3703,7 @@ mod tests {
     fn deformation_overlay_projects_node_values_to_render_vertices() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![4, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3398,6 +3748,7 @@ mod tests {
     fn deformation_overlay_prefers_solver_node_mapping_when_counts_match() {
         let field = AnalysisField::host_f64(
             "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //

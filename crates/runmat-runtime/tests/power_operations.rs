@@ -126,10 +126,32 @@ fn test_matrix_power_non_square_fails() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn test_matrix_power_negative_fails() {
+fn test_matrix_power_negative_inverts_floating_and_rejects_integer_storage() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let result = power(
         &Value::Tensor(matrix),
+        &Value::Int(runmat_value::IntValue::I32(-1)),
+    )
+    .expect("negative floating matrix power uses the inverse");
+    let Value::Tensor(inverse) = result else {
+        panic!("matrix inverse must preserve its tensor carrier");
+    };
+    assert_eq!(inverse.shape(), &[2, 2]);
+    assert_eq!(inverse.numeric_dtype(), runmat_value::NumericDType::F64);
+    for (actual, expected) in inverse
+        .materialize_f64()
+        .into_iter()
+        .zip([-2.0, 1.0, 1.5, -0.5])
+    {
+        assert!((actual - expected).abs() < 1e-12);
+    }
+    let integer = Tensor::new_integer(
+        runmat_value::IntegerStorage::U8(vec![1, 2, 3, 4]),
+        vec![2, 2],
+    )
+    .unwrap();
+    let result = power(
+        &Value::Tensor(integer),
         &Value::Int(runmat_value::IntValue::I32(-1)),
     );
     assert!(result.is_err());
@@ -168,7 +190,7 @@ fn test_elementwise_vs_matrix_power() {
 #[test]
 fn test_unsupported_power_combinations() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let string_val = Value::String("test".to_string());
+    let string_val = Value::String("test".to_string().into());
 
     // String^matrix should fail
     let result = power(&string_val, &Value::Tensor(matrix.clone()));

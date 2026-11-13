@@ -1,0 +1,185 @@
+---
+description: Reference for RunMat assemblies. Place parts and sub-assemblies as occurrences, set their configurations and placements, and join them with connectors and mates, including revolute, slider, gear, rack-and-pinion, screw, pin-slot, cam, width, symmetric, path, linear coupler, hinge and universal joint mates.
+keywords: [assembly, occurrences, mates, mate connectors, revolute, slider, cylindrical, planar, ball, gear mate, rack and pinion, screw mate, pin slot, cam mate, width mate, symmetric mate, path mate, linear coupler, hinge, universal joint, kinematics, degrees of freedom]
+---
+# Occurrences and mates
+
+An assembly places designs as occurrences and positions them with placements and mates. The mate solver moves floating occurrences until every mate holds, reports the degrees of freedom left, and names mates that conflict or repeat each other.
+
+## A hinge
+
+The base plate is fixed where it is placed. The arm floats, and a revolute mate turns it about the pivot by the `opening` input.
+
+```part file=plate.part
+runmat 0.7
+std 1
+
+part plate {
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])
+        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])
+        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s, distance = 10 mm)
+    output plate = { body = feature.body.body }
+}
+```
+
+```part file=arm.part
+runmat 0.7
+std 1
+
+part arm {
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, -5 mm], end = [100 mm, -5 mm])
+        l2 = line(start = [100 mm, -5 mm], end = [100 mm, 5 mm])
+        l3 = line(start = [100 mm, 5 mm], end = [0 mm, 5 mm])
+        l4 = line(start = [0 mm, 5 mm], end = [0 mm, -5 mm])
+    }
+    feature body = extrude(profile = sketch.s, distance = 4 mm)
+    output arm = { body = feature.body.body }
+}
+```
+
+```assembly file=hinge.assembly
+runmat 0.7
+std 1
+
+assembly hinge {
+    input opening : angle = 30 deg
+
+    use part plate as base
+    use part arm as arm {
+        fixed = false
+        placement = { placement = offset, offset = { translation = [40 mm, 25 mm, 10 mm] } }
+    }
+
+    connector pivot = { occurrence = [{ name = base }], at = [40 mm, 25 mm, 10 mm] }
+    connector eye = { occurrence = [{ name = arm }] }
+
+    mate hinge = { kind = { mate = revolute, angle = { target = exact, value = input.opening } }, a = pivot, b = eye }
+}
+```
+
+## Occurrences
+
+`use part <design> as <occurrence> { … }` (or `use assembly …`) places a design. The design is found by name through the folder scope; see [Folders, modules and use](/docs/design-language/modules). The block holds the occurrence's fields:
+
+| Field | Meaning |
+|---|---|
+| `placement` | Where it goes: `{ placement = offset, offset = { translation = [x, y, z], rotation = … } }`, or `{ placement = attach, own = …, to = …, offset = …, flip = true }` to put one of its frames on a frame of the assembly or of an interface part. With no placement it sits at the assembly origin. |
+| `fixed` | `true` (the default): the placement is final. `false`: the placement is a starting pose and mates move it. |
+| `configuration` | `{ select = named, name = long }`, or input values: `{ select = inputs, values = { length = input.length } }`, optionally on a `base` configuration. Values may read the assembly's own inputs and lets. |
+| `flexible` | A sub-assembly whose own occurrences join this assembly's mate solve, so a linkage inside it can move. |
+| `when` | A condition on the assembly's options; alternatives of one occurrence share a name. |
+| `required` | Some alternative of this name must be present in every legal configuration. |
+| `material` | A material override of the design's own material. |
+| `suppressed` | Leaves the occurrence out. |
+
+Rotations are `{ rotation = axis_angle, axis = [1, 0, 0], angle = 90 deg }` or Euler angles. A pattern or mirror makes keyed copies of occurrences; see [Patterns, mirrors and fasteners](/docs/mcad/assembly/patterns-and-mirrors).
+
+## Connectors
+
+A connector is a frame on an occurrence (or on the assembly itself) that mates join. Its Z axis is the joint axis.
+
+| Field | Meaning |
+|---|---|
+| `occurrence` | The occurrence path: `[{ name = base }]`; empty for the assembly's own frame. |
+| `anchor` | `{ anchor = origin }` (the design's origin, and the default), `{ anchor = published, name = <frame> }` (a frame the design publishes, such as a `mate_connector` feature), or `{ anchor = explicit, offset = { translation = …, rotation = … } }`. |
+| `at` | The connector's origin in the anchor's coordinates: `at = [40 mm, 25 mm, 10 mm]`. |
+| `z` | The connector's Z axis, such as a surface normal: `z = [0, 0, -1]`. The anchor's Z when left out. |
+| `x` | The direction the connector's X axis leans toward (made square to `z`), such as a straight member's axis. The anchor's X when left out. |
+| `offset` | A further offset in the anchor's axes, after `at`, `z` and `x`. |
+| `flip` | Turns the frame half a turn about its X axis, so two faces meet face to face. |
+
+`at`, `z` and `x` sit on the connector itself, so a connector at a point and normal is one line: `connector mount = { occurrence = [{ name = body_bottom }], at = [-40 mm, 30 mm, 8.2 mm], z = [0, 0.11, -0.99], x = [1, 0, 0] }`.
+
+Publishing frames from the parts (`mate_connector` features) keeps an assembly's connectors on the geometry as the parts change.
+
+### Seating a part on a curved body
+
+A part that mounts to a curved surface, such as a clamp foot on a lofted lower shell, needs a connector at a point on that surface. Work in three steps.
+
+1. **Find the body's own frame.** `design.inspect` on the body's part with the `mass` section returns its `extent_mm` (the box around it) and its `principal_axes`, smallest moment first. For a long body the first principal axis is its long axis, so a member that runs along the body is parallel to it.
+2. **Cast every ray in one call.** The `surface` section takes `rays`, a list; each ray has a start point outside the body, a direction and optionally the occurrences it is limited to. The answer lists each ray's hits, nearest first, with the face, the point in millimetres and the outward normal there.
+
+   ```json
+   { "path": "/drone.assembly", "sections": ["surface"],
+     "rays": [{ "from": [-40, 30, -60], "direction": [0, 0, 1], "occurrences": ["body_bottom"] },
+              { "from": [40, 30, -60], "direction": [0, 0, 1], "occurrences": ["body_bottom"] }] }
+   ```
+
+   The first hit with `"entering": true` is the underside above that point. A flat foot touches a curved surface first at its lowest point, so cast a ray at each corner of each foot and take the lowest hit.
+3. **Write the connectors.** Put the body's connector at the point with `at`, and fasten the foot's connector to it. Leave a standoff of about 0.5 mm below the lowest hit, or follow the surface: trim the foot's top with a `loft` in `mode = cut` through the same section sketches the body's loft uses, so the foot takes the body's shape.
+
+A part seated on its own, such as a bracket, takes the surface's normal as its `z`. A straight member held at several stations, such as a tube in two clamps, stays straight: leave out `z` (or give every station the same `z`) and give every station the member's axis as `x`, so all its clamps share one orientation and take only their height from the rays. Fasten the member to one clamp only and each clamp to the body; a second fasten between the member and another clamp over-constrains it, and the mates don't converge.
+
+After the change, check interference only for the new and moved occurrences with `changed` (see [Interference and clearance](/docs/mcad/evaluate#interference-and-clearance)).
+
+## Mates
+
+`mate <name> = { kind = { mate = <kind>, … }, a = <connector>, b = <connector> }` joins two connectors. Joint mates take an optional drive (`{ target = exact, value = 30 deg }`) or a range of motion (`{ target = range, min = 0 deg, max = 90 deg }`).
+
+| Kind | Leaves free | Parameters |
+|---|---|---|
+| `fasten` | nothing | |
+| `revolute` | rotation about Z | `angle` |
+| `slider` | translation along Z | `distance` |
+| `cylindrical` | rotation about and translation along Z | `angle`, `distance` |
+| `planar` | motion in the XY plane | |
+| `ball` | all rotation | |
+| `parallel` | translation; the Z axes stay parallel | |
+| `tangent` | a plane on a sphere or cylinder | `kind = { tangent = plane_sphere, radius }` or `plane_cylinder` |
+| `distance` | everything but one distance | `measure = point_point` or `plane_point`, `target` |
+| `angle` | everything but one angle | `measure = about_z` or `between_z`, `target` |
+| `pin_slot` | a pin (`a`, its Z the pin axis) sliding along and turning in a slot (`b`, along its X) | |
+| `screw` | `b` turns about `a`'s Z and advances `lead` per turn | `lead` |
+| `gear` | `b` turns −1/`ratio` of `a`'s turn about its own axis | `ratio` (`b`'s teeth over `a`'s) |
+| `rack_pinion` | a rack (`b`, along its X) moves `travel` per turn of the pinion (`a`) | `travel` (π × the pitch diameter) |
+| `cam` | a follower point (`b`) stays on a cam's published profile (`a`, the closed path seen along its Z) as the cam turns; the follower may sit anywhere along the cam's Z | `profile` |
+| `width` | a tab centred in a groove: the mid-plane of `b` and `b2` (the tab's faces) lies on the mid-plane of `a` and `a2` (the groove's faces); the tab still slides and turns in that plane | `a2`, `b2` |
+| `symmetric` | `a`'s and `b`'s origins mirror each other in `plane`'s XY plane | `plane` |
+| `path` | `b`'s origin rides along a path that `a`'s part publishes; an open path runs on straight past its ends | `path` |
+| `linear_coupler` | `b` moves along its Z by `ratio` times `a`'s travel along its Z | `ratio` |
+| `hinge` | rotation about Z: the Z axes coincide (concentric) and `b`'s origin lies on `a`'s XY plane (coincident) | `angle` |
+| `universal_joint` | `b`'s shaft (its Z) follows `a`'s turn through a cross whose arms run along each connector's X; with `joint_point = true` the two origins also meet at the joint's centre | `joint_point` |
+
+Gear, rack-and-pinion and linear coupler mates couple motion measured from the pose where the solve starts, so the authored placements set the phase.
+
+Width's connectors come in pairs, each pair on one component. A pair's mid-plane sits half way between its two connector origins, square to the first connector's Z. Symmetric's plane may be on a third component, and its two mirrored connectors may share one.
+
+A universal joint without its joint point couples only the turns, so give each shaft its own bearing (a `revolute` or `hinge`) with the two axes meeting at the joint. The output shaft then turns by the joint's law: for an input turned θ and shafts at angle β, the output turns φ with tan φ = tan θ / cos β. Start the two arms (the connectors' X axes) square to each other.
+
+A path mate and a cam read a path the part publishes: an edge region or a set of edges, such as `publish rail = region(region = rail)`. In a part, the Publish command's Path target publishes picked edges this way. The edges join end to end into one path; a cam's profile goes once round the cam's axis.
+
+```assembly fragment
+mate drive = { kind = { mate = revolute, angle = { target = exact, value = 90 deg } }, a = base_pin, b = pinion_eye }
+mate slide = { kind = { mate = slider, distance = { target = range, min = 0 mm, max = 120 mm } }, a = guide, b = rack_rail }
+mate mesh = { kind = { mate = gear, ratio = 2 }, a = gear_a, b = gear_b }
+mate rack = { kind = { mate = rack_pinion, travel = 100 mm }, a = pinion_eye, b = rack_teeth }
+mate nut = { kind = { mate = screw, lead = 2 mm }, a = shaft_axis, b = nut_eye }
+mate follower = { kind = { mate = pin_slot }, a = link_pin, b = base_slot }
+mate gap = { kind = { mate = distance, measure = plane_point, target = { target = exact, value = 5 mm } }, a = face_c, b = tip_c }
+```
+
+```assembly fragment
+mate lift = { kind = { mate = cam, profile = lobe }, a = cam_frame, b = follower_tip }
+mate centre = { kind = { mate = width, a2 = groove_far, b2 = tab_far }, a = groove_near, b = tab_near }
+mate mirror = { kind = { mate = symmetric, plane = mid_plane }, a = left_pad, b = right_pad }
+mate ride = { kind = { mate = path, path = rail }, a = track_frame, b = car_pin }
+mate couple = { kind = { mate = linear_coupler, ratio = 2 }, a = drive_rail, b = output_rail }
+mate lid = { kind = { mate = hinge, angle = { target = range, min = 0 deg, max = 110 deg } }, a = box_hinge, b = lid_hinge }
+mate cross = { kind = { mate = universal_joint }, a = input_yoke, b = output_yoke }
+```
+
+## What the solve reports
+
+| Code | Meaning |
+|---|---|
+| `cad.asm.under_defined` | an occurrence still has free directions; the occurrence's degrees of freedom are listed |
+| `cad.asm.mate_conflict` | a mate contradicts others, which it names |
+| `cad.asm.mate_redundant` | a mate is implied by others |
+| `cad.asm.limit_active` | a mate rests on its range limit |
+| `cad.asm.mate_not_converged` | the solve could not satisfy the mates around one |
+| `cad.asm.unknown_connector` | a mate uses a connector the assembly does not declare |

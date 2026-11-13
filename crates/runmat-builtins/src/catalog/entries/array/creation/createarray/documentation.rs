@@ -1,0 +1,33 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("createArray"),
+    slug: Some("createarray"),
+    summary: "Create an array of a specified class and value.",
+    description: "`createArray` accepts dimensions first, followed by an optional class name and `Like` or `FillValue` name-value arguments. Integer dimensions are structural and exact. Integer FillValue and Like forms preserve authoritative class, complexity, and resident storage. The result is complex when either Like or FillValue is complex.",
+    keywords: &["createArray", "FillValue", "Like", "constant", "array"],
+    related: &[],
+    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["`createArray` returns scalar double zero.",
+"`createArray(n)` creates an n-by-n array and `createArray(m,n,...)` creates the requested shape.",
+"Negative dimensions are treated as zero.",
+"A trailing class name selects the output class.",
+"FillValue selects the repeated scalar value and preserves its class unless classname or Like requests assignment conversion. Without Like, a GPU-resident FillValue contributes residency and owning provider but does not override an explicit classname.",
+"Like preserves numeric class and GPU residency; classname and Like cannot be combined.",
+"If either Like or FillValue is complex, the output is complex. A real single Like therefore produces complex single for a complex FillValue, while a real double Like produces complex double."] },
+BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &["Like and GPU FillValue forms use the source handle's owning provider for fill and fallback upload paths; native real and paired-complex integer storage remains exact and the output remains on that owner/device."] }],
+    examples: &[BuiltinExample { id: "example-1", title: "Integer array", program: "A = createArray(2,3,'uint64',FillValue=uint64(7));", display_output: Some("2-by-3 uint64 array of sevens"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(A), [2 3])); assert(strcmp(class(A), 'uint64')); assert(all(A(:) == uint64(7)));" } },
+BuiltinExample { id: "example-2", title: "Prototype", program: "A = createArray(2,3,Like=uint16(1),FillValue=8);", display_output: Some("2-by-3 uint16 array"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Succeeds },
+BuiltinExample { id: "example-3", title: "Complex FillValue with a real prototype", program: "A = createArray(2,Like=single(0),FillValue=1+2i);", display_output: Some("2-by-2 complex single array"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Succeeds }],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq { question: "How is createArray different from fill?", answer: "createArray constructs arrays; fill creates 2-D Patch graphics." }],
+    links: &[BuiltinDocumentationLink { label: "fill", target: BuiltinDocumentationLinkTarget::Documentation("./fill") },
+BuiltinDocumentationLink { label: "zeros", target: BuiltinDocumentationLinkTarget::Documentation("./zeros") },
+BuiltinDocumentationLink { label: "ones", target: BuiltinDocumentationLinkTarget::Documentation("./ones") }],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/fill.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/fill.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Runtime unit tests", location: "builtins::array::creation::fill::tests" },
+    ], notes: &[] },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

@@ -7,13 +7,12 @@ use std::mem::size_of;
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::NULL_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, NULL_ERROR_INTERNAL, NULL_ERROR_INVALID_ARGUMENT,
+    NULL_ERROR_INVALID_INPUT, NULL_ERROR_PROVIDER_OWNERSHIP, NULL_INTEGER_MATRIX_EXTENSION,
+    NULL_LOGICAL_MATRIX_EXTENSION, NULL_RESIDENT_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -30,165 +29,9 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::solve::rref::{
     default_complex_tolerance, default_real_tolerance, rref_complex_impl, rref_real_impl,
 };
-use crate::builtins::math::linalg::type_resolvers::null_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "null";
-
-const INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "null-integer-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "null with a native-class integer matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:NullIntegerMatrixExtension"),
-};
-const LOGICAL_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "null-logical-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "null with a logical matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:NullLogicalMatrixExtension"),
-};
-const RESIDENT_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "null-resident-tolerance",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "null with an explicit gpuArray tolerance is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:NullResidentToleranceExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_MATRIX_EXTENSION,
-    LOGICAL_MATRIX_EXTENSION,
-    RESIDENT_TOLERANCE_EXTENSION,
-];
-
-const INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The compatibility target documents single and double A; RunMat gates integer matrices and checks the binary64 null-space boundary before materialization.",
-}];
-const INTEGER_TOLERANCE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "tol",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented real numeric scalar tolerance accepts native integer scalars and converts only when exactly representable as binary64.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Z = null(integer_A, ___)", inputs: &INTEGER_MATRIX_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer A is a RunMat-only extension; exact host or resident values enter double SVD/RREF computation and return double bases." },
-    BuiltinIntegerCapabilityDescriptor { form: "Z = null(A, integer_tol)", inputs: &INTEGER_TOLERANCE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer tolerance values are parsed exactly before the floating rank threshold; resident tolerance controls are a separately gated extension." },
-];
-
-const NULL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Basis for the null space of A.",
-}];
-
-const NULL_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const NULL_INPUTS_A_TOL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Rank tolerance.",
-    },
-];
-
-const NULL_INPUTS_A_OPTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "`\"rational\"` requests a row-reduction basis; `\"r\"` is a legacy alias.",
-    },
-];
-
-const NULL_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "Z = null(A)",
-        inputs: &NULL_INPUTS_A,
-        outputs: &NULL_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = null(A, tol)",
-        inputs: &NULL_INPUTS_A_TOL,
-        outputs: &NULL_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = null(A, \"rational\")",
-        inputs: &NULL_INPUTS_A_OPTION,
-        outputs: &NULL_OUTPUT,
-    },
-];
-
-const NULL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:null:InvalidArgument"),
-    when: "Optional tolerance or basis option is malformed or outside accepted bounds.",
-    message: "null: invalid argument",
-};
-
-const NULL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.INVALID_INPUT",
-    identifier: Some("RunMat:null:InvalidInput"),
-    when: "Input shape/type cannot be processed for null-space evaluation.",
-    message: "null: invalid input",
-};
-
-const NULL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.INTERNAL",
-    identifier: Some("RunMat:null:Internal"),
-    when: "Runtime fails while computing the null space or executing fallback/upload paths.",
-    message: "null: internal runtime failure",
-};
-const NULL_ERROR_PROVIDER_OWNERSHIP: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NULL.PROVIDER_OWNERSHIP_MISMATCH",
-    identifier: Some("RunMat:gpu:ProviderOwnershipMismatch"),
-    when: "A resident input has no exact owning provider.",
-    message: "null: no acceleration provider owns the input handle",
-};
-
-const NULL_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    NULL_ERROR_INVALID_ARGUMENT,
-    NULL_ERROR_INVALID_INPUT,
-    NULL_ERROR_INTERNAL,
-    NULL_ERROR_PROVIDER_OWNERSHIP,
-];
-
-pub const NULL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NULL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NULL_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::null")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -270,19 +113,12 @@ enum NullMode {
 
 #[runtime_builtin(
     name = "null",
-    category = "math/linalg/solve",
-    summary = "Compute a basis for a matrix null space.",
-    keywords = "null,null space,kernel,svd,rref,rational,gpu",
-    accel = "sink",
-    type_resolver(null_type),
-    descriptor(crate::builtins::math::linalg::solve::null::NULL_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::null::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::solve::null::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::null"
 )]
-async fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn null_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     ensure_null_input_compatibility(&value)?;
-    let mode = parse_null_mode(&rest).await?;
+    let mode = parse_null_mode(rest.view()).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     if crate::builtins::common::validation::value_contains_native_integer_class(&value)
         && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
@@ -308,17 +144,25 @@ async fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 fn ensure_null_input_compatibility(value: &Value) -> BuiltinResult<()> {
     if crate::builtins::common::validation::value_contains_native_integer_class(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_MATRIX_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &NULL_INTEGER_MATRIX_EXTENSION,
+            NAME,
+        )?;
     }
     if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
     {
-        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_MATRIX_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &NULL_LOGICAL_MATRIX_EXTENSION,
+            NAME,
+        )?;
     }
     Ok(())
 }
 
-async fn parse_null_mode(args: &[Value]) -> Result<NullMode, RuntimeError> {
+async fn parse_null_mode(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Result<NullMode, RuntimeError> {
     match args.len() {
         0 => Ok(NullMode::Orthonormal { tolerance: None }),
         1 => {
@@ -334,7 +178,7 @@ async fn parse_null_mode(args: &[Value]) -> Result<NullMode, RuntimeError> {
             }
             if crate::builtins::common::validation::value_contains_explicit_gpu(&args[0]) {
                 crate::compatibility::ensure_builtin_extension_enabled(
-                    &RESIDENT_TOLERANCE_EXTENSION,
+                    &NULL_RESIDENT_TOLERANCE_EXTENSION,
                     NAME,
                 )?;
             }
@@ -348,7 +192,12 @@ async fn parse_null_mode(args: &[Value]) -> Result<NullMode, RuntimeError> {
                 )));
             }
             let gathered = crate::dispatcher::gather_if_needed_async(&args[0]).await?;
-            let tolerance = parse_tolerance_arg(NAME, &[gathered]).map_err(argument_error)?;
+            let gathered = [gathered];
+            let tolerance = parse_tolerance_arg(
+                NAME,
+                crate::call::FunctionArgumentView::from_slice(&gathered),
+            )
+            .map_err(argument_error)?;
             Ok(NullMode::Orthonormal { tolerance })
         }
         _ => Err(argument_error(format!("{NAME}: too many input arguments"))),
@@ -370,7 +219,7 @@ async fn null_gpu(handle: GpuTensorHandle, mode: NullMode) -> BuiltinResult<Valu
             "{NAME}: the rational basis option is not supported for gpuArray input"
         )));
     }
-    let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+    let owner = gpu_helpers::require_resident_compute_owner(&handle, || {
         build_runtime_error(format!(
             "{NAME}: no acceleration provider owns the input handle"
         ))
@@ -383,13 +232,12 @@ async fn null_gpu(handle: GpuTensorHandle, mode: NullMode) -> BuiltinResult<Valu
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
     })?;
-    let source_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered_result = gpu_helpers::gather_tensor_async(&handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &source_metadata);
     let gathered = gathered_result.map_err(map_control_flow)?;
     let basis = null_real_tensor(&gathered, mode)?;
     if gpu_helpers::exact_provider_for_handle(&handle)
-        .is_none_or(|candidate| !std::ptr::eq(candidate, owner))
+        .is_none_or(|candidate| !runmat_accelerate_api::same_provider_instance(candidate, owner))
     {
         return Err(internal_error(format!(
             "{NAME}: input provider ownership changed during fallback"
@@ -432,7 +280,7 @@ fn null_complex_tensor(matrix: &ComplexTensor, mode: NullMode) -> BuiltinResult<
 }
 
 fn null_real_orthonormal_tensor(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Tensor> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(input_error)?;
     if cols == 0 {
         return real_basis_tensor(matrix, Vec::new(), vec![0, 0]);
     }
@@ -449,7 +297,7 @@ fn null_complex_orthonormal_tensor(
     matrix: &ComplexTensor,
     tol: Option<f64>,
 ) -> BuiltinResult<ComplexTensor> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(input_error)?;
     if cols == 0 {
         return complex_basis_tensor(matrix, Vec::new(), vec![0, 0]);
     }
@@ -475,7 +323,7 @@ fn null_complex_orthonormal_tensor(
 }
 
 fn null_real_row_reduction_tensor(matrix: &Tensor) -> BuiltinResult<Tensor> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(input_error)?;
     let values = tensor::tensor_values_f64_cow(matrix);
     let tolerance = default_real_tolerance(&values, rows, cols);
     let (basis, basis_cols) = real_row_reduction_basis(values.into_owned(), rows, cols, tolerance)?;
@@ -483,7 +331,7 @@ fn null_real_row_reduction_tensor(matrix: &Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn null_complex_row_reduction_tensor(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
-    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(input_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(input_error)?;
     let tolerance = default_complex_tolerance(&matrix.materialize_f64(), rows, cols);
     let data: Vec<Complex64> = matrix
         .materialize_f64()
@@ -519,7 +367,7 @@ fn complex_basis_tensor(
                 .map(|(real, imag)| (real as f32, imag as f32))
                 .collect(),
         ),
-        _ => ComplexStorage::F64(data),
+        _ => ComplexStorage::F64(data.into()),
     };
     ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|error| internal_error(format!("{NAME}: {error}")))
@@ -872,7 +720,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CharArray, IntValue, IntegerStorage, StringArray};
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -900,18 +747,18 @@ pub(crate) mod tests {
     }
 
     fn assert_az_zero(a: &Tensor, z: &Tensor, tol: f64) {
-        assert_eq!(a.shape.len(), 2);
-        assert_eq!(z.shape.len(), 2);
-        assert_eq!(a.shape[1], z.shape[0], "inner dimension mismatch");
-        let rows = a.shape[0];
-        let inner = a.shape[1];
-        let cols = z.shape[1];
+        assert_eq!(a.shape().len(), 2);
+        assert_eq!(z.shape().len(), 2);
+        assert_eq!(a.shape()[1], z.shape()[0], "inner dimension mismatch");
+        let rows = a.shape()[0];
+        let inner = a.shape()[1];
+        let cols = z.shape()[1];
         for col in 0..cols {
             for row in 0..rows {
                 let mut sum = 0.0;
                 for k in 0..inner {
                     sum += a.materialize_f64()[row + k * rows]
-                        * z.materialize_f64()[k + col * z.shape[0]];
+                        * z.materialize_f64()[k + col * z.shape()[0]];
                 }
                 assert!(
                     sum.abs() <= tol,
@@ -922,18 +769,18 @@ pub(crate) mod tests {
     }
 
     fn assert_complex_az_zero(a: &ComplexTensor, z: &ComplexTensor, tol: f64) {
-        assert_eq!(a.shape.len(), 2);
-        assert_eq!(z.shape.len(), 2);
-        assert_eq!(a.shape[1], z.shape[0], "inner dimension mismatch");
-        let rows = a.shape[0];
-        let inner = a.shape[1];
-        let cols = z.shape[1];
+        assert_eq!(a.shape().len(), 2);
+        assert_eq!(z.shape().len(), 2);
+        assert_eq!(a.shape()[1], z.shape()[0], "inner dimension mismatch");
+        let rows = a.shape()[0];
+        let inner = a.shape()[1];
+        let cols = z.shape()[1];
         for col in 0..cols {
             for row in 0..rows {
                 let mut sum = Complex64::new(0.0, 0.0);
                 for k in 0..inner {
                     let lhs = a.materialize_f64()[row + k * rows];
-                    let rhs = z.materialize_f64()[k + col * z.shape[0]];
+                    let rhs = z.materialize_f64()[k + col * z.shape()[0]];
                     sum += Complex64::new(lhs.0, lhs.1) * Complex64::new(rhs.0, rhs.1);
                 }
                 assert!(
@@ -945,8 +792,8 @@ pub(crate) mod tests {
     }
 
     fn assert_columns_orthonormal(z: &Tensor, tol: f64) {
-        let rows = z.shape[0];
-        let cols = z.shape[1];
+        let rows = z.shape()[0];
+        let cols = z.shape()[1];
         for col in 0..cols {
             let norm = (0..rows)
                 .map(|row| {
@@ -968,8 +815,8 @@ pub(crate) mod tests {
     }
 
     fn assert_complex_columns_orthonormal(z: &ComplexTensor, tol: f64) {
-        let rows = z.shape[0];
-        let cols = z.shape[1];
+        let rows = z.shape()[0];
+        let cols = z.shape()[1];
         for col in 0..cols {
             let norm = (0..rows)
                 .map(|row| {
@@ -990,22 +837,6 @@ pub(crate) mod tests {
                 assert!(dot.norm() <= tol, "column dot {dot}");
             }
         }
-    }
-
-    #[test]
-    fn null_type_uses_input_column_count_and_unknown_nullity() {
-        let out = null_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(3), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(4), None])
-            }
-        );
     }
 
     #[test]
@@ -1035,7 +866,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(tensor), Vec::new()).expect("null");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 0]);
+                assert_eq!(out.shape(), [2, 0]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor basis, got {other:?}"),
@@ -1049,7 +880,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("null");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_az_zero(&tensor, &out, 1e-12);
                 assert_columns_orthonormal(&out, 1e-12);
             }
@@ -1064,7 +895,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("null");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_az_zero(&tensor, &out, 1e-12);
                 assert_columns_orthonormal(&out, 1e-12);
             }
@@ -1079,7 +910,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("null");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_az_zero(&tensor, &out, 1e-6);
                 assert_columns_orthonormal(&out, 1e-12);
                 assert!(out.materialize_f64()[0].abs() <= 1e-12);
@@ -1093,12 +924,12 @@ pub(crate) mod tests {
     #[test]
     fn null_row_reduction_option_returns_pivot_basis() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0, 3.0, 6.0], vec![2, 3]).unwrap();
-        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("r".chars().collect(), 1, 1).unwrap();
         let result = null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)])
             .expect("null rref basis");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), [3, 2]);
                 assert_close(
                     &out.materialize_f64(),
                     &[-2.0, 1.0, 0.0, -3.0, 0.0, 1.0],
@@ -1115,13 +946,13 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 2, 4]), vec![2, 2]).unwrap();
-        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("r".chars().collect(), 1, 1).unwrap();
 
         let result = null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)])
             .expect("null rref basis");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_close(&out.materialize_f64(), &[-2.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
@@ -1139,7 +970,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             error.identifier(),
-            INTEGER_MATRIX_EXTENSION.error_identifier
+            NULL_INTEGER_MATRIX_EXTENSION.error_identifier
         );
     }
 
@@ -1162,7 +993,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(matrix), Vec::new()).expect("single null");
 
         assert!(
-            matches!(result, Value::Tensor(ref basis) if basis.numeric_dtype() == NumericDType::F32 && basis.shape == vec![2, 1])
+            matches!(result, Value::Tensor(ref basis) if basis.numeric_dtype() == NumericDType::F32 && basis.shape() == [2, 1])
         );
     }
 
@@ -1175,7 +1006,7 @@ pub(crate) mod tests {
             .expect("null rref basis");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_close(&out.materialize_f64(), &[-2.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
@@ -1189,7 +1020,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(tensor), vec![Value::Num(1e-6)]).expect("null");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_close(&out.materialize_f64(), &[0.0, 1.0], 1e-12);
             }
             other => panic!("expected tensor basis, got {other:?}"),
@@ -1204,7 +1035,7 @@ pub(crate) mod tests {
             .expect("null with large tolerance");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_az_zero(&tensor, &out, 1e-12);
                 assert_columns_orthonormal(&out, 1e-12);
             }
@@ -1223,7 +1054,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::ComplexTensor(tensor.clone()), Vec::new()).expect("null");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_complex_az_zero(&tensor, &out, 1e-12);
                 assert_complex_columns_orthonormal(&out, 1e-12);
             }
@@ -1239,12 +1070,12 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("r".chars().collect(), 1, 1).unwrap();
         let result = null_builtin(Value::ComplexTensor(tensor), vec![Value::CharArray(chars)])
             .expect("null rref basis");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_complex_close(&out.materialize_f64(), &[(-0.0, -1.0), (1.0, 0.0)], 1e-12);
             }
             other => panic!("expected complex tensor basis, got {other:?}"),
@@ -1258,7 +1089,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(zero_by_three), Vec::new()).expect("null");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
+                assert_eq!(out.shape(), [3, 3]);
                 assert_close(
                     &out.materialize_f64(),
                     &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
@@ -1272,7 +1103,7 @@ pub(crate) mod tests {
         let result = null_builtin(Value::Tensor(three_by_zero), Vec::new()).expect("null");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![0, 0]);
+                assert_eq!(out.shape(), [0, 0]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected 0x0 tensor basis, got {other:?}"),
@@ -1312,7 +1143,7 @@ pub(crate) mod tests {
         }
         match nonzero {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 0]);
+                assert_eq!(out.shape(), [1, 0]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected empty scalar null basis, got {other:?}"),
@@ -1323,7 +1154,7 @@ pub(crate) mod tests {
     #[test]
     fn null_rejects_invalid_option() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let chars = CharArray::new("q".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("q".chars().collect(), 1, 1).unwrap();
         let err = unwrap_error(
             null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)]).unwrap_err(),
         );
@@ -1349,14 +1180,14 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = null_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu null");
             let gathered = test_support::gather(result).expect("gather");
             let cpu = null_real_tensor(&tensor, NullMode::Orthonormal { tolerance: None })
                 .expect("cpu null");
-            assert_eq!(gathered.shape, cpu.shape);
+            assert_eq!(gathered.shape(), cpu.shape());
             assert_close(&gathered.materialize_f64(), &cpu.materialize_f64(), 1e-12);
         });
     }
@@ -1367,7 +1198,7 @@ pub(crate) mod tests {
             let matrix = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &matrix.materialize_f64(),
-                shape: &matrix.shape,
+                shape: matrix.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let option = Value::from("rational");
@@ -1395,11 +1226,15 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("admit explicit provenance view");
+        drop(handle);
+        let handle = explicit;
         let source_precision = runmat_accelerate_api::handle_precision(&handle);
 
         let gpu_value = null_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu null");
@@ -1413,13 +1248,16 @@ pub(crate) mod tests {
         );
         assert!(runmat_accelerate_api::handle_integer_type(output).is_none());
         assert!(gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_close(&gathered.materialize_f64(), &cpu.materialize_f64(), 5e-5);
     }
 
     fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::null_builtin(value, rest))
+        block_on(super::null_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

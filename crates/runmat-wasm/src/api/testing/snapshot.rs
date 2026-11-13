@@ -13,6 +13,7 @@ struct ProjectTestLayoutRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectTestLayout {
+    compatibility_mode: runmat_config::runtime::LanguageCompatMode,
     source_roots: Vec<String>,
     test_roots: Vec<String>,
     test_paths: Vec<String>,
@@ -25,6 +26,13 @@ pub fn project_test_layout(value: JsValue) -> Result<JsValue, JsValue> {
         serde_wasm_bindgen::from_value(value).map_err(|error| {
             JsValue::from_str(&format!("project test layout parse failed: {error}"))
         })?;
+    let document = runmat_config::document::RunmatConfigDocument::parse_path(
+        request.manifest_content.clone(),
+        std::path::Path::new(&request.manifest_path),
+    )
+    .map_err(|error| {
+        JsValue::from_str(&format!("invalid project runtime configuration: {error}"))
+    })?;
     let manifest = if request.manifest_path.ends_with(".json") {
         runmat_config::project::parse_project_manifest_json(&request.manifest_content).map_err(
             |error| JsValue::from_str(&format!("invalid JSON project manifest: {error}")),
@@ -35,14 +43,17 @@ pub fn project_test_layout(value: JsValue) -> Result<JsValue, JsValue> {
         )?
     };
     let test_config_digest = format!(
-        "sha256:{:x}",
-        Sha256::digest(serde_json::to_vec(&manifest.test).map_err(|error| {
-            JsValue::from_str(&format!(
-                "project test configuration encode failed: {error}"
-            ))
-        })?)
+        "sha256:{}",
+        hex::encode(Sha256::digest(serde_json::to_vec(&manifest.test).map_err(
+            |error| {
+                JsValue::from_str(&format!(
+                    "project test configuration encode failed: {error}"
+                ))
+            }
+        )?)),
     );
     serde_wasm_bindgen::to_value(&ProjectTestLayout {
+        compatibility_mode: document.runtime().language.compat,
         source_roots: manifest
             .sources
             .roots
@@ -69,6 +80,7 @@ pub fn project_test_layout(value: JsValue) -> Result<JsValue, JsValue> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FreezeTestSnapshotRequest {
+    compatibility_mode: runmat_core::CompatMode,
     graph_digest: String,
     base_source_digest: String,
     test_config_digest: String,
@@ -86,7 +98,7 @@ pub fn freeze_test_snapshot(value: JsValue) -> Result<JsValue, JsValue> {
     let snapshot = FrozenTestRunSnapshot::freeze(
         request.graph_digest,
         request.base_source_digest,
-        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        runmat_core::program_environment(request.compatibility_mode),
         request.test_config_digest,
         request.saved_sources,
         request.unsaved_buffers,

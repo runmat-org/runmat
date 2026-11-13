@@ -1,9 +1,9 @@
 [package]
 name = "runmat-logging"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 description = "Structured logging and tracing utilities for RunMat hosts"
-license-file = "../LICENSE.md"
+license-file = "../../LICENSE.md"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
@@ -18,30 +18,55 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", optional = true }
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+getrandom = { version = "0.2", features = ["js"], optional = true }
+web-sys = { version = "0.3", optional = true, features = ["AbortController", "AbortSignal", "Request", "RequestInit", "RequestMode", "RequestCredentials", "RequestRedirect", "Response", "Headers", "Url", "ReadableStream", "ReadableStreamDefaultReader", "console"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"], optional = true }
+tokio = { version = "1", features = ["rt", "time", "net"], optional = true }
+tonic = { version = "0.9", default-features = false, features = ["codegen", "prost", "transport", "tls", "tls-roots"], optional = true }
+opentelemetry-proto = { version = "0.4", default-features = false, features = ["gen-tonic"], optional = true }
 
 [features]
 default = []
 otlp = [
     "opentelemetry",
     "opentelemetry_sdk",
-    "opentelemetry-otlp",
+    "reqwest",
     "tracing-opentelemetry",
+    "opentelemetry-proto",
+    "prost",
+    "tokio",
+    "tonic",
 ]
+browser-otlp = ["opentelemetry", "opentelemetry_sdk", "tracing-opentelemetry", "opentelemetry-proto", "prost", "wasm-bindgen", "wasm-bindgen-futures", "futures-channel", "futures-util", "gloo-timers", "getrandom", "web-sys"]
 
 [dependencies.opentelemetry]
 version = "0.21"
 optional = true
-features = ["trace"]
+default-features = false
+features = ["trace", "logs"]
 
 [dependencies.opentelemetry_sdk]
 version = "0.21"
 optional = true
-features = ["rt-tokio"]
+default-features = false
+features = ["trace", "logs"]
 
-[dependencies.opentelemetry-otlp]
-version = "0.14"
+[dependencies.opentelemetry-proto]
+version = "0.4"
 optional = true
-features = ["http-proto", "reqwest-client"]
+default-features = false
+features = ["gen-tonic-messages", "trace", "logs"]
+
+[dependencies.prost]
+version = "0.11"
+optional = true
 
 [dependencies.tracing-opentelemetry]
 version = "0.22"

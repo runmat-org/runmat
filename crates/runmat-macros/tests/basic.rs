@@ -49,6 +49,7 @@ const FOO_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDesc
     descriptor(crate::FOO_DESCRIPTOR),
     extensions(crate::FOO_EXTENSIONS),
     integer_audit(crate::FOO_INTEGER_AUDIT),
+    execution_stack = "process",
     builtin_path = "tests::foo"
 )]
 fn foo(x: i32) -> Result<i32, String> {
@@ -65,6 +66,10 @@ fn works() {
         .find(|builtin| builtin.name == "foo")
         .expect("foo metadata");
     assert_eq!(builtin.extensions, &FOO_EXTENSIONS);
+    assert_eq!(
+        builtin.execution_stack,
+        runmat_builtins::ExecutionStackRequirement::Process
+    );
     assert_eq!(
         builtin.integer_audit.expect("foo integer audit").kind,
         BuiltinIntegerAuditKind::NotApplicable

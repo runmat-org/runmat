@@ -1,9 +1,19 @@
+use super::owner_shared::OwnerShared;
 use super::*;
 
 #[derive(Clone, Debug)]
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
     pub force_fallback_adapter: bool,
+    pub precision: WgpuPrecisionPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WgpuPrecisionPolicy {
+    #[default]
+    Automatic,
+    RequireF32,
+    RequireF64,
 }
 
 impl Default for WgpuProviderOptions {
@@ -11,94 +21,129 @@ impl Default for WgpuProviderOptions {
         Self {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
+            precision: WgpuPrecisionPolicy::Automatic,
         }
     }
 }
 
-pub(super) type MomentsKey = (u64, Vec<usize>);
-pub(super) type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
-pub(super) type MomentsCache = HashMap<MomentsKey, MomentsValue>;
+#[cfg(test)]
+mod image_normalize_key_tests {
+    use super::*;
 
-/// Immutable GPU resources cached for the lifetime of a physical device.
-///
-/// Logical runtime sessions share these resources because they are created for
-/// a specific `wgpu::Device`, while buffer-backed bind groups and handle tables
-/// remain session-local on `WgpuProvider`.
-pub(super) struct WgpuDeviceCaches {
-    pub(super) fused_pipelines: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
-    pub(super) bind_group_layouts: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
-    pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
-    pub(super) image_norm_pipelines:
-        Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
-    pub(super) fft_twiddles: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>,
-}
-
-impl Default for WgpuDeviceCaches {
-    fn default() -> Self {
-        Self {
-            fused_pipelines: Mutex::new(HashMap::new()),
-            bind_group_layouts: Mutex::new(HashMap::new()),
-            bind_group_layout_tags: Mutex::new(HashMap::new()),
-            image_norm_pipelines: Mutex::new(HashMap::new()),
-            fft_twiddles: Mutex::new(HashMap::new()),
-        }
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn persisted_pre_centered_variance_tuning_does_not_match_current_key() {
+        let current = ImageNormalizeKey::new(NumericPrecision::F32, 16, 2160 * 3840);
+        assert_eq!(current.version, 2);
+        let prior = ImageNormalizeKey {
+            version: 1,
+            ..current.clone()
+        };
+        let tuning = ImageNormalizeTuning {
+            batch_tile: 8,
+            values_per_thread: 4,
+            lane_count: 64,
+            spatial_tile: 2,
+        };
+        // AutotuneController persists Vec<(K, V)> and loads it into a map.
+        let persisted = serde_json::to_vec(&vec![(prior.clone(), tuning)]).unwrap();
+        let loaded: Vec<(ImageNormalizeKey, ImageNormalizeTuning)> =
+            serde_json::from_slice(&persisted).unwrap();
+        let cache: HashMap<_, _> = loaded.into_iter().collect();
+        assert_eq!(cache.get(&prior), Some(&tuning));
+        assert_eq!(cache.get(&current), None);
     }
 }
 
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
+    pub(super) capability_snapshot:
+        std::sync::OnceLock<runmat_accelerate_api::ProviderCapabilitySnapshot>,
     pub(super) instance: Arc<wgpu::Instance>,
-    pub(super) device: Arc<wgpu::Device>,
-    pub(super) queue: Arc<wgpu::Queue>,
+    /// The same authority is exported to renderers and retained by progress.
+    /// Nested emitters borrow its permit; they must not reacquire the gate.
+    pub(super) access: runmat_accelerate_api::WgpuDeviceAccess,
+    pub(super) emission_authority: runmat_accelerate_api::CanonicalWgpuEmissionAuthority,
+    pub(super) device_health: Arc<WgpuDeviceHealth>,
     pub(super) adapter: Arc<wgpu::Adapter>,
     pub(super) adapter_info: wgpu::AdapterInfo,
     pub(super) adapter_limits: wgpu::Limits,
+    /// Features of the device actually created, not the adapter's advertised set.
+    pub(super) enabled_features: wgpu::Features,
+    /// Available at device creation, independent of a command's current owner.
+    pub(super) timestamp_capability:
+        Option<crate::backend::wgpu::dispatch::observation::TimestampCapability>,
     pub(super) workgroup_config: WorkgroupConfig,
-    pub(super) buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
-    /// Physical storage allocation pool shared by logical sessions on this
-    /// device. Handle ownership remains session-local in `buffers`.
-    pub(super) buffer_residency: Arc<BufferResidency>,
-    pub(super) buffer_residency_max_poolable_bytes: u64,
-    pub(super) next_id: AtomicU64,
-    pub(super) pipelines: Arc<WgpuPipelines>,
+    pub(super) linear_launch: crate::backend::wgpu::pipelines::FrozenLinearLaunch,
+    pub(super) global_reduce_launch: crate::backend::wgpu::pipelines::FrozenGlobalReductionLaunch,
+    pub(super) allocations: OwnerShared<super::allocation_state::AllocationState>,
+    pub(super) sparse: super::sparse::SparseState,
+    pub(super) sparse_pipelines: super::sparse::SparsePipelines,
+    pub(super) pipelines: WgpuPipelines,
+    pub(super) f32_real_floating: Option<crate::backend::wgpu::pipelines::F32RealFloatingPipelines>,
+    pub(super) ordered_real_mean: Option<crate::backend::wgpu::pipelines::OrderedRealMeanPipelines>,
     pub(super) runtime_device_id: u32,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) observation_progress:
+        Option<Arc<super::observation_progress::NativeObservationProgress>>,
+    pub(super) observation_budget:
+        Arc<runmat_accelerate_api::observation::ProviderObservationBudget>,
     pub(super) cache_device_id: u32,
     pub(super) precision: NumericPrecision,
     pub(super) element_size: usize,
-    pub(super) device_caches: Arc<WgpuDeviceCaches>,
-    pub(super) bind_group_cache: BindGroupCache,
-    pub(super) kernel_resources: KernelResourceRegistry,
+    pub(super) fused_pipeline_cache: Mutex<super::pipeline_cache::PipelineCache>,
+    /// Only pipelines whose complete driver error scope resolved successfully.
+    /// Migrated ordinary fusion and tagged generic routes carry the exact pair
+    /// to emission; legacy shared-cache writers cannot substitute it.
+    pub(super) validated_fusion_cache:
+        Mutex<HashMap<u64, Arc<super::validated_fusion::ValidatedFusionPipeline>>>,
+    /// Driver-validated disk receipts retain their exact source, layout and
+    /// workgroup. A typed runtime route must admit them before promotion.
+    pub(super) warmed_pipeline_cache:
+        Mutex<HashMap<u64, Arc<super::validated_fusion::WarmedPipelineReceipt>>>,
+    pub(super) bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
+    pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
+    pub(super) bind_group_cache: Arc<BindGroupCache>,
+    pub(super) kernel_resources: OwnerShared<KernelResourceRegistry>,
     pub(super) metrics: crate::backend::wgpu::metrics::WgpuMetrics,
     pub(super) telemetry: AccelTelemetry,
+    /// A per-provider, one-shot fault at the actual post-buffer upload edge.
+    #[cfg(test)]
+    pub(super) numeric_upload_post_buffer_fault: Mutex<Option<anyhow::Error>>,
+    #[cfg(test)]
+    pub(super) numeric_upload_post_buffer_count: std::sync::atomic::AtomicUsize,
     pub(super) reduction_two_pass_mode: ReductionTwoPassMode,
     pub(super) reduction_two_pass_threshold: usize,
     pub(super) reduction_workgroup_size_default: u32,
     pub(super) pipeline_cache_dir: Option<std::path::PathBuf>,
     pub(super) reduction_autotune: AutotuneController<ReductionAutotuneKey, ReductionTuning>,
     pub(super) image_norm_autotune: AutotuneController<ImageNormalizeKey, ImageNormalizeTuning>,
+    pub(super) image_norm_pipeline_cache:
+        Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
     #[allow(dead_code)]
     pub(super) autotune_base_dir: Option<PathBuf>,
     #[allow(dead_code)]
     pub(super) autotune_device_tag: String,
     // Optimization caches
-    pub(super) pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
-    pub(super) moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
+    pub(super) reduction_reuse: OwnerShared<Mutex<super::moments_cache::ReductionReuseCache>>,
+    pub(super) fft_twiddle_cache:
+        Mutex<HashMap<(usize, u8), runmat_accelerate_api::WgpuBufferOwner>>, // (len, mode) -> twiddle buffer
 }
 
-impl Drop for WgpuProvider {
-    fn drop(&mut self) {
-        self.recycle_session_buffers();
-    }
-}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "authority_tests.rs"]
+mod authority_tests;
 
-#[cfg(target_arch = "wasm32")]
-unsafe impl Send for WgpuProvider {}
-#[cfg(target_arch = "wasm32")]
-unsafe impl Sync for WgpuProvider {}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "warmup_tests.rs"]
+mod warmup_tests;
 
 #[derive(Clone)]
 pub(super) struct BufferEntry {
-    pub(super) buffer: Arc<wgpu::Buffer>,
+    /// Operation-local interpretation copied from an admitted view. The owning
+    /// record separately retains immutable logical producer authority.
+    pub(super) logical: bool,
+    pub(super) buffer: runmat_accelerate_api::WgpuBufferOwner,
     pub(super) len: usize,
     pub(super) shape: Vec<usize>,
     pub(super) storage: GpuTensorStorage,
@@ -121,6 +166,7 @@ impl BufferEntry {
 
 pub(super) struct NumericBufferRegistration {
     pub(super) shape: Vec<usize>,
+    /// Physical scalar components; complex interleaved values use two each.
     pub(super) len: usize,
     pub(super) physical_element_type: runmat_accelerate_api::NumericElementType,
     pub(super) storage: GpuTensorStorage,
@@ -275,10 +321,7 @@ impl WorkgroupConfig {
                 break;
             }
         }
-        // Image normalization assigns one batch to each workgroup. Keeping this
-        // invariant in the sanitizer also upgrades persisted autotune entries
-        // created by the former cross-batch vectorized kernel.
-        tuning.batch_tile = 1;
+        tuning.batch_tile = tuning.batch_tile.clamp(1, batches.max(1));
         if tuning != original {
             debug!(
                 "sanitize_image_normalize_tuning batches={} lane {} -> {} spatial {} -> {} values/thread {} -> {} batch_tile {} -> {} (max_invocations={}, limits=({}, {}, {}))",
@@ -315,17 +358,24 @@ pub(super) struct ReductionTuning {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(super) struct ReductionAutotuneKey {
     pub(super) precision: u8,
+    pub(super) shader_requirements: runmat_accelerate_api::ProviderShaderRequirements,
     pub(super) slices_bucket: u32,
     pub(super) reduce_bucket: u32,
 }
 
 impl ReductionAutotuneKey {
-    pub(super) fn new(precision: NumericPrecision, num_slices: usize, reduce_len: usize) -> Self {
+    pub(super) fn new(
+        precision: NumericPrecision,
+        shader_requirements: runmat_accelerate_api::ProviderShaderRequirements,
+        num_slices: usize,
+        reduce_len: usize,
+    ) -> Self {
         Self {
             precision: match precision {
                 NumericPrecision::F64 => 64,
                 NumericPrecision::F32 => 32,
             },
+            shader_requirements,
             slices_bucket: bucketize_dimension(num_slices),
             reduce_bucket: bucketize_dimension(reduce_len),
         }

@@ -3,235 +3,23 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
-use crate::builtins::stats::type_resolvers::histcounts_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+mod edges;
+mod options;
+use edges::{apply_normalization, compute_edges, validate_edges};
+#[cfg(test)]
+use options::{numeric_vector, positive_usize, scalar_value};
+use options::{parse_options, HistcountsOptions};
 
 const BUILTIN_NAME: &str = "histcounts";
 const DEFAULT_BIN_COUNT: usize = 10;
-const RANGE_EPS: f64 = 1.0e-12;
-const HISTCOUNTS_OUTPUT_N: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "N",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Histogram bin counts.",
-}];
-
-const HISTCOUNTS_OUTPUT_NE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Histogram bin counts.",
-    },
-    BuiltinParamDescriptor {
-        name: "edges",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bin edge vector.",
-    },
-];
-
-const HISTCOUNTS_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input data values.",
-}];
-
-const HISTCOUNTS_INPUTS_X_BINS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data values.",
-    },
-    BuiltinParamDescriptor {
-        name: "bins",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar NumBins or explicit edge vector.",
-    },
-];
-
-const HISTCOUNTS_INPUTS_X_NAMEVALUE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data values.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Name/value pairs (BinEdges, NumBins, BinWidth, BinLimits, Normalization, BinMethod).",
-    },
-];
-
-const HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data values.",
-    },
-    BuiltinParamDescriptor {
-        name: "bins",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar NumBins or explicit edge vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional name/value pairs.",
-    },
-];
-
-const HISTCOUNTS_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "N = histcounts(X)",
-        inputs: &HISTCOUNTS_INPUTS_X,
-        outputs: &HISTCOUNTS_OUTPUT_N,
-    },
-    BuiltinSignatureDescriptor {
-        label: "N = histcounts(X, bins)",
-        inputs: &HISTCOUNTS_INPUTS_X_BINS,
-        outputs: &HISTCOUNTS_OUTPUT_N,
-    },
-    BuiltinSignatureDescriptor {
-        label: "N = histcounts(X, Name, Value, ...)",
-        inputs: &HISTCOUNTS_INPUTS_X_NAMEVALUE,
-        outputs: &HISTCOUNTS_OUTPUT_N,
-    },
-    BuiltinSignatureDescriptor {
-        label: "N = histcounts(X, bins, Name, Value, ...)",
-        inputs: &HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE,
-        outputs: &HISTCOUNTS_OUTPUT_N,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[N, edges] = histcounts(X)",
-        inputs: &HISTCOUNTS_INPUTS_X,
-        outputs: &HISTCOUNTS_OUTPUT_NE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[N, edges] = histcounts(X, bins)",
-        inputs: &HISTCOUNTS_INPUTS_X_BINS,
-        outputs: &HISTCOUNTS_OUTPUT_NE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[N, edges] = histcounts(X, Name, Value, ...)",
-        inputs: &HISTCOUNTS_INPUTS_X_NAMEVALUE,
-        outputs: &HISTCOUNTS_OUTPUT_NE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[N, edges] = histcounts(X, bins, Name, Value, ...)",
-        inputs: &HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE,
-        outputs: &HISTCOUNTS_OUTPUT_NE,
-    },
-];
-
-const HISTCOUNTS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HISTCOUNTS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:histcounts:InvalidArgument"),
-    when: "Arguments are malformed, inconsistent, or unsupported.",
-    message: "histcounts: invalid argument",
-};
-
-const HISTCOUNTS_ERROR_BINMETHOD_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HISTCOUNTS.BINMETHOD_CONFLICT",
-    identifier: Some("RunMat:histcounts:BinMethodConflict"),
-    when: "BinMethod is combined with incompatible bin controls.",
-    message: "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth",
-};
-
-const HISTCOUNTS_ERROR_BINWIDTH_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HISTCOUNTS.BINWIDTH_INVALID",
-    identifier: Some("RunMat:histcounts:BinWidthInvalid"),
-    when: "BinWidth is zero, negative, non-finite, or non-scalar.",
-    message: "histcounts: BinWidth must be a positive finite scalar",
-};
-
-const HISTCOUNTS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HISTCOUNTS.INTERNAL",
-    identifier: Some("RunMat:histcounts:Internal"),
-    when: "Internal tensor conversion or allocation fails.",
-    message: "histcounts: internal operation failed",
-};
-
-const HISTCOUNTS_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    HISTCOUNTS_ERROR_INVALID_ARGUMENT,
-    HISTCOUNTS_ERROR_BINMETHOD_CONFLICT,
-    HISTCOUNTS_ERROR_BINWIDTH_INVALID,
-    HISTCOUNTS_ERROR_INTERNAL,
-];
-
-pub const HISTCOUNTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HISTCOUNTS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HISTCOUNTS_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Host data accepts all eight integer classes; interactive GPU data accepts integer classes through 32 bits and rejects int64/uint64 before gather.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "bins_and_numeric_controls",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed integer bin counts, explicit edges, widths, and limits are parsed according to each control's scalar/vector contract.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[N, edges] = histcounts(X, bins/name-value controls)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer observations enter the documented double histogram domain and counts/edges are double; integer NumBins parsing remains exact and 64-bit integer gpuArray data is unsupported.",
-    }];
-
 fn builtin_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -253,75 +41,61 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::hist::histcounts")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "histcounts",
-    op_kind: GpuOpKind::Custom("histcounts"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("histcounts")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Omit,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Providers may implement device-side histogramming via the custom hook; current builds gather to host memory.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::hist::histcounts")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "histcounts",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Histogram binning materialises counts on the host and terminates fusion chains.",
-};
-
 #[runtime_builtin(
     name = "histcounts",
-    category = "stats/hist",
-    summary = "Count observations in histogram bins.",
-    keywords = "histcounts,histogram,binning,normalization,probability,cdf,gpu",
-    accel = "reduction",
-    sink = true,
-    type_resolver(histcounts_type),
-    descriptor(crate::builtins::stats::hist::histcounts::HISTCOUNTS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::stats::hist::histcounts::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
-async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(data, &rest).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
+async fn histcounts_builtin(
+    data: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let requested_outputs = crate::output_count::current_output_count();
+    if requested_outputs.is_some_and(|count| count > 3) {
+        return Err(builtin_error("histcounts: too many output arguments"));
+    }
+    let eval = evaluate_with_bins(data, rest.view(), requested_outputs == Some(3)).await?;
+    if let Some(out_count) = requested_outputs {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_counts_value()]));
+            return Ok(Value::output_list(vec![eval.into_counts_value()]));
+        }
+        if out_count == 3 {
+            let (counts, edges, bins) = eval.into_triple()?;
+            return Ok(Value::output_list(vec![counts, edges, bins]));
         }
         let (counts, edges) = eval.into_pair();
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![counts, edges],
-        ));
+        return Ok(Value::output_list(vec![counts, edges]));
     }
     Ok(eval.into_counts_value())
 }
 
 /// Evaluate `histcounts` once and surface both primary outputs.
-pub async fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistcountsEvaluation> {
+pub async fn evaluate(
+    data: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<HistcountsEvaluation> {
+    evaluate_with_bins(data, rest, false).await
+}
+
+async fn evaluate_with_bins(
+    data: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    include_bins: bool,
+) -> BuiltinResult<HistcountsEvaluation> {
     let options = parse_options(rest)?;
     match data {
-        Value::GpuTensor(handle) => histcounts_gpu(handle, &options).await,
-        other => histcounts_host(other, &options),
+        Value::GpuTensor(handle) => histcounts_gpu(handle, &options, include_bins).await,
+        other => histcounts_host(other, &options, include_bins),
     }
 }
 
 async fn histcounts_gpu(
     handle: GpuTensorHandle,
     options: &HistcountsOptions,
+    include_bins: bool,
 ) -> BuiltinResult<HistcountsEvaluation> {
     if matches!(
         runmat_accelerate_api::handle_integer_type(&handle),
@@ -335,27 +109,32 @@ async fn histcounts_gpu(
         .build());
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    histcounts_from_tensor(tensor, options)
+    histcounts_from_tensor(tensor, options, include_bins)
 }
 
 fn histcounts_host(
     value: Value,
     options: &HistcountsOptions,
+    include_bins: bool,
 ) -> BuiltinResult<HistcountsEvaluation> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(builtin_error)?;
-    histcounts_from_tensor(tensor, options)
+    histcounts_from_tensor(tensor, options, include_bins)
 }
 
 fn histcounts_from_tensor(
     tensor: Tensor,
     options: &HistcountsOptions,
+    include_bins: bool,
 ) -> BuiltinResult<HistcountsEvaluation> {
+    let input_shape = tensor.shape().to_vec();
+    let exact_samples = tensor
+        .integer_storage()
+        .map(|storage| storage.exact_values());
     let mut values = Vec::new();
     let mut min_val: Option<f64> = None;
     let mut max_val: Option<f64> = None;
-    // Numeric histogram edges and normalization are defined in a floating
-    // computation domain. Keep this conversion explicit: automatic binning of
-    // wide integer inputs intentionally has double-precision granularity.
+    // Public numeric edges use double. Keep exact integer observations beside
+    // that representation so bin comparisons never round their source values.
     let samples = tensor::tensor_values_f64_cow(&tensor);
 
     for &sample in samples.iter() {
@@ -382,617 +161,99 @@ fn histcounts_from_tensor(
         _ => false,
     };
 
-    let edges = compute_edges(&values, min_val, max_val, original_range_zero, options)?;
+    let mut edges = compute_edges(&values, min_val, max_val, original_range_zero, options)?;
+    if options.explicit_edges.is_none() && options.bin_limits.is_none() {
+        if let Some(exact) = exact_samples.as_deref() {
+            super::integer_bins::cover_exact_integer_range(&mut edges, exact);
+        }
+    }
     let mut counts = vec![0.0f64; edges.len() - 1];
 
-    for value in values {
-        if value < edges[0] || value > edges[edges.len() - 1] {
-            continue;
-        }
-        if value == edges[edges.len() - 1] {
-            if let Some(last) = counts.last_mut() {
-                *last += 1.0;
+    let mut bin_indices = include_bins.then(|| vec![0.0; samples.len()]);
+    for (position, &value) in samples.iter().enumerate() {
+        let index = if let Some(integer) = exact_samples.as_ref().and_then(|v| v.get(position)) {
+            if let Some(exact_edges) = options.exact_edges.as_deref() {
+                super::integer_bins::exact_edge_bin(integer, exact_edges)
+            } else {
+                super::integer_bins::floating_edge_bin(integer, &edges)
             }
-            continue;
-        }
-
-        match edges.binary_search_by(|edge| match edge.partial_cmp(&value) {
-            Some(order) => order,
-            None => Ordering::Less,
-        }) {
-            Ok(index) => {
-                if index == 0 {
-                    counts[0] += 1.0;
-                } else if index < counts.len() {
-                    counts[index] += 1.0;
-                } else if let Some(last) = counts.last_mut() {
-                    *last += 1.0;
-                }
-            }
-            Err(index) => {
-                if index == 0 || index > counts.len() {
-                    continue;
-                }
-                counts[index - 1] += 1.0;
+        } else if let Some(exact_edges) = options.exact_edges.as_deref() {
+            super::integer_bins::floating_observation_exact_bin(value, exact_edges)
+        } else {
+            histogram_bin_index(value, &edges)
+        };
+        if let Some(index) = index {
+            counts[index] += 1.0;
+            if let Some(indices) = bin_indices.as_mut() {
+                indices[position] = (index + 1) as f64;
             }
         }
     }
 
-    let normalised = apply_normalization(&counts, &edges, options.normalization);
+    let normalised = apply_normalization(
+        &counts,
+        &edges,
+        options.exact_edges.as_deref(),
+        options.normalization,
+    );
     let counts_tensor = Tensor::new(normalised, vec![1, counts.len()])
         .map_err(|e| builtin_error(format!("histcounts: {e}")))?;
     let edges_tensor = Tensor::new(edges.clone(), vec![1, edges.len()])
         .map_err(|e| builtin_error(format!("histcounts: {e}")))?;
 
-    Ok(HistcountsEvaluation::new(counts_tensor, edges_tensor))
+    let bins_tensor = bin_indices
+        .map(|indices| Tensor::new(indices, input_shape))
+        .transpose()
+        .map_err(|e| builtin_error(format!("histcounts: {e}")))?;
+
+    Ok(HistcountsEvaluation::new(
+        counts_tensor,
+        edges_tensor,
+        bins_tensor,
+    ))
 }
 
-fn compute_edges(
-    values: &[f64],
-    min_val: Option<f64>,
-    max_val: Option<f64>,
-    original_range_zero: bool,
-    options: &HistcountsOptions,
-) -> BuiltinResult<Vec<f64>> {
-    if let Some(edges) = &options.explicit_edges {
-        validate_edges(edges)?;
-        return Ok(edges.clone());
+fn histogram_bin_index(value: f64, edges: &[f64]) -> Option<usize> {
+    if value.is_nan() || value < edges[0] || value > edges[edges.len() - 1] {
+        return None;
     }
-
-    if let Some(method) = options.bin_method {
-        return compute_edges_with_method(
-            values,
-            min_val,
-            max_val,
-            original_range_zero,
-            method,
-            options,
-        );
+    if value == edges[edges.len() - 1] {
+        return Some(edges.len() - 2);
     }
-
-    compute_edges_standard(min_val, max_val, original_range_zero, options)
+    match edges.binary_search_by(|edge| edge.partial_cmp(&value).unwrap_or(Ordering::Less)) {
+        Ok(index) => Some(index),
+        Err(index) if index > 0 && index < edges.len() => Some(index - 1),
+        _ => None,
+    }
 }
 
-fn compute_edges_standard(
-    min_val: Option<f64>,
-    max_val: Option<f64>,
-    original_range_zero: bool,
-    options: &HistcountsOptions,
-) -> BuiltinResult<Vec<f64>> {
-    let (mut lower, mut upper) = derive_initial_limits(min_val, max_val, options.bin_limits);
-
-    if !lower.is_finite() || !upper.is_finite() {
-        return Err(builtin_error(
-            "histcounts: data range must be finite; specify BinLimits or BinEdges",
-        ));
-    }
-
-    if upper < lower {
-        return Err(builtin_error("histcounts: bin limits must be increasing"));
-    }
-
-    if options.bin_limits.is_some() && lower == upper {
-        return Err(builtin_error(
-            "histcounts: BinLimits must specify a non-zero width",
-        ));
-    }
-
-    if let Some(width) = options.bin_width {
-        if !width.is_finite() || width <= 0.0 {
-            return Err(builtin_error(HISTCOUNTS_ERROR_BINWIDTH_INVALID.message));
-        }
-
-        if original_range_zero && options.bin_limits.is_none() {
-            let centre = min_val.unwrap_or(0.0);
-            lower = centre - width / 2.0;
-            upper = centre + width / 2.0;
-        } else if options.bin_limits.is_none() {
-            if let (Some(minimum), Some(maximum)) = (min_val, max_val) {
-                lower = minimum;
-                upper = maximum;
-            }
-        }
-
-        if lower == upper {
-            upper = lower + width;
-        }
-
-        let bins = ((upper - lower) / width).ceil().max(1.0) as usize;
-        let mut edges = Vec::with_capacity(bins + 1);
-        for i in 0..=bins {
-            edges.push(lower + width * i as f64);
-        }
-        if let Some(last) = edges.last_mut() {
-            *last = upper;
-        }
-        return finalize_generated_edges(edges);
-    }
-
-    let mut num_bins = options.num_bins.unwrap_or(DEFAULT_BIN_COUNT);
-    if num_bins == 0 {
-        return Err(builtin_error(
-            "histcounts: NumBins must be a positive integer",
-        ));
-    }
-
-    if original_range_zero {
-        let centre = min_val.unwrap_or(0.0);
-        if options.num_bins.is_none() && options.bin_limits.is_none() && options.bin_width.is_none()
-        {
-            num_bins = 1;
-        }
-        if options.bin_limits.is_none() && options.bin_width.is_none() {
-            lower = centre - 0.5;
-            upper = centre + 0.5;
-        }
-    } else if options.bin_limits.is_none() {
-        if let (Some(minimum), Some(maximum)) = (min_val, max_val) {
-            lower = lower.min(minimum);
-            upper = upper.max(maximum);
-        }
-    }
-
-    if lower == upper {
-        upper = lower + 1.0;
-    }
-
-    finalize_generated_edges(linspace(lower, upper, num_bins + 1))
-}
-
-fn compute_edges_with_method(
-    values: &[f64],
-    min_val: Option<f64>,
-    max_val: Option<f64>,
-    original_range_zero: bool,
-    method: BinMethod,
-    options: &HistcountsOptions,
-) -> BuiltinResult<Vec<f64>> {
-    if values.is_empty() {
-        return compute_edges_standard(min_val, max_val, original_range_zero, options);
-    }
-
-    if matches!(method, BinMethod::Integers) {
-        return finalize_generated_edges(compute_integer_edges(min_val, max_val, options)?);
-    }
-
-    let (lower, upper) = derive_initial_limits(min_val, max_val, options.bin_limits);
-    if !lower.is_finite() || !upper.is_finite() {
-        return Err(builtin_error(
-            "histcounts: data range must be finite for BinMethod",
-        ));
-    }
-
-    if lower == upper {
-        if options.bin_limits.is_some() {
+fn validate_bin_edges(edges: &[f64], exact: Option<&[IntValue]>) -> BuiltinResult<()> {
+    if let Some(exact) = exact {
+        if !super::integer_bins::validate_exact_edges(exact) {
             return Err(builtin_error(
-                "histcounts: BinLimits must specify a non-zero width",
+                "histcounts: BinEdges must be strictly increasing",
             ));
-        }
-        return compute_edges_standard(min_val, max_val, true, options);
-    }
-
-    let finite_values: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
-    if finite_values.is_empty() {
-        return compute_edges_standard(min_val, max_val, original_range_zero, options);
-    }
-
-    let range = upper - lower;
-    if range <= 0.0 {
-        return compute_edges_standard(min_val, max_val, true, options);
-    }
-
-    let mut sorted = finite_values.clone();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-
-    let width = match method {
-        BinMethod::Auto => {
-            let fd = freedman_diaconis_width(&sorted);
-            if fd > 0.0 {
-                fd
-            } else {
-                let scott = scott_width(&finite_values);
-                if scott > 0.0 {
-                    scott
-                } else {
-                    range / sturges_bin_count(sorted.len()) as f64
-                }
-            }
-        }
-        BinMethod::Scott => scott_width(&finite_values),
-        BinMethod::Fd => freedman_diaconis_width(&sorted),
-        BinMethod::Sturges => range / sturges_bin_count(sorted.len()) as f64,
-        BinMethod::Sqrt => range / sqrt_bin_count(sorted.len()) as f64,
-        BinMethod::Integers => unreachable!(),
-    };
-
-    if !width.is_finite() || width <= 0.0 {
-        return compute_edges_standard(min_val, max_val, original_range_zero, options);
-    }
-
-    let bins = ((range / width).ceil().max(1.0)) as usize;
-    let mut edges = Vec::with_capacity(bins + 1);
-    for i in 0..=bins {
-        edges.push(lower + width * i as f64);
-    }
-    if let Some(last) = edges.last_mut() {
-        *last = upper;
-    }
-    finalize_generated_edges(edges)
-}
-
-fn compute_integer_edges(
-    min_val: Option<f64>,
-    max_val: Option<f64>,
-    options: &HistcountsOptions,
-) -> BuiltinResult<Vec<f64>> {
-    let (mut lower, mut upper) = derive_initial_limits(min_val, max_val, options.bin_limits);
-
-    if !lower.is_finite() || !upper.is_finite() {
-        return Err(builtin_error(
-            "histcounts: BinLimits must be finite for 'integers' BinMethod",
-        ));
-    }
-
-    if lower == upper {
-        let centre = min_val.or(max_val).unwrap_or(lower);
-        lower = centre - 0.5;
-        upper = centre + 0.5;
-    }
-
-    if let Some((lo, hi)) = options.bin_limits {
-        lower = lo;
-        upper = hi;
-    } else {
-        lower = lower.floor();
-        upper = upper.ceil();
-    }
-
-    if upper <= lower {
-        upper = lower + 1.0;
-    }
-
-    let mut edges = Vec::new();
-    edges.push(lower);
-
-    if let Some((lo, hi)) = options.bin_limits {
-        let mut k = lo.ceil() as i64;
-        while (k as f64) < hi {
-            let candidate = k as f64;
-            if candidate > lo + RANGE_EPS {
-                edges.push(candidate);
-            }
-            k += 1;
-        }
-    } else {
-        let mut current = lower.floor() as i64 + 1;
-        let end = upper.ceil() as i64;
-        while current < end {
-            edges.push(current as f64);
-            current += 1;
-        }
-    }
-
-    if *edges.last().unwrap() != upper {
-        edges.push(upper);
-    }
-
-    if edges.len() < 2 {
-        edges.push(upper + 1.0);
-    }
-
-    Ok(edges)
-}
-
-fn derive_initial_limits(
-    min_val: Option<f64>,
-    max_val: Option<f64>,
-    bin_limits: Option<(f64, f64)>,
-) -> (f64, f64) {
-    if let Some((lo, hi)) = bin_limits {
-        (lo, hi)
-    } else if let (Some(minimum), Some(maximum)) = (min_val, max_val) {
-        (minimum, maximum)
-    } else {
-        (0.0, 1.0)
-    }
-}
-
-fn scott_width(values: &[f64]) -> f64 {
-    let n = values.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let sigma = standard_deviation(values);
-    if sigma <= 0.0 {
-        return 0.0;
-    }
-    3.5 * sigma / (n as f64).powf(1.0 / 3.0)
-}
-
-fn freedman_diaconis_width(sorted: &[f64]) -> f64 {
-    let n = sorted.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let q1 = percentile(sorted, 0.25);
-    let q3 = percentile(sorted, 0.75);
-    let iqr = q3 - q1;
-    if iqr <= 0.0 {
-        return 0.0;
-    }
-    2.0 * iqr / (n as f64).powf(1.0 / 3.0)
-}
-
-fn sturges_bin_count(n: usize) -> usize {
-    if n <= 1 {
-        1
-    } else {
-        ((n as f64).log2() + 1.0).ceil().max(1.0) as usize
-    }
-}
-
-fn sqrt_bin_count(n: usize) -> usize {
-    if n == 0 {
-        1
-    } else {
-        (n as f64).sqrt().ceil().max(1.0) as usize
-    }
-}
-
-fn standard_deviation(values: &[f64]) -> f64 {
-    let n = values.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let mean = values.iter().sum::<f64>() / n as f64;
-    let mut acc = 0.0;
-    for &value in values {
-        let diff = value - mean;
-        acc += diff * diff;
-    }
-    (acc / (n as f64 - 1.0).max(1.0)).sqrt()
-}
-
-fn percentile(sorted: &[f64], p: f64) -> f64 {
-    let n = sorted.len();
-    if n == 0 {
-        return f64::NAN;
-    }
-    if n == 1 {
-        return sorted[0];
-    }
-    let clamped = p.clamp(0.0, 1.0);
-    let rank = clamped * (n as f64 - 1.0);
-    let lower = rank.floor() as usize;
-    let upper = rank.ceil() as usize;
-    if lower == upper {
-        sorted[lower]
-    } else {
-        let weight = rank - lower as f64;
-        sorted[lower] * (1.0 - weight) + sorted[upper] * weight
-    }
-}
-
-fn apply_normalization(counts: &[f64], edges: &[f64], mode: HistogramNormalization) -> Vec<f64> {
-    let widths: Vec<f64> = edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
-    let total: f64 = counts.iter().sum();
-
-    match mode {
-        HistogramNormalization::Count => counts.to_vec(),
-        HistogramNormalization::Probability => {
-            if total > 0.0 {
-                counts.iter().map(|&c| c / total).collect()
-            } else {
-                vec![0.0; counts.len()]
-            }
-        }
-        HistogramNormalization::CountDensity => counts
-            .iter()
-            .zip(widths.iter())
-            .map(|(&c, &w)| if w > 0.0 { c / w } else { 0.0 })
-            .collect(),
-        HistogramNormalization::Pdf => {
-            if total > 0.0 {
-                counts
-                    .iter()
-                    .zip(widths.iter())
-                    .map(|(&c, &w)| if w > 0.0 { c / (total * w) } else { 0.0 })
-                    .collect()
-            } else {
-                vec![0.0; counts.len()]
-            }
-        }
-        HistogramNormalization::CumCount => {
-            let mut acc = 0.0;
-            counts
-                .iter()
-                .map(|&c| {
-                    acc += c;
-                    acc
-                })
-                .collect()
-        }
-        HistogramNormalization::Cdf => {
-            if total > 0.0 {
-                let mut acc = 0.0;
-                counts
-                    .iter()
-                    .map(|&c| {
-                        acc += c;
-                        acc / total
-                    })
-                    .collect()
-            } else {
-                vec![0.0; counts.len()]
-            }
-        }
-    }
-}
-
-fn validate_edges(edges: &[f64]) -> BuiltinResult<()> {
-    if edges.len() < 2 {
-        return Err(builtin_error(
-            "histcounts: bin edges must contain at least two elements",
-        ));
-    }
-    for pair in edges.windows(2) {
-        if pair[0].is_nan() || pair[1].is_nan() {
-            return Err(builtin_error(
-                "histcounts: bin edges must be finite numbers",
-            ));
-        }
-        if pair[1] <= pair[0] {
-            return Err(builtin_error(
-                "histcounts: bin edges must be strictly increasing",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
-    if count <= 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (count - 1) as f64;
-    let mut out = Vec::with_capacity(count);
-    for i in 0..count {
-        out.push(start + step * i as f64);
-    }
-    if let Some(last) = out.last_mut() {
-        *last = stop;
-    }
-    out
-}
-
-fn finalize_generated_edges(edges: Vec<f64>) -> BuiltinResult<Vec<f64>> {
-    let mut compact = Vec::with_capacity(edges.len());
-    for edge in edges {
-        if !edge.is_finite() {
-            return Err(builtin_error(
-                "histcounts: generated bin edges must be finite numbers",
-            ));
-        }
-        if match compact.last() {
-            Some(previous) => edge > *previous,
-            None => true,
-        } {
-            compact.push(edge);
-        }
-    }
-
-    if compact.len() == 1 {
-        let centre = compact[0];
-        let lower = next_down(centre);
-        if lower.is_finite() {
-            compact.insert(0, lower);
-        } else {
-            let upper = next_up(centre);
-            if upper.is_finite() {
-                compact.push(upper);
-            }
-        }
-    }
-
-    validate_edges(&compact)?;
-    Ok(compact)
-}
-
-fn next_up(value: f64) -> f64 {
-    if value.is_nan() || value == f64::INFINITY {
-        return value;
-    }
-    if value == 0.0 {
-        return f64::from_bits(1);
-    }
-    let bits = value.to_bits();
-    f64::from_bits(if value > 0.0 { bits + 1 } else { bits - 1 })
-}
-
-fn next_down(value: f64) -> f64 {
-    if value.is_nan() || value == f64::NEG_INFINITY {
-        return value;
-    }
-    if value == 0.0 {
-        return -f64::from_bits(1);
-    }
-    let bits = value.to_bits();
-    f64::from_bits(if value > 0.0 { bits - 1 } else { bits + 1 })
-}
-
-#[derive(Clone, Default)]
-struct HistcountsOptions {
-    explicit_edges: Option<Vec<f64>>,
-    num_bins: Option<usize>,
-    bin_width: Option<f64>,
-    bin_limits: Option<(f64, f64)>,
-    bin_method: Option<BinMethod>,
-    normalization: HistogramNormalization,
-}
-
-impl HistcountsOptions {
-    fn validate(&self) -> BuiltinResult<()> {
-        if self.explicit_edges.is_some()
-            && (self.num_bins.is_some() || self.bin_width.is_some() || self.bin_limits.is_some())
-        {
-            return Err(builtin_error(
-                "histcounts: BinEdges cannot be combined with NumBins, BinWidth, or BinLimits",
-            ));
-        }
-        if self.bin_method.is_some()
-            && (self.explicit_edges.is_some()
-                || self.bin_width.is_some()
-                || self.num_bins.is_some())
-        {
-            return Err(descriptor_error(&HISTCOUNTS_ERROR_BINMETHOD_CONFLICT));
-        }
-        if self.num_bins.is_some() && self.bin_width.is_some() {
-            return Err(builtin_error(
-                "histcounts: specify only one of NumBins or BinWidth",
-            ));
-        }
-        if let Some((lo, hi)) = self.bin_limits {
-            if !lo.is_finite() || !hi.is_finite() {
-                return Err(builtin_error("histcounts: BinLimits must be finite"));
-            }
-            if hi < lo {
-                return Err(builtin_error("histcounts: BinLimits must be increasing"));
-            }
         }
         Ok(())
+    } else {
+        validate_edges(edges)
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BinMethod {
-    Auto,
-    Scott,
-    Fd,
-    Sturges,
-    Sqrt,
-    Integers,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-enum HistogramNormalization {
-    #[default]
-    Count,
-    Probability,
-    CountDensity,
-    Pdf,
-    CumCount,
-    Cdf,
 }
 
 #[derive(Clone)]
 pub struct HistcountsEvaluation {
     counts: Tensor,
     edges: Tensor,
+    bins: Option<Tensor>,
 }
 
 impl HistcountsEvaluation {
-    fn new(counts: Tensor, edges: Tensor) -> Self {
-        Self { counts, edges }
+    fn new(counts: Tensor, edges: Tensor, bins: Option<Tensor>) -> Self {
+        Self {
+            counts,
+            edges,
+            bins,
+        }
     }
 
     pub fn into_counts_value(self) -> Value {
@@ -1004,745 +265,18 @@ impl HistcountsEvaluation {
         let edges = self.edges;
         (Value::Tensor(counts), Value::Tensor(edges))
     }
-}
 
-fn parse_options(args: &[Value]) -> BuiltinResult<HistcountsOptions> {
-    let mut options = HistcountsOptions::default();
-    let mut index = 0;
-
-    if index < args.len() && !is_option_key(&args[index]) {
-        match classify_bin_argument(&args[index])? {
-            BinArgument::NumBins(n) => {
-                options.num_bins = Some(n);
-            }
-            BinArgument::Edges(edges) => {
-                validate_edges(&edges)?;
-                options.explicit_edges = Some(edges);
-            }
-        }
-        index += 1;
-    }
-
-    while index < args.len() {
-        let key = tensor::value_to_string(&args[index])
-            .ok_or_else(|| builtin_error("histcounts: expected name/value pair arguments"))?;
-        index += 1;
-        if index >= args.len() {
-            return Err(builtin_error(format!(
-                "histcounts: missing value for option '{key}'"
-            )));
-        }
-        let lowered = key.trim().to_ascii_lowercase();
-        let value = &args[index];
-        index += 1;
-
-        match lowered.as_str() {
-            "binedges" => {
-                let edges = numeric_vector(value, "histcounts", "BinEdges")?;
-                validate_edges(&edges)?;
-                options.explicit_edges = Some(edges);
-            }
-            "numbins" => {
-                let scalar = positive_usize(value, "histcounts", "NumBins")?;
-                options.num_bins = Some(scalar);
-            }
-            "binwidth" => {
-                let width = positive_scalar(value, "histcounts", "BinWidth")?;
-                options.bin_width = Some(width);
-            }
-            "binlimits" => {
-                let limits = numeric_vector(value, "histcounts", "BinLimits")?;
-                if limits.len() != 2 {
-                    return Err(builtin_error(
-                        "histcounts: BinLimits must contain exactly two elements",
-                    ));
-                }
-                let lo = limits[0];
-                let hi = limits[1];
-                if hi < lo {
-                    return Err(builtin_error("histcounts: BinLimits must be increasing"));
-                }
-                if !lo.is_finite() || !hi.is_finite() {
-                    return Err(builtin_error("histcounts: BinLimits must be finite"));
-                }
-                options.bin_limits = Some((lo, hi));
-            }
-            "normalization" => {
-                let text = tensor::value_to_string(value)
-                    .ok_or_else(|| builtin_error("histcounts: Normalization must be a string"))?;
-                options.normalization = parse_normalization(&text)?;
-            }
-            "binmethod" => {
-                let text = tensor::value_to_string(value)
-                    .ok_or_else(|| builtin_error("histcounts: BinMethod must be a string"))?;
-                options.bin_method = Some(parse_bin_method(&text)?);
-            }
-            other => {
-                return Err(builtin_error(format!(
-                    "histcounts: unrecognised option '{other}'"
-                )));
-            }
-        }
-    }
-
-    options.validate()?;
-    Ok(options)
-}
-
-#[derive(Debug)]
-enum BinArgument {
-    NumBins(usize),
-    Edges(Vec<f64>),
-}
-
-fn classify_bin_argument(value: &Value) -> BuiltinResult<BinArgument> {
-    match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let n = positive_usize(value, "histcounts", "NumBins")?;
-            Ok(BinArgument::NumBins(n))
-        }
-        Value::Tensor(tensor) => {
-            if tensor::is_scalar_tensor(tensor) {
-                Ok(BinArgument::NumBins(positive_usize(
-                    value,
-                    "histcounts",
-                    "NumBins",
-                )?))
-            } else {
-                let edges = tensor::tensor_values_f64(tensor);
-                Ok(BinArgument::Edges(edges))
-            }
-        }
-        Value::LogicalArray(logical) => {
-            if logical.data.len() == 1 {
-                Ok(BinArgument::NumBins(positive_usize_from_f64(
-                    f64::from(logical.data[0]),
-                    "histcounts",
-                    "NumBins",
-                )?))
-            } else {
-                Ok(BinArgument::Edges(
-                    logical.data.iter().copied().map(f64::from).collect(),
-                ))
-            }
-        }
-        Value::GpuTensor(_) => Err(build_runtime_error(
-            "histcounts: bin specification cannot be a gpuArray",
-        )
-        .with_builtin(BUILTIN_NAME)
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Requested)
-        .build()),
-        other => Err(builtin_error(format!(
-            "histcounts: unsupported bin specification {:?}",
-            other
-        ))),
-    }
-}
-
-fn is_option_key(value: &Value) -> bool {
-    if let Some(text) = tensor::value_to_string(value) {
-        let lowered = text.trim().to_ascii_lowercase();
-        matches!(
-            lowered.as_str(),
-            "binedges" | "numbins" | "binwidth" | "binlimits" | "normalization" | "binmethod"
-        )
-    } else {
-        false
-    }
-}
-
-fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<f64>> {
-    let tensor = tensor::value_to_tensor(value)
-        .map_err(|_| builtin_error(format!("{name}: {option} must be numeric")))?;
-    Ok(tensor::tensor_into_values_f64(tensor))
-}
-
-fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
-    if let Some(value) = tensor::scalar_integer_value(value) {
-        return value
-            .try_to_usize()
-            .filter(|value| *value > 0 && *value < usize::MAX)
-            .ok_or_else(|| {
-                builtin_error(format!("{name}: {option} must be a positive finite scalar"))
-            });
-    }
-    let scalar = scalar_value(value, name, option)?;
-    positive_usize_from_f64(scalar, name, option)
-}
-
-fn positive_usize_from_f64(scalar: f64, name: &str, option: &str) -> BuiltinResult<usize> {
-    if scalar <= 0.0 || !scalar.is_finite() {
-        return Err(builtin_error(format!(
-            "{name}: {option} must be a positive finite scalar"
-        )));
-    }
-    let rounded = scalar.round();
-    if (scalar - rounded).abs() > f64::EPSILON {
-        return Err(builtin_error(format!(
-            "{name}: {option} must be an integer"
-        )));
-    }
-    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
-        return Err(builtin_error(format!(
-            "{name}: {option} is outside the supported range"
-        )));
-    }
-    Ok(rounded as usize)
-}
-
-fn positive_scalar(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
-    let scalar = scalar_value(value, name, option)?;
-    if !scalar.is_finite() || scalar <= 0.0 {
-        if name == BUILTIN_NAME && option == "BinWidth" {
-            return Err(descriptor_error(&HISTCOUNTS_ERROR_BINWIDTH_INVALID));
-        }
-        return Err(builtin_error(format!(
-            "{name}: {option} must be a positive finite scalar"
-        )));
-    }
-    Ok(scalar)
-}
-
-fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
-    match value {
-        Value::Num(n) => Ok(*n),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) => {
-            if !tensor::is_scalar_tensor(tensor) {
-                return Err(builtin_error(format!("{name}: {option} must be a scalar")));
-            }
-            Ok(tensor::tensor_value_f64(tensor, 0))
-        }
-        Value::LogicalArray(logical) => {
-            if logical.data.len() != 1 {
-                return Err(builtin_error(format!("{name}: {option} must be a scalar")));
-            }
-            Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
-        }
-        other => Err(builtin_error(format!(
-            "{name}: {option} must be numeric, got {:?}",
-            other
-        ))),
-    }
-}
-
-fn parse_bin_method(text: &str) -> BuiltinResult<BinMethod> {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "auto" => Ok(BinMethod::Auto),
-        "scott" => Ok(BinMethod::Scott),
-        "fd" | "freedmandiaconis" => Ok(BinMethod::Fd),
-        "sturges" => Ok(BinMethod::Sturges),
-        "sqrt" => Ok(BinMethod::Sqrt),
-        "integers" => Ok(BinMethod::Integers),
-        other => Err(builtin_error(format!(
-            "histcounts: unrecognised BinMethod value '{other}'"
-        ))),
-    }
-}
-
-fn parse_normalization(text: &str) -> BuiltinResult<HistogramNormalization> {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "count" => Ok(HistogramNormalization::Count),
-        "probability" => Ok(HistogramNormalization::Probability),
-        "countdensity" => Ok(HistogramNormalization::CountDensity),
-        "pdf" | "probabilitydensity" => Ok(HistogramNormalization::Pdf),
-        "cumcount" => Ok(HistogramNormalization::CumCount),
-        "cdf" => Ok(HistogramNormalization::Cdf),
-        other => Err(builtin_error(format!(
-            "histcounts: unrecognised Normalization value '{other}'"
-        ))),
+    fn into_triple(self) -> BuiltinResult<(Value, Value, Value)> {
+        let bins = self.bins.ok_or_else(|| {
+            builtin_error("histcounts: bin indices were not prepared for the requested output")
+        })?;
+        Ok((
+            Value::Tensor(self.counts),
+            Value::Tensor(self.edges),
+            Value::Tensor(bins),
+        ))
     }
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::builtins::common::test_support;
-    use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
-
-    fn values_from_tensor(value: Value) -> Vec<f64> {
-        match value {
-            Value::Tensor(t) => t.materialize_f64(),
-            Value::Num(n) => vec![n],
-            other => panic!("unexpected value {other:?}"),
-        }
-    }
-
-    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
-    }
-
-    #[test]
-    fn histcounts_type_defaults_to_row_vector() {
-        let ctx = ResolveContext::new(Vec::new());
-        let out = histcounts_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(5), Some(1)]),
-            }],
-            &ctx,
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
-    #[test]
-    fn histcounts_type_uses_edge_vector_length() {
-        let ctx = ResolveContext::new(Vec::new());
-        let out = histcounts_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(5), Some(1)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(6)]),
-                },
-            ],
-            &ctx,
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(5)])
-            }
-        );
-    }
-
-    #[test]
-    fn histcounts_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = HISTCOUNTS_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"N = histcounts(X)"));
-        assert!(labels.contains(&"N = histcounts(X, bins)"));
-        assert!(labels.contains(&"[N, edges] = histcounts(X, Name, Value, ...)"));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_basic_numbins() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0, 5.0, 7.0], vec![6, 1]).unwrap();
-        let eval = block_on(evaluate(
-            Value::Tensor(tensor),
-            &[Value::Int(IntValue::I32(3))],
-        ))
-        .expect("histcounts");
-        let (counts_val, edges_val) = eval.into_pair();
-        assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
-        assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_data_reads_typed_integer_storage_exactly() {
-        let eval = block_on(evaluate(
-            integer_tensor(IntegerStorage::I16(vec![1, 2, 2, 4, 5, 7]), vec![6, 1]),
-            &[Value::Int(IntValue::I32(3))],
-        ))
-        .expect("histcounts");
-        let (counts_val, edges_val) = eval.into_pair();
-        assert_eq!(values_from_tensor(counts_val), vec![3.0, 1.0, 2.0]);
-        assert_eq!(values_from_tensor(edges_val), vec![1.0, 3.0, 5.0, 7.0]);
-    }
-
-    #[test]
-    fn histcounts_automatic_bins_compact_unrepresentable_wide_integer_edges() {
-        let wide = 9_007_199_254_740_993_u64;
-        let eval = block_on(evaluate(
-            integer_tensor(
-                IntegerStorage::U64(vec![wide, wide + 1, wide + 2, wide + 3]),
-                vec![4, 1],
-            ),
-            &[],
-        ))
-        .expect("wide integer histcounts");
-        let (counts, edges) = eval.into_pair();
-        let counts = values_from_tensor(counts);
-        let edges = values_from_tensor(edges);
-        assert_eq!(counts.iter().sum::<f64>(), 4.0);
-        assert!(edges.windows(2).all(|pair| pair[0] < pair[1]));
-    }
-
-    #[test]
-    fn histcounts_accepts_every_host_integer_class_and_returns_double_outputs() {
-        let storages = vec![
-            IntegerStorage::I8(vec![1, 2, 3]),
-            IntegerStorage::I16(vec![1, 2, 3]),
-            IntegerStorage::I32(vec![1, 2, 3]),
-            IntegerStorage::I64(vec![1, 2, 3]),
-            IntegerStorage::U8(vec![1, 2, 3]),
-            IntegerStorage::U16(vec![1, 2, 3]),
-            IntegerStorage::U32(vec![1, 2, 3]),
-            IntegerStorage::U64(vec![1, 2, 3]),
-        ];
-        for storage in storages {
-            let eval = block_on(evaluate(
-                integer_tensor(storage, vec![3, 1]),
-                &[Value::Tensor(
-                    Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("edges"),
-                )],
-            ))
-            .expect("histcounts");
-            let (counts, edges) = eval.into_pair();
-            for (value, expected) in [(counts, vec![1.0, 2.0]), (edges, vec![0.0, 2.0, 4.0])] {
-                let Value::Tensor(tensor) = value else {
-                    panic!("expected double tensor");
-                };
-                assert_eq!(tensor.materialize_f64(), expected);
-                assert!(matches!(
-                    tensor.into_numeric_storage().unwrap(),
-                    NumericStorage::F64(_)
-                ));
-            }
-        }
-    }
-
-    #[test]
-    fn histcounts_numbins_preserves_typed_integers_and_rejects_lossy_f64() {
-        assert_eq!(
-            positive_usize(&Value::Int(IntValue::U16(3)), "histcounts", "NumBins").unwrap(),
-            3
-        );
-        assert_eq!(
-            positive_usize(
-                &integer_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
-                "histcounts",
-                "NumBins",
-            )
-            .unwrap(),
-            4
-        );
-        assert_eq!(
-            positive_usize(
-                &integer_tensor(IntegerStorage::U16(vec![9]), vec![1, 1]),
-                "histcounts",
-                "NumBins",
-            )
-            .unwrap(),
-            9
-        );
-        for value in [
-            Value::Int(IntValue::I8(-1)),
-            integer_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
-            integer_tensor(IntegerStorage::U64(vec![usize::MAX as u64]), vec![1, 1]),
-            Value::Num(1.5),
-            Value::Num(usize::MAX as f64 + 1.0),
-        ] {
-            assert!(positive_usize(&value, "histcounts", "NumBins").is_err());
-        }
-    }
-
-    #[test]
-    fn histcounts_numeric_vectors_read_typed_integer_storage_exactly() {
-        assert_eq!(
-            numeric_vector(
-                &integer_tensor(IntegerStorage::I16(vec![1, 3, 5]), vec![1, 3]),
-                "histcounts",
-                "BinEdges",
-            )
-            .unwrap(),
-            vec![1.0, 3.0, 5.0]
-        );
-        match classify_bin_argument(&integer_tensor(
-            IntegerStorage::U16(vec![2, 4, 6]),
-            vec![1, 3],
-        ))
-        .unwrap()
-        {
-            BinArgument::Edges(edges) => assert_eq!(edges, vec![2.0, 4.0, 6.0]),
-            other => panic!("expected edge vector, got {other:?}"),
-        }
-        assert_eq!(
-            scalar_value(
-                &integer_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
-                "histcounts",
-                "BinWidth",
-            )
-            .unwrap(),
-            2.0
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_binwidth_and_limits() {
-        let tensor = Tensor::new(vec![5.0, 7.0, 8.0, 10.0, 12.0], vec![5, 1]).unwrap();
-        let eval = block_on(evaluate(
-            Value::Tensor(tensor),
-            &[
-                Value::from("BinWidth"),
-                Value::Num(2.0),
-                Value::from("BinLimits"),
-                Value::Tensor(Tensor::new(vec![4.0, 12.0], vec![2, 1]).unwrap()),
-            ],
-        ))
-        .expect("histcounts");
-        let (counts_val, edges_val) = eval.into_pair();
-        assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0, 2.0]);
-        assert_eq!(
-            values_from_tensor(edges_val),
-            vec![4.0, 6.0, 8.0, 10.0, 12.0]
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_probability_normalization() {
-        let data = Tensor::new(vec![0.2, 0.4, 1.1, 1.4, 1.8, 2.5], vec![6, 1]).unwrap();
-        let eval = block_on(evaluate(
-            Value::Tensor(data),
-            &[
-                Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap()),
-                Value::from("Normalization"),
-                Value::from("probability"),
-            ],
-        ))
-        .expect("histcounts");
-        let (counts_val, _) = eval.into_pair();
-        let counts = values_from_tensor(counts_val);
-        assert!((counts[0] - 0.3333).abs() < 5e-4);
-        assert!((counts[1] - 0.5).abs() < 5e-4);
-        assert!((counts[2] - 0.1667).abs() < 5e-4);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_cdf_normalization() {
-        let data = Tensor::new(vec![1.0, 2.0, 2.0, 3.0], vec![4, 1]).unwrap();
-        let eval = block_on(evaluate(
-            Value::Tensor(data),
-            &[
-                Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap()),
-                Value::from("Normalization"),
-                Value::from("cdf"),
-            ],
-        ))
-        .expect("histcounts");
-        let (counts_val, _) = eval.into_pair();
-        let counts = values_from_tensor(counts_val);
-        assert_eq!(counts, vec![0.0, 0.25, 1.0]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_handles_nan() {
-        let data = Tensor::new(vec![1.0, f64::NAN, 2.0, f64::NAN, 3.0], vec![5, 1]).unwrap();
-        let eval = block_on(evaluate(
-            Value::Tensor(data),
-            &[Value::Int(IntValue::I32(3))],
-        ))
-        .expect("histcounts");
-        let (counts_val, _) = eval.into_pair();
-        assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_constant_data_single_bin() {
-        let data = Tensor::new(vec![4.0, 4.0, 4.0], vec![3, 1]).unwrap();
-        let eval = block_on(evaluate(Value::Tensor(data), &[])).expect("histcounts");
-        let (counts_val, edges_val) = eval.into_pair();
-        assert_eq!(values_from_tensor(counts_val), vec![3.0]);
-        assert_eq!(values_from_tensor(edges_val), vec![3.5, 4.5]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_binmethod_sqrt() {
-        let data: Vec<f64> = (1..=16).map(|v| v as f64).collect();
-        let tensor = Tensor::new(data, vec![16, 1]).unwrap();
-        let eval = block_on(evaluate(
-            Value::Tensor(tensor),
-            &[Value::from("BinMethod"), Value::from("sqrt")],
-        ))
-        .expect("histcounts");
-        let (counts_val, edges_val) = eval.into_pair();
-        assert_eq!(values_from_tensor(counts_val).len(), 4);
-        assert_eq!(values_from_tensor(edges_val).len(), 5);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_binmethod_integers_with_limits() {
-        let tensor = Tensor::new(vec![2.2, 2.8, 3.4, 3.9], vec![4, 1]).unwrap();
-        let eval = block_on(evaluate(
-            Value::Tensor(tensor),
-            &[
-                Value::from("BinMethod"),
-                Value::from("integers"),
-                Value::from("BinLimits"),
-                Value::Tensor(Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap()),
-            ],
-        ))
-        .expect("histcounts");
-        let (counts_val, edges_val) = eval.into_pair();
-        let counts = values_from_tensor(counts_val);
-        let edges = values_from_tensor(edges_val);
-        assert_eq!(counts, vec![2.0, 2.0]);
-        assert_eq!(edges, vec![2.0, 3.0, 4.0]);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_binmethod_conflict_errors() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = block_on(evaluate(
-            Value::Tensor(tensor),
-            &[
-                Value::from("BinMethod"),
-                Value::from("auto"),
-                Value::from("NumBins"),
-                Value::Num(5.0),
-            ],
-        ))
-        .err()
-        .expect("BinMethod + NumBins should fail");
-        assert_eq!(
-            err.identifier(),
-            HISTCOUNTS_ERROR_BINMETHOD_CONFLICT.identifier
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_invalid_binwidth_errors() {
-        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = block_on(evaluate(
-            Value::Tensor(tensor),
-            &[Value::from("BinWidth"), Value::Num(0.0)],
-        ))
-        .err()
-        .expect("non-positive BinWidth should fail");
-        assert_eq!(
-            err.identifier(),
-            HISTCOUNTS_ERROR_BINWIDTH_INVALID.identifier
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn histcounts_gpu_roundtrip() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-            let eval = block_on(evaluate(
-                Value::GpuTensor(handle),
-                &[Value::Tensor(
-                    Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap(),
-                )],
-            ))
-            .expect("histcounts");
-            let (counts_val, edges_val) = eval.into_pair();
-            assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);
-            assert_eq!(values_from_tensor(edges_val), vec![0.0, 1.0, 2.0, 3.0]);
-        });
-    }
-
-    #[test]
-    fn histcounts_rejects_64_bit_integer_gpu_inputs_before_gather() {
-        test_support::with_test_provider(|provider| {
-            for storage in [
-                IntegerStorage::I64(vec![1, 2, 3]),
-                IntegerStorage::U64(vec![1, 2, 3]),
-            ] {
-                let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
-                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-                let error = block_on(evaluate(Value::GpuTensor(handle), &[]))
-                    .err()
-                    .expect("64-bit integer gpuArray should be rejected");
-                assert!(error
-                    .message()
-                    .contains("64-bit integer gpuArray inputs are not supported"));
-            }
-        });
-    }
-
-    #[test]
-    fn public_dispatch_preserves_64_bit_integer_gpu_rejection() {
-        test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 3]), vec![3, 1])
-                .expect("integer tensor");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-            let error = crate::dispatcher::call_builtin("histcounts", &[Value::GpuTensor(handle)])
-                .expect_err("public dispatch must not gather an unsupported 64-bit GPU form");
-            assert!(error
-                .message()
-                .contains("64-bit integer gpuArray inputs are not supported"));
-        });
-    }
-
-    #[test]
-    fn public_dispatch_still_gathers_resident_bin_specifications() {
-        test_support::with_test_provider(|provider| {
-            let bins = Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("bin edges");
-            let bins = gpu_helpers::upload_tensor(provider, &bins).expect("resident bin edges");
-            let data = Value::Tensor(
-                Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).expect("histogram data"),
-            );
-            let value =
-                crate::dispatcher::call_builtin("histcounts", &[data, Value::GpuTensor(bins)])
-                    .expect("legacy dispatcher fallback gathers resident bin edges");
-            let Value::Tensor(counts) = value else {
-                panic!("expected count tensor");
-            };
-            assert_eq!(counts.materialize_f64(), vec![2.0, 1.0]);
-        });
-    }
-
-    #[test]
-    fn histcounts_accepts_supported_integer_gpu_classes() {
-        test_support::with_test_provider(|provider| {
-            for storage in [
-                IntegerStorage::I8(vec![1, 2, 3]),
-                IntegerStorage::I16(vec![1, 2, 3]),
-                IntegerStorage::I32(vec![1, 2, 3]),
-                IntegerStorage::U8(vec![1, 2, 3]),
-                IntegerStorage::U16(vec![1, 2, 3]),
-                IntegerStorage::U32(vec![1, 2, 3]),
-            ] {
-                let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
-                let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-                let eval = block_on(evaluate(
-                    Value::GpuTensor(handle),
-                    &[Value::Tensor(
-                        Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).expect("edges"),
-                    )],
-                ))
-                .expect("supported integer gpuArray");
-                let (counts, edges) = eval.into_pair();
-                assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
-                assert_eq!(values_from_tensor(edges), vec![0.0, 2.0, 4.0]);
-            }
-        });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn histcounts_wgpu_roundtrip() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
-        let tensor = Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap();
-        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-        let eval = block_on(evaluate(
-            Value::GpuTensor(handle),
-            &[Value::Tensor(
-                Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap(),
-            )],
-        ))
-        .expect("histcounts");
-        let (counts_val, edges_val) = eval.into_pair();
-        assert_eq!(values_from_tensor(counts_val), vec![1.0, 1.0, 1.0]);
-        assert_eq!(values_from_tensor(edges_val), vec![0.0, 1.0, 2.0, 3.0]);
-    }
-}
+mod tests;

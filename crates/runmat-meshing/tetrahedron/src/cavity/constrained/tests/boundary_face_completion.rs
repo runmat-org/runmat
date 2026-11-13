@@ -20,7 +20,8 @@ fn boundary_face_completion_skips_duplicate_cap_tetrahedra() {
         &[duplicate_cap],
         &boundary_triangles,
         options,
-    );
+    )
+    .expect("candidate search should be admitted");
 
     assert!(candidate.is_none());
 }

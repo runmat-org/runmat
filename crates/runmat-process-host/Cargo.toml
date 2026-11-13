@@ -1,6 +1,6 @@
 [package]
 name = "runmat-process-host"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -10,21 +10,32 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-std", "io-util", "process", "rt", "sync"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
+rand = "0.8"
+hmac = { workspace = true }
+sha2 = { workspace = true }
+sha2-mac = { workspace = true }
+zeroize = { workspace = true }
+tempfile = "3.20"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+libc = "0.2"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    "Win32_System_Console",
+    "Win32_System_Performance",
+    "Win32_Storage_FileSystem",
 ] }
 
 [dev-dependencies]
-serde_json = { workspace = true }
-tempfile = "3.12"
+tempfile = "3.20"
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }

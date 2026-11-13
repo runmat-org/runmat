@@ -8,9 +8,9 @@ use runmat_value::Value;
 fn squeeze_basic() {
     let t = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
     let v = rt::call_builtin("squeeze", &[Value::Tensor(t)]).unwrap();
-    match v {
+    match v.value() {
         Value::Tensor(tt) => {
-            assert_eq!(tt.shape, vec![2, 2]);
+            assert_eq!(tt.shape(), &[2, 2]);
         }
         _ => panic!("expected tensor"),
     }
@@ -23,8 +23,8 @@ fn permute_swap_dims() {
     // order [2 1]
     let ord = runmat_value::Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap();
     let v = rt::call_builtin("permute", &[Value::Tensor(t.clone()), Value::Tensor(ord)]).unwrap();
-    if let Value::Tensor(p) = v {
-        assert_eq!(p.shape, vec![3, 2]);
+    if let Value::Tensor(p) = v.value() {
+        assert_eq!(p.shape(), &[3, 2]);
     } else {
         panic!("expected tensor")
     }
@@ -40,8 +40,8 @@ fn cat_dim1() {
         &[Value::Num(1.0), Value::Tensor(a), Value::Tensor(b)],
     )
     .unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![4, 2]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[4, 2]);
     } else {
         panic!("expected tensor")
     }
@@ -63,8 +63,8 @@ fn cat_variadic_three_inputs() {
         ],
     )
     .unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![2, 3]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[2, 3]);
     } else {
         panic!("expected tensor")
     }
@@ -79,8 +79,8 @@ fn repmat_2d() {
         &[Value::Tensor(a), Value::Num(2.0), Value::Num(3.0)],
     )
     .unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![4, 6]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[4, 6]);
     } else {
         panic!("expected tensor")
     }
@@ -92,8 +92,8 @@ fn repmat_nd_vector_form() {
     let a = runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
     let reps = runmat_value::Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let v = rt::call_builtin("repmat", &[Value::Tensor(a), Value::Tensor(reps)]).unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![3, 8]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[3, 8]);
     } else {
         panic!("expected tensor")
     }
@@ -104,8 +104,8 @@ fn repmat_nd_vector_form() {
 fn repelem_row_vector_scalar_form() {
     let a = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(2.0)]).unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![1, 6]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[1, 6]);
         assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     } else {
         panic!("expected tensor")
@@ -118,8 +118,8 @@ fn repelem_row_vector_count_form() {
     let a = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let counts = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Tensor(counts)]).unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![1, 6]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[1, 6]);
         assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
     } else {
         panic!("expected tensor")
@@ -139,8 +139,8 @@ fn repelem_matrix_block_form() {
         &[Value::Tensor(magic), Value::Num(2.0), Value::Num(3.0)],
     )
     .unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![6, 9]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[6, 9]);
         assert_eq!(t.materialize_f64()[0], 8.0);
         assert_eq!(t.materialize_f64()[1], 8.0);
         assert_eq!(t.materialize_f64()[6], 8.0);
@@ -156,8 +156,8 @@ fn repelem_matrix_block_form() {
 fn repelem_empty_column_preserves_orientation() {
     let a = runmat_value::Tensor::new(Vec::new(), vec![0, 1]).unwrap();
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(3.0)]).unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![0, 1]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[0, 1]);
         assert!(t.materialize_f64().is_empty());
     } else {
         panic!("expected tensor")
@@ -169,8 +169,8 @@ fn repelem_empty_column_preserves_orientation() {
 fn repelem_single_factor_uses_unique_nd_non_singleton_axis() {
     let a = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 1, 3]).unwrap();
     let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(2.0)]).unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![1, 1, 6]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[1, 1, 6]);
         assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
     } else {
         panic!("expected tensor")
@@ -195,10 +195,10 @@ fn repelem_cell_array_nd() {
         ],
     )
     .unwrap();
-    if let Value::Cell(out) = v {
+    if let Value::Cell(out) = v.value() {
         assert_eq!(out.shape, vec![1, 1, 4]);
         let values: Vec<f64> = out
-            .data
+            .data()
             .iter()
             .map(|ptr| match ptr {
                 Value::Num(n) => *n,
@@ -223,8 +223,8 @@ fn linspace_basic() {
         ],
     )
     .unwrap();
-    if let Value::Tensor(t) = v {
-        assert_eq!(t.shape, vec![1, 5]);
+    if let Value::Tensor(t) = v.value() {
+        assert_eq!(t.shape(), &[1, 5]);
         assert!((t.materialize_f64()[4] - 1.0).abs() < 1e-9);
     } else {
         panic!("expected tensor")
@@ -238,8 +238,8 @@ fn meshgrid_basic() {
     let y = runmat_value::Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
     // meshgrid returns its first output by default; ensure the shape follows MATLAB conventions
     let v = rt::call_builtin("meshgrid", &[Value::Tensor(x), Value::Tensor(y)]).unwrap();
-    if let Value::Tensor(t) = v {
-        assert!(t.shape == vec![2, 3] || t.shape == vec![3, 2]);
+    if let Value::Tensor(t) = v.value() {
+        assert!(t.shape() == [2, 3] || t.shape() == [3, 2]);
     } else {
         panic!("expected tensor")
     }
@@ -251,12 +251,12 @@ fn diag_vector_to_matrix_and_back() {
     // Vector -> diag matrix -> extract main diagonal
     let v = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let m = rt::call_builtin("diag", &[Value::Tensor(v)]).unwrap();
-    if let Value::Tensor(mt) = &m {
-        assert_eq!(mt.shape, vec![3, 3]);
+    if let Value::Tensor(mt) = m.value() {
+        assert_eq!(mt.shape(), &[3, 3]);
     }
-    let d = rt::call_builtin("diag", &[m]).unwrap();
-    if let Value::Tensor(dt) = d {
-        assert_eq!(dt.shape, vec![3, 1]);
+    let d = rt::call_builtin("diag", &[m.value().clone()]).unwrap();
+    if let Value::Tensor(dt) = d.value() {
+        assert_eq!(dt.shape(), &[3, 1]);
         assert!((dt.materialize_f64()[2] - 3.0).abs() < 1e-9);
     } else {
         panic!("expected tensor")
@@ -269,13 +269,13 @@ fn triu_tril_shapes() {
     let a = runmat_value::Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     let u = rt::call_builtin("triu", &[Value::Tensor(a.clone())]).unwrap();
     let l = rt::call_builtin("tril", &[Value::Tensor(a)]).unwrap();
-    if let Value::Tensor(ut) = u {
-        assert_eq!(ut.shape, vec![2, 2]);
+    if let Value::Tensor(ut) = u.value() {
+        assert_eq!(ut.shape(), &[2, 2]);
     } else {
         panic!("expected tensor")
     }
-    if let Value::Tensor(lt) = l {
-        assert_eq!(lt.shape, vec![2, 2]);
+    if let Value::Tensor(lt) = l.value() {
+        assert_eq!(lt.shape(), &[2, 2]);
     } else {
         panic!("expected tensor")
     }

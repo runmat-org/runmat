@@ -18,8 +18,12 @@ fn ensure_fusion_regression_env() {
 fn read_scalar(engine: &mut RunMatSession, expr: &str) -> f64 {
     let result = runmat_core::execute_text_request_for_testing(engine, expr)
         .expect("evaluate scalar expression");
-    match result.value.expect("scalar value should be available") {
-        Value::Num(value) => value,
+    match result
+        .value
+        .as_ref()
+        .expect("scalar value should be available")
+    {
+        Value::Num(value) => *value,
         Value::Tensor(tensor) if tensor.len() == 1 => tensor.materialize_f64()[0],
         other => panic!("expected scalar numeric value, got {other:?}"),
     }
@@ -224,6 +228,7 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
         runmat_core::execute_text_request_for_testing(&mut engine, script).expect("execute script");
     let snapshot = result
         .fusion_plan
+        .as_ref()
         .expect("expected runtime fusion plan snapshot");
 
     assert_eq!(

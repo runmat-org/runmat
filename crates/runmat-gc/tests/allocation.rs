@@ -23,7 +23,7 @@ fn test_multiple_allocations() {
             Value::Num(1.0),
             Value::Int(runmat_value::IntValue::I32(2)),
             Value::Bool(true),
-            Value::String("test".to_string()),
+            Value::String("test".to_string().into()),
         ];
 
         let mut ptrs = Vec::new();
@@ -47,7 +47,7 @@ fn test_multiple_allocations() {
         );
         assert_eq!(
             gc_clone_value(&ptrs[3]).expect("valid GC handle"),
-            Value::String("test".to_string())
+            Value::String("test".to_string().into())
         );
     });
 }
@@ -62,8 +62,8 @@ fn test_matrix_allocation() {
         let ptr = gc_allocate(value).expect("allocation should succeed");
 
         if let Value::Tensor(ref m) = gc_clone_value(&ptr).expect("valid GC handle") {
-            assert_eq!(m.rows, 2);
-            assert_eq!(m.cols, 2);
+            assert_eq!(m.rows(), 2);
+            assert_eq!(m.cols(), 2);
             assert_eq!(m.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
         } else {
             panic!("Expected Matrix value");
@@ -76,7 +76,7 @@ fn test_cell_allocation() {
     gc_test_context(|| {
         let cell_contents = vec![
             Value::Num(1.0),
-            Value::String("nested".to_string()),
+            Value::String("nested".to_string().into()),
             Value::Bool(false),
         ];
         let cell = Value::Cell(runmat_value::CellArray::new(cell_contents.clone(), 1, 3).unwrap());
@@ -84,10 +84,13 @@ fn test_cell_allocation() {
         let ptr = gc_allocate(cell).expect("allocation should succeed");
 
         if let Value::Cell(ref contents) = gc_clone_value(&ptr).expect("valid GC handle") {
-            assert_eq!(contents.data.len(), 3);
-            assert_eq!(&contents.data[0], &Value::Num(1.0));
-            assert_eq!(&contents.data[1], &Value::String("nested".to_string()));
-            assert_eq!(&contents.data[2], &Value::Bool(false));
+            assert_eq!(contents.data().len(), 3);
+            assert_eq!(&contents.data()[0], &Value::Num(1.0));
+            assert_eq!(
+                &contents.data()[1],
+                &Value::String("nested".to_string().into())
+            );
+            assert_eq!(&contents.data()[2], &Value::Bool(false));
         } else {
             panic!("Expected Cell value");
         }
@@ -136,8 +139,8 @@ fn test_large_allocation() {
         let ptr = gc_allocate(value).expect("large allocation should succeed");
 
         if let Value::Tensor(ref m) = gc_clone_value(&ptr).expect("valid GC handle") {
-            assert_eq!(m.rows, size);
-            assert_eq!(m.cols, size);
+            assert_eq!(m.rows(), size);
+            assert_eq!(m.cols(), size);
             assert_eq!(m.len(), size * size);
         } else {
             panic!("Expected Matrix value");
@@ -195,7 +198,7 @@ fn test_nested_cell_allocation() {
 
         let outer_cell = Value::Cell(
             runmat_value::CellArray::new(
-                vec![inner_cell, Value::String("outer".to_string())],
+                vec![inner_cell, Value::String("outer".to_string().into())],
                 1,
                 2,
             )
@@ -205,17 +208,20 @@ fn test_nested_cell_allocation() {
         let ptr = gc_allocate(outer_cell).expect("allocation should succeed");
 
         if let Value::Cell(ref outer_contents) = gc_clone_value(&ptr).expect("valid GC handle") {
-            assert_eq!(outer_contents.data.len(), 2);
+            assert_eq!(outer_contents.data().len(), 2);
 
-            if let Value::Cell(ref inner_contents) = outer_contents.data[0] {
-                assert_eq!(inner_contents.data.len(), 2);
-                assert_eq!(&inner_contents.data[0], &Value::Num(1.0));
-                assert_eq!(&inner_contents.data[1], &Value::Num(2.0));
+            if let Value::Cell(ref inner_contents) = outer_contents.data()[0] {
+                assert_eq!(inner_contents.data().len(), 2);
+                assert_eq!(&inner_contents.data()[0], &Value::Num(1.0));
+                assert_eq!(&inner_contents.data()[1], &Value::Num(2.0));
             } else {
                 panic!("Expected inner Cell value");
             }
 
-            assert_eq!(&outer_contents.data[1], &Value::String("outer".to_string()));
+            assert_eq!(
+                &outer_contents.data()[1],
+                &Value::String("outer".to_string().into())
+            );
         } else {
             panic!("Expected outer Cell value");
         }

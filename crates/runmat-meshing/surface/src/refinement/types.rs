@@ -17,6 +17,7 @@ pub enum ExactFaceRefinementReason {
     MetricEdgeLength,
     MetricAngle,
     PhysicalAspectRatio,
+    BoundaryMetricSupport,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +32,9 @@ pub struct ExactFaceRefinementCandidate {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExactFaceCandidateDisposition {
     Insert,
+    /// A shape-only point lying on a shared exact curve: it can be neither inserted nor used to
+    /// rewrite the curve, so it is withdrawn.
+    Withdraw,
     SplitProtectedSegment(Box<ExactProtectedSegmentSplit>),
     SplitChartCut(Box<ExactChartCutSplit>),
 }
@@ -91,17 +95,20 @@ pub struct ExactFaceChartRefinementOptions {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExactFaceRefinementPolicy {
     pub quality: SurfaceQualityTargets,
+    pub acceptance: crate::ExactFaceAcceptanceOptions,
     pub delaunay: crate::ExactFaceDelaunayOptions,
     pub refinement: ExactFaceRefinementOptions,
 }
 
 #[derive(Clone, Copy)]
 pub struct ExactFaceRefinementContext<'a> {
+    pub(crate) metric_field: Option<&'a crate::ResolvedFaceMetricField>,
     pub topology: &'a ExactBRepTopology,
     pub metric_request: &'a MetricFieldRequest,
     pub evaluator: &'a dyn ExactSurfaceEvaluator,
     pub geometry_control: &'a dyn GeometryEvaluationControl,
     pub cancellation: &'a dyn MeshingCancellationSignal,
+    pub boundary_coordinates: Option<&'a crate::ExactBoundaryNodeCoordinates<'a>>,
 }
 
 impl<'a> ExactFaceRefinementContext<'a> {
@@ -113,11 +120,30 @@ impl<'a> ExactFaceRefinementContext<'a> {
         cancellation: &'a dyn MeshingCancellationSignal,
     ) -> Self {
         Self {
+            metric_field: None,
             topology,
             metric_request,
             evaluator,
             geometry_control,
             cancellation,
+            boundary_coordinates: None,
+        }
+    }
+    pub fn with_boundary_coordinates(
+        mut self,
+        coordinates: &'a crate::ExactBoundaryNodeCoordinates<'a>,
+    ) -> Self {
+        self.boundary_coordinates = Some(coordinates);
+        self
+    }
+    pub(crate) fn geometry_context(self) -> crate::ExactFaceGeometryContext<'a> {
+        crate::ExactFaceGeometryContext {
+            metric_field: self.metric_field,
+            topology: self.topology,
+            metric_request: self.metric_request,
+            evaluator: self.evaluator,
+            control: self.geometry_control,
+            boundary_coordinates: self.boundary_coordinates,
         }
     }
 }
@@ -156,9 +182,9 @@ pub struct ExactFaceChartRefinedMesh {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExactFaceChartRefinementOutcome {
     Converged(Box<ExactFaceChartRefinedMesh>),
-    RequiresCurveSplit {
+    RequiresCurveSplits {
         chart_id: runmat_meshing_core::StableDigest,
-        split: Box<ExactProtectedSegmentSplit>,
+        splits: Vec<ExactProtectedSegmentSplit>,
         completed_interior_insertions: u32,
         completed_chart_cut_splits: u32,
     },
@@ -169,8 +195,8 @@ pub enum ExactFaceRefinementOutcome {
     Converged(Box<ExactFaceRefinedMesh>),
     /// The global shared curve must be rebuilt before this face is restarted. Any provisional
     /// face-owned insertions are intentionally not authoritative across that boundary change.
-    RequiresCurveSplit {
-        split: Box<ExactProtectedSegmentSplit>,
+    RequiresCurveSplits {
+        splits: Vec<ExactProtectedSegmentSplit>,
         completed_interior_insertions: u32,
     },
     RequiresChartCutSplit {
@@ -184,6 +210,7 @@ pub enum ExactFaceRefinementErrorKind {
     InvalidOptions,
     InvalidQuality,
     InvalidGeometry,
+    UnsatisfiedQuality,
     Metric(ExactFaceMetricErrorKind),
     Geometry(ExactFaceGeometryErrorKind),
     Delaunay(ExactFaceDelaunayErrorKind),

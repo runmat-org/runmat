@@ -35,6 +35,16 @@ impl<T> WasmTlsCell<T> {
         let ptr = self.ensure();
         unsafe { f(&*ptr) }
     }
+
+    /// Matches native TLS access without a thread-destruction failure phase.
+    /// Supported WASM cells are single-threaded statics and live for the instance.
+    /// Panics from initialization or the callback propagate normally.
+    pub fn try_with<R>(
+        &'static self,
+        f: impl FnOnce(&T) -> R,
+    ) -> Result<R, std::thread::AccessError> {
+        Ok(self.with(f))
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -81,4 +91,23 @@ macro_rules! runmat_thread_local {
         $crate::runmat_thread_local! { $($rest)* }
     };
     () => {};
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    crate::runmat_thread_local! {
+        static VALUE: Cell<u32> = const { Cell::new(7) };
+    }
+
+    #[test]
+    fn fallible_and_infallible_access_share_storage() {
+        VALUE.with(|value| value.set(11));
+        assert_eq!(VALUE.try_with(Cell::get).expect("live TLS access"), 11);
+        VALUE
+            .try_with(|value| value.set(19))
+            .expect("live TLS access");
+        assert_eq!(VALUE.with(Cell::get), 19);
+    }
 }

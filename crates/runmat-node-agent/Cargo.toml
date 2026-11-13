@@ -1,6 +1,6 @@
 [package]
 name = "runmat-node-agent"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 license-file = "../../LICENSE.md"
 description = "RunMat remote execution node service"
@@ -10,6 +10,8 @@ anyhow = { workspace = true }
 async-trait = "0.1"
 base64 = "0.22"
 chrono = { workspace = true }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 dirs = "5"
 rand = "0.8"
 serde = { workspace = true }
@@ -20,13 +22,18 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 runmat-execution-transport-native = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-accelerate-api = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-process-host = { workspace = true }
+runmat-filesystem = { workspace = true }
 runmat-server-client = { workspace = true }
+runmat-core = { workspace = true, default-features = false }
+runmat-canonical-codec = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.1"
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+axum = "0.7"
 tempfile = "3.12"

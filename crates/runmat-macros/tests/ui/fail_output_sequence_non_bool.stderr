@@ -1,0 +1,12 @@
+error: custom attribute panicked
+ --> tests/ui/fail_output_sequence_non_bool.rs:3:1
+  |
+3 | / #[runtime_builtin(
+4 | |     name = "bad_sequence_flag",
+5 | |     binding_variant = "default",
+6 | |     output_sequence = "true",
+7 | |     builtin_path = "tests::bad_sequence_flag"
+8 | | )]
+  | |__^
+  |
+  = help: message: output_sequence must be a boolean literal

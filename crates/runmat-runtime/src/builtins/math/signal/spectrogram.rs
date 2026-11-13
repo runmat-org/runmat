@@ -1,19 +1,18 @@
 //! MATLAB-compatible spectrogram using a short-time Fourier transform.
+use runmat_builtins::{
+    BuiltinErrorDescriptor, SPECTROGRAM_ERROR_ARG_COUNT, SPECTROGRAM_ERROR_INTERNAL,
+    SPECTROGRAM_ERROR_INVALID_FREQ, SPECTROGRAM_ERROR_INVALID_FS, SPECTROGRAM_ERROR_INVALID_OPTION,
+    SPECTROGRAM_ERROR_INVALID_OVERLAP, SPECTROGRAM_ERROR_INVALID_SIGNAL,
+    SPECTROGRAM_ERROR_INVALID_WINDOW, SPECTROGRAM_INTEGER_CONTROL_EXTENSION,
+    SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
+};
 
 use num_complex::Complex;
 use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, Tensor, Value};
+use runmat_value::Value;
 use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
@@ -25,7 +24,6 @@ use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_vector_len, parse_nonnegative_integer,
     parse_scalar_f64, selected_frequency_len, value_to_complex_vector,
 };
-use crate::builtins::math::signal::type_resolvers::spectrogram_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "spectrogram";
@@ -59,263 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "spectrogram materialises STFT and spectral estimate matrices and is not fused.",
 };
-
-const SPECTROGRAM_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "s",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Complex short-time Fourier transform matrix.",
-}];
-
-const SPECTROGRAM_OUTPUT_FULL: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "s",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Complex short-time Fourier transform matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Frequencies in radians/sample or Hz when fs is supplied.",
-    },
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Segment midpoint sample indices or time instants when fs is supplied.",
-    },
-    BuiltinParamDescriptor {
-        name: "ps",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Power spectral density or power spectrum estimate for each segment.",
-    },
-    BuiltinParamDescriptor {
-        name: "fc",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Center frequency matrix for reassigned-output compatibility.",
-    },
-    BuiltinParamDescriptor {
-        name: "tc",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Center time matrix for reassigned-output compatibility.",
-    },
-];
-
-const SPECTROGRAM_INPUTS: [BuiltinParamDescriptor; 7] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "win",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Hamming-window length, window vector, or [] for the default window.",
-    },
-    BuiltinParamDescriptor {
-        name: "nOverlap",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Number of overlapped samples between adjacent segments.",
-    },
-    BuiltinParamDescriptor {
-        name: "freqSpec",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "DFT length or explicit frequency vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Fs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Sampling frequency in Hz.",
-    },
-    BuiltinParamDescriptor {
-        name: "freqRange",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Frequency range selector: `onesided`, `twosided`, or `centered`.",
-    },
-    BuiltinParamDescriptor {
-        name: "spectrumType",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("psd"),
-        description: "Spectral estimate scaling: `psd` or `power`.",
-    },
-];
-
-const SPECTROGRAM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "s = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)",
-        inputs: &SPECTROGRAM_INPUTS,
-        outputs: &SPECTROGRAM_OUTPUT_S,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[s, f, t, ps, fc, tc] = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)",
-        inputs: &SPECTROGRAM_INPUTS,
-        outputs: &SPECTROGRAM_OUTPUT_FULL,
-    },
-];
-
-const SPECTROGRAM_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.ARG_COUNT",
-    identifier: Some("RunMat:spectrogram:ArgCount"),
-    when: "The argument count is outside supported forms.",
-    message: "spectrogram: expected spectrogram(x, [win, [nOverlap, [freqSpec, [Fs, [freqRange_or_spectrumType]]]]])",
-};
-
-const SPECTROGRAM_ERROR_INVALID_SIGNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_SIGNAL",
-    identifier: Some("RunMat:spectrogram:InvalidSignal"),
-    when: "Input signal is not a numeric vector.",
-    message: "spectrogram: x must be a nonempty numeric vector",
-};
-
-const SPECTROGRAM_ERROR_INVALID_WINDOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_WINDOW",
-    identifier: Some("RunMat:spectrogram:InvalidWindow"),
-    when: "Window input is invalid.",
-    message:
-        "spectrogram: win must be [] or a nonempty finite real vector or positive integer length",
-};
-
-const SPECTROGRAM_ERROR_INVALID_OVERLAP: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_OVERLAP",
-    identifier: Some("RunMat:spectrogram:InvalidOverlap"),
-    when: "Overlap is invalid.",
-    message: "spectrogram: nOverlap must be a nonnegative integer smaller than the window length",
-};
-
-const SPECTROGRAM_ERROR_INVALID_FREQ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_FREQ",
-    identifier: Some("RunMat:spectrogram:InvalidFreqSpec"),
-    when: "Frequency specification is invalid.",
-    message: "spectrogram: freqSpec must be a positive integer or finite real frequency vector with at least two elements",
-};
-
-const SPECTROGRAM_ERROR_INVALID_FS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_FS",
-    identifier: Some("RunMat:spectrogram:InvalidFs"),
-    when: "Sampling frequency is invalid.",
-    message: "spectrogram: Fs must be a positive finite scalar",
-};
-
-const SPECTROGRAM_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_OPTION",
-    identifier: Some("RunMat:spectrogram:InvalidOption"),
-    when: "Frequency range, spectrum type, or display option is invalid.",
-    message: "spectrogram: expected 'onesided', 'twosided', 'centered', 'psd', 'power', 'reassigned', or 'yaxis'",
-};
-
-const SPECTROGRAM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INTERNAL",
-    identifier: Some("RunMat:spectrogram:Internal"),
-    when: "Output tensor construction fails internally.",
-    message: "spectrogram: internal error",
-};
-
-const SPECTROGRAM_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    SPECTROGRAM_ERROR_ARG_COUNT,
-    SPECTROGRAM_ERROR_INVALID_SIGNAL,
-    SPECTROGRAM_ERROR_INVALID_WINDOW,
-    SPECTROGRAM_ERROR_INVALID_OVERLAP,
-    SPECTROGRAM_ERROR_INVALID_FREQ,
-    SPECTROGRAM_ERROR_INVALID_FS,
-    SPECTROGRAM_ERROR_INVALID_OPTION,
-    SPECTROGRAM_ERROR_INTERNAL,
-];
-
-pub const SPECTROGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPECTROGRAM_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SPECTROGRAM_ERRORS,
-};
-
-const SPECTROGRAM_INTEGER_SIGNAL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "spectrogram-integer-signal",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "spectrogram with a typed-integer signal is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:SpectrogramIntegerSignalExtension"),
-    };
-const SPECTROGRAM_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "spectrogram-integer-numeric-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "spectrogram with typed-integer numeric options is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:SpectrogramIntegerNumericControlExtension"),
-    };
-pub const SPECTROGRAM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
-    SPECTROGRAM_INTEGER_CONTROL_EXTENSION,
-];
-const SPECTROGRAM_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented signal classes are single and double; admitted typed values must be exact at the binary64 STFT boundary.",
-    }];
-const SPECTROGRAM_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    spectrogram_integer_control("win"),
-    spectrogram_integer_control("nOverlap"),
-    spectrogram_integer_control("freqSpec"),
-    spectrogram_integer_control("Fs"),
-];
-const fn spectrogram_integer_control(name: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public documentation establishes single and double storage for this role; RunMat gates typed input and prevents rounded conversion.",
-    }
-}
-pub const SPECTROGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[s,f,t,ps] = spectrogram(integer_x, ...)",
-        inputs: &SPECTROGRAM_INTEGER_SIGNAL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The signal crosses an exact binary64 boundary before host STFT or provider spectral dispatch; GPU support remains provider-dependent.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "spectrogram(x, integer_win/nOverlap/freqSpec/Fs, ...)",
-        inputs: &SPECTROGRAM_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed numeric controls are gated RunMat extensions. Structural scalars are range checked, and numerical vectors enter binary64 only after exact representability is proven.",
-    },
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrequencyRange {
@@ -374,6 +115,16 @@ fn spectrogram_error_with_detail(
     spectrogram_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
+fn spectrogram_control_error(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut error = spectrogram_error_with_detail(error, source.message());
+    error.source = Some(Box::new(source));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 fn spectrogram_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -387,22 +138,25 @@ fn spectrogram_error_with_message(
 
 #[runtime_builtin(
     name = "spectrogram",
-    category = "math/signal",
-    summary = "Compute a short-time Fourier transform spectrogram.",
-    keywords = "spectrogram,stft,psd,power spectrum,time frequency,signal processing",
-    type_resolver(spectrogram_type),
-    descriptor(crate::builtins::math::signal::spectrogram::SPECTROGRAM_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::spectrogram::SPECTROGRAM_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::signal::spectrogram::SPECTROGRAM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::spectrogram"
 )]
-async fn spectrogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(x, &rest).await
+async fn spectrogram_builtin(
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    evaluate_view(x, rest.view()).await
 }
 
+#[cfg(test)]
 pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
+    evaluate_view(x, crate::call::FunctionArgumentView::from_slice(rest)).await
+}
+
+async fn evaluate_view(
+    x: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     if rest.len() > 9 {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_ARG_COUNT));
     }
@@ -410,6 +164,37 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
+    for (value, extension) in std::iter::once((&x, &SPECTROGRAM_INTEGER_SIGNAL_EXTENSION)).chain(
+        rest.iter()
+            .map(|value| (value, &SPECTROGRAM_INTEGER_CONTROL_EXTENSION)),
+    ) {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+        }
+    }
+    let output_precision = super::common::output_precision::SignalPrecision::of(&x);
+    let source = if let Value::GpuTensor(handle) = &x {
+        Some(handle.clone())
+    } else {
+        None
+    };
+    let borrowed = std::iter::once(&x)
+        .chain(rest.iter())
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for handle in &borrowed {
+        super::resident_output::owner(handle, || spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL))?;
+    }
+    let _guards = borrowed
+        .iter()
+        .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
+        .collect::<Vec<_>>();
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &x,
         &SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
@@ -426,7 +211,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         )
         .await?;
     }
-    if let Value::GpuTensor(handle) = &x {
+    let parsed = if let Value::GpuTensor(handle) = &x {
         let signal_len = gpu_vector_len(BUILTIN_NAME, "x", handle).map_err(|err| {
             spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_SIGNAL, err.message())
         })?;
@@ -436,52 +221,83 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, signal_len, complex_input).await?;
-        if let Ok(value) = output_gpu(handle, &options, signal_len).await {
+        let controls = rest
+            .iter()
+            .filter_map(|value| {
+                if let Value::GpuTensor(handle) = value {
+                    Some(handle)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if let Some(value) = output_gpu(handle, &options, signal_len, &controls).await? {
             return Ok(value);
         }
-    }
+        Some(options)
+    } else {
+        None
+    };
     let signal = value_to_complex_vector(BUILTIN_NAME, "x", x)
         .await
-        .map_err(|err| {
-            spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_SIGNAL, err.message())
-        })?;
+        .map_err(|source| spectrogram_control_error(&SPECTROGRAM_ERROR_INVALID_SIGNAL, source))?;
     if signal.data.is_empty() {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_SIGNAL));
     }
-    let options = parse_options(rest, signal.data.len(), signal.is_complex).await?;
+    let options = match parsed {
+        Some(options) => options,
+        None => parse_options(rest, signal.data.len(), signal.is_complex).await?,
+    };
     let eval = compute_spectrogram(&signal.data, &options)?;
-    output_eval(eval, options.reassigned)
+    let output = output_eval(eval, options.reassigned, output_precision)?;
+    match source {
+        Some(source) => super::resident_output::restore_named(
+            &source,
+            output,
+            4,
+            BUILTIN_NAME,
+            &borrowed.iter().collect::<Vec<_>>(),
+        ),
+        None => Ok(output),
+    }
 }
 
-fn output_eval(eval: SpectrogramEvaluation, reassigned: bool) -> BuiltinResult<Value> {
+fn output_eval(
+    eval: SpectrogramEvaluation,
+    reassigned: bool,
+    precision: super::common::output_precision::SignalPrecision,
+) -> BuiltinResult<Value> {
     let rows = eval.f.len();
     let cols = eval.t.len();
-    let s = ComplexTensor::new(
-        eval.s.into_iter().map(|z| (z.re, z.im)).collect(),
-        vec![rows, cols],
-    )
-    .map(Value::ComplexTensor)
-    .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-    let f = Tensor::new(eval.f, vec![rows, 1])
+    let s = precision
+        .complex(eval.s, vec![rows, cols])
+        .map(Value::ComplexTensor)
+        .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
+    let f = precision
+        .real(eval.f, vec![rows, 1])
         .map(Value::Tensor)
         .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-    let t = Tensor::new(eval.t, vec![1, cols])
+    let t = precision
+        .real(eval.t, vec![1, cols])
         .map(Value::Tensor)
         .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-    let ps = Tensor::new(eval.ps, vec![rows, cols])
+    let ps = precision
+        .real(eval.ps, vec![rows, cols])
         .map(Value::Tensor)
         .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut values = vec![s, f, t, ps];
         if reassigned {
-            let fc = Tensor::new(eval.fc, vec![rows, cols])
+            let fc = precision
+                .real(eval.fc, vec![rows, cols])
                 .map(Value::Tensor)
                 .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-            let tc = Tensor::new(eval.tc, vec![rows, cols])
+            let tc = precision
+                .real(eval.tc, vec![rows, cols])
                 .map(Value::Tensor)
                 .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
             values.push(fc);
@@ -498,12 +314,13 @@ async fn output_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     options: &SpectrogramOptions,
     signal_len: usize,
-) -> BuiltinResult<Value> {
+    controls: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
-        return Err(spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL));
+        return Ok(None);
     };
     if options.reassigned {
-        return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_OPTION));
+        return Ok(None);
     }
     let window_len = options.window.len();
     let step = window_len - options.n_overlap;
@@ -524,7 +341,9 @@ async fn output_gpu(
         }
     };
     let range = gpu_range(options.range);
-    let estimate = runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
+    let provider =
+        super::resident_output::owner(handle, || spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL))?;
+    let request = ProviderSpectralRequest {
         input: handle,
         input_len: signal_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -535,11 +354,32 @@ async fn output_gpu(
         frame_mode: ProviderSpectralFrameMode::Sliding { hop: step },
         range,
         denominator,
-    })
-    .await
-    .map_err(|err| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, err.to_string()))?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL));
+    };
+    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(request.clone()).await {
+        Ok(estimate) => estimate,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                spectrogram_error_with_detail(
+                    &SPECTROGRAM_ERROR_INTERNAL,
+                    format!("provider spectral estimate failed: {error}"),
+                ),
+                error,
+            ))
+        }
+    };
+    let output_error = || {
+        spectrogram_error_with_detail(
+            &SPECTROGRAM_ERROR_INTERNAL,
+            "provider returned malformed spectral output",
+        )
+    };
+    let estimate =
+        super::resident_output::spectral(estimate, &request, provider, controls, output_error)?;
+    let context = super::resident_output::OutputContext {
+        input: handle,
+        provider,
+        caller_inputs: controls,
     };
     let f_values = frequency_vector(nfft, options.units, options.range);
     let t_values = starts
@@ -548,36 +388,40 @@ async fn output_gpu(
         .collect::<Vec<_>>();
     let f_shape = [estimate.rows, 1usize];
     let t_shape = [1usize, estimate.cols];
-    let f = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &f_values,
-            shape: &f_shape,
-        })
-        .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e.to_string()))?;
-    let t = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &t_values,
-            shape: &t_shape,
-        })
-        .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e.to_string()))?;
-    let s = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.s);
-    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
-    let t = crate::builtins::common::gpu_helpers::resident_gpu_value(t);
-    let ps = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps);
+    let f = context.coordinate(
+        f_values,
+        f_shape.to_vec(),
+        &[&estimate.s, &estimate.ps],
+        BUILTIN_NAME,
+        output_error,
+    )?;
+    let mut siblings = vec![&estimate.s, &estimate.ps];
+    if let Value::GpuTensor(handle) = &f {
+        siblings.push(handle);
+    }
+    let t = context.coordinate(
+        t_values,
+        t_shape.to_vec(),
+        &siblings,
+        BUILTIN_NAME,
+        output_error,
+    )?;
+    let s = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.s)?;
+    let ps = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Some(Value::output_list(Vec::new())));
         }
-        return Ok(crate::output_count::output_list_with_padding(
+        return Ok(Some(crate::output_count::output_list_with_padding(
             out_count,
             vec![s, f, t, ps],
-        ));
+        )));
     }
-    Ok(s)
+    Ok(Some(s))
 }
 
 async fn parse_options(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     signal_len: usize,
     complex_input: bool,
 ) -> BuiltinResult<SpectrogramOptions> {
@@ -586,7 +430,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             default_window(signal_len)
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             default_window(signal_len)
         } else {
             idx += 1;
@@ -601,7 +445,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             window_len / 2
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             window_len / 2
         } else {
             idx += 1;
@@ -624,7 +468,7 @@ async fn parse_options(
             FrequencyGrid::Uniform {
                 nfft: default_nfft(window_len)?,
             }
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             FrequencyGrid::Uniform {
                 nfft: default_nfft(window_len)?,
             }
@@ -642,7 +486,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             FrequencyUnits::Hz(1.0)
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             FrequencyUnits::NormalizedRadians
         } else {
             idx += 1;
@@ -667,7 +511,7 @@ async fn parse_options(
     let mut scale = SpectrumScale::Psd;
     let reassigned = false;
     while let Some(value) = rest.get(idx) {
-        let Some(keyword) = keyword(value) else {
+        let Some(keyword) = keyword(value)? else {
             return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_OPTION));
         };
         idx += 1;
@@ -725,9 +569,7 @@ async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
     }
     let vector = value_to_complex_vector(BUILTIN_NAME, "win", value)
         .await
-        .map_err(|err| {
-            spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_WINDOW, err.message())
-        })?;
+        .map_err(|source| spectrogram_control_error(&SPECTROGRAM_ERROR_INVALID_WINDOW, source))?;
     if vector.data.is_empty() {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_WINDOW));
     }
@@ -754,9 +596,7 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
     }
     let vector = value_to_complex_vector(BUILTIN_NAME, "freqSpec", value)
         .await
-        .map_err(|err| {
-            spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_FREQ, err.message())
-        })?;
+        .map_err(|source| spectrogram_control_error(&SPECTROGRAM_ERROR_INVALID_FREQ, source))?;
     if vector.data.len() < 2 || vector.data.len() > MAX_NFFT {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_FREQ));
     }
@@ -1111,22 +951,32 @@ fn is_empty(value: &Value) -> bool {
     }
 }
 
-fn keyword(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.trim().to_ascii_lowercase()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].trim().to_ascii_lowercase())
+fn keyword(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Some(text.trim().to_ascii_lowercase())
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .trim()
+                    .to_ascii_lowercase(),
+            )
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
-            chars
-                .data
-                .iter()
-                .collect::<String>()
+            runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|source| {
+                    let mut error = spectrogram_error(&SPECTROGRAM_ERROR_INVALID_OPTION);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
                 .trim()
                 .to_ascii_lowercase(),
         ),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1135,15 +985,101 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
-    use runmat_value::IntegerStorage;
+    use runmat_builtins::builtin_catalog_entry_by_name;
+    use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn empty_numeric_frequency_tensor_selects_default_fft_grid() {
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let controls = [empty.clone(), empty.clone(), empty];
+        let options = block_on(parse_options(
+            crate::call::FunctionArgumentView::from_slice(&controls),
+            8,
+            false,
+        ))
+        .unwrap();
+        assert!(matches!(options.grid, FrequencyGrid::Uniform { nfft: 256 }));
+    }
+
+    #[test]
+    fn singleton_numeric_window_tensor_selects_scalar_hamming_length() {
+        let win = Value::Tensor(Tensor::new(vec![4.0], vec![1, 1]).unwrap());
+        let controls = [win, Value::Num(2.0)];
+        let options = block_on(parse_options(
+            crate::call::FunctionArgumentView::from_slice(&controls),
+            8,
+            false,
+        ))
+        .unwrap();
+        assert_eq!(options.window.len(), 4);
+        assert_eq!(options.n_overlap, 2);
+    }
+
+    #[test]
+    fn output_publication_rounds_once_including_reserved_reassignment_coordinates() {
+        // Public reassignment remains unsupported. Exercise the existing output
+        // carrier directly so its reserved FC/TC slots cannot drift in class.
+        let boundary = 1.0 + 3.0 * 2.0f64.powi(-25);
+        assert_ne!(boundary, (boundary as f32) as f64);
+        for precision in [
+            super::super::common::output_precision::SignalPrecision::Single,
+            super::super::common::output_precision::SignalPrecision::Double,
+        ] {
+            let _outputs =
+                crate::output_count::push_output_count(Some(6)).expect("output-count scope");
+            let output = output_eval(
+                SpectrogramEvaluation {
+                    s: vec![Complex::new(boundary, -boundary)],
+                    f: vec![boundary],
+                    t: vec![boundary],
+                    ps: vec![boundary],
+                    fc: vec![boundary],
+                    tc: vec![boundary],
+                },
+                true,
+                precision,
+            )
+            .unwrap();
+            let Value::OutputList(values) = output else {
+                panic!("six output slots")
+            };
+            assert_eq!(values.len(), 6);
+            let single =
+                precision == super::super::common::output_precision::SignalPrecision::Single;
+            let dtype = if single {
+                runmat_value::NumericDType::F32
+            } else {
+                runmat_value::NumericDType::F64
+            };
+            let expected = if single {
+                (boundary as f32) as f64
+            } else {
+                boundary
+            };
+            let Value::ComplexTensor(stft) = &values[0] else {
+                panic!("complex STFT")
+            };
+            assert_eq!(stft.numeric_dtype(), dtype);
+            assert_eq!(stft.materialize_f64(), vec![(expected, -expected)]);
+            for value in &values[1..] {
+                let Value::Tensor(value) = value else {
+                    panic!("real coordinate/power")
+                };
+                assert_eq!(value.numeric_dtype(), dtype);
+                assert_eq!(value.materialize_f64(), vec![expected]);
+            }
+        }
+    }
 
     fn empty() -> Value {
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())
     }
 
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
-        let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+        let _guard = outputs
+            .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
+            .expect("output-count scope");
         block_on(evaluate(x, rest))
     }
 
@@ -1152,6 +1088,10 @@ mod tests {
             panic!("expected output list");
         };
         values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list")
     }
 
     #[test]
@@ -1167,10 +1107,10 @@ mod tests {
 
     #[test]
     fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("spectrogram builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
+        let builtin = builtin_catalog_entry_by_name(BUILTIN_NAME).expect("spectrogram builtin");
+        let descriptor = builtin.descriptor;
         assert!(descriptor.signatures.iter().any(|sig| {
-            sig.label == "[s, f, t, ps, fc, tc] = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)"
+            sig.label == "[s, f, t, ps] = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)"
         }));
     }
 
@@ -1203,8 +1143,8 @@ mod tests {
         let Value::Tensor(ps) = &values[3] else {
             panic!("expected ps");
         };
-        assert_eq!(s.shape, vec![17, 3]);
-        assert_eq!(ps.shape, vec![17, 3]);
+        assert_eq!(s.shape(), [17, 3]);
+        assert_eq!(ps.shape(), [17, 3]);
         assert_eq!(f.materialize_f64()[4], 4.0);
         assert_eq!(t.materialize_f64(), vec![0.5, 1.0, 1.5]);
         let first_column_peak = ps.materialize_f64()[..17]
@@ -1250,7 +1190,7 @@ mod tests {
         let Value::GpuTensor(s) = &values[0] else {
             panic!("expected resident stft");
         };
-        assert_eq!(s.shape, vec![17, 3]);
+        assert_eq!(s.shape(), [17, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(s),
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
@@ -1260,7 +1200,7 @@ mod tests {
         }
         let ps =
             crate::builtins::common::test_support::gather(values[3].clone()).expect("gather ps");
-        assert_eq!(ps.shape, vec![17, 3]);
+        assert_eq!(ps.shape(), [17, 3]);
         let peak = ps.materialize_f64()[..17]
             .iter()
             .enumerate()
@@ -1268,7 +1208,7 @@ mod tests {
             .map(|(idx, _)| idx)
             .unwrap();
         assert_eq!(peak, 4);
-        provider.free(&handle).ok();
+        handle.release().ok();
     }
 
     #[test]
@@ -1283,8 +1223,8 @@ mod tests {
             panic!("expected t");
         };
         assert_eq!(default_window(1024).len(), 227);
-        assert_eq!(s.shape[0], 129);
-        assert_eq!(s.shape[1], t.materialize_f64().len());
+        assert_eq!(s.shape()[0], 129);
+        assert_eq!(s.shape()[1], t.materialize_f64().len());
     }
 
     #[test]
@@ -1301,7 +1241,7 @@ mod tests {
         let Value::ComplexTensor(s) = &values[0] else {
             panic!("expected stft");
         };
-        assert_eq!(s.shape[0], 8);
+        assert_eq!(s.shape()[0], 8);
 
         let err = call(
             Value::ComplexTensor(x),
@@ -1334,7 +1274,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f");
         };
-        assert_eq!(s.shape, vec![2, 3]);
+        assert_eq!(s.shape(), [2, 3]);
         assert_eq!(f.materialize_f64(), vec![0.0, std::f64::consts::PI]);
     }
 

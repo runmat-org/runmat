@@ -37,6 +37,16 @@ pub fn workspace_symbols_from_documents(
     filter_symbols(out, query)
 }
 
+pub fn merge_workspace_symbols(
+    mut primary: Vec<SymbolInformation>,
+    additional: impl IntoIterator<Item = SymbolInformation>,
+    query: Option<&str>,
+) -> Vec<SymbolInformation> {
+    primary.extend(additional);
+    dedupe_symbol_info(&mut primary);
+    filter_symbols(primary, query)
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub async fn workspace_symbols_with_project_async(
     docs: &[(Url, String, DocumentAnalysis)],
@@ -70,7 +80,24 @@ fn append_document_symbols(
     text: &str,
     analysis: &DocumentAnalysis,
 ) {
-    for sym in document_symbols(text, analysis) {
+    // Workspace symbols are the callable and class names, wherever the outline nests them.
+    fn named(symbols: Vec<lsp_types::DocumentSymbol>, out: &mut Vec<lsp_types::DocumentSymbol>) {
+        for mut symbol in symbols {
+            let children = symbol.children.take().unwrap_or_default();
+            if matches!(
+                symbol.kind,
+                lsp_types::SymbolKind::FUNCTION
+                    | lsp_types::SymbolKind::CLASS
+                    | lsp_types::SymbolKind::METHOD
+            ) {
+                out.push(symbol);
+            }
+            named(children, out);
+        }
+    }
+    let mut symbols = Vec::new();
+    named(document_symbols(text, analysis), &mut symbols);
+    for sym in symbols {
         if let Ok(si) = serde_json::from_value::<SymbolInformation>(json!({
             "name": sym.name,
             "kind": sym.kind,

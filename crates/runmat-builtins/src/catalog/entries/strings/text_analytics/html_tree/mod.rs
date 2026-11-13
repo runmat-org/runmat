@@ -1,0 +1,55 @@
+use crate::*;
+
+mod contract;
+mod inference;
+mod documentation;
+pub use contract::*;
+
+pub const HTML_TREE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: BuiltinCatalogAudience::Public,
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    identity: BuiltinCatalogIdentity { name: "htmlTree" },
+    category: "strings/text_analytics",
+    // The legacy sidecar retains full prose/examples authority; its summary
+    // is mirrored here until complete documentation conservation.
+    documentation: documentation::DOCUMENTATION,
+    descriptor: &HTML_TREE_DESCRIPTOR,
+    contract: BuiltinContractDeclaration {
+        maturity: BuiltinContractMaturity::Incomplete,
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
+            inference::infer,
+        )),
+        compatibility: BuiltinCompatibility::Matlab,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
+        purity: BuiltinPurity::Pure,
+        semantic_kind: BuiltinSemanticKind::General,
+        workspace_effect: None,
+        environment_effect: None,
+        effects: &[
+            runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
+        ],
+        capabilities: &[],
+    },
+    placement: BuiltinPlacementContract {
+        preparation: BuiltinOperandPreparation::RuntimeOwned,
+        portability: BuiltinPortability::NativeAndWasm,
+        accelerator: BuiltinAcceleratorPolicy::Forbidden,
+        residency: BuiltinResidencyPolicy::Host,
+        fusion: BuiltinFusionPolicy::Boundary,
+        distributed: BuiltinDistributedPolicy::Unsupported,
+    },
+    link: BuiltinLinkContract {
+        reachability: BuiltinReachability::Always,
+        policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: runmat_types::ExecutionStackRequirement::Any,
+        artifact_dependencies: &[],
+    },
+    bindings: &REQUIRED_DEFAULT_BINDING,
+    extensions: &HTML_TREE_EXTENSIONS,
+    integer_capabilities: &[],
+    integer_audit: Some(&HTML_TREE_INTEGER_AUDIT),
+    suppress_auto_output: false,
+};
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&HTML_TREE_CATALOG_ENTRY];

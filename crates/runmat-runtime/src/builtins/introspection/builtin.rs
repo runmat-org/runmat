@@ -1,175 +1,50 @@
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinIntegerBackendRule, BuiltinOutputMode, BuiltinParamArity, BUILTIN_DESCRIPTOR,
+    BUILTIN_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
 use runmat_value::Value;
 
-const BUILTIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varargout",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Output value(s) from the selected builtin implementation.",
-}];
+use crate::execution::RootedValue;
 
-const BUILTIN_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Builtin function name.",
-    },
-    BuiltinParamDescriptor {
-        name: "varargin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Builtin function arguments.",
-    },
-];
+#[cfg(test)]
+#[path = "builtin/ownership_tests.rs"]
+mod ownership_tests;
 
-const BUILTIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[varargout] = builtin(name, varargin)",
-    inputs: &BUILTIN_INPUTS,
-    outputs: &BUILTIN_OUTPUT,
-}];
-
-const BUILTIN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "varargin",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are passed unchanged when they are valid inputs for the builtin selected by name; mixed-class and scalar-double rules belong to that target.",
-    }];
-
-pub const BUILTIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[varargout] = builtin(name,varargin) with integer target arguments or results",
-        inputs: &BUILTIN_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::FunctionSpecific,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "builtin performs no numeric conversion or arithmetic of its own; input admission, output count and class, overflow, shape, and host or provider behavior are inherited from the selected registered builtin.",
-    }];
-
-pub const BUILTIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &BUILTIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-fn parse_substruct_type_and_subs(arg: &Value) -> crate::BuiltinResult<(String, Value)> {
-    let Value::Struct(st) = arg else {
-        return Err(crate::build_runtime_error(
-            "builtin: substruct argument must be a scalar struct",
-        )
-        .with_builtin("builtin")
-        .build());
-    };
-    let kind_value = st.fields.get("type").ok_or_else(|| {
-        crate::build_runtime_error("builtin: substruct argument missing field 'type'")
-            .with_builtin("builtin")
-            .build()
-    })?;
-    let kind = String::try_from(kind_value).map_err(|err| {
-        crate::build_runtime_error(format!("builtin subsref/subsasgn: {err}"))
-            .with_builtin("builtin")
-            .build()
-    })?;
-    let subs = st.fields.get("subs").cloned().ok_or_else(|| {
-        crate::build_runtime_error("builtin: substruct argument missing field 'subs'")
-            .with_builtin("builtin")
-            .build()
-    })?;
-    Ok((kind, subs))
-}
-
-fn builtin_member_field_name(subs: &Value, op: &str) -> crate::BuiltinResult<String> {
-    String::try_from(subs).map_err(|err| {
-        crate::build_runtime_error(format!("builtin {op}: {err}"))
-            .with_builtin("builtin")
-            .build()
-    })
-}
-
-async fn dispatch_builtin_subsref(
-    rest: &[Value],
+async fn call_registered(
+    runtime: Option<&crate::context::RuntimeContext>,
+    name: &str,
+    arguments: crate::call::BuiltinArguments,
     requested_outputs: usize,
-) -> crate::BuiltinResult<Value> {
-    if rest.len() != 2 {
-        return crate::call_builtin_async_with_outputs("subsref", rest, requested_outputs).await;
-    }
-    let (kind, subs) = parse_substruct_type_and_subs(&rest[1])?;
-    if kind != crate::OBJECT_INDEX_MEMBER {
-        return crate::call_builtin_async_with_outputs("subsref", rest, requested_outputs).await;
-    }
-    let field = builtin_member_field_name(&subs, "subsref")?;
-    match crate::builtins::structs::core::getfield::get_member_value(rest[0].clone(), &field).await
-    {
-        Ok(value) => Ok(value),
-        Err(err) if err.identifier() == Some("RunMat:getfield:ObjectProperty") => {
-            crate::call_builtin_async_with_outputs(
-                "call_method",
-                &[rest[0].clone(), Value::String(field)],
-                requested_outputs,
-            )
-            .await
-        }
-        Err(err) => Err(err),
-    }
-}
-
-async fn dispatch_builtin_subsasgn(
-    rest: &[Value],
-    requested_outputs: usize,
-) -> crate::BuiltinResult<Value> {
-    if rest.len() != 3 {
-        return crate::call_builtin_async_with_outputs("subsasgn", rest, requested_outputs).await;
-    }
-    let (kind, subs) = parse_substruct_type_and_subs(&rest[1])?;
-    if kind != crate::OBJECT_INDEX_MEMBER {
-        return crate::call_builtin_async_with_outputs("subsasgn", rest, requested_outputs).await;
-    }
-    let field = builtin_member_field_name(&subs, "subsasgn")?;
-    crate::call_builtin_async_with_outputs(
-        "setfield",
-        &[rest[0].clone(), Value::String(field), rest[2].clone()],
+) -> crate::BuiltinResult<RootedValue> {
+    crate::context::check_active_host()?;
+    let result = crate::dispatcher::call_retained_registered_builtin_sequence_with_outputs(
+        name,
+        arguments,
         requested_outputs,
+        runtime,
     )
     .await
+    .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    crate::context::check_active_host()?;
+    result
 }
 
 #[runtime_builtin(
     name = "builtin",
-    category = "introspection",
-    summary = "Invoke a builtin implementation by name.",
-    keywords = "builtin,dispatch,subsref,subsasgn",
-    descriptor(crate::builtins::introspection::builtin::BUILTIN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::introspection::builtin::BUILTIN_INTEGER_CAPABILITIES),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::builtin"
 )]
-pub async fn builtin_builtin(name: String, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn builtin_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    name: runmat_value::Utf8Text,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<RootedValue> {
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
-
-    if name.eq_ignore_ascii_case("subsref") {
-        return dispatch_builtin_subsref(&rest, requested_outputs).await;
-    }
-
-    if name.eq_ignore_ascii_case("subsasgn") {
-        return dispatch_builtin_subsasgn(&rest, requested_outputs).await;
-    }
-
-    crate::call_builtin_async_with_outputs(&name, &rest, requested_outputs).await
+    call_registered(runtime.as_ref(), &name, rest, requested_outputs).await
 }
 
 #[cfg(test)]
@@ -178,8 +53,14 @@ mod tests {
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor};
 
-    fn call(name: &str, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(builtin_builtin(name.to_string(), rest))
+    fn call(name: &str, rest: Vec<Value>) -> crate::BuiltinResult<RootedValue> {
+        block_on(builtin_builtin(
+            None,
+            name.into(),
+            crate::execution::RootedValues::new(rest)
+                .map_err(|error| error.into_runtime_error())?
+                .into(),
+        ))
     }
 
     #[cfg(feature = "wgpu")]
@@ -256,7 +137,7 @@ mod tests {
             let input = Tensor::new_integer(input, vec![2, 1]).expect("input");
             let result = call("plus", vec![Value::Tensor(input), Value::Int(scalar)])
                 .expect("delegated integer plus");
-            let Value::Tensor(result) = result else {
+            let Value::Tensor(result) = result.value() else {
                 panic!("expected exact integer tensor, got {result:?}");
             };
             assert_eq!(result.integer_storage(), Some(&expected));
@@ -269,19 +150,22 @@ mod tests {
         let right = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("right");
         let result = call("plus", vec![Value::Tensor(left), Value::Tensor(right)])
             .expect("delegated single plus");
-        let Value::Tensor(result) = result else {
+        let Value::Tensor(result) = result.value() else {
             panic!("expected native single tensor");
         };
         assert_eq!(
-            result.into_numeric_storage().expect("single storage"),
+            result
+                .clone()
+                .into_numeric_storage()
+                .expect("single storage"),
             NumericStorage::F32(vec![2.25, 3.5])
         );
 
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let source = Tensor::new_integer(IntegerStorage::I16(vec![0, 7, 0, -3]), vec![2, 2])
             .expect("source");
         let result = call("find", vec![Value::Tensor(source)]).expect("delegated find");
-        let Value::OutputList(outputs) = result else {
+        let Value::OutputList(outputs) = result.value() else {
             panic!("expected two requested outputs, got {result:?}");
         };
         assert_eq!(outputs.len(), 2);
@@ -310,11 +194,12 @@ mod tests {
             vec![Value::GpuTensor(handle), Value::Int(IntValue::U64(1))],
         )
         .expect("delegated resident plus");
-        let Value::GpuTensor(result) = result else {
+        let Value::GpuTensor(result) = result.value() else {
             panic!("plus residency must survive builtin dispatch, got {result:?}");
         };
-        let gathered = crate::builtins::common::test_support::gather(Value::GpuTensor(result))
-            .expect("gather");
+        let gathered =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(result.clone()))
+                .expect("gather");
         assert_eq!(
             gathered.integer_storage(),
             Some(&IntegerStorage::U64(vec![9_007_199_254_740_994, u64::MAX]))

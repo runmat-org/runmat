@@ -1,16 +1,15 @@
 //! MATLAB-compatible periodogram power spectral density estimate.
+use runmat_builtins::{
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, PERIODOGRAM_ERROR_ARG_COUNT,
+    PERIODOGRAM_ERROR_INTERNAL, PERIODOGRAM_ERROR_INVALID_FS, PERIODOGRAM_ERROR_INVALID_NFFT,
+    PERIODOGRAM_ERROR_INVALID_RANGE, PERIODOGRAM_ERROR_INVALID_SIGNAL,
+    PERIODOGRAM_ERROR_INVALID_WINDOW, PERIODOGRAM_INTEGER_CONTROL_EXTENSION,
+    PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
+};
 
 use num_complex::Complex;
 use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -25,7 +24,6 @@ use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_matrix_shape, parse_nonnegative_integer,
     parse_scalar_f64, value_to_complex_vector,
 };
-use crate::builtins::math::signal::type_resolvers::periodogram_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "periodogram";
@@ -59,228 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "periodogram materialises PSD and frequency vectors and is not fused.",
 };
-
-const PERIODOGRAM_OUTPUT_PXX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "pxx",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Power spectral density or power spectrum estimate.",
-}];
-
-const PERIODOGRAM_OUTPUT_PXX_F: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "pxx",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Power spectral density or power spectrum estimate.",
-    },
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Frequency vector in radians/sample or Hz when fs is supplied.",
-    },
-];
-
-const PERIODOGRAM_INPUTS: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal vector or matrix with one signal per column.",
-    },
-    BuiltinParamDescriptor {
-        name: "window",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Window vector. [] uses a rectangular window matching the signal length.",
-    },
-    BuiltinParamDescriptor {
-        name: "nfft",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "DFT length or explicit frequency vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "fs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Sampling frequency in Hz.",
-    },
-    BuiltinParamDescriptor {
-        name: "freqrange",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Frequency range selector (`onesided`, `twosided`, or `centered`) and spectrum type (`psd` or `power`).",
-    },
-];
-
-const PERIODOGRAM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "pxx = periodogram(x, window, nfft, fs, freqrange)",
-        inputs: &PERIODOGRAM_INPUTS,
-        outputs: &PERIODOGRAM_OUTPUT_PXX,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[pxx, f] = periodogram(x, window, nfft, fs, freqrange)",
-        inputs: &PERIODOGRAM_INPUTS,
-        outputs: &PERIODOGRAM_OUTPUT_PXX_F,
-    },
-];
-
-const PERIODOGRAM_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.ARG_COUNT",
-    identifier: Some("RunMat:periodogram:ArgCount"),
-    when: "The argument count is outside supported forms.",
-    message:
-        "periodogram: expected periodogram(x, [window, [nfft_or_f, [fs, [freqrange_or_scale]]]])",
-};
-
-const PERIODOGRAM_ERROR_INVALID_SIGNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_SIGNAL",
-    identifier: Some("RunMat:periodogram:InvalidSignal"),
-    when: "Input signal is not a numeric vector or matrix.",
-    message: "periodogram: x must be a nonempty numeric vector or 2-D matrix",
-};
-
-const PERIODOGRAM_ERROR_INVALID_WINDOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_WINDOW",
-    identifier: Some("RunMat:periodogram:InvalidWindow"),
-    when: "Window input is invalid.",
-    message: "periodogram: window must be a finite real vector matching the signal length",
-};
-
-const PERIODOGRAM_ERROR_INVALID_NFFT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_NFFT",
-    identifier: Some("RunMat:periodogram:InvalidNfft"),
-    when: "DFT length or frequency vector is invalid.",
-    message: "periodogram: nfft must be a positive integer or finite real frequency vector",
-};
-
-const PERIODOGRAM_ERROR_INVALID_FS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_FS",
-    identifier: Some("RunMat:periodogram:InvalidFs"),
-    when: "Sampling frequency is invalid.",
-    message: "periodogram: fs must be a positive finite scalar",
-};
-
-const PERIODOGRAM_ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_RANGE",
-    identifier: Some("RunMat:periodogram:InvalidRange"),
-    when: "Frequency range selector or spectrum type is invalid.",
-    message: "periodogram: freqrange must be 'onesided', 'twosided', or 'centered'; spectrum type must be 'psd' or 'power'",
-};
-
-const PERIODOGRAM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INTERNAL",
-    identifier: Some("RunMat:periodogram:Internal"),
-    when: "Output tensor construction fails internally.",
-    message: "periodogram: internal error",
-};
-
-const PERIODOGRAM_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    PERIODOGRAM_ERROR_ARG_COUNT,
-    PERIODOGRAM_ERROR_INVALID_SIGNAL,
-    PERIODOGRAM_ERROR_INVALID_WINDOW,
-    PERIODOGRAM_ERROR_INVALID_NFFT,
-    PERIODOGRAM_ERROR_INVALID_FS,
-    PERIODOGRAM_ERROR_INVALID_RANGE,
-    PERIODOGRAM_ERROR_INTERNAL,
-];
-
-pub const PERIODOGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PERIODOGRAM_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PERIODOGRAM_ERRORS,
-};
-
-const PERIODOGRAM_INTEGER_SIGNAL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "periodogram-integer-signal",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "periodogram accepts a typed-integer input signal as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PeriodogramIntegerSignalExtension"),
-    };
-const PERIODOGRAM_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "periodogram-integer-numeric-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "periodogram accepts typed-integer window, frequency, DFT-length, or sample-rate controls as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PeriodogramIntegerNumericControlExtension"),
-    };
-pub const PERIODOGRAM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
-    PERIODOGRAM_INTEGER_CONTROL_EXTENSION,
-];
-const PERIODOGRAM_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion.",
-    }];
-const PERIODOGRAM_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    BuiltinIntegerInputCapability {
-        name: "window",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented window storage is single or double; typed windows cross a checked floating boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "freqSpec/nfft",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A scalar is decoded as an exact structural DFT length; a vector is a checked floating frequency grid.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Fs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed sample rates enter the floating frequency-scaling boundary only after exactness is proved.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "confidence or numeric option",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Additional supported numeric controls remain independently classified as checked floating inputs.",
-    },
-];
-pub const PERIODOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[pxx,f] = periodogram(integer_x, ...)",
-        inputs: &PERIODOGRAM_INTEGER_SIGNAL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion and supported resident floating paths remain unaffected.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "periodogram(x, integer_window_or_frequency_controls)",
-        inputs: &PERIODOGRAM_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed numerical controls are independently gated; scalar DFT length is structural and remaining controls cross a checked binary64 boundary.",
-    },
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrequencyRange {
@@ -342,6 +118,16 @@ fn periodogram_error_with_detail(
     periodogram_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
+fn periodogram_control_error(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut error = periodogram_error_with_detail(error, source.message());
+    error.source = Some(Box::new(source));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 fn periodogram_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -355,22 +141,25 @@ fn periodogram_error_with_message(
 
 #[runtime_builtin(
     name = "periodogram",
-    category = "math/signal",
-    summary = "Estimate power spectral density with a periodogram.",
-    keywords = "periodogram,psd,power spectrum,spectral density,signal processing",
-    type_resolver(periodogram_type),
-    descriptor(crate::builtins::math::signal::periodogram::PERIODOGRAM_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::periodogram::PERIODOGRAM_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::signal::periodogram::PERIODOGRAM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::periodogram"
 )]
-async fn periodogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(x, &rest).await
+async fn periodogram_builtin(
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    evaluate_view(x, rest.view()).await
 }
 
+#[cfg(test)]
 pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
+    evaluate_view(x, crate::call::FunctionArgumentView::from_slice(rest)).await
+}
+
+async fn evaluate_view(
+    x: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     if rest.len() > 6 {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_ARG_COUNT));
     }
@@ -378,6 +167,37 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
+    for (value, extension) in std::iter::once((&x, &PERIODOGRAM_INTEGER_SIGNAL_EXTENSION)).chain(
+        rest.iter()
+            .map(|value| (value, &PERIODOGRAM_INTEGER_CONTROL_EXTENSION)),
+    ) {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+        }
+    }
+    let output_precision = super::common::output_precision::SignalPrecision::of(&x);
+    let source = if let Value::GpuTensor(handle) = &x {
+        Some(handle.clone())
+    } else {
+        None
+    };
+    let borrowed = std::iter::once(&x)
+        .chain(rest.iter())
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for handle in &borrowed {
+        super::resident_output::owner(handle, || periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
+    }
+    let _guards = borrowed
+        .iter()
+        .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
+        .collect::<Vec<_>>();
     ensure_periodogram_integer_boundary(
         &x,
         &PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
@@ -400,24 +220,50 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         )
         .await?;
     }
-    if let Value::GpuTensor(handle) = &x {
+    let parsed = if let Value::GpuTensor(handle) = &x {
         let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle).map_err(|err| {
             periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_SIGNAL, err.message())
         })?;
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, rows, complex_input).await?;
-        if let Ok(value) = output_gpu(handle, rows, cols, &options).await {
+        let controls = rest
+            .iter()
+            .filter_map(|value| {
+                if let Value::GpuTensor(handle) = value {
+                    Some(handle)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if let Some(value) = output_gpu(handle, rows, cols, &options, &controls).await? {
             return Ok(value);
         }
-    }
+        Some(options)
+    } else {
+        None
+    };
     let input = value_to_signal_columns(x).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_SIGNAL));
     }
-    let options = parse_options(rest, input.rows, input.is_complex).await?;
+    let options = match parsed {
+        Some(options) => options,
+        None => parse_options(rest, input.rows, input.is_complex).await?,
+    };
     let eval = compute_periodogram(&input.columns, &options)?;
-    output_eval(eval)
+    let output = output_eval(eval, output_precision)?;
+    match source {
+        Some(source) => super::resident_output::restore_named(
+            &source,
+            output,
+            2,
+            BUILTIN_NAME,
+            &borrowed.iter().collect::<Vec<_>>(),
+        ),
+        None => Ok(output),
+    }
 }
 
 async fn ensure_periodogram_integer_boundary(
@@ -442,20 +288,25 @@ async fn ensure_periodogram_integer_boundary(
     Ok(())
 }
 
-fn output_eval(eval: PeriodogramEvaluation) -> BuiltinResult<Value> {
+fn output_eval(
+    eval: PeriodogramEvaluation,
+    precision: super::common::output_precision::SignalPrecision,
+) -> BuiltinResult<Value> {
     let freq_len = eval.f.len();
-    let pxx = Tensor::new(eval.pxx, vec![freq_len, eval.columns])
+    let pxx = precision
+        .real(eval.pxx, vec![freq_len, eval.columns])
         .map(Value::Tensor)
         .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e))?;
-    let f = Tensor::new(eval.f, vec![freq_len, 1])
+    let f = precision
+        .real(eval.f, vec![freq_len, 1])
         .map(Value::Tensor)
         .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e))?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![pxx]));
+            return Ok(Value::output_list(vec![pxx]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -470,9 +321,10 @@ async fn output_gpu(
     rows: usize,
     cols: usize,
     options: &PeriodogramOptions,
-) -> BuiltinResult<Value> {
+    controls: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
-        return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
+        return Ok(None);
     };
     let window_energy = options.window.iter().map(|v| v * v).sum::<f64>();
     let coherent_gain = options.window.iter().sum::<f64>();
@@ -492,7 +344,9 @@ async fn output_gpu(
     let input_len = rows
         .checked_mul(cols)
         .ok_or_else(|| periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
-    let estimate = runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
+    let provider =
+        super::resident_output::owner(handle, || periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
+    let request = ProviderSpectralRequest {
         input: handle,
         input_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -503,47 +357,75 @@ async fn output_gpu(
         frame_mode: ProviderSpectralFrameMode::FoldedColumns { input_rows: rows },
         range: gpu_range(options.range),
         denominator,
-    })
-    .await
-    .map_err(|err| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, err.to_string()))?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
+    };
+    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(request.clone()).await {
+        Ok(estimate) => estimate,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                periodogram_error_with_detail(
+                    &PERIODOGRAM_ERROR_INTERNAL,
+                    format!("provider spectral estimate failed: {error}"),
+                ),
+                error,
+            ))
+        }
+    };
+    let output_error = || {
+        periodogram_error_with_detail(
+            &PERIODOGRAM_ERROR_INTERNAL,
+            "provider returned malformed spectral output",
+        )
+    };
+    let estimate =
+        super::resident_output::spectral(estimate, &request, provider, controls, output_error)?;
+    let context = super::resident_output::OutputContext {
+        input: handle,
+        provider,
+        caller_inputs: controls,
     };
     let f_values = frequency_vector(nfft, options.frequency_units, options.range);
     let f_shape = [estimate.rows, 1usize];
-    let f = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &f_values,
-            shape: &f_shape,
-        })
-        .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e.to_string()))?;
-    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps);
-    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
+    let f = context.coordinate(
+        f_values,
+        f_shape.to_vec(),
+        &[&estimate.s, &estimate.ps],
+        BUILTIN_NAME,
+        output_error,
+    )?;
+    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Some(Value::output_list(Vec::new())));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![pxx]));
+            return Ok(Some(Value::output_list(vec![pxx])));
         }
-        return Ok(crate::output_count::output_list_with_padding(
+        return Ok(Some(crate::output_count::output_list_with_padding(
             out_count,
             vec![pxx, f],
-        ));
+        )));
     }
-    Ok(pxx)
+    Ok(Some(pxx))
 }
 
 async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
-    match value {
+    let value = match value {
         Value::GpuTensor(handle) => {
-            let tensor = crate::builtins::common::gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|err| {
-                    periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_SIGNAL, err.message())
-                })?;
-            tensor_to_signal_columns(tensor)
+            let provider = super::resident_output::owner(&handle, || {
+                periodogram_error(&PERIODOGRAM_ERROR_INTERNAL)
+            })?;
+            crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                provider, &handle,
+            )
+            .await
+            .map_err(|source| {
+                periodogram_control_error(&PERIODOGRAM_ERROR_INVALID_SIGNAL, source)
+            })?
         }
+        value => value,
+    };
+    match value {
         Value::Tensor(tensor) => tensor_to_signal_columns(tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_signal_columns(tensor),
         Value::LogicalArray(logical) => {
@@ -575,7 +457,7 @@ async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
             columns: vec![vec![Complex::new(re, im)]],
             rows: 1,
             cols: 1,
-            is_complex: im.abs() > EPS,
+            is_complex: true,
         }),
         other => Err(periodogram_error_with_detail(
             &PERIODOGRAM_ERROR_INVALID_SIGNAL,
@@ -585,7 +467,7 @@ async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
 }
 
 fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(periodogram_error_with_detail(
             &PERIODOGRAM_ERROR_INVALID_SIGNAL,
             "x must be a vector or 2-D matrix",
@@ -627,18 +509,15 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
 fn complex_tensor_to_signal_columns(
     tensor: runmat_value::ComplexTensor,
 ) -> BuiltinResult<SignalColumns> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(periodogram_error_with_detail(
             &PERIODOGRAM_ERROR_INVALID_SIGNAL,
             "x must be a vector or 2-D matrix",
         ));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let is_complex = tensor
-        .materialize_f64()
-        .iter()
-        .any(|(_, im)| im.abs() > EPS);
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    let is_complex = true;
     if rows == 1 || cols == 1 {
         return Ok(SignalColumns {
             columns: vec![tensor
@@ -669,7 +548,7 @@ fn complex_tensor_to_signal_columns(
 }
 
 async fn parse_options(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     signal_len: usize,
     complex_input: bool,
 ) -> BuiltinResult<PeriodogramOptions> {
@@ -678,7 +557,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             vec![1.0; signal_len]
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             vec![1.0; signal_len]
         } else {
             idx += 1;
@@ -695,7 +574,7 @@ async fn parse_options(
             FrequencyGrid::Uniform {
                 nfft: default_nfft(window_len)?,
             }
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             FrequencyGrid::Uniform {
                 nfft: default_nfft(window_len)?,
             }
@@ -713,7 +592,7 @@ async fn parse_options(
         if is_empty(value) {
             idx += 1;
             FrequencyUnits::Hz(1.0)
-        } else if keyword(value).is_some() {
+        } else if keyword(value)?.is_some() {
             FrequencyUnits::NormalizedRadians
         } else {
             idx += 1;
@@ -737,7 +616,7 @@ async fn parse_options(
     let mut range = default_range;
     let mut scale = SpectrumScale::Psd;
     while let Some(value) = rest.get(idx) {
-        let Some(keyword) = keyword(value) else {
+        let Some(keyword) = keyword(value)? else {
             return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_RANGE));
         };
         idx += 1;
@@ -777,9 +656,7 @@ async fn parse_options(
 async fn parse_window(value: Value, signal_len: usize) -> BuiltinResult<Vec<f64>> {
     let vector = value_to_complex_vector(BUILTIN_NAME, "window", value)
         .await
-        .map_err(|err| {
-            periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_WINDOW, err.message())
-        })?;
+        .map_err(|source| periodogram_control_error(&PERIODOGRAM_ERROR_INVALID_WINDOW, source))?;
     if vector.data.len() != signal_len {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_WINDOW));
     }
@@ -806,9 +683,7 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
 
     let vector = value_to_complex_vector(BUILTIN_NAME, "nfft", value)
         .await
-        .map_err(|err| {
-            periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_NFFT, err.message())
-        })?;
+        .map_err(|source| periodogram_control_error(&PERIODOGRAM_ERROR_INVALID_NFFT, source))?;
     if vector.data.is_empty() || vector.data.len() > MAX_NFFT {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_NFFT));
     }
@@ -1061,22 +936,32 @@ fn is_empty(value: &Value) -> bool {
     }
 }
 
-fn keyword(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.trim().to_ascii_lowercase()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].trim().to_ascii_lowercase())
+fn keyword(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Some(text.trim().to_ascii_lowercase())
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .trim()
+                    .to_ascii_lowercase(),
+            )
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
-            chars
-                .data
-                .iter()
-                .collect::<String>()
+            runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|source| {
+                    let mut error = periodogram_error(&PERIODOGRAM_ERROR_INVALID_RANGE);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
                 .trim()
                 .to_ascii_lowercase(),
         ),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1085,11 +970,27 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::builtin_catalog_entry_by_name;
     use runmat_value::IntegerStorage;
 
+    #[test]
+    fn empty_numeric_frequency_tensor_selects_default_fft_grid() {
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let controls = [empty.clone(), empty];
+        let options = block_on(parse_options(
+            crate::call::FunctionArgumentView::from_slice(&controls),
+            8,
+            false,
+        ))
+        .unwrap();
+        assert!(matches!(options.grid, FrequencyGrid::Uniform { nfft: 256 }));
+    }
+
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
-        let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+        let _guard = outputs
+            .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
+            .expect("output-count scope");
         block_on(evaluate(x, rest))
     }
 
@@ -1118,7 +1019,7 @@ mod tests {
         };
         (
             pxx.materialize_f64().clone(),
-            pxx.shape.clone(),
+            pxx.shape().to_vec(),
             f.materialize_f64().clone(),
         )
     }
@@ -1138,8 +1039,8 @@ mod tests {
 
     #[test]
     fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("periodogram builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
+        let builtin = builtin_catalog_entry_by_name(BUILTIN_NAME).expect("periodogram builtin");
+        let descriptor = builtin.descriptor;
         assert!(descriptor
             .signatures
             .iter()
@@ -1387,7 +1288,7 @@ mod tests {
         let pxx =
             crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
         let f = crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
-        assert_eq!(pxx.shape, vec![17, 1]);
+        assert_eq!(pxx.shape(), [17, 1]);
         assert_eq!(f.materialize_f64()[4], 4.0);
         let peak = pxx
             .materialize_f64()
@@ -1397,7 +1298,7 @@ mod tests {
             .map(|(idx, _)| idx)
             .unwrap();
         assert_eq!(peak, 4);
-        provider.free(&handle).ok();
+        handle.release().ok();
     }
 
     #[cfg(feature = "wgpu")]
@@ -1454,7 +1355,7 @@ mod tests {
                 "centered bin {idx}: gpu {actual}, host {expected}"
             );
         }
-        provider.free(&handle).ok();
+        handle.release().ok();
     }
 
     #[test]

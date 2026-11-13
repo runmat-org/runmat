@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn native_conformance() {
     let directory = tempfile::tempdir().unwrap();
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: "native-faceted-meshing-run".into(),
         encryption_context: Digest::sha256(b"native-faceted-meshing-context"),
     };
@@ -21,6 +21,11 @@ pub(super) async fn native_conformance() {
         schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
         stage: MeshingStageKind::SurfaceMesh,
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
             geometry_revision: document.revision.revision,
             persistent_mapping_version: document.revision.persistent_mapping_version,
@@ -59,17 +64,25 @@ pub(super) async fn native_conformance() {
             },
         ],
     };
-    let host =
-        MeshingHostWorkload::new(workload, identity, meshing_request, access, Some(document))
-            .unwrap();
+    let host = MeshingHostWorkload::new(
+        workload,
+        identity,
+        meshing_request,
+        super::fixture_ceilings(),
+        access,
+        Some(document),
+    )
+    .unwrap();
     let request = host
-        .program_request(revision(), std::slice::from_ref(input.root_input()))
-        .unwrap();
+        .prepare_program_request(revision(), std::slice::from_ref(input.root_input()))
+        .unwrap()
+        .into_request();
     let session = NativeProgramSession::new(config(directory.path(), "--faceted-child")).unwrap();
     let mut store = session.object_store();
     for object in &input.geometry_objects().objects {
         store.write_verified(object).unwrap();
     }
+    seed_host_invocation(&mut store, &host, &request);
     let task = session
         .submit(request.clone(), submission(&session, &host, &request))
         .unwrap();
@@ -83,7 +96,8 @@ pub(super) async fn native_conformance() {
     })
     .await
     .unwrap();
-    let [ValuePayload::Object(root)] = success.outputs.as_slice() else {
+    let (outputs, _) = success.values().expect("ordinary task result");
+    let [ValuePayload::Object(root)] = outputs else {
         panic!("native faceted-input stage returned a non-object root")
     };
     import_result_publication(&store, root, host.artifact_access, limits().inventory).unwrap();

@@ -1,119 +1,102 @@
 //! Generic model prediction dispatcher.
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::{PREDICT_INTEGER_CONTROLS_EXTENSION, PREDICT_INTEGER_PREDICTORS_EXTENSION};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::{gather_if_needed_async, BuiltinResult};
 
-use super::classification_linear::{
-    predict_classification_linear_object, CLASSIFICATION_LINEAR_CLASS,
-};
-use super::classification_tree::{predict_classification_tree_object, CLASSIFICATION_TREE_CLASS};
-use super::linear_model::{predict_invalid, predict_linear_model_dispatch, predict_type};
-
-const PREDICT_INTEGER_PREDICTORS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "predict-integer-statistical-predictors",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "predict accepts typed-integer statistical-model predictors as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PredictIntegerStatisticalPredictorsExtension"),
-    };
-const PREDICT_INTEGER_CONTROLS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "predict-integer-statistical-controls",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "predict accepts typed-integer statistical-model controls as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PredictIntegerStatisticalControlsExtension"),
-};
-pub const PREDICT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    PREDICT_INTEGER_PREDICTORS_EXTENSION,
-    PREDICT_INTEGER_CONTROLS_EXTENSION,
-];
-const PREDICT_INTEGER_STATS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Xnew for implemented statistical models",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The implemented linear-regression, classification-tree, and linear-classifier references document single, double, or table predictors. RunMat admits typed integer matrices only at a checked model-specific floating boundary.",
-    }];
-const PREDICT_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Alpha, Subtrees, or other numeric statistical controls",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed integer numeric controls are independently gated; unsupported general options remain ordinary surface gaps rather than silently admitted integer forms.",
-    }];
-const PREDICT_INTEGER_DEEP_LEARNING_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X for supported deep-learning network objects",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public deep-learning predict surface explicitly includes all eight integer input classes; the selected network determines output class and conversion behavior.",
-    }];
-pub const PREDICT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ypred = predict(statistical_model,integer_Xnew,___)",
-        inputs: &PREDICT_INTEGER_STATS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Statistical integer predictors are gated before gather and model dispatch and must be exactly representable at the binary64 prediction boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ypred = predict(statistical_model,Xnew,integer_control,___)",
-        inputs: &PREDICT_INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Numeric statistical controls are separately admitted and checked before the selected model parser runs.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = predict(deep_learning_network,integer_X,___)",
-        inputs: &PREDICT_INTEGER_DEEP_LEARNING_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Deep-learning integer admission is documented and is intentionally not covered by the statistical-model compatibility gates.",
-    },
-];
+use super::classification_linear::predict_classification_linear_object;
+use super::classification_tree::predict_classification_tree_object;
+use super::linear_model::{predict_invalid, predict_linear_model_dispatch};
 
 #[runtime_builtin(
     name = "predict",
-    category = "stats/ml",
-    summary = "Predict responses from a fitted model.",
-    keywords = "predict,fitlm,linear model,classification,deep learning,prediction",
-    type_resolver(predict_type),
-    descriptor(crate::builtins::stats::ml::linear_model::PREDICT_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::predict::PREDICT_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::predict::PREDICT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::stats::ml::predict"
 )]
+async fn predict_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    model: Value,
+    xnew: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    predict_in_runtime(runtime.as_ref(), requested_outputs, model, xnew, rest).await
+}
+
+#[cfg(test)]
 pub(crate) async fn predict_builtin(
     model: Value,
     xnew: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    predict_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        model,
+        xnew,
+        crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
+
+async fn predict_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    model: Value,
+    xnew: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let output = match model {
+        Value::Object(object)
+            if crate::builtins::deep_learning::model::is_deep_learning_network_object(&object) =>
+        {
+            crate::builtins::deep_learning::model::predict_deep_learning_object_in_runtime(
+                runtime,
+                requested_outputs,
+                object,
+                xnew,
+                rest,
+            )
+            .await?
+        }
+        model => predict_statistical(runtime, model, xnew, rest).await?,
+    };
+    match requested_outputs {
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![output[0].clone()])),
+        Some(out_count) if out_count > output.len() => {
+            Err(predict_invalid("predict: too many output arguments"))
+        }
+        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
+            out_count, output,
+        )),
+        None => Ok(output
+            .into_iter()
+            .next()
+            .expect("predict dispatch always returns at least one output")),
+    }
+}
+
+async fn predict_statistical(
+    runtime: Option<&crate::context::RuntimeContext>,
+    model: Value,
+    xnew: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Vec<Value>> {
     let statistical_model = matches!(
         &model,
         Value::Object(object)
-            if object.class_name == "LinearModel"
-                || object.class_name == CLASSIFICATION_TREE_CLASS
-                || object.class_name == CLASSIFICATION_LINEAR_CLASS
+            if object
+                .class_name()
+                .is(runmat_types::standard::LINEAR_MODEL)
+                || object.class_name().is(runmat_types::standard::CLASSIFICATION_TREE)
+                || object.class_name().is(runmat_types::standard::CLASSIFICATION_LINEAR)
     );
     if statistical_model {
         crate::builtins::common::validation::reject_typed_complex_integer(&xnew, "predict")?;
@@ -143,36 +126,25 @@ pub(crate) async fn predict_builtin(
     let xnew = gather(xnew)
         .await
         .map_err(|err| predict_invalid(err.message))?;
-    let rest = gather_all(rest)
+    let rest = gather_all(rest, runtime)
         .await
         .map_err(|err| predict_invalid(err.message))?;
-    let output = match model {
+    match model {
         Value::Object(object)
-            if crate::builtins::deep_learning::model::is_deep_learning_network_object(&object) =>
+            if object
+                .class_name()
+                .is(runmat_types::standard::CLASSIFICATION_TREE) =>
         {
-            crate::builtins::deep_learning::model::predict_deep_learning_object(object, xnew, rest)?
+            predict_classification_tree_object(object, xnew, rest.view())
         }
-        Value::Object(object) if object.class_name == CLASSIFICATION_TREE_CLASS => {
-            predict_classification_tree_object(object, xnew, rest)?
+        Value::Object(object)
+            if object
+                .class_name()
+                .is(runmat_types::standard::CLASSIFICATION_LINEAR) =>
+        {
+            predict_classification_linear_object(object, xnew, rest.view())
         }
-        Value::Object(object) if object.class_name == CLASSIFICATION_LINEAR_CLASS => {
-            predict_classification_linear_object(object, xnew, rest)?
-        }
-        other => predict_linear_model_dispatch(other, xnew, rest)?,
-    };
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![output[0].clone()])),
-        Some(out_count) if out_count > output.len() => {
-            Err(predict_invalid("predict: too many output arguments"))
-        }
-        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-            out_count, output,
-        )),
-        None => Ok(output
-            .into_iter()
-            .next()
-            .expect("predict dispatch always returns at least one output")),
+        other => predict_linear_model_dispatch(other, xnew, rest.view()),
     }
 }
 
@@ -180,10 +152,13 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
-    }
-    Ok(out)
+async fn gather_all(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, |index| {
+            gather(values[index].clone())
+        })
+        .await
 }

@@ -46,11 +46,14 @@ impl NodeControlPlane for RotationControl {
 #[tokio::test]
 async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     let directory = tempfile::tempdir().unwrap();
-    let store = CredentialStore::new(directory.path());
+    let state = directory.path().join("state");
+    let mut store = CredentialStore::new(&state).claim().unwrap();
     let identity_secret = [17; 32];
     let signer =
         runmat_execution::security::EndpointIdentitySigner::from_secret(identity_secret).unwrap();
     let mut credential = NodeCredential {
+        server_endpoint: runmat_node_agent::config::ServerEndpoint::parse("http://127.0.0.1:1")
+            .unwrap(),
         node_id: "node".into(),
         cluster_id: "cluster".into(),
         org_id: "org".into(),
@@ -67,7 +70,7 @@ async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     store.store(&credential).unwrap();
     rotate(
         Arc::new(RotationControl),
-        &store,
+        &mut store,
         &mut credential,
         NodeHeartbeat {
             org_id: "org".into(),
@@ -83,6 +86,18 @@ async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     assert_eq!(credential.credential, "b".repeat(43));
     assert_eq!(credential.credential_epoch, 2);
     assert_eq!(store.load().unwrap(), credential);
+    #[cfg(windows)]
+    {
+        let _directory = runmat_filesystem::NativeFsProvider
+            .open_owner_private_directory(&state)
+            .unwrap();
+        let file = runmat_filesystem::NativeFsProvider
+            .open_owner_private_file(&state.join("credential.json"))
+            .unwrap();
+        runmat_filesystem::NativeFsProvider
+            .verify_owner_private_file(&file)
+            .unwrap();
+    }
 }
 
 fn inventory() -> NodeInventory {
@@ -90,9 +105,11 @@ fn inventory() -> NodeInventory {
         cpu_millicores: 1,
         memory_bytes: 1,
         scratch_bytes: 1,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
+        host: runmat_node_agent::inventory::host(
+            runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+        )
+        .unwrap(),
         capabilities: Default::default(),
     }
 }

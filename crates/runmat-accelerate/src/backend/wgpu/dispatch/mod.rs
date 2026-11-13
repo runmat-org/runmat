@@ -1,6 +1,6 @@
-pub mod centered_gram;
 pub mod circshift;
 pub mod common;
+pub(crate) mod observation;
 pub mod conv;
 pub mod creation;
 pub mod diag;
@@ -25,6 +25,5 @@ pub mod scatter;
 pub mod solve;
 pub mod sub2ind;
 pub mod syrk;
-pub mod transpose;
 pub mod tril;
 pub mod triu;

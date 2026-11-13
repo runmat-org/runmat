@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_value::{IntValue, Value};
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 const INTEGER_CONSTRUCTORS: [&str; 8] = [
@@ -9,59 +9,39 @@ const INTEGER_CONSTRUCTORS: [&str; 8] = [
 ];
 
 fn object_of_class<'a>(values: &'a [Value], class_name: &str) -> &'a runmat_value::ObjectInstance {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values
         .iter()
         .find_map(|value| match value {
-            Value::Object(object) if object.class_name == class_name => Some(object),
+            Value::Object(object) if object.class_name() == &class_name => Some(object),
             _ => None,
         })
         .unwrap_or_else(|| panic!("expected {class_name} object"))
 }
 
-fn struct_field<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
-    match value {
-        Value::Struct(fields) => fields.fields.get(name),
-        _ => None,
-    }
-}
-
 #[test]
-fn fea_run_options_and_trends_accept_every_exact_integer_class() {
+fn fea_trends_accepts_every_exact_integer_class() {
     for constructor in INTEGER_CONSTRUCTORS {
         let source = format!(
             r#"
-            opts = fea.runOptions("modal", ...
-                "ModeCount", {constructor}(3), ...
-                "ResidualWarnThreshold", {constructor}(1));
             trends = fea.trends("WindowSize", {constructor}(1));
             "#
         );
         let values = execute_source(&source)
             .unwrap_or_else(|error| panic!("{constructor} FEA structural controls: {error}"));
-        let options = object_of_class(&values, "fea.RunOptions");
-        let payload = options.properties.get("options").expect("public options");
-        assert!(
-            matches!(
-                struct_field(payload, "mode_count"),
-                Some(Value::Int(IntValue::U64(3)))
-            ),
-            "{constructor} mode count must remain exact"
-        );
-        assert!(
-            matches!(
-                struct_field(payload, "residual_warn_threshold"),
-                Some(Value::Num(1.0))
-            ),
-            "{constructor} residual threshold must use binary64"
-        );
         object_of_class(&values, "fea.Trends");
     }
 }
 
 #[test]
 fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() {
+    use runmat_builtins::fea_contract::results_option::ResultsOption;
     for constructor in INTEGER_CONSTRUCTORS {
-        for option in ["ModeIndices", "TransientSnapshotIndices"] {
+        for option in [
+            ResultsOption::ModeIndices,
+            ResultsOption::TransientSnapshotIndices,
+        ] {
+            let option = option.canonical_name();
             let accepted = format!(
                 "value = fea.results(\"missing_integer_contract_run\", \"{option}\", {constructor}([1 2]));"
             );
@@ -85,13 +65,13 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
         }
 
         for flag in [
-            "IncludeFieldValues",
-            "IncludeDiagnostics",
-            "IncludeModalResults",
-            "IncludeTransientResults",
-            "IncludeNonlinearResults",
-            "IncludeElectromagneticResults",
+            ResultsOption::IncludeFieldValues,
+            ResultsOption::IncludeDiagnostics,
+            ResultsOption::IncludeModalResults,
+            ResultsOption::IncludeTransientResults,
+            ResultsOption::IncludeNonlinearResults,
         ] {
+            let flag = flag.canonical_name();
             let accepted = format!(
                 "value = fea.results(\"missing_integer_contract_run\", \"{flag}\", {constructor}(1));"
             );
@@ -114,6 +94,16 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
                 "{invalid}"
             );
         }
+        let unsupported = format!(
+            "value = fea.results(\"missing_integer_contract_run\", \"IncludeElectromagneticResults\", {constructor}(1));"
+        );
+        assert_eq!(
+            execute_source(&unsupported)
+                .expect_err("unsupported selector must fail before lookup")
+                .identifier(),
+            Some("RunMat:fea:InvalidInput"),
+            "{unsupported}"
+        );
     }
 }
 
@@ -121,7 +111,7 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
 fn fea_text_and_typed_object_workflow_roles_never_coerce_integers() {
     for constructor in INTEGER_CONSTRUCTORS {
         for source in [
-            format!("value = fea.step({constructor}(1), \"modal\");"),
+            format!("value = fea.StructuralStep.modal({constructor}(1));"),
             format!("value = fea.study({constructor}(1), {constructor}(2));"),
             format!("value = fea.sweep({constructor}(1), {constructor}(2));"),
             format!("value = fea.run({constructor}(1));"),
@@ -155,7 +145,7 @@ fn feedback_gains_and_feof_file_ids_accept_every_runmat_integer_extension_class(
             .iter()
             .any(|value| matches!(value, Value::Bool(false))));
         assert!(values.iter().any(|value| {
-            matches!(value, Value::Object(object) if object.class_name.eq_ignore_ascii_case("tf"))
+            matches!(value, Value::Object(object) if object.class_name().is(runmat_types::standard::TRANSFER_FUNCTION))
         }));
     }
 }

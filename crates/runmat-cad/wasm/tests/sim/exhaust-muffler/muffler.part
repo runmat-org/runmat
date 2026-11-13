@@ -1,0 +1,97 @@
+runmat 0.7
+std 1
+
+// A two-chamber exhaust muffler in 1.5 mm aluminized steel, with the exhaust gas it holds. A
+// 50 mm inlet pipe feeds a 180 mm bore shell; a baffle at mid-length with a 50 mm central
+// opening splits it into two 170 mm chambers, and a 50 mm tail pipe leaves the far end cap.
+// The air is the gas inside (inlet bore, both chambers and the tail pipe bore). The shell is
+// the envelope less the air, so every wall is one face shared by the shell and the air.
+//
+// Tuning: each chamber is a quarter wavelength long at 500 Hz (343 / 500 / 4 = 171 mm), where a
+// single expansion chamber of area ratio m = (180 / 50)^2 = 12.96 gives its peak loss,
+// TL = 10 log10(1 + (m - 1/m)^2 / 4) = 16.2 dB. The muffler's axis is z; the inlet face lies
+// on z = 0. Change `chamber`, `bore` or `pipe` and re-run the study.
+part muffler {
+    input pipe : length = 50 mm
+    input pipe_length : length = 100 mm
+    input bore : length = 180 mm
+    input chamber : length = 170 mm
+    input wall : length = 1.5 mm
+
+    let rp = input.pipe / 2
+    let rc = input.bore / 2
+    let c1 = input.pipe_length
+    let c2 = input.pipe_length + input.chamber
+    let c3 = input.pipe_length + input.chamber + input.wall
+    let c4 = input.pipe_length + input.chamber * 2 + input.wall
+
+    // The gas: the inlet bore, the two chambers joined through the baffle's opening, the tail
+    // pipe's bore; each a cylinder on the axis, joined.
+    sketch inlet_bore_s on origin.xy {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rp)
+    }
+    feature inlet_bore = extrude(profile = sketch.inlet_bore_s, distance = let.c1)
+    feature chamber_1_plane = plane.offset(base = origin.xy, distance = let.c1)
+    sketch chamber_1_s on plane.chamber_1_plane {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rc)
+    }
+    feature chamber_1 = extrude(profile = sketch.chamber_1_s, distance = input.chamber, mode = add(targets = [feature.inlet_bore.body]))
+    feature opening_plane = plane.offset(base = origin.xy, distance = let.c2)
+    sketch opening_s on plane.opening_plane {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rp)
+    }
+    feature opening = extrude(profile = sketch.opening_s, distance = input.wall, mode = add(targets = [feature.inlet_bore.body]))
+    feature chamber_2_plane = plane.offset(base = origin.xy, distance = let.c3)
+    sketch chamber_2_s on plane.chamber_2_plane {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rc)
+    }
+    feature chamber_2 = extrude(profile = sketch.chamber_2_s, distance = input.chamber, mode = add(targets = [feature.inlet_bore.body]))
+    feature tail_bore_plane = plane.offset(base = origin.xy, distance = let.c4)
+    sketch tail_bore_s on plane.tail_bore_plane {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rp)
+    }
+    feature tail_bore = extrude(profile = sketch.tail_bore_s, distance = input.pipe_length, mode = add(targets = [feature.inlet_bore.body]))
+
+    // The shell's outside: the pipes and the shell one wall out, the end caps one wall thick.
+    sketch inlet_pipe_s on origin.xy {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rp + input.wall)
+    }
+    feature inlet_pipe = extrude(profile = sketch.inlet_pipe_s, distance = let.c1 - input.wall)
+    feature shell_plane = plane.offset(base = origin.xy, distance = let.c1 - input.wall)
+    sketch shell_s on plane.shell_plane {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rc + input.wall)
+    }
+    feature shell = extrude(profile = sketch.shell_s, distance = input.chamber * 2 + input.wall * 3, mode = add(targets = [feature.inlet_pipe.body]))
+    feature tail_pipe_plane = plane.offset(base = origin.xy, distance = let.c4 + input.wall)
+    sketch tail_pipe_s on plane.tail_pipe_plane {
+        rim = circle(center = [0 mm, 0 mm], radius = let.rp + input.wall)
+    }
+    feature tail_pipe = extrude(profile = sketch.tail_pipe_s, distance = input.pipe_length - input.wall, mode = add(targets = [feature.inlet_pipe.body]))
+    feature hollow = boolean.subtract(target = feature.inlet_pipe.body, tools = [feature.inlet_bore.body], keep_tools = true)
+
+    region inlet : face = { select = [feature.inlet_bore.face.start], expect = exactly_one, body = feature.inlet_bore.body, label = "Inlet" }
+    region outlet : face = { select = [feature.tail_bore.face.end], expect = exactly_one, body = feature.inlet_bore.body, label = "Outlet" }
+    region walls : face = {
+        select = [
+            feature.inlet_bore.face.side(inlet_bore_s.rim),
+            feature.chamber_1.face.start,
+            feature.chamber_1.face.side(chamber_1_s.rim),
+            feature.chamber_1.face.end,
+            feature.opening.face.side(opening_s.rim),
+            feature.chamber_2.face.start,
+            feature.chamber_2.face.side(chamber_2_s.rim),
+            feature.chamber_2.face.end,
+            feature.tail_bore.face.side(tail_bore_s.rim)
+        ],
+        expect = at_least_one,
+        body = feature.inlet_bore.body,
+        label = "Walls"
+    }
+
+    // The acoustic study's geometry: the gas alone. The shell is a rigid wall to the gas, so the
+    // study needs no mesh of it.
+    configuration air_only = { suppress = [feature.inlet_pipe, feature.shell, feature.tail_pipe, feature.hollow] }
+
+    output shell = { body = feature.inlet_pipe.body, label = "Shell", part_number = "EX-1802", material = "aluminized_steel", color = "#8D9196" }
+    output air = { body = feature.inlet_bore.body, label = "Air", color = "#CFE3F5" }
+}

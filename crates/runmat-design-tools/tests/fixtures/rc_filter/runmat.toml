@@ -1,0 +1,9 @@
+[package]
+name = "electronics-rc-filter"
+version = "0.1.0"
+
+[sources]
+roots = ["."]
+
+[entrypoints.main]
+path = "lowpass.circuit"

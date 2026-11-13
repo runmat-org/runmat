@@ -1,11 +1,10 @@
 use runmat_value::NumericScalar;
 use runmat_value::{Tensor, Value};
 
-use super::op_common::axes_target::AxesTarget;
-use super::properties::{resolve_plot_handle, PlotHandle};
+use super::op_common::axes_target::prepare_axes_call;
 use super::state::{
-    axis_display_bounds_snapshot, axis_display_bounds_snapshot_for_axes, axis_ticks_snapshot,
-    axis_ticks_snapshot_for_axes, set_axis_ticks, set_axis_ticks_for_axes,
+    axis_display_bounds_snapshot_for_axes_for_property, axis_ticks_snapshot_for_axes_for_property,
+    set_axis_ticks_for_axes_for_property,
 };
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor;
@@ -24,30 +23,40 @@ enum TickMode {
 }
 
 pub fn axis_ticks_builtin(
+    runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let (target, args) = split_optional_axes_target(builtin, args)?;
-    match args.as_slice() {
-        [] => query_ticks(builtin, axis, target),
-        [value] => {
-            if let Some(text) = value_as_string(value) {
+    let (target, args) = prepare_axes_call(runtime, builtin, args.view())?;
+    match (args.len(), args.first()) {
+        (0, _) => query_ticks(builtin, axis, &target.resolve(builtin)?),
+        (1, Some(value)) => {
+            if let Some(text) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "auto" => {
-                        apply_mode(builtin, axis, target, TickMode::Auto)?;
+                        super::op_common::axes_output::validate_setter_output(builtin)?;
+                        apply_mode(builtin, axis, &target.resolve(builtin)?, TickMode::Auto)?;
                         return Ok(Value::String("auto".into()));
                     }
                     "manual" => {
-                        apply_mode(builtin, axis, target, TickMode::Manual)?;
+                        super::op_common::axes_output::validate_setter_output(builtin)?;
+                        apply_mode(builtin, axis, &target.resolve(builtin)?, TickMode::Manual)?;
                         return Ok(Value::String("manual".into()));
                     }
-                    "mode" => return query_mode(builtin, axis, target),
+                    "mode" => return query_mode(builtin, axis, &target.resolve(builtin)?),
                     _ => {}
                 }
             }
             let ticks = ticks_from_value(value, builtin)?;
-            set_ticks(builtin, axis, target, ticks.clone())?;
+            super::op_common::axes_output::validate_setter_output(builtin)?;
+            set_ticks(builtin, axis, &target.resolve(builtin)?, ticks.clone())?;
             Ok(tick_value(ticks))
         }
         _ => Err(plotting_error(
@@ -57,69 +66,48 @@ pub fn axis_ticks_builtin(
     }
 }
 
-fn split_optional_axes_target(
+fn query_ticks(
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(AxesTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
-    };
-    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(&first, builtin) {
-        return Ok((Some((handle, axes_index)), iter.collect()));
-    }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((None, rest))
-}
+    axis: TickAxis,
+    target: &super::state::ResolvedAxesTarget,
+) -> BuiltinResult<Value> {
+    let ticks = {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
 
-fn query_ticks(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> BuiltinResult<Value> {
-    let ticks = match target {
-        Some((handle, axes_index)) => {
-            let (x_ticks, y_ticks) =
-                axis_ticks_snapshot_for_axes(handle, axes_index).map_err(|err| {
+        let (x_ticks, y_ticks) = axis_ticks_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        let bounds =
+            axis_display_bounds_snapshot_for_axes_for_property(property, handle, axes_index)
+                .map_err(|err| {
                     plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
                 })?;
-            let bounds =
-                axis_display_bounds_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            match axis {
-                TickAxis::X => ticks_or_auto(x_ticks.as_deref(), axis_bounds(bounds, axis)),
-                TickAxis::Y => ticks_or_auto(y_ticks.as_deref(), axis_bounds(bounds, axis)),
-            }
-        }
-        None => {
-            let (x_ticks, y_ticks) = axis_ticks_snapshot();
-            let bounds = axis_display_bounds_snapshot();
-            match axis {
-                TickAxis::X => ticks_or_auto(x_ticks.as_deref(), axis_bounds(bounds, axis)),
-                TickAxis::Y => ticks_or_auto(y_ticks.as_deref(), axis_bounds(bounds, axis)),
-            }
+        match axis {
+            TickAxis::X => ticks_or_auto(x_ticks.as_deref(), axis_bounds(bounds, axis)),
+            TickAxis::Y => ticks_or_auto(y_ticks.as_deref(), axis_bounds(bounds, axis)),
         }
     };
     Ok(tick_value(ticks))
 }
 
-fn query_mode(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> BuiltinResult<Value> {
-    let manual = match target {
-        Some((handle, axes_index)) => {
-            let (x_ticks, y_ticks) =
-                axis_ticks_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            match axis {
-                TickAxis::X => x_ticks.is_some(),
-                TickAxis::Y => y_ticks.is_some(),
-            }
-        }
-        None => {
-            let (x_ticks, y_ticks) = axis_ticks_snapshot();
-            match axis {
-                TickAxis::X => x_ticks.is_some(),
-                TickAxis::Y => y_ticks.is_some(),
-            }
+fn query_mode(
+    builtin: &'static str,
+    axis: TickAxis,
+    target: &super::state::ResolvedAxesTarget,
+) -> BuiltinResult<Value> {
+    let manual = {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let (x_ticks, y_ticks) = axis_ticks_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        match axis {
+            TickAxis::X => x_ticks.is_some(),
+            TickAxis::Y => y_ticks.is_some(),
         }
     };
     Ok(Value::String(if manual { "manual" } else { "auto" }.into()))
@@ -128,40 +116,29 @@ fn query_mode(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> Buil
 fn apply_mode(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesTarget,
+    target: &super::state::ResolvedAxesTarget,
     mode: TickMode,
 ) -> BuiltinResult<()> {
     let current = match mode {
         TickMode::Auto => None,
-        TickMode::Manual => match target {
-            Some((handle, axes_index)) => {
-                let (x_ticks, y_ticks) =
-                    axis_ticks_snapshot_for_axes(handle, axes_index).map_err(|err| {
+        TickMode::Manual => {
+            let (handle, axes_index) = target.coordinates();
+            let property = target.authority();
+
+            let (x_ticks, y_ticks) = axis_ticks_snapshot_for_axes_for_property(
+                property, handle, axes_index,
+            )
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+            let bounds =
+                axis_display_bounds_snapshot_for_axes_for_property(property, handle, axes_index)
+                    .map_err(|err| {
                         plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
                     })?;
-                let bounds =
-                    axis_display_bounds_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                        plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                    })?;
-                Some(match axis {
-                    TickAxis::X => ticks_or_auto(x_ticks.as_deref(), axis_bounds(bounds, axis)),
-                    TickAxis::Y => ticks_or_auto(y_ticks.as_deref(), axis_bounds(bounds, axis)),
-                })
-            }
-            None => Some({
-                let bounds = axis_display_bounds_snapshot();
-                match axis {
-                    TickAxis::X => {
-                        let (x_ticks, _) = axis_ticks_snapshot();
-                        ticks_or_auto(x_ticks.as_deref(), axis_bounds(bounds, axis))
-                    }
-                    TickAxis::Y => {
-                        let (_, y_ticks) = axis_ticks_snapshot();
-                        ticks_or_auto(y_ticks.as_deref(), axis_bounds(bounds, axis))
-                    }
-                }
-            }),
-        },
+            Some(match axis {
+                TickAxis::X => ticks_or_auto(x_ticks.as_deref(), axis_bounds(bounds, axis)),
+                TickAxis::Y => ticks_or_auto(y_ticks.as_deref(), axis_bounds(bounds, axis)),
+            })
+        }
     };
     match current {
         Some(ticks) => set_ticks(builtin, axis, target, ticks),
@@ -172,65 +149,64 @@ fn apply_mode(
 fn set_ticks(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesTarget,
+    target: &super::state::ResolvedAxesTarget,
     ticks: Vec<f64>,
 ) -> BuiltinResult<()> {
-    match target {
-        Some((handle, axes_index)) => {
-            let (x_ticks, y_ticks) =
-                axis_ticks_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            let (x, y) = match axis {
-                TickAxis::X => (Some(ticks), y_ticks),
-                TickAxis::Y => (x_ticks, Some(ticks)),
-            };
-            set_axis_ticks_for_axes(handle, axes_index, x, y).map_err(|err| {
-                plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-            })
-        }
-        None => {
-            let (x_ticks, y_ticks) = axis_ticks_snapshot();
-            let (x, y) = match axis {
-                TickAxis::X => (Some(ticks), y_ticks),
-                TickAxis::Y => (x_ticks, Some(ticks)),
-            };
-            set_axis_ticks(x, y);
-            Ok(())
-        }
+    {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let (x_ticks, y_ticks) = axis_ticks_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        let (x, y) = match axis {
+            TickAxis::X => (Some(ticks), y_ticks),
+            TickAxis::Y => (x_ticks, Some(ticks)),
+        };
+        set_axis_ticks_for_axes_for_property(property, handle, axes_index, x, y)
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))
     }
 }
 
-fn clear_ticks(builtin: &'static str, axis: TickAxis, target: AxesTarget) -> BuiltinResult<()> {
-    match target {
-        Some((handle, axes_index)) => {
-            let (x_ticks, y_ticks) =
-                axis_ticks_snapshot_for_axes(handle, axes_index).map_err(|err| {
-                    plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-                })?;
-            let (x, y) = match axis {
-                TickAxis::X => (None, y_ticks),
-                TickAxis::Y => (x_ticks, None),
-            };
-            set_axis_ticks_for_axes(handle, axes_index, x, y).map_err(|err| {
-                plotting_error_with_source(builtin, format!("{builtin}: {err}"), err)
-            })
-        }
-        None => {
-            let (x_ticks, y_ticks) = axis_ticks_snapshot();
-            let (x, y) = match axis {
-                TickAxis::X => (None, y_ticks),
-                TickAxis::Y => (x_ticks, None),
-            };
-            set_axis_ticks(x, y);
-            Ok(())
-        }
+fn clear_ticks(
+    builtin: &'static str,
+    axis: TickAxis,
+    target: &super::state::ResolvedAxesTarget,
+) -> BuiltinResult<()> {
+    {
+        let (handle, axes_index) = target.coordinates();
+        let property = target.authority();
+
+        let (x_ticks, y_ticks) = axis_ticks_snapshot_for_axes_for_property(
+            property, handle, axes_index,
+        )
+        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+        let (x, y) = match axis {
+            TickAxis::X => (None, y_ticks),
+            TickAxis::Y => (x_ticks, None),
+        };
+        set_axis_ticks_for_axes_for_property(property, handle, axes_index, x, y)
+            .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))
     }
+}
+
+pub(super) fn tick_tensor_from_value(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<Tensor> {
+    // A scalar numeric Value is a one-element tick vector. Use the canonical
+    // checked conversion so native integers keep their exact storage until
+    // the graphics boundary. Resident controls remain unsupported.
+    match value {
+        Value::Num(_) | Value::Int(_) => tensor::value_into_tensor_for(builtin, value.clone()),
+        _ => Tensor::try_from(value),
+    }
+    .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))
 }
 
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
-    let tensor =
-        Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+    let tensor = tick_tensor_from_value(value, builtin)?;
     let exact = (0..tensor.len())
         .map(|index| {
             tensor
@@ -301,12 +277,12 @@ fn tick_value(data: Vec<f64>) -> Value {
     Value::Tensor(Tensor::new(data, vec![1, len]).expect("tick row vector"))
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
+fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
+        Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]

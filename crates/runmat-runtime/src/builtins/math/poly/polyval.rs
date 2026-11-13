@@ -1,274 +1,28 @@
 //! MATLAB-compatible `polyval` builtin with GPU-aware semantics for RunMat.
 
-use log::debug;
 use num_complex::Complex64;
-use runmat_accelerate_api::{HostTensorView, ProviderPolyvalMu, ProviderPolyvalOptions};
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
+use runmat_builtins::PolyfitStatField;
+#[cfg(test)]
+use runmat_builtins::POLYVAL_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, POLYVAL_ERROR_INVALID_ARGUMENT, POLYVAL_ERROR_INVALID_INPUT,
+    POLYVAL_INTEGER_COEFFICIENTS_EXTENSION, POLYVAL_INTEGER_OPTIONS_EXTENSION,
+    POLYVAL_INTEGER_POINTS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, LogicalArray, Tensor, Value};
 
+use super::normalization;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::poly::type_resolvers::polyval_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyval";
-
-const POLYVAL_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Evaluated polynomial values at x.",
-}];
-
-const POLYVAL_OUTPUT_Y_DELTA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluated polynomial values at x.",
-    },
-    BuiltinParamDescriptor {
-        name: "delta",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prediction interval values when S is supplied.",
-    },
-];
-
-const POLYVAL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluation points.",
-    },
-];
-
-const POLYVAL_INPUTS_WITH_S: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluation points.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional polyfit statistics structure.",
-    },
-];
-
-const POLYVAL_INPUTS_WITH_S_MU: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Evaluation points.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional polyfit statistics structure (or []).",
-    },
-    BuiltinParamDescriptor {
-        name: "mu",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional centering/scaling vector [mean, std].",
-    },
-];
-
-const POLYVAL_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "y = polyval(p, x)",
-        inputs: &POLYVAL_INPUTS,
-        outputs: &POLYVAL_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = polyval(p, x, S)",
-        inputs: &POLYVAL_INPUTS_WITH_S,
-        outputs: &POLYVAL_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = polyval(p, x, S, mu)",
-        inputs: &POLYVAL_INPUTS_WITH_S_MU,
-        outputs: &POLYVAL_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y, delta] = polyval(p, x)",
-        inputs: &POLYVAL_INPUTS,
-        outputs: &POLYVAL_OUTPUT_Y_DELTA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y, delta] = polyval(p, x, S)",
-        inputs: &POLYVAL_INPUTS_WITH_S,
-        outputs: &POLYVAL_OUTPUT_Y_DELTA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y, delta] = polyval(p, x, S, mu)",
-        inputs: &POLYVAL_INPUTS_WITH_S_MU,
-        outputs: &POLYVAL_OUTPUT_Y_DELTA,
-    },
-];
-
-const POLYVAL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYVAL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polyval:InvalidArgument"),
-    when: "Option arguments (S/mu/output arity) are malformed or unsupported.",
-    message: "polyval: invalid argument",
-};
-
-const POLYVAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYVAL.INVALID_INPUT",
-    identifier: Some("RunMat:polyval:InvalidInput"),
-    when: "Polynomial coefficients or evaluation points cannot be interpreted as numeric inputs.",
-    message: "polyval: invalid input",
-};
-
-const POLYVAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYVAL.INTERNAL",
-    identifier: Some("RunMat:polyval:Internal"),
-    when: "Runtime fails while building output tensors, deltas, or provider fallbacks.",
-    message: "polyval: internal runtime failure",
-};
-
-const POLYVAL_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    POLYVAL_ERROR_INVALID_ARGUMENT,
-    POLYVAL_ERROR_INVALID_INPUT,
-    POLYVAL_ERROR_INTERNAL,
-];
-
-pub const POLYVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLYVAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLYVAL_ERRORS,
-};
-
-const POLYVAL_INTEGER_COEFFICIENTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "polyval-integer-coefficients",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "polyval accepts typed-integer polynomial coefficients as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PolyvalIntegerCoefficientsExtension"),
-    };
-const POLYVAL_INTEGER_POINTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyval-integer-points",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyval accepts typed-integer query points as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyvalIntegerPointsExtension"),
-};
-const POLYVAL_INTEGER_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyval-integer-fit-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyval accepts typed-integer S or mu data as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyvalIntegerFitOptionsExtension"),
-};
-pub const POLYVAL_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    POLYVAL_INTEGER_COEFFICIENTS_EXTENSION,
-    POLYVAL_INTEGER_POINTS_EXTENSION,
-    POLYVAL_INTEGER_OPTIONS_EXTENSION,
-];
-const POLYVAL_INTEGER_COEFFICIENTS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double polynomial coefficients; RunMat admits typed integers only after exact floating conversion is proved.",
-    }];
-const POLYVAL_INTEGER_POINTS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double query points; RunMat admits typed integers only at the checked Horner-evaluation boundary.",
-    }];
-const POLYVAL_INTEGER_OPTIONS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "S or mu numeric fields",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented fit statistics and scaling vector are floating outputs of polyfit; native integer replacements are a checked RunMat extension.",
-    }];
-pub const POLYVAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = polyval(integer_p,x,___)",
-        inputs: &POLYVAL_INTEGER_COEFFICIENTS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer coefficients are independently gated before provider or host Horner evaluation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = polyval(p,integer_x,___)",
-        inputs: &POLYVAL_INTEGER_POINTS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer query points are independently gated before provider or host Horner evaluation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[y,delta] = polyval(p,x,integer_S_or_mu)",
-        inputs: &POLYVAL_INTEGER_OPTIONS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed integer fit metadata is independently gated and checked recursively before prediction-interval computation.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyval")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -319,22 +73,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polyval",
-    category = "math/poly",
-    summary = "Evaluate polynomials at specified points.",
-    keywords = "polyval,polynomial,polyfit,delta,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(polyval_type),
-    descriptor(crate::builtins::math::poly::polyval::POLYVAL_DESCRIPTOR),
-    extensions(crate::builtins::math::poly::polyval::POLYVAL_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::poly::polyval::POLYVAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
-async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyval_builtin(
+    p: Value,
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
-        let eval = evaluate(p, x, &rest, out_count >= 2).await?;
+        let eval = evaluate_view(p, x, rest.view(), out_count >= 2).await?;
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = vec![eval.value()];
         if out_count >= 2 {
@@ -344,7 +94,7 @@ async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::Builtin
             out_count, outputs,
         ));
     }
-    let eval = evaluate(p, x, &rest, false).await?;
+    let eval = evaluate_view(p, x, rest.view(), false).await?;
     Ok(eval.value())
 }
 
@@ -355,11 +105,37 @@ pub async fn evaluate(
     rest: &[Value],
     want_delta: bool,
 ) -> BuiltinResult<PolyvalEval> {
+    evaluate_view(
+        coefficients,
+        points,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        want_delta,
+    )
+    .await
+}
+
+async fn evaluate_view(
+    coefficients: Value,
+    points: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    want_delta: bool,
+) -> BuiltinResult<PolyvalEval> {
+    // Arity and an absent/known-empty statistics argument are decidable from
+    // the public call without reading any resident numerical payload.
+    if rest.len() > 2 {
+        return Err(polyval_argument_error("polyval: too many input arguments"));
+    }
+    if want_delta && (rest.is_empty() || rest.first().is_some_and(is_known_empty_option)) {
+        return Err(polyval_argument_error(
+            "polyval: S input (structure returned by polyfit) is required for delta output",
+        ));
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&coefficients, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&points, BUILTIN_NAME)?;
     for option in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(option, BUILTIN_NAME)?;
     }
+    let (preparsed_mu, preparsed_stats) = preflight_host_options(rest, &coefficients).await?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &coefficients,
         &POLYVAL_INTEGER_COEFFICIENTS_EXTENSION,
@@ -385,6 +161,7 @@ pub async fn evaluate(
     }
     let options = parse_option_values(rest).await?;
 
+    let residency = resident::Request::new(&points, &coefficients, rest)?;
     let coeff_clone = coefficients.clone();
     let points_clone = points.clone();
 
@@ -394,15 +171,14 @@ pub async fn evaluate(
     let (mut inputs, prefer_gpu_points) = convert_points(points_clone).await?;
     let prefer_gpu_output = prefer_gpu_points || coeff_was_gpu;
 
-    let mu = match options.mu.clone() {
-        Some(mu_value) => Some(parse_mu(mu_value).await?),
-        None => None,
+    let mu = match (preparsed_mu, options.mu.clone()) {
+        (Some(mu), _) => Some(mu),
+        (None, Some(mu_value)) => Some(parse_mu(mu_value).await?),
+        (None, None) => None,
     };
 
     if prefer_gpu_output && !want_delta && options.s.is_none() {
-        if let Some(value) =
-            try_gpu_polyval(&coeffs, coeff_real, &inputs, mu, prefer_gpu_output).await?
-        {
+        if let Some(value) = residency.try_evaluate(&coeffs, coeff_real, &inputs, mu)? {
             return Ok(PolyvalEval::new(value, None));
         }
     }
@@ -411,10 +187,10 @@ pub async fn evaluate(
         apply_mu(&mut inputs.data, mu_val)?;
     }
 
-    let stats = if let Some(s_value) = options.s {
-        parse_stats(s_value, coeffs.len()).await?
-    } else {
-        None
+    let stats = match (preparsed_stats, options.s) {
+        (Some(stats), _) => Some(stats),
+        (None, Some(s_value)) => parse_stats(s_value, coeffs.len()).await?,
+        (None, None) => None,
     };
 
     if want_delta && stats.is_none() {
@@ -424,9 +200,9 @@ pub async fn evaluate(
     }
 
     if inputs.data.is_empty() {
-        let y = zeros_like(&inputs.shape, prefer_gpu_output)?;
+        let y = zeros_like(&inputs.shape, prefer_gpu_output, &residency)?;
         let delta = if want_delta {
-            Some(zeros_like(&inputs.shape, prefer_gpu_output)?)
+            Some(zeros_like(&inputs.shape, prefer_gpu_output, &residency)?)
         } else {
             None
         };
@@ -434,9 +210,9 @@ pub async fn evaluate(
     }
 
     if coeffs.is_empty() {
-        let zeros = zeros_like(&inputs.shape, prefer_gpu_output)?;
+        let zeros = zeros_like(&inputs.shape, prefer_gpu_output, &residency)?;
         let delta = if want_delta {
-            Some(zeros_like(&inputs.shape, prefer_gpu_output)?)
+            Some(zeros_like(&inputs.shape, prefer_gpu_output, &residency)?)
         } else {
             None
         };
@@ -450,13 +226,14 @@ pub async fn evaluate(
         &inputs.shape,
         prefer_gpu_output,
         output_real && values_are_real(&values),
+        &residency,
     )?;
 
     let delta_value = if want_delta {
         let stats = stats.expect("delta requires stats");
         let delta = compute_prediction_interval(&coeffs, &inputs.data, &stats)?;
         let prefer = prefer_gpu_output && stats.is_real;
-        Some(finalize_delta(delta, &inputs.shape, prefer)?)
+        Some(finalize_delta(delta, &inputs.shape, prefer, &residency)?)
     } else {
         None
     };
@@ -464,91 +241,8 @@ pub async fn evaluate(
     Ok(PolyvalEval::new(result_value, delta_value))
 }
 
-async fn try_gpu_polyval(
-    coeffs: &[Complex64],
-    coeff_real: bool,
-    inputs: &NumericArray,
-    mu: Option<Mu>,
-    prefer_gpu_output: bool,
-) -> BuiltinResult<Option<Value>> {
-    if !coeff_real || !inputs.all_real {
-        return Ok(None);
-    }
-    if coeffs.is_empty() || inputs.data.is_empty() {
-        return Ok(None);
-    }
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(None);
-    };
-
-    let coeff_data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
-    let coeff_shape = vec![1usize, coeffs.len()];
-    let coeff_view = HostTensorView {
-        data: &coeff_data,
-        shape: &coeff_shape,
-    };
-    let coeff_handle = match provider.upload(&coeff_view) {
-        Ok(handle) => handle,
-        Err(err) => {
-            debug!("polyval: GPU upload of coefficients failed, falling back: {err}");
-            return Ok(None);
-        }
-    };
-
-    let input_data: Vec<f64> = inputs.data.iter().map(|c| c.re).collect();
-    let input_shape = inputs.shape.clone();
-    let input_view = HostTensorView {
-        data: &input_data,
-        shape: &input_shape,
-    };
-    let input_handle = match provider.upload(&input_view) {
-        Ok(handle) => handle,
-        Err(err) => {
-            debug!("polyval: GPU upload of evaluation points failed, falling back: {err}");
-            let _ = provider.free(&coeff_handle);
-            return Ok(None);
-        }
-    };
-
-    let options = ProviderPolyvalOptions {
-        mu: mu.map(|m| ProviderPolyvalMu {
-            mean: m.mean,
-            scale: m.scale,
-        }),
-    };
-
-    let result_handle = match provider.polyval(&coeff_handle, &input_handle, &options) {
-        Ok(handle) => handle,
-        Err(err) => {
-            debug!("polyval: GPU kernel execution failed, falling back: {err}");
-            let _ = provider.free(&coeff_handle);
-            let _ = provider.free(&input_handle);
-            return Ok(None);
-        }
-    };
-
-    let _ = provider.free(&coeff_handle);
-    let _ = provider.free(&input_handle);
-
-    if prefer_gpu_output {
-        return Ok(Some(Value::GpuTensor(result_handle)));
-    }
-
-    let host = match gpu_helpers::download_floating_projection_async(provider, &result_handle).await
-    {
-        Ok(host) => host,
-        Err(err) => {
-            debug!("polyval: GPU download failed, falling back: {err}");
-            let _ = provider.free(&result_handle);
-            return Ok(None);
-        }
-    };
-    let _ = provider.free(&result_handle);
-
-    let tensor =
-        Tensor::new(host.data, host.shape).map_err(|e| polyval_error(format!("polyval: {e}")))?;
-    Ok(Some(tensor::tensor_into_value(tensor)))
-}
+#[path = "polyval/resident.rs"]
+mod resident;
 
 /// Result object for polyval evaluation.
 #[derive(Debug)]
@@ -599,7 +293,7 @@ impl Mu {
         if !mean.is_finite() || !scale.is_finite() {
             return Err(polyval_error("polyval: mu values must be finite"));
         }
-        if scale.abs() <= EPS {
+        if scale == 0.0 {
             return Err(polyval_error("polyval: mu(2) must be non-zero"));
         }
         Ok(Self { mean, scale })
@@ -649,7 +343,101 @@ struct ParsedOptions {
     mu: Option<Value>,
 }
 
-async fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
+fn is_known_empty_option(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor_element_len(tensor) == 0,
+        Value::LogicalArray(array) => array.data.is_empty(),
+        Value::Cell(array) => array.data().is_empty(),
+        Value::GpuTensor(handle) => handle.shape().contains(&0),
+        _ => false,
+    }
+}
+
+fn known_coefficient_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(tensor) => Some(tensor_element_len(tensor)),
+        Value::ComplexTensor(tensor) => Some(complex_tensor_element_len(tensor)),
+        Value::LogicalArray(array) => Some(array.data.len()),
+        Value::GpuTensor(handle) if handle.shape().contains(&0) => Some(0),
+        Value::GpuTensor(handle) => handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |n, d| n.checked_mul(*d)),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(1),
+        _ => None,
+    }
+}
+
+fn stat_fields(value: &runmat_value::StructValue) -> BuiltinResult<(&Value, &Value, &Value)> {
+    Ok((
+        required_stat_field(value, PolyfitStatField::R)?,
+        required_stat_field(value, PolyfitStatField::DegreesOfFreedom)?,
+        required_stat_field(value, PolyfitStatField::ResidualNorm)?,
+    ))
+}
+
+fn required_stat_field(
+    value: &runmat_value::StructValue,
+    identity: PolyfitStatField,
+) -> BuiltinResult<&Value> {
+    value.fields.get(identity.public_name()).ok_or_else(|| {
+        polyval_error(format!(
+            "polyval: S input is missing the field '{}'",
+            identity.public_name()
+        ))
+    })
+}
+
+async fn preflight_host_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+    coefficients: &Value,
+) -> BuiltinResult<(Option<Mu>, Option<PolyfitStats>)> {
+    // Inspect the later host control before any earlier resident statistics
+    // field or numerical operand can initiate a provider readback.
+    let mu = match rest.get(1) {
+        Some(Value::GpuTensor(_)) | None => None,
+        Some(value) => Some(parse_host_mu(value.clone())?),
+    };
+    let stats = match rest.first() {
+        None => None,
+        Some(value) if is_known_empty_option(value) => None,
+        Some(Value::Struct(value)) => {
+            let (r, df, normr) = stat_fields(value)?;
+            let has_resident_field = [r, df, normr]
+                .into_iter()
+                .any(|field| matches!(field, Value::GpuTensor(_)));
+            if has_resident_field {
+                if let (Some(len), false) = (
+                    known_coefficient_len(coefficients),
+                    matches!(r, Value::GpuTensor(_)),
+                ) {
+                    let _ = convert_matrix((*r).clone(), len).await?;
+                }
+                if !matches!(df, Value::GpuTensor(_)) {
+                    let _ = scalar_to_f64((*df).clone(), "polyval: S.df").await?;
+                }
+                if !matches!(normr, Value::GpuTensor(_)) {
+                    let _ = scalar_to_f64((*normr).clone(), "polyval: S.normr").await?;
+                }
+                None
+            } else if let Some(len) = known_coefficient_len(coefficients) {
+                parse_stats(Value::Struct(value.clone()), len).await?
+            } else {
+                None
+            }
+        }
+        Some(other) => {
+            return Err(polyval_error(format!(
+                "polyval: S input must be the structure returned by polyfit, got {other:?}"
+            )))
+        }
+    };
+    Ok((mu, stats))
+}
+
+async fn parse_option_values(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedOptions> {
     match rest.len() {
         0 => Ok(ParsedOptions { s: None, mu: None }),
         1 => Ok(ParsedOptions {
@@ -681,7 +469,7 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
             convert_coefficients(gathered).await
         }
         Value::Tensor(tensor) => {
-            ensure_vector_shape("polyval", &tensor.shape)?;
+            ensure_vector_shape("polyval", tensor.shape())?;
             let data = tensor::tensor_values_f64(&tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
@@ -689,7 +477,7 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
             Ok((data, true))
         }
         Value::ComplexTensor(mut tensor) => {
-            ensure_vector_shape("polyval", &tensor.shape)?;
+            ensure_vector_shape("polyval", tensor.shape())?;
             let all_real = complex_tensor_values_are_real(&tensor);
             let data = complex_tensor_values(&mut tensor);
             Ok((data, all_real))
@@ -709,25 +497,34 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
             vec![Complex64::new(if flag { 1.0 } else { 0.0 }, 0.0)],
             true,
         )),
-        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im.abs() <= EPS)),
+        Value::Complex(re, im) => Ok((vec![Complex64::new(re, im)], im == 0.0)),
         other => Err(polyval_error(format!(
             "polyval: coefficients must be numeric, got {other:?}"
         ))),
     }
 }
 
+#[async_recursion::async_recursion(?Send)]
 async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            let array = NumericArray {
-                data: tensor::tensor_values_f64(&tensor)
-                    .into_iter()
-                    .map(|re| Complex64::new(re, 0.0))
-                    .collect(),
-                shape: tensor.shape.clone(),
-                all_real: true,
-            };
+            let readback =
+                runmat_accelerate_api::numeric_readback_for_handle(&handle).map_err(|source| {
+                    let mut error = crate::runtime_error::with_provider_execution_source(
+                        polyval_error("polyval: no exact owner for resident points"),
+                        source.into(),
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })?;
+            let runtime = crate::context::legacy::active();
+            let host = gpu_helpers::download_readback_value_in_context(runtime.as_ref(), &readback)
+                .await
+                .map_err(|mut error| {
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })?;
+            let (array, _) = convert_points(host).await?;
             Ok((array, true))
         }
         Value::Tensor(tensor) => Ok((
@@ -736,7 +533,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
                     .into_iter()
                     .map(|re| Complex64::new(re, 0.0))
                     .collect(),
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
                 all_real: true,
             },
             false,
@@ -744,7 +541,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
         Value::ComplexTensor(tensor) => Ok((
             NumericArray {
                 data: complex_tensor_values_ref(&tensor),
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
                 all_real: complex_tensor_values_are_real(&tensor),
             },
             false,
@@ -756,7 +553,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
                     .iter()
                     .map(|&bit| Complex64::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
                     .collect(),
-                shape: array.shape.clone(),
+                shape: array.shape.to_vec(),
                 all_real: true,
             },
             false,
@@ -789,7 +586,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
             NumericArray {
                 data: vec![Complex64::new(re, im)],
                 shape: vec![1, 1],
-                all_real: im.abs() <= EPS,
+                all_real: im == 0.0,
             },
             false,
         )),
@@ -799,13 +596,16 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     }
 }
 
-#[async_recursion::async_recursion(?Send)]
 async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
+    let host = match value {
+        Value::GpuTensor(handle) => Value::Tensor(gpu_helpers::gather_tensor_async(&handle).await?),
+        host => host,
+    };
+    parse_host_mu(host)
+}
+
+fn parse_host_mu(value: Value) -> BuiltinResult<Mu> {
     match value {
-        Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-            parse_mu(Value::Tensor(gathered)).await
-        }
         Value::Tensor(tensor) => {
             if tensor_element_len(&tensor) < 2 {
                 return Err(polyval_error(
@@ -837,22 +637,22 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
             let ((mean_re, mean_im), (scale_re, scale_im)) =
                 if let Some(storage) = tensor.integer_storage() {
                     let mean_re = storage
-                        .real
+                        .real()
                         .value_at(0)
                         .expect("complex integer mu real mean")
                         .to_f64();
                     let mean_im = storage
-                        .imag
+                        .imag()
                         .value_at(0)
                         .expect("complex integer mu imag mean")
                         .to_f64();
                     let scale_re = storage
-                        .real
+                        .real()
                         .value_at(1)
                         .expect("complex integer mu real scale")
                         .to_f64();
                     let scale_im = storage
-                        .imag
+                        .imag()
                         .value_at(1)
                         .expect("complex integer mu imag scale")
                         .to_f64();
@@ -860,7 +660,7 @@ async fn parse_mu(value: Value) -> BuiltinResult<Mu> {
                 } else {
                     (tensor.materialize_f64()[0], tensor.materialize_f64()[1])
                 };
-            if mean_im.abs() > EPS || scale_im.abs() > EPS {
+            if mean_im != 0.0 || scale_im != 0.0 {
                 return Err(polyval_error("polyval: mu values must be real"));
             }
             Mu::new(mean_re, scale_re)
@@ -888,25 +688,11 @@ async fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<Pol
             )))
         }
     };
-    let r_value = struct_value
-        .fields
-        .get("R")
-        .cloned()
-        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'R'"))?;
-    let df_value = struct_value
-        .fields
-        .get("df")
-        .cloned()
-        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'df'"))?;
-    let normr_value = struct_value
-        .fields
-        .get("normr")
-        .cloned()
-        .ok_or_else(|| polyval_error("polyval: S input is missing the field 'normr'"))?;
+    let (r_value, df_value, normr_value) = stat_fields(&struct_value)?;
 
-    let (matrix, is_real) = convert_matrix(r_value, coeff_len).await?;
-    let df = scalar_to_f64(df_value, "polyval: S.df").await?;
-    let normr = scalar_to_f64(normr_value, "polyval: S.normr").await?;
+    let (matrix, is_real) = convert_matrix((*r_value).clone(), coeff_len).await?;
+    let df = scalar_to_f64((*df_value).clone(), "polyval: S.df").await?;
+    let normr = scalar_to_f64((*normr_value).clone(), "polyval: S.normr").await?;
 
     Ok(Some(PolyfitStats {
         r: matrix,
@@ -914,6 +700,14 @@ async fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<Pol
         normr,
         is_real,
     }))
+}
+
+fn coefficient_matrix_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -924,8 +718,7 @@ async fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix
             convert_matrix(Value::Tensor(tensor), coeff_len).await
         }
         Value::Tensor(tensor) => {
-            let rows = tensor.rows;
-            let cols = tensor.cols;
+            let (rows, cols) = coefficient_matrix_dimensions(tensor.shape());
             if rows != coeff_len || cols != coeff_len {
                 return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
@@ -936,8 +729,8 @@ async fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix
             Ok((Matrix { rows, cols, data }, true))
         }
         Value::ComplexTensor(mut tensor) => {
-            let rows = tensor.rows;
-            let cols = tensor.cols;
+            let rows = tensor.rows();
+            let cols = tensor.cols();
             if rows != coeff_len || cols != coeff_len {
                 return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
@@ -1012,10 +805,10 @@ async fn scalar_to_f64(value: Value, context: &str) -> BuiltinResult<f64> {
 }
 
 fn apply_mu(values: &mut [Complex64], mu: Mu) -> BuiltinResult<()> {
-    let mean = Complex64::new(mu.mean, 0.0);
-    let scale = Complex64::new(mu.scale, 0.0);
     for v in values.iter_mut() {
-        *v = (*v - mean) / scale;
+        let real = normalization::standardize(v.re, mu.mean, mu.scale)
+            .ok_or_else(|| polyval_error("polyval: scaled query point exceeds finite range"))?;
+        *v = Complex64::new(real, v.im / mu.scale);
     }
     Ok(())
 }
@@ -1076,13 +869,19 @@ fn solve_row_against_upper(row: &[Complex64], matrix: &Matrix) -> BuiltinResult<
         ));
     }
     let mut result = vec![Complex64::new(0.0, 0.0); n];
-    for j in (0..n).rev() {
+    // The row variance is ||v / R||². Solve Rᵀ z = vᵀ by forward
+    // substitution; R is the upper-triangular factor in the same coordinate
+    // system as both the published coefficients and this Vandermonde row.
+    for j in 0..n {
         let mut acc = row[j];
-        for (k, value) in result.iter().enumerate().skip(j + 1) {
+        for (k, value) in result.iter().enumerate().take(j) {
             acc -= *value * matrix.get(k, j);
         }
         let diag = matrix.get(j, j);
-        if diag.norm() <= EPS {
+        let column_scale = (0..=j)
+            .map(|row| matrix.get(row, j).norm())
+            .fold(0.0_f64, f64::max);
+        if diag.norm() <= f64::EPSILON * column_scale {
             return Err(polyval_error("polyval: S.R is singular"));
         }
         result[j] = acc / diag;
@@ -1095,10 +894,11 @@ fn finalize_values(
     shape: &[usize],
     prefer_gpu: bool,
     real_only: bool,
+    residency: &resident::Request,
 ) -> BuiltinResult<Value> {
     if real_only {
         let real_data: Vec<f64> = data.iter().map(|c| c.re).collect();
-        finalize_real(real_data, shape, prefer_gpu)
+        finalize_real(real_data, shape, prefer_gpu, residency)
     } else if data.len() == 1 {
         let value = data[0];
         Ok(Value::Complex(value.re, value.im))
@@ -1110,31 +910,45 @@ fn finalize_values(
     }
 }
 
-fn finalize_delta(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
-    finalize_real(data, shape, prefer_gpu)
+fn finalize_delta(
+    data: Vec<f64>,
+    shape: &[usize],
+    prefer_gpu: bool,
+    residency: &resident::Request,
+) -> BuiltinResult<Value> {
+    finalize_real(data, shape, prefer_gpu, residency)
 }
 
-fn finalize_real(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
+fn finalize_real(
+    data: Vec<f64>,
+    shape: &[usize],
+    prefer_gpu: bool,
+    residency: &resident::Request,
+) -> BuiltinResult<Value> {
     let tensor = Tensor::new(data, shape.to_vec())
         .map_err(|e| polyval_error(format!("polyval: failed to build tensor: {e}")))?;
     if prefer_gpu {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: data.as_ref(),
-                shape: &tensor.shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                return Ok(Value::GpuTensor(handle));
-            }
+        if let Some(value) = residency.upload_result(&tensor)? {
+            return Ok(value);
         }
     }
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn zeros_like(shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
-    let len = shape.iter().product();
-    finalize_real(vec![0.0; len], shape, prefer_gpu)
+fn zeros_like(
+    shape: &[usize],
+    prefer_gpu: bool,
+    residency: &resident::Request,
+) -> BuiltinResult<Value> {
+    let len = if shape.contains(&0) {
+        0
+    } else {
+        shape
+            .iter()
+            .try_fold(1usize, |n, d| n.checked_mul(*d))
+            .ok_or_else(|| polyval_error("polyval: output shape overflow"))?
+    };
+    finalize_real(vec![0.0; len], shape, prefer_gpu, residency)
 }
 
 fn ensure_vector_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
@@ -1175,10 +989,10 @@ fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
 fn complex_tensor_values(tensor: &mut ComplexTensor) -> Vec<Complex64> {
     if let Some(storage) = tensor.integer_storage() {
         return storage
-            .real
+            .real()
             .exact_values()
             .into_iter()
-            .zip(storage.imag.exact_values())
+            .zip(storage.imag().exact_values())
             .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
             .collect();
     }
@@ -1192,10 +1006,10 @@ fn complex_tensor_values(tensor: &mut ComplexTensor) -> Vec<Complex64> {
 fn complex_tensor_values_ref(tensor: &ComplexTensor) -> Vec<Complex64> {
     if let Some(storage) = tensor.integer_storage() {
         return storage
-            .real
+            .real()
             .exact_values()
             .into_iter()
-            .zip(storage.imag.exact_values())
+            .zip(storage.imag().exact_values())
             .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
             .collect();
     }
@@ -1209,15 +1023,12 @@ fn complex_tensor_values_ref(tensor: &ComplexTensor) -> Vec<Complex64> {
 fn complex_tensor_values_are_real(tensor: &ComplexTensor) -> bool {
     if let Some(storage) = tensor.integer_storage() {
         return storage
-            .imag
+            .imag()
             .exact_values()
             .iter()
             .all(|value| value.is_zero());
     }
-    tensor
-        .materialize_f64()
-        .iter()
-        .all(|&(_, im)| im.abs() <= EPS)
+    tensor.materialize_f64().iter().all(|&(_, im)| im == 0.0)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -1225,7 +1036,7 @@ async fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Tensor(t) => Ok(tensor_element_len(t) == 0),
         Value::LogicalArray(l) => Ok(l.data.is_empty()),
-        Value::Cell(ca) => Ok(ca.data.is_empty()),
+        Value::Cell(ca) => Ok(ca.data().is_empty()),
         Value::GpuTensor(handle) => {
             let gathered =
                 gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
@@ -1236,7 +1047,7 @@ async fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
 }
 
 fn values_are_real(values: &[Complex64]) -> bool {
-    values.iter().all(|c| c.im.abs() <= EPS)
+    values.iter().all(|c| c.im == 0.0)
 }
 
 #[cfg(test)]
@@ -1244,7 +1055,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_value::{IntegerComplexStorage, IntegerStorage, StructValue};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1304,7 +1115,7 @@ pub(crate) mod tests {
         .expect("polyval");
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, points.shape);
+                assert_eq!(tensor.shape(), points.shape());
                 let expected = vec![-3.0, 2.0, 1.0, 0.0, 5.0];
                 assert_eq!(tensor.materialize_f64(), expected);
             }
@@ -1327,11 +1138,34 @@ pub(crate) mod tests {
         .expect("polyval");
         match value {
             Value::ComplexTensor(tensor) => {
-                assert_eq!(tensor.shape, points.shape);
+                assert_eq!(tensor.shape(), points.shape());
                 assert_eq!(tensor.materialize_f64().len(), 3);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiny_nonzero_complex_value_and_nonzero_mu_scale_survive() {
+        let tiny = polyval_builtin(Value::Complex(1.0, 1.0e-13), Value::Num(2.0), Vec::new())
+            .expect("complex constant");
+        assert_eq!(tiny, Value::Complex(1.0, 1.0e-13));
+
+        let mu = Value::Tensor(Tensor::new(vec![2.0e-14, 1.0e-14], vec![1, 2]).unwrap());
+        let options = vec![
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            mu,
+        ];
+        let scaled = polyval_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::Num(3.0e-14),
+            options,
+        )
+        .expect("small nonzero mu scale");
+        let Value::Num(scaled) = scaled else {
+            panic!("scalar prediction expected");
+        };
+        assert!((scaled - 3.0).abs() < 1.0e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1374,7 +1208,7 @@ pub(crate) mod tests {
         .expect("polyval");
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), [1, 3]);
                 assert_eq!(tensor.materialize_f64(), vec![0.25, 0.0, 0.25]);
                 assert!(tensor.integer_storage().is_none());
             }
@@ -1416,7 +1250,7 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         let r = Tensor::new_integer(
             IntegerStorage::I16(vec![1, 0, 0, 0, 1, 0, 0, 0, 1]),
             vec![3, 3],
@@ -1431,7 +1265,7 @@ pub(crate) mod tests {
         let eval = futures::executor::block_on(evaluate(
             Value::Tensor(coeffs),
             Value::Tensor(points),
-            &[Value::Struct(st)],
+            &[Value::Struct(st.finish())],
             true,
         ))
         .expect("polyval");
@@ -1439,7 +1273,7 @@ pub(crate) mod tests {
         let (_, delta) = eval.into_pair().expect("delta available");
         match delta {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), [1, 3]);
                 assert!(tensor
                     .materialize_f64()
                     .iter()
@@ -1454,7 +1288,7 @@ pub(crate) mod tests {
     fn polyval_delta_computation() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         let r = Tensor::new(
             vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             vec![3, 3],
@@ -1463,7 +1297,7 @@ pub(crate) mod tests {
         st.fields.insert("R".to_string(), Value::Tensor(r));
         st.fields.insert("df".to_string(), Value::Num(4.0));
         st.fields.insert("normr".to_string(), Value::Num(2.0));
-        let stats = Value::Struct(st);
+        let stats = Value::Struct(st.finish());
         let eval = futures::executor::block_on(evaluate(
             Value::Tensor(coeffs),
             Value::Tensor(points),
@@ -1474,7 +1308,7 @@ pub(crate) mod tests {
         let (_, delta) = eval.into_pair().expect("delta available");
         match delta {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), [1, 3]);
                 assert_eq!(tensor.materialize_f64().len(), 3);
             }
             other => panic!("expected tensor delta, got {other:?}"),
@@ -1549,13 +1383,42 @@ pub(crate) mod tests {
     fn polyval_invalid_stats_missing_r() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("df".to_string(), Value::Num(1.0));
         st.fields.insert("normr".to_string(), Value::Num(1.0));
-        let stats = Value::Struct(st);
+        let stats = Value::Struct(st.finish());
         let err = polyval_builtin(Value::Tensor(coeffs), Value::Tensor(points), vec![stats])
             .expect_err("expected missing R error");
         assert_error_contains(err, "missing the field 'R'");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn polyval_stat_matrix_preserves_rank_zero_and_rank_one_geometry() {
+        let statistics = |shape| {
+            let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+            fields.fields.insert(
+                "R".to_string(),
+                Value::Tensor(Tensor::new(vec![1.0], shape).expect("R tensor")),
+            );
+            fields.fields.insert("df".to_string(), Value::Num(1.0));
+            fields.fields.insert("normr".to_string(), Value::Num(0.0));
+            Value::Struct(fields.finish())
+        };
+        let coefficients = || Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap());
+
+        let rank_zero_error =
+            polyval_builtin(coefficients(), Value::Num(3.0), vec![statistics(vec![])])
+                .expect_err("rank-zero R has zero matrix rows and columns");
+        assert_error_contains(rank_zero_error, "size of S.R must match");
+
+        let rank_one_value =
+            polyval_builtin(coefficients(), Value::Num(3.0), vec![statistics(vec![1])])
+                .expect("rank-one R is a 1-by-1 coefficient matrix");
+        match rank_one_value {
+            Value::Num(value) => assert_eq!(value, 2.0),
+            other => panic!("expected scalar polynomial result, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1567,13 +1430,13 @@ pub(crate) mod tests {
             let coeff_handle = provider
                 .upload(&HostTensorView {
                     data: &coeffs.materialize_f64(),
-                    shape: &coeffs.shape,
+                    shape: coeffs.shape(),
                 })
                 .expect("upload coeff");
             let point_handle = provider
                 .upload(&HostTensorView {
                     data: &points.materialize_f64(),
-                    shape: &points.shape,
+                    shape: points.shape(),
                 })
                 .expect("upload points");
             let value = polyval_builtin(
@@ -1606,13 +1469,13 @@ pub(crate) mod tests {
         let coeff_handle = provider
             .upload(&HostTensorView {
                 data: &coeffs.materialize_f64(),
-                shape: &coeffs.shape,
+                shape: coeffs.shape(),
             })
             .expect("upload coeffs");
         let point_handle = provider
             .upload(&HostTensorView {
                 data: &points.materialize_f64(),
-                shape: &points.shape,
+                shape: points.shape(),
             })
             .expect("upload points");
 
@@ -1623,8 +1486,7 @@ pub(crate) mod tests {
         )
         .expect("polyval gpu");
 
-        let _ = provider.free(&coeff_handle);
-        let _ = provider.free(&point_handle);
+        drop((coeff_handle, point_handle));
 
         let gathered = test_support::gather(gpu_value).expect("gather");
 
@@ -1641,11 +1503,12 @@ pub(crate) mod tests {
         let expected_vals = evaluate_polynomial(&coeff_complex, &point_complex);
         let expected: Vec<f64> = expected_vals.iter().map(|c| c.re).collect();
 
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), [4, 1]);
         assert_eq!(gathered.materialize_f64(), expected);
     }
 
     fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(super::polyval_builtin(p, x, rest))
     }
 }

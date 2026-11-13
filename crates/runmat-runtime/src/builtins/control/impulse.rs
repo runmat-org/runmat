@@ -1,219 +1,36 @@
 //! MATLAB-compatible `impulse` response builtin for supported control models.
 
-use nalgebra::DMatrix;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, IMPULSE_ERROR_DISCRETE_LIMIT, IMPULSE_ERROR_INTERNAL,
+    IMPULSE_ERROR_INVALID_ARGUMENT, IMPULSE_ERROR_INVALID_MODEL, IMPULSE_ERROR_INVALID_TIME,
+    IMPULSE_ERROR_PLOT_FAILED, IMPULSE_ERROR_UNSUPPORTED_MODEL, IMPULSE_INTEGER_EXTENSION,
+    IMPULSE_LOGICAL_EXTENSION, IMPULSE_RESIDENT_EXTENSION, IMPULSE_SINGLE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, NumericDType, NumericScalar};
-use runmat_value::{Tensor, Value};
+use runmat_value::{NumericDType, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
-use crate::builtins::control::type_resolvers::impulse_type;
+use crate::builtins::control::response::{
+    parse_real_model, preflight_response_model_operand, ResponseKind,
+};
+use crate::builtins::control::tf_model::{RealTfModel, TfSampleDomain, TfVariable};
+use crate::plotting_hooks::{presentation_failed, with_render_cause};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "impulse";
-const TF_CLASS: &str = "tf";
-const EPS: f64 = 1.0e-12;
 const DEFAULT_POINTS: usize = 100;
 const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
 
-const IMPULSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "impulse-integer-numeric-role",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "impulse with typed-integer model metadata or time input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ImpulseIntegerExtension"),
-};
-const IMPULSE_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "impulse-logical-numeric-role",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "impulse with logical model metadata or time input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ImpulseLogicalExtension"),
-};
-const IMPULSE_SINGLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "impulse-single-numeric-role",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "impulse with single-precision model metadata or time input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ImpulseSingleExtension"),
-};
-const IMPULSE_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "impulse-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "impulse with resident model metadata or time input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ImpulseResidentExtension"),
-};
-pub const IMPULSE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    IMPULSE_INTEGER_EXTENSION,
-    IMPULSE_LOGICAL_EXTENSION,
-    IMPULSE_SINGLE_EXTENSION,
-    IMPULSE_RESIDENT_EXTENSION,
-];
+mod solver;
+mod time;
 
-const IMPULSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "sys numeric metadata",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer coefficients and timing metadata are outside the documented dynamic-system/time surface, are gated before model parsing, and must be exactly representable at the host floating simulation boundary when the RunMat extension is enabled.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "t or tFinal",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public impulse reference specifies numeric time values and shapes but no typed-integer class support, so every typed-integer time control is consistently classified as a RunMat-only extension.",
-    },
-];
-pub const IMPULSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[y, t] = impulse(sys, integer_time?)",
-        inputs: &IMPULSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Non-double and resident numeric roles are independent RunMat extensions. Typed integers cross to binary64 only after exact-representability validation; this bounded SISO tf implementation simulates on the host and returns double response/time arrays.",
-    }];
-
-const IMPULSE_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Impulse response samples (column vector).",
-}];
-const IMPULSE_OUTPUT_Y_T: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Impulse response samples (column vector).",
-    },
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Time samples (column vector).",
-    },
-];
-const IMPULSE_INPUTS_SYS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf model.",
-}];
-const IMPULSE_INPUTS_SYS_TIME: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "sys",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "SISO tf model.",
-    },
-    BuiltinParamDescriptor {
-        name: "time",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Final time scalar or explicit time vector.",
-    },
-];
-const IMPULSE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "y = impulse(sys)",
-        inputs: &IMPULSE_INPUTS_SYS,
-        outputs: &IMPULSE_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = impulse(sys, tFinal)",
-        inputs: &IMPULSE_INPUTS_SYS_TIME,
-        outputs: &IMPULSE_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = impulse(sys, t)",
-        inputs: &IMPULSE_INPUTS_SYS_TIME,
-        outputs: &IMPULSE_OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y,t] = impulse(sys)",
-        inputs: &IMPULSE_INPUTS_SYS,
-        outputs: &IMPULSE_OUTPUT_Y_T,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y,t] = impulse(sys, tFinal)",
-        inputs: &IMPULSE_INPUTS_SYS_TIME,
-        outputs: &IMPULSE_OUTPUT_Y_T,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y,t] = impulse(sys, t)",
-        inputs: &IMPULSE_INPUTS_SYS_TIME,
-        outputs: &IMPULSE_OUTPUT_Y_T,
-    },
-];
-const IMPULSE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMPULSE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:impulse:InvalidArgument"),
-    when: "Inputs do not match supported impulse invocation forms.",
-    message: "impulse: invalid argument",
-};
-const IMPULSE_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMPULSE.INVALID_MODEL",
-    identifier: Some("RunMat:impulse:InvalidModel"),
-    when: "Input system is not a supported tf object with valid required metadata.",
-    message: "impulse: invalid model",
-};
-const IMPULSE_ERROR_INVALID_TIME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMPULSE.INVALID_TIME",
-    identifier: Some("RunMat:impulse:InvalidTime"),
-    when: "Time argument is invalid for the model class or sampling mode.",
-    message: "impulse: invalid time input",
-};
-const IMPULSE_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMPULSE.UNSUPPORTED_MODEL",
-    identifier: Some("RunMat:impulse:UnsupportedModel"),
-    when: "Model is well-formed but unsupported by the current impulse implementation.",
-    message: "impulse: unsupported model",
-};
-const IMPULSE_ERROR_DISCRETE_LIMIT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMPULSE.DISCRETE_LIMIT",
-    identifier: Some("RunMat:impulse:DiscreteLimit"),
-    when: "Discrete simulation would exceed platform or configured sample limits.",
-    message: "impulse: discrete simulation limit exceeded",
-};
-const IMPULSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMPULSE.INTERNAL",
-    identifier: Some("RunMat:impulse:Internal"),
-    when: "Internal response assembly failed.",
-    message: "impulse: internal error",
-};
-const IMPULSE_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    IMPULSE_ERROR_INVALID_ARGUMENT,
-    IMPULSE_ERROR_INVALID_MODEL,
-    IMPULSE_ERROR_INVALID_TIME,
-    IMPULSE_ERROR_UNSUPPORTED_MODEL,
-    IMPULSE_ERROR_DISCRETE_LIMIT,
-    IMPULSE_ERROR_INTERNAL,
-];
-pub const IMPULSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMPULSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IMPULSE_ERRORS,
-};
+use solver::{evaluate_impulse, ImpulseResponse};
+#[cfg(test)]
+use time::time_vector_from_value;
+use time::{checked_discrete_sample_index, TimeSpec};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::impulse")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -262,28 +79,36 @@ fn impulse_error_with_message(
 
 #[runtime_builtin(
     name = "impulse",
-    category = "control",
-    summary = "Compute or plot impulse responses.",
-    keywords = "impulse,control system,transfer function,response,tf",
-    type_resolver(impulse_type),
-    descriptor(crate::builtins::control::impulse::IMPULSE_DESCRIPTOR),
-    extensions(crate::builtins::control::impulse::IMPULSE_EXTENSIONS),
-    integer_capabilities(crate::builtins::control::impulse::IMPULSE_INTEGER_CAPABILITIES),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::impulse"
 )]
-async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_impulse_extensions(&system, &rest)?;
-    let system = TfSystem::parse(system).await?;
-    let time = TimeSpec::parse(&system, &rest).await?;
+async fn impulse_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    system: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    if rest.len() > 1 || crate::output_count::current_output_count().is_some_and(|count| count > 2)
+    {
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_ARGUMENT,
+            "impulse accepts at most one time argument and two outputs",
+        ));
+    }
+    TimeSpec::preflight_host(rest.view())?;
+    preflight_response_model_operand(&system, ResponseKind::Impulse)?;
+    ensure_impulse_extensions(&system, rest.view())?;
+    let system = TfSystem::parse(runtime.as_ref(), system).await?;
+    let time = TimeSpec::parse(&system, rest.view()).await?;
     let response = evaluate_impulse(&system, time)?;
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             emit_impulse_plot(&response).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![response.y_value()?]));
+            return Ok(Value::output_list(vec![response.y_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -293,18 +118,21 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
 
     if crate::output_context::requested_output_count() == Some(0) {
         emit_impulse_plot(&response).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     response.y_value()
 }
 
-fn ensure_impulse_extensions(system: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    let mut values = std::iter::once(system).chain(rest.iter());
+fn ensure_impulse_extensions(
+    system: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    let mut values = consumed_numeric_inputs(system, rest).into_iter();
     let integer = values.clone().any(value_contains_typed_integer);
     let logical = values.clone().any(value_contains_logical);
     let single = values.clone().any(value_contains_single);
-    let resident = values.any(crate::dispatcher::value_contains_gpu);
+    let resident = values.any(|value| matches!(value, Value::GpuTensor(_)));
     if integer {
         crate::compatibility::ensure_builtin_extension_enabled(
             &IMPULSE_INTEGER_EXTENSION,
@@ -332,12 +160,36 @@ fn ensure_impulse_extensions(system: &Value, rest: &[Value]) -> BuiltinResult<()
     Ok(())
 }
 
+fn consumed_numeric_inputs<'a>(
+    system: &'a Value,
+    rest: crate::call::FunctionArgumentView<'a>,
+) -> Vec<&'a Value> {
+    let mut values = Vec::with_capacity(7);
+    if let Value::Object(object) = system {
+        for name in [
+            "Numerator",
+            "Denominator",
+            "Ts",
+            "InputDelay",
+            "OutputDelay",
+            "Variable",
+        ] {
+            if let Some(value) = object.properties().get(name) {
+                values.push(value);
+            }
+        }
+    } else {
+        values.push(system);
+    }
+    values.extend(rest.iter());
+    values
+}
+
 fn value_contains_typed_integer(value: &Value) -> bool {
     match value {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
-        Value::Object(object) => object.properties.values().any(value_contains_typed_integer),
         _ => false,
     }
 }
@@ -346,7 +198,6 @@ fn value_contains_logical(value: &Value) -> bool {
     match value {
         Value::Bool(_) | Value::LogicalArray(_) => true,
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_logical(handle),
-        Value::Object(object) => object.properties.values().any(value_contains_logical),
         _ => false,
     }
 }
@@ -360,26 +211,34 @@ fn value_contains_single(value: &Value) -> bool {
                 && runmat_accelerate_api::handle_precision(handle)
                     == Some(runmat_accelerate_api::ProviderPrecision::F32)
         }
-        Value::Object(object) => object.properties.values().any(value_contains_single),
         _ => false,
     }
 }
 
 async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
     if let Err(err) = render_impulse_plot(response).await {
-        if is_nonfatal_plot_setup_error(&err) {
+        if presentation_failed(&err) {
             return Ok(());
         }
-        return Err(err);
+        return Err(impulse_plot_error(err));
     }
     Ok(())
 }
 
-fn is_nonfatal_plot_setup_error(err: &RuntimeError) -> bool {
-    let lower = err.message().to_ascii_lowercase();
-    lower.contains("plotting is unavailable")
-        || lower.contains("non-main thread")
-        || lower.contains("interactive plotting failed")
+fn impulse_plot_error(source: RuntimeError) -> RuntimeError {
+    let mapped = build_runtime_error(format!(
+        "{}: {}",
+        IMPULSE_ERROR_PLOT_FAILED.message,
+        source.message()
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_identifier(
+        IMPULSE_ERROR_PLOT_FAILED
+            .identifier
+            .expect("plot failure has a stable identifier"),
+    )
+    .build();
+    with_render_cause(mapped, source)
 }
 
 #[derive(Clone, Debug)]
@@ -390,65 +249,23 @@ struct TfSystem {
 }
 
 impl TfSystem {
-    async fn parse(value: Value) -> BuiltinResult<Self> {
-        let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
-        let Value::Object(object) = gathered else {
+    async fn parse(
+        runtime: Option<&crate::context::RuntimeContext>,
+        value: Value,
+    ) -> BuiltinResult<Self> {
+        let model = parse_real_model(runtime, value, ResponseKind::Impulse).await?;
+        if model.sample_time() < 0.0 {
             return Err(impulse_error_with_detail(
                 &IMPULSE_ERROR_INVALID_MODEL,
-                format!("expected a dynamic system model, got {gathered:?}"),
-            ));
-        };
-        if object.class_name != TF_CLASS {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_UNSUPPORTED_MODEL,
-                format!(
-                    "unsupported model class '{}'; only SISO tf objects are currently supported",
-                    object.class_name
-                ),
+                "impulse requires a known nonnegative sample time",
             ));
         }
-
-        let numerator = real_coefficients(property(&object, "Numerator")?, "Numerator")?;
-        let denominator = real_coefficients(property(&object, "Denominator")?, "Denominator")?;
-        let sample_time = scalar_property(property(&object, "Ts")?, "Ts")?;
-        let input_delay = scalar_property(property(&object, "InputDelay")?, "InputDelay")?;
-        let output_delay = scalar_property(property(&object, "OutputDelay")?, "OutputDelay")?;
-        if !sample_time.is_finite() || sample_time < 0.0 {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_INVALID_MODEL,
-                format!("Ts must be a finite non-negative scalar, got {sample_time}"),
-            ));
-        }
-        if !input_delay.is_finite() || input_delay < 0.0 {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_INVALID_MODEL,
-                format!("InputDelay must be a finite non-negative scalar, got {input_delay}"),
-            ));
-        }
-        if !output_delay.is_finite() || output_delay < 0.0 {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_INVALID_MODEL,
-                format!("OutputDelay must be a finite non-negative scalar, got {output_delay}"),
-            ));
-        }
-        if input_delay.abs() > EPS || output_delay.abs() > EPS {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_UNSUPPORTED_MODEL,
-                "transfer functions with input or output delays are not supported yet",
-            ));
-        }
-
-        let numerator = trim_leading_zeros(numerator);
-        let denominator = trim_leading_zeros(denominator);
-        if denominator.is_empty() {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_INVALID_MODEL,
-                "denominator coefficients cannot be empty",
-            ));
-        }
-        if numerator.is_empty() {
+        let sample_time = model.sample_time();
+        let numerator = model.numerator;
+        let denominator = model.denominator;
+        if numerator.iter().all(|value| *value == 0.0) {
             return Ok(Self {
-                numerator,
+                numerator: Vec::new(),
                 denominator,
                 sample_time,
             });
@@ -476,515 +293,29 @@ impl TfSystem {
     fn is_discrete(&self) -> bool {
         self.sample_time > 0.0
     }
-}
 
-fn property<'a>(object: &'a runmat_value::ObjectInstance, name: &str) -> BuiltinResult<&'a Value> {
-    object.properties.get(name).ok_or_else(|| {
-        impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_MODEL,
-            format!("tf object is missing {name} property"),
-        )
-    })
-}
-
-fn real_coefficients(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
-    match value {
-        Value::Tensor(tensor) => {
-            ensure_vector(label, &tensor.shape)?;
-            ensure_exact_integer_tensor(tensor, label)?;
-            finite_values(label, tensor::tensor_values_f64(tensor))
-        }
-        Value::Num(n) => finite_values(label, vec![*n]),
-        Value::Int(i) => finite_values(label, vec![exact_integer_as_f64(i, label)?]),
-        Value::Bool(b) => finite_values(label, vec![if *b { 1.0 } else { 0.0 }]),
-        Value::LogicalArray(logical) => {
-            ensure_vector(label, &logical.shape)?;
-            finite_values(
-                label,
-                logical
-                    .data
-                    .iter()
-                    .map(|bit| if *bit == 0 { 0.0 } else { 1.0 })
-                    .collect(),
-            )
-        }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_UNSUPPORTED_MODEL,
-            "complex-coefficient tf models are not supported yet",
-        )),
-        other => Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_MODEL,
-            format!("{label} must be a real numeric coefficient vector, got {other:?}"),
-        )),
-    }
-}
-
-fn finite_values(label: &str, values: Vec<f64>) -> BuiltinResult<Vec<f64>> {
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_MODEL,
-            format!("{label} coefficients must be finite"),
-        ));
-    }
-    Ok(values)
-}
-
-fn ensure_vector(label: &str, shape: &[usize]) -> BuiltinResult<()> {
-    let non_unit = shape.iter().copied().filter(|&dim| dim > 1).count();
-    if non_unit <= 1 {
-        Ok(())
-    } else {
-        Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_MODEL,
-            format!("{label} coefficients must be a vector"),
-        ))
-    }
-}
-
-fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
-    match value {
-        Value::Num(n) => Ok(*n),
-        Value::Int(i) => exact_integer_as_f64(i, label),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            ensure_exact_integer_tensor(tensor, label)?;
-            Ok(tensor::tensor_value_f64(tensor, 0))
-        }
-        other => Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_MODEL,
-            format!("{label} must be a real scalar, got {other:?}"),
-        )),
-    }
-}
-
-fn exact_integer_as_f64(value: &IntValue, label: &str) -> BuiltinResult<f64> {
-    const MAX_EXACT: i128 = 1_i128 << 53;
-    let exact = match value {
-        IntValue::I8(value) => i128::from(*value),
-        IntValue::I16(value) => i128::from(*value),
-        IntValue::I32(value) => i128::from(*value),
-        IntValue::I64(value) => i128::from(*value),
-        IntValue::U8(value) => i128::from(*value),
-        IntValue::U16(value) => i128::from(*value),
-        IntValue::U32(value) => i128::from(*value),
-        IntValue::U64(value) => i128::from(*value),
-    };
-    if !(-MAX_EXACT..=MAX_EXACT).contains(&exact) {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_ARGUMENT,
-            format!("{label} integer values must be exactly representable as double"),
-        ));
-    }
-    Ok(exact as f64)
-}
-
-fn ensure_exact_integer_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<()> {
-    if tensor.integer_storage().is_none() {
-        return Ok(());
-    }
-    for index in 0..tensor.len() {
-        let value = match tensor.numeric_value_at(index) {
-            Some(NumericScalar::I8(value)) => IntValue::I8(value),
-            Some(NumericScalar::I16(value)) => IntValue::I16(value),
-            Some(NumericScalar::I32(value)) => IntValue::I32(value),
-            Some(NumericScalar::I64(value)) => IntValue::I64(value),
-            Some(NumericScalar::U8(value)) => IntValue::U8(value),
-            Some(NumericScalar::U16(value)) => IntValue::U16(value),
-            Some(NumericScalar::U32(value)) => IntValue::U32(value),
-            Some(NumericScalar::U64(value)) => IntValue::U64(value),
-            _ => continue,
+    fn normalized(&self) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+        let variable = if self.is_discrete() {
+            TfVariable::Z
+        } else {
+            TfVariable::S
         };
-        exact_integer_as_f64(&value, label)?;
-    }
-    Ok(())
-}
-
-fn trim_leading_zeros(values: Vec<f64>) -> Vec<f64> {
-    let first = values.iter().position(|value| value.abs() > EPS);
-    match first {
-        Some(idx) => values[idx..].to_vec(),
-        None => Vec::new(),
-    }
-}
-
-#[derive(Clone, Debug)]
-enum TimeSpec {
-    Values(Vec<f64>),
-}
-
-impl TimeSpec {
-    async fn parse(system: &TfSystem, rest: &[Value]) -> BuiltinResult<Self> {
-        match rest {
-            [] => Ok(Self::Values(default_time_vector(system))),
-            [value] => {
-                let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
-                if let Some(final_time) = scalar_time_from_value(&gathered)? {
-                    return Ok(Self::Values(time_vector_from_final_time(
-                        system, final_time,
-                    )?));
-                }
-                let vector = time_vector_from_value(gathered)?;
-                validate_time_vector(system, &vector)?;
-                Ok(Self::Values(vector))
-            }
-            _ => Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_INVALID_ARGUMENT,
-                "expected impulse(sys), impulse(sys, tFinal), or impulse(sys, t)",
-            )),
+        let sample_domain = TfSampleDomain::parse(self.sample_time, variable, BUILTIN_NAME)?;
+        RealTfModel {
+            numerator: self.numerator.clone(),
+            denominator: self.denominator.clone(),
+            sample_domain,
+            input_delay: 0.0,
+            output_delay: 0.0,
         }
+        .normalized(BUILTIN_NAME)
     }
-}
-
-fn scalar_time_from_value(value: &Value) -> BuiltinResult<Option<f64>> {
-    match value {
-        Value::Num(n) => Ok(Some(*n)),
-        Value::Int(i) => Ok(Some(exact_integer_as_f64(i, "time")?)),
-        Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            ensure_exact_integer_tensor(tensor, "time")?;
-            Ok(Some(tensor::tensor_value_f64(tensor, 0)))
-        }
-        Value::LogicalArray(logical) if logical.data.len() == 1 => {
-            Ok(Some(if logical.data[0] == 0 { 0.0 } else { 1.0 }))
-        }
-        Value::Tensor(_) | Value::LogicalArray(_) => Ok(None),
-        _ => Ok(None),
-    }
-}
-
-fn default_time_vector(system: &TfSystem) -> Vec<f64> {
-    if system.is_discrete() {
-        (0..DEFAULT_POINTS)
-            .map(|idx| idx as f64 * system.sample_time)
-            .collect()
-    } else {
-        linspace(0.0, 10.0, DEFAULT_POINTS)
-    }
-}
-
-fn time_vector_from_final_time(system: &TfSystem, final_time: f64) -> BuiltinResult<Vec<f64>> {
-    if !final_time.is_finite() || final_time < 0.0 {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_TIME,
-            "final time must be a finite non-negative scalar",
-        ));
-    }
-    if system.is_discrete() {
-        let count = checked_discrete_sample_count(system, final_time)?;
-        Ok((0..count)
-            .map(|idx| idx as f64 * system.sample_time)
-            .collect())
-    } else if final_time == 0.0 {
-        Ok(vec![0.0])
-    } else {
-        Ok(linspace(0.0, final_time, DEFAULT_POINTS))
-    }
-}
-
-fn checked_discrete_sample_count(system: &TfSystem, final_time: f64) -> BuiltinResult<usize> {
-    let samples = final_time / system.sample_time;
-    if !samples.is_finite() {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_DISCRETE_LIMIT,
-            "discrete sample count exceeds platform limits",
-        ));
-    }
-
-    let count = samples.floor() + 1.0;
-    if count > usize::MAX as f64 || count > MAX_DISCRETE_SAMPLES as f64 {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_DISCRETE_LIMIT,
-            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
-        ));
-    }
-    Ok(count as usize)
-}
-
-fn checked_discrete_sample_index(system: &TfSystem, time: f64) -> BuiltinResult<usize> {
-    let samples = time / system.sample_time;
-    let index = samples.round();
-    if !index.is_finite() || index > usize::MAX as f64 {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_DISCRETE_LIMIT,
-            "discrete sample index exceeds platform limits",
-        ));
-    }
-    if index >= MAX_DISCRETE_SAMPLES as f64 {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_DISCRETE_LIMIT,
-            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
-        ));
-    }
-    Ok(index as usize)
-}
-
-fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
-    if count <= 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / ((count - 1) as f64);
-    (0..count).map(|idx| start + idx as f64 * step).collect()
-}
-
-fn time_vector_from_value(value: Value) -> BuiltinResult<Vec<f64>> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(|err| {
-        impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_TIME,
-            format!("time vector must be numeric: {err}"),
-        )
-    })?;
-    ensure_vector("time", &tensor.shape)?;
-    ensure_exact_integer_tensor(&tensor, "time")?;
-    let values = tensor::tensor_into_values_f64(tensor);
-    if values.is_empty() {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_TIME,
-            "time vector cannot be empty",
-        ));
-    }
-    Ok(values)
-}
-
-fn validate_time_vector(system: &TfSystem, values: &[f64]) -> BuiltinResult<()> {
-    if values
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
-    {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_TIME,
-            "time vector values must be finite and non-negative",
-        ));
-    }
-    if values.windows(2).any(|pair| pair[1] <= pair[0]) {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_INVALID_TIME,
-            "time vector values must be strictly increasing",
-        ));
-    }
-    if system.is_discrete() {
-        for &value in values {
-            let samples = value / system.sample_time;
-            if (samples - samples.round()).abs() > 1.0e-8 {
-                return Err(impulse_error_with_detail(
-                    &IMPULSE_ERROR_INVALID_TIME,
-                    "discrete-time vectors must use integer multiples of the sample time",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-#[derive(Clone, Debug)]
-struct ImpulseResponse {
-    t: Vec<f64>,
-    y: Vec<f64>,
-    #[cfg(feature = "plot-core")]
-    discrete: bool,
-}
-
-impl ImpulseResponse {
-    fn y_value(&self) -> BuiltinResult<Value> {
-        let tensor = Tensor::new(self.y.clone(), vec![self.y.len(), 1]).map_err(|err| {
-            impulse_error_with_detail(
-                &IMPULSE_ERROR_INTERNAL,
-                format!("failed to build response tensor: {err}"),
-            )
-        })?;
-        Ok(Value::Tensor(tensor))
-    }
-
-    fn t_value(&self) -> BuiltinResult<Value> {
-        let tensor = Tensor::new(self.t.clone(), vec![self.t.len(), 1]).map_err(|err| {
-            impulse_error_with_detail(
-                &IMPULSE_ERROR_INTERNAL,
-                format!("failed to build time tensor: {err}"),
-            )
-        })?;
-        Ok(Value::Tensor(tensor))
-    }
-}
-
-fn evaluate_impulse(system: &TfSystem, time: TimeSpec) -> BuiltinResult<ImpulseResponse> {
-    let TimeSpec::Values(t) = time;
-    let realization = Realization::from_tf(system)?;
-    let y = if system.is_discrete() {
-        discrete_response(system, &realization, &t)?
-    } else {
-        continuous_response(&realization, &t)
-    };
-    Ok(ImpulseResponse {
-        t,
-        y,
-        #[cfg(feature = "plot-core")]
-        discrete: system.is_discrete(),
-    })
-}
-
-#[derive(Clone, Debug)]
-struct Realization {
-    a: DMatrix<f64>,
-    c: Vec<f64>,
-}
-
-impl Realization {
-    fn from_tf(system: &TfSystem) -> BuiltinResult<Self> {
-        if system.numerator.is_empty() {
-            let order = system.denominator.len().saturating_sub(1).max(1);
-            return Ok(Self {
-                a: DMatrix::zeros(order, order),
-                c: vec![0.0; order],
-            });
-        }
-        let leading = system.denominator[0];
-        if leading.abs() <= EPS {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_INVALID_MODEL,
-                "denominator leading coefficient must be non-zero",
-            ));
-        }
-        let denominator: Vec<f64> = system
-            .denominator
-            .iter()
-            .map(|value| *value / leading)
-            .collect();
-        let mut numerator: Vec<f64> = system
-            .numerator
-            .iter()
-            .map(|value| *value / leading)
-            .collect();
-        let order = denominator.len() - 1;
-        while numerator.len() < order {
-            numerator.insert(0, 0.0);
-        }
-
-        let mut a = DMatrix::<f64>::zeros(order, order);
-        for row in 0..order.saturating_sub(1) {
-            a[(row, row + 1)] = 1.0;
-        }
-        for col in 0..order {
-            a[(order - 1, col)] = -denominator[order - col];
-        }
-        let c = numerator.into_iter().rev().collect();
-        Ok(Self { a, c })
-    }
-}
-
-fn continuous_response(realization: &Realization, t: &[f64]) -> Vec<f64> {
-    t.iter()
-        .map(|&time| {
-            let exp_at = matrix_exp(&(realization.a.clone() * time));
-            dot_c_with_last_column(&realization.c, &exp_at)
-        })
-        .collect()
-}
-
-fn discrete_response(
-    system: &TfSystem,
-    realization: &Realization,
-    t: &[f64],
-) -> BuiltinResult<Vec<f64>> {
-    if t.len() > MAX_DISCRETE_SAMPLES {
-        return Err(impulse_error_with_detail(
-            &IMPULSE_ERROR_DISCRETE_LIMIT,
-            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
-        ));
-    }
-    let sample_indices: Vec<usize> = t
-        .iter()
-        .map(|value| checked_discrete_sample_index(system, *value))
-        .collect::<BuiltinResult<_>>()?;
-    let max_index = sample_indices.iter().copied().max().unwrap_or(0);
-    let order = realization.c.len();
-    let value_count = max_index.checked_add(1).ok_or_else(|| {
-        impulse_error_with_detail(
-            &IMPULSE_ERROR_DISCRETE_LIMIT,
-            "discrete sample index exceeds platform limits",
-        )
-    })?;
-    let mut values = vec![0.0; value_count];
-    if order == 0 {
-        return Ok(sample_indices.into_iter().map(|idx| values[idx]).collect());
-    }
-
-    let mut state = vec![0.0; order];
-    state[order - 1] = 1.0;
-    let impulse_scale = 1.0 / system.sample_time;
-    for k in 1..=max_index {
-        values[k] = dot(&realization.c, &state) * impulse_scale;
-        state = mat_vec_mul(&realization.a, &state);
-    }
-    Ok(sample_indices.into_iter().map(|idx| values[idx]).collect())
-}
-
-fn dot_c_with_last_column(c: &[f64], matrix: &DMatrix<f64>) -> f64 {
-    if c.is_empty() {
-        return 0.0;
-    }
-    let last_col = matrix.ncols() - 1;
-    c.iter()
-        .enumerate()
-        .map(|(row, coeff)| coeff * matrix[(row, last_col)])
-        .sum()
-}
-
-fn dot(lhs: &[f64], rhs: &[f64]) -> f64 {
-    lhs.iter().zip(rhs).map(|(a, b)| a * b).sum()
-}
-
-fn mat_vec_mul(matrix: &DMatrix<f64>, vector: &[f64]) -> Vec<f64> {
-    let mut out = vec![0.0; matrix.nrows()];
-    for row in 0..matrix.nrows() {
-        let mut acc = 0.0;
-        for col in 0..matrix.ncols() {
-            acc += matrix[(row, col)] * vector[col];
-        }
-        out[row] = acc;
-    }
-    out
-}
-
-fn matrix_exp(matrix: &DMatrix<f64>) -> DMatrix<f64> {
-    let norm = matrix_one_norm(matrix);
-    let scale_power = if norm <= 0.5 {
-        0usize
-    } else {
-        norm.log2().ceil().max(0.0) as usize + 1
-    };
-    let scale = 2.0_f64.powi(scale_power as i32);
-    let scaled = matrix / scale;
-    let n = matrix.nrows();
-    let mut result = DMatrix::<f64>::identity(n, n);
-    let mut term = DMatrix::<f64>::identity(n, n);
-    for k in 1..=48 {
-        term = (&term * &scaled) / (k as f64);
-        result += &term;
-        if matrix_one_norm(&term) <= 1.0e-14 {
-            break;
-        }
-    }
-    for _ in 0..scale_power {
-        result = &result * &result;
-    }
-    result
-}
-
-fn matrix_one_norm(matrix: &DMatrix<f64>) -> f64 {
-    let mut best = 0.0;
-    for col in 0..matrix.ncols() {
-        let mut sum = 0.0;
-        for row in 0..matrix.nrows() {
-            sum += matrix[(row, col)].abs();
-        }
-        if sum > best {
-            best = sum;
-        }
-    }
-    best
 }
 
 #[cfg(feature = "plot-core")]
-async fn render_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<Value> {
+async fn render_impulse_plot(
+    response: &ImpulseResponse,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let t = response.t_value()?;
     let y = response.y_value()?;
     let plot_name = if response.discrete { "stem" } else { "plot" };
@@ -992,368 +323,11 @@ async fn render_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<Value>
 }
 
 #[cfg(not(feature = "plot-core"))]
-async fn render_impulse_plot(_response: &ImpulseResponse) -> BuiltinResult<Value> {
-    Ok(Value::Num(f64::NAN))
+async fn render_impulse_plot(
+    _response: &ImpulseResponse,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    Err(crate::plotting_hooks::unavailable_presentation())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::{CharArray, IntegerStorage, ObjectInstance};
-
-    fn tf_object(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
-        tf_object_with_delays(num, den, ts, 0.0, 0.0)
-    }
-
-    fn tf_object_with_delays(
-        num: Vec<f64>,
-        den: Vec<f64>,
-        ts: f64,
-        input_delay: f64,
-        output_delay: f64,
-    ) -> Value {
-        let mut object = ObjectInstance::new("tf".to_string());
-        object.properties.insert(
-            "Numerator".to_string(),
-            Value::Tensor(Tensor::new(num.clone(), vec![1, num.len()]).unwrap()),
-        );
-        object.properties.insert(
-            "Denominator".to_string(),
-            Value::Tensor(Tensor::new(den.clone(), vec![1, den.len()]).unwrap()),
-        );
-        object.properties.insert(
-            "Variable".to_string(),
-            Value::CharArray(CharArray::new_row(if ts > 0.0 { "z" } else { "s" })),
-        );
-        object.properties.insert("Ts".to_string(), Value::Num(ts));
-        object
-            .properties
-            .insert("InputDelay".to_string(), Value::Num(input_delay));
-        object
-            .properties
-            .insert("OutputDelay".to_string(), Value::Num(output_delay));
-        Value::Object(object)
-    }
-
-    fn run_impulse(system: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(impulse_builtin(system, rest))
-    }
-
-    fn tensor_data(value: Value) -> Vec<f64> {
-        match value {
-            Value::Tensor(tensor) => tensor.materialize_f64(),
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
-        Value::Tensor(tensor)
-    }
-
-    #[test]
-    fn impulse_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = IMPULSE_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"y = impulse(sys)"));
-        assert!(labels.contains(&"y = impulse(sys, tFinal)"));
-        assert!(labels.contains(&"y = impulse(sys, t)"));
-        assert!(labels.contains(&"[y,t] = impulse(sys)"));
-        assert!(labels.contains(&"[y,t] = impulse(sys, tFinal)"));
-        assert!(labels.contains(&"[y,t] = impulse(sys, t)"));
-    }
-
-    #[test]
-    fn impulse_first_order_continuous_explicit_time() {
-        let sys = tf_object(vec![20.0], vec![1.0, 5.0], 0.0);
-        let t = Value::Tensor(Tensor::new(vec![0.0, 0.1, 0.2], vec![1, 3]).unwrap());
-        let y = tensor_data(run_impulse(sys, vec![t]).expect("impulse"));
-        let expected = [20.0, 20.0 * (-0.5f64).exp(), 20.0 * (-1.0f64).exp()];
-        for (actual, expected) in y.iter().zip(expected) {
-            assert!((actual - expected).abs() < 1.0e-8);
-        }
-    }
-
-    #[test]
-    fn impulse_second_order_continuous() {
-        let sys = tf_object(vec![1.0], vec![1.0, 3.0, 2.0], 0.0);
-        let t = Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap());
-        let y = tensor_data(run_impulse(sys, vec![t]).expect("impulse"));
-        for (actual, time) in y.iter().zip([0.0_f64, 0.5, 1.0]) {
-            let expected = (-time).exp() - (-2.0 * time).exp();
-            assert!((actual - expected).abs() < 1.0e-8);
-        }
-    }
-
-    #[test]
-    fn impulse_multi_output_returns_y_and_t_columns() {
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let sys = tf_object(vec![20.0], vec![1.0, 5.0], 0.0);
-        let t_arg = Value::Tensor(Tensor::new(vec![0.0, 0.1], vec![1, 2]).unwrap());
-        let result = run_impulse(sys, vec![t_arg]).expect("impulse");
-        let Value::OutputList(outputs) = result else {
-            panic!("expected output list");
-        };
-        assert_eq!(outputs.len(), 2);
-        match &outputs[0] {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 1]),
-            other => panic!("expected y tensor, got {other:?}"),
-        }
-        match &outputs[1] {
-            Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
-                assert_eq!(tensor.materialize_f64(), vec![0.0, 0.1]);
-            }
-            other => panic!("expected t tensor, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn impulse_zero_output_count_emits_no_values() {
-        let _guard = crate::output_count::push_output_count(Some(0));
-        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-        let result = run_impulse(sys, Vec::new()).expect("impulse");
-        let Value::OutputList(outputs) = result else {
-            panic!("expected output list");
-        };
-        assert!(outputs.is_empty());
-    }
-
-    #[test]
-    fn impulse_requested_zero_outputs_emits_no_values() {
-        let _guard = crate::output_context::push_output_count(0);
-        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-        let result = run_impulse(sys, Vec::new()).expect("impulse");
-        let Value::OutputList(outputs) = result else {
-            panic!("expected output list");
-        };
-        assert!(outputs.is_empty());
-    }
-
-    #[test]
-    fn impulse_discrete_siso_response() {
-        let sys = tf_object(vec![1.0], vec![1.0, -0.5], 0.1);
-        let t = Value::Tensor(Tensor::new(vec![0.0, 0.1, 0.2, 0.3], vec![1, 4]).unwrap());
-        let y = tensor_data(run_impulse(sys, vec![t]).expect("impulse"));
-        assert_eq!(y.len(), 4);
-        assert!((y[0] - 0.0).abs() < 1.0e-12);
-        assert!((y[1] - 10.0).abs() < 1.0e-12);
-        assert!((y[2] - 5.0).abs() < 1.0e-12);
-        assert!((y[3] - 2.5).abs() < 1.0e-12);
-    }
-
-    #[test]
-    fn impulse_typed_integer_coefficients_and_time_cross_double_boundary_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let mut object = ObjectInstance::new("tf".to_string());
-        object.properties.insert(
-            "Numerator".to_string(),
-            integer_tensor(IntegerStorage::U16(vec![20]), vec![1, 1]),
-        );
-        object.properties.insert(
-            "Denominator".to_string(),
-            integer_tensor(IntegerStorage::I16(vec![1, 5]), vec![1, 2]),
-        );
-        object.properties.insert(
-            "Variable".to_string(),
-            Value::CharArray(CharArray::new_row("s")),
-        );
-        object.properties.insert("Ts".to_string(), Value::Num(0.0));
-        object
-            .properties
-            .insert("InputDelay".to_string(), Value::Num(0.0));
-        object
-            .properties
-            .insert("OutputDelay".to_string(), Value::Num(0.0));
-
-        let t = integer_tensor(IntegerStorage::U64(vec![0, 1]), vec![1, 2]);
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let result = run_impulse(Value::Object(object), vec![t]).expect("impulse");
-        let Value::OutputList(outputs) = result else {
-            panic!("expected output list");
-        };
-        assert_eq!(tensor_data(outputs[1].clone()), vec![0.0, 1.0]);
-    }
-
-    #[test]
-    fn impulse_time_vector_parser_ignores_poisoned_integer_mirrors_for_all_classes() {
-        let storages = [
-            IntegerStorage::I8(vec![0, 1]),
-            IntegerStorage::I16(vec![0, 1]),
-            IntegerStorage::I32(vec![0, 1]),
-            IntegerStorage::I64(vec![0, 1]),
-            IntegerStorage::U8(vec![0, 1]),
-            IntegerStorage::U16(vec![0, 1]),
-            IntegerStorage::U32(vec![0, 1]),
-            IntegerStorage::U64(vec![0, 1]),
-        ];
-
-        for storage in storages {
-            assert_eq!(
-                time_vector_from_value(integer_tensor(storage, vec![1, 2]))
-                    .expect("typed integer time vector"),
-                vec![0.0, 1.0]
-            );
-        }
-    }
-
-    #[test]
-    fn impulse_scalar_final_time_reads_typed_integer_storage_length_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let mut object = ObjectInstance::new("tf".to_string());
-        object.properties.insert(
-            "Numerator".to_string(),
-            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-        );
-        object.properties.insert(
-            "Denominator".to_string(),
-            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
-        );
-        object.properties.insert(
-            "Variable".to_string(),
-            Value::CharArray(CharArray::new_row("s")),
-        );
-        object.properties.insert("Ts".to_string(), Value::Num(0.0));
-        object
-            .properties
-            .insert("InputDelay".to_string(), Value::Num(0.0));
-        object
-            .properties
-            .insert("OutputDelay".to_string(), Value::Num(0.0));
-
-        let final_time =
-            Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let result =
-            run_impulse(Value::Object(object), vec![Value::Tensor(final_time)]).expect("impulse");
-        let Value::OutputList(outputs) = result else {
-            panic!("expected output list");
-        };
-        let time = tensor_data(outputs[1].clone());
-        assert_eq!(time.first().copied(), Some(0.0));
-        assert_eq!(time.last().copied(), Some(2.0));
-    }
-
-    #[test]
-    fn impulse_discrete_final_time_rejects_excessive_sample_count() {
-        let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0e-6);
-        let err = run_impulse(sys, vec![Value::Num(2.0)]).expect_err("should fail");
-        assert!(err.message().contains("more than 1000000 samples"));
-        assert_eq!(err.identifier(), IMPULSE_ERROR_DISCRETE_LIMIT.identifier);
-    }
-
-    #[test]
-    fn impulse_discrete_time_vector_rejects_excessive_sample_index() {
-        let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0);
-        let t =
-            Value::Tensor(Tensor::new(vec![0.0, MAX_DISCRETE_SAMPLES as f64], vec![1, 2]).unwrap());
-        let err = run_impulse(sys, vec![t]).expect_err("should fail");
-        assert!(err.message().contains("more than 1000000 samples"));
-    }
-
-    #[test]
-    fn impulse_rejects_unsupported_model_type() {
-        let object = ObjectInstance::new("ss".to_string());
-        let err = run_impulse(Value::Object(object), Vec::new()).expect_err("should fail");
-        assert!(err.message().contains("unsupported model class"));
-        assert_eq!(err.identifier(), IMPULSE_ERROR_UNSUPPORTED_MODEL.identifier);
-    }
-
-    #[test]
-    fn impulse_rejects_direct_feedthrough_tf() {
-        let sys = tf_object(vec![1.0, 1.0], vec![1.0, 2.0], 0.0);
-        let err = run_impulse(sys, Vec::new()).expect_err("should fail");
-        assert!(err.message().contains("strictly proper"));
-    }
-
-    #[test]
-    fn impulse_rejects_invalid_time_metadata() {
-        let err = run_impulse(tf_object(vec![1.0], vec![1.0, -0.5], -0.1), Vec::new())
-            .expect_err("negative sample time should fail");
-        assert!(err.message().contains("Ts must be"));
-
-        let err = run_impulse(
-            tf_object_with_delays(vec![1.0], vec![1.0, 5.0], 0.0, f64::NAN, 0.0),
-            Vec::new(),
-        )
-        .expect_err("NaN input delay should fail");
-        assert!(err.message().contains("InputDelay must be"));
-
-        let err = run_impulse(
-            tf_object_with_delays(vec![1.0], vec![1.0, 5.0], 0.0, 0.0, -1.0),
-            Vec::new(),
-        )
-        .expect_err("negative output delay should fail");
-        assert!(err.message().contains("OutputDelay must be"));
-    }
-
-    #[test]
-    fn impulse_runmat_numeric_extensions_are_gated_and_exact() {
-        {
-            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let integer = run_impulse(
-                tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
-                vec![Value::Int(IntValue::U16(2))],
-            )
-            .unwrap_err();
-            assert_eq!(
-                integer.identifier(),
-                Some("RunMat:compatibility:ImpulseIntegerExtension")
-            );
-            let single = run_impulse(
-                tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
-                vec![Value::Tensor(
-                    Tensor::from_f32(vec![0.0, 1.0], vec![1, 2]).unwrap(),
-                )],
-            )
-            .unwrap_err();
-            assert_eq!(
-                single.identifier(),
-                Some("RunMat:compatibility:ImpulseSingleExtension")
-            );
-        }
-
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let wide = run_impulse(
-            tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
-            vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
-        )
-        .unwrap_err();
-        assert!(wide.message().contains("exactly representable as double"));
-    }
-
-    #[test]
-    fn impulse_resident_time_is_an_explicit_host_output_extension() {
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
-            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
-                .expect("resident time");
-            runmat_accelerate::fusion_residency::mark(&handle);
-            {
-                let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-                let error = run_impulse(
-                    tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
-                    vec![Value::GpuTensor(handle.clone())],
-                )
-                .unwrap_err();
-                assert_eq!(
-                    error.identifier(),
-                    Some("RunMat:compatibility:ImpulseResidentExtension")
-                );
-            }
-            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-            let output = run_impulse(
-                tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
-                vec![Value::GpuTensor(handle.clone())],
-            )
-            .expect("resident host fallback");
-            assert!(matches!(output, Value::Tensor(_)));
-            assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
-            let _ = provider.free(&handle);
-        });
-    }
-}
+mod tests;

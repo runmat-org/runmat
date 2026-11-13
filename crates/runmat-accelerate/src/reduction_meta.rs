@@ -25,7 +25,8 @@ pub struct ReductionSignature {
 
 /// Attempt to derive a generic reduction signature from a builtin reduction node without name checks.
 /// Heuristics:
-/// - Data input: the first input whose type is Tensor; otherwise fall back to the first input.
+/// - Data input: the first positional argument. Reduction controls can themselves be
+///   tensors (including `[]`), while a computed data producer can still be untyped.
 /// - Dim arg: the first input (after data) that is a scalar numeric or int constant (by ValueId; resolution is done by callers).
 /// - Behavior: inferred via a minimal registry keyed by builtin name for post-scale choices (mean -> MeanLike). This is centralized here.
 pub fn detect_reduction_signature(
@@ -36,7 +37,7 @@ pub fn detect_reduction_signature(
         return None;
     }
     let (name_opt, inputs) = match &node.label {
-        crate::graph::AccelNodeLabel::Builtin { name } => {
+        crate::graph::AccelNodeLabel::Builtin { name, .. } => {
             (Some(name.as_str()), node.inputs.as_slice())
         }
         _ => (None, node.inputs.as_slice()),
@@ -45,16 +46,10 @@ pub fn detect_reduction_signature(
         return None;
     }
 
-    // 1) Pick data input: first tensor-typed input, else inputs[0]
-    let mut data_input = inputs[0];
-    for &vid in inputs {
-        if let Some(info) = graph.value(vid) {
-            if matches!(info.ty, Type::Tensor { .. }) {
-                data_input = vid;
-                break;
-            }
-        }
-    }
+    // The selected reduction call's first argument is its data operand.
+    // Type facts are not an argument-role authority: a later `[]` control is
+    // tensor-typed even when the producer of this operand is still Unknown.
+    let data_input = inputs[0];
 
     // 2) Pick dim argument if present: first scalar numeric/int constant input after data input
     let mut dim_arg: Option<ValueId> = None;
@@ -64,7 +59,7 @@ pub fn detect_reduction_signature(
         }
         if let Some(info) = graph.value(vid) {
             // constants resolved by callers; here we only pass the ValueId through
-            if matches!(info.origin, crate::graph::ValueOrigin::Constant) {
+            if graph.source_literal_constant(vid).is_some() {
                 // allow numeric or integer constants (type system may already have Num/Int)
                 if matches!(info.ty, Type::Num | Type::Int) {
                     dim_arg = Some(vid);
@@ -87,10 +82,10 @@ pub fn detect_reduction_signature(
     let mut axes = ReductionAxes::Unspecified;
     // Inspect the dimension argument (if constant) first
     if let Some(dim_vid) = dim_arg {
-        if let Some(value) = graph.value(dim_vid).and_then(|info| info.constant.clone()) {
-            if value_is_all_keyword(&value) {
+        if let Some(value) = graph.source_literal_constant(dim_vid) {
+            if value_is_all_keyword(value) {
                 axes = ReductionAxes::All;
-            } else if let Some(dims) = parse_dims_from_value(&value) {
+            } else if let Some(dims) = parse_dims_from_value(value) {
                 axes = ReductionAxes::Explicit(dims);
             }
         }
@@ -101,11 +96,11 @@ pub fn detect_reduction_signature(
             if vid == data_input {
                 continue;
             }
-            if let Some(value) = graph.value(vid).and_then(|info| info.constant.clone()) {
-                if value_is_all_keyword(&value) {
+            if let Some(value) = graph.source_literal_constant(vid) {
+                if value_is_all_keyword(value) {
                     axes = ReductionAxes::All;
                     break;
-                } else if let Some(dims) = parse_dims_from_value(&value) {
+                } else if let Some(dims) = parse_dims_from_value(value) {
                     axes = ReductionAxes::Explicit(dims);
                     break;
                 }
@@ -123,16 +118,36 @@ pub fn detect_reduction_signature(
 
 pub fn value_is_all_keyword(value: &Value) -> bool {
     match value {
-        Value::String(s) => s.eq_ignore_ascii_case("all"),
+        Value::String(s) => s
+            .as_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case("all")),
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                let candidate: String = ca.data.iter().collect();
-                candidate.trim().eq_ignore_ascii_case("all")
+                let whitespace = |unit: &runmat_value::Utf16CodeUnit| {
+                    char::from_u32(u32::from(unit.raw())).is_some_and(char::is_whitespace)
+                };
+                let mut candidate = ca.data();
+                while candidate.first().is_some_and(whitespace) {
+                    candidate = &candidate[1..];
+                }
+                while candidate.last().is_some_and(whitespace) {
+                    candidate = &candidate[..candidate.len() - 1];
+                }
+                candidate.len() == 3
+                    && candidate.iter().zip(b"all").all(|(unit, ascii)| {
+                        unit.raw() == u16::from(*ascii)
+                            || unit.raw() == u16::from(ascii.to_ascii_uppercase())
+                    })
             } else {
                 false
             }
         }
-        Value::StringArray(sa) => sa.data.len() == 1 && sa.data[0].eq_ignore_ascii_case("all"),
+        Value::StringArray(sa) => {
+            sa.data().len() == 1
+                && sa.data()[0]
+                    .as_str()
+                    .is_some_and(|text| text.eq_ignore_ascii_case("all"))
+        }
         _ => false,
     }
 }
@@ -190,6 +205,120 @@ fn parse_tensor_dims(tensor: &Tensor) -> Option<Vec<usize>> {
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn all_axis_probe_preserves_text_shape_and_raw_utf16_grammar() {
+        use runmat_value::{CharArray, StringArray, Utf16CodeUnit};
+
+        assert!(value_is_all_keyword(&Value::String("AlL".into())));
+        assert!(!value_is_all_keyword(&Value::String(" all ".into())));
+        for (text, expected) in [("AlL", true), (" all ", false)] {
+            let strings = StringArray::new(vec![text.into()], vec![1, 1]).unwrap();
+            assert_eq!(value_is_all_keyword(&Value::StringArray(strings)), expected);
+        }
+        assert!(value_is_all_keyword(&Value::CharArray(CharArray::new_row(
+            "\u{2003}AlL\u{a0}"
+        ))));
+        for (units, rows, cols) in [
+            (vec![97, 108, 108], 3, 1),
+            (vec![0xD800, 97, 108, 108], 1, 4),
+            (vec![97, 108, 108, 0xDC00], 1, 4),
+            (vec![0, 97, 108, 108], 1, 4),
+        ] {
+            let chars = CharArray::from_code_units(
+                units.into_iter().map(Utf16CodeUnit::from_raw).collect(),
+                rows,
+                cols,
+            )
+            .unwrap();
+            assert!(!value_is_all_keyword(&Value::CharArray(chars)));
+        }
+    }
+
+    #[test]
+    fn reduction_data_role_is_positional_with_tensor_control_and_unknown_producer() {
+        use crate::graph::{
+            AccelNodeLabel, FusionCallOrigin, InstrSpan, ShapeInfo, ValueInfo, ValueOrigin, VarKind,
+        };
+        use std::collections::HashMap;
+
+        let mut graph = AccelGraph {
+            nodes: vec![AccelNode {
+                id: 0,
+                label: AccelNodeLabel::Builtin {
+                    name: "min".into(),
+                    origin: FusionCallOrigin::named("min"),
+                },
+                category: AccelOpCategory::Reduction,
+                inputs: vec![0, 1, 2],
+                outputs: vec![3],
+                span: InstrSpan { start: 0, end: 0 },
+                tags: Vec::new(),
+            }],
+            values: vec![
+                ValueInfo {
+                    id: 0,
+                    origin: ValueOrigin::Variable {
+                        kind: VarKind::Global,
+                        index: 0,
+                    },
+                    ty: Type::Unknown,
+                    shape: ShapeInfo::Unknown,
+                    constant: None,
+                },
+                ValueInfo {
+                    id: 1,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::tensor(),
+                    shape: ShapeInfo::Unknown,
+                    constant: Some(Value::Tensor(
+                        Tensor::new(Vec::new(), vec![0, 0]).expect("[]"),
+                    )),
+                },
+                ValueInfo {
+                    id: 2,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::Num,
+                    shape: ShapeInfo::Scalar,
+                    constant: Some(Value::Num(2.0)),
+                },
+                ValueInfo {
+                    id: 3,
+                    origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                    ty: Type::Unknown,
+                    shape: ShapeInfo::Unknown,
+                    constant: None,
+                },
+            ],
+            var_bindings: HashMap::new(),
+            node_bindings: HashMap::new(),
+        };
+        let selected = detect_reduction_signature(&graph, &graph.nodes[0]).expect("min signature");
+        assert_eq!(selected.data_input, 0);
+        assert_eq!(selected.dim_arg, Some(2));
+        assert_eq!(selected.axes, ReductionAxes::Explicit(vec![2]));
+
+        graph.nodes[0].label = AccelNodeLabel::Builtin {
+            name: "sum".into(),
+            origin: FusionCallOrigin::named("sum"),
+        };
+        graph.nodes[0].inputs = vec![0, 2];
+        let selected = detect_reduction_signature(&graph, &graph.nodes[0]).expect("sum signature");
+        assert_eq!(selected.data_input, 0);
+        assert_eq!(selected.axes, ReductionAxes::Explicit(vec![2]));
+
+        graph.var_bindings.insert(
+            2,
+            crate::graph::VarBinding {
+                kind: VarKind::Global,
+                index: 2,
+            },
+        );
+        let selected =
+            detect_reduction_signature(&graph, &graph.nodes[0]).expect("bound axis signature");
+        assert_eq!(selected.dim_arg, None);
+        assert_eq!(selected.axes, ReductionAxes::Unspecified);
+    }
 
     #[test]
     fn reduction_dimension_preserves_representable_uint64_values() {

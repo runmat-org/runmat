@@ -1,39 +1,29 @@
 //! MATLAB-compatible `symrcm` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use std::cmp::Ordering;
 use std::collections::{HashSet, VecDeque};
 
 use log::debug;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::ResolveContext;
+#[cfg(test)]
+use runmat_builtins::SYMRCM_DESCRIPTOR;
+use runmat_builtins::{SYMRCM_ERROR_INTERNAL, SYMRCM_ERROR_INVALID_INPUT};
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value};
+use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, SparseTensor, Tensor, Value};
 
+use super::kernel_error::{StructureKernelError, StructureKernelResult};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::symrcm_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-// NOTE: The `symrcm_type` symbol is referenced from the `#[runtime_builtin]` macro
-// attribute arguments, which does not currently count as a "use" for Rust's
-// unused-import lint. Keep a small reference so `-D unused-imports` builds.
-#[allow(dead_code)]
-const _SYMR_CM_TYPE_RESOLVER: fn(
-    &[runmat_builtins::Type],
-    &ResolveContext,
-) -> runmat_builtins::Type = symrcm_type;
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
@@ -68,71 +58,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "symrcm";
 
-const SYMRCM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Integer matrices contribute their exact zero/nonzero structure to the graph ordering.",
-}];
-pub const SYMRCM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "p = symrcm(integer_A)",
-        inputs: &SYMRCM_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Adjacency is derived with exact integer zero tests and the result is a one-based double permutation vector. Resident inputs use the provider hook or gather fallback.",
-    }];
-
-const SYMRCM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Permutation row vector (1-based indices) from reverse Cuthill-McKee ordering.",
-}];
-
-const SYMRCM_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const SYMRCM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "p = symrcm(A)",
-    inputs: &SYMRCM_INPUTS,
-    outputs: &SYMRCM_OUTPUT,
-}];
-
-const SYMRCM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SYMRCM.INVALID_INPUT",
-    identifier: Some("RunMat:symrcm:InvalidInput"),
-    when: "Input shape/type cannot be interpreted as a numeric or logical square matrix.",
-    message: "symrcm: invalid input",
-};
-
-const SYMRCM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SYMRCM.INTERNAL",
-    identifier: Some("RunMat:symrcm:Internal"),
-    when: "Runtime fails while constructing intermediate tensors or adjacency structures.",
-    message: "symrcm: internal runtime failure",
-};
-
-const SYMRCM_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [SYMRCM_ERROR_INVALID_INPUT, SYMRCM_ERROR_INTERNAL];
-
-pub const SYMRCM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SYMRCM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SYMRCM_ERRORS,
-};
-
 fn symrcm_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -153,19 +78,15 @@ fn symrcm_error_with_detail(
 
 #[runtime_builtin(
     name = "symrcm",
-    category = "math/linalg/structure",
-    summary = "Compute symmetric reverse Cuthill-McKee permutations to reduce matrix bandwidth.",
-    keywords = "symrcm,reverse cuthill-mckee,bandwidth reduction,gpu",
-    accel = "graph",
-    type_resolver(symrcm_type),
-    descriptor(crate::builtins::math::linalg::structure::symrcm::SYMRCM_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::math::linalg::structure::symrcm::SYMRCM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
 async fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
     match matrix {
+        Value::SparseTensor(sparse) => {
+            let ordering = symrcm_host_sparse(&sparse)?;
+            permutation_to_value(&ordering)
+        }
         Value::ComplexTensor(ct) => {
             let ordering = symrcm_host_complex_tensor(&ct)?;
             Ok(permutation_to_value(&ordering)?)
@@ -183,6 +104,31 @@ async fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
             Ok(permutation_to_value(&ordering)?)
         }
     }
+}
+
+fn symrcm_host_sparse(sparse: &SparseTensor) -> StructureKernelResult<Vec<usize>> {
+    if sparse.rows != sparse.cols {
+        return Err(StructureKernelError::detail(
+            BUILTIN_NAME,
+            &SYMRCM_ERROR_INVALID_INPUT,
+            "input matrix must be square",
+        ));
+    }
+    let mut adjacency: Vec<HashSet<usize>> = vec![HashSet::new(); sparse.rows];
+    super::sparse_pattern::for_each_nonzero(sparse, |row, col| {
+        if row != col {
+            adjacency[row].insert(col);
+            adjacency[col].insert(row);
+        }
+    });
+    // Building the symmetric graph is expected O(n + nnz). The shared RCM
+    // traversal sorts each frontier by (degree, index), so HashSet iteration
+    // order cannot affect the published permutation.
+    let adjacency: Vec<Vec<usize>> = adjacency
+        .into_iter()
+        .map(|neighbours| neighbours.into_iter().collect())
+        .collect();
+    Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
 
 fn value_into_tensor_for(value: Value) -> BuiltinResult<Tensor> {
@@ -216,11 +162,28 @@ fn logical_to_tensor(logical: &LogicalArray) -> BuiltinResult<Tensor> {
 }
 
 async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        symrcm_error_with_detail(
+            &SYMRCM_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         match provider.sym_rcm(&handle).await {
             Ok(ordering) => return permutation_to_value(&ordering),
-            Err(err) => {
+            Err(err)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &err,
+                ) =>
+            {
                 debug!("symrcm: provider hook unavailable, falling back to host: {err}");
+            }
+            Err(err) => {
+                return Err(super::kernel_error::with_provider_source(
+                    symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, err.to_string()),
+                    runmat_accelerate_api::ProviderExecutionError::from(err),
+                ))
             }
         }
     }
@@ -231,33 +194,39 @@ async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a real tensor.
-pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_real_tensor(tensor: &Tensor) -> StructureKernelResult<Vec<usize>> {
     if let Some(storage) = tensor.integer_storage() {
-        return adjacency_from_integer_storage(&tensor.shape, storage)
+        return adjacency_from_integer_storage(tensor.shape(), storage)
             .map(|adjacency| symmetric_reverse_cuthill_mckee(&adjacency));
     }
     let values = tensor::tensor_values_f64_cow(tensor);
-    symrcm_host_real_data(&tensor.shape, &values)
+    symrcm_host_real_data(tensor.shape(), &values)
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a complex tensor.
-pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Vec<usize>> {
-    symrcm_host_complex_data(&tensor.shape, &tensor.materialize_f64())
+pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> StructureKernelResult<Vec<usize>> {
+    symrcm_host_complex_data(tensor.shape(), &tensor.materialize_f64())
 }
 
 /// Host implementation for dense real data.
-pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> StructureKernelResult<Vec<usize>> {
     let adjacency = adjacency_from_real_data(shape, data)?;
     Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
 
 /// Host implementation for dense complex data.
-pub fn symrcm_host_complex_data(shape: &[usize], data: &[(f64, f64)]) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_complex_data(
+    shape: &[usize],
+    data: &[(f64, f64)],
+) -> StructureKernelResult<Vec<usize>> {
     let adjacency = adjacency_from_complex_data(shape, data)?;
     Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
 
-fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<Vec<usize>>> {
+fn adjacency_from_real_data(
+    shape: &[usize],
+    data: &[f64],
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |value| *value != 0.0)
 }
@@ -265,7 +234,7 @@ fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<
 fn adjacency_from_integer_storage(
     shape: &[usize],
     storage: &IntegerStorage,
-) -> BuiltinResult<Vec<Vec<usize>>> {
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency_from_integer_storage(n, storage)
 }
@@ -273,15 +242,16 @@ fn adjacency_from_integer_storage(
 fn adjacency_from_complex_data(
     shape: &[usize],
     data: &[(f64, f64)],
-) -> BuiltinResult<Vec<Vec<usize>>> {
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |(re, im)| !(*re == 0.0 && *im == 0.0))
 }
 
-fn ensure_square_matrix_shape(shape: &[usize]) -> BuiltinResult<usize> {
+fn ensure_square_matrix_shape(shape: &[usize]) -> StructureKernelResult<usize> {
     let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape)?;
     if rows != cols {
-        return Err(symrcm_error_with_detail(
+        return Err(StructureKernelError::detail(
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "input matrix must be square",
         ));
@@ -294,7 +264,7 @@ fn build_adjacency<T, F>(
     cols: usize,
     data: &[T],
     mut is_nonzero: F,
-) -> BuiltinResult<Vec<Vec<usize>>>
+) -> StructureKernelResult<Vec<Vec<usize>>>
 where
     F: FnMut(&T) -> bool,
 {
@@ -303,13 +273,15 @@ where
     }
 
     let expected = rows.checked_mul(cols).ok_or_else(|| {
-        symrcm_error_with_detail(
+        StructureKernelError::detail(
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INTERNAL,
             "matrix dimensions overflow when computing adjacency",
         )
     })?;
     if data.len() < expected {
-        return Err(symrcm_error_with_detail(
+        return Err(StructureKernelError::detail(
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "data does not match matrix dimensions",
         ));
@@ -346,18 +318,20 @@ where
 fn build_adjacency_from_integer_storage(
     rows: usize,
     storage: &IntegerStorage,
-) -> BuiltinResult<Vec<Vec<usize>>> {
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     if rows == 0 {
         return Ok(Vec::new());
     }
     let expected = rows.checked_mul(rows).ok_or_else(|| {
-        symrcm_error_with_detail(
+        StructureKernelError::detail(
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INTERNAL,
             "matrix dimensions overflow when computing adjacency",
         )
     })?;
     if storage.len() < expected {
-        return Err(symrcm_error_with_detail(
+        return Err(StructureKernelError::detail(
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "data does not match matrix dimensions",
         ));
@@ -393,17 +367,25 @@ fn symmetric_reverse_cuthill_mckee(adjacency: &[Vec<usize>]) -> Vec<usize> {
     }
     let degrees: Vec<usize> = adjacency.iter().map(|nbrs| nbrs.len()).collect();
     let mut visited = vec![false; n];
+    let mut seen_in_levels = vec![false; n];
+    let mut level_queue = Vec::new();
+    let mut starts: Vec<usize> = (0..n).collect();
+    starts.sort_unstable_by_key(|&index| (degrees[index], index));
+    let mut next_start = 0;
     let mut ordering = Vec::with_capacity(n);
 
     while ordering.len() < n {
-        let start = (0..n)
-            .filter(|&idx| !visited[idx])
-            .min_by(|&a, &b| {
-                let key_a = (degrees[a], a);
-                let key_b = (degrees[b], b);
-                key_a.cmp(&key_b)
-            })
-            .expect("symrcm: at least one unvisited vertex remains");
+        while visited[starts[next_start]] {
+            next_start += 1;
+        }
+        let start = pseudoperipheral_start(
+            starts[next_start],
+            adjacency,
+            &degrees,
+            &visited,
+            &mut seen_in_levels,
+            &mut level_queue,
+        );
 
         let mut component = cuthill_mckee_component(start, adjacency, &degrees, &mut visited);
         component.reverse();
@@ -411,6 +393,70 @@ fn symmetric_reverse_cuthill_mckee(adjacency: &[Vec<usize>]) -> Vec<usize> {
     }
 
     ordering
+}
+
+/// George-Liu style pseudoperipheral search within the next unvisited
+/// component. A deeper level structure replaces the candidate; otherwise the
+/// current vertex is pseudoperipheral under this deterministic degree/index
+/// tie policy. The queue and marks are reused across every component/probe.
+fn pseudoperipheral_start(
+    initial: usize,
+    adjacency: &[Vec<usize>],
+    degrees: &[usize],
+    visited: &[bool],
+    seen: &mut [bool],
+    queue: &mut Vec<usize>,
+) -> usize {
+    let mut candidate = initial;
+    let (mut levels, mut farthest) =
+        farthest_level_candidate(candidate, adjacency, degrees, visited, seen, queue);
+    loop {
+        let (next_levels, next_farthest) =
+            farthest_level_candidate(farthest, adjacency, degrees, visited, seen, queue);
+        if next_levels <= levels {
+            return candidate;
+        }
+        candidate = farthest;
+        levels = next_levels;
+        farthest = next_farthest;
+    }
+}
+
+fn farthest_level_candidate(
+    start: usize,
+    adjacency: &[Vec<usize>],
+    degrees: &[usize],
+    visited: &[bool],
+    seen: &mut [bool],
+    queue: &mut Vec<usize>,
+) -> (usize, usize) {
+    queue.clear();
+    queue.push(start);
+    seen[start] = true;
+    let (mut head, mut levels, mut farthest) = (0, 0, start);
+    while head < queue.len() {
+        let level_end = queue.len();
+        farthest = queue[head..level_end]
+            .iter()
+            .copied()
+            .min_by_key(|&vertex| (degrees[vertex], vertex))
+            .expect("nonempty level");
+        for position in head..level_end {
+            let vertex = queue[position];
+            for &neighbour in &adjacency[vertex] {
+                if !visited[neighbour] && !seen[neighbour] {
+                    seen[neighbour] = true;
+                    queue.push(neighbour);
+                }
+            }
+        }
+        head = level_end;
+        levels += 1;
+    }
+    for &vertex in queue.iter() {
+        seen[vertex] = false;
+    }
+    (levels, farthest)
 }
 
 fn cuthill_mckee_component(
@@ -464,7 +510,93 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::Type;
-    use runmat_value::{IntegerStorage, LogicalArray};
+    use runmat_value::{IntegerStorage, LogicalArray, SparseTensor};
+
+    #[test]
+    fn symrcm_sparse_csc_matches_typed_path_graph_and_ignores_stored_zeros() {
+        // One-way CSC path: the graph must be symmetrized without densifying.
+        let pointers = vec![0, 1, 2, 3, 4, 5];
+        let rows = vec![1, 2, 3, 4, 0];
+        let double = SparseTensor::new(
+            5,
+            5,
+            pointers.clone(),
+            rows.clone(),
+            vec![1.0, 1.0, 1.0, 1.0, 0.0],
+        )
+        .unwrap();
+        let expected = symrcm_host_sparse(&double).unwrap();
+        assert_eq!(expected, vec![4, 3, 2, 1, 0]);
+        let single = SparseTensor::new_f32(
+            5,
+            5,
+            pointers.clone(),
+            rows.clone(),
+            vec![1.0, 1.0, 1.0, 1.0, -0.0],
+        )
+        .unwrap();
+        assert_eq!(symrcm_host_sparse(&single).unwrap(), expected);
+        let wide = SparseTensor::new_integer(
+            5,
+            5,
+            pointers.clone(),
+            rows.clone(),
+            IntegerStorage::I64(vec![i64::MIN, 1, 1, 1, 0]),
+        )
+        .unwrap();
+        assert_eq!(symrcm_host_sparse(&wide).unwrap(), expected);
+        let complex = SparseTensor::new_complex_f32(
+            5,
+            5,
+            pointers.clone(),
+            rows.clone(),
+            vec![(0.0, 1.0), (1.0, 0.0), (1.0, 0.0), (1.0, 0.0), (0.0, 0.0)],
+        )
+        .unwrap();
+        assert_eq!(symrcm_host_sparse(&complex).unwrap(), expected);
+        let logical =
+            SparseTensor::new_logical(5, 5, vec![0, 1, 2, 3, 4, 4], vec![1, 2, 3, 4]).unwrap();
+        assert_eq!(symrcm_host_sparse(&logical).unwrap(), expected);
+        assert!(symrcm_host_sparse(&SparseTensor::zeros(2, 3)).is_err());
+        assert!(symrcm_host_sparse(&SparseTensor::zeros(0, 0))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn symrcm_sparse_public_output_is_one_based_row_permutation() {
+        let sparse = SparseTensor::new(3, 3, vec![0, 1, 2, 2], vec![1, 2], vec![1.0, 1.0]).unwrap();
+        match symrcm_builtin(Value::SparseTensor(sparse)).unwrap() {
+            Value::Tensor(permutation) => {
+                assert_eq!(permutation.shape(), [1, 3]);
+                assert_eq!(permutation.materialize_f64(), vec![3.0, 2.0, 1.0]);
+            }
+            other => panic!("expected permutation row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn symrcm_shared_pseudoperipheral_start_improves_center_leaf_seed() {
+        // Vertex zero is a leaf close to the center, not a peripheral leaf.
+        // The initial minimum-degree seed has four BFS levels; the endpoint
+        // reached through vertex three has five.
+        let col_ptrs = vec![0, 1, 3, 4, 5, 5, 5];
+        let row_indices = vec![1, 2, 3, 5, 4];
+        let sparse =
+            SparseTensor::new(6, 6, col_ptrs.clone(), row_indices.clone(), vec![1.0; 5]).unwrap();
+        let sparse_ordering = symrcm_host_sparse(&sparse).unwrap();
+        assert_eq!(sparse_ordering, vec![5, 2, 0, 1, 3, 4]);
+        let mut dense = vec![0.0; 36];
+        for col in 0..6 {
+            for &row in &row_indices[col_ptrs[col]..col_ptrs[col + 1]] {
+                dense[row + 6 * col] = 1.0;
+            }
+        }
+        assert_eq!(
+            symrcm_host_real_data(&[6, 6], &dense).unwrap(),
+            sparse_ordering
+        );
+    }
 
     fn tensor_from_entries(rows: usize, cols: usize, entries: &[(usize, usize, f64)]) -> Tensor {
         let mut data = vec![0.0; rows * cols];
@@ -482,7 +614,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -532,7 +664,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Num(42.0)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), [1, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -556,7 +688,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -581,7 +713,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -626,7 +758,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::LogicalArray(logical)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), [1, 4]);
                 assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -641,7 +773,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), [1, 4]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 1.0, 4.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -656,7 +788,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -671,7 +803,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::ComplexTensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert!(
                     t.materialize_f64() == vec![2.0, 1.0] || t.materialize_f64() == vec![1.0, 2.0]
                 );
@@ -687,13 +819,13 @@ pub(crate) mod tests {
             let tensor = tensor_from_entries(4, 4, &[(0, 1, 1.0), (1, 2, 1.0), (2, 3, 1.0)]);
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = symrcm_builtin(Value::GpuTensor(handle)).expect("symrcm");
             match result {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 4]);
+                    assert_eq!(t.shape(), [1, 4]);
                     assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
                 }
                 other => panic!("expected tensor result, got {other:?}"),
@@ -708,7 +840,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), [1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -754,7 +886,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_rejects_unsupported_type() {
-        let err = symrcm_builtin(Value::String("abc".to_string())).expect_err("should fail");
+        let err = symrcm_builtin(Value::String("abc".to_string().into())).expect_err("should fail");
         assert_eq!(err.identifier(), SYMRCM_ERROR_INVALID_INPUT.identifier);
         let message = err.to_string();
         assert!(
@@ -792,7 +924,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = symrcm_builtin(Value::GpuTensor(handle)).expect("symrcm");
@@ -800,7 +932,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 let expected_f: Vec<f64> =
                     expected.into_iter().map(|idx| (idx + 1) as f64).collect();
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), expected_f);
             }
             other => panic!("expected tensor result, got {other:?}"),

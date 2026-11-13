@@ -128,10 +128,13 @@ struct LinspaceParams {
     start: f64,
     step: f64,
     stop: f64,
+    first: f64,
+    last: f64,
     total: u32,
     chunk: u32,
     offset: u32,
-    _pad: u32,
+    mode: u32,
+    _pad: f64,
 };
 
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
@@ -150,9 +153,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if idx >= params.total {
         return;
     }
-    var value = params.start + f64(idx) * params.step;
+    let position = params.start + f64(idx) * params.step;
+    var value = position;
+    if params.mode == 1u {
+        value = pow(f64(10.0), position);
+    }
+    if idx == 0u && params.total > 1u {
+        value = params.first;
+    }
     if params.total == 1u || idx == params.total - 1u {
-        value = params.stop;
+        value = params.last;
     }
     Out.data[idx] = value;
 }
@@ -167,11 +177,15 @@ struct LinspaceParams {
     start: f32,
     step: f32,
     stop: f32,
-    _pad0: f32,
+    first: f32,
+    last: f32,
     total: u32,
     chunk: u32,
     offset: u32,
+    mode: u32,
+    _pad0: u32,
     _pad1: u32,
+    _pad2: u32,
 };
 
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
@@ -190,9 +204,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if idx >= params.total {
         return;
     }
-    var value = params.start + f32(idx) * params.step;
+    let position = params.start + f32(idx) * params.step;
+    var value = position;
+    if params.mode == 1u {
+        value = pow(10.0, position);
+    }
+    if idx == 0u && params.total > 1u {
+        value = params.first;
+    }
     if params.total == 1u || idx == params.total - 1u {
-        value = params.stop;
+        value = params.last;
     }
     Out.data[idx] = value;
 }
@@ -227,7 +248,7 @@ fn laplacian_base(row: u32, col: u32, a: f64, b: f64) -> f64 {
     }
     if col == 1u {
         if row == 0u { return b; }
-        if row == 1u { return -1.0; }
+        if row == 1u { return f64(-1.0); }
         return b;
     }
     if row == 0u { return a; }
@@ -237,16 +258,16 @@ fn laplacian_base(row: u32, col: u32, a: f64, b: f64) -> f64 {
 
 fn sobel_base(row: u32, col: u32) -> f64 {
     if col == 0u {
-        if row == 0u { return 1.0; }
-        if row == 1u { return 2.0; }
-        return 1.0;
+        if row == 0u { return f64(1.0); }
+        if row == 1u { return f64(2.0); }
+        return f64(1.0);
     }
     if col == 1u {
-        return 0.0;
+        return f64(0.0);
     }
-    if row == 0u { return -1.0; }
-    if row == 1u { return -2.0; }
-    return -1.0;
+    if row == 0u { return f64(-1.0); }
+    if row == 1u { return f64(-2.0); }
+    return f64(-1.0);
 }
 
 fn unsharp_base(row: u32, col: u32, alpha: f64) -> f64 {
@@ -654,7 +675,7 @@ fn uniform_pair(counter: vec4<u32>, key: vec2<u32>) -> vec2<f64> {
     let hi2 = rnd.z >> 5u;
     let lo2 = rnd.w >> 6u;
     let combined2 = f64(hi2) * 67108864.0 + f64(lo2);
-    let u2 = min(combined2 * INV_POW53, 0.9999999999999999);
+    let u2 = min(combined2 * INV_POW53, f64(0.9999999999999999));
     return vec2<f64>(u1, u2);
 }
 
@@ -1419,7 +1440,7 @@ fn uniform_pair(counter: vec4<u32>, key: vec2<u32>) -> vec2<f64> {
     let hi2 = rnd.z >> 5u;
     let lo2 = rnd.w >> 6u;
     let combined2 = f64(hi2) * 67108864.0 + f64(lo2);
-    let u2 = min(combined2 * INV_POW53, 0.9999999999999999);
+    let u2 = min(combined2 * INV_POW53, f64(0.9999999999999999));
     return vec2<f64>(u1, u2);
 }
 

@@ -1,13 +1,8 @@
 //! Evaluate piecewise-polynomial structs produced by `spline` and `pchip`.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, PPVAL_ERROR_INTERNAL, PPVAL_ERROR_INVALID_ARGUMENT,
+    PPVAL_ERROR_INVALID_INPUT, PPVAL_INTEGER_QUERY_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -17,102 +12,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 
-use super::pp::{evaluate_pp, pp_from_value, query_points, Extrapolation};
+use super::pp::{evaluate_pp, pp_from_value, query_points, Extrapolation, PpOutputLayout};
 use crate::{build_runtime_error, RuntimeError};
 
 const NAME: &str = "ppval";
-
-const PPVAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Vq",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Evaluated piecewise-polynomial values at query points.",
-}];
-
-const PPVAL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "pp",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Piecewise-polynomial struct with form/breaks/coefs fields.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query points.",
-    },
-];
-
-const PPVAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Vq = ppval(pp, Xq)",
-    inputs: &PPVAL_INPUTS,
-    outputs: &PPVAL_OUTPUT,
-}];
-
-const PPVAL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PPVAL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ppval:InvalidArgument"),
-    when: "The piecewise-polynomial struct shape or field grammar is invalid.",
-    message: "ppval: invalid argument",
-};
-
-const PPVAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PPVAL.INVALID_INPUT",
-    identifier: Some("RunMat:ppval:InvalidInput"),
-    when: "Query points or polynomial coefficients are invalid for evaluation.",
-    message: "ppval: invalid input",
-};
-
-const PPVAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PPVAL.INTERNAL",
-    identifier: Some("RunMat:ppval:Internal"),
-    when: "Piecewise-polynomial output assembly fails due to internal tensor construction paths.",
-    message: "ppval: internal interpolation failure",
-};
-
-const PPVAL_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    PPVAL_ERROR_INVALID_ARGUMENT,
-    PPVAL_ERROR_INVALID_INPUT,
-    PPVAL_ERROR_INTERNAL,
-];
-
-pub const PPVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PPVAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PPVAL_ERRORS,
-};
-
-const PPVAL_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ppval-integer-query-points",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ppval accepts typed-integer query points as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PpvalIntegerQueryPointsExtension"),
-};
-pub const PPVAL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PPVAL_INTEGER_QUERY_EXTENSION];
-const PPVAL_INTEGER_QUERY_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Xq",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double query points. RunMat admits typed integers only when every value is exactly representable at the floating piecewise-polynomial boundary.",
-    }];
-pub const PPVAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = ppval(pp,integer_Xq)",
-        inputs: &PPVAL_INTEGER_QUERY_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer query points are gated before gather and cross once into the polynomial evaluation domain.",
-    }];
 
 fn ppval_error_with_message(
     message: impl Into<String>,
@@ -153,27 +56,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "ppval is currently a runtime sink.",
 };
 
-fn ppval_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.get(1) {
-        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        _ => Type::tensor(),
-    }
-}
-
 #[runtime_builtin(
     name = "ppval",
-    category = "math/interpolation",
-    summary = "Evaluate a piecewise-polynomial structure at query points.",
-    keywords = "ppval,piecewise polynomial,spline,pchip",
-    accel = "sink",
-    sink = true,
-    type_resolver(ppval_type),
-    descriptor(crate::builtins::math::interpolation::ppval::PPVAL_DESCRIPTOR),
-    extensions(crate::builtins::math::interpolation::ppval::PPVAL_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::interpolation::ppval::PPVAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::ppval"
 )]
 async fn ppval_builtin(pp: Value, xq: Value) -> crate::BuiltinResult<Value> {
@@ -191,8 +76,14 @@ async fn ppval_builtin(pp: Value, xq: Value) -> crate::BuiltinResult<Value> {
     let query = query_points(xq, NAME).await.map_err(|err| {
         ppval_error_with_message(err.message().to_string(), &PPVAL_ERROR_INVALID_INPUT)
     })?;
-    evaluate_pp(&parsed, &query, &Extrapolation::Extrapolate, NAME)
-        .map_err(|err| ppval_error_with_message(err.message().to_string(), &PPVAL_ERROR_INTERNAL))
+    evaluate_pp(
+        &parsed,
+        &query,
+        &Extrapolation::Extrapolate,
+        PpOutputLayout::ComponentLeading,
+        NAME,
+    )
+    .map_err(|err| ppval_error_with_message(err.message().to_string(), &PPVAL_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -200,6 +91,7 @@ mod tests {
     use super::*;
     use crate::builtins::math::interpolation::pp::{build_spline_pp, pp_to_value, NumericSeries};
     use futures::executor::block_on;
+    use runmat_builtins::PPVAL_DESCRIPTOR;
     use runmat_value::Tensor;
 
     #[test]
@@ -208,10 +100,11 @@ mod tests {
             x: vec![1.0, 2.0, 3.0],
             y: vec![1.0, 4.0, 9.0],
             series: 1,
-            trailing_shape: Vec::new(),
+            component_shape: Vec::new(),
+            sample_axis: super::super::pp::SampleAxis::Last,
         };
         let pp = pp_to_value(
-            build_spline_pp(&series, "spline").expect("spline"),
+            block_on(build_spline_pp(&series, "spline", &mut ())).expect("spline"),
             "spline",
         )
         .expect("pp");
@@ -222,6 +115,68 @@ mod tests {
         };
         assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
         assert!((tensor.materialize_f64()[1] - 6.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn ppval_evaluates_nonsquare_array_valued_struct() {
+        let samples = (0..4)
+            .flat_map(|sample| (0..6).map(move |component| (component * 100 + sample) as f64))
+            .collect();
+        let series = block_on(super::super::pp::series_from_values_on_axis(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap()),
+            Value::Tensor(Tensor::new(samples, vec![2, 3, 4]).unwrap()),
+            super::super::pp::SampleAxis::Last,
+            "pchip",
+        ))
+        .unwrap();
+        let pp = pp_to_value(
+            super::super::pp::build_pchip_pp(&series, "pchip").unwrap(),
+            "pchip",
+        )
+        .unwrap();
+        let query = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        let Value::Tensor(output) = block_on(ppval_builtin(pp, query)).unwrap() else {
+            panic!("array-valued ppval must return a tensor");
+        };
+        assert_eq!(output.shape(), vec![2, 3, 2, 2]);
+        let values = output.materialize_f64();
+        for sample in 0..4 {
+            for component in 0..6 {
+                assert_eq!(
+                    values[component + sample * 6],
+                    (component * 100 + sample) as f64
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ppval_reads_piece_major_rows_from_external_vector_valued_pp() {
+        let mut pp = runmat_value::UnboundedStructValueBuilder::new();
+        pp.insert("form", Value::String("pp".into()));
+        pp.insert(
+            "breaks",
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+        );
+        // Rows are component 1 then component 2 within each interval;
+        // columns are the linear and constant coefficients.
+        pp.insert(
+            "coefs",
+            Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0], vec![4, 2]).unwrap(),
+            ),
+        );
+        pp.insert("pieces", Value::Num(2.0));
+        pp.insert("order", Value::Num(2.0));
+        pp.insert("dim", Value::Num(2.0));
+        let query = Value::Tensor(Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap());
+        let Value::Tensor(output) =
+            block_on(ppval_builtin(Value::Struct(pp.finish()), query)).unwrap()
+        else {
+            panic!("two-component pp must return a tensor");
+        };
+        assert_eq!(output.shape(), vec![2, 2]);
+        assert_eq!(output.materialize_f64(), vec![10.5, 21.0, 31.5, 42.0]);
     }
 
     #[test]

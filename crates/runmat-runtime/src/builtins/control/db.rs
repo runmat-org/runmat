@@ -1,12 +1,9 @@
 //! MATLAB-compatible `db` decibel conversion builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, DB_ERROR_INTERNAL, DB_ERROR_INVALID_ARGUMENT, DB_ERROR_INVALID_INPUT,
+    DB_ERROR_INVALID_MODE, DB_ERROR_INVALID_RESISTANCE, DB_ERROR_SIZE_MISMATCH,
+    DB_NONFLOATING_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
@@ -17,150 +14,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::control::type_resolvers::db_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "db";
-const DB_NONFLOATING_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "db-nonfloating-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "db with integer, logical, or complex-integer computation input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DbNonfloatingInputExtension"),
-};
-pub const DB_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [DB_NONFLOATING_INPUT_EXTENSION];
-
-const DB_OUTPUT_YDB: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "yDb",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Decibel-converted output.",
-}];
-const DB_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input signal magnitude or power quantity.",
-}];
-const DB_INPUTS_Y_MODE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal magnitude or power quantity.",
-    },
-    BuiltinParamDescriptor {
-        name: "modeOrR",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"voltage\""),
-        description: "Mode string ('voltage' or 'power') or resistance reference.",
-    },
-];
-const DB_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "yDb = db(y)",
-        inputs: &DB_INPUTS_Y,
-        outputs: &DB_OUTPUT_YDB,
-    },
-    BuiltinSignatureDescriptor {
-        label: "yDb = db(y, \"voltage\")",
-        inputs: &DB_INPUTS_Y_MODE,
-        outputs: &DB_OUTPUT_YDB,
-    },
-    BuiltinSignatureDescriptor {
-        label: "yDb = db(y, \"power\")",
-        inputs: &DB_INPUTS_Y_MODE,
-        outputs: &DB_OUTPUT_YDB,
-    },
-    BuiltinSignatureDescriptor {
-        label: "yDb = db(y, R)",
-        inputs: &DB_INPUTS_Y_MODE,
-        outputs: &DB_OUTPUT_YDB,
-    },
-];
-const DB_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DB.INVALID_ARGUMENT",
-    identifier: Some("RunMat:db:InvalidArgument"),
-    when: "Inputs do not match supported db invocation forms.",
-    message: "db: invalid argument",
-};
-const DB_ERROR_INVALID_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DB.INVALID_MODE",
-    identifier: Some("RunMat:db:InvalidMode"),
-    when: "Mode string is not recognized or is not a scalar text value.",
-    message: "db: invalid mode",
-};
-const DB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DB.INVALID_INPUT",
-    identifier: Some("RunMat:db:InvalidInput"),
-    when: "Input signal cannot be interpreted as numeric magnitude data.",
-    message: "db: invalid input",
-};
-const DB_ERROR_INVALID_RESISTANCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DB.INVALID_RESISTANCE",
-    identifier: Some("RunMat:db:InvalidResistance"),
-    when: "Resistance reference is non-numeric, complex, non-finite, or non-positive.",
-    message: "db: invalid resistance",
-};
-const DB_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DB.SIZE_MISMATCH",
-    identifier: Some("RunMat:db:SizeMismatch"),
-    when: "Signal and resistance inputs are not broadcast compatible.",
-    message: "db: array sizes are not compatible for broadcasting",
-};
-const DB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DB.INTERNAL",
-    identifier: Some("RunMat:db:Internal"),
-    when: "Internal tensor conversion or allocation failed.",
-    message: "db: internal error",
-};
-const DB_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    DB_ERROR_INVALID_ARGUMENT,
-    DB_ERROR_INVALID_MODE,
-    DB_ERROR_INVALID_INPUT,
-    DB_ERROR_INVALID_RESISTANCE,
-    DB_ERROR_SIZE_MISMATCH,
-    DB_ERROR_INTERNAL,
-];
-pub const DB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DB_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DB_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Real and paired-complex integer computation input is gated by db-nonfloating-input and enters the decibel floating domain.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "R",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer positive resistance is gated by db-nonfloating-input and broadcasts with the signal magnitude.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "yDb = db(y, mode_or_R)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
-        notes: "Nonfloating computation input is RunMat-only; ordinary integer/logical input promotes to double, while a native-single resistance can select single output, and resident inputs gather for host conversion.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::db")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -216,17 +72,10 @@ enum DbMode {
 
 #[runtime_builtin(
     name = "db",
-    category = "control",
-    summary = "Convert numeric values to decibels.",
-    keywords = "db,decibel,voltage,power,resistance,complex",
-    accel = "metadata",
-    type_resolver(db_type),
-    descriptor(crate::builtins::control::db::DB_DESCRIPTOR),
-    extensions(crate::builtins::control::db::DB_EXTENSIONS),
-    integer_capabilities(crate::builtins::control::db::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::db"
 )]
-async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn db_builtin(y: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(db_error_with_detail(
             &DB_ERROR_INVALID_ARGUMENT,
@@ -295,14 +144,24 @@ fn is_resident_nonfloating_extension_value(value: &Value) -> bool {
 
 fn parse_mode(value: Value) -> BuiltinResult<DbMode> {
     match value {
-        Value::String(text) => parse_mode_string(&text),
-        Value::StringArray(array) if array.data.len() == 1 => parse_mode_string(&array.data[0]),
+        Value::String(runmat_value::StringElement::Text(text)) => parse_mode_string(&text),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            parse_mode_string(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+            )
+        }
         Value::StringArray(_) => Err(db_error_with_detail(
             &DB_ERROR_INVALID_MODE,
             "mode must be a scalar string",
         )),
         Value::CharArray(array) if array.rows == 1 => {
-            let text = array.data.iter().collect::<String>();
+            let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                let mut error = db_error_with_detail(&DB_ERROR_INVALID_MODE, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?;
             parse_mode_string(&text)
         }
         Value::CharArray(_) => Err(db_error_with_detail(
@@ -360,7 +219,7 @@ fn magnitude_input(value: Value) -> BuiltinResult<RealInput> {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_INPUT, e))?;
             let precision = tensor_precision(&tensor);
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(f64::abs)
@@ -375,7 +234,7 @@ fn magnitude_input(value: Value) -> BuiltinResult<RealInput> {
 }
 
 fn complex_magnitudes(tensor: ComplexTensor) -> RealInput {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let precision = if tensor.numeric_dtype() == NumericDType::F32 {
         OutputPrecision::Single
     } else {
@@ -405,7 +264,7 @@ fn power_input(value: Value) -> BuiltinResult<RealInput> {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_INPUT, e))?;
             let precision = tensor_precision(&tensor);
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor);
             if values.iter().any(|value| *value < 0.0) {
                 return Err(db_error_with_detail(
@@ -435,7 +294,7 @@ fn resistance_input(value: Value) -> BuiltinResult<RealInput> {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_RESISTANCE, e))?;
             let precision = tensor_precision(&tensor);
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor);
             for &resistance in &values {
                 if !resistance.is_finite() || resistance <= 0.0 {
@@ -514,13 +373,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{
-        CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-    };
+    use runmat_builtins::DB_DESCRIPTOR;
+    use runmat_value::{CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::db_builtin(y, rest))
+        block_on(super::db_builtin(
+            y,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn assert_num_close(value: Value, expected: f64) {
@@ -536,7 +396,7 @@ pub(crate) mod tests {
     fn assert_tensor_close(value: Value, expected_shape: &[usize], expected: &[f64]) {
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, expected_shape);
+                assert_eq!(tensor.shape(), expected_shape);
                 assert_eq!(tensor.materialize_f64().len(), expected.len());
                 for (&actual, &expected) in tensor.materialize_f64().iter().zip(expected) {
                     if expected.is_infinite() {
@@ -577,89 +437,6 @@ pub(crate) mod tests {
         assert!(labels.contains(&"yDb = db(y, \"voltage\")"));
         assert!(labels.contains(&"yDb = db(y, \"power\")"));
         assert!(labels.contains(&"yDb = db(y, R)"));
-    }
-
-    #[test]
-    fn db_type_unary_preserves_tensor_shape() {
-        let out = db_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
-    fn db_type_scalar_returns_num() {
-        let out = db_type(&[Type::Num], &ResolveContext::new(Vec::new()));
-        assert_eq!(out, Type::Num);
-    }
-
-    #[test]
-    fn db_type_string_mode_uses_input_shape() {
-        let out = db_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(4), Some(1)]),
-                },
-                Type::String,
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(4), Some(1)])
-            }
-        );
-    }
-
-    #[test]
-    fn db_type_text_modes_use_unary_shape_rules() {
-        let string_array_type = Type::from_value(&Value::StringArray(
-            StringArray::new(vec!["power".into()], vec![1, 1]).unwrap(),
-        ));
-        let char_array_type = Type::from_value(&Value::CharArray(CharArray::new_row("power")));
-
-        for mode in [Type::String, string_array_type, char_array_type] {
-            let out = db_type(
-                &[
-                    Type::Tensor {
-                        shape: Some(vec![Some(1), Some(1)]),
-                    },
-                    mode,
-                ],
-                &ResolveContext::new(Vec::new()),
-            );
-            assert_eq!(out, Type::Num);
-        }
-    }
-
-    #[test]
-    fn db_type_resistance_broadcasts_shapes() {
-        let out = db_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(1)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -734,6 +511,24 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn db_preserves_rank_zero_and_rank_one_tensor_shapes() {
+        let scalar = db_builtin(
+            Value::Tensor(Tensor::new(vec![10.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero db");
+        assert_num_close(scalar, 20.0);
+
+        let vector = db_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-one db");
+        assert_tensor_close(vector, &[2], &[0.0, 20.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn db_preserves_native_single_output() {
         let tensor = Tensor::from_f32(vec![1.0, 10.0, 100.0], vec![1, 3]).unwrap();
@@ -762,7 +557,7 @@ pub(crate) mod tests {
             panic!("expected real single tensor");
         };
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![f64::from((20.0_f64 * 5.0_f64.log10()) as f32), 20.0]
@@ -895,22 +690,27 @@ pub(crate) mod tests {
                 .expect_err("invalid resistance retains ordinary validation");
             assert_eq!(invalid.identifier(), DB_ERROR_INVALID_RESISTANCE.identifier);
 
-            let resident = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 9_306_001,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::I16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
+            let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::I16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            assert!(
+                crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                    .is_none()
             );
-            let error = db_builtin(Value::GpuTensor(resident.clone()), vec![])
+            let resident = allocation.handle.clone();
+            let error = db_builtin(Value::GpuTensor(resident), vec![])
                 .expect_err("MATLAB mode rejects resident integer before gather");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:DbNonfloatingInputExtension")
             );
+            assert_eq!(allocation.probe.retirements(), 0);
+            allocation.handle.release().unwrap();
+            assert_eq!(allocation.probe.retirements(), 1);
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -957,7 +757,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 10.0, 100.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = db_builtin(Value::GpuTensor(handle), Vec::new()).expect("db");

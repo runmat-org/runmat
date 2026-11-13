@@ -1,10 +1,11 @@
 //! MATLAB-compatible `lower` builtin with GPU-aware semantics for RunMat.
 
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::RuntimeContext;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, LOWER_ERROR_CELL_ELEMENT, LOWER_ERROR_INTERNAL,
+    LOWER_ERROR_INVALID_INPUT, LOWER_STRING_CELL_EXTENSION,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
@@ -13,8 +14,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, lowercase_preserving_missing};
-use crate::builtins::strings::type_resolvers::text_preserve_type;
+use crate::builtins::strings::common::{
+    cell_has_valid_string_scalar, transform_character_case, transform_scalar_case,
+    transform_string_array_case, TextCase,
+};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::lower")]
@@ -31,7 +34,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Executes on the CPU; GPU-resident inputs are gathered to host memory before conversion.",
+        "Executes on host text; resident numeric inputs reject before provider access or gathering.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::lower")]
@@ -42,73 +45,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
+    notes: "Host text transformation; not eligible for fusion. Resident numeric inputs reject.",
 };
 
 const BUILTIN_NAME: &str = "lower";
-
-const LOWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Lowercased text preserving input container kind and shape.",
-}];
-
-const LOWER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String/char/cell text input to transform.",
-}];
-
-const LOWER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = lower(str)",
-    inputs: &LOWER_INPUTS,
-    outputs: &LOWER_OUTPUT,
-}];
-
-const LOWER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOWER.INVALID_INPUT",
-    identifier: Some("RunMat:lower:InvalidInput"),
-    when: "Input is not a string array, character array, or cell array of text scalars.",
-    message:
-        "lower: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const LOWER_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOWER.CELL_ELEMENT",
-    identifier: Some("RunMat:lower:CellElement"),
-    when: "Cell array contains a non-text element or non-row char array element.",
-    message: "lower: cell array elements must be string scalars or character vectors",
-};
-
-const LOWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOWER.INTERNAL",
-    identifier: Some("RunMat:lower:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "lower: internal error",
-};
-
-const LOWER_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    LOWER_ERROR_INVALID_INPUT,
-    LOWER_ERROR_CELL_ELEMENT,
-    LOWER_ERROR_INTERNAL,
-];
-
-pub const LOWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOWER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOWER_ERRORS,
-};
-
-pub const LOWER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "lower accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
-};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -131,91 +71,72 @@ fn lower_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "lower",
-    category = "strings/transform",
-    summary = "Convert strings, character arrays, and cell arrays of character vectors to lowercase.",
-    keywords = "lower,lowercase,strings,character array,text",
-    accel = "sink",
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::lower::LOWER_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::lower::LOWER_INTEGER_AUDIT),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
-async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
+async fn lower_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<Value> {
     if crate::dispatcher::value_contains_gpu(&value) {
         return Err(lower_error(&LOWER_ERROR_INVALID_INPUT));
     }
+    if cell_has_valid_string_scalar(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOWER_STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
-        Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
-        Value::StringArray(array) => lower_string_array(array),
-        Value::CharArray(array) => lower_char_array(array),
-        Value::Cell(cell) => lower_cell_array(cell),
+        Value::String(text) => {
+            transform_scalar_case(runtime.as_ref(), text, TextCase::Lower, lower_admission)
+                .map(Value::String)
+        }
+        Value::StringArray(array) => lower_string_array(runtime.as_ref(), array),
+        Value::CharArray(array) => lower_char_array(runtime.as_ref(), array),
+        Value::Cell(cell) => lower_cell_array(runtime.as_ref(), cell),
         _ => Err(lower_error(&LOWER_ERROR_INVALID_INPUT)),
     }
 }
 
-fn lower_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
-    let lowered = data
-        .into_iter()
-        .map(lowercase_preserving_missing)
-        .collect::<Vec<_>>();
-    let lowered_array = StringArray::new(lowered, shape).map_err(|e| {
-        lower_error_with_message(format!("{BUILTIN_NAME}: {e}"), &LOWER_ERROR_INTERNAL)
-    })?;
-    Ok(Value::StringArray(lowered_array))
+fn lower_string_array(
+    runtime: Option<&RuntimeContext>,
+    array: StringArray,
+) -> BuiltinResult<Value> {
+    transform_string_array_case(runtime, array, TextCase::Lower, lower_admission, |detail| {
+        lower_error_with_message(format!("{BUILTIN_NAME}: {detail}"), &LOWER_ERROR_INTERNAL)
+    })
+    .map(Value::StringArray)
 }
 
-fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
-    }
-
-    let mut lowered_rows = Vec::with_capacity(rows);
-    let mut target_cols = cols;
-    for row in 0..rows {
-        let text = char_row_to_string_slice(&data, cols, row).to_lowercase();
-        let len = text.chars().count();
-        target_cols = target_cols.max(len);
-        lowered_rows.push(text);
-    }
-
-    let mut lowered_data = Vec::with_capacity(rows * target_cols);
-    for row_text in lowered_rows {
-        let mut chars: Vec<char> = row_text.chars().collect();
-        if chars.len() < target_cols {
-            chars.resize(target_cols, ' ');
-        }
-        lowered_data.extend(chars.into_iter());
-    }
-
-    CharArray::new(lowered_data, rows, target_cols)
-        .map(Value::CharArray)
-        .map_err(|e| {
-            lower_error_with_message(format!("{BUILTIN_NAME}: {e}"), &LOWER_ERROR_INTERNAL)
-        })
+fn lower_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    build_runtime_error(format!("lower: host allocation: {cause}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(format!(
+            "{}:{}",
+            runtime.error_namespace(),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build()
 }
 
-fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+fn lower_char_array(runtime: Option<&RuntimeContext>, array: CharArray) -> BuiltinResult<Value> {
+    transform_character_case(runtime, array, TextCase::Lower, lower_admission, |detail| {
+        lower_error_with_message(
+            format!("{BUILTIN_NAME}: {detail}"),
+            &LOWER_ERROR_INVALID_INPUT,
+        )
+    })
+    .map(Value::CharArray)
+}
+
+fn lower_cell_array(runtime: Option<&RuntimeContext>, cell: CellArray) -> BuiltinResult<Value> {
+    let (data, _, rows, cols) = cell.into_parts();
     let mut lowered_values = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {
             let idx = row * cols + col;
-            let lowered = lower_cell_element(&data[idx])?;
+            let lowered = lower_cell_element(runtime, &data[idx])?;
             lowered_values.push(lowered);
         }
     }
@@ -224,13 +145,20 @@ fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     })
 }
 
-fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
+fn lower_cell_element(runtime: Option<&RuntimeContext>, value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text.clone()))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(
-            lowercase_preserving_missing(sa.data[0].clone()),
-        )),
-        Value::CharArray(ca) if ca.rows <= 1 => lower_char_array(ca.clone()),
+        Value::String(text) => {
+            transform_scalar_case(runtime, text.clone(), TextCase::Lower, lower_admission)
+                .map(Value::String)
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 => transform_scalar_case(
+            runtime,
+            sa.data()[0].clone(),
+            TextCase::Lower,
+            lower_admission,
+        )
+        .map(Value::String),
+        Value::CharArray(ca) if ca.rows <= 1 => lower_char_array(runtime, ca.clone()),
         Value::CharArray(_) => Err(lower_error(&LOWER_ERROR_CELL_ELEMENT)),
         _ => Err(lower_error(&LOWER_ERROR_CELL_ELEMENT)),
     }
@@ -239,10 +167,9 @@ fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn run_lower(value: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(lower_builtin(value))
+        futures::executor::block_on(lower_builtin(None, value))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -270,13 +197,8 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data,
-                    vec![
-                        String::from("gpu"),
-                        String::from("accel"),
-                        String::from("<missing>"),
-                        String::from("mixed")
-                    ]
+                    sa.data().to_vec(),
+                    vec!["gpu", "accel", "<missing>", "mixed"]
                 );
             }
             other => panic!("expected string array, got {other:?}"),
@@ -287,13 +209,13 @@ pub(crate) mod tests {
     #[test]
     fn lower_char_array_multiple_rows() {
         let data: Vec<char> = vec!['C', 'A', 'T', 'D', 'O', 'G'];
-        let array = CharArray::new(data, 2, 3).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 3).unwrap();
         let result = run_lower(Value::CharArray(array)).expect("lower");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data, vec!['c', 'a', 't', 'd', 'o', 'g']);
+                assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("catdog"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -308,8 +230,8 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
-                let expected: Vec<char> = "hello ".chars().collect();
-                assert_eq!(ca.data, expected);
+                let expected = runmat_value::encode_utf16_code_units("hello ");
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -318,23 +240,50 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_char_array_unicode_expansion_extends_width() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let data: Vec<char> = vec!['İ', 'A'];
-        let array = CharArray::new(data, 1, 2).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 1, 2).unwrap();
         let result = run_lower(Value::CharArray(array)).expect("lower");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
-                let expected: Vec<char> = vec!['i', '\u{307}', 'a'];
-                assert_eq!(ca.data, expected);
+                let expected = runmat_value::encode_utf16_code_units("i\u{307}a");
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
     }
 
+    #[test]
+    fn lower_preserves_supplementary_code_unit_geometry_and_refuses_unpaired_units() {
+        let result = run_lower(Value::CharArray(CharArray::new_row("🙂A"))).unwrap();
+        let Value::CharArray(result) = result else {
+            panic!("expected character output");
+        };
+        assert_eq!(result.shape(), &[1, 3]);
+        assert_eq!(result.try_row_string().unwrap().as_deref(), Some("🙂a"));
+
+        let malformed =
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)], 1, 1)
+                .unwrap();
+        let error = run_lower(Value::CharArray(malformed)).unwrap_err();
+        assert_eq!(error.identifier(), LOWER_ERROR_INVALID_INPUT.identifier);
+        assert!(error.message().contains("unpaired UTF-16 surrogate"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn lower_strict_latin1_character_mapping() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let result = run_lower(Value::CharArray(CharArray::new_row("ÉCOLE"))).unwrap();
+        assert_eq!(result, Value::CharArray(CharArray::new_row("école")));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_cell_array_mixed_content() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("RUN")),
@@ -358,6 +307,42 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn lower_string_cell_is_mode_gated_before_gather() {
+        let cell = CellArray::new(vec![Value::String("DATA".into())], 1, 1).unwrap();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = run_lower(Value::Cell(cell.clone())).expect_err("strict cellstr contract");
+            assert_eq!(
+                error.identifier(),
+                LOWER_STRING_CELL_EXTENSION.error_identifier
+            );
+            let scalar = StringArray::new(vec!["DATA".into()], vec![1, 1]).unwrap();
+            let wrapped = CellArray::new(vec![Value::StringArray(scalar)], 1, 1).unwrap();
+            let error = run_lower(Value::Cell(wrapped)).expect_err("scalar string-array cell");
+            assert_eq!(
+                error.identifier(),
+                LOWER_STRING_CELL_EXTENSION.error_identifier
+            );
+        }
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = run_lower(Value::Cell(cell)).expect("RunMat text cell extension");
+        let Value::Cell(result) = result else {
+            panic!("cell output")
+        };
+        assert_eq!(result.get(0, 0).unwrap(), Value::String("data".into()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn lower_invalid_mixed_cell_keeps_element_error() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cell = CellArray::new(vec![Value::String("A".into()), Value::Num(1.0)], 1, 2).unwrap();
+        let error = run_lower(Value::Cell(cell)).expect_err("invalid cell element");
+        assert_eq!(error.identifier(), LOWER_ERROR_CELL_ELEMENT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn lower_errors_on_invalid_input() {
         let err = run_lower(Value::Num(1.0)).unwrap_err();
         assert_eq!(err.to_string(), LOWER_ERROR_INVALID_INPUT.message);
@@ -374,14 +359,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_preserves_missing_string() {
-        let result = run_lower(Value::String("<missing>".into())).expect("lower");
-        assert_eq!(result, Value::String("<missing>".into()));
+        let result = run_lower(Value::String(runmat_value::StringElement::Missing)).expect("lower");
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_cell_allows_empty_char_vector() {
-        let empty_char = CharArray::new(Vec::new(), 1, 0).unwrap();
+        let empty_char = CharArray::from_unicode_scalars(Vec::new(), 1, 0).unwrap();
         let cell = CellArray::new(vec![Value::CharArray(empty_char.clone())], 1, 1).unwrap();
         let result = run_lower(Value::Cell(cell)).expect("lower");
         match result {
@@ -396,7 +381,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn lower_gpu_tensor_input_gathers_then_errors() {
+    fn lower_gpu_tensor_input_rejects_without_gathering() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -411,14 +396,15 @@ pub(crate) mod tests {
             .expect("upload");
         let err = run_lower(Value::GpuTensor(handle.clone())).unwrap_err();
         assert_eq!(err.to_string(), LOWER_ERROR_INVALID_INPUT.message);
-        provider.free(&handle).ok();
-    }
-
-    #[test]
-    fn lower_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("borrowed input remains live");
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release final fixture reference");
+        assert!(
+            physical.acquire().is_none(),
+            "physical lease must expire after final release"
         );
     }
 }

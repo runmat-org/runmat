@@ -1,9 +1,10 @@
+use runmat_geometry_core::physical::{Length, Position};
 use runmat_geometry_core::{
     CurveDerivatives, CurveEvaluatorId, CurveProjection, ExactCurveEvaluator, ExactPcurveEvaluator,
     ExactSurfaceEvaluator, ExactTrimClassifier, GeometryEvaluationControl, GeometryEvaluationError,
-    GeometryEvaluationErrorKind, ParameterRange, PcurveDerivatives, PcurveEvaluatorId,
-    SurfaceCurvature, SurfaceDerivatives, SurfaceEvaluatorId, SurfaceProjection, TrimClassifierId,
-    TrimDomainLocation,
+    GeometryEvaluationErrorKind, GeometryParameterAxis, GeometryParameterFrame, ParameterRange,
+    PcurveDerivatives, PcurveEvaluatorId, SurfaceCurvature, SurfaceDerivatives, SurfaceEvaluatorId,
+    SurfaceProjection, TrimClassifierId, TrimDomainLocation,
 };
 
 const POINTS: [[f64; 3]; 4] = [
@@ -17,14 +18,24 @@ const FACETS: [[usize; 3]; 4] = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
 
 pub(super) static EVALUATOR: LinearTetrahedronEvaluator = LinearTetrahedronEvaluator {
     warped_curve_parameter: false,
+    boundary_outside_trim: false,
 };
 pub(super) static WARPED_EVALUATOR: LinearTetrahedronEvaluator = LinearTetrahedronEvaluator {
     warped_curve_parameter: true,
+    boundary_outside_trim: false,
 };
+/// Classifies points on a face's boundary edges as outside its trim, as a STEP trim loop that
+/// lies a hair inside its pcurves does.
+pub(super) static BOUNDARY_OUTSIDE_EVALUATOR: LinearTetrahedronEvaluator =
+    LinearTetrahedronEvaluator {
+        warped_curve_parameter: false,
+        boundary_outside_trim: true,
+    };
 pub(super) static CONTROL: UnlimitedControl = UnlimitedControl;
 
 pub(super) struct LinearTetrahedronEvaluator {
     warped_curve_parameter: bool,
+    boundary_outside_trim: bool,
 }
 
 impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
@@ -43,12 +54,13 @@ impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
         id: &CurveEvaluatorId,
         parameter: f64,
         _control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 3], GeometryEvaluationError> {
+    ) -> Result<runmat_geometry_core::physical::Position, GeometryEvaluationError> {
         curve_point(
             index(id.as_str(), "curve:")?,
             parameter,
             self.warped_curve_parameter,
         )
+        .map(Position::new)
     }
 
     fn unit_tangent(
@@ -80,11 +92,12 @@ impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
         } else {
             0.0
         };
-        Ok(CurveDerivatives {
-            point_m: curve_point(edge, parameter, self.warped_curve_parameter)?,
-            first_m: direction.map(|value| value * first_scale),
-            second_m: direction.map(|value| value * second_scale),
-        })
+        CurveDerivatives::from_parameter_coefficients(
+            curve_point(edge, parameter, self.warped_curve_parameter)?,
+            direction.map(|value| value * first_scale),
+            direction.map(|value| value * second_scale),
+            GeometryParameterFrame::native(id.as_str(), GeometryParameterAxis::Curve),
+        )
     }
 
     fn curvature_1_per_m(
@@ -92,33 +105,41 @@ impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
         _id: &CurveEvaluatorId,
         _parameter: f64,
         _control: &dyn GeometryEvaluationControl,
-    ) -> Result<f64, GeometryEvaluationError> {
-        Ok(0.0)
+    ) -> Result<runmat_geometry_core::physical::Curvature, GeometryEvaluationError> {
+        Ok(runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Curvature,
+            _,
+        >::new(0.0))
     }
 
     fn arc_length_m(
         &self,
         id: &CurveEvaluatorId,
         range: ParameterRange,
-        _absolute_error_m: f64,
+        _absolute_error_m: runmat_geometry_core::physical::Length,
         _control: &dyn GeometryEvaluationControl,
-    ) -> Result<f64, GeometryEvaluationError> {
+    ) -> Result<runmat_geometry_core::physical::Length, GeometryEvaluationError> {
+        let _absolute_error_m = _absolute_error_m.canonical_value();
         let [left, right] = EDGES[index(id.as_str(), "curve:")?];
         let span = if self.warped_curve_parameter {
             warped_parameter(range.end) - warped_parameter(range.start)
         } else {
             range.end - range.start
         };
-        Ok(length(subtract(POINTS[right], POINTS[left])) * span.abs())
+        Ok(Length::new(
+            length(subtract(POINTS[right], POINTS[left])) * span.abs(),
+        ))
     }
 
     fn inverse_project(
         &self,
         _id: &CurveEvaluatorId,
-        _point_m: [f64; 3],
-        _absolute_error_m: f64,
+        _point_m: runmat_geometry_core::physical::Position,
+        _absolute_error_m: runmat_geometry_core::physical::Length,
         _control: &dyn GeometryEvaluationControl,
     ) -> Result<CurveProjection, GeometryEvaluationError> {
+        let _point_m = _point_m.canonical_value();
+        let _absolute_error_m = _absolute_error_m.canonical_value();
         Err(unused())
     }
 }
@@ -139,15 +160,46 @@ impl ExactPcurveEvaluator for LinearTetrahedronEvaluator {
         id: &PcurveEvaluatorId,
         parameter: f64,
         _control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 2], GeometryEvaluationError> {
+    ) -> Result<[runmat_geometry_core::GeometryParameterCoordinate; 2], GeometryEvaluationError>
+    {
         let (face, local_edge) = pcurve_indices(id.as_str())?;
         let from = FACETS[face][local_edge];
         let to = FACETS[face][(local_edge + 1) % 3];
         let edge = edge_index(from, to)?;
-        Ok(surface_uv(
-            face,
-            curve_point(edge, parameter, self.warped_curve_parameter)?,
-        ))
+        Ok({
+            let [u, v] = surface_uv(
+                face,
+                curve_point(edge, parameter, self.warped_curve_parameter)?,
+            );
+            [
+                runmat_geometry_core::GeometryParameterCoordinate::try_new(
+                    u,
+                    runmat_geometry_core::GeometryParameterFrame::native(
+                        format!("surface:{face}"),
+                        runmat_geometry_core::GeometryParameterAxis::SurfaceU,
+                    ),
+                )
+                .map_err(|error| {
+                    runmat_geometry_core::GeometryEvaluationError::new(
+                        runmat_geometry_core::GeometryEvaluationErrorKind::InvalidResult,
+                        error.to_string(),
+                    )
+                })?,
+                runmat_geometry_core::GeometryParameterCoordinate::try_new(
+                    v,
+                    runmat_geometry_core::GeometryParameterFrame::native(
+                        format!("surface:{face}"),
+                        runmat_geometry_core::GeometryParameterAxis::SurfaceV,
+                    ),
+                )
+                .map_err(|error| {
+                    runmat_geometry_core::GeometryEvaluationError::new(
+                        runmat_geometry_core::GeometryEvaluationErrorKind::InvalidResult,
+                        error.to_string(),
+                    )
+                })?,
+            ]
+        })
     }
 
     fn derivatives(
@@ -159,14 +211,25 @@ impl ExactPcurveEvaluator for LinearTetrahedronEvaluator {
         let epsilon = 1.0e-6;
         let left = ExactPcurveEvaluator::point(self, id, parameter - epsilon, control)?;
         let right = ExactPcurveEvaluator::point(self, id, parameter + epsilon, control)?;
-        Ok(PcurveDerivatives {
-            point_uv: ExactPcurveEvaluator::point(self, id, parameter, control)?,
-            first_uv: [
+        let left = left
+            .each_ref()
+            .map(|coordinate| coordinate.with_native_coordinate(|value, _frame| value));
+        let right = right
+            .each_ref()
+            .map(|coordinate| coordinate.with_native_coordinate(|value, _frame| value));
+        let point = ExactPcurveEvaluator::point(self, id, parameter, control)?;
+        PcurveDerivatives::from_parameter_coefficients(
+            point
+                .each_ref()
+                .map(|coordinate| coordinate.with_native_coordinate(|value, _frame| value)),
+            [
                 (right[0] - left[0]) / (2.0 * epsilon),
                 (right[1] - left[1]) / (2.0 * epsilon),
             ],
-            second_uv: [0.0; 2],
-        })
+            [0.0; 2],
+            point.each_ref().map(|coordinate| coordinate.axis().clone()),
+            GeometryParameterFrame::native(id.as_str(), GeometryParameterAxis::Pcurve),
+        )
     }
 }
 
@@ -193,8 +256,8 @@ impl ExactSurfaceEvaluator for LinearTetrahedronEvaluator {
         id: &SurfaceEvaluatorId,
         uv: [f64; 2],
         _control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 3], GeometryEvaluationError> {
-        surface_point(index(id.as_str(), "surface:")?, uv)
+    ) -> Result<runmat_geometry_core::physical::Position, GeometryEvaluationError> {
+        surface_point(index(id.as_str(), "surface:")?, uv).map(Position::new)
     }
 
     fn derivatives(
@@ -211,14 +274,18 @@ impl ExactSurfaceEvaluator for LinearTetrahedronEvaluator {
             3 => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
             _ => return Err(unknown()),
         };
-        Ok(SurfaceDerivatives {
-            point_m: ExactSurfaceEvaluator::point(self, id, uv, control)?,
+        SurfaceDerivatives::from_parameter_coefficients(
+            ExactSurfaceEvaluator::point(self, id, uv, control)?.canonical_value(),
             du_m,
             dv_m,
-            duu_m: [0.0; 3],
-            duv_m: [0.0; 3],
-            dvv_m: [0.0; 3],
-        })
+            [0.0; 3],
+            [0.0; 3],
+            [0.0; 3],
+            [
+                GeometryParameterFrame::native(id.as_str(), GeometryParameterAxis::SurfaceU),
+                GeometryParameterFrame::native(id.as_str(), GeometryParameterAxis::SurfaceV),
+            ],
+        )
     }
 
     fn unit_normal(
@@ -228,7 +295,14 @@ impl ExactSurfaceEvaluator for LinearTetrahedronEvaluator {
         control: &dyn GeometryEvaluationControl,
     ) -> Result<[f64; 3], GeometryEvaluationError> {
         let derivatives = ExactSurfaceEvaluator::derivatives(self, id, uv, control)?;
-        normalize(cross(derivatives.du_m, derivatives.dv_m))
+        normalize(cross(
+            derivatives
+                .du_m
+                .with_canonical_storage(|values, _axes| *values),
+            derivatives
+                .dv_m
+                .with_canonical_storage(|values, _axes| *values),
+        ))
     }
 
     fn principal_curvature(
@@ -238,8 +312,8 @@ impl ExactSurfaceEvaluator for LinearTetrahedronEvaluator {
         _control: &dyn GeometryEvaluationControl,
     ) -> Result<SurfaceCurvature, GeometryEvaluationError> {
         Ok(SurfaceCurvature {
-            minimum_1_per_m: 0.0,
-            maximum_1_per_m: 0.0,
+            minimum_1_per_m: runmat_geometry_core::physical::Curvature::new(0.0),
+            maximum_1_per_m: runmat_geometry_core::physical::Curvature::new(0.0),
             minimum_direction_uv: [1.0, 0.0],
             maximum_direction_uv: [0.0, 1.0],
         })
@@ -248,10 +322,12 @@ impl ExactSurfaceEvaluator for LinearTetrahedronEvaluator {
     fn closest_point(
         &self,
         _id: &SurfaceEvaluatorId,
-        _point_m: [f64; 3],
-        _absolute_error_m: f64,
+        _point_m: runmat_geometry_core::physical::Position,
+        _absolute_error_m: runmat_geometry_core::physical::Length,
         _control: &dyn GeometryEvaluationControl,
     ) -> Result<SurfaceProjection, GeometryEvaluationError> {
+        let _point_m = _point_m.canonical_value();
+        let _absolute_error_m = _absolute_error_m.canonical_value();
         Err(unused())
     }
 }
@@ -260,10 +336,13 @@ impl ExactTrimClassifier for LinearTetrahedronEvaluator {
     fn classify(
         &self,
         _id: &TrimClassifierId,
-        _uv: [f64; 2],
+        uv: [f64; 2],
         _boundary_tolerance_uv: f64,
         _control: &dyn GeometryEvaluationControl,
     ) -> Result<TrimDomainLocation, GeometryEvaluationError> {
+        if self.boundary_outside_trim && uv[0].min(uv[1]).min(1.0 - uv[0] - uv[1]) < 1.0e-12 {
+            return Ok(TrimDomainLocation::Outside);
+        }
         Ok(TrimDomainLocation::Inside)
     }
 }

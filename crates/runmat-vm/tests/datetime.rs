@@ -1,4 +1,4 @@
-use runmat_value::{StringArray, Value};
+use runmat_value::Value;
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -12,7 +12,7 @@ fn datetime_construction_and_component_access_work_in_scripts() {
 
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name == "datetime")));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name().is(runmat_types::StaticClassIdentity::new("datetime")))));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 2024.0).abs() < f64::EPSILON)));
@@ -35,9 +35,9 @@ fn datetime_string_and_indexing_work_for_arrays() {
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 2025.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
-        Value::StringArray(StringArray { data, .. }) => {
-            data.iter().any(|text| text == "15-Jan-2024")
-                && data.iter().any(|text| text == "20-Jun-2025")
+        Value::StringArray(array) => {
+            array.data().iter().any(|text| text == "15-Jan-2024")
+                && array.data().iter().any(|text| text == "20-Jun-2025")
         }
         _ => false,
     }));
@@ -59,7 +59,8 @@ fn datetime_comparisons_and_format_assignment_work() {
         .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data.iter().collect();
+            let rendered: String = runmat_value::decode_utf16_code_units(array.data())
+                .expect("valid UTF-16 text fixture");
             rendered.trim_end() == "2024-01-01"
         }
         _ => false,
@@ -96,12 +97,14 @@ fn datetime_subtraction_between_scalars_uses_object_overload_path() {
 
 #[test]
 fn datetime_legacy_conversion_helpers_execute_in_scripts() {
+    // Numeric serial-date operands to isbetween are a RunMat extension.
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
         "n = datenum(2024, 3, 14); \
          v = datevec(n); \
          w = weekday(n); \
          e = eomday(2024, 2); \
-         s = datestr(n, 'yyyy-MM-dd'); \
+         s = datestr(n, 'yyyy-mm-dd'); \
          ok = isbetween(n, n - 1, n + 1);",
     )
     .unwrap();
@@ -114,7 +117,8 @@ fn datetime_legacy_conversion_helpers_execute_in_scripts() {
         .any(|value| matches!(value, Value::Num(n) if (*n - 29.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data.iter().collect();
+            let rendered: String = runmat_value::decode_utf16_code_units(array.data())
+                .expect("valid UTF-16 text fixture");
             rendered.trim_end() == "2024-03-14"
         }
         _ => false,
@@ -136,7 +140,8 @@ fn calendar_duration_helpers_execute_in_scripts() {
 
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data.iter().collect();
+            let rendered: String = runmat_value::decode_utf16_code_units(array.data())
+                .expect("valid UTF-16 text fixture");
             rendered.trim_end() == "2024-02-29"
         }
         _ => false,
@@ -168,6 +173,6 @@ fn business_day_helpers_execute_in_scripts() {
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 4.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0, 1.0])
+        matches!(value, Value::LogicalArray(mask) if mask.shape == vec![1, 2] && mask.data == vec![1, 1])
     }));
 }

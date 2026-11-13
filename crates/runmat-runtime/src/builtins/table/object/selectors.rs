@@ -71,7 +71,9 @@ pub(in crate::builtins::table) fn parse_row_selector_for_object(
         if selector_object.is_class(ROWFILTER_CLASS) {
             return parse_rowfilter_selector(selector_object, object);
         }
-        if selector_object.is_class("datetime") || selector_object.is_class("duration") {
+        if selector_object.is_class(runmat_types::standard::DATETIME)
+            || selector_object.is_class(runmat_types::standard::DURATION)
+        {
             return parse_row_time_selector(selector, object);
         }
     }
@@ -149,8 +151,12 @@ enum RowTimeKind {
 
 fn row_time_kind(value: &Value) -> BuiltinResult<RowTimeKind> {
     match value {
-        Value::Object(obj) if obj.is_class("datetime") => Ok(RowTimeKind::Datetime),
-        Value::Object(obj) if obj.is_class("duration") => Ok(RowTimeKind::Duration),
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
+            Ok(RowTimeKind::Datetime)
+        }
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
+            Ok(RowTimeKind::Duration)
+        }
         Value::Tensor(_) | Value::Num(_) | Value::Int(_) => Ok(RowTimeKind::Numeric),
         other => Err(invalid_index(format!(
             "timetable: unsupported row-time selector {other:?}"
@@ -236,7 +242,7 @@ pub(in crate::builtins::table) fn parse_vartype_selector(
     names: &[String],
 ) -> BuiltinResult<Vec<String>> {
     let kind = selector
-        .properties
+        .properties()
         .get("Type")
         .map(|value| scalar_text(value, "vartype type"))
         .transpose()?
@@ -248,7 +254,7 @@ pub(in crate::builtins::table) fn parse_vartype_selector(
         .filter(|name| {
             variables
                 .fields
-                .get(*name)
+                .get(name)
                 .map(|value| vartype_matches(value, &kind))
                 .unwrap_or(false)
         })
@@ -269,8 +275,12 @@ pub(in crate::builtins::table) fn vartype_matches(value: &Value, kind: &str) -> 
             Value::StringArray(_) | Value::String(_) | Value::CharArray(_)
         ),
         "cell" => matches!(value, Value::Cell(_)),
-        "datetime" => matches!(value, Value::Object(obj) if obj.is_class("datetime")),
-        "duration" => matches!(value, Value::Object(obj) if obj.is_class("duration")),
+        "datetime" => {
+            matches!(value, Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME))
+        }
+        "duration" => {
+            matches!(value, Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION))
+        }
         "categorical" => matches!(value, Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS)),
         "table" => matches!(value, Value::Object(obj) if is_tabular_class(obj)),
         _ => false,
@@ -288,17 +298,17 @@ pub(in crate::builtins::table) fn parse_timerange_selector(
         .ok_or_else(|| invalid_index("timerange selector requires timetable RowTimes"))?;
     let serials = timerange_numeric_values(&row_times)?;
     let start = selector
-        .properties
+        .properties()
         .get("Start")
         .map(timerange_bound_value)
         .transpose()?;
     let end = selector
-        .properties
+        .properties()
         .get("End")
         .map(timerange_bound_value)
         .transpose()?;
     let inclusivity = selector
-        .properties
+        .properties()
         .get("Inclusivity")
         .map(|value| scalar_text(value, "timerange inclusivity"))
         .transpose()?
@@ -347,18 +357,22 @@ fn timerange_numeric_values(value: &Value) -> BuiltinResult<Vec<NumericScalar>> 
             .collect(),
         Value::Num(value) => Ok(vec![NumericScalar::F64(*value)]),
         Value::Int(value) => Ok(vec![NumericScalar::from(value.clone())]),
-        Value::Object(obj) if obj.is_class("datetime") => Ok(tensor_utils::tensor_into_values_f64(
-            crate::builtins::datetime::serials_from_datetime_value(value)?,
-        )
-        .into_iter()
-        .map(NumericScalar::F64)
-        .collect()),
-        Value::Object(obj) if obj.is_class("duration") => Ok(tensor_utils::tensor_into_values_f64(
-            crate::builtins::duration::duration_tensor_from_duration_value(value)?,
-        )
-        .into_iter()
-        .map(NumericScalar::F64)
-        .collect()),
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
+            Ok(tensor_utils::tensor_into_values_f64(
+                crate::builtins::datetime::serials_from_datetime_value(value)?,
+            )
+            .into_iter()
+            .map(NumericScalar::F64)
+            .collect())
+        }
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
+            Ok(tensor_utils::tensor_into_values_f64(
+                crate::builtins::duration::duration_tensor_from_duration_value(value)?,
+            )
+            .into_iter()
+            .map(NumericScalar::F64)
+            .collect())
+        }
         other => Err(invalid_argument(format!(
             "timerange: expected numeric, datetime, or duration row times, got {other:?}"
         ))),
@@ -378,7 +392,7 @@ pub(in crate::builtins::table) fn parse_rowfilter_selector(
     object: &ObjectInstance,
 ) -> BuiltinResult<Vec<usize>> {
     let height = table_height(object)?;
-    let predicate = selector.properties.get("Predicate");
+    let predicate = selector.properties().get("Predicate");
     if let Some(predicate) = predicate {
         match predicate {
             Value::LogicalArray(mask) => {
@@ -391,12 +405,24 @@ pub(in crate::builtins::table) fn parse_rowfilter_selector(
                     Vec::new()
                 });
             }
-            Value::String(text) if text.is_empty() => {}
+            Value::String(text) if text.as_str().is_some_and(str::is_empty) => {}
             Value::String(text) => {
-                return evaluate_named_rowfilter(text, selector, object);
+                return evaluate_named_rowfilter(
+                    text.as_str()
+                        .ok_or_else(|| invalid_index("table: row selector must not be missing"))?,
+                    selector,
+                    object,
+                );
             }
             Value::CharArray(chars) if chars.rows == 1 => {
-                let text = chars.data.iter().collect::<String>();
+                let text =
+                    runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
+                        table_error_with_source(
+                            &TABLE_ERROR_INVALID_INDEX,
+                            format!("table row selector is not valid UTF-16 text: {error}"),
+                            error,
+                        )
+                    })?;
                 return evaluate_named_rowfilter(&text, selector, object);
             }
             _ => {}
@@ -430,7 +456,7 @@ pub(in crate::builtins::table) fn evaluate_named_rowfilter(
     object: &ObjectInstance,
 ) -> BuiltinResult<Vec<usize>> {
     let variable_names = selector
-        .properties
+        .properties()
         .get("Variables")
         .map(string_list)
         .transpose()?
@@ -517,12 +543,16 @@ pub(in crate::builtins::table) fn selector_numeric_values(
         Value::Int(value) => Ok(vec![selector_scalar_to_f64(NumericScalar::from(
             value.clone(),
         ))?]),
-        Value::Object(obj) if obj.is_class("datetime") => Ok(tensor_utils::tensor_into_values_f64(
-            crate::builtins::datetime::serials_from_datetime_value(value)?,
-        )),
-        Value::Object(obj) if obj.is_class("duration") => Ok(tensor_utils::tensor_into_values_f64(
-            crate::builtins::duration::duration_tensor_from_duration_value(value)?,
-        )),
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
+            Ok(tensor_utils::tensor_into_values_f64(
+                crate::builtins::datetime::serials_from_datetime_value(value)?,
+            ))
+        }
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
+            Ok(tensor_utils::tensor_into_values_f64(
+                crate::builtins::duration::duration_tensor_from_duration_value(value)?,
+            ))
+        }
         other => Err(invalid_argument(format!(
             "timerange: expected numeric, datetime, or duration row times, got {other:?}"
         ))),
@@ -582,13 +612,13 @@ pub(in crate::builtins::table) fn numeric_cell_order_to_zero(
 pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool {
     match value {
         Value::Num(value) => value.is_nan(),
-        Value::String(text) => text.is_empty() || text == "<missing>",
+        Value::String(text) => text.is_missing(),
         Value::StringArray(array) => array
-            .data
+            .data()
             .first()
-            .map(|text| text.is_empty())
+            .map(|text| text.is_missing())
             .unwrap_or(true),
-        Value::CharArray(array) => array.data.iter().all(|ch| ch.is_whitespace()),
+        Value::CharArray(array) => array.data().iter().all(|ch| ch.is_whitespace()),
         Value::Tensor(tensor) => {
             if tensor.integer_storage().is_some() {
                 tensor.is_empty()
@@ -599,7 +629,7 @@ pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool
                     .unwrap_or(true)
             }
         }
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
                 .and_then(|tensor| {
@@ -608,7 +638,7 @@ pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool
                 .map(|serial| serial.is_nan())
                 .unwrap_or(false)
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
                 .and_then(|tensor| {

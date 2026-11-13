@@ -7,7 +7,16 @@
 namespace runmat_geometry_io {
 namespace occt_backend {
 
+// How far, in metres, an evaluated pcurve may run past its face's trimmed parameter domain in 3D
+// before evaluation clamps it, when that exceeds the face's edge tolerance (incidence validation
+// still holds the clamped point to the edge tolerance). Import no longer uses it: edge tolerance
+// admission is bounded by the request's geometric tolerance (admissible_edge_gap_m).
+inline constexpr double kAdmissibleEdgeGapM = 1.0e-6;
+
 enum class OcctCadFormat : std::uint8_t;
+enum class OcctFeatureKind : std::uint8_t;
+enum class OcctFeatureEntityKind : std::uint8_t;
+enum class OcctFeatureRelationKind : std::uint8_t;
 struct OcctImportOptions;
 struct OcctImportPayload;
 struct OcctExactShapePayload;
@@ -22,19 +31,34 @@ struct OcctMassPropertiesPayload;
 struct OcctPreviewSessionChunkOptions;
 struct OcctPreviewSessionChunkPayload;
 struct OcctPreviewSessionStartPayload;
+struct OcctFeatureOperand;
+struct OcctFeatureSelection;
+struct OcctFeatureExecutionPayload;
+
+rust::String exact_kernel_abi();
 
 OcctImportPayload import_cad_bytes(rust::Str path,
                                    rust::Slice<const std::uint8_t> bytes,
+                                   rust::Str materialized_path,
                                    OcctCadFormat format,
                                    OcctImportOptions options);
 OcctExactShapePayload import_exact_cad_bytes(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
+    OcctImportOptions options);
+OcctFeatureExecutionPayload execute_exact_feature(
+    OcctFeatureKind kind,
+    rust::Slice<const double> scalars,
+    rust::Slice<const double> matrices,
+    rust::Vec<OcctFeatureSelection> selections,
+    rust::Vec<OcctFeatureOperand> operands,
     OcctImportOptions options);
 OcctPreviewSessionStartPayload start_cad_preview_session(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options);
 OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
@@ -43,7 +67,8 @@ OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
 void close_cad_preview_session(std::uint64_t session_id);
 std::uint64_t start_exact_evaluator_session(
     rust::Slice<const std::uint8_t> representation,
-    double meters_per_source_unit);
+    double meters_per_source_unit,
+    rust::Slice<const std::uint64_t> face_keys);
 OcctCurveRangePayload exact_curve_range(std::uint64_t session_id,
                                         std::uint64_t shape_key);
 OcctCurveDerivativesPayload exact_curve_derivatives(std::uint64_t session_id,
@@ -62,12 +87,14 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
 OcctPcurveDerivativesPayload exact_pcurve_derivatives(
     std::uint64_t session_id,
     std::uint64_t face_key,
+    bool face_reversed,
     std::uint64_t wire_key,
     std::uint64_t coedge_position,
     std::int8_t seam_image,
     double parameter);
 OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
                                          std::uint64_t face_key,
+                                         bool face_reversed,
                                          std::uint64_t wire_key,
                                          std::uint64_t coedge_position,
                                          std::int8_t seam_image);

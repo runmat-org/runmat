@@ -1,14 +1,8 @@
-use std::collections::BTreeMap;
-
 use runmat_geometry_core::{
     ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, PersistentEntityId,
 };
-use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
-use runmat_meshing_size::{
-    grading::grade_metric_evaluations,
-    incidence::TopologyMetricIncidence,
-    metric::{MetricTensor3, ResolvedMetricField},
-};
+use runmat_meshing_core::MetricFieldRequest;
+use runmat_meshing_size::metric::MetricTensor3;
 
 use super::{
     resolved::evaluator_parameters, ExactFaceMetricError, ExactFaceMetricErrorKind,
@@ -41,6 +35,22 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
 ) -> Result<(), ExactFaceMetricError> {
+    let prepared =
+        super::prepared_validation::PreparedFaceMetricValidation::new(topology, request, control)?;
+    prepared.validate(evaluation, parameterization, evaluator, control)
+}
+
+pub(super) fn validate_prepared_face_metric_evaluation(
+    evaluation: &ExactFaceMetricEvaluation,
+    reference: &std::collections::BTreeMap<
+        PersistentEntityId,
+        super::prepared_validation::FaceMetricReference<'_>,
+    >,
+    resolver: &runmat_meshing_size::metric::ResolvedMetricField,
+    parameterization: &ExactFaceChartParameterization,
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    control: &dyn GeometryEvaluationControl,
+) -> Result<(), ExactFaceMetricError> {
     if evaluation
         .uv
         .iter()
@@ -48,29 +58,28 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
         .any(|value| !value.is_finite())
     {
         return Err(invalid(
-            &evaluation.source_face_id,
+            &evaluation.provenance.source_face_id,
             "metric evaluation chart or evaluator UV is not finite",
         ));
     }
-    let face = topology
-        .faces
-        .iter()
-        .find(|face| face.id == evaluation.source_face_id)
+    let record = reference
+        .get(&evaluation.provenance.source_face_id)
         .ok_or_else(|| {
             ExactFaceMetricError::new(
                 ExactFaceMetricErrorKind::UnknownFace,
-                Some(&evaluation.source_face_id),
+                Some(&evaluation.provenance.source_face_id),
                 "metric evaluation face is absent from exact topology",
             )
         })?;
+    let face = record.face;
     parameterization
         .validate()
-        .map_err(|reason| invalid(&evaluation.source_face_id, reason))?;
+        .map_err(|reason| invalid(&evaluation.provenance.source_face_id, reason))?;
     let expected = independent_sample(
         parameterization,
         evaluator,
         &face.surface_evaluator_id,
-        &evaluation.source_face_id,
+        &evaluation.provenance.source_face_id,
         evaluation.uv,
         control,
     )?;
@@ -80,13 +89,7 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
             "metric evaluation uses a noncanonical evaluator image",
         ));
     }
-    let transform = topology.world_transform_for(&face.id).map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            Some(&face.id),
-            error.to_string(),
-        )
-    })?;
+    let transform = record.world_transform;
     let expected_point = transform.transform_point(expected.point_m);
     let expected_u = transform.transform_vector(expected.derivatives[0]);
     let expected_v = transform.transform_vector(expected.derivatives[1]);
@@ -118,18 +121,21 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
         ));
     }
 
-    let expected = resolve_face_metrics(topology, request)?
-        .remove(&face.id)
-        .ok_or_else(|| invalid(&face.id, "resolved metric does not contain the exact face"))?;
-    let sizing_metric = independent_pullback(expected.metric, expected_u, expected_v);
+    let expected = &record.provenance;
+    let local_metric = resolver
+        .evaluate_at(record.metric.metric, &record.local, expected_point)
+        .map_err(|error| invalid(&face.id, error.to_string()))?;
+    let sizing_metric = independent_pullback(local_metric, expected_u, expected_v);
     sizing_metric
         .validate()
         .map_err(|reason| invalid(&face.id, format!("invalid sizing pullback: {reason}")))?;
     if evaluation.sizing_metric != sizing_metric
-        || evaluation.active_sources != expected.active_sources
-        || evaluation.applied_contribution_count != expected.applied_contribution_count
-        || evaluation.clipped_contribution_count != expected.clipped_contribution_count
-        || evaluation.rejected_contribution_count != expected.rejected_contribution_count
+        || evaluation.provenance.active_sources != expected.active_sources
+        || evaluation.provenance.applied_contribution_count != expected.applied_contribution_count
+        || evaluation.provenance.clipped_contribution_count
+            != record.metric.clipped_contribution_count
+        || evaluation.provenance.rejected_contribution_count
+            != record.metric.rejected_contribution_count
     {
         return Err(invalid(
             &face.id,
@@ -162,53 +168,110 @@ fn independent_sample(
                 .map_err(|error| geometry(source_face_id, error))?;
             Ok(IndependentSample {
                 evaluator_uv,
-                point_m: derivatives.point_m,
-                derivatives: [derivatives.du_m, derivatives.dv_m],
+                point_m: *derivatives.point_m.canonical_values(),
+                derivatives: [
+                    derivatives
+                        .du_m
+                        .with_canonical_storage(|values, _axes| *values),
+                    derivatives
+                        .dv_m
+                        .with_canonical_storage(|values, _axes| *values),
+                ],
             })
         }
-        ExactFaceChartParameterization::ClosestPointProjection {
-            origin_m,
-            axes,
-            differential_step_m,
-            projection_tolerance_m,
+        ExactFaceChartParameterization::AffineEvaluatorParameters {
+            evaluator_units_per_chart_unit,
+            ..
         } => {
-            let project = |coordinates: [f64; 2]| {
-                let query = std::array::from_fn(|axis| {
-                    origin_m[axis] + coordinates[0] * axes[0][axis] + coordinates[1] * axes[1][axis]
-                });
-                evaluator
-                    .closest_point(evaluator_id, query, *projection_tolerance_m, control)
-                    .map_err(|error| geometry(source_face_id, error))
+            let raw_uv = parameterization
+                .evaluator_parameters(coordinates)
+                .map_err(|reason| invalid(source_face_id, reason))?;
+            let evaluator_uv =
+                evaluator_parameters(evaluator, evaluator_id, source_face_id, raw_uv)?;
+            let derivatives = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry(source_face_id, error))?;
+            Ok(IndependentSample {
+                evaluator_uv,
+                point_m: *derivatives.point_m.canonical_values(),
+                derivatives: [
+                    derivatives
+                        .du_m
+                        .with_canonical_storage(|values, _axes| *values)
+                        .map(|value| value * evaluator_units_per_chart_unit[0]),
+                    derivatives
+                        .dv_m
+                        .with_canonical_storage(|values, _axes| *values)
+                        .map(|value| value * evaluator_units_per_chart_unit[1]),
+                ],
+            })
+        }
+        ExactFaceChartParameterization::PolarEvaluatorParameters {
+            angular_axis,
+            radial_axis,
+            radial_direction,
+            differential_step,
+            ..
+        } => {
+            let evaluator_uv = parameterization
+                .evaluator_parameters(coordinates)
+                .map_err(|reason| invalid(source_face_id, reason))?;
+            let center = evaluator
+                .derivatives(evaluator_id, evaluator_uv, control)
+                .map_err(|error| geometry(source_face_id, error))?;
+            let radius_squared = coordinates[0] * coordinates[0] + coordinates[1] * coordinates[1];
+            let derivatives = if radius_squared == 0.0 {
+                let mut result = [[0.0; 3]; 2];
+                for axis in 0..2 {
+                    let mut sample_coordinates = [0.0; 2];
+                    sample_coordinates[axis] = *differential_step;
+                    let sample_uv = parameterization
+                        .evaluator_parameters(sample_coordinates)
+                        .map_err(|reason| invalid(source_face_id, reason))?;
+                    let sample = evaluator
+                        .point(evaluator_id, sample_uv, control)
+                        .map_err(|error| geometry(source_face_id, error))?;
+                    result[axis] = std::array::from_fn(|component| {
+                        (sample.canonical_values()[component]
+                            - center.point_m.canonical_values()[component])
+                            / differential_step
+                    });
+                }
+                result
+            } else {
+                let radius = radius_squared.sqrt();
+                let mut jacobian = [[0.0; 2]; 2];
+                jacobian[*angular_axis as usize] = [
+                    -coordinates[1] / radius_squared,
+                    coordinates[0] / radius_squared,
+                ];
+                jacobian[*radial_axis as usize] = [
+                    radial_direction * coordinates[0] / radius,
+                    radial_direction * coordinates[1] / radius,
+                ];
+                [0, 1].map(|chart_axis| {
+                    std::array::from_fn(|component| {
+                        center.du_m.with_canonical_storage(|values, _axes| *values)[component]
+                            * jacobian[0][chart_axis]
+                            + center.dv_m.with_canonical_storage(|values, _axes| *values)[component]
+                                * jacobian[1][chart_axis]
+                    })
+                })
             };
-            let center = project(coordinates)?;
-            let mut derivatives = [[0.0; 3]; 2];
-            for axis in 0..2 {
-                let mut before = coordinates;
-                let mut after = coordinates;
-                before[axis] -= differential_step_m;
-                after[axis] += differential_step_m;
-                let before = project(before)?;
-                let after = project(after)?;
-                derivatives[axis] = std::array::from_fn(|component| {
-                    (after.point_m[component] - before.point_m[component])
-                        / (2.0 * differential_step_m)
-                });
-            }
-            if center
-                .uv
+            if evaluator_uv
                 .iter()
-                .chain(&center.point_m)
+                .chain(center.point_m.canonical_values())
                 .chain(derivatives.iter().flatten())
                 .any(|value| !value.is_finite())
             {
                 return Err(invalid(
                     source_face_id,
-                    "projected chart evaluation is not finite",
+                    "polar chart evaluation is not finite",
                 ));
             }
             Ok(IndependentSample {
-                evaluator_uv: center.uv,
-                point_m: center.point_m,
+                evaluator_uv,
+                point_m: *center.point_m.canonical_values(),
                 derivatives,
             })
         }
@@ -224,66 +287,6 @@ fn geometry(
         Some(face_id),
         error.reason,
     )
-}
-
-fn resolve_face_metrics(
-    topology: &ExactBRepTopology,
-    request: &MetricFieldRequest,
-) -> Result<
-    BTreeMap<PersistentEntityId, runmat_meshing_size::metric::ResolvedMetricEvaluation>,
-    ExactFaceMetricError,
-> {
-    request.validate().map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            None,
-            error.to_string(),
-        )
-    })?;
-    let resolver = ResolvedMetricField::new(request).map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            None,
-            error.to_string(),
-        )
-    })?;
-    let incidence = TopologyMetricIncidence::new(topology);
-    for contribution in &request.contributions {
-        let entity = match &contribution.scope {
-            MetricContributionScope::Region { region_id } => region_id,
-            MetricContributionScope::Entity { entity_id } => entity_id,
-        };
-        if !incidence.knows(entity) {
-            return Err(ExactFaceMetricError::new(
-                ExactFaceMetricErrorKind::InvalidRequest,
-                None,
-                format!("metric contribution references unknown exact entity {entity:?}"),
-            ));
-        }
-    }
-    let mut by_face = topology
-        .faces
-        .iter()
-        .map(|face| {
-            resolver
-                .resolve(&incidence.incident_face_entities(face))
-                .map(|metric| (face.id.clone(), metric))
-                .map_err(|error| invalid(&face.id, error.to_string()))
-        })
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
-    grade_metric_evaluations(
-        request.maximum_grading_ratio,
-        &TopologyMetricIncidence::face_adjacency(topology),
-        &mut by_face,
-    )
-    .map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            None,
-            error.to_string(),
-        )
-    })?;
-    Ok(by_face)
 }
 
 fn independent_pullback(

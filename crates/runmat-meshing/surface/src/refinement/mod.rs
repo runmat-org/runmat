@@ -1,20 +1,27 @@
+mod boundary_support;
 mod chart_cut;
 mod chart_refine;
 mod collar;
+mod control;
 mod encroachment;
 mod insertion;
 mod refine;
 mod select;
+mod spatial;
 mod types;
 
 pub use chart_cut::{split_exact_face_chart_cut, validate_exact_face_chart_cut_split_result};
 pub use chart_refine::refine_exact_face_chart_until_blocked;
 pub use encroachment::classify_exact_face_refinement_candidate;
-pub(crate) use encroachment::classify_exact_face_refinement_candidate_in_parameterization;
+#[cfg(test)]
+pub(crate) use encroachment::classify_exact_face_refinement_candidates_in_parameterization;
 pub use insertion::insert_exact_face_refinement_candidate;
-pub(crate) use insertion::insert_validated_face_refinement_candidate;
+#[cfg(test)]
+use insertion::insert_exact_face_refinement_candidates;
+pub(crate) use insertion::insert_validated_face_refinement_candidates;
 pub use refine::refine_exact_face_until_blocked;
 pub use select::select_exact_face_refinement_candidate;
+pub(crate) use select::{select_exact_face_refinement_candidates, separate_refinement_candidate};
 pub use types::{
     ExactChartCutSplit, ExactChartCutSplitImage, ExactFaceCandidateDisposition,
     ExactFaceChartRefinedMesh, ExactFaceChartRefinementOptions, ExactFaceChartRefinementOutcome,

@@ -90,8 +90,7 @@ impl BarChart {
             let source_row_count = source.source_row_count.max(row_count).max(1);
             let series_count = source.series_count.max(1);
             let all_values = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.inputs.values_buffer,
                 source_row_count * series_count,
                 source.inputs.scalar,
@@ -960,6 +959,40 @@ impl BarChart {
             .map_or(0, |i| i.len() * std::mem::size_of::<u32>());
 
         labels_size + values_size + vertices_size + indices_size
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::strings(&self.labels)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.label.as_ref()),
+        )?;
+        for values in [&self.values, &self.stack_offsets, &self.histogram_bin_edges]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.per_bar_colors.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<u32>(self.indices.as_ref().map_or(0, Vec::capacity))?,
+        )?;
+        Some(total)
     }
 }
 

@@ -1,0 +1,39 @@
+// Engineering physics belongs in the importing study.
+
+geometry beam {
+    file = "./geometry/cantilever.step"
+    units = mm
+    region body : solid { select name "Beam"; expect exactly_one }
+    region fixed_end : face { select name "Fixed end"; expect exactly_one }
+    region loaded_end : face { select name "Loaded end"; expect exactly_one }
+}
+
+mesh beam on geometry.beam {
+    tetrahedra {
+        order = linear
+        target_size = 0.15 m
+        maximum_deviation = 0.001 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model supported_beam {
+    assign material.steel to geometry.beam.region.body
+    constraint fixed_end {
+        structural.fixed { target = geometry.beam.region.fixed_end }
+    }
+}
+study cantilever_modes {
+    geometry = geometry.beam
+    mesh = mesh.beam
+    model = model.supported_beam
+    analysis modes { structural modal { modes = 2 } retain basis }
+    output shapes = analysis.modes.field.node.displacement
+}

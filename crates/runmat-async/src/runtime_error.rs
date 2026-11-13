@@ -1,7 +1,42 @@
 use std::error::Error as StdError;
+use std::sync::Arc;
 
 use miette::SourceSpan;
 use thiserror::Error;
+
+#[path = "runtime_error/source_bound.rs"]
+mod source_bound;
+pub use source_bound::RuntimeErrorSourceBound;
+
+/// Native errors retain the thread-safe source required by worker transport.
+/// Browser sources may own thread-local resources and stay on that execution
+/// lane; formatting a diagnostic does not replace or release the source.
+#[cfg(not(target_arch = "wasm32"))]
+pub type RuntimeErrorSource = dyn StdError + Send + Sync + 'static;
+#[cfg(target_arch = "wasm32")]
+pub type RuntimeErrorSource = dyn StdError + 'static;
+
+#[path = "runtime_error/owner.rs"]
+mod owner;
+pub use owner::RuntimeErrorOwner;
+
+#[path = "runtime_error/diagnostic.rs"]
+mod diagnostic;
+pub use diagnostic::{
+    DiagnosticConstructionError, DiagnosticCopyProgress, RuntimeDiagnosticConstruction,
+    RuntimeDiagnosticField, RuntimeDiagnosticLayout,
+};
+
+#[path = "runtime_error/diagnostic_text.rs"]
+mod diagnostic_text;
+pub use diagnostic_text::{DiagnosticText, DiagnosticTextCopy};
+
+#[path = "runtime_error/allocation.rs"]
+mod allocation;
+pub use allocation::{
+    DiagnosticAllocationLease, ManagedDiagnosticAllocation, ManagedDiagnosticAllocationLease,
+    RetainedDiagnosticAllocation,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErrorContext {
@@ -18,7 +53,119 @@ pub struct CallFrame {
     pub function: String,
     pub source_id: Option<usize>,
     pub span: Option<(usize, usize)>,
+    /// Local issuance proof only. Portable failures carry an admitted source
+    /// ordinal instead; no process token enters the worker wire format.
+    pub source_owner: Option<CallFrameSourceOwner>,
+    /// Shared presentation text captured at the exact frame producer. It
+    /// remains useful after the executable definition retires, but cannot
+    /// authenticate a callable or portable source ordinal.
+    pub diagnostic_source: Option<CallFrameDiagnosticSource>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallFrameDiagnosticSource {
+    Local {
+        display_name: DiagnosticText,
+        text: DiagnosticText,
+    },
+    Detached {
+        display_name: DiagnosticText,
+        line: u64,
+        column: u64,
+    },
+    DetachedUnknown {
+        display_name: DiagnosticText,
+    },
+}
+
+impl CallFrameDiagnosticSource {
+    pub fn new(display_name: Arc<str>, text: Arc<str>) -> Self {
+        Self::Local {
+            display_name: display_name.into(),
+            text: text.into(),
+        }
+    }
+
+    pub fn detached(display_name: Arc<str>, line: u64, column: u64) -> Self {
+        Self::detached_from_text_owner(display_name.into(), line, column)
+    }
+
+    pub fn detached_from_text_owner(display_name: DiagnosticText, line: u64, column: u64) -> Self {
+        Self::Detached {
+            display_name,
+            line,
+            column,
+        }
+    }
+
+    pub fn detached_unknown(display_name: Arc<str>) -> Self {
+        Self::detached_unknown_from_text_owner(display_name.into())
+    }
+
+    pub fn detached_unknown_from_text_owner(display_name: DiagnosticText) -> Self {
+        Self::DetachedUnknown { display_name }
+    }
+
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Local { display_name, .. }
+            | Self::Detached { display_name, .. }
+            | Self::DetachedUnknown { display_name } => display_name,
+        }
+    }
+
+    pub fn is_detached(&self) -> bool {
+        matches!(self, Self::Detached { .. } | Self::DetachedUnknown { .. })
+    }
+
+    /// Use the same byte-offset and one-based coordinate convention as the
+    /// existing source call-stack renderer, including its end clamp.
+    pub fn line_column(&self, span: Option<(usize, usize)>) -> Option<(u64, u64)> {
+        match self {
+            Self::Local { text, .. } => Self::line_column_from_text(text, span),
+            Self::Detached { line, column, .. } => Some((*line, *column)),
+            Self::DetachedUnknown { .. } => None,
+        }
+    }
+
+    /// Shared byte-offset coordinate rule for retained and still-live text.
+    pub fn line_column_from_text(text: &str, span: Option<(usize, usize)>) -> Option<(u64, u64)> {
+        let (offset, _) = span?;
+        let prefix = &text.as_bytes()[..offset.min(text.len())];
+        let line = prefix.iter().filter(|byte| **byte == b'\n').count() + 1;
+        let column = prefix
+            .iter()
+            .rev()
+            .take_while(|byte| **byte != b'\n')
+            .count()
+            + 1;
+        Some((u64::try_from(line).ok()?, u64::try_from(column).ok()?))
+    }
+}
+
+/// One source-table issuance shared by the binding, selected body, and error
+/// frame. Equality is identity of the allocation, not equality of its empty
+/// payload; possession alone never authenticates a portable source ordinal.
+#[derive(Clone, Debug)]
+pub struct CallFrameSourceOwner(Arc<()>);
+
+impl CallFrameSourceOwner {
+    pub fn issue() -> Self {
+        Self(Arc::new(()))
+    }
+
+    pub fn same_issuance(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl PartialEq for CallFrameSourceOwner {
+    fn eq(&self, other: &Self) -> bool {
+        self.same_issuance(other)
+    }
+}
+
+impl Eq for CallFrameSourceOwner {}
 
 impl ErrorContext {
     pub fn with_builtin(mut self, builtin: impl Into<String>) -> Self {
@@ -58,10 +205,55 @@ pub struct RuntimeError {
     pub message: String,
     pub span: Option<SourceSpan>,
     #[source]
-    pub source: Option<Box<dyn StdError + Send + Sync>>,
+    pub source: Option<Box<RuntimeErrorSource>>,
     pub identifier: Option<String>,
     pub context: ErrorContext,
     pub gpu_gather_retry: GpuGatherRetry,
+    pub failure_origin: RuntimeFailureOrigin,
+    /// An owning charge for original diagnostic allocations only. Its final
+    /// drop follows message, source, identifier and context physical drops.
+    /// Mutating public text/context fields requires a separate authority.
+    pub retained_diagnostic_allocation: Option<RetainedDiagnosticAllocation>,
+}
+
+/// An owning reference to the exact error caught by an exception value.
+///
+/// A rethrow may have several live references to that original error (for
+/// example, a catch variable and the VM's active exception). This source is
+/// not a formatted copy: traversing `source()` reaches the original
+/// `RuntimeError` and its downcastable provider or host cause.
+#[derive(Debug)]
+pub struct SharedRuntimeErrorSource {
+    original: RuntimeErrorOwner,
+}
+
+impl SharedRuntimeErrorSource {
+    pub fn original(&self) -> &RuntimeError {
+        &self.original
+    }
+}
+
+impl std::fmt::Display for SharedRuntimeErrorSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.original)
+    }
+}
+
+impl StdError for SharedRuntimeErrorSource {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(self.original.as_ref())
+    }
+}
+
+/// Producer-owned failure provenance, independent of diagnostic spelling or
+/// host presentation policy. Unclassified failures must not be retried based
+/// on their message or identifier.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RuntimeFailureOrigin {
+    #[default]
+    Unclassified,
+    LanguageEvaluation,
+    ExecutionControlCancellation,
 }
 
 /// Whether dispatcher-level legacy GPU gather-and-retry may transform this error.
@@ -77,6 +269,29 @@ pub enum GpuGatherRetry {
 }
 
 impl RuntimeError {
+    /// Recover the original caught error when it has one owner; otherwise
+    /// retain that exact original as an owning source while copying only its
+    /// language-visible metadata into the new outward error.
+    pub fn from_shared_original(original: RuntimeErrorOwner) -> Self {
+        match RuntimeErrorOwner::try_unwrap(original) {
+            Ok(error) => error,
+            Err(original) => Self {
+                message: original.message.clone(),
+                span: original.span,
+                source: Some(Box::new(SharedRuntimeErrorSource {
+                    original: original.clone(),
+                })),
+                identifier: original.identifier.clone(),
+                context: original.context.clone(),
+                gpu_gather_retry: original.gpu_gather_retry,
+                failure_origin: original.failure_origin,
+                // The source retains the original charge. These copied
+                // presentation fields require independent allocation authority.
+                retained_diagnostic_allocation: None,
+            },
+        }
+    }
+
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -85,6 +300,8 @@ impl RuntimeError {
             identifier: None,
             context: ErrorContext::default(),
             gpu_gather_retry: GpuGatherRetry::Legacy,
+            failure_origin: RuntimeFailureOrigin::Unclassified,
+            retained_diagnostic_allocation: None,
         }
     }
 
@@ -98,6 +315,10 @@ impl RuntimeError {
 
     pub fn gpu_gather_retry(&self) -> GpuGatherRetry {
         self.gpu_gather_retry
+    }
+
+    pub fn failure_origin(&self) -> RuntimeFailureOrigin {
+        self.failure_origin
     }
 
     pub fn contains(&self, needle: &str) -> bool {
@@ -193,6 +414,19 @@ pub struct RuntimeErrorBuilder {
 }
 
 impl RuntimeErrorBuilder {
+    pub fn with_retained_diagnostic_allocation(
+        mut self,
+        allocation: RetainedDiagnosticAllocation,
+    ) -> Self {
+        self.error.retained_diagnostic_allocation = Some(allocation);
+        self
+    }
+
+    pub fn with_failure_origin(mut self, origin: RuntimeFailureOrigin) -> Self {
+        self.error.failure_origin = origin;
+        self
+    }
+
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.error.identifier = Some(identifier.into());
         self
@@ -238,7 +472,7 @@ impl RuntimeErrorBuilder {
         self
     }
 
-    pub fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
+    pub fn with_source(mut self, source: impl RuntimeErrorSourceBound) -> Self {
         self.error.source = Some(Box::new(source));
         self
     }
@@ -247,6 +481,14 @@ impl RuntimeErrorBuilder {
         self.error
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_error/source_tests.rs"]
+mod source_tests;
+
+#[cfg(test)]
+#[path = "runtime_error/origin_tests.rs"]
+mod origin_tests;
 
 pub fn runtime_error(message: impl Into<String>) -> RuntimeErrorBuilder {
     RuntimeErrorBuilder {

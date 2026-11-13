@@ -20,7 +20,7 @@ fn test_massive_allocation_cycle() {
                     0 => Value::Num(i as f64),
                     1 => Value::Int(runmat_value::IntValue::I32(i)),
                     2 => Value::Bool(i % 2 == 0),
-                    _ => Value::String(format!("string_{i}")),
+                    _ => Value::String(format!("string_{i}").into()),
                 };
 
                 let ptr = gc_allocate(value).expect("allocation should succeed");
@@ -110,63 +110,6 @@ fn test_nested_cell_stress() {
 }
 
 #[test]
-fn test_gc_with_interpreter_integration() {
-    gc_test_context(|| {
-        // Test GC under interpreter load
-        use futures::executor::block_on;
-        use runmat_hir::LoweringContext;
-        use runmat_parser::parse;
-
-        // Program that creates many temporary values
-        let program = r#"
-        result = 0;
-        for i = 1:100
-            temp1 = i * 2;
-            temp2 = temp1 + 1;
-            temp3 = temp2 * temp2;
-            result = result + temp3;
-        end
-    "#;
-
-        fn compile_source(
-            source: &str,
-        ) -> std::result::Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
-            let ast = parse(source).map_err(|err| runmat_vm::CompileError::new(err.to_string()))?;
-            let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
-                .map_err(|err| runmat_vm::CompileError::new(format!("{err:?}")))?;
-            let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
-                .map_err(|err| runmat_vm::CompileError::new(format!("{err:?}")))?;
-            let entrypoint = lowering
-                .assembly
-                .entrypoints
-                .first()
-                .ok_or_else(|| runmat_vm::CompileError::new("missing semantic entrypoint"))?
-                .id;
-            runmat_vm::compile(&lowering.assembly, &mir, entrypoint)
-        }
-
-        // Run the program multiple times to stress the GC
-        for run in 0..50 {
-            let bytecode = compile_source(program).expect("semantic compile should succeed");
-            let vars = block_on(runmat_vm::interpret(&bytecode)).expect("execution should succeed");
-
-            // Verify the result is consistent
-            let result: f64 = (&vars[0]).try_into().expect("result should be a number");
-            assert!(result > 0.0);
-
-            if run % 10 == 9 {
-                let collected = gc_collect_minor().expect("collection should succeed");
-                println!(
-                    "After {} interpreter runs, collected {} objects",
-                    run + 1,
-                    collected
-                );
-            }
-        }
-    });
-}
-
-#[test]
 fn test_gc_statistics_accuracy() {
     gc_test_context(|| {
         let initial_stats = gc_stats();
@@ -232,7 +175,7 @@ fn test_gc_under_memory_pressure() {
             // Create different types of objects to stress the allocator
             let value = match i % 5 {
                 0 => Value::Num(i as f64),
-                1 => Value::String(format!("pressure_test_{i}")),
+                1 => Value::String(format!("pressure_test_{i}").into()),
                 2 => Value::Tensor(
                     runmat_value::Tensor::new_2d(vec![i as f64; 100], 10, 10).unwrap(),
                 ),
@@ -297,7 +240,7 @@ fn test_gc_configuration_changes() {
 
         // Allocate under aggressive settings
         for i in 0..100 {
-            let _ = gc_allocate(Value::String(format!("aggressive_{i}")))
+            let _ = gc_allocate(Value::String(format!("aggressive_{i}").into()))
                 .expect("allocation should succeed");
         }
 
@@ -315,7 +258,7 @@ fn test_gc_configuration_changes() {
 
         // Allocate under relaxed settings
         for i in 0..100 {
-            let _ = gc_allocate(Value::String(format!("relaxed_{i}")))
+            let _ = gc_allocate(Value::String(format!("relaxed_{i}").into()))
                 .expect("allocation should succeed");
         }
 

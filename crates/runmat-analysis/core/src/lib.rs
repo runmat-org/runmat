@@ -1,397 +1,282 @@
 //! Solver-agnostic analysis problem model and validation contracts.
 
 pub mod problem {
-    pub mod bc;
+    pub mod authored_constraints;
+    pub mod authored_excitations;
+    pub mod authored_expressions;
+    pub mod authored_initial_conditions;
+    pub mod authored_inputs;
+    pub mod authored_model_physics;
+    pub mod authored_parameterized_signals;
+    pub mod authored_properties;
+    pub mod acoustic_impedance;
+    pub mod rheology;
+    pub mod boundary;
+    pub mod connector;
+    pub mod constraint;
+    pub mod coordinate_frame;
     pub mod domains;
+    pub mod excitation;
+    pub mod initial_condition;
     pub mod interfaces;
-    pub mod loads;
     pub mod material_assignment;
     pub mod materials;
     pub mod model;
-    pub mod steps;
+    pub mod model_authoring;
+    pub mod model_realization;
+    pub mod prescribed_value;
+    pub mod quantity;
+    pub mod random_vibration;
+    pub mod reference_point;
+    pub mod response_spectrum;
+    pub mod signal;
     pub mod structure;
+    pub mod target;
 }
+mod execution_policy;
 pub mod field;
+pub mod study;
 pub mod validate;
+mod validate_accuracy;
+mod validate_authored;
+mod validate_domains;
+mod validate_excitations;
+mod validate_materials;
+mod validate_outputs;
+mod validate_sequence;
+mod validate_signals;
 
-pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
-pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
+pub use execution_policy::{
+    AcceleratorAdmissionPolicy, AcceleratorPreference, AuthoredExecutionPolicy,
+    AuthoredExecutionPolicyError, AuthoredExecutionPolicyRef, BackendPreference,
+    CheckpointPreference, CooperativePolicy, ExecutionResourceLimits, FanoutPolicy,
+    InclusiveCountRange, OperatorPartitioner, ParallelismLimit, PartitionBalance,
+    PlacementPreference, ResiliencePolicy, MAX_CPU_THREADS_PER_WORKER,
+};
+pub use study::{
+    attach_authored_outputs, authored_output_root, authored_output_types,
+    geometry_parameter_input_type, lower_authored_observations, retain_authored_outputs,
+    validate_authored_outputs, AuthoredCaseOutputRef, AuthoredExtremaTiePolicy,
+    AuthoredFieldDomain, AuthoredFieldProjection, AuthoredGeometryArgument,
+    AuthoredGeometryArgumentValue, AuthoredGeometryInstance, AuthoredMeshRef,
+    AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
+    AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
+    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPortReduction,
+    AuthoredPrincipalSelection, AuthoredSeriesDomain, AuthoredSeriesReduction,
+    AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding,
+    AuthoredStudyInputRef, AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep,
+    AuthoredSweepAxis, AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase,
+    AuthoredSweepDefinition, AuthoredSweepError, AuthoredSweepOutput,
+    AuthoredSweepOutputExpression, AuthoredVectorComponent, CaseOutputProjection,
+    LoweredAuthoredObservation, RealizedGeometryInstance, RealizedStudy, SweepAxisCombination,
+    SweepExtremum,
+};
+pub use validate::physics_family_can_consume_state;
+pub use validate_authored::validate_coordinate_frame;
+pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
+pub use validate_outputs::{
+    observation_sampling_matches_domain, validate_authored_observation_request,
+    validate_observation_sampling,
+};
+pub use validate_signals::validate_physical_signals;
+
+pub use field::{
+    AnalysisField, AnalysisFieldLayout, AnalysisFieldValues, DeviceFieldRef, FieldOrdinal,
+    FieldStatistic,
+};
+pub use problem::acoustic_impedance::AcousticImpedanceLaw;
+pub use problem::authored_constraints::{
+    authored_motion_acceleration_is_compatible, materialized_motion_acceleration_is_compatible,
+    AuthoredConstraint, AuthoredConstraintError, AuthoredConstraintKind, AuthoredConstraintTarget,
+    AuthoredPairedConstraint, AuthoredPairingPolicy, AuthoredPeriodicConstraint,
+    AuthoredPeriodicTransform, AuthoredPhaseShiftedPeriodicConstraint,
+    AuthoredPrescribedStructuralMotion, AuthoredReferencePointCoupling, AuthoredRotationDofValue,
+    AuthoredStructuralConstraintEquation, AuthoredStructuralConstraintEquationTerm,
+    AuthoredStructuralDofs, AuthoredTargetCardinality, AuthoredThermalJump,
+    AuthoredTranslationDofValue,
+};
+pub use problem::authored_excitations::{
+    validate_authored_excitations, AuthoredExcitation, AuthoredExcitationCase,
+    AuthoredExcitationKind, AuthoredExcitationTarget,
+};
+pub use problem::authored_expressions::{
+    AuthoredExpressionError, AuthoredNumericExpression, AuthoredNumericExpressionKind,
+    AuthoredNumericOperator,
+};
+pub use problem::authored_initial_conditions::{
+    AuthoredInitialCondition, AuthoredInitialConditionError, AuthoredInitialConditionKind,
+    AuthoredInitialConditionTarget,
+};
+pub use problem::authored_inputs::{
+    AuthoredInputDefinition, AuthoredInputError, AuthoredInputType, AuthoredInputValue,
+};
+pub use problem::authored_model_physics::{
+    AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector,
+    AuthoredConnectorKind, AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
+};
+pub use problem::authored_parameterized_signals::{
+    AuthoredParameterizedSignal, AuthoredParameterizedSignalError, AuthoredSignalExpression,
+};
+pub use problem::authored_properties::{
+    AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,
+    AuthoredOrientationSource, AuthoredPly, AuthoredPropertyAssignment,
+    AuthoredPropertyDefinitionRef, AuthoredPropertyError, AuthoredSectionDefinition,
+    AuthoredSectionSource, AxisOrientation, CartesianOrientation, CircularBeamSection,
+    GeneralBeamSection, HomogeneousShellSection, RectangularBeamSection, TubularBeamSection,
+};
+pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
+pub use problem::connector::{AnalysisConnector, ConnectorKind};
+pub use problem::constraint::{
+    AccelerationSignalId, AcousticConstraint, AcousticConstraintKind, AnalysisConstraint,
+    ElectricalConstraint, ElectricalConstraintKind, FluidConstraint, FluidConstraintKind,
+    MagneticConstraint, MagneticConstraintKind, PairedConstraint, PairingPolicy,
+    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint,
+    PrescribedStructuralDofs, PrescribedStructuralMotion, ReferencePointCoupling, RotationDofValue,
+    StructuralConstraint, StructuralConstraintEquation, StructuralConstraintEquationTerm,
+    StructuralConstraintKind, StructuralKinematicHistory, StructuralMotionReconstruction,
+    StructuralRotationDof, StructuralTranslationDof, ThermalConstraint, ThermalConstraintKind,
+    TranslationDofMotion, TranslationDofValue,
+};
+pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
-    CfdDomain, CfdSolveFamily, CfdTimeProfilePoint, ElectroRegionConductivityScale,
-    ElectroThermalDomain, ElectroTimeProfilePoint, ElectromagneticDomain,
-    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
-    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, MagnetostaticFormulation, PorousZone,
+    StaticElectricalEquation, ThermalDomain, ThermoMechanicalDomain,
+};
+pub use problem::excitation::{
+    AnalysisExcitation, Direction, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
+    ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
+    ProjectionRequirement,
+};
+pub use problem::initial_condition::{
+    InitialCondition, InitialConditionTarget, InitialConditionValue, InitialFieldArtifactRef,
+    InitialValue,
 };
 pub use problem::interfaces::{
-    AnalysisInterface, AnalysisInterfaceKind, ConjugateHeatTransferInterfaceModel,
-    ContactInterfaceModel, FluidStructureInterfaceModel,
+    AnalysisInterface, AnalysisInterfaceKind, ConjugateHeatTransferInterfaceModel, ContactFriction,
+    ContactInterfaceModel, FluidStructureInterfaceModel, FluidStructureKinematics,
+    ThermalInterfaceTransfer,
 };
-pub use problem::loads::{LoadCase, LoadKind};
-pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
+pub use problem::material_assignment::{
+    EvidenceConfidence, MaterialAssignment, PropertyRegionScope, PropertyRegionSelection,
+    PropertyRegionTarget,
+};
 pub use problem::materials::{
-    ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+    ConductivityFrequencyPoint, FluidMaterialError, ImportedCadEnvironmentCondition,
+    ImportedCadMaterialAssociation, ImportedCadMaterialAssociationTarget,
+    ImportedCadMaterialProperty, ImportedCadMaterialPropertyKind, ImportedCadMaterialProvenance,
+    IncompressibleNewtonianMaterial, MaterialAcousticModel, MaterialCapability,
+    MaterialElasticityModel, MaterialElectricalModel, MaterialFluidModel, MaterialMechanicalModel,
+    MaterialModel, MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialProvenance,
+    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability, PorousMediumLaw,
+    SolverMaterialModel,
 };
-pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
-pub use problem::steps::{AnalysisStep, AnalysisStepKind};
+pub use problem::model::{
+    AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
+    SolverMaterialAssignments, SolverMaterials, SolverProcedureStep, SolverSteps,
+};
+pub use problem::model_authoring::{
+    AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
+    AuthoredModelError, AuthoredModelInclude, AuthoredModelInputRef, AuthoredModelRef,
+    AuthoredPropertyTarget, AuthoredRegionSource,
+};
+pub use problem::model_realization::{
+    realize_analysis_model, AnalysisModelRealizationError, AnalysisModelRealizationInput,
+    RealizedAnalysisModel, RealizedLayupDefinition, RealizedModelProperties,
+    RealizedOrientationDefinition, RealizedPropertyAssignment, RealizedSectionDefinition,
+};
+pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
+pub use problem::quantity::{
+    Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, CanonicalQuantity,
+    ComplexPhase, Damping, Displacement, DynamicViscosity, ElectricCharge, ElectricChargeDensity,
+    ElectricCurrent, ElectricCurrentDensity, ElectricPotential, Force, FoundationModulus,
+    Frequency, FrictionCoefficient, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient,
+    Length, MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Power, Pressure,
+    RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation, SpecificAcousticImpedance,
+    Stiffness, SurfaceEmissivity, Temperature, TemperatureDifference, ThermalContactResistance,
+    Traction, Translation, TurbulenceIntensity, Velocity, VolumeFlowRate,
+};
+pub use problem::random_vibration::{
+    ComplexSpectralDensity, CrossPowerSpectralDensity, RandomExcitationChannel,
+    RandomExcitationChannelId, RandomExcitationId, RandomExcitationQuantity,
+    RandomExcitationSpectrum, RandomSpectrumEvidence, RandomSpectrumExtrapolation,
+    RandomSpectrumInterpolation, SpectralDensityConvention,
+};
+pub use problem::reference_point::ReferencePoint;
+pub use problem::response_spectrum::{
+    DirectionalCombination, ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy,
+    ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy, ShockResponseSpectrumMethod,
+    SpectrumAbscissa, SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope,
+    SpectrumEvidence, SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
+};
+pub use problem::rheology::GeneralizedNewtonianLaw;
+pub use problem::signal::{
+    AuthoredSignalFieldLocation, AuthoredSignalTopologySelector, GeneratorArgument,
+    GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy, GeneratorInvocation,
+    GeneratorProvenance, ImportedFunctionIdentity, NumericalDataSource, PhysicalQuantityKind,
+    PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence, SignalArtifactDomain,
+    SignalArtifactRef, SignalDomainKind, SignalExtrapolation, SignalGenerator, SignalId,
+    SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate, SignalPointContinuity,
+    SignalPrecision, SignalProvenance, SignalRepresentation, SignalSampleApproach,
+    SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform, StandardWaveformKind,
+    TabulatedSignal, TabulatedSignalDomain,
+};
 pub use problem::structure::{
-    BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
+    BeamElementModel, BeamSectionModel, ConformalSolidAttachment, HomogeneousShellReferenceSurface,
+    HomogeneousShellSectionModel, LaminatePlyModel, LaminateShellSectionModel, PlyOrderDirection,
+    ShellElementModel, ShellReferenceSurface, ShellSectionModel, StructuralElement,
     StructuralElementKind, StructuralModel, StructuralNode,
 };
-pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
+pub use problem::target::{
+    EntityDimension, ExpectedTopology, RegionTarget, ResolvedTopologyTarget, TargetCardinality,
+};
+pub use study::accuracy::{
+    AccuracyCriterion, AccuracyLimitAction, AccuracyPlan, AccuracyPlanId, AccuracyResourceCeiling,
+    AccuracyTarget, AccuracyTolerance, AlgebraicAccuracyMeasure, ErrorContributionKind,
+    NumericalEquivalencePolicy, RequiredAccuracyEvidence, UnavailableEvidencePolicy,
+};
+pub use study::modal_solver::ModalSolverMethod;
+pub use study::output::{
+    sound_pressure_level_db, AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy,
+    DiagnosticKind, DiagnosticObservation, ExtremaTiePolicy, FieldLocation, LineParameterScope,
+    MonitorCadence, MonitorObservation, MonitorStopCondition, ObservationComponent,
+    ObservationCostEstimate, ObservationCostPolicy, ObservationEvent, ObservationId,
+    ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationResultQuantity,
+    ObservationSpec, ObservationStoragePolicy, ObservationTarget, ObservationThreshold,
+    ObservationValueShape, PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy,
+    SamplingPolicy, SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
+    SolverObservationEvent, SpatialReduction, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
+};
+pub use study::sequence::{
+    ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,
+    InitialStateConflictPolicy, ModalStaticCorrection, ProcedureSettings, ProcedureStep,
+    ProcedureStepId, ReferenceStatePolicy, RestartPolicy, SequenceBranch, SequenceBranchId,
+    SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId, StateInput,
+    StateKind, StateOutput, StatePersistence, StateSource, StateTransition, StateTransitionMethod,
+    StateUse, StepObjectActivation, StepObjectRef, StructuralKinematics,
+    StructuralModalBasisSettings, StructuralModalFrequencySettings, StructuralNonlinearSettings,
+    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
+    ValidatedAnalysisSequence,
+};
+pub use study::{
+    analysis_identity_status, family_label, is_exposed_analysis_identity, procedure_label,
+    AnalysisIdentity, AnalysisIdentityStatus, ANALYSIS_IDENTITIES,
+};
+pub use study::{
+    AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
+    CoupledPhysicsFamily, CouplingImplementation, ExactFormulationComponent,
+    ExactFormulationRealization, FormulationAdmissionRejectionReason, FormulationAxis,
+    PhysicsFamily, RecoveryImplementation, SolutionSpace, SourceImplementation,
+    SpatialOperatorImplementation, StructuralFormulationRealization,
+    StructuralOperatorImplementation, StructuralRecoveryImplementation, TemporalImplementation,
+    TopologyImplementation,
+};
+pub use validate::{
+    dependency_graph_resident_bytes_upper_bound, validate_analysis_sequence,
+    validate_material_definitions, validate_model, validate_model_against_geometry,
+    validate_model_sequence, validate_model_with_dependency_graph_budget, AnalysisValidationError,
+};
 
 #[cfg(test)]
-mod tests {
-    use runmat_geometry_core::UnitSystem;
+mod tests;
 
-    use super::*;
-
-    fn valid_model() -> AnalysisModel {
-        AnalysisModel {
-            model_id: AnalysisModelId("analysis_model_1".to_string()),
-            geometry_id: "geo:model_1".to_string(),
-            geometry_revision: 1,
-            units: UnitSystem::Meter,
-            frame: ReferenceFrame::Global,
-            materials: vec![MaterialModel {
-                material_id: "mat_steel".to_string(),
-                name: "Steel".to_string(),
-                mechanical: MaterialMechanicalModel {
-                    youngs_modulus_pa: 200e9,
-                    poisson_ratio: 0.3,
-                    density_kg_per_m3: 7850.0,
-                },
-                thermal: MaterialThermalModel::default(),
-                acoustic: None,
-                electrical: None,
-                plastic: None,
-            }],
-            material_assignments: Vec::new(),
-            structural: None,
-            thermo_mechanical: None,
-            electro_thermal: None,
-            electromagnetic: None,
-            cfd: None,
-            interfaces: Vec::new(),
-            boundary_conditions: vec![BoundaryCondition {
-                bc_id: "bc_fixed_root".to_string(),
-                region_id: "root".to_string(),
-                kind: BoundaryConditionKind::Fixed,
-            }],
-            loads: vec![LoadCase {
-                load_id: "load_tip".to_string(),
-                region_id: "tip".to_string(),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: -1000.0,
-                    fz: 0.0,
-                },
-            }],
-            steps: vec![AnalysisStep {
-                step_id: "step_static".to_string(),
-                kind: AnalysisStepKind::Static,
-            }],
-        }
-    }
-
-    #[test]
-    fn missing_material_bc_load_validation_failures() {
-        let mut model = valid_model();
-        model.materials.clear();
-        assert_eq!(
-            validate_model(&model).expect_err("expected material validation failure"),
-            AnalysisValidationError::MissingMaterials
-        );
-
-        let mut model = valid_model();
-        model.boundary_conditions.clear();
-        assert_eq!(
-            validate_model(&model).expect_err("expected boundary condition validation failure"),
-            AnalysisValidationError::MissingBoundaryConditions
-        );
-
-        let mut model = valid_model();
-        model.loads.clear();
-        assert_eq!(
-            validate_model(&model).expect_err("expected load validation failure"),
-            AnalysisValidationError::MissingLoads
-        );
-    }
-
-    #[test]
-    fn invalid_moment_vectors_fail_validation() {
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Moment {
-            mx: f64::NAN,
-            my: 0.0,
-            mz: 1.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected nonfinite moment validation failure"),
-            AnalysisValidationError::InvalidMomentVector {
-                load_id: "load_tip".to_string()
-            }
-        );
-
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Moment {
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected zero moment validation failure"),
-            AnalysisValidationError::ZeroMomentVector {
-                load_id: "load_tip".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn invalid_wrench_vectors_fail_validation() {
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Wrench {
-            fx: 0.0,
-            fy: 1.0,
-            fz: 0.0,
-            mx: f64::INFINITY,
-            my: 0.0,
-            mz: 0.0,
-            px: 0.0,
-            py: 0.0,
-            pz: 0.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected nonfinite wrench validation failure"),
-            AnalysisValidationError::InvalidWrench {
-                load_id: "load_tip".to_string()
-            }
-        );
-
-        let mut model = valid_model();
-        model.loads[0].kind = LoadKind::Wrench {
-            fx: 0.0,
-            fy: 0.0,
-            fz: 0.0,
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-            px: 0.0,
-            py: 0.0,
-            pz: 0.0,
-        };
-        assert_eq!(
-            validate_model(&model).expect_err("expected zero wrench validation failure"),
-            AnalysisValidationError::ZeroWrench {
-                load_id: "load_tip".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn unit_frame_mismatch_rejection() {
-        let mut model = valid_model();
-        model.units = UnitSystem::Inch;
-        let err =
-            validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
-                .expect_err("expected unit mismatch");
-        assert!(matches!(
-            err,
-            AnalysisValidationError::UnitMismatch {
-                model: UnitSystem::Inch,
-                geometry: UnitSystem::Meter
-            }
-        ));
-
-        let mut model = valid_model();
-        model.frame = ReferenceFrame::Local("fixture_frame".to_string());
-        let err =
-            validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
-                .expect_err("expected frame mismatch");
-        assert!(matches!(
-            err,
-            AnalysisValidationError::FrameMismatch {
-                model: ReferenceFrame::Local(_),
-                geometry: ReferenceFrame::Global
-            }
-        ));
-    }
-
-    #[test]
-    fn valid_model_is_accepted() {
-        let model = valid_model();
-        validate_model(&model).expect("model should be valid");
-        validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
-            .expect("model should match geometry context");
-    }
-
-    #[test]
-    fn moment_load_kind_serializes_as_snake_case() {
-        let load = LoadCase {
-            load_id: "tip_moment".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Moment {
-                mx: 1.0,
-                my: 2.0,
-                mz: 3.0,
-            },
-        };
-
-        let json = serde_json::to_value(&load).expect("load should serialize");
-        assert_eq!(json["kind"]["moment"]["mx"], 1.0);
-        assert_eq!(json["kind"]["moment"]["my"], 2.0);
-        assert_eq!(json["kind"]["moment"]["mz"], 3.0);
-
-        let decoded: LoadCase = serde_json::from_value(json).expect("load should deserialize");
-        assert_eq!(decoded, load);
-    }
-
-    #[test]
-    fn wrench_load_kind_serializes_as_snake_case() {
-        let load = LoadCase {
-            load_id: "tip_wrench".to_string(),
-            region_id: "tip".to_string(),
-            kind: LoadKind::Wrench {
-                fx: 1.0,
-                fy: 2.0,
-                fz: 3.0,
-                mx: 4.0,
-                my: 5.0,
-                mz: 6.0,
-                px: 0.1,
-                py: 0.2,
-                pz: 0.3,
-            },
-        };
-
-        let json = serde_json::to_value(&load).expect("load should serialize");
-        assert_eq!(json["kind"]["wrench"]["fx"], 1.0);
-        assert_eq!(json["kind"]["wrench"]["mz"], 6.0);
-        assert_eq!(json["kind"]["wrench"]["pz"], 0.3);
-
-        let decoded: LoadCase = serde_json::from_value(json).expect("load should deserialize");
-        assert_eq!(decoded, load);
-    }
-
-    #[test]
-    fn prescribed_rotation_bc_serializes_as_snake_case() {
-        let bc = BoundaryCondition {
-            bc_id: "root_rotation".to_string(),
-            region_id: "root".to_string(),
-            kind: BoundaryConditionKind::PrescribedRotation {
-                rx: 0.0,
-                ry: 0.0,
-                rz: 0.125,
-            },
-        };
-
-        let json = serde_json::to_value(&bc).expect("bc should serialize");
-        assert_eq!(json["kind"]["prescribed_rotation"]["rx"], 0.0);
-        assert_eq!(json["kind"]["prescribed_rotation"]["ry"], 0.0);
-        assert_eq!(json["kind"]["prescribed_rotation"]["rz"], 0.125);
-
-        let decoded: BoundaryCondition =
-            serde_json::from_value(json).expect("bc should deserialize");
-        assert_eq!(decoded, bc);
-    }
-
-    #[test]
-    fn structural_beam_model_round_trips() {
-        let mut model = valid_model();
-        model.structural = Some(StructuralModel {
-            nodes: vec![
-                StructuralNode {
-                    node_id: 1,
-                    coordinates_m: [0.0, 0.0, 0.0],
-                },
-                StructuralNode {
-                    node_id: 2,
-                    coordinates_m: [1.0, 0.0, 0.0],
-                },
-            ],
-            elements: vec![StructuralElement {
-                element_id: "beam_1".to_string(),
-                region_id: "beam_span".to_string(),
-                kind: StructuralElementKind::Beam(BeamElementModel {
-                    node_ids: [1, 2],
-                    section_id: "section_1".to_string(),
-                    reference_axis: [0.0, 0.0, 1.0],
-                }),
-            }],
-            beam_sections: vec![BeamSectionModel {
-                section_id: "section_1".to_string(),
-                area_m2: 2.0e-4,
-                iy_m4: 1.6e-9,
-                iz_m4: 6.4e-9,
-                torsion_j_m4: 2.4e-9,
-                outer_fiber_y_m: 0.01,
-                outer_fiber_z_m: 0.005,
-                torsion_outer_radius_m: 0.011_180_339_887_498_949,
-            }],
-            shell_sections: Vec::new(),
-        });
-
-        let json = serde_json::to_value(&model).expect("model should serialize");
-        assert_eq!(
-            json["structural"]["elements"][0]["kind"]["beam"]["node_ids"][1],
-            2
-        );
-
-        let decoded: AnalysisModel =
-            serde_json::from_value(json).expect("model should deserialize");
-        assert_eq!(decoded, model);
-    }
-
-    #[test]
-    fn structural_shell_model_round_trips() {
-        let mut model = valid_model();
-        model.structural = Some(StructuralModel {
-            nodes: vec![
-                StructuralNode {
-                    node_id: 1,
-                    coordinates_m: [0.0, 0.0, 0.0],
-                },
-                StructuralNode {
-                    node_id: 2,
-                    coordinates_m: [1.0, 0.0, 0.0],
-                },
-                StructuralNode {
-                    node_id: 3,
-                    coordinates_m: [0.0, 1.0, 0.0],
-                },
-            ],
-            elements: vec![StructuralElement {
-                element_id: "shell_1".to_string(),
-                region_id: "shell_panel".to_string(),
-                kind: StructuralElementKind::Shell(ShellElementModel {
-                    node_ids: [1, 2, 3],
-                    section_id: "panel_2mm".to_string(),
-                    reference_axis: [1.0, 0.0, 0.0],
-                }),
-            }],
-            beam_sections: Vec::new(),
-            shell_sections: vec![ShellSectionModel {
-                section_id: "panel_2mm".to_string(),
-                thickness_m: 0.002,
-                shear_correction: 5.0 / 6.0,
-                drilling_stiffness_scale: 1.0e-4,
-            }],
-        });
-
-        let json = serde_json::to_value(&model).expect("model should serialize");
-        assert_eq!(
-            json["structural"]["elements"][0]["kind"]["shell"]["node_ids"][2],
-            3
-        );
-
-        let decoded: AnalysisModel =
-            serde_json::from_value(json).expect("model should deserialize");
-        assert_eq!(decoded, model);
-    }
-
-    #[test]
-    fn electrical_model_defaults_frequency_response() {
-        let electrical = MaterialElectricalModel::default();
-        assert!(electrical.conductivity_frequency_response.is_empty());
-    }
-}
+pub use study::assessment::*;

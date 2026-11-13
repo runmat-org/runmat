@@ -228,11 +228,12 @@ pub fn stderr() -> StreamStyles {
 }
 
 pub fn cli_output_mode(cli: &Cli) -> OutputMode {
-    if cli.generate_config || cli.emit_bytecode.is_some() {
+    if cli.generate_config || cli.emit_bytecode.is_some() || cli.script_json {
         return OutputMode::Machine;
     }
     match cli.command.as_ref() {
         Some(Commands::Check { json: true, .. })
+        | Some(Commands::Info { json: true })
         | Some(Commands::Run { json: true, .. })
         | Some(Commands::AccelInfo { json: true, .. })
         | Some(Commands::Batch {
@@ -242,6 +243,13 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
                 | BatchCommand::Show { json: true, .. }
                 | BatchCommand::Cancel { json: true, .. },
         }) => OutputMode::Machine,
+        Some(
+            Commands::Plan { json: true, .. }
+            | Commands::Reassess { json: true, .. }
+            | Commands::Snapshot { .. }
+            | Commands::RenderSnapshot { .. }
+            | Commands::VerifySnapshot { .. },
+        ) => OutputMode::Machine,
         #[cfg(feature = "wgpu")]
         Some(Commands::AccelCalibrate { json: true, .. }) => OutputMode::Machine,
         Some(Commands::Config {
@@ -250,7 +258,12 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
         Some(Commands::Cluster { cluster_command }) if cluster_command.machine_output() => {
             OutputMode::Machine
         }
+        Some(Commands::Node(args)) if args.command.machine_output() => OutputMode::Machine,
         Some(Commands::Job { job_command }) if job_command.machine_output() => OutputMode::Machine,
+        Some(Commands::RecoveryKey { command }) if command.machine_output() => OutputMode::Machine,
+        Some(Commands::NativeInterface { command }) if command.machine_output() => {
+            OutputMode::Machine
+        }
         Some(Commands::Package { package_command }) if package_command.machine_output() => {
             OutputMode::Machine
         }
@@ -592,6 +605,8 @@ mod tests {
 
         let info = Cli::try_parse_from(["runmat", "info"]).unwrap();
         assert_eq!(cli_output_mode(&info), OutputMode::Human);
+        let info_json = Cli::try_parse_from(["runmat", "info", "--json"]).unwrap();
+        assert_eq!(cli_output_mode(&info_json), OutputMode::Machine);
 
         let human_recovery = Cli::try_parse_from([
             "runmat",

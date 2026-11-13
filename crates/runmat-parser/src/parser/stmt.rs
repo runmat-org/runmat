@@ -17,17 +17,17 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, SyntaxError> {
         match self.peek_token() {
-            Some(Token::If) => self.parse_if().map_err(|e| e.into()),
-            Some(Token::For) => self.parse_for().map_err(|e| e.into()),
-            Some(Token::ParFor) => self.parse_parfor().map_err(|e| e.into()),
-            Some(Token::Spmd) => self.parse_spmd().map_err(|e| e.into()),
-            Some(Token::While) => self.parse_while().map_err(|e| e.into()),
-            Some(Token::Switch) => self.parse_switch().map_err(|e| e.into()),
-            Some(Token::Try) => self.parse_try_catch().map_err(|e| e.into()),
-            Some(Token::Import) => self.parse_import().map_err(|e| e.into()),
-            Some(Token::ClassDef) => self.parse_classdef().map_err(|e| e.into()),
-            Some(Token::Global) => self.parse_global().map_err(|e| e.into()),
-            Some(Token::Persistent) => self.parse_persistent().map_err(|e| e.into()),
+            Some(Token::If) => self.parse_if(),
+            Some(Token::For) => self.parse_for(),
+            Some(Token::ParFor) => self.parse_parfor(),
+            Some(Token::Spmd) => self.parse_spmd(),
+            Some(Token::While) => self.parse_while(),
+            Some(Token::Switch) => self.parse_switch(),
+            Some(Token::Try) => self.parse_try_catch(),
+            Some(Token::Import) => self.parse_import(),
+            Some(Token::ClassDef) => self.parse_classdef(),
+            Some(Token::Global) => self.parse_global(),
+            Some(Token::Persistent) => self.parse_persistent(),
             Some(Token::Break) => {
                 let token = &self.tokens[self.pos];
                 self.pos += 1;
@@ -43,15 +43,10 @@ impl Parser {
                 self.pos += 1;
                 Ok(Stmt::Return(self.span_from(token.position, token.end)))
             }
-            Some(Token::Function | Token::Isolated | Token::Async) => {
-                self.parse_function().map_err(|e| e.into())
-            }
+            Some(Token::Function | Token::Isolated | Token::Async) => self.parse_function(),
             Some(Token::LBracket) => {
                 if self.looks_like_multi_assign_lhs() {
-                    match self.try_parse_multi_assign() {
-                        Ok(stmt) => Ok(stmt),
-                        Err(msg) => Err(self.error(&msg)),
-                    }
+                    self.try_parse_multi_assign()
                 } else {
                     let expr = self.parse_expr()?;
                     let span = expr.span();
@@ -59,7 +54,7 @@ impl Parser {
                 }
             }
             _ => {
-                if self.peek_token() == Some(&Token::Ident)
+                if self.peek_token().is_some_and(Token::can_be_identifier)
                     && self.peek_token_at(1) == Some(&Token::Assign)
                 {
                     let name_token = self
@@ -80,7 +75,7 @@ impl Parser {
                     let expr = self.parse_expr()?;
                     let span = self.span_from(start, expr.span().end);
                     Ok(Stmt::Assign(name, expr, false, span))
-                } else if self.peek_token() == Some(&Token::Ident) {
+                } else if self.peek_token().is_some_and(Token::can_be_identifier) {
                     if self.looks_like_super_constructor_stmt() {
                         return self.parse_super_constructor_stmt();
                     }
@@ -90,7 +85,7 @@ impl Parser {
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
                         return Ok(lv);
                     }
-                    if matches!(self.peek_token_at(1), Some(Token::Ident))
+                    if self.peek_token_at(1).is_some_and(Token::can_be_identifier)
                         && matches!(
                             self.peek_token_at(2),
                             Some(
@@ -119,21 +114,18 @@ impl Parser {
     }
 
     fn looks_like_super_constructor_stmt(&self) -> bool {
-        if !matches!(
-            (
-                self.peek_token(),
-                self.peek_token_at(1),
-                self.peek_token_at(2)
-            ),
-            (Some(Token::Ident), Some(Token::At), Some(Token::Ident))
-        ) {
+        if !self.peek_token().is_some_and(Token::can_be_identifier)
+            || self.peek_token_at(1) != Some(&Token::At)
+            || !self.peek_token_at(2).is_some_and(Token::can_be_identifier)
+        {
             return false;
         }
         let mut idx = 3usize;
-        while matches!(
-            (self.peek_token_at(idx), self.peek_token_at(idx + 1)),
-            (Some(Token::Dot), Some(Token::Ident))
-        ) {
+        while self.peek_token_at(idx) == Some(&Token::Dot)
+            && self
+                .peek_token_at(idx + 1)
+                .is_some_and(Token::can_be_identifier)
+        {
             idx += 2;
         }
         matches!(self.peek_token_at(idx), Some(Token::LParen))
@@ -224,7 +216,7 @@ impl Parser {
         false
     }
 
-    fn parse_if(&mut self) -> Result<Stmt, String> {
+    fn parse_if(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::If);
         let cond = self.parse_expr()?;
@@ -243,7 +235,7 @@ impl Parser {
             None
         };
         if !self.consume(&Token::End) {
-            return Err("expected 'end'".into());
+            return Err(self.error("expected 'end'"));
         }
         let end = self.last_token_end();
         Ok(Stmt::If {
@@ -255,13 +247,13 @@ impl Parser {
         })
     }
 
-    fn parse_while(&mut self) -> Result<Stmt, String> {
+    fn parse_while(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::While);
         let cond = self.parse_expr()?;
         let body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
-            return Err("expected 'end'".into());
+            return Err(self.error("expected 'end'"));
         }
         let end = self.last_token_end();
         Ok(Stmt::While {
@@ -271,17 +263,17 @@ impl Parser {
         })
     }
 
-    fn parse_for(&mut self) -> Result<Stmt, String> {
+    fn parse_for(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::For);
         let var = self.expect_ident()?;
         if !self.consume(&Token::Assign) {
-            return Err("expected '='".into());
+            return Err(self.error("expected '='"));
         }
         let expr = self.parse_expr()?;
         let body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
-            return Err("expected 'end'".into());
+            return Err(self.error("expected 'end'"));
         }
         let end = self.last_token_end();
         Ok(Stmt::For {
@@ -292,29 +284,31 @@ impl Parser {
         })
     }
 
-    fn parse_parfor(&mut self) -> Result<Stmt, String> {
+    fn parse_parfor(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::ParFor);
         let parenthesized = self.consume(&Token::LParen);
         let var = self.expect_ident()?;
         if !self.consume(&Token::Assign) {
-            return Err("expected '='".into());
+            return Err(self.error("expected '='"));
         }
         let expr = self.parse_expr()?;
         let maximum_workers = if self.consume(&Token::Comma) {
             if !parenthesized {
-                return Err("parfor maximum workers requires parenthesized control syntax".into());
+                return Err(
+                    self.error("parfor maximum workers requires parenthesized control syntax")
+                );
             }
             Some(self.parse_expr()?)
         } else {
             None
         };
         if parenthesized && !self.consume(&Token::RParen) {
-            return Err("expected ')' after parfor control".into());
+            return Err(self.error("expected ')' after parfor control"));
         }
         let body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
-            return Err("expected 'end'".into());
+            return Err(self.error("expected 'end'"));
         }
         let end = self.last_token_end();
         Ok(Stmt::ParFor {
@@ -326,12 +320,12 @@ impl Parser {
         })
     }
 
-    fn parse_spmd(&mut self) -> Result<Stmt, String> {
+    fn parse_spmd(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::Spmd);
         let header = if self.consume(&Token::LParen) {
             if self.consume(&Token::RParen) {
-                return Err("spmd control list cannot be empty; omit parentheses".into());
+                return Err(self.error("spmd control list cannot be empty; omit parentheses"));
             } else {
                 let first = self.parse_expr()?;
                 let second = self
@@ -344,10 +338,10 @@ impl Parser {
                     None
                 };
                 if third.is_some() && self.consume(&Token::Comma) {
-                    return Err("spmd accepts at most three control arguments".into());
+                    return Err(self.error("spmd accepts at most three control arguments"));
                 }
                 if !self.consume(&Token::RParen) {
-                    return Err("expected ')' after spmd lab range".into());
+                    return Err(self.error("expected ')' after spmd lab range"));
                 }
                 match (second, third) {
                     (None, None) => crate::ast::SpmdHeader::One(first),
@@ -363,7 +357,7 @@ impl Parser {
         };
         let body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
-            return Err("expected 'end'".into());
+            return Err(self.error("expected 'end'"));
         }
         let end = self.last_token_end();
         Ok(Stmt::Spmd {
@@ -373,19 +367,19 @@ impl Parser {
         })
     }
 
-    fn parse_function(&mut self) -> Result<Stmt, String> {
+    fn parse_function(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         let mut isolated = false;
         let mut is_async = false;
         loop {
             if self.consume(&Token::Isolated) {
                 if isolated {
-                    return Err("duplicate 'isolated' function modifier".into());
+                    return Err(self.error("duplicate 'isolated' function modifier"));
                 }
                 isolated = true;
             } else if self.consume(&Token::Async) {
                 if is_async {
-                    return Err("duplicate 'async' function modifier".into());
+                    return Err(self.error("duplicate 'async' function modifier"));
                 }
                 is_async = true;
             } else {
@@ -393,7 +387,7 @@ impl Parser {
             }
         }
         if (isolated || is_async) && self.peek_token() != Some(&Token::Function) {
-            return Err("expected 'function' after function modifier".into());
+            return Err(self.error("expected 'function' after function modifier"));
         }
         self.consume(&Token::Function);
         let mut outputs = Vec::new();
@@ -403,12 +397,12 @@ impl Parser {
                 outputs.push(self.expect_ident_or_tilde()?);
             }
             if !self.consume(&Token::RBracket) {
-                return Err("expected ']'".into());
+                return Err(self.error("expected ']'"));
             }
             if !self.consume(&Token::Assign) {
-                return Err("expected '='".into());
+                return Err(self.error("expected '='"));
             }
-        } else if self.peek_token() == Some(&Token::Ident)
+        } else if self.peek_token().is_some_and(Token::can_be_identifier)
             && self.peek_token_at(1) == Some(&Token::Assign)
         {
             outputs.push(self.next().unwrap().lexeme);
@@ -419,34 +413,38 @@ impl Parser {
             let member = self.expect_ident()?;
             name = format!("{name}.{member}");
         }
-        if !self.consume(&Token::LParen) {
-            return Err("expected '('".into());
-        }
         let mut params = Vec::new();
-        if !self.consume(&Token::RParen) {
-            params.push(self.expect_ident()?);
-            while self.consume(&Token::Comma) {
-                params.push(self.expect_ident()?);
-            }
+        if self.consume(&Token::LParen) {
             if !self.consume(&Token::RParen) {
-                return Err("expected ')'".into());
+                params.push(self.expect_ident()?);
+                while self.consume(&Token::Comma) {
+                    params.push(self.expect_ident()?);
+                }
+                if !self.consume(&Token::RParen) {
+                    return Err(self.error("expected ')'"));
+                }
             }
+        } else if !matches!(
+            self.peek_token(),
+            Some(Token::Newline | Token::Semicolon | Token::Comma | Token::End)
+        ) {
+            return Err(self.error("expected '(' or end of function signature"));
         }
 
         if let Some(idx) = params.iter().position(|p| p == "varargin") {
             if idx != params.len() - 1 {
-                return Err("'varargin' must be the last input parameter".into());
+                return Err(self.error("'varargin' must be the last input parameter"));
             }
             if params.iter().filter(|p| p.as_str() == "varargin").count() > 1 {
-                return Err("'varargin' cannot appear more than once".into());
+                return Err(self.error("'varargin' cannot appear more than once"));
             }
         }
         if let Some(idx) = outputs.iter().position(|o| o == "varargout") {
             if idx != outputs.len() - 1 {
-                return Err("'varargout' must be the last output parameter".into());
+                return Err(self.error("'varargout' must be the last output parameter"));
             }
             if outputs.iter().filter(|o| o.as_str() == "varargout").count() > 1 {
-                return Err("'varargout' cannot appear more than once".into());
+                return Err(self.error("'varargout' cannot appear more than once"));
             }
         }
 
@@ -484,7 +482,7 @@ impl Parser {
 
         let body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
-            return Err("expected 'end'".into());
+            return Err(self.error("expected 'end'"));
         }
         let end = self.last_token_end();
         Ok(Stmt::Function {
@@ -518,24 +516,24 @@ impl Parser {
 
     fn parse_function_argument_validation_decl(
         &mut self,
-    ) -> Result<FunctionArgValidationDecl, String> {
+    ) -> Result<FunctionArgValidationDecl, SyntaxError> {
         let name = self.expect_ident()?;
         let mut size = None;
         if self.consume(&Token::LParen) {
             let rows = self.parse_function_argument_dim()?;
             if !self.consume(&Token::Comma) {
-                return Err("expected ',' in arguments size spec".into());
+                return Err(self.error("expected ',' in arguments size spec"));
             }
             let cols = self.parse_function_argument_dim()?;
             if !self.consume(&Token::RParen) {
-                return Err("expected ')' after arguments size spec".into());
+                return Err(self.error("expected ')' after arguments size spec"));
             }
             size = Some(FunctionArgSizeSpec { rows, cols });
         }
 
         let mut class_name = None;
         let mut validators = Vec::new();
-        if matches!(self.peek_token(), Some(Token::Ident)) {
+        if self.peek_token().is_some_and(Token::can_be_identifier) {
             let candidate = self.parse_qualified_name_in_stmt()?;
             if self.peek_token() == Some(&Token::LParen) {
                 validators.push(self.parse_function_argument_validator_decl_with_name(candidate)?);
@@ -552,13 +550,13 @@ impl Parser {
                         continue;
                     }
                     if !self.consume(&Token::RBrace) {
-                        return Err("expected '}' after arguments validators".into());
+                        return Err(self.error("expected '}' after arguments validators"));
                     }
                     break;
                 }
                 continue;
             }
-            if matches!(self.peek_token(), Some(Token::Ident)) {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 validators.push(self.parse_function_argument_validator_decl()?);
                 continue;
             }
@@ -609,23 +607,34 @@ impl Parser {
         })
     }
 
-    fn parse_function_argument_dim(&mut self) -> Result<FunctionArgDim, String> {
+    fn parse_function_argument_dim(&mut self) -> Result<FunctionArgDim, SyntaxError> {
         if self.consume(&Token::Colon) {
             return Ok(FunctionArgDim::Any);
         }
         match self.next() {
             Some(token) if matches!(token.token, Token::Integer | Token::Float) => {
-                let parsed = token
-                    .lexeme
-                    .parse::<usize>()
-                    .map_err(|_| "arguments size spec must use non-negative integer dimensions")?;
+                let parsed = token.lexeme.parse::<usize>().map_err(|_| {
+                    self.error_at_with_expected(
+                        &token,
+                        "arguments size spec must use non-negative integer dimensions",
+                        "non-negative integer dimension",
+                    )
+                })?;
                 Ok(FunctionArgDim::Exact(parsed))
             }
-            _ => Err("expected numeric dimension or ':' in arguments size spec".into()),
+            Some(token) => Err(self.error_at_with_expected(
+                &token,
+                "expected numeric dimension or ':' in arguments size spec",
+                "numeric dimension or ':'",
+            )),
+            None => Err(self.error_with_expected(
+                "expected numeric dimension or ':' in arguments size spec",
+                "numeric dimension or ':'",
+            )),
         }
     }
 
-    fn parse_qualified_name_in_stmt(&mut self) -> Result<String, String> {
+    fn parse_qualified_name_in_stmt(&mut self) -> Result<String, SyntaxError> {
         let mut parts = Vec::new();
         parts.push(self.expect_ident()?);
         while self.consume(&Token::Dot) {
@@ -636,7 +645,7 @@ impl Parser {
 
     fn parse_function_argument_validator_decl(
         &mut self,
-    ) -> Result<FunctionArgValidatorDecl, String> {
+    ) -> Result<FunctionArgValidatorDecl, SyntaxError> {
         let name = self.parse_qualified_name_in_stmt()?;
         self.parse_function_argument_validator_decl_with_name(name)
     }
@@ -644,7 +653,7 @@ impl Parser {
     fn parse_function_argument_validator_decl_with_name(
         &mut self,
         name: String,
-    ) -> Result<FunctionArgValidatorDecl, String> {
+    ) -> Result<FunctionArgValidatorDecl, SyntaxError> {
         let mut args = Vec::new();
         if self.consume(&Token::LParen) && !self.consume(&Token::RParen) {
             loop {
@@ -653,7 +662,7 @@ impl Parser {
                     continue;
                 }
                 if !self.consume(&Token::RParen) {
-                    return Err("expected ')' after arguments validator arguments".into());
+                    return Err(self.error("expected ')' after arguments validator arguments"));
                 }
                 break;
             }
@@ -661,7 +670,7 @@ impl Parser {
         Ok(FunctionArgValidatorDecl { name, args })
     }
 
-    pub(super) fn parse_block<F>(&mut self, term: F) -> Result<Vec<Stmt>, String>
+    pub(super) fn parse_block<F>(&mut self, term: F) -> Result<Vec<Stmt>, SyntaxError>
     where
         F: Fn(&Token) -> bool,
     {
@@ -679,7 +688,7 @@ impl Parser {
             let stmt = if self.peek_token() == Some(&Token::LBracket) {
                 self.try_parse_multi_assign()?
             } else {
-                self.parse_stmt().map_err(|e| e.message)?
+                self.parse_stmt()?
             };
             let is_semicolon_terminated = self.consume(&Token::Semicolon);
             body.push(self.finalize_stmt(stmt, is_semicolon_terminated));
@@ -687,7 +696,7 @@ impl Parser {
         Ok(body)
     }
 
-    fn parse_switch(&mut self) -> Result<Stmt, String> {
+    fn parse_switch(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::Switch);
         let control = self.parse_expr()?;
@@ -712,7 +721,7 @@ impl Parser {
             }
         }
         if !self.consume(&Token::End) {
-            return Err("expected 'end' for switch".into());
+            return Err(self.error("expected 'end' for switch"));
         }
         let end = self.last_token_end();
         Ok(Stmt::Switch {
@@ -723,21 +732,21 @@ impl Parser {
         })
     }
 
-    fn parse_try_catch(&mut self) -> Result<Stmt, String> {
+    fn parse_try_catch(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::Try);
         let try_body = self.parse_block(|t| matches!(t, Token::Catch | Token::End))?;
         if !self.consume(&Token::Catch) {
-            return Err("expected 'catch' after try".into());
+            return Err(self.error("expected 'catch' after try"));
         }
-        let catch_var = if self.peek_token() == Some(&Token::Ident) {
+        let catch_var = if self.peek_token().is_some_and(Token::can_be_identifier) {
             Some(self.expect_ident()?)
         } else {
             None
         };
         let catch_body = self.parse_block(|t| matches!(t, Token::End))?;
         if !self.consume(&Token::End) {
-            return Err("expected 'end' after catch".into());
+            return Err(self.error("expected 'end' after catch"));
         }
         let end = self.last_token_end();
         Ok(Stmt::TryCatch {
@@ -748,7 +757,7 @@ impl Parser {
         })
     }
 
-    fn parse_import(&mut self) -> Result<Stmt, String> {
+    fn parse_import(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::Import);
         let mut path = Vec::new();
@@ -778,7 +787,7 @@ impl Parser {
         })
     }
 
-    fn parse_global(&mut self) -> Result<Stmt, String> {
+    fn parse_global(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::Global);
         let mut names = Vec::new();
@@ -788,7 +797,7 @@ impl Parser {
                 names.push(self.expect_ident()?);
                 continue;
             }
-            if self.peek_token() == Some(&Token::Ident) {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 names.push(self.expect_ident()?);
                 continue;
             }
@@ -798,7 +807,7 @@ impl Parser {
         Ok(Stmt::Global(names, self.span_from(start, end)))
     }
 
-    fn parse_persistent(&mut self) -> Result<Stmt, String> {
+    fn parse_persistent(&mut self) -> Result<Stmt, SyntaxError> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::Persistent);
         let mut names = Vec::new();
@@ -808,7 +817,7 @@ impl Parser {
                 names.push(self.expect_ident()?);
                 continue;
             }
-            if self.peek_token() == Some(&Token::Ident) {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 names.push(self.expect_ident()?);
                 continue;
             }
@@ -818,42 +827,35 @@ impl Parser {
         Ok(Stmt::Persistent(names, self.span_from(start, end)))
     }
 
-    pub(super) fn expect_ident(&mut self) -> Result<String, String> {
+    pub(super) fn expect_ident(&mut self) -> Result<String, SyntaxError> {
         match self.next() {
-            Some(TokenInfo {
-                token: Token::Ident,
-                lexeme,
-                ..
-            }) => Ok(lexeme),
-            _ => Err("expected identifier".into()),
+            Some(TokenInfo { token, lexeme, .. }) if token.can_be_identifier() => Ok(lexeme),
+            Some(token) => {
+                Err(self.error_at_with_expected(&token, "expected identifier", "identifier"))
+            }
+            None => Err(self.error_with_expected("expected identifier", "identifier")),
         }
     }
 
     pub(super) fn expect_ident_syntax(&mut self) -> Result<String, SyntaxError> {
-        let token = self.peek().cloned();
-        self.expect_ident().map_err(|message| SyntaxError {
-            message,
-            position: token
-                .as_ref()
-                .map(|token| token.position)
-                .unwrap_or_else(|| self.input.len()),
-            found_token: token.map(|token| token.lexeme),
-            expected: Some("identifier".into()),
-        })
+        self.expect_ident()
     }
 
-    pub(super) fn expect_ident_or_tilde(&mut self) -> Result<String, String> {
+    pub(super) fn expect_ident_or_tilde(&mut self) -> Result<String, SyntaxError> {
         match self.next() {
-            Some(TokenInfo {
-                token: Token::Ident,
-                lexeme,
-                ..
-            }) => Ok(lexeme),
+            Some(TokenInfo { token, lexeme, .. }) if token.can_be_identifier() => Ok(lexeme),
             Some(TokenInfo {
                 token: Token::Tilde,
                 ..
             }) => Ok("~".to_string()),
-            _ => Err("expected identifier or '~'".into()),
+            Some(token) => Err(self.error_at_with_expected(
+                &token,
+                "expected identifier or '~'",
+                "identifier or '~'",
+            )),
+            None => {
+                Err(self.error_with_expected("expected identifier or '~'", "identifier or '~'"))
+            }
         }
     }
 }

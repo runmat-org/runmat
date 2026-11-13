@@ -1,0 +1,105 @@
+geometry bar {
+    file = "./geometry/bar.step"
+    units = mm
+    region body : solid { select name "Bar"; expect exactly_one }
+    region heated_end : face { select name "End A"; expect exactly_one }
+    region tip : face { select name "End B"; expect exactly_one }
+    region side_a : face { select name "Side A"; expect exactly_one }
+    region side_b : face { select name "Side B"; expect exactly_one }
+    region side_c : face { select name "Side C"; expect exactly_one }
+    region side_d : face { select name "Side D"; expect exactly_one }
+}
+
+mesh bar on geometry.bar {
+    tetrahedra {
+        order = linear
+        target_size = 0.025 m
+        maximum_deviation = 0.001 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    thermal {
+        reference_temperature = 298.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.000012 K^-1
+        conductivity = 45 W/m/K
+        specific_heat = 500 J/kg/K
+    }
+}
+
+model cooled_bar {
+    input film : heat_transfer_coefficient { default = 35 W/m^2/K }
+    thermal { reference_temperature = 25 degC }
+    assign material.steel to geometry.bar.region.body
+    load heater {
+        thermal.heat_flux {
+            target = geometry.bar.region.heated_end
+            value = 10000 W/m^2
+        }
+    }
+    load cool_tip {
+        thermal.convection {
+            target = geometry.bar.region.tip
+            ambient_temperature = 25 degC
+            coefficient = input.film
+        }
+    }
+    load cool_side_a {
+        thermal.convection {
+            target = geometry.bar.region.side_a
+            ambient_temperature = 25 degC
+            coefficient = input.film
+        }
+    }
+    load cool_side_b {
+        thermal.convection {
+            target = geometry.bar.region.side_b
+            ambient_temperature = 25 degC
+            coefficient = input.film
+        }
+    }
+    load cool_side_c {
+        thermal.convection {
+            target = geometry.bar.region.side_c
+            ambient_temperature = 25 degC
+            coefficient = input.film
+        }
+    }
+    load cool_side_d {
+        thermal.convection {
+            target = geometry.bar.region.side_d
+            ambient_temperature = 25 degC
+            coefficient = input.film
+        }
+    }
+}
+
+study bar_cooling {
+    input film : heat_transfer_coefficient { default = 35 W/m^2/K }
+    geometry = geometry.bar
+    mesh = mesh.bar
+    model = model.cooled_bar(film = input.film)
+    analysis heat { thermal steady {} }
+
+    output temperature = analysis.heat.field.node.temperature
+    output peak_temperature = max(
+        analysis.heat.field.node.temperature,
+        over = geometry.bar.region.body,
+    )
+    assessment under_limit {
+        value = output.peak_temperature
+        maximum = 85 degC
+        evidence = authored_samples
+    }
+}
+
+sweep cooling over study.bar_cooling {
+    axis film {
+        still_air = 10 W/m^2/K
+        light_airflow = 35 W/m^2/K
+        fan = 100 W/m^2/K
+    }
+    output peaks = collect(case.output.peak_temperature.value)
+}

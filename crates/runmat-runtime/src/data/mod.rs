@@ -11,13 +11,20 @@ use runmat_filesystem::data_contract::{
     DataChunkDescriptor, DataChunkUploadRequest, DataChunkUploadTarget,
 };
 use runmat_value::{
-    IntValue, IntegerStorage, NumericScalar, NumericStorage, ObjectInstance, Tensor, Value,
+    ForeignRef, IntValue, IntegerStorage, NumericScalar, NumericStorage, ObjectInstance, Tensor,
+    Value,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+mod cooperation;
+mod publication;
+pub(crate) use cooperation::cooperate_data_work;
+pub(crate) use publication::{create_array_revision, relative_storage_path, ChunkStorageIdentity};
+pub(crate) mod authority;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataManifest {
@@ -175,6 +182,39 @@ impl DataArrayValues {
             None if is_double_dtype(dtype) => Self::F64(vec![0.0; len]),
             _ => return Err(unsupported_data_dtype(dtype)),
         })
+    }
+
+    fn append_zeroes(&mut self, count: usize) {
+        let next = self.len().checked_add(count).expect("validated data shape");
+        match self {
+            Self::F64(values) => values.resize(next, 0.0),
+            Self::F32(values) => values.resize(next, 0.0),
+            Self::I8(values) => values.resize(next, 0),
+            Self::I16(values) => values.resize(next, 0),
+            Self::I32(values) => values.resize(next, 0),
+            Self::I64(values) => values.resize(next, 0),
+            Self::U8(values) => values.resize(next, 0),
+            Self::U16(values) => values.resize(next, 0),
+            Self::U32(values) => values.resize(next, 0),
+            Self::U64(values) => values.resize(next, 0),
+        }
+    }
+
+    pub async fn zeros_cooperative(
+        dtype: &str,
+        len: usize,
+        budget: &mut Option<crate::execution::CpuCooperationBudget>,
+    ) -> BuiltinResult<Self> {
+        const WORK_CHUNK: usize = 4_096;
+        let mut values = Self::zeros(dtype, 0)?;
+        let mut remaining = len;
+        while remaining != 0 {
+            let count = remaining.min(WORK_CHUNK);
+            values.append_zeroes(count);
+            remaining -= count;
+            cooperate_data_work(budget, count as u64).await?;
+        }
+        Ok(values)
     }
 
     pub fn len(&self) -> usize {
@@ -477,23 +517,37 @@ fn unsupported_data_dtype(dtype: &str) -> RuntimeError {
     ))
 }
 
-fn integer_target(dtype: &str) -> Option<IntegerTarget> {
-    match integer_dtype(dtype) {
-        Some("int8") => Some(IntegerTarget::I8),
-        Some("int16") => Some(IntegerTarget::I16),
-        Some("int32") => Some(IntegerTarget::I32),
-        Some("int64") => Some(IntegerTarget::I64),
-        Some("uint8") => Some(IntegerTarget::U8),
-        Some("uint16") => Some(IntegerTarget::U16),
-        Some("uint32") => Some(IntegerTarget::U32),
-        Some("uint64") => Some(IntegerTarget::U64),
-        _ => None,
-    }
+fn integer_target(dtype: &str) -> Option<IntegerClass> {
+    IntegerClass::from_class_name(dtype)
 }
 
 impl DataArrayPayload {
+    /// Validate zero-payload semantics without allocating the eventual array.
+    /// A multi-array create calls this for every schema entry before writing
+    /// any earlier array, so a late bad dtype or shape has no filesystem effect.
+    pub fn validate_zeros(dtype: &str, shape: &[usize]) -> BuiltinResult<()> {
+        checked_shape_element_count(shape)?;
+        let _ = DataArrayValues::zeros(dtype, 0)?;
+        Ok(())
+    }
+
     pub fn zeros(dtype: String, shape: Vec<usize>) -> BuiltinResult<Self> {
         let values = DataArrayValues::zeros(&dtype, checked_shape_element_count(&shape)?)?;
+        Ok(Self {
+            dtype,
+            shape,
+            values,
+            imaginary_values: None,
+        })
+    }
+
+    pub async fn zeros_cooperative(
+        dtype: String,
+        shape: Vec<usize>,
+        budget: &mut Option<crate::execution::CpuCooperationBudget>,
+    ) -> BuiltinResult<Self> {
+        let len = checked_shape_element_count(&shape)?;
+        let values = DataArrayValues::zeros_cooperative(&dtype, len, budget).await?;
         Ok(Self {
             dtype,
             shape,
@@ -535,6 +589,43 @@ impl DataArrayPayload {
             if let (Some(values), Some(scalar)) = (&mut imaginary_values, imaginary_scalar) {
                 values.set(index, scalar)?;
             }
+        }
+        Ok(Self {
+            dtype,
+            shape,
+            values,
+            imaginary_values,
+        })
+    }
+
+    pub async fn filled_cooperative(
+        dtype: String,
+        shape: Vec<usize>,
+        value: &Value,
+        budget: &mut Option<crate::execution::CpuCooperationBudget>,
+    ) -> BuiltinResult<Self> {
+        let scalar = Self::from_value(dtype.clone(), value)?;
+        if scalar.values.len() != 1 {
+            return Err(data_error("expected numeric scalar"));
+        }
+        let imaginary_scalar = scalar
+            .imaginary_values
+            .as_ref()
+            .map(|values| values.get(0))
+            .transpose()?;
+        let scalar = scalar.values.get(0)?;
+        let len = checked_shape_element_count(&shape)?;
+        let mut values = DataArrayValues::zeros_cooperative(&dtype, len, budget).await?;
+        let mut imaginary_values = match imaginary_scalar {
+            Some(_) => Some(DataArrayValues::zeros_cooperative(&dtype, len, budget).await?),
+            None => None,
+        };
+        for index in 0..len {
+            values.set(index, scalar)?;
+            if let (Some(values), Some(scalar)) = (&mut imaginary_values, imaginary_scalar) {
+                values.set(index, scalar)?;
+            }
+            cooperate_data_work(budget, 1).await?;
         }
         Ok(Self {
             dtype,
@@ -610,7 +701,7 @@ fn data_values_from_value(
                 .into_numeric_storage()
                 .map_err(|error| data_error(format!("invalid numeric tensor storage: {error}")))?;
             let values = DataArrayValues::from_numeric_storage(storage);
-            Ok((tensor.shape.clone(), values, None))
+            Ok((tensor.shape().to_vec(), values, None))
         }
         Value::Num(value) => Ok((vec![1, 1], DataArrayValues::F64(vec![*value]), None)),
         Value::Int(IntValue::I8(value)) => {
@@ -643,7 +734,7 @@ fn data_values_from_value(
             Some(DataArrayValues::F64(vec![*imag])),
         )),
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let (real, imag) = match tensor.clone().into_complex_storage() {
                 ComplexStorage::F64(values) => {
                     let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
@@ -653,10 +744,13 @@ fn data_values_from_value(
                     let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
                     (DataArrayValues::F32(real), DataArrayValues::F32(imag))
                 }
-                ComplexStorage::Integer(storage) => (
-                    DataArrayValues::from_integer_storage(storage.real),
-                    DataArrayValues::from_integer_storage(storage.imag),
-                ),
+                ComplexStorage::Integer(storage) => {
+                    let (real, imag) = storage.into_unbounded_components();
+                    (
+                        DataArrayValues::from_integer_storage(real),
+                        DataArrayValues::from_integer_storage(imag),
+                    )
+                }
             };
             Ok((shape, real, Some(imag)))
         }
@@ -696,6 +790,8 @@ pub struct DataSchema {
 pub struct PendingTxn {
     pub dataset_path: String,
     pub base_sequence: u64,
+    /// Monotonic mutation identity within this registry-issued transaction.
+    pub revision: u64,
     pub writes: Vec<PendingWrite>,
     pub resizes: Vec<PendingResize>,
     pub fills: Vec<PendingFill>,
@@ -795,6 +891,17 @@ pub fn data_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+pub fn data_error_with_source(
+    message: impl Into<String>,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier("RUNMAT:Data:Error")
+        .with_builtin("data")
+        .with_source(source)
+        .build()
+}
+
 fn data_error_with_identifier(
     message: impl Into<String>,
     identifier: &'static str,
@@ -809,13 +916,13 @@ const DATA_MANIFEST_CONFLICT_IDENTIFIER: &str = "RunMat:data:ManifestConflict";
 const DATA_TRANSACTION_NOT_FOUND_IDENTIFIER: &str = "RunMat:data:TransactionNotFound";
 
 pub fn parse_string(value: &Value, context: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(chars) => chars
-            .row_string()
-            .ok_or_else(|| data_error(format!("{context}: expected character row vector"))),
-        _ => Err(data_error(format!("{context}: expected string value"))),
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        if matches!(value, Value::CharArray(_)) {
+            data_error(format!("{context}: expected character row vector"))
+        } else {
+            data_error(format!("{context}: expected string value"))
+        }
+    })
 }
 
 pub fn dataset_root(path: &str) -> PathBuf {
@@ -831,37 +938,55 @@ pub fn arrays_root(root: &Path) -> PathBuf {
 }
 
 pub async fn write_manifest_async(root: &Path, manifest: &DataManifest) -> BuiltinResult<()> {
-    fs::create_dir_all_async(root).await.map_err(|err| {
-        data_error(format!(
-            "failed to create dataset root '{}': {err}",
-            root.display()
-        ))
+    let (provider, resolved) = captured_storage_root(root)?;
+    write_manifest_on(provider.as_ref(), &resolved, manifest).await
+}
+
+pub async fn write_manifest_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    manifest: &DataManifest,
+) -> BuiltinResult<()> {
+    provider.create_dir_all(root).await.map_err(|err| {
+        data_error_with_source(
+            format!("failed to create dataset root '{}': {err}", root.display()),
+            err,
+        )
     })?;
     let path = manifest_path(root);
-    let bytes = serde_json::to_vec_pretty(manifest)
-        .map_err(|err| data_error(format!("failed to encode manifest json: {err}")))?;
-    fs::write_async(&path, &bytes).await.map_err(|err| {
-        data_error(format!(
-            "failed to write manifest '{}': {err}",
-            path.display()
-        ))
+    let bytes = serde_json::to_vec_pretty(manifest).map_err(|err| {
+        data_error_with_source(format!("failed to encode manifest json: {err}"), err)
+    })?;
+    provider.write(&path, &bytes).await.map_err(|err| {
+        data_error_with_source(
+            format!("failed to write manifest '{}': {err}", path.display()),
+            err,
+        )
     })?;
     Ok(())
 }
 
 pub async fn read_manifest_async(root: &Path) -> BuiltinResult<DataManifest> {
+    let (provider, resolved) = captured_storage_root(root)?;
+    read_manifest_on(provider.as_ref(), &resolved).await
+}
+
+pub async fn read_manifest_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+) -> BuiltinResult<DataManifest> {
     let path = manifest_path(root);
-    let bytes = fs::read_async(&path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read manifest '{}': {err}",
-            path.display()
-        ))
+    let bytes = provider.read(&path).await.map_err(|err| {
+        data_error_with_source(
+            format!("failed to read manifest '{}': {err}", path.display()),
+            err,
+        )
     })?;
     let manifest = serde_json::from_slice::<DataManifest>(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse manifest '{}': {err}",
-            path.display()
-        ))
+        data_error_with_source(
+            format!("failed to parse manifest '{}': {err}", path.display()),
+            err,
+        )
     })?;
     Ok(manifest)
 }
@@ -872,31 +997,69 @@ pub async fn write_array_payload_async(
     payload: &DataArrayPayload,
     chunk_shape: &[usize],
 ) -> BuiltinResult<(PathBuf, PathBuf)> {
-    let array_dir = arrays_root(root).join(array);
-    fs::create_dir_all_async(&array_dir).await.map_err(|err| {
-        data_error(format!(
-            "failed to create array dir '{}': {err}",
-            array_dir.display()
-        ))
-    })?;
+    let (provider, resolved) = captured_storage_root(root)?;
+    let mut write_budget = None;
+    let (payload_path, index_path) = write_array_payload_on(
+        provider.as_ref(),
+        &resolved,
+        array,
+        payload,
+        chunk_shape,
+        &mut write_budget,
+    )
+    .await?;
+    let rebase = |path: PathBuf| {
+        path.strip_prefix(&resolved)
+            .map(|relative| root.join(relative))
+            .map_err(|_| data_error("written array path escaped its dataset root"))
+    };
+    Ok((rebase(payload_path)?, rebase(index_path)?))
+}
+
+fn captured_storage_root(
+    root: &Path,
+) -> BuiltinResult<(std::sync::Arc<dyn fs::FsProvider>, PathBuf)> {
+    fs::capture_provider_path(root).map_err(|source| {
+        data_error_with_source(
+            format!("failed to capture data storage directory: {source}"),
+            source,
+        )
+    })
+}
+
+pub async fn write_array_payload_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    array: &str,
+    payload: &DataArrayPayload,
+    chunk_shape: &[usize],
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
+) -> BuiltinResult<(PathBuf, PathBuf)> {
+    cooperate_data_work(budget, 0).await?;
+    let array_dir = create_array_revision(provider, root, array).await?;
     let payload_path = array_dir.join("data.f64.json");
-    let bytes = serde_json::to_vec(payload)
-        .map_err(|err| data_error(format!("failed to encode array payload json: {err}")))?;
-    fs::write_async(&payload_path, &bytes)
-        .await
-        .map_err(|err| {
-            data_error(format!(
+    let bytes = serde_json::to_vec(payload).map_err(|err| {
+        data_error_with_source(format!("failed to encode array payload json: {err}"), err)
+    })?;
+    provider.write(&payload_path, &bytes).await.map_err(|err| {
+        data_error_with_source(
+            format!(
                 "failed to write payload '{}': {err}",
                 payload_path.display()
-            ))
-        })?;
+            ),
+            err,
+        )
+    })?;
 
     let chunk_dir = array_dir.join("chunks");
-    fs::create_dir_all_async(&chunk_dir).await.map_err(|err| {
-        data_error(format!(
-            "failed to create chunk dir '{}': {err}",
-            chunk_dir.display()
-        ))
+    provider.create_dir_all(&chunk_dir).await.map_err(|err| {
+        data_error_with_source(
+            format!(
+                "failed to create chunk dir '{}': {err}",
+                chunk_dir.display()
+            ),
+            err,
+        )
     })?;
 
     let mut index = DataChunkIndex {
@@ -908,45 +1071,47 @@ pub async fn write_array_payload_async(
     let grid_shape = chunk_grid_shape(&payload.shape, chunk_shape);
     let mut coords = vec![0usize; payload.shape.len()];
     loop {
+        cooperate_data_work(budget, 0).await?;
         let chunk_start = chunk_start_for_coords(&coords, chunk_shape);
         let chunk_extent = chunk_extent_for_start(&chunk_start, chunk_shape, &payload.shape);
         let chunk_payload = DataArrayPayload {
             dtype: payload.dtype.clone(),
             shape: chunk_extent.clone(),
-            values: collect_chunk_values(payload, &chunk_start, &chunk_extent)?,
-            imaginary_values: payload
-                .imaginary_values
-                .as_ref()
-                .map(|values| {
+            values: collect_chunk_values(payload, &chunk_start, &chunk_extent, budget).await?,
+            imaginary_values: if let Some(values) = payload.imaginary_values.as_ref() {
+                Some(
                     collect_chunk_component_values(
                         values,
                         &payload.dtype,
                         &payload.shape,
                         &chunk_start,
                         &chunk_extent,
+                        budget,
                     )
-                })
-                .transpose()?,
+                    .await?,
+                )
+            } else {
+                None
+            },
         };
         let key = chunk_key(&coords);
-        let object_id = format!("obj_{}", key.replace('.', "_"));
-        let chunk_bytes = serde_json::to_vec(&chunk_payload)
-            .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
-        let data_path = chunk_dir.join(format!("{object_id}.json"));
-        fs::write_async(&data_path, &chunk_bytes)
+        let chunk_bytes = serde_json::to_vec(&chunk_payload).map_err(|err| {
+            data_error_with_source(format!("failed to encode chunk payload: {err}"), err)
+        })?;
+        let identity = ChunkStorageIdentity::for_payload(&chunk_bytes);
+        let hash = identity.hash;
+        let object_id = identity.object_id;
+        let data_path = chunk_dir.join(identity.file_name);
+        provider
+            .write(&data_path, &chunk_bytes)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "failed to write chunk '{}': {err}",
-                    data_path.display()
-                ))
+                data_error_with_source(
+                    format!("failed to write chunk '{}': {err}", data_path.display()),
+                    err,
+                )
             })?;
-        let hash = sha256_hex(&chunk_bytes);
-        let rel_chunk_path = data_path
-            .strip_prefix(root)
-            .map_err(|err| data_error(format!("failed to compute chunk relative path: {err}")))?
-            .to_string_lossy()
-            .to_string();
+        let rel_chunk_path = relative_storage_path(root, &data_path)?;
         index.chunks.push(DataChunkIndexEntry {
             key: key.clone(),
             object_id: object_id.clone(),
@@ -967,12 +1132,13 @@ pub async fn write_array_payload_async(
             },
             chunk_bytes,
         ));
+        cooperate_data_work(budget, 1).await?;
         if !advance_index(&mut coords, &grid_shape) {
             break;
         }
     }
 
-    maybe_upload_chunks_async(root, array, upload_chunks).await?;
+    maybe_upload_chunks_on(provider, root, array, upload_chunks, budget).await?;
 
     tracing::info!(
         target: "runmat.data",
@@ -984,15 +1150,20 @@ pub async fn write_array_payload_async(
     );
 
     let chunk_index_path = chunk_dir.join("index.json");
-    let chunk_index_bytes = serde_json::to_vec(&index)
-        .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
-    fs::write_async(&chunk_index_path, &chunk_index_bytes)
+    let chunk_index_bytes = serde_json::to_vec(&index).map_err(|err| {
+        data_error_with_source(format!("failed to encode chunk index json: {err}"), err)
+    })?;
+    provider
+        .write(&chunk_index_path, &chunk_index_bytes)
         .await
         .map_err(|err| {
-            data_error(format!(
-                "failed to write chunk index '{}': {err}",
-                chunk_index_path.display()
-            ))
+            data_error_with_source(
+                format!(
+                    "failed to write chunk index '{}': {err}",
+                    chunk_index_path.display()
+                ),
+                err,
+            )
         })?;
     Ok((payload_path, chunk_index_path))
 }
@@ -1001,27 +1172,55 @@ pub async fn read_array_payload_async(
     root: &Path,
     meta: &DataArrayMeta,
 ) -> BuiltinResult<DataArrayPayload> {
+    let (provider, resolved) = captured_storage_root(root)?;
+    read_array_payload_on(provider.as_ref(), &resolved, meta).await
+}
+
+pub async fn read_array_payload_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    meta: &DataArrayMeta,
+) -> BuiltinResult<DataArrayPayload> {
+    let mut budget = None;
+    read_array_payload_with_budget_on(provider, root, meta, &mut budget).await
+}
+
+/// The invocation-owned budget follows the same provider and decoding route;
+/// callers without an execution context use the compatibility wrapper above.
+pub async fn read_array_payload_with_budget_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    meta: &DataArrayMeta,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
+) -> BuiltinResult<DataArrayPayload> {
+    cooperate_data_work(budget, 0).await?;
     if let Some(index_path) = &meta.chunk_index_path {
         let path = root.join(index_path);
-        if fs::metadata_async(&path).await.is_ok() {
-            return read_array_payload_chunked_async(root, meta, &path).await;
+        if provider.metadata(&path).await.is_ok() {
+            return read_array_payload_chunked_on(provider, root, meta, &path, budget).await;
         }
     }
     let payload_path = root.join(&meta.data_path);
-    let bytes = fs::read_async(&payload_path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read payload '{}': {err}",
-            payload_path.display()
-        ))
+    let bytes = provider.read(&payload_path).await.map_err(|err| {
+        data_error_with_source(
+            format!("failed to read payload '{}': {err}", payload_path.display()),
+            err,
+        )
     })?;
-    serde_json::from_slice::<DataArrayPayload>(&bytes)
+    cooperate_data_work(budget, bytes.len() as u64).await?;
+    let payload = serde_json::from_slice::<DataArrayPayload>(&bytes)
         .map_err(|err| {
-            data_error(format!(
-                "failed to parse payload '{}': {err}",
-                payload_path.display()
-            ))
+            data_error_with_source(
+                format!(
+                    "failed to parse payload '{}': {err}",
+                    payload_path.display()
+                ),
+                err,
+            )
         })?
-        .normalize_for_dtype(&meta.dtype)
+        .normalize_for_dtype(&meta.dtype)?;
+    cooperate_data_work(budget, 0).await?;
+    Ok(payload)
 }
 
 pub async fn read_array_slice_payload_async(
@@ -1030,11 +1229,23 @@ pub async fn read_array_slice_payload_async(
     start: &[usize],
     shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
+    let (provider, resolved) = captured_storage_root(root)?;
+    read_array_slice_payload_on(provider.as_ref(), &resolved, meta, start, shape).await
+}
+
+pub async fn read_array_slice_payload_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    meta: &DataArrayMeta,
+    start: &[usize],
+    shape: &[usize],
+) -> BuiltinResult<DataArrayPayload> {
     let (slice_start, slice_shape) = normalize_slice_bounds(&meta.shape, start, shape)?;
     if let Some(index_path) = &meta.chunk_index_path {
         let path = root.join(index_path);
-        if fs::metadata_async(&path).await.is_ok() {
-            return read_array_payload_chunked_slice_async(
+        if provider.metadata(&path).await.is_ok() {
+            return read_array_payload_chunked_slice_on(
+                provider,
                 root,
                 meta,
                 &path,
@@ -1044,28 +1255,35 @@ pub async fn read_array_slice_payload_async(
             .await;
         }
     }
-    let full = read_array_payload_async(root, meta).await?;
+    let full = read_array_payload_on(provider, root, meta).await?;
     extract_slice_payload(&full, &slice_start, &slice_shape)
 }
 
-async fn read_array_payload_chunked_slice_async(
+async fn read_array_payload_chunked_slice_on(
+    provider: &dyn fs::FsProvider,
     root: &Path,
     meta: &DataArrayMeta,
     index_path: &Path,
     slice_start: &[usize],
     slice_shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
-    let bytes = fs::read_async(index_path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read chunk index '{}': {err}",
-            index_path.display()
-        ))
+    let bytes = provider.read(index_path).await.map_err(|err| {
+        data_error_with_source(
+            format!(
+                "failed to read chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
     let index: DataChunkIndex = serde_json::from_slice(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse chunk index '{}': {err}",
-            index_path.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to parse chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
 
     let mut values =
@@ -1084,18 +1302,24 @@ async fn read_array_payload_chunked_slice_async(
         }
 
         let chunk_path = root.join(&chunk.data_path);
-        let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
-            data_error(format!(
-                "failed to read chunk payload '{}': {err}",
-                chunk_path.display()
-            ))
+        let bytes = provider.read(&chunk_path).await.map_err(|err| {
+            data_error_with_source(
+                format!(
+                    "failed to read chunk payload '{}': {err}",
+                    chunk_path.display()
+                ),
+                err,
+            )
         })?;
         let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
             .map_err(|err| {
-                data_error(format!(
-                    "failed to parse chunk payload '{}': {err}",
-                    chunk_path.display()
-                ))
+                data_error_with_source(
+                    format!(
+                        "failed to parse chunk payload '{}': {err}",
+                        chunk_path.display()
+                    ),
+                    err,
+                )
             })?
             .normalize_for_dtype(&meta.dtype)?;
         if payload.shape != chunk_extent {
@@ -1144,42 +1368,64 @@ async fn read_array_payload_chunked_slice_async(
     })
 }
 
-async fn read_array_payload_chunked_async(
+async fn read_array_payload_chunked_on(
+    provider: &dyn fs::FsProvider,
     root: &Path,
     meta: &DataArrayMeta,
     index_path: &Path,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayPayload> {
-    let bytes = fs::read_async(index_path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read chunk index '{}': {err}",
-            index_path.display()
-        ))
+    cooperate_data_work(budget, 0).await?;
+    let bytes = provider.read(index_path).await.map_err(|err| {
+        data_error_with_source(
+            format!(
+                "failed to read chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
     let index: DataChunkIndex = serde_json::from_slice(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse chunk index '{}': {err}",
-            index_path.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to parse chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
-    let mut values =
-        DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(&meta.shape)?)?;
+    cooperate_data_work(budget, bytes.len() as u64).await?;
+    let mut values = DataArrayValues::zeros_cooperative(
+        &meta.dtype,
+        checked_shape_element_count(&meta.shape)?,
+        budget,
+    )
+    .await?;
     let mut imaginary_values: Option<DataArrayValues> = None;
     for chunk in index.chunks {
+        cooperate_data_work(budget, 0).await?;
         let chunk_path = root.join(&chunk.data_path);
-        let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
-            data_error(format!(
-                "failed to read chunk payload '{}': {err}",
-                chunk_path.display()
-            ))
+        let bytes = provider.read(&chunk_path).await.map_err(|err| {
+            data_error_with_source(
+                format!(
+                    "failed to read chunk payload '{}': {err}",
+                    chunk_path.display()
+                ),
+                err,
+            )
         })?;
         let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
             .map_err(|err| {
-                data_error(format!(
-                    "failed to parse chunk payload '{}': {err}",
-                    chunk_path.display()
-                ))
+                data_error_with_source(
+                    format!(
+                        "failed to parse chunk payload '{}': {err}",
+                        chunk_path.display()
+                    ),
+                    err,
+                )
             })?
             .normalize_for_dtype(&meta.dtype)?;
+        cooperate_data_work(budget, bytes.len() as u64).await?;
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
         let chunk_extent = if chunk.shape.is_empty() {
@@ -1195,6 +1441,7 @@ async fn read_array_payload_chunked_async(
         }
         let mut local = vec![0usize; chunk_extent.len()];
         loop {
+            cooperate_data_work(budget, 1).await?;
             let mut global = Vec::with_capacity(chunk_extent.len());
             for dim in 0..chunk_extent.len() {
                 global.push(chunk_start[dim] + local[dim]);
@@ -1203,13 +1450,19 @@ async fn read_array_payload_chunked_async(
             let dst_linear = linear_index_column_major(&global, &meta.shape)?;
             values.set(dst_linear, payload.values.get(src_linear)?)?;
             if let Some(payload_imaginary) = &payload.imaginary_values {
-                let target = match &mut imaginary_values {
-                    Some(values) => values,
-                    None => imaginary_values.insert(DataArrayValues::zeros(
-                        &meta.dtype,
-                        checked_shape_element_count(&meta.shape)?,
-                    )?),
-                };
+                if imaginary_values.is_none() {
+                    imaginary_values = Some(
+                        DataArrayValues::zeros_cooperative(
+                            &meta.dtype,
+                            checked_shape_element_count(&meta.shape)?,
+                            budget,
+                        )
+                        .await?,
+                    );
+                }
+                let target = imaginary_values
+                    .as_mut()
+                    .expect("imaginary storage initialized");
                 target.set(dst_linear, payload_imaginary.get(src_linear)?)?;
             }
             if !advance_index(&mut local, &chunk_extent) {
@@ -1225,10 +1478,12 @@ async fn read_array_payload_chunked_async(
     })
 }
 
-async fn maybe_upload_chunks_async(
+async fn maybe_upload_chunks_on(
+    provider: &dyn fs::FsProvider,
     root: &Path,
     array: &str,
     chunks: Vec<(DataChunkDescriptor, Vec<u8>)>,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
     if chunks.is_empty() {
         return Ok(());
@@ -1238,24 +1493,27 @@ async fn maybe_upload_chunks_async(
         array: array.to_string(),
         chunks: chunks.iter().map(|(desc, _)| desc.clone()).collect(),
     };
-    let targets = match fs::data_chunk_upload_targets_async(&request).await {
+    let targets = match provider.data_chunk_upload_targets(&request).await {
         Ok(targets) => targets,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => return Ok(()),
         Err(err) => {
-            return Err(data_error(format!(
-                "failed to request data chunk upload targets: {err}"
-            )))
+            return Err(data_error_with_source(
+                format!("failed to request data chunk upload targets: {err}"),
+                err,
+            ))
         }
     };
     for (descriptor, bytes) in chunks {
+        cooperate_data_work(budget, 1).await?;
         let target = find_chunk_target(&targets, &descriptor.key)?;
-        fs::data_upload_chunk_async(target, &bytes)
+        provider
+            .data_upload_chunk(target, &bytes)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "failed to upload chunk '{}': {err}",
-                    descriptor.key
-                ))
+                data_error_with_source(
+                    format!("failed to upload chunk '{}': {err}", descriptor.key),
+                    err,
+                )
             })?;
         tracing::info!(
             target: "runmat.data",
@@ -1283,7 +1541,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     let digest = hasher.finalize();
-    format!("sha256:{:x}", digest)
+    format!("sha256:{}", hex::encode(digest))
 }
 
 fn chunk_key(coords: &[usize]) -> String {
@@ -1329,10 +1587,11 @@ fn chunk_extent_for_start(
         .collect()
 }
 
-fn collect_chunk_values(
+async fn collect_chunk_values(
     payload: &DataArrayPayload,
     chunk_start: &[usize],
     chunk_extent: &[usize],
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayValues> {
     collect_chunk_component_values(
         &payload.values,
@@ -1340,19 +1599,23 @@ fn collect_chunk_values(
         &payload.shape,
         chunk_start,
         chunk_extent,
+        budget,
     )
+    .await
 }
 
-fn collect_chunk_component_values(
+async fn collect_chunk_component_values(
     source: &DataArrayValues,
     dtype: &str,
     full_shape: &[usize],
     chunk_start: &[usize],
     chunk_extent: &[usize],
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayValues> {
     let mut local = vec![0usize; chunk_extent.len()];
     let mut values = DataArrayValues::zeros(dtype, 0)?;
     loop {
+        cooperate_data_work(budget, 1).await?;
         let mut global = Vec::with_capacity(chunk_extent.len());
         for dim in 0..chunk_extent.len() {
             global.push(chunk_start[dim] + local[dim]);
@@ -1570,7 +1833,7 @@ pub fn parse_schema(schema: &Value) -> BuiltinResult<DataSchema> {
         let data_path = format!("arrays/{name}/data.f64.json");
         let chunk_index_path = format!("arrays/{name}/chunks/index.json");
         arrays.insert(
-            name.clone(),
+            name.to_owned(),
             DataArrayMeta {
                 dtype,
                 shape,
@@ -1665,19 +1928,25 @@ fn tensor_to_usize_vector(t: &Tensor) -> BuiltinResult<Vec<usize>> {
     Ok(out)
 }
 
-pub fn dataset_object(path: &str, manifest: &DataManifest) -> Value {
-    let mut obj = ObjectInstance::new("Dataset".to_string());
-    obj.properties
-        .insert("__data_path".to_string(), Value::String(path.to_string()));
-    obj.properties.insert(
-        "__data_id".to_string(),
-        Value::String(manifest.dataset_id.clone()),
-    );
-    obj.properties.insert(
-        "__data_version".to_string(),
-        Value::String(manifest_version_token(manifest)),
-    );
-    Value::Object(obj)
+pub fn dataset_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    path: &str,
+    manifest: &DataManifest,
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    data_object(
+        runtime,
+        runmat_builtins::DATASET_CLASS.display_name(),
+        [
+            ("__data_path", Value::string(path)),
+            ("__data_id", Value::string(manifest.dataset_id.clone())),
+            (
+                "__data_version",
+                Value::string(manifest_version_token(manifest)),
+            ),
+        ],
+        authority,
+    )
 }
 
 pub fn manifest_version_token(manifest: &DataManifest) -> String {
@@ -1700,32 +1969,56 @@ pub fn ensure_manifest_sequence(expected: u64, manifest: &DataManifest) -> Built
     Ok(())
 }
 
-pub fn array_object(dataset_path: &str, array_name: &str) -> Value {
-    let mut obj = ObjectInstance::new("DataArray".to_string());
-    obj.properties.insert(
-        "__data_path".to_string(),
-        Value::String(dataset_path.to_string()),
-    );
-    obj.properties.insert(
-        "__array_name".to_string(),
-        Value::String(array_name.to_string()),
-    );
-    Value::Object(obj)
+pub fn array_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    dataset_path: &str,
+    array_name: &str,
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    data_object(
+        runtime,
+        runmat_builtins::DATA_ARRAY_CLASS.display_name(),
+        [
+            ("__data_path", Value::string(dataset_path)),
+            ("__array_name", Value::string(array_name)),
+        ],
+        authority,
+    )
 }
 
-pub fn transaction_object(dataset_path: &str, tx_id: &str) -> Value {
-    let mut obj = ObjectInstance::new("DataTransaction".to_string());
-    obj.properties.insert(
-        "__data_path".to_string(),
-        Value::String(dataset_path.to_string()),
-    );
-    obj.properties
-        .insert("__tx_id".to_string(), Value::String(tx_id.to_string()));
-    Value::Object(obj)
+pub fn transaction_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    dataset_path: &str,
+    tx_id: &str,
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    data_object(
+        runtime,
+        runmat_builtins::DATA_TRANSACTION_CLASS.display_name(),
+        [
+            ("__data_path", Value::string(dataset_path)),
+            ("__tx_id", Value::string(tx_id)),
+        ],
+        authority,
+    )
+}
+
+fn data_object<const N: usize>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    class: &str,
+    fields: [(&str, Value); N],
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    crate::execution::object::construct_object_from_fields_with_native(
+        runtime,
+        class,
+        fields.iter().map(|(name, value)| (*name, value)),
+        Some(crate::execution::object::ObjectNativeInitialization::DatasetAuthority(authority)),
+    )
 }
 
 pub fn get_object_prop<'a>(obj: &'a ObjectInstance, key: &str) -> BuiltinResult<&'a Value> {
-    obj.properties
+    obj.properties()
         .get(key)
         .ok_or_else(|| data_error(format!("object missing internal property '{key}'")))
 }
@@ -1740,17 +2033,32 @@ pub fn new_dataset_id() -> String {
     format!("ds_{}_{}", Utc::now().timestamp_millis(), seq)
 }
 
-pub fn new_tx_id() -> String {
+pub fn new_tx_id() -> BuiltinResult<String> {
     static NEXT_TX_ID: AtomicU64 = AtomicU64::new(1);
-    let seq = NEXT_TX_ID.fetch_add(1, Ordering::Relaxed);
-    format!("tx_{}_{}", Utc::now().timestamp_millis(), seq)
+    let seq = NEXT_TX_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .map_err(|_| data_error("transaction identifier space is exhausted"))?;
+    Ok(format!("tx_{}_{}", Utc::now().timestamp_millis(), seq))
 }
 
+#[cfg(test)]
 pub fn start_tx(dataset_path: String, base_sequence: u64) -> BuiltinResult<String> {
-    let tx_id = new_tx_id();
+    let tx_id = new_tx_id()?;
+    start_tx_with_id(tx_id.clone(), dataset_path, base_sequence)?;
+    Ok(tx_id)
+}
+
+pub fn start_tx_with_id(
+    tx_id: String,
+    dataset_path: String,
+    base_sequence: u64,
+) -> BuiltinResult<()> {
     let pending = PendingTxn {
         dataset_path,
         base_sequence,
+        revision: 0,
         writes: Vec::new(),
         resizes: Vec::new(),
         fills: Vec::new(),
@@ -1760,9 +2068,13 @@ pub fn start_tx(dataset_path: String, base_sequence: u64) -> BuiltinResult<Strin
         status: TxnStatus::Open,
     };
     with_tx_registry(|registry| {
-        registry.insert(tx_id.clone(), pending);
-    })?;
-    Ok(tx_id)
+        if registry.contains_key(&tx_id) {
+            return Err(data_error("transaction identifier already exists"));
+        }
+        registry.insert(tx_id, pending);
+        Ok(())
+    })??;
+    Ok(())
 }
 
 pub fn with_tx_mut<T>(
@@ -1776,6 +2088,13 @@ pub fn with_tx_mut<T>(
                 DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
             )
         })?;
+        let next_revision = tx
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| data_error("transaction mutation revision exhausted"))?;
+        // Invalidate earlier admissions even if a fallible closure mutates
+        // before returning an error. The sealed transaction ID never recycles.
+        tx.revision = next_revision;
         f(tx)
     })?
 }
@@ -1825,6 +2144,37 @@ pub fn remove_tx(tx_id: &str) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn typed_value_encoding_preserves_low_rank_shape_and_payload() {
+        for shape in [Vec::new(), vec![2]] {
+            let count = shape.iter().product::<usize>();
+            let values = vec![u64::MAX; count];
+            let input = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(values.clone()), shape.clone()).unwrap(),
+            );
+            let (encoded_shape, real, imag) = data_values_from_value(&input).unwrap();
+            assert_eq!(encoded_shape, shape);
+            assert_eq!(real, DataArrayValues::U64(values));
+            assert_eq!(imag, None);
+
+            let complex = Value::ComplexTensor(
+                ComplexTensor::from_complex_storage(
+                    ComplexStorage::F32(vec![(1.25, 2.5); count].into()),
+                    shape.clone(),
+                )
+                .unwrap(),
+            );
+            let (encoded_shape, real, imag) = data_values_from_value(&complex).unwrap();
+            assert_eq!(encoded_shape, shape);
+            assert_eq!(real, DataArrayValues::F32(vec![1.25; count]));
+            assert_eq!(imag, Some(DataArrayValues::F32(vec![2.5; count])));
+        }
+    }
+
+    #[path = "cooperation.rs"]
+    mod cooperation;
 
     #[test]
     fn schema_dimensions_preserve_large_typed_unsigned_values() {
@@ -2129,6 +2479,24 @@ mod tests {
             Some(DATA_TRANSACTION_NOT_FOUND_IDENTIFIER),
             "missing transaction lookups should expose a stable identifier"
         );
+    }
+
+    #[test]
+    fn transaction_registry_rejects_identity_collision_without_replacing_owner() {
+        let tx_id = new_tx_id().expect("unique transaction identity");
+        start_tx_with_id(tx_id.clone(), "first.data".into(), 7).expect("first transaction");
+        let duplicate = start_tx_with_id(tx_id.clone(), "second.data".into(), 99);
+        assert!(
+            duplicate.is_err(),
+            "duplicate identity must fail before replacing the first"
+        );
+        with_tx(&tx_id, |tx| {
+            assert_eq!(tx.dataset_path, "first.data");
+            assert_eq!(tx.base_sequence, 7);
+            Ok(())
+        })
+        .expect("first transaction remains intact");
+        remove_tx(&tx_id).expect("remove first transaction");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

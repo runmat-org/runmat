@@ -1,29 +1,129 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
 
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
-use runmat_meshing_size::grading::grade_metric_evaluations;
 use runmat_meshing_size::metric::{
-    MetricContractError, MetricFieldRequest, MetricSourceKind, MetricTensor3, ResolvedMetricField,
+    MetricContractError, MetricFieldRequest, MetricSourceKind, MetricTensor3,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{
-    topology::build_delaunay_volume_topology_with_regions,
-    volume_provenance::derive_delaunay_volume_metric_contexts, DelaunayTopologyOptions,
+    topology::validate_canonical_volume_topology,
+    volume_provenance::validate_delaunay_volume_provenance, DelaunayTopologyOptions,
     DelaunayVolumeProvenance, DelaunayVolumeProvenanceError, DelaunayVolumeProvenanceErrorKind,
     DelaunayVolumeProvenanceOptions, DelaunayVolumeTopology,
 };
 
 pub(super) mod context;
+use context::{MetricContextInventory, MetricContexts};
+pub(in crate::cdt) mod boundary_compatibility;
 mod evaluation;
+mod jacobian;
+#[cfg(test)]
+pub(in crate::cdt) mod joint;
+pub(in crate::cdt) use jacobian::{evaluate_tetrahedron_jacobian, PreparedJacobian};
+mod metrics;
+mod mutation;
+pub(in crate::cdt) mod node_size;
+mod stream;
+mod summary;
+use stream::visit_from_metric_contexts;
+mod handoff;
+pub(in crate::cdt) use handoff::verify_complete_handoff;
+pub(in crate::cdt) mod working;
+pub(super) use mutation::evaluate_quality_after_mutation;
 mod validation;
 
-use context::{validate_metric_contexts, DelaunayVolumeMetricContext};
+use context::DelaunayVolumeMetricContext;
 use evaluation::evaluate_tetrahedron;
+pub(in crate::cdt) use evaluation::{evaluate_tetrahedron_geometry, violation_ratios};
 pub use validation::validate_delaunay_volume_quality;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Below this shape condition, a floating-point circumradius is not stable
+/// enough to serve as quantitative evidence. The cell is already rejected by
+/// the much stronger scaled-Jacobian quality gate, so both construction and
+/// independent validation report a deterministic worst-case radius until the
+/// optimizer repairs it.
+const CIRCUMRADIUS_CONDITION_FLOOR: f64 = 1.0e-8;
+
+/// Quality work ordering is part of deterministic topology construction, but
+/// the low mantissa bits of independently equivalent metric evaluations are
+/// not. Keep the quality gate on the full value and discard only those bits
+/// when choosing which violating cell to process first.
+const QUALITY_PRIORITY_DISCARDED_MANTISSA_BITS: u32 = 24;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::cdt) enum QualityObjective {
+    Shape,
+    Refinement,
+}
+
+pub(super) fn compare_violation_priority(
+    left_ratio: f64,
+    left_geometry: [[u64; 3]; 4],
+    left_identity: [StableDigest; 4],
+    right_ratio: f64,
+    right_geometry: [[u64; 3]; 4],
+    right_identity: [StableDigest; 4],
+) -> Ordering {
+    violation_priority_key(left_ratio)
+        .cmp(&violation_priority_key(right_ratio))
+        .then_with(|| right_geometry.cmp(&left_geometry))
+        .then_with(|| right_identity.cmp(&left_identity))
+}
+
+pub(super) fn tetrahedron_geometry_key(
+    topology: &DelaunayVolumeTopology,
+    identities: [StableDigest; 4],
+) -> [[u64; 3]; 4] {
+    let mut key = identities.map(|identity| {
+        topology
+            .nodes
+            .binary_search_by_key(&identity, |node| node.identity)
+            .map(|index| {
+                topology.nodes[index]
+                    .coordinates_m
+                    .canonical_value()
+                    .map(ordered_float_key)
+            })
+            .unwrap_or([u64::MAX; 3])
+    });
+    key.sort_unstable();
+    key
+}
+
+pub(super) fn ordered_float_key(value: f64) -> u64 {
+    let bits = if value == 0.0 { 0.0_f64 } else { value }.to_bits();
+    if bits >> 63 == 0 {
+        bits | (1_u64 << 63)
+    } else {
+        !bits
+    }
+}
+
+pub(super) fn violation_priority_key(ratio: f64) -> u64 {
+    debug_assert!(ratio.is_finite() && ratio >= 0.0);
+    let rounding = 1_u64 << (QUALITY_PRIORITY_DISCARDED_MANTISSA_BITS - 1);
+    ratio.to_bits().saturating_add(rounding) >> QUALITY_PRIORITY_DISCARDED_MANTISSA_BITS
+}
+
+/// Physical bounds use the complete computed value. Scheduling buckets must
+/// never make an above-bound value admissible.
+pub(super) fn violates_quality_bound(ratio: f64) -> bool {
+    !ratio.is_finite() || ratio > 1.0
+}
+
+pub(super) fn compare_spectra(left: &[f64], right: &[f64]) -> Ordering {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| violation_priority_key(*left).cmp(&violation_priority_key(*right)))
+        .find(|ordering| *ordering != Ordering::Equal)
+        .unwrap_or_else(|| left.len().cmp(&right.len()))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeQualityOptions {
     pub maximum_nodes: u64,
     pub maximum_tetrahedra: u64,
@@ -64,12 +164,23 @@ pub struct DelaunayTetrahedronQuality {
     pub metric_circumradius: f64,
     pub metric_radius_edge_ratio: f64,
     pub metric_scaled_jacobian: f64,
+    /// Number of vertices constrained by the published surface closure.
+    pub boundary_node_count: u8,
+    /// Number of this tetrahedron's faces present in protected facet provenance.
+    pub protected_facet_count: u8,
+    /// Size plus volumetrically repairable radius-edge defect assigned to point insertion.
     pub refinement_violation_ratio: f64,
+    /// Scaled-Jacobian shape defect assigned to topology optimization.
+    pub optimization_violation_ratio: f64,
 }
 
 impl DelaunayTetrahedronQuality {
     pub fn requires_refinement(&self) -> bool {
-        self.refinement_violation_ratio > 1.0
+        violates_quality_bound(self.refinement_violation_ratio)
+    }
+
+    pub fn requires_optimization(&self) -> bool {
+        violates_quality_bound(self.optimization_violation_ratio)
     }
 }
 
@@ -78,6 +189,7 @@ impl DelaunayTetrahedronQuality {
 pub struct DelaunayVolumeQuality {
     pub tetrahedra: Vec<DelaunayTetrahedronQuality>,
     pub worst_refinement_tetrahedron: Option<[StableDigest; 4]>,
+    pub worst_optimization_tetrahedron: Option<[StableDigest; 4]>,
     pub maximum_metric_edge_length: f64,
     pub maximum_radius_edge_ratio: f64,
     pub minimum_metric_scaled_jacobian: f64,
@@ -85,6 +197,7 @@ pub struct DelaunayVolumeQuality {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeQualityErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidTopology,
     InvalidMetric,
@@ -123,99 +236,18 @@ pub fn evaluate_delaunay_volume_quality(
 ) -> Result<DelaunayVolumeQuality, DelaunayVolumeQualityError> {
     let metric_contexts =
         validate_inputs(topology, metric_request, provenance, options, cancellation)?;
-    let field = ResolvedMetricField::new(metric_request).map_err(metric_error)?;
-    let mut resolved_metrics = BTreeMap::new();
-    let mut adjacency = BTreeMap::new();
-    for (tetrahedron, context) in topology.tetrahedra.iter().zip(&metric_contexts) {
-        let identity = context.tetrahedron_node_identities;
-        let incident_entities = context
-            .incident_entity_ids
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        resolved_metrics.insert(
-            identity,
-            field.resolve(&incident_entities).map_err(metric_error)?,
-        );
-        adjacency.insert(
-            identity,
-            tetrahedron
-                .neighbors
-                .iter()
-                .flatten()
-                .map(|neighbor| {
-                    let neighbor = &topology.tetrahedra[*neighbor as usize];
-                    neighbor
-                        .vertex_indices
-                        .map(|vertex| topology.nodes[vertex as usize].identity)
-                })
-                .collect::<BTreeSet<_>>(),
-        );
-    }
-    grade_metric_evaluations(
-        metric_request.maximum_grading_ratio,
-        &adjacency,
-        &mut resolved_metrics,
-    )
-    .map_err(metric_error)?;
-    let mut tetrahedra = Vec::with_capacity(topology.tetrahedra.len());
-    let mut worst = None::<(f64, [StableDigest; 4])>;
-    let mut maximum_metric_edge_length = 0.0_f64;
-    let mut maximum_radius_edge_ratio = 0.0_f64;
-    let mut minimum_metric_scaled_jacobian = f64::INFINITY;
-
-    for (index, (tetrahedron, context)) in
-        topology.tetrahedra.iter().zip(&metric_contexts).enumerate()
-    {
-        checkpoint(index as u64, options, cancellation)?;
-        let region_id = tetrahedron.region_id.clone().ok_or_else(|| {
-            error(
-                DelaunayVolumeQualityErrorKind::InvalidTopology,
-                Some(index),
-                "every evaluated tetrahedron must have one assigned region",
-            )
-        })?;
-        let metric = resolved_metrics
-            .remove(&context.tetrahedron_node_identities)
-            .ok_or_else(|| {
-                error(
-                    DelaunayVolumeQualityErrorKind::InvalidMetricContext,
-                    Some(index),
-                    "graded metric inventory lost a tetrahedron",
-                )
-            })?;
-        let quality = evaluate_tetrahedron(
-            topology,
-            index,
-            region_id,
-            context.incident_entity_ids.clone(),
-            metric,
-            options,
-        )?;
-        maximum_metric_edge_length =
-            maximum_metric_edge_length.max(quality.maximum_metric_edge_length);
-        maximum_radius_edge_ratio = maximum_radius_edge_ratio.max(quality.metric_radius_edge_ratio);
-        minimum_metric_scaled_jacobian =
-            minimum_metric_scaled_jacobian.min(quality.metric_scaled_jacobian);
-        if quality.requires_refinement() {
-            let candidate = (quality.refinement_violation_ratio, quality.node_identities);
-            if worst.as_ref().is_none_or(|current| {
-                candidate.0.total_cmp(&current.0).is_gt()
-                    || candidate.0.total_cmp(&current.0).is_eq() && candidate.1 < current.1
-            }) {
-                worst = Some(candidate);
-            }
-        }
-        tetrahedra.push(quality);
-    }
-
-    let quality = DelaunayVolumeQuality {
-        tetrahedra,
-        worst_refinement_tetrahedron: worst.map(|(_, identity)| identity),
-        maximum_metric_edge_length,
-        maximum_radius_edge_ratio,
-        minimum_metric_scaled_jacobian,
-    };
+    let quality = evaluate_from_metric_contexts(
+        topology,
+        metric_request,
+        options,
+        metric_contexts,
+        stream::BoundaryProtection {
+            nodes: &boundary_node_identities(provenance),
+            facets: &protected_facet_identities(provenance),
+            provenance,
+        },
+        cancellation,
+    )?;
     validate_delaunay_volume_quality(
         topology,
         metric_request,
@@ -227,13 +259,143 @@ pub fn evaluate_delaunay_volume_quality(
     Ok(quality)
 }
 
-fn validate_inputs(
+/// Evaluates a topology produced by a checked internal mutation. The caller must
+/// already have admitted the metric request and persistent boundary provenance;
+/// the completed artifact is independently validated at the public boundary.
+pub(super) fn evaluate_delaunay_volume_quality_from_admitted_input(
     topology: &DelaunayVolumeTopology,
     metric_request: &MetricFieldRequest,
     provenance: &DelaunayVolumeProvenance,
     options: DelaunayVolumeQualityOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Vec<DelaunayVolumeMetricContext>, DelaunayVolumeQualityError> {
+) -> Result<DelaunayVolumeQuality, DelaunayVolumeQualityError> {
+    if topology.nodes.len() as u64 > options.maximum_nodes
+        || topology.tetrahedra.len() as u64 > options.maximum_tetrahedra
+    {
+        return Err(error(
+            DelaunayVolumeQualityErrorKind::ResourceLimit,
+            None,
+            "volume topology exceeds the quality evaluation inventory limit",
+        ));
+    }
+    let metric_contexts =
+        MetricContexts::from_admitted(topology, provenance, metric_request, options, cancellation)?;
+    evaluate_from_metric_contexts(
+        topology,
+        metric_request,
+        options,
+        metric_contexts,
+        stream::BoundaryProtection {
+            nodes: &boundary_node_identities(provenance),
+            facets: &protected_facet_identities(provenance),
+            provenance,
+        },
+        cancellation,
+    )
+}
+
+fn evaluate_from_metric_contexts(
+    topology: &DelaunayVolumeTopology,
+    metric_request: &MetricFieldRequest,
+    options: DelaunayVolumeQualityOptions,
+    metric_contexts: MetricContexts<'_>,
+    protection: stream::BoundaryProtection<'_>,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeQuality, DelaunayVolumeQualityError> {
+    let mut tetrahedra = Vec::with_capacity(topology.tetrahedra.len());
+    visit_from_metric_contexts(
+        topology,
+        metric_request,
+        options,
+        metric_contexts,
+        protection,
+        cancellation,
+        |_, quality| {
+            tetrahedra.push(quality);
+            Ok(())
+        },
+    )?;
+    summary::summarize(topology, tetrahedra, options, cancellation)
+}
+
+fn boundary_node_identities(provenance: &DelaunayVolumeProvenance) -> BTreeSet<StableDigest> {
+    provenance
+        .facets
+        .iter()
+        .flat_map(|facet| facet.node_identities)
+        .collect()
+}
+
+/// The published surface the volume stage must preserve: its triangles and, derived from the same
+/// triangles, its edges. An edge is protected because it belongs to the surface, whether or not a
+/// given tetrahedron also carries one of its triangles.
+pub(in crate::cdt) struct ProtectedFacets {
+    pub(in crate::cdt) facets: BTreeSet<[StableDigest; 3]>,
+    pub(in crate::cdt) edges: BTreeSet<[StableDigest; 2]>,
+}
+
+fn protected_facet_identities(provenance: &DelaunayVolumeProvenance) -> ProtectedFacets {
+    let facets = provenance
+        .facets
+        .iter()
+        .map(|facet| facet.node_identities)
+        .collect::<BTreeSet<_>>();
+    let edges = facets
+        .iter()
+        .flat_map(|&[a, b, c]| {
+            [[a, b], [a, c], [b, c]].map(|mut edge| {
+                edge.sort_unstable();
+                edge
+            })
+        })
+        .collect();
+    ProtectedFacets { facets, edges }
+}
+
+/// Vertex pairs of a tetrahedron's six edges, in the bit order of [`protected_edge_mask`].
+pub(in crate::cdt) const TETRAHEDRON_EDGES: [(usize, usize); 6] =
+    [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+
+/// Bit `k` is set when edge `TETRAHEDRON_EDGES[k]` is an edge of the published surface mesh,
+/// which the volume stage never splits. A tetrahedron can hold a surface edge without holding
+/// either surface triangle on it; that edge is still the surface stage's, not the volume's.
+fn protected_edge_mask(tetrahedron: [StableDigest; 4], protected: &ProtectedFacets) -> u8 {
+    let mut mask = 0u8;
+    for (bit, (left, right)) in TETRAHEDRON_EDGES.iter().enumerate() {
+        let mut edge = [tetrahedron[*left], tetrahedron[*right]];
+        edge.sort_unstable();
+        if protected.edges.contains(&edge) {
+            mask |= 1 << bit;
+        }
+    }
+    mask
+}
+
+fn protected_facet_count(tetrahedron: [StableDigest; 4], protected: &ProtectedFacets) -> u8 {
+    let protected_facets = &protected.facets;
+    (0..4)
+        .filter(|opposite| {
+            let mut facet = [StableDigest::ZERO; 3];
+            let mut cursor = 0;
+            for (index, identity) in tetrahedron.iter().copied().enumerate() {
+                if index != *opposite {
+                    facet[cursor] = identity;
+                    cursor += 1;
+                }
+            }
+            facet.sort_unstable();
+            protected_facets.contains(&facet)
+        })
+        .count() as u8
+}
+
+fn validate_inputs<'a>(
+    topology: &'a DelaunayVolumeTopology,
+    metric_request: &MetricFieldRequest,
+    provenance: &'a DelaunayVolumeProvenance,
+    options: DelaunayVolumeQualityOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<MetricContexts<'a>, DelaunayVolumeQualityError> {
     validate_options(options)?;
     metric_request.validate().map_err(metric_error)?;
     if topology.nodes.len() as u64 > options.maximum_nodes
@@ -256,13 +418,8 @@ fn validate_inputs(
             "every evaluated tetrahedron must have one assigned region",
         ));
     }
-    let rebuilt = build_delaunay_volume_topology_with_regions(
-        topology.nodes.clone(),
-        topology
-            .tetrahedra
-            .iter()
-            .map(|tetrahedron| (tetrahedron.vertex_indices, tetrahedron.region_id.clone()))
-            .collect(),
+    validate_canonical_volume_topology(
+        topology,
         DelaunayTopologyOptions {
             maximum_nodes: options.maximum_nodes,
             maximum_tetrahedra: options.maximum_tetrahedra,
@@ -282,26 +439,16 @@ fn validate_inputs(
         };
         error(kind, None, failure.to_string())
     })?;
-    if rebuilt != *topology {
-        return Err(error(
-            DelaunayVolumeQualityErrorKind::InvalidTopology,
-            None,
-            "volume topology is not in canonical checked form",
-        ));
-    }
-    let contexts = derive_delaunay_volume_metric_contexts(
-        topology,
-        provenance,
-        options.provenance,
-        cancellation,
-    )
-    .map_err(provenance_error)?;
-    validate_metric_contexts(topology, &contexts)?;
-    Ok(contexts)
+    validate_delaunay_volume_provenance(topology, provenance, options.provenance, cancellation)
+        .map_err(provenance_error)?;
+    MetricContexts::from_admitted(topology, provenance, metric_request, options, cancellation)
 }
 
 fn provenance_error(failure: DelaunayVolumeProvenanceError) -> DelaunayVolumeQualityError {
     let kind = match failure.kind {
+        DelaunayVolumeProvenanceErrorKind::Accounting(cause) => {
+            DelaunayVolumeQualityErrorKind::Accounting(cause)
+        }
         DelaunayVolumeProvenanceErrorKind::InvalidOptions => {
             DelaunayVolumeQualityErrorKind::InvalidOptions
         }

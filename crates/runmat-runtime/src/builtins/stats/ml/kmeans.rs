@@ -1,295 +1,48 @@
 //! k-means clustering compatibility surface.
 
-use std::cmp::Ordering;
-
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, KmeansDisplay, KmeansDistance as Distance,
+    KmeansEmptyAction as EmptyAction, KmeansOption, KmeansStart, KmeansStatsetField, KmeansToggle,
+    KMEANS_ERROR_INTERNAL as ERROR_INTERNAL,
+    KMEANS_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    KMEANS_INTEGER_CLUSTER_COUNT_EXTENSION, KMEANS_INTEGER_DATA_EXTENSION,
+    KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION, KMEANS_INTEGER_PARALLEL_TOGGLE_EXTENSION,
+    KMEANS_INTEGER_START_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Tensor, Value};
+use runmat_value::Value;
 
-use crate::builtins::common::{random, random_args::keyword_of, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+mod admission;
+mod cooperation;
+mod compute;
+mod geometry;
+mod options;
+mod output;
+#[cfg(test)]
+mod admission_tests;
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+use crate::builtins::common::random;
+use admission::{BorrowedOperands, OptionHeader};
+#[cfg(test)]
+use geometry::prepare_data;
+use geometry::{
+    preflight_cluster_count, preflight_observations, tensor_rows_cols, validate_options,
+};
+#[cfg(test)]
+use options::{bool_option, is_empty_numeric, parse_positive_usize};
+use options::{parse_k, parse_options};
+#[cfg(test)]
+use runmat_builtins::{KMEANS_EXTENSIONS, KMEANS_INTEGER_CAPABILITIES};
 
 const NAME: &str = "kmeans";
 const EPS: f64 = 1.0e-12;
 const DEFAULT_MAX_ITER: usize = 100;
 const MAX_WORK_CELLS: usize = 20_000_000;
-
-const OUTPUT_IDX: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "idx",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "One-based cluster index for each input observation.",
-};
-
-const OUTPUT_C: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Final cluster centroid matrix.",
-};
-
-const OUTPUT_SUMD: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sumd",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Within-cluster sums of point-to-centroid distances.",
-};
-
-const OUTPUT_D: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "D",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Distance from every observation to every centroid.",
-};
-
-const OUTPUTS_IDX: [BuiltinParamDescriptor; 1] = [OUTPUT_IDX];
-const OUTPUTS_IDX_C: [BuiltinParamDescriptor; 2] = [OUTPUT_IDX, OUTPUT_C];
-const OUTPUTS_IDX_C_SUMD: [BuiltinParamDescriptor; 3] = [OUTPUT_IDX, OUTPUT_C, OUTPUT_SUMD];
-const OUTPUTS_FULL: [BuiltinParamDescriptor; 4] = [OUTPUT_IDX, OUTPUT_C, OUTPUT_SUMD, OUTPUT_D];
-
-const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Observation matrix with observations in rows.",
-};
-
-const PARAM_K: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "k",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of clusters.",
-};
-
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description:
-        "Name-value options including Distance, Start, Replicates, MaxIter, EmptyAction, Display, OnlinePhase, and Options.",
-};
-
-const INPUTS_X_K: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_K];
-const INPUTS_FULL: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_K, PARAM_OPTIONS];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "idx = kmeans(X, k)",
-        inputs: &INPUTS_X_K,
-        outputs: &OUTPUTS_IDX,
-    },
-    BuiltinSignatureDescriptor {
-        label: "idx = kmeans(X, k, Name, Value)",
-        inputs: &INPUTS_FULL,
-        outputs: &OUTPUTS_IDX,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[idx, C] = kmeans(___)",
-        inputs: &INPUTS_FULL,
-        outputs: &OUTPUTS_IDX_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[idx, C, sumd] = kmeans(___)",
-        inputs: &INPUTS_FULL,
-        outputs: &OUTPUTS_IDX_C_SUMD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[idx, C, sumd, D] = kmeans(___)",
-        inputs: &INPUTS_FULL,
-        outputs: &OUTPUTS_FULL,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.KMEANS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:kmeans:InvalidArgument"),
-    when: "Inputs, cluster counts, starts, distance metrics, or name-value options are malformed.",
-    message: "kmeans: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.KMEANS.INTERNAL",
-    identifier: Some("RunMat:kmeans:Internal"),
-    when: "RunMat cannot allocate or construct kmeans outputs.",
-    message: "kmeans: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const KMEANS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "kmeans-integer-observation-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "kmeans with typed-integer observation data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KmeansIntegerObservationDataExtension"),
-};
-const INTEGER_CLUSTER_COUNT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "kmeans-integer-cluster-count",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "kmeans with a typed-integer cluster count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KmeansIntegerClusterCountExtension"),
-};
-const INTEGER_ITERATION_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "kmeans-integer-iteration-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "kmeans with typed-integer MaxIter or Replicates is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:KmeansIntegerIterationControlExtension"),
-    };
-const INTEGER_START_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "kmeans-integer-start-centroids",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "kmeans with typed-integer numeric start centroids is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KmeansIntegerStartCentroidsExtension"),
-};
-const INTEGER_PARALLEL_TOGGLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "kmeans-integer-parallel-toggle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "kmeans with typed-integer UseParallel or UseSubstreams is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KmeansIntegerParallelToggleExtension"),
-};
-
-pub const KMEANS_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    INTEGER_DATA_EXTENSION,
-    INTEGER_CLUSTER_COUNT_EXTENSION,
-    INTEGER_ITERATION_CONTROL_EXTENSION,
-    INTEGER_START_EXTENSION,
-    INTEGER_PARALLEL_TOGGLE_EXTENSION,
-];
-
-const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "The documented observation classes are single and double. RunMat admits typed integers only when every value is exactly representable at the binary64 clustering boundary.",
-}];
-const INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "k",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The documented positive-integer control is stored as single or double; RunMat decodes a typed integer exactly as a bounded host cluster count.",
-}];
-const INTEGER_ITERATION_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "MaxIter",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat decodes the positive iteration count directly from authoritative integer storage.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Replicates",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat decodes the positive replicate count directly from authoritative integer storage.",
-    },
-];
-const INTEGER_START_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "Start",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Numeric Start is documented as single or double. Typed start centroids must be individually exact in binary64 before clustering.",
-}];
-const INTEGER_PARALLEL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Options.UseParallel",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes:
-            "The documented field is logical; a typed numeric toggle is conservatively RunMat-only.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Options.UseSubstreams",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes:
-            "The documented field is logical; a typed numeric toggle is conservatively RunMat-only.",
-    },
-];
-
-pub const KMEANS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[idx, C, sumd, D] = kmeans(integer_X, k, ...)",
-        inputs: &INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Compatibility is decided before provider access; admitted integer data crosses one checked binary64 boundary. The current CPU fallback can return numeric outputs to the source provider when it supports them.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "kmeans(X, integer_k, ...)",
-        inputs: &INTEGER_K_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "No floating conversion is used to decode the RunMat-only typed cluster count.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "kmeans(X, k, MaxIter/Replicates=integer_control)",
-        inputs: &INTEGER_ITERATION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Direct name-value and statset MaxIter forms share the same independently declared typed-integer control extension.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "kmeans(X, k, Start=integer_centroids)",
-        inputs: &INTEGER_START_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The centroid array remains a numerical solver input, not a structural index, and therefore uses the checked binary64 boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "kmeans(X, k, Options.UseParallel/UseSubstreams=integer_toggle)",
-        inputs: &INTEGER_PARALLEL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The current CPU implementation accepts only false for these unsupported parallel controls; typed zero is separately mode-gated.",
-    },
-];
-
-fn kmeans_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn kmeans_error(
     message: impl Into<String>,
@@ -310,28 +63,40 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     kmeans_error(message, &ERROR_INTERNAL)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Distance {
-    SqEuclidean,
-    Cityblock,
-    Cosine,
-    Correlation,
-    Hamming,
+fn reserve_borrowed<T>(
+    values: &mut Vec<T>,
+    additional: usize,
+    message: &'static str,
+) -> BuiltinResult<()> {
+    values
+        .try_reserve(additional)
+        .map_err(|source| internal_with_source(message, source))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EmptyAction {
-    Singleton,
-    Error,
-    Drop,
+fn internal_with_source(
+    message: impl Into<String>,
+    source: std::collections::TryReserveError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .with_source(source);
+    if let Some(identifier) = ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn with_kmeans_context(mut error: RuntimeError) -> RuntimeError {
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(NAME);
+    }
+    error
 }
 
 #[derive(Clone, Debug)]
 enum StartSpec {
-    Plus,
-    Sample,
-    Uniform,
-    Cluster,
+    Named(KmeansStart),
     Numeric(Vec<Vec<f64>>),
     NumericPages(Vec<Vec<Vec<f64>>>),
 }
@@ -354,7 +119,7 @@ impl Default for Options {
             max_iter: DEFAULT_MAX_ITER,
             online_phase: false,
             replicates: 1,
-            start: StartSpec::Plus,
+            start: StartSpec::Named(KmeansStart::Plus),
         }
     }
 }
@@ -378,30 +143,84 @@ struct ReplicateResult {
 
 #[runtime_builtin(
     name = "kmeans",
-    category = "stats/ml",
-    summary = "Partition observations into k clusters with k-means clustering.",
-    keywords = "kmeans,k-means,clustering,statistics,machine learning",
-    type_resolver(kmeans_type),
-    descriptor(crate::builtins::stats::ml::kmeans::KMEANS_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::kmeans::KMEANS_EXTENSIONS),
-    integer_capabilities(crate::builtins::stats::ml::kmeans::KMEANS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::kmeans"
 )]
+pub(crate) async fn kmeans_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    k: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    kmeans_in_runtime(runtime.as_ref(), x, k, rest).await
+}
+
+#[cfg(test)]
 async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_kmeans_extensions(&x, &k, &rest)?;
-    ensure_exact_integer_boundary(&x, "observation data").await?;
-    ensure_exact_start_boundary(&rest).await?;
+    kmeans_in_runtime(
+        None,
+        x,
+        k,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
+}
+
+async fn kmeans_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    x: Value,
+    k: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let mut cooperation = cooperation::KmeansCooperation::new(runtime);
+    cooperation.completed(0).await?;
+    if crate::output_count::current_output_count().is_some_and(|count| count > 4) {
+        return Err(invalid("kmeans: too many output arguments; maximum is 4"));
+    }
+    let mut borrowed = BorrowedOperands::new();
+    borrowed.protect_value(&x)?;
+    borrowed.protect_value(&k)?;
+    for value in &rest {
+        borrowed.protect_value(value)?;
+    }
+    let headers = admission::parse_option_headers(rest)?;
+    preflight_observations(&x)?;
+    preflight_cluster_count(&k)?;
+    ensure_kmeans_extensions(&x, &k, &headers)?;
+    let options = admission::admit_option_values_cooperative(headers, &mut cooperation).await?;
+    if !matches!(&k, Value::GpuTensor(_)) && !admission::is_empty_numeric(&k) {
+        options::parse_positive_usize(&k, "k")?;
+    }
+    geometry::preflight_effective_start(&x, &k, &options)?;
     let output_source = value_gpu_source(&x);
+    borrowed.record_consumed(&x)?;
+    let x_was_integer = typed_integer(&x);
     let x = gather(x).await?;
+    if x_was_integer && !admission::numeric_value_is_exact_cooperative(&x, &mut cooperation).await?
+    {
+        return Err(invalid(
+            "kmeans: typed-integer observation data must be exactly representable as double",
+        ));
+    }
+    borrowed.record_consumed(&k)?;
     let k = gather(k).await?;
-    let rest = gather_all(rest).await?;
-    let mut options = parse_options(rest)?;
-    let data = prepare_data(x, options.distance)?;
+    let mut options = parse_options(options, &mut borrowed, &mut cooperation).await?;
+    let data = geometry::prepare_data_cooperative(x, options.distance, &mut cooperation).await?;
     let k = parse_k(&k, &options.start)?;
-    validate_options(&mut options, k, &data)?;
-    let result = run_kmeans(&data, k, &options)?;
-    let value = outputs_for_count(result, &data)?;
-    restore_kmeans_value(value, output_source.as_ref())
+    validate_options(&mut options, k, &data, &mut cooperation).await?;
+    let result = compute::run_kmeans_cooperative(&data, k, &options, &mut cooperation).await?;
+    let value = output::outputs_for_count_cooperative(result, &data, &mut cooperation).await?;
+    cooperation.completed(0).await?;
+    restore_kmeans_value_cooperative(value, output_source.as_ref(), &borrowed, &mut cooperation)
+        .await
+}
+
+#[cfg(test)]
+fn parse_option_headers(args: &[Value]) -> BuiltinResult<Vec<OptionHeader>> {
+    admission::parse_option_headers(crate::builtins::common::test_support::builtin_arguments(
+        args.to_vec(),
+    ))
 }
 
 fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {
@@ -411,1402 +230,206 @@ fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHan
     Some(handle.clone())
 }
 
+#[cfg(test)]
 fn restore_kmeans_value(
     value: Value,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    borrowed: &BorrowedOperands,
+) -> BuiltinResult<Value> {
+    futures::executor::block_on(restore_kmeans_value_cooperative(
+        value,
+        source,
+        borrowed,
+        &mut cooperation::KmeansCooperation::new(None),
+    ))
+}
+
+async fn restore_kmeans_value_cooperative(
+    value: Value,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    borrowed: &BorrowedOperands,
+    cooperation: &mut cooperation::KmeansCooperation,
 ) -> BuiltinResult<Value> {
     let Some(source) = source else {
         return Ok(value);
     };
     match value {
-        Value::Tensor(tensor) => {
-            let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
-                source,
-                Value::Tensor(tensor),
-                NAME,
-            )?;
-            if runmat_accelerate_api::handle_is_explicit(source)
-                && !matches!(restored, Value::GpuTensor(_))
-            {
-                return Err(internal(
-                    "kmeans: provider cannot preserve explicit gpuArray output residency",
-                ));
+        Value::Tensor(_) => {
+            let protected = borrowed_handle_refs(borrowed.protected())?;
+            let intent = borrowed_handle_refs(borrowed.intent_sources())?;
+            let restored = restore_one_kmeans_output(value, source, &protected, &intent)?;
+            if let Err(error) = cooperation.completed(0).await {
+                return Err(retire_staged_outputs(vec![restored], error));
             }
             Ok(restored)
         }
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|value| restore_kmeans_value(value, Some(source)))
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(Value::OutputList),
+        Value::OutputList(values) => {
+            let mut restored = Vec::new();
+            reserve_borrowed(
+                &mut restored,
+                values.len(),
+                "kmeans: restored outputs exceed available memory",
+            )?;
+            let values = values.try_into_owned().map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
+            for value in values {
+                let mut protected = match borrowed_handle_refs(borrowed.protected()) {
+                    Ok(handles) => handles,
+                    Err(error) => return Err(retire_staged_outputs(restored, error)),
+                };
+                if let Err(error) = reserve_borrowed(
+                    &mut protected,
+                    restored.len(),
+                    "kmeans: borrowed output handles exceed available memory",
+                ) {
+                    return Err(retire_staged_outputs(restored, error));
+                }
+                let intent = match borrowed_handle_refs(borrowed.intent_sources()) {
+                    Ok(handles) => handles,
+                    Err(error) => return Err(retire_staged_outputs(restored, error)),
+                };
+                protected.extend(restored.iter().filter_map(|value| match value {
+                    Value::GpuTensor(handle) => Some(handle),
+                    _ => None,
+                }));
+                match restore_one_kmeans_output(value, source, &protected, &intent) {
+                    Ok(value) => restored.push(value),
+                    Err(error) => return Err(retire_staged_outputs(restored, error)),
+                }
+                if let Err(error) = cooperation.completed(0).await {
+                    return Err(retire_staged_outputs(restored, error));
+                }
+            }
+            Ok(Value::output_list(restored))
+        }
         other => Ok(other),
     }
+}
+
+fn borrowed_handle_refs(
+    handles: &[runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Vec<&runmat_accelerate_api::GpuTensorHandle>> {
+    let mut refs = Vec::new();
+    reserve_borrowed(
+        &mut refs,
+        handles.len(),
+        "kmeans: borrowed output handles exceed available memory",
+    )?;
+    refs.extend(handles.iter());
+    Ok(refs)
+}
+
+fn retire_staged_outputs(values: Vec<Value>, mut error: RuntimeError) -> RuntimeError {
+    for value in values {
+        if let Value::GpuTensor(handle) = value {
+            error = crate::builtins::common::gpu_helpers::reject_gpu_output(handle, error);
+        }
+    }
+    error
+}
+
+fn restore_one_kmeans_output(
+    value: Value,
+    source: &runmat_accelerate_api::GpuTensorHandle,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+    intent: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Value> {
+    let restored = match value {
+        Value::Tensor(tensor) => {
+            crate::builtins::common::gpu_helpers::restore_class_preserving_value_with_operands(
+                source,
+                Value::Tensor(tensor),
+                NAME,
+                crate::builtins::common::gpu_helpers::RestoreOperandContext::new(protected, intent),
+            )?
+        }
+        other => other,
+    };
+    if runmat_accelerate_api::handle_is_explicit(source) && !matches!(restored, Value::GpuTensor(_))
+    {
+        return Err(internal(
+            "kmeans: provider cannot preserve explicit gpuArray output residency",
+        ));
+    }
+    Ok(restored)
 }
 
 fn typed_integer(value: &Value) -> bool {
     crate::builtins::common::validation::value_has_native_integer_class(value)
 }
 
-fn ensure_kmeans_extensions(x: &Value, k: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_kmeans_extensions(x: &Value, k: &Value, options: &[OptionHeader]) -> BuiltinResult<()> {
     if typed_integer(x) {
-        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DATA_EXTENSION, NAME)?;
-    }
-    if typed_integer(k) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &INTEGER_CLUSTER_COUNT_EXTENSION,
+            &KMEANS_INTEGER_DATA_EXTENSION,
             NAME,
         )?;
     }
-    let mut idx = 0;
-    while idx + 1 < rest.len() {
-        let Some(name) = keyword_of(&rest[idx]) else {
-            idx += 1;
-            continue;
-        };
-        let value = &rest[idx + 1];
-        match name.trim().to_ascii_lowercase().as_str() {
-            "start" if typed_integer(value) => {
+    if typed_integer(k) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &KMEANS_INTEGER_CLUSTER_COUNT_EXTENSION,
+            NAME,
+        )?;
+    }
+    for option in options {
+        match option {
+            OptionHeader::Argument {
+                kind: KmeansOption::Start,
+                value,
+            } if typed_integer(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
-                    &INTEGER_START_EXTENSION,
+                    &KMEANS_INTEGER_START_EXTENSION,
                     NAME,
                 )?;
             }
-            "maxiter" | "replicates" if typed_integer(value) => {
+            OptionHeader::Argument {
+                kind: KmeansOption::MaxIter | KmeansOption::Replicates,
+                value,
+            } if typed_integer(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
-                    &INTEGER_ITERATION_CONTROL_EXTENSION,
+                    &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
                     NAME,
                 )?;
             }
-            "options" => {
-                if let Value::Struct(options) = value {
-                    for (field, value) in &options.fields {
-                        if field.eq_ignore_ascii_case("maxiter") && typed_integer(value) {
+            OptionHeader::Statset(fields) => {
+                for field in fields {
+                    match field.kind {
+                        KmeansStatsetField::MaxIter if typed_integer(&field.value) => {
                             crate::compatibility::ensure_builtin_extension_enabled(
-                                &INTEGER_ITERATION_CONTROL_EXTENSION,
+                                &KMEANS_INTEGER_ITERATION_CONTROL_EXTENSION,
                                 NAME,
                             )?;
                         }
-                        if matches!(
-                            field.to_ascii_lowercase().as_str(),
-                            "useparallel" | "usesubstreams"
-                        ) && typed_integer(value)
+                        KmeansStatsetField::UseParallel | KmeansStatsetField::UseSubstreams
+                            if typed_integer(&field.value) =>
                         {
                             crate::compatibility::ensure_builtin_extension_enabled(
-                                &INTEGER_PARALLEL_TOGGLE_EXTENSION,
+                                &KMEANS_INTEGER_PARALLEL_TOGGLE_EXTENSION,
                                 NAME,
                             )?;
                         }
+                        _ => {}
                     }
                 }
             }
             _ => {}
         }
-        idx += 2;
-    }
-    Ok(())
-}
-
-async fn ensure_exact_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
-    if typed_integer(value)
-        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
-            .await?
-    {
-        return Err(invalid(format!(
-            "kmeans: typed-integer {role} must be exactly representable as double"
-        )));
-    }
-    Ok(())
-}
-
-async fn ensure_exact_start_boundary(rest: &[Value]) -> BuiltinResult<()> {
-    let mut idx = 0;
-    while idx + 1 < rest.len() {
-        if keyword_of(&rest[idx]).is_some_and(|name| name.eq_ignore_ascii_case("start")) {
-            ensure_exact_integer_boundary(&rest[idx + 1], "Start values").await?;
-        }
-        idx += 2;
     }
     Ok(())
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|err| invalid(format!("kmeans: {err}")))
-}
-
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
-    }
-    Ok(out)
-}
-
-fn parse_options(args: Vec<Value>) -> BuiltinResult<Options> {
-    if !args.len().is_multiple_of(2) {
-        return Err(invalid("kmeans: options must be name-value pairs"));
-    }
-    let mut options = Options::default();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let name = keyword_of(&args[idx])
-            .ok_or_else(|| invalid("kmeans: option name must be text"))?
-            .to_ascii_lowercase();
-        let value = &args[idx + 1];
-        match name.as_str() {
-            "distance" => options.distance = parse_distance(value)?,
-            "emptyaction" => options.empty_action = parse_empty_action(value)?,
-            "maxiter" => options.max_iter = parse_positive_usize(value, "MaxIter")?,
-            "replicates" => options.replicates = parse_positive_usize(value, "Replicates")?,
-            "start" => options.start = parse_start(value)?,
-            "display" => {
-                let display = keyword_of(value)
-                    .ok_or_else(|| invalid("kmeans: Display must be 'off', 'final', or 'iter'"))?;
-                match display.to_ascii_lowercase().as_str() {
-                    "off" | "final" | "iter" => {}
-                    other => return Err(invalid(format!("kmeans: unsupported Display '{other}'"))),
-                }
-            }
-            "onlinephase" => {
-                let flag = keyword_of(value)
-                    .ok_or_else(|| invalid("kmeans: OnlinePhase must be 'off' or 'on'"))?;
-                match flag.to_ascii_lowercase().as_str() {
-                    "off" => options.online_phase = false,
-                    "on" => options.online_phase = true,
-                    other => {
-                        return Err(invalid(format!(
-                            "kmeans: unsupported OnlinePhase '{other}'"
-                        )))
-                    }
-                }
-            }
-            "options" => match value {
-                Value::Struct(options_struct) => {
-                    apply_options_struct(&mut options, options_struct)?
-                }
-                _ if is_empty_numeric(value) => {}
-                _ => {
-                    return Err(invalid(
-                        "kmeans: Options must be [] or a statset options struct",
-                    ))
-                }
-            },
-            other => return Err(invalid(format!("kmeans: unsupported option '{other}'"))),
-        }
-        idx += 2;
-    }
-    Ok(options)
-}
-
-fn parse_distance(value: &Value) -> BuiltinResult<Distance> {
-    let text = keyword_of(value).ok_or_else(|| invalid("kmeans: Distance must be text"))?;
-    match text.to_ascii_lowercase().as_str() {
-        "sqeuclidean" | "squaredeuclidean" | "squared euclidean" => Ok(Distance::SqEuclidean),
-        "cityblock" | "city block" | "manhattan" => Ok(Distance::Cityblock),
-        "cosine" => Ok(Distance::Cosine),
-        "correlation" => Ok(Distance::Correlation),
-        "hamming" => Ok(Distance::Hamming),
-        other => Err(invalid(format!("kmeans: unsupported Distance '{other}'"))),
-    }
-}
-
-fn parse_empty_action(value: &Value) -> BuiltinResult<EmptyAction> {
-    let text = keyword_of(value).ok_or_else(|| invalid("kmeans: EmptyAction must be text"))?;
-    match text.to_ascii_lowercase().as_str() {
-        "singleton" => Ok(EmptyAction::Singleton),
-        "error" => Ok(EmptyAction::Error),
-        "drop" => Ok(EmptyAction::Drop),
-        other => Err(invalid(format!(
-            "kmeans: unsupported EmptyAction '{other}'"
-        ))),
-    }
-}
-
-fn parse_start(value: &Value) -> BuiltinResult<StartSpec> {
-    if let Some(text) = keyword_of(value) {
-        return match text.to_ascii_lowercase().as_str() {
-            "plus" => Ok(StartSpec::Plus),
-            "sample" => Ok(StartSpec::Sample),
-            "uniform" => Ok(StartSpec::Uniform),
-            "cluster" => Ok(StartSpec::Cluster),
-            other => Err(invalid(format!("kmeans: unsupported Start '{other}'"))),
-        };
-    }
-    let tensor = tensor::value_into_tensor_for(NAME, value.clone())
-        .map_err(|err| invalid(format!("kmeans: {err}")))?;
-    if tensor.shape.len() > 3 {
-        return Err(invalid(
-            "kmeans: numeric Start must be a matrix or 3-D array",
-        ));
-    }
-    let values = tensor::tensor_values_f64(&tensor);
-    if tensor.shape.len() == 3 {
-        let k = tensor.shape[0];
-        let cols = tensor.shape[1];
-        let reps = tensor.shape[2];
-        let mut pages = Vec::with_capacity(reps);
-        for page in 0..reps {
-            let mut centers = vec![vec![0.0; cols]; k];
-            for col in 0..cols {
-                for (row, center_row) in centers.iter_mut().enumerate().take(k) {
-                    let offset = row + col * k + page * k * cols;
-                    center_row[col] = values[offset];
-                }
-            }
-            pages.push(centers);
-        }
-        Ok(StartSpec::NumericPages(pages))
+    // Admission leaves only direct numeric operands here. Keep owned host
+    // payloads in place; route resident operands through the shared owner-
+    // validating download path.
+    if matches!(&value, Value::GpuTensor(_)) {
+        gather_if_needed_async(&value)
+            .await
+            .map_err(with_kmeans_context)
     } else {
-        let (rows, cols) = tensor_rows_cols(&tensor);
-        let mut centers = vec![vec![0.0; cols]; rows];
-        for col in 0..cols {
-            for (row, center_row) in centers.iter_mut().enumerate().take(rows) {
-                center_row[col] = values[col * rows + row];
-            }
-        }
-        Ok(StartSpec::Numeric(centers))
-    }
-}
-
-fn parse_positive_usize(value: &Value, label: &str) -> BuiltinResult<usize> {
-    if let Some(integer) = tensor::scalar_integer_value(value) {
-        return integer
-            .try_to_usize()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| invalid(format!("kmeans: {label} must be a positive integer scalar")));
-    }
-    let raw = scalar_number(value)
-        .ok_or_else(|| invalid(format!("kmeans: {label} must be a positive integer scalar")))?;
-    if !raw.is_finite() || raw < 1.0 || raw.fract().abs() > EPS {
-        return Err(invalid(format!(
-            "kmeans: {label} must be a positive integer scalar"
-        )));
-    }
-    Ok(raw as usize)
-}
-
-fn parse_k(value: &Value, start: &StartSpec) -> BuiltinResult<usize> {
-    if is_empty_numeric(value) {
-        return infer_k_from_start(start).ok_or_else(|| {
-            invalid("kmeans: k can be [] only when Start is a numeric start matrix or array")
-        });
-    }
-    parse_positive_usize(value, "k")
-}
-
-fn infer_k_from_start(start: &StartSpec) -> Option<usize> {
-    match start {
-        StartSpec::Numeric(centers) => Some(centers.len()),
-        StartSpec::NumericPages(pages) => pages.first().map(Vec::len),
-        _ => None,
-    }
-}
-
-fn scalar_number(value: &Value) -> Option<f64> {
-    if let Some(integer) = tensor::scalar_integer_value(value) {
-        return Some(integer.to_f64());
-    }
-    match value {
-        Value::Num(value) => Some(*value),
-        Value::Bool(value) => Some(if *value { 1.0 } else { 0.0 }),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            Some(tensor::tensor_value_f64(tensor, 0))
-        }
-        _ => None,
-    }
-}
-
-fn is_empty_numeric(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0)
-}
-
-fn apply_options_struct(options: &mut Options, value: &StructValue) -> BuiltinResult<()> {
-    for (name, field) in &value.fields {
-        if is_empty_option_value(field) {
-            continue;
-        }
-        match name.to_ascii_lowercase().as_str() {
-            "maxiter" => options.max_iter = parse_positive_usize(field, "Options.MaxIter")?,
-            "display" => {
-                let display = keyword_of(field).ok_or_else(|| {
-                    invalid("kmeans: Options.Display must be 'off', 'final', or 'iter'")
-                })?;
-                match display.to_ascii_lowercase().as_str() {
-                    "off" | "final" | "iter" => {}
-                    other => {
-                        return Err(invalid(format!(
-                            "kmeans: unsupported Options.Display '{other}'"
-                        )))
-                    }
-                }
-            }
-            "useparallel" | "usesubstreams" => {
-                if bool_option(field)? {
-                    return Err(invalid(format!(
-                        "kmeans: Options.{name} is not supported by the CPU runtime"
-                    )));
-                }
-            }
-            "streams" => {
-                if !is_empty_numeric(field) {
-                    return Err(invalid(
-                        "kmeans: Options.Streams is not supported by the CPU runtime",
-                    ));
-                }
-            }
-            "tolx" | "tolfun" => {
-                let value = scalar_number(field).ok_or_else(|| {
-                    invalid(format!("kmeans: Options.{name} must be a numeric scalar"))
-                })?;
-                if !value.is_finite() || value < 0.0 {
-                    return Err(invalid(format!(
-                        "kmeans: Options.{name} must be a nonnegative finite scalar"
-                    )));
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-fn is_empty_option_value(value: &Value) -> bool {
-    match value {
-        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
-        Value::LogicalArray(array) => array.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::StringArray(array) => array.data.is_empty(),
-        Value::CharArray(array) => array.data.is_empty(),
-        _ => false,
-    }
-}
-
-fn bool_option(value: &Value) -> BuiltinResult<bool> {
-    if let Some(integer) = tensor::scalar_integer_value(value) {
-        return Ok(!integer.is_zero());
-    }
-    match value {
-        Value::Bool(value) => Ok(*value),
-        Value::Num(value) => Ok(*value != 0.0),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
-            Ok(tensor::tensor_value_f64(tensor, 0) != 0.0)
-        }
-        other => Err(invalid(format!(
-            "kmeans: option value must be a logical scalar, got {other:?}"
-        ))),
-    }
-}
-
-fn prepare_data(value: Value, distance: Distance) -> BuiltinResult<PreparedData> {
-    let tensor = tensor::value_into_tensor_for(NAME, value)
-        .map_err(|err| invalid(format!("kmeans: {err}")))?;
-    if tensor.shape.len() > 2 {
-        return Err(invalid("kmeans: X must be a numeric vector or 2-D matrix"));
-    }
-    let values = tensor::tensor_values_f64_cow(&tensor);
-    let (raw_rows, raw_cols) = tensor_rows_cols(&tensor);
-    let vector_as_column = raw_rows == 1 || raw_cols == 1;
-    let original_row_count = if vector_as_column {
-        values.len()
-    } else {
-        raw_rows
-    };
-    let cols = if vector_as_column { 1 } else { raw_cols };
-    let mut rows = Vec::new();
-    let mut original_to_valid = Vec::with_capacity(original_row_count);
-    for row in 0..original_row_count {
-        let mut row_values = Vec::with_capacity(cols);
-        let mut has_nan = false;
-        for col in 0..cols {
-            let value: f64 = if vector_as_column {
-                values[row]
-            } else {
-                values[col * raw_rows + row]
-            };
-            if value.is_nan() {
-                has_nan = true;
-            } else if !value.is_finite() {
-                return Err(invalid("kmeans: X cannot contain Inf values"));
-            }
-            row_values.push(value);
-        }
-        if has_nan {
-            original_to_valid.push(None);
-        } else {
-            let transformed = transform_row(&row_values, distance)?;
-            if transformed.iter().any(|value| value.is_nan()) {
-                original_to_valid.push(None);
-            } else {
-                original_to_valid.push(Some(rows.len()));
-                rows.push(transformed);
-            }
-        }
-    }
-    if rows.is_empty() {
-        return Err(invalid(
-            "kmeans: X must contain at least one complete observation",
-        ));
-    }
-    Ok(PreparedData {
-        rows,
-        original_row_count,
-        original_to_valid,
-        cols,
-    })
-}
-
-fn tensor_rows_cols(tensor: &Tensor) -> (usize, usize) {
-    match tensor.shape.as_slice() {
-        [] => (1, 1),
-        [n] => (*n, 1),
-        [rows, cols, ..] => (*rows, *cols),
-    }
-}
-
-fn transform_row(row: &[f64], distance: Distance) -> BuiltinResult<Vec<f64>> {
-    match distance {
-        Distance::Cosine => {
-            let norm = row.iter().map(|value| value * value).sum::<f64>().sqrt();
-            if norm <= EPS {
-                Ok(vec![f64::NAN; row.len()])
-            } else {
-                Ok(row.iter().map(|value| value / norm).collect())
-            }
-        }
-        Distance::Correlation => {
-            if row.is_empty() {
-                return Ok(Vec::new());
-            }
-            let mean = row.iter().sum::<f64>() / row.len() as f64;
-            let centered = row.iter().map(|value| value - mean).collect::<Vec<_>>();
-            let norm = centered
-                .iter()
-                .map(|value| value * value)
-                .sum::<f64>()
-                .sqrt();
-            if norm <= EPS {
-                Ok(vec![f64::NAN; row.len()])
-            } else {
-                Ok(centered.into_iter().map(|value| value / norm).collect())
-            }
-        }
-        Distance::Hamming => {
-            if row.iter().any(|value| *value != 0.0 && *value != 1.0) {
-                return Err(invalid("kmeans: Hamming distance requires binary X values"));
-            }
-            Ok(row.to_vec())
-        }
-        _ => Ok(row.to_vec()),
-    }
-}
-
-fn validate_options(options: &mut Options, k: usize, data: &PreparedData) -> BuiltinResult<()> {
-    match &mut options.start {
-        StartSpec::Numeric(centers) => {
-            validate_centers(centers, k, data.cols)?;
-            transform_centers(centers, options.distance)?;
-            options.replicates = 1;
-        }
-        StartSpec::NumericPages(pages) => {
-            if pages.is_empty() {
-                return Err(invalid(
-                    "kmeans: numeric Start array must have at least one page",
-                ));
-            }
-            for centers in &mut *pages {
-                validate_centers(centers, k, data.cols)?;
-                transform_centers(centers, options.distance)?;
-            }
-            options.replicates = pages.len();
-        }
-        StartSpec::Uniform if options.distance == Distance::Hamming => {
-            return Err(invalid(
-                "kmeans: Start 'uniform' is not valid with Hamming distance",
-            ));
-        }
-        _ => {}
-    }
-    let center_work = k
-        .checked_mul(data.cols)
-        .and_then(|value| value.checked_mul(options.replicates))
-        .ok_or_else(|| internal("kmeans: work size overflow"))?;
-    let assignment_work = data
-        .rows
-        .len()
-        .checked_mul(k)
-        .ok_or_else(|| internal("kmeans: assignment work size overflow"))?;
-    let d_work = data
-        .original_row_count
-        .checked_mul(k)
-        .ok_or_else(|| internal("kmeans: distance output size overflow"))?;
-    if center_work > MAX_WORK_CELLS || assignment_work > MAX_WORK_CELLS || d_work > MAX_WORK_CELLS {
-        return Err(invalid("kmeans: requested clustering work is too large"));
-    }
-    Ok(())
-}
-
-fn transform_centers(centers: &mut [Vec<f64>], distance: Distance) -> BuiltinResult<()> {
-    for center in centers {
-        let transformed = transform_row(center, distance)?;
-        if transformed.iter().any(|value| value.is_nan()) {
-            return Err(invalid(
-                "kmeans: numeric Start contains a degenerate centroid for the selected Distance",
-            ));
-        }
-        *center = transformed;
-    }
-    Ok(())
-}
-
-fn validate_centers(centers: &[Vec<f64>], k: usize, cols: usize) -> BuiltinResult<()> {
-    if centers.len() != k || centers.iter().any(|row| row.len() != cols) {
-        return Err(invalid(
-            "kmeans: numeric Start must be k-by-p or k-by-p-by-r",
-        ));
-    }
-    if centers
-        .iter()
-        .flat_map(|row| row.iter())
-        .any(|value| !value.is_finite())
-    {
-        return Err(invalid("kmeans: numeric Start values must be finite"));
-    }
-    Ok(())
-}
-
-fn run_kmeans(data: &PreparedData, k: usize, options: &Options) -> BuiltinResult<ReplicateResult> {
-    let starts = initial_centers(data, k, options)?;
-    let mut best = None;
-    for centers in starts {
-        let result = run_replicate(data, centers, options)?;
-        if best
-            .as_ref()
-            .map(|current: &ReplicateResult| result.objective < current.objective)
-            .unwrap_or(true)
-        {
-            best = Some(result);
-        }
-    }
-    best.ok_or_else(|| internal("kmeans: no replicate produced a result"))
-}
-
-fn initial_centers(
-    data: &PreparedData,
-    k: usize,
-    options: &Options,
-) -> BuiltinResult<Vec<Vec<Vec<f64>>>> {
-    match &options.start {
-        StartSpec::Numeric(centers) => Ok(vec![centers.clone()]),
-        StartSpec::NumericPages(pages) => Ok(pages.clone()),
-        _ if k > data.rows.len() && options.empty_action != EmptyAction::Drop => Err(invalid(
-            "kmeans: k cannot exceed the number of complete observations unless EmptyAction is 'drop'",
-        )),
-        StartSpec::Plus => (0..options.replicates)
-            .map(|_| plus_start(data, k, options.distance))
-            .collect(),
-        StartSpec::Sample => (0..options.replicates)
-            .map(|_| sample_start(data, k))
-            .collect(),
-        StartSpec::Uniform => (0..options.replicates)
-            .map(|_| uniform_start(data, k))
-            .collect(),
-        StartSpec::Cluster => (0..options.replicates)
-            .map(|_| cluster_start(data, k, options))
-            .collect(),
-    }
-}
-
-fn sample_start(data: &PreparedData, k: usize) -> BuiltinResult<Vec<Vec<f64>>> {
-    if k > data.rows.len() {
-        return Err(invalid(
-            "kmeans: Start 'sample' requires k no larger than the number of complete observations",
-        ));
-    }
-    let mut scored = random::generate_uniform(data.rows.len(), NAME)?
-        .into_iter()
-        .enumerate()
-        .collect::<Vec<_>>();
-    scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
-    Ok(scored
-        .into_iter()
-        .take(k)
-        .map(|(idx, _)| data.rows[idx].clone())
-        .collect())
-}
-
-fn plus_start(data: &PreparedData, k: usize, distance: Distance) -> BuiltinResult<Vec<Vec<f64>>> {
-    if k > data.rows.len() {
-        return Err(invalid(
-            "kmeans: Start 'plus' requires k no larger than the number of complete observations",
-        ));
-    }
-    let uniforms = random::generate_uniform(k.max(1), NAME)?;
-    let first = ((uniforms[0] * data.rows.len() as f64).floor() as usize).min(data.rows.len() - 1);
-    let mut centers = vec![data.rows[first].clone()];
-    while centers.len() < k {
-        let mut weights = Vec::with_capacity(data.rows.len());
-        let mut total = 0.0;
-        for row in &data.rows {
-            let best = centers
-                .iter()
-                .map(|center| distance_value(row, center, distance))
-                .fold(f64::INFINITY, f64::min);
-            let weight = if best.is_finite() { best.max(0.0) } else { 0.0 };
-            weights.push(weight);
-            total += weight;
-        }
-        let next = if total <= EPS {
-            first_unused_row(data, &centers, distance).unwrap_or(0)
-        } else {
-            let mut threshold = uniforms[centers.len()] * total;
-            let mut selected = data.rows.len() - 1;
-            for (idx, weight) in weights.iter().enumerate() {
-                threshold -= *weight;
-                if threshold <= 0.0 {
-                    selected = idx;
-                    break;
-                }
-            }
-            selected
-        };
-        centers.push(data.rows[next].clone());
-    }
-    Ok(centers)
-}
-
-fn first_unused_row(
-    data: &PreparedData,
-    centers: &[Vec<f64>],
-    distance: Distance,
-) -> Option<usize> {
-    data.rows.iter().position(|row| {
-        centers
-            .iter()
-            .all(|center| distance_value(row, center, distance) > EPS)
-    })
-}
-
-fn uniform_start(data: &PreparedData, k: usize) -> BuiltinResult<Vec<Vec<f64>>> {
-    let cols = data.cols;
-    let mut mins = vec![f64::INFINITY; cols];
-    let mut maxs = vec![f64::NEG_INFINITY; cols];
-    for row in &data.rows {
-        for col in 0..cols {
-            mins[col] = mins[col].min(row[col]);
-            maxs[col] = maxs[col].max(row[col]);
-        }
-    }
-    let uniforms = random::generate_uniform(k * cols, NAME)?;
-    let mut centers = vec![vec![0.0; cols]; k];
-    for center in 0..k {
-        for col in 0..cols {
-            let lo = mins[col];
-            let hi = maxs[col];
-            centers[center][col] = if hi > lo {
-                lo + (hi - lo) * uniforms[center + col * k]
-            } else {
-                lo
-            };
-        }
-    }
-    Ok(centers)
-}
-
-fn cluster_start(data: &PreparedData, k: usize, options: &Options) -> BuiltinResult<Vec<Vec<f64>>> {
-    let sample_size = data.rows.len().div_ceil(10).max(k).min(data.rows.len());
-    let rows = if sample_size == data.rows.len() {
-        data.rows.clone()
-    } else {
-        sample_start(data, sample_size)?
-    };
-    let subset = PreparedData {
-        rows,
-        original_row_count: sample_size,
-        original_to_valid: (0..sample_size).map(Some).collect(),
-        cols: data.cols,
-    };
-    if subset.rows.len() == k {
-        return Ok(subset.rows);
-    }
-    let centers = plus_start(&subset, k, options.distance)?;
-    let preliminary = Options {
-        distance: options.distance,
-        empty_action: EmptyAction::Singleton,
-        max_iter: options.max_iter.clamp(1, 10),
-        online_phase: false,
-        replicates: 1,
-        start: StartSpec::Numeric(centers.clone()),
-    };
-    run_replicate(&subset, centers, &preliminary).map(|result| result.centers)
-}
-
-fn run_replicate(
-    data: &PreparedData,
-    mut centers: Vec<Vec<f64>>,
-    options: &Options,
-) -> BuiltinResult<ReplicateResult> {
-    let k = centers.len();
-    let mut idx = vec![0usize; data.rows.len()];
-    let iterations = if options.online_phase {
-        options.max_iter.saturating_mul(2)
-    } else {
-        options.max_iter
-    };
-    for _ in 0..iterations {
-        let assignment = assign_rows(&data.rows, &centers, options.distance);
-        let changed = assignment.changed_from(&idx);
-        idx = assignment.idx;
-        let next_centers = update_centers(data, &idx, &assignment.distances, &centers, options)?;
-        centers = next_centers;
-        if !changed {
-            break;
-        }
-    }
-    let assignment = assign_rows(&data.rows, &centers, options.distance);
-    idx = assignment.idx;
-    let distances = assignment.distances;
-    let sumd = sum_distances(k, &idx, &distances);
-    let objective = sumd.iter().filter(|value| value.is_finite()).sum::<f64>();
-    Ok(ReplicateResult {
-        idx_valid: idx,
-        centers,
-        sumd,
-        distances,
-        objective,
-    })
-}
-
-struct Assignment {
-    idx: Vec<usize>,
-    distances: Vec<Vec<f64>>,
-}
-
-impl Assignment {
-    fn changed_from(&self, previous: &[usize]) -> bool {
-        self.idx != previous
-    }
-}
-
-fn assign_rows(rows: &[Vec<f64>], centers: &[Vec<f64>], distance: Distance) -> Assignment {
-    let mut idx = Vec::with_capacity(rows.len());
-    let mut all_distances = Vec::with_capacity(rows.len());
-    for row in rows {
-        let mut best_idx = 0usize;
-        let mut best_distance = f64::INFINITY;
-        let mut row_distances = Vec::with_capacity(centers.len());
-        for (center_idx, center) in centers.iter().enumerate() {
-            let d = distance_value(row, center, distance);
-            row_distances.push(d);
-            if d < best_distance {
-                best_distance = d;
-                best_idx = center_idx;
-            }
-        }
-        idx.push(best_idx);
-        all_distances.push(row_distances);
-    }
-    Assignment {
-        idx,
-        distances: all_distances,
-    }
-}
-
-fn update_centers(
-    data: &PreparedData,
-    idx: &[usize],
-    distances: &[Vec<f64>],
-    previous: &[Vec<f64>],
-    options: &Options,
-) -> BuiltinResult<Vec<Vec<f64>>> {
-    let k = previous.len();
-    let mut members = vec![Vec::new(); k];
-    for (row, cluster) in idx.iter().enumerate() {
-        members[*cluster].push(row);
-    }
-    let mut centers = vec![vec![f64::NAN; data.cols]; k];
-    let mut singleton_rows = vec![false; data.rows.len()];
-    for cluster in 0..k {
-        if members[cluster].is_empty() {
-            match options.empty_action {
-                EmptyAction::Error => {
-                    return Err(invalid(
-                        "kmeans: empty cluster encountered and EmptyAction is 'error'",
-                    ))
-                }
-                EmptyAction::Drop => continue,
-                EmptyAction::Singleton => {
-                    let row = furthest_assigned_row(distances, idx, &singleton_rows);
-                    singleton_rows[row] = true;
-                    centers[cluster] = data.rows[row].clone();
-                }
-            }
-        } else {
-            centers[cluster] = centroid_for(&data.rows, &members[cluster], options.distance);
-        }
-    }
-    Ok(centers)
-}
-
-fn furthest_assigned_row(distances: &[Vec<f64>], idx: &[usize], excluded: &[bool]) -> usize {
-    let mut best_row = 0usize;
-    let mut best_distance = f64::NEG_INFINITY;
-    for (row, cluster) in idx.iter().enumerate() {
-        if excluded.get(row).copied().unwrap_or(false) {
-            continue;
-        }
-        let distance = distances[row][*cluster];
-        if distance > best_distance {
-            best_distance = distance;
-            best_row = row;
-        }
-    }
-    best_row
-}
-
-fn centroid_for(rows: &[Vec<f64>], members: &[usize], distance: Distance) -> Vec<f64> {
-    let cols = rows[0].len();
-    match distance {
-        Distance::Cityblock | Distance::Hamming => {
-            let mut center = vec![0.0; cols];
-            for col in 0..cols {
-                let mut values = members
-                    .iter()
-                    .map(|row| rows[*row][col])
-                    .collect::<Vec<_>>();
-                values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-                let mid = values.len() / 2;
-                center[col] = if values.len() % 2 == 0 {
-                    (values[mid - 1] + values[mid]) / 2.0
-                } else {
-                    values[mid]
-                };
-                if distance == Distance::Hamming {
-                    center[col] = if center[col] >= 0.5 { 1.0 } else { 0.0 };
-                }
-            }
-            center
-        }
-        _ => {
-            let mut center = vec![0.0; cols];
-            for row in members {
-                for (col, value) in center.iter_mut().enumerate().take(cols) {
-                    *value += rows[*row][col];
-                }
-            }
-            for value in &mut center {
-                *value /= members.len() as f64;
-            }
-            match distance {
-                Distance::Cosine => normalize_or_nan(center),
-                Distance::Correlation => {
-                    let mean = center.iter().sum::<f64>() / center.len() as f64;
-                    normalize_or_nan(center.into_iter().map(|value| value - mean).collect())
-                }
-                _ => center,
-            }
-        }
-    }
-}
-
-fn normalize_or_nan(mut row: Vec<f64>) -> Vec<f64> {
-    let norm = row.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if norm <= EPS {
-        row.fill(f64::NAN);
-    } else {
-        for value in &mut row {
-            *value /= norm;
-        }
-    }
-    row
-}
-
-fn sum_distances(k: usize, idx: &[usize], distances: &[Vec<f64>]) -> Vec<f64> {
-    let mut sumd = vec![0.0; k];
-    for (row, cluster) in idx.iter().enumerate() {
-        let value = distances[row][*cluster];
-        if value.is_finite() {
-            sumd[*cluster] += value;
-        }
-    }
-    sumd
-}
-
-fn distance_value(row: &[f64], center: &[f64], distance: Distance) -> f64 {
-    if row.iter().any(|v| v.is_nan()) || center.iter().any(|v| v.is_nan()) {
-        return f64::NAN;
-    }
-    match distance {
-        Distance::SqEuclidean => row
-            .iter()
-            .zip(center.iter())
-            .map(|(a, b)| {
-                let diff = a - b;
-                diff * diff
-            })
-            .sum(),
-        Distance::Cityblock => row
-            .iter()
-            .zip(center.iter())
-            .map(|(a, b)| (a - b).abs())
-            .sum(),
-        Distance::Cosine | Distance::Correlation => {
-            1.0 - row
-                .iter()
-                .zip(center.iter())
-                .map(|(a, b)| a * b)
-                .sum::<f64>()
-        }
-        Distance::Hamming => {
-            let mismatches = row
-                .iter()
-                .zip(center.iter())
-                .filter(|(a, b)| (*a - *b).abs() > EPS)
-                .count();
-            mismatches as f64 / row.len() as f64
-        }
-    }
-}
-
-fn outputs_for_count(result: ReplicateResult, data: &PreparedData) -> BuiltinResult<Value> {
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![idx_output(&result, data)?])),
-        Some(2) => Ok(Value::OutputList(vec![
-            idx_output(&result, data)?,
-            Value::Tensor(matrix_output(&result.centers)?),
-        ])),
-        Some(3) => Ok(Value::OutputList(vec![
-            idx_output(&result, data)?,
-            Value::Tensor(matrix_output(&result.centers)?),
-            Value::Tensor(sumd_output(&result)?),
-        ])),
-        Some(4) => Ok(Value::OutputList(vec![
-            idx_output(&result, data)?,
-            Value::Tensor(matrix_output(&result.centers)?),
-            Value::Tensor(sumd_output(&result)?),
-            Value::Tensor(distance_output(&result, data)?),
-        ])),
-        Some(_) => Err(invalid("kmeans: too many output arguments; maximum is 4")),
-        None => idx_output(&result, data),
-    }
-}
-
-fn idx_output(result: &ReplicateResult, data: &PreparedData) -> BuiltinResult<Value> {
-    let mut values = vec![f64::NAN; data.original_row_count];
-    for (original, valid) in data.original_to_valid.iter().enumerate() {
-        if let Some(valid_idx) = valid {
-            values[original] = result.idx_valid[*valid_idx] as f64 + 1.0;
-        }
-    }
-    Tensor::new(values, vec![data.original_row_count, 1])
-        .map(Value::Tensor)
-        .map_err(|err| internal(format!("kmeans: {err}")))
-}
-
-fn matrix_output(rows: &[Vec<f64>]) -> BuiltinResult<Tensor> {
-    let row_count = rows.len();
-    let cols = rows.first().map(|row| row.len()).unwrap_or(0);
-    let len = row_count
-        .checked_mul(cols)
-        .ok_or_else(|| internal("kmeans: matrix output size overflow"))?;
-    let mut data = vec![0.0; len];
-    for row in 0..row_count {
-        for col in 0..cols {
-            data[col * row_count + row] = rows[row][col];
-        }
-    }
-    Tensor::new(data, vec![row_count, cols]).map_err(|err| internal(format!("kmeans: {err}")))
-}
-
-fn sumd_output(result: &ReplicateResult) -> BuiltinResult<Tensor> {
-    Tensor::new(result.sumd.clone(), vec![result.sumd.len(), 1])
-        .map_err(|err| internal(format!("kmeans: {err}")))
-}
-
-fn distance_output(result: &ReplicateResult, data: &PreparedData) -> BuiltinResult<Tensor> {
-    let k = result.centers.len();
-    let len = data
-        .original_row_count
-        .checked_mul(k)
-        .ok_or_else(|| internal("kmeans: distance output size overflow"))?;
-    let mut values = vec![f64::NAN; len];
-    for (original, valid) in data.original_to_valid.iter().enumerate() {
-        if let Some(valid_idx) = valid {
-            for cluster in 0..k {
-                values[cluster * data.original_row_count + original] =
-                    result.distances[*valid_idx][cluster];
-            }
-        }
-    }
-    Tensor::new(values, vec![data.original_row_count, k])
-        .map_err(|err| internal(format!("kmeans: {err}")))
-}
-
-#[cfg(test)]
-mod tests {
-    use futures::executor::block_on;
-    use runmat_value::{IntegerStorage, Tensor};
-
-    use super::*;
-    fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
-        Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
-    }
-
-    fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        Value::Tensor(tensor)
-    }
-
-    fn poisoned_int_tensor_shape(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        let tensor = Tensor::new_integer(storage, shape).unwrap();
-        Value::Tensor(tensor)
-    }
-
-    #[test]
-    fn option_parsers_read_all_integer_storage_variants() {
-        let storages = [
-            IntegerStorage::I8(vec![1]),
-            IntegerStorage::I16(vec![1]),
-            IntegerStorage::I32(vec![1]),
-            IntegerStorage::I64(vec![1]),
-            IntegerStorage::U8(vec![1]),
-            IntegerStorage::U16(vec![1]),
-            IntegerStorage::U32(vec![1]),
-            IntegerStorage::U64(vec![1]),
-        ];
-        for storage in storages {
-            let value = poisoned_int_tensor(storage, 1, 1);
-            assert_eq!(parse_positive_usize(&value, "k").unwrap(), 1);
-            assert!(bool_option(&value).unwrap());
-        }
-    }
-
-    fn cleared_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
-        let tensor = Tensor::new_integer(storage, vec![rows, cols]).unwrap();
-        Value::Tensor(tensor)
-    }
-
-    fn outputs(value: Value) -> Vec<Value> {
-        match value {
-            Value::OutputList(values) => values,
-            other => panic!("expected output list, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_documented_floating_gpu_fallback_preserves_explicit_residency() {
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            random::reset_rng();
-            let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
-            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
-                .expect("upload observations");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-            let output = block_on(kmeans_builtin(
-                Value::GpuTensor(handle),
-                Value::Num(2.0),
-                vec![
-                    Value::from("Start"),
-                    Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
-                ],
-            ))
-            .expect("documented resident kmeans");
-            assert!(matches!(output, Value::GpuTensor(_)));
-        });
-    }
-
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn kmeans_wgpu_fallback_enforces_explicit_residency_contract() {
-        let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
-        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        )
-        .expect("actual WGPU provider");
-        random::reset_rng();
-        let input = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap();
-        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
-            .expect("upload observations");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let result = block_on(kmeans_builtin(
-            Value::GpuTensor(handle.clone()),
-            Value::Num(2.0),
-            vec![
-                Value::from("Start"),
-                Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
-            ],
-        ));
-        let Value::GpuTensor(output) = result.expect("documented WGPU kmeans") else {
-            panic!("expected resident output");
-        };
-        assert!(runmat_accelerate_api::handle_is_explicit(&output));
-        assert_eq!(
-            output.device_id,
-            runmat_accelerate_api::AccelProvider::device_id(provider)
-        );
-        assert_eq!(output.shape, vec![4, 1]);
-        assert_eq!(
-            runmat_accelerate_api::handle_precision(&output),
-            Some(runmat_accelerate_api::ProviderPrecision::F64)
-        );
-    }
-
-    #[test]
-    fn kmeans_clusters_numeric_matrix_with_outputs() {
-        let _rng_guard = random::test_guard();
-        random::reset_rng();
-        let x = tensor(vec![0.0, 0.2, 9.8, 10.0, 0.0, 0.1, 9.9, 10.1], 4, 2);
-        let _guard = crate::output_count::push_output_count(Some(4));
-        let out = block_on(kmeans_builtin(
-            x,
-            Value::Num(2.0),
-            vec![
-                Value::from("Start"),
-                tensor(vec![0.0, 10.0, 0.0, 10.0], 2, 2),
-                Value::from("MaxIter"),
-                Value::Num(20.0),
-            ],
-        ))
-        .unwrap();
-        let out = outputs(out);
-        match &out[0] {
-            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
-            other => panic!("idx {other:?}"),
-        }
-        match &out[1] {
-            Value::Tensor(c) => {
-                assert_eq!(c.shape, vec![2, 2]);
-                assert!((c.materialize_f64()[0] - 0.1).abs() < 1.0e-12);
-                assert!((c.materialize_f64()[1] - 9.9).abs() < 1.0e-12);
-                assert!((c.materialize_f64()[2] - 0.05).abs() < 1.0e-12);
-                assert!((c.materialize_f64()[3] - 10.0).abs() < 1.0e-12);
-            }
-            other => panic!("centers {other:?}"),
-        }
-        match &out[2] {
-            Value::Tensor(sumd) => {
-                assert_eq!(sumd.shape, vec![2, 1]);
-                assert!(sumd.materialize_f64().iter().all(|v| v.is_finite()));
-            }
-            other => panic!("sumd {other:?}"),
-        }
-        match &out[3] {
-            Value::Tensor(d) => assert_eq!(d.shape, vec![4, 2]),
-            other => panic!("distances {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let mut statset = StructValue::new();
-        statset.insert(
-            "MaxIter",
-            cleared_int_tensor(IntegerStorage::U16(vec![20]), 1, 1),
-        );
-        statset.insert(
-            "TolFun",
-            cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
-        );
-        statset.insert(
-            "UseParallel",
-            cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
-        );
-
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(kmeans_builtin(
-            poisoned_int_tensor(IntegerStorage::I16(vec![0, 0, 10, 10]), 4, 1),
-            poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
-            vec![
-                Value::from("Start"),
-                poisoned_int_tensor(IntegerStorage::I16(vec![0, 10]), 2, 1),
-                Value::from("Replicates"),
-                poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-                Value::from("Options"),
-                Value::Struct(statset),
-            ],
-        ))
-        .unwrap();
-        let out = outputs(out);
-        match &out[0] {
-            Value::Tensor(idx) => assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0]),
-            other => panic!("idx {other:?}"),
-        }
-        match &out[1] {
-            Value::Tensor(centers) => assert_eq!(centers.materialize_f64(), vec![0.0, 10.0]),
-            other => panic!("centers {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_empty_option_helpers_use_typed_integer_storage_len() {
-        let empty = Tensor::new_integer(IntegerStorage::U16(Vec::new()), vec![0, 1]).unwrap();
-        let empty = Value::Tensor(empty);
-
-        assert!(is_empty_numeric(&empty));
-        assert!(is_empty_option_value(&empty));
-    }
-
-    #[test]
-    fn kmeans_treats_vector_as_column_and_nan_rows_as_missing() {
-        let _rng_guard = random::test_guard();
-        random::reset_rng();
-        let x = tensor(vec![1.0, 2.0, f64::NAN, 20.0, 21.0], 1, 5);
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(kmeans_builtin(
-            x,
-            Value::Num(2.0),
-            vec![Value::from("Start"), Value::from("sample")],
-        ))
-        .unwrap();
-        let out = outputs(out);
-        match &out[0] {
-            Value::Tensor(idx) => {
-                assert_eq!(idx.shape, vec![5, 1]);
-                assert!(idx.materialize_f64()[2].is_nan());
-                assert!(idx.materialize_f64()[0].is_finite());
-                assert!(idx.materialize_f64()[4].is_finite());
-            }
-            other => panic!("idx {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_supports_cityblock_and_replicates() {
-        let _rng_guard = random::test_guard();
-        random::reset_rng();
-        let x = tensor(vec![0.0, 1.0, 10.0, 11.0], 4, 1);
-        let out = block_on(kmeans_builtin(
-            x,
-            Value::Num(2.0),
-            vec![
-                Value::from("Distance"),
-                Value::from("cityblock"),
-                Value::from("Replicates"),
-                Value::Num(2.0),
-                Value::from("Start"),
-                Value::from("plus"),
-            ],
-        ))
-        .unwrap();
-        match out {
-            Value::Tensor(idx) => assert_eq!(idx.shape, vec![4, 1]),
-            other => panic!("idx {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_infers_k_from_numeric_start_when_k_is_empty() {
-        let x = tensor(vec![0.0, 0.5, 10.0, 10.5], 4, 1);
-        let empty_k = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(kmeans_builtin(
-            x,
-            empty_k,
-            vec![
-                Value::from("Start"),
-                tensor(vec![0.0, 10.0], 2, 1),
-                Value::from("MaxIter"),
-                Value::Num(5.0),
-            ],
-        ))
-        .unwrap();
-        let out = outputs(out);
-        match &out[1] {
-            Value::Tensor(c) => assert_eq!(c.shape, vec![2, 1]),
-            other => panic!("centers {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_accepts_3d_numeric_starts_as_replicates() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let x = tensor(vec![0.0, 0.2, 10.0, 10.2], 4, 1);
-        let starts =
-            poisoned_int_tensor_shape(IntegerStorage::I16(vec![0, 10, 0, 10]), vec![2, 1, 2]);
-        let _guard = crate::output_count::push_output_count(Some(3));
-        let out = block_on(kmeans_builtin(
-            x,
-            Value::Num(2.0),
-            vec![Value::from("Start"), starts],
-        ))
-        .unwrap();
-        let out = outputs(out);
-        match &out[2] {
-            Value::Tensor(sumd) => assert_eq!(sumd.shape, vec![2, 1]),
-            other => panic!("sumd {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_integer_roles_are_independently_gated_and_declared() {
-        let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 10]), 2, 1);
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(kmeans_builtin(x, Value::Num(1.0), Vec::new()))
-            .expect_err("strict mode rejects typed observation data");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:KmeansIntegerObservationDataExtension")
-        );
-        assert_eq!(KMEANS_EXTENSIONS.len(), 5);
-        assert_eq!(KMEANS_INTEGER_CAPABILITIES.len(), 5);
-    }
-
-    #[test]
-    fn kmeans_runmat_integer_data_still_requires_exact_double_values() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let x = poisoned_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), 1, 1);
-        let error = block_on(kmeans_builtin(x, Value::Num(1.0), Vec::new()))
-            .expect_err("wide integer data cannot cross the floating boundary");
-        assert!(error.message().contains("exactly representable as double"));
-    }
-
-    #[test]
-    fn kmeans_supports_cluster_start_and_online_phase() {
-        let _rng_guard = random::test_guard();
-        random::reset_rng();
-        let x = tensor(vec![0.0, 0.1, 9.9, 10.0, 0.0, 0.2, 10.1, 10.0], 4, 2);
-        let out = block_on(kmeans_builtin(
-            x,
-            Value::Num(2.0),
-            vec![
-                Value::from("Start"),
-                Value::from("cluster"),
-                Value::from("OnlinePhase"),
-                Value::from("on"),
-            ],
-        ))
-        .unwrap();
-        match out {
-            Value::Tensor(idx) => assert_eq!(idx.shape, vec![4, 1]),
-            other => panic!("idx {other:?}"),
-        }
-    }
-
-    #[test]
-    fn kmeans_rejects_bad_options() {
-        let x = tensor(vec![0.0, 1.0, 2.0], 3, 1);
-        let err = block_on(kmeans_builtin(
-            x.clone(),
-            Value::Num(2.0),
-            vec![Value::from("Distance"), Value::from("mahalanobis")],
-        ))
-        .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:kmeans:InvalidArgument"));
-
-        let err = block_on(kmeans_builtin(
-            x,
-            Value::Num(2.0),
-            vec![
-                Value::from("Distance"),
-                Value::from("hamming"),
-                Value::from("Start"),
-                Value::from("uniform"),
-            ],
-        ))
-        .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:kmeans:InvalidArgument"));
+        Ok(value)
     }
 }

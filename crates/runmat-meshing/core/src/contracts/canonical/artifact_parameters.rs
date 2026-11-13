@@ -5,7 +5,7 @@ use super::{MeshingContractError, PersistentEntityKind, SolverMeshNode, SolverNo
 const MAX_EXACT_PARAMETERS_PER_NODE: usize = 64;
 
 pub fn sort_solver_node_exact_parameters(parameters: &mut [SolverNodeExactParameter]) {
-    parameters.sort_by(canonical_cmp);
+    parameters.sort_unstable_by(canonical_cmp);
 }
 
 pub(super) fn validate_node_exact_parameters(
@@ -62,14 +62,16 @@ fn canonical_cmp(left: &SolverNodeExactParameter, right: &SolverNodeExactParamet
     match (left, right) {
         (
             SolverNodeExactParameter::Curve {
-                source_edge_id: left,
-                ..
+                source_edge_id: left_edge,
+                parameter: left_parameter,
             },
             SolverNodeExactParameter::Curve {
-                source_edge_id: right,
-                ..
+                source_edge_id: right_edge,
+                parameter: right_parameter,
             },
-        ) => left.cmp(right),
+        ) => left_edge
+            .cmp(right_edge)
+            .then_with(|| left_parameter.total_cmp(right_parameter)),
         (SolverNodeExactParameter::Curve { .. }, SolverNodeExactParameter::Surface { .. }) => {
             Ordering::Less
         }
@@ -80,14 +82,17 @@ fn canonical_cmp(left: &SolverNodeExactParameter, right: &SolverNodeExactParamet
             SolverNodeExactParameter::Surface {
                 source_face_id: left_face,
                 chart_id: left_chart,
-                ..
+                evaluator_uv: left_uv,
             },
             SolverNodeExactParameter::Surface {
                 source_face_id: right_face,
                 chart_id: right_chart,
-                ..
+                evaluator_uv: right_uv,
             },
-        ) => (left_face, left_chart).cmp(&(right_face, right_chart)),
+        ) => (left_face, left_chart)
+            .cmp(&(right_face, right_chart))
+            .then_with(|| left_uv[0].total_cmp(&right_uv[0]))
+            .then_with(|| left_uv[1].total_cmp(&right_uv[1])),
     }
 }
 

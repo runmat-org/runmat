@@ -1,14 +1,16 @@
 #![cfg(feature = "wgpu")]
 
+#[path = "support/retirement.rs"]
+mod retirement;
 use futures::executor::block_on;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
-use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderQrOptions, ProviderQrPivot};
+use runmat_accelerate_api::{
+    AccelProvider, HostTensorView, ProviderQrColumnOrder, ProviderQrOptions, ProviderQrOutputs,
+    ProviderQrResult,
+};
 
 fn register_provider() -> &'static dyn AccelProvider {
-    #[cfg(target_os = "windows")]
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
-    #[cfg(not(target_os = "windows"))]
-    std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f64");
 
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default());
     runmat_accelerate_api::provider().expect("wgpu provider registered")
@@ -37,7 +39,7 @@ fn qr_precision_boundary_uses_expected_execution_path() {
     provider.reset_telemetry();
     let options = ProviderQrOptions {
         economy: true,
-        pivot: ProviderQrPivot::Matrix,
+        ..ProviderQrOptions::default()
     };
     let qr = block_on(provider.qr(&input, options)).expect("qr");
     let telemetry = provider.telemetry_snapshot();
@@ -48,9 +50,47 @@ fn qr_precision_boundary_uses_expected_execution_path() {
         provider.precision()
     );
 
-    let _ = provider.free(&input);
-    let _ = provider.free(&qr.q);
-    let _ = provider.free(&qr.r);
-    let _ = provider.free(&qr.perm_matrix);
-    let _ = provider.free(&qr.perm_vector);
+    let ProviderQrResult::FullEnvelope {
+        q,
+        r,
+        perm_matrix,
+        perm_vector,
+    } = qr
+    else {
+        panic!("full provider request must return its full envelope");
+    };
+    let unpivoted = ProviderQrOptions {
+        economy: true,
+        column_order: ProviderQrColumnOrder::Unpivoted,
+        outputs: ProviderQrOutputs::R,
+    };
+    let ProviderQrResult::R { r: r_only } =
+        block_on(provider.qr(&input, unpivoted)).expect("R-only provider QR")
+    else {
+        panic!("R-only request must not publish unused Q or permutation handles");
+    };
+    let ProviderQrResult::Qr {
+        q: q_pair,
+        r: r_pair,
+    } = block_on(provider.qr(
+        &input,
+        ProviderQrOptions {
+            outputs: ProviderQrOutputs::Qr,
+            ..unpivoted
+        },
+    ))
+    .expect("two-output provider QR")
+    else {
+        panic!("two-output request must not publish unused permutation handles");
+    };
+    retirement::release_all([
+        input,
+        q,
+        r,
+        perm_matrix,
+        perm_vector,
+        r_only,
+        q_pair,
+        r_pair,
+    ]);
 }

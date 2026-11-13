@@ -1,3 +1,4 @@
+mod line;
 use super::super::super::{PersistentEntityId, TopologicalOrientation};
 use super::super::definition_validation::pcurve_domain;
 use super::super::{
@@ -11,6 +12,7 @@ use super::projection::{
     charge_seed_allocation, project_parametric, uniform_seeds, ParametricDerivatives,
 };
 use super::{find_by_id, invalid_result, kernel_owned, PortableExactEvaluator};
+use line::{classify_line, LineLocation};
 
 const WINDING_ABSOLUTE_ERROR_RAD: f64 = 1.0e-10;
 const MAX_PCURVE_PROJECTION_SEEDS: usize = 1_000_000;
@@ -96,6 +98,24 @@ impl PortableExactEvaluator<'_> {
             };
             let range =
                 pcurve_domain(&record.implementation).ok_or_else(|| kernel_owned("pcurve"))?;
+            if let Some(location) = classify_line(
+                definition,
+                range,
+                uv,
+                boundary_tolerance_uv,
+                integration_error,
+                control,
+            )? {
+                match location {
+                    LineLocation::Boundary => return Ok(WireLocation::Boundary),
+                    LineLocation::Winding(angle) => {
+                        winding_radians += orientation_sign(wire.orientation)
+                            * orientation_sign(coedge.orientation)
+                            * angle;
+                        continue;
+                    }
+                }
+            }
             if self.pcurve_distance(definition, range, uv, boundary_tolerance_uv, control)?
                 <= boundary_tolerance_uv
             {
@@ -170,7 +190,7 @@ fn pcurve_projection_seeds(
     range: ParameterRange,
 ) -> Result<Vec<f64>, GeometryEvaluationError> {
     let ExactPcurveDefinition::Nurbs { definition } = definition else {
-        return Ok(uniform_seeds(range, 64));
+        return uniform_seeds(range, 64);
     };
     let subdivisions = usize::from(definition.degree).saturating_mul(8).max(8);
     let mut seeds = Vec::new();
@@ -187,7 +207,10 @@ fn pcurve_projection_seeds(
                     "pcurve projection seed count exceeds its hard bound",
                 ));
             }
-            seeds.push(start + (end - start) * index as f64 / subdivisions as f64);
+            seeds.push(
+                ParameterRange { start, end }
+                    .parameter_at_fraction(index as f64 / subdivisions as f64)?,
+            );
         }
     }
     Ok(seeds)

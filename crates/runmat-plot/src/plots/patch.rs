@@ -3,12 +3,17 @@
 use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use crate::geometry::stroke3d::{tessellate_polyline, StrokeCap3D, StrokeStyle3D};
 use crate::plots::line::LineStyle;
+use crate::plots::surface::{ColorMap, SurfaceColorMapping};
 use crate::plots::NumericPlotData;
 use glam::{Vec2, Vec3, Vec4};
 
 const TRIANGULATION_EPSILON: f32 = 1.0e-6;
 
 const POINTS_TO_PX: f32 = 96.0 / 72.0;
+
+#[path = "patch/color_data.rs"]
+mod color_data;
+use color_data::{is_vector_shape, PatchColorContext, PatchColorLayout};
 
 pub type PatchSourceData<'a> = (
     Option<&'a NumericPlotData>,
@@ -19,11 +24,30 @@ pub type PatchSourceData<'a> = (
     Option<&'a NumericPlotData>,
 );
 
+#[derive(Debug, Default)]
+pub struct PatchSourceDataOwned {
+    pub x: Option<NumericPlotData>,
+    pub y: Option<NumericPlotData>,
+    pub z: Option<NumericPlotData>,
+    pub colors: Option<NumericPlotData>,
+    pub color_kind: PatchColorSourceKind,
+    pub faces: Option<NumericPlotData>,
+    pub vertices: Option<NumericPlotData>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatchFaceColorMode {
     Color,
     Flat,
+    Interp,
     None,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PatchColorSourceKind {
+    #[default]
+    FaceVertex,
+    CoordinateGrid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +79,13 @@ pub struct PatchPlot {
     y_data: Option<NumericPlotData>,
     z_data: Option<NumericPlotData>,
     c_data: Option<NumericPlotData>,
+    color_layout: Option<PatchColorLayout>,
+    color_source_kind: PatchColorSourceKind,
+    color_source_indices: Option<Vec<usize>>,
+    color_map: ColorMap,
+    color_map_length: usize,
+    color_limits: Option<(f64, f64)>,
+    color_mapping: SurfaceColorMapping,
     faces_data: Option<NumericPlotData>,
     vertices_data: Option<NumericPlotData>,
 }
@@ -92,6 +123,13 @@ impl PatchPlot {
             y_data: None,
             z_data: None,
             c_data: None,
+            color_layout: None,
+            color_source_kind: PatchColorSourceKind::FaceVertex,
+            color_source_indices: None,
+            color_map: ColorMap::Parula,
+            color_map_length: 256,
+            color_limits: None,
+            color_mapping: SurfaceColorMapping::Scaled,
             faces_data: None,
             vertices_data: None,
         })
@@ -112,21 +150,178 @@ impl PatchPlot {
         )
     }
 
-    pub fn set_source_data(
-        &mut self,
-        x_data: Option<NumericPlotData>,
-        y_data: Option<NumericPlotData>,
-        z_data: Option<NumericPlotData>,
-        c_data: Option<NumericPlotData>,
-        faces_data: Option<NumericPlotData>,
-        vertices_data: Option<NumericPlotData>,
-    ) {
+    pub fn set_source_data(&mut self, source: PatchSourceDataOwned) -> Result<(), String> {
+        let PatchSourceDataOwned {
+            x: x_data,
+            y: y_data,
+            z: z_data,
+            colors: c_data,
+            color_kind: color_source_kind,
+            faces: faces_data,
+            vertices: vertices_data,
+        } = source;
+        let (color_layout, color_source_indices) = self.prepare_color_source(
+            c_data.as_ref(),
+            color_source_kind,
+            x_data.as_ref(),
+            y_data.as_ref(),
+            z_data.as_ref(),
+        )?;
         self.x_data = x_data;
         self.y_data = y_data;
         self.z_data = z_data;
         self.c_data = c_data;
+        self.color_layout = color_layout;
+        self.color_source_kind = color_source_kind;
+        self.color_source_indices = color_source_indices;
         self.faces_data = faces_data;
         self.vertices_data = vertices_data;
+        self.mark_dirty();
+        Ok(())
+    }
+
+    pub fn set_color_data(&mut self, data: NumericPlotData) -> Result<(), String> {
+        self.set_color_data_kind(data, PatchColorSourceKind::FaceVertex)
+    }
+
+    pub fn set_color_data_kind(
+        &mut self,
+        data: NumericPlotData,
+        kind: PatchColorSourceKind,
+    ) -> Result<(), String> {
+        if data.is_empty() {
+            if self.face_color_mode == PatchFaceColorMode::Interp {
+                return Err("patch: interpolated faces require per-vertex color data".into());
+            }
+            self.c_data = None;
+            self.color_layout = None;
+            self.color_source_indices = None;
+            self.mark_dirty();
+            return Ok(());
+        }
+        let (layout, indices) = self.prepare_color_source(
+            Some(&data),
+            kind,
+            self.x_data.as_ref(),
+            self.y_data.as_ref(),
+            self.z_data.as_ref(),
+        )?;
+        let layout = layout.expect("present color source has a layout");
+        if !layout.supports(self.face_color_mode) {
+            return Err("patch: interpolated faces require per-vertex color data".into());
+        }
+        self.c_data = Some(data);
+        self.color_layout = Some(layout);
+        self.color_source_kind = kind;
+        self.color_source_indices = indices;
+        self.mark_dirty();
+        Ok(())
+    }
+
+    fn prepare_color_source(
+        &self,
+        data: Option<&NumericPlotData>,
+        kind: PatchColorSourceKind,
+        x: Option<&NumericPlotData>,
+        y: Option<&NumericPlotData>,
+        z: Option<&NumericPlotData>,
+    ) -> Result<(Option<PatchColorLayout>, Option<Vec<usize>>), String> {
+        let Some(data) = data else {
+            return Ok((None, None));
+        };
+        let coordinate_shape = if kind == PatchColorSourceKind::CoordinateGrid {
+            let x = x.ok_or("patch: coordinate CData requires XData")?;
+            let y = y.ok_or("patch: coordinate CData requires YData")?;
+            let matching = |other: &NumericPlotData| {
+                other.shape() == x.shape()
+                    || (is_vector_shape(other.shape())
+                        && is_vector_shape(x.shape())
+                        && other.len() == x.len())
+            };
+            if !matching(y) || z.is_some_and(|z| !matching(z)) {
+                return Err("patch: coordinate CData requires matching XData/YData/ZData".into());
+            }
+            Some(x.shape())
+        } else {
+            None
+        };
+        let layout = PatchColorLayout::validate(
+            data,
+            self.faces.len(),
+            self.vertices.len(),
+            coordinate_shape,
+        )?;
+        let indices = if kind == PatchColorSourceKind::CoordinateGrid {
+            let x = x.expect("coordinate source checked");
+            let y = y.expect("coordinate source checked");
+            let mut indices = Vec::new();
+            indices
+                .try_reserve_exact(x.len())
+                .map_err(|_| "patch: coordinate color index allocation failed")?;
+            for index in 0..x.len() {
+                let usable = [Some(x), Some(y), z].into_iter().flatten().all(|source| {
+                    !source
+                        .storage()
+                        .value_at(index)
+                        .expect("matching coordinate extent")
+                        .materialize_f64()
+                        .is_nan()
+                });
+                if usable {
+                    indices.push(index);
+                }
+            }
+            if indices.len() != self.vertices.len() {
+                return Err("patch: coordinate colors do not match retained vertices".into());
+            }
+            Some(indices)
+        } else {
+            None
+        };
+        Ok((Some(layout), indices))
+    }
+
+    pub fn color_source_kind(&self) -> PatchColorSourceKind {
+        self.color_source_kind
+    }
+
+    pub fn validate_color_mode(&self) -> Result<(), String> {
+        if self.face_color_mode == PatchFaceColorMode::Interp
+            && !self
+                .color_layout
+                .is_some_and(|layout| layout.supports(self.face_color_mode))
+        {
+            return Err("patch: interpolated faces require per-vertex color data".into());
+        }
+        Ok(())
+    }
+
+    pub fn set_color_context(
+        &mut self,
+        color_map: ColorMap,
+        color_map_length: usize,
+        color_limits: Option<(f64, f64)>,
+    ) {
+        if self.color_map != color_map
+            || self.color_map_length != color_map_length
+            || self.color_limits != color_limits
+        {
+            self.color_map = color_map;
+            self.color_map_length = color_map_length;
+            self.color_limits = color_limits;
+            self.mark_dirty();
+        }
+    }
+
+    pub fn color_mapping(&self) -> SurfaceColorMapping {
+        self.color_mapping
+    }
+
+    pub fn set_color_mapping(&mut self, mapping: SurfaceColorMapping) {
+        if self.color_mapping != mapping {
+            self.color_mapping = mapping;
+            self.mark_dirty();
+        }
     }
 
     pub fn faces(&self) -> &[Vec<usize>] {
@@ -215,6 +410,18 @@ impl PatchPlot {
         self.mark_dirty();
     }
 
+    pub fn set_face_color_mode_checked(&mut self, mode: PatchFaceColorMode) -> Result<(), String> {
+        if mode == PatchFaceColorMode::Interp
+            && !self
+                .color_layout
+                .is_some_and(|layout| layout.supports(mode))
+        {
+            return Err("patch: interpolated faces require per-vertex color data".into());
+        }
+        self.set_face_color_mode(mode);
+        Ok(())
+    }
+
     pub fn set_edge_color_mode(&mut self, mode: PatchEdgeColorMode) {
         self.edge_color_mode = mode;
         self.mark_dirty();
@@ -271,13 +478,41 @@ impl PatchPlot {
             let mut out_indices = Vec::new();
             if self.face_color_mode != PatchFaceColorMode::None {
                 let color = self.effective_face_color();
-                for face in &self.faces {
+                let color_context = PatchColorContext {
+                    colormap: &self.color_map,
+                    colormap_length: self.color_map_length,
+                    limits: self.color_limits,
+                    mapping: self.color_mapping,
+                    alpha: self.face_alpha,
+                    source_indices: self.color_source_indices.as_deref(),
+                };
+                for (face_index, face) in self.faces.iter().enumerate() {
                     if face.len() < 3 {
                         continue;
                     }
                     let base = out_vertices.len() as u32;
                     for &idx in face {
-                        out_vertices.push(Vertex::new(self.vertices[idx], color));
+                        let color_vertex = if self.face_color_mode == PatchFaceColorMode::Flat {
+                            face[0]
+                        } else {
+                            idx
+                        };
+                        let vertex_color = self
+                            .color_layout
+                            .filter(|_| self.face_color_mode != PatchFaceColorMode::Color)
+                            .and_then(|layout| {
+                                self.c_data.as_ref().map(|data| {
+                                    layout.color_for(
+                                        data,
+                                        face_index,
+                                        color_vertex,
+                                        self.face_color_mode,
+                                        &color_context,
+                                    )
+                                })
+                            })
+                            .unwrap_or(color);
+                        out_vertices.push(Vertex::new(self.vertices[idx], vertex_color));
                     }
                     triangulate_face(&self.vertices, face, base, &mut out_indices)
                         .expect("validated patch face should triangulate");
@@ -376,6 +611,17 @@ impl PatchPlot {
         &mut self,
         viewport_px: Option<(u32, u32)>,
     ) -> Option<RenderData> {
+        self.edge_render_data_with_resolved_viewport(crate::core::ResolvedViewport {
+            pixels: viewport_px,
+            view: None,
+        })
+    }
+
+    pub(crate) fn edge_render_data_with_resolved_viewport(
+        &mut self,
+        viewport: crate::core::ResolvedViewport,
+    ) -> Option<RenderData> {
+        let viewport_px = viewport.pixels;
         let bounds = self.bounds();
         let line_width = self.line_width.max(0.0);
         if line_width == 0.0 {
@@ -390,7 +636,7 @@ impl PatchPlot {
             let data_per_px = if has_3d_content {
                 crate::core::data_units_per_px_3d(&bounds, vp)
             } else {
-                crate::core::data_units_per_px(&bounds, vp)
+                crate::core::data_units_per_px(&viewport.bounds(bounds), vp)
             };
             let half_width_data = (width_px * 0.5) * data_per_px;
             let style = StrokeStyle3D::new(half_width_data, LineStyle::Solid, StrokeCap3D::Butt);
@@ -481,6 +727,43 @@ impl PatchPlot {
                 .edge_vertices
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        for bytes in [
+            crate::plots::clone_budget::vec::<Vec3>(self.vertices.capacity())?,
+            crate::plots::clone_budget::nested_vec(&self.faces)?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.face_vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<u32>(
+                self.face_indices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.edge_vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<usize>(
+                self.color_source_indices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        for source in [
+            &self.x_data,
+            &self.y_data,
+            &self.z_data,
+            &self.c_data,
+            &self.faces_data,
+            &self.vertices_data,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        crate::plots::clone_budget::add(&mut total, self.color_map.retained_snapshot_bytes()?)?;
+        Some(total)
     }
 }
 
@@ -709,6 +992,52 @@ fn normalize_faces(faces: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn patch_face_vertex_truecolor_is_flat_or_interpolated_at_real_vertices() {
+        let mut patch =
+            PatchPlot::new(vec![Vec3::ZERO, Vec3::X, Vec3::Y], vec![vec![0, 1, 2]]).unwrap();
+        let colors = NumericPlotData::from_f64(
+            vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        patch.set_color_data(colors).unwrap();
+        patch
+            .set_face_color_mode_checked(PatchFaceColorMode::Flat)
+            .unwrap();
+        let flat = patch.render_data();
+        assert!(flat
+            .vertices
+            .iter()
+            .all(|vertex| vertex.color == [1.0, 0.0, 0.0, 1.0]));
+        patch
+            .set_face_color_mode_checked(PatchFaceColorMode::Interp)
+            .unwrap();
+        let interpolated = patch.render_data();
+        assert_eq!(interpolated.vertices[0].color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(interpolated.vertices[1].color, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(interpolated.vertices[2].color, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn patch_indexed_colors_use_source_extent_or_direct_indices() {
+        let mut patch =
+            PatchPlot::new(vec![Vec3::ZERO, Vec3::X, Vec3::Y], vec![vec![0, 1, 2]]).unwrap();
+        patch
+            .set_color_data(
+                NumericPlotData::from_f64(vec![300.0, 400.0, 500.0], vec![3, 1]).unwrap(),
+            )
+            .unwrap();
+        patch
+            .set_face_color_mode_checked(PatchFaceColorMode::Interp)
+            .unwrap();
+        let scaled = patch.render_data().vertices;
+        assert_ne!(scaled[0].color, scaled[2].color);
+        patch.set_color_mapping(SurfaceColorMapping::Direct);
+        let direct = patch.render_data().vertices;
+        assert_eq!(direct[0].color, direct[2].color);
+    }
 
     #[test]
     fn patch_triangulates_quad_and_closes_edges() {

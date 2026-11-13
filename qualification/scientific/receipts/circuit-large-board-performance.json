@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "cohort": "circuit-large-board-performance",
+  "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
+  "measured": {
+    "source_revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+    "target": "macos-aarch64",
+    "hardware": "Apple M4, 24 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat-circuit",
+      "--test",
+      "runtime_scale",
+      "--",
+      "--test-threads=1"
+    ],
+    "profile": {
+      "release": true,
+      "debug": 0,
+      "cargo_build_jobs": 1,
+      "incremental": false,
+      "rust_test_nocapture": true
+    },
+    "log_sha256": "b1c9548012705f306db2894f20d91bcc06590dd2a87cb8c83b975f71303e10c5",
+    "log_location": "runmat-air:/Users/runmat-air/logs/intake-35f5a6c647-circuit-receipt.tests.log",
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0,
+    "exit_code": 0,
+    "case_names": [
+      "small_edits_on_a_large_board_stay_within_budget"
+    ],
+    "selected_filter": null,
+    "inputs": {
+      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+      "files": 26112,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "artifacts": [
+      {
+        "sha256": "ff391d179082800bbfd6026f9dbb9cb35c4589c9fa2dd7600a093a7e0b22f535",
+        "location": "runmat-air:/Users/runmat-air/logs/runtime-scale-35f5a6c647-qualified"
+      }
+    ],
+    "source_verification": {
+      "before_and_after": true,
+      "files": 27265,
+      "sha256": "f8e417808b079f3176a25bccc002eaec1b66abdcbf63e2e73152534efa551590"
+    },
+    "test_seconds": 72.55
+  },
+  "scope": "The unchanged 500 ms edit budget passed on the recorded native Apple M4. This receipt does not establish that budget on other processors. Earlier failed Linux measurements remain explicit comparisons.",
+  "comparison_runs": [
+    {
+      "source_revision": "a5ba07c1321391449e961bc3401300067672692b",
+      "target": "linux-x86_64",
+      "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
+      "passed": 0,
+      "failed": 1,
+      "move_and_compile_seconds": 1.187979635,
+      "log_sha256": "fccf508a24b68fe28b4435c7c36de6b2507abea2ae6f34028f2904555250d1a7",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-a5ba07c132-scientific.circuit-large-board-performance.log",
+      "disposition": "Retained failed measurement on the slower host; no threshold or numerical assertion changed."
+    },
+    {
+      "source_revision": "777b5146bf5ec50022f80b723b867df2fd5a8d04",
+      "target": "linux-x86_64",
+      "hardware": "GCP N1 highmem-16, Intel Xeon 2.00 GHz",
+      "passed": 0,
+      "failed": 1,
+      "move_and_compile_seconds": 1.222104462,
+      "log_sha256": "4d2cec0f59c4f433c0946cc96e543dcf738d375cb067c7a05bbc5fc5c56ce58a",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
+      "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
+    }
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+      "files": 26112,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "190b41b66e4260e756e5a6187443feb05e3d1ae4f8b261e02a9ee57b831ab6da",
+      "files": 26117,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Conserves the recorded scientific measurements across the reviewed process-retirement lifecycle change. Apple group-signal EPERM commits to bounded observation and retains its error; positive leader/group retirement is still required. Linux and Windows retain their previous signal/error decisions. No solver arithmetic, scientific inputs, dependencies, compiler settings or measured thresholds change. The direct in-process circuit Session workload and CAD drawing host workload do not invoke this child-retirement path. The actual Mac meshing and supervisor conformance executables pass with unchanged assertions; they qualify the affected native path separately from these conserved scientific measurements.",
+    "review": {
+      "path": "qualification/scientific/reviews/process-retirement-20261112-circuit-large-board-performance.json",
+      "sha256": "0fdd749829c6d43e6f88cd4858f5c1a7ce50993ce6552a123ae944af060398e5"
+    }
+  }
+}

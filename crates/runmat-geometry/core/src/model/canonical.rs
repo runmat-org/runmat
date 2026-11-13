@@ -1,4 +1,7 @@
 use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
+mod admission;
+pub(crate) use admission::decode_with_control;
+pub use admission::GeometryCanonicalControl;
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest as _, Sha256};
 

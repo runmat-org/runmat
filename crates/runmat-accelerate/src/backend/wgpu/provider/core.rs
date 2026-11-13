@@ -1,66 +1,173 @@
 use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, Pod};
-use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, IntegerElementType, NumericElementType, ProviderPrecision,
+    unsupported_provider_operation, GpuTensorHandle, GpuTensorStorage, IntegerElementType,
+    NumericElementType, ProviderPrecision, WgpuEmission,
 };
-#[cfg(target_arch = "wasm32")]
-use runmat_time::Instant;
 use std::sync::atomic::Ordering as AtomicOrdering;
-use std::sync::Arc;
-#[cfg(target_arch = "wasm32")]
-use std::time::Duration;
 use tracing::info_span;
-use wgpu::util::DeviceExt;
 
 use super::backend_shared::NEXT_SUBMISSION_ID;
 use super::backend_types::{BufferEntry, NumericBufferRegistration, WgpuProvider};
-use crate::backend::wgpu::residency::BufferUsageClass;
+use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
+use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
 
+#[path = "core/readback.rs"]
+mod readback;
+pub(super) use readback::map_completion_host_upper_bytes;
+pub(super) use readback::ReadbackResourceOwner;
+
 impl WgpuProvider {
-    pub(super) async fn map_readback_bytes(
+    pub(crate) fn supports_native_real_element_type(
         &self,
-        staging: Arc<wgpu::Buffer>,
-        size_bytes: u64,
-        context: &str,
-    ) -> Result<Vec<u8>> {
-        let size_usize = usize::try_from(size_bytes)
-            .map_err(|_| anyhow!("{context}: readback size overflow"))?;
-        let slice = staging.slice(..);
-        let (tx, rx) = oneshot::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.device.poll(wgpu::Maintain::Wait);
+        element_type: NumericElementType,
+    ) -> bool {
+        matches!(
+            (self.precision, element_type),
+            (NumericPrecision::F32, NumericElementType::F32)
+                | (NumericPrecision::F64, NumericElementType::F64)
+        )
+    }
+
+    /// Operation entry only. Nested helpers borrow these same two arguments;
+    /// they never acquire another read lock behind a pending scoped writer.
+    pub(super) fn with_emission<T>(
+        &self,
+        action: impl for<'p> FnOnce(&WgpuEmission<'p>, &mut PendingSubmissions) -> T,
+    ) -> Result<T> {
+        // Declared outside the gate so unwind cleanup also runs after unlock.
+        let mut pending = PendingSubmissions::new(self.access.clone()).with_profiling(
+            self.timestamp_capability,
+            self.observation_budget.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            self.observation_progress
+                .clone()
+                .map(|progress| progress as _),
+        );
+        let result = self
+            .access
+            .with_profiled_shared(&self.emission_authority, |emission| {
+                action(emission, &mut pending)
+            });
+        pending.commit();
+        #[cfg(target_arch = "wasm32")]
+        self.access.poll(wgpu::Maintain::Poll);
+        Ok(result?)
+    }
+    pub(super) fn inherit_elementwise_layout(
+        &self,
+        output: GpuTensorHandle,
+        source: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_is_transposed(source) {
+            Ok(output.with_view(output.view().clone().with_layout(source.view().layout()))?)
+        } else {
+            Ok(output)
         }
-        let map_result = rx
+    }
+    #[cfg(any(not(target_arch = "wasm32"), test))]
+    pub(super) fn map_readback_bytes<'a>(
+        &'a self,
+        staging: runmat_accelerate_api::WgpuBufferOwner,
+        size_bytes: u64,
+        context: &'a str,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>>> + 'a {
+        let staging = readback::track(&self.allocations, staging, None);
+        async move {
+            readback::read(
+                self.access.clone(),
+                staging?,
+                size_bytes,
+                context,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
             .await
-            .map_err(|_| anyhow!("{context}: map_async callback dropped"))?;
-        map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let data = slice.get_mapped_range();
-        let mut out = vec![0u8; size_usize];
-        out.copy_from_slice(&data);
-        drop(data);
-        staging.unmap();
-        self.recycle_readback_buffer(size_bytes, staging);
-        Ok(out)
+        }
+    }
+
+    pub(super) fn map_readback_with<'a, T: 'a>(
+        &'a self,
+        staging: impl ReadbackResourceOwner + 'a,
+        context: &'a str,
+        decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+    ) -> impl std::future::Future<Output = Result<T>> + 'a {
+        let staging = readback::track(&self.allocations, staging, None);
+        async move {
+            readback::read_with(
+                self.access.clone(),
+                staging?,
+                context,
+                decode,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
+            .await
+        }
+    }
+
+    pub(super) fn map_readback_with_admitted<'a, T: 'a>(
+        &'a self,
+        staging: impl ReadbackResourceOwner + 'a,
+        context: &'a str,
+        decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> impl std::future::Future<Output = Result<T>> + 'a {
+        let staging = readback::track(&self.allocations, staging, Some(claim.clone()));
+        async move {
+            readback::read_with_admitted(
+                self.access.clone(),
+                staging?,
+                context,
+                decode,
+                claim,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
+            .await
+        }
+    }
+
+    pub(super) fn map_readback_with_admitted_stage<'a, T: 'a>(
+        &'a self,
+        staging: impl ReadbackResourceOwner + 'a,
+        context: &'a str,
+        decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        callback_stage: runmat_accelerate_api::PreparedNumericDownloadStage,
+    ) -> impl std::future::Future<Output = Result<T>> + 'a {
+        let staging = readback::track(&self.allocations, staging, Some(claim.clone()));
+        async move {
+            readback::read_with_admitted_stage(
+                self.access.clone(),
+                staging?,
+                context,
+                decode,
+                claim,
+                callback_stage,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
+            .await
+        }
     }
 
     pub(super) fn map_readback_bytes_sync(
         &self,
-        staging: Arc<wgpu::Buffer>,
+        staging: runmat_accelerate_api::WgpuBufferOwner,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = (staging, size_bytes);
+            let _ = size_bytes;
+            // Ordinary Buffer Drop does not emit into WGPU error scopes; only
+            // explicit unmap (not used on this unsupported path) needs access.
+            drop(staging);
             Err(anyhow!("{context}: readback requires async path on wasm"))
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -69,105 +176,29 @@ impl WgpuProvider {
         }
     }
     pub(super) const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
-    // Keep enough reusable storage for common tensor shapes while reserving
-    // native resource capacity for pipelines, uniforms, and transient command
-    // buffers. This is deliberately conservative across software and integrated
-    // D3D12 adapters, whose resource ceilings can be substantially lower than
-    // those of discrete GPUs.
-    pub(super) const BUFFER_RESIDENCY_MAX_TOTAL: usize = 16;
-    pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
+    // Native-single variance now uses a centered second scan. Old tuning
+    // entries describe the former one-scan shader and cannot be reused.
+    pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 2;
     pub(super) const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
     pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
     pub(super) const IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE: f64 = 16.0;
 
-    pub(crate) fn device_ref(&self) -> &wgpu::Device {
-        self.device.as_ref()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_buffer_count(&self) -> usize {
-        self.buffers.lock().expect("buffer mutex poisoned").len()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_buffer_ptr(&self, handle: &GpuTensorHandle) -> Option<usize> {
-        self.buffers
-            .lock()
-            .ok()
-            .and_then(|buffers| buffers.get(&handle.buffer_id).cloned())
-            .map(|entry| Arc::as_ptr(&entry.buffer) as usize)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_pooled_buffer_counts(&self) -> (usize, usize) {
-        (
-            self.buffer_residency.pooled_count(),
-            self.buffer_residency.max_total(),
-        )
-    }
-
-    /// Close the logical session and return unaliased storage allocations to
-    /// the physical device pool.
-    ///
-    /// Buffer-backed caches are cleared first so their `Arc` references cannot
-    /// prevent reclamation. This is also invoked from `Drop`, making cleanup
-    /// independent of whether every caller explicitly freed every handle.
-    pub(super) fn recycle_session_buffers(&self) {
-        self.bind_group_cache.clear();
-        self.kernel_resources.clear();
-        if let Ok(mut cache) = self.pow2_of.lock() {
-            cache.clear();
-        }
-        if let Ok(mut cache) = self.moments_cache.lock() {
-            cache.clear();
-        }
-
-        let entries = self
-            .buffers
-            .lock()
-            .map(|mut buffers| buffers.drain().collect::<Vec<_>>())
-            .unwrap_or_default();
-        for (buffer_id, entry) in entries {
-            let handle = GpuTensorHandle {
-                shape: entry.shape.clone(),
-                device_id: self.runtime_device_id,
-                buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
-                    entry.element_type,
-                    entry.storage,
-                ),
-            };
-            runmat_accelerate_api::clear_handle_metadata(&handle);
-
-            let poolable_by_size = entry.len > 0
-                && self.buffer_residency_max_poolable_bytes > 0
-                && entry.allocated_bytes <= self.buffer_residency_max_poolable_bytes;
-            if poolable_by_size && Arc::strong_count(&entry.buffer) == 1 {
-                self.buffer_residency
-                    .release(entry.usage, entry.allocated_bytes, entry.buffer);
-            }
-        }
-    }
-
-    pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
-        self.queue.as_ref()
-    }
     pub(super) fn register_existing_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_existing_buffer_with_usage(buffer, shape, len, BufferUsageClass::Generic)
     }
 
     pub(super) fn register_existing_buffer_with_storage(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         storage: GpuTensorStorage,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_existing_buffer_with_usage_and_storage(
             buffer,
             shape,
@@ -179,11 +210,11 @@ impl WgpuProvider {
 
     pub(super) fn register_existing_buffer_with_usage(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         usage: BufferUsageClass,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_existing_buffer_with_usage_and_storage(
             buffer,
             shape,
@@ -195,12 +226,12 @@ impl WgpuProvider {
 
     pub(super) fn register_existing_buffer_with_usage_and_storage(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         storage: GpuTensorStorage,
         usage: BufferUsageClass,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         let element_type = match self.precision {
             NumericPrecision::F32 => NumericElementType::F32,
             NumericPrecision::F64 => NumericElementType::F64,
@@ -220,9 +251,54 @@ impl WgpuProvider {
 
     pub(super) fn register_numeric_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         registration: NumericBufferRegistration,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
+        self.register_numeric_buffer_produced(buffer, registration, false)
+    }
+
+    pub(super) fn register_logical_buffer(
+        &self,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+        shape: Vec<usize>,
+        len: usize,
+        usage: BufferUsageClass,
+    ) -> Result<GpuTensorHandle> {
+        let physical_element_type = match self.precision {
+            NumericPrecision::F32 => NumericElementType::F32,
+            NumericPrecision::F64 => NumericElementType::F64,
+        };
+        let allocated_bytes = buffer.size();
+        self.register_numeric_buffer_produced(
+            buffer,
+            NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type,
+                storage: GpuTensorStorage::Real,
+                allocated_bytes,
+                usage,
+            },
+            true,
+        )
+    }
+
+    pub(super) fn register_numeric_buffer_produced(
+        &self,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+        registration: NumericBufferRegistration,
+        logical: bool,
+    ) -> Result<GpuTensorHandle> {
+        self.register_numeric_buffer_produced_admitted(buffer, registration, logical, None)
+    }
+
+    pub(super) fn register_numeric_buffer_produced_admitted(
+        &self,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+        registration: NumericBufferRegistration,
+        logical: bool,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<GpuTensorHandle> {
         let NumericBufferRegistration {
             shape,
             len,
@@ -231,13 +307,12 @@ impl WgpuProvider {
             allocated_bytes,
             usage,
         } = registration;
-        let id = self
-            .next_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         let entry = BufferEntry {
+            logical,
             buffer,
             len,
-            shape: shape.clone(),
+            shape,
             storage,
             element_type,
             precision: match element_type.precision() {
@@ -249,37 +324,18 @@ impl WgpuProvider {
             usage,
             last_submission_id: None,
         };
-        self.buffers
-            .lock()
-            .expect("buffer mutex poisoned")
-            .insert(id, entry);
-        log::trace!(
-            "wgpu register id={} len={} shape={:?} element_type={:?} storage={:?}",
-            id,
-            len,
-            &shape,
-            element_type,
-            storage
-        );
-        let handle = GpuTensorHandle {
-            shape,
-            device_id: self.runtime_device_id,
-            buffer_id: id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(element_type, storage),
-        };
-        runmat_accelerate_api::clear_handle_metadata(&handle);
-        runmat_accelerate_api::clear_handle_transpose(&handle);
-        handle
+        self.allocations
+            .register_produced_admitted(entry, logical, admission)
     }
 
     pub(super) fn register_integer_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         element_type: IntegerElementType,
         allocated_bytes: u64,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_numeric_buffer(
             buffer,
             NumericBufferRegistration {
@@ -299,14 +355,17 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
     ) {
-        if lhs.device_id != self.runtime_device_id || rhs.device_id != self.runtime_device_id {
+        if self.get_entry_raw(product).is_err()
+            || self.get_entry_raw(lhs).is_err()
+            || self.get_entry_raw(rhs).is_err()
+        {
             return;
         }
         log::debug!(
             "remember_matmul_sources: product={} lhs={} rhs={} active_fusion={:?}",
-            product.buffer_id,
-            lhs.buffer_id,
-            rhs.buffer_id,
+            product.buffer_id(),
+            lhs.buffer_id(),
+            rhs.buffer_id(),
             active_fusion()
         );
         self.kernel_resources
@@ -314,142 +373,159 @@ impl WgpuProvider {
     }
 
     pub(super) fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
-        if let Ok(mut guard) = self.buffers.lock() {
-            if let Some(entry) = guard.get_mut(&handle.buffer_id) {
-                entry.usage = usage;
-            }
+        // Usage is an optional pooling hint, never a live-operation admission.
+        if handle.device_id() == self.runtime_device_id {
+            let _ = self.allocations.mark_usage(handle.buffer_id(), usage);
         }
     }
 
     pub(super) fn record_buffer_submission(&self, buffer_id: u64, submission_id: u32) {
-        if let Ok(mut guard) = self.buffers.lock() {
-            if let Some(entry) = guard.get_mut(&buffer_id) {
-                entry.last_submission_id = Some(submission_id);
-            }
-        }
+        let _ = self.allocations.record_submission(buffer_id, submission_id);
     }
 
     pub(super) fn create_storage_buffer_for_usage(
         &self,
+        emission: &WgpuEmission<'_>,
         usage: BufferUsageClass,
         len: usize,
         label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
-        self.buffer_residency
-            .acquire(self.device_ref(), usage, len, self.element_size, label)
-    }
-
-    pub(super) fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
-        self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
-            .0
-    }
-
-    pub(super) fn create_storage_buffer_bytes(
-        &self,
-        size_bytes: u64,
-        label: &str,
-    ) -> Arc<wgpu::Buffer> {
-        self.buffer_residency
-            .acquire_storage_bytes(self.device_ref(), size_bytes, label)
-            .0
-    }
-
-    pub(super) fn create_readback_buffer(&self, size_bytes: u64, label: &str) -> Arc<wgpu::Buffer> {
-        self.buffer_residency
-            .acquire_readback(self.device_ref(), size_bytes, label)
-            .0
-    }
-
-    pub(super) fn recycle_readback_buffer(&self, size_bytes: u64, buffer: Arc<wgpu::Buffer>) {
-        let poolable_by_size = self.buffer_residency_max_poolable_bytes > 0
-            && size_bytes <= self.buffer_residency_max_poolable_bytes;
-        if poolable_by_size && Arc::strong_count(&buffer) == 1 {
-            self.buffer_residency
-                .release(BufferUsageClass::Readback, size_bytes, buffer);
+    ) -> Result<(runmat_accelerate_api::WgpuBufferOwner, bool)> {
+        let size_bytes = BufferResidency::requested_bytes(len, self.element_size)
+            .ok_or_else(|| anyhow!("{label}: allocation byte extent overflow"))?;
+        if size_bytes > self.adapter_limits.max_buffer_size {
+            return Err(super::backend_shared::gpu_per_buffer_limit_error(
+                label,
+                size_bytes,
+                self.adapter_limits.max_buffer_size,
+            ));
         }
+        emission.ensure_device(&self.access)?;
+        self.allocations
+            .acquire(emission, usage, len, self.element_size, label)
+    }
+
+    pub(super) fn create_storage_buffer(
+        &self,
+        emission: &WgpuEmission<'_>,
+        len: usize,
+        label: &str,
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
+        Ok(self
+            .create_storage_buffer_for_usage(emission, BufferUsageClass::Generic, len, label)?
+            .0)
     }
 
     /// Allocate a raw-word buffer used by exact integer kernels. Integer
     /// storage is packed as u32 words, independently of float precision.
     pub(super) fn create_integer_word_buffer(
         &self,
+        emission: &WgpuEmission<'_>,
         words: usize,
         label: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
-        let bytes = (words as u64)
-            .checked_mul(std::mem::size_of::<u32>() as u64)
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
+        let bytes = crate::backend::wgpu_storage::raw_word_requested_bytes(words as u64)
             .ok_or_else(|| anyhow!("{label}: integer buffer size overflow"))?;
         if bytes > self.adapter_limits.max_buffer_size {
             return Err(anyhow!("{label}: integer buffer exceeds GPU limits"));
         }
-        Ok(Arc::new(self.device.create_buffer(
-            &wgpu::BufferDescriptor {
+        emission.ensure_device(&self.access)?;
+        Ok(runmat_accelerate_api::WgpuBufferOwner::new(
+            emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
-                size: bytes.max(4),
+                size: bytes,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
-            },
-        )))
+            }),
+        ))
     }
 
-    pub(super) fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
-        self.device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    pub(super) fn uniform_buffer<T: Pod>(
+        &self,
+        emission: &WgpuEmission<'_>,
+        data: &T,
+        label: &str,
+    ) -> Result<wgpu::Buffer> {
+        emission.ensure_device(&self.access)?;
+        Ok(
+            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents: bytes_of(data),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            })
+            }),
+        )
     }
 
-    pub(super) fn prepare_matmul_pipeline(&self) {
-        let mut enc = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    pub(super) fn prepare_matmul_pipeline(
+        &self,
+        emission: &WgpuEmission<'_>,
+        pending: &mut PendingSubmissions,
+    ) -> Result<()> {
+        emission.ensure_device(&self.access)?;
+        let mut enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-warmup"),
-            });
+            },
+        );
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-matmul-warmup-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.matmul.pipeline);
+            pass.set_pipeline(&self.pipelines.matmul.get(emission)?.pipeline);
         }
-        self.submit(enc);
+        self.submit(emission, pending, enc)?;
 
-        let enc = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-flush-gap"),
-            });
-        self.submit(enc);
+            },
+        );
+        self.submit(emission, pending, enc)?;
+        Ok(())
     }
 
-    pub(super) fn prepare_matmul_vec4_pipeline(&self) {
-        let mut enc = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    pub(super) fn prepare_matmul_vec4_pipeline(
+        &self,
+        emission: &WgpuEmission<'_>,
+        pending: &mut PendingSubmissions,
+    ) -> Result<()> {
+        emission.ensure_device(&self.access)?;
+        let mut enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-vec4-warmup"),
-            });
+            },
+        );
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("runmat-matmul-vec4-warmup-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.matmul_vec4.pipeline);
+            pass.set_pipeline(&self.pipelines.matmul_vec4.get(emission)?.pipeline);
         }
-        self.submit(enc);
+        self.submit(emission, pending, enc)?;
 
-        let enc = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let enc = pending.profiled_encoder(
+            emission,
+            &wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-vec4-flush-gap"),
-            });
-        self.submit(enc);
+            },
+        );
+        self.submit(emission, pending, enc)?;
+        Ok(())
     }
 
-    pub(super) fn submit(&self, encoder: wgpu::CommandEncoder) -> u32 {
+    pub(super) fn submit(
+        &self,
+        emission: &WgpuEmission<'_>,
+        pending: &mut PendingSubmissions,
+        encoder: impl crate::backend::wgpu::dispatch::observation::SubmissionEncoder,
+    ) -> Result<u32> {
+        emission.ensure_device(&self.access)?;
         let submission_id = NEXT_SUBMISSION_ID.fetch_add(1, AtomicOrdering::Relaxed);
         let _span = info_span!(
             "gpu.dispatch",
@@ -458,96 +534,56 @@ impl WgpuProvider {
         )
         .entered();
         log::trace!("wgpu submit {}: begin", submission_id);
-        let work = encoder.finish();
-        let submission_index = self.queue.submit(Some(work));
+        let submission_index = pending.submit(emission, encoder)?;
         log::trace!(
-            "wgpu submit {}: submitted, polling (index={:?})",
+            "wgpu submit {}: submitted (index={:?}); progress after emission",
             submission_id,
             submission_index
         );
-        // On Web/WASM, blocking `Maintain::Wait` can starve the worker event loop, preventing
-        // plot presentation and other cooperative tasks from running. Prefer non-blocking polls.
+        Ok(submission_id)
+    }
+    pub(super) fn submit_numeric_readback(
+        &self,
+        source: &runmat_accelerate_api::WgpuNumericReadbackSource,
+        stage: &runmat_accelerate_api::WgpuNumericReadbackBuffer,
+    ) -> Result<()> {
+        let mut pending = PendingSubmissions::new(self.access.clone()).with_profiling(
+            self.timestamp_capability,
+            self.observation_budget.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            self.observation_progress
+                .clone()
+                .map(|progress| progress as _),
+        );
+        let submission_id = NEXT_SUBMISSION_ID.fetch_add(1, AtomicOrdering::Relaxed);
+        let _span =
+            info_span!("gpu.dispatch", label = "runmat-wgpu-submit", submission_id).entered();
+        let result = pending.submit_numeric_readback(source, stage);
+        pending.commit();
         #[cfg(target_arch = "wasm32")]
-        let poll_start = Instant::now();
-        #[cfg(target_arch = "wasm32")]
-        self.device.poll(wgpu::Maintain::Poll);
-        #[cfg(target_arch = "wasm32")]
-        log::trace!("wgpu submit {}: poll complete", submission_id);
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.queue.on_submitted_work_done(move || {
-                log::trace!(
-                    "wgpu submit {}: on_submitted_work_done callback fired",
-                    submission_id
-                );
-            });
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            log::trace!(
-                "wgpu submit {}: on_submitted_work_done unavailable on wasm",
-                submission_id
-            );
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let elapsed = poll_start.elapsed();
-            if elapsed > Duration::from_millis(250) {
-                log::warn!(
-                    "wgpu submit {}: device.poll took {}ms on wasm target",
-                    submission_id,
-                    elapsed.as_millis()
-                );
-            }
-        }
-        submission_id
+        self.access.poll(wgpu::Maintain::Poll);
+        result.map(|_| ())
     }
     pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         let entry = self.get_entry_raw(handle)?;
         if let Some(element_type) = entry.integer_type() {
-            return Err(anyhow!(
+            return Err(unsupported_provider_operation(format!(
                 "native {:?} gpuArray buffers require an integer provider kernel; floating-point dispatch is not permitted",
                 element_type
-            ));
+            )));
         }
         if entry.precision != self.precision {
-            return Err(anyhow!(
+            return Err(unsupported_provider_operation(format!(
                 "native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
                 entry.element_type,
                 self.precision
-            ));
+            )));
         }
         Ok(entry)
     }
 
     pub(super) fn get_entry_raw(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
-        if handle.device_id != self.runtime_device_id {
-            return Err(anyhow!(
-                "handle device mismatch: expected {}, got {}",
-                self.runtime_device_id,
-                handle.device_id
-            ));
-        }
-        let guard = self.buffers.lock().expect("buffer mutex poisoned");
-        let handle_storage = runmat_accelerate_api::handle_storage(handle);
-        guard
-            .get(&handle.buffer_id)
-            .map(|entry| BufferEntry {
-                buffer: entry.buffer.clone(),
-                len: entry.len,
-                shape: entry.shape.clone(),
-                storage: if handle_storage == GpuTensorStorage::ComplexInterleaved {
-                    GpuTensorStorage::ComplexInterleaved
-                } else {
-                    entry.storage
-                },
-                element_type: entry.element_type,
-                precision: entry.precision,
-                allocated_bytes: entry.allocated_bytes,
-                usage: entry.usage,
-                last_submission_id: entry.last_submission_id,
-            })
-            .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
+        self.allocations.entry_for_handle(handle)
     }
 
     pub(super) fn get_entry_for_storage_move(

@@ -1,5 +1,7 @@
 #![cfg(feature = "wgpu")]
 
+#[path = "support/retirement.rs"]
+mod retirement;
 use num_complex::Complex;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
@@ -77,8 +79,7 @@ async fn staged_fft_forward_matches_cpu_for_pow2_family() {
             );
         }
 
-        p.free(&handle).ok();
-        p.free(&out).ok();
+        retirement::release_all([handle, out]);
     }
 }
 
@@ -111,9 +112,7 @@ async fn staged_fft_ifft_roundtrip_recovers_input_for_pow2_family() {
             );
         }
 
-        p.free(&handle).ok();
-        p.free(&freq).ok();
-        p.free(&back).ok();
+        retirement::release_all([handle, freq, back]);
     }
 }
 
@@ -146,8 +145,7 @@ async fn staged_fft_forward_matches_cpu_for_non_pow2_families() {
             );
         }
 
-        p.free(&handle).ok();
-        p.free(&out).ok();
+        retirement::release_all([handle, out]);
     }
 }
 
@@ -180,8 +178,6 @@ async fn staged_fft_ifft_roundtrip_recovers_input_for_non_pow2_families() {
             );
         }
 
-        p.free(&handle).ok();
-        p.free(&freq).ok();
-        p.free(&back).ok();
+        retirement::release_all([handle, freq, back]);
     }
 }

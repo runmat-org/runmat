@@ -8,6 +8,14 @@ use crate::result::AttemptResult;
 
 use super::ProtocolHandshake;
 
+/// Original physical execution authority, carried only over the owned worker pipe.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerExecutionAdmission {
+    pub assignment: runmat_execution::ProgramExecutionAssignment,
+    pub resources: runmat_execution::resource::ResourceRequest,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum WorkerRequest {
@@ -19,6 +27,8 @@ pub enum WorkerRequest {
     Execute {
         test_id: TestId,
         attempt: u32,
+        #[serde(default)]
+        admission: Option<WorkerExecutionAdmission>,
     },
     Cancel {
         run_id: RunId,
@@ -31,6 +41,7 @@ pub enum WorkerRequest {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum WorkerResponse {
     Handshake(ProtocolHandshake),
+    BootstrapReady,
     Ready {
         run_id: RunId,
     },

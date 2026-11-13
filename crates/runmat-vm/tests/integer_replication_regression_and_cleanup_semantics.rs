@@ -11,7 +11,7 @@ fn contains_integer_storage(values: &[Value], expected: &IntegerStorage) -> bool
             &structure.fields.values().cloned().collect::<Vec<_>>(),
             expected,
         ),
-        Value::Cell(cell) => contains_integer_storage(&cell.data, expected),
+        Value::Cell(cell) => contains_integer_storage(cell.data(), expected),
         Value::Int(value) => match (value, expected) {
             (IntValue::I8(actual), IntegerStorage::I8(expected)) => {
                 expected.as_slice() == [*actual]
@@ -65,7 +65,7 @@ fn compiled_documented_integer_floating_and_image_forms_have_declared_outputs() 
         execute_source("r=rescale(uint16([1 2 3])); g=rgb2gray(uint8(reshape([255 0 0],1,1,3)));")
             .expect("documented integer floating forms");
     assert!(values.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64 && tensor.shape == vec![1, 3])
+        matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64 && tensor.shape() == vec![1, 3])
     }));
     assert!(values.iter().any(|value| {
         matches!(value, Value::Tensor(tensor) if tensor.integer_storage() == Some(&IntegerStorage::U8(vec![76])))

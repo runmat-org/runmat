@@ -45,7 +45,7 @@ impl ExecutionClient {
             bail!("execution artifact ciphertext cannot be empty");
         }
         let size = upload.ciphertext.len() as u64;
-        let digest = format!("sha256:{:x}", Sha256::digest(&upload.ciphertext));
+        let digest = format!("sha256:{}", hex::encode(Sha256::digest(&upload.ciphertext)));
         let artifact = self
             .api
             .register_execution_artifact(
@@ -104,7 +104,7 @@ impl ExecutionClient {
                         .context("execution artifact has too many chunks")?,
                     offset_bytes: to_i64((index * CHUNK_BYTES) as u64, "chunk offset")?,
                     size_bytes: to_i64(bytes.len() as u64, "chunk size")?,
-                    ciphertext_sha256: format!("{:x}", Sha256::digest(bytes)),
+                    ciphertext_sha256: hex::encode(Sha256::digest(bytes)),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -195,7 +195,8 @@ impl ExecutionClient {
             )
             .await?;
         if bytes.len() as i64 != artifact.ciphertext_size_bytes
-            || format!("sha256:{:x}", Sha256::digest(&bytes)) != artifact.ciphertext_digest
+            || format!("sha256:{}", hex::encode(Sha256::digest(&bytes)))
+                != artifact.ciphertext_digest
         {
             bail!("downloaded execution artifact failed exact ciphertext verification");
         }

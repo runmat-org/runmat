@@ -1,206 +1,152 @@
-use crate::diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity};
+use crate::{
+    diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    solve::backend::kind::LinearAlgebraBackendKind,
+};
 
 use super::TransientSolveOptions;
 
-pub(super) struct TransientQualityDiagnosticInputs<'a> {
-    pub(super) options: &'a TransientSolveOptions,
-    pub(super) dt_final: f64,
-    pub(super) converged_steps: usize,
-    pub(super) retry_budget_hits: usize,
-    pub(super) accepted_time_steps_s: &'a [f64],
-    pub(super) residual_norms: &'a [f64],
-    pub(super) energies: &'a [f64],
-    pub(super) use_runtime_tensor: bool,
-    pub(super) prepared_cache_entries: usize,
-    pub(super) prepared_cache_hits: usize,
-    pub(super) prepared_cache_misses: usize,
-    pub(super) prepared_build_ms: f64,
-    pub(super) solve_ms: f64,
-    pub(super) fallback_apply_count: u32,
-    pub(super) adapt_increase_steps: usize,
-    pub(super) adapt_decrease_steps: usize,
-    pub(super) adapt_hold_steps: usize,
-    pub(super) adapt_scale_mean: f64,
-    pub(super) adapt_scale_min: f64,
-    pub(super) adapt_scale_max: f64,
-    pub(super) dt_bucket_rel_tolerance: f64,
-    pub(super) max_step_l2_jump_ratio: f64,
-    pub(super) nonfinite_displacement_count: usize,
-    pub(super) thermo_severity_mean: f64,
-    pub(super) thermo_time_scale_mean: f64,
-    pub(super) thermo_severity_peak: f64,
-    pub(super) thermo_temporal_variation: f64,
-    pub(super) thermo_time_extrapolated: usize,
-    pub(super) thermo_time_clamped: usize,
-    pub(super) effective_residual_target_peak: f64,
-    pub(super) thermo_growth_limit_min: f64,
-    pub(super) thermo_nonconverged_shrink_min: f64,
-}
-
-pub(super) fn push_transient_quality_diagnostics(
-    diagnostics: &mut Vec<FeaDiagnostic>,
-    inputs: TransientQualityDiagnosticInputs<'_>,
-) {
-    let options = inputs.options;
-    let converged_all = inputs.converged_steps == options.step_count;
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_TRANSIENT_CONVERGENCE".to_string(),
-        severity: if converged_all {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
+pub(super) fn transient_diagnostics(
+    options: &TransientSolveOptions,
+    accepted_time_steps_s: &[f64],
+    residual_norms: &[f64],
+    strain_energy: &[f64],
+    kinetic_energy: &[f64],
+    relative_energy_balance_error: &[f64],
+    backend: LinearAlgebraBackendKind,
+) -> Vec<FeaDiagnostic> {
+    let maximum_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+    let minimum_time_step = accepted_time_steps_s
+        .iter()
+        .copied()
+        .reduce(f64::min)
+        .unwrap_or(0.0);
+    let maximum_time_step = accepted_time_steps_s
+        .iter()
+        .copied()
+        .reduce(f64::max)
+        .unwrap_or(0.0);
+    let maximum_total_energy = strain_energy
+        .iter()
+        .zip(kinetic_energy)
+        .map(|(strain, kinetic)| strain + kinetic)
+        .fold(0.0_f64, f64::max);
+    let maximum_relative_energy_balance_error = relative_energy_balance_error
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    vec![
+        FeaDiagnostic {
+            code: "FEA_TRANSIENT_METHOD".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solver=newmark_average_acceleration_pcg beta=0.25 gamma=0.5 backend={backend}"
+            ),
         },
-        message: format!(
-            "step_count={} converged_steps={} dt_initial={} dt_final={}",
-            options.step_count, inputs.converged_steps, options.time_step_s, inputs.dt_final
-        ),
-    });
-    if !inputs.accepted_time_steps_s.is_empty() {
-        let min_accepted_dt = inputs
-            .accepted_time_steps_s
-            .iter()
-            .copied()
-            .reduce(f64::min)
-            .unwrap_or(options.min_time_step_s);
-        let max_accepted_dt = inputs
-            .accepted_time_steps_s
-            .iter()
-            .copied()
-            .reduce(f64::max)
-            .unwrap_or(options.max_time_step_s);
-        let max_residual = inputs
-            .residual_norms
-            .iter()
-            .copied()
-            .fold(0.0_f64, f64::max);
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_TRANSIENT_STABILITY".to_string(),
-            severity: if max_residual <= options.residual_target * 4.0 {
+        FeaDiagnostic {
+            code: "FEA_TRANSIENT_CONVERGENCE".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "nominal_interval_count={} accepted_step_count={} rejected_step_count=0",
+                options.time_step_policy.interval_count(),
+                accepted_time_steps_s.len()
+            ),
+        },
+        FeaDiagnostic {
+            code: "FEA_TRANSIENT_STABILITY".into(),
+            severity: if maximum_residual <= options.residual_target {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "adaptive={} dt_min={} dt_max={} max_residual_norm={}",
-                options.adaptive_time_step, min_accepted_dt, max_accepted_dt, max_residual
+                "time_step_policy=fixed dt_min={minimum_time_step} dt_max={maximum_time_step} max_projected_dynamic_residual={maximum_residual}"
             ),
-        });
-    }
-    if inputs.retry_budget_hits > 0 {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_TRANSIENT_STEP_FAILURE".to_string(),
-            severity: FeaDiagnosticSeverity::Warning,
-            message: format!("retry_budget_hits={}", inputs.retry_budget_hits),
-        });
-    }
-    if inputs.use_runtime_tensor {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_TRANSIENT_CACHE".to_string(),
-            severity: FeaDiagnosticSeverity::Info,
-            message: format!(
-                "prepared_cache_entries={} prepared_cache_hits={} prepared_cache_misses={}",
-                inputs.prepared_cache_entries,
-                inputs.prepared_cache_hits,
-                inputs.prepared_cache_misses
-            ),
-        });
-    }
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_TRANSIENT_COST".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
-            inputs.prepared_build_ms, inputs.solve_ms, inputs.fallback_apply_count
-        ),
-    });
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_TRANSIENT_ADAPTIVITY".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "increase_steps={} decrease_steps={} hold_steps={} scale_min={} scale_max={} scale_mean={}",
-            inputs.adapt_increase_steps,
-            inputs.adapt_decrease_steps,
-            inputs.adapt_hold_steps,
-            inputs.adapt_scale_min,
-            inputs.adapt_scale_max,
-            inputs.adapt_scale_mean
-        ),
-    });
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_TRANSIENT_BUCKETING".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "enabled={} rel_tolerance={}",
-            inputs.dt_bucket_rel_tolerance > 0.0,
-            inputs.dt_bucket_rel_tolerance
-        ),
-    });
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_TRANSIENT_PHYSICS".to_string(),
-        severity: if inputs.nonfinite_displacement_count == 0
-            && inputs.max_step_l2_jump_ratio <= 4.0
-        {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
         },
-        message: format!(
-            "max_step_l2_jump_ratio={} nonfinite_displacement_count={}",
-            inputs.max_step_l2_jump_ratio, inputs.nonfinite_displacement_count
-        ),
-    });
-
-    if inputs.thermo_severity_peak > 0.0 {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_TM_TRANSIENT".to_string(),
-            severity: if inputs.thermo_severity_peak <= 0.6
-                && inputs.thermo_temporal_variation <= 0.5
+        FeaDiagnostic {
+            code: "FEA_TRANSIENT_ENERGY".into(),
+            severity: if maximum_total_energy.is_finite()
+                && maximum_relative_energy_balance_error.is_finite()
+                && maximum_relative_energy_balance_error <= 1.0e-6
             {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_mean={} time_scale_mean={} severity_peak={} temporal_variation={} field_extrapolation_ratio={} field_clamp_ratio={} effective_residual_target_peak={} growth_limit_min={} nonconverged_shrink_min={}",
-                inputs.thermo_severity_mean,
-                inputs.thermo_time_scale_mean,
-                inputs.thermo_severity_peak,
-                inputs.thermo_temporal_variation,
-                if options.step_count == 0 {
-                    0.0
-                } else {
-                    inputs.thermo_time_extrapolated as f64 / options.step_count as f64
-                },
-                if options.step_count == 0 {
-                    0.0
-                } else {
-                    inputs.thermo_time_clamped as f64 / options.step_count as f64
-                },
-                inputs.effective_residual_target_peak,
-                inputs.thermo_growth_limit_min,
-                inputs.thermo_nonconverged_shrink_min,
+                "maximum_physical_strain_plus_kinetic_energy_joules={maximum_total_energy} maximum_relative_energy_balance_error={maximum_relative_energy_balance_error} conservation_balance_evaluated=true"
             ),
-        });
-    }
+        },
+    ]
+}
 
-    if !inputs.energies.is_empty() {
-        let baseline_energy = inputs
-            .energies
-            .iter()
-            .copied()
-            .skip(1)
-            .find(|energy| *energy > 1.0e-12)
-            .unwrap_or_else(|| inputs.energies[0].abs().max(1.0e-12));
-        let max_energy = inputs.energies.iter().copied().fold(0.0_f64, f64::max);
-        let growth_ratio = max_energy / baseline_energy;
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_TRANSIENT_ENERGY".to_string(),
-            severity: if growth_ratio <= 5.0 {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Warning
-            },
-            message: format!("max_energy_growth_ratio={growth_ratio}"),
-        });
+pub(crate) fn mechanical_energy_history_diagnostic(
+    kinetic_energy: &[f64],
+    strain_energy: &[f64],
+    external_work: &[f64],
+    support_work: &[f64],
+    damping_dissipation: &[f64],
+    energy_balance_residual: &[f64],
+    relative_energy_balance_error: &[f64],
+) -> FeaDiagnostic {
+    let snapshot_count = [
+        kinetic_energy.len(),
+        strain_energy.len(),
+        external_work.len(),
+        support_work.len(),
+        damping_dissipation.len(),
+        energy_balance_residual.len(),
+        relative_energy_balance_error.len(),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0);
+    let total_energy = (0..snapshot_count)
+        .map(|index| {
+            kinetic_energy.get(index).copied().unwrap_or(f64::NAN)
+                + strain_energy.get(index).copied().unwrap_or(f64::NAN)
+        })
+        .collect::<Vec<_>>();
+    let initial_total_energy = total_energy.first().copied().unwrap_or(0.0);
+    let final_total_energy = total_energy.last().copied().unwrap_or(0.0);
+    let minimum_total_energy = total_energy.iter().copied().fold(f64::INFINITY, f64::min);
+    let maximum_total_energy = total_energy
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let maximum_step_change = total_energy
+        .windows(2)
+        .map(|window| (window[1] - window[0]).abs())
+        .fold(0.0_f64, f64::max);
+    let final_external_work = external_work.last().copied().unwrap_or(f64::NAN);
+    let final_support_work = support_work.last().copied().unwrap_or(f64::NAN);
+    let final_damping_dissipation = damping_dissipation.last().copied().unwrap_or(f64::NAN);
+    let maximum_absolute_balance_residual = energy_balance_residual
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let maximum_relative_balance_error = relative_energy_balance_error
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let metrics_are_finite = total_energy.iter().all(|value| value.is_finite())
+        && minimum_total_energy.is_finite()
+        && maximum_total_energy.is_finite()
+        && maximum_step_change.is_finite()
+        && final_external_work.is_finite()
+        && final_support_work.is_finite()
+        && final_damping_dissipation.is_finite()
+        && maximum_absolute_balance_residual.is_finite()
+        && maximum_relative_balance_error.is_finite();
+
+    FeaDiagnostic {
+        code: "FEA_TRANSIENT_MECHANICAL_ENERGY_HISTORY".to_string(),
+        severity: if metrics_are_finite {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "snapshot_count={snapshot_count} initial_strain_plus_kinetic_energy_joules={initial_total_energy} final_strain_plus_kinetic_energy_joules={final_total_energy} minimum_strain_plus_kinetic_energy_joules={minimum_total_energy} maximum_strain_plus_kinetic_energy_joules={maximum_total_energy} maximum_step_change_joules={maximum_step_change} final_external_work_joules={final_external_work} final_support_work_joules={final_support_work} final_damping_dissipation_joules={final_damping_dissipation} maximum_absolute_energy_balance_residual_joules={maximum_absolute_balance_residual} maximum_relative_energy_balance_error={maximum_relative_balance_error} conservation_balance_evaluated=true"
+        ),
     }
 }

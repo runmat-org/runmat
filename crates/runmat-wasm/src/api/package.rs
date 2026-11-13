@@ -1,4 +1,5 @@
 mod cache;
+mod captured;
 mod provider;
 
 pub use cache::{
@@ -113,12 +114,14 @@ pub async fn resolve_project(
             JsValue::from_str(&format!("project resolve request parse failed: {error}"))
         })?;
     let provider = JsPackageSourceProvider::new(provider)?;
-    crate::runtime::filesystem::install_js_fs_provider(&filesystem).map_err(|error| {
-        JsValue::from_str(&format!(
-            "filesystem provider installation failed: {}",
-            provider::shared::js_error(error)
-        ))
-    })?;
+    crate::runtime::filesystem::install_js_fs_provider(&filesystem)
+        .map(|_| ())
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "filesystem provider installation failed: {}",
+                provider::shared::js_error(error)
+            ))
+        })?;
     let resolved = runmat_package::resolve_project_async(
         std::path::Path::new(&request.manifest_path),
         request.existing_lock.as_ref(),
@@ -127,6 +130,13 @@ pub async fn resolve_project(
     )
     .await
     .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    finish_resolution(resolved, &provider).await
+}
+
+async fn finish_resolution(
+    resolved: runmat_package::ResolvedProject,
+    provider: &JsPackageSourceProvider,
+) -> Result<JsValue, JsValue> {
     let cache_bindings =
         js_sys::Reflect::get(&provider.bindings, &JsValue::from_str("packageCache"))?;
     let cache = crate::runtime::package_cache::JsPackageCacheBackend::new(&cache_bindings)?;

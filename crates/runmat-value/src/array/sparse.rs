@@ -1,21 +1,29 @@
 use super::*;
 
+#[path = "sparse/validation.rs"]
+mod validation;
+pub use validation::{SparseCscValidation, ValidatedSparseCscParts};
+
+#[path = "sparse/merge.rs"]
+mod merge;
+pub use merge::SparseCscMergeEvent;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SparseTensor {
     pub rows: usize,
     pub cols: usize,
     /// Column pointers into `row_indices` and the numeric value storage; length is `cols + 1`.
-    pub col_ptrs: Vec<usize>,
+    pub col_ptrs: HostIndexBuffer,
     /// Zero-based row indices, sorted within each column.
-    pub row_indices: Vec<usize>,
+    pub row_indices: HostIndexBuffer,
     storage: SparseValueStorage,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum SparseValueStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
-    Integer(IntegerStorage),
+    Numeric(HostNumericBuffer),
+    ComplexF64(HostComplexBuffer<f64>),
+    ComplexF32(HostComplexBuffer<f32>),
     Logical,
 }
 
@@ -36,12 +44,17 @@ impl fmt::Display for SparseTensor {
             for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
                 let row = self.row_indices[idx];
                 let value = match &self.storage {
-                    SparseValueStorage::F64(values) => format_number(values[idx]),
-                    SparseValueStorage::F32(values) => format_number(f64::from(values[idx])),
-                    SparseValueStorage::Integer(storage) => storage
-                        .value_at(idx)
-                        .expect("validated sparse storage")
-                        .decimal_string(),
+                    SparseValueStorage::Numeric(storage) => format_sparse_scalar(
+                        storage.value_at(idx).expect("validated sparse storage"),
+                    ),
+                    SparseValueStorage::ComplexF64(storage) => {
+                        let ComplexElement(real, imaginary) = storage[idx];
+                        Value::Complex(real, imaginary).to_string()
+                    }
+                    SparseValueStorage::ComplexF32(storage) => {
+                        let ComplexElement(real, imaginary) = storage[idx];
+                        Value::Complex(f64::from(real), f64::from(imaginary)).to_string()
+                    }
                     SparseValueStorage::Logical => "1".to_string(),
                 };
                 writeln!(f, "  ({},{})  {}", row + 1, col + 1, value)?;
@@ -53,58 +66,95 @@ impl fmt::Display for SparseTensor {
 
 type SparseCscParts<T> = (Vec<usize>, Vec<usize>, Vec<T>);
 
+fn format_sparse_scalar(value: NumericScalar) -> String {
+    match value {
+        NumericScalar::F64(value) => format_number(value),
+        NumericScalar::F32(value) => format_number(f64::from(value)),
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .decimal_string(),
+    }
+}
+
+fn sparse_scalar_f64(value: NumericScalar) -> f64 {
+    match value {
+        NumericScalar::F64(value) => value,
+        NumericScalar::F32(value) => f64::from(value),
+        value => value
+            .into_int_value()
+            .expect("non-floating numeric scalar is integer")
+            .to_f64(),
+    }
+}
+
 impl SparseTensor {
     pub fn new(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         values: Vec<f64>,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
-        Ok(Self {
+        Self::from_numeric_storage(
             rows,
             cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::F64(values),
-        })
+            col_ptrs.into(),
+            row_indices.into(),
+            NumericStorage::F64(values),
+        )
     }
 
     /// Constructs a sparse matrix backed by native single-precision values.
     pub fn new_f32(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         values: Vec<f32>,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
-        Ok(Self {
+        Self::from_numeric_storage(
             rows,
             cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::F32(values),
-        })
+            col_ptrs.into(),
+            row_indices.into(),
+            NumericStorage::F32(values),
+        )
     }
 
     /// Constructs a sparse matrix backed by an exact integer value buffer.
     pub fn new_integer(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         integer_data: IntegerStorage,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, integer_data.len())?;
-        Ok(Self {
+        Self::from_numeric_storage(
             rows,
             cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Integer(integer_data),
-        })
+            col_ptrs.into(),
+            row_indices.into(),
+            NumericStorage::from_integer_storage(integer_data),
+        )
+    }
+
+    /// Constructs a double-precision complex sparse matrix using the canonical
+    /// interleaved host representation.
+    pub fn new_complex(
+        rows: usize,
+        cols: usize,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
+        values: Vec<(f64, f64)>,
+    ) -> Result<Self, String> {
+        Self::from_host_complex_buffers(
+            rows,
+            cols,
+            col_ptrs.into(),
+            row_indices.into(),
+            values.into(),
+        )
     }
 
     /// Constructs a sparse logical matrix whose CSC pattern is the complete
@@ -112,75 +162,250 @@ impl SparseTensor {
     pub fn new_logical(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, row_indices.len())?;
-        Ok(Self {
+        let col_ptrs = col_ptrs.into();
+        let row_indices = row_indices.into();
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, None)?;
+        Self::from_validated_logical(parts)
+    }
+
+    pub fn from_host_numeric_buffers(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        values: HostNumericBuffer,
+    ) -> Result<Self, String> {
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(values.len()))?;
+        Self::from_validated_numeric(parts, values)
+    }
+
+    /// Constructs a complex sparse matrix while retaining the supplied
+    /// pointer-stable value and index owners.
+    pub fn from_host_complex_buffers(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        values: HostComplexBuffer<f64>,
+    ) -> Result<Self, String> {
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(values.len()))?;
+        Self::from_validated_complex_f64(parts, values)
+    }
+
+    /// Constructs a single-precision complex sparse matrix while retaining
+    /// the canonical interleaved component class.
+    pub fn new_complex_f32(
+        rows: usize,
+        cols: usize,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
+        values: Vec<(f32, f32)>,
+    ) -> Result<Self, String> {
+        Self::from_host_complex_f32_buffers(
             rows,
             cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Logical,
+            col_ptrs.into(),
+            row_indices.into(),
+            values.into(),
+        )
+    }
+
+    pub fn from_host_complex_f32_buffers(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        values: HostComplexBuffer<f32>,
+    ) -> Result<Self, String> {
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(values.len()))?;
+        Self::from_validated_complex_f32(parts, values)
+    }
+
+    /// Constructs a complex sparse matrix with this matrix's component class.
+    /// Values use the common computation representation at the API boundary
+    /// and are narrowed only when the prototype is complex `single`.
+    pub fn new_complex_like(
+        &self,
+        rows: usize,
+        cols: usize,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
+        values: Vec<(f64, f64)>,
+    ) -> Result<Self, String> {
+        match &self.storage {
+            SparseValueStorage::ComplexF64(_) => {
+                Self::new_complex(rows, cols, col_ptrs, row_indices, values)
+            }
+            SparseValueStorage::ComplexF32(_) => Self::new_complex_f32(
+                rows,
+                cols,
+                col_ptrs,
+                row_indices,
+                values
+                    .into_iter()
+                    .map(|(real, imaginary)| (real as f32, imaginary as f32))
+                    .collect(),
+            ),
+            SparseValueStorage::Numeric(_) | SparseValueStorage::Logical => {
+                Err("complex sparse construction requires a complex prototype".to_string())
+            }
+        }
+    }
+
+    pub fn from_host_logical_pattern(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+    ) -> Result<Self, String> {
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, None)?;
+        Self::from_validated_logical(parts)
+    }
+
+    pub fn numeric_host_buffer(&self) -> Option<&HostNumericBuffer> {
+        match &self.storage {
+            SparseValueStorage::Numeric(values) => Some(values),
+            SparseValueStorage::ComplexF64(_)
+            | SparseValueStorage::ComplexF32(_)
+            | SparseValueStorage::Logical => None,
+        }
+    }
+
+    pub fn complex_host_buffer(&self) -> Option<&HostComplexBuffer<f64>> {
+        match &self.storage {
+            SparseValueStorage::ComplexF64(values) => Some(values),
+            SparseValueStorage::Numeric(_)
+            | SparseValueStorage::ComplexF32(_)
+            | SparseValueStorage::Logical => None,
+        }
+    }
+
+    pub fn complex_f32_host_buffer(&self) -> Option<&HostComplexBuffer<f32>> {
+        match &self.storage {
+            SparseValueStorage::ComplexF32(values) => Some(values),
+            SparseValueStorage::Numeric(_)
+            | SparseValueStorage::ComplexF64(_)
+            | SparseValueStorage::Logical => None,
+        }
+    }
+
+    fn from_numeric_scalars(
+        rows: usize,
+        cols: usize,
+        col_ptrs: Vec<usize>,
+        row_indices: Vec<usize>,
+        dtype: NumericDType,
+        values: Vec<NumericScalar>,
+    ) -> Result<Self, String> {
+        let mut storage = NumericStorage::zeros(dtype, values.len());
+        for (index, value) in values.into_iter().enumerate() {
+            storage.set_value(index, value)?;
+        }
+        Self::from_host_numeric_buffers(
+            rows,
+            cols,
+            col_ptrs.into(),
+            row_indices.into(),
+            HostNumericBuffer::from_numeric_storage(storage),
+        )
+    }
+
+    fn from_numeric_storage(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        storage: NumericStorage,
+    ) -> Result<Self, String> {
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(storage.len()))?;
+        Self::from_validated_numeric(parts, HostNumericBuffer::from_numeric_storage(storage))
+    }
+
+    fn validate_csc(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        values_len: Option<usize>,
+    ) -> Result<ValidatedSparseCscParts, String> {
+        let values_len = values_len.unwrap_or(row_indices.len());
+        SparseCscValidation::new(rows, cols, col_ptrs, row_indices, values_len)?
+            .finish_synchronously()
+    }
+
+    pub fn from_validated_numeric(
+        parts: ValidatedSparseCscParts,
+        values: HostNumericBuffer,
+    ) -> Result<Self, String> {
+        if parts.values_len != values.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
+        }
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::Numeric(values),
         })
     }
 
-    fn validate_structure(
-        rows: usize,
-        cols: usize,
-        col_ptrs: &[usize],
-        row_indices: &[usize],
-        values_len: usize,
-    ) -> Result<(), String> {
-        if col_ptrs.len() != cols.saturating_add(1) {
-            return Err(format!(
-                "SparseTensor col_ptrs length {} doesn't match cols {}",
-                col_ptrs.len(),
-                cols
-            ));
+    pub fn from_validated_complex_f64(
+        parts: ValidatedSparseCscParts,
+        values: HostComplexBuffer<f64>,
+    ) -> Result<Self, String> {
+        if parts.values_len != values.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
         }
-        if row_indices.len() != values_len {
-            return Err(format!(
-                "SparseTensor row index length {} doesn't match value length {}",
-                row_indices.len(),
-                values_len
-            ));
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::ComplexF64(values),
+        })
+    }
+
+    pub fn from_validated_complex_f32(
+        parts: ValidatedSparseCscParts,
+        values: HostComplexBuffer<f32>,
+    ) -> Result<Self, String> {
+        if parts.values_len != values.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
         }
-        if col_ptrs.first().copied().unwrap_or(usize::MAX) != 0 {
-            return Err("SparseTensor col_ptrs must start at 0".to_string());
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::ComplexF32(values),
+        })
+    }
+
+    pub fn from_validated_logical(parts: ValidatedSparseCscParts) -> Result<Self, String> {
+        if parts.values_len != parts.row_indices.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
         }
-        if col_ptrs.last().copied().unwrap_or(usize::MAX) != values_len {
-            return Err("SparseTensor final col_ptr must equal nnz".to_string());
-        }
-        for window in col_ptrs.windows(2) {
-            if window[0] > window[1] {
-                return Err("SparseTensor col_ptrs must be nondecreasing".to_string());
-            }
-        }
-        for col in 0..cols {
-            let start = col_ptrs[col];
-            let end = col_ptrs[col + 1];
-            let mut prev: Option<usize> = None;
-            for &row in &row_indices[start..end] {
-                if row >= rows {
-                    return Err(format!("SparseTensor row index {row} exceeds rows {rows}"));
-                }
-                if prev.is_some_and(|p| p >= row) {
-                    return Err("SparseTensor row indices must be sorted and unique".to_string());
-                }
-                prev = Some(row);
-            }
-        }
-        Ok(())
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::Logical,
+        })
     }
 
     pub fn zeros(rows: usize, cols: usize) -> Self {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::F64(Vec::new()),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F64(Vec::new()),
+            )),
         }
     }
 
@@ -189,9 +414,52 @@ impl SparseTensor {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::F32(Vec::new()),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F32(Vec::new()),
+            )),
+        }
+    }
+
+    /// Creates an all-zero double-precision complex sparse matrix.
+    pub fn zeros_complex(rows: usize, cols: usize) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::ComplexF64(Vec::<ComplexElement<f64>>::new().into()),
+        }
+    }
+
+    /// Creates an all-zero complex sparse matrix retaining the `single` class.
+    pub fn zeros_complex_f32(rows: usize, cols: usize) -> Self {
+        Self {
+            rows,
+            cols,
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::ComplexF32(Vec::<ComplexElement<f32>>::new().into()),
+        }
+    }
+
+    /// Creates an empty sparse matrix with the same value representation as
+    /// this matrix. Only the shape changes.
+    pub fn zeros_like(&self, rows: usize, cols: usize) -> Self {
+        match &self.storage {
+            SparseValueStorage::Numeric(values) => Self {
+                rows,
+                cols,
+                col_ptrs: vec![0; cols.saturating_add(1)].into(),
+                row_indices: Vec::new().into(),
+                storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                    NumericStorage::zeros(values.numeric_dtype(), 0),
+                )),
+            },
+            SparseValueStorage::ComplexF64(_) => Self::zeros_complex(rows, cols),
+            SparseValueStorage::ComplexF32(_) => Self::zeros_complex_f32(rows, cols),
+            SparseValueStorage::Logical => Self::zeros_logical(rows, cols),
         }
     }
 
@@ -200,8 +468,8 @@ impl SparseTensor {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
             storage: SparseValueStorage::Logical,
         }
     }
@@ -211,9 +479,11 @@ impl SparseTensor {
         Self {
             rows,
             cols,
-            col_ptrs: vec![0; cols.saturating_add(1)],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::Integer(storage.zeros_like(0)),
+            col_ptrs: vec![0; cols.saturating_add(1)].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::from_integer_storage(storage.zeros_like(0)),
+            )),
         }
     }
 
@@ -221,8 +491,8 @@ impl SparseTensor {
     pub fn new_integer_like(
         rows: usize,
         cols: usize,
-        col_ptrs: Vec<usize>,
-        row_indices: Vec<usize>,
+        col_ptrs: impl Into<HostIndexBuffer>,
+        row_indices: impl Into<HostIndexBuffer>,
         values: Vec<IntValue>,
         prototype: &IntegerStorage,
     ) -> Result<Self, String> {
@@ -237,9 +507,9 @@ impl SparseTensor {
 
     pub fn nnz(&self) -> usize {
         match &self.storage {
-            SparseValueStorage::F64(values) => values.len(),
-            SparseValueStorage::F32(values) => values.len(),
-            SparseValueStorage::Integer(storage) => storage.len(),
+            SparseValueStorage::Numeric(values) => values.len(),
+            SparseValueStorage::ComplexF64(values) => values.len(),
+            SparseValueStorage::ComplexF32(values) => values.len(),
             SparseValueStorage::Logical => self.row_indices.len(),
         }
     }
@@ -254,46 +524,65 @@ impl SparseTensor {
             .checked_mul(self.cols)
             .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
         match &self.storage {
-            SparseValueStorage::F64(values) => {
-                let mut data = Vec::new();
-                data.try_reserve_exact(len)
-                    .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
-                data.resize(len, 0.0);
-                for col in 0..self.cols {
-                    for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                        data[self.row_indices[idx] + col * self.rows] = values[idx];
-                    }
-                }
-                Tensor::new(data, self.shape())
-            }
-            SparseValueStorage::F32(values) => {
-                let mut data = Vec::new();
-                data.try_reserve_exact(len)
-                    .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
-                data.resize(len, 0.0);
-                for col in 0..self.cols {
-                    for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                        data[self.row_indices[idx] + col * self.rows] = values[idx];
-                    }
-                }
-                Tensor::from_f32(data, self.shape())
-            }
-            SparseValueStorage::Integer(integer_data) => {
-                let mut data = integer_data.zeros_like(len);
+            SparseValueStorage::Numeric(values) => {
+                let mut data = NumericStorage::zeros(values.numeric_dtype(), len);
                 for col in 0..self.cols {
                     for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
                         let row = self.row_indices[idx];
-                        let value = integer_data.value_at(idx).ok_or_else(|| {
-                            "SparseTensor integer storage is inconsistent".to_string()
+                        let value = values.value_at(idx).ok_or_else(|| {
+                            "SparseTensor numeric storage is inconsistent".to_string()
                         })?;
                         data.set_value(row + col * self.rows, value)?;
                     }
                 }
-                Tensor::new_integer(data, self.shape())
+                Tensor::from_numeric_storage(data, self.shape())
             }
             SparseValueStorage::Logical => {
                 Err("SparseTensor logical storage requires to_dense_logical".to_string())
             }
+            SparseValueStorage::ComplexF64(_) => {
+                Err("SparseTensor complex storage requires to_dense_complex".to_string())
+            }
+            SparseValueStorage::ComplexF32(_) => {
+                Err("SparseTensor complex storage requires to_dense_complex".to_string())
+            }
+        }
+    }
+
+    pub fn to_dense_complex(&self) -> Result<ComplexTensor, String> {
+        let len = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
+        match &self.storage {
+            SparseValueStorage::ComplexF64(values) => {
+                let mut data = vec![ComplexElement(0.0, 0.0); len];
+                for col in 0..self.cols {
+                    for index in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                        data[self.row_indices[index] + col * self.rows] = values[index];
+                    }
+                }
+                ComplexTensor::from_complex_storage(
+                    ComplexStorage::F64(HostComplexBuffer::from_elements(data)),
+                    self.shape(),
+                )
+            }
+            SparseValueStorage::ComplexF32(values) => {
+                let mut data = vec![ComplexElement(0.0_f32, 0.0_f32); len];
+                for col in 0..self.cols {
+                    for index in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                        data[self.row_indices[index] + col * self.rows] = values[index];
+                    }
+                }
+                ComplexTensor::from_complex_storage(
+                    ComplexStorage::F32(HostComplexBuffer::from_elements(data)),
+                    self.shape(),
+                )
+            }
+            SparseValueStorage::Numeric(_) | SparseValueStorage::Logical => Err(
+                "SparseTensor real or logical storage requires its matching dense conversion"
+                    .to_string(),
+            ),
         }
     }
 
@@ -317,27 +606,60 @@ impl SparseTensor {
         LogicalArray::new(data, self.shape())
     }
 
-    pub fn get(&self, row: usize, col: usize) -> Option<f64> {
+    /// Reads a real or logical sparse element. Complex storage must be read
+    /// through [`Self::complex_at`] so the imaginary component cannot be lost.
+    pub fn real_at(&self, row: usize, col: usize) -> Result<Option<f64>, String> {
+        if self.is_complex() {
+            return Err("SparseTensor contains complex storage; use complex_at".to_string());
+        }
         if row >= self.rows || col >= self.cols {
-            return None;
+            return Ok(None);
         }
         let start = self.col_ptrs[col];
         let end = self.col_ptrs[col + 1];
-        self.row_indices[start..end]
+        Ok(self.row_indices[start..end]
             .binary_search(&row)
             .ok()
             .map(|offset| {
                 let index = start + offset;
                 match &self.storage {
-                    SparseValueStorage::F64(values) => values[index],
-                    SparseValueStorage::F32(values) => f64::from(values[index]),
-                    SparseValueStorage::Integer(storage) => storage
-                        .value_at(index)
-                        .expect("validated sparse storage index")
-                        .to_f64(),
+                    SparseValueStorage::Numeric(storage) => sparse_scalar_f64(
+                        storage
+                            .value_at(index)
+                            .expect("validated sparse storage index"),
+                    ),
+                    SparseValueStorage::ComplexF64(_) | SparseValueStorage::ComplexF32(_) => {
+                        unreachable!("complex storage rejected")
+                    }
                     SparseValueStorage::Logical => 1.0,
                 }
-            })
+            }))
+    }
+
+    /// Reads a sparse element after the caller has established that the
+    /// matrix is real or logical.
+    pub fn get(&self, row: usize, col: usize) -> Option<f64> {
+        self.real_at(row, col)
+            .expect("SparseTensor::get requires real or logical storage")
+    }
+
+    /// Returns a stored complex value. An in-bounds implicit zero is not a
+    /// stored CSC entry and therefore returns `None`, matching `get`.
+    pub fn complex_at(&self, row: usize, col: usize) -> Option<(f64, f64)> {
+        if row >= self.rows || col >= self.cols {
+            return None;
+        }
+        let start = self.col_ptrs[col];
+        let end = self.col_ptrs[col + 1];
+        let index = start + self.row_indices[start..end].binary_search(&row).ok()?;
+        match &self.storage {
+            SparseValueStorage::ComplexF64(values) => Some(values[index].into()),
+            SparseValueStorage::ComplexF32(values) => {
+                let ComplexElement(real, imaginary) = values[index];
+                Some((f64::from(real), f64::from(imaginary)))
+            }
+            SparseValueStorage::Numeric(_) | SparseValueStorage::Logical => None,
+        }
     }
 
     pub fn logical_at(&self, row: usize, col: usize) -> Option<bool> {
@@ -365,9 +687,9 @@ impl SparseTensor {
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
         match &self.storage {
-            SparseValueStorage::Integer(storage) => Some(storage),
-            SparseValueStorage::F64(_)
-            | SparseValueStorage::F32(_)
+            SparseValueStorage::Numeric(storage) => storage.integer_storage(),
+            SparseValueStorage::ComplexF64(_)
+            | SparseValueStorage::ComplexF32(_)
             | SparseValueStorage::Logical => None,
         }
     }
@@ -375,9 +697,9 @@ impl SparseTensor {
     /// Borrows stored nonzero values when this sparse matrix is double.
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
         match &self.storage {
-            SparseValueStorage::F64(values) => Some(values),
-            SparseValueStorage::F32(_)
-            | SparseValueStorage::Integer(_)
+            SparseValueStorage::Numeric(values) => values.as_f64_slice(),
+            SparseValueStorage::ComplexF64(_)
+            | SparseValueStorage::ComplexF32(_)
             | SparseValueStorage::Logical => None,
         }
     }
@@ -385,11 +707,27 @@ impl SparseTensor {
     /// Borrows stored nonzero values when this sparse matrix is single.
     pub fn as_f32_slice(&self) -> Option<&[f32]> {
         match &self.storage {
-            SparseValueStorage::F32(values) => Some(values),
-            SparseValueStorage::F64(_)
-            | SparseValueStorage::Integer(_)
+            SparseValueStorage::Numeric(values) => values.as_f32_slice(),
+            SparseValueStorage::ComplexF64(_)
+            | SparseValueStorage::ComplexF32(_)
             | SparseValueStorage::Logical => None,
         }
+    }
+
+    /// Borrows stored nonzero values when this sparse matrix is complex double.
+    pub fn as_complex_f64_slice(&self) -> Option<&[ComplexElement<f64>]> {
+        self.complex_host_buffer().map(|values| &values[..])
+    }
+
+    pub fn as_complex_f32_slice(&self) -> Option<&[ComplexElement<f32>]> {
+        self.complex_f32_host_buffer().map(|values| &values[..])
+    }
+
+    pub fn is_complex(&self) -> bool {
+        matches!(
+            self.storage,
+            SparseValueStorage::ComplexF64(_) | SparseValueStorage::ComplexF32(_)
+        )
     }
 
     pub fn is_logical(&self) -> bool {
@@ -399,42 +737,75 @@ impl SparseTensor {
     pub fn value_byte_size(&self) -> usize {
         match &self.storage {
             SparseValueStorage::Logical => 0,
-            _ => self
-                .numeric_dtype()
-                .expect("non-logical sparse storage has a numeric dtype")
-                .byte_size(),
+            SparseValueStorage::ComplexF64(_) => std::mem::size_of::<ComplexElement<f64>>(),
+            SparseValueStorage::ComplexF32(_) => std::mem::size_of::<ComplexElement<f32>>(),
+            SparseValueStorage::Numeric(values) => values.numeric_dtype().byte_size(),
         }
     }
 
     /// Explicitly materializes stored nonzero values in the `f64` computation domain.
     ///
     /// Integer values outside the exact binary64 range may lose precision.
-    pub fn materialize_f64(&self) -> Vec<f64> {
+    pub fn materialize_real_f64(&self) -> Result<Vec<f64>, String> {
         match &self.storage {
-            SparseValueStorage::F64(values) => values.clone(),
-            SparseValueStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
-            SparseValueStorage::Integer(storage) => storage.to_f64_vec(),
-            SparseValueStorage::Logical => vec![1.0; self.nnz()],
+            SparseValueStorage::Numeric(values) => Ok(values.materialize_f64()),
+            SparseValueStorage::ComplexF64(_) | SparseValueStorage::ComplexF32(_) => Err(
+                "SparseTensor contains complex storage; use materialize_complex_f64".to_string(),
+            ),
+            SparseValueStorage::Logical => Ok(vec![1.0; self.nnz()]),
+        }
+    }
+
+    /// Materializes stored values after the caller has established that the
+    /// matrix is real or logical.
+    pub fn materialize_f64(&self) -> Vec<f64> {
+        self.materialize_real_f64()
+            .expect("SparseTensor::materialize_f64 requires real or logical storage")
+    }
+
+    pub fn materialize_complex_f64(&self) -> Result<Vec<(f64, f64)>, String> {
+        match &self.storage {
+            SparseValueStorage::ComplexF64(values) => {
+                Ok(values.iter().copied().map(Into::into).collect())
+            }
+            SparseValueStorage::ComplexF32(values) => Ok(values
+                .iter()
+                .map(|value| {
+                    let ComplexElement(real, imaginary) = *value;
+                    (f64::from(real), f64::from(imaginary))
+                })
+                .collect()),
+            SparseValueStorage::Numeric(_) | SparseValueStorage::Logical => {
+                Err("SparseTensor does not contain complex storage".to_string())
+            }
         }
     }
 
     /// Reads one stored nonzero value without routing integers through floating point.
     pub fn numeric_value_at(&self, index: usize) -> Option<NumericScalar> {
         match &self.storage {
-            SparseValueStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
-            SparseValueStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
-            SparseValueStorage::Integer(storage) => {
-                storage.value_at(index).map(NumericScalar::from)
-            }
+            SparseValueStorage::Numeric(values) => values.value_at(index),
+            SparseValueStorage::ComplexF64(_) | SparseValueStorage::ComplexF32(_) => None,
             SparseValueStorage::Logical => (index < self.nnz()).then_some(NumericScalar::F64(1.0)),
+        }
+    }
+
+    pub fn complex_value_at(&self, index: usize) -> Option<ComplexElement<f64>> {
+        match &self.storage {
+            SparseValueStorage::ComplexF64(values) => values.get(index).copied(),
+            SparseValueStorage::ComplexF32(values) => values.get(index).map(|value| {
+                let ComplexElement(real, imaginary) = *value;
+                ComplexElement(f64::from(real), f64::from(imaginary))
+            }),
+            SparseValueStorage::Numeric(_) | SparseValueStorage::Logical => None,
         }
     }
 
     pub fn numeric_dtype(&self) -> Option<NumericDType> {
         match &self.storage {
-            SparseValueStorage::F64(_) => Some(NumericDType::F64),
-            SparseValueStorage::F32(_) => Some(NumericDType::F32),
-            SparseValueStorage::Integer(storage) => Some(storage.numeric_dtype()),
+            SparseValueStorage::Numeric(storage) => Some(storage.numeric_dtype()),
+            SparseValueStorage::ComplexF64(_) => Some(NumericDType::F64),
+            SparseValueStorage::ComplexF32(_) => Some(NumericDType::F32),
             SparseValueStorage::Logical => None,
         }
     }
@@ -445,63 +816,67 @@ impl SparseTensor {
         mut stored_value: impl FnMut(usize) -> Result<T, String>,
         is_zero: impl Fn(&T) -> bool,
     ) -> Result<SparseCscParts<T>, String> {
-        let total = self
-            .rows
-            .checked_mul(self.cols)
-            .ok_or_else(|| "SparseTensor assignment dimensions overflow usize".to_string())?;
-        let mut latest = BTreeMap::new();
-        for (index, value) in updates {
-            if *index >= total {
-                return Err(format!(
-                    "SparseTensor assignment linear index {} exceeds {} elements",
-                    index, total
-                ));
-            }
-            latest.insert(*index, value.clone());
-        }
-
-        let capacity = self
-            .nnz()
-            .checked_add(latest.len())
-            .ok_or_else(|| "SparseTensor assignment nnz overflow".to_string())?;
+        let mut order = updates
+            .iter()
+            .enumerate()
+            .map(|(ordinal, (linear, _))| (*linear, ordinal))
+            .collect::<Vec<_>>();
+        order.sort_unstable();
+        let mut count = 0usize;
+        self.visit_merged_linear_updates(
+            self.rows,
+            self.cols,
+            &order,
+            |event| {
+                let retained = match event {
+                    SparseCscMergeEvent::Stored { .. } => true,
+                    SparseCscMergeEvent::Update { ordinal, .. } => !is_zero(&updates[ordinal].1),
+                    SparseCscMergeEvent::ColumnEnd { .. } => false,
+                };
+                if retained {
+                    count = count
+                        .checked_add(1)
+                        .ok_or_else(|| "SparseTensor assignment nnz overflow".to_string())?;
+                }
+                Ok(())
+            },
+            |error| error,
+            || Ok(()),
+        )?;
         let mut col_ptrs = Vec::with_capacity(self.cols.saturating_add(1));
         let mut row_indices = Vec::new();
         let mut values = Vec::new();
         row_indices
-            .try_reserve_exact(capacity)
+            .try_reserve_exact(count)
             .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
         values
-            .try_reserve_exact(capacity)
+            .try_reserve_exact(count)
             .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
         col_ptrs.push(0);
-
-        for col in 0..self.cols {
-            let column_start = col * self.rows;
-            let column_end = column_start + self.rows;
-            let mut stored = self.col_ptrs[col];
-            let stored_end = self.col_ptrs[col + 1];
-            for (&linear, value) in latest.range(column_start..column_end) {
-                let row = linear - column_start;
-                while stored < stored_end && self.row_indices[stored] < row {
-                    row_indices.push(self.row_indices[stored]);
-                    values.push(stored_value(stored)?);
-                    stored += 1;
+        self.visit_merged_linear_updates(
+            self.rows,
+            self.cols,
+            &order,
+            |event| {
+                match event {
+                    SparseCscMergeEvent::Stored { row, entry } => {
+                        row_indices.push(row);
+                        values.push(stored_value(entry)?);
+                    }
+                    SparseCscMergeEvent::Update { row, ordinal } => {
+                        let value = &updates[ordinal].1;
+                        if !is_zero(value) {
+                            row_indices.push(row);
+                            values.push(value.clone());
+                        }
+                    }
+                    SparseCscMergeEvent::ColumnEnd { .. } => col_ptrs.push(values.len()),
                 }
-                if stored < stored_end && self.row_indices[stored] == row {
-                    stored += 1;
-                }
-                if !is_zero(value) {
-                    row_indices.push(row);
-                    values.push(value.clone());
-                }
-            }
-            while stored < stored_end {
-                row_indices.push(self.row_indices[stored]);
-                values.push(stored_value(stored)?);
-                stored += 1;
-            }
-            col_ptrs.push(values.len());
-        }
+                Ok(())
+            },
+            |error| error,
+            || Ok(()),
+        )?;
         Ok((col_ptrs, row_indices, values))
     }
 
@@ -540,6 +915,55 @@ impl SparseTensor {
             |value| *value == 0.0,
         )?;
         Self::new_f32(self.rows, self.cols, col_ptrs, row_indices, values)
+    }
+
+    /// Applies complex updates in one CSC merge while retaining the matrix's
+    /// component class. A value is elided only when both components are zero.
+    pub fn with_updated_complex_linear_values(
+        &self,
+        updates: &[(usize, (f64, f64))],
+    ) -> Result<Self, String> {
+        match &self.storage {
+            SparseValueStorage::ComplexF64(stored_values) => {
+                let (col_ptrs, row_indices, values) = self.merged_linear_updates(
+                    updates,
+                    |index| {
+                        stored_values
+                            .get(index)
+                            .copied()
+                            .map(Into::into)
+                            .ok_or_else(|| {
+                                "SparseTensor complex storage is inconsistent".to_string()
+                            })
+                    },
+                    |(real, imaginary)| *real == 0.0 && *imaginary == 0.0,
+                )?;
+                Self::new_complex(self.rows, self.cols, col_ptrs, row_indices, values)
+            }
+            SparseValueStorage::ComplexF32(stored_values) => {
+                let updates = updates
+                    .iter()
+                    .map(|(index, (real, imaginary))| (*index, (*real as f32, *imaginary as f32)))
+                    .collect::<Vec<_>>();
+                let (col_ptrs, row_indices, values) = self.merged_linear_updates(
+                    &updates,
+                    |index| {
+                        stored_values
+                            .get(index)
+                            .copied()
+                            .map(Into::into)
+                            .ok_or_else(|| {
+                                "SparseTensor complex-single storage is inconsistent".to_string()
+                            })
+                    },
+                    |(real, imaginary)| *real == 0.0 && *imaginary == 0.0,
+                )?;
+                Self::new_complex_f32(self.rows, self.cols, col_ptrs, row_indices, values)
+            }
+            SparseValueStorage::Numeric(_) | SparseValueStorage::Logical => {
+                Err("cannot assign complex sparse value to real storage".to_string())
+            }
+        }
     }
 
     /// Applies exact integer updates in one CSC merge. Values must already be
@@ -600,6 +1024,16 @@ impl SparseTensor {
         self.with_updated_integer_linear_values(&[(index, value)])
     }
 
+    pub fn with_updated_complex_value(
+        &self,
+        row: usize,
+        col: usize,
+        value: (f64, f64),
+    ) -> Result<Self, String> {
+        let index = self.checked_assignment_linear_index(row, col)?;
+        self.with_updated_complex_linear_values(&[(index, value)])
+    }
+
     pub fn with_updated_logical_value(
         &self,
         row: usize,
@@ -625,31 +1059,68 @@ impl SparseTensor {
             self.nnz(),
         );
         match &self.storage {
-            SparseValueStorage::F64(values) => Self::new(
+            SparseValueStorage::Numeric(values) => Self::from_host_numeric_buffers(
                 rows,
                 cols,
                 col_ptrs,
                 self.row_indices.clone(),
                 values.clone(),
             ),
-            SparseValueStorage::F32(values) => Self::new_f32(
+            SparseValueStorage::ComplexF64(values) => Self::from_host_complex_buffers(
                 rows,
                 cols,
                 col_ptrs,
                 self.row_indices.clone(),
                 values.clone(),
             ),
-            SparseValueStorage::Integer(storage) => Self::new_integer(
+            SparseValueStorage::ComplexF32(values) => Self::from_host_complex_f32_buffers(
                 rows,
                 cols,
                 col_ptrs,
                 self.row_indices.clone(),
-                storage.clone(),
+                values.clone(),
             ),
             SparseValueStorage::Logical => {
-                Self::new_logical(rows, cols, col_ptrs, self.row_indices.clone())
+                Self::from_host_logical_pattern(rows, cols, col_ptrs, self.row_indices.clone())
             }
         }
+    }
+
+    /// Publish growth with one already owned/admitted column-pointer buffer.
+    /// Original row and value owners are moved intact, never materialized.
+    pub fn with_expanded_column_pointers(
+        self,
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+    ) -> Result<Self, String> {
+        if rows < self.rows || cols < self.cols {
+            return Err(format!(
+                "SparseTensor cannot shrink shape ({}, {}) to ({rows}, {cols})",
+                self.rows, self.cols
+            ));
+        }
+        let expected = cols
+            .checked_add(1)
+            .ok_or_else(|| "SparseTensor expanded column count overflow".to_string())?;
+        if col_ptrs.len() != expected
+            || col_ptrs.get(..self.col_ptrs.len()) != Some(self.col_ptrs.as_ref())
+            || col_ptrs[self.col_ptrs.len()..]
+                .iter()
+                .any(|&offset| offset != self.nnz())
+        {
+            return Err(
+                "SparseTensor expanded column pointers do not retain the original CSC topology"
+                    .into(),
+            );
+        }
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices: self.row_indices,
+            storage: self.storage,
+        })
     }
 
     fn checked_assignment_linear_index(&self, row: usize, col: usize) -> Result<usize, String> {
@@ -710,17 +1181,25 @@ impl SparseTensor {
             .try_reserve_exact(self.nnz())
             .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
         col_ptrs.push(0);
-        for &source_column in source_columns {
-            let start = self.col_ptrs[source_column];
-            let end = self.col_ptrs[source_column + 1];
-            for index in start..end {
-                if let Some(row) = map_row(self.row_indices[index]) {
-                    row_indices.push(row);
-                    values.push(stored_value(index)?);
+        self.visit_rebuilt_csc(
+            source_columns.iter().copied(),
+            &mut map_row,
+            |event| {
+                match event {
+                    SparseCscMergeEvent::Stored { row, entry: index } => {
+                        row_indices.push(row);
+                        values.push(stored_value(index)?);
+                    }
+                    SparseCscMergeEvent::ColumnEnd { .. } => col_ptrs.push(values.len()),
+                    SparseCscMergeEvent::Update { .. } => {
+                        unreachable!("rebuild only retains existing entries")
+                    }
                 }
-            }
-            col_ptrs.push(values.len());
-        }
+                Ok(())
+            },
+            || Ok(()),
+            |error| error,
+        )?;
         Ok((col_ptrs, row_indices, values))
     }
 
@@ -737,39 +1216,39 @@ impl SparseTensor {
             Err(removed_before) => Some(row - removed_before),
         };
         match &self.storage {
-            SparseValueStorage::F64(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, map_row, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor double storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new(output_rows, self.cols, col_ptrs, row_indices, values)
-            }
-            SparseValueStorage::F32(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, map_row, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor single storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new_f32(output_rows, self.cols, col_ptrs, row_indices, values)
-            }
-            SparseValueStorage::Integer(storage) => {
+            SparseValueStorage::Numeric(storage) => {
                 let (col_ptrs, row_indices, values) =
                     self.rebuilt_csc(&source_columns, map_row, |index| {
                         storage.value_at(index).ok_or_else(|| {
-                            "SparseTensor integer storage is inconsistent".to_string()
+                            "SparseTensor numeric storage is inconsistent".to_string()
                         })
                     })?;
-                Self::new_integer_like(
+                Self::from_numeric_scalars(
                     output_rows,
                     self.cols,
                     col_ptrs,
                     row_indices,
+                    storage.numeric_dtype(),
                     values,
-                    storage,
                 )
+            }
+            SparseValueStorage::ComplexF64(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, map_row, |index| {
+                        storage.get(index).copied().map(Into::into).ok_or_else(|| {
+                            "SparseTensor complex storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_complex(output_rows, self.cols, col_ptrs, row_indices, values)
+            }
+            SparseValueStorage::ComplexF32(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, map_row, |index| {
+                        storage.get(index).copied().map(Into::into).ok_or_else(|| {
+                            "SparseTensor complex single storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_complex_f32(output_rows, self.cols, col_ptrs, row_indices, values)
             }
             SparseValueStorage::Logical => {
                 let (col_ptrs, row_indices, _) =
@@ -786,50 +1265,50 @@ impl SparseTensor {
             .filter(|column| columns.binary_search(column).is_err())
             .collect::<Vec<_>>();
         match &self.storage {
-            SparseValueStorage::F64(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, Some, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor double storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new(
-                    self.rows,
-                    source_columns.len(),
-                    col_ptrs,
-                    row_indices,
-                    values,
-                )
-            }
-            SparseValueStorage::F32(storage) => {
-                let (col_ptrs, row_indices, values) =
-                    self.rebuilt_csc(&source_columns, Some, |index| {
-                        storage.get(index).copied().ok_or_else(|| {
-                            "SparseTensor single storage is inconsistent".to_string()
-                        })
-                    })?;
-                Self::new_f32(
-                    self.rows,
-                    source_columns.len(),
-                    col_ptrs,
-                    row_indices,
-                    values,
-                )
-            }
-            SparseValueStorage::Integer(storage) => {
+            SparseValueStorage::Numeric(storage) => {
                 let (col_ptrs, row_indices, values) =
                     self.rebuilt_csc(&source_columns, Some, |index| {
                         storage.value_at(index).ok_or_else(|| {
-                            "SparseTensor integer storage is inconsistent".to_string()
+                            "SparseTensor numeric storage is inconsistent".to_string()
                         })
                     })?;
-                Self::new_integer_like(
+                Self::from_numeric_scalars(
+                    self.rows,
+                    source_columns.len(),
+                    col_ptrs,
+                    row_indices,
+                    storage.numeric_dtype(),
+                    values,
+                )
+            }
+            SparseValueStorage::ComplexF64(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, Some, |index| {
+                        storage.get(index).copied().map(Into::into).ok_or_else(|| {
+                            "SparseTensor complex storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_complex(
                     self.rows,
                     source_columns.len(),
                     col_ptrs,
                     row_indices,
                     values,
-                    storage,
+                )
+            }
+            SparseValueStorage::ComplexF32(storage) => {
+                let (col_ptrs, row_indices, values) =
+                    self.rebuilt_csc(&source_columns, Some, |index| {
+                        storage.get(index).copied().map(Into::into).ok_or_else(|| {
+                            "SparseTensor complex single storage is inconsistent".to_string()
+                        })
+                    })?;
+                Self::new_complex_f32(
+                    self.rows,
+                    source_columns.len(),
+                    col_ptrs,
+                    row_indices,
+                    values,
                 )
             }
             SparseValueStorage::Logical => {
@@ -841,15 +1320,155 @@ impl SparseTensor {
     }
 
     pub fn class_name(&self) -> &'static str {
-        self.numeric_dtype()
-            .map(NumericDType::class_name)
-            .unwrap_or("logical")
+        match &self.storage {
+            SparseValueStorage::Numeric(values) => values.numeric_dtype().class_name(),
+            SparseValueStorage::ComplexF64(_) => "double",
+            SparseValueStorage::ComplexF32(_) => "single",
+            SparseValueStorage::Logical => "logical",
+        }
     }
 }
 
 #[cfg(test)]
 mod sparse_tensor_tests {
     use super::*;
+
+    #[test]
+    fn sparse_complex_single_retains_class_shape_and_native_components() {
+        let sparse = SparseTensor::new_complex_f32(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(1.25, -2.5), (3.5, 4.75)],
+        )
+        .expect("complex single sparse value");
+
+        assert_eq!(sparse.class_name(), "single");
+        assert_eq!(sparse.numeric_dtype(), Some(NumericDType::F32));
+        assert!(sparse.is_complex());
+        assert_eq!(
+            sparse.as_complex_f32_slice(),
+            Some([ComplexElement(1.25, -2.5), ComplexElement(3.5, 4.75)].as_slice())
+        );
+        assert_eq!(sparse.complex_at(1, 1), Some((3.5, 4.75)));
+        let dense = sparse.to_dense_complex().expect("dense conversion");
+        assert_eq!(dense.numeric_dtype(), NumericDType::F32);
+
+        let updated = sparse
+            .with_updated_complex_value(1, 0, (6.25, -7.5))
+            .expect("complex single update");
+        assert_eq!(updated.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(updated.complex_at(1, 0), Some((6.25, -7.5)));
+
+        let empty = sparse.zeros_like(3, 1);
+        assert!(empty.is_complex());
+        assert_eq!(empty.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(empty.shape(), vec![3, 1]);
+    }
+
+    #[test]
+    fn sparse_clone_and_shape_expansion_retain_unchanged_host_allocations() {
+        let sparse = SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![3.0, 4.0]).unwrap();
+        let clone = sparse.clone();
+        assert!(sparse.col_ptrs.shares_allocation_with(&clone.col_ptrs));
+        assert!(sparse
+            .row_indices
+            .shares_allocation_with(&clone.row_indices));
+        assert!(sparse
+            .numeric_host_buffer()
+            .unwrap()
+            .shares_allocation_with(clone.numeric_host_buffer().unwrap()));
+
+        let expanded = sparse.with_expanded_shape(2, 3).unwrap();
+        assert!(!sparse.col_ptrs.shares_allocation_with(&expanded.col_ptrs));
+        assert!(sparse
+            .row_indices
+            .shares_allocation_with(&expanded.row_indices));
+        assert!(sparse
+            .numeric_host_buffer()
+            .unwrap()
+            .shares_allocation_with(expanded.numeric_host_buffer().unwrap()));
+    }
+
+    #[test]
+    fn complex_sparse_storage_is_canonical_and_survives_structural_paths() {
+        let sparse = SparseTensor::new_complex(
+            3,
+            3,
+            vec![0, 2, 3, 5],
+            vec![0, 2, 1, 0, 2],
+            vec![(1.0, -1.0), (3.0, 0.5), (2.0, 4.0), (4.0, -2.0), (5.0, 6.0)],
+        )
+        .expect("complex sparse");
+        assert!(sparse.is_complex());
+        assert_eq!(sparse.class_name(), "double");
+        assert_eq!(sparse.numeric_dtype(), Some(NumericDType::F64));
+        assert_eq!(sparse.value_byte_size(), 16);
+        assert_eq!(sparse.complex_at(2, 0), Some((3.0, 0.5)));
+        assert_eq!(sparse.complex_at(1, 2), None);
+        assert_eq!(sparse.complex_value_at(2), Some(ComplexElement(2.0, 4.0)));
+        assert!(sparse.as_f64_slice().is_none());
+
+        let clone = sparse.clone();
+        assert!(sparse
+            .complex_host_buffer()
+            .expect("complex host buffer")
+            .shares_allocation_with(clone.complex_host_buffer().expect("clone host buffer")));
+
+        let dense = sparse.to_dense_complex().expect("dense complex");
+        assert_eq!(
+            dense.materialize_f64(),
+            vec![
+                (1.0, -1.0),
+                (0.0, 0.0),
+                (3.0, 0.5),
+                (0.0, 0.0),
+                (2.0, 4.0),
+                (0.0, 0.0),
+                (4.0, -2.0),
+                (0.0, 0.0),
+                (5.0, 6.0),
+            ]
+        );
+
+        let updated = sparse
+            .with_updated_complex_value(2, 0, (0.0, 0.0))
+            .expect("remove complex zero")
+            .with_updated_complex_value(1, 2, (7.0, -8.0))
+            .expect("insert complex value");
+        assert_eq!(updated.row_indices, vec![0, 1, 0, 1, 2]);
+        assert_eq!(updated.complex_at(1, 2), Some((7.0, -8.0)));
+
+        let expanded = sparse.with_expanded_shape(4, 4).expect("expand complex");
+        assert_eq!(expanded.col_ptrs, vec![0, 2, 3, 5, 5]);
+        assert!(sparse
+            .complex_host_buffer()
+            .expect("complex host buffer")
+            .shares_allocation_with(
+                expanded
+                    .complex_host_buffer()
+                    .expect("expanded host buffer")
+            ));
+
+        let rows = sparse.with_deleted_rows(&[1]).expect("delete complex row");
+        assert_eq!(rows.shape(), vec![2, 3]);
+        assert_eq!(
+            rows.materialize_complex_f64().expect("complex values"),
+            vec![(1.0, -1.0), (3.0, 0.5), (4.0, -2.0), (5.0, 6.0)]
+        );
+
+        let columns = sparse
+            .with_deleted_columns(&[1])
+            .expect("delete complex column");
+        assert_eq!(columns.shape(), vec![3, 2]);
+        assert_eq!(
+            columns.materialize_complex_f64().expect("complex values"),
+            vec![(1.0, -1.0), (3.0, 0.5), (4.0, -2.0), (5.0, 6.0)]
+        );
+        assert!(sparse.to_dense().is_err());
+        assert!(sparse.to_dense_logical().is_err());
+    }
 
     #[test]
     fn typed_sparse_scalar_updates_preserve_exact_values_and_zero_elision() {
@@ -1090,9 +1709,11 @@ mod sparse_tensor_tests {
         let sparse = SparseTensor {
             rows: usize::MAX,
             cols: 2,
-            col_ptrs: vec![0, 0, 0],
-            row_indices: Vec::new(),
-            storage: SparseValueStorage::F64(Vec::new()),
+            col_ptrs: vec![0, 0, 0].into(),
+            row_indices: Vec::new().into(),
+            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
+                NumericStorage::F64(Vec::new()),
+            )),
         };
 
         let err = sparse.to_dense().unwrap_err();

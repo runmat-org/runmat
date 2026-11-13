@@ -1,3 +1,4 @@
+use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use uuid::Uuid;
@@ -8,14 +9,13 @@ use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 use runmat_core::{
     abi::{
         DiagnosticSeverity, DisplayEvent, DisplayLabel, ExecutionOutcome, ExecutionSourceContext,
-        RuntimeDiagnostic, RuntimeFlow, WorkspaceBindingKey,
+        RuntimeDiagnostic, RuntimeFlow,
     },
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
-    value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
-    FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot, MaterializedVariable,
-    NumericPreviewValue, StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
-    WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions,
-    WorkspaceSnapshot,
+    value_shape, ExecutionProfiling, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
+    FusionPlanShader, FusionPlanSnapshot, MaterializedVariable, NumericPreviewValue, StdinEvent,
+    StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget,
+    WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions, WorkspaceSnapshot,
 };
 use runmat_value::Value;
 
@@ -44,6 +44,7 @@ struct MaterializeSlicePayload {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExecutionPayload {
+    pub(crate) dependency_lock: Option<String>,
     pub(crate) flow: JsonValue,
     pub(crate) display_events: Vec<DisplayEventPayload>,
     pub(crate) value_text: Option<String>,
@@ -52,7 +53,8 @@ pub(crate) struct ExecutionPayload {
     pub(crate) execution_time_ms: u64,
     pub(crate) used_jit: bool,
     pub(crate) error: Option<RunMatErrorPayload>,
-    pub(crate) stdout: Vec<ConsoleStreamPayload>,
+    #[serde(serialize_with = "serialize_console_entries")]
+    pub(crate) stdout: runmat_runtime::console::CapturedConsoleEntries,
     pub(crate) workspace: WorkspacePayload,
     pub(crate) figures_touched: Vec<u32>,
     pub(crate) warnings: Vec<WarningPayload>,
@@ -82,6 +84,7 @@ impl ExecutionPayload {
             .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
             .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source_context));
         Self {
+            dependency_lock: None,
             flow,
             display_events: outcome
                 .display_events
@@ -94,11 +97,7 @@ impl ExecutionPayload {
             execution_time_ms: outcome.execution_time_ms,
             used_jit: outcome.used_jit,
             error,
-            stdout: outcome
-                .streams
-                .into_iter()
-                .map(ConsoleStreamPayload::from)
-                .collect(),
+            stdout: outcome.streams,
             workspace,
             figures_touched: outcome.figures_touched,
             warnings: outcome
@@ -156,23 +155,39 @@ impl From<DisplayEvent> for DisplayEventPayload {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConsoleStreamPayload {
     pub(crate) stream: &'static str,
-    pub(crate) text: String,
+    pub(crate) text: runmat_runtime::console::ConsoleText,
     pub(crate) timestamp_ms: u64,
 }
 
-impl From<ExecutionStreamEntry> for ConsoleStreamPayload {
-    fn from(entry: ExecutionStreamEntry) -> Self {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BorrowedConsoleStreamPayload<'a> {
+    stream: &'static str,
+    text: &'a runmat_runtime::console::ConsoleText,
+    timestamp_ms: u64,
+}
+
+fn serialize_console_entries<S>(
+    entries: &runmat_runtime::console::CapturedConsoleEntries,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut sequence = serializer.serialize_seq(Some(entries.len()))?;
+    for entry in entries.iter() {
         let stream = match entry.stream {
-            ExecutionStreamKind::Stdout => "stdout",
-            ExecutionStreamKind::Stderr => "stderr",
-            ExecutionStreamKind::ClearScreen => "clear",
+            runmat_runtime::console::ConsoleStream::Stdout => "stdout",
+            runmat_runtime::console::ConsoleStream::Stderr => "stderr",
+            runmat_runtime::console::ConsoleStream::ClearScreen => "clear",
         };
-        Self {
+        sequence.serialize_element(&BorrowedConsoleStreamPayload {
             stream,
-            text: entry.text,
+            text: &entry.text,
             timestamp_ms: entry.timestamp_ms,
-        }
+        })?;
     }
+    sequence.end()
 }
 
 impl ConsoleStreamPayload {
@@ -265,17 +280,13 @@ impl WorkspacePayload {
                 .workspace_delta
                 .upserts
                 .iter()
-                .filter_map(|binding| {
-                    let name = workspace_binding_name(&binding.key)?.to_string();
-                    Some(workspace_entry_from_value(name, &binding.value))
-                })
+                .map(|binding| workspace_entry_from_value(binding.name.0.clone(), &binding.value))
                 .collect(),
             removals: outcome
                 .workspace_delta
                 .removals
                 .iter()
-                .filter_map(workspace_binding_name)
-                .map(ToString::to_string)
+                .map(|binding| binding.name.0.clone())
                 .collect(),
         }
     }
@@ -290,10 +301,6 @@ fn runtime_flow_to_json(flow: &RuntimeFlow) -> JsonValue {
         }),
         RuntimeFlow::OutputList(values) => serde_json::json!({
             "kind": "output-list",
-            "values": values.iter().map(|value| value_to_json(value, 0)).collect::<Vec<_>>()
-        }),
-        RuntimeFlow::CommaList(values) => serde_json::json!({
-            "kind": "comma-list",
             "values": values.iter().map(|value| value_to_json(value, 0)).collect::<Vec<_>>()
         }),
         RuntimeFlow::DynamicList(handle) => serde_json::json!({
@@ -330,15 +337,6 @@ impl From<WorkspaceEntry> for WorkspaceEntryPayload {
             residency: entry.residency.as_str(),
             preview_token: entry.preview_token.map(|id| id.to_string()),
         }
-    }
-}
-
-fn workspace_binding_name(key: &WorkspaceBindingKey) -> Option<&str> {
-    match key {
-        WorkspaceBindingKey::Interactive { name, .. }
-        | WorkspaceBindingKey::SourceBinding { binding: name, .. }
-        | WorkspaceBindingKey::Global { name, .. }
-        | WorkspaceBindingKey::Persistent { name, .. } => Some(name.0.as_str()),
     }
 }
 
@@ -402,6 +400,9 @@ fn error_payload_from_diagnostic(
         identifier: Some(diagnostic.code.clone()),
         diagnostic: diagnostic_text,
         span,
+        source_id: None,
+        source_name: Some(source_context.source_name().to_string()),
+        source_path: None,
         callstack: diagnostic.callstack.clone(),
         callstack_elided: diagnostic.callstack_elided,
     }
@@ -840,22 +841,49 @@ pub(crate) fn parse_materialize_options(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_core::abi::{ExecutionSourceContext, WorkspaceBindingValue, WorkspaceDelta};
+    use runmat_core::abi::{
+        ExecutionSourceContext, GlobalScopeKey, WorkspaceBindingKey, WorkspaceBindingRemoval,
+        WorkspaceBindingValue, WorkspaceDelta,
+    };
     use runmat_core::NumericPreviewValue;
     use runmat_hir::BindingName;
 
     fn test_source_context() -> ExecutionSourceContext {
         ExecutionSourceContext {
-            name: "<test>".to_string(),
+            name: "<test>".into(),
             text: Some(String::new()),
             identity: None,
         }
     }
 
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn execution_streams_retain_canonical_entries_and_wire_shape() {
+        use runmat_runtime::console::{ConsoleEntry, ConsoleStream, ConsoleText};
+
+        let text = ConsoleText::from(String::from("hello"));
+        let text_pointer = text.as_ptr();
+        let outcome = ExecutionOutcome {
+            streams: vec![ConsoleEntry {
+                stream: ConsoleStream::Stdout,
+                text,
+                timestamp_ms: 17,
+            }]
+            .into(),
+            ..ExecutionOutcome::default()
+        };
+        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
+        assert_eq!(payload.stdout[0].text.as_ptr(), text_pointer);
+        let wire = serde_json::to_value(&payload).expect("serialize execution payload");
+        assert_eq!(
+            wire["stdout"],
+            serde_json::json!([{"stream":"stdout","text":"hello","timestampMs":17}])
+        );
+    }
+
     #[test]
     fn execution_payload_serializes_runtime_flow_kind() {
         let outcome = ExecutionOutcome {
-            flow: RuntimeFlow::OutputList(vec![Value::Num(1.0), Value::Num(2.0)]),
+            flow: RuntimeFlow::output_list(vec![Value::Num(1.0), Value::Num(2.0)]),
             ..ExecutionOutcome::default()
         };
 
@@ -905,29 +933,44 @@ mod tests {
 
     #[test]
     fn execution_payload_serializes_workspace_version_and_removals() {
-        let key = WorkspaceBindingKey::Interactive {
-            session: Uuid::nil(),
-            name: BindingName("x".to_string()),
-        };
-        let workspace_delta = WorkspaceDelta {
-            version: 42,
-            upserts: vec![WorkspaceBindingValue {
-                key: key.clone(),
-                value: Value::Num(7.0),
-            }],
-            removals: vec![key],
-            full_snapshot_required: false,
-        };
-        let outcome = ExecutionOutcome {
-            workspace_delta,
-            ..ExecutionOutcome::default()
-        };
+        for key in [
+            WorkspaceBindingKey::Interactive {
+                session: Uuid::nil(),
+                name: BindingName("x".to_string()),
+            },
+            WorkspaceBindingKey::Global {
+                scope: GlobalScopeKey::Session(Uuid::nil()),
+                name: BindingName("target".to_string()),
+            },
+            WorkspaceBindingKey::GlobalSlot {
+                scope: GlobalScopeKey::Session(Uuid::nil()),
+                slot: 4,
+            },
+        ] {
+            let workspace_delta = WorkspaceDelta {
+                version: 42,
+                upserts: vec![WorkspaceBindingValue {
+                    key: key.clone(),
+                    name: BindingName("x".to_string()),
+                    value: Value::Num(7.0),
+                }],
+                removals: vec![WorkspaceBindingRemoval {
+                    key,
+                    name: BindingName("x".to_string()),
+                }],
+                full_snapshot_required: false,
+            };
+            let outcome = ExecutionOutcome {
+                workspace_delta,
+                ..ExecutionOutcome::default()
+            };
 
-        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
-        assert_eq!(payload.workspace.version, 42);
-        assert_eq!(payload.workspace.removals, vec!["x".to_string()]);
-        assert_eq!(payload.workspace.values.len(), 1);
-        assert_eq!(payload.workspace.values[0].name, "x");
+            let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
+            assert_eq!(payload.workspace.version, 42);
+            assert_eq!(payload.workspace.removals, vec!["x".to_string()]);
+            assert_eq!(payload.workspace.values.len(), 1);
+            assert_eq!(payload.workspace.values[0].name, "x");
+        }
     }
 
     #[test]
@@ -944,7 +987,7 @@ mod tests {
             ..ExecutionOutcome::default()
         };
         let source_context = ExecutionSourceContext {
-            name: "path-source.m".to_string(),
+            name: "path-source.m".into(),
             text: Some("x = 1;\ny = x(2);\n".to_string()),
             identity: None,
         };
@@ -954,5 +997,33 @@ mod tests {
         assert!(error.diagnostic.contains("--> path-source.m:2:1"));
         assert_eq!(error.span.expect("span").line, 2);
         assert_eq!(error.callstack, vec!["<main> @ path-source.m:2:5"]);
+    }
+
+    #[test]
+    fn companion_compile_payload_exposes_exact_source_identity_and_span() {
+        let companion = "x = 1;\ny = bad;\n";
+        let source_id = runmat_types::ProgramSourceId(1);
+        let error = runmat_core::RunError::SourceCompile(runmat_core::SourceCompileError {
+            error: runmat_vm::CompileError::new("companion compile failure")
+                .with_identifier("RunMat:CompanionCompileFixture")
+                .with_span(runmat_hir::Span { start: 7, end: 10 })
+                .with_source(source_id),
+            source: runmat_core::SourceMapEntry {
+                source_id,
+                owner_identity: "fixture".into(),
+                relative_path: "companion.m".into(),
+                content_revision: runmat_execution::Digest::sha256(companion.as_bytes()),
+                display_name: "companion.m".into(),
+                full_path: None,
+                text: companion.into(),
+            },
+        });
+        let payload =
+            crate::wire::errors::run_error_payload(&error, Some("primary.m"), Some("primary = 1;"));
+        assert_eq!(payload.source_id, Some(source_id));
+        assert_eq!(payload.source_name.as_deref(), Some("companion.m"));
+        assert_eq!(payload.source_path.as_deref(), Some("companion.m"));
+        assert_eq!(payload.span.expect("companion span").line, 2);
+        assert!(payload.diagnostic.contains("companion.m"));
     }
 }

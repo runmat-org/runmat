@@ -1,37 +1,5 @@
 //! MATLAB-compatible `horzcat` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::shape_rules::scalar_tensor_shape;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
-
-const HORZCAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A1,...,An",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every real integer class participates in documented dimension-two concatenation. The leftmost integer input determines the output class when integers mix with unlike integer, floating, or logical operands.",
-    }];
-
-pub const HORZCAT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = horzcat(A1,...,An) with real integer data",
-        inputs: &HORZCAT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "horzcat delegates to the settled cat(dim=2) engine, including exact wide-integer conversion, saturation, empty handling, owner validation, and typed gather/assemble/restore fallback.",
-    }];
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
@@ -73,237 +41,59 @@ fn horzcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("horzcat").build()
 }
 
-const HORZCAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Horizontally concatenated result (dimension 2).",
-}];
-
-const HORZCAT_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
-
-const HORZCAT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "An",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional input arrays.",
-    },
-];
-
-const HORZCAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = horzcat()",
-        inputs: &HORZCAT_INPUTS_EMPTY,
-        outputs: &HORZCAT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = horzcat(A1, An...)",
-        inputs: &HORZCAT_INPUTS,
-        outputs: &HORZCAT_OUTPUT,
-    },
-];
-
-const HORZCAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HORZCAT.INVALID_INPUT",
-    identifier: Some("RunMat:horzcat:InvalidInput"),
-    when: "Inputs are malformed or incompatible for horizontal concatenation.",
-    message: "horzcat: invalid input arguments",
-};
-
-const HORZCAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HORZCAT.TYPE_MISMATCH",
-    identifier: Some("RunMat:horzcat:TypeMismatch"),
-    when: "Input classes cannot be concatenated together.",
-    message: "horzcat: incompatible input classes for concatenation",
-};
-
-const HORZCAT_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [HORZCAT_ERROR_INVALID_INPUT, HORZCAT_ERROR_TYPE_MISMATCH];
-
-pub const HORZCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HORZCAT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HORZCAT_ERRORS,
-};
-
-fn concat_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
-    match ty {
-        Type::Tensor { shape: Some(shape) } => Some(shape.clone()),
-        Type::Logical { shape: Some(shape) } => Some(shape.clone()),
-        Type::Num | Type::Int | Type::Bool => Some(scalar_tensor_shape()),
-        _ => None,
-    }
-}
-
-fn concat_shape(shapes: &[Vec<Option<usize>>], dim_1based: usize) -> Option<Vec<Option<usize>>> {
-    if shapes.is_empty() || dim_1based == 0 {
-        return None;
-    }
-    let mut active = shapes.to_vec();
-    let has_known_nonempty = active.iter().any(|shape| {
-        shape.iter().all(Option::is_some)
-            && shape.iter().all(|dimension| dimension.unwrap_or(0) > 0)
-    });
-    if has_known_nonempty {
-        active.retain(|shape| !shape.iter().any(|dimension| matches!(dimension, Some(0))));
-    }
-    let rank = active
-        .iter()
-        .map(|shape| shape.len())
-        .max()?
-        .max(dim_1based);
-    let mut padded = Vec::with_capacity(active.len());
-    for shape in &active {
-        let mut current = shape.clone();
-        while current.len() < rank {
-            current.push(Some(1));
-        }
-        padded.push(current);
-    }
-
-    let mut output = vec![None; rank];
-    let dim_zero = dim_1based - 1;
-    for axis in 0..rank {
-        if axis == dim_zero {
-            let mut total: Option<usize> = Some(0);
-            for shape in &padded {
-                match (total, shape[axis]) {
-                    (Some(acc), Some(value)) => total = acc.checked_add(value),
-                    _ => {
-                        total = None;
-                        break;
-                    }
-                }
-            }
-            output[axis] = total;
-        } else {
-            let mut shared: Option<usize> = None;
-            let mut mismatch = false;
-            for shape in &padded {
-                match (shared, shape[axis]) {
-                    (None, value) => shared = value,
-                    (Some(current), Some(value)) if current == value => {}
-                    (Some(_), Some(_)) => {
-                        mismatch = true;
-                        break;
-                    }
-                    _ => {
-                        shared = None;
-                        break;
-                    }
-                }
-            }
-            output[axis] = if mismatch { None } else { shared };
-        }
-    }
-
-    let min_len = dim_1based.max(2).min(output.len());
-    while output.len() > min_len && matches!(output.last(), Some(Some(1))) {
-        output.pop();
-    }
-    Some(output)
-}
-
-fn cell_element_type(inputs: &[Type]) -> Option<Box<Type>> {
-    let mut element: Option<Type> = None;
-    for ty in inputs {
-        let Type::Cell { element_type, .. } = ty else {
-            return None;
-        };
-        match (&element, element_type.as_deref()) {
-            (None, Some(current)) => element = Some(current.clone()),
-            (Some(existing), Some(current)) if existing == current => {}
-            (Some(_), Some(_)) => return None,
-            _ => {}
-        }
-    }
-    element.map(Box::new)
-}
-
-fn concat_type_with_dim(args: &[Type], dim_1based: usize) -> Type {
-    if args.is_empty() {
-        return Type::tensor();
-    }
-    if args.len() == 1 {
-        return args[0].clone();
-    }
-
-    let has_cell = args.iter().any(|arg| matches!(arg, Type::Cell { .. }));
-    if has_cell {
-        return Type::Cell {
-            element_type: cell_element_type(args),
-            length: None,
-        };
-    }
-
-    let has_string = args.iter().any(|arg| matches!(arg, Type::String));
-    if has_string {
-        return Type::cell_of(Type::String);
-    }
-
-    let has_numeric = args
-        .iter()
-        .any(|arg| matches!(arg, Type::Tensor { .. } | Type::Num | Type::Int));
-    let has_logical = args
-        .iter()
-        .any(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
-
-    if has_numeric {
-        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
-        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
-        return Type::Tensor { shape };
-    }
-
-    if has_logical {
-        let shapes: Option<Vec<Vec<Option<usize>>>> = args.iter().map(concat_input_shape).collect();
-        let shape = shapes.as_ref().and_then(|s| concat_shape(s, dim_1based));
-        return Type::Logical { shape };
-    }
-
-    Type::Unknown
-}
-
-fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    concat_type_with_dim(args, 2)
-}
-
 #[runtime_builtin(
     name = "horzcat",
-    category = "array/shape",
-    summary = "Concatenate arrays horizontally.",
-    keywords = "horzcat,horizontal concatenation,array,gpu",
-    accel = "array_construct",
-    type_resolver(horzcat_type),
-    descriptor(crate::builtins::array::shape::horzcat::HORZCAT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::horzcat::HORZCAT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
-async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn horzcat_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if args.is_empty() {
-        return empty_double();
+        return crate::execution::RootedValue::in_optional_context(
+            empty_double()?,
+            context.as_ref(),
+        );
     }
     if args.len() == 1 {
-        return Ok(args.into_iter().next().unwrap());
+        return crate::execution::RootedValue::in_optional_context(
+            args[0].clone(),
+            context.as_ref(),
+        );
     }
 
-    let mut forwarded = Vec::with_capacity(args.len() + 1);
-    forwarded.push(Value::Int(IntValue::I32(2)));
-    forwarded.extend(args);
-    match crate::call_builtin_async("cat", &forwarded).await {
+    let prefix = crate::execution::RootedValue::in_optional_context(
+        Value::Int(IntValue::I32(2)),
+        context.as_ref(),
+    )?;
+    let forwarded = crate::builtins::common::mapped_callable::prepend_rooted_argument(
+        &args,
+        prefix,
+        context.as_ref(),
+    )
+    .await?;
+    match crate::dispatcher::call_retained_builtin_async("cat", forwarded, context.as_ref()).await {
         Ok(value) => Ok(value),
         Err(err) => Err(adapt_cat_error(err)),
     }
+}
+
+pub(crate) fn is_canonical_host_binding(binding: crate::builtin::RuntimeBuiltinBinding) -> bool {
+    binding.identity.builtin.name == "horzcat"
+        && binding.identity.variant == "default"
+        && std::ptr::fn_addr_eq(
+            binding.implementation,
+            __rt_wrap_horzcat_builtin as crate::builtin::RuntimeBuiltinImplementation,
+        )
+        && binding.continuation_layout.is_some_and(|layout| {
+            std::ptr::fn_addr_eq(
+                layout,
+                __rt_owned_layout_horzcat_builtin
+                    as crate::builtin::RuntimeBuiltinContinuationLayout,
+            )
+        })
 }
 
 fn empty_double() -> crate::BuiltinResult<Value> {
@@ -329,47 +119,40 @@ fn adapt_cat_error(mut error: RuntimeError) -> RuntimeError {
     error
 }
 
+/// Selected pure-host literal path. It shares `cat`'s exact class/shape
+/// assembly, including the public `horzcat` diagnostic adaptation.
+pub(crate) fn concatenate_host_values(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    match args.len() {
+        0 => empty_double(),
+        1 => Ok(args.into_iter().next().expect("one argument")),
+        _ => crate::builtins::array::shape::cat::concatenate_host_values(1, args)
+            .map_err(adapt_cat_error),
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
 
-    fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::horzcat_builtin(args))
+    fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<crate::execution::RootedValue> {
+        block_on(super::horzcat_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
 
-    #[test]
-    fn horzcat_type_combines_shapes() {
-        let out = horzcat_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(1)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(4)])
-            }
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_invocation_returns_zero_by_zero() {
         let result = horzcat_builtin(Vec::new()).expect("horzcat");
-        match result {
+        match result.value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), vec![0, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -380,7 +163,7 @@ pub(crate) mod tests {
     #[test]
     fn single_argument_round_trips() {
         let result = horzcat_builtin(vec![Value::Num(3.5)]).expect("horzcat");
-        assert_eq!(result, Value::Num(3.5));
+        assert_eq!(result.value(), &Value::Num(3.5));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -388,7 +171,7 @@ pub(crate) mod tests {
     fn true_empty_operand_is_neutral_for_dynamic_growth() {
         let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
         let result = horzcat_builtin(vec![Value::Tensor(empty), Value::Num(1.0)]).expect("horzcat");
-        assert_eq!(result, Value::Num(1.0));
+        assert_eq!(result.value(), &Value::Num(1.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -398,9 +181,9 @@ pub(crate) mod tests {
         let right = Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
         let result =
             horzcat_builtin(vec![Value::Tensor(left), Value::Tensor(right)]).expect("horzcat");
-        match result {
+        match result.value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), vec![2, 3]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0, 10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -413,7 +196,7 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("left");
         let result = horzcat_builtin(vec![Value::Tensor(left), Value::Num(3.5)]).expect("horzcat");
 
-        let Value::Tensor(output) = result else {
+        let Value::Tensor(output) = result.value() else {
             panic!("expected tensor");
         };
         assert_eq!(
@@ -425,15 +208,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_concatenate_by_columns() {
-        let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
-        let rhs = CharArray::new("Mat".chars().collect(), 1, 3).unwrap();
+        let lhs = CharArray::from_unicode_scalars("Run".chars().collect(), 1, 3).unwrap();
+        let rhs = CharArray::from_unicode_scalars("Mat".chars().collect(), 1, 3).unwrap();
         let result =
             horzcat_builtin(vec![Value::CharArray(lhs), Value::CharArray(rhs)]).expect("horzcat");
-        match result {
+        match result.value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 6);
-                let text: String = arr.data.into_iter().collect();
+                let text = runmat_value::decode_utf16_code_units(arr.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(text, "RunMat");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -447,10 +231,10 @@ pub(crate) mod tests {
         let right = StringArray::new(vec!["top".into(), "bottom".into()], vec![1, 2]).unwrap();
         let result = horzcat_builtin(vec![Value::StringArray(left), Value::StringArray(right)])
             .expect("horzcat");
-        match result {
+        match result.value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 4]);
-                assert_eq!(arr.data, vec!["left", "right", "top", "bottom"]);
+                assert_eq!(arr.data(), vec!["left", "right", "top", "bottom"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -468,10 +252,10 @@ pub(crate) mod tests {
             Value::StringArray(right),
         ])
         .expect("horzcat mixed");
-        match result {
+        match result.value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
-                assert_eq!(arr.data, vec!["wn = ", "6", " rad/s"]);
+                assert_eq!(arr.data(), vec!["wn = ", "6", " rad/s"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -495,18 +279,18 @@ pub(crate) mod tests {
             let right = Tensor::new(vec![10.0, 30.0], vec![2, 1]).unwrap();
             let view_left = runmat_accelerate_api::HostTensorView {
                 data: &left.materialize_f64(),
-                shape: &left.shape,
+                shape: left.shape(),
             };
             let view_right = runmat_accelerate_api::HostTensorView {
                 data: &right.materialize_f64(),
-                shape: &right.shape,
+                shape: right.shape(),
             };
             let h_left = provider.upload(&view_left).expect("upload left");
             let h_right = provider.upload(&view_right).expect("upload right");
             let result = horzcat_builtin(vec![Value::GpuTensor(h_left), Value::GpuTensor(h_right)])
                 .expect("horzcat");
-            let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            let gathered = result.with_owned(test_support::gather).expect("gather");
+            assert_eq!(gathered.shape(), vec![2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 10.0, 30.0]);
         });
     }
@@ -518,7 +302,7 @@ pub(crate) mod tests {
         let bottom = LogicalArray::new(vec![0, 1, 0], vec![1, 3]).unwrap();
         let result = horzcat_builtin(vec![Value::LogicalArray(top), Value::LogicalArray(bottom)])
             .expect("horzcat logical");
-        match result {
+        match result.value() {
             Value::LogicalArray(array) => {
                 assert_eq!(array.shape, vec![1, 6]);
                 assert_eq!(array.data, vec![1, 0, 1, 0, 1, 0]);
@@ -537,9 +321,9 @@ pub(crate) mod tests {
             Value::ComplexTensor(right),
         ])
         .expect("horzcat complex");
-        match result {
+        match result.value() {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 4]);
+                assert_eq!(ct.shape(), vec![1, 4]);
                 assert_eq!(
                     ct.materialize_f64(),
                     vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)]
@@ -576,7 +360,7 @@ pub(crate) mod tests {
         .unwrap();
         let result =
             horzcat_builtin(vec![Value::Cell(lhs), Value::Cell(rhs)]).expect("horzcat cell");
-        match result {
+        match result.value() {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 2);
                 assert_eq!(cell.cols, 4);
@@ -594,7 +378,7 @@ pub(crate) mod tests {
             let prototype = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = runmat_accelerate_api::HostTensorView {
                 data: &prototype.materialize_f64(),
-                shape: &prototype.shape,
+                shape: prototype.shape(),
             };
             let proto_handle = provider.upload(&proto_view).expect("upload proto");
 
@@ -607,12 +391,12 @@ pub(crate) mod tests {
                 Value::GpuTensor(proto_handle),
             ])
             .expect("horzcat like");
-            let handle = match result {
-                Value::GpuTensor(h) => h,
+            match result.value() {
+                Value::GpuTensor(_) => {}
                 other => panic!("expected gpu tensor, got {other:?}"),
-            };
-            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            }
+            let gathered = result.with_owned(test_support::gather).expect("gather");
+            assert_eq!(gathered.shape(), vec![2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
@@ -634,7 +418,7 @@ pub(crate) mod tests {
 
         let cpu_value = horzcat_builtin(vec![Value::Tensor(a.clone()), Value::Tensor(b.clone())])
             .expect("cpu horzcat");
-        let expected = match cpu_value {
+        let expected = match cpu_value.value() {
             Value::Tensor(t) => t,
             other => panic!("expected tensor output, got {other:?}"),
         };
@@ -644,18 +428,18 @@ pub(crate) mod tests {
         };
         let view_a = runmat_accelerate_api::HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = runmat_accelerate_api::HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let ha = provider.upload(&view_a).expect("upload a");
         let hb = provider.upload(&view_b).expect("upload b");
         let gpu_value =
             horzcat_builtin(vec![Value::GpuTensor(ha), Value::GpuTensor(hb)]).expect("gpu horzcat");
-        let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, expected.shape);
+        let gathered = gpu_value.with_owned(test_support::gather).expect("gather");
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

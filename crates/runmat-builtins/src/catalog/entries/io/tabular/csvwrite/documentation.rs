@@ -1,0 +1,65 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("csvwrite"),
+    slug: Some("csvwrite"),
+    summary: "Write numeric matrices to comma-separated text files.",
+    description: "`csvwrite(filename,M)` serializes numeric or logical 2-D data. The optional row and column offsets are zero-based; existing destinations are overwritten.",
+    keywords: &["csvwrite", "csv", "write", "comma-separated values", "numeric export", "row offset", "column offset"],
+    related: &["csvread", "readmatrix", "writematrix", "fprintf", "gpuArray", "gather", "dlmread", "dlmwrite"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Data and offsets", paragraphs: &[
+            "Real or complex single/double, all eight real integer classes, and logical matrices are accepted. Integer elements serialize from exact authoritative storage, not a double approximation; logical false/true become 0/1. Matrix data uses column-major indexing and must be two-dimensional, allowing trailing singleton extents.",
+            "`csvwrite(filename,M,row,col)` writes after `row` blank lines and `col` empty comma-separated leading fields. Offsets are nonnegative integers. Values use short `g` formatting (`%.5g`); NaN, Inf, and -Inf are emitted as text. Every row ends in LF on all platforms. An existing file is truncated, including any preexisting header; use `writematrix` with `WriteMode='append'` for appending.",
+            "The documented statement form has no output. The separate `csvwrite-bytes-written-output` RunMat extension permits one host double scalar counting bytes. Paths beginning with `~` expand to the home directory before writing.",
+            "The historical example `total = sum(rand(5)); csvwrite('scalar.csv', total)` actually writes a 1-by-5 computed row, not a scalar; the runnable gallery uses a deterministic matrix while retaining that use case.",
+            "Historical header-replacement program: `fid = fopen('with_header.csv','w'); fprintf(fid,'Name,Jan,Feb\\nalpha,1,2\\nbeta,3,4\\n'); fclose(fid); csvwrite('with_header.csv',[10 20;30 40],1,0); csvread('with_header.csv',1,0)`. The gallery seeds the same header as fixture data and verifies that csvwrite truncates it.",
+        ] },
+        BuiltinDocumentationSection { heading: "Filesystem and residency", paragraphs: &[
+            "The selected filesystem provider, working directory for relative paths, and advertised lease are captured before resident data is gathered. This is a host I/O and fusion boundary, not a device kernel. Direct resident input requires `csvwrite-resident-input`; when enabled, it is downloaded from its owning provider before serialization. Strict compatibility mode rejects that extension before downloading or opening a file.",
+            "CPU serialization cooperates with the installed execution service. Partial file bytes can remain after a write or cancellation failure; the operation is not transactional. Finite complete-call resource admission for gathered data and generated rows remains a shared service requirement, not a fixed file-size promise.",
+            "Resident byte-count example: `G = gpuArray(single([0.1 0.2 0.3])); bytes = csvwrite('gpu_values.csv',G); csvread('gpu_values.csv')` writes `0.1,0.2,0.3` with a trailing newline, so `bytes` is 12. This requires a GPU provider and the named resident-input and bytes-written extensions. The gallery also checks the byte count with host data.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "matrix", title: "Write a numeric matrix", program: "A = [1 2 3;4 5 6];\ncsvwrite('scores.csv',A);\ncsvread('scores.csv')", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "matrix" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "scores.csv", content: BuiltinFixtureContent::Utf8("obsolete,header\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(csvread('scores.csv'),A));" } },
+        BuiltinExample { id: "header-offset", title: "Start after a blank leading row", program: "csvwrite('with_header.csv',[10 20;30 40],1,0);\ncsvread('with_header.csv',1,0)", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "header-offset" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "with_header.csv", content: BuiltinFixtureContent::Utf8("Name,Jan,Feb\nalpha,1,2\nbeta,3,4\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(csvread('with_header.csv',1,0),[10 20;30 40]));" } },
+        BuiltinExample { id: "column-offset", title: "Leave empty leading columns", program: "B = magic(3);\ncsvwrite('offset_columns.csv',B,0,2);\ncsvread('offset_columns.csv')", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "column-offset" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "offset_columns.csv", content: BuiltinFixtureContent::Utf8("obsolete\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(csvread('offset_columns.csv'),[zeros(3,2) B]));" } },
+        BuiltinExample { id: "logical", title: "Write a logical mask as zeros and ones", program: "mask = [true false true;false true false];\ncsvwrite('mask.csv',mask);\ncsvread('mask.csv')", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "logical" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "mask.csv", content: BuiltinFixtureContent::Utf8("obsolete\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(csvread('mask.csv'),[1 0 1;0 1 0]));" } },
+        BuiltinExample { id: "bytes-written", title: "Return the number of bytes written", program: "A = [0.1 0.2 0.3];\nbytes = csvwrite('values.csv',A)\ncsvread('values.csv')", display_output: Some("bytes = 12"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "bytes-written" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "values.csv", content: BuiltinFixtureContent::Utf8("obsolete\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(bytes == 12); assert(isequal(csvread('values.csv'),A));" } },
+        BuiltinExample { id: "resident-bytes", title: "Write resident data and return byte count", program: "G = gpuArray(single([0.1 0.2 0.3]));\nbytes = csvwrite('gpu_values.csv',G)\ncsvread('gpu_values.csv')", display_output: Some("bytes = 12"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Wgpu, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "resident-bytes" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "gpu_values.csv", content: BuiltinFixtureContent::Utf8("obsolete\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(bytes == 12); assert(isequal(csvread('gpu_values.csv'),[0.1 0.2 0.3]));" } },
+        BuiltinExample { id: "computed-row", title: "Persist a computed row for downstream tools", program: "total = sum([1 2 3;4 5 6]);\ncsvwrite('scalar.csv',total);\ncsvread('scalar.csv')", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "computed-row" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "scalar.csv", content: BuiltinFixtureContent::Utf8("obsolete\n") }] }), requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(csvread('scalar.csv'),[5 7 9]));" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Why must input be numeric or logical?", answer: "This legacy writer does not serialize mixed text or tables. Use writematrix for broader data." },
+        BuiltinDocumentationFaq { question: "Are row and column offsets zero-based?", answer: "Yes. Row 1 inserts one blank line and column 2 inserts two empty fields before each row." },
+        BuiltinDocumentationFaq { question: "Can csvwrite append?", answer: "No; it truncates the file. Use writematrix with WriteMode='append' or lower-level I/O." },
+        BuiltinDocumentationFaq { question: "How are NaN and Inf written?", answer: "As the tokens NaN, Inf, and -Inf." },
+        BuiltinDocumentationFaq { question: "What line ending is used?", answer: "LF on every platform, including Windows." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "csvread", target: BuiltinDocumentationLinkTarget::Builtin("csvread") },
+        BuiltinDocumentationLink { label: "readmatrix", target: BuiltinDocumentationLinkTarget::Builtin("readmatrix") },
+        BuiltinDocumentationLink { label: "writematrix", target: BuiltinDocumentationLinkTarget::Builtin("writematrix") },
+        BuiltinDocumentationLink { label: "fprintf", target: BuiltinDocumentationLinkTarget::Builtin("fprintf") },
+        BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+        BuiltinDocumentationLink { label: "dlmread", target: BuiltinDocumentationLinkTarget::Builtin("dlmread") },
+        BuiltinDocumentationLink { label: "dlmwrite", target: BuiltinDocumentationLinkTarget::Builtin("dlmwrite") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "CSV serialization and output", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvwrite.rs") },
+            BuiltinDocumentationLink { label: "CSV writer and formatting", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/csvwrite/writer.rs") },
+            BuiltinDocumentationLink { label: "Captured filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/path.rs") },
+            BuiltinDocumentationLink { label: "Execution-service cooperation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/cooperation.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CSV classes, offsets, formatting and provider gather", location: "builtins::io::tabular::csvwrite::tests" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

@@ -3,16 +3,9 @@
 //! `blkdiag` constructs a block diagonal matrix by placing each input on the
 //! diagonal and filling off-block entries with the class-appropriate zero.
 
+#[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
@@ -20,270 +13,131 @@ use runmat_value::{
 };
 
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
+use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "blkdiag";
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::blkdiag")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "blkdiag",
-    op_kind: GpuOpKind::Custom("blkdiag"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("upload"), ProviderHook::Custom("download")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Assembles block diagonal matrices on the host; gpuArray inputs are gathered once and dense numeric, logical, or complex results are uploaded back to the active provider.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::blkdiag")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "blkdiag",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Block diagonal assembly materialises a new array and terminates fusion pipelines.",
-};
-
-const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Block diagonal matrix containing each input along the diagonal.",
-}];
-
-const INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
-
-const INPUTS_VARIADIC: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First scalar, vector, matrix, sparse matrix, or gpuArray block.",
-    },
-    BuiltinParamDescriptor {
-        name: "An",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional blocks placed down and right from the previous block.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = blkdiag()",
-        inputs: &INPUTS_EMPTY,
-        outputs: &OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = blkdiag(A1, An...)",
-        inputs: &INPUTS_VARIADIC,
-        outputs: &OUTPUTS,
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BLKDIAG.INVALID_INPUT",
-    identifier: Some("RunMat:blkdiag:InvalidInput"),
-    when: "An input class, dimensionality, or block conversion is unsupported.",
-    message: "blkdiag: invalid input",
-};
-
-const ERROR_SIZE_OVERFLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BLKDIAG.SIZE_OVERFLOW",
-    identifier: Some("RunMat:blkdiag:SizeOverflow"),
-    when: "The block diagonal output dimensions or allocation size exceed addressable memory.",
-    message: "blkdiag: output size exceeds maximum supported size",
-};
-
-const ERROR_GPU: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BLKDIAG.GPU",
-    identifier: Some("RunMat:blkdiag:GpuError"),
-    when: "A required gpuArray gather or upload operation fails.",
-    message: "blkdiag: gpuArray operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INVALID_INPUT, ERROR_SIZE_OVERFLOW, ERROR_GPU];
-
-pub const BLKDIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const BLKDIAG_SPARSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "blkdiag-sparse-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "blkdiag with sparse integer blocks is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BlkdiagSparseIntegerInputExtension"),
-};
-
-const BLKDIAG_COMPLEX_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "blkdiag-complex-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "blkdiag with complex integer blocks is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BlkdiagComplexIntegerInputExtension"),
-};
-
-const BLKDIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    BLKDIAG_SPARSE_INTEGER_EXTENSION,
-    BLKDIAG_COMPLEX_INTEGER_EXTENSION,
-];
-
-const BLKDIAG_DENSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A1,...,AN",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Dense scalar, vector, or matrix blocks accept every integer class; when classes differ, the first integer block determines output class and floating or logical blocks convert into it.",
-    }];
-
-const BLKDIAG_SPARSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "sparse A1,...,AN",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat can structurally assemble same-class sparse integer blocks while preserving their exact values; the public sparse numeric storage domain is single, double, or logical.",
-    }];
-
-const BLKDIAG_COMPLEX_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "complex A1,...,AN",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat can structurally assemble same-class paired integer components; the public integer domain does not support complex-integer operations.",
-    }];
-
-pub const BLKDIAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = blkdiag(A1,...,AN) with dense real integer blocks",
-        inputs: &BLKDIAG_DENSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Blocks retain matrix geometry and occupy diagonal offsets. If any dense real input is integer, the first integer input class dominates all dense real and logical blocks; otherwise ordinary floating/logical rules apply. GPU inputs gather exactly and dense results return to the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = blkdiag(A1,...,AN) with sparse integer blocks",
-        inputs: &BLKDIAG_SPARSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only same-class sparse integer assembly preserves exact CSC storage; sparse results remain host-resident.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = blkdiag(A1,...,AN) with complex integer blocks",
-        inputs: &BLKDIAG_COMPLEX_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only same-class paired integer-component assembly preserves exact real and imaginary storage.",
-    },
-];
-
-fn blkdiag_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Tensor {
-            shape: Some(vec![Some(0), Some(0)]),
-        };
-    }
-
-    let all_logical = args
-        .iter()
-        .all(|arg| matches!(arg, Type::Logical { .. } | Type::Bool));
-
-    let mut rows: Option<usize> = Some(0);
-    let mut cols: Option<usize> = Some(0);
-    for arg in args {
-        let Some((r, c)) = type_matrix_dims(arg) else {
-            rows = None;
-            cols = None;
-            break;
-        };
-        rows = match (rows, r) {
-            (Some(acc), Some(value)) => acc.checked_add(value),
-            _ => None,
-        };
-        cols = match (cols, c) {
-            (Some(acc), Some(value)) => acc.checked_add(value),
-            _ => None,
-        };
-    }
-
-    let shape = Some(vec![rows, cols]);
-    if all_logical {
-        Type::Logical { shape }
-    } else {
-        Type::Tensor { shape }
-    }
-}
-
-fn type_matrix_dims(ty: &Type) -> Option<(Option<usize>, Option<usize>)> {
-    match ty {
-        Type::Num | Type::Int | Type::Bool => Some((Some(1), Some(1))),
-        Type::Tensor { shape } | Type::Logical { shape } => match shape.as_deref() {
-            Some([]) => Some((Some(1), Some(1))),
-            Some([n]) => Some((Some(1), *n)),
-            Some([r, c, rest @ ..]) => {
-                if rest.iter().all(|dim| matches!(dim, Some(1))) {
-                    Some((*r, *c))
-                } else {
-                    None
-                }
-            }
-            None => Some((None, None)),
-        },
-        _ => None,
-    }
-}
+mod managed;
 
 #[runtime_builtin(
     name = "blkdiag",
-    category = "array/shape",
-    summary = "Construct a block diagonal matrix from scalar, vector, or matrix blocks.",
-    keywords = "blkdiag,block diagonal,matrix,sparse,gpu",
-    type_resolver(blkdiag_type),
-    descriptor(crate::builtins::array::shape::blkdiag::BLKDIAG_DESCRIPTOR),
-    extensions(BLKDIAG_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::blkdiag::BLKDIAG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::shape::blkdiag"
 )]
-async fn blkdiag_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_integer_extensions_enabled(&args)?;
+async fn blkdiag_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_integer_extensions_enabled(args.view())?;
     let has_gpu = args
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)));
     if has_gpu {
-        return blkdiag_gpu(args).await;
+        validate_blocks_before_provider(args.view())?;
+        return blkdiag_gpu(context.as_ref(), args).await;
+    }
+    if let Some(context) = context.as_ref() {
+        if HostAllocationReceipt::policy(Some(context))
+            .map_err(|cause| managed::admission(context, cause))?
+            == HostAllocationPolicy::Managed
+        {
+            if !args.is_empty()
+                && args
+                    .iter()
+                    .all(|value| matches!(value, Value::CharArray(_)))
+            {
+                return managed::character(context, args.view());
+            }
+            if args
+                .iter()
+                .any(|value| matches!(value, Value::SparseTensor(_)))
+            {
+                if managed::has_nonreal_dense_complex(context, args.view())? {
+                    return managed::dense(context, args.view());
+                }
+                return managed::sparse(context, args.view());
+            }
+            if args.iter().all(|value| {
+                matches!(
+                    value,
+                    Value::Tensor(_)
+                        | Value::ComplexTensor(_)
+                        | Value::LogicalArray(_)
+                        | Value::Num(_)
+                        | Value::Int(_)
+                        | Value::Bool(_)
+                        | Value::Complex(_, _)
+                )
+            }) {
+                return managed::dense(context, args.view());
+            }
+        }
     }
     blkdiag_host(args)
 }
 
-fn ensure_integer_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
+fn validate_blocks_before_provider(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    let mut rows = 0usize;
+    let mut cols = 0usize;
+    let has_char = args
+        .iter()
+        .any(|value| matches!(value, Value::CharArray(_)));
+    let mut owner: Option<&dyn runmat_accelerate_api::AccelProvider> = None;
+    for value in args {
+        let shape = match value {
+            Value::Tensor(tensor) => matrix_dims_from_shape(tensor.shape()),
+            Value::ComplexTensor(tensor) => matrix_dims_from_shape(tensor.shape()),
+            Value::LogicalArray(array) => matrix_dims_from_shape(&array.shape),
+            Value::GpuTensor(handle) => {
+                let provider =
+                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+                        error_with_detail(
+                            &BLKDIAG_ERROR_GPU,
+                            "resident block has no owning provider",
+                        )
+                    })?;
+                if owner.is_some_and(|first| {
+                    !runmat_accelerate_api::same_provider_instance(first, provider)
+                }) {
+                    return Err(error_with_detail(
+                        &BLKDIAG_ERROR_GPU,
+                        "resident blocks belong to different providers",
+                    ));
+                }
+                owner = Some(provider);
+                matrix_dims_from_shape(handle.shape())
+            }
+            Value::SparseTensor(array) => Some((array.rows, array.cols)),
+            Value::CharArray(array) => Some((array.rows, array.cols)),
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some((1, 1)),
+            _ => None,
+        };
+        let (height, width) = shape.ok_or_else(|| {
+            error_with_detail(
+                &BLKDIAG_ERROR_INVALID_INPUT,
+                "unsupported block class or matrix shape",
+            )
+        })?;
+        if has_char && !matches!(value, Value::CharArray(_)) {
+            return Err(error_with_detail(
+                &BLKDIAG_ERROR_INVALID_INPUT,
+                "character blocks cannot be mixed with non-character blocks",
+            ));
+        }
+        rows = rows.checked_add(height).ok_or_else(size_overflow)?;
+        cols = cols.checked_add(width).ok_or_else(size_overflow)?;
+    }
+    Ok(())
+}
+
+fn ensure_integer_extensions_enabled(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.iter().any(
         |value| matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()),
     ) {
@@ -303,39 +157,55 @@ fn ensure_integer_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn blkdiag_gpu(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn blkdiag_gpu(
+    context: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let provider = args
         .iter()
         .find_map(|value| match value {
             Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle),
             _ => None,
         })
-        .ok_or_else(|| error_with_detail(&ERROR_GPU, "no acceleration provider is registered"))?;
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        let gathered_value = gpu_helpers::gather_value_async(&value)
-            .await
-            .map_err(|err| error_with_detail(&ERROR_GPU, err.message().to_string()))?;
-        gathered.push(gathered_value);
-    }
+        .ok_or_else(|| {
+            error_with_detail(&BLKDIAG_ERROR_GPU, "no acceleration provider is registered")
+        })?;
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), context, |index| {
+            let value = &args[index];
+            async move {
+                gpu_helpers::gather_value_async(value).await.map_err(|err| {
+                    build_runtime_error(format!("blkdiag: gpuArray gather failed: {err}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_identifier(
+                            BLKDIAG_ERROR_GPU
+                                .identifier
+                                .expect("declared GPU identifier"),
+                        )
+                        .with_source(err)
+                        .build()
+                })
+            }
+        })
+        .await?;
     let host = blkdiag_host(gathered)?;
     upload_gpu_result(provider, host)
 }
 
-fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
+fn blkdiag_host(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+            .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))?;
         return Ok(Value::Tensor(tensor));
     }
 
-    if let Some(result) = assemble_typed_complex_integer_blocks(&args) {
+    if let Some(result) = assemble_typed_complex_integer_blocks(args.view()) {
         return result;
     }
-    if let Some(result) = assemble_typed_integer_sparse_blocks(&args) {
+    if let Some(result) = assemble_typed_integer_sparse_blocks(args.view()) {
         return result;
     }
-    if let Some(result) = assemble_typed_integer_blocks(&args) {
+    if let Some(result) = assemble_typed_integer_blocks(args.view()) {
         return result;
     }
 
@@ -349,7 +219,9 @@ fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
 /// Assemble typed integer sparse blocks without reconstructing their stored values through f64.
 ///
 /// Once a typed sparse input selects sparse output, every block must retain the same integer class until mixed-class sparse promotion has a MATLAB-validated policy.
-fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+fn assemble_typed_integer_sparse_blocks(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Option<BuiltinResult<Value>> {
     if !args.iter().any(
         |value| matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()),
     ) {
@@ -371,15 +243,15 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
             Value::SparseTensor(sparse) => {
                 let Some(storage) = sparse.integer_storage() else {
                     return Some(Err(error_with_detail(
-                        &ERROR_INVALID_INPUT,
+                        &BLKDIAG_ERROR_INVALID_INPUT,
                         "blkdiag: typed sparse integer blocks require every input to use the same integer class",
                     )));
                 };
                 (
                     sparse.rows,
                     sparse.cols,
-                    sparse.col_ptrs.clone(),
-                    sparse.row_indices.clone(),
+                    sparse.col_ptrs.to_vec(),
+                    sparse.row_indices.to_vec(),
                     storage.exact_values(),
                     storage.clone(),
                 )
@@ -387,13 +259,13 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
             Value::Tensor(tensor) => {
                 let Some(storage) = tensor.integer_storage() else {
                     return Some(Err(error_with_detail(
-                        &ERROR_INVALID_INPUT,
+                        &BLKDIAG_ERROR_INVALID_INPUT,
                         "blkdiag: typed sparse integer blocks require every input to use the same integer class",
                     )));
                 };
-                let (rows, cols) = match matrix_dims_from_shape(&tensor.shape) {
+                let (rows, cols) = match matrix_dims_from_shape(tensor.shape()) {
                     Some(dims) => dims,
-                    None => return Some(Err(validate_matrix_shape(&tensor.shape).unwrap_err())),
+                    None => return Some(Err(validate_matrix_shape(tensor.shape()).unwrap_err())),
                 };
                 let source = storage.exact_values();
                 let mut col_ptrs = Vec::with_capacity(cols + 1);
@@ -424,16 +296,16 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
             }
             _ => {
                 return Some(Err(error_with_detail(
-                    &ERROR_INVALID_INPUT,
+                    &BLKDIAG_ERROR_INVALID_INPUT,
                     "blkdiag: typed sparse integer blocks require every input to use the same integer class",
                 )));
             }
         };
 
         if let Some(existing) = prototype.as_ref() {
-            if existing.class_name() != storage.class_name() {
+            if existing.numeric_dtype() != storage.numeric_dtype() {
                 return Some(Err(error_with_detail(
-                    &ERROR_INVALID_INPUT,
+                    &BLKDIAG_ERROR_INVALID_INPUT,
                     "blkdiag: typed sparse integer blocks require every input to use the same integer class",
                 )));
             }
@@ -475,12 +347,12 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
     }
     let storage = match prototype.from_exact_values_like(values) {
         Ok(storage) => storage,
-        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+        Err(detail) => return Some(Err(error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))),
     };
     Some(
         SparseTensor::new_integer(rows, cols, col_ptrs, row_indices, storage)
             .map(Value::SparseTensor)
-            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+            .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail)),
     )
 }
 
@@ -489,7 +361,9 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
 /// MATLAB's public matrix-combination rules make the first integer class dominant over
 /// unlike integers, floating classes, and logical values. Integer sources remain exact and
 /// all other values use destination-class assignment conversion.
-fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+fn assemble_typed_integer_blocks(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Option<BuiltinResult<Value>> {
     if args.iter().any(|value| {
         matches!(
             value,
@@ -518,7 +392,7 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
     impl DenseIntegerBlock<'_> {
         fn shape(&self) -> &[usize] {
             match self {
-                Self::Tensor(tensor) => &tensor.shape,
+                Self::Tensor(tensor) => tensor.shape(),
                 Self::Scalar(_) => &SCALAR_SHAPE,
                 Self::Logical(array) => &array.shape,
             }
@@ -549,7 +423,7 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
             Value::LogicalArray(array) => DenseIntegerBlock::Logical(array),
             _ => {
                 return Some(Err(error_with_detail(
-                    &ERROR_INVALID_INPUT,
+                    &BLKDIAG_ERROR_INVALID_INPUT,
                     "blkdiag: integer-dominant blocks must be real numeric or logical matrices",
                 )))
             }
@@ -576,7 +450,7 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
     let storage = prototype.zeros_like(len);
     let mut output = match Tensor::new_integer(storage, vec![rows, cols]) {
         Ok(output) => output,
-        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+        Err(detail) => return Some(Err(error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))),
     };
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
@@ -589,12 +463,12 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
                 let dst = (row_offset + row) + (col_offset + col) * rows;
                 let Some(value) = block.value_at(src) else {
                     return Some(Err(error_with_detail(
-                        &ERROR_INVALID_INPUT,
+                        &BLKDIAG_ERROR_INVALID_INPUT,
                         "blkdiag: block storage does not match its shape",
                     )));
                 };
                 if let Err(detail) = output.set_numeric_assignment_at(dst, value) {
-                    return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail)));
+                    return Some(Err(error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail)));
                 }
             }
         }
@@ -610,7 +484,9 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
 /// however, so same-class typed-complex inputs retain their paired integer components and the
 /// off-diagonal elements are class-correct zeroes. Mixed representations need their own
 /// conversion policy and are rejected before the legacy floating-point assembly path.
-fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+fn assemble_typed_complex_integer_blocks(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Option<BuiltinResult<Value>> {
     let has_typed_complex_integer = args.iter().any(
         |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()),
     );
@@ -623,27 +499,27 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
     for value in args {
         let Value::ComplexTensor(tensor) = value else {
             return Some(Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
+                &BLKDIAG_ERROR_INVALID_INPUT,
                 "typed complex integer blkdiag inputs must all use the same integer class",
             )));
         };
         let Some(storage) = tensor.integer_storage() else {
             return Some(Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
+                &BLKDIAG_ERROR_INVALID_INPUT,
                 "typed complex integer blkdiag inputs must all use the same integer class",
             )));
         };
         if let Some(existing) = prototype {
-            if existing.class_name() != storage.class_name() {
+            if existing.numeric_dtype() != storage.numeric_dtype() {
                 return Some(Err(error_with_detail(
-                    &ERROR_INVALID_INPUT,
+                    &BLKDIAG_ERROR_INVALID_INPUT,
                     "typed complex integer blkdiag inputs must all use the same integer class",
                 )));
             }
         } else {
             prototype = Some(storage);
         }
-        if let Err(error) = validate_matrix_shape(&tensor.shape) {
+        if let Err(error) = validate_matrix_shape(tensor.shape()) {
             return Some(Err(error));
         }
         tensors.push(tensor);
@@ -652,14 +528,14 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
     let prototype = prototype.expect("typed complex input establishes an integer class");
     let rows = match tensors
         .iter()
-        .try_fold(0usize, |total, tensor| total.checked_add(tensor.rows))
+        .try_fold(0usize, |total, tensor| total.checked_add(tensor.rows()))
     {
         Some(rows) => rows,
         None => return Some(Err(size_overflow())),
     };
     let cols = match tensors
         .iter()
-        .try_fold(0usize, |total, tensor| total.checked_add(tensor.cols))
+        .try_fold(0usize, |total, tensor| total.checked_add(tensor.cols()))
     {
         Some(cols) => cols,
         None => return Some(Err(size_overflow())),
@@ -668,43 +544,43 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
         Ok(len) => len,
         Err(error) => return Some(Err(error)),
     };
-    let mut real = prototype.real.zeros_like(len).exact_values();
-    let mut imag = prototype.imag.zeros_like(len).exact_values();
+    let mut real = prototype.real().zeros_like(len).exact_values();
+    let mut imag = prototype.imag().zeros_like(len).exact_values();
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
     for tensor in tensors {
         let storage = tensor
             .integer_storage()
             .expect("typed complex input was checked above");
-        let source_real = storage.real.exact_values();
-        let source_imag = storage.imag.exact_values();
-        for col in 0..tensor.cols {
-            for row in 0..tensor.rows {
-                let src = row + col * tensor.rows;
+        let source_real = storage.real().exact_values();
+        let source_imag = storage.imag().exact_values();
+        for col in 0..tensor.cols() {
+            for row in 0..tensor.rows() {
+                let src = row + col * tensor.rows();
                 let dst = (row_offset + row) + (col_offset + col) * rows;
                 real[dst] = source_real[src].clone();
                 imag[dst] = source_imag[src].clone();
             }
         }
-        row_offset += tensor.rows;
-        col_offset += tensor.cols;
+        row_offset += tensor.rows();
+        col_offset += tensor.cols();
     }
-    let real = match prototype.real.from_exact_values_like(real) {
+    let real = match prototype.real().from_exact_values_like(real) {
         Ok(storage) => storage,
-        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+        Err(detail) => return Some(Err(error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))),
     };
-    let imag = match prototype.imag.from_exact_values_like(imag) {
+    let imag = match prototype.imag().from_exact_values_like(imag) {
         Ok(storage) => storage,
-        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+        Err(detail) => return Some(Err(error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))),
     };
     let storage = match IntegerComplexStorage::new(real, imag) {
         Ok(storage) => storage,
-        Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
+        Err(detail) => return Some(Err(error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))),
     };
     Some(
         ComplexTensor::new_integer(storage, vec![rows, cols])
             .map(Value::ComplexTensor)
-            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+            .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail)),
     )
 }
 
@@ -732,59 +608,59 @@ impl Block {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(tensor) => {
-                validate_matrix_shape(&tensor.shape)?;
-                if tensor.shape.is_empty() {
+                validate_matrix_shape(tensor.shape())?;
+                if tensor.shape().is_empty() {
                     return tensor
                         .reshape(vec![1, 1])
                         .map(Self::Real)
-                        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail));
+                        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail));
                 }
                 Ok(Self::Real(tensor))
             }
             Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
                 .map(Self::Real)
-                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+                .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail)),
             Value::Int(value) => {
                 Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
                     .map(Self::Real)
-                    .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+                    .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
             }
             Value::Bool(flag) => LogicalArray::new(vec![if flag { 1 } else { 0 }], vec![1, 1])
                 .map(Self::Logical)
-                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+                .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail)),
             Value::LogicalArray(array) => {
                 validate_matrix_shape(&array.shape)?;
                 if array.shape.is_empty() {
-                    return LogicalArray::new(array.data, vec![1, 1])
+                    return LogicalArray::from_host_buffer(array.data, vec![1, 1])
                         .map(Self::Logical)
-                        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail));
+                        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail));
                 }
                 Ok(Self::Logical(array))
             }
             Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map(Self::Complex)
-                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
+                .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail)),
             Value::ComplexTensor(tensor) => {
-                validate_matrix_shape(&tensor.shape)?;
-                if tensor.shape.is_empty() {
+                validate_matrix_shape(tensor.shape())?;
+                if tensor.shape().is_empty() {
                     return ComplexTensor::new(tensor.materialize_f64(), vec![1, 1])
                         .map(Self::Complex)
-                        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail));
+                        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail));
                 }
                 Ok(Self::Complex(tensor))
             }
             Value::SparseTensor(sparse) => Ok(Self::Sparse(sparse)),
             Value::CharArray(chars) => Ok(Self::Char(chars)),
             Value::String(_) | Value::StringArray(_) | Value::Cell(_) => Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
+                &BLKDIAG_ERROR_INVALID_INPUT,
                 "string and cell inputs are not valid blkdiag blocks",
             )),
             Value::GpuTensor(_) => Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
+                &BLKDIAG_ERROR_INVALID_INPUT,
                 "gpuArray values must be handled by the GPU path",
             )),
             other => Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
+                &BLKDIAG_ERROR_INVALID_INPUT,
                 format!("unsupported input type {other:?}"),
             )),
         }
@@ -792,9 +668,9 @@ impl Block {
 
     fn rows(&self) -> usize {
         match self {
-            Self::Real(tensor) => tensor.rows,
+            Self::Real(tensor) => matrix_dims_from_shape(tensor.shape()).map_or(0, |dims| dims.0),
             Self::Logical(array) => matrix_dims_from_shape(&array.shape).map_or(0, |dims| dims.0),
-            Self::Complex(tensor) => tensor.rows,
+            Self::Complex(tensor) => tensor.rows(),
             Self::Sparse(sparse) => sparse.rows,
             Self::Char(chars) => chars.rows,
         }
@@ -802,9 +678,9 @@ impl Block {
 
     fn cols(&self) -> usize {
         match self {
-            Self::Real(tensor) => tensor.cols,
+            Self::Real(tensor) => matrix_dims_from_shape(tensor.shape()).map_or(0, |dims| dims.1),
             Self::Logical(array) => matrix_dims_from_shape(&array.shape).map_or(0, |dims| dims.1),
-            Self::Complex(tensor) => tensor.cols,
+            Self::Complex(tensor) => tensor.cols(),
             Self::Sparse(sparse) => sparse.cols,
             Self::Char(chars) => chars.cols,
         }
@@ -827,7 +703,7 @@ impl OutputClass {
             for block in blocks {
                 if !matches!(block, Block::Char(_)) {
                     return Err(error_with_detail(
-                        &ERROR_INVALID_INPUT,
+                        &BLKDIAG_ERROR_INVALID_INPUT,
                         "char blkdiag inputs cannot be mixed with numeric, logical, complex, or sparse blocks",
                     ));
                 }
@@ -924,7 +800,7 @@ fn validate_matrix_shape(shape: &[usize]) -> BuiltinResult<()> {
         return Ok(());
     }
     Err(error_with_detail(
-        &ERROR_INVALID_INPUT,
+        &BLKDIAG_ERROR_INVALID_INPUT,
         "inputs must be two-dimensional matrices or have only singleton trailing dimensions",
     ))
 }
@@ -957,7 +833,7 @@ fn assemble_real(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Value
     let len = checked_len(rows, cols)?;
     let mut output =
         Tensor::from_numeric_storage(NumericStorage::zeros(dtype, len), vec![rows, cols])
-            .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+            .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))?;
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
     for block in &blocks {
@@ -973,7 +849,7 @@ fn assemble_real(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Value
             }
             Block::Complex(_) | Block::Char(_) => {
                 return Err(error_with_detail(
-                    &ERROR_INVALID_INPUT,
+                    &BLKDIAG_ERROR_INVALID_INPUT,
                     "invalid block type for real output",
                 ))
             }
@@ -995,7 +871,7 @@ fn assemble_logical(blocks: Vec<Block>) -> BuiltinResult<Value> {
             Block::Logical(array) => {
                 let (block_rows, block_cols) =
                     matrix_dims_from_shape(&array.shape).ok_or_else(|| {
-                        error_with_detail(&ERROR_INVALID_INPUT, "invalid logical shape")
+                        error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, "invalid logical shape")
                     })?;
                 for col in 0..block_cols {
                     for row in 0..block_rows {
@@ -1007,7 +883,7 @@ fn assemble_logical(blocks: Vec<Block>) -> BuiltinResult<Value> {
             }
             _ => {
                 return Err(error_with_detail(
-                    &ERROR_INVALID_INPUT,
+                    &BLKDIAG_ERROR_INVALID_INPUT,
                     "invalid block type for logical output",
                 ))
             }
@@ -1017,7 +893,7 @@ fn assemble_logical(blocks: Vec<Block>) -> BuiltinResult<Value> {
     }
     LogicalArray::new(data, vec![rows, cols])
         .map(Value::LogicalArray)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
 }
 
 fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Value> {
@@ -1029,9 +905,9 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
     for block in &blocks {
         match block {
             Block::Complex(tensor) => {
-                for col in 0..tensor.cols {
-                    for row in 0..tensor.rows {
-                        let src = row + col * tensor.rows;
+                for col in 0..tensor.cols() {
+                    for row in 0..tensor.rows() {
+                        let src = row + col * tensor.rows();
                         let dst = (row_offset + row) + (col_offset + col) * rows;
                         data[dst] = tensor.materialize_f64()[src];
                     }
@@ -1039,9 +915,11 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
             }
             Block::Real(tensor) => {
                 let values = tensor::tensor_values_f64_cow(tensor);
-                for col in 0..tensor.cols {
-                    for row in 0..tensor.rows {
-                        let src = row + col * tensor.rows;
+                let (block_rows, block_cols) =
+                    matrix_dims_from_shape(tensor.shape()).expect("real block shape was validated");
+                for col in 0..block_cols {
+                    for row in 0..block_rows {
+                        let src = row + col * block_rows;
                         let dst = (row_offset + row) + (col_offset + col) * rows;
                         data[dst] = (values[src], 0.0);
                     }
@@ -1050,7 +928,7 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
             Block::Logical(array) => {
                 let (block_rows, block_cols) =
                     matrix_dims_from_shape(&array.shape).ok_or_else(|| {
-                        error_with_detail(&ERROR_INVALID_INPUT, "invalid logical shape")
+                        error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, "invalid logical shape")
                     })?;
                 for col in 0..block_cols {
                     for row in 0..block_rows {
@@ -1072,7 +950,7 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
             }
             Block::Char(_) => {
                 return Err(error_with_detail(
-                    &ERROR_INVALID_INPUT,
+                    &BLKDIAG_ERROR_INVALID_INPUT,
                     "char blocks cannot be converted to complex blkdiag output",
                 ))
             }
@@ -1081,7 +959,7 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
         col_offset += block.cols();
     }
     let tensor = ComplexTensor::from_f64_values_with_dtype(data, vec![rows, cols], dtype)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))?;
     Ok(complex_tensor_into_blkdiag_value(tensor))
 }
 
@@ -1136,19 +1014,19 @@ fn assemble_sparse(blocks: Vec<Block>, dtype: Option<NumericDType>) -> BuiltinRe
     };
     sparse
         .map(Value::SparseTensor)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
 }
 
 fn assemble_char(blocks: Vec<Block>) -> BuiltinResult<Value> {
     let (rows, cols) = output_dims(&blocks)?;
     let len = checked_len(rows, cols)?;
-    let mut data = filled_vec(' ', len)?;
+    let mut data = filled_vec(runmat_value::Utf16CodeUnit::from_raw(b' ' as u16), len)?;
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
     for block in &blocks {
         let Block::Char(chars) = block else {
             return Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
+                &BLKDIAG_ERROR_INVALID_INPUT,
                 "invalid block type for char output",
             ));
         };
@@ -1156,15 +1034,15 @@ fn assemble_char(blocks: Vec<Block>) -> BuiltinResult<Value> {
             for col in 0..chars.cols {
                 let src = row * chars.cols + col;
                 let dst = (row_offset + row) * cols + (col_offset + col);
-                data[dst] = chars.data[src];
+                data[dst] = chars.data()[src];
             }
         }
         row_offset += block.rows();
         col_offset += block.cols();
     }
-    CharArray::new(data, rows, cols)
+    CharArray::from_code_units(data, rows, cols)
         .map(Value::CharArray)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
 }
 
 fn block_into_sparse(block: Block) -> BuiltinResult<SparseTensor> {
@@ -1174,16 +1052,19 @@ fn block_into_sparse(block: Block) -> BuiltinResult<SparseTensor> {
             // Core sparse output is currently floating; expose the dense
             // conversion boundary instead of consulting a mirror.
             let values = tensor::tensor_values_f64_cow(&tensor);
-            dense_to_sparse(values.as_ref(), tensor.rows, tensor.cols)
+            let (rows, cols) =
+                matrix_dims_from_shape(tensor.shape()).expect("real block shape was validated");
+            dense_to_sparse(values.as_ref(), rows, cols)
         }
         Block::Logical(array) => {
-            let (rows, cols) = matrix_dims_from_shape(&array.shape)
-                .ok_or_else(|| error_with_detail(&ERROR_INVALID_INPUT, "invalid logical shape"))?;
+            let (rows, cols) = matrix_dims_from_shape(&array.shape).ok_or_else(|| {
+                error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, "invalid logical shape")
+            })?;
             logical_to_sparse(&array.data, rows, cols)
         }
         Block::Complex(tensor) => complex_to_real_sparse(&tensor),
         Block::Char(_) => Err(error_with_detail(
-            &ERROR_INVALID_INPUT,
+            &BLKDIAG_ERROR_INVALID_INPUT,
             "char blocks cannot be converted to sparse blkdiag output",
         )),
     }
@@ -1208,7 +1089,7 @@ fn dense_to_sparse(data: &[f64], rows: usize, cols: usize) -> BuiltinResult<Spar
         col_ptrs.push(values.len());
     }
     SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
 }
 
 fn logical_to_sparse(data: &[u8], rows: usize, cols: usize) -> BuiltinResult<SparseTensor> {
@@ -1227,7 +1108,7 @@ fn logical_to_sparse(data: &[u8], rows: usize, cols: usize) -> BuiltinResult<Spa
         col_ptrs.push(row_indices.len());
     }
     SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
 }
 
 fn complex_to_real_sparse(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor> {
@@ -1235,12 +1116,12 @@ fn complex_to_real_sparse(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor>
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
     col_ptrs
-        .try_reserve_exact(tensor.cols.checked_add(1).ok_or_else(size_overflow)?)
+        .try_reserve_exact(tensor.cols().checked_add(1).ok_or_else(size_overflow)?)
         .map_err(|_| allocation_error("sparse column pointer allocation failed"))?;
     col_ptrs.push(0);
-    for col in 0..tensor.cols {
-        for row in 0..tensor.rows {
-            let (re, _) = tensor.materialize_f64()[row + col * tensor.rows];
+    for col in 0..tensor.cols() {
+        for row in 0..tensor.rows() {
+            let (re, _) = tensor.materialize_f64()[row + col * tensor.rows()];
             if re != 0.0 {
                 row_indices.push(row);
                 values.push(re);
@@ -1248,8 +1129,8 @@ fn complex_to_real_sparse(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor>
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(tensor.rows, tensor.cols, col_ptrs, row_indices, values)
-        .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
+    SparseTensor::new(tensor.rows(), tensor.cols(), col_ptrs, row_indices, values)
+        .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
 }
 
 fn copy_real_block(
@@ -1259,16 +1140,18 @@ fn copy_real_block(
     col_offset: usize,
     tensor: &Tensor,
 ) -> BuiltinResult<()> {
-    for col in 0..tensor.cols {
-        for row in 0..tensor.rows {
-            let src = row + col * tensor.rows;
+    let (block_rows, block_cols) =
+        matrix_dims_from_shape(tensor.shape()).expect("real block shape was validated");
+    for col in 0..block_cols {
+        for row in 0..block_rows {
+            let src = row + col * block_rows;
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
             let value = tensor
                 .numeric_value_at(src)
                 .expect("validated block tensor index");
             output
                 .set_numeric_assignment_at(dst, value)
-                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+                .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))?;
         }
     }
     Ok(())
@@ -1282,14 +1165,14 @@ fn copy_logical_to_real_block(
     array: &LogicalArray,
 ) -> BuiltinResult<()> {
     let (rows, cols) = matrix_dims_from_shape(&array.shape)
-        .ok_or_else(|| error_with_detail(&ERROR_INVALID_INPUT, "invalid logical shape"))?;
+        .ok_or_else(|| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, "invalid logical shape"))?;
     for col in 0..cols {
         for row in 0..rows {
             let src = row + col * rows;
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
             output
                 .set_numeric_assignment_at(dst, NumericScalar::F64(f64::from(array.data[src])))
-                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+                .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))?;
         }
     }
     Ok(())
@@ -1309,7 +1192,7 @@ fn copy_sparse_to_real_block(
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
             output
                 .set_numeric_assignment_at(dst, NumericScalar::F64(values[idx]))
-                .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))?;
+                .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))?;
         }
     }
     Ok(())
@@ -1338,57 +1221,53 @@ fn upload_gpu_result(
 ) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
-            runmat_accelerate_api::set_handle_logical(&handle, false);
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)?;
+            gpu_helpers::resident_gpu_value(handle)
         }
         Value::Num(value) => {
-            let data = [value];
-            let shape = [1usize, 1usize];
-            let view = HostTensorView {
-                data: &data,
-                shape: &shape,
-            };
-            let handle = provider
-                .upload(&view)
-                .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
-            runmat_accelerate_api::set_handle_logical(&handle, false);
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            let tensor = Tensor::new(vec![value], vec![1, 1])
+                .map_err(|cause| error_with_detail(&BLKDIAG_ERROR_GPU, cause))?;
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)?;
+            gpu_helpers::resident_gpu_value(handle)
         }
         Value::LogicalArray(array) => {
-            let data: Vec<f64> = array.data.iter().map(|&value| f64::from(value)).collect();
-            let view = HostTensorView {
-                data: &data,
+            let view = runmat_accelerate_api::HostLogicalTensorView {
+                data: &array.data,
                 shape: &array.shape,
             };
-            provider
-                .upload(&view)
-                .map(gpu_helpers::logical_gpu_value)
-                .map_err(|err| error_with_detail(&ERROR_GPU, err))
+            let output = provider.upload_logical(&view).map_err(|cause| {
+                build_runtime_error(format!("blkdiag: logical upload failed: {cause}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(cause)
+                    .build()
+            })?;
+            gpu_helpers::logical_gpu_value(output)
         }
         Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map(gpu_helpers::complex_gpu_value),
+            .and_then(gpu_helpers::complex_gpu_value),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|detail| error_with_detail(&ERROR_GPU, detail))?;
+                .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_GPU, detail))?;
             gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map(gpu_helpers::complex_gpu_value)
+                .and_then(gpu_helpers::complex_gpu_value)
         }
         Value::SparseTensor(sparse) => Ok(Value::SparseTensor(sparse)),
         other => Err(error_with_detail(
-            &ERROR_GPU,
+            &BLKDIAG_ERROR_GPU,
             format!("cannot upload blkdiag result {other:?}"),
         )),
     }
 }
 
 fn size_overflow() -> RuntimeError {
-    error_with_detail(&ERROR_SIZE_OVERFLOW, "output dimensions overflow usize")
+    error_with_detail(
+        &BLKDIAG_ERROR_SIZE_OVERFLOW,
+        "output dimensions overflow usize",
+    )
 }
 
 fn allocation_error(detail: impl std::fmt::Display) -> RuntimeError {
-    error_with_detail(&ERROR_SIZE_OVERFLOW, detail)
+    error_with_detail(&BLKDIAG_ERROR_SIZE_OVERFLOW, detail)
 }
 
 fn filled_vec<T: Clone>(value: T, len: usize) -> BuiltinResult<Vec<T>> {
@@ -1415,42 +1294,41 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, Type};
     use runmat_value::IntValue;
 
     use crate::builtins::common::test_support;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(blkdiag_builtin(args))
+        let args = crate::execution::RootedValues::new(args)
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+        block_on(blkdiag_builtin(None, args.into()))
     }
 
     #[test]
-    fn type_resolver_sums_known_shapes() {
-        let out = blkdiag_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-                Type::Num,
-                Type::Logical {
-                    shape: Some(vec![Some(4), Some(1)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(7), Some(5)])
-            }
-        );
+    fn logical_result_upload_preserves_producer_intent_and_column_order() {
+        test_support::with_test_provider(|provider| {
+            let logical =
+                runmat_value::LogicalArray::new(vec![1, 0, 0, 1, 1, 0], vec![2, 3]).unwrap();
+            let output = upload_gpu_result(provider, Value::LogicalArray(logical)).unwrap();
+            let Value::GpuTensor(handle) = &output else {
+                panic!("resident output")
+            };
+            assert!(handle.view().is_logical());
+            assert_eq!(handle.shape(), &[2, 3]);
+            assert_eq!(
+                handle.physical().storage(),
+                runmat_accelerate_api::GpuTensorStorage::Real
+            );
+            let host = test_support::gather(output).unwrap();
+            assert_eq!(host.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0, 1.0, 0.0]);
+        });
     }
 
     #[test]
     fn empty_call_returns_empty_double_matrix() {
         match call(Vec::new()).unwrap() {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![0, 0]);
+                assert_eq!(tensor.shape(), &[0, 0]);
                 assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1459,7 +1337,8 @@ mod tests {
 
     #[test]
     fn blkdiag_descriptor_declares_integer_forms_and_extensions() {
-        let builtin = builtin_function_by_name("blkdiag").expect("registered blkdiag");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name("blkdiag").expect("catalogued blkdiag");
         assert_eq!(builtin.extensions, &BLKDIAG_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 3);
         assert_eq!(
@@ -1497,7 +1376,7 @@ mod tests {
             else {
                 panic!("expected real integer blkdiag output");
             };
-            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.shape(), &[3, 2]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -1548,7 +1427,7 @@ mod tests {
             panic!("expected integer tensor");
         };
         assert_eq!(output.numeric_dtype(), NumericDType::I8);
-        assert_eq!(output.shape, vec![5, 5]);
+        assert_eq!(output.shape(), &[5, 5]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![
@@ -1643,7 +1522,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .filter_map(|(row, value)| (!value.is_zero()).then_some(row))
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 storage
                     .from_exact_values_like(nonzero.clone())
                     .expect("typed sparse storage"),
@@ -1713,7 +1592,7 @@ mod tests {
         let b = Tensor::new(vec![5.0, 6.0], vec![1, 2]).unwrap();
         match call(vec![Value::Tensor(a), Value::Tensor(b)]).unwrap() {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 4]);
+                assert_eq!(out.shape(), &[3, 4]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![1.0, 3.0, 0.0, 2.0, 4.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 6.0]
@@ -1734,13 +1613,25 @@ mod tests {
         .unwrap()
         {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 5]);
+                assert_eq!(out.shape(), &[3, 5]);
                 assert_eq!(out.materialize_f64()[0], 1.0);
                 assert_eq!(out.materialize_f64()[1 + 3 * 3], 4.0);
                 assert_eq!(out.materialize_f64()[2 + 4 * 3], 5.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rank_one_dense_input_is_a_row_block() {
+        let vector = Tensor::new(vec![2.0, 3.0], vec![2]).unwrap();
+        let result = call(vec![Value::Tensor(vector), Value::Num(4.0)]).unwrap();
+        let Value::Tensor(out) = result else {
+            panic!("expected dense tensor");
+        };
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 0.0, 3.0, 0.0, 0.0, 4.0]);
     }
 
     #[test]
@@ -1761,7 +1652,7 @@ mod tests {
         let b = Tensor::new_with_dtype(vec![3.25], vec![1, 1], NumericDType::F32).unwrap();
         match call(vec![Value::Tensor(a), Value::Tensor(b)]).unwrap() {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F32);
                 assert_eq!(out.materialize_f64()[0], 1.5);
                 assert_eq!(out.materialize_f64()[1], 2.5);
@@ -1776,7 +1667,7 @@ mod tests {
         let complex = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![2, 1]).unwrap();
         match call(vec![Value::Num(9.0), Value::ComplexTensor(complex)]).unwrap() {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.materialize_f64()[0], (9.0, 0.0));
                 assert_eq!(out.materialize_f64()[4], (1.0, 2.0));
                 assert_eq!(out.materialize_f64()[5], (3.0, -4.0));
@@ -1791,20 +1682,22 @@ mod tests {
         let complex = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, -4.0)], vec![2, 1]).unwrap();
         match call(vec![Value::Tensor(real), Value::ComplexTensor(complex)]).unwrap() {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F32);
                 assert_eq!(
-                    out.as_f32_slice(),
-                    Some(
-                        &[
-                            (9.0, 0.0),
-                            (0.0, 0.0),
-                            (0.0, 0.0),
-                            (0.0, 0.0),
-                            (1.0, 2.0),
-                            (3.0, -4.0),
-                        ][..]
-                    )
+                    out.as_f32_slice().map(|values| values
+                        .iter()
+                        .copied()
+                        .map(<(f32, f32)>::from)
+                        .collect::<Vec<_>>()),
+                    Some(vec![
+                        (9.0, 0.0),
+                        (0.0, 0.0),
+                        (0.0, 0.0),
+                        (0.0, 0.0),
+                        (1.0, 2.0),
+                        (3.0, -4.0),
+                    ])
                 );
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -1881,7 +1774,7 @@ mod tests {
         let sparse = SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![2.0]).unwrap();
         match call(vec![Value::SparseTensor(sparse), Value::Complex(5.0, 1.0)]).unwrap() {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 1.0)]
@@ -1937,7 +1830,7 @@ mod tests {
         .unwrap()
         {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
+                assert_eq!(out.shape(), &[3, 3]);
                 assert_eq!(out.materialize_f64()[0], (7.0, 0.0));
                 assert_eq!(out.materialize_f64()[4], (1.0, 0.0));
                 assert_eq!(out.materialize_f64()[8], (2.0, -3.0));
@@ -1948,13 +1841,14 @@ mod tests {
 
     #[test]
     fn char_blocks_are_space_padded() {
-        let a = CharArray::new("ab".chars().collect(), 1, 2).unwrap();
-        let b = CharArray::new("cd".chars().collect(), 2, 1).unwrap();
+        let a = CharArray::from_unicode_scalars("ab".chars().collect(), 1, 2).unwrap();
+        let b = CharArray::from_unicode_scalars("cd".chars().collect(), 2, 1).unwrap();
         match call(vec![Value::CharArray(a), Value::CharArray(b)]).unwrap() {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 3);
-                let text: String = out.data.iter().collect();
+                let text = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(text, "ab   c  d");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1963,12 +1857,12 @@ mod tests {
 
     #[test]
     fn unsupported_and_high_dimensional_inputs_error() {
-        let err = call(vec![Value::String("x".to_string())]).unwrap_err();
-        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+        let err = call(vec![Value::string("x")]).unwrap_err();
+        assert_eq!(err.identifier(), BLKDIAG_ERROR_INVALID_INPUT.identifier);
 
         let tensor = Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap();
         let err = call(vec![Value::Tensor(tensor)]).unwrap_err();
-        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
+        assert_eq!(err.identifier(), BLKDIAG_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
@@ -1979,19 +1873,19 @@ mod tests {
             let ha = provider
                 .upload(&HostTensorView {
                     data: &a.materialize_f64(),
-                    shape: &a.shape,
+                    shape: a.shape(),
                 })
                 .unwrap();
             let hb = provider
                 .upload(&HostTensorView {
                     data: &b.materialize_f64(),
-                    shape: &b.shape,
+                    shape: b.shape(),
                 })
                 .unwrap();
             let value = call(vec![Value::GpuTensor(ha), Value::GpuTensor(hb)]).unwrap();
             assert!(matches!(value, Value::GpuTensor(_)));
             let gathered = test_support::gather(value).unwrap();
-            assert_eq!(gathered.shape, vec![3, 3]);
+            assert_eq!(gathered.shape(), &[3, 3]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 4.0]
@@ -2047,7 +1941,7 @@ mod tests {
                 panic!("expected gathered tensor");
             };
             assert_eq!(out.numeric_dtype(), NumericDType::F32);
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
         });
     }
 
@@ -2058,13 +1952,13 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .unwrap();
             let value = call(vec![Value::GpuTensor(handle), Value::Num(2.0)]).unwrap();
             assert!(matches!(value, Value::GpuTensor(_)));
             let gathered = test_support::gather(value).unwrap();
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
         });
     }
@@ -2072,16 +1966,15 @@ mod tests {
     #[test]
     fn gpu_logical_inputs_preserve_logical_metadata() {
         test_support::with_test_provider(|provider| {
-            let logical = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
             let handle = provider
-                .upload(&HostTensorView {
-                    data: &logical.materialize_f64(),
-                    shape: &logical.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[2, 1],
                 })
                 .unwrap();
             let value = call(vec![
                 Value::Bool(true),
-                gpu_helpers::logical_gpu_value(handle),
+                gpu_helpers::logical_gpu_value(handle).expect("adopt logical producer"),
             ])
             .unwrap();
             let Value::GpuTensor(handle) = value else {
@@ -2089,7 +1982,7 @@ mod tests {
             };
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
-            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(gathered.shape(), &[3, 2]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
@@ -2114,7 +2007,7 @@ mod tests {
                 crate::builtins::math::fft::common::gather_gpu_complex_tensor(&handle, "blkdiag"),
             )
             .unwrap();
-            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(gathered.shape(), &[3, 2]);
             assert_eq!(gathered.materialize_f64()[0], (9.0, 0.0));
             assert_eq!(gathered.materialize_f64()[4], (1.0, 2.0));
             assert_eq!(gathered.materialize_f64()[5], (3.0, -4.0));

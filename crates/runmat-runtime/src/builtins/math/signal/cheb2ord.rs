@@ -1,119 +1,30 @@
 //! MATLAB-compatible `cheb2ord` Chebyshev Type II order selection.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CHEB2ORD_ERROR_ARG_COUNT, CHEB2ORD_ERROR_INTERNAL,
+    CHEB2ORD_ERROR_INVALID_ATTENUATION, CHEB2ORD_ERROR_INVALID_FREQUENCY,
+    CHEB2ORD_ERROR_INVALID_OPTION, CHEB2ORD_ERROR_TOO_MANY_OUTPUTS,
+    CHEB2ORD_INTEGER_ATTENUATION_EXTENSION, CHEB2ORD_INTEGER_FREQUENCY_EXTENSION,
+    CHEB2ORD_LOGICAL_INPUT_EXTENSION, CHEB2ORD_RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericScalar, Value};
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::signal::common::real_vector_to_row_value;
+use crate::builtins::math::signal::common::{real_vector_to_row_value, SignalCooperation};
 use crate::builtins::math::signal::order_selection::{
     chebyshev_v_pass_stop, checked_order, classify_kind, db_excess_log_ratio,
     find_natural_frequency, option_text, parse_positive_db, real_edges, transform_edges,
-    unwarp_frequency, validate_critical_frequencies, FilterKind, OrderFamily,
+    unwarp_frequency, validate_critical_frequencies, FilterKind, OrderEdgeError, OrderFamily,
 };
-use crate::builtins::math::signal::type_resolvers::cheb2ord_type;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, GpuGatherRetry, RuntimeError,
+};
 
 const BUILTIN_NAME: &str = "cheb2ord";
-
-const INTEGER_FREQUENCY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cheb2ord-integer-frequency",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "cheb2ord with typed-integer passband or stopband frequencies is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cheb2ordIntegerFrequencyExtension"),
-};
-const INTEGER_ATTENUATION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cheb2ord-integer-attenuation",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cheb2ord with typed-integer ripple or attenuation values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cheb2ordIntegerAttenuationExtension"),
-};
-const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cheb2ord-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cheb2ord with logical numeric inputs is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cheb2ordLogicalInputExtension"),
-};
-const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cheb2ord-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cheb2ord with interactive resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Cheb2ordResidentInputExtension"),
-};
-
-pub const CHEB2ORD_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    INTEGER_FREQUENCY_EXTENSION,
-    INTEGER_ATTENUATION_EXTENSION,
-    LOGICAL_INPUT_EXTENSION,
-    RESIDENT_INPUT_EXTENSION,
-];
-
-const INTEGER_FREQUENCY_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Wp",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer passband edges are outside the documented single/double domain and enter a checked double computation boundary only in RunMat mode.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Ws",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer stopband edges are outside the documented single/double domain and enter a checked double computation boundary only in RunMat mode.",
-    },
-];
-const INTEGER_ATTENUATION_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Rp",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer ripple is a RunMat-only control and must be exactly representable at the double computation boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Rs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer attenuation is a RunMat-only control and must be exactly representable at the double computation boundary.",
-    },
-];
-
-pub const CHEB2ORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[n, Wn] = cheb2ord(integer_Wp, integer_Ws, Rp, Rs, ...)",
-        inputs: &INTEGER_FREQUENCY_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer frequency edges are validated from authoritative storage before deliberate double filter-order computation; interactive resident input is independently gated.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[n, Wn] = cheb2ord(Wp, Ws, integer_Rp, integer_Rs, ...)",
-        inputs: &INTEGER_ATTENUATION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer ripple and attenuation controls are range-checked exactly before deliberate double filter-order computation.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::cheb2ord")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -140,181 +51,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: None,
     emits_nan: false,
     notes: "cheb2ord materialises scalar/vector design parameters and is not fused.",
-};
-
-const CHEB2ORD_OUTPUT_N: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Minimum Chebyshev Type II filter order.",
-}];
-
-const CHEB2ORD_OUTPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum Chebyshev Type II filter order.",
-    },
-    BuiltinParamDescriptor {
-        name: "Wn",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Natural cutoff frequency or frequency pair for Chebyshev Type II design.",
-    },
-];
-
-const CHEB2ORD_INPUTS_DIGITAL: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "Wp",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Passband edge or two-element passband edge vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Ws",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Stopband edge or two-element stopband edge vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rp",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum passband ripple in dB.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum stopband attenuation in dB.",
-    },
-];
-
-const CHEB2ORD_INPUTS_ANALOG: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "Wp",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analog passband edge or edge pair in rad/s.",
-    },
-    BuiltinParamDescriptor {
-        name: "Ws",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analog stopband edge or edge pair in rad/s.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rp",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum passband ripple in dB.",
-    },
-    BuiltinParamDescriptor {
-        name: "Rs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum stopband attenuation in dB.",
-    },
-    BuiltinParamDescriptor {
-        name: "s",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analog-design selector.",
-    },
-];
-
-const CHEB2ORD_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "n = cheb2ord(Wp, Ws, Rp, Rs)",
-        inputs: &CHEB2ORD_INPUTS_DIGITAL,
-        outputs: &CHEB2ORD_OUTPUT_N,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs)",
-        inputs: &CHEB2ORD_INPUTS_DIGITAL,
-        outputs: &CHEB2ORD_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "n = cheb2ord(Wp, Ws, Rp, Rs, 's')",
-        inputs: &CHEB2ORD_INPUTS_ANALOG,
-        outputs: &CHEB2ORD_OUTPUT_N,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[n, Wn] = cheb2ord(Wp, Ws, Rp, Rs, 's')",
-        inputs: &CHEB2ORD_INPUTS_ANALOG,
-        outputs: &CHEB2ORD_OUTPUTS,
-    },
-];
-
-const CHEB2ORD_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHEB2ORD.ARG_COUNT",
-    identifier: Some("RunMat:cheb2ord:ArgCount"),
-    when: "The argument count is outside supported forms.",
-    message: "cheb2ord: expected cheb2ord(Wp, Ws, Rp, Rs [, 's'])",
-};
-
-const CHEB2ORD_ERROR_INVALID_FREQUENCY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHEB2ORD.INVALID_FREQUENCY",
-    identifier: Some("RunMat:cheb2ord:InvalidFrequency"),
-    when: "Passband or stopband edges are invalid.",
-    message: "cheb2ord: invalid passband or stopband frequency",
-};
-
-const CHEB2ORD_ERROR_INVALID_ATTENUATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHEB2ORD.INVALID_ATTENUATION",
-    identifier: Some("RunMat:cheb2ord:InvalidAttenuation"),
-    when: "Ripple or attenuation values are invalid.",
-    message: "cheb2ord: Rp and Rs must be positive finite scalars with Rs > Rp",
-};
-
-const CHEB2ORD_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHEB2ORD.INVALID_OPTION",
-    identifier: Some("RunMat:cheb2ord:InvalidOption"),
-    when: "The optional selector is not supported.",
-    message: "cheb2ord: optional selector must be 's'",
-};
-
-const CHEB2ORD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHEB2ORD.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:cheb2ord:TooManyOutputs"),
-    when: "More than two output arguments are requested.",
-    message: "cheb2ord: too many output arguments",
-};
-
-const CHEB2ORD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHEB2ORD.INTERNAL",
-    identifier: Some("RunMat:cheb2ord:Internal"),
-    when: "Output tensor construction fails internally.",
-    message: "cheb2ord: internal error",
-};
-
-const CHEB2ORD_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    CHEB2ORD_ERROR_ARG_COUNT,
-    CHEB2ORD_ERROR_INVALID_FREQUENCY,
-    CHEB2ORD_ERROR_INVALID_ATTENUATION,
-    CHEB2ORD_ERROR_INVALID_OPTION,
-    CHEB2ORD_ERROR_TOO_MANY_OUTPUTS,
-    CHEB2ORD_ERROR_INTERNAL,
-];
-
-pub const CHEB2ORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CHEB2ORD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CHEB2ORD_ERRORS,
 };
 
 #[derive(Clone, Debug)]
@@ -345,25 +81,46 @@ fn cheb2ord_error_with_message(
     builder.build()
 }
 
+fn cheb2ord_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut owner = build_runtime_error(format!("{}: {}", error.message, source.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = error.identifier {
+        owner = owner.with_identifier(identifier);
+    }
+    owner.build()
+}
+
+fn frequency_error(error: OrderEdgeError) -> RuntimeError {
+    match error {
+        OrderEdgeError::Invalid(detail) => {
+            cheb2ord_error_with_detail(&CHEB2ORD_ERROR_INVALID_FREQUENCY, detail)
+        }
+        OrderEdgeError::Operational(source) => {
+            cheb2ord_error_with_source(&CHEB2ORD_ERROR_INVALID_FREQUENCY, *source)
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "cheb2ord",
-    category = "math/signal",
-    summary = "Select the minimum Chebyshev Type II filter order.",
-    keywords = "cheb2ord,chebyshev,type II,filter order,signal processing",
-    type_resolver(cheb2ord_type),
-    descriptor(crate::builtins::math::signal::cheb2ord::CHEB2ORD_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::cheb2ord::CHEB2ORD_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::cheb2ord::CHEB2ORD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::cheb2ord"
 )]
 async fn cheb2ord_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     wp: Value,
     ws: Value,
     rp: Value,
     rs: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    evaluate(wp, ws, rp, rs, &rest).await
+    evaluate_in_context(wp, ws, rp, rs, rest.view(), runtime.as_ref()).await
 }
 
 pub async fn evaluate(
@@ -373,11 +130,42 @@ pub async fn evaluate(
     rs: Value,
     rest: &[Value],
 ) -> BuiltinResult<Value> {
+    evaluate_in_context(
+        wp,
+        ws,
+        rp,
+        rs,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        None,
+    )
+    .await
+}
+
+async fn evaluate_in_context(
+    wp: Value,
+    ws: Value,
+    rp: Value,
+    rs: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     if rest.len() > 1 {
         return Err(cheb2ord_error(&CHEB2ORD_ERROR_ARG_COUNT));
     }
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(cheb2ord_error(&CHEB2ORD_ERROR_TOO_MANY_OUTPUTS));
+    }
     let analog = if let Some(option) = rest.first() {
-        match option_text(option).as_deref() {
+        match option_text(option)
+            .map_err(|source| {
+                let mut error = cheb2ord_error(&CHEB2ORD_ERROR_INVALID_OPTION);
+                error.source = Some(Box::new(source));
+                error
+            })?
+            .as_deref()
+        {
             Some("s") => true,
             Some(_) => return Err(cheb2ord_error(&CHEB2ORD_ERROR_INVALID_OPTION)),
             None => return Err(cheb2ord_error(&CHEB2ORD_ERROR_INVALID_OPTION)),
@@ -386,16 +174,20 @@ pub async fn evaluate(
         false
     };
     ensure_compatibility(&wp, &ws, &rp, &rs)?;
-    let wp = prepare_numeric_value(wp, "Wp").await?;
-    let ws = prepare_numeric_value(ws, "Ws").await?;
-    let rp = prepare_numeric_value(rp, "Rp").await?;
-    let rs = prepare_numeric_value(rs, "Rs").await?;
+    let wp = prepare_numeric_value(wp, OrderInputRole::Wp, &mut cooperation).await?;
+    cooperation.completed(1).await?;
+    let ws = prepare_numeric_value(ws, OrderInputRole::Ws, &mut cooperation).await?;
+    cooperation.completed(1).await?;
+    let rp = prepare_numeric_value(rp, OrderInputRole::Rp, &mut cooperation).await?;
+    cooperation.completed(1).await?;
+    let rs = prepare_numeric_value(rs, OrderInputRole::Rs, &mut cooperation).await?;
+    cooperation.completed(1).await?;
     let wp = real_edges(BUILTIN_NAME, "Wp", wp)
         .await
-        .map_err(|detail| cheb2ord_error_with_detail(&CHEB2ORD_ERROR_INVALID_FREQUENCY, detail))?;
+        .map_err(frequency_error)?;
     let ws = real_edges(BUILTIN_NAME, "Ws", ws)
         .await
-        .map_err(|detail| cheb2ord_error_with_detail(&CHEB2ORD_ERROR_INVALID_FREQUENCY, detail))?;
+        .map_err(frequency_error)?;
     let rp = parse_positive_db(BUILTIN_NAME, "Rp", &rp).map_err(|detail| {
         cheb2ord_error_with_detail(&CHEB2ORD_ERROR_INVALID_ATTENUATION, detail)
     })?;
@@ -407,6 +199,7 @@ pub async fn evaluate(
     }
 
     let result = compute_cheb2ord(&wp, &ws, rp, rs, analog)?;
+    cooperation.completed(1).await?;
     output_result(result)
 }
 
@@ -420,13 +213,13 @@ fn output_result(result: Cheb2ordResult) -> BuiltinResult<Value> {
     };
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![order]));
+            return Ok(Value::output_list(vec![order]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![order, wn]));
+            return Ok(Value::output_list(vec![order, wn]));
         }
         return Err(cheb2ord_error(&CHEB2ORD_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -436,19 +229,19 @@ fn output_result(result: Cheb2ordResult) -> BuiltinResult<Value> {
 fn ensure_compatibility(wp: &Value, ws: &Value, rp: &Value, rs: &Value) -> BuiltinResult<()> {
     if is_typed_integer(wp) || is_typed_integer(ws) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &INTEGER_FREQUENCY_EXTENSION,
+            &CHEB2ORD_INTEGER_FREQUENCY_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
     if is_typed_integer(rp) || is_typed_integer(rs) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &INTEGER_ATTENUATION_EXTENSION,
+            &CHEB2ORD_INTEGER_ATTENUATION_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
     if [wp, ws, rp, rs].into_iter().any(|value| is_logical(value)) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &LOGICAL_INPUT_EXTENSION,
+            &CHEB2ORD_LOGICAL_INPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
@@ -457,7 +250,7 @@ fn ensure_compatibility(wp: &Value, ws: &Value, rp: &Value, rs: &Value) -> Built
         .any(|value| matches!(value, Value::GpuTensor(_)))
     {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &RESIDENT_INPUT_EXTENSION,
+            &CHEB2ORD_RESIDENT_INPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
@@ -475,56 +268,72 @@ fn is_logical(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
 }
 
-async fn prepare_numeric_value(value: Value, label: &str) -> BuiltinResult<Value> {
-    let host = gather_if_needed_async(&value).await.map_err(|error| {
-        cheb2ord_error_with_detail(
-            &CHEB2ORD_ERROR_INTERNAL,
-            format!("failed to gather {label}: {}", error.message()),
-        )
-    })?;
-    ensure_exact_double_boundary(&host, label)?;
-    Ok(host)
+#[derive(Clone, Copy)]
+enum OrderInputRole {
+    Wp,
+    Ws,
+    Rp,
+    Rs,
 }
 
-fn ensure_exact_double_boundary(value: &Value, label: &str) -> BuiltinResult<()> {
-    const MAX_EXACT: i128 = 1_i128 << 53;
-    let check = |scalar: NumericScalar| -> BuiltinResult<()> {
-        let exact = match scalar {
-            NumericScalar::I8(value) => i128::from(value),
-            NumericScalar::I16(value) => i128::from(value),
-            NumericScalar::I32(value) => i128::from(value),
-            NumericScalar::I64(value) => i128::from(value),
-            NumericScalar::U8(value) => i128::from(value),
-            NumericScalar::U16(value) => i128::from(value),
-            NumericScalar::U32(value) => i128::from(value),
-            NumericScalar::U64(value) => i128::from(value),
-            NumericScalar::F32(_) | NumericScalar::F64(_) => return Ok(()),
-        };
-        if !(-MAX_EXACT..=MAX_EXACT).contains(&exact) {
-            let descriptor = if matches!(label, "Rp" | "Rs") {
-                &CHEB2ORD_ERROR_INVALID_ATTENUATION
-            } else {
-                &CHEB2ORD_ERROR_INVALID_FREQUENCY
-            };
+impl OrderInputRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Wp => "Wp",
+            Self::Ws => "Ws",
+            Self::Rp => "Rp",
+            Self::Rs => "Rs",
+        }
+    }
+
+    fn extension(self) -> &'static runmat_builtins::BuiltinExtensionDescriptor {
+        match self {
+            Self::Wp | Self::Ws => &CHEB2ORD_INTEGER_FREQUENCY_EXTENSION,
+            Self::Rp | Self::Rs => &CHEB2ORD_INTEGER_ATTENUATION_EXTENSION,
+        }
+    }
+
+    fn error(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::Wp | Self::Ws => &CHEB2ORD_ERROR_INVALID_FREQUENCY,
+            Self::Rp | Self::Rs => &CHEB2ORD_ERROR_INVALID_ATTENUATION,
+        }
+    }
+}
+
+async fn prepare_numeric_value(
+    value: Value,
+    role: OrderInputRole,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let value = if is_typed_integer(&value) {
+        let prepared = cooperation
+            .prepare_integer_receipt(&value, role.extension())
+            .await?;
+        let descriptor = role.error();
+        if !prepared.is_exact() {
             return Err(cheb2ord_error_with_detail(
                 descriptor,
-                format!("integer {label} values must be exactly representable as double"),
+                format!(
+                    "integer {} values must be exactly representable as double",
+                    role.label()
+                ),
             ));
         }
-        Ok(())
-    };
-    match value {
-        Value::Int(integer) => check(NumericScalar::from(integer.clone())),
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            for index in 0..tensor.len() {
-                if let Some(scalar) = tensor.numeric_value_at(index) {
-                    check(scalar)?;
-                }
-            }
-            Ok(())
+        if let Some(payload) = prepared.into_resident_payload() {
+            payload
+                .into_value()
+                .map_err(|detail| cheb2ord_error_with_detail(descriptor, detail))?
+        } else {
+            value
         }
-        _ => Ok(()),
-    }
+    } else {
+        value
+    };
+    let host = gather_if_needed_async(&value)
+        .await
+        .map_err(|source| cheb2ord_error_with_source(&CHEB2ORD_ERROR_INTERNAL, source))?;
+    Ok(host)
 }
 
 fn compute_cheb2ord(
@@ -619,8 +428,43 @@ mod tests {
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::{builtin_catalog_entry_by_name, builtin_function_by_name};
+    use runmat_builtins::{CHEB2ORD_EXTENSIONS, CHEB2ORD_INTEGER_CAPABILITIES};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
+
+    #[test]
+    fn integer_input_roles_bind_exact_extension_and_error_family() {
+        for (role, label, extension, error) in [
+            (
+                OrderInputRole::Wp,
+                "Wp",
+                &CHEB2ORD_INTEGER_FREQUENCY_EXTENSION,
+                &CHEB2ORD_ERROR_INVALID_FREQUENCY,
+            ),
+            (
+                OrderInputRole::Ws,
+                "Ws",
+                &CHEB2ORD_INTEGER_FREQUENCY_EXTENSION,
+                &CHEB2ORD_ERROR_INVALID_FREQUENCY,
+            ),
+            (
+                OrderInputRole::Rp,
+                "Rp",
+                &CHEB2ORD_INTEGER_ATTENUATION_EXTENSION,
+                &CHEB2ORD_ERROR_INVALID_ATTENUATION,
+            ),
+            (
+                OrderInputRole::Rs,
+                "Rs",
+                &CHEB2ORD_INTEGER_ATTENUATION_EXTENSION,
+                &CHEB2ORD_ERROR_INVALID_ATTENUATION,
+            ),
+        ] {
+            assert_eq!(role.label(), label);
+            assert_eq!(role.extension().id, extension.id);
+            assert_eq!(role.error().identifier, error.identifier);
+        }
+    }
 
     fn call(
         wp: Value,
@@ -630,7 +474,10 @@ mod tests {
         rest: &[Value],
         outputs: Option<usize>,
     ) -> BuiltinResult<Value> {
-        let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+        let _guard = outputs
+            .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
+            .expect("output-count scope");
         block_on(evaluate(wp, ws, rp, rs, rest))
     }
 
@@ -656,8 +503,16 @@ mod tests {
 
     #[test]
     fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("cheb2ord builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
+        let builtin = builtin_catalog_entry_by_name(BUILTIN_NAME).expect("cheb2ord catalog entry");
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        assert_eq!(builtin.bindings.len(), 1);
+        let compiled = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(compiled.len(), 1);
+        assert_eq!(
+            compiled[0].identity,
+            builtin.binding_identity(&builtin.bindings[0])
+        );
+        let descriptor = builtin.descriptor;
         assert!(descriptor
             .signatures
             .iter()
@@ -861,12 +716,12 @@ mod tests {
     #[test]
     fn integer_metadata_and_compatibility_gates_are_role_specific() {
         assert_eq!(CHEB2ORD_INTEGER_CAPABILITIES.len(), 2);
-        assert!(CHEB2ORD_INTEGER_CAPABILITIES
-            .iter()
-            .all(|capability| capability
+        assert!(CHEB2ORD_INTEGER_CAPABILITIES.iter().all(|capability| {
+            capability
                 .inputs
                 .iter()
-                .all(|input| input.classes.len() == 8)));
+                .all(|input| input.classes.len() == 8)
+        }));
         assert_eq!(CHEB2ORD_EXTENSIONS.len(), 4);
 
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -913,6 +768,19 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:cheb2ord:InvalidFrequency"));
         assert!(err.message().contains("exactly representable as double"));
+    }
+
+    #[test]
+    fn exact_wide_integer_multiple_passes_shared_binary64_boundary() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
+        let exact = block_on(prepare_numeric_value(
+            Value::Int(IntValue::U64((1_u64 << 53) + 2)),
+            OrderInputRole::Wp,
+            &mut cooperation,
+        ))
+        .expect("exact binary64 multiple is admissible");
+        assert!(matches!(exact, Value::Int(IntValue::U64(value)) if value == (1_u64 << 53) + 2));
     }
 
     #[test]
@@ -964,7 +832,7 @@ mod tests {
             )
             .unwrap();
             assert!(matches!(out, Value::OutputList(values) if values.len() == 1));
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 

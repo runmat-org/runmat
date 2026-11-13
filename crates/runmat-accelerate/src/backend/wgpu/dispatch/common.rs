@@ -1,7 +1,12 @@
-pub fn noop_then_poll(device: &wgpu::Device, pipeline: &wgpu::ComputePipeline) {
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("runmat-noop"),
-    });
+use super::observation::PendingSubmissions;
+use runmat_accelerate_api::{WgpuDeviceAccess, WgpuEmission};
+
+pub fn noop_then_poll(emission: &WgpuEmission<'_>, pipeline: &wgpu::ComputePipeline) {
+    let mut enc = emission
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runmat-noop"),
+        });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-noop-pass"),
@@ -13,14 +18,26 @@ pub fn noop_then_poll(device: &wgpu::Device, pipeline: &wgpu::ComputePipeline) {
     // Note: queue submission is performed by caller to preserve provider semantics
 }
 
-pub fn submit(device: &wgpu::Device, queue: &wgpu::Queue, enc: wgpu::CommandEncoder) {
-    let _submission = queue.submit(Some(enc.finish()));
+/// Emission only; the enclosing owner commits pending observation and invokes
+/// `poll_submitted` after its access closure has returned.
+pub(crate) fn submit(
+    emission: &WgpuEmission<'_>,
+    pending: &mut PendingSubmissions,
+    enc: impl super::observation::SubmissionEncoder,
+) -> anyhow::Result<wgpu::SubmissionIndex> {
+    let submission = pending.submit(emission, enc)?;
+    pending.request_legacy_poll(submission.clone());
+    Ok(submission)
+}
+
+pub(crate) fn poll_submitted(access: &WgpuDeviceAccess, submission: wgpu::SubmissionIndex) {
     #[cfg(target_arch = "wasm32")]
     {
-        device.poll(wgpu::Maintain::Poll);
+        let _ = submission;
+        access.poll(wgpu::Maintain::Poll);
     }
     #[cfg(not(target_arch = "wasm32"))]
-    device.poll(wgpu::Maintain::WaitForSubmissionIndex(_submission));
+    access.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
 }
 
 pub fn dispatch_groups(groups: u32) -> u32 {

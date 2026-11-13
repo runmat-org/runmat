@@ -77,7 +77,8 @@ fn matlab_mode_keeps_signatures_and_extension_metadata_visible_to_lsp_consumers(
         let help = signature_help_at(source, &analysis, &Position::new(0, column))
             .unwrap_or_else(|| panic!("MATLAB-mode signature help for {source}"));
         assert!(!help.signatures.is_empty(), "{source}");
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(
             builtin.extensions.iter().any(|extension| {
                 extension.id == extension_id

@@ -2,120 +2,19 @@
 #[cfg(test)]
 use runmat_types::MemberAccess;
 
+#[cfg(test)]
+use runmat_builtins::DISPLAY_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, DISPLAY_ERROR_ARG_CONFIG, DISPLAY_ERROR_GATHER,
+    DISPLAY_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::console::{record_console_line, ConsoleStream};
 use crate::gather_if_needed_async;
 
 use super::disp::{empty_return_value, format_for_display};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::display")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "display",
-    op_kind: GpuOpKind::Custom("sink"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Always formats on the CPU; GPU tensors are gathered via the active provider before display.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::display")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "display",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Side-effecting sink; excluded from fusion planning.",
-};
-
-const DISPLAY_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Value to display with a variable-name header.",
-}];
-
-const DISPLAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "display(X)",
-    inputs: &DISPLAY_INPUTS_VALUE,
-    outputs: &[],
-}];
-
-const DISPLAY_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISPLAY.ARG_CONFIG",
-    identifier: Some("RunMat:display:TooManyInputs"),
-    when: "Too many input arguments are passed to display.",
-    message: "display: too many input arguments",
-};
-
-const DISPLAY_ERROR_GATHER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISPLAY.GATHER",
-    identifier: Some("RunMat:display:GatherFailed"),
-    when: "Input value cannot be gathered onto the host for rendering.",
-    message: "display: failed to gather value for display",
-};
-const DISPLAY_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISPLAY.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:display:TooManyOutputs"),
-    when: "An output is requested from display.",
-    message: "display does not return output arguments",
-};
-
-const DISPLAY_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    DISPLAY_ERROR_ARG_CONFIG,
-    DISPLAY_ERROR_GATHER,
-    DISPLAY_ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const DISPLAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DISPLAY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DISPLAY_ERRORS,
-};
-
-const DISPLAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every integer class is displayed exactly through the variable-aware display path unless class-specific display or disp dispatch handles the object.",
-    }];
-
-pub const DISPLAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "display(X)",
-        inputs: &DISPLAY_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "display is a no-output host rendering sink with class-method dispatch. Resident integer arrays gather through exact typed provider download before the shared formatter runs.",
-    }];
 
 fn display_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
     display_error_with(error, error.message)
@@ -132,20 +31,25 @@ fn display_error_with(
     builder.build()
 }
 
+fn display_gather_error(source: crate::RuntimeError) -> crate::RuntimeError {
+    let mut builder = crate::build_runtime_error(format!("display: {source}"))
+        .with_builtin("display")
+        .with_source(source);
+    if let Some(identifier) = DISPLAY_ERROR_GATHER.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "display",
-    category = "io",
-    summary = "Display values with a variable-name header.",
-    keywords = "display,disp,print,object,gpu",
-    sink = true,
-    accel = "sink",
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::disp_type),
-    descriptor(crate::builtins::io::display::DISPLAY_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::display::DISPLAY_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::display"
 )]
-pub async fn display_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn display_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 0) {
         return Err(display_error(&DISPLAY_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -162,14 +66,14 @@ pub async fn display_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
 
     let host_value = gather_if_needed_async(&value)
         .await
-        .map_err(|e| display_error_with(&DISPLAY_ERROR_GATHER, format!("display: {e}")))?;
+        .map_err(display_gather_error)?;
     let lines = format_for_display(&host_value);
     if !lines.is_empty() {
         let body = match display_label() {
             Some(label) => format_display_body(&label, &host_value, &lines),
             None => lines.join("\n"),
         };
-        record_console_line(ConsoleStream::Stdout, body);
+        record_console_line(ConsoleStream::Stdout, body)?;
     }
     Ok(empty_return_value())
 }
@@ -180,7 +84,7 @@ async fn dispatch_custom_display_method(value: &Value) -> crate::BuiltinResult<b
         _ => return Ok(false),
     }
     let args = vec![value.clone()];
-    crate::dispatcher::try_call_registered_instance_method("display", &args, Some(0))
+    crate::dispatcher::try_call_registered_instance_method("display", &args, Some(0), None)
         .await
         .map(|result| result.is_some())
 }
@@ -191,7 +95,7 @@ async fn dispatch_custom_disp_method(value: &Value) -> crate::BuiltinResult<bool
         _ => return Ok(false),
     }
     let args = vec![value.clone()];
-    crate::dispatcher::try_call_registered_instance_method("disp", &args, Some(0))
+    crate::dispatcher::try_call_registered_instance_method("disp", &args, Some(0), None)
         .await
         .map(|result| result.is_some())
 }
@@ -230,7 +134,7 @@ fn implicit_integer_summary(value: &Value) -> Option<String> {
             if tensor.len() == 1 {
                 return Some(tensor.numeric_dtype().class_name().to_string());
             }
-            let shape = tensor.shape.as_slice();
+            let shape = tensor.shape();
             let dimensions = shape
                 .iter()
                 .map(usize::to_string)
@@ -262,6 +166,13 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    const DISPLAY_HOOK_OBJECT: runmat_types::StaticClassIdentity =
+        runmat_types::StaticClassIdentity::new("DisplayHookObject");
+    const DISP_FALLBACK_OBJECT: runmat_types::StaticClassIdentity =
+        runmat_types::StaticClassIdentity::new("DispFallbackObject");
+    const DISPLAY_HOOK_CHILD: runmat_types::StaticClassIdentity =
+        runmat_types::StaticClassIdentity::new("DisplayHookChild");
+
     fn span_of(source: &str, needle: &str) -> Span {
         let start = source.find(needle).expect("needle present");
         Span {
@@ -274,8 +185,10 @@ mod tests {
         take_thread_buffer()
             .into_iter()
             .filter(|entry| entry.stream == ConsoleStream::Stdout)
-            .map(|entry| entry.text)
-            .collect::<String>()
+            .fold(String::new(), |mut text, entry| {
+                text.push_str(entry.text.as_str());
+                text
+            })
     }
 
     #[test]
@@ -291,8 +204,12 @@ mod tests {
 
     #[test]
     fn display_rejects_requested_output() {
-        let _outputs = crate::output_count::push_output_count(Some(1));
-        let err = block_on(display_builtin(Value::Num(1.0), Vec::new())).unwrap_err();
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
+        let err = block_on(display_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:display:TooManyOutputs"));
     }
 
@@ -301,7 +218,7 @@ mod tests {
         reset_thread_buffer();
         block_on(display_builtin(
             Value::Tensor(Tensor::zeros(vec![0, 0])),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         assert_eq!(stdout_text(), "ans = []\n");
@@ -312,7 +229,11 @@ mod tests {
         reset_thread_buffer();
         let tensor =
             Tensor::new_integer(IntegerStorage::U8(Vec::new()), vec![0, 5]).expect("typed empty");
-        block_on(display_builtin(Value::Tensor(tensor), Vec::new())).unwrap();
+        block_on(display_builtin(
+            Value::Tensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         assert_eq!(stdout_text(), "ans = 0×5 empty uint8 matrix\n");
     }
 
@@ -321,7 +242,7 @@ mod tests {
         reset_thread_buffer();
         block_on(display_builtin(
             Value::Int(IntValue::U64(u64::MAX)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("display");
         assert_eq!(stdout_text(), format!("ans = uint64\n{}\n", u64::MAX));
@@ -335,7 +256,11 @@ mod tests {
             vec![1, 2],
         )
         .expect("integer row vector");
-        block_on(display_builtin(Value::Tensor(tensor), Vec::new())).unwrap();
+        block_on(display_builtin(
+            Value::Tensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         assert_eq!(
             stdout_text(),
             "ans = 1×2 uint64 row vector\n72057594037539387  72057594037927935\n"
@@ -358,7 +283,11 @@ mod tests {
             })
             .expect("upload integer");
         reset_thread_buffer();
-        block_on(display_builtin(Value::GpuTensor(handle), Vec::new())).expect("display");
+        block_on(display_builtin(
+            Value::GpuTensor(handle),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("display");
         let text = stdout_text();
         assert!(text.contains("9007199254740993"));
         assert!(text.contains("18446744073709551615"));
@@ -371,14 +300,20 @@ mod tests {
             SourceId(81),
             "/tmp/display_name.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("display source catalog admission");
         let _callsite_guard = crate::callsite::push_callsite(
             Some(SourceId(81)),
             Some(vec![span_of(source, "alpha")]),
-        );
+        )
+        .expect("display callsite");
 
         reset_thread_buffer();
-        let result = block_on(display_builtin(Value::Num(42.0), Vec::new())).expect("display");
+        let result = block_on(display_builtin(
+            Value::Num(42.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("display");
 
         assert_eq!(result, Value::Tensor(Tensor::zeros(vec![0, 0])));
         assert_eq!(stdout_text(), "alpha = 42\n");
@@ -391,14 +326,20 @@ mod tests {
             SourceId(82),
             "/tmp/display_expr.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("display source catalog admission");
         let _callsite_guard = crate::callsite::push_callsite(
             Some(SourceId(82)),
             Some(vec![span_of(source, "alpha + 1")]),
-        );
+        )
+        .expect("display callsite");
 
         reset_thread_buffer();
-        block_on(display_builtin(Value::Num(43.0), Vec::new())).expect("display");
+        block_on(display_builtin(
+            Value::Num(43.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("display");
 
         assert_eq!(stdout_text(), "43\n");
     }
@@ -407,7 +348,11 @@ mod tests {
     fn display_formats_multiline_values_under_header() {
         reset_thread_buffer();
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor");
-        block_on(display_builtin(Value::Tensor(tensor), Vec::new())).expect("display");
+        block_on(display_builtin(
+            Value::Tensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("display");
 
         assert_eq!(stdout_text(), "ans =\n     1       2\n     3       4\n");
     }
@@ -416,26 +361,29 @@ mod tests {
     fn display_dispatches_custom_object_display_method() {
         let class_name = "DisplayHookObject".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_name.clone(),
+            events: Default::default(),
+            name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
-                "display".to_string(),
+                "display".into(),
                 crate::class_registry::RuntimeMethod {
-                    name: "display".to_string(),
+                    name: "display".into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: "DisplayHookObject.customDisplayImpl".to_string(),
+                    function_name: "DisplayHookObject.customDisplayImpl".into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )]),
         });
         let _resolver =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "DisplayHookObject.customDisplayImpl").then_some(771)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 let args = args.to_vec();
@@ -443,18 +391,21 @@ mod tests {
                     assert_eq!(function, 771);
                     assert_eq!(requested_outputs, 0);
                     assert!(
-                        matches!(args.first(), Some(Value::Object(object)) if object.class_name == "DisplayHookObject")
+                        matches!(args.first(), Some(Value::Object(object)) if object.class_name().is(DISPLAY_HOOK_OBJECT))
                     );
-                    record_console_line(ConsoleStream::Stdout, "custom display");
-                    Ok(empty_return_value())
+                    record_console_line(ConsoleStream::Stdout, "custom display")?;
+                    crate::execution::RootedValueSequence::new(
+                        crate::sequence::ValueSequence::empty(),
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             },
-        )));
+        ))).expect("call-port scope");
 
         reset_thread_buffer();
         block_on(display_builtin(
             Value::Object(ObjectInstance::new(class_name)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("display");
 
@@ -465,26 +416,29 @@ mod tests {
     fn display_falls_back_to_overloaded_disp_method() {
         let class_name = "DispFallbackObject".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: class_name.clone(),
+            events: Default::default(),
+            name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
-                "disp".to_string(),
+                "disp".into(),
                 crate::class_registry::RuntimeMethod {
-                    name: "disp".to_string(),
+                    name: "disp".into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: "DispFallbackObject.renderDisp".to_string(),
+                    function_name: "DispFallbackObject.renderDisp".into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )]),
         });
         let _resolver =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "DispFallbackObject.renderDisp").then_some(773)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 let args = args.to_vec();
@@ -492,17 +446,20 @@ mod tests {
                     assert_eq!(function, 773);
                     assert_eq!(requested_outputs, 0);
                     assert!(
-                        matches!(args.first(), Some(Value::Object(object)) if object.class_name == "DispFallbackObject")
+                        matches!(args.first(), Some(Value::Object(object)) if object.class_name().is(DISP_FALLBACK_OBJECT))
                     );
-                    record_console_line(ConsoleStream::Stdout, "custom disp");
-                    Ok(empty_return_value())
+                    record_console_line(ConsoleStream::Stdout, "custom disp")?;
+                    crate::execution::RootedValueSequence::new(
+                        crate::sequence::ValueSequence::empty(),
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             },
-        )));
+        ))).expect("call-port scope");
         reset_thread_buffer();
         block_on(display_builtin(
             Value::Object(ObjectInstance::new(class_name)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("display through disp");
         assert_eq!(stdout_text(), "custom disp\n");
@@ -513,32 +470,36 @@ mod tests {
         let parent_class_name = "DisplayHookParent".to_string();
         let child_class_name = "DisplayHookChild".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: parent_class_name.clone(),
+            events: Default::default(),
+            name: parent_class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: HashMap::from([(
-                "display".to_string(),
+                "display".into(),
                 crate::class_registry::RuntimeMethod {
-                    name: "display".to_string(),
+                    name: "display".into(),
                     is_static: false,
                     is_abstract: false,
                     is_sealed: false,
                     access: MemberAccess::Public,
-                    function_name: "DisplayHookParent.renderDisplay".to_string(),
+                    function_name: "DisplayHookParent.renderDisplay".into(),
                     implicit_class_argument: None,
+                    role: runmat_types::ClassMethodRole::Ordinary,
                 },
             )]),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child_class_name.clone(),
-            parent: Some(parent_class_name),
+            events: Default::default(),
+            name: child_class_name.clone().into(),
+            parent: Some(parent_class_name.into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
         let _resolver =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "DisplayHookParent.renderDisplay").then_some(772)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 let args = args.to_vec();
@@ -546,18 +507,21 @@ mod tests {
                     assert_eq!(function, 772);
                     assert_eq!(requested_outputs, 0);
                     assert!(
-                        matches!(args.first(), Some(Value::Object(object)) if object.class_name == "DisplayHookChild")
+                        matches!(args.first(), Some(Value::Object(object)) if object.class_name().is(DISPLAY_HOOK_CHILD))
                     );
-                    record_console_line(ConsoleStream::Stdout, "inherited display");
-                    Ok(empty_return_value())
+                    record_console_line(ConsoleStream::Stdout, "inherited display")?;
+                    crate::execution::RootedValueSequence::new(
+                        crate::sequence::ValueSequence::empty(),
+                    )
+                    .map_err(|error| error.into_runtime_error())
                 })
             },
-        )));
+        ))).expect("call-port scope");
 
         reset_thread_buffer();
         block_on(display_builtin(
             Value::Object(ObjectInstance::new(child_class_name)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("display");
 
@@ -566,8 +530,11 @@ mod tests {
 
     #[test]
     fn display_rejects_extra_arguments() {
-        let err = block_on(display_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
-            .expect_err("extra argument should fail");
+        let err = block_on(display_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
+        ))
+        .expect_err("extra argument should fail");
         assert_eq!(err.identifier(), DISPLAY_ERROR_ARG_CONFIG.identifier);
     }
 }

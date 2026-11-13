@@ -1,25 +1,28 @@
-use crate::accel::residency as accel_residency;
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Instr;
-use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;
-use crate::runtime::workspace::refresh_workspace_state;
+use crate::interpreter::vars::InterpreterVars;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
-    execute_centered_gram, execute_elementwise, execute_explained_variance,
-    execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
-    execute_reduction_with_shape, FusionExecutionRequest,
+    elementwise_floating_admission, execute_elementwise_placed, execute_explained_variance_placed,
+    execute_matmul_epilogue_placed, execute_power_step_normalize_placed,
+    execute_reduction_with_shape_placed_async, execute_reduction_with_shape_placed_async_vm,
+    CpuReadbackFailure, ElementwiseFloatingAdmission, FusionExecutionOutcome,
+    FusionExecutionRequest, FusionProviderCompletion,
 };
 use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
 };
 use runmat_accelerate::InstrSpan;
-use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
-use runmat_runtime::builtins::common::{shape::is_scalar_shape, tensor::scalar_integer_value};
+use runmat_accelerate::{FusionKind, VarKind};
+use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
-use std::collections::HashMap;
+use std::collections::HashSet;
+
+#[path = "fusion/input_transport.rs"]
+pub(crate) mod input_transport;
 
 #[inline]
 pub fn value_kind(value: &Value) -> &'static str {
@@ -39,6 +42,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::ComplexTensor(_) => "ComplexTensor",
         Value::Cell(_) => "Cell",
         Value::Struct(_) => "Struct",
+        Value::StructArray(_) => "StructArray",
         Value::GpuTensor(_) => "GpuTensor",
         Value::ObjectArray(_) => "ObjectArray",
         Value::Object(_) => "Object",
@@ -47,7 +51,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_) => "FunctionHandle",
-        Value::BoundFunctionHandle { .. } => "FunctionHandle",
+        Value::BoundFunctionHandle(_) | Value::ScopedFunctionHandle(_) => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
@@ -56,6 +60,8 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::Task(_) => "Task",
         Value::Pool(_) => "Pool",
         Value::Job(_) => "Job",
+        Value::Distributed(_) => "Distributed",
+        Value::Composite(_) => "Composite",
         Value::Foreign(_) => "Foreign",
     }
 }
@@ -63,12 +69,12 @@ pub fn value_kind(value: &Value) -> &'static str {
 #[inline]
 pub fn summarize_value(i: usize, v: &Value) -> String {
     match v {
-        Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape),
-        Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
+        Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape()),
+        Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape()),
         Value::Num(n) => format!("in#{i}:Num({n:.6})"),
         Value::Int(n) => format!("in#{i}:Int({n:?})"),
         Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
-        Value::String(s) => format!("in#{i}:String({})", s),
+        Value::String(s) => format!("in#{i}:String({})", s.display()),
         _ => format!("in#{i}:{}", value_kind(v)),
     }
 }
@@ -77,11 +83,11 @@ pub fn summarize_value(i: usize, v: &Value) -> String {
 fn is_scalarish_runtime_value(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
-        Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
-        Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::Tensor(tensor) => is_scalar_shape(tensor.shape()),
+        Value::ComplexTensor(tensor) => is_scalar_shape(tensor.shape()),
         Value::LogicalArray(array) => is_scalar_shape(&array.shape),
-        Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
-        Value::CharArray(array) => array.data.len() == 1,
+        Value::GpuTensor(handle) => is_scalar_shape(handle.shape()),
+        Value::CharArray(array) => array.data().len() == 1,
         _ => false,
     }
 }
@@ -108,12 +114,11 @@ pub fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> b
     for instr in &instructions[span.start..=span.end] {
         if matches!(
             instr,
-            Instr::StoreIndex(_)
+            Instr::StochasticEvolution { .. }
+                | Instr::StoreIndex(_)
                 | Instr::StoreIndexDelete(_)
                 | Instr::StoreSlice(_, _, _, _)
                 | Instr::StoreSliceDelete(_, _, _, _)
-                | Instr::StoreSliceExpr { .. }
-                | Instr::StoreSliceExprDelete { .. }
                 | Instr::StoreIndexCell { .. }
                 | Instr::StoreIndexCellDelete { .. }
                 | Instr::StoreMember(_)
@@ -127,24 +132,71 @@ pub fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> b
     fusion_span_live_result_count(instructions, span) != Some(1)
 }
 
+#[path = "fusion/final_only_stores.rs"]
+mod final_only_stores;
+pub use final_only_stores::final_only_span_requires_ordinary_stores;
+pub(crate) use final_only_stores::final_only_span_requires_ordinary_stores_with_private;
+
 pub struct StackSliceGuard<'a> {
-    stack: *mut Vec<Value>,
-    slice: Option<Vec<Value>>,
-    _marker: std::marker::PhantomData<&'a mut Vec<Value>>,
+    stack: *mut crate::interpreter::stack::InterpreterStack,
+    slice: Option<runmat_value::OwnedOutputListValues>,
+    _marker: std::marker::PhantomData<&'a mut crate::interpreter::stack::InterpreterStack>,
 }
 
 impl<'a> StackSliceGuard<'a> {
-    pub fn new(stack: &'a mut Vec<Value>, slice_start: usize) -> Self {
-        let slice = stack.split_off(slice_start);
-        Self {
+    pub fn new(
+        stack: &'a mut crate::interpreter::stack::InterpreterStack,
+        slice_start: usize,
+    ) -> Result<Self, RuntimeError> {
+        let slice = stack
+            .try_extract_output(slice_start)?
+            .try_into_owned()
+            .map_err(|_| {
+                mex(
+                    "SharedOutputStorage",
+                    "fusion operands unexpectedly have shared storage",
+                )
+            })?;
+        Ok(Self {
             stack,
             slice: Some(slice),
             _marker: std::marker::PhantomData,
-        }
+        })
     }
 
     pub fn slice(&self) -> &[Value] {
-        self.slice.as_ref().expect("stack slice missing").as_slice()
+        self.slice.as_ref().map_or(&[], |slice| slice.as_slice())
+    }
+
+    /// Validate every destination before changing the selected operand slice.
+    /// The readback owner already checked each live view and source owner.
+    pub fn replace_host_operands(
+        &mut self,
+        replacements: Vec<(usize, Value)>,
+    ) -> Result<(), RuntimeError> {
+        let Some(slice) = self.slice.as_mut().map(|slice| slice.as_mut_slice()) else {
+            return Err(mex(
+                "FusionHostReadback",
+                "fusion host stack slice was consumed",
+            ));
+        };
+        let mut offsets = HashSet::new();
+        if replacements.iter().any(|(offset, value)| {
+            !offsets.insert(*offset)
+                || !matches!(slice.get(*offset), Some(Value::GpuTensor(_)))
+                || runmat_runtime::dispatcher::value_contains_gpu(value)
+        }) || slice.iter().enumerate().any(|(offset, value)| {
+            runmat_runtime::dispatcher::value_contains_gpu(value) && !offsets.contains(&offset)
+        }) {
+            return Err(mex(
+                "FusionHostReadback",
+                "selected host readback cannot publish its complete operand slice",
+            ));
+        }
+        for (offset, value) in replacements {
+            slice[offset] = value;
+        }
+        Ok(())
     }
 
     pub fn commit(mut self) {
@@ -155,256 +207,36 @@ impl<'a> StackSliceGuard<'a> {
 impl Drop for StackSliceGuard<'_> {
     fn drop(&mut self) {
         if let Some(slice) = self.slice.take() {
-            unsafe { (&mut *self.stack).extend(slice) }
+            unsafe { (&mut *self.stack).restore_extracted(slice) }
         }
     }
 }
 
-pub fn gather_fusion_inputs<'a>(
+pub(crate) struct GatheredFusionInputs<'a> {
+    pub guard: StackSliceGuard<'a>,
+    pub request: FusionExecutionRequest<'a>,
+}
+
+pub(crate) fn gather_fusion_inputs<'a>(
     plan: &'a runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
-    stack: &'a mut Vec<Value>,
-    vars: &mut [Value],
+    transport: &input_transport::VmFusionInputTransport,
+    stack: &'a mut crate::interpreter::stack::InterpreterStack,
+    vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
-) -> Result<
-    (
-        StackSliceGuard<'a>,
-        FusionExecutionRequest<'a>,
-        Vec<Option<Value>>,
-    ),
-    RuntimeError,
-> {
+) -> Result<Option<GatheredFusionInputs<'a>>, RuntimeError> {
     let prepare_started = Instant::now();
-    if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
-        return Err(mex(
-            "FusionMissingStackLayout",
-            "fusion: missing compile-time stack layout metadata",
-        ));
+    let required = transport.required_stack_operands();
+    if !transport.matches(plan) || stack.len() < required {
+        return Ok(None);
     }
-    let required_stack_operands = plan
-        .group
-        .stack_layout
-        .as_ref()
-        .map(|layout| layout.required_stack_operands)
-        .unwrap_or_else(|| plan.stack_pattern.len());
-    let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
-
-    for (idx, value) in &plan.constants {
-        if let Some(slot) = inputs.get_mut(*idx) {
-            if slot.is_none() {
-                *slot = Some(value.clone());
-            }
-        }
-    }
-
-    for (idx, value_id) in plan.inputs.iter().enumerate() {
-        let info = graph
-            .value(*value_id)
-            .ok_or_else(|| format!("fusion: missing value metadata for id {value_id}"))?;
-        match &info.origin {
-            ValueOrigin::Variable { kind, index } => {
-                let value =
-                    match kind {
-                        VarKind::Global => vars
-                            .get(*index)
-                            .cloned()
-                            .ok_or_else(|| format!("fusion: global var {index} out of range"))?,
-                        VarKind::Local => {
-                            if let Some(frame) = context.call_stack.last() {
-                                let absolute = frame.locals_start + index;
-                                context.locals.get(absolute).cloned().ok_or_else(|| {
-                                    format!("fusion: local var {index} unavailable")
-                                })?
-                            } else {
-                                vars.get(*index).cloned().ok_or_else(|| {
-                                    format!("fusion: local var {index} unavailable")
-                                })?
-                            }
-                        }
-                    };
-                debug_assert!(
-                    inputs[idx].is_none(),
-                    "fusion: duplicate input slot {} for plan {}",
-                    idx,
-                    plan.index
-                );
-                inputs[idx] = Some(value);
-            }
-            ValueOrigin::Constant | ValueOrigin::NodeOutput { .. } | ValueOrigin::Unknown => {}
-        }
-    }
-
-    if log::log_enabled!(log::Level::Debug) && interp_engine::fusion_debug_enabled() {
-        let stack_needed_preview = required_stack_operands;
-        let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
-        let stack_kinds: Vec<&'static str> =
-            stack_snapshot.iter().rev().map(|v| value_kind(v)).collect();
-        let input_meta: Vec<String> = plan
-            .inputs
-            .iter()
-            .enumerate()
-            .map(|(i, value_id)| {
-                if let Some(info) = graph.value(*value_id) {
-                    format!("#{i}:id={} origin={:?}", value_id, info.origin)
-                } else {
-                    format!("#{i}:id={} origin=<missing>", value_id)
-                }
-            })
-            .collect();
-        log::debug!(
-            "fusion group {} gather: stack_depth={} stack_needed={} stack_kinds={:?} pattern={:?} inputs={:?}",
-            plan.index, stack.len(), stack_needed_preview, stack_kinds, &plan.stack_pattern, input_meta
-        );
-    }
-
-    if stack.len() < required_stack_operands {
-        if interp_engine::fusion_debug_enabled() {
-            log::debug!(
-                "fusion stack underflow: plan={} needed={} available={} pattern={:?}",
-                plan.index,
-                required_stack_operands,
-                stack.len(),
-                plan.stack_pattern
-            );
-        }
-        return Err(mex(
-            "FusionStackUnderflow",
-            "fusion: stack underflow gathering inputs",
-        ));
-    }
-    let available = required_stack_operands;
-    let slice_start = stack.len() - available;
-    let stack_guard = StackSliceGuard::new(stack, slice_start);
-    let slice = stack_guard.slice().to_vec();
-    let mut consumed_inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
-    let input_positions: HashMap<runmat_accelerate::graph::ValueId, usize> = plan
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(idx, value_id)| (*value_id, idx))
-        .collect();
-
-    let allow_stack_value = |val: &Value| {
-        if plan.group.kind.is_reduction() {
-            matches!(val, Value::GpuTensor(_) | Value::Tensor(_))
-        } else {
-            true
-        }
+    // Read only the sealed input sources before taking ownership of operands.
+    // An unavailable source declines without changing the VM stack.
+    let slice_start = stack.len() - required;
+    let Some(inputs) = transport.gather(&stack.as_slice()[slice_start..], vars, context) else {
+        return Ok(None);
     };
-
-    if let Some(layout) = plan.group.stack_layout.as_ref() {
-        for binding in &layout.bindings {
-            let Some(input_idx) = input_positions.get(&binding.value_id).copied() else {
-                continue;
-            };
-            let Some(val) = slice.get(binding.stack_offset).cloned() else {
-                continue;
-            };
-            consumed_inputs[input_idx] = Some(val.clone());
-            if inputs[input_idx].is_none() && allow_stack_value(&val) {
-                inputs[input_idx] = Some(val);
-            }
-        }
-    } else {
-        for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
-            let Some(val) = slice.get(offset).cloned() else {
-                continue;
-            };
-            consumed_inputs[*input_idx] = Some(val.clone());
-            if inputs[*input_idx].is_none() && allow_stack_value(&val) {
-                inputs[*input_idx] = Some(val);
-            }
-        }
-    }
-
-    for (idx, slot) in inputs.iter_mut().enumerate() {
-        if slot.is_some() {
-            continue;
-        }
-        let vid = plan.inputs[idx];
-        let info = graph.value(vid);
-        if let Some(info) = info {
-            match &info.origin {
-                ValueOrigin::Variable { kind, index } => {
-                    let value_opt = match kind {
-                        VarKind::Global => vars.get(*index).cloned(),
-                        VarKind::Local => {
-                            if let Some(frame) = context.call_stack.last() {
-                                let absolute = frame.locals_start + index;
-                                context.locals.get(absolute).cloned()
-                            } else {
-                                vars.get(*index).cloned()
-                            }
-                        }
-                    };
-                    if let Some(value) = value_opt {
-                        *slot = Some(value);
-                        continue;
-                    }
-                }
-                ValueOrigin::Constant => {
-                    if let Some(value) = plan.const_values.get(&vid) {
-                        *slot = Some(value.clone());
-                        continue;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if slot.is_none() {
-            if let Some(binding) = graph.var_binding(vid) {
-                let value_opt = match binding.kind {
-                    VarKind::Global => vars.get(binding.index).cloned(),
-                    VarKind::Local => {
-                        if let Some(frame) = context.call_stack.last() {
-                            let absolute = frame.locals_start + binding.index;
-                            context.locals.get(absolute).cloned()
-                        } else {
-                            vars.get(binding.index).cloned()
-                        }
-                    }
-                };
-                if let Some(value) = value_opt {
-                    *slot = Some(value);
-                    continue;
-                }
-            }
-        }
-        if slot.is_none() {
-            if let Some(info) = info {
-                if let ValueOrigin::NodeOutput { node, .. } = info.origin {
-                    if let Some(binding) = graph.node_binding(node) {
-                        let value_opt = match binding.kind {
-                            VarKind::Global => vars.get(binding.index).cloned(),
-                            VarKind::Local => {
-                                if let Some(frame) = context.call_stack.last() {
-                                    let absolute = frame.locals_start + binding.index;
-                                    context.locals.get(absolute).cloned()
-                                } else {
-                                    vars.get(binding.index).cloned()
-                                }
-                            }
-                        };
-                        if let Some(value) = value_opt {
-                            *slot = Some(value);
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-        if slot.is_none() {
-            if let Some(value) = plan.const_values.get(&vid) {
-                *slot = Some(value.clone());
-            }
-        }
-    }
-
-    let inputs: Vec<Value> = inputs
-        .into_iter()
-        .map(|opt| opt.ok_or_else(|| mex("FusionMissingInput", "fusion: missing input value")))
-        .collect::<Result<_, _>>()?;
+    let stack_guard = StackSliceGuard::new(stack, slice_start)?;
 
     if log::log_enabled!(log::Level::Debug) {
         let summaries: Vec<String> = inputs
@@ -415,16 +247,15 @@ pub fn gather_fusion_inputs<'a>(
         log::debug!("fusion inputs runtime: [{}]", summaries.join(", "));
     }
 
-    Ok((
-        stack_guard,
-        FusionExecutionRequest {
+    Ok(Some(GatheredFusionInputs {
+        guard: stack_guard,
+        request: FusionExecutionRequest {
             plan,
             inputs,
             placement,
             runtime: Some(context.runtime.clone()),
         },
-        consumed_inputs,
-    ))
+    }))
     .inspect(|_| {
         if let Some(correlation) = placement {
             record_event(
@@ -440,25 +271,18 @@ pub fn gather_fusion_inputs<'a>(
     })
 }
 
+/// Direct writeback utility retained for allocation-lifetime tests. VM
+/// publication uses the ordinary StoreVar/StoreLocal owner in the runner.
 pub fn write_elementwise_materialized_stores(
     materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     context: &mut ExecutionContext,
-) {
+) -> Result<(), RuntimeError> {
     for (store, value) in materialized_stores {
         match store.binding.kind {
             VarKind::Global => {
                 let i = store.binding.index;
-                if i < vars.len() {
-                    if let Err(err) = accel_residency::clear_value_excluding(&vars[i], &value) {
-                        log::warn!("failed to clear fused global GPU residency: {err}");
-                    }
-                }
-                if i >= vars.len() {
-                    vars.resize(i + 1, Value::Num(0.0));
-                    refresh_workspace_state(vars);
-                }
-                vars[i] = value;
+                crate::runtime::workspace::commit_workspace_slot_value(vars, i, None, value)?;
             }
             VarKind::Local => {
                 if let Some(frame) = context.call_stack.last() {
@@ -466,43 +290,200 @@ pub fn write_elementwise_materialized_stores(
                     while context.locals.len() <= absolute {
                         context.locals.push(Value::Num(0.0));
                     }
-                    if let Err(err) =
-                        accel_residency::clear_value_excluding(&context.locals[absolute], &value)
-                    {
-                        log::warn!("failed to clear fused local GPU residency: {err}");
-                    }
                     context.locals[absolute] = value;
                 } else {
                     let i = store.binding.index;
-                    if i < vars.len() {
-                        if let Err(err) = accel_residency::clear_value_excluding(&vars[i], &value) {
-                            log::warn!("failed to clear fused fallback GPU residency: {err}");
-                        }
-                    }
-                    if i >= vars.len() {
-                        vars.resize(i + 1, Value::Num(0.0));
-                        refresh_workspace_state(vars);
-                    }
-                    vars[i] = value;
+                    crate::runtime::workspace::commit_workspace_slot_value(vars, i, None, value)?;
                 }
             }
         }
     }
+    Ok(())
 }
 
-pub fn execute_fusion_elementwise(
+pub(crate) fn fusion_execution_error(
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> RuntimeError {
+    let fallback = mex("FusionExecutionFailed", &error.to_string());
+    runmat_runtime::runtime_error::with_provider_execution_source(fallback, error)
+}
+
+/// Only an explicit unsupported, pre-effect provider result permits replay.
+/// Hard failures and failures after a provider or workspace effect retain
+/// their original error and must follow normal exception handling.
+#[derive(Debug)]
+pub enum FusionAttemptError {
+    Deopt(RuntimeError),
+    Terminal(RuntimeError),
+}
+
+// Resource admission and continuation control failures are never an explicit
+// pre-effect provider Unsupported receipt. Preserve them as terminal failures,
+// including when the selected continuation never constructs its child.
+impl From<RuntimeError> for FusionAttemptError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Terminal(error)
+    }
+}
+
+pub struct FusionVmResult {
+    pub final_value: Value,
+    pub ordered_stores: Vec<(FusionStoreMaterialization, Value)>,
+    pub completion: Option<FusionProviderCompletion>,
+}
+
+fn without_intermediate_stores(
+    outcome: FusionExecutionOutcome<Value>,
+) -> FusionExecutionOutcome<FusionVmResult> {
+    match outcome {
+        FusionExecutionOutcome::Executed(final_value) => {
+            FusionExecutionOutcome::Executed(FusionVmResult {
+                final_value,
+                ordered_stores: Vec::new(),
+                completion: None,
+            })
+        }
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            FusionExecutionOutcome::SharedRuntime(observation)
+        }
+    }
+}
+
+fn classify_provider_error(
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> FusionAttemptError {
+    let retryable = error.is_unsupported();
+    let error = fusion_execution_error(error);
+    if retryable {
+        FusionAttemptError::Deopt(error)
+    } else {
+        FusionAttemptError::Terminal(error)
+    }
+}
+
+fn finish_provider_execution(
+    outcome: runmat_accelerate_api::ProviderExecutionResult<FusionExecutionOutcome<Value>>,
+    stack_guard: StackSliceGuard<'_>,
+) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
+    match outcome {
+        Ok(FusionExecutionOutcome::Executed(result)) => {
+            stack_guard.commit();
+            Ok(FusionExecutionOutcome::Executed(result))
+        }
+        Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
+            Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+        Err(error) => {
+            let classified = classify_provider_error(error);
+            if matches!(&classified, FusionAttemptError::Terminal(_)) {
+                stack_guard.commit();
+            }
+            Err(classified)
+        }
+    }
+}
+
+#[cfg(test)]
+mod error_tests;
+
+pub async fn execute_fusion_elementwise(
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
-    vars: &mut Vec<Value>,
-    context: &mut ExecutionContext,
-) -> Result<Value, RuntimeError> {
-    match execute_elementwise(request) {
-        Ok(result) => {
-            write_elementwise_materialized_stores(result.materialized_stores, vars, context);
-            stack_guard.commit();
-            Ok(result.final_value)
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    execute_fusion_elementwise_vm(request, stack_guard, None, None, None).await
+}
+
+async fn execute_fusion_elementwise_vm(
+    request: FusionExecutionRequest<'_>,
+    mut stack_guard: StackSliceGuard<'_>,
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
+    input_uses: Option<&runmat_accelerate::fusion_exec::VmHostInputUses>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    let admission = decline
+        .as_ref()
+        .map(|_| elementwise_floating_admission(&request))
+        .transpose();
+    let execution = match admission {
+        Err(error) => Err(error),
+        Ok(Some(ElementwiseFloatingAdmission::NativeIntegerIneligible)) => {
+            runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_decline(
+                request,
+                decline.expect("integer admission requires the inspected VM decline right"),
+            )
+            .await
         }
-        Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+        Ok(_) => {
+            if let Some(right) = right {
+                if let Some(uses) = input_uses {
+                    runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_inputs(
+                        request, right, uses,
+                    )
+                    .await
+                } else {
+                    runmat_accelerate::fusion_exec::execute_elementwise_placed_vm(request, right)
+                        .await
+                }
+            } else if let Some(decline) = decline {
+                runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_decline(
+                    request, decline,
+                )
+                .await
+            } else {
+                execute_elementwise_placed(request)
+                    .await
+                    .map(|outcome| match outcome {
+                        FusionExecutionOutcome::Executed(result) => {
+                            FusionExecutionOutcome::Executed(
+                                runmat_accelerate::fusion_exec::ElementwiseVmExecutionResult {
+                                    result,
+                                    completion: None,
+                                },
+                            )
+                        }
+                        FusionExecutionOutcome::SharedRuntime(observation) => {
+                            FusionExecutionOutcome::SharedRuntime(observation)
+                        }
+                    })
+            }
+        }
+    };
+    match execution {
+        Ok(FusionExecutionOutcome::Executed(result)) => {
+            stack_guard.commit();
+            Ok(FusionExecutionOutcome::Executed(FusionVmResult {
+                final_value: result.result.final_value,
+                ordered_stores: result.result.materialized_stores,
+                completion: result.completion,
+            }))
+        }
+        Ok(FusionExecutionOutcome::SharedRuntime(mut observation)) => {
+            match observation
+                .prepare_vm_host_inputs(stack_guard.slice())
+                .await
+            {
+                Ok(Some(replacements)) => stack_guard
+                    .replace_host_operands(replacements)
+                    .map_err(FusionAttemptError::Terminal)?,
+                Ok(None) => {}
+                Err(CpuReadbackFailure::BeforeEffect(error)) => {
+                    return Err(FusionAttemptError::Deopt(error))
+                }
+                Err(CpuReadbackFailure::AfterEffect(error)) => {
+                    return Err(FusionAttemptError::Terminal(error))
+                }
+            }
+            Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+        Err(err) => {
+            let classified = classify_provider_error(err);
+            if matches!(&classified, FusionAttemptError::Terminal(_)) {
+                // Ordinary failing arithmetic consumes its operands before
+                // entering the catch handler. Deopt alone needs them back.
+                stack_guard.commit();
+            }
+            Err(classified)
+        }
     }
 }
 
@@ -511,576 +492,229 @@ pub async fn execute_fusion_special_kind(
     plan_inputs: &[runmat_accelerate::graph::ValueId],
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
-) -> Result<Value, RuntimeError> {
+    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
+) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
     match kind {
-        FusionKind::CenteredGram => match execute_centered_gram(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        },
-        FusionKind::PowerStepNormalize => match execute_power_step_normalize(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        },
+        FusionKind::CenteredGram => {
+            // Structural recognition does not prove equivalent classes,
+            // accumulation, operand order or shape. Leave all operands and
+            // stores untouched for the original bytecode, including GPU ones.
+            Ok(FusionExecutionOutcome::implementation_unavailable())
+        }
+        FusionKind::PowerStepNormalize => finish_provider_execution(
+            execute_power_step_normalize_placed(request).await,
+            stack_guard,
+        ),
         FusionKind::ExplainedVariance => {
             log::debug!("explained variance plan inputs {:?}", plan_inputs);
-            match execute_explained_variance(request).await {
-                Ok(result) => {
-                    stack_guard.commit();
-                    Ok(result)
-                }
-                Err(err) => {
-                    log::debug!("explained variance fusion fallback: {}", err);
-                    Err(mex("FusionExecutionFailed", &err.to_string()))
-                }
+            let outcome = execute_explained_variance_placed(request).await;
+            if let Err(error) = &outcome {
+                log::debug!("explained variance fusion execution: {}", error);
             }
+            finish_provider_execution(outcome, stack_guard)
         }
-        FusionKind::MatmulEpilogue => match execute_matmul_epilogue(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        },
-        FusionKind::ImageNormalize => match execute_image_normalize(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        },
-        _ => Err(mex(
+        FusionKind::MatmulEpilogue => {
+            finish_provider_execution(execute_matmul_epilogue_placed(request).await, stack_guard)
+        }
+        FusionKind::ImageNormalize => finish_provider_execution(
+            runmat_accelerate::fusion_exec::execute_image_normalize_vm(request, decline.as_ref())
+                .await,
+            stack_guard,
+        ),
+        _ => Err(FusionAttemptError::Terminal(mex(
             "FusionUnsupportedKind",
             "fusion: unsupported fusion kind",
-        )),
+        ))),
     }
 }
 
-pub struct ReductionGeometry {
-    pub axis: usize,
-    pub reduce_len: usize,
-    pub num_slices: usize,
-    pub output_shape: Vec<usize>,
-}
+#[path = "fusion/reduction_geometry.rs"]
+mod reduction_geometry;
+pub use reduction_geometry::{resolve_reduction_geometry, ReductionGeometry};
 
-fn validate_fused_reduction_domain(
-    axes: Option<&runmat_accelerate::ReductionAxes>,
-    runtime_shape: Option<&[usize]>,
-    reduce_all: bool,
-) -> Result<(), RuntimeError> {
-    if matches!(
-        axes,
-        Some(runmat_accelerate::ReductionAxes::Explicit(dims)) if dims.len() != 1
-    ) {
-        return Err(mex(
-            "FusionReductionAxesUnsupported",
-            "fusion: multi-axis reduction requires the provider N-D reduction path",
-        ));
-    }
-    if !reduce_all && runtime_shape.is_some_and(|shape| shape.len() > 2) {
-        return Err(mex(
-            "FusionReductionRankUnsupported",
-            "fusion: N-D reduction requires the provider N-D reduction path",
-        ));
-    }
-    Ok(())
-}
-
-fn fused_reduction_output_shape(
-    runtime_shape: Option<Vec<usize>>,
-    rows: usize,
-    columns: usize,
-    axis: usize,
-    reduce_all: bool,
-) -> Result<Vec<usize>, RuntimeError> {
-    if reduce_all {
-        return Ok(vec![1, 1]);
-    }
-    let mut shape = runtime_shape.unwrap_or_else(|| vec![rows, columns]);
-    if shape.len() < 2 {
-        shape.resize(2, 1);
-    }
-    if axis >= shape.len() {
-        return Err(mex(
-            "FusionReductionAxisUnsupported",
-            "fusion: reduction dimension exceeds the runtime tensor rank",
-        ));
-    }
-    shape[axis] = 1;
-    Ok(shape)
-}
-
-pub fn resolve_reduction_geometry(
+pub async fn execute_fusion_reduction(
     plan: &runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
-    request: &FusionExecutionRequest<'_>,
-    consumed_inputs: &[Option<Value>],
-    vars: &[Value],
-    context: &ExecutionContext,
-) -> Result<ReductionGeometry, RuntimeError> {
-    fn detect_reduce_all(
-        plan: &runmat_accelerate::FusionGroupPlan,
-        graph: &runmat_accelerate::AccelGraph,
-    ) -> bool {
-        let mut reduce_all = matches!(
-            plan.reduction_axes,
-            Some(runmat_accelerate::ReductionAxes::All)
-        );
-        let has_all = reduce_all
-            || plan.constants.values().any(value_is_all_keyword)
-            || plan.const_values.values().any(value_is_all_keyword);
-        if has_all {
-            return true;
-        }
-        for node_id in &plan.group.nodes {
-            if let Some(node) = graph.node(*node_id) {
-                if let runmat_accelerate::graph::AccelNodeLabel::Builtin { name } = &node.label {
-                    if name.eq_ignore_ascii_case("mean") {
-                        for input_vid in &node.inputs {
-                            if let Some(info) = graph.value(*input_vid) {
-                                if let Some(constant) = &info.constant {
-                                    if value_is_all_keyword(constant) {
-                                        reduce_all = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if reduce_all {
-                break;
-            }
-        }
-        reduce_all
-    }
-
-    fn reduction_axis_from_value(value: &Value) -> Result<Option<usize>, RuntimeError> {
-        if let Some(integer) = scalar_integer_value(value) {
-            return integer
-                .try_to_usize()
-                .and_then(|dim| dim.checked_sub(1))
-                .map(Some)
-                .ok_or_else(|| {
-                    mex(
-                        "FusionReductionAxisUnsupported",
-                        "fusion: integer reduction dimension is outside the platform index range",
-                    )
-                });
-        }
-        match value {
-            // Floating-point dimension arguments deliberately retain MATLAB's
-            // double conversion semantics. Native integers, however, must be
-            // representable by the host index type before acceleration plans
-            // them as an axis.
-            Value::Num(n) if *n >= 1.0 => Ok(Some((*n as usize).saturating_sub(1))),
-            _ => Ok(None),
-        }
-    }
-
-    fn resolve_reduction_axis(
-        plan: &runmat_accelerate::FusionGroupPlan,
-    ) -> Result<(usize, bool), RuntimeError> {
-        let mut axis = 0usize;
-        let mut axis_explicit = false;
-        if let Some(runmat_accelerate::ReductionAxes::Explicit(dims)) = &plan.reduction_axes {
-            if let Some(first) = dims.first().copied() {
-                axis = first.saturating_sub(1);
-                axis_explicit = true;
-            }
-        }
-        if let Some(dim_vid) = plan.reduction_dim {
-            if let Some(cv) = plan.const_values.get(&dim_vid) {
-                if let Some(parsed) = reduction_axis_from_value(cv)? {
-                    axis = parsed;
-                }
-                axis_explicit = true;
-            } else if let Some(input_idx) = plan.inputs.iter().position(|v| *v == dim_vid) {
-                if let Some(cv) = plan.constants.get(&input_idx) {
-                    if let Some(parsed) = reduction_axis_from_value(cv)? {
-                        axis = parsed;
-                    }
-                    axis_explicit = true;
-                }
-            }
-        } else if let Some(dim_const) = plan.constants.get(&1) {
-            if let Some(parsed) = reduction_axis_from_value(dim_const)? {
-                axis = parsed;
-            }
-            axis_explicit = true;
-        }
-        Ok((axis, axis_explicit))
-    }
-
-    fn derive_rows_cols(
-        plan: &runmat_accelerate::FusionGroupPlan,
-        graph: &runmat_accelerate::AccelGraph,
-        request: &FusionExecutionRequest<'_>,
-        consumed_inputs: &[Option<Value>],
-        vars: &[Value],
-        context: &ExecutionContext,
-    ) -> Option<(usize, usize)> {
-        let shape_of = |value: &Value| -> Option<(usize, usize)> {
-            match value {
-                Value::GpuTensor(h) => Some((
-                    h.shape.first().copied().unwrap_or(1).max(1),
-                    h.shape.get(1).copied().unwrap_or(1).max(1),
-                )),
-                Value::Tensor(t) => Some((
-                    t.shape.first().copied().unwrap_or(1).max(1),
-                    t.shape.get(1).copied().unwrap_or(1).max(1),
-                )),
-                _ => None,
-            }
-        };
-
-        if let Some(shape) = plan.reduction_data_shape(graph) {
-            if shape.len() >= 2 {
-                return Some((shape[0].max(1), shape[1].max(1)));
-            }
-            if shape.len() == 1 {
-                return Some((shape[0].max(1), 1));
-            }
-        }
-
-        for &vid in &plan.inputs {
-            if let Some(binding) = graph.var_binding(vid) {
-                let value_opt = match binding.kind {
-                    VarKind::Global => vars.get(binding.index).cloned(),
-                    VarKind::Local => {
-                        if let Some(frame) = context.call_stack.last() {
-                            let absolute = frame.locals_start + binding.index;
-                            context.locals.get(absolute).cloned()
-                        } else {
-                            vars.get(binding.index).cloned()
-                        }
-                    }
-                };
-                if let Some(value) = value_opt {
-                    if let Some(shape) = shape_of(&value) {
-                        return Some(shape);
-                    }
-                }
-            }
-        }
-
-        for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
-            if let Some(shape) = shape_of(v) {
-                return Some(shape);
-            }
-        }
-
-        if let Some(data_id) = plan.reduction_data {
-            if let Some(input_index) = plan.inputs.iter().position(|vid| *vid == data_id) {
-                if let Some(val) = consumed_inputs.get(input_index).and_then(|v| v.as_ref()) {
-                    if let Some(shape) = shape_of(val) {
-                        return Some(shape);
-                    }
-                }
-                if let Some(val) = request.inputs.get(input_index) {
-                    if let Some(shape) = shape_of(val) {
-                        return Some(shape);
-                    }
-                }
-            }
-            if let Some(info) = graph.value(data_id) {
-                if let ValueOrigin::Variable { kind, index } = &info.origin {
-                    let val = match kind {
-                        VarKind::Global => vars.get(*index).cloned(),
-                        VarKind::Local => {
-                            if let Some(frame) = context.call_stack.last() {
-                                let absolute = frame.locals_start + index;
-                                context.locals.get(absolute).cloned()
-                            } else {
-                                vars.get(*index).cloned()
-                            }
-                        }
-                    };
-                    if let Some(v) = val {
-                        if let Some(shape) = shape_of(&v) {
-                            return Some(shape);
-                        }
-                    }
-                }
-                if let ShapeInfo::Tensor(dims) = &info.shape {
-                    if !dims.is_empty() {
-                        let r = dims.first().and_then(|d| *d).unwrap_or(1);
-                        let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
-                        return Some((r.max(1), c.max(1)));
-                    }
-                }
-            }
-        }
-
-        for v in &request.inputs {
-            if let Some(shape) = shape_of(v) {
-                return Some(shape);
-            }
-        }
-
-        if let ShapeInfo::Tensor(dims) = &plan.group.shape {
-            if !dims.is_empty() {
-                let r = dims.first().and_then(|d| *d).unwrap_or(1);
-                let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
-                return Some((r.max(1), c.max(1)));
-            }
-        }
-        None
-    }
-
-    if log::log_enabled!(log::Level::Debug) {
-        let meta: Vec<String> = plan
-            .inputs
-            .iter()
-            .map(|vid| {
-                if let Some(info) = graph.value(*vid) {
-                    format!(
-                        "vid={} origin={:?} shape={:?}",
-                        vid, info.origin, info.shape
-                    )
-                } else {
-                    format!("vid={} origin=<missing>", vid)
-                }
-            })
-            .collect();
-        log::debug!("reduction gather meta: [{}]", meta.join(", "));
-    }
-
-    let reduce_all = detect_reduce_all(plan, graph);
-    let (mut axis, axis_explicit) = if reduce_all {
-        (0usize, false)
-    } else {
-        resolve_reduction_axis(plan)?
-    };
-    if reduce_all && interp_engine::fusion_debug_enabled() {
-        log::debug!(
-            "fusion reduction (all) meta: data_vid={:?} inputs={:?} stack_pattern={:?}",
-            plan.reduction_data,
-            plan.inputs,
-            plan.stack_pattern
-        );
-    }
-
-    let runtime_shape = plan.reduction_data_shape(graph).or_else(|| {
-        consumed_inputs
-            .iter()
-            .filter_map(|value| value.as_ref())
-            .chain(request.inputs.iter())
-            .find_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle.shape.clone()),
-                Value::Tensor(tensor) => Some(tensor.shape.clone()),
-                _ => None,
-            })
-    });
-    validate_fused_reduction_domain(
-        plan.reduction_axes.as_ref(),
-        runtime_shape.as_deref(),
-        reduce_all,
-    )?;
-    let (r, c) = runtime_shape
-        .as_ref()
-        .map(|shape| {
-            (
-                shape.first().copied().unwrap_or(1).max(1),
-                shape.get(1).copied().unwrap_or(1).max(1),
-            )
-        })
-        .or_else(|| derive_rows_cols(plan, graph, request, consumed_inputs, vars, context))
-        .unwrap_or((1, 1));
-    let (reduce_len, num_slices) = if reduce_all {
-        let total_from_runtime = consumed_inputs
-            .iter()
-            .filter_map(|v| v.as_ref())
-            .chain(request.inputs.iter())
-            .find_map(|value| match value {
-                Value::GpuTensor(handle) => Some(if handle.shape.is_empty() {
-                    1
-                } else {
-                    handle
-                        .shape
-                        .iter()
-                        .copied()
-                        .map(|d| d.max(1))
-                        .product::<usize>()
-                }),
-                Value::Tensor(tensor) => Some(if tensor.shape.is_empty() {
-                    1
-                } else {
-                    tensor
-                        .shape
-                        .iter()
-                        .copied()
-                        .map(|d| d.max(1))
-                        .product::<usize>()
-                }),
-                _ => None,
-            });
-        let total = plan
-            .reduction_data_shape(graph)
-            .map(|shape| shape.into_iter().map(|d| d.max(1)).product::<usize>())
-            .or(total_from_runtime)
-            .or_else(|| plan.element_count())
-            .filter(|v| *v > 0)
-            .ok_or_else(|| {
-                mex(
-                    "FusionReductionExtentUnknown",
-                    "fusion: reduction all extent unknown",
-                )
-            })?;
-        if interp_engine::fusion_debug_enabled() {
-            log::debug!(
-                "fusion reduction (all): total_elems={} fallback_rows={} fallback_cols={}",
-                total,
-                r,
-                c
-            );
-        }
-        (total, 1usize)
-    } else {
-        if !axis_explicit {
-            axis = if r == 1 && c > 1 {
-                1
-            } else if r > 1 {
-                0
-            } else {
-                axis
-            };
-        }
-        if interp_engine::fusion_debug_enabled() {
-            if r == 1 && c == 1 {
-                log::debug!(
-                    "fusion reduction: unresolved shape (defaulted to 1x1); axis={}, constants={:?}",
-                    axis,
-                    plan.constants
-                );
-            } else {
-                log::debug!(
-                    "fusion reduction: resolved shape rows={} cols={} axis={} constants={:?}",
-                    r,
-                    c,
-                    axis,
-                    plan.constants
-                );
-            }
-        }
-        if axis == 0 {
-            (r, c)
-        } else {
-            (c, r)
-        }
-    };
-
-    if interp_engine::fusion_debug_enabled() {
-        log::debug!(
-            "fusion reduction: axis={} reduce_len={} num_slices={} constants={:?}",
-            axis,
-            reduce_len,
-            num_slices,
-            plan.constants
-        );
-    }
-
-    let looks_wrong = reduce_len == 1 && num_slices == 1 && {
-        let mut big = false;
-        let mut check_val = |v: &Value| match v {
-            Value::GpuTensor(h) => {
-                let prod = h.shape.iter().copied().product::<usize>();
-                if prod > 1 {
-                    big = true;
-                }
-            }
-            Value::Tensor(t) => {
-                let prod = t.shape.iter().copied().product::<usize>();
-                if prod > 1 {
-                    big = true;
-                }
-            }
-            _ => {}
-        };
-        for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
-            check_val(v);
-        }
-        for v in &request.inputs {
-            check_val(v);
-        }
-        big
-    };
-    if looks_wrong {
-        log::debug!("fusion reduction: skipping fusion due to unresolved shape; falling back to provider path");
-        return Err(mex(
-            "FusionReductionShapeUnresolved",
-            "fusion: reduction shape unresolved",
-        ));
-    }
-    let output_shape = fused_reduction_output_shape(runtime_shape, r, c, axis, reduce_all)?;
-    if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
-        return Err(mex(
-            "FusionReductionDisabled",
-            "fusion: fused reductions disabled",
-        ));
-    }
-
-    Ok(ReductionGeometry {
-        axis,
-        reduce_len,
-        num_slices,
-        output_shape,
-    })
-}
-
-pub fn execute_fusion_reduction(
-    plan: &runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
     request: FusionExecutionRequest<'_>,
-    consumed_inputs: &[Option<Value>],
     stack_guard: StackSliceGuard<'_>,
-    vars: &[Value],
-    context: &ExecutionContext,
-) -> Result<Value, RuntimeError> {
-    let geom = resolve_reduction_geometry(plan, graph, &request, consumed_inputs, vars, context)?;
-    match execute_reduction_with_shape(
-        request,
-        geom.reduce_len,
-        geom.num_slices,
-        &geom.output_shape,
-        256u32,
-    ) {
-        Ok(result) => {
-            stack_guard.commit();
-            Ok(result)
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    execute_fusion_reduction_vm(plan, request, stack_guard, right, None).await
+}
+
+async fn execute_fusion_reduction_vm(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    request: FusionExecutionRequest<'_>,
+    mut stack_guard: StackSliceGuard<'_>,
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    let geom = match resolve_reduction_geometry(plan, &request) {
+        Ok(geom) => geom,
+        Err(error) => {
+            // Geometry admission runs before provider work. Unsupported or
+            // unresolved fused geometry must leave the original runtime call
+            // responsible for its value, options, and owning diagnostics.
+            return Err(FusionAttemptError::Deopt(error));
         }
-        Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+    };
+    // Specialize only this invocation. The generator must use the same axis as
+    // geometry; never overwrite a cached dimension value used by another op.
+    let resolved_plan = match reduction_geometry::bind_axis(plan, &geom) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            return Err(FusionAttemptError::Terminal(error));
+        }
+    };
+    let request = FusionExecutionRequest {
+        plan: &resolved_plan,
+        ..request
+    };
+    if right.is_some() || decline.is_some() {
+        let execution = if let Some(right) = right {
+            execute_reduction_with_shape_placed_async_vm(
+                request,
+                geom.reduce_len,
+                geom.num_slices,
+                &geom.output_shape,
+                256u32,
+                right,
+            )
+            .await
+        } else {
+            runmat_accelerate::fusion_exec::execute_reduction_with_shape_placed_async_vm_decline(
+                request,
+                geom.reduce_len,
+                geom.num_slices,
+                &geom.output_shape,
+                256u32,
+                decline.expect("checked VM decline right"),
+            )
+            .await
+        };
+        match execution {
+            Ok(FusionExecutionOutcome::Executed(result)) => {
+                stack_guard.commit();
+                Ok(FusionExecutionOutcome::Executed(FusionVmResult {
+                    final_value: result.value,
+                    ordered_stores: Vec::new(),
+                    completion: result.completion,
+                }))
+            }
+            Ok(FusionExecutionOutcome::SharedRuntime(mut observation)) => {
+                match observation.prepare_vm_host_slice(stack_guard.slice()).await {
+                    Ok(Some(replacements)) => stack_guard
+                        .replace_host_operands(replacements)
+                        .map_err(FusionAttemptError::Terminal)?,
+                    Ok(None) => {}
+                    Err(CpuReadbackFailure::BeforeEffect(error)) => {
+                        return Err(FusionAttemptError::Deopt(error));
+                    }
+                    Err(CpuReadbackFailure::AfterEffect(error)) => {
+                        return Err(FusionAttemptError::Terminal(error));
+                    }
+                }
+                Ok(FusionExecutionOutcome::SharedRuntime(observation))
+            }
+            Err(error) => {
+                let classified = classify_provider_error(error);
+                if matches!(&classified, FusionAttemptError::Terminal(_)) {
+                    stack_guard.commit();
+                }
+                Err(classified)
+            }
+        }
+    } else {
+        finish_provider_execution(
+            execute_reduction_with_shape_placed_async(
+                request,
+                geom.reduce_len,
+                geom.num_slices,
+                &geom.output_shape,
+                256u32,
+            )
+            .await,
+            stack_guard,
+        )
+        .map(without_intermediate_stores)
     }
 }
 
 pub async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
-    stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
-) -> Result<Value, RuntimeError> {
-    let (stack_guard, request, consumed_inputs) =
-        gather_fusion_inputs(plan, graph, stack, vars, context, placement)?;
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    // This compatibility entry point has no instruction transcript. It can
+    // transport evaluated operands/literals, but never skip a semantic load.
+    let transport = input_transport::VmFusionInputTransport::project(plan, graph, &[], &[]);
+    try_execute_fusion_group_with_inputs(
+        plan,
+        graph,
+        stack,
+        vars,
+        context,
+        placement,
+        VmFusionInvocation {
+            right,
+            decline: None,
+            input_uses: None,
+            transport: transport.as_ref(),
+        },
+    )
+    .await
+}
+
+pub(crate) struct VmFusionInvocation<'a> {
+    pub right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    pub decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
+    pub input_uses: Option<&'a runmat_accelerate::fusion_exec::VmHostInputUses>,
+    pub transport: Option<&'a input_transport::VmFusionInputTransport>,
+}
+
+pub(crate) async fn try_execute_fusion_group_with_inputs(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    _graph: &runmat_accelerate::AccelGraph,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    vars: &InterpreterVars,
+    context: &mut ExecutionContext,
+    placement: Option<PlacementCorrelationId>,
+    invocation: VmFusionInvocation<'_>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    let VmFusionInvocation {
+        right,
+        decline,
+        input_uses,
+        transport,
+    } = invocation;
+    let Some(transport) = transport else {
+        return Err(FusionAttemptError::Deopt(mex(
+            "FusionInputTransport",
+            "fusion input transport has not been installed",
+        )));
+    };
+    let GatheredFusionInputs {
+        guard: stack_guard,
+        request,
+    } = gather_fusion_inputs(plan, transport, stack, vars, context, placement)
+        .map_err(FusionAttemptError::Terminal)?
+        .ok_or_else(|| {
+            FusionAttemptError::Deopt(mex(
+                "FusionInputTransport",
+                "fusion input transport is unavailable before execution",
+            ))
+        })?;
     if plan.group.kind.is_elementwise()
         && !request.inputs.is_empty()
         && request.inputs.iter().all(is_scalarish_runtime_value)
     {
-        return Err(mex(
+        return Err(FusionAttemptError::Deopt(mex(
             "FusionScalarBypass",
             "fusion: bypass scalar-only elementwise group",
-        ));
+        )));
     }
     log::debug!(
         "dispatch fusion kind {:?}, supported {}",
@@ -1088,39 +722,38 @@ pub async fn try_execute_fusion_group(
         plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
-        execute_fusion_elementwise(request, stack_guard, vars, context)
+        execute_fusion_elementwise_vm(request, stack_guard, right, decline, input_uses).await
     } else if plan.group.kind.is_reduction() {
-        execute_fusion_reduction(
-            plan,
-            graph,
-            request,
-            &consumed_inputs,
-            stack_guard,
-            vars,
-            context,
-        )
+        execute_fusion_reduction_vm(plan, request, stack_guard, right, decline).await
     } else {
-        execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard)
-            .await
+        execute_fusion_special_kind(
+            plan.group.kind.clone(),
+            &plan.inputs,
+            request,
+            stack_guard,
+            decline,
+        )
+        .await
+        .map(without_intermediate_stores)
     }
 }
 
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use super::{
+    use super::reduction_geometry::{
         fused_reduction_output_shape, validate_fused_reduction_domain,
-        write_elementwise_materialized_stores, StackSliceGuard,
     };
+    use super::{write_elementwise_materialized_stores, StackSliceGuard};
     use crate::bytecode::program::ExecutionContext;
+    use crate::interpreter::vars::InterpreterVars;
     use runmat_accelerate::fusion::FusionStoreMaterialization;
     use runmat_accelerate::fusion_residency;
     use runmat_accelerate::graph::VarBinding;
     use runmat_accelerate::VarKind;
-    use runmat_accelerate_api::GpuTensorHandle;
     use runmat_value::Value;
 
     #[test]
-    fn fused_reduction_domain_defers_multi_axis_and_nd_work_to_provider_paths() {
+    fn fused_reduction_domain_defers_multi_axis_but_admits_single_nd_axis() {
         use runmat_accelerate::ReductionAxes;
 
         assert!(validate_fused_reduction_domain(
@@ -1134,7 +767,7 @@ mod tests {
             Some(&[2, 4, 5]),
             false,
         )
-        .is_err());
+        .is_ok());
         assert!(
             validate_fused_reduction_domain(Some(&ReductionAxes::All), Some(&[2, 4, 5]), true,)
                 .is_ok()
@@ -1165,72 +798,186 @@ mod tests {
 
     #[test]
     fn fusion_writeback_preserves_shared_gpu_handles() {
-        let shared = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 17,
-            buffer_id: 17001,
-            descriptor: Default::default(),
-        };
-        let old_only = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 17,
-            buffer_id: 17002,
-            descriptor: Default::default(),
-        };
-        fusion_residency::mark(&shared);
-        fusion_residency::mark(&old_only);
-        assert!(fusion_residency::is_resident(&shared));
-        assert!(fusion_residency::is_resident(&old_only));
+        use futures::executor::block_on;
+        use once_cell::sync::Lazy;
+        use runmat_accelerate::simple_provider::InProcessProvider;
+        use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
 
-        let mut vars = vec![Value::OutputList(vec![
-            Value::GpuTensor(shared.clone()),
-            Value::GpuTensor(old_only.clone()),
-        ])];
-        let mut context = ExecutionContext {
-            call_stack: Vec::new(),
-            locals: Vec::new(),
-            instruction_pointer: 0,
-            ..ExecutionContext::default()
-        };
-        write_elementwise_materialized_stores(
-            vec![(
-                FusionStoreMaterialization {
-                    value_id: 1,
-                    binding: VarBinding {
-                        kind: VarKind::Global,
-                        index: 0,
+        static PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
+        runmat_gc::gc_test_context(|| {
+            let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+            runmat_accelerate::ensure_residency_hooks();
+            let upload = |value| {
+                PROVIDER
+                    .upload(&HostTensorView {
+                        data: &[value],
+                        shape: &[1, 1],
+                    })
+                    .unwrap()
+            };
+            let shared = upload(7.0);
+            let old_only = upload(9.0);
+            fusion_residency::mark(&shared);
+            fusion_residency::mark(&old_only);
+            let stack = Vec::new();
+            let mut vars = InterpreterVars::from_owned(vec![Value::Cell(
+                runmat_value::CellArray::new_with_shape(
+                    vec![
+                        Value::GpuTensor(shared.clone()),
+                        Value::GpuTensor(old_only.clone()),
+                    ],
+                    vec![1, 2],
+                )
+                .unwrap(),
+            )]);
+            let frame_roots = crate::runtime::gc::InterpretContext::new(&stack, &vars).unwrap();
+            drop(frame_roots);
+            let old_weak = old_only.downgrade();
+            let shared_weak = shared.downgrade();
+            let mut context = ExecutionContext::default();
+            write_elementwise_materialized_stores(
+                vec![(
+                    FusionStoreMaterialization {
+                        value_id: 1,
+                        binding: VarBinding {
+                            kind: VarKind::Global,
+                            index: 0,
+                        },
                     },
-                },
-                Value::GpuTensor(shared.clone()),
-            )],
-            &mut vars,
-            &mut context,
-        );
+                    Value::GpuTensor(shared.clone()),
+                )],
+                &mut vars,
+                &mut context,
+            )
+            .unwrap();
+            // Both external handles are genuine owners; writeback cannot free either.
+            assert!(block_on(PROVIDER.download(&shared)).is_ok());
+            assert!(block_on(PROVIDER.download(&old_only)).is_ok());
+            assert!(fusion_residency::is_resident(&old_only));
+            assert_eq!(
+                block_on(PROVIDER.download(&shared)).unwrap().data,
+                vec![7.0]
+            );
+            drop(old_only);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(old_weak.acquire().is_err());
+            assert!(fusion_residency::is_resident(&shared));
+            drop(shared);
+            assert!(
+                shared_weak.acquire().is_ok(),
+                "published variable owns the output"
+            );
+            drop(vars);
+            assert!(shared_weak.acquire().is_err());
+        });
+    }
 
-        assert!(fusion_residency::is_resident(&shared));
-        assert!(!fusion_residency::is_resident(&old_only));
-        fusion_residency::clear(&shared);
+    #[test]
+    fn host_readback_slice_publication_is_atomic_and_keeps_source_handles() {
+        use futures::executor::block_on;
+        use once_cell::sync::Lazy;
+        use runmat_accelerate::simple_provider::InProcessProvider;
+        use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
+
+        static PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
+        runmat_gc::gc_test_context(|| {
+            let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+            let upload = |value| {
+                PROVIDER
+                    .upload(&HostTensorView {
+                        data: &[value],
+                        shape: &[1, 1],
+                    })
+                    .unwrap()
+            };
+            let left = upload(7.0);
+            let right = upload(9.0);
+            let public = [
+                Value::GpuTensor(left.clone()),
+                Value::GpuTensor(right.clone()),
+            ];
+            let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+                Value::Num(3.0),
+                Value::GpuTensor(left.clone()),
+                Value::GpuTensor(right.clone()),
+            ]);
+            {
+                let mut guard = StackSliceGuard::new(&mut stack, 1)
+                    .expect("the unbounded test stack has a unique operand slice");
+                assert!(guard
+                    .replace_host_operands(vec![(0, Value::Num(7.0))])
+                    .is_err());
+                assert_eq!(guard.slice().len(), 2);
+                assert!(guard
+                    .slice()
+                    .iter()
+                    .all(|value| matches!(value, Value::GpuTensor(_))));
+                assert!(guard
+                    .replace_host_operands(vec![(0, Value::Num(7.0)), (0, Value::Num(9.0))])
+                    .is_err());
+                assert!(guard
+                    .slice()
+                    .iter()
+                    .all(|value| matches!(value, Value::GpuTensor(_))));
+                assert!(guard
+                    .replace_host_operands(vec![
+                        (0, Value::Num(7.0)),
+                        (1, Value::GpuTensor(right.clone()))
+                    ])
+                    .is_err());
+                assert!(guard
+                    .slice()
+                    .iter()
+                    .all(|value| matches!(value, Value::GpuTensor(_))));
+                guard
+                    .replace_host_operands(vec![(0, Value::Num(7.0)), (1, Value::Num(9.0))])
+                    .unwrap();
+                assert_eq!(guard.slice(), &[Value::Num(7.0), Value::Num(9.0)]);
+            }
+            assert_eq!(
+                stack.as_slice(),
+                &[Value::Num(3.0), Value::Num(7.0), Value::Num(9.0)]
+            );
+            assert!(
+                matches!(&public[0], Value::GpuTensor(handle) if handle.view_identity() == left.view_identity())
+            );
+            assert!(
+                matches!(&public[1], Value::GpuTensor(handle) if handle.view_identity() == right.view_identity())
+            );
+            assert_eq!(block_on(PROVIDER.download(&left)).unwrap().data, vec![7.0]);
+            assert_eq!(block_on(PROVIDER.download(&right)).unwrap().data, vec![9.0]);
+        });
     }
 
     #[test]
     fn fusion_stack_transaction_restores_before_commit_and_never_replays_after_commit() {
-        let mut failed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        let mut failed = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]);
         {
-            let guard = StackSliceGuard::new(&mut failed, 1);
+            let guard = StackSliceGuard::new(&mut failed, 1)
+                .expect("the unbounded test stack has a unique operand slice");
             assert_eq!(guard.slice(), &[Value::Num(2.0), Value::Num(3.0)]);
             // A provider/placement failure drops the guard without publishing
             // outputs; the original VM operands are restored exactly once.
         }
         assert_eq!(
-            failed,
-            vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]
+            failed.as_slice(),
+            &[Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]
         );
 
-        let mut completed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        let mut completed = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]);
         {
-            let guard = StackSliceGuard::new(&mut completed, 1);
+            let guard = StackSliceGuard::new(&mut completed, 1)
+                .expect("the unbounded test stack has a unique operand slice");
             guard.commit();
         }
-        assert_eq!(completed, vec![Value::Num(1.0)]);
+        assert_eq!(completed.as_slice(), &[Value::Num(1.0)]);
     }
 }

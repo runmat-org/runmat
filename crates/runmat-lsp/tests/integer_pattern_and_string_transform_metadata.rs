@@ -25,7 +25,8 @@ const INAPPLICABLE_NAMES: [&str; 6] = [
 #[test]
 fn pattern_and_string_transform_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         for capability in builtin.integer_capabilities {
@@ -35,7 +36,8 @@ fn pattern_and_string_transform_integer_metadata_is_explicit() {
         }
     }
     for name in INAPPLICABLE_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert_eq!(
             builtin.integer_audit.expect("integer audit").kind,
@@ -48,7 +50,8 @@ fn pattern_and_string_transform_integer_metadata_is_explicit() {
 #[test]
 fn documented_and_evidence_open_string_controls_are_distinguished() {
     for name in ["lettersPattern", "wildcardPattern", "pad"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         for capability in builtin.integer_capabilities {
             assert_eq!(
                 capability.overflow,
@@ -66,7 +69,8 @@ fn documented_and_evidence_open_string_controls_are_distinguished() {
         }
     }
     for name in ["strfind", "split"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.iter().all(|capability| {
             capability.overflow == BuiltinIntegerOverflowRule::Error
                 && capability

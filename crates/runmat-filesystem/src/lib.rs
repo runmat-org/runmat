@@ -8,29 +8,77 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
+mod dialog;
 #[cfg(not(target_arch = "wasm32"))]
+mod file_lock;
+mod invocation;
+mod mapped_backing;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_path;
+mod native_path_intent;
+mod provider_path;
+mod captured_read;
+mod resource;
+mod selected_provider;
+mod staged_output;
+mod unavailable;
+#[cfg(not(target_arch = "wasm32"))]
+pub use file_lock::ExclusiveFileLock;
+mod publication;
+pub use publication::{AtomicCreateResult, AtomicReplaceOutcome, PublicationDurability};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sandbox;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
-
 #[cfg(not(target_arch = "wasm32"))]
+mod workspace_native;
+
+pub use captured_read::{CapturedExecutionScope, CapturedPinnedScope, CapturedReadScope};
+pub use dialog::*;
+pub use invocation::{
+    register_invocation_filesystem_resolver, InvocationFilesystem, InvocationFilesystemSelection,
+};
+pub use mapped_backing::{
+    capture_mapped_backing, capture_mapped_backing_on, CapturedMappedBacking, FsMappedBacking,
+    FsMappedWriteDisposition, FsMappedWriteFailure, FsMappedWriteOutcome,
+};
 pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
-pub use remote::{RemoteFsConfig, RemoteFsProvider};
+pub use native_path::{
+    capture_native_path, CapturedNativePath, NativePathAuthority, NativePathGrant,
+    NativeProcessRevocation,
+};
+pub use native_path_intent::NativePathIntent;
+pub use provider_path::{capture_provider_for_paths, capture_provider_path, FsPathNamespace};
+use provider_path::{capture_provider_many, capture_provider_pair};
 #[cfg(not(target_arch = "wasm32"))]
-pub use sandbox::SandboxFsProvider;
+pub use remote::{RemoteFsConfig, RemoteFsProvider};
+pub use resource::{
+    capture_resource_lease, capture_resource_lease_for_effect, CapturedFsResourceLease,
+    FsBoundedInput, FsFilePayloadContract, FsManagedOpenedInputCost, FsManagedReadBacking,
+    FsManagedReadContract, FsResourceContract, FsResourceLease, FsResourceLeaseHandle,
+    FsResourceRevision,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use sandbox::{CapturedIo, SandboxFsProvider};
+pub use selected_provider::SelectedFsProvider;
+pub use staged_output::{FsPublicationDisposition, FsPublicationFailure, FsStagedOutput};
+pub use unavailable::UnavailableFsProvider;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
 
 pub mod data_contract;
+pub mod execution;
+pub mod pinned;
+pub mod workspace;
+pub mod workspace_access;
 
 use data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
@@ -38,6 +86,17 @@ use data_contract::{
 
 #[async_trait(?Send)]
 pub trait FileHandle: Read + Write + Seek + Send + Sync {
+    /// Providers may override these for suspension-aware streaming. The
+    /// default retains their synchronous handle semantics for one bounded
+    /// chunk; callers can still cooperate between chunks.
+    async fn read_async(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.read(bytes)
+    }
+
+    async fn write_async(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.write(bytes)
+    }
+
     async fn metadata_async(&self) -> io::Result<FsMetadata> {
         Err(io::Error::new(
             ErrorKind::Unsupported,
@@ -134,15 +193,44 @@ impl OpenOptions {
     }
 
     pub fn open(&self, path: impl AsRef<Path>) -> io::Result<File> {
-        let resolved = resolve_path(path.as_ref());
-        with_provider(|provider| provider.open(&resolved, &self.flags)).map(File::from_handle)
+        let (provider, resolved) = capture_provider_path(path.as_ref())?;
+        provider.open(&resolved, &self.flags).map(File::from_handle)
+    }
+
+    /// Open an absolute path through a previously captured provider, without
+    /// consulting the ambient provider or working directory again.
+    pub fn open_on(&self, provider: &dyn FsProvider, path: impl AsRef<Path>) -> io::Result<File> {
+        let path = path.as_ref();
+        if !provider.path_namespace().is_absolute(path) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
+        provider.open(path, &self.flags).map(File::from_handle)
     }
 
     pub async fn open_async(&self, path: impl AsRef<Path>) -> io::Result<File> {
-        let resolved = resolve_path(path.as_ref());
-        let provider = current_provider();
+        let (provider, path) = capture_provider_path(path.as_ref())?;
+        self.open_async_on(provider.as_ref(), path).await
+    }
+
+    /// Open using the invocation's captured filesystem authority. The caller
+    /// may pass an absolute path captured with that authority before suspension.
+    pub async fn open_async_on(
+        &self,
+        provider: &dyn FsProvider,
+        path: impl AsRef<Path>,
+    ) -> io::Result<File> {
+        let resolved = path.as_ref();
+        if !provider.path_namespace().is_absolute(resolved) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
         provider
-            .open_async(&resolved, &self.flags)
+            .open_async(resolved, &self.flags)
             .await
             .map(File::from_handle)
     }
@@ -293,50 +381,6 @@ impl ReadManyEntry {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpenFileDialogFilter {
-    pub patterns: Vec<String>,
-    pub description: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct OpenFileDialogRequest {
-    pub title: Option<String>,
-    pub default_path: Option<PathBuf>,
-    pub filters: Vec<OpenFileDialogFilter>,
-    pub multiselect: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpenFileDialogSelection {
-    pub paths: Vec<PathBuf>,
-    pub filter_index: Option<usize>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SaveFileDialogRequest {
-    pub title: Option<String>,
-    pub default_path: Option<PathBuf>,
-    pub filters: Vec<OpenFileDialogFilter>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SaveFileDialogSelection {
-    pub path: PathBuf,
-    pub filter_index: Option<usize>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DirectoryDialogRequest {
-    pub title: Option<String>,
-    pub default_path: Option<PathBuf>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DirectoryDialogSelection {
-    pub path: PathBuf,
-}
-
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -344,6 +388,18 @@ impl DirEntry {
             file_name,
             file_type,
         }
+    }
+
+    /// Requested storage of this response entry, including owned buffer capacities.
+    /// Allocator rounding and OS iterator internals are excluded.
+    pub fn resident_bytes(&self) -> Option<u64> {
+        (std::mem::size_of::<Self>() as u64)
+            .checked_add(self.path.capacity() as u64)?
+            .checked_add(self.file_name.capacity() as u64)
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        self.path
     }
 
     pub fn path(&self) -> &Path {
@@ -365,6 +421,172 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Capability metadata only; capture and publication still perform admission.
+    fn supports_workspace_transactions(&self) -> bool {
+        false
+    }
+    /// Coherent access through this provider's existing publication/recovery authority.
+    fn workspace_access(
+        &self,
+        _root: &Path,
+        _writable: bool,
+        _maximum_resident_bytes: u64,
+    ) -> io::Result<Box<dyn workspace_access::WorkspaceAccess>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "provider coherent workspace access is unsupported",
+        ))
+    }
+    /// Capture one coherent project inventory, including immutable file versions.
+    async fn capture_workspace(
+        &self,
+        _request: workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<workspace::WorkspaceSnapshot> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "coherent workspace capture is unsupported",
+        ))
+    }
+
+    /// Recover the result of an exact publication request without replaying edits.
+    /// This supports lost acknowledgements and rename/delete retries after restart.
+    async fn lookup_workspace_publication(
+        &self,
+        _request: &workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<workspace::WorkspacePublicationOutcome>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "workspace publication receipts are unsupported",
+        ))
+    }
+
+    /// Publish against exactly the captured revision. Successful retries return
+    /// the same durable receipt even if later edits have changed the project.
+    async fn publish_workspace(
+        &self,
+        _request: workspace::WorkspacePublicationRequest,
+    ) -> io::Result<workspace::WorkspacePublicationOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional workspace publication is unsupported",
+        ))
+    }
+    /// Arbitrate execution ownership inside this provider's existing project
+    /// scope. The authority supplies time and stores the transition atomically.
+    /// A remote client must never emulate this with reads or a local clock.
+    async fn transition_execution(
+        &self,
+        _work: &execution::ExecutionWorkId,
+        _command: execution::ExecutionLeaseCommand,
+    ) -> io::Result<execution::ExecutionLeaseOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "provider execution authority is unsupported",
+        ))
+    }
+    /// Validate ownership at the publication commit boundary under the same
+    /// provider lock as the files and receipt. A separate lease check is unsafe.
+    async fn publish_workspace_fenced(
+        &self,
+        _request: workspace::WorkspacePublicationRequest,
+        _lease: &execution::ExecutionLease,
+    ) -> io::Result<execution::FencedWorkspacePublicationOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "fenced workspace publication is unsupported",
+        ))
+    }
+    /// Path syntax owned by this provider. The default preserves native OS
+    /// qualification for existing native embedders; a provider exposing a
+    /// virtual rooted namespace must opt in even when hosted on Windows.
+    fn path_namespace(&self) -> FsPathNamespace {
+        #[cfg(target_arch = "wasm32")]
+        {
+            FsPathNamespace::VirtualRooted
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            FsPathNamespace::NativeOs
+        }
+    }
+    /// Opt in to an opened, fixed-extent range owner for an existing file.
+    /// `None` means the provider cannot supply live range semantics; it does
+    /// not mean the source is absent. This is not a memory-peak certificate.
+    async fn open_mapped_backing(
+        &self,
+        _resolved_absolute: &Path,
+        _writable: bool,
+    ) -> io::Result<Option<Box<dyn FsMappedBacking>>> {
+        Ok(None)
+    }
+
+    /// Acquire an exclusive provider-owned staging object for one already
+    /// resolved absolute destination. The returned owner must abort private
+    /// staging on Drop before commit dispatch. Dropping an in-flight remote
+    /// publication may leave its commit outcome indeterminate.
+    /// `None` means this provider cannot supply that guarantee; callers must
+    /// not reconstruct it from a public temporary path and `remove_file`.
+    /// RemoteFsProvider currently does not opt in: its CRUD/versioned upload
+    /// endpoints do not provide this private abort/commit-disposition contract.
+    /// Callers requiring staged replacement (such as writecell/dlmwrite)
+    /// therefore reject that provider before modifying the destination.
+    fn begin_staged_replace(
+        &self,
+        _resolved_absolute_destination: &Path,
+    ) -> io::Result<Option<Box<dyn FsStagedOutput>>> {
+        Ok(None)
+    }
+
+    /// Opt in to direct OS-path access by a native library. The path is
+    /// absolute and resolved with this provider's captured working directory.
+    /// `None` means the provider has no safe direct native-path route; callers
+    /// must not fall back to the process filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn acquire_native_path(
+        &self,
+        _resolved_absolute: &Path,
+        _intent: NativePathIntent,
+    ) -> io::Result<Option<NativePathGrant>> {
+        Ok(None)
+    }
+
+    /// Opt-in opened-source bound for an already resolved absolute path.
+    /// `None` means this provider cannot certify direct, extent-limited reads;
+    /// callers retain their ordinary route. The certificate and handle must
+    /// refer to the same open, never to a separate path metadata lookup.
+    async fn open_bounded_input(&self, _path: &Path) -> io::Result<Option<FsBoundedInput>> {
+        Ok(None)
+    }
+
+    /// Pure, allocation-free pre-effect managed-byte contract for this exact
+    /// provider's bounded input route. `None` is unavailable, never zero.
+    /// Callers must still certify their path, codec, and output allocations.
+    fn managed_read_contract(&self) -> Option<FsManagedReadContract> {
+        None
+    }
+
+    /// Opt-in resource authority for this exact provider instance. The lease
+    /// must keep its claims valid while retained by a caller. This does not
+    /// certify codec, path, result, or whole-invocation allocations.
+    fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
+        None
+    }
+
+    /// Allocation-free static leases can serve managed reads; existing
+    /// instance-owned authorities use the Arc-valued compatibility method.
+    fn resource_lease_handle(&self) -> Option<FsResourceLeaseHandle> {
+        self.resource_lease().map(FsResourceLeaseHandle::Owned)
+    }
+
+    /// Whether this installed provider can service ordinary file reads.
+    /// Hosts use this metadata for capability admission; it does not promise
+    /// that a particular path exists or that a subsequent read will succeed.
+    /// Providers whose read operation is unconditionally Unsupported must
+    /// override this to return false.
+    fn supports_read(&self) -> bool {
+        true
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         None
     }
@@ -374,7 +596,40 @@ pub trait FsProvider: Send + Sync + 'static {
         self.open(path, flags)
     }
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
+    /// Read an immutable version through the provider's normal authorization.
+    /// Never fall back to a live head when the version is unavailable.
+    async fn read_version(
+        &self,
+        _path: &Path,
+        _version: &str,
+        _size: u64,
+        _snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "immutable version reads are unsupported by this provider",
+        ))
+    }
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
+    /// Atomically create (None) or replace the exact previously published version.
+    /// Implementations must never emulate this with a read followed by a write.
+    async fn publish_output(
+        &self,
+        _path: &Path,
+        _data: &[u8],
+        _expected: Option<&str>,
+    ) -> io::Result<String> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional output publication is unsupported",
+        ))
+    }
+    async fn remove_output(&self, _path: &Path, _expected: &str) -> io::Result<()> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional output removal is unsupported",
+        ))
+    }
     async fn remove_file(&self, path: &Path) -> io::Result<()>;
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
     async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata>;
@@ -385,7 +640,53 @@ pub trait FsProvider: Send + Sync + 'static {
     async fn remove_dir(&self, path: &Path) -> io::Result<()>;
     async fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    /// Replace a compatible destination as part of one provider-owned rename.
+    ///
+    /// Implementations must not delete the destination before attempting the move.
+    /// Unsupported replacement, incompatible types, and nonempty destination
+    /// directories must fail without discarding either existing tree. This does
+    /// not require cross-volume emulation or a transaction across multiple moves.
+    async fn rename_replace(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "filesystem provider does not support safe rename replacement",
+        ))
+    }
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
+
+    /// Atomically publishes `bytes` if `path` does not exist.
+    ///
+    /// Implementations must provide a linearizable no-replace operation: exactly one competing
+    /// publisher may return `Published`, and readers must observe either no entry or the complete
+    /// winning payload, never a partially written destination. `Existing` contains a complete
+    /// snapshot of the payload which won publication. The default deliberately fails instead of
+    /// emulating these semantics with a racy existence check followed by a write.
+    async fn atomic_create_new(
+        &self,
+        _path: &Path,
+        _bytes: &[u8],
+    ) -> io::Result<AtomicCreateResult> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "atomic create-if-absent is unsupported by this provider",
+        ))
+    }
+
+    /// Atomically replaces a path with one complete payload. Concurrent callers
+    /// are linearized at publication; ordering/fencing belongs to the caller.
+    /// Err guarantees this invocation did not publish its replacement. After
+    /// publication, uncertain crash durability is returned explicitly with its
+    /// original diagnostic. Unsupported providers must not emulate this by write.
+    async fn atomic_replace(
+        &self,
+        _path: &Path,
+        _bytes: &[u8],
+    ) -> io::Result<AtomicReplaceOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "atomic replacement is unsupported by this provider",
+        ))
+    }
 
     async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
         let mut entries = Vec::with_capacity(paths.len());
@@ -440,27 +741,6 @@ pub trait FsProvider: Send + Sync + 'static {
             "data chunk upload is unsupported by this provider",
         ))
     }
-
-    async fn select_file_open(
-        &self,
-        _request: &OpenFileDialogRequest,
-    ) -> io::Result<Option<OpenFileDialogSelection>> {
-        Ok(None)
-    }
-
-    async fn select_file_save(
-        &self,
-        _request: &SaveFileDialogRequest,
-    ) -> io::Result<Option<SaveFileDialogSelection>> {
-        Ok(None)
-    }
-
-    async fn select_directory(
-        &self,
-        _request: &DirectoryDialogRequest,
-    ) -> io::Result<Option<DirectoryDialogSelection>> {
-        Ok(None)
-    }
 }
 
 pub struct File {
@@ -478,10 +758,51 @@ impl File {
         opts.open(path)
     }
 
+    /// Open through the caller's retained filesystem authority. A global
+    /// provider replacement between admission and execution cannot redirect
+    /// this input to another owner.
+    pub fn open_on(provider: &dyn FsProvider, path: impl AsRef<Path>) -> io::Result<Self> {
+        let resolved = path.as_ref();
+        if !provider.path_namespace().is_absolute(resolved) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
+        let flags = OpenFlags {
+            read: true,
+            ..OpenFlags::default()
+        };
+        provider.open(resolved, &flags).map(Self::from_handle)
+    }
+
     pub async fn open_async(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut opts = OpenOptions::new();
         opts.read(true);
         opts.open_async(path).await
+    }
+
+    /// Async counterpart of [`File::open_on`]; the borrowed owner is held
+    /// through completion of the provider's open future.
+    pub async fn open_async_on(
+        provider: &dyn FsProvider,
+        path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let resolved = path.as_ref();
+        if !provider.path_namespace().is_absolute(resolved) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
+        let flags = OpenFlags {
+            read: true,
+            ..OpenFlags::default()
+        };
+        provider
+            .open_async(resolved, &flags)
+            .await
+            .map(Self::from_handle)
     }
 
     pub fn create(path: impl AsRef<Path>) -> io::Result<Self> {
@@ -569,6 +890,15 @@ pub fn provider_override_lock() -> MutexGuard<'static, ()> {
 }
 
 fn current_dir_override() -> Option<PathBuf> {
+    if let Some((provider, directory)) = invocation::snapshot() {
+        if captured_read::check_selected(&provider).is_err() {
+            return None;
+        }
+        return directory;
+    }
+    if let Some((_, directory)) = captured_read::snapshot() {
+        return directory;
+    }
     provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned")
@@ -576,34 +906,12 @@ fn current_dir_override() -> Option<PathBuf> {
         .clone()
 }
 
+#[cfg(test)]
 fn replace_current_dir_override(value: Option<PathBuf>) -> Option<PathBuf> {
     let mut guard = provider_state_lock()
         .write()
         .expect("filesystem provider lock poisoned");
     std::mem::replace(&mut guard.current_dir_override, value)
-}
-
-fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {
-    let guard = provider_state_lock()
-        .read()
-        .expect("filesystem provider lock poisoned");
-    f(&*guard.provider)
-}
-
-fn resolve_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    let state = provider_state_lock()
-        .read()
-        .expect("filesystem provider lock poisoned");
-    if let Some(base) = &state.current_dir_override {
-        if path.has_root() {
-            return path.to_path_buf();
-        }
-        return base.join(path);
-    }
-    path.to_path_buf()
 }
 
 fn next_current_dir_override(
@@ -662,6 +970,13 @@ pub fn with_provider_override<R>(provider: Arc<dyn FsProvider>, f: impl FnOnce()
 
 /// Returns the currently installed provider.
 pub fn current_provider() -> Arc<dyn FsProvider> {
+    if let Some((provider, _)) = invocation::snapshot() {
+        return captured_read::selected_view(&provider)
+            .unwrap_or_else(|_| Arc::new(UnavailableFsProvider));
+    }
+    if let Some((provider, _)) = captured_read::snapshot() {
+        return provider;
+    }
     provider_state_lock()
         .read()
         .expect("filesystem provider lock poisoned")
@@ -669,7 +984,70 @@ pub fn current_provider() -> Arc<dyn FsProvider> {
         .clone()
 }
 
+/// Capture the installed provider and its effective working directory as one
+/// invocation authority. A virtual CWD belongs to the same registry state as
+/// the provider; native process CWD is copied after that state is released.
+pub fn current_provider_with_current_dir() -> io::Result<(Arc<dyn FsProvider>, PathBuf)> {
+    if let Some((provider, directory)) = invocation::snapshot() {
+        let provider = captured_read::selected_view(&provider)?;
+        return Ok((
+            provider,
+            directory.expect("selected filesystem has virtual CWD"),
+        ));
+    }
+    if let Some((provider, directory)) = captured_read::snapshot() {
+        return Ok((
+            provider,
+            directory.ok_or_else(captured_read::missing_directory)?,
+        ));
+    }
+    let (provider, virtual_dir) = {
+        let state = provider_state_lock()
+            .read()
+            .expect("filesystem provider lock poisoned");
+        (state.provider.clone(), state.current_dir_override.clone())
+    };
+    let dir = match virtual_dir {
+        Some(dir) => dir,
+        None => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                std::env::current_dir()?
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                PathBuf::from("/")
+            }
+        }
+    };
+    Ok((provider, dir))
+}
+
+pub fn current_provider_supports_read() -> bool {
+    // Provider metadata is implementation code and may reenter the registry.
+    // Clone its current owner while locked, then invoke outside the lock.
+    current_provider().supports_read()
+}
+
 pub fn current_dir() -> io::Result<PathBuf> {
+    if let Some((provider, _)) = invocation::snapshot() {
+        captured_read::check_selected(&provider)?;
+    }
+    match invocation::selected() {
+        Some(InvocationFilesystemSelection::Selected(owner)) => return owner.current_dir(),
+        Some(InvocationFilesystemSelection::Denied {
+            directory,
+            environment_read,
+        }) => {
+            return directory
+                .filter(|_| environment_read)
+                .ok_or_else(invocation::denied_environment)
+        }
+        None => {}
+    }
+    if let Some((_, directory)) = captured_read::snapshot() {
+        return directory.ok_or_else(captured_read::missing_directory);
+    }
     if let Some(current) = current_dir_override() {
         return Ok(current);
     }
@@ -684,8 +1062,92 @@ pub fn current_dir() -> io::Result<PathBuf> {
 }
 
 pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    if current_dir_override().is_some() {
-        futures::executor::block_on(set_current_dir_async(path.as_ref().to_path_buf()))
+    futures::executor::block_on(set_current_dir_async(path.as_ref()))
+}
+
+pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
+    captured_read::require_directory_write()?;
+    if let Some((provider, _)) = invocation::snapshot() {
+        captured_read::check_selected(&provider)?;
+    }
+    match invocation::selected() {
+        Some(InvocationFilesystemSelection::Selected(owner)) => {
+            if !owner.environment_write_allowed() {
+                return Err(invocation::denied_environment());
+            }
+            let mut target = PathBuf::from(path.as_ref());
+            if !owner.provider().path_namespace().is_absolute(&target) {
+                target = owner.captured_dir().join(target);
+            }
+            let canonical = owner
+                .provider()
+                .canonicalize(&target)
+                .await
+                .unwrap_or(target.clone());
+            let metadata = owner.provider().metadata(&canonical).await?;
+            if !metadata.is_dir() {
+                return Err(io::Error::new(
+                    ErrorKind::NotFound,
+                    format!("Not a directory: {}", canonical.display()),
+                ));
+            }
+            if !matches!(
+                invocation::selected(),
+                Some(InvocationFilesystemSelection::Selected(ref current))
+                    if current.same_owner(&owner)
+            ) {
+                return Err(io::Error::new(
+                    ErrorKind::Interrupted,
+                    "filesystem invocation changed before working-directory publication",
+                ));
+            }
+            owner.publish_current_dir(canonical)?;
+            return Ok(());
+        }
+        Some(InvocationFilesystemSelection::Denied { .. }) => {
+            return Err(io::Error::new(
+                ErrorKind::PermissionDenied,
+                "selected invocation has no filesystem service",
+            ));
+        }
+        None => {}
+    }
+    if captured_read::set_local_directory(path.as_ref()).await? {
+        return Ok(());
+    }
+    let (provider, selected_dir) = {
+        let state = provider_state_lock()
+            .read()
+            .expect("filesystem provider lock poisoned");
+        (state.provider.clone(), state.current_dir_override.clone())
+    };
+    if let Some(base) = selected_dir {
+        let mut target = PathBuf::from(path.as_ref());
+        if !provider.path_namespace().is_absolute(&target) {
+            target = base.join(target);
+        }
+        let canonical = provider
+            .canonicalize(&target)
+            .await
+            .unwrap_or(target.clone());
+        let metadata = provider.metadata(&canonical).await?;
+        if !metadata.is_dir() {
+            return Err(io::Error::new(
+                ErrorKind::NotFound,
+                format!("Not a directory: {}", canonical.display()),
+            ));
+        }
+        let mut state = provider_state_lock()
+            .write()
+            .expect("filesystem provider lock poisoned");
+        if !Arc::ptr_eq(&state.provider, &provider) {
+            return Err(io::Error::new(
+                ErrorKind::Interrupted,
+                "filesystem provider changed before working-directory publication",
+            ));
+        }
+        state.current_dir_override = Some(canonical);
+        Ok(())
     } else {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -695,28 +1157,6 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
         {
             Ok(())
         }
-    }
-}
-
-pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
-    if current_dir_override().is_some() {
-        let mut target = PathBuf::from(path.as_ref());
-        if !target.has_root() {
-            let base = current_dir()?;
-            target = base.join(target);
-        }
-        let canonical = canonicalize_async(&target).await.unwrap_or(target.clone());
-        let metadata = metadata_async(&canonical).await?;
-        if !metadata.is_dir() {
-            return Err(io::Error::new(
-                ErrorKind::NotFound,
-                format!("Not a directory: {}", canonical.display()),
-            ));
-        }
-        replace_current_dir_override(Some(canonical));
-        Ok(())
-    } else {
-        set_current_dir(path)
     }
 }
 
@@ -736,23 +1176,35 @@ impl Drop for ProviderGuard {
 }
 
 pub async fn read_many_async(paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
-    let resolved = paths
-        .iter()
-        .map(|path| resolve_path(path.as_path()))
-        .collect::<Vec<_>>();
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_many(paths)?;
     provider.read_many(&resolved).await
 }
 
 pub async fn read_async(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.read(&resolved).await
 }
 
 pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     let path = path.as_ref().to_path_buf();
     wait_for_fs(move || async move { read_async(path).await })
+}
+
+pub async fn atomic_create_new_async(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicCreateResult> {
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
+    provider.atomic_create_new(&resolved, bytes.as_ref()).await
+}
+
+pub fn atomic_create_new(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicCreateResult> {
+    let path = path.as_ref().to_path_buf();
+    let bytes = bytes.as_ref().to_vec();
+    wait_for_fs(move || async move { atomic_create_new_async(path, bytes).await })
 }
 
 pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
@@ -766,8 +1218,7 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 }
 
 pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.write(&resolved, data.as_ref()).await
 }
 
@@ -778,8 +1229,7 @@ pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
 }
 
 pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.remove_file(&resolved).await
 }
 
@@ -788,9 +1238,20 @@ pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     wait_for_fs(move || async move { remove_file_async(path).await })
 }
 
+/// Remove through a retained provider without consulting process-global
+/// provider state. Safe to call from a synchronous destructor inside an
+/// already-running executor on native hosts: `wait_for_fs` owns the worker.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn remove_file_in_provider(
+    provider: Arc<dyn FsProvider>,
+    path: impl AsRef<Path>,
+) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { provider.remove_file(&path).await })
+}
+
 pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.metadata(&resolved).await
 }
 
@@ -800,14 +1261,17 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
 }
 
 pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.symlink_metadata(&resolved).await
 }
 
+pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { symlink_metadata_async(path).await })
+}
+
 pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.read_dir(&resolved).await
 }
 
@@ -817,20 +1281,17 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
 }
 
 pub async fn canonicalize_async(path: impl AsRef<Path>) -> io::Result<PathBuf> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.canonicalize(&resolved).await
 }
 
 pub async fn create_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.create_dir(&resolved).await
 }
 
 pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.create_dir_all(&resolved).await
 }
 
@@ -840,22 +1301,23 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
 }
 
 pub async fn remove_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.remove_dir(&resolved).await
 }
 
 pub async fn remove_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.remove_dir_all(&resolved).await
 }
 
 pub async fn rename_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
-    let resolved_from = resolve_path(from.as_ref());
-    let resolved_to = resolve_path(to.as_ref());
-    let provider = current_provider();
+    let (provider, resolved_from, resolved_to) = capture_provider_pair(from.as_ref(), to.as_ref())?;
     provider.rename(&resolved_from, &resolved_to).await
+}
+
+pub async fn rename_replace_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    let (provider, resolved_from, resolved_to) = capture_provider_pair(from.as_ref(), to.as_ref())?;
+    provider.rename_replace(&resolved_from, &resolved_to).await
 }
 
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
@@ -865,42 +1327,8 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
 }
 
 pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.set_readonly(&resolved, readonly).await
-}
-
-pub async fn select_file_open_async(
-    request: &OpenFileDialogRequest,
-) -> io::Result<Option<OpenFileDialogSelection>> {
-    let mut resolved = request.clone();
-    if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = resolve_path(default_path);
-    }
-    let provider = current_provider();
-    provider.select_file_open(&resolved).await
-}
-
-pub async fn select_file_save_async(
-    request: &SaveFileDialogRequest,
-) -> io::Result<Option<SaveFileDialogSelection>> {
-    let mut resolved = request.clone();
-    if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = resolve_path(default_path);
-    }
-    let provider = current_provider();
-    provider.select_file_save(&resolved).await
-}
-
-pub async fn select_directory_async(
-    request: &DirectoryDialogRequest,
-) -> io::Result<Option<DirectoryDialogSelection>> {
-    let mut resolved = request.clone();
-    if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = resolve_path(default_path);
-    }
-    let provider = current_provider();
-    provider.select_directory(&resolved).await
 }
 
 pub async fn data_manifest_descriptor_async(
@@ -928,14 +1356,54 @@ pub async fn data_upload_chunk_async(
 /// Copy a file from `from` to `to`, truncating the destination when it exists.
 /// Returns the number of bytes written, matching `std::fs::copy`.
 pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
-    let mut reader = OpenOptions::new().read(true).open(from.as_ref())?;
+    let (provider, from, to) = capture_provider_pair(from.as_ref(), to.as_ref())?;
+    let mut reader = OpenOptions::new()
+        .read(true)
+        .open_on(provider.as_ref(), &from)?;
     let mut writer = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .open(to.as_ref())?;
+        .open_on(provider.as_ref(), &to)?;
     io::copy(&mut reader, &mut writer)
 }
+
+/// Copy between absolute paths through one retained provider. Unlike
+/// `copy_file`, this never consults the process-wide provider or CWD after
+/// capture. It preserves the existing synchronous stream-copy semantics.
+pub fn copy_file_on(provider: &dyn FsProvider, from: &Path, to: &Path) -> io::Result<u64> {
+    if !provider.path_namespace().is_absolute(from) || !provider.path_namespace().is_absolute(to) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "copy_file_on requires captured absolute paths",
+        ));
+    }
+    let mut reader = File::from_handle(provider.open(
+        from,
+        &OpenFlags {
+            read: true,
+            ..OpenFlags::default()
+        },
+    )?);
+    let mut writer = File::from_handle(provider.open(
+        to,
+        &OpenFlags {
+            write: true,
+            create: true,
+            truncate: true,
+            ..OpenFlags::default()
+        },
+    )?);
+    io::copy(&mut reader, &mut writer)
+}
+
+#[path = "copy_stream.rs"]
+mod copy_stream;
+pub use copy_stream::{copy_file_on_async, FsCopyCheckpoint, FsCopyError};
+
+#[cfg(test)]
+#[path = "copy_tests.rs"]
+mod copy_tests;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
@@ -972,18 +1440,13 @@ fn default_provider() -> Arc<dyn FsProvider> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
     use std::collections::{HashMap, HashSet};
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::sync::Mutex;
     use tempfile::tempdir;
 
-    static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
     fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-        TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        provider_override_lock()
     }
 
     fn comparable_path(path: impl AsRef<Path>) -> PathBuf {
@@ -1011,6 +1474,61 @@ mod tests {
     }
 
     struct UnsupportedProvider;
+
+    #[test]
+    fn unqualified_provider_cannot_claim_a_staged_replacement() {
+        assert!(UnsupportedProvider
+            .begin_staged_replace(Path::new("/report.csv"))
+            .expect("capability query")
+            .is_none());
+    }
+
+    #[test]
+    fn retained_stage_uses_issuing_provider_after_ambient_swap() {
+        let _lock = test_lock();
+        let original = Arc::new(MemoryFsProvider::with_current_dir("/reports"));
+        original
+            .write_project_path("/reports/data.csv", b"original")
+            .expect("original file");
+        let replacement = Arc::new(MemoryFsProvider::with_current_dir("/reports"));
+        replacement
+            .write_project_path("/reports/data.csv", b"unrelated")
+            .expect("replacement file");
+        let _original = replace_provider(original.clone());
+        let mut stage = original
+            .begin_staged_replace(Path::new("/reports/data.csv"))
+            .expect("stage acquisition")
+            .expect("memory stage");
+        let _replacement = replace_provider(replacement.clone());
+        assert_eq!(
+            futures::executor::block_on(stage.write_chunk(b"published")).unwrap(),
+            9
+        );
+        futures::executor::block_on(stage.publish()).expect("publish on original provider");
+        assert_eq!(
+            original.read_project_path("/reports/data.csv").unwrap(),
+            b"published"
+        );
+        assert_eq!(
+            replacement.read_project_path("/reports/data.csv").unwrap(),
+            b"unrelated"
+        );
+    }
+
+    #[test]
+    fn read_capability_metadata_is_queried_outside_the_provider_lock() {
+        let _guard = test_lock();
+        let _provider = replace_provider(Arc::new(UnsupportedProvider));
+        assert!(!current_provider_supports_read());
+    }
+
+    #[test]
+    fn unimplemented_replacement_fails_before_any_provider_operation() {
+        let result = futures::executor::block_on(
+            UnsupportedProvider.rename_replace(Path::new("/source"), Path::new("/target")),
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Unsupported);
+    }
 
     struct AsyncOpenProvider {
         opened_async: Arc<Mutex<bool>>,
@@ -1136,6 +1654,13 @@ mod tests {
 
     #[async_trait(?Send)]
     impl FsProvider for UnsupportedProvider {
+        fn supports_read(&self) -> bool {
+            // A metadata callback may inspect the provider registry. A write
+            // lock must be available here, without recursively blocking.
+            assert!(provider_state_lock().try_write().is_ok());
+            false
+        }
+
         fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
             Err(unsupported())
         }
@@ -1217,6 +1742,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl FsProvider for VirtualFsProvider {
+        fn path_namespace(&self) -> FsPathNamespace {
+            FsPathNamespace::VirtualRooted
+        }
+
         fn current_dir_override(&self) -> Option<PathBuf> {
             Some(self.default_current_dir.clone())
         }
@@ -1448,6 +1977,23 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn explicit_provider_cleanup_inside_executor_does_not_switch_ambient_provider() {
+        let _guard = test_lock();
+        let ambient = current_provider();
+        let provider = Arc::new(MemoryFsProvider::new());
+        provider.write_project_path("/partial", b"discard").unwrap();
+        futures::executor::block_on(async {
+            remove_file_in_provider(provider.clone(), "/partial").expect("nested cleanup");
+        });
+        assert_eq!(
+            provider.read_project_path("/partial").unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        assert!(Arc::ptr_eq(&ambient, &current_provider()));
+    }
+
+    #[test]
     fn replace_provider_restores_previous() {
         let _guard = test_lock();
         let original = current_provider();
@@ -1620,11 +2166,11 @@ mod tests {
     }
 
     #[test]
-    fn select_file_open_defaults_to_cancelled_selection() {
+    fn dialog_requests_resolve_default_paths_through_the_selected_storage_provider() {
         let _guard = test_lock();
-        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
+        let provider = Arc::new(VirtualFsProvider::new("/workspace", &["/workspace/data"]));
         let _provider_guard = replace_provider(provider);
-        let request = OpenFileDialogRequest {
+        let open = OpenFileDialogRequest {
             title: Some("Open".to_string()),
             default_path: Some(PathBuf::from("data")),
             filters: vec![OpenFileDialogFilter {
@@ -1633,47 +2179,34 @@ mod tests {
             }],
             multiselect: false,
         };
-
-        let selection =
-            futures::executor::block_on(select_file_open_async(&request)).expect("select file");
-
-        assert_eq!(selection, None);
-    }
-
-    #[test]
-    fn select_file_save_defaults_to_cancelled_selection() {
-        let _guard = test_lock();
-        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
-        let _provider_guard = replace_provider(provider);
-        let request = SaveFileDialogRequest {
+        let save = SaveFileDialogRequest {
             title: Some("Save".to_string()),
-            default_path: Some(PathBuf::from("data.mat")),
-            filters: vec![OpenFileDialogFilter {
-                patterns: vec!["*.mat".to_string()],
-                description: Some("MAT files".to_string()),
-            }],
+            default_path: Some(PathBuf::from("data/results.mat")),
+            filters: Vec::new(),
         };
-
-        let selection =
-            futures::executor::block_on(select_file_save_async(&request)).expect("select file");
-
-        assert_eq!(selection, None);
-    }
-
-    #[test]
-    fn select_directory_defaults_to_cancelled_selection() {
-        let _guard = test_lock();
-        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
-        let _provider_guard = replace_provider(provider);
-        let request = DirectoryDialogRequest {
-            title: Some("Select folder".to_string()),
+        let directory = DirectoryDialogRequest {
+            title: Some("Directory".to_string()),
             default_path: Some(PathBuf::from("data")),
         };
 
-        let selection =
-            futures::executor::block_on(select_directory_async(&request)).expect("select folder");
-
-        assert_eq!(selection, None);
+        assert_eq!(
+            resolve_open_file_dialog_request(&open)
+                .unwrap()
+                .default_path,
+            Some(PathBuf::from("/workspace/data"))
+        );
+        assert_eq!(
+            resolve_save_file_dialog_request(&save)
+                .unwrap()
+                .default_path,
+            Some(PathBuf::from("/workspace/data/results.mat"))
+        );
+        assert_eq!(
+            resolve_directory_dialog_request(&directory)
+                .unwrap()
+                .default_path,
+            Some(PathBuf::from("/workspace/data"))
+        );
     }
 
     #[test]
@@ -1691,5 +2224,33 @@ mod tests {
         assert!(result.is_err());
         let final_provider = current_provider();
         assert!(Arc::ptr_eq(&final_provider, &original));
+    }
+
+    #[test]
+    fn atomic_publication_uses_only_the_installed_provider() {
+        let _guard = test_lock();
+        // A relative name is valid in both namespaces; an OS drive prefix is
+        // deliberately not a portable memory-filesystem path on Windows.
+        let host = tempfile::NamedTempFile::new_in(std::env::current_dir().unwrap()).unwrap();
+        let logical_path = Path::new(host.path().file_name().unwrap());
+        std::fs::write(host.path(), b"host").unwrap();
+        let memory = Arc::new(MemoryFsProvider::new());
+        let provider: Arc<dyn FsProvider> = memory.clone();
+        let _provider_guard = replace_provider(provider);
+
+        let outcome = atomic_create_new(logical_path, b"provider").unwrap();
+
+        assert!(matches!(outcome, AtomicCreateResult::Published { .. }));
+        assert_eq!(memory.read_project_path(logical_path).unwrap(), b"provider");
+        assert_eq!(std::fs::read(host.path()).unwrap(), b"host");
+    }
+
+    #[test]
+    fn unsupported_provider_does_not_emulate_atomic_publication() {
+        let error = futures::executor::block_on(
+            UnsupportedProvider.atomic_create_new(Path::new("/artifact"), b"payload"),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
     }
 }

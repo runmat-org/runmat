@@ -1,29 +1,103 @@
 use serde::{Deserialize, Serialize};
 
+mod admission;
+mod input;
+pub(crate) use input::{solve_structural_system_reusing, StructuralLinearSystemView};
+mod diagnostics;
+mod settings;
+use diagnostics::SuccessfulDiagnostic;
+pub(crate) use diagnostics::{successful_diagnostic_record_count, successful_diagnostics_profile};
+pub(crate) use settings::accelerator_iteration_limit;
+pub(crate) use settings::ScopedLinearSolveSettings;
+
+use admission::{incompatible_system_result, invalid_system_result, rejected_system_result};
+
 use crate::{
-    assembly::AssemblySummary,
-    diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_k, csr_stiffness, dense_stiffness},
-    solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
-    solve::{
-        backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
-        runtime_tensor_solver::solve_linear_system_runtime_tensor,
+    algebra::{
+        validate_prepared_solver_compatibility, AssembledRealSystem, RealPreconditioner,
+        RealSolver, ScopedSpmvError,
     },
+    assembly::AssemblySummary,
+    contracts::{FeaRunError, SolverMethod, SolverPreconditioner},
+    diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
+    solve::{
+        accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
+        backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
+    },
+    solve::{preconditioner::SpdPreconditionerKind, shared_sparse},
 };
 
+struct PreparedSolveSettings<'a> {
+    plan: LocalExecutionPlan,
+    admission: Option<&'a SolverAdmissionResourcePolicy>,
+    relative_tolerance: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LinearSolveResult {
+pub struct LinearSolveResult<StateStorage = Vec<f64>> {
     pub iterations: u32,
     pub residual_norm: f64,
+    /// Relative residual in the actual solved equation space; absent after admission failure.
+    pub relative_residual: Option<f64>,
     pub converged: bool,
     pub host_sync_count: u32,
-    pub solver_backend: String,
+    pub solver_backend: LinearAlgebraBackendKind,
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
-    pub solution: Vec<f64>,
-    pub solver_method: String,
-    pub preconditioner: String,
+    pub accelerator_evidence: Option<crate::solve::accelerator::AcceleratorSolveEvidence>,
+    pub solution: StateStorage,
+    pub solver_method: SolverMethod,
+    pub preconditioner: SolverPreconditioner,
     pub diagnostics: Vec<FeaDiagnostic>,
+    /// PCG only: Lanczos λ_min estimate and the forward error it implies (never a proof).
+    pub spectral_estimate: Option<crate::contracts::SpectralErrorEstimate>,
+}
+
+impl<S> LinearSolveResult<S> {
+    pub fn map_solution<T>(self, map: impl FnOnce(S) -> T) -> LinearSolveResult<T> {
+        self.try_map_solution(|storage| Ok::<_, std::convert::Infallible>(map(storage)))
+            .unwrap_or_else(|never| match never {})
+    }
+    /// Move the solver's numerical state into a checked physical representation
+    /// without duplicating its buffer or its backend/admission evidence.
+    pub fn try_map_solution<T, E>(
+        self,
+        map: impl FnOnce(S) -> Result<T, E>,
+    ) -> Result<LinearSolveResult<T>, E> {
+        let LinearSolveResult {
+            iterations,
+            residual_norm,
+            relative_residual,
+            converged,
+            host_sync_count,
+            solver_backend,
+            device_apply_k_count,
+            device_apply_k_attempt_count,
+            accelerator_evidence,
+            solution,
+            solver_method,
+            preconditioner,
+            diagnostics,
+            spectral_estimate,
+        } = self;
+        Ok(LinearSolveResult {
+            iterations,
+            residual_norm,
+            relative_residual,
+            converged,
+            host_sync_count,
+            solver_backend,
+            device_apply_k_count,
+            device_apply_k_attempt_count,
+            accelerator_evidence,
+            solution: map(solution)?,
+            solver_method,
+            preconditioner,
+            diagnostics,
+            spectral_estimate,
+        })
+    }
 }
 
 pub fn solve_linear_system(
@@ -31,497 +105,701 @@ pub fn solve_linear_system(
     preconditioner_kind: SpdPreconditionerKind,
     backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
-) -> LinearSolveResult {
-    let mut effective_backend_kind = backend_kind;
-    let mut runtime_tensor_fallback = false;
-    if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
-        if let Some(result) = solve_linear_system_runtime_tensor(summary, preconditioner_kind) {
-            return result;
-        }
-        effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
-        runtime_tensor_fallback = true;
-    }
+    initial_guess: Option<&[f64]>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    input::solve_structural_system(
+        &input::StructuralLinearSystemView::from(summary),
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+    )
+}
 
-    let has_dofs = summary.dof_count > 0;
+/// Uses the admitted local CPU plan for ordinary, affine-reduced, and multiplier static stiffness
+/// application. Multiplier GMRES propagates scoped execution failure without reporting breakdown.
+pub fn solve_linear_system_with_execution(
+    summary: &AssemblySummary,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    plan: LocalExecutionPlan,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    solve_linear_system_with_execution_admitted(
+        summary,
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+        plan,
+        None,
+        None,
+        None,
+    )
+}
+
+pub(crate) fn solve_linear_system_with_execution_admitted(
+    summary: &AssemblySummary,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    plan: LocalExecutionPlan,
+    admission: Option<&SolverAdmissionResourcePolicy>,
+    planned_reduced_support: Option<&crate::algebra::SparsePattern>,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    input::solve_structural_system_with_execution(
+        &input::StructuralLinearSystemView {
+            planned_reduced_support,
+            ..input::StructuralLinearSystemView::from(summary)
+        },
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+        plan,
+        admission,
+        preparation,
+    )
+}
+
+pub(crate) fn solve_operator_system_scoped(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    _algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    settings: ScopedLinearSolveSettings<'_>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    solve_operator_system_with_settings(
+        operator,
+        preconditioner_kind,
+        backend_kind,
+        initial_guess,
+        settings,
+    )
+}
+
+pub fn solve_operator_system(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    _algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    solve_operator_system_with_settings(
+        operator,
+        preconditioner_kind,
+        backend_kind,
+        initial_guess,
+        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
+    )
+}
+
+fn solve_operator_system_with_settings(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    initial_guess: Option<&[f64]>,
+    settings: ScopedLinearSolveSettings<'_>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    let tol = settings.relative_tolerance;
+    if !tol.is_finite() || tol <= 0.0 {
+        return Ok(rejected_system_result(
+            operator,
+            backend_kind,
+            preconditioner_kind,
+            "FEA_INVALID_SOLVER_TOLERANCE",
+            "relative solver tolerance must be finite and positive".into(),
+        ));
+    }
+    let effective_backend_kind = backend_kind;
+    let has_dofs = operator.dof_count() > 0;
     if !has_dofs {
-        return LinearSolveResult {
+        return Ok(LinearSolveResult {
+            spectral_estimate: None,
             iterations: 0,
             residual_norm: 0.0,
+            relative_residual: None,
             converged: false,
             host_sync_count: 0,
-            solver_backend: effective_backend_kind.as_str().to_string(),
+            solver_backend: effective_backend_kind,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
+            accelerator_evidence: None,
             solution: Vec::new(),
-            solver_method: "matrix_free_pcg".to_string(),
-            preconditioner: preconditioner_kind.as_str().to_string(),
+            solver_method: admission::requested_provenance(preconditioner_kind).0,
+            preconditioner: admission::requested_provenance(preconditioner_kind).1,
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
                 message: "linear solve skipped because assembled system has zero DOFs".to_string(),
             }],
-        };
+        });
     }
 
-    let tol = 1.0e-8;
-    let mut initial_diagnostics = Vec::new();
-    if runtime_tensor_fallback {
-        initial_diagnostics.push(FeaDiagnostic {
-            code: "FEA_RUNTIME_TENSOR_FALLBACK".to_string(),
+    let plan = settings.plan;
+    let reuse = settings.preparation;
+    // The coercivity proof factors the operator; run it on the admitted plan.
+    let preparation = shared_sparse::with_plan(plan, move || {
+        operator.prepare_linear_with_reuse(reuse, settings.admission)
+    });
+    let prepared = match preparation {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return Ok(invalid_system_result(
+                operator,
+                effective_backend_kind,
+                preconditioner_kind,
+                error,
+            ))
+        }
+    };
+    solve_prepared_operator_system(
+        operator,
+        preconditioner_kind,
+        backend_kind,
+        initial_guess,
+        PreparedSolveSettings {
+            plan,
+            admission: settings.admission,
+            relative_tolerance: tol,
+        },
+        prepared,
+    )
+}
+
+/// The owned browser path awaits the exact symbolic factor grant before numerical
+/// factorization. The resulting prepared system enters the same solver as the sync path.
+pub(crate) async fn solve_operator_system_with_settings_owned<O, F, A>(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    initial_guess: Option<&[f64]>,
+    settings: ScopedLinearSolveSettings<'_>,
+    mut before_factor: O,
+) -> Result<LinearSolveResult, crate::algebra::coercivity::NumericalCapacityError<FeaRunError, A>>
+where
+    O: FnMut(
+        crate::algebra::coercivity::NumericalCapacityPhase,
+        runmat_simulation_usage::OperationCount,
+    ) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+{
+    use crate::algebra::coercivity::NumericalCapacityError;
+    let tol = settings.relative_tolerance;
+    if !tol.is_finite() || tol <= 0.0 || operator.dof_count() == 0 {
+        return solve_operator_system_with_settings(
+            operator,
+            preconditioner_kind,
+            backend_kind,
+            initial_guess,
+            settings,
+        )
+        .map_err(|error| NumericalCapacityError::Numerical(scoped_solve_error(error)));
+    }
+    let plan = settings.plan;
+    let admission = settings.admission;
+    let prepared = match operator
+        .prepare_linear_with_reuse_owned(settings.preparation, admission, &mut before_factor)
+        .await
+    {
+        Ok(prepared) => prepared,
+        Err(NumericalCapacityError::Numerical(error)) => {
+            return Ok(invalid_system_result(
+                operator,
+                backend_kind,
+                preconditioner_kind,
+                error,
+            ));
+        }
+        Err(NumericalCapacityError::Admission(error)) => {
+            return Err(NumericalCapacityError::Admission(error));
+        }
+    };
+    solve_prepared_operator_system_owned(
+        operator,
+        preconditioner_kind,
+        backend_kind,
+        initial_guess,
+        PreparedSolveSettings {
+            plan,
+            admission,
+            relative_tolerance: tol,
+        },
+        prepared,
+        before_factor,
+    )
+    .await
+}
+
+fn scoped_solve_error(error: ScopedSpmvError) -> FeaRunError {
+    match error {
+        ScopedSpmvError::Usage(cause) => FeaRunError::Usage(cause),
+        other => FeaRunError::Solve(other.to_string()),
+    }
+}
+
+async fn solve_prepared_operator_system_owned<O, F, A>(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    initial_guess: Option<&[f64]>,
+    settings: PreparedSolveSettings<'_>,
+    prepared: crate::algebra::PreparedRealLinearSystem,
+    before_capacity: O,
+) -> Result<LinearSolveResult, crate::algebra::coercivity::NumericalCapacityError<FeaRunError, A>>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+{
+    use crate::algebra::coercivity::NumericalCapacityError;
+    let PreparedSolveSettings {
+        admission,
+        relative_tolerance: tol,
+        ..
+    } = settings;
+    if let Some(admission) = admission {
+        if !prepared
+            .admissibility()
+            .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()))
+        {
+            return Ok(rejected_system_result(
+                operator,
+                backend_kind,
+                preconditioner_kind,
+                "FEA_SOLVER_WORK_EXCEEDS_ADMISSION",
+                "exact prepared-solver work exceeds the admitted resource envelope".into(),
+            ));
+        }
+    }
+    if let Err(error) = validate_prepared_solver_compatibility(
+        &prepared,
+        RealSolver::ConjugateGradient,
+        match preconditioner_kind {
+            SpdPreconditionerKind::Jacobi => RealPreconditioner::Jacobi,
+            SpdPreconditionerKind::Ilu0 => RealPreconditioner::Ilu0,
+            _ => RealPreconditioner::None,
+        },
+    ) {
+        return Ok(incompatible_system_result(
+            operator,
+            backend_kind,
+            preconditioner_kind,
+            error,
+        ));
+    }
+    let factor = prepared
+        .admissibility()
+        .and_then(|evidence| evidence.factor())
+        .map(|factor| factor.0.clone());
+    let strategy = shared_sparse::resolve_spd_strategy(
+        preconditioner_kind,
+        prepared.dof_count(),
+        prepared.matrix().values().len(),
+        1,
+        factor.is_some(),
+    );
+    if backend_kind != LinearAlgebraBackendKind::CpuReference {
+        return Err(NumericalCapacityError::Numerical(FeaRunError::Solve(
+            "awaited structural solve requires the CPU reference backend".into(),
+        )));
+    }
+    let b = prepared.rhs();
+    let mut x = match initial_guess {
+        Some(values)
+            if values.len() == operator.dof_count()
+                && values.iter().all(|value| value.is_finite()) =>
+        {
+            values.to_vec()
+        }
+        Some(_) => {
+            return Ok(rejected_system_result(
+                operator,
+                backend_kind,
+                preconditioner_kind,
+                "FEA_INVALID_INITIAL_GUESS",
+                "initial guess must contain one finite value per solver DOF".into(),
+            ))
+        }
+        None => vec![0.0; operator.dof_count()],
+    };
+    for (index, constrained) in prepared.constrained_dofs().iter().copied().enumerate() {
+        if constrained {
+            x[index] = b[index];
+        }
+    }
+    let arrays = shared_sparse::CsrArrays::of(prepared.matrix());
+    let outcome = match strategy {
+        shared_sparse::SpdStrategy::Cholesky => {
+            let factor = factor.as_ref().ok_or_else(|| {
+                NumericalCapacityError::Numerical(FeaRunError::Solve(
+                    "awaited direct solve requires the coercivity-proving factor".into(),
+                ))
+            })?;
+            shared_sparse::solve_cholesky_with_owner(
+                arrays.view(),
+                b,
+                Some(&x),
+                tol,
+                Some(factor.as_ref()),
+                before_capacity,
+            )
+            .await
+            .map_err(|error| error.map_numerical(FeaRunError::Usage))?
+        }
+        shared_sparse::SpdStrategy::Pcg(
+            choice @ (runmat_sparse_solvers::policy::PreconditionerChoice::Jacobi
+            | runmat_sparse_solvers::policy::PreconditionerChoice::Ilu0
+            | runmat_sparse_solvers::policy::PreconditionerChoice::Amg),
+        ) => shared_sparse::solve_pcg_with_owner(
+            arrays.view(),
+            b,
+            Some(&x),
+            tol,
+            choice,
+            before_capacity,
+        )
+        .await
+        .map_err(|error| {
+            error.map_numerical(|error| match error {
+                runmat_sparse_solvers::SolverError::Usage(cause) => FeaRunError::Usage(cause),
+                other => FeaRunError::Solve(other.to_string()),
+            })
+        })?,
+        _ => {
+            return Err(NumericalCapacityError::Numerical(FeaRunError::Solve(
+                "awaited PCG preconditioner has no resumable reference-work owner".into(),
+            )))
+        }
+    };
+    let (solver_method, preconditioner) = strategy.provenance();
+    let mut diagnostics = vec![SuccessfulDiagnostic::CpuMethod(strategy).diagnostic()];
+    if outcome.cancelled {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_CANCELLED".to_string(),
             severity: FeaDiagnosticSeverity::Warning,
-            message: "runtime-tensor backend unavailable for current provider; fell back to cpu_reference solver"
+            message: "linear solve cancelled".to_string(),
+        });
+    } else if !outcome.converged {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_CG_NOT_CONVERGED".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: format!(
+                "{} did not reach tolerance {tol}: {}",
+                strategy.label(),
+                outcome
+                    .failure
+                    .as_deref()
+                    .unwrap_or("residual above tolerance")
+            ),
+        });
+    }
+    Ok(LinearSolveResult {
+        spectral_estimate: outcome.spectral_estimate,
+        iterations: outcome.iterations,
+        residual_norm: outcome.residual_norm,
+        relative_residual: crate::solve::convergence::relative_residual(
+            outcome.residual_norm,
+            outcome.reference_norm,
+        ),
+        converged: outcome.converged && !outcome.cancelled,
+        host_sync_count: 0,
+        solver_backend: backend_kind,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
+        solution: outcome.solution,
+        solver_method,
+        preconditioner,
+        diagnostics,
+    })
+}
+
+fn solve_prepared_operator_system(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    initial_guess: Option<&[f64]>,
+    settings: PreparedSolveSettings<'_>,
+    prepared: crate::algebra::PreparedRealLinearSystem,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    let PreparedSolveSettings {
+        plan,
+        admission,
+        relative_tolerance: tol,
+    } = settings;
+    let mut effective_backend_kind = backend_kind;
+    let mut accelerator_fallback = false;
+    if let Some(admission) = admission {
+        let accepted = prepared
+            .admissibility()
+            .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()));
+        if !accepted {
+            return Ok(rejected_system_result(
+                operator,
+                effective_backend_kind,
+                preconditioner_kind,
+                "FEA_SOLVER_WORK_EXCEEDS_ADMISSION",
+                "exact prepared-solver work exceeds the admitted resource envelope".into(),
+            ));
+        }
+    }
+    if let Err(error) = validate_prepared_solver_compatibility(
+        &prepared,
+        RealSolver::ConjugateGradient,
+        match preconditioner_kind {
+            SpdPreconditionerKind::Jacobi => RealPreconditioner::Jacobi,
+            SpdPreconditionerKind::Ilu0 => RealPreconditioner::Ilu0,
+            SpdPreconditionerKind::Auto
+            | SpdPreconditionerKind::Direct
+            | SpdPreconditionerKind::Amg => RealPreconditioner::None,
+        },
+    ) {
+        return Ok(incompatible_system_result(
+            operator,
+            effective_backend_kind,
+            preconditioner_kind,
+            error,
+        ));
+    }
+    // Compatibility is a solver-independent admission boundary. A runtime provider must never
+    // receive a system that the reference path would reject, and provider fallback must not alter
+    // that decision.
+    // One canonical SPD path: the shared sparse layer solves with the coercivity-proving
+    // Cholesky factor when one exists, otherwise with the policy's strategy.
+    let factor = prepared
+        .admissibility()
+        .and_then(|evidence| evidence.factor())
+        .map(|factor| factor.0.clone());
+    let strategy = shared_sparse::resolve_spd_strategy(
+        preconditioner_kind,
+        prepared.dof_count(),
+        prepared.matrix().values().len(),
+        1,
+        factor.is_some(),
+    );
+    // A multigrid strategy on an accelerator runs mixed precision: host hierarchy, device inner
+    // CG, host f64 flexible CG with the f64 true-residual certificate. Other strategies use the
+    // provider's resident Jacobi CG.
+    let device = shared_sparse::multigrid_device(backend_kind, strategy);
+    if backend_kind == LinearAlgebraBackendKind::Accelerator && device.is_none() {
+        let maximum_iterations = accelerator_iteration_limit(operator, 64);
+        match prepare_accelerator_linear_system(prepared.clone(), maximum_iterations).and_then(
+            |accelerator| {
+                solve_prepared_accelerator_system(&accelerator, prepared.rhs(), initial_guess, tol)
+            },
+        ) {
+            Ok(output) => {
+                // The provider path is Jacobi-preconditioned CG.
+                return Ok(linear_result_from_accelerator_output(
+                    output,
+                    SpdPreconditionerKind::Jacobi,
+                ));
+            }
+            Err(error) if error.permits_cpu_fallback() => {
+                effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
+                accelerator_fallback = true;
+            }
+            Err(error) => {
+                return Ok(linear_result_from_accelerator_error(
+                    operator.dof_count(),
+                    operator.load(),
+                    SpdPreconditionerKind::Jacobi,
+                    error,
+                ))
+            }
+        }
+    }
+    let mut initial_diagnostics = Vec::new();
+    if accelerator_fallback {
+        initial_diagnostics.push(SuccessfulDiagnostic::AdmissionFallback.diagnostic());
+    }
+    let b = prepared.rhs();
+    let mut x = match initial_guess {
+        Some(values)
+            if values.len() == operator.dof_count()
+                && values.iter().all(|value| value.is_finite()) =>
+        {
+            values.to_vec()
+        }
+        Some(_) => {
+            return Ok(rejected_system_result(
+                operator,
+                effective_backend_kind,
+                preconditioner_kind,
+                "FEA_INVALID_INITIAL_GUESS",
+                "initial guess must contain one finite value per solver DOF".to_string(),
+            ))
+        }
+        None => vec![0.0; operator.dof_count()],
+    };
+    for (index, constrained) in prepared.constrained_dofs().iter().copied().enumerate() {
+        if constrained {
+            x[index] = b[index];
+        }
+    }
+    let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
+        matrix: prepared.matrix(),
+        rhs: b,
+        initial_guess: Some(&x),
+        relative_tolerance: tol,
+        plan,
+        strategy,
+        block_size: 1,
+        factor: factor.as_deref(),
+        device,
+    })
+    .map_err(ScopedSpmvError::Usage)?;
+    let mut diagnostics = initial_diagnostics;
+    diagnostics.push(SuccessfulDiagnostic::CpuMethod(strategy).diagnostic());
+    if outcome.device_preconditioner {
+        effective_backend_kind = LinearAlgebraBackendKind::Accelerator;
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_DEVICE_PRECONDITIONER".to_string(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "solver=flexible_cg preconditioner=device_amg_inner_cg inner_steps={} inner_precision=f32 outer_precision=f64",
+                shared_sparse::DEVICE_INNER_CG_STEPS
+            ),
+        });
+    } else if device.is_some() {
+        // The provider could not hold the hierarchy: the host multigrid ran instead.
+        effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
+        diagnostics.push(SuccessfulDiagnostic::AdmissionFallback.diagnostic());
+    }
+    if outcome.cancelled {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_CANCELLED".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: "linear solve cancelled".to_string(),
+        });
+    } else if !outcome.converged {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_CG_NOT_CONVERGED".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: format!(
+                "{} did not reach tolerance {tol}: {}",
+                strategy.label(),
+                outcome
+                    .failure
+                    .as_deref()
+                    .unwrap_or("residual above tolerance"),
+            ),
+        });
+    }
+    let (solver_method, preconditioner) = strategy.provenance();
+    Ok(LinearSolveResult {
+        spectral_estimate: outcome.spectral_estimate,
+        iterations: outcome.iterations,
+        residual_norm: outcome.residual_norm,
+        relative_residual: crate::solve::convergence::relative_residual(
+            outcome.residual_norm,
+            outcome.reference_norm,
+        ),
+        converged: outcome.converged && !outcome.cancelled,
+        host_sync_count: 0,
+        solver_backend: effective_backend_kind,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
+        solution: outcome.solution,
+        solver_method,
+        preconditioner,
+        diagnostics,
+    })
+}
+
+pub(crate) fn linear_result_from_accelerator_output(
+    output: crate::solve::accelerator::AcceleratorSolveOutput,
+    preconditioner_kind: SpdPreconditionerKind,
+) -> LinearSolveResult {
+    let provider_evidence = output.evidence.provider();
+    let host_sync_count = provider_evidence.host_synchronizations.saturating_add(1);
+    let device_apply_k_count = u32::try_from(provider_evidence.spmv_dispatches).unwrap_or(u32::MAX);
+    let mut diagnostics =
+        vec![SuccessfulDiagnostic::AcceleratorMethod(preconditioner_kind).diagnostic()];
+    if !output.converged {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_ACCELERATOR_TOLERANCE_NOT_SATISFIED".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: "native sparse solve did not satisfy the independently recomputed residual tolerance"
                 .to_string(),
         });
     }
-    if let Some(dense) = dense_stiffness(&summary.operator) {
-        match solve_dense_direct(summary, dense) {
-            Ok(solution) => {
-                let b = &summary.operator.rhs;
-                let residual = algebra_backend.vec_sub(b, &apply_k(&summary.operator, &solution));
-                let residual_norm = algebra_backend.dot(&residual, &residual).sqrt();
-                let b_norm = algebra_backend.dot(b, b).sqrt().max(1.0);
-                let converged = residual_norm / b_norm <= tol;
-                let mut diagnostics = initial_diagnostics;
-                diagnostics.push(FeaDiagnostic {
-                    code: "FEA_SOLVER_METHOD".to_string(),
-                    severity: FeaDiagnosticSeverity::Info,
-                    message:
-                        "solver=dense_direct factorization=gaussian_partial_pivot matrix_free=false"
-                            .to_string(),
-                });
-                if !converged {
-                    diagnostics.push(FeaDiagnostic {
-                        code: "FEA_DENSE_DIRECT_RESIDUAL".to_string(),
-                        severity: FeaDiagnosticSeverity::Warning,
-                        message: format!(
-                            "dense direct solve residual_norm={residual_norm} relative_residual={}",
-                            residual_norm / b_norm
-                        ),
-                    });
-                }
-                return LinearSolveResult {
-                    iterations: 1,
-                    residual_norm,
-                    converged,
-                    host_sync_count: 0,
-                    solver_backend: effective_backend_kind.as_str().to_string(),
-                    device_apply_k_count: 0,
-                    device_apply_k_attempt_count: 0,
-                    solution,
-                    solver_method: "dense_direct".to_string(),
-                    preconditioner: "none".to_string(),
-                    diagnostics,
-                };
-            }
-            Err(message) => {
-                initial_diagnostics.push(FeaDiagnostic {
-                    code: "FEA_DENSE_DIRECT_FALLBACK".to_string(),
-                    severity: FeaDiagnosticSeverity::Warning,
-                    message,
-                });
-            }
-        }
-    }
-
-    let tuned_preconditioner_kind = graph_tuned_preconditioner(summary, preconditioner_kind);
-    let max_iters = graph_tuned_max_iters(summary, 64);
-    let preconditioner = build_spd_preconditioner(summary, tuned_preconditioner_kind);
-    let traversal_order = graph_solver_traversal_order(summary);
-    let b = &summary.operator.rhs;
-    let mut x = vec![0.0; summary.dof_count];
-
-    let mut r = algebra_backend.vec_sub(b, &apply_k(&summary.operator, &x));
-    let mut z = preconditioner.apply(&r);
-    let mut p = z.clone();
-    let mut rz_old = algebra_backend.dot(&r, &z);
-    let b_norm = algebra_backend.dot(b, b).sqrt().max(1.0);
-
-    let mut diagnostics = initial_diagnostics;
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_SOLVER_METHOD".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "solver=pcg preconditioner={} matrix_free=true",
-            preconditioner.kind().as_str()
-        ),
-    });
-    if tuned_preconditioner_kind != preconditioner_kind {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_GRAPH_PRECONDITIONER_TUNING".to_string(),
-            severity: FeaDiagnosticSeverity::Info,
-            message: format!(
-                "requested_preconditioner={} tuned_preconditioner={}",
-                preconditioner_kind.as_str(),
-                tuned_preconditioner_kind.as_str()
-            ),
-        });
-    }
-
-    if algebra_backend.dot(&r, &r).sqrt() / b_norm <= tol {
-        return LinearSolveResult {
-            iterations: 0,
-            residual_norm: algebra_backend.dot(&r, &r).sqrt(),
-            converged: true,
-            host_sync_count: 0,
-            solver_backend: effective_backend_kind.as_str().to_string(),
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            solution: x,
-            solver_method: "matrix_free_pcg".to_string(),
-            preconditioner: preconditioner.kind().as_str().to_string(),
-            diagnostics,
-        };
-    }
-
-    let mut iterations = 0u32;
-    let mut converged = false;
-    for _ in 0..max_iters {
-        let ap = apply_k(&summary.operator, &p);
-        let denom = algebra_backend.dot(&p, &ap);
-        if denom.abs() <= 1.0e-18 {
-            break;
-        }
-        let alpha = rz_old / denom;
-        algebra_backend.axpy(alpha, &p, &mut x);
-        algebra_backend.axpy(-alpha, &ap, &mut r);
-        let residual_norm = algebra_backend.dot(&r, &r).sqrt();
-        iterations += 1;
-        if residual_norm / b_norm <= tol {
-            converged = true;
-            break;
-        }
-
-        z = preconditioner.apply(&r);
-        let rz_new = algebra_backend.dot(&r, &z);
-        if rz_old.abs() <= 1.0e-18 {
-            break;
-        }
-        let beta = rz_new / rz_old;
-        for i in &traversal_order {
-            p[*i] = z[*i] + beta * p[*i];
-        }
-        rz_old = rz_new;
-    }
-
-    let residual_norm = algebra_backend.dot(&r, &r).sqrt();
-    if !converged {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_CG_MAX_ITERS".to_string(),
-            severity: FeaDiagnosticSeverity::Warning,
-            message: format!(
-                "matrix-free cg reached max iterations ({max_iters}) with residual_norm={residual_norm}"
-            ),
-        });
-    }
-
     LinearSolveResult {
-        iterations,
-        residual_norm,
-        converged,
-        host_sync_count: 0,
-        solver_backend: effective_backend_kind.as_str().to_string(),
-        device_apply_k_count: 0,
-        device_apply_k_attempt_count: 0,
-        solution: x,
-        solver_method: "matrix_free_pcg".to_string(),
-        preconditioner: preconditioner.kind().as_str().to_string(),
+        spectral_estimate: None,
+        iterations: output.iterations,
+        residual_norm: output
+            .evidence
+            .independent_residual_norm()
+            .expect("completed accelerator evidence has a residual"),
+        relative_residual: output.evidence.independent_relative_residual(),
+        converged: output.converged,
+        host_sync_count,
+        solver_backend: LinearAlgebraBackendKind::Accelerator,
+        device_apply_k_count,
+        device_apply_k_attempt_count: device_apply_k_count,
+        accelerator_evidence: Some(output.evidence),
+        solution: output.solution,
+        solver_method: SolverMethod::AssembledPcg,
+        preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
         diagnostics,
     }
 }
 
-fn solve_dense_direct(summary: &AssemblySummary, dense: &[f64]) -> Result<Vec<f64>, String> {
-    let n = summary.dof_count;
-    if dense.len() != n.saturating_mul(n) || summary.operator.rhs.len() != n {
-        return Err(
-            "dense direct solve skipped because matrix or rhs dimensions are invalid".to_string(),
-        );
-    }
-    let free_dofs = (0..n)
-        .filter(|idx| !summary.operator.constrained[*idx])
-        .collect::<Vec<_>>();
-    let mut x = vec![0.0_f64; n];
-    for (row, value) in x.iter_mut().enumerate().take(n) {
-        if summary.operator.constrained[row] {
-            *value = summary.operator.rhs[row];
-        }
-    }
-    if free_dofs.is_empty() {
-        return Ok(x);
-    }
-
-    let free_n = free_dofs.len();
-    let mut a = vec![0.0_f64; free_n * free_n];
-    let mut b = vec![0.0_f64; free_n];
-    for (local_row, &global_row) in free_dofs.iter().enumerate() {
-        b[local_row] = summary.operator.rhs[global_row];
-        for (local_col, &global_col) in free_dofs.iter().enumerate() {
-            a[local_row * free_n + local_col] = dense[global_row * n + global_col];
-        }
-    }
-
-    let mut free_solution = solve_dense_square(&a, &b)?;
-    for _ in 0..3 {
-        let residual = dense_residual(&a, &free_solution, &b);
-        let residual_norm = residual
+pub(crate) fn linear_result_from_accelerator_error(
+    dof_count: usize,
+    right_hand_side: &[f64],
+    preconditioner_kind: SpdPreconditionerKind,
+    error: crate::solve::accelerator::AcceleratorAdapterError,
+) -> LinearSolveResult {
+    let terminal = error.phase;
+    LinearSolveResult {
+        spectral_estimate: None,
+        iterations: 0,
+        residual_norm: right_hand_side
             .iter()
             .map(|value| value * value)
             .sum::<f64>()
-            .sqrt();
-        let rhs_norm = b
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt()
-            .max(1.0);
-        if residual_norm / rhs_norm <= 1.0e-10 {
-            break;
-        }
-        let correction = solve_dense_square(&a, &residual)?;
-        for (value, delta) in free_solution.iter_mut().zip(correction) {
-            *value += delta;
-        }
-    }
-
-    for (local, &global) in free_dofs.iter().enumerate() {
-        x[global] = free_solution[local];
-        if !x[global].is_finite() {
-            return Err(format!(
-                "dense direct solve skipped because solution component {global} is non-finite"
-            ));
-        }
-    }
-    Ok(x)
-}
-
-fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, String> {
-    let n = b.len();
-    if a.len() != n.saturating_mul(n) {
-        return Err(
-            "dense direct solve skipped because matrix or rhs dimensions are invalid".to_string(),
-        );
-    }
-    let mut a = a.to_vec();
-    let mut b = b.to_vec();
-    let row_scales = (0..n)
-        .map(|row| {
-            (0..n)
-                .map(|col| a[row * n + col].abs())
-                .fold(0.0_f64, f64::max)
-        })
-        .collect::<Vec<_>>();
-
-    for pivot in 0..n {
-        let mut pivot_row = pivot;
-        let mut pivot_score = scaled_pivot_score(&a, &row_scales, n, pivot, pivot);
-        for row in (pivot + 1)..n {
-            let candidate_score = scaled_pivot_score(&a, &row_scales, n, row, pivot);
-            if candidate_score > pivot_score {
-                pivot_score = candidate_score;
-                pivot_row = row;
+            .sqrt(),
+        relative_residual: None,
+        converged: false,
+        host_sync_count: error
+            .evidence
+            .as_ref()
+            .map_or(0, |evidence| evidence.provider().host_synchronizations),
+        solver_backend: LinearAlgebraBackendKind::Accelerator,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: error.evidence.map(|evidence| *evidence),
+        solution: vec![0.0; dof_count],
+        solver_method: SolverMethod::AssembledPcg,
+        preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
+        diagnostics: vec![FeaDiagnostic {
+            code: match terminal {
+                crate::solve::accelerator::AcceleratorAdapterPhase::Cancellation => {
+                    "FEA_SOLVER_CANCELLED"
+                }
+                crate::solve::accelerator::AcceleratorAdapterPhase::ProviderLoss => {
+                    "FEA_ACCELERATOR_PROVIDER_LOST"
+                }
+                _ => "FEA_ACCELERATOR_SOLVE_FAILED",
             }
-        }
-        let pivot_abs = a[pivot_row * n + pivot].abs();
-        if pivot_abs <= 1.0e-18 || !pivot_abs.is_finite() || !pivot_score.is_finite() {
-            return Err(format!(
-                "dense direct solve skipped because pivot {pivot} is singular or non-finite"
-            ));
-        }
-        if pivot_row != pivot {
-            for col in 0..n {
-                a.swap(pivot * n + col, pivot_row * n + col);
-            }
-            b.swap(pivot, pivot_row);
-        }
-
-        for row in (pivot + 1)..n {
-            let factor = a[row * n + pivot] / a[pivot * n + pivot];
-            if factor == 0.0 {
-                continue;
-            }
-            a[row * n + pivot] = 0.0;
-            for col in (pivot + 1)..n {
-                a[row * n + col] -= factor * a[pivot * n + col];
-            }
-            b[row] -= factor * b[pivot];
-        }
+            .to_string(),
+            severity: match terminal {
+                crate::solve::accelerator::AcceleratorAdapterPhase::Cancellation => {
+                    FeaDiagnosticSeverity::Warning
+                }
+                _ => FeaDiagnosticSeverity::Error,
+            },
+            message: error.message,
+        }],
     }
-
-    let mut x = vec![0.0_f64; n];
-    for row in (0..n).rev() {
-        let mut rhs = b[row];
-        for col in (row + 1)..n {
-            rhs -= a[row * n + col] * x[col];
-        }
-        let diag = a[row * n + row];
-        if diag.abs() <= 1.0e-18 || !diag.is_finite() {
-            return Err(format!(
-                "dense direct solve skipped because diagonal {row} is singular or non-finite"
-            ));
-        }
-        x[row] = rhs / diag;
-        if !x[row].is_finite() {
-            return Err(format!(
-                "dense direct solve skipped because solution component {row} is non-finite"
-            ));
-        }
-    }
-    Ok(x)
-}
-
-fn scaled_pivot_score(a: &[f64], row_scales: &[f64], n: usize, row: usize, col: usize) -> f64 {
-    let scale = row_scales[row].max(1.0e-30);
-    a[row * n + col].abs() / scale
-}
-
-fn dense_residual(a: &[f64], x: &[f64], b: &[f64]) -> Vec<f64> {
-    let n = b.len();
-    let mut residual = b.to_vec();
-    for row in 0..n {
-        let ax = (0..n).map(|col| a[row * n + col] * x[col]).sum::<f64>();
-        residual[row] -= ax;
-    }
-    residual
-}
-
-fn graph_tuned_preconditioner(
-    summary: &AssemblySummary,
-    requested: SpdPreconditionerKind,
-) -> SpdPreconditionerKind {
-    if dense_stiffness(&summary.operator).is_some() || csr_stiffness(&summary.operator).is_some() {
-        return SpdPreconditionerKind::Jacobi;
-    }
-    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
-        if graph.recommend_ilu0 {
-            return SpdPreconditionerKind::Ilu0;
-        }
-    }
-    requested
-}
-
-fn graph_tuned_max_iters(summary: &AssemblySummary, base_max_iters: usize) -> usize {
-    if dense_stiffness(&summary.operator).is_some() || csr_stiffness(&summary.operator).is_some() {
-        return base_max_iters
-            .max(summary.dof_count.saturating_mul(2))
-            .max(256);
-    }
-    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
-        if graph.ordering_reduction_ratio > 0.15 {
-            return ((base_max_iters as f64) * 0.85).round() as usize;
-        }
-        if graph.connected_component_count > 8 {
-            return ((base_max_iters as f64) * 1.1).round() as usize;
-        }
-    }
-    base_max_iters
-}
-
-fn graph_solver_traversal_order(summary: &AssemblySummary) -> Vec<usize> {
-    let mut order = (0..summary.dof_count).collect::<Vec<_>>();
-    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
-        let seed = graph.ordering_fingerprint;
-        order.sort_by_key(|idx| {
-            let mut hash = seed ^ ((*idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
-            hash ^= hash >> 33;
-            hash = hash.wrapping_mul(0xff51afd7ed558ccd);
-            hash
-        });
-    }
-    order
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        assembly::{AssemblySummary, StructuralMaterialSummary},
-        operator::OperatorSystem,
-        solve::backend::cpu_reference::CpuReferenceBackend,
-    };
-
-    fn dense_summary(dof_count: usize) -> AssemblySummary {
-        AssemblySummary {
-            dof_count,
-            structural_node_count: dof_count / 3,
-            structural_translational_dof_count: dof_count,
-            structural_rotational_dof_count: 0,
-            structural_rotation_node_count: 0,
-            structural_moment_load_count: 0,
-            structural_direct_rotational_moment_load_count: 0,
-            structural_wrench_lowering: Vec::new(),
-            structural_rotational_constraint_count: 0,
-            structural_beam_element_count: 0,
-            structural_shell_element_count: 0,
-            structural_solid_element_count: dof_count / 12,
-            structural_solid_recovery: Vec::new(),
-            structural_dof_layout: Default::default(),
-            structural_beam_recovery: Vec::new(),
-            structural_shell_recovery: Vec::new(),
-            constrained_dof_count: 0,
-            load_count: 1,
-            structural_material: StructuralMaterialSummary {
-                youngs_modulus_pa: 1.0,
-                poisson_ratio: 0.3,
-                density_kg_per_m3: 1.0,
-                lame_lambda_pa: 1.0,
-                shear_modulus_pa: 1.0,
-            },
-            prep_assembly: None,
-            prep_operator_topology: None,
-            prep_region_topology: None,
-            prep_element_assembly: None,
-            prep_element_connectivity: None,
-            prep_graph_assembly: None,
-            prep_recovery_edges: Vec::new(),
-            prep_calibration: None,
-            prep_acceptance: None,
-            prep_coordinates: None,
-            thermo_mechanical: None,
-            electro_thermal: None,
-            operator: OperatorSystem {
-                dof_count,
-                constrained: vec![false; dof_count],
-                stiffness_dense: Some(vec![0.0; dof_count * dof_count]),
-                stiffness_csr: None,
-                stiffness_diag: vec![1.0; dof_count],
-                stiffness_upper: vec![0.0; dof_count.saturating_sub(1)],
-                mass_diag: vec![1.0; dof_count],
-                damping_diag: vec![0.0; dof_count],
-                rhs: vec![1.0; dof_count],
-            },
-        }
-    }
-
-    #[test]
-    fn dense_stiffness_max_iterations_scale_with_dof_count() {
-        let summary = dense_summary(144);
-
-        assert_eq!(graph_tuned_max_iters(&summary, 64), 288);
-    }
-
-    #[test]
-    fn dense_stiffness_uses_direct_solver() {
-        let mut summary = dense_summary(2);
-        summary.operator.stiffness_dense = Some(vec![4.0, 1.0, 1.0, 3.0]);
-        summary.operator.stiffness_diag = vec![4.0, 3.0];
-        summary.operator.rhs = vec![1.0, 2.0];
-        let backend = CpuReferenceBackend;
-
-        let result = solve_linear_system(
-            &summary,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &backend,
-        );
-
-        assert!(result.converged);
-        assert_eq!(result.solver_method, "dense_direct");
-        assert_eq!(result.preconditioner, "none");
-        assert!((result.solution[0] - 1.0 / 11.0).abs() <= 1.0e-12);
-        assert!((result.solution[1] - 7.0 / 11.0).abs() <= 1.0e-12);
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "FEA_SOLVER_METHOD"
-                && diag.message.contains("solver=dense_direct")));
-    }
-}
+#[path = "linear/tests.rs"]
+mod tests;

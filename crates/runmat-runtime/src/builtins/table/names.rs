@@ -20,18 +20,15 @@ pub(super) fn validate_variable_names(names: &[String]) -> BuiltinResult<()> {
     }
     let mut used = HashSet::new();
     for name in names {
-        let trimmed = name.trim();
-        if trimmed.is_empty() {
+        if name.is_empty() {
             return Err(invalid_variable("table: variable names must not be blank"));
         }
-        let valid = trimmed == name && make_valid_variable_name(name, 1) == name.as_str();
-        if !valid {
+        if is_reserved_table_name(name) {
             return Err(invalid_variable(format!(
-                "table: invalid variable name '{name}'"
+                "table: reserved variable name '{name}'"
             )));
         }
-        let key = name.to_ascii_lowercase();
-        if !used.insert(key) {
+        if !used.insert(name.as_str()) {
             return Err(invalid_variable(format!(
                 "table: duplicate variable name '{name}'"
             )));
@@ -128,7 +125,7 @@ fn validate_nonempty_distinct_names(
 ) -> BuiltinResult<()> {
     let mut used = HashSet::new();
     for name in names {
-        if name.trim().is_empty() {
+        if name.is_empty() {
             return Err(invalid_variable(format!(
                 "{context}: {kind} names must not be empty"
             )));
@@ -165,18 +162,18 @@ pub(super) fn make_unique_names(names: Vec<String>) -> Vec<String> {
     let mut used = HashSet::new();
     let mut out = Vec::with_capacity(names.len());
     for (idx, name) in names.into_iter().enumerate() {
-        let base = if name.trim().is_empty() {
+        let base = if name.is_empty() {
             format!("Var{}", idx + 1)
         } else {
-            name.trim().to_string()
+            name
         };
         let mut candidate = base.clone();
         let mut suffix = 1usize;
-        while used.contains(&candidate.to_ascii_lowercase()) {
+        while used.contains(&candidate) {
             suffix += 1;
             candidate = format!("{base}_{suffix}");
         }
-        used.insert(candidate.to_ascii_lowercase());
+        used.insert(candidate.clone());
         out.push(candidate);
     }
     out

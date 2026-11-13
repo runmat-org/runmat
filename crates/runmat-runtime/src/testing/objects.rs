@@ -1,35 +1,59 @@
 use runmat_test::descriptor::{FixtureDescriptor, TestDescriptor};
 use runmat_test::result::{Diagnostic, TestResult};
-use runmat_value::{ObjectArray, ObjectInstance, Value};
+use runmat_value::{ObjectArray, ObjectInstance, UnboundedObjectBuilder, Value};
 
-pub const TEST_CASE_CLASS: &str = "matlab.unittest.TestCase";
-pub const FUNCTION_TEST_CASE_CLASS: &str = "matlab.unittest.FunctionTestCase";
-pub const TEST_SUITE_CLASS: &str = "matlab.unittest.TestSuite";
-pub const TEST_RESULT_CLASS: &str = "matlab.unittest.TestResult";
+mod contextual;
+pub use contextual::{
+    object_array_or_scalar_in_context, object_from_fields_in_context,
+    replace_object_properties_in_context, test_result_object_in_context,
+    test_suite_object_in_context,
+};
+
+pub const TEST_CASE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestCase");
+pub const FUNCTION_TEST_CASE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.FunctionTestCase");
+pub const TEST_SUITE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestSuite");
+pub const TEST_RESULT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestResult");
 
 pub fn test_case_object(name: impl Into<String>, function_based: bool) -> Value {
-    let mut object = ObjectInstance::new(
-        if function_based {
-            FUNCTION_TEST_CASE_CLASS
-        } else {
-            TEST_CASE_CLASS
-        }
-        .into(),
-    );
-    object
-        .properties
-        .insert("Name".into(), Value::String(name.into()));
-    Value::Object(object)
+    let mut object = UnboundedObjectBuilder::new(if function_based {
+        FUNCTION_TEST_CASE_CLASS
+    } else {
+        TEST_CASE_CLASS
+    });
+    object.insert("Name".into(), Value::string(name.into()));
+    Value::Object(object.finish())
+}
+
+/// Retain an original name owner while admitting the final TestCase object.
+/// Any nonempty name backing must already have its own allocation authority.
+pub fn test_case_object_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    name: runmat_value::Utf8Text,
+    function_based: bool,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    let class = if function_based {
+        FUNCTION_TEST_CASE_CLASS
+    } else {
+        TEST_CASE_CLASS
+    };
+    let fields = [("Name", Value::String(name.into()))];
+    crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        class.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
 }
 
 pub fn test_suite_object(test: &TestDescriptor) -> Value {
-    let mut object = ObjectInstance::new(TEST_SUITE_CLASS.into());
-    object
-        .properties
-        .insert("Name".into(), Value::String(test.display_name.clone()));
-    object.properties.insert(
+    let mut object = UnboundedObjectBuilder::new(TEST_SUITE_CLASS);
+    object.insert("Name".into(), Value::string(test.display_name.clone()));
+    object.insert(
         "ProcedureName".into(),
-        Value::String(
+        Value::string(
             test.procedure
                 .display_name
                 .rsplit('/')
@@ -38,44 +62,34 @@ pub fn test_suite_object(test: &TestDescriptor) -> Value {
                 .to_owned(),
         ),
     );
-    object.properties.insert(
+    object.insert(
         "TestFile".into(),
-        Value::String(test.procedure.source.relative_path.clone()),
+        Value::string(test.procedure.source.relative_path.clone()),
     );
-    object.properties.insert(
+    object.insert(
         "Tags".into(),
         Value::StringArray(
             runmat_value::StringArray::new(test.tags.clone(), vec![1, test.tags.len()])
                 .expect("test tags have a valid row shape"),
         ),
     );
-    object.properties.insert(
+    object.insert(
         "__runmat_test_id".into(),
         Value::String(test.id.as_str().into()),
     );
-    Value::Object(object)
+    Value::Object(object.finish())
 }
 
 pub fn test_result_object(name: impl Into<String>, result: &TestResult) -> Value {
-    let mut object = ObjectInstance::new(TEST_RESULT_CLASS.into());
-    object
-        .properties
-        .insert("Name".into(), Value::String(name.into()));
-    object
-        .properties
-        .insert("Passed".into(), Value::Bool(result.state.is_success()));
-    object
-        .properties
-        .insert("Failed".into(), Value::Bool(result.state.failed));
-    object
-        .properties
-        .insert("Incomplete".into(), Value::Bool(result.state.incomplete));
-    object
-        .properties
-        .insert("Flaky".into(), Value::Bool(result.flaky));
-    object.properties.insert(
+    let mut object = UnboundedObjectBuilder::new(TEST_RESULT_CLASS);
+    object.insert("Name".into(), Value::string(name.into()));
+    object.insert("Passed".into(), Value::Bool(result.state.is_success()));
+    object.insert("Failed".into(), Value::Bool(result.state.failed));
+    object.insert("Incomplete".into(), Value::Bool(result.state.incomplete));
+    object.insert("Flaky".into(), Value::Bool(result.flaky));
+    object.insert(
         "Details".into(),
-        Value::String(
+        Value::string(
             result
                 .attempts
                 .last()
@@ -83,45 +97,42 @@ pub fn test_result_object(name: impl Into<String>, result: &TestResult) -> Value
                 .unwrap_or_default(),
         ),
     );
-    object.properties.insert(
+    object.insert(
         "__runmat_test_id".into(),
         Value::String(result.test_id.as_str().into()),
     );
-    Value::Object(object)
+    Value::Object(object.finish())
 }
 
 pub fn fixture_object(fixture: &FixtureDescriptor) -> Value {
-    let mut object = ObjectInstance::new("matlab.unittest.fixtures.Fixture".into());
-    object
-        .properties
-        .insert("Name".into(), Value::String(fixture.display_name.clone()));
-    object.properties.insert(
+    let mut object = UnboundedObjectBuilder::new("matlab.unittest.fixtures.Fixture");
+    object.insert("Name".into(), Value::string(fixture.display_name.clone()));
+    object.insert(
         "__runmat_fixture_id".into(),
         Value::String(fixture.id.as_str().into()),
     );
-    Value::Object(object)
+    Value::Object(object.finish())
 }
 
 pub fn diagnostic_object(diagnostic: &Diagnostic) -> Value {
-    let mut object = ObjectInstance::new("matlab.unittest.diagnostics.Diagnostic".into());
-    object.properties.insert(
+    let mut object = UnboundedObjectBuilder::new("matlab.unittest.diagnostics.Diagnostic");
+    object.insert(
         "Identifier".into(),
-        Value::String(diagnostic.identifier.clone()),
+        Value::string(diagnostic.identifier.clone()),
     );
-    object
-        .properties
-        .insert("Message".into(), Value::String(diagnostic.message.clone()));
-    Value::Object(object)
+    object.insert("Message".into(), Value::string(diagnostic.message.clone()));
+    Value::Object(object.finish())
 }
 
-pub fn plugin_object(class_name: impl Into<String>) -> Value {
+pub fn plugin_object(class_name: impl Into<runmat_types::ClassIdentity>) -> Value {
     Value::Object(ObjectInstance::new(class_name.into()))
 }
 
 pub fn object_array_or_scalar(
-    class_name: impl Into<String>,
+    class_name: impl Into<runmat_types::ClassIdentity>,
     values: Vec<Value>,
 ) -> Result<Value, String> {
+    let class_name: runmat_types::ClassIdentity = class_name.into();
     if values.len() == 1 {
         Ok(values.into_iter().next().expect("one value"))
     } else {

@@ -1,23 +1,26 @@
 //! MATLAB-compatible `strip` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRIP_CHARACTER_SET_EXTENSION, STRIP_DIRECTION_ALIAS_EXTENSION,
+    STRIP_ERROR_ARG_COUNT, STRIP_ERROR_CELL_ELEMENT, STRIP_ERROR_CHARACTERS, STRIP_ERROR_DIRECTION,
+    STRIP_ERROR_INTERNAL, STRIP_ERROR_INVALID_INPUT, STRIP_ERROR_SIZE_MISMATCH,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Value};
+use runmat_value::{
+    CellArray, CharArray, StringArray, StringElement, Utf16CodeUnit, Utf8Text, Value,
+};
 
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_resident_text_input, is_missing_string,
+    contains_resident_text_input, is_missing_string, transform_scalar_borrowed,
+    transform_string_array_borrowed_indexed,
 };
-use crate::builtins::strings::type_resolvers::text_preserve_type;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::RuntimeContext;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strip")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,8 +35,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Executes on the CPU; GPU-resident inputs are gathered to host memory before trimming characters.",
+    notes: "Executes on host text; resident numeric inputs reject before provider access.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::strip")]
@@ -44,186 +46,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
+    notes: "Host text transformation; not eligible for fusion. Resident numeric inputs reject.",
 };
 
 const BUILTIN_NAME: &str = "strip";
 
-const STRIP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Stripped text preserving input container kind and shape.",
-}];
-
-const STRIP_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String/char/cell text input to strip.",
-}];
-
-const STRIP_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String/char/cell text input to strip.",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"both\""),
-        description: "Direction (`\"left\"|\"right\"|\"both\"`, plus leading/trailing synonyms).",
-    },
-];
-
-const STRIP_INPUTS_CHARACTERS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String/char/cell text input to strip.",
-    },
-    BuiltinParamDescriptor {
-        name: "stripCharacters",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Characters to strip (scalar or per-element text container).",
-    },
-];
-
-const STRIP_INPUTS_DIRECTION_CHARACTERS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String/char/cell text input to strip.",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Direction (`\"left\"|\"right\"|\"both\"`, plus leading/trailing synonyms).",
-    },
-    BuiltinParamDescriptor {
-        name: "stripCharacters",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Characters to strip (scalar or per-element text container).",
-    },
-];
-
-const STRIP_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "out = strip(str)",
-        inputs: &STRIP_INPUTS_BASE,
-        outputs: &STRIP_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = strip(str, direction)",
-        inputs: &STRIP_INPUTS_DIRECTION,
-        outputs: &STRIP_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = strip(str, stripCharacters)",
-        inputs: &STRIP_INPUTS_CHARACTERS,
-        outputs: &STRIP_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = strip(str, direction, stripCharacters)",
-        inputs: &STRIP_INPUTS_DIRECTION_CHARACTERS,
-        outputs: &STRIP_OUTPUT,
-    },
-];
-
-const STRIP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRIP.INVALID_INPUT",
-    identifier: Some("RunMat:strip:InvalidInput"),
-    when: "Input is not a string array, character array, or cell array of text scalars.",
-    message:
-        "strip: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const STRIP_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRIP.CELL_ELEMENT",
-    identifier: Some("RunMat:strip:CellElement"),
-    when: "Cell array contains a non-text element or non-row char array element.",
-    message: "strip: cell array elements must be string scalars or character vectors",
-};
-
-const STRIP_ERROR_DIRECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRIP.DIRECTION",
-    identifier: Some("RunMat:strip:InvalidDirection"),
-    when: "Direction argument is not one of left/right/both (or leading/trailing synonyms).",
-    message: "strip: direction must be 'left', 'right', or 'both'",
-};
-
-const STRIP_ERROR_CHARACTERS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRIP.CHARACTERS",
-    identifier: Some("RunMat:strip:InvalidCharacters"),
-    when: "stripCharacters argument is not a valid text container.",
-    message:
-        "strip: characters to remove must be a string array, character vector, or cell array of character vectors",
-};
-
-const STRIP_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRIP.SIZE_MISMATCH",
-    identifier: Some("RunMat:strip:SizeMismatch"),
-    when: "Per-element stripCharacters does not match input shape/size.",
-    message:
-        "strip: stripCharacters must be the same size as the input when supplying multiple values",
-};
-
-const STRIP_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRIP.ARG_COUNT",
-    identifier: Some("RunMat:strip:ArgCount"),
-    when: "More than three input arguments were supplied.",
-    message: "strip: too many input arguments",
-};
-
-const STRIP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRIP.INTERNAL",
-    identifier: Some("RunMat:strip:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "strip: internal error",
-};
-
-const STRIP_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    STRIP_ERROR_INVALID_INPUT,
-    STRIP_ERROR_CELL_ELEMENT,
-    STRIP_ERROR_DIRECTION,
-    STRIP_ERROR_CHARACTERS,
-    STRIP_ERROR_SIZE_MISMATCH,
-    STRIP_ERROR_ARG_COUNT,
-    STRIP_ERROR_INTERNAL,
-];
-
-pub const STRIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRIP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRIP_ERRORS,
-};
-
-pub const STRIP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strip accepts host string, character, and cell text plus textual direction and strip-character inputs. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access.",
-};
-
-fn map_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, BUILTIN_NAME)
-}
+mod character;
+mod cell;
 
 fn strip_error_with_message(
     message: impl Into<String>,
@@ -247,24 +76,33 @@ enum StripDirection {
     Right,
 }
 
-enum PatternSpec {
-    Default,
-    Scalar(Vec<char>),
-    PerElement(Vec<Vec<char>>),
+#[derive(Clone, Copy)]
+enum DirectionToken {
+    Standard(StripDirection),
+    RunMatAlias(StripDirection),
 }
 
+enum PatternSpec<'a> {
+    Default,
+    Scalar(PatternRef<'a>),
+    PerElementStrings(&'a StringArray),
+    PerElementChars(&'a CharArray),
+    PerElementCell(&'a CellArray),
+}
+
+#[derive(Clone, Copy)]
 enum PatternRef<'a> {
     Default,
-    Custom(&'a [char]),
+    CustomText(&'a str),
+    CustomChars(&'a [Utf16CodeUnit]),
 }
 
-#[derive(Clone)]
-struct PatternExpectation {
+struct PatternExpectation<'a> {
     len: usize,
-    shape: Option<Vec<usize>>,
+    shape: Option<&'a [usize]>,
 }
 
-impl PatternExpectation {
+impl<'a> PatternExpectation<'a> {
     fn scalar() -> Self {
         Self {
             len: 1,
@@ -276,10 +114,10 @@ impl PatternExpectation {
         Self { len, shape: None }
     }
 
-    fn with_shape(len: usize, shape: &[usize]) -> Self {
+    fn with_shape(len: usize, shape: &'a [usize]) -> Self {
         Self {
             len,
-            shape: Some(shape.to_vec()),
+            shape: Some(shape),
         }
     }
 
@@ -288,200 +126,120 @@ impl PatternExpectation {
     }
 
     fn shape(&self) -> Option<&[usize]> {
-        self.shape.as_deref()
+        self.shape
     }
 }
 
-impl PatternSpec {
+impl PatternSpec<'_> {
     fn pattern_for_index(&self, idx: usize) -> PatternRef<'_> {
         match self {
             PatternSpec::Default => PatternRef::Default,
-            PatternSpec::Scalar(chars) => PatternRef::Custom(chars),
-            PatternSpec::PerElement(patterns) => patterns
-                .get(idx)
-                .map(|chars| PatternRef::Custom(chars))
-                .unwrap_or(PatternRef::Default),
+            PatternSpec::Scalar(pattern) => *pattern,
+            PatternSpec::PerElementStrings(array) => PatternRef::CustomText(
+                array.data()[idx]
+                    .as_str()
+                    .expect("pattern elements validated before selection"),
+            ),
+            PatternSpec::PerElementChars(array) => {
+                let start = idx * array.cols;
+                PatternRef::CustomChars(&array.data()[start..start + array.cols])
+            }
+            PatternSpec::PerElementCell(cell) => pattern_ref_from_value(&cell.data()[idx])
+                .expect("pattern elements validated before selection"),
         }
     }
 }
 
 #[runtime_builtin(
     name = "strip",
-    category = "strings/transform",
-    summary = "Remove leading and trailing characters from supported text containers.",
-    keywords = "strip,trim,strings,character array,text",
-    accel = "sink",
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::strip::STRIP_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::strip::STRIP_INTEGER_AUDIT),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
-async fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn strip_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if contains_resident_text_input(&value) || rest.iter().any(contains_resident_text_input) {
         return Err(strip_error(&STRIP_ERROR_INVALID_INPUT));
     }
-    let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
-    match gathered {
-        Value::String(text) => strip_string(text, &rest).await,
-        Value::StringArray(array) => strip_string_array(array, &rest).await,
-        Value::CharArray(array) => strip_char_array(array, &rest).await,
-        Value::Cell(cell) => strip_cell_array(cell, &rest).await,
+    match value {
+        Value::String(text) => strip_string(runtime.as_ref(), text, rest.view()).await,
+        Value::StringArray(array) => strip_string_array(runtime.as_ref(), array, rest.view()).await,
+        Value::CharArray(array) => {
+            character::strip_char_array(runtime.as_ref(), array, rest.view()).await
+        }
+        Value::Cell(cell) => cell::strip_cell_array(runtime.as_ref(), cell, rest.view()).await,
         _ => Err(strip_error(&STRIP_ERROR_INVALID_INPUT)),
     }
 }
 
-async fn strip_string(text: String, args: &[Value]) -> BuiltinResult<Value> {
+async fn strip_string(
+    runtime: Option<&RuntimeContext>,
+    text: StringElement,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
         return Ok(Value::String(text));
     }
     let expectation = PatternExpectation::scalar();
     let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
-    let stripped = strip_text(&text, direction, pattern_spec.pattern_for_index(0));
+    let stripped = transform_scalar_borrowed(
+        runtime,
+        text,
+        |text| strip_slice(text, direction, pattern_spec.pattern_for_index(0)),
+        strip_allocation_error,
+    )?;
     Ok(Value::String(stripped))
 }
 
-async fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult<Value> {
-    let expected_len = array.data.len();
+async fn strip_string_array(
+    runtime: Option<&RuntimeContext>,
+    array: StringArray,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
+    let expected_len = array.data().len();
     let expectation = PatternExpectation::with_shape(expected_len, &array.shape);
     let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
-    let StringArray { data, shape, .. } = array;
-    let mut stripped: Vec<String> = Vec::with_capacity(expected_len);
-    for (idx, text) in data.into_iter().enumerate() {
-        if is_missing_string(&text) {
-            stripped.push(text);
-        } else {
-            let pattern = pattern_spec.pattern_for_index(idx);
-            stripped.push(strip_text(&text, direction, pattern));
-        }
-    }
-    let result = StringArray::new(stripped, shape).map_err(|e| {
-        strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
-    })?;
+    let result = transform_string_array_borrowed_indexed(
+        runtime,
+        array,
+        |index, text| strip_slice(text, direction, pattern_spec.pattern_for_index(index)),
+        strip_allocation_error,
+        |detail| {
+            strip_error_with_message(format!("{BUILTIN_NAME}: {detail}"), &STRIP_ERROR_INTERNAL)
+        },
+    )?;
     Ok(Value::StringArray(result))
 }
 
-async fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    let expectation = PatternExpectation::with_len(rows);
-    let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
-
-    if rows == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
-    }
-
-    let mut stripped_rows: Vec<String> = Vec::with_capacity(rows);
-    let mut target_cols: usize = 0;
-    for row in 0..rows {
-        let text = char_row_to_string_slice(&data, cols, row);
-        let pattern = pattern_spec.pattern_for_index(row);
-        let stripped = strip_text(&text, direction, pattern);
-        let len = stripped.chars().count();
-        target_cols = target_cols.max(len);
-        stripped_rows.push(stripped);
-    }
-
-    let mut new_data: Vec<char> = Vec::with_capacity(rows * target_cols);
-    for row_text in stripped_rows {
-        let mut chars: Vec<char> = row_text.chars().collect();
-        if chars.len() < target_cols {
-            chars.resize(target_cols, ' ');
-        }
-        new_data.extend(chars.into_iter());
-    }
-
-    CharArray::new(new_data, rows, target_cols)
-        .map(Value::CharArray)
-        .map_err(|e| {
-            strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
-        })
+fn strip_allocation_error(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    build_runtime_error(format!("strip: host text allocation: {cause}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(format!(
+            "{}:{}",
+            RuntimeContext::error_namespace(runtime),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build()
 }
 
-async fn strip_cell_array(cell: CellArray, args: &[Value]) -> BuiltinResult<Value> {
-    let rows = cell.rows;
-    let cols = cell.cols;
-    let dims = [rows, cols];
-    let expectation = PatternExpectation::with_shape(rows * cols, &dims);
-    let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
-    let total = rows * cols;
-    let mut stripped_values: Vec<Value> = Vec::with_capacity(total);
-    for idx in 0..total {
-        let value = &cell.data[idx];
-        let pattern = pattern_spec.pattern_for_index(idx);
-        let stripped = strip_cell_element(value, direction, pattern).await?;
-        stripped_values.push(stripped);
-    }
-    make_cell(stripped_values, rows, cols).map_err(|e| {
-        strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
-    })
-}
-
-async fn strip_cell_element(
-    value: &Value,
-    direction: StripDirection,
-    pattern: PatternRef<'_>,
-) -> BuiltinResult<Value> {
-    let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
-    match gathered {
-        Value::String(text) => {
-            if is_missing_string(&text) {
-                Ok(Value::String(text))
-            } else {
-                let stripped = strip_text(&text, direction, pattern);
-                Ok(Value::String(stripped))
-            }
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            let text = sa.data.into_iter().next().unwrap();
-            if is_missing_string(&text) {
-                Ok(Value::String(text))
-            } else {
-                let stripped = strip_text(&text, direction, pattern);
-                Ok(Value::String(stripped))
-            }
-        }
-        Value::CharArray(ca) if ca.rows <= 1 => {
-            let source = if ca.rows == 0 {
-                String::new()
-            } else {
-                char_row_to_string_slice(&ca.data, ca.cols, 0)
-            };
-            let stripped = strip_text(&source, direction, pattern);
-            let len = stripped.chars().count();
-            let data: Vec<char> = stripped.chars().collect();
-            let rows = ca.rows;
-            let cols = if rows == 0 { ca.cols } else { len };
-            CharArray::new(data, rows, cols)
-                .map(Value::CharArray)
-                .map_err(|e| {
-                    strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
-                })
-        }
-        Value::CharArray(_) => Err(strip_error(&STRIP_ERROR_CELL_ELEMENT)),
-        _ => Err(strip_error(&STRIP_ERROR_CELL_ELEMENT)),
-    }
-}
-
-async fn parse_arguments(
-    args: &[Value],
-    expectation: &PatternExpectation,
-) -> BuiltinResult<(StripDirection, PatternSpec)> {
+async fn parse_arguments<'a>(
+    args: crate::call::FunctionArgumentView<'a>,
+    expectation: &PatternExpectation<'_>,
+) -> BuiltinResult<(StripDirection, PatternSpec<'a>)> {
     match args.len() {
         0 => Ok((StripDirection::Both, PatternSpec::Default)),
         1 => {
             if let Some(direction) = try_parse_direction(&args[0], false)? {
                 Ok((direction, PatternSpec::Default))
             } else {
-                let pattern = parse_pattern(&args[0], expectation).await?;
+                let pattern =
+                    parse_pattern(args.get(0).expect("single pattern argument"), expectation)
+                        .await?;
+                enforce_pattern_extension(&pattern)?;
                 Ok((StripDirection::Both, pattern))
             }
         }
@@ -490,30 +248,56 @@ async fn parse_arguments(
                 Some(dir) => dir,
                 None => return Err(strip_error(&STRIP_ERROR_DIRECTION)),
             };
-            let pattern = parse_pattern(&args[1], expectation).await?;
+            let pattern =
+                parse_pattern(args.get(1).expect("pattern after direction"), expectation).await?;
+            enforce_pattern_extension(&pattern)?;
             Ok((direction, pattern))
         }
         _ => Err(strip_error(&STRIP_ERROR_ARG_COUNT)),
     }
 }
 
-fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<StripDirection>> {
-    let Some(text) = value_to_single_string(value) else {
-        return Ok(None);
+fn enforce_pattern_extension(pattern: &PatternSpec<'_>) -> BuiltinResult<()> {
+    let extended = match pattern {
+        PatternSpec::Default => false,
+        PatternSpec::Scalar(PatternRef::Default) => false,
+        PatternSpec::Scalar(PatternRef::CustomText(text)) => text.chars().nth(1).is_some(),
+        PatternSpec::Scalar(PatternRef::CustomChars(chars)) => chars.len() > 1,
+        PatternSpec::PerElementStrings(_)
+        | PatternSpec::PerElementChars(_)
+        | PatternSpec::PerElementCell(_) => true,
     };
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return if strict {
-            Err(strip_error(&STRIP_ERROR_DIRECTION))
-        } else {
-            Ok(None)
-        };
+    if extended {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRIP_CHARACTER_SET_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
-    let lowered = trimmed.to_ascii_lowercase();
-    let direction = match lowered.as_str() {
-        "both" => Some(StripDirection::Both),
-        "left" | "leading" => Some(StripDirection::Left),
-        "right" | "trailing" => Some(StripDirection::Right),
+    Ok(())
+}
+
+fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<StripDirection>> {
+    let token = match value {
+        Value::String(text) => text.as_str().and_then(direction_token),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].as_str().and_then(direction_token)
+        }
+        Value::CharArray(array)
+            if array.rows <= 1 && array.shape.len() <= 2 && array.validate_layout().is_ok() =>
+        {
+            direction_char_token(array.data_owner().as_slice())
+        }
+        _ => None,
+    };
+    let direction = match token {
+        Some(DirectionToken::Standard(direction)) => Some(direction),
+        Some(DirectionToken::RunMatAlias(direction)) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &STRIP_DIRECTION_ALIAS_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            Some(direction)
+        }
         _ => {
             if strict {
                 return Err(strip_error(&STRIP_ERROR_DIRECTION));
@@ -524,71 +308,97 @@ fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<Stri
     Ok(direction)
 }
 
-fn value_to_single_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Some(sa.data[0].clone())
-            } else {
-                None
-            }
-        }
-        Value::CharArray(ca) => {
-            if ca.rows <= 1 {
-                Some(char_row_to_string_slice(&ca.data, ca.cols, 0))
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+fn direction_token(text: &str) -> Option<DirectionToken> {
+    let text = text.trim();
+    direction_candidates()
+        .into_iter()
+        .find_map(|(candidate, token)| text.eq_ignore_ascii_case(candidate).then_some(token))
 }
 
-async fn parse_pattern(
-    value: &Value,
-    expectation: &PatternExpectation,
-) -> BuiltinResult<PatternSpec> {
+fn direction_char_token(chars: &[Utf16CodeUnit]) -> Option<DirectionToken> {
+    let mut start = 0;
+    let mut end = chars.len();
+    while start < end && chars[start].is_whitespace() {
+        start += 1;
+    }
+    while end > start && chars[end - 1].is_whitespace() {
+        end -= 1;
+    }
+    direction_candidates()
+        .into_iter()
+        .find_map(|(candidate, token)| {
+            let mut actual = chars[start..end].iter().map(|unit| unit.raw());
+            let matches = candidate.bytes().all(|expected| {
+                actual.next().is_some_and(|unit| {
+                    unit <= u8::MAX as u16 && (unit as u8).to_ascii_lowercase() == expected
+                })
+            });
+            (matches && actual.next().is_none()).then_some(token)
+        })
+}
+
+fn direction_candidates() -> [(&'static str, DirectionToken); 5] {
+    [
+        ("both", DirectionToken::Standard(StripDirection::Both)),
+        ("left", DirectionToken::Standard(StripDirection::Left)),
+        ("right", DirectionToken::Standard(StripDirection::Right)),
+        ("leading", DirectionToken::RunMatAlias(StripDirection::Left)),
+        (
+            "trailing",
+            DirectionToken::RunMatAlias(StripDirection::Right),
+        ),
+    ]
+}
+
+async fn parse_pattern<'a>(
+    value: &'a Value,
+    expectation: &PatternExpectation<'_>,
+) -> BuiltinResult<PatternSpec<'a>> {
     let expected_len = expectation.len();
     match value {
-        Value::String(text) => Ok(PatternSpec::Scalar(text.chars().collect())),
+        Value::String(text) => Ok(PatternSpec::Scalar(PatternRef::CustomText(
+            text.as_str()
+                .ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?,
+        ))),
         Value::StringArray(sa) => {
-            if sa.data.len() <= 1 {
-                if let Some(first) = sa.data.first() {
-                    Ok(PatternSpec::Scalar(first.chars().collect()))
+            if sa.data().iter().any(StringElement::is_missing) {
+                return Err(strip_error(&STRIP_ERROR_CHARACTERS));
+            }
+            if sa.data().len() <= 1 {
+                if let Some(first) = sa.data().first() {
+                    Ok(PatternSpec::Scalar(PatternRef::CustomText(
+                        first
+                            .as_str()
+                            .ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?,
+                    )))
                 } else {
-                    Ok(PatternSpec::Scalar(Vec::new()))
+                    Ok(PatternSpec::Scalar(PatternRef::CustomChars(&[])))
                 }
-            } else if sa.data.len() == expected_len {
+            } else if sa.data().len() == expected_len {
                 if let Some(shape) = expectation.shape() {
-                    if sa.shape != shape {
+                    if sa.shape.as_slice() != shape {
                         return Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH));
                     }
                 }
-                let mut patterns = Vec::with_capacity(sa.data.len());
-                for text in &sa.data {
-                    patterns.push(text.chars().collect());
-                }
-                Ok(PatternSpec::PerElement(patterns))
+                Ok(PatternSpec::PerElementStrings(sa))
             } else {
                 Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH))
             }
         }
         Value::CharArray(ca) => {
+            if ca.shape.len() > 2 || ca.rows.checked_mul(ca.cols) != Some(ca.data().len()) {
+                return Err(strip_error(&STRIP_ERROR_CHARACTERS));
+            }
             if ca.rows <= 1 {
                 if ca.rows == 0 {
-                    Ok(PatternSpec::Scalar(Vec::new()))
+                    Ok(PatternSpec::Scalar(PatternRef::CustomChars(&[])))
                 } else {
-                    let chars = char_row_to_string_slice(&ca.data, ca.cols, 0);
-                    Ok(PatternSpec::Scalar(chars.chars().collect()))
+                    Ok(PatternSpec::Scalar(PatternRef::CustomChars(
+                        ca.data_owner().as_slice(),
+                    )))
                 }
             } else if ca.rows == expected_len {
-                let mut patterns = Vec::with_capacity(ca.rows);
-                for row in 0..ca.rows {
-                    let text = char_row_to_string_slice(&ca.data, ca.cols, row);
-                    patterns.push(text.chars().collect());
-                }
-                Ok(PatternSpec::PerElement(patterns))
+                Ok(PatternSpec::PerElementChars(ca))
             } else {
                 Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH))
             }
@@ -598,104 +408,95 @@ async fn parse_pattern(
     }
 }
 
-async fn parse_pattern_cell(
-    cell: &CellArray,
-    expectation: &PatternExpectation,
-) -> BuiltinResult<PatternSpec> {
-    let len = cell.rows * cell.cols;
+async fn parse_pattern_cell<'a>(
+    cell: &'a CellArray,
+    expectation: &PatternExpectation<'_>,
+) -> BuiltinResult<PatternSpec<'a>> {
+    let len = cell.data().len();
     if len == 0 {
-        return Ok(PatternSpec::Scalar(Vec::new()));
+        return Ok(PatternSpec::Scalar(PatternRef::CustomChars(&[])));
     }
     if len == 1 {
-        let chars = pattern_chars_from_value(&cell.data[0]).await?;
-        return Ok(PatternSpec::Scalar(chars));
+        let pattern = pattern_ref_from_value(&cell.data()[0])
+            .ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?;
+        return Ok(PatternSpec::Scalar(pattern));
     }
     if len != expectation.len() {
         return Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH));
     }
     if let Some(shape) = expectation.shape() {
-        match shape.len() {
-            0 => {}
-            1 => {
-                if cell.rows != shape[0] || cell.cols != 1 {
-                    return Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH));
-                }
-            }
-            _ => {
-                if cell.rows != shape[0] || cell.cols != shape[1] {
-                    return Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH));
-                }
-            }
+        if cell.shape.as_slice() != shape {
+            return Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH));
         }
     }
-    let mut patterns = Vec::with_capacity(len);
-    for value in &cell.data {
-        patterns.push(pattern_chars_from_value(value).await?);
+    for value in cell.data() {
+        pattern_ref_from_value(value).ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?;
     }
-    Ok(PatternSpec::PerElement(patterns))
+    Ok(PatternSpec::PerElementCell(cell))
 }
 
-async fn pattern_chars_from_value(value: &Value) -> BuiltinResult<Vec<char>> {
-    let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
-    match gathered {
-        Value::String(text) => Ok(text.chars().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].chars().collect()),
-        Value::CharArray(ca) if ca.rows <= 1 => {
-            if ca.rows == 0 {
-                Ok(Vec::new())
-            } else {
-                let text = char_row_to_string_slice(&ca.data, ca.cols, 0);
-                Ok(text.chars().collect())
-            }
+fn pattern_ref_from_value(value: &Value) -> Option<PatternRef<'_>> {
+    match value {
+        Value::String(text) => text.as_str().map(PatternRef::CustomText),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].as_str().map(PatternRef::CustomText)
         }
-        Value::CharArray(_) => Err(strip_error(&STRIP_ERROR_CHARACTERS)),
-        _ => Err(strip_error(&STRIP_ERROR_CHARACTERS)),
+        Value::CharArray(array)
+            if array.rows <= 1
+                && array.shape.len() <= 2
+                && array.rows.checked_mul(array.cols) == Some(array.data().len()) =>
+        {
+            Some(PatternRef::CustomChars(array.data_owner().as_slice()))
+        }
+        _ => None,
     }
 }
 
-fn strip_text(text: &str, direction: StripDirection, pattern: PatternRef<'_>) -> String {
+fn strip_slice<'a>(text: &'a str, direction: StripDirection, pattern: PatternRef<'_>) -> &'a str {
     match pattern {
-        PatternRef::Default => strip_text_with_predicate(text, direction, char::is_whitespace),
-        PatternRef::Custom(chars) => {
-            strip_text_with_predicate(text, direction, |c| chars.contains(&c))
+        PatternRef::Default => strip_slice_with_predicate(text, direction, |c| {
+            crate::builtins::strings::common::trimmable_whitespace(
+                c,
+                !crate::compatibility::runmat_extensions_enabled(),
+            )
+        }),
+        PatternRef::CustomText(chars) => {
+            strip_slice_with_predicate(text, direction, |c| chars.contains(c))
         }
+        PatternRef::CustomChars(chars) => strip_slice_with_predicate(text, direction, |c| {
+            let mut encoded = [0_u16; 2];
+            let encoded = c.encode_utf16(&mut encoded);
+            chars.windows(encoded.len()).any(|window| {
+                window
+                    .iter()
+                    .map(|unit| unit.raw())
+                    .eq(encoded.iter().copied())
+            })
+        }),
     }
 }
 
-fn strip_text_with_predicate<F>(text: &str, direction: StripDirection, mut predicate: F) -> String
+fn strip_slice_with_predicate<F>(text: &str, direction: StripDirection, predicate: F) -> &str
 where
-    F: FnMut(char) -> bool,
+    F: Fn(char) -> bool,
 {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.is_empty() {
-        return String::new();
+    match direction {
+        StripDirection::Left => text.trim_start_matches(predicate),
+        StripDirection::Right => text.trim_end_matches(predicate),
+        StripDirection::Both => text.trim_matches(predicate),
     }
-
-    let mut start = 0usize;
-    let mut end = chars.len();
-
-    if direction != StripDirection::Right {
-        while start < end && predicate(chars[start]) {
-            start += 1;
-        }
-    }
-
-    if direction != StripDirection::Left {
-        while end > start && predicate(chars[end - 1]) {
-            end -= 1;
-        }
-    }
-
-    chars[start..end].iter().collect()
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn run_strip(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(strip_builtin(value, rest))
+        futures::executor::block_on(strip_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -703,6 +504,12 @@ pub(crate) mod tests {
     fn strip_string_scalar_default() {
         let result = run_strip(Value::String("  RunMat  ".into()), Vec::new()).expect("strip");
         assert_eq!(result, Value::String("RunMat".into()));
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let significant = "  \u{00A0}RunMat\u{00A0}  ";
+        assert_eq!(
+            run_strip(Value::string(significant), Vec::new()).unwrap(),
+            Value::string("\u{00A0}RunMat\u{00A0}"),
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -743,7 +550,7 @@ pub(crate) mod tests {
     fn strip_empty_pattern_returns_original() {
         let result = run_strip(
             Value::String("abc".into()),
-            vec![Value::String(String::new())],
+            vec![Value::String(String::new().into())],
         )
         .expect("strip");
         assert_eq!(result, Value::String("abc".into()));
@@ -752,17 +559,29 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_supports_leading_synonym() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = run_strip(
             Value::String("   data".into()),
             vec![Value::String("leading".into())],
         )
         .expect("strip");
         assert_eq!(result, Value::String("data".into()));
+        drop(_compat);
+        let strict = run_strip(
+            Value::String("   data".into()),
+            vec![Value::String("leading".into())],
+        )
+        .expect_err("direction alias requires RunMat extension mode");
+        assert_eq!(
+            strict.identifier(),
+            STRIP_DIRECTION_ALIAS_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_supports_trailing_synonym() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = run_strip(
             Value::String("data   ".into()),
             vec![Value::String("trailing".into())],
@@ -774,12 +593,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_array_per_element_characters() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let strings = StringArray::new(
             vec!["##ok##".into(), "--warn--".into(), "**fail**".into()],
             vec![3, 1],
         )
         .unwrap();
-        let chars = CharArray::new(vec!['#', '#', '-', '-', '*', '*'], 3, 2).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['#', '#', '-', '-', '*', '*'], 3, 2).unwrap();
         let result = run_strip(
             Value::StringArray(strings),
             vec![Value::String("both".into()), Value::CharArray(chars)],
@@ -788,7 +609,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         String::from("ok"),
                         String::from("warn"),
@@ -798,11 +619,22 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+        drop(_compat);
+        let strict = run_strip(
+            Value::String("##ok##".into()),
+            vec![Value::String("both".into()), Value::String("#-".into())],
+        )
+        .expect_err("multi-character set requires RunMat extension mode");
+        assert_eq!(
+            strict.identifier(),
+            STRIP_CHARACTER_SET_EXTENSION.error_identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_array_cell_pattern_per_element() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let strings =
             StringArray::new(vec!["__pass__".into(), "--warn--".into()], vec![2, 1]).unwrap();
         let patterns = CellArray::new(
@@ -815,7 +647,7 @@ pub(crate) mod tests {
             run_strip(Value::StringArray(strings), vec![Value::Cell(patterns)]).expect("strip");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec![String::from("pass"), String::from("warn")]);
+                assert_eq!(sa.data(), vec![String::from("pass"), String::from("warn")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -824,13 +656,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_string_array_preserves_missing() {
-        let strings =
-            StringArray::new(vec!["   data   ".into(), "<missing>".into()], vec![2, 1]).unwrap();
+        let strings = StringArray::from_elements_unbounded(
+            vec!["   data   ".into(), runmat_value::StringElement::Missing],
+            vec![2, 1],
+        )
+        .unwrap();
         let result = run_strip(Value::StringArray(strings), Vec::new()).expect("strip");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "data");
-                assert_eq!(sa.data[1], "<missing>");
+                assert_eq!(sa.data()[0], "data");
+                assert!(sa.data()[1].is_missing());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -841,22 +676,52 @@ pub(crate) mod tests {
     fn strip_char_array_shrinks_width() {
         let source = "  cat  dog  ";
         let chars: Vec<char> = source.chars().collect();
-        let array = CharArray::new(chars, 1, source.chars().count()).unwrap();
+        let array = CharArray::from_unicode_scalars(chars, 1, source.chars().count()).unwrap();
         let result = run_strip(Value::CharArray(array), Vec::new()).expect("strip");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 8);
-                let expected: Vec<char> = "cat  dog".chars().collect();
-                assert_eq!(ca.data, expected);
+                let expected = runmat_value::encode_utf16_code_units("cat  dog");
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
+
+        let row = CharArray::from_unicode_scalars_with_shape("  xy  ".chars().collect(), vec![6])
+            .unwrap();
+        let Value::CharArray(row) = run_strip(Value::CharArray(row), Vec::new()).unwrap() else {
+            panic!("expected character row");
+        };
+        assert_eq!(row.shape.as_slice(), &[2]);
+        assert_eq!(
+            row.data(),
+            runmat_value::encode_utf16_code_units("xy").as_slice()
+        );
+
+        let pages = CharArray::from_unicode_scalars_with_shape(
+            [" a   ", " b   ", " cc  ", " d   "]
+                .concat()
+                .chars()
+                .collect(),
+            vec![2, 5, 2],
+        )
+        .unwrap();
+        let Value::CharArray(pages) = run_strip(Value::CharArray(pages), Vec::new()).unwrap()
+        else {
+            panic!("expected character pages");
+        };
+        assert_eq!(pages.shape.as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            pages.data(),
+            runmat_value::encode_utf16_code_units("a b ccd ").as_slice()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_char_array_supports_trailing_direction() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let array = CharArray::new_row("gpu   ");
         let result = run_strip(
             Value::CharArray(array),
@@ -867,8 +732,8 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
-                let expected: Vec<char> = "gpu".chars().collect();
-                assert_eq!(ca.data, expected);
+                let expected = runmat_value::encode_utf16_code_units("gpu");
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -906,8 +771,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strip_preserves_missing_string() {
-        let result = run_strip(Value::String("<missing>".into()), Vec::new()).expect("strip");
-        assert_eq!(result, Value::String("<missing>".into()));
+        let result = run_strip(
+            Value::String(runmat_value::StringElement::Missing),
+            Vec::new(),
+        )
+        .expect("strip");
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1010,14 +879,39 @@ pub(crate) mod tests {
             .expect("upload");
         let err = run_strip(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
         assert_eq!(err.to_string(), STRIP_ERROR_INVALID_INPUT.message);
-        provider.free(&handle).ok();
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("borrowed input remains live");
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release final fixture reference");
+        assert!(
+            physical.acquire().is_none(),
+            "physical lease must expire after final release"
+        );
     }
 
     #[test]
     fn strip_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
+        use runmat_types::{
+            CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ValueFact,
+            ValueKindFact,
+        };
+        let input = ValueFact::scalar(ValueKindFact::String);
+        let request = CallRequest {
+            arguments: vec![input.clone()],
+            literals: LiteralContext::new(Vec::new()),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let inferred =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::STRIP_CATALOG_ENTRY, &request);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
         );
+        assert_eq!(inferred.outputs.len(), 1);
+        assert_eq!(inferred.outputs[0].kind, ValueKindFact::String);
+        assert_eq!(inferred.outputs[0].shape, input.shape);
     }
 }

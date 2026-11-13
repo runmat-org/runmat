@@ -1,4 +1,4 @@
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,14 +10,18 @@ use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, ExecutionHpkeSuite, ExecutionRecipientKey,
     PortableExecutionEncryption, PortableExecutionPrivateKey,
 };
-use runmat_execution_artifact::ProgramExecutionResponse;
-use runmat_server_client::auth::resolve_project_id;
+use runmat_execution_artifact::ProgramExecutionOutputs;
+use runmat_server_client::auth::resolve_public_project_id;
 use runmat_server_client::execution::public_error;
 use runmat_server_client::public_api::types;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize as _, Zeroizing};
 
 use crate::cli::JobRecoveryCommand;
+
+#[cfg(windows)]
+#[path = "recovery_windows.rs"]
+mod windows;
 
 const RECOVERY_SUITE: &str = "x25519-hkdf-sha256-aes128gcm-v1";
 const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
@@ -28,7 +32,24 @@ const MILLIS_PER_DAY: u64 = 24 * 60 * 60 * 1_000;
 struct RecoveryKeyFile {
     schema_version: u16,
     recipient: RecoveryRecipientFile,
-    private_key: String,
+    #[serde(
+        serialize_with = "serialize_secret",
+        deserialize_with = "deserialize_secret"
+    )]
+    private_key: Zeroizing<String>,
+}
+
+fn serialize_secret<S: serde::Serializer>(
+    value: &Zeroizing<String>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_str(value.as_str())
+}
+
+fn deserialize_secret<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Zeroizing<String>, D::Error> {
+    String::deserialize(deserializer).map(Zeroizing::new)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -81,6 +102,38 @@ pub(super) async fn execute(command: JobRecoveryCommand) -> Result<()> {
             key,
             json,
         } => recover(&run_id, project, &key, json).await,
+        JobRecoveryCommand::Decrypt {
+            key,
+            envelope,
+            artifact,
+            run_id,
+            diagnostic,
+            output,
+        } => {
+            let key = load_key(&key)?;
+            let envelope = read_bounded(&envelope, MAX_ENVELOPE_BYTES)?;
+            let artifact = read_bounded(&artifact, 64 * 1024 * 1024)?;
+            let plaintext = Zeroizing::new(
+                runmat_execution_artifact::encryption::open_recovery_artifact(
+                    &key.private_key,
+                    &envelope,
+                    &artifact,
+                    runmat_execution_artifact::encryption::RecoveryArtifactScope {
+                        run_identity: &run_id,
+                        key_epoch: 1,
+                        purpose: if diagnostic {
+                            EncryptionPurpose::DetailedEvent
+                        } else {
+                            EncryptionPurpose::Result
+                        },
+                    },
+                    64 * 1024 * 1024,
+                )?,
+            );
+            write_new_private_bytes(&output, &plaintext)?;
+            println!("Recovered plaintext written to {}", output.display());
+            Ok(())
+        }
     }
 }
 
@@ -101,8 +154,9 @@ fn keygen(output: &Path, valid_days: u32, custodian_uri: Option<String>, json: b
     let mut document = RecoveryKeyFile {
         schema_version: 1,
         recipient: RecoveryRecipientFile::from_recipient(&recipient),
-        private_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(private_bytes.as_slice()),
+        private_key: Zeroizing::new(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(private_bytes.as_slice()),
+        ),
     };
     write_new_key(output, &document)?;
     document.private_key.zeroize();
@@ -121,6 +175,8 @@ fn keygen(output: &Path, valid_days: u32, custodian_uri: Option<String>, json: b
             output.display()
         );
         println!("fingerprint\t{}", document.recipient.fingerprint);
+        println!("public_key\t{}", document.recipient.public_key);
+        println!("suite\t{}", document.recipient.suite);
         println!(
             "{}",
             crate::presentation::stdout().muted(
@@ -235,15 +291,17 @@ async fn recover(
 ) -> Result<()> {
     let key = load_key(key_path)?;
     let (client, _, config) = super::authenticated_context().await?;
-    let project_id = resolve_project_id(&config, project)?.to_string();
+    let project_id = resolve_public_project_id(&config, project)?;
     let recovery = client
         .api()
-        .get_run_recovery(&project_id, run_id)
+        .get_run_recovery(project_id.as_str(), run_id)
         .await
         .map_err(public_error)?
         .into_inner();
     if recovery.run_id != run_id
-        || recovery.project_id != project_id
+        || runmat_server_client::ids::ProjectId::parse(&recovery.project_id)
+            .context("recovery contains an invalid public project identity")?
+            != project_id
         || recovery.recipient_fingerprint != key.recipient.fingerprint
     {
         bail!("recovery metadata does not match the requested run, project, and key");
@@ -261,7 +319,11 @@ async fn recover(
     )?;
     if let Some(artifact_id) = recovery.result_artifact_id {
         let ciphertext = client
-            .download_artifact(&project_id, &artifact_id, &recovery.recipient_fingerprint)
+            .download_artifact(
+                project_id.as_str(),
+                &artifact_id,
+                &recovery.recipient_fingerprint,
+            )
             .await?;
         let plaintext = super::crypto::open_run_object(
             &run_key,
@@ -269,32 +331,48 @@ async fn recover(
             EncryptionPurpose::Result,
             &ciphertext,
         )?;
-        let result: ProgramExecutionResponse =
+        let outputs: ProgramExecutionOutputs =
             serde_json::from_slice(&plaintext).context("recovered result payload is malformed")?;
+        outputs
+            .validate()
+            .context("recovered result payload failed integrity validation")?;
+        if !json {
+            super::console::print_outputs(&outputs)?;
+        }
+        let result_object_count = outputs.objects.len();
+        let result = outputs.response;
         if json {
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "runId": run_id,
                     "result": result,
+                    "resultObjectCount": result_object_count,
+                    "console": outputs.console,
+                    "consoleScopes": outputs.console_scopes,
+                    "consoleBudget": outputs.console_budget,
+                    "delegatedConsoleRoot": outputs.delegated_console_root,
                 }))?
             );
+            super::result::ensure_terminal_success(result, super::result::ResultOrigin::Recovered)?;
         } else {
-            match result {
-                ProgramExecutionResponse::Success { value } => {
-                    println!("{}", serde_json::to_string_pretty(&value)?);
-                }
-                ProgramExecutionResponse::ExternalizedSuccess { .. } => {
-                    bail!("recovered result requires an artifact-aware consumer")
-                }
-                ProgramExecutionResponse::Failure { message } => bail!("{message}"),
-            }
+            println!(
+                "{}",
+                super::result::format_terminal_result(
+                    result,
+                    super::result::ResultOrigin::Recovered,
+                )?
+            );
         }
         return Ok(());
     }
     if let Some(artifact_id) = recovery.diagnostic_artifact_id {
         let ciphertext = client
-            .download_artifact(&project_id, &artifact_id, &recovery.recipient_fingerprint)
+            .download_artifact(
+                project_id.as_str(),
+                &artifact_id,
+                &recovery.recipient_fingerprint,
+            )
             .await?;
         let plaintext = super::crypto::open_run_object(
             &run_key,
@@ -312,7 +390,6 @@ async fn recover(
                     "diagnostic": message,
                 }))?
             );
-            return Ok(());
         }
         bail!("{message}");
     }
@@ -396,9 +473,19 @@ impl RecoveryRecipientFile {
 
 fn load_key(path: &Path) -> Result<LoadedRecoveryKey> {
     require_private_file(path)?;
-    let encoded = Zeroizing::new(
-        std::fs::read(path).with_context(|| format!("read recovery key {}", path.display()))?,
-    );
+    #[cfg(windows)]
+    let file = runmat_filesystem::NativeFsProvider
+        .open_owner_private_file(path)
+        .context("open private recovery key")?;
+    #[cfg(not(windows))]
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .open(path)
+        .context("open private recovery key")?;
+    if !file.metadata()?.is_file() {
+        bail!("recovery key must be a regular file");
+    }
+    let encoded = Zeroizing::new(read_file_bounded(file, MAX_ENVELOPE_BYTES)?);
     let mut document: RecoveryKeyFile =
         serde_json::from_slice(encoded.as_slice()).context("recovery key file is malformed")?;
     if document.schema_version != 1 {
@@ -423,6 +510,27 @@ fn load_key(path: &Path) -> Result<LoadedRecoveryKey> {
 }
 
 fn write_new_key(path: &Path, value: &RecoveryKeyFile) -> Result<()> {
+    let encoded = Zeroizing::new(serde_json::to_vec_pretty(value)?);
+    write_new_private_bytes(path, &encoded)
+}
+
+fn read_bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
+    read_file_bounded(
+        std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?,
+        maximum,
+    )
+}
+
+fn read_file_bounded(file: std::fs::File, maximum: usize) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    file.take(maximum as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > maximum {
+        bail!("input exceeds the {} byte limit", maximum);
+    }
+    Ok(bytes)
+}
+
+fn write_new_private_bytes(path: &Path, encoded: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -433,24 +541,29 @@ fn write_new_key(path: &Path, value: &RecoveryKeyFile) -> Result<()> {
             parent.display()
         );
     }
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).context("create temporary recovery key")?;
-    set_private_file(temporary.path())?;
-    let encoded = Zeroizing::new(serde_json::to_vec_pretty(value)?);
-    temporary
-        .write_all(encoded.as_slice())
-        .context("write recovery key")?;
+    #[cfg(windows)]
+    let mut temporary = windows::create_temporary(parent)?;
+    #[cfg(not(windows))]
+    let mut temporary = {
+        let temporary =
+            tempfile::NamedTempFile::new_in(parent).context("create temporary recovery key")?;
+        set_private_file(temporary.path())?;
+        temporary
+    };
+    temporary.write_all(encoded).context("write recovery key")?;
     temporary.flush().context("flush recovery key")?;
     temporary
         .as_file()
         .sync_all()
         .context("sync recovery key")?;
     temporary.persist_noclobber(path).map_err(|error| {
-        anyhow::anyhow!(
-            "refusing to overwrite recovery key {}: {}",
-            path.display(),
-            error.error
-        )
+        let context = match error.error.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                format!("refusing to overwrite recovery key {path:?}")
+            }
+            _ => format!("persist private recovery key {path:?}"),
+        };
+        anyhow::Error::new(error.error).context(context)
     })?;
     Ok(())
 }
@@ -484,9 +597,9 @@ fn set_private_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn set_private_file(_path: &Path) -> Result<()> {
-    Ok(())
+    bail!("private recovery-file creation requires an OS access-control adapter on this platform")
 }
 
 #[cfg(unix)]
@@ -499,12 +612,32 @@ fn require_private_file(path: &Path) -> Result<()> {
     }
     let mode = metadata.permissions().mode();
     if mode & 0o077 != 0 {
-        bail!(
-            "recovery key {} is accessible by group or other users; require mode 0600",
-            path.display()
-        );
+        return Err(private_file_permissions_error(path));
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn private_file_permissions_error(path: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "recovery key {:?} is accessible by group or other users; require mode 0600; {}",
+        path,
+        private_mode_guidance(path)
+    )
+}
+
+#[cfg(unix)]
+fn private_mode_guidance(path: &Path) -> String {
+    let Some(path) = path.to_str() else {
+        return "the pathname contains non-UTF-8 bytes: use chmod -- 600 with the original filename selected by your shell's filename completion; no lossy copy-pastable pathname is shown".into();
+    };
+    if path.chars().any(char::is_control) {
+        return "the pathname contains control characters: use chmod -- 600 with the original filename selected by your shell's filename completion; no copy-pastable pathname is shown".into();
+    }
+    // POSIX single-quoted arguments preserve spaces and shell metacharacters.
+    // A literal apostrophe closes the quote, emits one quoted apostrophe,
+    // then reopens it. `--` also protects relative names beginning with '-'.
+    format!("run: chmod -- 600 '{}'", path.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(not(unix))]
@@ -536,8 +669,9 @@ mod tests {
         let document = RecoveryKeyFile {
             schema_version: 1,
             recipient: RecoveryRecipientFile::from_recipient(&recipient),
-            private_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(private_key.to_bytes()),
+            private_key: Zeroizing::new(
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(private_key.to_bytes()),
+            ),
         };
         write_new_key(&path, &document).unwrap();
         let loaded = load_key(&path).unwrap();
@@ -545,13 +679,58 @@ mod tests {
             loaded.private_key.public_key_bytes().as_slice(),
             recipient.public_key
         );
-        assert!(write_new_key(&path, &document).is_err());
+        let overwrite = write_new_key(&path, &document).unwrap_err();
+        assert_eq!(
+            overwrite.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
         assert_eq!(
             std::fs::read(&path).unwrap(),
             serde_json::to_vec_pretty(&document).unwrap()
         );
         #[cfg(unix)]
         {
+            use std::os::unix::ffi::OsStringExt as _;
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let downloaded = directory.path().join("browser owner's key.json");
+            write_new_key(&downloaded, &document).unwrap();
+            std::fs::set_permissions(&downloaded, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let refusal = load_key(&downloaded)
+                .err()
+                .expect("insecure import refused")
+                .to_string();
+            // Execute the exact diagnostic guidance, including POSIX quoting
+            // of the filename's space and literal apostrophe.
+            let guidance = private_mode_guidance(&downloaded);
+            assert!(guidance.starts_with("run: chmod -- 600 '"));
+            assert!(guidance.ends_with("/browser owner'\"'\"'s key.json'"));
+            assert!(refusal.contains(&guidance));
+            let emitted = guidance.strip_prefix("run: ").unwrap();
+            assert!(std::process::Command::new("sh")
+                .arg("-c")
+                .arg(emitted)
+                .status()
+                .unwrap()
+                .success());
+            assert_eq!(
+                std::fs::metadata(&downloaded).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            load_key(&downloaded).unwrap();
+
+            let non_utf8 = directory
+                .path()
+                .join(std::ffi::OsString::from_vec(b"download-\xff.json".to_vec()));
+            // Unix path values can contain non-UTF-8 bytes even where the
+            // filesystem (including APFS) rejects those names. Exercise the
+            // production diagnostic independently of filesystem encoding.
+            let refusal = private_file_permissions_error(&non_utf8).to_string();
+            assert!(refusal.contains("non-UTF-8"));
+            assert!(refusal.contains("no lossy copy-pastable pathname is shown"));
+            assert!(!refusal.contains('\u{fffd}'));
+            assert!(!private_mode_guidance(&non_utf8).starts_with("run: "));
+
             let link = directory.path().join("recovery-key-link.json");
             std::os::unix::fs::symlink(&path, &link).unwrap();
             assert!(load_key(&link).is_err());

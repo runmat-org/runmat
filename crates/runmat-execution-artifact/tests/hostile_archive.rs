@@ -11,7 +11,7 @@ fn archive() -> Vec<u8> {
         .unwrap()
         .with_materialized_program(
             support::recipe(revision),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"bytecode".to_vec(),
         )
         .build()

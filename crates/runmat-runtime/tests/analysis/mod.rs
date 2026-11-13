@@ -1,32 +1,30 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, ThreadProviderGuard,
+    AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
+    HostTensorView, ThreadProviderGuard,
 };
-use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ReferenceFrame};
+use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ProcedureStep};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
-use runmat_geometry_core::UnitSystem;
-use runmat_runtime::analysis::{
-    analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
-    analysis_run_acoustic_with_options_op, analysis_run_cfd_with_options_op,
-    analysis_run_cht_with_options_op, analysis_run_electromagnetic_with_options_op,
-    analysis_run_fsi_with_options_op, analysis_run_linear_static_with_options,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
-    analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
-    analysis_validate, AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsQuery, AnalysisRunOptions, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
+use runmat_meshing_core::{
+    solver_volume_element_identity, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
+    MeshNeighbor, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, SolverMeshNode,
+    SolverVolumeElement, StableDigest,
 };
-use runmat_runtime::geometry::geometry_load_op;
+use runmat_runtime::analysis::{
+    analysis_results_by_run_id_op, analysis_results_op, analysis_run_acoustic_with_options_op,
+    analysis_run_cfd_with_options_op, analysis_run_cht_op, analysis_run_fsi_op,
+    analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
+    analysis_run_transient_with_options_op, analysis_validate, AnalysisAcousticRunOptions,
+    AnalysisCfdRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsQuery, AnalysisRunOptions, AnalysisSolverOptions,
+    AnalysisStructuralTimeStepPolicy, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
+    FallbackEvent, FallbackReason, FallbackStage, PrecisionMode, PreconditionerMode, QualityPolicy,
+};
 use runmat_runtime::operations::OperationContext;
 use serde::{Deserialize, Serialize};
 
@@ -37,23 +35,8 @@ enum GpuMode {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum ResidencyExpectation {
-    DeviceRef,
-    HostFallback,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum AnalysisRunKind {
-    LinearStatic,
-    Modal,
-    Acoustic,
-    Thermal,
-    Transient,
-    Cfd,
-    Cht,
-    Fsi,
-    Nonlinear,
-    Electromagnetic,
+enum PublishedFieldStorageExpectation {
+    HostF64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,13 +50,14 @@ struct FixtureSpec {
     id: &'static str,
     description: &'static str,
     model: fn() -> AnalysisModel,
-    run_kind: AnalysisRunKind,
     expect_validate_error: Option<&'static str>,
     expect_run_error: Option<&'static str>,
-    expected_publishable: Option<bool>,
+    /// The GPU placement's rejection when it differs from the CPU placement's. Static GPU
+    /// execution fails closed at backend admission before the model reaches assembly.
+    expected_numerically_acceptable: Option<bool>,
     parity_tolerance: Option<ParityTolerance>,
     gpu_mode: Option<GpuMode>,
-    residency_expectation: Option<ResidencyExpectation>,
+    published_field_storage_expectation: Option<PublishedFieldStorageExpectation>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
     expected_solver_backend: Option<&'static str>,
@@ -82,24 +66,21 @@ struct FixtureSpec {
     max_modal_orthogonality_offdiag: Option<f64>,
     min_modal_relative_frequency_separation: Option<f64>,
     max_transient_residual_norm: Option<f64>,
-    max_transient_energy_growth_ratio: Option<f64>,
     min_gpu_speedup_ratio: Option<f64>,
-    min_transient_cache_hit_ratio: Option<f64>,
-    max_transient_cache_misses: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FixtureManifestEntry {
     id: String,
     description: String,
-    run_kind: String,
+    procedure_step: ProcedureStep,
     expect_validate_error: Option<String>,
     expect_run_error: Option<String>,
-    expected_publishable: Option<bool>,
+    expected_numerically_acceptable: Option<bool>,
     parity_tolerance_abs: Option<f64>,
     parity_tolerance_rel: Option<f64>,
     gpu_mode: Option<String>,
-    residency_expectation: Option<String>,
+    published_field_storage_expectation: Option<String>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
     expected_solver_backend: Option<String>,
@@ -108,10 +89,7 @@ struct FixtureManifestEntry {
     max_modal_orthogonality_offdiag: Option<f64>,
     min_modal_relative_frequency_separation: Option<f64>,
     max_transient_residual_norm: Option<f64>,
-    max_transient_energy_growth_ratio: Option<f64>,
     min_gpu_speedup_ratio: Option<f64>,
-    min_transient_cache_hit_ratio: Option<f64>,
-    max_transient_cache_misses: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,6 +108,17 @@ struct FixtureManifest {
     fixtures: Vec<FixtureManifestEntry>,
 }
 
+fn fixture_procedure_step(model: &AnalysisModel) -> &ProcedureStep {
+    let [step] = model.sequence.steps.as_slice() else {
+        panic!(
+            "analysis fixture `{}` must define exactly one canonical procedure step; found {}",
+            model.model_id.0,
+            model.sequence.steps.len()
+        )
+    };
+    step
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ParitySummary {
     max_abs_diff: f64,
@@ -145,23 +134,15 @@ struct FixtureRunRecord {
     run_error_code: Option<String>,
     cpu_run_ms: Option<f64>,
     gpu_run_ms: Option<f64>,
-    gpu_fallback_events: Vec<String>,
-    gpu_displacement_residency: Option<String>,
+    gpu_fallback_events: Vec<FallbackEvent>,
+    published_primary_field_storage: Option<String>,
     gpu_solver_host_sync_count: Option<u32>,
     gpu_solver_device_apply_k_ratio: Option<f64>,
     gpu_speedup_ratio: Option<f64>,
     gpu_solver_backend: Option<String>,
-    gpu_transient_cache_hit_ratio: Option<f64>,
-    gpu_transient_cache_misses: Option<f64>,
-    gpu_transient_cache_entries: Option<f64>,
     gpu_solver_prepared_build_ms: Option<f64>,
     gpu_solver_solve_ms: Option<f64>,
     gpu_solver_fallback_apply_count: Option<f64>,
-    prep_calibration_profile: Option<String>,
-    prep_calibration_fingerprint: Option<u64>,
-    prep_acceptance_score: Option<f64>,
-    prep_acceptance_passed: Option<bool>,
-    prep_acceptance_fingerprint: Option<u64>,
     thermo_coupling_enabled: Option<bool>,
     thermo_coupling_fingerprint: Option<u64>,
     thermo_constitutive_temperature_factor: Option<f64>,
@@ -170,22 +151,13 @@ struct FixtureRunRecord {
     thermo_assignment_heterogeneity_index: Option<f64>,
     thermo_region_delta_count: Option<f64>,
     thermo_spatial_coverage_ratio: Option<f64>,
-    thermo_field_extrapolation_ratio: Option<f64>,
-    thermo_field_clamp_ratio: Option<f64>,
-    thermo_field_artifact_id: Option<String>,
-    thermo_field_artifact_approved: Option<bool>,
-    thermo_field_artifact_age_days: Option<f64>,
-    thermo_field_artifact_provenance_valid: Option<bool>,
-    thermo_transient_severity: Option<f64>,
     thermo_nonlinear_severity: Option<f64>,
     electro_thermal_coupling_enabled: Option<bool>,
     electro_thermal_coupling_fingerprint: Option<u64>,
     electro_joule_heating_scale: Option<f64>,
     electro_conductivity_spread_ratio: Option<f64>,
     electro_transient_severity: Option<f64>,
-    electro_transient_time_scale_mean: Option<f64>,
     electro_nonlinear_severity: Option<f64>,
-    electro_nonlinear_time_scale_mean: Option<f64>,
     plastic_nonlinear_severity: Option<f64>,
     plastic_nonlinear_severity_mean: Option<f64>,
     plastic_load_realization_ratio: Option<f64>,
@@ -194,14 +166,11 @@ struct FixtureRunRecord {
     contact_nonlinear_severity_mean: Option<f64>,
     contact_load_realization_ratio: Option<f64>,
     contact_load_amplification_ratio: Option<f64>,
-    thermal_max_residual_norm: Option<f64>,
+    thermal_max_relative_residual_norm: Option<f64>,
     thermal_min_temperature_k: Option<f64>,
     thermal_max_temperature_k: Option<f64>,
     thermal_conductivity_spread_ratio: Option<f64>,
     thermal_heat_capacity_spread_ratio: Option<f64>,
-    thermal_spatial_gradient_index: Option<f64>,
-    thermal_monotonic_response_fraction: Option<f64>,
-    thermal_response_realization_ratio: Option<f64>,
     electromagnetic_enabled: Option<bool>,
     electromagnetic_formulation_coverage_ratio: Option<f64>,
     electromagnetic_magnetostatic_curl_curl_coverage_ratio: Option<f64>,
@@ -243,7 +212,7 @@ struct FixtureRunRecord {
     electromagnetic_resonance_bandwidth_hz: Option<f64>,
     electromagnetic_resonance_quality_factor: Option<f64>,
     electromagnetic_resonance_flux_gain: Option<f64>,
-    publishable: Option<bool>,
+    numerically_acceptable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
     failures: Vec<String>,
@@ -271,21 +240,9 @@ struct BaselineConfig {
 const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "modal_large_gpu_provider",
     "modal_large_gpu_provider_stress16",
-    "transient_long_gpu_provider",
-    "transient_shock_gpu_provider",
-    "cfd_steady_gpu_provider",
     "cht_coupled_gpu_provider",
     "fsi_coupled_gpu_provider",
-    "thermo_mech_kickoff_gpu_provider",
-    "thermo_gradient_benign_gpu_provider",
-    "thermo_gradient_pathological_gpu_provider",
-    "thermo_ramp_smooth_gpu_provider",
-    "thermo_ramp_smooth_field_artifact_gpu_provider",
-    "thermo_shock_oscillatory_gpu_provider",
-    "thermo_shock_oscillatory_field_artifact_gpu_provider",
     "thermal_standalone_ramp_gpu_provider",
-    "electro_thermal_joule_benign_gpu_provider",
-    "electro_thermal_joule_pathological_gpu_provider",
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_benchmark_gpu_provider",
@@ -306,8 +263,6 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "electromagnetic_reference_multi_region_phased_source_gpu_provider",
 ];
 
-const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
-
 fn default_harness_artifact_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-fea-artifacts")
 }
@@ -324,35 +279,8 @@ fn harness_artifact_root() -> PathBuf {
         .unwrap_or_else(default_harness_artifact_root)
 }
 
-fn harness_thermo_field_artifact_root(artifact_root: &Path) -> PathBuf {
-    std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| artifact_root.join("thermo-fields"))
-}
-
 fn synthesized_nonlinear_model() -> AnalysisModel {
-    let geometry = geometry_load_op(
-        "/synthetic/nonlinear_fixture.stl",
-        SYNTHETIC_TRIANGLE_STL.as_bytes(),
-        OperationContext::new(
-            Some("trace-create-model-nonlinear-geometry".to_string()),
-            None,
-        ),
-    )
-    .expect("load synthetic nonlinear geometry for create-model fixture");
-
-    let created = analysis_create_model_op(
-        &geometry.data,
-        AnalysisCreateModelIntentSpec {
-            model_id: "nonlinear_created_fixture_model".to_string(),
-            profile: AnalysisCreateModelProfile::NonlinearStructural,
-            prep_context: None,
-        },
-        OperationContext::new(Some("trace-create-model-nonlinear".to_string()), None),
-    )
-    .expect("synthesize nonlinear model via fea.create_model");
-    created.data
+    fixture_model(FixtureId::NonlinearAssembly)
 }
 
 mod baseline;
@@ -391,9 +319,26 @@ fn fea_conformance_manifest_uses_physical_fixture_language() {
 }
 
 #[test]
+fn fea_prescribed_motion_release_fixture_gates() {
+    let _admission = crate::fea_admission::guard();
+    let spec = manifest_specs()
+        .into_iter()
+        .find(|spec| spec.id == "transient_physical_tet4_support_motion_reference_cpu")
+        .expect("the prescribed-motion release fixture must remain in the manifest");
+    let root = tempfile::TempDir::new().expect("temporary release-fixture artifact root");
+    let root = root.path().to_path_buf();
+    let record = run_fixture(&spec, Some(&root));
+    assert!(
+        record.failures.is_empty(),
+        "prescribed-motion release fixture failed: {}",
+        record.failures.join("; ")
+    );
+}
+
+#[test]
 fn fea_benchmark_conformance_manifest_gates() {
+    let _admission = crate::fea_admission::guard();
     let artifact_root = harness_artifact_root();
-    let thermo_field_artifact_root = harness_thermo_field_artifact_root(&artifact_root);
     let store_root = artifact_root
         .join("store")
         .join(format!("harness-{}", std::process::id()));
@@ -407,7 +352,7 @@ fn fea_benchmark_conformance_manifest_gates() {
     runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
         artifact_root: Some(artifact_root.clone()),
         study_artifact_root: Some(artifact_root.join("studies")),
-        thermo_field_artifact_root: Some(thermo_field_artifact_root),
+        ..Default::default()
     })
     .expect("configure FEA runtime artifact roots for harness");
 

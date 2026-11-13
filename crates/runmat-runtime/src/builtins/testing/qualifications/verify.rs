@@ -6,15 +6,14 @@ use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyEqual",
-    category = "testing/qualifications",
-    summary = "Verify that two values are equal without aborting the test.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_equal(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyEqual",
@@ -30,15 +29,14 @@ async fn verify_equal(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyNotEqual",
-    category = "testing/qualifications",
-    summary = "Verify that two values are not equal without aborting the test.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_not_equal(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyNotEqual",
@@ -54,14 +52,13 @@ async fn verify_not_equal(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyTrue",
-    category = "testing/qualifications",
-    summary = "Verify that a value is logical true without aborting the test.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_true(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "verifyTrue",
@@ -76,14 +73,13 @@ async fn verify_true(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyFalse",
-    category = "testing/qualifications",
-    summary = "Verify that a value is logical false without aborting the test.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_false(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "verifyFalse",
@@ -98,15 +94,14 @@ async fn verify_false(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyGreaterThan",
-    category = "testing/qualifications",
-    summary = "Verify that the actual scalar is greater than the expected scalar.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_greater_than(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyGreaterThan",
@@ -122,15 +117,14 @@ async fn verify_greater_than(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyLessThan",
-    category = "testing/qualifications",
-    summary = "Verify that the actual scalar is less than the expected scalar.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_less_than(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyLessThan",
@@ -146,14 +140,13 @@ async fn verify_less_than(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyEmpty",
-    category = "testing/qualifications",
-    summary = "Verify that a value has no elements.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_empty(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_empty(
         "verifyEmpty",
@@ -168,14 +161,13 @@ async fn verify_empty(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyNotEmpty",
-    category = "testing/qualifications",
-    summary = "Verify that a value has at least one element.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 async fn verify_not_empty(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_empty(
         "verifyNotEmpty",
@@ -190,15 +182,14 @@ async fn verify_not_empty(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.verifyThat",
-    category = "testing/qualifications",
-    summary = "Verify that a value satisfies a compatible constraint.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::verify"
 )]
 fn verify_that(
     receiver: Value,
     actual: Value,
     constraint: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_that(
         "verifyThat",

@@ -1,11 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum BufferUsageClass {
     Generic,
-    Readback,
     MatmulPartial,
     MatmulOut,
     SyrkOut,
@@ -16,6 +15,7 @@ pub enum BufferUsageClass {
 struct ResidencyKey {
     usage: BufferUsageClass,
     allocated_bytes: u64,
+    scope: Option<runmat_accelerate_api::DeviceAllocationScope>,
 }
 
 impl ResidencyKey {
@@ -23,6 +23,7 @@ impl ResidencyKey {
         Self {
             usage,
             allocated_bytes,
+            scope: None,
         }
     }
 }
@@ -31,233 +32,256 @@ impl Hash for ResidencyKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.usage.hash(state);
         self.allocated_bytes.hash(state);
+        self.scope.hash(state);
     }
 }
 
 pub struct BufferResidency {
-    state: Mutex<ResidencyState>,
+    pools: Mutex<HashMap<ResidencyKey, VecDeque<runmat_accelerate_api::WgpuBufferOwner>>>,
     max_per_key: usize,
-    max_total: usize,
 }
 
-struct ResidencyState {
-    pools: HashMap<ResidencyKey, VecDeque<PooledBuffer>>,
-    release_order: VecDeque<(ResidencyKey, u64)>,
-    next_release_id: u64,
-    total: usize,
+/// Optional buffer reuse was declined; this is not a device/free failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PoolRejectionReason {
+    Empty,
+    Full,
+    Poisoned,
+    BookkeepingCapacity,
 }
 
-struct PooledBuffer {
-    release_id: u64,
-    buffer: Arc<wgpu::Buffer>,
+pub struct RejectedBuffer {
+    pub reason: PoolRejectionReason,
+    pub buffer: runmat_accelerate_api::WgpuBufferOwner,
+}
+
+impl Drop for BufferResidency {
+    fn drop(&mut self) {
+        let pools = std::mem::take(self.pools.get_mut().unwrap_or_else(|e| e.into_inner()));
+        for buffers in pools.into_values() {
+            for buffer in buffers {
+                // Final pool disposal, not an uncertain driver free retry.
+                if runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind(|| {
+                    drop(buffer)
+                })
+                .is_err()
+                {
+                    let _ =
+                        runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind(|| {
+                            log::error!(
+                                "WGPU pool terminal reference release unwound; no retry attempted"
+                            );
+                        });
+                }
+            }
+        }
+    }
 }
 
 impl BufferResidency {
-    pub fn new(max_per_key: usize, max_total: usize) -> Self {
+    /// Exact buffer extent used by `acquire`, including its nonzero empty
+    /// binding. This is also the provider's symbolic FusionOut projection.
+    pub(crate) fn requested_bytes(len: usize, element_size: usize) -> Option<u64> {
+        if element_size == 0 {
+            return None;
+        }
+        if len == 0 {
+            u64::try_from(element_size.max(1)).ok()
+        } else {
+            u64::try_from(len)
+                .ok()?
+                .checked_mul(u64::try_from(element_size).ok()?)
+        }
+    }
+
+    pub fn new(max_per_key: usize) -> Self {
         Self {
-            state: Mutex::new(ResidencyState {
-                pools: HashMap::new(),
-                release_order: VecDeque::new(),
-                next_release_id: 0,
-                total: 0,
-            }),
+            pools: Mutex::new(HashMap::new()),
             max_per_key,
-            max_total,
         }
     }
 
     pub fn acquire(
         &self,
-        device: &wgpu::Device,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         usage: BufferUsageClass,
         len: usize,
         element_size: usize,
         label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
+    ) -> anyhow::Result<(runmat_accelerate_api::WgpuBufferOwner, bool)> {
+        let size_bytes = Self::requested_bytes(len, element_size)
+            .ok_or_else(|| anyhow::anyhow!("{label}: allocation byte extent overflow"))?;
         if len == 0 {
-            return (
-                Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some(label),
-                    size: element_size.max(1) as u64,
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_SRC
-                        | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                })),
+            return Ok((
+                runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                    &wgpu::BufferDescriptor {
+                        label: Some(label),
+                        size: size_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    },
+                )),
                 false,
+            ));
+        }
+
+        let mut key = ResidencyKey::new(usage, size_bytes);
+        key.scope = runmat_accelerate_api::current_device_allocation_scope();
+        let reused = self
+            .pools
+            .lock()
+            .ok()
+            .and_then(|mut pools| pools.get_mut(&key).and_then(VecDeque::pop_front));
+        if let Some(buffer) = reused {
+            log::trace!(
+                "buffer_residency: reuse {:?} len={} ptr={:p}",
+                usage,
+                len,
+                runmat_accelerate_api::WgpuBufferOwner::as_ptr(&buffer)
             );
-        }
-        let size_bytes = (len as u64).max(1) * element_size as u64;
-        self.acquire_bytes(
-            device,
-            usage,
-            size_bytes,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            label,
-        )
-    }
-
-    pub fn acquire_readback(
-        &self,
-        device: &wgpu::Device,
-        size_bytes: u64,
-        label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
-        self.acquire_bytes(
-            device,
-            BufferUsageClass::Readback,
-            size_bytes.max(1),
-            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            label,
-        )
-    }
-
-    pub fn acquire_storage_bytes(
-        &self,
-        device: &wgpu::Device,
-        size_bytes: u64,
-        label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
-        self.acquire_bytes(
-            device,
-            BufferUsageClass::Generic,
-            size_bytes.max(1),
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            label,
-        )
-    }
-
-    fn acquire_bytes(
-        &self,
-        device: &wgpu::Device,
-        usage: BufferUsageClass,
-        size_bytes: u64,
-        buffer_usages: wgpu::BufferUsages,
-        label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
-        let key = ResidencyKey::new(usage, size_bytes);
-        if let Ok(mut state) = self.state.lock() {
-            let pooled = state.pools.get_mut(&key).and_then(VecDeque::pop_front);
-            if let Some(pooled) = pooled {
-                state.total = state.total.saturating_sub(1);
-                if let Some(position) = state
-                    .release_order
-                    .iter()
-                    .position(|entry| *entry == (key, pooled.release_id))
-                {
-                    state.release_order.remove(position);
-                }
-                if state.pools.get(&key).is_some_and(VecDeque::is_empty) {
-                    state.pools.remove(&key);
-                }
-                let buffer = pooled.buffer;
-                log::trace!(
-                    "buffer_residency: reuse {:?} bytes={} ptr={:p}",
-                    usage,
-                    size_bytes,
-                    Arc::as_ptr(&buffer)
-                );
-                return (buffer, true);
-            }
+            return Ok((buffer, true));
         }
 
-        let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: size_bytes,
-            usage: buffer_usages,
-            mapped_at_creation: false,
-        }));
+        let buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        ));
         log::trace!(
-            "buffer_residency: new {:?} bytes={} ptr={:p}",
+            "buffer_residency: new {:?} len={} ptr={:p}",
             usage,
-            size_bytes,
-            Arc::as_ptr(&buffer)
+            len,
+            runmat_accelerate_api::WgpuBufferOwner::as_ptr(&buffer)
         );
-        (buffer, false)
+        Ok((buffer, false))
     }
 
     pub fn release(
         &self,
         usage: BufferUsageClass,
         allocated_bytes: u64,
-        buffer: Arc<wgpu::Buffer>,
-    ) {
-        if allocated_bytes == 0 {
-            return;
-        }
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+    ) -> Result<(), RejectedBuffer> {
+        let mut key = ResidencyKey::new(usage, allocated_bytes);
+        key.scope = buffer.creation_scope();
+        release_into(&self.pools, self.max_per_key, key, buffer)
+            .map_err(|(reason, buffer)| RejectedBuffer { reason, buffer })
+    }
 
-        let key = ResidencyKey::new(usage, allocated_bytes);
-        if self.max_per_key == 0 || self.max_total == 0 {
-            return;
-        }
+    /// Detach one scope's reusable buffers, then destroy without the pool lock.
+    pub(super) fn has_scope(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+    ) -> anyhow::Result<bool> {
+        Ok(self
+            .pools
+            .lock()
+            .map_err(|_| anyhow::anyhow!("WGPU scoped pool query is poisoned"))?
+            .iter()
+            .any(|(key, buffers)| {
+                !buffers.is_empty() && key.scope.is_some_and(|created| scope.covers(created))
+            }))
+    }
 
-        if let Ok(mut state) = self.state.lock() {
-            let key_len = state.pools.get(&key).map_or(0, VecDeque::len);
-            if key_len < self.max_per_key {
-                while state.total >= self.max_total {
-                    let Some((evicted_key, evicted_id)) = state.release_order.pop_front() else {
-                        break;
+    pub(super) fn reset_selection_bytes(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+        retiring_records: usize,
+    ) -> Option<u64> {
+        let pools = self.pools.lock().ok()?;
+        let count = pools
+            .keys()
+            .filter(|key| key.scope.is_some_and(|created| scope.covers(created)))
+            .count();
+        // A concurrent final lease can move a quoted record into one new pool
+        // key before the fence settles. Fund that bounded transition too.
+        u64::try_from(
+            count
+                .checked_add(retiring_records)?
+                .checked_mul(std::mem::size_of::<ResidencyKey>())?,
+        )
+        .ok()
+    }
+
+    pub(super) async fn destroy_scope(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+        access: &runmat_accelerate_api::WgpuDeviceAccess,
+    ) -> anyhow::Result<()> {
+        let keys = {
+            let pools = self
+                .pools
+                .lock()
+                .map_err(|_| anyhow::anyhow!("WGPU scoped pool reset is poisoned"))?;
+            let count = pools
+                .keys()
+                .filter(|key| key.scope.is_some_and(|created| scope.covers(created)))
+                .count();
+            let mut keys = runmat_value::exact_capacity_vec(count)?;
+            keys.extend(
+                pools
+                    .keys()
+                    .filter(|key| key.scope.is_some_and(|created| scope.covers(created)))
+                    .copied(),
+            );
+            keys
+        };
+        for key in keys {
+            loop {
+                tokio::task::yield_now().await;
+                let candidate = {
+                    let pools = self
+                        .pools
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("WGPU scoped pool reset is poisoned"))?;
+                    pools.get(&key).and_then(|buffers| buffers.front().cloned())
+                };
+                let Some(buffer) = candidate else {
+                    break;
+                };
+                // A rejected cleanup leaves every owner in the existing pool.
+                // No pool lock crosses a driver call and no queue is detached on
+                // failure, so a retained reset failure cannot fabricate release.
+                access.with_cleanup(|cleanup| cleanup.destroy_buffer(&buffer))?;
+                let removed = {
+                    let mut pools = self
+                        .pools
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("WGPU scoped pool reset is poisoned"))?;
+                    let Some(buffers) = pools.get_mut(&key) else {
+                        continue;
                     };
-                    let mut evicted = None;
-                    let mut remove_key = false;
-                    if let Some(queue) = state.pools.get_mut(&evicted_key) {
-                        if let Some(position) = queue
-                            .iter()
-                            .position(|entry| entry.release_id == evicted_id)
-                        {
-                            evicted = queue.remove(position);
-                        }
-                        remove_key = queue.is_empty();
+                    let removed = if buffers.front().is_some_and(|front| {
+                        runmat_accelerate_api::WgpuBufferOwner::ptr_eq(front, &buffer)
+                    }) {
+                        buffers.pop_front()
+                    } else {
+                        None
+                    };
+                    if buffers.is_empty() {
+                        pools.remove(&key);
                     }
-                    if remove_key {
-                        state.pools.remove(&evicted_key);
-                    }
-                    if let Some(evicted) = evicted {
-                        state.total = state.total.saturating_sub(1);
-                        log::trace!(
-                            "buffer_residency: evict {:?} bytes={} ptr={:p} (global pool full)",
-                            evicted_key.usage,
-                            evicted_key.allocated_bytes,
-                            Arc::as_ptr(&evicted.buffer)
-                        );
-                    }
-                }
-
-                let release_id = state.next_release_id;
-                state.next_release_id = state.next_release_id.wrapping_add(1);
-                log::trace!(
-                    "buffer_residency: release {:?} bytes={} ptr={:p}",
-                    usage,
-                    allocated_bytes,
-                    Arc::as_ptr(&buffer)
-                );
-                state
-                    .pools
-                    .entry(key)
-                    .or_insert_with(VecDeque::new)
-                    .push_back(PooledBuffer { release_id, buffer });
-                state.release_order.push_back((key, release_id));
-                state.total += 1;
-            } else {
-                log::trace!(
-                    "buffer_residency: drop {:?} bytes={} ptr={:p} (pool full)",
-                    usage,
-                    allocated_bytes,
-                    Arc::as_ptr(&buffer)
-                );
+                    removed
+                };
+                drop(removed);
+                drop(buffer);
             }
         }
+        Ok(())
     }
 
     pub fn pooled_bytes(&self, _element_size: usize) -> u64 {
-        self.state
+        self.pools
             .lock()
-            .map(|state| {
-                state.pools.iter().fold(0_u64, |total, (key, buffers)| {
+            .map(|pools| {
+                pools.iter().fold(0_u64, |total, (key, buffers)| {
                     let bytes_each = key.allocated_bytes;
                     total.saturating_add(
                         bytes_each.saturating_mul(u64::try_from(buffers.len()).unwrap_or(u64::MAX)),
@@ -266,14 +290,44 @@ impl BufferResidency {
             })
             .unwrap_or(0)
     }
-
-    #[cfg(test)]
-    pub fn pooled_count(&self) -> usize {
-        self.state.lock().map(|state| state.total).unwrap_or(0)
-    }
-
-    #[cfg(test)]
-    pub fn max_total(&self) -> usize {
-        self.max_total
-    }
 }
+
+fn release_into<T>(
+    pools: &Mutex<HashMap<ResidencyKey, VecDeque<T>>>,
+    max_per_key: usize,
+    key: ResidencyKey,
+    buffer: T,
+) -> Result<(), (PoolRejectionReason, T)> {
+    if key.allocated_bytes == 0 {
+        return Err((PoolRejectionReason::Empty, buffer));
+    }
+    if max_per_key == 0 {
+        return Err((PoolRejectionReason::Full, buffer));
+    }
+    let mut pools = match pools.lock() {
+        Ok(pools) => pools,
+        Err(_) => return Err((PoolRejectionReason::Poisoned, buffer)),
+    };
+    if let Some(queue) = pools.get_mut(&key) {
+        if queue.len() >= max_per_key {
+            return Err((PoolRejectionReason::Full, buffer));
+        }
+        if queue.try_reserve(1).is_err() {
+            return Err((PoolRejectionReason::BookkeepingCapacity, buffer));
+        }
+        queue.push_back(buffer);
+    } else {
+        // Complete fallible bookkeeping before transferring the resource.
+        let mut queue = VecDeque::new();
+        if pools.try_reserve(1).is_err() || queue.try_reserve(1).is_err() {
+            return Err((PoolRejectionReason::BookkeepingCapacity, buffer));
+        }
+        queue.push_back(buffer);
+        pools.insert(key, queue);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "residency/tests.rs"]
+mod tests;

@@ -9,9 +9,16 @@ use super::{
     GeometryObjectRef, GeometryRevisionIdentity,
 };
 
+pub use bindings::validate_exact_geometry_component_bindings;
 pub use codec::{
-    decode_exact_evaluators, decode_exact_topology, decode_geometry_healing_report,
-    encode_exact_evaluators, encode_exact_topology, encode_geometry_healing_report,
+    decode_exact_evaluators, decode_exact_evaluators_with_control, decode_exact_topology,
+    decode_exact_topology_with_control, decode_geometry_healing_report,
+    decode_geometry_healing_report_with_control, encode_exact_evaluators, encode_exact_topology,
+    encode_geometry_healing_report,
+};
+pub use codec::{
+    decode_exact_geometry_components, decode_exact_geometry_components_with_control,
+    DecodedExactGeometryComponents, ExactGeometryComponentBytes,
 };
 pub use construction::build_exact_geometry_closure;
 pub use validation::admit_exact_geometry_closure;
@@ -65,3 +72,5 @@ pub struct EncodedExactGeometryClosure {
 
 #[cfg(test)]
 mod tests;
+
+mod bindings;

@@ -7,199 +7,28 @@
 //! in between (e.g. `xmax = 0.5` for a triangle wave) interpolates between
 //! the two via a piecewise-linear ramp.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SAWTOOTH_ERROR_ARG_COUNT, SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED,
+    SAWTOOTH_ERROR_INTERNAL, SAWTOOTH_ERROR_INVALID_INPUT, SAWTOOTH_ERROR_XMAX_INVALID,
+    SAWTOOTH_ERROR_XMAX_RANGE, SAWTOOTH_GPU_INPUT_EXTENSION, SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, Value};
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
-use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::type_resolvers::numeric_unary_type;
+use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::tensor::tensor_into_value;
+use crate::builtins::math::signal::common::{
+    admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
+    prepared_real_integer_tensor, waveform_input_tensor, PreparedWaveformControl,
+    SignalCooperation, WaveformControlError, WaveformOutputMode, WaveformSampleError,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sawtooth";
 const TWO_PI: f64 = 2.0 * PI;
-
-const SAWTOOTH_NONDOUBLE_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sawtooth-nondouble-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sawtooth with a non-double numeric argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SawtoothNondoubleInputExtension"),
-};
-
-const SAWTOOTH_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sawtooth-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interactive sawtooth gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SawtoothGpuInputExtension"),
-};
-
-pub const SAWTOOTH_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
-    SAWTOOTH_GPU_INPUT_EXTENSION,
-];
-
-const SAWTOOTH_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "t",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer sample times are outside the documented double input domain and are admitted only when every value is exactly representable as binary64.",
-    }];
-const SAWTOOTH_INTEGER_T_XMAX_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "t",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer sample times cross the checked binary64 waveform boundary only in RunMat mode.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "xmax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The typed peak-position control is checked exactly before conversion and must remain in the documented interval from zero through one.",
-    },
-];
-pub const SAWTOOTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sawtooth(integer_t)",
-        inputs: &SAWTOOTH_INTEGER_T_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The RunMat-only form returns double waveform samples and automatic residency may gather through the exact owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sawtooth(integer_t, integer_xmax)",
-        inputs: &SAWTOOTH_INTEGER_T_XMAX_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each independently typed argument is compatibility-gated and proved binary64-exact before evaluation or provider access.",
-    },
-];
-
-const SAWTOOTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sawtooth output sampled at t.",
-}];
-
-const SAWTOOTH_SIG_DEFAULT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "t",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times.",
-}];
-
-const SAWTOOTH_SIG_XMAX_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times.",
-    },
-    BuiltinParamDescriptor {
-        name: "xmax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Peak position fraction in [0, 1].",
-    },
-];
-
-const SAWTOOTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = sawtooth(t)",
-        inputs: &SAWTOOTH_SIG_DEFAULT_INPUTS,
-        outputs: &SAWTOOTH_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = sawtooth(t, xmax)",
-        inputs: &SAWTOOTH_SIG_XMAX_INPUTS,
-        outputs: &SAWTOOTH_OUTPUT,
-    },
-];
-
-const SAWTOOTH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.INVALID_INPUT",
-    identifier: Some("RunMat:sawtooth:InvalidInput"),
-    when: "Primary input is not numeric-real tensor/scalar compatible.",
-    message: "sawtooth: expected numeric input",
-};
-
-const SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:sawtooth:ComplexUnsupported"),
-    when: "Primary input includes complex values.",
-    message: "sawtooth: input must be real; complex values are not supported",
-};
-
-const SAWTOOTH_ERROR_XMAX_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.XMAX_INVALID",
-    identifier: Some("RunMat:sawtooth:XmaxInvalid"),
-    when: "xmax argument is not a real numeric scalar.",
-    message: "sawtooth: xmax must be a real numeric scalar in [0, 1]",
-};
-
-const SAWTOOTH_ERROR_XMAX_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.XMAX_RANGE",
-    identifier: Some("RunMat:sawtooth:XmaxOutOfRange"),
-    when: "xmax argument lies outside [0, 1] or is non-finite.",
-    message: "sawtooth: xmax must be a finite scalar in [0, 1]",
-};
-
-const SAWTOOTH_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.ARG_COUNT",
-    identifier: Some("RunMat:sawtooth:ArgCount"),
-    when: "More than one optional argument is provided.",
-    message: "sawtooth: expected 1 or 2 arguments",
-};
-
-const SAWTOOTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAWTOOTH.INTERNAL",
-    identifier: Some("RunMat:sawtooth:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "sawtooth: internal error",
-};
-
-const SAWTOOTH_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    SAWTOOTH_ERROR_INVALID_INPUT,
-    SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED,
-    SAWTOOTH_ERROR_XMAX_INVALID,
-    SAWTOOTH_ERROR_XMAX_RANGE,
-    SAWTOOTH_ERROR_ARG_COUNT,
-    SAWTOOTH_ERROR_INTERNAL,
-];
-
-pub const SAWTOOTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SAWTOOTH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SAWTOOTH_ERRORS,
-};
 
 fn sawtooth_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     sawtooth_error_with_message(error.message, error)
@@ -234,7 +63,9 @@ fn sawtooth_error_with_source(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    let mut failure = builder.build();
+    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    failure
 }
 
 /// Element-wise scalar sawtooth.
@@ -268,20 +99,37 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
 
 #[runtime_builtin(
     name = "sawtooth",
-    category = "math/signal",
-    summary = "Generate periodic sawtooth waveforms with an optional peak-position control.",
-    keywords = "sawtooth,waveform,signal processing,triangle,periodic",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::signal::sawtooth::SAWTOOTH_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::sawtooth::SAWTOOTH_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::sawtooth::SAWTOOTH_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::sawtooth"
 )]
+async fn sawtooth_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    varargin: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    sawtooth_in_runtime(runtime.as_ref(), t, varargin).await
+}
+
+#[cfg(test)]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
-    if matches!(&t, Value::GpuTensor(_))
+    let varargin = crate::execution::RootedValues::new(varargin)
+        .map_err(|error| error.into_runtime_error())?;
+    sawtooth_in_runtime(None, t, varargin.into()).await
+}
+
+async fn sawtooth_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    varargin: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&SAWTOOTH_ERROR_INTERNAL);
+    cooperation.completed(0).await?;
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || varargin
             .iter()
-            .any(|value| matches!(value, Value::GpuTensor(_)))
+            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SAWTOOTH_GPU_INPUT_EXTENSION,
@@ -297,32 +145,39 @@ async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value
             BUILTIN_NAME,
         )?;
     }
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &t,
-        &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
-        BUILTIN_NAME,
-        "t",
-    )
-    .await?;
-    if let [xmax] = varargin.as_slice() {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            xmax,
-            &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
-            BUILTIN_NAME,
-            "xmax",
-        )
-        .await?;
+    let mut xmax = prepare_xmax(varargin.view())?;
+    admit_real_waveform_sample(&t).map_err(|error| match error {
+        WaveformSampleError::Complex => sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED),
+        WaveformSampleError::Unsupported => sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT),
+    })?;
+    if let Some(control) = &mut xmax {
+        control
+            .admit_host_boundary(&mut cooperation)
+            .await
+            .map_err(xmax_control_error)?;
     }
-    let xmax = parse_xmax(&varargin).await?;
+    if let Some(control) = &xmax {
+        control
+            .admit_resident_metadata(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL)
+            .map_err(xmax_control_error)?;
+    }
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &SAWTOOTH_ERROR_INTERNAL)?;
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION, "t")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
+    let xmax = resolve_xmax(xmax, &mut cooperation).await?;
     match t {
-        Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax).await,
+        Value::GpuTensor(handle) => {
+            sawtooth_gpu(handle, xmax, prepared_payload, &mut cooperation).await
+        }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT))
         }
-        other => sawtooth_real(other, xmax),
+        other => sawtooth_real(other, xmax, &mut cooperation).await,
     }
 }
 
@@ -340,21 +195,23 @@ fn is_supported_nondouble_argument(value: &Value) -> bool {
     }
 }
 
-async fn parse_xmax(varargin: &[Value]) -> BuiltinResult<f64> {
+fn prepare_xmax<'a>(
+    varargin: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<Option<PreparedWaveformControl<'a>>> {
     match varargin.len() {
-        0 => Ok(1.0),
+        0 => Ok(None),
         1 => {
-            let raw = scalar_f64_from_value_async(&varargin[0])
-                .await
-                .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_XMAX_INVALID, err))?
-                .ok_or_else(|| sawtooth_error(&SAWTOOTH_ERROR_XMAX_INVALID))?;
-            if !raw.is_finite() || !(0.0..=1.0).contains(&raw) {
-                return Err(sawtooth_error_with_detail(
-                    &SAWTOOTH_ERROR_XMAX_RANGE,
-                    format!("got {raw}"),
-                ));
+            let control = PreparedWaveformControl::admit(
+                varargin.first().expect("single xmax operand was checked"),
+                &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
+                BUILTIN_NAME,
+                "xmax",
+            )
+            .map_err(xmax_control_error)?;
+            if let Some(raw) = control.host_value() {
+                validate_xmax(raw)?;
             }
-            Ok(raw)
+            Ok(Some(control))
         }
         _ => Err(sawtooth_error_with_detail(
             &SAWTOOTH_ERROR_ARG_COUNT,
@@ -363,40 +220,147 @@ async fn parse_xmax(varargin: &[Value]) -> BuiltinResult<f64> {
     }
 }
 
-async fn sawtooth_gpu(handle: GpuTensorHandle, xmax: f64) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "gpu gather failed", source)
+async fn resolve_xmax(
+    control: Option<PreparedWaveformControl<'_>>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<f64> {
+    let Some(control) = control else {
+        return Ok(1.0);
+    };
+    validate_xmax(
+        control
+            .resolve(cooperation)
+            .await
+            .map_err(xmax_control_error)?,
+    )
+}
+
+fn validate_xmax(raw: f64) -> BuiltinResult<f64> {
+    if !raw.is_finite() || !(0.0..=1.0).contains(&raw) {
+        return Err(sawtooth_error_with_detail(
+            &SAWTOOTH_ERROR_XMAX_RANGE,
+            format!("got {raw}"),
+        ));
+    }
+    Ok(raw)
+}
+
+fn xmax_control_error(error: WaveformControlError) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => {
+            sawtooth_error_with_detail(&SAWTOOTH_ERROR_XMAX_INVALID, detail)
+        }
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "control download failed", source)
+        }
+    }
+}
+
+async fn sawtooth_gpu(
+    handle: GpuTensorHandle,
+    xmax: f64,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|source| {
+                sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "gpu gather failed", source)
+            })?,
+    };
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::Double,
+        |value| sawtooth_scalar(value, xmax),
+        cooperation,
+    )
+    .await?
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL))
+}
+
+async fn sawtooth_real(
+    value: Value,
+    xmax: f64,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
+        .await?
+        .map_err(|error| {
+            error.into_runtime_error(
+                BUILTIN_NAME,
+                &SAWTOOTH_ERROR_INVALID_INPUT,
+                &SAWTOOTH_ERROR_INTERNAL,
+            )
         })?;
-    sawtooth_tensor(tensor, xmax).map(tensor_into_value)
-}
-
-fn sawtooth_real(value: Value, xmax: f64) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INVALID_INPUT, err))?;
-    sawtooth_tensor(tensor, xmax).map(tensor_into_value)
-}
-
-fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
-    let data = tensor
-        .into_numeric_storage()
-        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))?
-        .materialize_f64()
-        .into_iter()
-        .map(|value| sawtooth_scalar(value, xmax))
-        .collect::<Vec<_>>();
-    Tensor::new(data, shape)
-        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::Double,
+        |sample| sawtooth_scalar(sample, xmax),
+        cooperation,
+    )
+    .await?
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &SAWTOOTH_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_host_xmax_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err =
+            call_with_xmax(Value::GpuTensor(input.handle), Value::Num(2.0)).expect_err("host xmax");
+        assert_eq!(err.identifier(), SAWTOOTH_ERROR_XMAX_RANGE.identifier);
+    }
+
+    #[test]
+    fn integer_sample_literal_boundary_matches_catalog_fact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error =
+            call(Value::Int(IntValue::U64((1_u64 << 53) + 1))).expect_err("inexact sample time");
+        assert!(error.message().contains("exactly representable"));
+        assert!(matches!(
+            call(Value::Int(IntValue::U64(1_u64 << 54))).unwrap(),
+            Value::Num(_)
+        ));
+    }
+
+    #[test]
+    fn invalid_host_sample_precedes_resident_xmax_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let control = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        control.probe.mark_unavailable();
+        let error = call_with_xmax(
+            Value::String("invalid".into()),
+            Value::GpuTensor(control.handle),
+        )
+        .expect_err("invalid sample before control download");
+        assert_eq!(error.identifier(), SAWTOOTH_ERROR_INVALID_INPUT.identifier);
+    }
+
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
-    use runmat_value::{IntValue, LogicalArray};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{IntValue, LogicalArray, Tensor};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(sawtooth_builtin(t, Vec::new()))
@@ -429,25 +393,16 @@ mod tests {
     }
 
     #[test]
-    fn sawtooth_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
     fn sawtooth_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("sawtooth builtin");
-        let descriptor = builtin.descriptor.expect("sawtooth descriptor");
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).unwrap();
+        assert!(builtin_function_by_name(BUILTIN_NAME).is_none());
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(BUILTIN_NAME);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
+        let descriptor = entry.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = sawtooth(t)"));
         assert!(labels.contains(&"Y = sawtooth(t, xmax)"));
@@ -486,7 +441,7 @@ mod tests {
         let data: Vec<f64> = (0..n).map(|i| i as f64 * step).collect();
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![1, n]);
+        assert_eq!(result.shape(), vec![1, n]);
         let min = result
             .materialize_f64()
             .iter()
@@ -619,7 +574,7 @@ mod tests {
 
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), vec![1, 2]);
         assert_close(result.materialize_f64()[0], -1.0);
         assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
     }
@@ -662,19 +617,37 @@ mod tests {
             assert!(call(single()).is_ok());
         }
 
-        let handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 0,
-            buffer_id: 9_300_003,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("publish provenance view");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(Value::GpuTensor(handle))
-            .expect_err("MATLAB mode rejects interactive gpuArray input before gather");
+            .expect_err("MATLAB mode rejects explicit interactive gpuArray input before gather");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:SawtoothGpuInputExtension")
         );
+    }
+
+    #[test]
+    fn sawtooth_automatic_residency_can_materialize_in_matlab_mode() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let input = Tensor::new(vec![0.0, std::f64::consts::PI], vec![1, 2]).unwrap();
+            let automatic = gpu_helpers::upload_tensor(provider, &input).unwrap();
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let result = call(Value::GpuTensor(automatic)).expect("automatic host materialization");
+            assert_eq!(expect_tensor(result).materialize_f64(), vec![-1.0, 0.0]);
+        });
     }
 
     #[test]
@@ -702,7 +675,7 @@ mod tests {
     fn sawtooth_preserves_matrix_shape() {
         let tensor = Tensor::new(vec![0.0, PI / 2.0, PI, 3.0 * PI / 2.0], vec![2, 2]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), vec![2, 2]);
         let expected = [-1.0, -0.5, 0.0, 0.5];
         for (got, want) in result.materialize_f64().iter().zip(expected) {
             assert_close(*got, want);

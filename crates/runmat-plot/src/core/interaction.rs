@@ -139,17 +139,11 @@ pub fn egui_raw_input_from_plot_events(
                 modifiers,
             } => {
                 egui_events.push(egui::Event::PointerMoved(egui_pos(position, ppp)));
-                #[cfg(target_arch = "wasm32")]
                 egui_events.push(egui::Event::MouseWheel {
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::vec2(delta.x * 80.0, delta.y * 80.0),
-                    modifiers: egui_modifiers(modifiers),
+                    modifiers: egui_wheel_modifiers(modifiers),
                 });
-                #[cfg(not(target_arch = "wasm32"))]
-                egui_events.push(egui::Event::Scroll(egui::vec2(
-                    delta.x * 80.0,
-                    delta.y * 80.0,
-                )));
                 if modifiers.ctrl || modifiers.meta {
                     egui_events.push(egui::Event::Zoom((1.0 + delta.y * 0.08).clamp(0.2, 5.0)));
                 }
@@ -178,6 +172,96 @@ pub fn egui_raw_input_from_plot_events(
     }
 }
 
+#[cfg(all(test, feature = "egui-overlay"))]
+mod egui_input_tests {
+    use super::*;
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn modified_wheel_keeps_platform_zoom_presentation() {
+        let input = egui_raw_input_from_plot_events(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0)),
+            1.0,
+            vec![PlotEvent::MouseWheel {
+                position: Vec2::new(12.0, 18.0),
+                delta: Vec2::new(0.0, 1.0),
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Modifiers::default()
+                },
+            }],
+        );
+        assert_eq!(input.events.len(), 3);
+        assert!(matches!(input.events[0], egui::Event::PointerMoved(_)));
+        assert!(matches!(
+            input.events[1],
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                ..
+            }
+        ));
+        assert!(
+            matches!(input.events[2], egui::Event::Zoom(factor) if (factor - 1.08).abs() < 1e-6)
+        );
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            assert!(matches!(
+                input.events[1],
+                egui::Event::MouseWheel {
+                    modifiers: egui::Modifiers {
+                        ctrl: false,
+                        mac_cmd: false,
+                        command: false,
+                        ..
+                    },
+                    ..
+                }
+            ));
+            let mut observed = None;
+            let context = egui::Context::default();
+            let _ = context.run(input, |ctx| {
+                observed = Some(ctx.input(|state| state.zoom_delta()))
+            });
+            assert!((observed.expect("zoom factor") - 1.08).abs() < 1e-6);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        assert!(matches!(
+            input.events[1],
+            egui::Event::MouseWheel {
+                modifiers: egui::Modifiers { ctrl: true, .. },
+                ..
+            }
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_modified_wheel_uses_original_zoom_clamps() {
+        for (delta_y, expected) in [(-1.0, 0.92), (-100.0, 0.2), (100.0, 5.0)] {
+            let input = egui_raw_input_from_plot_events(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0)),
+                1.0,
+                vec![PlotEvent::MouseWheel {
+                    position: Vec2::ZERO,
+                    delta: Vec2::new(0.0, delta_y),
+                    modifiers: Modifiers {
+                        meta: true,
+                        ..Modifiers::default()
+                    },
+                }],
+            );
+            let mut observed = None;
+            let context = egui::Context::default();
+            let _ = context.run(input, |ctx| {
+                observed = Some(ctx.input(|state| state.zoom_delta()))
+            });
+            assert!((observed.expect("zoom factor") - expected).abs() < 1e-6);
+        }
+    }
+}
+
 #[cfg(feature = "egui-overlay")]
 fn egui_pos(position: Vec2, pixels_per_point: f32) -> egui::Pos2 {
     egui::pos2(position.x / pixels_per_point, position.y / pixels_per_point)
@@ -192,6 +276,18 @@ fn egui_modifiers(value: Modifiers) -> egui::Modifiers {
         mac_cmd: value.meta,
         command: value.meta || value.ctrl,
     }
+}
+
+#[cfg(all(feature = "egui-overlay", not(target_arch = "wasm32")))]
+fn egui_wheel_modifiers(_value: Modifiers) -> egui::Modifiers {
+    // Native's old Scroll event carried no modifiers. Keep its plain scrolling
+    // (including Shift) and separately emit the original clamped Zoom event.
+    egui::Modifiers::NONE
+}
+
+#[cfg(all(feature = "egui-overlay", target_arch = "wasm32"))]
+fn egui_wheel_modifiers(value: Modifiers) -> egui::Modifiers {
+    egui_modifiers(value)
 }
 
 #[cfg(feature = "egui-overlay")]

@@ -1,31 +1,20 @@
 //! MATLAB-compatible `mean` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Type,
+use runmat_builtins::{BuiltinErrorDescriptor, MeanControl, MeanOutputClass as OutputTemplate};
+pub use runmat_builtins::{
+    MEAN_ERROR_INTERNAL, MEAN_ERROR_INVALID_ARGUMENT, MEAN_ERROR_INVALID_INPUT,
 };
 use runmat_value::{
-    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar,
-    NumericStorage, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, Tensor,
+    Value,
 };
 const NAME: &str = "mean";
-
-use runmat_builtins::ResolveContext;
-
-fn mean_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    reduce_numeric_type(args, ctx)
-}
 
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -36,331 +25,7 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::dispatcher;
-
-const MEAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Mean reduction result.",
-}];
-
-const MEAN_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const MEAN_INPUTS_A_DIM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Dimension selector or vector of dimensions.",
-    },
-];
-
-const MEAN_INPUTS_A_ALL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "all",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"all\""),
-        description: "Reduce across all dimensions.",
-    },
-];
-
-const MEAN_INPUTS_A_MISSINGFLAG: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "missingflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includemissing\""),
-        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
-    },
-];
-
-const MEAN_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "outtype",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"default\""),
-        description: "Output class specifier: \"double\", \"default\", or \"native\".",
-    },
-];
-
-const MEAN_INPUTS_A_DIM_MISSINGFLAG: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Dimension selector or vector of dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "missingflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includemissing\""),
-        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
-    },
-];
-
-const MEAN_INPUTS_A_MISSINGFLAG_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "missingflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includemissing\""),
-        description: "Missing-data handling mode: \"includemissing\" or \"omitmissing\".",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Dimension selector or vector of dimensions.",
-    },
-];
-
-const MEAN_INPUTS_A_WEIGHTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "Weights",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Weights\""),
-        description: "Weighting-scheme name.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Nonnegative single- or double-precision weighting scheme.",
-    },
-];
-
-const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A)",
-        inputs: &MEAN_INPUTS_A,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, dim)",
-        inputs: &MEAN_INPUTS_A_DIM,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, \"all\")",
-        inputs: &MEAN_INPUTS_A_ALL,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, missingflag)",
-        inputs: &MEAN_INPUTS_A_MISSINGFLAG,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, outtype)",
-        inputs: &MEAN_INPUTS_A_OUTTYPE,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, dim, missingflag)",
-        inputs: &MEAN_INPUTS_A_DIM_MISSINGFLAG,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, missingflag, dim)",
-        inputs: &MEAN_INPUTS_A_MISSINGFLAG_DIM,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(A, vecdim)",
-        inputs: &MEAN_INPUTS_A_DIM,
-        outputs: &MEAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mean(___, Weights=W)",
-        inputs: &MEAN_INPUTS_A_WEIGHTS,
-        outputs: &MEAN_OUTPUT,
-    },
-];
-
-const MEAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEAN.INVALID_ARGUMENT",
-    identifier: Some("RunMat:mean:InvalidArgument"),
-    when: "Dimension, missing-data, weights, or output class argument grammar is invalid.",
-    message: "mean: invalid argument",
-};
-
-const MEAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEAN.INVALID_INPUT",
-    identifier: Some("RunMat:mean:InvalidInput"),
-    when: "Input values cannot be converted to supported mean reduction domains.",
-    message: "mean: invalid input",
-};
-
-const MEAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEAN.INTERNAL",
-    identifier: Some("RunMat:mean:Internal"),
-    when:
-        "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
-    message: "mean: internal reduction failure",
-};
-
-const MEAN_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    MEAN_ERROR_INVALID_ARGUMENT,
-    MEAN_ERROR_INVALID_INPUT,
-    MEAN_ERROR_INTERNAL,
-];
-
-pub const MEAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MEAN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MEAN_ERRORS,
-};
-
-const INTEGER_DATA_AND_DIM_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Ordinary real arrays accept all eight integer storage classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim_or_vecdim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Optional dimensions accept exact positive integer scalars or vectors in every integer class; integer-valued double selectors remain allowed.",
-    },
-];
-
-const WEIGHTED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Weighted reduction retains the ordinary all-class integer data contract.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The optional weighted-reduction dimension accepts every integer class and integer-valued double; weights cannot be combined with vecdim or all.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "W",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Weights are restricted to nonnegative single or double arrays; integer and logical weights are rejected before reduction.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = mean(A, dim_or_vecdim, missingflag, \"default\"|\"double\")",
-        inputs: &INTEGER_DATA_AND_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Default and explicit-double integer means enter the floating reduction domain and return double; all and omitted dimensions share this rule, and supported resident inputs remain resident.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = mean(A, dim_or_vecdim, missingflag, \"native\")",
-        inputs: &INTEGER_DATA_AND_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native integer mean widens the full accumulation and performs one nearest/ties-away division; the mean remains within the input class range without intermediate saturation, and CPU/provider paths preserve all eight classes.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = mean(A, dim, missingflag, Weights=W, \"default\"|\"double\")",
-        inputs: &WEIGHTED_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer data with floating weights returns double by default; integer weights are rejected, and resident fallback output is re-uploaded.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = mean(A, dim, missingflag, Weights=W, \"native\")",
-        inputs: &WEIGHTED_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native weighted integer mean anchors exact wide integer values, applies nonnegative floating weights, rounds once with ties away from zero, remains within the input class range, and re-uploads gathered resident results.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -377,12 +42,12 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         },
     ],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: Some(256),
     workgroup_size: Some(256),
     accepts_nan_mode: true,
-    notes: "Providers can specialise mean reductions; omitnan currently falls back to the host.",
+    notes: "Real floating reductions, including omitnan, stay resident when the exact owner supports the required hooks. An unsupported hook uses the admitted class-preserving host boundary and restores to the input owner; a singleton identity may share its allocation. Complex inputs retain their typed host fallback unless an owner supplies a complete complex route.",
 };
 
 fn mean_descriptor_error_with_message(
@@ -415,7 +80,12 @@ fn mean_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     mean_descriptor_error_with_detail(&MEAN_ERROR_INTERNAL, detail)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean")]
+#[path = "mean/fusion_contract.rs"]
+mod fusion_contract;
+#[path = "mean/fusion_sign.rs"]
+mod fusion_sign;
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean", reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mean",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -423,7 +93,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: true,
-    notes: "Fusion fallback currently gathers to host; future kernels will divide the accumulated sum by slice size.",
+    notes: "The typed reduction owner binds axes, NaN handling, accumulation and output classes, and mean division; weighted forms retain their ordinary runtime path.",
 };
 
 #[derive(Clone)]
@@ -435,44 +105,29 @@ struct ParsedArguments {
 }
 
 #[derive(Clone)]
-enum OutputTemplate {
-    Default,
-    Double,
-    Native,
-}
-
-#[derive(Clone)]
 struct MeanWeights {
     storage: MeanWeightStorage,
     shape: Vec<usize>,
 }
 
 #[derive(Clone)]
-enum MeanWeightStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
-}
+struct MeanWeightStorage(Tensor);
 
 impl MeanWeights {
     fn len(&self) -> usize {
-        match &self.storage {
-            MeanWeightStorage::F64(values) => values.len(),
-            MeanWeightStorage::F32(values) => values.len(),
-        }
+        self.storage.0.len()
     }
 
     fn f64_at(&self, index: usize) -> f64 {
-        match &self.storage {
-            MeanWeightStorage::F64(values) => values[index],
-            MeanWeightStorage::F32(values) => f64::from(values[index]),
+        match self.storage.0.numeric_value_at(index) {
+            Some(runmat_value::NumericScalar::F64(value)) => value,
+            Some(runmat_value::NumericScalar::F32(value)) => f64::from(value),
+            _ => unreachable!("validated mean weight class and coordinate"),
         }
     }
 
     fn f32_at(&self, index: usize) -> f32 {
-        match &self.storage {
-            MeanWeightStorage::F64(values) => values[index] as f32,
-            MeanWeightStorage::F32(values) => values[index],
-        }
+        self.f64_at(index) as f32
     }
 }
 
@@ -507,6 +162,7 @@ struct InputMeta {
     class: InputClass,
     device: DevicePreference,
     numeric_dtype: Option<NumericDType>,
+    source: Option<GpuTensorHandle>,
 }
 
 impl InputMeta {
@@ -547,6 +203,10 @@ impl InputMeta {
             class,
             device,
             numeric_dtype,
+            source: match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            },
         }
     }
 }
@@ -646,21 +306,26 @@ enum MeanAxes {
 
 #[runtime_builtin(
     name = "mean",
-    category = "math/reduction",
-    summary = "Average elements of scalars, vectors, matrices, or N-D tensors.",
-    keywords = "mean,average,reduction,gpu,omitnan",
-    accel = "reduction",
-    type_resolver(mean_type),
-    descriptor(crate::builtins::math::reduction::mean::MEAN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::reduction::mean::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
-pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn mean_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    mean_with_nan_policy(value, rest, None).await
+}
+
+pub(crate) async fn mean_with_nan_policy(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+    imposed_nan_mode: Option<ReductionNaN>,
+) -> crate::BuiltinResult<Value> {
     // Normalise argument order defensively:
     // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
     // argument exists in 'rest', swap them so we interpret calls like
     // mean('all', X) as mean(X, 'all').
-    let (value, rest) = normalise_mean_call_args(value, rest);
+    let (value, rest) = normalise_mean_call_args(value, rest)?;
 
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(mean_invalid_input(
@@ -669,11 +334,17 @@ pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::Built
     }
 
     let input_meta = InputMeta::from_value(&value);
-    let parsed = parse_arguments(&rest).await?;
+    let mut parsed = parse_arguments(rest.view()).await?;
+    // Legacy NaN aliases impose omission after parsing the owning reduction's
+    // public controls. This retains their previous behavior even if a caller
+    // also supplied an explicit inclusion flag, without fabricating an option.
+    if let Some(mode) = imposed_nan_mode {
+        parsed.nan_mode = mode;
+    }
     if matches!(parsed.output, OutputTemplate::Native) {
         if let Value::GpuTensor(handle) = &value {
             if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-                return mean_native_integer_gpu(handle.clone(), &parsed).await;
+                return native_resident::evaluate(handle.clone(), &parsed).await;
             }
         }
         if let Some(result) = mean_native_integer(&value, &parsed)? {
@@ -699,7 +370,7 @@ fn mean_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult
             let Some(storage) = tensor.integer_storage() else {
                 return Ok(None);
             };
-            (storage.clone(), tensor.shape.clone())
+            (storage.clone(), tensor.shape().to_vec())
         }
         _ => return Ok(None),
     };
@@ -722,57 +393,8 @@ fn mean_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult
         .map_err(mean_internal_error)
 }
 
-async fn mean_native_integer_gpu(
-    handle: GpuTensorHandle,
-    parsed: &ParsedArguments,
-) -> BuiltinResult<Value> {
-    if let Some(weights) = parsed.weights.as_ref() {
-        let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
-            mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
-        })?;
-        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-        let storage = gathered
-            .integer_storage()
-            .cloned()
-            .ok_or_else(|| mean_internal_error("mean: expected gathered integer storage"))?;
-        let dim = match &parsed.axes {
-            MeanAxes::Default => default_dimension_from_shape(&gathered.shape),
-            MeanAxes::Dim(dim) => *dim,
-            MeanAxes::Vec(_) | MeanAxes::All => {
-                return Err(mean_invalid_argument(
-                    "mean: Weights cannot be combined with vecdim or 'all'",
-                ));
-            }
-        };
-        let result = weighted_integer_mean(&storage, &gathered.shape, dim, weights)?;
-        let uploaded = gpu_helpers::upload_tensor(provider, &result).map_err(|error| {
-            mean_internal_error(format!(
-                "mean: failed to upload weighted native result: {error}"
-            ))
-        })?;
-        return Ok(Value::GpuTensor(uploaded));
-    }
-    let dims = resolve_native_dims(&handle.shape, &parsed.axes)?;
-    if dims.is_empty() {
-        return Ok(Value::GpuTensor(handle));
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
-        mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
-    })?;
-    let result = if dims.len() == handle.shape.len() {
-        provider.reduce_integer_mean_native(&handle).await
-    } else if dims.len() == 1 {
-        provider
-            .reduce_integer_mean_native_dim(&handle, dims[0])
-            .await
-    } else {
-        provider
-            .reduce_integer_mean_native_dims(&handle, &dims)
-            .await
-    }
-    .map_err(|err| mean_internal_error(format!("mean: {err}")))?;
-    Ok(Value::GpuTensor(result))
-}
+#[path = "mean/native_resident.rs"]
+mod native_resident;
 
 fn resolve_native_dims(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<Vec<usize>> {
     let mut dims = match axes {
@@ -787,21 +409,38 @@ fn resolve_native_dims(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<Vec<us
     Ok(dims)
 }
 
-fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {
+enum NormalizedMeanArguments {
+    Retained(crate::call::BuiltinArguments),
+    Legacy(Vec<Value>),
+}
+
+impl NormalizedMeanArguments {
+    fn view(&self) -> crate::call::FunctionArgumentView<'_> {
+        match self {
+            Self::Retained(args) => args.view(),
+            Self::Legacy(args) => crate::call::FunctionArgumentView::from_slice(args),
+        }
+    }
+}
+
+fn normalise_mean_call_args(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<(Value, NormalizedMeanArguments)> {
     if is_data_like(&value) {
-        return (value, rest);
+        return Ok((value, NormalizedMeanArguments::Retained(rest)));
     }
     if let Some(idx) = rest.iter().position(is_data_like) {
-        let mut rest_mut = rest;
+        let mut rest_mut = rest.materialize_legacy_contiguous(None)?;
         let new_value = rest_mut.remove(idx);
         let mut new_rest = Vec::with_capacity(rest_mut.len() + 1);
         // Keep the original non-data 'value' (e.g., 'all') in rest so it can be parsed as a keyword
         new_rest.push(value);
         // Append the remaining rest args
         new_rest.extend(rest_mut);
-        return (new_value, new_rest);
+        return Ok((new_value, NormalizedMeanArguments::Legacy(new_rest)));
     }
-    (value, rest)
+    Ok((value, NormalizedMeanArguments::Retained(rest)))
 }
 
 fn is_data_like(v: &Value) -> bool {
@@ -818,21 +457,28 @@ fn is_data_like(v: &Value) -> bool {
     )
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedArguments> {
+    parse_arguments_cooperative(args, None, None).await
+}
+async fn parse_arguments_cooperative(
+    args: crate::call::FunctionArgumentView<'_>,
+    mut cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = MeanAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
     let mut output = OutputTemplate::Default;
     let mut output_set = false;
     let mut weights = None;
-    let tokens = tokens_from_values(args);
-
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "weights" => {
+        if let Some(text) = keyword_of(arg)? {
+            match MeanControl::from_public_option(&text) {
+                Some(MeanControl::Weights) => {
                     if weights.is_some() {
                         return Err(mean_invalid_argument(
                             "mean: Weights may be specified only once",
@@ -841,21 +487,17 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     let value = args
                         .get(idx + 1)
                         .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
-                    weights = Some(parse_weights(value).await?);
+                    weights =
+                        Some(parse_weights(value, cooperation.as_deref_mut(), runtime).await?);
                     idx += 2;
                     continue;
                 }
-                "omitnan" | "omitmissing" => {
-                    nan_mode = ReductionNaN::Omit;
+                Some(MeanControl::Missing(mode)) => {
+                    nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includenan" | "includemissing" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(MeanControl::All) => {
                     if axes_set && !matches!(axes, MeanAxes::Default) {
                         return Err(mean_invalid_argument(
                             "mean: 'all' cannot be combined with an explicit dimension",
@@ -866,110 +508,40 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                _ => {}
-            }
-        }
-        if let Some(keyword) = keyword_of(arg) {
-            match keyword.as_str() {
-                "weights" => {
-                    if weights.is_some() {
-                        return Err(mean_invalid_argument(
-                            "mean: Weights may be specified only once",
-                        ));
-                    }
-                    let value = args
-                        .get(idx + 1)
-                        .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
-                    weights = Some(parse_weights(value).await?);
-                    idx += 2;
-                    continue;
-                }
-                "omitnan" | "omitmissing" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includenan" | "includemissing" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if axes_set && !matches!(axes, MeanAxes::Default) {
-                        return Err(mean_invalid_argument(
-                            "mean: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    axes = MeanAxes::All;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
-                }
-                "default" => {
+                Some(MeanControl::Output(class)) => {
                     if output_set {
                         return Err(mean_invalid_argument(
                             "mean: multiple output class specifications provided",
                         ));
                     }
-                    output = OutputTemplate::Default;
+                    output = class;
                     output_set = true;
                     idx += 1;
                     continue;
                 }
-                "double" => {
-                    if output_set {
-                        return Err(mean_invalid_argument(
-                            "mean: multiple output class specifications provided",
-                        ));
-                    }
-                    output = OutputTemplate::Double;
-                    output_set = true;
-                    idx += 1;
-                    continue;
+                None if text.trim().is_empty() => {
+                    return Err(mean_invalid_argument(
+                        "mean: dimension string must not be empty",
+                    ));
                 }
-                "native" => {
-                    if output_set {
-                        return Err(mean_invalid_argument(
-                            "mean: multiple output class specifications provided",
-                        ));
-                    }
-                    output = OutputTemplate::Native;
-                    output_set = true;
-                    idx += 1;
-                    continue;
+                None => {
+                    return Err(mean_invalid_argument(format!(
+                        "mean: unrecognised argument {arg:?}"
+                    )));
                 }
-                _ => {}
             }
         }
 
-        if !axes_set || matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg).await? {
-                if matches!(selection, MeanAxes::All)
-                    && axes_set
-                    && !matches!(axes, MeanAxes::Default)
-                {
-                    return Err(mean_invalid_argument(
-                        "mean: 'all' cannot be combined with an explicit dimension",
-                    ));
-                }
-                axes = selection;
-                axes_set = true;
-                idx += 1;
-                continue;
-            }
-        }
-
-        if axes_set && !matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg).await? {
-                if matches!(selection, MeanAxes::All) {
-                    return Err(mean_invalid_argument(
-                        "mean: 'all' cannot be combined with an explicit dimension",
-                    ));
-                }
+        if let Some(selection) = parse_axes(arg).await? {
+            if axes_set && !matches!(axes, MeanAxes::Default) {
                 return Err(mean_invalid_argument(
                     "mean: multiple dimension specifications provided",
                 ));
             }
+            axes = selection;
+            axes_set = true;
+            idx += 1;
+            continue;
         }
 
         return Err(mean_invalid_argument(format!(
@@ -991,7 +563,16 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     })
 }
 
-async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
+async fn parse_weights(
+    value: &Value,
+    mut cooperation: Option<&mut crate::execution::CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<MeanWeights> {
+    if let Some(c) = cooperation.as_deref_mut() {
+        c.checkpoint(0)
+            .await
+            .map_err(|e| e.into_runtime_error_in_context(runtime))?;
+    }
     let tensor = match value {
         Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
             .map_err(|error| mean_internal_error(format!("mean: {error}")))?,
@@ -1012,18 +593,24 @@ async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
             ));
         }
     };
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_numeric_storage().map_err(mean_internal_error)? {
-        NumericStorage::F64(values) => MeanWeightStorage::F64(values),
-        NumericStorage::F32(values) => MeanWeightStorage::F32(values),
-        _ => {
-            return Err(mean_invalid_argument(
-                "mean: Weights must be single or double",
-            ));
-        }
-    };
+    let shape = tensor.shape().to_vec();
+    tensor.validate_shape().map_err(mean_internal_error)?;
+    if !matches!(
+        tensor.numeric_dtype(),
+        NumericDType::F64 | NumericDType::F32
+    ) {
+        return Err(mean_invalid_argument(
+            "mean: Weights must be single or double",
+        ));
+    }
+    let storage = MeanWeightStorage(tensor);
     let weights = MeanWeights { storage, shape };
     for index in 0..weights.len() {
+        if let Some(c) = cooperation.as_deref_mut() {
+            c.checkpoint(1)
+                .await
+                .map_err(|e| e.into_runtime_error_in_context(runtime))?;
+        }
         let weight = weights.f64_at(index);
         if weight.is_nan() || weight < 0.0 {
             return Err(mean_invalid_argument(format!(
@@ -1036,25 +623,12 @@ async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
-    if let Some(text) = value_as_str(value) {
-        let lowered = text.trim().to_ascii_lowercase();
-        return match lowered.as_str() {
-            "all" => Ok(Some(MeanAxes::All)),
-            "omitnan" | "includenan" | "omitmissing" | "includemissing" | "double" | "native"
-            | "default" | "weights" => Ok(None),
-            "" => Err(mean_invalid_argument(
-                "mean: dimension string must not be empty",
-            )),
-            _ => Ok(None),
-        };
-    }
-
     let scalar_hint = match value {
         Value::Num(_) | Value::Int(_) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         Value::GpuTensor(handle) => {
-            is_scalar_shape(&handle.shape) || tensor::element_count(&handle.shape) == 1
+            is_scalar_shape(handle.shape()) || tensor::element_count(handle.shape()) == 1
         }
         _ => false,
     };
@@ -1064,7 +638,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         | Value::LogicalArray(_)
         | Value::Int(_)
         | Value::Num(_)
-        | Value::GpuTensor(_) => tensor::dims_from_value_async(value)
+        | Value::GpuTensor(_) => tensor::dims_from_value_async_typed(value)
             .await
             .map_err(|err| map_dims_error(err, scalar_hint))?,
         Value::Bool(_) => {
@@ -1099,31 +673,34 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
     Ok(Some(MeanAxes::Vec(dims)))
 }
 
-fn value_as_str(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        _ => None,
-    }
-}
-
-fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
-    if message.contains("non-negative") {
-        if scalar {
-            return mean_invalid_argument("mean: dimension must be >= 1");
-        }
-        return mean_invalid_argument("mean: dimension entries must be >= 1");
-    }
-    if scalar {
-        if message.contains("finite") {
-            return mean_invalid_argument("mean: dimension must be finite");
-        }
-        if message.contains("integer") {
-            return mean_invalid_argument("mean: dimension must be an integer");
-        }
-    }
-    mean_invalid_argument("mean: dimension entries must be finite integers")
+fn map_dims_error(error: tensor::DimensionDecodeError, scalar: bool) -> RuntimeError {
+    use tensor::DimensionDecodeError;
+    let message = match (&error, scalar) {
+        (
+            DimensionDecodeError::Negative
+            | DimensionDecodeError::IntegerNegative
+            | DimensionDecodeError::IntegerOutOfPlatformRange
+            | DimensionDecodeError::BelowMinimum,
+            true,
+        ) => "mean: dimension must be >= 1",
+        (
+            DimensionDecodeError::Negative
+            | DimensionDecodeError::IntegerNegative
+            | DimensionDecodeError::IntegerOutOfPlatformRange
+            | DimensionDecodeError::BelowMinimum,
+            false,
+        ) => "mean: dimension entries must be >= 1",
+        (DimensionDecodeError::NonFinite, true) => "mean: dimension must be finite",
+        (DimensionDecodeError::Fractional, true) => "mean: dimension must be an integer",
+        (
+            DimensionDecodeError::NonFinite
+            | DimensionDecodeError::Fractional
+            | DimensionDecodeError::OutOfPlatformRange
+            | DimensionDecodeError::Gather(_),
+            _,
+        ) => "mean: dimension entries must be finite integers",
+    };
+    error.attach_cause(mean_invalid_argument(message))
 }
 
 #[derive(Clone, Copy)]
@@ -1228,16 +805,17 @@ fn weighted_real_mean(
     if dim == 0 {
         return Err(mean_invalid_argument("mean: dimension must be >= 1"));
     }
-    let reduce_len = if dim <= tensor.shape.len() {
-        tensor.shape[dim - 1]
+    let reduce_len = if dim <= tensor.shape().len() {
+        tensor.shape()[dim - 1]
     } else {
         1
     };
-    let layout = validate_weight_shape(weights, &tensor.shape, reduce_len)?;
-    if dim > tensor.shape.len() {
+    let layout = validate_weight_shape(weights, tensor.shape(), reduce_len)?;
+    if dim > tensor.shape().len() {
         return Ok(tensor::coerce_tensor_dtype(tensor.clone(), dtype));
     }
-    let output_shape = reduction_shape(&tensor.shape, dim).unwrap_or_else(|| tensor.shape.clone());
+    let output_shape =
+        reduction_shape(tensor.shape(), dim).unwrap_or_else(|| tensor.shape().to_vec());
     if reduce_len == 0 || tensor.is_empty() {
         return match dtype {
             NumericDType::F32 => Tensor::from_f32(
@@ -1269,9 +847,9 @@ fn weighted_real_mean_f64(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<Tensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
 
     for after in 0..stride_after {
@@ -1331,9 +909,9 @@ fn weighted_real_mean_f32(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<Tensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
 
     for after in 0..stride_after {
@@ -1576,16 +1154,17 @@ fn weighted_complex_mean(
     if dim == 0 {
         return Err(mean_invalid_argument("mean: dimension must be >= 1"));
     }
-    let reduce_len = if dim <= tensor.shape.len() {
-        tensor.shape[dim - 1]
+    let reduce_len = if dim <= tensor.shape().len() {
+        tensor.shape()[dim - 1]
     } else {
         1
     };
-    let layout = validate_weight_shape(weights, &tensor.shape, reduce_len)?;
-    if dim > tensor.shape.len() {
+    let layout = validate_weight_shape(weights, tensor.shape(), reduce_len)?;
+    if dim > tensor.shape().len() {
         return coerce_complex_tensor_dtype(tensor.clone(), dtype);
     }
-    let output_shape = reduction_shape(&tensor.shape, dim).unwrap_or_else(|| tensor.shape.clone());
+    let output_shape =
+        reduction_shape(tensor.shape(), dim).unwrap_or_else(|| tensor.shape().to_vec());
     if reduce_len == 0 || tensor.is_empty() {
         return match dtype {
             NumericDType::F32 => ComplexTensor::from_f32(
@@ -1616,9 +1195,9 @@ fn weighted_complex_mean_f64(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<ComplexTensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
     for after in 0..stride_after {
         for before in 0..stride_before {
@@ -1682,9 +1261,9 @@ fn weighted_complex_mean_f32(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<ComplexTensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
     for after in 0..stride_after {
         for before in 0..stride_before {
@@ -1743,13 +1322,14 @@ fn coerce_complex_tensor_dtype(
     tensor: ComplexTensor,
     dtype: NumericDType,
 ) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     match (tensor.into_complex_storage(), dtype) {
         (ComplexStorage::F64(values), NumericDType::F64) => {
-            ComplexTensor::new(values, shape).map_err(mean_internal_error)
+            ComplexTensor::new(values.into_iter().collect(), shape).map_err(mean_internal_error)
         }
         (ComplexStorage::F32(values), NumericDType::F32) => {
-            ComplexTensor::from_f32(values, shape).map_err(mean_internal_error)
+            ComplexTensor::from_f32(values.into_iter().collect(), shape)
+                .map_err(mean_internal_error)
         }
         (ComplexStorage::F32(values), NumericDType::F64) => ComplexTensor::new(
             values
@@ -1779,8 +1359,15 @@ fn coerce_complex_tensor_dtype(
 
 fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("mean", value).map_err(mean_invalid_input)?;
+    // Native integer mean has its own widened arithmetic path above. Default
+    // and double means need a fractional carrier even for identity dimensions.
+    let tensor = if tensor.integer_storage().is_some() {
+        tensor::coerce_tensor_dtype(tensor, NumericDType::F64)
+    } else {
+        tensor
+    };
     let reduced = if let Some(weights) = args.weights.as_ref() {
-        let dim = weighted_dimension(&tensor.shape, &args.axes)?;
+        let dim = weighted_dimension(tensor.shape(), &args.axes)?;
         let dtype = weighted_computation_dtype(tensor.numeric_dtype(), &args.output);
         weighted_real_mean(&tensor, dim, args.nan_mode, weights, dtype)?
     } else {
@@ -1797,7 +1384,7 @@ fn mean_host_complex_scalar(re: f64, im: f64, args: &ParsedArguments) -> Builtin
 
 fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> BuiltinResult<Value> {
     let reduced = if let Some(weights) = args.weights.as_ref() {
-        let dim = weighted_dimension(&tensor.shape, &args.axes)?;
+        let dim = weighted_dimension(tensor.shape(), &args.axes)?;
         let dtype = weighted_computation_dtype(tensor.numeric_dtype(), &args.output);
         weighted_complex_mean(&tensor, dim, args.nan_mode, weights, dtype)?
     } else {
@@ -1807,324 +1394,148 @@ fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> Bu
 }
 
 async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    #[cfg(all(test, feature = "wgpu"))]
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        mean_internal_error("mean: GPU input has no owning provider")
+    })?;
+    if args.weights.is_none()
+        && (runmat_accelerate_api::handle_integer_type(&handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(&handle))
     {
-        if handle.device_id != 0 {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
+        // Real floating reduction hooks do not promise fractional results for
+        // integer/logical storage. Reuse the host default-class authority; the
+        // caller's retained source restores through this exact allocation owner.
+        let owner = gpu_helpers::exact_provider_for_handle(&handle)
+            .ok_or_else(|| mean_internal_error("mean: GPU input has no owning provider"))?;
+        let gathered =
+            gpu_helpers::download_value_preserving_residency_async(owner, &handle).await?;
+        return mean_host(gathered, args);
     }
     if let Some(weights) = args.weights.as_ref() {
-        let provider = runmat_accelerate_api::provider_for_handle(&handle)
-            .or_else(runmat_accelerate_api::provider)
+        let provider = gpu_helpers::exact_provider_for_handle(&handle)
             .ok_or_else(|| mean_internal_error("mean: GPU input has no owning provider"))?;
         if runmat_accelerate_api::handle_storage(&handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
             let gathered = dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
                 .await
-                .map_err(|error| mean_internal_error(format!("mean: {error}")))?;
+                .map_err(|source| {
+                    let mut error = mean_internal_error(format!("mean: {source}"));
+                    error.source = Some(Box::new(source));
+                    error
+                })?;
             let Value::ComplexTensor(gathered) = gathered else {
                 return Err(mean_internal_error(
                     "mean: expected gathered complex GPU storage",
                 ));
             };
-            let dim = weighted_dimension(&gathered.shape, &args.axes)?;
-            let input_dtype = numeric_dtype_from_value(&Value::GpuTensor(handle))
+            let dim = weighted_dimension(gathered.shape(), &args.axes)?;
+            let input_dtype = numeric_dtype_from_value(&Value::GpuTensor(handle.clone()))
                 .unwrap_or_else(|| gathered.numeric_dtype());
             let dtype = weighted_computation_dtype(input_dtype, &args.output);
             let reduced = weighted_complex_mean(&gathered, dim, args.nan_mode, weights, dtype)?;
             let uploaded =
-                gpu_helpers::upload_complex_tensor(provider, &reduced).map_err(|error| {
-                    mean_internal_error(format!(
-                        "mean: failed to upload weighted complex GPU result: {error}"
-                    ))
-                })?;
-            return Ok(Value::GpuTensor(uploaded));
+                gpu_helpers::upload_complex_tensor_protecting(provider, &reduced, &[&handle])
+                    .map_err(|source| {
+                        let mut error = mean_internal_error(format!(
+                            "mean: failed to upload weighted complex GPU result: {source}"
+                        ));
+                        error.source = Some(Box::new(source));
+                        error
+                    })?;
+            let uploaded = gpu_helpers::propagate_owned_output_provenance(uploaded, [&handle])?;
+            return gpu_helpers::complex_gpu_value(uploaded);
         }
         let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-        let dim = weighted_dimension(&gathered.shape, &args.axes)?;
+        let dim = weighted_dimension(gathered.shape(), &args.axes)?;
         let input_dtype = numeric_dtype_from_value(&Value::GpuTensor(handle.clone()))
             .unwrap_or_else(|| gathered.numeric_dtype());
         let dtype = weighted_computation_dtype(input_dtype, &args.output);
         let reduced = weighted_real_mean(&gathered, dim, args.nan_mode, weights, dtype)?;
-        let uploaded = gpu_helpers::upload_tensor(provider, &reduced).map_err(|error| {
-            mean_internal_error(format!(
-                "mean: failed to upload weighted GPU result: {error}"
-            ))
-        })?;
-        return Ok(Value::GpuTensor(uploaded));
+        let uploaded = gpu_helpers::upload_tensor_protecting(provider, &reduced, &[&handle])
+            .map_err(|source| {
+                let mut error = mean_internal_error(format!(
+                    "mean: failed to upload weighted GPU result: {source}"
+                ));
+                error.source = Some(Box::new(source));
+                error
+            })?;
+        let uploaded = gpu_helpers::propagate_owned_output_provenance(uploaded, [&handle])?;
+        return gpu_helpers::resident_gpu_value(uploaded);
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        // Include-NaN: use provider reduce_mean_* hooks
-        if args.nan_mode == ReductionNaN::Include {
-            if let Some(device_result) = mean_gpu_try(provider, &handle, &args.axes).await {
-                return Ok(Value::GpuTensor(device_result));
-            }
-        } else {
-            // Omit-NaN: compute fully on device via cleaned sum and non-NaN counts
-            if let Some(device_result) = mean_gpu_omitnan(provider, &handle, &args.axes).await {
-                return Ok(Value::GpuTensor(device_result));
-            }
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        if let Some(device_result) =
+            provider_execution::execute(provider, &handle, &args.axes, args.nan_mode, &args.output)
+                .await?
+        {
+            let device_result = publish_mean_gpu_shape(device_result)?;
+            let device_result =
+                gpu_helpers::propagate_owned_output_provenance(device_result, [&handle])?;
+            return gpu_helpers::resident_gpu_value(device_result);
         }
     }
 
-    let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-    let reduced = mean_tensor(gathered, args.axes.clone(), args.nan_mode)?;
-    Ok(tensor::tensor_into_value(reduced))
-}
-
-async fn mean_gpu_try(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    axes: &MeanAxes,
-) -> Option<GpuTensorHandle> {
-    match axes {
-        MeanAxes::Default => {
-            if is_scalar_shape(&handle.shape) {
-                return Some(handle.clone());
-            }
-            let dim = default_dimension_from_shape(&handle.shape);
-            reduce_mean_dim_gpu(provider, handle.clone(), dim).await
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    match gathered {
+        Value::ComplexTensor(tensor) => mean_host_complex_tensor(tensor, args),
+        Value::Tensor(tensor) => {
+            let reduced = mean_tensor(tensor, args.axes.clone(), args.nan_mode)?;
+            Ok(tensor::tensor_into_value(reduced))
         }
-        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim).await,
-        MeanAxes::Vec(dims) => {
-            // Prefer provider N-D reduce if available
-            let mut dims0: Vec<usize> = dims
-                .iter()
-                .filter_map(|&d| if d > 0 { Some(d - 1) } else { None })
-                .collect();
-            dims0.sort_unstable();
-            dims0.dedup();
-            if !dims0.is_empty() {
-                if let Ok(out) = provider.reduce_mean_nd(handle, &dims0).await {
-                    return Some(out);
-                }
-            }
-            // Try fast permute+2D fallback
-            if let Some(nd) = reduce_mean_vecdim_nd_gpu(provider, handle, dims).await {
-                return Some(nd);
-            }
-            // Sequential per-dimension reductions
-            let mut result = handle.clone();
-            let mut dims_sorted = dims.clone();
-            dims_sorted.sort_unstable();
-            dims_sorted.dedup();
-            for dim in dims_sorted {
-                if is_scalar_shape(&result.shape) {
-                    break;
-                }
-                result = reduce_mean_dim_gpu(provider, result, dim).await?;
-            }
-            Some(result)
-        }
-        MeanAxes::All => {
-            if is_scalar_shape(&handle.shape) {
-                return Some(handle.clone());
-            }
-            match provider.reduce_mean(handle).await {
-                Ok(out) => Some(out),
-                Err(err) => {
-                    log::trace!("mean: provider reduce_mean fallback triggered: {err}");
-                    let rank = handle.shape.len();
-                    if is_scalar_shape(&handle.shape) || rank == 0 {
-                        Some(handle.clone())
-                    } else {
-                        let dims: Vec<usize> = (1..=rank).collect();
-                        if let Some(result) =
-                            reduce_mean_vecdim_nd_gpu(provider, handle, &dims).await
-                        {
-                            Some(result)
-                        } else {
-                            let mut result = handle.clone();
-                            for dim in 1..=rank {
-                                match reduce_mean_dim_gpu(provider, result, dim).await {
-                                    Some(updated) => result = updated,
-                                    None => return None,
-                                }
-                            }
-                            Some(result)
-                        }
-                    }
-                }
-            }
-        }
+        _ => Err(mean_internal_error(
+            "mean: provider returned an unsupported gathered numeric value",
+        )),
     }
 }
 
-async fn reduce_mean_dim_gpu(
-    provider: &dyn AccelProvider,
-    handle: GpuTensorHandle,
-    dim: usize,
-) -> Option<GpuTensorHandle> {
-    if dim == 0 {
-        return None;
-    }
-    if handle.shape.len() < dim {
-        return Some(handle);
-    }
-    provider
-        .reduce_mean_dim(&handle, dim - 1)
-        .await
-        .map_err(|err| {
-            log::trace!("mean: provider reduce_mean_dim fallback triggered: {err}");
-            err
-        })
-        .ok()
-}
-
-/// Reduce mean across multiple (1-based) dimensions in a single device pass by
-/// permuting reduce dims to the front, reshaping to 2-D, reducing rows, and
-/// reshaping/permuting back to the original order with size-1 dims preserved.
-// (N-D mean fast path omitted for now; sequential per-dimension GPU reductions used instead.)
-async fn reduce_mean_vecdim_nd_gpu(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    dims_1based: &[usize],
-) -> Option<GpuTensorHandle> {
-    let rank = handle.shape.len();
-    if rank == 0 || dims_1based.is_empty() {
-        return Some(handle.clone());
-    }
-    // Convert to 0-based and filter in-bounds
-    let mut reduce_dims: Vec<usize> = dims_1based
-        .iter()
-        .filter_map(|&d| {
-            if d > 0 && d <= rank {
-                Some(d - 1)
-            } else {
-                None
-            }
-        })
-        .collect();
-    if reduce_dims.is_empty() {
-        return Some(handle.clone());
-    }
-    reduce_dims.sort_unstable();
-    reduce_dims.dedup();
-    // Kept dims
-    let kept_dims: Vec<usize> = (0..rank).filter(|i| !reduce_dims.contains(i)).collect();
-    // Permute reduced dims first
-    let mut order: Vec<usize> = Vec::with_capacity(rank);
-    order.extend_from_slice(&reduce_dims);
-    order.extend_from_slice(&kept_dims);
-    let permuted = provider.permute(handle, &order).ok()?;
-    // Compute rows/cols
-    let mut reduce_len: usize = 1;
-    for &d in &reduce_dims {
-        reduce_len = reduce_len.saturating_mul(handle.shape[d]);
-    }
-    let total_elems: usize = handle.shape.iter().copied().product();
-    if reduce_len == 0 || total_elems == 0 {
-        let _ = provider.free(&permuted);
-        return provider.fill(&[1, 1], f64::NAN).ok();
-    }
-    let num_slices = total_elems / reduce_len;
-    // Reshape permuted view to [rows, cols]
-    let reshaped2d = provider
-        .reshape(&permuted, &[reduce_len, num_slices])
-        .ok()?;
-    // Reduce along rows (dim 0) -> [1, num_slices]
-    let reduced_rows = provider.reduce_mean_dim(&reshaped2d, 0).await.ok()?;
-    let _ = provider.free(&reshaped2d);
-    let _ = provider.free(&permuted);
-    // Reshape to kept sizes (permuted order)
-    let kept_sizes: Vec<usize> = kept_dims.iter().map(|&d| handle.shape[d]).collect();
-    let kept_shape = if kept_sizes.is_empty() {
+/// One mean call publishes scalar geometry only after all of its source axes
+/// have executed. Internal vecdim scratch retains its original tensor rank.
+fn mean_public_shape(shape: &[usize], count: usize) -> Vec<usize> {
+    if count == 1 {
         vec![1, 1]
     } else {
-        kept_sizes.clone()
-    };
-    let reshaped_kept = provider.reshape(&reduced_rows, &kept_shape).ok()?;
-    let _ = provider.free(&reduced_rows);
-    // Expand permuted shape by inserting ones for reduced axes
-    let mut expanded_perm_shape: Vec<usize> = Vec::with_capacity(rank);
-    expanded_perm_shape.extend(std::iter::repeat_n(1usize, reduce_dims.len()));
-    expanded_perm_shape.extend_from_slice(&kept_sizes);
-    let expanded = provider
-        .reshape(&reshaped_kept, &expanded_perm_shape)
-        .ok()?;
-    let _ = provider.free(&reshaped_kept);
-    // Inverse permute back to original axis order
-    let mut inv_order = vec![0usize; rank];
-    for (dst, &src) in order.iter().enumerate() {
-        inv_order[src] = dst;
+        shape.to_vec()
     }
-    let out = provider.permute(&expanded, &inv_order).ok()?;
-    let _ = provider.free(&expanded);
-    Some(out)
 }
 
-async fn mean_gpu_omitnan(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    axes: &MeanAxes,
-) -> Option<GpuTensorHandle> {
-    // Early return for empty dim selection
-    let dims_in_bounds: Vec<usize> = match axes {
-        MeanAxes::Default => {
-            if is_scalar_shape(&handle.shape) {
-                return Some(handle.clone());
-            }
-            vec![default_dimension_from_shape(&handle.shape) - 1]
-        }
-        MeanAxes::Dim(d) => {
-            if *d == 0 || *d > handle.shape.len() {
-                return Some(handle.clone());
-            }
-            vec![*d - 1]
-        }
-        MeanAxes::Vec(v) => {
-            let mut dims: Vec<usize> = v
-                .iter()
-                .filter_map(|&d| {
-                    if d > 0 && d <= handle.shape.len() {
-                        Some(d - 1)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            dims.sort_unstable();
-            dims.dedup();
-            dims
-        }
-        MeanAxes::All => {
-            if is_scalar_shape(&handle.shape) {
-                return Some(handle.clone());
-            }
-            (0..handle.shape.len()).collect()
-        }
+fn publish_mean_gpu_shape(output: GpuTensorHandle) -> BuiltinResult<GpuTensorHandle> {
+    let count = if output.shape().contains(&0) {
+        0
+    } else {
+        output
+            .shape()
+            .iter()
+            .try_fold(1usize, |total, &extent| total.checked_mul(extent))
+            .ok_or_else(|| {
+                let mut error =
+                    mean_internal_error("mean: provider output shape overflows at publication");
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
+            })?
     };
-
-    if dims_in_bounds.is_empty() {
-        return Some(handle.clone());
+    let public_shape = mean_public_shape(output.shape(), count);
+    if public_shape == output.shape() {
+        return Ok(output);
     }
-
-    // Build cleaned values and not-NaN counts on device
-    let cleaned = provider.map_nan_to_zero(handle).ok()?;
-    let mask = provider.not_nan_mask(handle).ok()?;
-
-    // Reduce cleaned (sum) and mask (count) along the requested dims
-    let mut sum_h = cleaned.clone();
-    let mut cnt_h = mask.clone();
-    for &dim in &dims_in_bounds {
-        sum_h = provider.reduce_sum_dim(&sum_h, dim).await.ok()?;
-        cnt_h = provider.reduce_sum_dim(&cnt_h, dim).await.ok()?;
-    }
-
-    // mean = sum ./ count (0/0 -> NaN when all NaN)
-    let out = provider.elem_div(&sum_h, &cnt_h).await.ok()?;
-
-    // Free intermediates
-    let _ = provider.free(&cleaned);
-    let _ = provider.free(&mask);
-    let _ = provider.free(&sum_h);
-    let _ = provider.free(&cnt_h);
-
-    Some(out)
+    output
+        .with_view(output.view().clone().with_shape(public_shape))
+        .map_err(|source| {
+            let mut error = mean_internal_error("mean: cannot publish scalar reduction view");
+            error.source = Some(Box::new(source));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })
 }
+
+#[path = "mean/provider_execution.rs"]
+mod provider_execution;
+
+#[cfg(test)]
+#[path = "mean/default_class_tests.rs"]
+mod default_class_tests;
+
+#[cfg(test)]
+#[path = "mean/owning_tests.rs"]
+mod owning_tests;
 
 fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
     match axes {
@@ -2148,12 +1559,12 @@ fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Builti
 }
 
 fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
-    if is_scalar_shape(&tensor.shape) {
+    if is_scalar_shape(tensor.shape()) {
         return reduce_tensor_mean_dim(tensor, 1, nan_mode);
     }
     let values = tensor::tensor_values_f64(tensor);
     let total_elems = tensor
-        .shape
+        .shape()
         .iter()
         .copied()
         .map(|dim| dim.max(1))
@@ -2210,7 +1621,7 @@ fn reduce_tensor_mean_dim(
         return Err(mean_internal_error("mean: dimension must be >= 1"));
     }
 
-    if is_scalar_shape(&tensor.shape) {
+    if is_scalar_shape(tensor.shape()) {
         let value = tensor::tensor_values_f64(tensor)
             .into_iter()
             .next()
@@ -2229,7 +1640,7 @@ fn reduce_tensor_mean_dim(
             .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
 
-    let Some(output_shape) = reduction_shape(&tensor.shape, dim) else {
+    let Some(output_shape) = reduction_shape(tensor.shape(), dim) else {
         return Ok(tensor.clone());
     };
 
@@ -2241,9 +1652,9 @@ fn reduce_tensor_mean_dim(
     }
 
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let out_len = tensor::element_count(&output_shape);
     let mut output = vec![0.0f64; out_len];
 
@@ -2304,7 +1715,7 @@ fn mean_complex_tensor(
 ) -> BuiltinResult<ComplexTensor> {
     match axes {
         MeanAxes::Default => {
-            let dim = default_dimension_from_shape(&tensor.shape);
+            let dim = default_dimension_from_shape(tensor.shape());
             reduce_complex_tensor_mean_dim(&tensor, dim, nan_mode)
         }
         MeanAxes::Dim(dim) => reduce_complex_tensor_mean_dim(&tensor, dim, nan_mode),
@@ -2317,19 +1728,52 @@ fn mean_complex_tensor(
             }
             Ok(current)
         }
-        MeanAxes::All => {
-            if is_scalar_shape(&tensor.shape) {
-                Ok(tensor)
-            } else {
-                let mut current = tensor;
-                let ndims = current.shape.len();
-                for dim in 1..=ndims {
-                    current = reduce_complex_tensor_mean_dim(&current, dim, nan_mode)?;
-                }
-                Ok(current)
-            }
-        }
+        MeanAxes::All => mean_complex_tensor_all(&tensor, nan_mode),
     }
+}
+
+fn mean_complex_tensor_all(
+    tensor: &ComplexTensor,
+    nan_mode: ReductionNaN,
+) -> BuiltinResult<ComplexTensor> {
+    let values = tensor.materialize_f64();
+    if is_scalar_shape(tensor.shape()) {
+        let (real, imaginary) = values.first().copied().unwrap_or((f64::NAN, f64::NAN));
+        let value = if nan_mode == ReductionNaN::Omit && (real.is_nan() || imaginary.is_nan()) {
+            (f64::NAN, f64::NAN)
+        } else {
+            (real, imaginary)
+        };
+        return ComplexTensor::from_f64_values_with_dtype(
+            vec![value],
+            canonical_scalar_shape(),
+            tensor.numeric_dtype(),
+        )
+        .map_err(mean_internal_error);
+    }
+    let mut real = 0.0;
+    let mut imaginary = 0.0;
+    let mut count = 0usize;
+    let mut saw_nan = false;
+    for (part_real, part_imaginary) in values {
+        if part_real.is_nan() || part_imaginary.is_nan() {
+            if nan_mode == ReductionNaN::Include {
+                saw_nan = true;
+                break;
+            }
+            continue;
+        }
+        real += part_real;
+        imaginary += part_imaginary;
+        count += 1;
+    }
+    let value = if saw_nan || count == 0 {
+        (f64::NAN, f64::NAN)
+    } else {
+        (real / count as f64, imaginary / count as f64)
+    };
+    ComplexTensor::new(vec![value], canonical_scalar_shape())
+        .map_err(|error| mean_internal_error(format!("mean: {error}")))
 }
 
 fn reduce_complex_tensor_mean_dim(
@@ -2341,10 +1785,10 @@ fn reduce_complex_tensor_mean_dim(
         return Err(mean_internal_error("mean: dimension must be >= 1"));
     }
 
-    let shape = if is_scalar_shape(&tensor.shape) {
-        normalize_scalar_shape(&tensor.shape)
+    let shape = if is_scalar_shape(tensor.shape()) {
+        normalize_scalar_shape(tensor.shape())
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
 
     if is_scalar_shape(&shape) {
@@ -2387,6 +1831,7 @@ fn reduce_complex_tensor_mean_dim(
     let stride_after = dim_product(&shape[dim..]);
     let out_len = tensor::element_count(&output_shape);
     let mut output = vec![(0.0f64, 0.0f64); out_len];
+    let values = tensor.materialize_f64();
 
     for after in 0..stride_after {
         for before in 0..stride_before {
@@ -2397,7 +1842,7 @@ fn reduce_complex_tensor_mean_dim(
 
             for k in 0..reduce_len {
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
-                let (re, im) = tensor.materialize_f64()[idx];
+                let (re, im) = values[idx];
                 let is_nan = re.is_nan() || im.is_nan();
                 match nan_mode {
                     ReductionNaN::Include => {
@@ -2467,7 +1912,7 @@ fn dim_product(dims: &[usize]) -> usize {
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -2493,15 +1938,15 @@ async fn apply_output_template(
             } else {
                 value
             };
-            ensure_device(value, meta.device).await
+            ensure_device(value, meta).await
         }
         OutputTemplate::Double => {
             let value = coerce_value_to_dtype(value, NumericDType::F64).await?;
-            ensure_device(value, meta.device).await
+            ensure_device(value, meta).await
         }
         OutputTemplate::Native => {
             let value = apply_native_template(value, meta).await?;
-            ensure_device(value, meta.device).await
+            ensure_device(value, meta).await
         }
     }
 }
@@ -2579,65 +2024,41 @@ fn coerce_host_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResul
     }
 }
 
-async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
-    match device {
+async fn ensure_device(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
+    match meta.device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                dispatcher::gather_if_needed_async(&Value::GpuTensor(handle))
-                    .await
-                    .map_err(|error| mean_internal_error(format!("mean: {error}")))
+                dispatcher::gather_if_needed_async(&Value::GpuTensor(handle)).await
             }
-            _ => Ok(value),
+            value => Ok(value),
         },
-        DevicePreference::Gpu => match value {
-            Value::GpuTensor(_) => Ok(value),
-            Value::Tensor(t) => upload_tensor(t),
-            Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
-                upload_tensor(tensor)
+        DevicePreference::Gpu => {
+            let source = meta.source.as_ref().ok_or_else(|| {
+                mean_internal_error("mean: resident result has no retained input owner")
+            })?;
+            match value {
+                Value::GpuTensor(output) => {
+                    let expected = gpu_helpers::exact_provider_for_handle(source);
+                    let actual = gpu_helpers::exact_provider_for_handle(&output);
+                    if !expected.zip(actual).is_some_and(|(expected, actual)| {
+                        runmat_accelerate_api::same_provider_instance(expected, actual)
+                    }) {
+                        return Err(gpu_helpers::reject_gpu_output(
+                            output,
+                            mean_internal_error("mean: result belongs to a different provider"),
+                        ));
+                    }
+                    gpu_helpers::resident_gpu_value(output)
+                }
+                value => gpu_helpers::restore_class_preserving_value(source, value, "mean"),
             }
-            Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(mean_invalid_input)?;
-                upload_tensor(tensor)
-            }
-            Value::ComplexTensor(tensor) => upload_complex_tensor(tensor),
-            Value::Complex(real, imag) => {
-                let tensor = ComplexTensor::new(vec![(real, imag)], canonical_scalar_shape())
-                    .map_err(mean_internal_error)?;
-                upload_complex_tensor(tensor)
-            }
-            other => Err(mean_invalid_input(format!(
-                "mean: cannot place value {other:?} on the GPU"
-            ))),
-        },
+        }
     }
 }
 
-fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(mean_internal_error(
-            "mean: no acceleration provider available to honour GPU output",
-        ));
-    };
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|e| mean_internal_error(format!("mean: failed to upload GPU result: {e}")))?;
-    Ok(Value::GpuTensor(handle))
-}
-
-fn upload_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(mean_internal_error(
-            "mean: no acceleration provider available to honour complex GPU output",
-        ));
-    };
-    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|error| {
-        mean_internal_error(format!(
-            "mean: failed to upload complex GPU result: {error}"
-        ))
-    })?;
-    Ok(Value::GpuTensor(handle))
-}
+#[path = "mean/affine_geometry.rs"]
+mod affine_geometry;
+pub(in crate::builtins::math) use affine_geometry::{affine_geometry, AffineGeometry};
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -2647,7 +2068,10 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage};
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::mean_builtin(value, rest))
+        block_on(super::mean_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn values(tensor: &Tensor) -> Vec<f64> {
@@ -2655,59 +2079,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mean_type_reduces_first_dim() {
-        let out = mean_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn mean_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = MEAN_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"M = mean(A)"));
-        assert!(labels.contains(&"M = mean(A, dim)"));
-        assert!(labels.contains(&"M = mean(A, \"all\")"));
-        assert!(labels.contains(&"M = mean(A, missingflag)"));
-        assert!(labels.contains(&"M = mean(A, outtype)"));
-        assert!(labels.contains(&"M = mean(A, dim, missingflag)"));
-        assert!(labels.contains(&"M = mean(A, missingflag, dim)"));
-        assert!(!labels.iter().any(|label| label.contains("like")));
-        assert!(labels.contains(&"M = mean(A, vecdim)"));
-        assert!(labels.contains(&"M = mean(___, Weights=W)"));
-        assert_eq!(MEAN_INPUTS_A_OUTTYPE[1].default, Some("\"default\""));
-        assert_eq!(
-            MEAN_INPUTS_A_MISSINGFLAG[1].default,
-            Some("\"includemissing\"")
-        );
-    }
-
-    #[test]
-    fn mean_descriptor_errors_have_stable_codes() {
-        assert!(MEAN_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == MEAN_ERROR_INVALID_ARGUMENT.code));
-        assert!(MEAN_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == MEAN_ERROR_INVALID_INPUT.code));
-        assert!(MEAN_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == MEAN_ERROR_INTERNAL.code));
+    fn mean_repeated_vecdim_executes_each_dimension_once() {
+        let input = Tensor::new((1..=12).map(f64::from).collect(), vec![3, 4]).unwrap();
+        let dimensions = Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap();
+        let result = mean_builtin(Value::Tensor(input), vec![Value::Tensor(dimensions)])
+            .expect("repeated vecdim is admitted");
+        let Value::Tensor(result) = result else {
+            panic!("expected row-wise reduction tensor");
+        };
+        assert_eq!(result.shape(), [3, 1]);
+        assert_eq!(values(&result), vec![5.5, 6.5, 7.5]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2724,7 +2105,7 @@ pub(crate) mod tests {
         let result = mean_builtin(Value::Tensor(tensor), Vec::new()).expect("mean");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(values(&out), vec![2.5, 3.5, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2735,6 +2116,21 @@ pub(crate) mod tests {
     fn mean_weights_vector_and_full_size_follow_operating_dimension() {
         let input = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let vector_weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
+        let retained = futures::executor::block_on(parse_weights(
+            &Value::Tensor(vector_weights.clone()),
+            None,
+            None,
+        ))
+        .unwrap();
+        assert!(
+            retained
+                .storage
+                .0
+                .host_buffer()
+                .shares_allocation_with(vector_weights.host_buffer()),
+            "weight inspection retains the original immutable numeric owner"
+        );
+        drop(retained);
         let vector = mean_builtin(
             Value::Tensor(input.clone()),
             vec![
@@ -2747,7 +2143,7 @@ pub(crate) mod tests {
         let Value::Tensor(vector) = vector else {
             panic!("expected tensor weighted vector result");
         };
-        assert_eq!(vector.shape, vec![1, 2]);
+        assert_eq!(vector.shape(), [1, 2]);
         assert_eq!(values(&vector), vec![2.5, 3.5]);
 
         let full_weights = Tensor::new(vec![1.0, 3.0, 2.0, 1.0], vec![2, 2]).unwrap();
@@ -2763,7 +2159,7 @@ pub(crate) mod tests {
         let Value::Tensor(full) = full else {
             panic!("expected tensor weighted full-size result");
         };
-        assert_eq!(full.shape, vec![1, 2]);
+        assert_eq!(full.shape(), [1, 2]);
         assert!((values(&full)[0] - 2.5).abs() < 1e-12);
         assert!((values(&full)[1] - (8.0 / 3.0)).abs() < 1e-12);
     }
@@ -2793,6 +2189,53 @@ pub(crate) mod tests {
         )
         .expect("omitted weighted mean");
         assert!(matches!(omitted, Value::Num(value) if (value - 2.5).abs() < 1e-12));
+    }
+
+    #[test]
+    fn mean_typed_controls_preserve_ordered_admission_and_diagnostics() {
+        let input = Value::Tensor(Tensor::new(vec![1.0, f64::NAN, 3.0], vec![1, 3]).unwrap());
+        let result = mean_builtin(
+            input.clone(),
+            vec![Value::from(" all "), Value::from("OMITMISSING")],
+        )
+        .expect("trimmed all and case-insensitive missing control");
+        assert!(matches!(result, Value::Num(value) if (value - 2.0).abs() < 1e-12));
+
+        let conflicting_output = mean_builtin(
+            input.clone(),
+            vec![Value::from("native"), Value::from("double")],
+        )
+        .expect_err("duplicate output class");
+        assert_eq!(
+            conflicting_output.identifier(),
+            MEAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(conflicting_output
+            .message()
+            .contains("multiple output class specifications"));
+
+        let conflicting_axes = mean_builtin(
+            input.clone(),
+            vec![Value::Int(IntValue::I32(2)), Value::from("all")],
+        )
+        .expect_err("dimension and all conflict");
+        assert_eq!(
+            conflicting_axes.identifier(),
+            MEAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(conflicting_axes
+            .message()
+            .contains("'all' cannot be combined"));
+
+        let empty_option =
+            mean_builtin(input, vec![Value::from(" ")]).expect_err("empty dimension text");
+        assert_eq!(
+            empty_option.identifier(),
+            MEAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(empty_option
+            .message()
+            .contains("dimension string must not be empty"));
     }
 
     #[test]
@@ -2982,7 +2425,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(values(&out), vec![1.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -3018,7 +2461,7 @@ pub(crate) mod tests {
             mean_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("mean");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(values(&out), vec![2.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -3090,6 +2533,7 @@ pub(crate) mod tests {
             class: InputClass::Integer(IntClass::U16),
             device: DevicePreference::Host,
             numeric_dtype: None,
+            source: None,
         };
 
         let result =
@@ -3127,7 +2571,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected typed tensor result");
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&runmat_value::IntegerStorage::U16(vec![2, 5]))
@@ -3257,7 +2701,7 @@ pub(crate) mod tests {
         .expect("mean");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(values(&out), vec![1.0, 3.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -3288,7 +2732,7 @@ pub(crate) mod tests {
         match (a, b) {
             (Value::Num(x), Value::Num(y)) => assert!((x - y).abs() < 1e-12),
             (Value::Tensor(tx), Value::Tensor(ty)) => {
-                assert_eq!(tx.shape, ty.shape);
+                assert_eq!(tx.shape(), ty.shape());
                 for (x, y) in values(&tx).iter().zip(values(&ty).iter()) {
                     assert!((x - y).abs() < 1e-12);
                 }
@@ -3366,6 +2810,28 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn mean_complex_singleton_all_keeps_include_pair_and_omit_pair_nan() {
+        for dtype in [NumericDType::F32, NumericDType::F64] {
+            let tensor =
+                ComplexTensor::from_f64_values_with_dtype(vec![(f64::NAN, 4.0)], vec![1, 1], dtype)
+                    .unwrap();
+            let included = mean_complex_tensor_all(&tensor, ReductionNaN::Include).unwrap();
+            assert_eq!(included.numeric_dtype(), dtype);
+            assert_eq!(included.shape(), [1, 1]);
+            let (real, imaginary) = included.materialize_f64()[0];
+            assert!(real.is_nan());
+            assert_eq!(imaginary, 4.0);
+
+            let omitted = mean_complex_tensor_all(&tensor, ReductionNaN::Omit).unwrap();
+            assert_eq!(omitted.numeric_dtype(), dtype);
+            assert_eq!(omitted.shape(), [1, 1]);
+            let (real, imaginary) = omitted.materialize_f64()[0];
+            assert!(real.is_nan() && imaginary.is_nan());
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn mean_complex_matrix_along_rows() {
         let tensor = ComplexTensor::new(
             vec![(1.0, 1.0), (5.0, -1.0), (2.0, 2.0), (6.0, -2.0)],
@@ -3376,7 +2842,7 @@ pub(crate) mod tests {
             mean_builtin(Value::ComplexTensor(tensor), vec![Value::Num(1.0)]).expect("mean");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 let expected = [(3.0, 0.0), (4.0, 0.0)];
                 for (got, exp) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < 1e-12);
@@ -3422,7 +2888,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = mean_builtin(Value::GpuTensor(handle), Vec::new()).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             assert_eq!(values(&gathered), vec![2.5, 3.5, 4.5]);
         });
     }
@@ -3443,7 +2909,7 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle)).expect("gather weighted mean");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(values(&gathered), vec![2.5, 3.5]);
         });
     }
@@ -3451,9 +2917,13 @@ pub(crate) mod tests {
     #[test]
     fn mean_weights_logical_gpu_result_is_numeric_and_resident() {
         test_support::with_test_provider(|provider| {
-            let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
-            let input = gpu_helpers::upload_tensor(provider, &input).expect("upload logical input");
-            let input = gpu_helpers::logical_gpu_value(input);
+            let input = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1],
+                    shape: &[2, 1],
+                })
+                .expect("upload logical input");
+            let input = gpu_helpers::logical_gpu_value(input).expect("admit logical producer");
             let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
             let result = mean_builtin(input, vec![Value::from("Weights"), Value::Tensor(weights)])
                 .expect("weighted logical GPU mean");
@@ -3493,6 +2963,180 @@ pub(crate) mod tests {
                 panic!("expected gathered complex tensor");
             };
             assert_eq!(gathered.materialize_f64(), vec![(2.5, 5.0)]);
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_unsupported_hook_restores_typed_result_to_input_owner() {
+        test_support::with_test_provider(|provider| {
+            for single in [false, true] {
+                let input = if single {
+                    ComplexTensor::from_f32(
+                        vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                        vec![2, 2],
+                    )
+                    .unwrap()
+                } else {
+                    ComplexTensor::new(
+                        vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                        vec![2, 2],
+                    )
+                    .unwrap()
+                };
+                let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+                let result = mean_builtin(Value::GpuTensor(input.clone()), Vec::new()).unwrap();
+                let Value::GpuTensor(result) = result else {
+                    panic!("complex GPU mean must retain residency");
+                };
+                assert_eq!(result.device_id(), input.device_id());
+                assert_eq!(
+                    runmat_accelerate_api::handle_storage(&result),
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(&result),
+                    runmat_accelerate_api::handle_precision(&input)
+                );
+                let gathered =
+                    block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+                let Value::ComplexTensor(gathered) = gathered else {
+                    panic!("complex GPU mean must preserve complex storage");
+                };
+                assert_eq!(gathered.shape(), [1, 2]);
+                assert_eq!(gathered.materialize_f64(), vec![(2.0, 3.0), (6.0, 7.0)]);
+                input.allocation_lease().validate_live().unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_omitnan_uses_typed_host_boundary() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::from_f32(
+                vec![(1.0, 2.0), (f32::NAN, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let result = mean_builtin(
+                Value::GpuTensor(input.clone()),
+                vec![Value::Int(IntValue::I32(1)), Value::from("omitnan")],
+            )
+            .unwrap();
+            let Value::GpuTensor(result) = result else {
+                panic!("complex omitnan result must remain resident");
+            };
+            assert_eq!(result.device_id(), input.device_id());
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+            let Value::ComplexTensor(gathered) = gathered else {
+                panic!("complex omitnan result must retain its class");
+            };
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.shape(), [1, 2]);
+            assert_eq!(gathered.materialize_f64(), vec![(1.0, 2.0), (6.0, 7.0)]);
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_all_preserves_double_value_and_owner() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(
+                vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)],
+                vec![2, 2],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let result =
+                mean_builtin(Value::GpuTensor(input.clone()), vec![Value::from("all")]).unwrap();
+            let Value::GpuTensor(result) = result else {
+                panic!("complex all reduction must retain residency");
+            };
+            assert_eq!(result.device_id(), input.device_id());
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+            match gathered {
+                Value::ComplexTensor(gathered) => {
+                    assert_eq!(gathered.shape(), [1, 1]);
+                    assert_eq!(gathered.materialize_f64(), vec![(4.0, 5.0)]);
+                }
+                Value::Complex(real, imaginary) => assert_eq!((real, imaginary), (4.0, 5.0)),
+                other => panic!("complex all reduction changed class: {other:?}"),
+            }
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_singleton_omitnan_does_not_publish_unchecked_identity() {
+        test_support::with_test_provider(|provider| {
+            let input = ComplexTensor::new(vec![(f64::NAN, 4.0)], vec![1, 1]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let result = mean_builtin(
+                Value::GpuTensor(input.clone()),
+                vec![Value::from("omitnan")],
+            )
+            .unwrap();
+            let Value::GpuTensor(result) = result else {
+                panic!("complex singleton omitnan result must remain resident");
+            };
+            assert_eq!(result.device_id(), input.device_id());
+            let gathered =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+            let (real, imaginary) = match gathered {
+                Value::Complex(real, imaginary) => (real, imaginary),
+                Value::ComplexTensor(tensor) => tensor.materialize_f64()[0],
+                other => panic!("complex singleton result changed class: {other:?}"),
+            };
+            assert!(real.is_nan() && imaginary.is_nan());
+            input.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn mean_complex_gpu_rank_three_default_vecdim_and_all_use_typed_fallback() {
+        test_support::with_test_provider(|provider| {
+            let data: Vec<(f64, f64)> = (1..=8)
+                .map(|value| (f64::from(value), f64::from(value * 10)))
+                .collect();
+            let input = ComplexTensor::new(data, vec![2, 2, 2]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+            let cases = [
+                (
+                    Vec::new(),
+                    vec![1, 2, 2],
+                    vec![(1.5, 15.0), (3.5, 35.0), (5.5, 55.0), (7.5, 75.0)],
+                ),
+                (
+                    vec![Value::Tensor(
+                        Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap(),
+                    )],
+                    vec![1, 2, 1],
+                    vec![(3.5, 35.0), (5.5, 55.0)],
+                ),
+                (vec![Value::from("all")], vec![1, 1], vec![(4.5, 45.0)]),
+            ];
+            for (controls, shape, values) in cases {
+                let result = mean_builtin(Value::GpuTensor(input.clone()), controls).unwrap();
+                let Value::GpuTensor(result) = result else {
+                    panic!("rank-three complex mean must retain residency");
+                };
+                assert_eq!(result.device_id(), input.device_id());
+                let gathered =
+                    block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
+                match gathered {
+                    Value::ComplexTensor(gathered) => {
+                        assert_eq!(gathered.shape(), shape);
+                        assert_eq!(gathered.materialize_f64(), values);
+                    }
+                    Value::Complex(real, imaginary) if shape == [1, 1] => {
+                        assert_eq!((real, imaginary), values[0]);
+                    }
+                    other => panic!("rank-three complex mean changed class: {other:?}"),
+                }
+                input.allocation_lease().validate_live().unwrap();
+            }
         });
     }
 
@@ -3556,7 +3200,7 @@ pub(crate) mod tests {
             let result =
                 mean_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(values(&gathered), vec![2.0, 4.0]);
         });
     }
@@ -3570,7 +3214,7 @@ pub(crate) mod tests {
             let result =
                 mean_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(values(&gathered), vec![2.5]);
         });
     }
@@ -3598,7 +3242,7 @@ pub(crate) mod tests {
                 other => panic!("unexpected cpu result {other:?}"),
             };
             let gpu_tensor = test_support::gather(gpu_result).expect("gather");
-            assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+            assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
             for (a, b) in values(&gpu_tensor).iter().zip(values(&cpu_tensor).iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
@@ -3657,7 +3301,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(out) = result else {
                 panic!("expected resident GPU tensor");
             };
-            assert_eq!(out.shape, vec![1, 3]);
+            assert_eq!(out.shape(), vec![1, 3]);
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&out),
                 Some(runmat_accelerate_api::IntegerElementType::U16)
@@ -3694,7 +3338,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&out),
                 Some(runmat_accelerate_api::IntegerElementType::I16)
             );
-            assert_eq!(out.shape, vec![1, 1]);
+            assert_eq!(out.shape(), vec![1, 1]);
             assert_eq!(
                 block_on(provider.download_integer(&out))
                     .expect("download native integer vecdim mean")
@@ -3736,7 +3380,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 for (a, b) in values(&gt).iter().zip(values(&ct).iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }

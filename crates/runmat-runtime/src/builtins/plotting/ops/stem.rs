@@ -1,12 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{STEM_ERROR_INTERNAL, STEM_ERROR_INVALID_ARGUMENT};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
@@ -15,7 +8,9 @@ use runmat_plot::gpu::stem::{StemGpuInputs, StemGpuParams};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{LineMarkerAppearance, StemPlot};
-use runmat_value::{Tensor, Value};
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -23,12 +18,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 use super::common::numeric_plot_data_pair;
-use super::gpu_helpers::gpu_xy_bounds;
+use super::gpu_helpers::gpu_xy_bounds_async;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -37,378 +30,6 @@ use super::style::{
 };
 
 const BUILTIN_NAME: &str = "stem";
-
-const STEM_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered stem plot.",
-}];
-
-const STEM_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Y samples. X defaults to 1:numel(Y).",
-}];
-
-const STEM_INPUTS_Y_STYLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples. X defaults to 1:numel(Y).",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style shorthand such as '--r'.",
-    },
-];
-
-const STEM_INPUTS_Y_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples. X defaults to 1:numel(Y).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const STEM_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-];
-
-const STEM_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style shorthand such as '--r'.",
-    },
-];
-
-const STEM_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const STEM_INPUTS_AX_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples. X defaults to 1:numel(Y).",
-    },
-];
-
-const STEM_INPUTS_AX_Y_STYLE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples. X defaults to 1:numel(Y).",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style shorthand such as '--r'.",
-    },
-];
-
-const STEM_INPUTS_AX_Y_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples. X defaults to 1:numel(Y).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const STEM_INPUTS_AX_X_Y: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-];
-
-const STEM_INPUTS_AX_X_Y_STYLE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style shorthand such as '--r'.",
-    },
-];
-
-const STEM_INPUTS_AX_X_Y_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const STEM_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
-    BuiltinSignatureDescriptor {
-        label: "h = stem(Y)",
-        inputs: &STEM_INPUTS_Y,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(Y, LineSpec)",
-        inputs: &STEM_INPUTS_Y_STYLE,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(Y, Name, Value, ...)",
-        inputs: &STEM_INPUTS_Y_PROPS,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(X, Y)",
-        inputs: &STEM_INPUTS_X_Y,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(X, Y, LineSpec)",
-        inputs: &STEM_INPUTS_X_Y_STYLE,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(X, Y, Name, Value, ...)",
-        inputs: &STEM_INPUTS_X_Y_PROPS,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(ax, Y)",
-        inputs: &STEM_INPUTS_AX_Y,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(ax, Y, LineSpec)",
-        inputs: &STEM_INPUTS_AX_Y_STYLE,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(ax, Y, Name, Value, ...)",
-        inputs: &STEM_INPUTS_AX_Y_PROPS,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(ax, X, Y)",
-        inputs: &STEM_INPUTS_AX_X_Y,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(ax, X, Y, LineSpec)",
-        inputs: &STEM_INPUTS_AX_X_Y_STYLE,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stem(ax, X, Y, Name, Value, ...)",
-        inputs: &STEM_INPUTS_AX_X_Y_PROPS,
-        outputs: &STEM_OUTPUT_HANDLE,
-    },
-];
-
-pub const STEM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STEM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:stem:InvalidArgument"),
-    when: "Input data, axes targeting, or style arguments are invalid.",
-    message: "stem: invalid argument",
-};
-
-pub const STEM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STEM.INTERNAL",
-    identifier: Some("RunMat:stem:Internal"),
-    when: "Internal plot construction or rendering fails unexpectedly.",
-    message: "stem: internal operation failed",
-};
-
-const STEM_ERRORS: [BuiltinErrorDescriptor; 2] = [STEM_ERROR_INVALID_ARGUMENT, STEM_ERROR_INTERNAL];
-
-pub const STEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STEM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STEM_ERRORS,
-};
-
-const STEM_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X and Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data.",
-    }];
-pub const STEM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = stem(integer_Y) or stem(integer_X, integer_Y, ...)",
-        inputs: &STEM_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "XData and YData retain native storage while rendering deliberately materializes floating geometry. Floating gpuArray inputs can use the direct WGPU sink; integer resident inputs gather exactly through their owner.",
-    }];
 
 fn stem_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -465,56 +86,68 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "stem",
-    category = "plotting",
-    summary = "Create stem plots for discrete sequences and sampled data.",
-    keywords = "stem,plotting,discrete",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::stem::STEM_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::stem::STEM_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::stem"
 )]
-pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn stem_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::STEM_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "stem",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "stem")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(stem_impl(args, &work).await)
+}
+
+async fn stem_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (target_axes, x, y, rest) = parse_stem_args(args).map_err(map_stem_invalid_argument)?;
     let parsed = parse_stem_style_args(&rest).map_err(map_stem_invalid_argument)?;
-    let mut x_input =
-        Some(NumericInput::from_value(x, BUILTIN_NAME).map_err(map_stem_invalid_argument)?);
-    let mut y_input =
-        Some(NumericInput::from_value(y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?);
-    let opts = PlotRenderOptions {
-        title: "Stem",
-        x_label: "X",
-        y_label: "Y",
-        ..Default::default()
+    let x_input = NumericInput::from_value(x, BUILTIN_NAME).map_err(map_stem_invalid_argument)?;
+    let y_input = NumericInput::from_value(y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?;
+    let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
+    // Complete provider work before entering the synchronous figure registry.
+    // Pending/error/drop therefore cannot publish a partially prepared plot.
+    let gpu_plot = if let (Some(x), Some(y)) = (x_input.gpu_handle(), y_input.gpu_handle()) {
+        build_stem_gpu_plot(BUILTIN_NAME, x, y, &parsed, &label)
+            .await
+            .map_err(map_stem_internal)?
+    } else {
+        None
     };
+    let plot = match gpu_plot {
+        Some(plot) => plot,
+        None => {
+            let x = x_input
+                .into_tensor_async(BUILTIN_NAME)
+                .await
+                .map_err(map_stem_invalid_argument)?;
+            let y = y_input
+                .into_tensor_async(BUILTIN_NAME)
+                .await
+                .map_err(map_stem_invalid_argument)?;
+            let (x, y) =
+                numeric_plot_data_pair(x, y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?;
+            build_stem_plot(x, y, &parsed, &label).map_err(map_stem_invalid_argument)?
+        }
+    };
+    let mut plot = Some(plot);
+    let opts = PlotRenderOptions::default();
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let axes = target_axes.unwrap_or(axes);
-        let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
-        let x_arg = x_input.take().expect("stem x consumed once");
-        let y_arg = y_input.take().expect("stem y consumed once");
-        if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
-            match build_stem_gpu_plot(BUILTIN_NAME, x_gpu, y_gpu, &parsed, &label) {
-                Ok(plot) => {
-                    let plot_index = figure.add_stem_plot_on_axes(plot, axes);
-                    *plot_index_slot.borrow_mut() = Some((axes, plot_index));
-                    return Ok(());
-                }
-                Err(err) => log::warn!("stem GPU path unavailable: {err}"),
-            }
-        }
-        let x = x_arg
-            .into_tensor(BUILTIN_NAME)
-            .map_err(map_stem_invalid_argument)?;
-        let y = y_arg
-            .into_tensor(BUILTIN_NAME)
-            .map_err(map_stem_invalid_argument)?;
-        let (x, y) =
-            numeric_plot_data_pair(x, y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?;
-        let plot = build_stem_plot(x, y, &parsed, &label).map_err(map_stem_invalid_argument)?;
+        let plot = plot.take().expect("stem plot consumed once");
         let plot_index = figure.add_stem_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
@@ -525,8 +158,7 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_stem_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_stem_internal(err));
@@ -567,21 +199,31 @@ fn build_stem_plot(
         marker.filled = true;
         plot.set_marker(Some(marker));
     }
+    if let Some(visible) = parsed.appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
-fn build_stem_gpu_plot(
+async fn build_stem_gpu_plot(
     name: &'static str,
     x: &runmat_accelerate_api::GpuTensorHandle,
     y: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedStemStyle,
     label: &str,
-) -> crate::BuiltinResult<StemPlot> {
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
+) -> crate::BuiltinResult<Option<StemPlot>> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
+    // Only unavailable zero-copy rendering support permits host preparation.
+    // Once admitted, invalid metadata, reduction and vertex failures propagate.
+    let Ok(context) = super::gpu_helpers::ensure_shared_wgpu_context(name) else {
+        return Ok(None);
+    };
+    let Some(x_ref) = gpu_exports.export(x, name)? else {
+        return Ok(None);
+    };
+    let Some(y_ref) = gpu_exports.export(y, name)? else {
+        return Ok(None);
+    };
     if x_ref.len != y_ref.len {
         return Err(plotting_error(
             name,
@@ -596,7 +238,7 @@ fn build_stem_gpu_plot(
     }
     let scalar =
         ScalarType::from_is_f64(x_ref.precision == runmat_accelerate_api::ProviderPrecision::F64);
-    let xy_bounds = gpu_xy_bounds(x, y, name)?;
+    let xy_bounds = gpu_xy_bounds_async(x, y, name).await?;
     let min_x = xy_bounds.min.x;
     let max_x = xy_bounds.max.x;
     let bounds = runmat_plot::core::BoundingBox::new(
@@ -612,26 +254,31 @@ fn build_stem_gpu_plot(
         ),
     );
     let inputs = StemGpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
         len: x_ref.len as u32,
         scalar,
     };
-    let gpu_vertices = runmat_plot::gpu::stem::pack_vertices_from_xy(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &StemGpuParams {
-            color: parsed.appearance.color,
-            baseline_color: parsed.appearance.color,
-            baseline: parsed.baseline as f32,
-            baseline_visible: parsed.baseline_visible,
-            min_x,
-            max_x,
-            line_style: parsed.appearance.line_style,
-        },
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::stem::pack_vertices_from_xy(
+                emission,
+                &inputs,
+                &StemGpuParams {
+                    color: parsed.appearance.color,
+                    baseline_color: parsed.appearance.color,
+                    baseline: parsed.baseline as f32,
+                    baseline_visible: parsed.baseline_visible,
+                    min_x,
+                    max_x,
+                    line_style: parsed.appearance.line_style,
+                },
+            )
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
     let mut plot = StemPlot::from_gpu_buffer(
         parsed.appearance.color,
         parsed.appearance.line_width,
@@ -640,7 +287,7 @@ fn build_stem_gpu_plot(
         parsed.appearance.color,
         parsed.baseline_visible,
         gpu_vertices,
-        (if parsed.baseline_visible { 2 } else { 0 }) + (x_ref.len as usize * 2),
+        (if parsed.baseline_visible { 2 } else { 0 }) + (x_ref.len * 2),
         bounds,
     )
     .with_gpu_source_inputs(inputs)
@@ -650,34 +297,41 @@ fn build_stem_gpu_plot(
         if parsed.filled {
             marker.filled = true;
         }
-        let marker_gpu = line::pack_marker_vertices_from_xy(
-            &context.device,
-            &context.queue,
-            &MarkerGpuInputs {
-                x_buffer: x_ref.buffer.clone(),
-                y_buffer: y_ref.buffer.clone(),
-                len: x_ref.len as u32,
-                scalar,
-            },
-            &MarkerGpuParams {
-                color: marker.face_color,
-                half_width_px: 0.0,
-                viewport_width_px: 1.0,
-                viewport_height_px: 1.0,
-                x_min: 0.0,
-                x_span: 1.0,
-                y_min: 0.0,
-                y_span: 1.0,
-                line_style: runmat_plot::plots::LineStyle::Solid,
-                marker_size: marker.size,
-            },
-        )
-        .map_err(|e| {
-            plotting_error(
-                name,
-                format!("{name}: failed to build marker vertices: {e}"),
-            )
-        })?;
+        let marker_gpu = context
+            .access
+            .with_shared(|emission| {
+                line::pack_marker_vertices_from_xy(
+                    emission,
+                    &MarkerGpuInputs {
+                        x_buffer: x_ref.clone().into(),
+                        y_buffer: y_ref.clone().into(),
+                        len: x_ref.len as u32,
+                        scalar,
+                    },
+                    &MarkerGpuParams {
+                        color: marker.face_color,
+                        half_width_px: 0.0,
+                        viewport_width_px: 1.0,
+                        viewport_height_px: 1.0,
+                        x_min: 0.0,
+                        x_span: 1.0,
+                        y_min: 0.0,
+                        y_span: 1.0,
+                        x_log: false,
+                        y_log: false,
+                        line_style: runmat_plot::plots::LineStyle::Solid,
+                        marker_size: marker.size,
+                    },
+                )
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| {
+                plotting_error(
+                    name,
+                    format!("{name}: failed to build marker vertices: {e}"),
+                )
+            })?;
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
     } else if parsed.filled {
@@ -688,38 +342,48 @@ fn build_stem_gpu_plot(
             face_color: parsed.appearance.color,
             filled: true,
         };
-        let marker_gpu = line::pack_marker_vertices_from_xy(
-            &context.device,
-            &context.queue,
-            &MarkerGpuInputs {
-                x_buffer: x_ref.buffer.clone(),
-                y_buffer: y_ref.buffer.clone(),
-                len: x_ref.len as u32,
-                scalar,
-            },
-            &MarkerGpuParams {
-                color: marker.face_color,
-                half_width_px: 0.0,
-                viewport_width_px: 1.0,
-                viewport_height_px: 1.0,
-                x_min: 0.0,
-                x_span: 1.0,
-                y_min: 0.0,
-                y_span: 1.0,
-                line_style: runmat_plot::plots::LineStyle::Solid,
-                marker_size: marker.size,
-            },
-        )
-        .map_err(|e| {
-            plotting_error(
-                name,
-                format!("{name}: failed to build marker vertices: {e}"),
-            )
-        })?;
+        let marker_gpu = context
+            .access
+            .with_shared(|emission| {
+                line::pack_marker_vertices_from_xy(
+                    emission,
+                    &MarkerGpuInputs {
+                        x_buffer: x_ref.clone().into(),
+                        y_buffer: y_ref.clone().into(),
+                        len: x_ref.len as u32,
+                        scalar,
+                    },
+                    &MarkerGpuParams {
+                        color: marker.face_color,
+                        half_width_px: 0.0,
+                        viewport_width_px: 1.0,
+                        viewport_height_px: 1.0,
+                        x_min: 0.0,
+                        x_span: 1.0,
+                        y_min: 0.0,
+                        y_span: 1.0,
+                        x_log: false,
+                        y_log: false,
+                        line_style: runmat_plot::plots::LineStyle::Solid,
+                        marker_size: marker.size,
+                    },
+                )
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| {
+                plotting_error(
+                    name,
+                    format!("{name}: failed to build marker vertices: {e}"),
+                )
+            })?;
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
     }
-    Ok(plot)
+    if let Some(visible) = parsed.appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(Some(plot))
 }
 
 struct ParsedStemStyle {
@@ -738,7 +402,13 @@ fn parse_stem_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedStemStyle
     let mut baseline_visible = true;
     let mut idx = 0usize;
     while idx < args.len() {
-        if let Some(text) = super::style::value_as_string(&args[idx]) {
+        if let Some(text) = super::style::value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "stem",
+                source.to_string(),
+                source,
+            )
+        })? {
             let trimmed = text.trim();
             if trimmed.eq_ignore_ascii_case("filled") {
                 filled = true;
@@ -779,7 +449,7 @@ fn parse_stem_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedStemStyle
 }
 
 fn parse_stem_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<(Option<usize>, Value, Value, Vec<Value>)> {
     if args.is_empty() {
         return Err(plotting_error(
@@ -801,24 +471,12 @@ fn parse_stem_args(
     };
     let Some(second) = it.next() else {
         let y = first;
-        let y_tensor =
-            Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?;
-        let len = tensor_utils::tensor_element_len(&y_tensor);
-        let x = Value::Tensor(
-            Tensor::new((1..=len).map(|i| i as f64).collect(), vec![len])
-                .expect("implicit stem axis"),
-        );
+        let x = NumericInput::implicit_x(&y, BUILTIN_NAME, 0)?;
         return Ok((target_axes, x, y, Vec::new()));
     };
     if matches!(second, Value::String(_) | Value::CharArray(_)) {
         let y = first;
-        let y_tensor =
-            Tensor::try_from(&y).map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?;
-        let len = tensor_utils::tensor_element_len(&y_tensor);
-        let x = Value::Tensor(
-            Tensor::new((1..=len).map(|i| i as f64).collect(), vec![len])
-                .expect("implicit stem axis"),
-        );
+        let x = NumericInput::implicit_x(&y, BUILTIN_NAME, 0)?;
         let mut rest = vec![second];
         rest.extend(it);
         return Ok((target_axes, x, y, rest));
@@ -829,6 +487,13 @@ fn parse_stem_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::STEM_DESCRIPTOR;
+    fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        futures::executor::block_on(super::stem_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+    }
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::subplot::subplot_builtin;
@@ -853,6 +518,31 @@ mod tests {
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Stem(_)));
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
         assert_eq!(ty, Value::String("stem".into()));
+        for y in [
+            Value::Num(4.0),
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+            Value::Tensor(Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap()),
+        ] {
+            let expected = NumericInput::from_value(y.clone(), "stem").unwrap();
+            let NumericInput::Host(expected) = expected else {
+                panic!("host scalar")
+            };
+            let handle = stem_builtin(vec![y]).expect("scalar stem");
+            let Value::Tensor(x) =
+                get_builtin(vec![Value::Num(handle), Value::from("XData")]).unwrap()
+            else {
+                panic!("XData")
+            };
+            let Value::Tensor(y) =
+                get_builtin(vec![Value::Num(handle), Value::from("YData")]).unwrap()
+            else {
+                panic!("YData")
+            };
+            assert_eq!(x.materialize_f64(), vec![1.0]);
+            assert_eq!(y.numeric_dtype(), expected.numeric_dtype());
+            assert_eq!(y.integer_storage(), expected.integer_storage());
+            assert_eq!(y.materialize_f64(), expected.materialize_f64());
+        }
     }
 
     #[test]
@@ -888,8 +578,8 @@ mod tests {
             y.integer_storage(),
             Some(&runmat_value::IntegerStorage::I16(vec![-3, 4]))
         );
-        assert_eq!(x.shape, vec![1, 2]);
-        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(x.shape(), [1, 2]);
+        assert_eq!(y.shape(), [2, 1]);
     }
 
     #[test]
@@ -910,8 +600,9 @@ mod tests {
             Value::String("filled".into()),
         ]);
         if let Err(err) = &result {
-            let msg = err.to_string().to_lowercase();
-            assert!(msg.contains("plotting is unavailable") || msg.contains("non-main thread"));
+            assert!(crate::builtins::plotting::state::presentation_unavailable(
+                err
+            ));
         }
         let handle = result.unwrap_or(-1.0);
         let fig = clone_figure(current_figure_handle()).unwrap();

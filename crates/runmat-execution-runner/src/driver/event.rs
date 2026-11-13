@@ -1,6 +1,6 @@
 use runmat_execution::identity::{AttemptId, ResultCommitId, WorkerId};
 use runmat_execution::state::{PoolState, TaskState};
-use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId, TaskId};
+use runmat_execution::{CancellationReason, ExecutionScopeId, GangId, PoolId, TaskId};
 use serde::{Deserialize, Serialize};
 
 use crate::task::AttemptFailureKind;
@@ -32,6 +32,9 @@ pub enum DriverEventKind {
     WorkerRegistered {
         worker_id: WorkerId,
         pool_id: PoolId,
+    },
+    WorkerActivated {
+        worker_id: WorkerId,
     },
     WorkerDraining {
         worker_id: WorkerId,
@@ -79,9 +82,20 @@ pub enum DriverEventKind {
         attempt_id: AttemptId,
         reason: String,
     },
+    TaskCancellationRequested {
+        task_id: TaskId,
+        reason: CancellationReason,
+        now_millis: u64,
+    },
     ScopeCancelled {
         scope_id: ExecutionScopeId,
         reason: CancellationReason,
+    },
+    GangCancelled {
+        gang_id: GangId,
+        generation: u64,
+        reason: CancellationReason,
+        now_millis: u64,
     },
     DeadlineExpired {
         task_id: TaskId,

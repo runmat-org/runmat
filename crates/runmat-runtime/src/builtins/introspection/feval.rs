@@ -3,17 +3,37 @@ use runmat_value::Value;
 #[runmat_macros::runtime_builtin(
     name = "feval",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
+    output_sequence = true,
     builtin_path = "crate::builtins::introspection::feval"
 )]
-pub async fn feval_builtin_registered(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    crate::feval_builtin(f, rest).await
+pub async fn feval_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    f: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
+    let input_callsite = crate::callsite::current_callsite().and_then(|callsite| {
+        (!callsite.arg_spans.is_empty()).then(|| callsite.without_first_argument())
+    });
+    crate::call::feval::invoke_retained(
+        runtime.as_ref(),
+        f,
+        rest,
+        requested_outputs
+            .or_else(crate::output_count::current_output_count)
+            .unwrap_or(1),
+        input_callsite,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use runmat_builtins::{
-        catalog::definitions::{FEVAL_EXTENSIONS, FEVAL_INTEGER_CAPABILITIES},
-        BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain,
+        BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain, FEVAL_EXTENSIONS,
+        FEVAL_INTEGER_CAPABILITIES,
     };
 
     #[test]

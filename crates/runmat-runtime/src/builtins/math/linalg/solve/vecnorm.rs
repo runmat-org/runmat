@@ -1,13 +1,11 @@
 //! MATLAB-compatible `vecnorm` builtin.
 
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::VECNORM_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, VECNORM_ERROR_INTERNAL, VECNORM_ERROR_INVALID_ARGUMENT,
+    VECNORM_ERROR_INVALID_INPUT, VECNORM_INTEGER_INPUT_EXTENSION, VECNORM_INTEGER_ORDER_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
@@ -18,196 +16,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::solve::norm::{root_sum_of_squares, NormOrder};
-use crate::builtins::math::linalg::type_resolvers::vecnorm_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "vecnorm";
-
-pub const VECNORM_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "vecnorm-integer-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "vecnorm with typed-integer array data is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:VecnormIntegerInputExtension"),
-    };
-pub const VECNORM_INTEGER_ORDER_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "vecnorm-integer-order",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "vecnorm with a typed-integer norm order is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:VecnormIntegerOrderExtension"),
-    };
-pub const VECNORM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    VECNORM_INTEGER_INPUT_EXTENSION,
-    VECNORM_INTEGER_ORDER_EXTENSION,
-];
-
-const VECNORM_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data classes are single and double. RunMat mode accepts real integer arrays only when every value is exactly representable at the binary64 norm boundary.",
-    }];
-const VECNORM_INTEGER_ORDER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed norm order is a RunMat extension and enters the floating exponent only after exact binary64 representability is proved.",
-    }];
-const VECNORM_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented dimension accepts every integer class and is decoded exactly as a positive platform-sized structural value.",
-    }];
-
-pub const VECNORM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "N = vecnorm(integer_A, ___)",
-        inputs: &VECNORM_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The gated integer array crosses one checked binary64 norm boundary. Host results are double and automatic residency restores results to the owning provider when supported.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "N = vecnorm(A, integer_p, dim?)",
-        inputs: &VECNORM_INTEGER_ORDER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The gated typed p is checked before conversion into the norm exponent; it does not select the output class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "N = vecnorm(A, p, integer_dim)",
-        inputs: &VECNORM_INTEGER_DIM_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Dimension selection remains exact and does not enter norm arithmetic; invalid or non-platform-sized values reject without floating conversion.",
-    },
-];
-
-const VECNORM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "N",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Vector-wise norm values.",
-}];
-
-const VECNORM_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input numeric array.",
-}];
-
-const VECNORM_INPUTS_A_P: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input numeric array.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("2"),
-        description: "Positive norm order or Inf.",
-    },
-];
-
-const VECNORM_INPUTS_A_P_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input numeric array.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("2"),
-        description: "Positive norm order or Inf.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Dimension to operate along.",
-    },
-];
-
-const VECNORM_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "N = vecnorm(A)",
-        inputs: &VECNORM_INPUTS_A,
-        outputs: &VECNORM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "N = vecnorm(A, p)",
-        inputs: &VECNORM_INPUTS_A_P,
-        outputs: &VECNORM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "N = vecnorm(A, p, dim)",
-        inputs: &VECNORM_INPUTS_A_P_DIM,
-        outputs: &VECNORM_OUTPUT,
-    },
-];
-
-const VECNORM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VECNORM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:vecnorm:InvalidArgument"),
-    when: "The norm order or dimension argument is malformed or unsupported.",
-    message: "vecnorm: invalid argument",
-};
-
-const VECNORM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VECNORM.INVALID_INPUT",
-    identifier: Some("RunMat:vecnorm:InvalidInput"),
-    when: "Input values cannot be converted to a supported numeric array domain.",
-    message: "vecnorm: invalid input",
-};
-
-const VECNORM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VECNORM.INTERNAL",
-    identifier: Some("RunMat:vecnorm:Internal"),
-    when: "Runtime fails while reducing, allocating, gathering, or uploading values.",
-    message: "vecnorm: internal runtime failure",
-};
-
-const VECNORM_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    VECNORM_ERROR_INVALID_ARGUMENT,
-    VECNORM_ERROR_INVALID_INPUT,
-    VECNORM_ERROR_INTERNAL,
-];
-
-pub const VECNORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &VECNORM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &VECNORM_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::vecnorm")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -285,19 +96,13 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "vecnorm",
-    category = "math/linalg/solve",
-    summary = "Compute vector-wise array norms.",
-    keywords = "vecnorm,vector norm,array norm,euclidean,gpu",
-    accel = "reduction",
-    type_resolver(vecnorm_type),
-    descriptor(crate::builtins::math::linalg::solve::vecnorm::VECNORM_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::solve::vecnorm::VECNORM_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::linalg::solve::vecnorm::VECNORM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::vecnorm"
 )]
-async fn vecnorm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn vecnorm_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !matches!(&value, Value::ComplexTensor(_)) {
         crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
             &value,
@@ -316,7 +121,7 @@ async fn vecnorm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         )
         .await?;
     }
-    let args = VecnormArgs::parse(&rest)?;
+    let args = VecnormArgs::parse(rest.view())?;
     match value {
         Value::GpuTensor(handle) => vecnorm_gpu(handle, args).await,
         Value::ComplexTensor(tensor) => {
@@ -346,7 +151,7 @@ struct VecnormArgs {
 }
 
 impl VecnormArgs {
-    fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         match args.len() {
             0 => Ok(Self {
                 order: NormOrder::Two,
@@ -377,14 +182,14 @@ async fn vecnorm_gpu(handle: GpuTensorHandle, args: VecnormArgs) -> BuiltinResul
 }
 
 fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tensor> {
-    let dim = resolve_dim(&tensor.shape, args.dim);
+    let dim = resolve_dim(tensor.shape(), args.dim);
     let dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
         NumericDType::F64
     };
     let result = reduce_magnitudes(
-        &tensor.shape,
+        tensor.shape(),
         dim,
         args.order,
         // The compatibility gate proves that any accepted integer extension
@@ -396,7 +201,7 @@ fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tens
 }
 
 fn vecnorm_complex_tensor(tensor: &ComplexTensor, args: VecnormArgs) -> BuiltinResult<Tensor> {
-    let dim = resolve_dim(&tensor.shape, args.dim);
+    let dim = resolve_dim(tensor.shape(), args.dim);
     let dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
@@ -404,7 +209,7 @@ fn vecnorm_complex_tensor(tensor: &ComplexTensor, args: VecnormArgs) -> BuiltinR
     };
     let values = tensor.materialize_f64();
     reduce_magnitudes(
-        &tensor.shape,
+        tensor.shape(),
         dim,
         args.order,
         |index| values[index].0.hypot(values[index].1),
@@ -712,7 +517,6 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn assert_close(actual: f64, expected: f64) {
@@ -727,38 +531,10 @@ mod tests {
     }
 
     fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::vecnorm_builtin(value, rest))
-    }
-
-    #[test]
-    fn vecnorm_type_reduces_default_dimension() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
-        };
-        let out = vecnorm_type(&[ty], &ResolveContext::new(Vec::new()));
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn vecnorm_type_uses_unknown_shape_for_nonliteral_explicit_dim() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
-        };
-        let out = vecnorm_type(
-            &[ty, Type::Num, Type::Num],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
+        block_on(super::vecnorm_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[test]
@@ -784,7 +560,7 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_close(out.materialize_f64()[0], (4.0f64 + 1.0 + 9.0).sqrt());
                 assert_close(out.materialize_f64()[1], (0.0f64 + 1.0 + 9.0).sqrt());
                 assert_close(out.materialize_f64()[2], 1.0);
@@ -804,7 +580,7 @@ mod tests {
         .expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_close(out.materialize_f64()[0], 4.0);
                 assert_close(out.materialize_f64()[1], 6.0);
             }
@@ -977,7 +753,7 @@ mod tests {
         .expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1005,7 +781,7 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1100,7 +876,7 @@ mod tests {
         .expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_close(out.materialize_f64()[0], 10.0f64.sqrt());
                 assert_close(out.materialize_f64()[1], 20.0f64.sqrt());
             }
@@ -1173,7 +949,7 @@ mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
             assert_close(gathered.materialize_f64()[0], 5.0);
             assert_close(gathered.materialize_f64()[1], 13.0);
@@ -1184,7 +960,7 @@ mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &single).expect("upload single");
             let result = call(Value::GpuTensor(handle), Vec::new()).expect("single vecnorm");
             let gathered = test_support::gather(result).expect("gather single");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(gathered.materialize_f64(), vec![5.0, 13.0]);
         });
@@ -1218,12 +994,12 @@ mod tests {
         };
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         for (actual, expected) in gathered
             .materialize_f64()
             .iter()

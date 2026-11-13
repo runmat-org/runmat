@@ -79,7 +79,7 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         ],
         "gpu_speedup_ratio": 0.25,
         "gpu_solver_solve_ms": 1.5,
-        "gpu_solver_backend": "runtime_tensor",
+        "gpu_solver_backend": "accelerator",
     }
     if fixture_id.startswith("electromagnetic_reference_"):
         record["gpu_solver_fallback_apply_count"] = 0.0
@@ -124,6 +124,18 @@ def _error_record(fixture_id: str, run_error_code: str) -> dict:
         "validate_error_code": None,
         "run_ok": False,
         "run_error_code": run_error_code,
+        "threshold_assertions": [],
+        "failures": [],
+    }
+
+
+def _validation_error_record(fixture_id: str, validate_error_code: str) -> dict:
+    return {
+        "fixture_id": fixture_id,
+        "validate_ok": False,
+        "validate_error_code": validate_error_code,
+        "run_ok": False,
+        "run_error_code": None,
         "threshold_assertions": [],
         "failures": [],
     }
@@ -237,14 +249,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                     "nonlinear_path_mix_material_spread_ratio",
                     "nonlinear_path_mix_spike_count",
                     "thermo_nonlinear_severity",
-                    "thermo_nonlinear_field_clamp_ratio",
-                    "thermo_nonlinear_time_scale_mean",
-                    "electro_nonlinear_joule_heating_scale",
-                    "electro_nonlinear_conductivity_spread_ratio",
-                    "electro_nonlinear_severity_peak",
-                    "electro_nonlinear_severity_mean",
-                    "electro_nonlinear_temporal_variation",
-                    "electro_nonlinear_time_scale_mean",
                 },
             )
             | {
@@ -256,15 +260,8 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
             },
             _record(
                 "nonlinear_plasticity_benchmark_gpu_provider",
@@ -280,12 +277,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 },
             )
             | {
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
                 "plastic_nonlinear_severity": 0.1,
             },
             _record(
@@ -372,7 +363,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                     "thermo_mech_material_spread_ratio",
                     "thermo_mech_assignment_heterogeneity_index",
                     "thermo_mech_transient_severity",
-                    "thermo_mech_transient_time_scale_mean",
                     "thermo_mech_constitutive_residual_ratio",
                     "thermo_mech_thermal_strain_energy_density_mean",
                     "thermo_mech_consistency_coverage_ratio",
@@ -394,7 +384,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
@@ -403,7 +392,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 {
                     "thermo_gradient_benign_spread_ratio",
                     "thermo_gradient_benign_heterogeneity",
-                    "thermo_gradient_benign_temporal_variation",
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
                     "transient_prepared_cache_hit_ratio",
@@ -419,7 +407,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
@@ -428,7 +415,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 {
                     "thermo_gradient_pathological_spread_ratio",
                     "thermo_gradient_pathological_heterogeneity",
-                    "thermo_gradient_pathological_temporal_variation",
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
                     "transient_prepared_cache_hit_ratio",
@@ -444,18 +430,14 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
             _record(
                 "thermo_ramp_smooth_gpu_provider",
                 {
-                    "thermo_ramp_smooth_temporal_variation",
                     "thermo_ramp_smooth_spatial_gradient_index",
                     "thermo_ramp_smooth_spatial_coverage_ratio",
-                    "thermo_ramp_smooth_field_extrapolation_ratio",
-                    "thermo_ramp_smooth_field_clamp_ratio",
                     "thermo_ramp_smooth_constitutive_temperature_factor",
                     "thermo_ramp_smooth_effective_modulus_scale",
                     "transient_max_residual_norm",
@@ -473,51 +455,14 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
-            },
-            _record(
-                "thermo_ramp_smooth_field_artifact_gpu_provider",
-                {
-                    "thermo_ramp_smooth_temporal_variation",
-                    "thermo_ramp_smooth_spatial_gradient_index",
-                    "thermo_ramp_smooth_spatial_coverage_ratio",
-                    "thermo_ramp_smooth_field_extrapolation_ratio",
-                    "thermo_ramp_smooth_field_clamp_ratio",
-                    "thermo_ramp_smooth_constitutive_temperature_factor",
-                    "thermo_ramp_smooth_effective_modulus_scale",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
-                    "transient_prepared_cache_hit_ratio",
-                    "transient_prepared_cache_misses",
-                },
-            )
-            | {
-                "thermo_coupling_enabled": True,
-                "thermo_coupling_fingerprint": 1,
-                "thermo_constitutive_temperature_factor": 1.0,
-                "thermo_effective_modulus_scale": 1.0,
-                "thermo_constitutive_material_spread_ratio": 1.0,
-                "thermo_assignment_heterogeneity_index": 1.0,
-                "thermo_region_delta_count": 1.0,
-                "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
-                "thermo_transient_severity": 0.1,
-                "thermo_nonlinear_severity": 0.1,
-                "thermo_field_artifact_id": "artifact_1",
-                "thermo_field_artifact_approved": True,
-                "thermo_field_artifact_age_days": 0.1,
-                "thermo_field_artifact_provenance_valid": True,
             },
             _record(
                 "thermo_shock_oscillatory_gpu_provider",
                 {
-                    "thermo_shock_oscillatory_temporal_variation",
                     "thermo_shock_oscillatory_spatial_gradient_index",
                     "thermo_shock_oscillatory_spatial_coverage_ratio",
-                    "thermo_shock_oscillatory_field_extrapolation_ratio",
-                    "thermo_shock_oscillatory_field_clamp_ratio",
                     "thermo_shock_constitutive_temperature_factor",
                     "thermo_shock_effective_modulus_scale",
                     "transient_max_residual_norm",
@@ -535,65 +480,22 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
-            },
-            _record(
-                "thermo_shock_oscillatory_field_artifact_gpu_provider",
-                {
-                    "thermo_shock_oscillatory_temporal_variation",
-                    "thermo_shock_oscillatory_spatial_gradient_index",
-                    "thermo_shock_oscillatory_spatial_coverage_ratio",
-                    "thermo_shock_oscillatory_field_extrapolation_ratio",
-                    "thermo_shock_oscillatory_field_clamp_ratio",
-                    "thermo_shock_constitutive_temperature_factor",
-                    "thermo_shock_effective_modulus_scale",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
-                    "transient_prepared_cache_hit_ratio",
-                    "transient_prepared_cache_misses",
-                },
-            )
-            | {
-                "thermo_coupling_enabled": True,
-                "thermo_coupling_fingerprint": 1,
-                "thermo_constitutive_temperature_factor": 1.0,
-                "thermo_effective_modulus_scale": 1.0,
-                "thermo_constitutive_material_spread_ratio": 1.0,
-                "thermo_assignment_heterogeneity_index": 1.0,
-                "thermo_region_delta_count": 1.0,
-                "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
-                "thermo_transient_severity": 0.1,
-                "thermo_nonlinear_severity": 0.1,
-                "thermo_field_artifact_id": "artifact_2",
-                "thermo_field_artifact_approved": True,
-                "thermo_field_artifact_age_days": 0.1,
-                "thermo_field_artifact_provenance_valid": True,
             },
             *[
                 _record(
                     fixture_id,
                     {
-                        "thermal_standalone_max_residual_norm",
+                        "thermal_standalone_max_relative_residual_norm",
                         "thermal_standalone_min_temperature_k",
                         "thermal_standalone_max_temperature_k",
-                        "thermal_standalone_heat_balance_residual_ratio",
+                        "thermal_standalone_energy_balance_residual_ratio",
                         "thermal_standalone_conductivity_spread_ratio",
                         "thermal_standalone_heat_capacity_spread_ratio",
-                        "thermal_standalone_spatial_gradient_index",
-                        "thermal_standalone_monotonic_response_fraction",
-                        "thermal_standalone_response_realization_ratio",
-                        "thermal_standalone_slab_linear_profile_rms_ratio",
-                        "thermal_standalone_slab_monotonic_edge_fraction",
-                        "thermal_standalone_lumped_response_error_ratio",
-                        "thermal_standalone_source_response_sign_alignment",
-                        "thermal_standalone_source_coverage_ratio",
-                        "thermal_standalone_boundary_coverage_ratio",
-                        "thermal_standalone_prescribed_temperature_count",
-                        "thermal_standalone_heat_flux_boundary_count",
-                        "thermal_standalone_convection_boundary_count",
+                        "thermal_standalone_element_count",
+                        "thermal_standalone_boundary_face_count",
+                        "thermal_standalone_initial_prescribed_node_count",
                     },
                 )
                 for fixture_id in (
@@ -602,9 +504,9 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                     "thermal_standalone_ramp_gpu_fallback",
                 )
             ],
-            _error_record(
+            _validation_error_record(
                 "thermal_standalone_ramp_invalid_material",
-                "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL",
+                "RM.FEA.VALIDATE.INVALID_MATERIAL",
             ),
             _error_record(
                 "thermal_standalone_ramp_invalid_source",
@@ -614,105 +516,25 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermal_standalone_ramp_invalid_boundary",
                 "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
             ),
-            _record(
-                "electro_thermal_joule_benign_gpu_provider",
-                {
-                    "electro_thermal_benign_joule_heating_scale",
-                    "electro_thermal_benign_conductivity_spread_ratio",
-                    "electro_thermal_benign_transient_severity_peak",
-                    "electro_thermal_benign_temporal_variation",
-                    "electro_thermal_benign_time_scale_mean",
-                    "electro_thermal_benign_conductive_node_count",
-                    "electro_thermal_benign_mapped_voltage_boundary_count",
-                    "electro_thermal_benign_mapped_current_source_count",
-                    "electro_thermal_benign_topology_component_count",
-                    "electro_thermal_benign_source_boundary_alignment_ratio",
-                    "electro_thermal_benign_domain_conductance_coverage_ratio",
-                    "electro_thermal_benign_material_region_coverage_ratio",
-                    "electro_thermal_benign_potential_residual_norm",
-                    "electro_thermal_benign_current_balance_residual",
-                    "electro_thermal_benign_potential_span_v",
-                    "electro_thermal_benign_conduction_edge_count",
-                    "electro_thermal_benign_topology_coverage_ratio",
-                    "electro_thermal_benign_ohms_law_residual_ratio",
-                    "electro_thermal_benign_joule_heat_balance_ratio",
-                    "electro_thermal_benign_potential_monotonic_edge_fraction",
-                    "electro_thermal_benign_conduction_graph_coverage_ratio",
-                    "electro_thermal_benign_joule_heat_realization_ratio",
-                    "electro_thermal_benign_joule_source_coverage_ratio",
-                    "electro_thermal_benign_thermal_temperature_source_alignment",
-                    "electro_thermal_benign_thermal_source_residual_ratio",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
-                    "transient_prepared_cache_hit_ratio",
-                    "transient_prepared_cache_misses",
-                },
-            )
-            | {
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
-            },
-            _record(
-                "electro_thermal_joule_pathological_gpu_provider",
-                {
-                    "electro_thermal_pathological_joule_heating_scale",
-                    "electro_thermal_pathological_conductivity_spread_ratio",
-                    "electro_thermal_pathological_transient_severity_peak",
-                    "electro_thermal_pathological_temporal_variation",
-                    "electro_thermal_pathological_time_scale_mean",
-                    "electro_thermal_pathological_conductive_node_count",
-                    "electro_thermal_pathological_mapped_voltage_boundary_count",
-                    "electro_thermal_pathological_mapped_current_source_count",
-                    "electro_thermal_pathological_topology_component_count",
-                    "electro_thermal_pathological_source_boundary_alignment_ratio",
-                    "electro_thermal_pathological_domain_conductance_coverage_ratio",
-                    "electro_thermal_pathological_material_region_coverage_ratio",
-                    "electro_thermal_pathological_potential_residual_norm",
-                    "electro_thermal_pathological_current_balance_residual",
-                    "electro_thermal_pathological_potential_span_v",
-                    "electro_thermal_pathological_conduction_edge_count",
-                    "electro_thermal_pathological_topology_coverage_ratio",
-                    "electro_thermal_pathological_ohms_law_residual_ratio",
-                    "electro_thermal_pathological_joule_heat_balance_ratio",
-                    "electro_thermal_pathological_potential_monotonic_edge_fraction",
-                    "electro_thermal_pathological_conduction_graph_coverage_ratio",
-                    "electro_thermal_pathological_joule_heat_realization_ratio",
-                    "electro_thermal_pathological_joule_source_coverage_ratio",
-                    "electro_thermal_pathological_thermal_temperature_source_alignment",
-                    "electro_thermal_pathological_thermal_source_residual_ratio",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
-                    "transient_prepared_cache_hit_ratio",
-                    "transient_prepared_cache_misses",
-                },
-            )
-            | {
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
-            },
             _error_record(
+                "electro_thermal_joule_benign_rejected",
+                "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+            ),
+            _error_record(
+                "electro_thermal_joule_pathological_rejected",
+                "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+            ),
+            _validation_error_record(
                 "electro_thermal_invalid_voltage",
-                "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+                "RM.FEA.VALIDATE.INVALID_SIGNAL",
             ),
-            _error_record(
-                "electro_thermal_invalid_conductivity_scale",
-                "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+            _validation_error_record(
+                "electro_thermal_invalid_conductivity",
+                "RM.FEA.VALIDATE.INVALID_MATERIAL",
             ),
-            _error_record(
-                "electro_thermal_unmapped_region",
-                "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
-            ),
-            _error_record(
+            _validation_error_record(
                 "cfd_invalid_domain_options",
-                "RM.FEA.RUN_CFD.INVALID_OPTIONS",
+                "RM.FEA.VALIDATE.INVALID_DOMAIN",
             ),
             _error_record(
                 "cfd_invalid_boundary_conditions",
@@ -722,17 +544,17 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "cht_coupled_invalid_interface_mapping",
                 "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
             ),
-            _error_record(
+            _validation_error_record(
                 "cht_coupled_invalid_cfd_domain",
-                "RM.FEA.RUN_CHT.INVALID_OPTIONS",
+                "RM.FEA.VALIDATE.INVALID_DOMAIN",
             ),
             _error_record(
                 "fsi_coupled_invalid_interface_mapping",
                 "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
             ),
-            _error_record(
+            _validation_error_record(
                 "fsi_coupled_invalid_cfd_domain",
-                "RM.FEA.RUN_FSI.INVALID_OPTIONS",
+                "RM.FEA.VALIDATE.INVALID_DOMAIN",
             ),
             _record(
                 "electromagnetic_reference_homogeneous_gpu_provider",
@@ -1024,9 +846,9 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                     "acoustic_known_answer_coverage_ratio",
                 },
             ),
-            _error_record(
+            _validation_error_record(
                 "nonlinear_invalid_plasticity_options",
-                "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+                "RM.FEA.VALIDATE.INVALID_MATERIAL",
             ),
             _error_record(
                 "nonlinear_invalid_contact_options",
@@ -1596,38 +1418,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_thermo_gradient_benign_temporal_variation_assertion_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            records = self._base_records()
-            for record in records:
-                if record["fixture_id"] == "thermo_gradient_benign_gpu_provider":
-                    record["threshold_assertions"] = [
-                        item
-                        for item in record["threshold_assertions"]
-                        if item["name"] != "thermo_gradient_benign_temporal_variation"
-                    ]
-                    break
-            path = Path(tmp) / "analysis_benchmark_report.json"
-            path.write_text(json.dumps({"records": records}))
-            rc = self._run_main_with_report(path)
-            self.assertEqual(rc, 1)
-
-    def test_fails_when_thermo_ramp_field_clamp_assertion_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            records = self._base_records()
-            for record in records:
-                if record["fixture_id"] == "thermo_ramp_smooth_gpu_provider":
-                    record["threshold_assertions"] = [
-                        item
-                        for item in record["threshold_assertions"]
-                        if item["name"] != "thermo_ramp_smooth_field_clamp_ratio"
-                    ]
-                    break
-            path = Path(tmp) / "analysis_benchmark_report.json"
-            path.write_text(json.dumps({"records": records}))
-            rc = self._run_main_with_report(path)
-            self.assertEqual(rc, 1)
-
     def test_fails_when_thermo_ramp_constitutive_factor_assertion_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
@@ -1926,12 +1716,12 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_electro_invalid_voltage_error_code_missing(self):
+    def test_fails_when_electro_invalid_voltage_validation_code_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
                 if record["fixture_id"] == "electro_thermal_invalid_voltage":
-                    record["run_error_code"] = None
+                    record["validate_error_code"] = None
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))
@@ -2014,12 +1804,12 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_expanded_performance_field_missing(self):
+    def test_fails_when_electro_thermal_rejection_code_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
-                if record["fixture_id"] == "electro_thermal_joule_benign_gpu_provider":
-                    record.pop("gpu_solver_solve_ms", None)
+                if record["fixture_id"] == "electro_thermal_joule_benign_rejected":
+                    record["run_error_code"] = None
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

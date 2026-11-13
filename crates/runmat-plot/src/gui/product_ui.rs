@@ -199,20 +199,11 @@ fn show_toolbar_tooltip(
         });
 }
 
-#[cfg(target_arch = "wasm32")]
 fn tooltip_frame(theme: &ProductToolbarTheme, scale: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(theme.tooltip_fill)
         .stroke(egui::Stroke::new(1.0_f32, theme.tooltip_stroke))
         .corner_radius(scaled_corner_radius(2.0 * scale))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn tooltip_frame(theme: &ProductToolbarTheme, scale: f32) -> egui::Frame {
-    egui::Frame::none()
-        .fill(theme.tooltip_fill)
-        .stroke(egui::Stroke::new(1.0_f32, theme.tooltip_stroke))
-        .rounding(scaled_corner_radius(2.0 * scale))
 }
 
 fn toolbar_visuals(
@@ -255,40 +246,24 @@ fn paint_toolbar_frame_with_rounding(
     rounding: f32,
     visuals: ToolbarVisuals,
 ) {
-    #[cfg(target_arch = "wasm32")]
     ui.painter().rect(
         rect,
         scaled_corner_radius(rounding),
         visuals.fill,
         visuals.stroke,
-        egui::StrokeKind::Inside,
+        super::OUTLINE_STROKE_KIND,
     );
-    #[cfg(not(target_arch = "wasm32"))]
-    ui.painter()
-        .rect(rect, rounding, visuals.fill, visuals.stroke);
 }
 
-#[cfg(target_arch = "wasm32")]
 fn scaled_corner_radius(radius: f32) -> egui::CornerRadius {
     egui::CornerRadius::same(radius.round().clamp(0.0, u8::MAX as f32) as u8)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn scaled_corner_radius(radius: f32) -> egui::Rounding {
-    egui::Rounding::same(radius)
-}
-
-#[cfg(target_arch = "wasm32")]
 fn scaled_margin_symmetric(x: f32, y: f32) -> egui::Margin {
     egui::Margin::symmetric(
         x.round().clamp(i8::MIN as f32, i8::MAX as f32) as i8,
         y.round().clamp(i8::MIN as f32, i8::MAX as f32) as i8,
     )
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn scaled_margin_symmetric(x: f32, y: f32) -> egui::Margin {
-    egui::Margin::symmetric(x, y)
 }
 
 fn paint_toolbar_icon(
@@ -344,24 +319,18 @@ fn paint_view_icon(ui: &egui::Ui, rect: egui::Rect, scale: f32, stroke: egui::St
         center + egui::vec2(3.0, -2.6) * scale,
         egui::vec2(8.5, 8.5) * scale,
     );
-    #[cfg(target_arch = "wasm32")]
     ui.painter().rect_stroke(
         back,
         scaled_corner_radius(0.0),
         stroke,
-        egui::StrokeKind::Inside,
+        super::OUTLINE_STROKE_KIND,
     );
-    #[cfg(target_arch = "wasm32")]
     ui.painter().rect_stroke(
         front,
         scaled_corner_radius(0.0),
         stroke,
-        egui::StrokeKind::Inside,
+        super::OUTLINE_STROKE_KIND,
     );
-    #[cfg(not(target_arch = "wasm32"))]
-    ui.painter().rect_stroke(back, 0.0, stroke);
-    #[cfg(not(target_arch = "wasm32"))]
-    ui.painter().rect_stroke(front, 0.0, stroke);
     for (a, b) in [
         (front.left_top(), back.left_top()),
         (front.right_top(), back.right_top()),

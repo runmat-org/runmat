@@ -1,172 +1,30 @@
 //! MATLAB-compatible `issymmetric` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSymmetryKind};
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::ISSYMMETRIC_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
+    ISSYMMETRIC_ERROR_INTERNAL, ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
+    ISSYMMETRIC_ERROR_INVALID_INPUT, ISSYMMETRIC_FLAG_ALIAS_EXTENSION,
+    ISSYMMETRIC_INTEGER_INPUT_EXTENSION, ISSYMMETRIC_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value};
 
+use super::kernel_error::{StructureKernelError, StructureKernelResult};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::structure::integer_symmetry;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "issymmetric";
-
-const ISSYMMETRIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when the matrix satisfies the selected symmetry predicate.",
-}];
-
-const ISSYMMETRIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const ISSYMMETRIC_INPUTS_OPTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Symmetry flag or tolerance scalar.",
-    },
-];
-
-const ISSYMMETRIC_INPUTS_FLAG_TOL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "flag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Symmetry flag (for example \"skew\" or \"symmetric\").",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Tolerance for element-wise symmetry checks.",
-    },
-];
-
-const ISSYMMETRIC_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A)",
-        inputs: &ISSYMMETRIC_INPUTS,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A, option)",
-        inputs: &ISSYMMETRIC_INPUTS_OPTION,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A, flag, tol)",
-        inputs: &ISSYMMETRIC_INPUTS_FLAG_TOL,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A, tol, flag)",
-        inputs: &ISSYMMETRIC_INPUTS_FLAG_TOL,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-];
-
-const ISSYMMETRIC_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSYMMETRIC.INVALID_ARGUMENT",
-    identifier: Some("RunMat:issymmetric:InvalidArgument"),
-    when: "Flag/tolerance arguments are malformed, duplicated, or unsupported.",
-    message: "issymmetric: invalid argument",
-};
-
-const ISSYMMETRIC_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSYMMETRIC.INVALID_INPUT",
-    identifier: Some("RunMat:issymmetric:InvalidInput"),
-    when: "Input shape/type cannot be interpreted as a numeric or logical 2-D matrix.",
-    message: "issymmetric: invalid input",
-};
-
-const ISSYMMETRIC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSYMMETRIC.INTERNAL",
-    identifier: Some("RunMat:issymmetric:Internal"),
-    when: "Runtime fails while creating internal tensors or coercing values.",
-    message: "issymmetric: internal runtime failure",
-};
-
-const ISSYMMETRIC_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
-    ISSYMMETRIC_ERROR_INVALID_INPUT,
-    ISSYMMETRIC_ERROR_INTERNAL,
-];
-
-pub const ISSYMMETRIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISSYMMETRIC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISSYMMETRIC_ERRORS,
-};
-
-const ISSYMMETRIC_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "issymmetric-integer-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "issymmetric with typed-integer input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IssymmetricIntegerInputExtension"),
-    };
-const ISSYMMETRIC_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "issymmetric-tolerance-form",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "issymmetric tolerance arguments are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IssymmetricToleranceExtension"),
-};
-const ISSYMMETRIC_FLAG_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "issymmetric-flag-aliases",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "issymmetric flag aliases beyond 'nonskew' and 'skew' are RunMat extensions",
-    error_identifier: Some("RunMat:compatibility:IssymmetricFlagAliasExtension"),
-};
-const ISSYMMETRIC_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    ISSYMMETRIC_INTEGER_INPUT_EXTENSION,
-    ISSYMMETRIC_TOLERANCE_EXTENSION,
-    ISSYMMETRIC_FLAG_ALIAS_EXTENSION,
-];
-pub const ISSYMMETRIC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "MATLAB documents single, double, and logical matrix inputs; RunMat integer matrices and tolerance arguments are separately declared and gated extensions.",
-    };
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
@@ -219,19 +77,13 @@ fn issymmetric_error_with_detail(
 
 #[runtime_builtin(
     name = "issymmetric",
-    category = "math/linalg/structure",
-    summary = "Test whether a matrix is symmetric or skew-symmetric.",
-    keywords = "issymmetric,symmetric,skew-symmetric,matrix structure,gpu",
-    accel = "metadata",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::issymmetric::ISSYMMETRIC_DESCRIPTOR),
-    extensions(ISSYMMETRIC_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::issymmetric::ISSYMMETRIC_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
-async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn issymmetric_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if value_has_integer_storage(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ISSYMMETRIC_INTEGER_INPUT_EXTENSION,
@@ -250,7 +102,7 @@ async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
             NAME,
         )?;
     }
-    let (mode, tol) = parse_optional_args(&rest)?;
+    let (mode, tol) = parse_optional_args(rest.view())?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "issymmetric")?;
     match value {
         Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol).await,
@@ -276,14 +128,16 @@ fn is_tolerance_argument(value: &Value) -> bool {
 
 fn is_flag_alias_argument(value: &Value) -> bool {
     let text = match value {
-        Value::String(value) => Some(value.as_str()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].as_str()),
+        Value::String(value) => value.as_str(),
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            value.data()[0].as_str()
+        }
         _ => None,
     };
     text.is_some_and(|value| value.trim().eq_ignore_ascii_case("symmetric"))
         || matches!(value, Value::CharArray(value) if value.rows == 1 && {
-            let text = value.data.iter().collect::<String>().trim().to_ascii_lowercase();
-            text == "symmetric"
+            let equals=|expected:&str|{let mut units=value.data().iter().map(|u|u.raw());while units.clone().next().is_some_and(|u|char::from_u32(u32::from(u)).is_some_and(char::is_whitespace)){units.next();}while units.clone().next_back().is_some_and(|u|char::from_u32(u32::from(u)).is_some_and(char::is_whitespace)){units.next_back();}units.map(|u|if (65..=90).contains(&u){u+32}else{u}).eq(expected.encode_utf16())};
+            equals("symmetric")
         })
 }
 
@@ -300,22 +154,36 @@ async fn issymmetric_gpu(
     mode: SymmetryMode,
     tol: f64,
 ) -> BuiltinResult<Value> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        issymmetric_error_with_detail(
+            &ISSYMMETRIC_ERROR_INTERNAL,
+            "no acceleration provider owns the input",
+        )
+    })?;
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let kind = match mode {
             SymmetryMode::Symmetric => ProviderSymmetryKind::Symmetric,
             SymmetryMode::Skew => ProviderSymmetryKind::Skew,
         };
         match provider.issymmetric(&handle, kind, tol) {
             Ok(flag) => {
-                gpu_helpers::restore_handle_metadata(&handle, &metadata);
                 return Ok(Value::Bool(flag));
             }
-            Err(err) => {
+            Err(err)
+                if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                    &err,
+                ) =>
+            {
                 log::debug!("issymmetric: provider hook unavailable, falling back to host: {err}");
             }
+            Err(err) => {
+                return Err(super::kernel_error::with_provider_source(
+                    issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, err.to_string()),
+                    runmat_accelerate_api::ProviderExecutionError::from(err),
+                ))
+            }
         }
-        gpu_helpers::restore_handle_metadata(&handle, &metadata);
     }
     let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         issymmetric_error_with_detail(
@@ -349,8 +217,8 @@ enum MatrixData {
 impl MatrixData {
     fn shape(&self) -> &[usize] {
         match self {
-            MatrixData::Real(t) => &t.shape,
-            MatrixData::Complex(t) => &t.shape,
+            MatrixData::Real(t) => t.shape(),
+            MatrixData::Complex(t) => t.shape(),
         }
     }
 }
@@ -404,7 +272,9 @@ fn evaluate_matrix(matrix: MatrixInput, mode: SymmetryMode, tol: f64) -> bool {
     }
 }
 
-fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
+fn parse_optional_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(SymmetryMode, f64)> {
     if args.len() > 2 {
         return Err(issymmetric_error_with_detail(
             &ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
@@ -445,9 +315,20 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
 
 fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<SymmetryMode>> {
     let text = match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => s.as_str().map(str::to_owned),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            sa.data()[0].as_str().map(str::to_owned)
+        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = issymmetric_error_with_detail(
+                    &ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
+                    source.to_string(),
+                );
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
     };
 
@@ -522,13 +403,14 @@ fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
     tensor::tensor_value_f64(tensor, 0)
 }
 
-fn matrix_dimensions_for(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+fn matrix_dimensions_for(shape: &[usize]) -> StructureKernelResult<(usize, usize)> {
     match shape.len() {
         0 => Ok((1, 1)),
         1 => Ok((shape[0], 1)),
         _ => {
             if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
-                Err(issymmetric_error_with_detail(
+                Err(StructureKernelError::detail(
+                    NAME,
                     &ISSYMMETRIC_ERROR_INVALID_INPUT,
                     "inputs must be 2-D matrices or vectors",
                 ))
@@ -640,8 +522,8 @@ fn is_symmetric_integer(
 }
 
 fn is_symmetric_complex(tensor: &ComplexTensor, mode: SymmetryMode, tol: f64) -> bool {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     debug_assert_eq!(rows, cols, "is_symmetric_complex requires a square matrix");
     let data = &tensor.materialize_f64();
 
@@ -690,12 +572,16 @@ fn complex_within(re: f64, im: f64, ref_re: f64, ref_im: f64, tol: f64) -> bool 
     diff_r.hypot(diff_i) <= tol
 }
 
-pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+pub fn ensure_matrix_shape(shape: &[usize]) -> StructureKernelResult<(usize, usize)> {
     matrix_dimensions_for(shape)
 }
 
-pub fn issymmetric_host_real_tensor(tensor: &Tensor, skew: bool, tol: f64) -> BuiltinResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
+pub fn issymmetric_host_real_tensor(
+    tensor: &Tensor,
+    skew: bool,
+    tol: f64,
+) -> StructureKernelResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(tensor.shape())?;
     if rows != cols {
         return Ok(false);
     }
@@ -711,8 +597,8 @@ pub fn issymmetric_host_complex_tensor(
     tensor: &ComplexTensor,
     skew: bool,
     tol: f64,
-) -> BuiltinResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
+) -> StructureKernelResult<bool> {
+    let (rows, cols) = matrix_dimensions_for(tensor.shape())?;
     if rows != cols {
         return Ok(false);
     }
@@ -729,13 +615,13 @@ pub fn issymmetric_host_real_data(
     data: &[f64],
     skew: bool,
     tol: f64,
-) -> BuiltinResult<bool> {
+) -> StructureKernelResult<bool> {
     let (rows, cols) = matrix_dimensions_for(shape)?;
     if rows != cols {
         return Ok(false);
     }
     let tensor = Tensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, e))?;
+        .map_err(|e| StructureKernelError::detail(NAME, &ISSYMMETRIC_ERROR_INTERNAL, e))?;
     issymmetric_host_real_tensor(&tensor, skew, tol)
 }
 
@@ -744,13 +630,13 @@ pub fn issymmetric_host_complex_data(
     data: &[(f64, f64)],
     skew: bool,
     tol: f64,
-) -> BuiltinResult<bool> {
+) -> StructureKernelResult<bool> {
     let (rows, cols) = matrix_dimensions_for(shape)?;
     if rows != cols {
         return Ok(false);
     }
     let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, e))?;
+        .map_err(|e| StructureKernelError::detail(NAME, &ISSYMMETRIC_ERROR_INTERNAL, e))?;
     issymmetric_host_complex_tensor(&tensor, skew, tol)
 }
 
@@ -794,7 +680,7 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let integer_error = block_on(super::issymmetric_builtin(
             Value::Int(IntValue::I32(1)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("integer input is an extension");
         assert_eq!(
@@ -803,7 +689,7 @@ pub(crate) mod tests {
         );
         let tolerance_error = block_on(super::issymmetric_builtin(
             Value::Num(1.0),
-            vec![Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
         ))
         .expect_err("tolerance form is an extension");
         assert_eq!(
@@ -812,7 +698,9 @@ pub(crate) mod tests {
         );
         let alias_error = block_on(super::issymmetric_builtin(
             Value::Num(1.0),
-            vec![Value::from("symmetric")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "symmetric",
+            )]),
         ))
         .expect_err("noncanonical flag alias is an extension");
         assert_eq!(
@@ -1120,7 +1008,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -1141,7 +1029,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).unwrap();
@@ -1156,7 +1044,7 @@ pub(crate) mod tests {
         .unwrap();
         let view_skew = runmat_accelerate_api::HostTensorView {
             data: &skew.materialize_f64(),
-            shape: &skew.shape,
+            shape: skew.shape(),
         };
         let handle_skew = provider.upload(&view_skew).unwrap();
         let gpu_skew = issymmetric_builtin(
@@ -1166,12 +1054,14 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(cpu_skew, gpu_skew);
 
-        let _ = provider.free(&handle);
-        let _ = provider.free(&handle_skew);
+        drop((handle, handle_skew));
     }
 
     fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::issymmetric_builtin(value, rest))
+        block_on(super::issymmetric_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

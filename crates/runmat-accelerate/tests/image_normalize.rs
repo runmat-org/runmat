@@ -1,6 +1,9 @@
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
-use runmat_accelerate_api::{AccelProvider, HostTensorView, ImageNormalizeDescriptor};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorView, HostTensorView, ImageNormalizeDescriptor, NumericElementType,
+};
 
 #[cfg(feature = "wgpu")]
 #[allow(clippy::too_many_arguments)]
@@ -112,6 +115,11 @@ async fn image_normalize_matches_cpu() {
         .image_normalize(&handle, &desc)
         .await
         .expect("image_normalize");
+    assert_eq!(
+        gpu.physical().element_type(),
+        handle.physical().element_type()
+    );
+    assert!(!gpu.shares_allocation_with(&handle));
     let host = p.download(&gpu).await.expect("download");
     assert_eq!(host.shape, vec![batch, height, width]);
 
@@ -126,6 +134,68 @@ async fn image_normalize_matches_cpu() {
             got,
             want,
             diff
+        );
+    }
+}
+
+#[cfg(feature = "wgpu")]
+#[tokio::test]
+async fn wgpu_single_image_normalize_keeps_near_constant_variance() {
+    let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
+    let p = runmat_accelerate_api::provider().expect("provider");
+    assert_eq!(
+        p.precision(),
+        runmat_accelerate_api::ProviderPrecision::F32,
+        "this witness must exercise the native single shader"
+    );
+    let base = 16_384.0f32;
+    let deltas = [-0.25f32, 0.25, -0.5, 0.5];
+    let mut data = Vec::with_capacity(8);
+    for delta in deltas {
+        data.extend([base + delta, base + delta]);
+    }
+    let shape = [2, 2, 2];
+    let input = p
+        .upload_numeric_raw(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&data),
+            shape: &shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("upload near-constant single input");
+    let output = p
+        .image_normalize(
+            &input,
+            &ImageNormalizeDescriptor {
+                batch: 2,
+                height: 2,
+                width: 2,
+                epsilon: 1e-3,
+                gain: None,
+                bias: None,
+                gamma: None,
+                clamp_zero: false,
+            },
+        )
+        .await
+        .expect("native single image normalization");
+    assert_eq!(output.shape(), shape);
+    assert_eq!(output.device_id(), p.device_id());
+    assert_eq!(output.physical().element_type(), NumericElementType::F32);
+    assert!(!output.shares_allocation_with(&input));
+    let host = p
+        .download_numeric(&output)
+        .await
+        .expect("download single output");
+    let HostNumericDataOwned::F32(actual) = host.data else {
+        panic!("native single shader changed output class");
+    };
+    let variance = deltas.iter().map(|delta| delta * delta).sum::<f32>() / 4.0;
+    let sigma = (variance + 1e-3f32).sqrt();
+    for (index, value) in actual.iter().enumerate() {
+        let expected = deltas[index / 2] / sigma;
+        assert!(
+            (*value - expected).abs() <= 1e-3,
+            "near-constant single variance mismatch at {index}: {value} vs {expected}"
         );
     }
 }
@@ -166,6 +236,51 @@ async fn wgpu_cpu_fallback_image_normalize_rejects_invalid_epsilon() {
             err.to_string().contains(expected),
             "unexpected error for epsilon {epsilon:?}: {err}"
         );
+    }
+}
+
+#[tokio::test]
+async fn simple_provider_image_normalize_preserves_native_single_storage() {
+    let provider = runmat_accelerate::simple_provider::InProcessProvider::new();
+    let data = [1.0f32, 2.0, 3.0, 4.0];
+    let shape = [1, 2, 2];
+    let input = provider
+        .upload_numeric_raw(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&data),
+            shape: &shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("upload native single input");
+    let output = provider
+        .image_normalize(
+            &input,
+            &ImageNormalizeDescriptor {
+                batch: 1,
+                height: 2,
+                width: 2,
+                epsilon: 0.0,
+                gain: None,
+                bias: None,
+                gamma: None,
+                clamp_zero: false,
+            },
+        )
+        .await
+        .expect("normalize native single input");
+    assert_eq!(output.shape(), shape);
+    assert_eq!(output.physical().element_type(), NumericElementType::F32);
+    assert!(!output.shares_allocation_with(&input));
+    let host = provider
+        .download_numeric(&output)
+        .await
+        .expect("download native single output");
+    let HostNumericDataOwned::F32(actual) = host.data else {
+        panic!("image normalize changed native single output class");
+    };
+    let mean = 2.5f32;
+    let inverse_sigma = 1.0f32 / 1.25f32.sqrt();
+    for (actual, input) in actual.iter().zip(data) {
+        assert!((actual - (input - mean) * inverse_sigma).abs() < 1e-6);
     }
 }
 

@@ -14,7 +14,7 @@ pub use quality::{
 };
 
 mod topology;
-pub use topology::local_tetrahedron_boundary_faces;
+pub use topology::{local_tetrahedron_boundary_faces, two_to_three_geometry_is_admissible};
 use topology::{
     opposite_node, ring_edges_form_cycle, shared_face, sorted_edge, sorted_face,
     sorted_removed_tetrahedron_ids,
@@ -23,17 +23,18 @@ use topology::{
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct LocalTetrahedron {
     pub tetrahedron_id: u32,
     pub node_ids: [u32; 4],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalTetrahedronFlipKind {
     TwoToThreeFace,
     ThreeToTwoEdge,
+    EdgeStar,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +85,7 @@ pub struct LocalTetrahedronFlipImprovementReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalTetrahedronFlipError {
+    Accounting(runmat_simulation_usage::LedgerError),
     DegenerateTetrahedron {
         tetrahedron_id: u32,
         node_ids: [u32; 4],

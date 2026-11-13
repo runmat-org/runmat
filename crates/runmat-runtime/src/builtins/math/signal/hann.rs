@@ -4,200 +4,19 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, HANN_ERROR_ARG_COUNT, HANN_ERROR_INTERNAL, HANN_ERROR_INVALID_LENGTH,
+    HANN_ERROR_INVALID_OPTION, HANN_ERROR_UNKNOWN_OPTION, HANN_LOGICAL_LENGTH_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
-    keyword, parse_window_options, provider_precision_matches, window_tensor, WindowArgError,
-    WindowOutputType, WindowSampling,
+    is_scalar_logical_window_length, parse_window_controls_view, window_allocation_error,
+    window_options_from_length, window_tensor, SignalCooperation, WindowArgError,
 };
-use crate::builtins::math::signal::type_resolvers::window_vector_type;
 use crate::builtins::math::trigonometry::pi_helpers::cospi_real;
 
 const BUILTIN_NAME: &str = "hann";
-
-const HANN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "w",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Hann window column vector.",
-}];
-
-const HANN_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Window length.",
-}];
-
-const HANN_SIG_SAMPLING_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Window length.",
-    },
-    BuiltinParamDescriptor {
-        name: "sampling",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"symmetric\""),
-        description: "Sampling mode: \"symmetric\" or \"periodic\".",
-    },
-];
-
-const HANN_SIG_TYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Window length.",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description: "Output precision: \"double\" or \"single\".",
-    },
-];
-
-const HANN_SIG_FULL_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Window length.",
-    },
-    BuiltinParamDescriptor {
-        name: "sampling",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"symmetric\""),
-        description: "Sampling mode: \"symmetric\" or \"periodic\".",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"double\""),
-        description: "Output precision: \"double\" or \"single\".",
-    },
-];
-
-const HANN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n)",
-        inputs: &HANN_SIG_N_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n, sampling)",
-        inputs: &HANN_SIG_SAMPLING_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n, precision)",
-        inputs: &HANN_SIG_TYPE_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "w = hann(n, sampling, precision)",
-        inputs: &HANN_SIG_FULL_INPUTS,
-        outputs: &HANN_OUTPUT,
-    },
-];
-
-const HANN_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.INVALID_LENGTH",
-    identifier: Some("RunMat:hann:InvalidLength"),
-    when: "Length input is not a finite nonnegative scalar value.",
-    message: "hann: expected a nonnegative scalar integer length",
-};
-
-const HANN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.INVALID_OPTION",
-    identifier: Some("RunMat:hann:InvalidOption"),
-    when: "An option argument is not a string-like sampling/precision token.",
-    message: "hann: unrecognized option",
-};
-
-const HANN_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.UNKNOWN_OPTION",
-    identifier: Some("RunMat:hann:UnknownOption"),
-    when: "An option string is not recognized by hann.",
-    message: "hann: unrecognized option",
-};
-
-const HANN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.INTERNAL",
-    identifier: Some("RunMat:hann:InternalError"),
-    when: "Window materialization fails internally.",
-    message: "hann: internal error",
-};
-
-const HANN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HANN.ARG_COUNT",
-    identifier: Some("RunMat:hann:ArgumentCount"),
-    when: "More than a sampling option and an output-type option are supplied.",
-    message: "hann: too many input arguments",
-};
-
-const HANN_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    HANN_ERROR_INVALID_LENGTH,
-    HANN_ERROR_INVALID_OPTION,
-    HANN_ERROR_UNKNOWN_OPTION,
-    HANN_ERROR_INTERNAL,
-    HANN_ERROR_ARG_COUNT,
-];
-
-const HANN_LOGICAL_LENGTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "hann-logical-length",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "hann with a logical scalar length is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:HannLogicalLengthExtension"),
-};
-
-const HANN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [HANN_LOGICAL_LENGTH_EXTENSION];
-
-const HANN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "L",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "L accepts every built-in integer class as a nonnegative scalar length; floating L is rounded to the nearest integer.",
-    }];
-
-pub const HANN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "w = hann(L[, sflag][, typeName])",
-        inputs: &HANN_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::FunctionSpecific,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The default and sampling-only forms return a double column vector; typeName selects double or single. L is a host structural scalar with no interactive gpuArray overload; RunMat may materialize the new floating output on its active provider as an internal acceleration choice.",
-    }];
-
-pub const HANN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HANN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HANN_ERRORS,
-};
 
 fn hann_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     hann_error_with_message(error.message, error)
@@ -223,10 +42,19 @@ fn hann_error_with_message(
 
 fn hann_map_window_error(error: WindowArgError) -> RuntimeError {
     match error {
+        WindowArgError::Text(source) => {
+            let mut error = hann_error(&HANN_ERROR_INVALID_OPTION);
+            error.source = Some(Box::new(source));
+            error
+        }
+        WindowArgError::TooManyOptions => hann_error(&HANN_ERROR_ARG_COUNT),
         WindowArgError::InvalidLength => hann_error(&HANN_ERROR_INVALID_LENGTH),
         WindowArgError::InvalidOptionType => hann_error(&HANN_ERROR_INVALID_OPTION),
         WindowArgError::UnknownOption(option) => {
             hann_error_with_detail(&HANN_ERROR_UNKNOWN_OPTION, format!("'{option}'"))
+        }
+        WindowArgError::Allocation(cause) => {
+            window_allocation_error(BUILTIN_NAME, &HANN_ERROR_INTERNAL, cause)
         }
         WindowArgError::TensorBuild(detail) => hann_error_with_detail(&HANN_ERROR_INTERNAL, detail),
     }
@@ -245,7 +73,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Generates the Hann window directly on the active provider when the custom hook is available; otherwise falls back to host construction.",
+    notes: "Generates the Hann window directly on the active provider when supported; only a typed unsupported hook falls back to host construction.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::hann")]
@@ -261,115 +89,60 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "hann",
-    category = "math/signal",
-    summary = "Generate Hann windows.",
-    keywords = "hann,window,signal processing,dsp,fft",
-    type_resolver(window_vector_type),
-    descriptor(crate::builtins::math::signal::hann::HANN_DESCRIPTOR),
-    extensions(HANN_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::hann::HANN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::hann"
 )]
+async fn hann_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    n: runmat_value::Value,
+    varargin: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<runmat_value::Value> {
+    hann_in_runtime(runtime.as_ref(), n, varargin).await
+}
+
+#[cfg(test)]
 async fn hann_builtin(
     n: runmat_value::Value,
     varargin: Vec<runmat_value::Value>,
 ) -> crate::BuiltinResult<runmat_value::Value> {
-    validate_hann_options(&varargin)?;
-    if matches!(n, runmat_value::Value::Bool(_)) {
+    hann_in_runtime(
+        None,
+        n,
+        crate::call::BuiltinArguments::from_borrowed(&varargin, None)?,
+    )
+    .await
+}
+
+async fn hann_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    n: runmat_value::Value,
+    varargin: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<runmat_value::Value> {
+    let controls =
+        parse_window_controls_view(varargin.view(), true).map_err(hann_map_window_error)?;
+    if is_scalar_logical_window_length(&n) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HANN_LOGICAL_LENGTH_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    let options = parse_window_options(n, &varargin, true).map_err(hann_map_window_error)?;
-    if options.len > 1 && provider_precision_matches(options.output_type) {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(handle) = provider.hann_window(
-                options.len,
-                matches!(options.sampling, WindowSampling::Periodic),
-            ) {
-                let precision = match options.output_type {
-                    WindowOutputType::Double => runmat_accelerate_api::ProviderPrecision::F64,
-                    WindowOutputType::Single => runmat_accelerate_api::ProviderPrecision::F32,
-                };
-                if valid_provider_window(&handle, provider, options.len, precision) {
-                    return Ok(runmat_value::Value::GpuTensor(handle));
-                }
-                free_rejected_provider_window(&handle);
-            }
-        }
+    let options = window_options_from_length(n, controls).map_err(hann_map_window_error)?;
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
+    if let Some(value) = try_generate(CosineWindow::Hann, options)? {
+        return Ok(value);
     }
-    window_tensor(options, |idx, total| {
-        let denom = (total - 1) as f64;
-        0.5 - 0.5 * cospi_real(2.0 * idx as f64 / denom)
-    })
+    window_tensor(
+        options,
+        |idx, total| {
+            let denom = (total - 1) as f64;
+            0.5 - 0.5 * cospi_real(2.0 * idx as f64 / denom)
+        },
+        &mut cooperation,
+    )
+    .await?
     .map_err(hann_map_window_error)
-}
-
-fn validate_hann_options(args: &[runmat_value::Value]) -> crate::BuiltinResult<()> {
-    if args.len() > 2 {
-        return Err(hann_error(&HANN_ERROR_ARG_COUNT));
-    }
-    let keywords = args
-        .iter()
-        .map(|arg| keyword(arg).ok_or_else(|| hann_error(&HANN_ERROR_INVALID_OPTION)))
-        .collect::<Result<Vec<_>, _>>()?;
-    let valid = match keywords.as_slice() {
-        [] => true,
-        [option] => matches!(
-            option.as_str(),
-            "symmetric" | "periodic" | "double" | "single"
-        ),
-        [sampling, output_type] => {
-            matches!(sampling.as_str(), "symmetric" | "periodic")
-                && matches!(output_type.as_str(), "double" | "single")
-        }
-        _ => false,
-    };
-    if valid {
-        Ok(())
-    } else {
-        let option = keywords
-            .iter()
-            .find(|option| {
-                !matches!(
-                    option.as_str(),
-                    "symmetric" | "periodic" | "double" | "single"
-                )
-            })
-            .or_else(|| keywords.first())
-            .map(String::as_str)
-            .unwrap_or_default();
-        Err(hann_error_with_detail(
-            &HANN_ERROR_UNKNOWN_OPTION,
-            format!("'{option}'"),
-        ))
-    }
-}
-
-fn valid_provider_window(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    len: usize,
-    precision: runmat_accelerate_api::ProviderPrecision,
-) -> bool {
-    handle.shape == [len, 1]
-        && handle.device_id == provider.device_id()
-        && runmat_accelerate_api::handle_storage(handle)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(handle) == Some(precision)
-        && runmat_accelerate_api::handle_integer_type(handle).is_none()
-        && !runmat_accelerate_api::handle_is_logical(handle)
-        && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_provider_window(handle: &runmat_accelerate_api::GpuTensorHandle) {
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) {
-        if owner.free(handle).is_ok() {
-            runmat_accelerate_api::clear_residency(handle);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -377,27 +150,30 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::HANN_CATALOG_ENTRY;
     use runmat_value::{IntValue, Value};
 
     #[test]
-    fn hann_type_uses_literal_length() {
-        let out = window_vector_type(
-            &[Type::Num],
-            &ResolveContext::new(vec![runmat_builtins::LiteralValue::Number(8.0)]),
+    fn registered_hann_binding_uses_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
         );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(8), Some(1)])
-            }
-        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(hann_builtin_registered(
+            Some(runtime),
+            Value::Num(8193.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
     }
 
     #[test]
     fn hann_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("hann builtin");
-        let descriptor = builtin.descriptor.expect("hann descriptor");
+        let descriptor = HANN_CATALOG_ENTRY.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"w = hann(n)"));
         assert!(labels.contains(&"w = hann(n, sampling)"));
@@ -411,16 +187,15 @@ mod tests {
 
     #[test]
     fn hann_integer_metadata_and_logical_extension_are_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("hann builtin");
-        assert_eq!(builtin.integer_capabilities.len(), 1);
-        assert_eq!(builtin.extensions.len(), 1);
+        assert_eq!(HANN_CATALOG_ENTRY.integer_capabilities.len(), 1);
+        assert_eq!(HANN_CATALOG_ENTRY.extensions.len(), 1);
 
         let integer = block_on(super::hann_builtin(
             Value::Int(IntValue::U64(4)),
             Vec::new(),
         ))
         .expect("documented integer length");
-        assert_eq!(test_support::gather(integer).unwrap().shape, vec![4, 1]);
+        assert_eq!(test_support::gather(integer).unwrap().shape(), vec![4, 1]);
 
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(super::hann_builtin(Value::Bool(true), Vec::new()))
@@ -429,6 +204,31 @@ mod tests {
             err.identifier(),
             Some("RunMat:compatibility:HannLogicalLengthExtension")
         );
+    }
+
+    #[test]
+    fn hann_scalar_logical_array_uses_the_same_extension_as_bool() {
+        let _guard = test_support::accel_test_lock();
+        let logical = |bit| {
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![bit], vec![1, 1]).unwrap())
+        };
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(hann_builtin(logical(1), Vec::new())).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                HANN_LOGICAL_LENGTH_EXTENSION.error_identifier
+            );
+        }
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for (bit, shape) in [(0, vec![0, 1]), (1, vec![1, 1])] {
+            let result = block_on(hann_builtin(logical(bit), Vec::new())).unwrap();
+            assert_eq!(test_support::gather(result).unwrap().shape(), shape);
+        }
+        let nonscalar =
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap());
+        let error = block_on(hann_builtin(nonscalar, Vec::new())).unwrap_err();
+        assert_eq!(error.identifier(), HANN_ERROR_INVALID_LENGTH.identifier);
     }
 
     #[test]
@@ -469,7 +269,7 @@ mod tests {
             0.1882550990706333,
             0.0,
         ];
-        assert_eq!(t.shape, vec![8, 1]);
+        assert_eq!(t.shape(), vec![8, 1]);
         for (got, want) in t.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
         }
@@ -482,14 +282,14 @@ mod tests {
             block_on(hann_builtin(Value::Num(0.0), Vec::new())).expect("hann(0)"),
         )
         .expect("gather hann(0)");
-        assert_eq!(zero.shape, vec![0, 1]);
+        assert_eq!(zero.shape(), vec![0, 1]);
         assert!(zero.materialize_f64().is_empty());
 
         let one = test_support::gather(
             block_on(hann_builtin(Value::Num(1.0), Vec::new())).expect("hann(1)"),
         )
         .expect("gather hann(1)");
-        assert_eq!(one.shape, vec![1, 1]);
+        assert_eq!(one.shape(), vec![1, 1]);
         assert_eq!(one.materialize_f64(), vec![1.0]);
     }
 
@@ -501,7 +301,7 @@ mod tests {
             block_on(hann_builtin(Value::Num(2.5), Vec::new())).expect("hann rounded"),
         )
         .expect("gather hann rounded");
-        assert_eq!(rounded.shape, vec![3, 1]);
+        assert_eq!(rounded.shape(), vec![3, 1]);
         assert!(block_on(hann_builtin(
             Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             Vec::new()
@@ -517,7 +317,7 @@ mod tests {
                 .expect("hann periodic"),
         )
         .expect("gather hann periodic");
-        assert_eq!(periodic.shape, vec![4, 1]);
+        assert_eq!(periodic.shape(), vec![4, 1]);
         assert!((periodic.materialize_f64()[1] - 0.5).abs() < 1e-12);
 
         let single = test_support::gather(
@@ -533,13 +333,13 @@ mod tests {
         test_support::with_test_provider(|_| {
             let value = block_on(hann_builtin(Value::Num(8.0), Vec::new())).expect("hann gpu");
             let tensor = test_support::gather(value).expect("gather");
-            assert_eq!(tensor.shape, vec![8, 1]);
+            assert_eq!(tensor.shape(), vec![8, 1]);
             assert!((tensor.materialize_f64()[3] - 0.9504844339512095).abs() < 1e-12);
 
             let periodic = block_on(hann_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
                 .expect("hann periodic gpu");
             let periodic = test_support::gather(periodic).expect("gather periodic");
-            assert_eq!(periodic.shape, vec![4, 1]);
+            assert_eq!(periodic.shape(), vec![4, 1]);
             assert!((periodic.materialize_f64()[1] - 0.5).abs() < 1e-12);
 
             let periodic_one =

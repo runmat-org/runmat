@@ -1,3 +1,4 @@
+use serde::ser::{Serialize, SerializeMap, Serializer};
 use std::collections::{BTreeMap, HashSet};
 
 use runmat_accelerate_api::{
@@ -94,10 +95,76 @@ impl CoherencyRecord {
     }
 }
 
+/// One-device summaries need no tree node. A second device promotes to the
+/// ordinary sorted map, while serialization retains the original map bytes.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ProviderByteSummary {
+    one: Option<(u32, u64)>,
+    many: BTreeMap<u32, u64>,
+}
+
+impl ProviderByteSummary {
+    pub(crate) fn insert(&mut self, device: u32, bytes: u64) -> Option<u64> {
+        if let Some((old_device, old_bytes)) = self.one {
+            if old_device == device {
+                self.one = Some((device, bytes));
+                return Some(old_bytes);
+            }
+            self.many.insert(old_device, old_bytes);
+            self.one = None;
+        }
+        if self.many.is_empty() {
+            self.one = Some((device, bytes));
+            None
+        } else {
+            self.many.insert(device, bytes)
+        }
+    }
+
+    pub(crate) fn add(&mut self, device: u32, bytes: u64) {
+        let old = self.get(&device).copied().unwrap_or(0);
+        self.insert(device, old.saturating_add(bytes));
+    }
+
+    pub(crate) fn get(&self, device: &u32) -> Option<&u64> {
+        self.one
+            .as_ref()
+            .filter(|(stored, _)| stored == device)
+            .map(|(_, bytes)| bytes)
+            .or_else(|| self.many.get(device))
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&u32, &u64)> {
+        self.one
+            .iter()
+            .map(|(device, bytes)| (device, bytes))
+            .chain(self.many.iter())
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &u32> {
+        self.iter().map(|(device, _)| device)
+    }
+
+    pub(crate) fn values(&self) -> impl Iterator<Item = &u64> {
+        self.iter().map(|(_, bytes)| bytes)
+    }
+}
+
+impl Serialize for ProviderByteSummary {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map =
+            serializer.serialize_map(Some(self.one.is_some() as usize + self.many.len()))?;
+        for (device, bytes) in self.iter() {
+            map.serialize_entry(device, bytes)?;
+        }
+        map.end()
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ResidencySummary {
     pub(crate) host_bytes: u64,
-    pub(crate) provider_bytes: BTreeMap<u32, u64>,
+    pub(crate) provider_bytes: ProviderByteSummary,
     pub(crate) unknown_values: u64,
 }
 
@@ -122,6 +189,15 @@ impl ResidencySummary {
 }
 
 pub(crate) fn summarize_values(values: &[&Value]) -> ResidencySummary {
+    if let [Value::GpuTensor(handle)] = values {
+        let mut summary = ResidencySummary::default();
+        let bytes = gpu_handle_bytes(handle).unwrap_or_else(|| {
+            summary.unknown_values = 1;
+            0
+        });
+        summary.provider_bytes.insert(handle.device_id(), bytes);
+        return summary;
+    }
     let mut summary = ResidencySummary::default();
     let mut visited_gpu = HashSet::new();
     let mut visited_handles = HashSet::new();
@@ -172,12 +248,11 @@ fn summarize_value(
                     summary.unknown_values = summary.unknown_values.saturating_add(1);
                     0
                 });
-                let entry = summary.provider_bytes.entry(handle.device_id).or_default();
-                *entry = entry.saturating_add(bytes);
+                summary.provider_bytes.add(handle.device_id(), bytes);
             }
         }
         Value::Cell(cell) => {
-            for element in &cell.data {
+            for element in cell.data() {
                 summarize_value(element, summary, visited_gpu, visited_handles);
             }
         }
@@ -186,8 +261,13 @@ fn summarize_value(
                 summarize_value(element, summary, visited_gpu, visited_handles);
             }
         }
+        Value::StructArray(array) => {
+            array.for_each_value(|element| {
+                summarize_value(element, summary, visited_gpu, visited_handles)
+            });
+        }
         Value::Object(value) => {
-            for element in value.properties.values() {
+            for element in value.properties().values() {
                 summarize_value(element, summary, visited_gpu, visited_handles);
             }
         }
@@ -226,13 +306,16 @@ fn summarize_value(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
+        | Value::ScopedFunctionHandle(_)
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_) => {
             summary.unknown_values = summary.unknown_values.saturating_add(1);
         }
@@ -255,7 +338,7 @@ fn int_byte_size(value: &IntValue) -> usize {
 }
 
 fn gpu_handle_bytes(handle: &GpuTensorHandle) -> Option<u64> {
-    let elements = handle.shape.iter().try_fold(1_u64, |total, dimension| {
+    let elements = handle.shape().iter().try_fold(1_u64, |total, dimension| {
         total.checked_mul(u64::try_from(*dimension).ok()?)
     })?;
     let width = handle_integer_type(handle)
@@ -275,8 +358,10 @@ fn gpu_handle_bytes(handle: &GpuTensorHandle) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, NumericElementType};
-    use runmat_value::{CellArray, Tensor};
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
+    use runmat_value::{CellArray, StructArray, Tensor};
 
     use super::*;
 
@@ -291,10 +376,28 @@ mod tests {
     }
 
     #[test]
+    fn inline_provider_bytes_keep_sorted_map_serialization() {
+        let mut summary = ProviderByteSummary::default();
+        let mut original = BTreeMap::new();
+        for (device, bytes) in [(9, 40), (2, 16)] {
+            summary.insert(device, bytes);
+            original.insert(device, bytes);
+            assert_eq!(
+                serde_json::to_vec(&summary).unwrap(),
+                serde_json::to_vec(&original).unwrap(),
+            );
+        }
+        assert_eq!(summary.get(&2), Some(&16));
+    }
+
+    #[test]
     fn nested_values_are_counted_and_aliased_gpu_handles_are_deduplicated() {
         let host = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
-        let gpu = GpuTensorHandle::new(vec![2, 2], 9, 41)
-            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let gpu = allocation.handle;
+        let device = gpu.device_id();
         let cell = Value::Cell(
             CellArray::new(
                 vec![host, Value::GpuTensor(gpu.clone()), Value::GpuTensor(gpu)],
@@ -305,7 +408,54 @@ mod tests {
         );
         let summary = summarize_values(&[&cell]);
         assert_eq!(summary.host_bytes, 16);
-        assert_eq!(summary.provider_bytes.get(&9), Some(&16));
-        assert_eq!(summary.required_upload_bytes(9), 16);
+        assert_eq!(summary.provider_bytes.get(&device), Some(&16));
+        assert_eq!(summary.required_upload_bytes(device), 16);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(cell);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+
+    #[test]
+    fn nd_structure_array_residency_visits_field_columns_and_empty_schema() {
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let gpu = allocation.handle;
+        let device = gpu.device_id();
+        let element = |host: Value, resident: Value| {
+            let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
+            value.insert("host", host);
+            value.insert("resident", resident);
+            value.finish()
+        };
+        let array = StructArray::with_fields(
+            vec!["host".into(), "resident".into()],
+            vec![
+                element(Value::Num(1.0), Value::GpuTensor(gpu.clone())),
+                element(
+                    Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap()),
+                    Value::GpuTensor(gpu),
+                ),
+            ],
+            vec![1, 1, 2],
+        )
+        .expect("N-D structure array");
+        let value = Value::StructArray(array);
+        let empty = Value::StructArray(
+            StructArray::with_fields(
+                vec!["host".into(), "resident".into()],
+                Vec::new(),
+                vec![0, 2],
+            )
+            .expect("empty structure array"),
+        );
+
+        let summary = summarize_values(&[&value, &empty]);
+        assert_eq!(summary.host_bytes, 24);
+        assert_eq!(summary.provider_bytes.get(&device), Some(&16));
+        assert_eq!(summary.required_upload_bytes(device), 24);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(value);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

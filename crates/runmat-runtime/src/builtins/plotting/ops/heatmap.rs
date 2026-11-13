@@ -2,288 +2,25 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, GPU_CDATA_EXTENSION, HEATMAP_ERROR_INTERNAL,
+    HEATMAP_ERROR_INVALID_ARGUMENT,
+};
+#[cfg(test)]
+use runmat_builtins::{
+    BuiltinIntegerInputAvailability, HEATMAP_DESCRIPTOR, HEATMAP_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 use runmat_value::{IntegerStorage, Tensor, Value};
 
-use super::common::SurfaceDataInput;
+use super::common::{surface_matrix_dimensions, SurfaceDataInput};
 use super::op_common::surface_inputs::AxisSource;
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 #[cfg(test)]
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "heatmap";
-
-const GPU_CDATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "heatmap-gpu-cdata",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "heatmap with GPU-resident CData is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:HeatmapGpuCDataExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_CDATA_EXTENSION];
-
-const fn documented_integer_input(
-    name: &'static str,
-    notes: &'static str,
-) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes,
-    }
-}
-
-const INTEGER_CDATA: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "CData",
-    "Matrix ColorData accepts every built-in integer class and remains authoritative on the chart object.",
-)];
-const INTEGER_XVALUES: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "XValues",
-    "Numeric constructor labels accept every built-in integer class and are formatted from authoritative storage.",
-)];
-const INTEGER_YVALUES: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "YValues",
-    "Numeric constructor labels accept every built-in integer class and are formatted from authoritative storage.",
-)];
-const INTEGER_FONT_SIZE: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "FontSize",
-    "The documented positive numeric font size is bounded before the client graphics conversion.",
-)];
-const INTEGER_COLORBAR_VISIBLE: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "ColorbarVisible",
-    "The documented numeric on/off value is validated exactly as zero or one.",
-)];
-const INTEGER_GRID_VISIBLE: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "GridVisible",
-    "The documented numeric on/off value is validated exactly as zero or one.",
-)];
-const INTEGER_COLOR_LIMITS: [BuiltinIntegerInputCapability; 1] = [documented_integer_input(
-    "ColorLimits",
-    "The documented two-element increasing limit vector is compared in authoritative storage before the renderer conversion.",
-)];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = heatmap(integer_CData)",
-        inputs: &INTEGER_CDATA,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Exact ColorData is retained on the HeatmapChart; integer-aware normalization precedes the explicit floating client-renderer boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = heatmap(integer_XValues, YValues, CData)",
-        inputs: &INTEGER_XVALUES,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer labels are converted directly to exact decimal strings; the output is an opaque chart handle.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = heatmap(XValues, integer_YValues, CData)",
-        inputs: &INTEGER_YVALUES,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer labels are converted directly to exact decimal strings; the output is an opaque chart handle.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = heatmap(..., 'FontSize', integer_size)",
-        inputs: &INTEGER_FONT_SIZE,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The exact positive scalar is range checked before conversion to the client font-size representation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = heatmap(..., 'ColorbarVisible', integer_on_off)",
-        inputs: &INTEGER_COLORBAR_VISIBLE,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Only exact integer zero and one are accepted.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = heatmap(..., 'GridVisible', integer_on_off)",
-        inputs: &INTEGER_GRID_VISIBLE,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Only exact integer zero and one are accepted.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = heatmap(..., 'ColorLimits', integer_limits)",
-        inputs: &INTEGER_COLOR_LIMITS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The two authoritative endpoints are ordered before their explicit client-renderer conversion.",
-    },
-];
-
-const HEATMAP_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the heatmap chart.",
-}];
-
-const HEATMAP_INPUTS_CDATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "CData",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "M-by-N numeric matrix of color values.",
-}];
-
-const HEATMAP_INPUTS_XYCDATA: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "XValues",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column labels (length N).",
-    },
-    BuiltinParamDescriptor {
-        name: "YValues",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row labels (length M).",
-    },
-    BuiltinParamDescriptor {
-        name: "CData",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "M-by-N numeric matrix of color values.",
-    },
-];
-const HEATMAP_INPUTS_CDATA_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "CData",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "M-by-N numeric matrix of color values.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Heatmap property name/value pairs.",
-    },
-];
-
-const HEATMAP_INPUTS_XYCDATA_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "XValues",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Column labels (length N).",
-    },
-    BuiltinParamDescriptor {
-        name: "YValues",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Row labels (length M).",
-    },
-    BuiltinParamDescriptor {
-        name: "CData",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "M-by-N numeric matrix of color values.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Heatmap property name/value pairs.",
-    },
-];
-
-const HEATMAP_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = heatmap(CData)",
-        inputs: &HEATMAP_INPUTS_CDATA,
-        outputs: &HEATMAP_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = heatmap(CData, Name, Value, ...)",
-        inputs: &HEATMAP_INPUTS_CDATA_PROPS,
-        outputs: &HEATMAP_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = heatmap(XValues, YValues, CData)",
-        inputs: &HEATMAP_INPUTS_XYCDATA,
-        outputs: &HEATMAP_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = heatmap(XValues, YValues, CData, Name, Value, ...)",
-        inputs: &HEATMAP_INPUTS_XYCDATA_PROPS,
-        outputs: &HEATMAP_OUTPUT_HANDLE,
-    },
-];
-
-const HEATMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HEATMAP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:heatmap:InvalidArgument"),
-    when: "CData/label/property inputs are malformed or incompatible.",
-    message: "heatmap: invalid argument",
-};
-
-const HEATMAP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HEATMAP.INTERNAL",
-    identifier: Some("RunMat:heatmap:Internal"),
-    when: "Internal render/surface construction fails.",
-    message: "heatmap: internal operation failed",
-};
-
-const HEATMAP_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [HEATMAP_ERROR_INVALID_ARGUMENT, HEATMAP_ERROR_INTERNAL];
-
-pub const HEATMAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HEATMAP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HEATMAP_ERRORS,
-};
 
 fn heatmap_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -315,48 +52,13 @@ fn heatmap_invalid(detail: impl AsRef<str>) -> RuntimeError {
     heatmap_error_with_detail(&HEATMAP_ERROR_INVALID_ARGUMENT, detail)
 }
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::heatmap")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "heatmap",
-    op_kind: GpuOpKind::PlotRender,
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "heatmap is a plotting sink; inputs are gathered to build labeled HeatmapChart state.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::heatmap")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "heatmap",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "heatmap terminates fusion graphs and performs rendering.",
-};
-
 #[runtime_builtin(
     name = "heatmap",
-    category = "plotting",
-    summary = "Create heatmap charts.",
-    keywords = "heatmap,plotting,chart,colormap,matrix visualization",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::heatmap::HEATMAP_DESCRIPTOR),
-    extensions(crate::builtins::plotting::heatmap::EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::heatmap::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::heatmap"
 )]
-pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    gate_gpu_cdata_extension(&args)?;
+pub async fn heatmap_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
+    gate_gpu_cdata_extension(args.view())?;
     let ParsedHeatmap {
         x_labels,
         y_labels,
@@ -374,12 +76,13 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     )
     .map_err(map_heatmap_invalid)?;
 
-    let rows = color_data.rows;
-    let cols = color_data.cols;
+    let (rows, cols) = surface_matrix_dimensions(&color_data);
     let integer_color_data = color_data.integer_storage().is_some();
     let public_color_limit_value = integer_public_color_limit_value(&color_data);
     let public_color_limits = integer_public_color_limits(&color_data);
-    let render_data = normalize_integer_color_data(&color_data);
+    // MATLAB draws the first row of a heatmap at the top; the y axis runs upward, so the
+    // rows are drawn in reverse order (and their labels with them).
+    let render_data = flip_rows(&normalize_integer_color_data(&color_data));
     let x_axis = AxisSource::Host(default_axis(cols));
     let y_axis = AxisSource::Host(default_axis(rows));
     let color_limits = if integer_color_data {
@@ -401,7 +104,16 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .with_flatten_z(true)
         .with_image_mode(true)
         .with_colormap(ColorMap::Parula)
-        .with_shading(ShadingMode::None);
+        .with_shading(ShadingMode::None)
+        .with_cell_labels(
+            heatmap_cell_labels(&color_data)
+                .into_iter()
+                .map(|mut column| {
+                    column.reverse();
+                    column
+                })
+                .collect(),
+        );
     if color_limits.is_some() {
         surface = surface.with_color_limits(color_limits);
     }
@@ -410,15 +122,13 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let render_x_labels = x_labels.clone();
-    let render_y_labels = y_labels.clone();
+    let render_y_labels: Vec<String> = y_labels.iter().rev().cloned().collect();
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "",
-            x_label: "",
-            y_label: "",
-            axis_equal: true,
+            // Heatmap cells fill the chart area, as in MATLAB; they are not kept square.
+            axis_equal: false,
             ..Default::default()
         },
         move |figure, axes| {
@@ -471,8 +181,7 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             .map_err(map_heatmap_invalid)?;
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_heatmap_internal(err));
@@ -487,15 +196,23 @@ struct ParsedHeatmap {
     rest: Vec<Value>,
 }
 
-async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeatmap> {
+async fn parse_heatmap_args(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<ParsedHeatmap> {
+    if let Some(Value::Object(table)) = args.first() {
+        if crate::builtins::table::is_tabular_object(table) {
+            return parse_table_heatmap_args_view(args.view());
+        }
+    }
     let cdata_with_properties = args.len() >= 3
         && args.len() % 2 == 1
         && crate::builtins::plotting::properties::is_heatmap_property_name(&args[1]);
     if cdata_with_properties {
         let mut it = args.into_iter();
         let color_data = cdata_tensor(it.next().expect("CData")).await?;
-        let x_labels = default_labels(color_data.cols);
-        let y_labels = default_labels(color_data.rows);
+        let (rows, cols) = surface_matrix_dimensions(&color_data);
+        let x_labels = default_labels(cols);
+        let y_labels = default_labels(rows);
         return Ok(ParsedHeatmap {
             x_labels,
             y_labels,
@@ -509,8 +226,9 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
         )),
         1 => {
             let color_data = cdata_tensor(args.into_iter().next().expect("one arg")).await?;
-            let x_labels = default_labels(color_data.cols);
-            let y_labels = default_labels(color_data.rows);
+            let (rows, cols) = surface_matrix_dimensions(&color_data);
+            let x_labels = default_labels(cols);
+            let y_labels = default_labels(rows);
             Ok(ParsedHeatmap {
                 x_labels,
                 y_labels,
@@ -528,8 +246,9 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
             let c = it.next().expect("cdata");
             let rest: Vec<Value> = it.collect();
             let color_data = cdata_tensor(c).await?;
-            let x_labels = labels_from_value(&x, color_data.cols, "XValues")?;
-            let y_labels = labels_from_value(&y, color_data.rows, "YValues")?;
+            let (rows, cols) = surface_matrix_dimensions(&color_data);
+            let x_labels = labels_from_value(&x, cols, "XValues")?;
+            let y_labels = labels_from_value(&y, rows, "YValues")?;
             Ok(ParsedHeatmap {
                 x_labels,
                 y_labels,
@@ -540,12 +259,73 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
     }
 }
 
+#[cfg(test)]
+fn parse_table_heatmap_args(args: &[Value]) -> crate::BuiltinResult<ParsedHeatmap> {
+    parse_table_heatmap_args_view(crate::call::FunctionArgumentView::from_slice(args))
+}
+
+fn parse_table_heatmap_args_view(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<ParsedHeatmap> {
+    let (Some(Value::Object(table)), Some(x), Some(y)) = (args.first(), args.get(1), args.get(2))
+    else {
+        return Err(heatmap_invalid(
+            "table heatmap requires SourceTable, XVariable, and YVariable",
+        ));
+    };
+    let options = args.range(3..).expect("validated table heatmap prefix");
+    if !options.len().is_multiple_of(2) {
+        return Err(heatmap_invalid(
+            "table heatmap properties must be name/value pairs",
+        ));
+    }
+    let mut color_variable = None;
+    let mut method = None;
+    let mut rest = Vec::new();
+    for pair in options.chunks_exact(2) {
+        let name =
+            crate::builtins::plotting::properties::property_name_text(&pair[0], BUILTIN_NAME)
+                .map_err(map_heatmap_invalid)?;
+        if name.eq_ignore_ascii_case("ColorVariable") {
+            color_variable = Some(pair.get(1).expect("heatmap option value"));
+        } else if name.eq_ignore_ascii_case("ColorMethod") {
+            let value =
+                crate::builtins::plotting::properties::property_name_text(&pair[1], BUILTIN_NAME)
+                    .map_err(map_heatmap_invalid)?;
+            method = Some(
+                crate::builtins::table::HeatmapAggregation::parse(&value)
+                    .ok_or_else(|| heatmap_invalid("unsupported table ColorMethod"))?,
+            );
+        } else {
+            rest.extend(pair.iter().cloned());
+        }
+    }
+    let method = method.unwrap_or(if color_variable.is_some() {
+        crate::builtins::table::HeatmapAggregation::Mean
+    } else {
+        crate::builtins::table::HeatmapAggregation::Count
+    });
+    let aggregated =
+        crate::builtins::table::aggregate_heatmap_table(table, x, y, color_variable, method)
+            .map_err(map_heatmap_invalid)?;
+    Ok(ParsedHeatmap {
+        x_labels: aggregated.x_labels,
+        y_labels: aggregated.y_labels,
+        color_data: aggregated.color_data,
+        rest,
+    })
+}
+
 async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let tensor = match value {
         Value::GpuTensor(handle) => {
-            if handle.shape.first().copied().unwrap_or(0) == 0
-                || handle.shape.get(1).copied().unwrap_or(0) == 0
-                || handle.shape.iter().skip(2).any(|&dimension| dimension != 1)
+            if handle.shape().first().copied().unwrap_or(0) == 0
+                || handle.shape().get(1).copied().unwrap_or(0) == 0
+                || handle
+                    .shape()
+                    .iter()
+                    .skip(2)
+                    .any(|&dimension| dimension != 1)
             {
                 return Err(heatmap_invalid(
                     "CData must be a nonempty 2-D numeric matrix",
@@ -565,16 +345,28 @@ async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
         }
         other => Tensor::try_from(&other).map_err(|e| heatmap_invalid(&e))?,
     };
-    if tensor.rows == 0 || tensor.cols == 0 {
+    let (rows, cols) = surface_matrix_dimensions(&tensor);
+    if rows == 0 || cols == 0 {
         return Err(heatmap_invalid("CData must contain at least a 2-D grid"));
     }
-    if tensor.shape.iter().skip(2).any(|&dimension| dimension != 1) {
+    if tensor
+        .shape()
+        .iter()
+        .skip(2)
+        .any(|&dimension| dimension != 1)
+    {
         return Err(heatmap_invalid("CData must be a 2-D numeric matrix"));
     }
     Ok(tensor)
 }
 
-fn gate_gpu_cdata_extension(args: &[Value]) -> crate::BuiltinResult<()> {
+fn gate_gpu_cdata_extension(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<()> {
+    if matches!(args.first(), Some(Value::Object(table)) if crate::builtins::table::is_tabular_object(table))
+    {
+        return Ok(());
+    }
     let cdata_with_properties = args.len() >= 3
         && args.len() % 2 == 1
         && crate::builtins::plotting::properties::is_heatmap_property_name(&args[1]);
@@ -773,6 +565,50 @@ fn exact_integer_renderer_limits(color_data: &Tensor, limits: &Tensor) -> Option
     }
 }
 
+/// The text printed in each cell, indexed `[column][row]` like the image surface, formatted
+/// as MATLAB's default `CellLabelFormat` (`%0.4g`); integer data prints exactly.
+fn heatmap_cell_labels(tensor: &Tensor) -> Vec<Vec<String>> {
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    let text = |index: usize| -> String {
+        if let Some(storage) = tensor.integer_storage() {
+            return match storage {
+                IntegerStorage::I8(v) => v[index].to_string(),
+                IntegerStorage::I16(v) => v[index].to_string(),
+                IntegerStorage::I32(v) => v[index].to_string(),
+                IntegerStorage::I64(v) => v[index].to_string(),
+                IntegerStorage::U8(v) => v[index].to_string(),
+                IntegerStorage::U16(v) => v[index].to_string(),
+                IntegerStorage::U32(v) => v[index].to_string(),
+                IntegerStorage::U64(v) => v[index].to_string(),
+            };
+        }
+        tensor
+            .as_f64_slice()
+            .and_then(|data| data.get(index).copied())
+            .map(|value| crate::builtins::strings::core::num2str::format_general(value, 4, false))
+            .unwrap_or_default()
+    };
+    (0..cols)
+        .map(|col| (0..rows).map(|row| text(row + col * rows)).collect())
+        .collect()
+}
+
+/// The matrix with its rows in reverse order (column-major data).
+fn flip_rows(tensor: &Tensor) -> Tensor {
+    let (rows, cols) = (tensor.rows(), tensor.cols());
+    let Some(data) = tensor.as_f64_slice() else {
+        return tensor.clone();
+    };
+    let mut flipped = Vec::with_capacity(data.len());
+    for col in 0..cols {
+        for row in (0..rows).rev() {
+            flipped.push(data[row + col * rows]);
+        }
+    }
+    Tensor::new(flipped, tensor.shape().to_vec()).expect("flipped heatmap shape")
+}
+
 fn normalize_integer_color_data(tensor: &Tensor) -> Tensor {
     let Some(storage) = tensor.integer_storage() else {
         return tensor.clone();
@@ -787,7 +623,7 @@ fn normalize_integer_color_data(tensor: &Tensor) -> Tensor {
         IntegerStorage::U32(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
         IntegerStorage::U64(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
     };
-    Tensor::new(normalized, tensor.shape.clone()).expect("normalized heatmap shape")
+    Tensor::new(normalized, tensor.shape().to_vec()).expect("normalized heatmap shape")
 }
 
 fn normalize_signed(values: impl Iterator<Item = i128> + Clone) -> Vec<f64> {
@@ -847,11 +683,12 @@ fn default_axis(len: usize) -> Vec<f64> {
 
 #[cfg(test)]
 fn transpose_for_surface(tensor: &Tensor) -> Tensor {
+    let (rows, cols) = surface_matrix_dimensions(tensor);
     let mut indices = vec![0; tensor_utils::tensor_element_len(tensor)];
-    for row in 0..tensor.rows {
-        for col in 0..tensor.cols {
-            let src = row + tensor.rows * col;
-            let dst = col + tensor.cols * row;
+    for row in 0..rows {
+        for col in 0..cols {
+            let src = row + rows * col;
+            let dst = col + cols * row;
             indices[dst] = src;
         }
     }
@@ -860,8 +697,7 @@ fn transpose_for_surface(tensor: &Tensor) -> Tensor {
         .into_numeric_storage()
         .and_then(|storage| storage.reorder(&indices))
         .expect("heatmap transpose permutation");
-    Tensor::from_numeric_storage(storage, vec![tensor.cols, tensor.rows])
-        .expect("heatmap transpose shape")
+    Tensor::from_numeric_storage(storage, vec![cols, rows]).expect("heatmap transpose shape")
 }
 #[cfg(test)]
 mod tests {
@@ -873,7 +709,11 @@ mod tests {
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
     use runmat_plot::plots::PlotElement;
-    use runmat_value::{CellArray, Value};
+    use runmat_value::{CellArray, IntegerStorage, StringArray, Value};
+
+    async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::heatmap_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?).await
+    }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -896,8 +736,7 @@ mod tests {
     fn heatmap_transpose_reads_typed_integer_storage_exactly() {
         let transposed = transpose_for_surface(&int_tensor(vec![1, 2, 3, 4, 5, 6], 2, 3));
 
-        assert_eq!(transposed.rows, 3);
-        assert_eq!(transposed.cols, 2);
+        assert_eq!(transposed.shape(), [3, 2]);
         assert_eq!(
             transposed.materialize_f64(),
             vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
@@ -907,6 +746,29 @@ mod tests {
             transposed.integer_storage(),
             Some(&runmat_value::IntegerStorage::I16(vec![1, 3, 5, 2, 4, 6]))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn heatmap_preserves_dense_rank_one_grid_and_rank_zero_rejection() {
+        let _guard = setup();
+        let handle = futures::executor::block_on(heatmap_builtin(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one CData"),
+        )]))
+        .expect("rank-one CData is one heatmap row");
+        assert!(handle.is_finite());
+        let figure = clone_figure(current_figure_handle()).expect("heatmap figure");
+        let PlotElement::Surface(surface) = figure.plots().next().expect("heatmap surface") else {
+            panic!("expected heatmap surface")
+        };
+        assert_eq!(surface.x_data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(surface.y_data, vec![1.0]);
+
+        let error = futures::executor::block_on(heatmap_builtin(vec![Value::Tensor(
+            Tensor::new(vec![1.0], Vec::new()).expect("rank-zero CData"),
+        )]))
+        .expect_err("rank-zero CData has no grid extent");
+        assert!(error.message().contains("at least a 2-D grid"));
     }
 
     #[test]
@@ -928,9 +790,10 @@ mod tests {
         assert!(surface.image_mode);
         assert_eq!(surface.x_data, vec![1.0, 2.0, 3.0]);
         assert_eq!(surface.y_data, vec![1.0, 2.0]);
+        // Rows are drawn in reverse so the first row is at the top, as in MATLAB.
         assert_eq!(
             surface.z_data.as_deref(),
-            Some(&[vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]][..])
+            Some(&[vec![2.0, 1.0], vec![4.0, 3.0], vec![6.0, 5.0]][..])
         );
         assert!(fig.axes_metadata(0).unwrap().colorbar_enabled);
     }
@@ -1002,13 +865,14 @@ mod tests {
                 "Large".to_string()
             ]
         );
+        // The first row is drawn at the top, so the axis labels run bottom-up reversed.
         assert_eq!(
             meta.y_tick_labels.as_ref().unwrap(),
             &vec![
-                "Green".to_string(),
-                "Red".to_string(),
+                "Gray".to_string(),
                 "Blue".to_string(),
-                "Gray".to_string()
+                "Red".to_string(),
+                "Green".to_string()
             ]
         );
         let labels = get_builtin(vec![
@@ -1019,7 +883,7 @@ mod tests {
         let Value::StringArray(labels) = labels else {
             panic!("expected string array");
         };
-        assert_eq!(labels.data, vec!["Small", "Medium", "Large"]);
+        assert_eq!(labels.data(), vec!["Small", "Medium", "Large"]);
 
         set_builtin(vec![
             Value::Num(handle),
@@ -1061,10 +925,10 @@ mod tests {
         assert_eq!(
             meta.y_tick_labels.as_ref().unwrap(),
             &vec![
-                "G".to_string(),
-                "R".to_string(),
+                "Y".to_string(),
                 "B".to_string(),
-                "Y".to_string()
+                "R".to_string(),
+                "G".to_string()
             ]
         );
     }
@@ -1120,8 +984,8 @@ mod tests {
 
     #[test]
     fn heatmap_integer_capabilities_cover_documented_matrix_roles() {
-        assert_eq!(INTEGER_CAPABILITIES.len(), 7);
-        for capability in INTEGER_CAPABILITIES {
+        assert_eq!(HEATMAP_INTEGER_CAPABILITIES.len(), 8);
+        for capability in HEATMAP_INTEGER_CAPABILITIES {
             for input in capability.inputs {
                 assert_eq!(
                     input.classes,
@@ -1165,12 +1029,16 @@ mod tests {
 
     #[test]
     fn heatmap_gpu_cdata_extension_is_gated_before_provider_access() {
-        let gpu = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let gpu = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![2, 2],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = futures::executor::block_on(heatmap_builtin(vec![gpu]))
             .expect_err("strict mode must reject GPU CData");
@@ -1206,8 +1074,7 @@ mod tests {
             runmat_accelerate_api::handle_integer_type(&handle),
             Some(runmat_accelerate_api::IntegerElementType::U64)
         );
-        provider.free(&handle).ok();
-        runmat_accelerate_api::clear_residency(&handle);
+        handle.release().expect("release exact CData input");
     }
 
     #[test]
@@ -1302,12 +1169,16 @@ mod tests {
     fn heatmap_rejects_resident_nd_cdata_before_provider_lookup() {
         let _guard = setup();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![2, 2, 2],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let error = futures::executor::block_on(heatmap_builtin(vec![resident]))
             .expect_err("N-D resident CData must reject from handle metadata");
         assert_eq!(
@@ -1390,5 +1261,252 @@ mod tests {
         let err = futures::executor::block_on(heatmap_builtin(Vec::new()))
             .expect_err("expected heatmap argument validation error");
         assert_eq!(err.identifier(), HEATMAP_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn table_heatmap_aggregates_before_scene_publication_and_preserves_matrix_forms() {
+        let _guard = setup();
+        let table = crate::builtins::table::table_from_columns(
+            vec!["Hour".into(), "Fixture".into(), "Force".into()],
+            vec![
+                Value::Tensor(tensor(vec![8.0, 8.0, 9.0], 3, 1)),
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "A".into(), "B".into()], vec![3, 1]).unwrap(),
+                ),
+                Value::Tensor(tensor(vec![2.0, 4.0, 10.0], 3, 1)),
+            ],
+        )
+        .unwrap();
+        let inputs = vec![
+            table.clone(),
+            Value::String("Hour".into()),
+            Value::String("Fixture".into()),
+            Value::String("ColorVariable".into()),
+            Value::String("Force".into()),
+            Value::String("ColorMethod".into()),
+            Value::String("mean".into()),
+        ];
+        let handle = futures::executor::block_on(heatmap_builtin(inputs)).unwrap();
+        let Value::Tensor(colors) =
+            get_builtin(vec![Value::Num(handle), Value::String("ColorData".into())]).unwrap()
+        else {
+            panic!("expected aggregated ColorData")
+        };
+        assert_eq!(colors.shape(), [2, 2]);
+        let values = colors.materialize_f64();
+        assert_eq!(values[0], 3.0);
+        assert!(values[1].is_nan() && values[2].is_nan());
+        assert_eq!(values[3], 10.0);
+        let figure = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(figure.plots().count(), 1);
+        let metadata = figure.axes_metadata(0).unwrap();
+        assert_eq!(metadata.x_tick_labels.as_ref().unwrap(), &vec!["8", "9"]);
+        // Rendering reverses rows and labels together; source table order stays A, B below.
+        assert_eq!(metadata.y_tick_labels.as_ref().unwrap(), &vec!["B", "A"]);
+        let indexed = parse_table_heatmap_args(&[
+            table.clone(),
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::from("ColorVariable"),
+            Value::Num(3.0),
+        ])
+        .expect("declared table order, not lexical field order");
+        assert_eq!(indexed.x_labels, vec!["8".to_string(), "9".to_string()]);
+        assert_eq!(indexed.y_labels, vec!["A".to_string(), "B".to_string()]);
+        assert_eq!(indexed.color_data.materialize_f64()[0], 3.0);
+
+        let table_with_missing_color = crate::builtins::table::table_from_columns(
+            vec!["Hour".into(), "Fixture".into(), "Force".into()],
+            vec![
+                Value::Tensor(tensor(vec![8.0, 8.0, 9.0], 3, 1)),
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "A".into(), "B".into()], vec![3, 1]).unwrap(),
+                ),
+                Value::Tensor(tensor(vec![f64::NAN, 4.0, 10.0], 3, 1)),
+            ],
+        )
+        .unwrap();
+        let count = parse_table_heatmap_args(&[
+            table_with_missing_color,
+            Value::String("Hour".into()),
+            Value::String("Fixture".into()),
+            Value::String("ColorVariable".into()),
+            Value::String("Force".into()),
+            Value::String("ColorMethod".into()),
+            Value::String("count".into()),
+        ])
+        .unwrap();
+        assert_eq!(count.color_data.materialize_f64(), vec![2.0, 0.0, 0.0, 1.0]);
+
+        let before = clone_figure(current_figure_handle())
+            .unwrap()
+            .plots()
+            .count();
+        let error = futures::executor::block_on(heatmap_builtin(vec![
+            table,
+            Value::String("Hour".into()),
+            Value::String("Fixture".into()),
+            Value::String("ColorVariable".into()),
+            Value::String("Force".into()),
+            Value::String("ColorMethod".into()),
+            Value::String("none".into()),
+        ]))
+        .expect_err("duplicate axis pairs cannot use no aggregation");
+        assert_eq!(
+            error.identifier(),
+            HEATMAP_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(
+            clone_figure(current_figure_handle())
+                .unwrap()
+                .plots()
+                .count(),
+            before
+        );
+
+        let literal_missing = crate::builtins::table::table_from_columns(
+            vec!["X".into(), "Y".into()],
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec!["".into(), "missing".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::StringArray(
+                    StringArray::new(vec!["one".into(), "one".into()], vec![2, 1]).unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        let categorized =
+            parse_table_heatmap_args(&[literal_missing, Value::from("X"), Value::from("Y")])
+                .expect("only observed nonmissing axis categories");
+        assert_eq!(categorized.x_labels, vec!["missing".to_string()]);
+        assert_eq!(categorized.color_data.materialize_f64(), vec![1.0]);
+        let only_missing = crate::builtins::table::table_from_columns(
+            vec!["X".into(), "Y".into()],
+            vec![
+                Value::StringArray(StringArray::new(vec!["".into()], vec![1, 1]).unwrap()),
+                Value::StringArray(StringArray::new(vec!["A".into()], vec![1, 1]).unwrap()),
+            ],
+        )
+        .unwrap();
+        assert!(
+            parse_table_heatmap_args(&[only_missing, Value::from("X"), Value::from("Y"),]).is_err()
+        );
+
+        let exact = crate::builtins::table::table_from_columns(
+            vec!["X".into(), "Y".into(), "Color".into()],
+            vec![
+                Value::Tensor(tensor(vec![1.0, 2.0], 2, 1)),
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "A".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                        vec![2, 1],
+                    )
+                    .unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        let exact_none = parse_table_heatmap_args(&[
+            exact.clone(),
+            Value::from("X"),
+            Value::from("Y"),
+            Value::from("ColorVariable"),
+            Value::from("Color"),
+            Value::from("ColorMethod"),
+            Value::from("none"),
+        ])
+        .expect("complete unaggregated integer grid");
+        assert_eq!(
+            exact_none.color_data.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
+        let exact_handle = futures::executor::block_on(heatmap_builtin(vec![
+            exact,
+            Value::from("X"),
+            Value::from("Y"),
+            Value::from("ColorVariable"),
+            Value::from("Color"),
+            Value::from("ColorMethod"),
+            Value::from("none"),
+        ]))
+        .expect("publish exact integer ColorData");
+        let Value::Tensor(observed) =
+            get_builtin(vec![Value::Num(exact_handle), Value::from("ColorData")])
+                .expect("read retained ColorData")
+        else {
+            panic!("expected exact integer ColorData");
+        };
+        assert_eq!(
+            observed.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+        );
+
+        let incomplete = crate::builtins::table::table_from_columns(
+            vec!["X".into(), "Y".into(), "Color".into()],
+            vec![
+                Value::Tensor(tensor(vec![1.0, 2.0], 2, 1)),
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "B".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                        vec![2, 1],
+                    )
+                    .unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        let incomplete_result = parse_table_heatmap_args(&[
+            incomplete,
+            Value::from("X"),
+            Value::from("Y"),
+            Value::from("ColorVariable"),
+            Value::from("Color"),
+            Value::from("ColorMethod"),
+            Value::from("none"),
+        ]);
+        let incomplete_error = match incomplete_result {
+            Ok(_) => panic!("wide integer ColorData cannot be widened for holes"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            incomplete_error.identifier(),
+            runmat_builtins::HEATMAP_ERROR_UNSUPPORTED_COLOR_DATA.identifier
+        );
+        let single_holes = crate::builtins::table::table_from_columns(
+            vec!["X".into(), "Y".into(), "Color".into()],
+            vec![
+                Value::Tensor(tensor(vec![1.0, 2.0], 2, 1)),
+                Value::StringArray(
+                    StringArray::new(vec!["A".into(), "B".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::Tensor(Tensor::from_f32(vec![1.5, 2.5], vec![2, 1]).unwrap()),
+            ],
+        )
+        .unwrap();
+        let projected = parse_table_heatmap_args(&[
+            single_holes,
+            Value::from("X"),
+            Value::from("Y"),
+            Value::from("ColorVariable"),
+            Value::from("Color"),
+            Value::from("ColorMethod"),
+            Value::from("none"),
+        ])
+        .expect("single class with missing grid cells");
+        assert_eq!(
+            projected.color_data.numeric_dtype(),
+            runmat_value::NumericDType::F32
+        );
+        let data = projected.color_data.materialize_f64();
+        assert_eq!(data[0], 1.5);
+        assert!(data[1].is_nan() && data[2].is_nan());
+        assert_eq!(data[3], 2.5);
     }
 }

@@ -1,0 +1,96 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("squareform"),
+    slug: Some("squareform"),
+    summary: "Convert between condensed distance vectors and square symmetric matrices.",
+    description: "`squareform` converts a condensed pairwise-distance vector into a square symmetric matrix, or converts a square symmetric distance matrix back into condensed form.",
+    keywords: &["squareform", "distance", "condensed", "symmetric", "statistics", "machine learning"],
+    related: &["pdist", "pdist2"],
+    sections: &[
+        BuiltinDocumentationSection {
+            heading: "Behavior",
+            paragraphs: &[
+                "Vector inputs must have length `n*(n-1)/2` for an integer `n`. Condensed vectors use the same pair ordering as `pdist`.",
+                "Matrix inputs must be square and symmetric with a zero diagonal. Floating-point symmetry and zero tests use RunMat's distance tolerance; integer and logical comparisons remain exact.",
+                "`squareform(Z,\"tomatrix\")` forces vector-to-matrix conversion; `squareform(Z,\"tovector\")` forces matrix-to-vector conversion. Without a direction, vectors expand and nonvector matrices condense.",
+                "The conversion preserves single, double, and logical classes. RunMat mode also preserves all eight typed-integer classes as an extension. Structural integer values do not pass through double.",
+            ],
+        },
+        BuiltinDocumentationSection {
+            heading: "Execution",
+            paragraphs: &[
+                "Automatically resident inputs may gather to host for structural conversion. An explicit `gpuArray` input is a RunMat-only extension. `squareform` has no GPU kernel or fused path.",
+                "The entire output must fit host memory. Shape and option errors are checked before output construction.",
+            ],
+        },
+    ],
+    examples: &[
+        BuiltinExample {
+            id: "example-1",
+            title: "Expand a condensed vector",
+            program: "D = [5 4 7]; M = squareform(D)",
+            display_output: Some("M = [0 5 4; 5 0 7; 4 7 0]"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(M,[0 5 4;5 0 7;4 7 0]));" },
+        },
+        BuiltinExample {
+            id: "example-2",
+            title: "Convert back to condensed form",
+            program: "M = [0 5 4; 5 0 7; 4 7 0]; D2 = squareform(M)",
+            display_output: Some("D2 = [5 4 7]"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(D2,[5 4 7]));" },
+        },
+        BuiltinExample {
+            id: "example-3",
+            title: "Force vector-to-matrix conversion",
+            program: "D = [5 4 7]; M = squareform(D,\"tomatrix\")",
+            display_output: Some("M is the 3-by-3 symmetric distance matrix."),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(M,[0 5 4;5 0 7;4 7 0]));" },
+        },
+        BuiltinExample {
+            id: "example-4",
+            title: "Preserve logical distance storage",
+            program: "D = logical([1 0 1]); M = squareform(D); V = squareform(M)",
+            display_output: Some("Both M and V have logical class; V equals D."),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(M),'logical')); assert(strcmp(class(V),'logical')); assert(isequal(V,D));" },
+        },
+    ],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq {
+        question: "Why does a matrix input need a zero diagonal?",
+        answer: "A distance matrix represents distance from each observation to itself on the diagonal, which must be zero for condensed conversion.",
+    }],
+    links: &[
+        BuiltinDocumentationLink { label: "pdist", target: BuiltinDocumentationLinkTarget::Builtin("pdist") },
+        BuiltinDocumentationLink { label: "pdist2", target: BuiltinDocumentationLinkTarget::Builtin("pdist2") },
+        BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/distance/squareform.rs") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Structural, integer, and logical squareform conversion", location: "builtins::stats::ml::distance::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "VM statistics integration", location: "crates/runmat-vm/tests/stats_ml.rs" },
+        ],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

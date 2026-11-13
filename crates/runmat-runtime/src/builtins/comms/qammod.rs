@@ -4,14 +4,6 @@ use runmat_accelerate_api::{
     GpuTensorHandle, IntegerElementType, ProviderBitModulationRequest, ProviderModulationRequest,
     ProviderPrecision,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value,
@@ -26,97 +18,6 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "qammod";
-const INTEGER_TOL: f64 = 1e-9;
-
-const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Complex rectangular-QAM baseband samples.",
-}];
-
-const INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Integer symbols or grouped bit input.",
-    },
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Square modulation order greater than one.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional symbol order and name-value options.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = qammod(X, M, symorder, Name, Value)",
-    inputs: &INPUTS,
-    outputs: &OUTPUTS,
-}];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.QAMMOD.INVALID_ARGUMENT",
-    identifier: None,
-    when: "Symbols, modulation order, mapping, or options are invalid.",
-    message: "qammod: invalid argument",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_ARGUMENT];
-
-pub const QAMMOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_16_BITS,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer symbol/bit input accepts int8, int16, uint8, and uint16 on host and GPU; wider integer symbol classes reject.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "M",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Modulation order accepts every exact integer class or an integer-valued floating scalar.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "symorder",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Custom symbol-order vectors accept all eight exact integer classes.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = qammod(X, M, symorder, Name, Value)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::OptionDependent,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Built-in integer symbol input defaults to complex double output; OutputDataType can select single, and provider/fallback paths preserve the selected resident precision.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::comms::qammod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -138,31 +39,18 @@ fn qammod_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
 }
 
-fn qammod_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Some(Type::Num) | Some(Type::Int) | Some(Type::Bool) => Type::Tensor {
-            shape: Some(vec![Some(1), Some(1)]),
-        },
-        _ => Type::tensor(),
-    }
-}
-
 #[runtime_builtin(
     name = "qammod",
-    category = "comms/modulation",
-    summary = "Map integer or bit symbols onto a QAM complex-baseband constellation.",
-    keywords = "qammod,qam,modulation,communications,gray,binary,gpu",
-    type_resolver(qammod_type),
-    descriptor(crate::builtins::comms::qammod::QAMMOD_DESCRIPTOR),
-    integer_capabilities(crate::builtins::comms::qammod::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::comms::qammod"
 )]
-async fn qammod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn qammod_builtin(
+    x: Value,
+    m: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let order = parse_modulation_order(&m)?;
-    let options = ParsedOptions::parse(&rest, order, default_output_dtype(&x))?;
+    let options = ParsedOptions::parse(rest.view(), order, default_output_dtype(&x))?;
     match x {
         Value::GpuTensor(handle) => qammod_gpu(handle, order, options).await,
         other => {
@@ -178,8 +66,7 @@ async fn qammod_gpu(
     options: ParsedOptions,
 ) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
-        .or_else(runmat_accelerate_api::provider)
-        .ok_or_else(|| qammod_error("qammod: no acceleration provider registered"))?;
+        .ok_or_else(|| qammod_error("qammod: no owning acceleration provider registered"))?;
     let constellation = constellation_table(order, &options)?;
     if let Some(class) = runmat_accelerate_api::handle_integer_type(&handle) {
         validate_gpu_symbol_class(class)?;
@@ -189,41 +76,71 @@ async fn qammod_gpu(
     {
         return Err(qammod_error("qammod: logical X requires InputType='bit'"));
     }
-    match options.input_type {
-        InputType::Integer => {
-            let request = ProviderModulationRequest {
-                input: &handle,
-                constellation: &constellation,
-            };
-            if let Ok(out) = provider.modulate_constellation(request).await {
-                if valid_gpu_output(provider, &handle, &out, options.output_dtype, &handle.shape) {
-                    return Ok(gpu_helpers::complex_gpu_value(out));
+    // These hooks produce provider-native complex storage. Other requested
+    // classes retain the existing typed host modulation/upload route.
+    let target_precision = match options.output_dtype {
+        OutputDType::Double => ProviderPrecision::F64,
+        OutputDType::Single => ProviderPrecision::F32,
+    };
+    if provider.precision() == target_precision {
+        let mut output_shape = handle.shape().to_vec();
+        let result = match options.input_type {
+            InputType::Integer => Some(
+                provider
+                    .modulate_constellation(ProviderModulationRequest {
+                        input: &handle,
+                        constellation: &constellation,
+                    })
+                    .await,
+            ),
+            InputType::Bit => {
+                let input_rows = handle.shape().first().copied().unwrap_or(0);
+                let bits = bits_per_symbol(order)?;
+                if input_rows > 0 {
+                    if !input_rows.is_multiple_of(bits) {
+                        return Err(qammod_error(
+                            "qammod: bit rows must be a multiple of bits per symbol",
+                        ));
+                    }
+                    output_shape[0] = input_rows / bits;
+                    Some(
+                        provider
+                            .modulate_bits_constellation(ProviderBitModulationRequest {
+                                input: &handle,
+                                input_rows,
+                                bits_per_symbol: bits,
+                                constellation: &constellation,
+                            })
+                            .await,
+                    )
+                } else {
+                    None
                 }
-                gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
             }
-        }
-        InputType::Bit => {
-            let input_rows = handle.shape.first().copied().unwrap_or(0);
-            if input_rows > 0 {
-                let request = ProviderBitModulationRequest {
-                    input: &handle,
-                    input_rows,
-                    bits_per_symbol: bits_per_symbol(order)?,
-                    constellation: &constellation,
-                };
-                if let Ok(out) = provider.modulate_bits_constellation(request).await {
-                    let mut output_shape = handle.shape.clone();
-                    output_shape[0] = input_rows / bits_per_symbol(order)?;
-                    if valid_gpu_output(
+        };
+        if let Some(result) = result {
+            match result {
+                Ok(out) => {
+                    if !valid_gpu_output(
                         provider,
                         &handle,
                         &out,
                         options.output_dtype,
                         &output_shape,
                     ) {
-                        return Ok(gpu_helpers::complex_gpu_value(out));
+                        return Err(gpu_helpers::reject_gpu_output(
+                            out,
+                            qammod_error("qammod: provider returned an invalid modulation result"),
+                        ));
                     }
-                    gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
+                    return gpu_helpers::complex_gpu_value(out);
+                }
+                Err(error) if error.is_unsupported() => {}
+                Err(error) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        qammod_error(format!("qammod: provider modulation failed: {error}")),
+                        error,
+                    ));
                 }
             }
         }
@@ -234,9 +151,8 @@ async fn qammod_gpu(
     let Value::ComplexTensor(tensor) = result else {
         return Err(qammod_error("qammod: expected complex modulation output"));
     };
-    let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
-        .map_err(|err| qammod_error(format!("qammod: {err}")))?;
-    Ok(gpu_helpers::complex_gpu_value(out))
+    let out = gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[&handle])?;
+    gpu_helpers::complex_gpu_value(out)
 }
 
 fn default_output_dtype(value: &Value) -> OutputDType {
@@ -263,10 +179,10 @@ fn valid_gpu_output(
         OutputDType::Single => runmat_accelerate_api::NumericElementType::F32,
     };
     !gpu_helpers::same_gpu_handle(input, handle)
-        && handle.device_id == provider.device_id()
-        && handle.shape == shape
+        && handle.device_id() == provider.device_id()
+        && handle.shape() == shape
         && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && gpu_helpers::numeric_descriptor_matches(
             handle,
             element_type,
@@ -320,7 +236,7 @@ enum OutputDType {
 
 impl ParsedOptions {
     fn parse(
-        args: &[Value],
+        args: crate::call::FunctionArgumentView<'_>,
         order: usize,
         default_output_dtype: OutputDType,
     ) -> BuiltinResult<Self> {
@@ -331,14 +247,14 @@ impl ParsedOptions {
         let mut idx = 0;
 
         if let Some(first) = args.first() {
-            if !is_name_value_key(first) {
+            if !is_name_value_key(first)? {
                 mapping = parse_symbol_mapping(first, order)?;
                 idx = 1;
             }
         }
 
         while idx < args.len() {
-            let key = value_as_string(&args[idx])
+            let key = value_as_string(&args[idx])?
                 .ok_or_else(|| qammod_error("qammod: expected name-value option name"))?;
             let Some(value) = args.get(idx + 1) else {
                 return Err(qammod_error(format!(
@@ -357,7 +273,7 @@ impl ParsedOptions {
                     }
                 }
                 "outputdatatype" => {
-                    let dtype = value_as_string(value).ok_or_else(|| {
+                    let dtype = value_as_string(value)?.ok_or_else(|| {
                         qammod_error("qammod: OutputDataType must be 'double' or 'single'")
                     })?;
                     output_dtype = match dtype.trim().to_ascii_lowercase().as_str() {
@@ -371,7 +287,7 @@ impl ParsedOptions {
                     };
                 }
                 "inputtype" => {
-                    let text = value_as_string(value)
+                    let text = value_as_string(value)?
                         .ok_or_else(|| qammod_error("qammod: InputType must be a string"))?;
                     input_type = match text.trim().to_ascii_lowercase().as_str() {
                         "integer" => InputType::Integer,
@@ -449,7 +365,7 @@ impl SymbolInput {
     }
 
     fn from_tensor(tensor: Tensor, order: usize, input_type: InputType) -> BuiltinResult<Self> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         if let Some(storage) = tensor.integer_storage() {
             validate_symbol_storage_class(storage)?;
             let symbols = integer_storage_to_symbols(storage, "X")?;
@@ -467,17 +383,14 @@ impl SymbolInput {
                     .iter()
                     .map(|&value| number_to_symbol(value))
                     .collect::<BuiltinResult<Vec<_>>>()?;
-                Ok(Self {
-                    data,
-                    shape: tensor.shape,
-                })
+                Ok(Self { data, shape })
             }
             InputType::Bit => {
                 let bits = tensor_utils::tensor_values_f64_cow(&tensor)
                     .iter()
                     .map(|&value| number_to_bit(value, "X"))
                     .collect::<BuiltinResult<Vec<_>>>()?;
-                bits_to_symbols(bits, tensor.shape, order)
+                bits_to_symbols(bits, shape, order)
             }
         }
     }
@@ -489,7 +402,9 @@ impl SymbolInput {
     ) -> BuiltinResult<Self> {
         match input_type {
             InputType::Integer => Err(qammod_error("qammod: logical X requires InputType='bit'")),
-            InputType::Bit => bits_to_symbols(logical.data, logical.shape, order),
+            InputType::Bit => {
+                bits_to_symbols(logical.data.into_vec(), logical.shape.to_vec(), order)
+            }
         }
     }
 }
@@ -719,7 +634,7 @@ fn parse_modulation_order(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn parse_symbol_mapping(value: &Value, order: usize) -> BuiltinResult<SymbolMapping> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value)? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "gray" => Ok(SymbolMapping::Gray),
             "bin" | "binary" => Ok(SymbolMapping::Binary),
@@ -781,6 +696,10 @@ fn invert_mapping(mapping: &[usize], order: usize) -> BuiltinResult<Vec<usize>> 
 fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(tensor) => {
+            let shape = tensor.shape();
+            if shape.len() > 2 || (shape.len() == 2 && shape[0] > 1 && shape[1] > 1) {
+                return Err(qammod_error(format!("qammod: {name} must be a vector")));
+            }
             if let Some(storage) = tensor.integer_storage() {
                 integer_storage_to_symbols(storage, name)
             } else {
@@ -790,7 +709,14 @@ fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
                     .collect()
             }
         }
-        Value::LogicalArray(logical) => Ok(logical.data.iter().map(|&v| usize::from(v)).collect()),
+        Value::LogicalArray(logical) => {
+            if logical.shape.len() > 2
+                || (logical.shape.len() == 2 && logical.shape[0] > 1 && logical.shape[1] > 1)
+            {
+                return Err(qammod_error(format!("qammod: {name} must be a vector")));
+            }
+            Ok(logical.data.iter().map(|&v| usize::from(v)).collect())
+        }
         Value::Num(n) => Ok(vec![number_to_symbol_with_name(*n, name)?]),
         Value::Int(i) => Ok(vec![integer_to_symbol_with_name(i, name)?]),
         Value::Bool(b) => Ok(vec![usize::from(*b)]),
@@ -834,19 +760,18 @@ fn number_to_symbol_with_name(value: f64, name: &str) -> BuiltinResult<usize> {
             "qammod: {name} values must be finite integers"
         )));
     }
-    let rounded = value.round();
-    if (value - rounded).abs() > INTEGER_TOL || rounded < 0.0 {
+    if value.fract() != 0.0 || value < 0.0 {
         return Err(qammod_error(format!(
             "qammod: {name} values must be nonnegative integers"
         )));
     }
-    if rounded > usize::MAX.saturating_sub(1) as f64 {
+    if value > usize::MAX.saturating_sub(1) as f64 {
         return Err(qammod_error(format!(
             "qammod: {name} value is too large for this platform"
         )));
     }
-    let parsed = rounded as usize;
-    if parsed as f64 != rounded || parsed == usize::MAX {
+    let parsed = value as usize;
+    if parsed as f64 != value || parsed == usize::MAX {
         return Err(qammod_error(format!(
             "qammod: {name} value is too large for this platform"
         )));
@@ -893,9 +818,9 @@ fn symbols_to_bits(symbols: Vec<usize>, name: &str) -> BuiltinResult<Vec<u8>> {
 
 fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     let n = scalar_number(value, name)?;
-    if (n - 0.0).abs() <= INTEGER_TOL {
+    if n == 0.0 {
         Ok(false)
-    } else if (n - 1.0).abs() <= INTEGER_TOL {
+    } else if n == 1.0 {
         Ok(true)
     } else {
         Err(qammod_error(format!(
@@ -904,13 +829,21 @@ fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+fn value_as_string(value: &Value) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
+    Ok(match value {
+        Value::String(s) => s.text_ref().cloned(),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].text_ref().cloned(),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|source| {
+                    let mut error = qammod_error(source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into(),
+        ),
         _ => None,
-    }
+    })
 }
 
 fn normalize_key(key: &str) -> String {
@@ -920,599 +853,15 @@ fn normalize_key(key: &str) -> String {
         .collect()
 }
 
-fn is_name_value_key(value: &Value) -> bool {
-    let Some(text) = value_as_string(value) else {
-        return false;
+fn is_name_value_key(value: &Value) -> BuiltinResult<bool> {
+    let Some(text) = value_as_string(value)? else {
+        return Ok(false);
     };
-    matches!(
+    Ok(matches!(
         normalize_key(&text).as_str(),
         "unitaveragepower" | "plotconstellation" | "outputdatatype" | "inputtype"
-    )
+    ))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::builtins::common::test_support;
-    use futures::executor::block_on;
-
-    fn qammod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
-        match block_on(super::qammod_builtin(x, Value::Num(order as f64), rest)).expect("qammod") {
-            Value::ComplexTensor(tensor) => tensor,
-            other => panic!("expected ComplexTensor, got {other:?}"),
-        }
-    }
-
-    fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new(data, shape).expect("tensor"))
-    }
-
-    fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
-        Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
-    }
-
-    fn assert_complex_close(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
-        assert_eq!(actual.len(), expected.len());
-        for (idx, ((ar, ai), (er, ei))) in actual.iter().zip(expected.iter()).enumerate() {
-            assert!(
-                (ar - er).abs() < 1e-12 && (ai - ei).abs() < 1e-12,
-                "at {idx}: expected ({er}, {ei}), got ({ar}, {ai})"
-            );
-        }
-    }
-
-    #[test]
-    fn qammod_4_gray_mapping() {
-        let out = qammod(tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]), 4, vec![]);
-        assert_eq!(out.shape, vec![1, 4]);
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
-        );
-    }
-
-    #[test]
-    fn qammod_reads_typed_integer_symbol_storage_exactly() {
-        let out = qammod(
-            integer_tensor(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![1, 4]),
-            4,
-            vec![],
-        );
-        assert_eq!(out.shape, vec![1, 4]);
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
-        );
-    }
-
-    #[test]
-    fn qammod_accepts_only_documented_integer_symbol_classes() {
-        for storage in [
-            IntegerStorage::I8(vec![0, 1, 2, 3]),
-            IntegerStorage::I16(vec![0, 1, 2, 3]),
-            IntegerStorage::U8(vec![0, 1, 2, 3]),
-            IntegerStorage::U16(vec![0, 1, 2, 3]),
-        ] {
-            qammod(integer_tensor(storage, vec![1, 4]), 4, vec![]);
-        }
-        for storage in [
-            IntegerStorage::I32(vec![0, 1, 2, 3]),
-            IntegerStorage::I64(vec![0, 1, 2, 3]),
-            IntegerStorage::U32(vec![0, 1, 2, 3]),
-            IntegerStorage::U64(vec![0, 1, 2, 3]),
-        ] {
-            let err = block_on(super::qammod_builtin(
-                integer_tensor(storage, vec![1, 4]),
-                Value::Num(4.0),
-                vec![],
-            ))
-            .expect_err("unsupported integer X class");
-            assert!(err.message().contains("int8, int16, uint8, or uint16"));
-        }
-    }
-
-    #[test]
-    fn qammod_16_gray_mapping() {
-        let input: Vec<f64> = (0..16).map(|v| v as f64).collect();
-        let out = qammod(tensor(input, vec![1, 16]), 16, vec![]);
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[
-                (-3.0, 3.0),
-                (-3.0, 1.0),
-                (-3.0, -3.0),
-                (-3.0, -1.0),
-                (-1.0, 3.0),
-                (-1.0, 1.0),
-                (-1.0, -3.0),
-                (-1.0, -1.0),
-                (3.0, 3.0),
-                (3.0, 1.0),
-                (3.0, -3.0),
-                (3.0, -1.0),
-                (1.0, 3.0),
-                (1.0, 1.0),
-                (1.0, -3.0),
-                (1.0, -1.0),
-            ],
-        );
-    }
-
-    #[test]
-    fn qammod_64_gray_has_expected_edges() {
-        let out = qammod(
-            tensor(vec![0.0, 1.0, 2.0, 3.0, 63.0], vec![1, 5]),
-            64,
-            vec![],
-        );
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[
-                (-7.0, 7.0),
-                (-7.0, 5.0),
-                (-7.0, 1.0),
-                (-7.0, 3.0),
-                (1.0, -1.0),
-            ],
-        );
-    }
-
-    #[test]
-    fn qammod_binary_mapping_is_sequential_columnwise() {
-        let out = qammod(
-            tensor(vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![1, 5]),
-            16,
-            vec![Value::from("bin")],
-        );
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[
-                (-3.0, 3.0),
-                (-3.0, 1.0),
-                (-3.0, -1.0),
-                (-3.0, -3.0),
-                (-1.0, 3.0),
-            ],
-        );
-    }
-
-    #[test]
-    fn qammod_bit_input_groups_rows_by_channel() {
-        let out = qammod(
-            tensor(
-                vec![
-                    0.0, 0.0, 0.0, 0.0, // channel 1 -> symbol 0
-                    1.0, 1.0, 1.0, 1.0, // channel 2 -> symbol 15
-                ],
-                vec![4, 2],
-            ),
-            16,
-            vec![Value::from("InputType"), Value::from("bit")],
-        );
-        assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.materialize_f64(), &[(-3.0, 3.0), (1.0, -1.0)]);
-    }
-
-    #[test]
-    fn qammod_reads_typed_integer_bit_storage_exactly() {
-        let out = qammod(
-            integer_tensor(
-                IntegerStorage::U8(vec![
-                    0, 0, 0, 0, // channel 1 -> symbol 0
-                    1, 1, 1, 1, // channel 2 -> symbol 15
-                ]),
-                vec![4, 2],
-            ),
-            16,
-            vec![Value::from("InputType"), Value::from("bit")],
-        );
-        assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.materialize_f64(), &[(-3.0, 3.0), (1.0, -1.0)]);
-    }
-
-    #[test]
-    fn qammod_bit_input_honors_binary_mapping() {
-        let out = qammod(
-            tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
-            16,
-            vec![
-                Value::from("bin"),
-                Value::from("InputType"),
-                Value::from("bit"),
-            ],
-        );
-        assert_eq!(out.shape, vec![1, 1]);
-        assert_complex_close(&out.materialize_f64(), &[(-3.0, -3.0)]);
-    }
-
-    #[test]
-    fn qammod_logical_bit_input_preserves_channels() {
-        let logical = LogicalArray::new(vec![0, 0, 1, 1], vec![2, 2]).expect("logical");
-        let out = qammod(
-            Value::LogicalArray(logical),
-            4,
-            vec![Value::from("InputType"), Value::from("bit")],
-        );
-        assert_eq!(out.shape, vec![1, 2]);
-        assert_complex_close(&out.materialize_f64(), &[(-1.0, 1.0), (1.0, -1.0)]);
-    }
-
-    #[test]
-    fn qammod_inprocess_gpu_bit_input_returns_complex_resident_output() {
-        use runmat_accelerate_api::{GpuTensorStorage, HostTensorView};
-
-        test_support::with_test_provider(|provider| {
-            let input = Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]).unwrap();
-            let expected = qammod(
-                Value::Tensor(input.clone()),
-                16,
-                vec![Value::from("InputType"), Value::from("bit")],
-            );
-            let input_handle = provider
-                .upload(&HostTensorView {
-                    data: &input.materialize_f64(),
-                    shape: &input.shape,
-                })
-                .expect("upload");
-            let result = block_on(super::qammod_builtin(
-                Value::GpuTensor(input_handle.clone()),
-                Value::Num(16.0),
-                vec![Value::from("InputType"), Value::from("bit")],
-            ))
-            .expect("gpu qammod bit");
-            let Value::GpuTensor(output_handle) = result else {
-                panic!("expected resident gpu output");
-            };
-            assert_eq!(
-                runmat_accelerate_api::handle_storage(&output_handle),
-                GpuTensorStorage::ComplexInterleaved
-            );
-            let gathered = block_on(crate::dispatcher::gather_if_needed_async(
-                &Value::GpuTensor(output_handle.clone()),
-            ))
-            .expect("gather output");
-            let Value::ComplexTensor(actual) = gathered else {
-                panic!("expected gathered complex tensor");
-            };
-            assert_eq!(actual.shape, expected.shape);
-            assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
-            provider.free(&input_handle).ok();
-            provider.free(&output_handle).ok();
-        });
-    }
-
-    #[test]
-    fn qammod_gpu_enforces_integer_symbol_classes_and_output_precision() {
-        test_support::with_test_provider(|provider| {
-            let accepted =
-                Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![1, 4]).unwrap();
-            let accepted_handle =
-                gpu_helpers::upload_tensor(provider, &accepted).expect("accepted integer upload");
-            let result = block_on(super::qammod_builtin(
-                Value::GpuTensor(accepted_handle),
-                Value::Num(4.0),
-                vec![],
-            ))
-            .expect("supported integer gpuArray");
-            let Value::GpuTensor(result_handle) = result else {
-                panic!("expected resident modulation output");
-            };
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&result_handle),
-                Some(ProviderPrecision::F64)
-            );
-
-            let rejected =
-                Tensor::new_integer(IntegerStorage::U32(vec![0, 1, 2, 3]), vec![1, 4]).unwrap();
-            let rejected_handle =
-                gpu_helpers::upload_tensor(provider, &rejected).expect("rejected integer upload");
-            let err = block_on(super::qammod_builtin(
-                Value::GpuTensor(rejected_handle),
-                Value::Num(4.0),
-                vec![],
-            ))
-            .expect_err("unsupported integer gpuArray class");
-            assert!(err.message().contains("int8, int16, uint8, or uint16"));
-
-            let single = Tensor::from_f32(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
-            let single_handle =
-                gpu_helpers::upload_tensor(provider, &single).expect("single upload");
-            let result = block_on(super::qammod_builtin(
-                Value::GpuTensor(single_handle),
-                Value::Num(4.0),
-                vec![],
-            ))
-            .expect("single gpuArray");
-            let Value::GpuTensor(result_handle) = result else {
-                panic!("expected resident single modulation output");
-            };
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&result_handle),
-                Some(ProviderPrecision::F32)
-            );
-        });
-    }
-
-    #[test]
-    fn qammod_bit_input_rejects_partial_symbols() {
-        let err = block_on(super::qammod_builtin(
-            tensor(vec![0.0, 1.0, 0.0], vec![3, 1]),
-            Value::Num(16.0),
-            vec![Value::from("InputType"), Value::from("bit")],
-        ))
-        .expect_err("expected bit grouping error");
-        assert!(err.to_string().contains("multiple of log2(M)"));
-    }
-
-    #[test]
-    fn qammod_bit_input_rejects_non_bits() {
-        let err = block_on(super::qammod_builtin(
-            tensor(vec![0.0, 2.0, 0.0, 1.0], vec![4, 1]),
-            Value::Num(16.0),
-            vec![Value::from("InputType"), Value::from("bit")],
-        ))
-        .expect_err("expected bit value error");
-        assert!(err.to_string().contains("bit values must be 0 or 1"));
-    }
-
-    #[test]
-    fn qammod_custom_mapping_uses_columnwise_symbol_order() {
-        let mapping = tensor(vec![0.0, 3.0, 1.0, 2.0], vec![1, 4]);
-        let out = qammod(
-            tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]),
-            4,
-            vec![mapping],
-        );
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
-        );
-    }
-
-    #[test]
-    fn qammod_reads_typed_integer_custom_mapping_exactly() {
-        let mapping = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
-        let out = qammod(
-            integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
-            4,
-            vec![mapping],
-        );
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
-        );
-    }
-
-    #[test]
-    fn qammod_unit_average_power_normalizes_constellation() {
-        let input: Vec<f64> = (0..16).map(|v| v as f64).collect();
-        let out = qammod(
-            tensor(input, vec![1, 16]),
-            16,
-            vec![Value::from("UnitAveragePower"), Value::Bool(true)],
-        );
-        let avg_power = out
-            .materialize_f64()
-            .iter()
-            .map(|(re, im)| re * re + im * im)
-            .sum::<f64>()
-            / out.materialize_f64().len() as f64;
-        assert!((avg_power - 1.0).abs() < 1e-12, "{avg_power}");
-    }
-
-    #[test]
-    fn qammod_output_datatype_single_rounds_samples() {
-        let out = qammod(
-            tensor(vec![0.0], vec![1, 1]),
-            16,
-            vec![
-                Value::from("UnitAveragePower"),
-                Value::Bool(true),
-                Value::from("OutputDataType"),
-                Value::from("single"),
-            ],
-        );
-        let expected = (-3.0 / 10.0_f64.sqrt()) as f32 as f64;
-        assert_eq!(out.materialize_f64()[0].0, expected);
-        assert_eq!(out.materialize_f64()[0].1, -expected);
-    }
-
-    #[test]
-    fn qammod_single_input_defaults_to_single_computation() {
-        let input = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
-        let out = qammod(
-            input,
-            16,
-            vec![Value::from("UnitAveragePower"), Value::Bool(true)],
-        );
-        let expected = (-3.0 / 10.0_f64.sqrt()) as f32 as f64;
-        assert_eq!(out.materialize_f64()[0], (expected, -expected));
-    }
-
-    #[test]
-    fn qammod_rejects_out_of_range_symbols() {
-        let err = block_on(super::qammod_builtin(
-            tensor(vec![0.0, 16.0], vec![1, 2]),
-            Value::Num(16.0),
-            vec![],
-        ))
-        .expect_err("expected out-of-range error");
-        assert!(err.to_string().contains("range [0, 15]"));
-    }
-
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn qammod_wgpu_input_returns_complex_resident_output() {
-        use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
-
-        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        ) {
-            Ok(provider) => {
-                let input = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
-                let expected = qammod(Value::Tensor(input.clone()), 4, vec![]);
-                let view = HostTensorView {
-                    data: &input.materialize_f64(),
-                    shape: &input.shape,
-                };
-                let input_handle = provider.upload(&view).expect("upload");
-                let result = block_on(super::qammod_builtin(
-                    Value::GpuTensor(input_handle.clone()),
-                    Value::Num(4.0),
-                    vec![],
-                ))
-                .expect("gpu qammod");
-                let Value::GpuTensor(output_handle) = result else {
-                    panic!("expected resident gpu output");
-                };
-                assert_eq!(
-                    runmat_accelerate_api::handle_storage(&output_handle),
-                    GpuTensorStorage::ComplexInterleaved
-                );
-                let gathered = block_on(crate::dispatcher::gather_if_needed_async(
-                    &Value::GpuTensor(output_handle.clone()),
-                ))
-                .expect("gather output");
-                let Value::ComplexTensor(actual) = gathered else {
-                    panic!("expected gathered complex tensor");
-                };
-                assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
-                provider.free(&input_handle).ok();
-                provider.free(&output_handle).ok();
-            }
-            Err(err) => {
-                tracing::warn!("Skipping qammod_wgpu_input_returns_complex_resident_output: {err}");
-            }
-        }
-        runmat_accelerate::simple_provider::register_inprocess_provider();
-    }
-
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn qammod_wgpu_bit_input_returns_complex_resident_output() {
-        use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView};
-
-        match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        ) {
-            Ok(provider) => {
-                let input = Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]).unwrap();
-                let expected = qammod(
-                    Value::Tensor(input.clone()),
-                    16,
-                    vec![Value::from("InputType"), Value::from("bit")],
-                );
-                let view = HostTensorView {
-                    data: &input.materialize_f64(),
-                    shape: &input.shape,
-                };
-                let input_handle = provider.upload(&view).expect("upload");
-                let result = block_on(super::qammod_builtin(
-                    Value::GpuTensor(input_handle.clone()),
-                    Value::Num(16.0),
-                    vec![Value::from("InputType"), Value::from("bit")],
-                ))
-                .expect("gpu qammod bit");
-                let Value::GpuTensor(output_handle) = result else {
-                    panic!("expected resident gpu output");
-                };
-                assert_eq!(
-                    runmat_accelerate_api::handle_storage(&output_handle),
-                    GpuTensorStorage::ComplexInterleaved
-                );
-                let gathered = block_on(crate::dispatcher::gather_if_needed_async(
-                    &Value::GpuTensor(output_handle.clone()),
-                ))
-                .expect("gather output");
-                let Value::ComplexTensor(actual) = gathered else {
-                    panic!("expected gathered complex tensor");
-                };
-                assert_eq!(actual.shape, expected.shape);
-                assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
-                provider.free(&input_handle).ok();
-                provider.free(&output_handle).ok();
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "Skipping qammod_wgpu_bit_input_returns_complex_resident_output: {err}"
-                );
-            }
-        }
-        runmat_accelerate::simple_provider::register_inprocess_provider();
-    }
-
-    #[test]
-    fn qammod_integer_scalars_preserve_exact_symbol_bounds() {
-        assert_eq!(
-            parse_modulation_order(&Value::Int(runmat_value::IntValue::U16(4))).unwrap(),
-            4
-        );
-        assert_eq!(
-            SymbolInput::from_value(
-                Value::Int(runmat_value::IntValue::U16(3)),
-                4,
-                InputType::Integer,
-            )
-            .unwrap()
-            .data,
-            vec![3]
-        );
-        for value in [
-            Value::Int(runmat_value::IntValue::I8(-1)),
-            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
-            Value::Num(usize::MAX as f64 + 1.0),
-        ] {
-            assert!(parse_modulation_order(&value).is_err());
-        }
-        assert!(number_to_symbol_with_name(usize::MAX as f64, "M").is_err());
-        assert!(number_to_symbol_with_name(1.0e300, "M").is_err());
-    }
-
-    #[test]
-    fn qammod_typed_integer_tensors_preserve_exact_symbol_values() {
-        let order = Tensor::new_integer(IntegerStorage::U64(vec![4]), vec![1, 1]).unwrap();
-        assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
-
-        let offset = Tensor::new_integer(IntegerStorage::I16(vec![2]), vec![1, 1]).unwrap();
-        assert_eq!(
-            scalar_number(&Value::Tensor(offset), "offset").unwrap(),
-            2.0
-        );
-
-        let out = qammod(
-            integer_tensor(IntegerStorage::U16(vec![0, 1, 2, 3]), vec![1, 4]),
-            4,
-            vec![],
-        );
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
-        );
-
-        let custom = integer_tensor(IntegerStorage::U16(vec![0, 3, 1, 2]), vec![1, 4]);
-        let out = qammod(
-            integer_tensor(IntegerStorage::U8(vec![0, 1, 2, 3]), vec![1, 4]),
-            4,
-            vec![custom],
-        );
-        assert_complex_close(
-            &out.materialize_f64(),
-            &[(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)],
-        );
-
-        for storage in [
-            IntegerStorage::I8(vec![4]),
-            IntegerStorage::I16(vec![4]),
-            IntegerStorage::I32(vec![4]),
-            IntegerStorage::I64(vec![4]),
-            IntegerStorage::U8(vec![4]),
-            IntegerStorage::U16(vec![4]),
-            IntegerStorage::U32(vec![4]),
-            IntegerStorage::U64(vec![4]),
-        ] {
-            let order = Tensor::new_integer(storage, vec![1, 1]).expect("typed order");
-            assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
-        }
-    }
-}
+mod tests;

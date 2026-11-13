@@ -6,7 +6,8 @@ use runmat_test::event::TestEventPayload;
 use runmat_test::identity::TestId;
 use runmat_test::plan::TestPlan;
 use runmat_test::result::{
-    aggregate_run_state, merge_attempts, AttemptResult, RunResult, TerminalDisposition, TestResult,
+    aggregate_run_state, merge_attempts, AttemptResult, RunResult, TerminalDisposition,
+    TestReportIdentity, TestResult,
 };
 
 use crate::host::{CancellationPort, Clock, IsolationMode};
@@ -196,10 +197,12 @@ impl Coordinator {
         runs.sort_by_key(|(index, _)| *index);
 
         let mut tests = Vec::new();
+        let mut lane_states = Vec::new();
         let mut infrastructure_failures = 0;
         let mut coverage = Vec::new();
         for (_, run) in runs {
             infrastructure_failures += run.infrastructure_failures;
+            lane_states.push(run.result.state);
             tests.extend(run.result.tests);
             coverage.push(run.coverage);
             for event in run.events {
@@ -211,7 +214,8 @@ impl Coordinator {
                 }
             }
         }
-        let result = run_result(&submission.plan, tests);
+        let mut result = run_result(&submission.plan, tests)?;
+        result.state = aggregate_run_state(lane_states.iter().chain([&result.state]));
         state.emit(TestEventPayload::RunFinished {
             result: result.clone(),
         })?;
@@ -258,6 +262,7 @@ impl Coordinator {
         let mut state = EventState::new(plan.run_id.clone(), reporters);
         let mut results = Vec::new();
         let mut infrastructure_failures = 0;
+        let mut process_output_incomplete = false;
         let mut abort_reason = None;
         let mut coverage = Vec::new();
 
@@ -418,6 +423,18 @@ impl Coordinator {
                         }
                     };
                     if lost_session {
+                        if let Some(output) = backend
+                            .take_process_output(active)
+                            .await
+                            .map_err(|error| RunnerError::Backend(error.to_string()))?
+                        {
+                            output
+                                .validate(runmat_test::event::MAX_WORKER_PROCESS_STREAM_BYTES)
+                                .map_err(|error| RunnerError::Protocol(error.to_string()))?;
+                            infrastructure_failures += usize::from(!output.complete());
+                            process_output_incomplete |= !output.complete();
+                            state.emit(TestEventPayload::ProcessOutput { output })?;
+                        }
                         session = None;
                     }
                     coverage.extend(execution.coverage.iter().cloned());
@@ -456,10 +473,29 @@ impl Coordinator {
                     .shutdown(active)
                     .await
                     .map_err(|error| RunnerError::Backend(error.to_string()))?;
+                if let Some(output) = backend
+                    .take_process_output(active)
+                    .await
+                    .map_err(|error| RunnerError::Backend(error.to_string()))?
+                {
+                    output
+                        .validate(runmat_test::event::MAX_WORKER_PROCESS_STREAM_BYTES)
+                        .map_err(|error| RunnerError::Protocol(error.to_string()))?;
+                    infrastructure_failures += usize::from(!output.complete());
+                    process_output_incomplete |= !output.complete();
+                    state.emit(TestEventPayload::ProcessOutput { output })?;
+                }
             }
         }
 
-        let result = run_result(plan, results);
+        let mut result = run_result(plan, results)?;
+        if process_output_incomplete {
+            // Keep individual test outcomes intact, but never certify a run
+            // whose owned worker streams failed to retire completely.
+            result.state.failed = true;
+            result.state.incomplete = true;
+            result.state.disposition = TerminalDisposition::Crashed;
+        }
         state.emit(TestEventPayload::RunFinished {
             result: result.clone(),
         })?;
@@ -538,10 +574,37 @@ fn emit_attempt(state: &mut EventState<'_>, attempt: &AttemptResult) -> RunnerRe
     })
 }
 
-fn run_result(plan: &TestPlan, tests: Vec<TestResult>) -> RunResult {
-    RunResult {
+fn run_result(plan: &TestPlan, mut tests: Vec<TestResult>) -> RunnerResult<RunResult> {
+    let identities = plan
+        .suites
+        .iter()
+        .flat_map(|suite| {
+            suite.fixture_groups.iter().flat_map(move |group| {
+                group.tests.iter().map(move |test| {
+                    (
+                        test.id.clone(),
+                        TestReportIdentity::from_plan(&suite.display_name, test),
+                    )
+                })
+            })
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    for test in &mut tests {
+        test.report_identity = Some(
+            identities
+                .get(&test.test_id)
+                .ok_or_else(|| {
+                    RunnerError::Protocol(format!(
+                        "test result '{}' has no planned display identity",
+                        test.test_id.as_str()
+                    ))
+                })?
+                .clone(),
+        );
+    }
+    Ok(RunResult {
         run_id: plan.run_id.clone(),
         state: aggregate_run_state(tests.iter().map(|result| &result.state)),
         tests,
-    }
+    })
 }

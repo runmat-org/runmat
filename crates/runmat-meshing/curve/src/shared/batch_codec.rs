@@ -5,8 +5,7 @@ use super::{batch::validate_batch, SharedCurveBatch, SharedCurveError};
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-curve-batch-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "shared-curve-batch/v1";
-const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 2_500_000, 1024 * 1024, 64);
+const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(1024 * 1024, 64);
 
 /// Encodes one independently admitted canonical edge batch.
 pub fn encode_shared_curve_batch(
@@ -16,6 +15,25 @@ pub fn encode_shared_curve_batch(
     validate_batch(batch, topology)?;
     runmat_canonical_codec::encode_contract(CODEC_PREFIX, CONTRACT_DOMAIN, batch, CONTRACT_LIMITS)
         .map_err(map_codec_error)
+}
+
+/// Admit the same canonical batch encoding under the caller's storage authority.
+/// Retained output charges belong to the caller's allocation scope.
+pub fn encode_shared_curve_batch_admitted(
+    batch: &SharedCurveBatch,
+    topology: &ExactBRepTopology,
+    signal: &dyn runmat_meshing_core::MeshingCancellationSignal,
+    allocations: &dyn runmat_geometry_core::GeometryEvaluationControl,
+) -> Result<Vec<u8>, SharedCurveError> {
+    super::batch::validate_batch_with_cancellation(batch, topology, Some(signal))?;
+    super::codec_admission::encode(
+        batch,
+        CODEC_PREFIX,
+        CONTRACT_DOMAIN,
+        CONTRACT_LIMITS,
+        signal,
+        allocations,
+    )
 }
 
 /// Decodes bounded hostile input and independently re-admits its topology slice.
@@ -47,7 +65,7 @@ pub(super) fn decode_with_byte_limit(
     decode_with_limits(
         bytes,
         topology,
-        CanonicalLimits::new(maximum_encoded_bytes, 2_500_000, 1024 * 1024, 64),
+        CanonicalLimits::content_bounded(maximum_encoded_bytes, 1024 * 1024, 64),
     )
 }
 

@@ -10,6 +10,10 @@ use crate::BuiltinResult;
 
 use super::plotting_error;
 
+#[cfg(test)]
+#[path = "style/visibility.rs"]
+mod visibility_tests;
+
 #[derive(Clone, Copy, Debug)]
 pub struct BarStyleDefaults {
     pub face_color: Vec4,
@@ -35,6 +39,9 @@ pub struct BarStyle {
     pub bar_width: f32,
     pub label: Option<String>,
     pub face_color_flat: bool,
+    /// The call gave a face color; otherwise each series takes the next color in the
+    /// axes color order, as in MATLAB.
+    pub face_color_explicit: bool,
     pub layout: BarLayout,
 }
 
@@ -130,6 +137,8 @@ pub struct LineAppearance {
     pub line_style: LineStyle,
     pub marker: Option<MarkerAppearance>,
     pub handle_visibility: String,
+    /// None retains the target builder's default; Some(true) is an explicit override.
+    pub visible: Option<bool>,
 }
 
 impl Default for LineAppearance {
@@ -140,6 +149,7 @@ impl Default for LineAppearance {
             line_style: LineStyle::Solid,
             marker: None,
             handle_visibility: "on".to_string(),
+            visible: None,
         }
     }
 }
@@ -315,6 +325,7 @@ struct LineStyleOptions {
     line_style_order: Option<Vec<LineStyle>>,
     label: Option<String>,
     handle_visibility: Option<String>,
+    visible: Option<bool>,
 }
 
 impl LineStyleOptions {
@@ -354,6 +365,9 @@ impl LineStyleOptions {
         if other.handle_visibility.is_some() {
             self.handle_visibility = other.handle_visibility;
         }
+        if other.visible.is_some() {
+            self.visible = other.visible;
+        }
     }
 
     fn resolve(&self) -> LineAppearance {
@@ -380,6 +394,7 @@ impl LineStyleOptions {
         if let Some(handle_visibility) = &self.handle_visibility {
             appearance.handle_visibility = handle_visibility.clone();
         }
+        appearance.visible = self.visible;
         appearance
     }
 }
@@ -396,6 +411,13 @@ pub struct ParsedLineStyle {
 
 pub fn parse_line_style_args(
     rest: &[Value],
+    opts: &LineStyleParseOptions,
+) -> BuiltinResult<ParsedLineStyle> {
+    parse_line_style_arguments(crate::call::FunctionArgumentView::from_slice(rest), opts)
+}
+
+pub fn parse_line_style_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
     opts: &LineStyleParseOptions,
 ) -> BuiltinResult<ParsedLineStyle> {
     if rest.is_empty() {
@@ -420,14 +442,20 @@ pub fn parse_line_style_args(
     let mut idx = 0usize;
     let mut saw_style_token = false;
     while idx < rest.len() {
-        if opts.forbid_interleaved_numeric && begins_with_numeric(&rest[idx..]) {
+        if opts.forbid_interleaved_numeric && begins_with_numeric(rest.range(idx..)?) {
             return Err(ctx_err(
                 opts,
                 "per-series styles interleaved with data are not supported yet",
             ));
         }
 
-        if let Some(token) = value_as_string(&rest[idx]) {
+        if let Some(token) = value_as_string(&rest[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                opts.builtin_name,
+                source.to_string(),
+                source,
+            )
+        })? {
             if is_style_token(opts, &token) {
                 if saw_style_token {
                     return Err(ctx_err(
@@ -443,8 +471,8 @@ pub fn parse_line_style_args(
         }
 
         let pair = rest
-            .get(idx..=idx + 1)
-            .ok_or_else(|| ctx_err(opts, "name-value arguments must come in pairs"))?;
+            .range(idx..=idx + 1)
+            .map_err(|_| ctx_err(opts, "name-value arguments must come in pairs"))?;
         options.merge(parse_name_value_pairs(opts, pair)?);
         idx += 2;
     }
@@ -462,7 +490,7 @@ pub fn parse_line_style_args(
 
 pub fn parse_surface_style_args(
     builtin: &'static str,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     defaults: SurfaceStyleDefaults,
 ) -> BuiltinResult<SurfaceStyle> {
     let opts = LineStyleParseOptions::generic(builtin);
@@ -478,6 +506,13 @@ pub fn parse_surface_style_args(
     }
     for pair in rest.chunks_exact(2) {
         let key = value_as_string(&pair[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?
             .ok_or_else(|| ctx_err(&opts, "option names must be char arrays or strings"))?;
         let lower = key.trim().to_ascii_lowercase();
         match lower.as_str() {
@@ -500,7 +535,14 @@ pub fn parse_surface_style_args(
                 style.flatten_z = parse_surface_bool(&opts, "FlattenZ", &pair[1])?;
             }
             "displayname" | "label" => {
-                let Some(name) = value_as_string(&pair[1]) else {
+                let Some(name) = value_as_string(&pair[1]).map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                else {
                     return Err(ctx_err(&opts, "DisplayName must be a char array or string"));
                 };
                 style.label = Some(name);
@@ -523,7 +565,7 @@ pub fn parse_surface_style_args(
     Ok(style)
 }
 
-fn begins_with_numeric(rest: &[Value]) -> bool {
+fn begins_with_numeric(rest: crate::call::FunctionArgumentView<'_>) -> bool {
     matches!(
         rest.first(),
         Some(
@@ -581,12 +623,19 @@ fn parse_style_string(
 
 fn parse_name_value_pairs(
     opts: &LineStyleParseOptions,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<LineStyleOptions> {
     let mut options = LineStyleOptions::default();
     let mut iter = args.chunks_exact(2);
     for pair in iter.by_ref() {
         let key = value_as_string(&pair[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    opts.builtin_name,
+                    source.to_string(),
+                    source,
+                )
+            })?
             .ok_or_else(|| ctx_err(opts, "option names must be char arrays or strings"))?;
         let lower = key.trim().to_ascii_lowercase();
         match lower.as_str() {
@@ -598,16 +647,36 @@ fn parse_name_value_pairs(
                 }
                 options.line_width = Some(width as f32);
             }
+            "visible" => {
+                options.visible =
+                    Some(value_as_bool(&pair[1]).ok_or_else(|| {
+                        ctx_err(opts, "Visible must be on/off or a logical scalar")
+                    })?);
+            }
             "color" => {
                 options.color = Some(parse_color_value(opts, &pair[1])?);
             }
             "linestyle" => {
                 let style_text = value_as_string(&pair[1])
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            opts.builtin_name,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
                     .ok_or_else(|| ctx_err(opts, "LineStyle must be a string"))?;
                 options.line_style = Some(parse_line_style_name(opts, &style_text)?);
             }
             "marker" => {
                 let marker_text = value_as_string(&pair[1])
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            opts.builtin_name,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
                     .ok_or_else(|| ctx_err(opts, "Marker must be a string"))?;
                 let parsed = parse_marker_string(opts, &marker_text)?;
                 match parsed {
@@ -640,7 +709,14 @@ fn parse_name_value_pairs(
                 options.line_style_order = Some(order);
             }
             "displayname" | "label" => {
-                let Some(name) = value_as_string(&pair[1]) else {
+                let Some(name) = value_as_string(&pair[1]).map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        opts.builtin_name,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                else {
                     return Err(ctx_err(opts, "DisplayName must be a char array or string"));
                 };
                 options.label = Some(name);
@@ -707,7 +783,13 @@ fn parse_marker_color_value(
     opts: &LineStyleParseOptions,
     value: &Value,
 ) -> BuiltinResult<MarkerColor> {
-    if let Some(name) = value_as_string(value) {
+    if let Some(name) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         let lower = name.trim().to_ascii_lowercase();
         return match lower.as_str() {
             "auto" => Ok(MarkerColor::Auto),
@@ -724,10 +806,27 @@ fn parse_line_style_order_value(
     value: &Value,
 ) -> BuiltinResult<Vec<LineStyle>> {
     let strings = match value {
-        Value::StringArray(arr) => arr.data.clone(),
+        Value::StringArray(arr) => arr
+            .data()
+            .iter()
+            .map(|text| {
+                text.as_str().map(str::to_owned).ok_or_else(|| {
+                    ctx_err(
+                        opts,
+                        "LineStyleOrder must be a string, string array, or cell array of strings",
+                    )
+                })
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?,
         Value::Cell(cell) => collect_cell_strings(cell, opts)?,
         _ => {
-            if let Some(text) = value_as_string(value) {
+            if let Some(text) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    opts.builtin_name,
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 vec![text]
             } else {
                 return Err(ctx_err(
@@ -759,7 +858,13 @@ fn collect_cell_strings(
             let value = cell
                 .get(row, col)
                 .map_err(|e| ctx_err(opts, format!("LineStyleOrder: {e}")))?;
-            if let Some(text) = value_as_string(&value) {
+            if let Some(text) = value_as_string(&value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    opts.builtin_name,
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 strings.push(text);
             } else {
                 return Err(ctx_err(
@@ -778,7 +883,13 @@ pub(crate) fn parse_color_value(
     opts: &LineStyleParseOptions,
     value: &Value,
 ) -> BuiltinResult<Vec4> {
-    if let Some(name) = value_as_string(value) {
+    if let Some(name) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         if let Some(color) = color_from_name_or_token(name.trim()) {
             return Ok(color);
         }
@@ -882,6 +993,7 @@ fn looks_like_option_name_for(opts: &LineStyleParseOptions, token: &str) -> bool
             | "linestyleorder"
             | "displayname"
             | "label"
+            | "visible"
     ) || (opts.accepts_handle_visibility && token.trim().eq_ignore_ascii_case("handlevisibility"))
 }
 
@@ -902,6 +1014,7 @@ pub fn looks_like_generic_line_option_name(token: &str) -> bool {
             | "linestyleorder"
             | "displayname"
             | "label"
+            | "visible"
     )
 }
 
@@ -909,7 +1022,14 @@ pub(crate) fn parse_handle_visibility(
     opts: &LineStyleParseOptions,
     value: &Value,
 ) -> BuiltinResult<String> {
-    let Some(text) = value_as_string(value) else {
+    let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })?
+    else {
         return Err(ctx_err(
             opts,
             "HandleVisibility must be a char array or string",
@@ -925,12 +1045,12 @@ pub(crate) fn parse_handle_visibility(
     }
 }
 
-pub fn value_as_string(value: &Value) -> Option<String> {
-    match value {
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        Value::String(s) => Some(s.clone()),
+pub fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
+        Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
+        Value::String(runmat_value::StringElement::Text(s)) => Some(s.as_str().to_owned()),
         _ => None,
-    }
+    })
 }
 
 pub(crate) fn value_as_f64(value: &Value) -> Option<f64> {
@@ -959,10 +1079,37 @@ pub(crate) fn value_as_bool(value: &Value) -> Option<bool> {
         Value::Num(v) => Some(*v != 0.0),
         Value::Int(i) => Some(!i.is_zero()),
         Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
-            bool_from_text(&text)
+            let mut units = chars.data().iter().map(|u| u.raw());
+            while units
+                .clone()
+                .next()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next();
+            }
+            while units
+                .clone()
+                .next_back()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next_back();
+            }
+            let units = units.map(|u| if (65..=90).contains(&u) { u + 32 } else { u });
+            if ["on", "true", "yes", "y"]
+                .into_iter()
+                .any(|word| units.clone().eq(word.encode_utf16()))
+            {
+                Some(true)
+            } else if ["off", "false", "no", "n"]
+                .into_iter()
+                .any(|word| units.clone().eq(word.encode_utf16()))
+            {
+                Some(false)
+            } else {
+                None
+            }
         }
-        Value::String(text) => bool_from_text(text),
+        Value::String(runmat_value::StringElement::Text(text)) => bool_from_text(text),
         _ => None,
     }
 }
@@ -976,7 +1123,13 @@ fn bool_from_text(text: &str) -> Option<bool> {
 }
 
 fn parse_colormap_option(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<ColorMap> {
-    if let Some(name) = value_as_string(value) {
+    if let Some(name) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         if let Some(map) = parse_colormap_name(&name) {
             return Ok(map);
         }
@@ -991,7 +1144,14 @@ fn parse_colormap_name(name: &str) -> Option<ColorMap> {
 }
 
 fn parse_shading_option(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<ShadingMode> {
-    let Some(text) = value_as_string(value) else {
+    let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })?
+    else {
         return Err(ctx_err(opts, "Shading must be a string"));
     };
     match text.trim().to_ascii_lowercase().as_str() {
@@ -1014,7 +1174,13 @@ fn apply_face_color_option(
     value: &Value,
     style: &mut SurfaceStyle,
 ) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
             "none" => {
@@ -1054,7 +1220,13 @@ fn apply_edge_color_option(
     value: &Value,
     style: &mut SurfaceStyle,
 ) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
             "none" => {
@@ -1086,7 +1258,13 @@ fn parse_surface_bool(
 }
 
 fn parse_lighting_option(opts: &LineStyleParseOptions, value: &Value) -> BuiltinResult<bool> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
             "none" => Ok(false),
@@ -1115,6 +1293,7 @@ pub fn parse_bar_style_args(
         bar_width: defaults.bar_width.clamp(0.1, 1.0),
         label: None,
         face_color_flat: false,
+        face_color_explicit: false,
         layout: BarLayout::Grouped,
     };
 
@@ -1122,14 +1301,20 @@ pub fn parse_bar_style_args(
         return Ok(style);
     }
 
-    let filtered = strip_bar_layout_tokens(rest, &mut style);
+    let filtered = strip_bar_layout_tokens(rest, &mut style, builtin)?;
     let rest = filtered.as_slice();
 
     let mut idx = 0usize;
     let mut saw_positional_width = false;
     let mut saw_positional_color = false;
     while let Some(value) = rest.get(idx) {
-        if let Some(token) = value_as_string(value) {
+        if let Some(token) = value_as_string(value).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })? {
             let trimmed = token.trim();
             if trimmed.is_empty() || is_bar_option_name(trimmed) {
                 break;
@@ -1141,6 +1326,7 @@ pub fn parse_bar_style_args(
                 ));
             }
             style.face_color = parse_bar_color_literal(&opts, trimmed)?;
+            style.face_color_explicit = true;
             saw_positional_color = true;
             idx += 1;
             continue;
@@ -1179,7 +1365,14 @@ pub fn parse_bar_style_args(
 
     for pair in remaining.chunks_exact(2) {
         let key_value = pair[0].clone();
-        let Some(key) = value_as_string(&pair[0]) else {
+        let Some(key) = value_as_string(&pair[0]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             return Err(bar_ctx_err(
                 builtin,
                 "option names must be char arrays or strings",
@@ -1203,6 +1396,7 @@ pub fn parse_bar_style_args(
                     style.face_color = color;
                     style.face_alpha = 1.0;
                     style.face_color_flat = false;
+                    style.face_color_explicit = true;
                 }
             },
             "edgecolor" => {
@@ -1245,7 +1439,14 @@ pub fn parse_bar_style_args(
                 style.edge_alpha = alpha.clamp(0.0, 1.0) as f32;
             }
             "displayname" | "label" => {
-                let Some(name) = value_as_string(&pair[1]) else {
+                let Some(name) = value_as_string(&pair[1]).map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                else {
                     return Err(bar_ctx_err(
                         builtin,
                         "DisplayName must be a char array or string",
@@ -1266,38 +1467,50 @@ pub fn parse_bar_style_args(
     Ok(style)
 }
 
-fn strip_bar_layout_tokens(rest: &[Value], style: &mut BarStyle) -> Vec<Value> {
-    let mut filtered = Vec::with_capacity(rest.len());
-    let mut expecting_value = false;
-    for value in rest {
-        if expecting_value {
-            filtered.push(value.clone());
-            expecting_value = false;
-            continue;
-        }
-        if let Some(text) = value_as_string(value) {
-            let lower = text.trim().to_ascii_lowercase();
-            match lower.as_str() {
-                "stacked" => {
-                    style.layout = BarLayout::Stacked;
-                    continue;
-                }
-                "grouped" => {
-                    style.layout = BarLayout::Grouped;
-                    continue;
-                }
-                _ => {
-                    if is_bar_option_name(&lower) {
-                        filtered.push(value.clone());
-                        expecting_value = true;
+fn strip_bar_layout_tokens(
+    rest: &[Value],
+    style: &mut BarStyle,
+    builtin: &str,
+) -> crate::BuiltinResult<Vec<Value>> {
+    Ok({
+        let mut filtered = Vec::with_capacity(rest.len());
+        let mut expecting_value = false;
+        for value in rest {
+            if expecting_value {
+                filtered.push(value.clone());
+                expecting_value = false;
+                continue;
+            }
+            if let Some(text) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })? {
+                let lower = text.trim().to_ascii_lowercase();
+                match lower.as_str() {
+                    "stacked" => {
+                        style.layout = BarLayout::Stacked;
                         continue;
+                    }
+                    "grouped" => {
+                        style.layout = BarLayout::Grouped;
+                        continue;
+                    }
+                    _ => {
+                        if is_bar_option_name(&lower) {
+                            filtered.push(value.clone());
+                            expecting_value = true;
+                            continue;
+                        }
                     }
                 }
             }
+            filtered.push(value.clone());
         }
-        filtered.push(value.clone());
-    }
-    filtered
+        filtered
+    })
 }
 
 fn is_bar_option_name(token: &str) -> bool {
@@ -1339,7 +1552,13 @@ fn parse_bar_face_color(
     opts: &LineStyleParseOptions,
     value: &Value,
 ) -> BuiltinResult<FaceColorSpec> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
             "auto" => Ok(FaceColorSpec::Auto),
@@ -1359,7 +1578,13 @@ fn parse_bar_edge_color(
     opts: &LineStyleParseOptions,
     value: &Value,
 ) -> BuiltinResult<EdgeColorSpec> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            opts.builtin_name,
+            source.to_string(),
+            source,
+        )
+    })? {
         let lower = text.trim().to_ascii_lowercase();
         return match lower.as_str() {
             "auto" => Ok(EdgeColorSpec::Auto),
@@ -1390,6 +1615,42 @@ fn parse_bar_color_literal(opts: &LineStyleParseOptions, token: &str) -> Builtin
 fn bar_ctx_err(builtin: &str, msg: impl Into<String>) -> crate::RuntimeError {
     let message = format!("{builtin}: {}", msg.into());
     plotting_error(builtin, message)
+}
+
+/// Spelling-only control probe. Invalid/raw UTF-16 cannot select an ASCII control;
+/// actual text materialization remains fallible in value_as_string.
+pub(crate) fn value_text_equals_ascii(value: &Value, expected: &str, trim: bool) -> bool {
+    match value {
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            let text = if trim { text.trim() } else { text.as_str() };
+            text.eq_ignore_ascii_case(expected)
+        }
+        Value::CharArray(chars) => {
+            let mut units = chars.data().iter().map(|u| u.raw());
+            if trim {
+                while units
+                    .clone()
+                    .next()
+                    .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+                {
+                    units.next();
+                }
+                while units
+                    .clone()
+                    .next_back()
+                    .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+                {
+                    units.next_back();
+                }
+            }
+            units
+                .map(|u| if (65..=90).contains(&u) { u + 32 } else { u })
+                .eq(expected
+                    .encode_utf16()
+                    .map(|u| if (65..=90).contains(&u) { u + 32 } else { u }))
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]

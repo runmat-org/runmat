@@ -8,14 +8,14 @@ use runmat_execution::{
     EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_types::{
-    CapabilityRequirement, CapabilitySet, ForeignAffinity, ForeignCapability, ForeignLifetime,
-    ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, InteropManifest, LabCount,
-    ParallelAccess, ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId,
-    ParallelVariableContract, ParallelVariableRole, ParforContract, ProgramFunctionId,
-    ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionId, RegionProvenance,
-    RegionValueId, SpmdContract, SpmdLabRequirement, ValueFact, ValueKindFact, WasmInteropPolicy,
-    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
-    REGION_CONTRACT_SCHEMA_VERSION,
+    CapabilityRequirement, CapabilitySet, ForeignAdapterContractReference, ForeignAffinity,
+    ForeignCapability, ForeignLifetime, ForeignOwnership, ForeignRequirement, ForeignTypeIdentity,
+    InteropManifest, LabCount, ParallelAccess, ParallelManifest, ParallelRandomnessPolicy,
+    ParallelRegionId, ParallelVariableContract, ParallelVariableRole, ParforContract,
+    PlannedForeignAdapter, ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan,
+    RegionContract, RegionId, RegionProvenance, RegionValueId, SpmdContract, SpmdLabRequirement,
+    ValueFact, ValueKindFact, WasmInteropPolicy, INTEROP_MANIFEST_SCHEMA_VERSION,
+    PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 
 fn program() -> ProgramRevision {
@@ -102,12 +102,14 @@ fn manifest() -> ExecutableUnitManifest {
             program,
             root_package: "example@1.0.0".into(),
             entrypoint: "main".into(),
-            entrypoint_function: ProgramFunctionId(0),
+            entrypoint_function: Some(ProgramFunctionId(0)),
             entrypoint_kind: ExecutableEntrypointKind::Function,
+            declaration_class: None,
             source_digest: Digest::sha256(b"main.m"),
         },
         revisions,
         components,
+        dependencies: Vec::new(),
         capabilities: CapabilitySet(BTreeSet::from([
             CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::ParallelRuntime,
@@ -129,6 +131,10 @@ fn manifest() -> ExecutableUnitManifest {
                 wasm: WasmInteropPolicy::HostBridge,
             }],
             adapters: Vec::new(),
+            adapter_contracts: vec![
+                ForeignAdapterContractReference::planned(PlannedForeignAdapter::DotNet),
+                ForeignAdapterContractReference::planned(PlannedForeignAdapter::WindowsCom),
+            ],
         },
         parallel: ParallelManifest {
             schema_version: PARALLEL_MANIFEST_SCHEMA_VERSION,
@@ -141,9 +147,10 @@ fn manifest() -> ExecutableUnitManifest {
                     role: ParallelVariableRole::Loop,
                     access: ParallelAccess::ReadWrite,
                     fact: ValueFact::scalar(ValueKindFact::Logical),
-                    transferable: true,
+                    transferability: runmat_types::ParallelTransferability::ProvenTransferable,
                 }],
                 maximum_workers: Some(LabCount(4)),
+                effects: Default::default(),
                 capabilities: Default::default(),
                 randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
             }],
@@ -154,6 +161,8 @@ fn manifest() -> ExecutableUnitManifest {
                     maximum: LabCount(4),
                 },
                 captures: Vec::new(),
+                outputs: Vec::new(),
+                effects: Default::default(),
                 capabilities: Default::default(),
             }],
             distributed_values: Vec::new(),
@@ -191,10 +200,44 @@ fn round_trip_vector() {
 #[test]
 fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
+    // Includes the explicit original dependency inventory in the manifest.
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:f19f3e2aab64c58611c48210de564e6b9a2d275a4d4b96c5285ac636efa00c7f"
+        "sha256:25e3e3b15dc6572dbc7eaf9476787f7130d459175ade2a21f23bc9cd4441cd9d"
     );
+}
+
+#[test]
+fn declaration_only_entrypoint_has_no_callable_ordinal() {
+    let class = runmat_types::ClassIdentity::new("Base").unwrap();
+    let mut declaration = manifest();
+    declaration.identity.entrypoint = class.display_name().into();
+    declaration.identity.entrypoint_function = None;
+    declaration.identity.entrypoint_kind = ExecutableEntrypointKind::DeclarationOnly;
+    declaration.identity.declaration_class = Some(class.clone());
+    declaration
+        .validate()
+        .expect("typed declaration-only manifest");
+    assert_eq!(
+        declaration.identity.validated_entrypoint().unwrap(),
+        runmat_execution::ValidatedExecutableEntrypoint::DeclarationOnly(class)
+    );
+    let bytes = declaration.canonical_bytes().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(value["identity"].get("entrypoint_function").is_none());
+
+    let mut fabricated = declaration.clone();
+    fabricated.identity.entrypoint_function = Some(ProgramFunctionId(0));
+    assert!(fabricated.validate().is_err());
+    let mut mismatched = declaration.clone();
+    mismatched.identity.entrypoint = "Other".into();
+    assert!(mismatched.validate().is_err());
+    let mut missing_class = declaration.clone();
+    missing_class.identity.declaration_class = None;
+    assert!(missing_class.validate().is_err());
+    let mut old_schema = declaration;
+    old_schema.schema_version = EXECUTABLE_UNIT_SCHEMA_VERSION - 1;
+    assert!(old_schema.validate().is_err());
 }
 
 #[test]
@@ -214,6 +257,72 @@ fn complete_envelope_round_trips_and_binds_every_payload() {
     let mut reordered = envelope;
     reordered.payloads.swap(0, 1);
     assert!(reordered.validate().is_err());
+}
+
+fn source_map_v2_envelope(entries: serde_json::Value) -> ExecutableUnitEnvelope {
+    let mut manifest = manifest();
+    manifest.revisions.source_map_schema = 2;
+    let mut payloads = component_payloads();
+    let source_index = payloads
+        .iter()
+        .position(|payload| payload.kind == ExecutableComponentKind::SourceMap)
+        .unwrap();
+    let bytes = serde_json::to_vec(&serde_json::json!({ "entries": entries })).unwrap();
+    payloads[source_index] =
+        ExecutableComponentPayload::new(ExecutableComponentKind::SourceMap, bytes).unwrap();
+    manifest.components[source_index] = ExecutableComponentDescriptor::from_payload(
+        ExecutableComponentKind::SourceMap,
+        2,
+        &payloads[source_index].bytes,
+    )
+    .unwrap();
+    ExecutableUnitEnvelope {
+        schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
+        manifest,
+        payloads,
+        dependency_products: Vec::new(),
+    }
+}
+
+fn source_entry(ordinal: usize, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "source_id": ordinal,
+        "owner_identity": "example@1.0.0",
+        "relative_path": format!("source-{ordinal}.m"),
+        "content_revision": Digest::sha256(text.as_bytes()),
+        "display_name": format!("source-{ordinal}.m"),
+        "text": text,
+    })
+}
+
+#[test]
+fn imported_v2_source_map_checks_exact_text_after_component_digest() {
+    let valid = source_map_v2_envelope(serde_json::json!([source_entry(0, "x = 1;\n")]));
+    let bytes = valid.canonical_bytes().unwrap();
+    assert_eq!(
+        ExecutableUnitEnvelope::from_canonical_bytes(&bytes).unwrap(),
+        valid
+    );
+
+    let mut stale = source_entry(0, "x = 1;\n");
+    stale["text"] = serde_json::json!("x = 2;\n");
+    let forged = source_map_v2_envelope(serde_json::json!([stale]));
+    let imported = serde_json::to_vec(&forged).unwrap();
+    assert!(ExecutableUnitEnvelope::from_canonical_bytes(&imported).is_err());
+    assert!(forged.validate().is_err());
+}
+
+#[test]
+fn imported_v2_source_map_requires_dense_unique_ordinals() {
+    for entries in [
+        serde_json::json!([source_entry(0, "a"), source_entry(0, "b")]),
+        serde_json::json!([source_entry(0, "a"), source_entry(2, "b")]),
+        serde_json::json!([source_entry(1, "a")]),
+    ] {
+        let forged = source_map_v2_envelope(entries);
+        let imported = serde_json::to_vec(&forged).unwrap();
+        assert!(ExecutableUnitEnvelope::from_canonical_bytes(&imported).is_err());
+    }
 }
 
 #[test]
@@ -263,6 +372,18 @@ fn versions_capabilities_digests_and_cache_inputs_are_enforced() {
         .remove(&CapabilityRequirement::ForeignRuntime);
     assert!(missing_capability.validate().is_err());
 
+    let available = CapabilitySet(BTreeSet::from([
+        CapabilityRequirement::ForeignRuntime,
+        CapabilityRequirement::ParallelRuntime,
+        CapabilityRequirement::DistributedRuntime,
+    ]));
+    baseline.validate_capabilities_for(&available).unwrap();
+    let unavailable = CapabilitySet(BTreeSet::from([
+        CapabilityRequirement::ParallelRuntime,
+        CapabilityRequirement::DistributedRuntime,
+    ]));
+    assert!(baseline.validate_capabilities_for(&unavailable).is_err());
+
     let mut tampered = baseline;
     tampered.optional_sections[0].payload.push(0);
     assert!(tampered.validate().is_err());
@@ -293,3 +414,6 @@ fn decoder_rejects_unknown_core_fields_and_noncanonical_json() {
 fn wasm_uses_the_same_executable_manifest_vector() {
     round_trip_vector();
 }
+
+#[path = "executable_manifest/dependencies.rs"]
+mod dependencies;

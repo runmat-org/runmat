@@ -1,0 +1,72 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("conv2"),
+    slug: Some("conv2"),
+    summary: "Compute two-dimensional convolution in MATLAB and RunMat.",
+    description: "`conv2` performs two-dimensional linear convolution in direct and separable forms. The documented numeric, logical, and eight fixed-width integer classes are accepted. Any single numeric input selects single output; otherwise the result is double. Integer input crosses the explicit floating-point computation boundary.",
+    keywords: &["conv2", "2d convolution", "image processing", "filtering", "gpu", "same", "valid"],
+    related: &["conv", "filter2", "imfilter", "gpuArray", "gather", "deconv", "filter"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Forms and dimensions", paragraphs: &[
+            "`conv2(A,B)` computes full two-dimensional convolution. `same` selects the central result with the dimensions of `A`; even-sized kernels use the top-left alignment in each even dimension. `valid` keeps only complete kernel overlaps. A scalar is a 1-by-1 matrix.",
+            "`conv2(hcol,hrow,A)` applies the outer-product kernel of two vectors to `A`, without conjugating either factor. The optional final shape selector also accepts full, same, or valid. RunMat uses a column pass followed by a row pass when checked factor balancing and intermediate ranges permit it. Otherwise, it forms the kernel and uses the general convolution path.",
+            "An empty operand gives an empty full or valid result. Same mode retains the signal matrix shape and fills its empty-kernel result with zeros.",
+            "For nonempty matrices, full mode has dimensions `size(A)+size(B)-1`; valid mode has dimensions `size(A)-size(B)+1` when the kernel fits along both axes. The separable kernel has `numel(hcol)` rows and `numel(hrow)` columns.",
+        ] },
+        BuiltinDocumentationSection { heading: "Classes and placement", paragraphs: &[
+            "Logical inputs promote to double. Explicitly complex inputs remain complex even if all computed imaginary components are zero. Integer operands, including mixed classes and host complex integer storage, convert independently to the selected floating result class before arithmetic.",
+            "Same-owner, same-device real floating operands may use a native provider `conv2d` hook. Its output is admitted only with the required class, shape, owner, device, and distinct live allocation. Other supported resident values gather through their owners and eligible floating results return to the first owner. Typed complex integer host data works; the current provider ABI cannot encode typed complex-integer resident buffers.",
+            "Convolution terminates fusion plans. The direct host form uses nested-loop convolution. The separable host form uses two one-dimensional passes when numerically admitted, with the general kernel as its fallback.",
+            "Numerical comparisons should account for accumulation order, scale, and precision. Example comparison tolerances of `1e-9` for double and `1e-3` for single are illustrative guidance, not universal error bounds for arbitrary inputs.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "example-1", title: "Smooth an image patch", program: "A = [1 2 3; 4 5 6; 7 8 9];\nh = ones(3) / 9;\nsmoothed = conv2(A, h, 'same')", display_output: Some("smoothed =\n    1.3333    2.3333    1.7778\n    3.0000    5.0000    3.6667\n    2.6667    4.3333    3.1111"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(smoothed),[3 3])); assert(abs(smoothed(2,2)-5)<1e-12); assert(abs(smoothed(1,1)-4/3)<1e-12);" } },
+        BuiltinExample { id: "example-2", title: "Full convolution of two kernels", program: "K1 = [1 2; 3 4];\nK2 = [1 1; 1 1];\nC = conv2(K1, K2)", display_output: Some("C =\n     1     3     2\n     4    10     6\n     3     7     4"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(C,[1 3 2;4 10 6;3 7 4]));" } },
+        BuiltinExample { id: "example-3", title: "Preserve image dimensions", program: "edge = conv2([1 2 3; 4 5 6; 7 8 9], [1 0 -1; 1 0 -1; 1 0 -1], 'same')", display_output: Some("edge =\n     7     4    -7\n    15     6   -15\n    13     4   -13"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(edge,[7 4 -7;15 6 -15;13 4 -13]));" } },
+        BuiltinExample { id: "example-4", title: "Valid sliding-window convolution", program: "block = magic(4);\nkernel = ones(2);\nvalid = conv2(block, kernel, 'valid')", display_output: Some("valid =\n    34    26    34\n    32    34    36\n    34    42    34"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(valid),[3 3])); assert(isequal(valid,[34 26 34;32 34 36;34 42 34]));" } },
+        BuiltinExample { id: "example-5", title: "Use column and row kernel factors", program: "hcol = [1; 2; 1];\nhrow = [1 0 -1];\nA = [3 4 5; 6 7 8; 9 10 11];\ngx = conv2(hcol, hrow, A, 'same')", display_output: Some("gx =\n    15     6   -15\n    28     8   -28\n    27     6   -27"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(gx,[15 6 -15;28 8 -28;27 6 -27]));" } },
+        BuiltinExample { id: "example-6", title: "Convolve resident arrays", program: "G = gpuArray(rand(128, 128));\nH = gpuArray([1 2 1; 0 0 0; -1 -2 -1]);\ngx = conv2(G, H, 'same');\nresult = gather(gx)", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Wgpu, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "reference = conv2(gather(G),gather(H),'same'); assert(isequal(size(result),[128 128])); assert(max(abs(result(:)-reference(:)))<1e-10);" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Does `conv2` support all three shape modes?", answer: "Yes. Full, same, and valid select the output extent; same uses the documented even-kernel alignment." },
+        BuiltinDocumentationFaq { question: "How do I use the separable form?", answer: "Call `conv2(hcol,hrow,A)` with an optional final shape. RunMat applies the column and row factors in separate passes when their numerical ranges permit it; otherwise it uses the outer-product kernel." },
+        BuiltinDocumentationFaq { question: "What happens if an input is empty?", answer: "Full and valid produce an empty result. Same preserves the first signal matrix dimensions with zero values when the kernel is empty." },
+        BuiltinDocumentationFaq { question: "Do logical inputs work?", answer: "Yes. They are promoted to double before convolution." },
+        BuiltinDocumentationFaq { question: "Will the result stay on the GPU?", answer: "A same-owner, same-device real floating pair can use a provider `conv2d` hook. Other supported resident values gather through their owners and eligible floating results return to the first owner. Host typed complex integers work; the current provider ABI cannot encode resident typed complex integers." },
+        BuiltinDocumentationFaq { question: "What does `conv2` compute?", answer: "It flips the kernel over both axes and sums products at each overlapping location. For correlation without flipping, use `filter2`." },
+        BuiltinDocumentationFaq { question: "When is the separable form faster?", answer: "For an admitted two-pass calculation, each output accumulates contributions from the column and row factors separately rather than from every coefficient of their outer product. This reduces arithmetic for larger rank-one kernels. Intermediate allocation, output shape, numerical fallback, and device transfers also affect elapsed time; a speedup is not guaranteed." },
+        BuiltinDocumentationFaq { question: "Should I use `conv2`, `filter2`, or `imfilter`?", answer: "Use `conv2` for convolution, `filter2` for correlation, and `imfilter` for image-specific boundary modes such as replicate, symmetric, and circular. Symmetric kernels can give the same convolution and correlation result." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "MATLAB conv2 documentation", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/conv2.html") },
+        BuiltinDocumentationLink { label: "conv", target: BuiltinDocumentationLinkTarget::Builtin("conv") },
+        BuiltinDocumentationLink { label: "filter2", target: BuiltinDocumentationLinkTarget::Builtin("filter2") },
+        BuiltinDocumentationLink { label: "imfilter", target: BuiltinDocumentationLinkTarget::Builtin("imfilter") },
+        BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+        BuiltinDocumentationLink { label: "deconv", target: BuiltinDocumentationLinkTarget::Builtin("deconv") },
+        BuiltinDocumentationLink { label: "filter", target: BuiltinDocumentationLinkTarget::Builtin("filter") },
+        BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Direct/separable admission and convolution", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs") },
+            BuiltinDocumentationLink { label: "Two-pass execution and numerical fallback", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2/separable.rs") },
+            BuiltinDocumentationLink { label: "Factor balancing and range admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2/separable/balance.rs") },
+            BuiltinDocumentationLink { label: "Shared resident convolution contracts", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/convolution.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Direct/separable modes, classes, and provider behavior", location: "builtins::math::signal::conv2::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident round trip against host convolution", location: "builtins::math::signal::conv2::tests::conv2_gpu_roundtrip_matches_cpu" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "WGPU fallback parity", location: "builtins::math::signal::conv2::tests::conv2_wgpu_fallback_matches_cpu" },
+        ],
+        notes: &[],
+    },
+    introduced: None,
+    status: None,
+};

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
@@ -14,45 +16,31 @@ use crate::cdt::{
     DelaunayTopologyOptions,
 };
 
-fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".to_owned(),
-        assembly_path: Vec::new(),
-    }
+pub(super) fn region() -> PersistentEntityId {
+    PersistentEntityId::new(PersistentEntityKind::Region, "solid".to_owned(), Vec::new())
 }
 
 fn named_region(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, value.to_owned(), Vec::new())
 }
 
 fn face(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Face, value.to_owned(), Vec::new())
 }
 
 fn edge(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Edge, value.to_owned(), Vec::new())
 }
 
 fn topology(points: [[f64; 3]; 4]) -> DelaunayVolumeTopology {
     let nodes = points
         .into_iter()
         .enumerate()
-        .map(|(index, coordinates_m)| DelaunayVolumeNode {
-            identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-            coordinates_m,
+        .map(|(index, coordinates_m)| {
+            DelaunayVolumeNode::explicit(
+                StableDigest::from_bytes([(index + 1) as u8; 32]),
+                coordinates_m,
+            )
         })
         .collect();
     let topology = build_delaunay_volume_topology(
@@ -71,7 +59,7 @@ fn topology(points: [[f64; 3]; 4]) -> DelaunayVolumeTopology {
     .unwrap()
 }
 
-fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
+pub(super) fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
     DelaunayVolumeProvenance {
         nodes: Vec::new(),
         segments: Vec::new(),
@@ -79,17 +67,22 @@ fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
     }
 }
 
-fn metric() -> MetricFieldRequest {
+pub(super) fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
 fn anisotropic_metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3 {
             xx: 1.0,
@@ -101,10 +94,11 @@ fn anisotropic_metric() -> MetricFieldRequest {
         },
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
-fn quality(
+pub(super) fn quality(
     topology: &DelaunayVolumeTopology,
     provenance: &DelaunayVolumeProvenance,
     maximum_edge: f64,
@@ -120,6 +114,90 @@ fn quality(
     (quality, options)
 }
 
+#[test]
+fn batch_admission_requires_lexicographic_quality_progress() {
+    let topology = topology([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]);
+    let provenance = context(&topology);
+    let (baseline, _) = quality(&topology, &provenance, 0.5);
+    let template = baseline.tetrahedra[0].clone();
+    let with_ratios = |ratios: &[f64]| {
+        let mut result = baseline.clone();
+        result.tetrahedra = ratios
+            .iter()
+            .map(|ratio| {
+                let mut tetrahedron = template.clone();
+                tetrahedron.refinement_violation_ratio = *ratio;
+                tetrahedron
+            })
+            .collect();
+        result
+    };
+    let prior = with_ratios(&[4.0, 2.0]);
+
+    assert!(super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[4.0, 1.5])
+    ));
+    assert!(super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[3.9, 3.0])
+    ));
+    assert!(!super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[4.0, 2.0])
+    ));
+    assert!(!super::batch::quality_strictly_improves(
+        &prior,
+        &with_ratios(&[4.0, 2.0, 1.1])
+    ));
+}
+
+#[test]
+fn batch_refinement_applies_separated_cavities_in_one_transaction() {
+    let batch_scheduler::Fixture {
+        topology,
+        provenance,
+        metric_request,
+        quality,
+        quality_options,
+    } = batch_scheduler::fixture();
+    let mut excluded = BTreeSet::new();
+
+    let outcome = super::batch::insert_independent_refinement_batch(
+        refinement_input(
+            &topology,
+            &metric_request,
+            &provenance,
+            &quality,
+            quality_options,
+        ),
+        &CandidateQueries::new(&topology, &NeverCancelled).unwrap(),
+        super::batch::RefinementBatchOptions {
+            step: DelaunayVolumeRefinementStepOptions::default(),
+            maximum_insertions: 8,
+            frontier: &mut Default::default(),
+        },
+        &mut excluded,
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    let super::batch::RefinementBatchOutcome::Admitted(batch) = outcome else {
+        panic!("two separated violating cavities should form one admitted batch");
+    };
+    assert_eq!(batch.inserted_nodes.len(), 2);
+    assert_eq!(batch.step.topology.nodes.len(), topology.nodes.len() + 2);
+    assert!(super::batch::quality_strictly_improves(
+        &quality,
+        &batch.step.quality
+    ));
+}
+
 fn refinement_input<'a>(
     topology: &'a DelaunayVolumeTopology,
     metric_request: &'a MetricFieldRequest,
@@ -133,6 +211,7 @@ fn refinement_input<'a>(
         provenance,
         quality,
         quality_options,
+        fixed_node_identities: &[],
     }
 }
 
@@ -146,9 +225,11 @@ fn two_region_topology() -> DelaunayVolumeTopology {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, coordinates_m)| DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-        coordinates_m,
+    .map(|(index, coordinates_m)| {
+        DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 1) as u8; 32]),
+            coordinates_m,
+        )
     })
     .collect();
     let topology = build_delaunay_volume_topology(
@@ -279,7 +360,53 @@ fn refinement_selects_a_deterministic_interior_metric_circumcenter() {
         anisotropic.kind,
         DelaunayRefinementCandidateKind::MetricCircumcenter
     );
-    assert_ne!(anisotropic.node.identity, first.node.identity);
+    assert_ne!(
+        anisotropic.node.coordinates_m.canonical_value(),
+        first.node.coordinates_m.canonical_value()
+    );
+    assert_eq!(anisotropic.node.identity, first.node.identity);
+}
+
+#[test]
+fn refinement_selects_the_next_canonical_candidate_after_sliver_deletion() {
+    let topology = topology([
+        [0.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]);
+    let provenance = context(&topology);
+    let request = metric();
+    let (quality, options) = quality(&topology, &provenance, 0.5);
+    let input = refinement_input(&topology, &request, &provenance, &quality, options);
+    let first = select_delaunay_volume_refinement_candidate(
+        input,
+        DelaunayVolumeRefinementCandidateOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap()
+    .unwrap();
+    let second = select_delaunay_volume_refinement_candidate_excluding(
+        input,
+        DelaunayVolumeRefinementCandidateOptions::default(),
+        &BTreeSet::from([first.node.identity]),
+        &NeverCancelled,
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_ne!(second.node.identity, first.node.identity);
+    assert_ne!(
+        second.node.coordinates_m.canonical_value(),
+        first.node.coordinates_m.canonical_value()
+    );
+    validate_delaunay_volume_refinement_candidate(
+        input,
+        &Some(second),
+        DelaunayVolumeRefinementCandidateOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -308,9 +435,77 @@ fn refinement_uses_an_interior_centroid_when_circumcenter_is_exterior() {
     .unwrap();
     assert_eq!(
         selected.kind,
-        DelaunayRefinementCandidateKind::InteriorCentroid
+        DelaunayRefinementCandidateKind::InteriorPoint
     );
-    assert_eq!(selected.node.coordinates_m, [0.5, 0.25, 0.25]);
+    assert_eq!(
+        selected.node.coordinates_m.canonical_value(),
+        [0.5, 0.25, 0.25]
+    );
+}
+
+// witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: The size-defect edge candidate splits only an edge with an interior endpoint and
+//   lies strictly inside its source; whole-part runtime is measured on the cantilever study.
+#[test]
+fn size_refinement_splits_the_longest_edge_with_an_interior_endpoint() {
+    let corner = [2.0, 0.0, 0.0];
+    let interior = [0.3, 0.2, 0.2];
+    let topology = insert_delaunay_volume_node(
+        topology([[0.0, 0.0, 0.0], corner, [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        DelaunayVolumeNode::explicit(StableDigest::from_bytes([9; 32]), interior),
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let contexts = context(&topology);
+    let (evaluated, options) = quality(&topology, &contexts, 1.2);
+    let points = |index: usize| {
+        topology.tetrahedra[index].vertex_indices.map(|vertex| {
+            topology.nodes[vertex as usize]
+                .coordinates_m
+                .canonical_value()
+        })
+    };
+    // The hull edges (corner to corner, up to 2.24) are longer than the interior
+    // edge to the far corner (1.73), but they cannot be split from inside.
+    let source = (0..topology.tetrahedra.len())
+        .find(|&index| points(index).contains(&corner) && points(index).contains(&[0.0, 1.0, 0.0]))
+        .unwrap();
+    let cell = evaluated
+        .tetrahedra
+        .iter()
+        .find(|cell| {
+            let mut identities = cell.node_identities;
+            identities.sort_unstable();
+            let mut expected = topology.tetrahedra[source]
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize].identity);
+            expected.sort_unstable();
+            identities == expected
+        })
+        .unwrap();
+    let point = candidate::metric_edge_midpoint(&topology, source, cell, options).unwrap();
+    let midpoint: [f64; 3] = std::array::from_fn(|axis| 0.5 * (interior[axis] + corner[axis]));
+    let offset = (0..3)
+        .map(|axis| (point[axis] - midpoint[axis]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        offset < 0.1,
+        "{point:?} is not near the interior edge midpoint {midpoint:?}"
+    );
+    assert!(candidate::strictly_inside(points(source), point).unwrap());
+    // No edge over the bound with an interior endpoint: no candidate.
+    let (relaxed, relaxed_options) = quality(&topology, &contexts, 2.0);
+    let relaxed_cell = relaxed
+        .tetrahedra
+        .iter()
+        .find(|candidate| candidate.node_identities == cell.node_identities)
+        .unwrap();
+    assert!(
+        candidate::metric_edge_midpoint(&topology, source, relaxed_cell, relaxed_options).is_none()
+    );
 }
 
 struct Cancelled;
@@ -359,7 +554,18 @@ fn refinement_handles_convergence_tampering_limits_and_cancellation() {
         &NeverCancelled,
     )
     .unwrap();
-    candidate.as_mut().unwrap().node.coordinates_m[0] += 0.1;
+    let admitted_candidate = candidate.clone();
+    {
+        let quantity_change = 0.1;
+        let quantity_index = 0;
+        let quantity_slot = &mut candidate.as_mut().unwrap().node.coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] += quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert_eq!(
         validate_delaunay_volume_refinement_candidate(
             refinement_input(
@@ -370,6 +576,28 @@ fn refinement_handles_convergence_tampering_limits_and_cancellation() {
                 quality_options,
             ),
             &candidate,
+            DelaunayVolumeRefinementCandidateOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeRefinementCandidateErrorKind::InvalidCandidate
+    );
+    let mut false_construction = admitted_candidate;
+    false_construction
+        .as_mut()
+        .unwrap()
+        .construction_node_identities[0] = StableDigest::ZERO;
+    assert_eq!(
+        validate_delaunay_volume_refinement_candidate(
+            refinement_input(
+                &topology,
+                &metric_request,
+                &contexts,
+                &quality,
+                quality_options,
+            ),
+            &false_construction,
             DelaunayVolumeRefinementCandidateOptions::default(),
             &NeverCancelled,
         )
@@ -441,6 +669,7 @@ fn refinement_insertion_preserves_region_interface_and_rederives_quality() {
     let quality_options = DelaunayVolumeQualityOptions {
         maximum_metric_edge_length: 0.5,
         maximum_radius_edge_ratio: 10.0,
+        minimum_metric_scaled_jacobian: 1.0e-12,
         ..DelaunayVolumeQualityOptions::default()
     };
     let initial_quality = evaluate_delaunay_volume_quality(
@@ -648,17 +877,13 @@ fn refinement_loop_preserves_converged_input_and_rejects_false_lineage() {
     assert_eq!(first, second);
     assert_eq!(first.topology, topology);
     assert_eq!(first.quality, quality);
-    assert!(first.mutations.is_empty());
+    assert!(first.insertions.is_empty());
 
     let mut tampered = first;
-    tampered
-        .mutations
-        .push(DelaunayVolumeRefinementMutation::Inserted(
-            DelaunayVolumeNode {
-                identity: StableDigest::from_bytes([9; 32]),
-                coordinates_m: [0.25; 3],
-            },
-        ));
+    tampered.insertions.push(DelaunayVolumeNode::explicit(
+        StableDigest::from_bytes([9; 32]),
+        [0.25; 3],
+    ));
     assert_eq!(
         validate_delaunay_volume_refinement(
             input,
@@ -1058,3 +1283,9 @@ fn marked_adaptation_is_local_deterministic_replayable_and_bounded() {
         DelaunayAdaptiveRefinementErrorKind::Cancelled
     );
 }
+
+#[path = "tests/owned_state.rs"]
+mod owned_state;
+
+#[path = "tests/batch_scheduler.rs"]
+mod batch_scheduler;

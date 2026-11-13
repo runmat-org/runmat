@@ -1,205 +1,78 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, SGTITLE_DESCRIPTOR, SGTITLE_ERROR_INTERNAL,
+    SGTITLE_ERROR_INVALID_ARGUMENT, SGTITLE_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::map_figure_error;
+use super::op_common::{annotation_error, map_figure_error};
 use crate::builtins::plotting::properties::parse_text_style_pairs;
 use crate::builtins::plotting::style::value_as_f64;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::builtins::plotting::{
     plotting_error,
     state::{current_figure_handle, figure_handle_exists, set_sg_title_for_figure, FigureHandle},
 };
 
-const SGTITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created/updated super-title object.",
-}];
-
-const SGTITLE_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
-}];
-
-const SGTITLE_INPUTS_FIG_TEXT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "fig",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target figure handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
-    },
-];
-
-const SGTITLE_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const SGTITLE_INPUTS_FIG_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "fig",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target figure handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const SGTITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = sgtitle(txt)",
-        inputs: &SGTITLE_INPUTS_TEXT,
-        outputs: &SGTITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = sgtitle(fig, txt)",
-        inputs: &SGTITLE_INPUTS_FIG_TEXT,
-        outputs: &SGTITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = sgtitle(txt, Name, Value, ...)",
-        inputs: &SGTITLE_INPUTS_TEXT_PROPS,
-        outputs: &SGTITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = sgtitle(fig, txt, Name, Value, ...)",
-        inputs: &SGTITLE_INPUTS_FIG_TEXT_PROPS,
-        outputs: &SGTITLE_OUTPUT_HANDLE,
-    },
-];
-
-const SGTITLE_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "txt",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "A scalar integer title is formatted directly from its native signed or unsigned value, including full-width uint64, without binary64 conversion.",
-    }];
-const SGTITLE_INTEGER_FONT_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "FontSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented for FontSize; accepted positive finite values cross the explicit client-renderer scalar boundary.",
-    }];
-pub const SGTITLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = sgtitle(integer_txt)", inputs: &SGTITLE_INTEGER_TEXT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The exact decimal spelling becomes the stored text String property; the returned graphics handle remains RunMat's ordinary double handle." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = sgtitle(..., 'FontSize', integer_size)", inputs: &SGTITLE_INTEGER_FONT_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "FontSize is a client-side graphics property, not an integer-preserving result; valid practical sizes are exactly representable at the renderer boundary." },
-];
-
-const SGTITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SGTITLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:sgtitle:InvalidArgument"),
-    when: "Figure handle, text payload, or property/value arguments are invalid.",
-    message: "sgtitle: invalid argument",
-};
-
-const SGTITLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SGTITLE.INTERNAL",
-    identifier: Some("RunMat:sgtitle:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "sgtitle: internal operation failed",
-};
-
-const SGTITLE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [SGTITLE_ERROR_INVALID_ARGUMENT, SGTITLE_ERROR_INTERNAL];
-
-pub const SGTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SGTITLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SGTITLE_ERRORS,
-};
-
 #[runtime_builtin(
     name = "sgtitle",
-    category = "plotting",
-    summary = "Set a centered title above the entire figure.",
-    keywords = "sgtitle,subplot,title,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::sgtitle::SGTITLE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::sgtitle::SGTITLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::sgtitle"
 )]
-pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    sgtitle_impl("sgtitle", args)
+pub fn sgtitle_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &SGTITLE_DESCRIPTOR,
+        &SGTITLE_ERROR_TOO_MANY_OUTPUTS,
+        "sgtitle",
+    )?;
+    sgtitle_impl(
+        "sgtitle",
+        &SGTITLE_ERROR_INVALID_ARGUMENT,
+        &SGTITLE_ERROR_INTERNAL,
+        args,
+    )
 }
 
-pub(super) fn sgtitle_impl(builtin: &'static str, args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (target, rest) = split_figure_target(builtin, &args)?;
-    if rest.is_empty() {
-        return Err(plotting_error(
+pub(super) fn sgtitle_impl(
+    builtin: &'static str,
+    invalid: &'static BuiltinErrorDescriptor,
+    internal: &'static BuiltinErrorDescriptor,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if args.is_empty() {
+        return Err(annotation_error(
             builtin,
-            format!("{builtin}: expected text input"),
+            invalid,
+            plotting_error(builtin, format!("{builtin}: expected text input")),
         ));
     }
-    let text = super::op_common::value_as_text_string(&rest[0])
+    let (target, rest) = split_figure_target(builtin, args.view())
+        .map_err(|error| annotation_error(builtin, invalid, error))?;
+    if rest.is_empty() {
+        return Err(annotation_error(
+            builtin,
+            invalid,
+            plotting_error(builtin, format!("{builtin}: expected text input")),
+        ));
+    }
+    let text = super::op_common::value_as_text_string(&rest[0]).map_err(|source| crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?
         .or_else(|| super::op_common::format_numeric_text(&rest[0]))
         .ok_or_else(|| {
-            plotting_error(
+            annotation_error(builtin, invalid, plotting_error(
                 builtin,
                 format!("{builtin}: expected text as char array, string, string array, or cell array of strings"),
-            )
+            ))
         })?;
-    let style = parse_text_style_pairs(builtin, &rest[1..])?;
-    set_sg_title_for_figure(target, &text, style).map_err(|err| map_figure_error(builtin, err))
+    let style = parse_text_style_pairs(builtin, rest.range(1..)?)
+        .map_err(|error| annotation_error(builtin, invalid, error))?;
+    let target = target.unwrap_or_else(current_figure_handle);
+    set_sg_title_for_figure(target, &text, style)
+        .map_err(|err| annotation_error(builtin, internal, map_figure_error(builtin, err)))
 }
 
 fn split_figure_target<'a>(
     builtin: &'static str,
-    args: &'a [Value],
-) -> crate::BuiltinResult<(FigureHandle, &'a [Value])> {
+    args: crate::call::FunctionArgumentView<'a>,
+) -> crate::BuiltinResult<(Option<FigureHandle>, crate::call::FunctionArgumentView<'a>)> {
     // Only attempt handle detection when there is a subsequent argument to serve as title text.
     // Without this guard, `sgtitle(42)` would be misread as targeting figure 42 with no text,
     // making it impossible to use a numeric value as title text when that figure exists.
@@ -207,7 +80,7 @@ fn split_figure_target<'a>(
         if let Some(first) = args.first() {
             if let Some(handle) = try_parse_figure_target(first) {
                 if figure_handle_exists(handle) {
-                    return Ok((handle, &args[1..]));
+                    return Ok((Some(handle), args.range(1..)?));
                 }
                 return Err(plotting_error(
                     builtin,
@@ -216,7 +89,7 @@ fn split_figure_target<'a>(
             }
         }
     }
-    Ok((current_figure_handle(), args))
+    Ok((None, args))
 }
 
 /// Converts a finite scalar number to a title string, matching MATLAB's behaviour of
@@ -228,6 +101,10 @@ fn try_parse_figure_target(value: &Value) -> Option<FigureHandle> {
     }
     Some(FigureHandle::from(scalar.round() as u32))
 }
+
+#[cfg(test)]
+#[path = "sgtitle/preflight_tests.rs"]
+mod preflight_tests;
 
 #[cfg(test)]
 mod tests {
@@ -274,7 +151,10 @@ mod tests {
     #[test]
     fn sgtitle_returns_handle_and_updates_current_figure() {
         let _guard = setup();
-        let handle = sgtitle_builtin(vec![Value::String("Overview".into())]).unwrap();
+        let handle = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Overview".into())],
+        ))
+        .unwrap();
         let (figure, axes, kind) = decode_plot_object_handle(handle).unwrap();
         assert_eq!(figure, current_figure_handle());
         assert_eq!(axes, 0);
@@ -287,15 +167,21 @@ mod tests {
     #[test]
     fn sgtitle_accepts_explicit_figure_targets_and_properties() {
         let _guard = setup();
-        let fig = figure_builtin(vec![Value::Num(321.0)]).unwrap();
-        sgtitle_builtin(vec![
-            Value::Num(fig),
-            Value::String("Figure Overview".into()),
-            Value::String("FontSize".into()),
-            Value::Num(18.0),
-            Value::String("FontWeight".into()),
-            Value::String("bold".into()),
-        ])
+        let fig = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(321.0)]),
+        )
+        .unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(fig),
+                Value::String("Figure Overview".into()),
+                Value::String("FontSize".into()),
+                Value::Num(18.0),
+                Value::String("FontWeight".into()),
+                Value::String("bold".into()),
+            ],
+        ))
         .unwrap();
 
         let figure = clone_figure(FigureHandle::from(321)).unwrap();
@@ -307,7 +193,10 @@ mod tests {
     #[test]
     fn sgtitle_handle_supports_get() {
         let _guard = setup();
-        let handle = sgtitle_builtin(vec![Value::String("Top".into())]).unwrap();
+        let handle = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Top".into())],
+        ))
+        .unwrap();
         let string = get_builtin(vec![Value::Num(handle), Value::String("String".into())]).unwrap();
         assert_eq!(string, Value::String("Top".into()));
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -317,14 +206,19 @@ mod tests {
     #[test]
     fn sgtitle_rejects_invalid_inputs() {
         let _guard = setup();
-        let err = sgtitle_builtin(vec![]).unwrap_err();
+        let err = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .unwrap_err();
         assert!(err.message.contains("expected text input"));
 
-        let err = sgtitle_builtin(vec![
-            Value::String("Top".into()),
-            Value::String("Bogus".into()),
-            Value::Num(1.0),
-        ])
+        let err = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Top".into()),
+                Value::String("Bogus".into()),
+                Value::Num(1.0),
+            ],
+        ))
         .unwrap_err();
         assert!(err.message.contains("unsupported property"));
     }
@@ -334,9 +228,16 @@ mod tests {
         // Regression: sgtitle(42) must set the title to "42" on the current figure even when
         // figure 42 exists, rather than consuming 42 as a handle and erroring with "expected text".
         let _guard = setup();
-        let _ = figure_builtin(vec![Value::Num(42.0)]).unwrap();
+        let _ = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(42.0)]),
+        )
+        .unwrap();
         let current = current_figure_handle();
-        sgtitle_builtin(vec![Value::Num(42.0)]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(42.0)],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("42"));
     }
@@ -347,7 +248,10 @@ mod tests {
         // exist (previously errored with "invalid figure handle").
         let _guard = setup();
         let current = current_figure_handle();
-        sgtitle_builtin(vec![Value::Num(99.0)]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(99.0)],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("99"));
     }
@@ -357,7 +261,10 @@ mod tests {
         let _guard = setup();
         let current = current_figure_handle();
         let pi = std::f64::consts::PI;
-        sgtitle_builtin(vec![Value::Num(pi)]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(pi)],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         let expected = format!("{pi}");
         assert_eq!(fig.sg_title.as_deref(), Some(expected.as_str()));
@@ -367,7 +274,10 @@ mod tests {
     fn sgtitle_preserves_full_width_integer_title_text() {
         let _guard = setup();
         let current = current_figure_handle();
-        sgtitle_builtin(vec![Value::Int(IntValue::U64(9_007_199_254_740_993))]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Int(IntValue::U64(9_007_199_254_740_993))],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("9007199254740993"));
     }
@@ -377,8 +287,15 @@ mod tests {
         // When there are 2+ args and the first is a valid figure handle, it is still treated as
         // the target figure — the pre-existing behaviour must be preserved.
         let _guard = setup();
-        let _ = figure_builtin(vec![Value::Num(7.0)]).unwrap();
-        sgtitle_builtin(vec![Value::Num(7.0), Value::String("Seven".into())]).unwrap();
+        let _ = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7.0)]),
+        )
+        .unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(7.0), Value::String("Seven".into())],
+        ))
+        .unwrap();
         let fig = clone_figure(FigureHandle::from(7)).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("Seven"));
     }
@@ -388,7 +305,11 @@ mod tests {
         // Before sgtitle is invoked the Children array must contain only the axes handles,
         // not a spurious super-title text object.
         let _guard = setup();
-        let fig_handle = figure_builtin(vec![Value::Num(50.0)]).unwrap();
+        let fig_handle = figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(50.0)]),
+        )
+        .unwrap();
         let children_before = figure_children_count(fig_handle);
         // Default figure has exactly one axes.
         assert_eq!(
@@ -396,15 +317,38 @@ mod tests {
             "expected 1 child (axes) before sgtitle, got {children_before}"
         );
 
-        sgtitle_builtin(vec![
-            Value::Num(fig_handle),
-            Value::String("Now it exists".into()),
-        ])
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(fig_handle),
+                Value::String("Now it exists".into()),
+            ],
+        ))
         .unwrap();
         let children_after = figure_children_count(fig_handle);
         assert_eq!(
             children_after, 2,
             "expected 2 children (axes + super-title) after sgtitle, got {children_after}"
         );
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::sgtitle_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:sgtitle:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = super::sgtitle_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:sgtitle:TooManyOutputs"));
     }
 }

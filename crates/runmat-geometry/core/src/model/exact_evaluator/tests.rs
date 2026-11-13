@@ -13,10 +13,16 @@ pub(crate) fn registry() -> ExactEvaluatorRegistry {
             id: CurveEvaluatorId::new("curve:1").unwrap(),
             implementation: ExactCurveImplementation::Portable {
                 definition: ExactCurveDefinition::Circle {
-                    center_m: [0.0, 0.0, 0.0],
+                    center_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([0.0, 0.0, 0.0]),
                     x_axis: [1.0, 0.0, 0.0],
                     y_axis: [0.0, 1.0, 0.0],
-                    radius_m: 1.0,
+                    radius_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Length,
+                        _,
+                    >::new(1.0),
                     domain: range(0.0, std::f64::consts::TAU),
                     periodic: true,
                 },
@@ -38,7 +44,10 @@ pub(crate) fn registry() -> ExactEvaluatorRegistry {
             id: SurfaceEvaluatorId::new("surface:1").unwrap(),
             implementation: ExactSurfaceImplementation::Portable {
                 definition: ExactSurfaceDefinition::Plane {
-                    origin_m: [0.0, 0.0, 0.0],
+                    origin_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new([0.0, 0.0, 0.0]),
                     u_axis_m_per_parameter: [1.0, 0.0, 0.0],
                     v_axis_m_per_parameter: [0.0, 1.0, 0.0],
                     domains: [range(-2.0, 2.0), range(-2.0, 2.0)],
@@ -53,10 +62,20 @@ pub(crate) fn registry() -> ExactEvaluatorRegistry {
             id: MassPropertiesEvaluatorId::new("mass:1").unwrap(),
             implementation: ExactMassPropertiesImplementation::KernelValidated {
                 properties: BodyMassProperties {
-                    volume_m3: 1.0,
-                    surface_area_m2: 6.0,
-                    centroid_m: [0.5, 0.5, 0.5],
-                    inertia_about_centroid_m5: [1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0, 0.0, 0.0, 0.0],
+                    volume_m3: crate::physical::Volume::new(1.0),
+                    surface_area_m2: crate::physical::Area::new(6.0),
+                    centroid_m: crate::physical::Position::new([0.5, 0.5, 0.5]),
+                    inertia_about_centroid_m5: crate::physical::Quantity::<
+                        crate::physical::kind::GeometricVolumeSecondMoment,
+                        _,
+                    >::new([
+                        1.0 / 6.0,
+                        1.0 / 6.0,
+                        1.0 / 6.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ]),
                 },
                 validation_digest: [9; 32],
             },
@@ -111,7 +130,14 @@ fn portable_nurbs_curves_pcurves_and_surfaces_are_admitted_without_samples() {
             definition: NurbsCurve3 {
                 degree: 2,
                 knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                control_points_m: vec![[0.0, 0.0, 0.0], [0.5, 1.0, 0.0], [1.0, 0.0, 0.0]],
+                control_points_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(vec![
+                    [0.0, 0.0, 0.0],
+                    [0.5, 1.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                ]),
                 weights: vec![1.0, 1.0, 1.0],
                 domain: range(0.0, 1.0),
                 periodic: false,
@@ -139,12 +165,15 @@ fn portable_nurbs_curves_pcurves_and_surfaces_are_admitted_without_samples() {
                 v_knots: vec![0.0, 0.0, 1.0, 1.0],
                 u_control_count: 2,
                 v_control_count: 2,
-                control_points_m: vec![
+                control_points_m: runmat_types::physical::Quantity::<
+                    runmat_types::physical::kind::Position,
+                    _,
+                >::new(vec![
                     [0.0, 0.0, 0.0],
                     [0.0, 1.0, 0.0],
                     [1.0, 0.0, 0.0],
                     [1.0, 1.0, 0.0],
-                ],
+                ]),
                 weights: vec![1.0; 4],
                 domains: [range(0.0, 1.0), range(0.0, 1.0)],
                 periodic_u: false,
@@ -183,7 +212,10 @@ fn portable_geometry_and_topology_flags_cannot_disagree() {
     let mut constant_curve = registry();
     constant_curve.curves[0].implementation = ExactCurveImplementation::Portable {
         definition: ExactCurveDefinition::Degenerate {
-            point_m: [1.0, 0.0, 0.0],
+            point_m:
+                runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+                    [1.0, 0.0, 0.0],
+                ),
             domain: range(0.0, std::f64::consts::TAU),
         },
     };
@@ -250,7 +282,7 @@ fn invalid_kernel_and_mass_evidence_fail_closed() {
     else {
         unreachable!()
     };
-    properties.volume_m3 = f64::NAN;
+    properties.volume_m3 = crate::physical::Volume::new(f64::NAN);
     *validation_digest = [0; 32];
     assert!(mass.validate_against(&topology(), &model()).is_err());
 }

@@ -2,12 +2,8 @@
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, DAMP_ERROR_INTERNAL, DAMP_ERROR_INVALID_MODEL, DAMP_ERROR_OUTPUT_COUNT,
+    DAMP_ERROR_UNSUPPORTED_MODEL,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -17,114 +13,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{
-    control_error, output_complex_column, polynomial_roots, ss_poles_from_object, TfModel, EPS,
+    control_error, output_complex_column, ss_poles_from_object_async, TfModel, TfSampleDomain, EPS,
     SS_CLASS, TF_CLASS,
 };
-use crate::builtins::control::type_resolvers::damp_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "damp";
-const DAMP_PARAM_WN: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "wn",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Natural frequencies as an N-by-1 column vector.",
-};
-const DAMP_PARAM_ZETA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "zeta",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Damping ratios as an N-by-1 column vector.",
-};
-const DAMP_PARAM_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Model poles as an N-by-1 real or complex column vector.",
-};
-const DAMP_OUTPUT_WN: [BuiltinParamDescriptor; 1] = [DAMP_PARAM_WN];
-const DAMP_OUTPUT_WNZETA: [BuiltinParamDescriptor; 2] = [DAMP_PARAM_WN, DAMP_PARAM_ZETA];
-const DAMP_OUTPUT_WNZETAP: [BuiltinParamDescriptor; 3] =
-    [DAMP_PARAM_WN, DAMP_PARAM_ZETA, DAMP_PARAM_P];
-const DAMP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf model or ss state-space model.",
-}];
-const DAMP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "wn = damp(sys)",
-        inputs: &DAMP_INPUTS,
-        outputs: &DAMP_OUTPUT_WN,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[wn, zeta] = damp(sys)",
-        inputs: &DAMP_INPUTS,
-        outputs: &DAMP_OUTPUT_WNZETA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[wn, zeta, p] = damp(sys)",
-        inputs: &DAMP_INPUTS,
-        outputs: &DAMP_OUTPUT_WNZETAP,
-    },
-];
-const DAMP_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.INVALID_MODEL",
-        identifier: Some("RunMat:damp:InvalidModel"),
-        when: "Input system is malformed or missing model metadata.",
-        message: "damp: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:damp:UnsupportedModel"),
-        when: "Model class is unsupported.",
-        message: "damp: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.OUTPUT_COUNT",
-        identifier: Some("RunMat:damp:OutputCount"),
-        when: "More than three outputs are requested.",
-        message: "damp: too many output arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.INTERNAL",
-        identifier: Some("RunMat:damp:Internal"),
-        when: "Pole extraction or output construction failed.",
-        message: "damp: internal error",
-    },
-];
-pub const DAMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DAMP_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DAMP_ERRORS,
-};
-
-const DAMP_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "sys",
-    classes: &[],
-    availability: BuiltinIntegerInputAvailability::Rejected,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "damp accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input.",
-}];
-
-pub const DAMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[wn, zeta, p] = damp(integer_sys)",
-        inputs: &DAMP_INTEGER_SYS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is inapplicable at the object boundary and rejects without provider dispatch. Model coefficients have already crossed their constructor's documented numeric boundary.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::damp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -155,32 +49,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "damp",
-    category = "control",
-    summary = "Return natural frequencies, damping ratios, and poles for control models.",
-    keywords = "damp,damping ratio,natural frequency,poles,control system,tf,ss",
-    type_resolver(damp_type),
-    descriptor(crate::builtins::control::damp::DAMP_DESCRIPTOR),
-    integer_capabilities(crate::builtins::control::damp::DAMP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::damp"
 )]
 async fn damp_builtin(sys: Value) -> BuiltinResult<Value> {
+    let output_count = crate::output_count::current_output_count();
+    if output_count.is_some_and(|count| count > 3) {
+        return Err(damp_error(
+            &DAMP_ERROR_OUTPUT_COUNT,
+            "damp: at most three outputs are supported",
+        ));
+    }
     let eval = DampingEval::from_value(sys).await?;
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![eval.wn_value()?])),
-        Some(2) => Ok(Value::OutputList(vec![
+    match output_count {
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![eval.wn_value()?])),
+        Some(2) => Ok(Value::output_list(vec![
             eval.wn_value()?,
             eval.zeta_value()?,
         ])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(3) => Ok(Value::output_list(vec![
             eval.wn_value()?,
             eval.zeta_value()?,
             eval.poles_value()?,
         ])),
-        Some(_) => Err(damp_error(
-            "RunMat:damp:OutputCount",
-            "damp: at most three outputs are supported",
-        )),
+        Some(_) => unreachable!("output count validated before model analysis"),
         None => eval.wn_value(),
     }
 }
@@ -201,23 +94,27 @@ impl DampingEval {
     async fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Object(object) if object.is_class(TF_CLASS) => {
-                let model = TfModel::from_value(Value::Object(object), BUILTIN_NAME)?;
-                let poles = polynomial_roots(&model.denominator, BUILTIN_NAME)?;
-                Ok(Self::from_poles(poles, model.sample_time))
+                let model = TfModel::from_value_async(Value::Object(object), BUILTIN_NAME).await?;
+                if model.sample_domain() == TfSampleDomain::DiscreteUnspecified {
+                    return Err(damp_error(&DAMP_ERROR_UNSUPPORTED_MODEL,
+                        "damp: discrete model requires a known positive sample time for physical natural frequency"));
+                }
+                Ok(Self::from_poles(model.poles()?, model.sample_time()))
             }
             Value::Object(object) if object.is_class(SS_CLASS) => {
-                let (poles, sample_time) = ss_poles_from_object(&object, BUILTIN_NAME)?;
+                let (poles, sample_time) =
+                    ss_poles_from_object_async(&object, BUILTIN_NAME).await?;
                 Ok(Self::from_poles(poles, sample_time))
             }
             Value::Object(object) => Err(damp_error(
-                "RunMat:damp:UnsupportedModel",
+                &DAMP_ERROR_UNSUPPORTED_MODEL,
                 format!(
                     "damp: unsupported model class '{}'; supported classes are tf and ss",
-                    object.class_name
+                    object.class_name()
                 ),
             )),
             other => Err(damp_error(
-                "RunMat:damp:InvalidModel",
+                &DAMP_ERROR_INVALID_MODEL,
                 format!("damp: expected a tf or ss object, got {other:?}"),
             )),
         }
@@ -313,40 +210,52 @@ fn real_column(data: Vec<f64>) -> BuiltinResult<Value> {
         .map(Value::Tensor)
         .map_err(|err| {
             damp_error(
-                "RunMat:damp:Internal",
+                &DAMP_ERROR_INTERNAL,
                 format!("damp: failed to build output tensor: {err}"),
             )
         })
 }
 
-fn damp_error(identifier: &'static str, message: impl Into<String>) -> crate::RuntimeError {
-    control_error(BUILTIN_NAME, identifier, message)
+fn damp_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    control_error(
+        BUILTIN_NAME,
+        descriptor
+            .identifier
+            .expect("damp error descriptor identifier"),
+        message,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::ComplexTensor;
+    use runmat_builtins::{
+        BuiltinIntegerInputAvailability, DAMP_DESCRIPTOR, DAMP_INTEGER_CAPABILITIES,
+    };
 
-    fn tf(numerator: Value, denominator: Value, rest: &[Value]) -> Value {
+    fn tf(numerator: Value, denominator: Value, rest: &[Value]) -> crate::execution::RootedValue {
         let mut args = vec![numerator, denominator];
         args.extend_from_slice(rest);
         block_on(crate::call_builtin_async("tf", &args)).expect("tf")
     }
 
-    fn ss(a: Value, b: Value, c: Value, d: Value, rest: &[Value]) -> Value {
+    fn ss(a: Value, b: Value, c: Value, d: Value, rest: &[Value]) -> crate::execution::RootedValue {
         let mut args = vec![a, b, c, d];
         args.extend_from_slice(rest);
         block_on(crate::call_builtin_async("ss", &args)).expect("ss")
     }
 
     fn damp_outputs(sys: Value, count: usize) -> Vec<Value> {
-        let _guard = crate::output_count::push_output_count(Some(count));
+        let _guard =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let Value::OutputList(outputs) = block_on(damp_builtin(sys)).expect("damp") else {
             panic!("expected output list");
         };
-        outputs
+        crate::sequence::into_unbounded_output_values(outputs).expect("ordinary damp outputs")
     }
 
     fn tensor_data(value: &Value) -> Vec<f64> {
@@ -376,7 +285,7 @@ mod tests {
             &[],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         let wn = tensor_data(&outputs[0]);
         let zeta = tensor_data(&outputs[1]);
         assert_eq!(wn.len(), 2);
@@ -389,7 +298,7 @@ mod tests {
         }
         match &outputs[2] {
             Value::ComplexTensor(poles) => {
-                assert_eq!(poles.shape, vec![2, 1]);
+                assert_eq!(poles.shape(), &[2, 1]);
                 assert!(poles
                     .materialize_f64()
                     .iter()
@@ -415,7 +324,7 @@ mod tests {
             &[],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         assert!((tensor_data(&outputs[0])[0] - 2.0).abs() < 1.0e-12);
         assert!((tensor_data(&outputs[1])[0] - 1.0).abs() < 1.0e-12);
         assert_eq!(tensor_data(&outputs[2]), &[-2.0]);
@@ -429,7 +338,7 @@ mod tests {
             &[Value::Num(0.1)],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         assert!((tensor_data(&outputs[0])[0] - 6.931471805599453).abs() < 1.0e-10);
         assert!((tensor_data(&outputs[1])[0] - 1.0).abs() < 1.0e-12);
         assert!((tensor_data(&outputs[2])[0] - 0.5).abs() < 1.0e-12);
@@ -475,6 +384,17 @@ mod tests {
     }
 
     #[test]
+    fn damp_pole_output_uses_shared_near_real_tolerance() {
+        let near_real = DampingEval::from_poles(vec![Complex64::new(-2.0, EPS / 2.0)], 0.0);
+        assert!(matches!(near_real.poles_value().unwrap(), Value::Tensor(_)));
+        let complex = DampingEval::from_poles(vec![Complex64::new(-2.0, EPS * 2.0)], 0.0);
+        assert!(matches!(
+            complex.poles_value().unwrap(),
+            Value::ComplexTensor(_)
+        ));
+    }
+
+    #[test]
     fn damp_integer_capability_marks_object_input_inapplicable() {
         assert_eq!(DAMP_INTEGER_CAPABILITIES.len(), 1);
         assert!(DAMP_INTEGER_CAPABILITIES[0].inputs[0].classes.is_empty());
@@ -495,14 +415,23 @@ mod tests {
             let error = block_on(damp_builtin(Value::Int(value))).expect_err("object input only");
             assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
         }
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 398,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let error = block_on(damp_builtin(resident)).expect_err("resident object input rejection");
         assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
@@ -519,7 +448,10 @@ mod tests {
                 .expect_err("dynamic-system object required");
             assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().unwrap();
+            assert!(physical.acquire().is_none());
         });
     }
 
@@ -533,16 +465,180 @@ mod tests {
             &[],
         );
 
-        let outputs = damp_outputs(sys, 3);
+        let outputs = sys.with_owned(|sys| damp_outputs(sys, 3));
         for value in tensor_data(&outputs[0]) {
             assert!((value - 2.0).abs() < 1.0e-8);
         }
         for value in tensor_data(&outputs[1]) {
             assert!((value - 0.125).abs() < 1.0e-8);
         }
-        assert!(
-            matches!(&outputs[2], Value::ComplexTensor(ComplexTensor { shape, .. }) if shape == &vec![2, 1])
-        );
+        assert!(matches!(&outputs[2], Value::ComplexTensor(tensor) if tensor.shape() == [2, 1]));
+    }
+
+    #[test]
+    fn damp_gathers_only_consumed_tf_properties() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let model = tf(
+                Value::Num(1.0),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                &[],
+            );
+            model.with_owned(|value| {
+                let mut object = match value {
+                    Value::Object(object) => object,
+                    _ => panic!("tf constructor must return an object"),
+                };
+                let denominator = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[1.0, 2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                let unused = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[9.0],
+                        shape: &[1, 1],
+                    })
+                    .unwrap();
+                object.replace_property_unbounded(
+                    "Denominator".into(),
+                    Value::GpuTensor(denominator),
+                );
+                object.replace_property_unbounded("Unused".into(), Value::GpuTensor(unused));
+                provider.reset_telemetry();
+
+                let outputs = damp_outputs(Value::Object(object), 3);
+                assert_eq!(tensor_data(&outputs[0]), vec![2.0]);
+                assert_eq!(tensor_data(&outputs[1]), vec![1.0]);
+                assert_eq!(tensor_data(&outputs[2]), vec![-2.0]);
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 2 * 8);
+            });
+        });
+    }
+
+    #[test]
+    fn damp_gathers_only_consumed_ss_properties() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let model = ss(
+                Value::Tensor(Tensor::new(vec![-2.0], vec![1, 1]).unwrap()),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(0.0),
+                &[],
+            );
+            model.with_owned(|value| {
+                let mut object = match value {
+                    Value::Object(object) => object,
+                    _ => panic!("ss constructor must return an object"),
+                };
+                let a = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[-2.0],
+                        shape: &[1, 1],
+                    })
+                    .unwrap();
+                let unused_b = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[9.0],
+                        shape: &[1, 1],
+                    })
+                    .unwrap();
+                object.replace_property_unbounded("A".into(), Value::GpuTensor(a));
+                object.replace_property_unbounded("B".into(), Value::GpuTensor(unused_b));
+                provider.reset_telemetry();
+
+                let outputs = damp_outputs(Value::Object(object), 3);
+                assert_eq!(tensor_data(&outputs[0]), vec![2.0]);
+                assert_eq!(tensor_data(&outputs[1]), vec![1.0]);
+                assert_eq!(tensor_data(&outputs[2]), vec![-2.0]);
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+            });
+        });
+    }
+
+    #[test]
+    fn damp_rejects_missing_ss_state_before_resident_sample_time_access() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let mut object = runmat_value::ObjectInstance::new(SS_CLASS.to_string());
+            let ts = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[0.1],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            object.replace_property_unbounded("Ts".into(), Value::GpuTensor(ts));
+            provider.reset_telemetry();
+
+            let error = block_on(damp_builtin(Value::Object(object))).expect_err("missing A");
+            assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn damp_rejects_invalid_host_state_before_resident_sample_time_access() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let mut object = runmat_value::ObjectInstance::new(SS_CLASS.to_string());
+            object.replace_property_unbounded(
+                "A".into(),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            );
+            let ts = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[0.1],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            object.replace_property_unbounded("Ts".into(), Value::GpuTensor(ts));
+            provider.reset_telemetry();
+
+            let error = block_on(damp_builtin(Value::Object(object)))
+                .expect_err("non-square A must reject before sample-time gather");
+            assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn damp_output_count_error_precedes_model_validation() {
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
+        let error = block_on(damp_builtin(Value::Num(1.0)))
+            .expect_err("too many outputs must reject before model analysis");
+        assert_eq!(error.identifier(), Some("RunMat:damp:OutputCount"));
+    }
+
+    #[test]
+    fn damp_output_count_error_precedes_nested_provider_access() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let model = tf(
+                Value::Num(1.0),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                &[],
+            );
+            model.with_owned(|value| {
+                let mut object = match value {
+                    Value::Object(object) => object,
+                    _ => panic!("tf constructor must return an object"),
+                };
+                let denominator = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[1.0, 2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                object.replace_property_unbounded(
+                    "Denominator".into(),
+                    Value::GpuTensor(denominator),
+                );
+                provider.reset_telemetry();
+                let _guard =
+                    crate::output_count::push_output_count(Some(4)).expect("output-count scope");
+                let error = block_on(damp_builtin(Value::Object(object)))
+                    .expect_err("output count must reject before nested gather");
+                assert_eq!(error.identifier(), Some("RunMat:damp:OutputCount"));
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            });
+        });
     }
 
     #[test]
@@ -553,8 +649,10 @@ mod tests {
             &[],
         );
 
-        let _guard = crate::output_count::push_output_count(Some(4));
-        let err = block_on(damp_builtin(sys)).expect_err("too many outputs should fail");
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
+        let err = sys
+            .with_owned(|sys| block_on(damp_builtin(sys)))
+            .expect_err("too many outputs should fail");
         assert_eq!(err.identifier(), Some("RunMat:damp:OutputCount"));
     }
 }

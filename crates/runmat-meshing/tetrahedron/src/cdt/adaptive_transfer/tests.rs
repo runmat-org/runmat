@@ -1,13 +1,15 @@
+mod quadratic;
+
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{
     solver_volume_element_identity, AlgorithmVersionSet, CancellationPolicy,
     CanonicalMeshingContract, CurveQualityTargets, ElementOrder, FieldTopologyLocation,
     FieldTopologyMap, GeometryRevisionRef, GeometryTolerancePolicy, MeshNeighbor, MeshRegion,
-    MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     NeverCancelled, SolverMeshAdaptationKind, SolverMeshAdaptationLineage, SolverMeshArtifact,
     SolverMeshNode, SolverMeshTopology, SolverTransferMethod, SolverVolumeElement, StableDigest,
-    SurfaceQualityTargets, VolumeQualityTargets, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
+    SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
 
@@ -20,11 +22,7 @@ use crate::cdt::{
 };
 
 fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".into(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, "solid".into(), Vec::new())
 }
 
 fn topology() -> DelaunayVolumeTopology {
@@ -36,9 +34,11 @@ fn topology() -> DelaunayVolumeTopology {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, coordinates_m)| DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-        coordinates_m,
+    .map(|(index, coordinates_m)| {
+        DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 1) as u8; 32]),
+            coordinates_m,
+        )
     })
     .collect();
     let topology = build_delaunay_volume_topology(
@@ -61,6 +61,7 @@ fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/current".into(),
@@ -72,24 +73,25 @@ fn request() -> MeshingRequest {
             validation: "validation/current".into(),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         metric: metric(),
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_tangent_change_degrees: 5.0,
                 minimum_metric_edge_length: 0.1,
                 maximum_metric_edge_length: 10.0,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
-                maximum_chordal_deviation_m: 1.0e-5,
+                maximum_chordal_deviation_m: runmat_types::physical::Length::new(1.0e-5),
                 maximum_normal_deviation_degrees: 5.0,
             },
             volume: VolumeQualityTargets {
@@ -98,30 +100,28 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 10.0,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
             maximum_work_units_between_checks: 100,
         },
+        size_controls: Vec::new(),
     }
 }
 
 fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.5,
         contributions: Vec::new(),
+        cells_across_gap: None,
     }
 }
 
@@ -134,7 +134,10 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
         .map(|(index, node)| SolverMeshNode {
             node_id: index as u64 + 1,
             stable_identity: node.identity,
-            coordinates_m: node.coordinates_m,
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(node.coordinates_m.canonical_value()),
             provenance: vec![region.clone()],
             exact_parameters: Vec::new(),
         })
@@ -156,7 +159,6 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
                 .map(|vertex| vertex as u64 + 1)
                 .into(),
             region_id: region.clone(),
-            material_id: "steel".into(),
             provenance: vec![region.clone()],
         })
         .collect::<Vec<_>>();
@@ -179,10 +181,15 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
     let node_ids = (1..=nodes.len() as u64).collect::<Vec<_>>();
     let element_ids = (1..=volume_elements.len() as u64).collect::<Vec<_>>();
     let mut artifact = SolverMeshArtifact {
-        schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: StableDigest::ZERO,
         root_stage_manifest_digest: StableDigest::from_bytes([90; 32]),
         geometry: GeometryRevisionRef {
+            source_unit_evidence:
+                runmat_geometry_core::physical::LengthUnitEvidence::explicit_fallback(
+                    runmat_geometry_core::LengthUnit::Meter,
+                    "canonical solver fixture",
+                ),
             source_digest: StableDigest::from_bytes([91; 32]),
             geometry_revision: 1,
             persistent_mapping_version: 1,
@@ -196,10 +203,9 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
             boundary_edges: Vec::new(),
             regions: vec![MeshRegion {
                 region_id: region,
-                material_id: "steel".into(),
                 element_ids: element_ids.clone(),
             }],
-            material_interfaces: Vec::new(),
+            conformal_interfaces: Vec::new(),
             contacts: Vec::new(),
             field_topologies: vec![
                 FieldTopologyMap {
@@ -223,7 +229,8 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
                     ordered_entity_ids: Vec::new(),
                 },
             ],
-        },
+        }
+        .into(),
     };
     artifact.seal_canonical_digest().unwrap();
     artifact
@@ -267,6 +274,7 @@ fn adaptation() -> (
             provenance: &provenance,
             quality: &quality,
             quality_options,
+            fixed_node_identities: &[],
         },
         &[mark],
         DelaunayAdaptiveRefinementOptions::default(),
@@ -293,6 +301,7 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_records() {
         provenance: &provenance,
         quality: &quality,
         quality_options,
+        fixed_node_identities: &[],
     };
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);
@@ -405,6 +414,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         provenance: &provenance,
         quality: &quality,
         quality_options,
+        fixed_node_identities: &[],
     };
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);
@@ -423,7 +433,17 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         DelaunayAdaptiveTransferErrorKind::InvalidArtifact
     );
     let mut displaced = source.clone();
-    displaced.topology.nodes[0].coordinates_m[0] = 0.125;
+    {
+        let quantity_change = 0.125;
+        let quantity_index = 0;
+        let quantity_slot = &mut displaced.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     displaced.seal_canonical_digest().unwrap();
     assert_eq!(
         build_refinement_solver_adaptation(

@@ -1,172 +1,97 @@
 //! MATLAB-compatible `gca` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    GCA_DESCRIPTOR, GCA_ERROR_TOO_MANY_OUTPUTS, GCA_FIGURE_ARGUMENT_EXTENSION,
+    GCA_INTEGER_FIGURE_ALIAS_EXTENSION, GCA_STRUCT_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
 use super::op_common::handles::{handle_from_integer, handle_from_scalar};
 use super::plotting_error;
 use super::properties::{map_figure_error, resolve_plot_handle, PlotHandle};
-use super::state::{
-    current_axes_handle_for_figure, current_axes_state, encode_axes_handle, FigureAxesState,
-    FigureHandle,
-};
+use super::state::{encode_axes_handle, FigureAxesState, FigureHandle};
 use super::style::value_as_string;
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::gca_type;
+
+#[cfg(test)]
+use runmat_builtins::GCA_INTEGER_CAPABILITIES;
 
 const BUILTIN_NAME: &str = "gca";
 
-const GCA_FIGURE_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gca-figure-argument",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "gca with an explicit figure argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GcaFigureArgumentExtension"),
-};
-const GCA_STRUCT_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gca-struct-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "gca('struct') is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GcaStructOutputExtension"),
-};
-const GCA_INTEGER_FIGURE_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "gca-integer-figure-alias",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "typed-integer numeric figure aliases for gca are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GcaIntegerFigureAliasExtension"),
-};
-pub const GCA_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    GCA_FIGURE_ARGUMENT_EXTENSION,
-    GCA_STRUCT_OUTPUT_EXTENSION,
-    GCA_INTEGER_FIGURE_ALIAS_EXTENSION,
-];
-
-const GCA_INTEGER_FIGURE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fig",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target's gca contract has no input form and returns a graphics object; typed integers are exact aliases for RunMat's numeric figure registry only.",
-    }];
-pub const GCA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "ax = gca(integer_fig_alias)",
-        inputs: &GCA_INTEGER_FIGURE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The alias is decoded exactly and gated before graphics lookup or mutation. RunMat currently returns its numeric axes representation rather than a MATLAB graphics object.",
-    }];
-
-const GCA_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Current axes graphics object; RunMat currently returns its encoded numeric axes handle.",
-}];
-
-const GCA_OUTPUT_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "s",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Axes state struct with handle/figure/rows/cols/index fields.",
-}];
-
-const GCA_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const GCA_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Only 'struct' is supported.",
-}];
-
-const GCA_INPUTS_FIGURE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fig",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Figure handle whose current axes should be returned.",
-}];
-
-const GCA_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "ax = gca()",
-        inputs: &GCA_INPUTS_NONE,
-        outputs: &GCA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ax = gca(fig)",
-        inputs: &GCA_INPUTS_FIGURE,
-        outputs: &GCA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = gca('struct')",
-        inputs: &GCA_INPUTS_MODE,
-        outputs: &GCA_OUTPUT_STRUCT,
-    },
-];
-
-const GCA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GCA.INVALID_ARGUMENT",
-    identifier: Some("RunMat:gca:InvalidArgument"),
-    when: "Unsupported arguments are provided.",
-    message: "gca: unsupported arguments",
-};
-
-const GCA_ERRORS: [BuiltinErrorDescriptor; 1] = [GCA_ERROR_INVALID_ARGUMENT];
-
-pub const GCA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GCA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GCA_ERRORS,
-};
-
 #[runtime_builtin(
     name = "gca",
-    category = "plotting",
-    summary = "Return the current axes handle.",
-    keywords = "gca,axes,plotting",
-    suppress_auto_output = true,
-    type_resolver(gca_type),
-    descriptor(crate::builtins::plotting::gca::GCA_DESCRIPTOR),
-    extensions(crate::builtins::plotting::gca::GCA_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::gca::GCA_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::gca"
 )]
+pub fn gca_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    gca_with_runtime(runtime.as_ref(), rest)
+}
+
+#[cfg(test)]
 pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    gca_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+}
+
+fn gca_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GCA_DESCRIPTOR,
+        &GCA_ERROR_TOO_MANY_OUTPUTS,
+        "gca",
+    )?;
     if rest.is_empty() {
-        let state = current_axes_state();
-        return Ok(Value::Num(encode_axes_handle(
-            state.handle,
-            state.active_index,
-        )));
+        let target = super::op_common::axes_target::PreparedAxesTarget::current(runtime)
+            .resolve(BUILTIN_NAME)?;
+        let (handle, index) = target.coordinates();
+        return Ok(Value::Num(encode_axes_handle(handle, index)));
     }
 
     if rest.len() == 1 {
-        if let Some(mode) = value_as_string(&rest[0]) {
+        if let Some(mode) = value_as_string(&rest[0]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source("gca", source.to_string(), source)
+        })? {
             if mode.trim().eq_ignore_ascii_case("struct") {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &GCA_STRUCT_OUTPUT_EXTENSION,
                     BUILTIN_NAME,
                 )?;
-                let state = current_axes_state();
+                let target = super::op_common::axes_target::PreparedAxesTarget::current(runtime)
+                    .resolve(BUILTIN_NAME)?;
+                let (handle, index) = target.coordinates();
+                let state = super::state::axes_state_snapshot_for_property(
+                    target.authority(),
+                    handle,
+                    index,
+                )
+                .map_err(|err| map_figure_error("gca", err))?;
                 return Ok(axes_struct_response(state));
+            }
+        }
+        if matches!(rest[0], Value::Object(_) | Value::HandleObject(_)) {
+            if let Some(prepared) = super::op_common::axes_target::prepare_graphics_target(
+                runtime,
+                BUILTIN_NAME,
+                &rest[0],
+            )? {
+                if matches!(prepared.handle(), PlotHandle::Figure(_)) {
+                    crate::compatibility::ensure_builtin_extension_enabled(
+                        &GCA_FIGURE_ARGUMENT_EXTENSION,
+                        BUILTIN_NAME,
+                    )?;
+                    let target = prepared.resolve_axes(BUILTIN_NAME)?;
+                    let (handle, index) = target.coordinates();
+                    return Ok(Value::Num(encode_axes_handle(handle, index)));
+                }
             }
         }
         if is_typed_integer_figure_alias(&rest[0]) {
@@ -180,9 +105,12 @@ pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
                 &GCA_FIGURE_ARGUMENT_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            let axes = current_axes_handle_for_figure(handle)
-                .map_err(|err| map_figure_error("gca", err))?;
-            return Ok(Value::Num(axes));
+            let target = super::op_common::axes_target::PreparedGraphicsTarget::figure_alias(
+                runtime, handle,
+            )
+            .resolve_axes(BUILTIN_NAME)?;
+            let (handle, index) = target.coordinates();
+            return Ok(Value::Num(encode_axes_handle(handle, index)));
         }
     }
 
@@ -198,7 +126,7 @@ fn is_typed_integer_figure_alias(value: &Value) -> bool {
 }
 
 fn axes_struct_response(state: FigureAxesState) -> Value {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert(
         "handle",
         Value::Num(encode_axes_handle(state.handle, state.active_index)),
@@ -207,7 +135,7 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
     st.insert("rows", Value::Num(state.rows as f64));
     st.insert("cols", Value::Num(state.cols as f64));
     st.insert("index", Value::Num((state.active_index + 1) as f64));
-    Value::Struct(st)
+    Value::Struct(st.finish())
 }
 
 fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
@@ -254,7 +182,6 @@ fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
-    use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -303,7 +230,7 @@ pub(crate) mod tests {
     fn struct_mode_returns_struct() {
         setup_plot_tests();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let value = gca_builtin(vec![Value::String("struct".to_string())]).unwrap();
+        let value = gca_builtin(vec![Value::String("struct".to_string().into())]).unwrap();
         assert!(matches!(value, Value::Struct(_)));
     }
 
@@ -320,7 +247,7 @@ pub(crate) mod tests {
     #[test]
     fn invalid_arguments_return_plotting_error() {
         setup_plot_tests();
-        let err = gca_builtin(vec![Value::String("unsupported".to_string())]).unwrap_err();
+        let err = gca_builtin(vec![Value::String("unsupported".to_string().into())]).unwrap_err();
         let text = err.to_string();
         assert!(
             text.contains("gca: unsupported arguments"),
@@ -399,58 +326,5 @@ pub(crate) mod tests {
         let error = gca_builtin(vec![Value::Tensor(tensor)])
             .expect_err("wide tensor figure identifier is not rounded into the registry");
         assert!(error.message().contains("too large"));
-    }
-
-    #[test]
-    fn gca_type_no_args_returns_num() {
-        assert_eq!(gca_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
-    }
-
-    #[test]
-    fn gca_type_with_string_arg_returns_struct() {
-        let out = gca_type(&[Type::String], &ResolveContext::new(Vec::new()));
-        assert!(matches!(out, Type::Struct { .. }));
-    }
-
-    #[test]
-    fn gca_type_with_figure_arg_returns_num() {
-        assert_eq!(
-            gca_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Num
-        );
-    }
-
-    #[test]
-    fn gca_type_with_multi_args_returns_unknown() {
-        assert_eq!(
-            gca_type(&[Type::Num, Type::String], &ResolveContext::new(Vec::new())),
-            Type::Unknown
-        );
-    }
-
-    #[test]
-    fn gca_type_with_scalar_tensor_arg_returns_num() {
-        assert_eq!(
-            gca_type(
-                &[Type::Tensor {
-                    shape: Some(vec![Some(1), Some(1)])
-                }],
-                &ResolveContext::new(Vec::new())
-            ),
-            Type::Num
-        );
-    }
-
-    #[test]
-    fn gca_type_with_non_scalar_tensor_arg_returns_unknown() {
-        assert_eq!(
-            gca_type(
-                &[Type::Tensor {
-                    shape: Some(vec![Some(1), Some(2)])
-                }],
-                &ResolveContext::new(Vec::new())
-            ),
-            Type::Unknown
-        );
     }
 }

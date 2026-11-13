@@ -1,13 +1,111 @@
+mod connected;
+mod cube;
+mod layered;
+mod solver_mesh;
+
+pub use cube::{
+    elevate_planar_tet4_fixture, quadratic_slab_bar_mesh, quadratic_slab_mesh, slab_bar_mesh,
+    slab_mesh,
+};
+pub use layered::layered_box_mesh;
+
+pub use connected::{
+    connected_quadratic_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh,
+    elevate_connected_tet4_fixture,
+};
+pub use solver_mesh::{
+    canonical_tetrahedron_meshing_evidence, canonical_tetrahedron_solver_mesh,
+    three_region_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh_with_order,
+};
+
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
-    UnitSystem,
 };
+use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+
+/// The occurrence of a named entity in every meshing-owned fixture mesh.
+///
+/// Fixture meshes place each entity under the `root` assembly occurrence. Analysis fixtures
+/// select these entities only through [`fixture_selection`], the canonical
+/// `persistent-entity:sha256:` selector of the same occurrence.
+pub fn fixture_entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
+    PersistentEntityId::new(kind, source.into(), vec!["root".into()])
+}
+
+/// Canonical analysis selector for [`fixture_entity`].
+pub fn fixture_selection(kind: PersistentEntityKind, source: &str) -> String {
+    let entity = fixture_entity(kind, source);
+    let selection = entity
+        .analysis_selection_id()
+        .expect("fixture entity names are valid persistent identities");
+    fixture_selection_index()
+        .lock()
+        .expect("fixture selection index is not poisoned")
+        .insert(selection.clone(), entity);
+    selection
+}
+
+/// The fixture entity a canonical selector returned by [`fixture_selection`] denotes.
+///
+/// Fixture mesh builders that shape a mesh around an authored model use this to place the exact
+/// entity a target selects; selectors that no fixture produced return `None`.
+pub fn fixture_entity_for_selection(selection: &str) -> Option<PersistentEntityId> {
+    fixture_selection_index()
+        .lock()
+        .expect("fixture selection index is not poisoned")
+        .get(selection)
+        .cloned()
+}
+
+fn fixture_selection_index(
+) -> &'static std::sync::Mutex<std::collections::BTreeMap<String, PersistentEntityId>> {
+    static INDEX: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::BTreeMap<String, PersistentEntityId>>,
+    > = std::sync::OnceLock::new();
+    INDEX.get_or_init(Default::default)
+}
+
+/// Canonical selector of the fixture solid named `source`.
+pub fn fixture_solid(source: &str) -> String {
+    fixture_selection(PersistentEntityKind::Solid, source)
+}
+
+/// Canonical selector of the fixture mesh region named `source`.
+pub fn fixture_region(source: &str) -> String {
+    fixture_selection(PersistentEntityKind::Region, source)
+}
+
+/// Canonical selector of the fixture face named `source`.
+pub fn fixture_face(source: &str) -> String {
+    fixture_selection(PersistentEntityKind::Face, source)
+}
+
+/// Canonical face selector for a fixture boundary name. Point ids (`node:`) and selectors that
+/// are already canonical pass through unchanged.
+pub fn fixture_boundary_selection(name: &str) -> String {
+    if name.starts_with("node:") || name.starts_with("persistent-entity:sha256:") {
+        name.to_owned()
+    } else {
+        fixture_face(name)
+    }
+}
+
+/// Canonical selector of the fixture edge named `source`.
+pub fn fixture_edge(source: &str) -> String {
+    fixture_selection(PersistentEntityKind::Edge, source)
+}
+
+/// Canonical selector of the fixture vertex named `source`.
+pub fn fixture_vertex(source: &str) -> String {
+    fixture_selection(PersistentEntityKind::Vertex, source)
+}
 
 pub fn through_hole_plate_geometry() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo_root_meshing_through_hole_plate".to_string(),
         source: GeometrySource {
+            unit_evidence: Default::default(),
             path: "/fixtures/generic_through_hole_plate.step".to_string(),
             sha256: "generic-through-hole-plate".to_string(),
             importer_version: "test".to_string(),
@@ -16,10 +114,11 @@ pub fn through_hole_plate_geometry() -> GeometryAsset {
             kind: SourceGeometryKind::Cad,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
+        coordinate_units: None,
         revision: 1,
         meshes: vec![MeshDescriptor {
             mesh_id: "through_hole_plate_surface".to_string(),
@@ -84,7 +183,7 @@ pub fn through_hole_plate_geometry() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "body".to_string(),
-            name: "body".to_string(),
+            name: "body".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         }],
@@ -105,13 +204,13 @@ pub fn split_material_through_hole_plate_geometry() -> GeometryAsset {
     geometry.regions = vec![
         Region {
             region_id: "region_base".to_string(),
-            name: "base".to_string(),
+            name: "base".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
         Region {
             region_id: "region_cap".to_string(),
-            name: "cap".to_string(),
+            name: "cap".into(),
             tag: Some("material".to_string()),
             cad_ownership: None,
         },
@@ -141,65 +240,4 @@ pub fn split_material_through_hole_plate_geometry() -> GeometryAsset {
         ),
     ];
     geometry
-}
-
-pub fn nested_tetrahedron_shell_geometry() -> GeometryAsset {
-    GeometryAsset {
-        geometry_id: "geo_root_meshing_nested_tetrahedron_shell".to_string(),
-        source: GeometrySource {
-            path: "/fixtures/generic_nested_tetrahedron_shell.step".to_string(),
-            sha256: "generic-nested-tetrahedron-shell".to_string(),
-            importer_version: "test".to_string(),
-        },
-        source_geometry: SourceGeometry {
-            kind: SourceGeometryKind::Cad,
-            assembly: None,
-            material_evidence: Vec::new(),
-            cad_evaluators: Vec::new(),
-        },
-        tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
-        revision: 1,
-        meshes: vec![MeshDescriptor {
-            mesh_id: "nested_tetrahedron_shell_surface".to_string(),
-            kind: MeshKind::Surface,
-            vertex_count: 8,
-            element_count: 8,
-        }],
-        surface_meshes: vec![SurfaceMesh::new(
-            "nested_tetrahedron_shell_surface",
-            vec![
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.2, 0.2, 0.2],
-                [0.3, 0.2, 0.2],
-                [0.2, 0.3, 0.2],
-                [0.2, 0.2, 0.3],
-            ],
-            vec![
-                [0, 2, 1],
-                [0, 1, 3],
-                [1, 2, 3],
-                [2, 0, 3],
-                [4, 6, 5],
-                [4, 5, 7],
-                [5, 6, 7],
-                [6, 4, 7],
-            ],
-        )],
-        regions: vec![Region {
-            region_id: "body".to_string(),
-            name: "body".to_string(),
-            tag: Some("material".to_string()),
-            cad_ownership: None,
-        }],
-        region_entity_mappings: vec![RegionEntityMapping::all_faces(
-            "body",
-            "nested_tetrahedron_shell_surface",
-            8,
-        )],
-        diagnostics: Vec::new(),
-    }
 }

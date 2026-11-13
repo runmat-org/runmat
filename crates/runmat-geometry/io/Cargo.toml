@@ -1,6 +1,6 @@
 [package]
 name = "runmat-geometry-io"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -10,28 +10,45 @@ repository = "https://github.com/runmat-org/runmat"
 build = "build.rs"
 
 [dependencies]
+runmat-types = { workspace = true }
 runmat-geometry-core = { workspace = true }
+runmat-geometry-ops = { workspace = true }
+# K1: the kernel-neutral contract the OCCT backend implements.
+runmat-geometry-kernel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))'.dependencies]
 cxx = { version = "1", optional = true }
+tempfile = { version = "3.12", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [build-dependencies]
+runmat-build-identity = { workspace = true }
 cxx-build = { version = "1", optional = true }
 occt-sys = { version = "0.6", optional = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
+# K1's robustness harness runs runmat-cad's naming corpus and feature suites on OcctKernel.
+runmat-cad = { path = "../../runmat-cad" }
+
+[[test]]
+name = "cad_kernel_corpus"
+path = "tests/cad_kernel_corpus.rs"
+required-features = ["occt-kernel"]
 
 [features]
 default = []
-occt-native = ["dep:cxx", "dep:cxx-build", "dep:occt-sys"]
+occt-native = ["dep:cxx", "dep:cxx-build", "dep:occt-sys", "dep:tempfile"]
 occt-wasm-host = ["dep:js-sys", "dep:wasm-bindgen"]
+# K1: the geometry-engine kernel programs on OCCT (exact_kernel*.cc). Separate from occt-native so
+# existing FEA builds are untouched until it is qualified.
+occt-kernel = ["occt-native"]

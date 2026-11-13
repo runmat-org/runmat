@@ -1,0 +1,371 @@
+{
+  "schema_version": 1,
+  "source_anchor": "0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf",
+  "frozen_source_manifest_sha256": "ca695ad9c122c802fd7019ab9c3d1d1d611c0cff67386857fe6a0bd57fc2ec41",
+  "target": "x86_64-pc-windows-msvc",
+  "execution_hosts": [
+    "gh-windows-20260330-204014, NVIDIA T4/D3D12",
+    "HP Victus, NVIDIA GeForce RTX 3050 6GB Laptop GPU/D3D12"
+  ],
+  "cli": {
+    "sha256": "c47fdf64fd10d43ec202486cf170f02eceebed7bf7485372b3a3944a71482696",
+    "bytes": 912615424,
+    "location": "Main:.tmp-rm1064/settings-windows-r1059-release-artifacts/unpacked/package/runmat.exe"
+  },
+  "build": {
+    "exit_code": 0,
+    "controller_exit": 0,
+    "elapsed": "37m15s",
+    "toolchain": "Rust 1.90.0",
+    "profile": "release optimized; symbols stripped",
+    "features": [
+      "blas-lapack",
+      "vendored-openssl",
+      "occt-native"
+    ],
+    "runtime_archive": "Completed R1057 archive and embedded payload/manifest are unchanged; no runtime archive rebuild."
+  },
+  "products": {
+    "passed": 31,
+    "failed": 0,
+    "not_selected": 0,
+    "selection": null,
+    "backend": "dx12",
+    "cases": [
+      {
+        "name": "compiled front door and machine-readable analysis",
+        "passed": true
+      },
+      {
+        "name": "authenticated named cluster join and original-identity recovery",
+        "passed": true
+      },
+      {
+        "name": "staged CLI distribution reopens independently with notices",
+        "passed": true
+      },
+      {
+        "name": "local FEA is lazy, denies signed-out effects, and meters authenticated mesh/solve",
+        "passed": true
+      },
+      {
+        "name": "in-process provider preserves exact wide integer comparisons",
+        "passed": true
+      },
+      {
+        "name": "script numerics, exact storage, compatibility and handles (VM)",
+        "passed": true
+      },
+      {
+        "name": "script numerics, exact storage, compatibility and handles (adaptive JIT)",
+        "passed": true
+      },
+      {
+        "name": "stdin script entrypoint",
+        "passed": true
+      },
+      {
+        "name": "dynamic source path and call resolution",
+        "passed": true
+      },
+      {
+        "name": "originating runtime error identity and failure exit",
+        "passed": true
+      },
+      {
+        "name": "adaptive future execution through CLI process services",
+        "passed": true
+      },
+      {
+        "name": "native future capability refusal precedes image publication",
+        "passed": true
+      },
+      {
+        "name": "compiled CLI uses real D3D12 provider without host-provider fallback",
+        "passed": true
+      },
+      {
+        "name": "process-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "session-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "none-isolated GPU test worker receives provider initialization",
+        "passed": true
+      },
+      {
+        "name": "public test runner testPasses",
+        "passed": true
+      },
+      {
+        "name": "public test runner testFails",
+        "passed": true
+      },
+      {
+        "name": "public test runner does-not-exist",
+        "passed": true
+      },
+      {
+        "name": "public test runner testHangs",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (process)",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (session)",
+        "passed": true
+      },
+      {
+        "name": "test runner inherits RunMat compatibility and foreign policy (none)",
+        "passed": true
+      },
+      {
+        "name": "process-isolated test worker supports VM future execution",
+        "passed": true
+      },
+      {
+        "name": "script Ctrl-C cancellation",
+        "passed": true
+      },
+      {
+        "name": "real native library callback value and originating callback error (process)",
+        "passed": true
+      },
+      {
+        "name": "real native library callback value and originating callback error (in_process)",
+        "passed": true
+      },
+      {
+        "name": "in-process native callback Ctrl-C cancellation and retirement",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_success",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_assertion",
+        "passed": true
+      },
+      {
+        "name": "public compile/link and independent native execution: native_origin",
+        "passed": true
+      }
+    ]
+  },
+  "source_guards": {
+    "count": 4,
+    "matchedEach": 25871,
+    "differences": 0,
+    "absent": 0,
+    "transition_before": "An additional full guard verifies the previous R1057 snapshot before applying exactly three AOT files."
+  },
+  "runtime_artifacts": [
+    {
+      "name": "runtime-archive.payload",
+      "bytes": 184449740,
+      "sha256": "c892671ff607abb2056c97a3134304383a23ebba7ddad4d5ed61afc317e0a6e5"
+    },
+    {
+      "name": "runtime-archive.json",
+      "bytes": 9878,
+      "sha256": "3a268430dedc8b9958f5d920e15b5a5f156606ba98dafd354b664240d47c07f6"
+    },
+    {
+      "name": "THIRD_PARTY_NOTICES.txt",
+      "bytes": 31590,
+      "sha256": "96d60d54677935795a8e4e43361b7bfff42a3de7e04c3388493f1adfd6264bcf"
+    }
+  ],
+  "preserved_runtime_artifacts_rehashed": true,
+  "assessment_conservation": {
+    "passed": true,
+    "commands": 8,
+    "original_cli_sha256": "d6d403ca9c1cbbff027bbfe013dd1b088b08c86f96653a12d6581fdabfce1142",
+    "source_anchor": "c7a12b7b9f050f6789dda56a1024636243b7a63e",
+    "scope": "Two structural studies each execute check, run, failed reassessment and indeterminate reassessment, preserving numerical evidence and settled usage. The three-file AOT MSVC linker successor is outside these interpreted study/assessment paths. These are retained R1057 executions, not a new R1059 assessment run."
+  },
+  "distribution": {
+    "archive_sha256": "e105e59a49f6fa601e6e0240aa1cbbea7478f4aa78b1dfcb3c725f62ae0a8dab",
+    "archive_bytes": 756379585,
+    "packet_manifest_sha256": "e87f28d780469187a5d9a118aa0c41cf714591ac8ce7060bde7a57e6c8e98d76",
+    "files": 76,
+    "all_files_rehashed_on_main_and_victus": true,
+    "candidate_manifest_sha256": "a6f119bd5d65a589b1b25d1877574d8fdbb82d5791b4c02ce69ab4a8871da92c",
+    "protected_files": 1007,
+    "license_sha256": "f923b86930cc30ee506959d2e026ae4cef0b29f74c00947540dd80f28e4eae51",
+    "free_use_sha256": "0ce48a3efdb6408518cafb1749bcf7a04ff8b07439c254ec7f04aa46768012f6",
+    "native_images": [
+      {
+        "path": "native/native_success.exe",
+        "bytes": 328814592,
+        "sha256": "2e9150367763ce745939b0f898bcb30dd0bc4137dfe74f2ecbc43722454446fb"
+      },
+      {
+        "path": "native/native_assertion.exe",
+        "bytes": 328749056,
+        "sha256": "b5a28a9aaf368b3797ef179aa6dd3ac74c8e54dfc1134aab838448cacc2ad82a"
+      },
+      {
+        "path": "native/native_origin.exe",
+        "bytes": 328749056,
+        "sha256": "4262c2a08fa2c2b78b15d86f2425e224dee3acafd8e6f93bac99ac70dfac88cd"
+      }
+    ]
+  },
+  "physical": {
+    "qualified_unique_cases": 7,
+    "passed": 7,
+    "failed": 0,
+    "inputs_unchanged": true,
+    "cases": [
+      {
+        "name": "pinned DXC libraries load from the package",
+        "passed": true
+      },
+      {
+        "name": "packaged CPU program runs without compiler/toolchain PATH",
+        "passed": true,
+        "exit": 0
+      },
+      {
+        "name": "real D3D12 execution without host-provider fallback",
+        "passed": true
+      },
+      {
+        "name": "private-console cooperative Ctrl-C",
+        "passed": true
+      },
+      {
+        "name": "independent native image native_success",
+        "passed": true,
+        "image_sha256": "2e9150367763ce745939b0f898bcb30dd0bc4137dfe74f2ecbc43722454446fb",
+        "exit": 0
+      },
+      {
+        "name": "independent native image native_assertion",
+        "passed": true,
+        "image_sha256": "b5a28a9aaf368b3797ef179aa6dd3ac74c8e54dfc1134aab838448cacc2ad82a",
+        "exit": 70
+      },
+      {
+        "name": "independent native image native_origin",
+        "passed": true,
+        "image_sha256": "4262c2a08fa2c2b78b15d86f2425e224dee3acafd8e6f93bac99ac70dfac88cd",
+        "exit": 70
+      }
+    ],
+    "initial_attempt": {
+      "passed": 6,
+      "failed": 1,
+      "disposition": "Console probe reached readiness but inherited Ctrl-C ignoring prevented cooperative cancellation. Original report and timeout are retained."
+    },
+    "console_successor": {
+      "passed": 1,
+      "failed": 0,
+      "probe_sha256": "28f20c5dd7e9211eb657ee8710ff898408dd6af6588913ac13b0467b2b4f9be8",
+      "runner_sha256": "a286774670421ccd8967c19813f6a814654a9f8a341a92ea20f7bd716ad028b7",
+      "scope": "The private-console parent explicitly clears its inherited ignore attribute before launching the CLI. Original signal, readiness, process-membership, cancellation assertions and 30-second bounds remain. The same shipping candidate and all 1007 protected inputs are unchanged; six other physical cases retain their first passing results."
+    }
+  },
+  "prior_product_failure": {
+    "passed": 30,
+    "failed": 1,
+    "report_sha256": "86eb6d64063c80352ab6828880bfd81b5718977cf42b7ea75b1b81fa6593ffe5",
+    "native_success_exit": "0xC00000FD",
+    "disposition": "The generated image reserved 1 MiB. Source repair reserves 64 MiB in ordinary and selected MSVC link plans, with selected canonical identity binding. Recompiled VM and independent physical native images pass. Diagnostic modified-header image is not shipped."
+  },
+  "evidence": [
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-collected/settings-windows-r1059-build.presource.json",
+      "sha256": "2e0f831e7da6bc41a48d2e16aa4d3a477a79ace73b2992d2305c0fe52080aecd"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-collected/settings-windows-r1059-build.postsource.json",
+      "sha256": "9cfdb7fd933a250303320ea455d56137b6ffb3a2260a66442d53c3eb30a55704"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-collected/settings-windows-r1059-products.before.json",
+      "sha256": "8e91ed22e921712ff7cefbc4d28c503614315adcb2e6c5d7f8e343230526dfae"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-collected/settings-windows-r1059-products.postsource.json",
+      "sha256": "12e7c3d28c4e74eff10fcf2e91f91a393a156d2d1926146bf39e0fb04abd4aca"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-collected/report.json",
+      "sha256": "f574cc123e1db9be2348097019a75c6430cebbe9f3f44298e34652aa8b7f4d99"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-collected/settings-windows-r1059-build.artifacts.json",
+      "sha256": "1bbcaa80e96f8fdf5ccba8e357120b2916be07c91c1897a39a59e76bc4dca6b4"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-collected/packet.json",
+      "sha256": "e87f28d780469187a5d9a118aa0c41cf714591ac8ce7060bde7a57e6c8e98d76"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1057-collected/result.json",
+      "sha256": "476635ae4f11c8a2382ea9c5885bc28d3c06cbcb29015d029491c3c8c778e2f9"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1057-collected/commands.json",
+      "sha256": "b0a2654f0ccd2a6eb3cf572eea2c5ec5b997ae87755e90df5d5e25c9c22cf0bd"
+    },
+    {
+      "path": ".tmp-rm1064/settings-victus-r1059-collected/report.json",
+      "sha256": "740c7dc10f089efa132318538f337add321ccbd28a0436ece497cd1daf37e823"
+    },
+    {
+      "path": ".tmp-rm1064/settings-victus-r1059-collected/console-successor.report.json",
+      "sha256": "a3a0f29df3b55ee4d8407a31435fcbab50b05926325ee8cacec0df220fdf5122"
+    },
+    {
+      "path": ".tmp-rm1064/settings-victus-r1059-collected/stage-r1059.receipt.json",
+      "sha256": "b696525a4dcfb831cc5dbf3fed02141ddd95300174b8b289edc9680dd2bb45ea"
+    },
+    {
+      "path": ".tmp-rm1064/settings-windows-r1059-release-artifacts/export.verified.json",
+      "sha256": "8f6715c0f3df22d0c2ec9816214cc7408a3e49b7bf830c8aa82cf65c38808e97"
+    },
+    {
+      "path": ".tmp-rm1064/settings-victus-r1059-console-clear.ps1",
+      "sha256": "28f20c5dd7e9211eb657ee8710ff898408dd6af6588913ac13b0467b2b4f9be8"
+    },
+    {
+      "path": ".tmp-rm1064/settings-victus-r1059-console-only.cjs",
+      "sha256": "a286774670421ccd8967c19813f6a814654a9f8a341a92ea20f7bd716ad028b7"
+    }
+  ],
+  "build_machine_disposition": [
+    {
+      "name": "gh-windows-20260330-204014",
+      "id": "9119638112898080503",
+      "status": "TERMINATED",
+      "persistent_disk": "https://www.googleapis.com/compute/v1/projects/runmat/zones/us-central1-b/disks/gh-windows-20260330-204014",
+      "disk_gb": 1200,
+      "accelerator": "https://www.googleapis.com/compute/v1/projects/runmat/zones/us-central1-b/acceleratorTypes/nvidia-tesla-t4",
+      "evidence": {
+        "path": ".tmp-rm1064/settings-windows-r1059-stop.after.json",
+        "sha256": "fdc1609beb9de258d98f0e33cb7fad7a7f28680da6ba89a73ce2e0864deb036a"
+      }
+    },
+    {
+      "name": "gh-linux-20260327-125436",
+      "id": "2841755519518752895",
+      "status": "TERMINATED",
+      "persistent_disk": "https://www.googleapis.com/compute/v1/projects/runmat/zones/us-central1-b/disks/gh-linux-20260327-125436",
+      "disk_gb": 2166,
+      "accelerator": "https://www.googleapis.com/compute/v1/projects/runmat/zones/us-central1-b/acceleratorTypes/nvidia-tesla-t4",
+      "evidence": {
+        "path": ".tmp-rm1064/settings-linux-r1059-idle-verification.json",
+        "sha256": "9befcbeed720185fcae4499677f2c76bdc4b6c486a5c31092c5656771e7db5b8"
+      }
+    }
+  ]
+}

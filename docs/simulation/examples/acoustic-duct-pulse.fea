@@ -1,0 +1,50 @@
+geometry duct {
+    file = "./geometry/duct.step"
+    units = mm
+    region air : solid { select name "Duct"; expect exactly_one }
+    region driven_end : face { select name "Near end"; expect exactly_one }
+    region far_end : face { select name "Far end"; expect exactly_one }
+}
+
+mesh duct on geometry.duct {
+    tetrahedra {
+        order = quadratic
+        target_size = 25 mm
+        maximum_deviation = 1 mm
+    }
+}
+
+material air {
+    mass_density = 1.2 kg/m^3
+    acoustic {
+        speed_of_sound = 343 m/s
+        damping_ratio = 0.0
+    }
+}
+
+model driven_duct {
+    assign material.air to geometry.duct.region.air
+    signal pulse : pressure over time {
+        samples = [
+            { at = 0 s, value = 0 Pa },
+            { at = 0.25 ms, value = 1 Pa },
+            { at = 0.5 ms, value = 0 Pa },
+            { at = 10 ms, value = 0 Pa },
+        ]
+        interpolation = linear
+        extrapolation = reject
+    }
+    constraint drive {
+        acoustic.pressure { target = geometry.duct.region.driven_end; value = signal.pulse }
+    }
+    load termination {
+        acoustic.impedance { target = geometry.duct.region.far_end; impedance = 411.6 Pa*s/m }
+    }
+}
+
+study acoustic_duct_pulse {
+    geometry = geometry.duct
+    mesh = mesh.duct
+    model = model.driven_duct
+    analysis pulse { acoustic transient { start_time = 0 s; end_time = 4 ms; time_step = 10 us } }
+}

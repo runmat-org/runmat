@@ -28,13 +28,13 @@ fn source_path(path: &std::path::Path) -> String {
 fn contains_storage(values: &[Value], expected: &IntegerStorage) -> bool {
     values.iter().any(|value| match value {
         Value::Tensor(tensor) => tensor.integer_storage() == Some(expected),
-        Value::Cell(cell) => contains_storage(&cell.data, expected),
+        Value::Cell(cell) => contains_storage(cell.data(), expected),
         Value::Struct(structure) => contains_storage(
             &structure.fields.values().cloned().collect::<Vec<_>>(),
             expected,
         ),
         Value::Object(object) => contains_storage(
-            &object.properties.values().cloned().collect::<Vec<_>>(),
+            &object.properties().values().cloned().collect::<Vec<_>>(),
             expected,
         ),
         _ => false,

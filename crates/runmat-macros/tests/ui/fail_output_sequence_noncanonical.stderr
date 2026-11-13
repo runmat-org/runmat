@@ -1,0 +1,11 @@
+error: custom attribute panicked
+ --> tests/ui/fail_output_sequence_noncanonical.rs:3:1
+  |
+3 | / #[runtime_builtin(
+4 | |     name = "noncanonical_sequence",
+5 | |     output_sequence = true,
+6 | |     builtin_path = "tests::noncanonical_sequence"
+7 | | )]
+  | |__^
+  |
+  = help: message: output_sequence requires a canonical binding_variant

@@ -38,8 +38,16 @@ pub fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureH
             }
             data.iter().map(|v| handle_from_scalar(*v, ctx)).collect()
         }
-        Value::CharArray(_) | Value::String(_) => {
-            let text = parse_string(value).unwrap_or_default();
+        Value::CharArray(_) | Value::String(runmat_value::StringElement::Text(_)) => {
+            let text = parse_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        ctx,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .unwrap_or_default();
             if text.is_empty() {
                 return Err(plotting_error(
                     ctx,
@@ -99,8 +107,8 @@ pub fn numeric_handle_scalar(value: &Value) -> Option<f64> {
     }
 }
 
-pub fn parse_string(value: &Value) -> Option<String> {
-    value_as_string(value).map(|s| s.trim().to_string())
+pub fn parse_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(value_as_string(value)?.map(|s| s.trim().to_string()))
 }
 
 pub fn handle_from_string(text: &str, ctx: &str) -> BuiltinResult<FigureHandle> {
@@ -156,8 +164,16 @@ pub fn parse_optional_figure_handle(
     ctx: &str,
 ) -> BuiltinResult<Option<FigureHandle>> {
     match value {
-        Value::CharArray(_) | Value::String(_) => {
-            let text = parse_string(value).unwrap_or_default();
+        Value::CharArray(_) | Value::String(runmat_value::StringElement::Text(_)) => {
+            let text = parse_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        ctx,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .unwrap_or_default();
             parse_string_handle_or_next(&text, ctx)
         }
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {

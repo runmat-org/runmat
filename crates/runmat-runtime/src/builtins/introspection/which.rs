@@ -8,183 +8,20 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use runmat_builtins::{
-    builtin_functions, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    which_option_token, BuiltinErrorDescriptor, WhichOptionToken, WHICH_ERROR_ARG_COUNT_MAX,
+    WHICH_ERROR_ARG_COUNT_MIN, WHICH_ERROR_NAME_ARG_TYPE, WHICH_ERROR_OPTION_ARG_TYPE,
+    WHICH_ERROR_OPTION_CONFLICT, WHICH_ERROR_OPTION_UNRECOGNIZED,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::fs::path_to_string;
-use crate::builtins::common::path_search::{
-    class_file_paths, class_folder_candidates, directory_candidates,
-    find_all_files_with_extensions, CLASS_M_FILE_EXTENSIONS, GENERAL_FILE_EXTENSIONS,
+use crate::user_functions::{
+    observe_runtime_name, RuntimeNameCandidate, RuntimeNameFilter, RuntimeNameQuery,
+    RuntimeNameResolutionError, RuntimeNameRoute,
 };
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::type_resolvers::which_type;
-use crate::{
-    build_runtime_error, dispatcher::gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
-};
-
-const WHICH_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "result",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Single resolution result string.",
-}];
-
-const WHICH_OUTPUT_ALL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "results",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "All matching resolution strings (cell array of char rows).",
-}];
-
-const WHICH_SIG_NAME_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Name to resolve.",
-}];
-
-const WHICH_SIG_NAME_OPTION_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Name to resolve.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"-all\""),
-        description: "Optional mode filter (-all|-builtin|-var|-file).",
-    },
-];
-
-const WHICH_SIG_OPTION_NAME_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Mode filter (-all|-builtin|-var|-file).",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Name to resolve.",
-    },
-];
-
-const WHICH_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "result = which(name)",
-        inputs: &WHICH_SIG_NAME_INPUTS,
-        outputs: &WHICH_OUTPUT_SINGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "result = which(name, option)",
-        inputs: &WHICH_SIG_NAME_OPTION_INPUTS,
-        outputs: &WHICH_OUTPUT_SINGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "result = which(option, name)",
-        inputs: &WHICH_SIG_OPTION_NAME_INPUTS,
-        outputs: &WHICH_OUTPUT_SINGLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "results = which(\"-all\", name)",
-        inputs: &WHICH_SIG_OPTION_NAME_INPUTS,
-        outputs: &WHICH_OUTPUT_ALL,
-    },
-];
-
-const WHICH_ERROR_ARG_COUNT_MIN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WHICH.ARG_COUNT_MIN",
-    identifier: None,
-    when: "No input arguments are provided.",
-    message: "which: not enough input arguments",
-};
-
-const WHICH_ERROR_ARG_COUNT_MAX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WHICH.ARG_COUNT_MAX",
-    identifier: None,
-    when: "More than one name argument is provided.",
-    message: "which: too many input arguments",
-};
-
-const WHICH_ERROR_NAME_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WHICH.NAME_ARG_TYPE",
-    identifier: None,
-    when: "Name argument is not a char row or string scalar.",
-    message: "which: name must be a character vector or string scalar",
-};
-
-const WHICH_ERROR_OPTION_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WHICH.OPTION_ARG_TYPE",
-    identifier: None,
-    when: "Option argument is not a char row or string scalar.",
-    message: "which: option must be a character vector or string scalar",
-};
-
-const WHICH_ERROR_OPTION_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WHICH.OPTION_CONFLICT",
-    identifier: None,
-    when: "Conflicting mode options are combined.",
-    message: "which: conflicting option",
-};
-
-const WHICH_ERROR_OPTION_UNRECOGNIZED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WHICH.OPTION_UNRECOGNIZED",
-    identifier: None,
-    when: "An unrecognized mode option is provided.",
-    message: "which: unrecognized option",
-};
-
-const WHICH_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    WHICH_ERROR_ARG_COUNT_MIN,
-    WHICH_ERROR_ARG_COUNT_MAX,
-    WHICH_ERROR_NAME_ARG_TYPE,
-    WHICH_ERROR_OPTION_ARG_TYPE,
-    WHICH_ERROR_OPTION_CONFLICT,
-    WHICH_ERROR_OPTION_UNRECOGNIZED,
-];
-
-pub const WHICH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WHICH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WHICH_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::which")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "which",
-    op_kind: GpuOpKind::Custom("io"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
-};
+use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeError};
 
 fn which_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     which_error_with_message(error.message, error)
@@ -214,8 +51,10 @@ fn which_runtime_error(message: impl Into<String>) -> RuntimeError {
 
 fn which_flow(err: RuntimeError) -> RuntimeError {
     let identifier = err.identifier().map(|id| id.to_string());
+    let retry = err.gpu_gather_retry;
     let mut builder = build_runtime_error(err.message().to_string())
         .with_builtin("which")
+        .with_gpu_gather_retry(retry)
         .with_source(err);
     if let Some(identifier) = identifier {
         builder = builder.with_identifier(identifier);
@@ -223,32 +62,12 @@ fn which_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-fn which_path<T>(result: Result<T, String>) -> BuiltinResult<T> {
-    result.map_err(which_runtime_error)
-}
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::which")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "which",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "I/O lookup; not eligible for fusion. Metadata registered for diagnostics.",
-};
-
 #[runtime_builtin(
     name = "which",
-    category = "introspection",
-    summary = "Resolve which variable, builtin, file, or class matches a given name.",
-    keywords = "which,search path,builtin lookup,script path,variable shadowing",
-    accel = "cpu",
-    type_resolver(which_type),
-    descriptor(crate::builtins::introspection::which::WHICH_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::which"
 )]
-async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn which_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(which_error(&WHICH_ERROR_ARG_COUNT_MIN));
     }
@@ -257,8 +76,17 @@ async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let mut options = WhichOptions::default();
 
     for arg in args {
-        let gathered = gather_if_needed_async(&arg).await.map_err(which_flow)?;
-        let text = value_to_string_scalar(&gathered).ok_or_else(|| {
+        // GPU handles carry only numeric element/storage descriptors, never a
+        // character or string representation. Decode the source-language
+        // argument role before touching an acceleration provider.
+        let text = value_to_string_scalar(&arg, || {
+            if name.is_none() {
+                which_error(&WHICH_ERROR_NAME_ARG_TYPE)
+            } else {
+                which_error(&WHICH_ERROR_OPTION_ARG_TYPE)
+            }
+        })?
+        .ok_or_else(|| {
             if name.is_none() {
                 which_error(&WHICH_ERROR_NAME_ARG_TYPE)
             } else {
@@ -266,8 +94,8 @@ async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             }
         })?;
 
-        if looks_like_option(&text) {
-            options.apply(&text)?;
+        if let Some(option) = which_option_token(&text) {
+            options.apply(option, &text)?;
         } else if name.is_none() {
             name = Some(text);
         } else {
@@ -301,241 +129,200 @@ async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     )))
 }
 
-#[derive(Default, Debug)]
-struct WhichOptions {
-    all: bool,
-    builtin_only: bool,
-    var_only: bool,
-    file_only: bool,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum WhichMode {
+    #[default]
+    Any,
+    Builtin,
+    Variable,
+    File,
 }
 
-impl WhichOptions {
-    fn apply(&mut self, option: &str) -> BuiltinResult<()> {
-        let lowered = option.trim().to_ascii_lowercase();
-        match lowered.as_str() {
-            "-all" => {
-                self.all = true;
-                Ok(())
-            }
-            "-builtin" | "-built-in" => {
-                let mut conflicts = Vec::new();
-                if self.var_only {
-                    conflicts.push("-var");
-                }
-                if self.file_only {
-                    conflicts.push("-file");
-                }
-                if !conflicts.is_empty() {
-                    return Err(which_error_with_detail(
-                        &WHICH_ERROR_OPTION_CONFLICT,
-                        conflict_message("-builtin", &conflicts),
-                    ));
-                }
-                self.builtin_only = true;
-                Ok(())
-            }
-            "-var" | "-variable" => {
-                let mut conflicts = Vec::new();
-                if self.builtin_only {
-                    conflicts.push("-builtin");
-                }
-                if self.file_only {
-                    conflicts.push("-file");
-                }
-                if !conflicts.is_empty() {
-                    return Err(which_error_with_detail(
-                        &WHICH_ERROR_OPTION_CONFLICT,
-                        conflict_message("-var", &conflicts),
-                    ));
-                }
-                self.var_only = true;
-                Ok(())
-            }
-            "-file" => {
-                let mut conflicts = Vec::new();
-                if self.builtin_only {
-                    conflicts.push("-builtin");
-                }
-                if self.var_only {
-                    conflicts.push("-var");
-                }
-                if !conflicts.is_empty() {
-                    return Err(which_error_with_detail(
-                        &WHICH_ERROR_OPTION_CONFLICT,
-                        conflict_message("-file", &conflicts),
-                    ));
-                }
-                self.file_only = true;
-                Ok(())
-            }
-            other => Err(which_error_with_detail(
+impl WhichMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Any => "",
+            Self::Builtin => "-builtin",
+            Self::Variable => "-var",
+            Self::File => "-file",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WhichOption {
+    All,
+    Mode(WhichMode),
+}
+
+impl WhichOption {
+    fn decode(token: WhichOptionToken, text: &str) -> BuiltinResult<Self> {
+        match token {
+            WhichOptionToken::All => Ok(Self::All),
+            WhichOptionToken::Builtin => Ok(Self::Mode(WhichMode::Builtin)),
+            WhichOptionToken::Variable => Ok(Self::Mode(WhichMode::Variable)),
+            WhichOptionToken::File => Ok(Self::Mode(WhichMode::File)),
+            WhichOptionToken::Unrecognized => Err(which_error_with_detail(
                 &WHICH_ERROR_OPTION_UNRECOGNIZED,
-                format!("'{other}'"),
+                format!("'{}'", text.trim().to_ascii_lowercase()),
             )),
         }
     }
 }
 
-fn conflict_message(option: &str, conflicts: &[&str]) -> String {
-    debug_assert!(!conflicts.is_empty());
-    let joined = match conflicts.len() {
-        1 => conflicts[0].to_string(),
-        2 => format!("{} or {}", conflicts[0], conflicts[1]),
-        _ => {
-            let mut text = conflicts[..conflicts.len() - 1].join(", ");
-            text.push_str(", or ");
-            text.push_str(conflicts.last().unwrap());
-            text
+#[derive(Default, Debug)]
+struct WhichOptions {
+    all: bool,
+    mode: WhichMode,
+}
+
+impl WhichOptions {
+    fn apply(&mut self, option: WhichOptionToken, text: &str) -> BuiltinResult<()> {
+        match WhichOption::decode(option, text)? {
+            WhichOption::All => self.all = true,
+            WhichOption::Mode(mode) if self.mode == WhichMode::Any || self.mode == mode => {
+                self.mode = mode;
+            }
+            WhichOption::Mode(mode) => {
+                return Err(which_error_with_detail(
+                    &WHICH_ERROR_OPTION_CONFLICT,
+                    format!(
+                        "'{}'; cannot combine with {}",
+                        mode.label(),
+                        self.mode.label()
+                    ),
+                ));
+            }
         }
-    };
-    format!("'{option}'; cannot combine with {joined}")
+        Ok(())
+    }
 }
 
 async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<String>> {
-    if options.var_only {
-        return Ok(variable_match(name).into_iter().collect());
-    }
-    if options.builtin_only {
-        return Ok(builtin_matches(name));
-    }
-    if options.file_only {
-        return search_file_like_matches(name, options.all).await;
-    }
-
-    let mut seen = HashSet::new();
+    let filter = if options.mode == WhichMode::Variable {
+        RuntimeNameFilter::Workspace
+    } else if options.mode == WhichMode::Builtin {
+        RuntimeNameFilter::Builtin
+    } else if options.mode == WhichMode::File {
+        RuntimeNameFilter::File
+    } else {
+        RuntimeNameFilter::Any
+    };
+    let resolution = observe_runtime_name(
+        name,
+        RuntimeNameQuery {
+            route: RuntimeNameRoute::DynamicCall,
+            filter,
+            all: options.all,
+        },
+    )
+    .await
+    .map_err(|error| match error {
+        RuntimeNameResolutionError::Workspace(error)
+        | RuntimeNameResolutionError::Control(error) => which_flow(*error),
+        RuntimeNameResolutionError::WasmRegistryNotReady
+        | RuntimeNameResolutionError::SearchPathChanged
+        | RuntimeNameResolutionError::ClassRegistryChanged => {
+            which_runtime_error(error.to_string())
+        }
+        RuntimeNameResolutionError::Search(error) => error.into_runtime_error("which"),
+    })?;
     let mut results = Vec::new();
-
-    if let Some(var_msg) = variable_match(name) {
-        push_unique(&mut results, &mut seen, var_msg.clone());
+    let mut seen = HashSet::new();
+    let mut seen_semantic_owners = HashSet::new();
+    let mut seen_semantic_origins = HashSet::new();
+    for candidate in &resolution.candidates {
+        let admitted = match candidate {
+            RuntimeNameCandidate::WorkspaceVariable => {
+                options.mode != WhichMode::Builtin && options.mode != WhichMode::File
+            }
+            RuntimeNameCandidate::Builtin(_) => {
+                options.mode != WhichMode::Variable && options.mode != WhichMode::File
+            }
+            RuntimeNameCandidate::Native(_)
+            | RuntimeNameCandidate::RegisteredConstructor(_)
+            | RuntimeNameCandidate::RegisteredStaticMethod { .. }
+            | RuntimeNameCandidate::Semantic { .. }
+            | RuntimeNameCandidate::Source(_)
+            | RuntimeNameCandidate::ClassFolder(_)
+            | RuntimeNameCandidate::ClassFile(_)
+            | RuntimeNameCandidate::File(_)
+            | RuntimeNameCandidate::Directory(_) => {
+                options.mode != WhichMode::Variable && options.mode != WhichMode::Builtin
+            }
+        };
+        if !admitted {
+            continue;
+        }
+        let text = match candidate {
+            RuntimeNameCandidate::WorkspaceVariable => format!("'{name}' is a variable."),
+            RuntimeNameCandidate::Builtin(identity) => {
+                format!("built-in (RunMat builtin: {})", identity.0)
+            }
+            RuntimeNameCandidate::Native(native) => canonical_path(&native.path).await,
+            RuntimeNameCandidate::RegisteredConstructor(class) => {
+                format!("class constructor: {class}")
+            }
+            RuntimeNameCandidate::RegisteredStaticMethod { resolution, source } => {
+                match &resolution.target {
+                    crate::dispatcher::RegisteredStaticMethodTarget::Bound(_)
+                    | crate::dispatcher::RegisteredStaticMethodTarget::Semantic(_) => {
+                        match source
+                            .as_ref()
+                            .and_then(|source| source.source_file.as_ref())
+                        {
+                            Some(path) => canonical_path(Path::new(path)).await,
+                            None => format!(
+                                "static method: {}.{}",
+                                resolution.registration.class, resolution.registration.method_name
+                            ),
+                        }
+                    }
+                    crate::dispatcher::RegisteredStaticMethodTarget::Builtin(identity) => {
+                        format!("built-in (RunMat builtin: {})", identity.0)
+                    }
+                }
+            }
+            RuntimeNameCandidate::Semantic { source, .. } => match source {
+                Some(source) => match source.source_file.as_ref() {
+                    Some(path) => canonical_path(Path::new(path)).await,
+                    None => format!("function {}", source.name),
+                },
+                None => format!("function {name}"),
+            },
+            RuntimeNameCandidate::Source(file) | RuntimeNameCandidate::File(file) => {
+                canonical_path(file.path()).await
+            }
+            RuntimeNameCandidate::ClassFolder(folder) => {
+                format!("class folder: {}", canonical_path(folder.path()).await)
+            }
+            RuntimeNameCandidate::ClassFile(file) => {
+                format!("classdef file: {}", canonical_path(file.path()).await)
+            }
+            RuntimeNameCandidate::Directory(folder) => canonical_path(folder.path()).await,
+        };
+        // Identical display paths do not make two executable definitions the
+        // same candidate: a retained body and its replacement can share the
+        // path while carrying different exact definition authority.
+        let distinct_semantic_definition = match candidate {
+            RuntimeNameCandidate::Semantic {
+                definition_owner: Some(owner),
+                ..
+            } => seen_semantic_owners.insert(std::sync::Arc::as_ptr(owner)),
+            RuntimeNameCandidate::Semantic {
+                source: Some(source),
+                ..
+            } => source
+                .binding_origin
+                .is_some_and(|origin| seen_semantic_origins.insert(origin)),
+            _ => false,
+        };
+        if !seen.insert(text.clone()) && !distinct_semantic_definition {
+            continue;
+        }
+        results.push(text);
         if !options.all {
-            return Ok(results);
-        }
-    }
-
-    for entry in builtin_matches(name) {
-        push_unique(&mut results, &mut seen, entry.clone());
-        if !options.all && !results.is_empty() {
-            return Ok(results);
-        }
-    }
-
-    let mut class_entries = class_matches(name).await?;
-    for entry in class_entries.drain(..) {
-        push_unique(&mut results, &mut seen, entry.clone());
-        if !options.all && !results.is_empty() {
-            return Ok(results);
-        }
-    }
-
-    let mut file_entries = file_matches(name).await?;
-    for entry in file_entries.drain(..) {
-        push_unique(&mut results, &mut seen, entry.clone());
-        if !options.all && !results.is_empty() {
-            return Ok(results);
-        }
-    }
-
-    let mut directory_entries = directory_matches(name).await?;
-    for entry in directory_entries.drain(..) {
-        push_unique(&mut results, &mut seen, entry.clone());
-        if !options.all && !results.is_empty() {
-            return Ok(results);
-        }
-    }
-
-    Ok(results)
-}
-
-async fn search_file_like_matches(name: &str, gather_all: bool) -> BuiltinResult<Vec<String>> {
-    let mut seen = HashSet::new();
-    let mut results = Vec::new();
-
-    for entry in class_matches(name).await? {
-        push_unique(&mut results, &mut seen, entry);
-    }
-
-    for entry in file_matches(name).await? {
-        push_unique(&mut results, &mut seen, entry);
-        if !gather_all && !results.is_empty() {
-            return Ok(results);
-        }
-    }
-
-    for entry in directory_matches(name).await? {
-        push_unique(&mut results, &mut seen, entry);
-        if !gather_all && !results.is_empty() {
-            return Ok(results);
-        }
-    }
-
-    Ok(results)
-}
-
-fn variable_match(name: &str) -> Option<String> {
-    crate::workspace::lookup(name).map(|_| format!("'{name}' is a variable."))
-}
-
-fn builtin_matches(name: &str) -> Vec<String> {
-    let lowered = name.to_ascii_lowercase();
-    builtin_functions()
-        .into_iter()
-        .filter(|b| b.name.eq_ignore_ascii_case(&lowered))
-        .map(|b| format!("built-in (RunMat builtin: {})", b.name))
-        .collect()
-}
-
-async fn class_matches(name: &str) -> BuiltinResult<Vec<String>> {
-    let mut results = Vec::new();
-    let mut seen = HashSet::new();
-
-    for folder in which_path(class_folder_candidates(name, "which"))? {
-        if vfs::metadata_async(&folder)
-            .await
-            .map(|meta| meta.is_dir())
-            .unwrap_or(false)
-        {
-            let text = format!("class folder: {}", canonical_path(&folder).await);
-            push_unique(&mut results, &mut seen, text);
-        }
-    }
-
-    for file in
-        which_path(class_file_paths(name, CLASS_M_FILE_EXTENSIONS, "classdef", "which").await)?
-    {
-        let text = format!("classdef file: {}", canonical_path(&file).await);
-        push_unique(&mut results, &mut seen, text);
-    }
-
-    Ok(results)
-}
-
-async fn file_matches(name: &str) -> BuiltinResult<Vec<String>> {
-    let mut results = Vec::new();
-    let mut seen = HashSet::new();
-    for file in
-        which_path(find_all_files_with_extensions(name, GENERAL_FILE_EXTENSIONS, "which").await)?
-    {
-        if vfs::metadata_async(&file)
-            .await
-            .map(|meta| meta.is_file())
-            .unwrap_or(false)
-        {
-            push_unique(&mut results, &mut seen, canonical_path(&file).await);
-        }
-    }
-    Ok(results)
-}
-
-async fn directory_matches(name: &str) -> BuiltinResult<Vec<String>> {
-    let mut results = Vec::new();
-    let mut seen = HashSet::new();
-    for dir in which_path(directory_candidates(name, "which"))? {
-        if vfs::metadata_async(&dir)
-            .await
-            .map(|meta| meta.is_dir())
-            .unwrap_or(false)
-        {
-            push_unique(&mut results, &mut seen, canonical_path(&dir).await);
+            break;
         }
     }
     Ok(results)
@@ -548,313 +335,30 @@ async fn canonical_path(path: &Path) -> String {
         .unwrap_or_else(|_| path_to_string(path))
 }
 
-fn value_to_string_scalar(value: &Value) -> Option<String> {
+fn value_to_string_scalar<F>(value: &Value, error: F) -> crate::BuiltinResult<Option<String>>
+where
+    F: FnOnce() -> crate::RuntimeError,
+{
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
-    }
-}
-
-fn looks_like_option(text: &str) -> bool {
-    text.trim_start().starts_with('-')
-}
-
-fn push_unique(results: &mut Vec<String>, seen: &mut HashSet<String>, entry: String) {
-    if seen.insert(entry.clone()) {
-        results.push(entry);
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(Some(text.as_str().to_owned()))
+        }
+        Value::CharArray(array) if array.rows == 1 => {
+            super::text::decode_utf16_with_error(array.data(), error).map(Some)
+        }
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(Some(
+                array.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string")
+                    .as_str()
+                    .to_owned(),
+            ))
+        }
+        _ => Ok(None),
     }
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use once_cell::sync::Lazy;
-    use runmat_thread_local::runmat_thread_local;
-    use runmat_value::{CharArray, StringArray, Value};
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::Write;
-    use std::path::PathBuf;
-    use std::sync::Mutex;
-    use tempfile::tempdir;
-
-    static WHICH_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-    fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::workspace::test_guard()
-    }
-
-    fn test_guard() -> (
-        std::sync::MutexGuard<'static, ()>,
-        std::sync::MutexGuard<'static, ()>,
-    ) {
-        let workspace = workspace_guard();
-        let which = WHICH_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        (workspace, which)
-    }
-
-    fn which_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::which_builtin(args))
-    }
-
-    runmat_thread_local! {
-        static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
-    }
-
-    fn ensure_test_resolver() {
-        crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
-            lookup: |name| TEST_WORKSPACE.with(|slot| slot.borrow().get(name).cloned()),
-            snapshot: || {
-                let mut entries: Vec<(String, Value)> =
-                    TEST_WORKSPACE.with(|slot| slot.borrow().clone().into_iter().collect());
-                entries.sort_by(|a, b| a.0.cmp(&b.0));
-                entries
-            },
-            globals: || Vec::new(),
-            assign: None,
-            clear: None,
-            remove: None,
-        });
-    }
-
-    fn set_workspace(entries: &[(&str, Value)]) {
-        TEST_WORKSPACE.with(|slot| {
-            let mut map = slot.borrow_mut();
-            map.clear();
-            for (name, value) in entries {
-                map.insert((*name).to_string(), value.clone());
-            }
-        });
-    }
-
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_reports_builtin() {
-        let (_guard, _lock) = test_guard();
-        let value = which_builtin(vec![Value::from("sin")]).expect("which");
-        let text = String::try_from(&value).expect("string result");
-        assert!(
-            text.contains("built-in"),
-            "expected builtin output, got {text}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_variable_search_respects_workspace() {
-        let (_guard, _lock) = test_guard();
-        ensure_test_resolver();
-        set_workspace(&[("answer", Value::Num(42.0))]);
-
-        let value = which_builtin(vec![Value::from("answer")]).expect("which");
-        assert_eq!(String::try_from(&value).unwrap(), "'answer' is a variable.");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_finds_files() {
-        let (_guard, _lock) = test_guard();
-        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let temp = tempdir().expect("tempdir");
-        let script_path = temp.path().join("script.m");
-        File::create(&script_path)
-            .and_then(|mut file| writeln!(file, "disp('hi');"))
-            .expect("write script");
-
-        let guard = DirGuard::new();
-        std::env::set_current_dir(temp.path()).expect("set temp dir");
-
-        let value = which_builtin(vec![Value::from("script")]).expect("which");
-        let text = String::try_from(&value).expect("string");
-        assert!(
-            text.ends_with("script.m"),
-            "expected to end with script.m, got {text}"
-        );
-
-        drop(guard);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_all_returns_cell_array() {
-        let (_guard, _lock) = test_guard();
-        let value = which_builtin(vec![Value::from("sin"), Value::from("-all")]).expect("which");
-        match value {
-            Value::Cell(cell) => assert!(!cell.data.is_empty()),
-            other => panic!("expected cell array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_not_found_message() {
-        let (_guard, _lock) = test_guard();
-        let value = which_builtin(vec![Value::from("definitely_missing")]).expect("which");
-        let text = String::try_from(&value).expect("string");
-        assert_eq!(text, "'definitely_missing' not found.");
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_parses_leading_option() {
-        let (_guard, _lock) = test_guard();
-        let value = which_builtin(vec![Value::from("-all"), Value::from("sin")]).expect("which");
-        match value {
-            Value::Cell(cell) => assert!(!cell.data.is_empty()),
-            other => panic!("expected cell array, got {other:?}"),
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_allows_uppercase_and_repeated_flags() {
-        let (_guard, _lock) = test_guard();
-        let value = which_builtin(vec![
-            Value::from("-BUILTIN"),
-            Value::from("-builtin"),
-            Value::from("sin"),
-        ])
-        .expect("which");
-        let text = String::try_from(&value).expect("string");
-        assert!(
-            text.contains("built-in"),
-            "expected builtin output, got {text}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_conflicting_flags_error() {
-        let (_guard, _lock) = test_guard();
-        let err = which_builtin(vec![
-            Value::from("-var"),
-            Value::from("-builtin"),
-            Value::from("sin"),
-        ])
-        .unwrap_err();
-        let message = error_message(err);
-        assert!(
-            message.contains("conflicting option '-builtin'"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_invalid_flag_error() {
-        let (_guard, _lock) = test_guard();
-        let err = which_builtin(vec![Value::from("-nope"), Value::from("sin")]).unwrap_err();
-        let message = error_message(err);
-        assert!(
-            message.contains("unrecognized option '-nope'"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_requires_name_argument() {
-        let (_guard, _lock) = test_guard();
-        let err = which_builtin(vec![]).unwrap_err();
-        let message = error_message(err);
-        assert_eq!(message, WHICH_ERROR_ARG_COUNT_MIN.message);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_errors_on_non_string_name() {
-        let (_guard, _lock) = test_guard();
-        let err = which_builtin(vec![Value::Num(4.0)]).unwrap_err();
-        let message = error_message(err);
-        assert_eq!(message, WHICH_ERROR_NAME_ARG_TYPE.message);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_errors_on_too_many_arguments() {
-        let (_guard, _lock) = test_guard();
-        let err = which_builtin(vec![
-            Value::from("sin"),
-            Value::from("cos"),
-            Value::from("tan"),
-        ])
-        .unwrap_err();
-        let message = error_message(err);
-        assert_eq!(message, WHICH_ERROR_ARG_COUNT_MAX.message);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_accepts_char_and_string_array_inputs() {
-        let (_guard, _lock) = test_guard();
-        let char_value = Value::CharArray(CharArray::new_row("sin"));
-        let char_result = which_builtin(vec![char_value]).expect("which char");
-        let char_text = String::try_from(&char_result).expect("string");
-        assert!(
-            char_text.contains("built-in"),
-            "expected builtin output, got {char_text}"
-        );
-
-        let string_array = StringArray::new(vec!["sin".to_string()], vec![1]).unwrap();
-        let string_result =
-            which_builtin(vec![Value::StringArray(string_array)]).expect("which string array");
-        let string_text = String::try_from(&string_result).expect("string");
-        assert!(
-            string_text.contains("built-in"),
-            "expected builtin output, got {string_text}"
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn which_file_option_finds_directories() {
-        let (_guard, _lock) = test_guard();
-        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let temp = tempdir().expect("tempdir");
-        let subdir = temp.path().join("helpers");
-        std::fs::create_dir_all(&subdir).expect("create dir");
-        let guard = DirGuard::new();
-        std::env::set_current_dir(temp.path()).expect("set temp dir");
-
-        let value =
-            which_builtin(vec![Value::from("-file"), Value::from("helpers")]).expect("which");
-        let text = String::try_from(&value).expect("string");
-        assert!(
-            text.ends_with("helpers") || text.contains("/helpers") || text.contains("\\helpers"),
-            "expected directory path, got {text}"
-        );
-
-        drop(guard);
-    }
-
-    struct DirGuard {
-        original: PathBuf,
-    }
-
-    impl DirGuard {
-        fn new() -> Self {
-            let original = std::env::current_dir().expect("current dir");
-            Self { original }
-        }
-    }
-
-    impl Drop for DirGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.original);
-        }
-    }
-}
+#[path = "which/tests.rs"]
+pub(crate) mod tests;

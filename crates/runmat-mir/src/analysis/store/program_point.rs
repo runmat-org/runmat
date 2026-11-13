@@ -36,4 +36,19 @@ impl ProgramPointFacts {
             .ok()
             .map(|index| &self.locals[index])
     }
+
+    pub(crate) fn local_fact_vector(&self, local_count: usize) -> Vec<Option<ValueFact>> {
+        let mut values = vec![None; local_count];
+        for local in &self.locals {
+            if local.value.function != self.point.function {
+                continue;
+            }
+            if let Ok(index) = usize::try_from(local.value.local) {
+                if let Some(slot) = values.get_mut(index) {
+                    *slot = local.fact.clone();
+                }
+            }
+        }
+        values
+    }
 }

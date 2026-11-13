@@ -113,12 +113,33 @@ impl FactJoin for ValueKindFact {
                             .map(|other| (name.clone(), fact.join(other)))
                     })
                     .collect::<BTreeMap<_, _>>();
-                Struct(StructFact {
-                    fields_complete: left.fields_complete
+                let elements_complete = left.elements_complete
+                    && right.elements_complete
+                    && left.elements.len() == right.elements.len();
+                Struct(StructFact::array(
+                    fields,
+                    left.fields_complete
                         && right.fields_complete
                         && left.fields.keys().eq(right.fields.keys()),
-                    fields,
-                })
+                    if elements_complete {
+                        left.elements
+                            .iter()
+                            .zip(&right.elements)
+                            .map(|(left, right)| {
+                                left.iter()
+                                    .filter_map(|(name, fact)| {
+                                        right
+                                            .get(name)
+                                            .map(|other| (name.clone(), fact.join(other)))
+                                    })
+                                    .collect()
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    },
+                    elements_complete,
+                ))
             }
             (Object(left), Object(right)) => Object(ObjectFact {
                 class: exact_or(&left.class, &right.class, None),
@@ -144,6 +165,13 @@ impl FactJoin for ValueKindFact {
             }),
             (Callable(left), Callable(right)) => Callable(CallableFact {
                 identity: exact_or(&left.identity, &right.identity, None),
+                capabilities: crate::CapabilitySet(
+                    left.capabilities
+                        .0
+                        .union(&right.capabilities.0)
+                        .copied()
+                        .collect(),
+                ),
                 parameters: join_ordered(&left.parameters, &right.parameters),
                 parameters_complete: left.parameters_complete
                     && right.parameters_complete
@@ -184,6 +212,15 @@ impl FactJoin for ValueKindFact {
                     materializable: left.materializable && right.materializable,
                 })
             }
+            (Composite(left), Composite(right))
+                if left.owner == right.owner && left.labs == right.labs =>
+            {
+                Composite(crate::CompositeFact {
+                    owner: left.owner,
+                    labs: left.labs,
+                    value: Box::new(left.value.join(&right.value)),
+                })
+            }
             (Foreign(left), Foreign(right)) if left.family == right.family => {
                 Foreign(ForeignFact {
                     family: left.family.clone(),
@@ -219,6 +256,15 @@ fn join_ordered(left: &[ValueFact], right: &[ValueFact]) -> Vec<ValueFact> {
     }
 }
 
+impl FactJoin for ValueSequenceFact {
+    fn join(&self, other: &Self) -> Self {
+        Self {
+            outputs: join_ordered(&self.outputs, &other.outputs),
+            variadic: self.variadic || other.variadic || self.outputs.len() != other.outputs.len(),
+        }
+    }
+}
+
 fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact {
     use ExecutionFact::*;
     let joined = match (left, right) {
@@ -232,7 +278,7 @@ fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact 
                 state: right_state,
             },
         ) => Future {
-            output: Box::new(left.join(right)),
+            output: left.join(right),
             state: exact_or(left_state, right_state, FutureStateFact::Unknown),
         },
         (
@@ -245,7 +291,7 @@ fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact 
                 spawn_safety: right_safety,
             },
         ) => Task {
-            output: Box::new(left.join(right)),
+            output: left.join(right),
             spawn_safety: exact_or(
                 left_safety,
                 right_safety,
@@ -254,7 +300,7 @@ fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact 
         },
         (Pool, Pool) => Pool,
         (Job { output: left }, Job { output: right }) => Job {
-            output: Box::new(left.join(right)),
+            output: left.join(right),
         },
         _ => return ValueKindFact::Unknown,
     };

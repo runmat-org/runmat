@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "ab9939b36fb58bfae4a336a143403739d59846b41145e82c2549756ba111dddc",
+    "files": 26022,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "3ae1253a1f557a8401fbc06a32a94b400c27d70137cd233c7a50c66745621d0e",
+    "files": 26022,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-cli/src/commands/circuit_checks.rs",
+      "before": [
+        "100644",
+        "blob",
+        "3cb90df8ea6dc7719fdf0c56dd2225d89347e0fd"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "09e176d9e5424bc280b4030b2e362c8dcf4a58b2"
+      ],
+      "reason": "Extends the existing circuit-check fixture with Windows separator rendering. FEA commands, numerical fixtures and runtime execution are unchanged."
+    },
+    {
+      "path": "crates/runmat-design-tools/src/ci.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ea77ac2824f666e73df4f56a94973b28824c2872"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "43d61b10bc5d2e3c99b610b94c283fa1c974e119"
+      ],
+      "reason": "Normalizes path separators only when formatting native circuit-check report lines. Call sites are the native RunMat and design command-line reporters; circuit compilation and simulation are unchanged."
+    },
+    {
+      "path": "crates/runmat-fea-admission-native/src/lib.rs",
+      "before": [
+        "100644",
+        "blob",
+        "03755082e313cee2ce743eb5647d5eb830adc37b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "777f71a5d49c185de80776ee923970da4eb7d9e6"
+      ],
+      "reason": "Bounds usage/settlement transport and token-refresh attempts by the existing outage window, retains the original transient denial, and preserves the initial settlement request after expiry. Successful request payloads, grants and absolute operation totals are unchanged. Authored science uses the unchanged healthy fixture server with 24-hour leases; solver, checkpoint, worker-retirement and publication algorithms are unchanged. Focused outage, expiry and settlement tests qualify the changed boundary."
+    },
+    {
+      "path": "crates/runmat-fea-admission-native/src/outage_tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9ef0afa1809c92cfec74a8d3f0fba66bc42f8389"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5af9cdbcf80e21c30a21f750c69718629261c593"
+      ],
+      "reason": "Extends the existing receipt-validity case to settle completed work after expiry. Scientific workload assertions and case inventories are unchanged."
+    },
+    {
+      "path": "crates/runmat-server-client/src/lease_retry.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4f508ee6f628b1fca28e8dc209e0eef28364c415"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6f47ad9a4c0f8077c15e6b621c630a884f7edab7"
+      ],
+      "reason": "Exposes the saturating remaining duration of the existing monotonic outage clock and checks live/expired durations in the existing backoff test. Backoff, window derivation, request encoding and numerical execution are unchanged."
+    }
+  ],
+  "cohorts": [
+    "authored-cli-physics",
+    "driver-recovery-physics",
+    "circuit-large-board-performance"
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/native-lease-and-circuit-report-20261110.json",
+      "sha256": "3493228d2b79f77d35010bcce3710e0070e4ad2e08ecadfaa369170ddb29a8fe"
+    }
+  ],
+  "reason": "Conserve the measured scientific results across five reviewed native reporting, lease-boundary and test-only edits. Numerical algorithms, authored scientific fixtures, checkpoint/publication algorithms and benchmark thresholds are unchanged. The unchanged scientific inputs are reconstructed by reversing this exact inventory. Focused native acceptance qualifies the changed request/report boundary; final platform and product CI remain separate requirements."
+}

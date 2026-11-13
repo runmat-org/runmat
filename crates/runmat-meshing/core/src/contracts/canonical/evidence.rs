@@ -1,16 +1,19 @@
+mod observation;
+use runmat_canonical_codec::CanonicalCodecControl;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use super::{
     validate_finite, validate_token, AlgorithmVersionSet, CanonicalMeshingContract,
-    GeometryRevisionRef, MeshingContractError, MeshingResourceBudget, MeshingStageKind,
-    PersistentEntityId, StableDigest,
+    GeometryRevisionRef, MeshingContractError, MeshingPartitionDescriptor, MeshingRequest,
+    MeshingResourceBudget, MeshingStageKind, PersistentEntityId, StableDigest,
 };
 
-pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 5;
 const MAX_STAGE_COUNTERS: usize = 256;
 const MAX_STAGE_INVARIANTS: usize = 256;
+const MAX_STAGE_EVIDENCE: usize = 65_536;
 const MAX_SIZING_EVIDENCE: usize = 65_536;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,10 +95,36 @@ impl InvariantEvidence {
     }
 }
 
+/// Provenance of original producing-stage observations imported from accepted
+/// artifacts. This is retained lineage, not an independently replayed proof.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReusedMeshingStageOrigin {
+    ImplementationCache {
+        implementation_digest: StableDigest,
+    },
+    AcceptedInvocation {
+        invocation_identity_digest: StableDigest,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReusedMeshingStageObservation {
+    pub original_observation_digest: StableDigest,
+    pub origin: ReusedMeshingStageOrigin,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingStageEvidence {
+    /// None denotes the original producer; cached observations retain original
+    /// counters and timings and explicitly bind their original evidence identity.
+    /// Omission preserves canonical bytes of existing fresh observations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reused_from: Option<ReusedMeshingStageObservation>,
     pub stage: MeshingStageKind,
+    pub partition: MeshingPartitionDescriptor,
     pub stage_result_digest: StableDigest,
     pub entity_counts: BTreeMap<String, u64>,
     pub invariants: Vec<InvariantEvidence>,
@@ -103,12 +132,43 @@ pub struct MeshingStageEvidence {
     pub completed_work: u64,
     pub estimated_work: u64,
     pub peak_memory_bytes: u64,
+    pub peak_scratch_bytes: u64,
+    pub search_work: u64,
+    pub maximum_recursion_depth: u32,
+    pub iterations: u64,
     pub elapsed_time_ms: u64,
     pub cancellation_checkpoints: u64,
 }
 
 impl MeshingStageEvidence {
-    fn validate(&self) -> Result<(), MeshingContractError> {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
+        let control = super::MeshingCanonicalCodecControl::new(&super::NeverCancelled);
+        self.validate_with_control(&control)
+    }
+    fn validate_with_control(
+        &self,
+        control: &dyn CanonicalCodecControl,
+    ) -> Result<(), MeshingContractError> {
+        observation::checkpoint(control)?;
+        if let Some(origin) = &self.reused_from {
+            origin
+                .original_observation_digest
+                .validate_nonzero("original observation digest")?;
+            match &origin.origin {
+                ReusedMeshingStageOrigin::ImplementationCache {
+                    implementation_digest,
+                } => {
+                    implementation_digest.validate_nonzero("reused implementation digest")?;
+                }
+                ReusedMeshingStageOrigin::AcceptedInvocation {
+                    invocation_identity_digest,
+                } => {
+                    invocation_identity_digest
+                        .validate_nonzero("reused invocation identity digest")?;
+                }
+            }
+        }
+        self.partition.validate()?;
         self.stage_result_digest
             .validate_nonzero("stage evidence result digest")?;
         if self.entity_counts.len() > MAX_STAGE_COUNTERS
@@ -139,6 +199,14 @@ impl MeshingStageEvidence {
         for distribution in self.achieved_error_distributions.values() {
             distribution.validate()?;
         }
+        if let Some(origin) = &self.reused_from {
+            if observation::original_digest(self, control)? != origin.original_observation_digest {
+                return Err(MeshingContractError::invalid(
+                    "reused stage observation",
+                    "retained values differ from the original observation identity",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -152,6 +220,22 @@ pub struct SizingResolutionEvidence {
     pub achieved_maximum_size_m: f64,
     pub clipped_contribution_count: u32,
     pub rejected_contribution_count: u32,
+    /// Authored size control that requested this scope's size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_id: Option<String>,
+    /// Achieved corner edge lengths of the mesh entities on the scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub achieved: Option<AchievedEdgeLengths>,
+}
+
+/// Corner edge-length statistics of the mesh entities on one sizing scope.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AchievedEdgeLengths {
+    pub edge_count: u64,
+    pub minimum_m: f64,
+    pub mean_m: f64,
+    pub maximum_m: f64,
 }
 
 impl SizingResolutionEvidence {
@@ -190,19 +274,48 @@ pub struct MeshingResourceUsage {
 
 impl MeshingResourceUsage {
     fn validate_against(&self, budget: &MeshingResourceBudget) -> Result<(), MeshingContractError> {
-        if self.generated_nodes > budget.maximum_nodes
-            || self.generated_elements > budget.maximum_elements
-            || self.peak_memory_bytes > budget.maximum_memory_bytes
-            || self.peak_scratch_bytes > budget.maximum_scratch_bytes
-            || self.wall_time_ms > budget.maximum_wall_time_ms
-            || self.artifact_bytes > budget.maximum_artifact_bytes
-            || self.search_work > budget.maximum_search_work
-            || self.maximum_recursion_depth > budget.maximum_recursion_depth
-            || self.iterations > budget.maximum_iterations
-        {
+        let exceeded = [
+            ("nodes", self.generated_nodes, budget.maximum_nodes),
+            ("elements", self.generated_elements, budget.maximum_elements),
+            (
+                "memory_bytes",
+                self.peak_memory_bytes,
+                budget.maximum_memory_bytes,
+            ),
+            (
+                "scratch_bytes",
+                self.peak_scratch_bytes,
+                budget.maximum_scratch_bytes,
+            ),
+            (
+                "wall_time_ms",
+                self.wall_time_ms,
+                budget.maximum_wall_time_ms,
+            ),
+            (
+                "artifact_bytes",
+                self.artifact_bytes,
+                budget.maximum_artifact_bytes,
+            ),
+            ("search_work", self.search_work, budget.maximum_search_work),
+            (
+                "recursion_depth",
+                u64::from(self.maximum_recursion_depth),
+                u64::from(budget.maximum_recursion_depth),
+            ),
+            ("iterations", self.iterations, budget.maximum_iterations),
+        ]
+        .into_iter()
+        .filter(|(_, used, limit)| used > limit)
+        .map(|(name, used, limit)| format!("{name} {used} > {limit}"))
+        .collect::<Vec<_>>();
+        if !exceeded.is_empty() {
             return Err(MeshingContractError::invalid(
                 "meshing resource usage",
-                "successful evidence exceeds a resolved hard budget",
+                format!(
+                    "successful evidence exceeds a resolved hard budget: {}",
+                    exceeded.join(", ")
+                ),
             ));
         }
         Ok(())
@@ -220,7 +333,7 @@ pub struct PlatformBuildIdentity {
 }
 
 impl PlatformBuildIdentity {
-    fn validate(&self) -> Result<(), MeshingContractError> {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
         validate_token("capability cohort", &self.capability_cohort, 128)?;
         validate_token("target triple", &self.target_triple, 128)?;
         self.build_digest
@@ -253,6 +366,9 @@ pub struct MeshingEvidence {
     pub stages: Vec<MeshingStageEvidence>,
     pub sizing: Vec<SizingResolutionEvidence>,
     pub resources: MeshingResourceUsage,
+    /// The execution ceilings the run was admitted under; with the request's size limits they
+    /// form the hard budget the usage is checked against.
+    pub ceilings: super::MeshingExecutionCeilings,
     pub cache_admission: CacheAdmissionDecision,
 }
 
@@ -275,18 +391,64 @@ impl MeshingEvidence {
             ));
         }
         if self.resources.generated_nodes != artifact.topology.nodes.len() as u64
-            || self.resources.generated_elements != artifact.topology.volume_elements.len() as u64
+            || self.resources.generated_elements != artifact.generated_element_count()
+            || self.resources.artifact_bytes != artifact.canonical_encode()?.len() as u64
         {
             return Err(MeshingContractError::invalid(
                 "meshing resource usage",
-                "generated entity counts must match the validated artifact",
+                "generated entity counts and canonical bytes must match the validated artifact",
             ));
         }
-        self.resources
-            .validate_against(&artifact.resolved_request.resources)
+        self.resources.validate_against(&MeshingResourceBudget::new(
+            artifact.resolved_request.limits,
+            self.ceilings,
+        ))
+    }
+
+    /// Validates the terminal evidence against the identities and byte inventory sealed by the
+    /// serialization stage. Serialization owns full artifact validation; publication verifies
+    /// that the independently supplied evidence closes over that validated result without
+    /// reconstructing the complete solver topology a second time.
+    pub fn validate_publication_closure(
+        &self,
+        geometry: &GeometryRevisionRef,
+        resolved_request: &MeshingRequest,
+        artifact_digest: StableDigest,
+        artifact_bytes: u64,
+    ) -> Result<(), MeshingContractError> {
+        self.validate_standalone()?;
+        if self.geometry != *geometry
+            || self.resolved_request_digest != resolved_request.canonical_digest()?
+            || self.artifact_digest != artifact_digest
+            || self.algorithms != resolved_request.algorithms
+            || self.deterministic_seed != resolved_request.deterministic_seed
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing publication evidence",
+                "geometry, request, artifact, algorithm, or seed identity does not close over the serialized artifact",
+            ));
+        }
+        if self.resources.artifact_bytes != artifact_bytes {
+            return Err(MeshingContractError::invalid(
+                "meshing publication evidence",
+                "artifact byte inventory does not match the serialized artifact",
+            ));
+        }
+        self.resources.validate_against(&MeshingResourceBudget::new(
+            resolved_request.limits,
+            self.ceilings,
+        ))
     }
 
     pub(super) fn validate_standalone(&self) -> Result<(), MeshingContractError> {
+        let control = super::MeshingCanonicalCodecControl::new(&super::NeverCancelled);
+        self.validate_standalone_with_control(&control)
+    }
+    fn validate_standalone_with_control(
+        &self,
+        control: &dyn CanonicalCodecControl,
+    ) -> Result<(), MeshingContractError> {
+        observation::checkpoint(control)?;
         if self.schema_version != MESHING_EVIDENCE_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
                 "meshing evidence schema version",
@@ -300,12 +462,20 @@ impl MeshingEvidence {
             .validate_nonzero("evidence artifact digest")?;
         self.algorithms.validate()?;
         self.platform.validate()?;
-        if self.stages.len() != MeshingStageKind::ALL.len()
-            || self
-                .stages
-                .iter()
-                .map(|value| value.stage)
-                .ne(MeshingStageKind::ALL)
+        if self.stages.is_empty()
+            || self.stages.len() > MAX_STAGE_EVIDENCE
+            || self.stages.last().map(|value| value.stage) != Some(MeshingStageKind::Serialization)
+            || !self.stages.windows(2).all(|pair| {
+                (
+                    pair[0].stage,
+                    &pair[0].partition,
+                    pair[0].stage_result_digest,
+                ) < (
+                    pair[1].stage,
+                    &pair[1].partition,
+                    pair[1].stage_result_digest,
+                )
+            })
             || self.sizing.len() > MAX_SIZING_EVIDENCE
             || !strictly_increasing_by(&self.sizing, |value| &value.scope)
         {
@@ -315,9 +485,17 @@ impl MeshingEvidence {
             ));
         }
         for stage in &self.stages {
-            stage.validate()?;
+            observation::checkpoint(control)?;
+            stage.validate_with_control(control)?;
             if stage.peak_memory_bytes > self.resources.peak_memory_bytes
-                || stage.elapsed_time_ms > self.resources.wall_time_ms
+                || stage.peak_scratch_bytes > self.resources.peak_scratch_bytes
+                || stage.search_work > self.resources.search_work
+                || stage.maximum_recursion_depth > self.resources.maximum_recursion_depth
+                || stage.iterations > self.resources.iterations
+                // A reused observation retains the timing of the run that produced it,
+                // which may exceed the wall time of the run that restored it.
+                || (stage.reused_from.is_none()
+                    && stage.elapsed_time_ms > self.resources.wall_time_ms)
             {
                 return Err(MeshingContractError::invalid(
                     "stage evidence",
@@ -325,11 +503,57 @@ impl MeshingEvidence {
                 ));
             }
         }
+        let expected_peak_memory = self
+            .stages
+            .iter()
+            .map(|stage| stage.peak_memory_bytes)
+            .max()
+            .unwrap_or(0);
+        let expected_peak_scratch = self
+            .stages
+            .iter()
+            .map(|stage| stage.peak_scratch_bytes)
+            .max()
+            .unwrap_or(0);
+        let expected_recursion = self
+            .stages
+            .iter()
+            .map(|stage| stage.maximum_recursion_depth)
+            .max()
+            .unwrap_or(0);
+        let expected_search_work = checked_stage_sum(&self.stages, |stage| stage.search_work)?;
+        let expected_iterations = checked_stage_sum(&self.stages, |stage| stage.iterations)?;
+        if self.resources.peak_memory_bytes != expected_peak_memory
+            || self.resources.peak_scratch_bytes != expected_peak_scratch
+            || self.resources.search_work != expected_search_work
+            || self.resources.maximum_recursion_depth != expected_recursion
+            || self.resources.iterations != expected_iterations
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing resource usage",
+                "aggregate stage resources must equal their factual maxima and checked totals",
+            ));
+        }
         for sizing in &self.sizing {
+            observation::checkpoint(control)?;
             sizing.validate()?;
         }
         Ok(())
     }
+}
+
+fn checked_stage_sum(
+    stages: &[MeshingStageEvidence],
+    value: impl Fn(&MeshingStageEvidence) -> u64,
+) -> Result<u64, MeshingContractError> {
+    stages.iter().try_fold(0_u64, |total, stage| {
+        total.checked_add(value(stage)).ok_or_else(|| {
+            MeshingContractError::invalid(
+                "meshing resource usage",
+                "aggregate stage resource counter overflowed",
+            )
+        })
+    })
 }
 
 fn validate_map_keys<T>(
@@ -344,4 +568,22 @@ fn validate_map_keys<T>(
 
 fn strictly_increasing_by<T, K: Ord>(values: &[T], key: impl Fn(&T) -> &K) -> bool {
     values.windows(2).all(|pair| key(&pair[0]) < key(&pair[1]))
+}
+
+impl MeshingEvidence {
+    /// Admit actual typed CBOR materialization and the largest original-observation
+    /// codec workspace before validating the complete evidence. No stage clone.
+    pub fn canonical_decode_with_control(
+        bytes: &[u8],
+        control: &dyn CanonicalCodecControl,
+        admit: impl FnMut(u64) -> Result<(), MeshingContractError>,
+    ) -> Result<Self, MeshingContractError> {
+        super::codec::decode_validated(
+            bytes,
+            control,
+            admit,
+            |evidence: &Self| observation::validation_workspace(evidence, control),
+            |evidence| evidence.validate_standalone_with_control(control),
+        )
+    }
 }

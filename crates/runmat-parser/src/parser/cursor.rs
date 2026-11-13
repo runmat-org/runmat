@@ -62,6 +62,20 @@ impl Parser {
         }
     }
 
+    pub(super) fn error_at_with_expected(
+        &self,
+        token: &TokenInfo,
+        message: &str,
+        expected: &str,
+    ) -> SyntaxError {
+        SyntaxError {
+            message: message.to_string(),
+            position: token.position,
+            found_token: Some(token.lexeme.clone()),
+            expected: Some(expected.to_string()),
+        }
+    }
+
     pub(super) fn peek(&self) -> Option<&TokenInfo> {
         self.tokens.get(self.pos)
     }

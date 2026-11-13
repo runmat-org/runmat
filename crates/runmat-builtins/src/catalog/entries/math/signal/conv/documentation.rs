@@ -1,0 +1,71 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("conv"),
+    slug: Some("conv"),
+    summary: "Compute one-dimensional linear convolution in MATLAB and RunMat.",
+    description: "`conv(a, b)` computes one-dimensional linear convolution. It accepts real or complex row and column vectors, scalars, logical values, and all eight fixed-width integer classes. Either single input selects single output; otherwise the output is double. Integer arithmetic crosses an explicit floating-point boundary before multiplication and accumulation.",
+    keywords: &["conv", "convolution", "linear convolution", "signal processing", "polynomial multiplication", "gpu"],
+    related: &["fft", "ifft", "fftshift", "gpuArray", "gather", "conv2", "deconv", "filter"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Shape and orientation", paragraphs: &[
+            "The optional shape selector is `full` (default), `same`, or `valid`. Full convolution is a row unless both inputs are columns. Same and valid follow the first input's orientation when it is unambiguous.",
+            "Inputs must be vectors or scalars, not genuine matrices or N-D arrays. Empty inputs normally return empty output. `conv(u, [], 'valid')` returns zeros with the length and orientation of `u`, preserving the selected floating class and explicit complexity.",
+        ] },
+        BuiltinDocumentationSection { heading: "Classes and execution", paragraphs: &[
+            "Logical values are promoted to double. An explicitly complex input produces complex output even if every resulting imaginary component is zero. Fixed-width integer inputs produce floating output and therefore use floating rounding and overflow, not integer saturation.",
+            "Same-owner, same-device real floating inputs may use the provider's `conv1d` hook. The result is accepted only with the expected class, shape, device, owner, and a distinct live allocation. Other supported resident inputs gather through their owners; an eligible floating result returns to its owner without changing class or complexity. Host complex integer values are supported, but the current provider ABI cannot encode typed complex-integer resident buffers.",
+            "Convolution ends a fusion plan. There are no user-facing GPU tuning knobs; the provider chooses its launch parameters.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "example-1", title: "Full convolution of two row vectors", program: "a = [1 2 3];\nb = [1 1 1];\nc = conv(a, b)", display_output: Some("c = [1 3 6 5 3]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(c,[1 3 6 5 3])); assert(strcmp(class(c),'double'));" } },
+        BuiltinExample { id: "example-2", title: "Keep the first input's length", program: "kernel = [1 0 -1];\nsignal = [3 4 5 6 7];\nedge = conv(signal, kernel, 'same')", display_output: Some("edge = [4 2 2 2 -6]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(edge,[4 2 2 2 -6])); assert(isequal(size(edge),size(signal)));" } },
+        BuiltinExample { id: "example-3", title: "Valid convolution without padding", program: "weights = [1 2 3 4];\nwindow = [1 1 1];\nvalid = conv(weights, window, 'valid')", display_output: Some("valid = [6 9]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(valid,[6 9]));" } },
+        BuiltinExample { id: "example-4", title: "Convolve column vectors", program: "a = (1:3)';\nb = [2; 0; -2];\nc = conv(a, b)", display_output: Some("c =\n     2\n     4\n     4\n     -4\n     -6"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(c,[2;4;4;-4;-6])); assert(isequal(size(c),[5 1]));" } },
+        BuiltinExample { id: "example-5", title: "Multiply polynomial coefficients", program: "p = [1 3 3 1];    % (x + 1)^3 coefficients\nq = [1 -1];       % (x - 1)\ncoeff = conv(p, q)", display_output: Some("coeff = [1 2 0 -2 -1]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(coeff,[1 2 0 -2 -1]));" } },
+        BuiltinExample { id: "example-6", title: "Complex convolution", program: "t = 0:3;\nsig = exp(1i * pi/4 * t);\nfilt = [1 2i];\nresp = conv(sig, filt)", display_output: Some("resp =\n   1.0000   0.7071 + 2.7071i  -1.4142 + 2.4142i  -2.7071 + 0.7071i  -1.4142 - 1.4142i"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(resp),[1 5])); assert(abs(resp(1)-1)<1e-12); assert(abs(resp(5)+sqrt(2)*(1+1i))<1e-12);" } },
+        BuiltinExample { id: "example-7", title: "Scale by a scalar", program: "s = [4 5 6];\ny = conv(2, s)", display_output: Some("y = [8 10 12]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(y,[8 10 12]));" } },
+        BuiltinExample { id: "example-8", title: "Use resident inputs", program: "g = gpuArray([1 2 3 4]);\nh = gpuArray([1 0 -1]);\nedge = conv(g, h, 'same');\nresult = gather(edge)", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Wgpu, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(result,[2 2 2 -3]));" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Does `conv` require row vectors?", answer: "No. It accepts rows, columns, and scalars. Use `conv2` for matrices; RunMat does not currently provide `convn` for general N-D convolution. Full orientation follows the both-columns rule, while same and valid normally follow the first input." },
+        BuiltinDocumentationFaq { question: "What happens when an input is empty?", answer: "The result is normally empty. With `conv(u, [], 'valid')`, RunMat returns zeros with the length and orientation of `u` and the selected floating class and complexity." },
+        BuiltinDocumentationFaq { question: "How is `same` computed?", answer: "It selects the central portion of the full convolution with the first input's length." },
+        BuiltinDocumentationFaq { question: "When should I use `valid`?", answer: "Use it for results whose sliding window fits without zero padding." },
+        BuiltinDocumentationFaq { question: "Does `conv` support single precision?", answer: "Either single numeric input selects single output; otherwise logical, integer, and double inputs produce double. Integer arithmetic uses floating rounding and overflow rather than saturation." },
+        BuiltinDocumentationFaq { question: "Will the result stay on the GPU?", answer: "A same-owner, same-device real floating pair can use the native provider hook. Other supported resident values gather through their owners, and eligible floating results return to the first owner. Typed complex integer host inputs are supported; resident typed complex integer buffers are not encoded by the current provider ABI." },
+        BuiltinDocumentationFaq { question: "Can I convolve matrices or N-D arrays?", answer: "`conv` accepts vectors and scalars. Use `conv2` for matrices; general N-D convolution through `convn` is not currently available in RunMat." },
+        BuiltinDocumentationFaq { question: "How do I use an impulse kernel?", answer: "Use a `1` followed by zeros; convolution with a discrete delta retains the input with corresponding padding." },
+        BuiltinDocumentationFaq { question: "What about circular convolution?", answer: "For a circular convolution of length n, multiply `fft(a, n)` by `fft(b, n)` elementwise and apply `ifft` to the product. RunMat does not currently provide `cconv`." },
+        BuiltinDocumentationFaq { question: "Are there GPU tuning controls?", answer: "No. The provider chooses kernel launch settings." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "MATLAB conv documentation", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/conv.html") },
+        BuiltinDocumentationLink { label: "fft", target: BuiltinDocumentationLinkTarget::Builtin("fft") },
+        BuiltinDocumentationLink { label: "ifft", target: BuiltinDocumentationLinkTarget::Builtin("ifft") },
+        BuiltinDocumentationLink { label: "fftshift", target: BuiltinDocumentationLinkTarget::Builtin("fftshift") },
+        BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
+        BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+        BuiltinDocumentationLink { label: "conv2", target: BuiltinDocumentationLinkTarget::Builtin("conv2") },
+        BuiltinDocumentationLink { label: "deconv", target: BuiltinDocumentationLinkTarget::Builtin("deconv") },
+        BuiltinDocumentationLink { label: "filter", target: BuiltinDocumentationLinkTarget::Builtin("filter") },
+        BuiltinDocumentationLink { label: "Open a ticket", target: BuiltinDocumentationLinkTarget::External("https://github.com/runmat-org/runmat/issues/new/choose") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Convolution admission, numerical evaluation, and provider dispatch", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv.rs") },
+            BuiltinDocumentationLink { label: "Shared resident convolution contracts", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/common/convolution.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Shape, class, integer, complex, native and fallback tests", location: "builtins::math::signal::conv::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident round trip against host convolution", location: "builtins::math::signal::conv::tests::conv_gpu_roundtrip_matches_cpu" },
+        ],
+        notes: &[],
+    },
+    introduced: None,
+    status: None,
+};

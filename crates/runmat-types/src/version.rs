@@ -1,7 +1,7 @@
 pub const RUNMAT_TYPES_SCHEMA: SchemaIdentity = SchemaIdentity {
     name: "runmat-types",
     major: 1,
-    minor: 0,
+    minor: 3,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

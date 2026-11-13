@@ -1,20 +1,26 @@
 //! MATLAB-compatible `issorted` builtin with GPU-aware semantics.
 
+#[cfg(test)]
+use super::type_resolvers::bool_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    ISSORTED_DESCRIPTOR, ISSORTED_ERROR_DUPLICATE_DIRECTION, ISSORTED_ERROR_INTERNAL,
+    ISSORTED_ERROR_INVALID_ARGUMENT, ISSORTED_ERROR_INVALID_INPUT, ISSORTED_ERROR_ROWS_REQUIRES_2D,
+    ISSORTED_ERROR_STRING_COMPARISON_UNSUPPORTED, ISSORTED_EXTENSIONS,
+    ISSORTED_GPU_MISSING_PLACEMENT_EXTENSION, ISSORTED_GPU_NONVECTOR_EXTENSION,
+    ISSORTED_INTEGER_CAPABILITIES,
+};
 use runmat_value::IntegerComplexStorage;
 use std::cmp::Ordering;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, StringArray, Tensor, Value};
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::bool_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -54,261 +60,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "issorted";
 
-const ISSORTED_OUTPUT_TF: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when data is already sorted by requested criteria.",
-}];
-
-const ISSORTED_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const ISSORTED_INPUTS_A_ARG1: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token (including 'rows').",
-    },
-];
-
-const ISSORTED_INPUTS_A_ARG1_ARG2: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token (including 'rows').",
-    },
-    BuiltinParamDescriptor {
-        name: "arg2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Direction token or additional mode selector.",
-    },
-];
-
-const ISSORTED_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction/rows arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ComparisonMethod\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Comparison method: 'auto', 'real', or 'abs'.",
-    },
-];
-
-const ISSORTED_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction/rows arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"MissingPlacement\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "placement",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Missing placement policy: 'auto', 'first', or 'last'.",
-    },
-];
-
-const ISSORTED_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = issorted(A)",
-        inputs: &ISSORTED_INPUTS_A,
-        outputs: &ISSORTED_OUTPUT_TF,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issorted(A, arg1)",
-        inputs: &ISSORTED_INPUTS_A_ARG1,
-        outputs: &ISSORTED_OUTPUT_TF,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issorted(A, arg1, arg2)",
-        inputs: &ISSORTED_INPUTS_A_ARG1_ARG2,
-        outputs: &ISSORTED_OUTPUT_TF,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issorted(A, ..., \"ComparisonMethod\", method)",
-        inputs: &ISSORTED_INPUTS_COMPARISON_METHOD,
-        outputs: &ISSORTED_OUTPUT_TF,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issorted(A, ..., \"MissingPlacement\", placement)",
-        inputs: &ISSORTED_INPUTS_MISSING_PLACEMENT,
-        outputs: &ISSORTED_OUTPUT_TF,
-    },
-];
-
-const ISSORTED_ERROR_ROWS_REQUIRES_2D: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSORTED.ROWS_REQUIRES_2D",
-    identifier: Some("RunMat:issorted:RowsRequiresTwoDimensionalInput"),
-    when: "'rows' mode is used with non-2D input.",
-    message: "issorted: 'rows' expects a 2-D matrix",
-};
-
-const ISSORTED_ERROR_STRING_COMPARISON_UNSUPPORTED: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.ISSORTED.STRING_COMPARISON_UNSUPPORTED",
-        identifier: Some("RunMat:issorted:StringComparisonMethodUnsupported"),
-        when: "ComparisonMethod is used with string arrays.",
-        message: "issorted: 'ComparisonMethod' is not supported for string arrays",
-    };
-
-const ISSORTED_ERROR_DUPLICATE_DIRECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSORTED.DUPLICATE_DIRECTION",
-    identifier: Some("RunMat:issorted:DuplicateDirection"),
-    when: "Multiple direction tokens are provided.",
-    message: "issorted: sorting direction specified more than once",
-};
-
-const ISSORTED_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSORTED.INVALID_ARGUMENT",
-    identifier: Some("RunMat:issorted:InvalidArgument"),
-    when: "Parser encounters invalid or unrecognized option/value arguments.",
-    message: "issorted: invalid argument sequence",
-};
-
-const ISSORTED_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSORTED.INVALID_INPUT",
-    identifier: Some("RunMat:issorted:InvalidInput"),
-    when: "Input type cannot be normalized into a supported sortable representation.",
-    message: "issorted: invalid input type",
-};
-
-const ISSORTED_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSORTED.INTERNAL",
-    identifier: Some("RunMat:issorted:Internal"),
-    when: "Internal conversion/allocation paths fail.",
-    message: "issorted: internal operation failed",
-};
-
-const ISSORTED_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    ISSORTED_ERROR_ROWS_REQUIRES_2D,
-    ISSORTED_ERROR_STRING_COMPARISON_UNSUPPORTED,
-    ISSORTED_ERROR_DUPLICATE_DIRECTION,
-    ISSORTED_ERROR_INVALID_ARGUMENT,
-    ISSORTED_ERROR_INVALID_INPUT,
-    ISSORTED_ERROR_INTERNAL,
-];
-
-const ISSORTED_GPU_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "issorted-gpu-nonvector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "issorted with a nonvector resident GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IssortedGpuNonvectorExtension"),
-};
-
-const ISSORTED_GPU_MISSING_PLACEMENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "issorted-gpu-missing-placement",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "issorted with a non-auto MissingPlacement value on GPU is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IssortedGpuMissingPlacementExtension"),
-    };
-
-const ISSORTED_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ISSORTED_GPU_NONVECTOR_EXTENSION,
-    ISSORTED_GPU_MISSING_PLACEMENT_EXTENSION,
-];
-
-const ISSORTED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented sortable input domain includes all eight real integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive integer-scalar dimension accepts every integer class and integer-valued scalar double.",
-    },
-];
-
-const ISSORTED_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "tf = issorted(integer_A, integer_dim, direction, options)",
-        inputs: &ISSORTED_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer values are compared exactly and tf is scalar logical. GPU input is documented only for vectors and only with MissingPlacement auto; supported resident forms gather exactly.",
-    }];
-
-pub const ISSORTED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISSORTED_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISSORTED_ERRORS,
-};
-
 fn issorted_error(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -334,22 +85,20 @@ fn issorted_internal(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "issorted",
-    category = "array/sorting_sets",
-    summary = "Determine whether an array is already sorted.",
-    keywords = "issorted,sorted,monotonic,rows",
-    accel = "sink",
-    sink = true,
-    type_resolver(bool_output_type),
-    descriptor(crate::builtins::array::sorting_sets::issorted::ISSORTED_DESCRIPTOR),
-    extensions(ISSORTED_EXTENSIONS),
-    integer_capabilities(ISSORTED_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
-async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn issorted_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(issorted_error(
+            &ISSORTED_ERROR_INVALID_ARGUMENT,
+            "issorted: too many output arguments; maximum is 1",
+        ));
+    }
     let (input, args) = match value {
         Value::GpuTensor(handle) => {
-            let args = IssortedArgs::parse(&rest, &handle.shape)?;
-            if !gpu_shape_is_vector(&handle.shape) {
+            let args = IssortedArgs::parse(rest.view(), handle.shape())?;
+            if !gpu_shape_is_vector(handle.shape()) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &ISSORTED_GPU_NONVECTOR_EXTENSION,
                     BUILTIN_NAME,
@@ -366,7 +115,7 @@ async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         }
         other => {
             let input = normalize_host_input(other)?;
-            let args = IssortedArgs::parse(&rest, &input.shape())?;
+            let args = IssortedArgs::parse(rest.view(), input.shape())?;
             (input, args)
         }
     };
@@ -456,17 +205,17 @@ enum InputArray {
 }
 
 impl InputArray {
-    fn shape(&self) -> Vec<usize> {
+    fn shape(&self) -> &[usize] {
         match self {
-            InputArray::Real(t) => t.shape.clone(),
-            InputArray::Complex(t) => t.shape.clone(),
-            InputArray::String(sa) => sa.shape.clone(),
+            InputArray::Real(t) => t.shape(),
+            InputArray::Complex(t) => t.shape(),
+            InputArray::String(sa) => sa.shape.as_slice(),
         }
     }
 }
 
 impl IssortedArgs {
-    fn parse(args: &[Value], shape: &[usize]) -> crate::BuiltinResult<Self> {
+    fn parse(args: FunctionArgumentView<'_>, shape: &[usize]) -> crate::BuiltinResult<Self> {
         let mut dim_arg: Option<usize> = None;
         let mut direction: Option<Direction> = None;
         let mut comparison: ComparisonMethod = ComparisonMethod::Auto;
@@ -649,7 +398,7 @@ fn normalize_host_input(value: Value) -> crate::BuiltinResult<InputArray> {
         Value::StringArray(sa) => Ok(InputArray::String(sa)),
         Value::String(s) => {
             let array =
-                StringArray::new(vec![s], vec![1, 1])
+                StringArray::from_elements_unbounded(vec![s], vec![1, 1])
                     .map_err(|e| issorted_internal(format!("issorted: {e}")))?;
             Ok(InputArray::String(array))
         }
@@ -671,15 +420,15 @@ fn gpu_shape_is_vector(shape: &[usize]) -> bool {
 
 fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if let Some(storage) = tensor.integer_storage() {
-        return issorted_integer(&storage.exact_values(), &tensor.shape, args);
+        return issorted_integer(&storage.exact_values(), tensor.shape(), args);
     }
     if let Some(values) = tensor.as_f32_slice() {
-        return issorted_floating(values, &tensor.shape, args);
+        return issorted_floating(values, tensor.shape(), args);
     }
     let values = tensor
         .as_f64_slice()
         .expect("non-integer real tensor stores native single or double");
-    issorted_floating(values, &tensor.shape, args)
+    issorted_floating(values, tensor.shape(), args)
 }
 
 fn issorted_floating<T: SetFloat>(
@@ -815,15 +564,15 @@ fn check_integer_slice(
 
 fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if let Some(values) = tensor.as_f32_slice() {
-        return issorted_floating_complex(values, &tensor.shape, args);
+        return issorted_floating_complex(values, tensor.shape(), args);
     }
     if let Some(values) = tensor.as_f64_slice() {
-        return issorted_floating_complex(values, &tensor.shape, args);
+        return issorted_floating_complex(values, tensor.shape(), args);
     }
     let storage = tensor
         .integer_storage()
         .expect("complex tensor storage is floating or integer");
-    issorted_complex_integer(storage, &tensor.shape, args)
+    issorted_complex_integer(storage, tensor.shape(), args)
 }
 
 fn issorted_complex_integer(
@@ -927,19 +676,19 @@ fn compare_complex_integer_at(
     comparison: ComparisonMethod,
 ) -> Ordering {
     let a_real = storage
-        .real
+        .real()
         .value_at(a)
         .expect("validated complex integer index");
     let a_imag = storage
-        .imag
+        .imag()
         .value_at(a)
         .expect("validated complex integer index");
     let b_real = storage
-        .real
+        .real()
         .value_at(b)
         .expect("validated complex integer index");
     let b_imag = storage
-        .imag
+        .imag()
         .value_at(b)
         .expect("validated complex integer index");
     integer_order::compare_complex(
@@ -950,8 +699,8 @@ fn compare_complex_integer_at(
     )
 }
 
-fn issorted_floating_complex<T: SetFloat>(
-    values: &[(T, T)],
+fn issorted_floating_complex<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     args: &IssortedArgs,
 ) -> crate::BuiltinResult<bool> {
@@ -965,7 +714,7 @@ fn issorted_floating_complex<T: SetFloat>(
 }
 
 fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
-    if array.data.is_empty() {
+    if array.data().is_empty() {
         return Ok(true);
     }
     if !matches!(args.comparison, ComparisonMethod::Auto) {
@@ -1017,8 +766,8 @@ fn check_real_dimension<T: SetFloat>(
     true
 }
 
-fn check_complex_dimension<T: SetFloat>(
-    values: &[(T, T)],
+fn check_complex_dimension<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     dim: usize,
     args: &IssortedArgs,
@@ -1043,7 +792,7 @@ fn check_complex_dimension<T: SetFloat>(
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(values[idx]);
+                slice.push(values.pair_at(idx));
             }
             if !check_complex_slice(&slice, args.direction, effective_comp, args.missing) {
                 return false;
@@ -1070,7 +819,7 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(array.data[idx].as_str());
+                slice.push(&array.data()[idx]);
             }
             if !check_string_slice(&slice, args.direction, args.missing) {
                 return false;
@@ -1109,8 +858,8 @@ fn check_real_rows<T: SetFloat>(
     Ok(false)
 }
 
-fn check_complex_rows<T: SetFloat>(
-    values: &[(T, T)],
+fn check_complex_rows<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     args: &IssortedArgs,
 ) -> crate::BuiltinResult<bool> {
@@ -1189,15 +938,15 @@ fn real_rows_in_order<T: SetFloat>(
     true
 }
 
-fn complex_rows_in_order<T: SetFloat>(
-    values: &[(T, T)],
+fn complex_rows_in_order<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     rows: usize,
     cols: usize,
     order: OrderSpec,
     comparison: ComparisonMethod,
     missing: MissingPlacement,
 ) -> bool {
-    if order.strict && values.iter().any(|v| complex_is_nan(*v)) {
+    if order.strict && (0..values.len()).any(|index| complex_is_nan(values.pair_at(index))) {
         return false;
     }
     let missing_resolved = missing.resolve(order.direction);
@@ -1226,7 +975,7 @@ fn string_rows_in_order(
     order: OrderSpec,
     missing: MissingPlacement,
 ) -> bool {
-    if order.strict && array.data.iter().any(|s| is_string_missing(s)) {
+    if order.strict && array.data().iter().any(|s| is_string_missing(s)) {
         return false;
     }
     let missing_resolved = missing.resolve(order.direction);
@@ -1271,8 +1020,8 @@ fn compare_real_row_pair<T: SetFloat>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compare_complex_row_pair<T: SetFloat>(
-    values: &[(T, T)],
+fn compare_complex_row_pair<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     rows: usize,
     cols: usize,
     a: usize,
@@ -1284,8 +1033,13 @@ fn compare_complex_row_pair<T: SetFloat>(
     for col in 0..cols {
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
-        let ord =
-            compare_complex_scalars(values[idx_a], values[idx_b], direction, comparison, missing);
+        let ord = compare_complex_scalars(
+            values.pair_at(idx_a),
+            values.pair_at(idx_b),
+            direction,
+            comparison,
+            missing,
+        );
         if ord != Ordering::Equal {
             return ord;
         }
@@ -1306,8 +1060,8 @@ fn compare_string_row_pair(
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
         let ord = compare_string_scalars(
-            array.data[idx_a].as_str(),
-            array.data[idx_b].as_str(),
+            &array.data()[idx_a],
+            &array.data()[idx_b],
             direction,
             missing,
         );
@@ -1377,7 +1131,11 @@ fn check_complex_slice<T: SetFloat>(
     false
 }
 
-fn check_string_slice(slice: &[&str], direction: Direction, missing: MissingPlacement) -> bool {
+fn check_string_slice(
+    slice: &[&runmat_value::StringElement],
+    direction: Direction,
+    missing: MissingPlacement,
+) -> bool {
     if slice.len() <= 1 {
         return true;
     }
@@ -1425,7 +1183,7 @@ fn complex_slice_in_order<T: SetFloat>(
 }
 
 fn string_slice_in_order(
-    slice: &[&str],
+    slice: &[&runmat_value::StringElement],
     order: OrderSpec,
     missing: MissingPlacementResolved,
 ) -> bool {
@@ -1563,8 +1321,8 @@ fn compare_complex_real_first<T: SetFloat>(
 }
 
 fn compare_string_scalars(
-    a: &str,
-    b: &str,
+    a: &runmat_value::StringElement,
+    b: &runmat_value::StringElement,
     direction: SortDirection,
     missing: MissingPlacementResolved,
 ) -> Ordering {
@@ -1595,8 +1353,8 @@ fn complex_abs<T: SetFloat>(value: (T, T)) -> T {
     value.0.hypot(value.1)
 }
 
-fn is_string_missing(value: &str) -> bool {
-    value.eq_ignore_ascii_case("<missing>")
+fn is_string_missing(value: &runmat_value::StringElement) -> bool {
+    value.is_missing()
 }
 
 fn direction_orders(direction: Direction) -> &'static [OrderSpec] {
@@ -1671,9 +1429,9 @@ fn char_array_to_tensor(array: &CharArray) -> crate::BuiltinResult<Tensor> {
     let mut data = vec![0.0f64; rows * cols];
     for r in 0..rows {
         for c in 0..cols {
-            let ch = array.data[r * cols + c];
+            let ch = array.data()[r * cols + c];
             let idx = r + c * rows;
-            data[idx] = ch as u32 as f64;
+            data[idx] = f64::from(ch.raw());
         }
     }
     Tensor::new(data, vec![rows, cols]).map_err(|e| issorted_internal(format!("issorted: {e}")))
@@ -1688,7 +1446,10 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage, LogicalArray, Value};
 
     fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::issorted_builtin(value, rest))
+        block_on(super::issorted_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2109,8 +1870,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last() {
-        let array = StringArray::new(
-            vec!["apple".into(), "banana".into(), "<missing>".into()],
+        let array = StringArray::from_elements_unbounded(
+            vec![
+                "apple".into(),
+                "banana".into(),
+                runmat_value::StringElement::Missing,
+            ],
             vec![3, 1],
         )
         .unwrap();
@@ -2123,7 +1888,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_string_missingplacement_last_violation() {
-        let array = StringArray::new(vec!["<missing>".into(), "apple".into()], vec![2, 1]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing, "apple".into()],
+            vec![2, 1],
+        )
+        .unwrap();
         let args = vec![Value::from("MissingPlacement"), Value::from("last")];
         let result =
             issorted_builtin(Value::StringArray(array), args).expect("issorted string placement");
@@ -2145,7 +1914,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn issorted_char_array_input() {
-        let chars = CharArray::new(vec!['a', 'c', 'e'], 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['a', 'c', 'e'], 1, 3).unwrap();
         let result = issorted_builtin(Value::CharArray(chars), vec![]).expect("issorted char");
         assert_eq!(result, Value::Bool(true));
     }
@@ -2169,7 +1938,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = issorted_builtin(Value::GpuTensor(handle), vec![]).expect("issorted gpu");
@@ -2259,7 +2028,7 @@ pub(crate) mod tests {
         let cpu = issorted_builtin(Value::Tensor(tensor.clone()), vec![]).expect("cpu issorted");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .expect("wgpu provider")

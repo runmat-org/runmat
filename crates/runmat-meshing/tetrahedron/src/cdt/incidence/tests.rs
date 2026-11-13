@@ -10,18 +10,11 @@ use crate::cdt::{
 };
 
 fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-    DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([identity; 32]),
-        coordinates_m,
-    }
+    DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
 }
 
 fn region(id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: id.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, id.to_owned(), Vec::new())
 }
 
 fn bipyramid() -> DelaunayVolumeTopology {
@@ -56,10 +49,18 @@ fn incidence_derives_vertex_stars_and_outward_boundary_facets() {
         let tetrahedron = &topology.tetrahedra[facet.tetrahedron_index as usize];
         let opposite = tetrahedron.vertex_indices[facet.opposite_vertex_slot as usize];
         let points = [
-            topology.nodes[facet.oriented_vertex_indices[0] as usize].coordinates_m,
-            topology.nodes[facet.oriented_vertex_indices[1] as usize].coordinates_m,
-            topology.nodes[facet.oriented_vertex_indices[2] as usize].coordinates_m,
-            topology.nodes[opposite as usize].coordinates_m,
+            topology.nodes[facet.oriented_vertex_indices[0] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes[facet.oriented_vertex_indices[1] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes[facet.oriented_vertex_indices[2] as usize]
+                .coordinates_m
+                .canonical_value(),
+            topology.nodes[opposite as usize]
+                .coordinates_m
+                .canonical_value(),
         ];
         assert_eq!(orient3d(points).unwrap(), PredicateSign::Positive);
     }
@@ -197,5 +198,35 @@ fn region_assignment_honors_cancellation_before_mutation() {
         .unwrap_err()
         .kind,
         DelaunayTopologyErrorKind::Cancelled
+    );
+}
+
+#[test]
+fn distinct_region_validation_preserves_grouping_and_rejects_later_invalid_identity() {
+    let mut topology = bipyramid();
+    for cell in &mut topology.tetrahedra {
+        cell.region_id = Some(region("same-region"));
+    }
+    let incidence = build_volume_incidence(
+        &topology.nodes,
+        &topology.tetrahedra,
+        &NeverCancelled,
+        DelaunayTopologyOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(incidence.regions.len(), 1);
+    assert_eq!(incidence.regions[0].region_id, region("same-region"));
+    assert_eq!(incidence.regions[0].tetrahedron_indices, vec![0, 1]);
+    topology.tetrahedra[1].region_id = Some(region(" "));
+    assert_eq!(
+        build_volume_incidence(
+            &topology.nodes,
+            &topology.tetrahedra,
+            &NeverCancelled,
+            DelaunayTopologyOptions::default()
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayTopologyErrorKind::InvalidRegion
     );
 }

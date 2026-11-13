@@ -689,7 +689,7 @@ fn spectral_shader_numeric_fragments(
     precision: NumericPrecision,
 ) -> (&'static str, &'static str, &'static str) {
     match precision {
-        NumericPrecision::F64 => ("f64", "0.0", "f64"),
+        NumericPrecision::F64 => ("f64", "f64(0.0)", "f64"),
         NumericPrecision::F32 => ("f32", "0.0", "f32"),
     }
 }

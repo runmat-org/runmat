@@ -4,13 +4,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use runmat_core::{TelemetryPlatformInfo, TelemetrySink};
-use runmat_runtime::build_runtime_error;
 use runmat_runtime::builtins::wasm_registry;
-use runmat_value::Value;
 
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;
-use crate::runtime::config::{apply_plotting_overrides, InitOptions, SessionConfig};
+use crate::runtime::config::{ApplicationSettingsMode, InitOptions, SessionConfig};
 use crate::runtime::execution::{execution_host_from_options, BrowserExecutionService};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
@@ -20,6 +18,12 @@ use crate::runtime::gpu::{
 use crate::runtime::logging::{init_logging_once, set_log_filter_override};
 use crate::runtime::package_cache::JsPackageCacheBackend;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
+
+/// Exact SDK admission marker for string/null typed string projections.
+#[wasm_bindgen(js_name = stringElementWireSchemaVersion)]
+pub fn string_element_wire_schema_version() -> u16 {
+    runmat_execution::schema::STRING_ELEMENT_WIRE_SCHEMA_VERSION
+}
 
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
@@ -33,15 +37,26 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             )
         })?
     };
-    if let Some(level) = parsed_opts.log_level.as_deref() {
-        set_log_filter_override(level);
-    }
-    init_logging_once();
+    let config = SessionConfig::from_options(&parsed_opts)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
+    #[cfg(target_arch = "wasm32")]
+    crate::runtime::gpu::admit_browser_provider(&config)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
     #[cfg(target_arch = "wasm32")]
     ensure_getrandom_js();
+    crate::api::observability::configure_for_session(&config.runtime.logging.otel, &options)?;
+    let effective_log_level = if config.runtime.logging.debug {
+        "debug".to_owned()
+    } else {
+        format!("{:?}", config.runtime.logging.level).to_ascii_lowercase()
+    };
+    set_log_filter_override(&effective_log_level);
+    init_logging_once();
+    crate::runtime::settings::apply_resources(&config.runtime)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
     #[cfg(target_arch = "wasm32")]
     ensure_figure_event_bridge();
-    install_fs_provider_from_options(&options).map_err(|err| {
+    let dialog_host = install_fs_provider_from_options(&options).map_err(|err| {
         init_error_with_details(
             InitErrorCode::FilesystemProvider,
             "Failed to install filesystem provider",
@@ -68,15 +83,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         }
     }
 
-    apply_plotting_overrides(&parsed_opts);
     wasm_registry::register_all();
-    ensure_internal_builtins();
-    let builtin_count = runmat_builtins::builtin_functions().len();
-    log::info!("RunMat wasm: builtins registered ({builtin_count})");
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::log_1(&format!("RunMat wasm: builtins registered ({builtin_count})").into());
+    log::debug!("RunMat wasm: creating execution session");
 
-    let config = SessionConfig::from_options(&parsed_opts);
     config.apply_env_overrides();
     let mut session = runmat_core::RunMatSession::with_options(config.enable_jit, config.verbose)
         .map_err(|err| {
@@ -85,6 +94,17 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
+    session
+        .apply_runtime_config(&config.runtime)
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error.to_string()))?;
+    if let Some(host) = dialog_host.clone() {
+        session.install_host_service(host);
+    }
+    let application_settings = matches!(
+        parsed_opts.application_settings,
+        Some(ApplicationSettingsMode::IsolatedMemory)
+    )
+    .then(|| std::rc::Rc::new(runmat_runtime::context::IsolatedMemoryPreferenceService::new()));
     session.set_telemetry_consent(config.telemetry_consent);
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));
@@ -93,22 +113,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     session.set_compat_mode(config.language_compat);
     session.set_callstack_limit(config.callstack_limit);
     session.set_error_namespace(config.error_namespace.clone());
-    let execution_service =
-        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
-            init_error_with_details(
-                InitErrorCode::InvalidOptions,
-                "Failed to initialize browser execution host",
-                Some(error),
-            )
-        })?)
-        .map_err(|error| {
-            init_error(
-                InitErrorCode::SessionCreation,
-                format!("Failed to initialize browser execution: {error}"),
-            )
-        })?;
-    session.install_execution_services(execution_service.clone());
-
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
         active: false,
@@ -137,24 +141,59 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
                     }
                 }
                 Err(err) => {
+                    if !config.runtime.accelerate.allow_inprocess_fallback {
+                        return Err(init_error_with_details(
+                            InitErrorCode::SessionCreation,
+                            "GPU initialization failed and CPU fallback is disabled",
+                            Some(err),
+                        ));
+                    }
                     let message = js_value_to_string(err.clone());
                     log::warn!(
                         "RunMat wasm: GPU initialization failed (falling back to CPU): {message}"
                     );
                     gpu_status.error = Some(message);
-                    install_cpu_provider(&config);
+                    install_cpu_provider(&config)?;
                 }
             },
             Err(reason) => {
+                if !config.runtime.accelerate.allow_inprocess_fallback {
+                    return Err(init_error(
+                        InitErrorCode::SessionCreation,
+                        format!("WebGPU unavailable and CPU fallback is disabled: {reason}"),
+                    ));
+                }
                 log::warn!(
                     "RunMat wasm: WebGPU capability preflight failed (falling back to CPU): {reason}"
                 );
                 gpu_status.error = Some(reason);
-                install_cpu_provider(&config);
+                install_cpu_provider(&config)?;
             }
         }
     } else {
-        install_cpu_provider(&config);
+        install_cpu_provider(&config)?;
+    }
+
+    // Build the browser scheduler after provider initialization so its typed
+    // worker inventory reflects the accelerator that can actually execute
+    // this session's programs.
+    let execution_service =
+        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
+            init_error_with_details(
+                InitErrorCode::InvalidOptions,
+                "Failed to initialize browser execution host",
+                Some(error),
+            )
+        })?)
+        .map_err(|error| {
+            init_error(
+                InitErrorCode::SessionCreation,
+                format!("Failed to initialize browser execution: {error}"),
+            )
+        })?;
+    session.install_execution_services(execution_service.clone());
+    if execution_service.has_owned_cpu_worker() {
+        session.install_owned_builtin_work_service(execution_service.clone());
     }
 
     let telemetry_sink: Option<Arc<dyn TelemetrySink>> = {
@@ -188,14 +227,21 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         session.set_telemetry_sink(telemetry_sink.clone());
     }
 
-    Ok(RunMatWasm::new(
+    let handle = RunMatWasm::new(
         session,
         config,
         gpu_status,
         telemetry_sink,
         package_cache,
         execution_service,
-    ))
+        dialog_host,
+    );
+    match application_settings {
+        Some(settings) => handle
+            .with_application_settings(settings)
+            .map_err(|err| init_error(InitErrorCode::SessionCreation, err)),
+        None => Ok(handle),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -224,29 +270,37 @@ async fn package_cache_from_options(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn install_fs_provider_from_options(options: &JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_from_options(
+    options: &JsValue,
+) -> Result<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>, JsValue> {
     if options.is_null() || options.is_undefined() || !options.is_object() {
-        return Ok(());
+        return Ok(None);
     }
     let value = js_sys::Reflect::get(options, &JsValue::from_str("fsProvider"))?;
     if value.is_null() || value.is_undefined() {
-        return Ok(());
+        return Ok(None);
     }
-    install_js_fs_provider(&value)
+    install_js_fs_provider(&value).map(Some)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_fs_provider_from_options(_options: &JsValue) -> Result<(), JsValue> {
-    Ok(())
+pub(crate) fn install_fs_provider_from_options(
+    _options: &JsValue,
+) -> Result<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>, JsValue> {
+    Ok(None)
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn install_fs_provider_value(bindings: JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_value(
+    bindings: JsValue,
+) -> Result<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>, JsValue> {
     install_js_fs_provider(&bindings)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_value(
+    _bindings: JsValue,
+) -> Result<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>, JsValue> {
     Err(crate::wire::errors::js_error(
         "filesystem provider installation is only available when targeting wasm32",
     ))
@@ -258,55 +312,6 @@ fn ensure_getrandom_js() {
     if let Err(err) = getrandom::getrandom(&mut buf) {
         log::warn!("RunMat wasm: failed to initialize JS randomness source: {err}");
     }
-}
-
-pub(crate) fn ensure_internal_builtins() {
-    if runmat_builtins::builtin_function_by_name("make_anon").is_none() {
-        register_make_anon_fallback();
-    }
-}
-
-fn register_make_anon_fallback() {
-    use runmat_builtins::wasm_registry::submit_builtin_function;
-    use runmat_builtins::BuiltinFunction;
-
-    fn make_anon_impl(args: &[Value]) -> runmat_builtins::BuiltinFuture {
-        let args = args.to_vec();
-        Box::pin(async move {
-            if args.len() != 2 {
-                return Err(build_runtime_error("make_anon: expected 2 inputs")
-                    .with_identifier("RunMat:make_anon:InvalidInput")
-                    .build());
-            }
-            let params: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
-                build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("RunMat:make_anon:InvalidInput")
-                    .build()
-            })?;
-            let body: String = std::convert::TryInto::try_into(&args[1]).map_err(|err| {
-                build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("RunMat:make_anon:InvalidInput")
-                    .build()
-            })?;
-            Ok(Value::String(format!("@anon({params}) {body}")))
-        })
-    }
-
-    let builtin = BuiltinFunction::new(
-        "make_anon",
-        "",
-        "",
-        "",
-        "",
-        vec![runmat_builtins::Type::String, runmat_builtins::Type::String],
-        runmat_builtins::Type::Unknown,
-        None,
-        make_anon_impl,
-        &[],
-        false,
-        true,
-    );
-    submit_builtin_function(builtin);
 }
 
 #[cfg(target_arch = "wasm32")]

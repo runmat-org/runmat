@@ -16,7 +16,8 @@ struct LineParams {
     x_span: f32,
     y_min: f32,
     y_span: f32,
-    _pad1: vec2<f32>,
+    // (x_log, y_log): 1 when the axis maps through log10. x_min/x_span are then in decades.
+    log_flags: vec2<u32>,
 };
 
 @group(0) @binding(0)
@@ -62,17 +63,36 @@ fn write_vertex(index: u32, pos: vec2<f32>, color: vec4<f32>) {
     out_vertices[index] = vertex;
 }
 
+fn to_axis(value: f32, is_log: u32) -> f32 {
+    if (is_log != 0u) {
+        return log2(value) * 0.30102999566;
+    }
+    return value;
+}
+
+fn from_axis(value: f32, is_log: u32) -> f32 {
+    if (is_log != 0u) {
+        return exp2(value * 3.32192809489);
+    }
+    return value;
+}
+
+// Non-positive values have no position on a log axis; segments touching them are skipped.
+fn on_axes(p: vec2<f32>) -> bool {
+    return (params.log_flags.x == 0u || p.x > 0.0) && (params.log_flags.y == 0u || p.y > 0.0);
+}
+
 fn data_to_px(p: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(
-        (p.x - params.x_min) * (params.viewport_width_px / max(params.x_span, 1e-12)),
-        (p.y - params.y_min) * (params.viewport_height_px / max(params.y_span, 1e-12))
+        (to_axis(p.x, params.log_flags.x) - params.x_min) * (params.viewport_width_px / max(params.x_span, 1e-12)),
+        (to_axis(p.y, params.log_flags.y) - params.y_min) * (params.viewport_height_px / max(params.y_span, 1e-12))
     );
 }
 
 fn px_to_data(p: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(
-        params.x_min + p.x * (max(params.x_span, 1e-12) / params.viewport_width_px),
-        params.y_min + p.y * (max(params.y_span, 1e-12) / params.viewport_height_px)
+        from_axis(params.x_min + p.x * (max(params.x_span, 1e-12) / params.viewport_width_px), params.log_flags.x),
+        from_axis(params.y_min + p.y * (max(params.y_span, 1e-12) / params.viewport_height_px), params.log_flags.y)
     );
 }
 
@@ -93,7 +113,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p1 = data_to_px(p1_data);
     let delta = p1 - p0;
     let len = length(delta);
-    let draw = should_draw(idx, params.line_style) && (len != 0.0);
+    let draw = should_draw(idx, params.line_style)
+        && on_axes(p0_data)
+        && on_axes(p1_data)
+        && (len != 0.0);
     var color = params.color;
     if (!draw) {
         color.w = 0.0;
@@ -102,12 +125,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!draw) {
         let base = idx * 6u;
         // Emit fully transparent degenerate geometry for skipped/degenerate segments.
-        write_vertex(base + 0u, p0, color);
-        write_vertex(base + 1u, p0, color);
-        write_vertex(base + 2u, p0, color);
-        write_vertex(base + 3u, p0, color);
-        write_vertex(base + 4u, p0, color);
-        write_vertex(base + 5u, p0, color);
+        let parked = px_to_data(vec2<f32>(0.0, 0.0));
+        write_vertex(base + 0u, parked, color);
+        write_vertex(base + 1u, parked, color);
+        write_vertex(base + 2u, parked, color);
+        write_vertex(base + 3u, parked, color);
+        write_vertex(base + 4u, parked, color);
+        write_vertex(base + 5u, parked, color);
         return;
     }
 
@@ -151,7 +175,8 @@ struct LineParams {
     x_span: f32,
     y_min: f32,
     y_span: f32,
-    _pad1: vec2<f32>,
+    // (x_log, y_log): 1 when the axis maps through log10. x_min/x_span are then in decades.
+    log_flags: vec2<u32>,
 };
 
 @group(0) @binding(0)
@@ -197,17 +222,36 @@ fn write_vertex(index: u32, pos: vec2<f32>, color: vec4<f32>) {
     out_vertices[index] = vertex;
 }
 
+fn to_axis(value: f32, is_log: u32) -> f32 {
+    if (is_log != 0u) {
+        return log2(value) * 0.30102999566;
+    }
+    return value;
+}
+
+fn from_axis(value: f32, is_log: u32) -> f32 {
+    if (is_log != 0u) {
+        return exp2(value * 3.32192809489);
+    }
+    return value;
+}
+
+// Non-positive values have no position on a log axis; segments touching them are skipped.
+fn on_axes(p: vec2<f32>) -> bool {
+    return (params.log_flags.x == 0u || p.x > 0.0) && (params.log_flags.y == 0u || p.y > 0.0);
+}
+
 fn data_to_px(p: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(
-        (p.x - params.x_min) * (params.viewport_width_px / max(params.x_span, 1e-12)),
-        (p.y - params.y_min) * (params.viewport_height_px / max(params.y_span, 1e-12))
+        (to_axis(p.x, params.log_flags.x) - params.x_min) * (params.viewport_width_px / max(params.x_span, 1e-12)),
+        (to_axis(p.y, params.log_flags.y) - params.y_min) * (params.viewport_height_px / max(params.y_span, 1e-12))
     );
 }
 
 fn px_to_data(p: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(
-        params.x_min + p.x * (max(params.x_span, 1e-12) / params.viewport_width_px),
-        params.y_min + p.y * (max(params.y_span, 1e-12) / params.viewport_height_px)
+        from_axis(params.x_min + p.x * (max(params.x_span, 1e-12) / params.viewport_width_px), params.log_flags.x),
+        from_axis(params.y_min + p.y * (max(params.y_span, 1e-12) / params.viewport_height_px), params.log_flags.y)
     );
 }
 
@@ -228,7 +272,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p1 = data_to_px(p1_data);
     let delta = p1 - p0;
     let len = length(delta);
-    let draw = should_draw(idx, params.line_style) && (len != 0.0);
+    let draw = should_draw(idx, params.line_style)
+        && on_axes(p0_data)
+        && on_axes(p1_data)
+        && (len != 0.0);
     var color = params.color;
     if (!draw) {
         color.w = 0.0;
@@ -236,12 +283,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     if (!draw) {
         let base = idx * 6u;
-        write_vertex(base + 0u, p0, color);
-        write_vertex(base + 1u, p0, color);
-        write_vertex(base + 2u, p0, color);
-        write_vertex(base + 3u, p0, color);
-        write_vertex(base + 4u, p0, color);
-        write_vertex(base + 5u, p0, color);
+        let parked = px_to_data(vec2<f32>(0.0, 0.0));
+        write_vertex(base + 0u, parked, color);
+        write_vertex(base + 1u, parked, color);
+        write_vertex(base + 2u, parked, color);
+        write_vertex(base + 3u, parked, color);
+        write_vertex(base + 4u, parked, color);
+        write_vertex(base + 5u, parked, color);
         return;
     }
 
@@ -267,6 +315,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+// Dynamic marker-corner indexing needs addressable function storage in the
+// pinned SPIR-V backend, matching scatter's quad packing.
 pub const MARKER_F32: &str = r#"const WORKGROUP_SIZE: u32 = {{WORKGROUP_SIZE}}u;
 
 struct VertexRaw {
@@ -303,7 +353,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let py = buf_y[idx];
 
     let base = idx * 6u;
-    let corners = array<vec2<f32>, 6u>(
+    var corners = array<vec2<f32>, 6u>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
         vec2<f32>( 1.0,  1.0),
@@ -366,7 +416,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let py = f32(buf_y[idx]);
 
     let base = idx * 6u;
-    let corners = array<vec2<f32>, 6u>(
+    var corners = array<vec2<f32>, 6u>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
         vec2<f32>( 1.0,  1.0),

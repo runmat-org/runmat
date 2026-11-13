@@ -1,4 +1,4 @@
-use runmat_value::{LogicalArray, StringArray, Value};
+use runmat_value::{LogicalArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -29,16 +29,17 @@ fn has_logical(vars: &[Value], expected: &[u8]) -> bool {
 }
 
 #[test]
-fn missing_constructs_and_detects_string_sentinel() {
+fn missing_constructs_and_detects_typed_string_elements() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    let vars = execute_source("s = missing(1, 2); tf = ismissing(s); anytf = anymissing(s);")
+    let vars = execute_source("s = missing(1, 2); tf = ismissing(s); anytf = anymissing(s); literals = [\"<missing>\" \"<MISSING>\"]; literal_mask = ismissing(literals);")
         .expect("missing string script");
     assert!(vars.iter().any(|value| matches!(
         value,
-        Value::StringArray(StringArray { data, .. })
-            if data == &["<missing>".to_string(), "<missing>".to_string()]
+        Value::StringArray(array)
+            if array.data().len() == 2 && array.data().iter().all(runmat_value::StringElement::is_missing)
     )));
     assert!(has_logical(&vars, &[1, 1]));
+    assert!(has_logical(&vars, &[0, 0]));
     assert!(vars.iter().any(|value| matches!(value, Value::Bool(true))));
 }
 
@@ -83,7 +84,7 @@ fn table_missing_interop_executes_from_scripts() {
     assert!(has_logical(&vars, &[0, 1, 0, 1, 1, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name == "table")));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name().is(runmat_types::StaticClassIdentity::new("table")))));
 }
 
 #[test]
@@ -95,5 +96,5 @@ fn numeric_table_fillmissing_executes_from_scripts() {
     assert!(has_logical(&vars, &[0, 1, 0, 0, 0, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name == "table")));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name().is(runmat_types::StaticClassIdentity::new("table")))));
 }

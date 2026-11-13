@@ -6,7 +6,10 @@ fn integer_tensor(storage: IntegerStorage, shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new_integer(storage, shape.to_vec()).expect("integer tensor"))
 }
 
-fn call(name: &str, args: &[Value]) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+fn call(
+    name: &str,
+    args: &[Value],
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     block_on(runmat_runtime::call_builtin_async(name, args)).map_err(Box::new)
 }
 
@@ -22,7 +25,8 @@ fn rounding_row_reduction_and_scatter_packet_has_settled_metadata() {
         ("scatterhist", 3),
         ("scatterplot", 2),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert_eq!(builtin.integer_capabilities.len(), forms, "{name}");
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(builtin.integer_capabilities.iter().all(|capability| {
@@ -34,7 +38,8 @@ fn rounding_row_reduction_and_scatter_packet_has_settled_metadata() {
         }));
     }
     for name in ["rowfilter", "saveas", "savefig", "saveobj"] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         assert_eq!(
             builtin.integer_audit.expect("integer audit").kind,
@@ -134,16 +139,18 @@ fn documented_integer_round_and_rotation_preserve_wide_native_storage() {
     let wide = 9_007_199_254_740_993_u64;
     let input = integer_tensor(IntegerStorage::U64(vec![1, wide, 2, 3]), &[2, 2]);
     let rounded = call("round", std::slice::from_ref(&input)).expect("integer round");
-    let Value::Tensor(rounded) = rounded else {
-        panic!("expected integer tensor")
-    };
-    assert_eq!(
-        rounded.into_numeric_storage().expect("numeric storage"),
-        NumericStorage::U64(vec![1, wide, 2, 3])
-    );
+    rounded.with_owned(|rounded| {
+        let Value::Tensor(rounded) = rounded else {
+            panic!("expected integer tensor")
+        };
+        assert_eq!(
+            rounded.into_numeric_storage().expect("numeric storage"),
+            NumericStorage::U64(vec![1, wide, 2, 3])
+        );
+    });
 
     let rotated = call("rot90", &[input, Value::Int(IntValue::I64(-1))]).expect("integer rot90");
-    let Value::Tensor(rotated) = rotated else {
+    let Value::Tensor(rotated) = &*rotated else {
         panic!("expected rotated integer tensor")
     };
     assert_eq!(rotated.numeric_dtype(), runmat_value::NumericDType::U64);
@@ -165,15 +172,19 @@ fn scatter3_properties_reconstruct_authoritative_integer_coordinates() {
     let y = integer_tensor(IntegerStorage::I16(vec![-2, 3]), &[1, 2]);
     let z = integer_tensor(IntegerStorage::U8(vec![4, 5]), &[1, 2]);
     let handle = call("scatter3", &[x, y, z]).expect("scatter3 handle");
-    let xdata = call("get", &[handle, Value::String("XData".into())]).expect("XData");
-    let Value::Tensor(xdata) = xdata else {
+    let xdata = call(
+        "get",
+        &[handle.value().clone(), Value::String("XData".into())],
+    )
+    .expect("XData");
+    let Value::Tensor(xdata) = &*xdata else {
         panic!("expected XData tensor")
     };
     assert_eq!(
         xdata.integer_storage(),
         Some(&IntegerStorage::U64(vec![wide, wide + 2]))
     );
-    call("close", &[figure]).expect("close invisible figure");
+    call("close", &[figure.value().clone()]).expect("close invisible figure");
 }
 
 #[test]

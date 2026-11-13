@@ -1,17 +1,11 @@
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
+    IMSHOW_ERROR_INTERNAL, IMSHOW_ERROR_INVALID_ARGUMENT, IMSHOW_FOUR_CHANNEL_IMAGE_EXTENSION,
+};
 use std::cell::RefCell;
 use std::io::Cursor;
-#[cfg(target_arch = "wasm32")]
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 use runmat_value::{CharArray, IntegerStorage, NumericDType, StringArray, Tensor, Value};
@@ -23,164 +17,13 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, RuntimeError};
 
+#[path = "imshow/filesystem.rs"]
+mod filesystem;
+
 const BUILTIN_NAME: &str = "imshow";
-
-const IMSHOW_FOUR_CHANNEL_IMAGE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "imshow-four-channel-image",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "imshow with numeric M-by-N-by-4 image data is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ImshowFourChannelImageExtension"),
-    };
-
-pub const IMSHOW_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [IMSHOW_FOUR_CHANNEL_IMAGE_EXTENSION];
-
-const IMSHOW_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the image object.",
-}];
-
-const IMSHOW_INPUTS_IMAGE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "I",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Image matrix/array or filename.",
-}];
-
-const IMSHOW_INPUTS_IMAGE_RANGE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "I",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric grayscale image matrix/array.",
-    },
-    BuiltinParamDescriptor {
-        name: "DisplayRange",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: Some("[]"),
-        description: "Display limits as [] or [low high].",
-    },
-];
-
-const IMSHOW_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "h = imshow(I)",
-        inputs: &IMSHOW_INPUTS_IMAGE,
-        outputs: &IMSHOW_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = imshow(I, [low high])",
-        inputs: &IMSHOW_INPUTS_IMAGE_RANGE,
-        outputs: &IMSHOW_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = imshow(I, [])",
-        inputs: &IMSHOW_INPUTS_IMAGE_RANGE,
-        outputs: &IMSHOW_OUTPUT_HANDLE,
-    },
-];
-
-const IMSHOW_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMSHOW.INVALID_ARGUMENT",
-    identifier: Some("RunMat:imshow:InvalidArgument"),
-    when: "Image input, filename, or display range arguments are malformed or unsupported.",
-    message: "imshow: invalid argument",
-};
-
-const IMSHOW_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMSHOW.INTERNAL",
-    identifier: Some("RunMat:imshow:Internal"),
-    when: "Internal image decoding or render preparation fails unexpectedly.",
-    message: "imshow: internal operation failed",
-};
-
-const IMSHOW_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [IMSHOW_ERROR_INVALID_ARGUMENT, IMSHOW_ERROR_INTERNAL];
-
-pub const IMSHOW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMSHOW_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IMSHOW_ERRORS,
-};
-
-const GRAYSCALE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "I",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Grayscale image data accepts every integer class and derives the default display range from its exact class.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "DisplayRange",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Explicit two-element display limits accept all integer classes and are parsed from exact storage.",
-    },
-];
-
-const TRUECOLOR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "I",
-        classes: &crate::builtins::common::integer_capability::UNSIGNED_8_16_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented integer truecolor input accepts uint8 and uint16; other integer classes reject.",
-    }];
-
-const FOUR_CHANNEL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "I",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Numeric M-by-N-by-4 image data is gated by imshow-four-channel-image.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = imshow(I, DisplayRange) [grayscale]",
-        inputs: &GRAYSCALE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Exact integer class selects normalization limits before values enter the rendering domain; grayscale GPU inputs may remain resident with shared WGPU context.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = imshow(I) [truecolor]",
-        inputs: &TRUECOLOR_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Three-channel integer truecolor rendering is documented only for uint8 and uint16.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = imshow(I) [four-channel image]",
-        inputs: &FOUR_CHANNEL_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Four-channel numeric rendering is a separately gated RunMat-only form.",
-    },
-];
 
 fn imshow_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -208,14 +51,28 @@ fn map_imshow_invalid(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    imshow_error_with_detail(&IMSHOW_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = imshow_error_with_detail(&IMSHOW_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_imshow_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    imshow_error_with_detail(&IMSHOW_ERROR_INTERNAL, err.message)
+    let mapped = imshow_error_with_detail(&IMSHOW_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::imshow")]
@@ -247,19 +104,38 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "imshow",
-    category = "plotting",
-    summary = "Display images.",
-    keywords = "imshow,plotting,image,grayscale,rgb,binary",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::imshow::IMSHOW_DESCRIPTOR),
-    extensions(crate::builtins::plotting::imshow::IMSHOW_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::imshow::INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::imshow"
 )]
-pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn imshow_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "imshow: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "imshow")?;
+    let _arguments = args.fork();
+    work.finish(imshow_impl(runtime.as_ref(), args, &work).await)
+}
+async fn imshow_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
+    let file = args
+        .first()
+        .map(string_like_path)
+        .transpose()?
+        .flatten()
+        .map(|path| filesystem::ImageFile::capture(&path))
+        .transpose()?;
     let (image_value, range) = parse_args(args).await.map_err(map_imshow_invalid)?;
+    work.check()?;
 
     if let Some(path) = string_like_path(&image_value)? {
         if range != DisplayRange::Default {
@@ -267,10 +143,15 @@ pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 "imshow: display ranges are only supported for numeric image data",
             ));
         }
-        let tensor = tensor_from_image_file(&path)
-            .await
-            .map_err(map_imshow_internal)?;
-        return render_truecolor_tensor(tensor).await;
+        let tensor = tensor_from_image_file(
+            &path,
+            runtime,
+            file.as_ref().expect("filename captured before suspension"),
+        )
+        .await
+        .map_err(map_imshow_internal)?;
+        file.as_ref().expect("captured filename").check()?;
+        return render_truecolor_tensor(tensor, work).await;
     }
 
     if is_logical_truecolor_value(&image_value) {
@@ -294,10 +175,10 @@ pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         let tensor = tensor_from_value(image_value)
             .await
             .map_err(map_imshow_invalid)?;
-        return render_truecolor_tensor(tensor).await;
+        return render_truecolor_tensor(tensor, work).await;
     }
 
-    render_grayscale_value(image_value, range)
+    render_grayscale_value(image_value, range, work)
         .await
         .map_err(map_imshow_invalid)
 }
@@ -309,7 +190,9 @@ enum DisplayRange {
     Limits(f64, f64),
 }
 
-async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(Value, DisplayRange)> {
+async fn parse_args(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<(Value, DisplayRange)> {
     match args.len() {
         0 => Err(imshow_error("imshow: expected image data or filename")),
         1 => Ok((
@@ -382,7 +265,7 @@ fn is_logical_truecolor_value(value: &Value) -> bool {
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_is_logical(handle)
                 && handle
-                    .shape
+                    .shape()
                     .get(2)
                     .is_some_and(|&channels| channels == 3 || channels == 4)
         }
@@ -392,12 +275,12 @@ fn is_logical_truecolor_value(value: &Value) -> bool {
 
 fn is_supported_four_channel_image(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) if tensor.shape.get(2) == Some(&4) => matches!(
+        Value::Tensor(tensor) if tensor.shape().get(2) == Some(&4) => matches!(
             tensor.numeric_dtype(),
             NumericDType::F64 | NumericDType::F32 | NumericDType::U8 | NumericDType::U16
         ),
         Value::GpuTensor(handle)
-            if handle.shape.get(2) == Some(&4)
+            if handle.shape().get(2) == Some(&4)
                 && !runmat_accelerate_api::handle_is_logical(handle) =>
         {
             matches!(
@@ -415,12 +298,12 @@ fn is_supported_four_channel_image(value: &Value) -> bool {
 fn is_truecolor_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor
-            .shape
+            .shape()
             .get(2)
             .copied()
             .is_some_and(|c| c == 3 || c == 4),
         Value::GpuTensor(handle) => handle
-            .shape
+            .shape()
             .get(2)
             .copied()
             .is_some_and(|c| c == 3 || c == 4),
@@ -437,7 +320,11 @@ async fn tensor_from_value(value: Value) -> crate::BuiltinResult<Tensor> {
     }
 }
 
-async fn render_grayscale_value(value: Value, range: DisplayRange) -> crate::BuiltinResult<f64> {
+async fn render_grayscale_value(
+    value: Value,
+    range: DisplayRange,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let retained = tensor_from_value(value.clone()).await?;
     let c_input = SurfaceDataInput::from_value(value, BUILTIN_NAME)?;
     let (rows, cols) = c_input.grid_shape(BUILTIN_NAME)?;
@@ -458,10 +345,13 @@ async fn render_grayscale_value(value: Value, range: DisplayRange) -> crate::Bui
         .with_colormap(ColorMap::Gray)
         .with_shading(ShadingMode::None)
         .with_color_limits(Some(color_limits));
-    render_surface(surface, Some(color_limits), retained).await
+    render_surface(surface, Some(color_limits), retained, work).await
 }
 
-async fn render_truecolor_tensor(tensor: Tensor) -> crate::BuiltinResult<f64> {
+async fn render_truecolor_tensor(
+    tensor: Tensor,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (rows, cols) = truecolor_shape(&tensor)?;
     let x_host = default_axis_vec(cols);
     let y_host = default_image_y_axis(rows);
@@ -469,29 +359,40 @@ async fn render_truecolor_tensor(tensor: Tensor) -> crate::BuiltinResult<f64> {
         .with_flatten_z(true)
         .with_image_mode(true)
         .with_shading(ShadingMode::None);
-    render_surface(surface, None, tensor).await
+    render_surface(surface, None, tensor, work).await
 }
 
 async fn render_surface(
     surface: SurfacePlot,
     color_limits: Option<(f64, f64)>,
     c_data: Tensor,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
 ) -> crate::BuiltinResult<f64> {
+    // An intensity image sets the axes colormap to gray, as MATLAB's imshow does.
+    let grayscale = color_limits.is_some() && surface.colormap == ColorMap::Gray;
     let mut surface = Some(surface);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Image",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         if let Some(limits) = color_limits {
             figure.set_axes_color_limits(axes, Some(limits));
         }
+        if grayscale {
+            figure.set_axes_colormap(axes, ColorMap::Gray);
+        }
+        // MATLAB's imshow shows the image without axes.
+        let mut style = figure
+            .axes_metadata(axes)
+            .map(|meta| meta.axes_style.clone())
+            .unwrap_or_default();
+        style.visible = false;
+        figure.set_axes_style(axes, style);
         let plot_index = figure
             .add_surface_plot_on_axes(surface.take().expect("imshow plot consumed once"), axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
@@ -508,8 +409,7 @@ async fn render_surface(
         "scaled",
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_imshow_internal(err));
@@ -614,9 +514,10 @@ fn default_image_y_axis(rows: usize) -> Vec<f64> {
 }
 
 fn truecolor_shape(tensor: &Tensor) -> crate::BuiltinResult<(usize, usize)> {
-    let rows = tensor.shape.first().copied().unwrap_or(tensor.rows);
-    let cols = tensor.shape.get(1).copied().unwrap_or(tensor.cols);
-    let channels = tensor.shape.get(2).copied().unwrap_or(1);
+    let shape = tensor.shape();
+    let rows = shape.first().copied().unwrap_or(0);
+    let cols = shape.get(1).or_else(|| shape.first()).copied().unwrap_or(0);
+    let channels = shape.get(2).copied().unwrap_or(1);
     if rows == 0 || cols == 0 || (channels != 3 && channels != 4) {
         return Err(imshow_error(
             "imshow: truecolor image data must be MxNx3 or MxNx4",
@@ -634,14 +535,15 @@ fn build_truecolor_image_surface(
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
 ) -> crate::BuiltinResult<SurfacePlot> {
-    let image_rows = tensor.shape.first().copied().unwrap_or(tensor.rows);
-    let image_cols = tensor.shape.get(1).copied().unwrap_or(tensor.cols);
+    let shape = tensor.shape();
+    let image_rows = shape.first().copied().unwrap_or(0);
+    let image_cols = shape.get(1).or_else(|| shape.first()).copied().unwrap_or(0);
     if x_axis.len() != image_cols || y_axis.len() != image_rows {
         return Err(imshow_error(
             "imshow: truecolor image axes must match image columns and rows",
         ));
     }
-    let channels = tensor.shape.get(2).copied().unwrap_or(3);
+    let channels = shape.get(2).copied().unwrap_or(3);
     let dtype = tensor.numeric_dtype();
     let scale = match dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
@@ -756,8 +658,13 @@ fn grayscale_level(value: f64, color_limits: (f64, f64)) -> f32 {
     ((value - lo) / denom).clamp(0.0, 1.0) as f32
 }
 
-async fn tensor_from_image_file(path: &str) -> crate::BuiltinResult<Tensor> {
-    let bytes = read_image_file_bytes(path).await?;
+async fn tensor_from_image_file(
+    path: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
+    file: &filesystem::ImageFile,
+) -> crate::BuiltinResult<Tensor> {
+    let bytes = file.read(runtime).await?;
+    file.check()?;
     let reader = image::io::Reader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|err| {
@@ -791,99 +698,9 @@ async fn tensor_from_image_file(path: &str) -> crate::BuiltinResult<Tensor> {
         .map_err(|err| imshow_error(format!("imshow: {err}")))
 }
 
-async fn read_image_file_bytes(path: &str) -> crate::BuiltinResult<Vec<u8>> {
-    match runmat_filesystem::read_async(path).await {
-        Ok(bytes) => Ok(bytes),
-        Err(fs_err) => {
-            #[cfg(target_arch = "wasm32")]
-            {
-                match read_unique_virtual_file_by_name(path).await {
-                    Ok(Some(bytes)) => return Ok(bytes),
-                    Ok(None) => {}
-                    Err(search_err) => {
-                        return Err(imshow_error(format!(
-                            "imshow: unable to read image file '{path}' ({fs_err}; virtual filesystem search failed: {search_err})"
-                        )));
-                    }
-                }
-                Err(imshow_error(format!(
-                    "imshow: unable to read image file '{path}' ({fs_err}; no unique uploaded file named '{path}' was found in the virtual filesystem)"
-                )))
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                Err(imshow_error(format!(
-                    "imshow: unable to read image file '{path}' ({fs_err})"
-                )))
-            }
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn read_unique_virtual_file_by_name(path: &str) -> Result<Option<Vec<u8>>, String> {
-    if !is_simple_relative_filename(path) {
-        return Ok(None);
-    }
-    let matches = find_virtual_files_named(path).await?;
-    match matches.as_slice() {
-        [] => Ok(None),
-        [found] => runmat_filesystem::read_async(found)
-            .await
-            .map(Some)
-            .map_err(|err| format!("matched '{}', but read failed: {err}", found.display())),
-        _ => Err(format!(
-            "filename is ambiguous; matches: {}",
-            matches
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn find_virtual_files_named(file_name: &str) -> Result<Vec<PathBuf>, String> {
-    const MAX_VISITED_DIRS: usize = 4096;
-
-    let mut matches = Vec::new();
-    let mut stack = vec![PathBuf::from("/")];
-    let mut visited = 0usize;
-    while let Some(dir) = stack.pop() {
-        visited += 1;
-        if visited > MAX_VISITED_DIRS {
-            return Err("virtual filesystem search exceeded directory limit".to_string());
-        }
-        let entries = match runmat_filesystem::read_dir_async(&dir).await {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries {
-            let name = entry.file_name().to_string_lossy();
-            if entry.is_dir() {
-                stack.push(entry.path().to_path_buf());
-            } else if name == file_name {
-                matches.push(entry.path().to_path_buf());
-            }
-        }
-    }
-    Ok(matches)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn is_simple_relative_filename(path: &str) -> bool {
-    let path = Path::new(path);
-    !path.is_absolute()
-        && path
-            .components()
-            .all(|component| matches!(component, std::path::Component::Normal(_)))
-        && path.components().count() == 1
-}
-
 fn string_like_path(value: &Value) -> crate::BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Ok(Some(s.clone())),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(Some(s.as_str().to_owned())),
         Value::StringArray(array) => scalar_string_array(array).map(Some),
         Value::CharArray(chars) => scalar_char_array(chars).map(Some),
         _ => Ok(None),
@@ -891,8 +708,11 @@ fn string_like_path(value: &Value) -> crate::BuiltinResult<Option<String>> {
 }
 
 fn scalar_string_array(array: &StringArray) -> crate::BuiltinResult<String> {
-    if array.data.len() == 1 {
-        Ok(array.data[0].clone())
+    if array.data().len() == 1 {
+        array.data()[0]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| imshow_error("imshow: filename must be a string scalar"))
     } else {
         Err(imshow_error("imshow: filename must be a string scalar"))
     }
@@ -900,7 +720,15 @@ fn scalar_string_array(array: &StringArray) -> crate::BuiltinResult<String> {
 
 fn scalar_char_array(chars: &CharArray) -> crate::BuiltinResult<String> {
     if chars.rows == 1 {
-        Ok(chars.data.iter().collect())
+        Ok(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "imshow",
+                    source.to_string(),
+                    source,
+                )
+            })?,
+        )
     } else {
         Err(imshow_error(
             "imshow: filename must be a character row vector",
@@ -915,6 +743,14 @@ fn imshow_error(message: impl Into<String>) -> crate::RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::imshow_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::common::test_support;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
@@ -999,16 +835,14 @@ mod tests {
 
     #[test]
     fn gpu_integer_grayscale_uses_underlying_class_display_range() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: 0,
-            buffer_id: u64::MAX - 155,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::I32,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::I32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         assert_eq!(
             gpu_default_limits(&handle),
             (i32::MIN as f64, i32::MAX as f64)
@@ -1047,7 +881,7 @@ mod tests {
             &[Value::Tensor(matrix(vec![1.0; 4], 2, 2))],
         ))
         .expect("imshow should be registered");
-        assert!(matches!(result, Value::Num(handle) if handle.is_finite()));
+        assert!(matches!(result.value(), Value::Num(handle) if handle.is_finite()));
     }
 
     #[test]
@@ -1205,12 +1039,14 @@ mod tests {
             assert!(futures::executor::block_on(imshow_builtin(vec![rgba()])).is_ok());
         }
 
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 4],
-            device_id: 0,
-            buffer_id: u64::MAX - 156,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1, 4],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = futures::executor::block_on(imshow_builtin(vec![Value::GpuTensor(handle)]))
             .expect_err("MATLAB mode rejects resident four-channel input before gather");
@@ -1222,17 +1058,13 @@ mod tests {
 
     #[test]
     fn imshow_rejects_resident_logical_truecolor_before_gather() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 3],
-            device_id: 0,
-            buffer_id: u64::MAX - 157,
-            descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_logical_zeroed(vec![1, 1, 3], runmat_accelerate_api::ProviderPrecision::F64)
+            .unwrap()
+            .handle;
         let error =
             futures::executor::block_on(imshow_builtin(vec![Value::GpuTensor(handle.clone())]))
                 .expect_err("logical truecolor is not numeric truecolor");
-        runmat_accelerate_api::clear_handle_logical(&handle);
         assert_eq!(error.identifier(), Some("RunMat:imshow:InvalidArgument"));
         assert!(error
             .message()
@@ -1314,7 +1146,7 @@ mod tests {
         image.save(&path).expect("save png");
 
         futures::executor::block_on(imshow_builtin(vec![Value::String(
-            path.to_string_lossy().to_string(),
+            path.to_string_lossy().to_string().into(),
         )]))
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -1335,12 +1167,31 @@ mod tests {
         assert_eq!(grid[1][1], glam::Vec4::new(1.0, 0.0, 1.0, 1.0));
         assert_eq!(grid[2][1], glam::Vec4::new(1.0, 1.0, 0.0, 1.0));
 
+        // A provider replacement after capture cannot redirect the decoder.
+        let _filesystem_lock = runmat_filesystem::provider_override_lock();
+        let captured = filesystem::ImageFile::capture(&path.to_string_lossy()).unwrap();
+        let replacement =
+            std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir("/"));
+        let restore = runmat_filesystem::replace_provider(replacement);
+        let decoded = futures::executor::block_on(tensor_from_image_file(
+            &path.to_string_lossy(),
+            None,
+            &captured,
+        ))
+        .unwrap();
+        assert_eq!(decoded.shape(), &[2, 3, 4]);
+        assert_eq!(
+            decoded.numeric_value_at(0),
+            Some(runmat_value::NumericScalar::F64(1.0))
+        );
+        drop(restore);
+
         let _ = test_support::fs::remove_file(&path);
     }
 
     #[test]
     fn imshow_descriptor_includes_core_signatures() {
-        let labels: Vec<&str> = IMSHOW_DESCRIPTOR
+        let labels: Vec<&str> = runmat_builtins::IMSHOW_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)

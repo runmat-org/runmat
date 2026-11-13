@@ -1,0 +1,215 @@
+{
+  "status": "Qualified for the agreed 0.7.0 release scope; publication is separate",
+  "implementationCommit": "2a49ca1c467256029c5a64ec165bc66ec2b35810",
+  "scientificConservationCommit": "0fb8be141a2c94901714d18d77b48e6be998dc66",
+  "frozenInputCount": 25891,
+  "frozenManifest": {
+    "path": ".tmp-rm1064/workspace-r1322-consolidated.manifest.json",
+    "sha256": "c6db4600516e90195052591597a0b2405d5fb3b1b43ad2bd4c0e4e7005c0a1d6"
+  },
+  "committedSourceBinding": {
+    "path": ".tmp-rm1064/settings-r1350-source-checkpoint.json",
+    "sha256": "956acef618e05ca2872a960e4c403beb5e24656433dfc2cc566ebf71e7de56be"
+  },
+  "scientificInputFingerprint": {
+    "sha256": "6b953ddcdb84ca7ba8e84da21438278ec4e200ee7a94f605c0e74a64757289f9",
+    "files": 24830,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "platforms": [
+    {
+      "platform": "macos-arm64",
+      "products": {
+        "passed": 31,
+        "failed": 0,
+        "omitted": 0
+      },
+      "datasets": {
+        "passed": 3,
+        "failed": 0,
+        "execution": "Retained passing execution under component dependency conservation"
+      },
+      "binary": {
+        "path": ".tmp-rm1064/settings-r1337-main-shipping.artifact/runmat",
+        "sha256": "ade5f4693b7cf5a0c7c6c4d43f8c9d455a4b344143fb6193afdf0f56b19eca52"
+      },
+      "evidence": {
+        "path": ".tmp-rm1064/settings-r1345-main-qualified.json",
+        "sha256": "3e90519edfb67c3f045734cd62d9719cfa02dbe4afe163a6a0f59e131d0dd3aa"
+      }
+    },
+    {
+      "platform": "macos-x86_64-rosetta",
+      "products": {
+        "passed": 31,
+        "failed": 0,
+        "omitted": 0
+      },
+      "datasets": {
+        "passed": 3,
+        "failed": 0,
+        "execution": "Retained passing execution under component dependency conservation"
+      },
+      "binary": {
+        "path": ".tmp-rm1064/settings-r1344-intel-qualified-collected/runmat",
+        "sha256": "22c326cd123c581884ab837edad4be87e25041209a809a5de2034d80372431ae"
+      },
+      "evidence": {
+        "path": ".tmp-rm1064/settings-r1344-intel-qualified-collected/collection.json",
+        "sha256": "f6267fb6db8ca5696d7b0092b995db0bce9e70bf3be40ad4a57e1dadbbaccc1c"
+      }
+    },
+    {
+      "platform": "linux-x86_64",
+      "products": {
+        "passed": 31,
+        "failed": 0,
+        "omitted": 0
+      },
+      "datasets": {
+        "passed": 3,
+        "failed": 0,
+        "execution": "Retained passing execution under component dependency conservation"
+      },
+      "binary": {
+        "path": ".tmp-rm1064/settings-r1347-linux-qualified-collected/runmat",
+        "sha256": "7790fef59aa21da831d33186e11f497ac51295a66b66fbb40dc0aeb8aa54ab33"
+      },
+      "evidence": {
+        "path": ".tmp-rm1064/settings-r1347-linux-qualified-collected/collection.json",
+        "sha256": "c706dc17e1b8c05078f861c05661945dc93eb2e6b9a37797af8a4371effebfbf"
+      }
+    },
+    {
+      "platform": "windows-x86_64",
+      "products": {
+        "passed": 31,
+        "failed": 0,
+        "omitted": 0
+      },
+      "datasets": {
+        "passed": 3,
+        "failed": 0,
+        "execution": "Fresh interpreter/JIT/native execution"
+      },
+      "binary": {
+        "path": ".tmp-rm1064/settings-r1349-windows-qualified-collected/runmat.exe",
+        "sha256": "e689ab65ea817252576bd26a65166b56d682dc595cf1fee59717774f9675186a"
+      },
+      "evidence": {
+        "path": ".tmp-rm1064/settings-r1349-windows-qualified-collected/collection.json",
+        "sha256": "a91670c7a43d9ba3d8eef700b1a2a8df9f4d8a7b335ba94546ab14342bf02714"
+      }
+    }
+  ],
+  "ordinary": [
+    {
+      "platform": "macos",
+      "targets": 813,
+      "totals": {
+        "passed": 35437,
+        "failed": 0,
+        "ignored": 397,
+        "measured": 0,
+        "filtered": 45
+      },
+      "evidence": {
+        "path": ".tmp-rm1064/workspace-r1150-main-outcome-union.json",
+        "sha256": "08634bacde0e106d73c622d4fb634cbbc644cb0a99c50cf2029bea3ff3ff5ab1"
+      }
+    },
+    {
+      "platform": "linux",
+      "targets": 813,
+      "totals": {
+        "passed": 35438,
+        "failed": 0,
+        "ignored": 397,
+        "measured": 0,
+        "filtered": 45
+      },
+      "evidence": {
+        "path": ".tmp-rm1064/workspace-r1215-linux-outcome-union.json",
+        "sha256": "125027f05e0b18124e307d797bbaa87d44cc8fa2d34bccf87b44014fcc548098"
+      }
+    },
+    {
+      "platform": "windows",
+      "targets": 813,
+      "totals": {
+        "passed": 35310,
+        "failed": 0,
+        "ignored": 397,
+        "measured": 0,
+        "filtered": 45
+      },
+      "evidence": {
+        "path": ".tmp-rm1064/workspace-r1328-windows-outcome-union.json",
+        "sha256": "5412b4411e2ebd3a46451d0d02974cc4cdd865f2cdb1475a53f132c52abd1680"
+      }
+    }
+  ],
+  "ordinaryScope": "Original complete target census plus verified passing repair successors. Unaffected results retain measured identities; these are not fresh full-suite executions against one binary. Child process summaries are excluded from libtest totals.",
+  "browser": {
+    "runtimeSha256": "b02b8c33fbf0eba3cbc8976c1455304d2ccd58d2905efc4e132e17d3052c9239",
+    "cohorts": {
+      "node": {
+        "checks": 2,
+        "failed": 0
+      },
+      "pinnedData": {
+        "scenarios": 1,
+        "failed": 0
+      },
+      "chromeProducts": {
+        "cases": 10,
+        "failed": 0
+      },
+      "boundaries": {
+        "checks": 12,
+        "failed": 0
+      },
+      "input": {
+        "checks": 5,
+        "failed": 0
+      },
+      "exactCad": {
+        "assertions": 32,
+        "failed": 0
+      }
+    },
+    "evidence": {
+      "path": ".tmp-rm1064/settings-r1302-sdk-browser-qualified.report.json",
+      "sha256": "cf7284d2c038d11f908bc0e3e984534817705d3f0bfff31055194ca415a17cb1"
+    },
+    "servedEvidence": {
+      "path": ".tmp-rm1064/settings-r1303-served-http.json",
+      "sha256": "8839f62c8b94b242a36c3250baba7630e80cd233aa62079151b9628de97fb59a"
+    }
+  },
+  "componentConservation": {
+    "path": ".tmp-rm1064/settings-r1325-runtime-component-conservation.json",
+    "sha256": "20505029f0cd2aefb91dc6139c12ed03c8702616749c64463aa91e1690158c65"
+  },
+  "windowsQuality": {
+    "path": ".tmp-rm1064/settings-r1353-windows-checks-verified.json",
+    "sha256": "861533e50b11d7fce3512689f9a0c0139027f51f6d94b11af3bf3a950082257c"
+  },
+  "tooling": {
+    "routing": 5,
+    "scientificVerifier": 11,
+    "releasePolicy": 5,
+    "failed": 0,
+    "scope": "Lightweight tooling checks; no numerical or release-performance claim"
+  },
+  "dispositions": [
+    "Governed meshing recipe: 12 commands unrun under the November 4 owner decision.",
+    "Extended transient rods: routed to RM-1297; known failures remain outside this release gate.",
+    "Existing FEA architecture/style and language debt retain their exact approved ledgers.",
+    "Opaque solver and OCCT work measurement; existing plot temporary property allocations; external shader compiler/driver/browser allocations retain documented limits.",
+    "Embedded AOT/support-pack/selective-linking hardening remains in the 1.0 scope.",
+    "Intel macOS executes under owner-approved Rosetta; physical Intel hardware was not tested.",
+    "Desktop caller/settings acceptance is conserved separately; a fresh signed Desktop installer is outside this qualification."
+  ],
+  "exclusions": "No push, tag, deployment, release publication, license/history rewrite or version change in this closure."
+}

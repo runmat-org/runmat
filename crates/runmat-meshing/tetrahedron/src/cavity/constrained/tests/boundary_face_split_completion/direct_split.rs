@@ -22,10 +22,14 @@ fn boundary_face_split_completion_reports_inserted_node_and_refined_boundary() {
     .expect("split completion should generate child cap tetrahedra");
 
     assert_eq!(inserted_node.node_id, 4);
-    assert!(inserted_node.coordinates_m[0] > 0.0);
-    assert!(inserted_node.coordinates_m[1] > 0.0);
-    assert_eq!(inserted_node.coordinates_m[2], 0.0);
-    assert!(inserted_node.coordinates_m[0] + inserted_node.coordinates_m[1] < 1.0);
+    assert!(inserted_node.coordinates_m.canonical_value()[0] > 0.0);
+    assert!(inserted_node.coordinates_m.canonical_value()[1] > 0.0);
+    assert_eq!(inserted_node.coordinates_m.canonical_value()[2], 0.0);
+    assert!(
+        inserted_node.coordinates_m.canonical_value()[0]
+            + inserted_node.coordinates_m.canonical_value()[1]
+            < 1.0
+    );
     assert_eq!(split_tetrahedra.len(), 3);
     assert!(split_tetrahedra
         .iter()
@@ -76,19 +80,35 @@ fn boundary_face_split_completion_prefers_higher_quality_split_point() {
     let nodes = vec![
         ConstrainedCavityNode {
             node_id: 0,
-            coordinates_m: [0.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 1,
-            coordinates_m: [1.649331064611886, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.649331064611886, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 2,
-            coordinates_m: [0.10383330216927095, 0.5285988568010986, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.10383330216927095, 0.5285988568010986, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 3,
-            coordinates_m: [1.583996624105325, 0.04591313203731445, 1.25490017426856],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([
+                1.583996624105325,
+                0.04591313203731445,
+                1.25490017426856,
+            ]),
         },
     ];
     let boundary_nodes = boundary_node_coordinates(&cavity, &nodes)
@@ -105,6 +125,7 @@ fn boundary_face_split_completion_prefers_higher_quality_split_point() {
         &boundary_nodes,
         options,
     )
+    .expect("centroid split accounting should be admitted")
     .expect("centroid split should generate child cap tetrahedra");
     let centroid_min_quality = centroid_tetrahedra
         .iter()
@@ -130,5 +151,8 @@ fn boundary_face_split_completion_prefers_higher_quality_split_point() {
             selected_min_quality > centroid_min_quality + 1.0e-9,
             "split search should improve on the centroid split: selected={selected_min_quality} centroid={centroid_min_quality}"
         );
-    assert_ne!(inserted_node.coordinates_m, centroid_node.coordinates_m);
+    assert_ne!(
+        inserted_node.coordinates_m.canonical_value(),
+        centroid_node.coordinates_m.canonical_value()
+    );
 }

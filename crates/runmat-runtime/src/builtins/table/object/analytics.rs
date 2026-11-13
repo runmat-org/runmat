@@ -1,12 +1,26 @@
 use super::selectors::parse_variable_selector;
 use super::*;
+
+#[cfg(feature = "plot-core")]
+mod heatmap;
+#[cfg(feature = "plot-core")]
+pub(crate) use heatmap::{aggregate_heatmap_table, HeatmapAggregation};
 use runmat_value::IntValue;
 
 mod grpstats;
+mod summary;
+use summary::{summarize_groups, summarize_groups_value, SummaryMethod};
 
 pub(in crate::builtins::table) use grpstats::grpstats_impl;
 
 pub fn sortrows_table(value: Value, rest: &[Value]) -> BuiltinResult<(Value, Tensor)> {
+    sortrows_table_view(value, crate::call::FunctionArgumentView::from_slice(rest))
+}
+
+pub(crate) fn sortrows_table_view(
+    value: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Value, Tensor)> {
     let object = into_table_object(value, "sortrows")?;
     let names = table_variable_names_from_object(&object)?;
     let sort_spec = SortSpec::parse(rest, &names)?;
@@ -54,7 +68,7 @@ pub(in crate::builtins::table) struct SortKey {
 }
 
 impl SortSpec {
-    fn parse(rest: &[Value], names: &[String]) -> BuiltinResult<Self> {
+    fn parse(rest: crate::call::FunctionArgumentView<'_>, names: &[String]) -> BuiltinResult<Self> {
         let mut keys = if rest.is_empty() {
             names
                 .iter()
@@ -114,23 +128,37 @@ pub(in crate::builtins::table) fn compare_table_cells(
                 .unwrap_or(Ordering::Greater))
         }
         Value::StringArray(array) => {
-            let av = array.data.get(a).cloned().unwrap_or_default();
-            let bv = array.data.get(b).cloned().unwrap_or_default();
-            Ok(av.cmp(&bv))
+            let av = array
+                .data()
+                .get(a)
+                .ok_or_else(|| invalid_index("table: string row out of bounds"))?;
+            let bv = array
+                .data()
+                .get(b)
+                .ok_or_else(|| invalid_index("table: string row out of bounds"))?;
+            Ok(av.cmp(bv))
         }
         Value::LogicalArray(array) => {
             let av = *array.data.get(a).unwrap_or(&0);
             let bv = *array.data.get(b).unwrap_or(&0);
             Ok(av.cmp(&bv))
         }
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
             Ok(double_value_at(&tensor, a)
                 .unwrap_or(f64::NAN)
                 .partial_cmp(&double_value_at(&tensor, b).unwrap_or(f64::NAN))
                 .unwrap_or(Ordering::Greater))
         }
-        other => Ok(cell_key_string(other, a).cmp(&cell_key_string(other, b))),
+        Value::Cell(cell) => {
+            let left = cell.get(a, 0).map_err(invalid_index)?;
+            let right = cell.get(b, 0).map_err(invalid_index)?;
+            match (&left, &right) {
+                (Value::String(left), Value::String(right)) => Ok(left.cmp(right)),
+                _ => Ok(cell_key_string(value, a)?.cmp(&cell_key_string(value, b)?)),
+            }
+        }
+        other => Ok(cell_key_string(other, a)?.cmp(&cell_key_string(other, b)?)),
     }
 }
 
@@ -220,14 +248,30 @@ fn integer_sign_and_magnitude(value: &IntValue) -> (bool, u64) {
     }
 }
 
-pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> GroupAtom {
-    match value {
+pub(in crate::builtins::table) fn cell_group_atom(
+    value: &Value,
+    row: usize,
+) -> BuiltinResult<GroupAtom> {
+    Ok(match value {
+        Value::String(text) => match text.as_str() {
+            Some(text) => GroupAtom::Text(text.to_owned()),
+            None => GroupAtom::Missing,
+        },
+        Value::Num(value) => number_group_atom(*value),
+        Value::Int(value) => GroupAtom::Integer(value.clone()),
+        Value::Bool(value) => GroupAtom::Logical(*value),
+        Value::Cell(cell) => cell_group_atom(
+            &cell
+                .get(row, 0)
+                .map_err(|source| invalid_index(source.to_string()))?,
+            0,
+        )?,
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                return storage
+                return Ok(storage
                     .value_at(row)
                     .map(GroupAtom::Integer)
-                    .unwrap_or(GroupAtom::Missing);
+                    .unwrap_or(GroupAtom::Missing));
             }
             tensor
                 .get2(row, 0)
@@ -235,31 +279,33 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
                 .unwrap_or(GroupAtom::Missing)
         }
         Value::StringArray(array) => array
-            .data
+            .data()
             .get(row)
-            .cloned()
-            .map(text_group_atom)
+            .map(|text| match text.as_str() {
+                Some(text) => GroupAtom::Text(text.to_owned()),
+                None => GroupAtom::Missing,
+            })
             .unwrap_or(GroupAtom::Missing),
         Value::LogicalArray(array) => array
             .data
             .get(row)
             .map(|value| GroupAtom::Logical(*value != 0))
             .unwrap_or(GroupAtom::Missing),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
                 .map(number_group_atom)
                 .unwrap_or(GroupAtom::Missing)
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
                 .map(number_group_atom)
                 .unwrap_or(GroupAtom::Missing)
         }
-        Value::Object(obj) if obj.is_class("calendarDuration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::CALENDAR_DURATION) => {
             crate::builtins::datetime::calendar_duration_tensors_from_value(value)
                 .ok()
                 .and_then(|(months, days)| {
@@ -279,13 +325,17 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
                 _ => GroupAtom::Missing,
             }
         }
-        other => text_group_atom(cell_key_string(other, row)),
-    }
+        other => text_group_atom(cell_key_string(other, row)?),
+    })
 }
 
 fn number_group_atom(value: f64) -> GroupAtom {
     if value.is_nan() {
         GroupAtom::Missing
+    } else if value == 0.0 {
+        // Grouping has numeric equality, not IEEE total-order identity:
+        // signed zeros label the same table category.
+        GroupAtom::Number(0.0)
     } else {
         GroupAtom::Number(value)
     }
@@ -332,6 +382,22 @@ pub(in crate::builtins::table) fn pivot_impl(
             "pivot: data variable must be a numeric column vector",
         ));
     }
+    if let Value::Tensor(tensor) = data_value {
+        if let Some(storage) = tensor.integer_storage() {
+            for index in 0..tensor.len() {
+                let value = storage
+                    .value_at(index)
+                    .ok_or_else(|| invalid_variable("pivot: invalid integer data variable"))?;
+                if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
+                    return Err(invalid_argument(
+                        "pivot: integer data must be exactly representable as double for summary methods",
+                    ));
+                }
+            }
+        }
+    }
+    let method = SummaryMethod::parse(method)
+        .ok_or_else(|| invalid_argument(format!("pivot: unsupported method '{method}'")))?;
 
     let height = table_height(&object)?;
     let mut row_order = Vec::<Vec<GroupAtom>>::new();
@@ -340,8 +406,8 @@ pub(in crate::builtins::table) fn pivot_impl(
     let mut col_seen = BTreeMap::<Vec<GroupAtom>, ()>::new();
     let mut buckets = BTreeMap::<(Vec<GroupAtom>, Vec<GroupAtom>), Vec<usize>>::new();
     for row in 0..height {
-        let row_key = group_key_for_row(&variables, &row_names, row);
-        let col_key = group_key_for_row(&variables, &col_names, row);
+        let row_key = group_key_for_row(&variables, &row_names, row)?;
+        let col_key = group_key_for_row(&variables, &col_names, row)?;
         if !row_first_index.contains_key(&row_key) {
             row_first_index.insert(row_key.clone(), row);
             row_order.push(row_key.clone());
@@ -401,15 +467,12 @@ pub(in crate::builtins::table) fn group_key_for_row(
     variables: &StructValue,
     names: &[String],
     row: usize,
-) -> Vec<GroupAtom> {
+) -> BuiltinResult<Vec<GroupAtom>> {
     names
         .iter()
-        .map(|name| {
-            variables
-                .fields
-                .get(name)
-                .map(|value| cell_group_atom(value, row))
-                .unwrap_or(GroupAtom::Missing)
+        .map(|name| match variables.fields.get(name) {
+            Some(value) => cell_group_atom(value, row),
+            None => Ok(GroupAtom::Missing),
         })
         .collect()
 }
@@ -451,7 +514,7 @@ pub(in crate::builtins::table) fn groupsummary_impl(
     table: Value,
     groupvars: Value,
     method: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let object = into_table_object(table, "groupsummary")?;
     let names = table_variable_names_from_object(&object)?;
@@ -462,6 +525,14 @@ pub(in crate::builtins::table) fn groupsummary_impl(
             "groupsummary: method list must not be empty",
         ));
     }
+    let methods = methods
+        .iter()
+        .map(|name| {
+            SummaryMethod::parse(name).ok_or_else(|| {
+                invalid_argument(format!("groupsummary: unsupported method '{name}'"))
+            })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     let mut include_missing = true;
     let mut rest_index = 0usize;
     let data_selector = rest.first().filter(|value| {
@@ -507,7 +578,7 @@ pub(in crate::builtins::table) fn groupsummary_impl(
             .filter(|name| {
                 table_variables(&object)
                     .ok()
-                    .and_then(|vars| vars.fields.get(*name).cloned())
+                    .and_then(|vars| vars.fields.get(name).cloned())
                     .map(|value| matches!(value, Value::Tensor(_)))
                     .unwrap_or(false)
             })
@@ -520,14 +591,11 @@ pub(in crate::builtins::table) fn groupsummary_impl(
     for row in 0..height {
         let key = group_names
             .iter()
-            .map(|name| {
-                variables
-                    .fields
-                    .get(name)
-                    .map(|value| cell_group_atom(value, row))
-                    .unwrap_or(GroupAtom::Missing)
+            .map(|name| match variables.fields.get(name) {
+                Some(value) => cell_group_atom(value, row),
+                None => Ok(GroupAtom::Missing),
             })
-            .collect::<Vec<_>>();
+            .collect::<BuiltinResult<Vec<_>>>()?;
         if include_missing || !key.iter().any(group_atom_is_missing) {
             groups.entry(key).or_default().push(row);
         }
@@ -559,198 +627,54 @@ pub(in crate::builtins::table) fn groupsummary_impl(
             let value = variables.fields.get(name).ok_or_else(|| {
                 invalid_variable(format!("groupsummary: missing data variable '{name}'"))
             })?;
-            let summary = summarize_groups_value(value, &grouped_rows, method)?;
-            out_names.push(format!("{}_{}", method.to_ascii_lowercase(), name));
+            let summary = summarize_groups_value(value, &grouped_rows, *method)?;
+            out_names.push(format!("{}_{}", method.output_prefix(), name));
             out_columns.push(summary);
         }
     }
     table_from_columns(out_names, out_columns)
 }
 
-fn summarize_groups_value(
+pub(in crate::builtins::table) fn cell_key_string(
     value: &Value,
-    groups: &[&Vec<usize>],
-    method: &str,
-) -> BuiltinResult<Value> {
-    let Value::Tensor(tensor) = value else {
-        return Err(invalid_variable(
-            "groupsummary: summary data variables must be numeric column vectors",
-        ));
-    };
-    if tensor.cols() != 1 {
-        return Err(invalid_variable(
-            "groupsummary: summary data variables must be numeric column vectors",
-        ));
-    }
-    let Some(storage) = tensor.integer_storage() else {
-        let values = summarize_groups(value, groups.iter().copied(), method)?;
-        return Tensor::new(values, vec![groups.len(), 1])
-            .map(Value::Tensor)
-            .map_err(invalid_variable);
-    };
-    let method = method.to_ascii_lowercase();
-    if method == "min" || method == "max" {
-        let mut extrema = Vec::with_capacity(groups.len());
-        for rows in groups {
-            let mut values = rows.iter().map(|row| {
-                storage
-                    .value_at(*row)
-                    .ok_or_else(|| invalid_index("groupsummary: integer row out of bounds"))
-            });
-            let mut selected = values.next().transpose()?.ok_or_else(|| {
-                invalid_argument("groupsummary: observed integer groups cannot be empty")
-            })?;
-            for value in values {
-                let value = value?;
-                let ordering = compare_integer_values(&value, &selected);
-                if (method == "min" && ordering == Ordering::Less)
-                    || (method == "max" && ordering == Ordering::Greater)
-                {
-                    selected = value;
-                }
-            }
-            extrema.push(selected);
-        }
-        let output = storage
-            .from_exact_values_like(extrema)
-            .map_err(invalid_variable)?;
-        return Tensor::new_integer(output, vec![groups.len(), 1])
-            .map(Value::Tensor)
-            .map_err(invalid_variable);
-    }
-    if method == "count" || method == "numel" {
-        return Tensor::new(
-            groups.iter().map(|rows| rows.len() as f64).collect(),
-            vec![groups.len(), 1],
-        )
-        .map(Value::Tensor)
-        .map_err(invalid_variable);
-    }
-    let mut output = Vec::with_capacity(groups.len());
-    for rows in groups {
-        let mut values = rows
-            .iter()
-            .map(|row| {
-                let value = storage
-                    .value_at(*row)
-                    .ok_or_else(|| invalid_index("groupsummary: integer row out of bounds"))?;
-                if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
-                    return Err(invalid_argument(
-                        "groupsummary: integer data must be exactly representable as double for floating summary methods",
-                    ));
-                }
-                Ok(value.to_f64())
-            })
-            .collect::<BuiltinResult<Vec<_>>>()?;
-        let value = match method.as_str() {
-            "mean" => values.iter().sum::<f64>() / values.len() as f64,
-            "sum" => values.iter().sum(),
-            "median" => {
-                values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-                let mid = values.len() / 2;
-                if values.len().is_multiple_of(2) {
-                    (values[mid - 1] + values[mid]) / 2.0
-                } else {
-                    values[mid]
-                }
-            }
-            other => {
-                return Err(invalid_argument(format!(
-                    "groupsummary: unsupported method '{other}'"
-                )))
-            }
-        };
-        output.push(value);
-    }
-    Tensor::new(output, vec![groups.len(), 1])
-        .map(Value::Tensor)
-        .map_err(invalid_variable)
-}
-
-pub(in crate::builtins::table) fn summarize_groups<'a>(
-    value: &Value,
-    groups: impl Iterator<Item = &'a Vec<usize>>,
-    method: &str,
-) -> BuiltinResult<Vec<f64>> {
-    let tensor = match value {
-        Value::Tensor(tensor) if tensor.cols() == 1 => tensor,
-        _ => {
-            return Err(invalid_variable(
-                "groupsummary: summary data variables must be numeric column vectors",
-            ))
-        }
-    };
-    groups
-        .map(|rows| {
-            let mut values = rows
-                .iter()
-                .map(|row| tensor.get2(*row, 0).map_err(invalid_index))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            values.retain(|value| !value.is_nan());
-            let result = match method.to_ascii_lowercase().as_str() {
-                "mean" => {
-                    if values.is_empty() {
-                        f64::NAN
-                    } else {
-                        values.iter().sum::<f64>() / values.len() as f64
-                    }
-                }
-                "sum" => values.iter().sum(),
-                "min" => values.into_iter().fold(f64::INFINITY, f64::min),
-                "max" => values.into_iter().fold(f64::NEG_INFINITY, f64::max),
-                "median" => {
-                    if values.is_empty() {
-                        f64::NAN
-                    } else {
-                        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-                        let mid = values.len() / 2;
-                        if values.len() % 2 == 0 {
-                            (values[mid - 1] + values[mid]) / 2.0
-                        } else {
-                            values[mid]
-                        }
-                    }
-                }
-                "count" | "numel" => values.len() as f64,
-                other => {
-                    return Err(invalid_argument(format!(
-                        "groupsummary: unsupported method '{other}'"
-                    )))
-                }
-            };
-            Ok(result)
-        })
-        .collect()
-}
-
-pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> String {
-    match value {
+    row: usize,
+) -> BuiltinResult<String> {
+    Ok(match value {
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                return storage
+                return Ok(storage
                     .value_at(row)
                     .map(|value| format_integer_key(&value))
-                    .unwrap_or_default();
+                    .unwrap_or_default());
             }
             tensor
                 .get2(row, 0)
                 .map(format_key_number)
                 .unwrap_or_default()
         }
-        Value::StringArray(array) => array.data.get(row).cloned().unwrap_or_default(),
+        Value::StringArray(array) => array
+            .data()
+            .get(row)
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| invalid_variable("table: a missing string has no textual key"))
+            })
+            .transpose()?
+            .unwrap_or_default(),
         Value::LogicalArray(array) => array
             .data
             .get(row)
             .map(|value| value.to_string())
             .unwrap_or_default(),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
                 .map(format_key_number)
                 .unwrap_or_default()
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .ok()
                 .and_then(|tensor| double_value_at(&tensor, row))
@@ -760,12 +684,13 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => {
             categorical_label_at(obj, row).unwrap_or_default()
         }
-        Value::Cell(cell) => cell
-            .get(row, 0)
-            .map(|item| cell_to_text(&item))
-            .unwrap_or_default(),
+        Value::Cell(cell) => cell_to_text(
+            &cell
+                .get(row, 0)
+                .map_err(|error| invalid_index(format!("table cell index is invalid: {error}")))?,
+        )?,
         other => format!("{other}"),
-    }
+    })
 }
 
 fn double_value_at(tensor: &Tensor, index: usize) -> Option<f64> {
@@ -784,8 +709,8 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![2, 1]).unwrap(),
         );
 
-        let first = cell_group_atom(&value, 0);
-        let second = cell_group_atom(&value, 1);
+        let first = cell_group_atom(&value, 0).unwrap();
+        let second = cell_group_atom(&value, 1).unwrap();
         assert_ne!(first, second);
         assert_eq!(compare_table_cells(&value, 0, 1).unwrap(), Ordering::Less);
         assert_eq!(group_atom_label(&second), (large + 1).to_string());
@@ -797,7 +722,7 @@ mod tests {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
 
         assert_eq!(
-            cell_key_string(&Value::Tensor(tensor), 0),
+            cell_key_string(&Value::Tensor(tensor), 0).unwrap(),
             "9007199254740993"
         );
     }

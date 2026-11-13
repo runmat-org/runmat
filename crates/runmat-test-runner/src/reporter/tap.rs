@@ -5,10 +5,13 @@ use super::{RenderedReport, Reporter};
 use crate::RunnerResult;
 
 #[derive(Default)]
-pub struct TapReporter;
+pub struct TapReporter {
+    process_output: super::process_output::ProcessOutputReports,
+}
 
 impl Reporter for TapReporter {
-    fn event(&mut self, _event: &TestEvent) -> RunnerResult<()> {
+    fn event(&mut self, event: &TestEvent) -> RunnerResult<()> {
+        self.process_output.observe(event);
         Ok(())
     }
 
@@ -23,9 +26,14 @@ impl Reporter for TapReporter {
                     "not ok"
                 },
                 index + 1,
-                test.test_id.as_str().replace('\n', " ")
+                test.report_identity
+                    .as_ref()
+                    .map(runmat_test::result::TestReportIdentity::human_label)
+                    .unwrap_or_else(|| test.test_id.as_str().to_owned())
+                    .replace('\n', " ")
             ));
         }
+        tap.push_str(&self.process_output.tap());
         Ok(RenderedReport {
             name: "test-results.tap".into(),
             media_type: "application/tap".into(),

@@ -4,233 +4,29 @@
 //! its terse API for numeric CSV imports. This implementation mirrors MATLAB's
 //! zero-based range semantics while integrating with the modern builtin template.
 
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CSVREAD_COLON_RANGE_EXTENSION, CSVREAD_ERROR_ARG_CONFIG,
+    CSVREAD_ERROR_FILENAME, CSVREAD_ERROR_FILENAME_EMPTY, CSVREAD_ERROR_INDEX,
+    CSVREAD_ERROR_IO_OPEN, CSVREAD_ERROR_IO_READ, CSVREAD_ERROR_NON_NUMERIC_TOKEN,
+    CSVREAD_ERROR_RANGE, CSVREAD_ERROR_TENSOR_BUILD, CSVREAD_RESIDENT_CONTROL_EXTENSION,
+    CSVREAD_TWO_VECTOR_RANGE_EXTENSION,
 };
-use runmat_filesystem::File;
+#[cfg(test)]
+use runmat_builtins::{CSVREAD_DESCRIPTOR, CSVREAD_EXTENSIONS, CSVREAD_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::fs::expand_user_path;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvread";
 
-const CSVREAD_COLON_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "csvread-colon-range",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "csvread A1 ranges separated by ':' are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CsvreadColonRangeExtension"),
-};
-const CSVREAD_TWO_VECTOR_RANGE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "csvread-two-vector-range",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "csvread two-element numeric ranges are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CsvreadTwoVectorRangeExtension"),
-};
-const CSVREAD_RESIDENT_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "csvread-resident-control-inputs",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "csvread resident filename, offset, or range controls are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CsvreadResidentControlExtension"),
-};
-pub const CSVREAD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    CSVREAD_COLON_RANGE_EXTENSION,
-    CSVREAD_TWO_VECTOR_RANGE_EXTENSION,
-    CSVREAD_RESIDENT_CONTROL_EXTENSION,
-];
-
-const CSVREAD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability { name: "row", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are documented for the zero-based row control and are validated from authoritative storage." },
-    BuiltinIntegerInputCapability { name: "col", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "All eight integer classes are documented for the zero-based column control and are validated from authoritative storage." },
-    BuiltinIntegerInputCapability { name: "range", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The documented four-element numeric range accepts all eight integer classes and decodes every offset exactly." },
-];
-pub const CSVREAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "M = csvread(filename, integer_row, integer_col, integer_range?)", inputs: &CSVREAD_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Integer inputs control file selection only. Values are read exactly from authoritative integer storage; the CSV result remains double or complex double." }];
-
-const CSVREAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric matrix read from the CSV file.",
-}];
-const CSVREAD_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "CSV file path.",
-}];
-const CSVREAD_INPUTS_FILENAME_ROW_COL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "CSV file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "row",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Zero-based starting row offset.",
-    },
-    BuiltinParamDescriptor {
-        name: "col",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Zero-based starting column offset.",
-    },
-];
-const CSVREAD_INPUTS_FILENAME_ROW_COL_RANGE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "CSV file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "row",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Zero-based starting row offset.",
-    },
-    BuiltinParamDescriptor {
-        name: "col",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Zero-based starting column offset.",
-    },
-    BuiltinParamDescriptor {
-        name: "range",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "A1-style range string or numeric range vector.",
-    },
-];
-const CSVREAD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "M = csvread(filename)",
-        inputs: &CSVREAD_INPUTS_FILENAME,
-        outputs: &CSVREAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = csvread(filename, row, col)",
-        inputs: &CSVREAD_INPUTS_FILENAME_ROW_COL,
-        outputs: &CSVREAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = csvread(filename, row, col, range)",
-        inputs: &CSVREAD_INPUTS_FILENAME_ROW_COL_RANGE,
-        outputs: &CSVREAD_OUTPUT,
-    },
-];
-const CSVREAD_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.ARG_CONFIG",
-    identifier: None,
-    when: "Argument list does not match supported csvread call forms.",
-    message: "csvread: invalid argument configuration",
-};
-const CSVREAD_ERROR_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.INDEX",
-    identifier: None,
-    when: "Row/column offset arguments are invalid.",
-    message: "csvread: invalid row/column index",
-};
-const CSVREAD_ERROR_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.RANGE",
-    identifier: None,
-    when: "Range argument is malformed or semantically invalid.",
-    message: "csvread: invalid range",
-};
-const CSVREAD_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.FILENAME",
-    identifier: None,
-    when: "Filename argument is not a scalar string/char vector.",
-    message: "csvread: invalid filename input",
-};
-const CSVREAD_ERROR_FILENAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.FILENAME_EMPTY",
-    identifier: None,
-    when: "Filename resolves to an empty string.",
-    message: "csvread: filename must not be empty",
-};
-const CSVREAD_ERROR_IO_OPEN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.IO_OPEN",
-    identifier: None,
-    when: "Input file cannot be opened.",
-    message: "csvread: unable to open file",
-};
-const CSVREAD_ERROR_IO_READ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.IO_READ",
-    identifier: None,
-    when: "Input file cannot be read.",
-    message: "csvread: failed to read file",
-};
-const CSVREAD_ERROR_NON_NUMERIC_TOKEN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.NON_NUMERIC_TOKEN",
-    identifier: None,
-    when: "A CSV field cannot be parsed as numeric.",
-    message: "csvread: nonnumeric token encountered",
-};
-const CSVREAD_ERROR_TENSOR_BUILD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CSVREAD.TENSOR_BUILD",
-    identifier: None,
-    when: "Internal tensor materialization for csvread output fails.",
-    message: "csvread: unable to construct output matrix",
-};
-const CSVREAD_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    CSVREAD_ERROR_ARG_CONFIG,
-    CSVREAD_ERROR_INDEX,
-    CSVREAD_ERROR_RANGE,
-    CSVREAD_ERROR_FILENAME,
-    CSVREAD_ERROR_FILENAME_EMPTY,
-    CSVREAD_ERROR_IO_OPEN,
-    CSVREAD_ERROR_IO_READ,
-    CSVREAD_ERROR_NON_NUMERIC_TOKEN,
-    CSVREAD_ERROR_TENSOR_BUILD,
-];
-pub const CSVREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CSVREAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CSVREAD_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "csvread",
-    op_kind: GpuOpKind::Custom("io-csvread"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "File I/O and parsing run on the host and the result remains host-resident. Public host controls require no provider; gated resident controls are gathered through their owning provider before parsing.",
-};
+use super::cooperation::{await_io, TabularCooperation};
+use super::path::{TabularFsOwner, TabularFsPath};
 
 fn csvread_error_with(
     error: &'static BuiltinErrorDescriptor,
@@ -249,7 +45,7 @@ fn csvread_error_with_source<E>(
     source: E,
 ) -> RuntimeError
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: crate::runtime_error::RuntimeErrorSourceBound,
 {
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -272,30 +68,18 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::tabular::csvread")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "csvread",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; executes as a standalone host operation.",
-};
-
 #[runtime_builtin(
     name = "csvread",
-    category = "io/tabular",
-    summary = "Read numeric data from CSV files.",
-    keywords = "csvread,csv,dlmread,numeric import,range",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::tensor_type),
-    descriptor(crate::builtins::io::tabular::csvread::CSVREAD_DESCRIPTOR),
-    extensions(crate::builtins::io::tabular::csvread::CSVREAD_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::tabular::csvread::CSVREAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::tabular::csvread"
 )]
-async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn csvread_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    path: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if matches!(path, Value::GpuTensor(_)) || rest.iter().any(|v| matches!(v, Value::GpuTensor(_)))
     {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -303,12 +87,44 @@ async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             BUILTIN_NAME,
         )?;
     }
-    let gathered_path = gather_if_needed_async(&path)
-        .await
-        .map_err(map_control_flow)?;
-    let options = parse_arguments(&rest).await?;
+    preflight_host_controls(rest.view())?;
+    let known_path = if matches!(path, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(resolve_path(&path)?)
+    };
+    let owner = TabularFsOwner::capture(known_path.as_deref()).map_err(|source| {
+        csvread_error_with_source(
+            &CSVREAD_ERROR_IO_OPEN,
+            "csvread: unable to capture filesystem authority",
+            source,
+        )
+    })?;
+    let gathered_path = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        gather_if_needed_async(&path),
+    )
+    .await?
+    .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
+    let options = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        parse_arguments(runtime.as_ref(), &rest),
+    )
+    .await??;
+    cooperation.completed(0).await?;
     let resolved = resolve_path(&gathered_path)?;
-    let (rows, max_cols, skipped_rows) = read_csv_rows(&resolved, &options).await?;
+    let selected = owner.path(resolved).map_err(|source| {
+        csvread_error_with_source(
+            &CSVREAD_ERROR_IO_OPEN,
+            "csvread: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    let (rows, max_cols, skipped_rows) =
+        read_csv_rows(runtime.as_ref(), &mut cooperation, &selected, &options).await?;
     let start_row = if options.range.is_none() {
         options.start_row.saturating_sub(skipped_rows)
     } else {
@@ -316,22 +132,64 @@ async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     };
     let subset = if let Some(range) = options.range {
         let loaded_range = range.relative_to_loaded_rows();
-        apply_range(&rows, max_cols, &loaded_range, ParsedNumber::ZERO)
+        apply_range(
+            &mut cooperation,
+            &rows,
+            max_cols,
+            &loaded_range,
+            ParsedNumber::ZERO,
+        )
+        .await?
     } else {
         apply_offsets(
+            &mut cooperation,
             &rows,
             max_cols,
             start_row,
             options.start_col,
             ParsedNumber::ZERO,
         )
+        .await?
     };
-    rows_to_value(
+    let value = rows_to_value(
+        &mut cooperation,
         subset.rows,
         subset.row_count,
         subset.col_count,
         ParsedNumber::ZERO,
     )
+    .await?;
+    cooperation.completed(0).await?;
+    selected.check().map_err(|source| {
+        csvread_error_with_source(
+            &CSVREAD_ERROR_IO_READ,
+            "csvread: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    Ok(value)
+}
+
+fn preflight_host_controls(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    if !matches!(rest.len(), 0 | 2 | 3) {
+        return Err(csvread_error_with(
+            &CSVREAD_ERROR_ARG_CONFIG,
+            "csvread: expected filename, optional row and col, and optional range",
+        ));
+    }
+    for (index, name) in [(0, "row"), (1, "col")] {
+        if let Some(value) = rest.get(index) {
+            if !matches!(value, Value::GpuTensor(_)) {
+                value_to_start_index(value, name)?;
+            }
+        }
+    }
+    if let Some(range) = rest.get(2) {
+        if !matches!(range, Value::GpuTensor(_)) {
+            parse_range(range)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default)]
@@ -341,15 +199,17 @@ struct CsvReadOptions {
     range: Option<RangeSpec>,
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<CsvReadOptions> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
+async fn parse_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<CsvReadOptions> {
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), runtime, async |index| {
+            gather_if_needed_async(&args[index])
                 .await
-                .map_err(map_control_flow)?,
-        );
-    }
+                .map_err(map_control_flow)
+        })
+        .await?;
     match gathered.len() {
         0 => Ok(CsvReadOptions::default()),
         2 => {
@@ -435,22 +295,14 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
+    if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
+        return normalize_path(&text);
+    }
     match value {
-        Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
-        }
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                normalize_path(&sa.data[0])
-            } else {
-                Err(csvread_error_with(
-                    &CSVREAD_ERROR_FILENAME,
-                    "csvread: string array inputs must be scalar",
-                ))
-            }
-        }
+        Value::StringArray(_) => Err(csvread_error_with(
+            &CSVREAD_ERROR_FILENAME,
+            "csvread: string array inputs must be scalar",
+        )),
         Value::CharArray(_) => Err(csvread_error_with(
             &CSVREAD_ERROR_FILENAME,
             "csvread: expected a 1-by-N character vector for the file name",
@@ -476,1038 +328,22 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-async fn read_csv_rows(
-    path: &Path,
-    options: &CsvReadOptions,
-) -> BuiltinResult<(Vec<Vec<ParsedNumber>>, usize, usize)> {
-    let file = File::open_async(path).await.map_err(|err| {
-        csvread_error_with_source(
-            &CSVREAD_ERROR_IO_OPEN,
-            format!("csvread: unable to open '{}': {err}", path.display()),
-            err,
-        )
-    })?;
-    let mut reader = BufReader::new(file);
-    let mut buffer = Vec::new();
-    let mut rows = Vec::new();
-    let mut max_cols = 0usize;
-    let mut line_index = 0usize;
-    let mut nonempty_row_index = 0usize;
-    let mut skipped_rows = 0usize;
+#[path = "csvread/reader.rs"]
+mod reader;
+use reader::*;
 
-    loop {
-        buffer.clear();
-        let bytes = reader.read_until(b'\n', &mut buffer).map_err(|err| {
-            csvread_error_with_source(
-                &CSVREAD_ERROR_IO_READ,
-                format!("csvread: failed to read '{}': {err}", path.display()),
-                err,
-            )
-        })?;
-        if bytes == 0 {
-            break;
-        }
-        line_index += 1;
-        trim_line_ending(&mut buffer);
-        if buffer.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        let current_row_index = nonempty_row_index;
-        nonempty_row_index += 1;
-        if let Some(range) = options.range {
-            if let Some(end_row) = range.end_row {
-                if current_row_index > end_row {
-                    break;
-                }
-            }
-            if current_row_index < range.start_row {
-                continue;
-            }
-        }
-        if options.range.is_none() && options.start_row > 0 && line_index <= options.start_row {
-            skipped_rows += 1;
-            continue;
-        }
-        let (parse_start_col, parse_end_col) = match options.range {
-            Some(range) => (range.start_col, range.end_col),
-            None => (options.start_col, None),
-        };
-        let line = String::from_utf8_lossy(&buffer);
-        let parsed = parse_csv_row(&line, line_index, parse_start_col, parse_end_col)?;
-        max_cols = max_cols.max(parsed.len());
-        rows.push(parsed);
-    }
+#[path = "csvread/number.rs"]
+mod number;
+use number::*;
 
-    Ok((rows, max_cols, skipped_rows))
-}
+#[path = "csvread/range.rs"]
+mod range;
+use range::*;
 
-fn trim_line_ending(buffer: &mut Vec<u8>) {
-    if buffer.ends_with(b"\n") {
-        buffer.pop();
-        if buffer.ends_with(b"\r") {
-            buffer.pop();
-        }
-    } else if buffer.ends_with(b"\r") {
-        buffer.pop();
-    }
-}
-
-fn parse_csv_row(
-    line: &str,
-    line_index: usize,
-    parse_start_col: usize,
-    parse_end_col: Option<usize>,
-) -> BuiltinResult<Vec<ParsedNumber>> {
-    let mut values = Vec::new();
-    for (col_index, raw_field) in line.split(',').enumerate() {
-        if col_index < parse_start_col {
-            // Respect csvread(..., row, col) offsets by skipping validation for
-            // columns that will be dropped before materializing the output.
-            values.push(ParsedNumber::ZERO);
-            continue;
-        }
-        if parse_end_col.is_some_and(|end_col| col_index > end_col) {
-            break;
-        }
-        let trimmed = raw_field.trim();
-        if trimmed.is_empty() {
-            values.push(ParsedNumber::ZERO);
-            continue;
-        }
-        let unwrapped = if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2
-        {
-            &trimmed[1..trimmed.len() - 1]
-        } else {
-            trimmed
-        };
-        let lowered = unwrapped.to_ascii_lowercase();
-        let value = match lowered.as_str() {
-            "nan" => ParsedNumber::real(f64::NAN),
-            "inf" | "+inf" => ParsedNumber::real(f64::INFINITY),
-            "-inf" => ParsedNumber::real(f64::NEG_INFINITY),
-            _ => parse_csv_number(unwrapped).ok_or_else(|| {
-                csvread_error_with(
-                    &CSVREAD_ERROR_NON_NUMERIC_TOKEN,
-                    format!(
-                        "csvread: nonnumeric token '{}' at row {} column {}",
-                        unwrapped,
-                        line_index,
-                        col_index + 1
-                    ),
-                )
-            })?,
-        };
-        values.push(value);
-    }
-    Ok(values)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct ParsedNumber {
-    re: f64,
-    im: f64,
-    complex: bool,
-}
-
-impl ParsedNumber {
-    const ZERO: Self = Self {
-        re: 0.0,
-        im: 0.0,
-        complex: false,
-    };
-    fn real(re: f64) -> Self {
-        Self {
-            re,
-            im: 0.0,
-            complex: false,
-        }
-    }
-}
-
-fn parse_csv_number(text: &str) -> Option<ParsedNumber> {
-    if let Ok(re) = text.parse::<f64>() {
-        return Some(ParsedNumber::real(re));
-    }
-    let body = text.strip_suffix(['i', 'j'])?;
-    let split = body.char_indices().rev().find_map(|(idx, ch)| {
-        if idx == 0 {
-            return None;
-        }
-        if ch != '+' && ch != '-' {
-            return None;
-        }
-        let prior = body[..idx].chars().next_back();
-        (!matches!(prior, Some('e' | 'E'))).then_some(idx)
-    });
-    let (re, imag) = if let Some(idx) = split {
-        (
-            body[..idx].parse::<f64>().ok()?,
-            parse_imaginary(&body[idx..])?,
-        )
-    } else {
-        (0.0, parse_imaginary(body)?)
-    };
-    Some(ParsedNumber {
-        re,
-        im: imag,
-        complex: true,
-    })
-}
-
-fn parse_imaginary(text: &str) -> Option<f64> {
-    match text {
-        "" | "+" => Some(1.0),
-        "-" => Some(-1.0),
-        _ => text.parse::<f64>().ok(),
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct RangeSpec {
-    start_row: usize,
-    start_col: usize,
-    end_row: Option<usize>,
-    end_col: Option<usize>,
-}
-
-impl RangeSpec {
-    fn relative_to_loaded_rows(self) -> Self {
-        if self.end_row.is_some_and(|end_row| end_row < self.start_row) {
-            return Self {
-                start_row: 1,
-                start_col: self.start_col,
-                end_row: Some(0),
-                end_col: self.end_col,
-            };
-        }
-        Self {
-            start_row: 0,
-            start_col: self.start_col,
-            end_row: self.end_row.map(|end_row| end_row - self.start_row),
-            end_col: self.end_col,
-        }
-    }
-}
-
-fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
-    match value {
-        Value::String(s) => parse_range_string(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            parse_range_string(&text)
-        }
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                parse_range_string(&sa.data[0])
-            } else {
-                Err(csvread_error_with(
-                    &CSVREAD_ERROR_RANGE,
-                    "csvread: Range string array inputs must be scalar",
-                ))
-            }
-        }
-        Value::Tensor(_) => parse_range_numeric(value),
-        _ => Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range must be provided as a string or numeric vector",
-        )),
-    }
-}
-
-fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range string cannot be empty",
-        ));
-    }
-    let (separator, extension) = if trimmed.contains("..") {
-        ("..", None)
-    } else if trimmed.contains(':') {
-        (":", Some(&CSVREAD_COLON_RANGE_EXTENSION))
-    } else {
-        ("..", None)
-    };
-    if let Some(extension) = extension {
-        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
-    }
-    let parts: Vec<&str> = trimmed.split(separator).collect();
-    if parts.len() > 2 {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            format!("csvread: invalid Range specification '{trimmed}'"),
-        ));
-    }
-    let start = parse_cell_reference(parts[0])?;
-    if start.col.is_none() {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range must specify a starting column",
-        ));
-    }
-    let end = if parts.len() == 2 {
-        Some(parse_cell_reference(parts[1])?)
-    } else {
-        None
-    };
-    if let Some(ref end_ref) = end {
-        if end_ref.col.is_none() {
-            return Err(csvread_error_with(
-                &CSVREAD_ERROR_RANGE,
-                "csvread: Range end must include a column reference",
-            ));
-        }
-    }
-    let start_row = start.row.unwrap_or(0);
-    let start_col = start.col.unwrap();
-    let end_row = end.as_ref().and_then(|r| r.row);
-    let end_col = end.as_ref().and_then(|r| r.col);
-    Ok(RangeSpec {
-        start_row,
-        start_col,
-        end_row,
-        end_col,
-    })
-}
-
-fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
-    let elements = match value {
-        Value::Tensor(t) => (0..tensor::tensor_element_len(t))
-            .map(|idx| {
-                t.numeric_value_at(idx)
-                    .expect("index within authoritative numeric storage")
-            })
-            .collect::<Vec<_>>(),
-        _ => {
-            return Err(csvread_error_with(
-                &CSVREAD_ERROR_RANGE,
-                "csvread: numeric Range must be provided as a vector with 2 or 4 elements",
-            ));
-        }
-    };
-    if elements.len() != 2 && elements.len() != 4 {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: numeric Range must contain exactly 2 or 4 elements",
-        ));
-    }
-    if elements.len() == 2 {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &CSVREAD_TWO_VECTOR_RANGE_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    let mut indices = Vec::with_capacity(elements.len());
-    for (idx, element) in elements.into_iter().enumerate() {
-        if let Some(integer) = element.into_int_value() {
-            indices.push(integer.try_to_usize().ok_or_else(|| {
-                csvread_error_with(
-                    &CSVREAD_ERROR_RANGE,
-                    format!(
-                        "csvread: Range index {} must be a representable non-negative integer",
-                        idx + 1
-                    ),
-                )
-            })?);
-        } else {
-            indices.push(non_negative_index(element.materialize_f64(), idx)?);
-        }
-    }
-    let start_row = indices[0];
-    let start_col = indices[1];
-    let (end_row, end_col) = if indices.len() == 4 {
-        (Some(indices[2]), Some(indices[3]))
-    } else {
-        (None, None)
-    };
-    Ok(RangeSpec {
-        start_row,
-        start_col,
-        end_row,
-        end_col,
-    })
-}
-
-fn non_negative_index(value: f64, position: usize) -> BuiltinResult<usize> {
-    if !value.is_finite() {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range indices must be finite",
-        ));
-    }
-    if value < 0.0 {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range indices must be non-negative",
-        ));
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range indices must be integers",
-        ));
-    }
-    usize::try_from(rounded as i64).map_err(|_| {
-        csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            format!(
-                "csvread: Range index {} is too large to fit in usize",
-                position + 1
-            ),
-        )
-    })
-}
-
-#[derive(Clone, Copy)]
-struct CellReference {
-    row: Option<usize>,
-    col: Option<usize>,
-}
-
-fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
-    let mut letters = String::new();
-    let mut digits = String::new();
-    for ch in token.trim().chars() {
-        if ch == '$' {
-            continue;
-        }
-        if ch.is_ascii_alphabetic() {
-            letters.push(ch.to_ascii_uppercase());
-        } else if ch.is_ascii_digit() {
-            digits.push(ch);
-        } else {
-            return Err(csvread_error_with(
-                &CSVREAD_ERROR_RANGE,
-                format!("csvread: invalid Range component '{token}'"),
-            ));
-        }
-    }
-    if letters.is_empty() && digits.is_empty() {
-        return Err(csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range references cannot be empty",
-        ));
-    }
-    let col = if letters.is_empty() {
-        None
-    } else {
-        Some(column_index_from_letters(&letters)?)
-    };
-    let row = if digits.is_empty() {
-        None
-    } else {
-        let parsed = digits.parse::<usize>().map_err(|_| {
-            csvread_error_with(
-                &CSVREAD_ERROR_RANGE,
-                format!(
-                    "csvread: invalid row index '{}' in Range component '{token}'",
-                    digits
-                ),
-            )
-        })?;
-        if parsed == 0 {
-            return Err(csvread_error_with(
-                &CSVREAD_ERROR_RANGE,
-                "csvread: Range rows must be >= 1",
-            ));
-        }
-        Some(parsed - 1)
-    };
-    Ok(CellReference { row, col })
-}
-
-fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
-    let mut value: usize = 0;
-    for ch in letters.chars() {
-        if !ch.is_ascii_uppercase() {
-            return Err(csvread_error_with(
-                &CSVREAD_ERROR_RANGE,
-                format!("csvread: invalid column designator '{letters}' in Range"),
-            ));
-        }
-        let digit = (ch as u8 - b'A' + 1) as usize;
-        value = value
-            .checked_mul(26)
-            .and_then(|v| v.checked_add(digit))
-            .ok_or_else(|| {
-                csvread_error_with(
-                    &CSVREAD_ERROR_RANGE,
-                    "csvread: Range column index overflowed",
-                )
-            })?;
-    }
-    value.checked_sub(1).ok_or_else(|| {
-        csvread_error_with(
-            &CSVREAD_ERROR_RANGE,
-            "csvread: Range column index underflowed",
-        )
-    })
-}
-
-struct SubsetResult {
-    rows: Vec<Vec<ParsedNumber>>,
-    row_count: usize,
-    col_count: usize,
-}
-
-fn apply_offsets(
-    rows: &[Vec<ParsedNumber>],
-    max_cols: usize,
-    start_row: usize,
-    start_col: usize,
-    default_fill: ParsedNumber,
-) -> SubsetResult {
-    if rows.is_empty() || max_cols == 0 {
-        return SubsetResult {
-            rows: Vec::new(),
-            row_count: 0,
-            col_count: 0,
-        };
-    }
-    if start_row >= rows.len() {
-        return SubsetResult {
-            rows: Vec::new(),
-            row_count: 0,
-            col_count: 0,
-        };
-    }
-    if start_col >= max_cols {
-        return SubsetResult {
-            rows: Vec::new(),
-            row_count: 0,
-            col_count: 0,
-        };
-    }
-
-    let mut subset_rows = Vec::new();
-    let mut col_count = 0usize;
-    for row in rows.iter().skip(start_row) {
-        if start_col >= row.len() && row.len() < max_cols {
-            // Entire row missing required columns; fill zeros of remaining width.
-            let width = max_cols - start_col;
-            subset_rows.push(vec![default_fill; width]);
-            col_count = col_count.max(width);
-            continue;
-        }
-        let mut extracted = Vec::with_capacity(max_cols - start_col);
-        for col_idx in start_col..max_cols {
-            let value = row.get(col_idx).copied().unwrap_or(default_fill);
-            extracted.push(value);
-        }
-        col_count = col_count.max(extracted.len());
-        subset_rows.push(extracted);
-    }
-    let row_count = subset_rows.len();
-    SubsetResult {
-        rows: subset_rows,
-        row_count,
-        col_count,
-    }
-}
-
-fn apply_range(
-    rows: &[Vec<ParsedNumber>],
-    max_cols: usize,
-    range: &RangeSpec,
-    default_fill: ParsedNumber,
-) -> SubsetResult {
-    if rows.is_empty() || max_cols == 0 {
-        return SubsetResult {
-            rows: Vec::new(),
-            row_count: 0,
-            col_count: 0,
-        };
-    }
-    if range.start_row >= rows.len() || range.start_col >= max_cols {
-        return SubsetResult {
-            rows: Vec::new(),
-            row_count: 0,
-            col_count: 0,
-        };
-    }
-    let last_row = rows.len().saturating_sub(1);
-    let mut end_row = range.end_row.unwrap_or(last_row);
-    if end_row > last_row {
-        end_row = last_row;
-    }
-    if end_row < range.start_row {
-        return SubsetResult {
-            rows: Vec::new(),
-            row_count: 0,
-            col_count: 0,
-        };
-    }
-
-    let last_col = max_cols.saturating_sub(1);
-    let mut end_col = range.end_col.unwrap_or(last_col);
-    if end_col > last_col {
-        end_col = last_col;
-    }
-    if end_col < range.start_col {
-        return SubsetResult {
-            rows: Vec::new(),
-            row_count: 0,
-            col_count: 0,
-        };
-    }
-
-    let mut subset_rows = Vec::new();
-    let mut col_count = 0usize;
-    for row_idx in range.start_row..=end_row {
-        if row_idx >= rows.len() {
-            break;
-        }
-        let row = &rows[row_idx];
-        let mut extracted = Vec::with_capacity(end_col - range.start_col + 1);
-        for col_idx in range.start_col..=end_col {
-            if col_idx >= max_cols {
-                break;
-            }
-            let value = row.get(col_idx).copied().unwrap_or(default_fill);
-            extracted.push(value);
-        }
-        col_count = col_count.max(extracted.len());
-        subset_rows.push(extracted);
-    }
-    let row_count = subset_rows.len();
-    SubsetResult {
-        rows: subset_rows,
-        row_count,
-        col_count,
-    }
-}
-
-fn rows_to_value(
-    rows: Vec<Vec<ParsedNumber>>,
-    row_count: usize,
-    col_count: usize,
-    default_fill: ParsedNumber,
-) -> BuiltinResult<Value> {
-    if row_count == 0 || col_count == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0])
-            .map(Value::Tensor)
-            .map_err(|e| csvread_error_with(&CSVREAD_ERROR_TENSOR_BUILD, format!("csvread: {e}")));
-    }
-    let mut data = vec![default_fill; row_count * col_count];
-    for (row_idx, row) in rows.iter().enumerate().take(row_count) {
-        for col_idx in 0..col_count {
-            let value = row.get(col_idx).copied().unwrap_or(default_fill);
-            data[row_idx + col_idx * row_count] = value;
-        }
-    }
-    if data.iter().any(|value| value.complex) {
-        ComplexTensor::new(
-            data.into_iter().map(|value| (value.re, value.im)).collect(),
-            vec![row_count, col_count],
-        )
-        .map(Value::ComplexTensor)
-        .map_err(|e| csvread_error_with(&CSVREAD_ERROR_TENSOR_BUILD, format!("csvread: {e}")))
-    } else {
-        Tensor::new(
-            data.into_iter().map(|value| value.re).collect(),
-            vec![row_count, col_count],
-        )
-        .map(Value::Tensor)
-        .map_err(|e| csvread_error_with(&CSVREAD_ERROR_TENSOR_BUILD, format!("csvread: {e}")))
-    }
-}
+#[path = "csvread/output.rs"]
+mod output;
+use output::*;
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use runmat_time::unix_timestamp_ns;
-    use std::fs;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor as BuiltinTensor};
-
-    fn csvread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        let _provider_lock = runmat_filesystem::provider_override_lock();
-        futures::executor::block_on(super::csvread_builtin(path, rest))
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = CSVREAD_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"M = csvread(filename)"));
-        assert!(labels.contains(&"M = csvread(filename, row, col)"));
-        assert!(labels.contains(&"M = csvread(filename, row, col, range)"));
-    }
-
-    static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-    fn unique_path(prefix: &str) -> PathBuf {
-        let nanos = unix_timestamp_ns();
-        let seq = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "runmat_csvread_{prefix}_{}_{}_{}",
-            std::process::id(),
-            nanos,
-            seq
-        ));
-        path
-    }
-
-    fn write_temp_file(lines: &[&str]) -> PathBuf {
-        let path = unique_path("input").with_extension("csv");
-        let contents = lines.join("\n");
-        fs::write(&path, contents).expect("write temp csv");
-        path
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_basic_csv_roundtrip() {
-        let path = write_temp_file(&["1,2,3", "4,5,6"]);
-        let result = csvread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-            .expect("csvread");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
-                assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_with_offsets() {
-        let path = write_temp_file(&["0,1,2", "3,4,5", "6,7,8"]);
-        let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(1))];
-        let result =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_with_numeric_range() {
-        let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
-        let args = vec![
-            Value::Int(IntValue::I32(0)),
-            Value::Int(IntValue::I32(0)),
-            Value::from(BuiltinTensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]).expect("tensor")),
-        ];
-        let result =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_with_string_range() {
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
-        let args = vec![
-            Value::Int(IntValue::I32(0)),
-            Value::Int(IntValue::I32(0)),
-            Value::from("B2:C3"),
-        ];
-        let result =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn csvread_numeric_range_reads_typed_integer_storage_exactly() {
-        let range = BuiltinTensor::new_integer(IntegerStorage::U16(vec![1, 2, 3, 4]), vec![1, 4])
-            .expect("range");
-
-        let parsed = parse_range_numeric(&Value::Tensor(range)).expect("range");
-
-        assert_eq!(parsed.start_row, 1);
-        assert_eq!(parsed.start_col, 2);
-        assert_eq!(parsed.end_row, Some(3));
-        assert_eq!(parsed.end_col, Some(4));
-    }
-
-    #[test]
-    fn csvread_start_offsets_read_typed_integer_storage_exactly() {
-        let row = BuiltinTensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1])
-            .expect("row offset");
-        assert_eq!(value_to_start_index(&Value::Tensor(row), "row").unwrap(), 7);
-
-        let negative = BuiltinTensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
-            .expect("negative row offset");
-        assert!(value_to_start_index(&Value::Tensor(negative), "row").is_err());
-
-        assert_eq!(
-            value_to_start_index(&Value::Int(IntValue::U64(u64::MAX)), "row").ok(),
-            usize::try_from(u64::MAX).ok()
-        );
-        assert!(value_to_start_index(&Value::Num(1.0e300), "row").is_err());
-    }
-
-    #[test]
-    fn csvread_start_offsets_read_all_integer_storage_classes_with_poisoned_f64_mirrors() {
-        let storages = [
-            IntegerStorage::I8(vec![7]),
-            IntegerStorage::I16(vec![7]),
-            IntegerStorage::I32(vec![7]),
-            IntegerStorage::I64(vec![7]),
-            IntegerStorage::U8(vec![7]),
-            IntegerStorage::U16(vec![7]),
-            IntegerStorage::U32(vec![7]),
-            IntegerStorage::U64(vec![7]),
-        ];
-
-        for storage in storages {
-            let tensor = BuiltinTensor::new_integer(storage, vec![1, 1]).expect("index");
-            assert_eq!(
-                value_to_start_index(&Value::Tensor(tensor), "row").expect("index"),
-                7
-            );
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_empty_fields_become_zero() {
-        let path = write_temp_file(&["1,,3", ",5,", "7,8,"]);
-        let result = csvread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-            .expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                assert_eq!(
-                    t.materialize_f64(),
-                    vec![1.0, 0.0, 7.0, 0.0, 5.0, 8.0, 3.0, 0.0, 0.0]
-                );
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_errors_on_text() {
-        let path = write_temp_file(&["1,2,3", "4,error,6"]);
-        let err = csvread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new())
-            .expect_err("should fail");
-        let message = err.message().to_string();
-        assert!(
-            message.contains("nonnumeric token 'error'"),
-            "unexpected error: {message}"
-        );
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_accepts_char_array_filename() {
-        let path = write_temp_file(&["1,2"]);
-        let path_string = path.to_string_lossy().to_string();
-        let data: Vec<char> = path_string.chars().collect();
-        let cols = data.len();
-        let chars = CharArray::new(data, 1, cols).expect("char array");
-        let result = csvread_builtin(Value::CharArray(chars), Vec::new()).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
-                assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_with_header_and_row_labels_using_offsets() {
-        let path = write_temp_file(&["Name,Jan,Feb", "alpha,1,2", "beta,3,4"]);
-        let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(1))];
-        let result =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
-                assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_skips_non_utf8_bytes_outside_requested_numeric_block() {
-        let path = unique_path("latin1_offsets").with_extension("csv");
-        fs::write(&path, b"label,\xFCtemp\n\xFFrow,21.5\n\xFErow,22.0\n").expect("write temp csv");
-        let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(1))];
-        let result =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_numeric_range_ignores_bytes_and_text_outside_rectangle() {
-        let path = unique_path("latin1_numeric_range").with_extension("csv");
-        fs::write(
-            &path,
-            b"header,\xFCbad,tail\n\xFFlabel,21.5,\xFEtail\n\xFFlabel,22.0,\xFEtail\nafter,\xFCbad,tail\n",
-        )
-        .expect("write temp csv");
-        let range = BuiltinTensor::new(vec![1.0, 1.0, 2.0, 1.0], vec![4, 1]).expect("tensor");
-        let args = vec![
-            Value::Int(IntValue::I32(0)),
-            Value::Int(IntValue::I32(0)),
-            Value::from(range),
-        ];
-        let result =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn csvread_a1_range_ignores_bytes_and_text_outside_rectangle() {
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let path = unique_path("latin1_a1_range").with_extension("csv");
-        fs::write(
-            &path,
-            b"header,\xFCbad,tail\n\xFFlabel,21.5,\xFEtail\n\xFFlabel,22.0,\xFEtail\nafter,\xFCbad,tail\n",
-        )
-        .expect("write temp csv");
-        let args = vec![
-            Value::Int(IntValue::I32(0)),
-            Value::Int(IntValue::I32(0)),
-            Value::from("B2:B3"),
-        ];
-        let result =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
-                assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
-            }
-            other => panic!("expected tensor, got {other:?}"),
-        }
-        fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn csvread_public_dotdot_range_and_complex_tokens() {
-        let path = write_temp_file(&["1+2i,3-4j,5i", "6,7,8"]);
-        let args = vec![Value::Num(0.0), Value::Num(0.0), Value::from("A1..C2")];
-        let Value::ComplexTensor(result) =
-            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).unwrap()
-        else {
-            panic!("expected complex double result");
-        };
-        assert_eq!(result.shape, vec![2, 3]);
-        assert_eq!(
-            result.materialize_f64(),
-            vec![
-                (1.0, 2.0),
-                (6.0, 0.0),
-                (3.0, -4.0),
-                (7.0, 0.0),
-                (0.0, 5.0),
-                (8.0, 0.0)
-            ]
-        );
-        fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn csvread_four_vector_reads_all_integer_classes_authoritatively() {
-        for storage in [
-            IntegerStorage::I8(vec![0, 0, 1, 1]),
-            IntegerStorage::I16(vec![0, 0, 1, 1]),
-            IntegerStorage::I32(vec![0, 0, 1, 1]),
-            IntegerStorage::I64(vec![0, 0, 1, 1]),
-            IntegerStorage::U8(vec![0, 0, 1, 1]),
-            IntegerStorage::U16(vec![0, 0, 1, 1]),
-            IntegerStorage::U32(vec![0, 0, 1, 1]),
-            IntegerStorage::U64(vec![0, 0, 1, 1]),
-        ] {
-            let tensor = BuiltinTensor::new_integer(storage, vec![1, 4]).unwrap();
-            let range = parse_range_numeric(&Value::Tensor(tensor)).unwrap();
-            assert_eq!((range.start_row, range.start_col), (0, 0));
-            assert_eq!((range.end_row, range.end_col), (Some(1), Some(1)));
-        }
-    }
-
-    #[test]
-    fn csvread_range_extensions_are_independently_gated() {
-        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        assert_eq!(
-            parse_range_string("A1:B2").unwrap_err().identifier(),
-            CSVREAD_COLON_RANGE_EXTENSION.error_identifier
-        );
-        let two = BuiltinTensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
-        assert_eq!(
-            parse_range_numeric(&Value::Tensor(two))
-                .unwrap_err()
-                .identifier(),
-            CSVREAD_TWO_VECTOR_RANGE_EXTENSION.error_identifier
-        );
-        drop(strict);
-    }
-
-    #[test]
-    fn csvread_resident_control_gate_precedes_provider_and_file_access() {
-        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 396,
-            descriptor: Default::default(),
-        });
-        let error = csvread_builtin(Value::from("does-not-exist.csv"), vec![resident]).unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            CSVREAD_RESIDENT_CONTROL_EXTENSION.error_identifier
-        );
-        drop(strict);
-        assert_eq!(CSVREAD_EXTENSIONS.len(), 3);
-        assert_eq!(CSVREAD_INTEGER_CAPABILITIES[0].inputs.len(), 3);
-    }
-}
+#[path = "csvread/tests.rs"]
+pub(crate) mod tests;

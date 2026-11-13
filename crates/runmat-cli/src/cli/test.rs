@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 #[derive(Args, Clone, Debug)]
 pub struct TestArgs {
-    /// Test files or directories; defaults to manifest test roots
+    /// Test files or directories (defaults to manifest test roots); a .circuit or .circuit.layout
+    /// runs its circuit checks
     #[arg(value_name = "PATH")]
     pub targets: Vec<PathBuf>,
 
@@ -30,14 +31,14 @@ pub struct TestArgs {
     pub cluster: Option<String>,
 
     /// Remote project used for admission and billing
-    #[arg(long)]
+    #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
     pub project: Option<Uuid>,
 
     /// Authorized remote execution queue
     #[arg(long)]
     pub queue: Option<String>,
 
-    /// Pinned endpoint identity fingerprint trusted for remote tests
+    /// Optional independent endpoint identity pin for remote tests
     #[arg(long)]
     pub trust_identity: Option<String>,
 
@@ -89,7 +90,7 @@ pub struct TestArgs {
     #[arg(long)]
     pub coverage_include_vendor: bool,
 
-    /// Directory for machine reports and captured artifacts
+    /// Directory for direct report files and run-scoped captured artifacts
     #[arg(long = "report-dir", default_value = "test-results")]
     pub report_dir: PathBuf,
 

@@ -1,0 +1,61 @@
+geometry frame {
+    file = "./geometry/portal-frame.step"
+    units = mm
+    region girder : edge { select name "Girder"; expect exactly_one }
+    region right_column : edge { select name "Right column"; expect exactly_one }
+    region left_column : edge { select name "Left column"; expect exactly_one }
+    region ground : edge { select name "Ground"; expect exactly_one }
+    region left_top : vertex { select name "Left top"; expect exactly_one }
+    region left_base : vertex { select name "Left base"; expect exactly_one }
+    region right_base : vertex { select name "Right base"; expect exactly_one }
+}
+
+mesh frame on geometry.frame {
+    lines {
+        target_size = 250 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model sway_frame {
+    section member { rectangular_beam {
+        width = 100 mm
+        height = 100 mm
+    } }
+    orientation frame_axes { global_cartesian {} }
+
+    assign material.steel to geometry.frame.region.left_column
+    assign material.steel to geometry.frame.region.girder
+    assign material.steel to geometry.frame.region.right_column
+    assign material.steel to geometry.frame.region.ground
+    assign section.member to geometry.frame.region.left_column
+    assign section.member to geometry.frame.region.girder
+    assign section.member to geometry.frame.region.right_column
+    assign section.member to geometry.frame.region.ground
+    assign orientation.frame_axes to geometry.frame.region.left_column
+    assign orientation.frame_axes to geometry.frame.region.girder
+    assign orientation.frame_axes to geometry.frame.region.right_column
+    assign orientation.frame_axes to geometry.frame.region.ground
+    constraint left_footing { structural.fixed { target = geometry.frame.region.left_base } }
+    constraint right_footing { structural.fixed { target = geometry.frame.region.right_base } }
+    load wind {
+        force on geometry.frame.region.left_top = [10, 0, 0] kN
+    }
+    load_case service { include load.wind }
+}
+
+study portal_frame_static {
+    geometry = geometry.frame
+    mesh = mesh.frame
+    model = model.sway_frame
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+}

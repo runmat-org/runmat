@@ -3,6 +3,7 @@ use super::dependency::{
     ProjectRegistry, ProjectSourceReplacement, ProjectTargetDependencies,
 };
 use super::testing::ProjectTestConfig;
+use super::ProjectExecutionProfile;
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -28,6 +29,11 @@ pub struct ProjectManifest {
     pub source_replacements: BTreeMap<String, ProjectSourceReplacement>,
     pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
+    pub execution_profiles: BTreeMap<String, ProjectExecutionProfile>,
+    pub native_interfaces: BTreeMap<String, ProjectNativeInterface>,
+    pub mex_artifacts: BTreeMap<String, ProjectMexArtifact>,
+    pub java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
+    pub python_artifacts: BTreeMap<String, ProjectPythonArtifact>,
     pub test: ProjectTestConfig,
 }
 
@@ -63,6 +69,33 @@ pub struct ProjectEntrypoint {
     pub function: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectNativeInterface {
+    pub manifest: PathBuf,
+    pub library: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectMexArtifact {
+    pub manifest: PathBuf,
+    pub module: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectJavaArtifact {
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectPythonArtifact {
+    pub path: PathBuf,
+    pub module: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProjectManifest {
@@ -88,6 +121,16 @@ struct RawProjectManifest {
     publish: Option<ProjectPublication>,
     #[serde(default)]
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
+    #[serde(default, rename = "execution-profiles")]
+    execution_profiles: BTreeMap<String, ProjectExecutionProfile>,
+    #[serde(default, rename = "native-interfaces")]
+    native_interfaces: BTreeMap<String, ProjectNativeInterface>,
+    #[serde(default, rename = "mex-artifacts")]
+    mex_artifacts: BTreeMap<String, ProjectMexArtifact>,
+    #[serde(default, rename = "java-artifacts")]
+    java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
+    #[serde(default, rename = "python-artifacts")]
+    python_artifacts: BTreeMap<String, ProjectPythonArtifact>,
     #[serde(default, rename = "runtime")]
     _runtime: Option<IgnoredAny>,
     #[serde(default)]
@@ -132,6 +175,11 @@ impl From<RawProjectManifest> for ProjectManifest {
             source_replacements: value.source_replacements,
             publish: value.publish,
             entrypoints,
+            execution_profiles: value.execution_profiles,
+            native_interfaces: value.native_interfaces,
+            mex_artifacts: value.mex_artifacts,
+            java_artifacts: value.java_artifacts,
+            python_artifacts: value.python_artifacts,
             test: value.test,
         }
     }
@@ -170,6 +218,19 @@ impl Serialize for ProjectManifest {
             #[serde(skip_serializing_if = "Option::is_none")]
             publish: &'a Option<ProjectPublication>,
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
+            #[serde(
+                rename = "execution-profiles",
+                skip_serializing_if = "BTreeMap::is_empty"
+            )]
+            execution_profiles: &'a BTreeMap<String, ProjectExecutionProfile>,
+            #[serde(rename = "native-interfaces")]
+            native_interfaces: &'a BTreeMap<String, ProjectNativeInterface>,
+            #[serde(rename = "mex-artifacts")]
+            mex_artifacts: &'a BTreeMap<String, ProjectMexArtifact>,
+            #[serde(rename = "java-artifacts")]
+            java_artifacts: &'a BTreeMap<String, ProjectJavaArtifact>,
+            #[serde(rename = "python-artifacts")]
+            python_artifacts: &'a BTreeMap<String, ProjectPythonArtifact>,
             #[serde(skip_serializing_if = "ProjectTestConfig::is_default")]
             test: &'a ProjectTestConfig,
         }
@@ -211,6 +272,11 @@ impl Serialize for ProjectManifest {
             source_replacements: &self.source_replacements,
             publish: &self.publish,
             entrypoints,
+            execution_profiles: &self.execution_profiles,
+            native_interfaces: &self.native_interfaces,
+            mex_artifacts: &self.mex_artifacts,
+            java_artifacts: &self.java_artifacts,
+            python_artifacts: &self.python_artifacts,
             test: &self.test,
         }
         .serialize(serializer)
@@ -272,6 +338,10 @@ enum PathRequirement {
         path: PathBuf,
         missing_message: String,
     },
+    File {
+        path: PathBuf,
+        missing_message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -323,6 +393,9 @@ impl ProjectManifest {
                     ),
                 });
             }
+        }
+        for (name, profile) in &self.execution_profiles {
+            messages.extend(profile.validate(name));
         }
         messages.extend(self.test.validation_messages());
         for (field, paths) in [
@@ -477,6 +550,115 @@ impl ProjectManifest {
                 }
             }
         }
+        for (name, interface) in &self.native_interfaces {
+            if name.trim().is_empty() {
+                messages.push("native interface names must be non-empty".to_string());
+                continue;
+            }
+            for (kind, path) in [
+                ("manifest", &interface.manifest),
+                ("library", &interface.library),
+            ] {
+                if !is_relative_without_parent(path) {
+                    messages.push(format!(
+                        "native interface `{name}` {kind} path `{}` must be project-relative without `..` segments",
+                        path.display()
+                    ));
+                } else {
+                    path_requirements.push(PathRequirement::File {
+                        path: project_root.join(path),
+                        missing_message: format!(
+                            "native interface `{name}` {kind} path `{}` does not exist as a file under project root",
+                            path.display()
+                        ),
+                    });
+                }
+            }
+        }
+        for (name, artifact) in &self.mex_artifacts {
+            if name.trim().is_empty() {
+                messages.push("MEX artifact names must be non-empty".to_string());
+                continue;
+            }
+            for (kind, path) in [
+                ("manifest", &artifact.manifest),
+                ("module", &artifact.module),
+            ] {
+                if !is_relative_without_parent(path) {
+                    messages.push(format!(
+                        "MEX artifact `{name}` {kind} path `{}` must be project-relative without `..` segments",
+                        path.display()
+                    ));
+                } else {
+                    path_requirements.push(PathRequirement::File {
+                        path: project_root.join(path),
+                        missing_message: format!(
+                            "MEX artifact `{name}` {kind} path `{}` does not exist as a file under project root",
+                            path.display()
+                        ),
+                    });
+                }
+            }
+        }
+        for (name, artifact) in &self.java_artifacts {
+            if name.trim().is_empty() {
+                messages.push("Java artifact names must be non-empty".to_string());
+                continue;
+            }
+            if !is_relative_without_parent(&artifact.path) {
+                messages.push(format!(
+                    "Java artifact `{name}` path `{}` must be project-relative without `..` segments",
+                    artifact.path.display()
+                ));
+            } else {
+                path_requirements.push(PathRequirement::File {
+                    path: project_root.join(&artifact.path),
+                    missing_message: format!(
+                        "Java artifact `{name}` path `{}` does not exist as a file under project root",
+                        artifact.path.display()
+                    ),
+                });
+            }
+        }
+        for (name, artifact) in &self.python_artifacts {
+            if name.is_empty()
+                || matches!(name.as_str(), "." | "..")
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            {
+                messages.push(format!("Python artifact name `{name}` is invalid"));
+                continue;
+            }
+            if artifact.module.split('.').any(|part| {
+                let mut characters = part.chars();
+                !characters
+                    .next()
+                    .is_some_and(|character| character == '_' || character.is_alphabetic())
+                    || !characters.all(|character| character == '_' || character.is_alphanumeric())
+            }) {
+                messages.push(format!(
+                    "Python artifact `{name}` module `{}` is invalid",
+                    artifact.module
+                ));
+            }
+            if !is_relative_without_parent(&artifact.path)
+                || artifact.path.extension().and_then(|value| value.to_str()) != Some("whl")
+            {
+                messages.push(format!(
+                    "Python artifact `{name}` path `{}` must be a project-relative .whl file without `..` segments",
+                    artifact.path.display()
+                ));
+            } else {
+                path_requirements.push(PathRequirement::File {
+                    path: project_root.join(&artifact.path),
+                    missing_message: format!(
+                        "Python artifact `{name}` path `{}` does not exist as a file under project root",
+                        artifact.path.display()
+                    ),
+                });
+            }
+        }
         (messages, path_requirements)
     }
 
@@ -494,6 +676,12 @@ impl ProjectManifest {
                     path,
                     missing_message,
                 } if resolve_entrypoint_path(&project_root, &path).is_none() => {
+                    messages.push(missing_message);
+                }
+                PathRequirement::File {
+                    path,
+                    missing_message,
+                } if !path.is_file() => {
                     messages.push(missing_message);
                 }
                 _ => {}
@@ -515,20 +703,51 @@ impl ProjectManifest {
         project_root: &Path,
         options: ProjectManifestValidationOptions,
     ) -> Result<(), ProjectManifestValidationError> {
+        let (provider, project_root) = runmat_filesystem::capture_provider_path(project_root)
+            .map_err(|error| ProjectManifestValidationError {
+                messages: vec![error.to_string()],
+            })?;
+        self.validate_async_with_provider(&project_root, options, provider.as_ref())
+            .await
+    }
+
+    /// Validate paths against the retained project filesystem, not ambient state.
+    pub async fn validate_async_with_provider(
+        &self,
+        project_root: &Path,
+        options: ProjectManifestValidationOptions,
+        provider: &dyn runmat_filesystem::FsProvider,
+    ) -> Result<(), ProjectManifestValidationError> {
         let (mut messages, path_requirements) = self.validation_plan(project_root, options);
         for requirement in path_requirements {
             match requirement {
                 PathRequirement::Directory {
                     path,
                     missing_message,
-                } if !path_is_dir_async(&path).await => messages.push(missing_message),
+                } if !provider
+                    .metadata(&path)
+                    .await
+                    .is_ok_and(|metadata| metadata.is_dir()) =>
+                {
+                    messages.push(missing_message)
+                }
                 PathRequirement::Entrypoint {
                     project_root,
                     path,
                     missing_message,
-                } if resolve_entrypoint_path_async(&project_root, &path)
+                } if resolve_entrypoint_path_from_provider(&project_root, &path, provider)
                     .await
                     .is_none() =>
+                {
+                    messages.push(missing_message);
+                }
+                PathRequirement::File {
+                    path,
+                    missing_message,
+                } if !provider
+                    .metadata(&path)
+                    .await
+                    .is_ok_and(|metadata| metadata.is_file()) =>
                 {
                     messages.push(missing_message);
                 }
@@ -639,38 +858,45 @@ pub fn load_project_manifest(path: &Path) -> Result<ProjectManifest, ProjectMani
 pub async fn load_project_manifest_async(
     path: &Path,
 ) -> Result<ProjectManifest, ProjectManifestLoadError> {
-    let content = runmat_filesystem::read_to_string_async(path)
+    load_project_manifest_async_with_options(path, ProjectManifestValidationOptions::default())
         .await
-        .map_err(|source| ProjectManifestLoadError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    let manifest = parse_project_manifest(path, &content)?;
-    let project_root = path.parent().unwrap_or_else(|| Path::new("."));
-    manifest
-        .validate_async(project_root)
-        .await
-        .map_err(|source| ProjectManifestLoadError::Validation {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    Ok(manifest)
 }
 
 pub async fn load_project_manifest_async_with_options(
     path: &Path,
     options: ProjectManifestValidationOptions,
 ) -> Result<ProjectManifest, ProjectManifestLoadError> {
-    let content = runmat_filesystem::read_to_string_async(path)
+    let (provider, resolved) =
+        runmat_filesystem::capture_provider_path(path).map_err(|source| {
+            ProjectManifestLoadError::Read {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+    load_project_manifest_async_with_provider(&resolved, options, provider.as_ref()).await
+}
+
+/// Read and validate one manifest through the caller's retained filesystem owner.
+pub async fn load_project_manifest_async_with_provider(
+    path: &Path,
+    options: ProjectManifestValidationOptions,
+    provider: &dyn runmat_filesystem::FsProvider,
+) -> Result<ProjectManifest, ProjectManifestLoadError> {
+    let bytes = provider
+        .read(path)
         .await
         .map_err(|source| ProjectManifestLoadError::Read {
             path: path.to_path_buf(),
             source,
         })?;
+    let content = String::from_utf8(bytes).map_err(|error| ProjectManifestLoadError::Read {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()),
+    })?;
     let manifest = parse_project_manifest(path, &content)?;
     let project_root = path.parent().unwrap_or_else(|| Path::new("."));
     manifest
-        .validate_async_with_options(project_root, options)
+        .validate_async_with_provider(project_root, options, provider)
         .await
         .map_err(|source| ProjectManifestLoadError::Validation {
             path: path.to_path_buf(),
@@ -776,13 +1002,30 @@ pub(super) async fn resolve_entrypoint_path_async(
     project_root: &Path,
     path: &Path,
 ) -> Option<PathBuf> {
+    let (provider, project_root) = runmat_filesystem::capture_provider_path(project_root).ok()?;
+    resolve_entrypoint_path_from_provider(&project_root, path, provider.as_ref()).await
+}
+
+async fn resolve_entrypoint_path_from_provider(
+    project_root: &Path,
+    path: &Path,
+    provider: &dyn runmat_filesystem::FsProvider,
+) -> Option<PathBuf> {
     let direct = project_root.join(path);
-    if path_is_file_async(&direct).await {
+    if provider
+        .metadata(&direct)
+        .await
+        .is_ok_and(|metadata| metadata.is_file())
+    {
         return Some(direct);
     }
     if path.extension().is_none() {
         let inferred = direct.with_extension("m");
-        if path_is_file_async(&inferred).await {
+        if provider
+            .metadata(&inferred)
+            .await
+            .is_ok_and(|metadata| metadata.is_file())
+        {
             return Some(inferred);
         }
     }

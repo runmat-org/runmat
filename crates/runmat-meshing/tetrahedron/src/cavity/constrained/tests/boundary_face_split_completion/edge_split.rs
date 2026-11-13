@@ -23,11 +23,16 @@ fn boundary_face_edge_split_completion_reports_inserted_node_and_refined_boundar
         .expect("edge-split completion should generate child cap tetrahedra");
 
     assert_eq!(inserted_node.node_id, 4);
-    assert_eq!(inserted_node.coordinates_m[2], 0.0);
+    assert_eq!(inserted_node.coordinates_m.canonical_value()[2], 0.0);
     assert!(
-        (inserted_node.coordinates_m[0] == 0.0 && inserted_node.coordinates_m[1] > 0.0)
-            || (inserted_node.coordinates_m[1] == 0.0 && inserted_node.coordinates_m[0] > 0.0)
-            || (inserted_node.coordinates_m[0] + inserted_node.coordinates_m[1] - 1.0).abs()
+        (inserted_node.coordinates_m.canonical_value()[0] == 0.0
+            && inserted_node.coordinates_m.canonical_value()[1] > 0.0)
+            || (inserted_node.coordinates_m.canonical_value()[1] == 0.0
+                && inserted_node.coordinates_m.canonical_value()[0] > 0.0)
+            || (inserted_node.coordinates_m.canonical_value()[0]
+                + inserted_node.coordinates_m.canonical_value()[1]
+                - 1.0)
+                .abs()
                 <= 1.0e-12
     );
     assert_eq!(split_tetrahedra.len(), 2);

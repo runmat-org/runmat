@@ -1,20 +1,16 @@
 //! MATLAB-compatible `ss` state-space model constructor for RunMat.
 use runmat_types::MemberAccess;
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SS_ERROR_INTERNAL, SS_ERROR_INVALID_ARGUMENT,
+    SS_ERROR_INVALID_DIMENSIONS, SS_ERROR_INVALID_MATRIX, SS_ERROR_INVALID_OPTION,
+    SS_ERROR_INVALID_SAMPLE_TIME, SS_ERROR_UNSUPPORTED_INPUT, SS_EXPLICIT_GPU_EXTENSION,
+    SS_INTEGER_MATRIX_EXTENSION, SS_INTEGER_SAMPLE_TIME_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, ObjectInstance, Tensor, Value};
+use runmat_value::{CellArray, CharArray, Tensor, Value};
 
 use crate::builtins::common::{
     spec::{
@@ -23,227 +19,14 @@ use crate::builtins::common::{
     },
     tensor,
 };
-use crate::builtins::control::type_resolvers::ss_type;
+use crate::builtins::control::tf_model::state_matrix_dimensions;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "ss";
-const SS_CLASS: &str = "ss";
+const SS_CLASS: runmat_types::StaticClassIdentity = runmat_types::StaticClassIdentity::new("ss");
 
 static SS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(SS_CLASS);
-
-const SS_OUTPUT_SYS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "State-space model object.",
-}];
-const SS_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "State matrix with shape n-by-n.",
-};
-const SS_PARAM_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix with shape n-by-nu.",
-};
-const SS_PARAM_C: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Output matrix with shape ny-by-n.",
-};
-const SS_PARAM_D: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "D",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Feedthrough matrix with shape ny-by-nu.",
-};
-const SS_INPUTS_ABCD: [BuiltinParamDescriptor; 4] =
-    [SS_PARAM_A, SS_PARAM_B, SS_PARAM_C, SS_PARAM_D];
-const SS_INPUTS_ABCD_TS: [BuiltinParamDescriptor; 5] = [
-    SS_PARAM_A,
-    SS_PARAM_B,
-    SS_PARAM_C,
-    SS_PARAM_D,
-    BuiltinParamDescriptor {
-        name: "Ts",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0.0"),
-        description: "Sample time (0 for continuous-time model).",
-    },
-];
-const SS_INPUTS_ABCD_NAMEVALUE: [BuiltinParamDescriptor; 6] = [
-    SS_PARAM_A,
-    SS_PARAM_B,
-    SS_PARAM_C,
-    SS_PARAM_D,
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option name ('Ts' or 'SampleTime').",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option value.",
-    },
-];
-const SS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "sys = ss(A, B, C, D)",
-        inputs: &SS_INPUTS_ABCD,
-        outputs: &SS_OUTPUT_SYS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "sys = ss(A, B, C, D, Ts)",
-        inputs: &SS_INPUTS_ABCD_TS,
-        outputs: &SS_OUTPUT_SYS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "sys = ss(A, B, C, D, \"Ts\", Ts)",
-        inputs: &SS_INPUTS_ABCD_NAMEVALUE,
-        outputs: &SS_OUTPUT_SYS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "sys = ss(A, B, C, D, name, value, ...)",
-        inputs: &SS_INPUTS_ABCD_NAMEVALUE,
-        outputs: &SS_OUTPUT_SYS,
-    },
-];
-const SS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ss:InvalidArgument"),
-    when: "Arguments do not match supported ss invocation forms.",
-    message: "ss: invalid argument",
-};
-const SS_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SS.INVALID_OPTION",
-    identifier: Some("RunMat:ss:InvalidOption"),
-    when: "A name/value option token is unsupported or malformed.",
-    message: "ss: invalid option",
-};
-const SS_ERROR_INVALID_SAMPLE_TIME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SS.INVALID_SAMPLE_TIME",
-    identifier: Some("RunMat:ss:InvalidSampleTime"),
-    when: "Sample time is not a finite non-negative scalar.",
-    message: "ss: sample time must be a finite non-negative scalar",
-};
-const SS_ERROR_INVALID_DIMENSIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SS.INVALID_DIMENSIONS",
-    identifier: Some("RunMat:ss:InvalidDimensions"),
-    when: "A, B, C, and D dimensions do not define a consistent state-space model.",
-    message: "ss: invalid state-space matrix dimensions",
-};
-const SS_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SS.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:ss:UnsupportedInput"),
-    when: "An input is complex, sparse, logical, or another unsupported model form.",
-    message: "ss: unsupported input",
-};
-const SS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SS.INTERNAL",
-    identifier: Some("RunMat:ss:Internal"),
-    when: "Internal tensor/object construction failed.",
-    message: "ss: internal error",
-};
-const SS_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    SS_ERROR_INVALID_ARGUMENT,
-    SS_ERROR_INVALID_OPTION,
-    SS_ERROR_INVALID_SAMPLE_TIME,
-    SS_ERROR_INVALID_DIMENSIONS,
-    SS_ERROR_UNSUPPORTED_INPUT,
-    SS_ERROR_INTERNAL,
-];
-pub const SS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SS_ERRORS,
-};
-
-const SS_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ss-integer-matrix-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ss with typed-integer state-space matrices is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SsIntegerMatrixInputExtension"),
-};
-const SS_INTEGER_SAMPLE_TIME_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ss-integer-sample-time",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ss with a typed-integer sample time is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SsIntegerSampleTimeExtension"),
-};
-const SS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ss-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ss with explicit GPU input data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SsExplicitGpuInputExtension"),
-};
-pub const SS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    SS_INTEGER_MATRIX_EXTENSION,
-    SS_INTEGER_SAMPLE_TIME_EXTENSION,
-    SS_EXPLICIT_GPU_EXTENSION,
-];
-
-const SS_INTEGER_MATRIX_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    ss_integer_matrix_input("A"),
-    ss_integer_matrix_input("B"),
-    ss_integer_matrix_input("C"),
-    ss_integer_matrix_input("D"),
-];
-const SS_INTEGER_SAMPLE_TIME_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Ts",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat admits a typed scalar only when its exact value can enter the binary64 model metadata.",
-    }];
-const fn ss_integer_matrix_input(name: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented public surface does not establish typed-integer storage; RunMat requires every value to be exact at the binary64 model boundary.",
-    }
-}
-pub const SS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "sys = ss(integer_A, integer_B, integer_C, integer_D, ...)",
-        inputs: &SS_INTEGER_MATRIX_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each typed matrix is an independently gated RunMat extension and is checked before conversion; the state-space object's numeric matrices are binary64.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "sys = ss(A, B, C, D, integer_Ts)",
-        inputs: &SS_INTEGER_SAMPLE_TIME_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed sample time is a gated RunMat extension stored as binary64 model metadata after an exact representability check; the public contract requires a numeric scalar without enumerating typed storage classes.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::ss")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -310,9 +93,9 @@ fn ensure_ss_class_registered() {
             "OutputName",
         ] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -323,33 +106,34 @@ fn ensure_ss_class_registered() {
             );
         }
 
-        let methods: HashMap<String, crate::class_registry::RuntimeMethod> = HashMap::new();
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: SS_CLASS.to_string(),
-            parent: None,
-            properties,
-            methods,
-        });
+        let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
+            HashMap::new();
+        crate::class_registry::register_builtin_class(
+            SS_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: SS_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
 #[runtime_builtin(
     name = "ss",
-    category = "control",
-    summary = "Create state-space model objects from A, B, C, and D matrices.",
-    keywords = "ss,state space,control system,model,matrices",
-    type_resolver(ss_type),
-    descriptor(crate::builtins::control::ss::SS_DESCRIPTOR),
-    extensions(crate::builtins::control::ss::SS_EXTENSIONS),
-    integer_capabilities(crate::builtins::control::ss::SS_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::control::ss"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::control::ss",
+    context = true
 )]
 pub(crate) async fn ss_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     a: Value,
     b: Value,
     c: Value,
     d: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let matrices = [&a, &b, &c, &d];
     if matrices
@@ -364,29 +148,28 @@ pub(crate) async fn ss_builtin(
             BUILTIN_NAME,
         )?;
     }
-    for (value, role) in matrices.into_iter().zip(["A", "B", "C", "D"]) {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            value,
-            &SS_INTEGER_MATRIX_EXTENSION,
-            BUILTIN_NAME,
-            role,
-        )
-        .await?;
+    for value in matrices {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &SS_INTEGER_MATRIX_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
     }
-    for value in &rest {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            value,
-            &SS_INTEGER_SAMPLE_TIME_EXTENSION,
-            BUILTIN_NAME,
-            "sample-time",
-        )
-        .await?;
+    let admitted_options = SsAdmittedOptions::parse(rest.view())?;
+    let host_sample_times = admitted_options.preflight_host().await?;
+    let host_a = preparse_host_matrix(&a, "A").await?;
+    let host_b = preparse_host_matrix(&b, "B").await?;
+    let host_c = preparse_host_matrix(&c, "C").await?;
+    let host_d = preparse_host_matrix(&d, "D").await?;
+    if let (Some(a), Some(b), Some(c), Some(d)) = (&host_a, &host_b, &host_c, &host_d) {
+        validate_state_space_dimensions(a, b, c, d)?;
     }
-    let options = SsOptions::parse(&rest).await?;
-    let a = RealMatrix::parse("A", a).await?;
-    let b = RealMatrix::parse("B", b).await?;
-    let c = RealMatrix::parse("C", c).await?;
-    let d = RealMatrix::parse("D", d).await?;
+    let sample_time = admitted_options.resolve(host_sample_times).await?;
+    let a = resolve_matrix(host_a, &a, "A").await?;
+    let b = resolve_matrix(host_b, &b, "B").await?;
+    let c = resolve_matrix(host_c, &c, "C").await?;
+    let d = resolve_matrix(host_d, &d, "D").await?;
 
     validate_state_space_dimensions(&a, &b, &c, &d)?;
 
@@ -395,49 +178,117 @@ pub(crate) async fn ss_builtin(
     let output_count = c.rows;
 
     ensure_ss_class_registered();
-    let mut object = ObjectInstance::new(SS_CLASS.to_string());
-    object.properties.insert("A".to_string(), a.into_value());
-    object.properties.insert("B".to_string(), b.into_value());
-    object.properties.insert("C".to_string(), c.into_value());
-    object.properties.insert("D".to_string(), d.into_value());
-    object
-        .properties
-        .insert("Ts".to_string(), Value::Num(options.sample_time));
-    object.properties.insert(
-        "InputDelay".to_string(),
-        zero_tensor_value(vec![input_count, 1])?,
-    );
-    object.properties.insert(
-        "OutputDelay".to_string(),
-        zero_tensor_value(vec![output_count, 1])?,
-    );
-    object.properties.insert(
-        "StateName".to_string(),
-        empty_name_cell_value(state_count, 1)?,
-    );
-    object.properties.insert(
-        "InputName".to_string(),
-        empty_name_cell_value(input_count, 1)?,
-    );
-    object.properties.insert(
-        "OutputName".to_string(),
-        empty_name_cell_value(output_count, 1)?,
-    );
-    Ok(Value::Object(object))
+    let fields = [
+        ("A", a.into_value()),
+        ("B", b.into_value()),
+        ("C", c.into_value()),
+        ("D", d.into_value()),
+        ("Ts", Value::Num(sample_time)),
+        ("InputDelay", zero_tensor_value(vec![input_count, 1])?),
+        ("OutputDelay", zero_tensor_value(vec![output_count, 1])?),
+        ("StateName", empty_name_cell_value(state_count, 1)?),
+        ("InputName", empty_name_cell_value(input_count, 1)?),
+        ("OutputName", empty_name_cell_value(output_count, 1)?),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        SS_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
-#[derive(Clone)]
-struct SsOptions {
-    sample_time: f64,
+async fn admitted_matrix(value: &Value, role: &str) -> BuiltinResult<Value> {
+    let gathered = dispatcher::gather_if_needed_async(value).await?;
+    ensure_ss_integer_boundary(
+        &gathered,
+        &SS_INTEGER_MATRIX_EXTENSION,
+        &SS_ERROR_INVALID_MATRIX,
+        role,
+    )
+    .await?;
+    Ok(gathered)
 }
 
-impl SsOptions {
-    async fn parse(rest: &[Value]) -> BuiltinResult<Self> {
-        let mut options = Self { sample_time: 0.0 };
+async fn preparse_host_matrix(value: &Value, role: &str) -> BuiltinResult<Option<RealMatrix>> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(None);
+    }
+    Ok(Some(RealMatrix::parse(
+        role,
+        admitted_matrix(value, role).await?,
+    )?))
+}
 
-        match rest {
-            [] => {}
-            [sample_time] => options.sample_time = parse_sample_time(sample_time).await?,
+async fn resolve_matrix(
+    parsed_host: Option<RealMatrix>,
+    value: &Value,
+    role: &str,
+) -> BuiltinResult<RealMatrix> {
+    match parsed_host {
+        Some(matrix) => Ok(matrix),
+        None => RealMatrix::parse(role, admitted_matrix(value, role).await?),
+    }
+}
+
+async fn admitted_sample_time(value: &Value) -> BuiltinResult<f64> {
+    admit_ss_integer_extension(value, &SS_INTEGER_SAMPLE_TIME_EXTENSION)?;
+    let gathered = dispatcher::gather_if_needed_async(value).await?;
+    ensure_ss_integer_boundary(
+        &gathered,
+        &SS_INTEGER_SAMPLE_TIME_EXTENSION,
+        &SS_ERROR_INVALID_SAMPLE_TIME,
+        "sample-time",
+    )
+    .await?;
+    parse_sample_time(&gathered)
+}
+
+fn admit_ss_integer_extension(
+    value: &Value,
+    extension: &'static runmat_builtins::BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    }
+    Ok(())
+}
+
+async fn ensure_ss_integer_boundary(
+    value: &Value,
+    extension: &'static runmat_builtins::BuiltinExtensionDescriptor,
+    error: &'static BuiltinErrorDescriptor,
+    role: &str,
+) -> BuiltinResult<()> {
+    admit_ss_integer_extension(value, extension)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        let identifier = error
+            .identifier
+            .expect("ss precision error has an identifier");
+        return Err(build_runtime_error(format!(
+            "ss: integer {role} values must be exactly representable as double"
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(identifier)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    Ok(())
+}
+
+struct SsAdmittedOptions<'a> {
+    sample_times: Vec<&'a Value>,
+}
+
+impl<'a> SsAdmittedOptions<'a> {
+    fn parse(rest: crate::call::FunctionArgumentView<'a>) -> BuiltinResult<Self> {
+        let mut sample_times = Vec::new();
+        match rest.len() {
+            0 => {}
+            1 => sample_times.push(rest.first().expect("one ss option")),
             _ => {
                 if !rest.len().is_multiple_of(2) {
                     return Err(ss_error_with_detail(
@@ -445,15 +296,13 @@ impl SsOptions {
                         "optional arguments must be name-value pairs or a scalar sample time",
                     ));
                 }
-                let mut idx = 0;
-                while idx < rest.len() {
-                    let name = scalar_text(&rest[idx], "option name")?;
+                for index in (0..rest.len()).step_by(2) {
+                    let name_value = rest.get(index).expect("validated ss option name");
+                    let sample_value = rest.get(index + 1).expect("validated ss option value");
+                    let name = scalar_text(name_value, "option name")?;
                     let lowered = name.trim().to_ascii_lowercase();
-                    let value = &rest[idx + 1];
                     match lowered.as_str() {
-                        "ts" | "sampletime" => {
-                            options.sample_time = parse_sample_time(value).await?
-                        }
+                        "ts" | "sampletime" => sample_times.push(sample_value),
                         _ => {
                             return Err(ss_error_with_detail(
                                 &SS_ERROR_INVALID_OPTION,
@@ -461,18 +310,38 @@ impl SsOptions {
                             ));
                         }
                     }
-                    idx += 2;
                 }
             }
         }
+        Ok(Self { sample_times })
+    }
 
-        Ok(options)
+    async fn preflight_host(&self) -> BuiltinResult<Vec<Option<f64>>> {
+        let mut values = Vec::with_capacity(self.sample_times.len());
+        for value in &self.sample_times {
+            values.push(if matches!(*value, Value::GpuTensor(_)) {
+                None
+            } else {
+                Some(admitted_sample_time(value).await?)
+            });
+        }
+        Ok(values)
+    }
+
+    async fn resolve(self, preflight: Vec<Option<f64>>) -> BuiltinResult<f64> {
+        let mut sample_time = 0.0;
+        for (value, admitted) in self.sample_times.into_iter().zip(preflight) {
+            sample_time = match admitted {
+                Some(sample_time) => sample_time,
+                None => admitted_sample_time(value).await?,
+            };
+        }
+        Ok(sample_time)
     }
 }
 
-async fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
-    let gathered = dispatcher::gather_if_needed_async(value).await?;
-    let sample_time = match &gathered {
+fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
+    let sample_time = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
@@ -491,13 +360,27 @@ async fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
     Ok(sample_time)
 }
 
-fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
+fn scalar_text(value: &Value, context: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(array.data()[0]
+                .text_ref()
+                .expect("nonmissing scalar text")
+                .clone())
+        }
+        Value::CharArray(array) if array.rows == 1 => {
+            Ok(runmat_value::decode_utf16_code_units(array.data())
+                .map_err(|source| {
+                    let mut error =
+                        ss_error_with_detail(&SS_ERROR_INVALID_OPTION, source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into())
+        }
         other => Err(ss_error_with_detail(
-            &SS_ERROR_INVALID_ARGUMENT,
+            &SS_ERROR_INVALID_OPTION,
             format!("{context} must be a string scalar or character vector, got {other:?}"),
         )),
     }
@@ -511,9 +394,8 @@ struct RealMatrix {
 }
 
 impl RealMatrix {
-    async fn parse(label: &str, value: Value) -> BuiltinResult<Self> {
-        let gathered = dispatcher::gather_if_needed_async(&value).await?;
-        let tensor = match gathered {
+    fn parse(label: &str, value: Value) -> BuiltinResult<Self> {
+        let tensor = match value {
             Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor).map_err(|err| {
                 ss_error_with_detail(
                     &SS_ERROR_INTERNAL,
@@ -542,10 +424,13 @@ impl RealMatrix {
             }
         };
 
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(ss_error_with_detail(
                 &SS_ERROR_INVALID_DIMENSIONS,
-                format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
+                format!(
+                    "{label} must be a 2-D matrix, got shape {:?}",
+                    tensor.shape()
+                ),
             ));
         }
         let values = tensor::tensor_values_f64_cow(&tensor);
@@ -556,11 +441,8 @@ impl RealMatrix {
             ));
         }
 
-        Ok(Self {
-            rows: tensor.rows,
-            cols: tensor.cols,
-            tensor,
-        })
+        let (rows, cols) = state_matrix_dimensions(&tensor);
+        Ok(Self { rows, cols, tensor })
     }
 
     fn into_value(self) -> Value {
@@ -642,10 +524,18 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::SS_DESCRIPTOR;
     use runmat_value::{IntValue, IntegerStorage};
 
     fn run_ss(a: Value, b: Value, c: Value, d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(ss_builtin(a, b, c, d, rest))
+        block_on(ss_builtin(
+            None,
+            a,
+            b,
+            c,
+            d,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn property<'a>(value: &'a Value, name: &str) -> &'a Value {
@@ -653,7 +543,7 @@ mod tests {
             panic!("expected object, got {value:?}");
         };
         object
-            .properties
+            .properties()
             .get(name)
             .unwrap_or_else(|| panic!("missing property {name}"))
     }
@@ -661,7 +551,7 @@ mod tests {
     fn assert_tensor(value: &Value, shape: &[usize], data: &[f64]) {
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, shape);
+                assert_eq!(tensor.shape(), shape);
                 assert_eq!(tensor.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -695,7 +585,7 @@ mod tests {
         let Value::Object(object) = &sys else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name, "ss");
+        assert_eq!(object.class_name().display_name(), "ss");
         assert_eq!(property(&sys, "Ts"), &Value::Num(0.0));
         assert_tensor(property(&sys, "A"), &[2, 2], &[0.0, -2.0, 1.0, -3.0]);
         assert_tensor(property(&sys, "B"), &[2, 1], &[0.0, 1.0]);
@@ -703,6 +593,31 @@ mod tests {
         assert_tensor(property(&sys, "D"), &[1, 1], &[0.0]);
         assert_tensor(property(&sys, "InputDelay"), &[1, 1], &[0.0]);
         assert_tensor(property(&sys, "OutputDelay"), &[1, 1], &[0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn ss_preserves_dense_rank_zero_and_rank_one_matrix_projection() {
+        let rank_zero = || Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        let system = run_ss(
+            rank_zero(),
+            rank_zero(),
+            rank_zero(),
+            rank_zero(),
+            Vec::new(),
+        )
+        .expect("rank-zero state-space matrices");
+        assert_tensor(property(&system, "A"), &[], &[1.0]);
+
+        let error = run_ss(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Vec::new(),
+        )
+        .expect_err("rank-one A is a one-by-two matrix");
+        assert!(error.message().contains("A must be square, got 1x2"));
     }
 
     #[test]
@@ -798,6 +713,46 @@ mod tests {
         )
         .expect_err("inexact typed-integer ss matrices must not round silently");
         assert!(error.message().contains("exactly representable as double"));
+        assert_eq!(error.identifier(), SS_ERROR_INVALID_MATRIX.identifier);
+    }
+
+    #[test]
+    fn ss_rejects_inexact_integer_sample_time_with_owning_identifier() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = run_ss(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+            vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+        )
+        .expect_err("inexact integer sample time must not round silently");
+        assert!(error.message().contains("exactly representable as double"));
+        assert_eq!(error.identifier(), SS_ERROR_INVALID_SAMPLE_TIME.identifier);
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    }
+
+    #[test]
+    fn ss_accepts_exact_wide_integer_matrix_and_sample_time() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let exactly_representable = 1_u64 << 53;
+        let sys = run_ss(
+            Value::Int(IntValue::U64(exactly_representable)),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+            vec![Value::Int(IntValue::U64(exactly_representable))],
+        )
+        .expect("exact wide integer values are permitted");
+        assert_tensor(
+            property(&sys, "A"),
+            &[1, 1],
+            &[exactly_representable as f64],
+        );
+        assert_eq!(
+            property(&sys, "Ts"),
+            &Value::Num(exactly_representable as f64)
+        );
     }
 
     #[test]
@@ -889,7 +844,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let sys = run_ss(
@@ -902,6 +857,176 @@ mod tests {
             .expect("ss");
 
             assert_tensor(property(&sys, "A"), &[1, 1], &[1.0]);
+        });
+    }
+
+    #[test]
+    fn ss_admitted_resident_matrix_and_sample_time_download_once_each() {
+        test_support::with_test_provider(|provider| {
+            let matrix = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let sample_time = Tensor::new(vec![0.25], vec![1, 1]).unwrap();
+            let matrix =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix).unwrap();
+            let sample_time =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &sample_time)
+                    .unwrap();
+            provider.reset_telemetry();
+            let model = run_ss(
+                Value::GpuTensor(matrix),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+                vec![Value::GpuTensor(sample_time)],
+            )
+            .expect("resident ss inputs");
+            assert_tensor(property(&model, "A"), &[1, 1], &[1.0]);
+            assert_eq!(property(&model, "Ts"), &Value::Num(0.25));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 16);
+        });
+    }
+
+    #[test]
+    fn ss_invalid_option_preflights_before_resident_matrix_download() {
+        test_support::with_test_provider(|provider| {
+            let matrix = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix).unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+                vec![Value::from("Unsupported"), Value::Num(0.1)],
+            )
+            .expect_err("unsupported option");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_OPTION.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_nontext_option_name_uses_catalog_invalid_option_error() {
+        let error = run_ss(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+            vec![Value::Num(7.0), Value::Num(0.1)],
+        )
+        .expect_err("nontext option name");
+        assert_eq!(error.identifier(), SS_ERROR_INVALID_OPTION.identifier);
+    }
+
+    #[test]
+    fn ss_later_invalid_host_matrix_preflights_before_resident_a() {
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::from("not a numeric matrix"),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                vec![],
+            )
+            .expect_err("invalid B");
+            assert_eq!(error.identifier(), SS_ERROR_UNSUPPORTED_INPUT.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_all_host_dimension_error_preflights_before_resident_sample_time() {
+        test_support::with_test_provider(|provider| {
+            let sample_time = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![0.25], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::Num(1.0),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                vec![Value::GpuTensor(sample_time)],
+            )
+            .expect_err("inconsistent host dimensions");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_DIMENSIONS.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_invalid_host_sample_time_preflights_before_resident_matrix() {
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+                vec![Value::Num(-1.0)],
+            )
+            .expect_err("invalid host sample time");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_SAMPLE_TIME.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_inexact_host_integer_matrix_preflights_before_resident_matrix() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                vec![],
+            )
+            .expect_err("inexact host B preflights before A download");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_MATRIX.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_inexact_host_integer_sample_time_preflights_before_resident_matrix() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+                vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+            )
+            .expect_err("inexact host Ts preflights before A download");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_SAMPLE_TIME.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
     }
 }

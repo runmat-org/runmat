@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/runmat-org/runmat/actions"><img src="https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main" alt="Build Status"></a>
-  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-BSL--1.1-blue.svg" alt="License: BSL-1.1"></a>
   <a href="https://crates.io/crates/runmat"><img src="https://img.shields.io/crates/v/runmat.svg" alt="Crates.io"></a>
   <a href="https://www.npmjs.com/package/runmat"><img src="https://img.shields.io/npm/v/runmat.svg" alt="npm"></a>
   <a href="https://github.com/runmat-org/runmat/stargazers"><img src="https://img.shields.io/github/stars/runmat-org/runmat" alt="GitHub Stars"></a>
@@ -28,15 +28,15 @@
   <a href="benchmarks/README.md">Benchmarks</a>
 </p>
 
-RunMat is an open-source, high-performance runtime designed for numerical computing using MATLAB-style syntax. It is built in Rust and provides a multi-tiered execution model that targets both CPU and GPU hardware without requiring manual management of tensor allocations and movement.
+RunMat is a source-available, high-performance runtime designed for numerical computing using MATLAB-style syntax. It is built in Rust and provides a multi-tiered execution model that targets both CPU and GPU hardware without requiring manual management of tensor allocations and movement.
 
 RunMat runs MATLAB-syntax `.m` files with automatic operation fusion, a high-performance compiler, and a cross-platform GPU backend powered by wgpu.
 
-RunMat Desktop is free, including local-folder projects, unlimited cloud projects, private sharing, and real-time collaboration. [See what’s included](https://runmat.com/pricing).
+RunMat is free for eligible individuals, education, open-source projects and smaller organizations under the [RunMat Free Use grant](FREE-USE.md). Simulation allowances and subscription features are described on the [pricing page](https://runmat.com/pricing).
 
 Key Capabilities:
 
-- MATLAB Compatibility: Supports MATLAB-syntax scripts and projects, including arrays, functions, classes, packages, and [1,000+ documented built-in functions](https://runmat.com/docs/reference/builtins).
+- MATLAB Compatibility: Supports MATLAB-syntax scripts and projects, including arrays, functions, classes, packages, and [2,300+ documented built-in functions](https://runmat.com/docs/reference/builtins).
 - Native Compilation: [Compile `.m` scripts into standalone native executables](https://runmat.com/docs/runtime/getting-started/cli#compile) with `runmat compile`.
 - Code Checks and Tests: [Check code without executing it](https://runmat.com/docs/runtime/getting-started/cli#check) with `runmat check`, and [run MATLAB-style script, function, and class tests](https://runmat.com/docs/runtime/getting-started/cli#test-projects) with `runmat test`.
 - Integer Support: Work with signed and unsigned integer types from 8 to 64 bits.
@@ -264,6 +264,26 @@ grid on;
 
 See [Plotting System](docs/plotting/index.md).
 
+## Mechanical Design, Electrical Design and Simulation
+
+RunMat 0.7.1 includes file-based engineering workflows alongside MATLAB-syntax
+programs:
+
+- Mechanical design uses `.part`, `.assembly` and `.drawing` files for
+  parametric parts, assemblies, drawing views, dimensions and parts lists.
+  See [Mechanical Design](docs/design/mcad/get-started.md).
+- Electrical design uses `.circuit` and `.circuit.layout` files for schematics,
+  board layouts and circuit simulation. See
+  [Electrical Design](docs/design/ecad/get-started.md).
+- FEA studies define geometry, materials, loads, constraints and solver settings
+  in `.fea` files. See [Simulation](docs/simulation/index.md) for supported
+  physics, examples and simulation-work measurement.
+
+Mechanical design, electrical design and FEA are in beta. The guides describe
+the supported workflows and their current limits. FEA meshing and solving
+require sign-in, a connection to RunMat Server and an available simulation
+allowance; ordinary local `.m` execution works offline.
+
 ## Documentation
 
 Start here:
@@ -348,6 +368,6 @@ Useful docs:
 
 ## License
 
-RunMat is licensed under the [Apache License 2.0](LICENSE.md).
+RunMat is licensed under the [Business Source License 1.1](LICENSE.md) with the [RunMat Free Use grant](FREE-USE.md). Each version becomes available under Apache License 2.0 three years after it is first published. Releases through 0.6.2 retain their Apache License 2.0 terms.
 
-RunMat is a registered trademark of Dystr Inc. MATLAB is a registered trademark of The MathWorks, Inc. RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc.
+RunMat is a trademark of Dystr, Inc. MATLAB is a registered trademark of The MathWorks, Inc. RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc.

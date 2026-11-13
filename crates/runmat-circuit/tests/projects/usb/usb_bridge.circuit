@@ -1,0 +1,38 @@
+runmat 0.7
+std 1
+
+// A small USB device board: a 4-pin 1.0 mm USB cable header, a 3.3 V regulator from VBUS and a
+// Cortex-M4-class MCU whose USB pins take the D+/D- pair. The pair is declared, so the board
+// routes it as one at its gap and checks its skew.
+circuit usb_bridge {
+    root = main
+    net_class supply = { track_width = "0.25 mm" }
+
+    sheet main {
+        component J1 = { part = "CONN-SH-4P" }
+        component U1 = { part = "MCU-M4-LQFP48" }
+        component U2 = { part = "LDO-3V3-SOT23" }
+        component C1 = { part = "C0402-1U" }
+        component C2 = { part = "C0402-1U" }
+        component C3 = { part = "C0402-100N" }
+        component C4 = { part = "C0402-100N" }
+        component C5 = { part = "C0603-4U7" }
+        component R1 = { part = "R0402-10K" }
+        component R2 = { part = "R0402-10K" }
+        net GND = { class = supply, global = true, power_flag = true }
+        net VBUS = { class = supply, power_flag = true }
+        net "+3V3" = { class = supply }
+        // The cable header: VBUS, D-, D+, GND.
+        connect = [net.VBUS, "J1.1", U2.VIN, U2.EN, "C1.1"]
+        connect = [net.USB_DN, "J1.2", U1.PA11]
+        connect = [net.USB_DP, "J1.3", U1.PA12]
+        connect = [net.GND, "J1.4", U2.GND, "C1.2", "C2.2", "C3.2", "C4.2", "C5.2", U1.VSS, U1.VSSA, "R2.2"]
+        connect = ["net.+3V3", U2.VOUT, "C2.1", "C3.1", "C4.1", U1.VDD, U1.VDDA, "R1.1"]
+        connect = [net.VCAP, U1.VCAP, "C5.1"]
+        connect = [net.NRST, U1.NRST, "R1.2"]
+        connect = [net.BOOT0, U1.BOOT0, "R2.1"]
+        diff_pair USB = { p = USB_DP, n = USB_DN }
+        no_erc = [U2.NC, U1.OSC_IN, U1.OSC_OUT, U1.PC13, U1.PC14, U1.PC15, U1.PA0, U1.PA1, U1.PA2, U1.PA3, U1.PA4, U1.PA5, U1.PA6, U1.PA7, U1.PA8, U1.PA9, U1.PA10, U1.PA13, U1.PA14, U1.PA15]
+        no_erc = [U1.PB0, U1.PB1, U1.PB2, U1.PB3, U1.PB4, U1.PB5, U1.PB6, U1.PB7, U1.PB8, U1.PB9, U1.PB10, U1.PB12, U1.PB13, U1.PB14, U1.PB15]
+    }
+}

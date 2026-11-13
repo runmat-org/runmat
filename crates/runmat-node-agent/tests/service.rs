@@ -58,11 +58,10 @@ impl NodeControlPlane for Control {
                     cpu_millicores: 1,
                     memory_bytes: 1024,
                     scratch_bytes: 1024,
-                    accelerator_count: 0,
-                    accelerator_class: None,
-                    accelerator_memory_bytes: 0,
+                    accelerators: Vec::new(),
                     maximum_wall_millis: 10_000,
                 },
+                accelerator_devices: Vec::new(),
                 role: AllocationRole::Driver,
                 state: state.lease_state.clone(),
                 fencing_token: 1,
@@ -100,6 +99,7 @@ impl NodeControlPlane for Control {
             driver_lease_id: "driver-lease-1".into(),
             fencing_token: 1,
             credential: "driver-credential".into(),
+            ready_v1: false,
             expires_at_millis: allocation.expires_at_millis,
         })
     }
@@ -124,7 +124,11 @@ async fn service_reaps_fixed_mode_process_releases_lease_and_completes_drain() {
     let signer =
         runmat_execution::security::EndpointIdentitySigner::from_secret(identity_secret).unwrap();
     CredentialStore::new(directory.path())
+        .claim()
+        .unwrap()
         .store(&NodeCredential {
+            server_endpoint: runmat_node_agent::config::ServerEndpoint::parse("http://127.0.0.1:1")
+                .unwrap(),
             node_id: "node-1".into(),
             cluster_id: "cluster-1".into(),
             org_id: "org-1".into(),
@@ -146,20 +150,21 @@ async fn service_reaps_fixed_mode_process_releases_lease_and_completes_drain() {
             ..State::default()
         }),
     });
-    let mut service = NodeAgentService::load(
-        AgentConfig {
-            state_directory: directory.path().to_path_buf(),
-            server_url: "http://127.0.0.1:1".into(),
-            runmat_executable: "/usr/bin/true".into(),
-            heartbeat_interval: Duration::from_millis(10),
-            heartbeat_ttl: Duration::from_secs(10),
-            drain_timeout: Duration::from_millis(10),
-            maximum_allocations: 1,
-            trust_tier: runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
-        },
-        control.clone(),
-    )
-    .unwrap();
+    let config = AgentConfig {
+        state_directory: directory.path().to_path_buf(),
+        server_url: "http://127.0.0.1:1".into(),
+        runmat_executable: "/usr/bin/true".into(),
+        heartbeat_interval: Duration::from_millis(10),
+        heartbeat_ttl: Duration::from_secs(10),
+        drain_timeout: Duration::from_millis(10),
+        maximum_allocations: 1,
+        trust_tier: runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+    };
+    let mut service = NodeAgentService::load(config.clone(), control.clone()).unwrap();
+    assert!(matches!(
+        NodeAgentService::load(config.clone(), control.clone()),
+        Err(runmat_node_agent::AgentError::Configuration(_))
+    ));
 
     service.reconcile_once().await.unwrap();
     service.reconcile_once().await.unwrap();
@@ -172,4 +177,6 @@ async fn service_reaps_fixed_mode_process_releases_lease_and_completes_drain() {
     control.state.lock().unwrap().node_state = "draining".into();
     service.reconcile_once().await.unwrap();
     assert_eq!(control.state.lock().unwrap().drain_completions, 1);
+    drop(service);
+    assert!(NodeAgentService::load(config, control).is_ok());
 }

@@ -2,13 +2,14 @@
 
 use log::debug;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth};
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::{ISDIAG_DESCRIPTOR, ISTRIL_DESCRIPTOR, ISTRIU_DESCRIPTOR};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
+    ISDIAG_ERROR_INTERNAL, ISDIAG_ERROR_INVALID_INPUT, ISDIAG_INTEGER_INPUT_EXTENSION,
+    ISTRIL_ERROR_INTERNAL, ISTRIL_ERROR_INVALID_INPUT, ISTRIL_INTEGER_INPUT_EXTENSION,
+    ISTRIU_ERROR_INTERNAL, ISTRIU_ERROR_INVALID_INPUT, ISTRIU_INTEGER_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -21,151 +22,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when the input matrix satisfies the requested structure predicate.",
-}];
-
-const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input numeric, logical, complex, sparse, or gpuArray matrix.",
-}];
-
-const ISDIAG_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isdiag(A)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ISTRIL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = istril(A)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ISTRIU_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = istriu(A)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ISDIAG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISDIAG.INVALID_INPUT",
-    identifier: Some("RunMat:isdiag:InvalidInput"),
-    when: "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
-    message: "isdiag: invalid input",
-};
-
-const ISDIAG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISDIAG.INTERNAL",
-    identifier: Some("RunMat:isdiag:Internal"),
-    when: "Runtime fails while gathering GPU input or constructing an internal matrix view.",
-    message: "isdiag: internal runtime failure",
-};
-
-const ISTRIL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIL.INVALID_INPUT",
-    identifier: Some("RunMat:istril:InvalidInput"),
-    when: "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
-    message: "istril: invalid input",
-};
-
-const ISTRIL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIL.INTERNAL",
-    identifier: Some("RunMat:istril:Internal"),
-    when: "Runtime fails while gathering GPU input or constructing an internal matrix view.",
-    message: "istril: internal runtime failure",
-};
-
-const ISTRIU_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIU.INVALID_INPUT",
-    identifier: Some("RunMat:istriu:InvalidInput"),
-    when: "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
-    message: "istriu: invalid input",
-};
-
-const ISTRIU_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIU.INTERNAL",
-    identifier: Some("RunMat:istriu:Internal"),
-    when: "Runtime fails while gathering GPU input or constructing an internal matrix view.",
-    message: "istriu: internal runtime failure",
-};
-
-const ISDIAG_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ISDIAG_ERROR_INVALID_INPUT, ISDIAG_ERROR_INTERNAL];
-const ISTRIL_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ISTRIL_ERROR_INVALID_INPUT, ISTRIL_ERROR_INTERNAL];
-const ISTRIU_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ISTRIU_ERROR_INVALID_INPUT, ISTRIU_ERROR_INTERNAL];
-
-pub const ISDIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISDIAG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISDIAG_ERRORS,
-};
-
-const ISDIAG_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "isdiag-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "isdiag with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IsdiagIntegerInputExtension"),
-};
-const ISDIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISDIAG_INTEGER_INPUT_EXTENSION];
-pub const ISDIAG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
-};
-
-pub const ISTRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISTRIL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISTRIL_ERRORS,
-};
-
-const ISTRIL_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "istril-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "istril with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IstrilIntegerInputExtension"),
-};
-const ISTRIL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIL_INTEGER_INPUT_EXTENSION];
-pub const ISTRIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
-};
-
-pub const ISTRIU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISTRIU_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISTRIU_ERRORS,
-};
-
-const ISTRIU_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "istriu-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "istriu with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IstriuIntegerInputExtension"),
-};
-const ISTRIU_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIU_INTEGER_INPUT_EXTENSION];
-pub const ISTRIU_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
-};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
@@ -278,16 +137,7 @@ struct BuiltinContext {
 
 #[runtime_builtin(
     name = "isdiag",
-    category = "math/linalg/structure",
-    summary = "Determine whether a matrix is diagonal.",
-    keywords = "isdiag,diagonal,matrix structure,sparse,gpu",
-    accel = "structure",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_DESCRIPTOR),
-    extensions(ISDIAG_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
@@ -319,16 +169,7 @@ fn value_has_integer_storage(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "istril",
-    category = "math/linalg/structure",
-    summary = "Determine whether a matrix is lower triangular.",
-    keywords = "istril,lower triangular,matrix structure,sparse,gpu",
-    accel = "structure",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_DESCRIPTOR),
-    extensions(ISTRIL_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
@@ -352,16 +193,7 @@ async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "istriu",
-    category = "math/linalg/structure",
-    summary = "Determine whether a matrix is upper triangular.",
-    keywords = "istriu,upper triangular,matrix structure,sparse,gpu",
-    accel = "structure",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_DESCRIPTOR),
-    extensions(ISTRIU_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istriu_builtin(value: Value) -> BuiltinResult<Value> {
@@ -402,20 +234,33 @@ async fn gpu_structure_predicate(
     predicate: StructurePredicate,
     ctx: BuiltinContext,
 ) -> BuiltinResult<bool> {
+    gpu_helpers::require_resident_compute_owner(&handle, || {
+        runtime_error_with_detail(ctx, ctx.internal, "no acceleration provider owns the input")
+    })?;
     if runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::ComplexInterleaved {
-        let Some((_rows, _cols)) = matrix_dims_or_false(&handle.shape) else {
+        let Some((_rows, _cols)) = matrix_dims_or_false(handle.shape()) else {
             return Ok(false);
         };
         if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-            let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+            let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
             match provider.bandwidth(&handle) {
                 Ok(bandwidth) => {
-                    gpu_helpers::restore_handle_metadata(&handle, &metadata);
                     return Ok(bandwidth_satisfies(bandwidth, predicate));
                 }
-                Err(err) => debug!("{}: provider bandwidth fallback: {err}", ctx.name),
+                Err(err)
+                    if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(
+                        &err,
+                    ) =>
+                {
+                    debug!("{}: provider bandwidth fallback: {err}", ctx.name);
+                }
+                Err(err) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        runtime_error_with_detail(ctx, ctx.internal, &err),
+                        runmat_accelerate_api::ProviderExecutionError::from(err),
+                    ))
+                }
             }
-            gpu_helpers::restore_handle_metadata(&handle, &metadata);
         }
     }
 
@@ -454,6 +299,13 @@ enum MatrixInput {
 impl MatrixInput {
     async fn from_value(value: Value, ctx: BuiltinContext) -> BuiltinResult<Self> {
         if let Value::GpuTensor(handle) = value {
+            gpu_helpers::require_resident_compute_owner(&handle, || {
+                runtime_error_with_detail(
+                    ctx,
+                    ctx.internal,
+                    "no acceleration provider owns the input",
+                )
+            })?;
             return matrix_from_gpu(handle, ctx).await;
         }
         matrix_from_host_value(value, ctx)
@@ -527,7 +379,7 @@ async fn matrix_from_gpu(
 }
 
 fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult<MatrixInput> {
-    let Some((rows, cols)) = matrix_dims_or_false(&tensor.shape) else {
+    let Some((rows, cols)) = matrix_dims_or_false(tensor.shape()) else {
         return Ok(MatrixInput::TooManyDimensions);
     };
     if rows
@@ -565,7 +417,7 @@ fn matrix_from_complex_tensor(
     tensor: ComplexTensor,
     ctx: BuiltinContext,
 ) -> BuiltinResult<MatrixInput> {
-    let Some((rows, cols)) = matrix_dims_or_false(&tensor.shape) else {
+    let Some((rows, cols)) = matrix_dims_or_false(tensor.shape()) else {
         return Ok(MatrixInput::TooManyDimensions);
     };
     if rows
@@ -1045,29 +897,27 @@ mod tests {
         assert!(!expect_bool(call_istriu(Value::Tensor(tensor)).unwrap()));
     }
 
-    #[derive(Clone, Copy)]
     struct FixedBandwidthProvider {
         lower: u32,
         upper: u32,
-        device_id: u32,
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        fail: bool,
     }
 
     impl AccelProvider for FixedBandwidthProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id,
-                buffer_id: 1,
-                descriptor: Default::default(),
-            })
+            Ok(self
+                .owner
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
+                    shape: host.shape.to_vec(),
+                    storage: GpuTensorStorage::Real,
+                })?
+                .handle)
         }
 
         fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move { Err(anyhow::anyhow!("download should not be called")) })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
         }
 
         fn device_info(&self) -> String {
@@ -1075,10 +925,13 @@ mod tests {
         }
 
         fn device_id(&self) -> u32 {
-            self.device_id
+            self.owner.device_id()
         }
 
         fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
+            if self.fail {
+                return Err(anyhow::anyhow!("bandwidth execution failed"));
+            }
             Ok(ProviderBandwidth {
                 lower: self.lower,
                 upper: self.upper,
@@ -1086,56 +939,66 @@ mod tests {
         }
     }
 
-    static DIAGONAL_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
-        lower: 0,
-        upper: 0,
-        device_id: 92_001,
-    };
-    static LOWER_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
-        lower: 2,
-        upper: 0,
-        device_id: 92_002,
-    };
-    static UPPER_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
-        lower: 0,
-        upper: 2,
-        device_id: 92_003,
-    };
+    static DIAGONAL_PROVIDER: std::sync::LazyLock<FixedBandwidthProvider> =
+        std::sync::LazyLock::new(|| FixedBandwidthProvider {
+            lower: 0,
+            upper: 0,
+            owner: Default::default(),
+            fail: false,
+        });
+    static LOWER_PROVIDER: std::sync::LazyLock<FixedBandwidthProvider> =
+        std::sync::LazyLock::new(|| FixedBandwidthProvider {
+            lower: 2,
+            upper: 0,
+            owner: Default::default(),
+            fail: false,
+        });
+    static UPPER_PROVIDER: std::sync::LazyLock<FixedBandwidthProvider> =
+        std::sync::LazyLock::new(|| FixedBandwidthProvider {
+            lower: 0,
+            upper: 2,
+            owner: Default::default(),
+            fail: false,
+        });
 
     fn fixed_gpu_handle(provider: &FixedBandwidthProvider) -> Value {
-        Value::GpuTensor(GpuTensorHandle {
-            shape: vec![3, 3],
-            device_id: provider.device_id(),
-            buffer_id: 1,
-            descriptor: Default::default(),
-        })
+        Value::GpuTensor(
+            provider
+                .owner
+                .allocate_zeroed(
+                    vec![3, 3],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        )
     }
 
-    #[derive(Clone, Copy)]
-    struct FallbackDownloadProvider;
+    struct FallbackDownloadProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+    }
 
     impl AccelProvider for FallbackDownloadProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 1,
-                descriptor: Default::default(),
-            })
+            Ok(self
+                .owner
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
+                    shape: host.shape.to_vec(),
+                    storage: GpuTensorStorage::Real,
+                })?
+                .handle)
         }
 
         fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move {
                 Ok(HostTensorOwned {
                     data: vec![1.0, 3.0, 0.0, 2.0],
-                    shape: h.shape.clone(),
+                    shape: h.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                 })
             })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
         }
 
         fn device_info(&self) -> String {
@@ -1143,21 +1006,26 @@ mod tests {
         }
 
         fn device_id(&self) -> u32 {
-            92_004
+            self.owner.device_id()
         }
 
         fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
-            Err(anyhow::anyhow!("bandwidth intentionally unavailable"))
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "bandwidth intentionally unavailable",
+            ))
         }
     }
 
-    static FALLBACK_PROVIDER: FallbackDownloadProvider = FallbackDownloadProvider;
+    static FALLBACK_PROVIDER: std::sync::LazyLock<FallbackDownloadProvider> =
+        std::sync::LazyLock::new(|| FallbackDownloadProvider {
+            owner: Default::default(),
+        });
 
     #[test]
     fn gpu_inputs_use_provider_bandwidth_without_gathering() {
         let _guard = test_support::accel_test_lock();
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&DIAGONAL_PROVIDER));
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*DIAGONAL_PROVIDER));
         assert!(expect_bool(
             call_isdiag(fixed_gpu_handle(&DIAGONAL_PROVIDER)).unwrap()
         ));
@@ -1169,7 +1037,7 @@ mod tests {
         ));
 
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&LOWER_PROVIDER));
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*LOWER_PROVIDER));
         assert!(!expect_bool(
             call_isdiag(fixed_gpu_handle(&LOWER_PROVIDER)).unwrap()
         ));
@@ -1181,7 +1049,7 @@ mod tests {
         ));
 
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&UPPER_PROVIDER));
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*UPPER_PROVIDER));
         assert!(!expect_bool(
             call_isdiag(fixed_gpu_handle(&UPPER_PROVIDER)).unwrap()
         ));
@@ -1194,20 +1062,41 @@ mod tests {
     }
 
     #[test]
+    fn failed_bandwidth_does_not_download_or_retire_borrowed_input() {
+        let _guard = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(FixedBandwidthProvider {
+            lower: 0,
+            upper: 0,
+            owner: Default::default(),
+            fail: true,
+        }));
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let allocation = provider
+            .owner
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let error = call_isdiag(Value::GpuTensor(allocation.handle.clone())).unwrap_err();
+        assert!(error.to_string().contains("bandwidth execution failed"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+
+    #[test]
     fn gpu_inputs_fall_back_to_download_when_bandwidth_is_unavailable() {
         let _guard = test_support::accel_test_lock();
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&FALLBACK_PROVIDER));
-        let handle = GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: FALLBACK_PROVIDER.device_id(),
-            buffer_id: 1,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::Real,
-        );
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*FALLBACK_PROVIDER));
+        let handle = FALLBACK_PROVIDER
+            .upload(&HostTensorView {
+                data: &[1.0, 3.0, 0.0, 2.0],
+                shape: &[2, 2],
+            })
+            .unwrap();
         let handle = Value::GpuTensor(handle);
         assert!(!expect_bool(call_isdiag(handle.clone()).unwrap()));
         assert!(expect_bool(call_istril(handle.clone()).unwrap()));
@@ -1221,7 +1110,7 @@ mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .unwrap();
             assert!(expect_bool(call_isdiag(Value::GpuTensor(handle)).unwrap()));
@@ -1249,7 +1138,7 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &lower.materialize_f64(),
-                shape: &lower.shape,
+                shape: lower.shape(),
             })
             .expect("upload lower");
         assert!(!expect_bool(
@@ -1263,7 +1152,7 @@ mod tests {
 
     #[test]
     fn unsupported_inputs_error() {
-        let err = call_isdiag(Value::String("x".to_string())).unwrap_err();
+        let err = call_isdiag(Value::String("x".to_string().into())).unwrap_err();
         assert!(err.message.contains("isdiag: invalid input"));
     }
 }

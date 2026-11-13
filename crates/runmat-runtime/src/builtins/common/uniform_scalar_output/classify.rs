@@ -1,0 +1,79 @@
+use crate::builtins::common::tensor;
+use runmat_value::{IntValue, NumericScalar, Utf16CodeUnit, Value};
+
+use super::UniformScalarError;
+
+#[derive(Clone, Debug)]
+pub(super) enum ClassifiedValue {
+    Logical(bool),
+    F64(f64),
+    F32(f32),
+    Integer(IntValue),
+    ComplexF64((f64, f64)),
+    ComplexF32((f32, f32)),
+    IntegerComplex(IntValue, IntValue),
+    Char(Utf16CodeUnit),
+}
+
+pub(super) fn value(value: &Value) -> Result<ClassifiedValue, UniformScalarError> {
+    match value {
+        Value::Bool(value) => Ok(ClassifiedValue::Logical(*value)),
+        Value::LogicalArray(value) if value.len() == 1 => {
+            Ok(ClassifiedValue::Logical(value.data[0] != 0))
+        }
+        Value::Num(value) => Ok(ClassifiedValue::F64(*value)),
+        Value::Int(value) => Ok(ClassifiedValue::Integer(value.clone())),
+        Value::Tensor(value) if tensor::is_scalar_tensor(value) => numeric(
+            value
+                .numeric_value_at(0)
+                .ok_or(UniformScalarError::invalid_storage("numeric scalar"))?,
+        ),
+        Value::Complex(real, imaginary) => Ok(ClassifiedValue::ComplexF64((*real, *imaginary))),
+        Value::ComplexTensor(value) if tensor::is_scalar_complex_tensor(value) => {
+            let (real, imaginary) = value
+                .numeric_value_at(0)
+                .ok_or(UniformScalarError::invalid_storage("complex scalar"))?;
+            complex(real, imaginary)
+        }
+        Value::CharArray(value) if value.rows * value.cols == 1 => Ok(ClassifiedValue::Char(
+            value
+                .data()
+                .first()
+                .copied()
+                .unwrap_or(Utf16CodeUnit::from_raw(0)),
+        )),
+        _ => Err(UniformScalarError::NON_SCALAR),
+    }
+}
+
+fn numeric(value: NumericScalar) -> Result<ClassifiedValue, UniformScalarError> {
+    match value {
+        NumericScalar::F64(value) => Ok(ClassifiedValue::F64(value)),
+        NumericScalar::F32(value) => Ok(ClassifiedValue::F32(value)),
+        value => value
+            .into_int_value()
+            .map(ClassifiedValue::Integer)
+            .ok_or(UniformScalarError::invalid_storage("integer scalar")),
+    }
+}
+
+fn complex(
+    real: NumericScalar,
+    imaginary: NumericScalar,
+) -> Result<ClassifiedValue, UniformScalarError> {
+    match (real, imaginary) {
+        (NumericScalar::F64(real), NumericScalar::F64(imaginary)) => {
+            Ok(ClassifiedValue::ComplexF64((real, imaginary)))
+        }
+        (NumericScalar::F32(real), NumericScalar::F32(imaginary)) => {
+            Ok(ClassifiedValue::ComplexF32((real, imaginary)))
+        }
+        (real, imaginary) => Ok(ClassifiedValue::IntegerComplex(
+            real.into_int_value()
+                .ok_or(UniformScalarError::invalid_storage("complex scalar"))?,
+            imaginary
+                .into_int_value()
+                .ok_or(UniformScalarError::invalid_storage("complex scalar"))?,
+        )),
+    }
+}

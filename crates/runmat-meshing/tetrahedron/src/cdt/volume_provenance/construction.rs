@@ -81,6 +81,9 @@ fn validate_sources(
     )
     .map_err(|failure| {
         let kind = match failure.kind {
+            DelaunayCarvingErrorKind::Accounting(cause) => {
+                DelaunayVolumeProvenanceErrorKind::Accounting(cause)
+            }
             DelaunayCarvingErrorKind::InvalidOptions => {
                 DelaunayVolumeProvenanceErrorKind::InvalidOptions
             }
@@ -132,7 +135,7 @@ fn construct(
     nodes.sort_by_key(|binding| binding.node_identity);
 
     let mut segments = Vec::new();
-    for (index, recovered) in recovery.segment_recovery.segments.iter().enumerate() {
+    for (index, recovered) in recovery.recovered_segments.iter().enumerate() {
         checkpoint(index as u64, options, cancellation)?;
         let constraint = &constraints.segments[recovered.constraint_index as usize];
         let Some(source_edge) = &constraint.source_edge_id else {

@@ -1,7 +1,7 @@
 #![cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
 
 use runmat_runtime::{blas::*, call_builtin, lapack::*};
-use runmat_value::{CellArray, IntegerStorage, Tensor as Matrix, Value};
+use runmat_value::{IntegerStorage, NumericDType, Tensor as Matrix, Value};
 
 #[test]
 fn test_blas_matrix_multiplication() {
@@ -10,9 +10,8 @@ fn test_blas_matrix_multiplication() {
 
     let result = blas_matrix_mul(&a, &b).unwrap();
 
-    // [1 2] * [2 1] = [4 5]
-    // [3 4]   [1 2]   [10 11]
-    assert_eq!(result.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
+    // Column-major A = [1 3; 2 4], B = [2 1; 1 2].
+    assert_eq!(result.materialize_f64(), vec![5.0, 8.0, 7.0, 10.0]);
     assert_eq!(result.rows(), 2);
     assert_eq!(result.cols(), 2);
 }
@@ -24,7 +23,7 @@ fn blas_matrix_multiplication_reads_typed_integer_storage_exactly() {
 
     let result = blas_matrix_mul(&a, &b).unwrap();
 
-    assert_eq!(result.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
+    assert_eq!(result.materialize_f64(), vec![5.0, 8.0, 7.0, 10.0]);
 }
 
 #[test]
@@ -34,9 +33,8 @@ fn test_blas_matrix_vector_multiplication() {
 
     let result = blas_matrix_vector_mul(&matrix, &vector).unwrap();
 
-    // [1 2] * [2] = [8]
-    // [3 4]   [3]   [18]
-    assert_eq!(result, vec![8.0, 18.0]);
+    // Column-major [1 3; 2 4] * [2; 3] = [11; 16].
+    assert_eq!(result, vec![11.0, 16.0]);
 }
 
 #[test]
@@ -75,67 +73,111 @@ fn test_blas_vector_operations() {
 #[test]
 fn test_lapack_linear_solve() {
     // Solve the system:
-    // 2x + y = 5
-    // x + 3y = 6
-    // Solution: x = 1.8, y = 1.4
+    // 2x + 3y = 8
+    // x + 4y = 9
+    // Solution: x = 1, y = 2 (nonsymmetric layout witness).
 
-    let a = Matrix::new_2d(vec![2.0, 1.0, 1.0, 3.0], 2, 2).unwrap();
-    let b = vec![5.0, 6.0];
+    let a = Matrix::new_2d(vec![2.0, 1.0, 3.0, 4.0], 2, 2).unwrap();
+    let b = vec![8.0, 9.0];
 
     let solution = lapack_solve_linear_system(&a, &b).unwrap();
 
-    assert!((solution[0] - 1.8).abs() < 1e-10);
-    assert!((solution[1] - 1.4).abs() < 1e-10);
+    assert_eq!(solution.len(), 2);
+    assert!((solution[0] - 1.0).abs() < 1e-10);
+    assert!((solution[1] - 2.0).abs() < 1e-10);
 }
 
 #[test]
 fn lapack_linear_solve_reads_typed_integer_matrix_storage_exactly() {
-    let a = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 1, 3]), vec![2, 2]).unwrap();
-    let b = vec![5.0, 6.0];
+    let a = Matrix::new_integer(IntegerStorage::I16(vec![2, 1, 3, 4]), vec![2, 2]).unwrap();
+    let b = vec![8.0, 9.0];
 
     let solution = lapack_solve_linear_system(&a, &b).unwrap();
 
-    assert!((solution[0] - 1.8).abs() < 1e-10);
-    assert!((solution[1] - 1.4).abs() < 1e-10);
+    assert_eq!(solution.len(), 2);
+    assert!((solution[0] - 1.0).abs() < 1e-10);
+    assert!((solution[1] - 2.0).abs() < 1e-10);
 }
 
 #[test]
 fn test_lapack_lu_decomposition() {
-    let matrix = Matrix::new_2d(vec![4.0, 3.0, 2.0, 1.0], 2, 2).unwrap();
+    // Nonsymmetric matrix with a required first-column row pivot.
+    let matrix = Matrix::new_2d(vec![0.0, 2.0, 1.0, 2.0, 1.0, 3.0, 1.0, 0.0, 4.0], 3, 3).unwrap();
 
     let lu = lapack_lu_decomposition(&matrix).unwrap();
 
-    // Verify dimensions
-    assert_eq!(lu.lu_matrix.rows(), 2);
-    assert_eq!(lu.lu_matrix.cols(), 2);
-    assert_eq!(lu.pivots.len(), 2);
+    assert_eq!(lu.lu_matrix.shape(), &[3, 3]);
+    assert_eq!(lu.pivots.len(), 3);
+    let mut permuted = matrix.materialize_f64();
+    for (row, &pivot) in lu.pivots.iter().enumerate() {
+        assert!((1..=3).contains(&pivot));
+        let pivot_row = usize::try_from(pivot - 1).unwrap();
+        for column in 0..3 {
+            permuted.swap(row + column * 3, pivot_row + column * 3);
+        }
+    }
+    let packed = lu.lu_matrix.materialize_f64();
+    for column in 0..3 {
+        for row in 0..3 {
+            let product: f64 = (0..3)
+                .map(|inner| {
+                    let lower = if row == inner {
+                        1.0
+                    } else if row > inner {
+                        packed[row + inner * 3]
+                    } else {
+                        0.0
+                    };
+                    let upper = if inner <= column {
+                        packed[inner + column * 3]
+                    } else {
+                        0.0
+                    };
+                    lower * upper
+                })
+                .sum();
+            assert!((product - permuted[row + column * 3]).abs() < 1e-10);
+        }
+    }
 }
 
 #[test]
 fn test_lapack_qr_decomposition() {
-    let matrix = Matrix::new_2d(vec![1.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
-
-    let qr = lapack_qr_decomposition(&matrix).unwrap();
-
-    // Verify dimensions
-    assert_eq!(qr.q.rows(), 2);
-    assert_eq!(qr.q.cols(), 2);
-    assert_eq!(qr.r.rows(), 2);
-    assert_eq!(qr.r.cols(), 2);
-
-    // Q should be orthogonal (Q^T * Q = I)
-    let qt = match call_builtin("transpose", &[Value::Tensor(qr.q.clone())]).unwrap() {
-        Value::Tensor(t) => t,
-        other => panic!("expected tensor transpose, got {other:?}"),
-    };
-    let qt_q = blas_matrix_mul(&qt, &qr.q).unwrap();
-
-    // Check if Q^T * Q is approximately identity
-    let tolerance = 1e-10;
-    assert!((qt_q.materialize_f64()[0] - 1.0).abs() < tolerance); // [0,0] should be 1
-    assert!((qt_q.materialize_f64()[1]).abs() < tolerance); // [0,1] should be 0
-    assert!((qt_q.materialize_f64()[2]).abs() < tolerance); // [1,0] should be 0
-    assert!((qt_q.materialize_f64()[3] - 1.0).abs() < tolerance); // [1,1] should be 1
+    for (rows, columns, data) in [
+        (2, 2, vec![1.0, 1.0, 1.0, 2.0]),
+        (3, 2, vec![1.0, 2.0, 3.0, 4.0, 6.0, 5.0]),
+        (2, 3, vec![1.0, 2.0, 3.0, 5.0, 4.0, 6.0]),
+    ] {
+        let matrix = Matrix::new_2d(data.clone(), rows, columns).unwrap();
+        let qr = lapack_qr_decomposition(&matrix).unwrap();
+        let rank = rows.min(columns);
+        assert_eq!(qr.q.shape(), &[rows, rank]);
+        assert_eq!(qr.r.shape(), &[rank, columns]);
+        let q = qr.q.materialize_f64();
+        let r = qr.r.materialize_f64();
+        for column in 0..columns {
+            for row in 0..rows {
+                let product: f64 = (0..rank)
+                    .map(|inner| q[row + inner * rows] * r[inner + column * rank])
+                    .sum();
+                assert!((product - data[row + column * rows]).abs() < 1e-10);
+            }
+        }
+        for column in 0..rank {
+            for row in 0..rank {
+                let product: f64 = (0..rows)
+                    .map(|inner| q[inner + row * rows] * q[inner + column * rows])
+                    .sum();
+                let expected = if row == column { 1.0 } else { 0.0 };
+                assert!((product - expected).abs() < 1e-10);
+            }
+        }
+        for column in 0..columns {
+            for row in (column + 1)..rank {
+                assert_eq!(r[row + column * rank], 0.0);
+            }
+        }
+    }
 }
 
 #[test]
@@ -193,71 +235,52 @@ fn test_lapack_matrix_inverse() {
 
 #[test]
 fn test_builtin_blas_functions() {
-    // Test BLAS matrix multiplication builtin
+    // Column-major inputs represent A = [1 3; 2 4], B = [2 1; 1 2].
     let a = Matrix::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
     let b = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
-    match call_builtin("blas_matmul", &[Value::Tensor(a), Value::Tensor(b)]) {
-        Ok(Value::Tensor(m)) => {
-            assert_eq!(m.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
-        }
-        Err(message) if message.message().contains("Undefined function") => {
-            // Builtin not wired up yet; direct helper coverage above still exercises implementation.
-            return;
-        }
-        Ok(other) => panic!("Expected matrix result, got {other:?}"),
-        Err(message) => panic!("Unexpected error calling blas_matmul builtin: {message}"),
-    }
+    let result = call_builtin("mtimes", &[Value::Tensor(a), Value::Tensor(b)]).unwrap();
+    let Value::Tensor(matrix) = result.value() else {
+        panic!("expected double matrix product, got {:?}", result.value());
+    };
+    assert_eq!(matrix.numeric_dtype(), NumericDType::F64);
+    assert_eq!(matrix.shape(), &[2, 2]);
+    assert_eq!(matrix.materialize_f64(), vec![5.0, 8.0, 7.0, 10.0]);
 
-    // Test dot product builtin
-    let vec_a = CellArray::new(
-        vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
-        1,
-        3,
-    )
-    .unwrap();
-    let vec_b = CellArray::new(
-        vec![Value::Num(4.0), Value::Num(5.0), Value::Num(6.0)],
-        1,
-        3,
-    )
-    .unwrap();
-
-    match call_builtin("dot", &[Value::Cell(vec_a), Value::Cell(vec_b)]) {
-        Ok(Value::Num(dot)) => assert_eq!(dot, 32.0),
-        Err(message) if message.message().contains("Undefined function") => (),
-        Ok(other) => panic!("Expected numeric result, got {other:?}"),
-        Err(message) => panic!("Unexpected error calling dot builtin: {message}"),
-    }
+    let vec_a = Matrix::new_2d(vec![1.0, 2.0, 3.0], 3, 1).unwrap();
+    let vec_b = Matrix::new_2d(vec![4.0, 5.0, 6.0], 3, 1).unwrap();
+    let result = call_builtin("dot", &[Value::Tensor(vec_a), Value::Tensor(vec_b)]).unwrap();
+    let Value::Num(dot) = result.value() else {
+        panic!(
+            "expected double scalar dot product, got {:?}",
+            result.value()
+        );
+    };
+    assert_eq!(*dot, 32.0);
 }
 
 #[test]
 fn test_builtin_lapack_functions() {
-    // Test linear solve builtin
-    let a = Matrix::new_2d(vec![2.0, 1.0, 1.0, 3.0], 2, 2).unwrap();
-    let b_vec = CellArray::new(vec![Value::Num(5.0), Value::Num(6.0)], 2, 1).unwrap();
-
-    match call_builtin("solve", &[Value::Tensor(a), Value::Cell(b_vec)]) {
-        Ok(Value::Cell(sol)) => {
-            assert_eq!(sol.data.len(), 2);
-            if let (Value::Num(x), Value::Num(y)) = (&sol.data[0], &sol.data[1]) {
-                assert!((x - 1.8).abs() < 1e-10);
-                assert!((y - 1.4).abs() < 1e-10);
-            } else {
-                panic!("Expected numeric solution");
-            }
-        }
-        Err(message) if message.message().contains("Undefined function") => (),
-        Ok(other) => panic!("Expected vector result, got {other:?}"),
-        Err(message) => panic!("Unexpected error calling solve builtin: {message}"),
+    // Nonsymmetric A = [2 3; 1 4] distinguishes the column-major contract.
+    // A * [1; 2] = [8; 9].
+    let a = Matrix::new_2d(vec![2.0, 1.0, 3.0, 4.0], 2, 2).unwrap();
+    let b = Matrix::new_2d(vec![8.0, 9.0], 2, 1).unwrap();
+    let result = call_builtin("mldivide", &[Value::Tensor(a), Value::Tensor(b)]).unwrap();
+    let Value::Tensor(solution) = result.value() else {
+        panic!("expected double column solution, got {:?}", result.value());
+    };
+    assert_eq!(solution.numeric_dtype(), NumericDType::F64);
+    assert_eq!(solution.shape(), &[2, 1]);
+    for (actual, expected) in solution.materialize_f64().iter().zip([1.0, 2.0]) {
+        assert!((actual - expected).abs() < 1e-10);
     }
 
     // Test determinant builtin
     let matrix = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
     let det_result = call_builtin("det", &[Value::Tensor(matrix)]).unwrap();
 
-    if let Value::Num(det) = det_result {
-        assert!((det - 3.0).abs() < 1e-10);
+    if let Value::Num(det) = det_result.value() {
+        assert!((*det - 3.0).abs() < 1e-10);
     } else {
         panic!("Expected numeric result");
     }

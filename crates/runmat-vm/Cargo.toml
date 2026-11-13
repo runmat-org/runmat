@@ -1,6 +1,6 @@
 [package]
 name = "runmat-vm"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -19,7 +19,7 @@ runmat-accelerate = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, optional = true }
 runmat-gc = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-parser = { workspace = true }
 runmat-thread-local = { workspace = true }
 runmat-time = { workspace = true }
@@ -27,9 +27,13 @@ once_cell = { workspace = true }
 miette = { workspace = true }
 log = { workspace = true }
 tracing = "0.1"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 futures = "0.3"
+pin-project-lite = "0.2.17"
+allocator-api2 = "=0.2.21"
+hashbrown = "=0.16.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 stacker = "0.1"
@@ -42,4 +46,14 @@ wgpu = ["native-accel", "runmat-accelerate/wgpu"]
 plot-core = ["runmat-runtime/plot-core"]
 
 [dev-dependencies]
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 anyhow = "1"
+tempfile = "3"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[[bench]]
+name = "folded_reduction_placement"
+harness = false
+required-features = ["wgpu"]

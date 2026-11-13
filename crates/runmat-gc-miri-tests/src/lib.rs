@@ -10,9 +10,7 @@
 #[cfg(test)]
 mod tests {
     use runmat_gc::*;
-    use runmat_value::{
-        CellArray, Closure, HandleRef, Listener, ObjectInstance, StructValue, Value,
-    };
+    use runmat_value::{CellArray, Closure, HandleRef, Listener, Value};
     use std::ptr::NonNull;
 
     #[test]
@@ -41,7 +39,7 @@ mod tests {
             let mut returned = None;
             for i in 0..32 {
                 returned = Some(
-                    gc_allocate(Value::String(format!("value-{i}")))
+                    gc_allocate(Value::String(format!("value-{i}").into()))
                         .expect("allocation should succeed"),
                 );
             }
@@ -51,7 +49,7 @@ mod tests {
             gc_collect_minor().expect("forced minor collection should succeed");
             assert_eq!(
                 gc_clone_value(&handle).expect("allocation should not return a collected handle"),
-                Value::String("value-31".to_string())
+                Value::String("value-31".into())
             );
             gc_remove_root(handle).expect("returned handle root removal should succeed");
         });
@@ -117,10 +115,10 @@ mod tests {
     #[test]
     fn root_traversal_keeps_handle_targets_alive() {
         gc_test_context(|| {
-            let target = gc_allocate(Value::String("target".to_string()))
+            let target = gc_allocate(Value::String("target".into()))
                 .expect("target allocation should succeed");
             let holder = Value::HandleObject(HandleRef {
-                class_name: "Thing".to_string(),
+                class_name: "Thing".into(),
                 target,
                 valid: true,
             });
@@ -138,7 +136,7 @@ mod tests {
             assert_eq!(
                 gc_clone_value(&target_handle)
                     .expect("target should remain live through root trace"),
-                Value::String("target".to_string())
+                Value::String("target".into())
             );
         });
     }
@@ -151,7 +149,7 @@ mod tests {
             let cell = Value::Cell(
                 CellArray::new(
                     vec![Value::HandleObject(HandleRef {
-                        class_name: "Thing".to_string(),
+                        class_name: "Thing".into(),
                         target,
                         valid: true,
                     })],
@@ -166,7 +164,7 @@ mod tests {
 
             let target_handle =
                 match &*gc_read_value(&rooted.handle()).expect("root should be live") {
-                    Value::Cell(cell) => match &cell.data[0] {
+                    Value::Cell(cell) => match &cell.data()[0] {
                         Value::HandleObject(handle) => handle.target,
                         other => panic!("expected handle object in cell, got {other:?}"),
                     },
@@ -184,40 +182,42 @@ mod tests {
     #[test]
     fn root_traversal_scans_nested_trace_variants() {
         gc_test_context(|| {
-            let target = gc_allocate(Value::String("target".to_string()))
+            let target = gc_allocate(Value::String("target".into()))
                 .expect("target allocation should succeed");
-            let callback = gc_allocate(Value::String("callback".to_string()))
+            let callback = gc_allocate(Value::String("callback".into()))
                 .expect("callback allocation should succeed");
 
             let handle = Value::HandleObject(HandleRef {
-                class_name: "Thing".to_string(),
+                class_name: "Thing".into(),
                 target,
                 valid: true,
             });
             let listener = Value::Listener(Listener {
                 id: 1,
                 target,
-                target_class_name: "Thing".to_string(),
-                event_name: "Changed".to_string(),
+                target_class_name: "Thing".into(),
+                event_name: "Changed".into(),
                 callback,
                 enabled: true,
                 valid: true,
             });
-            let closure = Value::Closure(Closure {
-                function_name: "callback".to_string(),
-                bound_function: None,
-                captures: vec![Value::OutputList(vec![handle, listener])],
-            });
+            let closure = Value::Closure(Closure::new(
+                "callback".into(),
+                None,
+                Default::default(),
+                None,
+                vec![Value::output_list(vec![handle, listener])],
+                None,
+            ));
 
-            let mut object = ObjectInstance::new("Owner".to_string());
-            object.properties.insert("capture".to_string(), closure);
+            let mut object = runmat_value::UnboundedObjectBuilder::new("Owner".to_string());
+            object.insert("capture".to_string(), closure);
+            let object = object.finish();
 
-            let mut root_struct = StructValue::new();
-            root_struct
-                .fields
-                .insert("object".to_string(), Value::Object(object));
+            let mut root_struct = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            root_struct.insert("object".to_string(), Value::Object(object));
 
-            let rooted = gc_allocate_rooted(Value::Struct(root_struct))
+            let rooted = gc_allocate_rooted(Value::Struct(root_struct.finish()))
                 .expect("rooted nested value should allocate");
 
             gc_collect_minor().expect("minor collection should succeed");
@@ -228,11 +228,11 @@ mod tests {
             ));
             assert_eq!(
                 gc_clone_value(&target).expect("listener target should remain live"),
-                Value::String("target".to_string())
+                Value::String("target".into())
             );
             assert_eq!(
                 gc_clone_value(&callback).expect("listener callback should remain live"),
-                Value::String("callback".to_string())
+                Value::String("callback".into())
             );
         });
     }
@@ -240,14 +240,14 @@ mod tests {
     #[test]
     fn stale_survivor_handle_is_rejected_after_unrooted_collection() {
         gc_test_context(|| {
-            let root = gc_allocate_rooted(Value::String("temporary".to_string()))
+            let root = gc_allocate_rooted(Value::String("temporary".into()))
                 .expect("rooted allocation should succeed");
             let handle = root.handle();
 
             gc_collect_minor().expect("first collection should keep rooted value live");
             assert_eq!(
                 gc_clone_value(&handle).expect("rooted handle should remain live"),
-                Value::String("temporary".to_string())
+                Value::String("temporary".into())
             );
 
             drop(root);

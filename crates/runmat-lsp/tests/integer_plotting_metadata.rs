@@ -28,10 +28,10 @@ fn initialize_lsp_builtin_registry() {
 fn integer_plotting_metadata_is_public_settled_and_backend_explicit() {
     initialize_lsp_builtin_registry();
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("registered builtin {name}"));
         assert_eq!(
-            builtin.descriptor.unwrap().completion_policy,
+            builtin.descriptor.completion_policy,
             BuiltinCompletionPolicy::Public
         );
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
@@ -60,7 +60,7 @@ fn integer_plotting_metadata_is_public_settled_and_backend_explicit() {
 #[test]
 fn legend_is_explicitly_integer_inapplicable() {
     initialize_lsp_builtin_registry();
-    let builtin = runmat_builtins::builtin_function_by_name("legend").expect("legend builtin");
+    let builtin = runmat_builtins::builtin_catalog_entry_by_name("legend").expect("legend builtin");
     assert!(builtin.integer_capabilities.is_empty());
     assert_eq!(
         builtin.integer_audit.expect("legend integer audit").kind,

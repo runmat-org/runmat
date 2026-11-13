@@ -1,0 +1,43 @@
+use crate::*;
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+ authority: BuiltinDocumentationAuthority::Catalog, title: Some("mustBeVector"), slug: Some("mustBeVector"),
+ summary: "Validate that a value is vector-shaped.", description: "`mustBeVector` is available as a callable MATLAB argument validator. It returns no user-facing value when validation passes and throws a structured RunMat error when validation fails. Validators with literal/static payloads are also encoded in MATLAB `arguments` blocks; dynamic validator payload expressions should call the validator directly until runtime-evaluated arguments-block payloads are implemented.", keywords: &["mustBeVector", "argument validation", "arguments block", "MATLAB compatibility"],
+ related: &[], sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["Callable validator forms enforce exact supported arity, throw on validation failure, and suppress automatic output on success.",
+"The ordinary form accepts 1-by-N or N-by-1 arrays, including 0-by-1 and 1-by-0 integer vectors, and rejects multidimensional or other empty shapes from metadata without payload access.",
+"The documented 'allow-all-empties' form additionally accepts every empty shape and is supported consistently by callable validation and MATLAB arguments blocks.",
+"Arguments-block validation uses the same shared runtime predicates for validators that RunMat can encode statically.",
+"Numeric validators check every element without materializing a cloned numeric array, including sparse stored values and implicit sparse zeros where relevant.",
+"Text validators accept string scalars/arrays, character row vectors, and compatible cell arrays of text where MATLAB commonly permits them."] },
+BuiltinDocumentationSection { heading: "Residency and provider behavior", paragraphs: &["Validators run on host values and metadata; they throw on validation failure."] },
+BuiltinDocumentationSection { heading: "Execution contract", paragraphs: &["The runtime binding is portable across interpreter, native/JIT/AOT and WASM routes. Metadata and text checks do not upload or gather operands. Invalid output counts and controls reject before provider payload access.",
+"This validator has zero public outputs. A statement or arguments-block check validates normally; explicitly assigning a result is an error. An internal ABI return carrier is not a public output.",
+"The operation has no callbacks, filesystem, randomness, workspace mutation or foreign-runtime calls. Distributed values are inspected only as opaque handles, never materialized or validated partition-by-partition."] }],
+ examples: &[BuiltinExample {
+ id: "example-1", title: "Using the validator as a normal callable guard", program: "A = [1 2 3];\nmustBeVector(A);\npassed = true;",
+ display_output: Some("No output when validation passes; an error is thrown when validation fails."), compatibility: BuiltinExampleCompatibility::Matlab,
+ harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+ requirements: BuiltinExampleRequirements::NONE,
+ verification: BuiltinExampleVerification::Assertions { source: "assert(passed);" },
+},
+BuiltinExample {
+ id: "example-2", title: "Allow every empty shape", program: "A = zeros(0,2,3);\nmustBeVector(A, \"allow-all-empties\");\npassed = true;",
+ display_output: Some("No output when A is vector-shaped or empty; an error is thrown otherwise."), compatibility: BuiltinExampleCompatibility::Matlab,
+ harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+ requirements: BuiltinExampleRequirements::NONE,
+ verification: BuiltinExampleVerification::Assertions { source: "assert(passed);" },
+}], example_exemption: None,
+ faqs: &[BuiltinDocumentationFaq { question: "Does this validator work in an `arguments` block?", answer: "Yes for literal/static validator payloads that RunMat can encode at compile time. Dynamic validator payload expressions should use the callable form for now." }],
+ links: &[BuiltinDocumentationLink { label: "`arguments` blocks", target: BuiltinDocumentationLinkTarget::Documentation("../language/arguments") }],
+ media: &[],
+ evidence: BuiltinDocumentationEvidence {
+  implementation: &[BuiltinDocumentationLink {
+   label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("crates/runmat-runtime/src/builtins/common/validation/must_be_vector.rs"),
+  }],
+  verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Validator domain tests", location: "builtins::common::validation::tests" }],
+  notes: &["Retained unit reference: crates/runmat-runtime/src/builtins/common/validation.rs table-style pass/fail tests",
+"Retained integration reference: Representative callable and arguments-block coverage in crates/runmat-vm/tests/functions.rs; not every validator has a dedicated VM case.",
+   "Legacy GPU/fusion declarations are reconciled into typed placement; no device kernel or payload preparation is claimed. Exact-source integrated runtime, native and documentation execution remains required.",
+  ],
+ },
+ introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

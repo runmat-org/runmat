@@ -1,8 +1,9 @@
 use super::super::{
     surface_principal_curvature, surface_unit_normal, ExactSurfaceDefinition,
     ExactSurfaceEvaluator, ExactSurfaceImplementation, GeometryEvaluationControl,
-    GeometryEvaluationError, GeometryEvaluationErrorKind, NurbsSurface3, ParameterRange,
-    SurfaceCurvature, SurfaceDerivatives, SurfaceEvaluatorId, SurfaceProjection,
+    GeometryEvaluationError, GeometryEvaluationErrorKind, GeometryParameterAxis,
+    GeometryParameterFrame, NurbsSurface3, ParameterRange, SurfaceCurvature,
+    SurfaceDerivativeCoefficients, SurfaceDerivatives, SurfaceEvaluatorId, SurfaceProjection,
 };
 use super::projection::charge_seed_allocation;
 use super::surface_projection::{project_surface, uniform_surface_seeds};
@@ -38,7 +39,7 @@ impl ExactSurfaceEvaluator for PortableExactEvaluator<'_> {
         id: &SurfaceEvaluatorId,
         uv: [f64; 2],
         control: &dyn GeometryEvaluationControl,
-    ) -> Result<[f64; 3], GeometryEvaluationError> {
+    ) -> Result<crate::physical::Position, GeometryEvaluationError> {
         Ok(ExactSurfaceEvaluator::derivatives(self, id, uv, control)?.point_m)
     }
 
@@ -52,7 +53,8 @@ impl ExactSurfaceEvaluator for PortableExactEvaluator<'_> {
         let ExactSurfaceImplementation::Portable { definition } = &record.implementation else {
             return Err(kernel_owned("surface"));
         };
-        evaluate_surface(definition, uv, control)
+        let frames = surface_parameter_frames(definition, id);
+        evaluate_surface(definition, uv, control)?.into_parameter_frames(frames)
     }
 
     fn unit_normal(
@@ -76,10 +78,12 @@ impl ExactSurfaceEvaluator for PortableExactEvaluator<'_> {
     fn closest_point(
         &self,
         id: &SurfaceEvaluatorId,
-        point_m: [f64; 3],
-        absolute_error_m: f64,
+        point_m: crate::physical::Position,
+        absolute_error_m: crate::physical::Length,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<SurfaceProjection, GeometryEvaluationError> {
+        let point_m = point_m.canonical_value();
+        let absolute_error_m = absolute_error_m.canonical_value();
         let record = self.surface_record(id)?;
         let ExactSurfaceImplementation::Portable { definition } = &record.implementation else {
             return Err(kernel_owned("surface"));
@@ -89,7 +93,8 @@ impl ExactSurfaceEvaluator for PortableExactEvaluator<'_> {
         charge_seed_allocation(seeds.len(), std::mem::size_of::<[f64; 2]>(), control)?;
         project_surface(bounds, point_m, absolute_error_m, seeds, control, |uv| {
             evaluate_surface(definition, uv, control)
-        })
+        })?
+        .into_parameter_frames(surface_parameter_frames(definition, id))
     }
 }
 
@@ -97,7 +102,7 @@ fn evaluate_surface(
     definition: &ExactSurfaceDefinition,
     uv: [f64; 2],
     control: &dyn GeometryEvaluationControl,
-) -> Result<SurfaceDerivatives, GeometryEvaluationError> {
+) -> Result<SurfaceDerivativeCoefficients, GeometryEvaluationError> {
     require_parameters(uv, definition_bounds(definition))?;
     control.checkpoint()?;
     control.consume_iterations(1)?;
@@ -107,20 +112,23 @@ fn evaluate_surface(
             u_axis_m_per_parameter,
             v_axis_m_per_parameter,
             ..
-        } => SurfaceDerivatives {
-            point_m: add_scaled(
-                origin_m,
-                u_axis_m_per_parameter,
-                uv[0],
-                v_axis_m_per_parameter,
-                uv[1],
-            ),
-            du_m: *u_axis_m_per_parameter,
-            dv_m: *v_axis_m_per_parameter,
-            duu_m: [0.0; 3],
-            duv_m: [0.0; 3],
-            dvv_m: [0.0; 3],
-        },
+        } => {
+            let origin_m = origin_m.canonical_values();
+            SurfaceDerivativeCoefficients {
+                point_m: add_scaled(
+                    origin_m,
+                    u_axis_m_per_parameter,
+                    uv[0],
+                    v_axis_m_per_parameter,
+                    uv[1],
+                ),
+                du_m: *u_axis_m_per_parameter,
+                dv_m: *v_axis_m_per_parameter,
+                duu_m: [0.0; 3],
+                duv_m: [0.0; 3],
+                dvv_m: [0.0; 3],
+            }
+        }
         ExactSurfaceDefinition::Cylinder {
             origin_m,
             x_axis,
@@ -129,14 +137,23 @@ fn evaluate_surface(
             radius_m,
             ..
         } => {
-            let (radial, tangent) = radial_frame(x_axis, y_axis, uv[0]);
-            SurfaceDerivatives {
-                point_m: add_three(origin_m, &radial, *radius_m, axis_m_per_v, uv[1]),
-                du_m: scale(&tangent, *radius_m),
-                dv_m: *axis_m_per_v,
-                duu_m: scale(&radial, -*radius_m),
-                duv_m: [0.0; 3],
-                dvv_m: [0.0; 3],
+            let origin_m = origin_m.canonical_values();
+            {
+                let (radial, tangent) = radial_frame(x_axis, y_axis, uv[0]);
+                SurfaceDerivativeCoefficients {
+                    point_m: add_three(
+                        origin_m,
+                        &radial,
+                        radius_m.canonical_value(),
+                        axis_m_per_v,
+                        uv[1],
+                    ),
+                    du_m: scale(&tangent, radius_m.canonical_value()),
+                    dv_m: *axis_m_per_v,
+                    duu_m: scale(&radial, -radius_m.canonical_value()),
+                    duv_m: [0.0; 3],
+                    dvv_m: [0.0; 3],
+                }
             }
         }
         ExactSurfaceDefinition::Cone {
@@ -148,9 +165,15 @@ fn evaluate_surface(
             ..
         } => {
             let (radial, tangent) = radial_frame(x_axis, y_axis, uv[0]);
-            let (sine, cosine) = semi_angle_rad.sin_cos();
-            SurfaceDerivatives {
-                point_m: add_three(apex_m, axis, uv[1] * cosine, &radial, uv[1] * sine),
+            let (sine, cosine) = semi_angle_rad.canonical_value().sin_cos();
+            SurfaceDerivativeCoefficients {
+                point_m: add_three(
+                    apex_m.canonical_values(),
+                    axis,
+                    uv[1] * cosine,
+                    &radial,
+                    uv[1] * sine,
+                ),
                 du_m: scale(&tangent, uv[1] * sine),
                 dv_m: add_scaled(&[0.0; 3], axis, cosine, &radial, sine),
                 duu_m: scale(&radial, -uv[1] * sine),
@@ -165,7 +188,17 @@ fn evaluate_surface(
             z_axis,
             radius_m,
             ..
-        } => sphere_derivatives(center_m, x_axis, y_axis, z_axis, *radius_m, uv),
+        } => {
+            let center_m = center_m.canonical_values();
+            sphere_derivatives(
+                center_m,
+                x_axis,
+                y_axis,
+                z_axis,
+                radius_m.canonical_value(),
+                uv,
+            )
+        }
         ExactSurfaceDefinition::Torus {
             center_m,
             x_axis,
@@ -174,15 +207,18 @@ fn evaluate_surface(
             major_radius_m,
             minor_radius_m,
             ..
-        } => torus_derivatives(
-            center_m,
-            x_axis,
-            y_axis,
-            z_axis,
-            *major_radius_m,
-            *minor_radius_m,
-            uv,
-        ),
+        } => {
+            let center_m = center_m.canonical_values();
+            torus_derivatives(
+                center_m,
+                x_axis,
+                y_axis,
+                z_axis,
+                major_radius_m.canonical_value(),
+                minor_radius_m.canonical_value(),
+                uv,
+            )
+        }
         ExactSurfaceDefinition::Nurbs { definition } => {
             rational_surface_derivatives(definition, uv, control)?
         }
@@ -197,10 +233,10 @@ fn sphere_derivatives(
     z_axis: &[f64; 3],
     radius: f64,
     uv: [f64; 2],
-) -> SurfaceDerivatives {
+) -> SurfaceDerivativeCoefficients {
     let (radial, tangent) = radial_frame(x_axis, y_axis, uv[0]);
     let (sin_v, cos_v) = uv[1].sin_cos();
-    SurfaceDerivatives {
+    SurfaceDerivativeCoefficients {
         point_m: add_three(center, &radial, radius * cos_v, z_axis, radius * sin_v),
         du_m: scale(&tangent, radius * cos_v),
         dv_m: add_scaled(&[0.0; 3], &radial, -radius * sin_v, z_axis, radius * cos_v),
@@ -218,11 +254,11 @@ fn torus_derivatives(
     major_radius: f64,
     minor_radius: f64,
     uv: [f64; 2],
-) -> SurfaceDerivatives {
+) -> SurfaceDerivativeCoefficients {
     let (radial, tangent) = radial_frame(x_axis, y_axis, uv[0]);
     let (sin_v, cos_v) = uv[1].sin_cos();
     let ring_radius = major_radius + minor_radius * cos_v;
-    SurfaceDerivatives {
+    SurfaceDerivativeCoefficients {
         point_m: add_three(center, &radial, ring_radius, z_axis, minor_radius * sin_v),
         du_m: scale(&tangent, ring_radius),
         dv_m: add_scaled(
@@ -307,8 +343,8 @@ fn require_parameters(
 }
 
 fn validate_result(
-    result: SurfaceDerivatives,
-) -> Result<SurfaceDerivatives, GeometryEvaluationError> {
+    result: SurfaceDerivativeCoefficients,
+) -> Result<SurfaceDerivativeCoefficients, GeometryEvaluationError> {
     if result
         .point_m
         .iter()
@@ -332,7 +368,7 @@ fn projection_seeds(
 ) -> Result<Vec<[f64; 2]>, GeometryEvaluationError> {
     match definition {
         ExactSurfaceDefinition::Nurbs { definition } => nurbs_seeds(definition, bounds),
-        _ => Ok(uniform_surface_seeds(bounds, 16)),
+        _ => uniform_surface_seeds(bounds, 16),
     }
 }
 
@@ -340,8 +376,8 @@ fn nurbs_seeds(
     definition: &NurbsSurface3,
     bounds: [ParameterRange; 2],
 ) -> Result<Vec<[f64; 2]>, GeometryEvaluationError> {
-    let u = knot_axis_seeds(&definition.u_knots, bounds[0], definition.u_degree);
-    let v = knot_axis_seeds(&definition.v_knots, bounds[1], definition.v_degree);
+    let u = knot_axis_seeds(&definition.u_knots, bounds[0], definition.u_degree)?;
+    let v = knot_axis_seeds(&definition.v_knots, bounds[1], definition.v_degree)?;
     let count = u
         .len()
         .checked_mul(v.len())
@@ -361,7 +397,11 @@ fn nurbs_seeds(
     Ok(seeds)
 }
 
-fn knot_axis_seeds(knots: &[f64], range: ParameterRange, degree: u8) -> Vec<f64> {
+fn knot_axis_seeds(
+    knots: &[f64],
+    range: ParameterRange,
+    degree: u8,
+) -> Result<Vec<f64>, GeometryEvaluationError> {
     let subdivisions = usize::from(degree).saturating_mul(4).max(4);
     let mut values = Vec::new();
     for span in knots.windows(2) {
@@ -371,10 +411,33 @@ fn knot_axis_seeds(knots: &[f64], range: ParameterRange, degree: u8) -> Vec<f64>
             continue;
         }
         for index in 0..=subdivisions {
-            values.push(start + (end - start) * index as f64 / subdivisions as f64);
+            values.push(
+                ParameterRange { start, end }
+                    .parameter_at_fraction(index as f64 / subdivisions as f64)?,
+            );
         }
     }
     values.sort_by(f64::total_cmp);
     values.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    values
+    Ok(values)
+}
+
+fn surface_parameter_frames(
+    definition: &ExactSurfaceDefinition,
+    id: &SurfaceEvaluatorId,
+) -> [GeometryParameterFrame; 2] {
+    match definition {
+        ExactSurfaceDefinition::Sphere { .. } | ExactSurfaceDefinition::Torus { .. } => [
+            GeometryParameterFrame::radians(),
+            GeometryParameterFrame::radians(),
+        ],
+        ExactSurfaceDefinition::Cylinder { .. } | ExactSurfaceDefinition::Cone { .. } => [
+            GeometryParameterFrame::radians(),
+            GeometryParameterFrame::native(id.as_str(), GeometryParameterAxis::SurfaceV),
+        ],
+        _ => [
+            GeometryParameterFrame::native(id.as_str(), GeometryParameterAxis::SurfaceU),
+            GeometryParameterFrame::native(id.as_str(), GeometryParameterAxis::SurfaceV),
+        ],
+    }
 }

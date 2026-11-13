@@ -128,7 +128,9 @@ impl NativeWindowManager {
                     window.install_close_signal(sig);
                 }
                 // Set the figure data
-                window.set_figure(figure);
+                window
+                    .set_figure(figure)
+                    .map_err(|error| format!("Failed to prepare plot: {error}"))?;
 
                 // Run the window event loop (this will block until the window closes)
                 match pollster::block_on(window.run()) {

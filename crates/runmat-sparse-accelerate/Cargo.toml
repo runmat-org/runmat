@@ -1,0 +1,17 @@
+[package]
+name = "runmat-sparse-accelerate"
+version = "0.7.1"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "Device preconditioners for the shared sparse solvers through the accelerator provider contract"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-sparse-solvers = { workspace = true }
+runmat-accelerate-api = { workspace = true }
+pollster = "0.3"
+
+[dev-dependencies]
+runmat-accelerate = { workspace = true, features = ["wgpu"] }

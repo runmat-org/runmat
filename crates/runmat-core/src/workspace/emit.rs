@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use runmat_hir::{HirAssembly, HirExprKind, HirPlace, HirStmtKind};
 use runmat_value::Value;
 
@@ -35,21 +33,6 @@ pub(crate) struct ExecutionDisplayContext {
     pub display_var_ids: Vec<usize>,
 }
 
-pub(crate) fn determine_display_label_from_context(
-    single_assign_var: Option<usize>,
-    id_to_name: &HashMap<usize, String>,
-    is_expression_stmt: bool,
-    single_stmt_non_assign: bool,
-) -> Option<String> {
-    if let Some(var_id) = single_assign_var {
-        id_to_name.get(&var_id).cloned()
-    } else if is_expression_stmt || single_stmt_non_assign {
-        Some("ans".to_string())
-    } else {
-        None
-    }
-}
-
 /// Format value type information like MATLAB (e.g., "1000x1 vector", "3x3 matrix")
 pub(crate) fn format_type_info(value: &Value) -> String {
     match value {
@@ -69,7 +52,7 @@ pub(crate) fn format_type_info(value: &Value) -> String {
             }
         }
         Value::CharArray(ca) => {
-            if ca.data.len() == 1 {
+            if ca.data().len() == 1 {
                 "char".to_string()
             } else {
                 format!(
@@ -121,16 +104,26 @@ pub(crate) fn format_type_info(value: &Value) -> String {
             }
         }
         Value::Cell(cells) => {
-            if cells.data.len() == 1 {
+            if cells.data().len() == 1 {
                 "1x1 cell".to_string()
             } else {
-                format!("{}x1 cell array", cells.data.len())
+                format!("{}x1 cell array", cells.data().len())
             }
         }
+        Value::Struct(_) => "scalar struct".to_string(),
+        Value::StructArray(array) => format!(
+            "{} struct array",
+            array
+                .shape()
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join("x")
+        ),
         Value::GpuTensor(h) => {
-            if h.shape.len() == 2 {
-                let r = h.shape[0];
-                let c = h.shape[1];
+            if h.shape().len() == 2 {
+                let r = h.shape()[0];
+                let c = h.shape()[1];
                 if r == 1 && c == 1 {
                     "scalar (gpu)".to_string()
                 } else if r == 1 || c == 1 {
@@ -139,7 +132,7 @@ pub(crate) fn format_type_info(value: &Value) -> String {
                     format!("{r}x{c} matrix (gpu)")
                 }
             } else {
-                format!("Tensor{:?} (gpu)", h.shape)
+                format!("Tensor{:?} (gpu)", h.shape())
             }
         }
         _ => "value".to_string(),
@@ -279,24 +272,8 @@ fn display_context(
 }
 
 fn expr_emit_disposition(expr: &runmat_hir::HirExpr, suppressed: bool) -> FinalStmtEmitDisposition {
-    if suppressed {
+    if suppressed || !expr.emits_statement_output() {
         return FinalStmtEmitDisposition::Suppressed;
-    }
-    match &expr.kind {
-        HirExprKind::Call(call) => {
-            if call.requested_outputs.fixed_count() == 0 {
-                return FinalStmtEmitDisposition::Suppressed;
-            }
-            if let runmat_hir::HirCallableRef::Builtin(builtin) = &call.callee {
-                if runmat_builtins::suppresses_auto_output(builtin.0.as_str()) {
-                    return FinalStmtEmitDisposition::Suppressed;
-                }
-            }
-        }
-        HirExprKind::CommandCall(_) => {
-            return FinalStmtEmitDisposition::Suppressed;
-        }
-        _ => {}
     }
     FinalStmtEmitDisposition::Inline
 }
@@ -332,7 +309,7 @@ pub(crate) fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
         WorkspaceResidency::Cpu
     };
     WorkspaceEntry {
-        name: name.to_string(),
+        name: name.into(),
         class_name: matlab_class_name(value),
         dtype,
         shape: value_shape(value).unwrap_or_default(),
@@ -347,7 +324,13 @@ pub(crate) fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{SymbolicArray, SymbolicExpr};
+    use runmat_value::{StructArray, StructValue, SymbolicArray, SymbolicExpr};
+
+    fn structure(payload: f64) -> StructValue {
+        let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+        value.insert("payload", Value::Num(payload));
+        value.finish()
+    }
 
     #[test]
     fn symbolic_nd_array_is_not_labeled_scalar() {
@@ -375,5 +358,26 @@ mod tests {
             format_type_info(&Value::SymbolicArray(array)),
             "1x2 sym vector"
         );
+    }
+
+    #[test]
+    fn structure_array_workspace_metadata_reports_class_shape_and_dimensions() {
+        let array = StructArray::with_fields(
+            vec!["payload".into()],
+            vec![
+                structure(1.0),
+                structure(2.0),
+                structure(3.0),
+                structure(4.0),
+            ],
+            vec![2, 1, 2],
+        )
+        .expect("structure array");
+        let value = Value::StructArray(array);
+
+        assert_eq!(format_type_info(&value), "2x1x2 struct array");
+        let entry = workspace_entry("records", &value);
+        assert_eq!(entry.class_name, "struct");
+        assert_eq!(entry.shape, [2, 1, 2]);
     }
 }

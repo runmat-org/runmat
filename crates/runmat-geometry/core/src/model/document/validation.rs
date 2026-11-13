@@ -1,11 +1,9 @@
-use std::collections::BTreeSet;
-
 use super::{
     GeometryDocument, GeometryModel, GeometryObjectRef, GeometrySourceFormat,
     DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE, FACETED_SOLID_MEDIA_TYPE,
     GEOMETRY_DOCUMENT_SCHEMA_VERSION, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
 };
-use crate::{GeometryContractError, UnitSystem};
+use crate::GeometryContractError;
 
 const MAX_ARTIFACT_BYTES: u64 = 1 << 40;
 const MAX_DISPLAY_TESSELLATIONS: usize = 16;
@@ -23,13 +21,15 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
         &document.source.importer_version,
         128,
     )?;
-    if document.source.source_units == UnitSystem::Unspecified
-        || !document.source.meters_per_source_unit.is_finite()
-        || document.source.meters_per_source_unit <= 0.0
-    {
+    document
+        .source
+        .unit_evidence
+        .validate()
+        .map_err(|error| invalid("geometry source units", error.to_string()))?;
+    if !document.source.unit_evidence.physical_scale_resolved() {
         return Err(invalid(
             "geometry source units",
-            "units and positive finite normalization must be explicit",
+            "source physical scale must be established from declarations or explicit fallback",
         ));
     }
     if document.revision.revision == 0 || document.revision.persistent_mapping_version == 0 {
@@ -106,10 +106,10 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
             "too many derived display cache entries",
         ));
     }
-    let mut profiles = BTreeSet::new();
-    for display in &document.display_tessellations {
+    let mut profiles = [None; MAX_DISPLAY_TESSELLATIONS];
+    for (index, display) in document.display_tessellations.iter().enumerate() {
         validate_token("display tessellation profile", &display.profile_id, 128)?;
-        if !profiles.insert(display.profile_id.as_str())
+        if profiles[..index].contains(&Some(display.profile_id.as_str()))
             || display.geometry_revision != document.revision.revision
             || display.derived_from_primary_digest != document.primary_artifact().digest
         {
@@ -118,6 +118,7 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
                 "profiles must be unique and bind the exact document revision and primary payload",
             ));
         }
+        profiles[index] = Some(display.profile_id.as_str());
         validate_object(&display.artifact, DISPLAY_TESSELLATION_MEDIA_TYPE)?;
         if display.artifact.digest == document.primary_artifact().digest {
             return Err(invalid(

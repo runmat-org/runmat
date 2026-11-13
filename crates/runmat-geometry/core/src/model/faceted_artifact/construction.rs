@@ -27,7 +27,8 @@ pub fn build_faceted_solid_closure(
         schema_version: GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
     };
     document.validate()?;
-    admit_faceted_solid(&document, &solid_bytes)?;
+    // encode_faceted_solid has validated the original typed solid. Its newly
+    // constructed immutable bytes/reference need no second typed decode here.
     Ok(EncodedFacetedSolidClosure {
         document,
         solid,
@@ -60,4 +61,20 @@ fn verify_reference(model: &FacetedSolidModel, bytes: &[u8]) -> Result<(), Geome
         ));
     }
     Ok(())
+}
+
+pub fn admit_faceted_solid_with_control(
+    document: &GeometryDocument,
+    bytes: &[u8],
+    control: &dyn crate::GeometryCanonicalControl,
+) -> Result<FacetedSolid, GeometryContractError> {
+    document.validate()?;
+    let GeometryModel::FacetedSolid { model } = &document.model else {
+        return Err(GeometryContractError::invalid(
+            "faceted solid admission",
+            "exact geometry has no faceted solid payload",
+        ));
+    };
+    verify_reference(model, bytes)?;
+    super::decode_faceted_solid_with_control(bytes, model, control)
 }

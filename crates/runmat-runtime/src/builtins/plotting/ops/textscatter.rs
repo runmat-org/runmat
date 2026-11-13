@@ -1,26 +1,25 @@
 //! MATLAB-compatible `textscatter` and `textscatter3` builtins.
+pub use runmat_builtins::{
+    TEXTSCATTER3_DESCRIPTOR, TEXTSCATTER3_EXPLICIT_GPU_INPUT_EXTENSION,
+    TEXTSCATTER3_INTEGER_AXES_EXTENSION, TEXTSCATTER_DESCRIPTOR,
+    TEXTSCATTER_ERROR_INTERNAL as ERROR_INTERNAL,
+    TEXTSCATTER_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    TEXTSCATTER_EXPLICIT_GPU_INPUT_EXTENSION, TEXTSCATTER_INTEGER_AXES_EXTENSION,
+};
 
 use glam::{Vec3, Vec4};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::figure::PlotElement;
 use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{Figure, Scatter3Plot, ScatterPlot, TextStyle};
-use runmat_value::{StringArray, StructValue, Tensor, Value};
+use runmat_value::{decode_utf16_code_units, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_arguments};
 use crate::builtins::plotting::state::{
-    register_textscatter_handle, update_textscatter_figure, update_textscatter_handle_state,
-    FigureError, PlotRenderOptions, TextScatterHandleState, TextScatterMarkerColor,
+    register_textscatter_handle, FigureError, PlotRenderOptions, TextScatterHandleState,
+    TextScatterMarkerColor,
 };
 use crate::builtins::plotting::style::{
     parse_color_value, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -33,278 +32,6 @@ const DEFAULT_TEXT_DENSITY: f64 = 60.0;
 const DEFAULT_MAX_TEXT_LENGTH: usize = 40;
 const DEFAULT_MARKER_SIZE: f64 = 6.0;
 const DEFAULT_TEXT_COLOR: Vec4 = Vec4::new(0.0, 0.0, 0.0, 1.0);
-
-const TEXTSCATTER_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "textscatter-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "textscatter with a typed-integer numeric axes alias is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TextScatterIntegerAxesHandleExtension"),
-};
-const TEXTSCATTER3_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "textscatter3-integer-axes-handle",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "textscatter3 with a typed-integer numeric axes alias is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:TextScatter3IntegerAxesHandleExtension"),
-    };
-const TEXTSCATTER_EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "textscatter-explicit-gpu-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "textscatter with explicit gpuArray input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:TextScatterExplicitGpuInputExtension"),
-    };
-const TEXTSCATTER3_EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "textscatter3-explicit-gpu-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "textscatter3 with explicit gpuArray input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:TextScatter3ExplicitGpuInputExtension"),
-    };
-pub const TEXTSCATTER_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    TEXTSCATTER_INTEGER_AXES_EXTENSION,
-    TEXTSCATTER_EXPLICIT_GPU_INPUT_EXTENSION,
-];
-pub const TEXTSCATTER3_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    TEXTSCATTER3_INTEGER_AXES_EXTENSION,
-    TEXTSCATTER3_EXPLICIT_GPU_INPUT_EXTENSION,
-];
-
-const INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "XData",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are documented coordinate data and remain authoritative outside the derived render cache.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "YData",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are documented coordinate data and remain authoritative outside the derived render cache.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "ZData",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "ZData applies to textscatter3 and retains its native integer class and exact values.",
-    },
-];
-const INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "ax",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension.",
-}];
-pub const TEXTSCATTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ts = textscatter(integer_coordinates, labels, ...)",
-        inputs: &INTEGER_COORDINATE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Documented coordinate properties retain native source storage; only annotation and marker geometry enter the floating renderer domain.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "ts = textscatter(integer_ax, ...)",
-        inputs: &INTEGER_AXES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The axes-alias extension gate runs before target selection or graphics mutation.",
-    },
-];
-pub const TEXTSCATTER3_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] =
-    TEXTSCATTER_INTEGER_CAPABILITIES;
-
-const OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ts",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the TextScatter chart object.",
-}];
-
-const INPUTS_TEXTSCATTER_XY: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String vector or cell array of character vectors.",
-    },
-];
-
-const INPUTS_TEXTSCATTER_MATRIX: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "xy",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "N-by-2 coordinate matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String vector or cell array of character vectors.",
-    },
-];
-
-const INPUTS_TEXTSCATTER3_XYZ: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String vector or cell array of character vectors.",
-    },
-];
-
-const INPUTS_TEXTSCATTER3_MATRIX: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "xyz",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "N-by-3 coordinate matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String vector or cell array of character vectors.",
-    },
-];
-
-const INPUTS_PROPS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "props",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name/value TextScatter properties.",
-}];
-
-const TEXTSCATTER_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter(x, y, str)",
-        inputs: &INPUTS_TEXTSCATTER_XY,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter(xy, str)",
-        inputs: &INPUTS_TEXTSCATTER_MATRIX,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter(ax, ...)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter(..., Name, Value)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT_HANDLE,
-    },
-];
-
-const TEXTSCATTER3_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter3(x, y, z, str)",
-        inputs: &INPUTS_TEXTSCATTER3_XYZ,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter3(xyz, str)",
-        inputs: &INPUTS_TEXTSCATTER3_MATRIX,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter3(ax, ...)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ts = textscatter3(..., Name, Value)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT_HANDLE,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXTSCATTER.INVALID_ARGUMENT",
-    identifier: Some("RunMat:textscatter:InvalidArgument"),
-    when: "Coordinates, text labels, axes target, or TextScatter property values are invalid.",
-    message: "textscatter: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXTSCATTER.INTERNAL",
-    identifier: Some("RunMat:textscatter:Internal"),
-    when: "Internal plotting state update fails while creating or mutating TextScatter.",
-    message: "textscatter: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const TEXTSCATTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TEXTSCATTER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const TEXTSCATTER3_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TEXTSCATTER3_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[derive(Clone)]
 struct ParsedTextScatter {
@@ -346,41 +73,77 @@ impl Default for TextScatterOptions {
 
 #[runtime_builtin(
     name = "textscatter",
-    category = "plotting",
-    summary = "Create a 2-D text scatter chart.",
-    keywords = "textscatter,text,scatter,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::plotting::type_resolvers::handle_scalar_type),
-    descriptor(crate::builtins::plotting::textscatter::TEXTSCATTER_DESCRIPTOR),
-    extensions(crate::builtins::plotting::textscatter::TEXTSCATTER_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::textscatter::TEXTSCATTER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::textscatter"
 )]
-pub fn textscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
-    textscatter_impl(args, false, TEXTSCATTER_NAME)
+pub async fn textscatter_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &TEXTSCATTER_DESCRIPTOR,
+        &runmat_builtins::TEXTSCATTER_ERROR_TOO_MANY_OUTPUTS,
+        "textscatter",
+    )?;
+    let work =
+        super::text_chart_admission::UnboundedChartWork::admit(runtime.as_ref(), "textscatter")?;
+    work.finish(
+        async {
+            preflight_textscatter(args.view(), false, TEXTSCATTER_NAME)?;
+            let gathered = work
+                .wait(args.try_map_preserving_roots_async(
+                    args.len(),
+                    runtime.as_ref(),
+                    async |index| work.wait(crate::gather_if_needed_async(&args[index])).await,
+                ))
+                .await?;
+
+            textscatter_impl(gathered, false, TEXTSCATTER_NAME)
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "textscatter3",
-    category = "plotting",
-    summary = "Create a 3-D text scatter chart.",
-    keywords = "textscatter3,text,scatter,plotting,3d",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::plotting::type_resolvers::handle_scalar_type),
-    descriptor(crate::builtins::plotting::textscatter::TEXTSCATTER3_DESCRIPTOR),
-    extensions(crate::builtins::plotting::textscatter::TEXTSCATTER3_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::plotting::textscatter::TEXTSCATTER3_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::textscatter"
 )]
-pub fn textscatter3_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
-    textscatter_impl(args, true, TEXTSCATTER3_NAME)
+pub async fn textscatter3_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &TEXTSCATTER3_DESCRIPTOR,
+        &runmat_builtins::TEXTSCATTER3_ERROR_TOO_MANY_OUTPUTS,
+        "textscatter3",
+    )?;
+    let work =
+        super::text_chart_admission::UnboundedChartWork::admit(runtime.as_ref(), "textscatter3")?;
+    work.finish(
+        async {
+            preflight_textscatter(args.view(), true, TEXTSCATTER3_NAME)?;
+            let gathered = work
+                .wait(args.try_map_preserving_roots_async(
+                    args.len(),
+                    runtime.as_ref(),
+                    async |index| work.wait(crate::gather_if_needed_async(&args[index])).await,
+                ))
+                .await?;
+
+            textscatter_impl(gathered, true, TEXTSCATTER3_NAME)
+        }
+        .await,
+    )
 }
 
-fn textscatter_impl(args: Vec<Value>, is_3d: bool, builtin: &'static str) -> BuiltinResult<f64> {
+fn preflight_textscatter(
+    args: crate::call::FunctionArgumentView<'_>,
+    is_3d: bool,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -392,6 +155,14 @@ fn textscatter_impl(args: Vec<Value>, is_3d: bool, builtin: &'static str) -> Bui
         };
         crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
     }
+    Ok(())
+}
+
+fn textscatter_impl(
+    args: crate::call::BuiltinArguments,
+    is_3d: bool,
+    builtin: &'static str,
+) -> BuiltinResult<f64> {
     let typed_tensor_coordinate = matches!(
         args.first(),
         Some(Value::Tensor(tensor)) if tensor.integer_storage().is_some()
@@ -400,7 +171,7 @@ fn textscatter_impl(args: Vec<Value>, is_3d: bool, builtin: &'static str) -> Bui
     let (axes_target, rest) = if typed_tensor_coordinate {
         (None, args)
     } else {
-        split_leading_axes_handle(args, builtin)?
+        split_leading_axes_arguments(args, builtin)?
     };
     if axes_target.is_some()
         && first
@@ -415,12 +186,12 @@ fn textscatter_impl(args: Vec<Value>, is_3d: bool, builtin: &'static str) -> Bui
         crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
     }
     apply_axes_target(axes_target, builtin)?;
-    let parsed = parse_textscatter_args(rest, is_3d, builtin)?;
+    let parsed = parse_textscatter_args(rest.view(), is_3d, builtin)?;
     render_textscatter_chart(parsed, is_3d, builtin)
 }
 
 fn parse_textscatter_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
     is_3d: bool,
     builtin: &'static str,
 ) -> BuiltinResult<ParsedTextScatter> {
@@ -434,13 +205,16 @@ fn parse_textscatter_args(
     let matrix_width = if is_3d { 3 } else { 2 };
     let (x, y, z, text_value, option_args) =
         if let Ok(matrix) = tensor_from_value_local(&args[0], builtin) {
-            if matrix.cols == matrix_width && args.len() >= 2 && looks_like_text_labels(&args[1]) {
+            if textscatter_matrix_dimensions(&matrix).1 == matrix_width
+                && args.len() >= 2
+                && looks_like_text_labels(&args[1])
+            {
                 let (x, y, z) = coordinates_from_matrix(&matrix, matrix_width, builtin)?;
-                (x, y, z, &args[1], &args[2..])
+                (x, y, z, &args[1], args.range(2..)?)
             } else if is_3d && args.len() >= 4 {
-                explicit_coordinates(&args, true, builtin)?
+                explicit_coordinates(args, true, builtin)?
             } else if !is_3d && args.len() >= 3 {
-                explicit_coordinates(&args, false, builtin)?
+                explicit_coordinates(args, false, builtin)?
             } else {
                 return Err(textscatter_error(
                     builtin,
@@ -448,9 +222,9 @@ fn parse_textscatter_args(
                 ));
             }
         } else if is_3d && args.len() >= 4 {
-            explicit_coordinates(&args, true, builtin)?
+            explicit_coordinates(args, true, builtin)?
         } else if !is_3d && args.len() >= 3 {
-            explicit_coordinates(&args, false, builtin)?
+            explicit_coordinates(args, false, builtin)?
         } else {
             return Err(textscatter_error(
                 builtin,
@@ -479,23 +253,35 @@ type CoordinateParse<'a> = (
     NumericPlotData,
     Option<NumericPlotData>,
     &'a Value,
-    &'a [Value],
+    crate::call::FunctionArgumentView<'a>,
 );
 type CoordinateVectors = (NumericPlotData, NumericPlotData, Option<NumericPlotData>);
 
+/// Projects dense coordinate/color tensors into their historical matrix geometry.
+fn textscatter_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn explicit_coordinates<'a>(
-    args: &'a [Value],
+    args: crate::call::FunctionArgumentView<'a>,
     is_3d: bool,
     builtin: &'static str,
 ) -> BuiltinResult<CoordinateParse<'a>> {
     let x = tensor_vector(&args[0], "XData", builtin)?;
     let y = tensor_vector(&args[1], "YData", builtin)?;
-    if is_3d {
-        let z = tensor_vector(&args[2], "ZData", builtin)?;
-        Ok((x, y, Some(z), &args[3], &args[4..]))
+    let (z, text_index) = if is_3d {
+        (Some(tensor_vector(&args[2], "ZData", builtin)?), 3)
     } else {
-        Ok((x, y, None, &args[2], &args[3..]))
-    }
+        (None, 2)
+    };
+    let text = args
+        .get(text_index)
+        .ok_or_else(|| textscatter_error(builtin, "missing text labels"))?;
+    Ok((x, y, z, text, args.range(text_index + 1..)?))
 }
 
 fn coordinates_from_matrix(
@@ -503,7 +289,8 @@ fn coordinates_from_matrix(
     width: usize,
     builtin: &'static str,
 ) -> BuiltinResult<CoordinateVectors> {
-    if matrix.cols != width {
+    let (_, cols) = textscatter_matrix_dimensions(matrix);
+    if cols != width {
         return Err(textscatter_error(
             builtin,
             format!("coordinate matrix must have {width} columns"),
@@ -527,17 +314,15 @@ fn matrix_column(
     column: usize,
     builtin: &'static str,
 ) -> BuiltinResult<NumericPlotData> {
-    let indices = (0..matrix.rows)
-        .map(|row| row + column * matrix.rows)
-        .collect::<Vec<_>>();
+    let (rows, _) = textscatter_matrix_dimensions(matrix);
+    let indices = (0..rows).map(|row| row + column * rows).collect::<Vec<_>>();
     let storage = matrix
         .clone()
         .into_numeric_storage()
         .map_err(|err| textscatter_error(builtin, err))?
         .gather(&indices)
         .map_err(|err| textscatter_error(builtin, err))?;
-    NumericPlotData::new(storage, vec![matrix.rows, 1])
-        .map_err(|err| textscatter_error(builtin, err))
+    NumericPlotData::new(storage, vec![rows, 1]).map_err(|err| textscatter_error(builtin, err))
 }
 
 fn tensor_vector(
@@ -603,26 +388,49 @@ fn validate_finite_data(
 
 fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| {
+                text.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| textscatter_error(builtin, "labels must be text"))
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?),
+        Value::CharArray(chars) if chars.rows == 1 => decode_utf16_code_units(chars.data())
+            .map(|text| vec![text])
+            .map_err(|error| {
+                textscatter_utf16_error(builtin, "labels are not valid UTF-16 text", error)
+            }),
         Value::CharArray(chars) => {
             let mut labels = Vec::with_capacity(chars.rows);
             for row in 0..chars.rows {
-                let mut text = String::new();
-                for col in 0..chars.cols {
-                    text.push(chars.data[row * chars.cols + col]);
-                }
+                let start = row * chars.cols;
+                let text = decode_utf16_code_units(&chars.data()[start..start + chars.cols])
+                    .map_err(|error| {
+                        textscatter_utf16_error(builtin, "labels are not valid UTF-16 text", error)
+                    })?;
                 labels.push(text.trim_end().to_string());
             }
             Ok(labels)
         }
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
-                let text = value_as_string(value).ok_or_else(|| {
-                    textscatter_error(builtin, "cell labels must contain text scalars")
-                })?;
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
+                let text = value_as_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        textscatter_error(builtin, "cell labels must contain text scalars")
+                    })?;
                 labels.push(text);
             }
             Ok(labels)
@@ -642,7 +450,7 @@ fn looks_like_text_labels(value: &Value) -> bool {
 }
 
 fn parse_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     point_count: usize,
     builtin: &'static str,
 ) -> BuiltinResult<TextScatterOptions> {
@@ -777,16 +585,7 @@ fn render_textscatter_chart(
 
     let render_result = crate::builtins::plotting::state::render_active_plot(
         builtin,
-        PlotRenderOptions {
-            title: if is_3d {
-                "3-D Text Scatter"
-            } else {
-                "Text Scatter"
-            },
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             *axes_out.borrow_mut() = Some(axes);
             let visible_mask = density_mask(labels.len(), options.text_density_percentage);
@@ -868,8 +667,7 @@ fn render_textscatter_chart(
     };
     let handle = register_textscatter_handle(state);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_internal(builtin, err));
@@ -884,7 +682,7 @@ pub(crate) fn get_textscatter_property(
 ) -> BuiltinResult<Value> {
     match property.map(canonical_key).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("textscatter".into()));
             st.insert(
                 "Parent",
@@ -911,7 +709,7 @@ pub(crate) fn get_textscatter_property(
                 "Visible",
                 Value::String(if state.visible { "on" } else { "off" }.into()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("textscatter".into())),
         Some("parent") => Ok(Value::Num(
@@ -931,7 +729,7 @@ pub(crate) fn get_textscatter_property(
         Some("visible") => Ok(Value::String(
             if state.visible { "on" } else { "off" }.into(),
         )),
-        Some("displayname") | Some("tag") => Ok(Value::String(String::new())),
+        Some("displayname") | Some("tag") => Ok(Value::string(String::new())),
         Some(other) => Err(textscatter_error(
             builtin,
             format!("unsupported TextScatter property `{other}`"),
@@ -939,15 +737,35 @@ pub(crate) fn get_textscatter_property(
     }
 }
 
-pub(crate) fn apply_textscatter_property(
+fn property_state_error(
+    builtin: &'static str,
+    source: crate::builtins::plotting::state::FigureError,
+) -> RuntimeError {
+    let mut error = textscatter_error(builtin, source.to_string());
+    error.source = Some(Box::new(source));
+    error
+}
+
+pub(crate) fn apply_textscatter_property_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+
     handle: f64,
     state: &TextScatterHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot(handle) {
+    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot_for_property(
+        authority, handle,
+    ) {
         Ok(crate::builtins::plotting::state::PlotChildHandleState::TextScatter(current)) => current,
+        Err(err) if authority.is_selected() => return Err(property_state_error(builtin, err)),
+        _ if authority.is_selected() => {
+            return Err(property_state_error(
+                builtin,
+                crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+            ))
+        }
         _ => state.clone(),
     };
     let prop = canonical_key(key);
@@ -1042,9 +860,11 @@ pub(crate) fn apply_textscatter_property(
             ));
         }
     }
-    refresh_textscatter_rendering(&mut next, builtin)?;
-    update_textscatter_handle_state(handle, next)
-        .map_err(|err| textscatter_error(builtin, err.to_string()))
+    refresh_textscatter_rendering_for_property(authority, &mut next, builtin)?;
+    crate::builtins::plotting::state::update_textscatter_handle_state_for_property(
+        authority, handle, next,
+    )
+    .map_err(|err| property_state_error(builtin, err))
 }
 
 fn add_marker_plot(
@@ -1082,7 +902,9 @@ fn add_marker_plot(
     }
 }
 
-fn refresh_textscatter_rendering(
+fn refresh_textscatter_rendering_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+
     state: &mut TextScatterHandleState,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
@@ -1095,110 +917,133 @@ fn refresh_textscatter_rendering(
         .as_ref()
         .map(NumericPlotData::materialize_f64)
         .unwrap_or_else(|| vec![0.0; state.text_data.len()]);
-    let location = state.clone();
-    update_textscatter_figure(&location, |figure| {
-        for (idx, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
-            if figure
-                .axes_text_annotation(state.axes_index, annotation_index)
-                .is_none()
-            {
-                return Err(crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle);
+    crate::builtins::plotting::state::update_textscatter_figure_for_property(
+        authority,
+        state.figure,
+        state.axes_index,
+        |figure| {
+            for (idx, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
+                if figure
+                    .axes_text_annotation(state.axes_index, annotation_index)
+                    .is_none()
+                {
+                    return Err(
+                        crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+                    );
+                }
+                let mut style = state.base_style.clone();
+                style.visible = state.visible && visible_mask[idx];
+                style.color = text_colors.get(idx).copied();
+                figure.set_axes_text_annotation_text(
+                    state.axes_index,
+                    annotation_index,
+                    truncated_label(&state.text_data[idx], state.max_text_length),
+                );
+                figure.set_axes_text_annotation_position(
+                    state.axes_index,
+                    annotation_index,
+                    Vec3::new(
+                        x_values[idx] as f32,
+                        y_values[idx] as f32,
+                        z_values[idx] as f32,
+                    ),
+                );
+                figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
             }
-            let mut style = state.base_style.clone();
-            style.visible = state.visible && visible_mask[idx];
-            style.color = text_colors.get(idx).copied();
-            figure.set_axes_text_annotation_text(
-                state.axes_index,
-                annotation_index,
-                truncated_label(&state.text_data[idx], state.max_text_length),
+            let marker_colors = resolved_marker_colors(
+                state.text_data.len(),
+                &options_from_state(state),
+                &text_colors,
             );
-            figure.set_axes_text_annotation_position(
-                state.axes_index,
-                annotation_index,
-                Vec3::new(
-                    x_values[idx] as f32,
-                    y_values[idx] as f32,
-                    z_values[idx] as f32,
-                ),
-            );
-            figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
-        }
-        let marker_colors = resolved_marker_colors(
-            state.text_data.len(),
-            &options_from_state(state),
-            &text_colors,
-        );
-        if let Some(plot_index) = state.marker_plot_index {
-            if let Some(plot) = figure.get_plot_mut(plot_index) {
-                match plot {
-                    PlotElement::Scatter(scatter) => {
-                        if state.is_3d {
-                            scatter.set_visible(false);
-                            if should_show_markers_state(state) {
-                                let new_index = add_marker_plot(
-                                    figure,
-                                    state.axes_index,
-                                    state.is_3d,
-                                    &x_values,
-                                    &y_values,
-                                    Some(&z_values),
-                                    marker_colors,
-                                    state.marker_size,
-                                    state.visible,
-                                    builtin,
-                                )
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                                state.marker_plot_index = Some(new_index);
-                            }
-                        } else {
-                            scatter
-                                .update_numeric_data(state.x_data.clone(), state.y_data.clone())
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                            scatter.set_marker_size(state.marker_size as f32);
-                            scatter.set_visible(state.visible && should_show_markers_state(state));
-                            scatter.set_colors(marker_colors);
-                        }
-                    }
-                    PlotElement::Scatter3(scatter) => {
-                        if state.is_3d {
-                            scatter
-                                .update_numeric_data(
-                                    state.x_data.clone(),
-                                    state.y_data.clone(),
-                                    state
-                                        .z_data
-                                        .clone()
-                                        .ok_or(FigureError::InvalidPlotObjectHandle)?,
-                                )
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                            let mut updated = scatter
-                                .clone()
-                                .with_colors(marker_colors)
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?
-                                .with_point_size(state.marker_size as f32);
-                            updated.set_visible(state.visible && should_show_markers_state(state));
-                            *scatter = updated;
-                        } else {
-                            scatter.set_visible(false);
-                            if should_show_markers_state(state) {
-                                let new_index = add_marker_plot(
-                                    figure,
-                                    state.axes_index,
-                                    state.is_3d,
-                                    &x_values,
-                                    &y_values,
-                                    None,
-                                    marker_colors,
-                                    state.marker_size,
-                                    state.visible,
-                                    builtin,
-                                )
-                                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-                                state.marker_plot_index = Some(new_index);
+            if let Some(plot_index) = state.marker_plot_index {
+                if let Some(plot) = figure.get_plot_mut(plot_index) {
+                    match plot {
+                        PlotElement::Scatter(scatter) => {
+                            if state.is_3d {
+                                scatter.set_visible(false);
+                                if should_show_markers_state(state) {
+                                    let new_index = add_marker_plot(
+                                        figure,
+                                        state.axes_index,
+                                        state.is_3d,
+                                        &x_values,
+                                        &y_values,
+                                        Some(&z_values),
+                                        marker_colors,
+                                        state.marker_size,
+                                        state.visible,
+                                        builtin,
+                                    )
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                    state.marker_plot_index = Some(new_index);
+                                }
+                            } else {
+                                scatter
+                                    .update_numeric_data(state.x_data.clone(), state.y_data.clone())
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                scatter.set_marker_size(state.marker_size as f32);
+                                scatter
+                                    .set_visible(state.visible && should_show_markers_state(state));
+                                scatter.set_colors(marker_colors);
                             }
                         }
+                        PlotElement::Scatter3(scatter) => {
+                            if state.is_3d {
+                                scatter
+                                    .update_numeric_data(
+                                        state.x_data.clone(),
+                                        state.y_data.clone(),
+                                        state
+                                            .z_data
+                                            .clone()
+                                            .ok_or(FigureError::InvalidPlotObjectHandle)?,
+                                    )
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                let mut updated = scatter
+                                    .clone()
+                                    .with_colors(marker_colors)
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?
+                                    .with_point_size(state.marker_size as f32);
+                                updated
+                                    .set_visible(state.visible && should_show_markers_state(state));
+                                *scatter = updated;
+                            } else {
+                                scatter.set_visible(false);
+                                if should_show_markers_state(state) {
+                                    let new_index = add_marker_plot(
+                                        figure,
+                                        state.axes_index,
+                                        state.is_3d,
+                                        &x_values,
+                                        &y_values,
+                                        None,
+                                        marker_colors,
+                                        state.marker_size,
+                                        state.visible,
+                                        builtin,
+                                    )
+                                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                                    state.marker_plot_index = Some(new_index);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
+                } else if should_show_markers_state(state) {
+                    let new_index = add_marker_plot(
+                        figure,
+                        state.axes_index,
+                        state.is_3d,
+                        &x_values,
+                        &y_values,
+                        if state.is_3d { Some(&z_values) } else { None },
+                        marker_colors,
+                        state.marker_size,
+                        state.visible,
+                        builtin,
+                    )
+                    .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+                    state.marker_plot_index = Some(new_index);
                 }
             } else if should_show_markers_state(state) {
                 let new_index = add_marker_plot(
@@ -1216,25 +1061,10 @@ fn refresh_textscatter_rendering(
                 .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
                 state.marker_plot_index = Some(new_index);
             }
-        } else if should_show_markers_state(state) {
-            let new_index = add_marker_plot(
-                figure,
-                state.axes_index,
-                state.is_3d,
-                &x_values,
-                &y_values,
-                if state.is_3d { Some(&z_values) } else { None },
-                marker_colors,
-                state.marker_size,
-                state.visible,
-                builtin,
-            )
-            .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
-            state.marker_plot_index = Some(new_index);
-        }
-        Ok(())
-    })
-    .map_err(|err| textscatter_error(builtin, err.to_string()))
+            Ok(())
+        },
+    )
+    .map_err(|err| property_state_error(builtin, err))
 }
 
 fn numeric_data_value(data: &NumericPlotData, builtin: &'static str) -> BuiltinResult<Value> {
@@ -1358,23 +1188,24 @@ fn color_matrix(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<Vec4>
     if len == 0 {
         return Ok(Vec::new());
     }
-    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = textscatter_matrix_dimensions(&tensor);
+    if len == 3 && (rows == 1 || cols == 1) {
         let values = tensor_utils::tensor_values_f64(&tensor);
         let color = rgb_triplet(&values, builtin)?;
         return Ok(vec![color]);
     }
-    if tensor.cols != 3 || len != tensor.rows.saturating_mul(3) {
+    if cols != 3 || len != rows.saturating_mul(3) {
         return Err(textscatter_error(
             builtin,
             "RGB color matrices must have three columns",
         ));
     }
-    let mut colors = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut colors = Vec::with_capacity(rows);
+    for row in 0..rows {
         let rgb = [
             tensor_utils::tensor_value_f64(&tensor, row),
-            tensor_utils::tensor_value_f64(&tensor, row + tensor.rows),
-            tensor_utils::tensor_value_f64(&tensor, row + 2 * tensor.rows),
+            tensor_utils::tensor_value_f64(&tensor, row + rows),
+            tensor_utils::tensor_value_f64(&tensor, row + 2 * rows),
         ];
         colors.push(rgb_triplet(&rgb, builtin)?);
     }
@@ -1382,7 +1213,9 @@ fn color_matrix(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<Vec4>
 }
 
 fn marker_color(value: &Value, builtin: &'static str) -> BuiltinResult<TextScatterMarkerColor> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         match text.trim().to_ascii_lowercase().as_str() {
             "auto" => return Ok(TextScatterMarkerColor::Auto),
             "none" => return Ok(TextScatterMarkerColor::None),
@@ -1437,7 +1270,15 @@ fn positive_integer(value: &Value, name: &str, builtin: &'static str) -> Builtin
 }
 
 fn text_scalar(value: &Value, name: &str, builtin: &'static str) -> BuiltinResult<String> {
-    value_as_string(value).ok_or_else(|| textscatter_error(builtin, format!("{name} must be text")))
+    value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| textscatter_error(builtin, format!("{name} must be text")))
 }
 
 fn visible_value(value: &Value, builtin: &'static str) -> BuiltinResult<bool> {
@@ -1445,6 +1286,13 @@ fn visible_value(value: &Value, builtin: &'static str) -> BuiltinResult<bool> {
         Value::Bool(flag) => Ok(*flag),
         _ => {
             let text = value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| textscatter_error(builtin, "Visible must be 'on' or 'off'"))?;
             match text.trim().to_ascii_lowercase().as_str() {
                 "on" => Ok(true),
@@ -1457,6 +1305,13 @@ fn visible_value(value: &Value, builtin: &'static str) -> BuiltinResult<bool> {
 
 fn property_key(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     let key = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| textscatter_error(builtin, "property names must be text"))?;
     Ok(canonical_key(&key))
 }
@@ -1552,6 +1407,20 @@ fn textscatter_error(builtin: &'static str, detail: impl AsRef<str>) -> RuntimeE
     builder.build()
 }
 
+fn textscatter_utf16_error(
+    builtin: &'static str,
+    detail: &str,
+    error: runmat_value::Utf16DecodeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{builtin}: {detail}: {error}"))
+        .with_builtin(builtin)
+        .with_source(error);
+    if let Some(identifier) = ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn map_internal(builtin: &'static str, err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
@@ -1617,18 +1486,47 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn textscatter_preserves_dense_rank_one_coordinate_matrix_geometry() {
+        let _guard = setup();
+        let labels = StringArray::new(vec!["point".into()], vec![1, 1]).expect("label");
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(Tensor::new(vec![4.0, 5.0], vec![2]).expect("rank-one coordinates")),
+                Value::StringArray(labels.clone()),
+            ]),
+        ))
+        .expect("rank-one two-column coordinate matrix is one point");
+        assert!(handle.is_finite());
+
+        let error = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(Tensor::new(vec![4.0], Vec::new()).expect("rank-zero coordinates")),
+                Value::StringArray(labels),
+            ]),
+        ))
+        .expect_err("rank-zero coordinate data has no matrix columns");
+        assert!(error.message().contains("coordinate matrix must be N-by-2"));
+    }
+
     #[test]
     fn textscatter_vector_coordinates_read_typed_integer_storage_exactly() {
         let _guard = setup();
         let labels =
             runmat_value::StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
                 .expect("labels");
-        let handle = textscatter3_builtin(vec![
-            Value::Tensor(int_tensor(vec![1, 2], 1, 2)),
-            Value::Tensor(int_tensor(vec![3, 4], 1, 2)),
-            Value::Tensor(int_tensor(vec![5, 6], 1, 2)),
-            Value::StringArray(labels),
-        ])
+        let handle = futures::executor::block_on(textscatter3_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(int_tensor(vec![1, 2], 1, 2)),
+                Value::Tensor(int_tensor(vec![3, 4], 1, 2)),
+                Value::Tensor(int_tensor(vec![5, 6], 1, 2)),
+                Value::StringArray(labels),
+            ]),
+        ))
         .expect("textscatter3");
         assert!(handle.is_finite());
     }
@@ -1643,11 +1541,14 @@ mod tests {
             vec![1, 2],
         )
         .unwrap();
-        let handle = textscatter_builtin(vec![
-            Value::Tensor(x),
-            row(&[3.0, 4.0]),
-            Value::StringArray(labels),
-        ])
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(x),
+                row(&[3.0, 4.0]),
+                Value::StringArray(labels),
+            ]),
+        ))
         .unwrap();
 
         let actual = Tensor::try_from(
@@ -1676,7 +1577,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(actual.shape, vec![2, 1]);
+        assert_eq!(actual.shape(), [2, 1]);
         assert_eq!(
             actual.into_numeric_storage().unwrap(),
             runmat_value::NumericStorage::I64(vec![-(wide as i64), wide as i64])
@@ -1688,11 +1589,14 @@ mod tests {
         let _guard = setup();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let labels = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
-        let handle = textscatter_builtin(vec![
-            Value::Tensor(int_tensor(vec![1, 2], 1, 2)),
-            Value::Tensor(int_tensor(vec![3, 4], 1, 2)),
-            Value::StringArray(labels),
-        ])
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(int_tensor(vec![1, 2], 1, 2)),
+                Value::Tensor(int_tensor(vec![3, 4], 1, 2)),
+                Value::StringArray(labels),
+            ]),
+        ))
         .expect("documented integer coordinates");
         let x = Tensor::try_from(
             &get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap(),
@@ -1744,15 +1648,18 @@ mod tests {
             )
             .unwrap(),
         );
-        let handle = textscatter_builtin(vec![
-            row(&[1.0, 2.0, 3.0]),
-            row(&[4.0, 5.0, 6.0]),
-            labels,
-            Value::String("TextDensityPercentage".into()),
-            Value::Num(100.0),
-            Value::String("MaxTextLength".into()),
-            Value::Num(5.0),
-        ])
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                row(&[1.0, 2.0, 3.0]),
+                row(&[4.0, 5.0, 6.0]),
+                labels,
+                Value::String("TextDensityPercentage".into()),
+                Value::Num(100.0),
+                Value::String("MaxTextLength".into()),
+                Value::Num(5.0),
+            ]),
+        ))
         .unwrap();
 
         assert_eq!(
@@ -1778,21 +1685,23 @@ mod tests {
         );
         let colors =
             Value::Tensor(Tensor::new_2d(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 2, 3).unwrap());
-        let handle = textscatter_builtin(vec![
-            xy,
-            labels,
-            Value::String("ColorData".into()),
-            colors,
-            Value::String("MarkerColor".into()),
-            Value::String("auto".into()),
-        ])
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                xy,
+                labels,
+                Value::String("ColorData".into()),
+                colors,
+                Value::String("MarkerColor".into()),
+                Value::String("auto".into()),
+            ]),
+        ))
         .unwrap();
         let color_data = Tensor::try_from(
             &get_builtin(vec![Value::Num(handle), Value::String("ColorData".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(color_data.rows, 2);
-        assert_eq!(color_data.cols, 3);
+        assert_eq!(color_data.shape(), [2, 3]);
     }
 
     #[test]
@@ -1803,7 +1712,11 @@ mod tests {
         let labels = Value::StringArray(
             StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
         );
-        let handle = textscatter3_builtin(vec![xyz, labels]).unwrap();
+        let handle = futures::executor::block_on(textscatter3_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![xyz, labels]),
+        ))
+        .unwrap();
         let z = Tensor::try_from(
             &get_builtin(vec![Value::Num(handle), Value::String("ZData".into())]).unwrap(),
         )
@@ -1817,7 +1730,15 @@ mod tests {
         let labels = Value::StringArray(
             StringArray::new(vec!["alphabet".into(), "betatron".into()], vec![1, 2]).unwrap(),
         );
-        let handle = textscatter_builtin(vec![row(&[1.0, 2.0]), row(&[3.0, 4.0]), labels]).unwrap();
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                row(&[1.0, 2.0]),
+                row(&[3.0, 4.0]),
+                labels,
+            ]),
+        ))
+        .unwrap();
         set_builtin(vec![
             Value::Num(handle),
             Value::String("MaxTextLength".into()),
@@ -1851,15 +1772,18 @@ mod tests {
         let replacement = Value::StringArray(
             StringArray::new(vec!["new-a".into(), "new-b".into()], vec![1, 2]).unwrap(),
         );
-        let handle = textscatter_builtin(vec![
-            row(&[1.0, 2.0]),
-            row(&[3.0, 4.0]),
-            original,
-            Value::String("TextData".into()),
-            replacement,
-            Value::String("TextDensityPercentage".into()),
-            Value::Num(100.0),
-        ])
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                row(&[1.0, 2.0]),
+                row(&[3.0, 4.0]),
+                original,
+                Value::String("TextData".into()),
+                replacement,
+                Value::String("TextDensityPercentage".into()),
+                Value::Num(100.0),
+            ]),
+        ))
         .unwrap();
 
         let labels =
@@ -1867,7 +1791,10 @@ mod tests {
         let Value::StringArray(labels) = labels else {
             panic!("expected string array labels");
         };
-        assert_eq!(labels.data, vec!["new-a".to_string(), "new-b".to_string()]);
+        assert_eq!(
+            labels.data(),
+            vec!["new-a".to_string(), "new-b".to_string()]
+        );
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.axes_text_annotations(0)[0].text, "new-a");
     }
@@ -1878,13 +1805,16 @@ mod tests {
         let labels = Value::StringArray(
             StringArray::new(vec!["one".into(), "two".into(), "three".into()], vec![1, 3]).unwrap(),
         );
-        let handle = textscatter_builtin(vec![
-            row(&[1.0, 2.0, 3.0]),
-            row(&[4.0, 5.0, 6.0]),
-            labels,
-            Value::String("TextDensityPercentage".into()),
-            Value::Num(100.0),
-        ])
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                row(&[1.0, 2.0, 3.0]),
+                row(&[4.0, 5.0, 6.0]),
+                labels,
+                Value::String("TextDensityPercentage".into()),
+                Value::Num(100.0),
+            ]),
+        ))
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.len(), 0);
@@ -1905,7 +1835,15 @@ mod tests {
         let labels = Value::StringArray(
             StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
         );
-        let handle = textscatter_builtin(vec![row(&[1.0, 2.0]), row(&[3.0, 4.0]), labels]).unwrap();
+        let handle = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                row(&[1.0, 2.0]),
+                row(&[3.0, 4.0]),
+                labels,
+            ]),
+        ))
+        .unwrap();
         let err = set_builtin(vec![
             Value::Num(handle),
             Value::String("ZData".into()),
@@ -1923,8 +1861,15 @@ mod tests {
         let labels = Value::StringArray(
             StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
         );
-        let err = textscatter_builtin(vec![row(&[1.0]), row(&[2.0]), labels])
-            .expect_err("length mismatch");
+        let err = futures::executor::block_on(textscatter_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                row(&[1.0]),
+                row(&[2.0]),
+                labels,
+            ]),
+        ))
+        .expect_err("length mismatch");
         assert_eq!(err.identifier(), Some("RunMat:textscatter:InvalidArgument"));
     }
 }

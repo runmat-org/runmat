@@ -12,6 +12,7 @@ pub struct ProcessBackendConfig {
     pub max_workers: usize,
     pub max_stderr_bytes: usize,
     pub project_handoff: Option<runmat_package::FrozenProjectHandoff>,
+    pub execution: super::NativeWorkerExecutionConfig,
 }
 
 impl ProcessBackendConfig {
@@ -26,6 +27,7 @@ impl ProcessBackendConfig {
                 .unwrap_or(1),
             max_stderr_bytes: 1024 * 1024,
             project_handoff: None,
+            execution: super::NativeWorkerExecutionConfig::default(),
         }
     }
 }

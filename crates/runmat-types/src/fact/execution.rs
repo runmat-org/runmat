@@ -1,19 +1,19 @@
-use super::ValueFact;
+use super::ValueSequenceFact;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionFact {
     Future {
-        output: Box<ValueFact>,
+        output: ValueSequenceFact,
         state: FutureStateFact,
     },
     Task {
-        output: Box<ValueFact>,
+        output: ValueSequenceFact,
         spawn_safety: SpawnSafetyFact,
     },
     Pool,
     Job {
-        output: Box<ValueFact>,
+        output: ValueSequenceFact,
     },
 }
 

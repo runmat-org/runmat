@@ -12,11 +12,11 @@ pub(super) fn validate_nurbs_curve3(definition: &NurbsCurve3) -> Result<(), Geom
         "3D NURBS curve",
         definition.degree,
         &definition.knots,
-        definition.control_points_m.len(),
+        definition.control_points_m.canonical_values().len(),
         &definition.weights,
         &definition.domain,
     )?;
-    for point in &definition.control_points_m {
+    for point in definition.control_points_m.canonical_values() {
         finite_vector("3D NURBS control point", point)?;
     }
     Ok(())
@@ -57,7 +57,7 @@ pub(super) fn validate_nurbs_surface(
         .ok_or_else(|| invalid("NURBS surface", "control-grid size overflow"))?;
     if total == 0
         || total > MAX_CONTROL_POINTS
-        || definition.control_points_m.len() != total
+        || definition.control_points_m.canonical_values().len() != total
         || definition.weights.len() != total
     {
         return Err(invalid(
@@ -79,7 +79,7 @@ pub(super) fn validate_nurbs_surface(
         v_count,
         &definition.domains[1],
     )?;
-    for point in &definition.control_points_m {
+    for point in definition.control_points_m.canonical_values() {
         finite_vector("NURBS surface control point", point)?;
     }
     validate_weights("NURBS surface weights", &definition.weights)

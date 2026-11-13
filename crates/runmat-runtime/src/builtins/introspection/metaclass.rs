@@ -1,22 +1,12 @@
 //! MATLAB-compatible `metaclass` builtin backed by RunMat class metadata.
+pub use runmat_builtins::{METACLASS_DESCRIPTOR, METACLASS_ERROR_TOO_MANY_OUTPUTS};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::introspection::class::class_name_for_value;
-use crate::builtins::introspection::type_resolvers::metaclass_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use crate::builtins::introspection::class_identity::class_identity_for_value;
 use runmat_macros::runtime_builtin;
-use runmat_value::IntValue;
 use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::metaclass")]
@@ -47,73 +37,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Not eligible for fusion planning; metaclass executes on the host and produces metadata.",
 };
 
-const METACLASS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mc",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Meta-class reference for the input value's runtime class.",
-}];
-
-const METACLASS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "object",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Object or value whose runtime class metadata is requested.",
-}];
-
-const METACLASS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "mc = metaclass(object)",
-    inputs: &METACLASS_INPUTS,
-    outputs: &METACLASS_OUTPUT,
-}];
-
-const METACLASS_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const METACLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &METACLASS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &METACLASS_ERRORS,
-};
-
-const METACLASS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "object",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer scalars and arrays are ordinary MATLAB values whose runtime class metadata preserves exact signedness and width; payload data is not inspected.",
-    }];
-
-pub const METACLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "mc = metaclass(integer_object)",
-        inputs: &METACLASS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "RunMat returns its ClassRef representation of matlab.metadata.Class. Explicit resident values report gpuArray metadata while automatic residency remains transparent, both without gathering payload bytes.",
-    }];
-
 #[runtime_builtin(
     name = "metaclass",
-    category = "introspection",
-    summary = "Return metadata for the runtime class of a value.",
-    keywords = "metaclass,meta.class,classdef,object,introspection",
-    accel = "metadata",
-    type_resolver(metaclass_type),
-    descriptor(crate::builtins::introspection::metaclass::METACLASS_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::introspection::metaclass::METACLASS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::metaclass"
 )]
 fn metaclass_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::ClassRef(class_name_for_value(&value)))
+    crate::output_count::validate_bounded_outputs(
+        &METACLASS_DESCRIPTOR,
+        &METACLASS_ERROR_TOO_MANY_OUTPUTS,
+        "metaclass",
+    )?;
+    let identity = class_identity_for_value(&value);
+    Ok(Value::ClassRef(identity.into()))
 }
 
 #[cfg(test)]
@@ -121,8 +57,10 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::METACLASS_INTEGER_CAPABILITIES;
     use runmat_value::{
-        CellArray, CharArray, HandleRef, Listener, MException, ObjectInstance, StringArray, Tensor,
+        CellArray, CharArray, HandleRef, IntValue, Listener, MException, ObjectInstance,
+        StringArray, Tensor,
     };
 
     fn handle_target() -> runmat_gc::GcHandle {
@@ -133,7 +71,7 @@ mod tests {
         let Value::ClassRef(class_name) = metaclass_builtin(value).expect("metaclass") else {
             panic!("metaclass should return ClassRef");
         };
-        class_name
+        class_name.display_name().to_owned()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -145,7 +83,7 @@ mod tests {
         );
         assert_eq!(
             call(Value::HandleObject(HandleRef {
-                class_name: "pkg.HandlePoint".to_string(),
+                class_name: "pkg.HandlePoint".into(),
                 target: handle_target(),
                 valid: true,
             })),
@@ -156,7 +94,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn metaclass_reports_runtime_classes_for_text_values() {
-        assert_eq!(call(Value::String("Point".to_string())), "string");
+        assert_eq!(call(Value::String("Point".to_string().into())), "string");
         assert_eq!(call(Value::CharArray(CharArray::new_row("Point"))), "char");
         assert_eq!(
             call(Value::StringArray(
@@ -177,7 +115,7 @@ mod tests {
             )),
             "cell"
         );
-        assert_eq!(call(Value::ClassRef("Point".to_string())), "meta.class");
+        assert_eq!(call(Value::ClassRef("Point".into())), "meta.class");
         assert_eq!(
             call(Value::MException(MException::new(
                 "RunMat:Test".to_string(),
@@ -211,8 +149,8 @@ mod tests {
             call(Value::Listener(Listener {
                 id: 7,
                 target: handle_target(),
-                target_class_name: "pkg.Target".to_string(),
-                event_name: "Changed".to_string(),
+                target_class_name: "pkg.Target".into(),
+                event_name: "Changed".into(),
                 callback: handle_target(),
                 enabled: true,
                 valid: true,
@@ -224,13 +162,25 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
+            let caller_alias = handle.clone();
+            let original = handle.wire_descriptor();
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
             assert_eq!(call(Value::GpuTensor(handle.clone())), "double");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit immutable view");
+            drop(handle);
+            let handle = explicit;
             assert_eq!(call(Value::GpuTensor(handle)), "gpuArray");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(caller_alias.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            drop(caller_alias);
+            assert!(lease.acquire().is_none());
         });
     }
 }

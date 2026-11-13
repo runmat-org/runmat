@@ -1,4 +1,5 @@
 use super::*;
+use crate::LengthUnit;
 
 fn digest(seed: u8) -> GeometryDigest {
     GeometryDigest::from_bytes([seed; 32])
@@ -43,8 +44,11 @@ fn exact_document() -> GeometryDocument {
             format: GeometrySourceFormat::Step,
             importer_version: "step-import/v2".into(),
             kernel_version: Some("occt/7.9".into()),
-            source_units: UnitSystem::Millimeter,
-            meters_per_source_unit: 0.001,
+            unit_evidence: crate::physical::LengthUnitEvidence::explicit_fallback(
+                LengthUnit::Millimeter,
+                "authored fixture",
+            ),
+            representation_units: crate::physical::CoordinateUnits::new(LengthUnit::Millimeter),
         },
         revision: GeometryRevisionIdentity {
             revision: 7,
@@ -52,11 +56,11 @@ fn exact_document() -> GeometryDocument {
             parent_document_digest: Some(digest(2)),
         },
         tolerance: GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         healing: GeometryHealingPolicy {
             algorithm_version: "geometry-healing/v2".into(),
@@ -65,6 +69,7 @@ fn exact_document() -> GeometryDocument {
             consolidate_duplicates: true,
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::ExactBRep {
             model: ExactBRepModel {

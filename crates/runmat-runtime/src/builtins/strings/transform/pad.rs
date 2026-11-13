@@ -3,16 +3,13 @@
 #[cfg(test)]
 use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, PAD_ERROR_ARGUMENT_CONFIG, PAD_ERROR_ARG_COUNT, PAD_ERROR_CELL_ELEMENT,
+    PAD_ERROR_DIRECTION, PAD_ERROR_INTERNAL, PAD_ERROR_INVALID_INPUT, PAD_ERROR_LENGTH,
+    PAD_ERROR_PAD_CHAR,
 };
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, IntValue, StringArray, Value};
+use runmat_value::{CellArray, CharArray, IntValue, StringArray, StringElement, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -21,8 +18,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::builtins::strings::type_resolvers::text_preserve_type;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::pad")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -52,317 +50,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "pad";
-const PAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Padded text preserving input container kind and shape.",
-}];
-
-const PAD_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text (string/char/cell).",
-}];
-
-const PAD_INPUTS_LENGTH: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target length (non-negative integer).",
-    },
-];
-
-const PAD_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"right\""),
-        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
-    },
-];
-
-const PAD_INPUTS_PADCHAR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "padCharacter",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\" \""),
-        description: "Single-character padding value.",
-    },
-];
-
-const PAD_INPUTS_LENGTH_DIRECTION: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target length (non-negative integer).",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"right\""),
-        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
-    },
-];
-
-const PAD_INPUTS_LENGTH_PADCHAR: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target length (non-negative integer).",
-    },
-    BuiltinParamDescriptor {
-        name: "padCharacter",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\" \""),
-        description: "Single-character padding value.",
-    },
-];
-
-const PAD_INPUTS_DIRECTION_PADCHAR: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"right\""),
-        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
-    },
-    BuiltinParamDescriptor {
-        name: "padCharacter",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\" \""),
-        description: "Single-character padding value.",
-    },
-];
-
-const PAD_INPUTS_LENGTH_DIRECTION_PADCHAR: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target length (non-negative integer).",
-    },
-    BuiltinParamDescriptor {
-        name: "direction",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"right\""),
-        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
-    },
-    BuiltinParamDescriptor {
-        name: "padCharacter",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\" \""),
-        description: "Single-character padding value.",
-    },
-];
-
-const PAD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str)",
-        inputs: &PAD_INPUTS_BASE,
-        outputs: &PAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str, len)",
-        inputs: &PAD_INPUTS_LENGTH,
-        outputs: &PAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str, direction)",
-        inputs: &PAD_INPUTS_DIRECTION,
-        outputs: &PAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str, padCharacter)",
-        inputs: &PAD_INPUTS_PADCHAR,
-        outputs: &PAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str, len, direction)",
-        inputs: &PAD_INPUTS_LENGTH_DIRECTION,
-        outputs: &PAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str, len, padCharacter)",
-        inputs: &PAD_INPUTS_LENGTH_PADCHAR,
-        outputs: &PAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str, direction, padCharacter)",
-        inputs: &PAD_INPUTS_DIRECTION_PADCHAR,
-        outputs: &PAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = pad(str, len, direction, padCharacter)",
-        inputs: &PAD_INPUTS_LENGTH_DIRECTION_PADCHAR,
-        outputs: &PAD_OUTPUT,
-    },
-];
-
-const PAD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.INVALID_INPUT",
-    identifier: Some("RunMat:pad:InvalidInput"),
-    when: "First argument is not a string array, char array, or cell array of text scalars.",
-    message:
-        "pad: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const PAD_ERROR_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.LENGTH",
-    identifier: Some("RunMat:pad:Length"),
-    when: "Length argument is not a non-negative integer scalar.",
-    message: "pad: target length must be a non-negative integer scalar",
-};
-
-const PAD_ERROR_DIRECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.DIRECTION",
-    identifier: Some("RunMat:pad:Direction"),
-    when: "Direction argument is not one of left/right/both.",
-    message: "pad: direction must be 'left', 'right', or 'both'",
-};
-
-const PAD_ERROR_PAD_CHAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.PAD_CHAR",
-    identifier: Some("RunMat:pad:PadChar"),
-    when: "Padding character is not a single-character string/char scalar.",
-    message:
-        "pad: padding character must be a string scalar or character vector containing one character",
-};
-
-const PAD_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.CELL_ELEMENT",
-    identifier: Some("RunMat:pad:CellElement"),
-    when: "Cell arrays contain non-text elements or non-row char arrays.",
-    message: "pad: cell array elements must be string scalars or character vectors",
-};
-
-const PAD_ERROR_ARGUMENT_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.ARGUMENT_CONFIG",
-    identifier: Some("RunMat:pad:ArgumentConfig"),
-    when: "Second/third arguments cannot be interpreted as valid pad argument combinations.",
-    message: "pad: unable to interpret input arguments",
-};
-
-const PAD_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.ARG_COUNT",
-    identifier: Some("RunMat:pad:ArgCount"),
-    when: "More than four total arguments are supplied.",
-    message: "pad: too many input arguments",
-};
-
-const PAD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAD.INTERNAL",
-    identifier: Some("RunMat:pad:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "pad: internal error",
-};
-
-const PAD_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    PAD_ERROR_INVALID_INPUT,
-    PAD_ERROR_LENGTH,
-    PAD_ERROR_DIRECTION,
-    PAD_ERROR_PAD_CHAR,
-    PAD_ERROR_CELL_ELEMENT,
-    PAD_ERROR_ARGUMENT_CONFIG,
-    PAD_ERROR_ARG_COUNT,
-    PAD_ERROR_INTERNAL,
-];
 
 const MAX_PAD_TARGET_LENGTH: usize = isize::MAX as usize;
-
-pub const PAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PAD_ERRORS,
-};
-
-const PAD_LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "numberOfCharacters",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly documents single, double, and every built-in integer class for the nonnegative scalar output length.",
-    }];
-
-pub const PAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "newStr = pad(str, integer_numberOfCharacters, side?, padCharacter?)",
-        inputs: &PAD_LENGTH_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The exact integer controls only target text length; output preserves the input text container. Explicit interactive GPU length input is unsupported, while automatic residency may gather transparently.",
-    }];
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -424,17 +113,28 @@ impl PadOptions {
 
 #[runtime_builtin(
     name = "pad",
-    category = "strings/transform",
-    summary = "Pad text values to target lengths with configurable direction and fill characters.",
-    keywords = "pad,align,strings,character array",
-    accel = "sink",
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::pad::PAD_DESCRIPTOR),
-    integer_capabilities(crate::builtins::strings::transform::pad::PAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::transform::pad"
 )]
-async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pad_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PAD_DESCRIPTOR,
+        &runmat_builtins::PAD_ERROR_TOO_MANY_OUTPUTS,
+        "pad",
+    )?;
     if crate::dispatcher::value_contains_gpu(&value) {
+        return Err(pad_error(&PAD_ERROR_INVALID_INPUT));
+    }
+    if crate::builtins::strings::common::has_unsupported_character_pages(&value)
+        || rest
+            .iter()
+            .any(crate::builtins::strings::common::has_unsupported_character_pages)
+    {
         return Err(pad_error(&PAD_ERROR_INVALID_INPUT));
     }
     if rest.iter().any(
@@ -442,11 +142,12 @@ async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ) {
         return Err(pad_error(&PAD_ERROR_LENGTH));
     }
-    let mut gathered_rest = Vec::with_capacity(rest.len());
-    for arg in rest {
-        gathered_rest.push(gather_if_needed_async(&arg).await.map_err(map_flow)?);
-    }
-    let options = parse_arguments(&gathered_rest)?;
+    let gathered_rest = rest
+        .try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+            gather_if_needed_async(&rest[index]).await.map_err(map_flow)
+        })
+        .await?;
+    let options = parse_arguments(gathered_rest.view())?;
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => pad_string(text, options),
@@ -457,65 +158,76 @@ async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn pad_string(text: String, options: PadOptions) -> BuiltinResult<Value> {
+fn pad_string(text: StringElement, options: PadOptions) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
         return Ok(Value::String(text));
     }
-    let char_count = string_length(&text);
+    let char_count = string_length(text.as_str().expect("nonmissing subject"));
     let base_target = options.base_target(char_count);
     let target_len = element_target_length(&options, base_target, char_count);
-    let padded = apply_padding_owned(text, char_count, target_len, &options)?;
-    Ok(Value::String(padded))
+    if char_count >= target_len {
+        return Ok(Value::String(text));
+    }
+    Ok(Value::string(apply_padding_owned(
+        text.as_str().expect("nonmissing subject"),
+        char_count,
+        target_len,
+        &options,
+    )?))
 }
 
 fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let mut auto_len: usize = 0;
     if matches!(options.target, PadTarget::Auto) {
         for text in &data {
             if !is_missing_string(text) {
-                auto_len = auto_len.max(string_length(text));
+                auto_len = auto_len.max(string_length(text.as_str().expect("nonmissing subject")));
             }
         }
     }
     let base_target = options.base_target(auto_len);
-    let mut padded: Vec<String> = Vec::with_capacity(data.len());
-    for text in data.into_iter() {
+    let mut padded: Vec<StringElement> = Vec::with_capacity(data.len());
+    let values: Vec<StringElement> = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(data) => data.iter().cloned().collect(),
+    };
+    for text in values {
         if is_missing_string(&text) {
             padded.push(text);
             continue;
         }
-        let char_count = string_length(&text);
+        let char_count = string_length(text.as_str().expect("nonmissing subject"));
         let target_len = element_target_length(&options, base_target, char_count);
-        let new_text = apply_padding_owned(text, char_count, target_len, &options)?;
-        padded.push(new_text);
+        if char_count >= target_len {
+            padded.push(text);
+        } else {
+            padded.push(StringElement::text(apply_padding_owned(
+                text.as_str().expect("nonmissing subject"),
+                char_count,
+                target_len,
+                &options,
+            )?));
+        }
     }
-    let result = StringArray::new(padded, shape)
+    let result = StringArray::from_elements_unbounded(padded, shape.to_vec())
         .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))?;
     Ok(Value::StringArray(result))
 }
 
 fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut rows_text: Vec<String> = Vec::with_capacity(rows);
     let mut auto_len = 0usize;
     for row in 0..rows {
-        let text = char_row_to_string_slice(&data, cols, row);
-        auto_len = auto_len.max(string_length(&text));
+        let text = char_row_to_string_slice(&data, cols, row).map_err(|e| {
+            pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL)
+        })?;
+        auto_len = auto_len.max(text.encode_utf16().count());
         rows_text.push(text);
     }
 
@@ -523,84 +235,97 @@ fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value>
     let mut padded_rows: Vec<String> = Vec::with_capacity(rows);
     let mut final_cols: usize = 0;
     for row_text in rows_text.into_iter() {
-        let char_count = string_length(&row_text);
+        let char_count = row_text.encode_utf16().count();
         let target_len = element_target_length(&options, base_target, char_count);
-        let padded = apply_padding_owned(row_text, char_count, target_len, &options)?;
-        final_cols = final_cols.max(string_length(&padded));
+        let padded = apply_padding_owned(&row_text, char_count, target_len, &options)?;
+        final_cols = final_cols.max(padded.encode_utf16().count());
         padded_rows.push(padded);
     }
 
     let total_chars = rows
         .checked_mul(final_cols)
         .ok_or_else(|| pad_error(&PAD_ERROR_LENGTH))?;
-    let mut new_data: Vec<char> = Vec::new();
+    let mut new_data: Vec<runmat_value::Utf16CodeUnit> = Vec::new();
     new_data
         .try_reserve_exact(total_chars)
         .map_err(|_| pad_error(&PAD_ERROR_LENGTH))?;
     for row_text in padded_rows.into_iter() {
-        let mut chars: Vec<char> = row_text.chars().collect();
-        if chars.len() < final_cols {
-            chars.resize(final_cols, ' ');
+        let mut units = row_text
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect::<Vec<_>>();
+        if units.len() < final_cols {
+            units.resize(
+                final_cols,
+                runmat_value::Utf16CodeUnit::from_raw(b' ' as u16),
+            );
         }
-        new_data.extend(chars.into_iter());
+        new_data.extend(units);
     }
 
-    CharArray::new(new_data, rows, final_cols)
+    CharArray::from_code_units(new_data, rows, final_cols)
         .map(Value::CharArray)
         .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))
 }
 
 async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<Value> {
-    let rows = cell.rows;
-    let cols = cell.cols;
-    let total = rows * cols;
+    let shape = cell.shape().to_vec();
+    let total = cell.data().len();
     let mut items: Vec<CellItem> = Vec::with_capacity(total);
     let mut auto_len = 0usize;
 
     for idx in 0..total {
-        let value = &cell.data[idx];
+        let value = &cell.data()[idx];
         let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
         let item = match gathered {
             Value::String(text) => {
                 let is_missing = is_missing_string(&text);
-                let len = if is_missing { 0 } else { string_length(&text) };
-                if !is_missing {
-                    auto_len = auto_len.max(len);
-                }
-                CellItem {
-                    kind: CellKind::String,
-                    text,
-                    char_count: len,
-                    is_missing,
-                }
-            }
-            Value::StringArray(sa) if sa.data.len() == 1 => {
-                let text = sa.data.into_iter().next().unwrap_or_default();
-                let is_missing = is_missing_string(&text);
-                let len = if is_missing { 0 } else { string_length(&text) };
-                if !is_missing {
-                    auto_len = auto_len.max(len);
-                }
-                CellItem {
-                    kind: CellKind::String,
-                    text,
-                    char_count: len,
-                    is_missing,
-                }
-            }
-            Value::CharArray(ca) if ca.rows <= 1 => {
-                let text = if ca.rows == 0 {
-                    String::new()
+                let len = if is_missing {
+                    0
                 } else {
-                    char_row_to_string_slice(&ca.data, ca.cols, 0)
+                    string_length(text.as_str().expect("nonmissing subject"))
                 };
-                let len = string_length(&text);
+                if !is_missing {
+                    auto_len = auto_len.max(len);
+                }
+                CellItem {
+                    kind: CellKind::String,
+                    text,
+                    char_count: len,
+                }
+            }
+            Value::StringArray(sa) if sa.data().len() == 1 => {
+                let text = sa.data().first().cloned().unwrap_or_default();
+                let is_missing = is_missing_string(&text);
+                let len = if is_missing {
+                    0
+                } else {
+                    string_length(text.as_str().expect("nonmissing subject"))
+                };
+                if !is_missing {
+                    auto_len = auto_len.max(len);
+                }
+                CellItem {
+                    kind: CellKind::String,
+                    text,
+                    char_count: len,
+                }
+            }
+            Value::CharArray(ca) if ca.rows == 0 => CellItem {
+                kind: CellKind::EmptyChar(ca),
+                text: StringElement::default(),
+                char_count: 0,
+            },
+            Value::CharArray(ca) if ca.rows == 1 => {
+                let text = char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                    pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL)
+                })?;
+                let len = text.encode_utf16().count();
                 auto_len = auto_len.max(len);
                 CellItem {
                     kind: CellKind::Char { rows: ca.rows },
-                    text,
+                    text: StringElement::text(text),
                     char_count: len,
-                    is_missing: false,
                 }
             }
             Value::CharArray(_) => return Err(pad_error(&PAD_ERROR_CELL_ELEMENT)),
@@ -612,18 +337,32 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
     let base_target = options.base_target(auto_len);
     let mut results: Vec<Value> = Vec::with_capacity(total);
     for item in items.into_iter() {
-        if item.is_missing {
-            results.push(Value::String(item.text));
-            continue;
-        }
-        let target_len = element_target_length(&options, base_target, item.char_count);
-        let padded = apply_padding_owned(item.text, item.char_count, target_len, &options)?;
         match item.kind {
-            CellKind::String => results.push(Value::String(padded)),
+            // Preserve both the original empty payload owner and full shape.
+            // A positive target must not create nonempty data with zero rows.
+            CellKind::EmptyChar(array) => results.push(Value::CharArray(array)),
+            CellKind::String if item.text.is_missing() => results.push(Value::String(item.text)),
+            CellKind::String => {
+                let target_len = element_target_length(&options, base_target, item.char_count);
+                let padded = apply_padding_owned(
+                    item.text.as_str().expect("nonmissing subject"),
+                    item.char_count,
+                    target_len,
+                    &options,
+                )?;
+                results.push(Value::string(padded));
+            }
             CellKind::Char { rows } => {
+                let target_len = element_target_length(&options, base_target, item.char_count);
+                let padded = apply_padding_owned(
+                    item.text.as_str().expect("nonmissing subject"),
+                    item.char_count,
+                    target_len,
+                    &options,
+                )?;
                 let chars: Vec<char> = padded.chars().collect();
-                let cols = chars.len();
-                let array = CharArray::new(chars, rows, cols).map_err(|e| {
+                let cols = padded.encode_utf16().count();
+                let array = CharArray::from_unicode_scalars(chars, rows, cols).map_err(|e| {
                     pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL)
                 })?;
                 results.push(Value::CharArray(array));
@@ -631,25 +370,25 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
         }
     }
 
-    make_cell(results, rows, cols)
+    make_cell_with_shape(results, shape)
         .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))
 }
 
 #[derive(Clone)]
 struct CellItem {
     kind: CellKind,
-    text: String,
+    text: StringElement,
     char_count: usize,
-    is_missing: bool,
 }
 
 #[derive(Clone)]
 enum CellKind {
     String,
     Char { rows: usize },
+    EmptyChar(CharArray),
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<PadOptions> {
+fn parse_arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<PadOptions> {
     let mut options = PadOptions::default();
     match args.len() {
         0 => Ok(options),
@@ -741,7 +480,7 @@ fn parse_numeric_length(value: f64) -> BuiltinResult<usize> {
 }
 
 fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadDirection>> {
-    let Some(text) = value_to_single_string(value) else {
+    let Some(text) = value_to_single_string(value)? else {
         return if strict {
             Err(pad_error(&PAD_ERROR_DIRECTION))
         } else {
@@ -772,7 +511,7 @@ fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadD
 }
 
 fn parse_pad_char(value: &Value) -> BuiltinResult<char> {
-    let text = value_to_single_string(value).ok_or_else(|| pad_error(&PAD_ERROR_PAD_CHAR))?;
+    let text = value_to_single_string(value)?.ok_or_else(|| pad_error(&PAD_ERROR_PAD_CHAR))?;
     let mut chars = text.chars();
     let Some(first) = chars.next() else {
         return Err(pad_error(&PAD_ERROR_PAD_CHAR));
@@ -783,12 +522,12 @@ fn parse_pad_char(value: &Value) -> BuiltinResult<char> {
     Ok(first)
 }
 
-fn value_to_single_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
+fn value_to_single_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
+        Value::String(text) => text.as_str().map(str::to_owned),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Some(sa.data[0].clone())
+            if sa.data().len() == 1 {
+                sa.data()[0].as_str().map(str::to_owned)
             } else {
                 None
             }
@@ -797,11 +536,15 @@ fn value_to_single_string(value: &Value) -> Option<String> {
             if ca.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&ca.data, ca.cols, 0))
+                Some(
+                    char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                        pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL)
+                    })?,
+                )
             }
         }
         _ => None,
-    }
+    })
 }
 
 fn string_length(text: &str) -> usize {
@@ -816,13 +559,13 @@ fn element_target_length(options: &PadOptions, base_target: usize, current_len: 
 }
 
 fn apply_padding_owned(
-    text: String,
+    text: &str,
     current_len: usize,
     target_len: usize,
     options: &PadOptions,
 ) -> BuiltinResult<String> {
     if current_len >= target_len {
-        return Ok(text);
+        return Ok(text.to_owned());
     }
     let delta = target_len - current_len;
     let (left_pad, right_pad) = match options.direction {
@@ -847,7 +590,7 @@ fn apply_padding_owned(
     for _ in 0..left_pad {
         result.push(options.pad_char);
     }
-    result.push_str(&text);
+    result.push_str(text);
     for _ in 0..right_pad {
         result.push(options.pad_char);
     }
@@ -858,11 +601,14 @@ fn apply_padding_owned(
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::pad_builtin(value, rest))
+        futures::executor::block_on(super::pad_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -870,6 +616,45 @@ pub(crate) mod tests {
     fn pad_string_length_right() {
         let result = pad_builtin(Value::String("GPU".into()), vec![Value::Num(5.0)]).expect("pad");
         assert_eq!(result, Value::String("GPU  ".into()));
+    }
+
+    #[test]
+    fn pad_preserves_every_nd_cell_element_and_shape() {
+        let empty = CharArray::from_code_units_with_shape(Vec::new(), vec![0, 5, 1])
+            .expect("empty full shape");
+        let empty_shape = empty.shape.clone();
+        let input = make_cell_with_shape(
+            vec![
+                Value::CharArray(CharArray::new_row("x")),
+                Value::string("yz"),
+                Value::CharArray(empty),
+            ],
+            vec![1, 1, 3],
+        )
+        .expect("nd text cells");
+        let Value::Cell(output) = pad_builtin(input, vec![Value::Num(3.0)]).expect("pad nd cells")
+        else {
+            panic!("cell output");
+        };
+        assert_eq!(output.shape(), &[1, 1, 3]);
+        assert_eq!(output.data().len(), 3);
+        assert_eq!(
+            output.data()[0],
+            Value::CharArray(CharArray::new_row("x  "))
+        );
+        assert_eq!(output.data()[1], Value::string("yz "));
+        let Value::CharArray(empty_output) = &output.data()[2] else {
+            panic!("empty character cell");
+        };
+        assert_eq!(empty_output.shape(), &[0, 5, 1]);
+        assert!(empty_output.data().is_empty());
+        empty_output
+            .validate_layout()
+            .expect("empty layout remains valid");
+        assert!(
+            std::ptr::eq(empty_shape.as_ptr(), empty_output.shape().as_ptr()),
+            "retain the original full-shape owner"
+        );
     }
 
     #[test]
@@ -891,8 +676,9 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("automatic integer length");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let result = pad_builtin(
                 Value::String("GPU".into()),
                 vec![Value::GpuTensor(handle.clone())],
@@ -900,15 +686,16 @@ pub(crate) mod tests {
             .expect("automatic residency is transparent");
             assert_eq!(result, Value::String("GPU  ".into()));
 
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let error = pad_builtin(
                 Value::String("GPU".into()),
                 vec![Value::GpuTensor(handle.clone())],
             )
             .expect_err("explicit gpuArray length is unsupported");
             assert_eq!(error.identifier(), PAD_ERROR_LENGTH.identifier);
-            provider.free(&handle).expect("free length");
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -950,8 +737,8 @@ pub(crate) mod tests {
         let result = pad_builtin(Value::StringArray(strings), Vec::new()).expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "GPU       ");
-                assert_eq!(sa.data[1], "Accelerate");
+                assert_eq!(sa.data()[0], "GPU       ");
+                assert_eq!(sa.data()[1], "Accelerate");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -965,8 +752,8 @@ pub(crate) mod tests {
             pad_builtin(Value::StringArray(strings), vec![Value::String("*".into())]).expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "A**");
-                assert_eq!(sa.data[1], "Run");
+                assert_eq!(sa.data()[0], "A**");
+                assert_eq!(sa.data()[1], "Run");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -983,8 +770,8 @@ pub(crate) mod tests {
         .expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "7000");
-                assert_eq!(sa.data[1], "5120");
+                assert_eq!(sa.data()[0], "7000");
+                assert_eq!(sa.data()[1], "5120");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1002,8 +789,8 @@ pub(crate) mod tests {
         .expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "     Mary");
-                assert_eq!(sa.data[1], "Elizabeth");
+                assert_eq!(sa.data()[0], "     Mary");
+                assert_eq!(sa.data()[1], "Elizabeth");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1021,14 +808,16 @@ pub(crate) mod tests {
     #[test]
     fn pad_char_array_resizes_columns() {
         let chars: Vec<char> = "GPUrun".chars().collect();
-        let array = CharArray::new(chars, 2, 3).unwrap();
+        let array = CharArray::from_unicode_scalars(chars, 2, 3).unwrap();
         let result = pad_builtin(Value::CharArray(array), vec![Value::Num(5.0)]).expect("pad");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 5);
-                let expected: Vec<char> = "GPU  run  ".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(ca.data()).unwrap(),
+                    "GPU  run  "
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1070,9 +859,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_preserves_missing_string() {
-        let result =
-            pad_builtin(Value::String("<missing>".into()), vec![Value::Num(8.0)]).expect("pad");
-        assert_eq!(result, Value::String("<missing>".into()));
+        let result = pad_builtin(
+            Value::String(runmat_value::StringElement::Missing),
+            vec![Value::Num(8.0)],
+        )
+        .expect("pad");
+        assert_eq!(result, Value::String(runmat_value::StringElement::Missing));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1172,13 +964,5 @@ pub(crate) mod tests {
                 pad_builtin(Value::String("GPU".into()), vec![Value::Num(6.0)]).expect("pad");
             assert_eq!(result, Value::String("GPU   ".into()));
         });
-    }
-
-    #[test]
-    fn pad_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
     }
 }

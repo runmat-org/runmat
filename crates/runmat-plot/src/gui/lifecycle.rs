@@ -12,6 +12,9 @@ use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[path = "lifecycle/frame_ports.rs"]
+pub mod frame_ports;
+
 pub type CloseSignal = Arc<AtomicBool>;
 
 pub struct WindowRegistration {
@@ -49,6 +52,9 @@ pub fn register_handle(handle: u32) -> Result<WindowRegistration, String> {
         let mut map = WINDOW_SIGNALS
             .lock()
             .map_err(|_| "failed to track plot window".to_string())?;
+        if map.contains_key(&handle) {
+            return Err(format!("figure {handle} already owns a live plot window"));
+        }
         map.insert(handle, signal.clone());
     }
 
@@ -70,7 +76,13 @@ impl Drop for WindowRegistration {
             return;
         }
         if let Ok(mut map) = WINDOW_SIGNALS.lock() {
-            map.remove(&self.handle);
+            if map.get(&self.handle).is_some_and(|current| {
+                self.signal
+                    .as_ref()
+                    .is_some_and(|owned| Arc::ptr_eq(current, owned))
+            }) {
+                map.remove(&self.handle);
+            }
         }
     }
 }

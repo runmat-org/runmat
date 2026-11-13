@@ -1,0 +1,31 @@
+use crate::*;
+
+const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Inputs and iteration", paragraphs: &[
+        "`gmres(A,b,restart,tol,maxit,M1,M2,x0)` solves a square nonsymmetric system. A is a host single/double real or complex dense matrix, CSC matrix, or callable n-vector operator. Scalar double and complex-double systems are supported as order-one operators. b, x0 and matrix preconditioners must match its floating precision and real/complex domain. Sparse coefficients remain sparse; GPU and distributed operands are rejected without gathering.",
+        "Optional positions can be empty. By default the method does not restart and takes at most min(n,10) steps. With 1 <= restart < n, maxit counts outer cycles and defaults to min(ceil(n/restart),10). With restart empty or n, maxit counts total inner steps. Tolerance defaults to 1e-6 for double and 1e-3 for single; the default initial guess is zero.",
+        "M1 and M2 are matrix inverse actions or callable inverse actions, applied in that order. A matrix is prepared once and reused. Triangular factors are borrowed; general dense matrices use pivoted LU. General sparse matrix preconditioners use an execution context and support finite managed allocation with individually admitted sparse fill growth and reusable solve workspace. Callable operators require an execution context and use its selected callable authority.",
+    ]},
+    BuiltinDocumentationSection { heading: "Outputs and failures", paragraphs: &[
+        "The outputs are [x,flag,relres,iter,resvec]. relres is norm(M2\\(M1\\(b-A*x)))/norm(M2\\(M1\\b)); absent preconditioners are identity actions. resvec begins with the preconditioned initial residual norm and records each completed inner step. iter is a double row vector [outer inner] identifying the returned iterate. Nonconvergence returns the iterate with the smallest independently recomputed preconditioned residual.",
+        "Flags are 0 for convergence, 1 for the iteration limit, 2 for numerical failure of a preconditioner, 3 for stagnation, and 4 for scalar numerical breakdown. If the preconditioner fails before any residual can be evaluated, RunMat returns the initial guess, iter [0 0], infinite relres and an empty resvec. Resource denial, cancellation, stale authority and callback language errors remain errors, never convergence flags. Requesting flag suppresses status text; otherwise a concise status is printed.",
+    ]},
+    BuiltinDocumentationSection { heading: "Precision and execution", paragraphs: &[
+        "Matrix-vector products, basis vectors and the solution preserve native single/double real or complex storage. Norms and inner-product accumulation, the small complex Hessenberg system and rotations use binary64; residual history uses b's floating precision. This mixed-accumulator policy does not promise bit-for-bit MATLAB iteration histories. Mixed input classes are rejected rather than silently widened.",
+        "Finite-policy execution admits iteration workspace, each escaping callable input vector and final outputs independently. A callback may retain its input without retaining or aliasing the mutable recurrence scratch. Matrix products, Arnoldi vector work, callback vector/result copies and solution/history publication use bounded work chunks and the execution service's CPU cooperation budget. A receipt-less solve or factor fails if its allocation policy becomes finite; an unpublished output constructor owns and refunds its exact backing across suspension or drop. Dense LU factorization and solves use an owned native CPU job; its scratch remains owned until physical completion even if the caller cancels. The synchronous faer kernel does not yield within a browser task.",
+    ]},
+];
+
+const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample { id: "gmres-nonsymmetric", title: "Solve a nonsymmetric system", program: "A = [3 2; 0 1]; b = [5; 1]; [x,flag,relres,iter,resvec] = gmres(A,b);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(flag == 0); assert(relres < 1e-6); assert(norm(A*x-b) < 1e-6); assert(iter(1) == 1); assert(resvec(1) > resvec(end));" } },
+    BuiltinExample { id: "gmres-restarted", title: "Restart with a reusable preconditioner", program: "A = [4 1; 2 3]; b = [1; 0]; M = [2 1; 1 2]; [x,flag,relres,iter] = gmres(A,b,1,1e-8,50,M);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(flag == 0); assert(relres < 1e-8); assert(norm(A*x-b) < 1e-7); assert(iter(1) >= 1); assert(iter(2) == 1);" } },
+];
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog, title: Some("gmres"), slug: Some("gmres"),
+    summary: "Solve a square linear system with restarted generalized minimum residual iteration.",
+    description: "GMRES over native floating dense, sparse CSC and callable operators, with reusable left preconditioners and residual diagnostics.",
+    keywords: &["gmres", "sparse", "iterative solver", "Krylov"], related: &["pcg", "mldivide", "sparse"], sections: SECTIONS, examples: EXAMPLES, example_exemption: None, faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "MATLAB gmres reference", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/gmres.html") }], media: &[],
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "GMRES implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/gmres/mod.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Residual, restart and ownership matrix", location: "builtins::math::linalg::factor::gmres::tests" }], notes: &[] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
+};

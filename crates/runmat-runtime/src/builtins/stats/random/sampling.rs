@@ -1,17 +1,41 @@
 //! Sampling utilities for Statistics and Machine Learning Toolbox compatibility.
-
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinExtensionDescriptor,
+    SAMPLING_BOOTSTRP_GPU_INPUT_EXTENSION as BOOTSTRP_GPU_INPUT_EXTENSION,
+    SAMPLING_BOOTSTRP_INTEGER_DATA_EXTENSION as BOOTSTRP_INTEGER_DATA_EXTENSION,
+    SAMPLING_BOOTSTRP_INTEGER_NBOOT_EXTENSION as BOOTSTRP_INTEGER_NBOOT_EXTENSION,
+    SAMPLING_BOOTSTRP_INTEGER_WEIGHTS_EXTENSION as BOOTSTRP_INTEGER_WEIGHTS_EXTENSION,
+    SAMPLING_BOOTSTRP_LOGICAL_NBOOT_EXTENSION as BOOTSTRP_LOGICAL_NBOOT_EXTENSION,
+    SAMPLING_BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION as BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION,
+    SAMPLING_BOOTSTRP_TEXT_CALLABLE_EXTENSION as BOOTSTRP_TEXT_CALLABLE_EXTENSION,
+    SAMPLING_DATASAMPLE_INTEGER_DATA_EXTENSION as DATASAMPLE_INTEGER_DATA_EXTENSION,
+    SAMPLING_DATASAMPLE_INTEGER_DIM_EXTENSION as DATASAMPLE_INTEGER_DIM_EXTENSION,
+    SAMPLING_DATASAMPLE_INTEGER_K_EXTENSION as DATASAMPLE_INTEGER_K_EXTENSION,
+    SAMPLING_DATASAMPLE_INTEGER_WEIGHTS_EXTENSION as DATASAMPLE_INTEGER_WEIGHTS_EXTENSION,
+    SAMPLING_DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION as DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION,
+    SAMPLING_DATASAMPLE_NUMERIC_REPLACE_EXTENSION as DATASAMPLE_NUMERIC_REPLACE_EXTENSION,
+    SAMPLING_DATASAMPLE_RESIDENT_INPUT_EXTENSION as DATASAMPLE_RESIDENT_INPUT_EXTENSION,
+    SAMPLING_DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION as DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION,
+    SAMPLING_RANDSAMPLE_INTEGER_K_EXTENSION as RANDSAMPLE_INTEGER_K_EXTENSION,
+    SAMPLING_RANDSAMPLE_INTEGER_N_EXTENSION as RANDSAMPLE_INTEGER_N_EXTENSION,
+    SAMPLING_RANDSAMPLE_INTEGER_POPULATION_EXTENSION as RANDSAMPLE_INTEGER_POPULATION_EXTENSION,
+    SAMPLING_RANDSAMPLE_INTEGER_REPLACEMENT_EXTENSION as RANDSAMPLE_INTEGER_REPLACEMENT_EXTENSION,
+    SAMPLING_RANDSAMPLE_INTEGER_WEIGHTS_EXTENSION as RANDSAMPLE_INTEGER_WEIGHTS_EXTENSION,
+    SAMPLING_UNIDRND_INTEGER_LIMIT_EXTENSION as UNIDRND_INTEGER_LIMIT_EXTENSION,
+    SAMPLING_UNIDRND_INTEGER_SIZE_EXTENSION as UNIDRND_INTEGER_SIZE_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{
+    SAMPLING_BOOTSTRP_EXTENSIONS as BOOTSTRP_EXTENSIONS,
+    SAMPLING_BOOTSTRP_INTEGER_CAPABILITIES as BOOTSTRP_INTEGER_CAPABILITIES,
+    SAMPLING_DATASAMPLE_INTEGER_CAPABILITIES as DATASAMPLE_INTEGER_CAPABILITIES,
+    SAMPLING_DIVIDERAND_INTEGER_CAPABILITIES as DIVIDERAND_INTEGER_CAPABILITIES,
+};
+
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntValue, LogicalArray, NumericStorage, StringArray, Tensor, Value,
+    CellArray, CharArray, IntValue, LogicalArray, NumericDType, NumericStorage, StringArray,
+    Tensor, Value,
 };
 
 use crate::builtins::common::random;
@@ -21,773 +45,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const MAX_DIVIDERAND_Q: usize = 10_000_000;
 
-const DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "dividerand-resident-argument",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "resident dividerand arguments are gathered as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DividerandResidentArgumentExtension"),
-    };
-const DIVIDERAND_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [DIVIDERAND_RESIDENT_ARGUMENT_EXTENSION];
-const DIVIDERAND_INTEGER_Q_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Q",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Q is a nonnegative scalar target count and typed integer scalars are decoded from authoritative storage.",
-    }];
-pub const DIVIDERAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[trainInd,valInd,testInd] = dividerand(integer_Q,___)",
-        inputs: &DIVIDERAND_INTEGER_Q_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Q must fit usize and RunMat's bounded allocation policy; all returned index vectors are double row vectors.",
-    }];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAMPLING.INVALID_ARGUMENT",
-    identifier: None,
-    when: "Inputs, dimensions, replacement flags, or weights are malformed.",
-    message: "sampling: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAMPLING.INTERNAL",
-    identifier: None,
-    when: "Internal conversion or allocation fails.",
-    message: "sampling: internal error",
-};
-
-macro_rules! sampling_descriptor {
-    ($name:literal, $signatures:expr, $output_mode:expr) => {
-        const ERRORS: [BuiltinErrorDescriptor; 2] = [
-            BuiltinErrorDescriptor {
-                code: concat!("RM.", $name, ".INVALID_ARGUMENT"),
-                identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
-                when: ERROR_INVALID_ARGUMENT.when,
-                message: ERROR_INVALID_ARGUMENT.message,
-            },
-            BuiltinErrorDescriptor {
-                code: concat!("RM.", $name, ".INTERNAL"),
-                identifier: Some(concat!("RunMat:", $name, ":Internal")),
-                when: ERROR_INTERNAL.when,
-                message: ERROR_INTERNAL.message,
-            },
-        ];
-
-        pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: $output_mode,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-const OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Random sample.",
-}];
-
-const OUTPUT_Y_IDX: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Random sample.",
-    },
-    BuiltinParamDescriptor {
-        name: "idx",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "One-based sampled indices along the sampled dimension.",
-    },
-];
-
-const OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "r",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Discrete uniform random sample.",
-}];
-
-const OUTPUT_DIVIDERAND: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "trainInd",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based training-set indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "valInd",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "One-based validation-set indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "testInd",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "One-based test-set indices.",
-    },
-];
-
-const OUTPUT_BOOTSTAT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bootstat",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bootstrap statistics, one bootstrap replicate per row.",
-}];
-
-const OUTPUT_BOOTSTAT_BOOTSAM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "bootstat",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bootstrap statistics, one bootstrap replicate per row.",
-    },
-    BuiltinParamDescriptor {
-        name: "bootsam",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "One-based bootstrap sample indices.",
-    },
-];
-
-const PARAM_DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "data",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Population to sample from.",
-};
-
-const PARAM_N: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Population size or upper discrete uniform bound.",
-};
-
-const PARAM_K: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "k",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of samples.",
-};
-
-const PARAM_Q: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Q",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of targets to divide.",
-};
-
-const PARAM_TRAIN_RATIO: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "trainRatio",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("0.7"),
-    description: "Training-set allocation ratio.",
-};
-
-const PARAM_VAL_RATIO: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "valRatio",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("0.15"),
-    description: "Validation-set allocation ratio.",
-};
-
-const PARAM_TEST_RATIO: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "testRatio",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("0.15"),
-    description: "Test-set allocation ratio.",
-};
-
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Dimension, replacement, and weights options.",
-};
-
-const PARAM_SZ: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sz",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Output dimensions.",
-};
-
-const PARAM_NBOOT: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nboot",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of bootstrap samples.",
-};
-
-const PARAM_BOOTFUN: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "bootfun",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle applied to each bootstrap sample.",
-};
-
-const PARAM_BOOT_DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "data",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Data arrays and name-value options.",
-};
-
-const INPUTS_DATA_K: [BuiltinParamDescriptor; 2] = [PARAM_DATA, PARAM_K];
-const INPUTS_DATA_K_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_DATA, PARAM_K, PARAM_OPTIONS];
-const INPUTS_N_K: [BuiltinParamDescriptor; 2] = [PARAM_N, PARAM_K];
-const INPUTS_N_K_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_N, PARAM_K, PARAM_OPTIONS];
-const INPUTS_N: [BuiltinParamDescriptor; 1] = [PARAM_N];
-const INPUTS_N_SZ: [BuiltinParamDescriptor; 2] = [PARAM_N, PARAM_SZ];
-const INPUTS_BOOTSTRP: [BuiltinParamDescriptor; 3] = [PARAM_NBOOT, PARAM_BOOTFUN, PARAM_BOOT_DATA];
-const INPUTS_DIVIDERAND_Q: [BuiltinParamDescriptor; 1] = [PARAM_Q];
-const INPUTS_DIVIDERAND_RATIOS: [BuiltinParamDescriptor; 4] = [
-    PARAM_Q,
-    PARAM_TRAIN_RATIO,
-    PARAM_VAL_RATIO,
-    PARAM_TEST_RATIO,
-];
-
-const DATASAMPLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "y = datasample(data, k)",
-        inputs: &INPUTS_DATA_K,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = datasample(data, k, dim)",
-        inputs: &INPUTS_DATA_K_OPTIONS,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = datasample(___, Name, Value)",
-        inputs: &INPUTS_DATA_K_OPTIONS,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[y, idx] = datasample(___)",
-        inputs: &INPUTS_DATA_K_OPTIONS,
-        outputs: &OUTPUT_Y_IDX,
-    },
-];
-
-pub const DATASAMPLE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "datasample-integer-data",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "datasample with typed-integer population data is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DatasampleIntegerDataExtension"),
-    };
-pub const DATASAMPLE_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "datasample-integer-k",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "datasample with a typed-integer sample count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DatasampleIntegerKExtension"),
-};
-pub const DATASAMPLE_INTEGER_DIM_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "datasample-integer-dim",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "datasample with a typed-integer dimension is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DatasampleIntegerDimExtension"),
-    };
-pub const DATASAMPLE_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "datasample-integer-weights",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "datasample with typed-integer weights is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DatasampleIntegerWeightsExtension"),
-    };
-pub const DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "datasample-logical-weights",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "datasample with logical weights is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DatasampleLogicalWeightsExtension"),
-    };
-pub const DATASAMPLE_NUMERIC_REPLACE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "datasample-numeric-replace",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "datasample with a numeric Replace value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DatasampleNumericReplaceExtension"),
-    };
-pub const DATASAMPLE_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "datasample-resident-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "datasample with resident accelerator input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DatasampleResidentInputExtension"),
-    };
-pub const DATASAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
-    DATASAMPLE_INTEGER_DATA_EXTENSION,
-    DATASAMPLE_INTEGER_K_EXTENSION,
-    DATASAMPLE_INTEGER_DIM_EXTENSION,
-    DATASAMPLE_INTEGER_WEIGHTS_EXTENSION,
-    DATASAMPLE_LOGICAL_WEIGHTS_EXTENSION,
-    DATASAMPLE_NUMERIC_REPLACE_EXTENSION,
-    DATASAMPLE_RESIDENT_INPUT_EXTENSION,
-];
-
-const DATASAMPLE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are sampled by exact storage indexing; the documented ordinary numeric population classes are single and double.",
-    }];
-const DATASAMPLE_INTEGER_K_INPUTS: [BuiltinIntegerInputCapability; 1] = [
-    BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes:
-            "Typed k is independently gated and read exactly as a positive structural sample count.",
-    },
-];
-const DATASAMPLE_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed dim is independently gated and read exactly as a positive one-based structural dimension.",
-    }];
-const DATASAMPLE_INTEGER_WEIGHTS_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Weights",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed nonnegative weights are independently gated and converted only at the floating probability boundary.",
-    }];
-pub const DATASAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = datasample(integer_data,k,___)",
-        inputs: &DATASAMPLE_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Sampling preserves the exact selected integer values and native integer class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = datasample(data,integer_k,___)",
-        inputs: &DATASAMPLE_INTEGER_K_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed k controls output extent and never determines the sampled value class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = datasample(data,k,integer_dim,___)",
-        inputs: &DATASAMPLE_INTEGER_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed dim selects an axis and never determines the sampled value class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = datasample(data,k,Weights=integer_weights,___)",
-        inputs: &DATASAMPLE_INTEGER_WEIGHTS_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes:
-            "Weights affect selection probabilities only; sampled data retains its ordinary class.",
-    },
-];
-
-const RANDSAMPLE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "y = randsample(n, k)",
-        inputs: &INPUTS_N_K,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = randsample(population, k)",
-        inputs: &INPUTS_DATA_K,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "y = randsample(___, replacement, w)",
-        inputs: &INPUTS_N_K_OPTIONS,
-        outputs: &OUTPUT_Y,
-    },
-];
-
-const RANDSAMPLE_INTEGER_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "randsample-integer-range",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "randsample with a typed-integer range limit is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RandsampleIntegerRangeExtension"),
-};
-const RANDSAMPLE_INTEGER_POPULATION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "randsample-integer-population",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "randsample with a typed-integer population is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:RandsampleIntegerPopulationExtension"),
-    };
-const RANDSAMPLE_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "randsample-integer-count",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "randsample with a typed-integer sample count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RandsampleIntegerCountExtension"),
-};
-const RANDSAMPLE_INTEGER_REPLACEMENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "randsample-integer-replacement",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "randsample with a typed-integer replacement flag is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:RandsampleIntegerReplacementExtension"),
-    };
-const RANDSAMPLE_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "randsample-integer-weights",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "randsample with typed-integer sampling weights is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:RandsampleIntegerWeightsExtension"),
-    };
-pub const RANDSAMPLE_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    RANDSAMPLE_INTEGER_N_EXTENSION,
-    RANDSAMPLE_INTEGER_POPULATION_EXTENSION,
-    RANDSAMPLE_INTEGER_K_EXTENSION,
-    RANDSAMPLE_INTEGER_REPLACEMENT_EXTENSION,
-    RANDSAMPLE_INTEGER_WEIGHTS_EXTENSION,
-];
-const RANDSAMPLE_INTEGER_RANGE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents single/double n; RunMat typed range limits are exact structural controls and return double sampled indices.",
-    }];
-const RANDSAMPLE_INTEGER_POPULATION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "population",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target lists single/double/logical/text/categorical populations; RunMat preserves exact typed-integer population values, orientation, class, and supported residency.",
-    }];
-const RANDSAMPLE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "k/replacement/w",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed count, replacement, and weight roles are independently gated; only weights cross a checked binary64 probability boundary.",
-    }];
-pub const RANDSAMPLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = randsample(integer_n,k,___)",
-        inputs: &RANDSAMPLE_INTEGER_RANGE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The range form samples 1:n and emits a double column/scalar result.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = randsample(integer_population,k,___)",
-        inputs: &RANDSAMPLE_INTEGER_POPULATION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Sampling copies authoritative values by index and restores resident population output through the exact owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "y = randsample(...,integer_k,integer_replacement,integer_w)",
-        inputs: &RANDSAMPLE_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Counts and flags remain structural; weights require exact representability before floating probability normalization.",
-    },
-];
-
-const UNIDRND_INTEGER_LIMIT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "unidrnd-integer-limit",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "unidrnd with a typed-integer upper limit is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:UnidrndIntegerLimitExtension"),
-};
-const UNIDRND_INTEGER_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "unidrnd-integer-size",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "unidrnd with typed-integer size arguments is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:UnidrndIntegerSizeExtension"),
-};
-const UNIDRND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    UNIDRND_INTEGER_LIMIT_EXTENSION,
-    UNIDRND_INTEGER_SIZE_EXTENSION,
-];
-const UNIDRND_INTEGER_LIMIT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double upper limits; RunMat mode accepts typed integers only when the sampling boundary can represent them exactly as binary64.",
-    }];
-const UNIDRND_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "sz, sz1, ...",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double size controls; RunMat mode decodes typed integer extents exactly as structural values.",
-    }];
-pub const UNIDRND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "r = unidrnd(integer_n, ___)",
-        inputs: &UNIDRND_INTEGER_LIMIT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The upper limit is extension-gated before gather and must cross the binary64 random-sampling boundary without rounding.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "r = unidrnd(n, integer_sz)",
-        inputs: &UNIDRND_INTEGER_SIZE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed extents are extension-gated before provider access and parsed exactly as output shape.",
-    },
-];
-
-const UNIDRND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "r = unidrnd(n)",
-        inputs: &INPUTS_N,
-        outputs: &OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "r = unidrnd(n, sz)",
-        inputs: &INPUTS_N_SZ,
-        outputs: &OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "r = unidrnd(n, sz1, sz2, ...)",
-        inputs: &INPUTS_N_SZ,
-        outputs: &OUTPUT_R,
-    },
-];
-
-const BOOTSTRP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "bootstat = bootstrp(nboot, bootfun, d)",
-        inputs: &INPUTS_BOOTSTRP,
-        outputs: &OUTPUT_BOOTSTAT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "bootstat = bootstrp(nboot, bootfun, d1, ..., dN)",
-        inputs: &INPUTS_BOOTSTRP,
-        outputs: &OUTPUT_BOOTSTAT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[bootstat, bootsam] = bootstrp(___)",
-        inputs: &INPUTS_BOOTSTRP,
-        outputs: &OUTPUT_BOOTSTAT_BOOTSAM,
-    },
-];
-
-const BOOTSTRP_INTEGER_NBOOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bootstrp-integer-nboot",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bootstrp with an integer nboot control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BootstrpIntegerNbootExtension"),
-};
-
-const BOOTSTRP_LOGICAL_NBOOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bootstrp-logical-nboot",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bootstrp with a logical nboot control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BootstrpLogicalNbootExtension"),
-};
-
-const BOOTSTRP_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bootstrp-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bootstrp with integer sample data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BootstrpIntegerDataExtension"),
-};
-
-const BOOTSTRP_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bootstrp-integer-weights",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bootstrp with integer observation weights is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BootstrpIntegerWeightsExtension"),
-};
-
-const BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bootstrp-logical-weights",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bootstrp with logical observation weights is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BootstrpLogicalWeightsExtension"),
-};
-
-const BOOTSTRP_TEXT_CALLABLE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bootstrp-text-callable",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bootstrp with a text callback name is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BootstrpTextCallableExtension"),
-};
-
-const BOOTSTRP_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bootstrp-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bootstrp with gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BootstrpGpuInputExtension"),
-};
-
-const BOOTSTRP_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
-    BOOTSTRP_INTEGER_NBOOT_EXTENSION,
-    BOOTSTRP_LOGICAL_NBOOT_EXTENSION,
-    BOOTSTRP_INTEGER_DATA_EXTENSION,
-    BOOTSTRP_INTEGER_WEIGHTS_EXTENSION,
-    BOOTSTRP_LOGICAL_WEIGHTS_EXTENSION,
-    BOOTSTRP_TEXT_CALLABLE_EXTENSION,
-    BOOTSTRP_GPU_INPUT_EXTENSION,
-];
-
-const BOOTSTRP_INTEGER_NBOOT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "nboot",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat accepts every integer class as an exact positive scalar bootstrap count; the public control domain is single or double.",
-    }];
-
-const BOOTSTRP_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "d1,...,dN",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat samples every integer data class by exact row or vector indexing; public nongrouping numeric data is single or double.",
-    }];
-
-const BOOTSTRP_INTEGER_WEIGHT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Weights",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat accepts every nonnegative integer weight class and converts it once at the floating multinomial-probability boundary; the public weight domain is single or double.",
-    }];
-
-pub const BOOTSTRP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "bootstat = bootstrp(nboot,bootfun,d1,...,dN) with integer nboot",
-        inputs: &BOOTSTRP_INTEGER_NBOOT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only exact structural count; callback output class determines bootstat and bootsam remains double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "bootstat = bootstrp(nboot,bootfun,d1,...,dN) with integer data",
-        inputs: &BOOTSTRP_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only resampling preserves authoritative integer storage into each callback; homogeneous numeric or logical callback output determines bootstat class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "bootstat = bootstrp(___,Weights=w) with integer weights",
-        inputs: &BOOTSTRP_INTEGER_WEIGHT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer weights cross one deliberate binary64 probability boundary after exact nonnegative validation; sampled data and callback output retain their own classes.",
-    },
-];
-
-const DIVIDERAND_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "[trainInd, valInd, testInd] = dividerand(Q)",
-        inputs: &INPUTS_DIVIDERAND_Q,
-        outputs: &OUTPUT_DIVIDERAND,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[trainInd, valInd, testInd] = dividerand(Q, trainRatio, valRatio, testRatio)",
-        inputs: &INPUTS_DIVIDERAND_RATIOS,
-        outputs: &OUTPUT_DIVIDERAND,
-    },
-];
-
-fn sampling_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-fn numeric_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 fn sampling_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
@@ -795,7 +52,22 @@ fn sampling_error(name: &str, message: impl Into<String>) -> RuntimeError {
 async fn gathered(value: Value, name: &str) -> BuiltinResult<Value> {
     gather_if_needed_async(&value)
         .await
-        .map_err(|err| sampling_error(name, format!("{name}: {err}")))
+        .map_err(|source| sampling_gather_error(name, source))
+}
+fn sampling_gather_error(name: &str, source: RuntimeError) -> RuntimeError {
+    let mut error = sampling_error(name, format!("{name}: {source}"));
+    error.gpu_gather_retry = source.gpu_gather_retry;
+    error.source = Some(Box::new(source));
+    error
+}
+async fn gather_arguments(
+    args: crate::call::BuiltinArguments,
+    name: &str,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let runtime = crate::context::legacy::active();
+    crate::dispatcher::gather_builtin_arguments_async(args, runtime.as_ref())
+        .await
+        .map_err(|source| sampling_gather_error(name, source))
 }
 
 fn parse_positive_usize(name: &str, value: &Value, label: &str) -> BuiltinResult<usize> {
@@ -920,6 +192,7 @@ fn parse_weights(name: &str, value: Value, expected: usize) -> BuiltinResult<Vec
 }
 
 fn sample_indices(
+    turn: &mut random::RandomTurn,
     name: &str,
     population_len: usize,
     k: usize,
@@ -936,25 +209,26 @@ fn sample_indices(
         ));
     }
     match (replacement, weights) {
-        (true, Some(weights)) => weighted_with_replacement(name, k, weights),
-        (false, Some(weights)) => weighted_without_replacement(name, k, weights),
+        (true, Some(weights)) => weighted_with_replacement(turn, name, k, weights),
+        (false, Some(weights)) => weighted_without_replacement(turn, name, k, weights),
         (true, None) => {
-            let uniforms = random::generate_uniform(k, name)?;
+            let uniforms = random::generate_uniform(turn, k, name)?;
             Ok(uniforms
                 .into_iter()
                 .map(|u| ((u * population_len as f64).floor() as usize).min(population_len - 1))
                 .collect())
         }
-        (false, None) => unweighted_without_replacement(name, population_len, k),
+        (false, None) => unweighted_without_replacement(turn, name, population_len, k),
     }
 }
 
 fn unweighted_without_replacement(
+    turn: &mut random::RandomTurn,
     name: &str,
     population_len: usize,
     k: usize,
 ) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     let mut pool = (0..population_len).collect::<Vec<_>>();
     let mut out = Vec::with_capacity(k);
     for (draw, u) in uniforms.into_iter().enumerate() {
@@ -965,9 +239,14 @@ fn unweighted_without_replacement(
     Ok(out)
 }
 
-fn weighted_with_replacement(name: &str, k: usize, weights: &[f64]) -> BuiltinResult<Vec<usize>> {
+fn weighted_with_replacement(
+    turn: &mut random::RandomTurn,
+    name: &str,
+    k: usize,
+    weights: &[f64],
+) -> BuiltinResult<Vec<usize>> {
     let total = weights.iter().sum::<f64>();
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     Ok(uniforms
         .into_iter()
         .map(|u| choose_weighted(weights, total, u))
@@ -975,11 +254,12 @@ fn weighted_with_replacement(name: &str, k: usize, weights: &[f64]) -> BuiltinRe
 }
 
 fn weighted_without_replacement(
+    turn: &mut random::RandomTurn,
     name: &str,
     k: usize,
     weights: &[f64],
 ) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     let mut weights = weights.to_vec();
     let mut out = Vec::with_capacity(k);
     for u in uniforms {
@@ -1095,11 +375,11 @@ fn sample_string_axis(
     indices: &[usize],
     _name: &str,
 ) -> BuiltinResult<Value> {
-    let shape = normalize_shape(array.shape.clone());
+    let shape = normalize_shape(array.shape().to_vec());
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
-    let mut out = vec![String::new(); out_len];
+    let mut out = vec![runmat_value::StringElement::default(); out_len];
     let pre: usize = shape[..axis].iter().product();
     let axis_len = shape[axis];
     let post: usize = shape[axis + 1..].iter().product();
@@ -1108,18 +388,14 @@ fn sample_string_axis(
             for (dst_axis, src_axis) in indices.iter().enumerate() {
                 let src = prefix + src_axis * pre + suffix * pre * axis_len;
                 let dst = prefix + dst_axis * pre + suffix * pre * indices.len();
-                out[dst] = array.data[src].clone();
+                out[dst] = array.data()[src].clone();
             }
         }
     }
-    let rows = *out_shape.first().unwrap_or(&1);
-    let cols = *out_shape.get(1).unwrap_or(&1);
-    Ok(Value::StringArray(StringArray {
-        data: out,
-        shape: out_shape,
-        rows,
-        cols,
-    }))
+    Ok(Value::StringArray(
+        StringArray::from_elements_unbounded(out, out_shape)
+            .map_err(|err| sampling_error(_name, format!("{_name}: {err}")))?,
+    ))
 }
 
 fn sample_char_axis(
@@ -1132,7 +408,7 @@ fn sample_char_axis(
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
-    let mut out = vec![' '; out_len];
+    let mut out = vec![runmat_value::Utf16CodeUnit::from_raw(b' ' as u16); out_len];
     let pre: usize = shape[..axis].iter().product();
     let axis_len = shape[axis];
     let post: usize = shape[axis + 1..].iter().product();
@@ -1141,11 +417,11 @@ fn sample_char_axis(
             for (dst_axis, src_axis) in indices.iter().enumerate() {
                 let src = prefix + src_axis * pre + suffix * pre * axis_len;
                 let dst = prefix + dst_axis * pre + suffix * pre * indices.len();
-                out[dst] = array.data[src];
+                out[dst] = array.data()[src];
             }
         }
     }
-    CharArray::new(out, out_shape[0], out_shape[1])
+    CharArray::from_code_units(out, out_shape[0], out_shape[1])
         .map(Value::CharArray)
         .map_err(|err| sampling_error(name, format!("{name}: {err}")))
 }
@@ -1156,7 +432,7 @@ fn sample_cell_axis(
     indices: &[usize],
     name: &str,
 ) -> BuiltinResult<Value> {
-    let shape = normalize_shape(array.shape.clone());
+    let shape = normalize_shape(array.shape().to_vec());
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
@@ -1183,7 +459,7 @@ fn sample_cell_axis(
             .zip(source_strides.iter())
             .map(|(coord, stride)| coord * stride)
             .sum::<usize>();
-        out[output_linear] = array.data[source_linear].clone();
+        out[output_linear] = array.data()[source_linear].clone();
     }
     CellArray::new_with_shape(out, out_shape)
         .map(Value::Cell)
@@ -1208,7 +484,7 @@ fn sample_value_axis(
 ) -> BuiltinResult<Value> {
     match data {
         Value::Tensor(t) => {
-            let shape = normalize_shape(t.shape.clone());
+            let shape = normalize_shape(t.shape().to_vec());
             sample_tensor_axis(t, &shape, axis, indices, name)
         }
         Value::Num(value) => {
@@ -1228,18 +504,14 @@ fn sample_value_axis(
         }
         Value::LogicalArray(array) => sample_logical_axis(
             &array.data,
-            &normalize_shape(array.shape),
+            &normalize_shape(array.shape.to_vec()),
             axis,
             indices,
             name,
         ),
         Value::String(value) => sample_string_axis(
-            &StringArray {
-                data: vec![value],
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            },
+            &StringArray::from_elements_unbounded(vec![value], vec![1, 1])
+                .map_err(|err| sampling_error(name, format!("{name}: {err}")))?,
             axis,
             indices,
             name,
@@ -1256,11 +528,11 @@ fn sample_value_axis(
 
 fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(t) => Ok(normalize_shape(t.shape.clone())),
-        Value::LogicalArray(a) => Ok(normalize_shape(a.shape.clone())),
-        Value::StringArray(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::Tensor(t) => Ok(normalize_shape(t.shape().to_vec())),
+        Value::LogicalArray(a) => Ok(normalize_shape(a.shape.to_vec())),
+        Value::StringArray(a) => Ok(normalize_shape(a.shape().to_vec())),
         Value::CharArray(a) => Ok(vec![a.rows, a.cols]),
-        Value::Cell(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::Cell(a) => Ok(normalize_shape(a.shape().to_vec())),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(vec![1, 1]),
         other => Err(sampling_error(
             "datasample",
@@ -1271,6 +543,7 @@ fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
 
 #[derive(Clone)]
 struct DatasampleArgs {
+    _arguments: crate::call::BuiltinArguments,
     data: Value,
     k: usize,
     dim: Option<usize>,
@@ -1298,7 +571,10 @@ fn ensure_datasample_extension(extension: &BuiltinExtensionDescriptor) -> Builti
     crate::compatibility::ensure_builtin_extension_enabled(extension, "datasample")
 }
 
-fn ensure_datasample_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_datasample_extensions(
+    data: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if datasample_integer_value(data) {
         ensure_datasample_extension(&DATASAMPLE_INTEGER_DATA_EXTENSION)?;
     }
@@ -1316,7 +592,7 @@ fn ensure_datasample_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<(
     }
     let mut index = 1usize;
     while index < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[index]) {
+        if let Some(keyword) = keyword_of(&rest[index])? {
             let Some(value) = rest.get(index + 1) else {
                 break;
             };
@@ -1343,18 +619,22 @@ fn ensure_datasample_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<(
     Ok(())
 }
 
-async fn parse_datasample_args(data: Value, rest: Vec<Value>) -> BuiltinResult<DatasampleArgs> {
-    if rest.is_empty() {
+async fn parse_datasample_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<DatasampleArgs> {
+    if args.len() < 2 {
         return Err(sampling_error("datasample", "datasample: k is required"));
     }
-    let data = gathered(data, "datasample").await?;
+    let args = gather_arguments(args, "datasample").await?;
+    let data = args[0].clone();
+    let rest = args.view().range(1..)?;
     let k = parse_positive_usize("datasample", &rest[0], "k")?;
     let mut dim = None;
     let mut replacement = true;
     let mut weight_value = None;
     let mut idx = 1usize;
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
+        if let Some(keyword) = keyword_of(&rest[idx])? {
             match keyword.as_str() {
                 "replace" => {
                     let Some(value) = rest.get(idx + 1) else {
@@ -1410,6 +690,7 @@ async fn parse_datasample_args(data: Value, rest: Vec<Value>) -> BuiltinResult<D
         None => None,
     };
     Ok(DatasampleArgs {
+        _arguments: args,
         data,
         k,
         dim: Some(axis),
@@ -1418,10 +699,14 @@ async fn parse_datasample_args(data: Value, rest: Vec<Value>) -> BuiltinResult<D
     })
 }
 
-fn datasample_compute(args: DatasampleArgs) -> BuiltinResult<(Value, Value)> {
+fn datasample_compute(
+    turn: &mut random::RandomTurn,
+    args: DatasampleArgs,
+) -> BuiltinResult<(Value, Value)> {
     let shape = shape_of_sampled_value(&args.data)?;
     let axis = args.dim.unwrap_or_else(|| first_non_singleton(&shape));
     let indices = sample_indices(
+        turn,
         "datasample",
         shape[axis],
         args.k,
@@ -1435,35 +720,25 @@ fn datasample_compute(args: DatasampleArgs) -> BuiltinResult<(Value, Value)> {
 
 pub mod datasample {
     use super::*;
-    sampling_descriptor!(
-        "datasample",
-        DATASAMPLE_SIGNATURES,
-        BuiltinOutputMode::ByRequestedOutputCount
-    );
 
     #[runtime_builtin(
         name = "datasample",
-        category = "stats/random",
-        summary = "Randomly sample from data with or without replacement.",
-        keywords = "datasample,random,sample,replacement,weights,statistics",
-        type_resolver(super::sampling_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::DATASAMPLE_EXTENSIONS),
-        integer_capabilities(super::DATASAMPLE_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::random::sampling::datasample"
     )]
-    pub(crate) async fn datasample_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        super::ensure_datasample_extensions(&value, &rest)?;
-        let value = super::gathered(value, "datasample").await?;
-        let mut gathered_rest = Vec::with_capacity(rest.len());
-        for argument in rest {
-            gathered_rest.push(super::gathered(argument, "datasample").await?);
-        }
-        let args = super::parse_datasample_args(value, gathered_rest).await?;
-        let (sample, idx) = super::datasample_compute(args)?;
+    pub(crate) async fn datasample_builtin(
+        args: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
+        let data = args
+            .first()
+            .ok_or_else(|| sampling_error("datasample", "datasample: data and k are required"))?;
+        super::ensure_datasample_extensions(data, args.view().range(1..)?)?;
+        let args = super::parse_datasample_args(args).await?;
+        let mut turn = random::acquire_turn(None, "datasample").await?;
+        let (sample, idx) = super::datasample_compute(&mut turn, args)?;
         match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![sample])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![sample])),
             Some(out_count) => Ok(crate::output_count::output_list_with_padding(
                 out_count,
                 vec![sample, idx],
@@ -1475,24 +750,37 @@ pub mod datasample {
 
 enum RandsamplePopulation {
     Range(usize),
-    Values(Value, Vec<usize>, usize),
+    Values(Box<Value>, Vec<usize>, usize),
 }
 
 struct RandsampleArgs {
+    _arguments: crate::call::BuiltinArguments,
     population: RandsamplePopulation,
     k: usize,
     replacement: bool,
     weights: Option<Vec<f64>>,
 }
 
-async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs> {
+async fn parse_randsample_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<RandsampleArgs> {
     if args.len() < 2 {
         return Err(sampling_error(
             "randsample",
             "randsample: population and k are required",
         ));
     }
-    let first = gathered(args[0].clone(), "randsample").await?;
+    let runtime = crate::context::legacy::active();
+    let args = args
+        .try_map_preserving_roots_async(args.len(), runtime.as_ref(), async |index| {
+            if index == 0 || index == 3 {
+                gathered(args[index].clone(), "randsample").await
+            } else {
+                Ok(args[index].clone())
+            }
+        })
+        .await?;
+    let first = args[0].clone();
     let k = parse_positive_usize("randsample", &args[1], "k")?;
     let mut replacement = false;
     let mut weights_value = None;
@@ -1528,7 +816,7 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
                 ));
             }
             let axis = first_non_singleton(&shape);
-            RandsamplePopulation::Values(first, shape, axis)
+            RandsamplePopulation::Values(Box::new(first), shape, axis)
         }
     };
     let pop_len = match &population {
@@ -1548,6 +836,7 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
         None => None,
     };
     Ok(RandsampleArgs {
+        _arguments: args,
         population,
         k,
         replacement,
@@ -1555,10 +844,11 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
     })
 }
 
-fn randsample_compute(args: RandsampleArgs) -> BuiltinResult<Value> {
+fn randsample_compute(turn: &mut random::RandomTurn, args: RandsampleArgs) -> BuiltinResult<Value> {
     match args.population {
         RandsamplePopulation::Range(n) => {
             let indices = sample_indices(
+                turn,
                 "randsample",
                 n,
                 args.k,
@@ -1578,66 +868,83 @@ fn randsample_compute(args: RandsampleArgs) -> BuiltinResult<Value> {
         }
         RandsamplePopulation::Values(value, shape, axis) => {
             let indices = sample_indices(
+                turn,
                 "randsample",
                 shape[axis],
                 args.k,
                 args.replacement,
                 args.weights.as_deref(),
             )?;
-            sample_value_axis(value, axis, &indices, "randsample")
+            sample_value_axis(*value, axis, &indices, "randsample")
         }
     }
 }
 
 pub mod randsample {
     use super::*;
-    sampling_descriptor!(
-        "randsample",
-        RANDSAMPLE_SIGNATURES,
-        BuiltinOutputMode::Fixed
-    );
 
     #[runtime_builtin(
         name = "randsample",
-        category = "stats/random",
-        summary = "Randomly sample from a range or population vector.",
-        keywords = "randsample,random,sample,replacement,weights,statistics",
-        type_resolver(super::sampling_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::RANDSAMPLE_EXTENSIONS),
-        integer_capabilities(super::RANDSAMPLE_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::random::sampling::randsample"
     )]
-    pub(crate) async fn randsample_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        ensure_randsample_extensions(&args).await?;
+    pub(crate) async fn randsample_builtin(
+        args: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
+        ensure_randsample_extensions(args.view()).await?;
         let resident_population = args.first().and_then(|value| match value {
-            Value::GpuTensor(handle) if tensor::element_count(&handle.shape) > 1 => {
+            Value::GpuTensor(handle) if tensor::element_count(handle.shape()) > 1 => {
                 Some(handle.clone())
             }
             _ => None,
         });
+        // Choose publication before consuming the authoritative RNG stream.
+        // A policy-disabled automatic source publishes the normal host result;
+        // explicit device intent and invalid owners fail before any sampling.
+        let restore_provider = match resident_population.as_ref() {
+            Some(source) => {
+                match crate::builtins::common::gpu_helpers::resolve_resident_compute_owner(source) {
+                    Ok(provider) => Some(provider),
+                    Err(
+                        crate::builtins::common::gpu_helpers::ResidentComputeDecline::PolicyDenied,
+                    ) if !runmat_accelerate_api::handle_is_explicit(source) => None,
+                    Err(decline) => {
+                        let mut error = decline.with_domain_error(sampling_error(
+                            "randsample",
+                            "randsample: resident population owner is unavailable",
+                        ));
+                        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        return Err(error);
+                    }
+                }
+            }
+            None => None,
+        };
         let args = super::parse_randsample_args(args).await?;
-        let output = super::randsample_compute(args)?;
-        if let Some(source) = resident_population {
-            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&source)
-                .ok_or_else(|| {
-                    sampling_error(
-                        "randsample",
-                        "randsample: resident population owner is unavailable",
-                    )
-                })?;
-            return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+        let mut turn = random::acquire_turn(None, "randsample").await?;
+        let output = super::randsample_compute(&mut turn, args)?;
+        if let (Some(source), Some(provider)) = (resident_population, restore_provider) {
+            return crate::builtins::common::provider_restore::upload_value_like(
                 provider,
                 output,
                 "randsample",
                 &source,
-            );
+            )
+            .map_err(|mut error| {
+                // Sampling has already advanced the authoritative RNG stream.
+                // A restore error cannot authorize another sampling attempt,
+                // even if its retained provider cause requests gather/retry.
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
+            });
         }
         Ok(output)
     }
 }
 
-async fn ensure_randsample_extensions(args: &[Value]) -> BuiltinResult<()> {
+async fn ensure_randsample_extensions(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.len() < 2 {
         return Ok(());
     }
@@ -1646,7 +953,7 @@ async fn ensure_randsample_extensions(args: &[Value]) -> BuiltinResult<()> {
         let scalar = match first {
             Value::Int(_) => true,
             Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
-            Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+            Value::GpuTensor(handle) => tensor::element_count(handle.shape()) == 1,
             _ => false,
         };
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -1685,7 +992,10 @@ async fn ensure_randsample_extensions(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn parse_shape_args(name: &str, rest: &[Value]) -> BuiltinResult<Vec<usize>> {
+async fn parse_shape_args(
+    name: &str,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<usize>> {
     if rest.is_empty() {
         return Ok(vec![1, 1]);
     }
@@ -1714,11 +1024,14 @@ async fn parse_shape_args(name: &str, rest: &[Value]) -> BuiltinResult<Vec<usize
     }
 }
 
-async fn parse_unidrnd_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usize>)> {
+async fn parse_unidrnd_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(Tensor, Vec<usize>)> {
     if args.is_empty() {
         return Err(sampling_error("unidrnd", "unidrnd: n is required"));
     }
-    let n = tensor::value_into_tensor_for("unidrnd", gathered(args[0].clone(), "unidrnd").await?)
+    let args = gather_arguments(args, "unidrnd").await?;
+    let n = tensor::value_into_tensor_for("unidrnd", args[0].clone())
         .map_err(|err| sampling_error("unidrnd", format!("unidrnd: {err}")))?;
     let n_values = tensor::tensor_values_f64(&n);
     if n_values
@@ -1731,11 +1044,11 @@ async fn parse_unidrnd_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usiz
         ));
     }
     let shape = if args.len() == 1 {
-        normalize_shape(n.shape.clone())
+        normalize_shape(n.shape().to_vec())
     } else {
-        parse_shape_args("unidrnd", &args[1..]).await?
+        parse_shape_args("unidrnd", args.view().range(1..)?).await?
     };
-    if !tensor::is_scalar_tensor(&n) && normalize_shape(n.shape.clone()) != shape {
+    if !tensor::is_scalar_tensor(&n) && normalize_shape(n.shape().to_vec()) != shape {
         return Err(sampling_error(
             "unidrnd",
             "unidrnd: requested size must match non-scalar n",
@@ -1746,20 +1059,15 @@ async fn parse_unidrnd_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usiz
 
 pub mod unidrnd {
     use super::*;
-    sampling_descriptor!("unidrnd", UNIDRND_SIGNATURES, BuiltinOutputMode::Fixed);
 
     #[runtime_builtin(
         name = "unidrnd",
-        category = "stats/random",
-        summary = "Generate random integers from a discrete uniform distribution.",
-        keywords = "unidrnd,uniform,discrete,random,integer,statistics",
-        type_resolver(super::numeric_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(UNIDRND_EXTENSIONS),
-        integer_capabilities(UNIDRND_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::random::sampling::unidrnd"
     )]
-    pub(crate) async fn unidrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    pub(crate) async fn unidrnd_builtin(
+        args: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
         if let Some(value) = args.first() {
             crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                 value,
@@ -1781,7 +1089,8 @@ pub mod unidrnd {
         }
         let (n, shape) = super::parse_unidrnd_args(args).await?;
         let len = tensor::element_count(&shape);
-        let uniforms = random::generate_uniform(len, "unidrnd")?;
+        let mut turn = random::acquire_turn(None, "unidrnd").await?;
+        let uniforms = random::generate_uniform(&mut turn, len, "unidrnd")?;
         let data = uniforms
             .into_iter()
             .enumerate()
@@ -1806,13 +1115,16 @@ struct DividerandArgs {
     ratios: [f64; 3],
 }
 
-async fn parse_dividerand_args(args: Vec<Value>) -> BuiltinResult<DividerandArgs> {
+async fn parse_dividerand_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<DividerandArgs> {
     if args.len() != 1 && args.len() != 4 {
         return Err(sampling_error(
             "dividerand",
             "dividerand: expected Q or Q, trainRatio, valRatio, testRatio",
         ));
     }
+    let args = gather_arguments(args, "dividerand").await?;
     let q = parse_nonnegative_usize(
         "dividerand",
         gathered(args[0].clone(), "dividerand").await?,
@@ -1924,14 +1236,14 @@ fn dividerand_counts(q: usize, ratios: [f64; 3]) -> [usize; 3] {
     counts
 }
 
-fn dividerand_permutation(q: usize) -> BuiltinResult<Vec<usize>> {
+fn dividerand_permutation(turn: &mut random::RandomTurn, q: usize) -> BuiltinResult<Vec<usize>> {
     if q > MAX_DIVIDERAND_Q {
         return Err(sampling_error(
             "dividerand",
             format!("dividerand: Q exceeds the maximum supported value of {MAX_DIVIDERAND_Q}"),
         ));
     }
-    let uniforms = random::generate_uniform(q, "dividerand")?;
+    let uniforms = random::generate_uniform(turn, q, "dividerand")?;
     let mut pool = Vec::new();
     pool.try_reserve_exact(q)
         .map_err(|_| sampling_error("dividerand", "dividerand: requested output is too large"))?;
@@ -1954,12 +1266,15 @@ fn row_index_value(indices: &[usize]) -> BuiltinResult<Value> {
         .map_err(|err| sampling_error("dividerand", format!("dividerand: {err}")))
 }
 
-fn dividerand_compute(args: DividerandArgs) -> BuiltinResult<[Value; 3]> {
+fn dividerand_compute(
+    turn: &mut random::RandomTurn,
+    args: DividerandArgs,
+) -> BuiltinResult<[Value; 3]> {
     let counts = dividerand_counts(args.q, args.ratios);
     let permutation = if args.q == 0 {
         Vec::new()
     } else {
-        dividerand_permutation(args.q)?
+        dividerand_permutation(turn, args.q)?
     };
     let train_end = counts[0];
     let val_end = train_end + counts[1];
@@ -1972,24 +1287,15 @@ fn dividerand_compute(args: DividerandArgs) -> BuiltinResult<[Value; 3]> {
 
 pub mod dividerand {
     use super::*;
-    sampling_descriptor!(
-        "dividerand",
-        DIVIDERAND_SIGNATURES,
-        BuiltinOutputMode::ByRequestedOutputCount
-    );
 
     #[runtime_builtin(
         name = "dividerand",
-        category = "stats/random",
-        summary = "Divide target indices randomly into training, validation, and test sets.",
-        keywords = "dividerand,random,partition,train,validation,test,statistics,machine-learning",
-        type_resolver(super::sampling_type),
-        extensions(super::DIVIDERAND_EXTENSIONS),
-        integer_capabilities(super::DIVIDERAND_INTEGER_CAPABILITIES),
-        descriptor(self::DESCRIPTOR),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::random::sampling::dividerand"
     )]
-    pub(crate) async fn dividerand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    pub(crate) async fn dividerand_builtin(
+        args: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
         if args
             .iter()
             .any(|value| matches!(value, Value::GpuTensor(_)))
@@ -2000,12 +1306,13 @@ pub mod dividerand {
             )?;
         }
         let parsed = super::parse_dividerand_args(args).await?;
-        let [train, val, test] = super::dividerand_compute(parsed)?;
+        let mut turn = random::acquire_turn(None, "dividerand").await?;
+        let [train, val, test] = super::dividerand_compute(&mut turn, parsed)?;
         match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![train])),
-            Some(2) => Ok(Value::OutputList(vec![train, val])),
-            Some(3) => Ok(Value::OutputList(vec![train, val, test])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![train])),
+            Some(2) => Ok(Value::output_list(vec![train, val])),
+            Some(3) => Ok(Value::output_list(vec![train, val, test])),
             None => Ok(train),
             Some(_) => Err(super::sampling_error(
                 "dividerand",
@@ -2016,9 +1323,10 @@ pub mod dividerand {
 }
 
 struct BootstrpArgs {
+    _arguments: crate::call::BuiltinArguments,
     nboot: usize,
     bootfun: Value,
-    data: Vec<Value>,
+    data: crate::call::BuiltinArguments,
     sample_axis: usize,
     sample_len: usize,
     weights: Option<Vec<f64>>,
@@ -2051,7 +1359,9 @@ fn enable_bootstrp_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinR
     crate::compatibility::ensure_builtin_extension_enabled(extension, "bootstrp")
 }
 
-fn ensure_bootstrp_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_bootstrp_extensions_enabled(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.len() < 3 {
         return Ok(());
     }
@@ -2067,7 +1377,7 @@ fn ensure_bootstrp_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
 
     let mut idx = 2usize;
     while idx < args.len() {
-        if let Some(keyword) = keyword_of(&args[idx]) {
+        if let Some(keyword) = keyword_of(&args[idx])? {
             match keyword.as_str() {
                 "weights" => {
                     if let Some(value) = args.get(idx + 1) {
@@ -2107,10 +1417,10 @@ fn is_empty_function(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
-        Value::Cell(c) => c.data.is_empty(),
-        Value::String(s) => s.is_empty(),
-        Value::StringArray(a) => a.data.is_empty(),
-        Value::CharArray(a) => a.data.is_empty(),
+        Value::Cell(c) => c.data().is_empty(),
+        Value::String(runmat_value::StringElement::Text(s)) => s.is_empty(),
+        Value::StringArray(a) => a.data().is_empty(),
+        Value::CharArray(a) => a.data().is_empty(),
         _ => false,
     }
 }
@@ -2120,9 +1430,9 @@ fn is_scalar_boot_arg(value: &Value) -> bool {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(a) => a.data.len() == 1,
-        Value::StringArray(a) => a.data.len() == 1,
-        Value::CharArray(a) => a.data.len() == 1,
-        Value::Cell(a) => a.data.len() == 1,
+        Value::StringArray(a) => a.data().len() == 1,
+        Value::CharArray(a) => a.data().len() == 1,
+        Value::Cell(a) => a.data().len() == 1,
         _ => false,
     }
 }
@@ -2144,21 +1454,22 @@ fn bootstrp_data_axis(
     }
 }
 
-async fn parse_bootstrp_args(args: Vec<Value>) -> BuiltinResult<BootstrpArgs> {
+async fn parse_bootstrp_args(args: crate::call::BuiltinArguments) -> BuiltinResult<BootstrpArgs> {
     if args.len() < 3 {
         return Err(sampling_error(
             "bootstrp",
             "bootstrp: expected nboot, bootfun, and at least one data argument",
         ));
     }
-    let nboot_value = gathered(args[0].clone(), "bootstrp").await?;
+    let args = gather_arguments(args, "bootstrp").await?;
+    let nboot_value = args[0].clone();
     let nboot = parse_positive_usize("bootstrp", &nboot_value, "nboot")?;
     let bootfun = gathered(args[1].clone(), "bootstrp").await?;
-    let mut data = Vec::new();
+    let mut data_count = 0usize;
     let mut weight_value = None;
     let mut idx = 2usize;
     while idx < args.len() {
-        if let Some(keyword) = keyword_of(&args[idx]) {
+        if let Some(keyword) = keyword_of(&args[idx])? {
             match keyword.as_str() {
                 "weights" => {
                     let Some(value) = args.get(idx + 1) else {
@@ -2191,15 +1502,32 @@ async fn parse_bootstrp_args(args: Vec<Value>) -> BuiltinResult<BootstrpArgs> {
                 _ => {}
             }
         }
-        data.push(gathered(args[idx].clone(), "bootstrp").await?);
+        data_count += 1;
         idx += 1;
     }
-    if data.is_empty() {
+    if data_count == 0 {
         return Err(sampling_error(
             "bootstrp",
             "bootstrp: at least one data argument is required",
         ));
     }
+    let runtime = crate::context::legacy::active();
+    let mut source_index = 2usize;
+    let data =
+        args.fork()
+            .try_map_preserving_roots(data_count, runtime.as_ref(), |_, source| {
+                // The validation pass established each option pair and data slot.
+                // Advance one cursor rather than materializing another index batch.
+                while matches!(
+                    keyword_of(&source[source_index])?.as_deref(),
+                    Some("weights" | "options")
+                ) {
+                    source_index += 2;
+                }
+                let value = source[source_index].clone();
+                source_index += 1;
+                Ok(value)
+            })?;
     let single_nonscalar_arg = data
         .iter()
         .filter(|value| !is_scalar_boot_arg(value))
@@ -2232,6 +1560,7 @@ async fn parse_bootstrp_args(args: Vec<Value>) -> BuiltinResult<BootstrpArgs> {
         None => None,
     };
     Ok(BootstrpArgs {
+        _arguments: args,
         nboot,
         bootfun,
         data,
@@ -2246,6 +1575,12 @@ enum BootstatRow {
     Logical(Vec<u8>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BootstatClass {
+    Numeric(NumericDType),
+    Logical,
+}
+
 impl BootstatRow {
     fn len(&self) -> usize {
         match self {
@@ -2254,30 +1589,37 @@ impl BootstatRow {
         }
     }
 
-    fn class_name(&self) -> &'static str {
+    fn class(&self) -> BootstatClass {
         match self {
-            Self::Numeric(storage) => storage.class_name(),
-            Self::Logical(_) => "logical",
+            Self::Numeric(storage) => BootstatClass::Numeric(storage.numeric_dtype()),
+            Self::Logical(_) => BootstatClass::Logical,
         }
     }
 }
 
 async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
-    let mut value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
-    if let Value::OutputList(values) = value {
-        if values.len() != 1 {
+    // Adapt callback output arity before passing a scalar value to gathering.
+    let value = match value {
+        Value::OutputList(values) if values.len() == 1 => {
+            crate::sequence::into_first_output(values)?.expect("one bootstat output")
+        }
+        Value::OutputList(_) => {
             return Err(sampling_error(
                 "bootstrp",
                 "bootstrp: bootfun must return exactly one output",
             ));
         }
-        value = values.into_iter().next().unwrap_or(Value::Num(0.0));
-        value = gather_if_needed_async(&value)
-            .await
-            .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
+        value => value,
+    };
+    if matches!(value, Value::OutputList(_)) {
+        return Err(sampling_error(
+            "bootstrp",
+            "bootstrp: bootfun must return exactly one output",
+        ));
     }
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
     match value {
         Value::OutputList(_) => Err(sampling_error(
             "bootstrp",
@@ -2292,7 +1634,7 @@ async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
             .into_numeric_storage()
             .map(BootstatRow::Numeric)
             .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}"))),
-        Value::LogicalArray(a) => Ok(BootstatRow::Logical(a.data)),
+        Value::LogicalArray(a) => Ok(BootstatRow::Logical(a.data.into_vec())),
         other => Err(sampling_error(
             "bootstrp",
             format!("bootstrp: bootfun must return numeric or logical values, got {other:?}"),
@@ -2327,10 +1669,10 @@ fn assemble_bootstat(rows: Vec<BootstatRow>, nboot: usize) -> BuiltinResult<Valu
         return empty_bootstat(nboot);
     };
     let width = first.len();
-    let class_name = first.class_name();
+    let class = first.class();
     if rows
         .iter()
-        .any(|row| row.len() != width || row.class_name() != class_name)
+        .any(|row| row.len() != width || row.class() != class)
     {
         return Err(sampling_error(
             "bootstrp",
@@ -2395,37 +1737,49 @@ async fn bootstrp_compute(
     };
     let mut rows = Vec::with_capacity(args.nboot);
     for _ in 0..args.nboot {
+        let mut turn = random::acquire_turn(None, "bootstrp").await?;
         let indices = sample_indices(
+            &mut turn,
             "bootstrp",
             args.sample_len,
             args.sample_len,
             true,
             args.weights.as_deref(),
         )?;
+        drop(turn);
         if !is_empty_function(&args.bootfun) {
-            let mut callback_args = Vec::with_capacity(args.data.len());
-            for value in args.data.iter().cloned() {
-                if is_scalar_boot_arg(&value) {
-                    callback_args.push(value);
-                } else {
-                    callback_args.push(sample_value_axis(
-                        value,
-                        args.sample_axis,
-                        &indices,
-                        "bootstrp",
-                    )?);
-                }
-            }
-            let result =
-                crate::call_feval_async_with_outputs(args.bootfun.clone(), &callback_args, 1)
-                    .await
-                    .map_err(|err| {
-                        sampling_error(
-                            "bootstrp",
-                            format!("bootstrp: bootfun failed: {}", err.message()),
-                        )
-                    })?;
-            rows.push(bootstat_row(result).await?);
+            let runtime = crate::context::legacy::active();
+            let callback_args = args.data.fork().try_map_preserving_roots(
+                args.data.len(),
+                runtime.as_ref(),
+                |index, data| {
+                    let value = data[index].clone();
+                    if is_scalar_boot_arg(&value) {
+                        Ok(value)
+                    } else {
+                        sample_value_axis(value, args.sample_axis, &indices, "bootstrp")
+                    }
+                },
+            )?;
+            let result = crate::call::feval::invoke_retained(
+                runtime.as_ref(),
+                args.bootfun.clone(),
+                callback_args,
+                1,
+                None,
+            )
+            .await
+            .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+            .map_err(|source| {
+                let mut error = sampling_error(
+                    "bootstrp",
+                    format!("bootstrp: bootfun failed: {}", source.message()),
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error.source = Some(Box::new(source));
+                error
+            })?;
+            rows.push(result.with_owned_async(bootstat_row).await?);
         }
         if let Some(samples) = samples.as_mut() {
             samples.push(indices);
@@ -2445,27 +1799,18 @@ async fn bootstrp_compute(
 
 pub mod bootstrp {
     use super::*;
-    sampling_descriptor!(
-        "bootstrp",
-        BOOTSTRP_SIGNATURES,
-        BuiltinOutputMode::ByRequestedOutputCount
-    );
 
     #[runtime_builtin(
         name = "bootstrp",
-        category = "stats/random",
-        summary = "Bootstrap samples and evaluate a statistic.",
-        keywords = "bootstrp,bootstrap,resampling,statistics,weights",
-        type_resolver(super::sampling_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::BOOTSTRP_EXTENSIONS),
-        integer_capabilities(super::BOOTSTRP_INTEGER_CAPABILITIES),
+        binding_variant = "default",
         builtin_path = "crate::builtins::stats::random::sampling::bootstrp"
     )]
-    pub(crate) async fn bootstrp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    pub(crate) async fn bootstrp_builtin(
+        args: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
         let requested_outputs = crate::output_count::current_output_count();
         match requested_outputs {
-            Some(0) => return Ok(Value::OutputList(Vec::new())),
+            Some(0) => return Ok(Value::output_list(Vec::new())),
             Some(count) if count > 2 => {
                 return Err(super::sampling_error(
                     "bootstrp",
@@ -2474,13 +1819,13 @@ pub mod bootstrp {
             }
             _ => {}
         }
-        super::ensure_bootstrp_extensions_enabled(&args)?;
+        super::ensure_bootstrp_extensions_enabled(args.view())?;
         let include_bootsam = matches!(requested_outputs, Some(2));
         let args = super::parse_bootstrp_args(args).await?;
         let eval = super::bootstrp_compute(args, include_bootsam).await?;
         match requested_outputs {
-            Some(1) => Ok(Value::OutputList(vec![eval.bootstat])),
-            Some(2) => Ok(Value::OutputList(vec![
+            Some(1) => Ok(Value::output_list(vec![eval.bootstat])),
+            Some(2) => Ok(Value::output_list(vec![
                 eval.bootstat,
                 eval.bootsam.unwrap_or(Value::Num(0.0)),
             ])),
@@ -2491,10 +1836,13 @@ pub mod bootstrp {
 }
 
 #[cfg(test)]
+#[path = "sampling/restore_tests.rs"]
+mod restore_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntegerStorage, NumericStorage};
 
     fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
@@ -2538,6 +1886,34 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_callback_arity_is_adapted_before_scalar_gather() {
+        let exact = u64::MAX;
+        for value in [
+            Value::Int(IntValue::U64(exact)),
+            Value::output_list(vec![Value::Int(IntValue::U64(exact))]),
+        ] {
+            let row = block_on(bootstat_row(value)).expect("one exact callback value");
+            let BootstatRow::Numeric(NumericStorage::U64(values)) = row else {
+                panic!("callback output must preserve its native uint64 class");
+            };
+            assert_eq!(values, vec![exact]);
+        }
+        for values in [
+            Vec::new(),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+            vec![Value::output_list(vec![Value::Num(1.0)])],
+        ] {
+            let error = match block_on(bootstat_row(Value::output_list(values))) {
+                Ok(_) => panic!("invalid callback arity must fail"),
+                Err(error) => error,
+            };
+            assert!(error
+                .message()
+                .contains("bootfun must return exactly one output"));
+        }
+    }
+
+    #[test]
     fn sampling_tensor_axis_preserves_every_native_numeric_class() {
         let storages = [
             NumericStorage::F64(vec![1.0, 2.0, 3.0, 4.0]),
@@ -2560,7 +1936,7 @@ mod tests {
             let Value::Tensor(sampled) = sampled else {
                 panic!("expected sampled tensor");
             };
-            assert_eq!(sampled.shape, vec![2, 2]);
+            assert_eq!(sampled.shape(), &[2, 2]);
             assert_eq!(sampled.into_numeric_storage(), Ok(expected));
         }
     }
@@ -2571,10 +1947,17 @@ mod tests {
         random::reset_rng();
         let data =
             Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0], vec![3, 2]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(datasample::datasample_builtin(
-            data,
-            vec![Value::Num(2.0), Value::from("Replace"), Value::Bool(false)],
+            crate::builtins::common::test_support::builtin_arguments(
+                std::iter::once(data)
+                    .chain(vec![
+                        Value::Num(2.0),
+                        Value::from("Replace"),
+                        Value::Bool(false),
+                    ])
+                    .collect(),
+            ),
         ))
         .unwrap();
         match out {
@@ -2582,14 +1965,14 @@ mod tests {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 2]);
+                        assert_eq!(t.shape(), &[2, 2]);
                         assert_eq!(t.materialize_f64().len(), 4);
                     }
                     other => panic!("expected tensor sample, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 1]);
+                        assert_eq!(t.shape(), &[2, 1]);
                         assert!(t
                             .materialize_f64()
                             .iter()
@@ -2602,25 +1985,51 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn datasample_normalizes_rank_zero_and_rank_one_singleton_populations() {
+        let _lock = random::test_guard();
+        random::reset_rng();
+        for shape in [vec![], vec![1]] {
+            let population = Value::Tensor(Tensor::new(vec![7.0], shape).unwrap());
+            let sample = block_on(datasample::datasample_builtin(
+                crate::builtins::common::test_support::builtin_arguments(
+                    std::iter::once(population)
+                        .chain(vec![Value::Num(1.0)])
+                        .collect(),
+                ),
+            ))
+            .expect("sample singleton population");
+            assert_eq!(shape_of_sampled_value(&sample).unwrap(), [1, 1]);
+            assert_eq!(sample, Value::Num(7.0));
+        }
+    }
+
     #[test]
     fn datasample_supports_char_weights() {
         let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::CharArray(CharArray::new_row("ACGT"));
         let out = block_on(datasample::datasample_builtin(
-            data,
-            vec![
-                Value::Num(5.0),
-                Value::from("Weights"),
-                Value::Tensor(Tensor::new(vec![0.0, 0.0, 1.0, 0.0], vec![1, 4]).unwrap()),
-            ],
+            crate::builtins::common::test_support::builtin_arguments(
+                std::iter::once(data)
+                    .chain(vec![
+                        Value::Num(5.0),
+                        Value::from("Weights"),
+                        Value::Tensor(Tensor::new(vec![0.0, 0.0, 1.0, 0.0], vec![1, 4]).unwrap()),
+                    ])
+                    .collect(),
+            ),
         ))
         .unwrap();
         match out {
             Value::CharArray(chars) => {
                 assert_eq!(chars.rows, 1);
                 assert_eq!(chars.cols, 5);
-                assert_eq!(chars.data, vec!['G'; 5]);
+                assert_eq!(
+                    chars.data(),
+                    runmat_value::encode_utf16_code_units(&"G".repeat(5))
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -2644,19 +2053,22 @@ mod tests {
             .unwrap(),
         );
         let out = block_on(datasample::datasample_builtin(
-            data,
-            vec![
-                Value::Num(3.0),
-                Value::from("Weights"),
-                Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
-            ],
+            crate::builtins::common::test_support::builtin_arguments(
+                std::iter::once(data)
+                    .chain(vec![
+                        Value::Num(3.0),
+                        Value::from("Weights"),
+                        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+                    ])
+                    .collect(),
+            ),
         ))
         .unwrap();
         match out {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![3, 2]);
                 assert_eq!(
-                    cell.data,
+                    cell.data(),
                     vec![
                         Value::from("c"),
                         Value::from("d"),
@@ -2716,8 +2128,12 @@ mod tests {
         ];
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         for (population, rest, identifier) in cases {
-            let error = block_on(datasample::datasample_builtin(population, rest))
-                .expect_err("strict rejection");
+            let error = block_on(datasample::datasample_builtin(
+                crate::builtins::common::test_support::builtin_arguments(
+                    std::iter::once(population).chain(rest).collect(),
+                ),
+            ))
+            .expect_err("strict rejection");
             assert_eq!(error.identifier(), identifier);
         }
     }
@@ -2742,8 +2158,11 @@ mod tests {
             let population = Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap());
             let weights = Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap());
             let Value::Tensor(output) = block_on(datasample::datasample_builtin(
-                population,
-                vec![Value::Num(3.0), Value::from("Weights"), weights],
+                crate::builtins::common::test_support::builtin_arguments(
+                    std::iter::once(population)
+                        .chain(vec![Value::Num(3.0), Value::from("Weights"), weights])
+                        .collect(),
+                ),
             ))
             .unwrap() else {
                 panic!("expected integer tensor");
@@ -2770,8 +2189,11 @@ mod tests {
                 .unwrap();
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(datasample::datasample_builtin(
-                Value::GpuTensor(handle),
-                vec![Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(
+                    std::iter::once(Value::GpuTensor(handle))
+                        .chain(vec![Value::Num(1.0)])
+                        .collect(),
+                ),
             ))
             .expect_err("resident input gate must run before gather");
             assert_eq!(
@@ -2785,15 +2207,17 @@ mod tests {
     fn randsample_range_and_population_vector() {
         let _lock = random::test_guard();
         random::reset_rng();
-        let range = block_on(randsample::randsample_builtin(vec![
-            Value::Num(5.0),
-            Value::Num(3.0),
-            Value::Bool(false),
-        ]))
+        let range = block_on(randsample::randsample_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(5.0),
+                Value::Num(3.0),
+                Value::Bool(false),
+            ]),
+        ))
         .unwrap();
         match range {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2804,15 +2228,17 @@ mod tests {
 
         random::reset_rng();
         let population = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap());
-        let out = block_on(randsample::randsample_builtin(vec![
-            population,
-            Value::Num(4.0),
-            Value::Bool(true),
-        ]))
+        let out = block_on(randsample::randsample_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                population,
+                Value::Num(4.0),
+                Value::Bool(true),
+            ]),
+        ))
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2824,7 +2250,7 @@ mod tests {
 
     #[test]
     fn randsample_restores_exact_integer_population_to_its_owner() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         random::reset_rng();
         crate::builtins::common::test_support::with_test_provider(|provider| {
@@ -2837,16 +2263,19 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("upload integer population");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-            let Value::GpuTensor(output) = block_on(randsample::randsample_builtin(vec![
-                Value::GpuTensor(source),
-                Value::Num(2.0),
-            ]))
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
+            let Value::GpuTensor(output) = block_on(randsample::randsample_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(source),
+                    Value::Num(2.0),
+                ]),
+            ))
             .expect("resident integer population") else {
                 panic!("expected resident output");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), &[1, 2]);
             assert!(runmat_accelerate_api::handle_is_explicit(&output));
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&output),
@@ -2882,12 +2311,15 @@ mod tests {
             expected.sort_by_key(|value| format!("{value:?}"));
             let population = Tensor::new_integer(storage, vec![1, 2]).expect("population");
             let source = gpu_helpers::upload_tensor(provider, &population).expect("upload");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-            let output = block_on(randsample::randsample_builtin(vec![
-                Value::GpuTensor(source),
-                Value::Num(2.0),
-            ]))
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
+            let output = block_on(randsample::randsample_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(source),
+                    Value::Num(2.0),
+                ]),
+            ))
             .expect("resident integer population");
             let Value::GpuTensor(output_handle) = &output else {
                 panic!("expected resident output");
@@ -2908,15 +2340,17 @@ mod tests {
     fn unidrnd_generates_with_scalar_or_array_upper_bound() {
         let _lock = random::test_guard();
         random::reset_rng();
-        let out = block_on(unidrnd::unidrnd_builtin(vec![
-            Value::Num(3.0),
-            Value::Num(2.0),
-            Value::Num(2.0),
-        ]))
+        let out = block_on(unidrnd::unidrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Num(2.0),
+                Value::Num(2.0),
+            ]),
+        ))
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2927,10 +2361,13 @@ mod tests {
 
         random::reset_rng();
         let n = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-        let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
+        let out = block_on(unidrnd::unidrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![n]),
+        ))
+        .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert_eq!(t.materialize_f64()[0], 1.0);
                 assert!((1.0..=2.0).contains(&t.materialize_f64()[1]));
                 assert!((1.0..=3.0).contains(&t.materialize_f64()[2]));
@@ -2945,10 +2382,13 @@ mod tests {
         random::reset_rng();
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let n = poisoned_int_tensor(IntegerStorage::U16(vec![3, 3, 3]), vec![3, 1], f64::NAN);
-        let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
+        let out = block_on(unidrnd::unidrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![n]),
+        ))
+        .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
                 assert!(t
                     .materialize_f64()
@@ -2961,19 +2401,25 @@ mod tests {
 
     #[test]
     fn unidrnd_typed_integer_roles_are_gated_and_wide_limits_must_be_exact() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
-        let limit_error = block_on(unidrnd::unidrnd_builtin(vec![Value::Int(IntValue::U16(3))]))
-            .expect_err("typed limit must be gated");
+        let limit_error = block_on(unidrnd::unidrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U16(3),
+            )]),
+        ))
+        .expect_err("typed limit must be gated");
         assert_eq!(
             limit_error.identifier(),
             UNIDRND_INTEGER_LIMIT_EXTENSION.error_identifier
         );
-        let size_error = block_on(unidrnd::unidrnd_builtin(vec![
-            Value::Num(3.0),
-            Value::Int(IntValue::U8(2)),
-        ]))
+        let size_error = block_on(unidrnd::unidrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Int(IntValue::U8(2)),
+            ]),
+        ))
         .expect_err("typed size must be gated");
         assert_eq!(
             size_error.identifier(),
@@ -2982,9 +2428,11 @@ mod tests {
         drop(compatibility);
 
         let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let lossy = block_on(unidrnd::unidrnd_builtin(vec![Value::Int(IntValue::U64(
-            9_007_199_254_740_993,
-        ))]))
+        let lossy = block_on(unidrnd::unidrnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U64(9_007_199_254_740_993),
+            )]),
+        ))
         .expect_err("lossy upper limit must reject");
         assert!(lossy.message().contains("exactly representable"));
         drop(extensions);
@@ -2994,13 +2442,15 @@ mod tests {
     fn dividerand_partitions_indices_into_row_vectors() {
         let _lock = random::test_guard();
         random::reset_rng();
-        let _guard = crate::output_count::push_output_count(Some(3));
-        let out = block_on(dividerand::dividerand_builtin(vec![
-            Value::Num(10.0),
-            Value::Num(0.6),
-            Value::Num(0.2),
-            Value::Num(0.2),
-        ]))
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
+        let out = block_on(dividerand::dividerand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(10.0),
+                Value::Num(0.6),
+                Value::Num(0.2),
+                Value::Num(0.2),
+            ]),
+        ))
         .unwrap();
         match out {
             Value::OutputList(values) => {
@@ -3009,7 +2459,7 @@ mod tests {
                 for (value, expected_len) in values.iter().zip([6usize, 2, 2]) {
                     match value {
                         Value::Tensor(t) => {
-                            assert_eq!(t.shape, vec![1, expected_len]);
+                            assert_eq!(t.shape(), &[1, expected_len]);
                             seen.extend_from_slice(&t.materialize_f64());
                         }
                         other => panic!("expected tensor indices, got {other:?}"),
@@ -3027,14 +2477,18 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         {
-            let _guard = crate::output_count::push_output_count(Some(3));
-            let out = block_on(dividerand::dividerand_builtin(vec![Value::Num(4.0)])).unwrap();
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
+            let out = block_on(dividerand::dividerand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(4.0)]),
+            ))
+            .unwrap();
             match out {
                 Value::OutputList(values) => {
                     let shapes = values
                         .iter()
                         .map(|value| match value {
-                            Value::Tensor(t) => t.shape.clone(),
+                            Value::Tensor(t) => t.shape().to_vec(),
                             other => panic!("expected tensor indices, got {other:?}"),
                         })
                         .collect::<Vec<_>>();
@@ -3046,19 +2500,22 @@ mod tests {
 
         random::reset_rng();
         {
-            let _guard = crate::output_count::push_output_count(Some(3));
-            let out = block_on(dividerand::dividerand_builtin(vec![
-                Value::Num(3.0),
-                Value::Num(1.0),
-                Value::Num(0.0),
-                Value::Num(0.0),
-            ]))
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
+            let out = block_on(dividerand::dividerand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(3.0),
+                    Value::Num(1.0),
+                    Value::Num(0.0),
+                    Value::Num(0.0),
+                ]),
+            ))
             .unwrap();
             match out {
                 Value::OutputList(values) => {
-                    assert!(matches!(&values[0], Value::Tensor(t) if t.shape == vec![1, 3]));
-                    assert!(matches!(&values[1], Value::Tensor(t) if t.shape == vec![1, 0]));
-                    assert!(matches!(&values[2], Value::Tensor(t) if t.shape == vec![1, 0]));
+                    assert!(matches!(&values[0], Value::Tensor(t) if t.shape() == [1, 3]));
+                    assert!(matches!(&values[1], Value::Tensor(t) if t.shape() == [1, 0]));
+                    assert!(matches!(&values[2], Value::Tensor(t) if t.shape() == [1, 0]));
                 }
                 other => panic!("expected output list, got {other:?}"),
             }
@@ -3097,9 +2554,11 @@ mod tests {
                 .expect("resident Q upload");
             provider.reset_telemetry();
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(dividerand::dividerand_builtin(vec![Value::GpuTensor(
-                handle.clone(),
-            )]))
+            let error = block_on(dividerand::dividerand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]),
+            ))
             .expect_err("resident argument must reject before gather");
             assert_eq!(
                 error.identifier(),
@@ -3107,34 +2566,40 @@ mod tests {
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             drop(strict);
-            provider.free(&handle).expect("free resident Q");
+            drop(handle);
         });
     }
 
     #[test]
     fn dividerand_rejects_bad_arguments() {
-        let err = block_on(dividerand::dividerand_builtin(vec![
-            Value::Num(3.5),
-            Value::Num(0.7),
-            Value::Num(0.2),
-            Value::Num(0.1),
-        ]))
+        let err = block_on(dividerand::dividerand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.5),
+                Value::Num(0.7),
+                Value::Num(0.2),
+                Value::Num(0.1),
+            ]),
+        ))
         .unwrap_err();
         assert!(err.message().contains("nonnegative integer"));
 
-        let err = block_on(dividerand::dividerand_builtin(vec![
-            Value::Num(3.0),
-            Value::Num(0.0),
-            Value::Num(0.0),
-            Value::Num(0.0),
-        ]))
+        let err = block_on(dividerand::dividerand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Num(0.0),
+                Value::Num(0.0),
+                Value::Num(0.0),
+            ]),
+        ))
         .unwrap_err();
         assert!(err.message().contains("at least one ratio"));
 
-        let err = block_on(dividerand::dividerand_builtin(vec![
-            Value::Num(3.0),
-            Value::Num(1.0),
-        ]))
+        let err = block_on(dividerand::dividerand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Num(1.0),
+            ]),
+        ))
         .unwrap_err();
         assert!(err.message().contains("expected Q"));
     }
@@ -3146,16 +2611,21 @@ mod tests {
             [4, 3, 3]
         );
 
-        let err = block_on(dividerand::dividerand_builtin(vec![Value::Num(
-            (MAX_DIVIDERAND_Q + 1) as f64,
-        )]))
+        let err = block_on(dividerand::dividerand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                (MAX_DIVIDERAND_Q + 1) as f64,
+            )]),
+        ))
         .unwrap_err();
         assert!(err.message().contains("maximum supported value"));
     }
 
     #[test]
     fn bootstrp_descriptor_declares_integer_forms_and_extensions() {
-        let builtin = builtin_function_by_name("bootstrp").expect("registered bootstrp");
+        let builtin = runmat_builtins::builtin_catalog_entries()
+            .iter()
+            .find(|entry| entry.identity == runmat_builtins::BOOTSTRP_CATALOG_ENTRY.identity)
+            .expect("canonical bootstrp contract");
         assert_eq!(builtin.extensions, &BOOTSTRP_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 3);
         assert_eq!(
@@ -3233,8 +2703,10 @@ mod tests {
 
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         for (args, identifier) in cases {
-            let error =
-                block_on(bootstrp::bootstrp_builtin(args)).expect_err("strict mode must reject");
+            let error = block_on(bootstrp::bootstrp_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect_err("strict mode must reject");
             assert_eq!(error.identifier(), identifier);
         }
     }
@@ -3244,7 +2716,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let wide = 9_007_199_254_740_993_u64;
         let data = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![2, 1])
@@ -3254,26 +2726,28 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U8(vec![1, 0]), vec![2, 1])
                 .expect("integer weights"),
         );
-        let Value::OutputList(outputs) = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Int(IntValue::U16(2)),
-            Value::FunctionHandle("min".to_string()),
-            data,
-            Value::from("Weights"),
-            weights,
-        ]))
+        let Value::OutputList(outputs) = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U16(2)),
+                Value::FunctionHandle("min".into()),
+                data,
+                Value::from("Weights"),
+                weights,
+            ]),
+        ))
         .expect("RunMat integer bootstrap") else {
             panic!("expected output list");
         };
         assert!(matches!(
             &outputs[0],
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 1]
+                if tensor.shape() == [2, 1]
                     && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![wide, wide]))
         ));
         assert!(matches!(
             &outputs[1],
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 2]
+                if tensor.shape() == [2, 2]
                     && tensor.materialize_f64() == vec![1.0; 4]
         ));
     }
@@ -3295,11 +2769,13 @@ mod tests {
                 || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("double data"));
             {
                 let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-                let error = block_on(bootstrp::bootstrp_builtin(vec![
-                    Value::GpuTensor(handle.clone()),
-                    empty_callback(),
-                    data(),
-                ]))
+                let error = block_on(bootstrp::bootstrp_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::GpuTensor(handle.clone()),
+                        empty_callback(),
+                        data(),
+                    ]),
+                ))
                 .expect_err("strict mode rejects resident input");
                 assert_eq!(
                     error.identifier(),
@@ -3308,15 +2784,17 @@ mod tests {
             }
             {
                 let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-                let Value::Tensor(output) = block_on(bootstrp::bootstrp_builtin(vec![
-                    Value::GpuTensor(handle),
-                    empty_callback(),
-                    data(),
-                ]))
+                let Value::Tensor(output) = block_on(bootstrp::bootstrp_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::GpuTensor(handle),
+                        empty_callback(),
+                        data(),
+                    ]),
+                ))
                 .expect("RunMat resident nboot") else {
                     panic!("expected empty bootstat tensor");
                 };
-                assert_eq!(output.shape, vec![2, 0]);
+                assert_eq!(output.shape(), &[2, 0]);
             }
         });
     }
@@ -3342,7 +2820,7 @@ mod tests {
             let Value::Tensor(tensor) = output else {
                 panic!("expected tensor bootstat");
             };
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(tensor.into_numeric_storage(), Ok(expected));
         }
 
@@ -3360,21 +2838,23 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Num(4.0),
-            Value::FunctionHandle("mean".to_string()),
-            data,
-            Value::from("Weights"),
-            Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![3, 1]).unwrap()),
-        ]))
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let out = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(4.0),
+                Value::FunctionHandle("mean".into()),
+                data,
+                Value::from("Weights"),
+                Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![3, 1]).unwrap()),
+            ]),
+        ))
         .unwrap();
         match out {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![4, 1]);
+                        assert_eq!(t.shape(), &[4, 1]);
                         assert_eq!(t.materialize_f64(), vec![10.0; 4]);
                     }
                     Value::Num(value) => assert_eq!(*value, 10.0),
@@ -3382,7 +2862,7 @@ mod tests {
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 4]);
+                        assert_eq!(t.shape(), &[3, 4]);
                         assert_eq!(t.materialize_f64(), vec![1.0; 12]);
                     }
                     other => panic!("expected tensor bootsam, got {other:?}"),
@@ -3397,23 +2877,25 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Num(2.0),
-            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
-            data,
-        ]))
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let out = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                data,
+            ]),
+        ))
         .unwrap();
         match out {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
-                    Value::Tensor(t) => assert_eq!(t.shape, vec![2, 0]),
+                    Value::Tensor(t) => assert_eq!(t.shape(), &[2, 0]),
                     other => panic!("expected empty tensor bootstat, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 2]);
+                        assert_eq!(t.shape(), &[3, 2]);
                         assert!(t
                             .materialize_f64()
                             .iter()
@@ -3432,15 +2914,17 @@ mod tests {
         random::reset_rng();
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
         let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
-        let out = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Num(3.0),
-            Value::FunctionHandle("corr".to_string()),
-            x,
-            y,
-        ]))
+        let out = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::FunctionHandle("corr".into()),
+                x,
+                y,
+            ]),
+        ))
         .unwrap();
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 1]),
             other => panic!("expected tensor bootstat, got {other:?}"),
         }
     }
@@ -3449,15 +2933,17 @@ mod tests {
     fn bootstrp_scalar_data_arguments_are_passed_through() {
         let _lock = random::test_guard();
         random::reset_rng();
-        let out = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Num(3.0),
-            Value::FunctionHandle("mean".to_string()),
-            Value::Num(42.0),
-        ]))
+        let out = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::FunctionHandle("mean".into()),
+                Value::Num(42.0),
+            ]),
+        ))
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert_eq!(t.materialize_f64(), vec![42.0; 3]);
             }
             other => panic!("expected tensor bootstat, got {other:?}"),
@@ -3469,18 +2955,20 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let row = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Num(2.0),
-            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
-            row,
-            Value::from("tag"),
-        ]))
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let out = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+                row,
+                Value::from("tag"),
+            ]),
+        ))
         .unwrap();
         match out {
             Value::OutputList(values) => match &values[1] {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![4, 2]);
+                    assert_eq!(t.shape(), &[4, 2]);
                     assert!(t
                         .materialize_f64()
                         .iter()
@@ -3496,22 +2984,26 @@ mod tests {
     fn bootstrp_rejects_mismatched_data_and_extra_outputs() {
         let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         let y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
-        let err = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Num(2.0),
-            Value::FunctionHandle("corr".to_string()),
-            x,
-            y,
-        ]))
+        let err = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::FunctionHandle("corr".into()),
+                x,
+                y,
+            ]),
+        ))
         .unwrap_err();
         assert!(err.message().contains("same number of rows"));
 
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-        let err = block_on(bootstrp::bootstrp_builtin(vec![
-            Value::Num(2.0),
-            Value::FunctionHandle("definitely_missing_bootstrap_callback".to_string()),
-            data,
-        ]))
+        let err = block_on(bootstrp::bootstrp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::FunctionHandle("definitely_missing_bootstrap_callback".into()),
+                data,
+            ]),
+        ))
         .unwrap_err();
         assert!(err.message().contains("too many output"));
     }

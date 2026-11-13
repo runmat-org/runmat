@@ -6,15 +6,16 @@ use super::{Parser, TokenInfo};
 
 impl Parser {
     pub(super) fn parse_call_argument(&mut self) -> Result<Expr, SyntaxError> {
-        if self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
+        if self.peek_token().is_some_and(Token::can_be_identifier)
+            && self.peek_token_at(1) == Some(&Token::Assign)
         {
             let name = self.next().expect("peeked identifier");
             self.pos += 1; // consume '='
-            let value = self.parse_expr()?;
+            let value = self.parse_nested_expr()?;
             let span = self.span_from(name.position, value.span().end);
             return Ok(Expr::NameValueArg(name.lexeme, Box::new(value), span));
         }
-        self.parse_expr()
+        self.parse_nested_expr()
     }
 
     pub(super) fn parse_call_arguments_until(
@@ -39,6 +40,14 @@ impl Parser {
 
     pub(super) fn parse_expr(&mut self) -> Result<Expr, SyntaxError> {
         self.parse_logical_or()
+    }
+
+    fn parse_nested_expr(&mut self) -> Result<Expr, SyntaxError> {
+        let prior = self.at_matrix_element_boundary;
+        self.at_matrix_element_boundary = false;
+        let expr = self.parse_expr();
+        self.at_matrix_element_boundary = prior;
+        expr
     }
 
     fn parse_logical_or(&mut self) -> Result<Expr, SyntaxError> {
@@ -115,31 +124,16 @@ impl Parser {
     fn parse_add_sub(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_mul_div()?;
         loop {
-            if self.in_matrix_expr
+            if self.at_matrix_element_boundary
                 && matches!(self.peek_token(), Some(Token::Plus | Token::Minus))
                 && self.pos > 0
                 && !self.tokens_adjacent(self.pos - 1, self.pos)
                 && self.tokens_adjacent(self.pos, self.pos + 1)
             {
-                let rhs_index = self.pos + 1;
-                let rhs_is_imag_literal = self
-                    .tokens
-                    .get(rhs_index)
-                    .map(|info| matches!(info.token, Token::Integer | Token::Float))
-                    .unwrap_or(false)
-                    && self
-                        .tokens
-                        .get(rhs_index + 1)
-                        .map(|info| {
-                            matches!(info.token, Token::Ident)
-                                && (info.lexeme.eq_ignore_ascii_case("i")
-                                    || info.lexeme.eq_ignore_ascii_case("j"))
-                                && self.tokens_adjacent(rhs_index, rhs_index + 1)
-                        })
-                        .unwrap_or(false);
-                if !rhs_is_imag_literal {
-                    break;
-                }
+                // A spaced sign attached to its operand begins another column,
+                // including imaginary operands. Nested expressions do not have
+                // matrix-element separator semantics.
+                break;
             }
             let op = if self.consume(&Token::Plus) {
                 Some(BinOp::Add)
@@ -168,19 +162,6 @@ impl Parser {
     fn parse_mul_div(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_unary()?;
         loop {
-            if self.peek_token() == Some(&Token::Ident) && self.pos > 0 {
-                let prev = &self.tokens[self.pos - 1];
-                let curr = &self.tokens[self.pos];
-                let is_adjacent = self.tokens_adjacent(self.pos - 1, self.pos);
-                let is_imag =
-                    curr.lexeme.eq_ignore_ascii_case("i") || curr.lexeme.eq_ignore_ascii_case("j");
-                if is_adjacent && is_imag && matches!(prev.token, Token::Integer | Token::Float) {
-                    let token = self.next().unwrap();
-                    let rhs = Expr::Ident(token.lexeme, self.span_from(token.position, token.end));
-                    node = self.make_binary(node, BinOp::Mul, rhs);
-                    continue;
-                }
-            }
             let op = match self.peek_token() {
                 Some(Token::Star) => BinOp::Mul,
                 Some(Token::DotStar) => BinOp::ElemMul,
@@ -206,7 +187,10 @@ impl Parser {
                 _ => return Ok(node),
             };
             self.pos += 1;
-            let rhs = self.parse_pow()?;
+            // Prefix signs are valid on an exponent without parentheses.
+            // Unary parsing delegates unsigned operands back to parse_pow,
+            // preserving right association and the precedence of -2^2.
+            let rhs = self.parse_unary()?;
             Ok(self.make_binary(node, op, rhs))
         } else {
             Ok(node)
@@ -215,6 +199,20 @@ impl Parser {
 
     fn parse_postfix_with_base(&mut self, mut expr: Expr) -> Result<Expr, SyntaxError> {
         loop {
+            // At the outer level of a matrix element, a space before an
+            // opening delimiter starts the next column, rather than indexing
+            // or calling the prior column.
+            // Calls and grouping inside the element parse with this boundary off.
+            if self.at_matrix_element_boundary
+                && matches!(
+                    self.peek_token(),
+                    Some(Token::LParen | Token::LBracket | Token::LBrace)
+                )
+                && self.pos > 0
+                && !self.tokens_adjacent(self.pos - 1, self.pos)
+            {
+                break;
+            }
             if self.consume(&Token::LParen) {
                 let start = expr.span().start;
                 let args = self.parse_call_arguments_until(
@@ -235,9 +233,9 @@ impl Parser {
             } else if self.consume(&Token::LBracket) {
                 let start = expr.span().start;
                 let mut indices = Vec::new();
-                indices.push(self.parse_expr()?);
+                indices.push(self.parse_nested_expr()?);
                 while self.consume(&Token::Comma) {
-                    indices.push(self.parse_expr()?);
+                    indices.push(self.parse_nested_expr()?);
                 }
                 if !self.consume(&Token::RBracket) {
                     return Err(self.error_with_expected("expected ']'", "']'"));
@@ -252,9 +250,9 @@ impl Parser {
                 }
                 let start = expr.span().start;
                 let mut indices = Vec::new();
-                indices.push(self.parse_expr()?);
+                indices.push(self.parse_nested_expr()?);
                 while self.consume(&Token::Comma) {
-                    indices.push(self.parse_expr()?);
+                    indices.push(self.parse_nested_expr()?);
                 }
                 if !self.consume(&Token::RBrace) {
                     return Err(self.error_with_expected("expected '}'", "'}'"));
@@ -277,7 +275,7 @@ impl Parser {
                 }
                 self.pos += 1;
                 if self.consume(&Token::LParen) {
-                    let name_expr = self.parse_expr()?;
+                    let name_expr = self.parse_nested_expr()?;
                     if !self.consume(&Token::RParen) {
                         return Err(self.error_with_expected(
                             "expected ')' after dynamic member expression",
@@ -291,11 +289,11 @@ impl Parser {
                 }
                 let name_token = match self.peek().cloned() {
                     Some(TokenInfo {
-                        token: Token::Ident,
+                        token,
                         lexeme,
                         position,
                         end,
-                    }) => {
+                    }) if token.can_be_identifier() => {
                         self.pos += 1;
                         (lexeme, position, end)
                     }
@@ -375,7 +373,7 @@ impl Parser {
                 .unwrap_or(false);
             parts.push(first);
             while self.peek_token() == Some(&Token::Dot)
-                && matches!(self.peek_token_at(1), Some(Token::Ident))
+                && self.peek_token_at(1).is_some_and(Token::can_be_identifier)
             {
                 let next_lex = if let Some(ti) = self.tokens.get(self.pos + 1) {
                     ti.lexeme.clone()
@@ -410,8 +408,25 @@ impl Parser {
         match self.next() {
             Some(info) => match info.token {
                 Token::Integer | Token::Float => {
-                    let span = self.span_from(info.position, info.end);
-                    Ok(Expr::Number(info.lexeme, span))
+                    // The suffix is syntax of the numeric atom, not a variable
+                    // named i/j. Preserve the numeric text for later f64 decoding.
+                    if self.peek_token() == Some(&Token::Ident)
+                        && self.tokens_adjacent(self.pos - 1, self.pos)
+                        && self.tokens[self.pos].lexeme.len() == 1
+                        && matches!(
+                            self.tokens[self.pos].lexeme.as_bytes()[0],
+                            b'i' | b'I' | b'j' | b'J'
+                        )
+                    {
+                        let suffix = self.next().expect("peeked imaginary suffix");
+                        Ok(Expr::ImaginaryNumber(
+                            format!("{}{}", info.lexeme, suffix.lexeme),
+                            self.span_from(info.position, suffix.end),
+                        ))
+                    } else {
+                        let span = self.span_from(info.position, info.end);
+                        Ok(Expr::Number(info.lexeme, span))
+                    }
                 }
                 Token::RadixInteger => {
                     let span = self.span_from(info.position, info.end);
@@ -440,7 +455,7 @@ impl Parser {
                     let span = self.span_from(info.position, info.end);
                     Ok(Expr::Ident("false".into(), span))
                 }
-                Token::Ident => {
+                token if token.can_be_identifier() => {
                     let span = self.span_from(info.position, info.end);
                     if self.peek_token() == Some(&Token::At) {
                         let method_name = info.lexeme;
@@ -502,7 +517,7 @@ impl Parser {
                                 ));
                             }
                         }
-                        let body = self.parse_expr()?;
+                        let body = self.parse_nested_expr()?;
                         let span = self.span_from(start, body.span().end);
                         Ok(Expr::AnonFunc {
                             params,
@@ -512,7 +527,7 @@ impl Parser {
                     } else {
                         let mut name = self.expect_ident_syntax()?;
                         while self.peek_token() == Some(&Token::Dot)
-                            && matches!(self.peek_token_at(1), Some(Token::Ident))
+                            && self.peek_token_at(1).is_some_and(Token::can_be_identifier)
                         {
                             self.consume(&Token::Dot);
                             name.push('.');
@@ -525,7 +540,7 @@ impl Parser {
                 }
                 Token::LParen => {
                     let start = info.position;
-                    let expr = self.parse_expr()?;
+                    let expr = self.parse_nested_expr()?;
                     if !self.consume(&Token::RParen) {
                         return Err(
                             self.error_with_expected("expected ')' to close parentheses", "')'")
@@ -602,22 +617,25 @@ impl Parser {
                     break;
                 }
                 match self.peek_token() {
-                    Some(
-                        Token::Ident
-                        | Token::Integer
-                        | Token::RadixInteger
-                        | Token::Float
-                        | Token::Str
-                        | Token::LParen
-                        | Token::LBracket
-                        | Token::LBrace
-                        | Token::At
-                        | Token::Plus
-                        | Token::Minus
-                        | Token::Colon
-                        | Token::True
-                        | Token::False,
-                    ) => {
+                    Some(token)
+                        if token.can_be_identifier()
+                            || matches!(
+                                token,
+                                Token::Integer
+                                    | Token::RadixInteger
+                                    | Token::Float
+                                    | Token::Str
+                                    | Token::LParen
+                                    | Token::LBracket
+                                    | Token::LBrace
+                                    | Token::At
+                                    | Token::Plus
+                                    | Token::Minus
+                                    | Token::Colon
+                                    | Token::True
+                                    | Token::False
+                            ) =>
+                    {
                         row.push(self.parse_matrix_expr()?);
                     }
                     _ => {
@@ -638,10 +656,10 @@ impl Parser {
     }
 
     fn parse_matrix_expr(&mut self) -> Result<Expr, SyntaxError> {
-        let prior = self.in_matrix_expr;
-        self.in_matrix_expr = true;
+        let prior_boundary = self.at_matrix_element_boundary;
+        self.at_matrix_element_boundary = true;
         let expr = self.parse_expr();
-        self.in_matrix_expr = prior;
+        self.at_matrix_element_boundary = prior_boundary;
         expr
     }
 
@@ -657,9 +675,9 @@ impl Parser {
                 break;
             }
             let mut row = Vec::new();
-            row.push(self.parse_expr()?);
+            row.push(self.parse_nested_expr()?);
             while self.consume(&Token::Comma) {
-                row.push(self.parse_expr()?);
+                row.push(self.parse_nested_expr()?);
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
@@ -673,7 +691,10 @@ impl Parser {
         Ok(Expr::Cell(rows, Span::default()))
     }
 
-    fn try_parse_brace_aggregate_literal(&mut self, base: &Expr) -> Result<Option<Expr>, String> {
+    fn try_parse_brace_aggregate_literal(
+        &mut self,
+        base: &Expr,
+    ) -> Result<Option<Expr>, SyntaxError> {
         enum AggregateBase {
             Struct,
             Object(String),
@@ -703,7 +724,7 @@ impl Parser {
                 self.pos = checkpoint;
                 return Ok(None);
             };
-            let field_name = if token.token == Token::Ident {
+            let field_name = if token.token.can_be_identifier() {
                 token.lexeme
             } else {
                 self.pos = checkpoint;
@@ -713,7 +734,7 @@ impl Parser {
                 self.pos = checkpoint;
                 return Ok(None);
             }
-            let value = match self.parse_expr() {
+            let value = match self.parse_nested_expr() {
                 Ok(value) => value,
                 Err(_) => {
                     self.pos = checkpoint;

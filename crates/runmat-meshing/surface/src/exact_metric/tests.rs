@@ -1,3 +1,4 @@
+mod ownership;
 use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryModel, GeometryTransform,
     PersistentEntityId, PersistentEntityKind, PortableExactEvaluator,
@@ -38,22 +39,22 @@ fn exact_plane_pulls_the_resolved_world_metric_into_uv() {
     assert_eq!(
         evaluation.sizing_metric,
         ParametricMetricTensor {
-            uu: 4.0,
+            uu: 3.0,
             uv: 1.0,
-            vv: 9.0,
+            vv: 8.0,
         }
     );
     assert_eq!(
-        evaluation.active_sources,
+        evaluation.provenance.active_sources,
         vec![MetricSourceKind::Global, MetricSourceKind::Face]
     );
-    assert_eq!(evaluation.applied_contribution_count, 1);
+    assert_eq!(evaluation.provenance.applied_contribution_count, 1);
     assert_eq!(
         evaluation
             .sizing_metric
             .squared_length([0.5, 0.25])
             .unwrap(),
-        1.8125
+        1.5
     );
     validate_exact_face_metric_evaluation(&evaluation, &topology, &request, &evaluator, &Control)
         .unwrap();
@@ -85,7 +86,7 @@ fn independent_validation_rejects_geometry_metric_and_provenance_tampering() {
     assert_invalid(&altered_evaluator_uv, &topology, &request, &evaluator);
 
     let mut altered_provenance = evaluation;
-    altered_provenance.applied_contribution_count = 0;
+    std::sync::Arc::make_mut(&mut altered_provenance.provenance).applied_contribution_count = 0;
     assert_invalid(&altered_provenance, &topology, &request, &evaluator);
 }
 
@@ -120,9 +121,9 @@ fn occurrence_transform_is_applied_before_world_metric_pullback() {
     assert_eq!(
         evaluation.sizing_metric,
         ParametricMetricTensor {
-            uu: 16.0,
+            uu: 12.0,
             uv: 6.0,
-            vv: 81.0,
+            vv: 72.0,
         }
     );
     validate_exact_face_metric_evaluation(&evaluation, &topology, &request, &evaluator, &Control)
@@ -150,6 +151,8 @@ fn resolved_face_metric_rejects_unknown_scopes_and_queries() {
 
 fn request(face_id: &PersistentEntityId) -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
+        located_sources: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -167,7 +170,50 @@ fn request(face_id: &PersistentEntityId) -> MetricFieldRequest {
                 yz: 0.0,
             },
         }],
+        cells_across_gap: None,
     }
+}
+
+#[test]
+fn controlled_preparation_preserves_field_and_rejects_mid_inventory_cancellation() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CancelAtFace(AtomicUsize);
+    impl GeometryEvaluationControl for CancelAtFace {
+        fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 2 {
+                return Err(GeometryEvaluationError::new(
+                    runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled,
+                    "cancel during face resolution",
+                ));
+            }
+            Ok(())
+        }
+        fn consume_iterations(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+        fn consume_search_work(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+        fn consume_allocation_bytes(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+            Ok(())
+        }
+    }
+    let (_, topology, _) = runmat_geometry_fixtures::exact_circle();
+    let request = request(&topology.faces[0].id);
+    assert_eq!(
+        ResolvedFaceMetricField::new(&topology, &request).unwrap(),
+        ResolvedFaceMetricField::new_with_control(&topology, &request, &Control).unwrap(),
+    );
+    let control = CancelAtFace(AtomicUsize::new(0));
+    let error =
+        ResolvedFaceMetricField::new_with_control(&topology, &request, &control).unwrap_err();
+    assert_eq!(
+        error.kind,
+        ExactFaceMetricErrorKind::GeometryEvaluation(
+            runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled,
+        )
+    );
+    assert_eq!(control.0.load(Ordering::SeqCst), 3);
 }
 
 fn assert_invalid(
@@ -203,9 +249,5 @@ impl GeometryEvaluationControl for Control {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }

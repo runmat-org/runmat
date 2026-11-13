@@ -1,3 +1,5 @@
+import type { LanguageCompatMode } from "../index.js";
+
 export type TestIsolation = "auto" | "worker" | "session" | "none";
 export type TestReportFormat = "human" | "json" | "junit" | "tap";
 export type CoverageReportFormat = "json" | "lcov" | "cobertura" | "html";
@@ -39,10 +41,20 @@ export interface BrowserTestFilesystemEntry {
 }
 
 export interface ProjectTestLayout {
+  compatibilityMode: LanguageCompatMode;
   sourceRoots: string[];
   testRoots: string[];
   testPaths: string[];
   testConfigDigest: string;
+}
+
+export interface FreezeTestSnapshotInput {
+  compatibilityMode: LanguageCompatMode;
+  graphDigest: string;
+  baseSourceDigest: string;
+  testConfigDigest: string;
+  savedSources: SavedRunSource[];
+  unsavedBuffers: UnsavedRunBuffer[];
 }
 
 export interface RunMatTestPreparationNative {
@@ -50,13 +62,7 @@ export interface RunMatTestPreparationNative {
     manifestPath: string;
     manifestContent: string;
   }): ProjectTestLayout | Promise<ProjectTestLayout>;
-  freezeTestSnapshot(input: {
-    graphDigest: string;
-    baseSourceDigest: string;
-    testConfigDigest: string;
-    savedSources: SavedRunSource[];
-    unsavedBuffers: UnsavedRunBuffer[];
-  }): Record<string, unknown> | Promise<Record<string, unknown>>;
+  freezeTestSnapshot(input: FreezeTestSnapshotInput): Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
 export interface RunMatTestPreparationSession {

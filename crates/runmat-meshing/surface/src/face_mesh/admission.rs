@@ -8,15 +8,27 @@ use super::{
     ExactFaceJoinError, ExactFaceJoinErrorKind, ExactFaceMesh, EXACT_FACE_MESH_SCHEMA_VERSION,
 };
 
-pub(crate) fn validate_exact_face_mesh_contract(
+pub(crate) fn validate_exact_face_mesh_contract_with_cancellation(
     mesh: &ExactFaceMesh,
     topology: &ExactBRepTopology,
+    cancellation: Option<&dyn runmat_meshing_core::MeshingCancellationSignal>,
 ) -> Result<(), ExactFaceJoinError> {
+    let checkpoint = || {
+        if cancellation.is_some_and(runmat_meshing_core::MeshingCancellationSignal::is_cancelled) {
+            return Err(ExactFaceJoinError::new(
+                ExactFaceJoinErrorKind::Cancelled,
+                &mesh.source_face_id,
+                "face mesh admission cancelled",
+            ));
+        }
+        Ok(())
+    };
+    checkpoint()?;
     if mesh.schema_version != EXACT_FACE_MESH_SCHEMA_VERSION
-        || !topology
+        || topology
             .faces
-            .iter()
-            .any(|face| face.id == mesh.source_face_id)
+            .binary_search_by(|face| face.id.cmp(&mesh.source_face_id))
+            .is_err()
         || mesh.nodes.is_empty()
         || mesh.triangles.is_empty()
     {
@@ -26,12 +38,17 @@ pub(crate) fn validate_exact_face_mesh_contract(
         ));
     }
     let mut nodes = BTreeMap::new();
-    let coedges = topology
-        .coedges
-        .iter()
-        .map(|coedge| (&coedge.id, coedge))
-        .collect::<BTreeMap<_, _>>();
+    // Exact topology inventories are admitted in canonical identity order.
+    // Query only this face's incidences rather than copying all model coedges.
+    let coedge = |id: &runmat_geometry_core::PersistentEntityId| {
+        topology
+            .coedges
+            .binary_search_by(|coedge| coedge.id.cmp(id))
+            .ok()
+            .map(|index| &topology.coedges[index])
+    };
     for node in &mesh.nodes {
+        checkpoint()?;
         if node.node_id == StableDigest::ZERO
             || node.point_m.iter().any(|value| !value.is_finite())
             || node.uses.is_empty()
@@ -43,6 +60,7 @@ pub(crate) fn validate_exact_face_mesh_contract(
             ));
         }
         for use_record in &node.uses {
+            checkpoint()?;
             if use_record.source_face_id != mesh.source_face_id
                 || use_record.chart_id == StableDigest::ZERO
                 || use_record
@@ -55,14 +73,13 @@ pub(crate) fn validate_exact_face_mesh_contract(
             }
             let mut edge_parameters = BTreeSet::new();
             for parameter in &use_record.exact_edge_parameters {
+                checkpoint()?;
                 if parameter.source_coedge_id.kind != PersistentEntityKind::Coedge
                     || parameter.source_edge_id.kind != PersistentEntityKind::Edge
-                    || coedges
-                        .get(&parameter.source_coedge_id)
-                        .is_none_or(|coedge| {
-                            coedge.face_id != mesh.source_face_id
-                                || coedge.edge_id != parameter.source_edge_id
-                        })
+                    || coedge(&parameter.source_coedge_id).is_none_or(|coedge| {
+                        coedge.face_id != mesh.source_face_id
+                            || coedge.edge_id != parameter.source_edge_id
+                    })
                     || !parameter.parameter.is_finite()
                     || !edge_parameters.insert((
                         &parameter.source_coedge_id,
@@ -91,6 +108,7 @@ pub(crate) fn validate_exact_face_mesh_contract(
     let mut maximum_chordal = 0.0_f64;
     let mut maximum_normal = 0.0_f64;
     for triangle in &mesh.triangles {
+        checkpoint()?;
         let (canonical, _) = canonical_triangle(triangle.node_ids);
         let mut facet = triangle.node_ids;
         facet.sort();
@@ -120,9 +138,10 @@ pub(crate) fn validate_exact_face_mesh_contract(
     }
     let mut boundaries = BTreeSet::new();
     for segment in &mesh.boundary_segments {
+        checkpoint()?;
         if segment.source_coedge_id.kind != PersistentEntityKind::Coedge
             || segment.source_edge_id.kind != PersistentEntityKind::Edge
-            || coedges.get(&segment.source_coedge_id).is_none_or(|coedge| {
+            || coedge(&segment.source_coedge_id).is_none_or(|coedge| {
                 coedge.face_id != mesh.source_face_id || coedge.edge_id != segment.source_edge_id
             })
             || segment.node_ids[0] == segment.node_ids[1]
@@ -152,7 +171,7 @@ pub(crate) fn validate_exact_face_mesh_contract(
             .joined_chart_cuts
             .iter()
             .any(|cut| cut.cut_id == StableDigest::ZERO || cut.piece_count == 0)
-        || mesh.maximum_chordal_deviation_m != maximum_chordal
+        || mesh.maximum_chordal_deviation_m.canonical_value() != maximum_chordal
         || mesh.maximum_normal_deviation_rad != maximum_normal
     {
         return Err(invalid(

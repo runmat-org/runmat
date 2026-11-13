@@ -1,6 +1,6 @@
 [package]
 name = "runmat-test-runner"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -9,6 +9,7 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+runmat-execution = { workspace = true }
 runmat-test = { workspace = true }
 futures = "0.3"
 serde = { workspace = true }
@@ -16,5 +17,4 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-runmat-execution = { workspace = true }
 wasm-bindgen-test = "0.3"

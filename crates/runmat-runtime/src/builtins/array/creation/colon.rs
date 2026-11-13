@@ -1,29 +1,25 @@
 //! MATLAB-compatible `colon` builtin with GPU-aware semantics for RunMat.
-
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, Type,
+    COLON_ERROR_ARG_COUNT, COLON_ERROR_CHAR_CODEPOINT_RANGE,
+    COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT, COLON_ERROR_COMPLEX_IMAGINARY_NONZERO,
+    COLON_ERROR_INTERNAL, COLON_ERROR_NON_FINITE_INPUT, COLON_ERROR_NON_SCALAR_INPUT,
+    COLON_ERROR_SEQUENCE_LIMIT, COLON_ERROR_SEQUENCE_RANGE, COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+    COLON_GPU_64_BIT_INTEGER_EXTENSION, COLON_LOGICAL_INPUT_EXTENSION,
+    COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
 };
+
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
-use crate::builtins::array::type_resolvers::row_vector_type;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
-use runmat_builtins::shape_rules::infer_range_shape;
-use runmat_builtins::ResolveContext;
 
 const MIN_RATIO_TOL: f64 = f64::EPSILON * 8.0;
 const MAX_RATIO_TOL: f64 = 1e-9;
@@ -36,11 +32,12 @@ enum ScalarOrigin {
     Char,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ParsedScalar {
     value: f64,
     prefer_gpu: bool,
     origin: ScalarOrigin,
+    source: Option<runmat_accelerate_api::GpuTensorHandle>,
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::colon")]
@@ -49,14 +46,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("generator"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("linspace")],
+    provider_hooks: &[ProviderHook::Custom("sequence")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Falls back to uploading the host-generated vector when provider linspace kernels are unavailable.",
+    notes: "The typed double sequence hook preserves exact owner and endpoints; pre-attempt absence permits class-preserving host upload.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::colon")]
@@ -70,218 +67,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sequence generation is treated as a sink; it does not participate in fusion.",
 };
 
-fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
-    let (start, step, end) = match ctx.literal_args.as_slice() {
-        [LiteralValue::Number(start), LiteralValue::Number(end)] => {
-            (Some(*start), None, Some(*end))
-        }
-        [LiteralValue::Number(start), LiteralValue::Number(step), LiteralValue::Number(end)] => {
-            (Some(*start), Some(*step), Some(*end))
-        }
-        _ => (None, None, None),
-    };
-    infer_range_shape(start, step, end)
-        .map(|shape| Type::Tensor { shape: Some(shape) })
-        .unwrap_or_else(|| row_vector_type(ctx))
-}
-
 const BUILTIN_NAME: &str = "colon";
-
-pub const COLON_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "colon-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "colon with logical operands is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ColonLogicalInputExtension"),
-};
-
-pub const COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "colon-zero-imaginary-complex",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "colon with zero-imaginary complex operands is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ColonZeroImaginaryComplexExtension"),
-    };
-
-pub const COLON_GPU_64_BIT_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "colon-gpu-64-bit-integer",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "colon with resident int64 or uint64 operands is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ColonGpu64BitIntegerExtension"),
-    };
-
-pub const COLON_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    COLON_LOGICAL_INPUT_EXTENSION,
-    COLON_ZERO_IMAGINARY_COMPLEX_EXTENSION,
-    COLON_GPU_64_BIT_INTEGER_EXTENSION,
-];
-
-const COLON_INTEGER_INPUTS_TWO: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "start", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed-integer operand selects the output integer class; all typed-integer operands must use that class." },
-    BuiltinIntegerInputCapability { name: "stop", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The bound must be representable by the selected output class." },
-];
-const COLON_INTEGER_INPUTS_THREE: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability { name: "start", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed-integer operand selects the output integer class; all typed-integer operands must use that class." },
-    BuiltinIntegerInputCapability { name: "step", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The explicit step is decoded exactly and may be negative even for an unsigned output class." },
-    BuiltinIntegerInputCapability { name: "stop", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The bound must be representable by the selected output class." },
-];
-
-pub const COLON_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "x = colon(integer_start, integer_stop)", inputs: &COLON_INTEGER_INPUTS_TWO, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "All eight integer classes use exact native storage with an implicit +1 step." },
-    BuiltinIntegerCapabilityDescriptor { form: "x = colon(integer_start, integer_step, integer_stop)", inputs: &COLON_INTEGER_INPUTS_THREE, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "All eight integer classes use exact native storage. MATLAB-compatible GPU execution excludes int64 and uint64; RunMat mode accepts them through an exact owning-provider gather/upload fallback." },
-];
-
-const COLON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Arithmetic progression row vector (numeric or character).",
-}];
-
-const COLON_SIG_TWO_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Start scalar value.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Stop scalar value (implicit step = 1).",
-    },
-];
-
-const COLON_SIG_THREE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Start scalar value.",
-    },
-    BuiltinParamDescriptor {
-        name: "step",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Increment; zero returns an empty row vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "stop",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Stop scalar value.",
-    },
-];
-
-const COLON_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "x = colon(start, stop)",
-        inputs: &COLON_SIG_TWO_INPUTS,
-        outputs: &COLON_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = colon(start, step, stop)",
-        inputs: &COLON_SIG_THREE_INPUTS,
-        outputs: &COLON_OUTPUT,
-    },
-];
-
-const COLON_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.ARG_COUNT",
-    identifier: None,
-    when: "More than three input arguments are provided.",
-    message: "colon: expected two or three input arguments",
-};
-
-const COLON_ERROR_NON_SCALAR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.NON_SCALAR_INPUT",
-    identifier: None,
-    when: "At least one input is not scalar.",
-    message: "colon: expected scalar input",
-};
-
-const COLON_ERROR_NON_FINITE_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.NON_FINITE_INPUT",
-    identifier: None,
-    when: "At least one input scalar is non-finite.",
-    message: "colon: inputs must be finite numeric scalars",
-};
-
-const COLON_ERROR_COMPLEX_IMAGINARY_NONZERO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.COMPLEX_IMAGINARY_NONZERO",
-    identifier: None,
-    when: "Complex inputs have non-zero imaginary parts.",
-    message: "colon: complex inputs must have zero imaginary part",
-};
-
-const COLON_ERROR_UNSUPPORTED_STRING_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.UNSUPPORTED_STRING_INPUT",
-    identifier: None,
-    when: "String-like values are used as scalar bounds/step.",
-    message: "colon: inputs must be real scalar values; received a string-like argument",
-};
-
-const COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.CHAR_NON_INTEGER_CODEPOINT",
-    identifier: None,
-    when: "Character sequence values are non-integer.",
-    message: "colon: character sequence requires integer code points",
-};
-
-const COLON_ERROR_CHAR_CODEPOINT_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.CHAR_CODEPOINT_RANGE",
-    identifier: None,
-    when: "Character sequence values are outside valid Unicode range.",
-    message: "colon: character code point out of range",
-};
-
-const COLON_ERROR_SEQUENCE_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.SEQUENCE_RANGE",
-    identifier: None,
-    when: "Computed progression span/ratio is non-finite.",
-    message: "colon: sequence length exceeds representable range",
-};
-
-const COLON_ERROR_SEQUENCE_LIMIT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.SEQUENCE_LIMIT",
-    identifier: None,
-    when: "Computed progression length exceeds platform limits.",
-    message: "colon: sequence length exceeds platform limits",
-};
-
-const COLON_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLON.INTERNAL",
-    identifier: None,
-    when: "Internal tensor/character output construction failed.",
-    message: "colon: internal error",
-};
-
-const COLON_ERRORS: [BuiltinErrorDescriptor; 10] = [
-    COLON_ERROR_ARG_COUNT,
-    COLON_ERROR_NON_SCALAR_INPUT,
-    COLON_ERROR_NON_FINITE_INPUT,
-    COLON_ERROR_COMPLEX_IMAGINARY_NONZERO,
-    COLON_ERROR_UNSUPPORTED_STRING_INPUT,
-    COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT,
-    COLON_ERROR_CHAR_CODEPOINT_RANGE,
-    COLON_ERROR_SEQUENCE_RANGE,
-    COLON_ERROR_SEQUENCE_LIMIT,
-    COLON_ERROR_INTERNAL,
-];
-
-pub const COLON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COLON_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COLON_ERRORS,
-};
 
 fn colon_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
     colon_error_with_message(error.message, error)
@@ -298,28 +84,33 @@ fn colon_error_with_message(
     builder.build()
 }
 
+fn sequence_provider_error(
+    stage: &str,
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    let mut result = colon_error_with_message(
+        format!("colon: {stage} failed: {error}"),
+        &COLON_ERROR_INTERNAL,
+    );
+    result.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(result, error)
+}
+
 #[runtime_builtin(
     name = "colon",
-    category = "array/creation",
-    summary = "Generate arithmetic progressions with MATLAB colon semantics.",
-    keywords = "colon,sequence,range,step,gpu",
-    accel = "array_construct",
-    type_resolver(colon_type),
-    extensions(COLON_EXTENSIONS),
-    integer_capabilities(COLON_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::array::creation::colon::COLON_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::colon"
 )]
 async fn colon_builtin(
     start: Value,
     step_or_end: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(colon_error(&COLON_ERROR_ARG_COUNT));
     }
 
-    ensure_colon_extensions(&start, &step_or_end, &rest)?;
+    ensure_colon_extensions(&start, &step_or_end, rest.view())?;
 
     if [&start, &step_or_end].into_iter().chain(rest.iter()).any(|value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())) {
         return resident_integer_colon(start, step_or_end, rest).await;
@@ -345,12 +136,19 @@ async fn colon_builtin(
         } else {
             start_scalar.prefer_gpu || stop_scalar.prefer_gpu
         };
+        let source = sequence_source(&[&start_scalar, &stop_scalar])?;
+        let protected = [&start_scalar, &stop_scalar]
+            .into_iter()
+            .filter_map(|scalar| scalar.source.as_ref())
+            .collect::<Vec<_>>();
         build_sequence(
             start_scalar.value,
             step,
             stop_scalar.value,
             explicit_gpu,
             char_mode,
+            source.as_ref(),
+            &protected,
         )
     } else {
         let step_scalar = parse_real_scalar("colon", step_or_end).await?;
@@ -362,11 +160,16 @@ async fn colon_builtin(
         } else {
             start_scalar.prefer_gpu || step_scalar.prefer_gpu || stop_scalar.prefer_gpu
         };
+        let source = sequence_source(&[&start_scalar, &step_scalar, &stop_scalar])?;
+        let protected = [&start_scalar, &step_scalar, &stop_scalar]
+            .into_iter()
+            .filter_map(|scalar| scalar.source.as_ref())
+            .collect::<Vec<_>>();
         if step_scalar.value == 0.0 {
             return if char_mode {
                 build_char_sequence(Vec::new())
             } else {
-                finalize_numeric_sequence(Vec::new(), explicit_gpu)
+                finalize_numeric_sequence(Vec::new(), explicit_gpu, source.as_ref(), &protected)
             };
         }
         build_sequence(
@@ -375,6 +178,8 @@ async fn colon_builtin(
             stop_scalar.value,
             explicit_gpu,
             char_mode,
+            source.as_ref(),
+            &protected,
         )
     }
 }
@@ -382,7 +187,7 @@ async fn colon_builtin(
 async fn resident_integer_colon(
     start: Value,
     step_or_end: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut owner_device = None;
     for value in [&start, &step_or_end].into_iter().chain(rest.iter()) {
@@ -450,7 +255,7 @@ async fn resident_integer_colon(
     let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
         colon_error_with_message(format!("colon: {error}"), &COLON_ERROR_INTERNAL)
     })?;
-    Ok(gpu_helpers::resident_gpu_value(handle))
+    gpu_helpers::resident_gpu_value(handle)
 }
 
 async fn gather_colon_operand(value: Value) -> crate::BuiltinResult<Value> {
@@ -463,7 +268,7 @@ async fn gather_colon_operand(value: Value) -> crate::BuiltinResult<Value> {
 fn ensure_colon_extensions(
     start: &Value,
     step_or_end: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<()> {
     for value in std::iter::once(start)
         .chain(std::iter::once(step_or_end))
@@ -561,7 +366,7 @@ fn try_integer_sequence(
 
 fn integer_target_from_values<'a>(
     values: impl IntoIterator<Item = &'a Value>,
-) -> crate::BuiltinResult<Option<IntegerTarget>> {
+) -> crate::BuiltinResult<Option<IntegerClass>> {
     let mut target = None;
     for value in values {
         let Some(candidate) = typed_integer_target(value)? else {
@@ -581,9 +386,9 @@ fn integer_target_from_values<'a>(
     Ok(target)
 }
 
-fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTarget>> {
+fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerClass>> {
     match value {
-        Value::Int(value) => Ok(Some(IntegerTarget::from_int_value(value))),
+        Value::Int(value) => Ok(Some(IntegerClass::from_int_value(value))),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             if !tensor::is_scalar_tensor(tensor) {
                 return Err(colon_error_with_message(
@@ -591,7 +396,7 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTar
                     &COLON_ERROR_NON_SCALAR_INPUT,
                 ));
             }
-            Ok(tensor.integer_storage().map(IntegerTarget::from_storage))
+            Ok(tensor.integer_storage().map(IntegerClass::from_storage))
         }
         Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
             if complex_tensor_element_len(tensor) != 1 {
@@ -604,14 +409,14 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTar
                 .integer_storage()
                 .expect("typed complex integer storage");
             if !storage
-                .imag
+                .imag()
                 .value_at(0)
                 .expect("scalar imaginary value")
                 .is_zero()
             {
                 return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
             }
-            Ok(Some(IntegerTarget::from_storage(&storage.real)))
+            Ok(Some(IntegerClass::from_storage(storage.real())))
         }
         _ => Ok(None),
     }
@@ -619,12 +424,12 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTar
 
 fn integer_colon_value(
     value: &Value,
-    target: IntegerTarget,
+    target: IntegerClass,
     require_target_range: bool,
 ) -> crate::BuiltinResult<i128> {
     let integer = match value {
         Value::Int(value) => {
-            if IntegerTarget::from_int_value(value) != target {
+            if IntegerClass::from_int_value(value) != target {
                 return Err(colon_error_with_message(
                     "colon: integer operands must have the same integer class",
                     &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
@@ -642,7 +447,7 @@ fn integer_colon_value(
             let storage = tensor
                 .integer_storage()
                 .expect("typed tensor storage is present");
-            if IntegerTarget::from_storage(storage) != target {
+            if IntegerClass::from_storage(storage) != target {
                 return Err(colon_error_with_message(
                     "colon: integer operands must have the same integer class",
                     &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
@@ -661,20 +466,20 @@ fn integer_colon_value(
                 .integer_storage()
                 .expect("typed complex integer storage");
             if !storage
-                .imag
+                .imag()
                 .value_at(0)
                 .expect("scalar imaginary value")
                 .is_zero()
             {
                 return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
             }
-            if IntegerTarget::from_storage(&storage.real) != target {
+            if IntegerClass::from_storage(storage.real()) != target {
                 return Err(colon_error_with_message(
                     "colon: integer operands must have the same integer class",
                     &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
                 ));
             }
-            int_value_to_i128(&storage.real.value_at(0).expect("scalar real value"))
+            int_value_to_i128(&storage.real().value_at(0).expect("scalar real value"))
         }
         Value::Num(value) => float_to_integral_i128(*value)?,
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
@@ -730,30 +535,30 @@ fn int_value_to_i128(value: &IntValue) -> i128 {
     }
 }
 
-fn integer_target_contains(target: IntegerTarget, value: i128) -> bool {
+fn integer_target_contains(target: IntegerClass, value: i128) -> bool {
     match target {
-        IntegerTarget::I8 => value >= i128::from(i8::MIN) && value <= i128::from(i8::MAX),
-        IntegerTarget::I16 => value >= i128::from(i16::MIN) && value <= i128::from(i16::MAX),
-        IntegerTarget::I32 => value >= i128::from(i32::MIN) && value <= i128::from(i32::MAX),
-        IntegerTarget::I64 => value >= i128::from(i64::MIN) && value <= i128::from(i64::MAX),
-        IntegerTarget::U8 => value >= 0 && value <= i128::from(u8::MAX),
-        IntegerTarget::U16 => value >= 0 && value <= i128::from(u16::MAX),
-        IntegerTarget::U32 => value >= 0 && value <= i128::from(u32::MAX),
-        IntegerTarget::U64 => value >= 0 && value <= i128::from(u64::MAX),
+        IntegerClass::Int8 => value >= i128::from(i8::MIN) && value <= i128::from(i8::MAX),
+        IntegerClass::Int16 => value >= i128::from(i16::MIN) && value <= i128::from(i16::MAX),
+        IntegerClass::Int32 => value >= i128::from(i32::MIN) && value <= i128::from(i32::MAX),
+        IntegerClass::Int64 => value >= i128::from(i64::MIN) && value <= i128::from(i64::MAX),
+        IntegerClass::UInt8 => value >= 0 && value <= i128::from(u8::MAX),
+        IntegerClass::UInt16 => value >= 0 && value <= i128::from(u16::MAX),
+        IntegerClass::UInt32 => value >= 0 && value <= i128::from(u32::MAX),
+        IntegerClass::UInt64 => value >= 0 && value <= i128::from(u64::MAX),
     }
 }
 
-fn integer_value_from_i128(target: IntegerTarget, value: i128) -> IntValue {
+fn integer_value_from_i128(target: IntegerClass, value: i128) -> IntValue {
     debug_assert!(integer_target_contains(target, value));
     match target {
-        IntegerTarget::I8 => IntValue::I8(value as i8),
-        IntegerTarget::I16 => IntValue::I16(value as i16),
-        IntegerTarget::I32 => IntValue::I32(value as i32),
-        IntegerTarget::I64 => IntValue::I64(value as i64),
-        IntegerTarget::U8 => IntValue::U8(value as u8),
-        IntegerTarget::U16 => IntValue::U16(value as u16),
-        IntegerTarget::U32 => IntValue::U32(value as u32),
-        IntegerTarget::U64 => IntValue::U64(value as u64),
+        IntegerClass::Int8 => IntValue::I8(value as i8),
+        IntegerClass::Int16 => IntValue::I16(value as i16),
+        IntegerClass::Int32 => IntValue::I32(value as i32),
+        IntegerClass::Int64 => IntValue::I64(value as i64),
+        IntegerClass::UInt8 => IntValue::U8(value as u8),
+        IntegerClass::UInt16 => IntValue::U16(value as u16),
+        IntegerClass::UInt32 => IntValue::U32(value as u32),
+        IntegerClass::UInt64 => IntValue::U64(value as u64),
     }
 }
 
@@ -779,23 +584,25 @@ fn build_sequence(
     stop: f64,
     explicit_gpu: bool,
     char_mode: bool,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> crate::BuiltinResult<Value> {
     if !start.is_finite() || !step.is_finite() || !stop.is_finite() {
         return Err(colon_error(&COLON_ERROR_NON_FINITE_INPUT));
     }
     if step == 0.0 {
-        return finalize_numeric_sequence(Vec::new(), explicit_gpu);
+        return finalize_numeric_sequence(Vec::new(), explicit_gpu, source, protected);
     }
 
     let plan = plan_progression(start, step, stop)?;
 
     if char_mode {
-        let data = materialize_progression(&plan, start, step);
+        let data = materialize_progression(&plan, start, step)?;
         return build_char_sequence(data);
     }
 
     if plan.count == 0 {
-        return finalize_numeric_sequence(Vec::new(), explicit_gpu);
+        return finalize_numeric_sequence(Vec::new(), explicit_gpu, source, protected);
     }
 
     let prefer_gpu =
@@ -808,42 +615,134 @@ fn build_sequence(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            if let Ok(handle) = provider.linspace(start, plan.final_end, plan.count) {
-                return Ok(Value::GpuTensor(handle));
+        if let Some(provider) = source
+            .and_then(gpu_helpers::exact_provider_for_handle)
+            .or_else(runmat_accelerate_api::provider)
+        {
+            let request = runmat_accelerate_api::ProviderSequenceRequest::linear(
+                start,
+                plan.final_end,
+                plan.count,
+                runmat_accelerate_api::ProviderPrecision::F64,
+            );
+            match provider.sequence(&request) {
+                Ok(Some(handle)) => {
+                    return validated_sequence_output(
+                        handle, provider, source, protected, plan.count,
+                    )
+                }
+                Ok(None) => {}
+                Err(error) => return Err(sequence_provider_error("provider sequence", error)),
             }
         }
     }
 
-    let data = materialize_progression(&plan, start, step);
-    finalize_numeric_sequence(data, prefer_gpu)
+    let data = materialize_progression(&plan, start, step)?;
+    finalize_numeric_sequence(data, prefer_gpu, source, protected)
 }
 
-fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> crate::BuiltinResult<Value> {
+fn finalize_numeric_sequence(
+    data: Vec<f64>,
+    prefer_gpu: bool,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> crate::BuiltinResult<Value> {
     let len = data.len();
     let shape = vec![1usize, len];
+    let tensor = Tensor::new(data, shape)
+        .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))?;
+
+    if let Some(source) = source {
+        let provider = gpu_helpers::exact_provider_for_handle(source).ok_or_else(|| {
+            colon_error_with_message(
+                "colon: no exact owner for resident scalar",
+                &COLON_ERROR_INTERNAL,
+            )
+        })?;
+        if !gpu_helpers::real_sequence_upload_feasible(
+            provider,
+            runmat_accelerate_api::ProviderPrecision::F64,
+            tensor.shape(),
+        ) {
+            if runmat_accelerate_api::handle_is_explicit(source) {
+                let mut error = colon_error_with_message(
+                    "colon: owner cannot preserve double GPU class",
+                    &COLON_ERROR_INTERNAL,
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(error);
+            }
+            return Ok(tensor::tensor_into_value(tensor));
+        }
+        return gpu_helpers::restore_class_preserving_value_with_operands(
+            source,
+            Value::Tensor(tensor),
+            "colon",
+            gpu_helpers::RestoreOperandContext::new(protected, protected),
+        );
+    }
 
     if prefer_gpu {
-        #[cfg(all(test, feature = "wgpu"))]
-        {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &data,
-                shape: &shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                return Ok(Value::GpuTensor(handle));
+            if !gpu_helpers::real_sequence_upload_feasible(
+                provider,
+                runmat_accelerate_api::ProviderPrecision::F64,
+                tensor.shape(),
+            ) {
+                return Ok(tensor::tensor_into_value(tensor));
+            }
+            match gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[]) {
+                Ok(handle) => return validated_sequence_output(handle, provider, None, &[], len),
+                Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                    if error.is_unsupported() => {}
+                Err(error) => {
+                    return Err(sequence_provider_error(
+                        "typed sequence upload",
+                        error.into_execution_error(),
+                    ))
+                }
             }
         }
     }
 
-    Tensor::new(data, shape)
-        .map(tensor::tensor_into_value)
-        .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))
+    Ok(tensor::tensor_into_value(tensor))
+}
+
+fn validated_sequence_output(
+    output: runmat_accelerate_api::GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+    count: usize,
+) -> crate::BuiltinResult<Value> {
+    let valid = output.shape() == [1, count]
+        && output.device_id() == provider.device_id()
+        && gpu_helpers::exact_provider_for_handle(&output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+        && runmat_accelerate_api::handle_storage(&output)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && runmat_accelerate_api::handle_precision(&output)
+            == Some(runmat_accelerate_api::ProviderPrecision::F64)
+        && runmat_accelerate_api::handle_integer_type(&output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&output)
+        && protected
+            .iter()
+            .all(|input| !input.shares_allocation_with(&output));
+    if !valid {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            colon_error_with_message(
+                "colon: malformed provider sequence output",
+                &COLON_ERROR_INTERNAL,
+            ),
+        ));
+    }
+    let output = if source.is_some() {
+        gpu_helpers::propagate_owned_output_provenance(output, protected.iter().copied())?
+    } else {
+        output
+    };
+    gpu_helpers::resident_gpu_value(output)
 }
 
 struct ProgressionPlan {
@@ -917,18 +816,31 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> crate::BuiltinResult<Pr
     Ok(ProgressionPlan { count, final_end })
 }
 
-fn materialize_progression(plan: &ProgressionPlan, start: f64, step: f64) -> Vec<f64> {
+fn materialize_progression(
+    plan: &ProgressionPlan,
+    start: f64,
+    step: f64,
+) -> crate::BuiltinResult<Vec<f64>> {
     if plan.count == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut data = Vec::with_capacity(plan.count);
+    let mut data = Vec::new();
+    data.try_reserve_exact(plan.count).map_err(|error| {
+        colon_error_with_message(
+            format!("colon: cannot reserve sequence: {error}"),
+            &COLON_ERROR_SEQUENCE_LIMIT,
+        )
+    })?;
     for idx in 0..plan.count {
         data.push(start + step * (idx as f64));
+    }
+    if let Some(first) = data.first_mut() {
+        *first = start;
     }
     if let Some(last) = data.last_mut() {
         *last = plan.final_end;
     }
-    data
+    Ok(data)
 }
 
 fn default_step(_start: f64, _stop: f64) -> f64 {
@@ -948,16 +860,32 @@ fn tolerance(start: f64, step: f64, stop: f64) -> f64 {
 async fn parse_real_scalar(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
     match value {
         Value::GpuTensor(handle) => {
+            runmat_accelerate_api::numeric_readback_for_handle(&handle).map_err(|_| {
+                colon_error_with_message(
+                    "colon: no exact owner for resident scalar",
+                    &COLON_ERROR_INTERNAL,
+                )
+            })?;
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             let scalar = tensor_scalar(name, &tensor)?;
             Ok(ParsedScalar {
                 value: scalar,
                 prefer_gpu: true,
                 origin: ScalarOrigin::Numeric,
+                source: Some(handle),
             })
         }
         other => parse_real_scalar_host(name, other),
     }
+}
+
+fn sequence_source(
+    scalars: &[&ParsedScalar],
+) -> crate::BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
+    gpu_helpers::select_resident_output_source(
+        scalars.iter().filter_map(|scalar| scalar.source.clone()),
+        "colon",
+    )
 }
 
 fn parse_real_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<ParsedScalar> {
@@ -966,41 +894,49 @@ fn parse_real_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<Pars
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Int(i) => Ok(ParsedScalar {
             value: i.to_f64(),
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Bool(b) => Ok(ParsedScalar {
             value: if b { 1.0 } else { 0.0 },
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Tensor(t) => tensor_scalar(name, &t).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::LogicalArray(logical) => logical_scalar(name, &logical).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::Complex(re, im) => complex_to_real(name, re, im).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::ComplexTensor(t) => complex_tensor_scalar(name, &t).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Numeric,
+            source: None,
         }),
         Value::CharArray(chars) => char_scalar(name, &chars).map(|v| ParsedScalar {
             value: v,
             prefer_gpu: false,
             origin: ScalarOrigin::Char,
+            source: None,
         }),
         Value::String(_) | Value::StringArray(_) => Err(colon_error_with_message(
             format!("{name}: inputs must be real scalar values; received a string-like argument"),
@@ -1064,12 +1000,12 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
     }
     if let Some(storage) = tensor.integer_storage() {
         let re = storage
-            .real
+            .real()
             .value_at(0)
             .expect("scalar complex integer tensor has one real value")
             .to_f64();
         let im = storage
-            .imag
+            .imag()
             .value_at(0)
             .expect("scalar complex integer tensor has one imaginary value")
             .to_f64();
@@ -1080,21 +1016,18 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
-    tensor
-        .integer_storage()
-        .as_ref()
-        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
+    tensor.len()
 }
 
 fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {
-    if array.rows * array.cols != 1 {
+    if array.data().len() != 1 {
         return Err(colon_error_with_message(
             format!("{name}: expected scalar input"),
             &COLON_ERROR_NON_SCALAR_INPUT,
         ));
     }
-    let ch = array.data[0];
-    Ok(ch as u32 as f64)
+    let ch = array.data()[0];
+    Ok(f64::from(ch.raw()))
 }
 
 fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
@@ -1105,31 +1038,36 @@ fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
         if (value - rounded).abs() > CHAR_TOL {
             return Err(colon_error(&COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT));
         }
-        if !(0.0..=(u32::MAX as f64)).contains(&rounded) {
+        if !(0.0..=f64::from(u16::MAX)).contains(&rounded) {
             return Err(colon_error(&COLON_ERROR_CHAR_CODEPOINT_RANGE));
         }
-        let code = rounded as u32;
-        let ch = std::char::from_u32(code)
-            .ok_or_else(|| colon_error(&COLON_ERROR_CHAR_CODEPOINT_RANGE))?;
-        chars.push(ch);
+        chars.push(runmat_value::Utf16CodeUnit::from_raw(rounded as u16));
     }
 
-    let array = CharArray::new(chars, 1, len)
+    let array = CharArray::from_code_units(chars, 1, len)
         .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))?;
     Ok(Value::CharArray(array))
 }
+
+#[cfg(test)]
+mod f32_preferred_owner;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, Tensor,
     };
 
     fn colon_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::colon_builtin(start, stop, rest))
+        block_on(super::colon_builtin(
+            start,
+            stop,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1138,7 +1076,7 @@ pub(crate) mod tests {
         let result = colon_builtin(Value::Num(1.0), Value::Num(5.0), Vec::new()).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1256,7 +1194,7 @@ pub(crate) mod tests {
             IntValue::U64(1),
         ];
         for value in values {
-            let target = IntegerTarget::from_int_value(&value);
+            let target = IntegerClass::from_int_value(&value);
             let typed_one = integer_value_from_i128(target, 1);
             let typed_three = integer_value_from_i128(target, 3);
             for result in [
@@ -1307,38 +1245,13 @@ pub(crate) mod tests {
         assert!(error.message().contains("same integer class"));
     }
 
-    #[test]
-    fn colon_type_is_row_vector() {
-        assert_eq!(
-            colon_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
-    #[test]
-    fn colon_type_infers_literal_length() {
-        let ctx = ResolveContext::new(vec![
-            LiteralValue::Number(-2.0),
-            LiteralValue::Number(0.02),
-            LiteralValue::Number(2.0),
-        ]);
-        assert_eq!(
-            colon_type(&[Type::Num, Type::Num, Type::Num], &ctx),
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(201)])
-            }
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_two_arg_descending_returns_empty() {
         let result = colon_builtin(Value::Num(5.0), Value::Num(1.0), Vec::new()).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), vec![1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1352,7 +1265,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(5.0), Value::Num(-1.0), vec![Value::Num(1.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1366,7 +1279,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(0.0), Value::Num(0.5), vec![Value::Num(2.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.5, 1.0, 1.5, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1380,7 +1293,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(0.0), Value::Num(2.0), vec![Value::Num(5.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), vec![1, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1394,7 +1307,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Num(-1.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), vec![1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1409,7 +1322,7 @@ pub(crate) mod tests {
         else {
             panic!("expected empty tensor");
         };
-        assert_eq!(result.shape, vec![1, 0]);
+        assert_eq!(result.shape(), vec![1, 0]);
         let Value::Tensor(typed) = colon_builtin(
             Value::Int(IntValue::U16(0)),
             Value::Num(0.0),
@@ -1562,14 +1475,12 @@ pub(crate) mod tests {
     #[test]
     fn colon_resident_logical_and_complex_metadata_are_gated_before_dispatch() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
             let logical = provider
-                .upload(&HostTensorView {
-                    data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
                 })
                 .expect("logical upload");
-            runmat_accelerate_api::set_handle_logical(&logical, true);
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = colon_builtin(
                 Value::GpuTensor(logical.clone()),
@@ -1582,14 +1493,11 @@ pub(crate) mod tests {
                 COLON_LOGICAL_INPUT_EXTENSION.error_identifier
             );
             drop(_compat);
-            let mut complex = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 0.0],
-                    shape: &[1, 1],
-                })
-                .expect("complex upload");
-            complex.descriptor.storage =
-                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+            let complex = gpu_helpers::upload_complex_tensor(
+                provider,
+                &runmat_value::ComplexTensor::new(vec![(1.0, 0.0)], vec![1, 1]).unwrap(),
+            )
+            .expect("complex upload");
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = colon_builtin(
                 Value::GpuTensor(complex.clone()),
@@ -1691,7 +1599,7 @@ pub(crate) mod tests {
             let start = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let start_view = HostTensorView {
                 data: &start.materialize_f64(),
-                shape: &start.shape,
+                shape: start.shape(),
             };
             let start_handle = provider.upload(&start_view).expect("upload start");
 
@@ -1705,12 +1613,73 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 5]);
+                    assert_eq!(gathered.shape(), vec![1, 5]);
                     assert_eq!(gathered.materialize_f64(), vec![0.0, 0.5, 1.0, 1.5, 2.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
         });
+    }
+
+    #[test]
+    fn double_colon_uses_f64_capability_of_f32_preferred_owner() {
+        super::f32_preferred_owner::with_provider(|provider| {
+            assert_eq!(
+                provider.precision(),
+                runmat_accelerate_api::ProviderPrecision::F32
+            );
+            assert!(gpu_helpers::real_sequence_upload_feasible(
+                provider,
+                runmat_accelerate_api::ProviderPrecision::F64,
+                &[1, 3],
+            ));
+            let output = finalize_numeric_sequence(vec![0.0, 0.5, 1.0], true, None, &[])
+                .expect("class-preserving sequence");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident double")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            assert_eq!(handle.device_id(), provider.device_id());
+            assert_eq!(handle.shape(), [1, 3]);
+            let tensor = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+            assert_eq!(tensor.materialize_f64(), vec![0.0, 0.5, 1.0]);
+            // This finite value would round to 1 in F32: a preferred-class
+            // conversion plus an F64 tag cannot satisfy the native oracle.
+            let exact = 1.0_f64 + 2.0_f64.powi(-40);
+            let output = finalize_numeric_sequence(vec![exact], true, None, &[])
+                .expect("native F64 sequence despite F32 preference");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected native resident F64 probe");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&handle),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            );
+            let tensor = test_support::gather(Value::GpuTensor(handle)).expect("native readback");
+            assert_eq!(tensor.as_f64_slice().unwrap()[0].to_bits(), exact.to_bits());
+        });
+    }
+
+    #[test]
+    fn colon_host_progression_retains_negative_zero_start() {
+        let plan = plan_progression(-0.0, 1.0, 1.0).unwrap();
+        assert_eq!(
+            materialize_progression(&plan, -0.0, 1.0).unwrap()[0].to_bits(),
+            (-0.0f64).to_bits()
+        );
+    }
+
+    #[test]
+    fn colon_host_progression_rejects_unreservable_count() {
+        let plan = ProgressionPlan {
+            count: usize::MAX,
+            final_end: 1.0,
+        };
+        assert!(materialize_progression(&plan, 0.0, 1.0).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1730,7 +1699,7 @@ pub(crate) mod tests {
         let start = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
         let start_view = HostTensorView {
             data: &start.materialize_f64(),
-            shape: &start.shape,
+            shape: start.shape(),
         };
         let start_handle = provider.upload(&start_view).expect("upload start");
         let gpu = colon_builtin(
@@ -1744,6 +1713,12 @@ pub(crate) mod tests {
             Value::GpuTensor(handle) => {
                 test_support::gather(Value::GpuTensor(handle)).expect("gather gpu")
             }
+            Value::Tensor(tensor)
+                if provider.precision() == runmat_accelerate_api::ProviderPrecision::F32 =>
+            {
+                assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+                tensor
+            }
             other => panic!("expected GPU tensor, got {other:?}"),
         };
 
@@ -1753,7 +1728,7 @@ pub(crate) mod tests {
             other => panic!("unexpected CPU result {other:?}"),
         };
 
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
@@ -1774,6 +1749,35 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn colon_char_increasing() {
+        let raw = |unit| {
+            Value::CharArray(
+                CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(unit)], 1, 1)
+                    .expect("raw endpoint"),
+            )
+        };
+        let Value::CharArray(units) =
+            colon_builtin(raw(0xD7FF), raw(0xD801), Vec::new()).expect("raw UTF-16 range")
+        else {
+            panic!("expected character range");
+        };
+        assert_eq!(
+            units
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            [0xD7FF, 0xD800, 0xD801]
+        );
+        let Value::CharArray(last) =
+            colon_builtin(raw(0xFFFF), raw(0xFFFF), Vec::new()).expect("last code unit")
+        else {
+            panic!("expected character range");
+        };
+        assert_eq!(last.data()[0].raw(), 0xFFFF);
+        assert!(build_char_sequence(vec![65536.0]).is_err());
+        assert!(char_scalar("colon", &CharArray::new_row("\u{1F642}")).is_err());
+        let empty = CharArray::from_code_units_with_shape(Vec::new(), vec![1, 1, 0]).unwrap();
+        assert!(char_scalar("colon", &empty).is_err());
         let start = Value::CharArray(CharArray::new_row("a"));
         let stop = Value::CharArray(CharArray::new_row("e"));
         let result = colon_builtin(start, stop, Vec::new()).expect("colon");
@@ -1781,8 +1785,11 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 5);
-                let expected: Vec<char> = "abcde".chars().collect();
-                assert_eq!(arr.data, expected);
+                let expected: Vec<_> = "abcde"
+                    .encode_utf16()
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .collect();
+                assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1799,8 +1806,11 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 4);
-                let expected: Vec<char> = "aceg".chars().collect();
-                assert_eq!(arr.data, expected);
+                let expected: Vec<_> = "aceg"
+                    .encode_utf16()
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .collect();
+                assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1852,7 +1862,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 0);
-                assert!(arr.data.is_empty());
+                assert!(arr.data().is_empty());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1869,8 +1879,11 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 5);
-                let expected: Vec<char> = "fedcb".chars().collect();
-                assert_eq!(arr.data, expected);
+                let expected: Vec<_> = "fedcb"
+                    .encode_utf16()
+                    .map(runmat_value::Utf16CodeUnit::from_raw)
+                    .collect();
+                assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1897,7 +1910,7 @@ pub(crate) mod tests {
             let step = Tensor::new(vec![0.5], vec![1, 1]).unwrap();
             let view = HostTensorView {
                 data: &step.materialize_f64(),
-                shape: &step.shape,
+                shape: step.shape(),
             };
             let step_handle = provider.upload(&view).expect("upload step");
             let result = colon_builtin(

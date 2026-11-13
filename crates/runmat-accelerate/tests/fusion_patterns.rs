@@ -1,5 +1,5 @@
 use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
-use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
+use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ShapeInfo, ValueOrigin};
 use runmat_hir::LoweringContext;
 use runmat_parser::parse;
 use std::sync::Once;
@@ -10,19 +10,33 @@ fn init_logger() {
         let _ = env_logger::builder().is_test(true).try_init();
     });
 }
-fn compile_graph(source: &str) -> AccelGraph {
+fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
     let trimmed = source.trim_start_matches(|c: char| c.is_whitespace());
     let ast = parse(trimmed).expect("parse");
     let hir = runmat_hir::lower(&ast, &LoweringContext::empty()).expect("lower HIR");
     let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("lower MIR");
     let entrypoint = hir.assembly.entrypoints[0].id;
-    let bytecode = runmat_vm::compile(&hir.assembly, &mir, entrypoint).expect("compile semantic");
-    bytecode.accel_graph.clone().expect("bytecode accel graph")
+    runmat_vm::compile(&hir.assembly, &mir, entrypoint).expect("compile semantic")
+}
+fn compile_graph(source: &str) -> AccelGraph {
+    compile_bytecode(source)
+        .accel_graph
+        .expect("bytecode accel graph")
+}
+
+fn count_matrix_products(graph: &AccelGraph) -> usize {
+    graph
+        .nodes
+        .iter()
+        .filter(|node| node.is_matrix_product())
+        .count()
 }
 
 fn has_builtin(graph: &AccelGraph, name: &str) -> bool {
     graph.nodes.iter().any(|node| match &node.label {
-        AccelNodeLabel::Builtin { name: node_name } => node_name.eq_ignore_ascii_case(name),
+        AccelNodeLabel::Builtin {
+            name: node_name, ..
+        } => node_name.eq_ignore_ascii_case(name),
         _ => false,
     })
 }
@@ -51,7 +65,7 @@ fn stats_centered_gram_pattern() {
     assert!(has_builtin(&graph, "mean"));
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
-    assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 1);
+    assert!(count_matrix_products(&graph) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::ElemDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
@@ -140,7 +154,7 @@ fn random_projection_power_step_pattern() {
     assert!(has_builtin(&graph, "sqrt"));
     assert!(count_primitives(&graph, PrimitiveOp::ElemDiv) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
-    assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 1);
+    assert!(count_matrix_products(&graph) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
 
@@ -163,7 +177,7 @@ fn monte_carlo_factor_risk_pattern() {
     assert!(has_builtin(&graph, "mean"));
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
-    assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 2);
+    assert!(count_matrix_products(&graph) >= 2);
     assert!(count_primitives(&graph, PrimitiveOp::ElemDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
@@ -173,16 +187,64 @@ fn detects_centered_gram_group() {
     let source = r#"
     n = 7;
     d = 4;
-    A = rand(n, d);
+    A = rand(7, 4);
     mu = mean(A, 1);
     centered = A - mu;
-    cov = (centered.' * centered) / (n - 1);
+    cov = (centered.' * centered) / 6;
     "#;
     let graph = compile_graph(source);
     let groups = detect_fusion_groups(&graph);
     assert!(groups
         .iter()
         .any(|group| matches!(group.kind, FusionKind::CenteredGram)));
+    for expression in [
+        "(centered.' * centered) / (n - 1)",
+        "(centered.' * A) / 6",
+        "(centered * centered.') / 6",
+        "(centered.' .* centered) / 6",
+        "(centered.' * centered) / 8",
+    ] {
+        let source =
+            format!("n=7; d=4; A=rand(7,4); mu=mean(A,1); centered=A-mu; cov={expression};");
+        assert!(
+            !detect_fusion_groups(&compile_graph(&source))
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::CenteredGram)),
+            "{expression}"
+        );
+    }
+    let wrong_axis =
+        compile_graph("A=rand(7,4); mu=mean(A,2); centered=A-mu; cov=(centered.'*centered)/6;");
+    assert!(!detect_fusion_groups(&wrong_axis)
+        .iter()
+        .any(|group| matches!(group.kind, FusionKind::CenteredGram)));
+    let entry = runmat_builtins::MTIMES_CATALOG_ENTRY;
+    let identity = entry.binding_identity(&entry.bindings[0]);
+    for origin in [
+        runmat_accelerate::graph::FusionCallOrigin::NamedUnresolved,
+        runmat_accelerate::graph::FusionCallOrigin::Operator(runmat_types::OperatorKind::Add),
+        runmat_accelerate::graph::FusionCallOrigin::Named {
+            binding: runmat_builtins::BuiltinBindingIdentity {
+                variant: "not-canonical",
+                ..identity
+            },
+        },
+    ] {
+        let mut forged = graph.clone();
+        let product = forged
+            .nodes
+            .iter_mut()
+            .find(|node| node.is_matrix_product())
+            .unwrap();
+        product.label = AccelNodeLabel::Builtin {
+            name: entry.identity.name.into(),
+            origin,
+        };
+        assert!(!product.is_matrix_product());
+        assert!(!detect_fusion_groups(&forged)
+            .iter()
+            .any(|group| matches!(group.kind, FusionKind::CenteredGram)));
+    }
 }
 
 #[test]
@@ -236,6 +298,20 @@ fn detects_explained_variance_group() {
 }
 
 #[test]
+fn explained_variance_does_not_reorder_matrix_products() {
+    for expression in ["diag((G * Q.') * Q)", "diag(Q * (Q.' * G))"] {
+        let source = format!("Q = [1, 2; 3, 4]; G = [5, 6; 7, 8]; result = {expression};");
+        let graph = compile_graph(&source);
+        assert!(
+            !detect_fusion_groups(&graph)
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::ExplainedVariance)),
+            "must retain matrix operand order: {expression}",
+        );
+    }
+}
+
+#[test]
 fn detects_image_normalize_group() {
     let source = r#"
     seed = 0;
@@ -251,9 +327,10 @@ fn detects_image_normalize_group() {
     out = max(out, single(0));
     out = out .^ gamma;
     "#;
-    let graph = compile_graph(source);
-    let groups = detect_fusion_groups(&graph);
-    let plan = FusionPlan::from_graph(&graph, &groups);
+    let bytecode = compile_bytecode(source);
+    let graph = bytecode.accel_graph.as_ref().expect("compiled graph");
+    let groups = detect_fusion_groups(graph);
+    let plan = FusionPlan::from_graph(graph, &groups);
     let image_group = plan
         .groups
         .iter()
@@ -261,25 +338,32 @@ fn detects_image_normalize_group() {
         .expect("image normalize group not found");
     match image_group.pattern.as_ref() {
         Some(runmat_accelerate::fusion::FusionPattern::ImageNormalize(pattern)) => {
-            assert!(matches!(
-                pattern.epsilon,
-                runmat_accelerate::fusion::ImageScalar::Constant(_)
-            ));
-            assert!(pattern
-                .gain
-                .as_ref()
-                .map(|s| matches!(s, runmat_accelerate::fusion::ImageScalar::Constant(_)))
-                .unwrap_or(true));
-            assert!(pattern
-                .bias
-                .as_ref()
-                .map(|s| matches!(s, runmat_accelerate::fusion::ImageScalar::Constant(_)))
-                .unwrap_or(true));
-            assert!(pattern
-                .gamma
-                .as_ref()
-                .map(|s| matches!(s, runmat_accelerate::fusion::ImageScalar::Constant(_)))
-                .unwrap_or(true));
+            let assert_live = |scalar: &runmat_accelerate::fusion::ImageScalar, name: &str| {
+                let runmat_accelerate::fusion::ImageScalar::Value(id) = scalar else {
+                    panic!("{name}: published scalar must not be frozen into a literal");
+                };
+                let binding = graph
+                    .var_binding(*id)
+                    .or_else(|| match graph.value(*id)?.origin {
+                        ValueOrigin::NodeOutput { node, .. } => graph.node_binding(node),
+                        _ => None,
+                    })
+                    .expect("exact live scalar binding");
+                let expected = bytecode
+                    .var_names
+                    .iter()
+                    .find(|(_, candidate)| candidate.as_str() == name)
+                    .map(|(slot, _)| *slot)
+                    .expect("compiled control variable");
+                assert_eq!(
+                    binding.index, expected,
+                    "{name}: wrong live scalar identity"
+                );
+            };
+            assert_live(&pattern.epsilon, "eps0");
+            assert_live(pattern.gain.as_ref().expect("source gain"), "gain");
+            assert_live(pattern.bias.as_ref().expect("source bias"), "bias");
+            assert_live(pattern.gamma.as_ref().expect("source exponent"), "gamma");
             assert!(
                 pattern.clamp_zero,
                 "clamped image normalize script should set clamp_zero"
@@ -319,9 +403,29 @@ fn detects_image_normalize_group_with_vecdim_and_clamp() {
                 pattern.clamp_zero,
                 "clamped vecdim image normalize script should set clamp_zero"
             );
+            assert!(pattern.requires_single_input);
         }
         _ => panic!("missing image normalize pattern"),
     }
+
+    let mut known_scalar_cast = graph.clone();
+    let clamp = known_scalar_cast
+        .nodes
+        .iter()
+        .find(|node| matches!(&node.label, AccelNodeLabel::Builtin { name, .. } if name == "max"))
+        .expect("compiled clamp");
+    let cast_output = clamp.inputs[0];
+    let cast_value = known_scalar_cast
+        .values
+        .iter_mut()
+        .find(|value| value.id == cast_output)
+        .expect("compiled cast output");
+    assert!(matches!(cast_value.shape, ShapeInfo::Unknown));
+    cast_value.shape = ShapeInfo::Scalar;
+    assert!(known_scalar_cast
+        .detect_fusion_groups()
+        .iter()
+        .all(|group| group.kind != FusionKind::ImageNormalize));
 }
 
 #[test]
@@ -391,7 +495,7 @@ fn detects_image_normalize_group_with_vecdim_without_clamp() {
 }
 
 #[test]
-fn detects_image_normalize_group_with_gpu_scalars() {
+fn live_gpu_zero_without_a_validated_value_proof_retains_ordinary_execution() {
     init_logger();
     let source = r#"
     seed = 0;
@@ -416,11 +520,16 @@ fn detects_image_normalize_group_with_gpu_scalars() {
     let graph = compile_graph(source);
     let groups = detect_fusion_groups(&graph);
     assert!(
-        groups
+        !groups
             .iter()
             .any(|group| matches!(group.kind, FusionKind::ImageNormalize)),
-        "image normalize fusion group not detected for gpuArray scalars"
+        "a live gpuArray zero is not a certified immutable zero control"
     );
+    assert!(has_builtin(&graph, "max"));
+    assert!(has_builtin(&graph, "gpuArray"));
+    // This is a source-plan fixture, not a numerical execution witness. The
+    // original bytecode and explicit GPU intent remain the ordinary route;
+    // no specialized kernel may invent a live-control proof.
 }
 
 #[test]

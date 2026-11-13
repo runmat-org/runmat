@@ -3,7 +3,13 @@ mod artifact_classification;
 mod artifact_identity;
 mod artifact_order;
 mod artifact_parameters;
+mod artifact_resources;
+mod artifact_storage;
+mod artifact_topology;
 mod artifact_types;
+mod topology_wire;
+mod artifact_workspace;
+mod authoring;
 mod cancellation;
 mod chunk;
 mod codec;
@@ -15,33 +21,46 @@ mod lineage;
 mod manifest;
 mod metric;
 mod request;
+mod settings;
+mod size_controls;
+mod solver_projection;
 mod transfer;
 mod workload;
 
-pub use artifact::validate_solver_mesh_topology;
+pub use artifact::{
+    validate_solver_mesh_topology, validate_solver_mesh_topology_with_cancellation,
+};
 pub use artifact_identity::{
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_midside_node_identity,
     solver_volume_element_identity,
 };
 pub use artifact_parameters::sort_solver_node_exact_parameters;
+pub use artifact_topology::SharedSolverMeshTopology;
 pub use artifact_types::{
-    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ContactPair, FieldTopologyLocation,
-    FieldTopologyMap, MaterialInterface, MeshNeighbor, MeshRegion, SolverBoundaryEdge,
+    BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder, ConformalInterface, ContactPair,
+    FieldTopologyLocation, FieldTopologyMap, MeshNeighbor, MeshRegion, SolverBoundaryEdge,
     SolverBoundaryFace, SolverMeshArtifact, SolverMeshNode, SolverMeshTopology,
-    SolverNodeExactParameter, SolverVolumeElement, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+    SolverNodeExactParameter, SolverVolumeElement, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
     TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
+pub use authoring::MeshDefinition;
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};
 pub use chunk::{
-    build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
-    verify_stage_manifest_closure, EncodedMeshingChunk, MeshingChunkPolicy, MeshingChunkStream,
-    MeshingChunkedPayload,
+    build_chunked_stage_payload, build_chunked_stage_payload_with_cancellation,
+    build_closed_stage_manifest, close_stage_payload_with_admission, decode_stage_manifest_streams,
+    decode_stage_manifest_streams_borrowed, decode_stage_manifest_streams_borrowed_with_admission,
+    decode_stage_manifest_streams_with_cancellation, profile_chunked_stage_payload,
+    verify_stage_manifest_closure, verify_stage_manifest_closure_borrowed,
+    verify_stage_manifest_closure_borrowed_with_admission, ClosedMeshingStage, EncodedMeshingChunk,
+    EncodedMeshingChunkRef, MeshingChunkPolicy, MeshingChunkStorageProfile, MeshingChunkStream,
+    MeshingChunkedPayload, MeshingManifestMetadata, MeshingStreamStorageProfile,
 };
-pub use codec::{CanonicalMeshingContract, MeshingCanonicalLimits};
+pub use codec::{CanonicalMeshingContract, MeshingCanonicalCodecControl, MeshingCanonicalLimits};
 pub use error::MeshingContractError;
 pub use evidence::{
-    CacheAdmissionDecision, ErrorDistribution, InvariantEvidence, MeshingEvidence,
-    MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity, SizingResolutionEvidence,
+    AchievedEdgeLengths, CacheAdmissionDecision, ErrorDistribution, InvariantEvidence,
+    MeshingEvidence, MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity,
+    ReusedMeshingStageObservation, ReusedMeshingStageOrigin, SizingResolutionEvidence,
     MESHING_EVIDENCE_SCHEMA_VERSION,
 };
 pub use failure::{
@@ -69,11 +88,24 @@ pub use metric::{
     MetricSourceKind, MetricTensor3,
 };
 pub use request::{
-    AlgorithmVersionSet, CurveQualityTargets, ElementOrder, MeshingQualityTargets, MeshingRequest,
-    MeshingResourceBudget, SurfaceQualityTargets, VolumeQualityTargets,
-    MESHING_REQUEST_SCHEMA_VERSION,
+    AlgorithmVersionSet, CurveQualityTargets, ElementOrder, MeshDimension,
+    MeshingExecutionCeilings, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingSizeLimits, SurfaceQualityTargets, VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
 };
 pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
+pub use settings::{
+    production_algorithm_versions, resolve_meshing_request, CrossSectionMeshSettings,
+    MeshingRequestSettings,
+};
+pub use size_controls::{
+    size_control_evidence, validate_size_controls, AppliedSizeControl, MeshSizeControl,
+    MeshSizeControlTarget, NamedRegionEntities,
+};
+pub use solver_projection::{
+    SolverElevationReport, SolverMeshProjection, SolverMeshValidation,
+    ValidatedSolverMeshProjection, ValidatedSolverMeshTopology,
+    SOLVER_MESH_PROJECTION_SCHEMA_VERSION, SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
+};
 pub use transfer::{
     SolverEntityTransfer, SolverMeshTransferMap, SolverTransferMethod, SolverTransferSource,
     SOLVER_MESH_TRANSFER_SCHEMA_VERSION,

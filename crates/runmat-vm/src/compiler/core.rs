@@ -1,4 +1,7 @@
-use crate::bytecode::instr::PropertyDefaultLiteral;
+mod deferred;
+
+use crate::bytecode::instr::{BytecodeClassMethod, BytecodeClassProperty, PropertyDefaultLiteral};
+use crate::bytecode::StochasticSourceOperand;
 use crate::call::builtins::is_vm_intrinsic_builtin;
 use crate::compiler::CompileError;
 use crate::instr::Instr;
@@ -14,30 +17,40 @@ use runmat_mir::{
     MirPlace, MirPlaceMutation, MirRvalue, MirShortCircuitOp, MirStmt, MirStmtKind,
     MirTerminatorKind,
 };
-use runmat_runtime::call::arguments::ArgumentSpec;
-use runmat_runtime::indexing::EndExpr;
-use std::collections::{HashMap, HashSet};
+use runmat_runtime::call::arguments::{ArgumentExpansionSpec, ArgumentSpec};
+use std::collections::HashMap;
 
-type ClassRegistration = (
-    String,
-    Option<String>,
-    bool,
-    bool,
-    Vec<(
-        String,
-        bool,
-        bool,
-        Option<PropertyDefaultLiteral>,
-        String,
-        String,
-    )>,
-    Vec<(String, String, bool, bool, bool, String)>,
-    Vec<String>,
-);
-type MirCellEndOffsets = Vec<(usize, isize)>;
-type MirCellEndExprs = Vec<(usize, EndExpr)>;
-type MirCellSelectorCompileResult = (usize, bool, MirCellEndOffsets, MirCellEndExprs);
-type MirCellIndexCompileResult = (MirCellEndOffsets, MirCellEndExprs);
+mod aggregate_construction;
+mod stochastic_evolution;
+mod subscript_path;
+
+#[derive(Clone)]
+pub struct ClassRegistration {
+    name: runmat_types::ClassIdentity,
+    super_class: Option<runmat_types::ClassIdentity>,
+    is_sealed: bool,
+    is_abstract: bool,
+    properties: Vec<BytecodeClassProperty>,
+    methods: Vec<BytecodeClassMethod>,
+    events: Vec<runmat_types::EventDeclaration>,
+    enumerations: Vec<String>,
+}
+
+impl ClassRegistration {
+    fn into_instruction(self) -> Instr {
+        Instr::RegisterClass {
+            name: self.name,
+            super_class: self.super_class,
+            is_sealed: self.is_sealed,
+            is_abstract: self.is_abstract,
+            properties: self.properties,
+            methods: self.methods,
+            events: self.events,
+            enumerations: self.enumerations,
+        }
+    }
+}
+type MirCellSelectorCompileResult = (usize, bool);
 
 #[derive(Clone, Copy)]
 enum ResolvedCallOutputCount {
@@ -56,6 +69,7 @@ impl ResolvedCallOutputCount {
 
 pub struct Compiler {
     pub instructions: Vec<Instr>,
+    pub catch_scopes: Vec<Option<runmat_mir::CatchScopeId>>,
     pub instr_spans: Vec<runmat_hir::Span>,
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     pub var_count: usize,
@@ -63,10 +77,25 @@ pub struct Compiler {
     pub var_types: Vec<Type>,
     pub layout: Option<VmAssemblyLayout>,
     pub function: Option<FunctionId>,
+    source: Option<runmat_types::ProgramSourceId>,
     pub body: Option<MirBody>,
+    aggregate_proof: Option<aggregate_construction::ProofIndex>,
     pub class_registrations: Vec<ClassRegistration>,
     current_span: Option<runmat_hir::Span>,
+    current_catch_scope: Option<runmat_mir::CatchScopeId>,
     pending_place_mutation: Option<MirPlaceMutation>,
+    index_end_context: Option<IndexEndContext>,
+}
+
+/// The innermost selector owns `end`, regardless of how its receiver is prepared.
+#[derive(Clone, Copy)]
+enum IndexEndContext {
+    Prepared(usize),
+    Contextual(usize),
+    Subscript {
+        component: usize,
+        component_count: usize,
+    },
 }
 
 struct SpanGuard {
@@ -74,49 +103,6 @@ struct SpanGuard {
     prev: Option<runmat_hir::Span>,
 }
 
-fn end_expr_with_offset(offset: isize) -> EndExpr {
-    let magnitude = EndExpr::Const(offset.unsigned_abs() as f64);
-    if offset.is_negative() {
-        EndExpr::Sub(Box::new(EndExpr::End), Box::new(magnitude))
-    } else {
-        EndExpr::Add(Box::new(EndExpr::End), Box::new(magnitude))
-    }
-}
-
-struct MirSliceExprComponents {
-    numeric_count: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    range_dims: Vec<usize>,
-    range_has_step: Vec<bool>,
-    range_start_exprs: Vec<Option<EndExpr>>,
-    range_step_exprs: Vec<Option<EndExpr>>,
-    range_end_exprs: Vec<EndExpr>,
-    end_numeric_exprs: Vec<(usize, EndExpr)>,
-}
-
-#[derive(Clone, Copy)]
-enum MirRangeParamOrder {
-    BeforeNumeric,
-    AfterNumeric,
-}
-
-struct MirRangeEndSpec {
-    start_expr: Option<EndExpr>,
-    step_expr: Option<EndExpr>,
-    end_expr: EndExpr,
-    has_step: bool,
-}
-
-struct MirStochasticEvolutionPlan {
-    state: runmat_mir::MirLocalId,
-    drift: MirOperand,
-    scale: MirOperand,
-    steps: MirOperand,
-}
-
-const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
-const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
 const IDENT_MIR_CELL_EXPAND_PLAN_INVALID: &str = "RunMat:MirCellExpandPlanInvalid";
 const IDENT_MIR_PAREN_CELL_PLAN_INVALID: &str = "RunMat:MirParenCellPlanInvalid";
 const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInvalid";
@@ -124,6 +110,7 @@ const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvali
 const IDENT_MIR_CELL_INDEX_PLAN_INVALID: &str = "RunMat:MirCellIndexPlanInvalid";
 const IDENT_MIR_CELL_INDEX_CONTEXT_INVALID: &str = "RunMat:MirCellIndexContextInvalid";
 const IDENT_MIR_INDEX_CONTEXT_INVALID: &str = "RunMat:MirIndexContextInvalid";
+const IDENT_MIR_SUBSCRIPT_CHAIN_INVALID: &str = "RunMat:MirSubscriptChainInvalid";
 const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
     "RunMat:MirMultiAssignOutputCountMismatch";
 const IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID: &str = "RunMat:MirDeleteAssignmentRhsInvalid";
@@ -149,60 +136,6 @@ const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_CALL_CALLEE_INVALID: &str = "RunMat:MirMethodCallCalleeInvalid";
 const IDENT_MIR_METHOD_CALL_RECEIVER_MISSING: &str = "RunMat:MirMethodCallReceiverMissing";
-const IDENT_MIR_PARALLEL_CAPABILITY_UNSUPPORTED: &str = "RunMat:MirParallelCapabilityUnsupported";
-const IDENT_MIR_DISTRIBUTED_CAPABILITY_UNSUPPORTED: &str =
-    "RunMat:MirDistributedCapabilityUnsupported";
-
-fn encode_cell_end_offset(offset: isize) -> f64 {
-    if offset <= 0 {
-        if offset == 0 {
-            -0.0
-        } else {
-            offset as f64
-        }
-    } else {
-        f64::from_bits(CELL_END_PLUS_TAG_VALUE | ((offset as u64) & CELL_END_PLUS_OFFSET_MASK))
-    }
-}
-
-fn stochastic_evolution_disabled() -> bool {
-    std::env::var("RUNMAT_DISABLE_STOCHASTIC_EVOLUTION")
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes"
-            )
-        })
-        .unwrap_or(false)
-}
-
-fn mir_range_starts_at_one(iterable: &MirRvalue) -> bool {
-    let MirRvalue::Range { start, step, .. } = iterable else {
-        return false;
-    };
-    mir_operand_is_one(start) && step.as_ref().is_none_or(mir_operand_is_one)
-}
-
-fn mir_operand_is_one(operand: &MirOperand) -> bool {
-    match operand {
-        MirOperand::Constant(MirConstant::Number(value)) => value == "1" || value == "1.0",
-        MirOperand::Constant(MirConstant::IntegerLiteral(value)) => {
-            runmat_value::IntValue::from(value).try_to_u64() == Some(1)
-        }
-        _ => false,
-    }
-}
-
-fn call_name(call: &MirCall) -> Option<&str> {
-    match &call.callee {
-        MirCallee::Static(CallableIdentity::Builtin(id)) => Some(id.0.as_str()),
-        MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
-            Some(name.0[0].0.as_str())
-        }
-        MirCallee::Static(CallableIdentity::DynamicName(name)) => Some(name.0.as_str()),
-        _ => None,
-    }
-}
 
 fn imported_handle_runtime_name(path: &runmat_hir::DefPath) -> Option<String> {
     let item_name = path.item.last().map(|item| item.display_name())?;
@@ -224,96 +157,6 @@ fn imported_handle_runtime_name(path: &runmat_hir::DefPath) -> Option<String> {
         segments.push(normalized.to_string());
     }
     Some(segments.join("."))
-}
-
-fn randn_assignment(stmt: &MirStmt) -> Option<(runmat_mir::MirLocalId, &MirCall)> {
-    let MirStmtKind::Assign {
-        place: MirPlace::Local(local),
-        value: MirRvalue::Call(call),
-    } = &stmt.kind
-    else {
-        return None;
-    };
-    call_name(call)
-        .is_some_and(|name| name.eq_ignore_ascii_case("randn"))
-        .then_some((*local, call))
-}
-
-fn assigned_rvalue(statements: &[MirStmt], local: runmat_mir::MirLocalId) -> Option<&MirRvalue> {
-    statements.iter().find_map(|stmt| {
-        let MirStmtKind::Assign {
-            place: MirPlace::Local(candidate),
-            value,
-        } = &stmt.kind
-        else {
-            return None;
-        };
-        (*candidate == local).then_some(value)
-    })
-}
-
-fn local_operand(operand: &MirOperand) -> Option<runmat_mir::MirLocalId> {
-    match operand {
-        MirOperand::Local(local) => Some(*local),
-        _ => None,
-    }
-}
-
-fn exp_call_arg(statements: &[MirStmt], exp_local: runmat_mir::MirLocalId) -> Option<&MirOperand> {
-    let MirRvalue::Call(call) = assigned_rvalue(statements, exp_local)? else {
-        return None;
-    };
-    if !call_name(call).is_some_and(|name| name.eq_ignore_ascii_case("exp")) || call.args.len() != 1
-    {
-        return None;
-    }
-    match &call.args[0] {
-        MirCallArg::Single(arg) => Some(arg),
-        _ => None,
-    }
-}
-
-fn add_with_scale_term(
-    statements: &[MirStmt],
-    arg_local: runmat_mir::MirLocalId,
-    z_local: runmat_mir::MirLocalId,
-) -> Option<(&MirOperand, &MirOperand)> {
-    let MirRvalue::Binary(left, OperatorKind::Add, right) = assigned_rvalue(statements, arg_local)?
-    else {
-        return None;
-    };
-    if local_operand(left)
-        .and_then(|local| scale_term(statements, local, z_local))
-        .is_some()
-    {
-        Some((right, left))
-    } else if local_operand(right)
-        .and_then(|local| scale_term(statements, local, z_local))
-        .is_some()
-    {
-        Some((left, right))
-    } else {
-        None
-    }
-}
-
-fn scale_term(
-    statements: &[MirStmt],
-    scale_mul_local: runmat_mir::MirLocalId,
-    z_local: runmat_mir::MirLocalId,
-) -> Option<&MirOperand> {
-    let MirRvalue::Binary(left, OperatorKind::ElementwiseMultiply, right) =
-        assigned_rvalue(statements, scale_mul_local)?
-    else {
-        return None;
-    };
-    if matches!(left, MirOperand::Local(local) if *local == z_local) {
-        Some(right)
-    } else if matches!(right, MirOperand::Local(local) if *local == z_local) {
-        Some(left)
-    } else {
-        None
-    }
 }
 
 fn mir_indexing_context_matches(actual: IndexResultContext, expected: IndexResultContext) -> bool {
@@ -347,24 +190,37 @@ fn hir_function_imports(hir: &HirAssembly, function: FunctionId) -> Vec<(Vec<Str
         .unwrap_or_default()
 }
 
-fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
+fn hir_class_registrations(hir: &HirAssembly, mir: &MirAssembly) -> Vec<ClassRegistration> {
+    hir_class_registrations_for_source(hir, mir, None)
+}
+
+fn hir_class_registrations_for_source(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    source: Option<runmat_types::ProgramSourceId>,
+) -> Vec<ClassRegistration> {
     hir.classes
         .iter()
+        .filter(|class| {
+            source.is_none_or(|source| {
+                hir.modules
+                    .get(class.module.0)
+                    .is_some_and(|module| module.source_id == source)
+            })
+        })
         .map(|class| {
-            let name = class
-                .declaration
-                .name
-                .0
-                .iter()
-                .map(|part| part.0.clone())
-                .collect::<Vec<_>>()
-                .join(".");
+            let name = runmat_types::ClassIdentity::from_qualified_name(&class.declaration.name)
+                .expect("HIR class declaration must have a canonical identity");
             let mut super_class = class
                 .declaration
                 .inheritance
                 .builtin_super_class
-                .clone()
-                .or_else(|| class.declaration.inheritance.declared_super_class.clone())
+                .as_ref()
+                .or(class.declaration.inheritance.declared_super_class.as_ref())
+                .map(|name| {
+                    runmat_types::ClassIdentity::new(name.clone())
+                        .expect("HIR superclass must have a canonical identity")
+                })
                 .or_else(|| {
                     class
                         .declaration
@@ -375,43 +231,53 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                                 .iter()
                                 .find(|candidate| candidate.declaration.id == class_id)
                                 .map(|super_class| {
-                                    super_class
-                                        .declaration
-                                        .name
-                                        .0
-                                        .iter()
-                                        .map(|part| part.0.clone())
-                                        .collect::<Vec<_>>()
-                                        .join(".")
+                                    runmat_types::ClassIdentity::from_qualified_name(
+                                        &super_class.declaration.name,
+                                    )
+                                    .expect("resolved superclass must have a canonical identity")
                                 })
                         })
                 });
             if super_class.is_none()
                 && matches!(class.declaration.kind, runmat_hir::ClassKind::Handle)
             {
-                super_class = Some("handle".to_string());
+                super_class = Some(runmat_types::standard::HANDLE.owned());
             }
             let properties = class
                 .declaration
                 .properties
                 .iter()
                 .map(|property| {
-                    let name = if property.attributes.is_dependent {
-                        format!("@dep:{}", property.name.0)
-                    } else {
-                        property.name.0.clone()
-                    };
-                    let default = class
-                        .property_default(&property.name)
-                        .and_then(hir_property_default_to_value);
-                    (
-                        name,
-                        property.attributes.is_static,
-                        property.attributes.is_constant,
-                        default,
-                        member_access_name(property.attributes.get_access).to_string(),
-                        member_access_name(property.attributes.set_access).to_string(),
-                    )
+                    let default = mir
+                        .class_property_defaults
+                        .iter()
+                        .find(|candidate| {
+                            candidate.class == class.declaration.id
+                                && candidate.property == property.name
+                        })
+                        .map(|candidate| match &candidate.literal {
+                            runmat_mir::MirClassDefaultLiteral::Num(value) => {
+                                PropertyDefaultLiteral::Num(*value)
+                            }
+                            runmat_mir::MirClassDefaultLiteral::Int(value) => {
+                                PropertyDefaultLiteral::Int(runmat_value::IntValue::from(value))
+                            }
+                            runmat_mir::MirClassDefaultLiteral::Bool(value) => {
+                                PropertyDefaultLiteral::Bool(*value)
+                            }
+                            runmat_mir::MirClassDefaultLiteral::String(value) => {
+                                PropertyDefaultLiteral::String(value.clone())
+                            }
+                        });
+                    BytecodeClassProperty {
+                        name: property.name.clone(),
+                        is_static: property.attributes.is_static,
+                        is_constant: property.attributes.is_constant,
+                        is_dependent: property.attributes.is_dependent,
+                        default_literal: default,
+                        get_access: property.attributes.get_access,
+                        set_access: property.attributes.set_access,
+                    }
                 })
                 .collect();
             let methods = class
@@ -425,14 +291,15 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                         .find(|function| function.id == method.function)
                         .map(|function| function.name.0.clone())
                         .unwrap_or_else(|| method.name.0.clone());
-                    (
-                        method.name.0.clone(),
+                    BytecodeClassMethod {
+                        name: method.name.clone(),
                         function_name,
-                        method.is_static,
-                        method.attributes.is_abstract,
-                        method.attributes.is_sealed,
-                        member_access_name(method.attributes.access).to_string(),
-                    )
+                        role: method.role,
+                        is_static: method.is_static,
+                        is_abstract: method.attributes.is_abstract,
+                        is_sealed: method.attributes.is_sealed,
+                        access: method.attributes.access,
+                    }
                 })
                 .collect();
             let enumerations = class
@@ -441,76 +308,30 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .iter()
                 .map(|enumeration| enumeration.name.0.clone())
                 .collect();
-            (
+            let events = class.declaration.events.clone();
+            ClassRegistration {
                 name,
                 super_class,
-                class.declaration.is_sealed,
-                class.declaration.is_abstract,
+                is_sealed: class.declaration.is_sealed,
+                is_abstract: class.declaration.is_abstract,
                 properties,
                 methods,
+                events,
                 enumerations,
-            )
+            }
         })
         .collect()
 }
 
-fn member_access_name(access: runmat_hir::MemberAccess) -> &'static str {
-    match access {
-        runmat_hir::MemberAccess::Private => "private",
-        runmat_hir::MemberAccess::Protected => "protected",
-        _ => "public",
-    }
-}
-
-fn hir_property_default_to_value(expr: &runmat_hir::HirExpr) -> Option<PropertyDefaultLiteral> {
-    fn eval_numeric(expr: &runmat_hir::HirExpr) -> Option<f64> {
-        match &expr.kind {
-            runmat_hir::HirExprKind::Number(text) => text.parse::<f64>().ok(),
-            runmat_hir::HirExprKind::Unary(runmat_hir::OperatorKind::UnaryPlus, inner) => {
-                eval_numeric(inner)
-            }
-            runmat_hir::HirExprKind::Unary(runmat_hir::OperatorKind::UnaryMinus, inner) => {
-                eval_numeric(inner).map(|value| -value)
-            }
-            runmat_hir::HirExprKind::Binary(left, op, right) => {
-                let left = eval_numeric(left)?;
-                let right = eval_numeric(right)?;
-                match op {
-                    runmat_hir::OperatorKind::Add => Some(left + right),
-                    runmat_hir::OperatorKind::Subtract => Some(left - right),
-                    runmat_hir::OperatorKind::MatrixMultiply
-                    | runmat_hir::OperatorKind::ElementwiseMultiply => Some(left * right),
-                    runmat_hir::OperatorKind::Mrdivide
-                    | runmat_hir::OperatorKind::Mldivide
-                    | runmat_hir::OperatorKind::ElementwiseDivide
-                    | runmat_hir::OperatorKind::ElementwiseLeftDivide => Some(left / right),
-                    runmat_hir::OperatorKind::MatrixPower
-                    | runmat_hir::OperatorKind::ElementwisePower => Some(left.powf(right)),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    match &expr.kind {
-        runmat_hir::HirExprKind::Number(text) => {
-            text.parse::<f64>().ok().map(PropertyDefaultLiteral::Num)
-        }
-        runmat_hir::HirExprKind::IntegerLiteral(value) => Some(PropertyDefaultLiteral::Int(
-            runmat_value::IntValue::from(value),
-        )),
-        runmat_hir::HirExprKind::String(text) => {
-            Some(PropertyDefaultLiteral::String(text.0.clone()))
-        }
-        runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("true") => {
-            Some(PropertyDefaultLiteral::Bool(true))
-        }
-        runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("false") => {
-            Some(PropertyDefaultLiteral::Bool(false))
-        }
-        _ => eval_numeric(expr).map(PropertyDefaultLiteral::Num),
-    }
+pub(crate) fn class_declaration_instructions(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    source: Option<runmat_types::ProgramSourceId>,
+) -> Vec<Instr> {
+    hir_class_registrations_for_source(hir, mir, source)
+        .into_iter()
+        .map(ClassRegistration::into_instruction)
+        .collect()
 }
 
 impl SpanGuard {
@@ -581,6 +402,7 @@ impl Compiler {
 
         Ok(Self {
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             var_count,
@@ -588,10 +410,14 @@ impl Compiler {
             var_types,
             layout: Some(layout),
             function: Some(function),
+            source: mir.functions.get(&function).map(|metadata| metadata.source),
             body: Some(body),
-            class_registrations: hir_class_registrations(hir),
+            aggregate_proof: None,
+            class_registrations: hir_class_registrations(hir, mir),
             current_span: None,
+            current_catch_scope: None,
             pending_place_mutation: None,
+            index_end_context: None,
         })
     }
 
@@ -623,6 +449,7 @@ impl Compiler {
 
         Ok(Self {
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             var_count,
@@ -630,10 +457,14 @@ impl Compiler {
             var_types,
             layout: Some(layout),
             function: Some(function),
+            source: mir.functions.get(&function).map(|metadata| metadata.source),
             body: Some(body),
-            class_registrations: hir_class_registrations(hir),
+            aggregate_proof: None,
+            class_registrations: hir_class_registrations(hir, mir),
             current_span: None,
+            current_catch_scope: None,
             pending_place_mutation: None,
+            index_end_context: None,
         })
     }
 
@@ -657,19 +488,15 @@ impl Compiler {
             .body
             .clone()
             .ok_or_else(|| CompileError::new("compiler missing MIR body"))?;
+        body.validate_expression_regions().map_err(|error| {
+            CompileError::new(format!("invalid MIR expression region: {error}"))
+        })?;
+        body.validate_statement_outputs()
+            .map_err(|error| CompileError::new(format!("invalid MIR statement output: {error}")))?;
+        self.aggregate_proof = None;
 
-        for (name, super_class, is_sealed, is_abstract, properties, methods, enumerations) in
-            self.class_registrations.clone()
-        {
-            self.emit(Instr::RegisterClass {
-                name,
-                super_class,
-                is_sealed,
-                is_abstract,
-                properties,
-                methods,
-                enumerations,
-            });
+        for registration in self.class_registrations.clone() {
+            self.emit(registration.into_instruction());
         }
         for (path, wildcard) in self.imports.clone() {
             self.emit(Instr::RegisterImport { path, wildcard });
@@ -689,13 +516,18 @@ impl Compiler {
 
         for (block_index, block) in blocks.iter().enumerate() {
             self.pending_place_mutation = None;
+            self.current_catch_scope = body
+                .catch_scopes
+                .get(&block.id)
+                .and_then(|scopes| scopes.last().copied());
             block_starts.insert(block.id, self.instructions.len());
             for scope in exception_scopes.leaving_at(block.id) {
                 self.emit(Instr::LeaveTry(*scope));
             }
             for (position, stmt) in block.statements.iter().enumerate() {
                 self.record_resume_point(block.id, position)?;
-                self.compile_mir_stmt(stmt)?;
+                let next = block.statements.get(position + 1).map(|stmt| &stmt.kind);
+                self.compile_mir_stmt(stmt, next)?;
             }
             self.record_resume_point(block.id, block.statements.len())?;
             match &block.terminator.kind {
@@ -760,6 +592,8 @@ impl Compiler {
                     ..
                 } => {
                     if self.try_compile_mir_stochastic_evolution(
+                        block.id,
+                        *binding,
                         iterable,
                         *body_block,
                         *exit_block,
@@ -775,12 +609,46 @@ impl Compiler {
                         &mut pending_jumps,
                     )?;
                 }
-                MirTerminatorKind::ParFor { .. } | MirTerminatorKind::Spmd { .. } => {
-                    return Err(CompileError::new(
-                        "parallel-region MIR requires the structured scheduler lowering capability",
-                    )
-                    .with_span(block.terminator.span)
-                    .with_identifier(IDENT_MIR_PARALLEL_CAPABILITY_UNSUPPORTED));
+                MirTerminatorKind::ParFor {
+                    region,
+                    iterable,
+                    maximum_workers,
+                    ..
+                } => {
+                    self.compile_mir_rvalue(iterable)?;
+                    if let Some(maximum_workers) = maximum_workers {
+                        self.compile_mir_rvalue(maximum_workers)?;
+                    }
+                    self.emit(Instr::ExecuteParfor {
+                        region: *region,
+                        has_maximum_workers: maximum_workers.is_some(),
+                    });
+                }
+                MirTerminatorKind::Spmd { region, header, .. } => {
+                    let header = match header.as_ref() {
+                        runmat_mir::parallel::MirSpmdHeader::Default => {
+                            crate::BytecodeSpmdHeader::Default
+                        }
+                        runmat_mir::parallel::MirSpmdHeader::One(value) => {
+                            self.compile_mir_rvalue(value)?;
+                            crate::BytecodeSpmdHeader::Exact
+                        }
+                        runmat_mir::parallel::MirSpmdHeader::Two(minimum, maximum) => {
+                            self.compile_mir_rvalue(minimum)?;
+                            self.compile_mir_rvalue(maximum)?;
+                            crate::BytecodeSpmdHeader::Range
+                        }
+                        runmat_mir::parallel::MirSpmdHeader::Three(pool, minimum, maximum) => {
+                            self.compile_mir_rvalue(pool)?;
+                            self.compile_mir_rvalue(minimum)?;
+                            self.compile_mir_rvalue(maximum)?;
+                            crate::BytecodeSpmdHeader::PoolRange
+                        }
+                    };
+                    self.emit(Instr::ExecuteSpmd {
+                        region: *region,
+                        header,
+                    });
                 }
                 MirTerminatorKind::Return(values) => {
                     for scope in exception_scopes.active_at(block.id) {
@@ -886,68 +754,93 @@ impl Compiler {
 
     fn try_compile_mir_stochastic_evolution(
         &mut self,
+        header_block: BasicBlockId,
+        binding: runmat_mir::MirLocalId,
         iterable: &MirRvalue,
         body_block: BasicBlockId,
         exit_block: BasicBlockId,
         pending_jumps: &mut Vec<(usize, BasicBlockId, bool)>,
     ) -> Result<bool, CompileError> {
-        if stochastic_evolution_disabled() || !mir_range_starts_at_one(iterable) {
-            return Ok(false);
-        }
-        let Some(plan) = self.detect_mir_stochastic_evolution(body_block, iterable) else {
+        let Some(plan) = self.body.as_ref().and_then(|body| {
+            stochastic_evolution::detect(body, header_block, binding, body_block, iterable)
+        }) else {
             return Ok(false);
         };
+        let iteration_slot = self.mir_local_slot(plan.iteration_binding)?;
+        let noise_slot = self.mir_local_slot(plan.noise)?;
         let state_slot = self.mir_local_slot(plan.state)?;
-        self.emit(Instr::LoadVar(state_slot));
-        self.compile_mir_operand(&plan.drift)?;
-        self.compile_mir_operand(&plan.scale)?;
-        self.compile_mir_operand(&plan.steps)?;
-        self.emit(Instr::StochasticEvolution);
-        self.emit(Instr::StoreVar(state_slot));
+        // A selected attempt cannot execute LoadVar before the original For:
+        // even a successful load may refresh an alias and clone shape metadata.
+        let Some(steps) = self.stochastic_source_operand(&plan.steps)? else {
+            return Ok(false);
+        };
+        let Some(drift) = self.stochastic_source_operand(&plan.drift)? else {
+            return Ok(false);
+        };
+        let Some(scale) = self.stochastic_source_operand(&plan.scale)? else {
+            return Ok(false);
+        };
+        let Some(randn_args) = plan
+            .randn_args
+            .iter()
+            .map(|arg| self.stochastic_source_operand(arg))
+            .collect::<Result<Option<Vec<_>>, _>>()?
+        else {
+            return Ok(false);
+        };
+        let selected = self.emit(Instr::StochasticEvolution {
+            iteration_slot,
+            noise_slot,
+            state_slot,
+            steps: steps.clone(),
+            drift: drift.clone(),
+            scale: scale.clone(),
+            randn_args: randn_args.clone(),
+            fallback_pc: usize::MAX,
+        });
         let done = self.emit(Instr::Jump(usize::MAX));
         pending_jumps.push((done, exit_block, false));
+        let fallback_pc = self.instructions.len();
+        self.patch(
+            selected,
+            Instr::StochasticEvolution {
+                iteration_slot,
+                noise_slot,
+                state_slot,
+                steps,
+                drift,
+                scale,
+                randn_args,
+                fallback_pc,
+            },
+        );
+        self.compile_mir_for_terminator(binding, iterable, body_block, exit_block, pending_jumps)?;
         Ok(true)
     }
 
-    fn detect_mir_stochastic_evolution(
+    fn stochastic_source_operand(
         &self,
-        body_block: BasicBlockId,
-        iterable: &MirRvalue,
-    ) -> Option<MirStochasticEvolutionPlan> {
-        let body = self.body.as_ref()?;
-        let block = body.blocks.iter().find(|block| block.id == body_block)?;
-        let statements = block.statements.as_slice();
-        let (z_local, _) = statements.iter().find_map(randn_assignment)?;
-        let (state, exp_operand) = statements.iter().rev().find_map(|stmt| {
-            let MirStmtKind::Assign {
-                place: MirPlace::Local(state),
-                value: MirRvalue::Binary(left, OperatorKind::ElementwiseMultiply, right),
-            } = &stmt.kind
-            else {
-                return None;
-            };
-            if matches!(left, MirOperand::Local(local) if local == state) {
-                Some((*state, right))
-            } else if matches!(right, MirOperand::Local(local) if local == state) {
-                Some((*state, left))
-            } else {
-                None
+        operand: &MirOperand,
+    ) -> Result<Option<StochasticSourceOperand>, CompileError> {
+        Ok(Some(match operand {
+            MirOperand::Local(local) => StochasticSourceOperand::Slot(self.mir_local_slot(*local)?),
+            MirOperand::Constant(MirConstant::Number(source)) => {
+                let Ok(value) = source.parse::<f64>() else {
+                    return Ok(None);
+                };
+                StochasticSourceOperand::Number(value)
             }
-        })?;
-        let exp_local = local_operand(exp_operand)?;
-        let exp_arg = exp_call_arg(statements, exp_local)?;
-        let arg_local = local_operand(exp_arg)?;
-        let (drift, scale_mul_operand) = add_with_scale_term(statements, arg_local, z_local)?;
-        let scale = scale_term(statements, local_operand(scale_mul_operand)?, z_local)?;
-        let MirRvalue::Range { end, .. } = iterable else {
-            return None;
-        };
-        Some(MirStochasticEvolutionPlan {
-            state,
-            drift: drift.clone(),
-            scale: scale.clone(),
-            steps: end.clone(),
-        })
+            MirOperand::Constant(MirConstant::IntegerLiteral(source)) => {
+                StochasticSourceOperand::Integer(runmat_value::IntValue::from(source))
+            }
+            MirOperand::Constant(MirConstant::Bool(value)) => StochasticSourceOperand::Bool(*value),
+            MirOperand::Constant(MirConstant::String(value)) => {
+                StochasticSourceOperand::String(value.0.clone())
+            }
+            // The normal For retains every other literal/handle's exact
+            // evaluation and error timing.
+            _ => return Ok(None),
+        }))
     }
 
     fn compile_mir_for_terminator(
@@ -969,6 +862,11 @@ impl Compiler {
         };
         let binding_slot = self.mir_local_slot(binding)?;
         let init_flag = self.alloc_temp();
+        let entered_flag = self.alloc_temp();
+        // Keep the range cursor separate from the source binding: the latter
+        // is published only for an iteration that will actually run, and a
+        // body assignment to it does not alter the next range element.
+        let cursor_var = self.alloc_temp();
         let end_var = self.alloc_temp();
         let step_var = self.alloc_temp();
 
@@ -977,7 +875,9 @@ impl Compiler {
         self.emit(Instr::Equal);
         let already_initialized = self.emit(Instr::JumpIfFalse(usize::MAX));
         self.compile_mir_operand(start)?;
-        self.emit(Instr::StoreVar(binding_slot));
+        self.emit(Instr::StoreVar(cursor_var));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::StoreVar(entered_flag));
         if let Some(step) = step {
             self.compile_mir_operand(step)?;
         } else {
@@ -991,10 +891,10 @@ impl Compiler {
         let after_update = self.emit(Instr::Jump(usize::MAX));
         let increment_pc = self.instructions.len();
         self.patch(already_initialized, Instr::JumpIfFalse(increment_pc));
-        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(cursor_var));
         self.emit(Instr::LoadVar(step_var));
         self.emit(Instr::Add);
-        self.emit(Instr::StoreVar(binding_slot));
+        self.emit(Instr::StoreVar(cursor_var));
         let condition_pc = self.instructions.len();
         self.patch(after_update, Instr::Jump(condition_pc));
 
@@ -1002,10 +902,7 @@ impl Compiler {
         self.emit(Instr::LoadConst(0.0));
         self.emit(Instr::Equal);
         let nonzero_step = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(0.0));
-        self.emit(Instr::StoreVar(init_flag));
         let zero_step_exit = self.emit(Instr::Jump(usize::MAX));
-        pending_jumps.push((zero_step_exit, exit_block, false));
         let after_zero_step = self.instructions.len();
         self.patch(nonzero_step, Instr::JumpIfFalse(after_zero_step));
 
@@ -1013,26 +910,38 @@ impl Compiler {
         self.emit(Instr::LoadConst(0.0));
         self.emit(Instr::GreaterEqual);
         let negative_step_branch = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(cursor_var));
         self.emit(Instr::LoadVar(end_var));
         self.emit(Instr::LessEqual);
         let positive_step_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
         let condition_done = self.emit(Instr::Jump(usize::MAX));
         let negative_branch = self.instructions.len();
         self.patch(negative_step_branch, Instr::JumpIfFalse(negative_branch));
-        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(cursor_var));
         self.emit(Instr::LoadVar(end_var));
         self.emit(Instr::GreaterEqual);
         let negative_step_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
         let body_jump_pc = self.instructions.len();
         self.patch(condition_done, Instr::Jump(body_jump_pc));
 
+        self.emit(Instr::LoadVar(cursor_var));
+        self.emit(Instr::StoreVar(binding_slot));
+        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::StoreVar(entered_flag));
         let body_jump = self.emit(Instr::Jump(usize::MAX));
         pending_jumps.push((body_jump, body_block, false));
 
         let exit_pc = self.instructions.len();
+        self.patch(zero_step_exit, Instr::Jump(exit_pc));
         self.patch(positive_step_exit, Instr::JumpIfFalse(exit_pc));
         self.patch(negative_step_exit, Instr::JumpIfFalse(exit_pc));
+        self.emit(Instr::LoadVar(entered_flag));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::Equal);
+        let nonempty_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.emit(Instr::CreateMatrix(0, 0));
+        self.emit(Instr::StoreVar(binding_slot));
+        self.patch(nonempty_exit, Instr::JumpIfFalse(self.instructions.len()));
         self.emit(Instr::LoadConst(0.0));
         self.emit(Instr::StoreVar(init_flag));
         let done = self.emit(Instr::Jump(usize::MAX));
@@ -1127,9 +1036,35 @@ impl Compiler {
         Ok(true)
     }
 
-    fn compile_mir_stmt(&mut self, stmt: &MirStmt) -> Result<(), CompileError> {
+    fn compile_mir_stmt(
+        &mut self,
+        stmt: &MirStmt,
+        next: Option<&MirStmtKind>,
+    ) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, stmt.span);
         match &stmt.kind {
+            MirStmtKind::PrepareFixedAssignment(preparation) => {
+                self.pending_place_mutation = None;
+                self.compile_mir_fixed_assignment_target(preparation)
+            }
+            MirStmtKind::PreparedAssign { preparation, value } => {
+                self.pending_place_mutation = None;
+                if preparation.mutation.kind == runmat_types::PlaceMutationKind::Delete
+                    && !self.mir_delete_rhs_is_empty_tensor_literal(value)
+                {
+                    return Err(self
+                        .compile_error("prepared deletion requires an empty tensor literal RHS")
+                        .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID));
+                }
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::CaptureScalarSequence);
+                let root_slot = self.mir_place_root_slot(&preparation.mutation.place)?;
+                self.emit(Instr::CommitFixedAssignment {
+                    source_statement: preparation.source_statement,
+                    root_slot,
+                });
+                Ok(())
+            }
             MirStmtKind::Assign { place, value } => {
                 let delete = self.take_assign_delete_flag(place)?;
                 self.compile_mir_assign(place, value, delete)
@@ -1137,8 +1072,32 @@ impl Compiler {
             MirStmtKind::Expr(value) => {
                 self.pending_place_mutation = None;
                 self.compile_mir_rvalue(value)?;
-                self.emit(Instr::Pop);
+                if value.has_statement_result()
+                    && !matches!(next, Some(MirStmtKind::StatementOutput(output))
+                        if matches!(output.source, runmat_mir::MirStatementOutputSource::Expression))
+                {
+                    self.emit(Instr::Pop);
+                }
                 Ok(())
+            }
+            MirStmtKind::StatementOutput(output) => {
+                self.pending_place_mutation = None;
+                match output.source {
+                    runmat_mir::MirStatementOutputSource::Local(local) => {
+                        self.emit(Instr::EmitVar {
+                            var_index: self.mir_local_slot(local)?,
+                            label: self.statement_output_label(&output.label)?,
+                        });
+                        Ok(())
+                    }
+                    runmat_mir::MirStatementOutputSource::Expression => {
+                        self.emit(Instr::EmitStackTop {
+                            label: self.statement_output_label(&output.label)?,
+                        });
+                        self.emit(Instr::Pop);
+                        Ok(())
+                    }
+                }
             }
             MirStmtKind::WorkspaceEffect { effect, bindings } => {
                 self.pending_place_mutation = None;
@@ -1156,7 +1115,143 @@ impl Compiler {
                 self.pending_place_mutation = None;
                 self.compile_mir_multi_assign(targets, value)
             }
+            MirStmtKind::SequenceAssign { target, value } => {
+                self.pending_place_mutation = None;
+                self.compile_mir_sequence_assign(target, value)
+            }
+            MirStmtKind::CaptureSequence {
+                destination,
+                source,
+            } => {
+                self.pending_place_mutation = None;
+                self.compile_mir_sequence_capture(destination.0, source)
+            }
         }
+    }
+
+    fn statement_output_label(
+        &self,
+        label: &runmat_mir::MirStatementOutputLabel,
+    ) -> Result<crate::bytecode::EmitLabel, CompileError> {
+        Ok(match label {
+            runmat_mir::MirStatementOutputLabel::Ans => crate::bytecode::EmitLabel::Ans,
+            runmat_mir::MirStatementOutputLabel::Binding(binding) => {
+                crate::bytecode::EmitLabel::Var(self.binding_slot(*binding)?)
+            }
+        })
+    }
+
+    fn compile_mir_sequence_capture(
+        &mut self,
+        sequence_slot: usize,
+        source: &runmat_mir::MirExpansionSource,
+    ) -> Result<(), CompileError> {
+        match source {
+            runmat_mir::MirExpansionSource::SubscriptChain(chain) => {
+                self.compile_subscript_chain(chain, Some(sequence_slot))?;
+            }
+            runmat_mir::MirExpansionSource::Member { base, member } => {
+                self.compile_mir_operand(base)?;
+                self.emit(Instr::CaptureMemberSequence {
+                    member: member.clone(),
+                    sequence_slot,
+                });
+            }
+            runmat_mir::MirExpansionSource::DynamicMember { base, member } => {
+                self.compile_mir_operand(base)?;
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::CaptureMemberDynamicSequence { sequence_slot });
+            }
+            runmat_mir::MirExpansionSource::CellContents { base, indexing } => {
+                self.compile_mir_operand(base)?;
+                let (index_count, expand_all) =
+                    self.compile_mir_cell_selector_operands(indexing)?;
+                self.emit(Instr::CaptureCellContentsSequence {
+                    sequence_slot,
+                    num_indices: if expand_all { 0 } else { index_count },
+                    expand_all,
+                });
+            }
+            runmat_mir::MirExpansionSource::ReturnedOutputs(base) => {
+                self.compile_mir_operand(base)?;
+                self.emit(Instr::CaptureReturnedOutputsSequence { sequence_slot });
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_mir_sequence_assign(
+        &mut self,
+        target: &runmat_mir::MirSequenceTarget,
+        value: &MirRvalue,
+    ) -> Result<(), CompileError> {
+        let (base, dynamic_member) = match target {
+            runmat_mir::MirSequenceTarget::Member { base, .. } => (base, None),
+            runmat_mir::MirSequenceTarget::DynamicMember { base, member } => (base, Some(member)),
+            runmat_mir::MirSequenceTarget::CellContents { .. } => {
+                return Err(self.compile_error(
+                    "legacy sequence-assignment statements cannot target brace contents",
+                ));
+            }
+        };
+        self.compile_mir_place_read(base)?;
+        self.emit(Instr::MemberSequenceCardinality);
+        let count_slot = self.alloc_temp();
+        self.emit(Instr::StoreVar(count_slot));
+
+        // Materialize the already-evaluated destination before producing the
+        // transient value sequence. The sequence register is deliberately a
+        // single-instruction channel: its producer must be followed
+        // immediately by the member-sequence store that consumes it.
+        self.compile_mir_member_base_for_assignment(base, false)?;
+        if let Some(member) = dynamic_member {
+            self.compile_mir_operand(member)?;
+        }
+
+        let sequence_capture = match value {
+            MirRvalue::Member { base, member, .. } => {
+                self.compile_mir_operand(base)?;
+                self.emit(Instr::LoadMemberSequenceUsingOutputSlot {
+                    member: member.clone(),
+                    output_count_slot: count_slot,
+                });
+                None
+            }
+            MirRvalue::DynamicMember { base, member, .. } => {
+                self.compile_mir_operand(base)?;
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::LoadMemberDynamicSequenceUsingOutputSlot {
+                    output_count_slot: count_slot,
+                });
+                None
+            }
+            MirRvalue::Call(call) => {
+                if call.requested_outputs != RequestedOutputCount::DestinationSequenceCardinality {
+                    return Err(self.compile_error(
+                        "sequence assignment call is missing its destination-cardinality request",
+                    ));
+                }
+                self.compile_mir_call_with_output_count(
+                    call,
+                    ResolvedCallOutputCount::FromSlot(count_slot),
+                )?;
+                Some(Instr::CaptureCallOutputSequence)
+            }
+            _ => {
+                self.compile_mir_rvalue(value)?;
+                Some(Instr::CaptureScalarSequence)
+            }
+        };
+        if let Some(capture) = sequence_capture {
+            self.emit(capture);
+        }
+
+        if dynamic_member.is_some() {
+            self.emit(Instr::StoreMemberDynamicSequence);
+        } else if let runmat_mir::MirSequenceTarget::Member { member, .. } = target {
+            self.emit(Instr::StoreMemberSequence(member.clone()));
+        }
+        self.emit_store_back_mir_member_chain(base, false)
     }
 
     fn compile_mir_workspace_effect(
@@ -1227,7 +1322,30 @@ impl Compiler {
         targets: &runmat_mir::MirOutputTargetList,
         value: &MirRvalue,
     ) -> Result<(), CompileError> {
+        if targets
+            .targets
+            .iter()
+            .any(|target| matches!(target, MirOutputTarget::Sequence(_)))
+        {
+            return self.compile_mir_dynamic_multi_assign(targets, value);
+        }
         let output_count = self.output_count_for_targets(targets)?;
+        let parallel_output_count = match value {
+            MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::GlobalIndices {
+                requested_outputs,
+                ..
+            })
+            | MirRvalue::Collective(runmat_mir::parallel::MirCollectiveOp::Receive {
+                requested_outputs,
+                ..
+            }) => Some(usize::from(*requested_outputs)),
+            _ => None,
+        };
+        if parallel_output_count.is_some_and(|count| count != output_count) {
+            return Err(self.compile_error(
+                "parallel operation output count disagrees with its assignment targets",
+            ));
+        }
         match value {
             MirRvalue::Call(call) => self.compile_mir_call_for_multi_assign(call, output_count)?,
             MirRvalue::Index { base, indexing }
@@ -1238,17 +1356,401 @@ impl Compiler {
             }
             _ => self.compile_mir_rvalue(value)?,
         }
-        if !matches!(
-            value,
-            MirRvalue::Index { indexing, .. }
-                if indexing.kind == IndexKind::Brace
-                    && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
-        ) {
+        let emits_requested_values = matches!(value, MirRvalue::Call(_))
+            || matches!(
+                value,
+                MirRvalue::Index { indexing, .. }
+                    if indexing.kind == IndexKind::Brace
+                        && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
+            )
+            || matches!(
+                value,
+                MirRvalue::Member {
+                    sequence_use: runmat_types::SequenceUse::SelectPrefix { count },
+                    ..
+                } | MirRvalue::DynamicMember {
+                    sequence_use: runmat_types::SequenceUse::SelectPrefix { count },
+                    ..
+                } if *count == output_count
+            )
+            || matches!(
+                value,
+                MirRvalue::SubscriptChain(chain)
+                    if matches!(chain.sequence_use, runmat_types::SequenceUse::SelectPrefix { count } if count == output_count)
+            )
+            // These typed instructions already publish one stack slot per
+            // requested output; Unpack would consume the last scalar instead.
+            || parallel_output_count.is_some();
+        if !emits_requested_values {
             self.emit(Instr::Unpack(targets.targets.len()));
+            if output_count > 1 {
+                // Scalar Unpack is an unconditional TooManyOutputs error.
+                // It has no normal successor and cannot initialize targets.
+                return Ok(());
+            }
         }
         for target in targets.targets.iter().rev() {
             self.compile_mir_output_target_store(target)?;
         }
+        Ok(())
+    }
+
+    fn compile_mir_dynamic_multi_assign(
+        &mut self,
+        targets: &runmat_mir::MirOutputTargetList,
+        value: &MirRvalue,
+    ) -> Result<(), CompileError> {
+        if targets.requested_outputs != RequestedOutputCount::DestinationSequenceCardinality {
+            return Err(self.compile_error(
+                "runtime-cardinality output targets require destination-cardinality output selection",
+            ));
+        }
+        self.emit(Instr::BeginOutputAssignment {
+            target_count: targets.targets.len(),
+        });
+        for target in &targets.targets {
+            match target {
+                MirOutputTarget::Place(_) => {
+                    self.emit(Instr::PrepareFixedOutputTarget);
+                }
+                MirOutputTarget::Discard => {
+                    self.emit(Instr::PrepareDiscardOutputTarget);
+                }
+                MirOutputTarget::Sequence(target) => {
+                    self.compile_mir_sequence_output_target(target)?;
+                }
+            }
+        }
+        self.emit(Instr::LoadPreparedOutputCardinality);
+        let count_slot = self.alloc_temp();
+        self.emit(Instr::StoreVar(count_slot));
+
+        match value {
+            MirRvalue::Member { base, member, .. } => {
+                self.compile_mir_operand(base)?;
+                self.emit(Instr::LoadMemberSequenceUsingOutputSlot {
+                    member: member.clone(),
+                    output_count_slot: count_slot,
+                });
+            }
+            MirRvalue::DynamicMember { base, member, .. } => {
+                self.compile_mir_operand(base)?;
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::LoadMemberDynamicSequenceUsingOutputSlot {
+                    output_count_slot: count_slot,
+                });
+            }
+            MirRvalue::Index { base, indexing }
+                if indexing.kind == IndexKind::Brace
+                    && indexing.result_context == IndexResultContext::ReadCommaList =>
+            {
+                self.compile_mir_cell_list(base, indexing)?;
+            }
+            MirRvalue::SubscriptChain(chain) => {
+                self.compile_subscript_chain_to_register(chain)?;
+            }
+            MirRvalue::Call(call) => {
+                if call.requested_outputs != RequestedOutputCount::DestinationSequenceCardinality {
+                    return Err(self.compile_error(
+                        "dynamic output assignment call is missing its destination-cardinality request",
+                    ));
+                }
+                self.compile_mir_call_with_output_count(
+                    call,
+                    ResolvedCallOutputCount::FromSlot(count_slot),
+                )?;
+                self.emit(Instr::CaptureCallOutputSequence);
+            }
+            _ => {
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::CaptureScalarSequence);
+            }
+        }
+
+        let retained_outputs = targets
+            .targets
+            .iter()
+            .filter(|target| !matches!(target, MirOutputTarget::Sequence(_)))
+            .count();
+        self.emit(Instr::CommitPreparedOutputTargets { retained_outputs });
+        for target in targets.targets.iter().rev() {
+            if !matches!(target, MirOutputTarget::Sequence(_)) {
+                self.compile_mir_output_target_store(target)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_mir_sequence_output_target(
+        &mut self,
+        target: &runmat_mir::MirSequenceTarget,
+    ) -> Result<(), CompileError> {
+        let root_slot = self.mir_place_root_slot(target.base())?;
+        self.emit(Instr::BeginSequenceOutputTarget {
+            root_slot,
+            root_creation: target.root_creation(),
+        });
+        self.compile_mir_sequence_target_path(target.base())?;
+        match target {
+            runmat_mir::MirSequenceTarget::Member { member, .. } => {
+                self.emit(Instr::FinishMemberSequenceOutputTarget(member.clone()));
+            }
+            runmat_mir::MirSequenceTarget::DynamicMember { member, .. } => {
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::FinishDynamicMemberSequenceOutputTarget);
+            }
+            runmat_mir::MirSequenceTarget::CellContents { indexing, .. } => {
+                let (component_count, selectors) =
+                    self.compile_prepared_index_components(indexing)?;
+                self.emit(Instr::FinishCellContentsSequenceOutputTarget {
+                    component_count,
+                    selectors,
+                    expand_all: indexing.cell_expand_all,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_mir_sequence_target_path(&mut self, place: &MirPlace) -> Result<(), CompileError> {
+        match place {
+            MirPlace::Local(_) | MirPlace::Binding(_) => Ok(()),
+            MirPlace::Member(base, member) => {
+                self.compile_mir_sequence_target_path(base)?;
+                self.emit(Instr::PrepareMemberPathStep {
+                    member: member.clone(),
+                    child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                });
+                Ok(())
+            }
+            MirPlace::DynamicMember(base, member) => {
+                self.compile_mir_sequence_target_path(base)?;
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::PrepareDynamicMemberPathStep {
+                    child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                });
+                Ok(())
+            }
+            MirPlace::Index(base, indexing) => {
+                self.compile_mir_sequence_target_path(base)?;
+                let (component_count, selectors) =
+                    self.compile_prepared_index_components(indexing)?;
+                match indexing.kind {
+                    IndexKind::Paren => self.emit(Instr::PrepareParenthesesPathStep {
+                        child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                        component_count,
+                        selectors,
+                    }),
+                    IndexKind::Brace => self.emit(Instr::PrepareBracesPathStep {
+                        child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                        component_count,
+                        selectors,
+                        expand_all: indexing.cell_expand_all,
+                    }),
+                };
+                Ok(())
+            }
+        }
+    }
+
+    fn mir_place_root_slot(&self, place: &MirPlace) -> Result<usize, CompileError> {
+        match place {
+            MirPlace::Local(_) | MirPlace::Binding(_) => self.mir_place_slot(place),
+            MirPlace::Member(base, _)
+            | MirPlace::DynamicMember(base, _)
+            | MirPlace::Index(base, _) => self.mir_place_root_slot(base),
+        }
+    }
+
+    fn compile_prepared_index_components(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(usize, Vec<crate::bytecode::BytecodeSubscriptSelector>), CompileError> {
+        indexing.validate_target_selectors().map_err(|error| {
+            self.compile_error(format!("invalid MIR target selectors: {error}"))
+        })?;
+        let component_count = if indexing.cell_expand_all {
+            0
+        } else {
+            indexing.components.len()
+        };
+        self.emit(Instr::BeginPreparedIndexSelectors { component_count });
+        if indexing.cell_expand_all {
+            return Ok((0, Vec::new()));
+        }
+        let mut selectors = Vec::with_capacity(indexing.components.len());
+        for (component_index, component) in indexing.components.iter().enumerate() {
+            match component {
+                MirIndexComponent::Colon => {
+                    selectors.push(crate::bytecode::BytecodeSubscriptSelector::Colon)
+                }
+                MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
+                    selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
+                }
+                MirIndexComponent::ContextualExpr(region) => {
+                    let previous = self
+                        .index_end_context
+                        .replace(IndexEndContext::Prepared(component_index));
+                    let result = self.compile_mir_expression_region(region);
+                    self.index_end_context = previous;
+                    result?;
+                    selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
+                }
+                MirIndexComponent::Expansion(region) => {
+                    self.compile_mir_expression_steps(&region.steps)?;
+                    self.compile_mir_call_arg(&region.argument)?;
+                    let (mut specs, _) =
+                        self.mir_call_arg_specs(std::slice::from_ref(&region.argument))?;
+                    selectors.push(crate::bytecode::BytecodeSubscriptSelector::Expansion(
+                        specs.remove(0),
+                    ));
+                }
+            }
+        }
+        Ok((component_count, selectors))
+    }
+
+    fn compile_mir_expression_region(
+        &mut self,
+        region: &runmat_mir::MirExpressionRegion,
+    ) -> Result<(), CompileError> {
+        region
+            .validate()
+            .map_err(|message| self.compile_error(message))?;
+        self.compile_mir_expression_steps(region.steps())?;
+        self.compile_mir_operand(region.result())
+    }
+
+    fn compile_mir_prepared_expression_region(
+        &mut self,
+        region: &runmat_mir::MirPreparedExpressionRegion,
+    ) -> Result<(), CompileError> {
+        region
+            .validate()
+            .map_err(|message| self.compile_error(message))?;
+        self.compile_mir_expression_steps(region.steps())?;
+        self.compile_mir_operand(region.result())
+    }
+
+    fn compile_mir_expression_steps(
+        &mut self,
+        steps: &[runmat_mir::MirExpressionStep],
+    ) -> Result<(), CompileError> {
+        for step in steps {
+            let statement = match step {
+                runmat_mir::MirExpressionStep::Let { local, value, span } => MirStmt {
+                    kind: MirStmtKind::Assign {
+                        place: MirPlace::Local(*local),
+                        value: value.clone(),
+                    },
+                    span: *span,
+                },
+                runmat_mir::MirExpressionStep::CaptureSequence {
+                    destination,
+                    source,
+                    span,
+                } => MirStmt {
+                    kind: MirStmtKind::CaptureSequence {
+                        destination: *destination,
+                        source: source.clone(),
+                    },
+                    span: *span,
+                },
+            };
+            self.compile_mir_stmt(&statement, None)?;
+        }
+        Ok(())
+    }
+
+    fn compile_contextual_slice_components(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(usize, u32, u32), CompileError> {
+        self.emit(Instr::BeginContextualIndexSelectors {
+            component_count: indexing.components.len(),
+        });
+        let mut numeric_count = 0usize;
+        let mut colon_mask = 0u32;
+        let end_mask = 0u32;
+        for (component_index, component) in indexing.components.iter().enumerate() {
+            match component {
+                MirIndexComponent::Colon => self.set_selector_mask_bit(
+                    &mut colon_mask,
+                    component_index,
+                    IDENT_MIR_SLICE_INDEX_PLAN_INVALID,
+                    "contextual selector dimension exceeds mask width",
+                )?,
+                MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    numeric_count += 1;
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
+                    numeric_count += 1;
+                }
+                MirIndexComponent::ContextualExpr(region) => {
+                    let previous = self
+                        .index_end_context
+                        .replace(IndexEndContext::Contextual(component_index));
+                    let result = self.compile_mir_expression_region(region);
+                    self.index_end_context = previous;
+                    result?;
+                    numeric_count += 1;
+                }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
+                    ));
+                }
+            }
+        }
+        self.emit(Instr::FinishContextualIndexSelectors {
+            component_count: indexing.components.len(),
+        });
+        Ok((numeric_count, colon_mask, end_mask))
+    }
+
+    fn compile_contextual_index_values(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(), CompileError> {
+        self.emit(Instr::BeginContextualIndexSelectors {
+            component_count: indexing.components.len(),
+        });
+        for (component_index, component) in indexing.components.iter().enumerate() {
+            match component {
+                MirIndexComponent::Colon => {
+                    self.emit(Instr::LoadString(":".into()));
+                }
+                MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
+                }
+                MirIndexComponent::ContextualExpr(region) => {
+                    let previous = self
+                        .index_end_context
+                        .replace(IndexEndContext::Contextual(component_index));
+                    let result = self.compile_mir_expression_region(region);
+                    self.index_end_context = previous;
+                    result?;
+                }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
+                    ));
+                }
+            }
+        }
+        self.emit(Instr::FinishContextualIndexSelectors {
+            component_count: indexing.components.len(),
+        });
         Ok(())
     }
 
@@ -1276,6 +1778,9 @@ impl Compiler {
                 self.emit(Instr::StoreVar(tmp));
                 self.compile_mir_assign_from_slot(place, tmp)
             }
+            MirOutputTarget::Sequence(_) => Err(self.compile_error(
+                "runtime-cardinality output targets require prepared multi-assignment lowering",
+            )),
             MirOutputTarget::Discard => {
                 self.emit(Instr::Pop);
                 Ok(())
@@ -1297,7 +1802,12 @@ impl Compiler {
             }
             MirPlace::Index(base, indexing) => {
                 if let Ok(base_slot) = self.mir_place_slot(base) {
-                    self.emit(Instr::LoadVarForIndexAssignment(base_slot));
+                    self.emit(match place.first_root_step() {
+                        Some(runmat_mir::MirRootStep::Index(IndexKind::Brace)) => {
+                            Instr::LoadVarForCellAssignment(base_slot)
+                        }
+                        _ => Instr::LoadVarForIndexAssignment(base_slot),
+                    });
                     self.compile_mir_store_indexed_value_from_temp(
                         indexing, value_slot, false, false,
                     )?;
@@ -1311,7 +1821,7 @@ impl Compiler {
             MirPlace::Member(base, member) => {
                 self.compile_mir_member_base_for_assignment(base, false)?;
                 self.emit(Instr::LoadVar(value_slot));
-                self.emit(Instr::StoreMemberOrInit(member.0.clone()));
+                self.emit(Instr::StoreMemberOrInit(member.clone()));
                 self.emit_store_back_mir_member_chain(base, false)
             }
             MirPlace::DynamicMember(base, member) => {
@@ -1331,21 +1841,16 @@ impl Compiler {
         output_count: usize,
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(base)?;
-        let (index_count, expand_all, end_offsets, end_exprs) =
-            self.compile_mir_cell_selector_operands(indexing)?;
+        let (index_count, expand_all) = self.compile_mir_cell_selector_operands(indexing)?;
         if expand_all {
             self.emit(Instr::IndexCellExpand {
                 num_indices: 0,
                 out_count: output_count,
-                end_offsets,
-                end_exprs,
             });
         } else {
             self.emit(Instr::IndexCellExpand {
                 num_indices: index_count,
                 out_count: output_count,
-                end_offsets,
-                end_exprs,
             });
         }
         Ok(())
@@ -1357,12 +1862,9 @@ impl Compiler {
         indexing: &MirIndexing,
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(base)?;
-        let (index_count, expand_all, end_offsets, end_exprs) =
-            self.compile_mir_cell_selector_operands(indexing)?;
+        let (index_count, expand_all) = self.compile_mir_cell_selector_operands(indexing)?;
         self.emit(Instr::IndexCellList {
             num_indices: if expand_all { 0 } else { index_count },
-            end_offsets,
-            end_exprs,
         });
         Ok(())
     }
@@ -1371,10 +1873,16 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
     ) -> Result<MirCellSelectorCompileResult, CompileError> {
+        if indexing
+            .components
+            .iter()
+            .any(|component| matches!(component, MirIndexComponent::ContextualExpr(_)))
+        {
+            self.compile_contextual_index_values(indexing)?;
+            return Ok((indexing.components.len(), false));
+        }
         let expand_all = indexing.cell_expand_all;
         let mut index_count = 0usize;
-        let mut end_offsets = Vec::new();
-        let mut end_exprs = Vec::new();
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Colon => {
@@ -1385,19 +1893,21 @@ impl Compiler {
                 }
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
-                    if let Some(expr) = self.mir_operand_end_expr(operand) {
-                        if let Some(offset) = Self::mir_cell_end_offset_from_expr(&expr) {
-                            end_offsets.push((index_count, offset));
-                        } else {
-                            end_exprs.push((index_count, expr));
-                        }
-                    }
                     index_count += 1;
                 }
-                MirIndexComponent::End { offset, .. } => {
-                    self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
-                    end_offsets.push((index_count, *offset));
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
                     index_count += 1;
+                }
+                MirIndexComponent::ContextualExpr(_) => {
+                    return Err(self.compile_error(
+                        "contextual brace selectors require prepared indexing lowering",
+                    ));
+                }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
+                    ));
                 }
             }
         }
@@ -1414,7 +1924,7 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_CELL_EXPAND_PLAN_INVALID),
             );
         }
-        Ok((index_count, expand_all, end_offsets, end_exprs))
+        Ok((index_count, expand_all))
     }
 
     fn compile_mir_call_for_multi_assign(
@@ -1432,7 +1942,10 @@ impl Compiler {
                     .with_identifier(IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH));
             }
         }
-        let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
+        if self.try_compile_parallel_call(call)? {
+            return Ok(());
+        }
+        let (specs, has_expansion) = self.mir_call_arg_specs(&call.args)?;
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
                 MirCallee::Static(
@@ -1584,7 +2097,7 @@ impl Compiler {
                 );
             }
             MirCallee::Dynamic(_) => {
-                self.compile_mir_dynamic_callee_operand(match &call.callee {
+                self.compile_mir_operand(match &call.callee {
                     MirCallee::Dynamic(callee) => callee,
                     _ => unreachable!(),
                 })?;
@@ -1761,6 +2274,11 @@ impl Compiler {
                     .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID));
             }
         }
+        if place.requires_prepared_assignment() {
+            return Err(self.compile_error(
+                "expanded fixed assignment requires its canonical prepared producer/consumer",
+            ));
+        }
         match place {
             MirPlace::Local(_) | MirPlace::Binding(_) => {
                 self.compile_mir_rvalue(value)?;
@@ -1773,7 +2291,12 @@ impl Compiler {
                     if delete {
                         self.emit(Instr::LoadVar(base_slot));
                     } else {
-                        self.emit(Instr::LoadVarForIndexAssignment(base_slot));
+                        self.emit(match place.first_root_step() {
+                            Some(runmat_mir::MirRootStep::Index(IndexKind::Brace)) => {
+                                Instr::LoadVarForCellAssignment(base_slot)
+                            }
+                            _ => Instr::LoadVarForIndexAssignment(base_slot),
+                        });
                     }
                     self.compile_mir_index_assignment_after_base(indexing, value, delete)?;
                     self.emit(Instr::StoreVar(base_slot));
@@ -1786,7 +2309,7 @@ impl Compiler {
             MirPlace::Member(base, member) => {
                 self.compile_mir_member_base_for_assignment(base, false)?;
                 self.compile_mir_rvalue(value)?;
-                self.emit(Instr::StoreMemberOrInit(member.0.clone()));
+                self.emit(Instr::StoreMemberOrInit(member.clone()));
                 self.emit_store_back_mir_member_chain(base, false)
             }
             MirPlace::DynamicMember(base, member) => {
@@ -1797,6 +2320,189 @@ impl Compiler {
                 self.emit_store_back_mir_member_chain(base, false)
             }
         }
+    }
+
+    fn compile_mir_fixed_assignment_target(
+        &mut self,
+        phase: &runmat_mir::MirFixedPreparation,
+    ) -> Result<(), CompileError> {
+        use crate::bytecode::BytecodeSubscriptStep as Step;
+        use runmat_mir::{
+            MirFixedPreparationPhase as Phase, MirFixedSelectorDestination as Destination,
+        };
+        phase
+            .assignment
+            .validate_index_contexts()
+            .map_err(|error| {
+                self.compile_error(error.to_string())
+                    .with_identifier(error.identifier())
+            })?;
+        phase
+            .validate()
+            .map_err(|message| self.compile_error(message))?;
+        let preparation = &phase.assignment;
+        let place = &preparation.mutation.place;
+        match &phase.phase {
+            Phase::CaptureReceiver => {
+                let root_slot = self.mir_place_root_slot(place)?;
+                let root_creation =
+                    place.assignment_root_creation(preparation.mutation.creation_policy);
+                self.emit(Instr::BeginFixedAssignment {
+                    source_statement: preparation.source_statement,
+                    root_slot,
+                });
+                self.emit(Instr::BeginSequenceOutputTarget {
+                    root_slot,
+                    root_creation,
+                });
+            }
+            Phase::BeginIndex { path_step } => {
+                let Some(MirPlace::Index(_, indexing)) = preparation.path_step(*path_step) else {
+                    return Err(self.compile_error("fixed index phase has no indexed path step"));
+                };
+                self.emit(Instr::BeginPreparedIndexSelectors {
+                    component_count: if indexing.cell_expand_all {
+                        0
+                    } else {
+                        indexing.components.len()
+                    },
+                });
+            }
+            Phase::EvaluateSelector {
+                component,
+                region,
+                destination,
+                ..
+            } => {
+                let previous = self.index_end_context;
+                self.index_end_context = component.map(IndexEndContext::Prepared);
+                let result = (|| -> Result<(), CompileError> {
+                    self.compile_mir_expression_steps(&region.steps)?;
+                    match (destination, &region.argument) {
+                        (Destination::Scalar(local), MirCallArg::Single(operand)) => {
+                            self.compile_mir_operand(operand)?;
+                            let slot = self.mir_local_slot(*local)?;
+                            self.emit(Instr::StoreVar(slot));
+                        }
+                        (
+                            Destination::Sequence(destination),
+                            MirCallArg::CapturedSequence(source),
+                        ) => {
+                            self.emit(Instr::MoveCapturedSequence {
+                                source_slot: source.0,
+                                destination_slot: destination.0,
+                            });
+                        }
+                        (Destination::Sequence(destination), MirCallArg::Expansion(source)) => {
+                            self.compile_mir_sequence_capture(destination.0, source)?;
+                        }
+                        _ => {
+                            return Err(
+                                self.compile_error("fixed selector changes its scalar/CSL receipt")
+                            )
+                        }
+                    }
+                    Ok(())
+                })();
+                self.index_end_context = previous;
+                result?;
+            }
+            Phase::FinishStep { path_step } => {
+                let step = preparation
+                    .path_step(*path_step)
+                    .ok_or_else(|| self.compile_error("fixed path finish is outside its source"))?;
+                let final_step = *path_step + 1 == preparation.path_len();
+                let child_creation = place.assignment_child_creation(
+                    *path_step + 1,
+                    preparation.mutation.creation_policy,
+                );
+                let (endpoint, selector_context) = match step {
+                    MirPlace::Member(_, member) => (Step::Member(member.clone()), None),
+                    MirPlace::DynamicMember(_, member) => {
+                        self.compile_mir_operand(member)?;
+                        (Step::DynamicMember, None)
+                    }
+                    MirPlace::Index(_, indexing) => {
+                        let component_count = if indexing.cell_expand_all {
+                            0
+                        } else {
+                            indexing.components.len()
+                        };
+                        let mut selectors = Vec::with_capacity(indexing.components.len());
+                        for component in &indexing.components {
+                            selectors.push(match component {
+                                MirIndexComponent::Colon => {
+                                    crate::bytecode::BytecodeSubscriptSelector::Colon
+                                }
+                                MirIndexComponent::Expr(operand) => {
+                                    self.compile_mir_operand(operand)?;
+                                    crate::bytecode::BytecodeSubscriptSelector::Value
+                                }
+                                MirIndexComponent::Expansion(region) => {
+                                    let (mut specs, _) = self.mir_call_arg_specs(
+                                        std::slice::from_ref(&region.argument),
+                                    )?;
+                                    crate::bytecode::BytecodeSubscriptSelector::Expansion(
+                                        specs.remove(0),
+                                    )
+                                }
+                                _ => {
+                                    return Err(self.compile_error(
+                                        "fixed descriptor contains uncaptured selector work",
+                                    ))
+                                }
+                            });
+                        }
+                        if indexing.cell_expand_all && final_step {
+                            selectors.push(crate::bytecode::BytecodeSubscriptSelector::Colon);
+                        }
+                        if !final_step {
+                            match indexing.kind {
+                                IndexKind::Paren => self.emit(Instr::PrepareParenthesesPathStep {
+                                    child_creation,
+                                    component_count,
+                                    selectors,
+                                }),
+                                IndexKind::Brace => self.emit(Instr::PrepareBracesPathStep {
+                                    child_creation,
+                                    component_count,
+                                    selectors,
+                                    expand_all: indexing.cell_expand_all,
+                                }),
+                            };
+                            return Ok(());
+                        }
+                        let endpoint = match indexing.kind {
+                            IndexKind::Paren => Step::Parentheses { selectors },
+                            IndexKind::Brace => Step::Braces { selectors },
+                        };
+                        (endpoint, Some(component_count))
+                    }
+                    _ => return Err(self.compile_error("fixed destination has no path endpoint")),
+                };
+                if !final_step {
+                    match endpoint {
+                        Step::Member(member) => self.emit(Instr::PrepareMemberPathStep {
+                            member,
+                            child_creation,
+                        }),
+                        Step::DynamicMember => {
+                            self.emit(Instr::PrepareDynamicMemberPathStep { child_creation })
+                        }
+                        _ => unreachable!("indexed prefix handled above"),
+                    };
+                    return Ok(());
+                }
+                self.emit(Instr::FinishFixedAssignmentTarget {
+                    endpoint,
+                    selector_context,
+                    mutation: preparation.mutation.kind,
+                });
+                self.emit(Instr::LoadPreparedOutputCardinality);
+                self.emit(Instr::Pop);
+            }
+        }
+        Ok(())
     }
 
     fn compile_mir_member_base_for_assignment(
@@ -1811,7 +2517,7 @@ impl Compiler {
             }
             MirPlace::Member(parent, field) => {
                 self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
-                self.emit(Instr::LoadMemberOrInit(field.0.clone()));
+                self.emit(Instr::LoadMemberOrInit(field.clone()));
                 Ok(())
             }
             MirPlace::DynamicMember(parent, name) => {
@@ -1822,7 +2528,7 @@ impl Compiler {
             }
             _ => {
                 let slot = self.mir_place_slot(base)?;
-                self.emit(Instr::LoadVar(slot));
+                self.emit(Instr::LoadVarForStructAssignment(slot));
                 Ok(())
             }
         }
@@ -1834,6 +2540,32 @@ impl Compiler {
         value: &MirRvalue,
         delete: bool,
     ) -> Result<(), CompileError> {
+        if indexing.kind == IndexKind::Paren
+            && indexing
+                .components
+                .iter()
+                .any(|component| matches!(component, MirIndexComponent::ContextualExpr(_)))
+        {
+            let (numeric_count, colon_mask, end_mask) =
+                self.compile_contextual_slice_components(indexing)?;
+            self.compile_mir_rvalue(value)?;
+            self.emit(if delete {
+                Instr::StoreSliceDelete(
+                    indexing.components.len(),
+                    numeric_count,
+                    colon_mask,
+                    end_mask,
+                )
+            } else {
+                Instr::StoreSlice(
+                    indexing.components.len(),
+                    numeric_count,
+                    colon_mask,
+                    end_mask,
+                )
+            });
+            return Ok(());
+        }
         match indexing.kind {
             IndexKind::Paren => match indexing.plan {
                 MirIndexPlan::Scalar => {
@@ -1866,40 +2598,6 @@ impl Compiler {
                         });
                     }
                 }
-                MirIndexPlan::SliceExpr => {
-                    let components = self.compile_mir_slice_expr_components(
-                        indexing,
-                        MirRangeParamOrder::AfterNumeric,
-                    )?;
-                    self.compile_mir_rvalue(value)?;
-                    if delete {
-                        self.emit(Instr::StoreSliceExprDelete {
-                            dims: indexing.components.len(),
-                            numeric_count: components.numeric_count,
-                            colon_mask: components.colon_mask,
-                            end_mask: components.end_mask,
-                            range_dims: components.range_dims,
-                            range_has_step: components.range_has_step,
-                            range_start_exprs: components.range_start_exprs,
-                            range_step_exprs: components.range_step_exprs,
-                            range_end_exprs: components.range_end_exprs,
-                            end_numeric_exprs: components.end_numeric_exprs,
-                        });
-                    } else {
-                        self.emit(Instr::StoreSliceExpr {
-                            dims: indexing.components.len(),
-                            numeric_count: components.numeric_count,
-                            colon_mask: components.colon_mask,
-                            end_mask: components.end_mask,
-                            range_dims: components.range_dims,
-                            range_has_step: components.range_has_step,
-                            range_start_exprs: components.range_start_exprs,
-                            range_step_exprs: components.range_step_exprs,
-                            range_end_exprs: components.range_end_exprs,
-                            end_numeric_exprs: components.end_numeric_exprs,
-                        });
-                    }
-                }
                 MirIndexPlan::Slice => {
                     let (numeric_count, colon_mask, end_mask) =
                         self.compile_mir_slice_components(indexing)?;
@@ -1927,7 +2625,7 @@ impl Compiler {
                 }
             },
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) = self.compile_mir_cell_index_components(
+                self.compile_mir_cell_index_components(
                     indexing,
                     IndexResultContext::AssignmentTarget,
                 )?;
@@ -1935,14 +2633,10 @@ impl Compiler {
                 self.emit(if delete {
                     Instr::StoreIndexCellDelete {
                         num_indices: indexing.components.len(),
-                        end_offsets: end_offsets.clone(),
-                        end_exprs: end_exprs.clone(),
                     }
                 } else {
                     Instr::StoreIndexCell {
                         num_indices: indexing.components.len(),
-                        end_offsets,
-                        end_exprs,
                     }
                 });
             }
@@ -1964,7 +2658,7 @@ impl Compiler {
             MirPlace::Member(parent, field) => {
                 self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
                 self.emit(Instr::Swap);
-                self.emit(Instr::StoreMemberOrInit(field.0.clone()));
+                self.emit(Instr::StoreMemberOrInit(field.clone()));
                 self.emit_store_back_mir_member_chain(parent, allow_deletion_context)
             }
             MirPlace::DynamicMember(parent, name) => {
@@ -2000,7 +2694,7 @@ impl Compiler {
             }
             MirPlace::Member(base, member) => {
                 self.compile_mir_place_read(base)?;
-                self.emit(Instr::LoadMember(member.0.clone()));
+                self.emit(Instr::LoadMember(member.clone()));
                 Ok(())
             }
             MirPlace::DynamicMember(base, member) => {
@@ -2039,14 +2733,12 @@ impl Compiler {
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) = self.compile_mir_cell_index_components(
+                self.compile_mir_cell_index_components(
                     indexing,
                     IndexResultContext::AssignmentTarget,
                 )?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),
-                    end_offsets,
-                    end_exprs,
                 });
             }
         }
@@ -2074,6 +2766,32 @@ impl Compiler {
                     "MIR indexed helper store-back invariant violated: assignment-index context must be AssignmentTarget",
                 )
                 .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
+        }
+        if indexing.kind == IndexKind::Paren
+            && indexing
+                .components
+                .iter()
+                .any(|component| matches!(component, MirIndexComponent::ContextualExpr(_)))
+        {
+            let (numeric_count, colon_mask, end_mask) =
+                self.compile_contextual_slice_components(indexing)?;
+            self.emit(Instr::LoadVar(tmp));
+            self.emit(if delete {
+                Instr::StoreSliceDelete(
+                    indexing.components.len(),
+                    numeric_count,
+                    colon_mask,
+                    end_mask,
+                )
+            } else {
+                Instr::StoreSlice(
+                    indexing.components.len(),
+                    numeric_count,
+                    colon_mask,
+                    end_mask,
+                )
+            });
+            return Ok(());
         }
         match indexing.kind {
             IndexKind::Paren => {
@@ -2108,40 +2826,6 @@ impl Compiler {
                             });
                         }
                     }
-                    MirIndexPlan::SliceExpr => {
-                        let components = self.compile_mir_slice_expr_components(
-                            indexing,
-                            MirRangeParamOrder::AfterNumeric,
-                        )?;
-                        self.emit(Instr::LoadVar(tmp));
-                        if delete {
-                            self.emit(Instr::StoreSliceExprDelete {
-                                dims: indexing.components.len(),
-                                numeric_count: components.numeric_count,
-                                colon_mask: components.colon_mask,
-                                end_mask: components.end_mask,
-                                range_dims: components.range_dims,
-                                range_has_step: components.range_has_step,
-                                range_start_exprs: components.range_start_exprs,
-                                range_step_exprs: components.range_step_exprs,
-                                range_end_exprs: components.range_end_exprs,
-                                end_numeric_exprs: components.end_numeric_exprs,
-                            });
-                        } else {
-                            self.emit(Instr::StoreSliceExpr {
-                                dims: indexing.components.len(),
-                                numeric_count: components.numeric_count,
-                                colon_mask: components.colon_mask,
-                                end_mask: components.end_mask,
-                                range_dims: components.range_dims,
-                                range_has_step: components.range_has_step,
-                                range_start_exprs: components.range_start_exprs,
-                                range_step_exprs: components.range_step_exprs,
-                                range_end_exprs: components.range_end_exprs,
-                                end_numeric_exprs: components.end_numeric_exprs,
-                            });
-                        }
-                    }
                     MirIndexPlan::Slice => {
                         let (numeric_count, colon_mask, end_mask) =
                             self.compile_mir_slice_components(indexing)?;
@@ -2171,7 +2855,7 @@ impl Compiler {
                 Ok(())
             }
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) = self.compile_mir_cell_index_components(
+                self.compile_mir_cell_index_components(
                     indexing,
                     IndexResultContext::AssignmentTarget,
                 )?;
@@ -2179,14 +2863,10 @@ impl Compiler {
                 self.emit(if delete {
                     Instr::StoreIndexCellDelete {
                         num_indices: indexing.components.len(),
-                        end_offsets: end_offsets.clone(),
-                        end_exprs: end_exprs.clone(),
                     }
                 } else {
                     Instr::StoreIndexCell {
                         num_indices: indexing.components.len(),
-                        end_offsets,
-                        end_exprs,
                     }
                 });
                 Ok(())
@@ -2212,6 +2892,7 @@ impl Compiler {
     fn compile_mir_rvalue(&mut self, value: &MirRvalue) -> Result<(), CompileError> {
         match value {
             MirRvalue::Use(operand) => self.compile_mir_operand(operand),
+            MirRvalue::SubscriptChain(chain) => self.compile_subscript_chain(chain, None),
             MirRvalue::Unary(op, operand) => {
                 self.compile_mir_operand(operand)?;
                 match op {
@@ -2297,24 +2978,36 @@ impl Compiler {
             MirRvalue::Call(call) => self.compile_mir_call(call),
             MirRvalue::Aggregate {
                 kind,
-                rows,
-                cols,
+                row_lengths,
                 elements,
-            } => self.compile_mir_aggregate(kind, *rows, *cols, elements),
+            } => self.compile_mir_aggregate(kind, row_lengths, elements),
             MirRvalue::StructLiteral { fields } => self.compile_mir_struct_literal(fields),
             MirRvalue::ObjectLiteral { class_name, fields } => {
                 self.compile_mir_object_literal(class_name, fields)
             }
             MirRvalue::Index { base, indexing } => self.compile_mir_index(base, indexing),
-            MirRvalue::Member { base, member } => {
+            MirRvalue::Member {
+                base,
+                member,
+                sequence_use,
+            } => {
                 self.compile_mir_operand(base)?;
-                self.emit(Instr::LoadMember(member.0.clone()));
+                self.emit(Instr::LoadMemberSequence {
+                    member: member.clone(),
+                    selection: *sequence_use,
+                });
                 Ok(())
             }
-            MirRvalue::DynamicMember { base, member } => {
+            MirRvalue::DynamicMember {
+                base,
+                member,
+                sequence_use,
+            } => {
                 self.compile_mir_operand(base)?;
                 self.compile_mir_operand(member)?;
-                self.emit(Instr::LoadMemberDynamic);
+                self.emit(Instr::LoadMemberDynamicSequence {
+                    selection: *sequence_use,
+                });
                 Ok(())
             }
             MirRvalue::WorkspaceFirstStaticProperty {
@@ -2325,7 +3018,7 @@ impl Compiler {
                 self.emit(Instr::LoadWorkspaceFirstStaticProperty {
                     name: workspace_name.0.clone(),
                     class_name: class_name.clone(),
-                    property: property.0.clone(),
+                    property: property.clone(),
                 });
                 Ok(())
             }
@@ -2344,7 +3037,28 @@ impl Compiler {
                 Ok(())
             }
             MirRvalue::End => {
-                self.emit(Instr::LoadConst(-0.0));
+                match self.index_end_context {
+                    Some(IndexEndContext::Subscript {
+                        component,
+                        component_count,
+                    }) => {
+                        self.emit(Instr::LoadSubscriptEnd {
+                            component,
+                            component_count,
+                        });
+                    }
+                    Some(IndexEndContext::Prepared(component)) => {
+                        self.emit(Instr::LoadPreparedIndexEnd { component });
+                    }
+                    Some(IndexEndContext::Contextual(component)) => {
+                        self.emit(Instr::LoadContextualIndexEnd { component });
+                    }
+                    None => {
+                        return Err(self.compile_error(
+                            "MIR end expression is not enclosed by a contextual index component",
+                        ))
+                    }
+                }
                 Ok(())
             }
             MirRvalue::Future {
@@ -2353,11 +3067,15 @@ impl Compiler {
                 requested_outputs,
                 ..
             } => {
-                let (specs, has_expansion) = self.mir_call_arg_specs(args);
+                let (specs, has_expansion) = self.mir_call_arg_specs(args)?;
                 for arg in args {
                     self.compile_mir_call_arg(arg)?;
                 }
-                let out_count = requested_outputs.fixed_count();
+                let out_count = requested_outputs.executor_carrier_count().ok_or_else(|| {
+                    self.compile_error(
+                        "future output cardinality cannot be derived from an assignment destination",
+                    )
+                })?;
                 if has_expansion {
                     self.emit(Instr::CreateSemanticFutureExpandMultiOutput(
                         *function, specs, out_count,
@@ -2371,16 +3089,218 @@ impl Compiler {
                 }
                 Ok(())
             }
+            MirRvalue::ExternalFuture {
+                function,
+                args,
+                requested_outputs,
+                ..
+            } => self.compile_external_future(*function, args, *requested_outputs),
             MirRvalue::Spawn(operand) => {
                 self.compile_mir_operand(operand)?;
                 self.emit(Instr::Spawn);
                 Ok(())
             }
-            MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(self
-                .compile_error(
-                    "distributed-value and collective MIR requires the distributed runtime capability",
-                )
-                .with_identifier(IDENT_MIR_DISTRIBUTED_CAPABILITY_UNSUPPORTED)),
+            MirRvalue::Distributed(operation) => {
+                use runmat_mir::parallel::MirDistributedOp;
+                let instruction = match operation {
+                    MirDistributedOp::Create {
+                        id,
+                        owner,
+                        input,
+                        scheme,
+                    } => {
+                        self.compile_mir_operand(input)?;
+                        crate::BytecodeDistributedOp::Create {
+                            id: *id,
+                            owner: *owner,
+                            scheme: scheme.clone(),
+                        }
+                    }
+                    MirDistributedOp::Codistributed {
+                        id,
+                        owner,
+                        input,
+                        overload,
+                        coordination,
+                    } => {
+                        self.compile_mir_operand(input)?;
+                        let overload = match overload {
+                            runmat_mir::parallel::MirCodistributedOverload::ReplicatedInputDefault => {
+                                crate::BytecodeCodistributedOverload::ReplicatedInputDefault
+                            }
+                            runmat_mir::parallel::MirCodistributedOverload::CodistributorOrDesignatedWorker { operand } => {
+                                self.compile_mir_operand(operand)?;
+                                crate::BytecodeCodistributedOverload::CodistributorOrDesignatedWorker
+                            }
+                            runmat_mir::parallel::MirCodistributedOverload::DesignatedWorkerWithCodistributor { worker, codistributor } => {
+                                self.compile_mir_operand(worker)?;
+                                self.compile_mir_operand(codistributor)?;
+                                crate::BytecodeCodistributedOverload::DesignatedWorkerWithCodistributor
+                            }
+                        };
+                        crate::BytecodeDistributedOp::Codistributed {
+                            id: *id,
+                            owner: *owner,
+                            overload,
+                            coordination: *coordination,
+                        }
+                    }
+                    MirDistributedOp::Build {
+                        id,
+                        owner,
+                        local_part,
+                        codistributor,
+                        validation,
+                        coordination,
+                    } => {
+                        self.compile_mir_operand(local_part)?;
+                        if let Some(codistributor) = codistributor {
+                            self.compile_mir_operand(codistributor)?;
+                        }
+                        let validation = match validation {
+                            runmat_mir::parallel::MirDistributedBuildValidation::ValidateAcrossWorkers => {
+                                crate::BytecodeDistributedBuildValidation::ValidateAcrossWorkers
+                            }
+                            runmat_mir::parallel::MirDistributedBuildValidation::NoCommunication => {
+                                crate::BytecodeDistributedBuildValidation::NoCommunication
+                            }
+                            runmat_mir::parallel::MirDistributedBuildValidation::RuntimeOption(option) => {
+                                self.compile_mir_operand(option)?;
+                                crate::BytecodeDistributedBuildValidation::RuntimeOption
+                            }
+                        };
+                        crate::BytecodeDistributedOp::Build {
+                            id: *id,
+                            owner: *owner,
+                            has_codistributor: codistributor.is_some(),
+                            validation,
+                            coordination: *coordination,
+                        }
+                    }
+                    MirDistributedOp::LocalPart { value } => {
+                        self.compile_mir_operand(value)?;
+                        crate::BytecodeDistributedOp::LocalPart
+                    }
+                    MirDistributedOp::Materialize { value } => {
+                        self.compile_mir_operand(value)?;
+                        crate::BytecodeDistributedOp::Materialize
+                    }
+                    MirDistributedOp::Codistributor { value } => {
+                        self.compile_mir_operand(value)?;
+                        crate::BytecodeDistributedOp::Codistributor
+                    }
+                    MirDistributedOp::GlobalIndices {
+                        value,
+                        dimension,
+                        lab,
+                        requested_outputs,
+                    } => {
+                        self.compile_mir_operand(value)?;
+                        self.compile_mir_operand(dimension)?;
+                        if let Some(lab) = lab {
+                            self.compile_mir_operand(lab)?;
+                        }
+                        crate::BytecodeDistributedOp::GlobalIndices {
+                            has_lab: lab.is_some(),
+                            requested_outputs: *requested_outputs,
+                        }
+                    }
+                    MirDistributedOp::Redistribute {
+                        value,
+                        codistributor,
+                    } => {
+                        self.compile_mir_operand(value)?;
+                        self.compile_mir_operand(codistributor)?;
+                        crate::BytecodeDistributedOp::Redistribute
+                    }
+                };
+                self.emit(Instr::Distributed(instruction));
+                Ok(())
+            }
+            MirRvalue::Collective(operation) => {
+                for operand in operation.operands() {
+                    self.compile_mir_operand(operand)?;
+                }
+                use runmat_mir::parallel::MirCollectiveOp;
+                let (id, operation) = match operation {
+                    MirCollectiveOp::Barrier { id } => (*id, crate::BytecodeCollectiveOp::Barrier),
+                    MirCollectiveOp::Broadcast { id, input, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Broadcast {
+                            has_input: input.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::Gather { id, .. } => {
+                        (*id, crate::BytecodeCollectiveOp::Gather)
+                    }
+                    MirCollectiveOp::Scatter { id, .. } => {
+                        (*id, crate::BytecodeCollectiveOp::Scatter)
+                    }
+                    MirCollectiveOp::AllGather { id, .. } => {
+                        (*id, crate::BytecodeCollectiveOp::AllGather)
+                    }
+                    MirCollectiveOp::Reduce { id, operator, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Reduce {
+                            operator: *operator,
+                        },
+                    ),
+                    MirCollectiveOp::AllReduce { id, operator, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::AllReduce {
+                            operator: *operator,
+                        },
+                    ),
+                    MirCollectiveOp::Cat { id, root, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Cat {
+                            has_root: root.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::FunctionalReduce { id, root, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::FunctionalReduce {
+                            has_root: root.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::Send { id, tag, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Send {
+                            has_tag: tag.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::Receive {
+                        id,
+                        source,
+                        tag,
+                        requested_outputs,
+                    } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Receive {
+                            has_source: source.is_some(),
+                            has_tag: tag.is_some(),
+                            requested_outputs: *requested_outputs,
+                        },
+                    ),
+                    MirCollectiveOp::SendReceive { id, tag, .. } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::SendReceive {
+                            has_tag: tag.is_some(),
+                        },
+                    ),
+                    MirCollectiveOp::Probe {
+                        id, source, tag, ..
+                    } => (
+                        *id,
+                        crate::BytecodeCollectiveOp::Probe {
+                            has_source: source.is_some(),
+                            has_tag: tag.is_some(),
+                        },
+                    ),
+                };
+                self.emit(Instr::Collective { id, operation });
+                Ok(())
+            }
         }
     }
 
@@ -2392,15 +3312,16 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(left)?;
         let lhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        for stmt in right_temps {
-            self.compile_mir_stmt(stmt)?;
+        for (index, stmt) in right_temps.iter().enumerate() {
+            let next = right_temps.get(index + 1).map(|statement| &statement.kind);
+            self.compile_mir_stmt(stmt, next)?;
         }
         self.compile_mir_operand(right)?;
         let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::LoadBool(true));
         let end = self.emit(Instr::Jump(usize::MAX));
         let false_pc = self.instructions.len();
-        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::LoadBool(false));
         let end_pc = self.instructions.len();
         self.patch(lhs_false, Instr::JumpIfFalse(false_pc));
         self.patch(rhs_false, Instr::JumpIfFalse(false_pc));
@@ -2416,19 +3337,20 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(left)?;
         let lhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::LoadBool(true));
         let end = self.emit(Instr::Jump(usize::MAX));
         let right_pc = self.instructions.len();
         self.patch(lhs_false, Instr::JumpIfFalse(right_pc));
-        for stmt in right_temps {
-            self.compile_mir_stmt(stmt)?;
+        for (index, stmt) in right_temps.iter().enumerate() {
+            let next = right_temps.get(index + 1).map(|statement| &statement.kind);
+            self.compile_mir_stmt(stmt, next)?;
         }
         self.compile_mir_operand(right)?;
         let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::LoadBool(true));
         let rhs_end = self.emit(Instr::Jump(usize::MAX));
         let rhs_false_pc = self.instructions.len();
-        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::LoadBool(false));
         let end_pc = self.instructions.len();
         self.patch(rhs_false, Instr::JumpIfFalse(rhs_false_pc));
         self.patch(rhs_end, Instr::Jump(end_pc));
@@ -2437,9 +3359,20 @@ impl Compiler {
     }
 
     fn compile_mir_call(&mut self, call: &MirCall) -> Result<(), CompileError> {
+        if self.try_compile_parallel_call(call)? {
+            return Ok(());
+        }
         let requested_outputs = self.resolved_call_output_count(call)?;
 
-        let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
+        self.compile_mir_call_with_output_count(call, requested_outputs)
+    }
+
+    fn compile_mir_call_with_output_count(
+        &mut self,
+        call: &MirCall,
+        requested_outputs: ResolvedCallOutputCount,
+    ) -> Result<(), CompileError> {
+        let (specs, has_expansion) = self.mir_call_arg_specs(&call.args)?;
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
                 MirCallee::Static(
@@ -2750,7 +3683,7 @@ impl Compiler {
                 }
             }
             MirCallee::Dynamic(callee) => {
-                self.compile_mir_dynamic_callee_operand(callee)?;
+                self.compile_mir_operand(callee)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -2795,14 +3728,20 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    let requested_outputs = requested_outputs.require_fixed(
-                        self,
-                        "dynamic output count is not supported for expanded builtin calls",
-                    )?;
-                    self.emit_call(
-                        Instr::CallBuiltinExpandMultiOutput(name, specs, requested_outputs),
-                        call,
-                    );
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => self.emit_call(
+                            Instr::CallBuiltinExpandMultiOutput(name, specs, out_count),
+                            call,
+                        ),
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => self.emit_call(
+                            Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(
+                                name,
+                                specs,
+                                out_count_slot,
+                            ),
+                            call,
+                        ),
+                    };
                 } else {
                     match requested_outputs {
                         ResolvedCallOutputCount::Fixed(out_count) => {
@@ -2884,8 +3823,13 @@ impl Compiler {
                 let slot = self.current_function_nargout_slot()?;
                 Ok(ResolvedCallOutputCount::FromSlot(slot))
             }
+            RequestedOutputCount::DestinationSequenceCardinality => Err(self.compile_error(
+                "destination-cardinality output request requires a sequence assignment",
+            )),
             _ => Ok(ResolvedCallOutputCount::Fixed(
-                call.requested_outputs.fixed_count(),
+                call.requested_outputs.known_count().ok_or_else(|| {
+                    self.compile_error("call output count is not statically known")
+                })?,
             )),
         }
     }
@@ -2957,6 +3901,11 @@ impl Compiler {
         if matches!(fallback_policy, CallableFallbackPolicy::None) {
             return match identity {
                 CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) if !name.trim().is_empty() => {
+                    Ok(())
+                }
+                // Workspace lookup still runs first. If it misses, the typed
+                // function identity is sufficient to dispatch without a name fallback.
+                CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. } => {
                     Ok(())
                 }
                 _ => Err(self
@@ -3045,7 +3994,7 @@ impl Compiler {
             self.compile_mir_call_arg(arg)?;
         }
         if has_expansion {
-            let (specs, _) = self.mir_call_arg_specs(&call.args);
+            let (specs, _) = self.mir_call_arg_specs(&call.args)?;
             let output_count = self.resolved_call_output_count(call)?.require_fixed(
                 self,
                 "dynamic output count is not supported for expanded method/member calls",
@@ -3078,53 +4027,77 @@ impl Compiler {
         Ok(())
     }
 
-    fn mir_call_arg_specs(&self, args: &[MirCallArg]) -> (Vec<ArgumentSpec>, bool) {
+    fn mir_call_arg_specs(
+        &self,
+        args: &[MirCallArg],
+    ) -> Result<(Vec<ArgumentSpec>, bool), CompileError> {
         let mut has_expansion = false;
         let specs = args
             .iter()
-            .map(|arg| match arg {
-                MirCallArg::Single(_) => ArgumentSpec {
-                    is_expand: false,
-                    num_indices: 0,
-                    expand_all: false,
-                },
-                MirCallArg::Expansion {
-                    indices,
-                    expand_all,
-                    ..
-                } => {
-                    has_expansion = true;
-                    ArgumentSpec {
-                        is_expand: true,
-                        num_indices: indices.len(),
-                        expand_all: *expand_all,
+            .map(|arg| {
+                Ok(match arg {
+                    MirCallArg::Single(_) => ArgumentSpec::Single,
+                    MirCallArg::Expansion(source) => {
+                        has_expansion = true;
+                        ArgumentSpec::Expansion(match source {
+                            runmat_mir::MirExpansionSource::SubscriptChain(_) => {
+                                return Err(self.compile_error(
+                                "subscript-chain expansions must be captured before call lowering",
+                            ));
+                            }
+                            runmat_mir::MirExpansionSource::CellContents { indexing, .. } => {
+                                ArgumentExpansionSpec::CellContents {
+                                    num_indices: if indexing.cell_expand_all {
+                                        0
+                                    } else {
+                                        indexing.components.len()
+                                    },
+                                    expand_all: indexing.cell_expand_all,
+                                }
+                            }
+                            runmat_mir::MirExpansionSource::ReturnedOutputs(_) => {
+                                ArgumentExpansionSpec::ReturnedOutputs
+                            }
+                            runmat_mir::MirExpansionSource::Member { member, .. } => {
+                                ArgumentExpansionSpec::Member(member.clone())
+                            }
+                            runmat_mir::MirExpansionSource::DynamicMember { .. } => {
+                                ArgumentExpansionSpec::DynamicMember
+                            }
+                        })
                     }
-                }
+                    MirCallArg::CapturedSequence(slot) => {
+                        has_expansion = true;
+                        ArgumentSpec::CapturedSequence { slot: slot.0 }
+                    }
+                })
             })
-            .collect();
-        (specs, has_expansion)
+            .collect::<Result<Vec<_>, CompileError>>()?;
+        Ok((specs, has_expansion))
     }
 
-    fn compile_mir_call_arg(&mut self, arg: &MirCallArg) -> Result<(), CompileError> {
+    pub(super) fn compile_mir_call_arg(&mut self, arg: &MirCallArg) -> Result<(), CompileError> {
         match arg {
             MirCallArg::Single(operand) => self.compile_mir_operand(operand),
-            MirCallArg::Expansion { base, indices, .. } => {
-                self.compile_mir_operand(base)?;
-                for index in indices {
-                    if let Some(offset) = self.mir_operand_cell_end_offset(index) {
-                        self.emit(Instr::LoadConst(encode_cell_end_offset(offset)));
-                    } else if self.mir_operand_end_expr(index).is_some() {
-                        return Err(self
-                            .compile_error(
-                                "MIR call-arg cell expansion only supports offset-style end selectors",
-                            )
-                            .with_identifier(IDENT_MIR_CELL_EXPAND_PLAN_INVALID));
-                    } else {
-                        self.compile_mir_operand(index)?;
-                    }
+            MirCallArg::Expansion(source) => match source {
+                runmat_mir::MirExpansionSource::SubscriptChain(_) => Err(self.compile_error(
+                    "subscript-chain expansions must be captured before call lowering",
+                )),
+                runmat_mir::MirExpansionSource::CellContents { base, indexing } => {
+                    self.compile_mir_operand(base)?;
+                    self.compile_mir_cell_selector_operands(indexing)?;
+                    Ok(())
                 }
-                Ok(())
-            }
+                runmat_mir::MirExpansionSource::ReturnedOutputs(base)
+                | runmat_mir::MirExpansionSource::Member { base, .. } => {
+                    self.compile_mir_operand(base)
+                }
+                runmat_mir::MirExpansionSource::DynamicMember { base, member } => {
+                    self.compile_mir_operand(base)?;
+                    self.compile_mir_operand(member)
+                }
+            },
+            MirCallArg::CapturedSequence(_) => Ok(()),
         }
     }
 
@@ -3146,40 +4119,97 @@ impl Compiler {
     fn compile_mir_aggregate(
         &mut self,
         kind: &MirAggregateKind,
-        rows: usize,
-        cols: usize,
-        elements: &[MirOperand],
+        row_lengths: &[usize],
+        elements: &[runmat_mir::MirAggregateElement],
     ) -> Result<(), CompileError> {
-        if rows.checked_mul(cols) != Some(elements.len()) {
+        let Some(element_count) = row_lengths
+            .iter()
+            .try_fold(0usize, |total, length| total.checked_add(*length))
+        else {
+            return Err(self
+                .compile_error("MIR aggregate row element count overflows the platform")
+                .with_identifier(IDENT_MIR_AGGREGATE_SHAPE_INVALID));
+        };
+        if element_count != elements.len() {
             return Err(self
                 .compile_error("MIR aggregate shape does not match aggregate element count")
                 .with_identifier(IDENT_MIR_AGGREGATE_SHAPE_INVALID));
         }
+        let rows = row_lengths.len();
+        let columns = row_lengths.first().copied().unwrap_or(0);
+        let rectangular_columns = row_lengths
+            .iter()
+            .all(|candidate| *candidate == columns)
+            .then_some(columns);
+
+        let captured_sequence = elements.iter().any(|element| {
+            matches!(
+                element,
+                runmat_mir::MirAggregateElement::CapturedSequence(_)
+            )
+        });
+        let dynamic_concat = matches!(kind, MirAggregateKind::Tensor)
+            && (self.mir_aggregate_needs_dynamic_concat(elements) || rectangular_columns.is_none());
+        if captured_sequence || dynamic_concat {
+            let specs = elements
+                .iter()
+                .map(|element| match element {
+                    runmat_mir::MirAggregateElement::Single(operand) => {
+                        self.compile_mir_operand(operand)?;
+                        Ok(crate::bytecode::AggregateElementSpec::Single)
+                    }
+                    runmat_mir::MirAggregateElement::CapturedSequence(sequence) => {
+                        Ok(crate::bytecode::AggregateElementSpec::CapturedSequence {
+                            slot: sequence.0,
+                        })
+                    }
+                })
+                .collect::<Result<Vec<_>, CompileError>>()?;
+            self.emit(match kind {
+                MirAggregateKind::Tensor => Instr::CreateMatrixFromSequences {
+                    rows,
+                    row_lengths: row_lengths.to_vec(),
+                    elements: specs,
+                },
+                MirAggregateKind::Cell => Instr::CreateCellFromSequences {
+                    rows,
+                    row_lengths: row_lengths.to_vec(),
+                    elements: specs,
+                },
+            });
+            return Ok(());
+        }
 
         match kind {
-            MirAggregateKind::Tensor if self.mir_aggregate_needs_dynamic_concat(elements) => {
-                for element in elements {
-                    self.compile_mir_operand(element)?;
-                }
-                for _ in 0..rows {
-                    self.emit(Instr::LoadConst(cols as f64));
-                }
-                self.emit(Instr::CreateMatrixDynamic(rows));
-            }
             MirAggregateKind::Tensor => {
                 for element in elements {
-                    self.compile_mir_operand(element)?;
+                    self.compile_mir_aggregate_element(element)?;
                 }
-                self.emit(Instr::CreateMatrix(rows, cols));
+                self.emit(Instr::CreateMatrix(rows, rectangular_columns.unwrap_or(0)));
             }
             MirAggregateKind::Cell => {
+                let Some(columns) = rectangular_columns else {
+                    return Err(self
+                        .compile_error("cell literal rows realize different widths")
+                        .with_identifier(IDENT_MIR_AGGREGATE_SHAPE_INVALID));
+                };
                 for element in elements {
-                    self.compile_mir_operand(element)?;
+                    self.compile_mir_aggregate_element(element)?;
                 }
-                self.emit(Instr::CreateCell2D(rows, cols));
+                self.emit(Instr::CreateCell2D(rows, columns));
             }
         };
         Ok(())
+    }
+
+    fn compile_mir_aggregate_element(
+        &mut self,
+        element: &runmat_mir::MirAggregateElement,
+    ) -> Result<(), CompileError> {
+        match element {
+            runmat_mir::MirAggregateElement::Single(operand) => self.compile_mir_operand(operand),
+            runmat_mir::MirAggregateElement::CapturedSequence(_) => Ok(()),
+        }
     }
 
     fn compile_mir_struct_literal(
@@ -3200,17 +4230,11 @@ impl Compiler {
         class_name: &runmat_hir::QualifiedName,
         fields: &[(runmat_hir::MemberName, MirOperand)],
     ) -> Result<(), CompileError> {
-        let class_name = class_name
-            .0
-            .iter()
-            .map(|segment| segment.0.as_str())
-            .collect::<Vec<_>>()
-            .join(".");
-        if class_name.trim().is_empty() {
-            return Err(self
-                .compile_error("MIR object literal class name cannot be empty")
-                .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
-        }
+        let class_name =
+            runmat_types::ClassIdentity::from_qualified_name(class_name).map_err(|error| {
+                self.compile_error(format!("invalid MIR object literal class name: {error}"))
+                    .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID)
+            })?;
         let mut names = Vec::with_capacity(fields.len());
         for (name, value) in fields {
             self.compile_mir_operand(value)?;
@@ -3223,10 +4247,16 @@ impl Compiler {
         Ok(())
     }
 
-    fn mir_aggregate_needs_dynamic_concat(&self, elements: &[MirOperand]) -> bool {
-        elements
-            .iter()
-            .any(|element| self.mir_operand_needs_dynamic_concat(element))
+    fn mir_aggregate_needs_dynamic_concat(
+        &mut self,
+        elements: &[runmat_mir::MirAggregateElement],
+    ) -> bool {
+        let Some(body) = self.body.as_ref() else {
+            return true;
+        };
+        self.aggregate_proof
+            .get_or_insert_with(|| aggregate_construction::ProofIndex::new(body))
+            .needs_dynamic_concat(body, elements)
     }
 
     fn mir_delete_rhs_is_empty_tensor_literal(&self, value: &MirRvalue) -> bool {
@@ -3234,33 +4264,9 @@ impl Compiler {
             value,
             MirRvalue::Aggregate {
                 kind: MirAggregateKind::Tensor,
-                rows: 0,
-                cols: 0,
+                row_lengths,
                 elements,
-            } if elements.is_empty()
-        )
-    }
-
-    fn mir_operand_needs_dynamic_concat(&self, operand: &MirOperand) -> bool {
-        match operand {
-            MirOperand::Constant(MirConstant::String(_)) => true,
-            MirOperand::Local(local) => self
-                .mir_local_rvalue(*local)
-                .is_some_and(|value| self.mir_rvalue_needs_dynamic_concat(&value)),
-            _ => false,
-        }
-    }
-
-    fn mir_rvalue_needs_dynamic_concat(&self, value: &MirRvalue) -> bool {
-        matches!(
-            value,
-            MirRvalue::Range { .. }
-                | MirRvalue::Call(_)
-                | MirRvalue::Aggregate { .. }
-                | MirRvalue::Index { .. }
-                | MirRvalue::Member { .. }
-                | MirRvalue::DynamicMember { .. }
-                | MirRvalue::WorkspaceFirstStaticProperty { .. }
+            } if row_lengths.is_empty() && elements.is_empty()
         )
     }
 
@@ -3281,21 +4287,26 @@ impl Compiler {
         }
 
         if indexing.kind == IndexKind::Brace
-            && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
+            && indexing.result_context == IndexResultContext::ReadCommaList
         {
-            return self.compile_mir_cell_list(base, indexing);
+            let chain = runmat_mir::MirSubscriptChain {
+                root: base.clone(),
+                steps: vec![runmat_mir::MirSubscriptStep::Index(indexing.clone())],
+                sequence_use: runmat_types::SequenceUse::RequireSingle,
+                context: runmat_types::ObjectIndexingContext::Expression,
+            };
+            return self.compile_subscript_chain(&chain, None);
         }
 
         self.compile_mir_operand(base)?;
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) =
-                    self.compile_mir_cell_index_components(indexing, indexing.result_context)?;
+                // ReadCommaList returned through the validated sequence path;
+                // this remaining ReadSingle branch keeps its scalar cell read.
+                self.compile_mir_cell_index_components(indexing, indexing.result_context)?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),
-                    end_offsets,
-                    end_exprs,
                 });
             }
         };
@@ -3306,46 +4317,54 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
         expected_context: IndexResultContext,
-    ) -> Result<MirCellIndexCompileResult, CompileError> {
+    ) -> Result<(), CompileError> {
         if !mir_indexing_context_matches(indexing.result_context, expected_context) {
             return Err(self
                 .compile_error("MIR cell index lowering received mismatched index result context")
                 .with_identifier(IDENT_MIR_CELL_INDEX_CONTEXT_INVALID));
         }
-        let mut end_offsets = Vec::new();
-        let mut end_exprs = Vec::new();
-        let mut index_position = 0usize;
+        if indexing
+            .components
+            .iter()
+            .any(|component| matches!(component, MirIndexComponent::ContextualExpr(_)))
+        {
+            self.compile_contextual_index_values(indexing)?;
+            return Ok(());
+        }
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
-                    if let Some(expr) = self.mir_operand_end_expr(operand) {
-                        if let Some(offset) = Self::mir_cell_end_offset_from_expr(&expr) {
-                            end_offsets.push((index_position, offset));
-                        } else {
-                            end_exprs.push((index_position, expr));
-                        }
-                    }
-                    index_position += 1;
                 }
-                MirIndexComponent::End { offset, .. } => {
-                    self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
-                    end_offsets.push((index_position, *offset));
-                    index_position += 1;
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
                 }
                 _ => {
                     return Err(self
-                        .compile_error(
-                            "MIR cell index lowering expects expression selectors or end-relative selectors",
-                        )
+                        .compile_error("MIR cell index lowering expects expression selectors")
                         .with_identifier(IDENT_MIR_CELL_INDEX_PLAN_INVALID))
                 }
             }
         }
-        Ok((end_offsets, end_exprs))
+        Ok(())
     }
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        if indexing
+            .components
+            .iter()
+            .any(|component| matches!(component, MirIndexComponent::ContextualExpr(_)))
+        {
+            let (numeric_count, colon_mask, end_mask) =
+                self.compile_contextual_slice_components(indexing)?;
+            self.emit(Instr::IndexSlice(
+                indexing.components.len(),
+                numeric_count,
+                colon_mask,
+                end_mask,
+            ));
+            return Ok(());
+        }
         match indexing.plan {
             MirIndexPlan::Scalar => {
                 if indexing.components.len() > 2 {
@@ -3361,25 +4380,6 @@ impl Compiler {
                     self.compile_mir_scalar_index_components(indexing)?;
                     self.emit(Instr::Index(indexing.components.len()));
                 }
-                Ok(())
-            }
-            MirIndexPlan::SliceExpr => {
-                let components = self.compile_mir_slice_expr_components(
-                    indexing,
-                    MirRangeParamOrder::BeforeNumeric,
-                )?;
-                self.emit(Instr::IndexSliceExpr {
-                    dims: indexing.components.len(),
-                    numeric_count: components.numeric_count,
-                    colon_mask: components.colon_mask,
-                    end_mask: components.end_mask,
-                    range_dims: components.range_dims,
-                    range_has_step: components.range_has_step,
-                    range_start_exprs: components.range_start_exprs,
-                    range_step_exprs: components.range_step_exprs,
-                    range_end_exprs: components.range_end_exprs,
-                    end_numeric_exprs: components.end_numeric_exprs,
-                });
                 Ok(())
             }
             MirIndexPlan::Slice => {
@@ -3404,21 +4404,19 @@ impl Compiler {
         indexing: &MirIndexing,
     ) -> Result<(), CompileError> {
         for component in &indexing.components {
-            let MirIndexComponent::Expr(operand) = component else {
-                return Err(self
-                    .compile_error("scalar index lowering expects expression selectors only")
-                    .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
-            };
-            if self.mir_operand_range_end_spec(operand).is_some()
-                || self.mir_operand_end_expr(operand).is_some()
-            {
-                return Err(self
-                    .compile_error(
-                        "scalar index lowering invariant violated: range/end selectors must lower through IndexSliceExpr",
-                    )
-                    .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
+            match component {
+                MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?
+                }
+                MirIndexComponent::Colon
+                | MirIndexComponent::ContextualExpr(_)
+                | MirIndexComponent::Expansion(_) => {
+                    return Err(self
+                        .compile_error("scalar index lowering expects expression selectors only")
+                        .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
+                }
             }
-            self.compile_mir_operand(operand)?;
         }
         Ok(())
     }
@@ -3428,7 +4426,7 @@ impl Compiler {
         indexing: &MirIndexing,
     ) -> Result<(usize, u32, u32), CompileError> {
         let mut colon_mask = 0u32;
-        let mut end_mask = 0u32;
+        let end_mask = 0u32;
         let mut numeric_count = 0usize;
 
         for (dim, component) in indexing.components.iter().enumerate() {
@@ -3439,125 +4437,27 @@ impl Compiler {
                     IDENT_MIR_SLICE_INDEX_PLAN_INVALID,
                     "MIR slice lowering invariant violated: selector dimension exceeds mask width",
                 )?,
-                MirIndexComponent::End { offset, .. } if *offset == 0 => self
-                    .set_selector_mask_bit(
-                        &mut end_mask,
-                        dim,
-                        IDENT_MIR_SLICE_INDEX_PLAN_INVALID,
-                        "MIR slice lowering invariant violated: selector dimension exceeds mask width",
-                    )?,
-                MirIndexComponent::Expr(operand)
-                    if self.mir_operand_range_needs_slice_expr(operand)
-                        || self.mir_operand_end_expr(operand).is_some() =>
-                {
-                    return Err(self
-                        .compile_error(
-                            "MIR slice lowering invariant violated: range/end selectors must lower through IndexSliceExpr",
-                        )
-                        .with_identifier(IDENT_MIR_SLICE_INDEX_PLAN_INVALID))
-                }
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
                     numeric_count += 1;
                 }
-                MirIndexComponent::End { .. } => {
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
+                    numeric_count += 1;
+                }
+                MirIndexComponent::ContextualExpr(_) => {
                     return Err(self
-                        .compile_error(
-                            "MIR slice lowering invariant violated: nonzero end offset must lower through IndexSliceExpr",
-                        )
-                        .with_identifier(IDENT_MIR_SLICE_INDEX_PLAN_INVALID))
+                        .compile_error("contextual selectors require contextual slice lowering"));
+                }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
+                    ));
                 }
             }
         }
 
         Ok((numeric_count, colon_mask, end_mask))
-    }
-
-    fn compile_mir_slice_expr_components(
-        &mut self,
-        indexing: &MirIndexing,
-        range_order: MirRangeParamOrder,
-    ) -> Result<MirSliceExprComponents, CompileError> {
-        let mut colon_mask = 0u32;
-        let end_mask = 0u32;
-        let mut numeric_count = 0usize;
-        let mut numeric_operands = Vec::new();
-        let mut range_params = Vec::new();
-        let mut range_dims = Vec::new();
-        let mut range_has_step = Vec::new();
-        let mut range_start_exprs = Vec::new();
-        let mut range_step_exprs = Vec::new();
-        let mut range_end_exprs = Vec::new();
-        let mut end_numeric_exprs = Vec::new();
-
-        for (dim, component) in indexing.components.iter().enumerate() {
-            match component {
-                MirIndexComponent::Colon => self.set_selector_mask_bit(
-                    &mut colon_mask,
-                    dim,
-                    IDENT_MIR_SLICE_INDEX_PLAN_INVALID,
-                    "MIR slice expr lowering invariant violated: selector dimension exceeds mask width",
-                )?,
-                MirIndexComponent::End { offset, .. } => {
-                    numeric_operands.push(None);
-                    if *offset == 0 {
-                        end_numeric_exprs.push((numeric_count, EndExpr::End));
-                    } else {
-                        end_numeric_exprs.push((numeric_count, end_expr_with_offset(*offset)));
-                    }
-                    numeric_count += 1;
-                }
-                MirIndexComponent::Expr(operand)
-                    if self.mir_operand_range_end_spec(operand).is_some() =>
-                {
-                    let spec = self.mir_operand_range_end_spec(operand).ok_or_else(|| {
-                        self.compile_error("MIR range end expression disappeared during lowering")
-                    })?;
-                    range_dims.push(dim);
-                    range_has_step.push(spec.has_step);
-                    range_start_exprs.push(spec.start_expr.clone());
-                    range_step_exprs.push(spec.step_expr.clone());
-                    range_end_exprs.push(spec.end_expr.clone());
-                    range_params.push((operand.clone(), spec));
-                }
-                MirIndexComponent::Expr(operand)
-                    if self.mir_operand_end_expr(operand).is_some() =>
-                {
-                    numeric_operands.push(None);
-                    end_numeric_exprs.push((
-                        numeric_count,
-                        self.mir_operand_end_expr(operand).ok_or_else(|| {
-                            self.compile_error("MIR end expression disappeared during lowering")
-                        })?,
-                    ));
-                    numeric_count += 1;
-                }
-                MirIndexComponent::Expr(operand) => {
-                    numeric_operands.push(Some(operand.clone()));
-                    numeric_count += 1;
-                }
-            }
-        }
-
-        if matches!(range_order, MirRangeParamOrder::AfterNumeric) {
-            self.emit_mir_slice_numeric_operands(&numeric_operands)?;
-        }
-        self.emit_mir_slice_range_params(&range_params)?;
-        if matches!(range_order, MirRangeParamOrder::BeforeNumeric) {
-            self.emit_mir_slice_numeric_operands(&numeric_operands)?;
-        }
-
-        Ok(MirSliceExprComponents {
-            numeric_count,
-            colon_mask,
-            end_mask,
-            range_dims,
-            range_has_step,
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-        })
     }
 
     fn set_selector_mask_bit(
@@ -3572,378 +4472,6 @@ impl Compiler {
         }
         *mask |= 1u32 << dim;
         Ok(())
-    }
-
-    fn emit_mir_slice_numeric_operands(
-        &mut self,
-        operands: &[Option<MirOperand>],
-    ) -> Result<(), CompileError> {
-        for operand in operands {
-            if let Some(operand) = operand {
-                self.compile_mir_operand(operand)?;
-            } else {
-                self.emit(Instr::LoadConst(0.0));
-            }
-        }
-        Ok(())
-    }
-
-    fn emit_mir_slice_range_params(
-        &mut self,
-        params: &[(MirOperand, MirRangeEndSpec)],
-    ) -> Result<(), CompileError> {
-        for (operand, spec) in params {
-            let Some(MirRvalue::Range { start, step, .. }) = self.mir_operand_rvalue(operand)
-            else {
-                return Err(self.compile_error("MIR range index disappeared during lowering"));
-            };
-            if spec.start_expr.is_some() {
-                self.emit(Instr::LoadConst(0.0));
-            } else {
-                self.compile_mir_operand(&start)?;
-            }
-            if let Some(step) = step {
-                if spec.step_expr.is_some() {
-                    self.emit(Instr::LoadConst(0.0));
-                } else {
-                    self.compile_mir_operand(&step)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn mir_operand_end_expr(&self, operand: &MirOperand) -> Option<EndExpr> {
-        self.mir_operand_end_expr_internal(operand)
-            .and_then(|(expr, has_end)| has_end.then_some(expr))
-    }
-
-    fn mir_operand_cell_end_offset(&self, operand: &MirOperand) -> Option<isize> {
-        let (expr, has_end) = self.mir_operand_end_expr_internal(operand)?;
-        has_end
-            .then(|| Self::mir_cell_end_offset_from_expr(&expr))
-            .flatten()
-    }
-
-    fn mir_cell_end_offset_from_expr(expr: &EndExpr) -> Option<isize> {
-        match expr {
-            EndExpr::End => Some(0),
-            EndExpr::Pos(inner) => Self::mir_cell_end_offset_from_expr(inner),
-            EndExpr::Add(left, right) => {
-                if matches!(left.as_ref(), EndExpr::End) {
-                    Some(Self::end_expr_nonnegative_int(right)?)
-                } else if matches!(right.as_ref(), EndExpr::End) {
-                    Some(Self::end_expr_nonnegative_int(left)?)
-                } else {
-                    None
-                }
-            }
-            EndExpr::Sub(left, right) if matches!(left.as_ref(), EndExpr::End) => {
-                Some(-Self::end_expr_nonnegative_int(right)?)
-            }
-            _ => None,
-        }
-    }
-
-    fn end_expr_nonnegative_int(expr: &EndExpr) -> Option<isize> {
-        let EndExpr::Const(value) = expr else {
-            return None;
-        };
-        if !value.is_finite() || *value < 0.0 {
-            return None;
-        }
-        let rounded = value.round();
-        if (rounded - value).abs() > f64::EPSILON {
-            return None;
-        }
-        if rounded > isize::MAX as f64 {
-            return None;
-        }
-        Some(rounded as isize)
-    }
-
-    fn mir_operand_end_expr_internal(&self, operand: &MirOperand) -> Option<(EndExpr, bool)> {
-        match operand {
-            MirOperand::Local(local) => self.mir_local_end_expr_internal(*local),
-            MirOperand::Constant(MirConstant::Number(value)) => value
-                .parse::<f64>()
-                .ok()
-                .map(|value| (EndExpr::Const(value), false)),
-            _ => None,
-        }
-    }
-
-    fn mir_local_end_expr_internal(
-        &self,
-        local: runmat_mir::MirLocalId,
-    ) -> Option<(EndExpr, bool)> {
-        self.mir_local_rvalue(local)
-            .and_then(|value| self.mir_rvalue_end_expr_internal(&value))
-    }
-
-    fn mir_operand_range_end_spec(&self, operand: &MirOperand) -> Option<MirRangeEndSpec> {
-        let MirRvalue::Range { start, step, end } = self.mir_operand_rvalue(operand)? else {
-            return None;
-        };
-        let start_expr = self.mir_operand_end_expr(&start);
-        let step_expr = step
-            .as_ref()
-            .and_then(|step| self.mir_operand_end_expr(step));
-        let end_expr = self.mir_operand_range_bound_expr(&end)?;
-        Some(MirRangeEndSpec {
-            start_expr,
-            step_expr,
-            end_expr,
-            has_step: step.is_some(),
-        })
-    }
-
-    fn mir_operand_range_needs_slice_expr(&self, operand: &MirOperand) -> bool {
-        let Some(MirRvalue::Range { start, step, end }) = self.mir_operand_rvalue(operand) else {
-            return false;
-        };
-        self.mir_operand_end_expr_internal(&start)
-            .map(|(_, has_end)| has_end)
-            .unwrap_or(false)
-            || step
-                .as_ref()
-                .and_then(|value| self.mir_operand_end_expr_internal(value))
-                .map(|(_, has_end)| has_end)
-                .unwrap_or(false)
-            || self
-                .mir_operand_end_expr_internal(&end)
-                .map(|(_, has_end)| has_end)
-                .unwrap_or(false)
-    }
-
-    fn mir_operand_range_bound_expr(&self, operand: &MirOperand) -> Option<EndExpr> {
-        match operand {
-            MirOperand::Constant(MirConstant::Number(value)) => {
-                value.parse::<f64>().ok().map(EndExpr::Const)
-            }
-            MirOperand::Local(local) => {
-                let slot = self.mir_local_slot(*local).ok()?;
-                let mut visited = HashSet::new();
-                match self
-                    .mir_local_single_assignment_rvalue(*local)
-                    .and_then(|value| {
-                        self.mir_rvalue_range_bound_end_expr_internal(&value, &mut visited)
-                    }) {
-                    Some((expr, true)) => Some(expr),
-                    Some((_, false)) | None => Some(EndExpr::Var(slot)),
-                }
-            }
-            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => None,
-        }
-    }
-
-    fn mir_operand_rvalue(&self, operand: &MirOperand) -> Option<MirRvalue> {
-        match operand {
-            MirOperand::Local(local) => self.mir_local_rvalue(*local),
-            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => None,
-        }
-    }
-
-    fn mir_local_rvalue(&self, local: runmat_mir::MirLocalId) -> Option<MirRvalue> {
-        let body = self.body.as_ref()?;
-        body.blocks
-            .iter()
-            .flat_map(|block| block.statements.iter())
-            .find_map(|stmt| match &stmt.kind {
-                MirStmtKind::Assign {
-                    place: MirPlace::Local(candidate),
-                    value,
-                } if *candidate == local => Some(value.clone()),
-                _ => None,
-            })
-    }
-
-    fn mir_local_single_assignment_rvalue(
-        &self,
-        local: runmat_mir::MirLocalId,
-    ) -> Option<MirRvalue> {
-        let body = self.body.as_ref()?;
-        let mut assignments = body
-            .blocks
-            .iter()
-            .flat_map(|block| block.statements.iter())
-            .filter_map(|stmt| match &stmt.kind {
-                MirStmtKind::Assign {
-                    place: MirPlace::Local(candidate),
-                    value,
-                } if *candidate == local => Some(value),
-                _ => None,
-            });
-        let value = assignments.next()?.clone();
-        assignments.next().is_none().then_some(value)
-    }
-
-    fn mir_operand_range_bound_end_expr_internal(
-        &self,
-        operand: &MirOperand,
-        visited: &mut HashSet<runmat_mir::MirLocalId>,
-    ) -> Option<(EndExpr, bool)> {
-        match operand {
-            MirOperand::Local(local) => {
-                if !visited.insert(*local) {
-                    return None;
-                }
-                let result = self
-                    .mir_local_single_assignment_rvalue(*local)
-                    .and_then(|value| {
-                        self.mir_rvalue_range_bound_end_expr_internal(&value, visited)
-                    });
-                visited.remove(local);
-                result
-            }
-            MirOperand::Constant(MirConstant::Number(value)) => value
-                .parse::<f64>()
-                .ok()
-                .map(|value| (EndExpr::Const(value), false)),
-            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => None,
-        }
-    }
-
-    fn mir_rvalue_range_bound_end_expr_internal(
-        &self,
-        value: &MirRvalue,
-        visited: &mut HashSet<runmat_mir::MirLocalId>,
-    ) -> Option<(EndExpr, bool)> {
-        match value {
-            MirRvalue::End => Some((EndExpr::End, true)),
-            MirRvalue::Use(operand) => {
-                self.mir_operand_range_bound_end_expr_internal(operand, visited)
-            }
-            MirRvalue::Unary(op, operand) => {
-                let (expr, has_end) =
-                    self.mir_operand_range_bound_end_expr_internal(operand, visited)?;
-                match op {
-                    OperatorKind::UnaryPlus => Some((EndExpr::Pos(Box::new(expr)), has_end)),
-                    OperatorKind::UnaryMinus => Some((EndExpr::Neg(Box::new(expr)), has_end)),
-                    _ => None,
-                }
-            }
-            MirRvalue::Binary(left, op, right) => {
-                let (left, left_has_end) =
-                    self.mir_operand_range_bound_end_expr_internal(left, visited)?;
-                let (right, right_has_end) =
-                    self.mir_operand_range_bound_end_expr_internal(right, visited)?;
-                let has_end = left_has_end || right_has_end;
-                let expr = match op {
-                    OperatorKind::Add => EndExpr::Add(Box::new(left), Box::new(right)),
-                    OperatorKind::Subtract => EndExpr::Sub(Box::new(left), Box::new(right)),
-                    OperatorKind::MatrixMultiply | OperatorKind::ElementwiseMultiply => {
-                        EndExpr::Mul(Box::new(left), Box::new(right))
-                    }
-                    OperatorKind::Mrdivide | OperatorKind::ElementwiseDivide => {
-                        EndExpr::Div(Box::new(left), Box::new(right))
-                    }
-                    OperatorKind::Mldivide | OperatorKind::ElementwiseLeftDivide => {
-                        EndExpr::LeftDiv(Box::new(left), Box::new(right))
-                    }
-                    OperatorKind::MatrixPower | OperatorKind::ElementwisePower => {
-                        EndExpr::Pow(Box::new(left), Box::new(right))
-                    }
-                    _ => return None,
-                };
-                Some((expr, has_end))
-            }
-            MirRvalue::Call(call) => self.mir_call_range_bound_end_expr_internal(call, visited),
-            _ => None,
-        }
-    }
-
-    fn mir_call_range_bound_end_expr_internal(
-        &self,
-        call: &MirCall,
-        visited: &mut HashSet<runmat_mir::MirLocalId>,
-    ) -> Option<(EndExpr, bool)> {
-        let identity = match &call.callee {
-            MirCallee::Static(identity) => identity.clone(),
-            MirCallee::SuperConstructor { .. } | MirCallee::SuperMethod { .. } => return None,
-            MirCallee::Dynamic(_) => return None,
-        };
-        let mut args = Vec::with_capacity(call.args.len());
-        let mut has_end = false;
-        for arg in &call.args {
-            let MirCallArg::Single(operand) = arg else {
-                return None;
-            };
-            let (expr, arg_has_end) =
-                self.mir_operand_range_bound_end_expr_internal(operand, visited)?;
-            args.push(expr);
-            has_end |= arg_has_end;
-        }
-        let expr = EndExpr::ResolvedCall {
-            identity,
-            fallback_policy: call.fallback_policy,
-            args,
-        };
-        Some((expr, has_end))
-    }
-
-    fn mir_rvalue_end_expr_internal(&self, value: &MirRvalue) -> Option<(EndExpr, bool)> {
-        match value {
-            MirRvalue::End => Some((EndExpr::End, true)),
-            MirRvalue::Use(operand) => self.mir_operand_end_expr_internal(operand),
-            MirRvalue::Unary(op, operand) => {
-                let (expr, has_end) = self.mir_operand_end_expr_internal(operand)?;
-                match op {
-                    OperatorKind::UnaryPlus => Some((EndExpr::Pos(Box::new(expr)), has_end)),
-                    OperatorKind::UnaryMinus => Some((EndExpr::Neg(Box::new(expr)), has_end)),
-                    _ => None,
-                }
-            }
-            MirRvalue::Binary(left, op, right) => {
-                let (left, left_has_end) = self.mir_operand_end_expr_internal(left)?;
-                let (right, right_has_end) = self.mir_operand_end_expr_internal(right)?;
-                let has_end = left_has_end || right_has_end;
-                let expr = match op {
-                    OperatorKind::Add => EndExpr::Add(Box::new(left), Box::new(right)),
-                    OperatorKind::Subtract => EndExpr::Sub(Box::new(left), Box::new(right)),
-                    OperatorKind::MatrixMultiply | OperatorKind::ElementwiseMultiply => {
-                        EndExpr::Mul(Box::new(left), Box::new(right))
-                    }
-                    OperatorKind::Mrdivide | OperatorKind::ElementwiseDivide => {
-                        EndExpr::Div(Box::new(left), Box::new(right))
-                    }
-                    OperatorKind::Mldivide | OperatorKind::ElementwiseLeftDivide => {
-                        EndExpr::LeftDiv(Box::new(left), Box::new(right))
-                    }
-                    OperatorKind::MatrixPower | OperatorKind::ElementwisePower => {
-                        EndExpr::Pow(Box::new(left), Box::new(right))
-                    }
-                    _ => return None,
-                };
-                Some((expr, has_end))
-            }
-            MirRvalue::Call(call) => self.mir_call_end_expr_internal(call),
-            _ => None,
-        }
-    }
-
-    fn mir_call_end_expr_internal(&self, call: &MirCall) -> Option<(EndExpr, bool)> {
-        let identity = match &call.callee {
-            MirCallee::Static(identity) => identity.clone(),
-            MirCallee::SuperConstructor { .. } | MirCallee::SuperMethod { .. } => return None,
-            MirCallee::Dynamic(_) => return None,
-        };
-        let mut args = Vec::with_capacity(call.args.len());
-        let mut has_end = false;
-        for arg in &call.args {
-            let MirCallArg::Single(operand) = arg else {
-                return None;
-            };
-            let (expr, arg_has_end) = self.mir_operand_end_expr_internal(operand)?;
-            args.push(expr);
-            has_end |= arg_has_end;
-        }
-        let expr = EndExpr::ResolvedCall {
-            identity,
-            fallback_policy: call.fallback_policy,
-            args,
-        };
-        Some((expr, has_end))
     }
 
     fn compile_mir_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {
@@ -3961,6 +4489,14 @@ impl Compiler {
                 self.emit(Instr::LoadConst(value));
                 Ok(())
             }
+            MirOperand::Constant(MirConstant::ImaginaryNumber(value)) => {
+                let value = value.parse().map_err(|_| {
+                    self.compile_error(format!("invalid imaginary number literal {value:?}"))
+                        .with_identifier(IDENT_MIR_NUMBER_LITERAL_INVALID)
+                })?;
+                self.emit(Instr::LoadComplex(0.0, value));
+                Ok(())
+            }
             MirOperand::Constant(MirConstant::IntegerLiteral(value)) => {
                 self.emit(Instr::LoadInt(runmat_value::IntValue::from(value)));
                 Ok(())
@@ -3975,15 +4511,12 @@ impl Compiler {
             }
             MirOperand::Constant(MirConstant::Symbol(name)) => {
                 let name = &name.0;
-                let constants = runmat_builtins::constants();
-                let constant = constants
-                    .iter()
-                    .find(|constant| constant.name == name)
-                    .ok_or_else(|| {
+                let constant =
+                    runmat_runtime::builtin::builtin_constant_value(name).ok_or_else(|| {
                         self.compile_error(format!("unknown constant {name}"))
                             .with_identifier(IDENT_MIR_CONSTANT_UNKNOWN)
                     })?;
-                match &constant.value {
+                match &constant {
                     runmat_value::Value::Num(value) => self.emit(Instr::LoadConst(*value)),
                     runmat_value::Value::Complex(re, im) => self.emit(Instr::LoadComplex(*re, *im)),
                     runmat_value::Value::Bool(value) => self.emit(Instr::LoadBool(*value)),
@@ -4001,18 +4534,6 @@ impl Compiler {
                 Ok(())
             }
         }
-    }
-
-    fn compile_mir_dynamic_callee_operand(
-        &mut self,
-        operand: &MirOperand,
-    ) -> Result<(), CompileError> {
-        if let Some(name) = callback_name_from_mir_operand(operand) {
-            if self.compile_semantic_function_handle_for_name(&name)? {
-                return Ok(());
-            }
-        }
-        self.compile_mir_operand(operand)
     }
 
     fn compile_mir_function_handle(
@@ -4053,7 +4574,7 @@ impl Compiler {
                 Ok(())
             }
             CallableIdentity::AnonymousFunction(function) => {
-                let (captures, display_name) = self
+                let (captures, display_name, source_role) = self
                     .layout
                     .as_ref()
                     .and_then(|layout| layout.functions.get(function))
@@ -4062,7 +4583,13 @@ impl Compiler {
                             "missing VM layout for function handle target {function:?}"
                         ))
                     })
-                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))?;
+                    .map(|layout| {
+                        (
+                            layout.captures.clone(),
+                            layout.display_name.clone(),
+                            layout.source_role,
+                        )
+                    })?;
                 for capture in &captures {
                     let slot = self.binding_slot(capture.binding)?;
                     self.emit(Instr::LoadVar(slot));
@@ -4071,6 +4598,7 @@ impl Compiler {
                     *function,
                     display_name,
                     captures.len(),
+                    source_role,
                 ));
                 Ok(())
             }
@@ -4081,26 +4609,51 @@ impl Compiler {
                 self.emit(Instr::CreateExternalBoundFunctionHandle(
                     *function,
                     display_name.clone(),
+                    runmat_types::FunctionSourceRole::Unknown,
                 ));
                 Ok(())
             }
             CallableIdentity::BoundFunction(function) => {
-                let Some((captures, display_name)) = self
+                let Some((captures, display_name, source_role)) = self
                     .layout
                     .as_ref()
                     .and_then(|layout| layout.functions.get(function))
-                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))
+                    .map(|layout| {
+                        (
+                            layout.captures.clone(),
+                            layout.display_name.clone(),
+                            layout.source_role,
+                        )
+                    })
                 else {
                     // External semantic function identities may not have a local VM layout in the
                     // current compilation unit. Keep the identity and emit a simple semantic handle.
                     self.emit(Instr::CreateBoundFunctionHandle(
                         *function,
                         format!("bound_function_{}", function.0),
+                        runmat_types::FunctionSourceRole::Unknown,
                     ));
                     return Ok(());
                 };
-                if captures.is_empty() {
-                    self.emit(Instr::CreateBoundFunctionHandle(*function, display_name));
+                if source_role == runmat_types::FunctionSourceRole::Nested
+                    && !self.function.is_some_and(|caller| {
+                        self.layout.as_ref().is_some_and(|layout| {
+                            nested_visibility_distance(layout, caller, *function).is_some()
+                        })
+                    })
+                {
+                    return Err(self.compile_error(
+                        "nested function handle is outside the caller's lexical scope",
+                    ));
+                }
+                // A capture-free nested handle still retains this particular
+                // lexical activation. Only non-nested handles can discard it.
+                if captures.is_empty() && source_role != runmat_types::FunctionSourceRole::Nested {
+                    self.emit(Instr::CreateBoundFunctionHandle(
+                        *function,
+                        display_name,
+                        source_role,
+                    ));
                     return Ok(());
                 }
                 for capture in &captures {
@@ -4111,86 +4664,11 @@ impl Compiler {
                     *function,
                     display_name,
                     captures.len(),
+                    source_role,
                 ));
                 Ok(())
             }
         }
-    }
-
-    fn compile_semantic_function_handle_for_name(
-        &mut self,
-        name: &str,
-    ) -> Result<bool, CompileError> {
-        let Some((function, captures, display_name)) =
-            self.resolve_visible_semantic_function_layout(name)
-        else {
-            return Ok(false);
-        };
-        if captures.is_empty() {
-            self.emit(Instr::CreateBoundFunctionHandle(function, display_name));
-            return Ok(true);
-        }
-        for capture in &captures {
-            let slot = self.binding_slot(capture.binding)?;
-            self.emit(Instr::LoadVar(slot));
-        }
-        self.emit(Instr::CreateSemanticClosure(
-            function,
-            display_name,
-            captures.len(),
-        ));
-        Ok(true)
-    }
-
-    fn resolve_visible_semantic_function_layout(
-        &self,
-        name: &str,
-    ) -> Option<(FunctionId, Vec<crate::layout::VmCaptureSlot>, String)> {
-        let layout = self.layout.as_ref()?;
-        let current_function = self.function;
-        if let Some(current) = current_function {
-            let owner_scope = layout
-                .functions
-                .get(&current)
-                .map(|function| function.private_owner_scope.as_str())
-                .unwrap_or_default();
-            if !owner_scope.is_empty() && !name.contains('.') {
-                let scoped_name = format!("{owner_scope}.__private__.{name}");
-                if let Some((function, function_layout)) = layout
-                    .functions
-                    .iter()
-                    .find(|(_, function_layout)| function_layout.display_name == scoped_name)
-                {
-                    return Some((
-                        *function,
-                        function_layout.captures.clone(),
-                        function_layout.display_name.clone(),
-                    ));
-                }
-            }
-        }
-        let mut ids: Vec<_> = layout.functions.keys().copied().collect();
-        ids.sort_by_key(|id| id.0);
-        ids.into_iter().find_map(|function| {
-            let function_layout = layout.functions.get(&function)?;
-            if function_layout.display_name != name {
-                return None;
-            }
-            let visible = function_layout.captures.is_empty()
-                || current_function.is_some_and(|current| {
-                    function_layout
-                        .captures
-                        .iter()
-                        .all(|capture| capture.from_function == current)
-                });
-            visible.then(|| {
-                (
-                    function,
-                    function_layout.captures.clone(),
-                    function_layout.display_name.clone(),
-                )
-            })
-        })
     }
 
     fn semantic_capture_slots_for_call(
@@ -4198,6 +4676,25 @@ impl Compiler {
         target_function: FunctionId,
         captures: &[crate::layout::VmCaptureSlot],
     ) -> Result<Option<Vec<usize>>, CompileError> {
+        if let Some(layout) = self.layout.as_ref().and_then(|layout| {
+            layout.functions.get(&target_function).and_then(|target| {
+                (target.source_role == runmat_types::FunctionSourceRole::Nested).then_some(layout)
+            })
+        }) {
+            let current = self
+                .function
+                .ok_or_else(|| self.compile_error("nested call has no lexical caller"))?;
+            if nested_visibility_distance(layout, current, target_function).is_none() {
+                return Err(
+                    self.compile_error("nested function is outside the caller's lexical scope")
+                );
+            }
+            return captures
+                .iter()
+                .map(|capture| self.binding_slot(capture.binding))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Some);
+        }
         if captures.is_empty() {
             return Ok(None);
         }
@@ -4274,13 +4771,16 @@ impl Compiler {
 
     pub fn emit(&mut self, instr: Instr) -> usize {
         match &instr {
-            Instr::LoadVar(id) | Instr::LoadVarForIndexAssignment(id) | Instr::StoreVar(id) => {
-                self.ensure_var(*id)
-            }
+            Instr::LoadVar(id)
+            | Instr::LoadVarForIndexAssignment(id)
+            | Instr::LoadVarForCellAssignment(id)
+            | Instr::LoadVarForStructAssignment(id)
+            | Instr::StoreVar(id) => self.ensure_var(*id),
             _ => {}
         }
         let pc = self.instructions.len();
         self.instructions.push(instr);
+        self.catch_scopes.push(self.current_catch_scope);
         let span = self.current_span.unwrap_or_default();
         self.instr_spans.push(span);
         self.call_arg_spans.push(None);
@@ -4302,21 +4802,31 @@ impl Compiler {
         if let Some(span) = self.current_span {
             err = err.with_span(span);
         }
+        if let Some(source) = self.source {
+            err = err.with_source(source);
+        }
         err
     }
 }
 
-fn callback_name_from_mir_operand(operand: &MirOperand) -> Option<String> {
-    let MirOperand::Constant(MirConstant::String(value)) = operand else {
-        return None;
-    };
-    let text = string_literal_runtime_text(&value.0);
-    let name = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
-fn string_literal_runtime_text(value: &str) -> String {
-    runmat_hir::StringLiteral(value.to_string()).runtime_text()
+/// A nested definition is visible from its parent and every frame below that
+/// parent, including sibling nested functions. A cousin in another branch is
+/// not below the target's parent and therefore cannot call it or form `@`.
+fn nested_visibility_distance(
+    layout: &VmAssemblyLayout,
+    caller: FunctionId,
+    target: FunctionId,
+) -> Option<usize> {
+    let parent = layout.functions.get(&target)?.parent?;
+    let mut frame = Some(caller);
+    for distance in 0..layout.functions.len() {
+        let current = frame?;
+        if current == parent {
+            return Some(distance);
+        }
+        frame = layout.functions.get(&current)?.parent;
+    }
+    None
 }
 
 fn emit_string_literal(compiler: &mut Compiler, value: &str) {
@@ -4390,7 +4900,9 @@ mod tests {
             function,
             VmFunctionLayout {
                 function,
-                display_name: "test".to_string(),
+                parent: None,
+                display_name: "test".into(),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 private_owner_scope: String::new(),
                 frame_abi: VmFrameAbi {
                     fixed_inputs: Vec::new(),
@@ -4420,6 +4932,7 @@ mod tests {
             .collect();
         Compiler {
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             var_count: local_count,
@@ -4431,7 +4944,9 @@ mod tests {
                 storage_bindings: HashMap::<BindingId, VmStorageBinding>::new(),
             }),
             function: Some(function),
+            source: None,
             body: Some(MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: empty_function_abi(),
                 locals,
@@ -4444,9 +4959,79 @@ mod tests {
                     },
                 }],
             }),
+            aggregate_proof: None,
             class_registrations: Vec::new(),
             current_span: None,
+            current_catch_scope: None,
             pending_place_mutation: None,
+            index_end_context: None,
+        }
+    }
+
+    #[test]
+    fn active_mir_compile_error_keeps_function_source_owner() {
+        let mut compiler = compiler_with_local_assignments(Vec::new());
+        compiler.source = Some(runmat_types::ProgramSourceId(7));
+        compiler.current_span = Some(runmat_hir::Span { start: 4, end: 9 });
+        let error = compiler.compile_error("source-owned failure");
+        assert_eq!(error.source, Some(runmat_types::ProgramSourceId(7)));
+        assert_eq!(error.span, compiler.current_span);
+    }
+
+    #[test]
+    fn typed_parallel_multi_outputs_are_stored_without_scalar_unpacking() {
+        let operand = MirOperand::Constant(MirConstant::Number("1".into()));
+        let values = [
+            MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::GlobalIndices {
+                value: operand.clone(),
+                dimension: operand.clone(),
+                lab: None,
+                requested_outputs: 2,
+            }),
+            MirRvalue::Collective(runmat_mir::parallel::MirCollectiveOp::Receive {
+                id: runmat_types::CollectiveId {
+                    region: runmat_types::ParallelRegionId(runmat_types::RegionId {
+                        function: runmat_types::ProgramFunctionId(0),
+                        ordinal: 0,
+                    }),
+                    ordinal: 0,
+                },
+                source: None,
+                tag: None,
+                requested_outputs: 2,
+            }),
+        ];
+        for value in values {
+            let mut compiler = compiler_with_assignments(vec![
+                (MirLocalId(0), MirRvalue::Use(operand.clone())),
+                (MirLocalId(1), MirRvalue::Use(operand.clone())),
+            ]);
+            let targets = runmat_mir::MirOutputTargetList {
+                targets: vec![
+                    MirOutputTarget::Place(MirPlace::Local(MirLocalId(0))),
+                    MirOutputTarget::Place(MirPlace::Local(MirLocalId(1))),
+                ],
+                requested_outputs: RequestedOutputCount::Exactly(2),
+            };
+            compiler.compile_mir_multi_assign(&targets, &value).unwrap();
+            assert!(!compiler
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::Unpack(_))));
+            assert!(matches!(
+                compiler.instructions.as_slice(),
+                [.., Instr::StoreVar(8), Instr::StoreVar(7)]
+            ));
+
+            let mismatched_targets = runmat_mir::MirOutputTargetList {
+                targets: vec![MirOutputTarget::Discard],
+                requested_outputs: RequestedOutputCount::One,
+            };
+            let before = compiler.instructions.len();
+            assert!(compiler
+                .compile_mir_multi_assign(&mismatched_targets, &value)
+                .is_err());
+            assert_eq!(compiler.instructions.len(), before);
         }
     }
 
@@ -4485,36 +5070,22 @@ mod tests {
     }
 
     #[test]
-    fn range_bound_uses_derived_end_expr_for_single_assignment_local() {
-        let compiler = compiler_with_local_assignments(vec![MirRvalue::End]);
-        let expr = compiler.mir_operand_range_bound_expr(&MirOperand::Local(MirLocalId(0)));
-        assert!(matches!(expr, Some(EndExpr::End)));
-    }
-
-    #[test]
-    fn range_bound_uses_live_var_for_reassigned_local() {
-        let compiler = compiler_with_local_assignments(vec![
-            MirRvalue::End,
-            MirRvalue::Use(MirOperand::Constant(MirConstant::Number("3".to_string()))),
-        ]);
-        let expr = compiler.mir_operand_range_bound_expr(&MirOperand::Local(MirLocalId(0)));
-        assert!(matches!(expr, Some(EndExpr::Var(7))));
-    }
-
-    #[test]
-    fn range_bound_uses_live_var_for_nested_reassigned_local() {
-        let compiler = compiler_with_assignments(vec![
-            (
-                MirLocalId(0),
-                MirRvalue::Use(MirOperand::Local(MirLocalId(1))),
-            ),
-            (MirLocalId(1), MirRvalue::End),
-            (
-                MirLocalId(1),
-                MirRvalue::Use(MirOperand::Constant(MirConstant::Number("3".to_string()))),
-            ),
-        ]);
-        let expr = compiler.mir_operand_range_bound_expr(&MirOperand::Local(MirLocalId(0)));
-        assert!(matches!(expr, Some(EndExpr::Var(7))));
+    fn hir_class_registration_retains_typed_event_declarations() {
+        let ast = runmat_parser::parse(
+            "classdef EventVmSource < handle\n events(NotifyAccess=protected)\n Changed\n end\nend",
+        )
+        .unwrap();
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .unwrap()
+            .assembly;
+        let mir = runmat_mir::lowering::lower_assembly(&hir).expect("lower MIR");
+        let registrations = hir_class_registrations(&hir, &mir);
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].events.len(), 1);
+        assert_eq!(registrations[0].events[0].name.0, "Changed");
+        assert_eq!(
+            registrations[0].events[0].attributes.notify_access,
+            runmat_types::EventAccess::Protected
+        );
     }
 }

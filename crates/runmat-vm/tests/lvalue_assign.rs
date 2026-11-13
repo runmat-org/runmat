@@ -1,8 +1,33 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_value::Value;
-use test_helpers::{compile_source, execute_source};
+use runmat_value::{IntegerStorage, Value};
+use test_helpers::{compile_source, execute_source, interpret};
+
+fn binding_slot(bytecode: &runmat_vm::Bytecode, name: &str) -> usize {
+    bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, candidate)| (candidate == name).then_some(slot))
+        .expect("named binding")
+}
+
+#[test]
+fn fixed_target_expansion_uses_prepared_one_output_assignment() {
+    for source in [
+        "A=[1,2;3,4]; I={1,2}; A(I{:})=9; assert(isequal(A,[1,9;3,4]));",
+        "A=[1,2,3,4]; I={2}; A(I{:})=[]; assert(isequal(A,[1,3,4]));",
+        "A=[1,2;3,4]; I={2}; A(:,I{:})=7; assert(isequal(A,[1,7;3,7]));",
+    ] {
+        let bytecode = compile_source(source).expect("compile expanded fixed target");
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            runmat_vm::Instr::FinishFixedAssignmentTarget { .. }
+        )));
+        execute_source(source).expect("execute expanded fixed target");
+    }
+    assert!(compile_source("A=[1,2]; I={1}; A(end,I{:})=9;").is_err());
+}
 
 #[test]
 fn chained_member_and_index_assignments() {
@@ -112,10 +137,7 @@ fn vector_index_assignment_lowers_to_store_slice() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::StoreSlice(..)
-                | runmat_vm::Instr::StoreSliceDelete(..)
-                | runmat_vm::Instr::StoreSliceExpr { .. }
-                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
         )),
         "vector index assignment should lower through StoreSlice* instructions"
     );
@@ -143,10 +165,7 @@ fn logical_mask_assignment_lowers_to_store_slice() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::StoreSlice(..)
-                | runmat_vm::Instr::StoreSliceDelete(..)
-                | runmat_vm::Instr::StoreSliceExpr { .. }
-                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
         )),
         "logical mask assignment should lower through StoreSlice* instructions"
     );
@@ -164,5 +183,119 @@ fn logical_mask_assignment_lowers_to_store_slice() {
             |v| matches!(v, Value::Tensor(t) if t.materialize_f64() == vec![0.0, 2.0, 0.0, 4.0])
         ),
         "logical mask assignment should mutate true mask positions"
+    );
+}
+
+#[test]
+fn numeric_scalar_base_store_slice_preserves_growth_alias_and_empty_selection() {
+    let source = "a=1; old=a; k=[1 3]; a(k)=[4 7]; empty=[]; a(empty)=9; ok=isequal(size(a),[1 3]) && isequal(a,[4 0 7]) && old==1;";
+    let bytecode = compile_source(source).expect("compile scalar-base slice store");
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))));
+    let ok_slot = binding_slot(&bytecode, "ok");
+    let vars = interpret(&bytecode).expect("execute scalar-base slice store");
+    assert!(
+        matches!(vars.get(ok_slot), Some(Value::Bool(true))),
+        "unexpected result: {:?}",
+        vars.get(ok_slot)
+    );
+}
+
+#[test]
+fn computed_bounded_store_detaches_alias_before_read_modify_write() {
+    use runmat_value::NumericDType;
+
+    for (constructor, dtype) in [
+        ("double", NumericDType::F64),
+        ("single", NumericDType::F32),
+        ("int32", NumericDType::I32),
+    ] {
+        let source = format!(
+            "A={constructor}(zeros(10)); A(3,3)=1; B=A; d=[2 25]; \
+             for j=1:1, \
+             B(2*d(j,1)-1,2*d(j,1)-1)=B(2*d(j,1)-1,2*d(j,1)-1)+d(j,2); \
+             end;"
+        );
+        let bytecode = compile_source(&source).expect("compile computed bounded store");
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, runmat_vm::Instr::StoreSlice(..))));
+        let a = binding_slot(&bytecode, "A");
+        let b = binding_slot(&bytecode, "B");
+        let values = interpret(&bytecode).expect("execute computed bounded store");
+        for (slot, expected) in [(a, 1.0), (b, 26.0)] {
+            let Some(Value::Tensor(tensor)) = values.get(slot) else {
+                panic!("missing {constructor} matrix at {slot}");
+            };
+            assert_eq!(tensor.numeric_dtype(), dtype);
+            assert_eq!(tensor.shape(), &[10, 10]);
+            let mut expected_values = vec![0.0; 100];
+            expected_values[22] = expected;
+            assert_eq!(tensor.materialize_f64(), expected_values, "{constructor}");
+        }
+    }
+}
+
+#[test]
+fn integer_scalar_base_store_slice_keeps_exact_native_classes() {
+    let cases: &[(&str, IntegerStorage)] = &[
+        ("int8(-8)", IntegerStorage::I8(vec![-8, 3])),
+        ("int16(-16)", IntegerStorage::I16(vec![-16, 3])),
+        ("int32(-32)", IntegerStorage::I32(vec![-32, 3])),
+        ("int64(-64)", IntegerStorage::I64(vec![-64, 3])),
+        ("uint8(8)", IntegerStorage::U8(vec![8, 3])),
+        ("uint16(16)", IntegerStorage::U16(vec![16, 3])),
+        ("uint32(32)", IntegerStorage::U32(vec![32, 3])),
+        (
+            "uint64(9007199254740992)+uint64(1)",
+            IntegerStorage::U64(vec![9007199254740993, 3]),
+        ),
+    ];
+    for (scalar, expected) in cases {
+        let source = format!("a={scalar}; old=a; k=[2 2]; a(k)=3; ok=isequal(old,{scalar});");
+        let bytecode = compile_source(&source).expect("compile integer scalar slice store");
+        assert!(
+            bytecode
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
+            "missing StoreSlice for {scalar}"
+        );
+        let a_slot = binding_slot(&bytecode, "a");
+        let ok_slot = binding_slot(&bytecode, "ok");
+        let vars = interpret(&bytecode).expect("execute integer scalar slice store");
+        let Some(Value::Tensor(actual)) = vars.get(a_slot) else {
+            panic!("missing tensor result for {scalar}");
+        };
+        assert_eq!(actual.shape(), &[1, 2], "shape for {scalar}");
+        assert_eq!(
+            actual.integer_storage(),
+            Some(expected),
+            "storage for {scalar}"
+        );
+        assert!(
+            matches!(vars.get(ok_slot), Some(Value::Bool(true))),
+            "alias changed for {scalar}"
+        );
+    }
+}
+
+#[test]
+fn numeric_scalar_slice_deletion_uses_bounded_plan() {
+    let source = "a=5; a(1:1)=[]; ok=isempty(a);";
+    let bytecode = compile_source(source).expect("compile scalar slice deletion");
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))));
+    let ok_slot = binding_slot(&bytecode, "ok");
+    let vars = interpret(&bytecode).expect("execute scalar slice deletion");
+    assert!(
+        matches!(vars.get(ok_slot), Some(Value::Bool(true))),
+        "unexpected result: {:?}",
+        vars.get(ok_slot)
     );
 }

@@ -10,9 +10,12 @@ const CAPABILITY_NAMES: [&str; 25] = [
 #[test]
 fn linear_algebra_logarithm_and_logic_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(!builtin.integer_capabilities.is_empty(), "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
+        let catalog = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("canonical builtin {name}"));
+        let integer_capabilities = catalog.integer_capabilities;
+        let integer_audit = catalog.integer_audit;
+        assert!(!integer_capabilities.is_empty(), "{name}");
+        assert!(integer_audit.is_none(), "{name}");
     }
 }
 
@@ -63,14 +66,32 @@ fn core_operator_runmat_extensions_are_visible_in_lsp_metadata() {
         ("rdivide", &["rdivide-like-prototype"][..]),
         ("power", &["power-like-prototype"][..]),
         ("or", &["or-complex-input", "or-character-input"][..]),
-        ("xor", &["xor-complex-input", "xor-character-input"][..]),
+        ("xor", &["xor-complex-input"][..]),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         let actual = builtin
             .extensions
             .iter()
             .map(|extension| extension.id)
             .collect::<Vec<_>>();
         assert_eq!(actual, ids, "{name}");
+        for extension in builtin.extensions {
+            assert_eq!(
+                extension.mode,
+                runmat_builtins::BuiltinExtensionMode::RunMatOnly
+            );
+            assert!(
+                extension.error_identifier.is_some(),
+                "{name}: {}",
+                extension.id
+            );
+        }
+        if name == "xor" {
+            assert_eq!(
+                builtin.extensions[0].error_identifier,
+                Some("RunMat:compatibility:XorComplexInputExtension")
+            );
+        }
     }
 }

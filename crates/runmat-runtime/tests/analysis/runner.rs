@@ -1,149 +1,745 @@
+use runmat_types::physical::Quantity;
+mod rejection;
+
 use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
+
+fn fixed_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: id.into(),
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                target: runmat_analysis_core::RegionTarget::authored(
+                    runmat_meshing_core::fixtures::fixture_boundary_selection(
+                        &Into::<String>::into(region),
+                    ),
+                ),
+            },
+        },
+    )
+}
+
+fn zero_translation_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Structural(
+        runmat_analysis_core::StructuralConstraint {
+            constraint_id: id.into(),
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
+                runmat_analysis_core::PrescribedStructuralDofs {
+                    target: runmat_analysis_core::RegionTarget::authored(
+                        runmat_meshing_core::fixtures::fixture_boundary_selection(
+                            &Into::<String>::into(region),
+                        ),
+                    ),
+                    translations: [
+                        runmat_analysis_core::StructuralTranslationDof::Ux,
+                        runmat_analysis_core::StructuralTranslationDof::Uy,
+                        runmat_analysis_core::StructuralTranslationDof::Uz,
+                    ]
+                    .into_iter()
+                    .map(|dof| runmat_analysis_core::TranslationDofValue {
+                        dof,
+                        value: runmat_analysis_core::PrescribedValue::Constant(
+                            runmat_analysis_core::Displacement::new(0.0),
+                        ),
+                    })
+                    .collect(),
+                    rotations: Vec::new(),
+                },
+            ),
+        },
+    )
+}
+
+fn magnetic_ground(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Magnetic(runmat_analysis_core::MagneticConstraint {
+        constraint_id: id.into(),
+        kind: runmat_analysis_core::MagneticConstraintKind::VectorPotentialGround {
+            target: runmat_analysis_core::RegionTarget::authored(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(
+                    region,
+                )),
+            ),
+        },
+    })
+}
+
+fn magnetic_insulation(
+    id: impl Into<String>,
+    region: impl Into<String>,
+) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.into(),
+        target: runmat_analysis_core::RegionTarget::authored(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(
+                region,
+            )),
+        ),
+        operator: runmat_analysis_core::BoundaryOperator::MagneticInsulation,
+    }
+}
+
+fn acoustic_boundary(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    operator: runmat_analysis_core::BoundaryOperator,
+) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.into(),
+        target: runmat_analysis_core::RegionTarget::authored(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(
+                region,
+            )),
+        ),
+        operator,
+    }
+}
+
+fn thermal_temperature(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    kelvin: f64,
+) -> runmat_analysis_core::AnalysisConstraint {
+    runmat_analysis_core::AnalysisConstraint::Thermal(runmat_analysis_core::ThermalConstraint {
+        constraint_id: id.into(),
+        kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
+            target: runmat_analysis_core::RegionTarget::authored(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(
+                    region,
+                )),
+            ),
+            value: runmat_analysis_core::PrescribedValue::Constant(
+                runmat_analysis_core::Temperature::new(kelvin),
+            ),
+        },
+    })
+}
+
+fn thermal_boundary(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    operator: runmat_analysis_core::BoundaryOperator,
+) -> runmat_analysis_core::AnalysisBoundary {
+    runmat_analysis_core::AnalysisBoundary {
+        boundary_id: id.into(),
+        target: runmat_analysis_core::RegionTarget::authored(
+            runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(
+                region,
+            )),
+        ),
+        operator,
+    }
+}
+
+enum FluidFixtureConstraint {
+    Velocity([f64; 3]),
+    PressureGauge(f64),
+    NoSlipWall,
+}
+
+fn fluid_constraint(
+    id: impl Into<String>,
+    region: impl Into<String>,
+    condition: FluidFixtureConstraint,
+) -> runmat_analysis_core::AnalysisConstraint {
+    let target = runmat_analysis_core::RegionTarget::authored(
+        runmat_meshing_core::fixtures::fixture_boundary_selection(&Into::<String>::into(region)),
+    );
+    let kind = match condition {
+        FluidFixtureConstraint::Velocity(components) => {
+            runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                target,
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    components.map(runmat_analysis_core::Velocity::new),
+                ),
+            }
+        }
+        FluidFixtureConstraint::PressureGauge(value) => {
+            runmat_analysis_core::FluidConstraintKind::PressureReference {
+                target,
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    runmat_analysis_core::Pressure::new(value),
+                ),
+            }
+        }
+        FluidFixtureConstraint::NoSlipWall => {
+            runmat_analysis_core::FluidConstraintKind::NoSlipWall { target }
+        }
+    };
+    runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
+        constraint_id: id.into(),
+        kind,
+    })
+}
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
-    fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    fea_buckling_mode_shape_field_id, fea_thermal_temperature_field_id,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
-use runmat_runtime::analysis::{
-    AnalysisRunResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
-    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, PlasticityConstitutiveOptions,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-};
-use runmat_runtime::geometry::{geometry_prep_for_analysis_op, GeometryPrepForAnalysisSpec};
+use runmat_runtime::analysis::{AnalysisRunResult, ContactEnforcementOptions};
 use sha2::{Digest, Sha256};
 
-const SYNTHETIC_TWO_TRIANGLE_PREP_OBJ: &str =
-    "o thermal_prep\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n";
+enum FixtureExcitationQuantity {
+    Force([f64; 3]),
+    Moment([f64; 3]),
+    Pressure(f64),
+    AcousticPressure(f64),
+    HeatGeneration(f64),
+    ElectricCurrent {
+        amperes: f64,
+        phase_radians: runmat_types::physical::Angle,
+        amplitude_scale: f64,
+    },
+    CurrentDensity {
+        amperes_per_square_meter: [f64; 3],
+        phase_radians: runmat_types::physical::Angle,
+        amplitude_scale: f64,
+    },
+}
 
-fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
-    let schema = payload
-        .get("schema_version")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    let geometry_id = payload
-        .get("source_geometry_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    let geometry_revision = payload
-        .get("source_geometry_revision")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let source = payload
-        .get("field_source")
-        .and_then(|value| value.as_object())
-        .cloned()
-        .unwrap_or_default();
-    let source_id = source
-        .get("source_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    let source_revision = source
-        .get("revision")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let interpolation = source
-        .get("interpolation_mode")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    let expected_regions = source
-        .get("expected_region_ids")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_default();
-    let region_terms = payload
-        .get("region_temperature_deltas")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .map(|entry| {
-                    let region_id = entry
-                        .get("region_id")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or_default();
-                    let delta = entry
-                        .get("temperature_delta_k")
-                        .and_then(|value| value.as_f64())
-                        .unwrap_or(0.0);
-                    format!("{}:{:016x}", region_id, delta.to_bits())
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_default();
-    let time_terms = payload
-        .get("time_profile")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .map(|entry| {
-                    let t = entry
-                        .get("normalized_time")
-                        .and_then(|value| value.as_f64())
-                        .unwrap_or(0.0)
-                        .to_bits();
-                    let s = entry
-                        .get("scale")
-                        .and_then(|value| value.as_f64())
-                        .unwrap_or(0.0)
-                        .to_bits();
-                    format!("{:016x}:{:016x}", t, s)
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_default();
-    let canonical = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        schema,
-        geometry_id,
-        geometry_revision,
-        source_id,
-        source_revision,
-        interpolation,
-        expected_regions,
-        region_terms,
-        time_terms,
+struct FixtureExcitation {
+    excitation_id: String,
+    region_id: String,
+    quantity: FixtureExcitationQuantity,
+}
+
+fn replace_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcitation>) {
+    let replaced_signal_ids = model
+        .excitations
+        .iter()
+        .map(|action| action.excitation().signal_id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    model
+        .signals
+        .retain(|signal| !replaced_signal_ids.contains(signal.signal_id()));
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    append_fixture_excitations(model, specs);
+}
+
+fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcitation>) {
+    use runmat_analysis_core::{
+        AnalysisExcitation, CoordinateFrame, ExcitationAction, ExcitationCase,
+        ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
+        ExcitationKinematics, ExcitationTarget, PhysicalSignal, ProjectionRequirement, Signal,
+        SignalApproximationEvidence, SignalId, SignalPrecision, SignalProvenance,
+        SignalRepresentation, SignalShape, SignalValue,
+    };
+
+    let case_id = ExcitationCaseId(format!("fixture_case_{}", model.excitation_cases.len()));
+    let first_action = model.excitations.len();
+
+    for spec in specs {
+        let excitation_id = ExcitationId(spec.excitation_id);
+        let signal_id = SignalId(format!("{}_signal", excitation_id.0));
+        let (signal, action, distribution, volume_target, preserve_moment): (
+            PhysicalSignal,
+            fn(AnalysisExcitation) -> ExcitationAction,
+            ExcitationDistribution,
+            bool,
+            bool,
+        ) = match spec.quantity {
+            FixtureExcitationQuantity::Force(value) => (
+                PhysicalSignal::Force(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Vector3,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Vector3(
+                        value.map(runmat_analysis_core::Force::new),
+                    )),
+                )),
+                ExcitationAction::Force as fn(AnalysisExcitation) -> ExcitationAction,
+                ExcitationDistribution::PreserveResultant,
+                false,
+                false,
+            ),
+            FixtureExcitationQuantity::Moment(value) => (
+                PhysicalSignal::Moment(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Vector3,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Vector3(
+                        value.map(runmat_analysis_core::Moment::new),
+                    )),
+                )),
+                ExcitationAction::Moment,
+                ExcitationDistribution::PreserveResultant,
+                false,
+                true,
+            ),
+            FixtureExcitationQuantity::Pressure(value) => (
+                PhysicalSignal::Pressure(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Scalar,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Scalar(
+                        runmat_analysis_core::Pressure::new(value),
+                    )),
+                )),
+                ExcitationAction::Pressure,
+                ExcitationDistribution::IntensityPerArea,
+                false,
+                false,
+            ),
+            FixtureExcitationQuantity::AcousticPressure(value) => (
+                PhysicalSignal::Pressure(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Scalar,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Scalar(
+                        runmat_analysis_core::Pressure::new(value),
+                    )),
+                )),
+                ExcitationAction::AcousticPressure,
+                ExcitationDistribution::IntensityPerArea,
+                false,
+                false,
+            ),
+            FixtureExcitationQuantity::HeatGeneration(value) => (
+                PhysicalSignal::HeatGenerationDensity(fixture_signal(
+                    signal_id.clone(),
+                    SignalShape::Scalar,
+                    SignalPrecision::Real64,
+                    SignalRepresentation::Constant(SignalValue::Scalar(
+                        runmat_analysis_core::HeatGenerationDensity::new(value),
+                    )),
+                )),
+                ExcitationAction::HeatGeneration,
+                ExcitationDistribution::IntensityPerVolume,
+                true,
+                false,
+            ),
+            FixtureExcitationQuantity::ElectricCurrent {
+                amperes,
+                phase_radians,
+                amplitude_scale,
+            } => {
+                let amplitude = amperes * amplitude_scale;
+                let real = runmat_analysis_core::ElectricCurrent::new(
+                    amplitude * phase_radians.canonical_value().cos(),
+                );
+                let imaginary = runmat_analysis_core::ElectricCurrent::new(
+                    amplitude * phase_radians.canonical_value().sin(),
+                );
+                (
+                    PhysicalSignal::ElectricCurrent(fixture_signal(
+                        signal_id.clone(),
+                        SignalShape::Scalar,
+                        SignalPrecision::Complex128,
+                        SignalRepresentation::Tabulated(runmat_analysis_core::TabulatedSignal {
+                            domain: runmat_analysis_core::TabulatedSignalDomain::FrequencyHertz,
+                            knots: vec![runmat_analysis_core::SignalKnot::continuous(
+                                1.0,
+                                runmat_analysis_core::SignalOrdinate::Complex {
+                                    real: SignalValue::Scalar(real),
+                                    imaginary: SignalValue::Scalar(imaginary),
+                                },
+                            )],
+                            interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                            extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
+                        }),
+                    )),
+                    ExcitationAction::ElectricCurrent,
+                    ExcitationDistribution::Concentrated,
+                    false,
+                    false,
+                )
+            }
+            FixtureExcitationQuantity::CurrentDensity {
+                amperes_per_square_meter,
+                phase_radians,
+                amplitude_scale,
+            } => {
+                let real = amperes_per_square_meter.map(|value| {
+                    runmat_analysis_core::ElectricCurrentDensity::new(
+                        value * amplitude_scale * phase_radians.canonical_value().cos(),
+                    )
+                });
+                let imaginary = amperes_per_square_meter.map(|value| {
+                    runmat_analysis_core::ElectricCurrentDensity::new(
+                        value * amplitude_scale * phase_radians.canonical_value().sin(),
+                    )
+                });
+                (
+                    PhysicalSignal::ElectricCurrentDensity(fixture_signal(
+                        signal_id.clone(),
+                        SignalShape::Vector3,
+                        SignalPrecision::Complex128,
+                        SignalRepresentation::Tabulated(runmat_analysis_core::TabulatedSignal {
+                            domain: runmat_analysis_core::TabulatedSignalDomain::FrequencyHertz,
+                            knots: vec![runmat_analysis_core::SignalKnot::continuous(
+                                1.0,
+                                runmat_analysis_core::SignalOrdinate::Complex {
+                                    real: SignalValue::Vector3(real),
+                                    imaginary: SignalValue::Vector3(imaginary),
+                                },
+                            )],
+                            interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                            extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
+                        }),
+                    )),
+                    ExcitationAction::CurrentDensity,
+                    ExcitationDistribution::TopologyField,
+                    false,
+                    false,
+                )
+            }
+        };
+        let target = if volume_target {
+            runmat_analysis_core::RegionTarget::volume(spec.region_id)
+        } else {
+            runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&spec.region_id),
+            )
+        };
+        model.signals.push(signal);
+        model.excitations.push(action(AnalysisExcitation {
+            excitation_id: excitation_id.clone(),
+            target: ExcitationTarget::Region(target),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id,
+            active_step_ids: Vec::new(),
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: distribution == ExcitationDistribution::PreserveResultant,
+                preserve_moment,
+                relative_tolerance: 1.0e-10,
+            },
+        }));
+    }
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: model
+            .excitations
+            .iter()
+            .skip(first_action)
+            .map(|action| action.excitation().excitation_id.clone())
+            .collect(),
+        activation: ExcitationCaseActivation::Always,
+    });
+
+    fn fixture_signal<Q>(
+        signal_id: SignalId,
+        shape: SignalShape,
+        precision: SignalPrecision,
+        representation: SignalRepresentation<Q>,
+    ) -> Signal<Q> {
+        let frame = if shape == SignalShape::Scalar {
+            None
+        } else {
+            Some(CoordinateFrame::Global)
+        };
+        Signal {
+            signal_id,
+            shape,
+            frame,
+            representation,
+            precision,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: None,
+                max_relative_error: None,
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+            provenance: SignalProvenance::Authored,
+        }
+    }
+}
+
+fn set_temperature_history(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    reference_kelvin: f64,
+    delta_kelvin: f64,
+    points: &[(f64, f64)],
+) {
+    set_temperature_excitation(
+        model,
+        signal_id,
+        reference_kelvin,
+        delta_kelvin,
+        points,
+        runmat_analysis_core::ExcitationTarget::WholeModel,
     );
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
 }
 
-fn thermo_field_signature(payload_hash: &str, approved_by: &str) -> String {
-    let signing_key = std::env::var("RUNMAT_THERMO_FIELD_SIGNING_KEY")
-        .unwrap_or_else(|_| "runmat-dev-thermo-signing-key".to_string());
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{payload_hash}:{approved_by}:{signing_key}").as_bytes());
-    format!("sigv1:sha256:{:x}", hasher.finalize())
+fn set_temperature_excitation(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    reference_kelvin: f64,
+    delta_kelvin: f64,
+    points: &[(f64, f64)],
+    target: runmat_analysis_core::ExcitationTarget,
+) {
+    let id = runmat_analysis_core::SignalId(signal_id.to_string());
+    model.signals.retain(|signal| signal.signal_id() != &id);
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::Temperature(
+            scalar_signal(id.clone(), points, |scale| {
+                runmat_analysis_core::Temperature::new(reference_kelvin + delta_kelvin * scale)
+            }),
+        ));
+    append_signal_excitation(
+        model,
+        signal_id,
+        id,
+        target,
+        None,
+        runmat_analysis_core::ExcitationDistribution::TopologyField,
+        runmat_analysis_core::ExcitationAction::TemperatureField,
+    );
 }
 
-fn primary_result_field_id(run_kind: AnalysisRunKind) -> String {
-    match run_kind {
-        AnalysisRunKind::Thermal => fea_thermal_temperature_field_id(0),
-        AnalysisRunKind::Acoustic => FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string(),
-        AnalysisRunKind::Electromagnetic => FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
-        AnalysisRunKind::Cfd => FEA_FIELD_CFD_VELOCITY.to_string(),
-        AnalysisRunKind::Cht => FEA_FIELD_CHT_FLUID_VELOCITY.to_string(),
-        AnalysisRunKind::Fsi => fea_fsi_fluid_velocity_field_id(0),
-        AnalysisRunKind::LinearStatic
-        | AnalysisRunKind::Modal
-        | AnalysisRunKind::Transient
-        | AnalysisRunKind::Nonlinear => FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string(),
+fn set_electric_potential_history(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    applied_voltage: f64,
+    points: &[(f64, f64)],
+) {
+    let id = runmat_analysis_core::SignalId(signal_id.to_string());
+    model.signals.retain(|signal| signal.signal_id() != &id);
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::ElectricPotential(
+            scalar_signal(id.clone(), points, |scale| {
+                runmat_analysis_core::ElectricPotential::new(applied_voltage * scale)
+            }),
+        ));
+    let target = model
+        .material_assignments
+        .first()
+        .map(|assignment| {
+            runmat_analysis_core::ExcitationTarget::Region(
+                runmat_analysis_core::RegionTarget::boundary(
+                    assignment
+                        .selected_region_id()
+                        .expect("fixture uses selected material region"),
+                ),
+            )
+        })
+        .unwrap_or_else(|| {
+            runmat_analysis_core::ExcitationTarget::Region(
+                runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("terminal"),
+                ),
+            )
+        });
+    append_signal_excitation(
+        model,
+        signal_id,
+        id,
+        target,
+        None,
+        runmat_analysis_core::ExcitationDistribution::TopologyField,
+        runmat_analysis_core::ExcitationAction::TerminalVoltage,
+    );
+}
+
+fn set_velocity_history(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    inlet_velocity: f64,
+    points: &[(f64, f64)],
+) {
+    let id = runmat_analysis_core::SignalId(signal_id.to_string());
+    model.signals.retain(|signal| signal.signal_id() != &id);
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::Velocity(
+            scalar_signal(id.clone(), points, |scale| {
+                runmat_analysis_core::Velocity::new(inlet_velocity * scale)
+            }),
+        ));
+    let target = model
+        .constraints
+        .iter()
+        .find_map(|constraint| match constraint {
+            runmat_analysis_core::AnalysisConstraint::Fluid(fluid) => match &fluid.kind {
+                runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                    target, ..
+                } => Some(target.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_face("inlet"),
+            )
+        });
+    append_signal_excitation(
+        model,
+        signal_id,
+        id,
+        runmat_analysis_core::ExcitationTarget::Region(target),
+        Some(runmat_analysis_core::Direction {
+            vector: [1.0, 0.0, 0.0],
+        }),
+        runmat_analysis_core::ExcitationDistribution::TopologyField,
+        runmat_analysis_core::ExcitationAction::InletVelocity,
+    );
+}
+
+fn fixture_cfd_domain(
+    model: &mut AnalysisModel,
+    signal_id: &str,
+    inlet_velocity_m_per_s: f64,
+    dynamic_viscosity_pa_s: f64,
+    turbulence_intensity: f64,
+    points: &[(f64, f64)],
+) -> runmat_analysis_core::CfdDomain {
+    set_velocity_history(model, signal_id, inlet_velocity_m_per_s, points);
+    runmat_analysis_core::CfdDomain {
+        density: runmat_analysis_core::MassDensity::new(1.225),
+        dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(dynamic_viscosity_pa_s),
+        turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(turbulence_intensity),
+        rheology: None,
+        porous_zones: Vec::new(),
+    }
+}
+
+fn scalar_signal<Q>(
+    signal_id: runmat_analysis_core::SignalId,
+    points: &[(f64, f64)],
+    value: impl Fn(f64) -> Q,
+) -> runmat_analysis_core::Signal<Q> {
+    let representation = if points.is_empty() {
+        runmat_analysis_core::SignalRepresentation::Constant(
+            runmat_analysis_core::SignalValue::Scalar(value(1.0)),
+        )
+    } else {
+        runmat_analysis_core::SignalRepresentation::Tabulated(
+            runmat_analysis_core::TabulatedSignal {
+                domain: runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+                knots: points
+                    .iter()
+                    .map(|point| {
+                        runmat_analysis_core::SignalKnot::continuous(
+                            point.0,
+                            runmat_analysis_core::SignalOrdinate::Real(
+                                runmat_analysis_core::SignalValue::Scalar(value(point.1)),
+                            ),
+                        )
+                    })
+                    .collect(),
+                interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
+            },
+        )
+    };
+    runmat_analysis_core::Signal {
+        signal_id,
+        shape: runmat_analysis_core::SignalShape::Scalar,
+        frame: None,
+        representation,
+        precision: runmat_analysis_core::SignalPrecision::Real64,
+        evidence: runmat_analysis_core::SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count: points.len().max(1),
+        },
+        provenance: runmat_analysis_core::SignalProvenance::Authored,
+    }
+}
+
+fn append_signal_excitation(
+    model: &mut AnalysisModel,
+    id: &str,
+    signal_id: runmat_analysis_core::SignalId,
+    target: runmat_analysis_core::ExcitationTarget,
+    direction: Option<runmat_analysis_core::Direction>,
+    distribution: runmat_analysis_core::ExcitationDistribution,
+    action: fn(runmat_analysis_core::AnalysisExcitation) -> runmat_analysis_core::ExcitationAction,
+) {
+    let excitation_id = runmat_analysis_core::ExcitationId(format!("{id}.excitation"));
+    let case_id = runmat_analysis_core::ExcitationCaseId(format!("{id}.case"));
+    model
+        .excitations
+        .retain(|existing| existing.excitation().excitation_id != excitation_id);
+    model
+        .excitation_cases
+        .retain(|existing| existing.case_id != case_id);
+    model
+        .excitations
+        .push(action(runmat_analysis_core::AnalysisExcitation {
+            excitation_id: excitation_id.clone(),
+            target,
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            direction,
+            distribution,
+            kinematics: runmat_analysis_core::ExcitationKinematics::FixedFrame,
+            signal_id,
+            active_step_ids: Vec::new(),
+            combination_group: None,
+            projection: runmat_analysis_core::ProjectionRequirement {
+                preserve_resultant: false,
+                preserve_moment: false,
+                relative_tolerance: 1.0e-10,
+            },
+        }));
+    model
+        .excitation_cases
+        .push(runmat_analysis_core::ExcitationCase {
+            case_id,
+            action_ids: vec![excitation_id],
+            activation: runmat_analysis_core::ExcitationCaseActivation::Always,
+        });
+}
+
+fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
+    match AnalysisSolverOptions::defaults_for(procedure_step)
+        .expect("fixture procedure step must select a supported solver")
+    {
+        AnalysisSolverOptions::ThermalDiffusion(_) => fea_thermal_temperature_field_id(0),
+        AnalysisSolverOptions::AcousticHelmholtz(_) => {
+            FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string()
+        }
+        AnalysisSolverOptions::AcousticResponse(_) => {
+            panic!("acoustic modal/transient fixtures execute through the study runner")
+        }
+        AnalysisSolverOptions::ElectricalStatic(_)
+        | AnalysisSolverOptions::Magnetostatic(_)
+        | AnalysisSolverOptions::MaxwellHarmonic(_)
+        | AnalysisSolverOptions::LineParameters(_) => {
+            panic!(
+                "typed electromagnetic completions have no synthetic scalar-harness primary field"
+            )
+        }
+        AnalysisSolverOptions::IncompressibleFlow(_) => FEA_FIELD_CFD_VELOCITY.to_string(),
+        AnalysisSolverOptions::StructuralLinear(_)
+        | AnalysisSolverOptions::StructuralModes(_)
+        | AnalysisSolverOptions::StructuralFrequency(_)
+        | AnalysisSolverOptions::StructuralTransient(_)
+        | AnalysisSolverOptions::StructuralNonlinear(_) => {
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()
+        }
+        AnalysisSolverOptions::StructuralResponseSpectrum(_) => {
+            panic!("response-spectrum envelopes do not have one ordinary primary field")
+        }
+        AnalysisSolverOptions::StructuralRandomResponse(_) => {
+            panic!("random-response statistics do not have one ordinary primary field")
+        }
+        AnalysisSolverOptions::StructuralBuckling(_) => fea_buckling_mode_shape_field_id(1),
     }
 }
 
@@ -186,19 +782,6 @@ fn analysis_result_field<'a>(
                     .find(|field| field.field_id == field_id)
             })
         })
-        .or_else(|| {
-            run_result
-                .electromagnetic_results
-                .as_ref()
-                .and_then(|electromagnetic| {
-                    [
-                        &electromagnetic.vector_potential_real,
-                        &electromagnetic.magnetic_flux_density_magnitude,
-                    ]
-                    .into_iter()
-                    .find(|field| field.field_id == field_id)
-                })
-        })
 }
 
 fn env_usize(name: &str) -> Option<usize> {
@@ -223,8 +806,13 @@ fn env_bool(name: &str) -> Option<bool> {
         })
 }
 
-fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions {
+fn nonlinear_options_for_spec(
+    spec: &FixtureSpec,
+    solver_mesh_artifact_path: Option<String>,
+) -> AnalysisNonlinearRunOptions {
     let mut options = AnalysisNonlinearRunOptions::solid_recommended();
+    options.solver_mesh_artifact_path = solver_mesh_artifact_path;
+    options.contact_enforcement = contact_for_fixture(spec.id).map(|contact| contact.enforcement);
     options.increment_count = spec.transient_step_count.unwrap_or(options.increment_count);
 
     if let Some(value) = env_usize("RUNMAT_NONLINEAR_INCREMENT_COUNT") {
@@ -238,14 +826,14 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
             options.tolerance = value;
         }
     }
-    if let Some(value) = env_f64("RUNMAT_NONLINEAR_RESIDUAL_FACTOR") {
-        if value.is_finite() && value >= 1.0 {
-            options.residual_convergence_factor = value;
+    if let Some(value) = env_f64("RUNMAT_NONLINEAR_LINEAR_TOLERANCE") {
+        if value.is_finite() && value > 0.0 {
+            options.linear_tolerance = value;
         }
     }
-    if let Some(value) = env_f64("RUNMAT_NONLINEAR_INCREMENT_NORM_TOL") {
+    if let Some(value) = env_f64("RUNMAT_NONLINEAR_MINIMUM_LOAD_INCREMENT") {
         if value.is_finite() && value > 0.0 {
-            options.increment_norm_tolerance = value;
+            options.minimum_load_increment = value;
         }
     }
     if let Some(value) = env_bool("RUNMAT_NONLINEAR_LINE_SEARCH") {
@@ -259,72 +847,76 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
             options.line_search_reduction = value;
         }
     }
-    if let Some(value) = env_usize("RUNMAT_NONLINEAR_TANGENT_REFRESH_INTERVAL") {
-        options.tangent_refresh_interval = value.max(1);
+    if let Some(value) = env_usize("RUNMAT_NONLINEAR_MAX_LOAD_CUTBACKS") {
+        options.max_load_cutbacks = value;
+    }
+    if let Some(value) = env_usize("RUNMAT_NONLINEAR_MAX_ACCEPTED_INCREMENTS") {
+        options.max_accepted_increments = value.max(1);
     }
 
     options
 }
 
-fn plasticity_for_fixture(spec_id: &str) -> Option<PlasticityConstitutiveOptions> {
+fn plasticity_for_fixture(spec_id: &str) -> Option<runmat_analysis_core::MaterialPlasticModel> {
+    use runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening;
     match spec_id {
-        "nonlinear_plasticity_benchmark_gpu_provider" => Some(PlasticityConstitutiveOptions {
-            enabled: true,
-            yield_strain: 2.0e-4,
-            hardening_modulus_ratio: 0.2,
-            saturation_exponent: 4.0,
+        "nonlinear_plasticity_benchmark_gpu_provider" => Some(J2IsotropicLinearHardening {
+            yield_stress_pa: runmat_types::physical::YieldStress::new(250e6),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         }),
-        "nonlinear_invalid_plasticity_options" => Some(PlasticityConstitutiveOptions {
-            enabled: true,
-            yield_strain: -1.0,
-            hardening_modulus_ratio: 0.2,
-            saturation_exponent: 4.0,
+        "nonlinear_invalid_plasticity_options" => Some(J2IsotropicLinearHardening {
+            yield_stress_pa: runmat_types::physical::YieldStress::new(-1.0),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(1e9),
         }),
-        "nonlinear_plastic_hardening_reference_gpu_provider" => {
-            Some(PlasticityConstitutiveOptions {
-                enabled: true,
-                yield_strain: 0.03,
-                hardening_modulus_ratio: 0.06,
-                saturation_exponent: 1.0,
-            })
-        }
+        "nonlinear_plastic_hardening_reference_gpu_provider" => Some(J2IsotropicLinearHardening {
+            yield_stress_pa: runmat_types::physical::YieldStress::new(300e6),
+            isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(2e9),
+        }),
         "nonlinear_plastic_hardening_reference_complex_gpu_provider" => {
-            Some(PlasticityConstitutiveOptions {
-                enabled: true,
-                yield_strain: 0.018,
-                hardening_modulus_ratio: 0.09,
-                saturation_exponent: 1.25,
+            Some(J2IsotropicLinearHardening {
+                yield_stress_pa: runmat_types::physical::YieldStress::new(350e6),
+                isotropic_hardening_modulus_pa: runmat_types::physical::HardeningModulus::new(3e9),
             })
         }
         _ => None,
     }
 }
 
-fn contact_for_fixture(spec_id: &str) -> Option<ContactInterfaceOptions> {
+#[derive(Debug, Clone, Copy)]
+struct FixtureContactOptions {
+    enforcement: ContactEnforcementOptions,
+    friction_coefficient: f64,
+}
+
+fn contact_for_fixture(spec_id: &str) -> Option<FixtureContactOptions> {
     match spec_id {
-        "nonlinear_contact_benchmark_gpu_provider" => Some(ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.15,
-            max_penetration_ratio: 0.035,
+        "nonlinear_contact_benchmark_gpu_provider" => Some(FixtureContactOptions {
+            enforcement: ContactEnforcementOptions {
+                penalty_stiffness_scale: 0.15,
+                max_penetration_ratio: 0.035,
+            },
             friction_coefficient: 0.9,
         }),
-        "nonlinear_invalid_contact_options" => Some(ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 0.0,
-            max_penetration_ratio: 0.01,
+        "nonlinear_invalid_contact_options" => Some(FixtureContactOptions {
+            enforcement: ContactEnforcementOptions {
+                penalty_stiffness_scale: 0.0,
+                max_penetration_ratio: 0.01,
+            },
             friction_coefficient: 0.0,
         }),
-        "nonlinear_contact_frictionless_reference_gpu_provider" => Some(ContactInterfaceOptions {
-            enabled: true,
-            penalty_stiffness_scale: 2.0,
-            max_penetration_ratio: 0.01,
+        "nonlinear_contact_frictionless_reference_gpu_provider" => Some(FixtureContactOptions {
+            enforcement: ContactEnforcementOptions {
+                penalty_stiffness_scale: 2.0,
+                max_penetration_ratio: 0.01,
+            },
             friction_coefficient: 0.0,
         }),
         "nonlinear_contact_frictionless_reference_complex_gpu_provider" => {
-            Some(ContactInterfaceOptions {
-                enabled: true,
-                penalty_stiffness_scale: 1.2,
-                max_penetration_ratio: 0.014,
+            Some(FixtureContactOptions {
+                enforcement: ContactEnforcementOptions {
+                    penalty_stiffness_scale: 1.2,
+                    max_penetration_ratio: 0.014,
+                },
                 friction_coefficient: 0.0,
             })
         }
@@ -332,502 +924,190 @@ fn contact_for_fixture(spec_id: &str) -> Option<ContactInterfaceOptions> {
     }
 }
 
-fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCouplingOptions> {
+struct FixtureThermoRegionTemperatureDelta {
+    region_id: String,
+    temperature_delta_k: f64,
+}
+
+struct FixtureThermoMechanicalCoupling {
+    reference_temperature_k: runmat_types::physical::Temperature,
+    applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
+    thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion,
+    region_temperature_deltas: Vec<FixtureThermoRegionTemperatureDelta>,
+}
+
+struct FixtureElectroThermalCoupling {
+    reference_temperature_k: runmat_types::physical::Temperature,
+    applied_voltage_v: f64,
+    base_electrical_conductivity_s_per_m: f64,
+    resistive_heating_coefficient: runmat_types::physical::InverseTemperature,
+}
+
+fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalCoupling> {
     match spec_id {
-        "thermo_mech_kickoff_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 65.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
+        "thermo_mech_kickoff_rejected" => Some(FixtureThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(65.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 75.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "mid_aluminum".to_string(),
                     temperature_delta_k: 55.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.6,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
         }),
-        "thermo_gradient_benign_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 55.0,
-            thermal_expansion_coefficient: 1.0e-5,
-            field_artifact_id: None,
-            field_source: None,
+        "thermo_gradient_benign_rejected" => Some(FixtureThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(55.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.0e-5),
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 60.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "mid_aluminum".to_string(),
                     temperature_delta_k: 50.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.7,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
         }),
-        "thermo_gradient_pathological_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 220.0,
-            thermal_expansion_coefficient: 2.5e-5,
-            field_artifact_id: None,
-            field_source: None,
+        "thermo_gradient_pathological_rejected" => Some(FixtureThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(220.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(2.5e-5),
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 260.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "polymer_segment".to_string(),
                     temperature_delta_k: 120.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.2,
+        }),
+        "thermo_ramp_smooth_rejected" => Some(FixtureThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(70.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.1e-5),
+            region_temperature_deltas: vec![
+                FixtureThermoRegionTemperatureDelta {
+                    region_id: "tip_steel".to_string(),
+                    temperature_delta_k: 72.0,
                 },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.4,
-                    scale: 1.3,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 0.9,
+                FixtureThermoRegionTemperatureDelta {
+                    region_id: "mid_aluminum".to_string(),
+                    temperature_delta_k: 68.0,
                 },
             ],
         }),
-        spec_id
-            if spec_id == "thermo_ramp_smooth_gpu_provider"
-                || spec_id.starts_with("thermal_standalone_ramp_") =>
-        {
-            Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 70.0,
-                thermal_expansion_coefficient: 1.1e-5,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: vec![
-                    ThermoRegionTemperatureDelta {
-                        region_id: "tip_steel".to_string(),
-                        temperature_delta_k: 72.0,
-                    },
-                    ThermoRegionTemperatureDelta {
-                        region_id: "mid_aluminum".to_string(),
-                        temperature_delta_k: 68.0,
-                    },
-                ],
-                time_profile: vec![
-                    ThermoTimeProfilePoint {
-                        normalized_time: 0.0,
-                        scale: 0.3,
-                    },
-                    ThermoTimeProfilePoint {
-                        normalized_time: 0.5,
-                        scale: 0.7,
-                    },
-                    ThermoTimeProfilePoint {
-                        normalized_time: 1.0,
-                        scale: 1.0,
-                    },
-                ],
-            })
-        }
-        "thermo_ramp_smooth_field_artifact_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: Some("thermo_ramp_smooth_approved".to_string()),
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        }),
-        "thermo_shock_oscillatory_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 140.0,
-            thermal_expansion_coefficient: 2.0e-5,
-            field_artifact_id: None,
-            field_source: None,
+        "thermo_shock_oscillatory_rejected" => Some(FixtureThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(140.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(2.0e-5),
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 210.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "polymer_segment".to_string(),
                     temperature_delta_k: 90.0,
                 },
             ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.4,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.25,
-                    scale: 1.4,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.5,
-                    scale: 0.5,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.75,
-                    scale: 1.3,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 0.6,
-                },
-            ],
         }),
-        "thermo_shock_oscillatory_field_artifact_gpu_provider" => {
-            Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 140.0,
-                thermal_expansion_coefficient: 2.0e-5,
-                field_artifact_id: Some("thermo_shock_oscillatory_approved".to_string()),
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            })
-        }
         _ => None,
     }
 }
 
-fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingOptions> {
+fn thermo_history_for_fixture(spec_id: &str) -> &'static [(f64, f64)] {
     match spec_id {
-        "electro_thermal_joule_benign_gpu_provider" => Some(ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
+        "thermo_mech_kickoff_rejected" => &[(0.0, 0.6), (1.0, 1.0)],
+        "thermo_gradient_benign_rejected" => &[(0.0, 0.7), (1.0, 1.0)],
+        "thermo_gradient_pathological_rejected" => &[(0.0, 0.2), (0.4, 1.3), (1.0, 0.9)],
+        value
+            if value == "thermo_ramp_smooth_rejected"
+                || value.starts_with("thermal_standalone_ramp_") =>
+        {
+            &[(0.0, 0.3), (0.5, 0.7), (1.0, 1.0)]
+        }
+        "thermo_shock_oscillatory_rejected" => {
+            &[(0.0, 0.4), (0.25, 1.4), (0.5, 0.5), (0.75, 1.3), (1.0, 0.6)]
+        }
+        _ => &[],
+    }
+}
+
+fn electro_coupling_for_fixture(spec_id: &str) -> Option<FixtureElectroThermalCoupling> {
+    match spec_id {
+        "electro_thermal_joule_benign_rejected" => Some(FixtureElectroThermalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.8e7,
-            resistive_heating_coefficient: 3.5e-4,
-            region_conductivity_scales: vec![
-                ElectroRegionConductivityScale {
-                    region_id: "tip_steel".to_string(),
-                    conductivity_scale: 1.05,
-                },
-                ElectroRegionConductivityScale {
-                    region_id: "mid_aluminum".to_string(),
-                    conductivity_scale: 0.98,
-                },
-            ],
-            time_profile: vec![
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.0,
-                    current_scale: 0.7,
-                },
-                ElectroTimeProfilePoint {
-                    normalized_time: 1.0,
-                    current_scale: 1.0,
-                },
-            ],
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(3.5e-4),
         }),
-        "electro_thermal_joule_pathological_gpu_provider" => Some(ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
+        "electro_thermal_joule_pathological_rejected" => Some(FixtureElectroThermalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 180.0,
             base_electrical_conductivity_s_per_m: 2.0e7,
-            resistive_heating_coefficient: 9.5e-4,
-            region_conductivity_scales: vec![
-                ElectroRegionConductivityScale {
-                    region_id: "shock_region_0".to_string(),
-                    conductivity_scale: 1.8,
-                },
-                ElectroRegionConductivityScale {
-                    region_id: "shock_region_1".to_string(),
-                    conductivity_scale: 0.55,
-                },
-            ],
-            time_profile: vec![
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.0,
-                    current_scale: 0.45,
-                },
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.3,
-                    current_scale: 1.45,
-                },
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.6,
-                    current_scale: 0.6,
-                },
-                ElectroTimeProfilePoint {
-                    normalized_time: 1.0,
-                    current_scale: 1.25,
-                },
-            ],
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(9.5e-4),
         }),
-        "electro_thermal_invalid_voltage" => Some(ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
+        "electro_thermal_invalid_voltage" => Some(FixtureElectroThermalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.8e7,
-            resistive_heating_coefficient: 3.5e-4,
-            region_conductivity_scales: Vec::new(),
-            time_profile: Vec::new(),
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(3.5e-4),
         }),
-        "electro_thermal_invalid_conductivity_scale" => Some(ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
+        "electro_thermal_invalid_conductivity" => Some(FixtureElectroThermalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
             applied_voltage_v: 36.0,
-            base_electrical_conductivity_s_per_m: 3.8e7,
-            resistive_heating_coefficient: 3.5e-4,
-            region_conductivity_scales: vec![ElectroRegionConductivityScale {
-                region_id: "tip_steel".to_string(),
-                conductivity_scale: 0.0,
-            }],
-            time_profile: Vec::new(),
-        }),
-        "electro_thermal_unmapped_region" => Some(ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 36.0,
-            base_electrical_conductivity_s_per_m: 3.8e7,
-            resistive_heating_coefficient: 3.5e-4,
-            region_conductivity_scales: vec![ElectroRegionConductivityScale {
-                region_id: "electro_region_not_mapped".to_string(),
-                conductivity_scale: 1.0,
-            }],
-            time_profile: Vec::new(),
-        }),
-        "nonlinear_load_path_mix_gpu_provider" => Some(ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 82.0,
-            base_electrical_conductivity_s_per_m: 2.6e7,
-            resistive_heating_coefficient: 6.0e-4,
-            region_conductivity_scales: vec![
-                ElectroRegionConductivityScale {
-                    region_id: "softening_material_region_0".to_string(),
-                    conductivity_scale: 1.2,
-                },
-                ElectroRegionConductivityScale {
-                    region_id: "softening_material_region_1".to_string(),
-                    conductivity_scale: 0.85,
-                },
-            ],
-            time_profile: vec![
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.0,
-                    current_scale: 0.55,
-                },
-                ElectroTimeProfilePoint {
-                    normalized_time: 0.5,
-                    current_scale: 1.2,
-                },
-                ElectroTimeProfilePoint {
-                    normalized_time: 1.0,
-                    current_scale: 0.9,
-                },
-            ],
+            base_electrical_conductivity_s_per_m: 0.0,
+            resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(3.5e-4),
         }),
         _ => None,
     }
 }
 
-fn electro_thermal_prep_artifact_id_for_fixture(
-    spec_id: &str,
-    model: &AnalysisModel,
-) -> Option<String> {
-    if !matches!(
-        spec_id,
-        "electro_thermal_joule_benign_gpu_provider"
-            | "electro_thermal_joule_pathological_gpu_provider"
-    ) {
-        return None;
+fn electro_history_for_fixture(spec_id: &str) -> &'static [(f64, f64)] {
+    match spec_id {
+        "electro_thermal_joule_benign_rejected" => &[(0.0, 0.7), (1.0, 1.0)],
+        "electro_thermal_joule_pathological_rejected" => {
+            &[(0.0, 0.45), (0.3, 1.45), (0.6, 0.6), (1.0, 1.25)]
+        }
+        _ => &[],
     }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.stl"),
-        SYNTHETIC_TRIANGLE_STL.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for electro-thermal fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted electro-thermal fixture geometry");
-    Some(prep.data.prep_artifact_id)
-}
-
-fn thermal_prep_artifact_id_for_fixture(spec_id: &str, model: &AnalysisModel) -> Option<String> {
-    if !matches!(
-        spec_id,
-        "thermal_standalone_ramp_cpu"
-            | "thermal_standalone_ramp_gpu_provider"
-            | "thermal_standalone_ramp_gpu_fallback"
-    ) {
-        return None;
-    }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.obj"),
-        SYNTHETIC_TWO_TRIANGLE_PREP_OBJ.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for thermal fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted thermal fixture geometry");
-    Some(prep.data.prep_artifact_id)
-}
-
-fn electromagnetic_prep_artifact_id_for_fixture(
-    spec_id: &str,
-    model: &AnalysisModel,
-) -> Option<String> {
-    if !spec_id.starts_with("electromagnetic_reference_") {
-        return None;
-    }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.obj"),
-        SYNTHETIC_TWO_TRIANGLE_PREP_OBJ.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for electromagnetic fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted electromagnetic fixture geometry");
-    Some(prep.data.prep_artifact_id)
-}
-
-fn coupled_flow_prep_artifact_id_for_fixture(
-    spec_id: &str,
-    model: &AnalysisModel,
-) -> Option<String> {
-    if !matches!(
-        spec_id,
-        "cht_coupled_cpu"
-            | "cht_coupled_channel_slab_cpu"
-            | "cht_coupled_gpu_provider"
-            | "cht_coupled_gpu_fallback"
-            | "fsi_coupled_cpu"
-            | "fsi_coupled_pipe_plate_cpu"
-            | "fsi_coupled_gpu_provider"
-            | "fsi_coupled_gpu_fallback"
-    ) {
-        return None;
-    }
-
-    let mut geometry = geometry_load_op(
-        &format!("/synthetic/{spec_id}_prep.stl"),
-        SYNTHETIC_TRIANGLE_STL.as_bytes(),
-        OperationContext::new(Some(format!("trace-prep-geometry-{spec_id}")), None),
-    )
-    .expect("load synthetic prep geometry for coupled-flow fixture")
-    .data;
-    geometry.geometry_id = model.geometry_id.clone();
-    geometry.revision = model.geometry_revision;
-
-    let prep = geometry_prep_for_analysis_op(
-        &geometry,
-        GeometryPrepForAnalysisSpec::default(),
-        OperationContext::new(Some(format!("trace-prep-artifact-{spec_id}")), None),
-    )
-    .expect("prepare trusted coupled-flow fixture geometry");
-    Some(prep.data.prep_artifact_id)
 }
 
 fn thermal_options_for_spec(
     spec: &FixtureSpec,
-    model: &AnalysisModel,
+    solver_mesh_artifact_path: Option<String>,
 ) -> AnalysisThermalRunOptions {
     AnalysisThermalRunOptions {
-        step_count: spec
+        snapshot_count: spec
             .transient_step_count
-            .unwrap_or(AnalysisThermalRunOptions::default().step_count),
-        prep_artifact_id: thermal_prep_artifact_id_for_fixture(spec.id, model),
+            .unwrap_or(AnalysisThermalRunOptions::default().snapshot_count),
+        solver_mesh_artifact_path,
         ..AnalysisThermalRunOptions::default()
-    }
-}
-
-fn electromagnetic_options_for_spec(
-    spec: &FixtureSpec,
-    model: &AnalysisModel,
-) -> AnalysisElectromagneticRunOptions {
-    AnalysisElectromagneticRunOptions {
-        deterministic_mode: true,
-        precision_mode: PrecisionMode::Fp64,
-        quality_policy: QualityPolicy::Balanced,
-        residual_target: 1.0e-6,
-        harmonic_tolerance: 1.0e-7,
-        harmonic_max_iterations: 96,
-        prep_context: None,
-        prep_artifact_id: electromagnetic_prep_artifact_id_for_fixture(spec.id, model),
-        prep_calibration_profile: None,
-        sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
-        sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
     }
 }
 
 fn transient_options_for_spec(
     spec: &FixtureSpec,
-    model: &AnalysisModel,
+    solver_mesh_artifact_path: Option<String>,
 ) -> AnalysisTransientRunOptions {
-    let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok());
     AnalysisTransientRunOptions {
-        step_count: spec
-            .transient_step_count
-            .unwrap_or(AnalysisTransientRunOptions::default().step_count),
-        dt_bucket_rel_tolerance: requested_bucket_rel_tol
-            .unwrap_or(AnalysisTransientRunOptions::solid_recommended().dt_bucket_rel_tolerance),
-        prep_context: None,
-        prep_artifact_id: electro_thermal_prep_artifact_id_for_fixture(spec.id, model),
+        time_step_policy: AnalysisStructuralTimeStepPolicy::Fixed {
+            interval_count: spec.transient_step_count.unwrap_or(
+                AnalysisTransientRunOptions::default()
+                    .time_step_policy
+                    .interval_count(),
+            ),
+        },
+        solver_mesh_artifact_path,
         ..AnalysisTransientRunOptions::solid_recommended()
     }
 }
@@ -920,120 +1200,109 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
     }
 }
 
-fn electromagnetic_sweep_frequency_hz_for_fixture(spec_id: &str) -> Vec<f64> {
-    let Some(profile) = electromagnetic_profile_for_fixture(spec_id) else {
-        return Vec::new();
-    };
-    let f0 = profile.reference_frequency_hz.max(1.0);
-    vec![f0 * 0.75, f0 * 0.9, f0, f0 * 1.1, f0 * 1.25]
-}
-
 fn authored_cfd_boundaries_for_fixture(
     spec_id: &str,
-    inlet_velocity_m_per_s: f64,
-) -> Vec<runmat_analysis_core::BoundaryCondition> {
+    inlet_velocity_m_per_s: [f64; 3],
+) -> Vec<runmat_analysis_core::AnalysisConstraint> {
     vec![
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_inlet_{}", spec_id),
-            region_id: "fluid_inlet".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdInletVelocity {
-                velocity_m_per_s: inlet_velocity_m_per_s,
-            },
-        },
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_outlet_{}", spec_id),
-            region_id: "fluid_outlet".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdOutletPressure {
-                pressure_pa: 0.0,
-            },
-        },
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_wall_upper_{}", spec_id),
-            region_id: "fluid_wall_upper".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdNoSlipWall,
-        },
-        runmat_analysis_core::BoundaryCondition {
-            bc_id: format!("bc_cfd_wall_lower_{}", spec_id),
-            region_id: "fluid_wall_lower".to_string(),
-            kind: runmat_analysis_core::BoundaryConditionKind::CfdNoSlipWall,
-        },
+        fluid_constraint(
+            format!("bc_cfd_inlet_{spec_id}"),
+            "fluid_inlet",
+            FluidFixtureConstraint::Velocity(inlet_velocity_m_per_s),
+        ),
+        fluid_constraint(
+            format!("bc_cfd_outlet_{spec_id}"),
+            "fluid_outlet",
+            FluidFixtureConstraint::PressureGauge(0.0),
+        ),
+        fluid_constraint(
+            format!("bc_cfd_wall_upper_{spec_id}"),
+            "fluid_wall_upper",
+            FluidFixtureConstraint::NoSlipWall,
+        ),
+        fluid_constraint(
+            format!("bc_cfd_wall_lower_{spec_id}"),
+            "fluid_wall_lower",
+            FluidFixtureConstraint::NoSlipWall,
+        ),
     ]
 }
 
 fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     if spec_id.starts_with("acoustic_harmonic_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_acoustic_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Modal,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::acoustic_harmonic(
+            format!("step_acoustic_{}", spec_id),
+        )];
         for material in &mut model.materials {
+            material.mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(1.225));
             material.acoustic = Some(runmat_analysis_core::MaterialAcousticModel {
-                density_kg_per_m3: 1.225,
-                speed_of_sound_m_per_s: 343.0,
-                damping_ratio: 0.024,
+                speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+                damping_ratio: runmat_types::physical::DampingRatio::new(0.024),
             });
         }
         if model.materials.is_empty() {
             model.materials.push(runmat_analysis_core::MaterialModel {
+                fluid: None,
                 material_id: "mat_acoustic_air".to_string(),
                 name: "Acoustic Air".to_string(),
-                mechanical: runmat_analysis_core::MaterialMechanicalModel {
-                    youngs_modulus_pa: 1.0,
-                    poisson_ratio: 0.0,
-                    density_kg_per_m3: 1.225,
-                },
-                thermal: runmat_analysis_core::MaterialThermalModel::default(),
+                provenance: runmat_analysis_core::MaterialProvenance::Authored,
+                mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(1.225)),
+                elasticity: None,
+                damping: None,
+                thermal: None,
                 acoustic: Some(runmat_analysis_core::MaterialAcousticModel {
-                    density_kg_per_m3: 1.225,
-                    speed_of_sound_m_per_s: 343.0,
-                    damping_ratio: 0.024,
+                    speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(343.0),
+                    damping_ratio: runmat_types::physical::DampingRatio::new(0.024),
                 }),
                 electrical: None,
                 plastic: None,
             });
         }
-        model.boundary_conditions = vec![
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_acoustic_rigid_{}", spec_id),
-                region_id: "acoustic_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::AcousticRigidWall,
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_acoustic_radiation_{}", spec_id),
-                region_id: "acoustic_open".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::AcousticRadiation,
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_acoustic_impedance_{}", spec_id),
-                region_id: "acoustic_liner".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::AcousticImpedance {
-                    specific_impedance_pa_s_per_m: 420.0,
+        model.constraints.clear();
+        model.boundaries = vec![
+            acoustic_boundary(
+                format!("bc_acoustic_rigid_{spec_id}"),
+                "acoustic_wall",
+                runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
+            ),
+            acoustic_boundary(
+                format!("bc_acoustic_radiation_{spec_id}"),
+                "acoustic_open",
+                runmat_analysis_core::BoundaryOperator::AcousticRadiation,
+            ),
+            acoustic_boundary(
+                format!("bc_acoustic_impedance_{spec_id}"),
+                "acoustic_liner",
+                runmat_analysis_core::BoundaryOperator::AcousticImpedance {
+                    impedance: runmat_analysis_core::SpecificAcousticImpedance::new(420.0),
                 },
-            },
+            ),
         ];
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: format!("load_acoustic_pressure_{}", spec_id),
-            region_id: "acoustic_source".to_string(),
-            kind: runmat_analysis_core::LoadKind::Pressure { magnitude_pa: 1.0 },
-        }];
+        replace_fixture_excitations(
+            model,
+            vec![FixtureExcitation {
+                excitation_id: format!("load_acoustic_pressure_{}", spec_id),
+                region_id: "acoustic_source".to_string(),
+                quantity: FixtureExcitationQuantity::AcousticPressure(1.0),
+            }],
+        );
         match spec_id {
             "acoustic_harmonic_missing_source" => {
-                model.loads = vec![runmat_analysis_core::LoadCase {
-                    load_id: format!("load_acoustic_invalid_force_{}", spec_id),
-                    region_id: "acoustic_source".to_string(),
-                    kind: runmat_analysis_core::LoadKind::Force {
-                        fx: 1.0,
-                        fy: 0.0,
-                        fz: 0.0,
-                    },
-                }];
+                replace_fixture_excitations(
+                    model,
+                    vec![FixtureExcitation {
+                        excitation_id: format!("load_acoustic_invalid_force_{}", spec_id),
+                        region_id: "acoustic_source".to_string(),
+                        quantity: FixtureExcitationQuantity::Force([1.0, 0.0, 0.0]),
+                    }],
+                );
             }
             "acoustic_harmonic_missing_boundary" => {
-                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-                    bc_id: format!("bc_acoustic_invalid_structural_{}", spec_id),
-                    region_id: "acoustic_wall".to_string(),
-                    kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                }];
+                model.boundaries.clear();
+                model.constraints = vec![fixed_constraint(
+                    format!("bc_acoustic_invalid_structural_{spec_id}"),
+                    "acoustic_wall",
+                )];
             }
             _ => {}
         }
@@ -1043,65 +1312,87 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.cfd = None;
     }
     if spec_id.starts_with("thermal_standalone_ramp_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_thermal_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-        }];
-        model.boundary_conditions = vec![
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_thermal_temperature_{}", spec_id),
-                region_id: "thermal_hot_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::ThermalPrescribedTemperature {
-                    temperature_k: 343.15,
+        model.thermal = Some(runmat_analysis_core::ThermalDomain {
+            reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+        });
+        model.material_assignments.truncate(1);
+        if let Some(assignment) = model.material_assignments.first_mut() {
+            *assignment
+                .target
+                .selected_region_id_mut()
+                .expect("fixture uses selected material region") =
+                runmat_meshing_core::fixtures::fixture_region("thermal_core");
+        }
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_transient(
+            format!("step_thermal_{}", spec_id),
+        )];
+        model.constraints = vec![thermal_temperature(
+            format!("bc_thermal_temperature_{spec_id}"),
+            "thermal_hot_wall",
+            343.15,
+        )];
+        model.boundaries = vec![
+            thermal_boundary(
+                format!("bc_thermal_flux_{spec_id}"),
+                "thermal_flux_wall",
+                runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
+                    value: runmat_analysis_core::PrescribedValue::Constant(
+                        runmat_analysis_core::HeatFlux::new(4500.0),
+                    ),
                 },
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_thermal_flux_{}", spec_id),
-                region_id: "thermal_flux_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::ThermalHeatFlux {
-                    heat_flux_w_per_m2: 4500.0,
+            ),
+            thermal_boundary(
+                format!("bc_thermal_convection_{spec_id}"),
+                "thermal_open_wall",
+                runmat_analysis_core::BoundaryOperator::ThermalConvection {
+                    ambient_temperature: runmat_analysis_core::PrescribedValue::Constant(
+                        runmat_analysis_core::Temperature::new(308.15),
+                    ),
+                    coefficient: runmat_analysis_core::HeatTransferCoefficient::new(35.0),
                 },
-            },
-            runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_thermal_convection_{}", spec_id),
-                region_id: "thermal_open_wall".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::ThermalConvection {
-                    ambient_temperature_k: 308.15,
-                    coefficient_w_per_m2k: 35.0,
-                },
-            },
+            ),
         ];
-        model.loads = vec![runmat_analysis_core::LoadCase {
-            load_id: format!("load_thermal_heat_source_{}", spec_id),
-            region_id: "thermal_core".to_string(),
-            kind: runmat_analysis_core::LoadKind::HeatSource {
-                volumetric_w_per_m3: 1.2e6,
-            },
-        }];
+        replace_fixture_excitations(
+            model,
+            vec![FixtureExcitation {
+                excitation_id: format!("load_thermal_heat_source_{}", spec_id),
+                region_id: runmat_meshing_core::fixtures::fixture_region("thermal_core"),
+                quantity: FixtureExcitationQuantity::HeatGeneration(1.2e6),
+            }],
+        );
         match spec_id {
             "thermal_standalone_ramp_invalid_material" => {
                 if let Some(material) = model.materials.first_mut() {
-                    material.thermal.conductivity_w_per_mk = 0.0;
+                    material
+                        .thermal
+                        .as_mut()
+                        .expect("thermal fixture material")
+                        .conductivity_w_per_mk =
+                        runmat_types::physical::ThermalConductivity::new(0.0);
                 }
             }
             "thermal_standalone_ramp_invalid_source" => {
-                model.loads = vec![runmat_analysis_core::LoadCase {
-                    load_id: format!("load_thermal_invalid_heat_source_{}", spec_id),
-                    region_id: "thermal_core".to_string(),
-                    kind: runmat_analysis_core::LoadKind::HeatSource {
-                        volumetric_w_per_m3: f64::INFINITY,
-                    },
-                }];
+                replace_fixture_excitations(
+                    model,
+                    vec![FixtureExcitation {
+                        excitation_id: format!("load_thermal_invalid_heat_source_{}", spec_id),
+                        region_id: runmat_meshing_core::fixtures::fixture_region("thermal_core"),
+                        quantity: FixtureExcitationQuantity::Moment([1.0, 0.0, 0.0]),
+                    }],
+                );
             }
             "thermal_standalone_ramp_invalid_boundary" => {
-                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-                    bc_id: format!("bc_thermal_invalid_convection_{}", spec_id),
-                    region_id: "thermal_open_wall".to_string(),
-                    kind: runmat_analysis_core::BoundaryConditionKind::ThermalConvection {
-                        ambient_temperature_k: 293.15,
-                        coefficient_w_per_m2k: f64::NAN,
+                model.constraints.clear();
+                model.boundaries = vec![thermal_boundary(
+                    format!("bc_thermal_invalid_convection_{spec_id}"),
+                    "thermal_open_wall",
+                    runmat_analysis_core::BoundaryOperator::ThermalConvection {
+                        ambient_temperature: runmat_analysis_core::PrescribedValue::Constant(
+                            runmat_analysis_core::Temperature::new(293.15),
+                        ),
+                        coefficient: runmat_analysis_core::HeatTransferCoefficient::new(f64::NAN),
                     },
-                }];
+                )];
             }
             _ => {}
         }
@@ -1111,289 +1402,222 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.cfd = None;
     }
     if spec_id.starts_with("cfd_steady_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_cfd_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
+            "step_cfd_{}",
+            spec_id
+        ))];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.boundary_conditions = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: Vec::new(),
-        });
+        model.boundaries.clear();
+        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, [5.0, 0.0, 0.0]);
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cfd_velocity_{spec_id}"),
+            5.0,
+            1.81e-5,
+            0.06,
+            &[],
+        ));
     }
     if spec_id.starts_with("cfd_transient_") {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_cfd_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_transient(
+            format!("step_cfd_{}", spec_id),
+        )];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.boundary_conditions = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: vec![
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 0.0,
-                    inlet_scale: 0.65,
-                },
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 1.0,
-                    inlet_scale: 1.0,
-                },
-            ],
-        });
+        model.boundaries.clear();
+        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, [5.0, 0.0, 0.0]);
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cfd_velocity_{spec_id}"),
+            5.0,
+            1.81e-5,
+            0.06,
+            &[(0.0, 0.65), (1.0, 1.0)],
+        ));
     }
     if spec_id == "cfd_invalid_domain_options" || spec_id == "cfd_invalid_boundary_conditions" {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_cfd_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-        }];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
+            "step_cfd_{}",
+            spec_id
+        ))];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.boundary_conditions = if spec_id == "cfd_invalid_boundary_conditions" {
-            vec![runmat_analysis_core::BoundaryCondition {
-                bc_id: format!("bc_cfd_inlet_only_{}", spec_id),
-                region_id: "inlet".to_string(),
-                kind: runmat_analysis_core::BoundaryConditionKind::CfdInletVelocity {
-                    velocity_m_per_s: 5.0,
-                },
-            }]
+        model.boundaries.clear();
+        model.constraints = if spec_id == "cfd_invalid_boundary_conditions" {
+            vec![fluid_constraint(
+                format!("bc_cfd_inlet_only_{spec_id}"),
+                "inlet",
+                FluidFixtureConstraint::Velocity([5.0, -1.0, 0.0]),
+            )]
         } else {
-            authored_cfd_boundaries_for_fixture(spec_id, 5.0)
+            authored_cfd_boundaries_for_fixture(spec_id, [5.0, 0.0, 0.0])
         };
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: if spec_id == "cfd_invalid_domain_options" {
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cfd_velocity_{spec_id}"),
+            5.0,
+            if spec_id == "cfd_invalid_domain_options" {
                 0.0
             } else {
                 1.81e-5
             },
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: Vec::new(),
-        });
+            0.06,
+            &[],
+        ));
     }
     if spec_id.starts_with("cht_coupled_") {
-        model.steps = vec![
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_cht_flow_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-            },
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_cht_thermal_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Thermal,
-            },
-        ];
+        model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+            format!("sequence_{spec_id}"),
+            vec![runmat_analysis_core::ProcedureStep::coupled(
+                format!("step_cht_{spec_id}"),
+                runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer,
+                runmat_analysis_core::AnalysisProcedure::TransientResponse,
+            )],
+        );
         model.electro_thermal = None;
-        model.interfaces.clear();
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.06,
-            time_profile: vec![
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 0.0,
-                    inlet_scale: 0.8,
-                },
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 1.0,
-                    inlet_scale: 1.0,
-                },
-            ],
+        model.thermal = Some(runmat_analysis_core::ThermalDomain {
+            reference_temperature: runmat_analysis_core::Temperature::new(293.15),
         });
+        model.interfaces.clear();
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("cht_velocity_{spec_id}"),
+            5.0,
+            1.81e-5,
+            0.06,
+            &[(0.0, 0.8), (1.0, 1.0)],
+        ));
         if spec_id == "cht_coupled_channel_slab_cpu" {
-            model.cfd = Some(runmat_analysis_core::CfdDomain {
-                enabled: true,
-                solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-                reference_density_kg_per_m3: 1.225,
-                dynamic_viscosity_pa_s: 1.81e-5,
-                inlet_velocity_m_per_s: 4.1,
-                turbulence_intensity: 0.052,
-                time_profile: vec![
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.0,
-                        inlet_scale: 0.7,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.5,
-                        inlet_scale: 0.9,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 1.0,
-                        inlet_scale: 1.0,
-                    },
-                ],
-            });
+            model.cfd = Some(fixture_cfd_domain(
+                model,
+                &format!("cht_velocity_{spec_id}"),
+                4.1,
+                1.81e-5,
+                0.052,
+                &[(0.0, 0.7), (0.5, 0.9), (1.0, 1.0)],
+            ));
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("cht_channel_slab_interface_{spec_id}"),
-                primary_region_id: "fluid_channel".to_string(),
-                secondary_region_id: "solid_slab".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_channel"),
+                ),
+                secondary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("solid_slab"),
+                ),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
                     runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
-                        thermal_conductance_w_per_m2k: 2000.0,
-                        contact_resistance_m2k_per_w: 0.0,
-                        relaxation_factor: 0.5,
+                        transfer: runmat_analysis_core::ThermalInterfaceTransfer::Conductance(
+                            runmat_analysis_core::HeatTransferCoefficient::new(2000.0),
+                        ),
                     },
                 ),
             }];
         }
         if spec_id == "cht_coupled_invalid_cfd_domain" {
             if let Some(cfd_domain) = model.cfd.as_mut() {
-                cfd_domain.dynamic_viscosity_pa_s = 0.0;
+                cfd_domain.dynamic_viscosity = runmat_types::physical::Quantity::new(0.0);
             }
         }
+        set_temperature_history(
+            model,
+            &format!("cht_temperature_{spec_id}"),
+            293.15,
+            60.0,
+            &[(0.0, 0.5), (1.0, 1.0)],
+        );
         model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 60.0,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![
-                runmat_analysis_core::ThermoRegionTemperatureDelta {
-                    region_id: "tip".to_string(),
-                    temperature_delta_k: 70.0,
-                },
-                runmat_analysis_core::ThermoRegionTemperatureDelta {
-                    region_id: "root".to_string(),
-                    temperature_delta_k: 45.0,
-                },
-            ],
-            time_profile: vec![
-                runmat_analysis_core::ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.5,
-                },
-                runmat_analysis_core::ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
+            reference_temperature: runmat_analysis_core::Temperature::new(293.15),
         });
         if spec_id == "cht_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("cht_invalid_contact_{spec_id}"),
-                primary_region_id: "fluid_channel".to_string(),
-                secondary_region_id: "solid_wall".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_channel"),
+                ),
+                secondary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("solid_wall"),
+                ),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                     runmat_analysis_core::ContactInterfaceModel {
-                        penalty_stiffness_scale: 1.0,
-                        max_penetration_ratio: 0.01,
-                        friction_coefficient: 0.0,
+                        friction: runmat_analysis_core::ContactFriction::Frictionless,
                     },
                 ),
             }];
         }
     }
     if spec_id.starts_with("fsi_coupled_") {
-        model.steps = vec![
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_fsi_structure_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Transient,
-            },
-            runmat_analysis_core::AnalysisStep {
-                step_id: format!("step_fsi_flow_{}", spec_id),
-                kind: runmat_analysis_core::AnalysisStepKind::Cfd,
-            },
-        ];
+        model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+            format!("sequence_{spec_id}"),
+            vec![runmat_analysis_core::ProcedureStep::coupled(
+                format!("step_fsi_{spec_id}"),
+                runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
+                runmat_analysis_core::AnalysisProcedure::TransientResponse,
+            )],
+        );
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
-        model.cfd = Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 4.0,
-            turbulence_intensity: 0.06,
-            time_profile: vec![
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 0.0,
-                    inlet_scale: 0.6,
-                },
-                runmat_analysis_core::CfdTimeProfilePoint {
-                    normalized_time: 1.0,
-                    inlet_scale: 1.0,
-                },
-            ],
-        });
+        model.cfd = Some(fixture_cfd_domain(
+            model,
+            &format!("fsi_velocity_{spec_id}"),
+            4.0,
+            1.81e-5,
+            0.06,
+            &[(0.0, 0.6), (1.0, 1.0)],
+        ));
         if spec_id == "fsi_coupled_pipe_plate_cpu" {
-            model.cfd = Some(runmat_analysis_core::CfdDomain {
-                enabled: true,
-                solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-                reference_density_kg_per_m3: 1.225,
-                dynamic_viscosity_pa_s: 1.81e-5,
-                inlet_velocity_m_per_s: 4.2,
-                turbulence_intensity: 0.055,
-                time_profile: vec![
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.0,
-                        inlet_scale: 0.5,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 0.5,
-                        inlet_scale: 0.85,
-                    },
-                    runmat_analysis_core::CfdTimeProfilePoint {
-                        normalized_time: 1.0,
-                        inlet_scale: 1.0,
-                    },
-                ],
-            });
-            model.loads.push(runmat_analysis_core::LoadCase {
-                load_id: format!("pipe_plate_pressure_preload_{spec_id}"),
-                region_id: "pipe_wall".to_string(),
-                kind: runmat_analysis_core::LoadKind::Pressure {
-                    magnitude_pa: 2.5e4,
-                },
-            });
+            model.cfd = Some(fixture_cfd_domain(
+                model,
+                &format!("fsi_velocity_{spec_id}"),
+                4.2,
+                1.81e-5,
+                0.055,
+                &[(0.0, 0.5), (0.5, 0.85), (1.0, 1.0)],
+            ));
+            append_fixture_excitations(
+                model,
+                vec![FixtureExcitation {
+                    excitation_id: format!("pipe_plate_pressure_preload_{spec_id}"),
+                    region_id: "pipe_wall".to_string(),
+                    quantity: FixtureExcitationQuantity::Pressure(2.5e4),
+                }],
+            );
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_pipe_plate_interface_{spec_id}"),
-                primary_region_id: "fluid_pipe".to_string(),
-                secondary_region_id: "plate_wall".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_pipe"),
+                ),
+                secondary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("plate_wall"),
+                ),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
                     runmat_analysis_core::FluidStructureInterfaceModel {
-                        normal_stiffness_pa_per_m: 8.0e8,
-                        damping_ratio: 0.04,
-                        relaxation_factor: 0.5,
+                        kinematics: runmat_analysis_core::FluidStructureKinematics::NoSlip,
                     },
                 ),
             }];
         }
         if spec_id == "fsi_coupled_invalid_cfd_domain" {
             if let Some(cfd_domain) = model.cfd.as_mut() {
-                cfd_domain.dynamic_viscosity_pa_s = 0.0;
+                cfd_domain.dynamic_viscosity = runmat_types::physical::Quantity::new(0.0);
             }
         }
         if spec_id == "fsi_coupled_invalid_interface_mapping" {
             model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
                 interface_id: format!("fsi_invalid_contact_{spec_id}"),
-                primary_region_id: "fluid_channel".to_string(),
-                secondary_region_id: "structure_wall".to_string(),
+                primary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("fluid_channel"),
+                ),
+                secondary: runmat_analysis_core::RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("structure_wall"),
+                ),
                 kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                     runmat_analysis_core::ContactInterfaceModel {
-                        penalty_stiffness_scale: 1.0,
-                        max_penetration_ratio: 0.01,
-                        friction_coefficient: 0.0,
+                        friction: runmat_analysis_core::ContactFriction::Frictionless,
                     },
                 ),
             }];
@@ -1401,10 +1625,12 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     }
 
     if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {
-        model.steps = vec![runmat_analysis_core::AnalysisStep {
-            step_id: format!("step_em_{}", spec_id),
-            kind: runmat_analysis_core::AnalysisStepKind::Electromagnetic,
-        }];
+        model.sequence.steps = vec![
+            runmat_analysis_core::ProcedureStep::electromagnetic_harmonic(format!(
+                "step_em_{}",
+                spec_id
+            )),
+        ];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -1412,14 +1638,35 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         if model.materials.len() < 3 {
             let base = model.materials.first().cloned().unwrap_or_else(|| {
                 runmat_analysis_core::MaterialModel {
+                    fluid: None,
                     material_id: "mat_default".to_string(),
                     name: "Default".to_string(),
-                    mechanical: runmat_analysis_core::MaterialMechanicalModel {
-                        youngs_modulus_pa: 110e9,
-                        poisson_ratio: 0.31,
-                        density_kg_per_m3: 7850.0,
-                    },
-                    thermal: runmat_analysis_core::MaterialThermalModel::default(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
+                    mass_density_kg_per_m3: Some(runmat_types::physical::MassDensity::new(7850.0)),
+                    elasticity: Some(
+                        runmat_analysis_core::MaterialElasticityModel::IsotropicLinear(
+                            runmat_analysis_core::MaterialMechanicalModel {
+                                youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(
+                                    110e9,
+                                ),
+                                poisson_ratio: runmat_types::physical::PoissonRatio::new(0.31),
+                            },
+                        ),
+                    ),
+                    damping: None,
+                    thermal: Some(runmat_analysis_core::MaterialThermalModel {
+                        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                        modulus_temp_coeff_per_k: runmat_types::physical::InverseTemperature::new(
+                            -2.5e-4,
+                        ),
+                        conductivity_w_per_mk: runmat_types::physical::ThermalConductivity::new(
+                            45.0,
+                        ),
+                        specific_heat_j_per_kgk: runmat_types::physical::SpecificHeat::new(500.0),
+                        expansion_coefficient_per_k: runmat_types::physical::ThermalExpansion::new(
+                            1.2e-5,
+                        ),
+                    }),
                     acoustic: None,
                     electrical: None,
                     plastic: None,
@@ -1429,29 +1676,30 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_copper".to_string(),
                     name: "EM Copper".to_string(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 5.8e7,
-                        resistive_heating_coefficient: 0.0039,
-                        relative_permittivity: 2.0,
-                        relative_permeability: 1.0,
+                        reference_temperature_k: Quantity::new(293.15),
+                        conductivity_s_per_m: Quantity::new(5.8e7),
+                        resistive_heating_coefficient: Quantity::new(0.0039),
+                        relative_permittivity: Quantity::new(2.0),
+                        relative_permeability: Quantity::new(1.0),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 1.05,
                                 dispersive_loss_scale: Some(0.02),
                                 relative_permittivity_scale: Some(1.01),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 200.0,
+                                frequency_hz: Quantity::new(200.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.025),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 0.94,
                                 dispersive_loss_scale: Some(0.03),
                                 relative_permittivity_scale: Some(0.99),
@@ -1464,29 +1712,30 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_ferrite".to_string(),
                     name: "EM Ferrite".to_string(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 8.0e4,
-                        resistive_heating_coefficient: 0.0020,
-                        relative_permittivity: 14.0,
-                        relative_permeability: 90.0,
+                        reference_temperature_k: Quantity::new(293.15),
+                        conductivity_s_per_m: Quantity::new(8.0e4),
+                        resistive_heating_coefficient: Quantity::new(0.0020),
+                        relative_permittivity: Quantity::new(14.0),
+                        relative_permeability: Quantity::new(90.0),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 1.32,
                                 dispersive_loss_scale: Some(0.08),
                                 relative_permittivity_scale: Some(1.15),
                                 relative_permeability_scale: Some(1.35),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 200.0,
+                                frequency_hz: Quantity::new(200.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.11),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 0.72,
                                 dispersive_loss_scale: Some(0.16),
                                 relative_permittivity_scale: Some(0.85),
@@ -1499,29 +1748,30 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 runmat_analysis_core::MaterialModel {
                     material_id: "mat_em_polymer".to_string(),
                     name: "EM Polymer".to_string(),
+                    provenance: runmat_analysis_core::MaterialProvenance::Authored,
                     electrical: Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 0.2,
-                        resistive_heating_coefficient: 0.0010,
-                        relative_permittivity: 3.5,
-                        relative_permeability: 1.05,
+                        reference_temperature_k: Quantity::new(293.15),
+                        conductivity_s_per_m: Quantity::new(0.2),
+                        resistive_heating_coefficient: Quantity::new(0.0010),
+                        relative_permittivity: Quantity::new(3.5),
+                        relative_permeability: Quantity::new(1.05),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 0.88,
                                 dispersive_loss_scale: Some(0.24),
                                 relative_permittivity_scale: Some(0.95),
                                 relative_permeability_scale: Some(0.98),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 200.0,
+                                frequency_hz: Quantity::new(200.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.26),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 1.24,
                                 dispersive_loss_scale: Some(0.29),
                                 relative_permittivity_scale: Some(1.10),
@@ -1542,21 +1792,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 let conductivity_frequency_response = match idx % 3 {
                     0 => vec![
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 50.0,
+                            frequency_hz: Quantity::new(50.0),
                             conductivity_scale: 1.05,
                             dispersive_loss_scale: Some(0.02),
                             relative_permittivity_scale: Some(1.01),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 200.0,
+                            frequency_hz: Quantity::new(200.0),
                             conductivity_scale: 1.0,
                             dispersive_loss_scale: Some(0.025),
                             relative_permittivity_scale: Some(1.0),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 1_000.0,
+                            frequency_hz: Quantity::new(1_000.0),
                             conductivity_scale: 0.94,
                             dispersive_loss_scale: Some(0.03),
                             relative_permittivity_scale: Some(0.99),
@@ -1565,21 +1815,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     ],
                     1 => vec![
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 50.0,
+                            frequency_hz: Quantity::new(50.0),
                             conductivity_scale: 1.32,
                             dispersive_loss_scale: Some(0.08),
                             relative_permittivity_scale: Some(1.15),
                             relative_permeability_scale: Some(1.35),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 200.0,
+                            frequency_hz: Quantity::new(200.0),
                             conductivity_scale: 1.0,
                             dispersive_loss_scale: Some(0.11),
                             relative_permittivity_scale: Some(1.0),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 1_000.0,
+                            frequency_hz: Quantity::new(1_000.0),
                             conductivity_scale: 0.72,
                             dispersive_loss_scale: Some(0.16),
                             relative_permittivity_scale: Some(0.85),
@@ -1588,21 +1838,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     ],
                     _ => vec![
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 50.0,
+                            frequency_hz: Quantity::new(50.0),
                             conductivity_scale: 0.88,
                             dispersive_loss_scale: Some(0.24),
                             relative_permittivity_scale: Some(0.95),
                             relative_permeability_scale: Some(0.98),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 200.0,
+                            frequency_hz: Quantity::new(200.0),
                             conductivity_scale: 1.0,
                             dispersive_loss_scale: Some(0.26),
                             relative_permittivity_scale: Some(1.0),
                             relative_permeability_scale: Some(1.0),
                         },
                         runmat_analysis_core::ConductivityFrequencyPoint {
-                            frequency_hz: 1_000.0,
+                            frequency_hz: Quantity::new(1_000.0),
                             conductivity_scale: 1.24,
                             dispersive_loss_scale: Some(0.29),
                             relative_permittivity_scale: Some(1.10),
@@ -1611,11 +1861,15 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     ],
                 };
                 material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-                    reference_temperature_k: 293.15,
-                    conductivity_s_per_m: sigma,
-                    resistive_heating_coefficient: 0.0025,
-                    relative_permittivity: eps_r,
-                    relative_permeability: mu_r,
+                    reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                    conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                        sigma,
+                    ),
+                    resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                        0.0025,
+                    ),
+                    relative_permittivity: runmat_types::physical::RelativePermittivity::new(eps_r),
+                    relative_permeability: runmat_types::physical::RelativePermeability::new(mu_r),
                     conductivity_frequency_response,
                 });
             }
@@ -1625,28 +1879,35 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             ElectromagneticFixtureKind::Homogeneous => {
                 for material in &mut model.materials {
                     material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-                        reference_temperature_k: 293.15,
-                        conductivity_s_per_m: 5.8e7,
-                        resistive_heating_coefficient: 0.0039,
-                        relative_permittivity: 2.1,
-                        relative_permeability: 1.0,
+                        reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+                        conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                            5.8e7,
+                        ),
+                        resistive_heating_coefficient:
+                            runmat_types::physical::InverseTemperature::new(0.0039),
+                        relative_permittivity: runmat_types::physical::RelativePermittivity::new(
+                            2.1,
+                        ),
+                        relative_permeability: runmat_types::physical::RelativePermeability::new(
+                            1.0,
+                        ),
                         conductivity_frequency_response: vec![
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 50.0,
+                                frequency_hz: Quantity::new(50.0),
                                 conductivity_scale: 1.02,
                                 dispersive_loss_scale: Some(0.015),
                                 relative_permittivity_scale: Some(1.01),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 60.0,
+                                frequency_hz: Quantity::new(60.0),
                                 conductivity_scale: 1.0,
                                 dispersive_loss_scale: Some(0.017),
                                 relative_permittivity_scale: Some(1.0),
                                 relative_permeability_scale: Some(1.0),
                             },
                             runmat_analysis_core::ConductivityFrequencyPoint {
-                                frequency_hz: 1_000.0,
+                                frequency_hz: Quantity::new(1_000.0),
                                 conductivity_scale: 0.95,
                                 dispersive_loss_scale: Some(0.03),
                                 relative_permittivity_scale: Some(0.99),
@@ -1664,14 +1925,20 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     model
                         .material_assignments
                         .push(runmat_analysis_core::MaterialAssignment {
-                            region_id: "em_region_homogeneous".to_string(),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(
+                                "em_region_homogeneous",
+                            ),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
                         });
                 } else {
                     for assignment in &mut model.material_assignments {
-                        assignment.region_id = "em_region_homogeneous".to_string();
+                        *assignment
+                            .target
+                            .selected_region_id_mut()
+                            .expect("fixture uses selected material region") =
+                            "em_region_homogeneous".to_string();
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
                         assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
@@ -1685,7 +1952,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .iter()
                         .enumerate()
                         .map(|(idx, material)| runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_region_{idx}"
+                            )),
                             expected_material_id: material.material_id.clone(),
                             assigned_material_id: material.material_id.clone(),
                             confidence: match idx % 3 {
@@ -1697,7 +1966,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .collect();
                 } else {
                     for (idx, assignment) in model.material_assignments.iter_mut().enumerate() {
-                        assignment.region_id = format!("em_region_{idx}");
+                        *assignment
+                            .target
+                            .selected_region_id_mut()
+                            .expect("fixture uses selected material region") =
+                            format!("em_region_{idx}");
                         let material_id = &model.materials[idx % model.materials.len()].material_id;
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
@@ -1720,7 +1993,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         if idx < 4 {
                             let material_id = ids[idx % ids.len()].clone();
                             runmat_analysis_core::MaterialAssignment {
-                                region_id: format!("em_sparse_region_{idx}"),
+                                target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                    "em_sparse_region_{idx}"
+                                )),
                                 expected_material_id: material_id.clone(),
                                 assigned_material_id: material_id,
                                 confidence: if idx % 2 == 0 {
@@ -1732,7 +2007,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         } else {
                             let material_id = ids[idx % ids.len()].clone();
                             runmat_analysis_core::MaterialAssignment {
-                                region_id: format!("em_sparse_region_{idx}"),
+                                target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                    "em_sparse_region_{idx}"
+                                )),
                                 expected_material_id: material_id.clone(),
                                 assigned_material_id: material_id,
                                 confidence: runmat_analysis_core::EvidenceConfidence::Inferred,
@@ -1751,7 +2028,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_multiregion_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_multiregion_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 2 == 0 {
@@ -1771,7 +2050,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .enumerate()
                         .take(3)
                         .map(|(idx, material)| runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_overlap_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_overlap_region_{idx}"
+                            )),
                             expected_material_id: material.material_id.clone(),
                             assigned_material_id: material.material_id.clone(),
                             confidence: runmat_analysis_core::EvidenceConfidence::Verified,
@@ -1779,7 +2060,11 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .collect();
                 } else {
                     for (idx, assignment) in model.material_assignments.iter_mut().enumerate() {
-                        assignment.region_id = format!("em_overlap_region_{}", idx % 3);
+                        *assignment
+                            .target
+                            .selected_region_id_mut()
+                            .expect("fixture uses selected material region") =
+                            format!("em_overlap_region_{}", idx % 3);
                         let material_id = &model.materials[idx % model.materials.len()].material_id;
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
@@ -1797,7 +2082,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_boundary_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_boundary_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 2 == 0 {
@@ -1819,7 +2106,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_penalty_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_penalty_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 4 == 0 {
@@ -1841,7 +2130,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     .map(|idx| {
                         let material_id = ids[idx % ids.len()].clone();
                         runmat_analysis_core::MaterialAssignment {
-                            region_id: format!("em_phase_region_{idx}"),
+                            target: runmat_analysis_core::PropertyRegionTarget::solid(format!(
+                                "em_phase_region_{idx}"
+                            )),
                             expected_material_id: material_id.clone(),
                             assigned_material_id: material_id,
                             confidence: if idx % 3 == 0 {
@@ -1857,514 +2148,420 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
 
         match profile.kind {
             ElectromagneticFixtureKind::Homogeneous => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_ground_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_ground_1".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_1".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_ground_0", "em_region_homogeneous"),
+                    magnetic_ground("em_bc_ground_1", "em_region_homogeneous"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_coil_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_current_density_0".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 1.0,
-                            jy: 0.0,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_current_density_1".to_string(),
-                        region_id: "em_region_homogeneous".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.0,
-                            jy: 1.0,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
+                model.boundaries = vec![
+                    magnetic_insulation("em_bc_insulation_0", "em_region_homogeneous"),
+                    magnetic_insulation("em_bc_insulation_1", "em_region_homogeneous"),
                 ];
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_coil_0".to_string(),
+                            region_id: "em_region_homogeneous".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_current_density_0".to_string(),
+                            region_id: "em_region_homogeneous".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [1.0, 0.0, 0.0],
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_current_density_1".to_string(),
+                            region_id: "em_region_homogeneous".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.0, 1.0, 0.0],
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                    ],
+                );
             }
             ElectromagneticFixtureKind::Heterogeneous => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_ground_hetero".to_string(),
-                        region_id: "em_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_hetero_0".to_string(),
-                        region_id: "em_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_insulation_hetero_1".to_string(),
-                        region_id: "em_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_structural_fallback".to_string(),
-                        region_id: "em_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_ground_hetero", "em_region_0"),
+                    fixed_constraint("em_bc_structural_fallback", "em_region_2"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_coil_hetero".to_string(),
-                        region_id: "em_region_0".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.85,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_current_density_hetero".to_string(),
-                        region_id: "em_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.8,
-                            jy: 0.3,
-                            jz: 0.1,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_structural_mixed".to_string(),
-                        region_id: "em_region_2".to_string(),
-                        kind: runmat_analysis_core::LoadKind::Force {
-                            fx: 0.0,
-                            fy: -50.0,
-                            fz: 0.0,
-                        },
-                    },
+                model.boundaries = vec![
+                    magnetic_insulation("em_bc_insulation_hetero_0", "em_region_1"),
+                    magnetic_insulation("em_bc_insulation_hetero_1", "em_region_2"),
                 ];
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_coil_hetero".to_string(),
+                            region_id: "em_region_0".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.85,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_current_density_hetero".to_string(),
+                            region_id: "em_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.8, 0.3, 0.1],
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_structural_mixed".to_string(),
+                            region_id: "em_region_2".to_string(),
+                            quantity: FixtureExcitationQuantity::Force([0.0, -50.0, 0.0]),
+                        },
+                    ],
+                );
             }
             ElectromagneticFixtureKind::SparseAssignments => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_ground".to_string(),
-                        region_id: "em_sparse_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_struct_0".to_string(),
-                        region_id: "em_sparse_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_struct_1".to_string(),
-                        region_id: "em_sparse_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_sparse_struct_2".to_string(),
-                        region_id: "em_sparse_region_3".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::PrescribedDisplacement,
-                    },
+                model.boundaries.clear();
+                model.constraints = vec![
+                    magnetic_ground("em_bc_sparse_ground", "em_sparse_region_0"),
+                    fixed_constraint("em_bc_sparse_struct_0", "em_sparse_region_1"),
+                    fixed_constraint("em_bc_sparse_struct_1", "em_sparse_region_2"),
+                    zero_translation_constraint("em_bc_sparse_struct_2", "em_sparse_region_3"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_coil".to_string(),
-                        region_id: "em_sparse_region_0".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.4,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_coil".to_string(),
+                            region_id: "em_sparse_region_0".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.4,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_current_density_0".to_string(),
-                        region_id: "em_sparse_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.0,
-                            jy: 0.6,
-                            jz: 0.2,
-                            phase_rad: 0.2,
-                            amplitude_scale: 0.8,
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_current_density_0".to_string(),
+                            region_id: "em_sparse_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.0, 0.6, 0.2],
+                                phase_radians: Quantity::new(0.2),
+                                amplitude_scale: 0.8,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_current_density_1".to_string(),
-                        region_id: "em_sparse_region_2".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.3,
-                            jy: 0.1,
-                            jz: 0.4,
-                            phase_rad: 0.4,
-                            amplitude_scale: 0.7,
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_current_density_1".to_string(),
+                            region_id: "em_sparse_region_2".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.3, 0.1, 0.4],
+                                phase_radians: Quantity::new(0.4),
+                                amplitude_scale: 0.7,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_sparse_current_density_2".to_string(),
-                        region_id: "em_sparse_region_3".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.1,
-                            jy: 0.0,
-                            jz: 0.7,
-                            phase_rad: 0.6,
-                            amplitude_scale: 0.6,
+                        FixtureExcitation {
+                            excitation_id: "em_load_sparse_current_density_2".to_string(),
+                            region_id: "em_sparse_region_3".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.1, 0.0, 0.7],
+                                phase_radians: Quantity::new(0.6),
+                                amplitude_scale: 0.6,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::MultiRegionAssignments => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_ground".to_string(),
-                        region_id: "em_multiregion_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_insulation_0".to_string(),
-                        region_id: "em_multiregion_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_insulation_1".to_string(),
-                        region_id: "em_multiregion_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_ground_1".to_string(),
-                        region_id: "em_multiregion_region_3".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_multiregion_insulation_2".to_string(),
-                        region_id: "em_multiregion_region_4".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_multiregion_ground", "em_multiregion_region_0"),
+                    magnetic_ground("em_bc_multiregion_ground_1", "em_multiregion_region_3"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_coil".to_string(),
-                        region_id: "em_multiregion_region_0".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.25,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_0".to_string(),
-                        region_id: "em_multiregion_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.4,
-                            jy: 0.2,
-                            jz: 0.1,
-                            phase_rad: 0.15,
-                            amplitude_scale: 0.9,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_1".to_string(),
-                        region_id: "em_multiregion_region_2".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.1,
-                            jy: 0.5,
-                            jz: 0.2,
-                            phase_rad: 0.35,
-                            amplitude_scale: 0.8,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_2".to_string(),
-                        region_id: "em_multiregion_region_3".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.2,
-                            jy: 0.1,
-                            jz: 0.6,
-                            phase_rad: 0.55,
-                            amplitude_scale: 0.7,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_multiregion_current_density_3".to_string(),
-                        region_id: "em_multiregion_region_4".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.3,
-                            jy: 0.3,
-                            jz: 0.3,
-                            phase_rad: 0.75,
-                            amplitude_scale: 0.65,
-                        },
-                    },
+                model.boundaries = vec![
+                    magnetic_insulation(
+                        "em_bc_multiregion_insulation_0",
+                        "em_multiregion_region_1",
+                    ),
+                    magnetic_insulation(
+                        "em_bc_multiregion_insulation_1",
+                        "em_multiregion_region_2",
+                    ),
+                    magnetic_insulation(
+                        "em_bc_multiregion_insulation_2",
+                        "em_multiregion_region_4",
+                    ),
                 ];
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_coil".to_string(),
+                            region_id: "em_multiregion_region_0".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.25,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_0".to_string(),
+                            region_id: "em_multiregion_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.4, 0.2, 0.1],
+                                phase_radians: Quantity::new(0.15),
+                                amplitude_scale: 0.9,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_1".to_string(),
+                            region_id: "em_multiregion_region_2".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.1, 0.5, 0.2],
+                                phase_radians: Quantity::new(0.35),
+                                amplitude_scale: 0.8,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_2".to_string(),
+                            region_id: "em_multiregion_region_3".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.2, 0.1, 0.6],
+                                phase_radians: Quantity::new(0.55),
+                                amplitude_scale: 0.7,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_multiregion_current_density_3".to_string(),
+                            region_id: "em_multiregion_region_4".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.3, 0.3, 0.3],
+                                phase_radians: Quantity::new(0.75),
+                                amplitude_scale: 0.65,
+                            },
+                        },
+                    ],
+                );
             }
             ElectromagneticFixtureKind::OverlapInterference => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_overlap_ground".to_string(),
-                        region_id: "em_overlap_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_overlap_insulation_0".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_overlap_insulation_1".to_string(),
-                        region_id: "em_overlap_region_2".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![magnetic_ground(
+                    "em_bc_overlap_ground",
+                    "em_overlap_region_0",
+                )];
+                model.boundaries = vec![
+                    magnetic_insulation("em_bc_overlap_insulation_0", "em_overlap_region_1"),
+                    magnetic_insulation("em_bc_overlap_insulation_1", "em_overlap_region_2"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_coil_pos".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_coil_pos".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_coil_neg".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: -profile.applied_current_a * 0.92,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_coil_neg".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: -profile.applied_current_a * 0.92,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_cd_pos".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 1.0,
-                            jy: 0.4,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_cd_pos".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [1.0, 0.4, 0.0],
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_overlap_cd_neg".to_string(),
-                        region_id: "em_overlap_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: -0.8,
-                            jy: -0.35,
-                            jz: 0.0,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_overlap_cd_neg".to_string(),
+                            region_id: "em_overlap_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [-0.8, -0.35, 0.0],
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::BoundaryKernel => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_ground_mapped".to_string(),
-                        region_id: "em_boundary_region_24".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_ground_unmapped_0".to_string(),
-                        region_id: "em_boundary_unmapped_ground_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_ground_unmapped_1".to_string(),
-                        region_id: "em_boundary_unmapped_ground_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_insulation_unmapped_0".to_string(),
-                        region_id: "em_boundary_unmapped_insulation_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_insulation_unmapped_1".to_string(),
-                        region_id: "em_boundary_unmapped_insulation_1".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_boundary_structural_noise".to_string(),
-                        region_id: "em_boundary_region_3".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_boundary_ground_mapped", "em_boundary_region_24"),
+                    magnetic_ground(
+                        "em_bc_boundary_ground_unmapped_0",
+                        "em_boundary_unmapped_ground_0",
+                    ),
+                    magnetic_ground(
+                        "em_bc_boundary_ground_unmapped_1",
+                        "em_boundary_unmapped_ground_1",
+                    ),
+                    fixed_constraint("em_bc_boundary_structural_noise", "em_boundary_region_3"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_boundary_coil_primary".to_string(),
-                        region_id: "em_boundary_region_24".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.9,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_boundary_current_density".to_string(),
-                        region_id: "em_boundary_region_25".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.9,
-                            jy: -0.5,
-                            jz: 0.2,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
-                        },
-                    },
+                model.boundaries = vec![
+                    magnetic_insulation(
+                        "em_bc_boundary_insulation_unmapped_0",
+                        "em_boundary_unmapped_insulation_0",
+                    ),
+                    magnetic_insulation(
+                        "em_bc_boundary_insulation_unmapped_1",
+                        "em_boundary_unmapped_insulation_1",
+                    ),
                 ];
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_boundary_coil_primary".to_string(),
+                            region_id: "em_boundary_region_24".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.9,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                        FixtureExcitation {
+                            excitation_id: "em_load_boundary_current_density".to_string(),
+                            region_id: "em_boundary_region_25".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.9, -0.5, 0.2],
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
+                        },
+                    ],
+                );
             }
             ElectromagneticFixtureKind::BoundaryPenaltyStress => {
-                model.boundary_conditions = (0..18)
-                    .flat_map(|idx| {
-                        let mut conditions = vec![runmat_analysis_core::BoundaryCondition {
-                            bc_id: format!("em_bc_penalty_ground_{idx}"),
-                            region_id: format!("em_penalty_region_{}", idx + 8),
-                            kind:
-                                runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                        }];
-                        if idx % 2 == 0 {
-                            conditions.push(runmat_analysis_core::BoundaryCondition {
-                                bc_id: format!("em_bc_penalty_insulation_{idx}"),
-                                region_id: format!("em_penalty_region_{}", idx + 20),
-                                kind:
-                                    runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                            });
-                        }
-                        conditions
+                model.constraints = (0..18)
+                    .map(|idx| {
+                        magnetic_ground(
+                            format!("em_bc_penalty_ground_{idx}"),
+                            format!("em_penalty_region_{}", idx + 8),
+                        )
                     })
                     .collect();
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_penalty_coil_0".to_string(),
-                        region_id: "em_penalty_region_10".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                model.boundaries = (0..18)
+                    .filter(|idx| idx % 2 == 0)
+                    .map(|idx| {
+                        magnetic_insulation(
+                            format!("em_bc_penalty_insulation_{idx}"),
+                            format!("em_penalty_region_{}", idx + 20),
+                        )
+                    })
+                    .collect();
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_penalty_coil_0".to_string(),
+                            region_id: "em_penalty_region_10".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_penalty_coil_1".to_string(),
-                        region_id: "em_penalty_region_13".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * -0.65,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_penalty_coil_1".to_string(),
+                            region_id: "em_penalty_region_13".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * -0.65,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_penalty_density".to_string(),
-                        region_id: "em_penalty_region_29".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 1.2,
-                            jy: -0.7,
-                            jz: 0.15,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                        FixtureExcitation {
+                            excitation_id: "em_load_penalty_density".to_string(),
+                            region_id: "em_penalty_region_29".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [1.2, -0.7, 0.15],
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
             ElectromagneticFixtureKind::MultiRegionPhasedSource => {
-                model.boundary_conditions = vec![
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_phase_ground_0".to_string(),
-                        region_id: "em_phase_region_0".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_phase_ground_1".to_string(),
-                        region_id: "em_phase_region_8".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
-                    },
-                    runmat_analysis_core::BoundaryCondition {
-                        bc_id: "em_bc_phase_insulation_0".to_string(),
-                        region_id: "em_phase_region_5".to_string(),
-                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
-                    },
+                model.constraints = vec![
+                    magnetic_ground("em_bc_phase_ground_0", "em_phase_region_0"),
+                    magnetic_ground("em_bc_phase_ground_1", "em_phase_region_8"),
                 ];
-                model.loads = vec![
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_coil_0".to_string(),
-                        region_id: "em_phase_region_1".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a,
-                            phase_rad: 0.0,
-                            amplitude_scale: 1.0,
+                model.boundaries = vec![magnetic_insulation(
+                    "em_bc_phase_insulation_0",
+                    "em_phase_region_5",
+                )];
+                replace_fixture_excitations(
+                    model,
+                    vec![
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_coil_0".to_string(),
+                            region_id: "em_phase_region_1".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a,
+                                phase_radians: Quantity::new(0.0),
+                                amplitude_scale: 1.0,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_coil_1".to_string(),
-                        region_id: "em_phase_region_3".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: -profile.applied_current_a * 0.8,
-                            phase_rad: std::f64::consts::PI * 0.85,
-                            amplitude_scale: 0.9,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_coil_1".to_string(),
+                            region_id: "em_phase_region_3".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: -profile.applied_current_a * 0.8,
+                                phase_radians: Quantity::new(std::f64::consts::PI * 0.85),
+                                amplitude_scale: 0.9,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_coil_2".to_string(),
-                        region_id: "em_phase_region_7".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
-                            current_a: profile.applied_current_a * 0.55,
-                            phase_rad: std::f64::consts::FRAC_PI_2,
-                            amplitude_scale: 0.8,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_coil_2".to_string(),
+                            region_id: "em_phase_region_7".to_string(),
+                            quantity: FixtureExcitationQuantity::ElectricCurrent {
+                                amperes: profile.applied_current_a * 0.55,
+                                phase_radians: Quantity::new(std::f64::consts::FRAC_PI_2),
+                                amplitude_scale: 0.8,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_density_0".to_string(),
-                        region_id: "em_phase_region_10".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: 0.9,
-                            jy: -0.45,
-                            jz: 0.2,
-                            phase_rad: std::f64::consts::PI / 3.0,
-                            amplitude_scale: 0.9,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_density_0".to_string(),
+                            region_id: "em_phase_region_10".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [0.9, -0.45, 0.2],
+                                phase_radians: Quantity::new(std::f64::consts::PI / 3.0),
+                                amplitude_scale: 0.9,
+                            },
                         },
-                    },
-                    runmat_analysis_core::LoadCase {
-                        load_id: "em_load_phase_density_1".to_string(),
-                        region_id: "em_phase_region_12".to_string(),
-                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
-                            jx: -0.85,
-                            jy: 0.35,
-                            jz: -0.1,
-                            phase_rad: -std::f64::consts::FRAC_PI_2,
-                            amplitude_scale: 0.85,
+                        FixtureExcitation {
+                            excitation_id: "em_load_phase_density_1".to_string(),
+                            region_id: "em_phase_region_12".to_string(),
+                            quantity: FixtureExcitationQuantity::CurrentDensity {
+                                amperes_per_square_meter: [-0.85, 0.35, -0.1],
+                                phase_radians: Quantity::new(-std::f64::consts::FRAC_PI_2),
+                                amplitude_scale: 0.85,
+                            },
                         },
-                    },
-                ];
+                    ],
+                );
             }
         }
 
-        model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain {
-            enabled: true,
-            reference_frequency_hz: profile.reference_frequency_hz,
-            applied_current_a: profile.applied_current_a,
+        model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain::Harmonic {
+            reference_frequency: runmat_analysis_core::Frequency::new(
+                profile.reference_frequency_hz,
+            ),
         });
         match spec_id {
             "electromagnetic_missing_material" => {
@@ -2373,22 +2570,21 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 }
             }
             "electromagnetic_missing_source" => {
-                model.loads = vec![runmat_analysis_core::LoadCase {
-                    load_id: "em_invalid_structural_force".to_string(),
-                    region_id: "em_region_homogeneous".to_string(),
-                    kind: runmat_analysis_core::LoadKind::Force {
-                        fx: 1.0,
-                        fy: 0.0,
-                        fz: 0.0,
-                    },
-                }];
+                replace_fixture_excitations(
+                    model,
+                    vec![FixtureExcitation {
+                        excitation_id: "em_invalid_structural_force".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        quantity: FixtureExcitationQuantity::Force([1.0, 0.0, 0.0]),
+                    }],
+                );
             }
             "electromagnetic_missing_boundary" => {
-                model.boundary_conditions = vec![runmat_analysis_core::BoundaryCondition {
-                    bc_id: "em_invalid_structural_fixed".to_string(),
-                    region_id: "em_region_homogeneous".to_string(),
-                    kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
-                }];
+                model.boundaries.clear();
+                model.constraints = vec![fixed_constraint(
+                    "em_invalid_structural_fixed",
+                    "em_region_homogeneous",
+                )];
             }
             _ => {}
         }
@@ -2396,170 +2592,110 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
 
     let mut thermo = thermo_coupling_for_fixture(spec_id);
     if thermo.is_none() && spec_id == "nonlinear_load_path_mix_gpu_provider" {
-        thermo = Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 75.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
+        thermo = Some(FixtureThermoMechanicalCoupling {
+            reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
+            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(75.0),
+            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(1.2e-5),
             region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
         });
     }
     if let Some(value) = thermo {
+        set_temperature_history(
+            model,
+            &format!("thermo_temperature_{spec_id}"),
+            value.reference_temperature_k.canonical_value(),
+            value.applied_temperature_delta_k.canonical_value(),
+            thermo_history_for_fixture(spec_id),
+        );
+        for (index, delta) in value.region_temperature_deltas.iter().enumerate() {
+            set_temperature_excitation(
+                model,
+                &format!("thermo_region_temperature_{spec_id}_{index}"),
+                value.reference_temperature_k.canonical_value(),
+                delta.temperature_delta_k,
+                &[],
+                runmat_analysis_core::ExcitationTarget::Region(
+                    runmat_analysis_core::RegionTarget::volume(&delta.region_id),
+                ),
+            );
+        }
+        for material in &mut model.materials {
+            let thermal = material.thermal.as_mut().expect("thermal fixture material");
+            thermal.reference_temperature_k = runmat_types::physical::Temperature::new(
+                value.reference_temperature_k.canonical_value(),
+            );
+            thermal.expansion_coefficient_per_k = runmat_types::physical::ThermalExpansion::new(
+                value.thermal_expansion_coefficient.canonical_value(),
+            );
+        }
         model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
-            enabled: value.enabled,
-            reference_temperature_k: value.reference_temperature_k,
-            applied_temperature_delta_k: value.applied_temperature_delta_k,
-            field_artifact_id: value.field_artifact_id,
-            field_source: value.field_source.map(|source| {
-                runmat_analysis_core::ThermoFieldSource {
-                    source_id: source.source_id,
-                    revision: source.revision,
-                    interpolation_mode: source.interpolation_mode.map(|mode| match mode {
-                        runmat_runtime::analysis::ThermoFieldInterpolationMode::Linear => {
-                            runmat_analysis_core::ThermoFieldInterpolationMode::Linear
-                        }
-                        runmat_runtime::analysis::ThermoFieldInterpolationMode::Step => {
-                            runmat_analysis_core::ThermoFieldInterpolationMode::Step
-                        }
-                    }),
-                    expected_region_ids: source.expected_region_ids,
-                }
-            }),
-            region_temperature_deltas: value
-                .region_temperature_deltas
-                .into_iter()
-                .map(|delta| runmat_analysis_core::ThermoRegionTemperatureDelta {
-                    region_id: delta.region_id,
-                    temperature_delta_k: delta.temperature_delta_k,
-                })
-                .collect(),
-            time_profile: value
-                .time_profile
-                .into_iter()
-                .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
-                    normalized_time: point.normalized_time,
-                    scale: point.scale,
-                })
-                .collect(),
+            reference_temperature: runmat_analysis_core::Temperature::new(
+                value.reference_temperature_k.canonical_value(),
+            ),
         });
+        for step in &mut model.sequence.steps {
+            if step.family == runmat_analysis_core::PhysicsFamily::Structural
+                && matches!(
+                    step.procedure,
+                    runmat_analysis_core::AnalysisProcedure::Static
+                        | runmat_analysis_core::AnalysisProcedure::TransientResponse
+                        | runmat_analysis_core::AnalysisProcedure::Nonlinear
+                )
+            {
+                step.family = runmat_analysis_core::PhysicsFamily::Coupled(
+                    runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+                );
+            }
+        }
     }
 
     if let Some(electro) = electro_coupling_for_fixture(spec_id) {
-        let mut material_region_ids = model
-            .material_assignments
-            .iter()
-            .map(|assignment| assignment.region_id.clone())
-            .collect::<Vec<_>>();
-        if material_region_ids.is_empty() {
-            let material_id = model
-                .materials
-                .first()
-                .map(|material| material.material_id.clone())
-                .unwrap_or_else(|| "mat_default".to_string());
-            model
-                .material_assignments
-                .push(runmat_analysis_core::MaterialAssignment {
-                    region_id: "electro_region_0".to_string(),
-                    expected_material_id: material_id.clone(),
-                    assigned_material_id: material_id,
-                    confidence: runmat_analysis_core::EvidenceConfidence::Verified,
-                });
-            material_region_ids.push("electro_region_0".to_string());
-        }
-
-        let mut region_conductivity_scales =
-            Vec::with_capacity(electro.region_conductivity_scales.len());
-        for (index, scale) in electro.region_conductivity_scales.into_iter().enumerate() {
-            let mapped_region_id = if spec_id == "electro_thermal_unmapped_region" {
-                scale.region_id.clone()
-            } else if index < material_region_ids.len() {
-                material_region_ids[index].clone()
-            } else {
-                let synthesized_region_id = format!("electro_region_{index}");
-                let assignment_seed =
-                    model
-                        .material_assignments
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| runmat_analysis_core::MaterialAssignment {
-                            region_id: synthesized_region_id.clone(),
-                            expected_material_id: model
-                                .materials
-                                .first()
-                                .map(|material| material.material_id.clone())
-                                .unwrap_or_else(|| "mat_default".to_string()),
-                            assigned_material_id: model
-                                .materials
-                                .first()
-                                .map(|material| material.material_id.clone())
-                                .unwrap_or_else(|| "mat_default".to_string()),
-                            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
-                        });
-                model
-                    .material_assignments
-                    .push(runmat_analysis_core::MaterialAssignment {
-                        region_id: synthesized_region_id.clone(),
-                        ..assignment_seed
-                    });
-                material_region_ids.push(synthesized_region_id.clone());
-                synthesized_region_id
-            };
-            region_conductivity_scales.push(runmat_analysis_core::ElectroRegionConductivityScale {
-                region_id: mapped_region_id,
-                conductivity_scale: scale.conductivity_scale,
-            });
-        }
-
         for material in &mut model.materials {
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
-                reference_temperature_k: electro.reference_temperature_k,
-                conductivity_s_per_m: electro.base_electrical_conductivity_s_per_m,
-                resistive_heating_coefficient: electro.resistive_heating_coefficient,
-                relative_permittivity: 1.0,
-                relative_permeability: 1.0,
+                reference_temperature_k: runmat_types::physical::Temperature::new(
+                    electro.reference_temperature_k.canonical_value(),
+                ),
+                conductivity_s_per_m: runmat_types::physical::ElectricalConductivity::new(
+                    electro.base_electrical_conductivity_s_per_m,
+                ),
+                resistive_heating_coefficient: runmat_types::physical::InverseTemperature::new(
+                    electro.resistive_heating_coefficient.canonical_value(),
+                ),
+                relative_permittivity: runmat_types::physical::RelativePermittivity::new(1.0),
+                relative_permeability: runmat_types::physical::RelativePermeability::new(1.0),
                 conductivity_frequency_response: Vec::new(),
             });
         }
+        set_electric_potential_history(
+            model,
+            &format!("electro_potential_{spec_id}"),
+            electro.applied_voltage_v,
+            electro_history_for_fixture(spec_id),
+        );
         model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
-            enabled: electro.enabled,
-            reference_temperature_k: electro.reference_temperature_k,
-            applied_voltage_v: electro.applied_voltage_v,
-            region_conductivity_scales,
-            time_profile: electro
-                .time_profile
-                .into_iter()
-                .map(
-                    |ElectroTimeProfilePoint {
-                         normalized_time,
-                         current_scale,
-                     }| runmat_analysis_core::ElectroTimeProfilePoint {
-                        normalized_time,
-                        current_scale,
-                    },
-                )
-                .collect(),
+            reference_temperature: runmat_analysis_core::Temperature::new(
+                electro.reference_temperature_k.canonical_value(),
+            ),
         });
     }
 
     if let Some(plastic) = plasticity_for_fixture(spec_id) {
         for material in &mut model.materials {
-            material.plastic = Some(runmat_analysis_core::MaterialPlasticModel {
-                yield_strain: plastic.yield_strain,
-                hardening_modulus_ratio: plastic.hardening_modulus_ratio,
-                saturation_exponent: plastic.saturation_exponent,
-            });
+            material.plastic = Some(plastic.clone());
         }
-        model.loads = plastic_load_cases_for_fixture(spec_id);
+        replace_fixture_excitations(model, plastic_excitations_for_fixture(spec_id));
     }
 
     if let Some(contact) = contact_for_fixture(spec_id) {
         let mut regions = model
             .material_assignments
             .iter()
-            .map(|assignment| assignment.region_id.clone())
+            .map(|assignment| {
+                assignment
+                    .selected_region_id()
+                    .expect("fixture uses selected material region")
+                    .to_owned()
+            })
             .collect::<Vec<_>>();
         if regions.is_empty() {
             regions.push("root".to_string());
@@ -2576,20 +2712,30 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             .unwrap_or_else(|| "tip".to_string());
         model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
             interface_id: format!("contact_{spec_id}"),
-            primary_region_id: primary,
-            secondary_region_id: secondary,
+            primary: runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&primary),
+            ),
+            secondary: runmat_analysis_core::RegionTarget::boundary(
+                runmat_meshing_core::fixtures::fixture_boundary_selection(&secondary),
+            ),
             kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
                 runmat_analysis_core::ContactInterfaceModel {
-                    penalty_stiffness_scale: contact.penalty_stiffness_scale,
-                    max_penetration_ratio: contact.max_penetration_ratio,
-                    friction_coefficient: contact.friction_coefficient,
+                    friction: if contact.friction_coefficient == 0.0 {
+                        runmat_analysis_core::ContactFriction::Frictionless
+                    } else {
+                        runmat_analysis_core::ContactFriction::Coulomb {
+                            coefficient: runmat_analysis_core::FrictionCoefficient::new(
+                                contact.friction_coefficient,
+                            ),
+                        }
+                    },
                 },
             ),
         }];
     }
 }
 
-fn plastic_load_cases_for_fixture(spec_id: &str) -> Vec<runmat_analysis_core::LoadCase> {
+fn plastic_excitations_for_fixture(spec_id: &str) -> Vec<FixtureExcitation> {
     let peak_force = match spec_id {
         "nonlinear_plasticity_benchmark_gpu_provider" => 1.2e7,
         "nonlinear_plastic_hardening_reference_gpu_provider" => 3.0e7,
@@ -2597,104 +2743,26 @@ fn plastic_load_cases_for_fixture(spec_id: &str) -> Vec<runmat_analysis_core::Lo
         _ => 1.0e7,
     };
     vec![
-        runmat_analysis_core::LoadCase {
-            load_id: format!("plastic_axial_drive_{spec_id}"),
+        FixtureExcitation {
+            excitation_id: format!("plastic_axial_drive_{spec_id}"),
             region_id: "plastic_drive_tip".to_string(),
-            kind: runmat_analysis_core::LoadKind::Force {
-                fx: peak_force,
-                fy: 0.0,
-                fz: 0.0,
-            },
+            quantity: FixtureExcitationQuantity::Force([peak_force, 0.0, 0.0]),
         },
-        runmat_analysis_core::LoadCase {
-            load_id: format!("plastic_shear_drive_{spec_id}"),
+        FixtureExcitation {
+            excitation_id: format!("plastic_shear_drive_{spec_id}"),
             region_id: "plastic_drive_web".to_string(),
-            kind: runmat_analysis_core::LoadKind::Force {
-                fx: 0.0,
-                fy: -0.35 * peak_force,
-                fz: 0.12 * peak_force,
-            },
+            quantity: FixtureExcitationQuantity::Force([
+                0.0,
+                -0.35 * peak_force,
+                0.12 * peak_force,
+            ]),
         },
-        runmat_analysis_core::LoadCase {
-            load_id: format!("plastic_pressure_drive_{spec_id}"),
+        FixtureExcitation {
+            excitation_id: format!("plastic_pressure_drive_{spec_id}"),
             region_id: "plastic_drive_face".to_string(),
-            kind: runmat_analysis_core::LoadKind::Pressure {
-                magnitude_pa: 0.08 * peak_force,
-            },
+            quantity: FixtureExcitationQuantity::Pressure(0.08 * peak_force),
         },
     ]
-}
-
-fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisModel) {
-    let root = harness_thermo_field_artifact_root(&harness_artifact_root());
-    let _ = fs::create_dir_all(&root);
-    let write_artifact = |artifact_id: &str,
-                          source_id: &str,
-                          interpolation_mode: &str,
-                          region_temperature_deltas: serde_json::Value,
-                          time_profile: serde_json::Value| {
-        let mut payload = serde_json::json!({
-            "schema_version": "analysis_thermo_field_artifact/v1",
-            "source_geometry_id": model.geometry_id,
-            "source_geometry_revision": model.geometry_revision,
-            "artifact_status": "approved",
-            "created_at": "2026-03-10T00:00:00Z",
-            "approved_at": "2026-03-10T00:05:00Z",
-            "approved_by": "release-bot",
-            "field_source": {
-                "source_id": source_id,
-                "revision": 1,
-                "interpolation_mode": interpolation_mode,
-                "expected_region_ids": [],
-            },
-            "region_temperature_deltas": region_temperature_deltas,
-            "time_profile": time_profile,
-        });
-        let payload_hash = thermo_field_payload_hash_for_value(&payload);
-        payload["payload_hash"] = serde_json::Value::String(payload_hash.clone());
-        payload["signature"] =
-            serde_json::Value::String(thermo_field_signature(&payload_hash, "release-bot"));
-        let _ = fs::write(
-            root.join(format!("{artifact_id}.json")),
-            serde_json::to_vec_pretty(&payload).unwrap_or_default(),
-        );
-    };
-
-    if spec_id == "thermo_ramp_smooth_field_artifact_gpu_provider" {
-        write_artifact(
-            "thermo_ramp_smooth_approved",
-            "field/thermo-ramp-smooth",
-            "linear",
-            serde_json::json!([
-                {"region_id": "tip_steel", "temperature_delta_k": 72.0},
-                {"region_id": "mid_aluminum", "temperature_delta_k": 68.0}
-            ]),
-            serde_json::json!([
-                {"normalized_time": 0.0, "scale": 0.3},
-                {"normalized_time": 0.5, "scale": 0.7},
-                {"normalized_time": 1.0, "scale": 1.0}
-            ]),
-        );
-    }
-
-    if spec_id == "thermo_shock_oscillatory_field_artifact_gpu_provider" {
-        write_artifact(
-            "thermo_shock_oscillatory_approved",
-            "field/thermo-shock-oscillatory",
-            "step",
-            serde_json::json!([
-                {"region_id": "tip_steel", "temperature_delta_k": 210.0},
-                {"region_id": "polymer_segment", "temperature_delta_k": 90.0}
-            ]),
-            serde_json::json!([
-                {"normalized_time": 0.0, "scale": 0.4},
-                {"normalized_time": 0.25, "scale": 1.4},
-                {"normalized_time": 0.5, "scale": 0.5},
-                {"normalized_time": 0.75, "scale": 1.3},
-                {"normalized_time": 1.0, "scale": 0.6}
-            ]),
-        );
-    }
 }
 
 type FixtureRunEnvelope =
@@ -2708,26 +2776,76 @@ fn boxed_fixture_run_result(
     result.map_err(Box::new)
 }
 
-fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResult {
-    boxed_fixture_run_result(match spec.run_kind {
-        AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
+fn run_fixture_cpu(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+    solver_mesh_artifact_path: Option<&str>,
+) -> FixtureRunResult {
+    let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
+    let procedure_step = fixture_procedure_step(model);
+    let solver = match AnalysisSolverOptions::defaults_for(procedure_step) {
+        Ok(solver) => solver,
+        Err(_)
+            if procedure_step.procedure
+                == runmat_analysis_core::AnalysisProcedure::TransientResponse
+                && matches!(
+                    procedure_step.family,
+                    runmat_analysis_core::PhysicsFamily::Coupled(
+                        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical
+                            | runmat_analysis_core::CoupledPhysicsFamily::Electrothermal
+                    )
+                ) =>
+        {
+            return boxed_fixture_run_result(analysis_run_transient_with_options_op(
+                model,
+                ComputeBackend::Cpu,
+                transient_options_for_spec(spec, solver_mesh_artifact_path),
+                OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+            ));
+        }
+        Err(error) => panic!(
+            "fixture procedure step must select a supported solver or an explicitly governed negative path: {error}"
+        ),
+    };
+    boxed_fixture_run_result(match solver {
+        AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Cpu,
-            default_options(),
+            default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
+        AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Cpu,
             AnalysisModalRunOptions {
-                mode_count: spec
-                    .modal_mode_count
-                    .unwrap_or(AnalysisModalRunOptions::default().mode_count),
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
+                truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
+                    spec.modal_mode_count.unwrap_or_else(|| {
+                        AnalysisModalRunOptions::default()
+                            .truncation
+                            .requested_mode_count()
+                    }),
+                ),
                 ..AnalysisModalRunOptions::balanced()
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Acoustic => analysis_run_acoustic_with_options_op(
+        AnalysisSolverOptions::StructuralFrequency(_) => panic!(
+            "structural-frequency fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralResponseSpectrum(_) => panic!(
+            "response-spectrum fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralRandomResponse(_) => panic!(
+            "random-response fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralBuckling(_) => panic!(
+            "structural-buckling fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
+        AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
             AnalysisAcousticRunOptions {
@@ -2738,113 +2856,88 @@ fn run_fixture_cpu(spec: &FixtureSpec, model: &AnalysisModel) -> FixtureRunResul
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
+        AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
-            transient_options_for_spec(spec, model),
+            transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
+        AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            thermal_options_for_spec(spec, model),
+            thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
+        AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Cpu,
-            AnalysisCfdRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisCfdRunOptions::default().step_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: None,
-                prep_calibration_profile: None,
-            },
+            AnalysisCfdRunOptions::default(),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cht => analysis_run_cht_with_options_op(
+        AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
-            AnalysisChtRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisChtRunOptions::default().step_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
-            },
+            nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Fsi => analysis_run_fsi_with_options_op(
-            model,
-            ComputeBackend::Cpu,
-            AnalysisFsiRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisFsiRunOptions::default().step_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
-            },
-            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
-        ),
-        AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
-            model,
-            ComputeBackend::Cpu,
-            nonlinear_options_for_spec(spec),
-            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
-        ),
-        AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
-            model,
-            ComputeBackend::Cpu,
-            electromagnetic_options_for_spec(spec, model),
-            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        AnalysisSolverOptions::ElectricalStatic(_)
+        | AnalysisSolverOptions::Magnetostatic(_)
+        | AnalysisSolverOptions::MaxwellHarmonic(_)
+        | AnalysisSolverOptions::LineParameters(_) => panic!(
+            "electromagnetic fixtures must execute through the governed typed study runner, not the legacy single-run fixture harness"
         ),
     })
 }
 
-fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> FixtureRunResult {
-    let run = || match spec.run_kind {
-        AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
+fn run_fixture_gpu(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+    mode: GpuMode,
+    solver_mesh_artifact_path: Option<&str>,
+) -> FixtureRunResult {
+    let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
+    let run = || {
+        match AnalysisSolverOptions::defaults_for(fixture_procedure_step(model))
+        .expect("fixture procedure step must select a supported solver")
+    {
+        AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Gpu,
-            default_options(),
+            default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
+        AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Gpu,
             AnalysisModalRunOptions {
-                mode_count: spec
-                    .modal_mode_count
-                    .unwrap_or(AnalysisModalRunOptions::default().mode_count),
+                solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
+                truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
+                    spec.modal_mode_count.unwrap_or_else(|| {
+                        AnalysisModalRunOptions::default()
+                            .truncation
+                            .requested_mode_count()
+                    }),
+                ),
                 ..AnalysisModalRunOptions::balanced()
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Acoustic => analysis_run_acoustic_with_options_op(
+        AnalysisSolverOptions::StructuralFrequency(_) => panic!(
+            "structural-frequency fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralResponseSpectrum(_) => panic!(
+            "response-spectrum fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralRandomResponse(_) => panic!(
+            "random-response fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::StructuralBuckling(_) => panic!(
+            "structural-buckling fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Gpu,
             AnalysisAcousticRunOptions {
@@ -2855,90 +2948,37 @@ fn run_fixture_gpu(spec: &FixtureSpec, model: &AnalysisModel, mode: GpuMode) -> 
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
+        AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
-            transient_options_for_spec(spec, model),
+            transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
+        AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            thermal_options_for_spec(spec, model),
+            thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
+        AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Gpu,
-            AnalysisCfdRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisCfdRunOptions::default().step_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: None,
-                prep_calibration_profile: None,
-            },
+            AnalysisCfdRunOptions::default(),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cht => analysis_run_cht_with_options_op(
+        AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Gpu,
-            AnalysisChtRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisChtRunOptions::default().step_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
-            },
+            nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Fsi => analysis_run_fsi_with_options_op(
-            model,
-            ComputeBackend::Gpu,
-            AnalysisFsiRunOptions {
-                deterministic_mode: true,
-                precision_mode: PrecisionMode::Fp64,
-                quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisFsiRunOptions::default().step_count),
-                max_linear_iters: 128,
-                tolerance: 1.0e-8,
-                residual_warn_threshold: 1.0e-4,
-                prep_context: None,
-                prep_artifact_id: coupled_flow_prep_artifact_id_for_fixture(spec.id, model),
-                prep_calibration_profile: None,
-            },
-            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        AnalysisSolverOptions::ElectricalStatic(_)
+        | AnalysisSolverOptions::Magnetostatic(_)
+        | AnalysisSolverOptions::MaxwellHarmonic(_)
+        | AnalysisSolverOptions::LineParameters(_) => panic!(
+            "electromagnetic fixtures must execute through the governed typed study runner, not the legacy single-run fixture harness"
         ),
-        AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
-            model,
-            ComputeBackend::Gpu,
-            nonlinear_options_for_spec(spec),
-            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-        ),
-        AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
-            model,
-            ComputeBackend::Gpu,
-            electromagnetic_options_for_spec(spec, model),
-            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-        ),
+    }
     };
     boxed_fixture_run_result(match mode {
         GpuMode::WithProvider => with_harness_provider(run),
@@ -2979,17 +3019,28 @@ fn analysis_result_field_max_abs(run: &AnalysisRunResult, field_id: &str) -> Opt
         })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_threshold_assertion(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    name: &str,
-    source_diagnostic: &str,
+struct ThresholdAssertion<'a> {
+    fixture_id: &'a str,
+    name: &'a str,
+    source_diagnostic: &'a str,
     observed: Option<f64>,
     min_allowed: Option<f64>,
     max_allowed: Option<f64>,
+}
+
+fn record_threshold_assertion(
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    assertion: ThresholdAssertion<'_>,
 ) {
+    let ThresholdAssertion {
+        fixture_id,
+        name,
+        source_diagnostic,
+        observed,
+        min_allowed,
+        max_allowed,
+    } = assertion;
     let passed = observed
         .map(|value| {
             min_allowed.map(|min| value >= min).unwrap_or(true)
@@ -2997,7 +3048,7 @@ fn push_threshold_assertion(
         })
         .unwrap_or(false);
     assertions.push(ThresholdAssertionRecord {
-        name: name.to_string(),
+        name: name.into(),
         source_diagnostic: source_diagnostic.to_string(),
         observed,
         min_allowed,
@@ -3012,289 +3063,268 @@ fn push_threshold_assertion(
     }
 }
 
-fn push_plastic_state_threshold_assertions(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    run: &AnalysisRunResult,
-    prefix: &str,
-) {
-    push_nonlinear_state_topology_threshold_assertions(
-        fixture_id, assertions, failures, run, prefix,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_active_element_count"),
-        "FEA_NONLINEAR_STATE",
-        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "plastic_active_element_count"),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_max_equivalent_plastic_strain"),
-        "FEA_NONLINEAR_STATE",
-        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "max_equivalent_plastic_strain"),
-        Some(1.0e-12),
-        None,
-    );
+macro_rules! push_threshold_assertion {
+    (
+        $fixture_id:expr,
+        $assertions:expr,
+        $failures:expr,
+        $name:expr,
+        $source_diagnostic:expr,
+        $observed:expr,
+        $min_allowed:expr,
+        $max_allowed:expr $(,)?
+    ) => {
+        record_threshold_assertion(
+            $assertions,
+            $failures,
+            ThresholdAssertion {
+                fixture_id: $fixture_id,
+                name: $name,
+                source_diagnostic: $source_diagnostic,
+                observed: $observed,
+                min_allowed: $min_allowed,
+                max_allowed: $max_allowed,
+            },
+        )
+    };
 }
 
-fn push_contact_state_threshold_assertions(
+fn push_fixed_step_transient_assertions(
     fixture_id: &str,
+    execution: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
-    prefix: &str,
+    expected_interval_count: Option<usize>,
+    maximum_residual: Option<f64>,
 ) {
-    push_nonlinear_state_topology_threshold_assertions(
-        fixture_id, assertions, failures, run, prefix,
-    );
-    push_threshold_assertion(
+    let method = run
+        .run
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "FEA_TRANSIENT_METHOD")
+        .map(|diagnostic| diagnostic.message.as_str());
+    if !method.is_some_and(|message| message.contains("solver=newmark_average_acceleration_pcg")) {
+        failures.push(format!(
+            "fixture {fixture_id} {execution} run did not report the fixed-step average-acceleration Newmark method"
+        ));
+    }
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        &format!("{prefix}_active_entity_count"),
-        "FEA_NONLINEAR_STATE",
-        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "contact_active_entity_count"),
-        Some(1.0),
-        None,
+        &format!("{execution}_transient_newmark_beta"),
+        "FEA_TRANSIENT_METHOD",
+        method.and_then(|message| parse_metric_value(message, "beta")),
+        Some(0.25),
+        Some(0.25),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        &format!("{prefix}_max_contact_pressure"),
-        "FEA_NONLINEAR_STATE",
-        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "max_contact_pressure"),
-        Some(1.0e-12),
-        None,
+        &format!("{execution}_transient_newmark_gamma"),
+        "FEA_TRANSIENT_METHOD",
+        method.and_then(|message| parse_metric_value(message, "gamma")),
+        Some(0.5),
+        Some(0.5),
     );
-    push_threshold_assertion(
+    if let Some(expected) = expected_interval_count.map(|value| value as f64) {
+        push_threshold_assertion!(
+            fixture_id,
+            assertions,
+            failures,
+            &format!("{execution}_transient_nominal_interval_count"),
+            "FEA_TRANSIENT_CONVERGENCE",
+            diagnostic_metric(run, "FEA_TRANSIENT_CONVERGENCE", "nominal_interval_count"),
+            Some(expected),
+            Some(expected),
+        );
+        push_threshold_assertion!(
+            fixture_id,
+            assertions,
+            failures,
+            &format!("{execution}_transient_accepted_step_count"),
+            "FEA_TRANSIENT_CONVERGENCE",
+            diagnostic_metric(run, "FEA_TRANSIENT_CONVERGENCE", "accepted_step_count"),
+            Some(expected),
+            None,
+        );
+    }
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        &format!("{prefix}_min_contact_gap"),
-        "FEA_NONLINEAR_STATE",
-        diagnostic_metric(run, "FEA_NONLINEAR_STATE", "min_contact_gap"),
+        &format!("{execution}_transient_rejected_step_count"),
+        "FEA_TRANSIENT_CONVERGENCE",
+        diagnostic_metric(run, "FEA_TRANSIENT_CONVERGENCE", "rejected_step_count"),
         Some(0.0),
-        None,
+        Some(0.0),
     );
-}
-
-fn push_nonlinear_state_topology_threshold_assertions(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    run: &AnalysisRunResult,
-    prefix: &str,
-) {
-    push_threshold_assertion(
+    let dt_min = diagnostic_metric(run, "FEA_TRANSIENT_STABILITY", "dt_min");
+    let dt_max = diagnostic_metric(run, "FEA_TRANSIENT_STABILITY", "dt_max");
+    for (name, observed) in [("dt_min", dt_min), ("dt_max", dt_max)] {
+        push_threshold_assertion!(
+            fixture_id,
+            assertions,
+            failures,
+            &format!("{execution}_transient_{name}"),
+            "FEA_TRANSIENT_STABILITY",
+            observed,
+            Some(f64::MIN_POSITIVE),
+            Some(f64::MAX),
+        );
+    }
+    if matches!((dt_min, dt_max), (Some(minimum), Some(maximum)) if minimum > maximum) {
+        failures.push(format!(
+            "fixture {fixture_id} {execution} run reported transient dt_min greater than dt_max"
+        ));
+    }
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        &format!("{prefix}_topology_element_count"),
-        "FEA_NONLINEAR_STATE_TOPOLOGY",
-        diagnostic_metric(run, "FEA_NONLINEAR_STATE_TOPOLOGY", "element_count"),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_topology_active_recovery_edge_count"),
-        "FEA_NONLINEAR_STATE_TOPOLOGY",
+        &format!("{execution}_transient_max_projected_dynamic_residual"),
+        "FEA_TRANSIENT_STABILITY",
         diagnostic_metric(
             run,
-            "FEA_NONLINEAR_STATE_TOPOLOGY",
-            "active_recovery_edge_count",
+            "FEA_TRANSIENT_STABILITY",
+            "max_projected_dynamic_residual",
         ),
-        Some(1.0),
-        None,
+        Some(0.0),
+        maximum_residual,
     );
-}
-
-fn push_plastic_known_answer_threshold_assertions(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    run: &AnalysisRunResult,
-    prefix: &str,
-) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        &format!("{prefix}_monotonic_equivalent_plastic_strain_fraction"),
-        "FEA_PLASTIC_KNOWN_ANSWER",
+        &format!("{execution}_transient_maximum_physical_energy"),
+        "FEA_TRANSIENT_ENERGY",
         diagnostic_metric(
             run,
-            "FEA_PLASTIC_KNOWN_ANSWER",
-            "monotonic_equivalent_plastic_strain_fraction",
+            "FEA_TRANSIENT_ENERGY",
+            "maximum_physical_strain_plus_kinetic_energy_joules",
         ),
-        Some(1.0),
-        Some(1.0),
+        Some(0.0),
+        Some(f64::MAX),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        &format!("{prefix}_active_element_coverage_ratio"),
-        "FEA_PLASTIC_KNOWN_ANSWER",
+        &format!("{execution}_transient_maximum_relative_energy_balance_error"),
+        "FEA_TRANSIENT_ENERGY",
         diagnostic_metric(
             run,
-            "FEA_PLASTIC_KNOWN_ANSWER",
-            "active_element_coverage_ratio",
+            "FEA_TRANSIENT_ENERGY",
+            "maximum_relative_energy_balance_error",
         ),
+        Some(0.0),
         Some(1.0e-6),
-        Some(1.0),
     );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_final_to_peak_equivalent_plastic_strain_ratio"),
-        "FEA_PLASTIC_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_PLASTIC_KNOWN_ANSWER",
-            "final_to_peak_equivalent_plastic_strain_ratio",
-        ),
-        Some(0.999_999),
-        Some(1.000_001),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_known_answer_coverage_ratio"),
-        "FEA_PLASTIC_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_PLASTIC_KNOWN_ANSWER",
-            "known_answer_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
+    if let Err(error) = validate_transient_result(run) {
+        failures.push(format!(
+            "fixture {fixture_id} {execution} run returned invalid transient results: {error}"
+        ));
+    }
 }
 
-fn push_contact_known_answer_threshold_assertions(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    run: &AnalysisRunResult,
-    prefix: &str,
-) {
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_pressure_gap_consistency_residual"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_CONTACT_KNOWN_ANSWER",
-            "pressure_gap_consistency_residual",
-        ),
-        Some(0.0),
-        Some(1.0e-12),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_active_entity_coverage_ratio"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_CONTACT_KNOWN_ANSWER",
-            "active_entity_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_nonpenetration_gap_min"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(run, "FEA_CONTACT_KNOWN_ANSWER", "nonpenetration_gap_min"),
-        Some(0.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_open_gap_pressure_residual"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_CONTACT_KNOWN_ANSWER",
-            "open_gap_pressure_residual",
-        ),
-        Some(0.0),
-        Some(1.0e-12),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_pressure_gap_complementarity_residual"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_CONTACT_KNOWN_ANSWER",
-            "pressure_gap_complementarity_residual",
-        ),
-        Some(0.0),
-        Some(1.0e-12),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_closed_entity_coverage_ratio"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_CONTACT_KNOWN_ANSWER",
-            "closed_entity_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_friction_coefficient"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(run, "FEA_CONTACT_KNOWN_ANSWER", "friction_coefficient"),
-        Some(0.0),
-        Some(0.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_known_answer_coverage_ratio"),
-        "FEA_CONTACT_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_CONTACT_KNOWN_ANSWER",
-            "known_answer_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
+fn validate_transient_result(run: &AnalysisRunResult) -> Result<(), String> {
+    let transient = run
+        .transient_results
+        .as_ref()
+        .ok_or_else(|| "transient payload is missing".to_string())?;
+    let snapshot_count = transient.time_points_s.len();
+    if snapshot_count == 0
+        || transient
+            .time_points_s
+            .iter()
+            .any(|value| !value.is_finite())
+    {
+        return Err("time grid is empty or nonfinite".to_string());
+    }
+    if transient
+        .time_points_s
+        .windows(2)
+        .any(|times| times[1] <= times[0])
+    {
+        return Err("time grid is not strictly increasing".to_string());
+    }
+    let required_fields = [
+        &transient.displacement_snapshots,
+        &transient.velocity_snapshots,
+        &transient.acceleration_snapshots,
+        &transient.kinetic_energy_snapshots,
+        &transient.strain_energy_snapshots,
+        &transient.residual_norm_snapshots,
+        &transient.reaction_force_snapshots,
+        &transient.external_work_snapshots,
+        &transient.support_work_snapshots,
+        &transient.damping_dissipation_snapshots,
+        &transient.energy_balance_residual_snapshots,
+        &transient.relative_energy_balance_error_snapshots,
+    ];
+    if required_fields
+        .iter()
+        .any(|history| history.len() != snapshot_count)
+    {
+        return Err("required transient histories do not match the time grid".to_string());
+    }
+    if transient
+        .residual_norms
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return Err("physical residual history contains a nonfinite value".to_string());
+    }
+    if transient.residual_norms.len() != snapshot_count {
+        return Err("physical residual history does not match the time grid".to_string());
+    }
+    if required_fields
+        .iter()
+        .flat_map(|history| history.iter())
+        .any(|field| {
+            field.as_host_f64().is_none_or(|values| {
+                values.is_empty() || values.iter().any(|value| !value.is_finite())
+            })
+        })
+    {
+        return Err(
+            "required transient history contains unavailable or nonfinite values".to_string(),
+        );
+    }
+    let optional_fields = [
+        &transient.rotation_snapshots,
+        &transient.angular_velocity_snapshots,
+        &transient.angular_acceleration_snapshots,
+        &transient.strain_snapshots,
+        &transient.stress_snapshots,
+        &transient.strain_energy_density_snapshots,
+        &transient.von_mises_snapshots,
+        &transient.reaction_moment_snapshots,
+        &transient.electro_thermal_temperature_snapshots,
+        &transient.electro_thermal_thermal_residual_snapshots,
+    ];
+    if optional_fields.iter().any(|history| {
+        !history.is_empty()
+            && (history.len() != snapshot_count
+                || history.iter().any(|field| {
+                    field.as_host_f64().is_none_or(|values| {
+                        values.is_empty() || values.iter().any(|value| !value.is_finite())
+                    })
+                }))
+    }) {
+        return Err("optional formulation-owned history is incomplete or nonfinite".to_string());
+    }
+    if transient.dynamic_balance_snapshots.len() != snapshot_count {
+        return Err("dynamic-balance history does not match the time grid".to_string());
+    }
+    for balance in &transient.dynamic_balance_snapshots {
+        balance
+            .validate()
+            .map_err(|error| format!("dynamic-balance history is invalid: {error}"))?;
+    }
+    Ok(())
 }
 
 fn push_thermal_standalone_threshold_assertions(
@@ -3303,51 +3333,47 @@ fn push_thermal_standalone_threshold_assertions(
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_max_residual_norm",
+        "thermal_standalone_max_relative_residual_norm",
         "FEA_THERMAL_STABILITY",
-        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_residual_norm"),
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_relative_residual_norm",),
         Some(0.0),
-        Some(7.0),
+        Some(1.0e-4),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
         "thermal_standalone_min_temperature_k",
         "FEA_THERMAL_STABILITY",
-        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "min_temperature_k"),
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "minimum_temperature_k",),
         Some(290.0),
         Some(360.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
         "thermal_standalone_max_temperature_k",
         "FEA_THERMAL_STABILITY",
-        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_temperature_k"),
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "maximum_temperature_k",),
         Some(300.0),
         Some(370.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_heat_balance_residual_ratio",
-        "FEA_THERMAL_HEAT_BALANCE",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_HEAT_BALANCE",
-            "heat_balance_residual_ratio",
-        ),
+        "thermal_standalone_energy_balance_residual_ratio",
+        "FEA_THERMAL_ENERGY_BALANCE",
+        diagnostic_metric(run, "FEA_THERMAL_ENERGY_BALANCE", "max_relative_residual",),
         Some(0.0),
-        Some(0.25),
+        Some(1.0e-4),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3357,7 +3383,7 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         Some(1.5),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3371,219 +3397,33 @@ fn push_thermal_standalone_threshold_assertions(
         Some(1.0),
         Some(1.5),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_spatial_gradient_index",
-        "FEA_THERMAL_OUTCOME",
-        diagnostic_metric(run, "FEA_THERMAL_OUTCOME", "spatial_gradient_index"),
-        Some(0.4),
-        Some(1.4),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_monotonic_response_fraction",
-        "FEA_THERMAL_OUTCOME",
-        diagnostic_metric(run, "FEA_THERMAL_OUTCOME", "monotonic_response_fraction"),
-        Some(0.9),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_response_realization_ratio",
-        "FEA_THERMAL_OUTCOME",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_OUTCOME",
-            "thermal_response_realization_ratio",
-        ),
-        Some(0.6),
-        Some(1.2),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_prep_recovery_edge_count",
+        "thermal_standalone_element_count",
         "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "prep_recovery_edge_count",
-        ),
-        Some(0.0),
+        diagnostic_metric(run, "FEA_THERMAL_FIELD_RECOVERY", "element_count"),
+        Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_prep_triangle_element_count",
+        "thermal_standalone_boundary_face_count",
         "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "prep_triangle_element_count",
-        ),
+        diagnostic_metric(run, "FEA_THERMAL_FIELD_RECOVERY", "boundary_face_count"),
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_full_topology_element_count",
-        "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "full_topology_element_count",
-        ),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_prep_active_dimension_count",
-        "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "coordinate_active_dimension_count",
-        ),
-        Some(2.0),
-        Some(3.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_slab_linear_profile_rms_ratio",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "slab_linear_profile_rms_ratio",
-        ),
-        Some(0.0),
-        Some(0.35),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_slab_monotonic_edge_fraction",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "slab_monotonic_edge_fraction",
-        ),
-        Some(0.95),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_lumped_response_error_ratio",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "lumped_response_error_ratio",
-        ),
-        Some(0.0),
-        Some(0.45),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_source_response_sign_alignment",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "source_response_sign_alignment",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_source_coverage_ratio",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "thermal_source_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_boundary_coverage_ratio",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "thermal_boundary_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_prescribed_temperature_count",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "prescribed_temperature_count",
-        ),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_heat_flux_boundary_count",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "heat_flux_boundary_count",
-        ),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_convection_boundary_count",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "convection_boundary_count",
-        ),
+        "thermal_standalone_initial_prescribed_node_count",
+        "FEA_THERMAL_INITIAL_STATE",
+        diagnostic_metric(run, "FEA_THERMAL_INITIAL_STATE", "prescribed_node_count",),
         Some(1.0),
         None,
     );
@@ -3595,7 +3435,7 @@ fn push_em_reference_topology_threshold_assertions(
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3605,7 +3445,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3615,7 +3455,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3625,21 +3465,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        "electromagnetic_prep_recovery_edge_count",
-        "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-        diagnostic_metric(
-            run,
-            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-            "prep_recovery_edge_count",
-        ),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3653,7 +3479,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(3.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3667,7 +3493,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3681,7 +3507,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3695,7 +3521,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(3.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3705,7 +3531,7 @@ fn push_em_reference_topology_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3721,78 +3547,13 @@ fn push_em_reference_topology_threshold_assertions(
     );
 }
 
-fn push_electro_thermal_source_coupling_threshold_assertions(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    run: &AnalysisRunResult,
-    prefix: &str,
-) {
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_joule_heat_realization_ratio"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "joule_heat_realization_ratio",
-        ),
-        Some(0.999_999),
-        Some(1.000_001),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_joule_source_coverage_ratio"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "joule_source_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_thermal_temperature_source_alignment"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "thermal_temperature_source_alignment",
-        ),
-        Some(0.999_999),
-        Some(1.0),
-    );
-    push_threshold_assertion(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_thermal_source_residual_ratio"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "thermal_source_residual_ratio",
-        ),
-        Some(0.0),
-        Some(1.0e-10),
-    );
-}
-
 fn push_linear_structural_threshold_assertions(
     fixture_id: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3802,7 +3563,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.0),
         Some(1.0e-6),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3814,7 +3575,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3828,7 +3589,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.999_999),
         Some(1.000_001),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3842,7 +3603,7 @@ fn push_linear_structural_threshold_assertions(
         Some(0.0),
         Some(1.0e-8),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3856,7 +3617,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3870,7 +3631,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3884,7 +3645,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0),
         None,
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3898,7 +3659,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0e-12),
         Some(1.0e-2),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3908,7 +3669,7 @@ fn push_linear_structural_threshold_assertions(
         Some(1.0e5),
         Some(1.0e9),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3926,7 +3687,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
     failures: &mut Vec<String>,
     run: &AnalysisRunResult,
 ) {
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3940,7 +3701,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.0),
         Some(0.1),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3954,7 +3715,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.5),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3968,7 +3729,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(1.0),
         Some(1.0),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3982,7 +3743,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.0),
         Some(1.0e-7),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -3996,7 +3757,7 @@ fn push_structural_reference_kinematics_threshold_assertions(
         Some(0.0),
         Some(1.0e-7),
     );
-    push_threshold_assertion(
+    push_threshold_assertion!(
         fixture_id,
         assertions,
         failures,
@@ -4132,7 +3893,7 @@ fn push_structural_beam_moment_threshold_assertions(
             Some(1.0),
         ),
     ] {
-        push_threshold_assertion(
+        push_threshold_assertion!(
             fixture_id,
             assertions,
             failures,
@@ -4223,7 +3984,7 @@ fn push_structural_shell_moment_threshold_assertions(
             Some(1.0e-5),
         ),
     ] {
-        push_threshold_assertion(
+        push_threshold_assertion!(
             fixture_id,
             assertions,
             failures,
@@ -4235,64 +3996,61 @@ fn push_structural_shell_moment_threshold_assertions(
         );
     }
 
-    for (name, field_id) in [
+    // A single shell triangle loaded only by a nodal moment carries no transverse load, so
+    // equilibrium of the transverse-displacement rows forces the integral of the transverse
+    // shear resultant over the element to vanish. The MITC3 assumed-shear field is linear, so
+    // its centroid value (the published one) is zero up to round-off: Q = div(M) = 0 for this
+    // pure-bending patch. The original lower bound of 1e-12 predates the MITC3 tying
+    // (22468691f4, which removed parasitic shear locking) and asserted the locking artefact.
+    for (name, field_id, min, max) in [
         (
             "structural_shell_membrane_force_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+            Some(0.0),
+            None,
         ),
         (
             "structural_shell_bending_moment_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+            Some(1.0e-12),
+            None,
         ),
         (
             "structural_shell_transverse_shear_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+            Some(0.0),
+            Some(1.0e-9),
         ),
         (
             "structural_shell_von_mises_max_abs",
             FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+            Some(1.0e-12),
+            None,
         ),
     ] {
-        push_threshold_assertion(
+        push_threshold_assertion!(
             fixture_id,
             assertions,
             failures,
             name,
             field_id,
             analysis_result_field_max_abs(run, field_id),
-            if name == "structural_shell_membrane_force_max_abs" {
-                Some(0.0)
-            } else {
-                Some(1.0e-12)
-            },
-            None,
+            min,
+            max,
         );
     }
 }
 
-fn validate_fallback_event_schema(event: &str) -> bool {
-    let parts: Vec<&str> = event.splitn(3, ':').collect();
-    if parts.len() != 3 {
-        return false;
+fn validate_fallback_event_schema(event: &FallbackEvent) -> bool {
+    match (event.stage, event.reason) {
+        (FallbackStage::Solver, FallbackReason::RequestedBackendUnavailable) => {
+            event.actual_preconditioner.is_none()
+        }
+        (FallbackStage::Preconditioner, FallbackReason::RequestedPreconditionerUnavailable) => {
+            event.actual_preconditioner.is_some()
+        }
+        _ => false,
     }
-    let category_ok = matches!(
-        parts[0],
-        "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED" | "SOLVER_BACKEND_FALLBACK"
-    );
-    let stage_ok = if parts[0] == "SOLVER_BACKEND_FALLBACK" {
-        parts[1].starts_with("requested=")
-    } else {
-        is_namespace_field_id(parts[1])
-    };
-    let reason_ok = !parts[2].is_empty();
-    category_ok && stage_ok && reason_ok
-}
-
-fn is_namespace_field_id(value: &str) -> bool {
-    value.contains('.')
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
 }
 
 fn compute_parity(left: &[f64], right: &[f64]) -> ParitySummary {
@@ -4315,20 +4073,257 @@ fn compute_parity(left: &[f64], right: &[f64]) -> ParitySummary {
     }
 }
 
+fn subdivide_fixture_tetrahedron(mesh: &mut SolverMeshArtifact, model: &AnalysisModel) {
+    let mut identity_hasher = Sha256::new();
+    identity_hasher.update(b"runmat-analysis-fixture-interior-node\0");
+    identity_hasher.update(model.geometry_id.as_bytes());
+    let interior_identity = StableDigest::from_bytes(identity_hasher.finalize().into());
+    let interior_node_id = 5;
+    let topo = &mut *mesh.topology;
+    topo.nodes.push(SolverMeshNode {
+        node_id: interior_node_id,
+        stable_identity: interior_identity,
+        coordinates_m:
+            runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new([
+                0.25, 0.25, 0.25,
+            ]),
+        provenance: topo.nodes[0].provenance.clone(),
+        exact_parameters: Vec::new(),
+    });
+
+    let original_element = mesh.topology.volume_elements[0].clone();
+    let tetrahedra = [
+        [1, 2, 3, interior_node_id],
+        [1, 4, 2, interior_node_id],
+        [1, 3, 4, interior_node_id],
+        [2, 4, 3, interior_node_id],
+    ];
+    let node_identity = mesh
+        .topology
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.stable_identity))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    mesh.topology.volume_elements = tetrahedra
+        .into_iter()
+        .enumerate()
+        .map(|(index, node_ids)| SolverVolumeElement {
+            element_id: index as u64 + 1,
+            stable_identity: solver_volume_element_identity(
+                node_ids.map(|node_id| node_identity[&node_id]),
+            ),
+            order: ElementOrder::Tet4,
+            node_ids: node_ids.to_vec(),
+            region_id: original_element.region_id.clone(),
+            provenance: original_element.provenance.clone(),
+        })
+        .collect();
+    mesh.topology.neighbors = (1_u64..=4)
+        .flat_map(|element_id| {
+            let adjacent = (1_u64..=4)
+                .filter(|candidate| *candidate != element_id)
+                .collect::<Vec<_>>();
+            (0_u8..4).map(move |local_face_index| MeshNeighbor {
+                element_id,
+                local_face_index,
+                adjacent_element_id: if local_face_index == 0 {
+                    None
+                } else {
+                    Some(adjacent[usize::from(local_face_index - 1)])
+                },
+            })
+        })
+        .collect();
+    for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
+        face.adjacent_volume_element_ids = vec![index as u64 + 1];
+    }
+    mesh.topology.regions[0].element_ids = (1_u64..=4).collect();
+    for field in &mut mesh.topology.field_topologies {
+        match field.location {
+            FieldTopologyLocation::Node => field.ordered_entity_ids = (1_u64..=5).collect(),
+            FieldTopologyLocation::VolumeElement => {
+                field.ordered_entity_ids = (1_u64..=4).collect()
+            }
+            FieldTopologyLocation::BoundaryFace | FieldTopologyLocation::BoundaryEdge => {}
+        }
+    }
+}
+
+fn write_fixture_solver_mesh_artifact(
+    root: &Path,
+    model: &AnalysisModel,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let mut mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let is_physical_transient_reference = matches!(
+        model.model_id.0.as_str(),
+        "structural_transient_tet4_reference"
+            | "structural_transient_tet4_support_motion_reference"
+    );
+    if !is_physical_transient_reference {
+        subdivide_fixture_tetrahedron(&mut mesh, model);
+    }
+    let mut source_hasher = Sha256::new();
+    source_hasher.update(model.geometry_id.as_bytes());
+    mesh.geometry.source_digest = StableDigest::from_bytes(source_hasher.finalize().into());
+    mesh.geometry.geometry_revision = u64::from(model.geometry_revision);
+
+    if let Some(assignment) = model.material_assignments.first() {
+        let assigned_region = assignment
+            .selected_region_id()
+            .expect("fixture uses selected material region")
+            .to_owned();
+        let region_identity =
+            runmat_meshing_core::fixtures::fixture_entity_for_selection(&assigned_region)
+                .unwrap_or_else(|| {
+                    PersistentEntityId::new(
+                        PersistentEntityKind::Region,
+                        assigned_region.clone(),
+                        vec!["root".to_owned()],
+                    )
+                });
+        for element in &mut mesh.topology.volume_elements {
+            element.region_id = region_identity.clone();
+        }
+        mesh.topology.regions[0].region_id = region_identity;
+    }
+
+    let mut boundary_regions = std::collections::BTreeSet::new();
+    for constraint in &model.constraints {
+        constraint.visit_targets(|target| {
+            boundary_regions.insert(target.region_id.clone());
+        });
+    }
+    boundary_regions.extend(
+        model
+            .boundaries
+            .iter()
+            .map(|boundary| boundary.target.region_id.clone()),
+    );
+    for excitation in &model.excitations {
+        if let runmat_analysis_core::ExcitationTarget::Region(target) =
+            &excitation.excitation().target
+        {
+            boundary_regions.insert(target.region_id.clone());
+        }
+    }
+    for interface in &model.interfaces {
+        boundary_regions.insert(interface.primary.region_id.clone());
+        boundary_regions.insert(interface.secondary.region_id.clone());
+    }
+    let boundary_face_count = mesh.topology.boundary_faces.len();
+    for (index, region_id) in boundary_regions.into_iter().enumerate() {
+        // Canonical fixture selectors name a fixture entity: place that exact entity, matched by
+        // its source name. Other targets (point ids) keep a region identity.
+        let fixture_entity =
+            runmat_meshing_core::fixtures::fixture_entity_for_selection(&region_id);
+        let source_name = fixture_entity
+            .as_ref()
+            .map_or(region_id.as_str(), |entity| {
+                entity.source_topology_id.as_str()
+            });
+        let face_index = if is_physical_transient_reference {
+            match source_name {
+                "root" => 0,
+                "free_vertex_y_support" => 1,
+                "free_vertex_z_support" => 2,
+                "dynamic_force" => 3,
+                _ => index % boundary_face_count,
+            }
+        } else {
+            index % boundary_face_count
+        };
+        let face = &mut mesh.topology.boundary_faces[face_index];
+        face.provenance.push(fixture_entity.unwrap_or_else(|| {
+            PersistentEntityId::new(
+                PersistentEntityKind::Region,
+                region_id.clone(),
+                vec!["root".to_owned()],
+            )
+        }));
+        face.provenance.sort();
+        face.provenance.dedup();
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .map_err(|error| format!("{}: {error}", model.model_id.0))?;
+    let path = root.join("solver_mesh.cbor");
+    fs::write(
+        &path,
+        mesh.canonical_encode().map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+fn fixture_requires_solver_mesh(spec: &FixtureSpec, model: &AnalysisModel) -> bool {
+    spec.expect_validate_error.is_none()
+        && spec.expect_run_error.is_none()
+        && ((spec.id == "transient_physical_tet4_reference_cpu"
+            || spec.id == "transient_physical_tet4_support_motion_reference_cpu")
+            || matches!(
+                AnalysisSolverOptions::defaults_for(fixture_procedure_step(model)),
+                Ok(AnalysisSolverOptions::ThermalDiffusion(_))
+                    | Ok(AnalysisSolverOptions::MaxwellHarmonic(_))
+            )
+            || spec.id.starts_with("electro_thermal_joule_"))
+}
+
+fn configure_mesh_backed_electro_thermal_model(spec: &FixtureSpec, model: &mut AnalysisModel) {
+    if !spec.id.starts_with("electro_thermal_joule_") {
+        return;
+    }
+    replace_fixture_excitations(
+        model,
+        vec![FixtureExcitation {
+            excitation_id: format!("{}_force", spec.id),
+            region_id: "fixture_force_face".to_owned(),
+            quantity: FixtureExcitationQuantity::Force([0.0, -100.0, 0.0]),
+        }],
+    );
+    model.boundaries.clear();
+    model.constraints = vec![fixed_constraint(
+        format!("{}_fixed", spec.id),
+        "fixture_fixed_face",
+    )];
+}
+
 pub(super) fn run_fixture(
     spec: &FixtureSpec,
     filesystem_root: Option<&PathBuf>,
 ) -> FixtureRunRecord {
+    // Fixture runs are numerical contract tests: they run under the explicit finite test
+    // admission the runtime's own contract tests use, never a signed-in lease.
+    let _fea_admission = crate::fea_admission::guard();
     let mut model = (spec.model)();
     configure_model_for_fixture(spec.id, &mut model);
-    ensure_thermo_field_artifacts_for_fixture(spec.id, &model);
+    configure_mesh_backed_electro_thermal_model(spec, &mut model);
+    let fixture_store_root = filesystem_root.map(|root| root.join(spec.id));
+    let filesystem_root = fixture_store_root.as_ref();
+    if let Some(root) = filesystem_root {
+        runmat_runtime::analysis::storage::configure_artifact_store(
+            runmat_runtime::analysis::storage::AnalysisArtifactStoreConfig::Filesystem {
+                root: root.clone(),
+            },
+        )
+        .expect("configure isolated fixture artifact store");
+    }
+    let solver_mesh_artifact_path = if fixture_requires_solver_mesh(spec, &model) {
+        filesystem_root.map(|root| {
+            write_fixture_solver_mesh_artifact(root, &model)
+                .expect("write canonical fixture solver mesh artifact")
+        })
+    } else {
+        None
+    };
+    let solver_mesh_artifact_path = solver_mesh_artifact_path.as_deref().and_then(Path::to_str);
     let mut failures = Vec::new();
 
     let validate_start = Instant::now();
     let validate_result = analysis_validate(
         &model,
-        UnitSystem::Meter,
-        &ReferenceFrame::Global,
+        &runmat_analysis_core::CoordinateFrame::Global,
         OperationContext::new(Some(format!("trace-validate-{}", spec.id)), None),
     );
     let _validate_ms = validate_start.elapsed().as_secs_f64() * 1_000.0;
@@ -4368,22 +4363,14 @@ pub(super) fn run_fixture(
     let mut cpu_run_ms = None;
     let mut gpu_run_ms = None;
     let mut gpu_fallback_events = Vec::new();
-    let mut gpu_displacement_residency = None;
+    let mut published_primary_field_storage = None;
     let mut gpu_solver_host_sync_count = None;
     let mut gpu_solver_device_apply_k_ratio = None;
     let mut gpu_speedup_ratio = None;
     let mut gpu_solver_backend = None;
-    let mut gpu_transient_cache_hit_ratio = None;
-    let mut gpu_transient_cache_misses = None;
-    let mut gpu_transient_cache_entries = None;
     let mut gpu_solver_prepared_build_ms = None;
     let mut gpu_solver_solve_ms = None;
     let mut gpu_solver_fallback_apply_count = None;
-    let mut prep_calibration_profile = None;
-    let mut prep_calibration_fingerprint = None;
-    let mut prep_acceptance_score = None;
-    let mut prep_acceptance_passed = None;
-    let mut prep_acceptance_fingerprint = None;
     let mut thermo_coupling_enabled = None;
     let mut thermo_coupling_fingerprint = None;
     let mut thermo_constitutive_temperature_factor = None;
@@ -4392,30 +4379,13 @@ pub(super) fn run_fixture(
     let mut thermo_assignment_heterogeneity_index = None;
     let mut thermo_region_delta_count = None;
     let mut thermo_spatial_coverage_ratio = None;
-    let mut thermo_field_extrapolation_ratio = None;
-    let mut thermo_field_clamp_ratio = None;
-    let thermo_field_artifact_id = model
-        .thermo_mechanical
-        .as_ref()
-        .and_then(|domain| domain.field_artifact_id.clone());
-    let mut thermo_field_artifact_approved = None;
-    let mut thermo_field_artifact_age_days = None;
-    let mut thermo_field_artifact_provenance_valid = None;
-    if thermo_field_artifact_id.is_some() {
-        thermo_field_artifact_approved = Some(true);
-        thermo_field_artifact_age_days = Some(0.0);
-        thermo_field_artifact_provenance_valid = Some(true);
-    }
-    let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
     let mut electro_thermal_coupling_enabled = None;
     let mut electro_thermal_coupling_fingerprint = None;
     let mut electro_joule_heating_scale = None;
     let mut electro_conductivity_spread_ratio = None;
     let mut electro_transient_severity = None;
-    let mut electro_transient_time_scale_mean = None;
     let mut electro_nonlinear_severity = None;
-    let mut electro_nonlinear_time_scale_mean = None;
     let mut plastic_nonlinear_severity = None;
     let mut plastic_nonlinear_severity_mean = None;
     let mut plastic_load_realization_ratio = None;
@@ -4424,14 +4394,11 @@ pub(super) fn run_fixture(
     let mut contact_nonlinear_severity_mean = None;
     let mut contact_load_realization_ratio = None;
     let mut contact_load_amplification_ratio = None;
-    let mut thermal_max_residual_norm = None;
+    let mut thermal_max_relative_residual_norm = None;
     let mut thermal_min_temperature_k = None;
     let mut thermal_max_temperature_k = None;
     let mut thermal_conductivity_spread_ratio = None;
     let mut thermal_heat_capacity_spread_ratio = None;
-    let mut thermal_spatial_gradient_index = None;
-    let mut thermal_monotonic_response_fraction = None;
-    let mut thermal_response_realization_ratio = None;
     let mut electromagnetic_enabled = None;
     let mut electromagnetic_formulation_coverage_ratio = None;
     let mut electromagnetic_magnetostatic_curl_curl_coverage_ratio = None;
@@ -4473,21 +4440,21 @@ pub(super) fn run_fixture(
     let mut electromagnetic_resonance_bandwidth_hz = None;
     let mut electromagnetic_resonance_quality_factor = None;
     let mut electromagnetic_resonance_flux_gain = None;
-    let mut publishable = None;
+    let mut numerically_acceptable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
 
     if spec.expect_validate_error.is_none() && spec.expect_run_error.is_none() {
         let cpu_start = Instant::now();
-        let cpu_result = run_fixture_cpu(spec, &model);
+        let cpu_result = run_fixture_cpu(spec, &model, solver_mesh_artifact_path);
         cpu_run_ms = Some(cpu_start.elapsed().as_secs_f64() * 1_000.0);
 
         let cpu_envelope = match cpu_result {
             Ok(value) => value,
             Err(err) => {
                 failures.push(format!(
-                    "unexpected CPU run failure for fixture {}: {}",
-                    spec.id, err.error_code
+                    "unexpected CPU run failure for fixture {}: {}: {}",
+                    spec.id, err.error_code, err.message
                 ));
                 return FixtureRunRecord {
                     fixture_id: spec.id.to_string(),
@@ -4498,22 +4465,14 @@ pub(super) fn run_fixture(
                     cpu_run_ms,
                     gpu_run_ms,
                     gpu_fallback_events,
-                    gpu_displacement_residency,
+                    published_primary_field_storage,
                     gpu_solver_host_sync_count,
                     gpu_solver_device_apply_k_ratio,
                     gpu_speedup_ratio,
                     gpu_solver_backend,
-                    gpu_transient_cache_hit_ratio,
-                    gpu_transient_cache_misses,
-                    gpu_transient_cache_entries,
                     gpu_solver_prepared_build_ms,
                     gpu_solver_solve_ms,
                     gpu_solver_fallback_apply_count,
-                    prep_calibration_profile,
-                    prep_calibration_fingerprint,
-                    prep_acceptance_score,
-                    prep_acceptance_passed,
-                    prep_acceptance_fingerprint,
                     thermo_coupling_enabled,
                     thermo_coupling_fingerprint,
                     thermo_constitutive_temperature_factor,
@@ -4522,22 +4481,13 @@ pub(super) fn run_fixture(
                     thermo_assignment_heterogeneity_index,
                     thermo_region_delta_count,
                     thermo_spatial_coverage_ratio,
-                    thermo_field_extrapolation_ratio,
-                    thermo_field_clamp_ratio,
-                    thermo_field_artifact_id,
-                    thermo_field_artifact_approved,
-                    thermo_field_artifact_age_days,
-                    thermo_field_artifact_provenance_valid,
-                    thermo_transient_severity,
                     thermo_nonlinear_severity,
                     electro_thermal_coupling_enabled,
                     electro_thermal_coupling_fingerprint,
                     electro_joule_heating_scale,
                     electro_conductivity_spread_ratio,
                     electro_transient_severity,
-                    electro_transient_time_scale_mean,
                     electro_nonlinear_severity,
-                    electro_nonlinear_time_scale_mean,
                     plastic_nonlinear_severity,
                     plastic_nonlinear_severity_mean,
                     plastic_load_realization_ratio,
@@ -4546,14 +4496,11 @@ pub(super) fn run_fixture(
                     contact_nonlinear_severity_mean,
                     contact_load_realization_ratio,
                     contact_load_amplification_ratio,
-                    thermal_max_residual_norm,
+                    thermal_max_relative_residual_norm,
                     thermal_min_temperature_k,
                     thermal_max_temperature_k,
                     thermal_conductivity_spread_ratio,
                     thermal_heat_capacity_spread_ratio,
-                    thermal_spatial_gradient_index,
-                    thermal_monotonic_response_fraction,
-                    thermal_response_realization_ratio,
                     electromagnetic_enabled,
                     electromagnetic_formulation_coverage_ratio,
                     electromagnetic_magnetostatic_curl_curl_coverage_ratio,
@@ -4595,7 +4542,7 @@ pub(super) fn run_fixture(
                     electromagnetic_resonance_bandwidth_hz,
                     electromagnetic_resonance_quality_factor,
                     electromagnetic_resonance_flux_gain,
-                    publishable,
+                    numerically_acceptable,
                     parity,
                     threshold_assertions,
                     failures,
@@ -4603,24 +4550,26 @@ pub(super) fn run_fixture(
             }
         };
         run_ok = true;
-        publishable = Some(cpu_envelope.data.publishable);
-
-        if let Some(expected_publishable) = spec.expected_publishable {
-            if cpu_envelope.data.publishable != expected_publishable {
+        numerically_acceptable = Some(cpu_envelope.data.numerically_acceptable);
+        if let Some(expected_numerically_acceptable) = spec.expected_numerically_acceptable {
+            if cpu_envelope.data.numerically_acceptable != expected_numerically_acceptable {
                 failures.push(format!(
-                    "cpu publishable mismatch: expected {expected_publishable}, got {}",
-                    cpu_envelope.data.publishable
+                    "cpu numerical acceptance mismatch: expected {expected_numerically_acceptable}, got {}",
+                    cpu_envelope.data.numerically_acceptable
                 ));
             }
         }
 
-        if matches!(spec.run_kind, AnalysisRunKind::Modal) {
+        if matches!(
+            AnalysisSolverOptions::defaults_for(fixture_procedure_step(&model)),
+            Ok(AnalysisSolverOptions::StructuralModes(_))
+        ) {
             let observed = cpu_envelope
                 .data
                 .modal_results
                 .as_ref()
-                .and_then(|modal| modal.residual_norms.iter().copied().reduce(f64::max));
-            push_threshold_assertion(
+                .and_then(|modal| modal.residual_norms().into_iter().reduce(f64::max));
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4630,7 +4579,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-1),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4646,7 +4595,7 @@ pub(super) fn run_fixture(
                     .map(|count| count as f64),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4667,7 +4616,7 @@ pub(super) fn run_fixture(
                 "FEA_MODAL_ORTHOGONALITY",
                 "max_m_orthogonality_offdiag",
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4684,7 +4633,7 @@ pub(super) fn run_fixture(
                 "FEA_MODAL_SEPARATION",
                 "min_relative_frequency_separation",
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4696,7 +4645,7 @@ pub(super) fn run_fixture(
             );
         }
         if spec.id.starts_with("acoustic_harmonic_") {
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4710,7 +4659,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-3),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4724,7 +4673,7 @@ pub(super) fn run_fixture(
                 Some(50.0),
                 Some(20_000.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4738,7 +4687,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-12),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4752,7 +4701,7 @@ pub(super) fn run_fixture(
                 Some(3.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4766,7 +4715,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4780,7 +4729,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4794,7 +4743,7 @@ pub(super) fn run_fixture(
                 Some(2.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4808,7 +4757,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4822,7 +4771,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4836,7 +4785,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4850,7 +4799,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4864,7 +4813,7 @@ pub(super) fn run_fixture(
                 Some(3.0),
                 Some(3.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4878,7 +4827,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4892,7 +4841,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4906,7 +4855,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-12),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4920,7 +4869,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-3),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4934,7 +4883,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(0.5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4948,7 +4897,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-12),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4962,7 +4911,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-9),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -4976,7 +4925,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5040,466 +4989,20 @@ pub(super) fn run_fixture(
                 &cpu_envelope.data,
             );
         }
-        if let Some(max_residual) = spec.max_transient_residual_norm {
-            let observed = diagnostic_metric(
-                &cpu_envelope.data,
-                "FEA_TRANSIENT_STABILITY",
-                "max_residual_norm",
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_residual_norm",
-                "FEA_TRANSIENT_STABILITY",
-                observed,
-                None,
-                Some(max_residual),
-            );
-        }
-        if let Some(max_growth) = spec.max_transient_energy_growth_ratio {
-            let observed = diagnostic_metric(
-                &cpu_envelope.data,
-                "FEA_TRANSIENT_ENERGY",
-                "max_energy_growth_ratio",
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_energy_growth_ratio",
-                "FEA_TRANSIENT_ENERGY",
-                observed,
-                None,
-                Some(max_growth),
-            );
-        }
         if spec.id.starts_with("transient_") {
-            push_threshold_assertion(
+            push_fixed_step_transient_assertions(
                 spec.id,
+                "cpu",
                 &mut threshold_assertions,
                 &mut failures,
-                "transient_initial_total_energy",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "initial_total_energy",
-                ),
-                Some(0.0),
-                Some(1.0e-12),
+                &cpu_envelope.data,
+                spec.transient_step_count,
+                spec.max_transient_residual_norm,
             );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_final_total_energy",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "final_total_energy",
-                ),
-                Some(0.0),
-                None,
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_total_energy",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "max_total_energy",
-                ),
-                Some(0.0),
-                None,
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_energy_balance_growth_ratio",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "energy_growth_ratio",
-                ),
-                Some(1.0),
-                Some(spec.max_transient_energy_growth_ratio.unwrap_or(10.0)),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "transient_max_step_energy_jump_ratio",
-                "FEA_TRANSIENT_ENERGY_BALANCE",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_TRANSIENT_ENERGY_BALANCE",
-                    "max_step_energy_jump_ratio",
-                ),
-                None,
-                Some(10.0),
-            );
-        }
-        let is_cfd_fixture =
-            spec.id.starts_with("cfd_steady_") || spec.id.starts_with("cfd_transient_");
-        if is_cfd_fixture {
-            let expected_profile_point_count = if spec.id.starts_with("cfd_transient_") {
-                2.0
-            } else {
-                0.0
-            };
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_reference_density_kg_per_m3",
-                "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "density"),
-                Some(1.20),
-                Some(1.25),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_dynamic_viscosity_pa_s",
-                "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "viscosity"),
-                Some(1.0e-5),
-                Some(3.0e-5),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_inlet_velocity_m_per_s",
-                "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "inlet_velocity"),
-                Some(4.0),
-                Some(6.0),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_turbulence_intensity",
-                "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "turbulence_intensity"),
-                Some(0.04),
-                Some(0.08),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_reynolds_number",
-                "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "reynolds_number"),
-                Some(2.0e5),
-                Some(5.0e5),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_profile_point_count",
-                "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(expected_profile_point_count),
-                Some(expected_profile_point_count),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_max_momentum_residual",
-                "FEA_CFD_RESIDUAL",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_RESIDUAL",
-                    "max_momentum_residual",
-                ),
-                None,
-                Some(1.0e-4),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_max_continuity_residual",
-                "FEA_CFD_RESIDUAL",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_RESIDUAL",
-                    "max_continuity_residual",
-                ),
-                None,
-                Some(1.0e-4),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_mass_balance_residual",
-                "FEA_CFD_ASSEMBLY",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_ASSEMBLY",
-                    "mass_balance_residual",
-                ),
-                Some(0.0),
-                Some(1.0e-8),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_pressure_drop_pa",
-                "FEA_CFD_ASSEMBLY",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_ASSEMBLY", "pressure_drop_pa"),
-                Some(0.1),
-                Some(10.0),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_control_volume_count",
-                "FEA_CFD_ASSEMBLY",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_ASSEMBLY",
-                    "control_volume_count",
-                ),
-                Some(2.0),
-                None,
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_inlet_boundary_count",
-                "FEA_CFD_BOUNDARY_CONDITIONS",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_BOUNDARY_CONDITIONS",
-                    "inlet_boundary_count",
-                ),
-                Some(1.0),
-                Some(1.0),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_outlet_boundary_count",
-                "FEA_CFD_BOUNDARY_CONDITIONS",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_BOUNDARY_CONDITIONS",
-                    "outlet_boundary_count",
-                ),
-                Some(1.0),
-                Some(1.0),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_wall_boundary_count",
-                "FEA_CFD_BOUNDARY_CONDITIONS",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_BOUNDARY_CONDITIONS",
-                    "wall_boundary_count",
-                ),
-                Some(2.0),
-                None,
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_boundary_coverage_ratio",
-                "FEA_CFD_BOUNDARY_CONDITIONS",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_BOUNDARY_CONDITIONS",
-                    "boundary_coverage_ratio",
-                ),
-                Some(1.0),
-                Some(1.0),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_wall_boundary_coverage_ratio",
-                "FEA_CFD_BOUNDARY_CONDITIONS",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_BOUNDARY_CONDITIONS",
-                    "wall_boundary_coverage_ratio",
-                ),
-                Some(1.0),
-                Some(1.0),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_pressure_correction_residual_ratio",
-                "FEA_CFD_PRESSURE_CORRECTION",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_PRESSURE_CORRECTION",
-                    "pressure_correction_residual_ratio",
-                ),
-                Some(0.0),
-                Some(1.0e-4),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_velocity_correction_residual_ratio",
-                "FEA_CFD_PRESSURE_CORRECTION",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_PRESSURE_CORRECTION",
-                    "velocity_correction_residual_ratio",
-                ),
-                Some(0.0),
-                Some(1.0e-4),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_pressure_drop_balance_ratio",
-                "FEA_CFD_KNOWN_ANSWER",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_KNOWN_ANSWER",
-                    "pressure_drop_balance_ratio",
-                ),
-                Some(0.999_999),
-                Some(1.000_001),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_mass_flux_uniformity_ratio",
-                "FEA_CFD_KNOWN_ANSWER",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_KNOWN_ANSWER",
-                    "mass_flux_uniformity_ratio",
-                ),
-                Some(0.0),
-                Some(1.0e-8),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_pressure_monotonic_cell_fraction",
-                "FEA_CFD_KNOWN_ANSWER",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_KNOWN_ANSWER",
-                    "pressure_monotonic_cell_fraction",
-                ),
-                Some(1.0),
-                Some(1.0),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "cfd_known_answer_coverage_ratio",
-                "FEA_CFD_KNOWN_ANSWER",
-                diagnostic_metric(
-                    &cpu_envelope.data,
-                    "FEA_CFD_KNOWN_ANSWER",
-                    "known_answer_coverage_ratio",
-                ),
-                Some(1.0),
-                Some(1.0),
-            );
-            if spec.id.starts_with("cfd_transient_") {
-                push_threshold_assertion(
-                    spec.id,
-                    &mut threshold_assertions,
-                    &mut failures,
-                    "cfd_transient_step_count",
-                    "FEA_CFD_TRANSIENT_EVOLUTION",
-                    diagnostic_metric(
-                        &cpu_envelope.data,
-                        "FEA_CFD_TRANSIENT_EVOLUTION",
-                        "step_count",
-                    ),
-                    Some(12.0),
-                    Some(12.0),
-                );
-                push_threshold_assertion(
-                    spec.id,
-                    &mut threshold_assertions,
-                    &mut failures,
-                    "cfd_transient_scale_min",
-                    "FEA_CFD_TRANSIENT_EVOLUTION",
-                    diagnostic_metric(
-                        &cpu_envelope.data,
-                        "FEA_CFD_TRANSIENT_EVOLUTION",
-                        "transient_scale_min",
-                    ),
-                    Some(0.649_999),
-                    Some(0.650_001),
-                );
-                push_threshold_assertion(
-                    spec.id,
-                    &mut threshold_assertions,
-                    &mut failures,
-                    "cfd_transient_scale_max",
-                    "FEA_CFD_TRANSIENT_EVOLUTION",
-                    diagnostic_metric(
-                        &cpu_envelope.data,
-                        "FEA_CFD_TRANSIENT_EVOLUTION",
-                        "transient_scale_max",
-                    ),
-                    Some(1.0),
-                    Some(1.0),
-                );
-                push_threshold_assertion(
-                    spec.id,
-                    &mut threshold_assertions,
-                    &mut failures,
-                    "cfd_transient_scale_variation",
-                    "FEA_CFD_TRANSIENT_EVOLUTION",
-                    diagnostic_metric(
-                        &cpu_envelope.data,
-                        "FEA_CFD_TRANSIENT_EVOLUTION",
-                        "transient_scale_variation",
-                    ),
-                    Some(0.349_999),
-                    Some(0.350_001),
-                );
-            }
         }
         if spec.id.starts_with("cht_coupled_") {
-            let expected_cht_profile_point_count = if spec.id == "cht_coupled_channel_slab_cpu" {
-                3.0
-            } else {
-                2.0
-            };
-            push_threshold_assertion(
+            let expected_cht_sample_count = 12.0;
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5509,7 +5012,7 @@ pub(super) fn run_fixture(
                 Some(1.20),
                 Some(1.25),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5519,7 +5022,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-5),
                 Some(3.0e-5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5529,7 +5032,7 @@ pub(super) fn run_fixture(
                 Some(4.0),
                 Some(6.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5539,7 +5042,7 @@ pub(super) fn run_fixture(
                 Some(0.04),
                 Some(0.08),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5549,17 +5052,17 @@ pub(super) fn run_fixture(
                 Some(2.0e5),
                 Some(5.0e5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "cht_profile_point_count",
+                "cht_executed_sample_count",
                 "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(expected_cht_profile_point_count),
-                Some(expected_cht_profile_point_count),
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "executed_sample_count"),
+                Some(expected_cht_sample_count),
+                Some(expected_cht_sample_count),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5573,27 +5076,31 @@ pub(super) fn run_fixture(
                 Some(60.0),
                 Some(60.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "cht_step_count",
+                "cht_sample_count",
                 "FEA_CHT_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "step_count"),
+                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "sample_count"),
                 Some(12.0),
                 Some(12.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "cht_time_step_s",
+                "cht_nominal_time_step_s",
                 "FEA_CHT_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "time_step_s"),
-                Some(1.0e-3),
-                Some(1.0e-3),
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_COUPLING",
+                    "nominal_time_step_s",
+                ),
+                Some(1.0 / 11.0),
+                Some(1.0 / 11.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5607,7 +5114,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5621,7 +5128,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5630,12 +5137,12 @@ pub(super) fn run_fixture(
                 diagnostic_metric(
                     &cpu_envelope.data,
                     "FEA_THERMAL_STABILITY",
-                    "max_residual_norm",
+                    "max_relative_residual_norm",
                 ),
                 None,
                 Some(2.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5649,7 +5156,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5663,7 +5170,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(0.1),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5677,7 +5184,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5691,7 +5198,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5705,7 +5212,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5719,7 +5226,7 @@ pub(super) fn run_fixture(
                 Some(0.999),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5733,7 +5240,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(0.1),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5747,7 +5254,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5761,7 +5268,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5775,7 +5282,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5789,7 +5296,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(64.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5803,7 +5310,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5817,7 +5324,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5831,7 +5338,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5853,7 +5360,7 @@ pub(super) fn run_fixture(
             } else {
                 0.0
             };
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5867,7 +5374,7 @@ pub(super) fn run_fixture(
                 Some(cht_mesh_backed_min),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5881,7 +5388,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5895,7 +5402,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5909,7 +5416,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5923,7 +5430,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5937,7 +5444,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5951,7 +5458,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5965,7 +5472,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5979,7 +5486,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -5993,7 +5500,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6007,7 +5514,7 @@ pub(super) fn run_fixture(
                 Some(0.999),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6021,7 +5528,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6036,7 +5543,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
             );
             if spec.id == "cht_coupled_channel_slab_cpu" {
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -6053,12 +5560,8 @@ pub(super) fn run_fixture(
             }
         }
         if spec.id.starts_with("fsi_coupled_") {
-            let expected_fsi_profile_point_count = if spec.id == "fsi_coupled_pipe_plate_cpu" {
-                3.0
-            } else {
-                2.0
-            };
-            push_threshold_assertion(
+            let expected_fsi_sample_count = 12.0;
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6072,7 +5575,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6086,7 +5589,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6100,7 +5603,7 @@ pub(super) fn run_fixture(
                 None,
                 Some(1.0e-4),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6114,7 +5617,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6128,7 +5631,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6142,7 +5645,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-12),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6156,7 +5659,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(128.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6170,7 +5673,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6184,7 +5687,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6198,7 +5701,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6212,7 +5715,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6226,7 +5729,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6240,7 +5743,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-18),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6254,7 +5757,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-18),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6268,7 +5771,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6282,7 +5785,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6304,7 +5807,7 @@ pub(super) fn run_fixture(
             } else {
                 0.0
             };
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6318,7 +5821,7 @@ pub(super) fn run_fixture(
                 Some(fsi_mesh_backed_min),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6332,7 +5835,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6346,7 +5849,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6360,7 +5863,7 @@ pub(super) fn run_fixture(
                 Some(1.0e6),
                 None,
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6374,7 +5877,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6388,7 +5891,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-9),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6402,7 +5905,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-12),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6416,7 +5919,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6430,7 +5933,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6444,7 +5947,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6458,7 +5961,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6472,7 +5975,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6486,7 +5989,7 @@ pub(super) fn run_fixture(
                 Some(0.0),
                 Some(1.0e-8),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6500,7 +6003,7 @@ pub(super) fn run_fixture(
                 Some(1.0),
                 Some(1.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6510,7 +6013,7 @@ pub(super) fn run_fixture(
                 Some(1.20),
                 Some(1.25),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6520,7 +6023,7 @@ pub(super) fn run_fixture(
                 Some(1.0e-5),
                 Some(3.0e-5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6530,7 +6033,7 @@ pub(super) fn run_fixture(
                 Some(3.5),
                 Some(4.5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6540,7 +6043,7 @@ pub(super) fn run_fixture(
                 Some(0.04),
                 Some(0.08),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
@@ -6550,66 +6053,70 @@ pub(super) fn run_fixture(
                 Some(2.0e5),
                 Some(3.0e5),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_profile_point_count",
+                "fsi_executed_sample_count",
                 "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(expected_fsi_profile_point_count),
-                Some(expected_fsi_profile_point_count),
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "executed_sample_count"),
+                Some(expected_fsi_sample_count),
+                Some(expected_fsi_sample_count),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_step_count",
+                "fsi_sample_count",
                 "FEA_FSI_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "step_count"),
+                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "sample_count"),
                 Some(12.0),
                 Some(12.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_time_step_s",
-                "FEA_FSI_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "time_step_s"),
-                Some(1.0e-3),
-                Some(1.0e-3),
-            );
-            push_threshold_assertion(
-                spec.id,
-                &mut threshold_assertions,
-                &mut failures,
-                "fsi_structural_step_count",
+                "fsi_nominal_time_step_s",
                 "FEA_FSI_COUPLING",
                 diagnostic_metric(
                     &cpu_envelope.data,
                     "FEA_FSI_COUPLING",
-                    "structural_step_count",
+                    "nominal_time_step_s",
                 ),
-                Some(1.0),
-                Some(1.0),
+                Some(1.0 / 11.0),
+                Some(1.0 / 11.0),
             );
-            push_threshold_assertion(
+            push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_cfd_profile_point_count",
+                "fsi_procedure_count",
                 "FEA_FSI_COUPLING",
                 diagnostic_metric(
                     &cpu_envelope.data,
                     "FEA_FSI_COUPLING",
-                    "cfd_profile_point_count",
+                    "fsi_procedure_count",
                 ),
-                Some(expected_fsi_profile_point_count),
-                Some(expected_fsi_profile_point_count),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion!(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_cfd_executed_sample_count",
+                "FEA_FSI_COUPLING",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_COUPLING",
+                    "cfd_executed_sample_count",
+                ),
+                Some(expected_fsi_sample_count),
+                Some(expected_fsi_sample_count),
             );
             if spec.id == "fsi_coupled_pipe_plate_cpu" {
-                push_threshold_assertion(
+                push_threshold_assertion!(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
@@ -6636,44 +6143,28 @@ pub(super) fn run_fixture(
 
         if let Some(gpu_mode) = spec.gpu_mode {
             let gpu_start = Instant::now();
-            let gpu_result = run_fixture_gpu(spec, &model, gpu_mode);
+            let gpu_result = run_fixture_gpu(spec, &model, gpu_mode, solver_mesh_artifact_path);
             gpu_run_ms = Some(gpu_start.elapsed().as_secs_f64() * 1_000.0);
 
             match gpu_result {
                 Ok(gpu_envelope) => {
                     run_ok = true;
-                    publishable = Some(gpu_envelope.data.publishable);
+                    numerically_acceptable = Some(gpu_envelope.data.numerically_acceptable);
                     gpu_fallback_events = gpu_envelope.data.provenance.fallback_events.clone();
                     gpu_solver_host_sync_count =
                         Some(gpu_envelope.data.provenance.solver_host_sync_count);
                     gpu_solver_device_apply_k_ratio =
                         Some(gpu_envelope.data.provenance.solver_device_apply_k_ratio);
-                    gpu_solver_backend = Some(gpu_envelope.data.provenance.solver_backend.clone());
+                    gpu_solver_backend = Some(
+                        gpu_envelope
+                            .data
+                            .provenance
+                            .solver_backend
+                            .as_str()
+                            .to_string(),
+                    );
                     gpu_speedup_ratio = match (cpu_run_ms, gpu_run_ms) {
                         (Some(cpu_ms), Some(gpu_ms)) if gpu_ms > 0.0 => Some(cpu_ms / gpu_ms),
-                        _ => None,
-                    };
-                    let cache_hits = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_CACHE",
-                        "prepared_cache_hits",
-                    );
-                    let cache_misses = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_CACHE",
-                        "prepared_cache_misses",
-                    );
-                    let cache_entries = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_CACHE",
-                        "prepared_cache_entries",
-                    );
-                    gpu_transient_cache_misses = cache_misses;
-                    gpu_transient_cache_entries = cache_entries;
-                    gpu_transient_cache_hit_ratio = match (cache_hits, cache_misses) {
-                        (Some(hits), Some(misses)) if (hits + misses) > 0.0 => {
-                            Some(hits / (hits + misses))
-                        }
                         _ => None,
                     };
                     gpu_solver_prepared_build_ms = diagnostic_metric(
@@ -6740,108 +6231,18 @@ pub(super) fn run_fixture(
                             "fallback_apply_count",
                         )
                     });
-                    let transient_adapt_scale_min = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "scale_min",
-                    );
-                    let transient_adapt_scale_max = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "scale_max",
-                    );
-                    let transient_adapt_scale_mean = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "scale_mean",
-                    );
-                    let transient_adapt_decrease_steps = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_ADAPTIVITY",
-                        "decrease_steps",
-                    );
-                    let transient_bucket_rel_tolerance = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_BUCKETING",
-                        "rel_tolerance",
-                    );
-                    let transient_physics_jump_ratio = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_PHYSICS",
-                        "max_step_l2_jump_ratio",
-                    );
-                    let transient_physics_nonfinite = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_TRANSIENT_PHYSICS",
-                        "nonfinite_displacement_count",
-                    );
-                    let nonlinear_converged_increments = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "converged_increments",
-                    );
-                    let nonlinear_total_increments = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "increments",
-                    );
-                    let nonlinear_failed_increments = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "failed_increments",
-                    );
-                    let nonlinear_max_residual_norm = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "max_residual_norm",
-                    );
-                    let nonlinear_max_increment_norm = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "max_increment_norm",
-                    );
-                    let nonlinear_line_search_backtracks = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "line_search_backtracks",
-                    );
-                    let nonlinear_max_backtracks_per_increment = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "max_line_search_backtracks_per_increment",
-                    );
-                    let nonlinear_tangent_rebuild_count = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "tangent_rebuild_count",
-                    );
-                    let nonlinear_iteration_spike_count = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "iteration_spike_count",
-                    );
-                    let nonlinear_convergence_stall_count = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "convergence_stall_count",
-                    );
-                    let nonlinear_backtrack_burst_count = diagnostic_metric(
-                        &gpu_envelope.data,
-                        "FEA_NONLINEAR_CONVERGENCE",
-                        "backtrack_burst_count",
-                    );
-
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
-                            failures.push(format!("invalid fallback event schema: {event}"));
+                            failures.push(format!("invalid fallback event schema: {event:?}"));
                         }
                     }
 
-                    let gpu_primary_field_id = primary_result_field_id(spec.run_kind);
+                    let gpu_primary_field_id =
+                        primary_result_field_id(fixture_procedure_step(&model));
                     if let Some(primary_field) =
                         analysis_result_field(&gpu_envelope.data, &gpu_primary_field_id)
                     {
-                        gpu_displacement_residency = Some(match &primary_field.values {
+                        published_primary_field_storage = Some(match &primary_field.values {
                             AnalysisFieldValues::DeviceRef(_) => "device_ref".to_string(),
                             AnalysisFieldValues::HostF64(_) => "host_f64".to_string(),
                         });
@@ -6852,27 +6253,74 @@ pub(super) fn run_fixture(
                         ));
                     }
 
-                    let gpu_expected_publishable = if spec.id.starts_with("acoustic_harmonic_") {
-                        Some(false)
-                    } else {
-                        spec.expected_publishable
-                    };
-                    if let Some(expected_publishable) = gpu_expected_publishable {
-                        if gpu_envelope.data.publishable != expected_publishable {
+                    let gpu_expected_numerically_acceptable =
+                        if spec.id.starts_with("acoustic_harmonic_") {
+                            Some(false)
+                        } else {
+                            spec.expected_numerically_acceptable
+                        };
+                    if let Some(expected_numerically_acceptable) =
+                        gpu_expected_numerically_acceptable
+                    {
+                        if gpu_envelope.data.numerically_acceptable
+                            != expected_numerically_acceptable
+                        {
                             failures.push(format!(
-                                "gpu publishable mismatch: expected {expected_publishable}, got {}",
-                                gpu_envelope.data.publishable
+                                "gpu numerical acceptance mismatch: expected {expected_numerically_acceptable}, got {}",
+                                gpu_envelope.data.numerically_acceptable
                             ));
                         }
                     }
+                    if spec.id.starts_with("transient_") {
+                        push_fixed_step_transient_assertions(
+                            spec.id,
+                            "gpu",
+                            &mut threshold_assertions,
+                            &mut failures,
+                            &gpu_envelope.data,
+                            spec.transient_step_count,
+                            spec.max_transient_residual_norm,
+                        );
+                    }
 
                     if let Some(expected_solver_backend) = spec.expected_solver_backend {
-                        if gpu_envelope.data.provenance.solver_backend != expected_solver_backend {
+                        if gpu_envelope.data.provenance.solver_backend.as_str()
+                            != expected_solver_backend
+                        {
                             failures.push(format!(
                                 "solver_backend mismatch for fixture {}: expected={} got={}",
                                 spec.id,
                                 expected_solver_backend,
                                 gpu_envelope.data.provenance.solver_backend
+                            ));
+                        }
+                    }
+                    // Shared accelerator admission: a GPU placement that ran on cpu_reference
+                    // publishes the solver-backend fallback event and exactly one fallback
+                    // diagnostic, whatever the physics family.
+                    if gpu_envelope.data.provenance.solver_backend.as_str() == "cpu_reference" {
+                        let fallback_diagnostics = gpu_envelope
+                            .data
+                            .run
+                            .diagnostics
+                            .iter()
+                            .filter(|diagnostic| {
+                                diagnostic.code == "FEA_ACCELERATOR_ADMISSION_FALLBACK"
+                            })
+                            .count();
+                        if fallback_diagnostics != 1 {
+                            failures.push(format!(
+                                "fixture {} must report FEA_ACCELERATOR_ADMISSION_FALLBACK once for a GPU placement that ran on cpu_reference; found {fallback_diagnostics}",
+                                spec.id
+                            ));
+                        }
+                        if !gpu_fallback_events
+                            .iter()
+                            .any(|event| event.stage == FallbackStage::Solver)
+                        {
+                            failures.push(format!(
+                                "fixture {} must publish a solver-backend fallback event for a GPU placement that ran on cpu_reference",
+                                spec.id
                             ));
                         }
                     }
@@ -6887,2075 +6335,12 @@ pub(super) fn run_fixture(
                             }
                         }
                     }
-                    if let Some(min_cache_hit_ratio) = spec.min_transient_cache_hit_ratio {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_prepared_cache_hit_ratio",
-                            "FEA_TRANSIENT_CACHE",
-                            gpu_transient_cache_hit_ratio,
-                            Some(min_cache_hit_ratio),
-                            None,
-                        );
-                    }
-                    if let Some(max_cache_misses) = spec.max_transient_cache_misses {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_prepared_cache_misses",
-                            "FEA_TRANSIENT_CACHE",
-                            gpu_transient_cache_misses,
-                            None,
-                            Some(max_cache_misses),
-                        );
-                    }
-                    if spec.id == "transient_long_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_scale_min",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_scale_min,
-                            Some(0.65),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_scale_max",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_scale_max,
-                            None,
-                            Some(1.35),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_scale_mean",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_scale_mean,
-                            Some(0.8),
-                            Some(1.2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_adapt_decrease_steps",
-                            "FEA_TRANSIENT_ADAPTIVITY",
-                            transient_adapt_decrease_steps,
-                            None,
-                            Some(16.0),
-                        );
-                        let requested_bucket_tol =
-                            std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
-                                .ok()
-                                .and_then(|value| value.parse::<f64>().ok())
-                                .unwrap_or(0.0)
-                                .max(0.0);
-                        if requested_bucket_tol > 0.0 {
-                            push_threshold_assertion(
-                                spec.id,
-                                &mut threshold_assertions,
-                                &mut failures,
-                                "transient_bucket_rel_tolerance",
-                                "FEA_TRANSIENT_BUCKETING",
-                                transient_bucket_rel_tolerance,
-                                Some(requested_bucket_tol * 0.99),
-                                Some(requested_bucket_tol * 1.01 + 1.0e-12),
-                            );
-                            push_threshold_assertion(
-                                spec.id,
-                                &mut threshold_assertions,
-                                &mut failures,
-                                "transient_bucket_quality_residual",
-                                "FEA_TRANSIENT_STABILITY",
-                                diagnostic_metric(
-                                    &gpu_envelope.data,
-                                    "FEA_TRANSIENT_STABILITY",
-                                    "max_residual_norm",
-                                ),
-                                None,
-                                Some(1.0e-2),
-                            );
-                        }
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_physics_jump_ratio",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_jump_ratio,
-                            None,
-                            Some(3.5),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_physics_nonfinite_count",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_nonfinite,
-                            None,
-                            Some(0.0),
-                        );
-                    }
-                    if spec.id == "transient_shock_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_shock_physics_jump_ratio",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_jump_ratio,
-                            None,
-                            Some(4.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_shock_physics_nonfinite_count",
-                            "FEA_TRANSIENT_PHYSICS",
-                            transient_physics_nonfinite,
-                            None,
-                            Some(0.0),
-                        );
-                    }
-                    if spec.id == "thermo_mech_kickoff_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_thermal_strain_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "thermal_strain_scale",
-                            ),
-                            Some(5.0e-4),
-                            Some(5.0e-2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_thermal_load_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "thermal_load_scale",
-                            ),
-                            Some(0.5),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_effective_modulus_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "effective_modulus_scale",
-                            ),
-                            Some(0.85),
-                            Some(1.2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_material_spread_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_material_spread_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.3),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_assignment_heterogeneity_index",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "assignment_heterogeneity_index",
-                            ),
-                            Some(0.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_transient_severity",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "severity_peak",
-                            ),
-                            Some(0.0),
-                            Some(0.2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_transient_time_scale_mean",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "time_scale_mean",
-                            ),
-                            Some(0.6),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_constitutive_residual_ratio",
-                            "FEA_TM_CONSISTENCY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_CONSISTENCY",
-                                "constitutive_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_thermal_strain_energy_density_mean",
-                            "FEA_TM_CONSISTENCY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_CONSISTENCY",
-                                "thermal_strain_energy_density_mean",
-                            ),
-                            Some(0.0),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_consistency_coverage_ratio",
-                            "FEA_TM_CONSISTENCY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_CONSISTENCY",
-                                "consistency_coverage_ratio",
-                            ),
-                            Some(0.9),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_temperature_field_node_count",
-                            "FEA_TM_TEMPERATURE_FIELD",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TEMPERATURE_FIELD",
-                                "node_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_strain_temperature_residual_ratio",
-                            "FEA_TM_TEMPERATURE_FIELD",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TEMPERATURE_FIELD",
-                                "strain_temperature_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_mech_strain_temperature_coverage_ratio",
-                            "FEA_TM_TEMPERATURE_FIELD",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TEMPERATURE_FIELD",
-                                "strain_temperature_coverage_ratio",
-                            ),
-                            Some(0.9),
-                            Some(1.0),
-                        );
-                    } else if spec.id == "thermo_gradient_benign_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_benign_spread_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_material_spread_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.18),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_benign_heterogeneity",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "assignment_heterogeneity_index",
-                            ),
-                            Some(0.0),
-                            Some(0.22),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_benign_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.0),
-                            Some(0.35),
-                        );
-                    } else if spec.id == "thermo_gradient_pathological_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_pathological_spread_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_material_spread_ratio",
-                            ),
-                            Some(1.04),
-                            Some(1.55),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_pathological_heterogeneity",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "assignment_heterogeneity_index",
-                            ),
-                            Some(0.2),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_pathological_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.2),
-                            Some(1.0),
-                        );
-                    } else if spec.id == "thermo_ramp_smooth_gpu_provider"
-                        || spec.id == "thermo_ramp_smooth_field_artifact_gpu_provider"
-                    {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_constitutive_temperature_factor",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_temperature_factor",
-                            ),
-                            Some(-0.1),
-                            Some(0.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_effective_modulus_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "effective_modulus_scale",
-                            ),
-                            Some(0.85),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.2),
-                            Some(0.4),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_spatial_gradient_index",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_gradient_index",
-                            ),
-                            Some(0.0),
-                            Some(0.25),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_spatial_coverage_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_coverage_ratio",
-                            ),
-                            Some(0.35),
-                            Some(0.7),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_field_extrapolation_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_extrapolation_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.02),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_field_clamp_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_clamp_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.02),
-                        );
-                    } else if spec.id == "thermo_shock_oscillatory_gpu_provider"
-                        || spec.id == "thermo_shock_oscillatory_field_artifact_gpu_provider"
-                    {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_constitutive_temperature_factor",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_temperature_factor",
-                            ),
-                            Some(-0.2),
-                            Some(0.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_effective_modulus_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "effective_modulus_scale",
-                            ),
-                            Some(0.8),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.35),
-                            Some(0.7),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_spatial_gradient_index",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_gradient_index",
-                            ),
-                            Some(0.25),
-                            Some(0.8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_spatial_coverage_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "spatial_coverage_ratio",
-                            ),
-                            Some(0.30),
-                            Some(0.7),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_field_extrapolation_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_extrapolation_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.08),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_field_clamp_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_clamp_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.08),
-                        );
-                    } else if spec.id.starts_with("thermal_standalone_ramp_") {
+                    if spec.id.starts_with("thermal_standalone_ramp_") {
                         push_thermal_standalone_threshold_assertions(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
                             &gpu_envelope.data,
-                        );
-                    } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_joule_heating_scale",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "joule_heating_scale",
-                            ),
-                            Some(9.8),
-                            Some(10.2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conductivity_spread_ratio",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "conductivity_spread_ratio",
-                            ),
-                            Some(1.03),
-                            Some(1.12),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_transient_severity_peak",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "severity_peak",
-                            ),
-                            Some(0.98),
-                            Some(1.02),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_temporal_variation",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.08),
-                            Some(0.25),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_time_scale_mean",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "time_scale_mean",
-                            ),
-                            Some(0.82),
-                            Some(0.95),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conductive_node_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "conductive_node_count",
-                            ),
-                            Some(2.0),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_mapped_voltage_boundary_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_voltage_boundary_count",
-                            ),
-                            Some(2.0),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_topology_component_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "topology_component_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_mapped_current_source_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_current_source_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_source_boundary_alignment_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "source_boundary_alignment_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_domain_conductance_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "domain_conductance_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_mesh_backed_topology_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mesh_backed_topology_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_material_region_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "material_region_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_potential_residual_norm",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "residual_norm",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_current_balance_residual",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "current_balance_residual",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_potential_span_v",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "potential_span_v",
-                            ),
-                            Some(35.9),
-                            Some(36.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conduction_edge_count",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "edge_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_topology_coverage_ratio",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "topology_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_ohms_law_residual_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "ohms_law_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_joule_heat_balance_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "joule_heat_balance_ratio",
-                            ),
-                            Some(0.999_999),
-                            Some(1.000_001),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_potential_monotonic_edge_fraction",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "potential_monotonic_edge_fraction",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conduction_graph_coverage_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "conduction_graph_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_electro_thermal_source_coupling_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "electro_thermal_benign",
-                        );
-                    } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_joule_heating_scale",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "joule_heating_scale",
-                            ),
-                            Some(9.8),
-                            Some(10.2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conductivity_spread_ratio",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "conductivity_spread_ratio",
-                            ),
-                            Some(2.8),
-                            Some(3.6),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_transient_severity_peak",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "severity_peak",
-                            ),
-                            Some(0.9),
-                            Some(1.2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_temporal_variation",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.35),
-                            Some(0.8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_time_scale_mean",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "time_scale_mean",
-                            ),
-                            Some(0.85),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conductive_node_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "conductive_node_count",
-                            ),
-                            Some(2.0),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_mapped_voltage_boundary_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_voltage_boundary_count",
-                            ),
-                            Some(2.0),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_topology_component_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "topology_component_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_mapped_current_source_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_current_source_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_source_boundary_alignment_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "source_boundary_alignment_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_domain_conductance_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "domain_conductance_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_mesh_backed_topology_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mesh_backed_topology_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_material_region_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "material_region_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_potential_residual_norm",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "residual_norm",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_current_balance_residual",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "current_balance_residual",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_potential_span_v",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "potential_span_v",
-                            ),
-                            Some(179.9),
-                            Some(180.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conduction_edge_count",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "edge_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_topology_coverage_ratio",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "topology_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_ohms_law_residual_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "ohms_law_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_joule_heat_balance_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "joule_heat_balance_ratio",
-                            ),
-                            Some(0.999_999),
-                            Some(1.000_001),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_potential_monotonic_edge_fraction",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "potential_monotonic_edge_fraction",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conduction_graph_coverage_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "conduction_graph_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_electro_thermal_source_coupling_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "electro_thermal_pathological",
-                        );
-                    }
-                    if spec.id == "nonlinear_assembly_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_converged_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_converged_increments,
-                            Some(24.0),
-                            Some(24.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_line_search_backtracks",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_line_search_backtracks,
-                            Some(8.0),
-                            Some(12.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_total_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_total_increments,
-                            Some(24.0),
-                            Some(24.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_failed_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_failed_increments,
-                            None,
-                            Some(0.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_max_increment_norm",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_max_increment_norm,
-                            None,
-                            Some(1.0e-4),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_iteration_spike_count",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_iteration_spike_count,
-                            None,
-                            Some(2.0),
-                        );
-                    }
-                    if spec.id == "nonlinear_assembly_stress_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_converged_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_converged_increments,
-                            Some(32.0),
-                            Some(32.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_total_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_total_increments,
-                            Some(32.0),
-                            Some(32.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_failed_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_failed_increments,
-                            None,
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_max_residual_norm",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_max_residual_norm,
-                            None,
-                            Some(1.0e-5),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_max_increment_norm",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_max_increment_norm,
-                            None,
-                            Some(1.0e-4),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_line_search_backtracks",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_line_search_backtracks,
-                            Some(8.0),
-                            Some(14.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_tangent_rebuild_count",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_tangent_rebuild_count,
-                            Some(5.0),
-                            Some(10.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_iteration_spike_count",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_iteration_spike_count,
-                            None,
-                            Some(3.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_stress_stall_count",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_convergence_stall_count,
-                            None,
-                            Some(2.0),
-                        );
-                    }
-                    if spec.id == "nonlinear_softening_benchmark_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_softening_total_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_total_increments,
-                            Some(40.0),
-                            Some(40.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_softening_failed_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_failed_increments,
-                            None,
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_softening_stall_count",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_convergence_stall_count,
-                            Some(0.0),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_softening_spike_count",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_iteration_spike_count,
-                            Some(1.0),
-                            Some(4.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_softening_backtrack_bursts",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_backtrack_burst_count,
-                            Some(1.0),
-                            Some(4.0),
-                        );
-                    }
-                    if spec.id == "nonlinear_load_path_mix_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_path_mix_total_increments",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_total_increments,
-                            Some(36.0),
-                            Some(36.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_path_mix_max_backtracks_per_increment",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_max_backtracks_per_increment,
-                            Some(8.0),
-                            Some(11.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_path_mix_backtrack_bursts",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_backtrack_burst_count,
-                            Some(1.0),
-                            Some(3.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_path_mix_spike_count",
-                            "FEA_NONLINEAR_CONVERGENCE",
-                            nonlinear_iteration_spike_count,
-                            Some(0.0),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_path_mix_effective_modulus_scale",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "effective_modulus_scale",
-                            ),
-                            Some(0.93),
-                            Some(1.02),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "nonlinear_path_mix_material_spread_ratio",
-                            "FEA_TM_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_COUPLING",
-                                "constitutive_material_spread_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.08),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_nonlinear_severity",
-                            "FEA_TM_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.0),
-                            Some(0.08),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_nonlinear_time_scale_mean",
-                            "FEA_TM_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_NONLINEAR",
-                                "time_scale_mean",
-                            ),
-                            Some(0.9),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_nonlinear_field_clamp_ratio",
-                            "FEA_TM_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_NONLINEAR",
-                                "field_clamp_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.05),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_joule_heating_scale",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "joule_heating_scale",
-                            ),
-                            Some(9.8),
-                            Some(10.2),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_conductivity_spread_ratio",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "conductivity_spread_ratio",
-                            ),
-                            Some(1.3),
-                            Some(1.55),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_severity_peak",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.98),
-                            Some(1.02),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_temporal_variation",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "temporal_variation",
-                            ),
-                            Some(0.2),
-                            Some(0.45),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_time_scale_mean",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "time_scale_mean",
-                            ),
-                            Some(0.9),
-                            Some(1.05),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_severity_mean",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.9),
-                            Some(0.98),
-                        );
-                    }
-                    if spec.id == "nonlinear_plasticity_benchmark_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_nonlinear_severity_peak",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.82),
-                            Some(0.9),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_nonlinear_severity_mean",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.65),
-                            Some(0.8),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_nonlinear_load_realization_ratio",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "load_realization_ratio",
-                            ),
-                            Some(0.825),
-                            Some(0.835),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_nonlinear_load_amplification_ratio",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "load_amplification_ratio",
-                            ),
-                            Some(1.51),
-                            Some(1.525),
-                        );
-                        push_plastic_state_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "plasticity_nonlinear_state",
-                        );
-                    }
-                    if spec.id == "nonlinear_plastic_hardening_reference_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_severity_peak",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.18),
-                            Some(0.28),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_severity_mean",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.15),
-                            Some(0.25),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_load_realization_ratio",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "load_realization_ratio",
-                            ),
-                            Some(0.825),
-                            Some(0.835),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_load_amplification_ratio",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "load_amplification_ratio",
-                            ),
-                            Some(1.51),
-                            Some(1.525),
-                        );
-                        push_plastic_state_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "plasticity_hardening_reference_state",
-                        );
-                        push_plastic_known_answer_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "plasticity_hardening_reference_known",
-                        );
-                    }
-                    if spec.id == "nonlinear_plastic_hardening_reference_complex_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_complex_severity_peak",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.33),
-                            Some(0.43),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_complex_severity_mean",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.27),
-                            Some(0.36),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_complex_load_realization_ratio",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "load_realization_ratio",
-                            ),
-                            Some(0.825),
-                            Some(0.835),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "plasticity_hardening_reference_complex_load_amplification_ratio",
-                            "FEA_PLASTIC_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_PLASTIC_NONLINEAR",
-                                "load_amplification_ratio",
-                            ),
-                            Some(1.51),
-                            Some(1.525),
-                        );
-                        push_plastic_state_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "plasticity_hardening_reference_complex_state",
-                        );
-                        push_plastic_known_answer_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "plasticity_hardening_reference_complex_known",
-                        );
-                    }
-                    if spec.id == "nonlinear_contact_benchmark_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_nonlinear_severity_peak",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.92),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_nonlinear_severity_mean",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.72),
-                            Some(0.9),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_nonlinear_load_realization_ratio",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "load_realization_ratio",
-                            ),
-                            Some(0.845),
-                            Some(0.865),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_nonlinear_load_amplification_ratio",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "load_amplification_ratio",
-                            ),
-                            Some(1.4),
-                            Some(1.42),
-                        );
-                        push_contact_state_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "contact_nonlinear_state",
-                        );
-                    }
-                    if spec.id == "nonlinear_contact_frictionless_reference_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_severity_peak",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.23),
-                            Some(0.31),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_severity_mean",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.18),
-                            Some(0.28),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_load_realization_ratio",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "load_realization_ratio",
-                            ),
-                            Some(0.845),
-                            Some(0.865),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_load_amplification_ratio",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "load_amplification_ratio",
-                            ),
-                            Some(1.4),
-                            Some(1.42),
-                        );
-                        push_contact_state_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "contact_frictionless_state",
-                        );
-                        push_contact_known_answer_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "contact_frictionless_known",
-                        );
-                    }
-                    if spec.id == "nonlinear_contact_frictionless_reference_complex_gpu_provider" {
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_complex_severity_peak",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.36),
-                            Some(0.46),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_complex_severity_mean",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.3),
-                            Some(0.39),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_complex_load_realization_ratio",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "load_realization_ratio",
-                            ),
-                            Some(0.845),
-                            Some(0.865),
-                        );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "contact_frictionless_complex_load_amplification_ratio",
-                            "FEA_CONTACT_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_CONTACT_NONLINEAR",
-                                "load_amplification_ratio",
-                            ),
-                            Some(1.4),
-                            Some(1.42),
-                        );
-                        push_contact_state_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "contact_frictionless_complex_state",
-                        );
-                        push_contact_known_answer_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "contact_frictionless_complex_known",
                         );
                     }
                     if spec.id.starts_with("electromagnetic_reference_") {
@@ -8965,7 +6350,7 @@ pub(super) fn run_fixture(
                             &mut failures,
                             &gpu_envelope.data,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8979,7 +6364,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -8993,7 +6378,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9007,7 +6392,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9021,7 +6406,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9035,7 +6420,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9049,7 +6434,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9065,7 +6450,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9079,7 +6464,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9093,7 +6478,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9107,7 +6492,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9121,7 +6506,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.25),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9135,7 +6520,7 @@ pub(super) fn run_fixture(
                             Some(1.5),
                             Some(1.0e9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9151,7 +6536,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9165,7 +6550,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9179,7 +6564,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.15),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9193,7 +6578,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9207,7 +6592,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9221,7 +6606,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9235,7 +6620,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9249,7 +6634,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9263,7 +6648,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9277,7 +6662,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9291,7 +6676,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.08),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9305,7 +6690,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9319,7 +6704,7 @@ pub(super) fn run_fixture(
                             Some(0.99),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9333,7 +6718,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9347,7 +6732,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9361,7 +6746,7 @@ pub(super) fn run_fixture(
                             Some(0.99),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9375,7 +6760,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9389,7 +6774,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9403,7 +6788,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.1),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9417,7 +6802,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.02),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9431,7 +6816,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9445,7 +6830,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9459,7 +6844,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9473,7 +6858,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9487,7 +6872,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9501,7 +6886,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9515,7 +6900,7 @@ pub(super) fn run_fixture(
                             Some(0.5),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9529,7 +6914,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9543,7 +6928,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.40),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9557,7 +6942,7 @@ pub(super) fn run_fixture(
                             Some(0.12),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9571,7 +6956,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9585,7 +6970,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9599,21 +6984,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "em_homogeneous_prep_recovery_edge_count",
-                            "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_EM_MAXWELL_EDGE_TOPOLOGY",
-                                "prep_recovery_edge_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9627,7 +6998,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9641,7 +7012,7 @@ pub(super) fn run_fixture(
                             Some(3.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9655,7 +7026,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9669,7 +7040,7 @@ pub(super) fn run_fixture(
                             Some(0.5),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9683,7 +7054,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             None,
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9697,7 +7068,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9711,7 +7082,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9725,7 +7096,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9739,7 +7110,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0e-9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9753,7 +7124,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9769,7 +7140,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_heterogeneous_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9783,7 +7154,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9797,7 +7168,7 @@ pub(super) fn run_fixture(
                             Some(1.2),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9811,7 +7182,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9825,7 +7196,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9839,7 +7210,7 @@ pub(super) fn run_fixture(
                             Some(1.1),
                             Some(5.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9853,7 +7224,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9867,7 +7238,7 @@ pub(super) fn run_fixture(
                             Some(0.85),
                             Some(1.5),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9881,7 +7252,7 @@ pub(super) fn run_fixture(
                             Some(1.1),
                             Some(8.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9895,7 +7266,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9909,7 +7280,7 @@ pub(super) fn run_fixture(
                             Some(0.06),
                             Some(0.22),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9923,7 +7294,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(20.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9937,7 +7308,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9951,7 +7322,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.2),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9965,7 +7336,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9979,7 +7350,7 @@ pub(super) fn run_fixture(
                             Some(0.9),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -9993,7 +7364,7 @@ pub(super) fn run_fixture(
                             Some(10.0),
                             Some(1.0e9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10007,7 +7378,7 @@ pub(super) fn run_fixture(
                             Some(2.0),
                             Some(1.0e9),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10021,7 +7392,7 @@ pub(super) fn run_fixture(
                             Some(5.0),
                             Some(1.0e12),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10035,7 +7406,7 @@ pub(super) fn run_fixture(
                             Some(0.25),
                             Some(2.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10049,7 +7420,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(10.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10063,7 +7434,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10077,7 +7448,7 @@ pub(super) fn run_fixture(
                             Some(0.6),
                             Some(0.8),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10091,7 +7462,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10105,7 +7476,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10119,7 +7490,7 @@ pub(super) fn run_fixture(
                             Some(0.7),
                             Some(0.85),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10133,7 +7504,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10147,7 +7518,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10163,7 +7534,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_sparse_assignments_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10177,7 +7548,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10191,7 +7562,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10205,7 +7576,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10219,7 +7590,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10233,7 +7604,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10247,7 +7618,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10263,7 +7634,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_multiregion_assignments_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10277,7 +7648,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10291,7 +7662,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10305,7 +7676,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10319,7 +7690,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10333,7 +7704,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10347,7 +7718,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10363,7 +7734,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_overlap_interference_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10377,7 +7748,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10391,7 +7762,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10405,7 +7776,7 @@ pub(super) fn run_fixture(
                             Some(0.35),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10421,7 +7792,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_boundary_kernel_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10435,7 +7806,7 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10449,21 +7820,21 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.35),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_boundary_kernel_ground_anchor_effectiveness_ratio",
+                            "em_boundary_kernel_ground_selector_coverage_ratio",
                             "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                                 "ground_anchor_effectiveness_ratio",
                             ),
-                            Some(0.0),
-                            Some(0.6),
+                            Some(1.0),
+                            Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10479,7 +7850,7 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_boundary_penalty_stress_gpu_provider" {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10493,21 +7864,21 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "em_boundary_penalty_conditioning_contribution",
+                            "em_boundary_strong_constraint_penalty_ratio",
                             "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_EM_BOUNDARY_KNOWN_ANSWER",
                                 "boundary_penalty_conditioning_contribution",
                             ),
-                            Some(0.35),
-                            Some(1.0),
+                            Some(0.0),
+                            Some(0.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10521,7 +7892,7 @@ pub(super) fn run_fixture(
                             Some(0.75),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10535,7 +7906,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.95),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10553,7 +7924,7 @@ pub(super) fn run_fixture(
                     if spec.id
                         == "electromagnetic_reference_multi_region_phased_source_gpu_provider"
                     {
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10567,7 +7938,7 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10581,7 +7952,7 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.95),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10595,7 +7966,7 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(1.0),
                         );
-                        push_threshold_assertion(
+                        push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
@@ -10611,7 +7982,8 @@ pub(super) fn run_fixture(
                         );
                     }
 
-                    let gpu_primary_field_id = primary_result_field_id(spec.run_kind);
+                    let gpu_primary_field_id =
+                        primary_result_field_id(fixture_procedure_step(&model));
                     let gpu_results = analysis_results_op(
                         &gpu_envelope.data,
                         AnalysisResultsQuery {
@@ -10621,11 +7993,11 @@ pub(super) fn run_fixture(
                             include_diagnostics: false,
                             diagnostic_codes: Vec::new(),
                             include_modal_results: false,
+                            include_buckling_results: false,
                             mode_indices: Vec::new(),
                             include_transient_results: false,
                             transient_snapshot_indices: Vec::new(),
                             include_nonlinear_results: false,
-                            include_electromagnetic_results: false,
                         },
                         OperationContext::new(Some(format!("trace-results-gpu-{}", spec.id)), None),
                     );
@@ -10645,22 +8017,14 @@ pub(super) fn run_fixture(
                                 cpu_run_ms,
                                 gpu_run_ms,
                                 gpu_fallback_events,
-                                gpu_displacement_residency,
+                                published_primary_field_storage,
                                 gpu_solver_host_sync_count,
                                 gpu_solver_device_apply_k_ratio,
                                 gpu_speedup_ratio,
                                 gpu_solver_backend,
-                                gpu_transient_cache_hit_ratio,
-                                gpu_transient_cache_misses,
-                                gpu_transient_cache_entries,
                                 gpu_solver_prepared_build_ms,
                                 gpu_solver_solve_ms,
                                 gpu_solver_fallback_apply_count,
-                                prep_calibration_profile,
-                                prep_calibration_fingerprint,
-                                prep_acceptance_score,
-                                prep_acceptance_passed,
-                                prep_acceptance_fingerprint,
                                 thermo_coupling_enabled,
                                 thermo_coupling_fingerprint,
                                 thermo_constitutive_temperature_factor,
@@ -10669,22 +8033,13 @@ pub(super) fn run_fixture(
                                 thermo_assignment_heterogeneity_index,
                                 thermo_region_delta_count,
                                 thermo_spatial_coverage_ratio,
-                                thermo_field_extrapolation_ratio,
-                                thermo_field_clamp_ratio,
-                                thermo_field_artifact_id,
-                                thermo_field_artifact_approved,
-                                thermo_field_artifact_age_days,
-                                thermo_field_artifact_provenance_valid,
-                                thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 electro_thermal_coupling_enabled,
                                 electro_thermal_coupling_fingerprint,
                                 electro_joule_heating_scale,
                                 electro_conductivity_spread_ratio,
                                 electro_transient_severity,
-                                electro_transient_time_scale_mean,
                                 electro_nonlinear_severity,
-                                electro_nonlinear_time_scale_mean,
                                 plastic_nonlinear_severity,
                                 plastic_nonlinear_severity_mean,
                                 plastic_load_realization_ratio,
@@ -10693,14 +8048,11 @@ pub(super) fn run_fixture(
                                 contact_nonlinear_severity_mean,
                                 contact_load_realization_ratio,
                                 contact_load_amplification_ratio,
-                                thermal_max_residual_norm,
+                                thermal_max_relative_residual_norm,
                                 thermal_min_temperature_k,
                                 thermal_max_temperature_k,
                                 thermal_conductivity_spread_ratio,
                                 thermal_heat_capacity_spread_ratio,
-                                thermal_spatial_gradient_index,
-                                thermal_monotonic_response_fraction,
-                                thermal_response_realization_ratio,
                                 electromagnetic_enabled,
                                 electromagnetic_formulation_coverage_ratio,
                                 electromagnetic_magnetostatic_curl_curl_coverage_ratio,
@@ -10742,7 +8094,7 @@ pub(super) fn run_fixture(
                                 electromagnetic_resonance_bandwidth_hz,
                                 electromagnetic_resonance_quality_factor,
                                 electromagnetic_resonance_flux_gain,
-                                publishable,
+                                numerically_acceptable,
                                 parity,
                                 threshold_assertions,
                                 failures,
@@ -10754,15 +8106,6 @@ pub(super) fn run_fixture(
                     {
                         failures.push("fea.results contract version mismatch".to_string());
                     }
-
-                    prep_calibration_profile =
-                        gpu_results.data.summary.prep_calibration_profile.clone();
-                    prep_calibration_fingerprint =
-                        gpu_results.data.summary.prep_calibration_fingerprint;
-                    prep_acceptance_score = gpu_results.data.summary.prep_acceptance_score;
-                    prep_acceptance_passed = gpu_results.data.summary.prep_acceptance_passed;
-                    prep_acceptance_fingerprint =
-                        gpu_results.data.summary.prep_acceptance_fingerprint;
                     thermo_coupling_enabled = gpu_results.data.summary.thermo_coupling_enabled;
                     thermo_coupling_fingerprint =
                         gpu_results.data.summary.thermo_coupling_fingerprint;
@@ -10783,10 +8126,6 @@ pub(super) fn run_fixture(
                     thermo_region_delta_count = gpu_results.data.summary.thermo_region_delta_count;
                     thermo_spatial_coverage_ratio =
                         gpu_results.data.summary.thermo_spatial_coverage_ratio;
-                    thermo_field_extrapolation_ratio =
-                        gpu_results.data.summary.thermo_field_extrapolation_ratio;
-                    thermo_field_clamp_ratio = gpu_results.data.summary.thermo_field_clamp_ratio;
-                    thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
                     electro_thermal_coupling_enabled =
                         gpu_results.data.summary.electro_thermal_coupling_enabled;
@@ -10800,12 +8139,8 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electro_conductivity_spread_ratio;
                     electro_transient_severity =
                         gpu_results.data.summary.electro_transient_severity;
-                    electro_transient_time_scale_mean =
-                        gpu_results.data.summary.electro_transient_time_scale_mean;
                     electro_nonlinear_severity =
                         gpu_results.data.summary.electro_nonlinear_severity;
-                    electro_nonlinear_time_scale_mean =
-                        gpu_results.data.summary.electro_nonlinear_time_scale_mean;
                     plastic_nonlinear_severity =
                         gpu_results.data.summary.plastic_nonlinear_severity;
                     plastic_nonlinear_severity_mean =
@@ -10822,19 +8157,14 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.contact_load_realization_ratio;
                     contact_load_amplification_ratio =
                         gpu_results.data.summary.contact_load_amplification_ratio;
-                    thermal_max_residual_norm = gpu_results.data.summary.thermal_max_residual_norm;
+                    thermal_max_relative_residual_norm =
+                        gpu_results.data.summary.thermal_max_relative_residual_norm;
                     thermal_min_temperature_k = gpu_results.data.summary.thermal_min_temperature_k;
                     thermal_max_temperature_k = gpu_results.data.summary.thermal_max_temperature_k;
                     thermal_conductivity_spread_ratio =
                         gpu_results.data.summary.thermal_conductivity_spread_ratio;
                     thermal_heat_capacity_spread_ratio =
                         gpu_results.data.summary.thermal_heat_capacity_spread_ratio;
-                    thermal_spatial_gradient_index =
-                        gpu_results.data.summary.thermal_spatial_gradient_index;
-                    thermal_monotonic_response_fraction =
-                        gpu_results.data.summary.thermal_monotonic_response_fraction;
-                    thermal_response_realization_ratio =
-                        gpu_results.data.summary.thermal_response_realization_ratio;
                     electromagnetic_enabled = gpu_results.data.summary.electromagnetic_enabled;
                     electromagnetic_formulation_coverage_ratio = gpu_results
                         .data
@@ -11002,11 +8332,11 @@ pub(super) fn run_fixture(
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
+                                include_buckling_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
                                 include_nonlinear_results: false,
-                                include_electromagnetic_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-gpu-by-id-{}", spec.id)),
@@ -11049,26 +8379,16 @@ pub(super) fn run_fixture(
                         }
                     }
 
-                    if let Some(expectation) = spec.residency_expectation {
+                    if let Some(expectation) = spec.published_field_storage_expectation {
                         match expectation {
-                            ResidencyExpectation::DeviceRef => {
-                                if !matches!(
-                                    &gpu_results.data.fields[0].values,
-                                    AnalysisFieldValues::DeviceRef(_)
-                                ) {
-                                    failures.push(
-                                        "expected gpu displacement device_ref residency"
-                                            .to_string(),
-                                    );
-                                }
-                            }
-                            ResidencyExpectation::HostFallback => {
+                            PublishedFieldStorageExpectation::HostF64 => {
                                 if !matches!(
                                     &gpu_results.data.fields[0].values,
                                     AnalysisFieldValues::HostF64(_)
                                 ) {
                                     failures.push(
-                                        "expected gpu displacement host_f64 fallback".to_string(),
+                                        "expected authoritative host_f64 published field storage"
+                                            .to_string(),
                                     );
                                 }
                             }
@@ -11076,7 +8396,8 @@ pub(super) fn run_fixture(
                     }
 
                     if let Some(tol) = spec.parity_tolerance {
-                        let cpu_primary_field_id = primary_result_field_id(spec.run_kind);
+                        let cpu_primary_field_id =
+                            primary_result_field_id(fixture_procedure_step(&model));
                         let cpu_results = analysis_results_op(
                             &cpu_envelope.data,
                             AnalysisResultsQuery {
@@ -11085,11 +8406,11 @@ pub(super) fn run_fixture(
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
+                                include_buckling_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
                                 include_nonlinear_results: false,
-                                include_electromagnetic_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-cpu-{}", spec.id)),
@@ -11112,22 +8433,14 @@ pub(super) fn run_fixture(
                                     cpu_run_ms,
                                     gpu_run_ms,
                                     gpu_fallback_events,
-                                    gpu_displacement_residency,
+                                    published_primary_field_storage,
                                     gpu_solver_host_sync_count,
                                     gpu_solver_device_apply_k_ratio,
                                     gpu_speedup_ratio,
                                     gpu_solver_backend,
-                                    gpu_transient_cache_hit_ratio,
-                                    gpu_transient_cache_misses,
-                                    gpu_transient_cache_entries,
                                     gpu_solver_prepared_build_ms,
                                     gpu_solver_solve_ms,
                                     gpu_solver_fallback_apply_count,
-                                    prep_calibration_profile,
-                                    prep_calibration_fingerprint,
-                                    prep_acceptance_score,
-                                    prep_acceptance_passed,
-                                    prep_acceptance_fingerprint,
                                     thermo_coupling_enabled,
                                     thermo_coupling_fingerprint,
                                     thermo_constitutive_temperature_factor,
@@ -11136,22 +8449,13 @@ pub(super) fn run_fixture(
                                     thermo_assignment_heterogeneity_index,
                                     thermo_region_delta_count,
                                     thermo_spatial_coverage_ratio,
-                                    thermo_field_extrapolation_ratio,
-                                    thermo_field_clamp_ratio,
-                                    thermo_field_artifact_id,
-                                    thermo_field_artifact_approved,
-                                    thermo_field_artifact_age_days,
-                                    thermo_field_artifact_provenance_valid,
-                                    thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     electro_thermal_coupling_enabled,
                                     electro_thermal_coupling_fingerprint,
                                     electro_joule_heating_scale,
                                     electro_conductivity_spread_ratio,
                                     electro_transient_severity,
-                                    electro_transient_time_scale_mean,
                                     electro_nonlinear_severity,
-                                    electro_nonlinear_time_scale_mean,
                                     plastic_nonlinear_severity,
                                     plastic_nonlinear_severity_mean,
                                     plastic_load_realization_ratio,
@@ -11160,14 +8464,11 @@ pub(super) fn run_fixture(
                                     contact_nonlinear_severity_mean,
                                     contact_load_realization_ratio,
                                     contact_load_amplification_ratio,
-                                    thermal_max_residual_norm,
+                                    thermal_max_relative_residual_norm,
                                     thermal_min_temperature_k,
                                     thermal_max_temperature_k,
                                     thermal_conductivity_spread_ratio,
                                     thermal_heat_capacity_spread_ratio,
-                                    thermal_spatial_gradient_index,
-                                    thermal_monotonic_response_fraction,
-                                    thermal_response_realization_ratio,
                                     electromagnetic_enabled,
                                     electromagnetic_formulation_coverage_ratio,
                                     electromagnetic_magnetostatic_curl_curl_coverage_ratio,
@@ -11209,7 +8510,7 @@ pub(super) fn run_fixture(
                                     electromagnetic_resonance_bandwidth_hz,
                                     electromagnetic_resonance_quality_factor,
                                     electromagnetic_resonance_flux_gain,
-                                    publishable,
+                                    numerically_acceptable,
                                     parity,
                                     threshold_assertions,
                                     failures,
@@ -11248,30 +8549,16 @@ pub(super) fn run_fixture(
                 Err(err) => {
                     run_error_code = Some(err.error_code.clone());
                     failures.push(format!(
-                        "unexpected gpu run failure for fixture {}: {}",
-                        spec.id, err.error_code
+                        "unexpected gpu run failure for fixture {}: {}: {}",
+                        spec.id, err.error_code, err.message
                     ));
                 }
             }
         }
     }
 
-    if let Some(expected_run_error) = spec.expect_run_error {
-        let result = run_fixture_cpu(spec, &model);
-        match result {
-            Ok(_) => failures.push(format!(
-                "expected run error code {expected_run_error}, but run succeeded"
-            )),
-            Err(err) => {
-                run_error_code = Some(err.error_code.clone());
-                if err.error_code != expected_run_error {
-                    failures.push(format!(
-                        "run error mismatch: expected {expected_run_error}, got {}",
-                        err.error_code
-                    ));
-                }
-            }
-        }
+    if spec.expect_run_error.is_some() {
+        run_error_code = rejection::check(spec, &model, solver_mesh_artifact_path, &mut failures);
     }
 
     FixtureRunRecord {
@@ -11283,22 +8570,14 @@ pub(super) fn run_fixture(
         cpu_run_ms,
         gpu_run_ms,
         gpu_fallback_events,
-        gpu_displacement_residency,
+        published_primary_field_storage,
         gpu_solver_host_sync_count,
         gpu_solver_device_apply_k_ratio,
         gpu_speedup_ratio,
         gpu_solver_backend,
-        gpu_transient_cache_hit_ratio,
-        gpu_transient_cache_misses,
-        gpu_transient_cache_entries,
         gpu_solver_prepared_build_ms,
         gpu_solver_solve_ms,
         gpu_solver_fallback_apply_count,
-        prep_calibration_profile,
-        prep_calibration_fingerprint,
-        prep_acceptance_score,
-        prep_acceptance_passed,
-        prep_acceptance_fingerprint,
         thermo_coupling_enabled,
         thermo_coupling_fingerprint,
         thermo_constitutive_temperature_factor,
@@ -11307,22 +8586,13 @@ pub(super) fn run_fixture(
         thermo_assignment_heterogeneity_index,
         thermo_region_delta_count,
         thermo_spatial_coverage_ratio,
-        thermo_field_extrapolation_ratio,
-        thermo_field_clamp_ratio,
-        thermo_field_artifact_id,
-        thermo_field_artifact_approved,
-        thermo_field_artifact_age_days,
-        thermo_field_artifact_provenance_valid,
-        thermo_transient_severity,
         thermo_nonlinear_severity,
         electro_thermal_coupling_enabled,
         electro_thermal_coupling_fingerprint,
         electro_joule_heating_scale,
         electro_conductivity_spread_ratio,
         electro_transient_severity,
-        electro_transient_time_scale_mean,
         electro_nonlinear_severity,
-        electro_nonlinear_time_scale_mean,
         plastic_nonlinear_severity,
         plastic_nonlinear_severity_mean,
         plastic_load_realization_ratio,
@@ -11331,14 +8601,11 @@ pub(super) fn run_fixture(
         contact_nonlinear_severity_mean,
         contact_load_realization_ratio,
         contact_load_amplification_ratio,
-        thermal_max_residual_norm,
+        thermal_max_relative_residual_norm,
         thermal_min_temperature_k,
         thermal_max_temperature_k,
         thermal_conductivity_spread_ratio,
         thermal_heat_capacity_spread_ratio,
-        thermal_spatial_gradient_index,
-        thermal_monotonic_response_fraction,
-        thermal_response_realization_ratio,
         electromagnetic_enabled,
         electromagnetic_formulation_coverage_ratio,
         electromagnetic_magnetostatic_curl_curl_coverage_ratio,
@@ -11380,7 +8647,7 @@ pub(super) fn run_fixture(
         electromagnetic_resonance_bandwidth_hz,
         electromagnetic_resonance_quality_factor,
         electromagnetic_resonance_flux_gain,
-        publishable,
+        numerically_acceptable,
         parity,
         threshold_assertions,
         failures,

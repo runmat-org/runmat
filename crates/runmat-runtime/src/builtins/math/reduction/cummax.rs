@@ -1,16 +1,14 @@
 //! MATLAB-compatible `cummax` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{
-    GpuTensorHandle, ProviderCummaxResult, ProviderNanMode, ProviderScanDirection,
-};
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+use crate::context::RuntimeContext;
+use crate::execution::RootedValueLease;
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, CumulativeKind, CumulativeMissingMode as CummaxNanMode,
+    CumulativeScanDirection as CummaxDirection, CUMMAX_DESCRIPTOR, CUMMAX_ERROR_INTERNAL,
+    CUMMAX_ERROR_INVALID_ARGUMENT, CUMMAX_ERROR_INVALID_INPUT,
+    CUMMAX_GPU_NANFLAG_EXTENSION as GPU_NANFLAG_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -23,266 +21,11 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cummax";
 
-const GPU_NANFLAG_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cummax-gpu-nanflag",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cummax with an explicit missing-value flag on a GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CummaxGpuNanflagExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_NANFLAG_EXTENSION];
-
-fn cummax_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    cumulative_numeric_type(args, ctx)
-}
-
-const CUMMAX_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cumulative maximum values.",
-}];
-
-const CUMMAX_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar or array.",
-};
-
-const CUMMAX_PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "dim",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("[]"),
-    description: "Dimension selector (placeholder [] keeps default dimension).",
-};
-
-const CUMMAX_PARAM_DIRECTION: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "direction",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"forward\""),
-    description: "Scan direction: \"forward\" or \"reverse\".",
-};
-
-const CUMMAX_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "nanflag",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"includenan\""),
-    description:
-        "Missing-value mode: \"includenan\"/\"includemissing\" or \"omitnan\"/\"omitmissing\".",
-};
-
-const CUMMAX_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [CUMMAX_PARAM_A];
-const CUMMAX_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [CUMMAX_PARAM_A, CUMMAX_PARAM_DIM];
-const CUMMAX_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] =
-    [CUMMAX_PARAM_A, CUMMAX_PARAM_DIRECTION];
-const CUMMAX_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [CUMMAX_PARAM_A, CUMMAX_PARAM_NANFLAG];
-const CUMMAX_INPUTS_DIM_DIRECTION: [BuiltinParamDescriptor; 3] =
-    [CUMMAX_PARAM_A, CUMMAX_PARAM_DIM, CUMMAX_PARAM_DIRECTION];
-const CUMMAX_INPUTS_DIRECTION_DIM: [BuiltinParamDescriptor; 3] =
-    [CUMMAX_PARAM_A, CUMMAX_PARAM_DIRECTION, CUMMAX_PARAM_DIM];
-const CUMMAX_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [CUMMAX_PARAM_A, CUMMAX_PARAM_DIM, CUMMAX_PARAM_NANFLAG];
-const CUMMAX_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] =
-    [CUMMAX_PARAM_A, CUMMAX_PARAM_NANFLAG, CUMMAX_PARAM_DIM];
-const CUMMAX_INPUTS_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 3] =
-    [CUMMAX_PARAM_A, CUMMAX_PARAM_DIRECTION, CUMMAX_PARAM_NANFLAG];
-const CUMMAX_INPUTS_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 3] =
-    [CUMMAX_PARAM_A, CUMMAX_PARAM_NANFLAG, CUMMAX_PARAM_DIRECTION];
-const CUMMAX_INPUTS_DIM_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 4] = [
-    CUMMAX_PARAM_A,
-    CUMMAX_PARAM_DIM,
-    CUMMAX_PARAM_DIRECTION,
-    CUMMAX_PARAM_NANFLAG,
-];
-const CUMMAX_INPUTS_DIM_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 4] = [
-    CUMMAX_PARAM_A,
-    CUMMAX_PARAM_DIM,
-    CUMMAX_PARAM_NANFLAG,
-    CUMMAX_PARAM_DIRECTION,
-];
-const CUMMAX_INPUTS_DIRECTION_DIM_NANFLAG: [BuiltinParamDescriptor; 4] = [
-    CUMMAX_PARAM_A,
-    CUMMAX_PARAM_DIRECTION,
-    CUMMAX_PARAM_DIM,
-    CUMMAX_PARAM_NANFLAG,
-];
-const CUMMAX_INPUTS_DIRECTION_NANFLAG_DIM: [BuiltinParamDescriptor; 4] = [
-    CUMMAX_PARAM_A,
-    CUMMAX_PARAM_DIRECTION,
-    CUMMAX_PARAM_NANFLAG,
-    CUMMAX_PARAM_DIM,
-];
-const CUMMAX_INPUTS_NANFLAG_DIM_DIRECTION: [BuiltinParamDescriptor; 4] = [
-    CUMMAX_PARAM_A,
-    CUMMAX_PARAM_NANFLAG,
-    CUMMAX_PARAM_DIM,
-    CUMMAX_PARAM_DIRECTION,
-];
-const CUMMAX_INPUTS_NANFLAG_DIRECTION_DIM: [BuiltinParamDescriptor; 4] = [
-    CUMMAX_PARAM_A,
-    CUMMAX_PARAM_NANFLAG,
-    CUMMAX_PARAM_DIRECTION,
-    CUMMAX_PARAM_DIM,
-];
-
-const CUMMAX_SIGNATURES: [BuiltinSignatureDescriptor; 16] = [
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A)",
-        inputs: &CUMMAX_INPUTS_CORE,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, dim)",
-        inputs: &CUMMAX_INPUTS_DIM,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, direction)",
-        inputs: &CUMMAX_INPUTS_DIRECTION,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, nanflag)",
-        inputs: &CUMMAX_INPUTS_NANFLAG,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, dim, direction)",
-        inputs: &CUMMAX_INPUTS_DIM_DIRECTION,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, direction, dim)",
-        inputs: &CUMMAX_INPUTS_DIRECTION_DIM,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, dim, nanflag)",
-        inputs: &CUMMAX_INPUTS_DIM_NANFLAG,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, nanflag, dim)",
-        inputs: &CUMMAX_INPUTS_NANFLAG_DIM,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, direction, nanflag)",
-        inputs: &CUMMAX_INPUTS_DIRECTION_NANFLAG,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, nanflag, direction)",
-        inputs: &CUMMAX_INPUTS_NANFLAG_DIRECTION,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, dim, direction, nanflag)",
-        inputs: &CUMMAX_INPUTS_DIM_DIRECTION_NANFLAG,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, dim, nanflag, direction)",
-        inputs: &CUMMAX_INPUTS_DIM_NANFLAG_DIRECTION,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, direction, dim, nanflag)",
-        inputs: &CUMMAX_INPUTS_DIRECTION_DIM_NANFLAG,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, direction, nanflag, dim)",
-        inputs: &CUMMAX_INPUTS_DIRECTION_NANFLAG_DIM,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, nanflag, dim, direction)",
-        inputs: &CUMMAX_INPUTS_NANFLAG_DIM_DIRECTION,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = cummax(A, nanflag, direction, dim)",
-        inputs: &CUMMAX_INPUTS_NANFLAG_DIRECTION_DIM,
-        outputs: &CUMMAX_OUTPUT_M,
-    },
-];
-
-const CUMMAX_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMMAX.INVALID_ARGUMENT",
-    identifier: Some("RunMat:cummax:InvalidArgument"),
-    when: "Dimension, direction, or missing-value argument grammar is invalid.",
-    message: "cummax: invalid argument",
-};
-
-const CUMMAX_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMMAX.INVALID_INPUT",
-    identifier: Some("RunMat:cummax:InvalidInput"),
-    when: "Input value type is unsupported for cumulative maximum reduction.",
-    message: "cummax: invalid input",
-};
-
-const CUMMAX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CUMMAX.INTERNAL",
-    identifier: Some("RunMat:cummax:Internal"),
-    when: "Reduction execution fails due to conversion, provider, or allocation operations.",
-    message: "cummax: internal reduction failure",
-};
-
-const CUMMAX_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    CUMMAX_ERROR_INVALID_ARGUMENT,
-    CUMMAX_ERROR_INVALID_INPUT,
-    CUMMAX_ERROR_INTERNAL,
-];
-
-pub const CUMMAX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CUMMAX_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CUMMAX_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Ordinary real arrays accept all eight integer classes; complex-integer ordering remains a separately tracked conformance question.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The optional positive scalar dimension is decoded exactly from typed integer or integer-valued floating storage.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "M = cummax(A, dim, direction, nanflag)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Cumulative maximum preserves integer class and exact shape in forward or reverse direction; the compatibility target exposes one public value output and rejects GPU nanflag, so internal/provider indices remain private and RunMat GPU nanflag support is mode-gated.",
-    }];
-
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
+use crate::builtins::common::tensor;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::cummax")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -298,12 +41,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: true,
     notes:
-        "Providers may compute internal running-selection indices, but the public builtin exposes only cumulative values; the runtime gathers to host when hooks or options are unsupported.",
+        "Providers return cumulative values and optional public double indices. A certified no-attempt permits only admitted automatic host fallback; execution failures are terminal.",
 };
-
-fn cummax_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    cummax_error_with_message(error.message, error)
-}
 
 fn cummax_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -338,18 +77,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner currently lowers cummax to the runtime implementation; providers can substitute specialised scan kernels when available.",
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CummaxDirection {
-    Forward,
-    Reverse,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CummaxNanMode {
-    Include,
-    Omit,
-}
-
 /// Evaluation artifact returned by `cummax` that carries both values and indices.
 #[derive(Debug, Clone)]
 pub struct CummaxEvaluation {
@@ -376,181 +103,122 @@ impl CummaxEvaluation {
 
 #[runtime_builtin(
     name = "cummax",
-    category = "math/reduction",
-    summary = "Compute cumulative maxima.",
-    keywords = "cummax,cumulative maximum,running maximum,reverse,omitnan,gpu",
-    accel = "reduction",
-    type_resolver(cummax_type),
-    descriptor(crate::builtins::math::reduction::cummax::CUMMAX_DESCRIPTOR),
-    extensions(crate::builtins::math::reduction::cummax::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::reduction::cummax::INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::math::reduction::cummax"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::math::reduction::cummax",
+    context = true
 )]
-async fn cummax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count > 1 {
-            return Err(cummax_error_with_detail(
-                &CUMMAX_ERROR_INVALID_ARGUMENT,
-                "cummax returns exactly one output",
-            ));
-        }
-        return Ok(Value::OutputList(vec![eval.into_value()]));
-    }
-    Ok(eval.into_value())
+async fn cummax_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let _roots = super::cumulative::admission::roots(
+        runtime.as_ref(),
+        std::iter::once(&value).chain(rest.iter()),
+    )?;
+    crate::output_count::validate_bounded_outputs(
+        &CUMMAX_DESCRIPTOR,
+        &CUMMAX_ERROR_INVALID_ARGUMENT,
+        NAME,
+    )?;
+    let parsed = admitted_controls(&value, rest.view())?;
+    let publication =
+        super::cumulative::output::Publication::admit(CumulativeKind::Maximum, runtime.as_ref())?;
+    let result = evaluate_parsed(value, parsed, runtime.as_ref(), publication.demand()).await?;
+    let (values, indices) = result.into_pair();
+    publication.finish(values, indices)
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CummaxEvaluation> {
-    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
-        return Err(cummax_error_with_detail(
-            &CUMMAX_ERROR_INVALID_INPUT,
-            "operations involving complex numbers with integer types are not supported",
-        ));
-    }
-    let (dim, direction, nan_mode, nanflag_explicit) = parse_arguments(rest)?;
-    if matches!(&value, Value::GpuTensor(_)) && nanflag_explicit {
+    let _roots = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
+        .map_err(|e| e.into_runtime_error())?;
+    let parsed = admitted_controls(&value, FunctionArgumentView::from_slice(rest))?;
+    evaluate_parsed(
+        value,
+        parsed,
+        None,
+        runmat_accelerate_api::ProviderExtremaDemand::ValuesAndIndices,
+    )
+    .await
+}
+fn admitted_controls(
+    value: &Value,
+    rest: FunctionArgumentView<'_>,
+) -> BuiltinResult<super::cumulative::options::Options> {
+    super::cumulative::admission::input(CumulativeKind::Maximum, value)?;
+    let parsed = super::cumulative::options::parse(rest)
+        .map_err(|e| cummax_error_with_detail(&CUMMAX_ERROR_INVALID_ARGUMENT, e))?;
+    if matches!(value, Value::GpuTensor(_)) && parsed.explicit_missing {
         crate::compatibility::ensure_builtin_extension_enabled(&GPU_NANFLAG_EXTENSION, NAME)?;
     }
+    Ok(parsed)
+}
+async fn evaluate_parsed(
+    value: Value,
+    parsed: super::cumulative::options::Options,
+    runtime: Option<&RuntimeContext>,
+    demand: runmat_accelerate_api::ProviderExtremaDemand,
+) -> BuiltinResult<CummaxEvaluation> {
     match value {
-        Value::GpuTensor(handle) => cummax_gpu(handle, dim, direction, nan_mode).await,
-        Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cummax_internal_error(&e))?;
-            let target_dim = dim.unwrap_or(1);
-            let (values, indices) =
-                cummax_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
-            Ok(CummaxEvaluation {
-                values: complex_tensor_into_value(values),
-                indices: tensor::tensor_into_value(indices),
-            })
+        Value::GpuTensor(handle) => {
+            cummax_gpu(
+                handle,
+                parsed.dimension,
+                parsed.direction,
+                parsed.missing,
+                demand,
+                runtime,
+            )
+            .await
         }
-        Value::ComplexTensor(ct) => {
-            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&ct.shape));
-            let (values, indices) = cummax_complex_tensor(&ct, target_dim, direction, nan_mode)?;
-            Ok(CummaxEvaluation {
-                values: complex_tensor_into_value(values),
-                indices: tensor::tensor_into_value(indices),
-            })
+        other => {
+            host_value(
+                other,
+                parsed.dimension,
+                parsed.direction,
+                parsed.missing,
+                runtime,
+            )
+            .await
+        }
+    }
+}
+
+async fn host_value(
+    value: Value,
+    dim: Option<usize>,
+    direction: CummaxDirection,
+    nan_mode: CummaxNanMode,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<CummaxEvaluation> {
+    super::cumulative::admission::host(CumulativeKind::Maximum, runtime)?;
+    match value {
+        Value::Complex(re, im) => {
+            let tensor =
+                ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(cummax_internal_error)?;
+            host_complex(&tensor, dim.unwrap_or(1), direction, nan_mode, runtime).await
+        }
+        Value::ComplexTensor(tensor) => {
+            let dimension = dim.unwrap_or_else(|| default_dimension_from_shape(tensor.shape()));
+            host_complex(&tensor, dimension, direction, nan_mode, runtime).await
         }
         other => cummax_host(other, dim, direction, nan_mode),
     }
 }
-
-fn parse_arguments(
-    args: &[Value],
-) -> BuiltinResult<(Option<usize>, CummaxDirection, CummaxNanMode, bool)> {
-    if args.len() > 4 {
-        return Err(cummax_error(&CUMMAX_ERROR_INVALID_ARGUMENT));
-    }
-
-    let mut dim: Option<usize> = None;
-    let mut direction = CummaxDirection::Forward;
-    let mut direction_set = false;
-    let mut nan_mode = CummaxNanMode::Include;
-    let mut nan_set = false;
-
-    for value in args {
-        match value {
-            Value::Int(_) | Value::Num(_) => {
-                if dim.is_some() {
-                    return Err(cummax_error_with_detail(
-                        &CUMMAX_ERROR_INVALID_ARGUMENT,
-                        "dimension specified more than once",
-                    ));
-                }
-                dim = Some(tensor::parse_dimension(value, "cummax").map_err(|err| {
-                    cummax_error_with_detail(&CUMMAX_ERROR_INVALID_ARGUMENT, err)
-                })?);
-            }
-            Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-                if dim.is_some() {
-                    return Err(cummax_error_with_detail(
-                        &CUMMAX_ERROR_INVALID_ARGUMENT,
-                        "dimension specified more than once",
-                    ));
-                }
-                dim = Some(tensor::parse_dimension(value, "cummax").map_err(|err| {
-                    cummax_error_with_detail(&CUMMAX_ERROR_INVALID_ARGUMENT, err)
-                })?);
-            }
-            Value::Tensor(t) if tensor::tensor_element_len(t) == 0 => {
-                // MATLAB allows [] placeholders; ignore them.
-            }
-            Value::LogicalArray(l) if l.data.is_empty() => {}
-            _ => {
-                if let Some(text) = tensor::value_to_string(value) {
-                    let keyword = text.trim().to_ascii_lowercase();
-                    match keyword.as_str() {
-                        "forward" => {
-                            if direction_set {
-                                return Err(cummax_error_with_detail(
-                                    &CUMMAX_ERROR_INVALID_ARGUMENT,
-                                    "direction specified more than once",
-                                ));
-                            }
-                            direction = CummaxDirection::Forward;
-                            direction_set = true;
-                        }
-                        "reverse" => {
-                            if direction_set {
-                                return Err(cummax_error_with_detail(
-                                    &CUMMAX_ERROR_INVALID_ARGUMENT,
-                                    "direction specified more than once",
-                                ));
-                            }
-                            direction = CummaxDirection::Reverse;
-                            direction_set = true;
-                        }
-                        "omitnan" | "omitmissing" => {
-                            if nan_set {
-                                return Err(cummax_error_with_detail(
-                                    &CUMMAX_ERROR_INVALID_ARGUMENT,
-                                    "missing-value handling specified more than once",
-                                ));
-                            }
-                            nan_mode = CummaxNanMode::Omit;
-                            nan_set = true;
-                        }
-                        "includenan" | "includemissing" => {
-                            if nan_set {
-                                return Err(cummax_error_with_detail(
-                                    &CUMMAX_ERROR_INVALID_ARGUMENT,
-                                    "missing-value handling specified more than once",
-                                ));
-                            }
-                            nan_mode = CummaxNanMode::Include;
-                            nan_set = true;
-                        }
-                        "" => {
-                            return Err(cummax_error_with_detail(
-                                &CUMMAX_ERROR_INVALID_ARGUMENT,
-                                "empty string option is not supported",
-                            ));
-                        }
-                        other => {
-                            return Err(cummax_error_with_detail(
-                                &CUMMAX_ERROR_INVALID_ARGUMENT,
-                                format!("unrecognised option '{other}'"),
-                            ));
-                        }
-                    }
-                } else {
-                    return Err(cummax_error_with_detail(
-                        &CUMMAX_ERROR_INVALID_ARGUMENT,
-                        format!("unsupported argument type {value:?}"),
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok((dim, direction, nan_mode, nan_set))
+async fn host_complex(
+    tensor: &ComplexTensor,
+    dimension: usize,
+    direction: CummaxDirection,
+    nan_mode: CummaxNanMode,
+    _runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<CummaxEvaluation> {
+    let (values, indices) = cummax_complex_tensor(tensor, dimension, direction, nan_mode)?;
+    Ok(CummaxEvaluation {
+        values: complex_tensor_into_value(values),
+        indices: tensor::tensor_into_value(indices),
+    })
 }
-
 fn cummax_host(
     value: Value,
     dim: Option<usize>,
@@ -567,7 +235,7 @@ fn cummax_host(
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
             integer_cummax(
                 tensor.integer_storage().expect("checked integer storage"),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 target_dim,
                 direction,
             )
@@ -612,7 +280,7 @@ fn integer_cummax(
         },
         crate::builtins::math::reduction::integer_native::CumulativeExtremaDirection::Max,
     )
-    .map_err(|error| cummax_internal_error(&error))?;
+    .map_err(cummax_internal_error)?;
     Ok(CummaxEvaluation {
         values: result.values,
         indices: result.indices,
@@ -624,85 +292,51 @@ async fn cummax_gpu(
     dim: Option<usize>,
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
+    demand: runmat_accelerate_api::ProviderExtremaDemand,
+    runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<CummaxEvaluation> {
-    if let Some(target) = dim {
-        if target == 0 {
-            return Err(cummax_error_with_detail(
-                &CUMMAX_ERROR_INVALID_ARGUMENT,
-                "dimension must be >= 1",
-            ));
-        }
-    }
-
-    let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
-    if target_dim == 0 {
+    let target = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
+    if target == 0 {
         return Err(cummax_error_with_detail(
             &CUMMAX_ERROR_INVALID_ARGUMENT,
-            "dimension must be >= 1",
+            "dimension must be positive",
         ));
     }
-
-    if target_dim > handle.shape.len() {
-        let indices = ones_indices(&handle.shape)?;
+    if target > handle.shape().len() {
+        super::cumulative::provider::identity(CumulativeKind::Maximum, &handle, runtime)?;
+        super::cumulative::admission::host(CumulativeKind::Maximum, runtime)?;
+        let indices = ones_indices(handle.shape())?;
         return Ok(CummaxEvaluation {
             values: Value::GpuTensor(handle),
             indices: tensor::tensor_into_value(indices),
         });
     }
-
-    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let provider_direction = match direction {
-            CummaxDirection::Forward => ProviderScanDirection::Forward,
-            CummaxDirection::Reverse => ProviderScanDirection::Reverse,
-        };
-        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-            cummax_error_with_detail(
-                &CUMMAX_ERROR_INVALID_INPUT,
-                "cummax: native integer gpuArray requires an acceleration provider",
-            )
-        })?;
-        let ProviderCummaxResult { values, indices } = provider
-            .integer_cummax_scan(&handle, target_dim - 1, provider_direction)
-            .map_err(|err| cummax_internal_error(format!("cummax: {err}")))?;
-        return Ok(CummaxEvaluation {
-            values: Value::GpuTensor(values),
-            indices: Value::GpuTensor(indices),
-        });
-    }
-
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        let zero_based_dim = target_dim.saturating_sub(1);
-        if zero_based_dim < handle.shape.len() {
-            let provider_direction = match direction {
-                CummaxDirection::Forward => ProviderScanDirection::Forward,
-                CummaxDirection::Reverse => ProviderScanDirection::Reverse,
-            };
-            let provider_nan_mode = match nan_mode {
-                CummaxNanMode::Include => ProviderNanMode::Include,
-                CummaxNanMode::Omit => ProviderNanMode::Omit,
-            };
-            if let Ok(ProviderCummaxResult { values, indices }) = provider.cummax_scan(
-                &handle,
-                zero_based_dim,
-                provider_direction,
-                provider_nan_mode,
-            ) {
-                return Ok(CummaxEvaluation {
+    let result = super::cumulative::provider::execute(
+        CumulativeKind::Maximum,
+        &handle,
+        target - 1,
+        (direction, nan_mode),
+        demand,
+        runtime,
+    )
+    .await?;
+    if let Some(result) = result {
+        return match result {
+            super::cumulative::provider::ResultValue::Pair { values, indices } => {
+                Ok(CummaxEvaluation {
                     values: Value::GpuTensor(values),
                     indices: Value::GpuTensor(indices),
-                });
+                })
             }
-        }
+            other => Err(other.reject(super::cumulative::failure(
+                CumulativeKind::Maximum,
+                "provider returned an invalid scan result family",
+            ))),
+        };
     }
-
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|err| cummax_internal_error(err.message()))?;
-    let (values, indices) = cummax_tensor(tensor, target_dim, direction, nan_mode)?;
-    Ok(CummaxEvaluation {
-        values: tensor::tensor_into_value(values),
-        indices: tensor::tensor_into_value(indices),
-    })
+    let value =
+        super::cumulative::provider::fallback(CumulativeKind::Maximum, &handle, runtime).await?;
+    host_value(value, Some(target), direction, nan_mode, runtime).await
 }
 
 fn cummax_tensor(
@@ -711,10 +345,10 @@ fn cummax_tensor(
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
 ) -> BuiltinResult<(Tensor, Tensor)> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
-        .map_err(|error| cummax_internal_error(&error))?;
+        .map_err(cummax_internal_error)?;
     floating_cumulative_extrema::cumulative_extrema(
         storage,
         shape,
@@ -740,7 +374,7 @@ fn cummax_complex_tensor(
 ) -> BuiltinResult<(ComplexTensor, Tensor)> {
     complex_cumulative_extrema::cumulative_extrema(
         tensor.clone().into_complex_storage(),
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
         dim,
         match direction {
             CummaxDirection::Forward => complex_cumulative_extrema::Direction::Forward,
@@ -770,11 +404,11 @@ fn ones_indices(shape: &[usize]) -> BuiltinResult<Tensor> {
     } else {
         vec![1.0f64; len]
     };
-    Tensor::new(data, shape.to_vec()).map_err(|e| cummax_internal_error(&e))
+    Tensor::new(data, shape.to_vec()).map_err(cummax_internal_error)
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -795,22 +429,6 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerStorage, NumericStorage};
 
-    #[test]
-    fn cummax_type_keeps_shape() {
-        let out = cummax_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
-            }
-        );
-    }
-
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CummaxEvaluation> {
         block_on(super::evaluate(value, rest))
     }
@@ -826,14 +444,20 @@ pub(crate) mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"M = cummax(A)"));
-        assert!(labels.contains(&"M = cummax(A, dim)"));
-        assert!(labels.contains(&"M = cummax(A, direction)"));
-        assert!(labels.contains(&"M = cummax(A, nanflag)"));
-        assert!(labels.contains(&"M = cummax(A, dim, direction, nanflag)"));
+        assert!(labels.contains(&"[M, I] = cummax(A)"));
+        assert!(labels.contains(&"[M, I] = cummax(A, dim)"));
+        assert!(labels.contains(&"[M, I] = cummax(A, direction)"));
+        assert!(labels.contains(&"[M, I] = cummax(A, nanflag)"));
+        assert!(labels.contains(&"[M, I] = cummax(A, dim, direction, nanflag)"));
         assert_eq!(labels.len(), 16);
-        assert!(labels.iter().all(|label| !label.contains("[M, I]")));
-        assert_eq!(CUMMAX_DESCRIPTOR.output_mode, BuiltinOutputMode::Fixed);
+        assert!(CUMMAX_DESCRIPTOR
+            .signatures
+            .iter()
+            .all(|signature| signature.outputs.len() == 2));
+        assert_eq!(
+            CUMMAX_DESCRIPTOR.output_mode,
+            runmat_builtins::BuiltinOutputMode::ByRequestedOutputCount
+        );
         assert!(CUMMAX_DESCRIPTOR
             .errors
             .iter()
@@ -849,9 +473,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cummax_rejects_a_second_public_output() {
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let error = block_on(super::cummax_builtin(Value::Num(7.0), Vec::new())).unwrap_err();
+    fn cummax_rejects_a_third_public_output() {
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
+        let error = block_on(super::cummax_builtin(
+            None,
+            Value::Num(7.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),
             Some("RunMat:cummax:InvalidArgument")
@@ -870,7 +499,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.complex_storage(),
-            &runmat_value::ComplexStorage::F32(vec![(3.0, 0.0), (3.0, 0.0), (3.0, 0.0)])
+            &runmat_value::ComplexStorage::F32(vec![(3.0, 0.0), (3.0, 0.0), (3.0, 0.0)].into())
         );
     }
 
@@ -939,14 +568,14 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 4.0, 2.0, 5.0, 7.0, 7.0]);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.shape, vec![2, 3]);
+                assert_eq!(idx.shape(), [2, 3]);
                 assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
@@ -1261,7 +890,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![4.0, 2.0, 7.0, 1.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("cummax");
@@ -1315,7 +944,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let args = vec![Value::from("omitnan")];
@@ -1342,7 +971,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::Int(IntValue::I32(5))];
@@ -1377,29 +1006,70 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
+        let values_only = block_on(cummax_gpu(
+            handle.clone(),
+            None,
+            CummaxDirection::Forward,
+            CummaxNanMode::Include,
+            runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            None,
+        ))
+        .expect("resident values-only scan");
+        assert!(matches!(values_only.values, Value::GpuTensor(_)));
+        let gathered = test_support::gather(values_only.values).expect("gather values-only scan");
+        assert_eq!(gathered.materialize_f64(), expected_vals.materialize_f64());
+
         let gpu_eval = evaluate(Value::GpuTensor(handle), &[]).expect("cummax gpu");
         let (gpu_vals, gpu_idx) = gpu_eval.into_pair();
 
-        match (&gpu_vals, &gpu_idx) {
-            (Value::GpuTensor(_), Value::GpuTensor(_)) => {}
-            other => panic!("expected GPU tensors, got {other:?}"),
+        match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                assert!(matches!(
+                    (&gpu_vals, &gpu_idx),
+                    (Value::GpuTensor(_), Value::GpuTensor(_))
+                ));
+            }
+            runmat_accelerate_api::ProviderPrecision::F32 => {
+                // This backend cannot publish double indices. Its two-output
+                // route declines before execution; automatic input gathers.
+                let (Value::Tensor(values), Value::Tensor(indices)) = (&gpu_vals, &gpu_idx) else {
+                    panic!("expected class-preserving host fallback");
+                };
+                assert_eq!(values.numeric_dtype(), runmat_value::NumericDType::F32);
+                assert_eq!(indices.numeric_dtype(), runmat_value::NumericDType::F64);
+            }
         }
 
         let gathered_vals = test_support::gather(gpu_vals).expect("gather values");
         let gathered_idx = test_support::gather(gpu_idx).expect("gather indices");
 
-        assert_eq!(gathered_vals.shape, expected_vals.shape);
+        assert_eq!(gathered_vals.shape(), expected_vals.shape());
         assert_eq!(
             gathered_vals.materialize_f64(),
             expected_vals.materialize_f64()
         );
-        assert_eq!(gathered_idx.shape, expected_idx.shape);
+        assert_eq!(gathered_idx.shape(), expected_idx.shape());
         assert_eq!(
             gathered_idx.materialize_f64(),
             expected_idx.materialize_f64()
         );
+    }
+
+    #[test]
+    fn canonical_second_output_is_real_double() {
+        let _guard = crate::output_count::push_output_count(Some(2)).unwrap();
+        let result = block_on(super::cummax_builtin(
+            None,
+            Value::Num(7.),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
+        let Value::OutputList(values) = result else {
+            panic!("requested output list")
+        };
+        assert_eq!(values.as_slice(), &[Value::Num(7.), Value::Num(1.)]);
     }
 }

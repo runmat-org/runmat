@@ -1,6 +1,6 @@
 [package]
 name = "runmat-execution-artifact"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -14,20 +14,26 @@ hkdf = { workspace = true }
 minicbor = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-package = { workspace = true }
+runmat-test = { workspace = true }
+runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+sha2-mac = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 hpke = { workspace = true, features = ["getrandom"] }
+runmat-process-host = { workspace = true }
+tempfile = "3.12"
+libc = "0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 hpke = { workspace = true }
 
 [dev-dependencies]
-hex = "0.4"
-tempfile = "3.12"
+hex = { workspace = true }
 runmat-types = { workspace = true }
+tempfile = "3.12"

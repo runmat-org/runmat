@@ -1,0 +1,50 @@
+geometry cavity {
+    construct {
+        feature volume = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.volume
+    }
+    region air : solid {
+        select result
+        expect exactly_one
+    }
+    region walls : face {
+        select result
+        expect one_or_more
+    }
+}
+
+mesh cavity on geometry.cavity {
+    tetrahedra {
+        order = linear
+        target_size = 0.5 m
+        maximum_deviation = 0.05 m
+    }
+}
+
+material air {
+    mass_density = 1.225 kg/m^3
+    acoustic {
+        speed_of_sound = 343 m/s
+        damping_ratio = 0.0
+    }
+}
+
+model cavity {
+    assign material.air to geometry.cavity.region.air
+    constraint incident_pressure {
+        acoustic.pressure {
+            target = geometry.cavity.region.walls
+            value = 1 Pa
+        }
+    }
+}
+
+study acoustic_cavity_harmonic {
+    geometry = geometry.cavity
+    mesh = mesh.cavity
+    model = model.cavity
+    analysis harmonic {
+        acoustic harmonic { frequencies = [100, 200, 400] Hz }
+    }
+    output pressure = analysis.harmonic.field.node.acoustic_pressure
+}

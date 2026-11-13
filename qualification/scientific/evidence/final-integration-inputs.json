@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "accepted_source_revision": "b0816059935e14cd18b6b13b08b74f551d2e9db8",
+  "checks": [
+    {
+      "name": "Design seating and through-bore placement with OCCT after lint repairs",
+      "passed": 9,
+      "failed": 0,
+      "log_sha256": "b3b8a6424f43e74945e50c0980666ff8554c36a00029b93b3c4989679ee23aab",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-design-seat-occt-lint-repair.log"
+    },
+    {
+      "name": "Design seating and through-bore placement with the grid kernel after lint repairs",
+      "passed": 9,
+      "failed": 0,
+      "log_sha256": "cf7d517affbbb5ee45034087c3bd4ee1a18b7a164f0c616ef8c4eced34af13ba",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-design-seat-grid-lint-repair.log"
+    },
+    {
+      "name": "Complete first-party lint census",
+      "target": "aarch64-apple-darwin",
+      "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+      "exit_code": 0,
+      "structured_warnings": 0,
+      "structured_errors": 0,
+      "all_targets": true,
+      "all_features": true,
+      "excluded_packages": [
+        "runmat-clarabel",
+        "runmat-analysis-fea"
+      ],
+      "log_sha256": "f76150ac04582e3243ce5712a4fe35d86c1a6da5ce72923f7fe125bca976f48c",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-first-party-lint-census.jsonl",
+      "scope": "Diagnostic collection uses --cap-lints warn so dependent crates are checked in the same pass. Zero warning/error diagnostics are required. CI retains its unchanged strict -D warnings command; this is host-scoped lint evidence, not a cross-platform test result."
+    },
+    {
+      "name": "Existing FEA lint debt verification",
+      "target": "aarch64-apple-darwin",
+      "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+      "cargo_exit_code": 101,
+      "verifier_exit_code": 0,
+      "distinct_sites": 179,
+      "emissions": 265,
+      "ledger_sha256": "918bb417ab88d82367425555c7d260b0e8739245a5cc2b54ae55e418414f8df5",
+      "log_sha256": "dcf600d7e14d5b5fb02dc0a1338b6a48559734a731adceaf382efb099fa0a398",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-fea-lint-debt.jsonl",
+      "scope": "Every diagnostic matches the existing reviewed RM-1287 ledger. No new lint exception was added."
+    },
+    {
+      "name": "CAD browser library regressions after mechanical strict-Clippy repairs",
+      "passed": 196,
+      "failed": 0,
+      "log_sha256": "afc093452f59ef8a382c243e8fdec9777f4113bc18473b140818379e9e74f77f",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-cad-wasm-lint-regressions.log"
+    },
+    {
+      "name": "Preview pick chunk ownership",
+      "passed": 1,
+      "failed": 0,
+      "log_sha256": "85fc63cbe80f2dc673041fd2ca87bf19893ae27c1a7b112519d534a91a5f7749",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-picked-chunk-main.log"
+    },
+    {
+      "name": "Adjacent runtime geometry checks",
+      "passed": 65,
+      "failed": 0,
+      "log_sha256": "de173d72a2c0216de899a9b9fb4f5089d22ac391b531f0c2b2e061d8529e71da",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-runtime-geometry-main-serial.log",
+      "test_threads": 1
+    },
+    {
+      "name": "Exact factor-free inertia counts and peak quote",
+      "passed": 2,
+      "failed": 0,
+      "log_sha256": "22c30e8b59246a0e1a3a038cec542ebc71288bc614e8b7e970677d0462116f85",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-factor-free-inertia-tests.log"
+    },
+    {
+      "name": "Circuit library declarations and round trips",
+      "passed": 6,
+      "failed": 0,
+      "log_sha256": "c8f4e853ce4f6edda5088764935800f82106e9d4d99a07faa93407735f074ae2",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-footprint-library-tests.log"
+    },
+    {
+      "name": "CAD missing pattern edge diagnostics in stub and native kernels",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "harnesses": 2,
+      "log_sha256": "b076cce6603168df4f901c215e983e653757b1f2ee1653e62247d31c7b495c2b",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-cad-pattern-diagnostic-tests.log"
+    },
+    {
+      "name": "KiCad interchange and circuit runtime contracts",
+      "passed": 26,
+      "failed": 0,
+      "ignored": 0,
+      "harnesses": 2,
+      "log_sha256": "6ed5d6b42fdbdd9f799ea567b6a2a7fda676c707be5f3891916aa8f04d2fa255",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-circuit-diagnostic-contract-tests.log"
+    },
+    {
+      "name": "Seat placement with OCCT gap measurement",
+      "passed": 9,
+      "failed": 0,
+      "log_sha256": "0b77992aa9b31a51ac667c62bad70d610c0ec42b1a546c8d1be37f69d899e2a9",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-seat-occt-tests.log"
+    },
+    {
+      "name": "Seat placement with explicit grid-kernel measurement limits",
+      "passed": 9,
+      "failed": 0,
+      "log_sha256": "ad3109582d361a9edee56515b3f26b480a594de0028830db9ffd784b0a7072bd",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-seat-grid-tests.log"
+    },
+    {
+      "name": "Detached startup diagnostics and atomic fixture completion",
+      "passed": 2,
+      "failed": 0,
+      "log_sha256": "9730bb4dd8abb639a0fc0d2477ceb9bca3d911d57ec51508a45ef47f55bcd3e4",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-startup-marker-tests.log"
+    },
+    {
+      "name": "Native STEP face and product names",
+      "passed": 3,
+      "failed": 0,
+      "log_sha256": "79ea0e3684a8fa65f93123aa8c6d0bfbb1d365a3366b5a7a26c1f5eac48b842a",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-step-face-names.log"
+    },
+    {
+      "name": "Windows native STEP face/product names after enumeration-independent fixture repair",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "harnesses": 1,
+      "log_sha256": "1b6c188ef9781f6b8b934dca618183ecf69c556f1f2ec68bb16e698ad30e4ff5",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/windows-step-order-evidence/step-order-20261111.tests.log",
+      "source_revision": "b0816059935e14cd18b6b13b08b74f551d2e9db8",
+      "fixture_sha256": "057dee8eaf27b67fffd4c88794885a4b53d8caab4d26531967265a02244de8a5",
+      "artifact": {
+        "path": "C:\\Users\\nallana\\rm1293\\targets\\debug\\deps\\step_face_names-1d167e0ebffa33a7.exe",
+        "bytes": 26074112,
+        "sha256": "188b947643ee8cfcad3df98fb3a91b84294680258865aaabc0d07038190159d4"
+      },
+      "source_verification": {
+        "at": "2026-11-11T20:05:47.243Z",
+        "root": "C:\\Users\\nallana\\rm1293-r964-source",
+        "stage": "C:\\Users\\nallana\\rm1293\\incoming\\step-order-20261111\\source",
+        "status": "verified",
+        "files": 27237
+      },
+      "source_scope": "Frozen public a630 plus the sole reviewed STEP fixture overlay; all 27,237 canonical source files verified before and after."
+    },
+    {
+      "name": "Windows focused Design integration",
+      "source_revision": "6c6c9ece36cb587a8691994d4d11445aa30f61f8",
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0,
+      "harnesses": 8,
+      "log_sha256": "22ec0671913cf04c344e9978090e23fb01410a27b6258f0ea0411adacc2793d9",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/windows-final-6c6c-focused.log",
+      "artifacts": [
+        {
+          "sha256": "c43d4c114813db4025dfc6ec769817bf59a8f743c56d87de109cb23a7b6766e6",
+          "bytes": 14458880,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\library_files-95be83766b645ce7.exe"
+        },
+        {
+          "sha256": "001591bafc36822d2687d04632abdbe4785537a6a26778bddf613d0c05d05932",
+          "bytes": 16870400,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\m_values-523ddf7721d4c760.exe"
+        },
+        {
+          "sha256": "6683cf334db7668cddddf3e8a3a5f0008ad041d97f5ea5d587da207a2f60f3a0",
+          "bytes": 2888192,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\design_catalog-1895e8071fe0527f.exe"
+        },
+        {
+          "sha256": "55f7155441f16bf36b707b2e737144218c9bb09cf605185c13c3f1d4e4817d9a",
+          "bytes": 590861824,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\command_registry-3cd3afcd6da9c965.exe"
+        },
+        {
+          "sha256": "f85789148827188f3bc9f669d13aa72d3404e8f2f251de05334bf14ea84a60ba",
+          "bytes": 705025024,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\docs_snippets-202406ec28ab5c19.exe"
+        },
+        {
+          "sha256": "fd75f48fd89c71c87a1909a01048f36ccb9c6d3ba8eb26775fafcb3c256184be",
+          "bytes": 603617792,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\drone-3f9b8b36f70059a5.exe"
+        },
+        {
+          "sha256": "f68d01daf51ad43933e4cfa983267d4f39bca8ab008c6ce98263169d6df8c4dc",
+          "bytes": 705041408,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\m_values-bf90f74edebf89a8.exe"
+        },
+        {
+          "sha256": "6ff4000c0d0da31a60888037ace9ba3c1027d8174a88437134e773f1ac97ac0c",
+          "bytes": 1176064,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\native_cli-e15c52692df41be0.exe"
+        },
+        {
+          "sha256": "cd9d16a6ec7b0d3d7f88c2051c86b37c3f3f84c0a31e0d872894819e3ce4d860",
+          "bytes": 704592896,
+          "path": "C:\\Users\\nallana\\rm1293\\logs\\final-6c6c9ece36-artifacts\\runmat-design.exe"
+        }
+      ],
+      "source_verification": {
+        "at": "2026-11-11T11:18:02.023Z",
+        "root": "C:\\Users\\nallana\\rm1293-r964-source",
+        "stage": "C:\\Users\\nallana\\rm1293\\incoming\\final-6c6c9ece36",
+        "status": "verified",
+        "files": 27226
+      }
+    },
+    {
+      "name": "documentation tooling",
+      "passed": 55,
+      "failed": 0,
+      "log_sha256": "57a09df0af9fa636baa234d806fa62beb5db1a2bfdaa002b64511a4ab24ff5c9"
+    },
+    {
+      "name": "canonical command reference",
+      "passed": 1,
+      "failed": 0,
+      "filtered_out": 4,
+      "log_sha256": "a823cd5e0ab4d06d2c0e1e6bf1bb6e0322d0cf894e6aae2f17f43b4e65be6e9f"
+    }
+  ],
+  "comparison_runs": [
+    {
+      "name": "Adjacent runtime geometry checks with default parallel test threads",
+      "passed": 63,
+      "failed": 2,
+      "log_sha256": "ac505d59ef9d127ec493f7d446b322096a1fdc7c553c21726f25c7fc6de3fb00",
+      "log_location": "Main:/Users/nallana/Source/runmat-acc-2/.runtime-rca-work/private-dev-20261110/final-runtime-geometry-main.log",
+      "disposition": "The process-wide CountingGeometryFs test provider returns STL bytes to unrelated test threads. The existing CI uses RUST_TEST_THREADS=1; all 65 cases pass with that configuration. The parallel test-isolation defect remains recorded; no production code or CI concurrency policy changed."
+    }
+  ],
+  "windows_source_scope": "The earlier focused Design transfer verifier checked 27,226 files and omitted eight Rust source files under directories named target; that evidence retains its partial scope. The later Windows STEP name check verifies all 27,237 canonical source files before and after, including Rust modules named target. Final Windows CI uses the complete Git checkout; the corrected Linux verifier checks every canonical source file.",
+  "scope": "These checks qualify the enumerated documentation, fixture, chunk-lookup, import-metadata and mechanical lint changes. A private alias retains the drawing-call tuple layout; enumeration of the immutable count-element parent vector visits the same index/parent pairs and appends the same child indices in the same order. CAD browser bounding boxes visit the same three coordinates per exact chunk with identical conversions and min/max order. Constant thread-local initializers retain their values; test input slices borrow identical strings instead of cloning them. Design seating formats the same coordinate values and serializes the same derived Copy pose-status enum tags. Scientific arithmetic, allocation behavior, dependencies, authored cases, required commands and timing thresholds are unchanged. Required scientific workloads retain their actual measured d8e06 source and artifacts."
+}

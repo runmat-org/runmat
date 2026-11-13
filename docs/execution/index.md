@@ -46,6 +46,20 @@ The session prevents concurrent execution on a single `RunMatSession`. Hosts tha
 
 Execution placement follows the same session boundary. Each `RunMatSession` owns its guarded decision cache and bounded aggregate feedback; separate sessions cannot change one another's placement state. The runtime exposes one executor-neutral graph, signature, feedback, invalidation, and resource contract so VM, JIT, and AOT execution paths can share policy without moving provider scheduling into the runtime. A host scheduler remains authoritative for its allocation and can install that allocation as the CPU/memory budget placement must obey. Profile snapshot and restore are explicit host operations and use a portable data-only format suitable for native and WebAssembly hosts.
 
+## Managed-memory limits and plot properties
+
+A managed execution limit covers allocations admitted through RunMat's allocation
+owners. Temporary host buffers used by `get` and `set` on existing plot handles
+are outside that accounting in 0.7.0. This includes property snapshots, source
+readback and prepared property updates. New chart construction is refused in a
+finite-managed context, but an existing handle can still reach these property
+operations. Handle validity and revision checks remain enforced.
+
+Do not use the managed limit as a bound on the total memory consumed by plot
+property operations. Hosts that require a process-wide bound need an operating
+system or container limit. GPU compiler and driver allocations have a separate
+[memory-budget boundary](../gpu/wgpu.md#memory-budget-boundary).
+
 ## Outcome Contract
 
 `ExecutionOutcome` is the host-facing result of a request.
@@ -77,7 +91,12 @@ The execution path resets and drains per-thread runtime buffers around every req
 | Page | Purpose |
 | --- | --- |
 | [Async Execution](/docs/runtime/execution/async) | Where execution awaits host input, builtin futures, GPU/provider work, filesystem/network work, async semantic calls, and current RunMat async extensions. |
+| [Parallel Execution](/docs/runtime/execution/parallel) | How to use `parfor`, SPMD, distributed arrays, collectives, pools, futures, cancellation, and native, browser, or remote worker backends. |
 | [Errors & Diagnostics](/docs/runtime/execution/errors) | How syntax, semantic, compile, runtime, warning, `MException`, catch/rethrow, and WASM error payloads are represented. |
 | [Remote Execution](/docs/runtime/execution/remote) | How to configure clusters, enroll customer nodes, submit content-blind jobs and tests, use browser workers, drain nodes, and configure organization recovery. |
+| [Native Library Interfaces](/docs/runtime/execution/native-libraries) | How to prepare, declare, package, compile, distribute, and call native shared-library interfaces. |
+| [C, C++, and MEX Extensions](/docs/runtime/execution/mex) | How to build, call, package, isolate, and distribute C, modern C++, Fortran, and GPU MEX modules. |
+| [Java Interoperability](/docs/runtime/execution/java) | How to configure the JVM, call Java code, manage classpaths, use callbacks, and dispatch Desktop UI calls on the EDT. |
+| [Python Interoperability](/docs/runtime/execution/python) | How to configure CPython, use `py.*` and Python workspaces, package wheels, and choose in-process or isolated execution. |
 
 For request and workspace details, see [Session Engine](/docs/runtime/session). For instruction-level behavior, see [Interpreter Dispatch & Execution Loop](/docs/runtime/vm/interpreter). For JIT behavior, see [JIT Compiler](/docs/runtime/jit).

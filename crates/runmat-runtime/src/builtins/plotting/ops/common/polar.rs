@@ -125,10 +125,11 @@ pub(crate) fn tensor_columns(tensor: &Tensor) -> Vec<Vec<f64>> {
     if tensor_is_vector(tensor) {
         return vec![tensor_utils::tensor_values_f64(tensor)];
     }
-    (0..tensor.cols)
+    let (rows, cols) = polar_matrix_dimensions(tensor);
+    (0..cols)
         .map(|col| {
-            let start = col * tensor.rows;
-            (start..start + tensor.rows)
+            let start = col * rows;
+            (start..start + rows)
                 .map(|idx| tensor_utils::tensor_value_f64(tensor, idx))
                 .collect()
         })
@@ -136,16 +137,16 @@ pub(crate) fn tensor_columns(tensor: &Tensor) -> Vec<Vec<f64>> {
 }
 
 pub(crate) fn complex_tensor_columns(tensor: &ComplexTensor) -> Vec<Vec<(f64, f64)>> {
-    if tensor.rows <= 1 || tensor.cols <= 1 || tensor.shape.len() <= 1 {
+    if tensor.rows() <= 1 || tensor.cols() <= 1 || tensor.shape().len() <= 1 {
         return vec![tensor_utils::complex_tensor_values_complex64(tensor)
             .into_iter()
             .map(|value| (value.re, value.im))
             .collect()];
     }
-    (0..tensor.cols)
+    (0..tensor.cols())
         .map(|col| {
-            let start = col * tensor.rows;
-            (start..start + tensor.rows)
+            let start = col * tensor.rows();
+            (start..start + tensor.rows())
                 .map(|idx| {
                     let value = tensor_utils::complex_tensor_value_complex64(tensor, idx);
                     (value.re, value.im)
@@ -155,15 +156,24 @@ pub(crate) fn complex_tensor_columns(tensor: &ComplexTensor) -> Vec<Vec<(f64, f6
         .collect()
 }
 
+fn polar_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(crate) fn tensor_is_vector(tensor: &Tensor) -> bool {
-    tensor.rows <= 1 || tensor.cols <= 1 || tensor.shape.len() <= 1
+    let (rows, cols) = polar_matrix_dimensions(tensor);
+    rows <= 1 || cols <= 1 || tensor.shape().len() <= 1
 }
 
 pub(crate) fn tensor_rows(tensor: &Tensor) -> usize {
     if tensor_is_vector(tensor) {
         tensor_utils::tensor_element_len(tensor)
     } else {
-        tensor.rows
+        polar_matrix_dimensions(tensor).0
     }
 }
 
@@ -171,7 +181,7 @@ pub(crate) fn tensor_cols(tensor: &Tensor) -> usize {
     if tensor_is_vector(tensor) {
         1
     } else {
-        tensor.cols
+        polar_matrix_dimensions(tensor).1
     }
 }
 
@@ -194,6 +204,26 @@ fn polar_data_err(builtin: &'static str, msg: impl Into<String>) -> RuntimeError
 mod tests {
     use super::*;
     use runmat_value::{IntegerComplexStorage, IntegerStorage};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn polar_vector_evaluation_preserves_dense_rank_boundaries() {
+        let scalar_theta = Tensor::new(vec![0.0], Vec::new()).unwrap();
+        let scalar_rho = Tensor::new(vec![2.0], Vec::new()).unwrap();
+        assert_eq!(polar_matrix_dimensions(&scalar_theta), (0, 0));
+        let scalar = evaluate_theta_rho_tensors(scalar_theta, scalar_rho, "polarplot").unwrap();
+        assert_eq!(scalar.len(), 1);
+        assert_eq!(scalar[0].theta, vec![0.0]);
+        assert_eq!(scalar[0].rho, vec![2.0]);
+
+        let vector_theta = Tensor::new(vec![0.0, 1.0], vec![2]).unwrap();
+        let vector_rho = Tensor::new(vec![2.0, 3.0], vec![2]).unwrap();
+        assert_eq!(polar_matrix_dimensions(&vector_theta), (1, 2));
+        let vector = evaluate_theta_rho_tensors(vector_theta, vector_rho, "polarplot").unwrap();
+        assert_eq!(vector.len(), 1);
+        assert_eq!(vector[0].theta, vec![0.0, 1.0]);
+        assert_eq!(vector[0].rho, vec![2.0, 3.0]);
+    }
 
     #[test]
     fn tensor_columns_read_typed_integer_storage_exactly() {

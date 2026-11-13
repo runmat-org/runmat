@@ -2,6 +2,11 @@
 use std::{env, path::PathBuf};
 
 fn main() {
+    runmat_build_identity::emit_configuration();
+    // runmat-cad's integration tests, built into tests/cad_kernel_corpus.rs, run on the OCCT
+    // kernel under test when this cfg is set (runmat-cad/tests/common/mod.rs).
+    println!("cargo:rustc-check-cfg=cfg(runmat_cad_kernel_under_test)");
+    println!("cargo:rustc-cfg=runmat_cad_kernel_under_test");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_ROOT");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_LIB_DIR");
@@ -32,7 +37,12 @@ fn build_occt_backend() {
     let (occt_include, occt_lib, uses_bundled_occt) = occt_paths(&link_mode);
 
     let occt_link_libs = occt_link_libs(&occt_lib);
-    let mut build = cxx_build::bridge("src/occt/ffi.rs");
+    let k1 = env::var_os("CARGO_FEATURE_OCCT_KERNEL").is_some();
+    let mut bridges = vec!["src/occt/ffi.rs"];
+    if k1 {
+        bridges.push("src/occt/kernel_ffi.rs");
+    }
+    let mut build = cxx_build::bridges(bridges);
     build
         .file("src/occt/occt_bridge.cc")
         .file("src/occt/exact_assembly.cc")
@@ -42,19 +52,50 @@ fn build_occt_backend() {
         .file("src/occt/exact_xcaf_healing.cc")
         .file("src/occt/exact_xcaf_subshape_remap.cc")
         .file("src/occt/exact_nesting.cc")
+        .file("src/occt/exact_names.cc")
+        .file("src/occt/preview_face_owners.cc")
+        .file("src/occt/exact_shared_interfaces.cc")
         .file("src/occt/exact_topology.cc")
+        .file("src/occt/exact_wire.cc")
         .file("src/occt/exact_evaluator.cc")
+        .file("src/occt/exact_feature.cc")
+        .file("src/occt/exact_feature_operations.cc")
         .file("src/occt/exact_surface_evaluator.cc")
         .include(".")
         .include(&occt_include)
         .std("c++17")
         .flag_if_supported("-Wno-deprecated-declarations")
         .define("_USE_MATH_DEFINES", None);
-    if uses_bundled_occt {
+    if k1 {
+        // K1: the geometry-engine interface (kernel programs, profiles, tools, analyses,
+        // hidden lines, AP242 export).
+        for f in [
+            "src/occt/exact_kernel.cc",
+            "src/occt/exact_kernel_display.cc",
+            "src/occt/exact_sketch_profile.cc",
+            "src/occt/exact_sweep_loft.cc",
+            "src/occt/exact_sweep_follow.cc",
+            "src/occt/exact_pattern_faces.cc",
+            "src/occt/exact_boundary.cc",
+            "src/occt/exact_hlr.cc",
+            "src/occt/exact_step_writer.cc",
+        ] {
+            build.file(f);
+        }
+    }
+    if uses_bundled_occt || (link_mode == "static" && is_occt_78(&occt_include)) {
         // OCCT 7.8's process-lifetime RTTI registry can be destroyed before STEP/IGES type
         // descriptors when statically linked. This source overrides that one TKernel object with
         // the upstream lifetime-safe ownership model used by later OCCT releases.
         build.file("src/occt/occt_type_lifetime.cc");
+    }
+
+    if target.contains("emscripten") && is_occt_78(&occt_include) {
+        // Override the two affected SDK archive members using upstream OCCT
+        // implementation without native signal-to-longjmp conversion. The
+        // bridge archive precedes OCCT, as for the RTTI lifetime adapter above.
+        build.file("src/occt/wasm_shape_upgrade_shape_divide.cc");
+        build.file("src/occt/wasm_shape_custom_bspline_restriction.cc");
     }
 
     if is_windows_gnu {
@@ -62,6 +103,11 @@ fn build_occt_backend() {
     }
     if target_env == "msvc" {
         build.flag("/utf-8");
+        // CXX gates shared-field defaults on the reported language standard.
+        // MSVC otherwise reports pre-C++11 even with /std:c++17 selected.
+        build.flag("/Zc:__cplusplus");
+        // Preserve RAII cleanup when the bridge catches C++ exceptions.
+        build.flag("/EHsc");
     }
 
     build.compile("runmat_geometry_io_occt");
@@ -74,6 +120,8 @@ fn build_occt_backend() {
     }
     if is_windows {
         println!("cargo:rustc-link-lib=dylib=user32");
+        // TKernel's filesystem/signal code and TKService fonts use registry APIs.
+        println!("cargo:rustc-link-lib=dylib=advapi32");
     }
     if target.to_ascii_lowercase().contains("apple-darwin") {
         println!("cargo:rustc-link-lib=dylib=objc");
@@ -87,8 +135,30 @@ fn build_occt_backend() {
     }
 
     println!("cargo:rerun-if-changed=src/occt/ffi.rs");
+    for k1 in [
+        "src/occt/kernel_ffi.rs",
+        "src/occt/exact_kernel.hxx",
+        "src/occt/exact_kernel_ffi.hxx",
+        "src/occt/exact_kernel.cc",
+        "src/occt/exact_kernel_display.cc",
+        "src/occt/exact_sketch_profile.cc",
+        "src/occt/exact_sweep_loft.cc",
+        "src/occt/exact_sweep_follow.cc",
+        "src/occt/exact_pattern_faces.cc",
+        "src/occt/exact_boundary.cc",
+        "src/occt/exact_hlr.cc",
+        "src/occt/exact_step_writer.cc",
+    ] {
+        println!("cargo:rerun-if-changed={k1}");
+    }
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.hxx");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_names.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_names.cc");
+    println!("cargo:rerun-if-changed=src/occt/preview_face_owners.hxx");
+    println!("cargo:rerun-if-changed=src/occt/preview_face_owners.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_shared_interfaces.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_shared_interfaces.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_assembly.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_assembly.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_identity.hxx");
@@ -104,9 +174,35 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/exact_nesting.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_wire.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_wire.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature_internal.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature_operations.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator_internal.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_surface_bounds.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_surface_evaluator.cc");
+    println!("cargo:rerun-if-changed=src/occt/wasm_shape_upgrade_shape_divide.cc");
+    println!("cargo:rerun-if-changed=src/occt/wasm_shape_custom_bspline_restriction.cc");
+}
+
+#[cfg(feature = "occt-native")]
+fn is_occt_78(include: &std::path::Path) -> bool {
+    let version_header = include.join("Standard_Version.hxx");
+    println!("cargo:rerun-if-changed={}", version_header.display());
+    let Ok(header) = std::fs::read_to_string(version_header) else {
+        return false;
+    };
+    let macro_value = |name: &str| {
+        header.lines().find_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next() == Some("#define") && words.next() == Some(name))
+                .then(|| words.next())
+                .flatten()
+        })
+    };
+    macro_value("OCC_VERSION_MAJOR") == Some("7") && macro_value("OCC_VERSION_MINOR") == Some("8")
 }
 
 #[cfg(not(feature = "occt-native"))]

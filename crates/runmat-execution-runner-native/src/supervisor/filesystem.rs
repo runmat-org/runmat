@@ -1,126 +1,151 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
 use std::path::Path;
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use uuid::Uuid;
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 const MAX_PERSISTED_JSON_BYTES: u64 = 64 * 1024 * 1024;
 
-pub(super) fn atomic_json(path: &Path, value: &impl Serialize) -> NativeExecutionResult<()> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> NativeExecutionResult<()> {
+    let bytes = runmat_canonical_codec::encode_json_bounded(value, MAX_PERSISTED_JSON_BYTES)?;
     atomic_write(path, &bytes)
 }
 
-pub(super) fn read_json<T: DeserializeOwned>(path: &Path) -> NativeExecutionResult<T> {
-    let mut file = File::open(path).map_err(io_error)?;
-    let length = file.metadata().map_err(io_error)?.len();
-    if length > MAX_PERSISTED_JSON_BYTES {
-        return Err(NativeExecutionError::Protocol(format!(
-            "{} exceeds the durable metadata size limit",
-            path.display()
-        )));
+pub(crate) fn immutable_json(path: &Path, value: &impl Serialize) -> NativeExecutionResult<()> {
+    use runmat_filesystem::{AtomicCreateResult, NativeFsProvider, PublicationDurability};
+    let bytes = runmat_canonical_codec::encode_json_bounded(value, MAX_PERSISTED_JSON_BYTES)?;
+    secure_directory(path.parent().ok_or_else(|| {
+        NativeExecutionError::Configuration("immutable metadata requires a parent".into())
+    })?)?;
+    match NativeFsProvider
+        .atomic_create_private_new(path, &bytes, MAX_PERSISTED_JSON_BYTES)
+        .map_err(io_error)?
+    {
+        AtomicCreateResult::Published {
+            durability: PublicationDurability::Durable,
+        } => Ok(()),
+        AtomicCreateResult::Published {
+            durability: PublicationDurability::AtomicVisibility,
+        } => Err(NativeExecutionError::CheckpointDelivery {
+            diagnostic: format!(
+                "{} is visible but crash durability is unconfirmed",
+                path.display()
+            ),
+            evidence: Box::new(crate::NativeCheckpointEvidence::DurabilityIndeterminate {
+                diagnostic: "immutable publication directory retention is unconfirmed".into(),
+            }),
+        }),
+        AtomicCreateResult::Existing(existing) if existing == bytes => {
+            // Preserve the winner; reaffirm retention rather than replacing it.
+            // Windows FlushFileBuffers requires write access; reopening never
+            // truncates or replaces the original immutable publication.
+            #[cfg(windows)]
+            let retained = std::fs::OpenOptions::new().write(true).open(path);
+            #[cfg(not(windows))]
+            let retained = std::fs::File::open(path);
+            retained
+                .and_then(|file| file.sync_all())
+                .map_err(|error| retained_publication_error(path, error))?;
+            NativeFsProvider
+                .synchronize_directory(path.parent().expect("validated parent"))
+                .map_err(|error| retained_publication_error(path, error))
+        }
+        AtomicCreateResult::Existing(_) => Err(NativeExecutionError::Protocol(
+            "immutable durable attempt metadata differs from its original publisher".into(),
+        )),
     }
-    let mut bytes = Vec::with_capacity(length as usize);
-    use std::io::Read as _;
-    file.read_to_end(&mut bytes).map_err(io_error)?;
+}
+
+pub(super) fn read_json<T: DeserializeOwned>(path: &Path) -> NativeExecutionResult<T> {
+    read_optional_json(path)?.ok_or_else(|| {
+        io_error(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("{}: durable metadata is absent", path.display()),
+        ))
+    })
+}
+
+pub(super) fn read_optional_json<T: DeserializeOwned>(
+    path: &Path,
+) -> NativeExecutionResult<Option<T>> {
+    read_optional_json_bounded(path, MAX_PERSISTED_JSON_BYTES)
+}
+
+pub(crate) fn read_optional_json_bounded<T: DeserializeOwned>(
+    path: &Path,
+    maximum_bytes: u64,
+) -> NativeExecutionResult<Option<T>> {
+    let bytes = match runmat_filesystem::NativeFsProvider
+        .read_bounded_sync(path, maximum_bytes.min(MAX_PERSISTED_JSON_BYTES))
+    {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(io_error(error)),
+    };
     serde_json::from_slice(&bytes)
+        .map(Some)
         .map_err(|error| NativeExecutionError::Protocol(format!("{}: {error}", path.display())))
 }
 
 pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> NativeExecutionResult<()> {
+    use runmat_filesystem::NativeFsProvider;
     let parent = path.parent().ok_or_else(|| {
         NativeExecutionError::Configuration("durable metadata path has no parent".into())
     })?;
-    secure_directory(parent)?;
-    let temporary = parent.join(format!(".write-{}.tmp", Uuid::new_v4().simple()));
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
+    runmat_filesystem::NativeFsProvider
+        .create_private_directory_durable(parent)
+        .map_err(|source| NativeExecutionError::MetadataIo {
+            operation: crate::MetadataIoOperation::PreparePrivateDirectory,
+            path: parent.to_owned(),
+            source,
+        })?;
+    let outcome = NativeFsProvider
+        .atomic_replace_sync(path, bytes)
+        .map_err(|source| NativeExecutionError::MetadataIo {
+            operation: crate::MetadataIoOperation::AtomicReplacement,
+            path: path.to_owned(),
+            source,
+        })?;
+    let evidence = crate::NativeCheckpointEvidence::from_publication(outcome);
+    if let Some(diagnostic) = evidence.delivery_error() {
+        return Err(NativeExecutionError::CheckpointDelivery {
+            diagnostic: format!("{}: {diagnostic}", path.display()),
+            evidence: Box::new(evidence),
+        });
     }
-    let mut file = options.open(&temporary).map_err(io_error)?;
-    file.write_all(bytes).map_err(io_error)?;
-    file.sync_all().map_err(io_error)?;
-    replace_file(&temporary, path)?;
-    sync_parent_directory(parent)?;
     Ok(())
 }
 
-#[cfg(unix)]
-fn sync_parent_directory(parent: &Path) -> NativeExecutionResult<()> {
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
+pub(crate) fn secure_directory(path: &Path) -> NativeExecutionResult<()> {
+    runmat_filesystem::NativeFsProvider
+        .create_private_directory_durable(path)
         .map_err(io_error)
-}
-
-#[cfg(not(unix))]
-fn sync_parent_directory(_parent: &Path) -> NativeExecutionResult<()> {
-    // Windows replacement uses MOVEFILE_WRITE_THROUGH below. Opening a
-    // directory through std::fs::File is rejected with ERROR_ACCESS_DENIED.
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn replace_file(source: &Path, destination: &Path) -> NativeExecutionResult<()> {
-    fs::rename(source, destination).map_err(io_error)
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> NativeExecutionResult<()> {
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let mut source = source.as_os_str().encode_wide().collect::<Vec<_>>();
-    source.push(0);
-    let mut destination = destination.as_os_str().encode_wide().collect::<Vec<_>>();
-    destination.push(0);
-    let result = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if result == 0 {
-        Err(io_error(std::io::Error::last_os_error()))
-    } else {
-        Ok(())
-    }
-}
-
-pub(super) fn secure_directory(path: &Path) -> NativeExecutionResult<()> {
-    fs::create_dir_all(path).map_err(io_error)?;
-    let metadata = fs::symlink_metadata(path).map_err(io_error)?;
-    if !metadata.file_type().is_dir() {
-        return Err(NativeExecutionError::Configuration(format!(
-            "durable state path is not a regular directory: {}",
-            path.display()
-        )));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(io_error)?;
-    }
-    Ok(())
 }
 
 pub(super) fn io_error(error: std::io::Error) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
 
-pub(super) fn unix_millis() -> u64 {
+pub(crate) fn unix_millis() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_millis() as u64)
 }
+
+fn retained_publication_error(path: &Path, error: std::io::Error) -> NativeExecutionError {
+    let diagnostic = format!(
+        "{} remains visible but retention failed: {error}",
+        path.display()
+    );
+    NativeExecutionError::CheckpointDelivery {
+        evidence: Box::new(crate::NativeCheckpointEvidence::DurabilityIndeterminate {
+            diagnostic: diagnostic.clone(),
+        }),
+        diagnostic,
+    }
+}
+
+#[cfg(test)]
+mod tests;

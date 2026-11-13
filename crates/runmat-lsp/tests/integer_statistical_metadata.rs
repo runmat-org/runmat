@@ -1,3 +1,7 @@
+mod support;
+#[path = "support/hover.rs"]
+mod hover_support;
+
 use lsp_types::{HoverContents, Position};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinExtensionMode, BuiltinIntegerClass, BuiltinOutputMode,
@@ -35,11 +39,9 @@ fn grouping_random_and_clustering_packet_is_public_and_audited() {
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
     for name in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("registered builtin {name}"));
-        let descriptor = builtin
-            .descriptor
-            .unwrap_or_else(|| panic!("{name} descriptor"));
+        let descriptor = builtin.descriptor;
         assert_eq!(
             descriptor.completion_policy,
             BuiltinCompletionPolicy::Public
@@ -71,7 +73,8 @@ fn grouping_random_and_clustering_packet_is_public_and_audited() {
 #[test]
 fn packet_capabilities_publish_complete_integer_class_masks() {
     for name in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         for capability in builtin.integer_capabilities {
             assert!(!capability.inputs.is_empty(), "{name} {}", capability.form);
             for input in capability.inputs {
@@ -87,69 +90,44 @@ fn packet_capabilities_publish_complete_integer_class_masks() {
 
 #[test]
 fn packet_calls_expose_descriptor_hover_and_signature_help() {
-    for (lookup, source, expected) in [
-        ("gamrnd", "x=gamrnd(2,3);", "r = gamrnd(a, b)"),
-        (
-            "groupcounts",
-            "x=groupcounts([1;2]);",
-            "varargout = groupingBuiltin(args...)",
-        ),
-        (
-            "groupsummary",
-            "x=groupsummary([1;2],[1;1],'sum');",
-            "G = groupsummary(T, groupvars, method, datavars)",
-        ),
-        ("isoutlier", "x=isoutlier([1;2]);", "TF = isoutlier(A)"),
-        ("kmeans", "x=kmeans([1;2],1);", "idx = kmeans(X, k)"),
-        (
-            "knnsearch",
-            "x=knnsearch([1;2],[1]);",
-            "Idx = knnsearch(X, Y)",
-        ),
-        ("lhsdesign", "x=lhsdesign(2,1);", "X = lhsdesign(n, p)"),
-        ("linkage", "x=linkage([1;2]);", "Z = linkage(X)"),
+    for (lookup, source) in [
+        ("gamrnd", "x=gamrnd(2,3);"),
+        ("groupcounts", "x=groupcounts([1;2]);"),
+        ("groupsummary", "x=groupsummary([1;2],[1;1],'sum');"),
+        ("isoutlier", "x=isoutlier([1;2]);"),
+        ("kmeans", "x=kmeans([1;2],1);"),
+        ("knnsearch", "x=knnsearch([1;2],[1]);"),
+        ("lhsdesign", "x=lhsdesign(2,1);"),
+        ("linkage", "x=linkage([1;2]);"),
     ] {
         let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
         assert!(analysis.syntax_error.is_none(), "{source}");
         assert!(analysis.lowering_error.is_none(), "{source}");
-        let position = Position::new(0, source.find(lookup).expect("builtin") as u32);
-        let help = signature_help_at(source, &analysis, &position).expect("signature help");
-        assert!(
-            help.signatures
-                .iter()
-                .any(|signature| signature.label == expected),
-            "{lookup}: {:?}",
-            help.signatures
-                .iter()
-                .map(|signature| signature.label.as_str())
-                .collect::<Vec<_>>()
-        );
-        let hover = hover_at(source, &analysis, &position).expect("hover");
+        let position = Position::new(0, source.find(lookup).expect("builtin call") as u32);
+        let help =
+            signature_help_at(source, &analysis, &position).expect("canonical signature help");
+        support::assert_catalog_signatures(lookup, &help);
+        let hover = hover_at(source, &analysis, &position).expect("canonical hover");
         let HoverContents::Markup(markup) = hover.contents else {
-            panic!("Markdown hover for {lookup}");
+            panic!("expected Markdown hover");
         };
-        assert!(
-            markup.value.contains(expected),
-            "{lookup}: {}",
-            markup.value
-        );
+        hover_support::assert_catalog_hover(lookup, &help, &markup.value);
     }
 }
-
 #[test]
 fn grouping_control_extensions_and_groupsummary_forms_are_explicit() {
     for (name, extension_id) in [
         ("groupcounts", "groupcounts-integer-control"),
         ("groupsummary", "groupsummary-integer-control"),
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
         assert!(builtin.extensions.iter().any(|extension| {
             extension.id == extension_id && extension.mode == BuiltinExtensionMode::RunMatOnly
         }));
     }
 
-    let builtin = runmat_builtins::builtin_function_by_name("groupsummary").unwrap();
-    let descriptor = builtin.descriptor.unwrap();
+    let builtin = runmat_builtins::builtin_catalog_entry_by_name("groupsummary").unwrap();
+    let descriptor = builtin.descriptor;
     assert_eq!(
         descriptor.output_mode,
         BuiltinOutputMode::ByRequestedOutputCount

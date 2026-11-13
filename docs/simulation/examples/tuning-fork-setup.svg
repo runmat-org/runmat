@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="280" viewBox="0 0 760 280" role="img" aria-labelledby="title desc">
+<title id="title">Tuning-fork geometry and restraint</title><desc id="desc">Two 65 millimeter free tines connect through a bridge to a fixed stem. Stiffness and mass determine the natural modes; no driving force is prescribed.</desc>
+<defs><pattern id="support" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 8L8 0" stroke="#9ca3af" stroke-width="1.5"/></pattern></defs>
+<rect width="760" height="280" rx="8" fill="#111318"/>
+<g font-family="system-ui,sans-serif" font-size="15" fill="#e5e7eb">
+<path d="M272 28H296V166H356V28H380V192H338V247H314V192H272Z" fill="#546c87" stroke="#a8c9ec" stroke-width="2"/>
+<rect x="292" y="250" width="68" height="14" fill="url(#support)"/><path d="M292 248H360" stroke="#79b5f8" stroke-width="4"/>
+<text x="28" y="55">Two free tines</text><text x="28" y="79" fill="#aeb7c4">65 mm above the bridge</text><text x="28" y="103" fill="#aeb7c4">8 mm wide × 6 mm thick</text>
+<path d="M200 71H270M384 71H420" stroke="#aeb7c4"/>
+<text x="450" y="54">Steel stiffness + mass</text><text x="450" y="78" fill="#aeb7c4">E = 200 GPa · ρ = 7,850 kg/m³</text><text x="450" y="123">No applied vibration force</text>
+<text x="450" y="225">Fixed stem end</text><text x="450" y="249" fill="#79b5f8">All displacement components = 0</text><path d="M363 248H432" stroke="#79b5f8"/>
+<text x="28" y="248" fill="#aeb7c4">100 mm total height · schematic</text>
+</g></svg>

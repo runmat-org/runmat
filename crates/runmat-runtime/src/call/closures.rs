@@ -1,57 +1,54 @@
 use crate::call::identity::external_qualified_display_name;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
-use runmat_types::MemberAccess;
+use runmat_types::{ClassIdentity, MemberAccess};
 use runmat_value::{Closure, Value};
 
 pub fn closure_value(function_name: String, captures: Vec<Value>) -> Value {
-    Value::Closure(Closure {
+    Value::Closure(Closure::new(
         function_name,
-        bound_function: None,
+        None,
+        runmat_types::FunctionSourceRole::Unknown,
+        None,
         captures,
-    })
+        None,
+    ))
 }
 
 pub fn semantic_closure_value(
     function: runmat_types::FunctionId,
     display_name: String,
     captures: Vec<Value>,
+    source_role: runmat_types::FunctionSourceRole,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Value {
-    Value::Closure(Closure {
-        function_name: display_name,
-        bound_function: Some(function.0),
+    Value::Closure(Closure::new(
+        display_name,
+        Some(crate::user_functions::bound_function_binding_for(
+            function.0,
+        )),
+        source_role,
+        crate::user_functions::source_file_for(function.0),
         captures,
-    })
+        lexical_environment,
+    ))
 }
 
-pub fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
-    let caller_function_name = caller_function_name?;
-    if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
-        if !class_name.is_empty() && !method_name.is_empty() {
-            return Some(class_name.to_string());
-        }
-    }
-    crate::class_registry::class_names()
-        .into_iter()
-        .find(|class_name| {
-            crate::class_registry::get_class(class_name).is_some_and(|class_def| {
-                class_def
-                    .methods
-                    .values()
-                    .any(|method| method.function_name == caller_function_name)
-            })
-        })
+pub fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<ClassIdentity> {
+    caller_function_name
+        .and_then(crate::class_registry::caller_method_for_function)
+        .map(|(class, _)| class)
 }
 
 pub fn method_access_permitted(
-    owner: &str,
+    owner: &ClassIdentity,
     access: &MemberAccess,
     caller_function_name: Option<&str>,
 ) -> bool {
     match access {
         MemberAccess::Public => true,
         MemberAccess::Private => {
-            caller_class_for_function(caller_function_name).as_deref() == Some(owner)
+            caller_class_for_function(caller_function_name).as_ref() == Some(owner)
         }
         MemberAccess::Protected => {
             caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
@@ -61,8 +58,21 @@ pub fn method_access_permitted(
     }
 }
 
+pub fn method_access_permitted_for_class(
+    owner: &ClassIdentity,
+    access: &MemberAccess,
+    caller_class: Option<&ClassIdentity>,
+) -> bool {
+    match access {
+        MemberAccess::Public => true,
+        MemberAccess::Private => caller_class == Some(owner),
+        MemberAccess::Protected => caller_class
+            .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, owner)),
+    }
+}
+
 pub fn resolve_method_semantic_function_id(
-    owner: &str,
+    owner: &ClassIdentity,
     method_name: &str,
     function_name: &str,
 ) -> Option<usize> {
@@ -90,17 +100,35 @@ pub fn load_method_closure(
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(object) => {
-            let function_name = external_qualified_display_name(&object.class_name, &name);
-            Ok(Value::Closure(Closure {
-                bound_function: crate::user_functions::resolve_semantic_function_by_name(
-                    &function_name,
-                ),
+            let function_name =
+                external_qualified_display_name(object.class_name().display_name(), &name);
+            let registered = crate::class_registry::lookup_bound_method(
+                object.class_name(),
+                &runmat_types::MethodName::from(name.as_str()),
+            )
+            .and_then(|method| method.bound_function);
+            let bound_function =
+                registered
+                    .as_ref()
+                    .map(|binding| binding.function)
+                    .or_else(|| {
+                        crate::user_functions::resolve_semantic_function_by_name(&function_name)
+                    });
+            Ok(Value::Closure(Closure::new(
                 function_name,
-                captures: vec![Value::Object(object)],
-            }))
+                registered.or_else(|| {
+                    bound_function.map(crate::user_functions::bound_function_binding_for)
+                }),
+                runmat_types::FunctionSourceRole::Method,
+                bound_function.and_then(crate::user_functions::source_file_for),
+                vec![Value::Object(object)],
+                None,
+            )))
         }
         Value::ClassRef(class_name) => {
-            if let Some((method, owner)) = crate::class_registry::lookup_method(&class_name, &name)
+            let method_name = runmat_types::MethodName::from(name.as_str());
+            if let Some((method, owner)) =
+                crate::class_registry::lookup_method(&class_name, &method_name)
             {
                 if !method.is_static {
                     return Err(semantic_error(
@@ -114,25 +142,43 @@ pub fn load_method_closure(
                         format!("Method '{name}' is private"),
                     ));
                 }
-                return Ok(Value::Closure(Closure {
-                    bound_function: resolve_method_semantic_function_id(
-                        &owner,
-                        &name,
-                        &method.function_name,
-                    ),
-                    function_name: method.function_name,
-                    captures: vec![],
-                }));
+                let registered =
+                    crate::class_registry::lookup_bound_method(&class_name, &method_name)
+                        .and_then(|method| method.bound_function);
+                let bound_function =
+                    registered
+                        .as_ref()
+                        .map(|binding| binding.function)
+                        .or_else(|| {
+                            resolve_method_semantic_function_id(
+                                &owner,
+                                &name,
+                                &method.function_name,
+                            )
+                        });
+                return Ok(Value::Closure(Closure::new(
+                    method.function_name,
+                    registered.or_else(|| {
+                        bound_function.map(crate::user_functions::bound_function_binding_for)
+                    }),
+                    runmat_types::FunctionSourceRole::Method,
+                    bound_function.and_then(crate::user_functions::source_file_for),
+                    vec![],
+                    None,
+                )));
             }
-            let qualified_name = external_qualified_display_name(&class_name, &name);
+            let qualified_name = external_qualified_display_name(class_name.display_name(), &name);
             if runmat_builtins::builtin_name_is_known(&qualified_name) {
-                Ok(Value::Closure(Closure {
-                    bound_function: crate::user_functions::resolve_semantic_function_by_name(
-                        &qualified_name,
-                    ),
-                    function_name: qualified_name,
-                    captures: vec![],
-                }))
+                let bound_function =
+                    crate::user_functions::resolve_semantic_function_by_name(&qualified_name);
+                Ok(Value::Closure(Closure::new(
+                    qualified_name,
+                    bound_function.map(crate::user_functions::bound_function_binding_for),
+                    runmat_types::FunctionSourceRole::Method,
+                    bound_function.and_then(crate::user_functions::source_file_for),
+                    vec![],
+                    None,
+                )))
             } else {
                 Err(semantic_error(
                     "UnknownStaticMethod",

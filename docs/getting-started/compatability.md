@@ -53,6 +53,8 @@ RunMat implements a robust indexing subsystem that handles N-D numeric and logic
 - Expansion: Supports function and cell expansion into slice targets with dynamic packing.
 - L-Value Handling: The HIR lowering stage distinguishes between standard assignments, indexed assignments (`A(1)=2`), and cell assignments (`C{1}=3`).
 
+RunMat currently rejects an index list that combines receiver-relative `end` with a variable-width expansion, such as `A(C{:}, end)`. Pass the indices individually, or compute the numeric index explicitly with `size` before indexing. This restriction avoids guessing which dimension `end` refers to when expansion changes the number of indices.
+
 ### Functions
 
 RunMat implements a MATLAB-compatible function model, from simple named functions to nested functions that share their parent's scope.
@@ -96,7 +98,7 @@ runmat run analysis.m
 runmat test
 ```
 
-`runmat check` uses the parser, static analysis, source lookup, and compile validation used by RunMat's editor tooling. It does not execute the program. A clean result means that no static blocker was found. See the [runmat check reference](/docs/runtime/getting-started/check) for source-root setup, diagnostic examples, and automation.
+`runmat check` uses the parser, static analysis, source lookup, and compile validation used by RunMat's editor tooling. It does not execute the program. A clean result means that no static blocker was found. See [Check](/docs/runtime/getting-started/cli#check) for source-root setup, diagnostic examples, and automation.
 
 `runmat run` exercises runtime behavior, external data, files, and integrations reached by the selected entrypoint. Use representative inputs when numerical results or code paths depend on input data.
 

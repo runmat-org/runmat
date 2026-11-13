@@ -4,7 +4,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use crate::tests::MemoryCache;
 use crate::{
     import_faceted_geometry_input, import_faceted_geometry_objects, prepare_faceted_geometry_input,
-    prepare_faceted_geometry_objects, MeshingArtifactAccess,
+    prepare_faceted_geometry_objects, ArtifactAccess,
 };
 
 #[test]
@@ -16,14 +16,16 @@ fn faceted_geometry_round_trips_through_shared_input_objects() {
     let mut cache = MemoryCache::default();
     cache.insert_all(&prepared.objects);
 
+    let reads = crate::tests::read_buffers::ReadBuffers::new(&cache);
     let imported = import_faceted_geometry_objects(
-        &cache,
+        &reads,
         prepared.document.clone(),
         prepared.root_reference(),
         ObjectInventoryLimits::default(),
     )
     .unwrap();
 
+    reads.assert_retained(&imported.objects);
     assert_eq!(imported, prepared);
     assert_eq!(imported.objects.len(), 1);
     assert_eq!(
@@ -65,7 +67,7 @@ fn faceted_geometry_projects_to_one_driver_owned_input() {
     let objects =
         prepare_faceted_geometry_objects(document, solid, ObjectInventoryLimits::default())
             .unwrap();
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: "faceted-geometry-run".into(),
         encryption_context: runmat_execution::Digest::sha256(b"faceted-geometry-context"),
     };
@@ -77,14 +79,16 @@ fn faceted_geometry_projects_to_one_driver_owned_input() {
 
     let mut cache = MemoryCache::default();
     cache.insert_all(&prepared.geometry_objects().objects);
+    let reads = crate::tests::read_buffers::ReadBuffers::new(&cache);
     let imported = import_faceted_geometry_input(
-        &cache,
+        &reads,
         prepared.geometry_objects().document.clone(),
         prepared.root_input(),
         access.clone(),
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    reads.assert_retained(&imported.geometry_objects().objects);
     assert_eq!(imported, prepared);
 
     let mut wrong = prepared.root_input().clone();

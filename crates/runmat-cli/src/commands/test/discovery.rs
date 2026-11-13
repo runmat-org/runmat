@@ -24,7 +24,11 @@ pub(super) struct PreparedDiscovery {
     _resolved_project: Option<NativeResolvedProject>,
 }
 
-pub(super) async fn prepare(args: &TestArgs, cli: &Cli) -> Result<PreparedDiscovery> {
+pub(super) async fn prepare(
+    args: &TestArgs,
+    cli: &Cli,
+    compat_mode: runmat_core::CompatMode,
+) -> Result<PreparedDiscovery> {
     let current = std::env::current_dir().context("failed to resolve current directory")?;
     let manifest_path = cli
         .config
@@ -98,16 +102,19 @@ pub(super) async fn prepare(args: &TestArgs, cli: &Cli) -> Result<PreparedDiscov
                 if manifest_bytes.is_empty() {
                     runmat_execution::Digest::sha256(b"loose-project").to_string()
                 } else {
-                    format!("sha256:{:x}", Sha256::digest(&manifest_bytes))
+                    format!("sha256:{}", hex::encode(Sha256::digest(&manifest_bytes)))
                 },
                 None,
             )
         });
     let test_config_digest = format!(
-        "sha256:{:x}",
-        Sha256::digest(serde_json::to_vec(&test_config).context("failed to encode test config")?)
+        "sha256:{}",
+        hex::encode(Sha256::digest(
+            serde_json::to_vec(&test_config).context("failed to encode test config")?
+        )),
     );
     let snapshot = freeze_native_snapshot(NativeSnapshotInput {
+        compat_mode,
         project_root: project_root.clone(),
         catalog_roots,
         graph_digest,

@@ -10,199 +10,16 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinErrorDescriptor, MODE_ERROR_COMPLEX_UNSUPPORTED, MODE_ERROR_INTERNAL,
+    MODE_ERROR_INVALID_ARGUMENT, MODE_ERROR_INVALID_DIMENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::stats::type_resolvers::mode_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mode";
-
-const MODE_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Most frequent value along the selected dimension.",
-}];
-
-const MODE_OUTPUT_MF: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Most frequent value along the selected dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "F",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Frequency counts for each reported mode.",
-    },
-];
-
-const MODE_OUTPUT_MFC: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Most frequent value along the selected dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "F",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Frequency counts for each reported mode.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Cell array containing all tied modal values per slice.",
-    },
-];
-
-const MODE_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input data array.",
-}];
-
-const MODE_INPUTS_X_DIM_OR_ALL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input data array.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim_or_vecdim_or_all",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reduction axis, vector of axes, or 'all'.",
-    },
-];
-
-const MODE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "M = mode(X)",
-        inputs: &MODE_INPUTS_X,
-        outputs: &MODE_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = mode(X, dim_or_vecdim_or_all)",
-        inputs: &MODE_INPUTS_X_DIM_OR_ALL,
-        outputs: &MODE_OUTPUT_M,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, F] = mode(X)",
-        inputs: &MODE_INPUTS_X,
-        outputs: &MODE_OUTPUT_MF,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, F] = mode(X, dim_or_vecdim_or_all)",
-        inputs: &MODE_INPUTS_X_DIM_OR_ALL,
-        outputs: &MODE_OUTPUT_MF,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, F, C] = mode(X)",
-        inputs: &MODE_INPUTS_X,
-        outputs: &MODE_OUTPUT_MFC,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[M, F, C] = mode(X, dim_or_vecdim_or_all)",
-        inputs: &MODE_INPUTS_X_DIM_OR_ALL,
-        outputs: &MODE_OUTPUT_MFC,
-    },
-];
-
-const MODE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MODE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:mode:InvalidArgument"),
-    when: "Arguments are malformed, duplicated, or unrecognised.",
-    message: "mode: invalid argument",
-};
-
-const MODE_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MODE.INVALID_DIMENSION",
-    identifier: Some("RunMat:mode:InvalidDimension"),
-    when: "Dimension argument is zero or negative.",
-    message: "mode: dimension must be >= 1",
-};
-
-const MODE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MODE.COMPLEX_UNSUPPORTED",
-    identifier: Some("RunMat:mode:ComplexUnsupported"),
-    when: "Input data is complex-valued.",
-    message: "mode: complex inputs are not supported; gather real data first",
-};
-
-const MODE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MODE.INTERNAL",
-    identifier: Some("RunMat:mode:Internal"),
-    when: "Internal conversion/allocation/shape handling fails.",
-    message: "mode: internal operation failed",
-};
-
-const MODE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    MODE_ERROR_INVALID_ARGUMENT,
-    MODE_ERROR_INVALID_DIMENSION,
-    MODE_ERROR_COMPLEX_UNSUPPORTED,
-    MODE_ERROR_INTERNAL,
-];
-
-pub const MODE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MODE_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MODE_ERRORS,
-};
-
-const MODE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Numeric arrays accept every real integer class; modal values and every tied-value cell preserve the exact input class.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim_or_vecdim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Positive integer dimensions are parsed exactly from typed integer or integer-valued floating controls.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[M, F, C] = mode(A, dim_or_vecdim_or_all)",
-        inputs: &MODE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "M and the sorted tied vectors in C preserve exact same-class integer storage, F is always double, first/smallest tie rules are exact above flintmax, and resident integer inputs gather then re-upload typed value outputs.",
-    }];
 
 fn mode_error_with(
     error: &'static BuiltinErrorDescriptor,
@@ -223,38 +40,31 @@ fn mode_internal_error(message: impl Into<String>) -> RuntimeError {
     mode_error_with(&MODE_ERROR_INTERNAL, message)
 }
 
-fn mode_type_resolver(args: &[Type], ctx: &ResolveContext) -> Type {
-    mode_type(args, ctx)
-}
-
 #[runtime_builtin(
     name = "mode",
-    category = "stats/summary",
-    summary = "Most frequent value along a dimension with MATLAB-compatible tie semantics.",
-    keywords = "mode,frequency,statistics,reduction,ties",
-    type_resolver(mode_type_resolver),
-    descriptor(crate::builtins::stats::summary::mode::MODE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::stats::summary::mode::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::mode"
 )]
-async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let parsed = parse_arguments(&rest).await?;
-    let gpu_provider = match &value {
-        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
-            .or_else(runmat_accelerate_api::provider),
+async fn mode_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let parsed = parse_arguments(rest.view()).await?;
+    let gpu_source = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     };
+    let gpu_provider = gpu_source
+        .as_ref()
+        .and_then(runmat_accelerate_api::provider_for_handle);
     let value = crate::gather_if_needed_async(&value).await?;
     let output_class = OutputClass::from_value(&value);
     let eval = mode_evaluate(value, parsed, output_class)?;
     let result = if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         } else if out_count == 1 {
-            Value::OutputList(vec![eval.into_values_value()?])
+            Value::output_list(vec![eval.into_values_value()?])
         } else if out_count == 2 {
             let (values, freq) = eval.into_pair()?;
-            Value::OutputList(vec![values, freq])
+            Value::output_list(vec![values, freq])
         } else {
             let (values, freq, cells) = eval.into_triple()?;
             crate::output_count::output_list_with_padding(out_count, vec![values, freq, cells])
@@ -263,7 +73,8 @@ async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         eval.into_values_value()?
     };
     if let Some(provider) = gpu_provider {
-        upload_mode_value(provider, result)
+        let protected: Vec<_> = gpu_source.iter().collect();
+        upload_mode_value(provider, result, &protected)
     } else {
         Ok(result)
     }
@@ -272,22 +83,37 @@ async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 fn upload_mode_value(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     value: Value,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let upload_tensor = |tensor: Tensor, logical: bool| -> BuiltinResult<Value> {
-        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|error| mode_internal_error(format!("mode: GPU upload failed: {error}")))?;
-        if logical {
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-        }
+    let upload_error = |error: runmat_accelerate_api::NumericUploadError| {
+        crate::build_runtime_error(format!("mode: GPU upload failed: {error}"))
+            .with_builtin("mode")
+            .with_identifier(MODE_ERROR_INTERNAL.identifier.expect("internal identifier"))
+            .with_source(error)
+            .build()
+    };
+    let upload_tensor = |tensor: Tensor| -> BuiltinResult<Value> {
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+            provider, &tensor, protected,
+        )
+        .map_err(upload_error)?;
+        Ok(Value::GpuTensor(handle))
+    };
+    let upload_logical = |data: &[u8], shape: &[usize]| -> BuiltinResult<Value> {
+        let handle = runmat_accelerate_api::upload_logical_protecting(
+            provider,
+            &runmat_accelerate_api::HostLogicalTensorView { data, shape },
+            protected,
+        )
+        .map_err(upload_error)?;
         Ok(Value::GpuTensor(handle))
     };
     match value {
         gpu @ Value::GpuTensor(_) => Ok(gpu),
-        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Tensor(tensor) => upload_tensor(tensor),
         Value::Num(number) => upload_tensor(
             Tensor::new(vec![number], vec![1, 1])
                 .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
-            false,
         ),
         Value::Int(integer) => upload_tensor(
             Tensor::new_integer(
@@ -295,33 +121,33 @@ fn upload_mode_value(
                 vec![1, 1],
             )
             .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
-            false,
         ),
-        Value::Bool(logical) => upload_tensor(
-            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
-            true,
-        ),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(mode_internal_error)?;
-            upload_tensor(tensor, true)
+        Value::Bool(logical) => upload_logical(&[u8::from(logical)], &[1, 1]),
+        Value::LogicalArray(logical) => upload_logical(&logical.data, &logical.shape),
+        Value::Cell(mut cell) => {
+            if !cell.data_owner().is_unique() {
+                cell.make_data_unique_unbounded()
+                    .map_err(|error| mode_internal_error(error.to_string()))?;
+            }
+            let slots = cell.try_data_mut_unique().ok_or_else(|| {
+                mode_internal_error("shared admitted Cell output requires an admitted replacement")
+            })?;
+            for slot in slots {
+                *slot = upload_mode_value(
+                    provider,
+                    std::mem::replace(slot, Value::Num(0.0)),
+                    protected,
+                )?;
+            }
+            Ok(Value::Cell(cell))
         }
-        Value::Cell(cell) => {
-            let shape = cell.shape.clone();
-            let data = cell
-                .data
-                .into_iter()
-                .map(|entry| upload_mode_value(provider, entry))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            runmat_value::CellArray::new_with_shape(data, shape)
-                .map(Value::Cell)
-                .map_err(mode_internal_error)
-        }
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|entry| upload_mode_value(provider, entry))
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(Value::OutputList),
+        Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)?
+            .try_map(
+                |entry| upload_mode_value(provider, entry, protected),
+                crate::sequence::sequence_error_to_runtime,
+            )
+            .map(|sequence| Value::OutputList(sequence.into_output_storage())),
         other => Ok(other),
     }
 }
@@ -339,7 +165,9 @@ struct ParsedArguments {
     axes: ModeAxes,
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = ModeAxes::Default;
     let mut axes_set = false;
 
@@ -365,7 +193,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
-    if let Some(text) = value_as_str(value) {
+    if let Some(text) = value_as_str(value)? {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(mode_error_with(
@@ -388,7 +216,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
         Value::Tensor(tensor) => (tensor::is_scalar_tensor(tensor), tensor.is_empty()),
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
-            let len = tensor::element_count(&handle.shape);
+            let len = tensor::element_count(handle.shape());
             (len == 1, len == 0)
         }
         _ => return Ok(None),
@@ -449,13 +277,22 @@ fn mode_dimension_error(message: String, scalar: bool) -> RuntimeError {
     mode_error_with(&MODE_ERROR_INVALID_DIMENSION, detail)
 }
 
-fn value_as_str(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+fn value_as_str(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
+    Ok(match value {
+        Value::String(s) => s.as_str().map(std::borrow::Cow::Borrowed),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            sa.data()[0].as_str().map(std::borrow::Cow::Borrowed)
+        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
+            crate::builtins::stats::decode_utf16_with_error(ca.data(), || {
+                mode_error_with(
+                    &MODE_ERROR_INVALID_ARGUMENT,
+                    "mode: dimension text is not valid UTF-16",
+                )
+            })?,
+        )),
         _ => None,
-    }
+    })
 }
 
 /// Evaluation artifact produced by `mode` carrying values, frequencies, and tied sets.
@@ -573,13 +410,13 @@ fn mode_evaluate(
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
     let tensor = materialize_tensor(value)?;
-    if matches!(&args.axes, ModeAxes::Default) && tensor.shape == [0, 0] {
+    if matches!(&args.axes, ModeAxes::Default) && tensor.shape() == [0, 0] {
         return ModeEvaluation::empty(vec![1, 1], output_class);
     }
     if let Some(storage) = tensor.integer_storage().cloned() {
         return match args.axes {
             ModeAxes::Default => {
-                let dim = default_dimension_from_shape(&tensor.shape);
+                let dim = default_dimension_from_shape(tensor.shape());
                 reduce_integer_along_dim(tensor, storage, dim)
             }
             ModeAxes::Dim(dim) => reduce_integer_along_dim(tensor, storage, dim),
@@ -589,7 +426,7 @@ fn mode_evaluate(
     }
     match args.axes {
         ModeAxes::Default => {
-            let dim = default_dimension_from_shape(&tensor.shape);
+            let dim = default_dimension_from_shape(tensor.shape());
             reduce_along_dim(tensor, dim, output_class)
         }
         ModeAxes::Dim(dim) => reduce_along_dim(tensor, dim, output_class),
@@ -656,7 +493,7 @@ fn reduce_along_dim(
     if dim == 0 {
         return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = tensor::tensor_into_values_f64(tensor);
 
     if shape.is_empty() {
@@ -758,7 +595,7 @@ fn reduce_along_dims(
     dims: Vec<usize>,
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let (output_shape, reduce_mask) = vecdim_plan(&shape, dims)?;
     if !reduce_mask.iter().any(|reduced| *reduced) {
         return reduce_along_dim(tensor, shape.len() + 1, output_class);
@@ -812,20 +649,20 @@ fn reduce_integer_along_dim(
     if dim == 0 {
         return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
     }
-    if tensor.shape.is_empty() || dim > tensor.shape.len() {
+    if tensor.shape().is_empty() || dim > tensor.shape().len() {
         return integer_identity_mode(tensor, storage);
     }
 
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let mut output_shape = tensor.shape.clone();
+    let reduce_len = tensor.shape()[dim_index];
+    let mut output_shape = tensor.shape().to_vec();
     output_shape[dim_index] = 1;
     if reduce_len == 0 || storage.is_empty() {
         return ModeEvaluation::empty(output_shape, OutputClass::Double);
     }
 
-    let stride_before = dim_product(&tensor.shape[..dim_index])?;
-    let stride_after = dim_product(&tensor.shape[dim_index + 1..])?;
+    let stride_before = dim_product(&tensor.shape()[..dim_index])?;
+    let stride_after = dim_product(&tensor.shape()[dim_index + 1..])?;
     let output_len = stride_before
         .checked_mul(stride_after)
         .ok_or_else(|| mode_internal_error("mode: output size overflow"))?;
@@ -875,7 +712,7 @@ fn reduce_integer_along_dims(
     storage: IntegerStorage,
     dims: Vec<usize>,
 ) -> BuiltinResult<ModeEvaluation> {
-    let (output_shape, reduce_mask) = vecdim_plan(&tensor.shape, dims)?;
+    let (output_shape, reduce_mask) = vecdim_plan(tensor.shape(), dims)?;
     if !reduce_mask.iter().any(|reduced| *reduced) {
         return integer_identity_mode(tensor, storage);
     }
@@ -885,7 +722,7 @@ fn reduce_integer_along_dims(
     let output_len = tensor::element_count(&output_shape);
     let mut slices = vec![Vec::new(); output_len];
     for (linear, value) in storage.exact_values().into_iter().enumerate() {
-        let output_index = vecdim_output_index(linear, &tensor.shape, &reduce_mask);
+        let output_index = vecdim_output_index(linear, tensor.shape(), &reduce_mask);
         slices[output_index].push(value);
     }
     let mut values = Vec::with_capacity(output_len);
@@ -955,7 +792,7 @@ fn vecdim_output_index(linear: usize, shape: &[usize], reduce_mask: &[bool]) -> 
 }
 
 fn integer_identity_mode(tensor: Tensor, storage: IntegerStorage) -> BuiltinResult<ModeEvaluation> {
-    let output_shape = tensor.shape.clone();
+    let output_shape = tensor.shape().to_vec();
     let values = Tensor::new_integer(storage.clone(), output_shape.clone())
         .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
     let freq = Tensor::new(vec![1.0; storage.len()], output_shape.clone())
@@ -1286,7 +1123,7 @@ fn tensor_into_class_value(tensor: Tensor, class: OutputClass) -> BuiltinResult<
     match class {
         OutputClass::Double => unreachable!("double handled above"),
         OutputClass::Single => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| value as f32)
@@ -1317,7 +1154,7 @@ fn tensor_into_class_value(tensor: Tensor, class: OutputClass) -> BuiltinResult<
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
             }
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data: Vec<u8> = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| if value != 0.0 { 1 } else { 0 })
@@ -1349,7 +1186,7 @@ fn tensor_into_class_array_value(tensor: Tensor, class: OutputClass) -> BuiltinR
     match class {
         OutputClass::Double => unreachable!("double handled above"),
         OutputClass::Single => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| value as f32)
@@ -1380,7 +1217,7 @@ fn tensor_into_class_array_value(tensor: Tensor, class: OutputClass) -> BuiltinR
             if contains_nan {
                 return Ok(Value::Tensor(tensor));
             }
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data: Vec<u8> = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| if value != 0.0 { 1 } else { 0 })
@@ -1416,7 +1253,7 @@ fn tensor_into_integer_class_value(tensor: Tensor, kind: IntKind) -> BuiltinResu
 }
 
 fn tensor_into_integer_class_array_value(tensor: Tensor, kind: IntKind) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = if let Some(storage) = tensor.integer_storage() {
         kind.storage_from_int_values(storage.exact_values())
     } else {
@@ -1494,17 +1331,36 @@ fn compare_f64(a: f64, b: f64) -> Ordering {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::MODE_DESCRIPTOR;
     use runmat_value::{IntValue, LogicalArray, NumericDType, Tensor, Value};
 
     fn mode_call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::mode_builtin(value, rest))
+        block_on(super::mode_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn mode_outputs(value: Value, rest: Vec<Value>, out_count: usize) -> BuiltinResult<Vec<Value>> {
-        let _guard = crate::output_count::push_output_count(Some(out_count));
+        let _guard =
+            crate::output_count::push_output_count(Some(out_count)).expect("output-count scope");
         let result = mode_call(value, rest)?;
         match result {
-            Value::OutputList(list) => Ok(list),
+            Value::OutputList(list) => list
+                .try_into_owned()
+                .map_err(|_| {
+                    crate::runtime_error::semantic_error(
+                        "SharedOutputStorage",
+                        "mode test output list was shared",
+                    )
+                })?
+                .try_into_unbounded_vec()
+                .map_err(|_| {
+                    crate::runtime_error::semantic_error(
+                        "SharedOutputStorage",
+                        "mode test output list retained a managed claim",
+                    )
+                }),
             other => Ok(vec![other]),
         }
     }
@@ -1517,16 +1373,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mode_type_resolver_reduces_first_dim() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
+    fn mode_catalog_inference_reduces_first_dim() {
+        use runmat_types::{
+            CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+            OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact,
+            ValueKindFact,
         };
-        let out = mode_type_resolver(&[ty], &ResolveContext::new(Vec::new()));
+        let request = CallRequest {
+            arguments: vec![ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                }),
+                ShapeFact::from(vec![Some(3), Some(4)]),
+                StorageFact::Dense,
+            )],
+            literals: LiteralContext::new(vec![LiteralValue::Unknown]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let out =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::MODE_CATALOG_ENTRY, &request);
+        assert!(out.diagnostics.is_empty());
+        assert_eq!(out.outputs.len(), 1);
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
+            out.outputs[0].shape,
+            ShapeFact::from(vec![Some(1), Some(4)])
         );
     }
 
@@ -1549,6 +1420,28 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn mode_concrete_rank_zero_and_rank_one_shapes_follow_existing_axes() {
+        let scalar = Tensor::new(vec![7.0], vec![]).expect("rank-zero tensor");
+        let scalar_outputs = mode_outputs(Value::Tensor(scalar), Vec::new(), 2).expect("mode");
+        assert_eq!(scalar_outputs, vec![Value::Num(7.0), Value::Num(1.0)]);
+
+        let vector = Tensor::new(vec![1.0, 2.0, 2.0], vec![3]).expect("rank-one tensor");
+        let reduced = mode_outputs(Value::Tensor(vector.clone()), Vec::new(), 2).expect("mode");
+        assert_eq!(reduced, vec![Value::Num(2.0), Value::Num(2.0)]);
+
+        let identity = mode_outputs(Value::Tensor(vector), vec![Value::Int(IntValue::I32(2))], 2)
+            .expect("mode on trailing singleton axis");
+        assert_eq!(expect_tensor(&identity[0]).shape(), &[3]);
+        assert_eq!(
+            expect_tensor(&identity[0]).materialize_f64(),
+            vec![1.0, 2.0, 2.0]
+        );
+        assert_eq!(expect_tensor(&identity[1]).shape(), &[3]);
+        assert_eq!(expect_tensor(&identity[1]).materialize_f64(), vec![1.0; 3]);
+    }
+
     #[test]
     fn mode_vector_simple_majority() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![7, 1]).unwrap();
@@ -1569,7 +1462,7 @@ pub(crate) mod tests {
         let Value::Cell(ties) = &outputs[2] else {
             panic!("expected ties cell");
         };
-        let Value::Tensor(tie_values) = &ties.data[0] else {
+        let Value::Tensor(tie_values) = &ties.data()[0] else {
             panic!("expected tie tensor");
         };
         assert_eq!(tie_values.numeric_dtype(), NumericDType::F32);
@@ -1585,11 +1478,11 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                assert_eq!(cell.data.len(), 1);
-                let entry = &cell.data[0];
+                assert_eq!(cell.data().len(), 1);
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 1]);
+                        assert_eq!(t.shape(), [2, 1]);
                         assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
                     }
                     other => panic!("expected tensor inside cell, got {other:?}"),
@@ -1609,7 +1502,7 @@ pub(crate) mod tests {
         let result = mode_call(Value::Tensor(tensor), Vec::new()).expect("mode");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1627,7 +1520,7 @@ pub(crate) mod tests {
             mode_call(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("mode");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1646,7 +1539,7 @@ pub(crate) mod tests {
         let result = mode_call(Value::Tensor(tensor), vec![Value::Tensor(dim)]).expect("mode");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1663,10 +1556,10 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![1, 1]);
+                        assert_eq!(t.shape(), [1, 1]);
                         assert_eq!(t.materialize_f64(), vec![2.0]);
                     }
                     other => panic!("expected tensor in cell, got {other:?}"),
@@ -1685,20 +1578,20 @@ pub(crate) mod tests {
         let outputs =
             mode_outputs(Value::Tensor(input), vec![Value::Tensor(dims)], 3).expect("mode");
         let values = expect_tensor(&outputs[0]);
-        assert_eq!(values.shape, vec![1, 1, 2]);
+        assert_eq!(values.shape(), [1, 1, 2]);
         assert_eq!(values.materialize_f64(), vec![1.0, 3.0]);
         let frequency = expect_tensor(&outputs[1]);
-        assert_eq!(frequency.shape, vec![1, 1, 2]);
+        assert_eq!(frequency.shape(), [1, 1, 2]);
         assert_eq!(frequency.materialize_f64(), vec![2.0, 3.0]);
         let Value::Cell(ties) = &outputs[2] else {
             panic!("expected tied-value cell");
         };
         assert_eq!(ties.shape, vec![1, 1, 2]);
         assert_eq!(
-            expect_tensor(&ties.data[0]).materialize_f64(),
+            expect_tensor(&ties.data()[0]).materialize_f64(),
             vec![1.0, 2.0]
         );
-        assert_eq!(expect_tensor(&ties.data[1]).materialize_f64(), vec![3.0]);
+        assert_eq!(expect_tensor(&ties.data()[1]).materialize_f64(), vec![3.0]);
     }
 
     #[test]
@@ -1731,11 +1624,11 @@ pub(crate) mod tests {
             panic!("expected tied-value cell");
         };
         assert_eq!(
-            expect_tensor(&ties.data[0]).integer_storage(),
+            expect_tensor(&ties.data()[0]).integer_storage(),
             Some(&IntegerStorage::U64(vec![wide - 1, wide]))
         );
         assert_eq!(
-            expect_tensor(&ties.data[1]).integer_storage(),
+            expect_tensor(&ties.data()[1]).integer_storage(),
             Some(&IntegerStorage::U64(vec![wide]))
         );
     }
@@ -1760,10 +1653,10 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![0, 1]);
+                        assert_eq!(t.shape(), [0, 1]);
                         assert!(t.materialize_f64().is_empty());
                     }
                     other => panic!("expected empty tensor in cell, got {other:?}"),
@@ -1796,11 +1689,11 @@ pub(crate) mod tests {
         assert_eq!(outputs[1], Value::Num(2.0));
         match &outputs[2] {
             Value::Cell(cell) => {
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.numeric_dtype(), NumericDType::U16);
-                        assert_eq!(t.shape, vec![1, 1]);
+                        assert_eq!(t.shape(), [1, 1]);
                         assert_eq!(t.integer_storage(), Some(&IntegerStorage::U16(vec![10])));
                     }
                     other => panic!("expected uint16 tensor inside cell, got {other:?}"),
@@ -1817,7 +1710,7 @@ pub(crate) mod tests {
         let outputs = mode_outputs(Value::Tensor(unsigned), Vec::new(), 3).expect("mode");
         match &outputs[0] {
             Value::Tensor(values) => {
-                assert_eq!(values.shape, vec![1, 2]);
+                assert_eq!(values.shape(), [1, 2]);
                 assert_eq!(
                     values.integer_storage(),
                     Some(&IntegerStorage::U16(vec![2, 3]))
@@ -1828,11 +1721,11 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(
-                    expect_tensor(&cell.data[0]).integer_storage(),
+                    expect_tensor(&cell.data()[0]).integer_storage(),
                     Some(&IntegerStorage::U16(vec![2]))
                 );
                 assert_eq!(
-                    expect_tensor(&cell.data[1]).integer_storage(),
+                    expect_tensor(&cell.data()[1]).integer_storage(),
                     Some(&IntegerStorage::U16(vec![3]))
                 );
             }
@@ -1852,7 +1745,7 @@ pub(crate) mod tests {
         }
         match &outputs[2] {
             Value::Cell(cell) => assert_eq!(
-                expect_tensor(&cell.data[1]).integer_storage(),
+                expect_tensor(&cell.data()[1]).integer_storage(),
                 Some(&IntegerStorage::I16(vec![-2]))
             ),
             other => panic!("expected tied-value cell array, got {other:?}"),
@@ -1924,7 +1817,7 @@ pub(crate) mod tests {
             .expect("mode");
         match &outputs[0] {
             Value::Tensor(values) => {
-                assert_eq!(values.shape, vec![2, 1]);
+                assert_eq!(values.shape(), [2, 1]);
                 assert_eq!(
                     values.integer_storage(),
                     Some(&IntegerStorage::U64(vec![wide, wide - 1]))
@@ -1940,11 +1833,11 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![2, 1]);
                 assert_eq!(
-                    expect_tensor(&cell.data[0]).integer_storage(),
+                    expect_tensor(&cell.data()[0]).integer_storage(),
                     Some(&IntegerStorage::U64(vec![wide]))
                 );
                 assert_eq!(
-                    expect_tensor(&cell.data[1]).integer_storage(),
+                    expect_tensor(&cell.data()[1]).integer_storage(),
                     Some(&IntegerStorage::U64(vec![wide - 1]))
                 );
             }
@@ -1962,7 +1855,7 @@ pub(crate) mod tests {
         assert_eq!(all_outputs[1], Value::Num(2.0));
         match &all_outputs[2] {
             Value::Cell(cell) => assert_eq!(
-                expect_tensor(&cell.data[0]).integer_storage(),
+                expect_tensor(&cell.data()[0]).integer_storage(),
                 Some(&IntegerStorage::I64(vec![i64::MIN + 2, 8]))
             ),
             other => panic!("expected tied-value cell array, got {other:?}"),
@@ -1987,7 +1880,7 @@ pub(crate) mod tests {
         }
         match &outputs[2] {
             Value::Cell(cell) => assert_eq!(
-                expect_tensor(&cell.data[1]).integer_storage(),
+                expect_tensor(&cell.data()[1]).integer_storage(),
                 Some(&IntegerStorage::U64(vec![u64::MAX - 1]))
             ),
             other => panic!("expected tied-value cell array, got {other:?}"),
@@ -2002,7 +1895,7 @@ pub(crate) mod tests {
         assert_eq!(outputs[1], Value::Num(3.0));
         match &outputs[2] {
             Value::Cell(cell) => {
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::LogicalArray(array) => {
                         assert_eq!(array.shape, vec![1, 1]);
@@ -2071,7 +1964,7 @@ pub(crate) mod tests {
             let source = Tensor::new(vec![1.0, 2.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &source.materialize_f64(),
-                shape: &source.shape,
+                shape: source.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let outputs = mode_outputs(Value::GpuTensor(handle), Vec::new(), 2).expect("mode");
@@ -2088,14 +1981,12 @@ pub(crate) mod tests {
                 vec![2.0]
             );
 
-            let logical_source = Tensor::new(vec![0.0, 1.0, 1.0], vec![3, 1]).unwrap();
             let logical_handle = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &logical_source.materialize_f64(),
-                    shape: &logical_source.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1],
+                    shape: &[3, 1],
                 })
                 .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
             let logical_outputs =
                 mode_outputs(Value::GpuTensor(logical_handle), Vec::new(), 2).expect("mode");
             let Value::GpuTensor(logical_mode) = &logical_outputs[0] else {
@@ -2154,7 +2045,7 @@ pub(crate) mod tests {
             let Value::Cell(ties) = &outputs[2] else {
                 panic!("expected tied-value cell");
             };
-            let Value::GpuTensor(tie_handle) = &ties.data[0] else {
+            let Value::GpuTensor(tie_handle) = &ties.data()[0] else {
                 panic!("expected resident integer tied values");
             };
             assert_eq!(
@@ -2162,7 +2053,7 @@ pub(crate) mod tests {
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
             assert_eq!(
-                test_support::gather(ties.data[0].clone())
+                test_support::gather(ties.data()[0].clone())
                     .expect("gather ties")
                     .integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide - 1, wide]))
@@ -2177,14 +2068,14 @@ pub(crate) mod tests {
             .expect("mode");
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match &outputs[1] {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor of frequencies, got {other:?}"),

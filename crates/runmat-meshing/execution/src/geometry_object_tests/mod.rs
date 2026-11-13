@@ -8,7 +8,7 @@ use runmat_geometry_core::{
 
 use crate::{
     import_exact_geometry_input, import_exact_geometry_objects, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, MeshingArtifactAccess,
+    prepare_exact_geometry_objects, ArtifactAccess,
 };
 
 #[test]
@@ -25,14 +25,16 @@ fn exact_geometry_round_trips_through_shared_input_objects() {
     .unwrap();
     let mut cache = MemoryCache::default();
     cache.insert_all(&prepared.objects);
+    let reads = crate::tests::read_buffers::ReadBuffers::new(&cache);
     let imported = import_exact_geometry_objects(
-        &cache,
+        &reads,
         prepared.document.clone(),
         prepared.root_reference(),
         ObjectInventoryLimits::default(),
     )
     .unwrap();
 
+    reads.assert_retained(&imported.objects);
     assert_eq!(imported, prepared);
     assert!(imported.objects.iter().all(|object| {
         object.descriptor.namespace == runmat_execution_artifact::ObjectNamespace::InputValue
@@ -53,11 +55,13 @@ fn kernel_representation_is_a_verified_transfer_object() {
             representation_digest: *runmat_execution::Digest::sha256(&representation).bytes(),
         },
     };
+    let original = representation.clone();
+    let original_pointer = original.as_ptr();
     let prepared = prepare_exact_geometry_objects(
         document,
         topology,
         evaluators,
-        Some(representation.clone()),
+        Some(original),
         None,
         ObjectInventoryLimits::default(),
     )
@@ -68,17 +72,38 @@ fn kernel_representation_is_a_verified_transfer_object() {
         .find(|object| object.descriptor.media_type == KERNEL_REPRESENTATION_MEDIA_TYPE)
         .unwrap();
     assert_eq!(representation_object.bytes, representation);
+    assert_eq!(representation_object.bytes.as_ptr(), original_pointer);
+    assert_eq!(
+        prepared.kernel_representation().unwrap().unwrap().as_ptr(),
+        original_pointer
+    );
 
     let mut cache = MemoryCache::default();
     cache.insert_all(&prepared.objects);
+    let reads = crate::tests::read_buffers::ReadBuffers::new(&cache);
     let imported = import_exact_geometry_objects(
-        &cache,
+        &reads,
         prepared.document.clone(),
         prepared.root_reference(),
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    reads.assert_retained(&imported.objects);
     assert_eq!(imported, prepared);
+    let imported_pointer = imported.kernel_representation().unwrap().unwrap().as_ptr();
+    let components = imported.into_components().unwrap();
+    assert_eq!(
+        components.kernel_representation.as_ref().unwrap().as_ptr(),
+        imported_pointer
+    );
+    let mut missing = prepared.clone();
+    missing
+        .objects
+        .retain(|object| object.descriptor.media_type != KERNEL_REPRESENTATION_MEDIA_TYPE);
+    assert!(
+        missing.kernel_representation().is_err(),
+        "missing native representation must not become a portable fallback"
+    );
 
     cache.replace(
         representation_object.descriptor.digest,
@@ -203,14 +228,16 @@ fn exact_geometry_projects_to_complete_driver_owned_input_inventory() {
 
     let mut cache = MemoryCache::default();
     cache.insert_all(&prepared.geometry_objects().objects);
+    let reads = crate::tests::read_buffers::ReadBuffers::new(&cache);
     let imported = import_exact_geometry_input(
-        &cache,
+        &reads,
         prepared.geometry_objects().document.clone(),
         prepared.root_input(),
         access,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    reads.assert_retained(&imported.geometry_objects().objects);
     assert_eq!(imported, prepared);
 }
 
@@ -245,7 +272,7 @@ fn exact_geometry_input_rejects_wrong_authority_and_object_kind() {
     .is_err());
 
     wrong = prepared.root_input().clone();
-    wrong.kind = ValueRefKind::ResultObject;
+    wrong.kind = ValueRefKind::WorkerObject;
     assert!(import_exact_geometry_input(
         &cache,
         prepared.geometry_objects().document.clone(),
@@ -256,8 +283,8 @@ fn exact_geometry_input_rejects_wrong_authority_and_object_kind() {
     .is_err());
 }
 
-fn access() -> MeshingArtifactAccess {
-    MeshingArtifactAccess {
+fn access() -> ArtifactAccess {
+    ArtifactAccess {
         authorization_scope: "geometry-run".into(),
         encryption_context: runmat_execution::Digest::sha256(b"geometry-context"),
     }

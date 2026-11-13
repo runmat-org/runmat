@@ -1,5 +1,6 @@
 use crate::interpreter::errors::mex;
 use runmat_runtime::builtins::common::tensor::is_scalar_tensor;
+use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerStorage, LogicalArray, SymbolicArray, SymbolicExpr, Tensor,
@@ -7,7 +8,10 @@ use runmat_value::{
 };
 use std::future::Future;
 
-pub fn pack_to_row(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeError> {
+pub fn pack_to_row(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    count: usize,
+) -> Result<(), RuntimeError> {
     let mut tmp: Vec<Value> = Vec::with_capacity(count);
     for _ in 0..count {
         tmp.push(
@@ -18,11 +22,13 @@ pub fn pack_to_row(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeEr
     }
     tmp.reverse();
     let tens = pack_numeric_values(tmp, vec![1, count], "PackToRow")?;
-    stack.push(Value::Tensor(tens));
-    Ok(())
+    stack.try_push(Value::Tensor(tens))
 }
 
-pub fn pack_to_col(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeError> {
+pub fn pack_to_col(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    count: usize,
+) -> Result<(), RuntimeError> {
     let mut tmp: Vec<Value> = Vec::with_capacity(count);
     for _ in 0..count {
         tmp.push(
@@ -33,11 +39,14 @@ pub fn pack_to_col(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeEr
     }
     tmp.reverse();
     let tens = pack_numeric_values(tmp, vec![count, 1], "PackToCol")?;
-    stack.push(Value::Tensor(tens));
-    Ok(())
+    stack.try_push(Value::Tensor(tens))
 }
 
-pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result<(), RuntimeError> {
+pub fn create_matrix(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    rows: usize,
+    cols: usize,
+) -> Result<(), RuntimeError> {
     let total_elements = rows * cols;
     let mut row_major = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
@@ -51,7 +60,7 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
     if total_elements == 0 {
         let matrix = Tensor::new_2d(Vec::new(), rows, cols)
             .map_err(|e| format!("Matrix creation error: {e}"))?;
-        stack.push(Value::Tensor(matrix));
+        stack.try_push(Value::Tensor(matrix))?;
     } else if row_major
         .iter()
         .any(|v| matches!(v, Value::Symbolic(_) | Value::SymbolicArray(_)))
@@ -64,7 +73,7 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         }
         let matrix = SymbolicArray::new_2d(data, rows, cols)
             .map_err(|e| format!("Symbolic matrix creation error: {e}"))?;
-        stack.push(Value::SymbolicArray(matrix));
+        stack.try_push(Value::SymbolicArray(matrix))?;
     } else if row_major.iter().all(|v| matches!(v, Value::Bool(_))) {
         let mut data = vec![0u8; total_elements];
         for r in 0..rows {
@@ -77,7 +86,7 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         }
         let matrix = LogicalArray::new(data, vec![rows, cols])
             .map_err(|e| format!("Logical matrix creation error: {e}"))?;
-        stack.push(Value::LogicalArray(matrix));
+        stack.try_push(Value::LogicalArray(matrix))?;
     } else if row_major.iter().any(|v| matches!(v, Value::Complex(_, _))) {
         let mut data = vec![(0.0, 0.0); total_elements];
         for r in 0..rows {
@@ -87,7 +96,7 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         }
         let matrix = ComplexTensor::new_2d(data, rows, cols)
             .map_err(|e| format!("Complex matrix creation error: {e}"))?;
-        stack.push(Value::ComplexTensor(matrix));
+        stack.try_push(Value::ComplexTensor(matrix))?;
     } else if let Some(target) = leftmost_integer_target(&row_major) {
         let zero = target.cast_f64_assignment(0.0);
         let mut values = vec![zero; total_elements];
@@ -101,7 +110,7 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
             .map_err(|e| format!("Integer matrix creation error: {e}"))?;
         let matrix = Tensor::new_integer(storage, vec![rows, cols])
             .map_err(|e| format!("Integer matrix creation error: {e}"))?;
-        stack.push(Value::Tensor(matrix));
+        stack.try_push(Value::Tensor(matrix))?;
     } else {
         let mut data = vec![0.0; total_elements];
         for r in 0..rows {
@@ -111,7 +120,7 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         }
         let matrix =
             Tensor::new_2d(data, rows, cols).map_err(|e| format!("Matrix creation error: {e}"))?;
-        stack.push(Value::Tensor(matrix));
+        stack.try_push(Value::Tensor(matrix))?;
     }
     Ok(())
 }
@@ -185,7 +194,7 @@ fn scalar_to_real(value: &Value) -> Result<f64, RuntimeError> {
 fn scalar_to_symbolic(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
     match value {
         Value::Symbolic(expr) => Ok(expr.clone()),
-        Value::SymbolicArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::SymbolicArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::Num(n) => Ok(SymbolicExpr::constant(*n)),
         Value::Int(i) => Ok(SymbolicExpr::constant(i.to_f64())),
         Value::Bool(flag) => Ok(SymbolicExpr::constant(if *flag { 1.0 } else { 0.0 })),
@@ -195,51 +204,14 @@ fn scalar_to_symbolic(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
     }
 }
 
-pub async fn create_matrix_dynamic<F, Fut>(
-    stack: &mut Vec<Value>,
-    num_rows: usize,
-    mut create_from_values: F,
-) -> Result<(), RuntimeError>
-where
-    F: FnMut(Vec<Vec<Value>>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
-{
-    let mut row_lengths = Vec::new();
-    for _ in 0..num_rows {
-        let row_len: f64 = (&stack
-            .pop()
-            .ok_or(mex("StackUnderflow", "stack underflow"))?)
-            .try_into()?;
-        row_lengths.push(row_len as usize);
-    }
-    row_lengths.reverse();
-    let mut rows_data = Vec::new();
-    for &row_len in row_lengths.iter().rev() {
-        let mut row_values = Vec::new();
-        for _ in 0..row_len {
-            row_values.push(
-                stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?,
-            );
-        }
-        row_values.reverse();
-        rows_data.push(row_values);
-    }
-    rows_data.reverse();
-    let result = create_from_values(rows_data).await?;
-    stack.push(result);
-    Ok(())
-}
-
 pub async fn create_range<F, Fut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     has_step: bool,
     mut call_colon: F,
 ) -> Result<(), RuntimeError>
 where
     F: FnMut(Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Value, RuntimeError>>,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     if has_step {
         let end = stack
@@ -251,7 +223,11 @@ where
         let start = stack
             .pop()
             .ok_or(mex("StackUnderflow", "stack underflow"))?;
-        stack.push(call_colon(vec![start, step, end]).await?);
+        let arguments = vec![start, step, end];
+        let _roots = crate::call::root_values(&arguments)?;
+        call_colon(arguments)
+            .await?
+            .with_owned(|value| stack.try_push(value))?;
     } else {
         let end = stack
             .pop()
@@ -259,37 +235,25 @@ where
         let start = stack
             .pop()
             .ok_or(mex("StackUnderflow", "stack underflow"))?;
-        stack.push(call_colon(vec![start, end]).await?);
+        let arguments = vec![start, end];
+        let _roots = crate::call::root_values(&arguments)?;
+        call_colon(arguments)
+            .await?
+            .with_owned(|value| stack.try_push(value))?;
     }
     Ok(())
 }
 
-pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeError> {
-    let value = stack
-        .pop()
-        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-    match value {
-        Value::OutputList(values) => {
-            if values.len() < out_count {
-                let message = format!(
-                    "Requested {out_count} outputs but call produced {} output value(s)",
-                    values.len()
-                );
-                return Err(mex("TooManyOutputs", &message));
-            }
-            for v in values.into_iter().take(out_count) {
-                stack.push(v);
-            }
-        }
-        other => {
-            if out_count > 1 {
-                let message = format!(
-                    "Requested {out_count} outputs but call produced a single output value"
-                );
-                return Err(mex("TooManyOutputs", &message));
-            }
-            stack.push(other);
-        }
+pub fn unpack(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    out_count: usize,
+) -> Result<(), RuntimeError> {
+    let _ = stack;
+    if out_count > 1 {
+        return Err(mex(
+            "TooManyOutputs",
+            &format!("Requested {out_count} outputs from a scalar expression"),
+        ));
     }
     Ok(())
 }
@@ -300,18 +264,18 @@ mod tests {
 
     #[test]
     fn pack_to_row_preserves_leftmost_integer_class_exactly() {
-        let mut stack = vec![
+        let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
             Value::Int(IntValue::U64(u64::MAX)),
             Value::Num(3.5),
             Value::Int(IntValue::U8(9)),
-        ];
+        ]);
 
         pack_to_row(&mut stack, 3).expect("pack row");
 
         let Value::Tensor(output) = stack.pop().expect("output") else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), vec![1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 4, 9]))
@@ -320,18 +284,18 @@ mod tests {
 
     #[test]
     fn pack_to_col_preserves_leftmost_integer_class_exactly() {
-        let mut stack = vec![
+        let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
             Value::Int(IntValue::I8(12)),
             Value::Int(IntValue::U64(u64::MAX)),
             Value::Num(-200.0),
-        ];
+        ]);
 
         pack_to_col(&mut stack, 3).expect("pack col");
 
         let Value::Tensor(output) = stack.pop().expect("output") else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.shape(), vec![3, 1]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![12, i8::MAX, i8::MIN]))
@@ -342,19 +306,19 @@ mod tests {
     fn create_matrix_preserves_exact_integer_storage_column_major() {
         let scalar = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1])
             .expect("scalar integer tensor");
-        let mut stack = vec![
+        let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
             Value::Tensor(scalar),
             Value::Int(IntValue::U64(u64::MAX)),
             Value::Num(7.4),
             Value::Int(IntValue::U16(11)),
-        ];
+        ]);
 
         create_matrix(&mut stack, 2, 2).expect("create matrix");
 
         let Value::Tensor(output) = stack.pop().expect("output") else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63, 7, u64::MAX, 11]))
@@ -365,7 +329,10 @@ mod tests {
     fn pack_uses_cleared_typed_scalar_storage_for_class_and_value() {
         let scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
             .expect("scalar integer tensor");
-        let mut stack = vec![Value::Tensor(scalar), Value::Num(3.5)];
+        let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+            Value::Tensor(scalar),
+            Value::Num(3.5),
+        ]);
 
         pack_to_row(&mut stack, 2).expect("pack row");
 

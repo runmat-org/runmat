@@ -1,10 +1,6 @@
 //! Zero extraction for SISO transfer-function control models.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+use runmat_builtins::ZERO_ERRORS;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -13,65 +9,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{output_complex_column, TfModel};
-use crate::builtins::control::type_resolvers::zero_type;
 use crate::BuiltinResult;
-
-const ZERO_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "z",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zeros of the SISO tf model as a column vector.",
-}];
-const ZERO_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf model.",
-}];
-const ZERO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "z = zero(sys)",
-    inputs: &ZERO_INPUTS,
-    outputs: &ZERO_OUTPUT,
-}];
-const ZERO_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.ZERO.INVALID_MODEL",
-        identifier: Some("RunMat:zero:InvalidModel"),
-        when: "Input system is not a valid SISO tf object.",
-        message: "zero: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ZERO.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:zero:UnsupportedModel"),
-        when: "Model form is unsupported.",
-        message: "zero: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ZERO.INVALID_ARGUMENT",
-        identifier: Some("RunMat:zero:InvalidArgument"),
-        when: "Model metadata or arguments are malformed.",
-        message: "zero: invalid argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ZERO.INTERNAL",
-        identifier: Some("RunMat:zero:Internal"),
-        when: "Root calculation or output construction failed.",
-        message: "zero: internal error",
-    },
-];
-pub const ZERO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ZERO_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ZERO_ERRORS,
-};
-pub const ZERO_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "zero accepts a dynamic-system model; fundamental integer values are invalid model inputs and reject before model payload or provider access.",
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::zero")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -102,12 +40,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "zero",
-    category = "control",
-    summary = "Return zeros of SISO transfer-function models.",
-    keywords = "zero,zeros,control system,transfer function,tf",
-    type_resolver(zero_type),
-    descriptor(crate::builtins::control::zero::ZERO_DESCRIPTOR),
-    integer_audit(crate::builtins::control::zero::ZERO_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::zero"
 )]
 async fn zero_builtin(sys: Value) -> BuiltinResult<Value> {
@@ -132,7 +65,33 @@ async fn zero_builtin(sys: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::Tensor;
+    use runmat_value::{ObjectInstance, Tensor};
+
+    #[test]
+    fn unrelated_resident_property_is_not_downloaded() {
+        let unrelated = Tensor::new(vec![5.0, 6.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated)
+                    .expect("upload unrelated property");
+            let mut model =
+                ObjectInstance::new(crate::builtins::control::tf_model::TF_CLASS.to_string());
+            model.replace_property_unbounded("Numerator".into(), Value::Num(2.0));
+            model.replace_property_unbounded("Denominator".into(), Value::Num(1.0));
+            model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            model.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let Value::Tensor(zeros) =
+                block_on(zero_builtin(Value::Object(model))).expect("static gain")
+            else {
+                panic!("expected real empty column");
+            };
+            assert_eq!(zeros.shape(), &[0, 1]);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
 
     #[test]
     fn zero_returns_roots_of_numerator() {
@@ -144,10 +103,13 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::Tensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
+        let Value::Tensor(zeros) = sys
+            .with_owned(|sys| block_on(zero_builtin(sys)))
+            .expect("zero")
+        else {
             panic!("expected real zeros");
         };
-        assert_eq!(zeros.shape, vec![2, 1]);
+        assert_eq!(zeros.shape(), &[2, 1]);
         assert!(zeros
             .materialize_f64()
             .iter()
@@ -168,10 +130,13 @@ mod tests {
             ],
         ))
         .expect("tf");
-        let Value::ComplexTensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
+        let Value::ComplexTensor(zeros) = sys
+            .with_owned(|sys| block_on(zero_builtin(sys)))
+            .expect("zero")
+        else {
             panic!("expected complex zeros");
         };
-        assert_eq!(zeros.shape, vec![2, 1]);
+        assert_eq!(zeros.shape(), &[2, 1]);
         assert!(zeros
             .materialize_f64()
             .iter()
@@ -193,10 +158,13 @@ mod tests {
             &[Value::Num(5.0), Value::Num(2.0)],
         ))
         .expect("tf");
-        let Value::Tensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
+        let Value::Tensor(zeros) = sys
+            .with_owned(|sys| block_on(zero_builtin(sys)))
+            .expect("zero")
+        else {
             panic!("expected real empty column");
         };
-        assert_eq!(zeros.shape, vec![0, 1]);
+        assert_eq!(zeros.shape(), &[0, 1]);
         assert!(zeros.materialize_f64().is_empty());
     }
 }

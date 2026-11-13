@@ -29,7 +29,7 @@ This creates a `training.data` directory with two arrays:
 - `samples`, a `1000000 x 64` matrix.
 - `labels`, a `1000000 x 1` vector.
 
-The `dtype` field accepts `f64`, `f32`, and every built-in integer class: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`. Full and sliced reads preserve that declared class exactly. Writes and fills preserve exact values when the source class matches the declared dtype; unlike numeric classes are converted once through the declared dtype's ordinary numeric cast contract before storage. Complex numeric arrays are not currently supported.
+The `dtype` field accepts `f64`, `f32`, and every built-in integer class: `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, and `uint64`. Full and sliced reads preserve that declared class exactly, including paired real/imaginary storage when the array contains complex values. Writes and fills preserve exact values when the source class matches the declared dtype; unlike numeric classes are converted once through the declared dtype's ordinary numeric cast contract before storage.
 
 The `shape` and optional `chunk` fields accept scalar or vector dimensions in all eight integer classes, plus exactly integral `single` or `double` values within platform bounds. RunMat parses typed dimensions directly from authoritative integer storage, checks total shape multiplication before allocation, and rejects negative, fractional, out-of-range, or overflowing shape dimensions. Explicit chunk dimensions must be strictly positive and have the same rank as the array shape.
 
@@ -40,6 +40,8 @@ ds = data.open("training.data");
 samples = Dataset.array(ds, "samples");
 labels = Dataset.array(ds, "labels");
 ```
+
+The returned handle retains the filesystem provider and resolved root that opened it. Changing the ambient provider or working directory does not silently retarget later `Dataset`, `DataArray`, or transaction calls. Reopen the path to obtain a handle for a different provider or a moved directory.
 
 ## Writing Batches
 
@@ -89,7 +91,7 @@ attrs = Dataset.attrs(ds);
 source = Dataset.get_attr(ds, "source", "unknown");
 ```
 
-Each metadata update advances the dataset version. `Dataset.version(ds)` returns the current manifest version token.
+Each metadata update advances the manifest version. `Dataset.version(ds)` presents the version captured when that handle was created or refreshed; use `Dataset.refresh(ds)` to obtain an updated handle before comparing versions.
 
 Scalar attributes accept all eight built-in integer classes and are written to the JSON manifest as exact integer numbers without an `f64` intermediary. Because JSON numbers do not encode narrow integer dtypes, `Dataset.attrs` and stored-value `Dataset.get_attr` results use canonical `int64` scalars whenever the value fits and `uint64` otherwise; the mathematical value remains exact. When a key is absent, an explicitly supplied integer default is returned directly and therefore preserves its original class.
 
@@ -112,7 +114,7 @@ Larger chunks reduce bookkeeping and are efficient for large contiguous reads. S
 
 ## Transactions
 
-Use a transaction when several changes should land together. This is common when a batch write needs to update multiple arrays and metadata in one commit.
+Use a transaction to queue several changes and check one manifest sequence before applying them. This is common when a batch write needs to update multiple arrays and metadata in one commit.
 
 ```matlab
 tx = Dataset.begin(ds);
@@ -126,7 +128,7 @@ commit(tx);
 
 Transaction writes, fills, resizes, and array creation accept the same eight integer classes for values, slices, shapes, and chunk shapes as their direct dataset counterparts. Native integer payloads and exact structural controls remain queued and are converted, validated, and serialized only when the transaction commits. `DataTransaction.set_attr` and integer scalar fields passed to `DataTransaction.set_attrs` are persisted as exact JSON integers, including `int64` and `uint64` values outside the exactly representable `f64` range.
 
-At commit time, RunMat checks that the dataset has not changed since the transaction began. If another writer committed first, the commit fails with a manifest conflict instead of overwriting newer state.
+At commit time, RunMat checks that the dataset has not changed since the transaction began. If another writer committed first, the commit fails with a manifest conflict instead of overwriting newer state. A later provider or serialization failure can leave some chunk effects applied before the manifest is published; this is not an atomic multi-file transaction.
 
 For explicit concurrency control, commit with the version token the code expects:
 
@@ -154,9 +156,9 @@ training.data/
 
 The manifest records the array names, shapes, chunk shapes, attributes, and version. The array directories contain the stored payloads and chunk indexes. Most code should use the dataset API instead of reading those files directly.
 
-Because datasets use the active RunMat filesystem provider, the same code works against local disk, sandboxed storage, browser-backed storage, or a remote project filesystem. 
+Path-level calls capture the active RunMat filesystem provider; an opened handle retains that provider for follow-on calls. The same API can therefore work against local disk, sandboxed storage, browser-backed storage, or a remote project filesystem when that provider supports the required operations.
 
-On remote storage, chunked writes can upload the touched chunks directly through provider-managed upload targets, so large dataset updates do not have to move as one monolithic file, and benefit from high-throughput parallel uploads to object storage.
+On remote storage, chunked writes can upload touched chunks through provider-managed upload targets, so a slice update need not rewrite every chunk. Upload scheduling and throughput depend on the selected provider.
 
 Combined with RunMat Server's remote filesystem, datasets can be used to share large arrays between team members and projects.
 
@@ -174,12 +176,20 @@ Path-level operations manage whole datasets.
 | `data.copy(fromPath, toPath)` | Copy a dataset directory. |
 | `data.move(fromPath, toPath)` | Rename a dataset directory. |
 | `data.delete(path)` | Remove a dataset directory. |
-| `data.import(path, "data", sourcePath)` | Copy another RunMat dataset into `path`. |
+| `feval("data.import", path, "data", sourcePath)` | Copy another RunMat dataset into `path`. |
 | `data.export(path, "data", targetPath)` | Copy a dataset to another path. |
 
-`data.import` and `data.export` currently support RunMat's `"data"` format.
+`data.import` and `data.export` support RunMat's `"data"` format. Call
+`data.import` through `feval`, because `import` is a reserved keyword.
+
+Dataset moves and deletion require a provider that permits directory namespace
+changes. Perform those operations in an ordinary request. Pinned execution
+rejects directory renames and removal while preserving its captured inputs and
+conditionally published outputs.
 
 These namespace functions use exactly the positional signatures shown above; they do not reserve trailing name-value arguments. Their path and format arguments are textual rather than numeric, while copying, moving, importing, and exporting a dataset preserves its stored integer payload bytes and declared dtype. Dataset lifecycle work is filesystem-provider I/O and does not dispatch through an acceleration provider.
+
+Each path-level call captures the active filesystem provider and working directory once before its first filesystem operation. Relative source and destination paths in the same call therefore resolve against the same directory, even if ambient configuration changes while the operation is suspended. A returned `Dataset` object records its public path, ID, and version; it is not a persistent filesystem-provider handle, so later `Dataset.*` calls use their own current filesystem authority. `data.exists` checks for accessible manifest metadata without parsing the manifest; use `data.open` to validate it.
 
 ## Common Methods
 

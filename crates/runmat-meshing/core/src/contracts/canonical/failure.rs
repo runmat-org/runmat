@@ -99,6 +99,7 @@ pub enum MeshingFailureCategory {
     RecursionBudgetExceeded,
     IterationBudgetExceeded,
     Cancelled,
+    NumericalAccounting,
     NumericalFailure,
     InternalInvariantViolation,
 }
@@ -106,17 +107,29 @@ pub enum MeshingFailureCategory {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GeometricWitness {
-    Point { coordinates_m: [f64; 3] },
-    Segment { endpoints_m: [[f64; 3]; 2] },
-    Triangle { vertices_m: [[f64; 3]; 3] },
-    CurveParameter { parameter: f64 },
-    SurfaceParameter { uv: [f64; 2] },
+    Point {
+        #[serde(with = "runmat_types::physical::canonical_storage")]
+        coordinates_m:
+            runmat_types::physical::Quantity<runmat_types::physical::kind::Position, [f64; 3]>,
+    },
+    Segment {
+        endpoints_m: [[f64; 3]; 2],
+    },
+    Triangle {
+        vertices_m: [[f64; 3]; 3],
+    },
+    CurveParameter {
+        parameter: f64,
+    },
+    SurfaceParameter {
+        uv: [f64; 2],
+    },
 }
 
 impl GeometricWitness {
     fn validate(&self) -> Result<(), MeshingContractError> {
         let values: Vec<f64> = match self {
-            Self::Point { coordinates_m } => coordinates_m.to_vec(),
+            Self::Point { coordinates_m } => coordinates_m.canonical_value().to_vec(),
             Self::Segment { endpoints_m } => endpoints_m.iter().flatten().copied().collect(),
             Self::Triangle { vertices_m } => vertices_m.iter().flatten().copied().collect(),
             Self::CurveParameter { parameter } => vec![*parameter],
@@ -193,6 +206,9 @@ pub struct MeshingFailure {
     pub request_values: Vec<MeshingDiagnosticEntry>,
     #[serde(default)]
     pub achieved_values: Vec<MeshingDiagnosticEntry>,
+    /// The original numerical-admission error, present only for accounting failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounting_error: Option<runmat_simulation_usage::LedgerError>,
     pub remediation: String,
 }
 
@@ -220,6 +236,14 @@ impl MeshingFailure {
                 "operation does not belong to the reported stage",
             ));
         }
+        if (self.category == MeshingFailureCategory::NumericalAccounting)
+            != self.accounting_error.is_some()
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing failure accounting error",
+                "numerical accounting failures must retain exactly one typed accounting cause",
+            ));
+        }
         for entity in &self.entity_ids {
             entity.validate()?;
         }
@@ -229,6 +253,22 @@ impl MeshingFailure {
         validate_diagnostics("request diagnostics", &self.request_values)?;
         validate_diagnostics("achieved diagnostics", &self.achieved_values)?;
         validate_token("meshing failure remediation", &self.remediation, 8192)
+    }
+
+    /// Returns the most specific textual diagnostic recorded by the failing stage.
+    ///
+    /// Stage adapters retain the originating kernel error in `achieved_values` so
+    /// callers can inspect failures without depending on an implementation-specific
+    /// error type. Prefer the last text entry: diagnostics are sorted by name and
+    /// adapters conventionally place their stage failure detail there.
+    pub fn detail(&self) -> Option<&str> {
+        self.achieved_values
+            .iter()
+            .rev()
+            .find_map(|entry| match &entry.value {
+                MeshingDiagnosticValue::Text(value) if !value.is_empty() => Some(value.as_str()),
+                _ => None,
+            })
     }
 }
 
@@ -276,10 +316,132 @@ impl std::fmt::Display for MeshingFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "{:?} during {:?}/{:?}: {}",
-            self.category, self.stage, self.operation, self.remediation
-        )
+            "{:?} during {:?}/{:?}",
+            self.category, self.stage, self.operation
+        )?;
+        if let Some(detail) = self.detail() {
+            write!(formatter, ": {detail}")?;
+        }
+        for achieved in &self.achieved_values {
+            if matches!(achieved.value, MeshingDiagnosticValue::Text(_)) {
+                continue;
+            }
+            write!(
+                formatter,
+                "; achieved {}={}",
+                achieved.name,
+                diagnostic_value(&achieved.value)
+            )?;
+            if let Some(required) = self
+                .request_values
+                .iter()
+                .find(|required| required.name == achieved.name)
+            {
+                write!(formatter, " (limit {})", diagnostic_value(&required.value))?;
+            }
+        }
+        write!(formatter, "; remediation: {}", self.remediation)
     }
 }
 
-impl std::error::Error for MeshingFailure {}
+fn diagnostic_value(value: &MeshingDiagnosticValue) -> String {
+    match value {
+        MeshingDiagnosticValue::Count(value) => value.to_string(),
+        MeshingDiagnosticValue::Integer(value) => value.to_string(),
+        MeshingDiagnosticValue::Scalar(value) => value.to_string(),
+        MeshingDiagnosticValue::Text(value) => value.clone(),
+        MeshingDiagnosticValue::Interval { minimum, maximum } => {
+            format!("[{minimum}, {maximum}]")
+        }
+    }
+}
+
+impl std::error::Error for MeshingFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.accounting_error
+            .as_ref()
+            .map(|error| error as &(dyn std::error::Error + 'static))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_includes_retained_kernel_detail() {
+        let failure = MeshingFailure {
+            schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+            category: MeshingFailureCategory::InvalidGeometry,
+            stage: MeshingStageKind::CurveMesh,
+            operation: MeshingOperation::DiscretizeCurve,
+            entity_ids: Vec::new(),
+            witnesses: Vec::new(),
+            request_values: Vec::new(),
+            achieved_values: vec![MeshingDiagnosticEntry {
+                name: "curve_failure".into(),
+                value: MeshingDiagnosticValue::Text("edge evaluation failed".into()),
+                unit: None,
+            }],
+            accounting_error: None,
+            remediation: "repair the exact boundary".into(),
+        };
+
+        assert_eq!(
+            failure.to_string(),
+            "InvalidGeometry during CurveMesh/DiscretizeCurve: edge evaluation failed; \
+             remediation: repair the exact boundary"
+        );
+    }
+
+    #[test]
+    fn display_remains_useful_without_text_diagnostics() {
+        let failure = MeshingFailure {
+            schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+            category: MeshingFailureCategory::ElementBudgetExceeded,
+            stage: MeshingStageKind::Tetrahedralization,
+            operation: MeshingOperation::Tetrahedralize,
+            entity_ids: Vec::new(),
+            witnesses: Vec::new(),
+            request_values: Vec::new(),
+            achieved_values: Vec::new(),
+            accounting_error: None,
+            remediation: "raise the element budget".into(),
+        };
+
+        assert_eq!(
+            failure.to_string(),
+            "ElementBudgetExceeded during Tetrahedralization/Tetrahedralize; \
+             remediation: raise the element budget"
+        );
+    }
+
+    #[test]
+    fn accounting_failure_keeps_its_typed_cause_across_serialization() {
+        let mut failure = MeshingFailure {
+            schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+            category: MeshingFailureCategory::NumericalAccounting,
+            stage: MeshingStageKind::OrderElevation,
+            operation: MeshingOperation::ElevateOrder,
+            entity_ids: Vec::new(),
+            witnesses: Vec::new(),
+            request_values: Vec::new(),
+            achieved_values: Vec::new(),
+            accounting_error: Some(runmat_simulation_usage::LedgerError::CountOverflow),
+            remediation: "raise the operation spending cap".into(),
+        };
+        failure.validate().unwrap();
+        let encoded = serde_json::to_vec(&failure).unwrap();
+        let decoded: MeshingFailure = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.accounting_error, failure.accounting_error);
+        assert_eq!(
+            decoded.category,
+            MeshingFailureCategory::NumericalAccounting
+        );
+        failure.accounting_error = None;
+        assert!(failure.validate().is_err());
+        failure.category = MeshingFailureCategory::InvalidGeometry;
+        failure.accounting_error = Some(runmat_simulation_usage::LedgerError::CountOverflow);
+        assert!(failure.validate().is_err());
+    }
+}

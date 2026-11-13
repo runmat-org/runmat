@@ -8,6 +8,7 @@ mod tests {
     use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
     use runmat_hir::{lower, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
+    use runmat_runtime::sequence::ResolveValueSequence;
     use runmat_runtime::RuntimeError;
     use runmat_value::Value;
     use runmat_vm::{compile_semantic_function_registry, Bytecode};
@@ -100,6 +101,229 @@ mod tests {
         Ok((function_id, registry, input_slot))
     }
 
+    fn invoke_no_arg(
+        source: &str,
+        function_name: &str,
+    ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
+        let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
+        let hir = lower(&ast, &LoweringContext::empty())
+            .map_err(|err| RuntimeError::new(err.to_string()))?;
+        let mir =
+            lower_assembly(&hir.assembly).map_err(|err| RuntimeError::new(format!("{err:?}")))?;
+        let function_id = hir
+            .assembly
+            .functions
+            .iter()
+            .find(|function| function.name.0 == function_name)
+            .map(|function| function.id)
+            .ok_or_else(|| RuntimeError::new(format!("missing function `{function_name}`")))?;
+        let registry = runmat_vm::FunctionRegistry::new(
+            compile_semantic_function_registry(&hir.assembly, &mir).map_err(RuntimeError::from)?,
+        );
+        let sequence = block_on(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &[],
+            1,
+            &registry,
+        ))?;
+        resolve_single_output(sequence)
+    }
+
+    fn resolve_single_output(
+        sequence: runmat_runtime::execution::RootedValueSequence,
+    ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
+        sequence.try_map_owned(
+            |sequence| {
+                let values = sequence.resolve(
+                    runmat_types::SequenceUse::RequireSingle,
+                    runmat_runtime::sequence::SequenceResolutionContext::default(),
+                )?;
+                values
+                    .try_into_first()
+                    .map_err(|_| {
+                        runmat_runtime::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?
+                    .ok_or_else(|| RuntimeError::new("expected one function output"))
+            },
+            |error| error.into_runtime_error(),
+        )
+    }
+
+    #[test]
+    fn short_circuit_await_starts_only_the_selected_future() {
+        let source = r#"
+            async function y = fail_if_started()
+                error("future was started");
+                y = true;
+            end
+
+            async function y = skip_and()
+                y = false && await(fail_if_started());
+            end
+
+            async function y = skip_or()
+                y = true || await(fail_if_started());
+            end
+
+            async function y = take_and()
+                y = true && await(fail_if_started());
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(source, "skip_and").expect("false && must skip its future"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            invoke_no_arg(source, "skip_or").expect("true || must skip its future"),
+            Value::Bool(true)
+        );
+        assert!(
+            invoke_no_arg(source, "take_and").is_err(),
+            "true && must evaluate and await its right operand"
+        );
+    }
+
+    #[test]
+    fn while_await_restarts_each_iteration_and_skips_the_terminating_future() {
+        let source = r#"
+            async function ok = guard_iteration(v)
+                if v >= 2
+                    error("terminating guard future was started");
+                end
+                ok = true;
+            end
+
+            async function y = run_loop()
+                y = 0;
+                while y < 2 && await(guard_iteration(y))
+                    y = y + 1;
+                end
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(source, "run_loop")
+                .expect("loop futures should be evaluated per iteration"),
+            Value::Num(2.0)
+        );
+    }
+
+    #[test]
+    fn await_resume_does_not_replay_expression_or_target_prefixes() {
+        let expression = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = pass(value)
+                y = value;
+            end
+
+            async function y = run_expression()
+                y = tick() + await(pass(1));
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(expression, "run_expression")
+                .expect("expression prefix must survive suspension"),
+            Value::Num(2.0)
+        );
+
+        let destination = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = pass(value)
+                y = value;
+            end
+
+            async function y = run_destination()
+                matrix = zeros(2, 2);
+                matrix(tick(), await(pass(2))) = 9;
+                y = matrix(1, 2);
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(destination, "run_destination")
+                .expect("destination prefix must survive suspension"),
+            Value::Num(9.0)
+        );
+    }
+
+    #[test]
+    fn destination_await_failures_clear_prepared_prefix_state_before_catch() {
+        let failure_during_await = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = fail_future()
+                error("expected awaited failure");
+                y = 0;
+            end
+
+            async function y = run_failure_during_await()
+                matrix = zeros(2, 2);
+                try
+                    matrix(tick(), await(fail_future())) = 9;
+                catch
+                    y = tick();
+                end
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(failure_during_await, "run_failure_during_await")
+                .expect("caught awaited failure must clear prepared destination state"),
+            Value::Num(2.0)
+        );
+
+        let failure_after_resume = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = pass(value)
+                y = value;
+            end
+
+            async function y = run_failure_after_resume()
+                matrix = zeros(2, 2);
+                try
+                    matrix(tick(), await(pass(1.5))) = 9;
+                catch
+                    y = tick();
+                end
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(failure_after_resume, "run_failure_after_resume")
+                .expect("caught post-resume failure must clear prepared destination state"),
+            Value::Num(2.0)
+        );
+    }
+
     fn result_contains_handle(
         vars: &[Value],
         handle: &runmat_accelerate_api::GpuTensorHandle,
@@ -107,7 +331,7 @@ mod tests {
         vars.iter().any(|value| {
             matches!(
                 value,
-                Value::GpuTensor(candidate) if candidate.buffer_id == handle.buffer_id
+                Value::GpuTensor(candidate) if candidate.shares_allocation_with(handle)
             )
         })
     }
@@ -118,8 +342,36 @@ mod tests {
     ) -> bool {
         matches!(
             value,
-            Value::GpuTensor(candidate) if candidate.buffer_id == handle.buffer_id
+            Value::GpuTensor(candidate) if candidate.shares_allocation_with(handle)
         )
+    }
+
+    fn assert_caller_view_retires(
+        handle: runmat_accelerate_api::GpuTensorHandle,
+        expected: &[f64],
+    ) {
+        use runmat_accelerate_api::allocation::AllocationReleaseOutcome;
+
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "a caller-owned view must retain its residency marker"
+        );
+        let downloaded = block_on(TEST_PROVIDER.download(&handle))
+            .expect("caller-owned view must retain readable provider storage");
+        assert_eq!(downloaded.data, expected);
+        assert_eq!(downloaded.shape, [1, expected.len()]);
+        let weak = handle.downgrade();
+        assert_eq!(
+            handle
+                .release()
+                .expect("final caller view must retire allocation"),
+            AllocationReleaseOutcome::Retired,
+            "a retained VM frame or future must not outlive the completed call"
+        );
+        assert!(
+            weak.acquire().is_err(),
+            "a retired allocation must not revive a view"
+        );
     }
 
     #[test]
@@ -154,14 +406,8 @@ mod tests {
             !result_contains_handle(&result, &handle),
             "unaliased spawn/drop flow should not retain the input handle in function slots"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "unaliased spawn/drop flow should clear residency for dropped input handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "unaliased spawn/drop flow should release provider storage for dropped input handle"
-        );
+        drop(result);
+        assert_caller_view_retires(handle, &[1.0, 2.0]);
     }
 
     #[test]
@@ -206,8 +452,8 @@ mod tests {
             "aliased spawn/drop flow should preserve provider storage for retained alias handle"
         );
 
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
+        drop(result);
+        assert_caller_view_retires(handle, &[3.0, 4.0]);
     }
 
     #[test]
@@ -241,19 +487,13 @@ mod tests {
             &registry,
         ))
         .expect("semantic async spawn/await function should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
             "async spawn/await helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[5.0, 6.0]);
     }
 
     #[test]
@@ -300,8 +540,8 @@ mod tests {
             "async spawn/await aliased flow should preserve provider storage for retained alias handle"
         );
 
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
+        drop(result);
+        assert_caller_view_retires(handle, &[7.0, 8.0]);
     }
 
     #[test]
@@ -337,19 +577,13 @@ mod tests {
             &registry,
         ))
         .expect("semantic async struct helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
             "async spawn/await struct helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await struct helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await struct helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[9.0, 10.0]);
     }
 
     #[test]
@@ -383,19 +617,13 @@ mod tests {
             &registry,
         ))
         .expect("semantic async cell helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
             "async spawn/await cell helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await cell helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await cell helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[11.0, 12.0]);
     }
 
     #[test]
@@ -432,19 +660,13 @@ mod tests {
             &registry,
         ))
         .expect("semantic async multi-output helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
             "async spawn/await multi-output helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await multi-output helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await multi-output helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[13.0, 14.0]);
     }
 
     #[test]
@@ -480,19 +702,13 @@ mod tests {
             &registry,
         ))
         .expect("semantic async varargout helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
             "async spawn/await varargout helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await varargout helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await varargout helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[15.0, 16.0]);
     }
 
     #[test]
@@ -528,19 +744,13 @@ mod tests {
             &registry,
         ))
         .expect("semantic async nested varargout helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
             "async spawn/await nested varargout helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await nested varargout helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await nested varargout helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[17.0, 18.0]);
     }
 
     #[test]
@@ -586,6 +796,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic parallel async function should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert!(
             value_matches_handle(&result, &handle_a),
             "parallel async flow should preserve retained first awaited handle as output"
@@ -598,17 +809,11 @@ mod tests {
             block_on(TEST_PROVIDER.download(&handle_a)).is_ok(),
             "parallel async flow should preserve provider storage for retained first handle"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle_b),
-            "parallel async flow should clear residency for dropped second handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle_b)).is_err(),
-            "parallel async flow should release provider storage for dropped second handle"
-        );
+        assert_caller_view_retires(handle_b, &[23.0, 24.0]);
+        assert!(block_on(TEST_PROVIDER.download(&handle_a)).is_ok());
 
-        fusion_residency::clear(&handle_a);
-        let _ = TEST_PROVIDER.free(&handle_a);
+        drop(result);
+        assert_caller_view_retires(handle_a, &[21.0, 22.0]);
     }
 
     #[test]
@@ -653,26 +858,13 @@ mod tests {
             &registry,
         ))
         .expect("semantic parallel async drop-both function should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
             "parallel async drop-both flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle_a),
-            "parallel async drop-both flow should clear residency for first dropped handle"
-        );
-        assert!(
-            !fusion_residency::is_resident(&handle_b),
-            "parallel async drop-both flow should clear residency for second dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle_a)).is_err(),
-            "parallel async drop-both flow should release provider storage for first dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle_b)).is_err(),
-            "parallel async drop-both flow should release provider storage for second dropped handle"
-        );
+        assert_caller_view_retires(handle_a, &[25.0, 26.0]);
+        assert_caller_view_retires(handle_b, &[27.0, 28.0]);
     }
 }

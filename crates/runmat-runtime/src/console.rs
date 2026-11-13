@@ -2,24 +2,41 @@ use once_cell::sync::OnceCell;
 use runmat_thread_local::runmat_thread_local;
 use runmat_time::unix_timestamp_ms;
 use runmat_value::Value;
+use std::borrow::Cow;
 use std::cell::RefCell;
-use std::io::Write;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-/// Identifies the console stream that received the text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConsoleStream {
-    Stdout,
-    Stderr,
-    ClearScreen,
-}
+mod buffer;
+mod capture_projection;
+mod diary;
+mod entries;
+#[cfg(test)]
+mod tests;
+mod text;
+use crate::context::host_allocation::{
+    HostAllocationError, HostAllocationPlan, HostAllocationPolicy, HostAllocationReceipt,
+    HostTextError,
+};
+use crate::context::overlay_storage::AdmittedOverlayVec;
+use buffer::append_buffer_entry;
+pub use buffer::{append_thread_buffer, reset_thread_buffer, take_thread_buffer};
+pub(crate) use capture_projection::{CaptureLease, ConsoleCaptureProjection};
+pub use diary::{
+    diary_enabled, diary_filename, ensure_diary_writable, record_diary_command, set_diary_enabled,
+    set_diary_enabled_checked, set_diary_filename, set_diary_filename_checked, take_diary_error,
+    toggle_diary,
+};
+use diary::{write_diary_entry, DiaryState};
+pub use entries::{CapturedConsoleEntries, CapturedConsoleEntriesIter};
+pub use text::ConsoleText;
+
+pub use runmat_execution::console::ConsoleStream;
 
 /// Single console write (line or chunk) captured during execution.
 #[derive(Clone, Debug)]
 pub struct ConsoleEntry {
     pub stream: ConsoleStream,
-    pub text: String,
+    pub text: ConsoleText,
     pub timestamp_ms: u64,
 }
 
@@ -31,60 +48,41 @@ runmat_thread_local! {
 
 static FORWARDER: OnceCell<RwLock<Option<Arc<StreamForwarder>>>> = OnceCell::new();
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DiaryStateSnapshot {
-    pub enabled: bool,
-    pub filename: PathBuf,
-}
-
-impl Default for DiaryStateSnapshot {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            filename: PathBuf::from("diary"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct DiaryState {
-    enabled: bool,
-    filename: PathBuf,
-    last_error: Option<String>,
-}
-
-impl Default for DiaryState {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            filename: PathBuf::from("diary"),
-            last_error: None,
-        }
-    }
-}
-
-impl From<DiaryStateSnapshot> for DiaryState {
-    fn from(snapshot: DiaryStateSnapshot) -> Self {
-        Self {
-            enabled: snapshot.enabled,
-            filename: snapshot.filename,
-            last_error: None,
-        }
-    }
-}
-
 /// Guard for a dynamic command-window capture scope such as `evalc`.
 pub struct ConsoleCaptureGuard {
     active: bool,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    projection: Option<CaptureLease>,
 }
 
-#[derive(Debug, Default)]
 pub(crate) struct ConsoleState {
-    buffer: Vec<ConsoleEntry>,
+    buffer: AdmittedOverlayVec<ConsoleEntry>,
     last_value_output: Option<Value>,
     captures: Vec<Vec<ConsoleEntry>>,
     diary: DiaryState,
+}
+
+impl Default for ConsoleState {
+    fn default() -> Self {
+        Self {
+            buffer: AdmittedOverlayVec::unbounded(),
+            last_value_output: None,
+            captures: Vec::new(),
+            diary: DiaryState::default(),
+        }
+    }
+}
+
+impl std::fmt::Debug for ConsoleState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ConsoleState")
+            .field("buffer_entries", &self.buffer.len())
+            .field("capture_depth", &self.captures.len())
+            .field("has_last_value_output", &self.last_value_output.is_some())
+            .field("diary", &self.diary)
+            .finish()
+    }
 }
 
 fn now_ms() -> u64 {
@@ -93,33 +91,181 @@ fn now_ms() -> u64 {
 
 /// Record console output for the current thread while also forwarding it to any
 /// registered listener (used by wasm bindings for live streaming).
-pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
+pub fn record_console_output<'a>(
+    stream: ConsoleStream,
+    text: impl Into<Cow<'a, str>>,
+) -> Result<(), crate::RuntimeError> {
+    record_console_text(stream, text.into(), false)
+}
+
+fn record_console_text(
+    stream: ConsoleStream,
+    text: Cow<'_, str>,
+    append_newline: bool,
+) -> Result<(), crate::RuntimeError> {
+    let needs_newline = append_newline && !text.ends_with('\n');
+    let text_len = text
+        .len()
+        .checked_add(usize::from(needs_newline))
+        .ok_or_else(|| console_admission(None, HostAllocationError::Overflow))?;
+    let runtime = crate::context::legacy::active();
+    let text = if let Some(runtime) = runtime.as_ref() {
+        if HostAllocationReceipt::policy(Some(runtime))
+            .map_err(|error| console_admission(Some(runtime), error))?
+            == HostAllocationPolicy::Managed
+        {
+            let adopt_existing = matches!(&text, Cow::Owned(owned) if owned.capacity() >= text_len);
+            let retained = ConsoleText::retained_bytes(match &text {
+                Cow::Owned(owned) if adopt_existing => owned.capacity(),
+                _ => text_len,
+            })
+            .map_err(|error| console_admission(Some(runtime), error))?;
+            let receipt = HostAllocationReceipt::admit(
+                Some(runtime),
+                HostAllocationPlan::new(0, retained)
+                    .map_err(|error| console_admission(Some(runtime), error))?,
+            )
+            .map_err(|error| console_admission(Some(runtime), error))?
+            .ok_or_else(|| {
+                console_admission(Some(runtime), HostAllocationError::MissingManagedOwner)
+            })?;
+            let permit = receipt
+                .output_permit(runtime)
+                .map_err(|error| console_admission(Some(runtime), error))?;
+            let prepared = match text {
+                Cow::Owned(owned) if adopt_existing => {
+                    if needs_newline {
+                        ConsoleText::try_adopt_owned_line(owned, &permit)
+                    } else {
+                        ConsoleText::try_adopt_owned(owned, &permit)
+                    }
+                }
+                text => ConsoleText::try_initialize(text_len, &permit, |writer| {
+                    std::fmt::Write::write_str(writer, text.as_ref())?;
+                    if needs_newline {
+                        std::fmt::Write::write_char(writer, '\n')?;
+                    }
+                    Ok(())
+                }),
+            };
+            receipt
+                .checkpoint(runtime)
+                .map_err(|error| console_admission(Some(runtime), error))?;
+            prepared.map_err(|error| console_text_error(runtime, error))?
+        } else {
+            let mut text = text.into_owned();
+            if needs_newline {
+                text.push('\n');
+            }
+            ConsoleText::from(text)
+        }
+    } else {
+        let mut text = text.into_owned();
+        if needs_newline {
+            text.push('\n');
+        }
+        ConsoleText::from(text)
+    };
     let entry = ConsoleEntry {
         stream,
-        text: text.into(),
+        text,
         timestamp_ms: now_ms(),
     };
-    if with_console_state(|state| {
+    let entry = if let Some(runtime) = runtime.as_ref() {
+        match ConsoleCaptureProjection::record(runtime.console_capture_projection(), entry, runtime)
+            .map_err(|error| console_admission(Some(runtime), error))?
+        {
+            capture_projection::CaptureRoute::Captured => return Ok(()),
+            capture_projection::CaptureRoute::Uncaptured(entry) => entry,
+        }
+    } else {
+        entry
+    };
+    let entry = match with_console_state(|state| {
         if let Some(current) = state.captures.last_mut() {
-            current.push(entry.clone());
-            true
+            current.push(entry);
+            capture_projection::CaptureRoute::Captured
         } else {
-            false
+            capture_projection::CaptureRoute::Uncaptured(entry)
         }
     }) {
-        return;
-    }
+        capture_projection::CaptureRoute::Captured => return Ok(()),
+        capture_projection::CaptureRoute::Uncaptured(entry) => entry,
+    };
 
-    with_console_state(|state| state.buffer.push(entry.clone()));
+    // A retaining host (remote execution) owns the console inventory itself.
+    let host = crate::context::legacy::active()
+        .and_then(|context| context.service_ports().host().cloned());
+    if host
+        .as_ref()
+        .is_none_or(|host| !host.owns_console_retention())
+    {
+        append_buffer_entry(entry.clone(), runtime.as_ref())?;
+    }
     write_diary_entry(&entry);
 
-    if let Some(context) = crate::context::legacy::active() {
-        if let Some(host) = context.service_ports().host() {
-            host.console(entry.stream, entry.text.clone());
-            return;
-        }
+    if let Some(host) = host {
+        host.console(entry.stream, entry.text);
+        return Ok(());
     }
 
+    forward_to_registered(&entry);
+    Ok(())
+}
+
+fn forward_to_registered(entry: &ConsoleEntry) {
+    if let Some(forwarder) = FORWARDER
+        .get()
+        .and_then(|lock| lock.read().ok().map(|guard| guard.as_ref().cloned()))
+        .flatten()
+    {
+        forwarder(entry);
+    }
+}
+
+/// The stock hosted-console port forwards the already-admitted text through
+/// the same invocation listener as the ordinary no-host route. It does not
+/// allocate a second capture or replace the managed thread-buffer owner.
+pub(crate) fn forward_host_text(stream: ConsoleStream, text: ConsoleText) {
+    let entry = ConsoleEntry {
+        stream,
+        text,
+        timestamp_ms: now_ms(),
+    };
+    forward_to_registered(&entry);
+}
+
+pub(super) fn console_admission(
+    runtime: Option<&crate::context::RuntimeContext>,
+    error: HostAllocationError,
+) -> crate::RuntimeError {
+    let cancellation = runtime.map(crate::context::RuntimeContext::cancellation_context);
+    crate::builtin::builtin_control_error(cancellation.as_ref(), "console", error)
+}
+
+pub(super) fn console_text_error(
+    runtime: &crate::context::RuntimeContext,
+    error: HostTextError,
+) -> crate::RuntimeError {
+    match error {
+        HostTextError::Allocation(error) => {
+            console_admission(Some(runtime), HostAllocationError::Numeric(error))
+        }
+        other => {
+            crate::runtime_error::semantic_error("RunMat:console:TextOutput", other.to_string())
+        }
+    }
+}
+
+/// Forward an entry that the Runtime host port received after the canonical
+/// buffer and diary owners already recorded it. Host adapters use this to
+/// preserve installed live-stream listeners without recursively recording.
+pub fn forward_recorded_console_output(stream: ConsoleStream, text: ConsoleText) {
+    let entry = ConsoleEntry {
+        stream,
+        text,
+        timestamp_ms: now_ms(),
+    };
     if let Some(forwarder) = FORWARDER
         .get()
         .and_then(|lock| lock.read().ok().map(|guard| guard.as_ref().cloned()))
@@ -130,40 +276,16 @@ pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
 }
 
 /// Record a control event that asks the host to clear the visible console.
-pub fn record_clear_screen() {
-    record_console_output(ConsoleStream::ClearScreen, String::new());
+pub fn record_clear_screen() -> Result<(), crate::RuntimeError> {
+    record_console_output(ConsoleStream::ClearScreen, String::new())
 }
 
 /// Record a line-oriented console entry, ensuring the stream text ends with a newline.
-pub fn record_console_line(stream: ConsoleStream, text: impl Into<String>) {
-    let mut text = text.into();
-    if !text.ends_with('\n') {
-        text.push('\n');
-    }
-    record_console_output(stream, text);
-}
-
-/// Clears the per-thread console buffer. Call this before execution begins so
-/// each run only returns fresh output.
-pub fn reset_thread_buffer() {
-    with_console_state(|state| {
-        state.buffer.clear();
-        state.last_value_output = None;
-    });
-}
-
-/// Drain (and return) the buffered console entries for the current thread.
-pub fn take_thread_buffer() -> Vec<ConsoleEntry> {
-    with_console_state(|state| state.buffer.drain(..).collect())
-}
-
-/// Append console entries captured on another execution thread without
-/// forwarding them again to live stream listeners.
-pub fn append_thread_buffer(entries: impl IntoIterator<Item = ConsoleEntry>) {
-    with_console_state(|state| {
-        state.buffer.extend(entries);
-        state.buffer.sort_by_key(|entry| entry.timestamp_ms);
-    });
+pub fn record_console_line<'a>(
+    stream: ConsoleStream,
+    text: impl Into<Cow<'a, str>>,
+) -> Result<(), crate::RuntimeError> {
+    record_console_text(stream, text.into(), true)
 }
 
 /// Install (or remove) a global forwarder for console output. Passing `None`
@@ -176,16 +298,19 @@ pub fn install_forwarder(forwarder: Option<Arc<StreamForwarder>>) {
 }
 
 /// Convenience helper to record formatted value output (matching MATLAB's `name = value` layout).
-pub fn record_value_output(label: Option<&str>, value: &Value) {
-    with_console_state(|state| state.last_value_output = Some(value.clone()));
+pub fn record_value_output(label: Option<&str>, value: &Value) -> Result<(), crate::RuntimeError> {
+    let retained = value.clone();
+    let displaced = with_console_state(|state| state.last_value_output.replace(retained));
+    drop(displaced);
     let value_text = match value {
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Struct(_) => crate::builtins::io::disp::format_for_display(value).join("\n"),
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::datetime_display_text(value)
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| value.to_string())
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_display_text(value)
                 .ok()
                 .flatten()
@@ -204,7 +329,34 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
     } else {
         value_text
     };
-    record_console_line(ConsoleStream::Stdout, text);
+    record_console_line(ConsoleStream::Stdout, text)
+}
+
+/// One statement-ordered value effect shared by bytecode and native execution.
+/// The selected provider's gather completes before any console publication.
+pub async fn emit_statement_value(
+    runtime: &crate::context::RuntimeContext,
+    label: Option<&str>,
+    value: &Value,
+) -> Result<(), crate::RuntimeError> {
+    let mut cooperation = runtime.cpu_cooperation();
+    let control = |cause: crate::execution::ExecutionServiceError| {
+        cause.into_runtime_error_in_context(Some(runtime))
+    };
+    cooperation.checkpoint(0).await.map_err(control)?;
+    // Poll cancellation before constructing/polling the gather. The selected
+    // provider's physical callback keeps its own original download claims if
+    // cancellation drops this logical waiter; no later statement can overtake
+    // an output whose gather is still pending.
+    let host_value = cooperation
+        .await_cancellable(async {
+            crate::dispatcher::gather_if_needed_in_context_async(value, Some(runtime)).await
+        })
+        .await
+        .map_err(control)??;
+    cooperation.checkpoint(0).await.map_err(control)?;
+    record_value_output(label, &host_value)?;
+    Ok(())
 }
 
 pub fn take_last_value_output() -> Option<Value> {
@@ -217,22 +369,48 @@ pub fn take_last_value_output() -> Option<Value> {
 /// capture buffer instead of the normal execution stream, live forwarder, or
 /// diary log. This matches MATLAB's `evalc` behavior, where `diary` is disabled
 /// inside the captured evaluation.
-pub fn begin_capture() -> ConsoleCaptureGuard {
+pub fn begin_capture() -> Result<ConsoleCaptureGuard, crate::RuntimeError> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        return Ok(ConsoleCaptureGuard {
+            active: true,
+            state: None,
+            projection: Some(
+                ConsoleCaptureProjection::begin(runtime.console_capture_projection(), &runtime)
+                    .map_err(|error| console_admission(Some(&runtime), error))?,
+            ),
+        });
+    }
     let state = active_state();
     if let Some(state) = &state {
         state.console.borrow_mut().captures.push(Vec::new());
     } else {
         FALLBACK_STATE.with(|fallback| fallback.borrow_mut().captures.push(Vec::new()));
     }
-    ConsoleCaptureGuard {
+    Ok(ConsoleCaptureGuard {
         active: true,
         state,
-    }
+        projection: None,
+    })
 }
 
 impl ConsoleCaptureGuard {
-    pub fn finish(mut self) -> String {
+    pub fn finish(mut self) -> Result<String, crate::RuntimeError> {
+        captured_text(self.take_entries())
+    }
+
+    /// Finish this capture and retain the stream identity of every entry.
+    ///
+    /// Foreign engine adapters use this form when the caller supplied
+    /// distinct standard-output and standard-error stream buffers.
+    pub fn finish_entries(mut self) -> CapturedConsoleEntries {
+        self.take_entries()
+    }
+
+    fn take_entries(&mut self) -> CapturedConsoleEntries {
         self.active = false;
+        if let Some(projection) = self.projection.take() {
+            return projection.finish();
+        }
         let entries = if let Some(state) = &self.state {
             state
                 .console
@@ -243,165 +421,52 @@ impl ConsoleCaptureGuard {
         } else {
             FALLBACK_STATE.with(|fallback| fallback.borrow_mut().captures.pop().unwrap_or_default())
         };
-        captured_text(entries)
+        entries.into()
     }
 }
 
 impl Drop for ConsoleCaptureGuard {
     fn drop(&mut self) {
         if self.active {
-            if let Some(state) = &self.state {
-                state.console.borrow_mut().captures.pop();
-            } else {
-                FALLBACK_STATE.with(|fallback| {
-                    fallback.borrow_mut().captures.pop();
-                });
+            if self.projection.take().is_some() {
+                return;
             }
+            let retired = if let Some(state) = &self.state {
+                state.console.borrow_mut().captures.pop()
+            } else {
+                FALLBACK_STATE.with(|fallback| fallback.borrow_mut().captures.pop())
+            };
+            drop(retired);
         }
     }
 }
 
-fn captured_text(entries: Vec<ConsoleEntry>) -> String {
+fn captured_text(entries: CapturedConsoleEntries) -> Result<String, crate::RuntimeError> {
+    if entries.iter().any(|entry| entry.text.has_managed_backing()) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:console:ManagedTextMaterialization",
+            "captured managed console text requires an admitted language output owner",
+        ));
+    }
     let mut out = String::new();
     for entry in entries {
         if matches!(entry.stream, ConsoleStream::Stdout | ConsoleStream::Stderr) {
             out.push_str(&entry.text);
         }
     }
-    out
-}
-
-pub fn diary_enabled() -> bool {
-    with_console_state(|state| state.diary.enabled)
-}
-
-pub fn diary_filename() -> PathBuf {
-    with_console_state(|state| state.diary.filename.clone())
-}
-
-pub fn diary_state_snapshot() -> DiaryStateSnapshot {
-    with_console_state(|state| DiaryStateSnapshot {
-        enabled: state.diary.enabled,
-        filename: state.diary.filename.clone(),
-    })
-}
-
-pub fn replace_diary_state(snapshot: DiaryStateSnapshot) -> DiaryStateSnapshot {
-    with_console_state(|state| {
-        let previous = DiaryStateSnapshot {
-            enabled: state.diary.enabled,
-            filename: state.diary.filename.clone(),
-        };
-        state.diary = DiaryState::from(snapshot);
-        previous
-    })
-}
-
-pub fn take_diary_error() -> Option<String> {
-    with_console_state(|state| state.diary.last_error.take())
-}
-
-pub fn set_diary_filename(filename: impl Into<PathBuf>) {
-    with_console_state(|state| {
-        state.diary.filename = filename.into();
-        state.diary.enabled = true;
-        state.diary.last_error = None;
-    });
-}
-
-pub fn set_diary_filename_checked(filename: impl Into<PathBuf>) -> std::io::Result<()> {
-    let filename = filename.into();
-    open_diary_append(&filename).map(|_| ())?;
-    set_diary_filename(filename);
-    Ok(())
-}
-
-pub fn set_diary_enabled(enabled: bool) {
-    with_console_state(|state| {
-        state.diary.enabled = enabled;
-        if enabled {
-            state.diary.last_error = None;
-        }
-    });
-}
-
-pub fn set_diary_enabled_checked(enabled: bool) -> std::io::Result<()> {
-    if enabled {
-        ensure_diary_writable()?;
-    }
-    set_diary_enabled(enabled);
-    Ok(())
-}
-
-pub fn toggle_diary() -> std::io::Result<()> {
-    if diary_enabled() {
-        set_diary_enabled(false);
-    } else {
-        set_diary_enabled_checked(true)?;
-    }
-    Ok(())
-}
-
-pub fn ensure_diary_writable() -> std::io::Result<()> {
-    let filename = diary_filename();
-    open_diary_append(&filename).map(|_| ())
-}
-
-/// Append the top-level source text to the diary without echoing it to stdout.
-pub fn record_diary_command(text: &str) {
-    if !diary_enabled() {
-        return;
-    }
-    let mut owned = text.to_string();
-    if !owned.ends_with('\n') {
-        owned.push('\n');
-    }
-    if let Err(err) = write_diary_text(&owned) {
-        record_diary_failure(err);
-    }
-}
-
-fn write_diary_entry(entry: &ConsoleEntry) {
-    if !matches!(entry.stream, ConsoleStream::Stdout | ConsoleStream::Stderr) {
-        return;
-    }
-    if diary_enabled() {
-        if let Err(err) = write_diary_text(&entry.text) {
-            record_diary_failure(err);
-        }
-    }
-}
-
-fn record_diary_failure(err: std::io::Error) {
-    with_console_state(|state| {
-        state.diary.enabled = false;
-        state.diary.last_error = Some(format!("diary: failed to write diary file ({err})"));
-    });
+    Ok(out)
 }
 
 fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
     crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
 
-fn with_console_state<R>(callback: impl FnOnce(&mut ConsoleState) -> R) -> R {
+pub(super) fn with_console_state<R>(callback: impl FnOnce(&mut ConsoleState) -> R) -> R {
     if let Some(state) = active_state() {
         callback(&mut state.console.borrow_mut())
     } else {
         FALLBACK_STATE.with(|state| callback(&mut state.borrow_mut()))
     }
-}
-
-fn write_diary_text(text: &str) -> std::io::Result<()> {
-    let filename = diary_filename();
-    let mut file = open_diary_append(&filename)?;
-    file.write_all(text.as_bytes())?;
-    file.flush()
-}
-
-fn open_diary_append(path: &PathBuf) -> std::io::Result<runmat_filesystem::File> {
-    let mut options = runmat_filesystem::OpenOptions::new();
-    options.create(true).append(true);
-    options.open(path)
 }
 
 fn is_unlabeled_nd_page_display(text: &str) -> bool {
@@ -424,47 +489,4 @@ fn inject_label_into_nd_page_headers(label: &str, text: &str) -> String {
         }
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn entry(text: &str, timestamp_ms: u64) -> ConsoleEntry {
-        ConsoleEntry {
-            stream: ConsoleStream::Stdout,
-            text: text.to_string(),
-            timestamp_ms,
-        }
-    }
-
-    #[test]
-    fn append_thread_buffer_orders_entries_by_timestamp_stably() {
-        reset_thread_buffer();
-        append_thread_buffer(vec![entry("late", 20)]);
-        append_thread_buffer(vec![entry("early", 10), entry("same-time", 20)]);
-
-        let entries = take_thread_buffer();
-        let texts = entries
-            .into_iter()
-            .map(|entry| entry.text)
-            .collect::<Vec<_>>();
-        assert_eq!(texts, vec!["early", "late", "same-time"]);
-    }
-
-    #[test]
-    fn capture_diverts_console_text_from_thread_buffer() {
-        let _lock = runmat_filesystem::provider_override_lock();
-        set_diary_enabled(false);
-        reset_thread_buffer();
-        let capture = begin_capture();
-        record_console_line(ConsoleStream::Stdout, "inside");
-        let text = capture.finish();
-        record_console_line(ConsoleStream::Stdout, "outside");
-
-        assert_eq!(text, "inside\n");
-        let entries = take_thread_buffer();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].text, "outside\n");
-    }
 }

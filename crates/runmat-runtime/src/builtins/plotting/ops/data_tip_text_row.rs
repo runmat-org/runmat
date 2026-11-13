@@ -3,199 +3,36 @@ use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Value};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::{BuiltinIntegerComputationDomain, BuiltinIntegerOverloadKind};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
+use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::ObjectInstance;
+use runmat_value::{CharArray, HandleRef, StringArray, Value};
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dataTipTextRow";
-const CLASS_NAME: &str = "matlab.graphics.datatip.DataTipTextRow";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.graphics.datatip.DataTipTextRow");
 
 static DATA_TIP_TEXT_ROW_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(CLASS_NAME);
+    crate::class_registry::ClassRegistration::new(CLASS_IDENTITY);
 
-const DATA_TIP_OUTPUT_ROW: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "row",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Data-tip text row object with Label, Value, and Format properties.",
-}];
+pub use runmat_builtins::DATA_TIP_ERROR_INVALID_ARGUMENT;
 
-const DATA_TIP_INPUTS_LABEL_VALUE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Display label for the data-tip row.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value source, expression, or data vector shown by the row.",
-    },
-];
+pub use runmat_builtins::DATA_TIP_ERROR_INTERNAL;
 
-const DATA_TIP_INPUTS_LABEL_VALUE_FORMAT: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Display label for the data-tip row.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value source, expression, or data vector shown by the row.",
-    },
-    BuiltinParamDescriptor {
-        name: "format",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"auto\""),
-        description: "Optional numeric, datetime, duration, or text display format.",
-    },
-];
+#[cfg(test)]
+use runmat_builtins::DATA_TIP_TEXT_ROW_DESCRIPTOR;
 
-const DATA_TIP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "row = dataTipTextRow(label, value)",
-        inputs: &DATA_TIP_INPUTS_LABEL_VALUE,
-        outputs: &DATA_TIP_OUTPUT_ROW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "row = dataTipTextRow(label, value, format)",
-        inputs: &DATA_TIP_INPUTS_LABEL_VALUE_FORMAT,
-        outputs: &DATA_TIP_OUTPUT_ROW,
-    },
-];
+pub use runmat_builtins::DATA_TIP_NONVECTOR_VALUE_EXTENSION;
+pub use runmat_builtins::DATA_TIP_RESIDENT_VALUE_EXTENSION;
 
-const DATA_TIP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATATIPTEXTROW.INVALID_ARGUMENT",
-    identifier: Some("RunMat:dataTipTextRow:InvalidArgument"),
-    when: "The label/format text is not scalar, or the argument count is not supported.",
-    message: "dataTipTextRow: invalid argument",
-};
-
-const DATA_TIP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATATIPTEXTROW.INTERNAL",
-    identifier: Some("RunMat:dataTipTextRow:Internal"),
-    when: "Internal data-tip row object construction fails.",
-    message: "dataTipTextRow: internal error",
-};
-
-const DATA_TIP_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [DATA_TIP_ERROR_INVALID_ARGUMENT, DATA_TIP_ERROR_INTERNAL];
-
-pub const DATA_TIP_TEXT_ROW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DATA_TIP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DATA_TIP_ERRORS,
-};
-
-pub const DATA_TIP_RESIDENT_VALUE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "data-tip-text-row-resident-value",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "dataTipTextRow preserving a resident numeric Value source is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DataTipTextRowResidentValueExtension"),
-    };
-pub const DATA_TIP_NONVECTOR_VALUE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "data-tip-text-row-nonvector-value",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "dataTipTextRow with a nonvector numeric Value source is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:DataTipTextRowNonvectorValueExtension"),
-    };
-pub const DATA_TIP_TEXT_ROW_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    DATA_TIP_RESIDENT_VALUE_EXTENSION,
-    DATA_TIP_NONVECTOR_VALUE_EXTENSION,
-];
-
-const DATA_TIP_INTEGER_VECTOR: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public Value contract says vector without a per-class table. RunMat classifies integer vectors as an evidence-based inference and preserves authoritative storage structurally without conversion.",
-    }];
-const DATA_TIP_INTEGER_NONVECTOR: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Nonvector integer Value sources are preserved only behind the separate RunMat extension gate.",
-    }];
-const DATA_TIP_INTEGER_RESIDENT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "resident value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Resident integer Value metadata is preserved without provider access only behind the separate resident-value extension gate.",
-    }];
-
-pub const DATA_TIP_TEXT_ROW_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "row = dataTipTextRow(label, integer_vector, format?)", inputs: &DATA_TIP_INTEGER_VECTOR, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Inferred vector support stores the exact integer Value object as metadata; formatting occurs later in the data-tip renderer." },
-    BuiltinIntegerCapabilityDescriptor { form: "row = dataTipTextRow(label, integer_nonvector, format?)", inputs: &DATA_TIP_INTEGER_NONVECTOR, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only nonvector metadata preservation is independently gated." },
-    BuiltinIntegerCapabilityDescriptor { form: "row = dataTipTextRow(label, resident_integer, format?)", inputs: &DATA_TIP_INTEGER_RESIDENT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only resident metadata preservation performs no gather, upload, or provider dispatch." },
-];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::data_tip_text_row")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: BUILTIN_NAME,
-    op_kind: GpuOpKind::Custom("data-tip-text-row"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Constructs metadata only. Value inputs, including gpuArray handles, are stored without materializing or gathering their payloads.",
-};
-
-#[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::plotting::data_tip_text_row"
-)]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: BUILTIN_NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Data-tip text row construction is a metadata sink and does not generate numeric fusion kernels.",
-};
-
-fn data_tip_text_row_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
+#[cfg(test)]
+use runmat_builtins::DATA_TIP_TEXT_ROW_INTEGER_CAPABILITIES;
 
 fn error(descriptor: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{}: {}", descriptor.message, detail.as_ref()))
@@ -211,9 +48,9 @@ fn ensure_class_registered() {
         let mut properties = HashMap::new();
         for name in ["Label", "Value", "Format"] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -224,19 +61,24 @@ fn ensure_class_registered() {
             );
         }
 
-        let methods: HashMap<String, crate::class_registry::RuntimeMethod> = HashMap::new();
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: CLASS_NAME.to_string(),
-            parent: Some("handle".to_string()),
-            properties,
-            methods,
-        });
+        let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
+            HashMap::new();
+        crate::class_registry::register_builtin_class(
+            CLASS_IDENTITY,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: CLASS_IDENTITY.into(),
+                parent: Some(runmat_types::standard::HANDLE.into()),
+                properties,
+                methods,
+            },
+        );
     });
 }
 
 fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars) => char_array_text(chars, name),
         Value::StringArray(array) => string_array_text(array, name),
         _ => Err(error(
@@ -253,33 +95,38 @@ fn char_array_text(chars: &CharArray, name: &str) -> BuiltinResult<String> {
             format!("{name} must be a character vector"),
         ));
     }
-    Ok(chars.data.iter().collect())
+    runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+        let mut error = error(&DATA_TIP_ERROR_INVALID_ARGUMENT, source.to_string());
+        error.source = Some(Box::new(source));
+        error
+    })
 }
 
 fn string_array_text(array: &StringArray, name: &str) -> BuiltinResult<String> {
-    if array.data.len() != 1 {
+    if array.data().len() != 1 {
         return Err(error(
             &DATA_TIP_ERROR_INVALID_ARGUMENT,
             format!("{name} must be a scalar string"),
         ));
     }
-    Ok(array.data[0].clone())
+    array.data()[0].as_str().map(str::to_owned).ok_or_else(|| {
+        error(
+            &DATA_TIP_ERROR_INVALID_ARGUMENT,
+            format!("{name} must be a scalar string"),
+        )
+    })
 }
 
 #[runtime_builtin(
     name = "dataTipTextRow",
-    category = "plotting",
-    summary = "Create a data-tip text row object for plot data tips.",
-    keywords = "dataTipTextRow,datatip,data cursor,plotting,graphics",
-    type_resolver(data_tip_text_row_type),
-    descriptor(crate::builtins::plotting::data_tip_text_row::DATA_TIP_TEXT_ROW_DESCRIPTOR),
-    extensions(crate::builtins::plotting::data_tip_text_row::DATA_TIP_TEXT_ROW_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::plotting::data_tip_text_row::DATA_TIP_TEXT_ROW_INTEGER_CAPABILITIES
-    ),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::data_tip_text_row"
 )]
-pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub fn data_tip_text_row_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !(2..=3).contains(&args.len()) {
         return Err(error(
             &DATA_TIP_ERROR_INVALID_ARGUMENT,
@@ -297,14 +144,21 @@ pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         None => "auto".to_string(),
     };
 
-    let mut object = ObjectInstance::new(CLASS_NAME.to_string());
-    object
-        .properties
-        .insert("Label".to_string(), Value::String(label));
-    object.properties.insert("Value".to_string(), value);
-    object
-        .properties
-        .insert("Format".to_string(), Value::String(format));
+    let fields = [
+        ("Label", Value::string(label)),
+        ("Value", value),
+        ("Format", Value::string(format)),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        CLASS_IDENTITY.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    let (object, _roots) = object.into_value_and_lease();
+    let Value::Object(object) = object else {
+        unreachable!("data-tip constructor publishes an object")
+    };
+    let class_name = object.class_name_owner().clone();
     let target = runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| {
         error(
             &DATA_TIP_ERROR_INTERNAL,
@@ -312,7 +166,7 @@ pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )
     })?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: CLASS_NAME.to_string(),
+        class_name,
         target,
         valid: true,
     }))
@@ -325,22 +179,25 @@ fn vector_shape(shape: &[usize]) -> bool {
 fn validate_value_source(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::String(_) | Value::CharArray(_) => Ok(()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(()),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_missing() => {
+            Ok(())
+        }
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. } => Ok(()),
+        | Value::BoundFunctionHandle(_)
+        | Value::ScopedFunctionHandle(_) => Ok(()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(()),
-        Value::Tensor(tensor) => validate_host_vector_shape(&tensor.shape),
+        Value::Tensor(tensor) => validate_host_vector_shape(tensor.shape()),
         Value::LogicalArray(array) => validate_host_vector_shape(&array.shape),
-        Value::ComplexTensor(tensor) => validate_host_vector_shape(&tensor.shape),
+        Value::ComplexTensor(tensor) => validate_host_vector_shape(tensor.shape()),
         Value::Complex(_, _) => Ok(()),
         Value::GpuTensor(handle) => {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &DATA_TIP_RESIDENT_VALUE_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            if !vector_shape(&handle.shape) {
+            if !vector_shape(handle.shape()) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &DATA_TIP_NONVECTOR_VALUE_EXTENSION,
                     BUILTIN_NAME,
@@ -368,14 +225,20 @@ fn validate_host_vector_shape(shape: &[usize]) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::GpuTensorHandle;
     use runmat_value::{IntegerStorage, StringArray, Tensor};
+
+    fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::data_tip_text_row_builtin(
+            None,
+            crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+        )
+    }
 
     fn handle_payload(value: Value) -> ObjectInstance {
         let Value::HandleObject(handle) = value else {
             panic!("expected handle object");
         };
-        assert_eq!(handle.class_name, CLASS_NAME);
+        assert!(handle.class_name.is(CLASS_IDENTITY));
         let target = runmat_gc::gc_clone_value(&handle.target).expect("clone handle target");
         let Value::Object(object) = target else {
             panic!("expected object handle target");
@@ -401,14 +264,31 @@ mod tests {
             .expect("dataTipTextRow");
         let object = handle_payload(row);
         assert_eq!(
-            object.properties.get("Label"),
+            object.properties().get("Label"),
             Some(&Value::String("Amplitude".into()))
         );
-        assert_eq!(object.properties.get("Value"), Some(&value));
+        assert_eq!(object.properties().get("Value"), Some(&value));
         assert_eq!(
-            object.properties.get("Format"),
+            object.properties().get("Format"),
             Some(&Value::String("auto".into()))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn preserves_low_rank_real_and_complex_value_sources() {
+        let values = [
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap(),
+            ),
+        ];
+        for value in values {
+            let row = data_tip_text_row_builtin(vec![Value::String("Value".into()), value.clone()])
+                .expect("low-rank value source");
+            let object = handle_payload(row);
+            assert_eq!(object.properties().get("Value"), Some(&value));
+        }
     }
 
     #[test]
@@ -419,15 +299,15 @@ mod tests {
             .expect("dataTipTextRow");
         let object = handle_payload(row);
         assert_eq!(
-            object.properties.get("Label"),
+            object.properties().get("Label"),
             Some(&Value::String("Speed".into()))
         );
         assert_eq!(
-            object.properties.get("Value"),
+            object.properties().get("Value"),
             Some(&Value::String("YData".into()))
         );
         assert_eq!(
-            object.properties.get("Format"),
+            object.properties().get("Format"),
             Some(&Value::String("%.2f".into()))
         );
     }
@@ -444,12 +324,14 @@ mod tests {
     #[test]
     fn stores_gpu_value_without_gathering_or_replacing_handle() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 7,
-            buffer_id: 42,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let row = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),
             Value::GpuTensor(handle.clone()),
@@ -457,9 +339,9 @@ mod tests {
         .expect("dataTipTextRow");
         let object = handle_payload(row);
         assert!(matches!(
-            object.properties.get("Value"),
+            object.properties().get("Value"),
             Some(Value::GpuTensor(stored))
-                if stored.device_id == handle.device_id && stored.buffer_id == handle.buffer_id
+                if stored.shares_allocation_with(&handle)
         ));
     }
 
@@ -482,11 +364,11 @@ mod tests {
                 .unwrap(),
             );
             assert!(matches!(
-                object.properties.get("Value"),
+                object.properties().get("Value"),
                 Some(Value::GpuTensor(stored)) if stored == &handle
             ));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 
@@ -506,7 +388,7 @@ mod tests {
             let object = handle_payload(
                 data_tip_text_row_builtin(vec![Value::String("Integer".into()), value]).unwrap(),
             );
-            let Some(Value::Tensor(stored)) = object.properties.get("Value") else {
+            let Some(Value::Tensor(stored)) = object.properties().get("Value") else {
                 panic!("integer vector storage");
             };
             assert_eq!(stored.integer_storage(), Some(&storage));
@@ -537,12 +419,14 @@ mod tests {
             error.identifier(),
             DATA_TIP_NONVECTOR_VALUE_EXTENSION.error_identifier
         );
-        let handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 397,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let error = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),
             Value::GpuTensor(handle.clone()),

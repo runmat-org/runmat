@@ -43,13 +43,13 @@ pub enum Token {
     // Object-oriented and function syntax keywords
     #[token("classdef")]
     ClassDef,
-    #[token("properties")]
+    #[token("properties", |lex| { lex.extras.last_was_value = true; })]
     Properties,
-    #[token("methods")]
+    #[token("methods", |lex| { lex.extras.last_was_value = true; })]
     Methods,
-    #[token("events")]
+    #[token("events", |lex| { lex.extras.last_was_value = true; })]
     Events,
-    #[token("enumeration")]
+    #[token("enumeration", |lex| { lex.extras.last_was_value = true; })]
     Enumeration,
     #[token("arguments")]
     Arguments,
@@ -86,10 +86,13 @@ pub enum Token {
     #[regex(r"0[bB][0-9a-zA-Z_]*", |lex| { lex.extras.last_was_value = true; }, priority = 4)]
     RadixInteger,
     // Float with optional underscores as digit separators (strip later)
-    #[regex(r"\d(?:_?\d)*\.(?:\d(?:_?\d)*)?(?:[eE][+-]?\d(?:_?\d)*)?", |lex| {
+    #[regex(r"\d(?:_?\d)*\.\d(?:_?\d)*(?:[eEdD][+-]?\d(?:_?\d)*)?", |lex| {
         lex.extras.last_was_value = true;
     })]
-    #[regex(r"\d(?:_?\d)*[eE][+-]?\d(?:_?\d)*", |lex| {
+    #[regex(r"\d(?:_?\d)*\.[eEdD][+-]?\d(?:_?\d)*", |lex| {
+        lex.extras.last_was_value = true;
+    })]
+    #[regex(r"\d(?:_?\d)*[eEdD][+-]?\d(?:_?\d)*", |lex| {
         lex.extras.last_was_value = true;
     })]
     Float,
@@ -196,6 +199,17 @@ pub enum Token {
     Error,
     // Synthetic tokens (not produced by Logos directly)
     Transpose,
+}
+
+impl Token {
+    /// Class member block introducers are identifiers outside their classdef
+    /// block position. Other keywords remain reserved in expression syntax.
+    pub fn can_be_identifier(&self) -> bool {
+        matches!(
+            self,
+            Self::Ident | Self::Properties | Self::Methods | Self::Events | Self::Enumeration
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

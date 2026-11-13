@@ -144,7 +144,10 @@ fn try_catch_protects_nested_control_flow_blocks() {
     .expect("nested try block error must transfer to catch");
     assert!(has_num(&caught, 7.0));
     assert!(caught.iter().any(|value| {
-        matches!(value, runmat_value::Value::String(id) if id == "RunMat:IndexOutOfBounds")
+        value
+            == &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:IndexOutOfBounds",
+            ))
     }));
 
     let completed = execute_source(
@@ -205,6 +208,16 @@ fn for_loop_over_matrix_iterates_columns() {
     .unwrap();
     assert!(has_num(&vars, 6.0));
     assert!(has_num(&vars, 60.0));
+}
+
+#[test]
+fn range_variable_reassigned_scalar_iterates_one_column() {
+    let vars = execute_source(
+        "v = 1:3; total = 0; for f = v; total = total + f; end; \
+         v = 7; for f = v; total = total + f; end; assert(total == 13);",
+    )
+    .expect("a reassigned scalar is a one-column iterable");
+    assert!(has_num(&vars, 13.0));
 }
 
 #[test]
@@ -321,17 +334,33 @@ fn varargout_mismatch_mex() {
 }
 
 #[test]
-fn slice_non_tensor_mex() {
-    let src = "x = 5; y = x(1,1);";
-    let err = execute_semantic_error(src);
-    assert_eq!(err.identifier(), Some("RunMat:SliceNonTensor"));
+fn scalar_multidimensional_indexing_preserves_value() {
+    let bytecode = compile_source("x = 5; y = x(1,1);").unwrap();
+    let slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, name)| (name == "y").then_some(slot))
+        .unwrap();
+    let values = test_helpers::interpret(&bytecode).expect("scalar indexing at one is legal");
+    assert_eq!(values.get(slot), Some(&runmat_value::Value::Num(5.0)));
+    let error = execute_semantic_error("x = 5; y = x(2,1);");
+    assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]
-fn index_step_zero_mex() {
-    let src = "A = [1 2 3 4]; B = A(1:0:3);";
-    let err = execute_semantic_error(src);
-    assert_eq!(err.identifier(), Some("RunMat:IndexStepZero"));
+fn zero_step_index_range_is_empty() {
+    let bytecode = compile_source("A = [1 2 3 4]; B = A(1:0:3);").unwrap();
+    let slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, name)| (name == "B").then_some(slot))
+        .unwrap();
+    let values = test_helpers::interpret(&bytecode).expect("zero step colon yields empty");
+    let Some(runmat_value::Value::Tensor(value)) = values.get(slot) else {
+        panic!("empty range must retain numeric array class");
+    };
+    assert_eq!(value.shape(), vec![1, 0]);
+    assert!(value.materialize_f64().is_empty());
 }
 
 #[test]

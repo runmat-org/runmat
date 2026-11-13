@@ -148,6 +148,26 @@ fn validate_request(
     request: &WorkerRequest,
     limits: ProtocolLimits,
 ) -> Result<(), TestDomainError> {
+    if let WorkerRequest::Execute {
+        admission: Some(admission),
+        ..
+    } = request
+    {
+        admission
+            .assignment
+            .validate()
+            .and_then(|_| admission.resources.validate())
+            .and_then(|_| {
+                admission
+                    .assignment
+                    .resources
+                    .validate_for_request(&admission.resources)
+            })
+            .map_err(|error| TestDomainError::InvalidField {
+                field: "worker.execution_admission",
+                reason: error.to_string(),
+            })?;
+    }
     if let WorkerRequest::InstallPlan { plan, snapshot } = request {
         let count = plan.tests().count();
         if count > limits.max_tests_per_plan as usize {
@@ -190,6 +210,12 @@ fn validate_response(
             Ok(())
         }
         WorkerResponse::Event { event } => match &event.payload {
+            crate::event::TestEventPayload::ProcessOutput { .. } => {
+                Err(TestDomainError::InvalidField {
+                    field: "worker.event.process_output",
+                    reason: "only the process owner may certify raw application output".into(),
+                })
+            }
             crate::event::TestEventPayload::TestFinished { result } => {
                 check_attempt(result, limits)
             }

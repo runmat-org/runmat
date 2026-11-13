@@ -1,13 +1,15 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "occt_bridge.hxx"
 #include "exact_evaluator_internal.hxx"
+#include "exact_surface_bounds.hxx"
+#include "exact_wire.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <Geom2dAdaptor_Curve.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepGProp.hxx>
-#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
-#include <BRepTools.hxx>
 #include <BRepTools_ShapeSet.hxx>
 #include <BRep_Builder.hxx>
 #include <Extrema_ExtPC.hxx>
@@ -38,6 +40,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include <unordered_map>
 
 namespace runmat_geometry_io {
@@ -48,6 +51,7 @@ struct ExactEvaluatorSession {
   TopoDS_Shape root;
   BRepTools_ShapeSet shapes{Standard_False};
   double meters_per_source_unit = 1.0;
+  detail::ExactSurfaceBounds face_parameter_bounds;
 };
 
 std::mutex& sessions_mutex() {
@@ -119,6 +123,7 @@ struct PcurveData {
 
 PcurveData pcurve(const ExactEvaluatorSession& session,
                   std::uint64_t face_key,
+                  bool face_reversed,
                   std::uint64_t wire_key,
                   std::uint64_t coedge_position,
                   std::int8_t seam_image) {
@@ -129,7 +134,11 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
     throw std::runtime_error("OCCT exact pcurve token is outside the B-rep topology");
   }
 
-  const TopoDS_Face face_use = face(session, face_key);
+  // The shape table stores a face in its orientation within its first shell; the topology
+  // defines coedge positions and seam images on the face's use in the body, whose orientation
+  // the token carries. Seam uses of a reversed face are traversed in the opposite order.
+  TopoDS_Face face_use = face(session, face_key);
+  face_use.Orientation(face_reversed ? TopAbs_REVERSED : TopAbs_FORWARD);
 
   TopoDS_Wire wire;
   for (TopoDS_Iterator wires(face_use, Standard_False, Standard_True); wires.More(); wires.Next()) {
@@ -143,16 +152,11 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
     throw std::runtime_error("OCCT exact pcurve wire is not owned by its face");
   }
 
-  BRepTools_WireExplorer edge_uses(wire, face_use);
-  std::uint64_t position = 1;
-  while (edge_uses.More() && position < coedge_position) {
-    edge_uses.Next();
-    ++position;
-  }
-  if (!edge_uses.More() || position != coedge_position) {
+  const std::vector<TopoDS_Edge> ordered_edges = exact_wire_edge_uses(wire, face_use);
+  if (coedge_position > ordered_edges.size()) {
     throw std::runtime_error("OCCT exact pcurve coedge position is outside its wire");
   }
-  TopoDS_Edge edge_use = edge_uses.Current();
+  TopoDS_Edge edge_use = ordered_edges[static_cast<std::size_t>(coedge_position - 1)];
   if (seam_image >= 0) {
     TopoDS_Edge local_edge = edge_use;
     if (face_use.Orientation() == TopAbs_REVERSED) {
@@ -185,12 +189,14 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
 detail::ExactFaceContext detail::exact_face_context(std::uint64_t session_id,
                                                     std::uint64_t face_key) {
   const auto value = session(session_id);
-  return {face(*value, face_key), value->meters_per_source_unit};
+  return {face(*value, face_key), value->meters_per_source_unit,
+          value->face_parameter_bounds.at(face_key)};
 }
 
 std::uint64_t start_exact_evaluator_session(
     rust::Slice<const std::uint8_t> representation,
-    double meters_per_source_unit) {
+    double meters_per_source_unit,
+    rust::Slice<const std::uint64_t> face_keys) {
   if (representation.empty()) {
     throw std::runtime_error("OCCT exact evaluator representation is empty");
   }
@@ -207,6 +213,7 @@ std::uint64_t start_exact_evaluator_session(
   }
   value->shapes.Add(value->root);
   value->meters_per_source_unit = meters_per_source_unit;
+  value->face_parameter_bounds = detail::ExactSurfaceBounds(value->shapes, face_keys);
 
   const std::uint64_t id = next_session_id().fetch_add(1, std::memory_order_relaxed);
   std::lock_guard<std::mutex> lock(sessions_mutex());
@@ -241,6 +248,11 @@ OcctCurveDerivativesPayload exact_curve_derivatives(std::uint64_t session_id,
   curve.D2(parameter, point, first, second);
   const double scale = value->meters_per_source_unit;
   OcctCurveDerivativesPayload result;
+  // Native line parameters use source-coordinate length; conic parameters are
+  // radians. Other bases retain their named native axis rather than guessed units.
+  result.parameter_unit = curve.GetType() == GeomAbs_Line ? 1 :
+      ((curve.GetType() == GeomAbs_Circle || curve.GetType() == GeomAbs_Ellipse) ? 2 : 0);
+  result.parameter_scale = scale;
   result.point_x = point.X() * scale;
   result.point_y = point.Y() * scale;
   result.point_z = point.Z() * scale;
@@ -325,6 +337,9 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
   }
 
   OcctCurveProjectionPayload result;
+  result.parameter_unit = curve.GetType() == GeomAbs_Line ? 1 :
+      ((curve.GetType() == GeomAbs_Circle || curve.GetType() == GeomAbs_Ellipse) ? 2 : 0);
+  result.parameter_scale = scale;
   result.parameter = best_parameter;
   result.point_x = best_point.X() * scale;
   result.point_y = best_point.Y() * scale;
@@ -336,12 +351,13 @@ OcctCurveProjectionPayload exact_curve_inverse_project(
 
 OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
                                          std::uint64_t face_key,
+                                         bool face_reversed,
                                          std::uint64_t wire_key,
                                          std::uint64_t coedge_position,
                                          std::int8_t seam_image) {
   const auto value = session(session_id);
   const PcurveData pcurve_value =
-      pcurve(*value, face_key, wire_key, coedge_position, seam_image);
+      pcurve(*value, face_key, face_reversed, wire_key, coedge_position, seam_image);
   OcctCurveRangePayload result;
   result.start = pcurve_value.start;
   result.end = pcurve_value.end;
@@ -351,13 +367,14 @@ OcctCurveRangePayload exact_pcurve_range(std::uint64_t session_id,
 OcctPcurveDerivativesPayload exact_pcurve_derivatives(
     std::uint64_t session_id,
     std::uint64_t face_key,
+    bool face_reversed,
     std::uint64_t wire_key,
     std::uint64_t coedge_position,
     std::int8_t seam_image,
     double parameter) {
   const auto value = session(session_id);
   const PcurveData pcurve_value =
-      pcurve(*value, face_key, wire_key, coedge_position, seam_image);
+      pcurve(*value, face_key, face_reversed, wire_key, coedge_position, seam_image);
   require_finite(parameter, "pcurve parameter");
   if (parameter < pcurve_value.start || parameter > pcurve_value.end) {
     throw std::runtime_error("OCCT exact pcurve parameter is outside the edge domain");
@@ -367,6 +384,21 @@ OcctPcurveDerivativesPayload exact_pcurve_derivatives(
   gp_Vec2d second;
   pcurve_value.curve->D2(parameter, point, first, second);
   OcctPcurveDerivativesPayload result;
+  const Geom2dAdaptor_Curve curve(pcurve_value.curve);
+  result.parameter_unit = (curve.GetType() == GeomAbs_Circle || curve.GetType() == GeomAbs_Ellipse) ? 2 : 0;
+  // Only the surface type is read here; an unrestricted adaptor skips the per-call UV-bounds
+  // pass over the face's wires, which dominated dense pcurve sampling.
+  const BRepAdaptor_Surface surface(face(*value, face_key), Standard_False);
+  result.parameter_scale = value->meters_per_source_unit;
+  result.u_parameter_unit = 0;
+  result.v_parameter_unit = 0;
+  switch (surface.GetType()) {
+    case GeomAbs_Plane: result.u_parameter_unit = 1; result.v_parameter_unit = 1; break;
+    case GeomAbs_Cylinder: result.u_parameter_unit = 2; result.v_parameter_unit = 1; break;
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus: result.u_parameter_unit = 2; result.v_parameter_unit = 2; break;
+    default: break;
+  }
   result.range_start = pcurve_value.start;
   result.range_end = pcurve_value.end;
   result.point_u = point.X();

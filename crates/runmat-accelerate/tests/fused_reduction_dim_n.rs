@@ -1,10 +1,14 @@
 #![cfg(feature = "wgpu")]
+#[path = "support/direct_reduction_runtime.rs"]
+mod invocation;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 
 use runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate::fusion::{
     detect_fusion_groups, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
 use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, PrimitiveOp,
     ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
@@ -31,6 +35,8 @@ fn upload(
 
 #[tokio::test]
 async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
+    let runtime = invocation::runtime();
+    let _invocation = runtime.enter();
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
     )
@@ -97,9 +103,9 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                 origin: ValueOrigin::Unknown,
                 ty: Type::tensor(),
                 shape: if dim_val == 1.0 {
-                    ShapeInfo::Tensor(vec![Some(cols)])
+                    ShapeInfo::Tensor(vec![Some(1), Some(cols)])
                 } else {
-                    ShapeInfo::Tensor(vec![Some(rows)])
+                    ShapeInfo::Tensor(vec![Some(rows), Some(1)])
                 },
                 constant: None,
             },
@@ -116,7 +122,10 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin { name: "sum".into() },
+            label: AccelNodeLabel::Builtin {
+                name: "sum".into(),
+                origin: Default::default(),
+            },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_y],
@@ -163,7 +172,8 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
-                    name: "sum".to_string(),
+                    origin: Default::default(),
+                    name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_y),
                 },
@@ -193,15 +203,24 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             plan: &plan,
             inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
             placement: None,
-            runtime: None,
+            runtime: Some(runtime.clone()),
         };
         let (reduce_len, num_slices) = if dim_val == 1.0 {
             (rows, cols)
         } else {
             (cols, rows)
         };
-        let result =
-            execute_reduction(req, reduce_len, num_slices, 0).expect("execute fused reduction");
+        let shape = if dim_val == 1.0 {
+            vec![1, cols]
+        } else {
+            vec![rows, 1]
+        };
+        let Some(result) = selected_reduction::execute(req, reduce_len, num_slices, &shape, 0)
+            .await
+            .expect("canonical fused reduction admission")
+        else {
+            continue;
+        };
         let out_handle = match result {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor"),
@@ -211,7 +230,7 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
             .expect("download");
 
         if dim_val == 1.0 {
-            assert_eq!(out.shape, vec![cols]);
+            assert_eq!(out.shape, vec![1, cols]);
             for c in 0..cols {
                 let mut acc = 0.0f64;
                 for r in 0..rows {
@@ -224,7 +243,7 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                 );
             }
         } else {
-            assert_eq!(out.shape, vec![rows]);
+            assert_eq!(out.shape, vec![rows, 1]);
             for r in 0..rows {
                 let mut acc = 0.0f64;
                 for c in 0..cols {

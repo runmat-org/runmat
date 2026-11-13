@@ -1,124 +1,37 @@
 //! MATLAB-compatible `strcmp` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRCMP_DESCRIPTOR, STRCMP_ERROR_INTERNAL, STRCMP_ERROR_INVALID_INPUT,
+    STRCMP_ERROR_SHAPE_MISMATCH, STRCMP_ERROR_TOO_MANY_OUTPUTS,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmp")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "strcmp",
-    op_kind: GpuOpKind::Custom("string-compare"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Performs host-side text comparisons; GPU operands are gathered automatically before evaluation.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strcmp")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "strcmp",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Produces logical results on the host; not eligible for GPU fusion.",
-};
 
 const BUILTIN_NAME: &str = "strcmp";
 
-const STRCMP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical comparison result.",
-}];
+#[derive(serde::Serialize)]
+pub(crate) struct ScalarStringCompareWorkload {
+    pub left_utf8_bytes: usize,
+    pub right_utf8_bytes: usize,
+    pub requested_outputs: Option<usize>,
+}
 
-const STRCMP_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second text input (string/char/cell/string array).",
-    },
-];
+impl crate::dispatcher::direct_call_observation::HostCallDomainFacts
+    for ScalarStringCompareWorkload
+{
+    const ROUTE_ID: &'static [u8] = b"runmat.strcmp.host-string-scalar.v1";
 
-const STRCMP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = strcmp(A, B)",
-    inputs: &STRCMP_INPUTS,
-    outputs: &STRCMP_OUTPUT,
-}];
-
-const STRCMP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCMP.INVALID_INPUT",
-    identifier: Some("RunMat:strcmp:InvalidInput"),
-    when: "At least one input is not a supported text container.",
-    message: "strcmp: text inputs must be string/char/cell/string-array values",
-};
-
-const STRCMP_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCMP.SHAPE_MISMATCH",
-    identifier: Some("RunMat:strcmp:ShapeMismatch"),
-    when: "Inputs are not broadcast-compatible for elementwise comparison.",
-    message: "strcmp: input sizes are not broadcast-compatible",
-};
-
-const STRCMP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCMP.INTERNAL",
-    identifier: Some("RunMat:strcmp:InternalError"),
-    when: "Internal logical result assembly failed.",
-    message: "strcmp: internal error",
-};
-
-const STRCMP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STRCMP_ERROR_INVALID_INPUT,
-    STRCMP_ERROR_SHAPE_MISMATCH,
-    STRCMP_ERROR_INTERNAL,
-];
-
-pub const STRCMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRCMP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRCMP_ERRORS,
-};
-
-pub const STRCMP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strcmp compares text containers. An unsupported integer or other numeric input returns scalar logical false as documented, without reading numeric payloads or accessing a provider.",
-};
+    fn requested_outputs(&self) -> Option<usize> {
+        self.requested_outputs
+    }
+}
 
 fn strcmp_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strcmp_error_with_message(error.message, error)
@@ -141,19 +54,32 @@ fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strcmp",
-    category = "strings/core",
-    summary = "Compare text inputs for exact case-sensitive equality.",
-    keywords = "strcmp,string compare,text equality",
-    accel = "sink",
-    type_resolver(logical_text_match_type),
-    descriptor(crate::builtins::strings::core::strcmp::STRCMP_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::strcmp::STRCMP_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::strings::core::strcmp"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::core::strcmp",
+    requested_outputs = true,
+    call_observation = true
 )]
-async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+async fn strcmp_builtin(
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    a: Value,
+    b: Value,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &STRCMP_DESCRIPTOR,
+        &STRCMP_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
         return Ok(Value::Bool(false));
     }
+    let host_scalar_lengths = match (&a, &b) {
+        (Value::String(left), Value::String(right)) => left
+            .as_str()
+            .zip(right.as_str())
+            .map(|(left, right)| (left.len(), right.len())),
+        _ => None,
+    };
     let a = gather_if_needed_async(&a)
         .await
         .map_err(remap_strcmp_flow)?;
@@ -164,13 +90,36 @@ async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
         .map_err(|_| strcmp_error(&STRCMP_ERROR_INVALID_INPUT))?;
     let right = TextCollection::from_argument(BUILTIN_NAME, b, "second argument")
         .map_err(|_| strcmp_error(&STRCMP_ERROR_INVALID_INPUT))?;
-    evaluate_strcmp(&left, &right)
+    evaluate_strcmp(
+        &left,
+        &right,
+        host_scalar_lengths,
+        requested_outputs,
+        observation,
+    )
 }
 
-fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
+fn evaluate_strcmp(
+    left: &TextCollection,
+    right: &TextCollection,
+    host_scalar_lengths: Option<(usize, usize)>,
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+) -> BuiltinResult<Value> {
     let shape = broadcast_shapes(BUILTIN_NAME, &left.shape, &right.shape)
         .map_err(|_| strcmp_error(&STRCMP_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&shape);
+    if total == 1 && left.shape == [1, 1] && right.shape == [1, 1] {
+        if let (Some((left_utf8_bytes, right_utf8_bytes)), Some(observation)) =
+            (host_scalar_lengths, observation)
+        {
+            observation.admit(ScalarStringCompareWorkload {
+                left_utf8_bytes,
+                right_utf8_bytes,
+                requested_outputs,
+            });
+        }
+    }
     if total == 0 {
         return logical_result(BUILTIN_NAME, Vec::new(), shape)
             .map_err(|_| strcmp_error(&STRCMP_ERROR_INTERNAL));
@@ -195,15 +144,23 @@ fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResu
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CellArray, CharArray, LogicalArray, StringArray};
 
     fn strcmp_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::strcmp_builtin(a, b))
+        futures::executor::block_on(super::strcmp_builtin(None, None, a, b))
     }
 
     fn error_message(err: RuntimeError) -> String {
         err.to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strcmp_rejects_excess_outputs_before_comparing() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = strcmp_builtin(Value::String("a".into()), Value::String("a".into()))
+            .expect_err("fixed output bound");
+        assert_eq!(error.identifier(), STRCMP_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -245,7 +202,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_row_compare() {
-        let chars = CharArray::new(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
         let result =
             strcmp_builtin(Value::CharArray(chars), Value::String("cat".into())).expect("cmp");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -255,8 +213,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_to_char_array() {
-        let left = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
-        let right = CharArray::new(vec!['a', 'b', 'x', 'y'], 2, 2).unwrap();
+        let left = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        let right = CharArray::from_unicode_scalars(vec!['a', 'b', 'x', 'y'], 2, 2).unwrap();
         let result =
             strcmp_builtin(Value::CharArray(left), Value::CharArray(right)).expect("strcmp");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -310,7 +268,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_trailing_space_is_not_equal() {
-        let chars = CharArray::new(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
         let result =
             strcmp_builtin(Value::CharArray(chars), Value::String("cat".into())).expect("strcmp");
         assert_eq!(result, Value::Bool(false));
@@ -319,7 +277,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_empty_rows_returns_empty() {
-        let chars = CharArray::new(Vec::new(), 0, 0).unwrap();
+        let chars = CharArray::from_code_units(Vec::new(), 0, 0).unwrap();
         let result = strcmp_builtin(Value::CharArray(chars), Value::String("anything".into()))
             .expect("strcmp");
         match result {
@@ -334,7 +292,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_missing_strings_compare_false() {
-        let strings = StringArray::new(vec!["<missing>".into()], vec![1, 1]).unwrap();
+        let strings = StringArray::from_elements_unbounded(
+            vec![runmat_value::StringElement::Missing],
+            vec![1, 1],
+        )
+        .unwrap();
         let result = strcmp_builtin(
             Value::StringArray(strings.clone()),
             Value::StringArray(strings),
@@ -346,7 +308,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_missing_string_false() {
-        let array = StringArray::new(vec!["alpha".into(), "<missing>".into()], vec![1, 2]).unwrap();
+        let array = StringArray::from_elements_unbounded(
+            vec!["alpha".into(), runmat_value::StringElement::Missing],
+            vec![1, 2],
+        )
+        .unwrap();
         let result =
             strcmp_builtin(Value::StringArray(array), Value::String("alpha".into())).expect("cmp");
         let expected = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
@@ -373,14 +339,36 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strcmp_type_is_logical_match() {
+    fn strcmp_direct_numeric_false_precedes_invalid_peer_container() {
+        let malformed = Value::Struct(runmat_value::StructValue::new());
+        for (a, b) in [
+            (Value::Num(1.0), malformed.clone()),
+            (malformed, Value::Num(1.0)),
+        ] {
+            assert_eq!(strcmp_builtin(a, b).unwrap(), Value::Bool(false));
+        }
+        let malformed_cell = CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap();
+        let error = strcmp_builtin(Value::Cell(malformed_cell), Value::String("a".into()))
+            .expect_err("invalid host cell without direct numeric input");
+        assert_eq!(error.identifier(), STRCMP_ERROR_INVALID_INPUT.identifier);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
         assert_eq!(
-            logical_text_match_type(
-                &[Type::String, Type::String],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Bool
+            strcmp_builtin(
+                Value::GpuTensor(allocation.handle.clone()),
+                Value::Struct(runmat_value::StructValue::new()),
+            )
+            .unwrap(),
+            Value::Bool(false)
         );
+        assert!(allocation.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 }

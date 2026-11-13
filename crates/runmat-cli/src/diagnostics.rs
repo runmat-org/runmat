@@ -25,10 +25,15 @@ pub fn resolved_error_namespace(cfg: &RunMatRuntimeConfig) -> String {
     }
 }
 
-pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) -> Option<String> {
+pub fn format_frontend_error(
+    err: &RunError,
+    source_name: &str,
+    source: Option<&str>,
+) -> Option<String> {
     let styles = presentation::stderr();
     match err {
         RunError::Syntax(err) => {
+            let source = source?;
             let mut message = err.message.clone();
             if let Some(expected) = &err.expected {
                 message = format!("{message} (expected {expected})");
@@ -47,6 +52,7 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
             ))
         }
         RunError::Semantic(err) => {
+            let source = source?;
             let span = err.span.map(|span| {
                 SourceSpan::new(
                     SourceOffset::from(span.start),
@@ -64,6 +70,7 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
             ))
         }
         RunError::Compile(err) => {
+            let source = source?;
             let span = err.span.map(|span| {
                 SourceSpan::new(
                     SourceOffset::from(span.start),
@@ -80,11 +87,28 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
                 &styles,
             ))
         }
+        RunError::SourceCompile(bound) => {
+            let err = &bound.error;
+            let span = err.span.map(|span| {
+                SourceSpan::new(
+                    SourceOffset::from(span.start),
+                    span.end.saturating_sub(span.start).max(1),
+                )
+            });
+            Some(format_diagnostic_with_styles(
+                &err.message,
+                err.identifier.as_deref().or(Some("RunMat:CompileError")),
+                span,
+                &bound.source.display_name,
+                &bound.source.text,
+                &styles,
+            ))
+        }
         RunError::Runtime(err) => Some(render_runtime_error(
             err,
             DiagnosticSeverity::Error,
             Some(source_name),
-            Some(source),
+            Some(source?),
             &styles,
         )),
     }
@@ -142,6 +166,23 @@ pub fn format_compact_runtime_diagnostic(diagnostic: &RuntimeDiagnostic) -> Stri
         styles.paint(tone, &diagnostic.code),
         diagnostic.message
     )
+}
+
+/// Render a validated worker diagnostic with the same presentation policy as
+/// local runtime errors. Remote responses do not carry source text, so spans
+/// remain structured protocol data while identity, phase, task, and callstack
+/// details remain visible.
+pub fn format_program_runtime_failure(
+    failure: runmat_execution::ProgramRuntimeFailure,
+) -> Result<String, String> {
+    let error = runmat_runtime::execution::decode_runtime_failure(failure)?;
+    Ok(render_runtime_error(
+        &error,
+        DiagnosticSeverity::Error,
+        None,
+        None,
+        &presentation::stderr(),
+    ))
 }
 
 fn diagnostic_severity_label(severity: DiagnosticSeverity) -> &'static str {
@@ -298,9 +339,10 @@ fn render_span(source: &str, span: &SourceSpan) -> (usize, usize, String, String
         .find('\n')
         .map(|relative| line_start + relative)
         .unwrap_or(source.len());
-    let line_text = source[line_start..line_end].to_string();
+    let text = &source[line_start..line_end];
+    let line_text = text.strip_suffix('\r').unwrap_or(text).to_string();
     let column = offset.saturating_sub(line_start) + 1;
-    let available = line_end.saturating_sub(offset).max(1);
+    let available = (line_start + line_text.len()).saturating_sub(offset).max(1);
     let caret_len = len.max(1).min(available);
     let caret = format!(
         "{}{}",
@@ -349,13 +391,14 @@ mod compat_tests {
             callstack_elided: 0,
         };
 
-        let rendered =
-            format_runtime_diagnostic(&diagnostic, Some("main.m"), Some("y = butter(4);"));
-
-        assert!(rendered.contains("error: Undefined function: butter"));
-        assert!(rendered.contains("id: RunMat:UndefinedFunction"));
-        assert!(rendered.contains("--> main.m:1:5"));
-        assert!(rendered.contains("callstack:\n  main"));
+        for source in ["y = butter(4);\n", "y = butter(4);\r\n"] {
+            let rendered = format_runtime_diagnostic(&diagnostic, Some("main.m"), Some(source));
+            assert!(rendered.contains("error: Undefined function: butter"));
+            assert!(rendered.contains("id: RunMat:UndefinedFunction"));
+            assert!(rendered.contains("--> main.m:1:5"));
+            assert!(rendered.contains("callstack:\n  main"));
+            assert!(!rendered.contains('\r'));
+        }
     }
 
     #[test]
@@ -373,6 +416,28 @@ mod compat_tests {
 
         assert!(rendered.starts_with("warning: careful"));
         assert!(!rendered.starts_with("error: careful"));
+    }
+
+    #[test]
+    fn worker_runtime_failure_uses_the_local_diagnostic_renderer() {
+        let failure = runmat_execution::ProgramRuntimeFailure {
+            message: "parallel task failed".into(),
+            identifier: Some("RunMat:ParallelFailure".into()),
+            span: None,
+            builtin: Some("sample".into()),
+            task_id: Some("task_00000000000000000000000000000000".into()),
+            call_frames: Vec::new(),
+            call_frames_elided: 0,
+            call_stack: vec!["workerFunction at sample.m:2:4".into()],
+            phase: Some("execute".into()),
+        };
+        let rendered = format_program_runtime_failure(failure).unwrap();
+        assert!(rendered.contains("error: parallel task failed"));
+        assert!(rendered.contains("id: RunMat:ParallelFailure"));
+        assert!(rendered.contains("builtin: sample"));
+        assert!(rendered.contains("task: task_00000000000000000000000000000000"));
+        assert!(rendered.contains("phase: execute"));
+        assert!(rendered.contains("callstack:\n  workerFunction at sample.m:2:4"));
     }
 
     #[test]

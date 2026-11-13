@@ -1,29 +1,19 @@
 //! Sentiment scoring helpers for Text Analytics compatibility objects.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_value::NumericScalar;
 use std::collections::{HashMap, HashSet};
 
 use once_cell::sync::Lazy;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type, documents_from_object, text_analytics_error, tokenized_document_language,
     words_from_word_vector, TOKENIZED_DOCUMENT_CLASS,
 };
-use crate::builtins::table::{table_variables, TABLE_CLASS};
+use crate::builtins::table::{table_variables_ref, TABLE_CLASS};
 use crate::{gather_if_needed_async, BuiltinResult};
 
 const BOOSTER_AMOUNT: f64 = 0.293;
@@ -31,146 +21,17 @@ const CAPS_AMOUNT: f64 = 0.733;
 const NEGATION_SCALAR: f64 = -0.74;
 const NORMALIZATION_ALPHA: f64 = 15.0;
 
-const OUT_COMPOUND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "compoundScores",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Compound VADER-style sentiment score for each document.",
-}];
-
-const OUT_ALL: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "compoundScores",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Compound VADER-style sentiment score for each document.",
-    },
-    BuiltinParamDescriptor {
-        name: "positiveScores",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive sentiment proportions.",
-    },
-    BuiltinParamDescriptor {
-        name: "negativeScores",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Negative sentiment proportions.",
-    },
-    BuiltinParamDescriptor {
-        name: "neutralScores",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Neutral token proportions.",
-    },
-];
-
-const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const IN_DOCUMENTS_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: SentimentLexicon, Boosters, Dampeners, Negations.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VADER_SENTIMENT_SCORES.INVALID_INPUT",
-    identifier: Some("RunMat:vaderSentimentScores:InvalidInput"),
-    when: "Inputs do not match supported vaderSentimentScores forms.",
-    message: "vaderSentimentScores: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const VADER_SENTIMENT_SCORES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "compoundScores = vaderSentimentScores(documents)",
-            inputs: &IN_DOCUMENTS,
-            outputs: &OUT_COMPOUND,
-        },
-        BuiltinSignatureDescriptor {
-            label: "compoundScores = vaderSentimentScores(documents,Name,Value)",
-            inputs: &IN_DOCUMENTS_REST,
-            outputs: &OUT_COMPOUND,
-        },
-        BuiltinSignatureDescriptor {
-            label:
-                "[compoundScores,positiveScores,negativeScores,neutralScores] = vaderSentimentScores(___)",
-            inputs: &IN_DOCUMENTS_REST,
-            outputs: &OUT_ALL,
-        },
-    ],
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const VADER_INTEGER_SCORE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "SentimentLexicon.SentimentScore",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented numeric scalar scores may use any integer class. Their required [-4, 4] range is validated on authoritative storage before exact conversion into the VADER floating computation.",
-    }];
-
-pub const VADER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "scores = vaderSentimentScores(documents, SentimentLexicon=table(integer_scores))",
-        inputs: &VADER_INTEGER_SCORE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Every valid integer lexicon score is exactly representable as binary64 because the public domain is [-4, 4]. Automatic residency may gather the enclosing table through its owner; outputs are host double score vectors.",
-    }];
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 #[runtime_builtin(
     name = "vaderSentimentScores",
-    category = "strings/text_analytics",
-    summary = "Score tokenized documents using VADER-style sentiment rules.",
-    keywords = "vaderSentimentScores,VADER,sentiment,text analytics,tokenizedDocument",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(
-        crate::builtins::strings::text_analytics::sentiment::VADER_SENTIMENT_SCORES_DESCRIPTOR
-    ),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::sentiment::VADER_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::sentiment"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::sentiment",
+    context = true
 )]
-async fn vader_sentiment_scores_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args(args).await?;
-    let (documents_object, options) = parse_args(args)?;
+async fn vader_sentiment_scores_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let (documents_object, options) = parse_args(runtime.as_ref(), args).await?;
     if !tokenized_document_language(&documents_object)
         .trim()
         .eq_ignore_ascii_case("en")
@@ -184,19 +45,10 @@ async fn vader_sentiment_scores_builtin(args: Vec<Value>) -> BuiltinResult<Value
     scores.into_value()
 }
 
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
-            sentiment_error(format!(
-                "vaderSentimentScores: failed to gather input: {err}"
-            ))
-        })?);
-    }
-    Ok(out)
-}
-
-fn parse_args(args: Vec<Value>) -> BuiltinResult<(ObjectInstance, SentimentOptions)> {
+async fn parse_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(ObjectInstance, SentimentOptions)> {
     if args.is_empty() {
         return Err(sentiment_error(
             "vaderSentimentScores: expected tokenizedDocument input",
@@ -207,12 +59,13 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(ObjectInstance, SentimentOptio
             "vaderSentimentScores: name-value options must appear in pairs",
         ));
     }
-    let documents = match &args[0] {
-        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => object.clone(),
+    let mut args = args.into_iter();
+    let documents = match args.next().expect("validated document argument") {
+        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => object,
         Value::Object(object) => {
             return Err(sentiment_error(format!(
                 "vaderSentimentScores: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             )));
         }
         other => {
@@ -223,42 +76,37 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(ObjectInstance, SentimentOptio
     };
 
     let mut options = SentimentOptions::default();
-    let mut idx = 1usize;
-    while idx < args.len() {
-        let name = scalar_text(&args[idx], "vaderSentimentScores")
-            .map_err(|err| sentiment_error(err.to_string()))?
-            .to_ascii_lowercase();
-        match name.as_str() {
-            "sentimentlexicon" => {
-                options.lexicon = sentiment_lexicon_from_table(&args[idx + 1])?;
+    while let Some(name_value) = args.next() {
+        let option_value = args.next().expect("validated name-value pairs");
+        let name = scalar_text_input(&name_value, runtime, |runtime, cause| {
+            text_input_admission("vaderSentimentScores", runtime, cause)
+        })?
+        .ok_or_else(|| sentiment_error("vaderSentimentScores: expected text option"))?;
+        if name.as_str().eq_ignore_ascii_case("sentimentlexicon") {
+            options.lexicon = sentiment_lexicon_from_table(&option_value).await?;
+        } else if name.as_str().eq_ignore_ascii_case("boosters") {
+            options.boosters = modifier_ngrams_from_value(&option_value, "Boosters")?;
+        } else if name.as_str().eq_ignore_ascii_case("dampeners") {
+            options.dampeners = modifier_ngrams_from_value(&option_value, "Dampeners")?;
+        } else if name.as_str().eq_ignore_ascii_case("negations") {
+            let negations: HashSet<String> =
+                words_from_word_vector(&option_value, "vaderSentimentScores")?
+                    .into_iter()
+                    .map(|word| word.trim().to_ascii_lowercase())
+                    .filter(|word| !word.is_empty())
+                    .collect();
+            if negations.is_empty() {
+                return Err(sentiment_error(
+                    "vaderSentimentScores: Negations must contain at least one word",
+                ));
             }
-            "boosters" => {
-                options.boosters = modifier_ngrams_from_value(&args[idx + 1], "Boosters")?;
-            }
-            "dampeners" => {
-                options.dampeners = modifier_ngrams_from_value(&args[idx + 1], "Dampeners")?;
-            }
-            "negations" => {
-                let negations: HashSet<String> =
-                    words_from_word_vector(&args[idx + 1], "vaderSentimentScores")?
-                        .into_iter()
-                        .map(|word| word.trim().to_ascii_lowercase())
-                        .filter(|word| !word.is_empty())
-                        .collect();
-                if negations.is_empty() {
-                    return Err(sentiment_error(
-                        "vaderSentimentScores: Negations must contain at least one word",
-                    ));
-                }
-                options.negations = negations;
-            }
-            other => {
-                return Err(sentiment_error(format!(
-                    "vaderSentimentScores: unsupported option '{other}'"
-                )));
-            }
+            options.negations = negations;
+        } else {
+            return Err(sentiment_error(format!(
+                "vaderSentimentScores: unsupported option '{}'",
+                name.as_str()
+            )));
         }
-        idx += 2;
     }
     Ok((documents, options))
 }
@@ -299,10 +147,10 @@ impl SentimentOutputs {
         let compound = tensor_value(self.compound, shape.clone())?;
         if let Some(out_count) = crate::output_count::current_output_count() {
             if out_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
             if out_count == 1 {
-                return Ok(Value::OutputList(vec![compound]));
+                return Ok(Value::output_list(vec![compound]));
             }
             return Ok(crate::output_count::output_list_with_padding(
                 out_count,
@@ -560,13 +408,13 @@ fn is_mixed_or_lower_word(token: &str) -> bool {
         .any(|ch| ch.is_alphabetic() && ch.is_lowercase())
 }
 
-fn sentiment_lexicon_from_table(value: &Value) -> BuiltinResult<HashMap<String, f64>> {
+async fn sentiment_lexicon_from_table(value: &Value) -> BuiltinResult<HashMap<String, f64>> {
     let object = match value {
         Value::Object(object) if object.is_class(TABLE_CLASS) => object,
         Value::Object(object) => {
             return Err(sentiment_error(format!(
                 "vaderSentimentScores: SentimentLexicon must be a table, got {}",
-                object.class_name
+                object.class_name()
             )));
         }
         other => {
@@ -575,8 +423,11 @@ fn sentiment_lexicon_from_table(value: &Value) -> BuiltinResult<HashMap<String, 
             )));
         }
     };
-    let variables = table_variables(object)
-        .map_err(|err| sentiment_error(format!("vaderSentimentScores: {err}")))?;
+    let variables = table_variables_ref(object)
+        .map_err(|err| sentiment_error(format!("vaderSentimentScores: {err}")))?
+        .ok_or_else(|| {
+            sentiment_error("vaderSentimentScores: SentimentLexicon missing Token column")
+        })?;
     let token_column = variables.fields.get("Token").ok_or_else(|| {
         sentiment_error("vaderSentimentScores: SentimentLexicon missing Token column")
     })?;
@@ -584,7 +435,21 @@ fn sentiment_lexicon_from_table(value: &Value) -> BuiltinResult<HashMap<String, 
         sentiment_error("vaderSentimentScores: SentimentLexicon missing SentimentScore column")
     })?;
     let tokens = words_from_word_vector(token_column, "vaderSentimentScores")?;
-    let scores = numeric_vector(score_column, "SentimentScore")?;
+    // Gather only the selected score column. A generic gather of the table would
+    // duplicate its token/metadata forest before we even know which column is used.
+    let gathered_scores = if crate::dispatcher::value_contains_gpu(score_column) {
+        Some(gather_if_needed_async(score_column).await.map_err(|err| {
+            sentiment_error(format!(
+                "vaderSentimentScores: failed to gather SentimentScore: {err}"
+            ))
+        })?)
+    } else {
+        None
+    };
+    let scores = numeric_vector(
+        gathered_scores.as_ref().unwrap_or(score_column),
+        "SentimentScore",
+    )?;
     if tokens.len() != scores.len() {
         return Err(sentiment_error(
             "vaderSentimentScores: SentimentLexicon Token and SentimentScore columns must have equal height",
@@ -624,7 +489,7 @@ fn numeric_vector(value: &Value, column_name: &str) -> BuiltinResult<Vec<f64>> {
             })
             .collect(),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| numeric_scalar(item, column_name))
             .collect(),
@@ -702,19 +567,25 @@ fn modifier_ngrams_from_value(value: &Value, option_name: &str) -> BuiltinResult
 }
 
 fn phrases_from_string_array(array: &StringArray) -> Vec<Vec<String>> {
-    if array.data.is_empty() {
+    if array.data().is_empty() {
         return Vec::new();
     }
     if array.rows <= 1 || array.cols <= 1 {
-        return array.data.iter().map(|word| vec![word.clone()]).collect();
+        return array
+            .data()
+            .iter()
+            .filter_map(|word| word.as_str().map(|word| vec![word.to_owned()]))
+            .collect();
     }
     let mut phrases = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let mut phrase = Vec::new();
         for col in 0..array.cols {
             let idx = row + col * array.rows;
-            if let Some(token) = array.data.get(idx) {
-                phrase.push(token.clone());
+            if let Some(token) = array.data().get(idx) {
+                if let Some(token) = token.as_str() {
+                    phrase.push(token.to_owned());
+                }
             }
         }
         phrases.push(phrase);
@@ -838,7 +709,57 @@ static DEFAULT_NEGATIONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{CellArray, IntegerStorage, StructValue};
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
+        AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
+        HostNumericTensorOwned, HostTensorView,
+    };
+    use runmat_value::{CellArray, IntegerStorage};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct LexiconScoreProvider {
+        owner: TestAllocationOwner,
+        selected_score: AtomicU64,
+        downloads: AtomicUsize,
+    }
+
+    impl AccelProvider for LexiconScoreProvider {
+        fn device_id(&self) -> u32 {
+            self.owner.device_id()
+        }
+
+        fn device_info(&self) -> String {
+            "VADER selected native integer score fixture".into()
+        }
+
+        fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+            panic!("VADER does not upload a lexicon")
+        }
+
+        fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            panic!("VADER must use the native numeric download")
+        }
+
+        fn download_numeric<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> AccelNumericDownloadFuture<'a> {
+            assert_eq!(
+                handle.buffer_id(),
+                self.selected_score.load(Ordering::SeqCst),
+                "only SentimentScore may be downloaded"
+            );
+            self.downloads.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                Ok(HostNumericTensorOwned {
+                    data: HostNumericDataOwned::I8(vec![4, -3]),
+                    shape: handle.shape().to_vec(),
+                    storage: GpuTensorStorage::Real,
+                })
+            })
+        }
+    }
 
     fn integer_scalar(storage: IntegerStorage) -> Value {
         let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
@@ -846,7 +767,10 @@ mod tests {
     }
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(vader_sentiment_scores_builtin(args))
+        futures::executor::block_on(vader_sentiment_scores_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     #[test]
@@ -911,20 +835,20 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Documents".to_string(),
             Value::Cell(CellArray::new(values, docs.len(), 1).unwrap()),
         );
         object
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(docs.len() as f64));
-        object.properties.insert(
+            .replace_property_unbounded("NumDocuments".to_string(), Value::Num(docs.len() as f64));
+        object.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![docs.len() as f64, 1.0], vec![1, 2]).unwrap()),
         );
-        object
-            .properties
-            .insert("Language".to_string(), Value::String("en".to_string()));
+        object.replace_property_unbounded(
+            "Language".to_string(),
+            Value::String("en".to_string().into()),
+        );
         Value::Object(object)
     }
 
@@ -940,6 +864,10 @@ mod tests {
             panic!("expected output list");
         };
         values
+            .try_into_owned()
+            .expect("unique sentiment outputs")
+            .try_into_unbounded_vec()
+            .expect("ordinary unbounded sentiment outputs")
     }
 
     #[test]
@@ -960,7 +888,7 @@ mod tests {
 
     #[test]
     fn vader_returns_four_requested_score_vectors() {
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let values = outputs(run(vec![documents(vec![vec!["good"], vec!["bad"]])]).unwrap());
         assert_eq!(values.len(), 4);
         let compound_scores = compound(values[0].clone());
@@ -988,13 +916,59 @@ mod tests {
         let out = compound(
             run(vec![
                 documents(vec![vec!["innovative"], vec!["risk"]]),
-                Value::String("SentimentLexicon".to_string()),
+                Value::String("SentimentLexicon".to_string().into()),
                 table,
             ])
             .unwrap(),
         );
         assert!(out[0] > 0.70);
         assert!(out[1] < -0.60);
+
+        let _serial = crate::builtins::common::test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(LexiconScoreProvider::default()));
+        unsafe { runmat_accelerate_api::register_device_provider(provider) };
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let score = provider
+            .owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::I8(vec![4, -3]),
+                shape: vec![2, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("native integer score column");
+        let unrelated = provider
+            .owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::I8(vec![1, 1]),
+                shape: vec![2, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("unselected resident table column");
+        provider
+            .selected_score
+            .store(score.handle.buffer_id(), Ordering::SeqCst);
+        let table = table_value(
+            vec!["Token".into(), "SentimentScore".into(), "Unused".into()],
+            vec![
+                Value::StringArray(
+                    StringArray::new(vec!["innovative".into(), "risk".into()], vec![2, 1]).unwrap(),
+                ),
+                Value::GpuTensor(score.handle.clone()),
+                Value::GpuTensor(unrelated.handle.clone()),
+            ],
+        );
+        let resident = compound(
+            run(vec![
+                documents(vec![vec!["innovative"], vec!["risk"]]),
+                Value::String("SentimentLexicon".into()),
+                table,
+            ])
+            .expect("resident score column"),
+        );
+        assert_eq!(resident, out);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+        score.handle.allocation_lease().validate_live().unwrap();
+        unrelated.handle.allocation_lease().validate_live().unwrap();
     }
 
     #[test]
@@ -1006,13 +980,13 @@ mod tests {
                     vec!["kinda", "good"],
                     vec!["never", "good"],
                 ]),
-                Value::String("Boosters".to_string()),
+                Value::String("Boosters".to_string().into()),
                 Value::StringArray(
                     StringArray::new(vec!["exceptionally".into()], vec![1, 1]).unwrap(),
                 ),
-                Value::String("Dampeners".to_string()),
+                Value::String("Dampeners".to_string().into()),
                 Value::StringArray(StringArray::new(vec!["kinda".into()], vec![1, 1]).unwrap()),
-                Value::String("Negations".to_string()),
+                Value::String("Negations".to_string().into()),
                 Value::StringArray(StringArray::new(vec!["never".into()], vec![1, 1]).unwrap()),
             ])
             .unwrap(),
@@ -1026,7 +1000,7 @@ mod tests {
         let out = compound(
             run(vec![
                 documents(vec![vec!["kind", "of", "good"], vec!["good"]]),
-                Value::String("Dampeners".to_string()),
+                Value::String("Dampeners".to_string().into()),
                 Value::StringArray(
                     StringArray::new(
                         vec!["kind".into(), "unused".into(), "of".into(), "".into()],
@@ -1051,7 +1025,7 @@ mod tests {
         );
         let err = run(vec![
             documents(vec![vec!["strong"]]),
-            Value::String("SentimentLexicon".to_string()),
+            Value::String("SentimentLexicon".to_string().into()),
             table,
         ])
         .unwrap_err();
@@ -1062,7 +1036,7 @@ mod tests {
     fn vader_rejects_empty_custom_negations() {
         let err = run(vec![
             documents(vec![vec!["good"]]),
-            Value::String("Negations".to_string()),
+            Value::String("Negations".to_string().into()),
             Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap()),
         ])
         .unwrap_err();
@@ -1070,14 +1044,15 @@ mod tests {
     }
 
     fn table_value(names: Vec<String>, columns: Vec<Value>) -> Value {
-        let mut variables = StructValue::new();
+        let mut variables = runmat_value::UnboundedStructValueBuilder::new();
         for (name, column) in names.into_iter().zip(columns) {
             variables.insert(name, column);
         }
         let mut object = ObjectInstance::new(TABLE_CLASS.to_string());
-        object
-            .properties
-            .insert("__table_variables".to_string(), Value::Struct(variables));
+        object.replace_property_unbounded(
+            "__table_variables".to_string(),
+            Value::Struct(variables.finish()),
+        );
         Value::Object(object)
     }
 }

@@ -1,26 +1,127 @@
-use crate::{MirLocal, MirLocalId, MirLocalKind};
+use crate::{MirLocal, MirLocalId, MirLocalKind, MirSequenceLocalId};
 use runmat_hir::{BindingId, FunctionId, HirError, HirFunction, Span};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct MirLoweringContext {
     binding_locals: HashMap<BindingId, MirLocalId>,
     async_functions: HashSet<FunctionId>,
+    external_async_functions: HashSet<FunctionId>,
     next_local: usize,
     temp_locals: RefCell<Vec<MirLocal>>,
+    function: runmat_types::ProgramFunctionId,
+    active_spmd_regions: RefCell<Vec<runmat_types::ParallelRegionId>>,
+    next_distributed_value: Cell<u32>,
+    next_collective: Cell<u32>,
+    next_sequence_local: Cell<usize>,
+    statement_ans: Option<BindingId>,
+}
+
+impl Default for MirLoweringContext {
+    fn default() -> Self {
+        Self {
+            binding_locals: HashMap::new(),
+            async_functions: HashSet::new(),
+            external_async_functions: HashSet::new(),
+            next_local: 0,
+            temp_locals: RefCell::new(Vec::new()),
+            function: runmat_types::ProgramFunctionId(0),
+            active_spmd_regions: RefCell::new(Vec::new()),
+            next_distributed_value: Cell::new(0),
+            next_collective: Cell::new(0),
+            next_sequence_local: Cell::new(0),
+            statement_ans: None,
+        }
+    }
 }
 
 impl MirLoweringContext {
-    pub(crate) fn with_async_functions(async_functions: HashSet<FunctionId>) -> Self {
+    pub(crate) fn with_statement_ans(mut self, binding: Option<BindingId>) -> Self {
+        self.statement_ans = binding;
+        self
+    }
+
+    pub(crate) fn statement_ans_local(&self) -> Result<Option<MirLocalId>, HirError> {
+        self.statement_ans
+            .map(|binding| self.local_for_binding(binding))
+            .transpose()
+    }
+    pub(crate) fn with_async_functions(
+        async_functions: HashSet<FunctionId>,
+        external_async_functions: HashSet<FunctionId>,
+        function: FunctionId,
+    ) -> Self {
         Self {
             async_functions,
+            external_async_functions,
+            function: runmat_types::ProgramFunctionId(
+                u32::try_from(function.0).expect("HIR function IDs fit portable identities"),
+            ),
             ..Self::default()
         }
     }
 
+    pub(crate) fn with_spmd_region<T>(
+        &self,
+        region: runmat_types::ParallelRegionId,
+        operation: impl FnOnce() -> Result<T, HirError>,
+    ) -> Result<T, HirError> {
+        self.active_spmd_regions.borrow_mut().push(region);
+        let result = operation();
+        let popped = self.active_spmd_regions.borrow_mut().pop();
+        debug_assert_eq!(popped, Some(region));
+        result
+    }
+
+    pub(crate) fn distributed_identity(
+        &self,
+    ) -> (
+        runmat_types::DistributedValueId,
+        runmat_types::DistributedOwner,
+    ) {
+        let ordinal = self.next_distributed_value.get();
+        self.next_distributed_value.set(ordinal + 1);
+        let owner = self
+            .active_spmd_regions
+            .borrow()
+            .last()
+            .copied()
+            .map(runmat_types::DistributedOwner::Region)
+            .unwrap_or(runmat_types::DistributedOwner::Client(self.function));
+        (
+            runmat_types::DistributedValueId {
+                function: self.function,
+                ordinal,
+            },
+            owner,
+        )
+    }
+
+    pub(crate) fn collective_identity(&self) -> Result<runmat_types::CollectiveId, HirError> {
+        let region = self
+            .active_spmd_regions
+            .borrow()
+            .last()
+            .copied()
+            .ok_or_else(|| {
+                HirError::new("collective operation requires an enclosing SPMD region")
+            })?;
+        let ordinal = self.next_collective.get();
+        self.next_collective.set(ordinal + 1);
+        Ok(runmat_types::CollectiveId { region, ordinal })
+    }
+
+    pub(crate) fn in_spmd_region(&self) -> bool {
+        !self.active_spmd_regions.borrow().is_empty()
+    }
+
     pub(crate) fn is_async_function(&self, function: FunctionId) -> bool {
         self.async_functions.contains(&function)
+    }
+
+    pub(crate) fn is_external_async_function(&self, function: FunctionId) -> bool {
+        self.external_async_functions.contains(&function)
     }
 
     pub(crate) fn local_for_binding(&self, binding: BindingId) -> Result<MirLocalId, HirError> {
@@ -30,7 +131,18 @@ impl MirLoweringContext {
             .ok_or_else(|| HirError::new("binding has no MIR local"))
     }
 
-    pub(crate) fn locals_for_function(&mut self, function: &HirFunction) -> Vec<MirLocal> {
+    pub(crate) fn binding_for_local(&self, local: MirLocalId) -> Option<BindingId> {
+        self.binding_locals
+            .iter()
+            .find_map(|(binding, candidate)| (*candidate == local).then_some(*binding))
+    }
+
+    pub(crate) fn locals_for_function(
+        &mut self,
+        function: &HirFunction,
+        incoming_workspace: &HashSet<BindingId>,
+        external_workspace: &HashSet<BindingId>,
+    ) -> Vec<MirLocal> {
         let mut locals: Vec<_> = function
             .locals
             .iter()
@@ -42,6 +154,10 @@ impl MirLoweringContext {
                     MirLocalKind::Parameter
                 } else if function.outputs.contains(binding) {
                     MirLocalKind::Output
+                } else if incoming_workspace.contains(binding) {
+                    MirLocalKind::IncomingWorkspace
+                } else if external_workspace.contains(binding) {
+                    MirLocalKind::ExternalWorkspace
                 } else {
                     MirLocalKind::Binding
                 };
@@ -81,6 +197,12 @@ impl MirLoweringContext {
             span,
         });
         local
+    }
+
+    pub(crate) fn fresh_sequence_local(&self) -> MirSequenceLocalId {
+        let next = self.next_sequence_local.get();
+        self.next_sequence_local.set(next + 1);
+        MirSequenceLocalId(next)
     }
 
     pub(crate) fn take_temp_locals(&self) -> Vec<MirLocal> {

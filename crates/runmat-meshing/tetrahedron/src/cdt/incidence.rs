@@ -8,9 +8,8 @@ use runmat_meshing_core::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    topology::{build_delaunay_volume_topology_with_regions, error},
-    DelaunayTopologyError, DelaunayTopologyErrorKind, DelaunayTopologyOptions, DelaunayVolumeNode,
-    DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
+    topology::error, DelaunayTopologyError, DelaunayTopologyErrorKind, DelaunayTopologyOptions,
+    DelaunayVolumeNode, DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,22 +45,7 @@ pub fn assign_delaunay_volume_regions(
     options: DelaunayTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayTopologyError> {
-    let rebuilt = build_delaunay_volume_topology_with_regions(
-        topology.nodes.clone(),
-        topology
-            .tetrahedra
-            .iter()
-            .map(|tetrahedron| (tetrahedron.vertex_indices, tetrahedron.region_id.clone()))
-            .collect(),
-        options,
-        cancellation,
-    )?;
-    if rebuilt != topology {
-        return Err(error(
-            DelaunayTopologyErrorKind::InvalidTetrahedron,
-            "region assignment requires canonical checked topology and incidence",
-        ));
-    }
+    super::topology::validate_canonical_volume_topology(&topology, options, cancellation)?;
     if region_ids.len() != topology.tetrahedra.len() {
         return Err(error(
             DelaunayTopologyErrorKind::InvalidRegion,
@@ -85,7 +69,7 @@ pub(super) fn build_volume_incidence(
 ) -> Result<DelaunayVolumeIncidence, DelaunayTopologyError> {
     let mut vertex_stars = vec![Vec::new(); nodes.len()];
     let mut boundary_facets = Vec::new();
-    let mut regions = BTreeMap::<PersistentEntityId, Vec<u32>>::new();
+    let mut regions = BTreeMap::<&PersistentEntityId, Vec<u32>>::new();
     let mut unassigned = Vec::new();
     for (tetrahedron_index, tetrahedron) in tetrahedra.iter().enumerate() {
         if (tetrahedron_index as u64).is_multiple_of(options.cancellation_check_interval)
@@ -98,11 +82,14 @@ pub(super) fn build_volume_incidence(
         }
         match &tetrahedron.region_id {
             Some(region_id) => {
-                validate_region(region_id)?;
-                regions
-                    .entry(region_id.clone())
-                    .or_default()
-                    .push(tetrahedron_index as u32);
+                let entries = match regions.entry(region_id) {
+                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        validate_region(region_id)?;
+                        entry.insert(Vec::new())
+                    }
+                };
+                entries.push(tetrahedron_index as u32);
             }
             None => unassigned.push(tetrahedron_index as u32),
         }
@@ -125,7 +112,7 @@ pub(super) fn build_volume_incidence(
         regions: regions
             .into_iter()
             .map(|(region_id, tetrahedron_indices)| DelaunayRegionIncidence {
-                region_id,
+                region_id: region_id.clone(),
                 tetrahedron_indices,
             })
             .collect(),
@@ -133,7 +120,7 @@ pub(super) fn build_volume_incidence(
     })
 }
 
-fn boundary_facet(
+pub(super) fn boundary_facet(
     nodes: &[DelaunayVolumeNode],
     tetrahedron: &DelaunayVolumeTetrahedron,
     tetrahedron_index: usize,
@@ -149,10 +136,12 @@ fn boundary_facet(
     }
     let opposite_vertex = tetrahedron.vertex_indices[opposite];
     let points = [
-        nodes[oriented[0] as usize].coordinates_m,
-        nodes[oriented[1] as usize].coordinates_m,
-        nodes[oriented[2] as usize].coordinates_m,
-        nodes[opposite_vertex as usize].coordinates_m,
+        nodes[oriented[0] as usize].coordinates_m.canonical_value(),
+        nodes[oriented[1] as usize].coordinates_m.canonical_value(),
+        nodes[oriented[2] as usize].coordinates_m.canonical_value(),
+        nodes[opposite_vertex as usize]
+            .coordinates_m
+            .canonical_value(),
     ];
     match orient3d(points).map_err(|predicate| {
         error(
@@ -179,7 +168,7 @@ fn boundary_facet(
     })
 }
 
-fn validate_region(region_id: &PersistentEntityId) -> Result<(), DelaunayTopologyError> {
+pub(super) fn validate_region(region_id: &PersistentEntityId) -> Result<(), DelaunayTopologyError> {
     region_id.validate().map_err(|validation| {
         error(
             DelaunayTopologyErrorKind::InvalidRegion,

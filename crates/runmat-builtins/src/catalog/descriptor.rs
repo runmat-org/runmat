@@ -34,6 +34,7 @@ pub enum BuiltinParamType {
     StyleSpec,
     PropertyName,
     PropertyValue,
+    Callable,
 }
 
 #[derive(Debug, Clone, Serialize)]

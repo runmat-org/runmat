@@ -1,0 +1,50 @@
+runmat 0.7
+std 1
+
+use material aluminum from "./materials"
+use part skeleton from "//wing/skeleton" @ "R3" as sk
+use "./fasteners" as lib
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    sketch s_cut on origin.xy {
+        c1 = line(start = [20 mm, 20 mm], end = [40 mm, 20 mm])
+        c2 = line(start = [40 mm, 20 mm], end = [40 mm, 30 mm])
+        c3 = line(start = [40 mm, 30 mm], end = [20 mm, 30 mm])
+        c4 = line(start = [20 mm, 30 mm], end = [20 mm, 20 mm])
+    }
+    feature cut = extrude(profile = sketch.s_cut, through_all, mode = cut)
+    feature h = hole(
+        face = feature.body.face.end,
+        at = { a = point(60 mm, 10 mm, 10 mm) },
+        diameter = 4 mm,
+        through_all
+    )
+    feature round = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],
+        radius = 1.5 mm
+    )
+    feature round_missing = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l9), feature.body.face.end)],
+        radius = 1 mm
+    )
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    region top : face = { select = [feature.body.face.end], expect = at_least_one }
+    region cut_wall : face = { select = [feature.cut.face.side(s_cut.c1)], expect = exactly_one }
+
+    publish top = region(region = top)
+
+    configuration long = {}
+}

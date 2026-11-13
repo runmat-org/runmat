@@ -13,12 +13,7 @@ pub fn constrained_cavity_solid_empty_boundary_faces(
     validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
     let boundary_node_map = boundary_node_coordinates(cavity, nodes)?;
     let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
-    Ok(solid_empty_boundary_faces(
-        cavity,
-        &boundary_node_map,
-        &boundary_triangles,
-        options,
-    ))
+    solid_empty_boundary_faces(cavity, &boundary_node_map, &boundary_triangles, options)
 }
 
 pub fn constrained_cavity_classified_solid_empty_boundary_faces(
@@ -147,9 +142,13 @@ fn constrained_cavity_boundary_nodes_from_sources(
 ) -> Result<Vec<ConstrainedCavityNode>, ConstrainedCavityRefillError> {
     let mut coordinates = source_nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
-    coordinates.extend(nodes.iter().map(|node| (node.node_id, node.coordinates_m)));
+    coordinates.extend(
+        nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m.canonical_value())),
+    );
     cavity_boundary_node_ids(cavity)
         .into_iter()
         .map(|node_id| {
@@ -158,7 +157,10 @@ fn constrained_cavity_boundary_nodes_from_sources(
                 .copied()
                 .map(|coordinates_m| ConstrainedCavityNode {
                     node_id,
-                    coordinates_m,
+                    coordinates_m: runmat_types::physical::Quantity::<
+                        runmat_types::physical::kind::Position,
+                        _,
+                    >::new(coordinates_m),
                 })
                 .ok_or(ConstrainedCavityRefillError::MissingBoundaryNode { node_id })
         })

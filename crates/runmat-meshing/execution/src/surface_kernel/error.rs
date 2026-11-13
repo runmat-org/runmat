@@ -1,4 +1,5 @@
-use runmat_geometry_core::{GeometryEvaluationErrorKind, PersistentEntityId};
+use crate::geometry_failure::category as geometry_category;
+use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
     MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure, MeshingFailureCategory,
     MeshingOperation, MeshingStageKind, MESHING_FAILURE_SCHEMA_VERSION,
@@ -19,6 +20,9 @@ pub(crate) fn map_convergence_error(error: ExactSurfaceConvergenceError) -> Box<
         ExactSurfaceConvergenceErrorKind::Curve(kind) => {
             crate::curve_kernel::shared_curve_failure_category(kind)
         }
+        ExactSurfaceConvergenceErrorKind::Surface(ExactSurfaceMeshErrorKind::Cancelled) => {
+            MeshingFailureCategory::Cancelled
+        }
         ExactSurfaceConvergenceErrorKind::Surface(ExactSurfaceMeshErrorKind::ResourceLimit) => {
             MeshingFailureCategory::ElementBudgetExceeded
         }
@@ -34,7 +38,9 @@ pub(crate) fn map_convergence_error(error: ExactSurfaceConvergenceError) -> Box<
 
 pub(crate) fn map_surface_error(error: ExactFacePartitionError) -> Box<MeshingFailure> {
     let category = match error.kind {
-        ExactFacePartitionErrorKind::Chart(ExactFaceChartErrorKind::GeometryEvaluation(kind)) => {
+        ExactFacePartitionErrorKind::Reuse => MeshingFailureCategory::InternalInvariantViolation,
+        ExactFacePartitionErrorKind::Coordinates(kind)
+        | ExactFacePartitionErrorKind::Chart(ExactFaceChartErrorKind::GeometryEvaluation(kind)) => {
             geometry_category(kind)
         }
         ExactFacePartitionErrorKind::Chart(ExactFaceChartErrorKind::Delaunay(kind))
@@ -42,25 +48,41 @@ pub(crate) fn map_surface_error(error: ExactFacePartitionError) -> Box<MeshingFa
             delaunay_category(kind)
         }
         ExactFacePartitionErrorKind::Refinement(ExactFaceRefinementErrorKind::Metric(kind))
-        | ExactFacePartitionErrorKind::Acceptance(ExactFaceAcceptanceErrorKind::Metric(kind)) => {
-            metric_category(kind)
-        }
+        | ExactFacePartitionErrorKind::Acceptance(ExactFaceAcceptanceErrorKind::Metric(kind))
+        | ExactFacePartitionErrorKind::FaceJoin(ExactFaceJoinErrorKind::Acceptance(
+            ExactFaceAcceptanceErrorKind::Metric(kind),
+        )) => metric_category(kind),
         ExactFacePartitionErrorKind::Refinement(ExactFaceRefinementErrorKind::Geometry(kind))
-        | ExactFacePartitionErrorKind::Acceptance(ExactFaceAcceptanceErrorKind::Geometry(kind)) => {
-            face_geometry_category(kind)
-        }
+        | ExactFacePartitionErrorKind::Acceptance(ExactFaceAcceptanceErrorKind::Geometry(kind))
+        | ExactFacePartitionErrorKind::FaceJoin(ExactFaceJoinErrorKind::Acceptance(
+            ExactFaceAcceptanceErrorKind::Geometry(kind),
+        )) => face_geometry_category(kind),
         ExactFacePartitionErrorKind::Refinement(ExactFaceRefinementErrorKind::ResourceLimit)
         | ExactFacePartitionErrorKind::Acceptance(ExactFaceAcceptanceErrorKind::ResourceLimit)
         | ExactFacePartitionErrorKind::FaceJoin(ExactFaceJoinErrorKind::ResourceLimit)
+        | ExactFacePartitionErrorKind::FaceJoin(ExactFaceJoinErrorKind::Acceptance(
+            ExactFaceAcceptanceErrorKind::ResourceLimit,
+        ))
         | ExactFacePartitionErrorKind::Batch(ExactSurfaceMeshErrorKind::ResourceLimit)
         | ExactFacePartitionErrorKind::Boundary(ExactSurfaceBoundaryErrorKind::ResourceLimit) => {
             MeshingFailureCategory::ElementBudgetExceeded
         }
         ExactFacePartitionErrorKind::Acceptance(
             ExactFaceAcceptanceErrorKind::UnsatisfiedQuality,
-        ) => MeshingFailureCategory::QualityTargetUnreachable,
+        )
+        | ExactFacePartitionErrorKind::FaceJoin(ExactFaceJoinErrorKind::Acceptance(
+            ExactFaceAcceptanceErrorKind::UnsatisfiedQuality,
+        )) => MeshingFailureCategory::QualityTargetUnreachable,
         ExactFacePartitionErrorKind::Refinement(ExactFaceRefinementErrorKind::InvalidQuality) => {
             MeshingFailureCategory::SizingConflict
+        }
+        ExactFacePartitionErrorKind::Refinement(
+            ExactFaceRefinementErrorKind::UnsatisfiedQuality,
+        ) => MeshingFailureCategory::QualityTargetUnreachable,
+        ExactFacePartitionErrorKind::Boundary(ExactSurfaceBoundaryErrorKind::Cancelled)
+        | ExactFacePartitionErrorKind::FaceJoin(ExactFaceJoinErrorKind::Cancelled)
+        | ExactFacePartitionErrorKind::Batch(ExactSurfaceMeshErrorKind::Cancelled) => {
+            MeshingFailureCategory::Cancelled
         }
         ExactFacePartitionErrorKind::InvalidPartition
         | ExactFacePartitionErrorKind::Boundary(_)
@@ -98,6 +120,7 @@ fn face_geometry_category(kind: ExactFaceGeometryErrorKind) -> MeshingFailureCat
 
 fn delaunay_category(kind: ExactFaceDelaunayErrorKind) -> MeshingFailureCategory {
     match kind {
+        ExactFaceDelaunayErrorKind::GeometryEvaluation(kind) => geometry_category(kind),
         ExactFaceDelaunayErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
         ExactFaceDelaunayErrorKind::ElementLimit => MeshingFailureCategory::ElementBudgetExceeded,
         ExactFaceDelaunayErrorKind::SearchWorkLimit => {
@@ -112,35 +135,6 @@ fn delaunay_category(kind: ExactFaceDelaunayErrorKind) -> MeshingFailureCategory
         ExactFaceDelaunayErrorKind::InvalidPslg
         | ExactFaceDelaunayErrorKind::InvalidOptions
         | ExactFaceDelaunayErrorKind::InvalidTopology => MeshingFailureCategory::InvalidGeometry,
-    }
-}
-
-fn geometry_category(kind: GeometryEvaluationErrorKind) -> MeshingFailureCategory {
-    match kind {
-        GeometryEvaluationErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
-        GeometryEvaluationErrorKind::TimeBudgetExceeded => {
-            MeshingFailureCategory::TimeBudgetExceeded
-        }
-        GeometryEvaluationErrorKind::AllocationBudgetExceeded => {
-            MeshingFailureCategory::MemoryBudgetExceeded
-        }
-        GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
-        | GeometryEvaluationErrorKind::BudgetExceeded => {
-            MeshingFailureCategory::SearchWorkBudgetExceeded
-        }
-        GeometryEvaluationErrorKind::IterationBudgetExceeded => {
-            MeshingFailureCategory::IterationBudgetExceeded
-        }
-        GeometryEvaluationErrorKind::UnknownEvaluator
-        | GeometryEvaluationErrorKind::ParameterOutsideDomain
-        | GeometryEvaluationErrorKind::InconsistentGeometry => {
-            MeshingFailureCategory::InvalidGeometry
-        }
-        GeometryEvaluationErrorKind::ProjectionDidNotConverge
-        | GeometryEvaluationErrorKind::ClassificationDidNotConverge
-        | GeometryEvaluationErrorKind::KernelUnavailable
-        | GeometryEvaluationErrorKind::KernelFailure
-        | GeometryEvaluationErrorKind::InvalidResult => MeshingFailureCategory::NumericalFailure,
     }
 }
 
@@ -173,6 +167,79 @@ pub(crate) fn surface_failure(
             value: MeshingDiagnosticValue::Text(detail),
             unit: None,
         }],
+        accounting_error: None,
         remediation: remediation.into(),
     })
+}
+
+#[cfg(test)]
+mod planarity_control_tests {
+    use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Joined acceptance preserves cancellation, time, memory, search, iteration and
+    //   numerical-result categories through both nested metric paths, retaining the original diagnostic
+    //   detail. This category transport fixture does not establish successful convergence, budget
+    //   sufficiency or whole-study execution.
+    #[test]
+    fn joined_acceptance_preserves_nested_geometry_control_causes() {
+        use runmat_geometry_core::GeometryEvaluationErrorKind as Kind;
+        for cause in [
+            Kind::Cancelled,
+            Kind::TimeBudgetExceeded,
+            Kind::AllocationBudgetExceeded,
+            Kind::SearchWorkBudgetExceeded,
+            Kind::IterationBudgetExceeded,
+            Kind::InvalidResult,
+        ] {
+            for acceptance in [
+                ExactFaceAcceptanceErrorKind::Metric(ExactFaceMetricErrorKind::GeometryEvaluation(
+                    cause,
+                )),
+                ExactFaceAcceptanceErrorKind::Geometry(ExactFaceGeometryErrorKind::Metric(
+                    ExactFaceMetricErrorKind::GeometryEvaluation(cause),
+                )),
+            ] {
+                let failure = map_surface_error(ExactFacePartitionError {
+                    kind: ExactFacePartitionErrorKind::FaceJoin(
+                        ExactFaceJoinErrorKind::Acceptance(acceptance),
+                    ),
+                    reason: "original joined acceptance cause".into(),
+                });
+                assert_eq!(failure.category, geometry_category(cause));
+                assert!(failure.achieved_values.iter().any(|entry|matches!(&entry.value,MeshingDiagnosticValue::Text(text) if text.contains("original joined acceptance cause"))));
+            }
+        }
+    }
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Surface-stage failure construction preserves memory denial and cancellation
+    //   categories, operation and original diagnostic detail from controlled planarity validation.
+    #[test]
+    fn surface_planarity_failures_preserve_resource_category_and_detail() {
+        use runmat_geometry_core::GeometryEvaluationErrorKind;
+        for (kind, expected) in [
+            (
+                GeometryEvaluationErrorKind::AllocationBudgetExceeded,
+                MeshingFailureCategory::MemoryBudgetExceeded,
+            ),
+            (
+                GeometryEvaluationErrorKind::Cancelled,
+                MeshingFailureCategory::Cancelled,
+            ),
+        ] {
+            let failure = map_surface_error(ExactFacePartitionError {
+                kind: ExactFacePartitionErrorKind::Refinement(
+                    ExactFaceRefinementErrorKind::Delaunay(
+                        ExactFaceDelaunayErrorKind::GeometryEvaluation(kind),
+                    ),
+                ),
+                reason: "original planarity resource failure".into(),
+            });
+            assert_eq!(failure.category, expected);
+            assert_eq!(failure.stage, MeshingStageKind::SurfaceMesh);
+            assert_eq!(failure.operation, MeshingOperation::TriangulateSurface);
+            assert!(failure.achieved_values.iter().any(|entry|matches!(&entry.value,MeshingDiagnosticValue::Text(text) if text.contains("original planarity resource failure"))));
+        }
+    }
 }

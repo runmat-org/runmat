@@ -1,39 +1,31 @@
 //! MATLAB-compatible `sub2ind` builtin with GPU-aware semantics for RunMat.
 
-#[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, SUB2IND_ERROR_INDEX_BOUNDS, SUB2IND_ERROR_INTERNAL,
+    SUB2IND_ERROR_INVALID_INPUT, SUB2IND_ERROR_PROVIDER,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
 use super::common::{
-    build_strides, dims_from_tokens, fits_positive_platform_index, materialize_value, parse_dims,
+    build_strides, fits_positive_platform_index, materialize_value, parse_dims, IndexingOperation,
 };
-use crate::builtins::array::type_resolvers::is_scalar_type;
-use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::shape_rules::element_count_if_known;
+
+#[path = "sub2ind/resident_owner.rs"]
+mod resident_owner;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::indexing::sub2ind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sub2ind",
     op_kind: GpuOpKind::Custom("indexing"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    supported_precisions: &[ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[ProviderHook::Custom("sub2ind")],
     constant_strategy: ConstantStrategy::InlineLiteral,
@@ -56,140 +48,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion executes eagerly on the host; fusion does not apply.",
 };
 
-fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.len() < 2 {
-        return Type::Unknown;
-    }
-    if let Some(dims) = dims_from_tokens(&tokens_from_context(ctx)) {
-        if args.len() - 1 != dims.len() {
-            return Type::Unknown;
-        }
-    }
-    let subscripts = &args[1..];
-    if subscripts.iter().all(|ty| is_scalar_type(ty)) {
-        return Type::Num;
-    }
-    for ty in subscripts {
-        if let Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } = ty {
-            if element_count_if_known(shape).unwrap_or(0) > 1 {
-                return Type::Tensor {
-                    shape: Some(shape.clone()),
-                };
-            }
-        }
-    }
-    Type::tensor()
-}
-
 const BUILTIN_NAME: &str = "sub2ind";
-
-const SUB2IND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "sz",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The size vector accepts every native integer class and is parsed directly as positive platform dimensions.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "I1...In",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every subscript role accepts all eight integer classes, including scalar expansion and full-width exact bounds checks.",
-    },
-];
-pub const SUB2IND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "ind = sub2ind(integer_sz, integer_I1, integer_In...)",
-        inputs: &SUB2IND_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Dimensions and subscripts are read from authoritative integer storage, combined with checked column-major index arithmetic, and returned as documented double indices. Resident integer inputs use exact gather fallback and return resident double output when the owner supports upload.",
-    }];
-
-const SUB2IND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ind",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Column-major linear indices corresponding to provided subscripts.",
-}];
-
-const SUB2IND_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "sz",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Size vector describing source array dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "I1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First-dimension subscript values.",
-    },
-    BuiltinParamDescriptor {
-        name: "In",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Remaining per-dimension subscript arrays/scalars.",
-    },
-];
-
-const SUB2IND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "ind = sub2ind(sz, I1, In...)",
-    inputs: &SUB2IND_INPUTS,
-    outputs: &SUB2IND_OUTPUT,
-}];
-
-const SUB2IND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.INVALID_INPUT",
-    identifier: Some("RunMat:sub2ind:InvalidInput"),
-    when: "Size vector, subscript count, or subscript types are invalid.",
-    message: "sub2ind: invalid input arguments",
-};
-
-const SUB2IND_ERROR_INDEX_BOUNDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.INDEX_BOUNDS",
-    identifier: Some("RunMat:sub2ind:IndexBounds"),
-    when: "At least one subscript lies outside bounds for its dimension.",
-    message: "sub2ind: subscript index exceeds dimension bounds",
-};
-
-const SUB2IND_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.PROVIDER",
-    identifier: Some("RunMat:sub2ind:ProviderError"),
-    when: "GPU provider sub2ind hook fails.",
-    message: "sub2ind: provider execution failed",
-};
-
-const SUB2IND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.INTERNAL",
-    identifier: Some("RunMat:sub2ind:InternalError"),
-    when: "Internal tensor conversion/output construction fails.",
-    message: "sub2ind: internal error",
-};
-
-const SUB2IND_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    SUB2IND_ERROR_INVALID_INPUT,
-    SUB2IND_ERROR_INDEX_BOUNDS,
-    SUB2IND_ERROR_PROVIDER,
-    SUB2IND_ERROR_INTERNAL,
-];
-
-pub const SUB2IND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUB2IND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SUB2IND_ERRORS,
-};
 
 fn sub2ind_error_with_message(
     message: impl Into<String>,
@@ -220,18 +79,23 @@ fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "sub2ind",
-    category = "array/indexing",
-    summary = "Convert N-D subscripts to MATLAB-style column-major linear indices.",
-    keywords = "sub2ind,linear index,column major,gpu indexing",
-    accel = "custom",
-    type_resolver(sub2ind_type),
-    descriptor(crate::builtins::array::indexing::sub2ind::SUB2IND_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::indexing::sub2ind::SUB2IND_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
-async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "sub2ind").await?;
-    let dims = parse_dims(&dims_value, "sub2ind").await?;
+async fn sub2ind_builtin(
+    dims_val: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let resident_source = resident_owner::source(&dims_val, rest.view());
+    let resident_inputs: Vec<GpuTensorHandle> = std::iter::once(&dims_val)
+        .chain(rest.iter())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let (dims_value, _) = materialize_value(dims_val, IndexingOperation::Sub2Ind).await?;
+    let dims = parse_dims(&dims_value, IndexingOperation::Sub2Ind).await?;
     if dims.is_empty() {
         return Err(sub2ind_error("Size vector must have at least one element."));
     }
@@ -242,136 +106,125 @@ async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinRes
         ));
     }
 
-    if let Some(value) = try_gpu_sub2ind(&dims, &rest)? {
+    if let Some(value) = try_gpu_sub2ind(&dims, rest.view(), resident_source.as_ref()).await? {
         return Ok(value);
     }
 
-    let mut saw_gpu = dims_was_gpu;
     let mut subscripts: Vec<Tensor> = Vec::with_capacity(rest.len());
     for value in rest {
-        let (materialised, was_gpu) = materialize_value(value, "sub2ind").await?;
-        saw_gpu |= was_gpu;
+        let (materialised, _) = materialize_value(value, IndexingOperation::Sub2Ind).await?;
         let tensor = tensor::value_into_tensor_for("sub2ind", materialised)
             .map_err(|message| sub2ind_error(message))?;
         subscripts.push(tensor);
     }
 
     let (result_data, result_shape) = compute_indices(&dims, &subscripts)?;
-    let want_gpu_output = saw_gpu && runmat_accelerate_api::provider().is_some();
-
-    if want_gpu_output {
-        #[cfg(all(test, feature = "wgpu"))]
-        {
-            if runmat_accelerate_api::provider().is_none() {
-                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                );
-            }
-        }
-        let shape = result_shape.clone().unwrap_or_else(|| vec![1, 1]);
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &result_data,
-                shape: &shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                return Ok(Value::GpuTensor(handle));
-            }
-        }
-    }
-
-    build_host_value(result_data, result_shape)
+    let host = build_host_value(result_data, result_shape)?;
+    let protected: Vec<_> = resident_inputs.iter().collect();
+    resident_owner::restore_host(resident_source.as_ref(), host, &protected)
 }
 
-fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Option<Value>> {
-    #[cfg(target_arch = "wasm32")]
+async fn try_gpu_sub2ind(
+    dims: &[usize],
+    subs: crate::call::FunctionArgumentView<'_>,
+    source: Option<&GpuTensorHandle>,
+) -> crate::BuiltinResult<Option<Value>> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    if !subs
+        .iter()
+        .all(|value| matches!(value, Value::GpuTensor(_)))
     {
-        let _ = (dims, subs);
-        Ok(None)
+        return Ok(None);
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let provider = match runmat_accelerate_api::provider() {
-            Some(p) => p,
-            None => return Ok(None),
-        };
-        if !subs
-            .iter()
-            .all(|value| matches!(value, Value::GpuTensor(_)))
-        {
-            return Ok(None);
-        }
-        if subs.iter().any(
+    if subs.iter().any(
             |value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some()),
         ) {
             return Ok(None);
         }
-        if dims.is_empty() {
-            return Ok(None);
-        }
+    if dims.is_empty() {
+        return Ok(None);
+    }
 
-        let mut handles: Vec<&GpuTensorHandle> = Vec::with_capacity(subs.len());
-        for value in subs {
-            if let Value::GpuTensor(handle) = value {
-                handles.push(handle);
-            }
+    let mut handles: Vec<&GpuTensorHandle> = Vec::with_capacity(subs.len());
+    for value in subs {
+        if let Value::GpuTensor(handle) = value {
+            handles.push(handle);
         }
+    }
 
-        if handles.len() != dims.len() {
-            return Err(sub2ind_error(
+    gpu_helpers::require_resident_compute_owners(&handles, false, || {
+        sub2ind_provider_error("sub2ind: no exact provider owns the resident subscripts")
+    })?;
+    let Some(provider) = resident_owner::direct_owner(source, &handles) else {
+        return Ok(None);
+    };
+
+    if handles.len() != dims.len() {
+        return Err(sub2ind_error(
             "The number of subscripts supplied must equal the number of dimensions in the size vector.",
         ));
-        }
+    }
 
-        let mut scalar_mask: Vec<bool> = Vec::with_capacity(handles.len());
-        let mut target_shape: Option<Vec<usize>> = None;
-        let mut result_len: usize = 1;
-        let mut saw_non_scalar = false;
+    let mut scalar_mask: Vec<bool> = Vec::with_capacity(handles.len());
+    let mut target_shape: Option<Vec<usize>> = None;
+    let mut result_len: usize = 1;
+    let mut saw_non_scalar = false;
 
-        for handle in &handles {
-            let len = tensor::element_count(&handle.shape);
-            let is_scalar = len == 1;
-            scalar_mask.push(is_scalar);
-            if !is_scalar {
-                saw_non_scalar = true;
-                if let Some(existing) = &target_shape {
-                    if existing != &handle.shape {
-                        return Err(sub2ind_error("Subscript inputs must have the same size."));
-                    }
-                } else {
-                    target_shape = Some(handle.shape.clone());
-                    result_len = len;
+    for handle in &handles {
+        let len = tensor::element_count(handle.shape());
+        let is_scalar = len == 1;
+        scalar_mask.push(is_scalar);
+        if !is_scalar {
+            saw_non_scalar = true;
+            if let Some(existing) = &target_shape {
+                if existing != handle.shape() {
+                    return Err(sub2ind_error("Subscript inputs must have the same size."));
                 }
+            } else {
+                target_shape = Some(handle.shape().to_vec());
+                result_len = len;
             }
         }
+    }
 
-        if !saw_non_scalar {
-            target_shape = Some(vec![1, 1]);
-            result_len = 1;
-        } else if let Some(shape) = &target_shape {
-            result_len = tensor::element_count(shape);
-        }
+    if !saw_non_scalar {
+        target_shape = Some(vec![1, 1]);
+        result_len = 1;
+    } else if let Some(shape) = &target_shape {
+        result_len = tensor::element_count(shape);
+    }
 
-        let strides = build_strides(dims, "sub2ind")?;
-        if dims.iter().any(|&d| d > u32::MAX as usize)
-            || strides.iter().any(|&s| s > u32::MAX as usize)
-            || result_len > u32::MAX as usize
-        {
-            return Ok(None);
-        }
+    let strides = build_strides(dims, IndexingOperation::Sub2Ind)?;
+    if dims.iter().any(|&d| d > u32::MAX as usize)
+        || strides.iter().any(|&s| s > u32::MAX as usize)
+        || result_len > u32::MAX as usize
+    {
+        return Ok(None);
+    }
 
-        let output_shape = target_shape.clone().unwrap_or_else(|| vec![1, 1]);
-        match provider.sub2ind(
+    let output_shape = target_shape.clone().unwrap_or_else(|| vec![1, 1]);
+    match provider
+        .sub2ind(
             dims,
             &strides,
             &handles,
             &scalar_mask,
             result_len,
             &output_shape,
-        ) {
-            Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-            Err(err) => Err(sub2ind_provider_error(err.to_string())),
+        )
+        .await
+    {
+        Ok(handle) => {
+            resident_owner::publish_direct(handle, &output_shape, source, &handles, provider)
+                .map(Some)
         }
+        Err(err) if err.is_unsupported() => Ok(None),
+        Err(err) => Err(crate::runtime_error::with_provider_execution_source(
+            sub2ind_provider_error(err.to_string()),
+            err,
+        )),
     }
 }
 
@@ -388,11 +241,11 @@ fn compute_indices(
         if len != 1 {
             has_non_scalar = true;
             if let Some(shape) = &target_shape {
-                if &tensor.shape != shape {
+                if tensor.shape() != shape {
                     return Err(sub2ind_error("Subscript inputs must have the same size."));
                 }
             } else {
-                target_shape = Some(tensor.shape.clone());
+                target_shape = Some(tensor.shape().to_vec());
                 result_len = len;
             }
         }
@@ -408,7 +261,7 @@ fn compute_indices(
         return Ok((Vec::new(), target_shape));
     }
 
-    let strides = build_strides(dims, "sub2ind")?;
+    let strides = build_strides(dims, IndexingOperation::Sub2Ind)?;
     let mut output = Vec::with_capacity(result_len);
 
     for idx in 0..result_len {
@@ -546,10 +399,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Type;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(super::sub2ind_builtin(dims_val, rest))
     }
 
@@ -560,33 +414,6 @@ pub(crate) mod tests {
         let result =
             sub2ind_builtin(Value::Tensor(dims), vec![Value::Num(2.0), Value::Num(3.0)]).unwrap();
         assert_eq!(result, Value::Num(8.0));
-    }
-
-    #[test]
-    fn sub2ind_type_scalar_outputs_num() {
-        assert_eq!(
-            sub2ind_type(
-                &[Type::Tensor { shape: None }, Type::Num, Type::Int],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Num
-        );
-    }
-
-    #[test]
-    fn sub2ind_type_vector_outputs_tensor() {
-        let subs = Type::Tensor {
-            shape: Some(vec![Some(3), Some(1)]),
-        };
-        assert_eq!(
-            sub2ind_type(
-                &[Type::Tensor { shape: None }, subs.clone(), Type::Num],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(1)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -601,7 +428,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -622,7 +449,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.shape(), [3, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -643,7 +470,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 11.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -702,7 +529,7 @@ pub(crate) mod tests {
             let Value::Tensor(result) = result else {
                 panic!("expected double tensor output");
             };
-            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.shape(), [1, 2]);
             assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
             assert!(result.integer_storage().is_none());
         }
@@ -727,6 +554,19 @@ pub(crate) mod tests {
             err.identifier(),
             super::SUB2IND_ERROR_INVALID_INPUT.identifier
         );
+    }
+
+    #[test]
+    fn rejects_trailing_singleton_rank_mismatch_for_non_scalar_subscripts() {
+        let dims = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let rows = Tensor::new(vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0], vec![2, 3]).unwrap();
+        let cols = Tensor::new(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0], vec![2, 3, 1]).unwrap();
+        let error = sub2ind_builtin(
+            Value::Tensor(dims),
+            vec![Value::Tensor(rows), Value::Tensor(cols)],
+        )
+        .expect_err("runtime requires exact non-scalar shape and rank");
+        assert_eq!(error.identifier(), SUB2IND_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -783,19 +623,19 @@ pub(crate) mod tests {
             let dims_handle = provider
                 .upload(&HostTensorView {
                     data: &dims.materialize_f64(),
-                    shape: &dims.shape,
+                    shape: dims.shape(),
                 })
                 .expect("upload dims");
             let rows_handle = provider
                 .upload(&HostTensorView {
                     data: &rows.materialize_f64(),
-                    shape: &rows.shape,
+                    shape: rows.shape(),
                 })
                 .expect("upload rows");
             let cols_handle = provider
                 .upload(&HostTensorView {
                     data: &cols.materialize_f64(),
-                    shape: &cols.shape,
+                    shape: cols.shape(),
                 })
                 .expect("upload cols");
 
@@ -808,7 +648,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
-                    assert_eq!(gathered.shape, vec![3, 1]);
+                    assert_eq!(gathered.shape(), [3, 1]);
                     assert_eq!(gathered.materialize_f64(), vec![10.0, 11.0, 12.0]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
@@ -843,7 +683,7 @@ pub(crate) mod tests {
             };
             assert_eq!(runmat_accelerate_api::handle_integer_type(handle), None);
             let result = test_support::gather(result).expect("gather result");
-            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.shape(), [1, 2]);
             assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
             assert!(result.integer_storage().is_none());
         });
@@ -873,13 +713,13 @@ pub(crate) mod tests {
         let rows_handle = provider
             .upload(&HostTensorView {
                 data: &rows.materialize_f64(),
-                shape: &rows.shape,
+                shape: rows.shape(),
             })
             .expect("upload rows");
         let cols_handle = provider
             .upload(&HostTensorView {
                 data: &cols.materialize_f64(),
-                shape: &cols.shape,
+                shape: cols.shape(),
             })
             .expect("upload cols");
 
@@ -895,7 +735,7 @@ pub(crate) mod tests {
             Value::Num(v) => Tensor::new(vec![v], vec![1, 1]).unwrap(),
             other => panic!("unexpected cpu result {other:?}"),
         };
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

@@ -1,318 +1,24 @@
 //! MATLAB-compatible `assert` builtin that mirrors MATLAB diagnostic semantics.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::diagnostic_identifier::{
+    is_qualified as is_message_identifier,
+    is_unqualified_field as looks_like_unqualified_identifier,
 };
+use runmat_builtins::{
+    BuiltinErrorDescriptor, ASSERT_COMPLEX_CONDITION_EXTENSION, ASSERT_ERROR_ASSERTION_FAILED,
+    ASSERT_ERROR_INVALID_CONDITION, ASSERT_ERROR_INVALID_INPUT, ASSERT_ERROR_NOT_ENOUGH_INPUTS,
+    ASSERT_ERROR_TOO_MANY_OUTPUTS, ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION,
+};
+#[cfg(test)]
+use runmat_builtins::{ASSERT_DESCRIPTOR, ASSERT_EXTENSIONS, ASSERT_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericScalar, Tensor, Value};
 
-use crate::builtins::common::format::{flatten_arguments, format_variadic};
+use crate::builtins::common::format::{flatten_argument_elements, format_variadic_arguments};
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::diagnostics::type_resolvers::assert_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "assert";
-
-const ASSERT_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
-
-pub(crate) const ASSERT_COMPLEX_CONDITION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "assert-complex-condition",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "assert with a complex condition is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:AssertComplexConditionExtension"),
-    };
-
-pub(crate) const ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "assert-unqualified-identifier",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "assert with an unqualified custom error identifier is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:AssertUnqualifiedIdentifierExtension"),
-    };
-
-pub const ASSERT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ASSERT_COMPLEX_CONDITION_EXTENSION,
-    ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION,
-];
-
-const ASSERT_INTEGER_CONDITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "cond",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every real integer scalar or array is convertible to logical; the condition passes only when it is nonempty and every element is nonzero.",
-    }];
-
-const ASSERT_COMPLEX_INTEGER_CONDITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "cond",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode additionally accepts paired complex-integer storage and tests each element for a nonzero real or imaginary component.",
-    }];
-
-const ASSERT_INTEGER_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Formatting replacement values accept numeric scalars and preserve exact integer values through integer and string conversion specifiers.",
-    }];
-
-pub const ASSERT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "assert(integer_cond, ...)",
-        inputs: &ASSERT_INTEGER_CONDITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Truth testing reads exact authoritative integer storage. The public builtin has no output; resident conditions gather to the host because assert accepts gpuArray input but does not execute on the GPU.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "assert(complex_integer_cond, ...)",
-        inputs: &ASSERT_COMPLEX_INTEGER_CONDITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Public logical conversion rejects complex numeric values. RunMat mode retains the pre-existing nonzero-component predicate without floating materialization.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "assert(cond, msg, integer_A...)",
-        inputs: &ASSERT_INTEGER_FORMAT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Each documented replacement A is a character vector, string scalar, or numeric scalar. Integer scalars remain exact during host formatting, including after resident gather.",
-    },
-];
-
-const ASSERT_INPUTS_CONDITION: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "condition",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical or logically convertible condition that must evaluate to true.",
-}];
-
-const ASSERT_INPUTS_MESSAGE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message text.",
-    },
-];
-
-const ASSERT_INPUTS_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message template text.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Formatting values for the message template.",
-    },
-];
-
-const ASSERT_INPUTS_IDENTIFIER_MESSAGE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message_id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"RunMat:assertion:failed\""),
-        description: "Message identifier.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message text.",
-    },
-];
-
-const ASSERT_INPUTS_IDENTIFIER_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message_id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"RunMat:assertion:failed\""),
-        description: "Message identifier.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message template text.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Formatting values for the message template.",
-    },
-];
-
-const ASSERT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "assert(condition)",
-        inputs: &ASSERT_INPUTS_CONDITION,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message)",
-        inputs: &ASSERT_INPUTS_MESSAGE,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message, A...)",
-        inputs: &ASSERT_INPUTS_MESSAGE_VARIADIC,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message_id, message)",
-        inputs: &ASSERT_INPUTS_IDENTIFIER_MESSAGE,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message_id, message, A...)",
-        inputs: &ASSERT_INPUTS_IDENTIFIER_MESSAGE_VARIADIC,
-        outputs: &ASSERT_OUTPUTS,
-    },
-];
-
-const ASSERT_ERROR_ASSERTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.ASSERTION_FAILED",
-    identifier: Some("RunMat:assertion:failed"),
-    when: "Condition evaluates to false and no custom identifier/message override is provided.",
-    message: "Assertion failed.",
-};
-
-const ASSERT_ERROR_INVALID_CONDITION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.INVALID_CONDITION",
-    identifier: Some("RunMat:assertion:invalidCondition"),
-    when: "First argument is not logical or convertible to a logical condition.",
-    message: "assert: first input must be logical or convertible to logical.",
-};
-
-const ASSERT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.INVALID_INPUT",
-    identifier: Some("RunMat:assertion:invalidInput"),
-    when: "Message identifier/message text or formatting payload is invalid.",
-    message: "assert: invalid input argument",
-};
-
-const ASSERT_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.NOT_ENOUGH_INPUTS",
-    identifier: Some("RunMat:minrhs"),
-    when: "No condition argument is provided.",
-    message: "Not enough input arguments.",
-};
-
-const ASSERT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:assertion:TooManyOutputs"),
-    when: "One or more public outputs are requested from assert.",
-    message: "assert: too many output arguments",
-};
-
-const ASSERT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    ASSERT_ERROR_ASSERTION_FAILED,
-    ASSERT_ERROR_INVALID_CONDITION,
-    ASSERT_ERROR_INVALID_INPUT,
-    ASSERT_ERROR_NOT_ENOUGH_INPUTS,
-    ASSERT_ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const ASSERT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ASSERT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ASSERT_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::assert")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "assert",
-    op_kind: GpuOpKind::Custom("control"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Control-flow builtin; GPU tensors are gathered to host memory before evaluation.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::assert")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "assert",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Control-flow builtin with no fusion support.",
-};
 
 fn assert_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     assert_error_with_message(error.message, error)
@@ -365,17 +71,14 @@ where
 
 #[runtime_builtin(
     name = "assert",
-    category = "diagnostics",
-    summary = "Throw an error when a condition is false, matching MATLAB assert semantics.",
-    keywords = "assert,diagnostics,validation,error",
-    accel = "metadata",
-    type_resolver(assert_type),
-    descriptor(crate::builtins::diagnostics::assert::ASSERT_DESCRIPTOR),
-    extensions(crate::builtins::diagnostics::assert::ASSERT_EXTENSIONS),
-    integer_capabilities(crate::builtins::diagnostics::assert::ASSERT_INTEGER_CAPABILITIES),
+    context = true,
+    binding_variant = "default",
     builtin_path = "crate::builtins::diagnostics::assert"
 )]
-async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn assert_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 0) {
         return Err(assert_error(&ASSERT_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -383,16 +86,21 @@ async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return Err(assert_error(&ASSERT_ERROR_NOT_ENOUGH_INPUTS));
     }
 
-    let mut iter = args.into_iter();
-    let condition_raw = iter.next().expect("checked length above");
-    let rest: Vec<Value> = iter.collect();
+    let condition_raw = args[0].clone();
+    let rest = args.into_range(1..)?;
 
-    let condition = normalize_condition_value(condition_raw).await?;
+    let normalize = normalize_condition_value(condition_raw);
+    let condition = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(normalize).await,
+        None => normalize.await,
+    }?;
     match evaluate_condition(condition)? {
         ConditionOutcome::Pass => Ok(Value::Num(0.0)),
         ConditionOutcome::Fail => {
-            let payload = failure_payload(&rest).await?;
-            Err(assert_flow(&payload.identifier, payload.message))
+            let payload = failure_payload(runtime.as_ref(), &rest).await?;
+            let mut error = assert_flow(&payload.identifier, payload.message);
+            error.source = Some(Box::new(crate::runtime_error::RuntimeAssertionFailure));
+            Err(error)
         }
     }
 }
@@ -469,7 +177,8 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
             evaluate_complex_tensor(&tensor)
         }
         Value::CharArray(chars) => {
-            if !chars.data.is_empty() && chars.data.iter().all(|character| *character != '\0') {
+            if !chars.data().is_empty() && chars.data().iter().all(|character| character.raw() != 0)
+            {
                 Ok(ConditionOutcome::Pass)
             } else {
                 Ok(ConditionOutcome::Fail)
@@ -526,8 +235,8 @@ fn evaluate_complex_tensor(tensor: &ComplexTensor) -> crate::BuiltinResult<Condi
             return Ok(ConditionOutcome::Fail);
         }
         for idx in 0..storage.len() {
-            let real = storage.real.value_at(idx);
-            let imag = storage.imag.value_at(idx);
+            let real = storage.real().value_at(idx);
+            let imag = storage.imag().value_at(idx);
             if real.is_none_or(|value| value.is_zero()) && imag.is_none_or(|value| value.is_zero())
             {
                 return Ok(ConditionOutcome::Fail);
@@ -567,7 +276,10 @@ struct FailurePayload {
     message: String,
 }
 
-async fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload> {
+async fn failure_payload(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<FailurePayload> {
     if args.is_empty() {
         return Ok(FailurePayload {
             identifier: assert_default_identifier().to_string(),
@@ -589,16 +301,18 @@ async fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload>
         }
         let identifier = identifier_from_value(candidate)?;
         let template = message_from_value(&args[1])?;
-        let formatting_args = normalize_formatting_arguments(&args[2..]).await?;
-        let message = format_message(&template, &formatting_args)?;
+        let formatting_args =
+            normalize_formatting_arguments(runtime, args.fork().into_range(2..)?).await?;
+        let message = format_message(&template, formatting_args.view())?;
         Ok(FailurePayload {
             identifier,
             message,
         })
     } else {
         let template = message_from_value(candidate)?;
-        let formatting_args = normalize_formatting_arguments(&args[1..]).await?;
-        let message = format_message(&template, &formatting_args)?;
+        let formatting_args =
+            normalize_formatting_arguments(runtime, args.fork().into_range(1..)?).await?;
+        let message = format_message(&template, formatting_args.view())?;
         Ok(FailurePayload {
             identifier: assert_default_identifier().to_string(),
             message,
@@ -606,29 +320,37 @@ async fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload>
     }
 }
 
-async fn normalize_formatting_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<Value>> {
-    let mut normalized = Vec::with_capacity(args.len());
-    for value in args {
-        let mut flattened = flatten_arguments(std::slice::from_ref(value), BUILTIN_NAME)
-            .await
-            .map_err(|flow| {
-                remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
-                    format!("assert: {}", err.message())
-                })
-            })?;
+async fn normalize_formatting_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        let value = &args[index];
+        let flatten = flatten_argument_elements(
+            crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(value)),
+            BUILTIN_NAME,
+        );
+        let mut flattened = match runtime {
+            Some(runtime) => runtime.scope(flatten).await,
+            None => flatten.await,
+        }
+        .map_err(|flow| {
+            remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
+                format!("assert: {}", err.message())
+            })
+        })?;
         if flattened.len() != 1 {
             return Err(assert_error_with_message(
                 "assert: each message replacement value must be a character vector, string scalar, or numeric scalar.",
                 &ASSERT_ERROR_INVALID_INPUT,
             ));
         }
-        normalized.push(flattened.remove(0));
-    }
-    Ok(normalized)
+        Ok(flattened.pop().expect("one validated formatting scalar"))
+    }).await
 }
 
 fn value_is_identifier(value: &Value) -> crate::BuiltinResult<bool> {
-    if let Some(text) = string_scalar_opt(value) {
+    if let Some(text) = string_scalar_opt(value)? {
         if text.contains(':') {
             return Ok(true);
         }
@@ -684,10 +406,14 @@ fn message_from_value(value: &Value) -> crate::BuiltinResult<String> {
         value,
         "assert: message text must be a string scalar or character vector.",
     )
+    .map(runmat_value::Utf8Text::into_string_unbounded)
 }
 
-fn format_message(template: &str, args: &[Value]) -> crate::BuiltinResult<String> {
-    format_variadic(template, args).map_err(|flow| {
+fn format_message(
+    template: &str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<String> {
+    format_variadic_arguments(template, args).map_err(|flow| {
         remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
             format!("assert: {}", err.message())
         })
@@ -705,34 +431,25 @@ fn normalize_identifier(raw: &str) -> String {
     }
 }
 
-fn is_message_identifier(text: &str) -> bool {
-    let trimmed = text.trim();
-    let fields: Vec<&str> = trimmed.split(':').collect();
-    if fields.len() < 2 {
-        return false;
-    }
-    fields.into_iter().all(is_identifier_field)
-}
-
-fn looks_like_unqualified_identifier(text: &str) -> bool {
-    let trimmed = text.trim();
-    !trimmed.contains(':') && is_identifier_field(trimmed)
-}
-
-fn is_identifier_field(field: &str) -> bool {
-    let mut chars = field.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
-}
-
-fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResult<String> {
+fn string_scalar_from_value(
+    value: &Value,
+    context: &str,
+) -> crate::BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(runmat_value::StringElement::Text(text)) => Ok(text.clone()),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0]
+            .text_ref()
+            .cloned()
+            .ok_or_else(|| assert_error_with_message(context, &ASSERT_ERROR_INVALID_INPUT)),
         Value::CharArray(char_array) if char_array.rows == 1 => {
-            Ok(char_array.data.iter().collect::<String>())
+            Ok(runmat_value::decode_utf16_code_units(char_array.data())
+                .map_err(|source| {
+                    let mut error =
+                        assert_error_with_message(source.to_string(), &ASSERT_ERROR_INVALID_INPUT);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into())
         }
         _ => Err(assert_error_with_message(
             context,
@@ -741,15 +458,22 @@ fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResul
     }
 }
 
-fn string_scalar_opt(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::CharArray(char_array) if char_array.rows == 1 => {
-            Some(char_array.data.iter().collect())
-        }
+fn string_scalar_opt(value: &Value) -> crate::BuiltinResult<Option<runmat_value::Utf8Text>> {
+    Ok(match value {
+        Value::String(text) => text.text_ref().cloned(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].text_ref().cloned(),
+        Value::CharArray(char_array) if char_array.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(char_array.data())
+                .map_err(|source| {
+                    let mut error =
+                        assert_error_with_message(source.to_string(), &ASSERT_ERROR_INVALID_INPUT);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into(),
+        ),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -757,13 +481,16 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{BuiltinIntegerInputAvailability, BuiltinIntegerOutputClassRule};
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
 
     fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::assert_builtin(args))
+        block_on(super::assert_builtin(
+            None,
+            crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+        ))
     }
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -802,6 +529,26 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
+    #[test]
+    fn assert_character_truth_uses_raw_utf16_units() {
+        let nonzero = runmat_value::CharArray::from_code_units(
+            vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)],
+            1,
+            1,
+        )
+        .expect("raw surrogate character");
+        assert_builtin(vec![Value::CharArray(nonzero)])
+            .expect("every nonzero raw character unit is true");
+
+        let zero = runmat_value::CharArray::from_code_units(
+            vec![runmat_value::Utf16CodeUnit::from_raw(0)],
+            1,
+            1,
+        )
+        .expect("raw zero character");
+        assert!(assert_builtin(vec![Value::CharArray(zero)]).is_err());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn assert_false_uses_default_message() {
@@ -826,6 +573,8 @@ pub(crate) mod tests {
             assert_builtin(vec![Value::Tensor(tensor)]).expect_err("assert should fail"),
         );
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
+        assert!(std::error::Error::source(&err)
+            .is_some_and(|cause| cause.is::<crate::runtime_error::RuntimeAssertionFailure>()));
     }
 
     #[test]
@@ -904,7 +653,7 @@ pub(crate) mod tests {
         ] {
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String(format.to_string()),
+                Value::String(format.to_string().into()),
                 Value::Int(value),
             ])
             .expect_err("formatted assertion should fail");
@@ -915,7 +664,7 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("scalar");
         let err = assert_builtin(vec![
             Value::Bool(false),
-            Value::String("%u".to_string()),
+            Value::String("%u".to_string().into()),
             Value::Tensor(scalar),
         ])
         .expect_err("formatted assertion should fail");
@@ -925,7 +674,7 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2]).expect("array");
         let err = assert_builtin(vec![
             Value::Bool(false),
-            Value::String("%u".to_string()),
+            Value::String("%u".to_string().into()),
             Value::Tensor(nonscalar),
         ])
         .expect_err("format replacement arrays reject");
@@ -937,12 +686,14 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_real_condition_conversion_rejects_nan_and_accepts_character_vectors() {
-        let chars = runmat_value::CharArray::new(vec!['o', 'k'], 1, 2).expect("chars");
+        let chars =
+            runmat_value::CharArray::from_unicode_scalars(vec!['o', 'k'], 1, 2).expect("chars");
         assert_builtin(vec![Value::CharArray(chars)]).expect("nonzero character codes pass");
 
         for chars in [
-            runmat_value::CharArray::new(Vec::new(), 1, 0).expect("empty"),
-            runmat_value::CharArray::new(vec!['o', '\0'], 1, 2).expect("zero character"),
+            runmat_value::CharArray::from_code_units(Vec::new(), 1, 0).expect("empty"),
+            runmat_value::CharArray::from_unicode_scalars(vec!['o', '\0'], 1, 2)
+                .expect("zero character"),
         ] {
             let err =
                 assert_builtin(vec![Value::CharArray(chars)]).expect_err("condition should fail");
@@ -986,7 +737,7 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String("plainMessage".to_string()),
+                Value::String("plainMessage".to_string().into()),
                 Value::Int(IntValue::I32(7)),
             ])
             .expect_err("plain text is the message form");
@@ -997,8 +748,8 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String("customFailure".to_string()),
-                Value::String("failed".to_string()),
+                Value::String("customFailure".to_string().into()),
+                Value::String("failed".to_string().into()),
             ])
             .expect_err("RunMat mode admits unqualified identifier");
             assert_eq!(err.identifier(), Some("RunMat:customFailure"));
@@ -1006,8 +757,8 @@ pub(crate) mod tests {
         for identifier in ["bad.segment:mnemonic", "component:9bad", "component::bad"] {
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String(identifier.to_string()),
-                Value::String("failed".to_string()),
+                Value::String(identifier.to_string().into()),
+                Value::String("failed".to_string().into()),
             ])
             .expect_err("invalid qualified identifier rejects");
             assert_eq!(
@@ -1178,7 +929,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = assert_builtin(vec![Value::GpuTensor(handle)]).expect("assert");
@@ -1223,7 +974,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let err =
@@ -1250,10 +1001,12 @@ pub(crate) mod tests {
                     &Tensor::new_integer(storage, vec![2, 1]).expect("condition"),
                 )
                 .expect("upload");
+                let lease = handle.allocation_lease().downgrade();
                 let err = assert_builtin(vec![Value::GpuTensor(handle.clone())])
                     .expect_err("resident zero fails");
                 assert_eq!(err.identifier(), Some(assert_default_identifier()));
-                let _ = provider.free(&handle);
+                drop((err, handle));
+                assert!(lease.acquire().is_none());
             }
 
             let handle = gpu_helpers::upload_tensor(
@@ -1262,14 +1015,16 @@ pub(crate) mod tests {
                     .expect("format value"),
             )
             .expect("upload");
+            let lease = handle.allocation_lease().downgrade();
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String("%u".to_string()),
+                Value::String("%u".to_string().into()),
                 Value::GpuTensor(handle.clone()),
             ])
             .expect_err("resident scalar formats");
             assert_eq!(err.message(), u64::MAX.to_string());
-            let _ = provider.free(&handle);
+            drop((err, handle));
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -1296,7 +1051,7 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_rejects_requested_public_output() {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let err = assert_builtin(vec![Value::Bool(true)]).expect_err("assert has no output");
         assert_eq!(err.identifier(), ASSERT_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
@@ -1319,7 +1074,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let err = unwrap_error(
@@ -1360,7 +1115,10 @@ pub(crate) mod tests {
             let err = assert_builtin(vec![Value::GpuTensor(handle.clone())])
                 .expect_err("resident zero fails");
             assert_eq!(err.identifier(), Some(assert_default_identifier()));
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().unwrap();
+            assert!(physical.acquire().is_none());
         }
 
         let handle = gpu_helpers::upload_tensor(
@@ -1371,20 +1129,15 @@ pub(crate) mod tests {
         .expect("upload");
         let err = assert_builtin(vec![
             Value::Bool(false),
-            Value::String("%u".to_string()),
+            Value::String("%u".to_string().into()),
             Value::GpuTensor(handle.clone()),
         ])
         .expect_err("resident scalar formats");
         assert_eq!(err.message(), u64::MAX.to_string());
-        let _ = provider.free(&handle);
-    }
-
-    #[test]
-    fn assert_has_no_public_output_type() {
-        assert_eq!(
-            assert_type(&[Type::Bool], &ResolveContext::new(Vec::new())),
-            Type::Unknown
-        );
+        handle.allocation_lease().validate_live().unwrap();
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().unwrap();
+        assert!(physical.acquire().is_none());
     }
 
     #[test]
@@ -1405,7 +1158,8 @@ pub(crate) mod tests {
                 ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION
             ]
         );
-        assert!(ASSERT_SIGNATURES
+        assert!(ASSERT_DESCRIPTOR
+            .signatures
             .iter()
             .all(|signature| signature.outputs.is_empty()));
     }

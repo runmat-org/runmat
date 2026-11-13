@@ -67,6 +67,65 @@ describe("BrowserProjectSession", () => {
     expect(setFsProvider).toHaveBeenLastCalledWith(filesystem);
   });
 
+  it("resolves captured inputs without reading or writing the live lock", async () => {
+    const filesystem = workspaceFilesystem({ "/workspace/runmat.lock": "peer-lock" });
+    const native = nativeBindings();
+    const prepareCapturedProject = vi.fn(async () => resolved("write-generated"));
+    const setFsProvider = vi.fn();
+    const project = new BrowserProjectSession({
+      native, filesystem, packageCache: cacheProvider(),
+      gitGateway: { baseUrl: "https://api.runmat.test" },
+      session: {
+        prepareCapturedProject,
+        setFsProvider,
+        async installProjectHandoff() { return {}; },
+        async clearProjectHandoff() {},
+        async projectRevision() { return {}; },
+      },
+    });
+    const inputManifest = { snapshotId: "capture", entries: [] };
+    const resolution = await project.resolve({ ...request(), inputManifest });
+    expect(prepareCapturedProject).toHaveBeenCalledWith(
+      { manifestPath: request().manifestPath, options: request().options, inputManifest },
+      expect.objectContaining({ fetchGitInventory: expect.any(Function) }),
+      project.filesystem,
+    );
+    expect(native.resolveProject).not.toHaveBeenCalled();
+    expect(setFsProvider).not.toHaveBeenCalled();
+    expect(native.decodePackageLock).not.toHaveBeenCalled();
+    expect(native.encodePackageLock).not.toHaveBeenCalled();
+    expect(resolution.lockWritten).toBe(false);
+    expect(new TextDecoder().decode(await filesystem.readFile("/workspace/runmat.lock"))).toBe("peer-lock");
+    await project.dispose();
+    expect(setFsProvider).toHaveBeenCalledOnce();
+    expect(setFsProvider).toHaveBeenCalledWith(filesystem);
+  });
+
+  it("restores the original provider when captured preparation fails", async () => {
+    const filesystem = workspaceFilesystem({});
+    const setFsProvider = vi.fn();
+    const clearProjectHandoff = vi.fn(async () => {});
+    const failure = new Error("captured source unavailable");
+    const project = new BrowserProjectSession({
+      native: nativeBindings(), filesystem, packageCache: cacheProvider(),
+      gitGateway: { baseUrl: "https://api.runmat.test" },
+      session: {
+        async prepareCapturedProject() { throw failure; },
+        setFsProvider, clearProjectHandoff,
+        async installProjectHandoff() { return {}; },
+        async projectRevision() { return {}; },
+      },
+    });
+    await expect(project.resolve({
+      ...request(), inputManifest: { snapshotId: "capture", entries: [] },
+    })).rejects.toBe(failure);
+    expect(clearProjectHandoff).toHaveBeenCalledOnce();
+    expect(setFsProvider).toHaveBeenCalledOnce();
+    expect(setFsProvider).toHaveBeenCalledWith(filesystem);
+    await project.dispose();
+    expect(setFsProvider).toHaveBeenCalledOnce();
+  });
+
   it("supports locked offline reload without writing the lock", async () => {
     const filesystem = workspaceFilesystem({
       "/workspace/runmat.toml": '[package]\nname = "demo"\n',

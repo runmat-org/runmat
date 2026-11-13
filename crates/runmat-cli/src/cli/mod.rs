@@ -1,6 +1,10 @@
 mod batch;
 mod cluster;
+mod execution_target;
+mod fea;
 mod job;
+mod mex;
+mod native_interface;
 mod package;
 mod parse;
 mod remote;
@@ -10,10 +14,15 @@ mod value_types;
 
 pub use batch::BatchCommand;
 pub use cluster::{
-    ClusterCommand, ClusterStateArg, NodeJoinArgs, NodeJoinCommand, NodeServiceCommand,
-    NodeStateArg, NodeTrustTier,
+    ClusterCommand, ClusterJoinArgs, ClusterStateArg, NodeArgs, NodeCommand, NodeOptions,
+    NodeServiceCommand, NodeStateArg, NodeTrustTier,
 };
+pub(crate) use execution_target::resolve_endpoint_trust;
+pub use execution_target::{ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
+pub use fea::{FeaRootArgs, SnapshotPresentationArgs};
 pub use job::{JobCommand, JobRecoveryCommand};
+pub use mex::MexArgs;
+pub use native_interface::{NativeInterfaceCommand, NativeInterfacePrepareArgs};
 pub use package::{
     PackageCacheCommand, PackageCommand, PackageInspectArgs, PackageKeyCommand, PackageKeyTarget,
     PackageProjectArgs, PackagePublishArgs,
@@ -23,8 +32,11 @@ pub use remote::{
     FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand, ProjectRetentionCommand,
     RemoteCommand,
 };
-pub use root::{Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, GcCommand};
+pub use root::{
+    Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, ConfigUserCommand, GcCommand,
+};
 pub use test::{TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
 pub use value_types::{
-    AotOptLevel, AotPolicy, CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel, OptLevel,
+    AotOptLevel, AotPolicy, CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel,
+    MeshElementOrderArg, MeshSourceUnitsArg, OptLevel,
 };

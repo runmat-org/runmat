@@ -6,13 +6,13 @@
 //! host implementation with result re-upload when the owning provider can
 //! preserve the documented floating class and complexity.
 
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::{CROSS_DESCRIPTOR, CROSS_EXTENSIONS, CROSS_INTEGER_CAPABILITIES};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CROSS_ERROR_INTERNAL, CROSS_ERROR_INVALID_ARGUMENT, CROSS_ERROR_INVALID_INPUT,
+    CROSS_INTEGER_A_EXTENSION, CROSS_INTEGER_B_EXTENSION, CROSS_INTEGER_DIM_EXTENSION,
+    CROSS_LOGICAL_A_EXTENSION, CROSS_LOGICAL_B_EXTENSION, CROSS_LOGICAL_DIM_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
@@ -23,159 +23,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::cross_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const CROSS_NAME: &str = "cross";
-
-const CROSS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cross product result.",
-}];
-
-const CROSS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-];
-
-const CROSS_INPUTS_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension with extent 3.",
-    },
-];
-
-const CROSS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "C = cross(A, B)",
-        inputs: &CROSS_INPUTS,
-        outputs: &CROSS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = cross(A, B, dim)",
-        inputs: &CROSS_INPUTS_DIM,
-        outputs: &CROSS_OUTPUT,
-    },
-];
-
-const CROSS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CROSS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:cross:InvalidArgument"),
-    when: "Argument count or dimension argument is invalid.",
-    message: "cross: invalid argument",
-};
-
-const CROSS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CROSS.INVALID_INPUT",
-    identifier: Some("RunMat:cross:InvalidInput"),
-    when: "Inputs are unsupported or incompatible for cross product.",
-    message: "cross: A and B must be the same size.",
-};
-
-const CROSS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CROSS.INTERNAL",
-    identifier: Some("RunMat:cross:Internal"),
-    when: "Runtime cannot materialize cross outputs.",
-    message: "cross: internal runtime failure",
-};
-
-const CROSS_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    CROSS_ERROR_INVALID_ARGUMENT,
-    CROSS_ERROR_INVALID_INPUT,
-    CROSS_ERROR_INTERNAL,
-];
-
-pub const CROSS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CROSS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CROSS_ERRORS,
-};
-
-pub const CROSS_INTEGER_A_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cross-integer-a",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cross with a typed-integer A operand is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CrossIntegerAExtension"),
-};
-pub const CROSS_INTEGER_B_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cross-integer-b",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cross with a typed-integer B operand is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CrossIntegerBExtension"),
-};
-pub const CROSS_LOGICAL_A_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cross-logical-a",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cross with a logical A operand is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CrossLogicalAExtension"),
-};
-pub const CROSS_LOGICAL_B_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cross-logical-b",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cross with a logical B operand is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CrossLogicalBExtension"),
-};
-pub const CROSS_INTEGER_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cross-integer-dim",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cross with a typed-integer dim argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CrossIntegerDimExtension"),
-};
-pub const CROSS_LOGICAL_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "cross-logical-dim",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "cross with a logical dim argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CrossLogicalDimExtension"),
-};
-pub const CROSS_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
-    CROSS_INTEGER_A_EXTENSION,
-    CROSS_INTEGER_B_EXTENSION,
-    CROSS_LOGICAL_A_EXTENSION,
-    CROSS_LOGICAL_B_EXTENSION,
-    CROSS_INTEGER_DIM_EXTENSION,
-    CROSS_LOGICAL_DIM_EXTENSION,
-];
-const CROSS_INTEGER_A_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Rejected, notes: "MATLAB documents only single and double data operands; RunMat mode admits every real or complex integer class at an explicit floating boundary, with single output when the other data operand is single and double otherwise." }];
-const CROSS_INTEGER_B_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Rejected, notes: "The independently gated B operand accepts every real or complex integer class in RunMat mode." }];
-const CROSS_INTEGER_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "dim", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The public cross reference documents a positive-integer scalar dim but does not list typed integer classes. RunMat mode accepts every typed integer class exactly; an ordinary double-valued integer scalar remains documented behavior." }];
-pub const CROSS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "C = cross(integer_A, B, dim?)", inputs: &CROSS_INTEGER_A_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only integer data crosses a floating boundary. The result is single when either data operand is single and double otherwise; matching shapes and the length-three operating dimension are preserved. Resident integer inputs gather exactly before conversion and eligible results return to the owning provider." },
-    BuiltinIntegerCapabilityDescriptor { form: "C = cross(A, integer_B, dim?)", inputs: &CROSS_INTEGER_B_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The B role has the same independently gated RunMat-only floating-boundary behavior and single-dominant output-class rule." },
-    BuiltinIntegerCapabilityDescriptor { form: "C = cross(A, B, integer_dim)", inputs: &CROSS_INTEGER_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "dim controls traversal only; floating data output preserves the supported input precision and residency path." },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::cross")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -334,17 +186,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "cross",
-    category = "math/linalg/ops",
-    summary = "Compute vector cross products.",
-    keywords = "cross,vector product,3d vector,gpu,linear algebra",
-    accel = "custom",
-    type_resolver(cross_type),
-    extensions(CROSS_EXTENSIONS),
-    integer_capabilities(CROSS_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::linalg::ops::cross::CROSS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::cross"
 )]
-async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cross_builtin(
+    lhs: Value,
+    rhs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(cross_invalid_argument("cross: too many input arguments"));
     }
@@ -361,10 +210,17 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
         (Value::GpuTensor(handle), _) | (_, Value::GpuTensor(handle)) => Some(handle.clone()),
         _ => None,
     };
+    gpu_helpers::require_resident_compute_values(&[&lhs, &rhs], false, || {
+        cross_internal_error("cross: resident input has no exact owning provider")
+    })?;
     let single_output = value_uses_single(&lhs) || value_uses_single(&rhs);
     let complex_output = value_is_complex(&lhs) || value_is_complex(&rhs);
 
     if let (Value::GpuTensor(lhs_handle), Value::GpuTensor(rhs_handle)) = (&lhs, &rhs) {
+        if lhs_handle.shape() != rhs_handle.shape() {
+            return Err(cross_error(&CROSS_ERROR_INVALID_INPUT));
+        }
+        resolve_dimension(lhs_handle.shape(), dim)?;
         let requires_floating_boundary = runmat_accelerate_api::handle_integer_type(lhs_handle)
             .is_some()
             || runmat_accelerate_api::handle_integer_type(rhs_handle).is_some()
@@ -372,13 +228,13 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             || runmat_accelerate_api::handle_is_logical(rhs_handle);
         if !requires_floating_boundary
             && !complex_output
-            && lhs_handle.device_id == rhs_handle.device_id
+            && lhs_handle.device_id() == rhs_handle.device_id()
         {
             if let (Some(provider), Some(rhs_provider)) = (
-                runmat_accelerate_api::provider_for_handle(lhs_handle),
-                runmat_accelerate_api::provider_for_handle(rhs_handle),
+                gpu_helpers::exact_provider_for_handle(lhs_handle),
+                gpu_helpers::exact_provider_for_handle(rhs_handle),
             ) {
-                if !std::ptr::eq(provider, rhs_provider) {
+                if !runmat_accelerate_api::same_provider_instance(provider, rhs_provider) {
                     // Mixed-owner handles must gather independently.
                 } else {
                     let expected = if single_output {
@@ -390,18 +246,33 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
                         Ok(handle)
                             if native_result_matches_provider(
                                 &handle,
-                                lhs_handle.device_id,
+                                lhs_handle.device_id(),
                                 provider,
                                 expected,
-                            ) =>
+                            ) && handle.shape() == lhs_handle.shape()
+                                && !handle.shares_allocation_with(lhs_handle)
+                                && !handle.shares_allocation_with(rhs_handle) =>
                         {
                             return Ok(Value::GpuTensor(handle));
                         }
                         Ok(handle) => {
-                            free_rejected_native_handle(&handle, provider);
+                            let mut error = cross_internal_error(
+                                "cross: provider returned malformed or aliased output",
+                            );
+                            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                            return Err(gpu_helpers::reject_gpu_output(handle, error));
                         }
+                        Err(err) if gpu_helpers::provider_hook_allows_host_fallback(&err) => {}
                         Err(err) => {
-                            log::trace!("cross: provider cross fallback triggered: {err}");
+                            let mut error = cross_internal_error(format!(
+                                "cross: provider execution failed: {err}"
+                            ));
+                            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                            error = crate::runtime_error::with_provider_execution_source(
+                                error,
+                                err.into(),
+                            );
+                            return Err(error);
                         }
                     }
                 }
@@ -411,6 +282,13 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
 
     let lhs_gpu = matches!(lhs, Value::GpuTensor(_));
     let rhs_gpu = matches!(rhs, Value::GpuTensor(_));
+    let protected: Vec<_> = [&lhs, &rhs]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
 
     let lhs_host = gather_if_needed_async(&lhs)
         .await
@@ -433,13 +311,13 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             tensor::value_into_tensor_for(CROSS_NAME, rhs_host).map_err(cross_invalid_input)?;
         let result = cross_real_tensor(&lhs_tensor, &rhs_tensor, dim, single_output)?;
         if lhs_gpu || rhs_gpu {
-            return promote_real_result_to_gpu(result, owner.as_ref(), single_output);
+            return promote_real_result_to_gpu(result, owner.as_ref(), single_output, &protected);
         }
         tensor::tensor_into_value(result)
     };
 
     if let (Some(owner), Value::ComplexTensor(tensor)) = (owner.as_ref(), &value) {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(owner) {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(owner) {
             let expected = if single_output {
                 runmat_accelerate_api::ProviderPrecision::F32
             } else {
@@ -448,8 +326,9 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             if provider.precision() != expected {
                 return Ok(value);
             }
-            return gpu_helpers::upload_complex_tensor(provider, tensor)
-                .map(gpu_helpers::complex_gpu_value);
+            let output =
+                gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &protected)?;
+            return gpu_helpers::complex_gpu_value(output);
         }
     }
     Ok(value)
@@ -461,22 +340,14 @@ fn native_result_matches_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    handle.device_id == input_device
+    handle.device_id() == input_device
         && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_native_handle(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
-    if let Err(err) = owner.free(handle) {
-        log::trace!("cross: failed to free rejected provider result: {err}");
-    }
+        && !runmat_accelerate_api::handle_is_logical(handle)
+        && runmat_accelerate_api::handle_integer_type(handle).is_none()
+        && gpu_helpers::exact_provider_for_handle(handle)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn value_is_complex(value: &Value) -> bool {
@@ -650,7 +521,7 @@ fn cross_complex_tensor(
                 .collect(),
         )
     } else {
-        ComplexStorage::F64(output)
+        ComplexStorage::F64(output.into())
     };
     ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
@@ -693,18 +564,20 @@ fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResu
 }
 
 fn canonical_shape_tensor(t: &Tensor) -> Vec<usize> {
-    if t.shape.is_empty() {
-        vec![t.rows, t.cols]
+    if t.shape().is_empty() {
+        // `cross` treats a rank-zero dense value as having no vector axis;
+        // keep that domain projection distinct from the public 1-by-1 matrix view.
+        vec![0, 0]
     } else {
-        t.shape.clone()
+        t.shape().to_vec()
     }
 }
 
 fn canonical_shape_complex(t: &ComplexTensor) -> Vec<usize> {
-    if t.shape.is_empty() {
-        vec![t.rows, t.cols]
+    if t.shape().is_empty() {
+        vec![t.rows(), t.cols()]
     } else {
-        t.shape.clone()
+        t.shape().to_vec()
     }
 }
 
@@ -745,8 +618,9 @@ fn promote_real_result_to_gpu(
     tensor: Tensor,
     owner: Option<&runmat_accelerate_api::GpuTensorHandle>,
     single_output: bool,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let provider = match owner.and_then(runmat_accelerate_api::provider_for_handle) {
+    let provider = match owner.and_then(gpu_helpers::exact_provider_for_handle) {
         Some(provider) => provider,
         None => return Ok(tensor::tensor_into_value(tensor)),
     };
@@ -758,11 +632,13 @@ fn promote_real_result_to_gpu(
     if provider.precision() != expected {
         return Ok(tensor::tensor_into_value(tensor));
     }
-    match gpu_helpers::upload_tensor(provider, &tensor) {
-        Ok(handle) => Ok(Value::GpuTensor(handle)),
-        Err(_) => Ok(tensor::tensor_into_value(tensor)),
-    }
+    let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, protected)?;
+    gpu_helpers::resident_gpu_value(handle)
 }
+
+#[cfg(test)]
+#[path = "vector_product_owned_tests.rs"]
+mod owned_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -847,6 +723,23 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cross_dense_scalar_retains_zero_by_zero_domain_projection() {
+        let scalar = Tensor::new(vec![1.0], Vec::new()).expect("scalar");
+        assert_eq!(scalar.rows(), 1);
+        assert_eq!(scalar.cols(), 1);
+        assert_eq!(canonical_shape_tensor(&scalar), [0, 0]);
+
+        let error = cross_builtin(
+            Value::Tensor(scalar.clone()),
+            Value::Tensor(scalar),
+            Vec::new(),
+        )
+        .expect_err("a scalar has no dimension of length three");
+        assert_eq!(error.identifier(), CROSS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cross_row_vectors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
@@ -855,7 +748,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -871,7 +764,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -891,7 +784,7 @@ pub(crate) mod tests {
         .expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), [2, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -915,7 +808,7 @@ pub(crate) mod tests {
         .expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), [2, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -932,7 +825,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1134,7 +1027,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2, 3]);
+                assert_eq!(t.shape(), [1, 2, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1155,7 +1048,7 @@ pub(crate) mod tests {
         .expect("cross");
         match value {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64()[0], (0.0, 0.0));
                 assert_eq!(t.materialize_f64()[1], (0.0, 0.0));
                 assert_eq!(t.materialize_f64()[2], (3.0, -1.0));
@@ -1167,12 +1060,12 @@ pub(crate) mod tests {
     #[test]
     fn cross_complex_single_retains_class_and_explicit_complexity() {
         let lhs = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]),
+            ComplexStorage::F32(vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0)].into()),
             vec![1, 3],
         )
         .unwrap();
         let rhs = ComplexTensor::from_complex_storage(
-            ComplexStorage::F32(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 0.0)]),
+            ComplexStorage::F32(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 0.0)].into()),
             vec![1, 3],
         )
         .unwrap();
@@ -1251,7 +1144,7 @@ pub(crate) mod tests {
         else {
             panic!("owner-restored output")
         };
-        assert_eq!(output.device_id, provider_a.device_id());
+        assert_eq!(output.device_id(), provider_a.device_id());
         let gathered = block_on(provider_a.download(&output)).unwrap();
         assert_eq!(gathered.data, vec![0.0, 0.0, 1.0]);
     }
@@ -1423,11 +1316,11 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap();
             let view_lhs = HostTensorView {
                 data: &lhs.materialize_f64(),
-                shape: &lhs.shape,
+                shape: lhs.shape(),
             };
             let view_rhs = HostTensorView {
                 data: &rhs.materialize_f64(),
-                shape: &rhs.shape,
+                shape: rhs.shape(),
             };
             let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
             let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -1440,7 +1333,7 @@ pub(crate) mod tests {
             match value {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 3]);
+                    assert_eq!(gathered.shape(), [1, 3]);
                     assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 1.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -1449,7 +1342,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cross_frees_rejected_native_result_before_fallback() {
+    fn cross_retires_rejected_native_result_without_fallback() {
         test_support::with_rejecting_native_result_provider(|provider| {
             let lhs = provider
                 .upload(&HostTensorView {
@@ -1463,11 +1356,15 @@ pub(crate) mod tests {
                     shape: &[1, 3],
                 })
                 .unwrap();
-            let result = cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new())
-                .expect("cross fallback");
-            let result = test_support::gather(result).expect("gather fallback");
-            assert_eq!(result.shape, vec![1, 3]);
-            assert_eq!(result.materialize_f64(), vec![0.0, 0.0, 1.0]);
+            let error = cross_builtin(
+                Value::GpuTensor(lhs.clone()),
+                Value::GpuTensor(rhs.clone()),
+                Vec::new(),
+            )
+            .expect_err("malformed provider output is not an Unsupported route");
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            lhs.allocation_lease().validate_live().unwrap();
+            rhs.allocation_lease().validate_live().unwrap();
             assert_eq!(provider.free_count(), 1);
         });
     }
@@ -1475,21 +1372,24 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
+    #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn cross_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .expect("requested vector-product hardware gate requires an actual WGPU adapter");
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let lhs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
         let rhs = Tensor::new(vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0], vec![2, 3]).unwrap();
         let cpu = cross_real_tensor(&lhs, &rhs, Some(2), false).expect("cpu cross");
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_lhs = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_rhs = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
         let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -1500,11 +1400,15 @@ pub(crate) mod tests {
         )
         .expect("gpu cross");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 
     fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::cross_builtin(lhs, rhs, rest))
+        block_on(super::cross_builtin(
+            lhs,
+            rhs,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

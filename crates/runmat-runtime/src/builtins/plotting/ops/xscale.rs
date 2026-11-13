@@ -1,105 +1,41 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{XSCALE_DESCRIPTOR, XSCALE_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::axis_scale::axis_scale_builtin;
 use super::axis_ticks::TickAxis;
-use crate::builtins::plotting::type_resolvers::get_type;
-
-const XSCALE_OUTPUT_SCALE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "scale",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current X-axis scale, 'linear' or 'log'.",
-}];
-
-const XSCALE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const XSCALE_INPUTS_SCALE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "scale",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scale string: 'linear' or 'log'.",
-}];
-
-const XSCALE_INPUTS_AX_SCALE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "scale",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scale string: 'linear' or 'log'.",
-    },
-];
-
-const XSCALE_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const XSCALE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "scale = xscale()",
-        inputs: &XSCALE_INPUTS_NONE,
-        outputs: &XSCALE_OUTPUT_SCALE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "xscale(scale)",
-        inputs: &XSCALE_INPUTS_SCALE,
-        outputs: &XSCALE_OUTPUTS_NONE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "xscale(ax, scale)",
-        inputs: &XSCALE_INPUTS_AX_SCALE,
-        outputs: &XSCALE_OUTPUTS_NONE,
-    },
-];
-
-const XSCALE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XSCALE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:xscale:InvalidArgument"),
-    when: "Argument count, scale value, or axes handle is invalid.",
-    message: "xscale: invalid argument",
-};
-
-const XSCALE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XSCALE.INTERNAL",
-    identifier: Some("RunMat:xscale:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "xscale: internal operation failed",
-};
-
-const XSCALE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [XSCALE_ERROR_INVALID_ARGUMENT, XSCALE_ERROR_INTERNAL];
-
-pub const XSCALE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &XSCALE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &XSCALE_ERRORS,
-};
 
 #[runtime_builtin(
     name = "xscale",
-    category = "plotting",
-    summary = "Query or set X-axis scale.",
-    keywords = "xscale,plotting,axes,log,linear",
-    suppress_auto_output = true,
-    type_resolver(get_type),
-    descriptor(crate::builtins::plotting::xscale::XSCALE_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::xscale"
 )]
+pub fn xscale_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    xscale_with_runtime(runtime.as_ref(), args)
+}
+
+#[cfg(test)]
 pub fn xscale_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    axis_scale_builtin("xscale", TickAxis::X, args)
+    xscale_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+}
+
+fn xscale_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &XSCALE_DESCRIPTOR,
+        &XSCALE_ERROR_TOO_MANY_OUTPUTS,
+        "xscale",
+    )?;
+    axis_scale_builtin(runtime, "xscale", TickAxis::X, args)
 }
 
 #[cfg(test)]
@@ -201,8 +137,10 @@ mod tests {
     #[test]
     fn xscale_descriptor_only_advertises_query_output() {
         let signatures = XSCALE_DESCRIPTOR.signatures;
-        assert_eq!(signatures[0].outputs.len(), 1);
-        assert!(signatures[1].outputs.is_empty());
-        assert!(signatures[2].outputs.is_empty());
+        assert_eq!(
+            signatures.iter().map(|signature| signature.outputs.len()).collect::<Vec<_>>(),
+            [1, 1, 0, 0],
+            "both current/explicit-axes queries return a value; neither setter advertises an output",
+        );
     }
 }

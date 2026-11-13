@@ -1,22 +1,28 @@
 //! Core Text Analytics document and bag-of-words compatibility objects.
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    BAG_OF_WORDS_DESCRIPTOR,
+    BAG_OF_WORDS_ERROR_BAG_OF_WORDS_INVALID_INPUT as ERROR_BAG_OF_WORDS_INVALID_INPUT,
+    BAG_OF_WORDS_INTEGER_CAPABILITIES, REMOVE_LONG_WORDS_DESCRIPTOR,
+    REMOVE_LONG_WORDS_ERROR_REMOVE_LONG_WORDS_INVALID_INPUT as ERROR_REMOVE_LONG_WORDS_INVALID_INPUT,
+    REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION, REMOVE_LONG_WORDS_EXTENSIONS,
+    REMOVE_LONG_WORDS_INTEGER_CAPABILITIES, REMOVE_SHORT_WORDS_DESCRIPTOR,
+    REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION, REMOVE_SHORT_WORDS_EXTENSIONS,
+    REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES, REMOVE_STOP_WORDS_DESCRIPTOR,
+    REMOVE_STOP_WORDS_ERROR_REMOVE_STOP_WORDS_INVALID_INPUT as ERROR_REMOVE_STOP_WORDS_INVALID_INPUT,
+    REMOVE_STOP_WORDS_INTEGER_AUDIT, REMOVE_WORDS_DESCRIPTOR,
+    REMOVE_WORDS_ERROR_REMOVE_WORDS_INVALID_INPUT as ERROR_REMOVE_WORDS_INVALID_INPUT,
+    REMOVE_WORDS_EXPLICIT_GPU_EXTENSION, REMOVE_WORDS_EXTENSIONS,
+    REMOVE_WORDS_INTEGER_CAPABILITIES, TOKENIZED_DOCUMENT_DESCRIPTOR,
+    TOKENIZED_DOCUMENT_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
+    TOKENIZED_DOCUMENT_INTEGER_AUDIT,
+};
 use runmat_types::MemberAccess;
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
-};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, IntegerStorage, LogicalArray, NumericScalar, ObjectInstance, StringArray, Tensor,
@@ -32,234 +38,16 @@ use crate::builtins::strings::text_analytics::stopwords::{
 use crate::builtins::table::table_variables;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
-pub const TOKENIZED_DOCUMENT_CLASS: &str = "tokenizedDocument";
-pub const BAG_OF_WORDS_CLASS: &str = "bagOfWords";
+pub const TOKENIZED_DOCUMENT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("tokenizedDocument");
+pub const BAG_OF_WORDS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("bagOfWords");
 const MAX_DENSE_BAG_COUNT_CELLS: usize = 50_000_000;
-
-pub const REMOVE_STOP_WORDS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "removeStopWords accepts a tokenizedDocument and logical IgnoreCase option; native integer and resident numeric arguments are rejected before provider access.",
-    };
 
 static TOKENIZED_DOCUMENT_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(TOKENIZED_DOCUMENT_CLASS);
 static BAG_OF_WORDS_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(BAG_OF_WORDS_CLASS);
-
-const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Tokenized document object.",
-}];
-
-const OUT_BAG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "bag",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bag-of-words model object.",
-}];
-
-const OUT_DOCUMENTS_OR_BAG: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newDocumentsOrBag",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Filtered tokenizedDocument or bagOfWords object.",
-}];
-
-const OUT_DOCUMENTS_FILTERED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Filtered tokenizedDocument object.",
-}];
-
-const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text or pre-tokenized words.",
-}];
-
-const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text or pre-tokenized words.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Name-value options: TokenizeMethod, Language, DetectPatterns, TopLevelDomains, CustomTokens, RegularExpressions.",
-    },
-];
-
-const IN_DOCUMENTS_OR_WORDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documentsOrWords",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Tokenized documents, word vector, or unique vocabulary.",
-}];
-
-const IN_WORDS_COUNTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "uniqueWords",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique words.",
-    },
-    BuiltinParamDescriptor {
-        name: "counts",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Word counts per document.",
-    },
-];
-
-const IN_REMOVE_SHORT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documentsOrBag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument or bagOfWords object.",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum word length to remove.",
-    },
-];
-
-const IN_REMOVE_LONG: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documentsOrBag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument or bagOfWords object.",
-    },
-    BuiltinParamDescriptor {
-        name: "len",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum word length to remove.",
-    },
-];
-
-const IN_REMOVE_WORDS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "documentsOrBag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument or bagOfWords object.",
-    },
-    BuiltinParamDescriptor {
-        name: "wordsOrIdx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to remove or indices into the object's Vocabulary.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: IgnoreCase.",
-    },
-];
-
-const IN_REMOVE_STOP: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: IgnoreCase.",
-    },
-];
-
-const IN_REMOVE_STOP_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS_DOCUMENTS.INVALID_INPUT",
-    identifier: Some("RunMat:textAnalyticsDocuments:InvalidInput"),
-    when: "Inputs do not match a supported Text Analytics document or model helper form.",
-    message: "Text Analytics document helper received invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-const ERROR_BAG_OF_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAGOFWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:bagOfWords:InvalidInput"),
-    when: "Inputs do not match a supported bagOfWords form.",
-    message: "bagOfWords: invalid input",
-};
-
-const BAG_OF_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_BAG_OF_WORDS_INVALID_INPUT];
-
-const ERROR_REMOVE_LONG_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REMOVELONGWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:removeLongWords:InvalidInput"),
-    when: "Inputs do not match a supported removeLongWords form.",
-    message: "removeLongWords: invalid input",
-};
-
-const REMOVE_LONG_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [ERROR_REMOVE_LONG_WORDS_INVALID_INPUT];
-
-const ERROR_REMOVE_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REMOVEWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:removeWords:InvalidInput"),
-    when: "Inputs do not match a supported removeWords form.",
-    message: "removeWords: invalid input",
-};
-
-const REMOVE_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_REMOVE_WORDS_INVALID_INPUT];
-
-const ERROR_REMOVE_STOP_WORDS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REMOVESTOPWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:removeStopWords:InvalidInput"),
-    when: "Inputs do not match a supported removeStopWords form.",
-    message: "removeStopWords: invalid input",
-};
-
-const REMOVE_STOP_WORDS_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [ERROR_REMOVE_STOP_WORDS_INVALID_INPUT];
 
 const ERROR_TOKEN_DETAILS_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TOKENDETAILS.INVALID_INPUT",
@@ -311,230 +99,6 @@ const ERROR_VADER_SENTIMENT_SCORES_INVALID_INPUT: BuiltinErrorDescriptor = Built
     message: "vaderSentimentScores received invalid input",
 };
 
-pub const TOKENIZED_DOCUMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "documents = tokenizedDocument",
-            inputs: &[],
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "documents = tokenizedDocument(str)",
-            inputs: &IN_TEXT,
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "documents = tokenizedDocument(str, Name, Value, ...)",
-            inputs: &IN_TEXT_REST,
-            outputs: &OUT_DOCUMENTS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const TOKENIZED_DOCUMENT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "tokenizedDocument accepts text, text containers, and text-valued tokenization options. Native integer arrays are neither document text nor valid option values; generated document counts remain double object metadata.",
-    };
-
-pub const BAG_OF_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfWords",
-            inputs: &[],
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfWords(documents)",
-            inputs: &IN_DOCUMENTS_OR_WORDS,
-            outputs: &OUT_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "bag = bagOfWords(uniqueWords, counts)",
-            inputs: &IN_WORDS_COUNTS,
-            outputs: &OUT_BAG,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &BAG_OF_WORDS_ERRORS,
-};
-
-const BAG_OF_WORDS_COUNTS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "counts",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Explicit count matrices accept every integer class and require nonnegative values.",
-    }];
-
-pub const BAG_OF_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "bag = bagOfWords(uniqueWords, integer_counts)",
-        inputs: &BAG_OF_WORDS_COUNTS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Counts remain authoritative through nonnegative-integer validation and vocabulary-column filtering before one conversion into the model's documented double Counts property; the result is an opaque text-model object.",
-    }];
-
-const REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
-    text_control_gpu_extension(
-        "removeshortwords-explicit-gpu-input",
-        "removeShortWords host fallback for explicit gpuArray input is a RunMat extension",
-        "RunMat:compatibility:RemoveShortWordsExplicitGpuInputExtension",
-    );
-const REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
-    text_control_gpu_extension(
-        "removelongwords-explicit-gpu-input",
-        "removeLongWords host fallback for explicit gpuArray input is a RunMat extension",
-        "RunMat:compatibility:RemoveLongWordsExplicitGpuInputExtension",
-    );
-const REMOVE_WORDS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = text_control_gpu_extension(
-    "removewords-explicit-gpu-input",
-    "removeWords host fallback for explicit gpuArray input is a RunMat extension",
-    "RunMat:compatibility:RemoveWordsExplicitGpuInputExtension",
-);
-const fn text_control_gpu_extension(
-    id: &'static str,
-    description: &'static str,
-    error_identifier: &'static str,
-) -> BuiltinExtensionDescriptor {
-    BuiltinExtensionDescriptor {
-        id,
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description,
-        error_identifier: Some(error_identifier),
-    }
-}
-const REMOVE_SHORT_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION];
-const REMOVE_LONG_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION];
-const REMOVE_WORDS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [REMOVE_WORDS_EXPLICIT_GPU_EXTENSION];
-
-const TEXT_LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "len",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive-integer word-length threshold accepts every integer class and is validated exactly against platform bounds.",
-    }];
-const REMOVE_WORDS_INDEX_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "idx",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Documented numeric vocabulary indices accept all eight integer classes and are read exactly before one-based bounds validation and deduplication.",
-    }];
-pub const REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [text_length_integer_capability(
-        "newDocumentsOrBag = removeShortWords(documentsOrBag, integer_len)",
-    )];
-pub const REMOVE_LONG_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [text_length_integer_capability(
-        "newDocumentsOrBag = removeLongWords(documentsOrBag, integer_len)",
-    )];
-const fn text_length_integer_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &TEXT_LENGTH_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact threshold controls host text filtering only. Automatic residency gathers transparently; explicit gpuArray arguments are separately gated.",
-    }
-}
-pub const REMOVE_WORDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "newDocumentsOrBag = removeWords(documentsOrBag, integer_idx)",
-        inputs: &REMOVE_WORDS_INDEX_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Exact positive indices select vocabulary entries without binary64 collapse; logical masks remain a distinct documented selector form.",
-    }];
-
-pub const REMOVE_SHORT_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "newDocumentsOrBag = removeShortWords(documentsOrBag, len)",
-        inputs: &IN_REMOVE_SHORT,
-        outputs: &OUT_DOCUMENTS_OR_BAG,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const REMOVE_LONG_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "newDocumentsOrBag = removeLongWords(documentsOrBag, len)",
-        inputs: &IN_REMOVE_LONG,
-        outputs: &OUT_DOCUMENTS_OR_BAG,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REMOVE_LONG_WORDS_ERRORS,
-};
-
-pub const REMOVE_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "newDocumentsOrBag = removeWords(documentsOrBag, words)",
-            inputs: &IN_REMOVE_WORDS,
-            outputs: &OUT_DOCUMENTS_OR_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocumentsOrBag = removeWords(documentsOrBag, idx)",
-            inputs: &IN_REMOVE_WORDS,
-            outputs: &OUT_DOCUMENTS_OR_BAG,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocumentsOrBag = removeWords(___, 'IgnoreCase', tf)",
-            inputs: &IN_REMOVE_WORDS,
-            outputs: &OUT_DOCUMENTS_OR_BAG,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REMOVE_WORDS_ERRORS,
-};
-
-pub const REMOVE_STOP_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = removeStopWords(documents)",
-            inputs: &IN_REMOVE_STOP_DOCUMENTS,
-            outputs: &OUT_DOCUMENTS_FILTERED,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = removeStopWords(documents, Name, Value, ...)",
-            inputs: &IN_REMOVE_STOP,
-            outputs: &OUT_DOCUMENTS_FILTERED,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REMOVE_STOP_WORDS_ERRORS,
-};
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
     fn_name: &str,
     message: impl Into<String>,
@@ -561,6 +125,74 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
     }
 }
 
+fn char_row_for_text_analytics(
+    array: &runmat_value::CharArray,
+    row: usize,
+    fn_name: &str,
+) -> BuiltinResult<String> {
+    char_row_to_string_slice(array.data(), array.cols, row).map_err(|source| {
+        let mut diagnostic = text_analytics_error(
+            fn_name,
+            format!("{fn_name}: malformed UTF-16 character input"),
+        );
+        diagnostic.source = Some(Box::new(source));
+        diagnostic
+    })
+}
+
+pub(in crate::builtins::strings::text_analytics) fn replace_document_properties<'a, I>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    updates: I,
+    fn_name: &str,
+) -> BuiltinResult<()>
+where
+    I: Iterator<Item = (&'a str, &'a Value)> + Clone,
+{
+    crate::execution::object::replacement::replace_properties(
+        runtime,
+        object,
+        updates,
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:textAnalytics:HostAllocation",
+                message,
+                source,
+            )
+        },
+        |message| text_analytics_error(fn_name, message),
+    )
+}
+
+pub(in crate::builtins::strings::text_analytics) fn remove_document_properties(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    names: impl IntoIterator<Item = &'static str>,
+    fn_name: &str,
+) -> BuiltinResult<()> {
+    for name in names {
+        if object.property(name).is_none() {
+            continue;
+        }
+        crate::execution::object::replacement::remove_property(
+            runtime,
+            object,
+            name,
+            |message, source| {
+                crate::context::host_allocation::host_allocation_runtime_error(
+                    runtime,
+                    "RunMat:textAnalytics:HostAllocation",
+                    message,
+                    source,
+                )
+            },
+            |message| text_analytics_error(fn_name, message),
+        )?;
+    }
+    Ok(())
+}
+
 fn ensure_tokenized_document_class_registered() {
     TOKENIZED_DOCUMENT_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
@@ -583,14 +215,18 @@ fn ensure_tokenized_document_class_registered() {
             "HeadDetails",
             "DependencyDetails",
         ] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: TOKENIZED_DOCUMENT_CLASS.to_string(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        crate::class_registry::register_builtin_class(
+            TOKENIZED_DOCUMENT_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: TOKENIZED_DOCUMENT_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+            },
+        );
     });
 }
 
@@ -598,20 +234,24 @@ fn ensure_bag_of_words_class_registered() {
     BAG_OF_WORDS_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Counts", "Vocabulary", "NumWords", "NumDocuments"] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: BAG_OF_WORDS_CLASS.to_string(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        crate::class_registry::register_builtin_class(
+            BAG_OF_WORDS_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: BAG_OF_WORDS_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+            },
+        );
     });
 }
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
@@ -623,28 +263,32 @@ fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
 
 #[runtime_builtin(
     name = "tokenizedDocument",
-    category = "strings/text_analytics",
-    summary = "Create tokenized document objects for Text Analytics workflows.",
-    keywords = "tokenizedDocument,text analytics,tokenize,document",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::documents::TOKENIZED_DOCUMENT_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
 pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_builtin(
-    args: Vec<Value>,
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::TOKENIZED_DOCUMENT_DESCRIPTOR,
+        &runmat_builtins::TOKENIZED_DOCUMENT_ERROR_TOO_MANY_OUTPUTS,
+        "tokenizedDocument",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "tokenizedDocument")?;
+    work.finish(async {
+
     if args.iter().any(direct_numeric_or_resident_document_input) {
         return Err(text_analytics_error(
             "tokenizedDocument",
             "tokenizedDocument: inputs and option values must be host text or supported text containers",
         ));
     }
-    let gathered = gather_args(args, "tokenizedDocument").await?;
-    let (input, options) = parse_tokenized_document_args(gathered)?;
+    let gathered = gather_args(&args, runtime.as_ref(), "tokenizedDocument").await?;
+ work.check()?;
+    let (input, options) = parse_tokenized_document_args(gathered.view())?;
     let parsed = match input {
         Some(value) => documents_from_value(value, &options)?,
         None => ParsedDocuments {
@@ -653,7 +297,8 @@ pub(in crate::builtins::strings::text_analytics) async fn tokenized_document_bui
             type_details: None,
         },
     };
-    tokenized_document_value(parsed.documents, parsed.shape, options, parsed.type_details)
+    tokenized_document_value(runtime.as_ref(), parsed.documents, parsed.shape, options, parsed.type_details)
+ }.await)
 }
 
 fn direct_numeric_or_resident_document_input(value: &Value) -> bool {
@@ -673,194 +318,232 @@ fn direct_numeric_or_resident_document_input(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "bagOfWords",
-    category = "strings/text_analytics",
-    summary = "Create bag-of-words model objects.",
-    keywords = "bagOfWords,text analytics,word counts,vocabulary",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::documents::BAG_OF_WORDS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn bag_of_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
-        return Err(text_analytics_error(
-            "bagOfWords",
-            "bagOfWords: GPU-resident inputs are not supported",
-        ));
-    }
-    let gathered = gather_args(args, "bagOfWords").await?;
-    match gathered.as_slice() {
-        [] => bag_from_documents(Vec::new()),
-        [value] => match value {
-            Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
-                bag_from_documents(documents_from_object(object, "bagOfWords")?)
+async fn bag_of_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::BAG_OF_WORDS_DESCRIPTOR,
+        &runmat_builtins::BAG_OF_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "bagOfWords",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "bagOfWords")?;
+    work.finish(
+        async {
+            if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
+                return Err(text_analytics_error(
+                    "bagOfWords",
+                    "bagOfWords: GPU-resident inputs are not supported",
+                ));
             }
-            Value::Object(object) => Err(text_analytics_error(
-                "bagOfWords",
-                format!(
-                    "bagOfWords: expected tokenizedDocument object, got {}",
-                    object.class_name
-                ),
-            )),
-            other => bag_from_documents(vec![words_from_word_vector(other, "bagOfWords")?]),
-        },
-        [words, counts] => bag_from_unique_words_and_counts(words, counts),
-        _ => Err(text_analytics_error(
-            "bagOfWords",
-            "bagOfWords: expected zero, one, or two inputs",
-        )),
-    }
+            let gathered = gather_args(&args, runtime.as_ref(), "bagOfWords").await?;
+            work.check()?;
+            match gathered.len() {
+                0 => bag_from_documents(runtime.as_ref(), Vec::new()),
+                1 => match &gathered[0] {
+                    Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+                        bag_from_documents(
+                            runtime.as_ref(),
+                            documents_from_object(object, "bagOfWords")?,
+                        )
+                    }
+                    Value::Object(object) => Err(text_analytics_error(
+                        "bagOfWords",
+                        format!(
+                            "bagOfWords: expected tokenizedDocument object, got {}",
+                            object.class_name()
+                        ),
+                    )),
+                    other => bag_from_documents(
+                        runtime.as_ref(),
+                        vec![words_from_word_vector(other, "bagOfWords")?],
+                    ),
+                },
+                2 => bag_from_unique_words_and_counts(runtime.as_ref(), &gathered[0], &gathered[1]),
+                _ => Err(text_analytics_error(
+                    "bagOfWords",
+                    "bagOfWords: expected zero, one, or two inputs",
+                )),
+            }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeShortWords",
-    category = "strings/text_analytics",
-    summary = "Remove short words from tokenized documents or bag-of-words models.",
-    keywords = "removeShortWords,text analytics,tokenizedDocument,bagOfWords",
-    accel = "sink",
-    extensions(REMOVE_SHORT_WORDS_EXTENSIONS),
-    integer_capabilities(REMOVE_SHORT_WORDS_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_SHORT_WORDS_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
-        || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION,
-            "removeShortWords",
-        )?;
-    }
-    let value = gather_if_needed_async(&value).await.map_err(|err| {
-        text_analytics_error("removeShortWords", format!("removeShortWords: {err}"))
-    })?;
-    let len = gather_if_needed_async(&len).await.map_err(|err| {
-        text_analytics_error("removeShortWords", format!("removeShortWords: {err}"))
-    })?;
-    let max_len = parse_positive_integer(&len, "removeShortWords")?;
-    match value {
-        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
-            let documents = documents_from_object(&object, "removeShortWords")?
-                .into_iter()
-                .map(|doc| {
-                    doc.into_iter()
-                        .filter(|token| token.chars().count() > max_len)
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>();
-            let shape = shape_from_object(&object, "removeShortWords")?;
-            let options = options_from_document_object(&object);
-            tokenized_document_value(documents, shape, options, None)
-        }
-        Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
-            remove_short_words_from_bag(object, max_len)
-        }
-        Value::Object(object) => Err(text_analytics_error(
-            "removeShortWords",
-            format!(
-                "removeShortWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name
-            ),
-        )),
-        other => Err(text_analytics_error(
-            "removeShortWords",
-            format!(
+async fn remove_short_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    len: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_SHORT_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_SHORT_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeShortWords",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeShortWords")?;
+    work.finish(
+        async {
+            if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+                || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &REMOVE_SHORT_WORDS_EXPLICIT_GPU_EXTENSION,
+                    "removeShortWords",
+                )?;
+            }
+            let value = work.wait(gather_if_needed_async(&value)).await?;
+            let len = work.wait(gather_if_needed_async(&len)).await?;
+            let max_len = parse_positive_integer(&len, "removeShortWords")?;
+            match value {
+                Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+                    let documents = documents_from_object(&object, "removeShortWords")?
+                        .into_iter()
+                        .map(|doc| {
+                            doc.into_iter()
+                                .filter(|token| token.chars().count() > max_len)
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>();
+                    let shape = shape_from_object(&object, "removeShortWords")?;
+                    let options = options_from_document_object(&object);
+                    tokenized_document_value(runtime.as_ref(), documents, shape, options, None)
+                }
+                Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
+                    remove_short_words_from_bag(runtime.as_ref(), object, max_len)
+                }
+                Value::Object(object) => Err(text_analytics_error(
+                    "removeShortWords",
+                    format!(
+                        "removeShortWords: expected tokenizedDocument or bagOfWords object, got {}",
+                        object.class_name()
+                    ),
+                )),
+                other => Err(text_analytics_error(
+                    "removeShortWords",
+                    format!(
                 "removeShortWords: expected tokenizedDocument or bagOfWords object, got {other:?}"
             ),
-        )),
-    }
+                )),
+            }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeLongWords",
-    category = "strings/text_analytics",
-    summary = "Remove long words from tokenized documents or bag-of-words models.",
-    keywords = "removeLongWords,text analytics,tokenizedDocument,bagOfWords",
-    accel = "sink",
-    extensions(REMOVE_LONG_WORDS_EXTENSIONS),
-    integer_capabilities(REMOVE_LONG_WORDS_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_LONG_WORDS_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_long_words_builtin(value: Value, len: Value) -> BuiltinResult<Value> {
-    if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
-        || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION,
-            "removeLongWords",
-        )?;
-    }
-    let value = gather_if_needed_async(&value).await.map_err(|err| {
-        text_analytics_error("removeLongWords", format!("removeLongWords: {err}"))
-    })?;
-    let len = gather_if_needed_async(&len).await.map_err(|err| {
-        text_analytics_error("removeLongWords", format!("removeLongWords: {err}"))
-    })?;
-    let min_len = parse_positive_integer(&len, "removeLongWords")?;
-    match value {
-        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
-            transform_tokenized_document(&object, "removeLongWords", |token, _| {
-                Ok((token.chars().count() < min_len).then(|| token.to_string()))
-            })
-        }
-        Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
-            filter_bag_columns_by_predicate(object, "removeLongWords", |word| {
-                word.chars().count() < min_len
-            })
-        }
-        Value::Object(object) => Err(text_analytics_error(
-            "removeLongWords",
-            format!(
-                "removeLongWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name
-            ),
-        )),
-        other => Err(text_analytics_error(
-            "removeLongWords",
-            format!(
+async fn remove_long_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    len: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_LONG_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_LONG_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeLongWords",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeLongWords")?;
+    work.finish(
+        async {
+            if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
+                || crate::builtins::common::validation::value_contains_explicit_gpu(&len)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &REMOVE_LONG_WORDS_EXPLICIT_GPU_EXTENSION,
+                    "removeLongWords",
+                )?;
+            }
+            let value = work.wait(gather_if_needed_async(&value)).await?;
+            let len = work.wait(gather_if_needed_async(&len)).await?;
+            let min_len = parse_positive_integer(&len, "removeLongWords")?;
+            match value {
+                Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
+                    transform_tokenized_document(
+                        runtime.as_ref(),
+                        &object,
+                        "removeLongWords",
+                        |token, _| Ok((token.chars().count() < min_len).then(|| token.to_string())),
+                    )
+                }
+                Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
+                    filter_bag_columns_by_predicate(
+                        runtime.as_ref(),
+                        object,
+                        "removeLongWords",
+                        |word| word.chars().count() < min_len,
+                    )
+                }
+                Value::Object(object) => Err(text_analytics_error(
+                    "removeLongWords",
+                    format!(
+                        "removeLongWords: expected tokenizedDocument or bagOfWords object, got {}",
+                        object.class_name()
+                    ),
+                )),
+                other => Err(text_analytics_error(
+                    "removeLongWords",
+                    format!(
                 "removeLongWords: expected tokenizedDocument or bagOfWords object, got {other:?}"
             ),
-        )),
-    }
+                )),
+            }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeWords",
-    category = "strings/text_analytics",
-    summary = "Remove selected words from tokenized documents or bag-of-words models.",
-    keywords = "removeWords,text analytics,tokenizedDocument,bagOfWords,filter",
-    accel = "sink",
-    extensions(REMOVE_WORDS_EXTENSIONS),
-    integer_capabilities(REMOVE_WORDS_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_WORDS_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args
-        .iter()
-        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &REMOVE_WORDS_EXPLICIT_GPU_EXTENSION,
-            "removeWords",
-        )?;
-    }
-    let gathered = gather_args(args, "removeWords").await?;
-    let (value, selector, options) = parse_remove_words_args(gathered)?;
-    match value {
+async fn remove_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeWords",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeWords")?;
+    work.finish(
+        async {
+            if args
+                .iter()
+                .any(crate::builtins::common::validation::value_contains_explicit_gpu)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &REMOVE_WORDS_EXPLICIT_GPU_EXTENSION,
+                    "removeWords",
+                )?;
+            }
+            let gathered = gather_args(&args, runtime.as_ref(), "removeWords").await?;
+            work.check()?;
+            let (value, selector, options) = parse_remove_words_args(gathered.view())?;
+            match value {
         Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
             let vocabulary = documents_vocabulary(&object, "removeWords")?;
             let words = selector.words(&vocabulary, "removeWords")?;
             let remove_set = word_set(words, options.ignore_case);
-            transform_tokenized_document(&object, "removeWords", |token, _| {
+            transform_tokenized_document(runtime.as_ref(), &object, "removeWords", |token, _| {
                 let key = comparable_word(token, options.ignore_case);
                 Ok((!remove_set.contains(&key)).then(|| token.to_string()))
             })
@@ -869,7 +552,7 @@ async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             let vocabulary = vocabulary_from_bag(&object, "removeWords")?;
             let words = selector.words(&vocabulary, "removeWords")?;
             let remove_set = word_set(words, options.ignore_case);
-            filter_bag_columns(object, "removeWords", |word| {
+            filter_bag_columns(runtime.as_ref(), object, "removeWords", |word| {
                 let key = comparable_word(word, options.ignore_case);
                 !remove_set.contains(&key)
             })
@@ -878,7 +561,7 @@ async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "removeWords",
             format!(
                 "removeWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -886,83 +569,101 @@ async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             format!("removeWords: expected tokenizedDocument or bagOfWords object, got {other:?}"),
         )),
     }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "removeStopWords",
-    category = "strings/text_analytics",
-    summary = "Remove stop words from tokenized documents.",
-    keywords = "removeStopWords,stop words,text analytics,tokenizedDocument",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::documents::REMOVE_STOP_WORDS_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::documents::REMOVE_STOP_WORDS_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::documents"
 )]
-async fn remove_stop_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(|value| {
-        crate::builtins::common::validation::value_has_native_integer_class(value)
-            || matches!(value, Value::GpuTensor(_))
-    }) {
-        return Err(text_analytics_error(
-            "removeStopWords",
-            "removeStopWords: expected tokenizedDocument input and logical options",
-        ));
-    }
-    let (value, options) = parse_remove_stop_words_args(args)?;
-    let Value::Object(object) = value else {
-        return Err(text_analytics_error(
-            "removeStopWords",
-            format!("removeStopWords: expected tokenizedDocument object, got {value:?}"),
-        ));
-    };
-    if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
-        return Err(text_analytics_error(
-            "removeStopWords",
-            format!(
-                "removeStopWords: expected tokenizedDocument object, got {}",
-                object.class_name
-            ),
-        ));
-    }
-    let language = stop_words_language_from_document_object(&object, "removeStopWords")?;
-    let words = stop_words_for_language(language);
-    let stop_words = words
-        .iter()
-        .map(|word| {
-            if options.ignore_case {
-                word.to_lowercase()
-            } else {
-                (*word).to_string()
+async fn remove_stop_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REMOVE_STOP_WORDS_DESCRIPTOR,
+        &runmat_builtins::REMOVE_STOP_WORDS_ERROR_TOO_MANY_OUTPUTS,
+        "removeStopWords",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "removeStopWords")?;
+    work.finish(
+        async {
+            if args.iter().any(|value| {
+                crate::builtins::common::validation::value_has_native_integer_class(value)
+                    || matches!(value, Value::GpuTensor(_))
+            }) {
+                return Err(text_analytics_error(
+                    "removeStopWords",
+                    "removeStopWords: expected tokenizedDocument input and logical options",
+                ));
             }
-        })
-        .collect::<HashSet<_>>();
-    transform_tokenized_document(&object, "removeStopWords", |token, token_type| {
-        if !matches!(
-            token_type,
-            DocumentTokenType::Letters | DocumentTokenType::Other
-        ) {
-            return Ok(Some(token.to_string()));
+            let (value, options) = parse_remove_stop_words_args(args.view())?;
+            let Value::Object(object) = value else {
+                return Err(text_analytics_error(
+                    "removeStopWords",
+                    format!("removeStopWords: expected tokenizedDocument object, got {value:?}"),
+                ));
+            };
+            if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
+                return Err(text_analytics_error(
+                    "removeStopWords",
+                    format!(
+                        "removeStopWords: expected tokenizedDocument object, got {}",
+                        object.class_name()
+                    ),
+                ));
+            }
+            let language = stop_words_language_from_document_object(&object, "removeStopWords")?;
+            let words = stop_words_for_language(language);
+            let stop_words = words
+                .iter()
+                .map(|word| {
+                    if options.ignore_case {
+                        word.to_lowercase()
+                    } else {
+                        (*word).to_string()
+                    }
+                })
+                .collect::<HashSet<_>>();
+            transform_tokenized_document(
+                runtime.as_ref(),
+                &object,
+                "removeStopWords",
+                |token, token_type| {
+                    if !matches!(
+                        token_type,
+                        DocumentTokenType::Letters | DocumentTokenType::Other
+                    ) {
+                        return Ok(Some(token.to_string()));
+                    }
+                    let key = if options.ignore_case {
+                        token.to_lowercase()
+                    } else {
+                        token.to_string()
+                    };
+                    Ok((!stop_words.contains(&key)).then(|| token.to_string()))
+                },
+            )
         }
-        let key = if options.ignore_case {
-            token.to_lowercase()
-        } else {
-            token.to_string()
-        };
-        Ok((!stop_words.contains(&key)).then(|| token.to_string()))
-    })
+        .await,
+    )
 }
 
-async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
-            text_analytics_error(fn_name, format!("{fn_name}: failed to gather input: {err}"))
-        })?);
-    }
-    Ok(out)
+async fn gather_args(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+    fn_name: &str,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let work = super::model_admission::UnboundedModelWork::admit(runtime, fn_name)?;
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        work.wait(gather_if_needed_async(&args[index])).await
+    })
+    .await
 }
 
 #[derive(Clone, Debug)]
@@ -1092,7 +793,7 @@ impl DetectPatterns {
 }
 
 fn parse_tokenized_document_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Option<Value>, DocumentOptions)> {
     if args.is_empty() {
         return Ok((None, DocumentOptions::default()));
@@ -1230,9 +931,7 @@ pub(in crate::builtins::strings::text_analytics) fn parse_top_level_domains(
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for raw in domains {
-        if is_missing_string(&raw) {
-            continue;
-        }
+        let Some(raw) = raw.as_str() else { continue };
         let domain = raw
             .trim()
             .trim_start_matches('.')
@@ -1305,7 +1004,7 @@ fn text_column(
     variables: &runmat_value::StructValue,
     name: &str,
     option_name: &str,
-) -> BuiltinResult<Vec<String>> {
+) -> BuiltinResult<Vec<runmat_value::StringElement>> {
     let Some(value) = variables.fields.get(name) else {
         return Err(text_analytics_error(
             "tokenizedDocument",
@@ -1320,7 +1019,7 @@ fn optional_text_column(
     name: &str,
     option_name: &str,
     expected_len: usize,
-) -> BuiltinResult<Option<Vec<String>>> {
+) -> BuiltinResult<Option<Vec<runmat_value::StringElement>>> {
     let Some(value) = variables.fields.get(name) else {
         return Ok(None);
     };
@@ -1338,15 +1037,16 @@ fn optional_text_column(
 }
 
 fn custom_token_rules_from_columns(
-    tokens: Vec<String>,
-    types: Option<Vec<String>>,
+    tokens: Vec<runmat_value::StringElement>,
+    types: Option<Vec<runmat_value::StringElement>>,
 ) -> BuiltinResult<Vec<CustomTokenRule>> {
     let mut rules = Vec::new();
     let mut seen = HashSet::new();
     for (idx, token) in tokens.into_iter().enumerate() {
-        if is_missing_string(&token) {
+        let Some(token) = token.into_text() else {
             continue;
-        }
+        };
+        let token = token.as_str().to_owned();
         if token.is_empty() {
             return Err(text_analytics_error(
                 "tokenizedDocument",
@@ -1356,8 +1056,9 @@ fn custom_token_rules_from_columns(
         let token_type = types
             .as_ref()
             .and_then(|values| values.get(idx))
-            .filter(|value| !is_missing_string(value) && !value.is_empty())
-            .cloned()
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
             .unwrap_or_else(|| "custom".to_string());
         if seen.insert(token.clone()) {
             rules.push(CustomTokenRule { token, token_type });
@@ -1367,14 +1068,15 @@ fn custom_token_rules_from_columns(
 }
 
 fn regex_token_rules_from_columns(
-    patterns: Vec<String>,
-    types: Option<Vec<String>>,
+    patterns: Vec<runmat_value::StringElement>,
+    types: Option<Vec<runmat_value::StringElement>>,
 ) -> BuiltinResult<Vec<RegexTokenRule>> {
     let mut rules = Vec::new();
     for (idx, pattern) in patterns.into_iter().enumerate() {
-        if is_missing_string(&pattern) {
+        let Some(pattern) = pattern.into_text() else {
             continue;
-        }
+        };
+        let pattern = pattern.as_str().to_owned();
         if pattern.is_empty() {
             return Err(text_analytics_error(
                 "tokenizedDocument",
@@ -1401,8 +1103,9 @@ fn regex_token_rules_from_columns(
         let token_type = types
             .as_ref()
             .and_then(|values| values.get(idx))
-            .filter(|value| !is_missing_string(value) && !value.is_empty())
-            .cloned()
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
             .unwrap_or_else(|| "custom".to_string());
         rules.push(RegexTokenRule { regex, token_type });
     }
@@ -1482,7 +1185,7 @@ impl RemoveWordsSelector {
 }
 
 fn parse_remove_stop_words_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, RemoveStopWordsOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
@@ -1519,7 +1222,7 @@ fn parse_remove_stop_words_args(
 }
 
 fn parse_remove_words_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, RemoveWordsSelector, RemoveWordsOptions)> {
     if args.len() < 2 {
         return Err(text_analytics_error(
@@ -1673,7 +1376,13 @@ fn documents_from_value(value: Value, options: &DocumentOptions) -> BuiltinResul
 fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<ParsedDocuments> {
     match value {
         Value::String(text) => {
-            let tokenized = tokenize_text(&text, options);
+            let tokenized = match text.as_str() {
+                Some(text) => tokenize_text(text, options),
+                None => TokenizedText {
+                    tokens: Vec::new(),
+                    types: options.requires_type_details().then(Vec::new),
+                },
+            };
             Ok(ParsedDocuments {
                 type_details: tokenized.types.clone().map(|types| vec![types]),
                 documents: vec![tokenized.tokens],
@@ -1681,17 +1390,17 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             })
         }
         Value::StringArray(array) => {
-            let shape = array.shape.clone();
-            let mut docs = Vec::with_capacity(array.data.len());
+            let shape = array.shape.to_vec();
+            let mut docs = Vec::with_capacity(array.data().len());
             let mut type_details = options.requires_type_details().then(Vec::new);
-            for text in array.data {
-                let tokenized = if is_missing_string(&text) {
+            for text in array.data().iter() {
+                let tokenized = if is_missing_string(text) {
                     TokenizedText {
                         tokens: Vec::new(),
                         types: type_details.as_ref().map(|_| Vec::new()),
                     }
                 } else {
-                    tokenize_text(&text, options)
+                    tokenize_text(text.as_str().expect("nonmissing document"), options)
                 };
                 if let Some(details) = &mut type_details {
                     details.push(tokenized.types.unwrap_or_default());
@@ -1708,7 +1417,7 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_for_text_analytics(&array, 0, "tokenizedDocument")?
             };
             let tokenized = tokenize_text(&text, options);
             Ok(ParsedDocuments {
@@ -1722,7 +1431,7 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             let mut type_details = options.requires_type_details().then(Vec::new);
             for row in 0..array.rows {
                 let tokenized = tokenize_text(
-                    &char_row_to_string_slice(&array.data, array.cols, row),
+                    &char_row_for_text_analytics(&array, row, "tokenizedDocument")?,
                     options,
                 );
                 if let Some(details) = &mut type_details {
@@ -1737,11 +1446,11 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             })
         }
         Value::Cell(cell) => {
-            let shape = cell.shape.clone();
-            let mut docs = Vec::with_capacity(cell.data.len());
+            let shape = cell.shape.to_vec();
+            let mut docs = Vec::with_capacity(cell.data().len());
             let mut type_details = options.requires_type_details().then(Vec::new);
-            for item in cell.data {
-                let text = scalar_text(&item, "tokenizedDocument")
+            for item in cell.data().iter() {
+                let text = scalar_text(item, "tokenizedDocument")
                     .map_err(|err| text_analytics_error("tokenizedDocument", err.to_string()))?;
                 let tokenized = tokenize_text(&text, options);
                 if let Some(details) = &mut type_details {
@@ -1765,15 +1474,15 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
 fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
     match value {
         Value::String(text) => Ok(ParsedDocuments {
-            documents: vec![vec![text]],
+            documents: vec![text.as_str().map(str::to_owned).into_iter().collect()],
             shape: vec![1, 1],
             type_details: None,
         }),
         Value::StringArray(array) => Ok(ParsedDocuments {
             documents: vec![array
-                .data
-                .into_iter()
-                .filter(|text| !is_missing_string(text))
+                .data()
+                .iter()
+                .filter_map(|text| text.as_str().map(str::to_owned))
                 .collect()],
             shape: vec![1, 1],
             type_details: None,
@@ -1782,7 +1491,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_for_text_analytics(&array, 0, "tokenizedDocument")?
             };
             Ok(ParsedDocuments {
                 documents: vec![vec![text]],
@@ -1791,15 +1500,14 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
             })
         }
         Value::Cell(cell) => {
-            let shape = cell.shape.clone();
-            if cell.data.len() == 1 {
-                if let Value::StringArray(array) = &cell.data[0] {
+            let shape = cell.shape.to_vec();
+            if cell.data().len() == 1 {
+                if let Value::StringArray(array) = &cell.data()[0] {
                     return Ok(ParsedDocuments {
                         documents: vec![array
-                            .data
+                            .data()
                             .iter()
-                            .filter(|text| !is_missing_string(text))
-                            .cloned()
+                            .filter_map(|text| text.as_str().map(str::to_owned))
                             .collect()],
                         shape: vec![1, 1],
                         type_details: None,
@@ -1807,19 +1515,19 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
                 }
             }
             let mut all_string_arrays = true;
-            let mut docs = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
+            let mut docs = Vec::with_capacity(cell.data().len());
+            for item in cell.data().iter() {
                 match item {
                     Value::StringArray(array) => docs.push(
                         array
-                            .data
-                            .into_iter()
-                            .filter(|text| !is_missing_string(text))
+                            .data()
+                            .iter()
+                            .filter_map(|text| text.as_str().map(str::to_owned))
                             .collect(),
                     ),
                     other => {
                         all_string_arrays = false;
-                        docs.push(vec![scalar_text(&other, "tokenizedDocument").map_err(
+                        docs.push(vec![scalar_text(other, "tokenizedDocument").map_err(
                             |err| text_analytics_error("tokenizedDocument", err.to_string()),
                         )?]);
                     }
@@ -2159,74 +1867,74 @@ fn is_trailing_punctuation(ch: char) -> bool {
 }
 
 fn tokenized_document_value(
+    runtime: Option<&crate::context::RuntimeContext>,
     documents: Vec<Vec<String>>,
     shape: Vec<usize>,
     options: DocumentOptions,
     type_details: Option<Vec<Vec<String>>>,
 ) -> BuiltinResult<Value> {
     ensure_tokenized_document_class_registered();
-    let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-    object
-        .properties
-        .insert("Documents".to_string(), documents_cell(&documents)?);
-    object
-        .properties
-        .insert("Vocabulary".to_string(), vocabulary_value(&documents)?);
-    object.properties.insert(
-        "NumDocuments".to_string(),
-        Value::Num(documents.len() as f64),
-    );
-    object.properties.insert(
-        "DocumentLengths".to_string(),
-        Value::Tensor(
-            Tensor::new(
-                documents.iter().map(|doc| doc.len() as f64).collect(),
-                vec![documents.len(), 1],
-            )
-            .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+    let fields = [
+        ("Documents", documents_cell(&documents)?),
+        ("Vocabulary", vocabulary_value(&documents)?),
+        ("NumDocuments", Value::Num(documents.len() as f64)),
+        (
+            "DocumentLengths",
+            Value::Tensor(
+                Tensor::new(
+                    documents.iter().map(|doc| doc.len() as f64).collect(),
+                    vec![documents.len(), 1],
+                )
+                .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+            ),
         ),
-    );
-    object.properties.insert(
-        "Shape".to_string(),
-        Value::Tensor(
-            Tensor::new(
-                shape.iter().map(|dim| *dim as f64).collect(),
-                vec![1, shape.len()],
-            )
-            .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+        (
+            "Shape",
+            Value::Tensor(
+                Tensor::new(
+                    shape.iter().map(|dim| *dim as f64).collect(),
+                    vec![1, shape.len()],
+                )
+                .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+            ),
         ),
-    );
-    object.properties.insert(
-        "TokenizeMethod".to_string(),
-        Value::String(
-            match options.tokenize_method {
-                TokenizeMethod::Unicode => "unicode",
-                TokenizeMethod::None => "none",
-            }
-            .to_string(),
+        (
+            "TokenizeMethod",
+            Value::string(
+                match options.tokenize_method {
+                    TokenizeMethod::Unicode => "unicode",
+                    TokenizeMethod::None => "none",
+                }
+                .to_string(),
+            ),
         ),
-    );
-    object
-        .properties
-        .insert("Language".to_string(), Value::String(options.language));
-    object.properties.insert(
-        "DetectPatterns".to_string(),
-        detect_patterns_value(options.detect_patterns)?,
-    );
-    object.properties.insert(
-        "TopLevelDomains".to_string(),
-        top_level_domains_value(&options.top_level_domains, "tokenizedDocument")?,
-    );
-    object.properties.insert(
-        "TopLevelDomainsCustom".to_string(),
-        Value::Bool(options.top_level_domains_custom),
-    );
-    if let Some(type_details) = type_details {
-        object
-            .properties
-            .insert("TypeDetails".to_string(), type_details_cell(&type_details)?);
-    }
-    Ok(Value::Object(object))
+        ("Language", Value::string(options.language)),
+        (
+            "DetectPatterns",
+            detect_patterns_value(options.detect_patterns)?,
+        ),
+        (
+            "TopLevelDomains",
+            top_level_domains_value(&options.top_level_domains, "tokenizedDocument")?,
+        ),
+        (
+            "TopLevelDomainsCustom",
+            Value::Bool(options.top_level_domains_custom),
+        ),
+    ];
+    let type_details = type_details
+        .as_ref()
+        .map(|details| type_details_cell(details).map(|value| ("TypeDetails", value)))
+        .transpose()?;
+    crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        TOKENIZED_DOCUMENT_CLASS.display_name(),
+        fields
+            .iter()
+            .chain(type_details.iter())
+            .map(|(name, value)| (*name, value)),
+    )
+    .map(|output| output.with_owned(|value| value))
 }
 
 fn type_details_cell(type_details: &[Vec<String>]) -> BuiltinResult<Value> {
@@ -2246,8 +1954,8 @@ fn type_details_cell(type_details: &[Vec<String>]) -> BuiltinResult<Value> {
 
 fn detect_patterns_value(patterns: DetectPatterns) -> BuiltinResult<Value> {
     match patterns {
-        DetectPatterns::All => Ok(Value::String("all".to_string())),
-        DetectPatterns::None => Ok(Value::String("none".to_string())),
+        DetectPatterns::All => Ok(Value::string("all".to_string())),
+        DetectPatterns::None => Ok(Value::string("none".to_string())),
         DetectPatterns::Selected(selected) => {
             let mut values = Vec::new();
             if selected.email_address {
@@ -2284,13 +1992,16 @@ pub(in crate::builtins::strings::text_analytics) fn top_level_domains_value(
 pub(in crate::builtins::strings::text_analytics) fn tokenized_document_language(
     object: &ObjectInstance,
 ) -> String {
-    match object.properties.get("Language") {
-        Some(Value::String(value)) => value.clone(),
+    match object.properties().get("Language") {
+        Some(Value::String(value)) if value.as_str().is_some() => {
+            value.as_str().expect("text metadata").to_owned()
+        }
         _ => "en".to_string(),
     }
 }
 
 pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &ObjectInstance,
     fn_name: &str,
     mut transform: impl FnMut(&str, DocumentTokenType) -> BuiltinResult<Option<String>>,
@@ -2311,6 +2022,7 @@ pub(in crate::builtins::strings::text_analytics) fn transform_tokenized_document
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     tokenized_document_value(
+        runtime,
         documents,
         shape_from_object(object, fn_name)?,
         options,
@@ -2351,14 +2063,14 @@ impl DocumentTokenType {
 
 pub(in crate::builtins::strings) fn erase_punctuation_tokenized_document(
     object: ObjectInstance,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
         return Err(text_analytics_error(
             "erasePunctuation",
             format!(
                 "erasePunctuation: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -2380,7 +2092,7 @@ pub(in crate::builtins::strings) fn erase_urls_tokenized_document(
             "eraseURLs",
             format!(
                 "eraseURLs: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -2411,10 +2123,11 @@ fn transform_tokenized_document_by_type_name(
             let explicit_type = explicit_types
                 .as_ref()
                 .and_then(|documents| documents.get(document_index))
-                .and_then(|types| types.get(token_index));
+                .and_then(|types| types.get(token_index))
+                .and_then(|value| value.as_str());
             let derived_type;
             let token_type = if let Some(explicit_type) = explicit_type {
-                explicit_type.as_str()
+                explicit_type
             } else {
                 derived_type = document_token_type_with_options(&token, &options);
                 derived_type.as_str()
@@ -2433,6 +2146,7 @@ fn transform_tokenized_document_by_type_name(
     }
 
     tokenized_document_value(
+        None,
         output_documents,
         shape_from_object(object, fn_name)?,
         options,
@@ -2444,8 +2158,8 @@ fn explicit_type_details(
     object: &ObjectInstance,
     documents: &[Vec<String>],
     fn_name: &str,
-) -> BuiltinResult<Option<Vec<Vec<String>>>> {
-    let Some(value) = object.properties.get("TypeDetails") else {
+) -> BuiltinResult<Option<Vec<Vec<runmat_value::StringElement>>>> {
+    let Some(value) = object.properties().get("TypeDetails") else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -2454,17 +2168,17 @@ fn explicit_type_details(
             format!("{fn_name}: invalid token type details"),
         ));
     };
-    if cell.data.len() != documents.len() {
+    if cell.data().len() != documents.len() {
         return Err(text_analytics_error(
             fn_name,
             format!("{fn_name}: token type details do not match document shape"),
         ));
     }
     let mut all_types = Vec::with_capacity(documents.len());
-    for (value, document) in cell.data.iter().zip(documents) {
+    for (value, document) in cell.data().iter().zip(documents) {
         let types = match value {
-            Value::StringArray(array) => array.data.clone(),
-            Value::String(text) if document.len() == 1 => vec![text.clone()],
+            Value::StringArray(array) => array.data_owner().as_slice(),
+            Value::String(text) if document.len() == 1 => std::slice::from_ref(text),
             _ => {
                 return Err(text_analytics_error(
                     fn_name,
@@ -2478,17 +2192,19 @@ fn explicit_type_details(
                 format!("{fn_name}: token type details do not match document tokens"),
             ));
         }
-        all_types.push(types);
+        all_types.push(types.to_vec());
     }
     Ok(Some(all_types))
 }
 
-fn parse_erase_punctuation_args(args: Vec<Value>) -> BuiltinResult<HashSet<String>> {
-    match args.as_slice() {
-        [] => Ok(["punctuation".to_string(), "other".to_string()]
+fn parse_erase_punctuation_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<HashSet<String>> {
+    match (args.len(), args.get(0), args.get(1)) {
+        (0, _, _) => Ok(["punctuation".to_string(), "other".to_string()]
             .into_iter()
             .collect()),
-        [name, types] => {
+        (2, Some(name), Some(types)) => {
             let option = scalar_text(name, "erasePunctuation")
                 .map_err(|err| text_analytics_error("erasePunctuation", err.to_string()))?
                 .to_ascii_lowercase();
@@ -2685,20 +2401,21 @@ pub(in crate::builtins::strings::text_analytics) fn documents_from_object(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Vec<Vec<String>>> {
-    let Some(Value::Cell(cell)) = object.properties.get("Documents") else {
+    let Some(Value::Cell(cell)) = object.properties().get("Documents") else {
         return Err(text_analytics_error(
             fn_name,
             format!("{fn_name}: tokenizedDocument object missing Documents property"),
         ));
     };
-    let mut documents = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut documents = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         documents.push(words_from_word_vector(item, fn_name)?);
     }
     Ok(documents)
 }
 
 pub(in crate::builtins::strings::text_analytics) fn replace_tokenized_document_documents(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &mut ObjectInstance,
     documents: Vec<Vec<String>>,
     fn_name: &str,
@@ -2721,27 +2438,28 @@ pub(in crate::builtins::strings::text_analytics) fn replace_tokenized_document_d
             ),
         ));
     }
-    object
-        .properties
-        .insert("Documents".to_string(), documents_cell(&documents)?);
-    object
-        .properties
-        .insert("Vocabulary".to_string(), vocabulary_value(&documents)?);
-    object.properties.insert(
-        "NumDocuments".to_string(),
-        Value::Num(documents.len() as f64),
+    let documents_value = documents_cell(&documents)?;
+    let vocabulary = vocabulary_value(&documents)?;
+    let count = Value::Num(documents.len() as f64);
+    let lengths = Value::Tensor(
+        Tensor::new(
+            documents.iter().map(|doc| doc.len() as f64).collect(),
+            vec![documents.len(), 1],
+        )
+        .map_err(|err| text_analytics_error(fn_name, err))?,
     );
-    object.properties.insert(
-        "DocumentLengths".to_string(),
-        Value::Tensor(
-            Tensor::new(
-                documents.iter().map(|doc| doc.len() as f64).collect(),
-                vec![documents.len(), 1],
-            )
-            .map_err(|err| text_analytics_error(fn_name, err))?,
-        ),
-    );
-    Ok(())
+    let updates = [
+        ("Documents", documents_value),
+        ("Vocabulary", vocabulary),
+        ("NumDocuments", count),
+        ("DocumentLengths", lengths),
+    ];
+    replace_document_properties(
+        runtime,
+        object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        fn_name,
+    )
 }
 
 pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
@@ -2749,15 +2467,15 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
     fn_name: &str,
 ) -> BuiltinResult<Vec<usize>> {
     let expected = object
-        .properties
+        .properties()
         .get("Documents")
         .and_then(|value| match value {
-            Value::Cell(cell) => Some(cell.data.len()),
+            Value::Cell(cell) => Some(cell.data().len()),
             _ => None,
         })
         .or_else(|| {
             object
-                .properties
+                .properties()
                 .get("NumDocuments")
                 .and_then(nonnegative_dimension)
         })
@@ -2783,7 +2501,7 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
 }
 
 fn shape_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<usize>> {
-    if let Some(Value::Tensor(tensor)) = object.properties.get("Shape") {
+    if let Some(Value::Tensor(tensor)) = object.properties().get("Shape") {
         (0..tensor.len())
             .map(|index| {
                 let value = tensor
@@ -2800,7 +2518,7 @@ fn shape_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Ve
             })
             .collect()
     } else {
-        let num_documents = match object.properties.get("NumDocuments") {
+        let num_documents = match object.properties().get("NumDocuments") {
             Some(value) => nonnegative_dimension(value).ok_or_else(|| {
                 text_analytics_error(
                     fn_name,
@@ -2858,25 +2576,27 @@ pub(in crate::builtins::strings::text_analytics) fn is_nonnegative_integer_count
 pub(in crate::builtins::strings::text_analytics) fn options_from_document_object(
     object: &ObjectInstance,
 ) -> DocumentOptions {
-    let tokenize_method = match object.properties.get("TokenizeMethod") {
+    let tokenize_method = match object.properties().get("TokenizeMethod") {
         Some(Value::String(value)) if value == "none" => TokenizeMethod::None,
         _ => TokenizeMethod::Unicode,
     };
-    let language = match object.properties.get("Language") {
-        Some(Value::String(value)) => value.clone(),
+    let language = match object.properties().get("Language") {
+        Some(Value::String(value)) if value.as_str().is_some() => {
+            value.as_str().expect("text metadata").to_owned()
+        }
         _ => "en".to_string(),
     };
     let detect_patterns = object
-        .properties
+        .properties()
         .get("DetectPatterns")
         .and_then(|value| parse_detect_patterns(value, "tokenizedDocument").ok())
         .unwrap_or(DetectPatterns::All);
     let top_level_domains = object
-        .properties
+        .properties()
         .get("TopLevelDomains")
         .and_then(|value| parse_top_level_domains(value, "tokenizedDocument").ok())
         .unwrap_or_else(default_top_level_domains);
-    let top_level_domains_custom = match object.properties.get("TopLevelDomainsCustom") {
+    let top_level_domains_custom = match object.properties().get("TopLevelDomainsCustom") {
         Some(Value::Bool(value)) => *value,
         _ => false,
     };
@@ -2891,7 +2611,10 @@ pub(in crate::builtins::strings::text_analytics) fn options_from_document_object
     }
 }
 
-fn bag_from_documents(documents: Vec<Vec<String>>) -> BuiltinResult<Value> {
+fn bag_from_documents(
+    runtime: Option<&crate::context::RuntimeContext>,
+    documents: Vec<Vec<String>>,
+) -> BuiltinResult<Value> {
     let mut vocabulary = Vec::new();
     let mut positions = BTreeMap::new();
     for token in documents.iter().flatten() {
@@ -2910,10 +2633,22 @@ fn bag_from_documents(documents: Vec<Vec<String>>) -> BuiltinResult<Value> {
             }
         }
     }
-    bag_object(vocabulary, counts, rows)
+    bag_object(runtime, vocabulary, counts, rows)
 }
 
-fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinResult<Value> {
+fn count_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
+fn bag_from_unique_words_and_counts(
+    runtime: Option<&crate::context::RuntimeContext>,
+    words: &Value,
+    counts: &Value,
+) -> BuiltinResult<Value> {
     let raw_words = words_from_word_vector_preserving_missing(words, "bagOfWords")?;
     let tensor = match counts {
         Value::Tensor(tensor) => tensor.clone(),
@@ -2930,12 +2665,13 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
             ))
         }
     };
-    if tensor.cols != raw_words.len() {
+    let (rows, cols) = count_matrix_dimensions(&tensor);
+    if cols != raw_words.len() {
         return Err(text_analytics_error(
             "bagOfWords",
             format!(
                 "bagOfWords: counts columns ({}) must match uniqueWords length ({})",
-                tensor.cols,
+                cols,
                 raw_words.len()
             ),
         ));
@@ -2956,33 +2692,33 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
     let mut vocabulary = Vec::new();
     let mut keep_cols = Vec::new();
     for (col, word) in raw_words.iter().enumerate() {
-        if is_missing_string(word) {
-            continue;
-        }
-        if !seen.insert(word.clone()) {
+        let Some(word) = word.as_str() else { continue };
+        if !seen.insert(word.to_owned()) {
             return Err(text_analytics_error(
                 "bagOfWords",
                 format!("bagOfWords: uniqueWords contains duplicate word '{word}'"),
             ));
         }
-        vocabulary.push(word.clone());
+        vocabulary.push(word.to_owned());
         keep_cols.push(col);
     }
-    let mut filtered_counts = Vec::with_capacity(checked_count_len(
-        tensor.rows,
-        keep_cols.len(),
-        "bagOfWords",
-    )?);
+    let mut filtered_counts =
+        Vec::with_capacity(checked_count_len(rows, keep_cols.len(), "bagOfWords")?);
     let values = tensor_utils::tensor_values_f64_cow(&tensor);
     for col in keep_cols {
-        for row in 0..tensor.rows {
-            filtered_counts.push(values[row + col * tensor.rows]);
+        for row in 0..rows {
+            filtered_counts.push(values[row + col * rows]);
         }
     }
-    bag_object(vocabulary, filtered_counts, tensor.rows)
+    bag_object(runtime, vocabulary, filtered_counts, rows)
 }
 
-fn bag_object(vocabulary: Vec<String>, counts: Vec<f64>, rows: usize) -> BuiltinResult<Value> {
+fn bag_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    vocabulary: Vec<String>,
+    counts: Vec<f64>,
+    rows: usize,
+) -> BuiltinResult<Value> {
     ensure_bag_of_words_class_registered();
     let cols = vocabulary.len();
     let expected = checked_count_len(rows, cols, "bagOfWords")?;
@@ -2998,28 +2734,30 @@ fn bag_object(vocabulary: Vec<String>, counts: Vec<f64>, rows: usize) -> Builtin
             ),
         ));
     }
-    let mut object = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
-    object.properties.insert(
-        "Vocabulary".to_string(),
-        Value::StringArray(
-            StringArray::new(vocabulary.clone(), vec![1, vocabulary.len()])
-                .map_err(|err| text_analytics_error("bagOfWords", err))?,
+    let fields = [
+        (
+            "Vocabulary",
+            Value::StringArray(
+                StringArray::new(vocabulary, vec![1, cols])
+                    .map_err(|err| text_analytics_error("bagOfWords", err))?,
+            ),
         ),
-    );
-    object.properties.insert(
-        "Counts".to_string(),
-        Value::Tensor(
-            Tensor::new(counts, vec![rows, cols])
-                .map_err(|err| text_analytics_error("bagOfWords", err))?,
+        (
+            "Counts",
+            Value::Tensor(
+                Tensor::new(counts, vec![rows, cols])
+                    .map_err(|err| text_analytics_error("bagOfWords", err))?,
+            ),
         ),
-    );
-    object
-        .properties
-        .insert("NumWords".to_string(), Value::Num(cols as f64));
-    object
-        .properties
-        .insert("NumDocuments".to_string(), Value::Num(rows as f64));
-    Ok(Value::Object(object))
+        ("NumWords", Value::Num(cols as f64)),
+        ("NumDocuments", Value::Num(rows as f64)),
+    ];
+    crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        BAG_OF_WORDS_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
+    .map(|output| output.with_owned(|value| value))
 }
 
 pub(in crate::builtins::strings::text_analytics) fn checked_count_len(
@@ -3044,21 +2782,27 @@ pub(in crate::builtins::strings::text_analytics) fn checked_count_len(
     Ok(len)
 }
 
-fn remove_short_words_from_bag(object: ObjectInstance, max_len: usize) -> BuiltinResult<Value> {
-    filter_bag_columns_by_predicate(object, "removeShortWords", |word| {
+fn remove_short_words_from_bag(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: ObjectInstance,
+    max_len: usize,
+) -> BuiltinResult<Value> {
+    filter_bag_columns_by_predicate(runtime, object, "removeShortWords", |word| {
         word.chars().count() > max_len
     })
 }
 
 fn filter_bag_columns_by_predicate(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
     fn_name: &str,
     mut keep_word: impl FnMut(&str) -> bool,
 ) -> BuiltinResult<Value> {
-    filter_bag_columns(object, fn_name, |word| keep_word(word))
+    filter_bag_columns(runtime, object, fn_name, |word| keep_word(word))
 }
 
 fn filter_bag_columns(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
     fn_name: &str,
     mut keep_word: impl FnMut(&str) -> bool,
@@ -3071,19 +2815,20 @@ fn filter_bag_columns(
         .filter_map(|(idx, word)| keep_word(word).then_some(idx))
         .collect::<Vec<_>>();
     let mut new_vocab = Vec::with_capacity(keep.len());
-    let mut new_counts = Vec::with_capacity(counts.rows * keep.len());
+    let (rows, _) = count_matrix_dimensions(&counts);
+    let mut new_counts = Vec::with_capacity(rows * keep.len());
     let count_values = tensor_utils::tensor_values_f64_cow(&counts);
     for col in keep {
         new_vocab.push(vocabulary[col].clone());
-        for row in 0..counts.rows {
-            new_counts.push(count_values[row + col * counts.rows]);
+        for row in 0..rows {
+            new_counts.push(count_values[row + col * rows]);
         }
     }
-    bag_object(new_vocab, new_counts, counts.rows)
+    bag_object(runtime, new_vocab, new_counts, rows)
 }
 
 fn documents_vocabulary(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<String>> {
-    match object.properties.get("Vocabulary") {
+    match object.properties().get("Vocabulary") {
         Some(value) => words_from_word_vector(value, fn_name),
         None => Ok(vocabulary_from_documents(&documents_from_object(
             object, fn_name,
@@ -3106,7 +2851,7 @@ pub(in crate::builtins::strings::text_analytics) fn vocabulary_from_bag(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Vec<String>> {
-    match object.properties.get("Vocabulary") {
+    match object.properties().get("Vocabulary") {
         Some(value) => words_from_word_vector(value, fn_name),
         None => Err(text_analytics_error(
             fn_name,
@@ -3119,7 +2864,7 @@ pub(in crate::builtins::strings::text_analytics) fn counts_from_bag(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Tensor> {
-    match object.properties.get("Counts") {
+    match object.properties().get("Counts") {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         _ => Err(text_analytics_error(
             fn_name,
@@ -3133,30 +2878,29 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector(
     fn_name: &str,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(text.as_str().map(str::to_owned).into_iter().collect()),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
-            .filter(|text| !is_missing_string(text))
-            .cloned()
+            .filter_map(|text| text.as_str().map(str::to_owned))
             .collect()),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_for_text_analytics(array, 0, fn_name)?
             };
             Ok(vec![text])
         }
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                words.push(char_row_to_string_slice(&array.data, array.cols, row));
+                words.push(char_row_for_text_analytics(array, row, fn_name)?);
             }
             Ok(words)
         }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| {
                 scalar_text(item, fn_name)
@@ -3173,31 +2917,34 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector(
 pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_preserving_missing(
     value: &Value,
     fn_name: &str,
-) -> BuiltinResult<Vec<String>> {
+) -> BuiltinResult<Vec<runmat_value::StringElement>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array.data().to_vec()),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_for_text_analytics(array, 0, fn_name)?
             };
-            Ok(vec![text])
+            Ok(vec![text.into()])
         }
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                words.push(char_row_to_string_slice(&array.data, array.cols, row));
+                words.push(char_row_for_text_analytics(array, row, fn_name)?.into());
             }
             Ok(words)
         }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
-            .map(|item| {
-                scalar_text(item, fn_name)
-                    .map_err(|err| text_analytics_error(fn_name, err.to_string()))
+            .map(|item| match item {
+                Value::String(text) => Ok(text.clone()),
+                Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
+                _ => scalar_text(item, fn_name)
+                    .map(runmat_value::StringElement::text)
+                    .map_err(|err| text_analytics_error(fn_name, err.to_string())),
             })
             .collect(),
         other => Err(text_analytics_error(
@@ -3257,27 +3004,39 @@ mod tests {
     }
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tokenized_document_builtin(args))
+        futures::executor::block_on(tokenized_document_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_bag(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(bag_of_words_builtin(args))
+        futures::executor::block_on(bag_of_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_remove_short(value: Value, len: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_short_words_builtin(value, len))
+        futures::executor::block_on(remove_short_words_builtin(None, value, len))
     }
 
     fn run_remove_long(value: Value, len: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_long_words_builtin(value, len))
+        futures::executor::block_on(remove_long_words_builtin(None, value, len))
     }
 
     fn run_remove_words(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_words_builtin(args))
+        futures::executor::block_on(remove_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_remove_stop(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(remove_stop_words_builtin(args))
+        futures::executor::block_on(remove_stop_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -3288,14 +3047,18 @@ mod tests {
     }
 
     fn string_array_property(object: &ObjectInstance, name: &str) -> Vec<String> {
-        let Some(Value::StringArray(array)) = object.properties.get(name) else {
+        let Some(Value::StringArray(array)) = object.properties().get(name) else {
             panic!("expected string array property {name}");
         };
-        array.data.clone()
+        array
+            .data()
+            .iter()
+            .map(|text| text.as_str().expect("nonmissing test text").to_owned())
+            .collect()
     }
 
     fn tensor_property(object: &ObjectInstance, name: &str) -> Tensor {
-        let Some(Value::Tensor(tensor)) = object.properties.get(name) else {
+        let Some(Value::Tensor(tensor)) = object.properties().get(name) else {
             panic!("expected tensor property {name}");
         };
         tensor.clone()
@@ -3306,16 +3069,20 @@ mod tests {
     }
 
     fn type_details_property(object: &ObjectInstance) -> Vec<Vec<String>> {
-        let Some(Value::Cell(cell)) = object.properties.get("TypeDetails") else {
+        let Some(Value::Cell(cell)) = object.properties().get("TypeDetails") else {
             panic!("expected TypeDetails property");
         };
-        cell.data
+        cell.data()
             .iter()
             .map(|value| {
                 let Value::StringArray(array) = value else {
                     panic!("expected TypeDetails string array");
                 };
-                array.data.clone()
+                array
+                    .data()
+                    .iter()
+                    .map(|text| text.as_str().expect("nonmissing test text").to_owned())
+                    .collect()
             })
             .collect()
     }
@@ -3332,8 +3099,8 @@ mod tests {
         )
         .unwrap();
         let doc = object(run_tokenized(vec![Value::StringArray(input)]).expect("tokenized"));
-        assert_eq!(doc.class_name, TOKENIZED_DOCUMENT_CLASS);
-        assert_eq!(doc.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
+        assert!(doc.class_name().is(TOKENIZED_DOCUMENT_CLASS));
+        assert_eq!(doc.properties().get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(
             string_array_property(&doc, "Vocabulary"),
             vec!["an", "example", "of", "a", "short", "sentence", "second"]
@@ -3359,8 +3126,8 @@ mod tests {
         let doc = object(
             run_tokenized(vec![
                 Value::StringArray(input),
-                Value::String("TokenizeMethod".to_string()),
-                Value::String("none".to_string()),
+                Value::String("TokenizeMethod".to_string().into()),
+                Value::String("none".to_string().into()),
             ])
             .expect("tokenized"),
         );
@@ -3374,22 +3141,22 @@ mod tests {
     #[test]
     fn tokenized_document_no_input_is_scalar_empty_document() {
         let doc = object(run_tokenized(Vec::new()).expect("tokenized"));
-        assert_eq!(doc.properties.get("NumDocuments"), Some(&Value::Num(1.0)));
+        assert_eq!(doc.properties().get("NumDocuments"), Some(&Value::Num(1.0)));
         assert_eq!(
             string_array_property(&doc, "Vocabulary"),
             Vec::<String>::new()
         );
         let lengths = tensor_property(&doc, "DocumentLengths");
-        assert_eq!(lengths.shape, vec![1, 1]);
+        assert_eq!(lengths.shape(), [1, 1]);
         assert_eq!(lengths.materialize_f64(), vec![0.0]);
         let shape = tensor_property(&doc, "Shape");
         assert_eq!(shape.materialize_f64(), vec![1.0, 1.0]);
 
         let bag = object(run_bag(vec![Value::Object(doc)]).expect("bag"));
-        assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(1.0)));
-        assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(0.0)));
+        assert_eq!(bag.properties().get("NumDocuments"), Some(&Value::Num(1.0)));
+        assert_eq!(bag.properties().get("NumWords"), Some(&Value::Num(0.0)));
         let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![1, 0]);
+        assert_eq!(counts.shape(), [1, 0]);
         assert!(counts.materialize_f64().is_empty());
     }
 
@@ -3402,8 +3169,11 @@ mod tests {
             .expect("tokenized"),
         );
 
-        document.properties.remove("Shape");
-        document.properties.insert(
+        crate::builtins::common::test_support::remove_object_property_unbounded(
+            &mut document,
+            "Shape",
+        );
+        document.replace_property_unbounded(
             "NumDocuments".to_string(),
             Value::Int(runmat_value::IntValue::U16(2)),
         );
@@ -3412,18 +3182,16 @@ mod tests {
             vec![2, 1]
         );
 
-        document
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(1.5));
+        document.replace_property_unbounded("NumDocuments".to_string(), Value::Num(1.5));
         assert!(document_shape_from_object(&document, "test").is_err());
 
-        document.properties.insert(
+        document.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![1.5, 1.0], vec![1, 2]).unwrap()),
         );
         assert!(document_shape_from_object(&document, "test").is_err());
 
-        document.properties.insert(
+        document.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![usize::MAX as f64 + 1.0, 1.0], vec![1, 2]).unwrap()),
         );
@@ -3433,7 +3201,7 @@ mod tests {
     #[test]
     fn tokenized_document_shape_reads_native_single_storage() {
         let mut document = object(run_tokenized(Vec::new()).expect("tokenized"));
-        document.properties.insert(
+        document.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(
                 Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0, 1.0]), vec![1, 2])
@@ -3452,7 +3220,8 @@ mod tests {
         let doc = object(
             run_tokenized(vec![Value::String(
                 "Analyze #MATLAB :-) at help@example.com or https://www.mathworks.com/help/"
-                    .to_string(),
+                    .to_string()
+                    .into(),
             )])
             .expect("tokenized"),
         );
@@ -3468,7 +3237,7 @@ mod tests {
     fn tokenized_document_preserves_trailing_punctuation_after_url_token() {
         let doc = object(
             run_tokenized(vec![Value::String(
-                "Visit https://example.com.".to_string(),
+                "Visit https://example.com.".to_string().into(),
             )])
             .expect("tokenized"),
         );
@@ -3482,7 +3251,9 @@ mod tests {
     fn tokenized_document_preserves_explicit_urls_with_uncommon_default_tlds() {
         let doc = object(
             run_tokenized(vec![Value::String(
-                "Visit HTTPS://example.software and www.example.community.".to_string(),
+                "Visit HTTPS://example.software and www.example.community."
+                    .to_string()
+                    .into(),
             )])
             .expect("tokenized"),
         );
@@ -3504,8 +3275,12 @@ mod tests {
         let tlds = StringArray::new(vec!["zz".into(), "dev".into()], vec![1, 2]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("See example.zz, docs.example.dev/path and example.com".to_string()),
-                Value::String("TopLevelDomains".to_string()),
+                Value::String(
+                    "See example.zz, docs.example.dev/path and example.com"
+                        .to_string()
+                        .into(),
+                ),
+                Value::String("TopLevelDomains".to_string().into()),
                 Value::StringArray(tlds),
             ])
             .expect("tokenized"),
@@ -3536,8 +3311,12 @@ mod tests {
             StringArray::new(vec!["hashtag".into(), "email-address".into()], vec![1, 2]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("Mail a@example.com #MATLAB at https://example.com :-D".to_string()),
-                Value::String("DetectPatterns".to_string()),
+                Value::String(
+                    "Mail a@example.com #MATLAB at https://example.com :-D"
+                        .to_string()
+                        .into(),
+                ),
+                Value::String("DetectPatterns".to_string().into()),
                 Value::StringArray(patterns),
             ])
             .expect("tokenized"),
@@ -3569,8 +3348,8 @@ mod tests {
         let custom = StringArray::new(vec!["C++".into(), "C++17".into()], vec![1, 2]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("Use C++17 and C++.".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("Use C++17 and C++.".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 Value::StringArray(custom),
             ])
             .expect("tokenized"),
@@ -3608,8 +3387,8 @@ mod tests {
         .expect("custom table");
         let doc = object(
             run_tokenized(vec![
-                Value::String("Na+ in H2O".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("Na+ in H2O".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 table,
             ])
             .expect("tokenized"),
@@ -3640,10 +3419,10 @@ mod tests {
         .expect("regex table");
         let doc = object(
             run_tokenized(vec![
-                Value::String("abc123 xyz9".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("abc123 xyz9".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 Value::StringArray(custom),
-                Value::String("RegularExpressions".to_string()),
+                Value::String("RegularExpressions".to_string().into()),
                 regex_table,
             ])
             .expect("tokenized"),
@@ -3657,8 +3436,8 @@ mod tests {
     fn tokenized_document_supports_non_table_custom_and_regex_vectors() {
         let custom = CellArray::new(
             vec![
-                Value::String("R&D".to_string()),
-                Value::String("C#".to_string()),
+                Value::String("R&D".to_string().into()),
+                Value::String("C#".to_string().into()),
             ],
             1,
             2,
@@ -3667,10 +3446,10 @@ mod tests {
         let regexes = StringArray::new(vec![r"\d{4}-\d{2}-\d{2}".into()], vec![1, 1]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("R&D shipped C# on 2026-07-17.".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("R&D shipped C# on 2026-07-17.".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 Value::Cell(custom),
-                Value::String("RegularExpressions".to_string()),
+                Value::String("RegularExpressions".to_string().into()),
                 Value::StringArray(regexes),
             ])
             .expect("tokenized"),
@@ -3697,9 +3476,9 @@ mod tests {
     #[test]
     fn tokenized_document_rejects_invalid_custom_and_regex_options() {
         let err = run_tokenized(vec![
-            Value::String("abc".to_string()),
-            Value::String("RegularExpressions".to_string()),
-            Value::String("(".to_string()),
+            Value::String("abc".to_string().into()),
+            Value::String("RegularExpressions".to_string().into()),
+            Value::String("(".to_string().into()),
         ])
         .expect_err("invalid regex");
         assert!(err
@@ -3707,9 +3486,9 @@ mod tests {
             .contains("invalid RegularExpressions pattern"));
 
         let err = run_tokenized(vec![
-            Value::String("abc".to_string()),
-            Value::String("RegularExpressions".to_string()),
-            Value::String(".*".to_string()),
+            Value::String("abc".to_string().into()),
+            Value::String("RegularExpressions".to_string().into()),
+            Value::String(".*".to_string().into()),
         ])
         .expect_err("empty regex");
         assert!(err.to_string().contains("can match empty text"));
@@ -3722,8 +3501,8 @@ mod tests {
         )
         .expect("bad custom table");
         let err = run_tokenized(vec![
-            Value::String("abc".to_string()),
-            Value::String("CustomTokens".to_string()),
+            Value::String("abc".to_string().into()),
+            Value::String("CustomTokens".to_string().into()),
             table,
         ])
         .expect_err("missing token variable");
@@ -3743,15 +3522,15 @@ mod tests {
         .unwrap();
         let docs = run_tokenized(vec![Value::StringArray(input)]).expect("tokenized");
         let bag = object(run_bag(vec![docs]).expect("bag"));
-        assert_eq!(bag.class_name, BAG_OF_WORDS_CLASS);
+        assert!(bag.class_name().is(BAG_OF_WORDS_CLASS));
         assert_eq!(
             string_array_property(&bag, "Vocabulary"),
             vec!["an", "example", "of", "a", "short", "sentence", "second"]
         );
-        let Some(Value::Tensor(counts)) = bag.properties.get("Counts") else {
+        let Some(Value::Tensor(counts)) = bag.properties().get("Counts") else {
             panic!("expected Counts");
         };
-        assert_eq!(counts.shape, vec![2, 7]);
+        assert_eq!(counts.shape(), [2, 7]);
         assert_eq!(counts.materialize_f64()[0], 1.0);
         assert_eq!(counts.materialize_f64()[1], 0.0);
         assert_eq!(counts.materialize_f64()[3 * 2], 1.0);
@@ -3765,8 +3544,8 @@ mod tests {
         let counts = Tensor::new(vec![2.0, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let bag =
             object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
-        assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
-        assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(2.0)));
+        assert_eq!(bag.properties().get("NumDocuments"), Some(&Value::Num(2.0)));
+        assert_eq!(bag.properties().get("NumWords"), Some(&Value::Num(2.0)));
     }
 
     #[test]
@@ -3806,7 +3585,7 @@ mod tests {
             .expect("scalar integer count"),
         );
         let actual = tensor_property(&bag, "Counts");
-        assert_eq!(actual.shape, vec![1, 1]);
+        assert_eq!(actual.shape(), [1, 1]);
         assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(actual.materialize_f64(), vec![7.0]);
     }
@@ -3826,12 +3605,14 @@ mod tests {
 
     #[test]
     fn bag_of_words_rejects_resident_inputs_before_provider_access() {
-        let resident = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_363_001,
-            descriptor: Default::default(),
-        };
+        let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident numeric admission fixture")
+            .handle;
         let error =
             run_bag(vec![Value::GpuTensor(resident)]).expect_err("resident input must reject");
         assert_eq!(error.identifier(), Some("RunMat:bagOfWords:InvalidInput"));
@@ -3878,23 +3659,73 @@ mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn bag_counts_preserve_rank_one_vocabulary_columns_and_rank_zero_rejection() {
+        let words = Value::StringArray(
+            StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap(),
+        );
+        let bag = run_bag(vec![
+            words.clone(),
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
+        ])
+        .expect("rank-one counts are one document with two vocabulary columns");
+        let bag_object = object(bag.clone());
+        let counts = tensor_property(&bag_object, "Counts");
+        assert_eq!(counts.shape(), [1, 2]);
+        assert_eq!(counts.materialize_f64(), vec![2.0, 3.0]);
+
+        let filtered = object(run_remove_short(bag, Value::Num(4.0)).unwrap());
+        assert_eq!(
+            string_array_property(&filtered, "Vocabulary"),
+            vec!["alpha"]
+        );
+        assert_eq!(
+            tensor_property(&filtered, "Counts").materialize_f64(),
+            vec![2.0]
+        );
+
+        let error = run_bag(vec![
+            words,
+            Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()),
+        ])
+        .expect_err("rank-zero counts have no vocabulary columns");
+        assert!(error.message().contains("counts columns (0)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bag_of_words_drops_missing_unique_word_and_count_column() {
-        let words = StringArray::new(
-            vec!["alpha".into(), "<missing>".into(), "beta".into()],
-            vec![1, 3],
-        )
-        .unwrap();
-        let counts = Tensor::new(vec![1.0, 0.0, 9.0, 9.0, 2.0, 3.0], vec![2, 3]).unwrap();
-        let bag =
-            object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
-        assert_eq!(
-            string_array_property(&bag, "Vocabulary"),
-            vec!["alpha", "beta"]
-        );
-        let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 2]);
-        assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 2.0, 3.0]);
+        for middle in [runmat_value::StringElement::Missing, "<missing>".into()] {
+            let missing = middle.is_missing();
+            let words = StringArray::from_elements_unbounded(
+                vec!["alpha".into(), middle, "beta".into()],
+                vec![1, 3],
+            )
+            .unwrap();
+            let original = vec![1.0, 0.0, 9.0, 9.0, 2.0, 3.0];
+            let counts = Tensor::new(original.clone(), vec![2, 3]).unwrap();
+            let bag = object(
+                run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"),
+            );
+            assert_eq!(
+                string_array_property(&bag, "Vocabulary"),
+                if missing {
+                    vec!["alpha", "beta"]
+                } else {
+                    vec!["alpha", "<missing>", "beta"]
+                }
+            );
+            let counts = tensor_property(&bag, "Counts");
+            assert_eq!(counts.shape(), [2, if missing { 2 } else { 3 }]);
+            assert_eq!(
+                counts.materialize_f64(),
+                if missing {
+                    vec![1.0, 0.0, 2.0, 3.0]
+                } else {
+                    original
+                }
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -3913,7 +3744,7 @@ mod tests {
     #[test]
     fn remove_short_words_filters_documents_and_bag() {
         let docs = run_tokenized(vec![Value::String(
-            "an example of a short sentence".to_string(),
+            "an example of a short sentence".to_string().into(),
         )])
         .expect("tokenized");
         let filtered_docs =
@@ -3929,10 +3760,10 @@ mod tests {
             string_array_property(&filtered_bag, "Vocabulary"),
             vec!["example", "short", "sentence"]
         );
-        let Some(Value::Tensor(counts)) = filtered_bag.properties.get("Counts") else {
+        let Some(Value::Tensor(counts)) = filtered_bag.properties().get("Counts") else {
             panic!("expected Counts");
         };
-        assert_eq!(counts.shape, vec![1, 3]);
+        assert_eq!(counts.shape(), [1, 3]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 1.0]);
     }
 
@@ -3966,7 +3797,7 @@ mod tests {
             vec!["An", "of", "a", "short", "A", "second", "note"]
         );
         let counts = tensor_property(&filtered_bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 7]);
+        assert_eq!(counts.shape(), [2, 7]);
         assert_eq!(
             counts.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
@@ -3990,7 +3821,7 @@ mod tests {
             run_remove_words(vec![
                 docs.clone(),
                 Value::StringArray(words),
-                Value::String("IgnoreCase".to_string()),
+                Value::String("IgnoreCase".to_string().into()),
                 Value::Bool(true),
             ])
             .expect("remove words"),
@@ -4021,14 +3852,15 @@ mod tests {
             vec!["Short", "sentence", "example"]
         );
         let counts = tensor_property(&filtered_bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 3]);
+        assert_eq!(counts.shape(), [2, 3]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn remove_words_rejects_bad_indices_and_mask_lengths() {
-        let docs = run_tokenized(vec![Value::String("alpha beta".to_string())]).expect("tokenized");
+        let docs =
+            run_tokenized(vec![Value::String("alpha beta".to_string().into())]).expect("tokenized");
         let err = run_remove_words(vec![docs.clone(), Value::Num(0.0)])
             .expect_err("expected bad numeric index");
         assert!(err.to_string().contains("positive integers"));
@@ -4067,14 +3899,14 @@ mod tests {
         .unwrap();
         let docs = run_tokenized(vec![
             Value::StringArray(words),
-            Value::String("TokenizeMethod".to_string()),
-            Value::String("none".to_string()),
+            Value::String("TokenizeMethod".to_string().into()),
+            Value::String("none".to_string().into()),
         ])
         .expect("tokenized");
         let filtered = object(
             run_remove_stop(vec![
                 docs,
-                Value::String("IgnoreCase".to_string()),
+                Value::String("IgnoreCase".to_string().into()),
                 Value::Bool(false),
             ])
             .expect("case-sensitive remove stop words"),
@@ -4084,12 +3916,16 @@ mod tests {
 
     #[test]
     fn remove_stop_words_rejects_integer_and_resident_inputs_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_446_002,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         for invalid in [Value::Int(runmat_value::IntValue::U8(1)), resident] {
             let error = run_remove_stop(vec![invalid]).expect_err("numeric input must reject");
             assert!(!error.message().to_ascii_lowercase().contains("provider"));
@@ -4101,12 +3937,19 @@ mod tests {
     fn erase_punctuation_filters_document_tokens_by_token_type() {
         let docs = object(
             run_tokenized(vec![Value::String(
-                "An example: email help@example.com, visit https://example.com.".to_string(),
+                "An example: email help@example.com, visit https://example.com."
+                    .to_string()
+                    .into(),
             )])
             .expect("tokenized"),
         );
-        let filtered =
-            object(erase_punctuation_tokenized_document(docs, vec![]).expect("erase punctuation"));
+        let filtered = object(
+            erase_punctuation_tokenized_document(
+                docs,
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            )
+            .expect("erase punctuation"),
+        );
         assert_eq!(
             documents_property(&filtered),
             vec![vec![
@@ -4132,18 +3975,18 @@ mod tests {
         let docs = object(
             run_tokenized(vec![
                 Value::StringArray(words),
-                Value::String("TokenizeMethod".to_string()),
-                Value::String("none".to_string()),
+                Value::String("TokenizeMethod".to_string().into()),
+                Value::String("none".to_string().into()),
             ])
             .expect("tokenized"),
         );
         let filtered = object(
             erase_punctuation_tokenized_document(
                 docs,
-                vec![
-                    Value::String("TokenTypes".to_string()),
-                    Value::String("letters".to_string()),
-                ],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("TokenTypes".to_string().into()),
+                    Value::String("letters".to_string().into()),
+                ]),
             )
             .expect("erase letters punctuation"),
         );
@@ -4165,12 +4008,12 @@ mod tests {
         let mut docs = object(
             run_tokenized(vec![
                 Value::StringArray(words),
-                Value::String("TokenizeMethod".to_string()),
-                Value::String("none".to_string()),
+                Value::String("TokenizeMethod".to_string().into()),
+                Value::String("none".to_string().into()),
             ])
             .expect("tokenized"),
         );
-        docs.properties.insert(
+        docs.replace_property_unbounded(
             "TypeDetails".to_string(),
             type_details_cell(&[vec!["language".to_string(), "letters".to_string()]])
                 .expect("type details"),
@@ -4178,10 +4021,10 @@ mod tests {
         let filtered = object(
             erase_punctuation_tokenized_document(
                 docs,
-                vec![
-                    Value::String("TokenTypes".to_string()),
-                    Value::String("language".to_string()),
-                ],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("TokenTypes".to_string().into()),
+                    Value::String("language".to_string().into()),
+                ]),
             )
             .expect("erase custom type"),
         );
@@ -4218,9 +4061,9 @@ mod tests {
     #[test]
     fn rejects_unimplemented_japanese_tokenization() {
         let err = run_tokenized(vec![
-            Value::String("東京に行きます".to_string()),
-            Value::String("Language".to_string()),
-            Value::String("ja".to_string()),
+            Value::String("東京に行きます".to_string().into()),
+            Value::String("Language".to_string().into()),
+            Value::String("ja".to_string().into()),
         ])
         .expect_err("expected unsupported ja");
         assert!(err.to_string().contains("MeCab"));
@@ -4230,8 +4073,8 @@ mod tests {
     #[test]
     fn tokenized_document_rejects_invalid_detect_patterns() {
         let err = run_tokenized(vec![
-            Value::String("email me at a@example.com".to_string()),
-            Value::String("DetectPatterns".to_string()),
+            Value::String("email me at a@example.com".to_string().into()),
+            Value::String("DetectPatterns".to_string().into()),
             Value::StringArray(
                 StringArray::new(vec!["all".into(), "web-address".into()], vec![1, 2]).unwrap(),
             ),
@@ -4240,9 +4083,9 @@ mod tests {
         assert!(err.to_string().contains("specified alone"));
 
         let err = run_tokenized(vec![
-            Value::String("email me at a@example.com".to_string()),
-            Value::String("DetectPatterns".to_string()),
-            Value::String("url".to_string()),
+            Value::String("email me at a@example.com".to_string().into()),
+            Value::String("DetectPatterns".to_string().into()),
+            Value::String("url".to_string().into()),
         ])
         .expect_err("expected unsupported pattern");
         assert!(err.to_string().contains("unsupported DetectPatterns"));
@@ -4252,9 +4095,9 @@ mod tests {
     #[test]
     fn tokenized_document_rejects_invalid_top_level_domains() {
         let err = run_tokenized(vec![
-            Value::String("visit example.com".to_string()),
-            Value::String("TopLevelDomains".to_string()),
-            Value::String("co.uk".to_string()),
+            Value::String("visit example.com".to_string().into()),
+            Value::String("TopLevelDomains".to_string().into()),
+            Value::String("co.uk".to_string().into()),
         ])
         .expect_err("expected invalid tld");
         assert!(err.to_string().contains("TopLevelDomains"));
@@ -4263,8 +4106,8 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn remove_short_words_requires_positive_integer_length() {
-        let docs =
-            run_tokenized(vec![Value::String("a short document".to_string())]).expect("tokenized");
+        let docs = run_tokenized(vec![Value::String("a short document".to_string().into())])
+            .expect("tokenized");
         let zero =
             run_remove_short(docs.clone(), Value::Num(0.0)).expect_err("expected zero rejection");
         assert!(zero.to_string().contains("positive integer"));
@@ -4336,32 +4179,33 @@ mod tests {
     #[test]
     fn bag_column_filters_read_typed_integer_storage_exactly() {
         let mut bag = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
-        bag.properties.insert(
+        bag.replace_property_unbounded(
             "Vocabulary".to_string(),
             Value::StringArray(
                 StringArray::new(vec!["keep".to_string(), "drop".to_string()], vec![1, 2]).unwrap(),
             ),
         );
-        bag.properties.insert(
+        bag.replace_property_unbounded(
             "Counts".to_string(),
             Value::Tensor(poisoned_integer_vector(
                 IntegerStorage::U16(vec![1, 2, 3, 4]),
                 vec![2, 2],
             )),
         );
-        bag.properties
-            .insert("NumWords".to_string(), Value::Num(2.0));
-        bag.properties
-            .insert("NumDocuments".to_string(), Value::Num(2.0));
+        bag.replace_property_unbounded("NumWords".to_string(), Value::Num(2.0));
+        bag.replace_property_unbounded("NumDocuments".to_string(), Value::Num(2.0));
 
         let filtered = object(
-            run_remove_words(vec![Value::Object(bag), Value::String("drop".to_string())])
-                .expect("filtered"),
+            run_remove_words(vec![
+                Value::Object(bag),
+                Value::String("drop".to_string().into()),
+            ])
+            .expect("filtered"),
         );
 
         assert_eq!(string_array_property(&filtered, "Vocabulary"), vec!["keep"]);
         let counts = tensor_property(&filtered, "Counts");
-        assert_eq!(counts.shape, vec![2, 1]);
+        assert_eq!(counts.shape(), [2, 1]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
     }
 }

@@ -3,22 +3,33 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[test]
-fn public_integer_cast_descriptors_are_unique() {
+fn public_migrated_numeric_descriptors_are_unique() {
     let _ = runmat_runtime::object_property_getter_name("__descriptor_registry_probe");
     for name in [
-        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+        "angle", "conj", "double", "expm1", "imag", "int8", "int16", "int32", "int64", "log",
+        "flintmax", "intmax", "intmin", "log1p", "log2", "log10", "real", "realmax", "realmin",
+        "realsqrt", "sign", "single", "sqrt", "uint8", "uint16", "uint32", "uint64",
     ] {
-        let count = runmat_builtins::builtin_functions()
-            .into_iter()
-            .filter(|builtin| {
-                builtin.name == name
-                    && builtin.descriptor.is_some_and(|descriptor| {
-                        descriptor.completion_policy
-                            == runmat_builtins::BuiltinCompletionPolicy::Public
-                    })
+        let catalog_count = runmat_builtins::builtin_catalog_entries()
+            .iter()
+            .filter(|entry| {
+                entry.identity.name == name
+                    && entry.descriptor.completion_policy
+                        == runmat_builtins::BuiltinCompletionPolicy::Public
             })
             .count();
-        assert_eq!(count, 1, "expected exactly one public {name} descriptor");
+        let legacy_count = runmat_builtins::builtin_functions()
+            .into_iter()
+            .filter(|builtin| builtin.name == name)
+            .count();
+        assert_eq!(
+            catalog_count, 1,
+            "expected exactly one canonical public {name} descriptor"
+        );
+        assert_eq!(
+            legacy_count, 0,
+            "expected no legacy {name} descriptor authority"
+        );
     }
 }
 
@@ -62,6 +73,16 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
     let builtins_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/builtins");
     let mut files = Vec::new();
     collect_rs_files(&builtins_root, &mut files);
+    let canonical_identifiers: std::collections::HashSet<_> =
+        runmat_builtins::builtin_catalog_entries()
+            .iter()
+            .flat_map(|entry| entry.descriptor.errors.iter())
+            .filter_map(|error| error.identifier)
+            .collect();
+    assert!(
+        !canonical_identifiers.is_empty(),
+        "canonical error inventory is linked"
+    );
 
     for file in files {
         let Ok(source) = fs::read_to_string(&file) else {
@@ -155,11 +176,21 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
             }
         }
 
-        assert!(
-            !runtime_source.contains("with_identifier(\"RunMat:"),
-            "{} hard-codes a RunMat identifier via with_identifier(...); throw through BuiltinErrorDescriptor rows instead",
-            file.display()
-        );
+        // Shared cooperation, cancellation and resource errors belong to their
+        // runtime domains, not the builtin's descriptor. Detect duplicate
+        // builtin identities using their canonical owners rather than assuming
+        // every RunMat-prefixed diagnostic is authored by this builtin.
+        for line in runtime_source.lines() {
+            if let Some((_, suffix)) = line.split_once("with_identifier(\"") {
+                if let Some((identifier, _)) = suffix.split_once('"') {
+                    assert!(
+                        !canonical_identifiers.contains(identifier),
+                        "{} duplicates canonical builtin identifier {identifier}; use its BuiltinErrorDescriptor owner",
+                        file.display()
+                    );
+                }
+            }
+        }
 
         for (identifier, expected_count) in descriptor_identifier_counts {
             let quoted_identifier = format!("\"{identifier}\"");

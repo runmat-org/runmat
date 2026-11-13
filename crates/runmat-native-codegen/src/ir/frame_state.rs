@@ -9,23 +9,8 @@ pub struct NativeSourceLocation {
     pub span: ProgramSpan,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NativeSitePhase {
-    Rvalue,
-    Statement,
-    TerminatorRvalue,
-    Terminator,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NativeMirSite {
-    pub point: ProgramPointId,
-    pub phase: NativeSitePhase,
-    pub ordinal: u32,
-    pub construct: runmat_mir::MirConstructKind,
-}
+pub type NativeSitePhase = runmat_mir::MirOperationPhase;
+pub type NativeMirSite = runmat_mir::MirOperationSite;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

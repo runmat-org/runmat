@@ -2,7 +2,44 @@
 mod test_helpers;
 
 use runmat_value::{IntValue, IntegerStorage, Value};
-use test_helpers::execute_source;
+use test_helpers::{compile_source, execute_source, interpret};
+
+#[test]
+fn empty_string_index_assignment_validates_rhs_and_keeps_values() {
+    for source in [
+        r#"S = ["a" "b"]; S([]) = "z"; T = S;"#,
+        r#"S = ["a" "b"]; E = strings(0,1); S([]) = E; T = S;"#,
+    ] {
+        let bytecode = compile_source(source).expect("compile empty string assignment");
+        let t_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(&slot, name)| (name == "T").then_some(slot))
+            .expect("named T output slot");
+        let vars = interpret(&bytecode).expect("scalar or compatible empty RHS");
+        let Value::StringArray(output) = vars.get(t_slot).expect("assigned T string array") else {
+            panic!(
+                "T must retain string-array class, got {:?}",
+                vars.get(t_slot)
+            );
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.data(), vec!["a", "b"]);
+    }
+    for (source, expected) in [
+        (
+            r#"S = ["a" "b"]; S([]) = ["x" "y"];"#,
+            "RunMat:ShapeMismatch",
+        ),
+        (
+            r#"S = ["a" "b"]; S([]) = {42};"#,
+            "RunMat:InvalidSliceAssignmentRhs",
+        ),
+    ] {
+        let error = execute_source(source).expect_err("incompatible empty-selection RHS");
+        assert_eq!(error.identifier(), Some(expected));
+    }
+}
 
 #[test]
 fn linear_index_and_end_keyword() {
@@ -21,13 +58,31 @@ fn linear_index_and_end_keyword() {
 }
 
 #[test]
+fn member_selectors_bind_end_and_preserve_argument_expansion() {
+    for source in [
+        "S=struct('x',reshape(1:12,3,4)); a=2; actual=S.x(:,a:end); assert(isequal(actual,reshape(4:12,3,3)));",
+        "S=struct('x',reshape(1:12,3,4)); actual=S.x(end-1,end); assert(actual==11);",
+        "S=struct('x',reshape(1:12,3,4)); c={2,4}; actual=S.x(c{1:end}); assert(actual==11);",
+        "S=struct('x',reshape(1:12,3,4)); c={2}; actual=S.x(end-c{end}); assert(actual==10);",
+    ] {
+        execute_source(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+    // This form needs runtime-expanded selector cardinality. Match ordinary
+    // indexing's explicit refusal instead of resolving `end` against the wrong rank.
+    let error =
+        compile_source("S=struct('x',reshape(1:24,3,4,2)); c={2,3}; actual=S.x(c{1:end},1:end);")
+            .expect_err("outer end with variable-width selectors requires dynamic cardinality");
+    assert_eq!(error.identifier(), Some("RunMat:MirIndexContextInvalid"));
+}
+
+#[test]
 fn logical_mask_indexing() {
     // A(logical([1 0 1 0])) over linearized A
     let vars = execute_source("A=[1,2;3,4]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
     // MATLAB uses column-major linearization: A(:) = [1;3;2;4], mask [1 0 1 0] selects [1,2]
     if let Value::Tensor(v) = &vars[2] {
         // MATLAB logical linear indexing returns a column vector.
-        assert_eq!(v.shape, vec![2, 1]);
+        assert_eq!(v.shape(), vec![2, 1]);
         assert_eq!(v.materialize_f64(), vec![1.0, 2.0]);
     } else {
         panic!("v");
@@ -35,13 +90,30 @@ fn logical_mask_indexing() {
 }
 
 #[test]
-fn logical_mask_linear_indexing_row_vector_returns_column() {
-    let vars = execute_source("A=[10,20,30,40]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
-    if let Value::Tensor(v) = &vars[2] {
-        assert_eq!(v.shape, vec![2, 1]);
-        assert_eq!(v.materialize_f64(), vec![10.0, 30.0]);
-    } else {
-        panic!("v");
+fn logical_mask_linear_indexing_preserves_source_vector_orientation() {
+    // Vector-vector indexing follows A's orientation. Matrix sources and
+    // matrix masks are covered separately below.
+    for (source, shape) in [
+        (
+            "A=[10,20,30,40]; idx=logical([1,0,1,0]); v=A(idx);",
+            vec![1, 2],
+        ),
+        (
+            "A=[10,20,30,40]; idx=logical([1;0;1;0]); v=A(idx);",
+            vec![1, 2],
+        ),
+        (
+            "A=[10;20;30;40]; idx=logical([1,0,1,0]); v=A(idx);",
+            vec![2, 1],
+        ),
+    ] {
+        let vars = execute_source(source).unwrap();
+        if let Value::Tensor(v) = &vars[2] {
+            assert_eq!(v.shape(), shape, "{source}");
+            assert_eq!(v.materialize_f64(), vec![10.0, 30.0]);
+        } else {
+            panic!("v");
+        }
     }
 }
 
@@ -50,7 +122,7 @@ fn logical_mask_linear_indexing_matrix_mask_returns_column() {
     let vars = execute_source("A=[1,2;3,4]; idx=logical([1,0;0,1]); v=A(idx);").unwrap();
     // mask selects A(1,1) and A(2,2) in column-major linear order
     if let Value::Tensor(v) = &vars[2] {
-        assert_eq!(v.shape, vec![2, 1]);
+        assert_eq!(v.shape(), vec![2, 1]);
         assert_eq!(v.materialize_f64(), vec![1.0, 4.0]);
     } else {
         panic!("v");
@@ -61,7 +133,7 @@ fn logical_mask_linear_indexing_matrix_mask_returns_column() {
 fn logical_mask_linear_indexing_all_false_returns_empty_column() {
     let vars = execute_source("A=[1,2;3,4]; idx=logical([0,0,0,0]); v=A(idx);").unwrap();
     if let Value::Tensor(v) = &vars[2] {
-        assert_eq!(v.shape, vec![0, 1]);
+        assert_eq!(v.shape(), vec![0, 1]);
         assert!(v.materialize_f64().is_empty());
     } else {
         panic!("v");
@@ -84,14 +156,14 @@ fn short_linear_logical_masks_read_assign_and_delete_integer_arrays() {
     assert!(vars.iter().any(|value| matches!(
         value,
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 4]
+            if tensor.shape() == vec![1, 4]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![10, 99, 30, 40]))
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 3]
+            if tensor.shape() == vec![1, 3]
                 && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![10, 30, 40]))
     )));
     assert!(vars
@@ -124,7 +196,8 @@ fn linear_logical_false_overhang_is_ignored_but_true_overhang_rejects() {
 fn host_linear_indexing_accepts_gpu_backed_range_selector() {
     let vars = execute_source("a=length(1:10); k=floor(a/2)+1; x=(1:10)'; y=x(1:k);").unwrap();
     if let Value::Tensor(v) = &vars[3] {
-        assert_eq!(v.shape, vec![1, 6]);
+        // Linear indexing of a vector preserves the source vector orientation.
+        assert_eq!(v.shape(), vec![6, 1]);
         assert_eq!(v.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     } else {
         panic!("y");
@@ -136,14 +209,14 @@ fn cell_paren_scalar_index_returns_cell_container() {
     let vars = execute_source("C={10,20,30}; D=C(2); x=D{1};").unwrap();
     let mut saw_container = false;
     let mut saw_unwrapped = false;
-    for value in vars {
+    for value in vars.values() {
         match value {
-            Value::Cell(cell) if cell.data.len() == 1 => {
-                if matches!(cell.data[0].clone(), Value::Num(n) if (n - 20.0).abs() < 1e-9) {
+            Value::Cell(cell) if cell.data().len() == 1 => {
+                if matches!(cell.data()[0].clone(), Value::Num(n) if (n - 20.0).abs() < 1e-9) {
                     saw_container = true;
                 }
             }
-            Value::Num(n) if (n - 20.0).abs() < 1e-9 => saw_unwrapped = true,
+            Value::Num(n) if (*n - 20.0).abs() < 1e-9 => saw_unwrapped = true,
             _ => {}
         }
     }
@@ -163,19 +236,19 @@ fn cell_paren_range_index_returns_cell_subset() {
     let mut saw_subset = false;
     let mut saw_x = false;
     let mut saw_y = false;
-    for value in vars {
+    for value in vars.values() {
         match value {
-            Value::Cell(cell) if cell.data.len() == 2 => {
-                let first = cell.data[0].clone();
-                let second = cell.data[1].clone();
+            Value::Cell(cell) if cell.data().len() == 2 => {
+                let first = cell.data()[0].clone();
+                let second = cell.data()[1].clone();
                 if matches!(first, Value::Num(n) if (n - 2.0).abs() < 1e-9)
                     && matches!(second, Value::Num(n) if (n - 3.0).abs() < 1e-9)
                 {
                     saw_subset = true;
                 }
             }
-            Value::Num(n) if (n - 2.0).abs() < 1e-9 => saw_x = true,
-            Value::Num(n) if (n - 3.0).abs() < 1e-9 => saw_y = true,
+            Value::Num(n) if (*n - 2.0).abs() < 1e-9 => saw_x = true,
+            Value::Num(n) if (*n - 3.0).abs() < 1e-9 => saw_y = true,
             _ => {}
         }
     }
@@ -190,17 +263,21 @@ fn cell_paren_range_index_returns_cell_subset() {
 }
 
 #[test]
-fn range_start_selector_rejects_non_numeric_value() {
-    let err = execute_source("A=1:5; s='x'; y=A(s:end);")
-        .expect_err("non-numeric range start selector should fail");
-    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+fn character_range_start_uses_character_code() {
+    let values = execute_source("A=1:5; s='x'; y=A(s:end);")
+        .expect("character range start should use its character code");
+    let Value::Tensor(selected) = &values[2] else {
+        panic!("expected y to be an empty tensor, got {:?}", values[2]);
+    };
+    assert_eq!(selected.shape(), vec![1, 0]);
+    assert!(selected.materialize_f64().is_empty());
 }
 
 #[test]
-fn range_step_selector_rejects_non_numeric_value() {
-    let err = execute_source("A=1:10; st='x'; y=A(1:st:end);")
-        .expect_err("non-numeric range step selector should fail");
-    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+fn character_range_step_uses_character_code() {
+    let values = execute_source("A=[37,42,55]; st='x'; y=A(1:st:end);")
+        .expect("character range step should use its character code");
+    assert!(matches!(&values[2], Value::Num(number) if *number == 37.0));
 }
 
 #[test]
@@ -261,7 +338,7 @@ fn fractional_range_end_expression_truncates_range_bound() {
     let vars = execute_source("A=[10,20,30,40,50]; y=A(1:end/2);")
         .expect("fractional range end expression should execute");
     if let Value::Tensor(y) = &vars[1] {
-        assert_eq!(y.shape, vec![1, 2]);
+        assert_eq!(y.shape(), vec![1, 2]);
         assert_eq!(y.materialize_f64(), vec![10.0, 20.0]);
     } else {
         panic!("expected tensor result for fractional range end expression");

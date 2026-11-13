@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use runmat_server_client::auth::{
-    resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
+    resolve_auth_token, resolve_public_project_id, resolve_server_url, RemoteConfig,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -11,7 +11,7 @@ use crate::remote::shared::build_http_client;
 #[derive(Deserialize)]
 struct RetentionResponse {
     #[serde(rename = "projectId")]
-    project_id: Uuid,
+    project_id: runmat_server_client::ids::ProjectId,
     #[serde(rename = "maxVersions")]
     max_versions: usize,
     #[serde(rename = "updatedAt")]
@@ -22,7 +22,7 @@ struct RetentionResponse {
 
 pub async fn get_project_retention(project: Option<Uuid>) -> Result<()> {
     let mut config = RemoteConfig::load()?;
-    let project_id = resolve_project_id(&config, project)?;
+    let project_id = resolve_public_project_id(&config, project)?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let (client, base) = build_http_client(&server_url, &token)?;
@@ -54,7 +54,7 @@ pub async fn get_project_retention(project: Option<Uuid>) -> Result<()> {
 
 pub async fn set_project_retention(project: Option<Uuid>, max_versions: usize) -> Result<()> {
     let mut config = RemoteConfig::load()?;
-    let project_id = resolve_project_id(&config, project)?;
+    let project_id = resolve_public_project_id(&config, project)?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let (client, base) = build_http_client(&server_url, &token)?;

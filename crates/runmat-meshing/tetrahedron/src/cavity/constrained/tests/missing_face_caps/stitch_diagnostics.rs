@@ -94,7 +94,7 @@ fn shared_patch_cap_finds_single_apex_for_simple_patch() {
     let nodes = unit_tetrahedron_nodes();
     let node_coordinates = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let boundary_triangles = cavity_boundary_triangles(&cavity, &node_coordinates)
         .expect("unit tetrahedron boundary should be valid");

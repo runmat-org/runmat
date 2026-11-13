@@ -18,7 +18,7 @@ fn compiled_object_restoration_and_field_reordering_preserve_wide_integers() {
     assert!(values.iter().any(|value| value == &Value::Num(3.0)));
     assert!(values
         .iter()
-        .any(|value| value == &Value::String("uint64".to_string())));
+        .any(|value| value == &Value::String("uint64".into())));
     assert!(values.iter().any(|value| {
         matches!(value, Value::Tensor(tensor) if tensor.numeric_value_at(0) == Some(NumericScalar::F64(2.0)) && tensor.numeric_value_at(1) == Some(NumericScalar::F64(1.0)))
     }));
@@ -58,12 +58,5 @@ fn compiled_orderfields_uses_documented_ascii_name_order() {
             _ => None,
         })
         .expect("ordered structure");
-    assert_eq!(
-        ordered
-            .fields
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        vec!["B", "a"]
-    );
+    assert_eq!(ordered.fields.keys().collect::<Vec<_>>(), vec!["B", "a"]);
 }

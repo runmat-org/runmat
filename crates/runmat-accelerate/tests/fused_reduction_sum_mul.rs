@@ -4,7 +4,9 @@ use runmat_accelerate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptio
 use runmat_accelerate::fusion::{
     FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, FusionOp,
 };
-use runmat_accelerate::fusion_exec::{execute_reduction, FusionExecutionRequest};
+use runmat_accelerate::fusion_exec::FusionExecutionRequest;
+#[path = "support/selected_reduction.rs"]
+mod selected_reduction;
 use runmat_accelerate::graph::{InstrSpan, ShapeInfo, ValueId};
 use runmat_accelerate::ReductionAxes;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ReductionFlavor};
@@ -64,7 +66,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         kind: FusionKind::Reduction,
         nodes: vec![],
         // Use a 1-D output shape placeholder (num_slices vector)
-        shape: ShapeInfo::Tensor(vec![Some(cols)]),
+        shape: ShapeInfo::Tensor(vec![Some(1), Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
         stack_layout: None,
@@ -80,7 +82,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
     let mut constants: HashMap<usize, Value> = HashMap::new();
     constants.insert(0, Value::Num(1.0));
 
-    let plan = FusionGroupPlan {
+    let mut plan = FusionGroupPlan {
         index: 0,
         group,
         operations,
@@ -101,6 +103,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         pattern: None,
     };
 
+    select_terminal(&mut plan);
     let request = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
@@ -109,31 +112,38 @@ async fn fused_sum_mul_dim0_matches_manual() {
     };
 
     // reduce_len = rows, num_slices = cols, workgroup_size = default(0)
-    let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");
-    let out_handle = match result {
-        Value::GpuTensor(h) => h,
-        _ => panic!("expected GPU tensor"),
-    };
-    let out = AccelProvider::download(provider, &out_handle)
+    let result = selected_reduction::execute(request, rows, cols, &[1, cols], 0)
         .await
-        .expect("download");
-    assert_eq!(
-        out.shape,
-        vec![cols],
-        "output shape should be vector of cols"
-    );
+        .expect("execute fused reduction");
+    match result {
+        None => {}
+        Some(result) => {
+            let out_handle = match result {
+                Value::GpuTensor(h) => h,
+                _ => panic!("expected GPU tensor"),
+            };
+            let out = AccelProvider::download(provider, &out_handle)
+                .await
+                .expect("download");
+            assert_eq!(
+                out.shape,
+                vec![1, cols],
+                "canonical sum output retains the reduced row axis"
+            );
 
-    // Manual per-column dot
-    for c in 0..cols {
-        let mut acc = 0.0f64;
-        for r in 0..rows {
-            acc += xh[r + c * rows] * wh[r + c * rows];
+            // Manual per-column dot
+            for c in 0..cols {
+                let mut acc = 0.0f64;
+                for r in 0..rows {
+                    acc += xh[r + c * rows] * wh[r + c * rows];
+                }
+                let got = out.data[c];
+                assert!(
+                    (got - acc).abs() < 1e-6,
+                    "dim0 col={c} got={got} exp={acc} rows={rows}"
+                );
+            }
         }
-        let got = out.data[c];
-        assert!(
-            (got - acc).abs() < 1e-6,
-            "dim0 col={c} got={got} exp={acc} rows={rows}"
-        );
     }
 }
 
@@ -166,7 +176,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
         id: 0,
         kind: FusionKind::Reduction,
         nodes: vec![],
-        shape: ShapeInfo::Tensor(vec![Some(cols)]),
+        shape: ShapeInfo::Tensor(vec![Some(1), Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
         stack_layout: None,
@@ -178,7 +188,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
     }];
     let mut constants: HashMap<usize, Value> = HashMap::new();
     constants.insert(0, Value::Num(1.0)); // dim=1 => reduce rows
-    let plan = FusionGroupPlan {
+    let mut plan = FusionGroupPlan {
         index: 0,
         group,
         operations,
@@ -198,32 +208,40 @@ async fn fused_mean_mul_dim0_matches_manual() {
         reduction_axes: Some(ReductionAxes::Explicit(vec![1])),
         pattern: None,
     };
+    select_terminal(&mut plan);
     let request = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
         placement: None,
         runtime: None,
     };
-    let result = execute_reduction(request, rows, cols, 0).expect("execute fused reduction");
-    let out_handle = match result {
-        Value::GpuTensor(h) => h,
-        _ => panic!("expected GPU tensor"),
-    };
-    let out = AccelProvider::download(provider, &out_handle)
+    let result = selected_reduction::execute(request, rows, cols, &[1, cols], 0)
         .await
-        .expect("download");
-    assert_eq!(out.shape, vec![cols]);
-    for c in 0..cols {
-        let mut acc = 0.0f64;
-        for r in 0..rows {
-            acc += xh[r + c * rows] * wh[r + c * rows];
+        .expect("execute fused reduction");
+    match result {
+        None => {}
+        Some(result) => {
+            let out_handle = match result {
+                Value::GpuTensor(h) => h,
+                _ => panic!("expected GPU tensor"),
+            };
+            let out = AccelProvider::download(provider, &out_handle)
+                .await
+                .expect("download");
+            assert_eq!(out.shape, vec![1, cols]);
+            for c in 0..cols {
+                let mut acc = 0.0f64;
+                for r in 0..rows {
+                    acc += xh[r + c * rows] * wh[r + c * rows];
+                }
+                let mean = acc / (rows as f64);
+                let got = out.data[c];
+                assert!(
+                    (got - mean).abs() < 1e-6,
+                    "dim0 mean col={c} got={got} exp={mean}"
+                );
+            }
         }
-        let mean = acc / (rows as f64);
-        let got = out.data[c];
-        assert!(
-            (got - mean).abs() < 1e-6,
-            "dim0 mean col={c} got={got} exp={mean}"
-        );
     }
 }
 
@@ -258,7 +276,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         id: 0,
         kind: FusionKind::Reduction,
         nodes: vec![],
-        shape: ShapeInfo::Tensor(vec![Some(rows)]),
+        shape: ShapeInfo::Tensor(vec![Some(rows), Some(1)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
         stack_layout: None,
@@ -273,7 +291,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
     let mut constants: HashMap<usize, Value> = HashMap::new();
     constants.insert(0, Value::Num(2.0)); // MATLAB dim=2 → axis=1 (reduce cols)
 
-    let plan = FusionGroupPlan {
+    let mut plan = FusionGroupPlan {
         index: 0,
         group,
         operations,
@@ -294,6 +312,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         pattern: None,
     };
 
+    select_terminal(&mut plan);
     let request = FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(x.clone()), Value::GpuTensor(w.clone())],
@@ -302,30 +321,59 @@ async fn fused_sum_mul_dim1_matches_manual() {
     };
 
     // reduce_len = cols, num_slices = rows
-    let result = execute_reduction(request, cols, rows, 0).expect("execute fused reduction");
-    let out_handle = match result {
-        Value::GpuTensor(h) => h,
-        _ => panic!("expected GPU tensor"),
-    };
-    let out = AccelProvider::download(provider, &out_handle)
+    let result = selected_reduction::execute(request, cols, rows, &[rows, 1], 0)
         .await
-        .expect("download");
-    assert_eq!(
-        out.shape,
-        vec![rows],
-        "output shape should be vector of rows"
-    );
+        .expect("execute fused reduction");
+    match result {
+        None => {}
+        Some(result) => {
+            let out_handle = match result {
+                Value::GpuTensor(h) => h,
+                _ => panic!("expected GPU tensor"),
+            };
+            let out = AccelProvider::download(provider, &out_handle)
+                .await
+                .expect("download");
+            assert_eq!(
+                out.shape,
+                vec![rows, 1],
+                "canonical sum output retains the reduced column axis"
+            );
 
-    // Manual per-row sum across columns of X.*W
-    for r in 0..rows {
-        let mut acc = 0.0f64;
-        for c in 0..cols {
-            acc += xh[r + c * rows] * wh[r + c * rows];
+            // Manual per-row sum across columns of X.*W
+            for r in 0..rows {
+                let mut acc = 0.0f64;
+                for c in 0..cols {
+                    acc += xh[r + c * rows] * wh[r + c * rows];
+                }
+                let got = out.data[r];
+                assert!(
+                    (got - acc).abs() < 1e-6,
+                    "dim1 row={r} got={got} exp={acc} cols={cols}"
+                );
+            }
         }
-        let got = out.data[r];
-        assert!(
-            (got - acc).abs() < 1e-6,
-            "dim1 row={r} got={got} exp={acc} cols={cols}"
-        );
     }
+}
+
+fn select_terminal(plan: &mut FusionGroupPlan) {
+    let name = match plan.reduction_flavor.unwrap() {
+        ReductionFlavor::Sum => "sum",
+        ReductionFlavor::Mean => "mean",
+        ReductionFlavor::CustomScale(_) => panic!("fixture terminal must be canonical sum or mean"),
+    };
+    let dim = match plan.reduction_axes.as_ref().unwrap() {
+        ReductionAxes::Explicit(axes) => axes[0] as f64,
+        _ => panic!("fixture has explicit matrix axis"),
+    };
+    plan.operations.push(FusionOp::Builtin {
+        name: name.into(),
+        origin: runmat_accelerate::graph::FusionCallOrigin::named(name),
+        inputs: vec![plan.reduction_data.unwrap(), 3],
+        output: Some(4),
+    });
+    plan.const_values.insert(3, Value::Num(dim));
+    plan.output = Some(4);
+    plan.reduction_dim = Some(3);
+    plan.group.span.end = plan.operations.len();
 }

@@ -11,8 +11,15 @@ struct FundamentalForms {
 pub fn surface_unit_normal(
     derivatives: &SurfaceDerivatives,
 ) -> Result<[f64; 3], GeometryEvaluationError> {
-    normalize(cross(derivatives.du_m, derivatives.dv_m))
-        .ok_or_else(|| invalid("surface normal is undefined at a singular parameter"))
+    normalize(cross(
+        derivatives
+            .du_m
+            .with_canonical_storage(|values, _axes| *values),
+        derivatives
+            .dv_m
+            .with_canonical_storage(|values, _axes| *values),
+    ))
+    .ok_or_else(|| invalid("surface normal is undefined at a singular parameter"))
 }
 
 /// Solves the fundamental-form eigenproblem for exact principal curvatures.
@@ -22,14 +29,50 @@ pub fn surface_principal_curvature(
     let normal = surface_unit_normal(derivatives)?;
     let forms = FundamentalForms {
         metric: [
-            dot(derivatives.du_m, derivatives.du_m),
-            dot(derivatives.du_m, derivatives.dv_m),
-            dot(derivatives.dv_m, derivatives.dv_m),
+            dot(
+                derivatives
+                    .du_m
+                    .with_canonical_storage(|values, _axes| *values),
+                derivatives
+                    .du_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
+            dot(
+                derivatives
+                    .du_m
+                    .with_canonical_storage(|values, _axes| *values),
+                derivatives
+                    .dv_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
+            dot(
+                derivatives
+                    .dv_m
+                    .with_canonical_storage(|values, _axes| *values),
+                derivatives
+                    .dv_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
         ],
         shape: [
-            dot(normal, derivatives.duu_m),
-            dot(normal, derivatives.duv_m),
-            dot(normal, derivatives.dvv_m),
+            dot(
+                normal,
+                derivatives
+                    .duu_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
+            dot(
+                normal,
+                derivatives
+                    .duv_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
+            dot(
+                normal,
+                derivatives
+                    .dvv_m
+                    .with_canonical_storage(|values, _axes| *values),
+            ),
         ],
     };
     let [e_metric, f_metric, g_metric] = forms.metric;
@@ -64,8 +107,8 @@ pub fn surface_principal_curvature(
             )
         };
     Ok(SurfaceCurvature {
-        minimum_1_per_m: minimum,
-        maximum_1_per_m: maximum,
+        minimum_1_per_m: crate::physical::Curvature::new(minimum),
+        maximum_1_per_m: crate::physical::Curvature::new(maximum),
         minimum_direction_uv,
         maximum_direction_uv,
     })

@@ -1,14 +1,16 @@
 //! MATLAB-compatible `argsort` builtin returning permutation indices.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use crate::call::BuiltinArguments;
+pub use runmat_builtins::{
+    ARGSORT_DESCRIPTOR, ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+    ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN, ARGSORT_ERROR_INVALID_DIMENSION,
+    ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN, ARGSORT_INTEGER_AUDIT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::sort;
+#[cfg(test)]
 use super::type_resolvers::index_output_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -44,233 +46,25 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`argsort` breaks fusion chains and acts as a residency sink; upstream tensors are gathered when no GPU sort kernel is provided.",
 };
 
-const ARGSORT_OUTPUT_I: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "I",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "One-based permutation indices that sort each slice.",
-}];
-
-const ARGSORT_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const ARGSORT_INPUTS_A_ARG1: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token.",
-    },
-];
-
-const ARGSORT_INPUTS_A_ARG1_ARG2: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector, placeholder, or direction token.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension selector or direction token.",
-    },
-];
-
-const ARGSORT_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ComparisonMethod\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Comparison method: 'auto', 'real', or 'abs'.",
-    },
-];
-
-const ARGSORT_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional dimension/direction arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"MissingPlacement\""),
-        description: "Name-value option key.",
-    },
-    BuiltinParamDescriptor {
-        name: "placement",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"auto\""),
-        description: "Requested NaN placement option (currently unsupported).",
-    },
-];
-
-const ARGSORT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "I = argsort(A)",
-        inputs: &ARGSORT_INPUTS_A,
-        outputs: &ARGSORT_OUTPUT_I,
-    },
-    BuiltinSignatureDescriptor {
-        label: "I = argsort(A, arg1)",
-        inputs: &ARGSORT_INPUTS_A_ARG1,
-        outputs: &ARGSORT_OUTPUT_I,
-    },
-    BuiltinSignatureDescriptor {
-        label: "I = argsort(A, arg1, arg2)",
-        inputs: &ARGSORT_INPUTS_A_ARG1_ARG2,
-        outputs: &ARGSORT_OUTPUT_I,
-    },
-    BuiltinSignatureDescriptor {
-        label: "I = argsort(A, ..., \"ComparisonMethod\", method)",
-        inputs: &ARGSORT_INPUTS_COMPARISON_METHOD,
-        outputs: &ARGSORT_OUTPUT_I,
-    },
-    BuiltinSignatureDescriptor {
-        label: "I = argsort(A, ..., \"MissingPlacement\", placement)",
-        inputs: &ARGSORT_INPUTS_MISSING_PLACEMENT,
-        outputs: &ARGSORT_OUTPUT_I,
-    },
-];
-
-const ARGSORT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ARGSORT.INVALID_DIMENSION",
-    identifier: Some("RunMat:sort:InvalidDimension"),
-    when: "Dimension argument is non-positive, non-integer, or otherwise invalid.",
-    message: "sort: invalid dimension argument",
-};
-
-const ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.ARGSORT.COMPARISON_METHOD_REQUIRES_STRING",
-        identifier: Some("RunMat:sort:ComparisonMethodRequiresString"),
-        when: "ComparisonMethod option value is not string-like.",
-        message: "sort: 'ComparisonMethod' requires a string value",
-    };
-
-const ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ARGSORT.COMPARISON_METHOD_UNKNOWN",
-    identifier: Some("RunMat:sort:ComparisonMethodUnknown"),
-    when: "ComparisonMethod option value is not one of 'auto'/'real'/'abs'.",
-    message: "sort: unsupported ComparisonMethod",
-};
-
-const ARGSORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.ARGSORT.MISSINGPLACEMENT_REQUIRES_STRING",
-        identifier: Some("RunMat:sort:MissingPlacementRequiresString"),
-        when: "MissingPlacement option value is not string-like.",
-        message: "sort: 'MissingPlacement' requires a string value",
-    };
-
-const ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ARGSORT.MISSINGPLACEMENT_UNKNOWN",
-    identifier: Some("RunMat:sort:MissingPlacementUnknown"),
-    when: "MissingPlacement option value is not one of 'auto'/'first'/'last'.",
-    message: "sort: unsupported MissingPlacement",
-};
-
-const ARGSORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ARGSORT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:sort:InvalidArgument"),
-    when: "Parser encounters invalid or unrecognized option/value arguments.",
-    message: "sort: invalid argument sequence",
-};
-
-const ARGSORT_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    ARGSORT_ERROR_INVALID_DIMENSION,
-    ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
-    ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN,
-    ARGSORT_ERROR_MISSINGPLACEMENT_REQUIRES_STRING,
-    ARGSORT_ERROR_MISSINGPLACEMENT_UNKNOWN,
-    ARGSORT_ERROR_INVALID_ARGUMENT,
-];
-
-pub const ARGSORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ARGSORT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ARGSORT_ERRORS,
-};
-
-const ARGSORT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::AliasOf,
-    canonical_builtin: Some("sort"),
-    notes: "argsort delegates to sort and returns its one-based permutation-index output, so sort's documented exact integer input, dimension, and resident-provider contract is canonical.",
-};
-
 #[runtime_builtin(
     name = "argsort",
-    category = "array/sorting_sets",
-    summary = "Return permutation indices that sort arrays along a dimension.",
-    keywords = "argsort,sort,indices,permutation,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(index_output_type),
-    descriptor(crate::builtins::array::sorting_sets::argsort::ARGSORT_DESCRIPTOR),
-    integer_audit(crate::builtins::array::sorting_sets::argsort::ARGSORT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::argsort"
 )]
-async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let evaluation = sort::evaluate(value, &rest).await?;
+async fn argsort_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(
+            crate::build_runtime_error("argsort: too many output arguments; maximum is 1")
+                .with_builtin("argsort")
+                .with_identifier(
+                    runmat_builtins::ARGSORT_ERROR_INVALID_ARGUMENT
+                        .identifier
+                        .expect("declared identifier"),
+                )
+                .build(),
+        );
+    }
+    let evaluation = sort::evaluate_view(value, rest.view()).await?;
     Ok(evaluation.indices_value())
 }
 
@@ -285,7 +79,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::argsort_builtin(value, rest))
+        block_on(super::argsort_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_builtins::{ResolveContext, Type};
@@ -299,7 +96,7 @@ pub(crate) mod tests {
         match indices {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]);
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), vec![3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -512,7 +309,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let indices = argsort_builtin(Value::GpuTensor(handle), Vec::new()).expect("argsort");
@@ -533,7 +330,7 @@ pub(crate) mod tests {
         let cpu_indices = argsort_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let gpu_handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -547,7 +344,7 @@ pub(crate) mod tests {
         };
         assert!(matches!(gpu_indices, Value::GpuTensor(_)));
         let gpu_tensor = test_support::gather(gpu_indices).expect("gather GPU indices");
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

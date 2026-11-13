@@ -2,218 +2,25 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, TRIPULS_ERROR_ARG_COUNT, TRIPULS_ERROR_INTERNAL,
+    TRIPULS_ERROR_INVALID_INPUT, TRIPULS_ERROR_SKEW_INVALID, TRIPULS_ERROR_WIDTH_INVALID,
+    TRIPULS_GPU_INPUT_EXTENSION, TRIPULS_INTEGER_CONTROL_EXTENSION, TRIPULS_INTEGER_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::NumericStorage;
-use runmat_value::{Tensor, Value};
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
-use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::signal::type_resolvers::numeric_unary_shape_type;
+use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::tensor::tensor_into_value;
+use crate::builtins::math::signal::common::{
+    admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
+    prepared_real_integer_tensor, waveform_input_tensor, PreparedWaveformControl,
+    SignalCooperation, WaveformControlError, WaveformOutputMode,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tripuls";
-
-const TRIPULS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Triangular pulse samples.",
-}];
-
-const TRIPULS_INPUTS_T: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "T",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times relative to the pulse center.",
-}];
-
-const TRIPULS_INPUTS_T_W: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "T",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times relative to the pulse center.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Pulse width.",
-    },
-];
-
-const TRIPULS_INPUTS_T_W_S: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "T",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times relative to the pulse center.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Pulse width.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
-        description: "Skew in [-1, 1].",
-    },
-];
-
-const TRIPULS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = tripuls(T)",
-        inputs: &TRIPULS_INPUTS_T,
-        outputs: &TRIPULS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = tripuls(T, W)",
-        inputs: &TRIPULS_INPUTS_T_W,
-        outputs: &TRIPULS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = tripuls(T, W, S)",
-        inputs: &TRIPULS_INPUTS_T_W_S,
-        outputs: &TRIPULS_OUTPUT,
-    },
-];
-
-const TRIPULS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.INVALID_INPUT",
-    identifier: Some("RunMat:tripuls:InvalidInput"),
-    when: "Input times cannot be interpreted as real numeric samples.",
-    message: "tripuls: expected real numeric input",
-};
-
-const TRIPULS_ERROR_WIDTH_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.WIDTH_INVALID",
-    identifier: Some("RunMat:tripuls:WidthInvalid"),
-    when: "Width is not a positive finite scalar.",
-    message: "tripuls: width must be a positive finite scalar",
-};
-
-const TRIPULS_ERROR_SKEW_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.SKEW_INVALID",
-    identifier: Some("RunMat:tripuls:SkewInvalid"),
-    when: "Skew is not a finite scalar in [-1, 1].",
-    message: "tripuls: skew must be a finite scalar in [-1, 1]",
-};
-
-const TRIPULS_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.ARG_COUNT",
-    identifier: Some("RunMat:tripuls:ArgCount"),
-    when: "Too many input arguments are provided.",
-    message: "tripuls: expected 1, 2, or 3 arguments",
-};
-
-const TRIPULS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRIPULS.INTERNAL",
-    identifier: Some("RunMat:tripuls:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "tripuls: internal error",
-};
-
-const TRIPULS_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    TRIPULS_ERROR_INVALID_INPUT,
-    TRIPULS_ERROR_WIDTH_INVALID,
-    TRIPULS_ERROR_SKEW_INVALID,
-    TRIPULS_ERROR_ARG_COUNT,
-    TRIPULS_ERROR_INTERNAL,
-];
-
-pub const TRIPULS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRIPULS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRIPULS_ERRORS,
-};
-
-const TRIPULS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tripuls-integer-sample-times",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tripuls with native typed-integer sample times is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TripulsIntegerSampleTimesExtension"),
-};
-const TRIPULS_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tripuls-integer-controls",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tripuls with native typed-integer width or skew is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TripulsIntegerControlsExtension"),
-};
-const TRIPULS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tripuls-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interactive tripuls gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TripulsGpuInputExtension"),
-};
-pub const TRIPULS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    TRIPULS_INTEGER_DATA_EXTENSION,
-    TRIPULS_INTEGER_CONTROL_EXTENSION,
-    TRIPULS_GPU_INPUT_EXTENSION,
-];
-const TRIPULS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "T",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented sample-time domain is single or double. RunMat mode admits typed integers only when every value is exactly representable at the binary64 pulse boundary.",
-    }];
-const TRIPULS_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "W",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed width is a mode-gated scalar and must convert exactly before positive-range validation.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "S",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed skew is a mode-gated scalar and must convert exactly before validation in the closed interval from -1 through 1.",
-    },
-];
-pub const TRIPULS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = tripuls(integer_T, ...)",
-        inputs: &TRIPULS_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Compatibility and exactness checks occur before provider access; admitted integer samples produce a same-shaped double waveform.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = tripuls(T, integer_W, integer_S?)",
-        inputs: &TRIPULS_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Width and skew cross checked scalar binary64 boundaries; output shape, class, and residency follow the supported sample-time path.",
-    },
-];
 
 fn tripuls_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     tripuls_error_with_message(error.message, error)
@@ -248,7 +55,9 @@ fn tripuls_error_with_source(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    let mut failure = builder.build();
+    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    failure
 }
 
 pub(crate) fn tripuls_scalar(t: f64, width: f64, skew: f64) -> f64 {
@@ -281,32 +90,6 @@ pub(crate) fn tripuls_scalar(t: f64, width: f64, skew: f64) -> f64 {
     }
 }
 
-pub(crate) fn tripuls_tensor(tensor: Tensor, width: f64, skew: f64) -> Result<Tensor, String> {
-    let shape = tensor.shape.clone();
-    match tensor
-        .into_numeric_storage()
-        .map_err(|err| err.to_string())?
-    {
-        NumericStorage::F32(values) => Tensor::from_f32(
-            values
-                .into_iter()
-                .map(|value| tripuls_scalar(f64::from(value), width, skew) as f32)
-                .collect(),
-            shape,
-        )
-        .map_err(|err| err.to_string()),
-        storage => Tensor::new(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(|value| tripuls_scalar(value, width, skew))
-                .collect(),
-            shape,
-        )
-        .map_err(|err| err.to_string()),
-    }
-}
-
 pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
     if !width.is_finite() || width <= 0.0 {
         Err(format!("got {width}"))
@@ -325,16 +108,33 @@ pub(crate) fn validate_skew(skew: f64) -> Result<f64, String> {
 
 #[runtime_builtin(
     name = "tripuls",
-    category = "math/signal",
-    summary = "Generate sampled triangular pulses.",
-    keywords = "tripuls,triangular pulse,pulse train,signal processing,skew",
-    type_resolver(numeric_unary_shape_type),
-    descriptor(crate::builtins::math::signal::tripuls::TRIPULS_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::tripuls::TRIPULS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::tripuls::TRIPULS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::tripuls"
 )]
+async fn tripuls_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    tripuls_in_runtime(runtime.as_ref(), t, rest).await
+}
+
+#[cfg(test)]
 async fn tripuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    tripuls_in_runtime(None, t, rest.into()).await
+}
+
+async fn tripuls_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&TRIPULS_ERROR_INTERNAL);
+    cooperation.completed(0).await?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&t)
         || rest
             .iter()
@@ -345,36 +145,78 @@ async fn tripuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &t,
-        &TRIPULS_INTEGER_DATA_EXTENSION,
-        BUILTIN_NAME,
-        "sample times",
-    )
-    .await?;
-    for value in &rest {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            value,
-            &TRIPULS_INTEGER_CONTROL_EXTENSION,
+    if crate::builtins::common::validation::value_has_native_integer_class(&t) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRIPULS_INTEGER_DATA_EXTENSION,
             BUILTIN_NAME,
-            "width or skew",
-        )
-        .await?;
+        )?;
     }
-    let (width, skew) = parse_options(&rest).await?;
+    let mut controls = prepare_options(rest.view())?;
+    admit_real_waveform_sample(&t).map_err(|_| tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))?;
+    if let Some(width) = &mut controls.0 {
+        width
+            .admit_host_boundary(&mut cooperation)
+            .await
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+    }
+    if let Some(skew) = &mut controls.1 {
+        skew.admit_host_boundary(&mut cooperation)
+            .await
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+    }
+    if let Some(width) = &controls.0 {
+        width
+            .admit_resident_metadata(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL)
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+    }
+    if let Some(skew) = &controls.1 {
+        skew.admit_resident_metadata(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL)
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+    }
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &TRIPULS_ERROR_INTERNAL)?;
+    let resident_inputs: Vec<_> = std::iter::once(&t)
+        .chain(rest.iter())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    gpu_helpers::select_resident_output_source(resident_inputs.iter().cloned(), BUILTIN_NAME)?;
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &TRIPULS_INTEGER_DATA_EXTENSION, "sample times")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
+    let (width, skew) = resolve_options(controls, &mut cooperation).await?;
     match t {
-        Value::GpuTensor(handle) => tripuls_gpu(handle, width, skew).await,
+        Value::GpuTensor(handle) => {
+            tripuls_gpu(
+                handle,
+                width,
+                skew,
+                prepared_payload,
+                &resident_inputs,
+                &mut cooperation,
+            )
+            .await
+        }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))
         }
-        other => tripuls_real(other, width, skew),
+        other => tripuls_real(other, width, skew, &mut cooperation).await,
     }
 }
 
-async fn parse_options(rest: &[Value]) -> BuiltinResult<(f64, f64)> {
+type TripulsControls<'a> = (
+    Option<PreparedWaveformControl<'a>>,
+    Option<PreparedWaveformControl<'a>>,
+);
+
+fn prepare_options<'a>(
+    rest: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<TripulsControls<'a>> {
     if rest.len() > 2 {
         return Err(tripuls_error_with_detail(
             &TRIPULS_ERROR_ARG_COUNT,
@@ -383,42 +225,119 @@ async fn parse_options(rest: &[Value]) -> BuiltinResult<(f64, f64)> {
     }
     let width = match rest.first() {
         Some(value) => {
-            let raw = scalar_f64_from_value_async(value)
-                .await
-                .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err))?
-                .ok_or_else(|| tripuls_error(&TRIPULS_ERROR_WIDTH_INVALID))?;
-            validate_width(raw).map_err(|err| {
-                tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err.as_str())
-            })?
+            let control = PreparedWaveformControl::admit(
+                value,
+                &TRIPULS_INTEGER_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+                "width or skew",
+            )
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+            if let Some(raw) = control.host_value() {
+                validate_width(raw)
+                    .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err))?;
+            }
+            Some(control)
         }
-        None => 1.0,
+        None => None,
     };
     let skew = match rest.get(1) {
         Some(value) => {
-            let raw = scalar_f64_from_value_async(value)
+            let control = PreparedWaveformControl::admit(
+                value,
+                &TRIPULS_INTEGER_CONTROL_EXTENSION,
+                BUILTIN_NAME,
+                "width or skew",
+            )
+            .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+            if let Some(raw) = control.host_value() {
+                validate_skew(raw)
+                    .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_SKEW_INVALID, err))?;
+            }
+            Some(control)
+        }
+        None => None,
+    };
+    Ok((width, skew))
+}
+
+async fn resolve_options(
+    controls: TripulsControls<'_>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<(f64, f64)> {
+    let width = match controls.0 {
+        Some(control) => {
+            let raw = control
+                .resolve(cooperation)
                 .await
+                .map_err(|error| control_error(error, &TRIPULS_ERROR_WIDTH_INVALID))?;
+            validate_width(raw)
+                .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_WIDTH_INVALID, err))?
+        }
+        None => 1.0,
+    };
+    let skew = match controls.1 {
+        Some(control) => {
+            let raw = control
+                .resolve(cooperation)
+                .await
+                .map_err(|error| control_error(error, &TRIPULS_ERROR_SKEW_INVALID))?;
+            validate_skew(raw)
                 .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_SKEW_INVALID, err))?
-                .ok_or_else(|| tripuls_error(&TRIPULS_ERROR_SKEW_INVALID))?;
-            validate_skew(raw).map_err(|err| {
-                tripuls_error_with_detail(&TRIPULS_ERROR_SKEW_INVALID, err.as_str())
-            })?
         }
         None => 0.0,
     };
     Ok((width, skew))
 }
 
-async fn tripuls_gpu(handle: GpuTensorHandle, width: f64, skew: f64) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "gpu gather failed", source)
-        })?;
-    let result = tripuls_tensor(tensor, width, skew)
-        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INTERNAL, err))?;
-    let restored =
-        gpu_helpers::restore_class_preserving_value(&handle, Value::Tensor(result), BUILTIN_NAME)?;
-    if runmat_accelerate_api::handle_is_explicit(&handle)
+fn control_error(
+    error: WaveformControlError,
+    invalid: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => tripuls_error_with_detail(invalid, detail),
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "control download failed", source)
+        }
+    }
+}
+
+async fn tripuls_gpu(
+    handle: GpuTensorHandle,
+    width: f64,
+    skew: f64,
+    prepared_payload: Option<crate::builtins::common::validation::PreparedIntegerPayload>,
+    resident_inputs: &[GpuTensorHandle],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| tripuls_error_with_detail(&TRIPULS_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|source| {
+                tripuls_error_with_source(&TRIPULS_ERROR_INTERNAL, "gpu gather failed", source)
+            })?,
+    };
+    let result = map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |value| tripuls_scalar(value, width, skew),
+        cooperation,
+    )
+    .await?
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL))?;
+    let protected: Vec<_> = resident_inputs.iter().collect();
+    let restored = gpu_helpers::restore_class_preserving_value_protecting(
+        &handle,
+        Value::Tensor(result),
+        BUILTIN_NAME,
+        &protected,
+    )?;
+    if resident_inputs
+        .iter()
+        .any(runmat_accelerate_api::handle_is_explicit)
         && !matches!(restored, Value::GpuTensor(_))
     {
         return Err(tripuls_error_with_detail(
@@ -429,12 +348,30 @@ async fn tripuls_gpu(handle: GpuTensorHandle, width: f64, skew: f64) -> BuiltinR
     Ok(restored)
 }
 
-fn tripuls_real(value: Value, width: f64, skew: f64) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INVALID_INPUT, err))?;
-    tripuls_tensor(tensor, width, skew)
-        .map(tensor_into_value)
-        .map_err(|err| tripuls_error_with_detail(&TRIPULS_ERROR_INTERNAL, err))
+async fn tripuls_real(
+    value: Value,
+    width: f64,
+    skew: f64,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Value> {
+    let tensor = waveform_input_tensor(value, BUILTIN_NAME, cooperation)
+        .await?
+        .map_err(|error| {
+            error.into_runtime_error(
+                BUILTIN_NAME,
+                &TRIPULS_ERROR_INVALID_INPUT,
+                &TRIPULS_ERROR_INTERNAL,
+            )
+        })?;
+    map_real_waveform(
+        tensor,
+        WaveformOutputMode::PreserveSingle,
+        |sample| tripuls_scalar(sample, width, skew),
+        cooperation,
+    )
+    .await?
+    .map(tensor_into_value)
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &TRIPULS_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -442,7 +379,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::{CharArray, IntegerStorage};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, NumericStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(tripuls_builtin(t, rest))
@@ -463,7 +400,7 @@ mod tests {
     fn tripuls_default_samples_triangle() {
         let input = Tensor::new(vec![-0.5, -0.25, 0.0, 0.25, 0.5], vec![1, 5]).unwrap();
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("tripuls"));
-        assert_eq!(out.shape, vec![1, 5]);
+        assert_eq!(out.shape(), vec![1, 5]);
         assert_eq!(out.materialize_f64(), vec![0.0, 0.5, 1.0, 0.5, 0.0]);
     }
 
@@ -473,7 +410,7 @@ mod tests {
         let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
         let out =
             expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("tripuls"));
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), vec![1, 3]);
         assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0]);
     }
 
@@ -509,6 +446,73 @@ mod tests {
     }
 
     #[test]
+    fn invalid_host_skew_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err = call(
+            Value::GpuTensor(input.handle),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        )
+        .expect_err("host skew");
+        assert_eq!(err.identifier(), TRIPULS_ERROR_SKEW_INVALID.identifier);
+    }
+
+    #[test]
+    fn invalid_host_sample_precedes_resident_width_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let control = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        control.probe.mark_unavailable();
+        let error = call(
+            Value::String("invalid".into()),
+            vec![Value::GpuTensor(control.handle)],
+        )
+        .expect_err("invalid sample before control download");
+        assert_eq!(error.identifier(), TRIPULS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn wide_host_width_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let owner = TestAllocationOwner::new();
+        let sample = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        sample.probe.mark_unavailable();
+        let error = call(
+            Value::GpuTensor(sample.handle),
+            vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+        )
+        .expect_err("inexact width before sample download");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn integer_sample_literal_boundary_matches_catalog_fact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = call(Value::Int(IntValue::U64((1_u64 << 53) + 1)), Vec::new())
+            .expect_err("inexact sample time");
+        assert!(error.message().contains("exactly representable"));
+        assert!(matches!(
+            call(Value::Int(IntValue::U64(1_u64 << 54)), Vec::new()).unwrap(),
+            Value::Num(_)
+        ));
+    }
+
+    #[test]
     fn tripuls_automatic_residency_is_transparent_and_explicit_residency_is_gated() {
         use crate::builtins::common::test_support;
 
@@ -530,8 +534,9 @@ mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let error = call(Value::GpuTensor(explicit), Vec::new())
                 .expect_err("MATLAB mode rejects explicit interactive gpuArray input");
             assert_eq!(
@@ -542,14 +547,46 @@ mod tests {
     }
 
     #[test]
+    fn restoration_never_adopts_other_borrowed_control_or_retires_it_on_failure() {
+        use crate::builtins::math::signal::common::waveform_restore_fixture::RestoreProbeProvider;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        for alias_control in [true, false] {
+            let provider = RestoreProbeProvider::new();
+            let sample = provider.input(&[0.0]);
+            let width = provider.input(&[1.0]);
+            let borrowed_sample = sample.clone();
+            let borrowed_width = width.clone();
+            if alias_control {
+                provider.alias_on_restore(&width);
+            } else {
+                provider.fail_on_restore();
+            }
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let error = call(Value::GpuTensor(sample), vec![Value::GpuTensor(width)])
+                .expect_err("borrowed alias or late upload failure");
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert_eq!(provider.downloads(), 2);
+            assert!(borrowed_sample.allocation_lease().validate_live().is_ok());
+            assert!(borrowed_width.allocation_lease().validate_live().is_ok());
+            if alias_control {
+                assert!(error.message().contains("borrowed input"));
+            } else {
+                assert!(error.message().contains("late waveform restoration fault"));
+                assert!(std::error::Error::source(&error).is_some());
+            }
+        }
+    }
+
+    #[test]
     fn tripuls_runmat_gpu_extension_preserves_explicit_provenance() {
         use crate::builtins::common::test_support;
 
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![-0.5, 0.0, 0.5], vec![1, 3]).expect("input");
             let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let _runmat_mode = crate::compatibility::push_runmat_extensions_enabled(true);
             let output = call(Value::GpuTensor(explicit), Vec::new())
                 .expect("RunMat mode accepts explicit gpuArray input");
@@ -590,6 +627,14 @@ mod tests {
 
     #[test]
     fn tripuls_is_registered() {
-        assert!(builtin_function_by_name("tripuls").is_some());
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("tripuls").unwrap();
+        assert!(builtin_function_by_name("tripuls").is_none());
+        assert_eq!(entry.bindings.len(), 1);
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name("tripuls");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
     }
 }

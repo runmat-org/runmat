@@ -1,75 +1,12 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
+#[cfg(test)]
+use runmat_builtins::BuiltinIntegerAuditKind;
+pub use runmat_builtins::{
+    FUNC2STR_DESCRIPTOR, FUNC2STR_ERROR_HANDLE_TYPE_INVALID, FUNC2STR_ERROR_TOO_MANY_OUTPUTS,
+    FUNC2STR_INTEGER_AUDIT, STR2FUNC_DESCRIPTOR, STR2FUNC_ERROR_NAME_INVALID,
+    STR2FUNC_ERROR_NAME_SHAPE_INVALID, STR2FUNC_ERROR_NAME_TYPE_INVALID,
+    STR2FUNC_ERROR_TOO_MANY_OUTPUTS, STR2FUNC_INTEGER_AUDIT,
 };
 use runmat_value::Value;
-
-const STR2FUNC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle value.",
-}];
-
-const STR2FUNC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle text.",
-}];
-
-const STR2FUNC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "fh = str2func(name)",
-    inputs: &STR2FUNC_INPUTS,
-    outputs: &STR2FUNC_OUTPUT,
-}];
-
-pub const STR2FUNC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STR2FUNC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STR2FUNC_ERRORS,
-};
-
-pub const STR2FUNC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "str2func accepts scalar function-name text only. Integer, numeric, and provider-resident values reject before provider access, and the builtin has no integer output surface.",
-    };
-
-const STR2FUNC_ERROR_NAME_SHAPE_INVALID: runmat_builtins::BuiltinErrorDescriptor =
-    runmat_builtins::BuiltinErrorDescriptor {
-        code: "RM.STR2FUNC.NAME_SHAPE_INVALID",
-        identifier: Some("RunMat:Str2FuncNameShapeInvalid"),
-        when: "Input text value is not scalar row text.",
-        message: "str2func: function name text input must be scalar row text",
-    };
-
-const STR2FUNC_ERROR_NAME_TYPE_INVALID: runmat_builtins::BuiltinErrorDescriptor =
-    runmat_builtins::BuiltinErrorDescriptor {
-        code: "RM.STR2FUNC.NAME_TYPE_INVALID",
-        identifier: Some("RunMat:Str2FuncNameTypeInvalid"),
-        when: "Input is not string or char text.",
-        message: "str2func: expected string/char function name",
-    };
-
-const STR2FUNC_ERROR_NAME_INVALID: runmat_builtins::BuiltinErrorDescriptor =
-    runmat_builtins::BuiltinErrorDescriptor {
-        code: "RM.STR2FUNC.NAME_INVALID",
-        identifier: Some("RunMat:Str2FuncNameInvalid"),
-        when: "Parsed function name is empty.",
-        message: "str2func: function name must not be empty",
-    };
-
-pub(crate) const STR2FUNC_ERRORS: [runmat_builtins::BuiltinErrorDescriptor; 3] = [
-    STR2FUNC_ERROR_NAME_SHAPE_INVALID,
-    STR2FUNC_ERROR_NAME_TYPE_INVALID,
-    STR2FUNC_ERROR_NAME_INVALID,
-];
 
 pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
     fn normalize_handle_name(text: &str) -> Option<String> {
@@ -79,8 +16,14 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
     }
 
     let name = match value {
-        Value::String(text) => normalize_handle_name(&text),
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_handle_name(&sa.data[0]),
+        Value::String(runmat_value::StringElement::Text(text)) => normalize_handle_name(&text),
+        Value::StringArray(sa) if sa.data().len() == 1 && !sa.data()[0].is_missing() => {
+            normalize_handle_name(
+                sa.data()[0]
+                    .text_ref()
+                    .expect("checked nonmissing scalar string"),
+            )
+        }
         Value::StringArray(_) => {
             return Err(crate::runtime_descriptor_error_with_detail(
                 "str2func",
@@ -88,8 +31,14 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
                 "string array must be scalar",
             ))
         }
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+        Value::CharArray(ca) if ca.rows == 1 && ca.shape().iter().skip(2).all(|n| *n == 1) => {
+            let text = super::text::decode_utf16_with_error(ca.data(), || {
+                crate::runtime_descriptor_error_with_detail(
+                    "str2func",
+                    &STR2FUNC_ERROR_NAME_INVALID,
+                    "function name is not valid UTF-16 text",
+                )
+            })?;
             normalize_handle_name(&text)
         }
         Value::CharArray(_) => {
@@ -110,78 +59,42 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
     .ok_or_else(|| crate::runtime_descriptor_error("str2func", &STR2FUNC_ERROR_NAME_INVALID))?;
 
     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
-        Ok(Value::BoundFunctionHandle { name, function })
+        Ok(crate::user_functions::bound_function_handle(name, function))
     } else if crate::is_well_formed_qualified_name(&name) {
-        Ok(Value::ExternalFunctionHandle(name))
+        Ok(Value::external_function_handle(name))
     } else {
-        Ok(Value::FunctionHandle(name))
+        Ok(Value::function_handle(name))
     }
 }
 
 #[runmat_macros::runtime_builtin(
     name = "str2func",
-    descriptor(self::STR2FUNC_DESCRIPTOR),
-    integer_audit(self::STR2FUNC_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::function_handle_text"
 )]
 pub fn str2func_builtin_registered(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &STR2FUNC_DESCRIPTOR,
+        &STR2FUNC_ERROR_TOO_MANY_OUTPUTS,
+        "str2func",
+    )?;
     dispatch_str2func(value)
 }
-
-const FUNC2STR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function name string.",
-}];
-
-const FUNC2STR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle value.",
-}];
-
-const FUNC2STR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "name = func2str(fh)",
-    inputs: &FUNC2STR_INPUTS,
-    outputs: &FUNC2STR_OUTPUT,
-}];
-
-pub const FUNC2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FUNC2STR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FUNC2STR_ERRORS,
-};
-
-pub const FUNC2STR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "func2str accepts only function-handle values and returns handle text; integer, numeric, and provider-resident values reject before provider access.",
-    };
-
-const FUNC2STR_ERROR_HANDLE_TYPE_INVALID: runmat_builtins::BuiltinErrorDescriptor =
-    runmat_builtins::BuiltinErrorDescriptor {
-        code: "RM.FUNC2STR.HANDLE_TYPE_INVALID",
-        identifier: Some("RunMat:Func2StrHandleTypeInvalid"),
-        when: "Input is not a supported function handle value.",
-        message: "func2str: expected function handle",
-    };
-
-pub(crate) const FUNC2STR_ERRORS: [runmat_builtins::BuiltinErrorDescriptor; 1] =
-    [FUNC2STR_ERROR_HANDLE_TYPE_INVALID];
 
 pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name)
-        | Value::BoundFunctionHandle { name, .. } => Ok(Value::String(name)),
-        Value::Closure(closure) => Ok(Value::String(closure.function_name)),
+        | Value::MethodFunctionHandle(name) => Ok(Value::String(
+            runmat_value::StringElement::Text(name.into_text_owner()),
+        )),
+        Value::BoundFunctionHandle(handle) => Ok(Value::String(runmat_value::StringElement::Text(
+            handle.name.clone(),
+        ))),
+        Value::Closure(closure) => Ok(Value::String(runmat_value::StringElement::Text(
+            closure.function_name.clone(),
+        ))),
+        Value::ScopedFunctionHandle(_) => Ok(Value::from("<invocation-scoped callable>")),
         other => Err(crate::runtime_descriptor_error_with_detail(
             "func2str",
             &FUNC2STR_ERROR_HANDLE_TYPE_INVALID,
@@ -192,11 +105,15 @@ pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "func2str",
-    descriptor(self::FUNC2STR_DESCRIPTOR),
-    integer_audit(self::FUNC2STR_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::function_handle_text"
 )]
 pub fn func2str_builtin_registered(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &FUNC2STR_DESCRIPTOR,
+        &FUNC2STR_ERROR_TOO_MANY_OUTPUTS,
+        "func2str",
+    )?;
     dispatch_func2str(value)
 }
 
@@ -205,13 +122,63 @@ mod tests {
     use super::*;
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
-    fn unowned_resident_value() -> Value {
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        })
+    #[test]
+    fn str2func_rejects_character_pages_and_excess_outputs() {
+        let pages =
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+                .unwrap();
+        let error = dispatch_str2func(Value::CharArray(pages)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
+        let _outputs = crate::output_count::push_output_count(Some(2)).unwrap();
+        let error = str2func_builtin_registered(Value::string("sin")).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:str2func:TooManyOutputs"));
+    }
+
+    #[test]
+    fn func2str_returns_existing_name_owner_without_resolving() {
+        for value in [
+            Value::function_handle("unresolved_text_target".into()),
+            Value::external_function_handle("pkg.unresolved_target".into()),
+            Value::method_function_handle("Class.method".into()),
+        ] {
+            let (expected, backing) = match &value {
+                Value::FunctionHandle(name)
+                | Value::ExternalFunctionHandle(name)
+                | Value::MethodFunctionHandle(name) => {
+                    (name.name().to_owned(), name.name().as_ptr())
+                }
+                _ => unreachable!(),
+            };
+            let result = dispatch_func2str(value).unwrap();
+            let Value::String(runmat_value::StringElement::Text(text)) = result else {
+                panic!("string scalar expected")
+            };
+            assert_eq!(text.as_str(), expected);
+            assert_eq!(text.as_str().as_ptr(), backing);
+        }
+    }
+
+    #[test]
+    fn func2str_rejects_excess_outputs_before_input_inspection() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).unwrap();
+        let error = func2str_builtin_registered(Value::Num(1.0)).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            FUNC2STR_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
+    }
+
+    fn unregistered_resident_value() -> Value {
+        Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("valid unregistered resident fixture")
+                .handle,
+        )
     }
 
     #[test]
@@ -231,7 +198,7 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                     .expect("integer tensor"),
             ),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ] {
             let error = dispatch_str2func(value).expect_err("non-text must reject");
             assert_eq!(error.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
@@ -264,7 +231,7 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                     .expect("integer tensor"),
             ),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ]) {
             let error = dispatch_func2str(value).expect_err("non-handle rejection");
             assert_eq!(

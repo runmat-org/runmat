@@ -13,7 +13,7 @@ pub(crate) fn modulate_constellation_shader(
         NumericPrecision::F64 => "1.7976931348623157e308",
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
-    format!(
+    let source = format!(
         r#"
 struct Tensor {{
     data: array<{ty}>,
@@ -37,11 +37,12 @@ struct Params {{
 @group(0) @binding(4) var<uniform> params: Params;
 
 const ORDER: u32 = {order}u;
-const EPSILON: {ty} = {epsilon};
 const MAX_FINITE: {ty} = {ty}({max_val});
 
+fn isFinite(value: {ty}) -> bool {{ @IEEE_FINITE_PREDICATE@ }}
+
 fn isfinite_scalar(x: {ty}) -> bool {{
-    return (x == x) && (abs(x) < MAX_FINITE);
+    return isFinite(x) && (abs(x) < MAX_FINITE);
 }}
 
 fn set_error(code: u32, index: u32) {{
@@ -69,22 +70,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         Out.data[idx * 2u + 1u] = {ty}(0.0);
         return;
     }}
-    if raw > {ty}(ORDER - 1u) + {ty}(0.5) {{
+    if raw > {ty}(ORDER - 1u) {{
         set_error(2u, idx);
         Out.data[idx * 2u] = {ty}(0.0);
         Out.data[idx * 2u + 1u] = {ty}(0.0);
         return;
     }}
 
-    let rounded = round(raw);
-    if abs(rounded - raw) > EPSILON {{
+    if raw != floor(raw) {{
         set_error(3u, idx);
         Out.data[idx * 2u] = {ty}(0.0);
         Out.data[idx * 2u + 1u] = {ty}(0.0);
         return;
     }}
 
-    let symbol = u32(rounded);
+    let symbol = u32(raw);
     if symbol >= ORDER {{
         set_error(2u, idx);
         Out.data[idx * 2u] = {ty}(0.0);
@@ -99,13 +99,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 "#,
         ty = ty,
         order = order,
-        epsilon = match precision {
-            NumericPrecision::F64 => "1.0e-9",
-            NumericPrecision::F32 => "1.0e-5",
-        },
         max_val = max_val,
         workgroup_size = workgroup_size,
-    )
+    );
+    super::nan_predicate::inject_finite(&source, precision)
 }
 
 pub(crate) fn modulate_bits_constellation_shader(
@@ -121,11 +118,7 @@ pub(crate) fn modulate_bits_constellation_shader(
         NumericPrecision::F64 => "1.7976931348623157e308",
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
-    let bit_tol = match precision {
-        NumericPrecision::F64 => "1.0e-9",
-        NumericPrecision::F32 => "1.0e-6",
-    };
-    format!(
+    let source = format!(
         r#"
 struct Tensor {{
     data: array<{ty}>,
@@ -153,10 +146,11 @@ struct Params {{
 
 const ORDER: u32 = {order}u;
 const MAX_FINITE: {ty} = {ty}({max_val});
-const BIT_TOL: {ty} = {ty}({bit_tol});
+
+fn isFinite(value: {ty}) -> bool {{ @IEEE_FINITE_PREDICATE@ }}
 
 fn isfinite_scalar(x: {ty}) -> bool {{
-    return (x == x) && (abs(x) < MAX_FINITE);
+    return isFinite(x) && (abs(x) < MAX_FINITE);
 }}
 
 fn set_error(code: u32, index: u32) {{
@@ -182,12 +176,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
             set_error(1u, input_idx);
             return;
         }}
-        let rounded = round(raw);
-        if abs(raw - rounded) > BIT_TOL || (rounded != {ty}(0.0) && rounded != {ty}(1.0)) {{
+        if raw != {ty}(0.0) && raw != {ty}(1.0) {{
             set_error(2u, input_idx);
             return;
         }}
-        symbol = (symbol << 1u) | u32(rounded);
+        symbol = (symbol << 1u) | u32(raw);
     }}
     if symbol >= ORDER {{
         set_error(3u, out_idx);
@@ -202,7 +195,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         ty = ty,
         order = order,
         max_val = max_val,
-        bit_tol = bit_tol,
         workgroup_size = workgroup_size,
-    )
+    );
+    super::nan_predicate::inject_finite(&source, precision)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modulation_shaders_require_exact_symbols_and_bits() {
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            let ty = match precision {
+                NumericPrecision::F32 => "f32",
+                NumericPrecision::F64 => "f64",
+            };
+            let symbol = modulate_constellation_shader(precision, 4, 64);
+            assert!(symbol.contains("raw != floor(raw)"));
+            assert!(!symbol.contains("EPSILON"));
+
+            let bits = modulate_bits_constellation_shader(precision, 4, 64);
+            assert!(bits.contains(&format!("raw != {ty}(0.0) && raw != {ty}(1.0)")));
+            assert!(!bits.contains("BIT_TOL"));
+            assert!(!bits.contains("round(raw)"));
+        }
+    }
 }

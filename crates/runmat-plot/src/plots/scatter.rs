@@ -8,13 +8,18 @@ use crate::core::{
     Vertex,
 };
 use crate::gpu::scatter2::Scatter2GpuInputs;
-use crate::gpu::util::readback_scalar_buffer_f64;
+use crate::gpu::util::readback_scalar_buffer_f64_typed;
 use crate::plots::surface::ColorMap;
-use crate::plots::NumericPlotData;
+use crate::plots::{NumericPlotData, PlotDataExportError};
 use glam::{Vec3, Vec4};
 use runmat_value::NumericStorage;
 
 pub type HostScatterData = (Vec<f64>, Vec<f64>);
+
+/// Convert marker area in typographic points squared to the rendered diameter.
+pub fn marker_area_points2_to_diameter_px(area_points2: f64) -> f32 {
+    (area_points2.max(0.1).sqrt() as f32 * (96.0_f32 / 72.0_f32)).max(1.0)
+}
 
 /// High-performance GPU-accelerated scatter plot
 #[derive(Debug, Clone)]
@@ -89,7 +94,15 @@ pub struct ScatterGpuStyle {
 
 impl ScatterPlot {
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if let Some((x, y)) = self.export_numeric_xy_data().await? {
+        self.export_scene_xy_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_scene_xy_data_typed(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>), PlotDataExportError> {
+        if let Some((x, y)) = self.export_numeric_xy_data_typed().await? {
             return Ok((x.materialize_f64(), y.materialize_f64()));
         }
         Ok((Vec::new(), Vec::new()))
@@ -98,31 +111,40 @@ impl ScatterPlot {
     pub async fn export_numeric_xy_data(
         &self,
     ) -> Result<Option<(NumericPlotData, NumericPlotData)>, String> {
+        self.export_numeric_xy_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_numeric_xy_data_typed(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData)>, PlotDataExportError> {
         match (&self.source_x, &self.source_y) {
             (Some(x), Some(y)) if x.len() == y.len() => {
                 return Ok(Some((x.clone(), y.clone())));
             }
             (None, None) => {}
-            _ => return Err("scatter plot has partial CPU source data".to_string()),
+            _ => {
+                return Err(PlotDataExportError::SourceUnavailable(
+                    "scatter plot has partial CPU source data",
+                ))
+            }
         }
 
         if let Some(inputs) = &self.gpu_inputs {
-            let context = shared_wgpu_context().ok_or_else(|| {
-                "scatter plot has GPU source data but no shared WGPU context is installed"
-                    .to_string()
-            })?;
+            let context = shared_wgpu_context().ok_or(PlotDataExportError::SourceUnavailable(
+                "scatter plot has GPU source data but no shared WGPU context is installed",
+            ))?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+            let x = readback_scalar_buffer_f64_typed(
+                &context.access,
                 &inputs.x_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+            let y = readback_scalar_buffer_f64_typed(
+                &context.access,
                 &inputs.y_buffer,
                 len,
                 inputs.scalar,
@@ -131,27 +153,31 @@ impl ScatterPlot {
             let shape = vec![1, len];
             let (x, y) = match inputs.scalar {
                 crate::gpu::ScalarType::F64 => (
-                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())?,
-                    NumericPlotData::new(NumericStorage::F64(y), shape)?,
+                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())
+                        .map_err(PlotDataExportError::InvalidSourceLayout)?,
+                    NumericPlotData::new(NumericStorage::F64(y), shape)
+                        .map_err(PlotDataExportError::InvalidSourceLayout)?,
                 ),
                 crate::gpu::ScalarType::F32 => (
                     NumericPlotData::new(
                         NumericStorage::F32(x.into_iter().map(|v| v as f32).collect()),
                         shape.clone(),
-                    )?,
+                    )
+                    .map_err(PlotDataExportError::InvalidSourceLayout)?,
                     NumericPlotData::new(
                         NumericStorage::F32(y.into_iter().map(|v| v as f32).collect()),
                         shape,
-                    )?,
+                    )
+                    .map_err(PlotDataExportError::InvalidSourceLayout)?,
                 ),
             };
             return Ok(Some((x, y)));
         }
 
         if self.gpu_vertices.is_some() {
-            return Err(
-                "scatter plot has GPU render vertices but no exportable source data".to_string(),
-            );
+            return Err(PlotDataExportError::SourceUnavailable(
+                "scatter plot has GPU render vertices but no exportable source data",
+            ));
         }
 
         Ok(None)
@@ -335,6 +361,18 @@ impl ScatterPlot {
         self.dirty = true;
         self.invalidate_gpu_vertices();
         self
+    }
+
+    /// Map scalar color data (`C`) through `cmap`; RGB colors are left as they are.
+    pub fn recolor_with_colormap(&mut self, cmap: &ColorMap) {
+        if self.color_values.is_none() {
+            return;
+        }
+        self.per_point_colors = None;
+        self.colormap = cmap.clone();
+        self.dirty = true;
+        self.invalidate_gpu_vertices();
+        self.gpu_has_per_point_colors = false;
     }
     pub fn set_filled(&mut self, filled: bool) {
         self.filled = filled;
@@ -660,6 +698,43 @@ impl ScatterPlot {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
             + self.gpu_point_count.unwrap_or(0) * std::mem::size_of::<Vertex>()
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        for source in [&self.source_x, &self.source_y].into_iter().flatten() {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for len in [
+            self.theta_data.as_ref().map_or(0, Vec::capacity),
+            self.r_data.as_ref().map_or(0, Vec::capacity),
+            self.color_values.as_ref().map_or(0, Vec::capacity),
+        ] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(len)?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<f32>(
+                self.per_point_sizes.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.per_point_colors.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        Some(total)
     }
 }
 

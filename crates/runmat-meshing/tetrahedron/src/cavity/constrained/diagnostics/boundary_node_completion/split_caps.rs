@@ -20,13 +20,14 @@ pub(super) fn diagnostic_split_cap_min_scaled_jacobian(
                 boundary_nodes,
                 diagnostic_options,
             )
+            .expect("diagnostic split accounting should be admitted")
             .map(|tetrahedra| {
                 tetrahedra
                     .iter()
                     .map(|tetrahedron| {
                         let points = tetrahedron.node_ids.map(|node_id| {
                             if node_id == split_node.node_id {
-                                split_node.coordinates_m
+                                split_node.coordinates_m.canonical_value()
                             } else {
                                 boundary_nodes[&node_id]
                             }
@@ -64,13 +65,14 @@ pub(super) fn diagnostic_edge_split_cap_min_scaled_jacobian(
                 boundary_nodes,
                 diagnostic_options,
             )
+            .expect("diagnostic edge split accounting should be admitted")
             .map(|tetrahedra| {
                 tetrahedra
                     .iter()
                     .map(|tetrahedron| {
                         let points = tetrahedron.node_ids.map(|node_id| {
                             if node_id == split_node.node_id {
-                                split_node.coordinates_m
+                                split_node.coordinates_m.canonical_value()
                             } else {
                                 boundary_nodes[&node_id]
                             }
@@ -105,7 +107,7 @@ pub(super) fn diagnostic_three_edge_split_cap_min_scaled_jacobian(
         .collect::<BTreeMap<_, _>>();
     let split_node_coordinates = split_nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     three_edge_split_completion_tetrahedra_for_node(
         face,
@@ -115,6 +117,7 @@ pub(super) fn diagnostic_three_edge_split_cap_min_scaled_jacobian(
         boundary_nodes,
         diagnostic_options,
     )
+    .expect("diagnostic three-edge split accounting should be admitted")
     .map(|tetrahedra| {
         tetrahedra
             .iter()

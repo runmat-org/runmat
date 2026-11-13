@@ -92,7 +92,7 @@ fn build_instruction(
     requirements: OperationRequirements,
     side_effect_epoch: &mut NativeValueId,
 ) -> NativeCodegenResult<NativeInstruction> {
-    let class = construct.native_lowering_class();
+    let class = runmat_mir::effective_native_lowering_class(construct, &requirements.effects);
     let outputs = output_locals
         .iter()
         .map(|local| {
@@ -126,7 +126,12 @@ fn build_instruction(
             .into_iter()
             .skip(1)
             .collect(),
-        NativeOperation::Statement(_) => Vec::new(),
+        NativeOperation::Statement(statement) => {
+            runmat_mir::statement_construct_inventory(statement)
+                .into_iter()
+                .skip(1)
+                .collect()
+        }
     };
     let instruction = NativeInstruction {
         id: ctx.instruction(),
@@ -167,33 +172,6 @@ pub(super) fn install_frame_locals(instruction: &mut NativeInstruction, locals: 
     }
 }
 
-pub(super) fn declared_requirements(value: &runmat_mir::MirRvalue) -> OperationRequirements {
-    let (effects, capabilities) = runmat_mir::rvalue_declared_requirements(value);
-    OperationRequirements {
-        effects,
-        capabilities,
-    }
-}
-
-pub(super) fn declared_statement_requirements(
-    statement: &runmat_mir::MirStmtKind,
-) -> OperationRequirements {
-    let effects = runmat_mir::statement_declared_effects(statement);
-    OperationRequirements {
-        effects,
-        capabilities: CapabilitySet::default(),
-    }
-}
-
-pub(super) fn merge_requirements(
-    mut left: OperationRequirements,
-    right: OperationRequirements,
-) -> OperationRequirements {
-    left.effects.0.extend(right.effects.0);
-    left.capabilities.0.extend(right.capabilities.0);
-    left
-}
-
 pub(super) fn root_local(place: &runmat_mir::MirPlace) -> Option<runmat_mir::MirLocalId> {
     match place {
         runmat_mir::MirPlace::Local(local) => Some(*local),
@@ -220,18 +198,74 @@ fn statement_inputs(
 ) -> NativeCodegenResult<Vec<NativeValueId>> {
     let mut inputs = Vec::new();
     match statement {
+        runmat_mir::MirStmtKind::PrepareFixedAssignment(preparation) => {
+            let mut result = Ok(());
+            preparation.visit_external_operands(|operand| {
+                if result.is_ok() {
+                    result = collect_operand(operand, locals, &mut inputs);
+                }
+            });
+            result?;
+        }
+        runmat_mir::MirStmtKind::PreparedAssign { .. } => {}
         runmat_mir::MirStmtKind::Assign { place, .. } => {
             collect_place_inputs(place, locals, &mut inputs)?;
         }
         runmat_mir::MirStmtKind::MultiAssign { targets, .. } => {
             for target in &targets.targets {
-                if let runmat_mir::MirOutputTarget::Place(place) = target {
-                    collect_place_inputs(place, locals, &mut inputs)?;
+                match target {
+                    runmat_mir::MirOutputTarget::Place(place) => {
+                        collect_place_inputs(place, locals, &mut inputs)?
+                    }
+                    runmat_mir::MirOutputTarget::Sequence(target) => {
+                        collect_place_inputs(target.base(), locals, &mut inputs)?;
+                        let mut result = Ok(());
+                        target.visit_operands(|operand| {
+                            if result.is_ok() {
+                                result = collect_operand(operand, locals, &mut inputs);
+                            }
+                        });
+                        result?;
+                    }
+                    runmat_mir::MirOutputTarget::Discard => {}
                 }
             }
         }
+        runmat_mir::MirStmtKind::SequenceAssign { target, .. } => match target {
+            runmat_mir::MirSequenceTarget::Member { base, .. } => {
+                collect_place_inputs(base, locals, &mut inputs)?;
+            }
+            runmat_mir::MirSequenceTarget::DynamicMember { base, member } => {
+                collect_place_inputs(base, locals, &mut inputs)?;
+                collect_operand(member, locals, &mut inputs)?;
+            }
+            runmat_mir::MirSequenceTarget::CellContents { base, indexing } => {
+                collect_place_inputs(base, locals, &mut inputs)?;
+                let mut result = Ok(());
+                indexing.visit_operands(|operand| {
+                    if result.is_ok() {
+                        result = collect_operand(operand, locals, &mut inputs);
+                    }
+                });
+                result?;
+            }
+        },
+        runmat_mir::MirStmtKind::CaptureSequence { source, .. } => {
+            let mut result = Ok(());
+            source.visit_outer_operands(|operand| {
+                if result.is_ok() {
+                    result = collect_operand(operand, locals, &mut inputs);
+                }
+            });
+            result?;
+        }
         runmat_mir::MirStmtKind::PlaceMutation(mutation) => {
             collect_place_inputs(&mutation.place, locals, &mut inputs)?;
+        }
+        runmat_mir::MirStmtKind::StatementOutput(output) => {
+            if let runmat_mir::MirStatementOutputSource::Local(local) = output.source {
+                collect_operand(&runmat_mir::MirOperand::Local(local), locals, &mut inputs)?;
+            }
         }
         runmat_mir::MirStmtKind::Expr(_)
         | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
@@ -302,18 +336,24 @@ fn collect_rvalue_inputs(
                     runmat_mir::MirCallArg::Single(operand) => {
                         collect_operand(operand, locals, output)?;
                     }
-                    runmat_mir::MirCallArg::Expansion { base, indices, .. } => {
-                        collect_operand(base, locals, output)?;
-                        for index in indices {
-                            collect_operand(index, locals, output)?;
-                        }
+                    runmat_mir::MirCallArg::Expansion(source) => {
+                        let mut result = Ok(());
+                        source.visit_outer_operands(|operand| {
+                            if result.is_ok() {
+                                result = collect_operand(operand, locals, output);
+                            }
+                        });
+                        result?;
                     }
+                    runmat_mir::MirCallArg::CapturedSequence(_) => {}
                 }
             }
         }
         R::Aggregate { elements, .. } => {
-            for operand in elements {
-                collect_operand(operand, locals, output)?;
+            for element in elements {
+                if let Some(operand) = element.operand() {
+                    collect_operand(operand, locals, output)?;
+                }
             }
         }
         R::StructLiteral { fields } | R::ObjectLiteral { fields, .. } => {
@@ -325,43 +365,47 @@ fn collect_rvalue_inputs(
             collect_operand(base, locals, output)?;
             collect_indexing_inputs(indexing, locals, output)?;
         }
+        R::SubscriptChain(chain) => {
+            let mut result = Ok(());
+            chain.visit_outer_operands(|operand| {
+                if result.is_ok() {
+                    result = collect_operand(operand, locals, output);
+                }
+            });
+            result?;
+        }
         R::Member { base, .. } => collect_operand(base, locals, output)?,
-        R::DynamicMember { base, member } => {
+        R::DynamicMember { base, member, .. } => {
             collect_operand(base, locals, output)?;
             collect_operand(member, locals, output)?;
         }
-        R::Future { args, .. } => {
+        R::Future { args, .. } | R::ExternalFuture { args, .. } => {
             for argument in args {
                 match argument {
                     runmat_mir::MirCallArg::Single(operand) => {
                         collect_operand(operand, locals, output)?;
                     }
-                    runmat_mir::MirCallArg::Expansion { base, indices, .. } => {
-                        collect_operand(base, locals, output)?;
-                        for index in indices {
-                            collect_operand(index, locals, output)?;
-                        }
+                    runmat_mir::MirCallArg::Expansion(source) => {
+                        let mut result = Ok(());
+                        source.visit_outer_operands(|operand| {
+                            if result.is_ok() {
+                                result = collect_operand(operand, locals, output);
+                            }
+                        });
+                        result?;
                     }
+                    runmat_mir::MirCallArg::CapturedSequence(_) => {}
                 }
             }
         }
         R::Distributed(operation) => {
-            use runmat_mir::parallel::MirDistributedOp as D;
-            if let D::Create { input, .. } = operation {
-                collect_operand(input, locals, output)?;
+            for operand in operation.operands() {
+                collect_operand(operand, locals, output)?;
             }
         }
         R::Collective(operation) => {
-            use runmat_mir::parallel::MirCollectiveOp as C;
-            match operation {
-                C::Broadcast { input, .. }
-                | C::Gather { input, .. }
-                | C::Scatter { input, .. }
-                | C::AllGather { input, .. }
-                | C::Reduce { input, .. }
-                | C::AllReduce { input, .. }
-                | C::Send { input, .. } => collect_operand(input, locals, output)?,
-                C::Barrier { .. } | C::Receive { .. } => {}
+            for operand in operation.operands() {
+                collect_operand(operand, locals, output)?;
             }
         }
         R::WorkspaceFirstStaticProperty { .. } | R::MetaClass(_) | R::Colon | R::End => {}
@@ -395,12 +439,13 @@ fn collect_indexing_inputs(
     locals: &[NativeValueId],
     output: &mut Vec<NativeValueId>,
 ) -> NativeCodegenResult<()> {
-    for component in &indexing.components {
-        if let runmat_mir::MirIndexComponent::Expr(operand) = component {
-            collect_operand(operand, locals, output)?;
+    let mut error = None;
+    indexing.visit_outer_operands(|operand| {
+        if error.is_none() {
+            error = collect_operand(operand, locals, output).err();
         }
-    }
-    Ok(())
+    });
+    error.map_or(Ok(()), Err)
 }
 
 fn collect_operand(

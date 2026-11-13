@@ -12,13 +12,18 @@ impl Walker<'_> {
     pub(super) fn identity(&mut self, from: &str, identity: &CallableIdentity, reason: Reason) {
         match identity {
             CallableIdentity::BoundFunction(function)
-            | CallableIdentity::AnonymousFunction(function)
-            | CallableIdentity::ExternalFunction { function, .. } => self.retain_function(
+            | CallableIdentity::AnonymousFunction(function) => self.retain_function(
                 *function,
                 Certainty::Definite,
                 Some(from.into()),
                 reason,
                 identity.display_name(),
+            ),
+            CallableIdentity::ExternalFunction { display_name, .. } => self.named_dynamic(
+                from,
+                Kind::ExternalCallable,
+                display_name.clone(),
+                "retained external callable requires its original program authority",
             ),
             CallableIdentity::Builtin(id) => self.builtin_reference(
                 from,
@@ -57,7 +62,8 @@ impl Walker<'_> {
     }
 
     pub(super) fn named_dynamic(&mut self, from: &str, kind: Kind, symbol: String, detail: &str) {
-        let id = format!("{}:{}", kind_token(kind), symbol.to_ascii_lowercase());
+        let id = format!("{}:{}", kind_token(&kind), symbol.to_ascii_lowercase());
+        let is_method = kind == Kind::Method;
         self.node(
             id.clone(),
             kind,
@@ -69,7 +75,7 @@ impl Walker<'_> {
             Some(from.into()),
             id,
             Certainty::FiniteDynamic,
-            if kind == Kind::Method {
+            if is_method {
                 Reason::MethodDispatch
             } else {
                 Reason::DynamicNamedCall
@@ -142,8 +148,14 @@ impl Walker<'_> {
         reason: Reason,
         detail: Option<String>,
     ) {
-        let id = format!("builtin:{}", name.to_ascii_lowercase());
-        let contract_certainty = builtin_catalog_entry_by_name(name)
+        let entry = builtin_catalog_entry_by_name(name);
+        let canonical_name = entry.map_or_else(
+            || name.to_ascii_lowercase(),
+            |entry| entry.identity.name.into(),
+        );
+        let builtin = runmat_types::BuiltinId(canonical_name.clone());
+        let id = format!("builtin:{canonical_name}");
+        let contract_certainty = entry
             .map(|entry| match entry.link.reachability {
                 BuiltinReachability::Always => Certainty::Definite,
                 BuiltinReachability::Dynamic | BuiltinReachability::Feature(_) => {
@@ -152,15 +164,9 @@ impl Walker<'_> {
             })
             .unwrap_or(Certainty::Definite);
         let certainty = requested_certainty.max(contract_certainty);
-        self.node(
-            id.clone(),
-            Kind::Builtin,
-            "runmat-builtins".into(),
-            name.into(),
-            certainty,
-        );
+        self.builtin_node(id.clone(), builtin, canonical_name, certainty);
         self.edge(Some(from.into()), id.clone(), certainty, reason, detail);
-        let Some(entry) = builtin_catalog_entry_by_name(name) else {
+        let Some(entry) = entry else {
             return;
         };
         for dependency in entry.link.artifact_dependencies {
@@ -219,13 +225,18 @@ impl Walker<'_> {
         }
     }
 
-    pub(super) fn class(&mut self, from: &str, class_name: &str, reason: Reason) {
-        let id = format!("class:{}", class_name.to_ascii_lowercase());
+    pub(super) fn class(
+        &mut self,
+        from: &str,
+        class_identity: &runmat_types::ClassIdentity,
+        reason: Reason,
+    ) {
+        let id = format!("class:{class_identity}");
         self.node(
             id.clone(),
             Kind::Class,
             "class".into(),
-            class_name.into(),
+            class_identity.display_name().into(),
             Certainty::FiniteDynamic,
         );
         self.edge(
@@ -240,10 +251,8 @@ impl Walker<'_> {
             .classes
             .iter()
             .filter(|class| {
-                class
-                    .name
-                    .display_name()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(class_name))
+                runmat_types::ClassIdentity::from_qualified_name(&class.name)
+                    .is_ok_and(|candidate| &candidate == class_identity)
             })
             .flat_map(|class| class.methods.iter().map(|method| method.function))
             .collect::<Vec<_>>();
@@ -279,7 +288,7 @@ impl Walker<'_> {
         };
         self.builtin_reference(
             from,
-            name,
+            name.display_name(),
             Certainty::FiniteDynamic,
             Reason::OperatorDispatch,
             Some(format!("{operator:?} overload fallback")),

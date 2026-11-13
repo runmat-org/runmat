@@ -1,7 +1,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
-use quinn::{ClientConfig, Connection, Endpoint, ServerConfig};
+use quinn::{ClientConfig, Connection, Endpoint, EndpointConfig, ServerConfig};
+
+mod runtime;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use sha2::Digest as _;
 
@@ -57,7 +60,7 @@ impl TryFrom<&runmat_execution::security::DirectQuicEndpoint> for PinnedQuicEndp
             certificate_der: endpoint.certificate_der.clone(),
         };
         pinned.validate()?;
-        let actual = format!("{:x}", sha2::Sha256::digest(&pinned.certificate_der));
+        let actual = hex::encode(sha2::Sha256::digest(&pinned.certificate_der));
         if actual != endpoint.certificate_sha256 {
             return Err(TransportError::StaleAuthority);
         }
@@ -88,7 +91,14 @@ impl QuicOverlayListener {
         let mut config =
             ServerConfig::with_single_cert(certificates, private_key).map_err(unavailable)?;
         config.transport_config(transport_config(limits));
-        let endpoint = Endpoint::server(config, authority).map_err(unavailable)?;
+        let socket = std::net::UdpSocket::bind(authority).map_err(unavailable)?;
+        let endpoint = Endpoint::new(
+            EndpointConfig::default(),
+            Some(config),
+            socket,
+            runtime::shared()?,
+        )
+        .map_err(unavailable)?;
         Ok(Self { endpoint, limits })
     }
 
@@ -132,7 +142,25 @@ impl QuicOverlayConnection {
         let mut config =
             ClientConfig::with_root_certificates(Arc::new(roots)).map_err(unavailable)?;
         config.transport_config(transport_config(limits));
-        let mut endpoint = Endpoint::client(bind_address).map_err(unavailable)?;
+        // Preserve Quinn's dual-stack client policy while binding its reactor to
+        // the transport's executor, rather than the caller's current runtime.
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(bind_address),
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )
+        .map_err(unavailable)?;
+        if bind_address.is_ipv6() {
+            socket.set_only_v6(false).map_err(unavailable)?;
+        }
+        socket.bind(&bind_address.into()).map_err(unavailable)?;
+        let mut endpoint = Endpoint::new(
+            EndpointConfig::default(),
+            None,
+            socket.into(),
+            runtime::shared()?,
+        )
+        .map_err(unavailable)?;
         endpoint.set_default_client_config(config);
         let connection = endpoint
             .connect(pinned.authority, &pinned.server_name)
@@ -169,6 +197,10 @@ impl QuicOverlayConnection {
 
 fn transport_config(limits: FrameLimits) -> Arc<quinn::TransportConfig> {
     let mut config = quinn::TransportConfig::default();
+    // Numerical kernels may legitimately run longer than QUIC's default idle interval. Transport
+    // liveness is maintained here; request inactivity and execution deadlines remain owned by the
+    // control channel and task contract respectively.
+    config.keep_alive_interval(Some(Duration::from_secs(10)));
     config.max_concurrent_uni_streams(64_u32.into());
     config.max_concurrent_bidi_streams(0_u32.into());
     config.receive_window(

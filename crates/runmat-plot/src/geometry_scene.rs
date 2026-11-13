@@ -9,7 +9,30 @@ use crate::core::{
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+mod annotations;
+mod edge_stroke;
+#[cfg(test)]
+mod highlight_tests;
+mod instances;
+mod paint;
+mod pick;
+mod pick_instances;
+mod section_cap;
+mod section_cut;
+#[cfg(test)]
+mod section_cut_tests;
+
+pub use pick::{
+    GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest,
+    GeometryScenePickResult,
+};
+
+pub use instances::GeometrySceneInstance;
+#[cfg(test)]
+use paint::GEOMETRY_HOVER_EDGE_COLOR;
+use paint::{RegionPaint, HOVER_PAINT, SELECTED_PAINT};
 
 const SECTION_DISTANCE_EPSILON: f32 = 1.0e-6;
 const GEOMETRY_SELECTED_REGION_COLOR: [f32; 4] = [0.98, 0.45, 0.12, 1.0];
@@ -17,7 +40,6 @@ const GEOMETRY_HOVER_REGION_COLOR: [f32; 4] = [0.43, 0.78, 1.0, 1.0];
 const GEOMETRY_MATERIAL_REGION_COLOR: [f32; 4] = [0.38, 0.58, 0.96, 0.92];
 const GEOMETRY_BOUNDARY_REGION_COLOR: [f32; 4] = [0.22, 0.82, 0.52, 0.96];
 const GEOMETRY_DRIVING_REGION_COLOR: [f32; 4] = [0.98, 0.38, 0.28, 0.96];
-
 #[derive(Debug, Clone)]
 pub struct GeometryScene {
     pub scene_id: String,
@@ -27,7 +49,31 @@ pub struct GeometryScene {
     pub chunks: Vec<GeometrySceneChunk>,
     pub bounds: BoundingBox,
     pub show_grid: bool,
+    /// Draw the corner orientation triad (on by default).
+    pub show_orientation_triad: bool,
     pub axis_equal: bool,
+    /// Unit provenance is attached to the rendered representation, not supplied
+    /// by a later measurement caller. Legacy/unitless scenes remain explicit.
+    pub physical_context: Option<GeometryPhysicalContext>,
+    /// Export-only labels on a request-local agent observation.
+    pub observation_callouts: Vec<GeometrySceneCallout>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeometryPhysicalContext {
+    pub coordinate_units:
+        runmat_types::physical::CoordinateUnits<runmat_types::physical::PreviewCoordinates>,
+    pub source_unit_evidence: runmat_types::physical::LengthUnitEvidence,
+}
+
+/// Source face triangles provide candidate leader endpoints. Visibility is
+/// checked against the final clipped scene before placing a label.
+#[derive(Debug, Clone)]
+pub struct GeometrySceneCallout {
+    pub region_id: String,
+    pub color: [f32; 4],
+    pub triangles: Vec<[[f32; 3]; 3]>,
 }
 
 impl GeometryScene {
@@ -44,9 +90,17 @@ impl GeometryScene {
             overlay: None,
             chunks,
             bounds,
-            show_grid: false,
+            show_grid: true,
+            show_orientation_triad: true,
             axis_equal: true,
+            observation_callouts: Vec::new(),
+            physical_context: None,
         }
+    }
+
+    pub fn with_physical_context(mut self, context: GeometryPhysicalContext) -> Self {
+        self.physical_context = Some(context);
+        self
     }
 
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
@@ -117,26 +171,44 @@ impl GeometryScene {
             .chunks
             .iter()
             .enumerate()
-            .map(|(index, chunk)| SceneNode {
-                id: self.chunk_node_id(index, &chunk.chunk_id),
-                name: chunk
-                    .label
-                    .clone()
-                    .unwrap_or_else(|| format!("Geometry chunk {}", index + 1)),
-                transform: Mat4::IDENTITY,
-                visible: chunk.visible,
-                cast_shadows: false,
-                receive_shadows: false,
-                axes_index: 0,
-                parent: None,
-                children: Vec::new(),
-                render_data: Some(chunk.render_data_with_presentation(presentation)),
-                bounds: chunk.bounds,
-                lod_levels: Vec::new(),
-                current_lod: 0,
+            .map(|(index, chunk)| {
+                // A section clips world triangles, so an instanced chunk draws flattened.
+                let flat;
+                let (chunk, instances) =
+                    if chunk.is_instanced() && presentation.active_section().is_some() {
+                        flat = chunk.flattened();
+                        (&flat, None)
+                    } else if chunk.is_instanced() {
+                        (chunk, Some(chunk.node_instances(presentation)))
+                    } else {
+                        (chunk, None)
+                    };
+                SceneNode {
+                    id: self.chunk_node_id(index, &chunk.chunk_id),
+                    name: chunk
+                        .label
+                        .clone()
+                        .unwrap_or_else(|| format!("Geometry chunk {}", index + 1)),
+                    transform: Mat4::IDENTITY,
+                    visible: chunk.visible,
+                    cast_shadows: false,
+                    receive_shadows: false,
+                    axes_index: 0,
+                    parent: None,
+                    children: Vec::new(),
+                    render_data: Some(edge_stroke::widen(
+                        chunk.render_data_with_presentation(presentation),
+                        presentation.edge_width_px,
+                    )),
+                    bounds: chunk.bounds,
+                    lod_levels: Vec::new(),
+                    current_lod: 0,
+                    instances,
+                }
             })
             .collect();
         nodes.extend(self.annotation_nodes(presentation));
+        nodes.extend(self.topology_selection_nodes(presentation));
         nodes
     }
 
@@ -144,116 +216,26 @@ impl GeometryScene {
         stable_node_id(&self.scene_id, self.revision, index, chunk_id)
     }
 
-    fn annotation_nodes(&self, presentation: &GeometryScenePresentation) -> Vec<SceneNode> {
-        if presentation.region_annotations.is_empty() {
-            return Vec::new();
-        }
-
-        let mut point_vertices = Vec::new();
-        let mut line_vertices = Vec::new();
-        let arrow_length = annotation_arrow_length(self.bounds);
-
-        for annotation in &presentation.region_annotations {
-            for chunk in &self.chunks {
-                if !chunk.visible || chunk.render_data.pipeline_type != PipelineType::Triangles {
-                    continue;
-                }
-                let Some(anchor) = chunk.region_anchor(&annotation.region_id) else {
-                    continue;
-                };
-                let color = annotation
-                    .color
-                    .unwrap_or_else(|| geometry_region_role_color(annotation.role.as_deref()));
-                let mut marker = vertex(
-                    anchor.to_array(),
-                    color,
-                    [0.0, 0.0, annotation.size.unwrap_or(15.0)],
-                );
-                marker.tex_coords = [1.0, 1.0];
-                point_vertices.push(marker);
-
-                if let Some(direction) = annotation
-                    .direction
-                    .and_then(normalized_annotation_direction)
-                {
-                    append_annotation_arrow(
-                        &mut line_vertices,
-                        anchor,
-                        direction,
-                        arrow_length,
-                        color,
-                    );
-                }
+    #[cfg(feature = "egui-overlay")]
+    pub(crate) fn region_anchor(&self, region_id: &str) -> Option<Vec3> {
+        if let Some(mesh_id) = region_id.strip_prefix("mesh:") {
+            let mut bounds = None::<BoundingBox>;
+            for chunk in self
+                .chunks
+                .iter()
+                .filter(|chunk| chunk.visible && chunk.mesh_id.as_deref() == Some(mesh_id))
+            {
+                bounds = Some(match bounds {
+                    Some(bounds) => bounds.union(&chunk.bounds),
+                    None => chunk.bounds,
+                });
             }
+            return bounds.map(|bounds| (bounds.min + bounds.max) * 0.5);
         }
-
-        let mut nodes = Vec::new();
-        if !point_vertices.is_empty() {
-            nodes.push(self.annotation_node(
-                "FEA region markers",
-                "__fea_annotations:markers",
-                self.chunks.len(),
-                PipelineType::Points,
-                point_vertices,
-            ));
-        }
-        if !line_vertices.is_empty() {
-            nodes.push(self.annotation_node(
-                "FEA load vectors",
-                "__fea_annotations:vectors",
-                self.chunks.len() + 1,
-                PipelineType::Lines,
-                line_vertices,
-            ));
-        }
-        nodes
-    }
-
-    fn annotation_node(
-        &self,
-        name: &str,
-        chunk_id: &str,
-        index: usize,
-        pipeline_type: PipelineType,
-        vertices: Vec<Vertex>,
-    ) -> SceneNode {
-        let vertex_count = vertices.len();
-        let bounds = bounds_from_vertices(&vertices);
-        SceneNode {
-            id: stable_node_id(&self.scene_id, self.revision, index, chunk_id),
-            name: name.to_string(),
-            transform: Mat4::IDENTITY,
-            visible: true,
-            cast_shadows: false,
-            receive_shadows: false,
-            axes_index: 0,
-            parent: None,
-            children: Vec::new(),
-            render_data: Some(RenderData {
-                pipeline_type,
-                vertices,
-                indices: None,
-                gpu_vertices: None,
-                bounds: Some(bounds),
-                material: Material {
-                    albedo: Vec4::ONE,
-                    alpha_mode: AlphaMode::Blend,
-                    double_sided: true,
-                    ..Default::default()
-                },
-                draw_calls: vec![DrawCall {
-                    vertex_offset: 0,
-                    vertex_count,
-                    index_offset: None,
-                    index_count: None,
-                    instance_count: 1,
-                }],
-                image: None,
-            }),
-            bounds,
-            lod_levels: Vec::new(),
-            current_lod: 0,
-        }
+        self.chunks
+            .iter()
+            .filter(|chunk| chunk.visible)
+            .find_map(|chunk| chunk.region_anchor(region_id))
     }
 }
 
@@ -263,7 +245,13 @@ pub struct GeometryScenePresentation {
     pub selected_region_id: Option<String>,
     #[serde(default)]
     pub selected_region_ids: Vec<String>,
+    #[serde(default)]
+    pub selected_topology: Vec<GeometrySceneTopologySelection>,
     pub hovered_region_id: Option<String>,
+    /// Analysis colors (draft, thickness, curvature): each listed region's faces fill with
+    /// its color while its edges keep theirs. Highlights, hover and selection paint over them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub region_colors: Vec<GeometrySceneRegionColor>,
     #[serde(default)]
     pub region_highlights: Vec<GeometrySceneRegionHighlight>,
     #[serde(default)]
@@ -273,9 +261,15 @@ pub struct GeometryScenePresentation {
     #[serde(default = "default_edge_overlay_enabled")]
     pub edge_overlay_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_grid: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hidden_owner_node_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolated_owner_node_ids: Option<Vec<String>>,
+    /// Regions left out of the view: their triangles and boundary segments draw nothing and
+    /// picks pass through them, as hidden owner nodes do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_region_ids: Vec<String>,
     #[serde(
         default,
         deserialize_with = "deserialize_explicit_optional_section",
@@ -284,6 +278,22 @@ pub struct GeometryScenePresentation {
     pub section: Option<Option<GeometrySceneSection>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_preset: Option<GeometrySceneViewPreset>,
+    /// Perspective or orthographic (parallel) projection for the 3-D view. Unset keeps the
+    /// current one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<GeometrySceneProjection>,
+    /// Width of line chunks (edges, wireframes) in CSS px. Above 1 px they draw as screen-space
+    /// strokes of that width; unset or 1 px or less draws GPU hairlines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_width_px: Option<f32>,
+}
+
+/// How the 3-D view projects: with perspective, or parallel as CAD drafting views do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GeometrySceneProjection {
+    Perspective,
+    Orthographic,
 }
 
 impl Default for GeometryScenePresentation {
@@ -291,15 +301,21 @@ impl Default for GeometryScenePresentation {
         Self {
             selected_region_id: None,
             selected_region_ids: Vec::new(),
+            selected_topology: Vec::new(),
             hovered_region_id: None,
+            region_colors: Vec::new(),
             region_highlights: Vec::new(),
             region_annotations: Vec::new(),
             display_mode: GeometrySceneDisplayMode::Shaded,
             edge_overlay_enabled: true,
+            show_grid: None,
             hidden_owner_node_ids: None,
             isolated_owner_node_ids: None,
+            hidden_region_ids: Vec::new(),
             section: None,
             view_preset: None,
+            projection: None,
+            edge_width_px: None,
         }
     }
 }
@@ -309,8 +325,20 @@ impl GeometryScenePresentation {
         self.hovered_region_id.is_some()
             || self.selected_region_id.is_some()
             || !self.selected_region_ids.is_empty()
+            || self
+                .selected_topology
+                .iter()
+                .any(|selection| matches!(selection, GeometrySceneTopologySelection::Face { .. }))
+            || !self.region_colors.is_empty()
             || !self.region_highlights.is_empty()
+            || !self.hidden_region_ids.is_empty()
             || self.active_section().is_some()
+    }
+
+    /// Whether a region's annotations (labels, markers, load arrows) are drawn: a hidden
+    /// region takes its annotations with it.
+    pub(crate) fn shows_region(&self, region_id: &str) -> bool {
+        !self.hidden_region_ids.iter().any(|id| id == region_id)
     }
 
     pub(crate) fn resolves_owner_visibility(&self) -> bool {
@@ -382,6 +410,17 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneSection {
     pub plane: GeometrySceneSectionPlane,
+    /// A second cutting plane. With two planes the view removes only what lies on the removed
+    /// side of both, a corner cutaway; each plane is capped where the removed corner meets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_plane: Option<GeometrySceneSectionPlane>,
+    /// Fill the solid's cut faces. Off leaves the cut open, showing the model's inside.
+    #[serde(default = "default_section_cap")]
+    pub cap: bool,
+}
+
+fn default_section_cap() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -409,6 +448,14 @@ pub enum GeometrySceneViewPreset {
     Bottom,
 }
 
+/// One region's analysis color: its faces fill with `color` and its edges keep theirs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneRegionColor {
+    pub region_id: String,
+    pub color: [f32; 4],
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneRegionHighlight {
@@ -421,20 +468,72 @@ pub struct GeometrySceneRegionHighlight {
     pub label: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum GeometrySceneTopologySelection {
+    Face {
+        chunk_id: String,
+        triangle_index: usize,
+    },
+    Edge {
+        chunk_id: String,
+        vertex_indices: [u32; 2],
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        segments: Vec<[u32; 2]>,
+    },
+    Point {
+        chunk_id: String,
+        vertex_index: u32,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeometrySceneRegionAnnotation {
     pub region_id: String,
     #[serde(default)]
     pub color: Option<[f32; 4]>,
-    #[serde(default)]
-    pub role: Option<String>,
+    pub kind: GeometrySceneAnnotationKind,
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default)]
     pub direction: Option<[f32; 3]>,
     #[serde(default)]
     pub size: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeometrySceneAnnotationKind {
+    /// Text-only selection identity; does not add a physical marker.
+    Label,
+    Force,
+    Moment,
+    Pressure,
+    Traction,
+    BodyForce,
+    HeatFlux,
+    CurrentDensity,
+    NormalVelocity,
+    FlowVelocity,
+    MassFlow,
+    WallMotion,
+    FixedSupport,
+    SymmetrySupport,
+    PrescribedMotion,
+    BoundaryCondition,
+    ThermalCondition,
+    ElectricalCondition,
+    MagneticCondition,
+    AcousticCondition,
+    FluidCondition,
+    Connector,
+    Interface,
+    InitialCondition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -452,188 +551,20 @@ impl Default for GeometrySceneDisplayMode {
 }
 
 impl GeometrySceneDisplayMode {
-    fn alpha(self, edge_overlay_enabled: bool) -> f32 {
+    fn alpha(self, _edge_overlay_enabled: bool) -> f32 {
         match self {
             Self::Shaded => 1.0,
-            Self::Edges if edge_overlay_enabled => 0.84,
-            Self::Edges => 0.94,
+            Self::Edges => 0.38,
             Self::Wireframe => 0.16,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct GeometryScenePickRequest {
-    pub camera: Camera,
-    pub surface_size: [f32; 2],
-    pub position: [f32; 2],
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GeometryScenePickResult {
-    pub mesh_id: Option<String>,
-    pub chunk_id: String,
-    pub triangle_index: usize,
-    pub region_id: Option<String>,
-    pub region_label: Option<String>,
-    pub region_tag: Option<String>,
-    pub distance: f32,
-    pub position: [f32; 3],
 }
 
 fn default_edge_overlay_enabled() -> bool {
     true
 }
 
-#[derive(Debug, Clone)]
-pub struct GeometryScenePickIndex {
-    scene_key: GeometrySceneCacheKey,
-    triangles: Vec<IndexedTriangle>,
-    nodes: Vec<PickBvhNode>,
-    root: Option<usize>,
-}
-
-impl GeometryScenePickIndex {
-    pub fn build(scene: &GeometryScene) -> Self {
-        let mut triangles = Vec::with_capacity(scene.triangle_count());
-        for chunk in &scene.chunks {
-            if !chunk.visible || chunk.render_data.pipeline_type != PipelineType::Triangles {
-                continue;
-            }
-            let Some(indices) = chunk.indices.as_ref() else {
-                continue;
-            };
-            for (triangle_index, triangle) in indices.chunks_exact(3).enumerate() {
-                let a = chunk.vertices.get(triangle[0] as usize);
-                let b = chunk.vertices.get(triangle[1] as usize);
-                let c = chunk.vertices.get(triangle[2] as usize);
-                let (Some(a), Some(b), Some(c)) = (a, b, c) else {
-                    continue;
-                };
-                let a = Vec3::from_array(a.position);
-                let b = Vec3::from_array(b.position);
-                let c = Vec3::from_array(c.position);
-                let bounds = triangle_bounds(a, b, c);
-                let region = chunk.region_for_triangle(triangle_index as u32);
-                triangles.push(IndexedTriangle {
-                    a,
-                    b,
-                    c,
-                    bounds,
-                    centroid: (a + b + c) / 3.0,
-                    mesh_id: chunk.mesh_id.clone(),
-                    chunk_id: chunk.chunk_id.clone(),
-                    triangle_index,
-                    region_id: region.map(|item| item.region_id.clone()),
-                    region_label: region.and_then(|item| item.label.clone()),
-                    region_tag: region.and_then(|item| item.tag.clone()),
-                });
-            }
-        }
-
-        let mut nodes = Vec::new();
-        let triangle_count = triangles.len();
-        let root = build_pick_bvh_node(&mut nodes, &mut triangles, 0, triangle_count);
-        Self {
-            scene_key: scene.cache_key(),
-            triangles,
-            nodes,
-            root,
-        }
-    }
-
-    pub fn scene_key(&self) -> &GeometrySceneCacheKey {
-        &self.scene_key
-    }
-
-    pub fn triangle_count(&self) -> usize {
-        self.triangles.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.triangles.is_empty()
-    }
-
-    pub fn pick(&self, request: GeometryScenePickRequest) -> Option<GeometryScenePickResult> {
-        if request.surface_size[0] <= 0.0 || request.surface_size[1] <= 0.0 {
-            return None;
-        }
-        let mut camera = request.camera;
-        let screen_size = Vec2::new(request.surface_size[0], request.surface_size[1]);
-        let screen_pos = Vec2::new(request.position[0], request.position[1]);
-        let origin = camera.screen_to_world(screen_pos, screen_size, 0.0);
-        let far = camera.screen_to_world(screen_pos, screen_size, 1.0);
-        let direction = (far - origin).normalize_or_zero();
-        if direction.length_squared() <= f32::EPSILON {
-            return None;
-        }
-        let ray = PickRay { origin, direction };
-        let mut best: Option<PickHit> = None;
-        if let Some(root) = self.root {
-            self.pick_node(root, &ray, &mut best);
-        }
-        let hit = best?;
-        let triangle = self.triangles.get(hit.triangle_index)?;
-        Some(GeometryScenePickResult {
-            mesh_id: triangle.mesh_id.clone(),
-            chunk_id: triangle.chunk_id.clone(),
-            triangle_index: triangle.triangle_index,
-            region_id: triangle.region_id.clone(),
-            region_label: triangle.region_label.clone(),
-            region_tag: triangle.region_tag.clone(),
-            distance: hit.distance,
-            position: (ray.origin + ray.direction * hit.distance).to_array(),
-        })
-    }
-
-    fn pick_node(&self, node_index: usize, ray: &PickRay, best: &mut Option<PickHit>) {
-        let Some(node) = self.nodes.get(node_index) else {
-            return;
-        };
-        let max_distance = best
-            .as_ref()
-            .map(|hit| hit.distance)
-            .unwrap_or(f32::INFINITY);
-        let Some(bounds_distance) = ray_intersects_bounds(ray, node.bounds) else {
-            return;
-        };
-        if bounds_distance > max_distance {
-            return;
-        }
-        match node.kind {
-            PickBvhNodeKind::Leaf { start, end } => {
-                for triangle_index in start..end {
-                    let Some(triangle) = self.triangles.get(triangle_index) else {
-                        continue;
-                    };
-                    if let Some(hit_distance) =
-                        ray_intersects_triangle(ray, triangle.a, triangle.b, triangle.c)
-                    {
-                        if hit_distance > 0.0
-                            && hit_distance
-                                < best
-                                    .as_ref()
-                                    .map(|hit| hit.distance)
-                                    .unwrap_or(f32::INFINITY)
-                        {
-                            *best = Some(PickHit {
-                                triangle_index,
-                                distance: hit_distance,
-                            });
-                        }
-                    }
-                }
-            }
-            PickBvhNodeKind::Branch { left, right } => {
-                self.pick_node(left, ray, best);
-                self.pick_node(right, ray, best);
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GeometrySceneCompleteness {
     Complete,
     Loading,
@@ -641,7 +572,7 @@ pub enum GeometrySceneCompleteness {
     FailedComplete,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometrySceneOverlay {
     pub source_name: Option<String>,
     pub status: GeometrySceneCompleteness,
@@ -654,6 +585,7 @@ pub struct GeometrySceneOverlay {
     pub vertex_count: usize,
     pub triangle_count: usize,
     pub progress_percent: Option<f64>,
+    pub scalar_legend: Option<GeometrySceneScalarLegend>,
     pub region_count: usize,
     pub mapped_region_count: usize,
     pub assembly_nodes: Vec<GeometrySceneAssemblyNode>,
@@ -661,14 +593,29 @@ pub struct GeometrySceneOverlay {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeometrySceneScalarLegend {
+    pub label: String,
+    pub unit: String,
+    pub minimum: f64,
+    pub maximum: f64,
+    /// An acceptance limit on the shown quantity, in `unit`: marked on the bar when it falls in
+    /// the range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<f64>,
+    /// A line under the range, such as how far the result is from that limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometrySceneAssemblyNode {
     pub node_id: String,
     pub label: String,
     pub children: Vec<GeometrySceneAssemblyNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometrySceneRegionSummary {
     pub region_id: String,
     pub label: String,
@@ -697,8 +644,18 @@ pub struct GeometrySceneChunk {
     pub bounds: BoundingBox,
     pub material: Material,
     pub regions: Vec<GeometrySceneRegion>,
+    /// Regions of a line chunk, with ranges counted in segments (index pairs). A CAD face's or
+    /// occurrence's boundary edges carry its region id, so selection and hover color them too.
+    pub segment_regions: Vec<GeometrySceneRegion>,
     pub owner_node_ids: Vec<String>,
     pub visible: bool,
+    /// Topology lines generated for CAD display modes; shaded CAD stays smooth.
+    pub wireframe_only: bool,
+    /// Placements of an instanced chunk (see [`instances`]): its vertices are then the placed
+    /// mesh's own coordinates and each placement is one region.
+    pub instances: Vec<GeometrySceneInstance>,
+    /// The projected diameters, in device pixels, an instanced chunk draws its placements at.
+    pub lod_pixels: Option<[f32; 2]>,
 }
 
 impl GeometrySceneChunk {
@@ -737,8 +694,12 @@ impl GeometrySceneChunk {
             bounds,
             material,
             regions: Vec::new(),
+            segment_regions: Vec::new(),
             owner_node_ids: Vec::new(),
             visible: true,
+            wireframe_only: false,
+            instances: Vec::new(),
+            lod_pixels: None,
         }
     }
 
@@ -759,8 +720,12 @@ impl GeometrySceneChunk {
             bounds,
             material,
             regions: Vec::new(),
+            segment_regions: Vec::new(),
             owner_node_ids: Vec::new(),
             visible: true,
+            wireframe_only: false,
+            instances: Vec::new(),
+            lod_pixels: None,
         }
     }
 
@@ -774,14 +739,223 @@ impl GeometrySceneChunk {
         self
     }
 
+    /// One chunk drawing every chunk in `chunks`, which must share a pipeline and be all indexed
+    /// or all unindexed; the first chunk's material and display flags apply to all. Regions,
+    /// owners and mesh ids are dropped: use it for geometry drawn as one piece, such as context.
+    /// Returns `None` for no chunks, mixed chunks or more than `u32::MAX` vertices.
+    pub fn merged(chunk_id: impl Into<String>, chunks: Vec<Self>) -> Option<Self> {
+        let first = chunks.first()?;
+        let pipeline_type = first.render_data.pipeline_type;
+        let indexed = first.indices.is_some();
+        let material = first.material.clone();
+        let wireframe_only = first.wireframe_only;
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for chunk in &chunks {
+            if chunk.render_data.pipeline_type != pipeline_type
+                || chunk.indices.is_some() != indexed
+            {
+                return None;
+            }
+            let offset = u32::try_from(vertices.len()).ok()?;
+            vertices.extend_from_slice(&chunk.vertices);
+            if let Some(chunk_indices) = &chunk.indices {
+                indices.extend(chunk_indices.iter().map(|index| index + offset));
+            }
+        }
+        u32::try_from(vertices.len()).ok()?;
+        let vertex_count = vertices.len();
+        let index_count = indices.len();
+        let mut merged = Self::from_render_data(
+            chunk_id,
+            RenderData {
+                pipeline_type,
+                vertices,
+                indices: indexed.then_some(indices),
+                gpu_vertices: None,
+                bounds: None,
+                material,
+                draw_calls: vec![DrawCall {
+                    vertex_offset: 0,
+                    vertex_count,
+                    index_offset: indexed.then_some(0),
+                    index_count: indexed.then_some(index_count),
+                    instance_count: 1,
+                }],
+                image: None,
+            },
+        );
+        merged.wireframe_only = wireframe_only;
+        Some(merged)
+    }
+
+    /// Restyle this chunk as translucent context geometry: surfaces take `face` (its alpha
+    /// below 1 makes them blended), edge lines take `edge`. A scene that also holds opaque
+    /// surfaces draws these after them without depth writes, so context never hides a result.
+    pub fn into_context(mut self, face: [f32; 4], edge: [f32; 4]) -> Self {
+        let color = if self.is_edge_chunk() { edge } else { face };
+        let blended = color[3] < 1.0;
+        for vertex in self
+            .vertices
+            .iter_mut()
+            .chain(self.render_data.vertices.iter_mut())
+        {
+            vertex.color = color;
+        }
+        for material in [&mut self.material, &mut self.render_data.material] {
+            material.albedo = Vec4::from_array(color);
+            if blended {
+                material.alpha_mode = AlphaMode::Blend;
+            }
+        }
+        // The colour lives in the vertices now; a stale GPU copy would keep the old one.
+        self.render_data.gpu_vertices = None;
+        // Context edges are part of its look in every display mode.
+        self.wireframe_only = false;
+        self
+    }
+
     pub fn with_regions(mut self, regions: Vec<GeometrySceneRegion>) -> Self {
         self.regions = regions;
+        self
+    }
+
+    pub fn with_segment_regions(mut self, segment_regions: Vec<GeometrySceneRegion>) -> Self {
+        self.segment_regions = segment_regions;
         self
     }
 
     pub fn with_owner_node_ids(mut self, owner_node_ids: Vec<String>) -> Self {
         self.owner_node_ids = owner_node_ids;
         self
+    }
+
+    /// Build CAD feature edges once. Tessellation diagonals within a smooth
+    /// face are render details and should not appear as model edges.
+    pub fn wireframe_edges(&self, color: [f32; 4]) -> Option<Self> {
+        if self.render_data.pipeline_type != PipelineType::Triangles {
+            return None;
+        }
+        struct EdgeIncidence {
+            start: Vertex,
+            end: Vertex,
+            normal: Vec3,
+            region_index: Option<usize>,
+            count: usize,
+            is_feature: bool,
+        }
+        let mut edge_indices = HashMap::new();
+        let mut edges: Vec<EdgeIncidence> = Vec::new();
+        let mut vertices = Vec::new();
+        let indices = self.indices.as_deref();
+        let vertex_count = indices.map_or(self.vertices.len(), |indices| indices.len());
+        let triangle_count = vertex_count / 3;
+        let mut triangle_regions = vec![None; triangle_count];
+        let mut region_ids = HashMap::new();
+        for region in &self.regions {
+            let next_region_index = region_ids.len();
+            let region_index = *region_ids
+                .entry(region.region_id.as_str())
+                .or_insert(next_region_index);
+            for range in &region.triangle_ranges {
+                let start = (range.start as usize).min(triangle_count);
+                let end = start
+                    .saturating_add(range.count as usize)
+                    .min(triangle_count);
+                for triangle_region in &mut triangle_regions[start..end] {
+                    *triangle_region = Some(region_index);
+                }
+            }
+        }
+        for offset in (0..vertex_count).step_by(3) {
+            if offset + 2 >= vertex_count {
+                break;
+            }
+            let triangle = [0, 1, 2].map(|corner| {
+                indices.map_or(offset + corner, |indices| indices[offset + corner] as usize)
+            });
+            let (Some(a), Some(b), Some(c)) = (
+                self.vertices.get(triangle[0]),
+                self.vertices.get(triangle[1]),
+                self.vertices.get(triangle[2]),
+            ) else {
+                continue;
+            };
+            let normal = (Vec3::from_array(b.position) - Vec3::from_array(a.position))
+                .cross(Vec3::from_array(c.position) - Vec3::from_array(a.position))
+                .normalize_or_zero();
+            let region_index = triangle_regions[offset / 3];
+            for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                let (Some(mut start), Some(mut end)) = (
+                    self.vertices.get(triangle[a]).copied(),
+                    self.vertices.get(triangle[b]).copied(),
+                ) else {
+                    continue;
+                };
+                let start_key = start.position.map(f32::to_bits);
+                let end_key = end.position.map(f32::to_bits);
+                let edge = if start_key < end_key {
+                    (start_key, end_key)
+                } else {
+                    (end_key, start_key)
+                };
+                if let Some(&index) = edge_indices.get(&edge) {
+                    let existing: &mut EdgeIncidence = &mut edges[index];
+                    existing.count += 1;
+                    existing.is_feature |= existing.region_index != region_index
+                        || existing.normal.dot(normal) < 0.966;
+                } else {
+                    start.color = color;
+                    end.color = color;
+                    edge_indices.insert(edge, edges.len());
+                    edges.push(EdgeIncidence {
+                        start,
+                        end,
+                        normal,
+                        region_index,
+                        count: 1,
+                        is_feature: false,
+                    });
+                }
+            }
+        }
+        for edge in edges {
+            if edge.count == 1 || edge.is_feature || edge.region_index.is_none() {
+                vertices.extend([edge.start, edge.end]);
+            }
+        }
+        if vertices.is_empty() {
+            return None;
+        }
+        let vertex_count = vertices.len();
+        let material = Material {
+            albedo: Vec4::ONE,
+            ..Material::default()
+        };
+        let mut chunk = Self::from_render_data(
+            format!("{}:wireframe-edges", self.chunk_id),
+            RenderData {
+                pipeline_type: PipelineType::Lines,
+                vertices,
+                indices: None,
+                gpu_vertices: None,
+                bounds: None,
+                material,
+                draw_calls: vec![DrawCall {
+                    vertex_offset: 0,
+                    vertex_count,
+                    index_offset: None,
+                    index_count: None,
+                    instance_count: 1,
+                }],
+                image: None,
+            },
+        );
+        chunk.mesh_id = self.mesh_id.clone();
+        chunk.owner_node_ids = self.owner_node_ids.clone();
+        chunk.visible = self.visible;
+        chunk.wireframe_only = true;
+        Some(chunk)
     }
 
     pub fn triangle_count(&self) -> usize {
@@ -810,11 +984,16 @@ impl GeometrySceneChunk {
         }
         let is_edge_chunk = self.is_edge_chunk();
         match presentation.display_mode {
+            GeometrySceneDisplayMode::Shaded
+                if self.wireframe_only && !presentation.edge_overlay_enabled =>
+            {
+                render_data.draw_calls.clear();
+            }
             GeometrySceneDisplayMode::Wireframe if !is_edge_chunk => {
-                render_data.material.alpha_mode = AlphaMode::Blend;
-                render_data.material.albedo.w = presentation
-                    .display_mode
-                    .alpha(presentation.edge_overlay_enabled);
+                // A wireframe view is the topology, not a translucent shaded view. Keeping
+                // triangle draw calls here both hid the mesh lines through depth writes and made
+                // the mode look indistinguishable from shaded rendering on native surfaces.
+                render_data.draw_calls.clear();
             }
             GeometrySceneDisplayMode::Wireframe => {}
             GeometrySceneDisplayMode::Edges
@@ -842,26 +1021,37 @@ impl GeometrySceneChunk {
                 }
             }
         }
+        if presentation.display_mode == GeometrySceneDisplayMode::Edges
+            && is_edge_chunk
+            && render_data.pipeline_type == PipelineType::Lines
+        {
+            render_data.pipeline_type = PipelineType::LinesNoDepth;
+        }
 
+        for region in &presentation.region_colors {
+            self.apply_region_color(
+                &mut render_data,
+                &region.region_id,
+                RegionPaint::Face(region.color),
+            );
+        }
         for highlight in &presentation.region_highlights {
             self.apply_region_color(
                 &mut render_data,
                 &highlight.region_id,
-                highlight
-                    .color
-                    .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref())),
+                RegionPaint::Highlight(
+                    highlight
+                        .color
+                        .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref())),
+                ),
             );
         }
         if let Some(region_id) = presentation.hovered_region_id.as_deref() {
-            self.apply_region_color(&mut render_data, region_id, GEOMETRY_HOVER_REGION_COLOR);
+            self.apply_region_color(&mut render_data, region_id, HOVER_PAINT);
         }
         for region_id in &presentation.selected_region_ids {
-            let colored = self.apply_region_color(
-                &mut render_data,
-                region_id,
-                GEOMETRY_SELECTED_REGION_COLOR,
-            );
-            log::info!(
+            let colored = self.apply_region_color(&mut render_data, region_id, SELECTED_PAINT);
+            log::debug!(
                 target: "runmat_plot",
                 "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
                 self.chunk_id,
@@ -869,24 +1059,68 @@ impl GeometrySceneChunk {
                 colored
             );
         }
+        for selection in &presentation.selected_topology {
+            if let GeometrySceneTopologySelection::Face {
+                chunk_id,
+                triangle_index,
+            } = selection
+            {
+                if chunk_id == &self.chunk_id {
+                    self.apply_triangle_color(&mut render_data, *triangle_index, SELECTED_PAINT);
+                }
+            }
+        }
         if let Some(region_id) = presentation.selected_region_id.as_deref() {
-            let colored = self.apply_region_color(
-                &mut render_data,
-                region_id,
-                GEOMETRY_SELECTED_REGION_COLOR,
-            );
-            log::info!(
+            let colored = self.apply_region_color(&mut render_data, region_id, SELECTED_PAINT);
+            log::debug!(
                 target: "runmat_plot",
                 "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
                 self.chunk_id,
                 region_id,
                 colored
             );
+        }
+        if !presentation.hidden_region_ids.is_empty() {
+            render_data =
+                self.render_data_without_regions(render_data, &presentation.hidden_region_ids);
         }
         if let Some(section) = presentation.active_section() {
             render_data = self.render_data_with_section(render_data, section);
         }
         render_data
+    }
+
+    /// Leaves out the triangles (or, on a line chunk, the segments) of the hidden regions.
+    fn render_data_without_regions(
+        &self,
+        render_data: RenderData,
+        hidden: &[String],
+    ) -> RenderData {
+        let lines = matches!(
+            render_data.pipeline_type,
+            PipelineType::Lines | PipelineType::LinesNoDepth
+        );
+        let regions = if lines {
+            &self.segment_regions
+        } else {
+            &self.regions
+        };
+        let ranges: Vec<GeometrySceneTriangleRange> = regions
+            .iter()
+            .filter(|region| hidden.iter().any(|id| id == &region.region_id))
+            .flat_map(|region| region.triangle_ranges.iter().copied())
+            .collect();
+        if ranges.is_empty() {
+            return render_data;
+        }
+        let per = if lines {
+            2
+        } else if render_data.pipeline_type == PipelineType::Triangles {
+            3
+        } else {
+            return render_data;
+        };
+        section_cut::without_primitives(render_data, per, &ranges)
     }
 
     fn render_data_with_section(
@@ -897,11 +1131,8 @@ impl GeometrySceneChunk {
         let Some(plane) = section_plane(&section.plane) else {
             return render_data;
         };
-        match render_data.pipeline_type {
-            PipelineType::Triangles => clip_triangle_render_data(render_data, plane),
-            PipelineType::Lines => clip_line_render_data(render_data, plane),
-            _ => render_data,
-        }
+        let second = section.second_plane.as_ref().and_then(section_plane);
+        section_cut::cut(render_data, plane, second, section.cap)
     }
 
     fn is_edge_chunk(&self) -> bool {
@@ -923,167 +1154,6 @@ impl GeometrySceneChunk {
                     && triangle_index < range.start.saturating_add(range.count)
             })
         })
-    }
-
-    fn region_anchor(&self, region_id: &str) -> Option<Vec3> {
-        if self.render_data.pipeline_type != PipelineType::Triangles {
-            return None;
-        }
-        let region = self
-            .regions
-            .iter()
-            .find(|item| item.region_id == region_id)?;
-        let mut weighted_centroid = Vec3::ZERO;
-        let mut total_area = 0.0_f32;
-        let mut fallback_centroid = Vec3::ZERO;
-        let mut fallback_count = 0_usize;
-
-        for range in &region.triangle_ranges {
-            let start = range.start as usize;
-            let end = start.saturating_add(range.count as usize);
-            for triangle_index in start..end {
-                let Some((a, b, c)) = self.triangle_vertices(triangle_index) else {
-                    continue;
-                };
-                let centroid = (a + b + c) / 3.0;
-                let area = (b - a).cross(c - a).length() * 0.5;
-                if area.is_finite() && area > 1.0e-8 {
-                    weighted_centroid += centroid * area;
-                    total_area += area;
-                } else {
-                    fallback_centroid += centroid;
-                    fallback_count += 1;
-                }
-            }
-        }
-
-        if total_area > 0.0 {
-            Some(weighted_centroid / total_area)
-        } else if fallback_count > 0 {
-            Some(fallback_centroid / fallback_count as f32)
-        } else {
-            None
-        }
-    }
-
-    fn triangle_vertices(&self, triangle_index: usize) -> Option<(Vec3, Vec3, Vec3)> {
-        let vertex_at = |index: u32| {
-            self.render_data
-                .vertices
-                .get(index as usize)
-                .map(|vertex| Vec3::from_array(vertex.position))
-        };
-
-        if let Some(indices) = self.indices.as_ref() {
-            let base = triangle_index.checked_mul(3)?;
-            let triangle = indices.get(base..base + 3)?;
-            Some((
-                vertex_at(triangle[0])?,
-                vertex_at(triangle[1])?,
-                vertex_at(triangle[2])?,
-            ))
-        } else {
-            let base = triangle_index.checked_mul(3)?;
-            let a = self.render_data.vertices.get(base)?;
-            let b = self.render_data.vertices.get(base + 1)?;
-            let c = self.render_data.vertices.get(base + 2)?;
-            Some((
-                Vec3::from_array(a.position),
-                Vec3::from_array(b.position),
-                Vec3::from_array(c.position),
-            ))
-        }
-    }
-
-    fn apply_region_color(
-        &self,
-        render_data: &mut RenderData,
-        region_id: &str,
-        color: [f32; 4],
-    ) -> usize {
-        if self.render_data.pipeline_type != PipelineType::Triangles {
-            return 0;
-        }
-        let Some(region) = self.regions.iter().find(|item| item.region_id == region_id) else {
-            log::info!(
-                target: "runmat_plot",
-                "geometry_scene.selection_color_missing chunk_id={} region_id={} available_regions={}",
-                self.chunk_id,
-                region_id,
-                self.regions.len()
-            );
-            return 0;
-        };
-        let (Some(indices), Some(render_indices)) =
-            (self.indices.as_ref(), render_data.indices.as_mut())
-        else {
-            return self.apply_direct_region_color(render_data, region, color);
-        };
-
-        let mut colored = 0usize;
-        for range in &region.triangle_ranges {
-            let start = range.start as usize;
-            let end = start.saturating_add(range.count as usize);
-            for triangle_index in start..end {
-                let base = triangle_index.saturating_mul(3);
-                let Some(triangle) = indices.get(base..base + 3) else {
-                    continue;
-                };
-                if render_indices.get(base..base + 3).is_none() {
-                    continue;
-                }
-                let mut isolated_indices = [0_u32; 3];
-                let mut isolated = true;
-                for (slot, vertex_index) in triangle.iter().copied().enumerate() {
-                    let Some(vertex) = render_data.vertices.get(vertex_index as usize).copied()
-                    else {
-                        isolated = false;
-                        break;
-                    };
-                    let mut vertex = vertex;
-                    vertex.color = color;
-                    let next_index = render_data.vertices.len();
-                    if next_index > u32::MAX as usize {
-                        isolated = false;
-                        break;
-                    }
-                    render_data.vertices.push(vertex);
-                    isolated_indices[slot] = next_index as u32;
-                }
-                if isolated {
-                    render_indices[base..base + 3].copy_from_slice(&isolated_indices);
-                    colored += 1;
-                }
-            }
-        }
-        colored
-    }
-
-    fn apply_direct_region_color(
-        &self,
-        render_data: &mut RenderData,
-        region: &GeometrySceneRegion,
-        color: [f32; 4],
-    ) -> usize {
-        if render_data.indices.is_some() {
-            return 0;
-        }
-        let mut colored = 0usize;
-        for range in &region.triangle_ranges {
-            let start = range.start as usize;
-            let end = start.saturating_add(range.count as usize);
-            for triangle_index in start..end {
-                let base = triangle_index.saturating_mul(3);
-                let Some(triangle) = render_data.vertices.get_mut(base..base + 3) else {
-                    continue;
-                };
-                for vertex in triangle {
-                    vertex.color = color;
-                }
-                colored += 1;
-            }
-        }
-        colored
     }
 }
 
@@ -1112,70 +1182,19 @@ fn geometry_region_role_color(role: Option<&str>) -> [f32; 4] {
     }
 }
 
-fn clip_triangle_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> RenderData {
-    let mut clipped_vertices = Vec::new();
-    if let Some(indices) = render_data.indices.as_ref() {
-        for triangle in indices.chunks_exact(3) {
-            let Some(vertices) = triangle_vertices_from_indices(&render_data.vertices, triangle)
-            else {
-                continue;
-            };
-            push_clipped_triangle(vertices, plane, &mut clipped_vertices);
-        }
-    } else {
-        for triangle in render_data.vertices.chunks_exact(3) {
-            push_clipped_triangle(
-                [triangle[0], triangle[1], triangle[2]],
-                plane,
-                &mut clipped_vertices,
-            );
-        }
+/// Every triangle of `render_data`, indexed or not.
+fn triangles_of(render_data: &RenderData) -> Vec<[Vertex; 3]> {
+    match render_data.indices.as_ref() {
+        Some(indices) => indices
+            .chunks_exact(3)
+            .filter_map(|t| triangle_vertices_from_indices(&render_data.vertices, t))
+            .collect(),
+        None => render_data
+            .vertices
+            .chunks_exact(3)
+            .map(|t| [t[0], t[1], t[2]])
+            .collect(),
     }
-    let bounds = bounds_from_vertices(&clipped_vertices);
-    let vertex_count = clipped_vertices.len();
-    render_data.vertices = clipped_vertices;
-    render_data.indices = None;
-    render_data.bounds = Some(bounds);
-    render_data.draw_calls = vec![DrawCall {
-        vertex_offset: 0,
-        vertex_count,
-        index_offset: None,
-        index_count: None,
-        instance_count: 1,
-    }];
-    render_data
-}
-
-fn clip_line_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> RenderData {
-    let mut clipped_vertices = Vec::new();
-    if let Some(indices) = render_data.indices.as_ref() {
-        for line in indices.chunks_exact(2) {
-            let Some(a) = render_data.vertices.get(line[0] as usize).copied() else {
-                continue;
-            };
-            let Some(b) = render_data.vertices.get(line[1] as usize).copied() else {
-                continue;
-            };
-            push_clipped_line(a, b, plane, &mut clipped_vertices);
-        }
-    } else {
-        for line in render_data.vertices.chunks_exact(2) {
-            push_clipped_line(line[0], line[1], plane, &mut clipped_vertices);
-        }
-    }
-    let bounds = bounds_from_vertices(&clipped_vertices);
-    let vertex_count = clipped_vertices.len();
-    render_data.vertices = clipped_vertices;
-    render_data.indices = None;
-    render_data.bounds = Some(bounds);
-    render_data.draw_calls = vec![DrawCall {
-        vertex_offset: 0,
-        vertex_count,
-        index_offset: None,
-        index_count: None,
-        instance_count: 1,
-    }];
-    render_data
 }
 
 fn triangle_vertices_from_indices(vertices: &[Vertex], triangle: &[u32]) -> Option<[Vertex; 3]> {
@@ -1366,60 +1385,6 @@ fn combined_chunk_bounds(chunks: &[GeometrySceneChunk]) -> BoundingBox {
     bounds
 }
 
-fn annotation_arrow_length(bounds: BoundingBox) -> f32 {
-    let size = bounds.size();
-    let diagonal = size.length();
-    if diagonal.is_finite() && diagonal > 1.0e-6 {
-        diagonal * 0.075
-    } else {
-        1.0
-    }
-}
-
-fn normalized_annotation_direction(direction: [f32; 3]) -> Option<Vec3> {
-    let direction = Vec3::from_array(direction);
-    let length = direction.length();
-    (length.is_finite() && length > 1.0e-8).then_some(direction / length)
-}
-
-fn append_annotation_arrow(
-    vertices: &mut Vec<Vertex>,
-    anchor: Vec3,
-    direction: Vec3,
-    length: f32,
-    color: [f32; 4],
-) {
-    let start = anchor;
-    let end = anchor + direction * length;
-    append_annotation_line(vertices, start, end, color);
-
-    let side = perpendicular_unit(direction);
-    let wing_base = end - direction * (length * 0.28);
-    let wing_size = length * 0.12;
-    append_annotation_line(vertices, end, wing_base + side * wing_size, color);
-    append_annotation_line(vertices, end, wing_base - side * wing_size, color);
-}
-
-fn append_annotation_line(vertices: &mut Vec<Vertex>, start: Vec3, end: Vec3, color: [f32; 4]) {
-    vertices.push(vertex(start.to_array(), color, [0.0, 0.0, 1.0]));
-    vertices.push(vertex(end.to_array(), color, [0.0, 0.0, 1.0]));
-}
-
-fn perpendicular_unit(direction: Vec3) -> Vec3 {
-    let reference = if direction.z.abs() < 0.9 {
-        Vec3::Z
-    } else {
-        Vec3::Y
-    };
-    let side = direction.cross(reference);
-    let length = side.length();
-    if length > 1.0e-8 {
-        side / length
-    } else {
-        Vec3::X
-    }
-}
-
 fn stable_node_id(scene_id: &str, revision: u64, index: usize, chunk_id: &str) -> u64 {
     const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
@@ -1438,499 +1403,5 @@ fn stable_node_id(scene_id: &str, revision: u64, index: usize, chunk_id: &str) -
     hash ^ index as u64
 }
 
-#[derive(Debug, Clone)]
-struct IndexedTriangle {
-    a: Vec3,
-    b: Vec3,
-    c: Vec3,
-    bounds: BoundingBox,
-    centroid: Vec3,
-    mesh_id: Option<String>,
-    chunk_id: String,
-    triangle_index: usize,
-    region_id: Option<String>,
-    region_label: Option<String>,
-    region_tag: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct PickBvhNode {
-    bounds: BoundingBox,
-    kind: PickBvhNodeKind,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum PickBvhNodeKind {
-    Leaf { start: usize, end: usize },
-    Branch { left: usize, right: usize },
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PickRay {
-    origin: Vec3,
-    direction: Vec3,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PickHit {
-    triangle_index: usize,
-    distance: f32,
-}
-
-fn build_pick_bvh_node(
-    nodes: &mut Vec<PickBvhNode>,
-    triangles: &mut [IndexedTriangle],
-    start: usize,
-    end: usize,
-) -> Option<usize> {
-    if start >= end {
-        return None;
-    }
-    let bounds = combined_triangle_bounds(&triangles[start..end]);
-    let node_index = nodes.len();
-    nodes.push(PickBvhNode {
-        bounds,
-        kind: PickBvhNodeKind::Leaf { start, end },
-    });
-    const LEAF_TRIANGLES: usize = 32;
-    if end - start <= LEAF_TRIANGLES {
-        return Some(node_index);
-    }
-    let centroid_bounds = combined_centroid_bounds(&triangles[start..end]);
-    let extent = centroid_bounds.max - centroid_bounds.min;
-    let axis = if extent.x >= extent.y && extent.x >= extent.z {
-        0
-    } else if extent.y >= extent.z {
-        1
-    } else {
-        2
-    };
-    triangles[start..end].sort_by(|a, b| {
-        a.centroid[axis]
-            .partial_cmp(&b.centroid[axis])
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let mid = start + (end - start) / 2;
-    let left = build_pick_bvh_node(nodes, triangles, start, mid);
-    let right = build_pick_bvh_node(nodes, triangles, mid, end);
-    if let (Some(left), Some(right)) = (left, right) {
-        nodes[node_index].kind = PickBvhNodeKind::Branch { left, right };
-    }
-    Some(node_index)
-}
-
-fn triangle_bounds(a: Vec3, b: Vec3, c: Vec3) -> BoundingBox {
-    let mut bounds = BoundingBox::new(a, a);
-    bounds.expand(b);
-    bounds.expand(c);
-    bounds
-}
-
-fn combined_triangle_bounds(triangles: &[IndexedTriangle]) -> BoundingBox {
-    let mut bounds = BoundingBox::default();
-    for triangle in triangles {
-        bounds.expand_by_box(&triangle.bounds);
-    }
-    bounds
-}
-
-fn combined_centroid_bounds(triangles: &[IndexedTriangle]) -> BoundingBox {
-    let Some(first) = triangles.first() else {
-        return BoundingBox::default();
-    };
-    let mut bounds = BoundingBox::new(first.centroid, first.centroid);
-    for triangle in triangles.iter().skip(1) {
-        bounds.expand(triangle.centroid);
-    }
-    bounds
-}
-
-fn ray_intersects_bounds(ray: &PickRay, bounds: BoundingBox) -> Option<f32> {
-    let mut t_min: f32 = 0.0;
-    let mut t_max = f32::INFINITY;
-    for axis in 0..3 {
-        let origin = ray.origin[axis];
-        let direction = ray.direction[axis];
-        let min = bounds.min[axis];
-        let max = bounds.max[axis];
-        if direction.abs() < 1e-8 {
-            if origin < min || origin > max {
-                return None;
-            }
-            continue;
-        }
-        let inv_direction = 1.0 / direction;
-        let mut t0 = (min - origin) * inv_direction;
-        let mut t1 = (max - origin) * inv_direction;
-        if t0 > t1 {
-            std::mem::swap(&mut t0, &mut t1);
-        }
-        t_min = t_min.max(t0);
-        t_max = t_max.min(t1);
-        if t_max < t_min {
-            return None;
-        }
-    }
-    Some(t_min.max(0.0))
-}
-
-fn ray_intersects_triangle(ray: &PickRay, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
-    let edge1 = b - a;
-    let edge2 = c - a;
-    let pvec = ray.direction.cross(edge2);
-    let det = edge1.dot(pvec);
-    if det.abs() < 1e-7 {
-        return None;
-    }
-    let inv_det = 1.0 / det;
-    let tvec = ray.origin - a;
-    let u = tvec.dot(pvec) * inv_det;
-    if !(0.0..=1.0).contains(&u) {
-        return None;
-    }
-    let qvec = tvec.cross(edge1);
-    let v = ray.direction.dot(qvec) * inv_det;
-    if v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-    let t = edge2.dot(qvec) * inv_det;
-    (t > 1e-6).then_some(t)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::ProjectionType;
-
-    #[test]
-    fn pick_index_returns_region_for_triangle() {
-        let material = cad_default_material();
-        let chunk = GeometrySceneChunk::indexed_triangles(
-            "face_chunk",
-            vec![
-                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-            ],
-            vec![0, 1, 2],
-            material,
-        )
-        .with_regions(vec![GeometrySceneRegion::new(
-            "face_a",
-            Some("Face A".to_string()),
-            Some("cad-face".to_string()),
-            vec![GeometrySceneTriangleRange::new(0, 1)],
-        )]);
-        let scene = GeometryScene::new("scene", 1, vec![chunk]);
-        let index = GeometryScenePickIndex::build(&scene);
-        let mut camera = Camera::new();
-        camera.position = Vec3::new(0.0, 0.0, 5.0);
-        camera.target = Vec3::ZERO;
-        camera.up = Vec3::Y;
-        camera.aspect_ratio = 1.0;
-        camera.projection = ProjectionType::Perspective {
-            fov: 45.0_f32.to_radians(),
-            near: 0.1,
-            far: 100.0,
-        };
-        camera.mark_dirty();
-
-        let hit = index.pick(GeometryScenePickRequest {
-            camera,
-            surface_size: [800.0, 800.0],
-            position: [400.0, 400.0],
-        });
-        assert_eq!(
-            hit.and_then(|hit| hit.region_id),
-            Some("face_a".to_string())
-        );
-    }
-
-    #[test]
-    fn presentation_selection_colors_indexed_triangle_region() {
-        let material = cad_default_material();
-        let chunk = GeometrySceneChunk::indexed_triangles(
-            "face_chunk",
-            vec![
-                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([2.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-            ],
-            vec![0, 1, 2, 1, 3, 2],
-            material,
-        )
-        .with_regions(vec![GeometrySceneRegion::new(
-            "face_b",
-            Some("Face B".to_string()),
-            Some("cad-face".to_string()),
-            vec![GeometrySceneTriangleRange::new(1, 1)],
-        )]);
-
-        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
-            selected_region_ids: vec!["face_b".to_string()],
-            ..Default::default()
-        });
-
-        assert_eq!(render_data.vertices.len(), 7);
-        assert_eq!(
-            render_data.indices.as_deref(),
-            Some(&[0, 1, 2, 4, 5, 6][..])
-        );
-        assert_eq!(
-            render_data.vertices[4].color,
-            GEOMETRY_SELECTED_REGION_COLOR
-        );
-        assert_eq!(
-            render_data.vertices[5].color,
-            GEOMETRY_SELECTED_REGION_COLOR
-        );
-        assert_eq!(
-            render_data.vertices[6].color,
-            GEOMETRY_SELECTED_REGION_COLOR
-        );
-    }
-
-    #[test]
-    fn presentation_selection_colors_direct_triangle_region() {
-        let material = cad_default_material();
-        let base_color = [0.5, 0.5, 0.5, 1.0];
-        let vertices = vec![
-            vertex([-1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
-            vertex([1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
-            vertex([0.0, 1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
-            vertex([1.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
-            vertex([2.0, -1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
-            vertex([0.0, 1.0, 0.0], base_color, [0.0, 0.0, 1.0]),
-        ];
-        let chunk = GeometrySceneChunk::from_render_data(
-            "face_chunk",
-            RenderData {
-                pipeline_type: PipelineType::Triangles,
-                vertices,
-                indices: None,
-                gpu_vertices: None,
-                bounds: None,
-                material,
-                draw_calls: vec![DrawCall {
-                    vertex_offset: 0,
-                    vertex_count: 6,
-                    index_offset: None,
-                    index_count: None,
-                    instance_count: 1,
-                }],
-                image: None,
-            },
-        )
-        .with_regions(vec![GeometrySceneRegion::new(
-            "face_b",
-            Some("Face B".to_string()),
-            Some("cad-face".to_string()),
-            vec![GeometrySceneTriangleRange::new(1, 1)],
-        )]);
-
-        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
-            selected_region_id: Some("face_b".to_string()),
-            ..Default::default()
-        });
-
-        assert!(render_data.indices.is_none());
-        assert_eq!(render_data.vertices.len(), 6);
-        assert_eq!(render_data.vertices[0].color, base_color);
-        assert_eq!(render_data.vertices[1].color, base_color);
-        assert_eq!(render_data.vertices[2].color, base_color);
-        assert_eq!(
-            render_data.vertices[3].color,
-            GEOMETRY_SELECTED_REGION_COLOR
-        );
-        assert_eq!(
-            render_data.vertices[4].color,
-            GEOMETRY_SELECTED_REGION_COLOR
-        );
-        assert_eq!(
-            render_data.vertices[5].color,
-            GEOMETRY_SELECTED_REGION_COLOR
-        );
-    }
-
-    #[test]
-    fn presentation_resolves_hidden_and_isolated_owner_visibility() {
-        let current_hidden = BTreeSet::from(["panel_b".to_string()]);
-        let all_owner_ids = ["panel_a", "panel_b", "panel_c"];
-
-        assert_eq!(
-            GeometryScenePresentation::default()
-                .resolved_hidden_owner_node_ids(all_owner_ids, &current_hidden),
-            current_hidden
-        );
-
-        assert_eq!(
-            GeometryScenePresentation {
-                hidden_owner_node_ids: Some(vec![
-                    " panel_a ".to_string(),
-                    String::new(),
-                    "panel_a".to_string(),
-                ]),
-                ..Default::default()
-            }
-            .resolved_hidden_owner_node_ids(all_owner_ids, &BTreeSet::new()),
-            BTreeSet::from(["panel_a".to_string()])
-        );
-
-        assert_eq!(
-            GeometryScenePresentation {
-                hidden_owner_node_ids: Some(vec!["panel_c".to_string()]),
-                isolated_owner_node_ids: Some(vec!["panel_a".to_string()]),
-                ..Default::default()
-            }
-            .resolved_hidden_owner_node_ids(all_owner_ids, &BTreeSet::new()),
-            BTreeSet::from(["panel_b".to_string(), "panel_c".to_string()])
-        );
-
-        assert_eq!(
-            GeometryScenePresentation {
-                hidden_owner_node_ids: Some(Vec::new()),
-                isolated_owner_node_ids: None,
-                ..Default::default()
-            }
-            .resolved_hidden_owner_node_ids(all_owner_ids, &current_hidden),
-            BTreeSet::new()
-        );
-    }
-
-    #[test]
-    fn presentation_section_distinguishes_preserve_clear_and_plane() {
-        let preserve: GeometryScenePresentation =
-            serde_json::from_value(serde_json::json!({})).expect("preserve presentation");
-        assert_eq!(preserve.section, None);
-
-        let clear: GeometryScenePresentation =
-            serde_json::from_value(serde_json::json!({ "section": null }))
-                .expect("clear presentation");
-        assert_eq!(clear.section, Some(None));
-
-        let sectioned: GeometryScenePresentation = serde_json::from_value(serde_json::json!({
-            "section": {
-                "plane": {
-                    "normal": [1.0, 0.0, 0.0],
-                    "origin": [0.0, 0.0, 0.0],
-                    "label": "midplane"
-                }
-            }
-        }))
-        .expect("section presentation");
-        let section = sectioned
-            .section
-            .as_ref()
-            .and_then(Option::as_ref)
-            .expect("section");
-        assert_eq!(section.plane.normal, [1.0, 0.0, 0.0]);
-        assert_eq!(section.plane.label.as_deref(), Some("midplane"));
-    }
-
-    #[test]
-    fn presentation_accepts_bounded_view_presets() {
-        let front: GeometryScenePresentation =
-            serde_json::from_value(serde_json::json!({ "viewPreset": "front" }))
-                .expect("front view presentation");
-        assert_eq!(front.view_preset, Some(GeometrySceneViewPreset::Front));
-
-        let isometric: GeometryScenePresentation =
-            serde_json::from_value(serde_json::json!({ "viewPreset": "isometric" }))
-                .expect("isometric view presentation");
-        assert_eq!(
-            isometric.view_preset,
-            Some(GeometrySceneViewPreset::Isometric)
-        );
-    }
-
-    #[test]
-    fn presentation_section_clips_triangle_render_data() {
-        let material = cad_default_material();
-        let chunk = GeometrySceneChunk::indexed_triangles(
-            "face_chunk",
-            vec![
-                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-            ],
-            vec![0, 1, 2],
-            material,
-        );
-        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
-            section: Some(Some(GeometrySceneSection {
-                plane: GeometrySceneSectionPlane {
-                    normal: [1.0, 0.0, 0.0],
-                    origin: Some([0.0, 0.0, 0.0]),
-                    offset: None,
-                    label: Some("midplane".to_string()),
-                },
-            })),
-            ..Default::default()
-        });
-
-        assert_eq!(render_data.pipeline_type, PipelineType::Triangles);
-        assert!(render_data.indices.is_none());
-        assert_eq!(render_data.vertices.len(), 6);
-        assert_eq!(
-            render_data.draw_calls[0].vertex_count,
-            render_data.vertices.len()
-        );
-        assert!(render_data
-            .vertices
-            .iter()
-            .all(|vertex| vertex.position[0] >= -SECTION_DISTANCE_EPSILON));
-    }
-
-    #[test]
-    fn presentation_region_annotations_emit_marker_and_vector_nodes() {
-        let material = cad_default_material();
-        let chunk = GeometrySceneChunk::indexed_triangles(
-            "face_chunk",
-            vec![
-                vertex([-1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([1.0, -1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
-            ],
-            vec![0, 1, 2],
-            material,
-        )
-        .with_regions(vec![GeometrySceneRegion::new(
-            "loaded_face",
-            Some("Loaded face".to_string()),
-            Some("cad-face".to_string()),
-            vec![GeometrySceneTriangleRange::new(0, 1)],
-        )]);
-        let scene = GeometryScene::new("scene", 1, vec![chunk]);
-        let nodes = scene.nodes_with_presentation(&GeometryScenePresentation {
-            region_annotations: vec![GeometrySceneRegionAnnotation {
-                region_id: "loaded_face".to_string(),
-                color: Some([0.9, 0.1, 0.1, 1.0]),
-                role: Some("load".to_string()),
-                label: Some("load".to_string()),
-                direction: Some([0.0, 0.0, 1.0]),
-                size: Some(18.0),
-            }],
-            ..Default::default()
-        });
-
-        let marker = nodes
-            .iter()
-            .find(|node| node.name == "FEA region markers")
-            .and_then(|node| node.render_data.as_ref())
-            .expect("marker annotation node");
-        assert_eq!(marker.pipeline_type, PipelineType::Points);
-        assert_eq!(marker.vertices.len(), 1);
-        assert!((marker.vertices[0].position[1] - (-1.0 / 3.0)).abs() < 1.0e-6);
-        assert_eq!(marker.vertices[0].normal[2], 18.0);
-
-        let vector = nodes
-            .iter()
-            .find(|node| node.name == "FEA load vectors")
-            .and_then(|node| node.render_data.as_ref())
-            .expect("vector annotation node");
-        assert_eq!(vector.pipeline_type, PipelineType::Lines);
-        assert_eq!(vector.vertices.len(), 6);
-        assert!(vector.vertices[1].position[2] > vector.vertices[0].position[2]);
-    }
-}
+mod tests;

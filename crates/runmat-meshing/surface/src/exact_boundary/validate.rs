@@ -1,3 +1,5 @@
+use super::control::{checkpoint, validate_curves};
+use runmat_meshing_core::MeshingCancellationSignal;
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
@@ -6,25 +8,20 @@ use runmat_geometry_core::{
 use runmat_meshing_curve::{SharedCurve, SharedCurveMesh};
 
 use super::{
-    crossings::validate_face_segment_intersections, ExactFaceBoundaryLoop, ExactSurfaceBoundary,
-    ExactSurfaceBoundaryError, ExactSurfaceBoundaryErrorKind,
+    crossings::validate_face_segment_intersections_controlled, ExactFaceBoundaryLoop,
+    ExactSurfaceBoundary, ExactSurfaceBoundaryError, ExactSurfaceBoundaryErrorKind,
     EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
 };
 
 const MAX_BOUNDARY_SEGMENTS: usize = 100_000_000;
 
-pub fn validate_exact_surface_boundary(
+pub(super) fn validate_exact_surface_boundary_controlled(
     boundary: &ExactSurfaceBoundary,
     topology: &ExactBRepTopology,
     curves: &SharedCurveMesh,
+    control: Option<&dyn MeshingCancellationSignal>,
 ) -> Result<(), ExactSurfaceBoundaryError> {
-    curves.validate_against(topology).map_err(|error| {
-        ExactSurfaceBoundaryError::new(
-            ExactSurfaceBoundaryErrorKind::InvalidCurveInput,
-            error.edge_id.clone(),
-            error.to_string(),
-        )
-    })?;
+    validate_curves(curves, topology, control)?;
     if boundary.schema_version != EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION
         || boundary.faces.len() != topology.faces.len()
     {
@@ -36,20 +33,30 @@ pub fn validate_exact_surface_boundary(
     let wires = topology
         .wires
         .iter()
-        .map(|wire| (&wire.id, wire))
-        .collect::<BTreeMap<_, _>>();
+        .map(|wire| {
+            checkpoint(control)?;
+            Ok((&wire.id, wire))
+        })
+        .collect::<Result<BTreeMap<_, _>, ExactSurfaceBoundaryError>>()?;
     let coedges = topology
         .coedges
         .iter()
-        .map(|coedge| (&coedge.id, coedge))
-        .collect::<BTreeMap<_, _>>();
+        .map(|coedge| {
+            checkpoint(control)?;
+            Ok((&coedge.id, coedge))
+        })
+        .collect::<Result<BTreeMap<_, _>, ExactSurfaceBoundaryError>>()?;
     let curves = curves
         .edges
         .iter()
-        .map(|curve| (&curve.source_edge_id, curve))
-        .collect::<BTreeMap<_, _>>();
+        .map(|curve| {
+            checkpoint(control)?;
+            Ok((&curve.source_edge_id, curve))
+        })
+        .collect::<Result<BTreeMap<_, _>, ExactSurfaceBoundaryError>>()?;
     let mut segment_count = 0usize;
     for (actual, face) in boundary.faces.iter().zip(&topology.faces) {
+        checkpoint(control)?;
         if actual.source_face_id != face.id
             || actual.outer_loop.source_wire_id != face.outer_wire_id
             || actual.inner_loops.len() != face.inner_wire_ids.len()
@@ -65,10 +72,14 @@ pub fn validate_exact_surface_boundary(
             ));
         }
         for loop_boundary in std::iter::once(&actual.outer_loop).chain(&actual.inner_loops) {
-            validate_loop(loop_boundary, &wires, &coedges, &curves)?;
+            validate_loop(loop_boundary, &wires, &coedges, &curves, control)?;
             segment_count = segment_count.saturating_add(loop_boundary.segments.len());
         }
-        validate_face_segment_intersections(actual)?;
+        validate_face_segment_intersections_controlled(
+            actual,
+            [face.periodic_u, face.periodic_v],
+            control,
+        )?;
     }
     if segment_count > MAX_BOUNDARY_SEGMENTS {
         return Err(ExactSurfaceBoundaryError::new(
@@ -85,6 +96,7 @@ fn validate_loop(
     wires: &BTreeMap<&PersistentEntityId, &ExactWire>,
     coedges: &BTreeMap<&PersistentEntityId, &runmat_geometry_core::ExactCoedge>,
     curves: &BTreeMap<&PersistentEntityId, &SharedCurve>,
+    control: Option<&dyn MeshingCancellationSignal>,
 ) -> Result<(), ExactSurfaceBoundaryError> {
     let wire = wires
         .get(&actual.source_wire_id)
@@ -97,6 +109,7 @@ fn validate_loop(
     }
     let mut offset = 0usize;
     for coedge_id in &wire.coedge_ids {
+        checkpoint(control)?;
         let coedge = coedges
             .get(coedge_id)
             .ok_or_else(|| invalid(Some(coedge_id), "source coedge is absent"))?;
@@ -116,6 +129,7 @@ fn validate_loop(
             ));
         };
         for (local, segment) in actual_segments.iter().enumerate() {
+            checkpoint(control)?;
             let index = match coedge.orientation {
                 TopologicalOrientation::Forward => local,
                 TopologicalOrientation::Reversed => count - 1 - local,
@@ -154,17 +168,19 @@ fn validate_loop(
             "wire contains unowned boundary segments",
         ));
     }
-    if actual
+    for (left, right) in actual
         .segments
         .iter()
         .zip(actual.segments.iter().cycle().skip(1))
         .take(actual.segments.len())
-        .any(|(left, right)| left.node_ids[1] != right.node_ids[0])
     {
-        return Err(invalid(
-            Some(&wire.id),
-            "wire segments do not form one identity-connected cycle",
-        ));
+        checkpoint(control)?;
+        if left.node_ids[1] != right.node_ids[0] {
+            return Err(invalid(
+                Some(&wire.id),
+                "wire segments do not form one identity-connected cycle",
+            ));
+        }
     }
     Ok(())
 }
@@ -178,4 +194,23 @@ fn invalid(
         entity_id.cloned(),
         reason,
     )
+}
+
+/// Build or independently admit exact boundary incidence without changing its coordinates.
+pub fn validate_exact_surface_boundary(
+    boundary: &ExactSurfaceBoundary,
+    topology: &ExactBRepTopology,
+    curves: &SharedCurveMesh,
+) -> Result<(), ExactSurfaceBoundaryError> {
+    validate_exact_surface_boundary_controlled(boundary, topology, curves, None)
+}
+
+/// Cooperative counterpart with identical boundary and incidence rules.
+pub fn validate_exact_surface_boundary_with_cancellation(
+    boundary: &ExactSurfaceBoundary,
+    topology: &ExactBRepTopology,
+    curves: &SharedCurveMesh,
+    control: &dyn MeshingCancellationSignal,
+) -> Result<(), ExactSurfaceBoundaryError> {
+    validate_exact_surface_boundary_controlled(boundary, topology, curves, Some(control))
 }

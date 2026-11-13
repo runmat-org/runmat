@@ -3,8 +3,10 @@
 //! Implements mark-and-sweep collection for generational garbage collection,
 //! with optimizations for RunMat's value types and usage patterns.
 
+use crate::retirement::RetiredValue;
 use crate::{
-    roots::collect_value_roots, GcConfig, GcHandle, GcStats, GenerationalAllocator, Result,
+    allocator::GcAllocationKind, roots::collect_value_roots, GcConfig, GcHandle, GcStats,
+    GenerationalAllocator, Result,
 };
 use runmat_time::Instant;
 use runmat_value::Value;
@@ -34,13 +36,14 @@ impl MarkSweepCollector {
         }
     }
 
-    /// Collect the young generation only (minor GC)
+    /// Detach unreachable young-generation values. Drop the returned payloads
+    /// only after releasing allocator and collector locks.
     pub fn collect_young_generation(
         &mut self,
         allocator: &mut GenerationalAllocator,
         roots: &[GcHandle],
         stats: &GcStats,
-    ) -> Result<usize> {
+    ) -> Result<Vec<RetiredValue>> {
         let _ = stats; // currently unused in this path
         log::debug!("Starting young generation collection");
         let start_time = Instant::now();
@@ -50,6 +53,7 @@ impl MarkSweepCollector {
 
         // Phase 2: Sweep unmarked objects in young generation (in-place sweep)
         let mut collected = 0usize;
+        let mut retired = Vec::new();
         let mut any_survivor = false;
         // Walk allocations recorded by the young generation and free the unmarked ones
         let allocated_ptrs = allocator.young_take_collection_candidates();
@@ -58,14 +62,17 @@ impl MarkSweepCollector {
             let addr = ptr as usize;
             if !self.marked_objects.lock().contains(&addr) {
                 collected += 1;
-                // Run finalizer if registered for this object address
-                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
-                    crate::gc_run_finalizer_for_handle(handle);
-                }
+                let handle = allocator.handle_for_live_ptr(ptr);
+                let kind = handle.and_then(|handle| allocator.allocation_kind(&handle));
                 if allocator.note_value_dropped(ptr) {
-                    // Drop the value in place to run destructors if any
+                    // SAFETY: the initialized slot was just removed from the
+                    // live set; transfer it before its storage can be reused.
                     unsafe {
-                        std::ptr::drop_in_place(ptr as *mut Value);
+                        retired.push(RetiredValue::take(
+                            ptr,
+                            handle,
+                            kind.expect("live GC allocation has a kind"),
+                        ));
                     }
                 }
                 // Space remains reserved; a free-list compactor can reclaim later
@@ -96,16 +103,17 @@ impl MarkSweepCollector {
         }
         log::debug!("Young generation collection completed: {collected} collected, {promoted_this_cycle} promoted in {duration:?}");
 
-        Ok(collected)
+        Ok(retired)
     }
 
-    /// Collect all generations (major GC)
+    /// Detach unreachable values in all generations. Drop the returned payloads
+    /// only after releasing allocator and collector locks.
     pub fn collect_all_generations(
         &mut self,
         allocator: &mut GenerationalAllocator,
         roots: &[GcHandle],
         stats: &GcStats,
-    ) -> Result<usize> {
+    ) -> Result<Vec<RetiredValue>> {
         log::debug!("Starting full heap collection");
         let start_time = Instant::now();
 
@@ -119,16 +127,21 @@ impl MarkSweepCollector {
         let _ = stats;
         let allocated_ptrs = allocator.all_live_collection_candidates();
         let mut collected = 0usize;
+        let mut retired = Vec::new();
         for ptr in allocated_ptrs {
             let addr = ptr as usize;
             if !self.marked_objects.lock().contains(&addr) {
-                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
-                    crate::gc_run_finalizer_for_handle(handle);
-                }
+                let handle = allocator.handle_for_live_ptr(ptr);
+                let kind = handle.and_then(|handle| allocator.allocation_kind(&handle));
                 if allocator.note_value_dropped(ptr) {
                     collected += 1;
+                    // SAFETY: removing the live slot grants its unique payload.
                     unsafe {
-                        std::ptr::drop_in_place(ptr as *mut Value);
+                        retired.push(RetiredValue::take(
+                            ptr,
+                            handle,
+                            kind.expect("live GC allocation has a kind"),
+                        ));
                     }
                 }
             }
@@ -141,7 +154,7 @@ impl MarkSweepCollector {
         let duration = start_time.elapsed();
         log::debug!("Full heap collection completed: {collected} collected in {duration:?}");
 
-        Ok(collected)
+        Ok(retired)
     }
 
     /// Mark phase: traverse from roots and mark all reachable objects
@@ -172,12 +185,12 @@ impl MarkSweepCollector {
         // SAFETY: this exposes the handle's preserved pointer token for
         // address-keyed mark bookkeeping. Ownership/liveness is established by
         // the root set and allocator before sweep.
-        let value_ptr = unsafe { obj.as_ptr_unchecked().cast::<Value>() };
-        let ptr = value_ptr.as_ptr().cast::<u8>();
+        let allocation = unsafe { obj.as_ptr_unchecked() };
+        let ptr = allocation.as_ptr().cast::<u8>();
         if allocator.find_generation(ptr).is_none() || !allocator.is_live_handle(&obj) {
             log::debug!(
                 "Ignoring stale GC mark edge {:p}@{}",
-                value_ptr.as_ptr(),
+                allocation.as_ptr(),
                 obj.epoch()
             );
             return Ok(());
@@ -199,7 +212,19 @@ impl MarkSweepCollector {
         // handles validated against allocator liveness above, and `ptr` is only
         // borrowed during the stop-the-world mark phase before any sweep can
         // reclaim the object.
-        collect_value_roots(unsafe { value_ptr.as_ref() }, &mut child_roots);
+        match allocator.allocation_kind(&obj) {
+            Some(GcAllocationKind::Value) => {
+                // SAFETY: this tagged live allocation contains a Value.
+                collect_value_roots(unsafe { &*ptr.cast::<Value>() }, &mut child_roots);
+            }
+            Some(GcAllocationKind::LexicalActivation) => {
+                // SAFETY: this tagged live allocation contains a private
+                // activation, never a language Value.
+                unsafe { &*ptr.cast::<crate::lexical_activation::LexicalActivation>() }
+                    .for_each_value(|value| collect_value_roots(value, &mut child_roots));
+            }
+            None => return Ok(()),
+        }
         for child in child_roots {
             self.mark_object(allocator, child)?;
         }
@@ -467,6 +492,7 @@ pub struct IncrementalProgress {
 mod tests {
     use super::*;
     use crate::{GcConfig, GcStats, GenerationalAllocator};
+    use runmat_value::StructArray;
 
     #[test]
     fn test_mark_sweep_collector_creation() {
@@ -562,11 +588,11 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let target = allocator
-            .allocate(Value::String("alive".to_string()), &stats)
+            .allocate(Value::String("alive".to_string().into()), &stats)
             .expect("target allocation");
         let target_addr = target.addr();
         let handle_value = Value::HandleObject(runmat_value::HandleRef {
-            class_name: "TestHandle".to_string(),
+            class_name: "TestHandle".into(),
             target,
             valid: true,
         });
@@ -583,6 +609,64 @@ mod tests {
     }
 
     #[test]
+    fn collector_marks_handles_reachable_through_nd_structure_arrays() {
+        let config = GcConfig::default();
+        let stats = GcStats::new();
+        let mut allocator = GenerationalAllocator::new(&config);
+        let mut collector = MarkSweepCollector::new(&config);
+
+        let first_target = allocator
+            .allocate(Value::String("first".to_string().into()), &stats)
+            .expect("first target allocation");
+        let second_target = allocator
+            .allocate(Value::String("second".to_string().into()), &stats)
+            .expect("second target allocation");
+        let first_addr = first_target.addr();
+        let second_addr = second_target.addr();
+        let element = |payload: f64, target| {
+            let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
+            value.insert("payload", Value::Num(payload));
+            value.insert(
+                "nested",
+                Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "TestHandle".into(),
+                    target,
+                    valid: true,
+                }),
+            );
+            value.finish()
+        };
+        let array = StructArray::with_fields(
+            vec!["payload".into(), "nested".into()],
+            vec![element(1.0, first_target), element(2.0, second_target)],
+            vec![1, 1, 2],
+        )
+        .expect("N-D structure array");
+        let array_root = allocator
+            .allocate(Value::StructArray(array), &stats)
+            .expect("structure-array allocation");
+        let empty = StructArray::with_fields(
+            vec!["payload".into(), "nested".into()],
+            Vec::new(),
+            vec![0, 2],
+        )
+        .expect("empty structure array");
+        let empty_root = allocator
+            .allocate(Value::StructArray(empty), &stats)
+            .expect("empty structure-array allocation");
+
+        collector
+            .mark_phase(&allocator, &[array_root, empty_root], 0)
+            .expect("mark phase should succeed");
+
+        let marked = collector.marked_objects.lock();
+        assert!(marked.contains(&array_root.addr()));
+        assert!(marked.contains(&empty_root.addr()));
+        assert!(marked.contains(&first_addr));
+        assert!(marked.contains(&second_addr));
+    }
+
+    #[test]
     fn collector_ignores_stale_handles_reachable_through_live_values() {
         let config = GcConfig::default();
         let stats = GcStats::new();
@@ -590,7 +674,7 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let stale_target = allocator
-            .allocate(Value::String("stale".to_string()), &stats)
+            .allocate(Value::String("stale".to_string().into()), &stats)
             .expect("target allocation");
         let stale_addr = stale_target.addr();
         let stale_epoch = stale_target
@@ -601,7 +685,7 @@ mod tests {
             unsafe { GcHandle::from_parts_unchecked(stale_target.as_ptr_unchecked(), stale_epoch) };
 
         let handle_value = Value::HandleObject(runmat_value::HandleRef {
-            class_name: "TestHandle".to_string(),
+            class_name: "TestHandle".into(),
             target: stale_handle,
             valid: true,
         });

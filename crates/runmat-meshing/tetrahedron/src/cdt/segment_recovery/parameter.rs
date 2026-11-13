@@ -36,26 +36,224 @@ impl DyadicNode {
         context: SegmentContext,
     ) -> Result<Self, DelaunaySegmentRecoveryError> {
         let exponent = self.exponent.max(right.exponent);
-        if exponent >= 62 {
+        if exponent >= 63 {
             return Err(error(
                 DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
                 Some(context.constraint_index),
                 "dyadic segment parameter exhausted its exact integer range",
             ));
         }
-        let left = self.numerator << (exponent - self.exponent);
-        let right = right.numerator << (exponent - right.exponent);
-        let mut numerator = left + right;
+        // The unreduced sum may need one extra bit even when the resulting
+        // parameter fits the admitted representation. Reduce before admission.
+        let lower = u128::from(self.numerator) << (exponent - self.exponent);
+        let upper = u128::from(right.numerator) << (exponent - right.exponent);
+        let mut numerator = lower + upper;
         let mut exponent = exponent + 1;
         while exponent > 0 && numerator.is_multiple_of(2) {
             numerator /= 2;
             exponent -= 1;
         }
+        if exponent >= 63 {
+            // The exact midpoint is finer than the representation, but a coarser dyadic point
+            // can still lie strictly inside the interval: take the coarsest one in its middle
+            // half, or else strictly inside it.
+            if let Some(inner) = self.coarsest_inner(right) {
+                return Ok(inner);
+            }
+            return Err(error(
+                DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
+                Some(context.constraint_index),
+                format!(
+                    "dyadic midpoint requires exponent {exponent} after exact reduction; interval \
+                     {}/2^{} to {}/2^{} on segment {:?}-{:?}",
+                    self.numerator,
+                    self.exponent,
+                    right.numerator,
+                    right.exponent,
+                    context.first_coordinates,
+                    context.last_coordinates
+                ),
+            ));
+        }
         Ok(Self {
             identity: StableDigest::ZERO,
-            numerator,
+            numerator: u64::try_from(numerator).map_err(|_| {
+                error(
+                    DelaunaySegmentRecoveryErrorKind::UnsatisfiableConstraint,
+                    Some(context.constraint_index),
+                    "dyadic midpoint numerator is out of range",
+                )
+            })?,
             exponent,
         })
+    }
+
+    /// The dyadic parameter with the smallest exponent (at most 62) in the middle half of the
+    /// open interval to `right`, or strictly inside it when the middle half holds none.
+    fn coarsest_inner(self, right: Self) -> Option<Self> {
+        let exponent = self.exponent.max(right.exponent);
+        if exponent > 62 {
+            return None;
+        }
+        let lower = u128::from(self.numerator) << (exponent - self.exponent);
+        let upper = u128::from(right.numerator) << (exponent - right.exponent);
+        let (lower, upper) = (lower.min(upper), lower.max(upper));
+        let width = upper - lower;
+        if width < 2 {
+            return None;
+        }
+        let ranges = [
+            (
+                (lower + width / 4).max(lower + 1),
+                (upper - width / 4).min(upper - 1),
+            ),
+            (lower + 1, upper - 1),
+        ];
+        for (from, to) in ranges {
+            if from > to {
+                continue;
+            }
+            for coarse in 0..=exponent {
+                let step = 1_u128 << (exponent - coarse);
+                let candidate = from.div_ceil(step) * step;
+                if candidate <= to && candidate > lower && candidate < upper {
+                    let mut numerator = candidate >> (exponent - coarse);
+                    let mut reduced = coarse;
+                    while reduced > 0 && numerator.is_multiple_of(2) {
+                        numerator /= 2;
+                        reduced -= 1;
+                    }
+                    return Some(Self {
+                        identity: StableDigest::ZERO,
+                        numerator: u64::try_from(numerator).ok()?,
+                        exponent: reduced,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    #[cfg(test)]
+    pub(super) fn near_parameter(
+        self,
+        right: Self,
+        parameter: f64,
+        context: SegmentContext,
+    ) -> Result<Self, DelaunaySegmentRecoveryError> {
+        match self.near_parameter_with_clearance(right, parameter, &mut |_| Ok(true))? {
+            Some(candidate) => Ok(candidate),
+            None => self.midpoint(right, context),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn near_parameter_with_clearance(
+        self,
+        right: Self,
+        parameter: f64,
+        admit: &mut impl FnMut(Self) -> Result<bool, DelaunaySegmentRecoveryError>,
+    ) -> Result<Option<Self>, DelaunaySegmentRecoveryError> {
+        self.search_near_parameter(right, parameter, false, admit)
+    }
+
+    /// Keep a verified coarse bracket, then approach the geometric preference
+    /// on the admitted exact integer grid. Clearance alone must not turn a
+    /// coarse rounding hint into a drifting acute-corner protection radius.
+    pub(super) fn closest_parameter_with_clearance(
+        self,
+        right: Self,
+        parameter: f64,
+        neighbors: bool,
+        admit: &mut impl FnMut(Self) -> Result<bool, DelaunaySegmentRecoveryError>,
+    ) -> Result<Option<Self>, DelaunaySegmentRecoveryError> {
+        let Some(seed) = self.search_near_parameter(right, parameter, neighbors, admit)? else {
+            return Ok(None);
+        };
+        let grid = |node: Self| node.numerator << (62 - node.exponent);
+        let canonical = |mut numerator: u64| {
+            let mut exponent = 62;
+            while exponent > 0 && numerator.is_multiple_of(2) {
+                numerator /= 2;
+                exponent -= 1;
+            }
+            Self {
+                identity: StableDigest::ZERO,
+                numerator,
+                exponent,
+            }
+        };
+        let target = (parameter * (1_u64 << 62) as f64).round() as u64;
+        let mut accepted = grid(seed);
+        if target <= grid(self) || target >= grid(right) || target == accepted {
+            return Ok(Some(seed));
+        }
+        if admit(canonical(target))? {
+            return Ok(Some(canonical(target)));
+        }
+        let mut rejected = target;
+        while accepted.abs_diff(rejected) > 1 {
+            let midpoint = accepted.min(rejected) + accepted.abs_diff(rejected) / 2;
+            if admit(canonical(midpoint))? {
+                accepted = midpoint;
+            } else {
+                rejected = midpoint;
+            }
+        }
+        Ok(Some(canonical(accepted)))
+    }
+
+    pub(super) fn search_near_parameter(
+        self,
+        right: Self,
+        parameter: f64,
+        neighbors: bool,
+        admit: &mut impl FnMut(Self) -> Result<bool, DelaunaySegmentRecoveryError>,
+    ) -> Result<Option<Self>, DelaunaySegmentRecoveryError> {
+        let interval = right.parameter()? - self.parameter()?;
+        if parameter.is_finite() && (0.0..=1.0).contains(&parameter) && interval > 0.0 {
+            // Begin with the inexpensive coarse geometric hint. Finer grids
+            // are admitted only by the caller's exact clearance predicate;
+            // fixed rounding precision never confers physical acceptance.
+            let mut previous = None;
+            for exponent in 0..63_u8 {
+                let denominator = 1_u64 << exponent;
+                if 1.0 / denominator as f64 > interval / 256.0 {
+                    continue;
+                }
+                let rounded = (parameter * denominator as f64).round() as u64;
+                // A radius bound may exclude the nearest grid point. Test its
+                // two adjacent representable points before refining the grid.
+                for mut numerator in [rounded, rounded.saturating_sub(1), rounded + 1]
+                    .into_iter()
+                    .take(if neighbors { 3 } else { 1 })
+                {
+                    let common = exponent.max(self.exponent).max(right.exponent);
+                    let aligned = numerator << (common - exponent);
+                    let left = self.numerator << (common - self.exponent);
+                    let right = right.numerator << (common - right.exponent);
+                    if aligned > left && aligned < right {
+                        let mut exponent = exponent;
+                        while exponent > 0 && numerator.is_multiple_of(2) {
+                            numerator /= 2;
+                            exponent -= 1;
+                        }
+                        let candidate = Self {
+                            identity: StableDigest::ZERO,
+                            numerator,
+                            exponent,
+                        };
+                        if previous != Some((numerator, exponent)) {
+                            previous = Some((numerator, exponent));
+                            if admit(candidate)? {
+                                return Ok(Some(candidate));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     pub(super) fn with_identity(mut self, identity: StableDigest) -> Self {

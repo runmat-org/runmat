@@ -1,8 +1,9 @@
+use crate::import::CancellationProbe;
 use sha2::Digest as _;
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc, Mutex, OnceLock,
+    atomic::{AtomicU64, Ordering},
+    Mutex, OnceLock,
 };
 
 #[cxx::bridge(namespace = "runmat_geometry_io::occt_backend")]
@@ -23,6 +24,77 @@ pub(crate) mod bridge {
         Face,
     }
 
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctFeatureKind {
+        Box,
+        Cylinder,
+        Sphere,
+        Transform,
+        Instance,
+        Extrude,
+        Revolve,
+        Union,
+        Subtract,
+        Intersect,
+        Hole,
+        Pocket,
+        Fillet,
+        Chamfer,
+    }
+
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctFeatureEntityKind {
+        Vertex,
+        Edge,
+        Face,
+        Solid,
+    }
+
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy)]
+    enum OcctFeatureRelationKind {
+        Modified,
+        Generated,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureOperand {
+        representation: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureSelection {
+        kind: OcctFeatureEntityKind,
+        identity_digest: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureSourcePayload {
+        operand_index: u64,
+        kind: OcctFeatureEntityKind,
+        identity_digest: Vec<u8>,
+        deleted: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureRelationPayload {
+        operand_index: u64,
+        source_kind: OcctFeatureEntityKind,
+        source_identity_digest: Vec<u8>,
+        result_kind: OcctFeatureEntityKind,
+        result_shape_key: u64,
+        relation: OcctFeatureRelationKind,
+    }
+
+    #[derive(Debug, Clone)]
+    struct OcctFeatureExecutionPayload {
+        representation: Vec<u8>,
+        sources: Vec<OcctFeatureSourcePayload>,
+        relations: Vec<OcctFeatureRelationPayload>,
+    }
+
     #[derive(Debug, Clone)]
     struct OcctHealingRelationPayload {
         kind: OcctHealingEntityKind,
@@ -32,7 +104,19 @@ pub(crate) mod bridge {
     }
 
     #[derive(Debug, Clone, Copy)]
+    struct OcctStepContextUnitPayload {
+        entity_id: u64,
+        length_done: bool,
+        meters_per_unit: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
     struct OcctImportOptions {
+        // Metres per coordinate unit requested for STEP XCAF transfer.
+        step_coordinate_unit_m: f64,
+        require_declared_step_units: bool,
+        // Explicit interpretation of a unitless BREP coordinate.
+        unitless_source_unit_m: f64,
         linear_deflection: f64,
         angular_deflection: f64,
         relative_deflection: bool,
@@ -46,8 +130,36 @@ pub(crate) mod bridge {
         heal_duplicates: bool,
         heal_gaps: bool,
         heal_short_edges_and_sliver_faces: bool,
+        /// Join touching solids so their coincident faces become shared interfaces.
+        share_interfaces: bool,
         maximum_healing_displacement: f64,
+        /// Largest curve/pcurve gap, in metres, that exact import admits by raising the edge's
+        /// tolerance after rebuilding its pcurves: the request's geometric tolerance (requested
+        /// deviation). Larger gaps stay defects. Unused by display-only imports.
+        admissible_edge_gap_m: f64,
         cancel_token_id: u64,
+    }
+
+    /// One edge whose measured curve/pcurve gap exceeded its written tolerance: where it lies
+    /// (curve start, parameter midpoint, end; kernel units), the gap before and after rebuilding
+    /// its pcurves, and the tolerance import admitted (kernel units).
+    #[derive(Debug, Clone)]
+    struct OcctEdgeToleranceAdmissionPayload {
+        start_x: f64,
+        start_y: f64,
+        start_z: f64,
+        middle_x: f64,
+        middle_y: f64,
+        middle_z: f64,
+        end_x: f64,
+        end_y: f64,
+        end_z: f64,
+        written_tolerance: f64,
+        gap_before: f64,
+        gap_after: f64,
+        admitted_tolerance: f64,
+        repaired: bool,
+        within_bound: bool,
     }
 
     #[derive(Debug, Clone)]
@@ -135,6 +247,7 @@ pub(crate) mod bridge {
         short_edges_simplified: bool,
         sliver_faces_simplified: bool,
         healing_relations: Vec<OcctHealingRelationPayload>,
+        edge_tolerance_admissions: Vec<OcctEdgeToleranceAdmissionPayload>,
         maximum_healing_displacement: f64,
         displacement_original_x: f64,
         displacement_original_y: f64,
@@ -190,6 +303,10 @@ pub(crate) mod bridge {
         point_y: f64,
         point_z: f64,
         tolerance: f64,
+        /// Authored names, in precedence order; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]
@@ -199,14 +316,20 @@ pub(crate) mod bridge {
         identity_digest: Vec<u8>,
         start_vertex_key: u64,
         end_vertex_key: u64,
+        tolerance: f64,
         closed: bool,
         periodic: bool,
         degenerate: bool,
+        /// Authored names, in precedence order; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]
     struct OcctExactFacePayload {
         occurrence_index: u64,
+        source_face_index: u64,
         shape_key: u64,
         identity_digest: Vec<u8>,
         reversed: bool,
@@ -215,6 +338,10 @@ pub(crate) mod bridge {
         periodic_u: bool,
         periodic_v: bool,
         singular: bool,
+        /// Authored names, in precedence order; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]
@@ -256,6 +383,10 @@ pub(crate) mod bridge {
         identity_digest: Vec<u8>,
         outer_shell_key: u64,
         void_shell_keys: Vec<u64>,
+        /// Authored solid or product names; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]
@@ -275,6 +406,8 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctCurveDerivativesPayload {
+        parameter_unit: u8,
+        parameter_scale: f64,
         point_x: f64,
         point_y: f64,
         point_z: f64,
@@ -288,6 +421,8 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctCurveProjectionPayload {
+        parameter_unit: u8,
+        parameter_scale: f64,
         parameter: f64,
         point_x: f64,
         point_y: f64,
@@ -297,6 +432,10 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctPcurveDerivativesPayload {
+        parameter_unit: u8,
+        u_parameter_unit: u8,
+        v_parameter_unit: u8,
+        parameter_scale: f64,
         range_start: f64,
         range_end: f64,
         point_u: f64,
@@ -321,6 +460,9 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctSurfaceDerivativesPayload {
+        u_parameter_unit: u8,
+        v_parameter_unit: u8,
+        parameter_scale: f64,
         point_x: f64,
         point_y: f64,
         point_z: f64,
@@ -343,6 +485,9 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctSurfaceProjectionPayload {
+        u_parameter_unit: u8,
+        v_parameter_unit: u8,
+        parameter_scale: f64,
         u: f64,
         v: f64,
         point_x: f64,
@@ -391,9 +536,12 @@ pub(crate) mod bridge {
     unsafe extern "C++" {
         include!("src/occt/occt_bridge.hxx");
 
+        fn exact_kernel_abi() -> String;
+
         fn import_cad_bytes(
             path: &str,
             bytes: &[u8],
+            materialized_path: &str,
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctImportPayload>;
@@ -401,13 +549,24 @@ pub(crate) mod bridge {
         fn import_exact_cad_bytes(
             path: &str,
             bytes: &[u8],
+            materialized_path: &str,
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctExactShapePayload>;
 
+        fn execute_exact_feature(
+            kind: OcctFeatureKind,
+            scalars: &[f64],
+            matrices: &[f64],
+            selections: Vec<OcctFeatureSelection>,
+            operands: Vec<OcctFeatureOperand>,
+            options: OcctImportOptions,
+        ) -> Result<OcctFeatureExecutionPayload>;
+
         fn start_exact_evaluator_session(
             representation: &[u8],
             meters_per_source_unit: f64,
+            face_keys: &[u64],
         ) -> Result<u64>;
 
         fn exact_curve_range(session_id: u64, shape_key: u64) -> Result<OcctCurveRangePayload>;
@@ -436,6 +595,7 @@ pub(crate) mod bridge {
         fn exact_pcurve_derivatives(
             session_id: u64,
             face_key: u64,
+            face_reversed: bool,
             wire_key: u64,
             coedge_position: u64,
             seam_image: i8,
@@ -445,6 +605,7 @@ pub(crate) mod bridge {
         fn exact_pcurve_range(
             session_id: u64,
             face_key: u64,
+            face_reversed: bool,
             wire_key: u64,
             coedge_position: u64,
             seam_image: i8,
@@ -488,6 +649,7 @@ pub(crate) mod bridge {
         fn start_cad_preview_session(
             path: &str,
             bytes: &[u8],
+            materialized_path: &str,
             format: OcctCadFormat,
             options: OcctImportOptions,
         ) -> Result<OcctPreviewSessionStartPayload>;
@@ -504,28 +666,30 @@ pub(crate) mod bridge {
         fn occt_import_cancelled(cancel_token_id: u64) -> bool;
         fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8>;
         fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8>;
+        fn occt_validate_step_source_units(
+            bytes: &[u8],
+            contexts: &[OcctStepContextUnitPayload],
+            require_declared: bool,
+        ) -> Result<()>;
     }
 }
 
 static NEXT_CANCEL_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
-static CANCEL_TOKENS: OnceLock<Mutex<BTreeMap<u64, Arc<AtomicBool>>>> = OnceLock::new();
+type CancelTokenMap = BTreeMap<u64, CancellationProbe>;
+static CANCEL_TOKENS: OnceLock<Mutex<CancelTokenMap>> = OnceLock::new();
 
 pub(crate) struct OcctCancelTokenRegistration {
     id: u64,
 }
 
 impl OcctCancelTokenRegistration {
-    pub(crate) fn new(flag: Option<Arc<AtomicBool>>) -> Self {
+    pub(crate) fn new(flag: Option<CancellationProbe>) -> Self {
         let Some(flag) = flag else {
             return Self { id: 0 };
         };
         let id = NEXT_CANCEL_TOKEN_ID.fetch_add(1, Ordering::Relaxed);
-        if let Ok(mut tokens) = cancel_tokens().lock() {
-            tokens.insert(id, flag);
-            Self { id }
-        } else {
-            Self { id: 0 }
-        }
+        lock_cancel_tokens(cancel_tokens()).insert(id, flag);
+        Self { id }
     }
 
     pub(crate) fn id(&self) -> u64 {
@@ -538,9 +702,9 @@ impl Drop for OcctCancelTokenRegistration {
         if self.id == 0 {
             return;
         }
-        if let Ok(mut tokens) = cancel_tokens().lock() {
-            tokens.remove(&self.id);
-        }
+        // Release the probe after the registry lock; its drop may run caller code.
+        let retired = lock_cancel_tokens(cancel_tokens()).remove(&self.id);
+        drop(retired);
     }
 }
 
@@ -548,12 +712,11 @@ fn occt_import_cancelled(cancel_token_id: u64) -> bool {
     if cancel_token_id == 0 {
         return false;
     }
-    cancel_tokens()
-        .lock()
-        .ok()
-        .and_then(|tokens| tokens.get(&cancel_token_id).cloned())
-        .map(|flag| flag.load(Ordering::Relaxed))
-        .unwrap_or(false)
+    // Clone under the lock, then probe outside it: probes may re-enter the registry.
+    let probe = lock_cancel_tokens(cancel_tokens())
+        .get(&cancel_token_id)
+        .cloned();
+    probe.is_some_and(|is_cancelled| is_cancelled())
 }
 
 fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8> {
@@ -567,6 +730,74 @@ fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8> {
     sha2::Sha256::digest(bytes).to_vec()
 }
 
-fn cancel_tokens() -> &'static Mutex<BTreeMap<u64, Arc<AtomicBool>>> {
+fn cancel_tokens() -> &'static Mutex<CancelTokenMap> {
     CANCEL_TOKENS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn lock_cancel_tokens(
+    registry: &Mutex<CancelTokenMap>,
+) -> std::sync::MutexGuard<'_, CancelTokenMap> {
+    registry.lock().unwrap_or_else(|poisoned| {
+        // Integer-keyed map mutations preserve Rust's map invariants on unwind.
+        // Keep the original token inventory; poisoning cannot disable cancellation.
+        registry.clear_poison();
+        poisoned.into_inner()
+    })
+}
+
+fn occt_validate_step_source_units(
+    bytes: &[u8],
+    contexts: &[bridge::OcctStepContextUnitPayload],
+    require_declared: bool,
+) -> Result<(), String> {
+    use runmat_geometry_core::physical::{LengthUnit, QuantityKind, UnitDefinition};
+    let mut checked = Vec::with_capacity(contexts.len());
+    for context in contexts {
+        let unit = if context.length_done {
+            let definition = UnitDefinition::try_new(
+                QuantityKind::Length.dimension(),
+                context.meters_per_unit,
+                0.0,
+            )
+            .map_err(|error| {
+                format!(
+                    "invalid OCCT source-unit factor in STEP #{}: {error}",
+                    context.entity_id
+                )
+            })?;
+            Some(LengthUnit::try_from_definition(definition).map_err(|error| error.to_string())?)
+        } else {
+            None
+        };
+        checked.push(crate::source_units::StepContextUnits {
+            entity_id: context.entity_id,
+            unit,
+        });
+    }
+    crate::source_units::verify_step_context_units(bytes, &checked, require_declared)
+}
+
+#[cfg(test)]
+mod control_tests;
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn probe_runs_outside_registry_lock_and_registration_drop_removes_it() {
+        let probe: CancellationProbe = Arc::new(|| {
+            drop(cancel_tokens().lock().unwrap());
+            true
+        });
+        let registration = OcctCancelTokenRegistration::new(Some(probe.clone()));
+        let id = registration.id();
+        assert_ne!(id, 0);
+        assert!(occt_import_cancelled(id));
+        assert_eq!(Arc::strong_count(&probe), 2);
+        drop(registration);
+        assert_eq!(Arc::strong_count(&probe), 1);
+        assert!(!occt_import_cancelled(id));
+    }
 }

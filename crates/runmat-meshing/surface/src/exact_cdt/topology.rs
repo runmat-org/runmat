@@ -10,11 +10,22 @@ pub(super) struct EdgeUse {
     pub opposite_vertex: u32,
 }
 
+#[cfg(test)]
 pub(super) fn edge_uses(
     triangles: &[ExactFaceDelaunayTriangle],
 ) -> BTreeMap<[u32; 2], Vec<EdgeUse>> {
+    edge_uses_with_checkpoint(triangles, || Ok::<(), std::convert::Infallible>(()))
+        .unwrap_or_else(|never| match never {})
+}
+
+/// Derive the same canonical incidence while admitting cancellation during the walk.
+pub(super) fn edge_uses_with_checkpoint<E>(
+    triangles: &[ExactFaceDelaunayTriangle],
+    mut checkpoint: impl FnMut() -> Result<(), E>,
+) -> Result<BTreeMap<[u32; 2], Vec<EdgeUse>>, E> {
     let mut uses = BTreeMap::<[u32; 2], Vec<EdgeUse>>::new();
     for (triangle_index, triangle) in triangles.iter().enumerate() {
+        checkpoint()?;
         let indices = triangle.vertex_indices;
         for position in 0..3 {
             uses.entry(sorted_edge([
@@ -28,7 +39,7 @@ pub(super) fn edge_uses(
             });
         }
     }
-    uses
+    Ok(uses)
 }
 
 pub(super) fn flip_edge(
@@ -119,4 +130,56 @@ fn opposite(left: PredicateSign, right: PredicateSign) -> bool {
         (PredicateSign::Negative, PredicateSign::Positive)
             | (PredicateSign::Positive, PredicateSign::Negative)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cooperative_incidence_preserves_shared_edges_and_stops_inside_the_walk() {
+        let triangles = [
+            ExactFaceDelaunayTriangle {
+                vertex_indices: [0, 1, 2],
+            },
+            ExactFaceDelaunayTriangle {
+                vertex_indices: [1, 3, 2],
+            },
+            ExactFaceDelaunayTriangle {
+                vertex_indices: [2, 3, 4],
+            },
+        ];
+        let expected = edge_uses(&triangles);
+        let mut probes = 0;
+        let actual = edge_uses_with_checkpoint(&triangles, || {
+            probes += 1;
+            Ok::<(), &'static str>(())
+        })
+        .unwrap();
+        assert_eq!(probes, triangles.len());
+        assert_eq!(
+            actual.keys().collect::<Vec<_>>(),
+            expected.keys().collect::<Vec<_>>()
+        );
+        for (edge, uses) in actual {
+            let facts = |uses: &[EdgeUse]| {
+                uses.iter()
+                    .map(|use_| (use_.triangle_index, use_.opposite_vertex))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(facts(&uses), facts(&expected[&edge]));
+        }
+        let mut probes = 0;
+        let error = edge_uses_with_checkpoint(&triangles, || {
+            probes += 1;
+            if probes == 2 {
+                Err("cancelled")
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!(error, "cancelled");
+        assert_eq!(probes, 2);
+    }
 }

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source_commit": "0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf",
+  "review_scope": "Conservation of Linux authored/recovery scientific measurements across three AOT linker-policy changes. Windows shipping-product qualification remains separate and pending.",
+  "changed_routes": [
+    "Ordinary MSVC link plans reserve a 64 MiB main-thread stack.",
+    "Selected MSVC link plans use the same reserve; their canonical JSON identity includes its byte count.",
+    "Existing link-plan tests assert the reserve and its identity binding. Those tests have not been executed for this checkpoint."
+  ],
+  "linux_scientific_disposition": "Neither cohort creates Windows native executables or selected MSVC plans. Unix link tokens and canonical JSON options retain their previous values. Numerical algorithms, FEA inputs, execution/worker/admission/publication paths, dependencies and scientific assertions are unchanged.",
+  "diagnostic": {
+    "report_location": "Main:.tmp-rm1064/settings-windows-r1057-collected/stack-diagnosis.original.json",
+    "report_sha256": "49a0f1a10a1567fb52b5f6a67da36f89f3792b62fb58a10ab0fceec305b48cda",
+    "original_image_sha256": "71b1ca4a5c4d10a2aa4b9376d10bf08442debd1c41a88dd1db5177c5f1a183d6",
+    "original_stack_reserve_bytes": 1048576,
+    "original_exit": "0xC00000FD",
+    "diagnostic_copy_sha256": "b0a232c1ea64e199c1e69e0dd52060e52aa8aa2ddccba1b2e977fd38f583acef",
+    "diagnostic_stack_reserve_bytes": 67108864,
+    "stack_commit_bytes_both_images": 4096,
+    "diagnostic_exit": 0,
+    "diagnostic_stdout": "NATIVE_OK",
+    "scope": "Preserved original and modified-header diagnostic copy establish the stack-overflow cause. The copy is not a shipping artifact or acceptance of the source repair."
+  }
+}

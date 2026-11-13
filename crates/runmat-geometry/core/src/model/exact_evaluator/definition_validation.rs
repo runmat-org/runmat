@@ -16,17 +16,23 @@ pub(super) fn validate_curve(
     match implementation {
         ExactCurveImplementation::Portable { definition } => match definition {
             ExactCurveDefinition::Degenerate { point_m, domain } => {
-                finite_vector("degenerate curve point", point_m)?;
-                validate_range("degenerate curve domain", domain)
+                let point_m = point_m.canonical_values();
+                {
+                    finite_vector("degenerate curve point", point_m)?;
+                    validate_range("degenerate curve domain", domain)
+                }
             }
             ExactCurveDefinition::Line {
                 origin_m,
                 direction_m_per_parameter,
                 domain,
             } => {
-                finite_vector("line origin", origin_m)?;
-                nonzero_vector("line direction", direction_m_per_parameter)?;
-                validate_range("line domain", domain)
+                let origin_m = origin_m.canonical_values();
+                {
+                    finite_vector("line origin", origin_m)?;
+                    nonzero_vector("line direction", direction_m_per_parameter)?;
+                    validate_range("line domain", domain)
+                }
             }
             ExactCurveDefinition::Circle {
                 center_m,
@@ -36,10 +42,13 @@ pub(super) fn validate_curve(
                 domain,
                 ..
             } => {
-                finite_vector("circle center", center_m)?;
-                orthonormal_pair("circle axes", x_axis, y_axis)?;
-                positive("circle radius", *radius_m)?;
-                validate_range("circle domain", domain)
+                let center_m = center_m.canonical_values();
+                {
+                    finite_vector("circle center", center_m)?;
+                    orthonormal_pair("circle axes", x_axis, y_axis)?;
+                    positive("circle radius", radius_m.canonical_value())?;
+                    validate_range("circle domain", domain)
+                }
             }
             ExactCurveDefinition::Ellipse {
                 center_m,
@@ -50,17 +59,20 @@ pub(super) fn validate_curve(
                 domain,
                 ..
             } => {
-                finite_vector("ellipse center", center_m)?;
-                orthonormal_pair("ellipse axes", x_axis, y_axis)?;
-                positive("ellipse major radius", *major_radius_m)?;
-                positive("ellipse minor radius", *minor_radius_m)?;
-                if major_radius_m < minor_radius_m {
-                    return Err(invalid(
-                        "ellipse radii",
-                        "major radius must not be smaller than minor radius",
-                    ));
+                let center_m = center_m.canonical_values();
+                {
+                    finite_vector("ellipse center", center_m)?;
+                    orthonormal_pair("ellipse axes", x_axis, y_axis)?;
+                    positive("ellipse major radius", major_radius_m.canonical_value())?;
+                    positive("ellipse minor radius", minor_radius_m.canonical_value())?;
+                    if major_radius_m < minor_radius_m {
+                        return Err(invalid(
+                            "ellipse radii",
+                            "major radius must not be smaller than minor radius",
+                        ));
+                    }
+                    validate_range("ellipse domain", domain)
                 }
-                validate_range("ellipse domain", domain)
             }
             ExactCurveDefinition::Nurbs { definition } => validate_nurbs_curve3(definition),
         },
@@ -111,13 +123,16 @@ pub(super) fn validate_surface(
                 v_axis_m_per_parameter,
                 domains,
             } => {
-                finite_vector("plane origin", origin_m)?;
-                independent_pair(
-                    "plane parameter axes",
-                    u_axis_m_per_parameter,
-                    v_axis_m_per_parameter,
-                )?;
-                validate_ranges("plane domains", domains)
+                let origin_m = origin_m.canonical_values();
+                {
+                    finite_vector("plane origin", origin_m)?;
+                    independent_pair(
+                        "plane parameter axes",
+                        u_axis_m_per_parameter,
+                        v_axis_m_per_parameter,
+                    )?;
+                    validate_ranges("plane domains", domains)
+                }
             }
             ExactSurfaceDefinition::Cylinder {
                 origin_m,
@@ -127,10 +142,13 @@ pub(super) fn validate_surface(
                 radius_m,
                 domains,
             } => {
-                finite_vector("cylinder origin", origin_m)?;
-                orthonormal_triple("cylinder frame", x_axis, y_axis, axis_m_per_v)?;
-                positive("cylinder radius", *radius_m)?;
-                validate_ranges("cylinder domains", domains)
+                let origin_m = origin_m.canonical_values();
+                {
+                    finite_vector("cylinder origin", origin_m)?;
+                    orthonormal_triple("cylinder frame", x_axis, y_axis, axis_m_per_v)?;
+                    positive("cylinder radius", radius_m.canonical_value())?;
+                    validate_ranges("cylinder domains", domains)
+                }
             }
             ExactSurfaceDefinition::Cone {
                 apex_m,
@@ -140,11 +158,11 @@ pub(super) fn validate_surface(
                 semi_angle_rad,
                 domains,
             } => {
-                finite_vector("cone apex", apex_m)?;
+                finite_vector("cone apex", apex_m.canonical_values())?;
                 orthonormal_triple("cone frame", x_axis, y_axis, axis)?;
                 if !semi_angle_rad.is_finite()
-                    || *semi_angle_rad <= 0.0
-                    || *semi_angle_rad >= std::f64::consts::FRAC_PI_2
+                    || semi_angle_rad.canonical_value() <= 0.0
+                    || semi_angle_rad.canonical_value() >= std::f64::consts::FRAC_PI_2
                 {
                     return Err(invalid(
                         "cone semi-angle",
@@ -161,10 +179,13 @@ pub(super) fn validate_surface(
                 radius_m,
                 domains,
             } => {
-                finite_vector("sphere center", center_m)?;
-                orthonormal_triple("sphere frame", x_axis, y_axis, z_axis)?;
-                positive("sphere radius", *radius_m)?;
-                validate_ranges("sphere domains", domains)
+                let center_m = center_m.canonical_values();
+                {
+                    finite_vector("sphere center", center_m)?;
+                    orthonormal_triple("sphere frame", x_axis, y_axis, z_axis)?;
+                    positive("sphere radius", radius_m.canonical_value())?;
+                    validate_ranges("sphere domains", domains)
+                }
             }
             ExactSurfaceDefinition::Torus {
                 center_m,
@@ -175,17 +196,20 @@ pub(super) fn validate_surface(
                 minor_radius_m,
                 domains,
             } => {
-                finite_vector("torus center", center_m)?;
-                orthonormal_triple("torus frame", x_axis, y_axis, z_axis)?;
-                positive("torus major radius", *major_radius_m)?;
-                positive("torus minor radius", *minor_radius_m)?;
-                if major_radius_m <= minor_radius_m {
-                    return Err(invalid(
-                        "torus radii",
-                        "ring torus major radius must exceed minor radius",
-                    ));
+                let center_m = center_m.canonical_values();
+                {
+                    finite_vector("torus center", center_m)?;
+                    orthonormal_triple("torus frame", x_axis, y_axis, z_axis)?;
+                    positive("torus major radius", major_radius_m.canonical_value())?;
+                    positive("torus minor radius", minor_radius_m.canonical_value())?;
+                    if major_radius_m <= minor_radius_m {
+                        return Err(invalid(
+                            "torus radii",
+                            "ring torus major radius must exceed minor radius",
+                        ));
+                    }
+                    validate_ranges("torus domains", domains)
                 }
-                validate_ranges("torus domains", domains)
             }
             ExactSurfaceDefinition::Nurbs { definition } => validate_nurbs_surface(definition),
         },
@@ -295,7 +319,13 @@ pub(super) fn curve_dynamic_value_count(implementation: &ExactCurveImplementatio
             .knots
             .len()
             .saturating_add(definition.weights.len())
-            .saturating_add(definition.control_points_m.len().saturating_mul(3)),
+            .saturating_add(
+                definition
+                    .control_points_m
+                    .canonical_values()
+                    .len()
+                    .saturating_mul(3),
+            ),
         _ => 0,
     }
 }
@@ -322,7 +352,13 @@ pub(super) fn surface_dynamic_value_count(implementation: &ExactSurfaceImplement
             .len()
             .saturating_add(definition.v_knots.len())
             .saturating_add(definition.weights.len())
-            .saturating_add(definition.control_points_m.len().saturating_mul(3)),
+            .saturating_add(
+                definition
+                    .control_points_m
+                    .canonical_values()
+                    .len()
+                    .saturating_mul(3),
+            ),
         _ => 0,
     }
 }

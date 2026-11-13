@@ -1,20 +1,39 @@
-use crate::{BasicBlock, BasicBlockId, MirOperand, MirPlace, MirTerminator, MirTerminatorKind};
+use crate::{
+    BasicBlock, BasicBlockId, CatchScopeId, MirConstant, MirOperand, MirPlace, MirTerminator,
+    MirTerminatorKind,
+};
 use runmat_hir::{
     ExprId, HirBlock, HirError, HirExpr, HirExprKind, HirStmt, HirStmtKind, Span, StmtId,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::{
+    conditional_await::conditional_await_guard,
     expr::{lower_expr_with_replacements, lower_operand_with_replacements},
     place::lower_place,
     stmt::lower_stmt_with_replacements,
     MirLoweringContext,
 };
 
+#[path = "control_flow/await_expression.rs"]
+mod await_expression;
+
+#[path = "control_flow/fixed_target.rs"]
+mod fixed_target;
+
 #[derive(Debug, Default)]
 pub(crate) struct ControlFlowBuilder {
     next_block: usize,
     blocks: Vec<BasicBlock>,
+    active_conditional_awaits: HashSet<ExprId>,
+    repeating_while_headers: HashMap<StmtId, BasicBlockId>,
+    active_catches: Vec<CatchScopeId>,
+    catch_scopes: BTreeMap<BasicBlockId, Vec<CatchScopeId>>,
+}
+
+pub(crate) struct LoweredControlFlow {
+    pub blocks: Vec<BasicBlock>,
+    pub catch_scopes: BTreeMap<BasicBlockId, Vec<CatchScopeId>>,
 }
 
 #[derive(Clone, Copy)]
@@ -23,7 +42,8 @@ struct BlockLoweringEnv<'a> {
     body: &'a HirBlock,
     return_terminator: &'a MirTerminator,
     loop_targets: Option<(BasicBlockId, BasicBlockId)>,
-    await_replacements: &'a HashMap<ExprId, MirOperand>,
+    await_replacements: &'a crate::lowering::AwaitReplacements,
+    fixed_preparation: Option<&'a crate::MirPreparedAssignment>,
 }
 
 impl ControlFlowBuilder {
@@ -42,19 +62,23 @@ impl ControlFlowBuilder {
         ctx: &MirLoweringContext,
         body: &HirBlock,
         return_terminator: MirTerminator,
-    ) -> Result<Vec<BasicBlock>, HirError> {
+    ) -> Result<LoweredControlFlow, HirError> {
         let base_env = BlockLoweringEnv {
+            fixed_preparation: None,
             ctx,
             body,
             return_terminator: &return_terminator,
             loop_targets: None,
-            await_replacements: &HashMap::new(),
+            await_replacements: &crate::lowering::AwaitReplacements::default(),
         };
         let entry = self.fresh_block();
         let entry = self.lower_block_from(entry, 0, return_terminator.clone(), base_env)?;
         self.blocks.push(entry);
         self.blocks.sort_by_key(|block| block.id.0);
-        Ok(self.blocks)
+        Ok(LoweredControlFlow {
+            blocks: self.blocks,
+            catch_scopes: self.catch_scopes,
+        })
     }
 
     fn lower_block_from(
@@ -64,7 +88,9 @@ impl ControlFlowBuilder {
         final_terminator: MirTerminator,
         env: BlockLoweringEnv<'_>,
     ) -> Result<BasicBlock, HirError> {
+        self.catch_scopes.insert(id, self.active_catches.clone());
         let BlockLoweringEnv {
+            fixed_preparation,
             ctx,
             body,
             return_terminator,
@@ -74,30 +100,209 @@ impl ControlFlowBuilder {
         let mut statements = Vec::new();
         for (idx, stmt) in body.statements.iter().enumerate().skip(start) {
             if let Some(await_expr) = first_unlowered_await_in_stmt(stmt, await_replacements) {
+                if matches!(&stmt.kind, HirStmtKind::Assign(target, rhs, _)
+                    if super::stmt::assignment_target_requires_preparation(target)
+                    && first_unlowered_await(rhs, await_replacements).map(|value| value.id) != Some(await_expr.id))
+                {
+                    let entry =
+                        self.lower_suspended_fixed_target(idx, stmt, final_terminator, env)?;
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(entry),
+                            span: stmt.span,
+                        },
+                    });
+                }
+                let retained_preparation =
+                    fixed_preparation.filter(|prepared| prepared.source_statement == stmt.id);
+                let target_preparation = if retained_preparation.is_none()
+                    && matches!(&stmt.kind,
+                    HirStmtKind::Assign(_, rhs, _) if first_unlowered_await(rhs, await_replacements).is_some_and(|rhs_await| rhs_await.id == await_expr.id))
+                {
+                    super::stmt::prepare_expanding_assignment(ctx, stmt, await_replacements)?
+                } else {
+                    None
+                };
+                let new_preparation = target_preparation.map(|(prepared, phases)| {
+                    statements.extend(phases);
+                    prepared
+                });
+                let fixed_preparation = new_preparation.as_ref().or(retained_preparation);
+                if matches!(stmt.kind, HirStmtKind::While { .. })
+                    && !statements.is_empty()
+                    && !self.repeating_while_headers.contains_key(&stmt.id)
+                {
+                    let header = self.fresh_block();
+                    self.repeating_while_headers.insert(stmt.id, header);
+                    let header_block = self.lower_block_from(
+                        header,
+                        idx,
+                        final_terminator,
+                        BlockLoweringEnv {
+                            fixed_preparation,
+                            ctx,
+                            body,
+                            return_terminator,
+                            loop_targets,
+                            await_replacements,
+                        },
+                    );
+                    self.repeating_while_headers.remove(&stmt.id);
+                    self.blocks.push(header_block?);
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(header),
+                            span: stmt.span,
+                        },
+                    });
+                }
+                if let Some(guard) =
+                    conditional_await_guard(stmt, await_expr.id, &self.active_conditional_awaits)
+                {
+                    let prior_repeat = if matches!(stmt.kind, HirStmtKind::While { .. }) {
+                        self.repeating_while_headers.insert(stmt.id, id)
+                    } else {
+                        None
+                    };
+                    let mut prepared = await_replacements.clone();
+                    super::await_preparation::prepare_statement_prefix(
+                        ctx,
+                        stmt,
+                        guard.expression.id,
+                        &mut statements,
+                        &mut prepared,
+                        fixed_preparation.is_some(),
+                    )?;
+                    let condition = lower_operand_with_replacements(
+                        ctx,
+                        guard.left,
+                        &mut statements,
+                        &prepared,
+                    )?;
+                    prepared.insert(guard.left.id, condition.clone());
+
+                    let result = ctx.fresh_temp(guard.expression.span);
+                    let mut joined = prepared.clone();
+                    joined.insert(guard.expression.id, MirOperand::Local(result));
+                    let joined_id = self.lower_continuation_target(
+                        idx,
+                        final_terminator.clone(),
+                        BlockLoweringEnv {
+                            fixed_preparation,
+                            ctx,
+                            body,
+                            return_terminator,
+                            loop_targets,
+                            await_replacements: &joined,
+                        },
+                    )?;
+
+                    let skipped_id = self.fresh_block();
+                    self.blocks.push(BasicBlock {
+                        id: skipped_id,
+                        statements: vec![crate::MirStmt {
+                            kind: crate::MirStmtKind::Assign {
+                                place: MirPlace::Local(result),
+                                value: crate::MirRvalue::Use(MirOperand::Constant(
+                                    MirConstant::Bool(guard.skipped_value),
+                                )),
+                            },
+                            span: guard.expression.span,
+                        }],
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(joined_id),
+                            span: guard.expression.span,
+                        },
+                    });
+                    self.active_conditional_awaits.insert(guard.expression.id);
+                    let evaluated_id = self.fresh_block();
+                    let evaluated = self.lower_expression_into(
+                        ctx,
+                        guard.expression,
+                        await_expression::ExpressionTarget {
+                            block: evaluated_id,
+                            destination: crate::MirFixedSelectorDestination::Scalar(result),
+                            selector: None,
+                            continuation: joined_id,
+                            span: stmt.span,
+                        },
+                        &prepared,
+                    );
+                    self.active_conditional_awaits.remove(&guard.expression.id);
+                    self.blocks.push(evaluated?);
+                    restore_repeat_header(&mut self.repeating_while_headers, stmt.id, prior_repeat);
+                    let (then_block, else_block) = if guard.evaluate_when_true {
+                        (evaluated_id, skipped_id)
+                    } else {
+                        (skipped_id, evaluated_id)
+                    };
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Branch {
+                                cond: condition,
+                                then_block,
+                                else_block,
+                            },
+                            span: stmt.span,
+                        },
+                    });
+                }
                 let HirExprKind::Await(future_expr) = &await_expr.kind else {
                     unreachable!();
                 };
+                let mut prepared_replacements = await_replacements.clone();
+                let is_direct_assignment_rhs = fixed_preparation.is_none()
+                    && matches!(
+                        &stmt.kind,
+                        HirStmtKind::Assign(_, value, _) if value.id == await_expr.id
+                    );
+                if !is_direct_assignment_rhs {
+                    super::await_preparation::prepare_statement_prefix(
+                        ctx,
+                        stmt,
+                        await_expr.id,
+                        &mut statements,
+                        &mut prepared_replacements,
+                        fixed_preparation.is_some(),
+                    )?;
+                }
                 let future = lower_operand_with_replacements(
                     ctx,
                     future_expr,
                     &mut statements,
-                    await_replacements,
+                    &prepared_replacements,
                 )?;
-                let await_result = top_level_await_result(ctx, stmt, await_expr, &mut statements)?;
+                let await_result = if fixed_preparation.is_some() {
+                    TopLevelAwaitResult::Nested
+                } else {
+                    top_level_await_result(ctx, stmt, await_expr, &mut statements)?
+                };
                 let (result, resume_start, resume_replacements) = match await_result {
                     TopLevelAwaitResult::ExpressionStatement => (None, idx + 1, None),
                     TopLevelAwaitResult::Assignment(place) => (Some(place), idx + 1, None),
                     TopLevelAwaitResult::Nested => {
                         let local = ctx.fresh_temp(await_expr.span);
-                        let mut replacements = await_replacements.clone();
+                        let mut replacements = prepared_replacements;
                         replacements.insert(await_expr.id, MirOperand::Local(local));
                         (Some(MirPlace::Local(local)), idx, Some(replacements))
                     }
+                };
+                let prior_repeat = if matches!(stmt.kind, HirStmtKind::While { .. }) {
+                    self.repeating_while_headers.insert(stmt.id, id)
+                } else {
+                    None
                 };
                 let resume = self.lower_continuation_target(
                     resume_start,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -106,7 +311,9 @@ impl ControlFlowBuilder {
                             .as_ref()
                             .unwrap_or(await_replacements),
                     },
-                )?;
+                );
+                restore_repeat_header(&mut self.repeating_while_headers, stmt.id, prior_repeat);
+                let resume = resume?;
                 return Ok(BasicBlock {
                     id,
                     statements,
@@ -133,6 +340,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -149,6 +357,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator.clone(),
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: then_body,
                         return_terminator,
@@ -165,6 +374,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: else_body.unwrap_or(&empty_else),
                         return_terminator,
@@ -203,11 +413,17 @@ impl ControlFlowBuilder {
                 } else {
                     self.fresh_block()
                 };
+                let repeat_header = self
+                    .repeating_while_headers
+                    .get(&stmt.id)
+                    .copied()
+                    .unwrap_or(header_id);
                 let loop_body_id = self.fresh_block();
                 let exit_id = self.lower_continuation_target(
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -219,14 +435,15 @@ impl ControlFlowBuilder {
                     loop_body_id,
                     0,
                     MirTerminator {
-                        kind: MirTerminatorKind::Goto(header_id),
+                        kind: MirTerminatorKind::Goto(repeat_header),
                         span: stmt.span,
                     },
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: loop_body,
                         return_terminator,
-                        loop_targets: Some((id, exit_id)),
+                        loop_targets: Some((repeat_header, exit_id)),
                         await_replacements,
                     },
                 )?;
@@ -281,6 +498,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -296,6 +514,7 @@ impl ControlFlowBuilder {
                         span: stmt.span,
                     },
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: loop_body,
                         return_terminator,
@@ -362,6 +581,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -377,6 +597,7 @@ impl ControlFlowBuilder {
                         span: stmt.span,
                     },
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: loop_body,
                         return_terminator,
@@ -453,6 +674,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -460,21 +682,24 @@ impl ControlFlowBuilder {
                         await_replacements,
                     },
                 )?;
-                let body_block = self.lower_block_from(
-                    body_id,
-                    0,
-                    MirTerminator {
-                        kind: MirTerminatorKind::Goto(exit_id),
-                        span: stmt.span,
-                    },
-                    BlockLoweringEnv {
-                        ctx,
-                        body: spmd_body,
-                        return_terminator,
-                        loop_targets: None,
-                        await_replacements,
-                    },
-                )?;
+                let body_block = ctx.with_spmd_region(*region, || {
+                    self.lower_block_from(
+                        body_id,
+                        0,
+                        MirTerminator {
+                            kind: MirTerminatorKind::Goto(exit_id),
+                            span: stmt.span,
+                        },
+                        BlockLoweringEnv {
+                            fixed_preparation,
+                            ctx,
+                            body: spmd_body,
+                            return_terminator,
+                            loop_targets: None,
+                            await_replacements,
+                        },
+                    )
+                })?;
                 self.blocks.push(body_block);
                 let header_block = BasicBlock {
                     id: header_id,
@@ -512,6 +737,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -531,6 +757,7 @@ impl ControlFlowBuilder {
                         0,
                         merge_terminator.clone(),
                         BlockLoweringEnv {
+                            fixed_preparation,
                             ctx,
                             body: case_body,
                             return_terminator,
@@ -556,6 +783,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: otherwise.as_ref().unwrap_or(&empty_otherwise),
                         return_terminator,
@@ -596,6 +824,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -612,6 +841,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator.clone(),
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: try_body,
                         return_terminator,
@@ -619,18 +849,22 @@ impl ControlFlowBuilder {
                         await_replacements,
                     },
                 )?;
+                self.active_catches.push(CatchScopeId(id.0));
                 let catch_block = self.lower_block_from(
                     catch_id,
                     0,
                     merge_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: catch_body,
                         return_terminator,
                         loop_targets,
                         await_replacements,
                     },
-                )?;
+                );
+                self.active_catches.pop();
+                let catch_block = catch_block?;
                 self.blocks.push(try_block);
                 self.blocks.push(catch_block);
                 return Ok(BasicBlock {
@@ -674,73 +908,11 @@ impl ControlFlowBuilder {
                     },
                 });
             }
-            if let HirStmtKind::ExprStmt(expr, _) = &stmt.kind {
-                if let HirExprKind::Await(future) = &expr.kind {
-                    let resume = self.lower_continuation_target(
-                        idx + 1,
-                        final_terminator,
-                        BlockLoweringEnv {
-                            ctx,
-                            body,
-                            return_terminator,
-                            loop_targets,
-                            await_replacements,
-                        },
-                    )?;
-                    let future = lower_operand_with_replacements(
-                        ctx,
-                        future,
-                        &mut statements,
-                        await_replacements,
-                    )?;
-                    return Ok(BasicBlock {
-                        id,
-                        statements,
-                        terminator: MirTerminator {
-                            kind: MirTerminatorKind::Await {
-                                future,
-                                result: None,
-                                resume,
-                            },
-                            span: stmt.span,
-                        },
-                    });
-                }
-            }
-            if let HirStmtKind::Assign(place, expr, _) = &stmt.kind {
-                if let HirExprKind::Await(future) = &expr.kind {
-                    let resume = self.lower_continuation_target(
-                        idx + 1,
-                        final_terminator,
-                        BlockLoweringEnv {
-                            ctx,
-                            body,
-                            return_terminator,
-                            loop_targets,
-                            await_replacements,
-                        },
-                    )?;
-                    let future = lower_operand_with_replacements(
-                        ctx,
-                        future,
-                        &mut statements,
-                        await_replacements,
-                    )?;
-                    let result = lower_place(ctx, place, &mut statements)?;
-                    return Ok(BasicBlock {
-                        id,
-                        statements,
-                        terminator: MirTerminator {
-                            kind: MirTerminatorKind::Await {
-                                future,
-                                result: Some(result),
-                                resume,
-                            },
-                            span: stmt.span,
-                        },
-                    });
-                }
-            }
+            // Unconsumed Await is handled by first_unlowered_await_in_stmt
+            // above. A resumed direct RHS must reach ordinary statement
+            // lowering with its replacement and exact retained preparation;
+            // matching the raw HIR Await again would replay it and omit the
+            // prepared assignment consumer.
             if matches!(stmt.kind, HirStmtKind::Return) {
                 return Ok(BasicBlock {
                     id,
@@ -751,7 +923,12 @@ impl ControlFlowBuilder {
                     },
                 });
             }
-            statements.extend(lower_stmt_with_replacements(ctx, stmt, await_replacements)?);
+            statements.extend(lower_stmt_with_replacements(
+                ctx,
+                stmt,
+                await_replacements,
+                fixed_preparation,
+            )?);
         }
         Ok(BasicBlock {
             id,
@@ -779,6 +956,18 @@ enum TopLevelAwaitResult {
     Nested,
 }
 
+fn restore_repeat_header(
+    headers: &mut HashMap<StmtId, BasicBlockId>,
+    statement: StmtId,
+    prior: Option<BasicBlockId>,
+) {
+    if let Some(prior) = prior {
+        headers.insert(statement, prior);
+    } else {
+        headers.remove(&statement);
+    }
+}
+
 fn top_level_await_result(
     ctx: &MirLoweringContext,
     stmt: &HirStmt,
@@ -786,7 +975,9 @@ fn top_level_await_result(
     statements: &mut Vec<crate::MirStmt>,
 ) -> Result<TopLevelAwaitResult, HirError> {
     match &stmt.kind {
-        HirStmtKind::ExprStmt(expr, _) if expr.id == await_expr.id => {
+        HirStmtKind::ExprStmt(expr, suppressed)
+            if expr.id == await_expr.id && (*suppressed || !expr.emits_statement_output()) =>
+        {
             Ok(TopLevelAwaitResult::ExpressionStatement)
         }
         HirStmtKind::Assign(place, expr, _) if expr.id == await_expr.id => Ok(
@@ -798,130 +989,35 @@ fn top_level_await_result(
 
 fn first_unlowered_await_in_stmt<'a>(
     stmt: &'a HirStmt,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Option<&'a HirExpr> {
-    match &stmt.kind {
-        HirStmtKind::ExprStmt(expr, _) | HirStmtKind::Assign(_, expr, _) => {
-            first_unlowered_await(expr, await_replacements)
-        }
-        HirStmtKind::MultiAssign(_, expr, _) => first_unlowered_await(expr, await_replacements),
-        HirStmtKind::If {
-            cond,
-            elseif_blocks,
-            ..
-        } => first_unlowered_await(cond, await_replacements).or_else(|| {
-            elseif_blocks
-                .iter()
-                .find_map(|(cond, _)| first_unlowered_await(cond, await_replacements))
-        }),
-        HirStmtKind::While { cond, .. } => first_unlowered_await(cond, await_replacements),
-        HirStmtKind::For { range, .. } => first_unlowered_await(range, await_replacements),
-        HirStmtKind::ParFor {
-            range,
-            maximum_workers,
-            ..
-        } => first_unlowered_await(range, await_replacements).or_else(|| {
-            maximum_workers
-                .as_ref()
-                .and_then(|value| first_unlowered_await(value, await_replacements))
-        }),
-        HirStmtKind::Spmd { header, .. } => match header {
-            runmat_hir::parallel::SpmdHeader::Default => None,
-            runmat_hir::parallel::SpmdHeader::One(value) => {
-                first_unlowered_await(value, await_replacements)
-            }
-            runmat_hir::parallel::SpmdHeader::Two(first, second) => {
-                first_unlowered_await(first, await_replacements)
-                    .or_else(|| first_unlowered_await(second, await_replacements))
-            }
-            runmat_hir::parallel::SpmdHeader::Three(first, second, third) => {
-                first_unlowered_await(first, await_replacements)
-                    .or_else(|| first_unlowered_await(second, await_replacements))
-                    .or_else(|| first_unlowered_await(third, await_replacements))
-            }
-        },
-        HirStmtKind::Switch { expr, cases, .. } => first_unlowered_await(expr, await_replacements)
-            .or_else(|| {
-                cases
-                    .iter()
-                    .find_map(|(case, _)| first_unlowered_await(case, await_replacements))
-            }),
-        HirStmtKind::TryCatch { .. }
-        | HirStmtKind::Global(_)
-        | HirStmtKind::Persistent(_)
-        | HirStmtKind::Break
-        | HirStmtKind::Continue
-        | HirStmtKind::Return
-        | HirStmtKind::Import(_) => None,
-    }
+    let direct = super::evaluation_order::statement_expressions(stmt)
+        .into_iter()
+        .find_map(|expression| first_unlowered_await(expression, await_replacements));
+    direct.or_else(|| match &stmt.kind {
+        // Switch-case expressions retain the existing eager contract. Else-if
+        // conditions deliberately do not appear here: their synthesized nested
+        // `if` owns evaluation after preceding conditions fail.
+        HirStmtKind::Switch { cases, .. } => cases
+            .iter()
+            .find_map(|(case, _)| first_unlowered_await(case, await_replacements)),
+        _ => None,
+    })
 }
 
 fn first_unlowered_await<'a>(
     expr: &'a HirExpr,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Option<&'a HirExpr> {
     if await_replacements.contains_key(&expr.id) {
         return None;
     }
-    match &expr.kind {
-        HirExprKind::Await(_) => Some(expr),
-        HirExprKind::Unary(_, inner) => first_unlowered_await(inner, await_replacements),
-        HirExprKind::Binary(left, _, right) => first_unlowered_await(left, await_replacements)
-            .or_else(|| first_unlowered_await(right, await_replacements)),
-        HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => rows
-            .iter()
-            .flat_map(|row| row.iter())
-            .find_map(|expr| first_unlowered_await(expr, await_replacements)),
-        HirExprKind::StructLiteral(fields) => fields
-            .iter()
-            .find_map(|(_, value)| first_unlowered_await(value, await_replacements)),
-        HirExprKind::ObjectLiteral { fields, .. } => fields
-            .iter()
-            .find_map(|(_, value)| first_unlowered_await(value, await_replacements)),
-        HirExprKind::Range(start, step, end) => first_unlowered_await(start, await_replacements)
-            .or_else(|| {
-                step.as_ref()
-                    .and_then(|step| first_unlowered_await(step, await_replacements))
-            })
-            .or_else(|| first_unlowered_await(end, await_replacements)),
-        HirExprKind::Index(base, indexing) => first_unlowered_await(base, await_replacements)
-            .or_else(|| first_unlowered_await_in_indexing(indexing, await_replacements)),
-        HirExprKind::Member(base, _) => first_unlowered_await(base, await_replacements),
-        HirExprKind::MemberDynamic(base, member) => first_unlowered_await(base, await_replacements)
-            .or_else(|| first_unlowered_await(member, await_replacements)),
-        HirExprKind::WorkspaceFirstStaticProperty { .. } => None,
-        HirExprKind::Call(call) => call
-            .args
-            .iter()
-            .find_map(|arg| first_unlowered_await(arg, await_replacements)),
-        HirExprKind::Spawn(inner) => first_unlowered_await(inner, await_replacements),
-        HirExprKind::Number(_)
-        | HirExprKind::IntegerLiteral(_)
-        | HirExprKind::String(_)
-        | HirExprKind::Constant(_)
-        | HirExprKind::Binding(_)
-        | HirExprKind::Colon
-        | HirExprKind::End
-        | HirExprKind::CommandCall(_)
-        | HirExprKind::FunctionHandle(_)
-        | HirExprKind::AnonymousFunction(_)
-        | HirExprKind::MetaClass(_) => None,
+    if matches!(expr.kind, HirExprKind::Await(_)) {
+        return Some(expr);
     }
-}
-
-fn first_unlowered_await_in_indexing<'a>(
-    indexing: &'a runmat_hir::IndexingSemantics,
-    await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Option<&'a HirExpr> {
-    indexing
-        .components
-        .iter()
-        .find_map(|component| match component {
-            runmat_hir::IndexComponent::Expr(expr) | runmat_hir::IndexComponent::Logical(expr) => {
-                first_unlowered_await(expr, await_replacements)
-            }
-            runmat_hir::IndexComponent::Colon | runmat_hir::IndexComponent::End { .. } => None,
-        })
+    super::evaluation_order::expression_children(expr)
+        .into_iter()
+        .find_map(|child| first_unlowered_await(child, await_replacements))
 }
 
 fn lower_elseif_blocks(

@@ -1,3 +1,5 @@
+mod admission;
+
 use super::*;
 use crate::{
     GeometryRevisionIdentity, GeometryRevisionOperation, PersistentEntityKind,
@@ -5,11 +7,7 @@ use crate::{
 };
 
 fn entity(name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(PersistentEntityKind::Edge, name.into(), vec!["root".into()])
 }
 
 fn valid() -> TopologyValidity {
@@ -45,13 +43,14 @@ fn report() -> GeometryHealingReport {
             consolidate_duplicates: true,
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: true,
+            shared_interfaces: false,
         },
         tolerance: crate::GeometryTolerancePolicy {
-            source_tolerance_m: 1.0e-8,
-            absolute_floor_m: 1.0e-10,
+            source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+            absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
             model_relative_term: 1.0e-9,
-            requested_deviation_m: 1.0e-5,
-            maximum_healing_displacement_m: 1.0e-6,
+            requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+            maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
         },
         revision_map: GeometryRevisionMap {
             schema_version: GEOMETRY_REVISION_MAP_SCHEMA_VERSION,
@@ -105,7 +104,8 @@ fn disabled_or_over_limit_mutation_cannot_be_reported_as_success() {
     assert!(disabled.validate().is_err());
 
     let mut displaced = report();
-    displaced.tolerance.maximum_healing_displacement_m = 1.0e-6;
+    displaced.tolerance.maximum_healing_displacement_m =
+        runmat_types::physical::Length::new(1.0e-6);
     displaced.operations[0].maximum_displacement_m = 2.0e-6;
     assert!(displaced.validate().is_err());
 }

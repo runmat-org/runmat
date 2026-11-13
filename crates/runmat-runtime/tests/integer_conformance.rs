@@ -10,17 +10,17 @@ fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
 }
 
-fn expect_integer(value: Value, shape: &[usize], storage: IntegerStorage) {
+fn expect_integer(value: &Value, shape: &[usize], storage: IntegerStorage) {
     match value {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, shape);
+            assert_eq!(tensor.shape(), shape);
             assert_eq!(tensor.integer_storage(), Some(&storage));
         }
         other => panic!("expected integer tensor, got {other:?}"),
     }
 }
 
-fn expect_integer_class(value: Value, class_name: &str) {
+fn expect_integer_class(value: &Value, class_name: &str) {
     match value {
         Value::Tensor(tensor) => assert_eq!(
             tensor
@@ -70,10 +70,10 @@ fn integer_scalar_two(storage: &IntegerStorage) -> Value {
     })
 }
 
-fn expect_logical(value: Value, shape: &[usize], data: &[u8]) {
+fn expect_logical(value: &Value, shape: &[usize], data: &[u8]) {
     assert_eq!(
         value,
-        Value::LogicalArray(LogicalArray::new(data.to_vec(), shape.to_vec()).expect("logical"))
+        &Value::LogicalArray(LogicalArray::new(data.to_vec(), shape.to_vec()).expect("logical"))
     );
 }
 
@@ -243,7 +243,7 @@ fn registered_complex_integer_ordering_uses_exact_real_components_for_every_clas
             let result =
                 runmat_runtime::call_builtin(builtin, &[complex.clone(), threshold.clone()])
                     .expect("registered complex integer comparison");
-            expect_logical(result, &[1, 2], &expected);
+            expect_logical(&result, &[1, 2], &expected);
         }
     }
 }
@@ -300,7 +300,7 @@ fn registered_integer_scalar_mtimes_preserves_every_class_and_saturates() {
         ] {
             let result =
                 runmat_runtime::call_builtin("mtimes", &operands).expect("integer scalar mtimes");
-            expect_integer(result, &[1, 2], expected.clone());
+            expect_integer(&result, &[1, 2], expected.clone());
         }
     }
 }
@@ -354,7 +354,7 @@ fn registered_integer_scalar_right_mrdivide_preserves_every_class() {
         for divisor in [Value::Int(scalar), Value::Num(2.0)] {
             let result = runmat_runtime::call_builtin("mrdivide", &[array.clone(), divisor])
                 .expect("integer scalar-right mrdivide");
-            expect_integer(result, &[1, 2], expected.clone());
+            expect_integer(&result, &[1, 2], expected.clone());
         }
     }
 }
@@ -364,14 +364,14 @@ fn registered_bit_position_operations_use_scalar_or_exact_size_expansion() {
     let input = integer_tensor(IntegerStorage::U64(vec![1, 1_u64 << 63]), vec![2, 1]);
     let shifts = Value::Tensor(Tensor::new(vec![1.0, -63.0], vec![2, 1]).expect("shifts"));
     expect_integer(
-        runmat_runtime::call_builtin("bitshift", &[input.clone(), shifts])
+        &runmat_runtime::call_builtin("bitshift", &[input.clone(), shifts])
             .expect("same-size bitshift"),
         &[2, 1],
         IntegerStorage::U64(vec![2, 1]),
     );
     let positions = Value::Tensor(Tensor::new(vec![1.0, 64.0], vec![2, 1]).expect("positions"));
     expect_integer(
-        runmat_runtime::call_builtin("bitget", &[input.clone(), positions])
+        &runmat_runtime::call_builtin("bitget", &[input.clone(), positions])
             .expect("same-size bitget"),
         &[2, 1],
         IntegerStorage::U64(vec![1, 1]),
@@ -379,7 +379,7 @@ fn registered_bit_position_operations_use_scalar_or_exact_size_expansion() {
     let zeros = integer_tensor(IntegerStorage::U64(vec![0, 0]), vec![2, 1]);
     let positions = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("positions"));
     expect_integer(
-        runmat_runtime::call_builtin("bitset", &[zeros, positions, Value::Bool(true)])
+        &runmat_runtime::call_builtin("bitset", &[zeros, positions, Value::Bool(true)])
             .expect("scalar-expanded bitset value"),
         &[2, 1],
         IntegerStorage::U64(vec![1, 2]),
@@ -399,28 +399,26 @@ fn registered_bit_position_operations_use_scalar_or_exact_size_expansion() {
 
 #[test]
 fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
-    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
-
-    let integer_handle = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 1,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::I64.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    let logical_handle = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataOwned,
+        HostNumericTensorOwned,
     };
-    runmat_accelerate_api::set_handle_logical(&logical_handle, true);
 
-    let resident_integer = Value::GpuTensor(integer_handle.clone());
-    let resident_logical = Value::GpuTensor(logical_handle.clone());
+    let owner = TestAllocationOwner::new();
+    let integer = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::I64(vec![2]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let logical = owner.allocate_logical(vec![1], vec![1, 1]).unwrap();
+    assert!(runmat_accelerate_api::provider_for_handle(&integer.handle).is_none());
+    assert!(runmat_accelerate_api::provider_for_handle(&logical.handle).is_none());
+    let integer_descriptor = integer.handle.wire_descriptor();
+    let logical_descriptor = logical.handle.wire_descriptor();
+    let resident_integer = Value::GpuTensor(integer.handle.clone());
+    let resident_logical = Value::GpuTensor(logical.handle.clone());
     let host_integer = Value::Int(IntValue::I64(2));
     let host_logical = Value::Bool(true);
     for builtin in [
@@ -438,7 +436,17 @@ fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
         }
     }
 
-    runmat_accelerate_api::clear_handle_logical(&logical_handle);
+    assert_eq!(integer.handle.wire_descriptor(), integer_descriptor);
+    assert_eq!(logical.handle.wire_descriptor(), logical_descriptor);
+    assert!(runmat_accelerate_api::handle_is_logical(&logical.handle));
+    assert_eq!(integer.probe.retirements(), 0);
+    assert_eq!(logical.probe.retirements(), 0);
+    drop(resident_integer);
+    drop(resident_logical);
+    integer.handle.release().unwrap();
+    logical.handle.release().unwrap();
+    assert_eq!(integer.probe.retirements(), 1);
+    assert_eq!(logical.probe.retirements(), 1);
 }
 
 macro_rules! integer_class_cases {
@@ -532,7 +540,7 @@ fn integer_same_class_arithmetic_is_exact_and_preserves_each_class() {
                 ("rdivide", IntegerStorage::$class($divide)),
             ] {
                 expect_integer(
-                    runmat_runtime::call_builtin(builtin, &[lhs.clone(), rhs.clone()])
+                    &runmat_runtime::call_builtin(builtin, &[lhs.clone(), rhs.clone()])
                         .unwrap_or_else(|error| {
                             panic!("{} {}: {error}", builtin, stringify!($class))
                         }),
@@ -635,7 +643,7 @@ fn integer_arithmetic_accepts_only_scalar_double_floating_companions() {
             ] {
                 let result = runmat_runtime::call_builtin(builtin, &operands)
                     .unwrap_or_else(|error| panic!("{builtin} scalar double: {error}"));
-                expect_integer_class(result, integer.class_name());
+                expect_integer_class(&result, integer.class_name());
             }
             for floating in [&nonscalar_double, &scalar_single] {
                 for operands in [
@@ -758,7 +766,7 @@ fn empty_integer_arithmetic_preserves_class_and_does_not_hide_type_errors() {
         ] {
             let result = runmat_runtime::call_builtin(builtin, &[empty.clone(), scalar.clone()])
                 .unwrap_or_else(|error| panic!("{class} {builtin}: {error}"));
-            expect_integer(result, &[0, 1, 3], storage.clone());
+            expect_integer(&result, &[0, 1, 3], storage.clone());
         }
 
         let unlike = if class == "uint8" {
@@ -843,7 +851,7 @@ fn integer_comparisons_return_logical_arrays_with_broadcast_shape_for_every_clas
                 ("ge", vec![1, 1, 1]),
             ] {
                 expect_logical(
-                    runmat_runtime::call_builtin(builtin, &[lhs.clone(), rhs.clone()])
+                    &runmat_runtime::call_builtin(builtin, &[lhs.clone(), rhs.clone()])
                         .expect("comparison"),
                     &[1, 3],
                     &expected,
@@ -864,7 +872,7 @@ fn integer_comparisons_return_logical_arrays_with_broadcast_shape_for_every_clas
                 ("ge", vec![1, 1, 1]),
             ] {
                 expect_logical(
-                    runmat_runtime::call_builtin(builtin, &[lhs.clone(), rhs.clone()])
+                    &runmat_runtime::call_builtin(builtin, &[lhs.clone(), rhs.clone()])
                         .expect("comparison"),
                     &[1, 3],
                     &expected,
@@ -894,7 +902,7 @@ fn integer_implicit_expansion_appends_singletons_and_enforces_zero_rules_for_eve
                 vec![2, 1, 3],
             );
             expect_integer(
-                runmat_runtime::call_builtin("plus", &[left, right])
+                &runmat_runtime::call_builtin("plus", &[left, right])
                     .expect("rank-mismatched integer expansion"),
                 &[2, 1, 3],
                 IntegerStorage::$class(vec![
@@ -913,7 +921,7 @@ fn integer_implicit_expansion_appends_singletons_and_enforces_zero_rules_for_eve
                 vec![1, 3, 2],
             );
             expect_integer(
-                runmat_runtime::call_builtin("plus", &[row_shorthand, pages])
+                &runmat_runtime::call_builtin("plus", &[row_shorthand, pages])
                     .expect("one-dimensional row shorthand expansion"),
                 &[1, 3, 2],
                 IntegerStorage::$class(vec![
@@ -949,7 +957,7 @@ fn integer_implicit_expansion_appends_singletons_and_enforces_zero_rules_for_eve
                 vec![1, 3],
             );
             expect_integer(
-                runmat_runtime::call_builtin("plus", &[empty.clone(), singleton])
+                &runmat_runtime::call_builtin("plus", &[empty.clone(), singleton])
                     .expect("zero extent expands against singleton"),
                 &[0, 3],
                 IntegerStorage::$class(Vec::<$ty>::new()),
@@ -991,8 +999,11 @@ fn native_integer_reductions_preserve_class_shape_and_empty_identities() {
                 ("mean", IntegerStorage::$class($mean)),
             ] {
                 expect_integer(
-                    runmat_runtime::call_builtin(builtin, &[matrix.clone(), Value::from("native")])
-                        .expect("native reduction"),
+                    &runmat_runtime::call_builtin(
+                        builtin,
+                        &[matrix.clone(), Value::from("native")],
+                    )
+                    .expect("native reduction"),
                     &[1, 2],
                     expected,
                 );
@@ -1011,13 +1022,13 @@ fn native_integer_reductions_preserve_class_shape_and_empty_identities() {
 
             let empty = integer_tensor(IntegerStorage::$class(Vec::new()), vec![0, 2]);
             expect_integer(
-                runmat_runtime::call_builtin("sum", &[empty.clone(), Value::from("native")])
+                &runmat_runtime::call_builtin("sum", &[empty.clone(), Value::from("native")])
                     .expect("empty sum"),
                 &[1, 2],
                 IntegerStorage::$class(vec![$zero, $zero]),
             );
             expect_integer(
-                runmat_runtime::call_builtin("prod", &[empty, Value::from("native")])
+                &runmat_runtime::call_builtin("prod", &[empty, Value::from("native")])
                     .expect("empty product"),
                 &[1, 2],
                 IntegerStorage::$class(vec![$one, $one]),
@@ -1105,13 +1116,13 @@ fn integer_elementwise_extrema_preserve_all_classes_and_broadcast_exactly() {
             let left = integer_tensor(IntegerStorage::$class($left), vec![2, 1]);
             let right = integer_tensor(IntegerStorage::$class($right), vec![1, 2]);
             expect_integer(
-                runmat_runtime::call_builtin("min", &[left.clone(), right.clone()])
+                &runmat_runtime::call_builtin("min", &[left.clone(), right.clone()])
                     .expect("integer min"),
                 &[2, 2],
                 IntegerStorage::$class($min),
             );
             expect_integer(
-                runmat_runtime::call_builtin("max", &[left, right]).expect("integer max"),
+                &runmat_runtime::call_builtin("max", &[left, right]).expect("integer max"),
                 &[2, 2],
                 IntegerStorage::$class($max),
             );
@@ -1183,12 +1194,12 @@ fn integer_logical_reductions_and_nnz_use_typed_storage_for_all_classes() {
                 .expect("integer tensor");
             let value = Value::Tensor(tensor);
             expect_logical(
-                runmat_runtime::call_builtin("any", std::slice::from_ref(&value)).expect("any"),
+                &runmat_runtime::call_builtin("any", std::slice::from_ref(&value)).expect("any"),
                 &[1, 2],
                 &[1, 1],
             );
             expect_logical(
-                runmat_runtime::call_builtin("all", std::slice::from_ref(&value)).expect("all"),
+                &runmat_runtime::call_builtin("all", std::slice::from_ref(&value)).expect("all"),
                 &[1, 2],
                 &[0, 1],
             );
@@ -1232,9 +1243,12 @@ fn registered_set_functions_cover_all_ordered_integer_class_pairs_and_rows() {
                         let result = runmat_runtime::call_builtin(builtin, &args)
                             .unwrap_or_else(|error| panic!("{builtin} same-class call: {error}"));
                         if builtin == "ismember" {
-                            assert!(matches!(result, Value::Bool(_) | Value::LogicalArray(_)));
+                            assert!(matches!(
+                                result.value(),
+                                Value::Bool(_) | Value::LogicalArray(_)
+                            ));
                         } else {
-                            expect_integer_class(result, left_storage.class_name());
+                            expect_integer_class(&result, left_storage.class_name());
                         }
                     } else {
                         let error = runmat_runtime::call_builtin(builtin, &args)
@@ -1269,7 +1283,7 @@ fn registered_set_functions_apply_double_exception_and_index_classes_for_every_i
                 [double.clone(), integer.clone()],
             ] {
                 expect_integer_class(
-                    runmat_runtime::call_builtin(builtin, &args)
+                    &runmat_runtime::call_builtin(builtin, &args)
                         .unwrap_or_else(|error| panic!("{builtin} double exception: {error}")),
                     class_name,
                 );
@@ -1277,7 +1291,7 @@ fn registered_set_functions_apply_double_exception_and_index_classes_for_every_i
         }
 
         expect_integer_class(
-            runmat_runtime::call_builtin("setdiff", &[integer.clone(), double.clone()])
+            &runmat_runtime::call_builtin("setdiff", &[integer.clone(), double.clone()])
                 .expect("integer-left setdiff"),
             class_name,
         );
@@ -1294,7 +1308,7 @@ fn registered_set_functions_apply_double_exception_and_index_classes_for_every_i
                 runmat_runtime::call_builtin_async_with_outputs("ismember", &args, 2),
             )
             .expect("ismember double exception");
-            let Value::OutputList(outputs) = result else {
+            let Value::OutputList(outputs) = result.value() else {
                 panic!("ismember multi-output result")
             };
             assert!(matches!(
@@ -1318,10 +1332,10 @@ fn registered_set_functions_apply_double_exception_and_index_classes_for_every_i
             output_count,
         ))
         .expect("set index outputs");
-        let Value::OutputList(outputs) = result else {
+        let Value::OutputList(outputs) = result.value() else {
             panic!("{builtin} multi-output result")
         };
-        expect_integer_class(outputs[0].clone(), "uint64");
+        expect_integer_class(&outputs[0], "uint64");
         for output in &outputs[1..] {
             expect_double_numeric(output);
         }
@@ -1341,25 +1355,25 @@ fn registered_set_double_exception_keeps_wide_integer_comparison_exact() {
     assert_eq!(member, Value::Bool(false));
 
     expect_integer(
-        runmat_runtime::call_builtin("intersect", &[integer.clone(), double.clone()])
+        &runmat_runtime::call_builtin("intersect", &[integer.clone(), double.clone()])
             .expect("wide intersect"),
-        &[0, 1],
+        &[1, 0],
         IntegerStorage::U64(Vec::new()),
     );
     expect_integer(
-        runmat_runtime::call_builtin("union", &[integer.clone(), double.clone()])
+        &runmat_runtime::call_builtin("union", &[integer.clone(), double.clone()])
             .expect("wide union"),
-        &[2, 1],
+        &[1, 2],
         IntegerStorage::U64(vec![rounded, wide]),
     );
     expect_integer(
-        runmat_runtime::call_builtin("setdiff", &[integer.clone(), double.clone()])
+        &runmat_runtime::call_builtin("setdiff", &[integer.clone(), double.clone()])
             .expect("wide setdiff"),
         &[1, 1],
         IntegerStorage::U64(vec![wide]),
     );
     expect_integer(
-        runmat_runtime::call_builtin("setxor", &[integer, double]).expect("wide setxor"),
+        &runmat_runtime::call_builtin("setxor", &[integer, double]).expect("wide setxor"),
         &[1, 2],
         IntegerStorage::U64(vec![rounded, wide]),
     );
@@ -1367,23 +1381,25 @@ fn registered_set_double_exception_keeps_wide_integer_comparison_exact() {
 
 #[test]
 fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dispatch() {
-    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataOwned,
+        HostNumericTensorOwned,
+    };
 
-    for (offset, integer_type) in [IntegerElementType::I64, IntegerElementType::U64]
-        .into_iter()
-        .enumerate()
-    {
-        let handle = GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 100 - offset as u64,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            integer_type.into(),
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
-        let resident = Value::GpuTensor(handle.clone());
+    for data in [
+        HostNumericDataOwned::I64(vec![i64::MIN, i64::MAX]),
+        HostNumericDataOwned::U64(vec![(1 << 53) + 1, u64::MAX]),
+    ] {
+        let allocation = TestAllocationOwner::new()
+            .allocate_numeric(HostNumericTensorOwned {
+                data,
+                shape: vec![2, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        assert!(runmat_accelerate_api::provider_for_handle(&allocation.handle).is_none());
+        let descriptor = allocation.handle.wire_descriptor();
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let host = integer_tensor(IntegerStorage::I32(vec![1, 2]), vec![2, 1]);
         for builtin in ["ismember", "intersect", "union", "setdiff", "setxor"] {
             for args in [
@@ -1407,5 +1423,10 @@ fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dis
                 );
             }
         }
+        assert_eq!(allocation.handle.wire_descriptor(), descriptor);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(resident);
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

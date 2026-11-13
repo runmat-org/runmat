@@ -6,7 +6,7 @@ use std::convert::TryInto;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_program(source: &str) -> Vec<runmat_value::Value> {
+fn execute_program(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }
@@ -70,6 +70,28 @@ fn for_negative_step_no_iterations_when_increasing() {
 }
 
 #[test]
+fn scalar_for_publishes_only_executed_range_values() {
+    for (source, expected) in [
+        ("i=77; for i=1:3; end", 3.0),
+        ("i=77; for i=1:2.5; end", 2.0),
+        ("i=77; for i=5:-2:0; end", 1.0),
+        ("i=77; for i=1:3; i=100; end", 100.0),
+    ] {
+        let vars = execute_program(source);
+        let actual: f64 = (&vars[0]).try_into().unwrap();
+        assert_eq!(actual, expected, "{source}");
+    }
+    for source in ["i=77; for i=4:2; end", "i=77; for i=1:0:3; end"] {
+        let vars = execute_program(source);
+        let runmat_value::Value::Tensor(index) = &vars[0] else {
+            panic!("empty loop must publish an empty index: {source}");
+        };
+        assert!(index.is_empty(), "{source}");
+        assert_eq!(index.shape(), &[0, 0], "{source}");
+    }
+}
+
+#[test]
 fn stochastic_evolution_loop_emits_instruction() {
     let source = "
     M = 32;
@@ -82,10 +104,102 @@ fn stochastic_evolution_loop_emits_instruction() {
     end
     ";
     let bytecode = compile_source(source).unwrap();
-    assert!(bytecode
+    let (selected_pc, selected) = bytecode
         .instructions
         .iter()
-        .any(|instr| matches!(instr, Instr::StochasticEvolution)));
+        .enumerate()
+        .find(|(_, instr)| matches!(instr, Instr::StochasticEvolution { .. }))
+        .expect("recognized source loop keeps its typed selected site");
+    let Instr::StochasticEvolution {
+        steps,
+        drift,
+        scale,
+        randn_args,
+        fallback_pc,
+        ..
+    } = selected
+    else {
+        unreachable!()
+    };
+    assert!(matches!(
+        steps,
+        runmat_vm::StochasticSourceOperand::Number(8.0)
+    ));
+    assert!(matches!(drift, runmat_vm::StochasticSourceOperand::Slot(_)));
+    assert!(matches!(scale, runmat_vm::StochasticSourceOperand::Slot(_)));
+    assert_eq!(randn_args.len(), 3);
+    assert!(matches!(
+        bytecode.instructions[selected_pc + 1],
+        Instr::Jump(_)
+    ));
+    assert!(*fallback_pc > selected_pc + 1);
+}
+
+#[test]
+fn stochastic_source_recognizes_parameter_and_output_bindings() {
+    let bytecode = compile_source(
+        "[S,Z,t] = evolve(ones(2,1,'single'), single(0.1), single(0.2));
+         function [S,Z,t] = evolve(S, drift, scale)
+             for t = 1:3
+                 Z = randn(2,1,'single');
+                 S = S .* exp(drift + scale .* Z);
+             end
+         end",
+    )
+    .unwrap();
+    let function = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|function| function.display_name == "evolve")
+        .expect("compiled function");
+    assert!(function
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instr::StochasticEvolution { .. })));
+}
+
+#[test]
+fn stochastic_evolution_keeps_original_for_when_body_has_other_effects() {
+    for body in [
+        "Z = randn(M, 1, 'single'); S = S .* exp(drift + scale .* Z); q = q + 1;",
+        "Z = randn(M, 1, 'single'); scale = scale + 1; S = S .* exp(drift + scale .* Z);",
+        "Z = randn(M, 1, 'single'); S = S .* exp(drift + scale .* Z); disp(S);",
+        "Z = randn(M, 1, 'single'); scaled = scale .* Z; argument = drift + scaled; factor = exp(argument); S = S .* factor;",
+    ] {
+        let source = format!(
+            "M = 2; S = ones(M, 1, 'single'); drift = single(0.1); \
+             scale = single(0.2); q = 0; for t = 1:3; {body} end"
+        );
+        let bytecode = compile_source(&source).unwrap();
+        assert!(
+            !bytecode
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instr::StochasticEvolution { .. })),
+            "an extra loop effect must stay on the original For path: {body}"
+        );
+    }
+}
+
+#[test]
+fn stochastic_snapshots_do_not_erase_named_aliases_or_shadowed_callbacks() {
+    for source in [
+        "M=2; S=ones(M,1,'single'); drift=single(0.1); scale=single(0.2); \
+         for t=1:3; Z=randn(M,1,'single'); saved=S; S=S.*exp(drift+scale.*Z); end",
+        "M=2; S=ones(M,1,'single'); drift=single(0.1); scale=single(0.2); \
+         for t=1:3; Z=randn(M,1,'single'); S=S.*exp(drift+scale.*Z); end; \
+         function y=exp(x); y=x; end",
+    ] {
+        let bytecode = compile_source(source).unwrap();
+        assert!(
+            !bytecode
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::StochasticEvolution { .. })),
+            "only compiler-private copies and authenticated builtin calls may be selected: {source}"
+        );
+    }
 }
 
 #[test]

@@ -1,12 +1,12 @@
 use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_execution::Digest;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::{invalidation::DependencySnapshot, tiering::TierAvailability};
 use runmat_native_executor::NativeExecutor;
 
-use super::{EntryCell, EntryKey, PublishedEntry};
+use super::{EntryCell, EntryKey, EntryPublications, NativeCompilationEvidence, PublishedEntry};
 
 /// JIT-owned stable entry publication and retirement registry.
 #[derive(Default)]
@@ -15,6 +15,20 @@ pub struct EntryRegistry {
 }
 
 impl EntryRegistry {
+    /// Inspect only the requested entry without cloning dependency maps or
+    /// scanning unrelated entries. Later resolution authenticates freshness.
+    pub fn publications(&self, key: &EntryKey, profile: Option<Digest>) -> EntryPublications {
+        self.publications_borrowed(&key.0, profile)
+    }
+
+    pub fn publications_borrowed(&self, key: &str, profile: Option<Digest>) -> EntryPublications {
+        self.cells
+            .get(key)
+            .map_or_else(EntryPublications::default, |cell| {
+                cell.publications(profile)
+            })
+    }
+
     pub fn cell(&mut self, key: EntryKey) -> EntryCell {
         self.cells
             .entry(key.clone())
@@ -26,14 +40,36 @@ impl EntryRegistry {
         self.cells.get(key)?.resolve(current)
     }
 
+    /// Borrow the tracker's current generations; do not allocate an unrelated
+    /// all-entry snapshot just to authenticate one immutable publication.
+    pub fn resolve_current(
+        &self,
+        key: &EntryKey,
+        current: &crate::invalidation::DependencyTracker,
+        profile: Option<runmat_execution::Digest>,
+    ) -> Option<PublishedEntry> {
+        self.resolve_current_borrowed(&key.0, current, profile)
+    }
+
+    pub fn resolve_current_borrowed(
+        &self,
+        key: &str,
+        current: &crate::invalidation::DependencyTracker,
+        profile: Option<Digest>,
+    ) -> Option<PublishedEntry> {
+        self.cells.get(key)?.resolve_current(current, profile)
+    }
+
     pub fn publish(
         &mut self,
         key: EntryKey,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
-        self.cell(key).publish(executor, entrypoint, dependencies)
+        self.cell(key)
+            .publish(executor, entrypoint, dependencies, compilation)
     }
 
     pub fn resolve_specialized(
@@ -45,16 +81,26 @@ impl EntryRegistry {
         self.cells.get(key)?.resolve_specialized(profile, current)
     }
 
+    pub fn preparation_quote(
+        &self,
+        key: &EntryKey,
+        profile: Digest,
+        current: &DependencySnapshot,
+    ) -> Option<super::NativePreparationQuote> {
+        self.cells.get(key)?.preparation_quote(profile, current)
+    }
+
     pub fn publish_specialized(
         &mut self,
         key: EntryKey,
         profile: Digest,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
         self.cell(key)
-            .publish_specialized(profile, executor, entrypoint, dependencies)
+            .publish_specialized(profile, executor, entrypoint, dependencies, compilation)
     }
 
     pub fn availability(

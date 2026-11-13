@@ -110,7 +110,7 @@ runmat compile main.m -o main
 
 Compilation uses the same project/package composition, HIR, MIR, static analysis, builtin catalog, and Native IR as normal execution. Functions in the entry file and configured project source roots are compiled with their stable program identities; list stable cross-directory sources under `[sources].roots` so they are available to static composition. A runtime-only `addpath` cannot retroactively add source code to an already linked executable.
 
-The default `--policy=native-specialized` emits target-native code and links the matching RunMat runtime archive embedded in the `runmat` binary. The result does not require a separate RunMat installation or SDK directory at runtime. `--optimization=none|size|speed` controls native object optimization; speed is the default.
+The default `--policy=native-specialized` emits target-native code and links the matching RunMat runtime archive embedded in the `runmat` binary. The result does not require a separate RunMat installation or SDK directory at runtime. `--optimization=none|size|speed` controls native object optimization; speed is the default. Native-specialized composition selects exact reachable builtin bindings with ordinary archive extraction and platform dead stripping when the runtime capability and canonical reachability/catalog closure permit it. Otherwise it retains runtime builtin discovery. `--explain-link` and `--link-plan-json` report the actual choice.
 
 The final host link uses a supported system linker and the native development libraries behind enabled runtime features, such as HDF5. Install those platform dependencies and expose their standard library search paths to the linker; RunMat supplies its own matching execution runtime and does not require a separate RunMat SDK.
 
@@ -123,6 +123,8 @@ Temporary object, archive, and response-file inputs are private and removed afte
 Use `--explain-link` to see the exact program functions, builtins, classes, method boundaries, providers, extensions, and runtime families retained by compilation, together with the direct, finite-dynamic, or unknown reason for each edge. Closed-world explanations also name each retained builtin binding variant and its stable native symbol. Use `--link-plan-json PATH` to write the same deterministic report for CI or tooling. The JSON includes the program, runtime archive, builtin catalog, target, policy, capability, and reachability identities used by that compilation; `--force` is required to replace an existing report.
 
 The compiler validates that the embedded runtime matches the current target, native ABI, schema, RunMat version, runtime identity, and builtin catalog before linking. A source build made with ordinary `cargo build` intentionally lacks that large embedded archive; use the two-phase build helper described in [Build System](/docs/runtime/development/build-system) when developing the standalone workflow.
+
+See [Native Compilation](/docs/runtime/compiler/native-compilation) for entrypoint and source-closure rules, runtime composition policies, link-plan inspection, platform requirements, and failure diagnosis.
 
 ## Check
 
@@ -147,7 +149,85 @@ For `.fea` files, check loads geometry, resolves selectors, validates the study 
 
 FEA JSON mode returns structured validation and plan payloads for CI and tooling.
 
-See the [runmat check reference](/docs/runtime/getting-started/check) for worked diagnostics, project source examples, and guidance on using checks in automation.
+### Project sources
+
+If `main.m` calls `toolbox/helper.m`, add the helper directory to the check:
+
+```bash
+runmat check --path toolbox main.m
+```
+
+A helper beside `main.m` is discoverable without `--path`. For a project-wide
+setting, configure source roots in `runmat.toml`:
+
+```toml
+[package]
+name = "check-example"
+
+[sources]
+roots = ["toolbox"]
+```
+
+Then use `runmat check main.m`. The CLI checks that entrypoint and its statically
+reached source closure; it does not recursively check independent scripts.
+Cross-file diagnostics retain each source's location. Verbose and JSON output
+identify partial analysis of unknown inputs, recursion or conditional calls.
+
+The check does not execute `addpath`. A call whose resolution depends on a runtime
+path change reports `RM-RES0002`; configure a source root or use `--path` to make
+the helper available during analysis. JSON reports that coverage as
+`runtime_dependent`.
+
+### Reading diagnostics
+
+Diagnostic codes, source locations and help text describe the problem. For
+example, a call to an unavailable `definitely_missing` function reports:
+
+```text
+warning[RM-RES0001]: cannot find function `definitely_missing`
+ --> missing.m:1:9
+```
+
+Check the spelling and put the function beside the script or in a configured
+source root. This warning exits successfully by default; `-D warnings` makes it
+fail the check.
+
+For `A = ones(2, 3); B = ones(4, 2); C = A * B;`, the check reports
+`RM-TYPE-MATMUL`: the inner dimensions 3 and 4 differ. Change the matrix dimensions
+to match the intended calculation. Syntax errors, such as `value = ;`, report
+`RunMat:ParseError` with the source location.
+
+### Exit status and automation
+
+| Result | Exit status |
+| --- | --- |
+| No errors or warnings | `0` |
+| Warnings, without `-D warnings` | `0` |
+| Errors, or warnings with `-D warnings` | `1` |
+
+Treat any nonzero status as failure; argument and startup failures may use other
+nonzero values. To save JSON while preserving the command's status:
+
+```sh
+status=0
+runmat check --json -D warnings analysis.m > check.json || status=$?
+cat check.json
+exit "$status"
+```
+
+Keep stderr separate from the JSON. Analysis failures emit the diagnostic report;
+startup, argument or file-loading failures may occur before a report is available.
+`outcome` is `clean`, `warnings` or `failed`. A `partial` analysis domain describes
+coverage and does not itself fail the check.
+
+Diagnostics retain source IDs, byte offsets and line/column coordinates, including
+related locations in other files. The `sources` array maps IDs to paths without
+embedding file contents. When source text is unavailable, paths and line/column
+coordinates are `null`, while byte offsets and source identity remain available.
+`analysis_incomplete_sources`, `call_context_budget_exhausted` and
+`call_context_precision_withheld` describe composition and call-analysis limits.
+
+For checks through the public SDK, see [JavaScript and browser checks](#javascript-and-browser-checks).
 
 ## Pass Runtime Options
 
@@ -155,7 +235,6 @@ Global options apply to the REPL, local scripts, and most commands.
 
 ```bash
 runmat --no-jit analysis.m
-runmat --jit-opt-level aggressive analysis.m
 runmat --gc-preset low-latency analysis.m
 runmat --plot-headless analysis.m
 ```
@@ -172,9 +251,9 @@ Common options:
 | `--offline` | Resolve packages only from locally available content. |
 | `--locked` | Require an existing, current `runmat.lock`. |
 | `--frozen` | Require the lock and prohibit network access or lock mutation. |
-| `--no-jit` | Use the interpreter only. |
-| `--jit-threshold N` | Set the execution count before JIT tiering. |
-| `--jit-opt-level LEVEL` | Set JIT optimization policy. |
+| `--no-jit` | Disable native JIT compilation. |
+| `--jit-threshold N` | Accepted but does not control native tiering. |
+| `--jit-opt-level LEVEL` | Accepted but does not select native compiler optimization. |
 | `--gc-preset PRESET` | Select a GC tuning preset. |
 | `--gc-young-size MB` | Override young generation size. |
 | `--gc-threads N` | Override GC worker count. |
@@ -185,40 +264,64 @@ Common options:
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
 
+`--jit-threshold N` and `--jit-opt-level LEVEL` are parsed and retained as configuration, but do not select compilation triggers or native compiler optimization. Native tiering tracks function and loop activity, profiles of runtime representations, and compilation budgets. Placement separately chooses among eligible implementations. See [JIT Compilation Pipeline](/docs/runtime/jit/pipeline). Enabling JIT permits native execution but does not force a particular tier or provider route.
+
+JIT and acceleration settings are independent. With `--no-jit`, the VM can still use supported GPU operations and fusion. Set `[runtime.accelerate].enabled = false` when measuring execution without acceleration.
+
 ## Clusters and Remote Jobs
 
-Cluster administration, enrollment, and durable encrypted jobs use the active Server, organization, and project credentials:
+Create a cluster once, join the machines that will execute work, then add
+`--cluster` to your usual run command. On your computer, sign in as an
+organization administrator and create the cluster:
 
 ```bash
-runmat cluster list
-runmat cluster create --name workstation-pool --queue default
-runmat cluster enroll CLUSTER_ID --ttl-seconds 900
-runmat cluster nodes CLUSTER_ID
-runmat cluster node-state CLUSTER_ID NODE_ID draining
+runmat login
+runmat cluster create --name engineering
+```
 
-runmat job submit analysis.m --cluster CLUSTER_ID --trust-identity SHA256_FINGERPRINT --detach
-runmat job list
+On the machine joining the cluster, sign in with an authorized account or supply
+its API key through `RUNMAT_API_KEY`, then join by name:
+
+```bash
+runmat login
+runmat cluster join engineering
+```
+
+Leave that terminal running to accept work. Back on your computer, confirm the
+node is active, select a Server project if needed, and run your script from its
+local project directory:
+
+```bash
+runmat cluster nodes engineering
+runmat project select PROJECT_ID
+runmat analysis.m --cluster engineering
+```
+
+RunMat trusts the authenticated Server to identify the execution machine,
+verifies its signed run/allocation evidence, and encrypts the workload automatically.
+`runmat run analysis.m` uses the same path. Omit `--cluster` to run locally.
+
+The command waits for completion. Add `--detach` to return after submission:
+
+```bash
+runmat analysis.m --cluster engineering --detach
 runmat job show RUN_ID
 runmat job attach RUN_ID
 runmat job cancel RUN_ID
-
-runmat job recovery keygen --output runmat-recovery.json
-runmat job recovery configure --org ORG_ID --key runmat-recovery.json
-runmat job recovery recover RUN_ID --project PROJECT_ID --key runmat-recovery.json
 ```
 
-Every cluster command and every durable job observation/mutation supports `--json`. JSON mode emits one complete stable API object or page and never includes ANSI escapes; human list mode remains stable tab-separated output. Enrollment output contains a single-use secret, so avoid shell history and logs and prefer JSON-to-secret-store automation when scripting it.
+Join authorizes machine registration with your signed-in account or API key.
+Cluster commands use names. `--org` is optional with a selected or single authorized
+organization; interactive commands ask when the choice is ambiguous.
 
-The node agent can run in the foreground for diagnosis or install its native systemd, launchd, or Windows service. Generate a dry-run plan before changing a host:
+For background services, automation/JSON output, organization selection,
+cluster-name rules, dependency locking, draining and organization recovery, see
+[Remote Execution](/docs/runtime/execution/remote). These are separate from the
+normal create → join → run flow.
 
-```bash
-runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
-sudo runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
-```
-
-Service installation persists only non-secret configuration. Enrollment credentials remain in the private state directory, service removal preserves that identity for safe reinstall, and retiring a host requires revoking the node before deleting its state. See `runmat cluster join --help` for platform paths and the foreground enrollment flow.
-
-Organization recovery is optional. The CLI generates and retains the private key locally, sends only its validated public recipient to the Server policy API, and decrypts authorized terminal results or diagnostics on the custodian machine. Once configured, every new submission must carry an envelope for the exact active fingerprint. Keep rotated private keys for the full artifact-retention period. See [Remote Execution](/docs/runtime/execution/remote) for customer-node, hosted-node, browser, draining, and recovery workflows.
+For independent endpoint verification, supply `--trust-identity FINGERPRINT` or
+set `RUNMAT_TRUST_IDENTITY`. Explicit pins remain strict. See the guide's
+[encryption and trust details](/docs/runtime/execution/remote#encryption-and-independent-identity-verification).
 
 ## Packages
 
@@ -247,14 +350,18 @@ runmat test
 runmat test tests/solver --name convergence --tag fast
 runmat test --jobs 4 --isolation process --report junit
 runmat test --coverage --coverage-format lcov
-runmat test --cluster CLUSTER_ID --project PROJECT_ID --trust-identity SHA256_FINGERPRINT --max-workers 8
+runmat test --cluster engineering --max-workers 8
 ```
 
 Runtime and test dependency groups are resolved together before discovery. The default native isolation is a fresh killable process; `session` and `none` are explicit weaker modes. Reports, captured output, diagnostics, artifacts, retries, cancellation, and coverage are projections of one deterministic event/result stream. Human, JSON, JUnit, and TAP reports are supported, as are JSON, LCOV, Cobertura, and HTML coverage reports. Exact options and defaults are available from `runmat test --help`.
 
-The same portable discovery, plan, coordinator, result, and coverage authorities back `runtests`, browser Web Worker execution, and Desktop. Browser hosts use fresh dedicated Web Workers as their strongest available isolation and preserve selected source and fixture bytes in an immutable worker-local filesystem snapshot.
+`--report-dir` places requested reports directly in that directory (for example, `test-results.json`, `test-results.xml`, and `coverage.lcov`). A later run may replace only the same requested report filenames; other files are left alone. Run-scoped artifact copies remain in hashed subdirectories for manifest identity and safe per-run cleanup.
 
-Remote tests use the same coordinator through the general execution scheduler and encrypted execution control/data plane. `--cluster` overrides `[test.cluster].profile`, `--queue` overrides `[test.cluster].queue`, and `--max-workers` caps concurrent remote fixture groups. A pinned `--trust-identity` is required before protected plan, source, result, event, artifact, or coverage content is encrypted to the admitted endpoint. The Server sees only the coarse execution metadata needed for admission, leases, routing, retention, and billing; it cannot decrypt test content or detailed results.
+The same portable discovery, plan, coordinator, result, and coverage authorities back `runtests`, browser Web Worker execution, and Desktop. Test snapshots retain the project's `[runtime.language].compat` policy through discovery and execution, including isolated workers. CLI test workers inherit the resolved JIT, acceleration and foreign-runtime settings. Browser hosts use fresh dedicated Web Workers as their strongest available isolation and preserve selected source and fixture bytes in an immutable worker-local filesystem snapshot.
+
+Process workers receive platform startup variables and any parent variables explicitly selected with `--allow-env NAME` or `[test].environment-allowlist`. Set `[runtime.foreign.python].executable` to pin interpreter selection; use `--allow-env PATH` when tests intentionally need the parent's command lookup path.
+
+Remote tests use the same coordinator through the general execution scheduler and encrypted execution control/data plane. `--cluster` overrides `[test.cluster].profile`, `--queue` overrides `[test.cluster].queue`, and `--max-workers` caps concurrent remote fixture groups. Endpoint identity comes from authenticated Server admission; optional `--trust-identity` or `RUNMAT_TRUST_IDENTITY` adds independent pinning. Workload content is encrypted after the signed evidence is verified. The Server receives the coarse metadata needed to coordinate execution, not the plaintext test content or detailed results.
 
 Remote jobs carry an exact compiled program artifact and frozen package identities inside the encrypted execution bundle, without source bytes or a project handoff. Drivers and workers validate the artifact, target, package graph, and source revision identities and execute it without reconstructing a source tree. Remote tests retain the separate source-project closure they need for fixtures, dynamic test discovery, and source-aware reporting; workers validate and materialize those verified logical objects into a private read-only source root. Package resolution and private-package decryption happen only on the submitting client in both cases, so remote workers need no Git, Server-project, registry, or package-decryption credentials and cannot silently select a different dependency.
 
@@ -328,6 +435,7 @@ runmat accel-info
 | Command | Use |
 | --- | --- |
 | `info` | Print version, runtime configuration, environment, and GC status. |
+| `info --json` | Emit versioned JSON describing the runtime features compiled into this executable. |
 | `version --detailed` | Print build details useful for support and bug reports. |
 | `gc stats` | Print current GC counters. |
 | `gc minor`, `gc major` | Force a minor or major collection. |
@@ -456,3 +564,55 @@ runmat project fs --help
 ```
 
 Use command help as the source of truth for exact flags in the installed version.
+
+## JavaScript and browser checks
+
+After installing the host filesystem through `initRunMat`, the public SDK's
+`checkSource` calls the same Rust project frontend as the CLI. No JavaScript
+parser or shadow checker runs, and checking does not execute user code.
+
+```typescript
+import { checkSource } from "runmat";
+
+const script = await checkSource({ target: { kind: "script", path: "/project/src/main.m" } });
+const fn = await checkSource({
+  target: { kind: "function", path: "/project/src/helper.m", function: "helper" },
+});
+const project = await checkSource({ target: { kind: "project", path: "/project/runmat.toml" } });
+const diagnostics = project.documents.flatMap(document => document.diagnostics);
+```
+
+Script/function checks compose the statically reached source closure. A project
+check additionally checks **every indexed root-package `.m` source**, including
+unreached scripts/functions. Each document has its own source table; never join
+source IDs from different document reports. Shared dependency diagnostics can
+occur in more than one root report. The compiler's completeness/resolution fields
+remain visible; a clean report does not prove runtime-dependent calls safe.
+
+`userSettingsJson` supplies the optional host-owned user layer; project settings,
+including language compatibility, come from the selected project's actual
+manifest. `policy: "clusterWorker"` excludes the user layer. `searchPaths` uses
+the original captured filesystem CWD, as the CLI does. Function selection uses
+the actual primary HIR module's top-level function identities, not a filename,
+public-callability catalog or name-only match in a companion source. A private
+function file or `server.m` declaring `main` can be checked directly. Parse and
+lowering errors remain their original diagnostics when no HIR is available.
+
+Optional `inputManifest` uses the existing immutable versioned filesystem
+contract. Include the manifest, primary source and any reached sources; missing
+versions reject rather than reading live replacements. Otherwise the check uses
+the current host filesystem captured at request admission. It retains that
+authority across asynchronous reads using a filesystem-owned thread/poll-local
+read scope, without mutating the process provider. Selected runtime filesystem
+authority takes precedence; a different selected owner is refused, never masked.
+Infrastructure/configuration/selection failures reject the
+Promise; compiler findings remain structured diagnostics in the returned report.
+
+Diagnostics retain CLI `code`, `severity`, `category`, `primary`, `secondary`,
+notes/help/suggestions, plus typed producer `stage` and `location`/`related`
+aliases. Stages come from compiler operations, never diagnostic message/category
+strings. Locations preserve UTF-8 byte `start`/`end` and one-based
+Unicode-scalar line/column coordinates. They are **not** zero-based LSP UTF-16
+positions. A span with an unknown explicit source ID stays unlocated rather
+than borrowing another document's coordinates. Older WASM without `checkSource`
+rejects explicitly and requires matching rebuilt browser assets.

@@ -1,8 +1,12 @@
 use crate::array::{should_expand_nd_display, write_nd_pages};
 use crate::*;
-use runmat_thread_local::runmat_thread_local;
-use std::cell::RefCell;
 use std::fmt;
+
+mod context;
+pub use context::{
+    get_display_format, select_display_format_owner, select_optional_display_format_owner,
+    set_display_format, DisplayFormatOwner, DisplayFormatSelectionGuard,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum FormatMode {
@@ -25,19 +29,7 @@ pub enum FormatMode {
     Hex,
 }
 
-runmat_thread_local! {
-    static DISPLAY_FORMAT: RefCell<FormatMode> = const { RefCell::new(FormatMode::Short) };
-}
-
-pub fn set_display_format(mode: FormatMode) {
-    DISPLAY_FORMAT.with(|c| *c.borrow_mut() = mode);
-}
-
-pub fn get_display_format() -> FormatMode {
-    DISPLAY_FORMAT.with(|c| *c.borrow())
-}
-
-/// Format a number using the current thread-local display format.
+/// Format a number using the selected session owner, or the bare-value fallback.
 pub fn format_number(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
@@ -241,7 +233,8 @@ impl fmt::Display for Value {
             }
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
             Value::LogicalArray(la) => write!(f, "{la}"),
-            Value::String(s) => write!(f, "'{s}'"),
+            Value::String(StringElement::Text(text)) => write!(f, "'{text}'"),
+            Value::String(StringElement::Missing) => write!(f, "<missing>"),
             Value::StringArray(sa) => write!(f, "{sa}"),
             Value::CharArray(ca) => write!(f, "{ca}"),
             Value::Tensor(m) => write!(f, "{m}"),
@@ -254,9 +247,13 @@ impl fmt::Display for Value {
             Value::GpuTensor(h) => write!(
                 f,
                 "GpuTensor(shape={:?}, device={}, buffer={})",
-                h.shape, h.device_id, h.buffer_id
+                h.shape(),
+                h.device_id(),
+                h.buffer_id()
             ),
-            Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
+            Value::Object(obj) => {
+                write!(f, "{}(props={})", obj.class_name(), obj.properties().len())
+            }
             Value::ObjectArray(array) => write!(f, "{array}"),
             Value::HandleObject(h) => {
                 write!(
@@ -289,6 +286,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::StructArray(array) => array.fmt(f),
             Value::OutputList(values) => {
                 write!(f, "[")?;
                 for (i, value) in values.iter().enumerate() {
@@ -304,7 +302,8 @@ impl fmt::Display for Value {
             | Value::MethodFunctionHandle(name) => {
                 write!(f, "@{name}")
             }
-            Value::BoundFunctionHandle { name, .. } => write!(f, "@{name}"),
+            Value::BoundFunctionHandle(handle) => write!(f, "@{}", handle.name),
+            Value::ScopedFunctionHandle(_) => write!(f, "@<invocation-scoped callable>"),
             Value::Closure(c) => write!(
                 f,
                 "<closure {} captures={}>",
@@ -321,6 +320,8 @@ impl fmt::Display for Value {
             Value::Task(handle) => write!(f, "<task {}>", handle.id),
             Value::Pool(handle) => write!(f, "<pool {}>", handle.id),
             Value::Job(handle) => write!(f, "<job {}>", handle.id),
+            Value::Distributed(handle) => write!(f, "<distributed {}>", handle.id),
+            Value::Composite(handle) => write!(f, "<composite {}>", handle.id),
             Value::Foreign(reference) => write!(
                 f,
                 "<foreign {}:{}@{}>",
@@ -332,7 +333,7 @@ impl fmt::Display for Value {
 
 impl fmt::Display for ComplexTensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.shape.len() {
+        match self.shape().len() {
             0 | 1 => {
                 write!(f, "[")?;
                 for i in 0..self.len() {
@@ -345,8 +346,8 @@ impl fmt::Display for ComplexTensor {
                 write!(f, "]")
             }
             2 => {
-                let rows = self.rows;
-                let cols = self.cols;
+                let rows = self.rows();
+                let cols = self.cols();
                 write!(f, "[")?;
                 for r in 0..rows {
                     for c in 0..cols {
@@ -363,12 +364,12 @@ impl fmt::Display for ComplexTensor {
                 write!(f, "]")
             }
             _ => {
-                if should_expand_nd_display(&self.shape) {
-                    write_nd_pages(f, &self.shape, |f, idx| {
+                if should_expand_nd_display(self.shape()) {
+                    write_nd_pages(f, self.shape(), |f, idx| {
                         write!(f, "{}", self.format_element(idx))
                     })
                 } else {
-                    write!(f, "ComplexTensor(shape={:?})", self.shape)
+                    write!(f, "ComplexTensor(shape={:?})", self.shape())
                 }
             }
         }

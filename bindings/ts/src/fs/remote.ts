@@ -1,4 +1,9 @@
+import { encodeWorkspace, decodeWorkspace, readWorkspaceResponse } from "./workspace-codec.js";
+import { workspaceSnapshotSchema, workspacePublicationOutcomeSchema } from "./workspace-contracts.js";
+import { captureBrowserPublication } from "./browser-workspace.js";
 import { normalizePath } from "./path.js";
+import { z } from "zod";
+import { readImmutableFilesystemResponse } from "./immutable-input.js";
 import type {
   RunMatFilesystemProvider,
   RunMatFilesystemDirEntry,
@@ -45,12 +50,28 @@ export function createRemoteFsProvider(options: RemoteProviderOptions): RunMatFi
   const client = new RemoteHttpClient(options.baseUrl, timeout, options.authToken, options.headers);
 
   return {
+    async captureWorkspace(request) {
+      return workspaceSnapshotSchema.parse(await client.workspace("capture", request));
+    },
+    async lookupWorkspacePublication(request) {
+      return workspacePublicationOutcomeSchema.nullable().parse(await client.workspace("lookup", captureBrowserPublication(request)));
+    },
+    async publishWorkspace(request) {
+      return workspacePublicationOutcomeSchema.parse(await client.workspace("publish", captureBrowserPublication(request)));
+    },
     async readFile(path) {
       const normalized = normalizePath(path);
       if (normalized === "/") {
         throw new Error("remote fs: cannot read '/'");
       }
       return client.readFileAll(normalized);
+    },
+
+    async readVersion(path, versionId, size, snapshotId) {
+      if (!versionId || !Number.isSafeInteger(size) || size < 0) {
+        throw new Error("Invalid immutable filesystem input");
+      }
+      return client.readVersion(normalizePath(path), versionId, size, snapshotId);
     },
 
     async readMany(paths) {
@@ -157,6 +178,11 @@ class RemoteHttpClient {
     private readonly extraHeaders: Record<string, string> = {}
   ) {}
 
+  async workspace(operation: "capture" | "lookup" | "publish", request: unknown): Promise<unknown> {
+    const response = await this.send("POST", `/collaboration/workspace/${operation}`, {}, encodeWorkspace(request), "application/cbor");
+    return decodeWorkspace(await readWorkspaceResponse(response));
+  }
+
   async fetchMetadata(path: string): Promise<RunMatFilesystemMetadata> {
     const payload = await this.getJson<MetadataPayload>("/fs/metadata", { path });
     const modifiedAt = payload.modifiedAt ? Date.parse(payload.modifiedAt) : undefined;
@@ -197,6 +223,17 @@ class RemoteHttpClient {
       return this.downloadFile(payload.downloadUrl);
     }
     return toUint8Array(await response.arrayBuffer());
+  }
+
+  async readVersion(path: string, versionId: string, size: number, snapshotId: string): Promise<Uint8Array> {
+    const response = await this.send("GET", "/fs/read", {
+      path, versionId, snapshotId, offset: "0", length: String(size),
+    });
+    const binary = response.headers.get("content-type")?.split(";", 1)[0]?.trim() === "application/json"
+      ? await this.send("GET", z.object({ downloadUrl: z.string().url() }).parse(await response.json()).downloadUrl,
+          {}, undefined, undefined, {}, false, false)
+      : response;
+    return readImmutableFilesystemResponse(binary, size);
   }
 
   async writeChunk(
@@ -301,9 +338,7 @@ class RemoteHttpClient {
       } catch {
         // ignore body parse issues and keep status text
       }
-      throw new Error(
-        `remote fs request failed (${response.status}): ${detail}`
-      );
+      throw new RemoteFilesystemHttpError(response.status, detail);
     }
     return response;
   }
@@ -356,9 +391,15 @@ function toRequestBody(
 }
 
 function isNotFoundReadError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return message.includes("(404)") || message.toLowerCase().includes("not found");
+  return error instanceof RemoteFilesystemHttpError && error.status === 404;
 }
+
+class RemoteFilesystemHttpError extends Error {
+  constructor(readonly status: number, detail: string) {
+    super(`remote fs request failed (${status}): ${detail}`);
+  }
+}
+
 
 function cloneViewToArrayBuffer(data: Uint8Array | ArrayBufferView): ArrayBuffer {
   const view = data instanceof Uint8Array

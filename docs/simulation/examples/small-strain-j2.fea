@@ -1,0 +1,35 @@
+// Engineering physics belongs in the importing study.
+
+geometry part {
+ file = "./geometry/box.brep"; units = m
+ region bulk : solid { select id "persistent-entity:sha256:eb1929ea502ba35824eceb7a1aa23719ab7fa023c89662b8de06cc458560a3f0"; expect exactly_one }
+ region left : face { select id "persistent-entity:sha256:8af3f3e08304762c1332b213d0ecd818feb256a2d233fd3e99e8978e41ae7a23"; expect exactly_one }
+ region right : face { select id "persistent-entity:sha256:db5e0a2817b1cfb20a910953eda8e66c0ed46aa95c61e200de19fec0ab781129"; expect exactly_one }
+ region bottom_y : face { select id "persistent-entity:sha256:ae08f150d6636feb8607ede706d4202f4481fb1d7b9399842aae13d235837e33"; expect exactly_one }
+ region bottom_z : face { select id "persistent-entity:sha256:1f2056eadc83682feeabae84eae920614441a06141b296350bb4d4548218a75e"; expect exactly_one }
+}
+mesh volume on geometry.part {
+ tetrahedra { order = linear; target_size = 1.5 m; maximum_deviation = 0.02 m }
+}
+material solid {
+ mass_density = 1 kg/m^3
+ elastic { youngs_modulus = 1000 Pa; poisson_ratio = 0.25 }
+ plastic { law = "j2_isotropic_linear_hardening"; yield_stress = 5 Pa; isotropic_hardening_modulus = 30 Pa }
+}
+model pull {
+ assign material.solid to geometry.part.region.bulk
+ constraint x { structural.prescribed { target = geometry.part.region.left; frame = global; ux = 0 m } }
+ constraint y { structural.prescribed { target = geometry.part.region.bottom_y; frame = global; uy = 0 m } }
+ constraint z { structural.prescribed { target = geometry.part.region.bottom_z; frame = global; uz = 0 m } }
+ load end { traction on geometry.part.region.right = [5.6, 0, 0] Pa }
+ load_case pull { include load.end }
+}
+study plastic {
+ geometry = geometry.part; mesh = mesh.volume; model = model.pull
+ analysis solve {
+  structural nonlinear { start_load_factor = 0; end_load_factor = 1 }
+  accuracy { algebraic_relative_tolerance = 1e-8 }
+ }
+ output displacement = analysis.solve.field.node.displacement
+ output stress = analysis.solve.field.element.stress
+}

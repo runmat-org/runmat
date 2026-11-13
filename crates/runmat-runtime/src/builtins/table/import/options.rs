@@ -3,6 +3,9 @@ use crate::builtins::common::tensor;
 use runmat_value::NumericScalar;
 #[derive(Clone)]
 pub(in crate::builtins::table) struct ReadTableOptions {
+    pub(super) variable_options:
+        Vec<crate::builtins::io::tabular::import_options::VariableImportOptions>,
+    pub(super) variable_source_origin: Option<usize>,
     pub(super) file_type: ImportFileType,
     pub(super) delimiter: Option<Delimiter>,
     pub(super) read_variable_names: Option<bool>,
@@ -25,6 +28,8 @@ pub(in crate::builtins::table) struct ReadTableOptions {
 impl Default for ReadTableOptions {
     fn default() -> Self {
         Self {
+            variable_options: Vec::new(),
+            variable_source_origin: None,
             file_type: ImportFileType::Auto,
             delimiter: None,
             read_variable_names: None,
@@ -47,22 +52,111 @@ impl Default for ReadTableOptions {
 }
 
 impl ReadTableOptions {
-    pub(in crate::builtins::table) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(in crate::builtins::table) fn projected_for_rows(
+        &self,
+        source_rows_column_count: usize,
+    ) -> BuiltinResult<Self> {
+        if self.variable_options.is_empty() || self.range.is_none() {
+            return Ok(self.clone());
+        }
+        use crate::builtins::io::tabular::import_options::ImportColumnProjection;
+        let selected_source_start = self.range.map_or(0, |range| range.start_col);
+        let variable_count =
+            source_rows_column_count.saturating_sub(usize::from(self.read_row_names));
+        // Options without a recorded source origin can describe the selected
+        // range itself (for example one named variable with DataRange C2:C3).
+        // An explicit origin, including column zero, always remains the
+        // authority for indexing source-file metadata.
+        let selected_metadata_width = (!self.read_row_names
+            && self.num_variables == Some(variable_count)
+            && self
+                .variable_names
+                .as_ref()
+                .is_none_or(|names| names.len() == variable_count)
+            && self
+                .variable_types
+                .as_ref()
+                .is_none_or(|types| types.len() == variable_count))
+        .then_some(variable_count);
+        let projection =
+            ImportColumnProjection::new(self.variable_source_origin, selected_source_start)
+                .with_selected_width(self.variable_options.len(), selected_metadata_width);
+        let mut output = self.clone();
+        output.variable_options = Vec::with_capacity(variable_count);
+        let mut names = self
+            .variable_names
+            .as_ref()
+            .map(|_| Vec::with_capacity(variable_count));
+        let mut types = self
+            .variable_types
+            .as_ref()
+            .map(|_| Vec::with_capacity(variable_count));
+        for output_col in 0..variable_count {
+            let index = projection
+                .metadata_index_for_output(output_col)
+                .ok_or_else(|| {
+                    invalid_argument("readtable: selected Range has no matching variable metadata")
+                })?;
+            let variable = self.variable_options.get(index).ok_or_else(|| {
+                invalid_argument("readtable: selected Range exceeds variable metadata")
+            })?;
+            output.variable_options.push(variable.clone());
+            if let (Some(source), Some(projected)) = (&self.variable_names, &mut names) {
+                projected.push(source.get(index).cloned().ok_or_else(|| {
+                    invalid_argument("readtable: selected Range exceeds VariableNames")
+                })?);
+            }
+            if let (Some(source), Some(projected)) = (&self.variable_types, &mut types) {
+                projected.push(*source.get(index).ok_or_else(|| {
+                    invalid_argument("readtable: selected Range exceeds VariableTypes")
+                })?);
+            }
+        }
+        output.variable_names = names;
+        output.variable_types = types;
+        output.num_variables = Some(variable_count);
+        output.variable_source_origin = Some(0);
+        output.range = None;
+        Ok(output)
+    }
+
+    pub(in crate::builtins::table) fn detected_variable_source_origin(&self) -> usize {
+        self.range.map_or(0, |range| range.start_col)
+    }
+
+    pub(in crate::builtins::table) fn has_variable_value_controls(&self) -> bool {
+        self.variable_options
+            .iter()
+            .any(|variable| variable.has_value_controls())
+    }
+
+    pub(in crate::builtins::table) fn parse(
+        runtime: Option<&crate::context::RuntimeContext>,
+        args: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         let mut options = Self::default();
         let mut idx = 0usize;
-        if let Some(Value::Struct(st)) = args.first() {
-            for (name, value) in &st.fields {
-                // Import-options objects use zero to mean that the variable count
-                // should be inferred. A direct readtable name-value argument still
-                // requires a positive count.
-                if name.eq_ignore_ascii_case("NumVariables")
-                    && matches!(value, Value::Num(value) if *value == 0.0)
-                {
-                    continue;
+        if let Some(source) = args.first() {
+            if let Some(import) =
+                crate::builtins::io::tabular::import_options::ImportOptions::decode(
+                    runtime, source,
+                )?
+            {
+                options.variable_options = import.variables().to_vec();
+                options.variable_source_origin = import.source_origin();
+                for (name, value) in &import.base().fields {
+                    // Import-options objects use zero to mean that the variable count
+                    // should be inferred. A direct readtable name-value argument still
+                    // requires a positive count.
+                    if name.eq_ignore_ascii_case("NumVariables")
+                        && matches!(value, Value::Num(value) if *value == 0.0)
+                    {
+                        continue;
+                    }
+                    options.apply(name, value)?;
                 }
-                options.apply(name, value)?;
+                idx = 1;
             }
-            idx = 1;
         }
         while idx < args.len() {
             if idx + 1 >= args.len() {
@@ -73,6 +167,65 @@ impl ReadTableOptions {
             let name = scalar_text(&args[idx], "readtable option")?;
             options.apply(&name, &args[idx + 1])?;
             idx += 2;
+        }
+        for (index, variable) in options.variable_options.iter().enumerate() {
+            let actual_type = options
+                .variable_types
+                .as_ref()
+                .and_then(|types| types.get(index))
+                .copied()
+                .unwrap_or(ImportVariableType::Auto);
+            let recorded_type = ImportVariableType::parse(&variable.type_name)?;
+            if actual_type != recorded_type {
+                return Err(invalid_argument(
+                    "readtable: VariableTypes override conflicts with per-variable options",
+                ));
+            }
+            if variable.input_format.is_some() && actual_type != ImportVariableType::Datetime {
+                return Err(invalid_argument(
+                    "readtable: InputFormat requires a datetime variable",
+                ));
+            }
+            if (variable.decimal_separator.is_some() || variable.thousands_separator.is_some())
+                && !matches!(
+                    actual_type,
+                    ImportVariableType::Auto
+                        | ImportVariableType::Numeric(_)
+                        | ImportVariableType::Integer(_)
+                )
+            {
+                return Err(invalid_argument(
+                    "readtable: numeric separators require a numeric variable",
+                ));
+            }
+            if variable.thousands_separator.flatten()
+                == Some(variable.decimal_separator.unwrap_or('.'))
+            {
+                return Err(invalid_argument(
+                    "readtable: DecimalSeparator and ThousandsSeparator must differ",
+                ));
+            }
+            if let Some(fill) = &variable.fill_value {
+                if !matches!(
+                    fill,
+                    Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_)
+                ) && !matches!(fill, Value::CharArray(chars) if chars.rows == 1)
+                {
+                    return Err(invalid_argument(
+                        "readtable: unsupported per-variable FillValue class",
+                    ));
+                }
+            }
+        }
+        if options.read_row_names
+            && options
+                .variable_options
+                .iter()
+                .any(|variable| variable.has_value_controls())
+        {
+            return Err(invalid_argument(
+                "readtable: per-variable controls with ReadRowNames require a distinct row-name import recipe",
+            ));
         }
         Ok(options)
     }
@@ -167,7 +320,7 @@ impl ReadTableOptions {
 }
 
 pub(in crate::builtins::table) fn spreadsheet_import_options(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if !args.len().is_multiple_of(2) {
         return Err(invalid_argument(
@@ -355,10 +508,10 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     let output_num_header_lines = detected_output_header_lines(options, header_rows_consumed);
     let output_range = detected_output_range(options.range, header_rows_consumed);
 
-    let mut out = StructValue::new();
-    out.insert("FileType", Value::String(import_file_type_label(file_type)));
+    let mut out = runmat_value::UnboundedStructValueBuilder::new();
+    out.insert("FileType", Value::string(import_file_type_label(file_type)));
     if let Some(delimiter) = delimiter {
-        out.insert("Delimiter", Value::String(delimiter_label(&delimiter)));
+        out.insert("Delimiter", Value::string(delimiter_label(&delimiter)));
     }
     out.insert("NumHeaderLines", Value::Num(output_num_header_lines as f64));
     out.insert("ReadVariableNames", Value::Bool(false));
@@ -391,15 +544,15 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     );
     out.insert(
         "VariableNamingRule",
-        Value::String(if options.preserve_variable_names {
-            "preserve".to_string()
+        Value::string(if options.preserve_variable_names {
+            "preserve"
         } else {
-            "modify".to_string()
+            "modify"
         }),
     );
     out.insert(
         "EmptyLineRule",
-        Value::String(
+        Value::string(
             match options.empty_line_rule {
                 EmptyLineRule::Skip => "skip",
                 EmptyLineRule::Read => "read",
@@ -409,7 +562,7 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     );
     out.insert(
         "TextType",
-        Value::String(
+        Value::string(
             match options.text_type {
                 TextImportType::String => "string",
                 TextImportType::Char => "char",
@@ -419,7 +572,7 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     );
     out.insert(
         "DatetimeType",
-        Value::String(
+        Value::string(
             match options.datetime_type {
                 DatetimeImportType::Datetime => "datetime",
                 DatetimeImportType::Text => "text",
@@ -428,8 +581,8 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
             .to_string(),
         ),
     );
-    out.insert("Encoding", Value::String(options.encoding.clone()));
-    Ok(Value::Struct(out))
+    out.insert("Encoding", Value::string(options.encoding.clone()));
+    Ok(Value::Struct(out.finish()))
 }
 
 pub(in crate::builtins::table) fn detected_variable_type_labels(
@@ -493,7 +646,7 @@ pub(in crate::builtins::table) fn is_detected_numeric(
     options: &ReadTableOptions,
 ) -> bool {
     match value {
-        ImportCell::Empty | ImportCell::Number(_) => true,
+        ImportCell::Empty | ImportCell::Missing | ImportCell::Number(_) => true,
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             options.is_missing(token) || parse_numeric(token).is_some()
@@ -507,7 +660,7 @@ pub(in crate::builtins::table) fn is_detected_logical(
     options: &ReadTableOptions,
 ) -> bool {
     match value {
-        ImportCell::Empty | ImportCell::Logical(_) => true,
+        ImportCell::Empty | ImportCell::Missing | ImportCell::Logical(_) => true,
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             options.is_missing(token) || parse_logical(token).is_some()
@@ -521,7 +674,7 @@ pub(in crate::builtins::table) fn is_detected_datetime(
     options: &ReadTableOptions,
 ) -> bool {
     match value {
-        ImportCell::Empty | ImportCell::DateTime(_) => true,
+        ImportCell::Empty | ImportCell::Missing | ImportCell::DateTime(_) => true,
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             options.is_missing(token) || parse_iso_datetime_to_datenum(token).is_some()
@@ -595,13 +748,13 @@ pub(in crate::builtins::table) fn delimiter_label(delimiter: &Delimiter) -> Stri
 
 pub(in crate::builtins::table) fn sheet_value(sheet: &SheetSelector) -> Value {
     match sheet {
-        SheetSelector::Name(name) => Value::String(name.clone()),
+        SheetSelector::Name(name) => Value::string(name.clone()),
         SheetSelector::Index(index) => Value::Num((*index + 1) as f64),
     }
 }
 
 pub(in crate::builtins::table) fn range_spec_value(range: RangeSpec) -> BuiltinResult<Value> {
-    Ok(Value::String(range_spec_text(range)))
+    Ok(Value::string(range_spec_text(range)))
 }
 
 pub(in crate::builtins::table) fn range_spec_text(range: RangeSpec) -> String {
@@ -825,8 +978,8 @@ impl SpreadsheetImportOptions {
 
     fn into_struct(mut self) -> BuiltinResult<StructValue> {
         self.ensure_variable_metadata_len();
-        let mut out = StructValue::new();
-        out.insert("FileType", Value::String("spreadsheet".to_string()));
+        let mut out = runmat_value::UnboundedStructValueBuilder::new();
+        out.insert("FileType", Value::string("spreadsheet".to_string()));
         out.insert("NumVariables", Value::Num(self.num_variables as f64));
         if let Some(read_variable_names) = self.read_variable_names {
             out.insert("ReadVariableNames", Value::Bool(read_variable_names));
@@ -855,11 +1008,11 @@ impl SpreadsheetImportOptions {
         out.insert(
             "DataRange",
             self.data_range
-                .unwrap_or_else(|| Value::String(String::new())),
+                .unwrap_or_else(|| Value::string(String::new())),
         );
         out.insert(
             "Sheet",
-            self.sheet.unwrap_or_else(|| Value::String(String::new())),
+            self.sheet.unwrap_or_else(|| Value::string(String::new())),
         );
         out.insert(
             "TreatAsMissing",
@@ -877,16 +1030,16 @@ impl SpreadsheetImportOptions {
         );
         out.insert(
             "VariableNamingRule",
-            Value::String(if self.preserve_variable_names {
+            Value::string(if self.preserve_variable_names {
                 "preserve".to_string()
             } else {
                 "modify".to_string()
             }),
         );
-        out.insert("EmptyLineRule", Value::String(self.empty_line_rule));
-        out.insert("TextType", Value::String(self.text_type));
-        out.insert("DatetimeType", Value::String(self.datetime_type));
-        Ok(out)
+        out.insert("EmptyLineRule", Value::string(self.empty_line_rule));
+        out.insert("TextType", Value::string(self.text_type));
+        out.insert("DatetimeType", Value::string(self.datetime_type));
+        Ok(out.finish())
     }
 }
 
@@ -894,7 +1047,7 @@ impl SpreadsheetImportOptions {
 pub(in crate::builtins::table) enum ImportVariableType {
     Auto,
     Numeric(NumericDType),
-    Integer(crate::builtins::math::elementwise::integer_cast::IntegerTarget),
+    Integer(crate::builtins::common::integer_conversion::IntegerClass),
     Logical,
     Text(TextImportType),
     CellStr,
@@ -910,28 +1063,28 @@ impl ImportVariableType {
             "double" => Ok(Self::Numeric(NumericDType::F64)),
             "single" => Ok(Self::Numeric(NumericDType::F32)),
             "int8" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I8,
+                crate::builtins::common::integer_conversion::IntegerClass::Int8,
             )),
             "int16" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I16,
+                crate::builtins::common::integer_conversion::IntegerClass::Int16,
             )),
             "int32" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I32,
+                crate::builtins::common::integer_conversion::IntegerClass::Int32,
             )),
             "int64" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I64,
+                crate::builtins::common::integer_conversion::IntegerClass::Int64,
             )),
             "uint8" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U8,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt8,
             )),
             "uint16" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U16,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt16,
             )),
             "uint32" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U32,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt32,
             )),
             "uint64" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U64,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt64,
             )),
             "logical" | "bool" | "boolean" => Ok(Self::Logical),
             "string" => Ok(Self::Text(TextImportType::String)),
@@ -1104,12 +1257,25 @@ pub(in crate::builtins::table) struct RangeSpec {
 impl RangeSpec {
     pub(in crate::builtins::table) fn parse(value: &Value) -> BuiltinResult<Self> {
         match value {
-            Value::String(text) => Self::parse_text(text),
+            Value::String(text) => Self::parse_text(
+                text.as_str()
+                    .ok_or_else(|| invalid_argument("readtable: Range must not be missing"))?,
+            ),
             Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data.iter().collect();
+                let text = runmat_value::decode_utf16_code_units(ca.data()).map_err(|error| {
+                    table_error_with_source(
+                        &TABLE_ERROR_INVALID_ARGUMENT,
+                        format!("readtable: Range is not valid UTF-16 text: {error}"),
+                        error,
+                    )
+                })?;
                 Self::parse_text(&text)
             }
-            Value::StringArray(sa) if sa.data.len() == 1 => Self::parse_text(&sa.data[0]),
+            Value::StringArray(sa) if sa.data().len() == 1 => Self::parse_text(
+                sa.data()[0]
+                    .as_str()
+                    .ok_or_else(|| invalid_argument("readtable: Range must not be missing"))?,
+            ),
             Value::Tensor(t) if tensor_len(t) == 2 || tensor_len(t) == 4 => {
                 let len = tensor_len(t);
                 let mut indices = Vec::with_capacity(len);
@@ -1219,7 +1385,7 @@ impl RangeSpec {
                 end_col: None,
             });
         }
-        if values.shape.as_slice() != [1, 2] {
+        if values.shape() != [1, 2] {
             return Err(invalid_argument(
                 "readtable: DataRange supports one 1-by-2 row interval; multiple Nx2 intervals are not yet supported",
             ));
@@ -1323,6 +1489,54 @@ pub(in crate::builtins::table) fn parse_cell_ref(
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn selected_range_metadata_uses_declared_layout_without_losing_bounds() {
+        fn options(names: &[&str], origin: Option<usize>) -> ReadTableOptions {
+            ReadTableOptions {
+                variable_options: names
+                    .iter()
+                    .map(|name| {
+                        crate::builtins::io::tabular::import_options::VariableImportOptions::new(
+                            (*name).to_string(),
+                            "auto".to_string(),
+                        )
+                    })
+                    .collect(),
+                variable_names: Some(names.iter().map(|name| (*name).to_string()).collect()),
+                variable_types: Some(vec![ImportVariableType::Auto; names.len()]),
+                num_variables: Some(names.len()),
+                variable_source_origin: origin,
+                range: Some(RangeSpec::parse(&Value::from("C2:D3")).unwrap()),
+                ..ReadTableOptions::default()
+            }
+        }
+
+        let selected = options(&["B", "C"], None).projected_for_rows(2).unwrap();
+        assert_eq!(
+            selected.variable_names.unwrap(),
+            vec!["B".to_string(), "C".to_string()]
+        );
+
+        let full = options(&["ID", "A", "B", "C"], None)
+            .projected_for_rows(2)
+            .unwrap();
+        assert_eq!(
+            full.variable_names.unwrap(),
+            vec!["B".to_string(), "C".to_string()]
+        );
+
+        let detected = options(&["B", "C"], Some(2)).projected_for_rows(2).unwrap();
+        assert_eq!(
+            detected.variable_names.unwrap(),
+            vec!["B".to_string(), "C".to_string()]
+        );
+        assert!(options(&["B", "C"], Some(0)).projected_for_rows(2).is_err());
+
+        assert!(options(&["ID", "A", "B"], None)
+            .projected_for_rows(2)
+            .is_err());
+    }
 
     fn integer_storages(values: &[u64]) -> Vec<IntegerStorage> {
         vec![

@@ -1,215 +1,19 @@
-//! MATLAB-compatible `underlyingType` and `isUnderlyingType` builtins.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::class::class_name_for_value;
-use crate::builtins::introspection::type_resolvers::{
-    is_underlying_type_type, underlying_type_type,
-};
+//! Runtime bindings for canonical underlying-type metadata queries.
+use crate::builtins::introspection::class_identity::class_identity_for_value;
+#[cfg(test)]
+use crate::builtins::introspection::class_identity::class_name_for_value;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{
-    handle_integer_type, handle_is_logical, handle_precision, handle_storage, GpuTensorStorage,
-    ProviderPrecision,
-};
+use runmat_accelerate_api::{handle_integer_type, handle_is_logical, handle_precision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD,
+    IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID, UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-#[runmat_macros::register_gpu_spec(
-    builtin_path = "crate::builtins::introspection::underlying_type"
-)]
-pub const UNDERLYING_TYPE_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "underlyingType",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Metadata-only query that returns a host string scalar. gpuArray inputs stay resident while RunMat reads logical/precision handle metadata.",
-};
-
-#[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::introspection::underlying_type"
-)]
-pub const UNDERLYING_TYPE_FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "underlyingType",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; the builtin executes on the host and returns a string scalar.",
-};
-
-#[runmat_macros::register_gpu_spec(
-    builtin_path = "crate::builtins::introspection::underlying_type"
-)]
-pub const IS_UNDERLYING_TYPE_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "isUnderlyingType",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Metadata-only predicate that returns a host logical scalar without gathering gpuArray buffers.",
-};
-
-#[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::introspection::underlying_type"
-)]
-pub const IS_UNDERLYING_TYPE_FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "isUnderlyingType",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion planning; the predicate executes on the host from metadata.",
-};
-
-const UNDERLYING_TYPE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "typename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Name of the underlying MATLAB data type.",
-}];
-
-const UNDERLYING_TYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array or object to inspect.",
-}];
-
-const UNDERLYING_TYPE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "typename = underlyingType(X)",
-    inputs: &UNDERLYING_TYPE_INPUTS,
-    outputs: &UNDERLYING_TYPE_OUTPUT,
-}];
-
-const IS_UNDERLYING_TYPE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when X has the requested underlying type.",
-}];
-
-const IS_UNDERLYING_TYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array or object to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "typename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Underlying data type name to test.",
-    },
-];
-
-const IS_UNDERLYING_TYPE_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "tf = isUnderlyingType(X, typename)",
-        inputs: &IS_UNDERLYING_TYPE_INPUTS,
-        outputs: &IS_UNDERLYING_TYPE_OUTPUT,
-    }];
-
-const BUILTIN_IS_UNDERLYING_TYPE: &str = "isUnderlyingType";
-
-const UNDERLYING_TYPE_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-const IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IS_UNDERLYING_TYPE.TYPE_NAME_INVALID",
-    identifier: Some("RunMat:isUnderlyingType:TypeNameInvalid"),
-    when: "Second argument is not a string scalar or row character vector.",
-    message: "isUnderlyingType: TYPENAME must be a string scalar or character vector",
-};
-const IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IS_UNDERLYING_TYPE.PROVIDER_PAYLOAD_MISMATCH",
-    identifier: Some("RunMat:isUnderlyingType:ProviderPayloadMismatch"),
-    when: "A resident input carries contradictory physical class metadata.",
-    message: "isUnderlyingType: resident input has contradictory physical class metadata",
-};
-
-const IS_UNDERLYING_TYPE_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID,
-    IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD,
-];
-
-pub const UNDERLYING_TYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UNDERLYING_TYPE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UNDERLYING_TYPE_ERRORS,
-};
-
-pub const IS_UNDERLYING_TYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IS_UNDERLYING_TYPE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IS_UNDERLYING_TYPE_ERRORS,
-};
-const UNDERLYING_TYPE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "The query reports the exact signedness and width of host or resident integer storage.",
-    }];
-pub const UNDERLYING_TYPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "typename = underlyingType(integer_X)",
-        inputs: &UNDERLYING_TYPE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Returns a host string scalar from coherent dtype metadata without reading or gathering payload values.",
-    }];
-const IS_UNDERLYING_TYPE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "X", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "The predicate inspects the exact signedness and width of host or resident integer storage." }];
-pub const IS_UNDERLYING_TYPE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isUnderlyingType(integer_X, typename)", inputs: &IS_UNDERLYING_TYPE_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Returns a host logical scalar from authoritative dtype metadata without reading or gathering payload values." }];
-
 #[runtime_builtin(
     name = "underlyingType",
-    category = "introspection",
-    summary = "Return the underlying MATLAB data type for a value.",
-    keywords = "underlyingType,type inspection,underlying data type,gpuArray dtype",
-    accel = "metadata",
-    type_resolver(underlying_type_type),
-    descriptor(crate::builtins::introspection::underlying_type::UNDERLYING_TYPE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::introspection::underlying_type::UNDERLYING_TYPE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::underlying_type"
 )]
 fn underlying_type_builtin(value: Value) -> BuiltinResult<String> {
@@ -218,22 +22,13 @@ fn underlying_type_builtin(value: Value) -> BuiltinResult<String> {
 
 #[runtime_builtin(
     name = "isUnderlyingType",
-    category = "introspection",
-    summary = "Test whether a value has a specified underlying MATLAB data type.",
-    keywords = "isUnderlyingType,type checking,underlying data type,gpuArray dtype",
-    accel = "metadata",
-    type_resolver(is_underlying_type_type),
-    descriptor(crate::builtins::introspection::underlying_type::IS_UNDERLYING_TYPE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::introspection::underlying_type::IS_UNDERLYING_TYPE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::underlying_type"
 )]
 fn is_underlying_type_builtin(value: Value, typename: Value) -> BuiltinResult<Value> {
     let requested = parse_type_name(&typename)?;
     Ok(Value::Bool(underlying_type_matches_checked(
-        &value,
-        requested.as_str(),
+        &value, requested,
     )?))
 }
 
@@ -244,103 +39,132 @@ pub(crate) fn underlying_type_for_value(value: &Value) -> String {
 }
 
 fn underlying_type_for_value_checked(value: &Value) -> BuiltinResult<String> {
+    underlying_class_identity_for_value_checked_for(value, UnderlyingQueryOwner::Type)
+        .map(|identity| identity.display_name().to_owned())
+}
+
+#[derive(Clone, Copy)]
+enum UnderlyingQueryOwner {
+    Type,
+    Predicate,
+}
+
+/// Shared typed underlying-class authority. Public text queries format this
+/// result; validators compare admitted identities without reparsing class tables.
+pub(crate) fn underlying_class_identity_for_value_checked(
+    value: &Value,
+) -> BuiltinResult<runmat_types::ClassIdentity> {
+    underlying_class_identity_for_value_checked_for(value, UnderlyingQueryOwner::Predicate)
+}
+
+fn underlying_class_identity_for_value_checked_for(
+    value: &Value,
+    owner: UnderlyingQueryOwner,
+) -> BuiltinResult<runmat_types::ClassIdentity> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.numeric_dtype().class_name().to_string()),
-        Value::SparseTensor(sparse) => Ok(sparse.class_name().to_string()),
-        Value::ComplexTensor(tensor) => Ok(tensor.numeric_dtype().class_name().to_string()),
-        Value::Complex(_, _) | Value::Num(_) => Ok("double".to_string()),
-        Value::Int(iv) => Ok(iv.class_name().to_string()),
-        Value::Bool(_) | Value::LogicalArray(_) => Ok("logical".to_string()),
-        Value::GpuTensor(handle) => gpu_underlying_type(handle),
-        _ => Ok(class_name_for_value(value)),
+        Value::GpuTensor(handle) => gpu_underlying_class_identity(handle, owner),
+        _ => Ok(class_identity_for_value(value)),
     }
 }
 
-fn gpu_underlying_type(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<String> {
-    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| metadata_error("no acceleration provider owns the input handle"))?;
+fn gpu_underlying_class_identity(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    owner: UnderlyingQueryOwner,
+) -> BuiltinResult<runmat_types::ClassIdentity> {
+    runmat_accelerate_api::numeric_readback_for_handle(handle).map_err(|source| {
+        let mut error = metadata_error(owner, "no acceleration provider owns the input handle");
+        error.source = Some(source.into_boxed_dyn_error());
+        error
+    })?;
+    // Preferred execution precision is not the class of an owned allocation.
+    // The owner has already admitted its immutable physical type and view.
+    crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(handle)
+        .map_err(|detail| metadata_error(owner, &detail))?;
     let integer = handle_integer_type(handle);
     let logical = handle_is_logical(handle);
     let precision = handle_precision(handle);
-    let storage = handle_storage(handle);
-    let structurally_valid = if logical {
-        integer.is_none()
-            && precision == Some(owner.precision())
-            && storage == GpuTensorStorage::Real
-    } else if integer.is_some() {
-        precision.is_none() && storage == GpuTensorStorage::Real
-    } else {
-        precision == Some(owner.precision())
-            && matches!(
-                storage,
-                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
-            )
-    };
-    if !structurally_valid
-        || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
-            handle, precision, integer, logical,
-        )
-    {
+    if !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+        handle, precision, integer, logical,
+    ) {
         return Err(metadata_error(
+            owner,
             "resident class metadata contradicts physical storage metadata",
         ));
     }
-    Ok(if logical {
-        "logical"
-    } else if let Some(integer) = integer {
-        match integer {
-            runmat_accelerate_api::IntegerElementType::I8 => "int8",
-            runmat_accelerate_api::IntegerElementType::I16 => "int16",
-            runmat_accelerate_api::IntegerElementType::I32 => "int32",
-            runmat_accelerate_api::IntegerElementType::I64 => "int64",
-            runmat_accelerate_api::IntegerElementType::U8 => "uint8",
-            runmat_accelerate_api::IntegerElementType::U16 => "uint16",
-            runmat_accelerate_api::IntegerElementType::U32 => "uint32",
-            runmat_accelerate_api::IntegerElementType::U64 => "uint64",
-        }
-    } else {
-        match precision.expect("validated floating precision") {
-            ProviderPrecision::F32 => "single",
-            ProviderPrecision::F64 => "double",
-        }
-    }
-    .to_string())
+    crate::builtins::common::gpu_helpers::expected_gpu_class_identity(precision, integer, logical)
+        .ok_or_else(|| metadata_error(owner, "physical numeric class is missing"))
 }
 
-fn metadata_error(detail: &str) -> RuntimeError {
-    build_runtime_error(format!("isUnderlyingType: {detail}"))
-        .with_builtin(BUILTIN_IS_UNDERLYING_TYPE)
+fn metadata_error(owner: UnderlyingQueryOwner, detail: &str) -> RuntimeError {
+    let (builtin, descriptor) = match owner {
+        UnderlyingQueryOwner::Type => ("underlyingType", &UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD),
+        UnderlyingQueryOwner::Predicate => (
+            "isUnderlyingType",
+            &IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD,
+        ),
+    };
+    build_runtime_error(format!("{builtin}: {detail}"))
+        .with_builtin(builtin)
         .with_identifier(
-            IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD
+            descriptor
                 .identifier
-                .expect("isUnderlyingType provider-payload descriptor identifier"),
+                .expect("provider-payload descriptor identifier"),
         )
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
 }
 
+#[cfg(test)]
 pub(crate) fn underlying_type_matches(value: &Value, typename: &str) -> bool {
-    underlying_type_matches_checked(value, typename).unwrap_or(false)
+    underlying_type_matches_checked(
+        value,
+        runmat_types::ClassIdentity::new(typename.trim()).ok(),
+    )
+    .unwrap_or(false)
 }
 
-fn underlying_type_matches_checked(value: &Value, typename: &str) -> BuiltinResult<bool> {
-    let requested = typename.trim();
-    Ok(!requested.is_empty() && underlying_type_for_value_checked(value)? == requested)
+fn underlying_type_matches_checked(
+    value: &Value,
+    requested: Option<runmat_types::ClassIdentity>,
+) -> BuiltinResult<bool> {
+    let Some(requested) = requested else {
+        return Ok(false);
+    };
+    let actual = underlying_class_identity_for_value_checked(value)?;
+    Ok(requested == actual)
 }
 
-fn parse_type_name(value: &Value) -> BuiltinResult<String> {
+fn parse_type_name(value: &Value) -> BuiltinResult<Option<runmat_types::ClassIdentity>> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() => {
-            Ok(sa.data[0].clone())
+        Value::String(runmat_value::StringElement::Text(s)) => {
+            Ok(runmat_types::ClassIdentity::new(s.trim()).ok())
         }
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::StringArray(sa)
+            if sa.rows == 1
+                && sa.cols == 1
+                && !sa.data().is_empty()
+                && !sa.data()[0].is_missing() =>
+        {
+            Ok(runmat_types::ClassIdentity::new(
+                sa.data()[0]
+                    .as_str()
+                    .expect("checked nonmissing string")
+                    .trim(),
+            )
+            .ok())
+        }
+        Value::CharArray(ca) if ca.rows == 1 => {
+            let text = super::text::decode_utf16_with_error(ca.data(), || {
+                is_underlying_type_error(&IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID)
+            })?;
+            Ok(runmat_types::ClassIdentity::new(text.trim()).ok())
+        }
         _ => Err(is_underlying_type_error(&IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID).into()),
     }
 }
 
 fn is_underlying_type_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_IS_UNDERLYING_TYPE);
+    let mut builder = build_runtime_error(error.message).with_builtin("isUnderlyingType");
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -351,11 +175,38 @@ fn is_underlying_type_error(error: &'static BuiltinErrorDescriptor) -> RuntimeEr
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-        LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor,
+        LogicalArray, NumericDType, ObjectInstance, StringArray, Tensor,
     };
+
+    #[test]
+    fn nested_underlying_type_query_uses_string_value_carrier() {
+        let inner =
+            underlying_type_builtin(Value::Int(IntValue::I16(7))).expect("inner underlying type");
+        let value = Value::from(inner);
+        assert!(matches!(value, Value::String(_)));
+        assert_eq!(
+            underlying_type_builtin(value).expect("outer type"),
+            "string"
+        );
+    }
+
+    #[test]
+    fn provider_metadata_errors_keep_the_public_query_owner() {
+        let type_error = metadata_error(UnderlyingQueryOwner::Type, "missing owner");
+        assert_eq!(
+            type_error.identifier(),
+            UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD.identifier
+        );
+        assert!(type_error.message().starts_with("underlyingType:"));
+        let predicate_error = metadata_error(UnderlyingQueryOwner::Predicate, "missing owner");
+        assert_eq!(
+            predicate_error.identifier(),
+            IS_UNDERLYING_TYPE_ERROR_PROVIDER_PAYLOAD.identifier
+        );
+        assert!(predicate_error.message().starts_with("isUnderlyingType:"));
+    }
 
     #[test]
     fn underlying_type_reports_core_host_types() {
@@ -466,11 +317,14 @@ pub(crate) mod tests {
             Value::Cell(CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap());
         assert_eq!(underlying_type_for_value(&cell), "cell");
 
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("x".into(), Value::Num(1.0));
-        assert_eq!(underlying_type_for_value(&Value::Struct(st)), "struct");
+        assert_eq!(
+            underlying_type_for_value(&Value::Struct(st.finish())),
+            "struct"
+        );
 
-        let object = ObjectInstance::new("pkg.Point".into());
+        let object = ObjectInstance::new("pkg.Point");
         assert_eq!(
             underlying_type_for_value(&Value::Object(object)),
             "pkg.Point"
@@ -537,7 +391,8 @@ pub(crate) mod tests {
                 Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::F32).unwrap();
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload");
-            runmat_accelerate_api::set_handle_class_name(&handle, "single");
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
 
             assert_eq!(
                 underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
@@ -548,6 +403,8 @@ pub(crate) mod tests {
                     .expect("predicate"),
                 Value::Bool(true)
             );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -557,18 +414,17 @@ pub(crate) mod tests {
         test_support::with_test_provider(|_| {
             let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
             let tensor = Tensor::new(vec![1.2, -3.7, 123456.0], vec![3, 1]).unwrap();
-            let handle = match crate::dispatcher::call_builtin(
+            let output = crate::dispatcher::call_builtin(
                 "gpuArray",
                 &[Value::Tensor(tensor), Value::from("int32")],
             )
-            .expect("gpuArray int32 native upload")
-            {
-                Value::GpuTensor(handle) => handle,
-                other => panic!("expected gpu tensor, got {other:?}"),
+            .expect("gpuArray int32 native upload");
+            let Value::GpuTensor(handle) = output.value() else {
+                panic!("expected gpu tensor, got {:?}", output.value());
             };
 
             assert_eq!(
-                runmat_accelerate_api::handle_integer_type(&handle),
+                runmat_accelerate_api::handle_integer_type(handle),
                 Some(runmat_accelerate_api::IntegerElementType::I32)
             );
             assert_eq!(
@@ -576,7 +432,7 @@ pub(crate) mod tests {
                 "int32"
             );
             assert_eq!(
-                is_underlying_type_builtin(Value::GpuTensor(handle), Value::from("int32"))
+                is_underlying_type_builtin(Value::GpuTensor(handle.clone()), Value::from("int32"))
                     .expect("predicate"),
                 Value::Bool(true)
             );
@@ -584,35 +440,49 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn underlying_type_rejects_contradictory_resident_integer_class_metadata() {
-        test_support::with_test_provider(|_| {
+    fn underlying_type_uses_owner_storage_after_contradictory_wire_rejection() {
+        test_support::with_test_provider(|provider| {
             let tensor =
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
-            let handle = crate::builtins::common::gpu_helpers::upload_tensor(
-                runmat_accelerate_api::provider().expect("test provider"),
-                &tensor,
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let original = handle.wire_descriptor();
+            let mut contradictory = original.clone();
+            contradictory.physical = runmat_accelerate_api::GpuPhysicalDescriptor::new(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                1,
+                8,
+                8,
             )
             .unwrap();
-            runmat_accelerate_api::set_handle_class_name(&handle, "double");
-            let error = underlying_type_builtin(Value::GpuTensor(handle))
-                .expect_err("contradictory class metadata must reject");
+            provider.reset_telemetry();
             assert_eq!(
-                error.identifier(),
-                Some("RunMat:isUnderlyingType:ProviderPayloadMismatch")
+                provider.acquire_live(&contradictory).unwrap_err(),
+                runmat_accelerate_api::allocation::AllocationAcquisitionError::PhysicalMismatch
             );
+            assert_eq!(handle.wire_descriptor(), original);
+            let lease = handle.allocation_lease().downgrade();
+            assert_eq!(
+                underlying_type_builtin(Value::GpuTensor(handle)).unwrap(),
+                "uint64"
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(lease.acquire().is_none());
         });
     }
 
     #[test]
     fn underlying_type_reports_logical_for_gpu_masks() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[1, 2],
+                })
+                .expect("native logical upload");
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
 
             assert_eq!(
                 underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
@@ -623,6 +493,8 @@ pub(crate) mod tests {
                     .expect("predicate"),
                 Value::Bool(true)
             );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(lease.acquire().is_none());
         });
     }
 }

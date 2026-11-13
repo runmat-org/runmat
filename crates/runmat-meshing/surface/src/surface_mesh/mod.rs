@@ -1,48 +1,66 @@
 mod artifact;
 mod batch;
 mod batch_codec;
+mod codec;
+mod control;
 mod convergence;
+mod copy;
+pub(crate) mod indexed_face;
 mod join;
-mod partition_result;
+pub(crate) mod partition_result;
 mod pass_result;
 mod surface_codec;
 mod types;
 
 pub use artifact::validate_published_exact_surface_mesh;
+pub(crate) use batch::validate_face_partition_descriptor;
 pub use batch::{
     build_exact_face_mesh_batch, face_partition_descriptors, validate_exact_face_mesh_batch,
 };
-pub(crate) use batch::{validate_exact_face_mesh_batch_parts, validate_face_partition_descriptor};
 #[cfg(test)]
 pub(crate) use batch_codec::decode_with_byte_limit;
 pub use batch_codec::{decode_exact_face_mesh_batch, encode_exact_face_mesh_batch};
 pub use convergence::{
-    decide_exact_surface_pass, resolve_exact_surface_pass, ExactSurfaceConvergenceError,
+    decide_exact_surface_pass, decide_exact_surface_pass_owned,
+    decide_exact_surface_pass_owned_admitted, decide_exact_surface_pass_with_cancellation,
+    resolve_exact_surface_pass, AcceptedExactSurfacePass, ExactSurfaceConvergenceError,
     ExactSurfaceConvergenceErrorKind, ExactSurfaceConvergenceOutcome,
+    PreparedExactSurfacePassEncoding,
 };
 pub use join::{join_exact_face_mesh_batches, validate_exact_surface_mesh};
+pub(crate) use partition_result::build_exact_face_partition_result_with_boundary;
 #[cfg(test)]
 pub(crate) use partition_result::decode_exact_face_partition_result_with_byte_limit;
 pub use partition_result::{
     build_exact_face_partition_result, decode_exact_face_partition_result,
-    encode_exact_face_partition_result, validate_exact_face_partition_result,
+    decode_exact_face_partition_result_admitted,
+    decode_exact_face_partition_result_with_cancellation,
+    decode_exact_face_reuse_record_with_cancellation, encode_exact_face_partition_result,
+    encode_exact_face_partition_result_with_cancellation,
+    profile_exact_face_partition_result_encoding, validate_exact_face_partition_result,
+    validate_exact_face_partition_result_with_cancellation,
 };
-pub(crate) use partition_result::{
-    build_exact_face_partition_result_with_boundary,
-    validate_exact_face_partition_result_with_boundary,
+pub use partition_result::{
+    decode_exact_face_partition_records, decode_exact_face_partition_records_admitted,
+    decode_exact_face_partition_records_with_cancellation, encode_exact_face_partition_completion,
+    profile_exact_face_partition_completion, EXACT_FACE_PARTITION_RECORD_SET_SCHEMA_VERSION,
 };
+pub(crate) use partition_result::{encode_accepted_face, profile_accepted_face};
 #[cfg(test)]
 pub(crate) use pass_result::decode_exact_surface_pass_result_with_byte_limit;
 pub use pass_result::{
-    decode_exact_surface_pass_result, encode_decided_exact_surface_pass_result,
-    encode_exact_surface_pass_result, validate_exact_surface_pass_result,
+    decode_exact_surface_pass_result, decode_exact_surface_pass_result_with_cancellation,
+    encode_decided_exact_surface_pass_result,
+    encode_decided_exact_surface_pass_result_with_cancellation, encode_exact_surface_pass_result,
+    validate_exact_surface_pass_result,
 };
 #[cfg(test)]
 pub(crate) use surface_codec::decode_exact_surface_mesh_with_byte_limit;
 pub use surface_codec::{
     decode_exact_surface_mesh, decode_exact_surface_mesh_from_pass,
-    decode_published_exact_surface_mesh, encode_exact_surface_mesh,
-    encode_exact_surface_mesh_from_pass,
+    decode_published_exact_surface_mesh, decode_published_exact_surface_mesh_admitted,
+    decode_published_exact_surface_mesh_with_cancellation, encode_exact_surface_mesh,
+    encode_exact_surface_mesh_from_pass, encode_exact_surface_mesh_from_pass_with_cancellation,
 };
 pub use types::{
     ExactFaceMeshBatch, ExactFacePartitionOutcome, ExactFacePartitionResult,
@@ -52,3 +70,8 @@ pub use types::{
     EXACT_SURFACE_MESH_SCHEMA_VERSION, EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
     MAX_EXACT_FACE_PARTITIONS,
 };
+
+#[cfg(test)]
+pub(crate) use partition_result::encode_unadmitted_for_test;
+
+pub use indexed_face::partition::PartitionEncoding as ExactFacePartitionEncoding;

@@ -32,12 +32,8 @@ export function dirname(path: string): string {
   if (normalized === "/" || normalized === ".") {
     return normalized === "." ? "." : "/";
   }
-  const parts = normalized.split("/");
-  parts.pop();
-  if (parts.length === 0) {
-    return "/";
-  }
-  return "/" + parts.join("/");
+  const separator = normalized.lastIndexOf("/");
+  return separator <= 0 ? "/" : normalized.slice(0, separator);
 }
 
 export function basename(path: string): string {

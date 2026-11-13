@@ -7,20 +7,23 @@ use async_trait::async_trait;
 use runmat_execution::security::{
     EndpointIdentityEvidence, EndpointRecipientKey, ExecutionTrustTier,
 };
-use runmat_execution::{Digest, OutputContract, ProgramRevision};
+use runmat_execution::{
+    Digest, OutputContract, ProgramCallable, ProgramFunctionId, ProgramRevision,
+};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     encode_run_key_envelope, EncryptionPurpose, PortableExecutionEncryption, RunKeyMaterial,
 };
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
-    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
+    ProgramExecutionObjectClosure, ProgramExecutionObjectLocation, ProgramExecutionOutputs,
+    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_transport_native::control::{
-    DriverArtifactDownload, DriverArtifactKind, DriverAuthority, DriverBootstrap,
-    DriverControlPlane, DriverHeartbeat, DriverRunTarget, DriverRunTransition, StoreDriverArtifact,
-    StoredDriverArtifact,
+    CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
+    DriverBootstrap, DriverControlPlane, DriverHeartbeat, DriverRunTarget, DriverRunTransition,
+    StoreDriverArtifact, StoredDriverArtifact,
 };
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 use runmat_execution_transport_native::{TransportError, TransportResult};
@@ -34,12 +37,25 @@ use super::config::RemoteDriverConfig;
 use super::crypto::{ciphertext_digest, open_object, project_revision_identity, seal_object};
 use super::driver::run_remote_driver;
 
+mod mixed_recovery;
+
+use super::test_ids::{test_driver_lease_id, test_org_id, TEST_ORG_ID};
+
 #[derive(Default)]
 struct FakeState {
     downloads: BTreeMap<String, Vec<u8>>,
-    stored: Vec<(String, DriverArtifactKind, Vec<u8>)>,
+    artifact_kinds: BTreeMap<String, String>,
+    stored: Vec<FakeStoredArtifact>,
     transitions: Vec<(DriverRunTarget, Option<String>)>,
+    diagnostics: Vec<(Option<String>, Option<String>)>,
     usage: Vec<u64>,
+    fail_store_at: Option<usize>,
+}
+
+struct FakeStoredArtifact {
+    kind: DriverArtifactKind,
+    ciphertext: Vec<u8>,
+    checkpoint: Option<(u64, CheckpointDisposition)>,
 }
 
 struct FakeControl {
@@ -91,6 +107,32 @@ impl DriverControlPlane for FakeControl {
         Ok(bytes)
     }
 
+    async fn execution_artifact(
+        &self,
+        _authority: &DriverAuthority,
+        artifact_id: &str,
+    ) -> TransportResult<DriverArtifactDownload> {
+        let state = self.state.lock().unwrap();
+        let bytes = state
+            .downloads
+            .get(artifact_id)
+            .ok_or_else(|| TransportError::Unavailable("missing fixture artifact".into()))?;
+        let kind = state
+            .artifact_kinds
+            .get(artifact_id)
+            .ok_or(TransportError::Integrity)?;
+        Ok(DriverArtifactDownload {
+            artifact_id: artifact_id.into(),
+            kind: kind.clone(),
+            ciphertext_digest: ciphertext_digest(bytes),
+            ciphertext_size_bytes: bytes.len() as u64,
+            media_type: "application/vnd.runmat.execution+ciphertext".into(),
+            method: "GET".into(),
+            url: format!("memory://{artifact_id}"),
+            headers: BTreeMap::new(),
+        })
+    }
+
     async fn store_artifact(
         &self,
         _authority: &DriverAuthority,
@@ -100,15 +142,28 @@ impl DriverControlPlane for FakeControl {
             return Err(TransportError::Integrity);
         }
         let mut state = self.state.lock().unwrap();
-        let artifact_id = format!("stored-{}", state.stored.len() + 1);
-        state.stored.push((
-            artifact_id.clone(),
-            artifact.kind,
-            artifact.ciphertext.to_vec(),
-        ));
+        let store_index = state.stored.len() + 1;
+        if state.fail_store_at == Some(store_index) {
+            return Err(TransportError::Unavailable(
+                "injected artifact store failure".into(),
+            ));
+        }
+        let artifact_id = format!("stored-{store_index}");
+        let kind = format!("{:?}", artifact.kind).to_ascii_lowercase();
+        state.stored.push(FakeStoredArtifact {
+            kind: artifact.kind,
+            ciphertext: artifact.ciphertext.to_vec(),
+            checkpoint: artifact.checkpoint,
+        });
+        state
+            .downloads
+            .insert(artifact_id.clone(), artifact.ciphertext.to_vec());
+        state
+            .artifact_kinds
+            .insert(artifact_id.clone(), kind.clone());
         Ok(StoredDriverArtifact {
             artifact_id,
-            kind: format!("{:?}", artifact.kind).to_ascii_lowercase(),
+            kind,
             ciphertext_size_bytes: artifact.ciphertext.len() as u64,
         })
     }
@@ -118,9 +173,11 @@ impl DriverControlPlane for FakeControl {
         _authority: &DriverAuthority,
         transition: DriverRunTransition,
     ) -> TransportResult<()> {
-        self.state
-            .lock()
-            .unwrap()
+        let mut state = self.state.lock().unwrap();
+        state
+            .diagnostics
+            .push((transition.reason_code, transition.diagnostic_artifact_id));
+        state
             .transitions
             .push((transition.target, transition.result_artifact_id));
         Ok(())
@@ -130,38 +187,444 @@ impl DriverControlPlane for FakeControl {
 #[tokio::test]
 async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
     let run_id = "run-remote-conformance";
-    let (_project_root, project, revision) =
-        project_fixture("function y = remote_answer(); y = 42; end\n");
-    let mut registry = runmat_vm::FunctionRegistry::default();
-    registry.insert_replacing_name(runmat_vm::FunctionBytecode {
-        display_name: "remote_answer".into(),
-        instructions: vec![
-            runmat_vm::Instr::LoadConst(42.0),
-            runmat_vm::Instr::StoreVar(0),
-            runmat_vm::Instr::Return,
-        ],
-        var_count: 1,
-        output_slots: vec![0],
-        ..Default::default()
-    });
-    let recipe = recipe(revision.clone());
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        serde_json::to_vec(&registry).unwrap(),
+    let (program, _, bytes) = super::pool_tests::executable_bundle().await;
+    let bundle =
+        runmat_execution_artifact::archive::read_bundle(bytes.as_slice(), ArchiveLimits::default())
+            .unwrap();
+    let response = run_encrypted_remote_request_with_prior_sequence(
+        run_id,
+        bundle,
+        None,
+        Some(program.callable),
+    )
+    .await;
+    assert!(
+        matches!(response, ProgramExecutionResponse::Success { .. }),
+        "{response:?}"
+    );
+}
+
+#[tokio::test]
+async fn replacement_driver_consumes_an_exact_resume_safe_checkpoint() {
+    let run_id = "run-remote-replacement";
+    let (program, _, bytes) = super::pool_tests::executable_bundle().await;
+    let bundle =
+        runmat_execution_artifact::archive::read_bundle(bytes.as_slice(), ArchiveLimits::default())
+            .unwrap();
+    let response = run_encrypted_remote_request_with_prior_sequence(
+        run_id,
+        bundle,
+        Some(7),
+        Some(program.callable),
+    )
+    .await;
+    assert!(
+        matches!(response, ProgramExecutionResponse::Success { .. }),
+        "{response:?}"
+    );
+}
+
+#[tokio::test]
+async fn remote_driver_commits_verified_externalized_results() {
+    let run_id = "run-externalized-result";
+    let bytes = b"canonical analysis result object".to_vec();
+    let reference = runmat_execution::value::ValueRef {
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
+        id: runmat_execution::identity::ValueId::derive(&[b"remote-result", &bytes]),
+        logical_digest: Digest::sha256(&bytes),
+        encoded_length: bytes.len() as u64,
+        media_type: "application/vnd.runmat.analysis-object".into(),
+        value_schema: "runmat.analysis-object.v1".into(),
+        encryption_context: Digest::sha256(b"remote-result-encryption"),
+        kind: runmat_execution::value::ValueRefKind::ResultObject,
+        authorization_scope: run_id.into(),
+        resident_fence: None,
+    };
+    let objects = super::object_transfer::RemoteObjectStore::new().unwrap();
+    objects
+        .register(ProgramExecutionObject {
+            reference: reference.clone(),
+            bytes,
+        })
+        .unwrap();
+    let result = super::pool_execution::RemotePoolExecutionResult {
+        console: None,
+        cancelled: false,
+        response: ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![runmat_execution::value::ValuePayload::Object(Box::new(
+                reference.clone(),
+            ))],
+            result_objects: vec![reference.clone()],
+        },
+        objects: super::result_objects::RemoteResultObjects::Local(objects),
+    };
+    let control = FakeControl {
+        bootstrap: DriverBootstrap {
+            driver_accelerator_devices: Vec::new(),
+            project_revision: "unused".into(),
+            endpoint_fingerprint: "unused".into(),
+            run_key_envelope: Vec::new(),
+            artifacts: Vec::new(),
+            checkpoint: None,
+            cancellation_requested: false,
+            driver_resources: driver_resource_request(),
+            desired_worker_count: 0,
+            worker_resources: resource_request(),
+        },
+        state: Mutex::new(FakeState::default()),
+    };
+    let run_key = RunKeyMaterial::from_entropy([41; 32]).unwrap();
+    let config = RemoteDriverConfig {
+        ready_v1: false,
+        clock_parent: None,
+        authority: DriverAuthority {
+            server_url: "https://control.invalid".into(),
+            run_id: run_id.into(),
+            org_id: test_org_id(),
+            project_id: "project-1".into(),
+            allocation_lease_id: "allocation-1".into(),
+            driver_lease_id: test_driver_lease_id(1),
+            fencing_token: 1,
+            credential: "driver-secret".into(),
+        },
+        endpoint_identity_file: PathBuf::from("unused"),
+    };
+    let (grant, _) = super::completion::RemoteCompletionGrant::admit(4096).unwrap();
+    super::driver::commit_response(&control, &config, &run_key, grant.retain(result).unwrap())
+        .await
+        .unwrap();
+    let state = control.state.lock().unwrap();
+    assert_eq!(
+        state.transitions,
+        vec![(DriverRunTarget::Succeeded, Some("stored-2".into()))]
+    );
+    let object_plaintext = open_object(
+        &run_key,
+        &state.stored[0].ciphertext,
+        run_id,
+        EncryptionPurpose::Result,
     )
     .unwrap();
-    let bundle = ExecutionBundleBuilder::native(&project, revision)
-        .unwrap()
-        .with_materialized_program(
-            recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
-            artifact.executable_bytes.clone(),
+    assert_eq!(object_plaintext, b"canonical analysis result object");
+    let plaintext = open_object(
+        &run_key,
+        &state.stored[1].ciphertext,
+        run_id,
+        EncryptionPurpose::Result,
+    )
+    .unwrap();
+    let committed: ProgramExecutionOutputs = serde_json::from_slice(&plaintext).unwrap();
+    committed.validate().unwrap();
+    assert_eq!(committed.objects.len(), 1);
+    assert_eq!(committed.objects[0].artifact_id, "stored-1");
+}
+
+#[tokio::test]
+async fn cancelled_console_free_completion_does_not_publish_a_result() {
+    let run_id = "run-cancelled-completion";
+    let config = RemoteDriverConfig {
+        ready_v1: false,
+        clock_parent: None,
+        authority: DriverAuthority {
+            server_url: "https://control.invalid".into(),
+            run_id: run_id.into(),
+            org_id: test_org_id(),
+            project_id: "project-1".into(),
+            allocation_lease_id: "allocation-1".into(),
+            driver_lease_id: test_driver_lease_id(1),
+            fencing_token: 1,
+            credential: "driver-secret".into(),
+        },
+        endpoint_identity_file: PathBuf::from("unused"),
+    };
+    let run_key = RunKeyMaterial::from_entropy([42; 32]).unwrap();
+    let responses = [
+        ProgramExecutionResponse::Failure {
+            message: "remote attempt was cancelled".into(),
+        },
+        ProgramExecutionResponse::GraphSuccess {
+            graph: runmat_execution::value::PayloadGraph {
+                roots: Vec::new(),
+                nodes: Vec::new(),
+            },
+        },
+    ];
+    for response in responses {
+        let control = FakeControl {
+            bootstrap: DriverBootstrap {
+                driver_accelerator_devices: Vec::new(),
+                project_revision: "unused".into(),
+                endpoint_fingerprint: "unused".into(),
+                run_key_envelope: Vec::new(),
+                artifacts: Vec::new(),
+                checkpoint: None,
+                cancellation_requested: false,
+                driver_resources: driver_resource_request(),
+                desired_worker_count: 0,
+                worker_resources: resource_request(),
+            },
+            state: Mutex::new(FakeState::default()),
+        };
+        let mut result =
+            super::pool_execution::RemotePoolExecutionResult::without_objects(response);
+        result.cancelled = true;
+        let (grant, _) = super::completion::RemoteCompletionGrant::admit(4096).unwrap();
+        super::driver::commit_response(&control, &config, &run_key, grant.retain(result).unwrap())
+            .await
+            .unwrap();
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.transitions, vec![(DriverRunTarget::Cancelled, None)]);
+        assert_eq!(
+            state.diagnostics,
+            vec![(Some("cancelled-during-execution".into()), None)]
+        );
+        assert!(state.stored.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn replacement_restores_a_verified_run_scoped_object_closure() {
+    let run_id = "run-recovery-closure";
+    let run_key = RunKeyMaterial::from_entropy([57; 32]).unwrap();
+    let first = result_object(run_id, b"first recovered object");
+    let second = result_object(run_id, b"second recovered object");
+    let first_location = ProgramExecutionObjectLocation {
+        reference: first.reference.clone(),
+        artifact_id: "recovered-object-1".into(),
+    };
+    let second_location = ProgramExecutionObjectLocation {
+        reference: second.reference.clone(),
+        artifact_id: "recovered-object-2".into(),
+    };
+    let closure = ProgramExecutionObjectClosure::new(
+        second.reference.clone(),
+        vec![second_location.clone(), first_location.clone()],
+    )
+    .unwrap();
+    let mut catalog = result_object(run_id, &closure.canonical_bytes().unwrap());
+    catalog.reference.media_type =
+        runmat_execution_artifact::PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE.into();
+    catalog.reference.value_schema =
+        runmat_execution_artifact::PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA.into();
+    let catalog_location = ProgramExecutionObjectLocation {
+        reference: catalog.reference.clone(),
+        artifact_id: "recovery-catalog".into(),
+    };
+    let encrypted = [
+        (&catalog_location, catalog.bytes.as_slice()),
+        (&first_location, first.bytes.as_slice()),
+        (&second_location, second.bytes.as_slice()),
+    ]
+    .into_iter()
+    .map(|(location, bytes)| {
+        (
+            location.artifact_id.clone(),
+            seal_object(&run_key, run_id, EncryptionPurpose::Result, bytes).unwrap(),
         )
-        .build()
+    })
+    .collect::<BTreeMap<_, _>>();
+    let control = FakeControl {
+        bootstrap: unused_bootstrap(),
+        state: Mutex::new(FakeState {
+            artifact_kinds: encrypted
+                .keys()
+                .map(|artifact_id| (artifact_id.clone(), "result".into()))
+                .collect(),
+            downloads: encrypted,
+            ..Default::default()
+        }),
+    };
+    let authority = DriverAuthority {
+        server_url: "https://control.invalid".into(),
+        run_id: run_id.into(),
+        org_id: test_org_id(),
+        project_id: "project-1".into(),
+        allocation_lease_id: "allocation-1".into(),
+        driver_lease_id: test_driver_lease_id(2),
+        fencing_token: 2,
+        credential: "credential".into(),
+    };
+
+    let restored = super::recovery::restore(&control, &run_key, &authority, &catalog_location)
+        .await
         .unwrap();
-    let response = run_encrypted_remote_request(run_id, bundle).await;
-    assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+    let mut expected = vec![first, second];
+    expected.sort_by_key(|object| object.reference.id);
+    assert_eq!(restored.root, second_location.reference);
+    assert_eq!(restored.objects, expected);
+
+    control
+        .state
+        .lock()
+        .unwrap()
+        .artifact_kinds
+        .insert(second_location.artifact_id.clone(), "input".into());
+    assert!(
+        super::recovery::restore(&control, &run_key, &authority, &catalog_location)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
+    let run_id = "run-recovery-publication";
+    let run_key = RunKeyMaterial::from_entropy([67; 32]).unwrap();
+    let authority = DriverAuthority {
+        server_url: "https://control.invalid".into(),
+        run_id: run_id.into(),
+        org_id: test_org_id(),
+        project_id: "project-1".into(),
+        allocation_lease_id: "allocation-1".into(),
+        driver_lease_id: test_driver_lease_id(4),
+        fencing_token: 4,
+        credential: "credential".into(),
+    };
+    let revision = ProgramRevision::new(
+        Digest::sha256("recovery-graph"),
+        Digest::sha256("recovery-source"),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+    )
+    .unwrap();
+    let mut recipe = recipe(revision);
+    recipe.entrypoint = "analysis_workload".into();
+    recipe.execution_mode = "recovery-publication-test".into();
+    let artifact =
+        ProgramArtifact::materialize(&recipe, ExecutableForm::AnalysisWorkload, vec![1]).unwrap();
+    let request = ProgramExecutionRequest {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        recipe,
+        artifact,
+        callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let control = FakeControl {
+        bootstrap: unused_bootstrap(),
+        state: Mutex::new(FakeState::default()),
+    };
+    let first = result_object(run_id, b"first transaction object");
+    let second = result_object(run_id, b"second transaction object");
+    let third = result_object(run_id, b"third transaction object");
+    let fourth = result_object(run_id, b"fourth transaction object");
+    let mut publisher = super::recovery::RemoteRecoveryPublisher::new(
+        &control,
+        &run_key,
+        &authority,
+        "project-revision",
+        &request,
+        4,
+        None,
+    )
+    .unwrap();
+
+    publisher
+        .publish_objects(
+            second.reference.clone(),
+            vec![second.clone(), first.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(publisher.checkpoint_sequence(), 5);
+    let first_catalog = {
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.stored.len(), 4);
+        assert_eq!(
+            state
+                .stored
+                .iter()
+                .map(|stored| stored.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                DriverArtifactKind::Result,
+                DriverArtifactKind::Result,
+                DriverArtifactKind::Result,
+                DriverArtifactKind::Checkpoint,
+            ]
+        );
+        assert_eq!(
+            state.stored[3].checkpoint,
+            Some((5, CheckpointDisposition::ResumeSafe))
+        );
+        super::checkpoint::RemoteDriverCheckpoint::from_canonical_bytes(
+            &open_object(
+                &run_key,
+                &state.stored[3].ciphertext,
+                run_id,
+                EncryptionPurpose::Checkpoint,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .closure_catalog
+        .unwrap()
+    };
+    let restored = super::recovery::restore(&control, &run_key, &authority, &first_catalog)
+        .await
+        .unwrap();
+    assert_eq!(restored.root, second.reference);
+    assert_eq!(restored.objects.len(), 2);
+
+    publisher
+        .publish_objects(
+            third.reference.clone(),
+            vec![third.clone(), first.clone(), second.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(publisher.checkpoint_sequence(), 6);
+    {
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.stored.len(), 7);
+        assert_eq!(state.stored[4].kind, DriverArtifactKind::Result);
+        assert_eq!(state.stored[5].kind, DriverArtifactKind::Result);
+        assert_eq!(state.stored[6].kind, DriverArtifactKind::Checkpoint);
+        assert_eq!(
+            state.stored[6].checkpoint,
+            Some((6, CheckpointDisposition::ResumeSafe))
+        );
+    }
+
+    control.state.lock().unwrap().fail_store_at = Some(10);
+    assert!(publisher
+        .publish_objects(
+            fourth.reference.clone(),
+            vec![first.clone(), second.clone(), third.clone(), fourth.clone()],
+        )
+        .await
+        .is_err());
+    assert_eq!(publisher.checkpoint_sequence(), 6);
+    {
+        let state = control.state.lock().unwrap();
+        assert_eq!(state.stored.len(), 9);
+        assert_eq!(state.stored[8].kind, DriverArtifactKind::Result);
+        assert_eq!(state.stored[6].kind, DriverArtifactKind::Checkpoint);
+    }
+
+    control.state.lock().unwrap().fail_store_at = None;
+    let mut clone = publisher.clone();
+    let clone_retry = clone
+        .publish_objects(fourth.reference.clone(), vec![fourth.clone()])
+        .await
+        .expect_err("every publisher clone must be fenced after an uncertain write");
+    assert!(clone_retry.to_string().contains("replace the driver"));
+    let retry = publisher
+        .publish_objects(fourth.reference.clone(), vec![first, second, third, fourth])
+        .await
+        .expect_err("uncertain checkpoint write must fence this publisher generation");
+    assert!(retry.to_string().contains("replace the driver"));
+    assert_eq!(publisher.checkpoint_sequence(), 6);
+    let state = control.state.lock().unwrap();
+    assert_eq!(state.stored.len(), 9);
+    assert_eq!(
+        state.stored[6].checkpoint,
+        Some((6, CheckpointDisposition::ResumeSafe))
+    );
 }
 
 #[tokio::test]
@@ -192,7 +655,9 @@ async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
         1,
     )
     .unwrap();
-    let request = workload.program_request().unwrap();
+    let request = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, request.recipe.program_revision.clone())
         .unwrap()
         .with_materialized_program(
@@ -203,10 +668,13 @@ async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
         .build()
         .unwrap();
     let response = run_encrypted_remote_request("run-remote-test-conformance", bundle).await;
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("remote driver rejected an exact test workload: {response:?}");
     };
-    let execution = decode_execution(&value).unwrap();
+    let [value] = outputs.as_slice() else {
+        panic!("expected one test output")
+    };
+    let execution = decode_execution(value).unwrap();
     assert_eq!(
         execution.result.state.disposition,
         TerminalDisposition::Passed,
@@ -282,6 +750,7 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
             resolved.frozen.clone(),
         ))
+        .await
         .unwrap();
     let prepared = session
         .prepare_tests(&snapshot, &TestSelector::default())
@@ -293,7 +762,9 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
         1,
     )
     .unwrap();
-    let request = workload.program_request().unwrap();
+    let request = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let bundle =
         ExecutionBundleBuilder::native(&resolved.frozen, request.recipe.program_revision.clone())
             .unwrap()
@@ -309,10 +780,13 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
 
     let response =
         run_encrypted_remote_request("run-private-registry-package-conformance", bundle).await;
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("credential-free remote private package execution failed: {response:?}");
     };
-    let execution = decode_execution(&value).unwrap();
+    let [value] = outputs.as_slice() else {
+        panic!("expected one test output")
+    };
+    let execution = decode_execution(value).unwrap();
     assert_eq!(
         execution.result.state.disposition,
         TerminalDisposition::Passed,
@@ -444,24 +918,50 @@ async fn run_encrypted_remote_request(
     run_id: &str,
     bundle: ExecutionBundle,
 ) -> ProgramExecutionResponse {
+    run_encrypted_remote_request_with_prior_sequence(run_id, bundle, None, None).await
+}
+
+async fn run_encrypted_remote_request_with_prior_sequence(
+    run_id: &str,
+    bundle: ExecutionBundle,
+    prior_checkpoint_sequence: Option<u64>,
+    callable: Option<ProgramCallable>,
+) -> ProgramExecutionResponse {
+    let bundle = if bundle.manifest.project_runtime_policy.is_none() {
+        let policy =
+            crate::remote::runtime_settings::fixture_policy(&bundle.manifest.program_revision);
+        bundle.with_project_runtime_policy_object(policy).unwrap()
+    } else {
+        bundle
+    };
     let revision = bundle.manifest.program_revision.clone();
     let recipe = bundle.manifest.recipes.first().cloned().unwrap();
     let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
-    let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    let descriptor_contract = ProgramExecutionDescriptor {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::new(
+            bundle.manifest.portable_environment.clone(),
+        )
+        .unwrap(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function: 0,
+        callable: callable.unwrap_or_else(|| ProgramCallable::semantic(ProgramFunctionId(0), None)),
         requested_outputs: 1,
-    })
-    .unwrap();
-    let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    };
+    let inputs_contract = ProgramExecutionInputs {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: Vec::new(),
-    })
-    .unwrap();
+        objects: Vec::new(),
+    };
+    let request =
+        ProgramExecutionRequest::from_parts(descriptor_contract.clone(), inputs_contract.clone())
+            .unwrap();
+    let descriptor = serde_json::to_vec(&descriptor_contract).unwrap();
+    let inputs = serde_json::to_vec(&inputs_contract).unwrap();
 
     let run_key = RunKeyMaterial::from_entropy([9; 32]).unwrap();
     let recipient_entropy = [7; 32];
@@ -492,15 +992,58 @@ async fn run_encrypted_remote_request(
         .enumerate()
         .map(|(index, (kind, bytes))| download(index, kind, bytes))
         .collect::<Vec<_>>();
+    let project_revision = project_revision_identity(&revision);
+    let driver_fence = if prior_checkpoint_sequence.is_some() {
+        2
+    } else {
+        1
+    };
+    let authority = DriverAuthority {
+        server_url: "https://control.invalid".into(),
+        run_id: run_id.into(),
+        org_id: test_org_id(),
+        project_id: "project-1".into(),
+        allocation_lease_id: "allocation-1".into(),
+        driver_lease_id: test_driver_lease_id(driver_fence),
+        fencing_token: driver_fence,
+        credential: "driver-secret".into(),
+    };
+    let prior_checkpoint = prior_checkpoint_sequence.map(|sequence| {
+        let prior_authority = DriverAuthority {
+            driver_lease_id: test_driver_lease_id(1),
+            fencing_token: 1,
+            ..authority.clone()
+        };
+        let checkpoint = super::checkpoint::RemoteDriverCheckpoint::new(
+            sequence,
+            &prior_authority,
+            &project_revision,
+            &request,
+            super::checkpoint::RemoteDriverCheckpointPhase::ReadyToExecute,
+            None,
+        )
+        .unwrap();
+        let ciphertext = seal_object(
+            &run_key,
+            run_id,
+            EncryptionPurpose::Checkpoint,
+            &checkpoint.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        (download(99, "checkpoint", &ciphertext), ciphertext)
+    });
     let control = Arc::new(FakeControl {
         bootstrap: DriverBootstrap {
-            project_revision: project_revision_identity(&revision),
+            project_revision,
             endpoint_fingerprint: recipient.fingerprint.clone(),
             run_key_envelope: encode_run_key_envelope(&envelope).unwrap(),
             artifacts: downloads.clone(),
-            checkpoint: None,
+            checkpoint: prior_checkpoint
+                .as_ref()
+                .map(|(download, _)| download.clone()),
             cancellation_requested: false,
-            driver_resources: resource_request(),
+            driver_resources: driver_resource_request(),
+            driver_accelerator_devices: Vec::new(),
             desired_worker_count: 0,
             worker_resources: resource_request(),
         },
@@ -509,48 +1052,108 @@ async fn run_encrypted_remote_request(
                 .iter()
                 .zip(encrypted)
                 .map(|(download, (_, bytes))| (download.artifact_id.clone(), bytes))
+                .chain(
+                    prior_checkpoint
+                        .iter()
+                        .map(|(download, bytes)| (download.artifact_id.clone(), bytes.clone())),
+                )
                 .collect(),
             ..Default::default()
         }),
     });
     let config = RemoteDriverConfig {
-        authority: DriverAuthority {
-            server_url: "https://control.invalid".into(),
-            run_id: run_id.into(),
-            org_id: "org-1".into(),
-            project_id: "project-1".into(),
-            allocation_lease_id: "allocation-1".into(),
-            driver_lease_id: "driver-1".into(),
-            fencing_token: 1,
-            credential: "driver-secret".into(),
-        },
+        authority,
         endpoint_identity_file: identity_path,
+        ready_v1: false,
+        clock_parent: None,
     };
 
     run_remote_driver(config, control.clone()).await.unwrap();
 
     let state = control.state.lock().unwrap();
+    let diagnostics = state
+        .diagnostics
+        .iter()
+        .map(|(reason, id)| {
+            (
+                reason,
+                id.as_ref().map(|id| {
+                    let encrypted = state
+                        .downloads
+                        .get(id)
+                        .expect("original diagnostic artifact retained");
+                    open_object(
+                        &run_key,
+                        encrypted,
+                        run_id,
+                        EncryptionPurpose::DetailedEvent,
+                    )
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                }),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
         state.transitions,
         vec![
             (DriverRunTarget::Running, None),
             (DriverRunTarget::Succeeded, Some("stored-3".into()))
-        ]
+        ],
+        "original remote driver diagnostics: {diagnostics:?}"
     );
     assert_eq!(state.usage.len(), 1);
     assert_eq!(state.usage[0], 1);
     assert_eq!(state.stored.len(), 3);
-    assert_eq!(state.stored[0].1, DriverArtifactKind::Checkpoint);
-    assert_eq!(state.stored[1].1, DriverArtifactKind::Checkpoint);
-    assert_eq!(state.stored[2].1, DriverArtifactKind::Result);
+    assert_eq!(state.stored[0].kind, DriverArtifactKind::Checkpoint);
+    assert_eq!(state.stored[1].kind, DriverArtifactKind::Checkpoint);
+    assert_eq!(state.stored[2].kind, DriverArtifactKind::Result);
+    let first_sequence = prior_checkpoint_sequence.map_or(1, |sequence| sequence + 1);
+    assert_eq!(
+        state.stored[0].checkpoint,
+        Some((first_sequence, CheckpointDisposition::ResumeSafe))
+    );
+    assert_eq!(
+        state.stored[1].checkpoint,
+        Some((first_sequence + 1, CheckpointDisposition::Indeterminate))
+    );
+    let ready_checkpoint = super::checkpoint::RemoteDriverCheckpoint::from_canonical_bytes(
+        &open_object(
+            &run_key,
+            &state.stored[0].ciphertext,
+            run_id,
+            EncryptionPurpose::Checkpoint,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        ready_checkpoint.phase,
+        super::checkpoint::RemoteDriverCheckpointPhase::ReadyToExecute
+    );
+    let started_checkpoint = super::checkpoint::RemoteDriverCheckpoint::from_canonical_bytes(
+        &open_object(
+            &run_key,
+            &state.stored[1].ciphertext,
+            run_id,
+            EncryptionPurpose::Checkpoint,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        started_checkpoint.phase,
+        super::checkpoint::RemoteDriverCheckpointPhase::EffectsMayHaveStarted
+    );
     let result = open_object(
         &run_key,
-        &state.stored[2].2,
+        &state.stored[2].ciphertext,
         run_id,
         EncryptionPurpose::Result,
     )
     .unwrap();
-    serde_json::from_slice::<ProgramExecutionResponse>(&result).unwrap()
+    let outputs = serde_json::from_slice::<ProgramExecutionOutputs>(&result).unwrap();
+    outputs.validate().unwrap();
+    outputs.response
 }
 
 fn resource_request() -> runmat_execution_transport_native::control::ResourceRequest {
@@ -558,11 +1161,16 @@ fn resource_request() -> runmat_execution_transport_native::control::ResourceReq
         cpu_millicores: 1_000,
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 60_000,
     }
+}
+
+fn driver_resource_request() -> runmat_execution_transport_native::control::ResourceRequest {
+    let mut resources = resource_request();
+    resources.memory_bytes =
+        runmat_execution::resource::remote_driver_memory_bytes(resources.memory_bytes).unwrap();
+    resources
 }
 
 fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
@@ -572,12 +1180,16 @@ fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         entrypoint: "0".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     }
 }
@@ -619,7 +1231,7 @@ fn endpoint_material(
         entropy,
         EndpointIdentityEvidence {
             schema_version: 1,
-            org_id: "org-1".into(),
+            org_id: TEST_ORG_ID.into(),
             cluster_id: "cluster-1".into(),
             node_id: "node-1".into(),
             allocation_lease_id: "allocation-1".into(),
@@ -657,3 +1269,38 @@ fn download(index: usize, kind: &str, bytes: &[u8]) -> DriverArtifactDownload {
         headers: BTreeMap::new(),
     }
 }
+
+fn result_object(run_id: &str, bytes: &[u8]) -> ProgramExecutionObject {
+    ProgramExecutionObject {
+        reference: runmat_execution::value::ValueRef {
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
+            id: runmat_execution::identity::ValueId::derive(&[b"recovery-object", bytes]),
+            logical_digest: Digest::sha256(bytes),
+            encoded_length: bytes.len() as u64,
+            media_type: "application/vnd.runmat.analysis-object".into(),
+            value_schema: "runmat.analysis-object.v1".into(),
+            encryption_context: Digest::sha256(b"recovery-object-encryption"),
+            kind: runmat_execution::value::ValueRefKind::ResultObject,
+            authorization_scope: run_id.into(),
+            resident_fence: None,
+        },
+        bytes: bytes.to_vec(),
+    }
+}
+
+fn unused_bootstrap() -> DriverBootstrap {
+    DriverBootstrap {
+        driver_accelerator_devices: Vec::new(),
+        project_revision: "unused".into(),
+        endpoint_fingerprint: "unused".into(),
+        run_key_envelope: Vec::new(),
+        artifacts: Vec::new(),
+        checkpoint: None,
+        cancellation_requested: false,
+        driver_resources: driver_resource_request(),
+        desired_worker_count: 0,
+        worker_resources: resource_request(),
+    }
+}
+
+mod environment;

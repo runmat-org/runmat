@@ -1,32 +1,24 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use runmat_meshing_core::{
-    quality::predicate::{orient2d, orient3d, PredicateSign},
-    MeshingCancellationSignal, StableDigest,
-};
+use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
-use super::insertion::insert_delaunay_volume_node_mutation;
+use super::insertion::{validate_locally_delaunay_volume_topology, UnconstrainedHull};
 use super::{
-    build_delaunay_volume_topology, validate_delaunay_volume_topology, DelaunayInsertionError,
-    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayTopologyError,
-    DelaunayTopologyErrorKind, DelaunayVolumeNode, DelaunayVolumeTopology,
+    build_delaunay_volume_topology, DelaunayInsertionError, DelaunayInsertionErrorKind,
+    DelaunayInsertionOptions, DelaunayTopologyError, DelaunayTopologyErrorKind, DelaunayVolumeNode,
+    DelaunayVolumeTopology,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+mod hull_validation;
+#[cfg(test)]
+mod scaling;
+mod seed;
+mod work;
+use hull_validation::validate_convex_hull_closure;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DelaunayPointSetOptions {
     pub insertion: DelaunayInsertionOptions,
-    /// Full local-Delaunay validation cadence in optimized builds. Debug and
-    /// test builds validate after every insertion.
-    pub validation_check_interval: u64,
-}
-
-impl Default for DelaunayPointSetOptions {
-    fn default() -> Self {
-        Self {
-            insertion: DelaunayInsertionOptions::default(),
-            validation_check_interval: 256,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,78 +50,91 @@ impl std::fmt::Display for DelaunayPointSetError {
 impl std::error::Error for DelaunayPointSetError {}
 
 /// Builds the canonical unconstrained Delaunay tetrahedralization of a point
-/// set. Construction-only enclosing nodes are removed before return.
+/// set by growing its real convex hull; no artificial enclosing vertices are used.
 pub fn build_delaunay_volume_point_set(
-    mut nodes: Vec<DelaunayVolumeNode>,
+    nodes: Vec<DelaunayVolumeNode>,
     options: DelaunayPointSetOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayPointSetError> {
+    build_delaunay_volume_point_set_with_order(
+        nodes,
+        options,
+        cancellation,
+        compare_geometric_nodes,
+    )
+}
+
+/// Insertion ordering is a scheduling hint only. The original point inventory
+/// remains authoritative for every predicate, cavity and published coordinate.
+pub(in crate::cdt) fn build_delaunay_volume_point_set_with_order(
+    mut nodes: Vec<DelaunayVolumeNode>,
+    options: DelaunayPointSetOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+    compare: impl Fn(&DelaunayVolumeNode, &DelaunayVolumeNode) -> std::cmp::Ordering,
+) -> Result<DelaunayVolumeTopology, DelaunayPointSetError> {
     validate_options(options)?;
     validate_and_order_nodes(&mut nodes, options, cancellation)?;
-    let enclosing = enclosing_tetrahedron(&nodes)?;
-    validate_spatial_dimension(&nodes, options, cancellation)?;
-    let enclosing_identities = enclosing
-        .iter()
-        .map(|node| node.identity)
-        .collect::<BTreeSet<_>>();
-
-    let mut working_options = options.insertion;
-    working_options.topology.maximum_nodes = working_options
-        .topology
-        .maximum_nodes
-        .checked_add(4)
-        .ok_or_else(|| resource("working node limit overflow"))?;
-    let mut topology = build_delaunay_volume_topology(
-        enclosing.to_vec(),
+    validate_coordinate_range(&nodes)?;
+    let mut geometric_nodes = nodes.clone();
+    geometric_nodes.sort_by(compare);
+    let initial = seed::initial_tetrahedron(
+        &geometric_nodes,
+        &mut work::HullWork::new(options, cancellation),
+    )?;
+    let mut seed_nodes = initial.map(|index| geometric_nodes[index]).to_vec();
+    seed_nodes.sort_by_key(|node| node.identity);
+    let topology = build_delaunay_volume_topology(
+        seed_nodes,
         vec![[0, 1, 2, 3]],
-        working_options.topology,
+        options.insertion.topology,
         cancellation,
     )
     .map_err(topology_error)?;
-
-    for (index, node) in nodes.iter().copied().enumerate() {
-        topology =
-            insert_delaunay_volume_node_mutation(topology, node, working_options, cancellation)
-                .map_err(insertion_error)?;
-        if cfg!(debug_assertions)
-            || (index as u64 + 1).is_multiple_of(options.validation_check_interval)
-        {
-            validate_delaunay_volume_topology(&topology, working_options, cancellation)
-                .map_err(insertion_error)?;
+    let mut hull = UnconstrainedHull::new(topology).map_err(insertion_error)?;
+    for (index, node) in geometric_nodes.iter().copied().enumerate() {
+        if initial.contains(&index) {
+            continue;
         }
+        hull.insert(node, options.insertion, cancellation)
+            .map_err(|failure| insertion_error_at_node(failure, index, node))?;
     }
 
-    let result_index = nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.identity, index as u32))
-        .collect::<BTreeMap<_, _>>();
-    let tetrahedra = topology
-        .tetrahedra
-        .iter()
-        .filter(|tetrahedron| {
-            tetrahedron.vertex_indices.iter().all(|vertex| {
-                !enclosing_identities.contains(&topology.nodes[*vertex as usize].identity)
-            })
-        })
-        .map(|tetrahedron| {
-            tetrahedron
-                .vertex_indices
-                .map(|vertex| result_index[&topology.nodes[vertex as usize].identity])
-        })
-        .collect::<Vec<_>>();
-    if tetrahedra.is_empty() {
+    let topology = hull
+        .freeze(options.insertion, cancellation)
+        .map_err(insertion_error)?;
+    if topology.nodes.len() != nodes.len()
+        || topology
+            .incidence
+            .vertex_stars
+            .iter()
+            .any(|star| star.is_empty())
+    {
         return Err(error(
-            DelaunayPointSetErrorKind::InsufficientDimension,
-            "point set does not contain a noncoplanar tetrahedron",
+            DelaunayPointSetErrorKind::InvalidTopology,
+            "convex-hull bootstrap did not retain every admitted point",
         ));
     }
-    let result =
-        build_delaunay_volume_topology(nodes, tetrahedra, options.insertion.topology, cancellation)
-            .map_err(topology_error)?;
-    validate_delaunay_volume_topology(&result, options.insertion, cancellation)
+    validate_locally_delaunay_volume_topology(&topology, options.insertion, cancellation)
         .map_err(insertion_error)?;
-    Ok(result)
+    validate_convex_hull_closure(&topology, options, cancellation)?;
+    Ok(topology)
+}
+
+fn validate_coordinate_range(nodes: &[DelaunayVolumeNode]) -> Result<(), DelaunayPointSetError> {
+    let mut minimum = [f64::INFINITY; 3];
+    let mut maximum = [f64::NEG_INFINITY; 3];
+    for node in nodes {
+        for axis in 0..3 {
+            minimum[axis] = minimum[axis].min(node.coordinates_m.canonical_value()[axis]);
+            maximum[axis] = maximum[axis].max(node.coordinates_m.canonical_value()[axis]);
+        }
+    }
+    if (0..3).any(|axis| !(maximum[axis] - minimum[axis]).is_finite()) {
+        return Err(resource(
+            "coordinate range cannot support finite spatial predicates",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_and_order_nodes(
@@ -146,6 +151,11 @@ fn validate_and_order_nodes(
     if nodes.len() as u64 > options.insertion.topology.maximum_nodes {
         return Err(resource("node limit exceeded"));
     }
+    // Persistent identities deliberately bind nodes to one source revision. They
+    // must not decide the geometry produced for an equivalent point cloud.
+    // Geometric order gives equivalent inputs a deterministic insertion schedule.
+    // Rigid transformations may reorder cospherical choices; independent physical
+    // admission, rather than identical connectivity, governs those cases.
     nodes.sort_by_key(|node| node.identity);
     let mut positions = BTreeSet::new();
     for (index, node) in nodes.iter().enumerate() {
@@ -155,9 +165,13 @@ fn validate_and_order_nodes(
             return Err(error(DelaunayPointSetErrorKind::Cancelled, "cancelled"));
         }
         if node.identity == StableDigest::ZERO
-            || node.coordinates_m.iter().any(|value| !value.is_finite())
+            || node
+                .coordinates_m
+                .canonical_value()
+                .iter()
+                .any(|value| !value.is_finite())
             || index > 0 && nodes[index - 1].identity == node.identity
-            || !positions.insert(node.coordinates_m.map(coordinate_bits))
+            || !positions.insert(node.coordinates_m.canonical_value().map(coordinate_bits))
         {
             return Err(error(
                 DelaunayPointSetErrorKind::InvalidNode,
@@ -168,6 +182,18 @@ fn validate_and_order_nodes(
     Ok(())
 }
 
+fn compare_geometric_nodes(
+    left: &DelaunayVolumeNode,
+    right: &DelaunayVolumeNode,
+) -> std::cmp::Ordering {
+    left.coordinates_m
+        .canonical_value()
+        .iter()
+        .zip(right.coordinates_m.canonical_value().iter())
+        .find_map(|(left, right)| (left != right).then(|| left.total_cmp(right)))
+        .unwrap_or_else(|| left.identity.cmp(&right.identity))
+}
+
 fn coordinate_bits(value: f64) -> u64 {
     if value == 0.0 {
         0
@@ -176,145 +202,8 @@ fn coordinate_bits(value: f64) -> u64 {
     }
 }
 
-fn validate_spatial_dimension(
-    nodes: &[DelaunayVolumeNode],
-    options: DelaunayPointSetOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<(), DelaunayPointSetError> {
-    let first = nodes[0].coordinates_m;
-    let second = nodes[1].coordinates_m;
-    let interval = options.insertion.topology.cancellation_check_interval;
-    let mut third = None;
-    for (index, node) in nodes.iter().enumerate().skip(2) {
-        if (index as u64).is_multiple_of(interval) && cancellation.is_cancelled() {
-            return Err(error(DelaunayPointSetErrorKind::Cancelled, "cancelled"));
-        }
-        let point = node.coordinates_m;
-        let projections = [
-            [
-                [first[0], first[1]],
-                [second[0], second[1]],
-                [point[0], point[1]],
-            ],
-            [
-                [first[1], first[2]],
-                [second[1], second[2]],
-                [point[1], point[2]],
-            ],
-            [
-                [first[2], first[0]],
-                [second[2], second[0]],
-                [point[2], point[0]],
-            ],
-        ];
-        if projections.into_iter().any(|projection| {
-            matches!(
-                orient2d(projection),
-                Ok(PredicateSign::Positive | PredicateSign::Negative)
-            )
-        }) {
-            third = Some(index);
-            break;
-        }
-    }
-    let third = third.ok_or_else(|| {
-        error(
-            DelaunayPointSetErrorKind::InsufficientDimension,
-            "all point-set nodes are collinear",
-        )
-    })?;
-    for (index, node) in nodes.iter().enumerate() {
-        if (index as u64).is_multiple_of(interval) && cancellation.is_cancelled() {
-            return Err(error(DelaunayPointSetErrorKind::Cancelled, "cancelled"));
-        }
-        let sign = orient3d([
-            first,
-            second,
-            nodes[third].coordinates_m,
-            node.coordinates_m,
-        ]);
-        if matches!(sign, Ok(PredicateSign::Positive | PredicateSign::Negative)) {
-            return Ok(());
-        }
-    }
-    Err(error(
-        DelaunayPointSetErrorKind::InsufficientDimension,
-        "all point-set nodes are coplanar",
-    ))
-}
-
-fn enclosing_tetrahedron(
-    nodes: &[DelaunayVolumeNode],
-) -> Result<[DelaunayVolumeNode; 4], DelaunayPointSetError> {
-    let mut minimum = [f64::INFINITY; 3];
-    let mut maximum = [f64::NEG_INFINITY; 3];
-    for node in nodes {
-        for axis in 0..3 {
-            minimum[axis] = minimum[axis].min(node.coordinates_m[axis]);
-            maximum[axis] = maximum[axis].max(node.coordinates_m[axis]);
-        }
-    }
-    let center: [f64; 3] = std::array::from_fn(|axis| minimum[axis] * 0.5 + maximum[axis] * 0.5);
-    let extent = nodes
-        .iter()
-        .flat_map(|node| (0..3).map(|axis| (node.coordinates_m[axis] - center[axis]).abs()))
-        .fold(0.0_f64, f64::max);
-    if center.iter().any(|value| !value.is_finite()) || !extent.is_finite() || extent == 0.0 {
-        return Err(error(
-            DelaunayPointSetErrorKind::InsufficientDimension,
-            "point extent cannot define a finite enclosing tetrahedron",
-        ));
-    }
-    let radius = extent * 4.0;
-    let sqrt_two = 2.0_f64.sqrt();
-    let sqrt_six = 6.0_f64.sqrt();
-    let offsets = [
-        [0.0, 0.0, 3.0 * radius],
-        [2.0 * sqrt_two * radius, 0.0, -radius],
-        [-sqrt_two * radius, sqrt_six * radius, -radius],
-        [-sqrt_two * radius, -sqrt_six * radius, -radius],
-    ];
-    let occupied = nodes
-        .iter()
-        .map(|node| node.identity)
-        .collect::<BTreeSet<_>>();
-    let identities = construction_identities(&occupied);
-    let result = std::array::from_fn(|index| DelaunayVolumeNode {
-        identity: identities[index],
-        coordinates_m: std::array::from_fn(|axis| center[axis] + offsets[index][axis]),
-    });
-    if result
-        .iter()
-        .flat_map(|node| node.coordinates_m)
-        .any(|value| !value.is_finite())
-    {
-        return Err(resource(
-            "coordinate range cannot form a finite enclosing tetrahedron",
-        ));
-    }
-    Ok(result)
-}
-
-fn construction_identities(occupied: &BTreeSet<StableDigest>) -> [StableDigest; 4] {
-    let mut identities = [StableDigest::ZERO; 4];
-    let mut admitted = 0;
-    let mut counter = 1_u64;
-    while admitted < identities.len() {
-        let mut bytes = [0; 32];
-        bytes[24..].copy_from_slice(&counter.to_be_bytes());
-        let identity = StableDigest::from_bytes(bytes);
-        if !occupied.contains(&identity) {
-            identities[admitted] = identity;
-            admitted += 1;
-        }
-        counter += 1;
-    }
-    identities
-}
-
 fn validate_options(options: DelaunayPointSetOptions) -> Result<(), DelaunayPointSetError> {
-    if options.validation_check_interval == 0
-        || options.insertion.topology.maximum_nodes < 4
+    if options.insertion.topology.maximum_nodes < 4
         || options.insertion.topology.maximum_tetrahedra == 0
         || options.insertion.topology.cancellation_check_interval == 0
         || options.insertion.maximum_cavity_tetrahedra == 0
@@ -323,7 +212,7 @@ fn validate_options(options: DelaunayPointSetOptions) -> Result<(), DelaunayPoin
     {
         return Err(error(
             DelaunayPointSetErrorKind::InvalidOptions,
-            "all point-set, topology, insertion, and validation limits must be nonzero",
+            "all point-set, topology, and insertion limits must be nonzero",
         ));
     }
     Ok(())
@@ -339,6 +228,23 @@ fn insertion_error(error_value: DelaunayInsertionError) -> DelaunayPointSetError
         | DelaunayInsertionErrorKind::InvalidTopology => DelaunayPointSetErrorKind::InvalidTopology,
     };
     error(kind, error_value.to_string())
+}
+
+fn insertion_error_at_node(
+    error_value: DelaunayInsertionError,
+    index: usize,
+    node: DelaunayVolumeNode,
+) -> DelaunayPointSetError {
+    let mut mapped = insertion_error(error_value);
+    mapped.reason = format!(
+        "{} while inserting canonical node {index} ({:?}, [{}, {}, {}])",
+        mapped.reason,
+        node.identity,
+        node.coordinates_m.canonical_value()[0],
+        node.coordinates_m.canonical_value()[1],
+        node.coordinates_m.canonical_value()[2]
+    );
+    mapped
 }
 
 fn topology_error(error_value: DelaunayTopologyError) -> DelaunayPointSetError {

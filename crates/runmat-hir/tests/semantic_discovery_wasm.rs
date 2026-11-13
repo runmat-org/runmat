@@ -79,7 +79,7 @@ fn frozen_semantic_discovery_has_a_native_wasm_golden() {
     });
     assert!(discovery.diagnostics.is_empty());
     let encoded = serde_json::to_vec(&discovery).unwrap();
-    let digest = format!("sha256:{:x}", Sha256::digest(&encoded));
+    let digest = format!("sha256:{}", hex::encode(Sha256::digest(&encoded)));
     assert_eq!(
         digest,
         "sha256:4f819a1450b5b24125dc79b3d570502eb7dbedb0ff1763abd6a2b4427514701e",

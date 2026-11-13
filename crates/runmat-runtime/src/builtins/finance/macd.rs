@@ -1,16 +1,14 @@
 //! Moving Average Convergence/Divergence indicator.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinErrorDescriptor, MACD_ERROR_INTERNAL as ERROR_INTERNAL,
+    MACD_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT, MACD_ERROR_OUTPUT_COUNT as ERROR_OUTPUT_COUNT,
+    MACD_NONDOUBLE_MATRIX_EXTENSION,
 };
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+#[cfg(test)]
+use runmat_builtins::{BuiltinIntegerInputAvailability, MACD_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
+use runmat_types::standard;
 use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::tensor;
@@ -24,156 +22,19 @@ const FAST_ALPHA: f64 = 0.15;
 const SLOW_ALPHA: f64 = 0.075;
 const SIGNAL_ALPHA: f64 = 0.20;
 
-const MACD_NONDOUBLE_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "macd-nondouble-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "raw non-double macd matrix input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MacdNondoubleMatrixExtension"),
-};
-
-pub const MACD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MACD_NONDOUBLE_MATRIX_EXTENSION];
-
-const MACD_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Data matrix",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents raw matrix Data as double; RunMat mode admits native integer M-by-4 matrices only when every price is exactly representable at the binary64 EMA boundary.",
-    }];
-
-const MACD_INTEGER_TABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "High/Low/Open/Close table variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented table and timetable containers impose names and vector shapes without restricting the numeric storage class of their price variables.",
-    }];
-
-pub const MACD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[MACDLine, SignalLine] = macd(integer_Data_matrix)",
-        inputs: &MACD_INTEGER_MATRIX_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The raw-matrix extension is gated before provider access, reads authoritative integer storage, rejects lossy binary64 conversion, and computes host-double column outputs.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[MACDLine, SignalLine] = macd(table_with_integer_prices)",
-        inputs: &MACD_INTEGER_TABLE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer price variables remain exact until a checked binary64 EMA boundary; outputs preserve the table or timetable container and use double Close data.",
-    },
-];
-
-const PARAM_DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Data",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Price data as an M-by-4 matrix, table, or timetable.",
-};
-
-const OUTPUT_MACD: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "MACDLine",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Moving Average Convergence/Divergence series.",
-};
-
-const OUTPUT_SIGNAL: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "SignalLine",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Nine-period exponential moving average of the MACD line.",
-};
-
-const INPUTS: [BuiltinParamDescriptor; 1] = [PARAM_DATA];
-const OUTPUTS_MACD: [BuiltinParamDescriptor; 1] = [OUTPUT_MACD];
-const OUTPUTS_BOTH: [BuiltinParamDescriptor; 2] = [OUTPUT_MACD, OUTPUT_SIGNAL];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "MACDLine = macd(Data)",
-        inputs: &INPUTS,
-        outputs: &OUTPUTS_MACD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[MACDLine, SignalLine] = macd(Data)",
-        inputs: &INPUTS,
-        outputs: &OUTPUTS_BOTH,
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-        code: "RM.macd.INVALID_INPUT",
-        identifier: Some("RunMat:macd:InvalidInput"),
-        when: "Input is not a numeric M-by-4 matrix or table/timetable with High, Low, Open, and Close variables.",
-        message: "macd: invalid input",
-    };
-const ERROR_OUTPUT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.macd.OUTPUT_COUNT",
-    identifier: Some("RunMat:macd:OutputCount"),
-    when: "More than two output arguments are requested.",
-    message: "macd: too many output arguments",
-};
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.macd.INTERNAL",
-    identifier: Some("RunMat:macd:Internal"),
-    when: "Output construction fails.",
-    message: "macd: internal error",
-};
-const ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_INVALID_INPUT, ERROR_OUTPUT_COUNT, ERROR_INTERNAL];
-
-pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-fn macd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Tensor { shape }) => Type::Tensor {
-            shape: shape.as_ref().map(|dims| {
-                if dims.len() >= 2 {
-                    vec![dims[0], Some(1)]
-                } else {
-                    dims.clone()
-                }
-            }),
-        },
-        Some(Type::Unknown) | None => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 #[runtime_builtin(
     name = "macd",
-    category = "finance",
-    summary = "Compute the Moving Average Convergence/Divergence indicator.",
-    keywords = "macd,finance,technical indicator,ema,moving average",
-    type_resolver(macd_type),
-    descriptor(crate::builtins::finance::macd::DESCRIPTOR),
-    extensions(crate::builtins::finance::macd::MACD_EXTENSIONS),
-    integer_capabilities(crate::builtins::finance::macd::MACD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::finance::macd"
 )]
-async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
+async fn macd_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    data: Value,
+) -> BuiltinResult<Value> {
     let output_count = crate::output_count::current_output_count();
     match output_count {
-        Some(0) => return Ok(Value::OutputList(Vec::new())),
+        Some(0) => return Ok(Value::output_list(Vec::new())),
         Some(count) if count > 2 => {
             return Err(macd_error(
                 ERROR_OUTPUT_COUNT,
@@ -185,10 +46,10 @@ async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
 
     let input = MacdInput::from_value(data).await?;
     let include_signal = output_count == Some(2);
-    let eval = input.evaluate(include_signal)?;
+    let eval = input.evaluate(runtime.as_ref(), include_signal)?;
     match output_count {
-        Some(1) => Ok(Value::OutputList(vec![eval.macd])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(1) => Ok(Value::output_list(vec![eval.macd])),
+        Some(2) => Ok(Value::output_list(vec![
             eval.macd,
             eval.signal.expect("signal requested"),
         ])),
@@ -214,20 +75,30 @@ struct MacdEval {
 
 impl MacdInput {
     async fn from_value(value: Value) -> BuiltinResult<Self> {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            &value,
-            &MACD_NONDOUBLE_MATRIX_EXTENSION,
-            NAME,
-            "matrix price",
-        )
-        .await?;
+        // Class and shape admission precede the one provider gather. An integer
+        // resident payload must be inspected after that gather, not downloaded
+        // once for exactness and again for the recurrence.
+        let raw_integer =
+            crate::builtins::common::validation::value_has_native_integer_class(&value);
+        if raw_integer {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &MACD_NONDOUBLE_MATRIX_EXTENSION,
+                NAME,
+            )?;
+        }
         let mut resident_declared_double = false;
         if let Value::GpuTensor(handle) = &value {
-            resident_declared_double = runmat_accelerate_api::handle_class_name(handle)
-                .is_some_and(|class| class.eq_ignore_ascii_case("double"));
+            let shape = handle.shape();
+            if shape.len() != 2 || shape[1] != 4 {
+                return Err(macd_invalid(
+                    "macd: matrix input must have exactly four columns [High Low Open Close]",
+                ));
+            }
+            resident_declared_double = runmat_accelerate_api::handle_class_identity(handle)
+                .is_some_and(|class| class.is(standard::DOUBLE));
             let nondouble_numeric = runmat_accelerate_api::handle_integer_type(handle).is_some()
-                || runmat_accelerate_api::handle_class_name(handle)
-                    .is_some_and(|class| class.eq_ignore_ascii_case("single"));
+                || runmat_accelerate_api::handle_class_identity(handle)
+                    .is_some_and(|class| class.is(standard::SINGLE));
             if nondouble_numeric {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &MACD_NONDOUBLE_MATRIX_EXTENSION,
@@ -235,9 +106,33 @@ impl MacdInput {
                 )?;
             }
         }
-        let value = gather_if_needed_async(&value)
-            .await
-            .map_err(|err| macd_internal(format!("macd: {err}")))?;
+        if let Value::Tensor(tensor) = &value {
+            let shape = tensor_shape_for(tensor);
+            if shape.len() != 2 || shape[1] != 4 {
+                return Err(macd_invalid(
+                    "macd: matrix input must have exactly four columns [High Low Open Close]",
+                ));
+            }
+            if tensor.numeric_dtype() != NumericDType::F64 {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &MACD_NONDOUBLE_MATRIX_EXTENSION,
+                    NAME,
+                )?;
+            }
+            if raw_integer
+                && !crate::builtins::common::validation::native_integer_value_is_exact_f64(&value)
+            {
+                return Err(macd_invalid(
+                    "macd: integer matrix prices must be exactly representable as double",
+                ));
+            }
+        }
+        let value = gather_if_needed_async(&value).await.map_err(|mut err| {
+            if err.context.builtin.is_none() {
+                err.context = err.context.with_builtin(NAME);
+            }
+            err
+        })?;
         match value {
             Value::Tensor(tensor) => {
                 let shape = tensor_shape_for(&tensor);
@@ -251,6 +146,15 @@ impl MacdInput {
                         &MACD_NONDOUBLE_MATRIX_EXTENSION,
                         NAME,
                     )?;
+                }
+                if tensor.integer_storage().is_some_and(|storage| {
+                    storage.exact_values().iter().any(|value| {
+                        !crate::builtins::common::validation::integer_is_exact_f64(value)
+                    })
+                }) {
+                    return Err(macd_invalid(
+                        "macd: integer matrix prices must be exactly representable as double",
+                    ));
                 }
                 Ok(MacdInput::Matrix {
                     close: close_column_from_matrix(&tensor, &shape)?,
@@ -269,7 +173,11 @@ impl MacdInput {
         }
     }
 
-    fn evaluate(self, include_signal: bool) -> BuiltinResult<MacdEval> {
+    fn evaluate(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+        include_signal: bool,
+    ) -> BuiltinResult<MacdEval> {
         match self {
             MacdInput::Matrix { close } => {
                 let (macd, signal) = compute_macd(&close, include_signal)?;
@@ -283,6 +191,7 @@ impl MacdInput {
                 let rows = (0..close.rows()).collect::<Vec<_>>();
                 let row_names = selected_row_names(&source, &rows)?;
                 let macd = table_from_columns_like(
+                    runtime,
                     &source,
                     vec!["Close".to_string()],
                     vec![Value::Tensor(macd)],
@@ -292,6 +201,7 @@ impl MacdInput {
                 let signal = signal
                     .map(|signal| {
                         table_from_columns_like(
+                            runtime,
                             &source,
                             vec!["Close".to_string()],
                             vec![Value::Tensor(signal)],
@@ -411,10 +321,10 @@ fn tensor_from_numeric_value(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn tensor_shape_for(tensor: &Tensor) -> Vec<usize> {
-    if tensor.shape.is_empty() {
-        tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(tensor))
+    if tensor.shape().is_empty() {
+        tensor::default_shape_for(tensor.shape(), tensor::tensor_element_len(tensor))
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     }
 }
 
@@ -435,432 +345,4 @@ fn macd_error(descriptor: BuiltinErrorDescriptor, message: impl Into<String>) ->
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::{IntegerStorage, NumericDType, NumericScalar, Value};
-
-    use crate::builtins::table::{table_from_columns, table_variables};
-
-    fn call(value: Value) -> BuiltinResult<Value> {
-        block_on(macd_builtin(value))
-    }
-
-    fn call_with_mode(value: Value, extensions_enabled: bool) -> BuiltinResult<Value> {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
-        block_on(macd_builtin(value))
-    }
-
-    fn matrix(rows: usize, columns: [[f64; 4]; 5]) -> Value {
-        let mut data = Vec::with_capacity(rows * 4);
-        for col in 0..4 {
-            for row_values in columns.iter().take(rows) {
-                data.push(row_values[col]);
-            }
-        }
-        Value::Tensor(Tensor::new(data, vec![rows, 4]).unwrap())
-    }
-
-    fn integer_matrix(rows: usize, columns: [[i16; 4]; 5]) -> Value {
-        let mut data = Vec::with_capacity(rows * 4);
-        for col in 0..4 {
-            for row_values in columns.iter().take(rows) {
-                data.push(row_values[col]);
-            }
-        }
-        let tensor =
-            Tensor::new_integer(IntegerStorage::I16(data), vec![rows, 4]).expect("integer matrix");
-        Value::Tensor(tensor)
-    }
-
-    fn expect_tensor(value: Value) -> Tensor {
-        match value {
-            Value::Tensor(tensor) => tensor,
-            other => panic!("expected tensor, got {other:?}"),
-        }
-    }
-
-    fn assert_close(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() < 1e-12,
-            "expected {expected}, got {actual}"
-        );
-    }
-
-    #[test]
-    fn matrix_input_returns_macd_line_by_default() {
-        let out = expect_tensor(
-            call(matrix(
-                5,
-                [
-                    [2.0, 0.5, 1.0, 1.0],
-                    [3.0, 1.5, 2.0, 2.0],
-                    [4.0, 2.5, 3.0, 4.0],
-                    [5.0, 3.5, 4.0, 8.0],
-                    [6.0, 4.5, 5.0, 16.0],
-                ],
-            ))
-            .unwrap(),
-        );
-        assert_eq!(out.shape, vec![5, 1]);
-        assert_close(out.materialize_f64()[0], 0.0);
-        assert_close(out.materialize_f64()[1], 0.075);
-        assert_close(out.materialize_f64()[2], 0.283125);
-        assert_close(out.materialize_f64()[3], 0.743578125);
-        assert_close(out.materialize_f64()[4], 1.697244140625);
-    }
-
-    #[test]
-    fn matrix_input_reads_typed_integer_storage_exactly_as_double() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let out = expect_tensor(
-            call(integer_matrix(
-                5,
-                [
-                    [2, 1, 1, 1],
-                    [3, 2, 2, 2],
-                    [4, 3, 3, 4],
-                    [5, 4, 4, 8],
-                    [6, 5, 5, 16],
-                ],
-            ))
-            .unwrap(),
-        );
-        assert_eq!(out.shape, vec![5, 1]);
-        assert!(out.integer_storage().is_none());
-        assert_close(out.materialize_f64()[0], 0.0);
-        assert_close(out.materialize_f64()[1], 0.075);
-        assert_close(out.materialize_f64()[2], 0.283125);
-        assert_close(out.materialize_f64()[3], 0.743578125);
-        assert_close(out.materialize_f64()[4], 1.697244140625);
-    }
-
-    #[test]
-    fn raw_nondouble_matrix_follows_compatibility_mode() {
-        let integer = || integer_matrix(1, [[2, 1, 1, 1], [0; 4], [0; 4], [0; 4], [0; 4]]);
-        let error = call_with_mode(integer(), false)
-            .expect_err("MATLAB mode rejects raw integer macd matrix");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
-        );
-        call_with_mode(integer(), true).expect("RunMat mode accepts raw integer macd matrix");
-
-        let single = Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("single matrix");
-        let error = call_with_mode(Value::Tensor(single), false)
-            .expect_err("MATLAB mode rejects raw single macd matrix");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
-        );
-    }
-
-    #[test]
-    fn integer_prices_reject_before_a_lossy_binary64_boundary() {
-        let wide = (1_u64 << 53) + 1;
-        let matrix = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U64(vec![wide; 4]), vec![1, 4])
-                .expect("wide matrix"),
-        );
-        let error = call_with_mode(matrix, true).expect_err("lossy raw price must reject");
-        assert!(error.message().contains("exactly representable"));
-
-        let table = table_from_columns(
-            vec![
-                "High".to_string(),
-                "Low".to_string(),
-                "Open".to_string(),
-                "Close".to_string(),
-            ],
-            vec![
-                Value::Num(2.0),
-                Value::Num(1.0),
-                Value::Num(1.0),
-                Value::Tensor(
-                    Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1])
-                        .expect("wide close"),
-                ),
-            ],
-        )
-        .expect("table");
-        let error = call(table).expect_err("lossy table price must reject");
-        assert!(error.message().contains("exactly representable"));
-    }
-
-    #[test]
-    fn macd_integer_capabilities_separate_matrix_extension_and_table_data() {
-        assert_eq!(MACD_INTEGER_CAPABILITIES.len(), 2);
-        assert_eq!(
-            MACD_INTEGER_CAPABILITIES[0].inputs[0].availability,
-            BuiltinIntegerInputAvailability::RunMatOnly
-        );
-        assert_eq!(
-            MACD_INTEGER_CAPABILITIES[1].inputs[0].availability,
-            BuiltinIntegerInputAvailability::Documented
-        );
-    }
-
-    #[test]
-    fn resident_nondouble_matrix_uses_the_same_compatibility_gate() {
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            let double = Tensor::new(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
-            let double_handle =
-                crate::builtins::common::gpu_helpers::upload_tensor(provider, &double)
-                    .expect("upload");
-            runmat_accelerate_api::set_handle_class_name(&double_handle, "double");
-            call_with_mode(Value::GpuTensor(double_handle), false)
-                .expect("provider precision does not change documented double class");
-
-            let upload = || {
-                let matrix =
-                    Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
-                let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
-                    .expect("upload");
-                runmat_accelerate_api::set_handle_class_name(&handle, "single");
-                handle
-            };
-            let error = call_with_mode(Value::GpuTensor(upload()), false)
-                .expect_err("MATLAB mode rejects resident single matrix");
-            assert_eq!(
-                error.identifier(),
-                Some("RunMat:compatibility:MacdNondoubleMatrixExtension")
-            );
-            call_with_mode(Value::GpuTensor(upload()), true)
-                .expect("RunMat mode accepts resident single matrix");
-        });
-    }
-
-    #[test]
-    fn tensor_shape_for_reads_scalar_typed_integer_storage_without_mirror() {
-        let input = Tensor::new_integer(IntegerStorage::U8(vec![7]), Vec::new()).unwrap();
-
-        assert_eq!(tensor_shape_for(&input), vec![1, 1]);
-    }
-
-    #[test]
-    fn two_outputs_return_macd_and_signal() {
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let result = call(matrix(
-            5,
-            [
-                [2.0, 0.5, 1.0, 1.0],
-                [3.0, 1.5, 2.0, 2.0],
-                [4.0, 2.5, 3.0, 4.0],
-                [5.0, 3.5, 4.0, 8.0],
-                [6.0, 4.5, 5.0, 16.0],
-            ],
-        ))
-        .unwrap();
-        let Value::OutputList(values) = result else {
-            panic!("expected outputs");
-        };
-        assert_eq!(values.len(), 2);
-        let macd = expect_tensor(values[0].clone());
-        let signal = expect_tensor(values[1].clone());
-        assert_eq!(macd.shape, vec![5, 1]);
-        assert_eq!(signal.shape, vec![5, 1]);
-        assert_close(signal.materialize_f64()[0], 0.0);
-        assert_close(signal.materialize_f64()[1], 0.015);
-        assert_close(signal.materialize_f64()[2], 0.068625);
-        assert_close(signal.materialize_f64()[3], 0.203615625);
-        assert_close(signal.materialize_f64()[4], 0.502341328125);
-    }
-
-    #[test]
-    fn zero_outputs_return_empty_without_validating_input() {
-        let _guard = crate::output_count::push_output_count(Some(0));
-        let result = call(Value::String("not data".to_string())).unwrap();
-        assert_eq!(result, Value::OutputList(Vec::new()));
-    }
-
-    #[test]
-    fn rejects_more_than_two_outputs_before_evaluation() {
-        let _guard = crate::output_count::push_output_count(Some(3));
-        let err = call(matrix(
-            1,
-            [[2.0, 0.5, 1.0, 1.0], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]],
-        ))
-        .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:macd:OutputCount"));
-    }
-
-    #[test]
-    fn empty_matrix_returns_empty_series() {
-        let _guard = crate::output_count::push_output_count(Some(2));
-        let result = call(Value::Tensor(Tensor::new(vec![], vec![0, 4]).unwrap())).unwrap();
-        let Value::OutputList(values) = result else {
-            panic!("expected outputs");
-        };
-        let macd = expect_tensor(values[0].clone());
-        let signal = expect_tensor(values[1].clone());
-        assert_eq!(macd.shape, vec![0, 1]);
-        assert_eq!(signal.shape, vec![0, 1]);
-        assert!(macd.materialize_f64().is_empty());
-        assert!(signal.materialize_f64().is_empty());
-    }
-
-    #[test]
-    fn nan_prices_propagate_through_ema_recurrence() {
-        let out = expect_tensor(
-            call(matrix(
-                4,
-                [
-                    [2.0, 0.5, 1.0, 1.0],
-                    [3.0, 1.5, 2.0, f64::NAN],
-                    [4.0, 2.5, 3.0, 4.0],
-                    [5.0, 3.5, 4.0, 8.0],
-                    [0.0; 4],
-                ],
-            ))
-            .unwrap(),
-        );
-        assert_eq!(out.shape, vec![4, 1]);
-        assert_eq!(out.materialize_f64()[0], 0.0);
-        assert!(out.materialize_f64()[1].is_nan());
-        assert!(out.materialize_f64()[2].is_nan());
-        assert!(out.materialize_f64()[3].is_nan());
-    }
-
-    #[test]
-    fn table_input_is_case_insensitive_and_returns_table_with_close() {
-        let table = table_from_columns(
-            vec![
-                "high".to_string(),
-                "LOW".to_string(),
-                "Open".to_string(),
-                "close".to_string(),
-            ],
-            vec![
-                Value::Tensor(Tensor::new(vec![2.0, 3.0, 4.0], vec![3, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![0.5, 1.5, 2.5], vec![3, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0], vec![3, 1]).unwrap()),
-            ],
-        )
-        .unwrap();
-        let out = call(table).unwrap();
-        let Value::Object(object) = out else {
-            panic!("expected table output");
-        };
-        assert_eq!(object.class_name, "table");
-        let variables = table_variables(&object).unwrap();
-        assert_eq!(variables.fields.len(), 1);
-        let close = expect_tensor(variables.fields.get("Close").cloned().unwrap());
-        assert_eq!(close.shape, vec![3, 1]);
-        assert_close(close.materialize_f64()[1], 0.075);
-        assert_close(close.materialize_f64()[2], 0.283125);
-    }
-
-    #[test]
-    fn table_input_preserves_native_single_close_class() {
-        let single_column = |values: Vec<f64>| {
-            Value::Tensor(
-                Tensor::new_with_dtype(values, vec![3, 1], NumericDType::F32)
-                    .expect("single table variable"),
-            )
-        };
-        let table = table_from_columns(
-            vec![
-                "High".to_string(),
-                "Low".to_string(),
-                "Open".to_string(),
-                "Close".to_string(),
-            ],
-            vec![
-                single_column(vec![2.0, 3.0, 4.0]),
-                single_column(vec![0.5, 1.5, 2.5]),
-                single_column(vec![1.0, 2.0, 3.0]),
-                single_column(vec![1.0, 2.0, 4.0]),
-            ],
-        )
-        .expect("single table");
-
-        let Value::Object(object) = call(table).expect("macd") else {
-            panic!("expected table output");
-        };
-        let variables = table_variables(&object).expect("output variables");
-        let close = expect_tensor(variables.fields.get("Close").cloned().expect("Close"));
-        assert_eq!(close.numeric_dtype(), NumericDType::F32);
-        for (index, expected) in [0.0_f32, 0.075, 0.283125].into_iter().enumerate() {
-            assert_eq!(
-                close.numeric_value_at(index),
-                Some(NumericScalar::F32(expected))
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_matrix_without_four_columns() {
-        let err = call(Value::Tensor(
-            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
-        ))
-        .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:macd:InvalidInput"));
-    }
-
-    #[test]
-    fn rejects_higher_rank_matrix_input() {
-        let err = call(Value::Tensor(
-            Tensor::new((1..=16).map(|value| value as f64).collect(), vec![2, 4, 2]).unwrap(),
-        ))
-        .unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:macd:InvalidInput"));
-    }
-
-    #[test]
-    fn rejects_table_missing_required_price_variable() {
-        let table = table_from_columns(
-            vec!["High".to_string(), "Low".to_string(), "Open".to_string()],
-            vec![
-                Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![0.5, 1.5], vec![2, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-            ],
-        )
-        .unwrap();
-        let err = call(table).unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:macd:InvalidInput"));
-    }
-
-    #[test]
-    fn rejects_nonnumeric_price_variables() {
-        let table = table_from_columns(
-            vec![
-                "High".to_string(),
-                "Low".to_string(),
-                "Open".to_string(),
-                "Close".to_string(),
-            ],
-            vec![
-                Value::String("not numeric".to_string()),
-                Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
-            ],
-        )
-        .unwrap();
-        let err = call(table).unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:macd:InvalidInput"));
-    }
-
-    #[test]
-    fn rejects_multicolumn_price_variables() {
-        let table = table_from_columns(
-            vec![
-                "High".to_string(),
-                "Low".to_string(),
-                "Open".to_string(),
-                "Close".to_string(),
-            ],
-            vec![
-                Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
-                Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-                Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
-            ],
-        )
-        .unwrap();
-        let err = call(table).unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:macd:InvalidInput"));
-    }
-}
+mod tests;

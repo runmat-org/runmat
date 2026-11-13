@@ -1,0 +1,52 @@
+// Engineering physics belongs in the importing study.
+
+geometry bracket {
+    file = "./geometry/two-box-assembly.step"
+    units = m
+
+    region left_body : solid { select name "left_body"; expect exactly_one }
+    region right_body : solid { select name "right_body"; expect exactly_one }
+    region left_support : face { select name "left_support"; expect exactly_one }
+    region left_load_face : face { select name "left_load_face"; expect exactly_one }
+    region right_support : face { select name "right_support"; expect exactly_one }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 1.5 m
+        maximum_deviation = 0.05 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model loaded_bracket {
+    assign material.steel to geometry.bracket.region.left_body
+    assign material.steel to geometry.bracket.region.right_body
+    constraint left_support {
+        structural.fixed { target = geometry.bracket.region.left_support }
+    }
+    constraint right_support {
+        structural.fixed { target = geometry.bracket.region.right_support }
+    }
+    load service_traction {
+        traction on geometry.bracket.region.left_load_face = [166.6666666667, 0, 0] Pa
+    }
+    load_case service { include load.service_traction }
+}
+
+study structural_static {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.loaded_bracket
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+}

@@ -6,19 +6,26 @@
 
 use runmat_execution::value::ValueRef;
 use runmat_execution::ProgramRevision;
-use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_geometry_core::ExactBRepTopology;
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingCapabilityRequirement, MeshingInputKind, MeshingInputRef,
-    MeshingPartitionDescriptor, MeshingPartitionKind, MeshingStageIdentity, MeshingStageKind,
-    MeshingWorkloadRequest, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
-    MESHING_WORKLOAD_SCHEMA_VERSION,
+    CanonicalMeshingContract, GeometryRevisionRef, MeshingCapabilityRequirement, MeshingInputKind,
+    MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind, MeshingRequest,
+    MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, StableDigest,
+    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_curve::curve_partition_descriptors;
 use runmat_meshing_surface::{face_partition_descriptors, MAX_EXACT_FACE_PARTITIONS};
 
 use crate::task::{validate_input, validate_inputs};
-use crate::{MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload};
+use crate::{
+    ArtifactAccess, MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload,
+    PreparedExactGeometryInput, MESHING_HOST_ABI,
+};
+
+mod stage;
+mod terminal;
+
+use stage::{capabilities_for_stage, validate_seed_capabilities, whole_partition};
 
 /// One meshing-owned stage with roots ordered exactly like its canonical prerequisites.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,11 +56,12 @@ impl PlannedMeshingStage {
         &self.input_roots
     }
 
-    pub fn program_request(
+    pub fn prepare_invocation(
         &self,
         revision: ProgramRevision,
-    ) -> MeshingExecutionResult<ProgramExecutionRequest> {
-        self.host.program_request(revision, &self.input_roots)
+    ) -> MeshingExecutionResult<crate::PreparedMeshingHostInvocation> {
+        self.host
+            .prepare_program_request(revision, &self.input_roots)
     }
 }
 
@@ -98,6 +106,101 @@ struct ExactDagContext {
 }
 
 impl ExactMeshingDagPlanner {
+    /// Constructs the canonical exact-meshing planner directly from an admitted geometry closure.
+    ///
+    /// This is the product entry boundary for meshing-owned DAG semantics. It creates no task,
+    /// attempt, worker, or placement state; callers remain responsible for submitting the planned
+    /// stages through an execution backend.
+    pub fn new(
+        geometry: &PreparedExactGeometryInput,
+        request: MeshingRequest,
+        ceilings: runmat_meshing_core::MeshingExecutionCeilings,
+        artifact_access: ArtifactAccess,
+        capability_cohort: Option<String>,
+    ) -> MeshingExecutionResult<Self> {
+        artifact_access.validate()?;
+        let document = &geometry.geometry_objects().document;
+        request.validate()?;
+        if request.tolerance != document.tolerance {
+            return Err(MeshingExecutionError::Identity(
+                "meshing request tolerance differs from the admitted geometry tolerance",
+            ));
+        }
+        let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+            return Err(invalid(
+                "exact meshing DAG requires an authoritative exact B-rep document",
+            ));
+        };
+        let root = geometry.root_input().clone();
+        if root.authorization_scope != artifact_access.authorization_scope
+            || root.encryption_context != artifact_access.encryption_context
+            || root.id != artifact_access.value_id(root.logical_digest)
+        {
+            return Err(MeshingExecutionError::Identity(
+                "exact geometry root is outside the requested artifact authority",
+            ));
+        }
+        let input = MeshingInputRef {
+            kind: MeshingInputKind::ExactGeometry,
+            digest: StableDigest::from_bytes(*root.logical_digest.bytes()),
+        };
+        let identity = MeshingStageIdentity {
+            schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
+            stage: MeshingStageKind::CurveMesh,
+            geometry: GeometryRevisionRef {
+                source_unit_evidence: document.source.unit_evidence.clone(),
+                source_digest: StableDigest::from_bytes(*document.source.content_digest.bytes()),
+                geometry_revision: document.revision.revision,
+                persistent_mapping_version: document.revision.persistent_mapping_version,
+            },
+            resolved_request_digest: request.canonical_digest()?,
+            tolerance_policy_digest: request.tolerance.canonical_digest()?,
+            metric_policy_digest: request.metric.canonical_digest()?,
+            algorithm_set_digest: request.algorithms.canonical_digest()?,
+            deterministic_seed: request.deterministic_seed,
+            prerequisites: vec![input.clone()],
+            capability_cohort: capability_cohort.clone(),
+        };
+        let mut required_capabilities = vec![
+            MeshingCapabilityRequirement::HostWorkload {
+                abi: MESHING_HOST_ABI.into(),
+            },
+            MeshingCapabilityRequirement::ExactCadKernel {
+                abi: model.kernel_abi.clone(),
+            },
+            MeshingCapabilityRequirement::MeshingAlgorithm {
+                version: request.algorithms.curve.clone(),
+            },
+            MeshingCapabilityRequirement::ElementOrder {
+                order: request.element_order,
+            },
+        ];
+        if let Some(cohort) = capability_cohort {
+            required_capabilities
+                .push(MeshingCapabilityRequirement::DeterministicPlatformCohort { cohort });
+        }
+        required_capabilities.sort();
+        let workload = MeshingWorkloadRequest {
+            schema_version: MESHING_WORKLOAD_SCHEMA_VERSION,
+            stage: MeshingStageKind::CurveMesh,
+            stage_identity_digest: identity.canonical_digest()?,
+            // The seed is identity/capability authority only. Initial edge batches are emitted by
+            // `initial_curve_pass`, so it is never submitted as an executable stage.
+            partition: whole_partition(MeshingPartitionKind::WholeStage),
+            inputs: vec![input],
+            required_capabilities,
+        };
+        let seed = MeshingHostWorkload::new(
+            workload,
+            identity,
+            request,
+            ceilings,
+            artifact_access,
+            Some(document.clone()),
+        )?;
+        Self::from_exact_host(&seed, root)
+    }
+
     /// Seeds exact meshing from a validated host that consumes the admitted exact geometry.
     ///
     /// Reusing the seed preserves the already admitted host ABI, exact-kernel ABI, element order,
@@ -215,7 +318,7 @@ impl ExactMeshingDagPlanner {
             .pass_index
             .checked_add(1)
             .ok_or_else(|| invalid("surface pass index overflowed"))?;
-        if pass_index >= self.seed.resolved_request.resources.maximum_recursion_depth {
+        if pass_index >= self.seed.resolved_request.limits.maximum_recursion_depth {
             return Err(invalid(
                 "surface convergence exhausted the resolved recursion budget",
             ));
@@ -341,7 +444,7 @@ impl ExactMeshingDagPlanner {
         partition: MeshingPartitionDescriptor,
         roots: Vec<ValueRef>,
     ) -> MeshingExecutionResult<PlannedMeshingStage> {
-        let mut dependencies = roots
+        let dependencies = roots
             .into_iter()
             .map(|root| {
                 let kind = if root.logical_digest.bytes() == self.context.geometry_digest.bytes() {
@@ -349,6 +452,21 @@ impl ExactMeshingDagPlanner {
                 } else {
                     MeshingInputKind::StageArtifact
                 };
+                (kind, root)
+            })
+            .collect::<Vec<_>>();
+        self.build_stage_with_dependencies(stage, partition, dependencies)
+    }
+
+    fn build_stage_with_dependencies(
+        &self,
+        stage: MeshingStageKind,
+        partition: MeshingPartitionDescriptor,
+        dependencies: Vec<(MeshingInputKind, ValueRef)>,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        let mut dependencies = dependencies
+            .into_iter()
+            .map(|(kind, root)| {
                 (
                     MeshingInputRef {
                         kind,
@@ -367,6 +485,14 @@ impl ExactMeshingDagPlanner {
             .into_iter()
             .map(|(_, root)| root)
             .collect::<Vec<_>>();
+        let geometry_document = if inputs
+            .iter()
+            .any(|input| input.kind == MeshingInputKind::ExactGeometry)
+        {
+            self.seed.geometry_document.clone()
+        } else {
+            None
+        };
         let identity = MeshingStageIdentity {
             schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
             stage,
@@ -391,71 +517,12 @@ impl ExactMeshingDagPlanner {
             workload,
             identity,
             self.seed.resolved_request.clone(),
+            self.seed.ceilings,
             self.seed.artifact_access.clone(),
-            self.seed.geometry_document.clone(),
+            geometry_document,
         )?;
         validate_inputs(&host.workload, &input_roots, &host.artifact_access)?;
         Ok(PlannedMeshingStage { host, input_roots })
-    }
-}
-
-fn validate_seed_capabilities(seed: &MeshingHostWorkload) -> MeshingExecutionResult<()> {
-    let mut host = 0;
-    let mut exact = 0;
-    let mut algorithm = 0;
-    let mut order = 0;
-    let mut cohort = 0;
-    for capability in &seed.workload.required_capabilities {
-        match capability {
-            MeshingCapabilityRequirement::HostWorkload { .. } => host += 1,
-            MeshingCapabilityRequirement::ExactCadKernel { .. } => exact += 1,
-            MeshingCapabilityRequirement::MeshingAlgorithm { .. } => algorithm += 1,
-            MeshingCapabilityRequirement::ElementOrder { .. } => order += 1,
-            MeshingCapabilityRequirement::DeterministicPlatformCohort { .. } => cohort += 1,
-        }
-    }
-    let expected_cohort = usize::from(seed.stage_identity.capability_cohort.is_some());
-    if (host, exact, algorithm, order, cohort) != (1, 1, 1, 1, expected_cohort) {
-        return Err(invalid(
-            "exact meshing DAG seed capabilities are incomplete or ambiguous",
-        ));
-    }
-    Ok(())
-}
-
-fn capabilities_for_stage(
-    seed: &MeshingHostWorkload,
-    stage: MeshingStageKind,
-) -> MeshingExecutionResult<Vec<MeshingCapabilityRequirement>> {
-    let version = match stage {
-        MeshingStageKind::CurveMesh => &seed.resolved_request.algorithms.curve,
-        MeshingStageKind::SurfaceMesh => &seed.resolved_request.algorithms.surface,
-        MeshingStageKind::Tetrahedralization => &seed.resolved_request.algorithms.tetrahedron,
-        _ => return Err(invalid("exact meshing DAG received an unsupported stage")),
-    };
-    let mut capabilities = seed
-        .workload
-        .required_capabilities
-        .iter()
-        .map(|capability| match capability {
-            MeshingCapabilityRequirement::MeshingAlgorithm { .. } => {
-                MeshingCapabilityRequirement::MeshingAlgorithm {
-                    version: version.clone(),
-                }
-            }
-            capability => capability.clone(),
-        })
-        .collect::<Vec<_>>();
-    capabilities.sort();
-    Ok(capabilities)
-}
-
-fn whole_partition(kind: MeshingPartitionKind) -> MeshingPartitionDescriptor {
-    MeshingPartitionDescriptor {
-        kind,
-        partition_index: 0,
-        partition_count: 1,
-        entity_range: None,
     }
 }
 

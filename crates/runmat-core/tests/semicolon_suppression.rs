@@ -5,6 +5,7 @@
 
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
+use runmat_runtime::execution::RootedResult;
 use runmat_value::Value;
 
 /// Test basic semicolon suppression behavior
@@ -15,7 +16,7 @@ fn test_semicolon_suppresses_output() {
     // Expression without semicolon should return a value
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "2 + 3").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "5");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "5");
 
     // Expression with semicolon should suppress output
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "2 + 3;").unwrap();
@@ -43,7 +44,7 @@ fn test_assignment_with_semicolon() {
     // But the variable should still be assigned
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "y").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "42");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "42");
 }
 
 #[test]
@@ -57,6 +58,26 @@ fn test_repeated_unsuppressed_assignment_does_not_duplicate_stdout() {
     assert_eq!(collect_stdout_texts(&first), vec!["x = 42"]);
     assert_eq!(collect_stdout_texts(&second), vec!["x = 42"]);
     assert_eq!(collect_stdout_texts(&third), vec!["x = 42"]);
+}
+
+#[test]
+fn test_statement_output_is_ordered_and_uses_whole_assignment_binding() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "x = [1 2]\nx(2) = 3\n2 + 4\ny = 7;\ny\ndisp('after-y');",
+    )
+    .unwrap();
+    let stdout = collect_stdout_texts(&result);
+    assert_eq!(stdout.len(), 5, "{stdout:?}");
+    assert!(stdout[0].starts_with("x ="), "{stdout:?}");
+    assert!(
+        stdout[1].starts_with("x =") && stdout[1].contains('3'),
+        "{stdout:?}"
+    );
+    assert_eq!(stdout[2], "ans = 6");
+    assert_eq!(stdout[3], "y = 7");
+    assert_eq!(stdout[4], "after-y");
 }
 
 #[test]
@@ -97,15 +118,15 @@ fn test_mixed_semicolon_behavior() {
 
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "a").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "10");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "10");
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "b").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "20");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "20");
 
     // Expression without semicolon should show result
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "a + b").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "30");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "30");
 
     // Same expression with semicolon should suppress output
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "a + b;").unwrap();
@@ -150,7 +171,7 @@ fn test_function_call_semicolon_suppression() {
     // Function call without semicolon should return result
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "sin(0)").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "0");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "0");
 
     // Function call with semicolon should suppress output
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "sin(0);").unwrap();
@@ -164,10 +185,10 @@ fn test_matrix_semicolon_suppression() {
 
     // Matrix creation without semicolon should show result
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "[1, 2, 3]").unwrap();
-    let Some(Value::Tensor(tensor)) = result.value else {
+    let Some(Value::Tensor(tensor)) = result.value.as_ref() else {
         panic!("expected tensor result for row-vector literal");
     };
-    assert_eq!(tensor.shape, vec![1, 3]);
+    assert_eq!(tensor.shape(), &[1, 3]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]);
 
     // Matrix creation with semicolon should suppress output
@@ -184,7 +205,7 @@ fn test_complex_expression_semicolon_suppression() {
     let result =
         runmat_core::execute_text_request_for_testing(&mut engine, "(2 + 3) * (4 - 1)").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "15");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "15");
 
     // Same complex expression with semicolon
     let result =
@@ -264,7 +285,7 @@ fn test_control_flow_not_affected() {
     // But the assignment inside should work
     let result = runmat_core::execute_text_request_for_testing(&mut engine, "y").unwrap();
     assert!(result.value.is_some());
-    assert_eq!(result.value.unwrap().to_string(), "2");
+    assert_eq!(result.value.as_ref().unwrap().to_string(), "2");
 }
 
 fn collect_stdout_texts(result: &SessionExecutionResult) -> Vec<String> {
@@ -285,7 +306,9 @@ fn collect_stdout_stream(result: &SessionExecutionResult) -> String {
         .collect::<String>()
 }
 
-fn assert_undefined_variable_identifier(result: Result<SessionExecutionResult, RunError>) {
+fn assert_undefined_variable_identifier(
+    result: Result<RootedResult<SessionExecutionResult>, RunError>,
+) {
     match result {
         Err(RunError::Semantic(err)) => {
             assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
@@ -299,6 +322,7 @@ fn assert_undefined_variable_identifier(result: Result<SessionExecutionResult, R
         Ok(exec) => {
             let err = exec
                 .error
+                .as_ref()
                 .expect("expected execution-level undefined-variable error");
             assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
         }

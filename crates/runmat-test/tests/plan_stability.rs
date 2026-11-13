@@ -26,6 +26,7 @@ fn plan_is_stable_across_input_order_and_checkout_location() {
     )
     .unwrap();
     let suite_id = SuiteId::derive(&revision.canonical_identity(), "suite/example");
+    assert!(suite_id.validate().is_ok());
     let group_id = FixtureGroupId::derive(suite_id.as_str(), "class-state");
     let tests = ["zeta", "alpha"]
         .map(|name| TestDescriptor {
@@ -58,6 +59,7 @@ fn plan_is_stable_across_input_order_and_checkout_location() {
     };
     let first = build(tests.clone());
     let second = build(tests);
+    assert!(first.tests().all(|test| test.id.validate().is_ok()));
 
     assert_eq!(first, second);
     assert_eq!(

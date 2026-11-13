@@ -1,6 +1,6 @@
 [package]
 name = "runmat-canonical-codec"
-version = "0.6.2"
+version = "0.7.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -12,3 +12,6 @@ repository = "https://github.com/runmat-org/runmat"
 minicbor = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[build-dependencies]
+runmat-build-identity = { workspace = true }

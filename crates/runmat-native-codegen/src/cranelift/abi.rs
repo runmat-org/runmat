@@ -1,64 +1,46 @@
+use crate::{NativeCodegenError, NativeCodegenResult, NativeTarget};
 use cranelift::prelude::*;
+use runmat_execution::host::{NativeAbiField, NativeAbiProbe};
 
-pub(super) struct AbiTypes {
+pub(super) struct AbiTypes<'a> {
     pub pointer: Type,
     pub entry_signature: Signature,
     pub execute_site_signature: Signature,
+    pub layout: &'a NativeAbiProbe,
 }
 
-impl AbiTypes {
-    pub fn current() -> Self {
-        let pointer = if usize::BITS == 32 {
-            types::I32
-        } else {
-            types::I64
-        };
-        let call_conv =
-            cranelift_codegen::isa::CallConv::triple_default(&target_lexicon::Triple::host());
+impl<'a> AbiTypes<'a> {
+    pub fn for_target(target: &'a NativeTarget) -> NativeCodegenResult<Self> {
+        let (selected, layout) = target.native_parts()?;
+        let triple = selected
+            .triple()
+            .map_err(|error| NativeCodegenError::new("native.cranelift.target", error.to_string()))?
+            .parse::<target_lexicon::Triple>()
+            .map_err(|error| {
+                NativeCodegenError::new("native.cranelift.target", error.to_string())
+            })?;
+        let pointer = types::I64; // Checked explicit probe/selected-target width.
+        let call_conv = cranelift_codegen::isa::CallConv::triple_default(&triple);
         let mut entry_signature = Signature::new(call_conv);
-        entry_signature.params.push(AbiParam::new(pointer));
-        entry_signature.params.push(AbiParam::new(pointer));
+        entry_signature
+            .params
+            .extend([AbiParam::new(pointer), AbiParam::new(pointer)]);
         entry_signature.returns.push(AbiParam::new(types::I32));
-
         let mut execute_site_signature = Signature::new(call_conv);
-        execute_site_signature.params.extend([
-            AbiParam::new(pointer),
-            AbiParam::new(pointer),
-            AbiParam::new(pointer),
-            AbiParam::new(pointer),
-            AbiParam::new(pointer),
-        ]);
+        execute_site_signature
+            .params
+            .extend([AbiParam::new(pointer); 5]);
         execute_site_signature
             .returns
             .push(AbiParam::new(types::I32));
-        Self {
+        Ok(Self {
             pointer,
             entry_signature,
             execute_site_signature,
-        }
+            layout,
+        })
     }
-}
-
-pub(super) fn call_host_offset() -> i32 {
-    std::mem::offset_of!(runmat_runtime::native::NativeCall, host) as i32
-}
-
-pub(super) fn call_frame_offset() -> i32 {
-    std::mem::offset_of!(runmat_runtime::native::NativeCall, frame) as i32
-}
-
-pub(super) fn frame_resume_offset() -> i32 {
-    std::mem::offset_of!(runmat_runtime::native::NativeFrame, resume) as i32
-}
-
-pub(super) fn resume_block_offset() -> i32 {
-    std::mem::offset_of!(runmat_runtime::native::NativeResumeState, block) as i32
-}
-
-pub(super) fn host_context_offset() -> i32 {
-    std::mem::offset_of!(runmat_runtime::native::NativeHostVTable, context) as i32
-}
-
-pub(super) fn host_execute_site_offset() -> i32 {
-    std::mem::offset_of!(runmat_runtime::native::NativeHostVTable, execute_site) as i32
+    pub fn offset(&self, field: NativeAbiField) -> i32 {
+        self.layout.offset(field) as i32
+    }
 }

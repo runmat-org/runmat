@@ -1,12 +1,9 @@
 //! MATLAB-compatible `toeplitz` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor,
+    TOEPLITZ_COMPLEX_INTEGER_INPUT_EXTENSION as COMPLEX_INTEGER_INPUT_EXTENSION,
+    TOEPLITZ_ERROR_INTERNAL as ERROR_INTERNAL, TOEPLITZ_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -16,148 +13,29 @@ use runmat_value::{
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
+use crate::builtins::math::elementwise::complex_components::conjugate_integer_imaginary_storage;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "toeplitz";
 
-const COMPLEX_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "toeplitz-complex-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "toeplitz accepts native complex-integer vectors",
-    error_identifier: Some("RunMat:compatibility:ToeplitzComplexIntegerInputExtension"),
-};
-const TOEPLITZ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [COMPLEX_INTEGER_INPUT_EXTENSION];
-
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "T",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Toeplitz matrix with constant diagonals.",
-}];
-
-const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "r",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "First row for the symmetric or Hermitian Toeplitz matrix.",
-}];
-
-const INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "c",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First column.",
-    },
-    BuiltinParamDescriptor {
-        name: "r",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First row.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "T = toeplitz(c)",
-        inputs: &INPUTS_ONE,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "T = toeplitz(c, r)",
-        inputs: &INPUTS_TWO,
-        outputs: &OUTPUT,
-    },
-];
-
-const INTEGER_VECTOR_INPUT: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "c",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "The first column retains its native integer class and exact values.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "r",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes:
-            "The first row must use the same native integer class as c and retains exact values.",
-    },
-];
-const COMPLEX_INTEGER_VECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "c and/or r",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "RunMat can structurally copy paired native integer components; the public integer domain does not support complex-integer operations.",
-    }];
-pub const TOEPLITZ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "T = toeplitz(integer_c [, integer_r])",
-        inputs: &INTEGER_VECTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Toeplitz placement copies exact native values without arithmetic. Two-input integer calls require one common class; resident output returns through the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "T = toeplitz(complex_integer_c [, complex_integer_r])",
-        inputs: &COMPLEX_INTEGER_VECTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "RunMat-only same-class paired integer-component construction preserves exact real and imaginary storage.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TOEPLITZ.INVALID_INPUT",
-    identifier: Some("RunMat:toeplitz:InvalidInput"),
-    when: "Inputs are not vector-valued real or complex numeric arrays.",
-    message: "toeplitz: invalid input",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TOEPLITZ.INTERNAL",
-    identifier: Some("RunMat:toeplitz:Internal"),
-    when: "Output allocation or gpuArray gather fails.",
-    message: "toeplitz: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_INTERNAL];
-
-pub const TOEPLITZ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "toeplitz",
-    category = "array/shape",
-    summary = "Construct a Toeplitz matrix from first-column and first-row vectors.",
-    keywords = "toeplitz,matrix,constant diagonals",
-    accel = "gather",
-    descriptor(crate::builtins::array::shape::toeplitz::TOEPLITZ_DESCRIPTOR),
-    extensions(TOEPLITZ_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::toeplitz::TOEPLITZ_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::toeplitz"
 )]
-async fn toeplitz_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn toeplitz_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        return Err(error_with_detail(
+            &runmat_builtins::TOEPLITZ_ERROR_TOO_MANY_OUTPUTS,
+            "expected at most one output",
+        ));
+    }
+    if !(1..=2).contains(&args.len()) {
+        return Err(error_with_detail(
+            &ERROR_INVALID_INPUT,
+            "expected one or two inputs",
+        ));
+    }
     if args
         .iter()
         .any(crate::builtins::common::validation::is_typed_complex_integer)
@@ -167,13 +45,14 @@ async fn toeplitz_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             NAME,
         )?;
     }
-    let source = gpu_helpers::select_resident_output_source(
-        args.iter().filter_map(|value| match value {
+    let protected: Vec<_> = args
+        .iter()
+        .filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
             _ => None,
-        }),
-        NAME,
-    )?;
+        })
+        .collect();
+    let source = gpu_helpers::select_resident_output_source(protected.iter().cloned(), NAME)?;
     let output = match args.len() {
         1 => {
             let r = InputVector::from_value(args.into_iter().next().expect("r")).await?;
@@ -193,154 +72,18 @@ async fn toeplitz_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let Some(source) = source else {
         return Ok(output);
     };
-    gpu_helpers::restore_class_preserving_value(&source, output, NAME)
-        .map_err(|error| error_with_detail(&ERROR_INTERNAL, error))
+    gpu_helpers::restore_class_preserving_value_protecting(
+        &source,
+        output,
+        NAME,
+        &protected.iter().collect::<Vec<_>>(),
+    )
+    .map_err(|error| error_with_detail(&ERROR_INTERNAL, error))
 }
 
-#[derive(Clone, Debug)]
-enum InputVector {
-    Real {
-        values: Vec<f64>,
-        dtype: NumericDType,
-    },
-    TypedInteger(IntegerStorage),
-    Complex {
-        values: Vec<(f64, f64)>,
-        dtype: NumericDType,
-    },
-    TypedComplex(IntegerComplexStorage),
-}
-
-impl InputVector {
-    async fn from_value(value: Value) -> BuiltinResult<Self> {
-        let gathered = gpu_helpers::gather_value_async(&value)
-            .await
-            .map_err(|err| error_with_detail(&ERROR_INTERNAL, err.message()))?;
-        match gathered {
-            Value::Num(value) => Ok(Self::Real {
-                values: vec![value],
-                dtype: NumericDType::F64,
-            }),
-            Value::Int(value) => Ok(Self::TypedInteger(IntegerStorage::from_scalar(value))),
-            Value::Tensor(tensor) => {
-                validate_vector_shape(&tensor.shape, tensor_utils::tensor_element_len(&tensor))?;
-                let storage = tensor
-                    .into_numeric_storage()
-                    .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
-                Ok(match storage {
-                    NumericStorage::F64(values) => Self::Real {
-                        values,
-                        dtype: NumericDType::F64,
-                    },
-                    NumericStorage::F32(values) => Self::Real {
-                        values: values.into_iter().map(f64::from).collect(),
-                        dtype: NumericDType::F32,
-                    },
-                    storage => Self::TypedInteger(
-                        storage
-                            .into_integer_storage()
-                            .expect("integer numeric storage"),
-                    ),
-                })
-            }
-            Value::Complex(re, im) => Ok(Self::Complex {
-                values: vec![(re, im)],
-                dtype: NumericDType::F64,
-            }),
-            Value::ComplexTensor(tensor) => {
-                validate_vector_shape(
-                    &tensor.shape,
-                    tensor_utils::complex_tensor_element_len(&tensor),
-                )?;
-                Ok(match tensor.integer_storage() {
-                    Some(storage) => Self::TypedComplex(storage.clone()),
-                    None => Self::Complex {
-                        dtype: tensor.numeric_dtype(),
-                        values: tensor.materialize_f64(),
-                    },
-                })
-            }
-            other => Err(error_with_detail(
-                &ERROR_INVALID_INPUT,
-                format!("unsupported input {other:?}"),
-            )),
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Real { values, .. } => values.len(),
-            Self::TypedInteger(storage) => storage.len(),
-            Self::Complex { values, .. } => values.len(),
-            Self::TypedComplex(storage) => storage.len(),
-        }
-    }
-
-    fn is_complex(&self) -> bool {
-        matches!(self, Self::Complex { .. } | Self::TypedComplex(_))
-    }
-
-    fn real_at(&self, index: usize) -> f64 {
-        match self {
-            Self::Real { values, .. } => values[index],
-            Self::TypedInteger(storage) => storage
-                .value_at(index)
-                .expect("toeplitz index is in bounds")
-                .to_f64(),
-            Self::Complex { values, .. } => values[index].0,
-            Self::TypedComplex(_) => {
-                unreachable!("typed complex integers use toeplitz_typed_complex")
-            }
-        }
-    }
-
-    fn complex_at(&self, index: usize) -> (f64, f64) {
-        match self {
-            Self::Real { values, .. } => (values[index], 0.0),
-            Self::TypedInteger(storage) => (
-                storage
-                    .value_at(index)
-                    .expect("toeplitz index is in bounds")
-                    .to_f64(),
-                0.0,
-            ),
-            Self::Complex { values, .. } => values[index],
-            Self::TypedComplex(_) => {
-                unreachable!("typed complex integers use toeplitz_typed_complex")
-            }
-        }
-    }
-
-    fn conjugated(&self) -> Self {
-        match self {
-            Self::Real { values, dtype } => Self::Real {
-                values: values.clone(),
-                dtype: *dtype,
-            },
-            Self::TypedInteger(storage) => Self::TypedInteger(storage.clone()),
-            Self::Complex { values, dtype } => Self::Complex {
-                values: values.iter().map(|&(re, im)| (re, -im)).collect(),
-                dtype: *dtype,
-            },
-            Self::TypedComplex(storage) => Self::TypedComplex(
-                IntegerComplexStorage::new(
-                    storage.real.clone(),
-                    conjugate_integer_imaginary_storage(storage.imag.clone()),
-                )
-                .expect("existing typed complex storage has matching components"),
-            ),
-        }
-    }
-
-    fn dtype(&self) -> Option<NumericDType> {
-        match self {
-            Self::Real { dtype, .. } => Some(*dtype),
-            Self::TypedInteger(_) => None,
-            Self::Complex { .. } => None,
-            Self::TypedComplex(_) => None,
-        }
-    }
-}
+#[path = "toeplitz/input.rs"]
+mod input;
+use input::InputVector;
 
 fn toeplitz_from_vectors(c: InputVector, r: InputVector, one_input: bool) -> BuiltinResult<Value> {
     let rows = c.len();
@@ -372,7 +115,7 @@ fn toeplitz_typed_integer(
     let (InputVector::TypedInteger(c), InputVector::TypedInteger(r)) = (c, r) else {
         unreachable!("typed integer branch requires typed integer vectors");
     };
-    if c.class_name() != r.class_name() {
+    if c.numeric_dtype() != r.numeric_dtype() {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
             "integer inputs must use one common native integer class",
@@ -413,7 +156,7 @@ fn toeplitz_typed_complex(
             "typed complex integer inputs must use the same integer class",
         ));
     };
-    if c.class_name() != r.class_name() {
+    if c.numeric_dtype() != r.numeric_dtype() {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
             "typed complex integer inputs must use the same integer class",
@@ -430,32 +173,32 @@ fn toeplitz_typed_complex(
             let storage = if row >= col { &c } else { &r };
             real.push(
                 storage
-                    .real
+                    .real()
                     .value_at(index)
                     .expect("toeplitz index is in bounds"),
             );
             imag.push(
                 storage
-                    .imag
+                    .imag()
                     .value_at(index)
                     .expect("toeplitz index is in bounds"),
             );
         }
     }
     if one_input && !real.is_empty() {
-        let diagonal_real = r.real.value_at(0).expect("nonempty diagonal");
-        let diagonal_imag = r.imag.value_at(0).expect("nonempty diagonal");
+        let diagonal_real = r.real().value_at(0).expect("nonempty diagonal");
+        let diagonal_imag = r.imag().value_at(0).expect("nonempty diagonal");
         for index in 0..rows.min(cols) {
             real[index + index * rows] = diagonal_real.clone();
             imag[index + index * rows] = diagonal_imag.clone();
         }
     }
     let real = c
-        .real
+        .real()
         .from_exact_values_like(real)
         .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
     let imag = c
-        .imag
+        .imag()
         .from_exact_values_like(imag)
         .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
     let storage = IntegerComplexStorage::new(real, imag)
@@ -596,218 +339,9 @@ fn error_with_detail(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
+#[path = "toeplitz/tests.rs"]
+mod tests;
 
-    fn row(values: &[f64]) -> Value {
-        Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).expect("tensor"))
-    }
-
-    #[test]
-    fn toeplitz_one_real_vector_is_symmetric() {
-        let out = block_on(toeplitz_builtin(vec![row(&[1.0, 2.0, 3.0])])).expect("toeplitz");
-        let Value::Tensor(tensor) = out else {
-            panic!("expected tensor");
-        };
-        assert_eq!(tensor.shape, vec![3, 3]);
-        assert_eq!(
-            tensor.materialize_f64(),
-            vec![1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]
-        );
-    }
-
-    #[test]
-    fn toeplitz_column_and_row_use_first_column_diagonal() {
-        let out = block_on(toeplitz_builtin(vec![
-            row(&[1.0, 2.0, 3.0]),
-            row(&[9.0, 4.0]),
-        ]))
-        .expect("toeplitz");
-        let Value::Tensor(tensor) = out else {
-            panic!("expected tensor");
-        };
-        assert_eq!(tensor.shape, vec![3, 2]);
-        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0]);
-    }
-
-    #[test]
-    fn toeplitz_complex_single_input_uses_row_and_conjugates_first_column() {
-        let r = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
-        let out = block_on(toeplitz_builtin(vec![Value::ComplexTensor(r)])).expect("toeplitz");
-        let Value::ComplexTensor(tensor) = out else {
-            panic!("expected complex tensor");
-        };
-        assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(
-            tensor.materialize_f64(),
-            vec![(1.0, 2.0), (3.0, -4.0), (3.0, 4.0), (1.0, 2.0)]
-        );
-    }
-
-    #[test]
-    fn toeplitz_preserves_native_single_storage() {
-        let input = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let out = block_on(toeplitz_builtin(vec![Value::Tensor(input)])).expect("toeplitz");
-        let Value::Tensor(tensor) = out else {
-            panic!("expected tensor");
-        };
-        assert_eq!(tensor.shape, vec![3, 3]);
-        assert_eq!(
-            tensor.into_numeric_storage().expect("single storage"),
-            NumericStorage::F32(vec![1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0])
-        );
-    }
-
-    #[test]
-    fn toeplitz_preserves_complex_single_storage() {
-        let input = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
-        let Value::ComplexTensor(output) =
-            block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)])).unwrap()
-        else {
-            panic!("expected complex tensor")
-        };
-        assert_eq!(output.numeric_dtype(), NumericDType::F32);
-    }
-
-    #[test]
-    fn toeplitz_rejects_mixed_integer_classes_without_floating_conversion() {
-        let column =
-            Tensor::new_integer(IntegerStorage::I64(vec![1, i64::MAX]), vec![2, 1]).unwrap();
-        let row = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2]).unwrap();
-        let error = block_on(toeplitz_builtin(vec![
-            Value::Tensor(column),
-            Value::Tensor(row),
-        ]))
-        .unwrap_err();
-        assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
-    }
-
-    #[test]
-    fn toeplitz_preserves_all_exact_integer_classes() {
-        let storages = [
-            IntegerStorage::I8(vec![-2, 7, 9]),
-            IntegerStorage::I16(vec![-300, 400, 900]),
-            IntegerStorage::I32(vec![i32::MIN, 0, i32::MAX]),
-            IntegerStorage::I64(vec![i64::MIN, 0, i64::MAX]),
-            IntegerStorage::U8(vec![0, 7, u8::MAX]),
-            IntegerStorage::U16(vec![0, 700, u16::MAX]),
-            IntegerStorage::U32(vec![0, 9_007_199, u32::MAX]),
-            IntegerStorage::U64(vec![0, 9_007_199_254_740_993, u64::MAX]),
-        ];
-
-        for storage in storages {
-            let values = storage.exact_values();
-            let expected = storage
-                .from_exact_values_like(vec![
-                    values[0].clone(),
-                    values[1].clone(),
-                    values[2].clone(),
-                    values[1].clone(),
-                    values[0].clone(),
-                    values[1].clone(),
-                    values[2].clone(),
-                    values[1].clone(),
-                    values[0].clone(),
-                ])
-                .expect("expected toeplitz storage");
-            let input = Tensor::new_integer(storage, vec![1, 3]).expect("integer vector");
-            let Value::Tensor(output) =
-                block_on(toeplitz_builtin(vec![Value::Tensor(input)])).expect("toeplitz")
-            else {
-                panic!("expected exact integer tensor");
-            };
-            assert_eq!(output.shape, vec![3, 3]);
-            assert_eq!(output.integer_storage(), Some(&expected));
-        }
-
-        let column = Tensor::new_integer(IntegerStorage::U64(vec![7, u64::MAX]), vec![2, 1])
-            .expect("column");
-        let row = Tensor::new_integer(
-            IntegerStorage::U64(vec![7, 9_007_199_254_740_993]),
-            vec![1, 2],
-        )
-        .expect("row");
-        let Value::Tensor(output) = block_on(toeplitz_builtin(vec![
-            Value::Tensor(column),
-            Value::Tensor(row),
-        ]))
-        .expect("toeplitz") else {
-            panic!("expected exact integer tensor");
-        };
-        assert_eq!(
-            output.integer_storage(),
-            Some(&IntegerStorage::U64(vec![
-                7,
-                u64::MAX,
-                9_007_199_254_740_993,
-                7
-            ]))
-        );
-
-        let Value::Tensor(scalar) =
-            block_on(toeplitz_builtin(vec![Value::Int(IntValue::U64(u64::MAX))]))
-                .expect("scalar toeplitz")
-        else {
-            panic!("expected exact scalar tensor");
-        };
-        assert_eq!(
-            scalar.integer_storage(),
-            Some(&IntegerStorage::U64(vec![u64::MAX]))
-        );
-    }
-
-    #[test]
-    fn toeplitz_typed_complex_integer_vector_shape_uses_storage_len_not_mirror() {
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::I16(vec![1, 2, 3]),
-            IntegerStorage::I16(vec![4, 5, 6]),
-        )
-        .expect("complex integer storage");
-        let input = ComplexTensor::new_integer(storage, vec![1, 3]).expect("complex vector");
-
-        let Value::ComplexTensor(output) =
-            block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)])).expect("toeplitz")
-        else {
-            panic!("expected exact complex integer tensor");
-        };
-
-        assert_eq!(output.shape, vec![3, 3]);
-        let storage = output.integer_storage().expect("typed complex storage");
-        assert_eq!(
-            storage.real,
-            IntegerStorage::I16(vec![1, 2, 3, 2, 1, 2, 3, 2, 1])
-        );
-        assert_eq!(
-            storage.imag,
-            IntegerStorage::I16(vec![4, -5, -6, 5, 4, -5, 6, 5, 4])
-        );
-    }
-
-    #[test]
-    fn toeplitz_complex_integer_requires_runmat_extensions() {
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::I16(vec![1, 2]),
-            IntegerStorage::I16(vec![3, 4]),
-        )
-        .expect("complex integer storage");
-        let input = ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex vector");
-        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)]))
-            .expect_err("MATLAB mode rejects typed complex integer input");
-        assert_eq!(
-            error.identifier(),
-            COMPLEX_INTEGER_INPUT_EXTENSION.error_identifier
-        );
-    }
-
-    #[test]
-    fn toeplitz_rejects_matrix_inputs() {
-        let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = block_on(toeplitz_builtin(vec![Value::Tensor(matrix)]))
-            .expect_err("matrix input should fail");
-        assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
-    }
-}
+#[cfg(test)]
+#[path = "toeplitz/provider_tests.rs"]
+mod provider_tests;

@@ -1,14 +1,10 @@
 //! MATLAB-compatible `polyint` builtin with GPU-aware semantics for RunMat.
 
-use log::{trace, warn};
 use num_complex::Complex64;
+#[cfg(test)]
+use runmat_builtins::POLYINT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, POLYINT_ERROR_INVALID_ARGUMENT, POLYINT_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
@@ -19,121 +15,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::poly::type_resolvers::polyint_type;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyint";
-
-const POLYINT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "q",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Integrated polynomial coefficient vector.",
-}];
-
-const POLYINT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Polynomial coefficient vector.",
-}];
-
-const POLYINT_INPUTS_WITH_K: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Constant of integration.",
-    },
-];
-
-const POLYINT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "q = polyint(p)",
-        inputs: &POLYINT_INPUTS,
-        outputs: &POLYINT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "q = polyint(p, k)",
-        inputs: &POLYINT_INPUTS_WITH_K,
-        outputs: &POLYINT_OUTPUT,
-    },
-];
-
-const POLYINT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYINT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polyint:InvalidArgument"),
-    when: "Input arity or integration-constant argument is malformed.",
-    message: "polyint: invalid argument",
-};
-
-const POLYINT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYINT.INVALID_INPUT",
-    identifier: Some("RunMat:polyint:InvalidInput"),
-    when: "Inputs are not single- or double-precision coefficient/constant values, or coefficients do not form a vector.",
-    message: "polyint: invalid input",
-};
-
-const POLYINT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYINT.INTERNAL",
-    identifier: Some("RunMat:polyint:Internal"),
-    when: "Runtime fails while building output tensors or provider fallback paths.",
-    message: "polyint: internal runtime failure",
-};
-
-const POLYINT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    POLYINT_ERROR_INVALID_ARGUMENT,
-    POLYINT_ERROR_INVALID_INPUT,
-    POLYINT_ERROR_INTERNAL,
-];
-
-pub const POLYINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLYINT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLYINT_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer and logical coefficient vectors are rejected before floating host/provider dispatch.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer and logical integration constants are rejected; only single/double real or complex values are supported.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "q = polyint(p, k)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "This builtin has no integer overload; the empty accepted-class masks are intentional and prevent generic numeric coercion from admitting integers.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyint")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -183,15 +68,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polyint",
-    category = "math/poly",
-    summary = "Integrate polynomial coefficient vectors and append a constant of integration.",
-    keywords = "polyint,polynomial,integral,antiderivative",
-    type_resolver(polyint_type),
-    descriptor(crate::builtins::math::poly::polyint::POLYINT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::poly::polyint::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
-async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyint_builtin(
+    coeffs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(polyint_argument_error("polyint: too many input arguments"));
     }
@@ -200,14 +83,23 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
         reject_unsupported_numeric_class(value, "constant")?;
     }
 
+    gpu_helpers::require_resident_compute_values(
+        &[&coeffs, rest.first().unwrap_or(&coeffs)],
+        false,
+        || polyint_error("polyint: resident input has no exact owning provider"),
+    )?;
+    let mut protected = Vec::new();
+    for value in &rest {
+        dispatcher::try_visit_gpu_handles(value, &mut |handle| protected.push(handle.clone()))?;
+    }
     let constant = match rest.into_iter().next() {
         Some(value) => parse_constant(value).await?,
         None => Complex64::new(0.0, 0.0),
     };
 
     if let Value::GpuTensor(handle) = &coeffs {
-        if let Some(device_result) = try_polyint_gpu(handle, constant)? {
-            return Ok(Value::GpuTensor(device_result));
+        if let Some(device_result) = try_polyint_gpu(handle, constant, &protected)? {
+            return gpu_helpers::resident_gpu_value(device_result);
         }
     }
 
@@ -215,13 +107,14 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     };
-    polyint_host_value(coeffs, constant, source_gpu).await
+    polyint_host_value(coeffs, constant, source_gpu, &protected).await
 }
 
 async fn polyint_host_value(
     coeffs: Value,
     constant: Complex64,
     source_gpu: Option<runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let polynomial = parse_polynomial(coeffs).await?;
     let mut integrated = integrate_coeffs(&polynomial.coeffs);
@@ -231,7 +124,15 @@ async fn polyint_host_value(
         *last += constant;
     }
     let value = coeffs_to_value(&integrated, polynomial.class)?;
-    maybe_return_gpu(value, source_gpu.as_ref())
+    let Some(source) = source_gpu.as_ref() else {
+        return Ok(value);
+    };
+    gpu_helpers::restore_class_preserving_value_protecting(
+        source,
+        value,
+        "polyint",
+        &protected.iter().collect::<Vec<_>>(),
+    )
 }
 
 fn reject_unsupported_numeric_class(value: &Value, role: &str) -> BuiltinResult<()> {
@@ -259,22 +160,81 @@ fn reject_unsupported_numeric_class(value: &Value, role: &str) -> BuiltinResult<
 fn try_polyint_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     constant: Complex64,
+    protected: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
-    if constant.im.abs() > EPS {
+    if constant.im != 0.0 {
         return Ok(None);
     }
-    ensure_vector_shape(&handle.shape)?;
-    let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
-    else {
+    ensure_vector_shape(handle.shape())?;
+    gpu_helpers::require_resident_compute_owner(handle, || {
+        polyint_error("polyint: resident input has no exact owning provider")
+    })?;
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) else {
         return Ok(None);
     };
+    let length = if handle.shape().contains(&0) {
+        0
+    } else {
+        handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |n, d| n.checked_mul(*d))
+            .ok_or_else(|| polyint_error("polyint: input size overflow"))?
+    }
+    .checked_add(1)
+    .ok_or_else(|| polyint_error("polyint: output size overflow"))?;
+    let _residency = std::iter::once(handle)
+        .chain(protected.iter())
+        .map(gpu_helpers::ResidencyRestoreGuard::new)
+        .collect::<Vec<_>>();
     match provider.polyint(handle, constant.re) {
-        Ok(result) => Ok(Some(result)),
-        Err(err) => {
-            trace!("polyint: provider hook unavailable, falling back to host: {err}");
+        Ok(mut result) => {
+            let output_length = if result.shape().contains(&0) {
+                Some(0)
+            } else {
+                result
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |n, d| n.checked_mul(*d))
+            };
+            if output_length != Some(length)
+                || ensure_vector_shape(result.shape()).is_err()
+                || result.physical().element_type() != handle.physical().element_type()
+                || result.physical().storage() != handle.physical().storage()
+                || runmat_accelerate_api::handle_is_logical(&result)
+                || runmat_accelerate_api::handle_is_transposed(&result)
+                || gpu_helpers::exact_provider_for_handle(&result).is_none_or(|owner| {
+                    !runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+                || std::iter::once(handle)
+                    .chain(protected.iter())
+                    .any(|input| result.shares_allocation_with(input))
+            {
+                return Err(gpu_helpers::reject_gpu_output(
+                    result,
+                    polyint_error("polyint: invalid provider output"),
+                ));
+            }
+            // The public integral contract is always a row vector, including column input.
+            result = result
+                .with_view(result.view().clone().with_shape(vec![1, length]))
+                .map_err(|error| {
+                    build_runtime_error(format!("polyint: invalid result view: {error}"))
+                        .with_source(error)
+                        .build()
+                })?;
+            let result = gpu_helpers::propagate_owned_output_provenance(result, [handle])?;
+            Ok(Some(result))
+        }
+        Err(error)
+            if crate::builtins::common::gpu_helpers::provider_hook_allows_host_fallback(&error) =>
+        {
             Ok(None)
         }
+        Err(error) => Err(crate::runtime_error::with_provider_execution_source(
+            polyint_error(format!("polyint: provider execution failed: {error}")),
+            runmat_accelerate_api::ProviderExecutionError::from(error),
+        )),
     }
 }
 
@@ -295,50 +255,9 @@ fn integrate_coeffs(coeffs: &[Complex64]) -> Vec<Complex64> {
     result
 }
 
-fn maybe_return_gpu(
-    value: Value,
-    source_gpu: Option<&runmat_accelerate_api::GpuTensorHandle>,
-) -> BuiltinResult<Value> {
-    let Some(source_gpu) = source_gpu else {
-        return Ok(value);
-    };
-    let provider = runmat_accelerate_api::provider_for_handle(source_gpu);
-    match value {
-        Value::Tensor(tensor) => {
-            if let Some(provider) = provider {
-                match gpu_helpers::upload_tensor(provider, &tensor) {
-                    Ok(handle) => return Ok(Value::GpuTensor(handle)),
-                    Err(err) => {
-                        warn!("polyint: provider upload failed, keeping result on host: {err}");
-                    }
-                }
-            } else {
-                trace!("polyint: no provider available to re-upload result");
-            }
-            Ok(Value::Tensor(tensor))
-        }
-        Value::ComplexTensor(tensor) => {
-            if let Some(provider) = provider {
-                match gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                    Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
-                    Err(err) => {
-                        warn!(
-                            "polyint: provider complex upload failed, keeping result on host: {err}"
-                        );
-                    }
-                }
-            } else {
-                trace!("polyint: no provider available to re-upload complex result");
-            }
-            Ok(Value::ComplexTensor(tensor))
-        }
-        other => Ok(other),
-    }
-}
-
 fn coeffs_to_value(coeffs: &[Complex64], class: FloatingClass) -> BuiltinResult<Value> {
     let shape = vec![1, coeffs.len()];
-    if coeffs.iter().all(|c| c.im.abs() <= EPS) {
+    if coeffs.iter().all(|c| c.im == 0.0) {
         let tensor = match class {
             FloatingClass::Double => {
                 let data = coeffs.iter().map(|c| c.re).collect();
@@ -380,7 +299,7 @@ async fn parse_polynomial(value: Value) -> BuiltinResult<Polynomial> {
 }
 
 fn parse_tensor_coeffs(tensor: Tensor) -> BuiltinResult<Polynomial> {
-    ensure_vector_shape(&tensor.shape)?;
+    ensure_vector_shape(tensor.shape())?;
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| polyint_error(format!("polyint: {error}")))?;
@@ -404,7 +323,7 @@ fn parse_tensor_coeffs(tensor: Tensor) -> BuiltinResult<Polynomial> {
 }
 
 fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> BuiltinResult<Polynomial> {
-    ensure_vector_shape(&tensor.shape)?;
+    ensure_vector_shape(tensor.shape())?;
     Ok(Polynomial {
         coeffs: tensor
             .materialize_f64()
@@ -480,6 +399,44 @@ enum FloatingClass {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn resident_column_complex_integral_keeps_storage_and_public_row_shape() {
+        test_support::with_test_provider(|provider| {
+            let source = ComplexTensor::new(vec![(2.0, 4.0), (3.0, -2.0)], vec![2, 1]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &source).unwrap();
+            let output =
+                polyint_builtin(Value::GpuTensor(input.clone()), vec![Value::Num(5.0)]).unwrap();
+            let Value::GpuTensor(output) = output else {
+                panic!("resident integral required")
+            };
+            assert_eq!(output.shape(), &[1, 3]);
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                output.physical().storage(),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let host = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &output),
+            )
+            .unwrap();
+            let Value::ComplexTensor(host) = host else {
+                panic!("complex result required")
+            };
+            assert_eq!(
+                host.materialize_f64(),
+                vec![(1.0, 2.0), (3.0, -2.0), (5.0, 0.0)]
+            );
+            let original = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &input),
+            )
+            .unwrap();
+            let Value::ComplexTensor(original) = original else {
+                panic!("complex input required")
+            };
+            assert_eq!(original.materialize_f64(), source.materialize_f64());
+        });
+    }
+
     use super::*;
     use crate::builtins::common::gpu_helpers;
     use crate::builtins::common::test_support;
@@ -526,7 +483,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Tensor(tensor), Vec::new()).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), &[1, 5]);
                 let expected = [0.75, -2.0 / 3.0, 2.5, 7.0, 0.0];
                 assert!(tensor::tensor_values_f64(&t)
                     .iter()
@@ -545,7 +502,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Tensor(tensor), args).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 let expected = [4.0 / 3.0, 0.0, -8.0, 3.0];
                 assert!(tensor::tensor_values_f64(&t)
                     .iter()
@@ -590,7 +547,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected native-single tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.shape(), &[1, 4]);
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
         assert_eq!(
             tensor.into_numeric_storage().unwrap(),
@@ -604,7 +561,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Num(5.0), Vec::new()).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let values = tensor::tensor_values_f64(&t);
                 assert!((values[0] - 5.0).abs() < 1e-12);
                 assert!(values[1].abs() < 1e-12);
@@ -638,7 +595,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Tensor(tensor), Vec::new()).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 let expected = [2.0 / 3.0, 0.0, -6.0, 0.0];
                 assert!(tensor::tensor_values_f64(&t)
                     .iter()
@@ -658,7 +615,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::ComplexTensor(tensor), args).expect("polyint");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 let expected = [(1.0 / 3.0, 2.0 / 3.0), (-1.5, 0.0), (0.0, 4.0), (0.0, -1.0)];
                 assert!(t.materialize_f64().iter().zip(expected.iter()).all(
                     |((lre, lim), (rre, rim))| {
@@ -668,6 +625,17 @@ pub(crate) mod tests {
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tiny_nonzero_imaginary_integral_is_not_retyped_real() {
+        let input = ComplexTensor::new(vec![(1.0, 1.0e-13)], vec![1, 1]).unwrap();
+        let output =
+            polyint_builtin(Value::ComplexTensor(input), Vec::new()).expect("complex integral");
+        let Value::ComplexTensor(output) = output else {
+            panic!("nonzero imaginary coefficient must remain complex");
+        };
+        assert_eq!(output.materialize_f64(), vec![(1.0, 1.0e-13), (0.0, 0.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -725,7 +693,7 @@ pub(crate) mod tests {
             .expect("polyint");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), &[1, 1]);
                 assert_eq!(t.materialize_f64().len(), 1);
                 let (re, im) = t.materialize_f64()[0];
                 assert!((re - 1.5).abs() < 1e-12);
@@ -745,7 +713,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 4]);
+                    assert_eq!(gathered.shape(), &[1, 4]);
                     let expected = [1.0 / 3.0, -2.0, 6.0, 0.0];
                     assert!(tensor::tensor_values_f64(&gathered)
                         .iter()
@@ -800,7 +768,7 @@ pub(crate) mod tests {
                     let Value::ComplexTensor(ct) = gathered else {
                         panic!("expected complex tensor");
                     };
-                    assert_eq!(ct.shape, vec![1, 3]);
+                    assert_eq!(ct.shape(), &[1, 3]);
                     let expected = [(0.5, 0.0), (0.0, 0.0), (0.0, 2.0)];
                     assert!(ct.materialize_f64().iter().zip(expected.iter()).all(
                         |((lre, lim), (rre, rim))| {
@@ -832,7 +800,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(ct) = gathered else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(ct.shape, vec![1, 3]);
+            assert_eq!(ct.shape(), &[1, 3]);
             let expected = [(0.5, 0.5), (2.0, -1.0), (2.0, 0.0)];
             assert!(ct.materialize_f64().iter().zip(expected.iter()).all(
                 |((lre, lim), (rre, rim))| {
@@ -861,7 +829,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(handle)).expect("gather result");
-                    assert_eq!(gathered.shape, vec![1, 3]);
+                    assert_eq!(gathered.shape(), &[1, 3]);
                     let expected = [1.0, 0.0, 3.0];
                     assert!(tensor::tensor_values_f64(&gathered)
                         .iter()
@@ -894,7 +862,7 @@ pub(crate) mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("unexpected cpu result {other:?}"),
         };
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -939,7 +907,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(gpu) = gathered else {
             panic!("expected complex tensor");
         };
-        assert_eq!(gpu.shape, cpu.shape);
+        assert_eq!(gpu.shape(), cpu.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -954,6 +922,9 @@ pub(crate) mod tests {
     }
 
     fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::polyint_builtin(coeffs, rest))
+        block_on(super::polyint_builtin(
+            coeffs,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

@@ -1,286 +1,245 @@
-//! Canonical solver-owned evidence and convergence decisions for adaptive structural iterations.
-
+//! Structural adaptation lineage with shared study accuracy as the sole acceptance authority.
+use runmat_analysis_core::AccuracyPlan;
+use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
 use runmat_meshing_core::{
     CanonicalMeshingContract, SolverMeshAdaptationLineage, SolverMeshArtifact,
     SolverMeshTransferMap, StableDigest,
 };
-use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-
-use super::{SolverFieldTransferErrorEvidence, StructuralRecoveryEstimate};
-
+mod accuracy;
+mod constraints;
+mod contract;
 mod decision;
 mod validation;
-
-use decision::{decide, validate_policy};
-use validation::{
-    validate_estimator_against, validate_solver_result, validate_target_quantity,
-    validate_transfer_errors, validate_transfer_errors_against,
-};
+use super::{SolverFieldTransferErrorEvidence, StructuralRecoveryEstimate};
+pub use constraints::StructuralAdaptationConstraintLineage;
+pub use contract::*;
+use validation::*;
 
 const CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-canonical-cbor/v1\0";
-const CODEC_DOMAIN: &str = "analysis.fea.structural-adaptation-iteration/v1";
-const CODEC_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 4096, 32);
-pub const STRUCTURAL_ADAPTATION_ITERATION_SCHEMA_VERSION: u16 = 1;
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralAdaptationPolicy {
-    pub estimator_tolerance: f64,
-    pub minimum_estimator_reduction: f64,
-    pub target_absolute_tolerance: f64,
-    pub target_relative_tolerance: f64,
-    pub maximum_transfer_relative_error: f64,
-}
-
-impl Default for StructuralAdaptationPolicy {
-    fn default() -> Self {
-        Self {
-            estimator_tolerance: 1.0e-3,
-            minimum_estimator_reduction: 0.05,
-            target_absolute_tolerance: 1.0e-6,
-            target_relative_tolerance: 1.0e-3,
-            maximum_transfer_relative_error: 0.05,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralAdaptationSolverResult {
-    pub result_digest: StableDigest,
-    pub converged: bool,
-    pub iteration_count: u64,
-    pub normalized_residual: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralTargetQuantity {
-    pub quantity_id: String,
-    pub value: f64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StructuralAdaptationDecisionStatus {
-    Continue,
-    Converged,
-    Rejected,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralAdaptationConvergenceDecision {
-    pub status: StructuralAdaptationDecisionStatus,
-    pub estimator_reduction: Option<f64>,
-    pub target_absolute_change: Option<f64>,
-    pub target_relative_change: Option<f64>,
-    pub solver_converged: bool,
-    pub transfer_accepted: bool,
-    pub estimator_reduction_accepted: bool,
-    pub estimator_target_met: bool,
-    pub target_quantity_converged: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralAdaptationIteration {
-    pub schema_version: u16,
-    pub iteration_index: u64,
-    pub previous_iteration_digest: Option<StableDigest>,
-    pub source_solver_artifact_digest: StableDigest,
-    pub target_solver_artifact_digest: StableDigest,
-    pub adaptation_lineage_digest: StableDigest,
-    pub transfer_map_digest: StableDigest,
-    pub estimator: StructuralRecoveryEstimate,
-    pub transfer_errors: Vec<SolverFieldTransferErrorEvidence>,
-    pub solver_result: StructuralAdaptationSolverResult,
-    pub target_quantity: StructuralTargetQuantity,
-    pub previous_estimator_error: Option<f64>,
-    pub previous_target_quantity_value: Option<f64>,
-    pub policy: StructuralAdaptationPolicy,
-    pub decision: StructuralAdaptationConvergenceDecision,
-}
-
-#[derive(Clone, Copy)]
-pub struct StructuralAdaptationIterationInput<'a> {
-    pub source_artifact: &'a SolverMeshArtifact,
-    pub target_artifact: &'a SolverMeshArtifact,
-    pub transfer_map: &'a SolverMeshTransferMap,
-    pub lineage: &'a SolverMeshAdaptationLineage,
-    pub estimator: &'a StructuralRecoveryEstimate,
-    pub transfer_errors: &'a [SolverFieldTransferErrorEvidence],
-    pub solver_result: &'a StructuralAdaptationSolverResult,
-    pub target_quantity: &'a StructuralTargetQuantity,
-    pub previous: Option<&'a StructuralAdaptationIteration>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StructuralAdaptationIterationError {
-    InvalidPolicy,
-    InvalidArtifact(String),
-    InvalidLineage(String),
-    InvalidEstimator,
-    InvalidTransferEvidence,
-    InvalidSolverResult,
-    InvalidTargetQuantity,
-    InvalidIterationChain,
-    InvalidDecision,
-    Codec(String),
-}
+const CODEC_DOMAIN: &str = "analysis.fea.structural-adaptation-iteration/v3";
+const CODEC_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(4096, 32);
+pub const STRUCTURAL_ADAPTATION_ITERATION_SCHEMA_VERSION: u16 = 3;
 
 pub fn build_structural_adaptation_iteration(
     input: StructuralAdaptationIterationInput<'_>,
-    policy: StructuralAdaptationPolicy,
+    plan: &AccuracyPlan,
 ) -> Result<StructuralAdaptationIteration, StructuralAdaptationIterationError> {
-    validate_policy(policy)?;
-    input.source_artifact.validate().map_err(|failure| {
-        StructuralAdaptationIterationError::InvalidArtifact(failure.to_string())
-    })?;
-    input.target_artifact.validate().map_err(|failure| {
-        StructuralAdaptationIterationError::InvalidArtifact(failure.to_string())
-    })?;
-    input
-        .lineage
-        .validate_against(
-            input.source_artifact,
-            input.target_artifact,
-            input.transfer_map,
-        )
-        .map_err(|failure| {
-            StructuralAdaptationIterationError::InvalidLineage(failure.to_string())
-        })?;
-    input
-        .estimator
-        .validate()
-        .map_err(|_| StructuralAdaptationIterationError::InvalidEstimator)?;
-    if input.estimator.solver_artifact_digest != input.target_artifact.canonical_digest {
-        return Err(StructuralAdaptationIterationError::InvalidEstimator);
-    }
-    validate_estimator_against(input.estimator, input.target_artifact)?;
-    validate_transfer_errors(
-        input.transfer_errors,
-        input.source_artifact.canonical_digest,
-        input.target_artifact.canonical_digest,
-    )?;
-    validate_transfer_errors_against(
-        input.transfer_errors,
+    let constraints = StructuralAdaptationConstraintLineage::derive(
+        input.model,
         input.source_artifact,
         input.target_artifact,
     )?;
-    validate_solver_result(input.solver_result)?;
-    validate_target_quantity(input.target_quantity)?;
-    let previous = previous_evidence(
-        input.previous,
-        input.source_artifact.canonical_digest,
-        &input.target_quantity.quantity_id,
-    )?;
-    let decision = decide(
+    let index = input
+        .previous
+        .map(|p| p.iteration_index.checked_add(1))
+        .unwrap_or(Some(0))
+        .ok_or(StructuralAdaptationIterationError::InvalidIterationChain)?;
+    let metrics = decision::changes(
+        input.source_estimator.total_error,
         input.estimator.total_error,
-        input.transfer_errors,
-        input.solver_result,
+        input.source_target_quantity.value,
         input.target_quantity.value,
-        previous.previous_estimator_error,
-        previous.previous_target_quantity_value,
-        policy,
+    )?;
+    let evaluation = accuracy::evaluate(accuracy::AccuracyInput {
+        plan,
+        source_estimator: input.source_estimator,
+        estimator: input.estimator,
+        transfer_errors: input.transfer_errors,
+        solver_result: input.solver_result,
+        target_quantity: input.target_quantity,
+        absolute_change: metrics.1,
+        relative_change: metrics.2,
+    })?;
+    let decision = decision::decide(
+        plan,
+        &evaluation,
+        index,
+        input.source_solver_result.converged && input.solver_result.converged,
+        metrics,
     );
-    let iteration = StructuralAdaptationIteration {
+    let record = StructuralAdaptationIteration {
         schema_version: STRUCTURAL_ADAPTATION_ITERATION_SCHEMA_VERSION,
-        iteration_index: previous.iteration_index,
-        previous_iteration_digest: previous.previous_iteration_digest,
+        iteration_index: index,
+        previous_iteration_digest: input.previous.map(|p| p.canonical_digest()).transpose()?,
         source_solver_artifact_digest: input.source_artifact.canonical_digest,
         target_solver_artifact_digest: input.target_artifact.canonical_digest,
-        adaptation_lineage_digest: input.lineage.canonical_digest().map_err(|failure| {
-            StructuralAdaptationIterationError::InvalidLineage(failure.to_string())
-        })?,
-        transfer_map_digest: input.transfer_map.canonical_digest().map_err(|failure| {
-            StructuralAdaptationIterationError::InvalidLineage(failure.to_string())
-        })?,
+        adaptation_lineage_digest: input
+            .lineage
+            .canonical_digest()
+            .map_err(|e| StructuralAdaptationIterationError::InvalidLineage(e.to_string()))?,
+        transfer_map_digest: input
+            .transfer_map
+            .canonical_digest()
+            .map_err(|e| StructuralAdaptationIterationError::InvalidLineage(e.to_string()))?,
+        source_estimator: input.source_estimator.clone(),
         estimator: input.estimator.clone(),
         transfer_errors: input.transfer_errors.to_vec(),
+        source_solver_result: input.source_solver_result.clone(),
         solver_result: input.solver_result.clone(),
+        source_target_quantity: input.source_target_quantity.clone(),
         target_quantity: input.target_quantity.clone(),
-        previous_estimator_error: previous.previous_estimator_error,
-        previous_target_quantity_value: previous.previous_target_quantity_value,
-        policy,
+        constraint_lineage: constraints,
+        accuracy_plan: plan.clone(),
+        accuracy_evaluation: evaluation,
         decision,
     };
-    iteration.validate()?;
-    Ok(iteration)
+    record.validate()?;
+    record.validate_mesh_evidence(
+        input.source_artifact,
+        input.target_artifact,
+        input.transfer_map,
+        input.lineage,
+    )?;
+    if let Some(previous) = input.previous {
+        record.validate_previous(previous)?;
+    }
+    Ok(record)
 }
 
 impl StructuralAdaptationIteration {
     pub fn validate(&self) -> Result<(), StructuralAdaptationIterationError> {
+        use StructuralAdaptationIterationError as Error;
         if self.schema_version != STRUCTURAL_ADAPTATION_ITERATION_SCHEMA_VERSION
-            || self.source_solver_artifact_digest == StableDigest::ZERO
-            || self.target_solver_artifact_digest == StableDigest::ZERO
+            || [
+                self.source_solver_artifact_digest,
+                self.target_solver_artifact_digest,
+                self.adaptation_lineage_digest,
+                self.transfer_map_digest,
+            ]
+            .contains(&StableDigest::ZERO)
             || self.source_solver_artifact_digest == self.target_solver_artifact_digest
-            || self.adaptation_lineage_digest == StableDigest::ZERO
-            || self.transfer_map_digest == StableDigest::ZERO
+            || self.source_estimator.solver_artifact_digest != self.source_solver_artifact_digest
             || self.estimator.solver_artifact_digest != self.target_solver_artifact_digest
+            || self.previous_iteration_digest.is_some() != (self.iteration_index > 0)
+            || self.previous_iteration_digest == Some(StableDigest::ZERO)
         {
-            return Err(StructuralAdaptationIterationError::InvalidIterationChain);
+            return Err(Error::InvalidIterationChain);
         }
-        validate_policy(self.policy)?;
-        self.estimator
-            .validate()
-            .map_err(|_| StructuralAdaptationIterationError::InvalidEstimator)?;
+        for estimate in [&self.source_estimator, &self.estimator] {
+            estimate.validate().map_err(|_| Error::InvalidEstimator)?;
+        }
         validate_transfer_errors(
             &self.transfer_errors,
             self.source_solver_artifact_digest,
             self.target_solver_artifact_digest,
         )?;
-        validate_solver_result(&self.solver_result)?;
-        validate_target_quantity(&self.target_quantity)?;
-        let has_previous = self.previous_iteration_digest.is_some();
-        if has_previous != (self.iteration_index > 0)
-            || has_previous != self.previous_estimator_error.is_some()
-            || has_previous != self.previous_target_quantity_value.is_some()
-            || self.previous_iteration_digest == Some(StableDigest::ZERO)
-        {
-            return Err(StructuralAdaptationIterationError::InvalidIterationChain);
+        for solver in [&self.source_solver_result, &self.solver_result] {
+            validate_solver_result(solver)?;
         }
-        let expected = decide(
+        for quantity in [&self.source_target_quantity, &self.target_quantity] {
+            validate_target_quantity(quantity)?;
+        }
+        if self.source_target_quantity.quantity_id != self.target_quantity.quantity_id
+            || self.source_target_quantity.quantity != self.target_quantity.quantity
+        {
+            return Err(Error::InvalidTargetQuantity);
+        }
+        self.constraint_lineage.validate()?;
+        let metrics = decision::changes(
+            self.source_estimator.total_error,
             self.estimator.total_error,
-            &self.transfer_errors,
-            &self.solver_result,
+            self.source_target_quantity.value,
             self.target_quantity.value,
-            self.previous_estimator_error,
-            self.previous_target_quantity_value,
-            self.policy,
-        );
-        if self.decision != expected {
-            return Err(StructuralAdaptationIterationError::InvalidDecision);
+        )?;
+        // Validate retained raw metrics before they can become accuracy evidence.
+        if self.decision.target_absolute_change != metrics.1
+            || self.decision.target_relative_change != metrics.2
+        {
+            return Err(Error::InvalidDecision);
+        }
+        let expected = accuracy::evaluate(accuracy::AccuracyInput {
+            plan: &self.accuracy_plan,
+            source_estimator: &self.source_estimator,
+            estimator: &self.estimator,
+            transfer_errors: &self.transfer_errors,
+            solver_result: &self.solver_result,
+            target_quantity: &self.target_quantity,
+            absolute_change: metrics.1,
+            relative_change: metrics.2,
+        })?;
+        if self.accuracy_evaluation != expected
+            || self.decision
+                != decision::decide(
+                    &self.accuracy_plan,
+                    &expected,
+                    self.iteration_index,
+                    self.source_solver_result.converged && self.solver_result.converged,
+                    metrics,
+                )
+        {
+            return Err(Error::InvalidDecision);
         }
         Ok(())
     }
 
     pub fn validate_against(
         &self,
+        model: &runmat_analysis_core::AnalysisModel,
         source: &SolverMeshArtifact,
         target: &SolverMeshArtifact,
         transfer: &SolverMeshTransferMap,
         lineage: &SolverMeshAdaptationLineage,
     ) -> Result<(), StructuralAdaptationIterationError> {
+        use StructuralAdaptationIterationError as Error;
         self.validate()?;
+        self.validate_mesh_evidence(source, target, transfer, lineage)?;
+        if self.constraint_lineage
+            != StructuralAdaptationConstraintLineage::derive(model, source, target)?
+        {
+            return Err(Error::InvalidConstraints(
+                "retained plans differ from canonical recompilation".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_mesh_evidence(
+        &self,
+        source: &SolverMeshArtifact,
+        target: &SolverMeshArtifact,
+        transfer: &SolverMeshTransferMap,
+        lineage: &SolverMeshAdaptationLineage,
+    ) -> Result<(), StructuralAdaptationIterationError> {
+        use StructuralAdaptationIterationError as Error;
         lineage
             .validate_against(source, target, transfer)
-            .map_err(|failure| {
-                StructuralAdaptationIterationError::InvalidLineage(failure.to_string())
-            })?;
+            .map_err(|e| Error::InvalidLineage(e.to_string()))?;
+        validate_estimator_against(&self.source_estimator, source)?;
         validate_estimator_against(&self.estimator, target)?;
         validate_transfer_errors_against(&self.transfer_errors, source, target)?;
         if self.source_solver_artifact_digest != source.canonical_digest
             || self.target_solver_artifact_digest != target.canonical_digest
             || self.adaptation_lineage_digest
-                != lineage.canonical_digest().map_err(|failure| {
-                    StructuralAdaptationIterationError::InvalidLineage(failure.to_string())
-                })?
+                != lineage
+                    .canonical_digest()
+                    .map_err(|e| Error::InvalidLineage(e.to_string()))?
             || self.transfer_map_digest
-                != transfer.canonical_digest().map_err(|failure| {
-                    StructuralAdaptationIterationError::InvalidLineage(failure.to_string())
-                })?
+                != transfer
+                    .canonical_digest()
+                    .map_err(|e| Error::InvalidLineage(e.to_string()))?
+        {
+            return Err(Error::InvalidIterationChain);
+        }
+        Ok(())
+    }
+
+    pub fn validate_previous(
+        &self,
+        previous: &Self,
+    ) -> Result<(), StructuralAdaptationIterationError> {
+        previous.validate()?;
+        self.validate()?;
+        if previous.iteration_index.checked_add(1) != Some(self.iteration_index)
+            || self.previous_iteration_digest != Some(previous.canonical_digest()?)
+            || previous.target_solver_artifact_digest != self.source_solver_artifact_digest
+            || previous.estimator != self.source_estimator
+            || previous.solver_result != self.source_solver_result
+            || previous.target_quantity != self.source_target_quantity
+            || previous.accuracy_plan != self.accuracy_plan
+            || previous.constraint_lineage.target_plan_digest
+                != self.constraint_lineage.source_plan_digest
+            || previous.decision.status != StructuralAdaptationDecisionStatus::Continue
         {
             return Err(StructuralAdaptationIterationError::InvalidIterationChain);
         }
@@ -292,7 +251,6 @@ impl StructuralAdaptationIteration {
         runmat_canonical_codec::encode_contract(CODEC_PREFIX, CODEC_DOMAIN, self, CODEC_LIMITS)
             .map_err(codec_error)
     }
-
     pub fn canonical_decode(bytes: &[u8]) -> Result<Self, StructuralAdaptationIterationError> {
         let record: Self = runmat_canonical_codec::decode_contract(
             CODEC_PREFIX,
@@ -304,57 +262,14 @@ impl StructuralAdaptationIteration {
         record.validate()?;
         Ok(record)
     }
-
     pub fn canonical_digest(&self) -> Result<StableDigest, StructuralAdaptationIterationError> {
         Ok(StableDigest::from_bytes(
             Sha256::digest(self.canonical_encode()?).into(),
         ))
     }
 }
-
-struct PreviousIterationEvidence {
-    iteration_index: u64,
-    previous_iteration_digest: Option<StableDigest>,
-    previous_estimator_error: Option<f64>,
-    previous_target_quantity_value: Option<f64>,
-}
-
-fn previous_evidence(
-    previous: Option<&StructuralAdaptationIteration>,
-    source_digest: StableDigest,
-    target_quantity_id: &str,
-) -> Result<PreviousIterationEvidence, StructuralAdaptationIterationError> {
-    let Some(previous) = previous else {
-        return Ok(PreviousIterationEvidence {
-            iteration_index: 0,
-            previous_iteration_digest: None,
-            previous_estimator_error: None,
-            previous_target_quantity_value: None,
-        });
-    };
-    previous.validate()?;
-    if previous.target_solver_artifact_digest != source_digest
-        || previous.target_quantity.quantity_id != target_quantity_id
-        || previous.decision.status != StructuralAdaptationDecisionStatus::Continue
-    {
-        return Err(StructuralAdaptationIterationError::InvalidIterationChain);
-    }
-    let iteration_index = previous
-        .iteration_index
-        .checked_add(1)
-        .ok_or(StructuralAdaptationIterationError::InvalidIterationChain)?;
-    Ok(PreviousIterationEvidence {
-        iteration_index,
-        previous_iteration_digest: Some(previous.canonical_digest()?),
-        previous_estimator_error: Some(previous.estimator.total_error),
-        previous_target_quantity_value: Some(previous.target_quantity.value),
-    })
-}
-
 fn codec_error(error: CanonicalCodecError) -> StructuralAdaptationIterationError {
     StructuralAdaptationIterationError::Codec(error.to_string())
 }
-
 #[cfg(test)]
-mod tests;
-use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
+pub(super) mod tests;

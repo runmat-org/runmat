@@ -2,172 +2,23 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, RECTPULS_ERROR_ARG_COUNT, RECTPULS_ERROR_INTERNAL,
+    RECTPULS_ERROR_INVALID_INPUT, RECTPULS_ERROR_WIDTH_INVALID, RECTPULS_EXPLICIT_GPU_EXTENSION,
+    RECTPULS_INTEGER_T_EXTENSION, RECTPULS_INTEGER_W_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
-use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::signal::type_resolvers::numeric_unary_shape_type;
+use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::tensor::tensor_into_value;
+use crate::builtins::math::signal::common::{
+    admit_real_waveform_sample, admit_resident_waveform_operand, map_real_waveform,
+    prepared_real_integer_tensor, waveform_input_tensor, PreparedWaveformControl,
+    SignalCooperation, WaveformControlError, WaveformOutputMode,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "rectpuls";
-
-const RECTPULS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Rectangular pulse samples.",
-}];
-
-const RECTPULS_INPUTS_T: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "T",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sample times relative to the pulse center.",
-}];
-
-const RECTPULS_INPUTS_T_W: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "T",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample times relative to the pulse center.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Pulse width.",
-    },
-];
-
-const RECTPULS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = rectpuls(T)",
-        inputs: &RECTPULS_INPUTS_T,
-        outputs: &RECTPULS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = rectpuls(T, W)",
-        inputs: &RECTPULS_INPUTS_T_W,
-        outputs: &RECTPULS_OUTPUT,
-    },
-];
-
-const RECTPULS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.INVALID_INPUT",
-    identifier: Some("RunMat:rectpuls:InvalidInput"),
-    when: "Input times cannot be interpreted as real numeric samples.",
-    message: "rectpuls: expected real numeric input",
-};
-
-const RECTPULS_ERROR_WIDTH_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.WIDTH_INVALID",
-    identifier: Some("RunMat:rectpuls:WidthInvalid"),
-    when: "Width is not a positive finite scalar.",
-    message: "rectpuls: width must be a positive finite scalar",
-};
-
-const RECTPULS_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.ARG_COUNT",
-    identifier: Some("RunMat:rectpuls:ArgCount"),
-    when: "Too many input arguments are provided.",
-    message: "rectpuls: expected 1 or 2 arguments",
-};
-
-const RECTPULS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RECTPULS.INTERNAL",
-    identifier: Some("RunMat:rectpuls:InternalError"),
-    when: "Internal tensor construction or GPU gather fails.",
-    message: "rectpuls: internal error",
-};
-
-const RECTPULS_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    RECTPULS_ERROR_INVALID_INPUT,
-    RECTPULS_ERROR_WIDTH_INVALID,
-    RECTPULS_ERROR_ARG_COUNT,
-    RECTPULS_ERROR_INTERNAL,
-];
-
-pub const RECTPULS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RECTPULS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RECTPULS_ERRORS,
-};
-
-const RECTPULS_INTEGER_T_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rectpuls-integer-time",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rectpuls with typed-integer sample times is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RectpulsIntegerTimeExtension"),
-};
-const RECTPULS_INTEGER_W_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rectpuls-integer-width",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rectpuls with a typed-integer width is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RectpulsIntegerWidthExtension"),
-};
-const RECTPULS_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rectpuls-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rectpuls with an explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RectpulsExplicitGpuInputExtension"),
-};
-pub const RECTPULS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    RECTPULS_INTEGER_T_EXTENSION,
-    RECTPULS_INTEGER_W_EXTENSION,
-    RECTPULS_EXPLICIT_GPU_EXTENSION,
-];
-const RECTPULS_INTEGER_T_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "T",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double sample times; typed integers are an independently gated RunMat extension.",
-    }];
-const RECTPULS_INTEGER_W_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "W",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public width is a positive floating scalar; typed width storage is admitted only at a checked binary64 boundary.",
-    }];
-pub const RECTPULS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = rectpuls(integer_T,W)",
-        inputs: &RECTPULS_INTEGER_T_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Typed times reject before provider access unless RunMat extensions are enabled and exact conversion is possible.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = rectpuls(T,integer_W)",
-        inputs: &RECTPULS_INTEGER_W_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Width is gated and checked separately from sample-time class.",
-    },
-];
 
 fn rectpuls_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rectpuls_error_with_message(error.message, error)
@@ -202,28 +53,23 @@ fn rectpuls_error_with_source(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    let mut failure = builder.build();
+    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    failure
 }
 
 pub(crate) fn rectpuls_scalar(t: f64, width: f64) -> f64 {
     if t.is_nan() {
         return f64::NAN;
     }
-    let half_width = width / 2.0;
-    if t >= -half_width && t < half_width {
+    // Doubling a finite sample is exact in binary64 unless it overflows,
+    // whereas halving the smallest positive width can round to zero.
+    let doubled_time = t * 2.0;
+    if doubled_time >= -width && doubled_time < width {
         1.0
     } else {
         0.0
     }
-}
-
-pub(crate) fn rectpuls_tensor(tensor: Tensor, width: f64) -> Result<Tensor, String> {
-    let shape = tensor.shape.clone();
-    let data = tensor::tensor_into_values_f64(tensor)
-        .into_iter()
-        .map(|value| rectpuls_scalar(value, width))
-        .collect::<Vec<_>>();
-    Tensor::new(data, shape).map_err(|err| err.to_string())
 }
 
 pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
@@ -236,27 +82,81 @@ pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
 
 #[runtime_builtin(
     name = "rectpuls",
-    category = "math/signal",
-    summary = "Generate sampled rectangular pulses.",
-    keywords = "rectpuls,rectangular pulse,pulse train,signal processing",
-    type_resolver(numeric_unary_shape_type),
-    descriptor(crate::builtins::math::signal::rectpuls::RECTPULS_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::rectpuls::RECTPULS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::signal::rectpuls::RECTPULS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::rectpuls"
 )]
+async fn rectpuls_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    t: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    rectpuls_in_runtime(runtime.as_ref(), t, rest).await
+}
+
+#[cfg(test)]
 async fn rectpuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_rectpuls_extensions(&t, &rest).await?;
-    let gpu_source = rectpuls_gpu_source(&t, &rest)?;
-    let width = parse_width(&rest).await?;
-    let tensor = rectpuls_input_tensor(t).await?;
-    let output = rectpuls_tensor(tensor, width)
-        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INTERNAL, err))?;
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    rectpuls_in_runtime(None, t, rest.into()).await
+}
+
+async fn rectpuls_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    t: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
+        .with_integer_error_descriptor(&RECTPULS_ERROR_INTERNAL);
+    cooperation.completed(0).await?;
+    ensure_rectpuls_compatibility(&t, rest.view())?;
+    let mut width = prepare_width(rest.view())?;
+    crate::builtins::common::validation::reject_typed_complex_integer(&t, BUILTIN_NAME)?;
+    admit_real_waveform_sample(&t).map_err(|_| rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))?;
+    if let Some(control) = &mut width {
+        control
+            .admit_host_boundary(&mut cooperation)
+            .await
+            .map_err(width_control_error)?;
+    }
+    if let Some(control) = &width {
+        control
+            .admit_resident_metadata(BUILTIN_NAME, &RECTPULS_ERROR_INTERNAL)
+            .map_err(width_control_error)?;
+    }
+    admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &RECTPULS_ERROR_INTERNAL)?;
+    // Authenticate every resident operand before preparation can download a
+    // wide integer sample. The same handles later protect output restoration.
+    let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, rest.view())?;
+    let prepared = cooperation
+        .prepare_integer_boundary(&t, &RECTPULS_INTEGER_T_EXTENSION, "T")
+        .await?;
+    let prepared_payload = prepared.into_resident_payload();
+    let width = resolve_width(width, &mut cooperation).await?;
+    let tensor = match prepared_real_integer_tensor(prepared_payload)
+        .map_err(|detail| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, detail))?
+    {
+        Some(tensor) => tensor,
+        None => rectpuls_input_tensor(t, &mut cooperation).await?,
+    };
+    let output = map_real_waveform(
+        tensor,
+        WaveformOutputMode::Double,
+        |value| rectpuls_scalar(value, width),
+        &mut cooperation,
+    )
+    .await?
+    .map_err(|error| error.into_runtime_error(BUILTIN_NAME, &RECTPULS_ERROR_INTERNAL))?;
     let Some(source) = gpu_source else {
         return Ok(tensor_into_value(output));
     };
-    let restored =
-        gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(output), BUILTIN_NAME)?;
+    let protected: Vec<_> = resident_inputs.iter().collect();
+    let restored = gpu_helpers::restore_class_preserving_value_protecting(
+        &source,
+        Value::Tensor(output),
+        BUILTIN_NAME,
+        &protected,
+    )?;
     if runmat_accelerate_api::handle_is_explicit(&source)
         && !matches!(restored, Value::GpuTensor(_))
     {
@@ -268,24 +168,15 @@ async fn rectpuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     Ok(restored)
 }
 
-async fn ensure_rectpuls_extensions(t: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    crate::builtins::common::validation::reject_typed_complex_integer(t, BUILTIN_NAME)?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        t,
-        &RECTPULS_INTEGER_T_EXTENSION,
-        BUILTIN_NAME,
-        "T",
-    )
-    .await?;
-    if let [width] = rest {
-        crate::builtins::common::validation::reject_typed_complex_integer(width, BUILTIN_NAME)?;
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            width,
-            &RECTPULS_INTEGER_W_EXTENSION,
+fn ensure_rectpuls_compatibility(
+    t: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(t) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RECTPULS_INTEGER_T_EXTENSION,
             BUILTIN_NAME,
-            "W",
-        )
-        .await?;
+        )?;
     }
     if std::iter::once(t)
         .chain(rest.iter())
@@ -299,29 +190,40 @@ async fn ensure_rectpuls_extensions(t: &Value, rest: &[Value]) -> BuiltinResult<
     Ok(())
 }
 
-fn rectpuls_gpu_source(t: &Value, rest: &[Value]) -> BuiltinResult<Option<GpuTensorHandle>> {
-    gpu_helpers::select_resident_output_source(
-        std::iter::once(t)
-            .chain(rest.iter())
-            .filter_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle.clone()),
-                _ => None,
-            }),
-        BUILTIN_NAME,
-    )
+fn rectpuls_gpu_source(
+    t: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<GpuTensorHandle>, Vec<GpuTensorHandle>)> {
+    let handles: Vec<_> = std::iter::once(t)
+        .chain(rest.iter())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let source = gpu_helpers::select_resident_output_source(handles.iter().cloned(), BUILTIN_NAME)?;
+    Ok((source, handles))
 }
 
-async fn parse_width(rest: &[Value]) -> BuiltinResult<f64> {
+fn prepare_width<'a>(
+    rest: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<Option<PreparedWaveformControl<'a>>> {
     match rest.len() {
-        0 => Ok(1.0),
+        0 => Ok(None),
         1 => {
-            let raw = scalar_f64_from_value_async(&rest[0])
-                .await
-                .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err))?
-                .ok_or_else(|| rectpuls_error(&RECTPULS_ERROR_WIDTH_INVALID))?;
-            validate_width(raw).map_err(|err| {
-                rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err.as_str())
-            })
+            let prepared = PreparedWaveformControl::admit(
+                rest.first().expect("single width operand was checked"),
+                &RECTPULS_INTEGER_W_EXTENSION,
+                BUILTIN_NAME,
+                "W",
+            )
+            .map_err(width_control_error)?;
+            if let Some(raw) = prepared.host_value() {
+                validate_width(raw).map_err(|err| {
+                    rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err)
+                })?;
+            }
+            Ok(Some(prepared))
         }
         _ => Err(rectpuls_error_with_detail(
             &RECTPULS_ERROR_ARG_COUNT,
@@ -330,7 +232,37 @@ async fn parse_width(rest: &[Value]) -> BuiltinResult<f64> {
     }
 }
 
-async fn rectpuls_input_tensor(value: Value) -> BuiltinResult<Tensor> {
+async fn resolve_width(
+    control: Option<PreparedWaveformControl<'_>>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<f64> {
+    let Some(control) = control else {
+        return Ok(1.0);
+    };
+    let raw = control
+        .resolve(cooperation)
+        .await
+        .map_err(width_control_error)?;
+    validate_width(raw)
+        .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, err))
+}
+
+fn width_control_error(error: WaveformControlError) -> RuntimeError {
+    match error {
+        WaveformControlError::Invalid(detail) => {
+            rectpuls_error_with_detail(&RECTPULS_ERROR_WIDTH_INVALID, detail)
+        }
+        WaveformControlError::Boundary(source) => source,
+        WaveformControlError::Provider(source) => {
+            rectpuls_error_with_source(&RECTPULS_ERROR_INTERNAL, "control admission failed", source)
+        }
+    }
+}
+
+async fn rectpuls_input_tensor(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => {
             gpu_helpers::gather_tensor_async(&handle)
@@ -349,8 +281,15 @@ async fn rectpuls_input_tensor(value: Value) -> BuiltinResult<Tensor> {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
             Err(rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))
         }
-        other => tensor::value_into_tensor_for(BUILTIN_NAME, other)
-            .map_err(|err| rectpuls_error_with_detail(&RECTPULS_ERROR_INVALID_INPUT, err)),
+        other => waveform_input_tensor(other, BUILTIN_NAME, cooperation)
+            .await?
+            .map_err(|error| {
+                error.into_runtime_error(
+                    BUILTIN_NAME,
+                    &RECTPULS_ERROR_INVALID_INPUT,
+                    &RECTPULS_ERROR_INTERNAL,
+                )
+            }),
     }
 }
 
@@ -358,8 +297,8 @@ async fn rectpuls_input_tensor(value: Value) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
-    use runmat_value::{CharArray, IntegerStorage};
+    use runmat_builtins::builtin_function_by_name;
+    use runmat_value::{CharArray, IntValue, IntegerStorage};
 
     fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(rectpuls_builtin(t, rest))
@@ -391,27 +330,24 @@ mod tests {
     }
 
     #[test]
-    fn rectpuls_type_preserves_input_shape() {
-        let out = numeric_unary_shape_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
-        );
-    }
-
-    #[test]
     fn rectpuls_default_width_samples_rectangle() {
         let input = Tensor::new(vec![-0.5, -0.25, 0.0, 0.25, 0.5, 0.75], vec![1, 6]).unwrap();
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("rectpuls"));
-        assert_eq!(out.shape, vec![1, 6]);
+        assert_eq!(out.shape(), vec![1, 6]);
         assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn smallest_positive_width_keeps_zero_inside_half_open_pulse() {
+        let minimum = f64::from_bits(1);
+        assert_eq!(rectpuls_scalar(0.0, minimum), 1.0);
+        assert_eq!(rectpuls_scalar(-0.0, minimum), 1.0);
+        assert_eq!(rectpuls_scalar(minimum, minimum), 0.0);
+        assert_eq!(rectpuls_scalar(-minimum, minimum), 0.0);
+        assert_eq!(rectpuls_scalar(-minimum, 2.0 * minimum), 1.0);
+        assert_eq!(rectpuls_scalar(minimum, 2.0 * minimum), 0.0);
+        assert_eq!(rectpuls_scalar(0.0, f64::MAX), 1.0);
+        assert_eq!(rectpuls_scalar(f64::MAX, f64::MAX), 0.0);
     }
 
     #[test]
@@ -420,7 +356,7 @@ mod tests {
         let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
         let out =
             expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("rectpuls"));
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), vec![1, 3]);
         assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 0.0]);
     }
 
@@ -438,6 +374,86 @@ mod tests {
         let err =
             call(Value::CharArray(CharArray::new_row("abc")), Vec::new()).expect_err("text input");
         assert_eq!(err.identifier(), RECTPULS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn invalid_host_width_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        input.probe.mark_unavailable();
+        let err =
+            call(Value::GpuTensor(input.handle), vec![Value::Num(0.0)]).expect_err("host width");
+        assert_eq!(err.identifier(), RECTPULS_ERROR_WIDTH_INVALID.identifier);
+    }
+
+    #[test]
+    fn invalid_host_sample_precedes_resident_width_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let control = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        control.probe.mark_unavailable();
+        let error = call(
+            Value::String("invalid".into()),
+            vec![Value::GpuTensor(control.handle)],
+        )
+        .expect_err("invalid sample before control download");
+        assert_eq!(error.identifier(), RECTPULS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
+    fn wide_host_width_precedes_resident_sample_access() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let owner = TestAllocationOwner::new();
+        let sample = owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        sample.probe.mark_unavailable();
+        let error = call(
+            Value::GpuTensor(sample.handle),
+            vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+        )
+        .expect_err("inexact width before sample download");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[test]
+    fn integer_width_requires_exact_binary64_conversion() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let rounded = call(
+            Value::Num(0.0),
+            vec![Value::Int(IntValue::U64((1u64 << 53) + 1))],
+        )
+        .expect_err("inexact width");
+        assert!(rounded
+            .to_string()
+            .contains("exactly representable as double"));
+        let exact = call(Value::Num(0.0), vec![Value::Int(IntValue::U64(1u64 << 54))])
+            .expect("exact wide width");
+        assert!(matches!(exact, Value::Num(value) if value == 1.0));
+    }
+
+    #[test]
+    fn integer_sample_literal_boundary_matches_catalog_fact() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = call(Value::Int(IntValue::U64((1_u64 << 53) + 1)), Vec::new())
+            .expect_err("inexact sample time");
+        assert!(error.message().contains("exactly representable"));
+        assert!(matches!(
+            call(Value::Int(IntValue::U64(1_u64 << 54)), Vec::new()).unwrap(),
+            Value::Num(_)
+        ));
     }
 
     #[test]
@@ -462,8 +478,9 @@ mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let error = call(Value::GpuTensor(explicit), vec![Value::Num(2.0)])
                 .expect_err("strict explicit input");
             assert_eq!(
@@ -471,6 +488,37 @@ mod tests {
                 RECTPULS_EXPLICIT_GPU_EXTENSION.error_identifier
             );
         });
+    }
+
+    #[test]
+    fn restoration_never_adopts_other_borrowed_control_or_retires_it_on_failure() {
+        use crate::builtins::math::signal::common::waveform_restore_fixture::RestoreProbeProvider;
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        for alias_control in [true, false] {
+            let provider = RestoreProbeProvider::new();
+            let sample = provider.input(&[0.0]);
+            let width = provider.input(&[1.0]);
+            let borrowed_sample = sample.clone();
+            let borrowed_width = width.clone();
+            if alias_control {
+                provider.alias_on_restore(&width);
+            } else {
+                provider.fail_on_restore();
+            }
+            let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let error = call(Value::GpuTensor(sample), vec![Value::GpuTensor(width)])
+                .expect_err("borrowed alias or late upload failure");
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert_eq!(provider.downloads(), 2);
+            assert!(borrowed_sample.allocation_lease().validate_live().is_ok());
+            assert!(borrowed_width.allocation_lease().validate_live().is_ok());
+            if alias_control {
+                assert!(error.message().contains("borrowed input"));
+            } else {
+                assert!(error.message().contains("late waveform restoration fault"));
+                assert!(std::error::Error::source(&error).is_some());
+            }
+        }
     }
 
     #[test]
@@ -489,8 +537,9 @@ mod tests {
         for storage in all_integer_storages() {
             let input = Tensor::new_integer(storage, vec![1, 2]).expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let result = call(Value::GpuTensor(handle), vec![Value::Num(2.0)]);
             let output = result.expect("resident integer rectpuls");
             let Value::GpuTensor(output_handle) = &output else {
@@ -511,7 +560,134 @@ mod tests {
     }
 
     #[test]
+    fn wide_resident_sample_uses_one_native_readback_before_mapping() {
+        use runmat_accelerate_api::{
+            AccelDownloadFuture, AccelIntegerDownloadFuture, AccelNumericDownloadFuture,
+            AccelProvider, GpuTensorHandle, HostNumericTensorView, HostTensorView,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountedOwner {
+            inner: runmat_accelerate::simple_provider::InProcessProvider,
+            integer_downloads: AtomicUsize,
+        }
+        impl AccelProvider for CountedOwner {
+            fn device_id(&self) -> u32 {
+                self.inner.device_id()
+            }
+            fn device_info(&self) -> String {
+                self.inner.device_info()
+            }
+            fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                self.inner.upload(host)
+            }
+            fn upload_numeric_raw(
+                &self,
+                host: &HostNumericTensorView,
+            ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+                self.inner.upload_numeric_raw(host)
+            }
+            fn download_integer<'a>(
+                &'a self,
+                handle: &'a GpuTensorHandle,
+            ) -> AccelIntegerDownloadFuture<'a> {
+                self.inner.download_integer(handle)
+            }
+            fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                self.inner.download(handle)
+            }
+            fn download_numeric<'a>(
+                &'a self,
+                handle: &'a GpuTensorHandle,
+            ) -> AccelNumericDownloadFuture<'a> {
+                // Count native integer input/control reads, not the test's
+                // separate floating-point output verification downloads.
+                if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+                    self.integer_downloads.fetch_add(1, Ordering::SeqCst);
+                }
+                self.inner.download_numeric(handle)
+            }
+        }
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let provider: &'static CountedOwner = Box::leak(Box::new(CountedOwner {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            integer_downloads: AtomicUsize::new(0),
+        }));
+        let _scope = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![0, 1_u64 << 54]), vec![1, 2]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
+        let invalid = call(Value::GpuTensor(handle.clone()), vec![Value::Num(0.0)])
+            .expect_err("host-invalid width precedes native sample readback");
+        assert_eq!(
+            invalid.identifier(),
+            RECTPULS_ERROR_WIDTH_INVALID.identifier
+        );
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 0);
+        assert!(handle.allocation_lease().validate_live().is_ok());
+        let output =
+            call(Value::GpuTensor(handle.clone()), vec![]).expect("prepared resident waveform");
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 1);
+        let gathered = crate::builtins::common::test_support::gather(output).unwrap();
+        assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
+        assert!(handle.allocation_lease().validate_live().is_ok());
+        handle.release().unwrap();
+
+        let control =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 54]), vec![1, 1]).unwrap();
+        let control_handle = gpu_helpers::upload_tensor(provider, &control).unwrap();
+        let control_output = call(
+            Value::Num(0.0),
+            vec![Value::GpuTensor(control_handle.clone())],
+        )
+        .expect("prepared resident width");
+        assert_eq!(
+            crate::builtins::common::test_support::gather(control_output)
+                .unwrap()
+                .materialize_f64(),
+            vec![1.0]
+        );
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), 2);
+        assert!(control_handle.allocation_lease().validate_live().is_ok());
+        control_handle.release().unwrap();
+
+        let other_provider: &'static runmat_accelerate::simple_provider::InProcessProvider =
+            Box::leak(Box::new(
+                runmat_accelerate::simple_provider::InProcessProvider::new(),
+            ));
+        unsafe { runmat_accelerate_api::register_device_provider(other_provider) };
+        let sample = gpu_helpers::upload_tensor(provider, &input).unwrap();
+        let foreign_width = other_provider
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        let before = provider.integer_downloads.load(Ordering::SeqCst);
+        let error = call(
+            Value::GpuTensor(sample.clone()),
+            vec![Value::GpuTensor(foreign_width.clone())],
+        )
+        .expect_err("mixed resident owners reject before native sample readback");
+        assert_eq!(error.identifier(), Some("RunMat:gpu:MixedProviders"));
+        assert_eq!(provider.integer_downloads.load(Ordering::SeqCst), before);
+        assert!(sample.allocation_lease().validate_live().is_ok());
+        assert!(foreign_width.allocation_lease().validate_live().is_ok());
+        sample.release().unwrap();
+        foreign_width.release().unwrap();
+    }
+
+    #[test]
     fn rectpuls_is_registered() {
-        assert!(builtin_function_by_name("rectpuls").is_some());
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("rectpuls").unwrap();
+        assert!(builtin_function_by_name("rectpuls").is_none());
+        assert_eq!(entry.bindings.len(), 1);
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name("rectpuls");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
     }
 }

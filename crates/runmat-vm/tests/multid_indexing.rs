@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use test_helpers::execute_source;
+use test_helpers::{compile_source, execute_source, interpret};
 
 #[test]
 fn reshape_and_index_3d_element() {
@@ -22,7 +22,7 @@ fn slice_3d_non_trailing_singleton_shape() {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
-        t.shape,
+        t.shape(),
         vec![3, 1, 5],
         "A(:,2,:) on 3x4x5 should be [3, 1, 5]"
     );
@@ -36,7 +36,7 @@ fn slice_3d_leading_scalars_shape() {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
-        t.shape,
+        t.shape(),
         vec![1, 1, 5],
         "A(1,1,:) on 3x4x5 should be [1, 1, 5]"
     );
@@ -49,7 +49,7 @@ fn slice_3d_trailing_singleton_dropped_for_vector_index() {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
-        t.shape,
+        t.shape(),
         vec![3, 4],
         "A(:,:,[2]) should drop trailing singleton"
     );
@@ -62,7 +62,7 @@ fn slice_3d_trailing_singleton_dropped_for_scalar_index() {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
     assert_eq!(
-        t.shape,
+        t.shape(),
         vec![3, 4],
         "A(:,:,2) should drop trailing singleton"
     );
@@ -80,17 +80,20 @@ fn mixed_selectors_basic_2d_range() {
 
 #[test]
 fn logical_mask_rows_select() {
-    let vars = execute_source("A=[1 2; 3 4; 5 6]; sel = A([true false true], :);").unwrap();
-    // Expect rows 1 and 3 selected. In column-major storage, resulting 2x2 has data [1 5 2 6].
-    let sel = vars
+    let bytecode = compile_source("A=[1 2; 3 4; 5 6]; sel = A([true false true], :);").unwrap();
+    let slot = bytecode
+        .var_names
         .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_value::Value::Tensor(_)))
+        .find_map(|(&slot, name)| (name == "sel").then_some(slot))
         .unwrap();
-    if let runmat_value::Value::Tensor(t) = sel {
-        assert_eq!(t.shape, vec![2, 2]);
-        assert_eq!(t.materialize_f64(), vec![1.0, 5.0, 2.0, 6.0]);
-    }
+    let vars = interpret(&bytecode).unwrap();
+    // Inspect the authored output, not a private temporary or the original A.
+    let sel = vars.get(slot).expect("named sel output");
+    let runmat_value::Value::Tensor(t) = sel else {
+        panic!("sel must remain a numeric tensor");
+    };
+    assert_eq!(t.shape(), vec![2, 2]);
+    assert_eq!(t.materialize_f64(), vec![1.0, 5.0, 2.0, 6.0]);
 }
 
 #[test]
@@ -143,10 +146,10 @@ fn slice_assignment_3d_entire_slice() {
                 None
             }
         })
-        .find(|t| t.shape.len() == 3)
+        .find(|t| t.shape().len() == 3)
         .unwrap();
     {
-        assert_eq!(a.shape, vec![2, 3, 2]);
+        assert_eq!(a.shape(), vec![2, 3, 2]);
         // First slice (k=1) occupies every other element interleaved due to column-major strides across dims.
         // Check elements of second slice by recomputing indices rather than slicing contiguous range.
         let second_slice_vals = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
@@ -172,7 +175,7 @@ fn gpu_slice_assignment_and_range_indexing() {
         execute_source("A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));")
             .expect("execute");
     let b_tensor = vars
-        .into_iter()
+        .iter()
         .filter_map(|value| match value {
             runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
@@ -190,7 +193,7 @@ fn gpu_range_end_indexing() {
         .expect("execute");
 
     let b_tensor = vars
-        .into_iter()
+        .iter()
         .filter_map(|value| match value {
             runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
@@ -208,7 +211,7 @@ fn gpu_range_end_assignment() {
         execute_source("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);").expect("execute");
 
     let b_tensor = vars
-        .into_iter()
+        .iter()
         .filter_map(|value| match value {
             runmat_value::Value::Tensor(tensor) => Some(tensor),
             _ => None,
@@ -234,14 +237,14 @@ fn gpu_integer_short_linear_logical_mask_preserves_residency_and_class() {
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![2, 1]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::U64(vec![10, 30]))
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![1, 4]
+            if tensor.shape() == vec![1, 4]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::U64(vec![7, 20, 9, 40]))
     )));

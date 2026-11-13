@@ -5,35 +5,9 @@ use uuid::Uuid;
 
 #[derive(Subcommand, Clone)]
 pub enum JobCommand {
-    /// Submit an exact encrypted program as a durable remote job
-    Submit {
-        file: PathBuf,
-        #[arg(long)]
-        project: Option<Uuid>,
-        #[arg(long)]
-        cluster: String,
-        #[arg(long, default_value = "default")]
-        queue: String,
-        /// Pinned endpoint identity fingerprint trusted for this run
-        #[arg(long)]
-        trust_identity: String,
-        #[arg(long)]
-        function: Option<String>,
-        #[arg(long)]
-        idempotency_key: Option<String>,
-        /// Number of remote worker allocations for driver-owned scheduling
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=1024))]
-        workers: u32,
-        #[arg(long)]
-        detach: bool,
-        #[arg(long)]
-        json: bool,
-        #[arg(last = true)]
-        args: Vec<String>,
-    },
     /// List durable remote jobs
     List {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         #[arg(long)]
         limit: Option<u32>,
@@ -72,8 +46,7 @@ pub enum JobCommand {
 impl JobCommand {
     pub(crate) fn machine_output(&self) -> bool {
         match self {
-            Self::Submit { json, .. }
-            | Self::List { json, .. }
+            Self::List { json, .. }
             | Self::Show { json, .. }
             | Self::Attach { json, .. }
             | Self::Cancel { json, .. } => *json,
@@ -85,6 +58,7 @@ impl JobCommand {
 #[derive(Subcommand, Clone)]
 pub enum JobRecoveryCommand {
     /// Generate a new local recovery key file without sending its secret to RunMat
+    #[command(name = "create", alias = "keygen")]
     Keygen {
         #[arg(long)]
         output: PathBuf,
@@ -127,23 +101,42 @@ pub enum JobRecoveryCommand {
     /// Recover and decrypt a terminal result or diagnostic with a local key
     Recover {
         run_id: String,
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         #[arg(long)]
         key: PathBuf,
         #[arg(long)]
         json: bool,
     },
+    /// Decrypt an exported binary recovery envelope and result artifact offline
+    Decrypt {
+        #[arg(long)]
+        key: PathBuf,
+        /// Canonical binary envelope (base64url-decode the server envelope first)
+        #[arg(long)]
+        envelope: PathBuf,
+        #[arg(long)]
+        artifact: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        /// Decrypt a diagnostic rather than a result
+        #[arg(long)]
+        diagnostic: bool,
+        /// New private output file; existing files are never overwritten
+        #[arg(long)]
+        output: PathBuf,
+    },
 }
 
 impl JobRecoveryCommand {
-    fn machine_output(&self) -> bool {
+    pub(crate) fn machine_output(&self) -> bool {
         match self {
             Self::Keygen { json, .. }
             | Self::Configure { json, .. }
             | Self::Disable { json, .. }
             | Self::Show { json, .. }
             | Self::Recover { json, .. } => *json,
+            Self::Decrypt { .. } => false,
         }
     }
 }

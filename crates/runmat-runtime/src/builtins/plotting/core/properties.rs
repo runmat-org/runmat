@@ -1,24 +1,52 @@
+#[path = "properties/text_input.rs"]
+mod text_input;
+use runmat_plot::plots::figure::AxisLimitAxis;
 use runmat_plot::plots::{
     ColorMap, LegendStyle, NumericPlotData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
-use runmat_value::{CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value};
+use runmat_value::{
+    CellArray, CharArray, NumericScalar, StringArray, Tensor, UnboundedStructValueBuilder, Value,
+};
 use std::borrow::Cow;
+use text_input::{ValidatedStylePairs, ValidatedStyleValue};
+
+#[path = "properties/async_readback.rs"]
+mod async_readback;
+#[path = "properties/scatter3_data.rs"]
+mod scatter3_data;
+pub use async_readback::get_properties_async;
+pub(crate) use async_readback::set_properties_async_with_runtime;
+#[path = "properties/read_source.rs"]
+mod read_source;
+use read_source::PropertyReadSource;
+#[path = "properties/axes_read.rs"]
+mod axes_read;
+#[path = "properties/figure_plan.rs"]
+mod figure_plan;
+#[path = "properties/figure_read.rs"]
+mod figure_read;
+#[path = "properties/receiver.rs"]
+mod receiver;
+#[path = "properties/set_target.rs"]
+mod set_target;
+pub(crate) use receiver::select as select_graphics_property;
+pub(crate) use receiver::{get_receiver_properties, set_receiver_properties_with_runtime};
+use set_target::PropertySetHandle;
+pub(crate) use set_target::PropertySetOutcome;
+#[path = "properties/set_preflight.rs"]
+mod set_preflight;
+use set_preflight::{
+    prepare_line3_data_updates, prepare_line_data_updates, prepare_scatter_data_updates,
+    Line3DataUpdates, LineDataUpdates, ScatterDataUpdates,
+};
 
 use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
-    axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
-    axis_display_bounds_snapshot_for_axes, current_axes_handle_for_figure,
-    current_figure_handle_if_exists, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, figure_has_sg_title, figure_tag, legend_entries_snapshot,
+    axes_handle_exists, axes_metadata_snapshot, current_figure_handle_if_exists,
+    decode_axes_handle, decode_plot_object_handle, figure_handle_exists, legend_entries_snapshot,
     present_figure_update, root_default_properties, root_default_property, root_figure_handles,
-    root_show_hidden_handles, root_units, select_axes_for_figure, select_current_figure_if_exists,
-    set_axes_position_for_axes, set_axes_style_for_axes, set_axes_units_for_axes,
-    set_axis_tick_angles_for_axes, set_axis_tick_formats_for_axes, set_axis_tick_labels_for_axes,
-    set_axis_ticks_for_axes, set_figure_background_color, set_figure_name, set_figure_number_title,
-    set_figure_position, set_figure_tag, set_figure_visible, set_legend_for_axes,
-    set_root_default_property, set_root_show_hidden_handles, set_root_units,
-    set_sg_title_properties_for_figure, set_text_annotation_properties_for_axes,
-    set_text_properties_for_axes, FigureHandle, PlotObjectKind, RootPropertyValue,
+    root_show_hidden_handles, root_units, set_root_default_property, set_root_show_hidden_handles,
+    set_root_units, FigureHandle, PlotObjectKind, RootPropertyValue,
 };
 use super::style::{
     color_from_name_or_token, parse_color_value, parse_handle_visibility, value_as_bool,
@@ -34,6 +62,8 @@ use crate::builtins::stats::summary::binscatter;
 use crate::BuiltinResult;
 
 const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
+#[path = "properties/colorbar.rs"]
+mod colorbar;
 
 #[derive(Clone, Debug)]
 pub enum PlotHandle {
@@ -47,6 +77,33 @@ pub enum PlotHandle {
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
+    if let Value::HandleObject(handle) = value {
+        let receiver = runmat_gc::gc_with_value(&handle.target, |target| match target {
+            Value::Object(object) => object.graphics_receiver().cloned(),
+            _ => None,
+        })
+        .ok()
+        .flatten();
+        if let Some(receiver) = receiver {
+            if !crate::is_handle_valid(handle) || !super::state::graphics_receiver_valid(&receiver)
+            {
+                return Err(crate::build_runtime_error("graphics object is retired")
+                    .with_builtin(builtin)
+                    .with_identifier("RunMat:graphics:ReceiverRetired")
+                    .build());
+            }
+            // An exact lease cannot be erased to a numeric PlotHandle: another
+            // session could close and reuse that number before the property
+            // owner reacquires the registry. Until a lease-bearing operation
+            // is admitted, reject this object without touching the new owner.
+            return Err(crate::build_runtime_error(
+                "graphics object property access requires a lease-bearing operation",
+            )
+            .with_builtin(builtin)
+            .with_identifier("RunMat:graphics:ReceiverPropertyUnavailable")
+            .build());
+        }
+    }
     let scalar = handle_scalar(value, builtin)?;
     if scalar == 0.0 {
         return Ok(PlotHandle::Root);
@@ -110,7 +167,12 @@ pub fn get_properties(
             get_legend_property(handle, axes_index, property, builtin)
         }
         PlotHandle::Figure(handle) => get_figure_property(handle, property, builtin),
-        PlotHandle::PlotChild(_, state) => get_plot_child_property(&state, property, builtin),
+        PlotHandle::PlotChild(_, state) => get_plot_child_property(
+            &state,
+            property,
+            builtin,
+            PropertyReadSource::CompatibilityAlias,
+        ),
     }
 }
 
@@ -119,6 +181,45 @@ pub fn set_properties(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    set_properties_with_runtime(
+        None,
+        handle,
+        crate::call::FunctionArgumentView::from_slice(args),
+        builtin,
+    )
+}
+
+pub(crate) fn set_properties_with_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: PlotHandle,
+    args: crate::call::FunctionArgumentView<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    set_properties_with_authority(
+        &super::state::PropertyMutationTarget::alias().with_runtime(runtime),
+        handle,
+        args,
+        builtin,
+    )
+}
+
+pub(crate) fn set_properties_with_authority(
+    authority: &super::state::PropertyMutationTarget,
+    handle: PlotHandle,
+    args: crate::call::FunctionArgumentView<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    set_properties_for_target(authority, (&handle).into(), args, builtin)?
+        .complete_compatibility(builtin)
+}
+
+fn set_properties_for_target(
+    authority: &super::state::PropertyMutationTarget,
+
+    handle: PropertySetHandle<'_>,
+    args: crate::call::FunctionArgumentView<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<PropertySetOutcome> {
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(plotting_error(
             builtin,
@@ -126,52 +227,42 @@ pub fn set_properties(
         ));
     }
     match handle {
-        PlotHandle::Root => {
+        PropertySetHandle::Root => {
             for pair in args.chunks_exact(2) {
                 let raw_key = property_name_text(&pair[0], builtin)?;
                 let key = canonical_property_name(raw_key.trim()).into_owned();
-                apply_root_property(&key, raw_key.trim(), &pair[1], builtin)?;
+                apply_root_property(authority, &key, raw_key.trim(), &pair[1], builtin)?;
             }
-            Ok(())
+            Ok(PropertySetOutcome::Complete)
         }
-        PlotHandle::Figure(handle) => {
-            let mut needs_present = false;
-            for pair in args.chunks_exact(2) {
-                validate_figure_property_value(&pair[0], &pair[1], Some(handle), builtin)?;
-            }
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                needs_present |= apply_figure_property(handle, &key, &pair[1], builtin)?;
-            }
-            if needs_present {
-                let figure = super::state::clone_figure(handle)
-                    .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
-                let _ = present_figure_update(builtin, handle, figure)?;
-            }
-            Ok(())
+        PropertySetHandle::Figure(handle) => {
+            figure_plan::PreparedFigureProperties::new(handle, args, builtin)?
+                .apply(authority, handle, builtin)
         }
-        PlotHandle::Axes(handle, axes_index) => {
+        PropertySetHandle::Axes(handle, axes_index) => {
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
-                apply_axes_property(handle, axes_index, &key, &pair[1], builtin)?;
+                apply_axes_property(authority, handle, axes_index, &key, &pair[1], builtin)?;
             }
-            Ok(())
+            Ok(PropertySetOutcome::Complete)
         }
-        PlotHandle::Ruler(handle, axes_index, kind) => {
+        PropertySetHandle::Ruler(handle, axes_index, kind) => {
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
-                apply_ruler_property(handle, axes_index, kind, &key, &pair[1], builtin)?;
+                apply_ruler_property(authority, handle, axes_index, kind, &key, &pair[1], builtin)?;
             }
-            Ok(())
+            Ok(PropertySetOutcome::Complete)
         }
-        PlotHandle::Text(handle, axes_index, kind) => {
+        PropertySetHandle::Text(handle, axes_index, kind) => {
             let mut text: Option<String> = None;
             let mut style = if matches!(kind, PlotObjectKind::SuperTitle) {
-                super::state::clone_figure(handle)
-                    .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?
+                authority
+                    .figure_snapshot(handle)
+                    .map_err(|err| map_figure_error(builtin, err))?
                     .sg_title_style
+                    .clone()
             } else {
-                axes_metadata_snapshot(handle, axes_index)
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
                     .map_err(|err| map_figure_error(builtin, err))?
                     .text_style_for(kind)
             };
@@ -180,17 +271,30 @@ pub fn set_properties(
                 apply_text_property(&mut text, &mut style, &key, &pair[1], builtin)?;
             }
             if matches!(kind, PlotObjectKind::SuperTitle) {
-                set_sg_title_properties_for_figure(handle, text, Some(style))
-                    .map_err(|err| map_figure_error(builtin, err))?;
-            } else {
-                set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
-                    .map_err(|err| map_figure_error(builtin, err))?;
-            }
-            Ok(())
-        }
-        PlotHandle::Legend(handle, axes_index) => {
-            let snapshot = axes_metadata_snapshot(handle, axes_index)
+                super::state::set_sg_title_properties_for_figure_for_property(
+                    authority,
+                    handle,
+                    text,
+                    Some(style),
+                )
                 .map_err(|err| map_figure_error(builtin, err))?;
+            } else {
+                super::state::set_text_properties_for_axes_for_property(
+                    authority,
+                    handle,
+                    axes_index,
+                    kind,
+                    text,
+                    Some(style),
+                )
+                .map_err(|err| map_figure_error(builtin, err))?;
+            }
+            Ok(PropertySetOutcome::Complete)
+        }
+        PropertySetHandle::Legend(handle, axes_index) => {
+            let snapshot =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
             let mut style = snapshot.legend_style;
             let mut enabled = snapshot.legend_enabled;
             let mut labels: Option<Vec<String>> = None;
@@ -205,17 +309,28 @@ pub fn set_properties(
                     builtin,
                 )?;
             }
-            set_legend_for_axes(handle, axes_index, enabled, labels.as_deref(), Some(style))
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(())
+            super::state::set_legend_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                enabled,
+                labels.as_deref(),
+                Some(style),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(PropertySetOutcome::Complete)
         }
-        PlotHandle::PlotChild(handle, state) => {
-            apply_plot_child_properties(handle, &state, args, builtin)
+        PropertySetHandle::PlotChild(handle, state) => {
+            apply_plot_child_properties(authority, handle, state, args, builtin)
+                .map(|_| PropertySetOutcome::Complete)
         }
     }
 }
 
-pub fn parse_text_style_pairs(builtin: &'static str, args: &[Value]) -> BuiltinResult<TextStyle> {
+pub fn parse_text_style_pairs(
+    builtin: &'static str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<TextStyle> {
     if args.is_empty() {
         return Ok(TextStyle::default());
     }
@@ -299,9 +414,17 @@ pub fn validate_heatmap_property_pairs(
                 }
             }
             "colormap" => {
-                let name = value_as_string(&pair[1]).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
-                })?;
+                let name = value_as_string(&pair[1])
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
+                    })?;
                 parse_colormap_name(&name, builtin)?;
             }
             "xdisplaylabels" => {
@@ -361,8 +484,8 @@ fn heatmap_exact_integer_limits_are_ordered(value: &Value) -> bool {
 
 pub fn split_legend_style_pairs<'a>(
     builtin: &'static str,
-    args: &'a [Value],
-) -> BuiltinResult<(&'a [Value], LegendStyle)> {
+    args: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<(crate::call::FunctionArgumentView<'a>, LegendStyle)> {
     let mut style = LegendStyle::default();
     let mut enabled = true;
     let mut labels = None;
@@ -398,12 +521,12 @@ pub fn split_legend_style_pairs<'a>(
         )?;
         split -= 2;
     }
-    Ok((&args[..split], style))
+    Ok((args.range(..split)?, style))
 }
 
 pub fn map_figure_error(
     builtin: &'static str,
-    err: impl std::error::Error + Send + Sync + 'static,
+    err: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> crate::RuntimeError {
     let message = format!("{builtin}: {err}");
     plotting_error_with_source(builtin, message, err)
@@ -414,89 +537,13 @@ fn get_figure_property(
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(handle)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
-    let axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
-    let current_axes =
-        current_axes_handle_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
-    let sg_title_handle =
-        super::state::encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle);
-    let has_sg_title = figure_has_sg_title(handle);
-    match property.map(canonical_property_name).as_deref() {
-        None => {
-            let mut st = StructValue::new();
-            st.insert("Handle", Value::Num(handle.as_u32() as f64));
-            st.insert("Number", Value::Num(handle.as_u32() as f64));
-            st.insert("Type", Value::String("figure".into()));
-            st.insert("CurrentAxes", Value::Num(current_axes));
-            let mut children = axes;
-            if has_sg_title {
-                children.push(sg_title_handle);
-            }
-            st.insert("Children", handles_value(children));
-            st.insert("Parent", Value::Num(f64::NAN));
-            st.insert(
-                "Name",
-                Value::String(figure.name.clone().unwrap_or_default()),
-            );
-            st.insert("NumberTitle", Value::Bool(figure.number_title));
-            st.insert("Visible", Value::Bool(figure.visible));
-            st.insert("Position", figure_position_value(figure.position));
-            st.insert(
-                "Color",
-                Value::String(color_to_short_name(figure.background_color)),
-            );
-            st.insert("Tag", Value::String(figure_tag(handle).unwrap_or_default()));
-            if let Some(waitbar) = super::state::waitbar_state_snapshot(handle)
-                .map_err(|err| map_figure_error(builtin, err))?
-            {
-                st.insert("WaitbarProgress", Value::Num(waitbar.progress));
-                st.insert("WaitbarMessage", Value::String(waitbar.message));
-            }
-            st.insert("SGTitle", Value::Num(sg_title_handle));
-            Ok(Value::Struct(st))
-        }
-        Some("number") => Ok(Value::Num(handle.as_u32() as f64)),
-        Some("type") => Ok(Value::String("figure".into())),
-        Some("currentaxes") => Ok(Value::Num(current_axes)),
-        Some("children") => Ok(handles_value({
-            let mut children = axes;
-            if has_sg_title {
-                children.push(sg_title_handle);
-            }
-            children
-        })),
-        Some("parent") => Ok(Value::Num(f64::NAN)),
-        Some("name") => Ok(Value::String(figure.name.unwrap_or_default())),
-        Some("numbertitle") => Ok(Value::Bool(figure.number_title)),
-        Some("visible") => Ok(Value::Bool(figure.visible)),
-        Some("position") => Ok(figure_position_value(figure.position)),
-        Some("color") => Ok(Value::String(color_to_short_name(figure.background_color))),
-        Some("waitbarprogress") => Ok(Value::Num(
-            super::state::waitbar_state_snapshot(handle)
-                .map_err(|err| map_figure_error(builtin, err))?
-                .map(|state| state.progress)
-                .unwrap_or(f64::NAN),
-        )),
-        Some("waitbarmessage") => Ok(Value::String(
-            super::state::waitbar_state_snapshot(handle)
-                .map_err(|err| map_figure_error(builtin, err))?
-                .map(|state| state.message)
-                .unwrap_or_default(),
-        )),
-        Some("tag") => Ok(Value::String(figure_tag(handle).unwrap_or_default())),
-        Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
-        Some(other) => Err(plotting_error(
-            builtin,
-            format!("{builtin}: unsupported figure property `{other}`"),
-        )),
-    }
+    figure_read::get_compatibility(handle, property, builtin)
 }
 
 fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Handle", Value::Num(0.0));
             st.insert("Type", Value::String("root".into()));
             st.insert("CurrentFigure", current_root_figure_value());
@@ -504,7 +551,7 @@ fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinRe
             st.insert("Parent", empty_handle_value());
             st.insert("ScreenSize", root_screen_size_value());
             st.insert("MonitorPositions", root_screen_size_value());
-            st.insert("Units", Value::String(root_units()));
+            st.insert("Units", Value::string(root_units()));
             st.insert(
                 "ShowHiddenHandles",
                 Value::String(on_off(root_show_hidden_handles()).into()),
@@ -512,7 +559,7 @@ fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinRe
             for (name, value) in root_default_properties() {
                 st.insert(name, root_property_value_to_value(value));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("handle") => Ok(Value::Num(0.0)),
         Some("type") => Ok(Value::String("root".into())),
@@ -521,11 +568,11 @@ fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinRe
         Some("parent") => Ok(empty_handle_value()),
         Some("screensize") => Ok(root_screen_size_value()),
         Some("monitorpositions") => Ok(root_screen_size_value()),
-        Some("units") => Ok(Value::String(root_units())),
+        Some("units") => Ok(Value::string(root_units())),
         Some("showhiddenhandles") => Ok(Value::String(on_off(root_show_hidden_handles()).into())),
         Some(default) if is_root_default_property(default) => Ok(root_default_property(default)
             .map(root_property_value_to_value)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported root property `{other}`"),
@@ -534,6 +581,8 @@ fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinRe
 }
 
 fn apply_root_property(
+    authority: &super::state::PropertyMutationTarget,
+
     key: &str,
     display_key: &str,
     value: &Value,
@@ -548,12 +597,19 @@ fn apply_root_property(
                     format!("{builtin}: CurrentFigure must be a figure handle"),
                 ));
             };
-            select_current_figure_if_exists(handle)
+            super::state::select_current_figure_if_exists_for_property(authority, handle)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "units" => {
             let units = value_as_text_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Units must be text")))?
                 .trim()
                 .to_ascii_lowercase();
@@ -640,15 +696,20 @@ fn root_property_value_from_value(
         Value::Bool(value) => Ok(RootPropertyValue::Bool(*value)),
         Value::Num(value) => Ok(RootPropertyValue::Num(*value)),
         Value::Int(value) => Ok(RootPropertyValue::Num(value.to_f64())),
-        Value::String(value) => Ok(RootPropertyValue::String(value.clone())),
-        Value::CharArray(value) => Ok(RootPropertyValue::String(value.data.iter().collect())),
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            Ok(RootPropertyValue::String(value.as_str().to_owned()))
+        }
+        Value::CharArray(value) => Ok(RootPropertyValue::String(
+            runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?,
+        )),
         Value::Tensor(value) => Ok(RootPropertyValue::Tensor(value.clone())),
-        Value::StringArray(value) => Ok(RootPropertyValue::StringArray {
-            rows: value.rows,
-            cols: value.cols,
-            shape: value.shape.clone(),
-            data: value.data.clone(),
-        }),
+        Value::StringArray(value) => Ok(RootPropertyValue::StringArray(value.clone())),
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported root default property value"),
@@ -660,19 +721,9 @@ fn root_property_value_to_value(value: RootPropertyValue) -> Value {
     match value {
         RootPropertyValue::Bool(value) => Value::Bool(value),
         RootPropertyValue::Num(value) => Value::Num(value),
-        RootPropertyValue::String(value) => Value::String(value),
+        RootPropertyValue::String(value) => Value::string(value),
         RootPropertyValue::Tensor(value) => Value::Tensor(value),
-        RootPropertyValue::StringArray {
-            rows,
-            cols,
-            shape,
-            data,
-        } => Value::StringArray(StringArray {
-            rows,
-            cols,
-            shape,
-            data,
-        }),
+        RootPropertyValue::StringArray(value) => Value::StringArray(value),
     }
 }
 
@@ -682,354 +733,7 @@ fn get_axes_property(
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let meta =
-        axes_metadata_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
-    let axes =
-        axes_state_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
-    let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    match property.map(canonical_property_name).as_deref() {
-        None => {
-            let mut st = StructValue::new();
-            st.insert(
-                "Handle",
-                Value::Num(super::state::encode_axes_handle(handle, axes_index)),
-            );
-            st.insert("Figure", Value::Num(handle.as_u32() as f64));
-            st.insert("Rows", Value::Num(axes.rows as f64));
-            st.insert("Cols", Value::Num(axes.cols as f64));
-            st.insert("Index", Value::Num((axes_index + 1) as f64));
-            st.insert(
-                "Title",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::Title,
-                )),
-            );
-            st.insert(
-                "Subtitle",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::Subtitle,
-                )),
-            );
-            st.insert(
-                "XLabel",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::XLabel,
-                )),
-            );
-            st.insert(
-                "YLabel",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::YLabel,
-                )),
-            );
-            st.insert(
-                "ZLabel",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::ZLabel,
-                )),
-            );
-            st.insert(
-                "Legend",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::Legend,
-                )),
-            );
-            st.insert(
-                "XAxis",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::XAxis,
-                )),
-            );
-            st.insert(
-                "YAxis",
-                Value::Num(super::state::encode_plot_object_handle(
-                    handle,
-                    axes_index,
-                    PlotObjectKind::YAxis,
-                )),
-            );
-            st.insert("LegendVisible", Value::Bool(meta.legend_enabled));
-            st.insert("Type", Value::String("axes".into()));
-            st.insert("Parent", Value::Num(handle.as_u32() as f64));
-            st.insert("Position", figure_position_value(meta.position));
-            st.insert("Units", Value::String(meta.units.clone()));
-            st.insert(
-                "Children",
-                handles_value(vec![
-                    super::state::encode_plot_object_handle(
-                        handle,
-                        axes_index,
-                        PlotObjectKind::Title,
-                    ),
-                    super::state::encode_plot_object_handle(
-                        handle,
-                        axes_index,
-                        PlotObjectKind::Subtitle,
-                    ),
-                    super::state::encode_plot_object_handle(
-                        handle,
-                        axes_index,
-                        PlotObjectKind::XLabel,
-                    ),
-                    super::state::encode_plot_object_handle(
-                        handle,
-                        axes_index,
-                        PlotObjectKind::YLabel,
-                    ),
-                    super::state::encode_plot_object_handle(
-                        handle,
-                        axes_index,
-                        PlotObjectKind::ZLabel,
-                    ),
-                    super::state::encode_plot_object_handle(
-                        handle,
-                        axes_index,
-                        PlotObjectKind::Legend,
-                    ),
-                ]),
-            );
-            st.insert("Grid", Value::Bool(meta.grid_enabled));
-            st.insert("MinorGrid", Value::Bool(meta.minor_grid_enabled));
-            st.insert(
-                "HiddenLineRemoval",
-                Value::String(on_off(meta.hidden_line_removal).into()),
-            );
-            st.insert("Box", Value::Bool(meta.box_enabled));
-            st.insert("AxisEqual", Value::Bool(meta.axis_equal));
-            st.insert(
-                "DataAspectRatio",
-                tensor_from_vec(meta.data_aspect_ratio.to_vec()),
-            );
-            st.insert(
-                "DataAspectRatioMode",
-                Value::String(meta.data_aspect_ratio_mode.clone()),
-            );
-            st.insert("Colorbar", Value::Bool(meta.colorbar_enabled));
-            st.insert(
-                "Colormap",
-                Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
-            );
-            st.insert(
-                "ColorLimits",
-                crate::builtins::plotting::op_common::limits::limit_value(meta.color_limits),
-            );
-            st.insert("XLim", limit_value(meta.x_limits));
-            st.insert("YLim", limit_value(meta.y_limits));
-            st.insert("ZLim", limit_value(meta.z_limits));
-            st.insert("CLim", limit_value(meta.color_limits));
-            st.insert(
-                "XTick",
-                tick_value(ticks_or_auto(
-                    meta.x_ticks.as_deref(),
-                    x_bounds(display_bounds),
-                )),
-            );
-            st.insert(
-                "YTick",
-                tick_value(ticks_or_auto(
-                    meta.y_ticks.as_deref(),
-                    y_bounds(display_bounds),
-                )),
-            );
-            st.insert("XTickMode", tick_mode_value(meta.x_ticks.as_ref()));
-            st.insert("YTickMode", tick_mode_value(meta.y_ticks.as_ref()));
-            st.insert(
-                "XTickLabel",
-                tick_label_value(tick_labels_or_auto(
-                    meta.x_tick_labels.as_deref(),
-                    meta.x_ticks.as_deref(),
-                    x_bounds(display_bounds),
-                    meta.x_tick_format.as_deref(),
-                )),
-            );
-            st.insert(
-                "YTickLabel",
-                tick_label_value(tick_labels_or_auto(
-                    meta.y_tick_labels.as_deref(),
-                    meta.y_ticks.as_deref(),
-                    y_bounds(display_bounds),
-                    meta.y_tick_format.as_deref(),
-                )),
-            );
-            st.insert(
-                "XTickLabelMode",
-                tick_mode_value(meta.x_tick_labels.as_ref()),
-            );
-            st.insert(
-                "YTickLabelMode",
-                tick_mode_value(meta.y_tick_labels.as_ref()),
-            );
-            st.insert(
-                "XTickLabelFormat",
-                Value::String(tick_format_or_default(meta.x_tick_format.as_deref())),
-            );
-            st.insert(
-                "YTickLabelFormat",
-                Value::String(tick_format_or_default(meta.y_tick_format.as_deref())),
-            );
-            st.insert(
-                "XTickLabelRotation",
-                Value::Num(meta.x_tick_label_rotation.unwrap_or(0.0)),
-            );
-            st.insert(
-                "YTickLabelRotation",
-                Value::Num(meta.y_tick_label_rotation.unwrap_or(0.0)),
-            );
-            st.insert(
-                "FontSize",
-                Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64),
-            );
-            st.insert("Visible", Value::Bool(meta.axes_style.visible));
-            st.insert(
-                "XScale",
-                Value::String(if meta.x_log { "log" } else { "linear" }.into()),
-            );
-            st.insert(
-                "YScale",
-                Value::String(if meta.y_log { "log" } else { "linear" }.into()),
-            );
-            st.insert("YAxisLocation", Value::String(meta.y_axis_location.clone()));
-            Ok(Value::Struct(st))
-        }
-        Some("title") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::Title,
-        ))),
-        Some("subtitle") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::Subtitle,
-        ))),
-        Some("xlabel") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::XLabel,
-        ))),
-        Some("ylabel") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::YLabel,
-        ))),
-        Some("zlabel") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::ZLabel,
-        ))),
-        Some("legend") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::Legend,
-        ))),
-        Some("xaxis") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::XAxis,
-        ))),
-        Some("yaxis") => Ok(Value::Num(super::state::encode_plot_object_handle(
-            handle,
-            axes_index,
-            PlotObjectKind::YAxis,
-        ))),
-        Some("view") => {
-            let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
-            let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
-            Ok(Value::Tensor(
-                Tensor::new(vec![az, el], vec![1, 2]).expect("view vector"),
-            ))
-        }
-        Some("grid") => Ok(Value::Bool(meta.grid_enabled)),
-        Some("minorgrid") => Ok(Value::Bool(meta.minor_grid_enabled)),
-        Some("hiddenlineremoval") => Ok(Value::String(on_off(meta.hidden_line_removal).into())),
-        Some("box") => Ok(Value::Bool(meta.box_enabled)),
-        Some("axisequal") => Ok(Value::Bool(meta.axis_equal)),
-        Some("dataaspectratio") => Ok(tensor_from_vec(meta.data_aspect_ratio.to_vec())),
-        Some("dataaspectratiomode") => Ok(Value::String(meta.data_aspect_ratio_mode.clone())),
-        Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
-        Some("colormap") => Ok(Value::String(
-            format!("{:?}", meta.colormap).to_ascii_lowercase(),
-        )),
-        Some("colorlimits") => Ok(crate::builtins::plotting::op_common::limits::limit_value(
-            meta.color_limits,
-        )),
-        Some("xlim") => Ok(limit_value(meta.x_limits)),
-        Some("ylim") => Ok(limit_value(meta.y_limits)),
-        Some("zlim") => Ok(limit_value(meta.z_limits)),
-        Some("clim") => Ok(limit_value(meta.color_limits)),
-        Some("xtick") => Ok(tick_value(ticks_or_auto(
-            meta.x_ticks.as_deref(),
-            x_bounds(display_bounds),
-        ))),
-        Some("ytick") => Ok(tick_value(ticks_or_auto(
-            meta.y_ticks.as_deref(),
-            y_bounds(display_bounds),
-        ))),
-        Some("xtickmode") => Ok(tick_mode_value(meta.x_ticks.as_ref())),
-        Some("ytickmode") => Ok(tick_mode_value(meta.y_ticks.as_ref())),
-        Some("xticklabel") => Ok(tick_label_value(tick_labels_or_auto(
-            meta.x_tick_labels.as_deref(),
-            meta.x_ticks.as_deref(),
-            x_bounds(display_bounds),
-            meta.x_tick_format.as_deref(),
-        ))),
-        Some("yticklabel") => Ok(tick_label_value(tick_labels_or_auto(
-            meta.y_tick_labels.as_deref(),
-            meta.y_ticks.as_deref(),
-            y_bounds(display_bounds),
-            meta.y_tick_format.as_deref(),
-        ))),
-        Some("xticklabelmode") => Ok(tick_mode_value(meta.x_tick_labels.as_ref())),
-        Some("yticklabelmode") => Ok(tick_mode_value(meta.y_tick_labels.as_ref())),
-        Some("xticklabelformat") => Ok(Value::String(tick_format_or_default(
-            meta.x_tick_format.as_deref(),
-        ))),
-        Some("yticklabelformat") => Ok(Value::String(tick_format_or_default(
-            meta.y_tick_format.as_deref(),
-        ))),
-        Some("xticklabelrotation") => Ok(Value::Num(meta.x_tick_label_rotation.unwrap_or(0.0))),
-        Some("yticklabelrotation") => Ok(Value::Num(meta.y_tick_label_rotation.unwrap_or(0.0))),
-        Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
-        Some("visible") => Ok(Value::Bool(meta.axes_style.visible)),
-        Some("xscale") => Ok(Value::String(
-            if meta.x_log { "log" } else { "linear" }.into(),
-        )),
-        Some("yscale") => Ok(Value::String(
-            if meta.y_log { "log" } else { "linear" }.into(),
-        )),
-        Some("yaxislocation") => Ok(Value::String(meta.y_axis_location)),
-        Some("type") => Ok(Value::String("axes".into())),
-        Some("parent") => Ok(Value::Num(handle.as_u32() as f64)),
-        Some("position") => Ok(figure_position_value(meta.position)),
-        Some("units") => Ok(Value::String(meta.units)),
-        Some("legendvisible") => Ok(Value::Bool(meta.legend_enabled)),
-        Some("children") => Ok(handles_value(vec![
-            super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::Title),
-            super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::Subtitle),
-            super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::XLabel),
-            super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::YLabel),
-            super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::ZLabel),
-            super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::Legend),
-        ])),
-        Some(other) => Err(plotting_error(
-            builtin,
-            format!("{builtin}: unsupported axes property `{other}`"),
-        )),
-    }
+    axes_read::get_compatibility(handle, axes_index, property, builtin)
 }
 
 fn get_text_property(
@@ -1073,7 +777,7 @@ fn get_text_property(
     };
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("text".into()));
             st.insert("Parent", parent.clone());
             st.insert("Children", handles_value(Vec::new()));
@@ -1083,18 +787,18 @@ fn get_text_property(
                 st.insert("FontSize", Value::Num(size as f64));
             }
             if let Some(weight) = style.font_weight {
-                st.insert("FontWeight", Value::String(weight));
+                st.insert("FontWeight", Value::string(weight));
             }
             if let Some(angle) = style.font_angle {
-                st.insert("FontAngle", Value::String(angle));
+                st.insert("FontAngle", Value::string(angle));
             }
             if let Some(interpreter) = style.interpreter {
-                st.insert("Interpreter", Value::String(interpreter));
+                st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(color) = style.color {
-                st.insert("Color", Value::String(color_to_short_name(color)));
+                st.insert("Color", rgb_triplet_value(color));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("text".into())),
         Some("parent") => Ok(parent),
@@ -1107,20 +811,20 @@ fn get_text_property(
             .unwrap_or(Value::Num(f64::NAN))),
         Some("fontweight") => Ok(style
             .font_weight
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontangle") => Ok(style
             .font_angle
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("interpreter") => Ok(style
             .interpreter
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("color") => Ok(style
             .color
-            .map(|c| Value::String(color_to_short_name(c)))
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(|c| rgb_triplet_value(c))
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported text property `{other}`"),
@@ -1158,23 +862,23 @@ fn get_ruler_property(
     let parent = Value::Num(super::state::encode_axes_handle(handle, axes_index));
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("numericruler".into()));
             st.insert("Parent", parent);
             st.insert("Children", handles_value(Vec::new()));
             st.insert("Axis", Value::String(axis_name.into()));
             st.insert(
                 "TickLabelFormat",
-                Value::String(tick_format_or_default(format)),
+                Value::string(tick_format_or_default(format)),
             );
             st.insert("TickLabelRotation", Value::Num(rotation.unwrap_or(0.0)));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("numericruler".into())),
         Some("parent") => Ok(parent),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("axis") => Ok(Value::String(axis_name.into())),
-        Some("ticklabelformat") => Ok(Value::String(tick_format_or_default(format))),
+        Some("ticklabelformat") => Ok(Value::string(tick_format_or_default(format))),
         Some("ticklabelrotation") => Ok(Value::Num(rotation.unwrap_or(0.0))),
         Some(other) => Err(plotting_error(
             builtin,
@@ -1195,7 +899,7 @@ fn get_legend_property(
         .map_err(|err| map_figure_error(builtin, err))?;
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("legend".into()));
             st.insert(
                 "Parent",
@@ -1211,30 +915,30 @@ fn get_legend_property(
                 legend_labels_value(entries.iter().map(|e| e.label.clone()).collect()),
             );
             if let Some(location) = meta.legend_style.location {
-                st.insert("Location", Value::String(location));
+                st.insert("Location", Value::string(location));
             }
             if let Some(size) = meta.legend_style.font_size {
                 st.insert("FontSize", Value::Num(size as f64));
             }
             if let Some(weight) = meta.legend_style.font_weight {
-                st.insert("FontWeight", Value::String(weight));
+                st.insert("FontWeight", Value::string(weight));
             }
             if let Some(angle) = meta.legend_style.font_angle {
-                st.insert("FontAngle", Value::String(angle));
+                st.insert("FontAngle", Value::string(angle));
             }
             if let Some(interpreter) = meta.legend_style.interpreter {
-                st.insert("Interpreter", Value::String(interpreter));
+                st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(box_visible) = meta.legend_style.box_visible {
                 st.insert("Box", Value::Bool(box_visible));
             }
             if let Some(orientation) = meta.legend_style.orientation {
-                st.insert("Orientation", Value::String(orientation));
+                st.insert("Orientation", Value::string(orientation));
             }
             if let Some(color) = meta.legend_style.text_color {
-                st.insert("TextColor", Value::String(color_to_short_name(color)));
+                st.insert("TextColor", rgb_triplet_value(color));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("visible") => Ok(Value::Bool(
             meta.legend_enabled && meta.legend_style.visible,
@@ -1250,8 +954,8 @@ fn get_legend_property(
         Some("location") => Ok(meta
             .legend_style
             .location
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontsize") => Ok(meta
             .legend_style
             .font_size
@@ -1260,18 +964,18 @@ fn get_legend_property(
         Some("fontweight") => Ok(meta
             .legend_style
             .font_weight
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontangle") => Ok(meta
             .legend_style
             .font_angle
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("interpreter") => Ok(meta
             .legend_style
             .interpreter
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("box") => Ok(meta
             .legend_style
             .box_visible
@@ -1280,13 +984,13 @@ fn get_legend_property(
         Some("orientation") => Ok(meta
             .legend_style
             .orientation
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("textcolor") | Some("color") => Ok(meta
             .legend_style
             .text_color
-            .map(|c| Value::String(color_to_short_name(c)))
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(|c| rgb_triplet_value(c))
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported legend property `{other}`"),
@@ -1299,35 +1003,59 @@ fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> 
 }
 
 pub(crate) fn is_heatmap_property_name(value: &Value) -> bool {
-    let Some(name) = value_as_string(value) else {
-        return false;
-    };
-    matches!(
-        canonical_property_name(name.trim()).as_ref(),
-        "title"
-            | "subtitle"
-            | "xlabel"
-            | "ylabel"
-            | "colorbar"
-            | "colorbarvisible"
-            | "gridvisible"
-            | "fontsize"
-            | "colorlimits"
-            | "colormap"
-            | "xdisplaylabels"
-            | "ydisplaylabels"
-    )
+    [
+        "title",
+        "subtitle",
+        "xlabel",
+        "ylabel",
+        "colorbar",
+        "colorbarvisible",
+        "gridvisible",
+        "fontsize",
+        "colorlimits",
+        "colormap",
+        "xdisplaylabels",
+        "ydisplaylabels",
+    ]
+    .into_iter()
+    .any(|key| crate::builtins::plotting::style::value_text_equals_ascii(value, key, true))
 }
 
-fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
-    value_as_string(value)
-        .map(|s| s.trim().to_string())
-        .ok_or_else(|| {
-            plotting_error(
+pub(crate) fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
+    if !crate::builtins::common::validation::value_is_text_scalar(value) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: property names must be scalar strings or character rows"),
+        ));
+    }
+    let text = match value {
+        Value::String(runmat_value::StringElement::Text(text)) => text.as_str().to_owned(),
+        Value::StringArray(strings) => strings.data()[0]
+            .as_str()
+            .ok_or_else(|| {
+                plotting_error(
+                    builtin,
+                    format!("{builtin}: property names must be scalar strings or character rows"),
+                )
+            })?
+            .to_owned(),
+        Value::CharArray(chars) => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?
+        }
+        _ => {
+            return Err(plotting_error(
                 builtin,
-                format!("{builtin}: property names must be strings"),
-            )
-        })
+                format!("{builtin}: property names must be scalar strings or character rows"),
+            ))
+        }
+    };
+    Ok(text.trim().to_string())
 }
 
 pub(crate) fn data_aspect_ratio_from_value(
@@ -1352,12 +1080,20 @@ pub(crate) fn data_aspect_ratio_mode_from_value(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<&'static str> {
-    let mode = value_as_string(value).ok_or_else(|| {
-        plotting_error(
-            builtin,
-            format!("{builtin}: DataAspectRatioMode must be text"),
-        )
-    })?;
+    let mode = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: DataAspectRatioMode must be text"),
+            )
+        })?;
     match mode.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok("auto"),
         "manual" => Ok("manual"),
@@ -1422,6 +1158,7 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "yaxislocation" => Cow::Borrowed("yaxislocation"),
+        "ydir" => Cow::Borrowed("ydir"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
         "currentfigure" => Cow::Borrowed("currentfigure"),
         "sgtitle" | "supertitle" => Cow::Borrowed("sgtitle"),
@@ -1482,12 +1219,23 @@ fn apply_text_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     let opts = LineStyleParseOptions::generic(builtin);
     match key {
         "string" => {
-            *text = Some(value_as_text_string(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: String must be text"))
-            })?);
+            *text = Some(
+                value_as_text_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: String must be text"))
+                    })?,
+            );
         }
         "color" => style.color = Some(parse_color_value(&opts, value)?),
         "fontsize" => {
@@ -1505,17 +1253,17 @@ fn apply_text_property(
             style.font_size = Some(font_size as f32);
         }
         "fontweight" => {
-            style.font_weight = Some(value_as_string(value).ok_or_else(|| {
+            style.font_weight = Some(text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FontWeight must be a string"))
             })?)
         }
         "fontangle" => {
-            style.font_angle = Some(value_as_string(value).ok_or_else(|| {
+            style.font_angle = Some(text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FontAngle must be a string"))
             })?)
         }
         "interpreter" => {
-            style.interpreter = Some(value_as_string(value).ok_or_else(|| {
+            style.interpreter = Some(text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Interpreter must be a string"))
             })?)
         }
@@ -1523,6 +1271,23 @@ fn apply_text_property(
             style.visible = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Visible must be logical"))
             })?
+        }
+        // MATLAB's text anchors: where the point sits on the text's box.
+        "horizontalalignment" => {
+            style.horizontal_alignment = Some(text_alignment(
+                &text_input,
+                builtin,
+                "HorizontalAlignment",
+                &["left", "center", "right"],
+            )?)
+        }
+        "verticalalignment" => {
+            style.vertical_alignment = Some(text_alignment(
+                &text_input,
+                builtin,
+                "VerticalAlignment",
+                &["middle", "top", "bottom", "baseline", "cap"],
+            )?)
         }
         other => {
             return Err(plotting_error(
@@ -1534,6 +1299,23 @@ fn apply_text_property(
     Ok(())
 }
 
+/// A text alignment value, lowercased, from MATLAB's set for `name`.
+fn text_alignment(
+    input: &ValidatedStyleValue<'_>,
+    builtin: &'static str,
+    name: &str,
+    allowed: &[&str],
+) -> BuiltinResult<String> {
+    let value = input.text().map(|t| t.trim().to_ascii_lowercase());
+    match value {
+        Some(v) if allowed.contains(&v.as_str()) => Ok(v),
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: {name} must be one of {}", allowed.join(", ")),
+        )),
+    }
+}
+
 fn apply_legend_property(
     style: &mut LegendStyle,
     enabled: &mut bool,
@@ -1542,12 +1324,14 @@ fn apply_legend_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     let opts = LineStyleParseOptions::generic(builtin);
     match key {
         "string" => *labels = Some(collect_label_strings(builtin, std::slice::from_ref(value))?),
         "location" => {
             style.location = Some(
-                value_as_string(value)
+                text_input
+                    .text()
                     .ok_or_else(|| plotting_error(builtin, "legend: Location must be a string"))?,
             )
         }
@@ -1560,19 +1344,20 @@ fn apply_legend_property(
         }
         "fontweight" => {
             style.font_weight =
-                Some(value_as_string(value).ok_or_else(|| {
+                Some(text_input.text().ok_or_else(|| {
                     plotting_error(builtin, "legend: FontWeight must be a string")
                 })?)
         }
         "fontangle" => {
             style.font_angle = Some(
-                value_as_string(value)
+                text_input
+                    .text()
                     .ok_or_else(|| plotting_error(builtin, "legend: FontAngle must be a string"))?,
             )
         }
         "interpreter" => {
             style.interpreter =
-                Some(value_as_string(value).ok_or_else(|| {
+                Some(text_input.text().ok_or_else(|| {
                     plotting_error(builtin, "legend: Interpreter must be a string")
                 })?)
         }
@@ -1591,7 +1376,7 @@ fn apply_legend_property(
         }
         "orientation" => {
             style.orientation =
-                Some(value_as_string(value).ok_or_else(|| {
+                Some(text_input.text().ok_or_else(|| {
                     plotting_error(builtin, "legend: Orientation must be a string")
                 })?)
         }
@@ -1605,50 +1390,93 @@ fn apply_legend_property(
     Ok(())
 }
 
+/// The camera stores binary32 angles; finite host input must remain finite
+/// after crossing that representation boundary.
+pub(crate) fn finite_camera_angle(value: f64) -> Option<f32> {
+    let angle = value as f32;
+    angle.is_finite().then_some(angle)
+}
+
 fn apply_axes_property(
+    authority: &super::state::PropertyMutationTarget,
+
     handle: FigureHandle,
     axes_index: usize,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     match key {
         "legendvisible" => {
             let visible = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: LegendVisible must be logical"))
             })?;
-            set_legend_for_axes(handle, axes_index, visible, None, None)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_legend_for_axes_for_property(
+                authority, handle, axes_index, visible, None, None,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
-        "title" => apply_axes_text_alias(handle, axes_index, PlotObjectKind::Title, value, builtin),
-        "subtitle" => {
-            apply_axes_text_alias(handle, axes_index, PlotObjectKind::Subtitle, value, builtin)
-        }
-        "xlabel" => {
-            apply_axes_text_alias(handle, axes_index, PlotObjectKind::XLabel, value, builtin)
-        }
-        "ylabel" => {
-            apply_axes_text_alias(handle, axes_index, PlotObjectKind::YLabel, value, builtin)
-        }
-        "zlabel" => {
-            apply_axes_text_alias(handle, axes_index, PlotObjectKind::ZLabel, value, builtin)
-        }
+        "title" => apply_axes_text_alias(
+            authority,
+            handle,
+            axes_index,
+            PlotObjectKind::Title,
+            value,
+            builtin,
+        ),
+        "subtitle" => apply_axes_text_alias(
+            authority,
+            handle,
+            axes_index,
+            PlotObjectKind::Subtitle,
+            value,
+            builtin,
+        ),
+        "xlabel" => apply_axes_text_alias(
+            authority,
+            handle,
+            axes_index,
+            PlotObjectKind::XLabel,
+            value,
+            builtin,
+        ),
+        "ylabel" => apply_axes_text_alias(
+            authority,
+            handle,
+            axes_index,
+            PlotObjectKind::YLabel,
+            value,
+            builtin,
+        ),
+        "zlabel" => apply_axes_text_alias(
+            authority,
+            handle,
+            axes_index,
+            PlotObjectKind::ZLabel,
+            value,
+            builtin,
+        ),
         "view" => {
             let tensor = runmat_value::Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
             let data = tensor::tensor_values_f64(&tensor);
-            if data.len() != 2 || !data[0].is_finite() || !data[1].is_finite() {
+            if data.len() != 2
+                || finite_camera_angle(data[0]).is_none()
+                || finite_camera_angle(data[1]).is_none()
+            {
                 return Err(plotting_error(
                     builtin,
-                    format!("{builtin}: View must be a 2-element finite numeric vector"),
+                    format!("{builtin}: View must be a 2-element numeric vector finite in single-precision camera state"),
                 ));
             }
-            crate::builtins::plotting::state::set_view_for_axes(
+            super::state::set_view_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
-                data[0] as f32,
-                data[1] as f32,
+                finite_camera_angle(data[0]).expect("validated camera angle"),
+                finite_camera_angle(data[1]).expect("validated camera angle"),
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -1657,8 +1485,8 @@ fn apply_axes_property(
             let enabled = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Grid must be logical"))
             })?;
-            crate::builtins::plotting::state::set_grid_enabled_for_axes(
-                handle, axes_index, enabled,
+            super::state::set_grid_enabled_for_axes_for_property(
+                authority, handle, axes_index, enabled,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -1667,8 +1495,8 @@ fn apply_axes_property(
             let enabled = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: MinorGrid must be logical"))
             })?;
-            crate::builtins::plotting::state::set_minor_grid_enabled_for_axes(
-                handle, axes_index, enabled,
+            super::state::set_minor_grid_enabled_for_axes_for_property(
+                authority, handle, axes_index, enabled,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -1677,8 +1505,10 @@ fn apply_axes_property(
             let enabled = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Box must be logical"))
             })?;
-            crate::builtins::plotting::state::set_box_enabled_for_axes(handle, axes_index, enabled)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_box_enabled_for_axes_for_property(
+                authority, handle, axes_index, enabled,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "hiddenlineremoval" => {
@@ -1688,8 +1518,8 @@ fn apply_axes_property(
                     format!("{builtin}: HiddenLineRemoval must be 'on' or 'off'"),
                 )
             })?;
-            crate::builtins::plotting::state::set_hidden_line_removal_for_axes(
-                handle, axes_index, enabled,
+            super::state::set_hidden_line_removal_for_axes_for_property(
+                authority, handle, axes_index, enabled,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -1698,26 +1528,28 @@ fn apply_axes_property(
             let enabled = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: AxisEqual must be logical"))
             })?;
-            crate::builtins::plotting::state::set_axis_equal_for_axes(handle, axes_index, enabled)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_equal_for_axes_for_property(
+                authority, handle, axes_index, enabled,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "dataaspectratio" => {
             let ratio = data_aspect_ratio_from_value(value, builtin)?;
-            crate::builtins::plotting::state::set_data_aspect_ratio_for_axes(
-                handle, axes_index, ratio, "manual",
+            super::state::set_data_aspect_ratio_for_axes_for_property(
+                authority, handle, axes_index, ratio, "manual",
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "dataaspectratiomode" => {
             let mode = data_aspect_ratio_mode_from_value(value, builtin)?;
-            let (ratio, _) = crate::builtins::plotting::state::data_aspect_ratio_snapshot_for_axes(
-                handle, axes_index,
+            let (ratio, _) = super::state::data_aspect_ratio_snapshot_for_axes_for_property(
+                authority, handle, axes_index,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_data_aspect_ratio_for_axes(
-                handle, axes_index, ratio, mode,
+            super::state::set_data_aspect_ratio_for_axes_for_property(
+                authority, handle, axes_index, ratio, mode,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -1726,18 +1558,18 @@ fn apply_axes_property(
             let enabled = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Colorbar must be logical"))
             })?;
-            crate::builtins::plotting::state::set_colorbar_enabled_for_axes(
-                handle, axes_index, enabled,
+            super::state::set_colorbar_enabled_for_axes_for_property(
+                authority, handle, axes_index, enabled,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "colormap" => {
-            let name = value_as_string(value).ok_or_else(|| {
+            let name = text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
             })?;
             let cmap = parse_colormap_name(&name, builtin)?;
-            crate::builtins::plotting::state::set_colormap_for_axes(handle, axes_index, cmap)
+            super::state::set_colormap_for_axes_for_property(authority, handle, axes_index, cmap)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
@@ -1753,31 +1585,39 @@ fn apply_axes_property(
                     ),
                 ));
             }
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
             let mut style = meta.axes_style;
             style.font_size = Some(font_size as f32);
-            set_axes_style_for_axes(handle, axes_index, style)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axes_style_for_axes_for_property(
+                authority, handle, axes_index, style,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "visible" => {
             let visible = value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Visible must be logical"))
             })?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
             let mut style = meta.axes_style;
             style.visible = visible;
-            set_axes_style_for_axes(handle, axes_index, style)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axes_style_for_axes_for_property(
+                authority, handle, axes_index, style,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xlim" => {
             let limits = limits_from_optional_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_axis_limits_for_axes(
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_manual_limits_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 limits,
@@ -1788,9 +1628,11 @@ fn apply_axes_property(
         }
         "ylim" => {
             let limits = limits_from_optional_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_axis_limits_for_axes(
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_manual_limits_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 meta.x_limits,
@@ -1801,38 +1643,59 @@ fn apply_axes_property(
         }
         "zlim" => {
             let limits = limits_from_optional_value(value, builtin)?;
-            crate::builtins::plotting::state::set_z_limits_for_axes(handle, axes_index, limits)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_z_limits_preserving_selection_for_property(
+                authority, handle, axes_index, limits,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "clim" => {
             let limits = limits_from_optional_value(value, builtin)?;
-            crate::builtins::plotting::state::set_color_limits_for_axes(handle, axes_index, limits)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_color_limits_preserving_selection_for_property(
+                authority, handle, axes_index, limits,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xtick" => {
             let ticks = ticks_from_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_ticks_for_axes(handle, axes_index, Some(ticks), meta.y_ticks)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_ticks_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                Some(ticks),
+                meta.y_ticks,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "ytick" => {
             let ticks = ticks_from_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, Some(ticks))
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_ticks_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                meta.x_ticks,
+                Some(ticks),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xtickmode" => {
             let mode = tick_mode_from_value(value, builtin, "XTickMode")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = super::state::axis_display_bounds_snapshot_for_axes_for_property(
+                authority, handle, axes_index,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             let x = match mode {
                 TickMode::Auto => None,
                 TickMode::Manual => Some(ticks_or_auto(
@@ -1840,16 +1703,25 @@ fn apply_axes_property(
                     x_bounds(display_bounds),
                 )),
             };
-            set_axis_ticks_for_axes(handle, axes_index, x, meta.y_ticks)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_ticks_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                x,
+                meta.y_ticks,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "ytickmode" => {
             let mode = tick_mode_from_value(value, builtin, "YTickMode")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = super::state::axis_display_bounds_snapshot_for_axes_for_property(
+                authority, handle, axes_index,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             let y = match mode {
                 TickMode::Auto => None,
                 TickMode::Manual => Some(ticks_or_auto(
@@ -1857,20 +1729,36 @@ fn apply_axes_property(
                     y_bounds(display_bounds),
                 )),
             };
-            set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, y)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_ticks_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                meta.x_ticks,
+                y,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xticklabel" => {
             let labels = tick_labels_from_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = super::state::axis_display_bounds_snapshot_for_axes_for_property(
+                authority, handle, axes_index,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             let ticks = ticks_or_auto(meta.x_ticks.as_deref(), x_bounds(display_bounds));
-            set_axis_ticks_for_axes(handle, axes_index, Some(ticks.clone()), meta.y_ticks)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_tick_labels_for_axes(
+            super::state::set_axis_ticks_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                Some(ticks.clone()),
+                meta.y_ticks,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_labels_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 Some(labels_padded_to_ticks(labels, ticks.len())),
@@ -1881,14 +1769,24 @@ fn apply_axes_property(
         }
         "yticklabel" => {
             let labels = tick_labels_from_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = super::state::axis_display_bounds_snapshot_for_axes_for_property(
+                authority, handle, axes_index,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             let ticks = ticks_or_auto(meta.y_ticks.as_deref(), y_bounds(display_bounds));
-            set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, Some(ticks.clone()))
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_tick_labels_for_axes(
+            super::state::set_axis_ticks_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                meta.x_ticks,
+                Some(ticks.clone()),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_labels_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 meta.x_tick_labels,
@@ -1899,10 +1797,13 @@ fn apply_axes_property(
         }
         "xticklabelmode" => {
             let mode = tick_mode_from_value(value, builtin, "XTickLabelMode")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = super::state::axis_display_bounds_snapshot_for_axes_for_property(
+                authority, handle, axes_index,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             let x_labels = match mode {
                 TickMode::Auto => None,
                 TickMode::Manual => Some(tick_labels_or_auto(
@@ -1914,19 +1815,34 @@ fn apply_axes_property(
             };
             if matches!(mode, TickMode::Manual) {
                 let ticks = ticks_or_auto(meta.x_ticks.as_deref(), x_bounds(display_bounds));
-                set_axis_ticks_for_axes(handle, axes_index, Some(ticks), meta.y_ticks)
-                    .map_err(|err| map_figure_error(builtin, err))?;
-            }
-            set_axis_tick_labels_for_axes(handle, axes_index, x_labels, meta.y_tick_labels)
+                super::state::set_axis_ticks_for_axes_for_property(
+                    authority,
+                    handle,
+                    axes_index,
+                    Some(ticks),
+                    meta.y_ticks,
+                )
                 .map_err(|err| map_figure_error(builtin, err))?;
+            }
+            super::state::set_axis_tick_labels_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                x_labels,
+                meta.y_tick_labels,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "yticklabelmode" => {
             let mode = tick_mode_from_value(value, builtin, "YTickLabelMode")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            let display_bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            let display_bounds = super::state::axis_display_bounds_snapshot_for_axes_for_property(
+                authority, handle, axes_index,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             let y_labels = match mode {
                 TickMode::Auto => None,
                 TickMode::Manual => Some(tick_labels_or_auto(
@@ -1938,34 +1854,62 @@ fn apply_axes_property(
             };
             if matches!(mode, TickMode::Manual) {
                 let ticks = ticks_or_auto(meta.y_ticks.as_deref(), y_bounds(display_bounds));
-                set_axis_ticks_for_axes(handle, axes_index, meta.x_ticks, Some(ticks))
-                    .map_err(|err| map_figure_error(builtin, err))?;
-            }
-            set_axis_tick_labels_for_axes(handle, axes_index, meta.x_tick_labels, y_labels)
+                super::state::set_axis_ticks_for_axes_for_property(
+                    authority,
+                    handle,
+                    axes_index,
+                    meta.x_ticks,
+                    Some(ticks),
+                )
                 .map_err(|err| map_figure_error(builtin, err))?;
+            }
+            super::state::set_axis_tick_labels_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                meta.x_tick_labels,
+                y_labels,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xticklabelformat" => {
             let format = tick_format_from_value(value, builtin, "XTickLabelFormat")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_tick_formats_for_axes(handle, axes_index, Some(format), meta.y_tick_format)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_formats_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                Some(format),
+                meta.y_tick_format,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "yticklabelformat" => {
             let format = tick_format_from_value(value, builtin, "YTickLabelFormat")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_tick_formats_for_axes(handle, axes_index, meta.x_tick_format, Some(format))
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_formats_for_axes_for_property(
+                authority,
+                handle,
+                axes_index,
+                meta.x_tick_format,
+                Some(format),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "xticklabelrotation" => {
             let angle = tick_angle_from_value(value, builtin, "XTickLabelRotation")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_tick_angles_for_axes(
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_angles_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 Some(angle),
@@ -1976,9 +1920,11 @@ fn apply_axes_property(
         }
         "yticklabelrotation" => {
             let angle = tick_angle_from_value(value, builtin, "YTickLabelRotation")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            set_axis_tick_angles_for_axes(
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_angles_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 meta.x_tick_label_rotation,
@@ -1989,9 +1935,11 @@ fn apply_axes_property(
         }
         "xscale" => {
             let mode = scale_mode_from_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_log_modes_for_axes(
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_log_modes_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 mode.is_log(),
@@ -2002,9 +1950,11 @@ fn apply_axes_property(
         }
         "yscale" => {
             let mode = scale_mode_from_value(value, builtin)?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            crate::builtins::plotting::state::set_log_modes_for_axes(
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_log_modes_for_axes_for_property(
+                authority,
                 handle,
                 axes_index,
                 meta.x_log,
@@ -2013,8 +1963,29 @@ fn apply_axes_property(
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
+        "ydir" => {
+            let direction = match text_input
+                .text()
+                .map(|text| text.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("normal") => runmat_plot::plots::figure::YDirection::Normal,
+                Some("reverse") => runmat_plot::plots::figure::YDirection::Reverse,
+                _ => {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: YDir must be 'normal' or 'reverse'"),
+                    ))
+                }
+            };
+            super::state::set_y_direction_for_axes_for_property(
+                authority, handle, axes_index, direction,
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
         "yaxislocation" => {
-            let location = value_as_string(value)
+            let location = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(builtin, format!("{builtin}: YAxisLocation must be text"))
                 })?
@@ -2026,20 +1997,23 @@ fn apply_axes_property(
                     format!("{builtin}: YAxisLocation must be 'left' or 'right'"),
                 ));
             }
-            crate::builtins::plotting::state::set_y_axis_location_for_axes(
-                handle, axes_index, location,
+            super::state::set_y_axis_location_for_axes_for_property(
+                authority, handle, axes_index, location,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "position" => {
             let position = parse_figure_position(value, builtin)?;
-            set_axes_position_for_axes(handle, axes_index, position)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axes_position_for_axes_for_property(
+                authority, handle, axes_index, position,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "units" => {
-            let units = value_as_string(value)
+            let units = text_input
+                .text()
                 .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Units must be text")))?
                 .trim()
                 .to_ascii_lowercase();
@@ -2052,8 +2026,10 @@ fn apply_axes_property(
                     format!("{builtin}: unsupported axes Units `{units}`"),
                 ));
             }
-            set_axes_units_for_axes(handle, axes_index, units)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axes_units_for_axes_for_property(
+                authority, handle, axes_index, units,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         other => Err(plotting_error(
@@ -2064,6 +2040,8 @@ fn apply_axes_property(
 }
 
 fn apply_ruler_property(
+    authority: &super::state::PropertyMutationTarget,
+
     handle: FigureHandle,
     axes_index: usize,
     kind: PlotObjectKind,
@@ -2074,8 +2052,9 @@ fn apply_ruler_property(
     match key {
         "ticklabelformat" => {
             let format = tick_format_from_value(value, builtin, "TickLabelFormat")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
             let (x_format, y_format) = match kind {
                 PlotObjectKind::XAxis => (Some(format), meta.y_tick_format),
                 PlotObjectKind::YAxis => (meta.x_tick_format, Some(format)),
@@ -2086,14 +2065,17 @@ fn apply_ruler_property(
                     ))
                 }
             };
-            set_axis_tick_formats_for_axes(handle, axes_index, x_format, y_format)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_formats_for_axes_for_property(
+                authority, handle, axes_index, x_format, y_format,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         "ticklabelrotation" => {
             let angle = tick_angle_from_value(value, builtin, "TickLabelRotation")?;
-            let meta = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            let meta =
+                super::state::axes_metadata_snapshot_for_property(authority, handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?;
             let (x_angle, y_angle) = match kind {
                 PlotObjectKind::XAxis => (Some(angle), meta.y_tick_label_rotation),
                 PlotObjectKind::YAxis => (meta.x_tick_label_rotation, Some(angle)),
@@ -2104,90 +2086,15 @@ fn apply_ruler_property(
                     ))
                 }
             };
-            set_axis_tick_angles_for_axes(handle, axes_index, x_angle, y_angle)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_axis_tick_angles_for_axes_for_property(
+                authority, handle, axes_index, x_angle, y_angle,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported ruler property `{other}`"),
-        )),
-    }
-}
-
-fn apply_figure_property(
-    figure_handle: FigureHandle,
-    key: &str,
-    value: &Value,
-    builtin: &'static str,
-) -> BuiltinResult<bool> {
-    let opts = LineStyleParseOptions::generic(builtin);
-    match key {
-        "name" => {
-            let name = value_as_text_string(value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
-            set_figure_name(figure_handle, name).map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "numbertitle" => {
-            let enabled = value_as_bool(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
-            })?;
-            set_figure_number_title(figure_handle, enabled)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "visible" => {
-            let visible = value_as_bool(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
-            })?;
-            let _ = set_figure_visible(figure_handle, visible)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "position" => {
-            let position = parse_figure_position(value, builtin)?;
-            set_figure_position(figure_handle, position)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "color" => {
-            let color = parse_color_value(&opts, value)?;
-            set_figure_background_color(figure_handle, color)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "tag" => {
-            let tag = value_as_text_string(value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Tag must be text")))?;
-            set_figure_tag(figure_handle, tag).map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "currentaxes" => {
-            let resolved = resolve_plot_handle(value, builtin)?;
-            let PlotHandle::Axes(fig, axes_index) = resolved else {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must be an axes handle"),
-                ));
-            };
-            if fig != figure_handle {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must belong to the target figure"),
-                ));
-            }
-            select_axes_for_figure(figure_handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?;
-            Ok(true)
-        }
-        "sgtitle" => {
-            apply_figure_text_alias(figure_handle, PlotObjectKind::SuperTitle, value, builtin)?;
-            Ok(true)
-        }
-        other => Err(plotting_error(
-            builtin,
-            format!("{builtin}: unsupported figure property `{other}`"),
         )),
     }
 }
@@ -2198,65 +2105,23 @@ pub(crate) fn validate_figure_property_value(
     target_figure: Option<FigureHandle>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let key = property_name(key_value, builtin)?;
-    let opts = LineStyleParseOptions::generic(builtin);
-    match key.as_str() {
-        "name" => {
-            value_as_text_string(property_value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Name must be text")))?;
-        }
-        "numbertitle" => {
-            value_as_bool(property_value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
-            })?;
-        }
-        "visible" => {
-            value_as_bool(property_value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: Visible must be logical"))
-            })?;
-        }
-        "position" => {
-            let _ = parse_figure_position(property_value, builtin)?;
-        }
-        "color" => {
-            let _ = parse_color_value(&opts, property_value)?;
-        }
-        "tag" => {
-            value_as_text_string(property_value)
-                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Tag must be text")))?;
-        }
-        "currentaxes" => {
-            let resolved = resolve_plot_handle(property_value, builtin)?;
-            let PlotHandle::Axes(fig, _) = resolved else {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must be an axes handle"),
-                ));
-            };
-            let Some(target) = target_figure else {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes requires an existing target figure"),
-                ));
-            };
-            if fig != target {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: CurrentAxes must belong to the target figure"),
-                ));
-            }
-        }
-        "sgtitle" => {
-            validate_figure_text_alias(PlotObjectKind::SuperTitle, property_value, builtin)?
-        }
-        other => {
-            return Err(plotting_error(
-                builtin,
-                format!("{builtin}: unsupported figure property `{other}`"),
-            ));
-        }
-    }
-    Ok(())
+    validate_figure_property_value_for_target(
+        &super::state::PropertyMutationTarget::alias(),
+        key_value,
+        property_value,
+        target_figure,
+        builtin,
+    )
+}
+
+fn validate_figure_property_value_for_target(
+    _authority: &super::state::PropertyMutationTarget,
+    key_value: &Value,
+    property_value: &Value,
+    target_figure: Option<FigureHandle>,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    figure_plan::validate(key_value, property_value, target_figure, builtin)
 }
 
 fn get_histogram_property(
@@ -2266,7 +2131,7 @@ fn get_histogram_property(
 ) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("histogram".into()));
             st.insert(
                 "Parent",
@@ -2290,25 +2155,25 @@ fn get_histogram_property(
             if let Some(data) = &hist.metadata.data {
                 st.insert("Data", Value::Tensor(data.clone()));
             }
-            st.insert("Normalization", Value::String(hist.normalization.clone()));
+            st.insert("Normalization", Value::string(hist.normalization.clone()));
             st.insert("NumBins", Value::Num(hist.raw_counts.len() as f64));
             st.insert("BinWidth", Value::Num(hist.metadata.bin_width));
             st.insert(
                 "BinLimits",
                 tensor_from_vec(vec![hist.metadata.bin_limits.0, hist.metadata.bin_limits.1]),
             );
-            st.insert("FaceColor", Value::String(hist.metadata.face_color.clone()));
+            st.insert("FaceColor", Value::string(hist.metadata.face_color.clone()));
             st.insert("FaceAlpha", Value::Num(hist.metadata.face_alpha));
-            st.insert("EdgeColor", Value::String(hist.metadata.edge_color.clone()));
+            st.insert("EdgeColor", Value::string(hist.metadata.edge_color.clone()));
             st.insert(
                 "DisplayStyle",
-                Value::String(hist.metadata.display_style.clone()),
+                Value::string(hist.metadata.display_style.clone()),
             );
             st.insert(
                 "DisplayName",
-                Value::String(hist.display_name.clone().unwrap_or_default()),
+                Value::string(hist.display_name.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("histogram".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -2327,18 +2192,18 @@ fn get_histogram_property(
         Some("data") => Ok(Value::Tensor(hist.metadata.data.clone().unwrap_or_else(
             || Tensor::new(Vec::new(), vec![0, 0]).expect("valid empty tensor"),
         ))),
-        Some("normalization") => Ok(Value::String(hist.normalization.clone())),
+        Some("normalization") => Ok(Value::string(hist.normalization.clone())),
         Some("numbins") => Ok(Value::Num(hist.raw_counts.len() as f64)),
         Some("binwidth") => Ok(Value::Num(hist.metadata.bin_width)),
         Some("binlimits") => Ok(tensor_from_vec(vec![
             hist.metadata.bin_limits.0,
             hist.metadata.bin_limits.1,
         ])),
-        Some("facecolor") => Ok(Value::String(hist.metadata.face_color.clone())),
+        Some("facecolor") => Ok(Value::string(hist.metadata.face_color.clone())),
         Some("facealpha") => Ok(Value::Num(hist.metadata.face_alpha)),
-        Some("edgecolor") => Ok(Value::String(hist.metadata.edge_color.clone())),
-        Some("displaystyle") => Ok(Value::String(hist.metadata.display_style.clone())),
-        Some("displayname") => Ok(Value::String(hist.display_name.clone().unwrap_or_default())),
+        Some("edgecolor") => Ok(Value::string(hist.metadata.edge_color.clone())),
+        Some("displaystyle") => Ok(Value::string(hist.metadata.display_style.clone())),
+        Some("displayname") => Ok(Value::string(hist.display_name.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported histogram property `{other}`"),
@@ -2362,7 +2227,7 @@ fn get_histogram2_property(
             st.insert("XBinEdges", tensor_from_vec(hist.x_bin_edges.clone()));
             st.insert("YBinEdges", tensor_from_vec(hist.y_bin_edges.clone()));
             st.insert("NumBins", tensor_from_vec(histogram2_num_bins(hist)));
-            st.insert("Normalization", Value::String(hist.normalization.clone()));
+            st.insert("Normalization", Value::string(hist.normalization.clone()));
             st.insert(
                 "DisplayStyle",
                 Value::String(hist.display_style.as_str().into()),
@@ -2371,9 +2236,9 @@ fn get_histogram2_property(
             st.insert("FaceAlpha", Value::Num(hist.face_alpha));
             st.insert(
                 "DisplayName",
-                Value::String(hist.display_name.clone().unwrap_or_default()),
+                Value::string(hist.display_name.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("histogram2".into())),
         Some("parent") => Ok(child_parent_handle(hist.figure, hist.axes_index)),
@@ -2387,11 +2252,11 @@ fn get_histogram2_property(
         Some("xbinedges") => Ok(tensor_from_vec(hist.x_bin_edges.clone())),
         Some("ybinedges") => Ok(tensor_from_vec(hist.y_bin_edges.clone())),
         Some("numbins") => Ok(tensor_from_vec(histogram2_num_bins(hist))),
-        Some("normalization") => Ok(Value::String(hist.normalization.clone())),
+        Some("normalization") => Ok(Value::string(hist.normalization.clone())),
         Some("displaystyle") => Ok(Value::String(hist.display_style.as_str().into())),
         Some("showemptybins") => Ok(Value::Bool(hist.show_empty_bins)),
         Some("facealpha") => Ok(Value::Num(hist.face_alpha)),
-        Some("displayname") => Ok(Value::String(hist.display_name.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(hist.display_name.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported histogram2 property `{other}`"),
@@ -2426,9 +2291,9 @@ fn get_binscatter_property(
             st.insert("FaceAlpha", Value::Num(binscatter.face_alpha));
             st.insert(
                 "DisplayName",
-                Value::String(binscatter.display_name.clone().unwrap_or_default()),
+                Value::string(binscatter.display_name.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("binscatter".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -2446,7 +2311,7 @@ fn get_binscatter_property(
         Some("ylimits") => Ok(binscatter_y_limits(binscatter)),
         Some("showemptybins") => Ok(Value::Bool(binscatter.show_empty_bins)),
         Some("facealpha") => Ok(Value::Num(binscatter.face_alpha)),
-        Some("displayname") => Ok(Value::String(
+        Some("displayname") => Ok(Value::string(
             binscatter.display_name.clone().unwrap_or_default(),
         )),
         Some(other) => Err(plotting_error(
@@ -2480,8 +2345,10 @@ fn get_plot_child_property(
     state: &super::state::PlotChildHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
     match state {
+        super::state::PlotChildHandleState::ColorBar(bar) => colorbar::get(bar, property, builtin),
         super::state::PlotChildHandleState::Histogram(hist) => {
             get_histogram_property(hist, property, builtin)
         }
@@ -2489,69 +2356,73 @@ fn get_plot_child_property(
             get_histogram2_property(hist, property, builtin)
         }
         super::state::PlotChildHandleState::Line(plot) => {
-            get_line_property(plot, property, builtin)
+            get_line_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::AnimatedLine(plot) => {
-            get_animated_line_property(plot, property, builtin)
+            get_animated_line_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::Scatter(plot) => {
-            get_scatter_property(plot, property, builtin)
+            get_scatter_property(plot, property, builtin, source)
         }
-        super::state::PlotChildHandleState::Bar(plot) => get_bar_property(plot, property, builtin),
+        super::state::PlotChildHandleState::Bar(plot) => {
+            get_bar_property(plot, property, builtin, source)
+        }
         super::state::PlotChildHandleState::Stem(stem) => {
-            get_stem_property(stem, property, builtin)
+            get_stem_property(stem, property, builtin, source)
         }
         super::state::PlotChildHandleState::ErrorBar(errorbar) => {
-            get_errorbar_property(errorbar, property, builtin)
+            get_errorbar_property(errorbar, property, builtin, source)
         }
         super::state::PlotChildHandleState::Stairs(plot) => {
-            get_stairs_property(plot, property, builtin)
+            get_stairs_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::Quiver(quiver) => {
-            get_quiver_property(quiver, property, builtin)
+            get_quiver_property(quiver, property, builtin, source)
         }
         super::state::PlotChildHandleState::Image(image) => {
-            get_image_property(image, property, builtin)
+            get_image_property(image, property, builtin, source)
         }
         super::state::PlotChildHandleState::Heatmap(heatmap) => {
-            get_heatmap_property(heatmap, property, builtin)
+            get_heatmap_property(heatmap, property, builtin, source)
         }
         super::state::PlotChildHandleState::Binscatter(binscatter) => {
             get_binscatter_property(binscatter, property, builtin)
         }
         super::state::PlotChildHandleState::FunctionSurface(function_surface) => {
-            get_function_surface_property(function_surface, property, builtin)
+            get_function_surface_property(function_surface, property, builtin, source)
         }
         super::state::PlotChildHandleState::FunctionContour(function_contour) => {
-            get_function_contour_property(function_contour, property, builtin)
+            get_function_contour_property(function_contour, property, builtin, source)
         }
         super::state::PlotChildHandleState::Area(area) => {
-            get_area_property(area, property, builtin)
+            get_area_property(area, property, builtin, source)
         }
         super::state::PlotChildHandleState::Surface(plot) => {
-            get_surface_property(plot, property, builtin)
+            get_surface_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::Patch(plot) => {
-            get_patch_property(plot, property, builtin)
+            get_patch_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::Line3(plot) => {
-            get_line3_property(plot, property, builtin)
+            get_line3_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::Scatter3(plot) => {
-            get_scatter3_property(plot, property, builtin)
+            get_scatter3_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::Contour(plot) => {
-            get_contour_property(plot, property, builtin)
+            get_contour_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::ContourFill(plot) => {
-            get_contour_fill_property(plot, property, builtin)
+            get_contour_fill_property(plot, property, builtin, source)
         }
         super::state::PlotChildHandleState::ReferenceLine(plot) => {
-            get_reference_line_property(plot, property, builtin)
+            get_reference_line_property(plot, property, builtin, source)
         }
-        super::state::PlotChildHandleState::Pie(plot) => get_pie_property(plot, property, builtin),
+        super::state::PlotChildHandleState::Pie(plot) => {
+            get_pie_property(plot, property, builtin, source)
+        }
         super::state::PlotChildHandleState::Text(text) => {
-            get_world_text_property(text, property, builtin)
+            get_world_text_property(text, property, builtin, source)
         }
         super::state::PlotChildHandleState::TextScatter(textscatter) => {
             crate::builtins::plotting::textscatter::get_textscatter_property(
@@ -2574,6 +2445,8 @@ fn get_plot_child_property(
 }
 
 fn apply_plot_child_property(
+    authority: &super::state::PropertyMutationTarget,
+
     handle: f64,
     state: &super::state::PlotChildHandleState,
     key: &str,
@@ -2581,83 +2454,87 @@ fn apply_plot_child_property(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     match state {
+        super::state::PlotChildHandleState::ColorBar(_) => {
+            colorbar::set(authority, handle, key, value, builtin)
+        }
         super::state::PlotChildHandleState::Histogram(hist) => {
-            apply_histogram_property(hist, key, value, builtin)
+            apply_histogram_property(authority, hist, key, value, builtin)
         }
         super::state::PlotChildHandleState::Histogram2(hist) => {
-            apply_histogram2_property(hist, key, value, builtin)
+            apply_histogram2_property(authority, hist, key, value, builtin)
         }
         super::state::PlotChildHandleState::Line(plot) => {
-            apply_line_property(plot, key, value, builtin)
+            apply_line_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::AnimatedLine(plot) => {
-            apply_animated_line_property(plot, key, value, builtin)
+            apply_animated_line_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Scatter(plot) => {
-            apply_scatter_property(plot, key, value, builtin)
+            apply_scatter_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Bar(plot) => {
-            apply_bar_property(plot, key, value, builtin)
+            apply_bar_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Stem(stem) => {
-            apply_stem_property(stem, key, value, builtin)
+            apply_stem_property(authority, stem, key, value, builtin)
         }
         super::state::PlotChildHandleState::ErrorBar(errorbar) => {
-            apply_errorbar_property(errorbar, key, value, builtin)
+            apply_errorbar_property(authority, errorbar, key, value, builtin)
         }
         super::state::PlotChildHandleState::Stairs(plot) => {
-            apply_stairs_property(plot, key, value, builtin)
+            apply_stairs_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Quiver(quiver) => {
-            apply_quiver_property(quiver, key, value, builtin)
+            apply_quiver_property(authority, quiver, key, value, builtin)
         }
         super::state::PlotChildHandleState::Image(image) => {
-            apply_image_property(image, key, value, builtin)
+            apply_image_property(authority, image, key, value, builtin)
         }
         super::state::PlotChildHandleState::Heatmap(heatmap) => {
-            apply_heatmap_property(handle, heatmap, key, value, builtin)
+            apply_heatmap_property(authority, handle, heatmap, key, value, builtin)
         }
         super::state::PlotChildHandleState::Binscatter(binscatter) => {
-            apply_binscatter_property(binscatter, key, value, builtin)
+            apply_binscatter_property(authority, binscatter, key, value, builtin)
         }
         super::state::PlotChildHandleState::FunctionSurface(function_surface) => {
-            apply_function_surface_property(function_surface, key, value, builtin)
+            apply_function_surface_property(authority, function_surface, key, value, builtin)
         }
         super::state::PlotChildHandleState::FunctionContour(function_contour) => {
-            apply_function_contour_property(function_contour, key, value, builtin)
+            apply_function_contour_property(authority, function_contour, key, value, builtin)
         }
         super::state::PlotChildHandleState::Area(area) => {
-            apply_area_property(area, key, value, builtin)
+            apply_area_property(authority, area, key, value, builtin)
         }
         super::state::PlotChildHandleState::Surface(plot) => {
-            apply_surface_property(plot, key, value, builtin)
+            apply_surface_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Patch(plot) => {
-            apply_patch_property(plot, key, value, builtin)
+            apply_patch_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Line3(plot) => {
-            apply_line3_property(plot, key, value, builtin)
+            apply_line3_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Scatter3(plot) => {
-            apply_scatter3_property(plot, key, value, builtin)
+            apply_scatter3_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Contour(plot) => {
-            apply_contour_property(plot, key, value, builtin)
+            apply_contour_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::ContourFill(plot) => {
-            apply_contour_fill_property(plot, key, value, builtin)
+            apply_contour_fill_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::ReferenceLine(plot) => {
-            apply_reference_line_property(plot, key, value, builtin)
+            apply_reference_line_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Pie(plot) => {
-            apply_pie_property(plot, key, value, builtin)
+            apply_pie_property(authority, plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Text(text) => {
-            apply_world_text_property(text, key, value, builtin)
+            apply_world_text_property(authority, text, key, value, builtin)
         }
         super::state::PlotChildHandleState::TextScatter(textscatter) => {
-            crate::builtins::plotting::textscatter::apply_textscatter_property(
+            crate::builtins::plotting::textscatter::apply_textscatter_property_for_property(
+                authority,
                 handle,
                 textscatter,
                 key,
@@ -2666,47 +2543,72 @@ fn apply_plot_child_property(
             )
         }
         super::state::PlotChildHandleState::WordCloud(wordcloud) => {
-            crate::builtins::plotting::wordcloud::apply_wordcloud_property(
-                handle, wordcloud, key, value, builtin,
+            crate::builtins::plotting::wordcloud::apply_wordcloud_property_for_property(
+                authority, handle, wordcloud, key, value, builtin,
             )
         }
         super::state::PlotChildHandleState::StackedPlot(stacked) => {
-            crate::builtins::plotting::stackedplot::apply_stackedplot_property(
-                handle, stacked, key, value, builtin,
+            crate::builtins::plotting::stackedplot::apply_stackedplot_property_for_property(
+                authority, handle, stacked, key, value, builtin,
             )
         }
     }
 }
 
 fn apply_plot_child_properties(
+    authority: &super::state::PropertyMutationTarget,
+
     handle: f64,
     state: &super::state::PlotChildHandleState,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     let mut pairs = Vec::with_capacity(args.len() / 2);
     for pair in args.chunks_exact(2) {
-        pairs.push((property_name(&pair[0], builtin)?, &pair[1]));
+        pairs.push((
+            property_name(&pair[0], builtin)?,
+            pair.get(1).expect("paired property value"),
+        ));
     }
     match state {
         super::state::PlotChildHandleState::Line(plot) => {
-            apply_line_properties(plot, &pairs, builtin)
+            apply_line_properties(authority, plot, &pairs, builtin)
         }
         super::state::PlotChildHandleState::AnimatedLine(plot) => {
-            apply_animated_line_properties(plot, &pairs, builtin)
+            apply_animated_line_properties(authority, plot, &pairs, builtin)
         }
         super::state::PlotChildHandleState::Line3(plot) => {
-            apply_line3_properties(plot, &pairs, builtin)
+            apply_line3_properties(authority, plot, &pairs, builtin)
         }
         super::state::PlotChildHandleState::Histogram2(hist) => {
-            apply_histogram2_properties(hist, &pairs, builtin)
+            apply_histogram2_properties(authority, hist, &pairs, builtin)
         }
         super::state::PlotChildHandleState::Scatter(plot) => {
-            apply_scatter_properties(plot, &pairs, builtin)
+            apply_scatter_properties(authority, plot, &pairs, builtin)
+        }
+        super::state::PlotChildHandleState::Scatter3(plot) => {
+            scatter3_data::apply(authority, plot, &pairs, builtin)
         }
         _ => {
             for (key, value) in pairs {
-                apply_plot_child_property(handle, state, &key, value, builtin)?;
+                if let Some(selection) = authority
+                    .selection()
+                    .map_err(|error| map_figure_error(builtin, error))?
+                {
+                    let snapshot = selection
+                        .child_snapshot()
+                        .map_err(|error| map_figure_error(builtin, error))?;
+                    apply_plot_child_property(
+                        authority,
+                        handle,
+                        &snapshot.child,
+                        &key,
+                        value,
+                        builtin,
+                    )?;
+                } else {
+                    apply_plot_child_property(authority, handle, state, &key, value, builtin)?;
+                }
             }
             Ok(())
         }
@@ -2717,8 +2619,12 @@ fn child_parent_handle(figure: FigureHandle, axes_index: usize) -> Value {
     Value::Num(super::state::encode_axes_handle(figure, axes_index))
 }
 
-fn child_base_struct(kind: &str, figure: FigureHandle, axes_index: usize) -> StructValue {
-    let mut st = StructValue::new();
+fn child_base_struct(
+    kind: &str,
+    figure: FigureHandle,
+    axes_index: usize,
+) -> UnboundedStructValueBuilder {
+    let mut st = UnboundedStructValueBuilder::new();
     st.insert("Type", Value::String(kind.into()));
     st.insert("Parent", child_parent_handle(figure, axes_index));
     st.insert("Children", handles_value(Vec::new()));
@@ -2761,7 +2667,8 @@ fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<
 }
 
 fn is_figure_position_vector_shape(tensor: &Tensor) -> bool {
-    tensor.shape.len() <= 1 || (tensor.shape.len() == 2 && (tensor.rows == 1 || tensor.cols == 1))
+    tensor.shape().len() <= 1
+        || (tensor.shape().len() == 2 && (tensor.rows() == 1 || tensor.cols() == 1))
 }
 
 fn text_position_value(position: glam::Vec3) -> Value {
@@ -2837,8 +2744,10 @@ fn get_world_text_property(
     handle: &super::state::TextAnnotationHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(handle.figure)
+    let figure = source
+        .figure(handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text figure")))?;
     let annotation = figure
         .axes_text_annotation(handle.axes_index, handle.annotation_index)
@@ -2847,54 +2756,54 @@ fn get_world_text_property(
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("text", handle.figure, handle.axes_index);
-            st.insert("String", Value::String(annotation.text.clone()));
+            st.insert("String", Value::string(annotation.text.clone()));
             st.insert(
                 "Position",
                 world_text_position_value(handle, annotation.position, builtin)?,
             );
             if let Some(weight) = annotation.style.font_weight.clone() {
-                st.insert("FontWeight", Value::String(weight));
+                st.insert("FontWeight", Value::string(weight));
             }
             if let Some(angle) = annotation.style.font_angle.clone() {
-                st.insert("FontAngle", Value::String(angle));
+                st.insert("FontAngle", Value::string(angle));
             }
             if let Some(interpreter) = annotation.style.interpreter.clone() {
-                st.insert("Interpreter", Value::String(interpreter));
+                st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(color) = annotation.style.color {
-                st.insert("Color", Value::String(color_to_short_name(color)));
+                st.insert("Color", rgb_triplet_value(color));
             }
             if let Some(font_size) = annotation.style.font_size {
                 st.insert("FontSize", Value::Num(font_size as f64));
             }
             st.insert("Visible", Value::Bool(annotation.style.visible));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("text".into())),
         Some("parent") => Ok(child_parent_handle(handle.figure, handle.axes_index)),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("string") => Ok(Value::String(annotation.text)),
+        Some("string") => Ok(Value::string(annotation.text)),
         Some("position") => world_text_position_value(handle, annotation.position, builtin),
         Some("fontweight") => Ok(annotation
             .style
             .font_weight
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontangle") => Ok(annotation
             .style
             .font_angle
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("interpreter") => Ok(annotation
             .style
             .interpreter
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("color") => Ok(annotation
             .style
             .color
-            .map(|c| Value::String(color_to_short_name(c)))
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(|c| rgb_triplet_value(c))
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontsize") => Ok(Value::Num(
             annotation.style.font_size.unwrap_or_default() as f64
         )),
@@ -2907,13 +2816,16 @@ fn get_world_text_property(
 }
 
 fn apply_world_text_property(
+    authority: &super::state::PropertyMutationTarget,
+
     handle: &super::state::TextAnnotationHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let figure = super::state::clone_figure(handle.figure)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text figure")))?;
+    let figure = authority
+        .figure_snapshot(handle.figure)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let annotation = figure
         .axes_text_annotation(handle.axes_index, handle.annotation_index)
         .cloned()
@@ -2924,9 +2836,19 @@ fn apply_world_text_property(
     let mut style = annotation.style;
     match canonical_property_name(key).as_ref() {
         "string" => {
-            text = Some(value_as_text_string(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: String must be text"))
-            })?);
+            text = Some(
+                value_as_text_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: String must be text"))
+                    })?,
+            );
         }
         "position" => {
             let source = text_position_source(value, builtin)?;
@@ -2940,7 +2862,8 @@ fn apply_world_text_property(
         }
         other => apply_text_property(&mut text, &mut style, other, value, builtin)?,
     }
-    set_text_annotation_properties_for_axes(
+    super::state::set_text_annotation_properties_for_axes_for_property(
+        authority,
         handle.figure,
         handle.axes_index,
         handle.annotation_index,
@@ -2950,26 +2873,25 @@ fn apply_world_text_property(
     )
     .map_err(|err| map_figure_error(builtin, err))?;
     if let Some(source) = position_source {
-        super::state::update_text_annotation_position_source(
+        super::state::update_text_annotation_position_source_for_property(
+            authority,
             handle.figure,
             handle.axes_index,
             handle.annotation_index,
             source,
-        );
+        )
+        .map_err(|err| map_figure_error(builtin, err))?;
     }
     Ok(())
 }
 
-fn get_simple_plot(
+fn get_simple_plot_from_source<'a>(
     plot: &super::state::SimplePlotHandleState,
     builtin: &'static str,
-) -> BuiltinResult<runmat_plot::plots::figure::PlotElement> {
-    let figure = super::state::clone_figure(plot.figure)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid plot figure")))?;
-    let resolved = figure
-        .plots()
-        .nth(plot.plot_index)
-        .cloned()
+    source: PropertyReadSource<'a>,
+) -> BuiltinResult<Cow<'a, runmat_plot::plots::figure::PlotElement>> {
+    let resolved = source
+        .plot(plot.figure, plot.plot_index)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid plot handle")))?;
     Ok(resolved)
 }
@@ -2978,21 +2900,38 @@ fn get_line_property(
     line_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(line_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Line(line) = plot else {
+    let plot = get_simple_plot_from_source(line_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Line(line) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid line handle"),
         ));
     };
-    let (x_data, y_data) = line_xy_data_for_properties(&line, builtin)?;
+    let (x_data, y_data) = line_xy_data_for_properties(line, builtin)?;
+    line_property_with_data(line_handle, property, builtin, line, x_data, y_data)
+}
+
+fn line_property_with_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    line: &runmat_plot::plots::LinePlot,
+    x_data: NumericPlotData,
+    y_data: NumericPlotData,
+) -> BuiltinResult<Value> {
+    if let SourcePropertyRead::Ready(value) =
+        line_property_without_data(line_handle, property, builtin, line)?
+    {
+        return Ok(value);
+    }
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
             st.insert("XData", numeric_plot_data_value(&x_data));
             st.insert("YData", numeric_plot_data_value(&y_data));
-            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("Color", rgb_triplet_value(line.color));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -3000,50 +2939,68 @@ fn get_line_property(
             );
             st.insert(
                 "DisplayName",
-                Value::String(line.label.clone().unwrap_or_default()),
+                Value::string(line.label.clone().unwrap_or_default()),
             );
             st.insert(
                 "HandleVisibility",
-                Value::String(line.handle_visibility.clone()),
+                Value::string(line.handle_visibility.clone()),
             );
             st.insert(
                 "Visible",
                 Value::String(if line.visible { "on" } else { "off" }.into()),
             );
             insert_line_marker_struct_props(&mut st, line.marker.as_ref());
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
-        Some("type") => Ok(Value::String("line".into())),
-        Some("parent") => Ok(child_parent_handle(
-            line_handle.figure,
-            line_handle.axes_index,
-        )),
-        Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
         Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
-        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
-        Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
-        Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-        Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
-        Some("handlevisibility") => Ok(Value::String(line.handle_visibility)),
-        Some("visible") => Ok(Value::String(
-            if line.visible { "on" } else { "off" }.into(),
+        Some(name) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported line property `{name}`"),
         )),
-        Some(name) => line_marker_property_value(&line.marker, name, builtin),
     }
+}
+
+/// Metadata-only queries do not need access to resident source buffers.
+enum SourcePropertyRead {
+    Ready(Value),
+    RequiresCoordinates,
+}
+
+fn line_property_without_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    line: &runmat_plot::plots::LinePlot,
+) -> BuiltinResult<SourcePropertyRead> {
+    let value = match property.map(canonical_property_name).as_deref() {
+        None | Some("xdata" | "ydata") => return Ok(SourcePropertyRead::RequiresCoordinates),
+        Some("type") => Value::String("line".into()),
+        Some("parent") => child_parent_handle(line_handle.figure, line_handle.axes_index),
+        Some("children") => handles_value(Vec::new()),
+        Some("color") => rgb_triplet_value(line.color),
+        Some("linewidth") => Value::Num(line.line_width as f64),
+        Some("linestyle") => Value::String(line_style_name(line.line_style).into()),
+        Some("displayname") => Value::string(line.label.clone().unwrap_or_default()),
+        Some("handlevisibility") => Value::string(line.handle_visibility.clone()),
+        Some("visible") => Value::String(if line.visible { "on" } else { "off" }.into()),
+        Some(name) => line_marker_property_value(&line.marker, name, builtin)?,
+    };
+    Ok(SourcePropertyRead::Ready(value))
 }
 
 fn get_animated_line_property(
     line_handle: &super::state::AnimatedLineHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
     let simple = animated_line_simple_state(line_handle);
-    let plot = get_simple_plot(&simple, builtin)?;
+    let plot = get_simple_plot_from_source(&simple, builtin, source)?;
     let property = property.map(canonical_property_name);
-    match plot {
+    match plot.as_ref() {
         runmat_plot::plots::figure::PlotElement::Line(line) => {
-            let (x_data, y_data) = line_xy_data_for_properties(&line, builtin)?;
+            let (x_data, y_data) = line_xy_data_for_properties(line, builtin)?;
             match property.as_deref() {
                 None => {
                     let mut st = child_base_struct(
@@ -3053,7 +3010,7 @@ fn get_animated_line_property(
                     );
                     st.insert("XData", numeric_plot_data_value(&x_data));
                     st.insert("YData", numeric_plot_data_value(&y_data));
-                    st.insert("Color", Value::String(color_to_short_name(line.color)));
+                    st.insert("Color", rgb_triplet_value(line.color));
                     st.insert("LineWidth", Value::Num(line.line_width as f64));
                     st.insert(
                         "LineStyle",
@@ -3061,7 +3018,7 @@ fn get_animated_line_property(
                     );
                     st.insert(
                         "DisplayName",
-                        Value::String(line.label.clone().unwrap_or_default()),
+                        Value::string(line.label.clone().unwrap_or_default()),
                     );
                     st.insert(
                         "Visible",
@@ -3072,7 +3029,7 @@ fn get_animated_line_property(
                         animated_line_maximum_value(line_handle.maximum_num_points),
                     );
                     insert_line_marker_struct_props(&mut st, line.marker.as_ref());
-                    Ok(Value::Struct(st))
+                    Ok(Value::Struct(st.finish()))
                 }
                 Some("type") => Ok(Value::String("animatedline".into())),
                 Some("parent") => Ok(child_parent_handle(
@@ -3083,10 +3040,10 @@ fn get_animated_line_property(
                 Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
                 Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
                 Some("zdata") => Ok(tensor_from_vec(Vec::new())),
-                Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+                Some("color") => Ok(rgb_triplet_value(line.color)),
                 Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
                 Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-                Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+                Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
                 Some("visible") => Ok(Value::String(
                     if line.visible { "on" } else { "off" }.into(),
                 )),
@@ -3097,7 +3054,7 @@ fn get_animated_line_property(
             }
         }
         runmat_plot::plots::figure::PlotElement::Line3(line) => {
-            let (x_data, y_data, z_data) = line_xyz_data_for_properties(&line, builtin)?;
+            let (x_data, y_data, z_data) = line_xyz_data_for_properties(line, builtin)?;
             match property.as_deref() {
                 None => {
                     let mut st = child_base_struct(
@@ -3108,7 +3065,7 @@ fn get_animated_line_property(
                     st.insert("XData", numeric_plot_data_value(&x_data));
                     st.insert("YData", numeric_plot_data_value(&y_data));
                     st.insert("ZData", numeric_plot_data_value(&z_data));
-                    st.insert("Color", Value::String(color_to_short_name(line.color)));
+                    st.insert("Color", rgb_triplet_value(line.color));
                     st.insert("LineWidth", Value::Num(line.line_width as f64));
                     st.insert(
                         "LineStyle",
@@ -3116,7 +3073,7 @@ fn get_animated_line_property(
                     );
                     st.insert(
                         "DisplayName",
-                        Value::String(line.label.clone().unwrap_or_default()),
+                        Value::string(line.label.clone().unwrap_or_default()),
                     );
                     st.insert(
                         "Visible",
@@ -3126,7 +3083,7 @@ fn get_animated_line_property(
                         "MaximumNumPoints",
                         animated_line_maximum_value(line_handle.maximum_num_points),
                     );
-                    Ok(Value::Struct(st))
+                    Ok(Value::Struct(st.finish()))
                 }
                 Some("type") => Ok(Value::String("animatedline".into())),
                 Some("parent") => Ok(child_parent_handle(
@@ -3137,10 +3094,10 @@ fn get_animated_line_property(
                 Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
                 Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
                 Some("zdata") => Ok(numeric_plot_data_value(&z_data)),
-                Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+                Some("color") => Ok(rgb_triplet_value(line.color)),
                 Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
                 Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-                Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+                Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
                 Some("visible") => Ok(Value::String(
                     if line.visible { "on" } else { "off" }.into(),
                 )),
@@ -3181,9 +3138,10 @@ fn get_reference_line_property(
     line_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(line_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot else {
+    let plot = get_simple_plot_from_source(line_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid reference line handle"),
@@ -3199,7 +3157,7 @@ fn get_reference_line_property(
                 child_base_struct("constantline", line_handle.figure, line_handle.axes_index);
             st.insert("Value", Value::Num(line.value));
             st.insert("Orientation", Value::String(orientation.into()));
-            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("Color", rgb_triplet_value(line.color));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -3207,21 +3165,21 @@ fn get_reference_line_property(
             );
             st.insert(
                 "Label",
-                Value::String(line.label.clone().unwrap_or_default()),
+                Value::string(line.label.clone().unwrap_or_default()),
             );
             st.insert(
                 "LabelOrientation",
-                Value::String(line.label_orientation.clone()),
+                Value::string(line.label_orientation.clone()),
             );
             st.insert(
                 "DisplayName",
-                Value::String(line.display_name.clone().unwrap_or_default()),
+                Value::string(line.display_name.clone().unwrap_or_default()),
             );
             st.insert(
                 "Visible",
                 Value::String(if line.visible { "on" } else { "off" }.into()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("constantline".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3231,12 +3189,14 @@ fn get_reference_line_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("value") => Ok(Value::Num(line.value)),
         Some("orientation") => Ok(Value::String(orientation.into())),
-        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("color") => Ok(rgb_triplet_value(line.color)),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-        Some("label") => Ok(Value::String(line.label.unwrap_or_default())),
-        Some("labelorientation") => Ok(Value::String(line.label_orientation)),
-        Some("displayname") => Ok(Value::String(line.display_name.unwrap_or_default())),
+        Some("label") => Ok(Value::string(line.label.clone().unwrap_or_default())),
+        Some("labelorientation") => Ok(Value::string(line.label_orientation.clone())),
+        Some("displayname") => Ok(Value::string(
+            line.display_name.as_deref().unwrap_or_default().to_owned(),
+        )),
         Some("visible") => Ok(Value::String(
             if line.visible { "on" } else { "off" }.into(),
         )),
@@ -3251,9 +3211,10 @@ fn get_stairs_property(
     stairs_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(stairs_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Stairs(stairs) = plot else {
+    let plot = get_simple_plot_from_source(stairs_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Stairs(stairs) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid stairs handle"),
@@ -3275,12 +3236,12 @@ fn get_stairs_property(
                 child_base_struct("stairs", stairs_handle.figure, stairs_handle.axes_index);
             st.insert("XData", x_data.clone());
             st.insert("YData", y_data.clone());
-            st.insert("Color", Value::String(color_to_short_name(stairs.color)));
+            st.insert("Color", rgb_triplet_value(stairs.color));
             st.insert("LineWidth", Value::Num(stairs.line_width as f64));
             if let Some(label) = stairs.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("stairs".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3290,9 +3251,9 @@ fn get_stairs_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(x_data),
         Some("ydata") => Ok(y_data),
-        Some("color") => Ok(Value::String(color_to_short_name(stairs.color))),
+        Some("color") => Ok(rgb_triplet_value(stairs.color)),
         Some("linewidth") => Ok(Value::Num(stairs.line_width as f64)),
-        Some("displayname") => Ok(Value::String(stairs.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(stairs.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported stairs property `{other}`"),
@@ -3304,17 +3265,32 @@ fn get_scatter_property(
     scatter_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(scatter_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot else {
+    let plot = get_simple_plot_from_source(scatter_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid scatter handle"),
         ));
     };
-    let (x_data, y_data) = scatter_xy_data_for_properties(&scatter, builtin)?;
-    let x_render = x_data.materialize_f64();
-    let y_render = y_data.materialize_f64();
+    let (x_data, y_data) = scatter_xy_data_for_properties(scatter, builtin)?;
+    scatter_property_with_data(scatter_handle, property, builtin, scatter, x_data, y_data)
+}
+
+fn scatter_property_with_data(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    scatter: &runmat_plot::plots::ScatterPlot,
+    x_data: NumericPlotData,
+    y_data: NumericPlotData,
+) -> BuiltinResult<Value> {
+    if let SourcePropertyRead::Ready(value) =
+        scatter_property_without_data(scatter_handle, property, builtin, scatter)?
+    {
+        return Ok(value);
+    }
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st =
@@ -3331,49 +3307,23 @@ fn get_scatter_property(
                 "Marker",
                 Value::String(marker_style_name(scatter.marker_style).into()),
             );
-            st.insert("SizeData", scatter_size_data_value(&scatter));
-            st.insert(
-                "MarkerFaceColor",
-                Value::String(color_to_short_name(scatter.color)),
-            );
-            st.insert(
-                "MarkerEdgeColor",
-                Value::String(color_to_short_name(scatter.edge_color)),
-            );
+            st.insert("SizeData", scatter_size_data_value(scatter));
+            st.insert("MarkerFaceColor", rgb_triplet_value(scatter.color));
+            st.insert("MarkerEdgeColor", rgb_triplet_value(scatter.edge_color));
             st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
-        Some("type") => Ok(Value::String("scatter".into())),
-        Some("parent") => Ok(child_parent_handle(
-            scatter_handle.figure,
-            scatter_handle.axes_index,
-        )),
-        Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
         Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
-        Some("thetadata") => Ok(tensor_from_vec(
-            scatter
-                .theta_data
-                .clone()
-                .unwrap_or_else(|| cartesian_theta(&x_render, &y_render)),
-        )),
-        Some("rdata") => Ok(tensor_from_vec(
-            scatter
-                .r_data
-                .clone()
-                .unwrap_or_else(|| cartesian_radius(&x_render, &y_render)),
-        )),
-        Some("marker") => Ok(Value::String(
-            marker_style_name(scatter.marker_style).into(),
-        )),
-        Some("sizedata") => Ok(scatter_size_data_value(&scatter)),
-        Some("markerfacecolor") => Ok(Value::String(color_to_short_name(scatter.color))),
-        Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
-        Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
-        Some("displayname") => Ok(Value::String(scatter.label.unwrap_or_default())),
+        Some("thetadata") => Ok(tensor_from_vec(scatter.theta_data.clone().unwrap_or_else(
+            || cartesian_theta(&x_data.materialize_f64(), &y_data.materialize_f64()),
+        ))),
+        Some("rdata") => Ok(tensor_from_vec(scatter.r_data.clone().unwrap_or_else(
+            || cartesian_radius(&x_data.materialize_f64(), &y_data.materialize_f64()),
+        ))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported scatter property `{other}`"),
@@ -3381,13 +3331,49 @@ fn get_scatter_property(
     }
 }
 
+fn scatter_property_without_data(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    scatter: &runmat_plot::plots::ScatterPlot,
+) -> BuiltinResult<SourcePropertyRead> {
+    let value = match property.map(canonical_property_name).as_deref() {
+        None | Some("xdata" | "ydata") => return Ok(SourcePropertyRead::RequiresCoordinates),
+        Some("thetadata") if scatter.theta_data.is_none() => {
+            return Ok(SourcePropertyRead::RequiresCoordinates)
+        }
+        Some("rdata") if scatter.r_data.is_none() => {
+            return Ok(SourcePropertyRead::RequiresCoordinates)
+        }
+        Some("type") => Value::String("scatter".into()),
+        Some("parent") => child_parent_handle(scatter_handle.figure, scatter_handle.axes_index),
+        Some("children") => handles_value(Vec::new()),
+        Some("thetadata") => tensor_from_vec(scatter.theta_data.clone().unwrap_or_default()),
+        Some("rdata") => tensor_from_vec(scatter.r_data.clone().unwrap_or_default()),
+        Some("marker") => Value::String(marker_style_name(scatter.marker_style).into()),
+        Some("sizedata") => scatter_size_data_value(scatter),
+        Some("markerfacecolor") => rgb_triplet_value(scatter.color),
+        Some("markeredgecolor") => rgb_triplet_value(scatter.edge_color),
+        Some("linewidth") => Value::Num(scatter.edge_thickness as f64),
+        Some("displayname") => Value::string(scatter.label.clone().unwrap_or_default()),
+        Some(other) => {
+            return Err(plotting_error(
+                builtin,
+                format!("{builtin}: unsupported scatter property `{other}`"),
+            ))
+        }
+    };
+    Ok(SourcePropertyRead::Ready(value))
+}
+
 fn get_bar_property(
     bar_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(bar_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot else {
+    let plot = get_simple_plot_from_source(bar_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid bar handle"),
@@ -3396,12 +3382,12 @@ fn get_bar_property(
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("bar", bar_handle.figure, bar_handle.axes_index);
-            st.insert("FaceColor", Value::String(color_to_short_name(bar.color)));
+            st.insert("FaceColor", rgb_triplet_value(bar.color));
             st.insert("BarWidth", Value::Num(bar.bar_width as f64));
             if let Some(label) = bar.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("bar".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3409,9 +3395,9 @@ fn get_bar_property(
             bar_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("facecolor") | Some("color") => Ok(Value::String(color_to_short_name(bar.color))),
+        Some("facecolor") | Some("color") => Ok(rgb_triplet_value(bar.color)),
         Some("barwidth") => Ok(Value::Num(bar.bar_width as f64)),
-        Some("displayname") => Ok(Value::String(bar.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(bar.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported bar property `{other}`"),
@@ -3423,9 +3409,10 @@ fn get_surface_property(
     surface_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(surface_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+    let plot = get_simple_plot_from_source(surface_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid surface handle"),
@@ -3435,12 +3422,17 @@ fn get_surface_property(
         None => {
             let mut st =
                 child_base_struct("surface", surface_handle.figure, surface_handle.axes_index);
-            st.insert("XData", surface_x_data_value(&surface));
-            st.insert("YData", surface_y_data_value(&surface));
-            st.insert("ZData", surface_z_data_value(&surface));
+            st.insert("XData", surface_x_data_value(surface));
+            st.insert("YData", surface_y_data_value(surface));
+            st.insert("ZData", surface_z_data_value(surface));
+            st.insert("CData", surface_c_data_value(surface));
+            st.insert(
+                "CDataMapping",
+                Value::String(surface_color_mapping_name(surface.color_mapping).into()),
+            );
             st.insert("FaceAlpha", Value::Num(surface.alpha as f64));
-            st.insert("FaceColor", surface_face_color_value(&surface));
-            st.insert("EdgeColor", surface_edge_color_value(&surface));
+            st.insert("FaceColor", surface_face_color_value(surface));
+            st.insert("EdgeColor", surface_edge_color_value(surface));
             st.insert(
                 "Shading",
                 Value::String(surface_shading_name(surface.shading_mode).into()),
@@ -3452,9 +3444,9 @@ fn get_surface_property(
             st.insert("Visible", Value::Bool(surface.visible));
             st.insert(
                 "DisplayName",
-                Value::String(surface.label.clone().unwrap_or_default()),
+                Value::string(surface.label.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("surface".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3462,12 +3454,16 @@ fn get_surface_property(
             surface_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(surface_x_data_value(&surface)),
-        Some("ydata") => Ok(surface_y_data_value(&surface)),
-        Some("zdata") => Ok(surface_z_data_value(&surface)),
+        Some("xdata") => Ok(surface_x_data_value(surface)),
+        Some("ydata") => Ok(surface_y_data_value(surface)),
+        Some("zdata") => Ok(surface_z_data_value(surface)),
+        Some("colordata") => Ok(surface_c_data_value(surface)),
+        Some("cdatamapping") => Ok(Value::String(
+            surface_color_mapping_name(surface.color_mapping).into(),
+        )),
         Some("facealpha") => Ok(Value::Num(surface.alpha as f64)),
-        Some("facecolor") | Some("color") => Ok(surface_face_color_value(&surface)),
-        Some("edgecolor") => Ok(surface_edge_color_value(&surface)),
+        Some("facecolor") | Some("color") => Ok(surface_face_color_value(surface)),
+        Some("edgecolor") => Ok(surface_edge_color_value(surface)),
         Some("shading") => Ok(Value::String(
             surface_shading_name(surface.shading_mode).into(),
         )),
@@ -3475,7 +3471,7 @@ fn get_surface_property(
             surface_lighting_name(surface.lighting_enabled).into(),
         )),
         Some("visible") => Ok(Value::Bool(surface.visible)),
-        Some("displayname") => Ok(Value::String(surface.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(surface.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported surface property `{other}`"),
@@ -3487,14 +3483,15 @@ fn get_function_surface_property(
     function_surface: &super::state::FunctionSurfaceHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
     let surface_handle = super::state::SimplePlotHandleState {
         figure: function_surface.figure,
         axes_index: function_surface.axes_index,
         plot_index: function_surface.plot_index,
     };
-    let plot = get_simple_plot(&surface_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+    let plot = get_simple_plot_from_source(&surface_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid function surface handle"),
@@ -3507,13 +3504,13 @@ fn get_function_surface_property(
                 function_surface.figure,
                 function_surface.axes_index,
             );
-            insert_function_surface_metadata(&mut st, function_surface);
-            st.insert("XData", surface_x_data_value(&surface));
-            st.insert("YData", surface_y_data_value(&surface));
-            st.insert("ZData", surface_z_data_value(&surface));
+            insert_function_surface_metadata(&mut st, function_surface, builtin)?;
+            st.insert("XData", surface_x_data_value(surface));
+            st.insert("YData", surface_y_data_value(surface));
+            st.insert("ZData", surface_z_data_value(surface));
             st.insert("FaceAlpha", Value::Num(surface.alpha as f64));
-            st.insert("FaceColor", surface_face_color_value(&surface));
-            st.insert("EdgeColor", surface_edge_color_value(&surface));
+            st.insert("FaceColor", surface_face_color_value(surface));
+            st.insert("EdgeColor", surface_edge_color_value(surface));
             st.insert(
                 "Shading",
                 Value::String(surface_shading_name(surface.shading_mode).into()),
@@ -3525,9 +3522,9 @@ fn get_function_surface_property(
             st.insert("Visible", Value::Bool(surface.visible));
             st.insert(
                 "DisplayName",
-                Value::String(surface.label.clone().unwrap_or_default()),
+                Value::string(surface.label.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("functionsurface".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3537,7 +3534,7 @@ fn get_function_surface_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("function") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Explicit(function) => {
-                Ok(function_surface_function_value(function))
+                function_surface_function_value(function, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Parametric { .. } => Err(plotting_error(
                 builtin,
@@ -3548,7 +3545,7 @@ fn get_function_surface_property(
         },
         Some("xfunction") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Parametric { x, .. } => {
-                Ok(function_surface_function_value(x))
+                function_surface_function_value(x, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
                 builtin,
@@ -3557,7 +3554,7 @@ fn get_function_surface_property(
         },
         Some("yfunction") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Parametric { y, .. } => {
-                Ok(function_surface_function_value(y))
+                function_surface_function_value(y, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
                 builtin,
@@ -3566,7 +3563,7 @@ fn get_function_surface_property(
         },
         Some("zfunction") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Parametric { z, .. } => {
-                Ok(function_surface_function_value(z))
+                function_surface_function_value(z, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
                 builtin,
@@ -3590,7 +3587,7 @@ fn get_function_surface_property(
             .map(tensor_from_matrix)
             .unwrap_or_else(|| tensor_from_vec(Vec::new()))),
         Some("facealpha") => Ok(Value::Num(surface.alpha as f64)),
-        Some("displayname") => Ok(Value::String(surface.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(surface.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported functionsurface property `{other}`"),
@@ -3599,9 +3596,10 @@ fn get_function_surface_property(
 }
 
 fn insert_function_surface_metadata(
-    st: &mut StructValue,
+    st: &mut UnboundedStructValueBuilder,
     function_surface: &super::state::FunctionSurfaceHandleState,
-) {
+    builtin: &'static str,
+) -> BuiltinResult<()> {
     st.insert(
         "MeshDensity",
         Value::Num(function_surface.mesh_density as f64),
@@ -3616,58 +3614,53 @@ fn insert_function_surface_metadata(
     );
     match &function_surface.function {
         super::state::FunctionSurfaceFunctionState::Explicit(function) => {
-            st.insert("Function", function_surface_function_value(function));
+            st.insert(
+                "Function",
+                function_surface_function_value(function, builtin)?,
+            );
         }
         super::state::FunctionSurfaceFunctionState::Parametric { x, y, z } => {
-            st.insert("XFunction", function_surface_function_value(x));
-            st.insert("YFunction", function_surface_function_value(y));
-            st.insert("ZFunction", function_surface_function_value(z));
+            st.insert("XFunction", function_surface_function_value(x, builtin)?);
+            st.insert("YFunction", function_surface_function_value(y, builtin)?);
+            st.insert("ZFunction", function_surface_function_value(z, builtin)?);
         }
     }
+    Ok(())
 }
 
-fn function_surface_function_value(function: &super::state::FunctionSurfaceFunctionRef) -> Value {
-    match function {
+fn function_surface_function_value(
+    function: &super::state::FunctionSurfaceFunctionRef,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    Ok(match function {
         super::state::FunctionSurfaceFunctionRef::FunctionHandle(name) => {
-            Value::FunctionHandle(name.clone())
+            Value::function_handle(name.clone())
         }
         super::state::FunctionSurfaceFunctionRef::ExternalFunctionHandle(name) => {
-            Value::ExternalFunctionHandle(name.clone())
+            Value::external_function_handle(name.clone())
         }
         super::state::FunctionSurfaceFunctionRef::MethodFunctionHandle(name) => {
-            Value::MethodFunctionHandle(name.clone())
+            Value::method_function_handle(name.clone())
         }
-        super::state::FunctionSurfaceFunctionRef::BoundFunctionHandle { name, function } => {
-            Value::BoundFunctionHandle {
-                name: name.clone(),
-                function: *function,
-            }
+        super::state::FunctionSurfaceFunctionRef::OwnedCallable(token) => {
+            return super::state::callbacks::resolve(token, builtin);
         }
-        super::state::FunctionSurfaceFunctionRef::ClosureSummary {
-            function_name,
-            bound_function,
-        } => match bound_function {
-            Some(function) => Value::BoundFunctionHandle {
-                name: function_name.clone(),
-                function: *function,
-            },
-            None => Value::String(function_name.clone()),
-        },
-    }
+    })
 }
 
 fn get_function_contour_property(
     function_contour: &super::state::FunctionContourHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
     let contour_handle = super::state::SimplePlotHandleState {
         figure: function_contour.figure,
         axes_index: function_contour.axes_index,
         plot_index: function_contour.plot_index,
     };
-    let plot = get_simple_plot(&contour_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot else {
+    let plot = get_simple_plot_from_source(&contour_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid function contour handle"),
@@ -3682,7 +3675,7 @@ fn get_function_contour_property(
             );
             st.insert(
                 "Function",
-                function_surface_function_value(&function_contour.function),
+                function_surface_function_value(&function_contour.function, builtin)?,
             );
             st.insert(
                 "MeshDensity",
@@ -3700,9 +3693,9 @@ fn get_function_contour_property(
             st.insert("LineWidth", Value::Num(contour.line_width as f64));
             st.insert(
                 "DisplayName",
-                Value::String(contour.label.clone().unwrap_or_default()),
+                Value::string(contour.label.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("functioncontour".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3710,7 +3703,7 @@ fn get_function_contour_property(
             function_contour.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("function") => Ok(function_surface_function_value(&function_contour.function)),
+        Some("function") => function_surface_function_value(&function_contour.function, builtin),
         Some("meshdensity") => Ok(Value::Num(function_contour.mesh_density as f64)),
         Some("xrange") => Ok(tensor_from_vec(vec![
             function_contour.x_range.0,
@@ -3722,7 +3715,7 @@ fn get_function_contour_property(
         ])),
         Some("fill") => Ok(Value::Bool(function_contour.fill)),
         Some("linewidth") => Ok(Value::Num(contour.line_width as f64)),
-        Some("displayname") => Ok(Value::String(contour.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(contour.label.clone().unwrap_or_default())),
         Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
         Some(other) => Err(plotting_error(
             builtin,
@@ -3735,9 +3728,10 @@ fn get_patch_property(
     patch_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(patch_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot else {
+    let plot = get_simple_plot_from_source(patch_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid patch handle"),
@@ -3760,12 +3754,18 @@ fn get_patch_property(
                     .map(numeric_plot_data_value)
                     .unwrap_or_else(|| vertices_tensor(patch.vertices())),
             );
-            st.insert("XData", patch_source_or_vertices(source_x, &patch, 0));
-            st.insert("YData", patch_source_or_vertices(source_y, &patch, 1));
-            st.insert("ZData", patch_source_or_vertices(source_z, &patch, 2));
-            if let Some(c_data) = source_c {
-                st.insert("CData", patch_data_value(c_data));
-            }
+            st.insert("XData", patch_source_or_vertices(source_x, patch, 0));
+            st.insert("YData", patch_source_or_vertices(source_y, patch, 1));
+            st.insert("ZData", patch_source_or_vertices(source_z, patch, 2));
+            let colors = source_c
+                .map(patch_data_value)
+                .unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0])));
+            st.insert("CData", colors.clone());
+            st.insert("FaceVertexCData", colors);
+            st.insert(
+                "CDataMapping",
+                Value::String(surface_color_mapping_name(patch.color_mapping()).into()),
+            );
             st.insert(
                 "FaceColor",
                 patch_color_property(patch.face_color_mode(), patch.face_color()),
@@ -3779,9 +3779,9 @@ fn get_patch_property(
             st.insert("LineWidth", Value::Num(patch.line_width() as f64));
             st.insert("Visible", Value::Bool(patch.is_visible()));
             if let Some(label) = patch.label() {
-                st.insert("DisplayName", Value::String(label.to_string()));
+                st.insert("DisplayName", Value::string(label.to_string()));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("patch".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3795,12 +3795,15 @@ fn get_patch_property(
         Some("vertices") => Ok(source_vertices
             .map(numeric_plot_data_value)
             .unwrap_or_else(|| vertices_tensor(patch.vertices()))),
-        Some("xdata") => Ok(patch_source_or_vertices(source_x, &patch, 0)),
-        Some("ydata") => Ok(patch_source_or_vertices(source_y, &patch, 1)),
-        Some("zdata") => Ok(patch_source_or_vertices(source_z, &patch, 2)),
-        Some("cdata") | Some("colordata") => source_c
+        Some("xdata") => Ok(patch_source_or_vertices(source_x, patch, 0)),
+        Some("ydata") => Ok(patch_source_or_vertices(source_y, patch, 1)),
+        Some("zdata") => Ok(patch_source_or_vertices(source_z, patch, 2)),
+        Some("cdata") | Some("colordata") | Some("facevertexcdata") => Ok(source_c
             .map(patch_data_value)
-            .ok_or_else(|| plotting_error(builtin, format!("{builtin}: patch has no CData"))),
+            .unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0])))),
+        Some("cdatamapping") => Ok(Value::String(
+            surface_color_mapping_name(patch.color_mapping()).into(),
+        )),
         Some("facecolor") | Some("color") => Ok(patch_color_property(
             patch.face_color_mode(),
             patch.face_color(),
@@ -3812,7 +3815,7 @@ fn get_patch_property(
         Some("facealpha") => Ok(Value::Num(patch.face_alpha() as f64)),
         Some("edgealpha") => Ok(Value::Num(patch.edge_alpha() as f64)),
         Some("linewidth") => Ok(Value::Num(patch.line_width() as f64)),
-        Some("displayname") => Ok(Value::String(patch.label().unwrap_or_default().to_string())),
+        Some("displayname") => Ok(Value::string(patch.label().unwrap_or_default().to_string())),
         Some("visible") => Ok(Value::Bool(patch.is_visible())),
         Some(other) => Err(plotting_error(
             builtin,
@@ -3849,22 +3852,47 @@ fn get_line3_property(
     line_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(line_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Line3(line) = plot else {
+    let plot = get_simple_plot_from_source(line_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Line3(line) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid plot3 handle"),
         ));
     };
+    let data = if line3_property_needs_data(property) {
+        Some(line_xyz_data_for_properties(line, builtin)?)
+    } else {
+        None
+    };
+    line3_property_with_data(line_handle, property, builtin, line, data)
+}
+
+fn line3_property_needs_data(property: Option<&str>) -> bool {
+    matches!(
+        property.map(canonical_property_name).as_deref(),
+        None | Some("xdata" | "ydata" | "zdata")
+    )
+}
+
+fn line3_property_with_data(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+    line: &runmat_plot::plots::Line3Plot,
+    data: Option<(NumericPlotData, NumericPlotData, NumericPlotData)>,
+) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
-            let (x_data, y_data, z_data) = line_xyz_data_for_properties(&line, builtin)?;
-            st.insert("XData", numeric_plot_data_value(&x_data));
-            st.insert("YData", numeric_plot_data_value(&y_data));
-            st.insert("ZData", numeric_plot_data_value(&z_data));
-            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            let (x_data, y_data, z_data) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
+            st.insert("XData", numeric_plot_data_value(x_data));
+            st.insert("YData", numeric_plot_data_value(y_data));
+            st.insert("ZData", numeric_plot_data_value(z_data));
+            st.insert("Color", rgb_triplet_value(line.color));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -3872,13 +3900,13 @@ fn get_line3_property(
             );
             st.insert(
                 "DisplayName",
-                Value::String(line.label.clone().unwrap_or_default()),
+                Value::string(line.label.clone().unwrap_or_default()),
             );
             st.insert(
                 "Visible",
                 Value::String(if line.visible { "on" } else { "off" }.into()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("line".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3887,21 +3915,27 @@ fn get_line3_property(
         )),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => {
-            let (x, _, _) = line_xyz_data_for_properties(&line, builtin)?;
-            Ok(numeric_plot_data_value(&x))
+            let (x, _, _) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
+            Ok(numeric_plot_data_value(x))
         }
         Some("ydata") => {
-            let (_, y, _) = line_xyz_data_for_properties(&line, builtin)?;
-            Ok(numeric_plot_data_value(&y))
+            let (_, y, _) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
+            Ok(numeric_plot_data_value(y))
         }
         Some("zdata") => {
-            let (_, _, z) = line_xyz_data_for_properties(&line, builtin)?;
-            Ok(numeric_plot_data_value(&z))
+            let (_, _, z) = data.as_ref().ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: plot3 has no source data"))
+            })?;
+            Ok(numeric_plot_data_value(z))
         }
-        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("color") => Ok(rgb_triplet_value(line.color)),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-        Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
         Some("visible") => Ok(Value::String(
             if line.visible { "on" } else { "off" }.into(),
         )),
@@ -3916,94 +3950,19 @@ fn get_scatter3_property(
     scatter_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(scatter_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Scatter3(scatter) = plot else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid scatter3 handle"),
-        ));
-    };
-    let (x, y, z) = if let Some((x, y, z)) = scatter.source_data() {
-        (
-            numeric_plot_data_value(x),
-            numeric_plot_data_value(y),
-            numeric_plot_data_value(z),
-        )
-    } else {
-        let (x, y, z): (Vec<f64>, Vec<f64>, Vec<f64>) = scatter
-            .points
-            .iter()
-            .map(|p| (p.x as f64, p.y as f64, p.z as f64))
-            .unzip_n_vec();
-        (tensor_from_vec(x), tensor_from_vec(y), tensor_from_vec(z))
-    };
-    match property.map(canonical_property_name).as_deref() {
-        None => {
-            let mut st =
-                child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
-            st.insert("XData", x.clone());
-            st.insert("YData", y.clone());
-            st.insert("ZData", z.clone());
-            st.insert(
-                "Marker",
-                Value::String(marker_style_name(scatter.marker_style).into()),
-            );
-            st.insert(
-                "SizeData",
-                Value::Num(marker_diameter_px_to_area_points2(scatter.point_size)),
-            );
-            st.insert(
-                "MarkerFaceColor",
-                Value::String(color_to_short_name(
-                    scatter.colors.first().copied().unwrap_or_default(),
-                )),
-            );
-            st.insert(
-                "MarkerEdgeColor",
-                Value::String(color_to_short_name(scatter.edge_color)),
-            );
-            st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
-            if let Some(label) = scatter.label.clone() {
-                st.insert("DisplayName", Value::String(label));
-            }
-            Ok(Value::Struct(st))
-        }
-        Some("type") => Ok(Value::String("scatter".into())),
-        Some("parent") => Ok(child_parent_handle(
-            scatter_handle.figure,
-            scatter_handle.axes_index,
-        )),
-        Some("children") => Ok(handles_value(Vec::new())),
-        Some("xdata") => Ok(x),
-        Some("ydata") => Ok(y),
-        Some("zdata") => Ok(z),
-        Some("marker") => Ok(Value::String(
-            marker_style_name(scatter.marker_style).into(),
-        )),
-        Some("sizedata") => Ok(Value::Num(marker_diameter_px_to_area_points2(
-            scatter.point_size,
-        ))),
-        Some("markerfacecolor") => Ok(Value::String(color_to_short_name(
-            scatter.colors.first().copied().unwrap_or_default(),
-        ))),
-        Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
-        Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
-        Some("displayname") => Ok(Value::String(scatter.label.unwrap_or_default())),
-        Some(other) => Err(plotting_error(
-            builtin,
-            format!("{builtin}: unsupported scatter3 property `{other}`"),
-        )),
-    }
+    scatter3_data::get(scatter_handle, property, builtin, source)
 }
 
 fn get_pie_property(
     pie_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(pie_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot else {
+    let plot = get_simple_plot_from_source(pie_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid pie handle"),
@@ -4013,9 +3972,9 @@ fn get_pie_property(
         None => {
             let mut st = child_base_struct("pie", pie_handle.figure, pie_handle.axes_index);
             if let Some(label) = pie.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("pie".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -4023,7 +3982,7 @@ fn get_pie_property(
             pie_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("displayname") => Ok(Value::String(pie.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(pie.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported pie property `{other}`"),
@@ -4035,9 +3994,10 @@ fn get_contour_property(
     contour_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(contour_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot else {
+    let plot = get_simple_plot_from_source(contour_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid contour handle"),
@@ -4049,9 +4009,9 @@ fn get_contour_property(
                 child_base_struct("contour", contour_handle.figure, contour_handle.axes_index);
             st.insert("ZData", Value::Num(contour.base_z as f64));
             if let Some(label) = contour.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("contour".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -4060,7 +4020,7 @@ fn get_contour_property(
         )),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
-        Some("displayname") => Ok(Value::String(contour.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(contour.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported contour property `{other}`"),
@@ -4072,9 +4032,10 @@ fn get_contour_fill_property(
     fill_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let plot = get_simple_plot(fill_handle, builtin)?;
-    let runmat_plot::plots::figure::PlotElement::ContourFill(fill) = plot else {
+    let plot = get_simple_plot_from_source(fill_handle, builtin, source)?;
+    let runmat_plot::plots::figure::PlotElement::ContourFill(fill) = plot.as_ref() else {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: invalid contourf handle"),
@@ -4084,9 +4045,9 @@ fn get_contour_fill_property(
         None => {
             let mut st = child_base_struct("contour", fill_handle.figure, fill_handle.axes_index);
             if let Some(label) = fill.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("contour".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -4094,7 +4055,7 @@ fn get_contour_fill_property(
             fill_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("displayname") => Ok(Value::String(fill.label.unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(fill.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported contourf property `{other}`"),
@@ -4106,8 +4067,10 @@ fn get_stem_property(
     stem_handle: &super::state::StemHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(stem_handle.figure)
+    let figure = source
+        .figure(stem_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid stem figure")))?;
     let plot = figure
         .plots()
@@ -4131,7 +4094,7 @@ fn get_stem_property(
         .unwrap_or_else(|| tensor_from_vec(stem.y.clone()));
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("stem".into()));
             st.insert(
                 "Parent",
@@ -4150,24 +4113,18 @@ fn get_stem_property(
                 "LineStyle",
                 Value::String(line_style_name(stem.line_style).into()),
             );
-            st.insert("Color", Value::String(color_to_short_name(stem.color)));
+            st.insert("Color", rgb_triplet_value(stem.color));
             if let Some(marker) = &stem.marker {
                 st.insert(
                     "Marker",
                     Value::String(marker_style_name(marker.kind).into()),
                 );
                 st.insert("MarkerSize", Value::Num(marker.size as f64));
-                st.insert(
-                    "MarkerFaceColor",
-                    Value::String(color_to_short_name(marker.face_color)),
-                );
-                st.insert(
-                    "MarkerEdgeColor",
-                    Value::String(color_to_short_name(marker.edge_color)),
-                );
+                st.insert("MarkerFaceColor", rgb_triplet_value(marker.face_color));
+                st.insert("MarkerEdgeColor", rgb_triplet_value(marker.edge_color));
                 st.insert("Filled", Value::Bool(marker.filled));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("stem".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4181,28 +4138,27 @@ fn get_stem_property(
         Some("baseline") => Ok(Value::Bool(stem.baseline_visible)),
         Some("linewidth") => Ok(Value::Num(stem.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(stem.line_style).into())),
-        Some("color") => Ok(Value::String(color_to_short_name(stem.color))),
+        Some("color") => Ok(rgb_triplet_value(stem.color)),
         Some("marker") => Ok(Value::String(
             stem.marker
                 .as_ref()
                 .map(|m| marker_style_name(m.kind).to_string())
-                .unwrap_or("none".into()),
+                .unwrap_or("none".into())
+                .into(),
         )),
         Some("markersize") => Ok(Value::Num(
             stem.marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
         )),
-        Some("markerfacecolor") => Ok(Value::String(
-            stem.marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.face_color))
-                .unwrap_or("none".into()),
-        )),
-        Some("markeredgecolor") => Ok(Value::String(
-            stem.marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.edge_color))
-                .unwrap_or("none".into()),
-        )),
+        Some("markerfacecolor") => Ok(stem
+            .marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.face_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
+        Some("markeredgecolor") => Ok(stem
+            .marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.edge_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
         Some("filled") => Ok(Value::Bool(
             stem.marker.as_ref().map(|m| m.filled).unwrap_or(false),
         )),
@@ -4217,8 +4173,10 @@ fn get_errorbar_property(
     error_handle: &super::state::ErrorBarHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(error_handle.figure)
+    let figure = source
+        .figure(error_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid errorbar figure")))?;
     let plot = figure
         .plots()
@@ -4232,7 +4190,7 @@ fn get_errorbar_property(
     };
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("errorbar".into()));
             st.insert(
                 "Parent",
@@ -4247,7 +4205,7 @@ fn get_errorbar_property(
                 "LineStyle",
                 Value::String(line_style_name(errorbar.line_style).into()),
             );
-            st.insert("Color", Value::String(color_to_short_name(errorbar.color)));
+            st.insert("Color", rgb_triplet_value(errorbar.color));
             st.insert("CapSize", Value::Num(errorbar.cap_size as f64));
             if let Some(marker) = &errorbar.marker {
                 st.insert(
@@ -4256,7 +4214,7 @@ fn get_errorbar_property(
                 );
                 st.insert("MarkerSize", Value::Num(marker.size as f64));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("errorbar".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4266,9 +4224,9 @@ fn get_errorbar_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("linewidth") => Ok(Value::Num(errorbar.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(errorbar.line_style).into())),
-        Some("color") => Ok(Value::String(color_to_short_name(errorbar.color))),
+        Some("color") => Ok(rgb_triplet_value(errorbar.color)),
         Some("capsize") => Ok(Value::Num(errorbar.cap_size as f64)),
-        Some("marker") => Ok(Value::String(
+        Some("marker") => Ok(Value::string(
             errorbar
                 .marker
                 .as_ref()
@@ -4293,8 +4251,10 @@ fn get_quiver_property(
     quiver_handle: &super::state::QuiverHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(quiver_handle.figure)
+    let figure = source
+        .figure(quiver_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid quiver figure")))?;
     let plot = figure
         .plots()
@@ -4310,7 +4270,7 @@ fn get_quiver_property(
     let source = quiver.source_data();
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("quiver".into()));
             st.insert(
                 "Parent",
@@ -4320,7 +4280,7 @@ fn get_quiver_property(
                 )),
             );
             st.insert("Children", handles_value(Vec::new()));
-            st.insert("Color", Value::String(color_to_short_name(quiver.color)));
+            st.insert("Color", rgb_triplet_value(quiver.color));
             st.insert("LineWidth", Value::Num(quiver.line_width as f64));
             st.insert("AutoScaleFactor", Value::Num(quiver.scale as f64));
             st.insert("MaxHeadSize", Value::Num(quiver.head_size as f64));
@@ -4355,7 +4315,7 @@ fn get_quiver_property(
                 st.insert("UData", tensor_from_vec(quiver.u.clone()));
                 st.insert("VData", tensor_from_vec(quiver.v.clone()));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("quiver".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4363,7 +4323,7 @@ fn get_quiver_property(
             quiver_handle.axes_index,
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("color") => Ok(Value::String(color_to_short_name(quiver.color))),
+        Some("color") => Ok(rgb_triplet_value(quiver.color)),
         Some("linewidth") => Ok(Value::Num(quiver.line_width as f64)),
         Some("autoscalefactor") => Ok(Value::Num(quiver.scale as f64)),
         Some("maxheadsize") => Ok(Value::Num(quiver.head_size as f64)),
@@ -4414,8 +4374,10 @@ fn get_image_property(
     image_handle: &super::state::ImageHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(image_handle.figure)
+    let figure = source
+        .figure(image_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid image figure")))?;
     let plot = figure
         .plots()
@@ -4435,7 +4397,7 @@ fn get_image_property(
     }
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("image".into()));
             st.insert(
                 "Parent",
@@ -4452,9 +4414,9 @@ fn get_image_property(
             }
             st.insert(
                 "CDataMapping",
-                Value::String(image_handle.c_data_mapping.clone()),
+                Value::string(image_handle.c_data_mapping.clone()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("image".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4467,7 +4429,7 @@ fn get_image_property(
         Some("colordata") => Ok(Value::Tensor(image_handle.c_data.clone().unwrap_or_else(
             || Tensor::new(Vec::new(), vec![0, 0]).expect("valid empty tensor"),
         ))),
-        Some("cdatamapping") => Ok(Value::String(image_handle.c_data_mapping.clone())),
+        Some("cdatamapping") => Ok(Value::string(image_handle.c_data_mapping.clone())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported image property `{other}`"),
@@ -4479,8 +4441,10 @@ fn get_heatmap_property(
     heatmap_handle: &super::state::HeatmapHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(heatmap_handle.figure)
+    let figure = source
+        .figure(heatmap_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap figure")))?;
     let plot = figure
         .plots()
@@ -4503,7 +4467,7 @@ fn get_heatmap_property(
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap axes")))?;
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("heatmap".into()));
             st.insert(
                 "Parent",
@@ -4515,15 +4479,15 @@ fn get_heatmap_property(
             st.insert("Children", handles_value(Vec::new()));
             st.insert(
                 "Title",
-                Value::String(meta.title.clone().unwrap_or_default()),
+                Value::string(meta.title.clone().unwrap_or_default()),
             );
             st.insert(
                 "XLabel",
-                Value::String(meta.x_label.clone().unwrap_or_default()),
+                Value::string(meta.x_label.clone().unwrap_or_default()),
             );
             st.insert(
                 "YLabel",
-                Value::String(meta.y_label.clone().unwrap_or_default()),
+                Value::string(meta.y_label.clone().unwrap_or_default()),
             );
             st.insert(
                 "XDisplayLabels",
@@ -4545,7 +4509,7 @@ fn get_heatmap_property(
             );
             st.insert(
                 "Colormap",
-                Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
+                Value::string(format!("{:?}", meta.colormap).to_ascii_lowercase()),
             );
             st.insert(
                 "ColorLimits",
@@ -4557,7 +4521,7 @@ fn get_heatmap_property(
                         crate::builtins::plotting::op_common::limits::limit_value(meta.color_limits)
                     }),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("heatmap".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4565,16 +4529,16 @@ fn get_heatmap_property(
             heatmap_handle.axes_index,
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("title") => Ok(Value::String(meta.title.clone().unwrap_or_default())),
-        Some("xlabel") => Ok(Value::String(meta.x_label.clone().unwrap_or_default())),
-        Some("ylabel") => Ok(Value::String(meta.y_label.clone().unwrap_or_default())),
+        Some("title") => Ok(Value::string(meta.title.clone().unwrap_or_default())),
+        Some("xlabel") => Ok(Value::string(meta.x_label.clone().unwrap_or_default())),
+        Some("ylabel") => Ok(Value::string(meta.y_label.clone().unwrap_or_default())),
         Some("xdisplaylabels") => string_array_from_vec(heatmap_handle.x_labels.clone()),
         Some("ydisplaylabels") => string_array_from_vec(heatmap_handle.y_labels.clone()),
         Some("colordata") => Ok(Value::Tensor(heatmap_handle.color_data.clone())),
         Some("colorbarvisible") | Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
         Some("gridvisible") => Ok(Value::Bool(meta.grid_enabled)),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
-        Some("colormap") => Ok(Value::String(
+        Some("colormap") => Ok(Value::string(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
         )),
         Some("colorlimits") => Ok(heatmap_handle
@@ -4595,8 +4559,10 @@ fn get_area_property(
     area_handle: &super::state::AreaHandleState,
     property: Option<&str>,
     builtin: &'static str,
+    source: PropertyReadSource<'_>,
 ) -> BuiltinResult<Value> {
-    let figure = super::state::clone_figure(area_handle.figure)
+    let figure = source
+        .figure(area_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid area figure")))?;
     let plot = figure
         .plots()
@@ -4610,7 +4576,7 @@ fn get_area_property(
     };
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("area".into()));
             st.insert(
                 "Parent",
@@ -4623,8 +4589,8 @@ fn get_area_property(
             st.insert("XData", tensor_from_vec(area.x.clone()));
             st.insert("YData", tensor_from_vec(area.y.clone()));
             st.insert("BaseValue", Value::Num(area.baseline));
-            st.insert("Color", Value::String(color_to_short_name(area.color)));
-            Ok(Value::Struct(st))
+            st.insert("Color", rgb_triplet_value(area.color));
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("area".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4635,7 +4601,7 @@ fn get_area_property(
         Some("xdata") => Ok(tensor_from_vec(area.x.clone())),
         Some("ydata") => Ok(tensor_from_vec(area.y.clone())),
         Some("basevalue") => Ok(Value::Num(area.baseline)),
-        Some("color") => Ok(Value::String(color_to_short_name(area.color))),
+        Some("color") => Ok(rgb_triplet_value(area.color)),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported area property `{other}`"),
@@ -4644,14 +4610,18 @@ fn get_area_property(
 }
 
 fn apply_histogram_property(
+    authority: &super::state::PropertyMutationTarget,
+
     hist: &super::state::HistogramHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     match key {
         "normalization" => {
-            let norm = value_as_string(value)
+            let norm = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(
                         builtin,
@@ -4668,14 +4638,16 @@ fn apply_histogram_property(
                 hist.normalization_denominator,
             );
             let labels = histogram_labels_from_edges(&hist.bin_edges);
-            super::state::update_histogram_plot_data(
+            super::state::update_histogram_plot_data_for_property(
+                authority,
                 hist.figure,
                 hist.plot_index,
                 labels,
                 normalized,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_histogram_handle_for_plot(
+            super::state::update_histogram_handle_for_plot_for_property(
+                authority,
                 hist.figure,
                 hist.axes_index,
                 hist.plot_index,
@@ -4686,14 +4658,20 @@ fn apply_histogram_property(
             Ok(())
         }
         "displayname" => {
-            let display_name = value_as_string(value).map(|s| s.to_string());
-            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
-                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
-                    bar.label = display_name.clone();
-                }
-            })
+            let display_name = text_input.text();
+            super::state::update_plot_element_for_property(
+                authority,
+                hist.figure,
+                hist.plot_index,
+                |plot| {
+                    if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                        bar.label = display_name.clone();
+                    }
+                },
+            )
             .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::set_histogram_handle_display_name(
+            super::state::set_histogram_handle_display_name_for_property(
+                authority,
                 hist.figure,
                 hist.axes_index,
                 hist.plot_index,
@@ -4703,7 +4681,8 @@ fn apply_histogram_property(
             Ok(())
         }
         "displaystyle" => {
-            let display_style = value_as_string(value)
+            let display_style = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(builtin, format!("{builtin}: DisplayStyle must be a string"))
                 })?
@@ -4727,15 +4706,21 @@ fn apply_histogram_property(
                     ),
                 ));
             }
-            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
-                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
-                    if bar.is_polar_histogram() {
-                        bar.set_polar_histogram_display_style(style);
+            super::state::update_plot_element_for_property(
+                authority,
+                hist.figure,
+                hist.plot_index,
+                |plot| {
+                    if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                        if bar.is_polar_histogram() {
+                            bar.set_polar_histogram_display_style(style);
+                        }
                     }
-                }
-            })
+                },
+            )
             .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_histogram_handle_metadata_for_plot(
+            super::state::update_histogram_handle_metadata_for_plot_for_property(
+                authority,
                 hist.figure,
                 hist.axes_index,
                 hist.plot_index,
@@ -4749,15 +4734,21 @@ fn apply_histogram_property(
                 plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
             })?;
             let alpha = alpha.clamp(0.0, 1.0);
-            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
-                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
-                    let mut color = bar.color;
-                    color.w = alpha as f32;
-                    bar.apply_face_style(color, bar.bar_width);
-                }
-            })
+            super::state::update_plot_element_for_property(
+                authority,
+                hist.figure,
+                hist.plot_index,
+                |plot| {
+                    if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                        let mut color = bar.color;
+                        color.w = alpha as f32;
+                        bar.apply_face_style(color, bar.bar_width);
+                    }
+                },
+            )
             .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_histogram_handle_metadata_for_plot(
+            super::state::update_histogram_handle_metadata_for_plot_for_property(
+                authority,
                 hist.figure,
                 hist.axes_index,
                 hist.plot_index,
@@ -4767,7 +4758,7 @@ fn apply_histogram_property(
             Ok(())
         }
         "facecolor" | "edgecolor" => {
-            let Some(color_text) = value_as_string(value) else {
+            let Some(color_text) = text_input.text() else {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: color property must be a string"),
@@ -4781,20 +4772,26 @@ fn apply_histogram_property(
                     plotting_error(builtin, format!("{builtin}: unsupported color `{lower}`"))
                 })?),
             };
-            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
-                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
-                    if key == "facecolor" {
-                        if let Some(mut color) = color {
-                            color.w = hist.metadata.face_alpha as f32;
-                            bar.apply_face_style(color, bar.bar_width);
+            super::state::update_plot_element_for_property(
+                authority,
+                hist.figure,
+                hist.plot_index,
+                |plot| {
+                    if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                        if key == "facecolor" {
+                            if let Some(mut color) = color {
+                                color.w = hist.metadata.face_alpha as f32;
+                                bar.apply_face_style(color, bar.bar_width);
+                            }
+                        } else {
+                            bar.apply_outline_style(color, bar.outline_width);
                         }
-                    } else {
-                        bar.apply_outline_style(color, bar.outline_width);
                     }
-                }
-            })
+                },
+            )
             .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_histogram_handle_metadata_for_plot(
+            super::state::update_histogram_handle_metadata_for_plot_for_property(
+                authority,
                 hist.figure,
                 hist.axes_index,
                 hist.plot_index,
@@ -4817,6 +4814,8 @@ fn apply_histogram_property(
 }
 
 fn apply_histogram2_property(
+    authority: &super::state::PropertyMutationTarget,
+
     hist: &super::state::Histogram2HandleState,
     key: &str,
     value: &Value,
@@ -4824,10 +4823,12 @@ fn apply_histogram2_property(
 ) -> BuiltinResult<()> {
     let mut next = hist.clone();
     apply_histogram2_property_to_state(&mut next, key, value, builtin)?;
-    refresh_histogram2_chart(next, builtin)
+    refresh_histogram2_chart(authority, next, builtin)
 }
 
 fn apply_histogram2_properties(
+    authority: &super::state::PropertyMutationTarget,
+
     hist: &super::state::Histogram2HandleState,
     pairs: &[(String, &Value)],
     builtin: &'static str,
@@ -4836,7 +4837,7 @@ fn apply_histogram2_properties(
     for (key, value) in pairs {
         apply_histogram2_property_to_state(&mut next, key, value, builtin)?;
     }
-    refresh_histogram2_chart(next, builtin)
+    refresh_histogram2_chart(authority, next, builtin)
 }
 
 fn apply_histogram2_property_to_state(
@@ -4845,9 +4846,11 @@ fn apply_histogram2_property_to_state(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     match key {
         "normalization" => {
-            next.normalization = value_as_string(value)
+            next.normalization = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(
                         builtin,
@@ -4876,7 +4879,7 @@ fn apply_histogram2_property_to_state(
             next.face_alpha = alpha;
         }
         "displayname" => {
-            next.display_name = value_as_string(value).map(|s| s.to_string());
+            next.display_name = text_input.text();
         }
         other => Err(plotting_error(
             builtin,
@@ -4887,10 +4890,12 @@ fn apply_histogram2_property_to_state(
 }
 
 fn refresh_histogram2_chart(
+    authority: &super::state::PropertyMutationTarget,
+
     next: super::state::Histogram2HandleState,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let color_limits = current_histogram2_color_limits(&next, builtin)?;
+    let color_limits = current_histogram2_color_limits(authority, &next, builtin)?;
     let surface = histogram2::build_surface_from_values(
         &next.values,
         &next.x_bin_edges,
@@ -4901,13 +4906,19 @@ fn refresh_histogram2_chart(
         next.display_name.as_deref(),
         color_limits,
     )?;
-    super::state::update_plot_element(next.figure, next.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Surface(existing) = plot {
-            *existing = surface;
-        }
-    })
+    super::state::update_plot_element_for_property(
+        authority,
+        next.figure,
+        next.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Surface(existing) = plot {
+                *existing = surface;
+            }
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
-    super::state::update_histogram2_handle_for_plot(
+    super::state::update_histogram2_handle_for_plot_for_property(
+        authority,
         next.figure,
         next.axes_index,
         next.plot_index,
@@ -4929,11 +4940,14 @@ fn refresh_histogram2_chart(
 }
 
 fn current_histogram2_color_limits(
+    authority: &super::state::PropertyMutationTarget,
+
     hist: &super::state::Histogram2HandleState,
     builtin: &'static str,
 ) -> BuiltinResult<Option<(f64, f64)>> {
-    let figure = super::state::clone_figure(hist.figure)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid histogram2 figure")))?;
+    let figure = authority
+        .figure_snapshot(hist.figure)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let plot = figure
         .plots()
         .nth(hist.plot_index)
@@ -4948,12 +4962,16 @@ fn current_histogram2_color_limits(
 }
 
 fn apply_stem_property(
+    authority: &super::state::PropertyMutationTarget,
+
     stem_handle: &super::state::StemHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_stem_plot(
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_stem_plot_for_property(
+        authority,
         stem_handle.figure,
         stem_handle.plot_index,
         |stem| match key {
@@ -4973,7 +4991,7 @@ fn apply_stem_property(
                 }
             }
             "linestyle" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     stem.line_style = parse_line_style_name_for_props(&s);
                 }
             }
@@ -4983,7 +5001,7 @@ fn apply_stem_property(
                 }
             }
             "marker" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     stem.marker = marker_from_name(&s, stem.marker.clone());
                 }
             }
@@ -5023,20 +5041,26 @@ fn apply_stem_property(
 }
 
 fn apply_errorbar_property(
+    authority: &super::state::PropertyMutationTarget,
+
     error_handle: &super::state::ErrorBarHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_errorbar_plot(error_handle.figure, error_handle.plot_index, |errorbar| {
-        match key {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_errorbar_plot_for_property(
+        authority,
+        error_handle.figure,
+        error_handle.plot_index,
+        |errorbar| match key {
             "linewidth" => {
                 if let Some(v) = value_as_f64(value) {
                     errorbar.line_width = v as f32;
                 }
             }
             "linestyle" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     errorbar.line_style = parse_line_style_name_for_props(&s);
                 }
             }
@@ -5051,7 +5075,7 @@ fn apply_errorbar_property(
                 }
             }
             "marker" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     errorbar.marker = marker_from_name(&s, errorbar.marker.clone());
                 }
             }
@@ -5063,13 +5087,15 @@ fn apply_errorbar_property(
                 }
             }
             _ => {}
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn apply_quiver_property(
+    authority: &super::state::PropertyMutationTarget,
+
     quiver_handle: &super::state::QuiverHandleState,
     key: &str,
     value: &Value,
@@ -5079,10 +5105,13 @@ fn apply_quiver_property(
         key,
         "xdata" | "ydata" | "zdata" | "udata" | "vdata" | "wdata"
     ) {
-        return apply_quiver_data_property(quiver_handle, key, value, builtin);
+        return apply_quiver_data_property(authority, quiver_handle, key, value, builtin);
     }
-    super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
-        match key {
+    super::state::update_quiver_plot_for_property(
+        authority,
+        quiver_handle.figure,
+        quiver_handle.plot_index,
+        |quiver| match key {
             "color" => {
                 if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
                     quiver.color = c;
@@ -5107,13 +5136,15 @@ fn apply_quiver_property(
                 }
             }
             _ => {}
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn apply_quiver_data_property(
+    authority: &super::state::PropertyMutationTarget,
+
     quiver_handle: &super::state::QuiverHandleState,
     key: &str,
     value: &Value,
@@ -5125,8 +5156,9 @@ fn apply_quiver_data_property(
             format!("{builtin}: unsupported quiver property `{key}`"),
         ));
     }
-    let figure = super::state::clone_figure(quiver_handle.figure)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid quiver figure")))?;
+    let figure = authority
+        .figure_snapshot(quiver_handle.figure)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let plot = figure
         .plots()
         .nth(quiver_handle.plot_index)
@@ -5162,11 +5194,16 @@ fn apply_quiver_data_property(
     };
     let update_error = std::rc::Rc::new(std::cell::RefCell::new(None));
     let update_error_slot = std::rc::Rc::clone(&update_error);
-    super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
-        if let Err(err) = quiver.set_numeric_component(component, data) {
-            *update_error_slot.borrow_mut() = Some(err);
-        }
-    })
+    super::state::update_quiver_plot_for_property(
+        authority,
+        quiver_handle.figure,
+        quiver_handle.plot_index,
+        |quiver| {
+            if let Err(err) = quiver.set_numeric_component(component, data) {
+                *update_error_slot.borrow_mut() = Some(err);
+            }
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     if let Some(err) = update_error.borrow_mut().take() {
         return Err(plotting_error(builtin, format!("{builtin}: {err}")));
@@ -5175,11 +5212,14 @@ fn apply_quiver_data_property(
 }
 
 fn apply_image_property(
+    authority: &super::state::PropertyMutationTarget,
+
     image_handle: &super::state::ImageHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     if key == "colordata" {
         return Err(plotting_error(
             builtin,
@@ -5187,7 +5227,8 @@ fn apply_image_property(
         ));
     }
     if key == "cdatamapping" {
-        let mapping = value_as_string(value)
+        let mapping = text_input
+            .text()
             .map(|text| text.trim().to_ascii_lowercase())
             .ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: CDataMapping must be text"))
@@ -5205,23 +5246,33 @@ fn apply_image_property(
                 .is_some_and(|tensor| tensor.integer_storage().is_some());
             Some(crate::builtins::plotting::image::direct_colormap_limits(
                 integer,
-                super::state::colormap_length_for_axes(
-                    image_handle.figure,
-                    image_handle.axes_index,
-                ),
+                authority
+                    .colormap_length(image_handle.figure, image_handle.axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?,
             ))
         } else {
-            super::state::clone_figure(image_handle.figure).and_then(|figure| {
-                figure
-                    .axes_metadata(image_handle.axes_index)
-                    .and_then(|metadata| metadata.color_limits)
-            })
+            authority
+                .figure_snapshot(image_handle.figure)
+                .map_err(|err| map_figure_error(builtin, err))?
+                .axes_metadata(image_handle.axes_index)
+                .and_then(|metadata| metadata.color_limits)
         };
-        super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
-            surface.set_color_limits(renderer_limits);
-        })
+        super::state::update_image_plot_for_property(
+            authority,
+            image_handle.figure,
+            image_handle.plot_index,
+            |surface| {
+                surface.color_mapping = if mapping == "direct" {
+                    runmat_plot::plots::surface::SurfaceColorMapping::Direct
+                } else {
+                    runmat_plot::plots::surface::SurfaceColorMapping::Scaled
+                };
+                surface.set_color_limits(renderer_limits);
+            },
+        )
         .map_err(|err| map_figure_error(builtin, err))?;
-        super::state::update_image_handle_for_plot(
+        super::state::update_image_handle_for_plot_for_property(
+            authority,
             image_handle.figure,
             image_handle.axes_index,
             image_handle.plot_index,
@@ -5231,8 +5282,11 @@ fn apply_image_property(
         return Ok(());
     }
     let mut retained_mapping = None;
-    super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
-        match key {
+    super::state::update_image_plot_for_property(
+        authority,
+        image_handle.figure,
+        image_handle.plot_index,
+        |surface| match key {
             "xdata" => {
                 if let Ok(tensor) = Tensor::try_from(value) {
                     surface.x_data = tensor.materialize_f64();
@@ -5244,7 +5298,7 @@ fn apply_image_property(
                 }
             }
             "cdatamapping" => {
-                if let Some(text) = value_as_string(value) {
+                if let Some(text) = text_input.text() {
                     let normalized = text.trim().to_ascii_lowercase();
                     if normalized == "direct" {
                         surface.image_mode = true;
@@ -5255,11 +5309,12 @@ fn apply_image_property(
                 }
             }
             _ => {}
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     if retained_mapping.is_some() {
-        super::state::update_image_handle_for_plot(
+        super::state::update_image_handle_for_plot_for_property(
+            authority,
             image_handle.figure,
             image_handle.axes_index,
             image_handle.plot_index,
@@ -5275,6 +5330,8 @@ fn apply_image_property(
 }
 
 fn apply_heatmap_property(
+    authority: &super::state::PropertyMutationTarget,
+
     handle: f64,
     heatmap_handle: &super::state::HeatmapHandleState,
     key: &str,
@@ -5283,6 +5340,7 @@ fn apply_heatmap_property(
 ) -> BuiltinResult<()> {
     match key {
         "title" => apply_axes_property(
+            authority,
             heatmap_handle.figure,
             heatmap_handle.axes_index,
             "title",
@@ -5290,6 +5348,7 @@ fn apply_heatmap_property(
             builtin,
         ),
         "xlabel" => apply_axes_property(
+            authority,
             heatmap_handle.figure,
             heatmap_handle.axes_index,
             "xlabel",
@@ -5297,6 +5356,7 @@ fn apply_heatmap_property(
             builtin,
         ),
         "ylabel" => apply_axes_property(
+            authority,
             heatmap_handle.figure,
             heatmap_handle.axes_index,
             "ylabel",
@@ -5310,7 +5370,8 @@ fn apply_heatmap_property(
                     format!("{builtin}: ColorbarVisible must be 'on', 'off', 0, or 1"),
                 )
             })?;
-            crate::builtins::plotting::state::set_colorbar_enabled_for_axes(
+            super::state::set_colorbar_enabled_for_axes_for_property(
+                authority,
                 heatmap_handle.figure,
                 heatmap_handle.axes_index,
                 enabled,
@@ -5324,7 +5385,8 @@ fn apply_heatmap_property(
                     format!("{builtin}: GridVisible must be 'on', 'off', 0, or 1"),
                 )
             })?;
-            crate::builtins::plotting::state::set_grid_enabled_for_axes(
+            super::state::set_grid_enabled_for_axes_for_property(
+                authority,
                 heatmap_handle.figure,
                 heatmap_handle.axes_index,
                 enabled,
@@ -5332,6 +5394,7 @@ fn apply_heatmap_property(
             .map_err(|err| map_figure_error(builtin, err))
         }
         "fontsize" => apply_axes_property(
+            authority,
             heatmap_handle.figure,
             heatmap_handle.axes_index,
             "fontsize",
@@ -5339,6 +5402,7 @@ fn apply_heatmap_property(
             builtin,
         ),
         "colormap" => apply_axes_property(
+            authority,
             heatmap_handle.figure,
             heatmap_handle.axes_index,
             "colormap",
@@ -5356,15 +5420,17 @@ fn apply_heatmap_property(
                     value,
                     builtin,
                 )?;
-            crate::builtins::plotting::state::set_color_limits_for_axes(
+            super::state::set_color_limits_for_axes_for_property(
+                authority,
                 heatmap_handle.figure,
                 heatmap_handle.axes_index,
                 Some(public_limits),
             )
             .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::set_heatmap_color_limits(handle, public_value)
+            super::state::set_heatmap_color_limits_for_property(authority, handle, public_value)
                 .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_plot_element(
+            super::state::update_plot_element_for_property(
+                authority,
                 heatmap_handle.figure,
                 heatmap_handle.plot_index,
                 |plot| {
@@ -5383,7 +5449,8 @@ fn apply_heatmap_property(
                     format!("{builtin}: XDisplayLabels length must match heatmap columns"),
                 ));
             }
-            super::state::set_heatmap_display_labels(
+            super::state::set_heatmap_display_labels_for_property(
+                authority,
                 heatmap_handle.figure,
                 heatmap_handle.axes_index,
                 heatmap_handle.plot_index,
@@ -5400,7 +5467,8 @@ fn apply_heatmap_property(
                     format!("{builtin}: YDisplayLabels length must match heatmap rows"),
                 ));
             }
-            super::state::set_heatmap_display_labels(
+            super::state::set_heatmap_display_labels_for_property(
+                authority,
                 heatmap_handle.figure,
                 heatmap_handle.axes_index,
                 heatmap_handle.plot_index,
@@ -5417,12 +5485,15 @@ fn apply_heatmap_property(
 }
 
 fn apply_area_property(
+    authority: &super::state::PropertyMutationTarget,
+
     area_handle: &super::state::AreaHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_area_plot(
+    super::state::update_area_plot_for_property(
+        authority,
         area_handle.figure,
         area_handle.plot_index,
         |area| match key {
@@ -5445,20 +5516,59 @@ fn apply_area_property(
 }
 
 fn apply_line_property(
+    authority: &super::state::PropertyMutationTarget,
+
     line_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    apply_line_properties(line_handle, &[(key.to_string(), value)], builtin)
+    apply_line_properties(authority, line_handle, &[(key.to_string(), value)], builtin)
+}
+
+#[derive(Clone, Copy)]
+struct PlotUpdateGuard {
+    child_handle: f64,
+    revision: u64,
+}
+
+type PlotXY = (NumericPlotData, NumericPlotData);
+type PlotXYZ = (NumericPlotData, NumericPlotData, NumericPlotData);
+
+fn update_property_plot(
+    authority: &super::state::PropertyMutationTarget,
+
+    figure: FigureHandle,
+    plot_index: usize,
+    guard: Option<PlotUpdateGuard>,
+    builtin: &'static str,
+    updater: impl FnOnce(&mut runmat_plot::plots::figure::PlotElement),
+) -> BuiltinResult<()> {
+    let result = match guard {
+        Some(guard) => super::state::update_plot_element_if_current(
+            guard.child_handle,
+            figure,
+            plot_index,
+            guard.revision,
+            updater,
+        ),
+        None => {
+            super::state::update_plot_element_for_property(authority, figure, plot_index, updater)
+        }
+    };
+    result.map_err(|err| map_figure_error(builtin, err))
 }
 
 fn apply_line_properties(
+    authority: &super::state::PropertyMutationTarget,
+
     line_handle: &super::state::SimplePlotHandleState,
     pairs: &[(String, &Value)],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let current = get_simple_plot(line_handle, builtin)?;
+    let current = authority
+        .plot_snapshot(line_handle.figure, line_handle.plot_index)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let runmat_plot::plots::figure::PlotElement::Line(current_line) = current else {
         return Err(plotting_error(
             builtin,
@@ -5466,57 +5576,105 @@ fn apply_line_properties(
         ));
     };
 
+    let prepared = prepare_line_data_updates(pairs, builtin)?;
     let (current_x, current_y) = line_xy_data_for_properties(&current_line, builtin)?;
-    let mut x_update = None;
-    let mut y_update = None;
-    let mut style_pairs = Vec::new();
-    for (key, value) in pairs {
-        match key.as_str() {
-            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
-            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
-            _ => style_pairs.push((key.as_str(), *value)),
-        }
-    }
+    apply_line_properties_with_data(
+        authority,
+        line_handle,
+        pairs,
+        builtin,
+        (current_x, current_y),
+        prepared,
+        None,
+    )
+}
 
-    let next_x = x_update.unwrap_or_else(|| current_x.clone());
-    let next_y = y_update.unwrap_or_else(|| current_y.clone());
-    let update_data = next_x != current_x || next_y != current_y;
+fn apply_line_properties_with_data(
+    authority: &super::state::PropertyMutationTarget,
+
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    (current_x, current_y): PlotXY,
+    prepared: LineDataUpdates,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
+    let style_pairs: Vec<_> = prepared
+        .style_indices
+        .iter()
+        .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+
+    let update_data = prepared.x.as_ref().is_some_and(|x| *x != current_x)
+        || prepared.y.as_ref().is_some_and(|y| *y != current_y);
+    let next_x = prepared.x.unwrap_or(current_x);
+    let next_y = prepared.y.unwrap_or(current_y);
     if update_data && next_x.len() != next_y.len() {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: XData and YData must contain the same number of elements"),
         ));
     }
-    for (key, value) in &style_pairs {
-        if *key == "handlevisibility" {
-            parse_handle_visibility(&LineStyleParseOptions::generic(builtin), value)?;
-        }
-    }
-
-    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
-            if update_data {
-                let _ = line.update_numeric_data(next_x.clone(), next_y.clone());
+    update_property_plot(
+        authority,
+        line_handle.figure,
+        line_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
+                if update_data {
+                    let _ = line.update_numeric_data(next_x, next_y);
+                }
+                for (key, value) in &style_pairs {
+                    apply_line_plot_properties(line, key, *value, builtin);
+                }
             }
-            for (key, value) in &style_pairs {
-                apply_line_plot_properties(line, key, value, builtin);
-            }
-        }
-    })
-    .map_err(|err| map_figure_error(builtin, err))?;
+        },
+    )?;
     Ok(())
 }
 
+fn apply_line_style_only(
+    authority: &super::state::PropertyMutationTarget,
+
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
+    let prepared_pairs = ValidatedStylePairs::new(pairs, builtin)?;
+    update_property_plot(
+        authority,
+        line_handle.figure,
+        line_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
+                for (key, value) in prepared_pairs.iter() {
+                    apply_line_plot_properties(line, key, value, builtin);
+                }
+            }
+        },
+    )
+}
+
 fn apply_animated_line_property(
+    authority: &super::state::PropertyMutationTarget,
+
     line_handle: &super::state::AnimatedLineHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    apply_animated_line_properties(line_handle, &[(key.to_string(), value)], builtin)
+    apply_animated_line_properties(authority, line_handle, &[(key.to_string(), value)], builtin)
 }
 
 fn apply_animated_line_properties(
+    authority: &super::state::PropertyMutationTarget,
+
     line_handle: &super::state::AnimatedLineHandleState,
     pairs: &[(String, &Value)],
     builtin: &'static str,
@@ -5535,7 +5693,7 @@ fn apply_animated_line_properties(
     if !plot_pairs.is_empty() {
         let simple = animated_line_simple_state(line_handle);
         if line_handle.is_3d {
-            apply_line3_properties(&simple, &plot_pairs, builtin)?;
+            apply_line3_properties(authority, &simple, &plot_pairs, builtin)?;
         } else {
             if plot_pairs.iter().any(|(key, _)| key == "zdata") {
                 return Err(plotting_error(
@@ -5543,13 +5701,17 @@ fn apply_animated_line_properties(
                     format!("{builtin}: ZData requires a 3-D animated line"),
                 ));
             }
-            apply_line_properties(&simple, &plot_pairs, builtin)?;
+            apply_line_properties(authority, &simple, &plot_pairs, builtin)?;
         }
     }
 
     if let Some(maximum) = maximum {
-        super::state::set_animated_line_maximum_num_points(line_handle, maximum)
-            .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))?;
+        super::state::set_animated_line_maximum_num_points_for_property(
+            authority,
+            line_handle,
+            maximum,
+        )
+        .map_err(|err| map_figure_error(builtin, err))?;
     }
     Ok(())
 }
@@ -5618,114 +5780,141 @@ pub(crate) fn animated_line_maximum_from_value(
 }
 
 fn apply_reference_line_property(
+    authority: &super::state::PropertyMutationTarget,
+
     line_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot {
-            match key {
-                "value" => {
-                    if let Some(v) = value_as_f64(value) {
-                        if v.is_finite() {
-                            line.value = v;
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_plot_element_for_property(
+        authority,
+        line_handle.figure,
+        line_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot {
+                match key {
+                    "value" => {
+                        if let Some(v) = value_as_f64(value) {
+                            if v.is_finite() {
+                                line.value = v;
+                            }
                         }
                     }
-                }
-                "color" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        line.color = c;
-                    }
-                }
-                "linewidth" => {
-                    if let Some(v) = value_as_f64(value) {
-                        if v > 0.0 {
-                            line.line_width = v as f32;
+                    "color" => {
+                        if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            line.color = c;
                         }
                     }
-                }
-                "linestyle" => {
-                    if let Some(s) = value_as_string(value) {
-                        line.line_style = parse_line_style_name_for_props(&s);
+                    "linewidth" => {
+                        if let Some(v) = value_as_f64(value) {
+                            if v > 0.0 {
+                                line.line_width = v as f32;
+                            }
+                        }
                     }
-                }
-                "label" => {
-                    line.label = value_as_string(value).map(|s| s.to_string());
-                }
-                "labelorientation" => {
-                    if let Some(s) = value_as_string(value) {
-                        line.label_orientation = s.to_ascii_lowercase();
+                    "linestyle" => {
+                        if let Some(s) = text_input.text() {
+                            line.line_style = parse_line_style_name_for_props(&s);
+                        }
                     }
-                }
-                "displayname" => {
-                    line.display_name = value_as_string(value).map(|s| s.to_string());
-                }
-                "visible" => {
-                    if let Some(v) = value_as_bool(value) {
-                        line.visible = v;
-                    } else if let Some(s) = value_as_string(value) {
-                        line.visible =
-                            !matches!(s.trim().to_ascii_lowercase().as_str(), "off" | "false");
+                    "label" => {
+                        line.label = text_input.text();
                     }
+                    "labelorientation" => {
+                        if let Some(s) = text_input.text() {
+                            line.label_orientation = s.to_ascii_lowercase();
+                        }
+                    }
+                    "displayname" => {
+                        line.display_name = text_input.text();
+                    }
+                    "visible" => {
+                        if let Some(v) = value_as_bool(value) {
+                            line.visible = v;
+                        } else if let Some(s) = text_input.text() {
+                            line.visible =
+                                !matches!(s.trim().to_ascii_lowercase().as_str(), "off" | "false");
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn apply_stairs_property(
+    authority: &super::state::PropertyMutationTarget,
+
     stairs_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_plot_element(stairs_handle.figure, stairs_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Stairs(stairs) = plot {
-            match key {
-                "color" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        stairs.color = c;
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_plot_element_for_property(
+        authority,
+        stairs_handle.figure,
+        stairs_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Stairs(stairs) = plot {
+                match key {
+                    "color" => {
+                        if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            stairs.color = c;
+                        }
                     }
-                }
-                "linewidth" => {
-                    if let Some(v) = value_as_f64(value) {
-                        stairs.line_width = v as f32;
+                    "linewidth" => {
+                        if let Some(v) = value_as_f64(value) {
+                            stairs.line_width = v as f32;
+                        }
                     }
+                    "displayname" => {
+                        stairs.label = text_input.text();
+                    }
+                    _ => {}
                 }
-                "displayname" => {
-                    stairs.label = value_as_string(value).map(|s| s.to_string());
-                }
-                _ => {}
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn apply_scatter_property(
+    authority: &super::state::PropertyMutationTarget,
+
     scatter_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    apply_scatter_properties(scatter_handle, &[(key.to_string(), value)], builtin)
+    apply_scatter_properties(
+        authority,
+        scatter_handle,
+        &[(key.to_string(), value)],
+        builtin,
+    )
 }
 
 fn apply_scatter_properties(
+    authority: &super::state::PropertyMutationTarget,
+
     scatter_handle: &super::state::SimplePlotHandleState,
     pairs: &[(String, &Value)],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let current = get_simple_plot(scatter_handle, builtin)?;
+    let current = authority
+        .plot_snapshot(scatter_handle.figure, scatter_handle.plot_index)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let runmat_plot::plots::figure::PlotElement::Scatter(current_scatter) = current else {
         return Err(plotting_error(
             builtin,
@@ -5733,48 +5922,66 @@ fn apply_scatter_properties(
         ));
     };
 
+    let prepared = prepare_scatter_data_updates(pairs, builtin)?;
     let (current_x, current_y) = scatter_xy_data_for_properties(&current_scatter, builtin)?;
-    let current_x_render = current_x.materialize_f64();
-    let current_y_render = current_y.materialize_f64();
+    apply_scatter_properties_with_data(
+        authority,
+        scatter_handle,
+        pairs,
+        builtin,
+        &current_scatter,
+        (current_x, current_y),
+        prepared,
+        None,
+    )
+}
 
-    let current_theta = current_scatter
-        .theta_data
-        .clone()
-        .unwrap_or_else(|| cartesian_theta(&current_x_render, &current_y_render));
-    let current_r = current_scatter
-        .r_data
-        .clone()
-        .unwrap_or_else(|| cartesian_radius(&current_x_render, &current_y_render));
-    let mut x_update = None;
-    let mut y_update = None;
-    let mut theta_update = None;
-    let mut r_update = None;
-    let mut style_pairs = Vec::new();
-    for (key, value) in pairs {
-        match key.as_str() {
-            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
-            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
-            "thetadata" => {
-                theta_update =
-                    Some(line_numeric_data(value, "ThetaData", builtin)?.materialize_f64())
-            }
-            "rdata" => {
-                r_update = Some(line_numeric_data(value, "RData", builtin)?.materialize_f64())
-            }
-            _ => style_pairs.push((key.as_str(), *value)),
-        }
-    }
+fn apply_scatter_properties_with_data(
+    authority: &super::state::PropertyMutationTarget,
 
-    let next_theta = theta_update.unwrap_or_else(|| current_theta.clone());
-    let next_r = r_update.unwrap_or_else(|| current_r.clone());
-    let polar_update =
-        (next_theta != current_theta || next_r != current_r).then_some((next_theta, next_r));
+    scatter_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    current_scatter: &runmat_plot::plots::ScatterPlot,
+    (current_x, current_y): PlotXY,
+    prepared: ScatterDataUpdates,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
+    let style_pairs: Vec<_> = prepared
+        .style_indices
+        .iter()
+        .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+
+    let polar_update = if prepared.theta.is_some() || prepared.r.is_some() {
+        let current_x_render = current_x.materialize_f64();
+        let current_y_render = current_y.materialize_f64();
+        let current_theta = current_scatter
+            .theta_data
+            .clone()
+            .unwrap_or_else(|| cartesian_theta(&current_x_render, &current_y_render));
+        let current_r = current_scatter
+            .r_data
+            .clone()
+            .unwrap_or_else(|| cartesian_radius(&current_x_render, &current_y_render));
+        let next_theta = prepared.theta.unwrap_or_else(|| current_theta.clone());
+        let next_r = prepared.r.unwrap_or_else(|| current_r.clone());
+        (next_theta != current_theta || next_r != current_r).then_some((next_theta, next_r))
+    } else {
+        None
+    };
     if let Some((theta, r)) = polar_update.as_ref() {
         validate_polar_scatter_data(theta, r, builtin)?;
     }
-    let next_x = x_update.unwrap_or_else(|| current_x.clone());
-    let next_y = y_update.unwrap_or_else(|| current_y.clone());
-    let cartesian_update = (next_x != current_x || next_y != current_y).then_some((next_x, next_y));
+    let cartesian_changed = prepared.x.as_ref().is_some_and(|x| *x != current_x)
+        || prepared.y.as_ref().is_some_and(|y| *y != current_y);
+    let cartesian_update = cartesian_changed.then(|| {
+        (
+            prepared.x.unwrap_or(current_x),
+            prepared.y.unwrap_or(current_y),
+        )
+    });
     if let Some((x, y)) = cartesian_update.as_ref() {
         if x.len() != y.len() || x.is_empty() {
             return Err(plotting_error(
@@ -5792,56 +5999,91 @@ fn apply_scatter_properties(
         ));
     }
 
-    super::state::update_plot_element(scatter_handle.figure, scatter_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
-            if let Some((x, y)) = cartesian_update.as_ref() {
-                let _ = scatter.update_numeric_data(x.clone(), y.clone());
+    update_property_plot(
+        authority,
+        scatter_handle.figure,
+        scatter_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
+                if let Some((x, y)) = cartesian_update {
+                    let _ = scatter.update_numeric_data(x, y);
+                }
+                if let Some((theta, r)) = polar_update {
+                    replace_polar_scatter_data_unchecked(scatter, theta, r);
+                }
+                apply_scatter_style_pairs(scatter, &style_pairs, builtin);
             }
-            if let Some((theta, r)) = polar_update.as_ref() {
-                replace_polar_scatter_data_unchecked(scatter, theta.clone(), r.clone());
-            }
-            for (key, value) in &style_pairs {
-                match *key {
-                    "marker" => {
-                        if let Some(s) = value_as_string(value) {
-                            scatter.marker_style =
-                                scatter_marker_from_name(&s, scatter.marker_style);
-                        }
-                    }
-                    "sizedata" => {
-                        if let Some(v) = value_as_f64(value) {
-                            scatter.marker_size = marker_area_points2_to_diameter_px(v);
-                        }
-                    }
-                    "markerfacecolor" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            scatter.set_face_color(c);
-                        }
-                    }
-                    "markeredgecolor" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            scatter.set_edge_color(c);
-                        }
-                    }
-                    "linewidth" => {
-                        if let Some(v) = value_as_f64(value) {
-                            scatter.set_edge_thickness(v as f32);
-                        }
-                    }
-                    "displayname" => {
-                        scatter.label = value_as_string(value).map(|s| s.to_string());
-                    }
-                    _ => {}
+        },
+    )?;
+    Ok(())
+}
+
+fn apply_scatter_style_pairs(
+    scatter: &mut runmat_plot::plots::ScatterPlot,
+    pairs: &[(&str, ValidatedStyleValue<'_>)],
+    builtin: &'static str,
+) {
+    for (key, text_input) in pairs {
+        let value = text_input.value();
+        match *key {
+            "marker" => {
+                if let Some(s) = text_input.text() {
+                    scatter.marker_style = scatter_marker_from_name(&s, scatter.marker_style);
                 }
             }
+            "sizedata" => {
+                if let Some(v) = value_as_f64(value) {
+                    scatter.marker_size = marker_area_points2_to_diameter_px(v);
+                }
+            }
+            "markerfacecolor" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    scatter.set_face_color(c);
+                }
+            }
+            "markeredgecolor" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    scatter.set_edge_color(c);
+                }
+            }
+            "linewidth" => {
+                if let Some(v) = value_as_f64(value) {
+                    scatter.set_edge_thickness(v as f32);
+                }
+            }
+            "displayname" => scatter.label = text_input.text(),
+            _ => {}
         }
-    })
-    .map_err(|err| map_figure_error(builtin, err))?;
-    Ok(())
+    }
+}
+
+fn apply_scatter_style_only(
+    authority: &super::state::PropertyMutationTarget,
+
+    scatter_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
+    let style_pairs: Vec<_> = pairs
+        .iter()
+        .map(|(name, value)| (name.as_str(), *value))
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    update_property_plot(
+        authority,
+        scatter_handle.figure,
+        scatter_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
+                apply_scatter_style_pairs(scatter, &style_pairs, builtin);
+            }
+        },
+    )
 }
 
 fn validate_polar_scatter_data(
@@ -5930,33 +6172,41 @@ fn cartesian_radius(x: &[f64], y: &[f64]) -> Vec<f64> {
 }
 
 fn apply_bar_property(
+    authority: &super::state::PropertyMutationTarget,
+
     bar_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_plot_element(bar_handle.figure, bar_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
-            match key {
-                "facecolor" | "color" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        bar.color = c;
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_plot_element_for_property(
+        authority,
+        bar_handle.figure,
+        bar_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                match key {
+                    "facecolor" | "color" => {
+                        if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            bar.color = c;
+                        }
                     }
-                }
-                "barwidth" => {
-                    if let Some(v) = value_as_f64(value) {
-                        bar.bar_width = v as f32;
+                    "barwidth" => {
+                        if let Some(v) = value_as_f64(value) {
+                            bar.bar_width = v as f32;
+                        }
                     }
+                    "displayname" => {
+                        bar.label = text_input.text();
+                    }
+                    _ => {}
                 }
-                "displayname" => {
-                    bar.label = value_as_string(value).map(|s| s.to_string());
-                }
-                _ => {}
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
@@ -5973,50 +6223,83 @@ enum SurfacePropertyUpdate {
     Lighting(bool),
     FaceColor(glam::Vec4),
     FaceNone,
+    ColorDataMapping(runmat_plot::plots::surface::SurfaceColorMapping),
 }
 
 fn apply_surface_property(
+    authority: &super::state::PropertyMutationTarget,
+
     surface_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if key == "colordata" {
+        let data = line_numeric_data(value, "CData", builtin)?;
+        return super::state::try_update_plot_element_for_property(
+            authority,
+            surface_handle.figure,
+            surface_handle.plot_index,
+            |plot| match plot {
+                runmat_plot::plots::figure::PlotElement::Surface(surface) => {
+                    surface.set_color_source(data)
+                }
+                _ => Err("invalid surface handle".into()),
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error))?
+        .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")));
+    }
     if matches!(key, "xdata" | "ydata" | "zdata") {
-        return apply_surface_data_property(surface_handle, key, value, builtin);
+        return apply_surface_data_property(authority, surface_handle, key, value, builtin);
     }
 
     let update = surface_property_update(key, value, builtin)?;
-    super::state::update_plot_element(surface_handle.figure, surface_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
-            match &update {
-                SurfacePropertyUpdate::FaceAlpha(alpha) => surface.alpha = *alpha,
-                SurfacePropertyUpdate::DisplayName(label) => surface.label = label.clone(),
-                SurfacePropertyUpdate::Visible(visible) => surface.visible = *visible,
-                SurfacePropertyUpdate::Colormap(colormap) => surface.colormap = colormap.clone(),
-                SurfacePropertyUpdate::Shading(shading) => surface.shading_mode = *shading,
-                SurfacePropertyUpdate::Wireframe(wireframe) => surface.wireframe = *wireframe,
-                SurfacePropertyUpdate::FlattenZ(flatten_z) => surface.flatten_z = *flatten_z,
-                SurfacePropertyUpdate::Lighting(enabled) => surface.lighting_enabled = *enabled,
-                SurfacePropertyUpdate::FaceColor(color) => {
-                    surface.colormap = ColorMap::Custom(*color, *color);
-                    surface.shading_mode = ShadingMode::None;
-                    surface.lighting_enabled = false;
+    super::state::update_plot_element_for_property(
+        authority,
+        surface_handle.figure,
+        surface_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
+                match &update {
+                    SurfacePropertyUpdate::FaceAlpha(alpha) => surface.alpha = *alpha,
+                    SurfacePropertyUpdate::DisplayName(label) => surface.label = label.clone(),
+                    SurfacePropertyUpdate::Visible(visible) => surface.visible = *visible,
+                    SurfacePropertyUpdate::Colormap(colormap) => {
+                        surface.colormap = colormap.clone()
+                    }
+                    SurfacePropertyUpdate::Shading(shading) => surface.shading_mode = *shading,
+                    SurfacePropertyUpdate::Wireframe(wireframe) => surface.wireframe = *wireframe,
+                    SurfacePropertyUpdate::FlattenZ(flatten_z) => surface.flatten_z = *flatten_z,
+                    SurfacePropertyUpdate::Lighting(enabled) => surface.lighting_enabled = *enabled,
+                    SurfacePropertyUpdate::FaceColor(color) => {
+                        surface.colormap = ColorMap::Custom(*color, *color);
+                        surface.shading_mode = ShadingMode::None;
+                        surface.lighting_enabled = false;
+                    }
+                    SurfacePropertyUpdate::FaceNone => surface.alpha = 0.0,
+                    SurfacePropertyUpdate::ColorDataMapping(mapping) => {
+                        surface.set_color_mapping(*mapping);
+                    }
                 }
-                SurfacePropertyUpdate::FaceNone => surface.alpha = 0.0,
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn apply_surface_data_property(
+    authority: &super::state::PropertyMutationTarget,
+
     surface_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let current = get_simple_plot(surface_handle, builtin)?;
+    let current = authority
+        .plot_snapshot(surface_handle.figure, surface_handle.plot_index)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let runmat_plot::plots::figure::PlotElement::Surface(current_surface) = current else {
         return Err(plotting_error(
             builtin,
@@ -6121,31 +6404,39 @@ fn apply_surface_data_property(
         }
     };
 
-    super::state::update_plot_element(surface_handle.figure, surface_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
-            match &next {
-                SurfaceDataUpdate::AxisData {
-                    x_data,
-                    y_data,
-                    z_grid,
-                } => {
-                    let _ =
-                        surface.update_axis_data(x_data.clone(), y_data.clone(), z_grid.clone());
-                }
-                SurfaceDataUpdate::CoordinateGrids {
-                    x_grid,
-                    y_grid,
-                    z_grid,
-                } => {
-                    let _ = surface.update_coordinate_grids(
-                        x_grid.clone(),
-                        y_grid.clone(),
-                        z_grid.clone(),
-                    );
+    super::state::update_plot_element_for_property(
+        authority,
+        surface_handle.figure,
+        surface_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
+                match &next {
+                    SurfaceDataUpdate::AxisData {
+                        x_data,
+                        y_data,
+                        z_grid,
+                    } => {
+                        let _ = surface.update_axis_data(
+                            x_data.clone(),
+                            y_data.clone(),
+                            z_grid.clone(),
+                        );
+                    }
+                    SurfaceDataUpdate::CoordinateGrids {
+                        x_grid,
+                        y_grid,
+                        z_grid,
+                    } => {
+                        let _ = surface.update_coordinate_grids(
+                            x_grid.clone(),
+                            y_grid.clone(),
+                            z_grid.clone(),
+                        );
+                    }
                 }
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
@@ -6174,6 +6465,9 @@ fn surface_property_update(
     builtin: &'static str,
 ) -> BuiltinResult<SurfacePropertyUpdate> {
     match key {
+        "cdatamapping" => Ok(SurfacePropertyUpdate::ColorDataMapping(
+            parse_color_data_mapping(value, builtin)?,
+        )),
         "facealpha" | "alpha" => {
             let alpha = value_as_f64(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
@@ -6183,7 +6477,15 @@ fn surface_property_update(
             ))
         }
         "displayname" | "label" => Ok(SurfacePropertyUpdate::DisplayName(
-            value_as_string(value).map(|s| s.to_string()),
+            value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .map(|s| s.to_string()),
         )),
         "visible" => {
             let visible = value_as_bool(value).ok_or_else(|| {
@@ -6192,7 +6494,13 @@ fn surface_property_update(
             Ok(SurfacePropertyUpdate::Visible(visible))
         }
         "colormap" => {
-            if let Some(name) = value_as_string(value) {
+            if let Some(name) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 return Ok(SurfacePropertyUpdate::Colormap(parse_colormap_name(
                     &name, builtin,
                 )?));
@@ -6206,12 +6514,20 @@ fn surface_property_update(
             value, builtin,
         )?)),
         "edgecolor" => {
-            let text = value_as_string(value).ok_or_else(|| {
-                plotting_error(
-                    builtin,
-                    format!("{builtin}: EdgeColor must be 'auto', 'flat', 'interp', or 'none'"),
-                )
-            })?;
+            let text = value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: EdgeColor must be 'auto', 'flat', 'interp', or 'none'"),
+                    )
+                })?;
             match text.trim().to_ascii_lowercase().as_str() {
                 "none" => Ok(SurfacePropertyUpdate::Wireframe(false)),
                 "auto" | "flat" | "interp" => Ok(SurfacePropertyUpdate::Wireframe(true)),
@@ -6239,6 +6555,8 @@ fn surface_property_update(
 }
 
 fn apply_function_surface_property(
+    authority: &super::state::PropertyMutationTarget,
+
     function_surface: &super::state::FunctionSurfaceHandleState,
     key: &str,
     value: &Value,
@@ -6251,7 +6569,7 @@ fn apply_function_surface_property(
                 axes_index: function_surface.axes_index,
                 plot_index: function_surface.plot_index,
             };
-            apply_surface_property(&surface_handle, key, value, builtin)
+            apply_surface_property(authority, &surface_handle, key, value, builtin)
         }
         "meshdensity" | "xrange" | "yrange" | "function" | "xfunction" | "yfunction"
         | "zfunction" => Err(plotting_error(
@@ -6263,6 +6581,8 @@ fn apply_function_surface_property(
 }
 
 fn apply_function_contour_property(
+    authority: &super::state::PropertyMutationTarget,
+
     function_contour: &super::state::FunctionContourHandleState,
     key: &str,
     value: &Value,
@@ -6275,7 +6595,7 @@ fn apply_function_contour_property(
                 axes_index: function_contour.axes_index,
                 plot_index: function_contour.plot_index,
             };
-            apply_contour_property(&contour_handle, key, value, builtin)
+            apply_contour_property(authority, &contour_handle, key, value, builtin)
         }
         "meshdensity" | "xrange" | "yrange" | "function" | "fill" => Err(plotting_error(
             builtin,
@@ -6286,11 +6606,14 @@ fn apply_function_contour_property(
 }
 
 fn apply_binscatter_property(
+    authority: &super::state::PropertyMutationTarget,
+
     binscatter: &super::state::BinscatterHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     let mut next = binscatter.clone();
     match key {
         "numbins" => {
@@ -6320,14 +6643,14 @@ fn apply_binscatter_property(
             next.face_alpha = alpha;
         }
         "displayname" => {
-            next.display_name = value_as_string(value).map(|s| s.to_string());
+            next.display_name = text_input.text();
         }
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported binscatter property `{other}`"),
         ))?,
     }
-    recompute_binscatter_chart(next, builtin)
+    recompute_binscatter_chart(authority, next, builtin)
 }
 
 fn binscatter_numeric_data(
@@ -6337,7 +6660,7 @@ fn binscatter_numeric_data(
 ) -> BuiltinResult<Tensor> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    if tensor.shape.iter().filter(|&&dim| dim > 1).count() > 1 {
+    if tensor.shape().iter().filter(|&&dim| dim > 1).count() > 1 {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must be a real numeric vector"),
@@ -6347,6 +6670,8 @@ fn binscatter_numeric_data(
 }
 
 fn recompute_binscatter_chart(
+    authority: &super::state::PropertyMutationTarget,
+
     mut next: super::state::BinscatterHandleState,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
@@ -6362,7 +6687,7 @@ fn recompute_binscatter_chart(
             binscatter::auto_bin_count(&next.y_data, next.y_limits_option.as_ref(), 100)?,
         ];
     }
-    let color_limits = current_binscatter_color_limits(&next, builtin)?;
+    let color_limits = current_binscatter_color_limits(authority, &next, builtin)?;
     let chart = binscatter::build_binscatter_chart(
         &next.x_data,
         &next.y_data,
@@ -6383,36 +6708,49 @@ fn recompute_binscatter_chart(
         *chart.y_bin_edges.last().unwrap_or(&1.0),
     );
     let surface = chart.surface.clone();
-    super::state::update_image_plot(next.figure, next.plot_index, |existing| {
-        *existing = surface;
-    })
+    super::state::update_image_plot_for_property(
+        authority,
+        next.figure,
+        next.plot_index,
+        |existing| {
+            *existing = surface;
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
-    super::state::update_binscatter_handle_for_plot(next.figure, next.plot_index, |state| {
-        state.values = chart.values;
-        state.x_bin_edges = chart.x_bin_edges;
-        state.y_bin_edges = chart.y_bin_edges;
-        state.x_data = next.x_data;
-        state.y_data = next.y_data;
-        state.num_bins = next.num_bins;
-        state.auto_bins = next.auto_bins;
-        state.x_limits_option = next.x_limits_option;
-        state.y_limits_option = next.y_limits_option;
-        state.x_limits = x_limits;
-        state.y_limits = y_limits;
-        state.show_empty_bins = next.show_empty_bins;
-        state.face_alpha = next.face_alpha;
-        state.display_name = next.display_name;
-    })
+    super::state::update_binscatter_handle_for_plot_for_property(
+        authority,
+        next.figure,
+        next.plot_index,
+        |state| {
+            state.values = chart.values;
+            state.x_bin_edges = chart.x_bin_edges;
+            state.y_bin_edges = chart.y_bin_edges;
+            state.x_data = next.x_data;
+            state.y_data = next.y_data;
+            state.num_bins = next.num_bins;
+            state.auto_bins = next.auto_bins;
+            state.x_limits_option = next.x_limits_option;
+            state.y_limits_option = next.y_limits_option;
+            state.x_limits = x_limits;
+            state.y_limits = y_limits;
+            state.show_empty_bins = next.show_empty_bins;
+            state.face_alpha = next.face_alpha;
+            state.display_name = next.display_name;
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn current_binscatter_color_limits(
+    authority: &super::state::PropertyMutationTarget,
+
     binscatter: &super::state::BinscatterHandleState,
     builtin: &'static str,
 ) -> BuiltinResult<Option<(f64, f64)>> {
-    let figure = super::state::clone_figure(binscatter.figure)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid binscatter figure")))?;
+    let figure = authority
+        .figure_snapshot(binscatter.figure)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let plot = figure
         .plots()
         .nth(binscatter.plot_index)
@@ -6427,11 +6765,69 @@ fn current_binscatter_color_limits(
 }
 
 fn apply_patch_property(
+    authority: &super::state::PropertyMutationTarget,
+
     patch_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    if key == "cdatamapping" {
+        let mapping = parse_color_data_mapping(value, builtin)?;
+        return super::state::update_plot_element_for_property(
+            authority,
+            patch_handle.figure,
+            patch_handle.plot_index,
+            |plot| {
+                if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
+                    patch.set_color_mapping(mapping);
+                }
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error));
+    }
+    if matches!(key, "colordata" | "facevertexcdata") {
+        let data = line_numeric_data(value, "CData", builtin)?;
+        return super::state::try_update_plot_element_for_property(
+            authority,
+            patch_handle.figure,
+            patch_handle.plot_index,
+            |plot| match plot {
+                runmat_plot::plots::figure::PlotElement::Patch(patch) => {
+                    let (x, y, _, _, _, _) = patch.source_data();
+                    let kind =
+                        if key == "colordata" && x.is_some() && y.is_some() && data.len() != 1 {
+                            runmat_plot::plots::PatchColorSourceKind::CoordinateGrid
+                        } else {
+                            runmat_plot::plots::PatchColorSourceKind::FaceVertex
+                        };
+                    patch.set_color_data_kind(data, kind)
+                }
+                _ => Err("invalid patch handle".into()),
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error))?
+        .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")));
+    }
+    if key == "facecolor"
+        && text_input
+            .text()
+            .is_some_and(|text| text.trim().eq_ignore_ascii_case("interp"))
+    {
+        return super::state::try_update_plot_element_for_property(
+            authority,
+            patch_handle.figure,
+            patch_handle.plot_index,
+            |plot| match plot {
+                runmat_plot::plots::figure::PlotElement::Patch(patch) => patch
+                    .set_face_color_mode_checked(runmat_plot::plots::PatchFaceColorMode::Interp),
+                _ => Err("invalid patch handle".into()),
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error))?
+        .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")));
+    }
     if !matches!(
         key,
         "facecolor"
@@ -6476,39 +6872,56 @@ fn apply_patch_property(
         }
         _ => {}
     }
-    super::state::update_plot_element(patch_handle.figure, patch_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
-            match key {
-                "facecolor" | "color" => {
-                    if let Some(text) = value_as_string(value) {
-                        match text.trim().to_ascii_lowercase().as_str() {
-                            "none" => patch
-                                .set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::None),
-                            "flat" => patch
-                                .set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::Flat),
-                            _ => {
-                                if let Ok(c) = parse_color_value(
-                                    &LineStyleParseOptions::generic(builtin),
-                                    value,
-                                ) {
-                                    patch.set_face_color(c);
-                                    patch.set_face_color_mode(
-                                        runmat_plot::plots::PatchFaceColorMode::Color,
-                                    );
+    super::state::update_plot_element_for_property(
+        authority,
+        patch_handle.figure,
+        patch_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
+                match key {
+                    "facecolor" | "color" => {
+                        if let Some(text) = text_input.text() {
+                            match text.trim().to_ascii_lowercase().as_str() {
+                                "none" => patch.set_face_color_mode(
+                                    runmat_plot::plots::PatchFaceColorMode::None,
+                                ),
+                                "flat" => patch.set_face_color_mode(
+                                    runmat_plot::plots::PatchFaceColorMode::Flat,
+                                ),
+                                _ => {
+                                    if let Ok(c) = parse_color_value(
+                                        &LineStyleParseOptions::generic(builtin),
+                                        value,
+                                    ) {
+                                        patch.set_face_color(c);
+                                        patch.set_face_color_mode(
+                                            runmat_plot::plots::PatchFaceColorMode::Color,
+                                        );
+                                    }
                                 }
                             }
+                        } else if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            patch.set_face_color(c);
+                            patch
+                                .set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::Color);
                         }
-                    } else if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        patch.set_face_color(c);
-                        patch.set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::Color);
                     }
-                }
-                "edgecolor" => {
-                    if let Some(text) = value_as_string(value) {
-                        if text.trim().eq_ignore_ascii_case("none") {
-                            patch.set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::None);
+                    "edgecolor" => {
+                        if let Some(text) = text_input.text() {
+                            if text.trim().eq_ignore_ascii_case("none") {
+                                patch.set_edge_color_mode(
+                                    runmat_plot::plots::PatchEdgeColorMode::None,
+                                );
+                            } else if let Ok(c) =
+                                parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                            {
+                                patch.set_edge_color(c);
+                                patch.set_edge_color_mode(
+                                    runmat_plot::plots::PatchEdgeColorMode::Color,
+                                );
+                            }
                         } else if let Ok(c) =
                             parse_color_value(&LineStyleParseOptions::generic(builtin), value)
                         {
@@ -6516,46 +6929,43 @@ fn apply_patch_property(
                             patch
                                 .set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::Color);
                         }
-                    } else if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        patch.set_edge_color(c);
-                        patch.set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::Color);
                     }
-                }
-                "facealpha" => {
-                    if let Some(v) = value_as_f64(value) {
-                        patch.set_face_alpha(v as f32);
+                    "facealpha" => {
+                        if let Some(v) = value_as_f64(value) {
+                            patch.set_face_alpha(v as f32);
+                        }
                     }
-                }
-                "edgealpha" => {
-                    if let Some(v) = value_as_f64(value) {
-                        patch.set_edge_alpha(v as f32);
+                    "edgealpha" => {
+                        if let Some(v) = value_as_f64(value) {
+                            patch.set_edge_alpha(v as f32);
+                        }
                     }
-                }
-                "linewidth" => {
-                    if let Some(v) = value_as_f64(value) {
-                        patch.set_line_width(v as f32);
+                    "linewidth" => {
+                        if let Some(v) = value_as_f64(value) {
+                            patch.set_line_width(v as f32);
+                        }
                     }
-                }
-                "displayname" => {
-                    patch.set_label(value_as_string(value).map(|s| s.to_string()));
-                }
-                "visible" => {
-                    if let Some(v) = value_as_bool(value) {
-                        patch.set_visible(v);
+                    "displayname" => {
+                        patch.set_label(text_input.text());
                     }
+                    "visible" => {
+                        if let Some(v) = value_as_bool(value) {
+                            patch.set_visible(v);
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn validate_patch_visible(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         if matches!(text.trim().to_ascii_lowercase().as_str(), "on" | "off") {
             return Ok(());
         }
@@ -6580,20 +6990,26 @@ fn patch_scalar_f64(value: &Value) -> Option<f64> {
 }
 
 fn apply_line3_property(
+    authority: &super::state::PropertyMutationTarget,
+
     line_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    apply_line3_properties(line_handle, &[(key.to_string(), value)], builtin)
+    apply_line3_properties(authority, line_handle, &[(key.to_string(), value)], builtin)
 }
 
 fn apply_line3_properties(
+    authority: &super::state::PropertyMutationTarget,
+
     line_handle: &super::state::SimplePlotHandleState,
     pairs: &[(String, &Value)],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let current = get_simple_plot(line_handle, builtin)?;
+    let current = authority
+        .plot_snapshot(line_handle.figure, line_handle.plot_index)
+        .map_err(|err| map_figure_error(builtin, err))?;
     let runmat_plot::plots::figure::PlotElement::Line3(current_line) = current else {
         return Err(plotting_error(
             builtin,
@@ -6601,24 +7017,42 @@ fn apply_line3_properties(
         ));
     };
 
+    let prepared = prepare_line3_data_updates(pairs, builtin)?;
     let (current_x, current_y, current_z) = line_xyz_data_for_properties(&current_line, builtin)?;
-    let mut x_update = None;
-    let mut y_update = None;
-    let mut z_update = None;
-    let mut style_pairs = Vec::new();
-    for (key, value) in pairs {
-        match key.as_str() {
-            "xdata" => x_update = Some(line_numeric_data(value, "XData", builtin)?),
-            "ydata" => y_update = Some(line_numeric_data(value, "YData", builtin)?),
-            "zdata" => z_update = Some(line_numeric_data(value, "ZData", builtin)?),
-            _ => style_pairs.push((key.as_str(), *value)),
-        }
-    }
+    apply_line3_properties_with_data(
+        authority,
+        line_handle,
+        pairs,
+        builtin,
+        (current_x, current_y, current_z),
+        prepared,
+        None,
+    )
+}
 
-    let next_x = x_update.unwrap_or_else(|| current_x.clone());
-    let next_y = y_update.unwrap_or_else(|| current_y.clone());
-    let next_z = z_update.unwrap_or_else(|| current_z.clone());
-    let update_data = next_x != current_x || next_y != current_y || next_z != current_z;
+fn apply_line3_properties_with_data(
+    authority: &super::state::PropertyMutationTarget,
+
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    (current_x, current_y, current_z): PlotXYZ,
+    prepared: Line3DataUpdates,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
+    let style_pairs: Vec<_> = prepared
+        .style_indices
+        .iter()
+        .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+
+    let update_data = prepared.x.as_ref().is_some_and(|x| *x != current_x)
+        || prepared.y.as_ref().is_some_and(|y| *y != current_y)
+        || prepared.z.as_ref().is_some_and(|z| *z != current_z);
+    let next_x = prepared.x.unwrap_or(current_x);
+    let next_y = prepared.y.unwrap_or(current_y);
+    let next_z = prepared.z.unwrap_or(current_z);
     if update_data
         && (next_x.is_empty() || next_x.len() != next_y.len() || next_x.len() != next_z.len())
     {
@@ -6628,153 +7062,181 @@ fn apply_line3_properties(
         ));
     }
 
-    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
-            if update_data {
-                let _ = line.update_numeric_data(next_x.clone(), next_y.clone(), next_z.clone());
-            }
-            for (key, value) in &style_pairs {
-                match *key {
-                    "color" => {
-                        if let Ok(c) =
-                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                        {
-                            line.color = c;
-                        }
-                    }
-                    "linewidth" => {
-                        if let Some(v) = value_as_f64(value) {
-                            line.line_width = v as f32;
-                        }
-                    }
-                    "linestyle" => {
-                        if let Some(s) = value_as_string(value) {
-                            line.line_style = parse_line_style_name_for_props(&s);
-                        }
-                    }
-                    "displayname" => {
-                        line.label = value_as_string(value).map(|s| s.to_string());
-                    }
-                    "visible" => {
-                        if let Some(v) = value_as_bool(value) {
-                            line.set_visible(v);
-                        } else if let Some(s) = value_as_string(value) {
-                            line.set_visible(!matches!(
-                                s.trim().to_ascii_lowercase().as_str(),
-                                "off" | "false"
-                            ));
-                        }
-                    }
-                    _ => {}
+    update_property_plot(
+        authority,
+        line_handle.figure,
+        line_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
+                if update_data {
+                    let _ = line.update_numeric_data(next_x, next_y, next_z);
                 }
+                apply_line3_style_pairs(line, &style_pairs, builtin);
             }
-        }
-    })
-    .map_err(|err| map_figure_error(builtin, err))?;
+        },
+    )?;
     Ok(())
 }
 
+fn apply_line3_style_pairs(
+    line: &mut runmat_plot::plots::Line3Plot,
+    pairs: &[(&str, ValidatedStyleValue<'_>)],
+    builtin: &'static str,
+) {
+    for (key, text_input) in pairs {
+        let value = text_input.value();
+        match *key {
+            "color" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    line.color = c;
+                }
+            }
+            "linewidth" => {
+                if let Some(v) = value_as_f64(value) {
+                    line.line_width = v as f32;
+                }
+            }
+            "linestyle" => {
+                if let Some(s) = text_input.text() {
+                    line.line_style = parse_line_style_name_for_props(&s);
+                }
+            }
+            "displayname" => line.label = text_input.text(),
+            "visible" => {
+                if let Some(v) = value_as_bool(value) {
+                    line.set_visible(v);
+                } else if let Some(s) = text_input.text() {
+                    line.set_visible(!matches!(
+                        s.trim().to_ascii_lowercase().as_str(),
+                        "off" | "false"
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn apply_line3_style_only(
+    authority: &super::state::PropertyMutationTarget,
+
+    line_handle: &super::state::SimplePlotHandleState,
+    pairs: &[(String, &Value)],
+    builtin: &'static str,
+    guard: Option<PlotUpdateGuard>,
+) -> BuiltinResult<()> {
+    let style_pairs: Vec<_> = pairs
+        .iter()
+        .map(|(name, value)| (name.as_str(), *value))
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    update_property_plot(
+        authority,
+        line_handle.figure,
+        line_handle.plot_index,
+        guard,
+        builtin,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
+                apply_line3_style_pairs(line, &style_pairs, builtin);
+            }
+        },
+    )
+}
+
 fn apply_scatter3_property(
+    authority: &super::state::PropertyMutationTarget,
+
     scatter_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_plot_element(scatter_handle.figure, scatter_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Scatter3(scatter) = plot {
-            match key {
-                "sizedata" => {
-                    if let Some(v) = value_as_f64(value) {
-                        scatter.point_size = marker_area_points2_to_diameter_px(v);
-                    }
-                }
-                "marker" => {
-                    if let Some(s) = value_as_string(value) {
-                        scatter.marker_style = scatter_marker_from_name(&s, scatter.marker_style);
-                    }
-                }
-                "markerfacecolor" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        let count = scatter.points.len().max(1);
-                        scatter.colors = vec![c; count];
-                    }
-                }
-                "markeredgecolor" => {
-                    if let Ok(c) =
-                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
-                    {
-                        scatter.edge_color = c;
-                    }
-                }
-                "linewidth" => {
-                    if let Some(v) = value_as_f64(value) {
-                        scatter.edge_thickness = v as f32;
-                    }
-                }
-                "displayname" => {
-                    scatter.label = value_as_string(value).map(|s| s.to_string());
-                }
-                _ => {}
-            }
-        }
-    })
-    .map_err(|err| map_figure_error(builtin, err))?;
-    Ok(())
+    scatter3_data::apply(
+        authority,
+        scatter_handle,
+        &[(key.to_owned(), value)],
+        builtin,
+    )
 }
 
 fn apply_pie_property(
+    authority: &super::state::PropertyMutationTarget,
+
     pie_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_plot_element(pie_handle.figure, pie_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot {
-            if key == "displayname" {
-                pie.label = value_as_string(value).map(|s| s.to_string());
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_plot_element_for_property(
+        authority,
+        pie_handle.figure,
+        pie_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot {
+                if key == "displayname" {
+                    pie.label = text_input.text();
+                }
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn apply_contour_property(
+    authority: &super::state::PropertyMutationTarget,
+
     contour_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_plot_element(contour_handle.figure, contour_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot {
-            if key == "displayname" {
-                contour.label = value_as_string(value).map(|s| s.to_string());
-            } else if key == "linewidth" {
-                if let Some(width) = value_as_f64(value) {
-                    contour.line_width = (width as f32).max(0.5);
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_plot_element_for_property(
+        authority,
+        contour_handle.figure,
+        contour_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot {
+                if key == "displayname" {
+                    contour.label = text_input.text();
+                } else if key == "linewidth" {
+                    if let Some(width) = value_as_f64(value) {
+                        contour.line_width = (width as f32).max(0.5);
+                    }
                 }
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
 fn apply_contour_fill_property(
+    authority: &super::state::PropertyMutationTarget,
+
     fill_handle: &super::state::SimplePlotHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    super::state::update_plot_element(fill_handle.figure, fill_handle.plot_index, |plot| {
-        if let runmat_plot::plots::figure::PlotElement::ContourFill(fill) = plot {
-            if key == "displayname" {
-                fill.label = value_as_string(value).map(|s| s.to_string());
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    super::state::update_plot_element_for_property(
+        authority,
+        fill_handle.figure,
+        fill_handle.plot_index,
+        |plot| {
+            if let runmat_plot::plots::figure::PlotElement::ContourFill(fill) = plot {
+                if key == "displayname" {
+                    fill.label = text_input.text();
+                }
             }
-        }
-    })
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
@@ -6782,9 +7244,10 @@ fn apply_contour_fill_property(
 fn apply_line_plot_properties(
     line: &mut runmat_plot::plots::LinePlot,
     key: &str,
-    value: &Value,
+    text_input: ValidatedStyleValue<'_>,
     builtin: &'static str,
 ) {
+    let value = text_input.value();
     match key {
         "color" => {
             if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
@@ -6797,12 +7260,12 @@ fn apply_line_plot_properties(
             }
         }
         "linestyle" => {
-            if let Some(s) = value_as_string(value) {
+            if let Some(s) = text_input.text() {
                 line.line_style = parse_line_style_name_for_props(&s);
             }
         }
         "displayname" => {
-            line.label = value_as_string(value).map(|s| s.to_string());
+            line.label = text_input.text();
         }
         "handlevisibility" => {
             if let Ok(visibility) =
@@ -6812,7 +7275,7 @@ fn apply_line_plot_properties(
             }
         }
         "marker" => {
-            if let Some(s) = value_as_string(value) {
+            if let Some(s) = text_input.text() {
                 line.marker = marker_from_name(&s, line.marker.clone());
             }
         }
@@ -6847,7 +7310,7 @@ fn apply_line_plot_properties(
         "visible" => {
             if let Some(v) = value_as_bool(value) {
                 line.set_visible(v);
-            } else if let Some(s) = value_as_string(value) {
+            } else if let Some(s) = text_input.text() {
                 line.set_visible(!matches!(
                     s.trim().to_ascii_lowercase().as_str(),
                     "off" | "false"
@@ -6865,7 +7328,7 @@ fn line_numeric_data(
 ) -> BuiltinResult<NumericPlotData> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| plotting_error(builtin, format!("{builtin}: {name}: {err}")))?;
@@ -6880,14 +7343,10 @@ fn line_xy_data_for_properties(
     if let (Some(x), Some(y)) = line.source_data() {
         return Ok((x.clone(), y.clone()));
     }
-    futures::executor::block_on(line.export_numeric_xy_data())
-        .map_err(|err| {
-            plotting_error(
-                builtin,
-                format!("{builtin}: unable to read line source data: {err}"),
-            )
-        })?
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: line has no source data")))
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: line source data requires async property access"),
+    ))
 }
 
 fn line_xyz_data_for_properties(
@@ -6897,14 +7356,10 @@ fn line_xyz_data_for_properties(
     if let (Some(x), Some(y), Some(z)) = line.source_data() {
         return Ok((x.clone(), y.clone(), z.clone()));
     }
-    futures::executor::block_on(line.export_numeric_xyz_data())
-        .map_err(|err| {
-            plotting_error(
-                builtin,
-                format!("{builtin}: unable to read plot3 source data: {err}"),
-            )
-        })?
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: plot3 has no source data")))
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: plot3 source data requires async property access"),
+    ))
 }
 
 fn scatter_xy_data_for_properties(
@@ -6914,14 +7369,10 @@ fn scatter_xy_data_for_properties(
     if let (Some(x), Some(y)) = scatter.source_data() {
         return Ok((x.clone(), y.clone()));
     }
-    futures::executor::block_on(scatter.export_numeric_xy_data())
-        .map_err(|err| {
-            plotting_error(
-                builtin,
-                format!("{builtin}: unable to read scatter source data: {err}"),
-            )
-        })?
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: scatter has no source data")))
+    Err(plotting_error(
+        builtin,
+        format!("{builtin}: scatter source data requires async property access"),
+    ))
 }
 
 fn numeric_plot_data_value(data: &NumericPlotData) -> Value {
@@ -6935,7 +7386,9 @@ fn limits_from_optional_value(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<Option<(f64, f64)>> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         let norm = text.trim().to_ascii_lowercase();
         if matches!(norm.as_str(), "auto" | "tight") {
             return Ok(None);
@@ -6953,8 +7406,7 @@ enum TickMode {
 }
 
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
-    let tensor = runmat_value::Tensor::try_from(value)
-        .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+    let tensor = super::axis_ticks::tick_tensor_from_value(value, builtin)?;
     let ticks = tensor::tensor_values_f64(&tensor);
     if ticks.iter().any(|value| !value.is_finite()) {
         return Err(plotting_error(
@@ -6976,9 +7428,17 @@ fn tick_mode_from_value(
     builtin: &'static str,
     property: &str,
 ) -> BuiltinResult<TickMode> {
-    let mode = value_as_string(value).ok_or_else(|| {
-        plotting_error(builtin, format!("{builtin}: {property} must be a string"))
-    })?;
+    let mode = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            plotting_error(builtin, format!("{builtin}: {property} must be a string"))
+        })?;
     match mode.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(TickMode::Auto),
         "manual" => Ok(TickMode::Manual),
@@ -6995,6 +7455,13 @@ fn tick_format_from_value(
     property: &'static str,
 ) -> BuiltinResult<String> {
     let format = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: {property} must be text")))?;
     Ok(runmat_plot::core::plot_renderer::plot_utils::canonical_tick_label_format(&format))
 }
@@ -7059,12 +7526,12 @@ fn tick_mode_value<T>(ticks: Option<&Vec<T>>) -> Value {
 
 fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::StringArray(strings) => Ok(strings.data.clone()),
-        Value::CharArray(chars) => Ok(char_array_rows(chars)),
+        Value::String(runmat_value::StringElement::Text(s)) => Ok(vec![s.as_str().to_owned()]),
+        Value::StringArray(strings) => strings.data().iter().map(|s| s.as_str().map(str::to_owned).ok_or_else(|| plotting_error(builtin, "tick labels must be text"))).collect(),
+        Value::CharArray(chars) => Ok(char_array_rows(chars).map_err(|source|crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?),
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for entry in &cell.data {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for entry in cell.data() {
                 labels.extend(tick_labels_from_value(entry, builtin)?);
             }
             Ok(labels)
@@ -7108,19 +7575,19 @@ fn tick_label_value(labels: Vec<String>) -> Value {
     Value::Cell(CellArray::new(values, 1, labels.len()).expect("valid tick-label cell array"))
 }
 
-fn char_array_rows(chars: &CharArray) -> Vec<String> {
+fn char_array_rows(chars: &CharArray) -> Result<Vec<String>, runmat_value::Utf16DecodeError> {
     if chars.rows == 0 || chars.cols == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     (0..chars.rows)
         .map(|row| {
             let start = row * chars.cols;
             let end = start + chars.cols;
-            chars.data[start..end]
-                .iter()
-                .collect::<String>()
-                .trim_end()
-                .to_string()
+            Ok(
+                runmat_value::decode_utf16_code_units(&chars.data()[start..end])?
+                    .trim_end()
+                    .to_string(),
+            )
         })
         .collect()
 }
@@ -7138,15 +7605,25 @@ fn parse_colormap_name(
 }
 
 fn apply_axes_text_alias(
+    authority: &super::state::PropertyMutationTarget,
+
     handle: FigureHandle,
     axes_index: usize,
     kind: PlotObjectKind,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
-        set_text_properties_for_axes(handle, axes_index, kind, Some(text), None)
-            .map_err(|err| map_figure_error(builtin, err))?;
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    if let Some(text) = text_input.text() {
+        super::state::set_text_properties_for_axes_for_property(
+            authority,
+            handle,
+            axes_index,
+            kind,
+            Some(text),
+            None,
+        )
+        .map_err(|err| map_figure_error(builtin, err))?;
         return Ok(());
     }
 
@@ -7162,7 +7639,7 @@ fn apply_axes_text_alias(
             ),
         ));
     }
-    let meta = axes_metadata_snapshot(src_handle, src_axes)
+    let meta = super::state::axes_metadata_snapshot(src_handle, src_axes)
         .map_err(|err| map_figure_error(builtin, err))?;
     let (text, style) = match kind {
         PlotObjectKind::Title => (meta.title, meta.title_style),
@@ -7175,8 +7652,15 @@ fn apply_axes_text_alias(
         | PlotObjectKind::XAxis
         | PlotObjectKind::YAxis => unreachable!(),
     };
-    set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
-        .map_err(|err| map_figure_error(builtin, err))?;
+    super::state::set_text_properties_for_axes_for_property(
+        authority,
+        handle,
+        axes_index,
+        kind,
+        text,
+        Some(style),
+    )
+    .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 
@@ -7185,7 +7669,16 @@ fn validate_axes_text_alias(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    if value_as_string(value).is_some() {
+    if value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .is_some()
+    {
         return Ok(());
     }
 
@@ -7205,94 +7698,58 @@ fn validate_axes_text_alias(
     Ok(())
 }
 
-fn apply_figure_text_alias(
-    handle: FigureHandle,
-    kind: PlotObjectKind,
-    value: &Value,
-    builtin: &'static str,
-) -> BuiltinResult<()> {
-    if let Some(text) = value_as_text_string(value) {
-        match kind {
-            PlotObjectKind::SuperTitle => {
-                set_sg_title_properties_for_figure(handle, Some(text), None)
-                    .map_err(|err| map_figure_error(builtin, err))?;
-            }
-            _ => unreachable!(),
-        }
-        return Ok(());
-    }
-
-    let scalar = handle_scalar(value, builtin)?;
-    let (src_handle, _src_axes, src_kind) =
-        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
-    if src_kind != kind {
-        return Err(plotting_error(
-            builtin,
-            format!(
-                "{builtin}: expected a matching text handle for `{}`",
-                key_name(kind)
-            ),
-        ));
-    }
-
-    let figure = super::state::clone_figure(src_handle)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
-    let (text, style) = match kind {
-        PlotObjectKind::SuperTitle => (figure.sg_title, figure.sg_title_style),
-        _ => unreachable!(),
-    };
-    set_sg_title_properties_for_figure(handle, text, Some(style))
-        .map_err(|err| map_figure_error(builtin, err))?;
-    Ok(())
-}
-
-fn validate_figure_text_alias(
-    kind: PlotObjectKind,
-    value: &Value,
-    builtin: &'static str,
-) -> BuiltinResult<()> {
-    if value_as_text_string(value).is_some() {
-        return Ok(());
-    }
-
-    let scalar = handle_scalar(value, builtin)?;
-    let (src_handle, _src_axes, src_kind) =
-        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
-    if src_kind != kind {
-        return Err(plotting_error(
-            builtin,
-            format!(
-                "{builtin}: expected a matching text handle for `{}`",
-                key_name(kind)
-            ),
-        ));
-    }
-
-    super::state::clone_figure(src_handle)
-        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
-    Ok(())
-}
-
 fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec<String>> {
     let mut labels = Vec::new();
     for arg in args {
         match arg {
-            Value::StringArray(arr) => labels.extend(arr.data.iter().cloned()),
+            Value::StringArray(arr) => labels.extend(
+                arr.data()
+                    .iter()
+                    .map(|s| {
+                        s.as_str().map(str::to_owned).ok_or_else(|| {
+                            plotting_error(builtin, "legend: labels must be strings or char arrays")
+                        })
+                    })
+                    .collect::<BuiltinResult<Vec<_>>>()?,
+            ),
             Value::Cell(cell) => {
                 for row in 0..cell.rows {
                     for col in 0..cell.cols {
                         let value = cell.get(row, col).map_err(|err| {
                             plotting_error(builtin, format!("legend: invalid label cell: {err}"))
                         })?;
-                        labels.push(value_as_string(&value).ok_or_else(|| {
-                            plotting_error(builtin, "legend: labels must be strings or char arrays")
-                        })?);
+                        labels.push(
+                            value_as_string(&value)
+                                .map_err(|source| {
+                                    crate::builtins::plotting::plotting_error_with_source(
+                                        builtin,
+                                        source.to_string(),
+                                        source,
+                                    )
+                                })?
+                                .ok_or_else(|| {
+                                    plotting_error(
+                                        builtin,
+                                        "legend: labels must be strings or char arrays",
+                                    )
+                                })?,
+                        );
                     }
                 }
             }
-            _ => labels.push(value_as_string(arg).ok_or_else(|| {
-                plotting_error(builtin, "legend: labels must be strings or char arrays")
-            })?),
+            _ => labels.push(
+                value_as_string(arg)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, "legend: labels must be strings or char arrays")
+                    })?,
+            ),
         }
     }
     Ok(labels)
@@ -7311,27 +7768,23 @@ fn handle_scalar(value: &Value, builtin: &'static str) -> BuiltinResult<f64> {
 }
 
 fn legend_labels_value(labels: Vec<String>) -> Value {
-    Value::StringArray(StringArray {
-        rows: 1,
-        cols: labels.len().max(1),
-        shape: vec![1, labels.len().max(1)],
-        data: labels,
-    })
+    let count = labels.len();
+    Value::StringArray(
+        StringArray::new(labels, vec![1, count]).expect("legend label shape matches data"),
+    )
 }
 
 fn text_value(text: Option<String>) -> Value {
     match text {
         Some(text) if text.contains('\n') => {
             let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
-            Value::StringArray(StringArray {
-                rows: 1,
-                cols: lines.len().max(1),
-                shape: vec![1, lines.len().max(1)],
-                data: lines,
-            })
+            let count = lines.len();
+            Value::StringArray(
+                StringArray::new(lines, vec![1, count]).expect("text line shape matches data"),
+            )
         }
-        Some(text) => Value::String(text),
-        None => Value::String(String::new()),
+        Some(text) => Value::string(text),
+        None => Value::string(String::new()),
     }
 }
 
@@ -7358,21 +7811,48 @@ pub(crate) fn label_strings_from_value(
     label_context: &str,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::StringArray(array) => Ok(array.data.clone()),
-        Value::Cell(cell) => cell
-            .data
+        Value::StringArray(array) => array
+            .data()
             .iter()
-            .map(|item| {
-                value_as_text_string(item).ok_or_else(|| {
-                    plotting_error(
-                        builtin,
-                        format!("{builtin}: {label_context} must contain text values"),
-                    )
+            .map(|s| {
+                s.as_str().map(str::to_owned).ok_or_else(|| {
+                    plotting_error(builtin, format!("{label_context} must contain text"))
                 })
             })
             .collect(),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::Cell(cell) => cell
+            .data()
+            .iter()
+            .map(|item| {
+                value_as_text_string(item)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(
+                            builtin,
+                            format!("{builtin}: {label_context} must contain text values"),
+                        )
+                    })
+            })
+            .collect(),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Ok(vec![runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?])
+        }
+        Value::String(runmat_value::StringElement::Text(text)) => {
+            Ok(vec![text.as_str().to_owned()])
+        }
         Value::Tensor(tensor) => Ok((0..tensor.len())
             .map(|index| {
                 format_numeric_label(
@@ -7410,10 +7890,31 @@ fn heatmap_on_off_value(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
         Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
-            heatmap_on_off_text(&text)
+            let mut units = chars.data().iter().map(|u| u.raw());
+            while units
+                .clone()
+                .next()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next();
+            }
+            while units
+                .clone()
+                .next_back()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next_back();
+            }
+            let units = units.map(|u| if (65..=90).contains(&u) { u + 32 } else { u });
+            if units.clone().eq("on".encode_utf16()) {
+                Some(true)
+            } else if units.eq("off".encode_utf16()) {
+                Some(false)
+            } else {
+                None
+            }
         }
-        Value::String(text) => heatmap_on_off_text(text),
+        Value::String(runmat_value::StringElement::Text(text)) => heatmap_on_off_text(text),
         Value::Num(value) => numeric_on_off(*value),
         Value::Int(value) => numeric_on_off(value.to_f64()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => tensor
@@ -7492,6 +7993,50 @@ fn surface_z_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
         .unwrap_or_else(|| tensor_from_vec(Vec::new()))
 }
 
+fn surface_c_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    surface
+        .color_source()
+        .map(numeric_plot_data_value)
+        .unwrap_or_else(|| surface_z_data_value(surface))
+}
+
+fn surface_color_mapping_name(
+    mapping: runmat_plot::plots::surface::SurfaceColorMapping,
+) -> &'static str {
+    match mapping {
+        runmat_plot::plots::surface::SurfaceColorMapping::Scaled => "scaled",
+        runmat_plot::plots::surface::SurfaceColorMapping::Direct => "direct",
+    }
+}
+
+pub(crate) fn parse_color_data_mapping(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<runmat_plot::plots::surface::SurfaceColorMapping> {
+    let value = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: CDataMapping must be 'scaled' or 'direct'"),
+            )
+        })?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "scaled" => Ok(runmat_plot::plots::surface::SurfaceColorMapping::Scaled),
+        "direct" => Ok(runmat_plot::plots::surface::SurfaceColorMapping::Direct),
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: CDataMapping must be 'scaled' or 'direct'"),
+        )),
+    }
+}
+
 fn surface_grid_to_tensor(grid: &[Vec<f64>]) -> Value {
     let cols = grid.len();
     let rows = grid.first().map_or(0, Vec::len);
@@ -7516,7 +8061,7 @@ fn surface_coordinate_data_from_value(
             format!("{builtin}: {name} must be non-empty"),
         ));
     }
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must be a vector or 2-D matrix"),
@@ -7528,11 +8073,10 @@ fn surface_coordinate_data_from_value(
             format!("{builtin}: {name} must contain finite coordinates"),
         ));
     }
-    if tensor.rows == 1 || tensor.cols == 1 {
+    let (rows, cols) = super::common::surface_matrix_dimensions(&tensor);
+    if rows == 1 || cols == 1 {
         return Ok(SurfaceCoordinateData::Vector(data));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
     let grid = super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin)?;
     Ok(SurfaceCoordinateData::Grid(grid))
 }
@@ -7556,13 +8100,14 @@ fn surface_z_grid_from_value(
     }
     tensor = tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))?;
-    if tensor.rows == rows && tensor.cols == cols {
+    let (input_rows, input_cols) = super::common::surface_matrix_dimensions(&tensor);
+    if input_rows == rows && input_cols == cols {
         return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
     }
-    if tensor.rows == 1 || tensor.cols == 1 {
-        tensor.rows = rows;
-        tensor.cols = cols;
-        tensor.shape = vec![rows, cols];
+    if input_rows == 1 || input_cols == 1 {
+        tensor
+            .reshape_in_place(vec![rows, cols])
+            .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")))?;
         return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
     }
     Err(plotting_error(
@@ -7610,7 +8155,7 @@ fn axis_to_y_grid(axis: &[f64], x_len: usize) -> Vec<Vec<f64>> {
 fn surface_face_color_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
     match &surface.colormap {
         ColorMap::Custom(min, max) if (*min - *max).abs().max_element() < 1e-6 => {
-            Value::String(color_to_short_name(*min))
+            rgb_triplet_value(*min)
         }
         _ => Value::String("flat".into()),
     }
@@ -7631,6 +8176,13 @@ fn surface_shading_name(shading: ShadingMode) -> &'static str {
 
 fn surface_shading_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<ShadingMode> {
     let text = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Shading must be text")))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "flat" => Ok(ShadingMode::Flat),
@@ -7653,7 +8205,9 @@ fn surface_lighting_name(enabled: bool) -> &'static str {
 }
 
 fn surface_lighting_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<bool> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "none" | "off" => Ok(false),
             "flat" | "gouraud" | "phong" | "auto" | "on" => Ok(true),
@@ -7671,7 +8225,9 @@ fn surface_face_color_update(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<SurfacePropertyUpdate> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "none" => Ok(SurfacePropertyUpdate::FaceNone),
             "flat" => Ok(SurfacePropertyUpdate::Shading(ShadingMode::Flat)),
@@ -7721,7 +8277,8 @@ fn patch_color_property(mode: runmat_plot::plots::PatchFaceColorMode, color: gla
     match mode {
         runmat_plot::plots::PatchFaceColorMode::None => Value::String("none".into()),
         runmat_plot::plots::PatchFaceColorMode::Flat => Value::String("flat".into()),
-        runmat_plot::plots::PatchFaceColorMode::Color => Value::String(color_to_short_name(color)),
+        runmat_plot::plots::PatchFaceColorMode::Interp => Value::String("interp".into()),
+        runmat_plot::plots::PatchFaceColorMode::Color => rgb_triplet_value(color),
     }
 }
 
@@ -7731,12 +8288,12 @@ fn patch_edge_color_property(
 ) -> Value {
     match mode {
         runmat_plot::plots::PatchEdgeColorMode::None => Value::String("none".into()),
-        runmat_plot::plots::PatchEdgeColorMode::Color => Value::String(color_to_short_name(color)),
+        runmat_plot::plots::PatchEdgeColorMode::Color => rgb_triplet_value(color),
     }
 }
 
 fn insert_line_marker_struct_props(
-    st: &mut StructValue,
+    st: &mut UnboundedStructValueBuilder,
     marker: Option<&runmat_plot::plots::line::LineMarkerAppearance>,
 ) {
     if let Some(marker) = marker {
@@ -7745,14 +8302,8 @@ fn insert_line_marker_struct_props(
             Value::String(marker_style_name(marker.kind).into()),
         );
         st.insert("MarkerSize", Value::Num(marker.size as f64));
-        st.insert(
-            "MarkerFaceColor",
-            Value::String(color_to_short_name(marker.face_color)),
-        );
-        st.insert(
-            "MarkerEdgeColor",
-            Value::String(color_to_short_name(marker.edge_color)),
-        );
+        st.insert("MarkerFaceColor", rgb_triplet_value(marker.face_color));
+        st.insert("MarkerEdgeColor", rgb_triplet_value(marker.edge_color));
         st.insert("Filled", Value::Bool(marker.filled));
     }
 }
@@ -7763,7 +8314,7 @@ fn line_marker_property_value(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match name {
-        "marker" => Ok(Value::String(
+        "marker" => Ok(Value::string(
             marker
                 .as_ref()
                 .map(|m| marker_style_name(m.kind).to_string())
@@ -7772,18 +8323,14 @@ fn line_marker_property_value(
         "markersize" => Ok(Value::Num(
             marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
         )),
-        "markerfacecolor" => Ok(Value::String(
-            marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.face_color))
-                .unwrap_or_else(|| "none".into()),
-        )),
-        "markeredgecolor" => Ok(Value::String(
-            marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.edge_color))
-                .unwrap_or_else(|| "none".into()),
-        )),
+        "markerfacecolor" => Ok(marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.face_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
+        "markeredgecolor" => Ok(marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.edge_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
         "filled" => Ok(Value::Bool(
             marker.as_ref().map(|m| m.filled).unwrap_or(false),
         )),
@@ -7960,44 +8507,15 @@ fn scatter_marker_from_name(
     }
 }
 
-trait Unzip3Vec<A, B, C> {
-    fn unzip_n_vec(self) -> (Vec<A>, Vec<B>, Vec<C>);
-}
-
-impl<I, A, B, C> Unzip3Vec<A, B, C> for I
-where
-    I: Iterator<Item = (A, B, C)>,
-{
-    fn unzip_n_vec(self) -> (Vec<A>, Vec<B>, Vec<C>) {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        let mut c = Vec::new();
-        for (va, vb, vc) in self {
-            a.push(va);
-            b.push(vb);
-            c.push(vc);
-        }
-        (a, b, c)
-    }
-}
-
-fn color_to_short_name(color: glam::Vec4) -> String {
-    let candidates = [
-        (glam::Vec4::new(1.0, 0.0, 0.0, 1.0), "r"),
-        (glam::Vec4::new(0.0, 1.0, 0.0, 1.0), "g"),
-        (glam::Vec4::new(0.0, 0.0, 1.0, 1.0), "b"),
-        (glam::Vec4::new(0.0, 0.0, 0.0, 1.0), "k"),
-        (glam::Vec4::new(1.0, 1.0, 1.0, 1.0), "w"),
-        (glam::Vec4::new(1.0, 1.0, 0.0, 1.0), "y"),
-        (glam::Vec4::new(1.0, 0.0, 1.0, 1.0), "m"),
-        (glam::Vec4::new(0.0, 1.0, 1.0, 1.0), "c"),
-    ];
-    for (candidate, name) in candidates {
-        if (candidate - color).abs().max_element() < 1e-6 {
-            return name.to_string();
-        }
-    }
-    format!("[{:.3},{:.3},{:.3}]", color.x, color.y, color.z)
+/// A color property as `get` returns it in MATLAB: a 1-by-3 RGB vector, whether it was set by
+/// name ('r'), short name or triplet.
+fn rgb_triplet_value(color: glam::Vec4) -> Value {
+    Tensor::new(
+        vec![color.x as f64, color.y as f64, color.z as f64],
+        vec![1, 3],
+    )
+    .map(Value::Tensor)
+    .unwrap_or_else(|_| Value::String(String::new().into()))
 }
 
 fn key_name(kind: PlotObjectKind) -> &'static str {
@@ -8039,6 +8557,26 @@ mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn surface_property_rank_boundaries_keep_host_grid_geometry() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        assert!(surface_coordinate_data_from_value(&scalar, "XData", "set").is_err());
+        assert!(surface_z_grid_from_value(&scalar, 1, 1, "set").is_err());
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap());
+        let SurfaceCoordinateData::Vector(coordinates) =
+            surface_coordinate_data_from_value(&vector, "XData", "set").unwrap()
+        else {
+            panic!("rank-one coordinates must stay a vector")
+        };
+        assert_eq!(coordinates, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            surface_z_grid_from_value(&vector, 2, 2, "set").unwrap(),
+            vec![vec![1.0, 2.0], vec![3.0, 4.0]]
+        );
+    }
+
     #[test]
     fn label_strings_preserve_exact_uint64_text() {
         let labels = label_strings_from_value(
@@ -8048,6 +8586,34 @@ mod tests {
         )
         .expect("labels");
         assert_eq!(labels, vec!["18446744073709551615"]);
+        let unicode = Value::CharArray(CharArray::new_row("🦀"));
+        assert_eq!(
+            ValidatedStyleValue::new(&unicode, "set")
+                .unwrap()
+                .text()
+                .as_deref(),
+            Some("🦀")
+        );
+        let malformed = Value::CharArray(
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)], 1, 1)
+                .unwrap(),
+        );
+        let Err(error) = ValidatedStyleValue::new(&malformed, "set") else {
+            panic!("malformed text must fail before a mutation callback")
+        };
+        assert!(error
+            .source
+            .as_deref()
+            .unwrap()
+            .downcast_ref::<runmat_value::Utf16DecodeError>()
+            .is_some());
+        assert!(!super::super::style::value_text_equals_ascii(
+            &malformed, "on", true
+        ));
+        let padded = Value::CharArray(CharArray::new_row("\u{2003} On\t"));
+        assert!(super::super::style::value_text_equals_ascii(
+            &padded, "on", true
+        ));
     }
 
     #[test]

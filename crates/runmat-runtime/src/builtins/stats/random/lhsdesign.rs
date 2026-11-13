@@ -1,14 +1,14 @@
 //! Latin hypercube experimental designs.
-
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    LHSDESIGN_ERROR_INTERNAL as ERROR_INTERNAL,
+    LHSDESIGN_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    LHSDESIGN_INTEGER_DIMENSION_EXTENSION as INTEGER_DIMENSION_EXTENSION,
+    LHSDESIGN_INTEGER_ITERATIONS_EXTENSION as INTEGER_ITERATIONS_EXTENSION,
+    LHSDESIGN_INTEGER_SMOOTH_EXTENSION as INTEGER_SMOOTH_EXTENSION,
+    LHSDESIGN_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
 };
+
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericScalar;
 use runmat_value::{Tensor, Value};
@@ -16,176 +16,11 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "lhsdesign";
 const DEFAULT_ITERATIONS: usize = 5;
 const MAX_SCORE_TERMS: usize = 200_000_000;
-
-const INTEGER_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lhsdesign-integer-dimension",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lhsdesign with typed-integer n or p dimensions is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LhsdesignIntegerDimensionExtension"),
-};
-
-const INTEGER_ITERATIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lhsdesign-integer-iterations",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lhsdesign with a typed-integer Iterations control is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LhsdesignIntegerIterationsExtension"),
-};
-
-const INTEGER_SMOOTH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lhsdesign-integer-smooth",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lhsdesign with a typed-integer Smooth boolean alias is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LhsdesignIntegerSmoothExtension"),
-};
-
-const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "lhsdesign-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "lhsdesign host fallback for explicit gpuArray inputs is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LhsdesignExplicitGpuInputExtension"),
-};
-
-pub const LHSDESIGN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    INTEGER_DIMENSION_EXTENSION,
-    INTEGER_ITERATIONS_EXTENSION,
-    INTEGER_SMOOTH_EXTENSION,
-    RESIDENT_INPUT_EXTENSION,
-];
-
-const INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n or p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer design dimensions are gated before gather and decoded exactly into bounded positive host counts.",
-    }];
-
-const INTEGER_ITERATIONS_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Iterations",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer iteration counts are gated before gather and decoded exactly without a floating round trip.",
-    }];
-
-const INTEGER_SMOOTH_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "Smooth",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The RunMat-only integer alias accepts only exact scalar zero or one.",
-}];
-
-pub const LHSDESIGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = lhsdesign(integer_n, integer_p, ___)",
-        inputs: &INTEGER_DIMENSION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "n and p are exact structural counts. Current public documentation does not declare lhsdesign output class, so this metadata does not infer single propagation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = lhsdesign(n, p, Iterations=integer_iterations)",
-        inputs: &INTEGER_ITERATIONS_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Iterations is a positive structural work bound and does not select output class or residency.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = lhsdesign(n, p, Smooth=integer_boolean)",
-        inputs: &INTEGER_SMOOTH_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Integer Smooth aliases are a separately gated RunMat convenience; documented text values remain the compatibility surface.",
-    },
-];
-
-const OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "N-by-P Latin hypercube design.",
-}];
-
-const PARAM_N: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of sample points.",
-};
-
-const PARAM_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of variables.",
-};
-
-const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value options such as Smooth, Criterion, and Iterations.",
-};
-
-const INPUTS_N_P: [BuiltinParamDescriptor; 2] = [PARAM_N, PARAM_P];
-const INPUTS_N_P_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_N, PARAM_P, PARAM_OPTIONS];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "X = lhsdesign(n, p)",
-        inputs: &INPUTS_N_P,
-        outputs: &OUTPUT_X,
-    },
-    BuiltinSignatureDescriptor {
-        label: "X = lhsdesign(n, p, Name, Value)",
-        inputs: &INPUTS_N_P_OPTIONS,
-        outputs: &OUTPUT_X,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LHSDESIGN.INVALID_ARGUMENT",
-    identifier: Some("RunMat:lhsdesign:InvalidArgument"),
-    when: "Sample counts, dimensions, criteria, or name-value options are malformed.",
-    message: "lhsdesign: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LHSDESIGN.INTERNAL",
-    identifier: Some("RunMat:lhsdesign:Internal"),
-    when: "Internal random generation or tensor allocation fails.",
-    message: "lhsdesign: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const LHSDESIGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Criterion {
@@ -222,32 +57,17 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     lhs_error(&ERROR_INTERNAL, message)
 }
 
-fn lhs_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    if args.len() >= 2 {
-        Type::Unknown
-    } else {
-        Type::Num
-    }
-}
-
 #[runtime_builtin(
     name = "lhsdesign",
-    category = "stats/random",
-    summary = "Generate a Latin hypercube sample design.",
-    keywords = "lhsdesign,latin hypercube,design of experiments,random,statistics",
-    type_resolver(lhs_type),
-    descriptor(crate::builtins::stats::random::lhsdesign::LHSDESIGN_DESCRIPTOR),
-    extensions(crate::builtins::stats::random::lhsdesign::LHSDESIGN_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::stats::random::lhsdesign::LHSDESIGN_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::random::lhsdesign"
 )]
-pub(crate) async fn lhsdesign_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_extensions(&args)?;
+pub(crate) async fn lhsdesign_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    ensure_extensions(args.view())?;
     let args = gather_args(args).await?;
     let options = parse_args(args)?;
-    let design = compute_lhsdesign(options)?;
+    let mut turn = random::acquire_turn(None, NAME).await?;
+    let design = compute_lhsdesign(&mut turn, options)?;
     Tensor::new(design, vec![options.n, options.p])
         .map(tensor::tensor_into_value)
         .map_err(|err| internal(format!("lhsdesign: {err}")))
@@ -262,24 +82,24 @@ fn is_typed_integer(value: &Value) -> bool {
 fn contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(contains_explicit_gpu),
-        Value::Object(value) => value.properties.values().any(contains_explicit_gpu),
+        Value::Object(value) => value.properties().values().any(contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(contains_explicit_gpu),
         _ => false,
     }
 }
 
-fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if args.iter().take(2).any(is_typed_integer) {
         crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DIMENSION_EXTENSION, NAME)?;
     }
-    for pair in args.get(2..).unwrap_or_default().chunks_exact(2) {
+    for pair in args.range(args.len().min(2)..)?.chunks_exact(2) {
         if !is_typed_integer(&pair[1]) {
             continue;
         }
-        let extension = match keyword_of(&pair[0]).as_deref() {
+        let extension = match keyword_of(&pair[0])?.as_deref() {
             Some("iterations") => &INTEGER_ITERATIONS_EXTENSION,
             Some("smooth") => &INTEGER_SMOOTH_EXTENSION,
             _ => continue,
@@ -292,19 +112,21 @@ fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(|err| invalid(format!("lhsdesign: {err}")))?,
-        );
-    }
-    Ok(gathered)
+async fn gather_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let runtime = crate::context::legacy::active();
+    crate::dispatcher::gather_builtin_arguments_async(args, runtime.as_ref())
+        .await
+        .map_err(|source| {
+            let mut error = invalid(format!("lhsdesign: {source}"));
+            error.gpu_gather_retry = source.gpu_gather_retry;
+            error.source = Some(Box::new(source));
+            error
+        })
 }
 
-fn parse_args(args: Vec<Value>) -> BuiltinResult<LhsOptions> {
+fn parse_args(args: crate::call::BuiltinArguments) -> BuiltinResult<LhsOptions> {
     if args.len() < 2 {
         return Err(invalid("lhsdesign: n and p are required"));
     }
@@ -319,7 +141,7 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<LhsOptions> {
     };
     let mut idx = 2usize;
     while idx < args.len() {
-        let Some(name) = keyword_of(&args[idx]) else {
+        let Some(name) = keyword_of(&args[idx])? else {
             return Err(invalid("lhsdesign: options must be name-value pairs"));
         };
         idx += 1;
@@ -417,7 +239,7 @@ fn scalar_f64(value: &Value) -> Option<f64> {
 }
 
 fn parse_on_off_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
-    if let Some(keyword) = keyword_of(value) {
+    if let Some(keyword) = keyword_of(value)? {
         return match keyword.as_str() {
             "on" | "true" => Ok(true),
             "off" | "false" => Ok(false),
@@ -450,7 +272,7 @@ fn parse_on_off_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 }
 
 fn parse_criterion(value: &Value) -> BuiltinResult<Criterion> {
-    let Some(keyword) = keyword_of(value) else {
+    let Some(keyword) = keyword_of(value)? else {
         return Err(invalid(
             "lhsdesign: Criterion must be 'maximin', 'correlation', or 'none'",
         ));
@@ -465,7 +287,10 @@ fn parse_criterion(value: &Value) -> BuiltinResult<Criterion> {
     }
 }
 
-fn compute_lhsdesign(options: LhsOptions) -> BuiltinResult<Vec<f64>> {
+fn compute_lhsdesign(
+    turn: &mut random::RandomTurn,
+    options: LhsOptions,
+) -> BuiltinResult<Vec<f64>> {
     let len = options
         .n
         .checked_mul(options.p)
@@ -483,7 +308,7 @@ fn compute_lhsdesign(options: LhsOptions) -> BuiltinResult<Vec<f64>> {
     let mut best = Vec::new();
     let mut best_score = f64::NEG_INFINITY;
     for _ in 0..candidates {
-        let candidate = candidate_design(options.n, options.p, len, smooth)?;
+        let candidate = candidate_design(turn, options.n, options.p, len, smooth)?;
         let score = design_score(&candidate, options.n, options.p, options.criterion);
         if best.is_empty() || score > best_score {
             best_score = score;
@@ -521,15 +346,21 @@ fn validate_score_budget(
     Ok(())
 }
 
-fn candidate_design(n: usize, p: usize, len: usize, smooth: bool) -> BuiltinResult<Vec<f64>> {
+fn candidate_design(
+    turn: &mut random::RandomTurn,
+    n: usize,
+    p: usize,
+    len: usize,
+    smooth: bool,
+) -> BuiltinResult<Vec<f64>> {
     let mut data = Vec::new();
     data.try_reserve_exact(len)
         .map_err(|_| invalid("lhsdesign: requested design is too large"))?;
     data.resize(len, 0.0);
     for col in 0..p {
-        let permutation = random_permutation(n)?;
+        let permutation = random_permutation(turn, n)?;
         let jitter = if smooth {
-            Some(random::generate_uniform(n, NAME)?)
+            Some(random::generate_uniform(turn, n, NAME)?)
         } else {
             None
         };
@@ -541,8 +372,8 @@ fn candidate_design(n: usize, p: usize, len: usize, smooth: bool) -> BuiltinResu
     Ok(data)
 }
 
-fn random_permutation(n: usize) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(n.saturating_sub(1), NAME)?;
+fn random_permutation(turn: &mut random::RandomTurn, n: usize) -> BuiltinResult<Vec<usize>> {
+    let uniforms = random::generate_uniform(turn, n.saturating_sub(1), NAME)?;
     let mut indices = Vec::new();
     indices
         .try_reserve_exact(n)
@@ -644,9 +475,15 @@ mod tests {
     #[test]
     fn basic_design_has_latin_bins_per_column() {
         let _guard = reset_rng();
-        let out = block_on(lhsdesign_builtin(vec![Value::Num(6.0), Value::Num(3.0)])).unwrap();
+        let out = block_on(lhsdesign_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(6.0),
+                Value::Num(3.0),
+            ]),
+        ))
+        .unwrap();
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![6, 3]);
+        assert_eq!(tensor.shape(), &[6, 3]);
         assert!(tensor
             .materialize_f64()
             .iter()
@@ -663,14 +500,16 @@ mod tests {
     #[test]
     fn smooth_off_uses_interval_midpoints() {
         let _guard = reset_rng();
-        let out = block_on(lhsdesign_builtin(vec![
-            Value::Num(4.0),
-            Value::Num(2.0),
-            Value::from("Smooth"),
-            Value::from("off"),
-            Value::from("Criterion"),
-            Value::from("none"),
-        ]))
+        let out = block_on(lhsdesign_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(4.0),
+                Value::Num(2.0),
+                Value::from("Smooth"),
+                Value::from("off"),
+                Value::from("Criterion"),
+                Value::from("none"),
+            ]),
+        ))
         .unwrap();
         let tensor = tensor(out);
         for value in tensor.materialize_f64() {
@@ -682,17 +521,19 @@ mod tests {
     #[test]
     fn criterion_correlation_and_iterations_are_accepted() {
         let _guard = reset_rng();
-        let out = block_on(lhsdesign_builtin(vec![
-            Value::Num(8.0),
-            Value::Num(3.0),
-            Value::from("Criterion"),
-            Value::from("correlation"),
-            Value::from("Iterations"),
-            Value::Num(4.0),
-        ]))
+        let out = block_on(lhsdesign_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(8.0),
+                Value::Num(3.0),
+                Value::from("Criterion"),
+                Value::from("correlation"),
+                Value::from("Iterations"),
+                Value::Num(4.0),
+            ]),
+        ))
         .unwrap();
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![8, 3]);
+        assert_eq!(tensor.shape(), &[8, 3]);
         for value in tensor.materialize_f64() {
             let scaled = value * 8.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
@@ -703,19 +544,21 @@ mod tests {
     fn typed_integer_scalar_arguments_are_exact() {
         let _guard = reset_rng();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let out = block_on(lhsdesign_builtin(vec![
-            poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
-            poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
-            Value::from("Smooth"),
-            poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
-            Value::from("Criterion"),
-            Value::from("correlation"),
-            Value::from("Iterations"),
-            poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
-        ]))
+        let out = block_on(lhsdesign_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                poisoned_int_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]),
+                poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
+                Value::from("Smooth"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+                Value::from("Criterion"),
+                Value::from("correlation"),
+                Value::from("Iterations"),
+                poisoned_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]),
+            ]),
+        ))
         .expect("lhsdesign");
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![4, 2]);
+        assert_eq!(tensor.shape(), &[4, 2]);
         for value in tensor.materialize_f64() {
             let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
@@ -742,35 +585,41 @@ mod tests {
 
     #[test]
     fn invalid_options_are_rejected() {
-        let err = block_on(lhsdesign_builtin(vec![
-            Value::Num(4.0),
-            Value::Num(2.0),
-            Value::from("Criterion"),
-            Value::from("bad"),
-        ]))
+        let err = block_on(lhsdesign_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(4.0),
+                Value::Num(2.0),
+                Value::from("Criterion"),
+                Value::from("bad"),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lhsdesign:InvalidArgument"));
     }
 
     #[test]
     fn invalid_name_value_arity_is_rejected() {
-        let err = block_on(lhsdesign_builtin(vec![
-            Value::Num(4.0),
-            Value::Num(2.0),
-            Value::from("Smooth"),
-        ]))
+        let err = block_on(lhsdesign_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(4.0),
+                Value::Num(2.0),
+                Value::from("Smooth"),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lhsdesign:InvalidArgument"));
     }
 
     #[test]
     fn excessive_scoring_work_is_rejected() {
-        let err = block_on(lhsdesign_builtin(vec![
-            Value::Num(20_000.0),
-            Value::Num(8.0),
-            Value::from("Iterations"),
-            Value::Num(5.0),
-        ]))
+        let err = block_on(lhsdesign_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(20_000.0),
+                Value::Num(8.0),
+                Value::from("Iterations"),
+                Value::Num(5.0),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lhsdesign:InvalidArgument"));
     }
@@ -814,7 +663,10 @@ mod tests {
             ),
         ];
         for (args, identifier) in cases {
-            let error = block_on(lhsdesign_builtin(args)).unwrap_err();
+            let error = block_on(lhsdesign_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .unwrap_err();
             assert_eq!(error.identifier(), Some(identifier));
         }
     }
@@ -848,13 +700,16 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let count = Tensor::new(vec![4.0], vec![1, 1]).unwrap();
             let explicit = gpu_helpers::upload_tensor(provider, &count).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(lhsdesign_builtin(vec![
-                Value::GpuTensor(explicit),
-                Value::Num(2.0),
-            ]))
+            let error = block_on(lhsdesign_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(explicit),
+                    Value::Num(2.0),
+                ]),
+            ))
             .unwrap_err();
             assert_eq!(
                 error.identifier(),
@@ -862,17 +717,20 @@ mod tests {
             );
 
             let automatic = gpu_helpers::upload_tensor(provider, &count).expect("upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-            let output = block_on(lhsdesign_builtin(vec![
-                Value::GpuTensor(automatic),
-                Value::Num(2.0),
-            ]))
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated provenance");
+            let output = block_on(lhsdesign_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(automatic),
+                    Value::Num(2.0),
+                ]),
+            ))
             .expect("automatic residency may gather transparently");
             let Value::Tensor(output) = output else {
                 panic!("lhsdesign remains a host implementation");
             };
-            assert_eq!(output.shape, vec![4, 2]);
+            assert_eq!(output.shape(), &[4, 2]);
         });
     }
 }

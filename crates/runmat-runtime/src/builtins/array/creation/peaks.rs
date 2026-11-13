@@ -23,16 +23,11 @@
 //! on the device.  The `[X, Y, Z] = peaks(n)` multi-output form constructs X and
 //! Y via the existing meshgrid GPU path and obtains Z from the peaks shader.
 
+#[cfg(test)]
 use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Type,
-};
+#[cfg(test)]
+use runmat_builtins::{LiteralValue, ResolveContext, Type};
+use runmat_builtins::{PEAKS_EXPLICIT_GPU_INPUT_EXTENSION, PEAKS_TYPED_INTEGER_N_EXTENSION};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
@@ -76,6 +71,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("peaks").build()
 }
 
+#[cfg(test)]
 fn peaks_type(args: &[Type], ctx: &ResolveContext) -> Type {
     match args {
         [] => Type::tensor_with_shape(vec![DEFAULT_N, DEFAULT_N]),
@@ -85,255 +81,7 @@ fn peaks_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
-const PEAKS_OUTPUT_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sampled peaks surface values.",
-}];
-
-const PEAKS_OUTPUT_XY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid coordinates along X-axis.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid coordinates along Y-axis.",
-    },
-];
-
-const PEAKS_OUTPUT_XYZ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid coordinates along X-axis.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grid coordinates along Y-axis.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sampled peaks surface values.",
-    },
-];
-
-const PEAKS_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const PEAKS_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: Some("49"),
-    description: "Grid size n for n-by-n sampling.",
-}];
-
-const PEAKS_SIG_XY_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate matrix (same size as X).",
-    },
-];
-
-const PEAKS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "Z = peaks()",
-        inputs: &PEAKS_SIG_EMPTY_INPUTS,
-        outputs: &PEAKS_OUTPUT_Z,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = peaks(n)",
-        inputs: &PEAKS_SIG_N_INPUTS,
-        outputs: &PEAKS_OUTPUT_Z,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = peaks(X, Y)",
-        inputs: &PEAKS_SIG_XY_INPUTS,
-        outputs: &PEAKS_OUTPUT_Z,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y] = peaks(n)",
-        inputs: &PEAKS_SIG_N_INPUTS,
-        outputs: &PEAKS_OUTPUT_XY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y,Z] = peaks(n)",
-        inputs: &PEAKS_SIG_N_INPUTS,
-        outputs: &PEAKS_OUTPUT_XYZ,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y] = peaks(X, Y)",
-        inputs: &PEAKS_SIG_XY_INPUTS,
-        outputs: &PEAKS_OUTPUT_XY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y,Z] = peaks(X, Y)",
-        inputs: &PEAKS_SIG_XY_INPUTS,
-        outputs: &PEAKS_OUTPUT_XYZ,
-    },
-];
-
-const PEAKS_ERRORS: [BuiltinErrorDescriptor; 10] = [
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.OUTPUT_COUNT",
-        identifier: None,
-        when: "More than three outputs are requested.",
-        message: "peaks: too many output arguments; maximum is 3",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.ARG_COUNT",
-        identifier: None,
-        when: "The builtin is called with more than two input arguments.",
-        message: "peaks: expected 0, 1, or 2 input arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.N_NON_SCALAR",
-        identifier: None,
-        when: "The n argument is not a numeric scalar.",
-        message: "peaks: n must be a numeric scalar",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.N_NON_FINITE",
-        identifier: None,
-        when: "The n argument is non-finite.",
-        message: "peaks: n must be finite",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.N_NON_INTEGER",
-        identifier: None,
-        when: "The n argument is not an integer.",
-        message: "peaks: n must be an integer",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.N_OUT_OF_RANGE",
-        identifier: None,
-        when: "The scalar n argument is not greater than one.",
-        message: "peaks: scalar n must be an integer greater than 1",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.N_TOO_LARGE",
-        identifier: None,
-        when: "The n argument exceeds platform limits.",
-        message: "peaks: n is too large for this platform",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.XY_NON_NUMERIC",
-        identifier: None,
-        when: "X/Y inputs are not numeric matrix values.",
-        message: "peaks: X and Y must be numeric matrices",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.XY_NOT_2D",
-        identifier: None,
-        when: "X/Y inputs are not 2-D matrices.",
-        message: "peaks: X and Y must be 2-D matrices",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.PEAKS.XY_SIZE_MISMATCH",
-        identifier: None,
-        when: "X and Y inputs do not have the same shape.",
-        message: "peaks: X and Y must have the same size",
-    },
-];
-
-pub const PEAKS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PEAKS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PEAKS_ERRORS,
-};
-
-const PEAKS_TYPED_INTEGER_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "peaks-typed-integer-grid-size",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "peaks accepts a typed-integer scalar grid size as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PeaksTypedIntegerGridSizeExtension"),
-};
-const PEAKS_EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "peaks-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "peaks accepts explicit gpuArray coordinate or grid-size inputs as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PeaksExplicitGpuInputExtension"),
-};
-pub const PEAKS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    PEAKS_TYPED_INTEGER_N_EXTENSION,
-    PEAKS_EXPLICIT_GPU_INPUT_EXTENSION,
-];
-
-const PEAKS_INTEGER_N_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public scalar form requires an integer value greater than one but does not enumerate typed integer storage. RunMat decodes all eight classes exactly as a structural grid size.",
-    }];
-const PEAKS_INTEGER_XY_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Xm",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly documents all eight integer coordinate classes. X output preserves Xm exactly when requested, while Z crosses the peaks floating formula boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Ym",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly documents all eight integer coordinate classes. Y output preserves Ym exactly when requested, while Z crosses the peaks floating formula boundary.",
-    },
-];
-pub const PEAKS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[X,Y,Z] = peaks(integer_n)",
-        inputs: &PEAKS_INTEGER_N_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Typed n is a gated structural extension; generated coordinates and surface values are floating and provider selection remains automatic.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[X,Y,Z] = peaks(integer_Xm, integer_Ym)",
-        inputs: &PEAKS_INTEGER_XY_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::BroadcastCompatible,
-        notes: "Documented integer coordinates remain authoritative for returned X and Y; Z intentionally materializes a floating view for transcendental evaluation. Explicit gpuArray inputs are separately RunMat-only because the public page does not advertise GPU arrays.",
-    },
-];
-
+#[cfg(test)]
 fn peaks_n_type(arg: &Type, ctx: &ResolveContext) -> Type {
     if let Some(n) = peaks_literal_n(ctx) {
         return Type::Tensor {
@@ -363,6 +111,7 @@ fn peaks_n_type(arg: &Type, ctx: &ResolveContext) -> Type {
     }
 }
 
+#[cfg(test)]
 fn peaks_xy_type(x: &Type, y: &Type) -> Type {
     let Some(x_shape) = peaks_xy_input_shape(x) else {
         return Type::Unknown;
@@ -376,6 +125,7 @@ fn peaks_xy_type(x: &Type, y: &Type) -> Type {
     Type::Tensor { shape: Some(shape) }
 }
 
+#[cfg(test)]
 fn peaks_literal_n(ctx: &ResolveContext) -> Option<usize> {
     match ctx.literal_args.first() {
         Some(LiteralValue::Number(value)) => {
@@ -396,6 +146,7 @@ fn peaks_literal_n(ctx: &ResolveContext) -> Option<usize> {
     }
 }
 
+#[cfg(test)]
 fn peaks_xy_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
     match ty {
         Type::Num => Some(vec![Some(1), Some(1)]),
@@ -406,6 +157,7 @@ fn peaks_xy_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
     }
 }
 
+#[cfg(test)]
 fn peaks_matrix_shape(shape: &[Option<usize>]) -> Option<Vec<Option<usize>>> {
     match shape {
         [] => Some(vec![Some(1), Some(1)]),
@@ -415,6 +167,7 @@ fn peaks_matrix_shape(shape: &[Option<usize>]) -> Option<Vec<Option<usize>>> {
     }
 }
 
+#[cfg(test)]
 fn same_size_shape(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Option<Vec<Option<usize>>> {
     if lhs.len() != rhs.len() {
         return None;
@@ -433,17 +186,10 @@ fn same_size_shape(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Option<Vec<O
 
 #[runtime_builtin(
     name = "peaks",
-    category = "array/creation",
-    summary = "Generate the standard peaks test surface.",
-    keywords = "peaks,sample,surface,test,demo",
-    accel = "array_construct",
-    type_resolver(peaks_type),
-    descriptor(crate::builtins::array::creation::peaks::PEAKS_DESCRIPTOR),
-    extensions(crate::builtins::array::creation::peaks::PEAKS_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::creation::peaks::PEAKS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::peaks"
 )]
-async fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn peaks_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if rest
         .first()
         .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
@@ -527,12 +273,12 @@ async fn peaks_from_n(n: usize, out_count: Option<usize>) -> crate::BuiltinResul
                 provider.upload(&z_view),
             ) {
                 return Ok(match out_count {
-                    Some(3) => Value::OutputList(vec![
+                    Some(3) => Value::output_list(vec![
                         Value::GpuTensor(xh),
                         Value::GpuTensor(yh),
                         Value::GpuTensor(zh),
                     ]),
-                    _ => Value::OutputList(vec![Value::GpuTensor(xh), Value::GpuTensor(yh)]),
+                    _ => Value::output_list(vec![Value::GpuTensor(xh), Value::GpuTensor(yh)]),
                 });
             }
         }
@@ -552,12 +298,12 @@ async fn peaks_from_xy(
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(z_handle) = provider.peaks_xy(x_handle, y_handle) {
                 return match out_count {
-                    Some(3) => Ok(Value::OutputList(vec![
+                    Some(3) => Ok(Value::output_list(vec![
                         Value::GpuTensor(x_handle.clone()),
                         Value::GpuTensor(y_handle.clone()),
                         Value::GpuTensor(z_handle),
                     ])),
-                    Some(2) => Ok(Value::OutputList(vec![
+                    Some(2) => Ok(Value::output_list(vec![
                         Value::GpuTensor(x_handle.clone()),
                         Value::GpuTensor(y_handle.clone()),
                     ])),
@@ -596,27 +342,27 @@ fn peaks_from_host_tensors(
     let _ = matrix_shape(&y_tensor)?;
     let output_shape = crate::builtins::common::broadcast::broadcast_shapes(
         "peaks",
-        &x_tensor.shape,
-        &y_tensor.shape,
+        x_tensor.shape(),
+        y_tensor.shape(),
     )
     .map_err(|_| builtin_error("peaks: X and Y must have compatible sizes"))?;
     let x_data = tensor::tensor_values_f64_cow(&x_tensor);
     let y_data = tensor::tensor_values_f64_cow(&y_tensor);
-    let x_strides = crate::builtins::common::broadcast::compute_strides(&x_tensor.shape);
-    let y_strides = crate::builtins::common::broadcast::compute_strides(&y_tensor.shape);
+    let x_strides = crate::builtins::common::broadcast::compute_strides(x_tensor.shape());
+    let y_strides = crate::builtins::common::broadcast::compute_strides(y_tensor.shape());
     let output_len = output_shape.iter().product();
     let mut z_mat = Vec::with_capacity(output_len);
     for index in 0..output_len {
         let x_index = crate::builtins::common::broadcast::broadcast_index(
             index,
             &output_shape,
-            &x_tensor.shape,
+            x_tensor.shape(),
             &x_strides,
         );
         let y_index = crate::builtins::common::broadcast::broadcast_index(
             index,
             &output_shape,
-            &y_tensor.shape,
+            y_tensor.shape(),
             &y_strides,
         );
         z_mat.push(peaks_at(x_data[x_index], y_data[y_index]));
@@ -699,13 +445,13 @@ fn build_output(
             let x_val = make_tensor(x_flat, shape.clone())?;
             let y_val = make_tensor(y_flat, shape.clone())?;
             let z_val = make_tensor(z_flat, shape)?;
-            Ok(Value::OutputList(vec![x_val, y_val, z_val]))
+            Ok(Value::output_list(vec![x_val, y_val, z_val]))
         }
         // Caller requested 2 outputs: [X, Y] = peaks(…) — unusual but allowed
         Some(2) => {
             let x_val = make_tensor(x_flat, shape.clone())?;
             let y_val = make_tensor(y_flat, shape)?;
-            Ok(Value::OutputList(vec![x_val, y_val]))
+            Ok(Value::output_list(vec![x_val, y_val]))
         }
         // Default single output: Z = peaks(…)
         _ => make_tensor(z_flat, shape),
@@ -720,12 +466,12 @@ fn build_xy_output(
     out_count: Option<usize>,
 ) -> crate::BuiltinResult<Value> {
     match out_count {
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(3) => Ok(Value::output_list(vec![
             tensor::tensor_into_value(x),
             tensor::tensor_into_value(y),
             make_tensor(z, z_shape)?,
         ])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(2) => Ok(Value::output_list(vec![
             tensor::tensor_into_value(x),
             tensor::tensor_into_value(y),
         ])),
@@ -847,7 +593,7 @@ async fn gather_tensor_or_gpu(value: &Value) -> crate::BuiltinResult<Tensor> {
 }
 
 fn matrix_shape(tensor: &Tensor) -> crate::BuiltinResult<(usize, usize)> {
-    match tensor.shape.as_slice() {
+    match tensor.shape() {
         [rows, cols] => Ok((*rows, *cols)),
         [n] => Ok((1, *n)),
         _ => Err(builtin_error("peaks: X and Y must be 2-D matrices")),
@@ -866,7 +612,9 @@ mod tests {
     use runmat_value::IntegerStorage;
 
     fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::peaks_builtin(rest))
+        block_on(super::peaks_builtin(
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn gather_result(value: Value) -> Tensor {
@@ -876,13 +624,13 @@ mod tests {
     #[test]
     fn peaks_default_shape() {
         let gathered = gather_result(peaks_builtin(vec![]).expect("peaks"));
-        assert_eq!(gathered.shape, vec![49, 49]);
+        assert_eq!(gathered.shape(), &[49, 49]);
     }
 
     #[test]
     fn peaks_n_shape() {
         let gathered = gather_result(peaks_builtin(vec![Value::Num(20.0)]).expect("peaks"));
-        assert_eq!(gathered.shape, vec![20, 20]);
+        assert_eq!(gathered.shape(), &[20, 20]);
     }
 
     #[test]
@@ -946,7 +694,7 @@ mod tests {
             peaks_builtin(vec![Value::Tensor(x.clone()), Value::Tensor(y.clone())]).expect("peaks");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 for i in 0..4 {
                     let expected = peaks_at(x.materialize_f64()[i], y.materialize_f64()[i]);
                     assert!((t.materialize_f64()[i] - expected).abs() < 1e-12);
@@ -981,7 +729,7 @@ mod tests {
             .expect("integer X");
         let y =
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![1, 2]).expect("integer Y");
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let Value::OutputList(values) =
             peaks_builtin(vec![Value::Tensor(x), Value::Tensor(y)]).expect("peaks")
         else {
@@ -1002,7 +750,7 @@ mod tests {
         let Value::Tensor(z) = &values[2] else {
             panic!("expected Z tensor");
         };
-        assert_eq!(z.shape, vec![1, 2]);
+        assert_eq!(z.shape(), &[1, 2]);
         assert!(z.integer_storage().is_none());
     }
 
@@ -1013,7 +761,7 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![2, 2])
                 .expect("integer Y"),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let Value::OutputList(values) = peaks_builtin(vec![x, y]).expect("broadcast peaks") else {
             panic!("expected three outputs");
         };
@@ -1028,7 +776,7 @@ mod tests {
         let Value::Tensor(z) = &values[2] else {
             panic!("expected Z tensor");
         };
-        assert_eq!(z.shape, vec![2, 2]);
+        assert_eq!(z.shape(), &[2, 2]);
     }
 
     #[test]
@@ -1041,7 +789,7 @@ mod tests {
     #[test]
     fn peaks_too_many_outputs_errors() {
         // Simulate [a,b,c,d] = peaks() — out_count = 4 must be rejected.
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let err = peaks_builtin(vec![]).unwrap_err();
         assert!(
             err.to_string().contains("too many output arguments"),
@@ -1199,7 +947,7 @@ mod tests {
                     .unwrap_or_else(|e| panic!("provider.peaks({n}) failed: {e}"));
                 let t = gather_handle(handle);
 
-                assert_eq!(t.shape, vec![n, n], "shape mismatch for n={n}");
+                assert_eq!(t.shape(), &[n, n], "shape mismatch for n={n}");
                 for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                     let err = (gv - cv).abs();
                     assert!(
@@ -1218,7 +966,7 @@ mod tests {
             let provider = wgpu_provider();
             let handle = provider.peaks(0).expect("peaks(0)");
             let t = gather_handle(handle);
-            assert_eq!(t.shape, vec![0, 0]);
+            assert_eq!(t.shape(), &[0, 0]);
             assert!(t.materialize_f64().is_empty());
         }
 
@@ -1263,7 +1011,7 @@ mod tests {
                 .expect("provider.peaks_xy");
             let t = gather_handle(z_handle);
 
-            assert_eq!(t.shape, shape.to_vec());
+            assert_eq!(t.shape(), shape);
             for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                 let err = (gv - cv).abs();
                 assert!(

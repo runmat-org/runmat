@@ -1,0 +1,56 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("h5disp"),
+    slug: Some("h5disp"),
+    summary: "Return a textual summary of an HDF5 file, group, or dataset.",
+    description: "`h5disp(filename)` displays the file root; an optional location selects a group or dataset, `mode` chooses `'simple'` or `'min'`, and the optional `'TextEncoding','UTF-8'` pair selects Unicode names. Capturing the display text as a string is a RunMat extension.",
+    keywords: &["h5disp", "hdf5", "metadata", "display", "dataset", "group", "file", "io"],
+    related: &["h5info"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["The default `'simple'` mode traverses groups, datasets, shapes, datatypes, and attributes, including scalar numeric (with exact integer classes) and scalar string attribute values. `'min'` lists only group and dataset names. `'TextEncoding','UTF-8'` uses the native library's Unicode name route; other encoding labels are rejected. A statement call writes the display text to standard output even when its expression is suppressed. Capturing that text as a string requires RunMat compatibility mode and does not also print it.", "HDF5 access uses the native HDF5 library. Browser execution reports `RunMat:hdf5:UnsupportedTarget`; there is no GPU kernel or fusion route. Filename, location, mode, and encoding controls are scalar host text, not resident numeric operands."] },
+        BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &["Native HDF5 file access is synchronous host work. It terminates fusion and does not launch a GPU kernel. The active native filesystem path authority and HDF5 library must be available; a missing native route reports a typed error rather than falling back to an unrelated ambient path."] },
+    ],
+    examples: &[BuiltinExample {
+        id: "native-h5disp",
+        title: "h5disp with a deterministic native HDF5 file",
+        program: "h5write('measurements.h5', '/group/A', [1 2; 3 4]);\nh5writeatt('measurements.h5', '/group/A', 'units', 'm/s');\ntxt = h5disp('measurements.h5');\ntxt",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(contains(txt, 'Group: /group')); assert(contains(txt, 'Dataset: /group/A')); assert(contains(txt, 'Value: m/s'));" },
+    }, BuiltinExample {
+        id: "native-h5disp-min-utf8",
+        title: "Minimal display with Unicode names",
+        program: "h5write('display.h5', '/café/measurements', [1 2]);\ntxt = h5disp('display.h5', '/café', 'min', 'TextEncoding', 'UTF-8');\ntxt",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(contains(txt, 'Group: /café')); assert(contains(txt, 'Dataset: /café/measurements')); assert(~contains(txt, 'Attribute:'));" },
+    }],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Can this run in a browser?", answer: "The current HDF5 backend requires a native HDF5 library; browser calls return RunMat:hdf5:UnsupportedTarget." },
+    ],
+    links: &[BuiltinDocumentationLink { label: "h5info", target: BuiltinDocumentationLinkTarget::Builtin("h5info") }, BuiltinDocumentationLink { label: "MATLAB h5disp forms", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/h5disp.html") }],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "mod.rs", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5/mod.rs") },
+            BuiltinDocumentationLink { label: "geometry.rs", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5/geometry.rs") },
+            BuiltinDocumentationLink { label: "path.rs", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5/path.rs") },
+            BuiltinDocumentationLink { label: "h5disp_controls.rs", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5/h5disp_controls.rs") },
+            BuiltinDocumentationLink { label: "metadata.rs", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5/native/metadata.rs") },
+            BuiltinDocumentationLink { label: "attribute_values.rs", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/hdf5/native/attribute_values.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Native HDF5 behavior", location: "builtins::io::hdf5::tests::h5writeatt_h5info_and_h5disp_report_metadata" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

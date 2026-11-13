@@ -5,28 +5,43 @@ fn boundary_node_refill_applies_quality_gated_two_to_three_flip() {
     let nodes = vec![
         ConstrainedCavityNode {
             node_id: 0,
-            coordinates_m: [0.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 1,
-            coordinates_m: [1.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 2,
-            coordinates_m: [0.0, 1.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 3,
-            coordinates_m: [0.05, 0.55, 0.3],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.05, 0.55, 0.3]),
         },
         ConstrainedCavityNode {
             node_id: 4,
-            coordinates_m: [0.55, 0.05, -0.3],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.55, 0.05, -0.3]),
         },
     ];
     let boundary_nodes = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let options = refill_options();
     let baseline_tetrahedra = [[0, 1, 2, 3], [0, 2, 1, 4]]
@@ -105,28 +120,43 @@ fn boundary_node_refill_applies_quality_gated_three_to_two_flip() {
     let nodes = vec![
         ConstrainedCavityNode {
             node_id: 0,
-            coordinates_m: [0.45, 0.5, 1.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.45, 0.5, 1.0]),
         },
         ConstrainedCavityNode {
             node_id: 3,
-            coordinates_m: [0.5, 0.45, -1.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.5, 0.45, -1.0]),
         },
         ConstrainedCavityNode {
             node_id: 4,
-            coordinates_m: [0.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 5,
-            coordinates_m: [1.0, 0.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([1.0, 0.0, 0.0]),
         },
         ConstrainedCavityNode {
             node_id: 6,
-            coordinates_m: [0.0, 1.0, 0.0],
+            coordinates_m: runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new([0.0, 1.0, 0.0]),
         },
     ];
     let boundary_nodes = nodes
         .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
+        .map(|node| (node.node_id, node.coordinates_m.canonical_value()))
         .collect::<BTreeMap<_, _>>();
     let options = refill_options();
     let baseline_tetrahedron_node_ids = [[0, 3, 4, 5], [0, 4, 3, 6], [0, 5, 6, 3]];

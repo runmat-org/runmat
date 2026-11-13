@@ -4,14 +4,13 @@ use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone)]
 pub struct Line3GpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
-    pub z_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
+    pub z_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }
@@ -35,11 +34,12 @@ struct Line3Uniforms {
 }
 
 pub fn pack_vertices_from_xyz(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &Line3GpuInputs,
     params: &Line3GpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.len < 2 {
         return Err("plot3: line inputs must contain at least two points".to_string());
     }
@@ -72,15 +72,17 @@ pub fn pack_vertices_from_xyz(
             entry_point: "main",
         });
 
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line3-gpu-vertices"),
-        size: max_vertices * std::mem::size_of::<Vertex>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("line3-gpu-vertices"),
+            size: max_vertices * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
     let uniforms = Line3Uniforms {
         color: params.color.to_array(),
@@ -102,15 +104,27 @@ pub fn pack_vertices_from_xyz(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: inputs.z_buffer.as_entire_binding(),
+                resource: inputs
+                    .z_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -140,7 +154,7 @@ pub fn pack_vertices_from_xyz(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -148,7 +162,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::line3::F32,
         ScalarType::F64 => shaders::line3::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("line3-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

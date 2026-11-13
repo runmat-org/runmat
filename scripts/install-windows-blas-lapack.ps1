@@ -172,7 +172,11 @@ function Export-GitHubEnvironment {
   Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$Prefix\lib"
   Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
   Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$Prefix\lib"
-  Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+  $lapackLibs = "lapack;openblas"
+  if (Test-Path -LiteralPath (Join-Path $Prefix "lib\libf2c.lib")) {
+    $lapackLibs = "lapack;libf2c;openblas"
+  }
+  Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=$lapackLibs"
   Add-Content -Path $env:GITHUB_PATH -Value "$Prefix\bin"
 }
 

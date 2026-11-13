@@ -1,7 +1,7 @@
 use crate::{
-    BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCallArg, MirDiagnostic,
-    MirDiagnosticSeverity, MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand,
-    MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    BasicBlock, MirAggregateKind, MirAssembly, MirBody, MirDiagnostic, MirDiagnosticSeverity,
+    MirIndexComponent, MirIndexing, MirLocalId, MirOperand, MirPlace, MirRvalue, MirStmt,
+    MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::Span;
 use runmat_types::{
@@ -12,17 +12,23 @@ use runmat_types::{
     LayoutFact, LiteralValue, MutationContract, MutationFact, NumericClass, RangeStepFact,
     ResidencyFact, ShapeFact, SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
-use std::collections::{HashMap, VecDeque};
+
+mod expression_regions;
+mod initialization;
+mod subscript_chain;
+use super::workspace_effect::{current_scope_bindings, exposes_current_workspace};
+use expression_regions::{diagnose_expression_steps, diagnose_subscript_chain_reads};
+use initialization::compute_init_dataflow;
+pub(crate) use subscript_chain::{SubscriptChainInference, SubscriptPathDisposition};
 
 use super::{
     spawn_safety::{analyze_assembly_spawn_boundaries, diagnose_spawn_safety},
     InitFact,
 };
 
-#[derive(Debug, Clone)]
-struct InitDataflowResult {
-    in_states: Vec<Option<Vec<InitFact>>>,
-}
+#[cfg(test)]
+#[path = "dataflow/workspace_binding_tests.rs"]
+mod workspace_binding_tests;
 
 pub(crate) fn assign_place_fact(
     place: &MirPlace,
@@ -89,7 +95,14 @@ fn place_fact(place: &MirPlace, facts: &[Option<ValueFact>]) -> ValueFact {
             .get(local.0)
             .and_then(Clone::clone)
             .unwrap_or_else(dynamic_value),
-        MirPlace::Member(base, member) => infer_member_read(&place_fact(base, facts), member).fact,
+        MirPlace::Member(base, member) => {
+            infer_member_read(
+                &place_fact(base, facts),
+                member,
+                runmat_types::SequenceUse::RequireSingle,
+            )
+            .fact
+        }
         MirPlace::Index(base, indexing) => {
             infer_index(
                 &place_fact(base, facts),
@@ -115,24 +128,25 @@ pub(crate) fn simple_rvalue_inference(
         MirRvalue::Use(operand) => {
             runmat_types::FactInference::exact(simple_operand_fact(operand, facts))
         }
-        MirRvalue::Future { .. } => runmat_types::FactInference::exact(scalar_fact(
-            ValueKindFact::Execution(ExecutionFact::Future {
-                output: Box::new(dynamic_value()),
-                state: FutureStateFact::Lazy,
-            }),
-        )),
+        MirRvalue::Future { .. } | MirRvalue::ExternalFuture { .. } => {
+            runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Execution(
+                ExecutionFact::Future {
+                    output: runmat_types::ValueSequenceFact::single(dynamic_value()),
+                    state: FutureStateFact::Lazy,
+                },
+            )))
+        }
         MirRvalue::Spawn(_) => runmat_types::FactInference::exact(scalar_fact(
             ValueKindFact::Execution(ExecutionFact::Task {
-                output: Box::new(dynamic_value()),
+                output: runmat_types::ValueSequenceFact::single(dynamic_value()),
                 spawn_safety: SpawnSafetyFact::RequiresIsolation,
             }),
         )),
         MirRvalue::Aggregate {
             kind,
-            rows,
-            cols,
+            row_lengths,
             elements,
-        } => aggregate_inference(kind, *rows, *cols, elements, facts),
+        } => aggregate_inference(kind, row_lengths, elements, facts),
         MirRvalue::StructLiteral { fields } => infer_struct(
             fields
                 .iter()
@@ -147,7 +161,10 @@ pub(crate) fn simple_rvalue_inference(
             runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Object(
                 runmat_types::ObjectFact {
                     class: None,
-                    runtime_class: Some(class_name.clone()),
+                    runtime_class: Some(
+                        runmat_types::ClassIdentity::from_qualified_name(class_name)
+                            .expect("MIR object literals carry canonical class names"),
+                    ),
                     properties,
                     properties_complete: true,
                     handle_semantics: None,
@@ -174,21 +191,48 @@ pub(crate) fn simple_rvalue_inference(
             };
             infer_range(numeric_operand(start), step, numeric_operand(end))
         }
+        MirRvalue::Index { base, indexing }
+            if matches!(
+                indexing.result_context,
+                runmat_types::IndexResultContext::ReadCommaList
+                    | runmat_types::IndexResultContext::FunctionArgumentExpansion
+            ) =>
+        {
+            legacy_sequence_as_value_inference(runmat_types::infer_index_sequence(
+                &simple_operand_fact(base, facts),
+                indexing.kind,
+                &index_selectors(indexing, facts),
+                indexing.result_context,
+            ))
+        }
         MirRvalue::Index { base, indexing } => infer_index(
             &simple_operand_fact(base, facts),
             indexing.kind,
             &index_selectors(indexing, facts),
             indexing.result_context,
         ),
-        MirRvalue::Member { base, member } => {
-            infer_member_read(&simple_operand_fact(base, facts), member)
+        MirRvalue::Member {
+            base,
+            member,
+            sequence_use,
+        } if *sequence_use == runmat_types::SequenceUse::RequireSingle => {
+            infer_member_read(&simple_operand_fact(base, facts), member, *sequence_use)
         }
+        MirRvalue::Member { base, member, .. } => legacy_sequence_as_value_inference(
+            runmat_types::infer_member_sequence(&simple_operand_fact(base, facts), member),
+        ),
+        MirRvalue::SubscriptChain(chain)
+            if chain.sequence_use != runmat_types::SequenceUse::RequireSingle =>
+        {
+            legacy_sequence_as_value_inference(infer_subscript_chain_sequence(chain, facts))
+        }
+        MirRvalue::SubscriptChain(chain) => infer_subscript_chain(chain, facts),
         MirRvalue::DynamicMember { .. }
         | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End => runmat_types::FactInference::exact(dynamic_value()),
-        MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0 => {
+        MirRvalue::Call(call) if call.requested_outputs.known_count() == Some(0) => {
             runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Void))
         }
         MirRvalue::Call(_) => runmat_types::FactInference::exact(dynamic_value()),
@@ -198,25 +242,79 @@ pub(crate) fn simple_rvalue_inference(
     }
 }
 
-fn aggregate_inference(
-    kind: &MirAggregateKind,
-    rows: usize,
-    cols: usize,
-    elements: &[MirOperand],
+/// Defensive fallback for old serialized MIR. Current lowering represents
+/// every non-single sequence expression with `CaptureSequence`, so a value
+/// rvalue cannot carry the sequence fact forward.
+fn legacy_sequence_as_value_inference(
+    inference: runmat_types::SequenceFactInference,
+) -> runmat_types::FactInference {
+    let fact = if !inference.sequence.variadic && inference.sequence.outputs.len() == 1 {
+        inference
+            .sequence
+            .outputs
+            .into_iter()
+            .next()
+            .expect("one sequence output was established")
+    } else {
+        ValueFact::unknown(DynamicReason::RuntimeValue)
+    };
+    runmat_types::FactInference {
+        fact,
+        diagnostics: inference.diagnostics,
+    }
+}
+
+pub(crate) fn infer_subscript_chain(
+    chain: &crate::MirSubscriptChain,
     facts: &[Option<ValueFact>],
 ) -> runmat_types::FactInference {
-    let rows = if rows == 0 {
-        Vec::new()
-    } else {
-        elements
-            .chunks(cols.max(1))
-            .map(|row| {
-                row.iter()
-                    .map(|operand| simple_operand_fact(operand, facts))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
-    };
+    subscript_chain::infer(chain, facts).inference
+}
+
+pub(crate) fn infer_subscript_chain_contract(
+    chain: &crate::MirSubscriptChain,
+    facts: &[Option<ValueFact>],
+) -> SubscriptChainInference {
+    subscript_chain::infer(chain, facts)
+}
+
+pub(crate) fn infer_subscript_chain_sequence(
+    chain: &crate::MirSubscriptChain,
+    facts: &[Option<ValueFact>],
+) -> runmat_types::SequenceFactInference {
+    subscript_chain::infer_sequence(chain, facts)
+}
+
+fn aggregate_inference(
+    kind: &MirAggregateKind,
+    row_lengths: &[usize],
+    elements: &[crate::MirAggregateElement],
+    facts: &[Option<ValueFact>],
+) -> runmat_types::FactInference {
+    let mut offset = 0usize;
+    let mut rows = Vec::with_capacity(row_lengths.len());
+    for &length in row_lengths {
+        let Some(end) = offset.checked_add(length) else {
+            return runmat_types::FactInference::exact(dynamic_value());
+        };
+        let Some(row) = elements.get(offset..end) else {
+            return runmat_types::FactInference::exact(dynamic_value());
+        };
+        rows.push(
+            row.iter()
+                .map(|element| {
+                    element
+                        .operand()
+                        .map(|operand| simple_operand_fact(operand, facts))
+                        .unwrap_or_else(dynamic_value)
+                })
+                .collect::<Vec<_>>(),
+        );
+        offset = end;
+    }
+    if offset != elements.len() {
+        return runmat_types::FactInference::exact(dynamic_value());
+    }
     match kind {
         MirAggregateKind::Tensor => infer_tensor_aggregate(&rows),
         MirAggregateKind::Cell => infer_cell_aggregate(&rows),
@@ -230,13 +328,11 @@ fn simple_operand_fact(operand: &MirOperand, facts: &[Option<ValueFact>]) -> Val
             .and_then(Clone::clone)
             .unwrap_or_else(dynamic_value),
         MirOperand::Constant(constant) => constant_fact(constant),
-        MirOperand::FunctionHandle(
-            CallableIdentity::BoundFunction(function)
-            | CallableIdentity::ExternalFunction { function, .. },
-        )
+        MirOperand::FunctionHandle(CallableIdentity::BoundFunction(function))
         | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
             scalar_fact(ValueKindFact::Callable(CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
+                capabilities: Default::default(),
                 parameters: Vec::new(),
                 parameters_complete: false,
                 outputs: Vec::new(),
@@ -250,6 +346,7 @@ fn simple_operand_fact(operand: &MirOperand, facts: &[Option<ValueFact>]) -> Val
         MirOperand::FunctionHandle(identity) => {
             scalar_fact(ValueKindFact::Callable(CallableFact {
                 identity: Some(identity.clone()),
+                capabilities: Default::default(),
                 parameters: Vec::new(),
                 parameters_complete: false,
                 outputs: Vec::new(),
@@ -276,6 +373,11 @@ pub(crate) fn literal_value(constant: &crate::MirConstant) -> LiteralValue {
     match constant {
         crate::MirConstant::Number(value) => LiteralValue::Real {
             text: value.clone(),
+            class: runmat_types::NumericClass::Double,
+        },
+        crate::MirConstant::ImaginaryNumber(value) => LiteralValue::Complex {
+            real: "0".into(),
+            imaginary: value.clone(),
             class: runmat_types::NumericClass::Double,
         },
         crate::MirConstant::IntegerLiteral(value) => LiteralValue::Integer {
@@ -317,29 +419,41 @@ fn numeric_operand(operand: &MirOperand) -> Option<f64> {
     }
 }
 
-fn index_selectors(indexing: &MirIndexing, facts: &[Option<ValueFact>]) -> Vec<IndexSelectorFact> {
+pub(crate) fn index_selectors(
+    indexing: &MirIndexing,
+    facts: &[Option<ValueFact>],
+) -> Vec<IndexSelectorFact> {
     indexing
         .components
         .iter()
         .map(|component| match component {
             MirIndexComponent::Colon => IndexSelectorFact::Colon,
-            MirIndexComponent::End { offset, .. } => IndexSelectorFact::End { offset: *offset },
-            MirIndexComponent::Expr(operand) => {
-                if let Some(index) =
-                    numeric_operand(operand).filter(|index| *index >= 1.0 && index.fract() == 0.0)
-                {
-                    IndexSelectorFact::KnownOneBasedIndex(index as usize)
-                } else {
-                    let fact = simple_operand_fact(operand, facts);
-                    if matches!(fact.kind, ValueKindFact::Logical) {
-                        IndexSelectorFact::Logical(fact)
-                    } else {
-                        IndexSelectorFact::Numeric(fact)
-                    }
-                }
+            MirIndexComponent::Expr(operand) => index_selector_for_operand(operand, facts),
+            MirIndexComponent::ContextualExpr(_)
+            | MirIndexComponent::PreparedExpr(_)
+            | MirIndexComponent::Expansion(_) => {
+                IndexSelectorFact::Numeric(ValueFact::unknown(DynamicReason::Unspecified))
             }
         })
         .collect()
+}
+
+fn index_selector_for_operand(
+    operand: &MirOperand,
+    facts: &[Option<ValueFact>],
+) -> IndexSelectorFact {
+    if let Some(index) =
+        numeric_operand(operand).filter(|index| *index >= 1.0 && index.fract() == 0.0)
+    {
+        IndexSelectorFact::KnownOneBasedIndex(index as usize)
+    } else {
+        let fact = simple_operand_fact(operand, facts);
+        if matches!(fact.kind, ValueKindFact::Logical) {
+            IndexSelectorFact::Logical(fact)
+        } else {
+            IndexSelectorFact::Numeric(fact)
+        }
+    }
 }
 
 fn scalar_fact(kind: ValueKindFact) -> ValueFact {
@@ -368,26 +482,63 @@ fn dynamic_value() -> ValueFact {
 
 pub(crate) fn diagnostics_for_assembly(assembly: &MirAssembly) -> Vec<MirDiagnostic> {
     let mut diagnostics = Vec::new();
-    for body in assembly.bodies.values() {
-        diagnostics.extend(diagnose_uninitialized_reads(body));
-        diagnostics.extend(diagnose_semantic_misuse(body));
+    for (function, body) in &assembly.bodies {
+        let source = assembly
+            .functions
+            .get(function)
+            .map(|metadata| metadata.source);
+        diagnostics.extend(
+            diagnose_uninitialized_reads(
+                body,
+                super::constructor_entry::instance_output_local(assembly, body),
+            )
+            .into_iter()
+            .map(|diagnostic| attach_source(diagnostic, source)),
+        );
+        diagnostics.extend(
+            diagnose_semantic_misuse(body)
+                .into_iter()
+                .map(|diagnostic| attach_source(diagnostic, source)),
+        );
     }
     let boundaries = analyze_assembly_spawn_boundaries(assembly);
-    for boundaries in boundaries.values() {
-        diagnostics.extend(diagnose_spawn_safety(boundaries));
+    for (function, boundaries) in &boundaries {
+        let source = assembly
+            .functions
+            .get(function)
+            .map(|metadata| metadata.source);
+        diagnostics.extend(
+            diagnose_spawn_safety(boundaries)
+                .into_iter()
+                .map(|diagnostic| attach_source(diagnostic, source)),
+        );
     }
     diagnostics
 }
 
-pub(super) fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {
-    let result = compute_init_dataflow(body);
+fn attach_source(
+    diagnostic: MirDiagnostic,
+    source: Option<runmat_types::ProgramSourceId>,
+) -> MirDiagnostic {
+    match source {
+        Some(source) => diagnostic.with_source(source),
+        None => diagnostic,
+    }
+}
+
+pub(super) fn diagnose_uninitialized_reads(
+    body: &MirBody,
+    constructor_instance: Option<MirLocalId>,
+) -> Vec<MirDiagnostic> {
+    let result = compute_init_dataflow(body, constructor_instance);
+    let current_bindings = current_scope_bindings(body);
     let mut diagnostics = Vec::new();
 
     for (idx, block) in body.blocks.iter().enumerate() {
         let Some(mut state) = result.in_states[idx].clone() else {
             continue;
         };
-        diagnose_block(block, &mut state, &mut diagnostics);
+        diagnose_block(block, &mut state, &current_bindings, &mut diagnostics);
     }
 
     diagnostics
@@ -398,8 +549,17 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
     for block in &body.blocks {
         for stmt in &block.statements {
             match &stmt.kind {
-                MirStmtKind::Assign { value, .. }
+                MirStmtKind::PrepareFixedAssignment(owner) => {
+                    for step in owner.steps() {
+                        if let crate::MirExpressionStep::Let { value, span, .. } = step {
+                            diagnose_rvalue_semantics(value, *span, &mut diagnostics);
+                        }
+                    }
+                }
+                MirStmtKind::PreparedAssign { value, .. }
+                | MirStmtKind::Assign { value, .. }
                 | MirStmtKind::MultiAssign { value, .. }
+                | MirStmtKind::SequenceAssign { value, .. }
                 | MirStmtKind::Expr(value) => {
                     diagnose_rvalue_semantics(value, stmt.span, &mut diagnostics)
                 }
@@ -419,6 +579,11 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                         ));
                     }
                 }
+                MirStmtKind::CaptureSequence { source, .. } => {
+                    source.visit_direct_expression_steps_dyn(&mut |steps| {
+                        diagnose_region_semantics(steps, &mut diagnostics)
+                    });
+                }
                 MirStmtKind::WorkspaceEffect { effect, .. } => {
                     if matches!(effect, runmat_hir::WorkspaceEffect::DynamicEval) {
                         diagnostics.push(hir_diagnostic(
@@ -430,6 +595,7 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                         ));
                     }
                 }
+                MirStmtKind::StatementOutput(_) => {}
                 MirStmtKind::EnvironmentEffect(_) => diagnostics.push(hir_diagnostic(
                     "RM-MIR0009",
                     "environment mutation invalidates dynamic lookup assumptions",
@@ -460,39 +626,30 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
                     "command-syntax",
                 ));
             }
-            if matches!(
-                call.requested_outputs,
-                runmat_hir::RequestedOutputCount::Zero
-            ) && call
-                .args
-                .iter()
-                .any(|arg| matches!(arg, MirCallArg::Expansion { .. }))
-            {
-                diagnostics.push(hir_diagnostic(
-                    "RM-MIR0004",
-                    "comma-list expansion is not valid for a zero-output call",
-                    "consume comma-list expansions in value-producing call contexts",
-                    span,
-                    "comma-list",
-                ));
-            }
         }
-        MirRvalue::Index { indexing, .. } => {
-            if indexing
-                .components
-                .iter()
-                .any(|component| matches!(component, MirIndexComponent::End { dim: None, .. }))
-            {
-                diagnostics.push(hir_diagnostic(
-                    "RM-MIR0006",
-                    "symbolic end requires an index dimension context",
-                    "resolve end against the indexed value and dimension before runtime lowering",
-                    span,
-                    "indexing-semantics",
-                ));
-            }
-        }
+        MirRvalue::Index { .. } => {}
         _ => {}
+    }
+    value.visit_direct_expression_steps_dyn(&mut |steps| {
+        diagnose_region_semantics(steps, diagnostics)
+    });
+}
+
+fn diagnose_region_semantics(
+    steps: &[crate::MirExpressionStep],
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    for step in steps {
+        match step {
+            crate::MirExpressionStep::Let { value, span, .. } => {
+                diagnose_rvalue_semantics(value, *span, diagnostics)
+            }
+            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                source.visit_direct_expression_steps_dyn(&mut |nested| {
+                    diagnose_region_semantics(nested, diagnostics)
+                });
+            }
+        }
     }
 }
 
@@ -509,103 +666,14 @@ fn hir_diagnostic(
         .with_category(category)
 }
 
-fn compute_init_dataflow(body: &MirBody) -> InitDataflowResult {
-    let local_count = body.locals.len();
-    if body.blocks.is_empty() {
-        return InitDataflowResult {
-            in_states: Vec::new(),
-        };
-    }
-
-    let block_index: HashMap<BasicBlockId, usize> = body
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(idx, block)| (block.id, idx))
-        .collect();
-
-    let mut initial = vec![InitFact::Unassigned; local_count];
-    for local in &body.locals {
-        if matches!(local.kind, MirLocalKind::Parameter | MirLocalKind::Capture) {
-            initial[local.id.0] = InitFact::DefinitelyAssigned;
-        }
-    }
-
-    let mut in_states: Vec<Option<Vec<InitFact>>> = vec![None; body.blocks.len()];
-    let mut out_states: Vec<Vec<InitFact>> =
-        vec![vec![InitFact::Unassigned; local_count]; body.blocks.len()];
-    in_states[0] = Some(initial);
-
-    let mut worklist = VecDeque::from([0usize]);
-    while let Some(block_idx) = worklist.pop_front() {
-        let Some(input) = in_states[block_idx].clone() else {
-            continue;
-        };
-        let block = &body.blocks[block_idx];
-        let output = transfer_block(block, input);
-        out_states[block_idx] = output.clone();
-
-        for successor in successors(&block.terminator.kind) {
-            let Some(&successor_idx) = block_index.get(&successor) else {
-                continue;
-            };
-            let changed = match &mut in_states[successor_idx] {
-                Some(existing) => join_into(existing, &output),
-                slot @ None => {
-                    *slot = Some(output.clone());
-                    true
-                }
-            };
-            if changed {
-                worklist.push_back(successor_idx);
-            }
-        }
-    }
-
-    InitDataflowResult { in_states }
-}
-
-fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<InitFact> {
-    for stmt in &block.statements {
-        match &stmt.kind {
-            MirStmtKind::Assign { place, .. } => mark_place_assigned(place, &mut state),
-            MirStmtKind::MultiAssign { targets, .. } => {
-                for target in &targets.targets {
-                    if let crate::MirOutputTarget::Place(place) = target {
-                        mark_place_assigned(place, &mut state);
-                    }
-                }
-            }
-            MirStmtKind::Expr(_)
-            | MirStmtKind::PlaceMutation(_)
-            | MirStmtKind::WorkspaceEffect { .. }
-            | MirStmtKind::EnvironmentEffect(_) => {}
-        }
-    }
-
-    match &block.terminator.kind {
-        MirTerminatorKind::For { binding, .. } => {
-            state[binding.0] = InitFact::DefinitelyAssigned;
-        }
-        MirTerminatorKind::Await {
-            result: Some(place),
-            ..
-        } => {
-            mark_place_assigned(place, &mut state);
-        }
-        MirTerminatorKind::Await { result: None, .. } => {}
-        _ => {}
-    }
-    state
-}
-
 fn diagnose_block(
     block: &BasicBlock,
     state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     for stmt in &block.statements {
-        diagnose_stmt(stmt, state, diagnostics);
+        diagnose_stmt(stmt, state, current_bindings, diagnostics);
     }
 
     match &block.terminator.kind {
@@ -621,7 +689,13 @@ fn diagnose_block(
         MirTerminatorKind::For {
             binding, iterable, ..
         } => {
-            diagnose_rvalue_reads(iterable, state, block.terminator.span, diagnostics);
+            diagnose_rvalue_reads(
+                iterable,
+                state,
+                current_bindings,
+                block.terminator.span,
+                diagnostics,
+            );
             state[binding.0] = InitFact::DefinitelyAssigned;
         }
         MirTerminatorKind::ParFor {
@@ -630,25 +704,73 @@ fn diagnose_block(
             maximum_workers,
             ..
         } => {
-            diagnose_rvalue_reads(iterable, state, block.terminator.span, diagnostics);
+            diagnose_rvalue_reads(
+                iterable,
+                state,
+                current_bindings,
+                block.terminator.span,
+                diagnostics,
+            );
             if let Some(workers) = maximum_workers.as_deref() {
-                diagnose_rvalue_reads(workers, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    workers,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
             state[binding.0] = InitFact::DefinitelyAssigned;
         }
         MirTerminatorKind::Spmd { header, .. } => match header.as_ref() {
             crate::parallel::MirSpmdHeader::Default => {}
             crate::parallel::MirSpmdHeader::One(value) => {
-                diagnose_rvalue_reads(value, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    value,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
             crate::parallel::MirSpmdHeader::Two(first, second) => {
-                diagnose_rvalue_reads(first, state, block.terminator.span, diagnostics);
-                diagnose_rvalue_reads(second, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    first,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
+                diagnose_rvalue_reads(
+                    second,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
             crate::parallel::MirSpmdHeader::Three(first, second, third) => {
-                diagnose_rvalue_reads(first, state, block.terminator.span, diagnostics);
-                diagnose_rvalue_reads(second, state, block.terminator.span, diagnostics);
-                diagnose_rvalue_reads(third, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    first,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
+                diagnose_rvalue_reads(
+                    second,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
+                diagnose_rvalue_reads(
+                    third,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
         },
         MirTerminatorKind::Return(outputs) => {
@@ -659,7 +781,13 @@ fn diagnose_block(
         MirTerminatorKind::Await { future, result, .. } => {
             diagnose_operand_read(future, state, block.terminator.span, diagnostics);
             if let Some(place) = result {
-                diagnose_place_reads(place, state, block.terminator.span, diagnostics);
+                diagnose_place_reads(
+                    place,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
                 mark_place_assigned(place, state);
             }
         }
@@ -669,32 +797,168 @@ fn diagnose_block(
     }
 }
 
-fn diagnose_stmt(stmt: &MirStmt, state: &mut [InitFact], diagnostics: &mut Vec<MirDiagnostic>) {
+fn diagnose_stmt(
+    stmt: &MirStmt,
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
     match &stmt.kind {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            if let Some(region) = owner.selector_region() {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    &region.steps,
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_call_argument_reads(
+                    &region.argument,
+                    &mut nested_state,
+                    current_bindings,
+                    region.span,
+                    diagnostics,
+                );
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
+            } else if matches!(
+                owner.phase,
+                crate::MirFixedPreparationPhase::FinishStep { .. }
+            ) {
+                owner.visit_external_operands(|operand| {
+                    diagnose_operand_read(operand, state, stmt.span, diagnostics);
+                });
+            }
+            if let Some(crate::MirFixedSelectorDestination::Scalar(local)) = owner.output() {
+                mark_place_assigned(&crate::MirPlace::Local(local), state);
+            }
+        }
+        MirStmtKind::PreparedAssign { preparation, value } => {
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
+            mark_place_assigned(&preparation.mutation.place, state);
+        }
         MirStmtKind::Assign { place, value } => {
-            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
-            diagnose_place_reads(place, state, stmt.span, diagnostics);
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
+            diagnose_place_reads(place, state, current_bindings, stmt.span, diagnostics);
             mark_place_assigned(place, state);
         }
         MirStmtKind::MultiAssign { targets, value } => {
-            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
             for target in &targets.targets {
-                if let crate::MirOutputTarget::Place(place) = target {
-                    diagnose_place_reads(place, state, stmt.span, diagnostics);
-                    mark_place_assigned(place, state);
+                match target {
+                    crate::MirOutputTarget::Place(place) => {
+                        diagnose_place_reads(
+                            place,
+                            state,
+                            current_bindings,
+                            stmt.span,
+                            diagnostics,
+                        );
+                        mark_place_assigned(place, state);
+                    }
+                    crate::MirOutputTarget::Sequence(target) => {
+                        diagnose_sequence_target_reads(
+                            target,
+                            state,
+                            current_bindings,
+                            stmt.span,
+                            diagnostics,
+                        );
+                        mark_place_assigned(target.base(), state);
+                    }
+                    crate::MirOutputTarget::Discard => {}
                 }
             }
         }
-        MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
-        MirStmtKind::PlaceMutation(_)
-        | MirStmtKind::WorkspaceEffect { .. }
-        | MirStmtKind::EnvironmentEffect(_) => {}
+        MirStmtKind::SequenceAssign { target, value } => {
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
+            let (base, member) = match target {
+                crate::MirSequenceTarget::Member { base, .. } => (base, None),
+                crate::MirSequenceTarget::DynamicMember { base, member } => (base, Some(member)),
+                crate::MirSequenceTarget::CellContents { base, indexing } => {
+                    diagnose_indexing_reads(
+                        indexing,
+                        state,
+                        current_bindings,
+                        stmt.span,
+                        diagnostics,
+                    );
+                    (base, None)
+                }
+            };
+            diagnose_place_reads(base, state, current_bindings, stmt.span, diagnostics);
+            if let Some(member) = member {
+                diagnose_operand_read(member, state, stmt.span, diagnostics);
+            }
+            mark_place_assigned(base, state);
+        }
+        MirStmtKind::CaptureSequence { source, .. } => {
+            diagnose_expansion_source_reads(
+                source,
+                state,
+                current_bindings,
+                stmt.span,
+                diagnostics,
+            );
+        }
+        MirStmtKind::WorkspaceEffect { effect, bindings } => {
+            mark_declared_storage(effect, bindings, state);
+        }
+        MirStmtKind::Expr(value) => {
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics)
+        }
+        MirStmtKind::StatementOutput(output) => {
+            if let crate::MirStatementOutputSource::Local(local) = output.source {
+                diagnose_operand_read(
+                    &crate::MirOperand::Local(local),
+                    state,
+                    stmt.span,
+                    diagnostics,
+                );
+            }
+        }
+        MirStmtKind::PlaceMutation(_) | MirStmtKind::EnvironmentEffect(_) => {}
+    }
+}
+
+fn mark_declared_storage(
+    effect: &runmat_hir::WorkspaceEffect,
+    bindings: &[MirLocalId],
+    state: &mut [InitFact],
+) {
+    if matches!(
+        effect,
+        runmat_hir::WorkspaceEffect::MutatesGlobal | runmat_hir::WorkspaceEffect::MutatesPersistent
+    ) {
+        for binding in bindings {
+            state[binding.0] = InitFact::DefinitelyAssigned;
+        }
+    }
+}
+
+fn diagnose_sequence_target_reads(
+    target: &crate::MirSequenceTarget,
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    diagnose_place_reads(target.base(), state, current_bindings, span, diagnostics);
+    match target {
+        crate::MirSequenceTarget::Member { .. } => {}
+        crate::MirSequenceTarget::DynamicMember { member, .. } => {
+            diagnose_operand_read(member, state, span, diagnostics)
+        }
+        crate::MirSequenceTarget::CellContents { indexing, .. } => {
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics)
+        }
     }
 }
 
 fn diagnose_rvalue_reads(
     value: &MirRvalue,
     state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -714,7 +978,7 @@ fn diagnose_rvalue_reads(
         } => {
             diagnose_operand_read(left, state, span, diagnostics);
             for stmt in right_temps {
-                diagnose_stmt(stmt, state, diagnostics);
+                diagnose_stmt(stmt, state, current_bindings, diagnostics);
             }
             diagnose_operand_read(right, state, span, diagnostics);
         }
@@ -727,12 +991,14 @@ fn diagnose_rvalue_reads(
         }
         MirRvalue::Call(call) => {
             for arg in &call.args {
-                diagnose_operand_read(arg.operand(), state, span, diagnostics);
+                diagnose_call_argument_reads(arg, state, current_bindings, span, diagnostics);
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
-                diagnose_operand_read(element, state, span, diagnostics);
+                if let Some(operand) = element.operand() {
+                    diagnose_operand_read(operand, state, span, diagnostics);
+                }
             }
         }
         MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
@@ -742,67 +1008,90 @@ fn diagnose_rvalue_reads(
         }
         MirRvalue::Index { base, indexing } => {
             diagnose_operand_read(base, state, span, diagnostics);
-            diagnose_indexing_reads(indexing, state, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics);
+        }
+        MirRvalue::SubscriptChain(chain) => {
+            diagnose_subscript_chain_reads(chain, state, current_bindings, span, diagnostics)
         }
         MirRvalue::Member { base, .. } => diagnose_operand_read(base, state, span, diagnostics),
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember { base, member, .. } => {
             diagnose_operand_read(base, state, span, diagnostics);
             diagnose_operand_read(member, state, span, diagnostics);
         }
         MirRvalue::WorkspaceFirstStaticProperty { .. } => {}
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for arg in args {
-                diagnose_operand_read(arg.operand(), state, span, diagnostics);
+                diagnose_call_argument_reads(arg, state, current_bindings, span, diagnostics);
             }
         }
         MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
-        MirRvalue::Distributed(operation) => match operation {
-            crate::parallel::MirDistributedOp::Create { input, .. } => {
-                diagnose_operand_read(input, state, span, diagnostics);
+        MirRvalue::Distributed(operation) => {
+            for operand in operation.operands() {
+                diagnose_operand_read(operand, state, span, diagnostics);
             }
-            crate::parallel::MirDistributedOp::LocalPart { .. }
-            | crate::parallel::MirDistributedOp::Materialize { .. }
-            | crate::parallel::MirDistributedOp::Redistribute { .. } => {}
-        },
-        MirRvalue::Collective(operation) => match operation {
-            crate::parallel::MirCollectiveOp::Broadcast { input, .. }
-            | crate::parallel::MirCollectiveOp::Gather { input, .. }
-            | crate::parallel::MirCollectiveOp::Scatter { input, .. }
-            | crate::parallel::MirCollectiveOp::AllGather { input, .. }
-            | crate::parallel::MirCollectiveOp::Reduce { input, .. }
-            | crate::parallel::MirCollectiveOp::AllReduce { input, .. }
-            | crate::parallel::MirCollectiveOp::Send { input, .. } => {
-                diagnose_operand_read(input, state, span, diagnostics);
+        }
+        MirRvalue::Collective(operation) => {
+            for operand in operation.operands() {
+                diagnose_operand_read(operand, state, span, diagnostics);
             }
-            crate::parallel::MirCollectiveOp::Barrier { .. }
-            | crate::parallel::MirCollectiveOp::Receive { .. } => {}
-        },
+        }
+    }
+    if exposes_current_workspace(value) {
+        mark_runtime_workspace_lookup(state, current_bindings);
+    }
+}
+
+fn mark_runtime_workspace_lookup(state: &mut [InitFact], current_bindings: &[MirLocalId]) {
+    for binding in current_bindings {
+        state[binding.0] = InitFact::RuntimeWorkspaceLookup;
+    }
+}
+
+fn diagnose_call_argument_reads(
+    argument: &crate::MirCallArg,
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    match argument {
+        crate::MirCallArg::Single(operand) => {
+            diagnose_operand_read(operand, state, span, diagnostics)
+        }
+        crate::MirCallArg::Expansion(source) => {
+            diagnose_expansion_source_reads(source, state, current_bindings, span, diagnostics)
+        }
+        crate::MirCallArg::CapturedSequence(_) => {}
     }
 }
 
 fn diagnose_place_reads(
     place: &MirPlace,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     match place {
         MirPlace::Local(_) | MirPlace::Binding(_) => {}
-        MirPlace::Member(base, _) => diagnose_place_reads(base, state, span, diagnostics),
+        MirPlace::Member(base, _) => {
+            diagnose_place_reads(base, state, current_bindings, span, diagnostics)
+        }
         MirPlace::DynamicMember(base, member) => {
-            diagnose_place_reads(base, state, span, diagnostics);
+            diagnose_place_reads(base, state, current_bindings, span, diagnostics);
             diagnose_operand_read(member, state, span, diagnostics);
         }
         MirPlace::Index(base, indexing) => {
-            diagnose_place_reads(base, state, span, diagnostics);
-            diagnose_indexing_reads(indexing, state, span, diagnostics);
+            diagnose_place_reads(base, state, current_bindings, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics);
         }
     }
 }
 
 fn diagnose_indexing_reads(
     indexing: &MirIndexing,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -811,7 +1100,84 @@ fn diagnose_indexing_reads(
             MirIndexComponent::Expr(operand) => {
                 diagnose_operand_read(operand, state, span, diagnostics);
             }
-            MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}
+            MirIndexComponent::ContextualExpr(region) => {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    region.steps(),
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
+            }
+            MirIndexComponent::PreparedExpr(region) => {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    region.steps(),
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
+            }
+            MirIndexComponent::Expansion(region) => {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    &region.steps,
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_call_argument_reads(
+                    &region.argument,
+                    &mut nested_state,
+                    current_bindings,
+                    region.span,
+                    diagnostics,
+                );
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
+            }
+            MirIndexComponent::Colon => {}
+        }
+    }
+}
+
+fn diagnose_expansion_source_reads(
+    source: &crate::MirExpansionSource,
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    match source {
+        crate::MirExpansionSource::SubscriptChain(chain) => {
+            diagnose_subscript_chain_reads(chain, state, current_bindings, span, diagnostics)
+        }
+        crate::MirExpansionSource::CellContents { base, indexing } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics);
+        }
+        crate::MirExpansionSource::ReturnedOutputs(base)
+        | crate::MirExpansionSource::Member { base, .. } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+        }
+        crate::MirExpansionSource::DynamicMember { base, member } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+            diagnose_operand_read(member, state, span, diagnostics);
+        }
+    }
+}
+
+fn transfer_region_workspace_lookup(
+    state: &mut [InitFact],
+    region_state: &[InitFact],
+    current_bindings: &[MirLocalId],
+) {
+    for binding in current_bindings {
+        if region_state[binding.0] == InitFact::RuntimeWorkspaceLookup {
+            state[binding.0] = InitFact::RuntimeWorkspaceLookup;
         }
     }
 }
@@ -825,35 +1191,53 @@ fn diagnose_operand_read(
     let MirOperand::Local(local) = operand else {
         return;
     };
-    match state[local.0] {
-        InitFact::DefinitelyAssigned => {}
-        InitFact::Unassigned => diagnostics.push(init_diagnostic(
-            "RM-MIR0001",
-            "local may be read before it is assigned",
-            "this local is read before any assignment reaches this point",
-            span,
-        )),
-        InitFact::MaybeAssigned => diagnostics.push(init_diagnostic(
-            "RM-MIR0002",
-            "local may be read before assignment on some control-flow paths",
-            "this local is not definitely assigned on every path reaching this point",
-            span,
-        )),
+    let Some(fact) = state.get(local.0) else {
+        diagnostics.push(invalid_region_local_diagnostic(*local, span));
+        return;
+    };
+    match fact {
+        InitFact::DefinitelyAssigned | InitFact::RuntimeWorkspaceLookup => {}
+        InitFact::Unassigned => {
+            diagnostics.push(init_diagnostic(UninitializedRead::Definite, span))
+        }
+        InitFact::MaybeAssigned => {
+            diagnostics.push(init_diagnostic(UninitializedRead::Possible, span))
+        }
     }
 }
 
-fn init_diagnostic(
-    code: &'static str,
-    message: &'static str,
-    label: &'static str,
-    span: Span,
-) -> MirDiagnostic {
-    let help = match code {
-        "RM-MIR0001" => "assign this local before reading it",
-        "RM-MIR0002" => "assign this local on every control-flow path before reading it",
-        _ => "ensure the local is initialized before use",
+fn invalid_region_local_diagnostic(local: MirLocalId, span: Span) -> MirDiagnostic {
+    MirDiagnostic::new(
+        "RM-MIR0021",
+        MirDiagnosticSeverity::Error,
+        format!("expression region references undeclared local {local:?}"),
+        span,
+    )
+    .with_category("expression-region")
+}
+
+enum UninitializedRead {
+    Definite,
+    Possible,
+}
+
+fn init_diagnostic(kind: UninitializedRead, span: Span) -> MirDiagnostic {
+    let (code, message, label, help) = match kind {
+        UninitializedRead::Definite => (
+            "RM-MIR0001",
+            "local may be read before it is assigned",
+            "this local is read before any assignment reaches this point",
+            "assign this local before reading it",
+        ),
+        UninitializedRead::Possible => (
+            "RM-MIR0002",
+            "local may be read before assignment on some control-flow paths",
+            "this local is not definitely assigned on every path reaching this point",
+            "assign this local on every control-flow path before reading it",
+        ),
     };
     MirDiagnostic::new(code, MirDiagnosticSeverity::Error, message, span)
+        .with_runtime_check()
         .with_primary_label(label)
         .with_help(help)
         .with_category("definite-assignment")
@@ -872,67 +1256,5 @@ fn place_root(place: &MirPlace) -> Option<MirLocalId> {
             place_root(base)
         }
         MirPlace::Binding(_) => None,
-    }
-}
-
-fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
-    match kind {
-        MirTerminatorKind::Goto(target) => vec![*target],
-        MirTerminatorKind::Branch {
-            then_block,
-            else_block,
-            ..
-        } => vec![*then_block, *else_block],
-        MirTerminatorKind::Switch {
-            cases, otherwise, ..
-        } => cases
-            .iter()
-            .map(|(_, block)| *block)
-            .chain(std::iter::once(*otherwise))
-            .collect(),
-        MirTerminatorKind::For {
-            body_block,
-            exit_block,
-            ..
-        } => vec![*body_block, *exit_block],
-        MirTerminatorKind::ParFor {
-            body_block,
-            exit_block,
-            ..
-        }
-        | MirTerminatorKind::Spmd {
-            body_block,
-            exit_block,
-            ..
-        } => vec![*body_block, *exit_block],
-        MirTerminatorKind::TryCatch {
-            try_block,
-            catch_block,
-            ..
-        } => vec![*try_block, *catch_block],
-        MirTerminatorKind::Await { resume, .. } => vec![*resume],
-        MirTerminatorKind::Return(_) | MirTerminatorKind::Unreachable => Vec::new(),
-    }
-}
-
-fn join_into(existing: &mut [InitFact], incoming: &[InitFact]) -> bool {
-    let mut changed = false;
-    for (slot, incoming) in existing.iter_mut().zip(incoming) {
-        let joined = join_init(*slot, *incoming);
-        if *slot != joined {
-            *slot = joined;
-            changed = true;
-        }
-    }
-    changed
-}
-
-fn join_init(left: InitFact, right: InitFact) -> InitFact {
-    match (left, right) {
-        (InitFact::Unassigned, InitFact::Unassigned) => InitFact::Unassigned,
-        (InitFact::DefinitelyAssigned, InitFact::DefinitelyAssigned) => {
-            InitFact::DefinitelyAssigned
-        }
-        _ => InitFact::MaybeAssigned,
     }
 }

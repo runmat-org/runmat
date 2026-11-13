@@ -16,23 +16,30 @@ fn residency_broadcast_2d_chain() {
     let gb = runmat_runtime::call_builtin("gpuArray", &[b]).unwrap();
 
     // Chain: (ga - gb) ./ (gb + 1) .* 0.5 + 2 then .^ 0.9
-    let sub = runmat_runtime::call_builtin("minus", &[ga.clone(), gb.clone()]).unwrap();
-    assert!(matches!(sub, Value::GpuTensor(_)));
-    let denom = runmat_runtime::call_builtin("plus", &[gb.clone(), Value::Num(1.0)]).unwrap();
-    assert!(matches!(denom, Value::GpuTensor(_)));
-    let div = runmat_runtime::call_builtin("rdivide", &[sub, denom]).unwrap();
-    assert!(matches!(div, Value::GpuTensor(_)));
-    let half = runmat_runtime::call_builtin("times", &[div, Value::Num(0.5)]).unwrap();
-    assert!(matches!(half, Value::GpuTensor(_)));
-    let add2 = runmat_runtime::call_builtin("plus", &[half, Value::Num(2.0)]).unwrap();
-    assert!(matches!(add2, Value::GpuTensor(_)));
-    let pow = runmat_runtime::call_builtin("power", &[add2, Value::Num(0.9)]).unwrap();
-    assert!(matches!(pow, Value::GpuTensor(_)));
+    let sub =
+        runmat_runtime::call_builtin("minus", &[ga.value().clone(), gb.value().clone()]).unwrap();
+    assert!(matches!(sub.value(), Value::GpuTensor(_)));
+    let denom =
+        runmat_runtime::call_builtin("plus", &[gb.value().clone(), Value::Num(1.0)]).unwrap();
+    assert!(matches!(denom.value(), Value::GpuTensor(_)));
+    let div =
+        runmat_runtime::call_builtin("rdivide", &[sub.value().clone(), denom.value().clone()])
+            .unwrap();
+    assert!(matches!(div.value(), Value::GpuTensor(_)));
+    let half =
+        runmat_runtime::call_builtin("times", &[div.value().clone(), Value::Num(0.5)]).unwrap();
+    assert!(matches!(half.value(), Value::GpuTensor(_)));
+    let add2 =
+        runmat_runtime::call_builtin("plus", &[half.value().clone(), Value::Num(2.0)]).unwrap();
+    assert!(matches!(add2.value(), Value::GpuTensor(_)));
+    let pow =
+        runmat_runtime::call_builtin("power", &[add2.value().clone(), Value::Num(0.9)]).unwrap();
+    assert!(matches!(pow.value(), Value::GpuTensor(_)));
 
     // Gather and check shape
-    let out = runmat_runtime::call_builtin("gather", &[pow]).unwrap();
-    if let Value::Tensor(t) = out {
-        assert_eq!(t.shape, vec![p, c]);
+    let out = runmat_runtime::call_builtin("gather", &[pow.value().clone()]).unwrap();
+    if let Value::Tensor(t) = out.value() {
+        assert_eq!(t.shape(), &[p, c]);
     } else {
         panic!("expected tensor");
     }
@@ -54,28 +61,31 @@ fn residency_broadcast_3d_chain_and_mean_vecdim() {
     let gbias = runmat_runtime::call_builtin("gpuArray", &[bias]).unwrap();
 
     // (ga - gbias) .* 0.25 + 1.0 then gamma-like power
-    let sub = runmat_runtime::call_builtin("minus", &[ga.clone(), gbias.clone()]).unwrap();
-    assert!(matches!(sub, Value::GpuTensor(_)));
-    let scaled = runmat_runtime::call_builtin("times", &[sub, Value::Num(0.25)]).unwrap();
-    assert!(matches!(scaled, Value::GpuTensor(_)));
-    let shifted = runmat_runtime::call_builtin("plus", &[scaled, Value::Num(1.0)]).unwrap();
-    assert!(matches!(shifted, Value::GpuTensor(_)));
+    let sub = runmat_runtime::call_builtin("minus", &[ga.value().clone(), gbias.value().clone()])
+        .unwrap();
+    assert!(matches!(sub.value(), Value::GpuTensor(_)));
+    let scaled =
+        runmat_runtime::call_builtin("times", &[sub.value().clone(), Value::Num(0.25)]).unwrap();
+    assert!(matches!(scaled.value(), Value::GpuTensor(_)));
+    let shifted =
+        runmat_runtime::call_builtin("plus", &[scaled.value().clone(), Value::Num(1.0)]).unwrap();
+    assert!(matches!(shifted.value(), Value::GpuTensor(_)));
 
     // mean over [2 3] (dims vector)
     let mean = runmat_runtime::call_builtin(
         "mean",
         &[
-            shifted.clone(),
+            shifted.value().clone(),
             Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
         ],
     )
     .unwrap();
-    assert!(matches!(mean, Value::GpuTensor(_)));
+    assert!(matches!(mean.value(), Value::GpuTensor(_)));
 
     // Gather and check shape [B,1,1] -> effectively [B,1,1] or [B,1]
-    let out = runmat_runtime::call_builtin("gather", &[mean]).unwrap();
-    if let Value::Tensor(t) = out {
-        assert_eq!(t.shape.first().copied(), Some(b));
+    let out = runmat_runtime::call_builtin("gather", &[mean.value().clone()]).unwrap();
+    if let Value::Tensor(t) = out.value() {
+        assert_eq!(t.shape().first().copied(), Some(b));
     } else {
         panic!("expected tensor");
     }
@@ -103,27 +113,42 @@ fn residency_thermal_camera_chain() {
     .unwrap();
 
     // subtraction with implicit expansion: (B,H,W) - (1,H,W)
-    let sub = runmat_runtime::call_builtin("minus", &[g_imgs.clone(), g_off]).unwrap();
-    assert!(matches!(sub, Value::GpuTensor(_)));
+    let sub =
+        runmat_runtime::call_builtin("minus", &[g_imgs.value().clone(), g_off.value().clone()])
+            .unwrap();
+    assert!(matches!(sub.value(), Value::GpuTensor(_)));
     // times (.*)
-    let scaled = runmat_runtime::call_builtin("times", &[sub, Value::Num(0.75)]).unwrap();
-    assert!(matches!(scaled, Value::GpuTensor(_)));
+    let scaled =
+        runmat_runtime::call_builtin("times", &[sub.value().clone(), Value::Num(0.75)]).unwrap();
+    assert!(matches!(scaled.value(), Value::GpuTensor(_)));
     // add (+)
-    let shifted = runmat_runtime::call_builtin("plus", &[scaled, Value::Num(0.1)]).unwrap();
-    assert!(matches!(shifted, Value::GpuTensor(_)));
+    let shifted =
+        runmat_runtime::call_builtin("plus", &[scaled.value().clone(), Value::Num(0.1)]).unwrap();
+    assert!(matches!(shifted.value(), Value::GpuTensor(_)));
     // clamp via mask: A .* (A >= 0)
-    let mask = runmat_runtime::call_builtin("ge", &[shifted.clone(), Value::Num(0.0)]).unwrap();
-    assert!(matches!(mask, Value::GpuTensor(_)));
-    let clamped = runmat_runtime::call_builtin("times", &[shifted, mask]).unwrap();
-    assert!(matches!(clamped, Value::GpuTensor(_)));
+    let mask =
+        runmat_runtime::call_builtin("ge", &[shifted.value().clone(), Value::Num(0.0)]).unwrap();
+    assert!(matches!(mask.value(), Value::GpuTensor(_)));
+    // Arithmetic consumes numerical device views. Convert the predicate via
+    // the public class-conversion path before multiplying the image.
+    let numeric_mask = runmat_runtime::call_builtin("double", &[mask.value().clone()]).unwrap();
+    assert!(matches!(numeric_mask.value(), Value::GpuTensor(_)));
+    let clamped = runmat_runtime::call_builtin(
+        "times",
+        &[shifted.value().clone(), numeric_mask.value().clone()],
+    )
+    .unwrap();
+    assert!(matches!(clamped.value(), Value::GpuTensor(_)));
     // log1p via log(1 + x)
-    let one_plus = runmat_runtime::call_builtin("plus", &[clamped, Value::Num(1.0)]).unwrap();
-    assert!(matches!(one_plus, Value::GpuTensor(_)));
-    let loged = runmat_runtime::call_builtin("log", &[one_plus]).unwrap();
-    assert!(matches!(loged, Value::GpuTensor(_)));
+    let one_plus =
+        runmat_runtime::call_builtin("plus", &[clamped.value().clone(), Value::Num(1.0)]).unwrap();
+    assert!(matches!(one_plus.value(), Value::GpuTensor(_)));
+    let loged = runmat_runtime::call_builtin("log", &[one_plus.value().clone()]).unwrap();
+    assert!(matches!(loged.value(), Value::GpuTensor(_)));
     // mean(A,'all') -> scalar
-    let mean_all = runmat_runtime::call_builtin("mean", &[loged, Value::from("all")]).unwrap();
-    assert!(matches!(mean_all, Value::GpuTensor(_)));
+    let mean_all =
+        runmat_runtime::call_builtin("mean", &[loged.value().clone(), Value::from("all")]).unwrap();
+    assert!(matches!(mean_all.value(), Value::GpuTensor(_)));
 }
 
 #[test]
@@ -146,18 +171,20 @@ fn residency_pca_center_and_normalize() {
     .unwrap();
 
     // center: X - mu (broadcast)
-    let centered = runmat_runtime::call_builtin("minus", &[gx.clone(), gmu]).unwrap();
-    assert!(matches!(centered, Value::GpuTensor(_)));
+    let centered =
+        runmat_runtime::call_builtin("minus", &[gx.value().clone(), gmu.value().clone()]).unwrap();
+    assert!(matches!(centered.value(), Value::GpuTensor(_)));
     // variance estimate: mean(centered.^2, 1)
-    let sq = runmat_runtime::call_builtin("power", &[centered.clone(), Value::Num(2.0)]).unwrap();
-    assert!(matches!(sq, Value::GpuTensor(_)));
-    let var = runmat_runtime::call_builtin("mean", &[sq, Value::Num(1.0)]).unwrap();
-    assert!(matches!(var, Value::GpuTensor(_)));
+    let sq = runmat_runtime::call_builtin("power", &[centered.value().clone(), Value::Num(2.0)])
+        .unwrap();
+    assert!(matches!(sq.value(), Value::GpuTensor(_)));
+    let var = runmat_runtime::call_builtin("mean", &[sq.value().clone(), Value::Num(1.0)]).unwrap();
+    assert!(matches!(var.value(), Value::GpuTensor(_)));
     // cast to single then back to double to check residency of casts
-    let single = runmat_runtime::call_builtin("single", std::slice::from_ref(&var)).unwrap();
-    assert!(matches!(single, Value::GpuTensor(_)));
-    let dbl = runmat_runtime::call_builtin("double", &[single]).unwrap();
-    assert!(matches!(dbl, Value::GpuTensor(_)));
+    let single = runmat_runtime::call_builtin("single", &[var.value().clone()]).unwrap();
+    assert!(matches!(single.value(), Value::GpuTensor(_)));
+    let dbl = runmat_runtime::call_builtin("double", &[single.value().clone()]).unwrap();
+    assert!(matches!(dbl.value(), Value::GpuTensor(_)));
 }
 
 #[test]
@@ -179,13 +206,15 @@ fn residency_nlms_like_ops() {
     )
     .unwrap();
 
-    let xx = runmat_runtime::call_builtin("times", &[gx.clone(), gx.clone()]).unwrap();
-    assert!(matches!(xx, Value::GpuTensor(_)));
-    let sx = runmat_runtime::call_builtin("sum", &[xx, Value::Num(1.0)]).unwrap();
-    assert!(matches!(sx, Value::GpuTensor(_)));
+    let xx =
+        runmat_runtime::call_builtin("times", &[gx.value().clone(), gx.value().clone()]).unwrap();
+    assert!(matches!(xx.value(), Value::GpuTensor(_)));
+    let sx = runmat_runtime::call_builtin("sum", &[xx.value().clone(), Value::Num(1.0)]).unwrap();
+    assert!(matches!(sx.value(), Value::GpuTensor(_)));
 
-    let xw = runmat_runtime::call_builtin("times", &[gx, gw]).unwrap();
-    assert!(matches!(xw, Value::GpuTensor(_)));
-    let sw = runmat_runtime::call_builtin("sum", &[xw, Value::Num(1.0)]).unwrap();
-    assert!(matches!(sw, Value::GpuTensor(_)));
+    let xw =
+        runmat_runtime::call_builtin("times", &[gx.value().clone(), gw.value().clone()]).unwrap();
+    assert!(matches!(xw.value(), Value::GpuTensor(_)));
+    let sw = runmat_runtime::call_builtin("sum", &[xw.value().clone(), Value::Num(1.0)]).unwrap();
+    assert!(matches!(sw.value(), Value::GpuTensor(_)));
 }

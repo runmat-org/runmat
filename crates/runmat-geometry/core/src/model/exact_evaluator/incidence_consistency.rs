@@ -7,6 +7,12 @@ use super::{
 const INITIAL_INTERVALS: usize = 32;
 const MAX_REFINEMENT_DEPTH: u8 = 32;
 const MAX_CONSISTENCY_INTERVALS: usize = 1_000_000;
+/// An edge tolerance written by a CAD kernel bounds the gap between the 3D curve and each pcurve
+/// at the writer's control points (OCCT checks 23 evenly spaced parameters); between them the
+/// true gap of two smooth curves can exceed it slightly. This check bisects adaptively and finds
+/// that larger maximum, so it admits a small fixed allowance over the written edge tolerance.
+/// Exported CAD in the meshing qualification corpus exceeded its edge tolerance by under 1%.
+const EDGE_TOLERANCE_SAMPLING_ALLOWANCE: f64 = 1.1;
 
 #[derive(Clone, Copy)]
 struct Sample {
@@ -21,6 +27,12 @@ struct Interval {
     start_sample: Sample,
     end_sample: Sample,
     depth: u8,
+}
+
+struct EdgeUse<'a> {
+    edge: &'a ExactEdge,
+    coedge: &'a ExactCoedge,
+    face: &'a ExactFace,
 }
 
 /// Independently checks exact curve endpoints and every curve/pcurve/surface incidence.
@@ -96,10 +108,11 @@ where
             edge,
             coedge,
             face,
-            tolerance_m,
+            tolerance_m.max(edge.tolerance_m.canonical_value() * EDGE_TOLERANCE_SAMPLING_ALLOWANCE),
             control,
             &additional_parameters,
-        )?;
+        )
+        .map_err(|error| with_edge_use_context(error, edge, face))?;
     }
     Ok(())
 }
@@ -120,8 +133,8 @@ where
     let point =
         ExactCurveEvaluator::point(evaluator, &edge.curve_evaluator_id, parameter, control)?;
     require_consistent(
-        distance(point, vertex.point_m),
-        tolerance_m.max(vertex.tolerance_m),
+        distance(point.canonical_value(), vertex.point_m.canonical_value()),
+        tolerance_m.max(vertex.tolerance_m.canonical_value()),
         format!(
             "curve endpoint {:?} at parameter {parameter:e} disagrees with topological vertex {:?}",
             edge.id, vertex.id
@@ -150,7 +163,7 @@ where
             "3D curve and face-use pcurve parameter domains disagree",
         ));
     }
-    let mut parameters = uniform_parameters(range);
+    let mut parameters = uniform_parameters(range)?;
     parameters.extend(additional_parameters(edge, coedge, range)?);
     parameters.retain(|value| value.is_finite() && *value >= range.start && *value <= range.end);
     parameters.sort_by(f64::total_cmp);
@@ -161,14 +174,17 @@ where
         ));
     }
     charge_allocation(parameters.len(), std::mem::size_of::<f64>(), control)?;
+    // Depth-first bisection holds at most one pending sibling per level, so one stack of
+    // `MAX_REFINEMENT_DEPTH + 1` intervals serves every interval of this edge use.
+    let stack_capacity = usize::from(MAX_REFINEMENT_DEPTH) + 1;
+    charge_allocation(stack_capacity, std::mem::size_of::<Interval>(), control)?;
+    let mut pending = Vec::with_capacity(stack_capacity);
     for pair in parameters.windows(2) {
         let start_sample = sample_edge_use(evaluator, edge, coedge, face, pair[0], control)?;
         let end_sample = sample_edge_use(evaluator, edge, coedge, face, pair[1], control)?;
         refine_interval(
             evaluator,
-            edge,
-            coedge,
-            face,
+            EdgeUse { edge, coedge, face },
             Interval {
                 start: pair[0],
                 end: pair[1],
@@ -178,6 +194,7 @@ where
             },
             tolerance_m,
             control,
+            &mut pending,
         )?;
     }
     Ok(())
@@ -185,18 +202,18 @@ where
 
 fn refine_interval<E>(
     evaluator: &E,
-    edge: &ExactEdge,
-    coedge: &ExactCoedge,
-    face: &ExactFace,
+    edge_use: EdgeUse<'_>,
     initial: Interval,
     tolerance_m: f64,
     control: &dyn GeometryEvaluationControl,
+    pending: &mut Vec<Interval>,
 ) -> Result<(), GeometryEvaluationError>
 where
     E: ExactCurveEvaluator + ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized,
 {
-    charge_allocation(1, std::mem::size_of::<Interval>(), control)?;
-    let mut pending = vec![initial];
+    let EdgeUse { edge, coedge, face } = edge_use;
+    pending.clear();
+    pending.push(initial);
     let mut visited = 0usize;
     while let Some(interval) = pending.pop() {
         control.checkpoint()?;
@@ -209,7 +226,7 @@ where
         }
         validate_sample(interval.start_sample, tolerance_m)?;
         validate_sample(interval.end_sample, tolerance_m)?;
-        let midpoint = interval.start + (interval.end - interval.start) * 0.5;
+        let midpoint = interval.start.midpoint(interval.end);
         if midpoint == interval.start || midpoint == interval.end {
             return Err(budget(
                 "geometry consistency exhausted parameter resolution",
@@ -217,17 +234,16 @@ where
         }
         let midpoint_sample = sample_edge_use(evaluator, edge, coedge, face, midpoint, control)?;
         validate_sample(midpoint_sample, tolerance_m)?;
-        let curve_flatness = midpoint_deviation(
-            interval.start_sample.curve_point,
-            interval.end_sample.curve_point,
-            midpoint_sample.curve_point,
+        // The validated quantity is the gap g(t) = curve(t) - surface(pcurve(t)). Stop refining
+        // once g is linear between the interval ends to a quarter of the tolerance: the samples
+        // then bound g on the interval. Requiring each curve itself to be that flat would bisect
+        // a curved edge with a nanometre tolerance into micrometre intervals.
+        let gap_curvature = midpoint_deviation(
+            gap(interval.start_sample),
+            gap(interval.end_sample),
+            gap(midpoint_sample),
         );
-        let mapped_flatness = midpoint_deviation(
-            interval.start_sample.mapped_point,
-            interval.end_sample.mapped_point,
-            midpoint_sample.mapped_point,
-        );
-        if curve_flatness.max(mapped_flatness) <= tolerance_m * 0.25 {
+        if gap_curvature <= tolerance_m * 0.25 {
             continue;
         }
         if interval.depth >= MAX_REFINEMENT_DEPTH {
@@ -235,7 +251,6 @@ where
                 "geometry consistency could not resolve curvature within its hard depth bound",
             ));
         }
-        charge_allocation(2, std::mem::size_of::<Interval>(), control)?;
         let depth = interval.depth + 1;
         pending.push(Interval {
             start: midpoint,
@@ -269,21 +284,20 @@ where
     let curve_point =
         ExactCurveEvaluator::point(evaluator, &edge.curve_evaluator_id, parameter, control)?;
     let uv =
-        ExactPcurveEvaluator::point(evaluator, &coedge.pcurve_evaluator_id, parameter, control)?;
+        ExactPcurveEvaluator::point(evaluator, &coedge.pcurve_evaluator_id, parameter, control)?
+            .map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value));
     let mapped_point =
         ExactSurfaceEvaluator::point(evaluator, &face.surface_evaluator_id, uv, control)?;
     Ok(Sample {
-        curve_point,
-        mapped_point,
+        curve_point: curve_point.canonical_value(),
+        mapped_point: mapped_point.canonical_value(),
     })
 }
 
-fn uniform_parameters(range: ParameterRange) -> Vec<f64> {
-    (0..=INITIAL_INTERVALS)
-        .map(|index| {
-            range.start + (range.end - range.start) * index as f64 / INITIAL_INTERVALS as f64
-        })
-        .collect()
+fn uniform_parameters(range: ParameterRange) -> Result<Vec<f64>, GeometryEvaluationError> {
+    Ok(range
+        .uniform_samples::<{ INITIAL_INTERVALS + 1 }>()?
+        .to_vec())
 }
 
 fn validate_sample(sample: Sample, tolerance_m: f64) -> Result<(), GeometryEvaluationError> {
@@ -307,6 +321,30 @@ fn require_consistent(
         ));
     }
     Ok(())
+}
+
+fn with_edge_use_context(
+    error: GeometryEvaluationError,
+    edge: &ExactEdge,
+    face: &ExactFace,
+) -> GeometryEvaluationError {
+    if error.kind != GeometryEvaluationErrorKind::InconsistentGeometry {
+        return error;
+    }
+    GeometryEvaluationError::new(
+        error.kind,
+        format!(
+            "{} (edge {} on face {}, written edge tolerance {:e} m)",
+            error.reason,
+            edge.id.source_topology_id,
+            face.id.source_topology_id,
+            edge.tolerance_m.canonical_value()
+        ),
+    )
+}
+
+fn gap(sample: Sample) -> [f64; 3] {
+    std::array::from_fn(|axis| sample.curve_point[axis] - sample.mapped_point[axis])
 }
 
 fn midpoint_deviation(start: [f64; 3], end: [f64; 3], midpoint: [f64; 3]) -> f64 {
@@ -358,4 +396,29 @@ fn inconsistent(reason: impl Into<String>) -> GeometryEvaluationError {
 
 fn invalid(reason: impl Into<String>) -> GeometryEvaluationError {
     GeometryEvaluationError::new(GeometryEvaluationErrorKind::InvalidResult, reason)
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+    #[test]
+    fn sampling_preserves_non_representable_domain_endpoints() {
+        for range in [
+            ParameterRange {
+                start: -3.0,
+                end: 0.1,
+            },
+            ParameterRange {
+                start: -1.0,
+                end: 0.123456789,
+            },
+        ] {
+            let parameters = uniform_parameters(range).unwrap();
+            assert_eq!(parameters[0].to_bits(), range.start.to_bits());
+            assert_eq!(parameters[INITIAL_INTERVALS].to_bits(), range.end.to_bits());
+            assert!(parameters
+                .iter()
+                .all(|value| *value >= range.start && *value <= range.end));
+        }
+    }
 }

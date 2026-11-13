@@ -37,7 +37,7 @@ fn inconsistent_curve_pcurve_surface_and_vertex_fail_closed() {
 
     let registry = registry();
     let mut bad_vertex = topology();
-    bad_vertex.vertices[0].point_m = [0.0; 3];
+    bad_vertex.vertices[0].point_m = crate::physical::Position::new([0.0; 3]);
     let evaluator = PortableExactEvaluator::new(&registry, &bad_vertex, &model()).unwrap();
     let error = evaluator
         .validate_incidence_consistency(1.0e-6, &BudgetControl::generous())

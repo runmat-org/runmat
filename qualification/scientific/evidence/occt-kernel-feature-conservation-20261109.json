@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source_revision": "878baa910e7806296fee33c672272f90af5d3d24",
+  "target": "x86_64-unknown-linux-gnu",
+  "toolchain": "1.90.0",
+  "scope": "Feature-graph conservation; this record does not assert numerical or OCCT kernel qualification",
+  "observations": [
+    {
+      "command": ["cargo", "tree", "--locked", "--offline", "--all-features", "-p", "runmat", "-e", "features", "-i", "runmat-geometry-io"],
+      "exit_code": 0,
+      "enabled_native_feature": "occt-native",
+      "occt_kernel_enabled": false,
+      "log": "/home/nallana/rm1293/logs/integration-071-878baa910e-cli-geometry-features.log",
+      "sha256": "9acd9b35dd203a86317ce804a004b4f8ece8292466e54f52735e2de79eb74fbd"
+    },
+    {
+      "command": ["cargo", "tree", "--locked", "--offline", "--all-features", "-p", "runmat-execution-runner-native", "-e", "features", "-i", "runmat-geometry-io"],
+      "exit_code": 0,
+      "enabled_native_feature": "occt-native",
+      "occt_kernel_enabled": false,
+      "log": "/home/nallana/rm1293/logs/integration-071-878baa910e-driver-geometry-features.log",
+      "sha256": "6d0d28c4c19aed238e74127a9f269e0e4ceb400502d66ff6cbd921abc610bda2"
+    }
+  ],
+  "source_review": "The unchanged runmat-geometry-io build script adds exact_kernel.cc and exact_kernel_display.cc only when CARGO_FEATURE_OCCT_KERNEL is set. The two required scientific commands do not enable that feature. Their compiled numerical source and test configuration are conserved. OCCT-enabled kernel builds and existing geometry/kernel tests must qualify the separate compatibility repair."
+}

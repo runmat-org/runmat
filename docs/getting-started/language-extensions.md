@@ -42,7 +42,7 @@ DataArray.write(samples, { [1 4096], ":" }, batch);
 
 See the [Datasets API](/docs/runtime/fs/datasets) for schemas, slicing, transactions, snapshots, import, export, and remote storage.
 
-RunMat also provides `geometry.*` and `fea.*` for loading CAD or mesh geometry, constructing multiphysics studies, running parameter sweeps, and retaining solver evidence. The subsystem can be driven from `.m` code or RunMat's declarative `.fea` format. See [FEA on Geometry](/docs/fea) for its beta status and supported physics families.
+RunMat also provides `geometry.*` and `fea.*` for loading CAD or mesh geometry, constructing multiphysics studies, running parameter sweeps, and retaining solver evidence. The subsystem can be driven from `.m` code or RunMat's declarative `.fea` format. See [FEA on Geometry](/docs/simulation) for its beta status and supported physics families.
 
 Small RunMat-native utilities include `urlencode` and `urldecode`, which provide URL text encoding directly to MATLAB-language programs.
 

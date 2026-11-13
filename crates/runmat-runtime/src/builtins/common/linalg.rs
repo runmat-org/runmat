@@ -2,6 +2,10 @@ use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::tensor;
 
+pub(crate) mod one_norm;
+pub(crate) mod inverse;
+pub use inverse::InverseError;
+
 /// Perform column-major matrix multiplication for real tensors.
 pub(crate) fn matmul_real(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     if a.cols() != b.rows() {
@@ -37,14 +41,14 @@ pub(crate) fn matmul_real(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 pub(crate) fn scalar_mul_real(a: &Tensor, scalar: f64) -> Tensor {
     let values = tensor::tensor_values_f64_cow(a);
     let data: Vec<f64> = values.iter().map(|x| x * scalar).collect();
-    Tensor::new(data, a.shape.clone()).expect("scalar_mul_real: invalid tensor")
+    Tensor::new(data, a.shape().to_vec()).expect("scalar_mul_real: invalid tensor")
 }
 
 /// Multiply a real tensor by a complex scalar, producing a complex tensor.
 pub(crate) fn scalar_mul_complex(a: &Tensor, cr: f64, ci: f64) -> ComplexTensor {
     let values = tensor::tensor_values_f64_cow(a);
     let data: Vec<(f64, f64)> = values.iter().map(|&x| (x * cr, x * ci)).collect();
-    ComplexTensor::new(data, a.shape.clone()).expect("scalar_mul_complex: invalid tensor")
+    ComplexTensor::new(data, a.shape().to_vec()).expect("scalar_mul_complex: invalid tensor")
 }
 
 /// Multiply a complex tensor by a complex scalar.
@@ -54,7 +58,8 @@ pub(crate) fn scalar_mul_complex_tensor(a: &ComplexTensor, cr: f64, ci: f64) -> 
         .iter()
         .map(|&(ar, ai)| (ar * cr - ai * ci, ar * ci + ai * cr))
         .collect();
-    ComplexTensor::new_2d(data, a.rows, a.cols).expect("scalar_mul_complex_tensor: invalid tensor")
+    ComplexTensor::new_2d(data, a.rows(), a.cols())
+        .expect("scalar_mul_complex_tensor: invalid tensor")
 }
 
 /// Multiply two complex matrices.
@@ -62,46 +67,58 @@ pub(crate) fn matmul_complex(
     a: &ComplexTensor,
     b: &ComplexTensor,
 ) -> Result<ComplexTensor, String> {
-    if a.cols != b.rows {
+    if a.cols() != b.rows() {
         return Err(format!(
             "Inner matrix dimensions must agree: {}x{} * {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a.rows(),
+            a.cols(),
+            b.rows(),
+            b.cols()
         ));
     }
-    let rows = a.rows;
-    let cols = b.cols;
-    let kdim = a.cols;
+    let rows = a.rows();
+    let cols = b.cols();
+    let kdim = a.cols();
     let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); rows * cols];
+    let a_values = a.materialize_f64();
+    let b_values = b.materialize_f64();
     for j in 0..cols {
         for i in 0..rows {
             let mut acc_re = 0.0;
             let mut acc_im = 0.0;
             for k in 0..kdim {
-                let (ar, ai) = a.materialize_f64()[i + k * rows];
-                let (br, bi) = b.materialize_f64()[k + j * b.rows];
+                let (ar, ai) = a_values[i + k * rows];
+                let (br, bi) = b_values[k + j * b.rows()];
                 acc_re += ar * br - ai * bi;
                 acc_im += ar * bi + ai * br;
             }
             data[i + j * rows] = (acc_re, acc_im);
         }
     }
-    ComplexTensor::new_2d(data, rows, cols)
+    let dtype = if a.numeric_dtype() == runmat_value::NumericDType::F32
+        && b.numeric_dtype() == runmat_value::NumericDType::F32
+    {
+        runmat_value::NumericDType::F32
+    } else {
+        runmat_value::NumericDType::F64
+    };
+    ComplexTensor::from_f64_values_with_dtype(data, vec![rows, cols], dtype)
 }
 
 /// Multiply a complex tensor by a real tensor.
 pub(crate) fn matmul_complex_real(a: &ComplexTensor, b: &Tensor) -> Result<ComplexTensor, String> {
-    if a.cols != b.rows() {
+    if a.cols() != b.rows() {
         return Err(format!(
             "Inner matrix dimensions must agree: {}x{} * {}x{}",
-            a.rows,
-            a.cols,
+            a.rows(),
+            a.cols(),
             b.rows(),
             b.cols()
         ));
     }
-    let rows = a.rows;
+    let rows = a.rows();
     let cols = b.cols();
-    let kdim = a.cols;
+    let kdim = a.cols();
     let b_values = tensor::tensor_values_f64_cow(b);
     let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); rows * cols];
     for j in 0..cols {
@@ -122,17 +139,17 @@ pub(crate) fn matmul_complex_real(a: &ComplexTensor, b: &Tensor) -> Result<Compl
 
 /// Multiply a real tensor by a complex tensor.
 pub(crate) fn matmul_real_complex(a: &Tensor, b: &ComplexTensor) -> Result<ComplexTensor, String> {
-    if a.cols() != b.rows {
+    if a.cols() != b.rows() {
         return Err(format!(
             "Inner matrix dimensions must agree: {}x{} * {}x{}",
             a.rows(),
             a.cols(),
-            b.rows,
-            b.cols
+            b.rows(),
+            b.cols()
         ));
     }
     let rows = a.rows();
-    let cols = b.cols;
+    let cols = b.cols();
     let kdim = a.cols();
     let a_values = tensor::tensor_values_f64_cow(a);
     let mut data: Vec<(f64, f64)> = vec![(0.0, 0.0); rows * cols];
@@ -142,7 +159,7 @@ pub(crate) fn matmul_real_complex(a: &Tensor, b: &ComplexTensor) -> Result<Compl
             let mut acc_im = 0.0;
             for k in 0..kdim {
                 let ar = a_values[i + k * rows];
-                let (br, bi) = b.materialize_f64()[k + j * b.rows];
+                let (br, bi) = b.materialize_f64()[k + j * b.rows()];
                 acc_re += ar * br;
                 acc_im += ar * bi;
             }
@@ -171,7 +188,10 @@ pub(crate) fn matrix_dimensions_for(
 }
 
 /// Parse an optional tolerance argument shared by SVD-derived builtins.
-pub(crate) fn parse_tolerance_arg(name: &str, args: &[Value]) -> Result<Option<f64>, String> {
+pub(crate) fn parse_tolerance_arg(
+    name: &str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Result<Option<f64>, String> {
     match args.len() {
         0 => Ok(None),
         1 => {
@@ -280,7 +300,11 @@ mod tests {
         let tol =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tolerance");
         assert_eq!(
-            parse_tolerance_arg("rank", &[Value::Tensor(tol)]).expect("tolerance"),
+            parse_tolerance_arg(
+                "rank",
+                crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(tol)])
+            )
+            .expect("tolerance"),
             Some(2.0)
         );
     }
@@ -289,8 +313,11 @@ mod tests {
     fn parse_tolerance_arg_rejects_negative_typed_integer_storage() {
         let tol = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("typed tolerance");
-        let err = parse_tolerance_arg("pinv", &[Value::Tensor(tol)])
-            .expect_err("negative typed tolerance must reject");
+        let err = parse_tolerance_arg(
+            "pinv",
+            crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(tol)]),
+        )
+        .expect_err("negative typed tolerance must reject");
         assert!(err.contains("tolerance must be >= 0"), "{err}");
     }
 
@@ -313,6 +340,25 @@ mod tests {
         let out = scalar_mul_complex(&tensor, 2.0, -0.5);
 
         assert_eq!(out.materialize_f64(), vec![(-4.0, 1.0), (6.0, -1.5)]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn scalar_multiplication_keeps_full_real_shape_and_complex_matrix_projection() {
+        let real = Tensor::new(vec![2.0, 3.0], vec![2]).expect("rank-one real tensor");
+        let real_out = scalar_mul_real(&real, 2.0);
+        assert_eq!(real_out.shape(), [2]);
+        assert_eq!(real_out.materialize_f64(), vec![4.0, 6.0]);
+
+        let promoted = scalar_mul_complex(&real, 2.0, -1.0);
+        assert_eq!(promoted.shape(), [2]);
+        assert_eq!(promoted.materialize_f64(), vec![(4.0, -2.0), (6.0, -3.0)]);
+
+        let complex = ComplexTensor::new(vec![(2.0, -1.0), (3.0, 1.0)], vec![1, 2, 1])
+            .expect("complex tensor with trailing singleton axis");
+        let complex_out = scalar_mul_complex_tensor(&complex, 2.0, 0.0);
+        assert_eq!(complex_out.shape(), [1, 2]);
+        assert_eq!(complex_out.materialize_f64(), vec![(4.0, -2.0), (6.0, 2.0)]);
     }
 
     #[test]

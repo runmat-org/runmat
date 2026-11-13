@@ -1,12 +1,14 @@
 use miette::{SourceOffset, SourceSpan};
 use runmat_hir::{HirError, Span};
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_types::ProgramSourceId;
 
 #[derive(Debug, Clone)]
 pub struct CompileError {
     pub message: String,
     pub span: Option<Span>,
     pub identifier: Option<String>,
+    pub source: Option<ProgramSourceId>,
 }
 
 impl CompileError {
@@ -15,6 +17,7 @@ impl CompileError {
             message: message.into(),
             span: None,
             identifier: None,
+            source: None,
         }
     }
 
@@ -25,6 +28,11 @@ impl CompileError {
 
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.identifier = Some(identifier.into());
+        self
+    }
+
+    pub fn with_source(mut self, source: ProgramSourceId) -> Self {
+        self.source = Some(source);
         self
     }
 }

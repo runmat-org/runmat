@@ -1,24 +1,26 @@
 //! MATLAB-compatible `regexp` builtin for RunMat.
 
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use regex::RegexBuilder;
+#[cfg(test)]
+use runmat_builtins::REGEXP_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    project_regex_options, EmptyMatchPolicy, RegexOptionError, RegexOptions,
+    RegexOutput as OutputSpec, RegexParseMode,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
+use runmat_value::{CharArray, SharedShape, StringArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
-use crate::builtins::strings::type_resolvers::unknown_type;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell, make_cell_with_shape, BuiltinResult,
+    RuntimeError,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -28,181 +30,25 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Runs on the CPU; when inputs live on the GPU, the runtime gathers them before matching and re-uploads numeric tensors afterwards.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "regexp",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Regex evaluation is control-flow heavy and not eligible for fusion today.",
+    notes: "The runtime rejects numeric and resident text roles before provider access; matching remains on the host.",
 };
 
 const BUILTIN_NAME: &str = "regexp";
 
-const REGEXP_OUTPUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Primary regexp output (depends on options and requested output count).",
-}];
-
-const REGEXP_OUTPUT_MULTI: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based match start indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "end_idx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based inclusive match end indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "match",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Matched substrings.",
-    },
-    BuiltinParamDescriptor {
-        name: "tokens",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Capture-group token outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "names",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Named capture-group outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "split",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Split output around regex matches.",
-    },
-];
-
-const REGEXP_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-];
-
-const REGEXP_INPUTS_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Output selectors and regexp options.",
-    },
-];
-
-const REGEXP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "out = regexp(subject, pattern)",
-        inputs: &REGEXP_INPUTS_CORE,
-        outputs: &REGEXP_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = regexp(subject, pattern, options...)",
-        inputs: &REGEXP_INPUTS_OPTIONS,
-        outputs: &REGEXP_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[start,end_idx,match,tokens,names,split] = regexp(subject, pattern, options...)",
-        inputs: &REGEXP_INPUTS_OPTIONS,
-        outputs: &REGEXP_OUTPUT_MULTI,
-    },
-];
-
-const REGEXP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:regexp:InvalidArgument"),
-    when: "Input/options are malformed or unsupported.",
-    message: "regexp: invalid argument",
-};
-
-const REGEXP_ERROR_PATTERN_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.PATTERN_INVALID",
-    identifier: Some("RunMat:regexp:PatternInvalid"),
-    when: "Pattern cannot be compiled as a regular expression.",
-    message: "regexp: invalid regular expression pattern",
-};
-
-const REGEXP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.INTERNAL",
-    identifier: Some("RunMat:regexp:Internal"),
-    when: "Internal regexp output assembly fails.",
-    message: "regexp: internal operation failed",
-};
-
-const REGEXP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    REGEXP_ERROR_INVALID_ARGUMENT,
-    REGEXP_ERROR_PATTERN_INVALID,
-    REGEXP_ERROR_INTERNAL,
-];
-
-pub const REGEXP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGEXP_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REGEXP_ERRORS,
-};
-
-pub const REGEXP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "regexp accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access.",
-};
-
 fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
+}
+
+fn decode_error_for(builtin: &'static str, source: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{builtin}: malformed UTF-16 character input"))
+        .with_builtin(builtin)
+        .with_source(source)
+        .build()
 }
 
 fn with_builtin_context(builtin: &'static str, mut err: RuntimeError) -> RuntimeError {
@@ -228,6 +74,23 @@ pub async fn evaluate_with(
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
+    evaluate_with_default(
+        builtin,
+        subject,
+        pattern,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        false,
+    )
+    .await
+}
+
+pub(crate) async fn evaluate_with_default(
+    builtin: &'static str,
+    subject: Value,
+    pattern: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    case_insensitive_by_default: bool,
+) -> BuiltinResult<RegexpEvaluation> {
     if contains_numeric_or_resident_text_input(&subject)
         || contains_numeric_or_resident_text_input(&pattern)
         || rest.iter().any(contains_numeric_or_resident_text_input)
@@ -243,30 +106,25 @@ pub async fn evaluate_with(
     let pattern = gather_if_needed_async(&pattern)
         .await
         .map_err(|err| with_builtin_context(builtin, err))?;
-    let options = RegexpOptions::parse(builtin, rest)?;
+    let options = parse_options(builtin, rest, case_insensitive_by_default)?;
     RegexpEvaluation::new(builtin, subject, pattern, options).await
 }
 
 #[runtime_builtin(
     name = "regexp",
-    category = "strings/regex",
-    summary = "Regular expression matching with MATLAB-compatible outputs.",
-    keywords = "regexp,regex,pattern,match,tokens,split",
-    accel = "sink",
-    type_resolver(unknown_type),
-    descriptor(crate::builtins::strings::regex::regexp::REGEXP_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::regex::regexp::REGEXP_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
 async fn regexp_builtin(
     subject: Value,
     pattern: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let evaluation = evaluate(subject, pattern, &rest).await?;
+    let evaluation =
+        evaluate_with_default(BUILTIN_NAME, subject, pattern, rest.view(), false).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = evaluation.outputs_for_multi()?;
         if outputs.len() > out_count {
@@ -289,145 +147,45 @@ async fn regexp_builtin(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutputSpec {
-    Start,
-    End,
-    Match,
-    Tokens,
-    TokenExtents,
-    Names,
-    Split,
-}
+type RegexpOptions = RegexOptions;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EmptyMatchPolicy {
-    Remove,
-    Allow,
-}
-
-#[derive(Debug, Clone)]
-struct RegexpOptions {
-    outputs: Vec<OutputSpec>,
-    once: bool,
-    emptymatch: EmptyMatchPolicy,
-    force_cell_output: bool,
-    case_insensitive: bool,
-    multi_line: bool,
-    dot_all: bool,
-}
-
-impl RegexpOptions {
-    fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
-        let mut outputs = Vec::new();
-        let mut once = false;
-        let mut emptymatch = EmptyMatchPolicy::Remove;
-        let mut force_cell_output = false;
-        let mut case_insensitive = false;
-        let mut multi_line = false;
-        let mut dot_all = false;
-        let mut idx = 0usize;
-        while idx < rest.len() {
-            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
-                runtime_error_for(
-                    builtin,
-                    format!("{builtin}: expected option string, got {:?}", rest[idx]),
-                )
-            })?;
-            idx += 1;
-            match raw.as_str() {
-                "match" => outputs.push(OutputSpec::Match),
-                "tokens" => outputs.push(OutputSpec::Tokens),
-                "tokenextents" => outputs.push(OutputSpec::TokenExtents),
-                "names" => outputs.push(OutputSpec::Names),
-                "split" => outputs.push(OutputSpec::Split),
-                "start" => outputs.push(OutputSpec::Start),
-                "end" => outputs.push(OutputSpec::End),
-                "once" => once = true,
-                "forcecelloutput" => force_cell_output = true,
-                "ignorecase" => case_insensitive = true,
-                "matchcase" => case_insensitive = false,
-                "lineanchors" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'lineanchors'"),
-                        )
-                    })?;
-                    multi_line = flag;
-                    idx += 1;
-                }
-                "dotall" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'dotall'"),
-                        )
-                    })?;
-                    dot_all = flag;
-                    idx += 1;
-                }
-                "dotexceptnewline" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'dotExceptNewline'"),
-                        )
-                    })?;
-                    dot_all = !flag;
-                    idx += 1;
-                }
-                "emptymatch" => {
-                    let policy = rest.get(idx).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
-                        )
-                    })?;
-                    let policy_str = value_to_lower_string(policy).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
-                        )
-                    })?;
-                    idx += 1;
-                    match policy_str.as_str() {
-                        "allow" => emptymatch = EmptyMatchPolicy::Allow,
-                        "remove" => emptymatch = EmptyMatchPolicy::Remove,
-                        other => {
-                            return Err(runtime_error_for(
-                                builtin,
-                                format!(
-                                    "{builtin}: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
-                                ),
-                            ))
-                        }
-                    }
-                }
-                "warnings" => {
-                    // MATLAB accepts 'on'/'off' here but RunMat currently ignores it.
-                    if rest.get(idx).is_some() {
-                        idx += 1;
-                    }
-                }
-                other => {
-                    return Err(runtime_error_for(
-                        builtin,
-                        format!("{builtin}: unrecognised option '{other}'"),
-                    ));
-                }
+fn parse_options(
+    builtin: &'static str,
+    rest: crate::call::FunctionArgumentView<'_>,
+    case_insensitive_by_default: bool,
+) -> BuiltinResult<RegexpOptions> {
+    let mut decode_failure = None;
+    let projected = project_regex_options(
+        rest.len(),
+        |index| match value_to_option_text(&rest[index], builtin) {
+            Ok(text) => text,
+            Err(error) => {
+                decode_failure = Some(error);
+                None
             }
-        }
-        Ok(Self {
-            outputs,
-            once,
-            emptymatch,
-            force_cell_output,
-            case_insensitive,
-            multi_line,
-            dot_all,
-        })
+        },
+        RegexParseMode::Runtime,
+    );
+    // The grammar deliberately does not request ignored warning operands.
+    // Preserve their non-observation while carrying a requested decode error.
+    if let Some(error) = decode_failure {
+        return Err(error);
     }
+    let mut options = projected
+        .map_err(|error| match error {
+            RegexOptionError::NonText(index) => runtime_error_for(
+                builtin,
+                format!("{builtin}: expected option string, got {:?}", rest[index]),
+            ),
+            RegexOptionError::Unknown { name, .. } => {
+                runtime_error_for(builtin, format!("{builtin}: unrecognised option '{name}'"))
+            }
+        })?
+        .options;
+    if case_insensitive_by_default {
+        options.apply_regexpi_default();
+    }
+    Ok(options)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -441,9 +199,12 @@ enum InputKind {
 
 #[derive(Debug, Clone)]
 struct SubjectCollection {
-    entries: Vec<String>,
+    entries: Vec<runmat_value::StringElement>,
     rows: usize,
     cols: usize,
+    /// The original shape owner, including every page. Scalar/char inputs use
+    /// their historical two-dimensional result shape instead.
+    shape: Option<SharedShape>,
     kind: InputKind,
     force_cell_output: bool,
 }
@@ -467,11 +228,12 @@ async fn collect_subjects(
             entries: vec![s],
             rows: 1,
             cols: 1,
+            shape: None,
             kind: InputKind::CharScalar,
             force_cell_output,
         }),
-        Value::CharArray(array) => collect_char_array(array, force_cell_output),
-        Value::StringArray(array) => collect_string_array(array, force_cell_output),
+        Value::CharArray(array) => collect_char_array(builtin, array, force_cell_output),
+        Value::StringArray(array) => collect_string_array(builtin, array, force_cell_output),
         Value::Cell(cell) => collect_cell_array(builtin, cell, force_cell_output).await,
         other => Err(runtime_error_for(
             builtin,
@@ -483,6 +245,7 @@ async fn collect_subjects(
 }
 
 fn collect_char_array(
+    builtin: &'static str,
     array: CharArray,
     force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
@@ -491,6 +254,7 @@ fn collect_char_array(
             entries: Vec::new(),
             rows: 0,
             cols: 0,
+            shape: None,
             kind: InputKind::CharMatrix {
                 rows: 0,
                 cols: array.cols,
@@ -499,27 +263,29 @@ fn collect_char_array(
         });
     }
     if array.rows == 1 {
-        let text: String = array.data.into_iter().collect();
+        let text = runmat_value::decode_utf16_code_units(array.data())
+            .map_err(|source| decode_error_for(builtin, source))?;
         return Ok(SubjectCollection {
-            entries: vec![text],
+            entries: vec![runmat_value::StringElement::text(text)],
             rows: 1,
             cols: 1,
+            shape: None,
             kind: InputKind::CharScalar,
             force_cell_output,
         });
     }
     let mut entries = Vec::with_capacity(array.rows);
     for r in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for c in 0..array.cols {
-            line.push(array.data[r * array.cols + c]);
-        }
-        entries.push(line);
+        let start = r * array.cols;
+        let line = runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+            .map_err(|source| decode_error_for(builtin, source))?;
+        entries.push(runmat_value::StringElement::text(line));
     }
     Ok(SubjectCollection {
         entries,
         rows: array.rows,
         cols: 1,
+        shape: None,
         kind: InputKind::CharMatrix {
             rows: array.rows,
             cols: array.cols,
@@ -529,32 +295,36 @@ fn collect_char_array(
 }
 
 fn collect_string_array(
+    builtin: &'static str,
     array: StringArray,
     force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
+    array
+        .validate_layout()
+        .map_err(|cause| runtime_error_for(builtin, format!("{builtin}: {cause}")))?;
     let rows = array.rows();
     let cols = array.cols();
-    let total = array.data.len();
-    if total == 1 && rows == 1 && cols == 1 {
+    let (data, shape, _, _) = array.into_parts();
+    let total = data.len();
+    if total == 1 && (shape.is_empty() || (rows == 1 && cols == 1)) {
         return Ok(SubjectCollection {
-            entries: vec![array.data[0].clone()],
+            entries: vec![data[0].clone()],
             rows: 1,
             cols: 1,
+            shape: None,
             kind: InputKind::StringScalar,
             force_cell_output,
         });
     }
-    let mut entries = Vec::with_capacity(total);
-    for row in 0..rows {
-        for col in 0..cols {
-            let idx = row + col * rows;
-            entries.push(array.data[idx].clone());
-        }
-    }
+    let entries = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(shared) => shared.iter().cloned().collect(),
+    };
     Ok(SubjectCollection {
         entries,
         rows,
         cols,
+        shape: Some(shape),
         kind: InputKind::StringArray { rows, cols },
         force_cell_output: true,
     })
@@ -565,12 +335,15 @@ async fn collect_cell_array(
     cell: runmat_value::CellArray,
     _force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
-    let mut entries = Vec::with_capacity(cell.data.len());
-    for ptr in &cell.data {
+    cell.validate_layout()
+        .map_err(|cause| runtime_error_for(builtin, format!("{builtin}: {cause}")))?;
+    let shape = cell.shape.clone();
+    let mut entries = Vec::with_capacity(cell.data().len());
+    for ptr in cell.data() {
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(|err| with_builtin_context(builtin, err))?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value, builtin)?.ok_or_else(|| {
             runtime_error_for(
                 builtin,
                 format!(
@@ -584,6 +357,7 @@ async fn collect_cell_array(
         entries,
         rows: cell.rows,
         cols: cell.cols,
+        shape: Some(shape),
         kind: InputKind::CellArray {
             rows: cell.rows,
             cols: cell.cols,
@@ -592,33 +366,34 @@ async fn collect_cell_array(
     })
 }
 
-fn extract_string(value: &Value) -> Option<String> {
-    match value {
+fn extract_string(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<Option<runmat_value::StringElement>> {
+    Ok(match value {
         Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(runmat_value::StringElement::text(
+            runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|source| decode_error_for(builtin, source))?,
+        )),
         _ => None,
-    }
+    })
 }
 
-fn value_to_lower_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(ca.data.iter().collect::<String>().to_ascii_lowercase())
-        }
+fn value_to_option_text<'a>(
+    value: &'a Value,
+    builtin: &'static str,
+) -> BuiltinResult<Option<Cow<'a, str>>> {
+    Ok(match value {
+        Value::String(s) => s.as_str().map(Cow::Borrowed),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str().map(Cow::Borrowed),
+        Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(
+            runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|source| decode_error_for(builtin, source))?,
+        )),
         _ => None,
-    }
-}
-
-fn parse_on_off(value: Option<&Value>) -> Option<bool> {
-    let text = value_to_lower_string(value?)?;
-    match text.as_str() {
-        "on" => Some(true),
-        "off" => Some(false),
-        _ => None,
-    }
+    })
 }
 
 #[derive(Clone)]
@@ -661,22 +436,23 @@ impl RegexpEvaluation {
         options: RegexpOptions,
     ) -> BuiltinResult<Self> {
         let subjects = collect_subjects(builtin, subject, options.force_cell_output).await?;
-        let pattern_str = extract_string(&pattern).ok_or_else(|| {
+        let pattern_str = extract_string(&pattern, builtin)?.ok_or_else(|| {
             runtime_error_for(
                 builtin,
                 format!("{builtin}: expected char vector or string pattern, got {pattern:?}"),
             )
         })?;
-        let mut builder = RegexBuilder::new(&pattern_str);
+        let pattern_str = pattern_str.as_str().ok_or_else(|| {
+            runtime_error_for(builtin, format!("{builtin}: pattern must not be missing"))
+        })?;
+        let mut builder = RegexBuilder::new(pattern_str);
         if options.case_insensitive {
             builder.case_insensitive(true);
         }
         if options.multi_line {
             builder.multi_line(true);
         }
-        if options.dot_all {
-            builder.dot_matches_new_line(true);
-        }
+        builder.dot_matches_new_line(options.dot_all);
         let regex = builder
             .build()
             .map_err(|e| runtime_error_for(builtin, format!("{builtin}: {e}")))?;
@@ -686,14 +462,22 @@ impl RegexpEvaluation {
                 named_groups.push(name.to_string());
             }
         }
-        let compute_splits = options
-            .outputs
-            .iter()
-            .any(|spec| matches!(spec, OutputSpec::Split));
+        let compute_splits = options.outputs.is_empty()
+            || options
+                .outputs
+                .iter()
+                .any(|spec| matches!(spec, OutputSpec::Split));
         let mut data = Vec::with_capacity(subjects.entries.len());
         for text in &subjects.entries {
-            let subject_data =
-                evaluate_subject(text, &regex, &named_groups, &options, compute_splits);
+            let subject_data = match text.as_str() {
+                Some(text) => {
+                    evaluate_subject(text, &regex, &named_groups, &options, compute_splits)
+                }
+                None => SubjectMatchData {
+                    matches: Vec::new(),
+                    splits: compute_splits.then(Vec::new),
+                },
+            };
             data.push(subject_data);
         }
         Ok(Self {
@@ -716,21 +500,23 @@ impl RegexpEvaluation {
             .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
     }
 
+    fn make_cell_value_with_shape(
+        &self,
+        values: Vec<Value>,
+        shape: Vec<usize>,
+    ) -> BuiltinResult<Value> {
+        let builtin = self.builtin;
+        make_cell_with_shape(values, shape)
+            .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
+    }
+
     pub fn outputs_for_single(&self) -> BuiltinResult<Vec<Value>> {
-        let specs = if self.options.outputs.is_empty() {
-            vec![OutputSpec::Start]
-        } else {
-            self.options.outputs.clone()
-        };
+        let specs = self.options.outputs_for_single();
         self.values_for_specs(&specs)
     }
 
     pub fn outputs_for_multi(&self) -> BuiltinResult<Vec<Value>> {
-        let specs = if self.options.outputs.is_empty() {
-            vec![OutputSpec::Start, OutputSpec::End, OutputSpec::Match]
-        } else {
-            self.options.outputs.clone()
-        };
+        let specs = self.options.outputs_for_multi();
         self.values_for_specs(&specs)
     }
 
@@ -784,13 +570,13 @@ impl RegexpEvaluation {
                 let value = data
                     .matches
                     .first()
-                    .map(|m| Value::String(m.matched.clone()))
-                    .unwrap_or_else(|| Value::String(String::new()));
+                    .map(|m| Value::string(m.matched.clone()))
+                    .unwrap_or_else(|| Value::string(String::new()));
                 return Ok(value);
             }
             let mut elements = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
-                elements.push(Value::String(m.matched.clone()));
+                elements.push(Value::string(m.matched.clone()));
             }
             return self.make_cell_value(elements, 1, data.matches.len());
         }
@@ -800,13 +586,13 @@ impl RegexpEvaluation {
                 let value = data
                     .matches
                     .first()
-                    .map(|m| Value::String(m.matched.clone()))
-                    .unwrap_or_else(|| Value::String(String::new()));
+                    .map(|m| Value::string(m.matched.clone()))
+                    .unwrap_or_else(|| Value::string(String::new()));
                 return Ok(value);
             }
             let mut elements = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
-                elements.push(Value::String(m.matched.clone()));
+                elements.push(Value::string(m.matched.clone()));
             }
             self.make_cell_value(elements, 1, data.matches.len())
         })
@@ -825,7 +611,7 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 let mut tokens = Vec::with_capacity(m.tokens.len());
                 for token in &m.tokens {
-                    tokens.push(Value::String(token.text.clone().unwrap_or_default()));
+                    tokens.push(Value::string(token.text.clone().unwrap_or_default()));
                 }
                 per_match.push(self.make_cell_value(tokens, 1, m.tokens.len())?);
             }
@@ -843,7 +629,7 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 let mut tokens = Vec::with_capacity(m.tokens.len());
                 for token in &m.tokens {
-                    tokens.push(Value::String(token.text.clone().unwrap_or_default()));
+                    tokens.push(Value::string(token.text.clone().unwrap_or_default()));
                 }
                 per_match.push(self.make_cell_value(tokens, 1, m.tokens.len())?);
             }
@@ -927,7 +713,7 @@ impl RegexpEvaluation {
                 .unwrap_or_else(Vec::new);
             let mut values = Vec::with_capacity(splits.len());
             for part in &splits {
-                values.push(Value::String(part.clone()));
+                values.push(Value::string(part.clone()));
             }
             let len = splits.len();
             return self.make_cell_value(values, 1, len);
@@ -936,7 +722,7 @@ impl RegexpEvaluation {
             let splits = data.splits.as_ref().cloned().unwrap_or_else(Vec::new);
             let mut values = Vec::with_capacity(splits.len());
             for part in &splits {
-                values.push(Value::String(part.clone()));
+                values.push(Value::string(part.clone()));
             }
             let len = splits.len();
             self.make_cell_value(values, 1, len)
@@ -949,19 +735,51 @@ impl RegexpEvaluation {
     {
         let rows = self.subjects.rows;
         let cols = self.subjects.cols;
+        let matrix_shape = [rows, cols];
+        let shape = self
+            .subjects
+            .shape
+            .as_ref()
+            .map_or(matrix_shape.as_slice(), |shape| shape.as_slice());
+        if self.data.len() != self.subjects.entries.len() {
+            return Err(runtime_error_for(
+                self.builtin,
+                format!(
+                    "{}: subject count does not match match results",
+                    self.builtin
+                ),
+            ));
+        }
         let mut values = Vec::with_capacity(self.data.len());
-        for row in 0..rows {
-            for col in 0..cols {
-                let idx = row * cols + col;
-                let value = if idx < self.data.len() {
-                    build(&self.data[idx])?
-                } else {
-                    Value::String(String::new())
-                };
-                values.push(value);
+        if !self.data.is_empty() {
+            let page_width = rows
+                .checked_mul(cols)
+                .filter(|width| *width > 0)
+                .ok_or_else(|| {
+                    runtime_error_for(
+                        self.builtin,
+                        format!("{}: invalid subject page shape", self.builtin),
+                    )
+                })?;
+            if !self.data.len().is_multiple_of(page_width) {
+                return Err(runtime_error_for(
+                    self.builtin,
+                    format!("{}: incomplete subject page", self.builtin),
+                ));
+            }
+            for page in self.data.chunks_exact(page_width) {
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let idx = match self.subjects.kind {
+                            InputKind::StringArray { .. } => col * rows + row,
+                            _ => row * cols + col,
+                        };
+                        values.push(build(&page[idx])?);
+                    }
+                }
             }
         }
-        self.make_cell_value(values, rows, cols)
+        self.make_cell_value_with_shape(values, shape.to_vec())
     }
 }
 
@@ -1089,7 +907,7 @@ fn vector_to_value(builtin: &'static str, values: &[f64]) -> BuiltinResult<Value
 fn tokens_to_cell(builtin: &'static str, tokens: &[TokenComponent]) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(tokens.len());
     for token in tokens {
-        values.push(Value::String(token.text.clone().unwrap_or_default()));
+        values.push(Value::string(token.text.clone().unwrap_or_default()));
     }
     make_cell(values, 1, tokens.len())
         .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
@@ -1114,22 +932,22 @@ fn empty_token_extents(builtin: &'static str) -> BuiltinResult<Value> {
 }
 
 fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     for name in names {
         let value = match match_data {
             Some(m) => m.named.get(name).cloned().unwrap_or_default(),
             None => String::new(),
         };
-        st.fields.insert(name.clone(), Value::String(value));
+        st.fields.insert(name.clone(), Value::string(value));
     }
-    Value::Struct(st)
+    Value::Struct(st.finish())
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = REGEXP_DESCRIPTOR
@@ -1140,7 +958,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"out = regexp(subject, pattern)"));
         assert!(labels.contains(&"out = regexp(subject, pattern, options...)"));
         assert!(labels.contains(
-            &"[start,end_idx,match,tokens,names,split] = regexp(subject, pattern, options...)"
+            &"[start,end_idx,token_extents,match,tokens,names,split] = regexp(subject, pattern, options...)"
         ));
     }
 
@@ -1181,10 +999,59 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                assert_eq!(&ca.data[0], &Value::String("123".into()));
+                assert_eq!(ca.data().len(), 1);
+                assert_eq!(&ca.data()[0], &Value::String("123".into()));
             }
             other => panic!("unexpected output {other:?}"),
+        }
+
+        // Each page is column-major in the StringArray, but row-major in the
+        // result Cell. The second page must not be truncated or interleaved.
+        let pages = StringArray::new(
+            vec!["hit", "miss", "hit", "miss", "miss", "hit", "miss", "hit"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let eval = evaluate(
+            Value::StringArray(pages),
+            Value::String("hit".into()),
+            &[Value::String("match".into())],
+        )
+        .unwrap();
+        let outputs = eval.outputs_for_single().unwrap();
+        let Value::Cell(result) = &outputs[0] else {
+            panic!("expected page-preserving Cell result");
+        };
+        assert_eq!(result.shape(), &[2, 2, 2]);
+        let counts: Vec<_> = result
+            .data()
+            .iter()
+            .map(|value| match value {
+                Value::Cell(matches) => matches.data().len(),
+                other => panic!("expected match Cell, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(counts, [1, 1, 0, 0, 0, 0, 1, 1]);
+
+        // A one-element StringArray still follows the scalar regexp grammar,
+        // including a rank-zero shape and trailing singleton dimensions.
+        for shape in [vec![], vec![1, 1, 1]] {
+            let scalar = StringArray::new(vec!["hit".to_owned()], shape).unwrap();
+            let eval = evaluate(
+                Value::StringArray(scalar),
+                Value::String("hit".into()),
+                &[Value::String("match".into())],
+            )
+            .unwrap();
+            let outputs = eval.outputs_for_single().unwrap();
+            let Value::Cell(matches) = &outputs[0] else {
+                panic!("expected scalar match Cell");
+            };
+            assert_eq!(matches.shape(), &[1, 1]);
+            assert_eq!(matches.data(), &[Value::String("hit".into())]);
         }
     }
 
@@ -1201,16 +1068,16 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                let token_cell = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let token_cell = &ca.data()[0];
                 match token_cell {
                     Value::Cell(inner) => {
-                        assert_eq!(inner.data.len(), 3);
-                        let year = &inner.data[0];
+                        assert_eq!(inner.data().len(), 3);
+                        let year = &inner.data()[0];
                         assert_eq!(year, &Value::String("2024".into()));
-                        let month = &inner.data[1];
+                        let month = &inner.data()[1];
                         assert_eq!(month, &Value::String("03".into()));
-                        let day = &inner.data[2];
+                        let day = &inner.data()[2];
                         assert_eq!(day, &Value::String("14".into()));
                     }
                     other => panic!("unexpected nested value {other:?}"),
@@ -1218,6 +1085,35 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
+
+        let pages = runmat_value::CellArray::new_with_shape(
+            ["hit", "hit", "miss", "miss", "miss", "miss", "hit", "hit"]
+                .into_iter()
+                .map(Value::string)
+                .collect(),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let eval = evaluate(
+            Value::Cell(pages),
+            Value::String("hit".into()),
+            &[Value::String("match".into())],
+        )
+        .unwrap();
+        let outputs = eval.outputs_for_single().unwrap();
+        let Value::Cell(result) = &outputs[0] else {
+            panic!("expected page-preserving Cell result");
+        };
+        assert_eq!(result.shape(), &[2, 2, 2]);
+        let counts: Vec<_> = result
+            .data()
+            .iter()
+            .map(|value| match value {
+                Value::Cell(matches) => matches.data().len(),
+                other => panic!("expected match Cell, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(counts, [1, 1, 0, 0, 0, 0, 1, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1252,12 +1148,12 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data.len(), 3);
-                let year = &ca.data[0];
+                assert_eq!(ca.data().len(), 3);
+                let year = &ca.data()[0];
                 assert_eq!(year, &Value::String("2024".into()));
-                let month = &ca.data[1];
+                let month = &ca.data()[1];
                 assert_eq!(month, &Value::String("03".into()));
-                let day = &ca.data[2];
+                let day = &ca.data()[2];
                 assert_eq!(day, &Value::String("14".into()));
             }
             other => panic!("expected cell row of tokens, got {other:?}"),
@@ -1280,7 +1176,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 6.0, 9.0, 4.0, 7.0, 10.0]);
             }
             other => panic!("expected token extent matrix, got {other:?}"),
@@ -1327,10 +1223,10 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 2);
-                for ptr in &ca.data {
+                assert_eq!(ca.data().len(), 2);
+                for ptr in ca.data() {
                     match ptr {
-                        Value::Cell(split) => assert_eq!(split.data.len(), 3),
+                        Value::Cell(split) => assert_eq!(split.data().len(), 3),
                         other => panic!("unexpected nested value {other:?}"),
                     }
                 }
@@ -1362,12 +1258,12 @@ pub(crate) mod tests {
     fn regexp_multi_output_default() {
         let eval = evaluate(
             Value::String("abcabc".into()),
-            Value::String("a.".into()),
+            Value::String("(a.)".into()),
             &[],
         )
         .unwrap();
         let outputs = eval.outputs_for_multi().unwrap();
-        assert_eq!(outputs.len(), 3);
+        assert_eq!(outputs.len(), 7);
         match &outputs[0] {
             Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
             other => panic!("unexpected output {other:?}"),
@@ -1378,10 +1274,73 @@ pub(crate) mod tests {
         }
         match &outputs[2] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 2);
+                assert_eq!(ca.data().len(), 2);
+                for entry in ca.data() {
+                    match entry {
+                        Value::Tensor(t) => assert_eq!(t.shape(), &[1, 2]),
+                        other => panic!("expected token extents, got {other:?}"),
+                    }
+                }
             }
             other => panic!("unexpected output {other:?}"),
         }
+        match &outputs[3] {
+            Value::Cell(ca) => assert_eq!(ca.data().len(), 2),
+            other => panic!("expected match cells, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexp_matlab_option_flags_and_dot_default() {
+        let subject = Value::String("a\nb".into());
+        let pattern = Value::String("a.b".into());
+        let all = evaluate(subject.clone(), pattern.clone(), &[]).unwrap();
+        assert_eq!(all.outputs_for_single().unwrap()[0], Value::Num(1.0));
+
+        let excluding_newline = evaluate(
+            subject.clone(),
+            pattern.clone(),
+            &[Value::String("dotexceptnewline".into())],
+        )
+        .unwrap();
+        assert_ne!(
+            excluding_newline.outputs_for_single().unwrap()[0],
+            Value::Num(1.0)
+        );
+
+        let including_again = evaluate(
+            subject,
+            pattern,
+            &[
+                Value::String("dotexceptnewline".into()),
+                Value::String("dotall".into()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            including_again.outputs_for_single().unwrap()[0],
+            Value::Num(1.0)
+        );
+
+        let empty = evaluate(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            &[Value::String("emptymatch".into())],
+        )
+        .unwrap();
+        assert_eq!(empty.outputs_for_single().unwrap()[0], Value::Num(1.0));
+
+        let removed = evaluate(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            &[
+                Value::String("emptymatch".into()),
+                Value::String("noemptymatch".into()),
+            ],
+        )
+        .unwrap();
+        assert_ne!(removed.outputs_for_single().unwrap()[0], Value::Num(1.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1417,8 +1376,8 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 2);
-                let first = &ca.data[0];
+                assert_eq!(ca.data().len(), 2);
+                let first = &ca.data()[0];
                 match first {
                     Value::Struct(st) => {
                         match st.fields.get("name") {
@@ -1432,7 +1391,7 @@ pub(crate) mod tests {
                     }
                     other => panic!("unexpected struct {other:?}"),
                 }
-                let second = &ca.data[1];
+                let second = &ca.data()[1];
                 match second {
                     Value::Struct(st) => {
                         match st.fields.get("name") {
@@ -1464,11 +1423,11 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                let matrix = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let matrix = &ca.data()[0];
                 match matrix {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 2]);
+                        assert_eq!(t.shape(), &[3, 2]);
                         // Starts should be 1,6,9 (1-based); ends 4,7,10
                         assert_eq!(t.materialize_f64()[0], 1.0);
                         assert_eq!(t.materialize_f64()[1], 6.0);
@@ -1499,8 +1458,8 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 1);
-                assert_eq!(ca.data.len(), 1);
-                let inner = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let inner = &ca.data()[0];
                 match inner {
                     Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
                     other => panic!("unexpected inner value {other:?}"),
@@ -1530,25 +1489,25 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data.len(), 4);
+                assert_eq!(ca.data().len(), 4);
                 // Row 0, Col 0
-                match &ca.data[0] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                match &ca.data()[0] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
-                // Row 0, Col 1
-                match &ca.data[1] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                // Row 0, Col 1 (row-major cell storage).
+                match &ca.data()[1] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
-                // Row 1, Col 0
-                match &ca.data[2] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                // Row 1, Col 0.
+                match &ca.data()[2] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1, Col 1
-                match &ca.data[3] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                match &ca.data()[3] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
             }
@@ -1582,24 +1541,24 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data.len(), 4);
+                assert_eq!(ca.data().len(), 4);
                 // Row 0, Col 0 should have one match
-                match &ca.data[0] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                match &ca.data()[0] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 0, Col 1 should have one match
-                match &ca.data[1] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                match &ca.data()[1] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1 entries should be empty
-                match &ca.data[2] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                match &ca.data()[2] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
-                match &ca.data[3] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                match &ca.data()[3] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
             }
@@ -1623,12 +1582,12 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                match &ca.data[0] {
+                assert_eq!(ca.data().len(), 1);
+                match &ca.data()[0] {
                     Value::String(s) => assert_eq!(s, "AbC"),
                     Value::Cell(inner) => {
-                        assert_eq!(inner.data.len(), 1);
-                        match &inner.data[0] {
+                        assert_eq!(inner.data().len(), 1);
+                        match &inner.data()[0] {
                             Value::String(s) => assert_eq!(s, "AbC"),
                             other => panic!("unexpected match value {other:?}"),
                         }
@@ -1675,12 +1634,12 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                match &ca.data[0] {
+                assert_eq!(ca.data().len(), 1);
+                match &ca.data()[0] {
                     Value::String(s) => assert_eq!(s, "first\nsecond"),
                     Value::Cell(inner) => {
                         // When forceCellOutput influences outer container, the inner should still be the match
-                        assert_eq!(inner.data.len(), 1);
+                        assert_eq!(inner.data().len(), 1);
                     }
                     other => panic!("unexpected dotall output {other:?}"),
                 }
@@ -1689,11 +1648,111 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn regexp_type_is_unknown() {
-        assert_eq!(
-            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::Unknown
+    fn regexp_registered_option_projection_and_output_counts() {
+        let call = |rest: Vec<Value>| {
+            futures::executor::block_on(regexp_builtin(
+                Value::String("aba".into()),
+                Value::String("a".into()),
+                crate::builtins::common::test_support::builtin_arguments(rest),
+            ))
+            .expect("registered regexp")
+        };
+        {
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
+            match call(vec![
+                Value::String("warnings".into()),
+                Value::String("match".into()),
+            ]) {
+                Value::OutputList(values) => match &values[0] {
+                    Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![1.0, 3.0]),
+                    other => panic!("expected start indices, got {other:?}"),
+                },
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+        {
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
+            match call(vec![Value::String("match".into())]) {
+                Value::OutputList(values) => match &values[0] {
+                    Value::Cell(cell) => assert_eq!((cell.rows, cell.cols), (1, 2)),
+                    other => panic!("expected match cell, got {other:?}"),
+                },
+                other => panic!("expected output list, got {other:?}"),
+            }
+            for rest in [
+                vec!["lineanchors", "off", "match"],
+                vec!["emptymatch", "remove", "match"],
+                vec!["warnings", "on", "match"],
+            ] {
+                let rest = rest
+                    .into_iter()
+                    .map(|flag| Value::String(flag.into()))
+                    .collect();
+                match call(rest) {
+                    Value::OutputList(values) => assert!(matches!(values[0], Value::Cell(_))),
+                    other => panic!("expected selected match output, got {other:?}"),
+                }
+            }
+        }
+        {
+            let _outputs =
+                crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+            assert_eq!(
+                call(vec![Value::String("match".into())]),
+                Value::output_list(vec![])
+            );
+        }
+        for count in [7, 8] {
+            let _outputs =
+                crate::output_count::push_output_count(Some(count)).expect("output-count scope");
+            match call(vec![]) {
+                Value::OutputList(values) => {
+                    assert_eq!(values.len(), count);
+                    assert!(matches!(values[6], Value::Cell(_)));
+                    if count == 8 {
+                        assert_eq!(values[7], Value::Num(0.0));
+                    }
+                }
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexp_ignored_warning_operand_and_early_error_order_remain_intact() {
+        let ignored = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::String("not an option".into())], 1, 1)
+                .unwrap(),
         );
+        let subject = Value::String("aba".into());
+        let pattern = Value::String("a".into());
+        let evaluation = evaluate(
+            subject.clone(),
+            pattern.clone(),
+            &[
+                Value::String("warnings".into()),
+                ignored.clone(),
+                Value::String("match".into()),
+            ],
+        )
+        .expect("ignored warning operand is not decoded");
+        assert!(matches!(
+            evaluation.outputs_for_single().unwrap()[0],
+            Value::Cell(_)
+        ));
+
+        let error = evaluate(
+            subject,
+            pattern,
+            &[Value::String("invalid".into()), ignored],
+        )
+        .err()
+        .expect("invalid first option must reject");
+        assert!(error.message().contains("unrecognised option 'invalid'"));
     }
 }

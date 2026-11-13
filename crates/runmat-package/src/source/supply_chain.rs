@@ -80,7 +80,7 @@ impl RegistryReleaseSupplyChain {
             .map_err(|_| "trusted publisher public key is invalid".to_string())?;
         let key = VerifyingKey::from_bytes(&key_bytes)
             .map_err(|_| "trusted publisher public key is invalid".to_string())?;
-        let fingerprint = format!("sha256:{:x}", Sha256::digest(key.as_bytes()));
+        let fingerprint = format!("sha256:{}", hex::encode(Sha256::digest(key.as_bytes())));
         if fingerprint != self.key_fingerprint {
             return Err("trusted publisher key fingerprint differs from its key".to_string());
         }

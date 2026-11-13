@@ -1,57 +1,22 @@
-use crate::{
-    import_exact_geometry_input, import_faceted_geometry_input, import_result_publication,
-    prepare_result_publication, prepare_stage_objects, MeshingExecutionError, MeshingHostWorkload,
-    PreparedExactGeometryInput, PreparedFacetedGeometryInput, PreparedMeshingResultPublication,
-};
-use runmat_execution::value::ValuePayload;
+use crate::{MeshingExecutionError, MeshingHostWorkload, PreparedMeshingResultPublication};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_meshing_core::{
-    build_chunked_stage_payload, build_closed_stage_manifest, CanonicalMeshingContract,
-    MeshingCancellationSignal, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream,
-    MeshingFailure, MeshingFailureCategory, MeshingInputKind, MeshingManifestDisposition,
+    build_chunked_stage_payload_with_cancellation, profile_chunked_stage_payload,
+    CanonicalMeshingContract, MeshingCancellationSignal, MeshingChunkMediaType, MeshingChunkPolicy,
+    MeshingChunkStream, MeshingFailure, MeshingFailureCategory, MeshingManifestDisposition,
     MeshingPartitionIdentity, MeshingPartitionKind, MeshingStageKind, MeshingStageResultKind,
     MeshingWorkloadResult, StableDigest, MESHING_IDENTITY_SCHEMA_VERSION,
 };
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum PreparedMeshingInput {
-    ExactGeometry(Box<PreparedExactGeometryInput>),
-    FacetedGeometry(Box<PreparedFacetedGeometryInput>),
-    StageArtifact(Box<PreparedMeshingResultPublication>),
-}
+mod admission;
+mod input;
+mod input_inventory;
+mod publication;
+use publication::publish_stage;
 
-impl PreparedMeshingInput {
-    pub const fn exact_geometry(&self) -> Option<&PreparedExactGeometryInput> {
-        match self {
-            Self::ExactGeometry(input) => Some(input),
-            Self::FacetedGeometry(_) | Self::StageArtifact(_) => None,
-        }
-    }
-
-    pub const fn faceted_geometry(&self) -> Option<&PreparedFacetedGeometryInput> {
-        match self {
-            Self::FacetedGeometry(input) => Some(input),
-            Self::ExactGeometry(_) | Self::StageArtifact(_) => None,
-        }
-    }
-
-    pub const fn stage_artifact(&self) -> Option<&PreparedMeshingResultPublication> {
-        match self {
-            Self::ExactGeometry(_) | Self::FacetedGeometry(_) => None,
-            Self::StageArtifact(input) => Some(input),
-        }
-    }
-
-    fn objects(&self) -> &[runmat_execution_artifact::LogicalObject] {
-        match self {
-            Self::ExactGeometry(input) => &input.geometry_objects().objects,
-            Self::FacetedGeometry(input) => &input.geometry_objects().objects,
-            Self::StageArtifact(input) => &input.stage_objects().objects,
-        }
-    }
-}
+pub use input::PreparedMeshingInput;
 
 use super::budget::{failure, MeshingProgressSink, MeshingStageCheckpoint, MeshingStageControl};
 
@@ -83,6 +48,8 @@ pub struct ValidatedMeshingStageOutput {
 pub struct CompletedMeshingStage {
     workload_result: MeshingWorkloadResult,
     publication: PreparedMeshingResultPublication,
+    stage_evidence: runmat_meshing_core::MeshingStageEvidence,
+    stage_evidence_reference: runmat_execution::value::ValueRef,
 }
 
 impl CompletedMeshingStage {
@@ -94,8 +61,20 @@ impl CompletedMeshingStage {
         &self.publication
     }
 
+    pub const fn stage_evidence(&self) -> &runmat_meshing_core::MeshingStageEvidence {
+        &self.stage_evidence
+    }
+
+    pub const fn stage_evidence_reference(&self) -> &runmat_execution::value::ValueRef {
+        &self.stage_evidence_reference
+    }
+
     pub fn attempt_success(&self) -> runmat_execution_runner::AttemptSuccess {
-        self.publication.attempt_success()
+        let mut success = self.publication.attempt_success();
+        success
+            .push_result_object(self.stage_evidence_reference.clone())
+            .expect("meshing publications are value results");
+        success
     }
 }
 
@@ -137,126 +116,114 @@ where
     S: CacheImport + CacheExport,
     K: MeshingStageKernel + ?Sized,
 {
-    let host = MeshingHostWorkload::from_program_request(request)?;
-    let roots = input_roots(request)?;
+    let host = MeshingHostWorkload::from_program_request(request, store)?;
+    let roots = MeshingHostWorkload::semantic_input_roots(request)?;
     let limits = effective_limits(&host, inventory_limits)?;
-    let inputs = host
-        .workload
-        .inputs
-        .iter()
-        .zip(&roots)
-        .map(|(input, root)| match input.kind {
-            MeshingInputKind::ExactGeometry => import_exact_geometry_input(
-                store,
-                host.geometry_document.clone().ok_or_else(|| {
-                    MeshingExecutionError::Invalid(
-                        "exact geometry input is missing its host document".into(),
-                    )
-                })?,
-                root,
-                host.artifact_access.clone(),
-                limits,
-            )
-            .map(Box::new)
-            .map(PreparedMeshingInput::ExactGeometry),
-            MeshingInputKind::FacetedGeometry => import_faceted_geometry_input(
-                store,
-                host.geometry_document.clone().ok_or_else(|| {
-                    MeshingExecutionError::Invalid(
-                        "faceted geometry input is missing its host document".into(),
-                    )
-                })?,
-                root,
-                host.artifact_access.clone(),
-                limits,
-            )
-            .map(Box::new)
-            .map(PreparedMeshingInput::FacetedGeometry),
-            MeshingInputKind::StageArtifact => {
-                import_result_publication(store, root, host.artifact_access.clone(), limits)
-                    .map(Box::new)
-                    .map(PreparedMeshingInput::StageArtifact)
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    validate_combined_input_inventory(&inputs, limits)?;
-
     let mut control = MeshingStageControl::new(
         host.workload.stage,
         host.workload.partition.partition_index,
         &host.resolved_request,
+        host.ceilings,
         cancellation,
         progress,
     )?;
+    let input_control = control.geometry_evaluation_control();
+    let input_scope = runmat_geometry_core::GeometryAllocationScope::new(&input_control);
+    let input_reader = admission::InputReader::new(&*store, &input_scope);
+    let inputs = admission::import_inputs(&host, &roots, &input_reader, limits)?;
+    drop(input_reader);
+    input_inventory::validate(&inputs, limits, &input_control, host.workload.stage)?;
+
     control.checkpoint(MeshingStageCheckpoint::default())?;
-    let output = kernel.execute(MeshingStageInvocation {
+    control.begin_kernel_allocations()?;
+    let produced = kernel.execute(MeshingStageInvocation {
         host: &host,
         inputs: &inputs,
         control: &mut control,
     })?;
-    control.checkpoint(output.final_checkpoint.clone())?;
+    let record_storage = control.finish_kernel_allocations(&produced.streams)?;
+    // Keep the returned record value after its guard in drop order.
+    let output = produced;
+    drop(inputs);
+    drop(input_scope);
+    let ValidatedMeshingStageOutput {
+        invariant_summary_digest,
+        streams,
+        final_checkpoint,
+    } = output;
+    control.checkpoint(final_checkpoint)?;
     control.guard()?;
-    validate_stage_streams(host.workload.stage, &output.streams)?;
-    output
-        .invariant_summary_digest
+    validate_stage_streams(host.workload.stage, &streams)?;
+    invariant_summary_digest
         .validate_nonzero("stage invariant summary")
         .map_err(MeshingExecutionError::from)?;
 
     let policy = effective_chunk_policy(&host, chunk_policy)?;
-    let payload = build_chunked_stage_payload(&output.streams, policy).map_err(|error| {
-        if error.field == "meshing chunks" && error.reason.contains("hard total byte limit") {
-            MeshingSerialExecutionError::Stage(artifact_budget_failure(&host))
-        } else {
-            MeshingSerialExecutionError::Bridge(MeshingExecutionError::from(error))
-        }
+    let publication_control = control.geometry_evaluation_control();
+    let publication_codec = crate::codec_control::CodecControl::new(&publication_control);
+    let chunk_profile = profile_chunked_stage_payload(&streams, policy, &publication_codec)
+        .map_err(|error| chunk_failure(&host, error, &publication_codec))?;
+    // Records and chunks coexist during encoding. Keep the additional charge
+    // through publication; never allocate the payload before this admission.
+    let _chunk_storage = runmat_geometry_core::GeometryAllocationReservation::new(
+        &publication_control,
+        chunk_profile.requested_storage_bytes,
+    )
+    .map_err(|error| {
+        MeshingSerialExecutionError::Stage(failure(
+            host.workload.stage,
+            crate::geometry_failure::category(error.kind),
+            &error.reason,
+            None,
+        ))
     })?;
-    let partition_identity = MeshingPartitionIdentity {
-        schema_version: MESHING_IDENTITY_SCHEMA_VERSION,
-        stage_identity_digest: host.workload.stage_identity_digest,
-        partition: host.workload.partition.clone(),
-    };
-    let result_kind = match host.workload.partition.kind {
-        MeshingPartitionKind::WholeStage => MeshingStageResultKind::WholeStage,
-        MeshingPartitionKind::DeterministicJoin => MeshingStageResultKind::DeterministicJoin,
-        MeshingPartitionKind::CanonicalEntityBatch
-        | MeshingPartitionKind::DisconnectedComponent => MeshingStageResultKind::Partition,
-    };
-    let mut prerequisite_manifest_digests = host
-        .workload
-        .inputs
-        .iter()
-        .map(|input| input.digest)
-        .collect::<Vec<_>>();
-    prerequisite_manifest_digests.sort_unstable();
-    let (result_identity, manifest) = build_closed_stage_manifest(
-        host.workload.stage,
-        result_kind,
-        partition_identity.canonical_digest()?,
-        output.invariant_summary_digest,
-        prerequisite_manifest_digests,
-        MeshingManifestDisposition::ValidatedDependency,
-        &payload,
-    )?;
-    let stage_objects = prepare_stage_objects(result_identity, manifest, payload.chunks, limits)
-        .map_err(|error| map_artifact_limit(&host, error))?;
-    let publication =
-        prepare_result_publication(stage_objects, host.artifact_access.clone(), limits)
-            .map_err(|error| map_artifact_limit(&host, error))?;
-    for object in &publication.stage_objects().objects {
-        store
-            .write_verified(object)
-            .map_err(MeshingExecutionError::from)?;
+    let payload =
+        build_chunked_stage_payload_with_cancellation(&streams, policy, &publication_codec)
+            .map_err(|error| chunk_failure(&host, error, &publication_codec))?;
+    // Chunk ownership has moved into the payload; release the original record buffers.
+    drop(streams);
+    drop(record_storage);
+    publish_stage(
+        &host,
+        store,
+        &mut control,
+        invariant_summary_digest,
+        payload,
+        limits,
+    )
+}
+
+fn chunk_failure(
+    host: &MeshingHostWorkload,
+    error: runmat_meshing_core::MeshingContractError,
+    codec: &crate::codec_control::CodecControl<'_>,
+) -> MeshingSerialExecutionError {
+    if let Some(original) = codec.take_failure() {
+        return MeshingSerialExecutionError::Stage(failure(
+            host.workload.stage,
+            crate::geometry_failure::category(original.kind),
+            &original.reason,
+            None,
+        ));
     }
-    let manifest_digest =
-        StableDigest::from_bytes(*publication.stage_objects().root.digest.bytes());
-    let workload_result = MeshingWorkloadResult::Validated {
-        stage_manifest_digest: manifest_digest,
-    };
-    workload_result.validate_against(&host.workload)?;
-    Ok(CompletedMeshingStage {
-        workload_result,
-        publication,
-    })
+    if error.field == "meshing chunks" && error.reason.contains("hard total byte limit") {
+        let mut failure = artifact_budget_failure(host);
+        failure
+            .achieved_values
+            .push(runmat_meshing_core::MeshingDiagnosticEntry {
+                name: "chunk_artifact_failure".into(),
+                value: runmat_meshing_core::MeshingDiagnosticValue::Text(
+                    crate::diagnostic::bounded_diagnostic_text(
+                        &error.to_string(),
+                        "chunk artifact limit exceeded",
+                    ),
+                ),
+                unit: None,
+            });
+        MeshingSerialExecutionError::Stage(failure)
+    } else {
+        MeshingSerialExecutionError::Bridge(MeshingExecutionError::from(error))
+    }
 }
 
 fn validate_stage_streams(
@@ -296,7 +263,8 @@ fn validate_stage_streams(
         ),
         MeshingStageKind::OrderElevation => matches!(
             media,
-            MeshingChunkMediaType::MeshNodes
+            MeshingChunkMediaType::SolverMeshProjection
+                | MeshingChunkMediaType::MeshNodes
                 | MeshingChunkMediaType::MeshElements
                 | MeshingChunkMediaType::MeshClassification
         ),
@@ -305,7 +273,7 @@ fn validate_stage_streams(
         }
         MeshingStageKind::Serialization | MeshingStageKind::Publication => matches!(
             media,
-            MeshingChunkMediaType::AnalysisMeshArtifact | MeshingChunkMediaType::MeshingEvidence
+            MeshingChunkMediaType::SolverMeshArtifact | MeshingChunkMediaType::MeshingEvidence
         ),
     };
     if streams.is_empty() || streams.iter().any(|stream| !legal(stream.media_type)) {
@@ -320,21 +288,6 @@ fn validate_stage_streams(
     Ok(())
 }
 
-fn input_roots(
-    request: &ProgramExecutionRequest,
-) -> Result<Vec<runmat_execution::value::ValueRef>, MeshingExecutionError> {
-    request
-        .arguments
-        .iter()
-        .map(|value| match value {
-            ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
-                "serial meshing inputs must remain externalized artifact roots".into(),
-            )),
-        })
-        .collect()
-}
-
 fn effective_limits(
     host: &MeshingHostWorkload,
     mut limits: ObjectInventoryLimits,
@@ -346,7 +299,7 @@ fn effective_limits(
     }
     limits.max_total_bytes = limits
         .max_total_bytes
-        .min(host.resolved_request.resources.maximum_artifact_bytes);
+        .min(host.resources().maximum_artifact_bytes);
     limits.max_object_bytes = limits.max_object_bytes.min(limits.max_total_bytes);
     Ok(limits)
 }
@@ -357,7 +310,7 @@ fn effective_chunk_policy(
 ) -> Result<MeshingChunkPolicy, MeshingSerialExecutionError> {
     policy.maximum_total_encoded_bytes = policy
         .maximum_total_encoded_bytes
-        .min(host.resolved_request.resources.maximum_artifact_bytes);
+        .min(host.resources().maximum_artifact_bytes);
     if policy.maximum_chunk_bytes > policy.maximum_total_encoded_bytes {
         policy.maximum_chunk_bytes = policy.maximum_total_encoded_bytes;
     }
@@ -365,38 +318,6 @@ fn effective_chunk_policy(
         .validate()
         .map_err(|_| MeshingSerialExecutionError::Stage(artifact_budget_failure(host)))?;
     Ok(policy)
-}
-
-fn validate_combined_input_inventory(
-    inputs: &[PreparedMeshingInput],
-    limits: ObjectInventoryLimits,
-) -> Result<(), MeshingExecutionError> {
-    let mut objects = std::collections::BTreeMap::new();
-    let mut total = 0_u64;
-    for input in inputs {
-        for object in input.objects() {
-            match objects.insert(object.descriptor.digest, object.descriptor.encoded_length) {
-                Some(length) if length != object.descriptor.encoded_length => {
-                    return Err(MeshingExecutionError::Identity(
-                        "input object digest was reused with a different length",
-                    ));
-                }
-                Some(_) => continue,
-                None => {}
-            }
-            total = total
-                .checked_add(object.descriptor.encoded_length)
-                .ok_or_else(|| {
-                    MeshingExecutionError::Invalid("input artifact byte total overflow".into())
-                })?;
-        }
-    }
-    if objects.len() > limits.max_objects || total > limits.max_total_bytes {
-        return Err(MeshingExecutionError::Invalid(
-            "combined meshing input artifact inventory exceeds its hard bound".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn map_artifact_limit(

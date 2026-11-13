@@ -1,5 +1,20 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+struct BlackScholesShaderInputGeometry<'a> {
+    shape: &'a [usize],
+    strides: &'a [usize],
+}
+
+struct BlackScholesShaderGeometry<'a> {
+    output_shape: &'a [usize],
+    inputs: [BlackScholesShaderInputGeometry<'a>; 6],
+}
+
+#[cfg(test)]
+#[path = "finance/validation_tests.rs"]
+mod validation_tests;
+
 impl WgpuProvider {
     pub(crate) fn black_scholes_price_exec(
         &self,
@@ -13,10 +28,7 @@ impl WgpuProvider {
             !request.output_shape.is_empty(),
             "black_scholes_price: missing output shape"
         );
-        ensure!(
-            request.output_shape.len() <= 8,
-            "black_scholes_price: rank exceeds GPU kernel limit"
-        );
+
         let total_len = request
             .output_shape
             .iter()
@@ -31,6 +43,9 @@ impl WgpuProvider {
             total_len <= u32::MAX as usize,
             "black_scholes_price: tensor length exceeds GPU dispatch limits"
         );
+        if total_len != 0 {
+            self.require_ieee_words(self.precision)?;
+        }
 
         let entries = request
             .inputs
@@ -60,11 +75,14 @@ impl WgpuProvider {
                     idx + 1
                 );
                 let entry = self.get_entry(input.handle)?;
-                ensure!(
-                    entry.storage != GpuTensorStorage::ComplexInterleaved,
-                    "black_scholes_price: complex input {} is not supported",
-                    idx + 1
-                );
+                if entry.storage != GpuTensorStorage::Real {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        format!(
+                            "black_scholes_price: complex input {} is not supported",
+                            idx + 1
+                        ),
+                    ));
+                }
                 ensure!(
                     entry.len == input_len,
                     "black_scholes_price: input {} shape does not match buffer length",
@@ -74,119 +92,160 @@ impl WgpuProvider {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let call_buffer =
-            self.create_storage_buffer_checked(total_len, "runmat-black-scholes-call-out")?;
-        let put_buffer =
-            self.create_storage_buffer_checked(total_len, "runmat-black-scholes-put-out")?;
-
-        if total_len > 0 {
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-            let mut offset = 0usize;
-            while offset < total_len {
-                let chunk_len = (total_len - offset).min(chunk_capacity);
-                let shader = black_scholes_price_shader(
-                    self.precision,
-                    request,
-                    total_len as u32,
-                    offset as u32,
-                    chunk_len as u32,
-                );
-                let shader_module =
-                    self.device_ref()
-                        .create_shader_module(wgpu::ShaderModuleDescriptor {
-                            label: Some("runmat-black-scholes-price-shader"),
-                            source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                        });
-                let bind_layout =
-                    self.device_ref()
-                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                            label: Some("runmat-black-scholes-price-layout"),
-                            entries: &black_scholes_bind_layout_entries(),
-                        });
-                let pipeline_layout =
-                    self.device_ref()
-                        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                            label: Some("runmat-black-scholes-price-pipeline-layout"),
-                            bind_group_layouts: &[&bind_layout],
-                            push_constant_ranges: &[],
-                        });
-                let pipeline = self.device_ref().create_compute_pipeline(
-                    &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                        label: Some("runmat-black-scholes-price-pipeline"),
-                        layout: Some(&pipeline_layout),
-                        module: &shader_module,
-                        entry_point: "main",
-                    },
-                );
-                let bind_group = self
-                    .device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-black-scholes-price-bind"),
-                        layout: &bind_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entries[0].buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: entries[1].buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: entries[2].buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: entries[3].buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: entries[4].buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: entries[5].buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: call_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: put_buffer.as_ref().as_entire_binding(),
-                            },
-                        ],
-                    });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
-                crate::backend::wgpu::dispatch::creation::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &pipeline,
-                    &bind_group,
-                    workgroups,
-                    "runmat-black-scholes-price-encoder",
-                    "runmat-black-scholes-price-pass",
-                );
-                offset += chunk_len;
-            }
+        if request.output_shape.len() > 8 {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "black_scholes_price: rank exceeds GPU kernel limit",
+            ));
         }
 
+        let geometry = BlackScholesShaderGeometry {
+            output_shape: request.output_shape,
+            inputs: std::array::from_fn(|index| BlackScholesShaderInputGeometry {
+                shape: request.inputs[index].shape,
+                strides: request.inputs[index].strides,
+            }),
+        };
+        // Complete every chunk's fallible compiler work before allocating or
+        // dispatching outputs. Later chunks must not discover a compiler error
+        // after an earlier chunk has already executed.
+        let mut prepared_chunks = Vec::new();
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        // `total_len` was admitted as u32 above, so this geometry imposes a
+        // fixed finite receipt count; reserve it before preparing any chunk.
+        prepared_chunks.try_reserve_exact(total_len.div_ceil(chunk_capacity))?;
+        let mut offset = 0usize;
+        while offset < total_len {
+            let chunk_len = (total_len - offset).min(chunk_capacity);
+            let shader = black_scholes_price_shader(
+                self.precision,
+                &geometry,
+                total_len as u32,
+                offset as u32,
+                chunk_len as u32,
+            );
+            prepared_chunks.push((
+                chunk_len,
+                crate::backend::wgpu::shader_compilation::prepare(
+                    &shader,
+                    self.access.enabled_features(),
+                    None,
+                )?,
+            ));
+            offset += chunk_len;
+        }
+        let (call_buffer, put_buffer) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let call_buffer = self.create_storage_buffer_checked(
+                    emission,
+                    total_len,
+                    "runmat-black-scholes-call-out",
+                )?;
+                let put_buffer = self.create_storage_buffer_checked(
+                    emission,
+                    total_len,
+                    "runmat-black-scholes-put-out",
+                )?;
+
+                if total_len > 0 {
+                    for (chunk_len, prepared_shader) in &prepared_chunks {
+                        let shader_module =
+                            crate::backend::wgpu::shader_compilation::create_prepared(
+                                emission,
+                                "runmat-black-scholes-price-shader",
+                                prepared_shader,
+                            )?;
+                        let bind_layout = emission.device().create_bind_group_layout(
+                            &wgpu::BindGroupLayoutDescriptor {
+                                label: Some("runmat-black-scholes-price-layout"),
+                                entries: &black_scholes_bind_layout_entries(),
+                            },
+                        );
+                        let pipeline_layout = emission.device().create_pipeline_layout(
+                            &wgpu::PipelineLayoutDescriptor {
+                                label: Some("runmat-black-scholes-price-pipeline-layout"),
+                                bind_group_layouts: &[&bind_layout],
+                                push_constant_ranges: &[],
+                            },
+                        );
+                        let pipeline = emission.device().create_compute_pipeline(
+                            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                                label: Some("runmat-black-scholes-price-pipeline"),
+                                layout: Some(&pipeline_layout),
+                                module: &shader_module,
+                                entry_point: "main",
+                            },
+                        );
+                        let bind_group =
+                            emission
+                                .device()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-black-scholes-price-bind"),
+                                    layout: &bind_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: entries[0].buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: entries[1].buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: entries[2].buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 3,
+                                            resource: entries[3].buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 4,
+                                            resource: entries[4].buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 5,
+                                            resource: entries[5].buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 6,
+                                            resource: call_buffer.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 7,
+                                            resource: put_buffer.as_ref().as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                            *chunk_len as u32,
+                            crate::backend::wgpu::config::WORKGROUP_SIZE,
+                        );
+                        crate::backend::wgpu::dispatch::creation::run(
+                            emission,
+                            pending,
+                            &pipeline,
+                            &bind_group,
+                            workgroups,
+                            "runmat-black-scholes-price-encoder",
+                            "runmat-black-scholes-price-pass",
+                        )?;
+                    }
+                }
+
+                Ok((call_buffer, put_buffer))
+            })??;
         Ok(ProviderBlackScholesPriceResult {
             call: self.register_existing_buffer(
                 call_buffer,
                 request.output_shape.to_vec(),
                 total_len,
-            ),
+            )?,
             put: self.register_existing_buffer(
                 put_buffer,
                 request.output_shape.to_vec(),
                 total_len,
-            ),
+            )?,
         })
     }
 }
@@ -209,18 +268,18 @@ fn black_scholes_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 8] {
 
 fn black_scholes_price_shader(
     precision: NumericPrecision,
-    request: &ProviderBlackScholesPriceRequest<'_>,
+    geometry: &BlackScholesShaderGeometry<'_>,
     total: u32,
     offset: u32,
     chunk: u32,
 ) -> String {
     let ty = precision.as_str();
-    let input_indices = request
+    let input_indices = geometry
         .inputs
         .iter()
         .map(|input| {
             wgsl_broadcast_index_expression(
-                request.output_shape,
+                geometry.output_shape,
                 input.shape,
                 input.strides,
                 "linear",
@@ -233,7 +292,7 @@ fn black_scholes_price_shader(
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
 
-    format!(
+    let source = format!(
         r#"
 const MAX_FINITE_BLS: {ty} = {ty}({max_finite});
 
@@ -250,12 +309,16 @@ struct Tensor {{
 @group(0) @binding(6) var<storage, read_write> call_out: Tensor;
 @group(0) @binding(7) var<storage, read_write> put_out: Tensor;
 
-fn is_nan_bls(x: {ty}) -> bool {{
-  return x != x;
+fn is_nan_bls(value: {ty}) -> bool {{
+  @IEEE_NAN_PREDICATE@
+}}
+
+fn isFiniteBls(value: {ty}) -> bool {{
+  @IEEE_FINITE_PREDICATE@
 }}
 
 fn is_finite_bls(x: {ty}) -> bool {{
-  return (x == x) && (abs(x) < MAX_FINITE_BLS);
+  return isFiniteBls(x) && (abs(x) < MAX_FINITE_BLS);
 }}
 
 fn nan_bls() -> {ty} {{
@@ -347,6 +410,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         total = total,
         offset = offset,
         chunk = chunk,
+    );
+    crate::backend::wgpu::shaders::nan_predicate::inject_finite(
+        &crate::backend::wgpu::shaders::nan_predicate::inject(&source, precision),
+        precision,
     )
 }
 
@@ -524,16 +591,16 @@ mod tests {
         }
 
         for handle in [
-            &price,
-            &strike,
-            &rate,
-            &time,
-            &volatility,
-            &yield_rate,
-            &result.call,
-            &result.put,
+            price,
+            strike,
+            rate,
+            time,
+            volatility,
+            yield_rate,
+            result.call,
+            result.put,
         ] {
-            provider.free(handle).ok();
+            handle.release().unwrap();
         }
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use runmat_types::physical::{Length, Position};
 
 struct UnlimitedEvaluation;
 
@@ -49,21 +50,42 @@ fn exact_singular_edge_is_a_complete_authoritative_fixture() {
     let control = UnlimitedEvaluation;
     let derivatives =
         ExactCurveEvaluator::derivatives(&evaluator, curve_id, 1.25, &control).unwrap();
-    assert_eq!(derivatives.point_m, [0.0, 0.0, 1.0]);
-    assert_eq!(derivatives.first_m, [0.0; 3]);
-    assert_eq!(derivatives.second_m, [0.0; 3]);
+    assert_eq!(derivatives.point_m.canonical_value(), [0.0, 0.0, 1.0]);
+    assert_eq!(
+        derivatives
+            .first_m
+            .with_canonical_storage(|values, _frames| *values),
+        [0.0; 3]
+    );
+    assert_eq!(
+        derivatives
+            .second_m
+            .with_canonical_storage(|values, _frames| *values),
+        [0.0; 3]
+    );
     assert_eq!(
         evaluator
-            .arc_length_m(curve_id, domain, 1.0e-12, &control)
-            .unwrap(),
+            .arc_length_m(curve_id, domain, Length::new(1.0e-12), &control)
+            .unwrap()
+            .canonical_value(),
         0.0
     );
     let projection = evaluator
-        .inverse_project(curve_id, [0.0, 3.0, 1.0], 1.0e-12, &control)
+        .inverse_project(
+            curve_id,
+            Position::new([0.0, 3.0, 1.0]),
+            Length::new(1.0e-12),
+            &control,
+        )
         .unwrap();
-    assert_eq!(projection.parameter, domain.start);
-    assert_eq!(projection.point_m, [0.0, 0.0, 1.0]);
-    assert_eq!(projection.distance_m, 3.0);
+    assert_eq!(
+        projection
+            .parameter
+            .with_native_coordinate(|value, _| value),
+        domain.start
+    );
+    assert_eq!(projection.point_m.canonical_value(), [0.0, 0.0, 1.0]);
+    assert_eq!(projection.distance_m.canonical_value(), 3.0);
     assert_eq!(
         evaluator
             .unit_tangent(curve_id, 1.25, &control)

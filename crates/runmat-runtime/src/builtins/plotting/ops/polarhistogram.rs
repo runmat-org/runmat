@@ -1,14 +1,7 @@
 //! MATLAB-compatible `polarhistogram` builtin.
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{POLARHISTOGRAM_ERROR_INTERNAL, POLARHISTOGRAM_ERROR_INVALID_ARGUMENT};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{AxesKind, BarChart, PolarHistogramDisplayStyle};
 use runmat_value::{Tensor, Value};
@@ -20,13 +13,13 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::bar::apply_bar_style;
 use super::histogram::histogram_metadata;
 use super::op_common::polar::real_tensor_from_value;
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::properties::{apply_histogram_normalization, validate_histogram_normalization};
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, value_as_string, BarStyle, BarStyleDefaults};
@@ -36,189 +29,6 @@ const POLAR_HIST_BAR_WIDTH: f32 = 0.95;
 const POLAR_HIST_DEFAULT_COLOR: glam::Vec4 = glam::Vec4::new(0.15, 0.5, 0.8, 0.6);
 const POLAR_HIST_DEFAULT_LABEL: &str = "Frequency";
 const DEFAULT_NUM_BINS: usize = 6;
-
-const OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created polar histogram chart.",
-}];
-
-const INPUT_THETA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "theta",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Angular sample data in radians.",
-}];
-
-const INPUT_THETA_BINS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "theta",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Angular sample data in radians.",
-    },
-    BuiltinParamDescriptor {
-        name: "bins",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bin count scalar or explicit edge vector in radians.",
-    },
-];
-
-const INPUT_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Optional axes handle, bin specification, and name/value pairs.",
-}];
-
-const POLARHISTOGRAM_INPUTS_MANUAL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name_value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "BinEdges/BinCounts pairs and optional style properties.",
-}];
-
-const POLARHISTOGRAM_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "h = polarhistogram(theta)",
-        inputs: &INPUT_THETA,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarhistogram(theta, nbins)",
-        inputs: &INPUT_THETA_BINS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarhistogram(theta, edges)",
-        inputs: &INPUT_THETA_BINS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarhistogram(theta, Name, Value, ...)",
-        inputs: &INPUT_ARGS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarhistogram(pax, ___)",
-        inputs: &INPUT_ARGS,
-        outputs: &OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = polarhistogram('BinEdges', edges, 'BinCounts', counts)",
-        inputs: &POLARHISTOGRAM_INPUTS_MANUAL,
-        outputs: &OUTPUT_HANDLE,
-    },
-];
-
-const POLARHISTOGRAM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLARHISTOGRAM.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polarhistogram:InvalidArgument"),
-    when: "Input data, bin specification, axes targeting, or style arguments are invalid.",
-    message: "polarhistogram: invalid argument",
-};
-
-const POLARHISTOGRAM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLARHISTOGRAM.INTERNAL",
-    identifier: Some("RunMat:polarhistogram:Internal"),
-    when: "Internal polar histogram construction or rendering fails.",
-    message: "polarhistogram: internal operation failed",
-};
-
-const POLARHISTOGRAM_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    POLARHISTOGRAM_ERROR_INVALID_ARGUMENT,
-    POLARHISTOGRAM_ERROR_INTERNAL,
-];
-
-pub const POLARHISTOGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLARHISTOGRAM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLARHISTOGRAM_ERRORS,
-};
-
-const POLARHISTOGRAM_INTEGER_THETA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "theta or selected table data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly documents all eight integer classes for direct theta data and any numeric class for the selected table variable.",
-    }];
-const POLARHISTOGRAM_INTEGER_BINS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "nbins",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public positive-integer bin count is decoded structurally and bounded by the implementation's allocation limits.",
-    }];
-const POLARHISTOGRAM_INTEGER_EDGE_COUNT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "edges, counts, or numeric bin properties",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public bin edges, manual counts, limits, widths, and numeric style properties accept numeric values and cross explicit histogram/rendering boundaries.",
-    }];
-const POLARHISTOGRAM_INTEGER_SELECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "datavar variable index",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target permits numeric table-variable indices; these are structural one-based selectors rather than histogram observations.",
-    }];
-pub const POLARHISTOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = polarhistogram(integer_theta,___) or polarhistogram(table_with_integer_data,datavar,___)",
-        inputs: &POLARHISTOGRAM_INTEGER_THETA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Authoritative integer samples gather exactly; angular binning and wedge rendering are explicit floating geometry/statistical boundaries.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = polarhistogram(theta,integer_nbins)",
-        inputs: &POLARHISTOGRAM_INTEGER_BINS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The count selects histogram structure and never becomes sample data.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = polarhistogram(theta,integer_edges) or polarhistogram(BinEdges=integer_edges,BinCounts=integer_counts,___)",
-        inputs: &POLARHISTOGRAM_INTEGER_EDGE_COUNT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native values remain authoritative through parsing; histogram counts and rendered coordinates are explicit double outputs of this plotting sink.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = polarhistogram(tbl,integer_datavar,___)",
-        inputs: &POLARHISTOGRAM_INTEGER_SELECTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Table variable selection is a documented structural role; broader table-form support remains a general surface concern, not an implicit numeric conversion.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::polarhistogram")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -249,21 +59,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polarhistogram",
-    category = "plotting",
-    summary = "Create histogram charts in polar coordinates.",
-    keywords = "polarhistogram,polar,histogram,theta,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::polarhistogram::POLARHISTOGRAM_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::plotting::polarhistogram::POLARHISTOGRAM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::polarhistogram"
 )]
-pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+pub async fn polarhistogram_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "polarhistogram: too many output arguments",
+        ));
+    }
+    let work =
+        super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "polarhistogram")?;
+    let _arguments = args.fork();
+    work.finish(polarhistogram_impl(args, &work).await)
+}
+async fn polarhistogram_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+    work.check()?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_invalid_argument)?;
     let parsed = ParsedPolarHistogram::from_args(args).await?;
     let counts = tensor_utils::tensor_into_values_f64(parsed.counts);
@@ -302,14 +123,13 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Polar Histogram",
-            x_label: "",
-            y_label: "",
             axis_equal: true,
             grid: true,
+            ..Default::default()
         },
         move |figure, axes| {
             figure.set_axes_kind(axes, AxesKind::Polar);
@@ -353,8 +173,7 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         .map_err(|err| internal(format!("failed to update histogram display name: {err}")))?;
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_internal(err));
@@ -372,7 +191,7 @@ struct ParsedPolarHistogram {
 }
 
 impl ParsedPolarHistogram {
-    async fn from_args(args: Vec<Value>) -> BuiltinResult<Self> {
+    async fn from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         let (data, rest) = split_data_and_rest(args)?;
         let mut parsed = ParsedArgs::from_values(rest)?;
         validate_histogram_normalization(&parsed.normalization, BUILTIN_NAME)
@@ -389,7 +208,7 @@ impl ParsedPolarHistogram {
             let normalized_data = normalize_theta_tensor(source, &parsed.histcounts_args)?;
             let eval = crate::builtins::stats::hist::histcounts::evaluate(
                 Value::Tensor(normalized_data.clone()),
-                &parsed.histcounts_args,
+                crate::call::FunctionArgumentView::from_slice(&parsed.histcounts_args),
             )
             .await
             .map_err(map_invalid_argument)?;
@@ -445,7 +264,7 @@ struct ParsedArgs {
 }
 
 impl ParsedArgs {
-    fn from_values(args: Vec<Value>) -> BuiltinResult<Self> {
+    fn from_values(args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         let mut histcounts_args = Vec::new();
         let mut style_args = Vec::new();
         let mut bin_edges: Option<Vec<f64>> = None;
@@ -455,13 +274,20 @@ impl ParsedArgs {
         let mut idx = 0usize;
 
         while idx < args.len() {
-            let Some(key) = value_as_string(&args[idx]) else {
+            let Some(key) = value_as_string(&args[idx]).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "polarhistogram",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            else {
                 if idx == 0 {
                     histcounts_args.push(args[idx].clone());
                     idx += 1;
                     continue;
                 }
-                style_args.extend_from_slice(&args[idx..]);
+                style_args.extend(args.view().range(idx..)?.iter().cloned());
                 break;
             };
             if idx + 1 >= args.len() {
@@ -484,6 +310,13 @@ impl ParsedArgs {
                 }
                 "normalization" => {
                     normalization = value_as_string(&value)
+                        .map_err(|source| {
+                            crate::builtins::plotting::plotting_error_with_source(
+                                "polarhistogram",
+                                source.to_string(),
+                                source,
+                            )
+                        })?
                         .ok_or_else(|| invalid_argument("Normalization must be a string"))?
                         .trim()
                         .to_ascii_lowercase();
@@ -542,20 +375,35 @@ impl ParsedArgs {
     }
 }
 
-fn split_data_and_rest(args: Vec<Value>) -> BuiltinResult<(Option<Value>, Vec<Value>)> {
-    if args.is_empty() {
-        return Ok((None, Vec::new()));
-    }
-    if value_as_string(&args[0]).is_some() {
+fn split_data_and_rest(
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(Option<Value>, crate::call::BuiltinArguments)> {
+    if args.is_empty()
+        || value_as_string(&args[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "polarhistogram",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .is_some()
+    {
         return Ok((None, args));
     }
-    let mut it = args.into_iter();
-    let data = it.next();
-    Ok((data, it.collect()))
+    let data = args.pop_front();
+    Ok((data, args))
 }
 
 fn parse_display_style(value: &Value) -> BuiltinResult<PolarHistogramDisplayStyle> {
     let style = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "polarhistogram",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| invalid_argument("DisplayStyle must be a string"))?
         .trim()
         .to_ascii_lowercase();
@@ -609,7 +457,7 @@ fn normalize_theta_tensor(tensor: Tensor, histcounts_args: &[Value]) -> BuiltinR
     if !period.is_finite() || period <= 0.0 {
         return Err(invalid_argument("angular bin range must be positive"));
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let mut values = tensor_utils::tensor_into_values_f64(tensor);
     for value in &mut values {
         if value.is_finite() {
@@ -648,7 +496,13 @@ fn angular_range(histcounts_args: &[Value]) -> BuiltinResult<(f64, f64)> {
 fn find_histcounts_vector(args: &[Value], key: &str) -> BuiltinResult<Option<Vec<f64>>> {
     let mut idx = 0usize;
     while idx + 1 < args.len() {
-        if let Some(name) = value_as_string(&args[idx]) {
+        if let Some(name) = value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "polarhistogram",
+                source.to_string(),
+                source,
+            )
+        })? {
             if name.trim().eq_ignore_ascii_case(key) {
                 return Ok(Some(numeric_vector(&args[idx + 1], key)?));
             }
@@ -668,10 +522,10 @@ fn find_histcounts_vector(args: &[Value], key: &str) -> BuiltinResult<Option<Vec
 }
 
 fn has_histcounts_key(args: &[Value], key: &str) -> bool {
-    let mut idx = 0usize;
+    let mut idx = 0;
     while idx + 1 < args.len() {
-        if let Some(name) = value_as_string(&args[idx]) {
-            if name.trim().eq_ignore_ascii_case(key) {
+        if matches!(&args[idx], Value::String(_) | Value::CharArray(_)) {
+            if crate::builtins::plotting::style::value_text_equals_ascii(&args[idx], key, true) {
                 return true;
             }
             idx += 2;
@@ -684,12 +538,12 @@ fn has_histcounts_key(args: &[Value], key: &str) -> bool {
 
 fn has_positional_bin_argument(args: &[Value]) -> bool {
     args.first()
-        .is_some_and(|value| value_as_string(value).is_none())
+        .is_some_and(|value| !matches!(value, Value::String(_) | Value::CharArray(_)))
 }
 
 fn has_positional_edge_argument(args: &[Value]) -> bool {
     args.first()
-        .filter(|value| value_as_string(value).is_none())
+        .filter(|value| !matches!(value, Value::String(_) | Value::CharArray(_)))
         .and_then(|value| numeric_vector(value, "BinEdges").ok())
         .is_some_and(|values| values.len() > 1)
 }
@@ -739,14 +593,28 @@ fn map_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    error_with_detail(&POLARHISTOGRAM_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = error_with_detail(&POLARHISTOGRAM_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    error_with_detail(&POLARHISTOGRAM_ERROR_INTERNAL, err.message)
+    let mapped = error_with_detail(&POLARHISTOGRAM_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
@@ -760,6 +628,14 @@ fn internal(detail: impl AsRef<str>) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn polarhistogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::polarhistogram_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
@@ -784,6 +660,17 @@ mod tests {
             numeric_vector(&Value::Tensor(edges), "BinEdges").expect("numeric vector"),
             vec![-3.0, 0.0, 3.0]
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn theta_normalization_preserves_low_rank_host_geometry() {
+        for (shape, samples) in [(Vec::new(), vec![0.0]), (vec![2], vec![0.0, 1.0])] {
+            let input = Tensor::new(samples.clone(), shape.clone()).expect("theta tensor");
+            let output = normalize_theta_tensor(input, &[]).expect("theta normalization");
+            assert_eq!(output.shape(), shape);
+            assert_eq!(output.materialize_f64(), samples);
+        }
     }
 
     #[test]

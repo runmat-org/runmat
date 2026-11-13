@@ -41,6 +41,19 @@ impl Default for RecorderState {
 
 static RECORDER: Lazy<Mutex<RecorderState>> = Lazy::new(|| Mutex::new(RecorderState::default()));
 
+#[cfg(test)]
+mod test_scope;
+#[cfg(test)]
+pub(crate) use test_scope::ScopedRecorder;
+
+fn with_recorder<R>(action: impl FnOnce(&mut RecorderState) -> R) -> R {
+    #[cfg(test)]
+    if let Some(recorder) = test_scope::current() {
+        return action(&mut recorder.lock().unwrap_or_else(|error| error.into_inner()));
+    }
+    action(&mut RECORDER.lock().unwrap_or_else(|error| error.into_inner()))
+}
+
 #[derive(Debug)]
 pub struct PlacementTraceContext {
     correlation: PlacementCorrelationId,
@@ -74,6 +87,23 @@ impl PlacementTraceContext {
             bytes,
             attributes,
         );
+    }
+
+    /// Close a provider-dispatch scope without asserting device completion.
+    pub fn submitted(mut self, variant: PlacementVariant, duration_ns: Option<u64>) {
+        if self.enabled {
+            record_event(
+                self.correlation,
+                PlacementEventKind::Queue,
+                Some(variant),
+                Some("provider_submission"),
+                duration_ns,
+                None,
+                &[],
+            );
+            complete_trace(self.correlation);
+        }
+        self.finished = true;
     }
 
     pub fn complete(mut self, variant: Option<PlacementVariant>, duration_ns: Option<u64>) {
@@ -137,45 +167,44 @@ impl Drop for PlacementTraceContext {
 
 pub fn begin_trace(operation: &str, region: Option<RegionId>) -> PlacementTraceContext {
     let operation = bounded_token(operation, OPERATION_MAX_BYTES, "unknown");
-    let mut state = RECORDER
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    while state.active.len().saturating_add(state.completed.len()) >= TRACE_CAPACITY {
-        if state.completed.pop_front().is_some() {
-            state.dropped_traces = state.dropped_traces.saturating_add(1);
-        } else {
-            break;
+    with_recorder(|state| {
+        while state.active.len().saturating_add(state.completed.len()) >= TRACE_CAPACITY {
+            if state.completed.pop_front().is_some() {
+                state.dropped_traces = state.dropped_traces.saturating_add(1);
+            } else {
+                break;
+            }
         }
-    }
-    if state.active.len() >= TRACE_CAPACITY {
-        state.dropped_traces = state.dropped_traces.saturating_add(1);
-        return PlacementTraceContext {
-            correlation: PlacementCorrelationId(0),
-            enabled: false,
-            finished: false,
-        };
-    }
-    let correlation = PlacementCorrelationId(state.next_correlation.max(1));
-    state.next_correlation = state.next_correlation.saturating_add(1).max(1);
-    state.active.insert(
-        correlation,
-        ActiveTrace {
-            started: Instant::now(),
-            trace: PlacementTrace {
-                correlation,
-                region,
-                operation,
-                events: Vec::new(),
-                dropped_events: 0,
-                complete: false,
+        if state.active.len() >= TRACE_CAPACITY {
+            state.dropped_traces = state.dropped_traces.saturating_add(1);
+            return PlacementTraceContext {
+                correlation: PlacementCorrelationId(0),
+                enabled: false,
+                finished: false,
+            };
+        }
+        let correlation = PlacementCorrelationId(state.next_correlation.max(1));
+        state.next_correlation = state.next_correlation.saturating_add(1).max(1);
+        state.active.insert(
+            correlation,
+            ActiveTrace {
+                started: Instant::now(),
+                trace: PlacementTrace {
+                    correlation,
+                    region,
+                    operation,
+                    events: Vec::new(),
+                    dropped_events: 0,
+                    complete: false,
+                },
             },
-        },
-    );
-    PlacementTraceContext {
-        correlation,
-        enabled: true,
-        finished: false,
-    }
+        );
+        PlacementTraceContext {
+            correlation,
+            enabled: true,
+            finished: false,
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -188,68 +217,63 @@ pub fn record_event(
     bytes: Option<u64>,
     attributes: &[PlacementAttribute],
 ) {
-    let mut state = RECORDER
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(active) = state.active.get_mut(&correlation) else {
-        return;
-    };
-    if active.trace.events.len() >= EVENT_CAPACITY {
-        active.trace.dropped_events = active.trace.dropped_events.saturating_add(1);
-        return;
-    }
-    let sequence = u32::try_from(active.trace.events.len()).unwrap_or(u32::MAX);
-    active.trace.events.push(PlacementEvent {
-        sequence,
-        elapsed_ns: duration_ns_saturating(active.started.elapsed()),
-        kind,
-        variant,
-        reason: reason.map(|reason| bounded_token(reason, REASON_MAX_BYTES, "unknown")),
-        duration_ns,
-        bytes,
-        attributes: attributes
-            .iter()
-            .take(ATTRIBUTE_CAPACITY)
-            .cloned()
-            .collect(),
+    with_recorder(|state| {
+        let Some(active) = state.active.get_mut(&correlation) else {
+            return;
+        };
+        if active.trace.events.len() >= EVENT_CAPACITY {
+            active.trace.dropped_events = active.trace.dropped_events.saturating_add(1);
+            return;
+        }
+        let sequence = u32::try_from(active.trace.events.len()).unwrap_or(u32::MAX);
+        active.trace.events.push(PlacementEvent {
+            sequence,
+            elapsed_ns: duration_ns_saturating(active.started.elapsed()),
+            kind,
+            variant,
+            reason: reason.map(|reason| bounded_token(reason, REASON_MAX_BYTES, "unknown")),
+            duration_ns,
+            bytes,
+            attributes: attributes
+                .iter()
+                .take(ATTRIBUTE_CAPACITY)
+                .cloned()
+                .collect(),
+        });
     });
 }
 
 pub fn complete_trace(correlation: PlacementCorrelationId) {
-    let mut state = RECORDER
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(mut active) = state.active.remove(&correlation) else {
-        return;
-    };
-    active.trace.complete = true;
-    while state.completed.len() >= TRACE_CAPACITY {
-        state.completed.pop_front();
-        state.dropped_traces = state.dropped_traces.saturating_add(1);
-    }
-    state.completed.push_back(active.trace);
+    with_recorder(|state| {
+        let Some(mut active) = state.active.remove(&correlation) else {
+            return;
+        };
+        active.trace.complete = true;
+        while state.completed.len() >= TRACE_CAPACITY {
+            state.completed.pop_front();
+            state.dropped_traces = state.dropped_traces.saturating_add(1);
+        }
+        state.completed.push_back(active.trace);
+    });
 }
 
 pub fn report() -> PlacementReport {
-    let state = RECORDER
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut traces = state.completed.iter().cloned().collect::<Vec<_>>();
-    traces.extend(state.active.values().map(|active| active.trace.clone()));
-    traces.sort_by_key(|trace| trace.correlation);
-    PlacementReport {
-        schema_version: PLACEMENT_REPORT_SCHEMA_VERSION,
-        trace_capacity: TRACE_CAPACITY,
-        event_capacity: EVENT_CAPACITY,
-        traces,
-        dropped_traces: state.dropped_traces,
-    }
+    with_recorder(|state| {
+        let mut traces = state.completed.iter().cloned().collect::<Vec<_>>();
+        traces.extend(state.active.values().map(|active| active.trace.clone()));
+        traces.sort_by_key(|trace| trace.correlation);
+        PlacementReport {
+            schema_version: PLACEMENT_REPORT_SCHEMA_VERSION,
+            trace_capacity: TRACE_CAPACITY,
+            event_capacity: EVENT_CAPACITY,
+            traces,
+            dropped_traces: state.dropped_traces,
+        }
+    })
 }
 
 pub fn reset() {
-    *RECORDER
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = RecorderState::default();
+    with_recorder(|state| *state = RecorderState::default());
 }
 
 fn bounded_token(value: &str, max_bytes: usize, fallback: &str) -> String {
@@ -268,12 +292,35 @@ fn bounded_token(value: &str, max_bytes: usize, fallback: &str) -> String {
 mod tests {
     use super::*;
 
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+    #[test]
+    fn submitted_trace_closes_without_a_device_completion_event() {
+        let _recorder = ScopedRecorder::new();
+        let trace = begin_trace("submitted", None);
+        let correlation = trace.correlation();
+        trace.submitted(PlacementVariant::ProviderFusion, Some(7));
+        let report = report();
+        let trace = report
+            .traces
+            .iter()
+            .find(|trace| trace.correlation == correlation)
+            .unwrap();
+        assert!(trace.complete);
+        assert_eq!(trace.events.len(), 1);
+        assert_eq!(trace.events[0].kind, PlacementEventKind::Queue);
+        assert_eq!(
+            trace.events[0].reason.as_deref(),
+            Some("provider_submission")
+        );
+        assert_eq!(trace.events[0].duration_ns, Some(7));
+        assert!(!trace
+            .events
+            .iter()
+            .any(|event| event.kind == PlacementEventKind::Complete));
+    }
 
     #[test]
     fn correlated_reports_are_bounded_ordered_and_redacted_by_contract() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset();
+        let _recorder = ScopedRecorder::new();
         let trace = begin_trace("elementwise", None);
         trace.event(
             PlacementEventKind::Candidate,
@@ -302,8 +349,7 @@ mod tests {
 
     #[test]
     fn event_overflow_is_counted_without_growing_the_trace() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset();
+        let _recorder = ScopedRecorder::new();
         let trace = begin_trace("bounded", None);
         for _ in 0..EVENT_CAPACITY + 5 {
             trace.event(PlacementEventKind::Queue, None, None, None, None, &[]);
@@ -322,8 +368,7 @@ mod tests {
 
     #[test]
     fn active_trace_overflow_is_counted_without_growing_the_report() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset();
+        let _recorder = ScopedRecorder::new();
         let traces = (0..TRACE_CAPACITY + 3)
             .map(|_| begin_trace("bounded-active", None))
             .collect::<Vec<_>>();
@@ -336,8 +381,7 @@ mod tests {
 
     #[test]
     fn completed_and_active_traces_share_one_capacity() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset();
+        let _recorder = ScopedRecorder::new();
         for _ in 0..TRACE_CAPACITY {
             begin_trace("complete", None).complete(None, None);
         }

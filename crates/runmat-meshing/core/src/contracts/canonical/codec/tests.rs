@@ -21,6 +21,73 @@ fn digest(byte: u8) -> StableDigest {
     StableDigest::from_bytes([byte; 32])
 }
 
+fn assert_canonical_if_decoded<T>(bytes: &[u8])
+where
+    T: CanonicalMeshingContract + PartialEq + std::fmt::Debug,
+{
+    if let Ok(decoded) = T::canonical_decode(bytes) {
+        let canonical = decoded.canonical_encode().unwrap();
+        assert_eq!(T::canonical_decode(&canonical).unwrap(), decoded);
+    }
+}
+
+fn exercise_all_decoders(bytes: &[u8]) {
+    assert_canonical_if_decoded::<MeshingRequest>(bytes);
+    assert_canonical_if_decoded::<MeshingStageIdentity>(bytes);
+    assert_canonical_if_decoded::<MeshingStageManifest>(bytes);
+    assert_canonical_if_decoded::<MeshingFailure>(bytes);
+    assert_canonical_if_decoded::<MeshingWorkloadResult>(bytes);
+    assert_canonical_if_decoded::<SolverMeshArtifact>(bytes);
+}
+
+#[test]
+fn bounded_contract_decoders_survive_deterministic_hostile_inputs() {
+    let mut state = 0xc0de_cafe_5eed_f00d_u64;
+    for case_index in 0..5_000 {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let length = (state as usize) % 4_097;
+        let bytes = (0..length)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(2_862_933_555_777_941_757)
+                    .wrapping_add(3_037_000_493);
+                (state >> 56) as u8
+            })
+            .collect::<Vec<_>>();
+        let result = std::panic::catch_unwind(|| exercise_all_decoders(&bytes));
+        assert!(
+            result.is_ok(),
+            "decoder panic for hostile case {case_index}"
+        );
+    }
+
+    let seeds = [
+        request().canonical_encode().unwrap(),
+        stage_identity().canonical_encode().unwrap(),
+        artifact().canonical_encode().unwrap(),
+    ];
+    for (seed_index, seed) in seeds.into_iter().enumerate() {
+        for byte_index in 0..seed.len() {
+            let mut mutated = seed.clone();
+            mutated[byte_index] ^= 1 << (byte_index % 8);
+            let result = std::panic::catch_unwind(|| exercise_all_decoders(&mutated));
+            assert!(
+                result.is_ok(),
+                "decoder panic for seed {seed_index}, byte {byte_index}"
+            );
+        }
+        for length in 0..seed.len() {
+            let result = std::panic::catch_unwind(|| exercise_all_decoders(&seed[..length]));
+            assert!(
+                result.is_ok(),
+                "decoder panic for seed {seed_index}, truncation {length}"
+            );
+        }
+    }
+}
+
 #[test]
 fn canonical_request_has_a_stable_golden_identity() {
     let request = request();
@@ -31,8 +98,8 @@ fn canonical_request_has_a_stable_golden_identity() {
     assert_eq!(
         request.canonical_digest().unwrap().bytes(),
         &[
-            149, 246, 181, 81, 14, 127, 8, 48, 174, 211, 43, 98, 50, 71, 151, 120, 39, 227, 201,
-            179, 27, 248, 47, 190, 163, 53, 100, 247, 172, 55, 198, 115,
+            113, 154, 196, 245, 39, 189, 243, 9, 31, 147, 112, 71, 8, 201, 165, 50, 129, 151, 108,
+            210, 99, 36, 7, 90, 81, 108, 28, 100, 154, 75, 1, 90,
         ]
     );
 }
@@ -66,11 +133,11 @@ fn domains_prevent_equal_values_from_cross_contract_decoding() {
     assert_eq!(error.field, "canonical decoding domain");
 
     let tolerance = GeometryTolerancePolicy {
-        source_tolerance_m: 1.0e-8,
-        absolute_floor_m: 1.0e-10,
+        source_tolerance_m: runmat_types::physical::Length::new(1.0e-8),
+        absolute_floor_m: runmat_types::physical::Length::new(1.0e-10),
         model_relative_term: 1.0e-9,
-        requested_deviation_m: 1.0e-5,
-        maximum_healing_displacement_m: 1.0e-6,
+        requested_deviation_m: runmat_types::physical::Length::new(1.0e-5),
+        maximum_healing_displacement_m: runmat_types::physical::Length::new(1.0e-6),
     };
     assert_ne!(
         tolerance.canonical_digest().unwrap(),
@@ -113,7 +180,12 @@ fn decoder_rejects_noncanonical_maps_trailing_bytes_and_oversized_inputs() {
         MeshingStageIdentity::canonical_decode(&oversized)
             .unwrap_err()
             .reason,
-        "encoded contract exceeds its byte limit"
+        format!(
+            "contract `{}` contains {} bytes, exceeding its {}-byte limit",
+            MeshingStageIdentity::DOMAIN,
+            oversized.len(),
+            MeshingStageIdentity::LIMITS.maximum_encoded_bytes
+        )
     );
 }
 
@@ -237,6 +309,7 @@ fn floating_point_identity_preserves_negative_zero_bits() {
             unit: None,
         }],
         achieved_values: Vec::new(),
+        accounting_error: None,
         remediation: "inspect the deterministic numerical witness".into(),
     };
     assert_ne!(
@@ -256,7 +329,17 @@ fn artifact_digest_is_sealed_over_payload_and_detects_tampering() {
     assert_eq!(decoded, artifact);
 
     let mut tampered = artifact.clone();
-    tampered.topology.nodes[0].coordinates_m[0] = 0.25;
+    {
+        let quantity_change = 0.25;
+        let quantity_index = 0;
+        let quantity_slot = &mut tampered.topology.nodes[0].coordinates_m;
+        let mut quantity_coordinates = quantity_slot.canonical_value();
+        quantity_coordinates[quantity_index] = quantity_change;
+        *quantity_slot = runmat_types::physical::Quantity::<
+            runmat_types::physical::kind::Position,
+            _,
+        >::new(quantity_coordinates);
+    };
     assert_eq!(
         tampered.validate_canonical().unwrap_err().field,
         "artifact.canonical_digest"

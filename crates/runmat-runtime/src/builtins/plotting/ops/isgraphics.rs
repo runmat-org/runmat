@@ -1,131 +1,85 @@
-use crate::builtins::plotting::type_resolvers::handle_logical_type;
+//! Canonical graphics predicate; candidates remain rooted in BuiltinArguments.
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    ISGRAPHICS_DESCRIPTOR, ISGRAPHICS_ERROR_INVALID_ARGUMENT, ISGRAPHICS_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{LogicalArray, Value};
-
-const ISGRAPHICS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input resolves to a valid plotting graphics handle.",
-}];
-
-const ISGRAPHICS_INPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Candidate plotting handle value.",
-}];
-
-const ISGRAPHICS_INPUTS_HANDLE_TYPE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Candidate plotting handle value.",
-    },
-    BuiltinParamDescriptor {
-        name: "type",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Required graphics object type.",
-    },
-];
-
-const ISGRAPHICS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = isgraphics(h)",
-        inputs: &ISGRAPHICS_INPUTS_HANDLE,
-        outputs: &ISGRAPHICS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = isgraphics(h, type)",
-        inputs: &ISGRAPHICS_INPUTS_HANDLE_TYPE,
-        outputs: &ISGRAPHICS_OUTPUT,
-    },
-];
-
-const ISGRAPHICS_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const ISGRAPHICS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISGRAPHICS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISGRAPHICS_ERRORS,
-};
-
-const ISGRAPHICS_INTEGER_HANDLE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "isgraphics-integer-handle-alias",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "isgraphics numeric integer handle aliases are a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IsgraphicsIntegerHandleExtension"),
-    };
-const ISGRAPHICS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [ISGRAPHICS_INTEGER_HANDLE_EXTENSION];
-pub const ISGRAPHICS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "MATLAB graphics predicates operate on graphics objects; numeric integer handle aliases are a separately declared RunMat-only extension and compatibility mode returns same-shaped false.",
-    };
-
+#[path = "isgraphics/selector.rs"]
+mod selector;
+#[cfg(test)]
+#[path = "isgraphics/tests.rs"]
+mod tests;
 #[runtime_builtin(
     name = "isgraphics",
-    category = "plotting",
-    summary = "Return true if the input is a valid plotting graphics handle.",
-    keywords = "isgraphics,plotting,handle",
-    suppress_auto_output = true,
-    type_resolver(handle_logical_type),
-    descriptor(crate::builtins::plotting::isgraphics::ISGRAPHICS_DESCRIPTOR),
-    extensions(ISGRAPHICS_EXTENSIONS),
-    integer_audit(crate::builtins::plotting::isgraphics::ISGRAPHICS_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::isgraphics"
 )]
-pub fn isgraphics_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if !(1..=2).contains(&args.len()) {
-        return Err(crate::builtins::plotting::plotting_error(
-            "isgraphics",
-            "isgraphics: expected one or two input arguments",
-        ));
-    }
-    let mut result = handle_predicate_value(&args[0], "isgraphics");
-    if let Some(kind) = args.get(1) {
-        let kind = graphics_type_name(kind)?;
-        result = handle_predicate_value_of_type(&args[0], &kind, result);
-    }
-    Ok(result)
-}
-
-fn graphics_type_name(value: &Value) -> crate::BuiltinResult<String> {
-    match value {
-        Value::String(value) => Ok(value.trim().to_ascii_lowercase()),
-        Value::StringArray(value) if value.data.len() == 1 => {
-            Ok(value.data[0].trim().to_ascii_lowercase())
+pub fn isgraphics_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let _scope = runtime.as_ref().map(|runtime| runtime.enter());
+    crate::output_count::validate_fixed_outputs(
+        &ISGRAPHICS_DESCRIPTOR,
+        &ISGRAPHICS_ERROR_TOO_MANY_OUTPUTS,
+        "isgraphics",
+    )
+    .map_err(super::coordinate_admission::terminal)?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "isgraphics")?;
+    work.finish((|| {
+        if !(1..=2).contains(&args.len()) {
+            return Err(invalid_argument(
+                "expected one candidate and optional type text",
+            ));
         }
-        Value::CharArray(value) if value.rows == 1 => Ok(value
-            .data
-            .iter()
-            .collect::<String>()
-            .trim()
-            .to_ascii_lowercase()),
-        _ => Err(crate::builtins::plotting::plotting_error(
-            "isgraphics",
-            "isgraphics: type must be a text scalar",
-        )),
-    }
+        let kind = args.get(1).map(graphics_type_name).transpose()?;
+        let result = handle_predicate_value(&args[0], "isgraphics");
+        Ok(match kind.as_ref() {
+            Some(kind) => handle_predicate_value_of_type(&args[0], kind, result),
+            None => result,
+        })
+    })())
+}
+fn invalid_argument(detail: &str) -> crate::RuntimeError {
+    super::coordinate_admission::terminal(crate::runtime_descriptor_error_with_detail(
+        "isgraphics",
+        &ISGRAPHICS_ERROR_INVALID_ARGUMENT,
+        detail,
+    ))
+}
+fn graphics_type_name(value: &Value) -> crate::BuiltinResult<selector::GraphicsType> {
+    let text = match value {
+        Value::String(runmat_value::StringElement::Text(value)) => {
+            value.trim().to_ascii_lowercase()
+        }
+        Value::StringArray(value) if value.data().len() == 1 && !value.data()[0].is_missing() => {
+            value.data()[0]
+                .text_ref()
+                .expect("checked nonmissing scalar string")
+                .trim()
+                .to_ascii_lowercase()
+        }
+        Value::CharArray(value) if value.rows == 1 => {
+            runmat_value::decode_utf16_code_units(value.data())
+                .map_err(|source| {
+                    let mut error = invalid_argument(&source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .trim()
+                .to_ascii_lowercase()
+        }
+        _ => return Err(invalid_argument("type must be a host text scalar")),
+    };
+    Ok(selector::GraphicsType::parse(&text))
 }
 
-fn handle_predicate_value_of_type(value: &Value, kind: &str, base: Value) -> Value {
+fn handle_predicate_value_of_type(
+    value: &Value,
+    kind: &selector::GraphicsType,
+    base: Value,
+) -> Value {
     let scalar_matches = |value: &Value| graphics_handle_matches_type(value, kind);
     match (value, base) {
         (Value::Tensor(tensor), Value::LogicalArray(mut logical)) => {
@@ -155,74 +109,37 @@ fn numeric_graphics_handle(value: runmat_value::NumericScalar) -> Option<f64> {
     }
 }
 
-fn graphics_handle_matches_type(value: &Value, kind: &str) -> bool {
-    use crate::builtins::plotting::properties::PlotHandle;
-    use crate::builtins::plotting::state::{PlotChildHandleState, PlotObjectKind};
-
-    let normalized;
-    let value = if let Value::Int(integer) = value {
-        let Some(handle) =
-            crate::builtins::plotting::op_common::handles::numeric_handle_from_integer(integer)
-        else {
+fn graphics_handle_matches_type(value: &Value, kind: &selector::GraphicsType) -> bool {
+    graphics_handle_valid(value, Some(kind), "isgraphics")
+}
+pub(super) fn graphics_handle_valid(
+    value: &Value,
+    kind: Option<&selector::GraphicsType>,
+    builtin: &'static str,
+) -> bool {
+    if let Value::HandleObject(handle) = value {
+        if !crate::is_handle_valid(handle) {
             return false;
-        };
-        normalized = Value::Num(handle);
-        &normalized
-    } else {
-        value
-    };
-
-    match crate::builtins::plotting::properties::resolve_plot_handle(value, "isgraphics") {
-        Ok(PlotHandle::Root) => kind == "root",
-        Ok(PlotHandle::Figure(_)) => kind == "figure",
-        Ok(PlotHandle::Axes(_, _)) => kind == "axes",
-        Ok(PlotHandle::Legend(_, _)) => kind == "legend",
-        Ok(PlotHandle::Ruler(_, _, ruler)) => {
-            kind == "ruler"
-                || matches!(
-                    (ruler, kind),
-                    (PlotObjectKind::XAxis, "xaxis") | (PlotObjectKind::YAxis, "yaxis")
-                )
         }
-        Ok(PlotHandle::Text(_, _, _)) => kind == "text",
-        Ok(PlotHandle::PlotChild(_, child)) => match child.as_ref() {
-            PlotChildHandleState::Histogram(_) => kind == "histogram",
-            PlotChildHandleState::Histogram2(_) => kind == "histogram2",
-            PlotChildHandleState::Line(_) => kind == "line",
-            PlotChildHandleState::AnimatedLine(_) => kind == "animatedline",
-            PlotChildHandleState::Scatter(_) => kind == "scatter",
-            PlotChildHandleState::Bar(_) => kind == "bar",
-            PlotChildHandleState::Stem(_) => kind == "stem",
-            PlotChildHandleState::ErrorBar(_) => kind == "errorbar",
-            PlotChildHandleState::Stairs(_) => kind == "stairs",
-            PlotChildHandleState::Quiver(_) => kind == "quiver",
-            PlotChildHandleState::Image(_) => kind == "image",
-            PlotChildHandleState::Heatmap(_) => kind == "heatmap",
-            PlotChildHandleState::Binscatter(_) => kind == "binscatter",
-            PlotChildHandleState::FunctionSurface(_) => kind == "functionsurface",
-            PlotChildHandleState::FunctionContour(_) => kind == "functioncontour",
-            PlotChildHandleState::Area(_) => kind == "area",
-            PlotChildHandleState::Surface(_) => kind == "surface",
-            PlotChildHandleState::Patch(_) => kind == "patch",
-            PlotChildHandleState::Line3(_) => kind == "line",
-            PlotChildHandleState::Scatter3(_) => kind == "scatter",
-            PlotChildHandleState::Contour(_) | PlotChildHandleState::ContourFill(_) => {
-                kind == "contour"
-            }
-            PlotChildHandleState::ReferenceLine(_) => kind == "constantline",
-            PlotChildHandleState::Pie(_) => kind == "patch",
-            PlotChildHandleState::Text(_) => kind == "text",
-            PlotChildHandleState::TextScatter(_) => kind == "textscatter",
-            PlotChildHandleState::WordCloud(_) => kind == "wordcloud",
-            PlotChildHandleState::StackedPlot(_) => kind == "stackedplot",
-        },
-        Err(_) => false,
+        return runmat_gc::gc_with_value(&handle.target, |target| {
+            let Value::Object(object) = target else {
+                return false;
+            };
+            object
+                .graphics_receiver()
+                .and_then(crate::builtins::plotting::state::graphics_receiver_class)
+                .filter(|identity| handle.class_name == *identity)
+                .is_some_and(|identity| kind.is_none_or(|kind| kind.matches_class(identity)))
+        })
+        .unwrap_or(false);
     }
+    crate::builtins::plotting::properties::resolve_plot_handle(value, builtin)
+        .is_ok_and(|handle| kind.is_none_or(|kind| kind.matches_handle(&handle)))
 }
 
 fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
     match value {
-        Value::GpuTensor(handle) => false_value(handle.shape.clone()),
+        Value::GpuTensor(handle) => false_value(handle.shape().to_vec()),
         Value::Int(integer) => {
             if !crate::compatibility::runmat_extensions_enabled() {
                 return Value::Bool(false);
@@ -234,22 +151,20 @@ fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             if crate::compatibility::ensure_builtin_extension_enabled(
-                &ISGRAPHICS_INTEGER_HANDLE_EXTENSION,
+                &runmat_builtins::ISGRAPHICS_INTEGER_HANDLE_EXTENSION,
                 builtin,
             )
             .is_err()
             {
                 return Value::LogicalArray(
-                    LogicalArray::new(vec![0; tensor.len()], tensor.shape.clone())
+                    LogicalArray::new(vec![0; tensor.len()], tensor.shape().to_vec())
                         .expect("logical shape from tensor"),
                 );
             }
             integer_handle_predicate(tensor, builtin, handle_is_graphics)
         }
         Value::Tensor(tensor) => numeric_handle_predicate(tensor, builtin, handle_is_graphics),
-        _ => Value::Bool(
-            crate::builtins::plotting::properties::resolve_plot_handle(value, builtin).is_ok(),
-        ),
+        _ => Value::Bool(graphics_handle_valid(value, None, builtin)),
     }
 }
 
@@ -269,21 +184,19 @@ fn integer_handle_predicate(
     builtin: &'static str,
     predicate: fn(f64, &'static str) -> bool,
 ) -> Value {
-    let storage = tensor
-        .integer_storage()
-        .expect("integer handle predicate requires integer storage");
-    let data = storage
-        .exact_values()
-        .iter()
-        .map(|value| {
-            u8::from(
-                crate::builtins::plotting::op_common::handles::numeric_handle_from_integer(value)
-                    .is_some_and(|handle| predicate(handle, builtin)),
-            )
-        })
-        .collect();
+    let storage = tensor.integer_storage().expect("integer handle storage");
+    let data =
+        (0..storage.len())
+            .map(|index| {
+                u8::from(
+        storage.value_at(index).as_ref()
+            .and_then(crate::builtins::plotting::op_common::handles::numeric_handle_from_integer)
+            .is_some_and(|handle| predicate(handle, builtin))
+    )
+            })
+            .collect();
     Value::LogicalArray(
-        LogicalArray::new(data, tensor.shape.clone()).expect("logical shape from tensor"),
+        LogicalArray::new(data, tensor.shape().to_vec()).expect("logical shape from tensor"),
     )
 }
 
@@ -292,13 +205,16 @@ fn numeric_handle_predicate(
     builtin: &'static str,
     predicate: fn(f64, &'static str) -> bool,
 ) -> Value {
-    let data = tensor
-        .materialize_f64()
-        .iter()
-        .map(|&handle| u8::from(predicate(handle, builtin)))
+    let data = (0..tensor.len())
+        .map(|index| {
+            u8::from(predicate(
+                crate::builtins::common::tensor::tensor_value_f64(tensor, index),
+                builtin,
+            ))
+        })
         .collect();
     Value::LogicalArray(
-        LogicalArray::new(data, tensor.shape.clone()).expect("logical shape from tensor"),
+        LogicalArray::new(data, tensor.shape().to_vec()).expect("logical shape from tensor"),
     )
 }
 
@@ -307,86 +223,4 @@ fn handle_is_graphics(handle: f64, builtin: &'static str) -> bool {
         return false;
     }
     crate::builtins::plotting::properties::resolve_plot_handle(&Value::Num(handle), builtin).is_ok()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn isgraphics_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = ISGRAPHICS_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"tf = isgraphics(h)"));
-        assert!(labels.contains(&"tf = isgraphics(h, type)"));
-    }
-
-    #[test]
-    fn isgraphics_vectorizes_numeric_handle_arrays() {
-        let handles = runmat_value::Tensor::new(vec![f64::NAN, -1.0], vec![2, 1]).unwrap();
-        let result = isgraphics_builtin(vec![Value::Tensor(handles)]).unwrap();
-        match result {
-            Value::LogicalArray(logical) => {
-                assert_eq!(logical.shape, vec![2, 1]);
-                assert_eq!(logical.data, vec![0, 0]);
-            }
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn isgraphics_vectorizes_typed_handles_without_a_floating_mirror() {
-        let handles = runmat_value::Tensor::new_integer(
-            runmat_value::IntegerStorage::I16(vec![-1, -2]),
-            vec![2, 1],
-        )
-        .unwrap();
-        let result = isgraphics_builtin(vec![Value::Tensor(handles)]).unwrap();
-        match result {
-            Value::LogicalArray(logical) => assert_eq!(logical.data, vec![0, 0]),
-            other => panic!("expected logical array, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn compatibility_mode_treats_integer_arrays_as_nonobjects() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handles = runmat_value::Tensor::new_integer(
-            runmat_value::IntegerStorage::U64(vec![u64::MAX]),
-            vec![1, 1],
-        )
-        .unwrap();
-        let Value::LogicalArray(result) = isgraphics_builtin(vec![Value::Tensor(handles)]).unwrap()
-        else {
-            panic!("expected logical array");
-        };
-        assert_eq!(result.data, vec![0]);
-    }
-
-    #[test]
-    fn isgraphics_validates_arity_and_type_selector() {
-        assert!(isgraphics_builtin(Vec::new()).is_err());
-        assert!(
-            isgraphics_builtin(vec![Value::Num(0.0), Value::from("root"), Value::Num(1.0)])
-                .is_err()
-        );
-        assert_eq!(
-            isgraphics_builtin(vec![Value::Num(0.0), Value::from("root")]).unwrap(),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            isgraphics_builtin(vec![Value::Num(0.0), Value::from("figure")]).unwrap(),
-            Value::Bool(false)
-        );
-        let handles = runmat_value::Tensor::new(vec![0.0, f64::NAN], vec![2, 1]).unwrap();
-        let Value::LogicalArray(result) =
-            isgraphics_builtin(vec![Value::Tensor(handles), Value::from("root")]).unwrap()
-        else {
-            panic!("expected logical array");
-        };
-        assert_eq!(result.data, vec![1, 0]);
-    }
 }

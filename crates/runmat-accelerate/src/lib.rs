@@ -8,7 +8,6 @@
 
 use once_cell::sync::Lazy;
 use runmat_value::{Tensor, Value};
-use std::path::PathBuf;
 use std::sync::RwLock;
 
 pub mod backend;
@@ -17,6 +16,8 @@ pub mod fusion_exec;
 pub mod fusion_residency;
 pub mod graph;
 mod host_lu;
+mod iir_zero_phase;
+mod kernel_math;
 pub mod native_auto;
 pub mod placement;
 pub mod precision;
@@ -24,6 +25,7 @@ mod reduction_meta;
 pub mod simple_provider;
 mod sortrows_host;
 pub mod telemetry;
+mod wgsl;
 #[cfg(target_arch = "wasm32")]
 mod web_auto_offload_store;
 #[cfg(feature = "wgpu")]
@@ -32,14 +34,33 @@ pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
     apply_auto_offload_calibration_from_file, auto_offload_report, is_sink, prepare_builtin_args,
-    promote_binary, promote_reduction_args, promote_unary, reset_auto_offload_log,
-    AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry,
-    AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
-    ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
+    promote_binary, promote_binary_in_context, promote_builtin_binary_in_context,
+    promote_builtin_unary_in_context, promote_reduction_args, promote_unary,
+    refresh_auto_offload_calibration, reset_auto_offload_log, AutoOffloadCalibrationOutcome,
+    AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry, AutoOffloadDisposition,
+    AutoOffloadReport, BinaryOp, CachedProviderInfo, CalibrationSource, CalibrationUnitPolicy,
+    DecisionReason, ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry,
+    ThresholdSnapshot, UnaryOp,
 };
 pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};
-#[cfg(feature = "wgpu")]
+
+/// Read the already-registered WGPU façade for Core's private command proof.
+/// This never initializes a device and is absent in non-WGPU builds.
+pub fn registered_wgpu_provider_for_profiling(
+) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
+    #[cfg(feature = "wgpu")]
+    {
+        backend::wgpu::provider::registered_wgpu_provider()
+            .map(|provider| provider as &'static dyn runmat_accelerate_api::AccelProvider)
+    }
+    #[cfg(not(feature = "wgpu"))]
+    {
+        None
+    }
+}
+
+#[cfg(any(feature = "wgpu", all(feature = "cuda", not(target_arch = "wasm32"))))]
 use runmat_accelerate_api::AccelProvider;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "wgpu")]
@@ -87,11 +108,10 @@ pub enum AutoOffloadLogLevel {
 
 /// Configuration passed to the native auto-offload planner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AutoOffloadOptions {
     pub enabled: bool,
     pub calibrate: bool,
-    #[serde(default)]
-    pub profile_path: Option<PathBuf>,
     #[serde(default)]
     pub log_level: AutoOffloadLogLevel,
 }
@@ -101,7 +121,6 @@ impl Default for AutoOffloadOptions {
         Self {
             enabled: true,
             calibrate: true,
-            profile_path: None,
             log_level: AutoOffloadLogLevel::Trace,
         }
     }
@@ -112,8 +131,9 @@ static AUTO_OFFLOAD_OPTIONS: Lazy<RwLock<AutoOffloadOptions>> =
 
 static API_HOOKS: Lazy<()> = Lazy::new(|| {
     runmat_accelerate_api::register_residency_mark(fusion_residency::mark);
-    runmat_accelerate_api::register_residency_clear(fusion_residency::clear);
+    runmat_accelerate_api::register_residency_clear(fusion_residency::clear_identity);
     runmat_accelerate_api::register_sequence_threshold_provider(sequence_threshold_hint_bridge);
+    runmat_accelerate_api::register_automatic_offload_enabled_provider(native_auto::auto_enabled);
     runmat_accelerate_api::register_workgroup_size_hint_provider(workgroup_size_hint_bridge);
 });
 
@@ -174,9 +194,37 @@ impl Default for AccelerateInitOptions {
     }
 }
 
+impl AccelerateInitOptions {
+    /// Compatibility providers remain available while ordinary automatic
+    /// placement respects the master acceleration switch.
+    fn effective_auto_offload(&self) -> AutoOffloadOptions {
+        let mut options = self.auto_offload.clone();
+        options.enabled &= self.enabled;
+        options
+    }
+}
+
 /// Initialize the global acceleration provider using the supplied options.
 pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
-    configure_auto_offload(options.auto_offload.clone());
+    configure_auto_offload(options.effective_auto_offload());
+
+    #[cfg(all(feature = "cuda", not(target_arch = "wasm32")))]
+    if options.enabled {
+        match backend::cuda::register_cuda_provider() {
+            Ok(Some(provider)) => {
+                log::info!(
+                    "RunMat Accelerate: CUDA extension provider {}",
+                    provider.device_info()
+                );
+            }
+            Ok(None) => {
+                log::debug!("RunMat Accelerate: CUDA driver is unavailable");
+            }
+            Err(error) => {
+                log::warn!("RunMat Accelerate: CUDA extension provider unavailable: {error}");
+            }
+        }
+    }
 
     if runmat_accelerate_api::provider().is_some() {
         return;
@@ -209,6 +257,7 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
                         AccelPowerPreference::LowPower => PowerPreference::LowPower,
                     },
                     force_fallback_adapter: options.wgpu_force_fallback_adapter,
+                    precision: backend::wgpu::provider::WgpuPrecisionPolicy::Automatic,
                 };
 
                 match backend::wgpu::provider::register_wgpu_provider(wgpu_options) {
@@ -291,7 +340,7 @@ fn announce_wgpu_provider(provider: &WgpuProvider) {
 
 #[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
 pub async fn initialize_wgpu_provider_async(options: &AccelerateInitOptions) -> anyhow::Result<()> {
-    configure_auto_offload(options.auto_offload.clone());
+    configure_auto_offload(options.effective_auto_offload());
 
     if runmat_accelerate_api::provider().is_some() {
         return Ok(());
@@ -323,6 +372,7 @@ pub async fn initialize_wgpu_provider_async(options: &AccelerateInitOptions) -> 
                 AccelPowerPreference::LowPower => PowerPreference::LowPower,
             },
             force_fallback_adapter: options.wgpu_force_fallback_adapter,
+            precision: backend::wgpu::provider::WgpuPrecisionPolicy::Automatic,
         };
 
         match backend::wgpu::provider::register_wgpu_provider_async(wgpu_options).await {
@@ -359,6 +409,29 @@ pub fn initialize_acceleration_provider() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn master_acceleration_switch_masks_only_effective_auto_placement() {
+        for master in [false, true] {
+            for requested in [false, true] {
+                let options = super::AccelerateInitOptions {
+                    enabled: master,
+                    auto_offload: super::AutoOffloadOptions {
+                        enabled: requested,
+                        calibrate: true,
+                        log_level: super::AutoOffloadLogLevel::Info,
+                    },
+                    ..Default::default()
+                };
+                let effective = options.effective_auto_offload();
+                assert_eq!(effective.enabled, master && requested);
+                assert!(effective.calibrate);
+                assert_eq!(effective.log_level, super::AutoOffloadLogLevel::Info);
+                assert_eq!(options.auto_offload.enabled, requested);
+                assert!(options.allow_inprocess_fallback);
+            }
+        }
+    }
+
     #[cfg(feature = "wgpu")]
     use crate::backend::wgpu::cache::key::compute_pipeline_hash_bytes;
 
@@ -512,31 +585,44 @@ impl Accelerator {
         Self { planner }
     }
 
-    pub async fn elementwise_add(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
+    pub async fn elementwise_add(
+        &self,
+        a: &Value,
+        b: &Value,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_runtime::execution::RootedValue>
+    {
+        let _inputs = runmat_runtime::execution::RootedValueLease::for_values([a, b].into_iter())
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
         match (a, b) {
             (Value::GpuTensor(ga), Value::GpuTensor(gb)) => {
                 let ha = self.gather_handle(ga).await?;
                 let hb = self.gather_handle(gb).await?;
-                self.elementwise_add_resolved(&ha, &hb)
+                self.elementwise_add_resolved(&ha, &hb).await
             }
             (Value::GpuTensor(ga), other) => {
                 let ha = self.gather_handle(ga).await?;
-                self.elementwise_add_resolved(&ha, other)
+                self.elementwise_add_resolved(&ha, other).await
             }
             (other, Value::GpuTensor(gb)) => {
                 let hb = self.gather_handle(gb).await?;
-                self.elementwise_add_resolved(other, &hb)
+                self.elementwise_add_resolved(other, &hb).await
             }
-            _ => self.elementwise_add_resolved(a, b),
+            _ => self.elementwise_add_resolved(a, b).await,
         }
     }
 
-    fn elementwise_add_resolved(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
+    async fn elementwise_add_resolved(
+        &self,
+        a: &Value,
+        b: &Value,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_runtime::execution::RootedValue>
+    {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
                 ExecutionTarget::Cpu => {
-                    runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
-                        .map_err(|e| anyhow::anyhow!(e))
+                    runmat_runtime::call_builtin_async("plus", &[a.clone(), b.clone()])
+                        .await
+                        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
                 }
                 ExecutionTarget::Gpu(_) => {
                     let bk = self
@@ -547,21 +633,23 @@ impl Accelerator {
                     let db = bk.upload_matrix(mb)?;
                     let dc = bk.elem_add(da.as_ref(), db.as_ref())?;
                     let out = bk.download_matrix(dc.as_ref())?;
-                    Ok(Value::Tensor(out))
+                    runmat_runtime::execution::RootedValue::new(Value::Tensor(out))
+                        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
                 }
             },
-            _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
-                .map_err(|e| anyhow::anyhow!(e)),
+            _ => runmat_runtime::call_builtin_async("plus", &[a.clone(), b.clone()])
+                .await
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from_source),
         }
     }
 
     async fn gather_handle(
         &self,
         h: &runmat_accelerate_api::GpuTensorHandle,
-    ) -> anyhow::Result<Value> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
         runmat_runtime::gather_if_needed_async(&Value::GpuTensor(h.clone()))
             .await
-            .map_err(|error| anyhow::anyhow!(error))
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
     }
 }
 
@@ -571,7 +659,32 @@ mod native_gather_tests {
     use futures::executor::block_on;
     use runmat_value::{ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn accelerator_host_add_publishes_rooted_scalar_and_tensor_results() {
+        let accelerator = Accelerator::new(Planner::new(None));
+        let tensor = |data| Value::Tensor(Tensor::new(data, vec![1, 2]).unwrap());
+        for (left, right, expected) in [
+            (Value::Num(2.0), Value::Num(3.0), Value::Num(5.0)),
+            (
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+                Value::Int(runmat_value::IntValue::U64(1)),
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+            ),
+            (
+                tensor(vec![1.0, 2.0]),
+                tensor(vec![3.0, 4.0]),
+                tensor(vec![4.0, 6.0]),
+            ),
+        ] {
+            let result = block_on(accelerator.elementwise_add(&left, &right)).expect("host add");
+            assert_eq!(result.value(), &expected);
+            result.with_owned(|value| assert_eq!(value, expected));
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn accelerator_gather_preserves_native_complex_integer_and_source_lifetime() {
         crate::simple_provider::register_inprocess_provider();
         let provider = runmat_accelerate_api::provider().expect("in-process provider");
@@ -586,11 +699,12 @@ mod native_gather_tests {
             vec![1, 2],
         )
         .unwrap();
-        let mut handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
+        let handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
             provider, &expected,
         )
-        .expect("native complex integer upload");
-        runmat_accelerate_api::mark_handle_automatic(&mut handle);
+        .expect("native complex integer upload")
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
         let accelerator = Accelerator::new(Planner::new(None));
 
         let gathered = block_on(accelerator.gather_handle(&handle)).expect("native gather");
@@ -601,15 +715,26 @@ mod native_gather_tests {
             runmat_accelerate_api::handle_provenance(&handle),
             Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         );
-        provider.free(&handle).expect("free handle");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        handle.release().expect("release handle");
 
-        let unowned = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        assert!(block_on(accelerator.gather_handle(&unowned)).is_err());
+        let unregistered = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let error = block_on(accelerator.gather_handle(&unregistered.handle)).unwrap_err();
+        assert!(std::error::Error::source(&error)
+            .unwrap()
+            .is::<runmat_runtime::RuntimeError>());
+        unregistered
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(unregistered.probe.retirements(), 0);
+        drop(unregistered.handle);
+        assert_eq!(unregistered.probe.retirements(), 1);
     }
 }

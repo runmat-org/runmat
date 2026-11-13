@@ -1,7 +1,7 @@
 use runmat_geometry_core::ExactBRepTopology;
 use runmat_meshing_core::{CanonicalEntityRange, MeshingPartitionDescriptor, MeshingPartitionKind};
 
-use crate::{face_mesh::validate_exact_face_mesh_contract, ExactFaceMesh};
+use crate::{face_mesh::validate_exact_face_mesh_contract_with_cancellation, ExactFaceMesh};
 
 use super::{
     ExactFaceMeshBatch, ExactSurfaceMeshError, ExactSurfaceMeshErrorKind,
@@ -71,6 +71,22 @@ pub(crate) fn validate_exact_face_mesh_batch_parts(
     faces: &[ExactFaceMesh],
     topology: &ExactBRepTopology,
 ) -> Result<(), ExactSurfaceMeshError> {
+    validate_exact_face_mesh_batch_parts_with_cancellation(
+        schema_version,
+        partition,
+        faces,
+        topology,
+        None,
+    )
+}
+
+pub(crate) fn validate_exact_face_mesh_batch_parts_with_cancellation(
+    schema_version: u16,
+    partition: &MeshingPartitionDescriptor,
+    faces: &[ExactFaceMesh],
+    topology: &ExactBRepTopology,
+    cancellation: Option<&dyn runmat_meshing_core::MeshingCancellationSignal>,
+) -> Result<(), ExactSurfaceMeshError> {
     validate_face_partition_descriptor(partition)?;
     if schema_version != EXACT_FACE_MESH_BATCH_SCHEMA_VERSION || faces.is_empty() {
         return Err(invalid_input("face batch schema or inventory is invalid"));
@@ -79,18 +95,16 @@ pub(crate) fn validate_exact_face_mesh_batch_parts(
         .entity_range
         .as_ref()
         .expect("partition kind validated");
-    let expected = topology
-        .faces
-        .iter()
-        .filter(|face| face.id >= range.first && face.id <= range.last)
-        .collect::<Vec<_>>();
+    let start = topology.faces.partition_point(|face| face.id < range.first);
+    let end = topology.faces.partition_point(|face| face.id <= range.last);
+    let expected = &topology.faces[start..end];
     if expected.len() as u64 != range.entity_count
         || expected.first().is_none_or(|face| face.id != range.first)
         || expected.last().is_none_or(|face| face.id != range.last)
         || faces.len() != expected.len()
         || faces
             .iter()
-            .zip(&expected)
+            .zip(expected)
             .any(|(mesh, face)| mesh.source_face_id != face.id)
     {
         return Err(invalid_input(
@@ -98,10 +112,19 @@ pub(crate) fn validate_exact_face_mesh_batch_parts(
         ));
     }
     for mesh in faces {
-        validate_exact_face_mesh_contract(mesh, topology).map_err(|error| {
-            ExactSurfaceMeshError::new(ExactSurfaceMeshErrorKind::InvalidInput, error.reason)
+        validate_exact_face_mesh_contract_with_cancellation(mesh, topology, cancellation).map_err(
+            |error| {
+                ExactSurfaceMeshError::new(
+                    if error.kind == crate::ExactFaceJoinErrorKind::Cancelled {
+                        ExactSurfaceMeshErrorKind::Cancelled
+                    } else {
+                        ExactSurfaceMeshErrorKind::InvalidInput
+                    },
+                    error.reason,
+                )
                 .with_face(&mesh.source_face_id)
-        })?;
+            },
+        )?;
     }
     Ok(())
 }

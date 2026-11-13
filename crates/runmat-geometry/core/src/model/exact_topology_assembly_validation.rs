@@ -1,17 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use super::{
     exact_topology_validation_support::{
         claim_unique, invalid, require_ordered_refs, require_reference, validate_transform,
     },
-    ExactBRepTopology, GeometryContractError, PersistentEntityId, PersistentEntityKind,
+    validation_storage::{lookup, Claims, IdIndex, ValidationWork},
+    ExactBRepTopology, GeometryContractError, PersistentEntityKind,
 };
 
 pub(super) fn validate_assembly_occurrences(
     topology: &ExactBRepTopology,
-    assemblies: &BTreeSet<PersistentEntityId>,
-    instances: &BTreeSet<PersistentEntityId>,
-    bodies: &BTreeSet<PersistentEntityId>,
+    assemblies: &IdIndex<'_>,
+    instances: &IdIndex<'_>,
+    bodies: &IdIndex<'_>,
+    work: ValidationWork<'_>,
 ) -> Result<(), GeometryContractError> {
     require_reference(
         "root assembly",
@@ -19,22 +19,26 @@ pub(super) fn validate_assembly_occurrences(
         PersistentEntityKind::Assembly,
         assemblies,
     )?;
-
-    let mut claimed_instances = BTreeSet::new();
-    let mut claimed_instance_parents = BTreeMap::new();
-    let mut claimed_bodies = BTreeSet::new();
-    let mut occurrence_paths = BTreeSet::new();
+    let mut claimed_instances = Claims::new(instances, work)?;
+    let mut claimed_bodies = Claims::new(bodies, work)?;
+    let mut paths = work.buffer(topology.assemblies.len())?;
     for assembly in &topology.assemblies {
+        paths.push(&assembly.id.assembly_path);
+    }
+    paths.sort_unstable();
+    if paths.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(invalid(
+            "assembly occurrence path",
+            "each expanded assembly occurrence must have one stable path",
+        ));
+    }
+    drop(paths);
+    for assembly in &topology.assemblies {
+        work.checkpoint()?;
         if assembly.definition_digest == [0; 32] {
             return Err(invalid(
                 "assembly definition",
                 "definition identity must be nonzero",
-            ));
-        }
-        if !occurrence_paths.insert(assembly.id.assembly_path.clone()) {
-            return Err(invalid(
-                "assembly occurrence path",
-                "each expanded assembly occurrence must have one stable path",
             ));
         }
         require_ordered_refs(
@@ -67,35 +71,37 @@ pub(super) fn validate_assembly_occurrences(
             &assembly.child_instance_ids,
             &mut claimed_instances,
         )?;
-        for instance_id in &assembly.child_instance_ids {
-            claimed_instance_parents.insert(instance_id.clone(), assembly.id.clone());
+        for id in &assembly.child_instance_ids {
+            let instance =
+                lookup(&topology.instances, id, |instance| &instance.id).ok_or_else(|| {
+                    invalid(
+                        "assembly instance incidence",
+                        "instance index is incomplete",
+                    )
+                })?;
+            if instance.parent_assembly_id != assembly.id {
+                return Err(invalid(
+                    "assembly instance incidence",
+                    "every instance must occur in its parent assembly",
+                ));
+            }
         }
     }
-    if claimed_instances != *instances {
+    if !claimed_instances.complete() {
         return Err(invalid(
             "instance ownership",
             "every instance must have one parent assembly owner",
         ));
     }
-    if claimed_bodies != *bodies {
+    if !claimed_bodies.complete() {
         return Err(invalid(
             "body ownership",
             "every body must have one assembly occurrence owner",
         ));
     }
-
-    let assembly_by_id = topology
-        .assemblies
-        .iter()
-        .map(|assembly| (&assembly.id, assembly))
-        .collect::<BTreeMap<_, _>>();
-    let instance_by_id = topology
-        .instances
-        .iter()
-        .map(|instance| (&instance.id, instance))
-        .collect::<BTreeMap<_, _>>();
-    let mut instantiated_assemblies = BTreeSet::new();
+    let mut instantiated = Claims::new(assemblies, work)?;
     for instance in &topology.instances {
+        work.checkpoint()?;
         require_reference(
             "instance parent assembly",
             &instance.parent_assembly_id,
@@ -108,12 +114,18 @@ pub(super) fn validate_assembly_occurrences(
             PersistentEntityKind::Assembly,
             assemblies,
         )?;
-        let parent = assembly_by_id
-            .get(&instance.parent_assembly_id)
-            .ok_or_else(|| invalid("instance parent assembly", "reference index is incomplete"))?;
-        let child = assembly_by_id
-            .get(&instance.instantiated_assembly_id)
-            .ok_or_else(|| invalid("instantiated assembly", "reference index is incomplete"))?;
+        let parent = lookup(
+            &topology.assemblies,
+            &instance.parent_assembly_id,
+            |assembly| &assembly.id,
+        )
+        .ok_or_else(|| invalid("instance parent assembly", "reference index is incomplete"))?;
+        let child = lookup(
+            &topology.assemblies,
+            &instance.instantiated_assembly_id,
+            |assembly| &assembly.id,
+        )
+        .ok_or_else(|| invalid("instantiated assembly", "reference index is incomplete"))?;
         if instance.id.assembly_path != child.id.assembly_path
             || child.id.assembly_path.len() <= parent.id.assembly_path.len()
             || !child.id.assembly_path.starts_with(&parent.id.assembly_path)
@@ -123,14 +135,8 @@ pub(super) fn validate_assembly_occurrences(
                 "instance and child assembly must share a strict descendant occurrence path",
             ));
         }
-        if claimed_instance_parents.get(&instance.id) != Some(&instance.parent_assembly_id) {
-            return Err(invalid(
-                "assembly instance incidence",
-                "every instance must occur in its parent assembly",
-            ));
-        }
         if instance.instantiated_assembly_id == topology.root_assembly_id
-            || !instantiated_assemblies.insert(instance.instantiated_assembly_id.clone())
+            || !instantiated.insert(&instance.instantiated_assembly_id)
         {
             return Err(invalid(
                 "assembly occurrence ownership",
@@ -139,37 +145,32 @@ pub(super) fn validate_assembly_occurrences(
         }
         validate_transform(&instance.transform.0)?;
     }
-    let expected_children = assemblies
-        .iter()
-        .filter(|id| *id != &topology.root_assembly_id)
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    if instantiated_assemblies != expected_children {
+    if instantiated.count() + 1 != assemblies.len() {
         return Err(invalid(
             "assembly occurrence ownership",
             "every non-root assembly must be instantiated exactly once",
         ));
     }
-
-    let mut reachable = BTreeSet::from([topology.root_assembly_id.clone()]);
-    let mut frontier = vec![topology.root_assembly_id.clone()];
-    while let Some(assembly_id) = frontier.pop() {
-        let assembly = assembly_by_id
-            .get(&assembly_id)
+    let mut reachable = Claims::new(assemblies, work)?;
+    let mut frontier = work.buffer(topology.assemblies.len())?;
+    reachable.insert(&topology.root_assembly_id);
+    frontier.push(&topology.root_assembly_id);
+    while let Some(id) = frontier.pop() {
+        work.checkpoint()?;
+        let assembly = lookup(&topology.assemblies, id, |assembly| &assembly.id)
             .ok_or_else(|| invalid("assembly occurrence graph", "assembly index is incomplete"))?;
         for instance_id in &assembly.child_instance_ids {
-            let child = &instance_by_id
-                .get(instance_id)
+            let child = &lookup(&topology.instances, instance_id, |instance| &instance.id)
                 .ok_or_else(|| {
                     invalid("assembly occurrence graph", "instance index is incomplete")
                 })?
                 .instantiated_assembly_id;
-            if reachable.insert(child.clone()) {
-                frontier.push(child.clone());
+            if reachable.insert(child) {
+                frontier.push(child);
             }
         }
     }
-    if reachable != *assemblies {
+    if !reachable.complete() {
         return Err(invalid(
             "assembly occurrence graph",
             "all assemblies must be reachable from the root without cycles",

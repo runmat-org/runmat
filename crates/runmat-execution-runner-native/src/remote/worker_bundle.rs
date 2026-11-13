@@ -9,7 +9,7 @@ use super::RemoteBundleReceipt;
 use crate::materialized_project::MaterializedProject;
 
 pub(super) struct InstalledBundle {
-    pub(super) bundle: ExecutionBundle,
+    pub(super) bundle: Arc<ExecutionBundle>,
     pub(super) materialized_project: Option<Arc<MaterializedProject>>,
     pub(super) digest: Digest,
     pub(super) receipt: RemoteBundleReceipt,
@@ -44,8 +44,10 @@ fn materialize(
     bundle: ExecutionBundle,
     stored_bytes: u64,
 ) -> Result<InstalledBundle, String> {
+    runmat_core::cluster_settings::decode_project_policy(&bundle)?
+        .ok_or("cluster bundle lacks digest-bound project-only runtime settings; rebuild the bundle for this cluster target")?;
     let materialized_project = bundle
-        .requires_source_project()
+        .requires_materialization()
         .then(|| MaterializedProject::from_bundle(&bundle))
         .transpose()
         .map_err(|error| format!("remote bundle could not be materialized: {error}"))?
@@ -57,7 +59,7 @@ fn materialize(
         stored_bytes,
     };
     Ok(InstalledBundle {
-        bundle,
+        bundle: Arc::new(bundle),
         materialized_project,
         digest: bundle_digest,
         receipt,

@@ -1,11 +1,12 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+use allocator::GcAllocationKind;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use runmat_time::Instant;
 use runmat_value::Value;
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::ThreadId;
 use thiserror::Error;
@@ -16,8 +17,29 @@ pub mod collector;
 pub mod config;
 pub use runmat_gc_api::{GcHandle, GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 pub mod generations;
+mod lexical_activation;
+pub use lexical_activation::{
+    LexicalActivation, LexicalBindingMutationError, LexicalReservationOutcome, LexicalSlotState,
+    LexicalValueOwner, PreparedLexicalTable, RetiredLexicalTable,
+};
+mod reachability;
 pub mod roots;
+pub use reachability::{gc_with_registered_root_reachability, RegisteredRootReachability};
+mod root_admission;
+pub use root_admission::{
+    PreparedRootLease, PreparedRootPlan, PreparedRootQuote, RootAdmissionError, RootTraceFailure,
+};
+mod root_retirement;
+pub use root_retirement::{RootRetirement, RootRetirementObserver};
+mod admitted_allocation;
+mod retirement;
+pub use admitted_allocation::{
+    gc_allocate_prepared_rooted, GcRootedAllocationError, PreparedGcAllocation,
+};
 pub mod stats;
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub mod test_support;
 
 // Finalizer support
 use std::collections::HashMap;
@@ -32,6 +54,11 @@ static EXTERNAL_ROOT_PROVIDERS: once_cell::sync::Lazy<
     RwLock<HashMap<&'static str, ExternalRootProvider>>,
 > = once_cell::sync::Lazy::new(|| RwLock::new(HashMap::new()));
 
+/// Root publication and collection admission cannot cross a last-owner
+/// inspection. The inspection callback may only update a pre-rooted lifecycle
+/// state; it must not register roots or execute user code under this guard.
+static ROOT_ADMISSION: RwLock<()> = RwLock::new(());
+
 /// Register a runtime-owned root source without making the collector depend on
 /// that runtime domain. Re-registering the same stable name replaces it.
 pub fn register_external_root_provider(
@@ -39,6 +66,7 @@ pub fn register_external_root_provider(
     roots: fn() -> Vec<GcHandle>,
     roots_on_other_threads: fn() -> bool,
 ) {
+    let _admission = ROOT_ADMISSION.write();
     EXTERNAL_ROOT_PROVIDERS.write().insert(
         name,
         ExternalRootProvider {
@@ -99,22 +127,16 @@ static FINALIZERS: once_cell::sync::Lazy<
 
 /// Register a finalizer for the provided GC handle.
 pub fn gc_register_finalizer(ptr: GcHandle, f: std::sync::Arc<dyn GcFinalizer>) -> Result<()> {
-    FINALIZERS.lock().insert(ptr.into(), f);
+    let previous = FINALIZERS.lock().insert(ptr.into(), f);
+    drop(previous);
     Ok(())
 }
 
 /// Remove any registered finalizer for the provided GC handle.
 pub fn gc_unregister_finalizer(ptr: GcHandle) -> Result<()> {
-    FINALIZERS.lock().remove(&ptr.into());
+    let removed = FINALIZERS.lock().remove(&ptr.into());
+    drop(removed);
     Ok(())
-}
-
-/// Internal: run and remove finalizer for a live handle if present.
-pub(crate) fn gc_run_finalizer_for_handle(handle: GcHandle) {
-    if let Some(f) = FINALIZERS.lock().remove(&handle.into()) {
-        // Run finalizer; avoid panicking across GC boundaries
-        f.finalize();
-    }
 }
 
 #[cfg(feature = "pointer-compression")]
@@ -127,14 +149,14 @@ pub use collector::MarkSweepCollector;
 pub use config::{GcConfig, GcConfigBuilder};
 // Re-export unified handle from API crate
 pub use generations::{Generation, GenerationStats, GenerationalHeap, GenerationalHeapStats};
-pub use roots::{GlobalRoot, RootScanner, StackRoot, VariableArrayRoot};
+pub use roots::{GlobalRoot, RootScanner, StackRoot, ValueRoot, VariableArrayRoot};
 pub use stats::{CollectionEvent, CollectionType, GcStats};
 
 #[cfg(feature = "pointer-compression")]
 pub use compression::*;
 
 /// Errors that can occur during garbage collection
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum GcError {
     #[error("Out of memory: {0}")]
     OutOfMemory(String),
@@ -171,10 +193,14 @@ pub struct GarbageCollector {
     collector: Mutex<MarkSweepCollector>,
 
     /// Explicit roots stored as identity handles with registration counts.
-    root_ptrs: Mutex<HashMap<GcHandle, usize>>,
+    root_ptrs: Mutex<root_admission::RootRegistry>,
 
     /// Collection state
     collection_in_progress: AtomicBool,
+
+    /// Monotonic proof that a successful collection has inspected the heap.
+    /// It never wraps: collection fails closed before exhaustion.
+    collection_epoch: AtomicU64,
 
     /// Active allocations whose just-created handles have not been returned or rooted.
     allocation_in_progress: AtomicUsize,
@@ -303,8 +329,9 @@ impl GarbageCollector {
             config: Arc::new(RwLock::new(config)),
             allocator: Mutex::new(allocator),
             collector: Mutex::new(collector),
-            root_ptrs: Mutex::new(HashMap::new()),
+            root_ptrs: Mutex::new(root_admission::RootRegistry::new()),
             collection_in_progress: AtomicBool::new(false),
+            collection_epoch: AtomicU64::new(0),
             allocation_in_progress: AtomicUsize::new(0),
             active_value_borrows: AtomicUsize::new(0),
             active_value_mut_borrow: AtomicBool::new(false),
@@ -314,47 +341,33 @@ impl GarbageCollector {
     }
 
     fn allocate_inner(&self, value: Value) -> Result<(GcHandle, bool)> {
-        // Capture GPU handle if present to attach a finalizer after allocation
-        let gpu_handle: Option<runmat_accelerate_api::GpuTensorHandle> =
-            if let Value::GpuTensor(h) = &value {
-                Some(h.clone())
-            } else {
-                None
-            };
-
         let mut allocator = self.allocator.lock();
-        let ptr = allocator.allocate(value, &self.stats)?;
+        let ptr = match allocator.allocate_preserving_value(value, &self.stats) {
+            Ok(ptr) => ptr,
+            Err(failure) => {
+                drop(allocator);
+                let allocator::AllocationFailure { error, value } = *failure;
+                drop(value);
+                return Err(error);
+            }
+        };
+        let should_collect = self.allocation_should_collect(&allocator);
+        drop(allocator);
+        Ok((ptr, should_collect))
+    }
+
+    /// The same post-allocation policy applies to Values and typed activations.
+    /// Caller retains the allocator lock only while observing its counters.
+    fn allocation_should_collect(&self, allocator: &allocator::GenerationalAllocator) -> bool {
         let usage = allocator.young_generation_usage();
         let alloc_count = allocator.young_allocations_count();
-        let cfg = self.config.read().clone();
-        drop(allocator);
-
-        // Register finalizer for GPU tensors so buffers are freed on collection
-        if let Some(handle) = gpu_handle {
-            struct GpuTensorFinalizer {
-                handle: runmat_accelerate_api::GpuTensorHandle,
-            }
-            impl GcFinalizer for GpuTensorFinalizer {
-                fn finalize(&self) {
-                    if let Some(p) = runmat_accelerate_api::provider() {
-                        let _ = p.free(&self.handle);
-                        runmat_accelerate_api::clear_handle_logical(&self.handle);
-                    }
-                }
-            }
-            let fin = std::sync::Arc::new(GpuTensorFinalizer { handle });
-            let _ = gc_register_finalizer(ptr, fin);
-        }
+        let cfg = self.config.read();
 
         // Heuristic triggers:
         // - Utilization threshold
         // - Aggressive mode: periodic minor GC by allocation count to satisfy stress configs
-        if usage > cfg.minor_gc_threshold
+        usage > cfg.minor_gc_threshold
             || (cfg.minor_gc_threshold <= 0.35 && alloc_count > 0 && alloc_count.is_multiple_of(32))
-        {
-            return Ok((ptr, true));
-        }
-        Ok((ptr, false))
     }
 
     /// Allocate a new Value object
@@ -383,17 +396,31 @@ impl GarbageCollector {
         Ok(unsafe { ptr.as_ptr_unchecked().cast::<Value>().as_ptr() })
     }
 
-    fn validate_value_handle(&self, handle: &GcHandle, raw: *const Value) -> Result<()> {
+    fn validate_handle_kind(&self, handle: &GcHandle, kind: GcAllocationKind) -> Result<()> {
         let allocator = self.allocator.lock();
-        if allocator.find_generation(raw.cast::<u8>()).is_none()
-            || !allocator.is_live_handle(handle)
-        {
+        if allocator.allocation_kind(handle) != Some(kind) {
             return Err(GcError::InvalidPointer(format!(
-                "GC value handle {:p} is not live in the RunMat GC heap",
-                raw
+                "GC handle {:p} is not a live {:?} in the RunMat GC heap",
+                handle.addr() as *const u8,
+                kind,
             )));
         }
         Ok(())
+    }
+
+    fn validate_value_handle(&self, handle: &GcHandle, _raw: *const Value) -> Result<()> {
+        self.validate_handle_kind(handle, GcAllocationKind::Value)
+    }
+
+    fn validate_live_handle(&self, handle: &GcHandle) -> Result<()> {
+        if self.allocator.lock().is_live_handle(handle) {
+            Ok(())
+        } else {
+            Err(GcError::InvalidPointer(format!(
+                "GC handle {:p} is not live in the RunMat GC heap",
+                handle.addr() as *const u8,
+            )))
+        }
     }
 
     fn begin_value_borrow(&self, mutable: bool) -> Result<GcValueBorrowGuard<'_>> {
@@ -479,6 +506,32 @@ impl GarbageCollector {
         Ok(f(&mut value))
     }
 
+    fn with_lexical_activation<R>(
+        &self,
+        handle: &GcHandle,
+        f: impl FnOnce(&LexicalActivation) -> R,
+    ) -> Result<R> {
+        let _borrow = self.begin_value_borrow(false)?;
+        self.validate_handle_kind(handle, GcAllocationKind::LexicalActivation)?;
+        // SAFETY: the live kind check and GC borrow guard establish the typed
+        // payload and prevent collection for the whole callback.
+        Ok(f(unsafe { &*(handle.addr() as *const LexicalActivation) }))
+    }
+
+    fn with_lexical_activation_mut<R>(
+        &self,
+        handle: &GcHandle,
+        f: impl FnOnce(&mut LexicalActivation) -> R,
+    ) -> Result<R> {
+        let _borrow = self.begin_value_borrow(true)?;
+        self.validate_handle_kind(handle, GcAllocationKind::LexicalActivation)?;
+        // SAFETY: the live kind check and exclusive GC borrow guard establish
+        // the typed payload and prevent concurrent mutation or collection.
+        Ok(f(unsafe {
+            &mut *(handle.addr() as *mut LexicalActivation)
+        }))
+    }
+
     /// Borrow a GC-managed value through an explicit guard.
     pub fn read_value(&self, ptr: &GcHandle) -> Result<GcValueRef<'_>> {
         let borrow = self.begin_value_borrow(false)?;
@@ -531,7 +584,13 @@ impl GarbageCollector {
         {
             return Ok(0);
         }
-        let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        let collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        if self.collection_epoch.load(Ordering::Acquire) == u64::MAX {
+            return Err(GcError::CollectionFailed(
+                "GC collection generation exhausted".into(),
+            ));
+        }
+        let admission = ROOT_ADMISSION.write();
         if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -565,11 +624,20 @@ impl GarbageCollector {
         // Collect young generation via unified collector/allocator
         let mut allocator = self.allocator.lock();
         let mut collector = self.collector.lock();
-        let collected_count =
+        let retired =
             collector.collect_young_generation(&mut allocator, &combined_roots, &self.stats)?;
+        let collected_count = retired.len();
+        drop(collector);
+        drop(allocator);
 
         // Clear dirty cards; keep remembered set for next minor cycle
         WRITE_BARRIERS.clear_after_minor_gc();
+        self.collection_epoch.fetch_add(1, Ordering::AcqRel);
+        // Retiring an owning payload may invoke a provider callback that
+        // allocates. Heap bookkeeping is complete; do not hold its entry gate.
+        drop(collection_guard);
+        drop(admission);
+        drop(retired);
 
         let duration = start_time.elapsed();
         self.stats
@@ -598,7 +666,13 @@ impl GarbageCollector {
         {
             return Ok(0);
         }
-        let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        let collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        if self.collection_epoch.load(Ordering::Acquire) == u64::MAX {
+            return Err(GcError::CollectionFailed(
+                "GC collection generation exhausted".into(),
+            ));
+        }
+        let admission = ROOT_ADMISSION.write();
         if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -627,12 +701,19 @@ impl GarbageCollector {
 
         let mut allocator = self.allocator.lock();
         let mut collector = self.collector.lock();
-        let collected_count =
+        let retired =
             collector.collect_all_generations(&mut allocator, &combined_roots, &self.stats)?;
+        let collected_count = retired.len();
 
         // Clear all barriers after major GC
         WRITE_BARRIERS.clear_after_major_gc();
         allocator.clear_promotion_state();
+        drop(collector);
+        drop(allocator);
+        self.collection_epoch.fetch_add(1, Ordering::AcqRel);
+        drop(collection_guard);
+        drop(admission);
+        drop(retired);
 
         let duration = start_time.elapsed();
         self.stats
@@ -645,23 +726,24 @@ impl GarbageCollector {
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcHandle) -> Result<()> {
+        let admission = ROOT_ADMISSION.write();
+        self.validate_live_handle(&root)?;
         let mut roots = self.root_ptrs.lock();
-        *roots.entry(root).or_insert(0) += 1;
+        let retired = roots.add_unbounded(root)?;
+        drop(roots);
+        drop(admission);
+        drop(retired);
         Ok(())
     }
 
     /// Remove a root
     pub fn remove_root(&self, root: GcHandle) -> Result<()> {
-        let mut roots = self.root_ptrs.lock();
-        match roots.get_mut(&root) {
-            Some(count) if *count > 1 => {
-                *count -= 1;
-            }
-            Some(_) => {
-                roots.remove(&root);
-            }
-            None => {}
+        {
+            let _admission = ROOT_ADMISSION.write();
+            let mut roots = self.root_ptrs.lock();
+            roots.remove(root);
         }
+        root_retirement::notify(RootRetirement::Explicit(root));
         Ok(())
     }
 
@@ -871,11 +953,104 @@ impl Drop for AllocationGate<'_> {
 
 /// Allocate a GC value and register it as an explicit root before collection can run.
 pub fn gc_allocate_rooted(value: Value) -> Result<ExplicitRoot> {
-    let _gate = AllocationGate::enter(&GC);
-    let (handle, _) = GC.allocate_inner(value)?;
+    // Unlike prepared allocation, incoming children need not have independent
+    // roots. Do not collect until their new parent has its actual root.
+    let gate = AllocationGate::enter(&GC);
+    let (handle, should_collect) = GC.allocate_inner(value)?;
     GC.add_root(handle)?;
-    Ok(ExplicitRoot {
+    let root = ExplicitRoot {
         handle: Some(handle),
+    };
+    drop(gate);
+    if should_collect {
+        GC.collect_minor()?;
+    }
+    Ok(root)
+}
+
+/// Allocate a private lexical activation and root it before collection may
+/// observe the new handle. No language Value is constructed at its address.
+pub fn gc_allocate_lexical_activation_rooted(
+    activation: LexicalActivation,
+) -> Result<ExplicitRoot> {
+    let gate = AllocationGate::enter(&GC);
+    let mut allocator = GC.allocator.lock();
+    let handle = match allocator.allocate_lexical_activation(activation, &GC.stats) {
+        Ok(handle) => handle,
+        Err((error, activation)) => {
+            drop(allocator);
+            drop(activation);
+            return Err(error);
+        }
+    };
+    let should_collect = GC.allocation_should_collect(&allocator);
+    drop(allocator);
+    GC.add_root(handle)?;
+    let root = ExplicitRoot {
+        handle: Some(handle),
+    };
+    drop(gate);
+    if should_collect {
+        GC.collect_minor()?;
+    }
+    Ok(root)
+}
+
+pub fn gc_with_lexical_activation<R>(
+    handle: &GcHandle,
+    f: impl FnOnce(&LexicalActivation) -> R,
+) -> Result<R> {
+    GC.with_lexical_activation(handle, f)
+}
+
+pub fn gc_with_lexical_activation_mut<R>(
+    handle: &GcHandle,
+    f: impl FnOnce(&mut LexicalActivation) -> R,
+) -> Result<R> {
+    GC.with_lexical_activation_mut(handle, f)
+}
+
+/// A short, prevalidated exclusive phase for a prepared lexical batch. It is
+/// acquired before any paired external workspace commit, so no collection or
+/// competing GC mutation can invalidate the prepared activation handles in
+/// the allocation-free commit closure.
+pub struct LexicalMutationGuard<'a> {
+    handles: &'a [GcHandle],
+    _borrow: GcValueBorrowGuard<'static>,
+}
+
+impl LexicalMutationGuard<'_> {
+    /// Visit a handle from the exact slice validated when this guard was
+    /// acquired. The index is private batch metadata, not a new handle
+    /// lookup that could fail after a paired workspace commit.
+    pub fn with_prevalidated_activation<R>(
+        &mut self,
+        index: usize,
+        visit: impl FnOnce(&mut LexicalActivation) -> R,
+    ) -> R {
+        let handle = self.handles[index];
+        // SAFETY: validation established the live typed allocation, this
+        // guard blocks collection, and &mut self serializes all references.
+        visit(unsafe { &mut *(handle.addr() as *mut LexicalActivation) })
+    }
+}
+
+pub fn gc_lock_lexical_mutations(handles: &[GcHandle]) -> Result<LexicalMutationGuard<'_>> {
+    let borrow = GC.begin_value_borrow(true)?;
+    {
+        let allocator = GC.allocator.lock();
+        for handle in handles {
+            if allocator.allocation_kind(handle) != Some(GcAllocationKind::LexicalActivation) {
+                return Err(GcError::InvalidPointer(format!(
+                    "GC lexical activation handle {:p} is not live",
+                    handle.addr() as *const u8,
+                )));
+            }
+        }
+    }
+    Ok(LexicalMutationGuard {
+        handles,
+        _borrow: borrow,
     })
 }
 
@@ -907,6 +1082,13 @@ pub fn gc_stats() -> GcStats {
     GC.stats()
 }
 
+/// Successful heap collections only; skipped/reentrant collection attempts
+/// leave this generation unchanged. Consumers may recheck retired identities
+/// after it advances, but it is not evidence that a specific handle died.
+pub fn gc_collection_epoch() -> u64 {
+    GC.collection_epoch.load(Ordering::Acquire)
+}
+
 pub fn gc_configure(config: GcConfig) -> Result<()> {
     GC.configure(config)
 }
@@ -917,6 +1099,7 @@ pub fn gc_get_config() -> GcConfig {
 
 /// Register a root source in the current thread-local root scanner.
 pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
+    let _admission = ROOT_ADMISSION.write();
     register_active_root_thread();
     match ROOT_SCANNER.with(|scanner| scanner.register_root(root)) {
         Ok(root_id) => Ok(root_id),
@@ -928,9 +1111,162 @@ pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
 }
 
 pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
-    ROOT_SCANNER.with(|scanner| scanner.unregister_root(root_id))?;
-    unregister_active_root_thread();
+    let removed = {
+        let _admission = ROOT_ADMISSION.write();
+        let removed = ROOT_SCANNER.with(|scanner| scanner.take_root(root_id))?;
+        unregister_active_root_thread();
+        removed
+    };
+    // Root-owned resources may reenter GC during destruction.
+    drop(removed);
+    root_retirement::notify(RootRetirement::Registration(root_id));
     Ok(())
+}
+
+/// Register a value-visible root under the same lifetime and removal authority
+/// as all other GC roots.
+pub fn gc_register_value_root(root: Box<dyn ValueRoot>) -> Result<RootId> {
+    let _admission = ROOT_ADMISSION.write();
+    register_active_root_thread();
+    match ROOT_SCANNER.with(|scanner| scanner.register_value_root(root)) {
+        Ok(root_id) => Ok(root_id),
+        Err(error) => {
+            unregister_active_root_thread();
+            Err(error)
+        }
+    }
+}
+
+/// Own one value-visible root registration, rather than a handle identity.
+/// The registration ID may be excluded from a last-owner inspection while an
+/// independently registered root for the same handle remains visible.
+#[derive(Debug)]
+pub struct ValueRootRegistration {
+    id: Option<RootId>,
+    // RootScanner is thread-local: this token must be removed on its owner thread.
+    _same_thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl ValueRootRegistration {
+    pub fn new(root: Box<dyn ValueRoot>) -> Result<Self> {
+        Ok(Self {
+            id: Some(gc_register_value_root(root)?),
+            _same_thread: std::marker::PhantomData,
+        })
+    }
+
+    pub fn id(&self) -> RootId {
+        self.id.expect("value root registration already removed")
+    }
+
+    pub fn unregister(mut self) -> Result<()> {
+        let id = self.id.expect("value root registration already removed");
+        gc_unregister_root(id)?;
+        self.id = None;
+        Ok(())
+    }
+}
+
+impl Drop for ValueRootRegistration {
+    fn drop(&mut self) {
+        if let Some(id) = self.id.take() {
+            let _ = gc_unregister_root(id);
+        }
+    }
+}
+
+/// Registered current-thread value roots and explicit-root targets, or
+/// unavailable for opaque roots. External domain root providers are not Value
+/// registrations; callers must also compose those domains' retained-value views.
+/// Project retained Values except registrations owned by a retiring frame.
+/// Exclusion affects neither GC tracing nor explicit roots and never unregisters
+/// anything; callers must own the excluded registration lifetimes.
+pub fn gc_visit_retained_values(
+    excluded: &[RootId],
+    visitor: &mut dyn FnMut(&Value) -> Option<()>,
+) -> Option<()> {
+    if registered_roots_exist_on_other_threads() || external_roots_exist_on_other_threads() {
+        return None;
+    }
+    ROOT_SCANNER.with(|scanner| scanner.visit_retained_values(excluded, visitor))?;
+    // Snapshot identities before guarded reads; never hold the root table lock
+    // across value traversal or invoke callbacks while holding it.
+    let explicit = GC.root_ptrs.try_lock()?.keys().copied().collect::<Vec<_>>();
+    for handle in explicit {
+        let kind = GC.allocator.lock().allocation_kind(&handle)?;
+        match kind {
+            GcAllocationKind::Value => gc_with_value(&handle, &mut *visitor).ok()??,
+            GcAllocationKind::LexicalActivation => {
+                gc_with_lexical_activation(&handle, |activation| {
+                    let mut accepted = Some(());
+                    activation.for_each_value(|value| {
+                        if accepted.is_some() {
+                            accepted = visitor(value);
+                        }
+                    });
+                    accepted
+                })
+                .ok()??;
+            }
+        }
+    }
+    Some(())
+}
+
+/// Trace the complete GC handle graph from registered value roots, counted
+/// explicit roots, and installed external root providers. Exclusions are root
+/// *registration IDs*, never handle identities: an independent alias of the
+/// same target still makes it reachable. `None` means inspection was
+/// incomplete and a caller must retain/retry rather than finalize early.
+pub fn gc_is_reachable_excluding(target: GcHandle, excluded: &[RootId]) -> Option<bool> {
+    gc_with_reachability_excluding(target, excluded, |result| result)
+}
+
+/// Hold root-publication admission through the caller's already-prepared
+/// Active-to-Queued decision. The closure must not allocate a new GC root,
+/// perform user code, or await; it may only update pre-rooted state.
+pub fn gc_with_reachability_excluding<R>(
+    target: GcHandle,
+    excluded: &[RootId],
+    decide: impl FnOnce(Option<bool>) -> R,
+) -> R {
+    let _admission = ROOT_ADMISSION.read();
+    decide(reachability_snapshot_excluding(target, excluded))
+}
+
+fn reachability_snapshot_excluding(target: GcHandle, excluded: &[RootId]) -> Option<bool> {
+    use std::collections::HashSet;
+
+    if GC.collection_in_progress.load(Ordering::Acquire) {
+        return None;
+    }
+    let mut pending = external_roots();
+    pending.extend(GC.root_ptrs.try_lock()?.keys().copied());
+    gc_visit_retained_values(excluded, &mut |value| {
+        pending.extend(gc_handles_in_value(value));
+        Some(())
+    })?;
+    let mut visited = HashSet::new();
+    while let Some(handle) = pending.pop() {
+        if handle == target {
+            return Some(true);
+        }
+        if visited.insert(handle) {
+            let children = gc_handles_in_allocation(&handle)?;
+            pending.extend(children);
+        }
+    }
+    Some(false)
+}
+
+#[cfg(test)]
+fn gc_retained_values() -> Option<Vec<Value>> {
+    let mut values = Vec::new();
+    gc_visit_retained_values(&[], &mut |value| {
+        values.push(value.clone());
+        Some(())
+    })?;
+    Some(values)
 }
 
 /// Record a write for GC barriers (approximate old->young tracking)
@@ -979,6 +1315,19 @@ pub fn gc_record_handle_write(owner: &GcHandle, new: &Value) {
     }
 }
 
+pub(crate) fn gc_handles_in_allocation(handle: &GcHandle) -> Option<Vec<GcHandle>> {
+    let kind = GC.allocator.lock().allocation_kind(handle)?;
+    match kind {
+        GcAllocationKind::Value => gc_with_value(handle, gc_handles_in_value).ok(),
+        GcAllocationKind::LexicalActivation => gc_with_lexical_activation(handle, |activation| {
+            let mut children = Vec::new();
+            activation.for_each_value(|value| children.extend(gc_handles_in_value(value)));
+            children
+        })
+        .ok(),
+    }
+}
+
 fn gc_handles_in_value(value: &Value) -> Vec<GcHandle> {
     struct HandleCollector {
         handles: Vec<GcHandle>,
@@ -1022,26 +1371,25 @@ pub fn gc_reset_for_test() -> Result<()> {
     GC.stats.reset();
 
     // Reset allocator/collector and roots
-    {
+    let retired = {
         let config = GcConfig::default();
         *GC.config.write() = config.clone();
         let mut alloc = GC.allocator.lock();
-        let live_ptrs = alloc.take_tracked_value_ptrs_for_reset();
-        for (ptr, handle) in live_ptrs {
-            if let Some(handle) = handle {
-                gc_run_finalizer_for_handle(handle);
-            }
+        let live_ptrs = alloc.take_tracked_allocations_for_reset();
+        let mut retired = Vec::with_capacity(live_ptrs.len());
+        for (ptr, handle, kind) in live_ptrs {
             // SAFETY: these pointers are drained from allocator bookkeeping for
-            // initialized Value slots that remain live at whole-GC test reset.
+            // initialized typed slots that remain live at whole-GC test reset.
             // Each pointer is deduplicated before it is returned.
             unsafe {
-                std::ptr::drop_in_place(ptr as *mut Value);
+                retired.push(retirement::RetiredValue::take(ptr, handle, kind));
             }
         }
         *alloc = GenerationalAllocator::new(&config);
         let mut coll = GC.collector.lock();
         *coll = MarkSweepCollector::new(&config);
-    }
+        retired
+    };
 
     {
         let mut roots = GC.root_ptrs.lock();
@@ -1057,6 +1405,7 @@ pub fn gc_reset_for_test() -> Result<()> {
 
     // Configure with default settings
     gc_configure(GcConfig::default())?;
+    drop(retired);
 
     Ok(())
 }
@@ -1091,9 +1440,136 @@ where
 }
 
 #[cfg(test)]
+#[test]
+fn collection_epoch_advances_only_after_completed_collection() {
+    gc_test_context(|| {
+        let rooted = gc_allocate_rooted(Value::Num(1.0)).expect("root fixture");
+        let before = gc_collection_epoch();
+        gc_with_value(&rooted.handle(), |_| {
+            assert_eq!(gc_collect_major().expect("deferred borrow collection"), 0);
+            assert_eq!(gc_collection_epoch(), before);
+        })
+        .expect("guarded fixture borrow");
+        gc_collect_major().expect("completed collection");
+        assert_eq!(gc_collection_epoch(), before + 1);
+    });
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::ptr::NonNull;
+
+    #[test]
+    fn collection_and_reset_release_values_and_finalizers_outside_locks() {
+        struct AssertUnlocked;
+        impl GcFinalizer for AssertUnlocked {
+            fn finalize(&self) {
+                assert!(GC.allocator.try_lock().is_some());
+                assert!(GC.collector.try_lock().is_some());
+                assert!(FINALIZERS.try_lock().is_some());
+                assert!(!GC.collection_in_progress.load(Ordering::Acquire));
+            }
+        }
+        for collect in [gc_collect_minor, gc_collect_major] {
+            gc_test_context(|| {
+                let handle = gc_allocate(Value::Num(1.0)).unwrap();
+                gc_register_finalizer(handle, Arc::new(AssertUnlocked)).unwrap();
+                assert_eq!(collect().unwrap(), 1);
+            });
+        }
+        gc_test_context(|| {
+            let handle = gc_allocate(Value::Num(1.0)).unwrap();
+            gc_register_finalizer(handle, Arc::new(AssertUnlocked)).unwrap();
+            gc_reset_for_test().unwrap();
+        });
+    }
+
+    #[test]
+    fn foreign_payload_release_can_reenter_allocation_after_collection() {
+        use runmat_value::{
+            ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRef, ForeignResourceKey,
+            ForeignResourceRelease, ForeignTypeIdentity,
+        };
+        #[derive(Debug)]
+        struct Release(AtomicUsize);
+        impl ForeignResourceRelease for Release {
+            fn release(&self, _: &ForeignResourceKey) {
+                // Assert before entry so a regression fails rather than spinning.
+                assert!(!GC.collection_in_progress.load(Ordering::Acquire));
+                assert!(GC.allocator.try_lock().is_some());
+                let allocated = gc_allocate_rooted(Value::Num(7.0)).unwrap();
+                assert!(matches!(
+                    gc_clone_value(&allocated.handle()).unwrap(),
+                    Value::Num(7.0)
+                ));
+                allocated.unroot().unwrap();
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        for collect in [gc_collect_minor, gc_collect_major] {
+            gc_test_context(|| {
+                let release = Arc::new(Release(AtomicUsize::new(0)));
+                let value = Value::Foreign(ForeignRef::managed(
+                    ForeignResourceKey {
+                        host_identity: "gc-retirement-test".into(),
+                        handle: 1,
+                        generation: 1,
+                    },
+                    ForeignTypeIdentity {
+                        family: "test".into(),
+                        name: "resource".into(),
+                        version: 1,
+                    },
+                    ForeignOwnership::Shared,
+                    ForeignAffinity::OriginProcess,
+                    ForeignLifetime::Session,
+                    release.clone(),
+                ));
+                gc_allocate(value).unwrap();
+                assert_eq!(collect().unwrap(), 1);
+                assert_eq!(release.0.load(Ordering::Relaxed), 1);
+                gc_collect_major().unwrap();
+                assert_eq!(release.0.load(Ordering::Relaxed), 1);
+            });
+        }
+    }
+
+    #[test]
+    fn collection_releases_only_its_gpu_alias_including_nested_values() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        for collect in [gc_collect_minor, gc_collect_major] {
+            for nested in [false, true] {
+                gc_test_context(|| {
+                    let owner = TestAllocationOwner::new();
+                    let allocation = owner
+                        .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+                        .unwrap();
+                    let alias = allocation.handle.clone();
+                    let value = Value::GpuTensor(allocation.handle);
+                    let value = if nested {
+                        Value::Cell(runmat_value::CellArray::new(vec![value], 1, 1).unwrap())
+                    } else {
+                        value
+                    };
+                    let target = gc_allocate_rooted(value).unwrap();
+                    assert_eq!(collect().unwrap(), 0);
+                    assert_eq!(allocation.probe.retirements(), 0);
+                    target.unroot().unwrap();
+                    assert_eq!(collect().unwrap(), 1);
+                    assert_eq!(allocation.probe.retirements(), 0);
+                    allocation
+                        .probe
+                        .with_data(&alias, |data| assert_eq!(data.len(), 1))
+                        .unwrap();
+                    drop(alias);
+                    assert_eq!(allocation.probe.retirements(), 1);
+                });
+            }
+        }
+    }
 
     thread_local! {
         static TEST_EXTERNAL_ROOT: std::cell::Cell<Option<GcHandle>> = const { std::cell::Cell::new(None) };
@@ -1211,10 +1687,10 @@ mod tests {
             let (result_tx, result_rx) = mpsc::channel();
 
             let worker = thread::spawn(move || {
-                let handle =
-                    gc_allocate(Value::String("thread-root".to_string())).expect("allocation");
+                let handle = gc_allocate(Value::String("thread-root".to_string().into()))
+                    .expect("allocation");
                 let root_value = Value::HandleObject(HandleRef {
-                    class_name: "ThreadRoot".to_string(),
+                    class_name: "ThreadRoot".into(),
                     target: handle,
                     valid: true,
                 });
@@ -1251,7 +1727,7 @@ mod tests {
             gc_add_root(protected).expect("root registration failed");
 
             for i in 0..60 {
-                let _ = gc_allocate(Value::String(format!("garbage_{i}")));
+                let _ = gc_allocate(Value::String(format!("garbage_{i}").into()));
             }
 
             let _ = gc_collect_minor().expect("collection failed");
@@ -1267,8 +1743,8 @@ mod tests {
     #[test]
     fn explicit_root_unregisters_on_drop() {
         gc_test_context(|| {
-            let protected =
-                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let protected = gc_allocate(Value::String("protected".to_string().into()))
+                .expect("allocation failed");
             let addr = protected.addr();
 
             {
@@ -1284,8 +1760,8 @@ mod tests {
     #[test]
     fn explicit_root_unroot_removes_registration() {
         gc_test_context(|| {
-            let protected =
-                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let protected = gc_allocate(Value::String("protected".to_string().into()))
+                .expect("allocation failed");
             let addr = protected.addr();
 
             let root = gc_root(protected).expect("root guard creation failed");
@@ -1300,8 +1776,8 @@ mod tests {
     #[test]
     fn duplicate_explicit_roots_are_counted_independently() {
         gc_test_context(|| {
-            let protected =
-                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let protected = gc_allocate(Value::String("protected".to_string().into()))
+                .expect("allocation failed");
             let first = gc_root(protected).expect("first root");
             let second = gc_root(protected).expect("second root");
 
@@ -1312,7 +1788,7 @@ mod tests {
             gc_collect_minor().expect("minor collection failed");
             assert_eq!(
                 gc_clone_value(&protected).expect("second root should keep value alive"),
-                Value::String("protected".to_string())
+                Value::String("protected".to_string().into())
             );
 
             drop(second);
@@ -1323,18 +1799,68 @@ mod tests {
     #[test]
     fn rooted_allocation_registers_before_collection() {
         gc_test_context(|| {
-            let root =
-                gc_allocate_rooted(Value::String("rooted".to_string())).expect("rooted alloc");
+            let root = gc_allocate_rooted(Value::String("rooted".to_string().into()))
+                .expect("rooted alloc");
             let handle = root.handle();
 
             assert!(GC.root_ptrs.lock().contains_key(&handle));
             gc_collect_minor().expect("minor collection failed");
             assert_eq!(
                 gc_clone_value(&handle).expect("rooted handle should remain live"),
-                Value::String("rooted".to_string())
+                Value::String("rooted".to_string().into())
             );
 
             drop(root);
+            assert!(!GC.root_ptrs.lock().contains_key(&handle));
+
+            // The admitted allocator participates in automatic collection,
+            // while its one prepared root protects the new result throughout.
+            struct One(GcHandle);
+            impl Trace for One {
+                fn trace(&self, tracer: &mut dyn Tracer) {
+                    tracer.mark(self.0);
+                }
+            }
+            let mut config = gc_get_config();
+            config.minor_gc_threshold = 0.0;
+            gc_configure(config).expect("automatic collection configuration");
+            // The ordinary rooted API protects a child carried only by its
+            // incoming Value before honoring the automatic trigger.
+            let child = gc_allocate(Value::Num(5.0)).expect("unrooted child");
+            let before = gc_collection_epoch();
+            let ordinary = gc_allocate_rooted(Value::HandleObject(runmat_value::HandleRef {
+                class_name: "RootedAllocationChild".into(),
+                target: child,
+                valid: true,
+            }))
+            .expect("ordinary rooted parent");
+            assert!(gc_collection_epoch() > before);
+            assert_eq!(gc_clone_value(&child).unwrap(), Value::Num(5.0));
+            assert!(GC.root_ptrs.lock().contains_key(&ordinary.handle()));
+
+            let before = gc_collection_epoch();
+            let activation = gc_allocate_lexical_activation_rooted(LexicalActivation::empty())
+                .expect("rooted lexical activation");
+            assert!(gc_collection_epoch() > before);
+            gc_with_lexical_activation(&activation.handle(), |value| {
+                assert_eq!(value.owned_bindings().count(), 0);
+            })
+            .expect("the exact typed root survives collection");
+
+            let before = gc_collection_epoch();
+            let admitted = gc_allocate_prepared_rooted(Value::Num(9.0), |handle| {
+                let source = One(handle);
+                PreparedRootPlan::for_traced(&source)?.prepare_unbounded(&source)
+            })
+            .expect("prepared rooted allocation");
+            assert!(
+                gc_collection_epoch() > before,
+                "allocation threshold must collect"
+            );
+            assert_eq!(gc_clone_value(&admitted.handle()).unwrap(), Value::Num(9.0));
+            assert!(GC.root_ptrs.lock().contains_key(&admitted.handle()));
+            let handle = admitted.handle();
+            drop(admitted);
             assert!(!GC.root_ptrs.lock().contains_key(&handle));
         });
     }
@@ -1342,8 +1868,8 @@ mod tests {
     #[test]
     fn reconfigure_preserves_live_allocations() {
         gc_test_context(|| {
-            let root =
-                gc_allocate_rooted(Value::String("still live".to_string())).expect("rooted alloc");
+            let root = gc_allocate_rooted(Value::String("still live".to_string().into()))
+                .expect("rooted alloc");
             let handle = root.handle();
             let mut config = gc_get_config();
             config.minor_gc_threshold = 0.5;
@@ -1352,7 +1878,7 @@ mod tests {
 
             assert_eq!(
                 gc_clone_value(&handle).expect("reconfiguration must preserve the live heap"),
-                Value::String("still live".to_string())
+                Value::String("still live".to_string().into())
             );
         });
     }
@@ -1372,8 +1898,8 @@ mod tests {
     #[test]
     fn reconfigure_rejects_generation_count_change_with_live_allocations() {
         gc_test_context(|| {
-            let root =
-                gc_allocate_rooted(Value::String("still live".to_string())).expect("rooted alloc");
+            let root = gc_allocate_rooted(Value::String("still live".to_string().into()))
+                .expect("rooted alloc");
             let handle = root.handle();
             let mut config = gc_get_config();
             config.num_generations = 2;
@@ -1383,7 +1909,7 @@ mod tests {
             assert!(error.to_string().contains("while GC allocations are live"));
             assert_eq!(
                 gc_clone_value(&handle).expect("failed reconfiguration must preserve live heap"),
-                Value::String("still live".to_string())
+                Value::String("still live".to_string().into())
             );
         });
     }

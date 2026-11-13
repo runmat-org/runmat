@@ -4,13 +4,12 @@ use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[derive(Clone, Debug)]
 pub struct StemGpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }
@@ -39,11 +38,12 @@ struct StemUniforms {
 }
 
 pub fn pack_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &StemGpuInputs,
     params: &StemGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -69,15 +69,17 @@ pub fn pack_vertices_from_xy(
         });
     let baseline_count = if params.baseline_visible { 2 } else { 0 };
     let vertex_count = baseline_count as u64 + inputs.len as u64 * 2;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("stem-gpu-vertices"),
-        size: vertex_count * std::mem::size_of::<Vertex>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("stem-gpu-vertices"),
+            size: vertex_count * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let uniforms = StemUniforms {
         color: params.color.to_array(),
         baseline_color: params.baseline_color.to_array(),
@@ -99,11 +101,19 @@ pub fn pack_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -132,7 +142,7 @@ pub fn pack_vertices_from_xy(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -140,7 +150,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::stem::F32,
         ScalarType::F64 => shaders::stem::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("stem-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

@@ -36,6 +36,28 @@ impl NumericStorage {
         }
     }
 
+    /// Construct zeroed storage whose backing capacity is exactly `len`.
+    /// This is the unmanaged counterpart used when a caller has physically
+    /// quoted the complete returned-value footprint.
+    pub fn zeros_exact(
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<Self, crate::ExactHostNumericAllocationError> {
+        use crate::exact_capacity_vec_with;
+        Ok(match dtype {
+            NumericDType::F64 => Self::F64(exact_capacity_vec_with(len, |_| 0.0_f64)?),
+            NumericDType::F32 => Self::F32(exact_capacity_vec_with(len, |_| 0.0_f32)?),
+            NumericDType::I8 => Self::I8(exact_capacity_vec_with(len, |_| 0_i8)?),
+            NumericDType::I16 => Self::I16(exact_capacity_vec_with(len, |_| 0_i16)?),
+            NumericDType::I32 => Self::I32(exact_capacity_vec_with(len, |_| 0_i32)?),
+            NumericDType::I64 => Self::I64(exact_capacity_vec_with(len, |_| 0_i64)?),
+            NumericDType::U8 => Self::U8(exact_capacity_vec_with(len, |_| 0_u8)?),
+            NumericDType::U16 => Self::U16(exact_capacity_vec_with(len, |_| 0_u16)?),
+            NumericDType::U32 => Self::U32(exact_capacity_vec_with(len, |_| 0_u32)?),
+            NumericDType::U64 => Self::U64(exact_capacity_vec_with(len, |_| 0_u64)?),
+        })
+    }
+
     pub fn ones(dtype: NumericDType, len: usize) -> Self {
         match dtype {
             NumericDType::F64 => Self::F64(vec![1.0; len]),
@@ -240,12 +262,10 @@ impl NumericStorage {
     }
 
     pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
-        let expected = shape
-            .iter()
-            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
-        let Some(expected) = expected else {
-            return Err(format!("numeric tensor shape {shape:?} overflows usize"));
-        };
+        let expected =
+            crate::array::BorrowedShapeAdmission::new(shape).finish_synchronously(|shape| {
+                format!("numeric tensor shape {shape:?} overflows usize")
+            })?;
         if self.len() != expected {
             return Err(format!(
                 "{} storage length {} doesn't match shape {:?} ({} elements)",
@@ -381,16 +401,43 @@ impl NumericStorage {
     /// Wider floating and integer values may lose precision or overflow.
     pub fn materialize_f32(&self) -> Vec<f32> {
         match self {
-            Self::F64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::F64(values) => values
+                .iter()
+                .map(|&value| NumericScalar::F64(value).materialize_f32())
+                .collect(),
             Self::F32(values) => values.clone(),
-            Self::I8(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::I16(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::I32(values) => values.iter().map(|&value| value as f32).collect(),
-            Self::I64(values) => values.iter().map(|&value| value as f32).collect(),
-            Self::U8(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::U16(values) => values.iter().map(|&value| f32::from(value)).collect(),
-            Self::U32(values) => values.iter().map(|&value| value as f32).collect(),
-            Self::U64(values) => values.iter().map(|&value| value as f32).collect(),
+            Self::I8(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I8(value).materialize_f32())
+                .collect(),
+            Self::I16(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I16(value).materialize_f32())
+                .collect(),
+            Self::I32(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I32(value).materialize_f32())
+                .collect(),
+            Self::I64(values) => values
+                .iter()
+                .map(|&value| NumericScalar::I64(value).materialize_f32())
+                .collect(),
+            Self::U8(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U8(value).materialize_f32())
+                .collect(),
+            Self::U16(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U16(value).materialize_f32())
+                .collect(),
+            Self::U32(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U32(value).materialize_f32())
+                .collect(),
+            Self::U64(values) => values
+                .iter()
+                .map(|&value| NumericScalar::U64(value).materialize_f32())
+                .collect(),
         }
     }
 

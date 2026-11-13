@@ -55,13 +55,25 @@ impl From<bool> for Value {
 
 impl From<String> for Value {
     fn from(s: String) -> Self {
-        Value::String(s)
+        Value::string(s)
     }
 }
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
-        Value::String(s.to_string())
+        Value::string(s)
+    }
+}
+
+impl From<Utf8Text> for Value {
+    fn from(text: Utf8Text) -> Self {
+        Value::String(StringElement::Text(text))
+    }
+}
+
+impl From<StringElement> for Value {
+    fn from(element: StringElement) -> Self {
+        Value::String(element)
     }
 }
 
@@ -112,10 +124,16 @@ impl TryFrom<&Value> for String {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::String(s) => Ok(s.clone()),
+            Value::String(s) => s
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "cannot convert missing string to text".to_owned()),
             Value::StringArray(sa) => {
                 if sa.data.len() == 1 {
-                    Ok(sa.data[0].clone())
+                    sa.data[0]
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "cannot convert missing string to text".to_owned())
                 } else {
                     Err("cannot convert string array to scalar string".to_string())
                 }
@@ -123,7 +141,11 @@ impl TryFrom<&Value> for String {
             Value::CharArray(ca) => {
                 // Convert full char array to one string if it is a single row; else error
                 if ca.shape.len() <= 2 && ca.rows == 1 {
-                    Ok(ca.data.iter().collect())
+                    ca.try_row_string()
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| {
+                            "cannot convert multi-row char array to scalar string".into()
+                        })
                 } else {
                     Err("cannot convert multi-row char array to scalar string".to_string())
                 }
@@ -157,7 +179,7 @@ impl TryFrom<&Value> for Vec<Value> {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Cell(c) => Ok(c.data.clone()),
+            Value::Cell(c) => Ok(c.data().to_vec()),
             _ => Err(format!("cannot convert {v:?} to Vec<Value>")),
         }
     }

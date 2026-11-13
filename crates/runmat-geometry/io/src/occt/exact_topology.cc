@@ -1,14 +1,15 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "exact_identity.hxx"
+#include "exact_names.hxx"
 #include "exact_nesting.hxx"
 #include "exact_topology.hxx"
+#include "exact_wire.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepClass3d.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ShapeSet.hxx>
-#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <Geom2d_Curve.hxx>
 #include <TopAbs_Orientation.hxx>
@@ -72,6 +73,7 @@ void append_exact_topology(OcctExactShapePayload& result,
                            const BRepTools_ShapeSet& shape_set,
                            ExactIdentityContext& identity_context,
                            std::uint64_t occurrence_index,
+                           const ExactNameTable* names,
                            const OcctImportOptions& options) {
   std::set<std::uint64_t> vertex_keys;
   for (TopExp_Explorer explorer(root, TopAbs_VERTEX); explorer.More(); explorer.Next()) {
@@ -92,6 +94,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     payload.point_y = point.Y();
     payload.point_z = point.Z();
     payload.tolerance = BRep_Tool::Tolerance(vertex);
+    if (names != nullptr) {
+      append_names(payload.names, names->subshape_names(vertex));
+      append_names(payload.tags, names->subshape_tags(vertex));
+    }
     result.vertices.push_back(payload);
   }
   std::sort(result.vertices.begin(), result.vertices.end(),
@@ -119,22 +125,31 @@ void append_exact_topology(OcctExactShapePayload& result,
     identity_context.append(payload.identity_digest, edge, payload.shape_key, options);
     payload.start_vertex_key = start.IsNull() ? 0 : shape_key(shape_set, start, "edge vertex");
     payload.end_vertex_key = end.IsNull() ? 0 : shape_key(shape_set, end, "edge vertex");
+    payload.tolerance = BRep_Tool::Tolerance(edge);
     payload.closed = closed;
     payload.periodic = closed && curve.IsPeriodic();
     payload.degenerate = BRep_Tool::Degenerated(edge);
+    if (names != nullptr) {
+      append_names(payload.names, names->subshape_names(edge));
+      append_names(payload.tags, names->subshape_tags(edge));
+    }
     result.edges.push_back(payload);
   }
   std::sort(result.edges.begin(), result.edges.end(),
             [](const auto& left, const auto& right) { return left.shape_key < right.shape_key; });
 
   std::set<std::uint64_t> face_keys;
+  std::uint64_t source_face_index = static_cast<std::uint64_t>(result.faces.size());
   for (TopExp_Explorer explorer(root, TopAbs_FACE); explorer.More(); explorer.Next()) {
     check_cancelled(options);
     const TopoDS_Face face = TopoDS::Face(explorer.Current());
     const std::uint64_t face_key = shape_key(shape_set, face, "face");
+    // A face shared by two solids is visited once per use; it is one source face, and source
+    // face ordinals stay contiguous.
     if (!face_keys.insert(face_key).second) {
       continue;
     }
+    const std::uint64_t current_source_face_index = source_face_index++;
     BRepAdaptor_Surface surface(face, Standard_False);
     const bool periodic_u = surface.IsUPeriodic();
     const bool periodic_v = surface.IsVPeriodic();
@@ -145,6 +160,7 @@ void append_exact_topology(OcctExactShapePayload& result,
 
     OcctExactFacePayload face_payload;
     face_payload.occurrence_index = occurrence_index;
+    face_payload.source_face_index = current_source_face_index;
     face_payload.shape_key = face_key;
     identity_context.append(face_payload.identity_digest,
                             shape_set.Shape(static_cast<Standard_Integer>(face_key)),
@@ -155,6 +171,10 @@ void append_exact_topology(OcctExactShapePayload& result,
     face_payload.periodic_u = periodic_u;
     face_payload.periodic_v = periodic_v;
     face_payload.singular = false;
+    if (names != nullptr) {
+      append_names(face_payload.names, names->subshape_names(face));
+      append_names(face_payload.tags, names->subshape_tags(face));
+    }
 
     for (TopoDS_Iterator wires(face, Standard_False, Standard_True); wires.More(); wires.Next()) {
       if (wires.Value().ShapeType() != TopAbs_WIRE) {
@@ -176,9 +196,7 @@ void append_exact_topology(OcctExactShapePayload& result,
       wire_payload.face_key = face_key;
       wire_payload.reversed = reversed_orientation(wire, "wire");
       std::unordered_map<std::uint64_t, std::uint8_t> seam_occurrences;
-      BRepTools_WireExplorer edge_uses(wire, face);
-      for (; edge_uses.More(); edge_uses.Next()) {
-        const TopoDS_Edge edge = edge_uses.Current();
+      for (const TopoDS_Edge& edge : exact_wire_edge_uses(wire, face)) {
         const std::uint64_t edge_key = shape_key(shape_set, edge, "coedge edge");
         Standard_Real first = 0.0;
         Standard_Real last = 0.0;
@@ -225,6 +243,24 @@ void append_exact_topology(OcctExactShapePayload& result,
   std::sort(result.wires.begin(), result.wires.end(),
             [](const auto& left, const auto& right) { return left.shape_key < right.shape_key; });
 
+  // A cavity shell of one solid can hold exactly the faces of a neighbouring solid's outer shell
+  // (a part inside an air region after General Fuse); both serialize alike. The shell's role in
+  // its solid is part of its identity, so the two stay distinct.
+  std::set<std::uint64_t> void_shell_keys;
+  std::set<std::uint64_t> outer_shell_keys;
+  for (TopExp_Explorer explorer(root, TopAbs_SOLID); explorer.More(); explorer.Next()) {
+    const TopoDS_Solid solid = TopoDS::Solid(explorer.Current());
+    const TopoDS_Shell outer_shell = BRepClass3d::OuterShell(solid);
+    for (TopoDS_Iterator shells(solid, Standard_False, Standard_True); shells.More();
+         shells.Next()) {
+      if (shells.Value().ShapeType() != TopAbs_SHELL) {
+        continue;
+      }
+      const std::uint64_t key = shape_key(shape_set, shells.Value(), "solid shell");
+      (shells.Value().IsSame(outer_shell) ? outer_shell_keys : void_shell_keys).insert(key);
+    }
+  }
+
   std::set<std::uint64_t> shell_keys;
   for (TopExp_Explorer explorer(root, TopAbs_SHELL); explorer.More(); explorer.Next()) {
     check_cancelled(options);
@@ -239,6 +275,14 @@ void append_exact_topology(OcctExactShapePayload& result,
                             shape_set.Shape(static_cast<Standard_Integer>(payload.shape_key)),
                             payload.shape_key,
                             options);
+    if (void_shell_keys.count(payload.shape_key) != 0 &&
+        outer_shell_keys.count(payload.shape_key) == 0) {
+      std::string salted = "runmat.occt-void-shell\0";
+      salted.append(payload.identity_digest.begin(), payload.identity_digest.end());
+      rust::Vec<std::uint8_t> digest = occt_exact_identity_digest(rust::Slice<const std::uint8_t>(
+          reinterpret_cast<const std::uint8_t*>(salted.data()), salted.size()));
+      payload.identity_digest = std::move(digest);
+    }
     payload.reversed = reversed_orientation(shell, "shell");
     for (TopoDS_Iterator faces(shell, Standard_False, Standard_True); faces.More(); faces.Next()) {
       if (faces.Value().ShapeType() != TopAbs_FACE) {
@@ -272,6 +316,10 @@ void append_exact_topology(OcctExactShapePayload& result,
                             payload.shape_key,
                             options);
     payload.outer_shell_key = shape_key(shape_set, outer_shell, "solid outer shell");
+    if (names != nullptr) {
+      append_names(payload.names, names->solid_names(solid));
+      append_names(payload.tags, names->solid_tags(solid));
+    }
     for (TopoDS_Iterator shells(solid, Standard_False, Standard_True); shells.More(); shells.Next()) {
       if (shells.Value().ShapeType() != TopAbs_SHELL || shells.Value().IsSame(outer_shell)) {
         continue;

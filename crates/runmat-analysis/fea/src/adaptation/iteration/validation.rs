@@ -106,8 +106,7 @@ pub(super) fn validate_transfer_errors_against(
 pub(super) fn validate_solver_result(
     result: &StructuralAdaptationSolverResult,
 ) -> Result<(), StructuralAdaptationIterationError> {
-    if result.result_digest == StableDigest::ZERO
-        || result.iteration_count == 0
+    if result.result_identity.digest().bytes() == &[0; 32]
         || !result.normalized_residual.is_finite()
         || result.normalized_residual < 0.0
     {

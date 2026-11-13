@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use crate::model::validation_storage::{lookup, ValidationWork};
 
 use super::super::{ExactBRepModel, ExactBRepTopology, GeometryContractError};
 use super::{
@@ -22,7 +22,38 @@ impl ExactEvaluatorRegistry {
         topology: &ExactBRepTopology,
         model: &ExactBRepModel,
     ) -> Result<(), GeometryContractError> {
-        topology.validate_against(model)?;
+        self.validate_admitted(topology, model, ValidationWork(None))
+    }
+    pub fn validate_against_with_control(
+        &self,
+        topology: &ExactBRepTopology,
+        model: &ExactBRepModel,
+        control: &dyn crate::GeometryEvaluationControl,
+    ) -> Result<(), GeometryContractError> {
+        self.validate_admitted(topology, model, ValidationWork(Some(control)))
+    }
+    fn validate_admitted(
+        &self,
+        topology: &ExactBRepTopology,
+        model: &ExactBRepModel,
+        work: ValidationWork<'_>,
+    ) -> Result<(), GeometryContractError> {
+        if let Some(control) = work.0 {
+            topology.validate_against_with_control(model, control)?;
+        } else {
+            topology.validate_against(model)?;
+        }
+        self.validate_for_validated_topology(topology, model, work)
+    }
+    /// Internal only: the geometry component owner has validated this exact
+    /// immutable topology in the same call before reaching this validator.
+    pub(crate) fn validate_for_validated_topology(
+        &self,
+        topology: &ExactBRepTopology,
+        model: &ExactBRepModel,
+        work: ValidationWork<'_>,
+    ) -> Result<(), GeometryContractError> {
+        work.checkpoint()?;
         if self.schema_version != EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION {
             return Err(invalid(
                 "exact evaluator registry schema",
@@ -77,117 +108,105 @@ impl ExactEvaluatorRegistry {
             ));
         }
 
-        let curves = collect_records(
+        require_exact_inventory(
+            "curve evaluator inventory",
             "curve evaluators",
             &self.curves,
             |record| &record.id,
-            CurveEvaluatorId::validate,
-        )?;
-        let pcurves = collect_records(
-            "pcurve evaluators",
-            &self.pcurves,
-            |record| &record.id,
-            PcurveEvaluatorId::validate,
-        )?;
-        let surfaces = collect_records(
-            "surface evaluators",
-            &self.surfaces,
-            |record| &record.id,
-            SurfaceEvaluatorId::validate,
-        )?;
-        let classifiers = collect_records(
-            "trim classifiers",
-            &self.trim_classifiers,
-            |record| &record.id,
-            TrimClassifierId::validate,
-        )?;
-        let mass_properties = collect_records(
-            "mass-properties evaluators",
-            &self.mass_properties,
-            |record| &record.id,
-            MassPropertiesEvaluatorId::validate,
-        )?;
-
-        require_exact_inventory(
-            "curve evaluator inventory",
-            curves,
             topology
                 .edges
                 .iter()
-                .map(|edge| edge.curve_evaluator_id.clone())
-                .collect(),
+                .map(|entity| &entity.curve_evaluator_id),
+            CurveEvaluatorId::validate,
+            work,
         )?;
         require_exact_inventory(
             "pcurve evaluator inventory",
-            pcurves,
+            "pcurve evaluators",
+            &self.pcurves,
+            |record| &record.id,
             topology
                 .coedges
                 .iter()
-                .map(|coedge| coedge.pcurve_evaluator_id.clone())
-                .collect(),
+                .map(|entity| &entity.pcurve_evaluator_id),
+            PcurveEvaluatorId::validate,
+            work,
         )?;
         require_exact_inventory(
             "surface evaluator inventory",
-            surfaces,
+            "surface evaluators",
+            &self.surfaces,
+            |record| &record.id,
             topology
                 .faces
                 .iter()
-                .map(|face| face.surface_evaluator_id.clone())
-                .collect(),
+                .map(|entity| &entity.surface_evaluator_id),
+            SurfaceEvaluatorId::validate,
+            work,
         )?;
         require_exact_inventory(
-            "trim classifier inventory",
-            classifiers,
+            "trim classifier evaluator inventory",
+            "trim classifiers",
+            &self.trim_classifiers,
+            |record| &record.id,
             topology
                 .faces
                 .iter()
-                .map(|face| face.trim_classifier_id.clone())
-                .collect(),
+                .map(|entity| &entity.trim_classifier_id),
+            TrimClassifierId::validate,
+            work,
         )?;
         require_exact_inventory(
             "mass-properties evaluator inventory",
-            mass_properties,
+            "mass-properties evaluators",
+            &self.mass_properties,
+            |record| &record.id,
             topology
                 .bodies
                 .iter()
-                .map(|body| body.mass_properties_evaluator_id.clone())
-                .collect(),
+                .map(|entity| &entity.mass_properties_evaluator_id),
+            MassPropertiesEvaluatorId::validate,
+            work,
         )?;
 
         for record in &self.curves {
+            work.checkpoint()?;
             validate_curve(&record.implementation)?;
         }
         for record in &self.pcurves {
+            work.checkpoint()?;
             validate_pcurve(&record.implementation)?;
         }
         for record in &self.surfaces {
+            work.checkpoint()?;
             validate_surface(&record.implementation)?;
         }
         for record in &self.trim_classifiers {
+            work.checkpoint()?;
             validate_trim_classifier(&record.implementation)?;
         }
         for record in &self.mass_properties {
+            work.checkpoint()?;
             validate_mass_properties(&record.implementation)?;
         }
         self.kernel_representation_digest()?;
 
-        validate_topology_claims(self, topology)
+        validate_topology_claims(self, topology, work)
     }
 }
 
 fn validate_topology_claims(
     registry: &ExactEvaluatorRegistry,
     topology: &ExactBRepTopology,
+    work: ValidationWork<'_>,
 ) -> Result<(), GeometryContractError> {
-    let curves = registry
-        .curves
-        .iter()
-        .map(|record| (&record.id, &record.implementation))
-        .collect::<BTreeMap<_, _>>();
     for edge in &topology.edges {
-        let implementation = curves
-            .get(&edge.curve_evaluator_id)
-            .ok_or_else(|| invalid("edge curve evaluator", "inventory index is incomplete"))?;
+        work.checkpoint()?;
+        let implementation = lookup(&registry.curves, &edge.curve_evaluator_id, |record| {
+            &record.id
+        })
+        .map(|record| &record.implementation)
+        .ok_or_else(|| invalid("edge curve evaluator", "inventory index is incomplete"))?;
         if curve_is_periodic(implementation).is_some_and(|periodic| periodic != edge.is_periodic) {
             return Err(invalid(
                 "edge periodicity",
@@ -203,26 +222,20 @@ fn validate_topology_claims(
             ));
         }
     }
-    let pcurves = registry
-        .pcurves
-        .iter()
-        .map(|record| (&record.id, &record.implementation))
-        .collect::<BTreeMap<_, _>>();
-    let edges = topology
-        .edges
-        .iter()
-        .map(|edge| (&edge.id, edge))
-        .collect::<BTreeMap<_, _>>();
     for coedge in &topology.coedges {
-        let edge = edges
-            .get(&coedge.edge_id)
+        work.checkpoint()?;
+        let edge = lookup(&topology.edges, &coedge.edge_id, |edge| &edge.id)
             .ok_or_else(|| invalid("coedge edge", "topology index is incomplete"))?;
-        let curve = curves
-            .get(&edge.curve_evaluator_id)
-            .ok_or_else(|| invalid("edge curve evaluator", "inventory index is incomplete"))?;
-        let pcurve = pcurves
-            .get(&coedge.pcurve_evaluator_id)
-            .ok_or_else(|| invalid("coedge pcurve evaluator", "inventory index is incomplete"))?;
+        let curve = lookup(&registry.curves, &edge.curve_evaluator_id, |record| {
+            &record.id
+        })
+        .map(|record| &record.implementation)
+        .ok_or_else(|| invalid("edge curve evaluator", "inventory index is incomplete"))?;
+        let pcurve = lookup(&registry.pcurves, &coedge.pcurve_evaluator_id, |record| {
+            &record.id
+        })
+        .map(|record| &record.implementation)
+        .ok_or_else(|| invalid("coedge pcurve evaluator", "inventory index is incomplete"))?;
         if let (Some(curve_domain), Some(pcurve_domain)) =
             (curve_domain(curve), pcurve_domain(pcurve))
         {
@@ -235,15 +248,13 @@ fn validate_topology_claims(
         }
     }
 
-    let surfaces = registry
-        .surfaces
-        .iter()
-        .map(|record| (&record.id, &record.implementation))
-        .collect::<BTreeMap<_, _>>();
     for face in &topology.faces {
-        let implementation = surfaces
-            .get(&face.surface_evaluator_id)
-            .ok_or_else(|| invalid("face surface evaluator", "inventory index is incomplete"))?;
+        work.checkpoint()?;
+        let implementation = lookup(&registry.surfaces, &face.surface_evaluator_id, |record| {
+            &record.id
+        })
+        .map(|record| &record.implementation)
+        .ok_or_else(|| invalid("face surface evaluator", "inventory index is incomplete"))?;
         if surface_periodicity(implementation)
             .is_some_and(|periodic| periodic != [face.periodic_u, face.periodic_v])
         {
@@ -254,19 +265,19 @@ fn validate_topology_claims(
         }
     }
 
-    let mass_properties = registry
-        .mass_properties
-        .iter()
-        .map(|record| (&record.id, &record.implementation))
-        .collect::<BTreeMap<_, _>>();
     for body in &topology.bodies {
-        let implementation = mass_properties
-            .get(&body.mass_properties_evaluator_id)
-            .ok_or_else(|| invalid("body mass properties", "inventory index is incomplete"))?;
+        work.checkpoint()?;
+        let implementation = lookup(
+            &registry.mass_properties,
+            &body.mass_properties_evaluator_id,
+            |record| &record.id,
+        )
+        .map(|record| &record.implementation)
+        .ok_or_else(|| invalid("body mass properties", "inventory index is incomplete"))?;
         if let ExactMassPropertiesImplementation::KernelValidated { properties, .. } =
             implementation
         {
-            if body.is_sheet_body != (properties.volume_m3 == 0.0) {
+            if body.is_sheet_body != (properties.volume_m3.canonical_value() == 0.0) {
                 return Err(invalid(
                     "body mass properties",
                     "sheet bodies require zero volume and solid bodies require positive volume",
@@ -277,37 +288,36 @@ fn validate_topology_claims(
     Ok(())
 }
 
-fn collect_records<Record, Id>(
+fn require_exact_inventory<'a, Record, Id: Ord + 'a>(
     field: &str,
+    canonical_field: &str,
     records: &[Record],
     id: impl Fn(&Record) -> &Id,
+    expected: impl ExactSizeIterator<Item = &'a Id>,
     validate: impl Fn(&Id) -> Result<(), GeometryContractError>,
-) -> Result<BTreeSet<Id>, GeometryContractError>
-where
-    Id: Clone + Ord,
-{
-    let mut ids = BTreeSet::new();
-    let mut previous = None;
+    work: ValidationWork<'a>,
+) -> Result<(), GeometryContractError> {
+    let mut prior = None;
     for record in records {
+        work.checkpoint()?;
         let current = id(record);
         validate(current)?;
-        if previous.is_some_and(|value| value >= current) || !ids.insert(current.clone()) {
+        if prior.is_some_and(|value| value >= current) {
             return Err(invalid(
-                field,
+                canonical_field,
                 "records must be strictly canonical and unique",
             ));
         }
-        previous = Some(current);
+        prior = Some(current);
     }
-    Ok(ids)
-}
-
-fn require_exact_inventory<Id: Ord>(
-    field: &str,
-    actual: BTreeSet<Id>,
-    expected: BTreeSet<Id>,
-) -> Result<(), GeometryContractError> {
-    if actual != expected {
+    let mut referenced = work.buffer(expected.len())?;
+    for value in expected {
+        work.checkpoint()?;
+        referenced.push(value);
+    }
+    referenced.sort_unstable();
+    referenced.dedup();
+    if !records.iter().map(id).eq(referenced.iter().copied()) {
         return Err(invalid(
             field,
             "must contain exactly every topology-referenced evaluator and no extras",

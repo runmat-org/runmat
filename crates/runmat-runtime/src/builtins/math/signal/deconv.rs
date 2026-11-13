@@ -1,24 +1,27 @@
 //! MATLAB-compatible `deconv` builtin with GPU-aware semantics for RunMat.
 
+#[cfg(test)]
+#[path = "deconv/placement_tests.rs"]
+mod placement_tests;
+
 use num_complex::Complex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, DECONV_ERROR_BUILD_COMPLEX_OUTPUT, DECONV_ERROR_BUILD_OUTPUT,
+    DECONV_ERROR_DENOMINATOR_INVALID, DECONV_ERROR_GATHER_FAILED, DECONV_ERROR_INVALID_INPUT,
+    DECONV_ERROR_LATE_UPLOAD_ADMISSION, DECONV_ERROR_TOO_MANY_OUTPUTS,
+    DECONV_ERROR_VECTOR_REQUIRED, DECONV_INTEGER_INPUT_EXTENSION, DECONV_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::builtins::common::validation::PreparedIntegerPayload;
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
-use crate::builtins::math::signal::type_resolvers::deconv_type;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::builtins::math::signal::common::SignalCooperation;
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::deconv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -48,170 +51,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "deconv";
-
-const DECONV_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "deconv-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "deconv with typed-integer coefficients is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DeconvIntegerInputExtension"),
-};
-const DECONV_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "deconv-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "deconv with logical coefficients is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DeconvLogicalInputExtension"),
-};
-const DECONV_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    DECONV_INTEGER_INPUT_EXTENSION,
-    DECONV_LOGICAL_INPUT_EXTENSION,
-];
-const DECONV_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "numerator",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "denominator",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double coefficients; RunMat mode admits exactly representable real integer coefficients.",
-    },
-];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[Q,R] = deconv(integer_numerator, integer_denominator)",
-        inputs: &DECONV_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Each authoritative coefficient is checked for exact binary64 representation before polynomial division; resident inputs gather through their owners and results return to the first resident owner.",
-    }];
-
-const DECONV_OUTPUT_Q: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Q",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Quotient polynomial coefficients.",
-}];
-
-const DECONV_OUTPUT_QR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Q",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Quotient polynomial coefficients.",
-    },
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Remainder polynomial coefficients.",
-    },
-];
-
-const DECONV_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "numerator",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numerator coefficients.",
-    },
-    BuiltinParamDescriptor {
-        name: "denominator",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Denominator coefficients.",
-    },
-];
-
-const DECONV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Q = deconv(numerator, denominator)",
-        inputs: &DECONV_INPUTS,
-        outputs: &DECONV_OUTPUT_Q,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Q, R] = deconv(numerator, denominator)",
-        inputs: &DECONV_INPUTS,
-        outputs: &DECONV_OUTPUT_QR,
-    },
-];
-
-const DECONV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.INVALID_INPUT",
-    identifier: Some("RunMat:deconv:InvalidInput"),
-    when: "Numerator/denominator input value is not supported for polynomial conversion.",
-    message: "deconv: unsupported input type",
-};
-
-const DECONV_ERROR_VECTOR_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.VECTOR_REQUIRED",
-    identifier: Some("RunMat:deconv:VectorRequired"),
-    when: "Input is not scalar/row/column vector.",
-    message: "deconv: inputs must be scalars, row vectors, or column vectors",
-};
-
-const DECONV_ERROR_DENOMINATOR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.DENOMINATOR_INVALID",
-    identifier: Some("RunMat:deconv:DenominatorInvalid"),
-    when: "Denominator is empty or contains only exact zero coefficients.",
-    message: "deconv: denominator is invalid",
-};
-
-const DECONV_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.GATHER_FAILED",
-    identifier: Some("RunMat:deconv:GatherFailed"),
-    when: "GPU input cannot be gathered for host fallback normalization.",
-    message: "deconv: failed to gather GPU input",
-};
-
-const DECONV_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.BUILD_COMPLEX_OUTPUT",
-    identifier: Some("RunMat:deconv:BuildComplexOutput"),
-    when: "Complex output tensor allocation fails.",
-    message: "deconv: failed to build complex tensor",
-};
-
-const DECONV_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.BUILD_OUTPUT",
-    identifier: Some("RunMat:deconv:BuildOutput"),
-    when: "Real output tensor allocation fails.",
-    message: "deconv: failed to build tensor",
-};
-const DECONV_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DECONV.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:deconv:TooManyOutputs"),
-    when: "More than two outputs are requested.",
-    message: "deconv: too many output arguments",
-};
-
-const DECONV_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    DECONV_ERROR_INVALID_INPUT,
-    DECONV_ERROR_VECTOR_REQUIRED,
-    DECONV_ERROR_DENOMINATOR_INVALID,
-    DECONV_ERROR_GATHER_FAILED,
-    DECONV_ERROR_BUILD_COMPLEX_OUTPUT,
-    DECONV_ERROR_BUILD_OUTPUT,
-    DECONV_ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const DECONV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DECONV_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DECONV_ERRORS,
-};
 
 fn deconv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     deconv_error_with_message(error.message, error)
@@ -251,18 +90,17 @@ fn deconv_error_with_source(
 
 #[runtime_builtin(
     name = "deconv",
-    category = "math/signal",
-    summary = "Compute one-dimensional deconvolution.",
-    keywords = "deconv,deconvolution,polynomial division,signal,gpu",
-    accel = "custom",
-    type_resolver(deconv_type),
-    extensions(DECONV_EXTENSIONS),
-    integer_capabilities(INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::signal::deconv::DECONV_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
-async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
-    if matches!(crate::output_count::current_output_count(), Some(count) if count > 2) {
+async fn deconv_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    numerator: Value,
+    denominator: Value,
+) -> crate::BuiltinResult<Value> {
+    let requested = crate::output_count::current_output_count();
+    if matches!(requested, Some(count) if count > 2) {
         return Err(build_runtime_error(DECONV_ERROR_TOO_MANY_OUTPUTS.message)
             .with_builtin(BUILTIN_NAME)
             .with_identifier(
@@ -272,74 +110,126 @@ async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinR
             )
             .build());
     }
-    let eval = evaluate(numerator, denominator).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            free_deconv_output(&eval.quotient);
-            free_deconv_output(&eval.remainder);
-            return Ok(Value::OutputList(Vec::new()));
+    let mut outputs = evaluate_requested(
+        numerator,
+        denominator,
+        requested.unwrap_or(1),
+        runtime.as_ref(),
+    )
+    .await?;
+    match requested {
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(count) => {
+            let mut published = vec![outputs.quotient.take().ok_or_else(deconv_missing_output)?];
+            if count == 2 {
+                published.push(outputs.remainder.take().ok_or_else(deconv_missing_output)?);
+            }
+            Ok(Value::output_list(published))
         }
-        let mut outputs = vec![eval.quotient()];
-        if out_count >= 2 {
-            outputs.push(eval.remainder());
-        } else {
-            free_deconv_output(&eval.remainder);
-        }
-        return Ok(Value::OutputList(outputs));
-    }
-    let quotient = eval.quotient();
-    free_deconv_output(&eval.remainder);
-    Ok(quotient)
-}
-
-fn free_deconv_output(value: &Value) {
-    if let Value::GpuTensor(handle) = value {
-        if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) {
-            let _ = owner.free(handle);
-        }
+        None => outputs.quotient.take().ok_or_else(deconv_missing_output),
     }
 }
 
 /// Evaluate `deconv` and retain both outputs for multi-value contexts.
 pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<DeconvEval> {
+    let mut outputs = evaluate_requested(numerator, denominator, 2, None).await?;
+    Ok(DeconvEval {
+        quotient: outputs.quotient.take().ok_or_else(deconv_missing_output)?,
+        remainder: outputs.remainder.take().ok_or_else(deconv_missing_output)?,
+    })
+}
+
+fn deconv_missing_output() -> RuntimeError {
+    deconv_error_with_detail(
+        &DECONV_ERROR_BUILD_OUTPUT,
+        "requested result was not constructed",
+    )
+}
+
+struct RequestedDeconvOutputs {
+    quotient: Option<Value>,
+    remainder: Option<Value>,
+}
+
+async fn evaluate_requested(
+    numerator: Value,
+    denominator: Value,
+    requested: usize,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<RequestedDeconvOutputs> {
     ensure_extensions(&numerator)?;
     ensure_extensions(&denominator)?;
-    crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
-        &numerator,
-        BUILTIN_NAME,
-    )?;
-    crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
-        &denominator,
-        BUILTIN_NAME,
-    )?;
+    admit_deconv_operand(&numerator)?;
+    admit_deconv_operand(&denominator)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&numerator, BUILTIN_NAME)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&denominator, BUILTIN_NAME)?;
+    let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
+    cooperation.completed(0).await?;
     let integer_or_logical = [&numerator, &denominator]
         .iter()
         .any(|value| value_is_integer_or_logical(value));
     let single_output =
         !integer_or_logical && (value_is_single(&numerator) || value_is_single(&denominator));
     let complex_output = value_is_complex(&numerator) || value_is_complex(&denominator);
-    let resident_prototype = [&numerator, &denominator]
+    let resident_inputs = [&numerator, &denominator]
         .iter()
-        .find_map(|value| match value {
+        .filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),
             _ => None,
-        });
-    let provider = resident_prototype
-        .as_ref()
-        .and_then(runmat_accelerate_api::provider_for_handle);
-    if [&numerator, &denominator]
-        .iter()
-        .any(|value| matches!(value, Value::GpuTensor(_)))
-        && provider.is_none()
-    {
+        })
+        .collect::<Vec<_>>();
+    let placement = if requested > 0 && !complex_output {
+        if let Some(numerator_len) = deconv_operand_len(&numerator) {
+            let element_type = if single_output {
+                runmat_accelerate_api::ProviderElementType::F32
+            } else {
+                runmat_accelerate_api::ProviderElementType::F64
+            };
+            let bounds = (0..requested)
+                .map(|index| runmat_accelerate_api::ProviderTransferOutputBound {
+                    element_type,
+                    storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+                    layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                    residency: runmat_accelerate_api::ProviderResidency::Device,
+                    max_elements: u64::try_from(if index == 0 {
+                        numerator_len.max(1)
+                    } else {
+                        numerator_len
+                    })
+                    .unwrap_or(u64::MAX),
+                })
+                .collect();
+            super::common::convolution::placement::select_bounded_host_variant(
+                runtime,
+                BUILTIN_NAME,
+                "division.host",
+                &[&numerator, &denominator],
+                &resident_inputs,
+                bounds,
+                deconv_host_scratch_bound(&numerator, &denominator),
+            )?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    // Complete host-visible exactness admission before either resident readback.
+    for value in [&numerator, &denominator] {
+        if !matches!(value, Value::GpuTensor(_)) {
+            prepare_deconv_integer(value, &mut cooperation).await?;
+        }
+    }
+    preflight_denominator(&denominator, &mut cooperation).await?;
+    let resident_prototype = resident_inputs.first();
+    let provider = resident_prototype.and_then(runmat_accelerate_api::provider_for_handle);
+    if !resident_inputs.is_empty() && provider.is_none() {
         return Err(deconv_error_with_detail(
             &DECONV_ERROR_GATHER_FAILED,
             "resident input has no owning provider",
         ));
     }
-    if let (Some(provider), Some(prototype)) = (provider, resident_prototype.as_ref()) {
+    if let (Some(provider), Some(prototype)) = (provider, resident_prototype) {
         for value in [&numerator, &denominator] {
             if let Value::GpuTensor(handle) = value {
                 let owner =
@@ -349,7 +239,9 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
                             "resident input has no owning provider",
                         )
                     })?;
-                if !std::ptr::eq(owner, provider) || handle.device_id != prototype.device_id {
+                if !runmat_accelerate_api::same_provider_instance(owner, provider)
+                    || handle.device_id() != prototype.device_id()
+                {
                     return Err(deconv_error_with_detail(
                         &DECONV_ERROR_INVALID_INPUT,
                         "resident inputs must share one owning provider and device",
@@ -358,67 +250,239 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
             }
         }
     }
-    let num_input = convert_value(numerator).await?;
-    let den_input = convert_value(denominator).await?;
+    let numerator_payload = if matches!(&numerator, Value::GpuTensor(_)) {
+        prepare_deconv_integer(&numerator, &mut cooperation).await?
+    } else {
+        None
+    };
+    let num_input = convert_value(numerator, numerator_payload, &mut cooperation).await?;
+    let denominator_payload = if matches!(&denominator, Value::GpuTensor(_)) {
+        prepare_deconv_integer(&denominator, &mut cooperation).await?
+    } else {
+        None
+    };
+    let den_input = convert_value(denominator, denominator_payload, &mut cooperation).await?;
 
-    let (quotient_raw, remainder_raw) = polynomial_division(&num_input.data, &den_input.data)?;
+    let (quotient_raw, remainder_raw) =
+        polynomial_division(&num_input.data, &den_input.data, &mut cooperation).await?;
 
     let orientation = orientation_from_hint(num_input.hint);
-    let quotient = convert_output(quotient_raw, orientation, single_output, complex_output)?;
-    let remainder = convert_output(remainder_raw, orientation, single_output, complex_output)?;
-    let (quotient, remainder) = if let (Some(provider), Some(prototype)) =
-        (provider, resident_prototype.as_ref())
-    {
-        let quotient = if integer_or_logical {
-            quotient
-        } else {
-            crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
-                quotient,
-                prototype,
-                BUILTIN_NAME,
-            )?
-        };
-        let remainder = if integer_or_logical {
-            remainder
-        } else {
-            crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
-                remainder,
-                prototype,
-                BUILTIN_NAME,
-            )?
-        };
-        let quotient = crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
-            provider,
-            quotient,
-            BUILTIN_NAME,
-            prototype,
-        )?;
-        let remainder =
-            match crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
-                provider,
-                remainder,
-                BUILTIN_NAME,
-                prototype,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    if let Value::GpuTensor(handle) = &quotient {
-                        let owner =
-                            runmat_accelerate_api::provider_for_handle(handle).unwrap_or(provider);
-                        let _ = owner.free(handle);
-                    }
-                    return Err(error);
-                }
-            };
-        (quotient, remainder)
-    } else {
-        (quotient, remainder)
-    };
-
-    Ok(DeconvEval {
+    let mut quotient = (requested >= 1)
+        .then(|| convert_output(quotient_raw, orientation, single_output, complex_output))
+        .transpose()?;
+    let mut remainder = (requested >= 2)
+        .then(|| convert_output(remainder_raw, orientation, single_output, complex_output))
+        .transpose()?;
+    if let (Some(placement), Some(provider)) = (placement.as_ref(), provider) {
+        let produced = quotient.iter().chain(remainder.iter()).collect::<Vec<_>>();
+        if let Err(cause) = placement.validate_actual_host_outputs(provider, &produced) {
+            // The selected whole-call route promised a bounded, exact-upload
+            // presentation. A late rejection cannot be repaired by running a
+            // different effectful restore beneath the same failed receipt.
+            return Err(
+                build_runtime_error(DECONV_ERROR_LATE_UPLOAD_ADMISSION.message)
+                    .with_builtin(BUILTIN_NAME)
+                    .with_identifier(
+                        DECONV_ERROR_LATE_UPLOAD_ADMISSION
+                            .identifier
+                            .expect("late upload admission descriptor identifier"),
+                    )
+                    .with_source(cause)
+                    .build(),
+            );
+        }
+    }
+    if let Some(prototype) = resident_prototype {
+        let caller_inputs = resident_inputs.iter().collect::<Vec<_>>();
+        if let Some(value) = quotient.take() {
+            quotient = Some(
+                runmat_accelerate_api::observation::with_provider_observation(
+                    placement.as_ref().and_then(|selected| selected.recorder()),
+                    || {
+                        gpu_helpers::restore_class_preserving_value_with_operands(
+                            prototype,
+                            value,
+                            BUILTIN_NAME,
+                            gpu_helpers::RestoreOperandContext::new(&caller_inputs, &caller_inputs),
+                        )
+                    },
+                )?,
+            );
+        }
+        if let Some(value) = remainder.take() {
+            let mut protected = caller_inputs.clone();
+            if let Some(Value::GpuTensor(handle)) = quotient.as_ref() {
+                protected.push(handle);
+            }
+            remainder = Some(
+                runmat_accelerate_api::observation::with_provider_observation(
+                    placement.as_ref().and_then(|selected| selected.recorder()),
+                    || {
+                        gpu_helpers::restore_class_preserving_value_with_operands(
+                            prototype,
+                            value,
+                            BUILTIN_NAME,
+                            gpu_helpers::RestoreOperandContext::new(&protected, &caller_inputs),
+                        )
+                    },
+                )?,
+            );
+        }
+    }
+    if let Some(placement) = placement {
+        let published = quotient.iter().chain(remainder.iter()).collect::<Vec<_>>();
+        placement.finish_outputs(&published, requested);
+    }
+    Ok(RequestedDeconvOutputs {
         quotient,
         remainder,
     })
+}
+
+fn deconv_operand_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Tensor(tensor) => {
+            super::common::convolution::checked_vector_elements(tensor.shape())
+        }
+        Value::ComplexTensor(tensor) => {
+            super::common::convolution::checked_vector_elements(tensor.shape())
+        }
+        Value::LogicalArray(array) => {
+            super::common::convolution::checked_vector_elements(&array.shape)
+        }
+        Value::GpuTensor(handle) => {
+            super::common::convolution::checked_vector_elements(handle.shape())
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(1),
+        _ => None,
+    }
+}
+
+fn deconv_host_scratch_bound(a: &Value, b: &Value) -> runmat_execution::ResourceByteBound {
+    let bound = (|| {
+        let n = u64::try_from(deconv_operand_len(a)?).ok()?;
+        let m = u64::try_from(deconv_operand_len(b)?).ok()?;
+        let product = if n == 0 || m == 0 {
+            0
+        } else {
+            n.checked_add(m)?.checked_sub(1)?
+        };
+        // Materialized inputs, trimmed working copy, quotient, product and
+        // full-length remainder may coexist. Both requested host outputs are
+        // conservatively counted even for a one-output call.
+        let complex_elements = n
+            .checked_add(m)?
+            .checked_add(n)?
+            .checked_add(n.max(1))?
+            .checked_add(product)?
+            .checked_add(n)?;
+        let numerical = complex_elements
+            .checked_mul(16)?
+            .checked_add(n.max(1).checked_add(n)?.checked_mul(16)?)?;
+        // Resident denominator preflight can read it before ordinary input
+        // conversion; count both readback phases with raw/decoded/value copies.
+        let gather = [a, b].into_iter().try_fold(0_u64, |total, value| {
+            let bytes = match value {
+                Value::GpuTensor(handle) => handle.physical().requested_bytes().checked_mul(6)?,
+                _ => 0,
+            };
+            total.checked_add(bytes)
+        })?;
+        numerical.checked_add(gather)
+    })();
+    bound
+        .map(runmat_execution::ResourceByteBound::Known)
+        .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        ))
+}
+
+async fn preflight_denominator(
+    denominator: &Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<()> {
+    let invalid = match denominator {
+        Value::Num(number) => *number == 0.0,
+        Value::Int(integer) => integer.is_zero(),
+        Value::Bool(flag) => !flag,
+        Value::Complex(real, imaginary) => *real == 0.0 && *imaginary == 0.0,
+        Value::Tensor(tensor) => {
+            let mut nonzero = false;
+            for index in 0..tensor.len() {
+                nonzero |= tensor
+                    .numeric_value_at(index)
+                    .is_some_and(|value| !value.is_zero());
+                if (index + 1).is_multiple_of(super::common::SIGNAL_WORK_CHUNK as usize) {
+                    cooperation
+                        .completed(super::common::SIGNAL_WORK_CHUNK)
+                        .await?;
+                }
+                if nonzero {
+                    break;
+                }
+            }
+            !nonzero
+        }
+        Value::ComplexTensor(tensor) => {
+            let mut nonzero = false;
+            for index in 0..tensor.len() {
+                nonzero |= tensor
+                    .numeric_value_at(index)
+                    .is_some_and(|(real, imaginary)| !real.is_zero() || !imaginary.is_zero());
+                if (index + 1).is_multiple_of(super::common::SIGNAL_WORK_CHUNK as usize) {
+                    cooperation
+                        .completed(super::common::SIGNAL_WORK_CHUNK)
+                        .await?;
+                }
+                if nonzero {
+                    break;
+                }
+            }
+            !nonzero
+        }
+        Value::LogicalArray(array) => {
+            let mut nonzero = false;
+            for chunk in array.data.chunks(super::common::SIGNAL_WORK_CHUNK as usize) {
+                nonzero |= chunk.iter().any(|value| *value != 0);
+                cooperation.completed(chunk.len() as u64).await?;
+                if nonzero {
+                    break;
+                }
+            }
+            !nonzero
+        }
+        Value::GpuTensor(handle) => handle.shape().contains(&0),
+        _ => false,
+    };
+    if invalid {
+        return Err(deconv_error_with_detail(
+            &DECONV_ERROR_DENOMINATOR_INVALID,
+            "must contain at least one non-zero coefficient",
+        ));
+    }
+    Ok(())
+}
+
+fn admit_deconv_operand(value: &Value) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        super::common::convolution::admit_resident_operand(value, || {
+            deconv_error(&DECONV_ERROR_INVALID_INPUT)
+        })?;
+    }
+    let shape = match value {
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
+        Value::LogicalArray(array) => Some(array.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
+        _ => return Err(deconv_error(&DECONV_ERROR_INVALID_INPUT)),
+    };
+    if shape
+        .is_some_and(|shape| super::common::convolution::checked_vector_elements(shape).is_none())
+    {
+        return Err(deconv_error(&DECONV_ERROR_VECTOR_REQUIRED));
+    }
+    Ok(())
 }
 
 /// Evaluation envelope used by both builtin and bytecode multi-output paths.
@@ -461,89 +525,114 @@ enum Orientation {
     Column,
 }
 
-#[async_recursion::async_recursion(?Send)]
-async fn convert_value(value: Value) -> BuiltinResult<PolyInput> {
+async fn prepare_deconv_integer(
+    value: &Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Option<PreparedIntegerPayload>> {
+    let prepared = cooperation
+        .prepare_integer_receipt(value, &DECONV_INTEGER_INPUT_EXTENSION)
+        .await?;
+    if !prepared.is_exact() {
+        let mut error = deconv_error_with_detail(
+            &DECONV_ERROR_INVALID_INPUT,
+            "integer input must be exactly representable as double",
+        );
+        error.gpu_gather_retry = GpuGatherRetry::Never;
+        return Err(error);
+    }
+    Ok(prepared.into_resident_payload())
+}
+
+async fn convert_value(
+    value: Value,
+    integer_payload: Option<PreparedIntegerPayload>,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<PolyInput> {
     match value {
         Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-                .await
-                .map_err(|flow| {
-                    let message = flow.message().to_owned();
-                    deconv_error_with_source(
-                        &DECONV_ERROR_GATHER_FAILED,
-                        message,
-                        map_control_flow_with_builtin(flow, BUILTIN_NAME),
-                    )
-                })?;
-            crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
-                &gathered,
-                BUILTIN_NAME,
-            )?;
-            convert_value(gathered).await
+            let gathered = if let Some(payload) = integer_payload {
+                match payload {
+                    PreparedIntegerPayload::Real(gathered) => {
+                        let tensor = Tensor::new_integer(
+                            gpu_helpers::integer_storage_from_owned(gathered.data),
+                            gathered.shape,
+                        )
+                        .map_err(|detail| {
+                            deconv_error_with_detail(&DECONV_ERROR_GATHER_FAILED, detail)
+                        })?;
+                        Value::Tensor(tensor)
+                    }
+                    PreparedIntegerPayload::Complex(_) => {
+                        return Err(deconv_error(&DECONV_ERROR_INVALID_INPUT));
+                    }
+                }
+            } else {
+                gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
+                    .await
+                    .map_err(|flow| {
+                        let message = flow.message().to_owned();
+                        deconv_error_with_source(
+                            &DECONV_ERROR_GATHER_FAILED,
+                            message,
+                            map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                        )
+                    })?
+            };
+            convert_host_value(gathered, cooperation).await
         }
-        Value::Tensor(tensor) => convert_tensor(tensor),
-        Value::ComplexTensor(tensor) => convert_complex_tensor(tensor),
-        Value::LogicalArray(logical) => convert_logical_array(logical),
-        Value::Num(n) => Ok(PolyInput {
-            data: vec![Complex::new(n, 0.0)],
-            hint: OrientationHint::Scalar,
-        }),
-        Value::Int(int_val) => {
-            let num = int_val.to_f64();
-            Ok(PolyInput {
-                data: vec![Complex::new(num, 0.0)],
-                hint: OrientationHint::Scalar,
-            })
-        }
-        Value::Bool(flag) => Ok(PolyInput {
-            data: vec![Complex::new(if flag { 1.0 } else { 0.0 }, 0.0)],
-            hint: OrientationHint::Scalar,
-        }),
-        Value::Complex(re, im) => Ok(PolyInput {
-            data: vec![Complex::new(re, im)],
-            hint: OrientationHint::Scalar,
-        }),
-        other => Err(deconv_error_with_detail(
-            &DECONV_ERROR_INVALID_INPUT,
-            format!("{other:?}"),
-        )),
+        host => convert_host_value(host, cooperation).await,
     }
 }
 
-fn convert_tensor(tensor: Tensor) -> BuiltinResult<PolyInput> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let data = tensor::tensor_into_values_f64(tensor);
-    let len = data.len();
-    let hint = classify_orientation(rows, cols, len);
+async fn convert_host_value(
+    value: Value,
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<PolyInput> {
+    let hint = match &value {
+        Value::Tensor(tensor) => {
+            let (rows, cols) = dense_deconv_dimensions(tensor.shape());
+            classify_orientation(rows, cols, tensor.len())
+        }
+        Value::ComplexTensor(tensor) => {
+            classify_orientation(tensor.rows(), tensor.cols(), tensor.len())
+        }
+        Value::LogicalArray(array) => classify_orientation(
+            array.shape.first().copied().unwrap_or(0),
+            array.shape.get(1).copied().unwrap_or(0),
+            array.data.len(),
+        ),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => {
+            OrientationHint::Scalar
+        }
+        Value::GpuTensor(_) => Err(deconv_error_with_detail(
+            &DECONV_ERROR_GATHER_FAILED,
+            "provider returned a resident handle instead of host coefficients",
+        ))?,
+        other => Err(deconv_error_with_detail(
+            &DECONV_ERROR_INVALID_INPUT,
+            format!("{other:?}"),
+        ))?,
+    };
     ensure_vector(hint)?;
-    let data = data.into_iter().map(|re| Complex::new(re, 0.0)).collect();
+    let data = super::common::convolution::materialize_host_coefficients(
+        &value,
+        cooperation,
+        || deconv_error(&DECONV_ERROR_INVALID_INPUT),
+        deconv_allocation_error,
+    )
+    .await?;
     Ok(PolyInput { data, hint })
 }
 
-fn convert_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<PolyInput> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let data = tensor::complex_tensor_into_values_complex64(tensor);
-    let len = data.len();
-    let hint = classify_orientation(rows, cols, len);
-    ensure_vector(hint)?;
-    Ok(PolyInput { data, hint })
-}
-
-fn convert_logical_array(array: LogicalArray) -> BuiltinResult<PolyInput> {
-    let hint = classify_orientation(
-        array.shape.first().copied().unwrap_or(0),
-        array.shape.get(1).copied().unwrap_or(0),
-        array.data.len(),
-    );
-    ensure_vector(hint)?;
-    let data = array
-        .data
-        .into_iter()
-        .map(|bit| Complex::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
-        .collect();
-    Ok(PolyInput { data, hint })
+/// Preserve deconv's coefficient-orientation policy for dense tensors: an
+/// explicit rank-one shape is a row vector, while rank zero has no matrix
+/// orientation and is rejected by the vector admission below.
+fn dense_deconv_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
 }
 
 fn ensure_vector(hint: OrientationHint) -> BuiltinResult<()> {
@@ -627,9 +716,10 @@ fn orientation_from_hint(hint: OrientationHint) -> Orientation {
 
 type PolyDivision = (Vec<Complex<f64>>, Vec<Complex<f64>>);
 
-fn polynomial_division(
+async fn polynomial_division(
     numerator: &[Complex<f64>],
     denominator: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PolyDivision> {
     if denominator.is_empty() {
         return Err(deconv_error_with_detail(
@@ -638,7 +728,7 @@ fn polynomial_division(
         ));
     }
 
-    let (den_trim, _) = trim_leading_zeros(denominator);
+    let den_trim = trim_leading_zeros(denominator, cooperation).await?;
     if den_trim.is_empty() {
         return Err(deconv_error_with_detail(
             &DECONV_ERROR_DENOMINATOR_INVALID,
@@ -646,64 +736,141 @@ fn polynomial_division(
         ));
     }
 
-    let (num_trim, num_all_zero) = trim_leading_zeros(numerator);
-    if num_all_zero {
-        return Ok((vec![Complex::new(0.0, 0.0)], numerator.to_vec()));
+    let num_trim = trim_leading_zeros(numerator, cooperation).await?;
+    if num_trim.is_empty() {
+        return Ok((
+            vec![Complex::new(0.0, 0.0)],
+            copy_coefficients(numerator, cooperation).await?,
+        ));
     }
 
     if num_trim.len() < den_trim.len() {
-        return Ok((vec![Complex::new(0.0, 0.0)], numerator.to_vec()));
+        return Ok((
+            vec![Complex::new(0.0, 0.0)],
+            copy_coefficients(numerator, cooperation).await?,
+        ));
     }
 
     let divisor_lead = den_trim[0];
 
     let q_len = num_trim.len() - den_trim.len() + 1;
-    let mut quotient = vec![Complex::new(0.0, 0.0); q_len];
-    let mut working = num_trim.clone();
+    let mut quotient = zero_coefficients(q_len)?;
+    let mut working = copy_coefficients(num_trim, cooperation).await?;
+    let mut work = 0_u64;
 
     for k in 0..q_len {
         let coeff = working[k] / divisor_lead;
         quotient[k] = coeff;
         for j in 0..den_trim.len() {
             working[k + j] -= coeff * den_trim[j];
+            work += 1;
+            if work == super::common::SIGNAL_WORK_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
     }
+    cooperation.completed(work).await?;
 
-    let product = convolve_complex(den_trim.as_slice(), quotient.as_slice());
-    let mut remainder = numerator.to_vec();
+    let product = convolve_complex(den_trim, &quotient, cooperation).await?;
+    let mut remainder = copy_coefficients(numerator, cooperation).await?;
     let offset = remainder.len().saturating_sub(product.len());
+    let mut work = 0_u64;
     for (index, value) in product.into_iter().enumerate() {
         remainder[offset + index] -= value;
+        work += 1;
+        if work == super::common::SIGNAL_WORK_CHUNK {
+            cooperation.completed(work).await?;
+            work = 0;
+        }
     }
+    cooperation.completed(work).await?;
 
     Ok((quotient, remainder))
 }
 
-fn trim_leading_zeros(data: &[Complex<f64>]) -> (Vec<Complex<f64>>, bool) {
-    if data.is_empty() {
-        return (Vec::new(), true);
-    }
-    let first_non_zero = data.iter().position(|c| !is_exact_zero(c));
-    match first_non_zero {
-        Some(idx) => {
-            let trimmed = data[idx..].to_vec();
-            (trimmed, false)
+async fn trim_leading_zeros<'a>(
+    data: &'a [Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<&'a [Complex<f64>]> {
+    let mut work = 0_u64;
+    for (index, value) in data.iter().enumerate() {
+        work += 1;
+        if work == super::common::SIGNAL_WORK_CHUNK {
+            cooperation.completed(work).await?;
+            work = 0;
         }
-        None => (Vec::new(), true),
+        if !is_exact_zero(value) {
+            cooperation.completed(work).await?;
+            return Ok(&data[index..]);
+        }
     }
+    cooperation.completed(work).await?;
+    Ok(&[])
 }
 
-fn convolve_complex(lhs: &[Complex<f64>], rhs: &[Complex<f64>]) -> Vec<Complex<f64>> {
+async fn convolve_complex(
+    lhs: &[Complex<f64>],
+    rhs: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
     if lhs.is_empty() || rhs.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut output = vec![Complex::new(0.0, 0.0); lhs.len() + rhs.len() - 1];
+    let len = lhs
+        .len()
+        .checked_add(rhs.len())
+        .and_then(|n| n.checked_sub(1))
+        .ok_or_else(|| deconv_error(&DECONV_ERROR_BUILD_OUTPUT))?;
+    let mut output = zero_coefficients(len)?;
+    let mut work = 0_u64;
     for (i, left) in lhs.iter().enumerate() {
         for (j, right) in rhs.iter().enumerate() {
             output[i + j] += *left * *right;
+            work += 1;
+            if work == super::common::SIGNAL_WORK_CHUNK {
+                cooperation.completed(work).await?;
+                work = 0;
+            }
         }
     }
-    output
+    cooperation.completed(work).await?;
+    Ok(output)
+}
+
+fn zero_coefficients(len: usize) -> BuiltinResult<Vec<Complex<f64>>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(deconv_allocation_error)?;
+    values.resize(len, Complex::new(0.0, 0.0));
+    Ok(values)
+}
+
+async fn copy_coefficients(
+    source: &[Complex<f64>],
+    cooperation: &mut SignalCooperation,
+) -> BuiltinResult<Vec<Complex<f64>>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(source.len())
+        .map_err(deconv_allocation_error)?;
+    for chunk in source.chunks(super::common::SIGNAL_WORK_CHUNK as usize) {
+        values.extend_from_slice(chunk);
+        cooperation.completed(chunk.len() as u64).await?;
+    }
+    Ok(values)
+}
+
+fn deconv_allocation_error(cause: std::collections::TryReserveError) -> RuntimeError {
+    let mut builder = build_runtime_error(DECONV_ERROR_BUILD_OUTPUT.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(cause)
+        .with_gpu_gather_retry(GpuGatherRetry::Never);
+    if let Some(identifier) = DECONV_ERROR_BUILD_OUTPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn is_exact_zero(value: &Complex<f64>) -> bool {
@@ -738,7 +905,7 @@ fn convert_output(
                     .collect(),
             )
         } else {
-            ComplexStorage::F64(complex_data)
+            ComplexStorage::F64(complex_data.into())
         };
         let tensor = ComplexTensor::from_complex_storage(storage, shape)
             .map_err(|e| deconv_error_with_detail(&DECONV_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
@@ -757,6 +924,10 @@ fn finalize_real(data: Vec<f64>, shape: Vec<usize>, single_output: bool) -> Buil
 }
 
 #[cfg(test)]
+#[path = "deconv/provider_tests.rs"]
+mod provider_tests;
+
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
@@ -764,8 +935,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
-    use runmat_value::{IntValue, IntegerStorage};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -780,66 +950,46 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn deconv_type_uses_numerator_orientation() {
-        let out = deconv_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(5)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
+    fn later_invalid_denominator_shape_rejects_before_resident_download() {
+        let _serial = test_support::accel_test_lock();
+        let provider =
+            super::super::common::convolution::test_support::RejectTransferProvider::new();
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let numerator = provider.input(vec![1.0, 2.0], vec![1, 2]);
+        let denominator = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let error = deconv_builtin(
+            Value::GpuTensor(numerator.handle.clone()),
+            Value::Tensor(denominator),
+        )
+        .expect_err("denominator matrix is invalid");
+        assert_eq!(error.identifier(), DECONV_ERROR_VECTOR_REQUIRED.identifier);
+        assert_eq!(provider.downloads(), 0);
+        numerator.handle.allocation_lease().validate_live().unwrap();
     }
 
     #[test]
-    fn deconv_type_denominator_longer_returns_scalar_zero_shape() {
-        let output = deconv_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(2)]),
-                },
-                Type::Tensor {
-                    shape: Some(vec![Some(1), Some(3)]),
-                },
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            output,
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
-    #[test]
-    fn deconv_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("deconv builtin");
-        let descriptor = builtin.descriptor.expect("deconv descriptor");
-        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
-        assert!(labels.contains(&"Q = deconv(numerator, denominator)"));
-        assert!(labels.contains(&"[Q, R] = deconv(numerator, denominator)"));
-        assert_eq!(
-            descriptor.output_mode,
-            BuiltinOutputMode::ByRequestedOutputCount
-        );
-        assert!(descriptor
-            .errors
-            .iter()
-            .any(|err| err.code == "RM.DECONV.DENOMINATOR_INVALID"));
-        assert!(descriptor
-            .errors
-            .iter()
-            .any(|err| err.code == "RM.DECONV.TOO_MANY_OUTPUTS"));
+    fn known_empty_or_zero_denominator_rejects_before_resident_numerator_download() {
+        let _serial = test_support::accel_test_lock();
+        let provider =
+            super::super::common::convolution::test_support::RejectTransferProvider::new();
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let numerator = provider.input(vec![1.0, 2.0], vec![1, 2]);
+        for denominator in [
+            Tensor::new(Vec::new(), vec![1, 0]).expect("empty denominator"),
+            Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("zero denominator"),
+        ] {
+            let error = deconv_builtin(
+                Value::GpuTensor(numerator.handle.clone()),
+                Value::Tensor(denominator),
+            )
+            .expect_err("known invalid denominator");
+            assert_eq!(
+                error.identifier(),
+                DECONV_ERROR_DENOMINATOR_INVALID.identifier
+            );
+            assert_eq!(provider.downloads(), 0);
+            numerator.handle.allocation_lease().validate_live().unwrap();
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -851,7 +1001,7 @@ pub(crate) mod tests {
             deconv_builtin(Value::Tensor(numerator), Value::Tensor(denominator)).expect("deconv");
         match value {
             Value::Tensor(q) => {
-                assert_eq!(q.shape, vec![1, 3]);
+                assert_eq!(q.shape(), [1, 3]);
                 assert_eq!(q.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor quotient, got {other:?}"),
@@ -870,6 +1020,24 @@ pub(crate) mod tests {
 
         assert_eq!(real_vector(eval.quotient()), vec![1.0, 2.0, 1.0]);
         assert_eq!(real_vector(eval.remainder()), vec![0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn deconv_rejects_typed_complex_integer_coefficients() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let storage = runmat_value::IntegerComplexStorage::new(
+            IntegerStorage::I16(vec![1, 2]),
+            IntegerStorage::I16(vec![0, 1]),
+        )
+        .expect("integer components");
+        let coefficients =
+            ComplexTensor::from_complex_storage(ComplexStorage::Integer(storage), vec![1, 2])
+                .expect("complex integer coefficients");
+        let error = evaluate(Value::ComplexTensor(coefficients), Value::Num(1.0))
+            .expect_err("complex integer arithmetic is unsupported");
+        assert!(error
+            .message()
+            .contains("complex numbers with integer types"));
     }
 
     #[test]
@@ -902,7 +1070,7 @@ pub(crate) mod tests {
         match eval.remainder() {
             Value::Tensor(output) => {
                 assert_eq!(output.numeric_dtype(), NumericDType::F32);
-                assert_eq!(output.shape, vec![1, 3]);
+                assert_eq!(output.shape(), [1, 3]);
             }
             other => panic!("expected single remainder, got {other:?}"),
         }
@@ -1065,6 +1233,25 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn deconv_preserves_dense_rank_zero_and_rank_one_orientation_policy() {
+        let scalar = Tensor::new(vec![2.0], Vec::new()).expect("rank-zero tensor");
+        let error = evaluate(Value::Tensor(scalar), Value::Num(1.0))
+            .expect_err("rank-zero dense coefficients have no vector orientation");
+        assert_eq!(error.identifier(), DECONV_ERROR_VECTOR_REQUIRED.identifier);
+
+        let row = Tensor::new(vec![2.0, 4.0], vec![2]).expect("rank-one tensor");
+        let quotient = evaluate(Value::Tensor(row), Value::Num(1.0))
+            .expect("rank-one dense coefficients remain a row vector")
+            .quotient();
+        let Value::Tensor(quotient) = quotient else {
+            panic!("expected dense quotient")
+        };
+        assert_eq!(quotient.shape(), [1, 2]);
+        assert_eq!(quotient.materialize_f64(), vec![2.0, 4.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1072,11 +1259,11 @@ pub(crate) mod tests {
             let denominator = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
             let n_view = HostTensorView {
                 data: &numerator.materialize_f64(),
-                shape: &numerator.shape,
+                shape: numerator.shape(),
             };
             let d_view = HostTensorView {
                 data: &denominator.materialize_f64(),
-                shape: &denominator.shape,
+                shape: denominator.shape(),
             };
             let n_handle = provider.upload(&n_view).expect("upload numerator");
             let d_handle = provider.upload(&d_view).expect("upload denominator");
@@ -1135,6 +1322,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn deconv_resident_wide_integer_exactness_uses_native_payload() {
+        use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let numerator = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[1u64 << 54, 0]),
+                    shape: &[1, 2],
+                })
+                .expect("upload exact wide numerator");
+            let quotient = evaluate(Value::GpuTensor(numerator), Value::Num(1.0))
+                .expect("exact wide coefficients")
+                .quotient();
+            let gathered = test_support::gather(quotient).expect("gather quotient");
+            assert_eq!(gathered.materialize_f64(), vec![(1u64 << 54) as f64, 0.0]);
+
+            let inexact = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[(1u64 << 53) + 1]),
+                    shape: &[1, 1],
+                })
+                .expect("upload inexact wide numerator");
+            let failure = evaluate(Value::GpuTensor(inexact), Value::Num(1.0))
+                .expect_err("inexact wide coefficients");
+            assert_eq!(failure.identifier(), Some("RunMat:deconv:InvalidInput"));
+        });
+    }
+
+    #[test]
     fn deconv_builtin_returns_only_requested_resident_outputs() {
         test_support::with_test_provider(|provider| {
             let numerator_data = [1.0, 3.0, 3.0, 1.0];
@@ -1151,7 +1368,8 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload denominator");
-            let guard = crate::output_count::push_output_count(Some(1));
+            let guard =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             let output = deconv_builtin(Value::GpuTensor(numerator), Value::GpuTensor(denominator))
                 .expect("deconv");
             drop(guard);
@@ -1168,7 +1386,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn deconv_resident_output_cleanup_releases_the_handle() {
+    fn deconv_resident_output_drop_preserves_caller_alias_until_final_lease() {
         test_support::with_test_provider(|provider| {
             let handle = provider
                 .upload(&HostTensorView {
@@ -1176,8 +1394,18 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload");
-            free_deconv_output(&Value::GpuTensor(handle.clone()));
-            assert!(block_on(provider.download(&handle)).is_err());
+            let lease = handle.allocation_lease().downgrade();
+            let original = handle.wire_descriptor();
+            let output = Value::GpuTensor(handle.clone());
+            drop(output);
+            let downloaded =
+                block_on(provider.download(&handle)).expect("caller alias remains live");
+            assert_eq!(downloaded.data, vec![1.0, 2.0]);
+            assert_eq!(downloaded.shape, vec![1, 2]);
+            assert_eq!(handle.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            handle.release().expect("release final caller lease");
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -1188,12 +1416,11 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let numerator = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 1.0, 1.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 1, 1],
                     shape: &[1, 3],
                 })
                 .expect("upload logical numerator");
-            runmat_accelerate_api::set_handle_logical(&numerator, true);
             let denominator = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 1.0],
@@ -1238,13 +1465,13 @@ pub(crate) mod tests {
         let num_handle = provider
             .upload(&HostTensorView {
                 data: &numerator.materialize_f64(),
-                shape: &numerator.shape,
+                shape: numerator.shape(),
             })
             .expect("upload numerator");
         let den_handle = provider
             .upload(&HostTensorView {
                 data: &denominator.materialize_f64(),
-                shape: &denominator.shape,
+                shape: denominator.shape(),
             })
             .expect("upload denominator");
 
@@ -1312,6 +1539,25 @@ pub(crate) mod tests {
     }
 
     fn deconv_builtin(numerator: Value, denominator: Value) -> BuiltinResult<Value> {
-        block_on(super::deconv_builtin(numerator, denominator))
+        block_on(super::deconv_builtin(None, numerator, denominator))
+    }
+
+    #[test]
+    fn registered_deconv_binding_honors_invocation_cancellation() {
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(super::deconv_builtin(
+            Some(runtime),
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ))
+        .expect_err("cancelled invocation");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+        assert!(error.source.is_some(), "preserve execution-service cause");
     }
 }

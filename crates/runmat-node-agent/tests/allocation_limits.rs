@@ -6,7 +6,7 @@ use runmat_execution_transport_native::control::{
     AllocationRole, DriverBootstrapCredential, NodeAllocation, ResourceRequest,
     WorkerBootstrapCredential,
 };
-use runmat_node_agent::allocation::{AllocationProcesses, Sandbox};
+use runmat_node_agent::allocation::{AllocationLaunchContext, AllocationProcesses, Sandbox};
 
 #[tokio::test]
 async fn local_wall_limit_kills_the_owned_process_tree() {
@@ -28,11 +28,10 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
             cpu_millicores: 1,
             memory_bytes: 8 * 1024 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 10,
         },
+        accelerator_devices: Vec::new(),
         role: AllocationRole::Driver,
         state: "offered".into(),
         fencing_token: 1,
@@ -47,24 +46,35 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
         driver_lease_id: "driver-lease".into(),
         fencing_token: 1,
         credential: "credential".into(),
+        ready_v1: false,
         expires_at_millis: allocation.expires_at_millis,
     };
     processes
         .launch_driver(
-            &executable,
-            &allocation,
-            &sandbox,
-            "https://server.test",
+            AllocationLaunchContext {
+                runmat_executable: &executable,
+                allocation: &allocation,
+                sandbox: &sandbox,
+                server_url: "https://server.test",
+                clock_domain_nonce: [1; 16],
+            },
             &bootstrap,
+            "fixture-node-identity",
         )
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let mut prepare =
+        |_: &str, _: Option<&runmat_node_agent::allocation::WorkerRetirementScope>| Ok(());
     let exceeded = processes
-        .enforce_local_limits(chrono::Utc::now().timestamp_millis())
+        .enforce_local_limits(chrono::Utc::now().timestamp_millis(), &mut prepare)
         .await
         .unwrap();
-    assert_eq!(exceeded, vec!["lease-limit"]);
+    assert_eq!(exceeded.len(), 1);
+    assert_eq!(exceeded[0].0, "lease-limit");
+    processes
+        .commit_retired(&["lease-limit".to_string()])
+        .unwrap();
     assert_eq!(processes.active_count(), 0);
 }
 
@@ -74,7 +84,7 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
     let executable = directory.path().join("worker-env.sh");
     std::fs::write(
         &executable,
-        "#!/bin/sh\nprintf '%s|%s|%s' \"$RUNMAT_EXECUTION_WORKER_RELAY_TICKET\" \"$RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN\" \"${RUNMAT_NODE_CREDENTIAL-unset}\"\n",
+        "#!/bin/sh\nprintf '%s|%s|%s|%s' \"$RUNMAT_EXECUTION_WORKER_RELAY_TICKET\" \"$RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN\" \"${RUNMAT_NODE_CREDENTIAL-unset}\" \"${RUNMAT_EXECUTION_ACCELERATOR_REQUIRED-unset}\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -93,11 +103,12 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
             cpu_millicores: 1,
             memory_bytes: 64 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: vec![
+                runmat_execution::resource::AcceleratorRequest::generic_compute(1).unwrap(),
+            ],
             maximum_wall_millis: 60_000,
         },
+        accelerator_devices: Vec::new(),
         role: AllocationRole::Worker,
         state: "active".into(),
         fencing_token: 3,
@@ -116,21 +127,38 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
         relay_path: "/v1/execution/workers/lease-worker/relay".into(),
         relay_protocol: "runmat-worker-relay-v1".into(),
         relay_ticket: "scoped-ticket".into(),
+        ready_v1: false,
     };
     let mut processes = AllocationProcesses::default();
     processes
         .launch_worker(
-            &executable,
-            &allocation,
-            &sandbox,
-            "https://server.test",
+            AllocationLaunchContext {
+                runmat_executable: &executable,
+                allocation: &allocation,
+                sandbox: &sandbox,
+                server_url: "https://server.test",
+                clock_domain_nonce: [3; 16],
+            },
             &bootstrap,
+            &runmat_node_agent::inventory::host(
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            )
+            .unwrap(),
+            &runmat_process_host::ProcessSpawnEvidence::default(),
         )
         .await
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut prepare =
+            |_: &str, _: Option<&runmat_node_agent::allocation::WorkerRetirementScope>| Ok(());
         loop {
-            if !processes.reap_finished().unwrap().is_empty() {
+            let retired = processes.reap_finished(&mut prepare).await.unwrap();
+            if !retired.is_empty() {
+                let ids = retired
+                    .iter()
+                    .map(|(allocation_id, _)| allocation_id.clone())
+                    .collect::<Vec<_>>();
+                processes.commit_retired(&ids).unwrap();
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -140,6 +168,6 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
     .expect("worker helper did not finish");
     assert_eq!(
         std::fs::read_to_string(&sandbox.stdout).unwrap(),
-        "scoped-ticket|9|unset"
+        "scoped-ticket|9|unset|1"
     );
 }

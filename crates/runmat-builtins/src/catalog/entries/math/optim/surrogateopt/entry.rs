@@ -1,0 +1,61 @@
+use super::*;
+use crate::*;
+use runmat_types::{EffectKind, ExecutionStackRequirement};
+pub const SURROGATEOPT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    audience: BuiltinCatalogAudience::Public,
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    identity: BuiltinCatalogIdentity { name: "surrogateopt" },
+    category: "math/optim",
+    documentation: documentation::SOLVER,
+    descriptor: &SURROGATEOPT_DESCRIPTOR,
+    contract: BuiltinContractDeclaration {
+        maturity: BuiltinContractMaturity::DynamicByDesign,
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(inference::solver)),
+        compatibility: BuiltinCompatibility::Matlab,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
+        purity: BuiltinPurity::Impure,
+        semantic_kind: BuiltinSemanticKind::General,
+        workspace_effect: None,
+        environment_effect: None,
+        effects: &[
+            EffectKind::FilesystemRead, EffectKind::FilesystemWrite,
+            EffectKind::UserInterface, EffectKind::Randomness, EffectKind::Clock,
+            EffectKind::HostCallback, EffectKind::MaySuspend, EffectKind::MayThrow,
+            EffectKind::Unknown,
+        ],
+        capabilities: &[],
+    },
+    placement: BuiltinPlacementContract {
+        preparation: BuiltinOperandPreparation::RuntimeOwned,
+        portability: BuiltinPortability::NativeAndWasm,
+        accelerator: BuiltinAcceleratorPolicy::Forbidden,
+        residency: BuiltinResidencyPolicy::GatherToHost,
+        fusion: BuiltinFusionPolicy::Boundary,
+        distributed: BuiltinDistributedPolicy::Unsupported,
+    },
+    link: BuiltinLinkContract {
+        reachability: BuiltinReachability::Always,
+        policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: ExecutionStackRequirement::Process,
+        artifact_dependencies: &[],
+    },
+    bindings: &REQUIRED_DEFAULT_BINDING,
+    extensions: &[SURROGATEOPT_INTEGER_OPTIONS_EXTENSION, SURROGATEOPT_RESIDENT_OPTIONS_EXTENSION],
+    integer_capabilities: &[BuiltinIntegerCapabilityDescriptor {
+        form: "selected surrogate native-integer controls",
+        inputs: &[BuiltinIntegerInputCapability {
+            name: "active scalar controls", classes: &ALL_INTEGER_CLASSES,
+            availability: BuiltinIntegerInputAvailability::RunMatOnly,
+            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+            notes: "The selected original compatibility policy admits controls; problem data remains double.",
+        }],
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::GatherFallback,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "Counts retain exact native values that fit usize. Continuous controls cross only an exact binary64 boundary.",
+    }],
+    integer_audit: None,
+    suppress_auto_output: false,
+};

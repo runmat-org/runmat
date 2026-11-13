@@ -1,0 +1,53 @@
+geometry bar {
+    file = "./geometry/bar.step"
+    units = mm
+    region body : solid { select name "Bar"; expect exactly_one }
+    region heated_end : face { select name "End A"; expect exactly_one }
+    region radiating_end : face { select name "End B"; expect exactly_one }
+}
+
+mesh bar on geometry.bar {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.001 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    thermal {
+        reference_temperature = 300 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.000012 K^-1
+        conductivity = 45 W/m/K
+        specific_heat = 500 J/kg/K
+    }
+}
+
+model radiating_bar {
+    thermal { reference_temperature = 300 K }
+    assign material.steel to geometry.bar.region.body
+    load heater {
+        thermal.heat_flux {
+            target = geometry.bar.region.heated_end
+            value = 1000 W/m^2
+        }
+    }
+    load radiation {
+        thermal.radiation {
+            target = geometry.bar.region.radiating_end
+            ambient_temperature = 300 K
+            emissivity = 0.8
+        }
+    }
+}
+
+study radiating_bar {
+    geometry = geometry.bar
+    mesh = mesh.bar
+    model = model.radiating_bar
+    analysis heat { thermal steady {} }
+    output temperature = analysis.heat.field.node.temperature
+    output heat_flux = analysis.heat.field.element.heat_flux
+}

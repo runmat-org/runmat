@@ -1,9 +1,21 @@
 pub mod api;
+pub mod bytecode_owner;
+mod completion;
+pub use completion::CompletedFrameProjection;
 pub mod debug;
+pub use crate::program_execution::dynamic_admission;
 pub mod dispatch;
+mod dispatch_cancellation;
 pub mod engine;
 pub mod errors;
+#[cfg(feature = "native-accel")]
+mod fusion_observation;
+pub(crate) mod parallel_placement;
+pub(crate) mod persistent;
+pub(crate) mod process_driver;
+pub use persistent::{PersistentAliases, PersistentBinding};
 pub mod runner;
 pub mod stack;
 pub mod state;
 pub mod timing;
+pub mod vars;

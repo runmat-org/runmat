@@ -2,6 +2,7 @@ mod accelerate;
 mod defaults;
 mod execution;
 mod fea;
+mod foreign;
 mod language;
 mod logging;
 mod plotting;
@@ -14,8 +15,13 @@ pub use accelerate::{
 };
 pub use execution::{GcConfig, GcPreset, JitConfig, JitOptLevel, RuntimeConfig};
 pub use fea::{FeaArtifactStoreMode, FeaConfig};
+pub use foreign::{
+    ForeignConfig, JavaConfig, MexConfig, NativeFfiConfig, NativeFfiIsolation, NativeFfiTimeout,
+    PythonConfig, PythonExactVersion, PythonExecutionModeConfig, PythonInstalledModulePaths,
+    UnmanifestedMexPolicy,
+};
 pub use language::{error_namespace_for_language_compat, LanguageCompatMode, LanguageConfig};
-pub use logging::{LogLevel, LoggingConfig};
+pub use logging::{LogLevel, LoggingConfig, OtelConfig, OtelProtocol, OtelSignal};
 pub use plotting::{ExportConfig, ExportFormat, GuiConfig, PlotBackend, PlotMode, PlottingConfig};
 pub use root::RunMatRuntimeConfig;
 pub use telemetry::{TelemetryConfig, TelemetryDrainMode};

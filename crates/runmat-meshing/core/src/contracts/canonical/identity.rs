@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{validate_token, MeshingContractError};
 
-pub const MESHING_IDENTITY_SCHEMA_VERSION: u16 = 3;
+pub const MESHING_IDENTITY_SCHEMA_VERSION: u16 = 4;
 const MAX_MESHING_INPUTS: usize = 64;
 const MAX_JOIN_PARTITIONS: usize = 4096;
 
@@ -41,6 +41,7 @@ impl StableDigest {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeometryRevisionRef {
+    pub source_unit_evidence: runmat_types::physical::LengthUnitEvidence,
     pub source_digest: StableDigest,
     pub geometry_revision: u64,
     pub persistent_mapping_version: u32,
@@ -51,6 +52,7 @@ pub struct GeometryRevisionRef {
 pub enum MeshingInputKind {
     ExactGeometry,
     FacetedGeometry,
+    Evidence,
     StageArtifact,
 }
 
@@ -69,6 +71,15 @@ impl MeshingInputRef {
 
 impl GeometryRevisionRef {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
+        self.source_unit_evidence.validate().map_err(|e| {
+            MeshingContractError::invalid("geometry.source_unit_evidence", e.to_string())
+        })?;
+        if !self.source_unit_evidence.physical_scale_resolved() {
+            return Err(MeshingContractError::invalid(
+                "geometry.source_unit_evidence",
+                "source length-unit interpretation must be resolved",
+            ));
+        }
         self.source_digest
             .validate_nonzero("geometry.source_digest")?;
         if self.geometry_revision == 0 || self.persistent_mapping_version == 0 {
@@ -81,7 +92,7 @@ impl GeometryRevisionRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalEntityRange {
     pub first: PersistentEntityId,
@@ -103,7 +114,7 @@ impl CanonicalEntityRange {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeshingPartitionKind {
     WholeStage,
@@ -112,7 +123,7 @@ pub enum MeshingPartitionKind {
     DisconnectedComponent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingPartitionDescriptor {
     pub kind: MeshingPartitionKind,

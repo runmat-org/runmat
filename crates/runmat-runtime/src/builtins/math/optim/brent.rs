@@ -11,12 +11,15 @@
 //! so RunMat's function-handle dispatch path (closures, anonymous functions,
 //! named handles) flows through a single helper.
 
+use runmat_builtins::OptimSolver;
 use runmat_value::Value;
 
 use crate::builtins::math::optim::common::{
-    call_scalar_function, call_scalar_function_with_precision, optim_error,
+    call_scalar_function, call_scalar_function_with_precision, optim_error, ScalarCooperation,
 };
 use crate::BuiltinResult;
+mod zero;
+pub(crate) use zero::{zero_with_receipts, ZeroFunction, ZeroResult};
 
 /// Result of a successful (or terminated) bounded scalar minimization.
 #[derive(Debug, Clone)]
@@ -55,7 +58,7 @@ pub(crate) trait BrentMinObserver {
         x: f64,
         fx: f64,
         step_kind: BrentStepKind,
-    );
+    ) -> crate::BuiltinResult<()>;
 }
 
 /// Per-iteration hook used for scalar root-finding `Display = 'iter'` output.
@@ -67,7 +70,7 @@ pub(crate) trait BrentZeroObserver {
         x: f64,
         fx: f64,
         step_kind: BrentZeroStepKind,
-    );
+    ) -> crate::BuiltinResult<()>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,158 +89,57 @@ pub(crate) enum BrentZeroStepKind {
 
 /// Find a zero of a scalar function on a sign-changing bracket using Brent's method.
 ///
-/// `bracket` must satisfy `fa * fb < 0` unless either endpoint is already zero
-/// the function returns an error).  The function evaluation counter
+/// `bracket` must have opposite-sign endpoint values unless an endpoint is
+/// already zero (in which case that endpoint is returned). The evaluation counter
 /// tracks calls performed by the caller while constructing the bracket.
-pub(crate) async fn brent_zero(
-    name: &str,
-    function: &Value,
+pub(crate) fn brent_zero<'a>(
+    name: &'a str,
+    cooperation: &'a mut ScalarCooperation,
+    function: &'a Value,
     bracket: BrentZeroBracket,
     params: BrentParams,
     single: bool,
-    mut observer: Option<&mut dyn BrentZeroObserver>,
-) -> BuiltinResult<BrentZeroResult> {
-    if bracket.fa == 0.0 {
-        return Ok(BrentZeroResult {
-            x: bracket.a,
-            fval: bracket.fa,
-            iterations: 0,
-            func_count: bracket.evals,
-            converged: true,
-        });
-    }
-    if bracket.fb == 0.0 {
-        return Ok(BrentZeroResult {
-            x: bracket.b,
-            fval: bracket.fb,
-            iterations: 0,
-            func_count: bracket.evals,
-            converged: true,
-        });
-    }
-    if bracket.fa * bracket.fb >= 0.0 {
-        return Err(optim_error(
+    observer: Option<&'a mut dyn BrentZeroObserver>,
+) -> impl std::future::Future<Output = BuiltinResult<BrentZeroResult>> + 'a {
+    use futures::FutureExt;
+    zero_with_receipts(
+        name,
+        cooperation,
+        RawZero {
             name,
-            format!("{name}: invalid bracket; endpoint function values must have opposite signs"),
-        ));
+            function,
+            single,
+        },
+        bracket,
+        ((), ()),
+        params,
+        observer,
+    )
+    .map(|result| result.map(|value| value.result))
+}
+struct RawZero<'a> {
+    name: &'a str,
+    function: &'a Value,
+    single: bool,
+}
+impl ZeroFunction for RawZero<'_> {
+    type Receipt = ();
+    async fn evaluate(
+        &mut self,
+        x: f64,
+        cooperation: &mut ScalarCooperation,
+    ) -> BuiltinResult<(f64, ())> {
+        let value = call_scalar_function_with_precision(
+            self.name,
+            OptimSolver::Fzero,
+            self.function,
+            x,
+            self.single,
+            cooperation,
+        )
+        .await?;
+        Ok((value, ()))
     }
-
-    let mut a = bracket.a;
-    let mut b = bracket.b;
-    let mut c = a;
-    let mut fa = bracket.fa;
-    let mut fb = bracket.fb;
-    let mut fc = fa;
-    let mut d = b - a;
-    let mut e = d;
-    let mut evals = bracket.evals;
-
-    if let Some(observer) = observer.as_deref_mut() {
-        observer.on_iteration(0, evals, b, fb, BrentZeroStepKind::Initial);
-    }
-
-    for iter in 1..=params.max_iter {
-        if fb.signum() == fc.signum() {
-            c = a;
-            fc = fa;
-            d = b - a;
-            e = d;
-        }
-        if fc.abs() < fb.abs() {
-            let old_b = b;
-            let old_fb = fb;
-            a = b;
-            fa = fb;
-            b = c;
-            fb = fc;
-            c = old_b;
-            fc = old_fb;
-        }
-
-        let tol = 2.0 * f64::EPSILON * b.abs() + 0.5 * params.tol_x;
-        let midpoint = 0.5 * (c - b);
-        if midpoint.abs() <= tol || fb == 0.0 {
-            return Ok(BrentZeroResult {
-                x: b,
-                fval: fb,
-                iterations: iter - 1,
-                func_count: evals,
-                converged: true,
-            });
-        }
-        if evals >= params.max_fun_evals {
-            return Ok(BrentZeroResult {
-                x: b,
-                fval: fb,
-                iterations: iter - 1,
-                func_count: evals,
-                converged: false,
-            });
-        }
-
-        let mut step_kind = BrentZeroStepKind::Bisection;
-        if e.abs() >= tol && fa.abs() > fb.abs() {
-            let s = fb / fa;
-            let (mut p, mut q) = if a == c {
-                (2.0 * midpoint * s, 1.0 - s)
-            } else {
-                let q = fa / fc;
-                let r = fb / fc;
-                (
-                    s * (2.0 * midpoint * q * (q - r) - (b - a) * (r - 1.0)),
-                    (q - 1.0) * (r - 1.0) * (s - 1.0),
-                )
-            };
-            if p > 0.0 {
-                q = -q;
-            }
-            p = p.abs();
-            if interpolation_step_accepted(p, q, midpoint, tol, e) {
-                e = d;
-                d = p / q;
-                step_kind = BrentZeroStepKind::Interpolation;
-            } else {
-                d = midpoint;
-                e = d;
-            }
-        } else {
-            d = midpoint;
-            e = d;
-        }
-
-        a = b;
-        fa = fb;
-        b += if d.abs() > tol {
-            d
-        } else if midpoint >= 0.0 {
-            tol
-        } else {
-            -tol
-        };
-        fb = call_scalar_function_with_precision(name, function, b, single).await?;
-        evals += 1;
-
-        if let Some(observer) = observer.as_deref_mut() {
-            observer.on_iteration(iter, evals, b, fb, step_kind);
-        }
-        if fb == 0.0 {
-            return Ok(BrentZeroResult {
-                x: b,
-                fval: fb,
-                iterations: iter,
-                func_count: evals,
-                converged: true,
-            });
-        }
-    }
-
-    Ok(BrentZeroResult {
-        x: b,
-        fval: fb,
-        iterations: params.max_iter,
-        func_count: evals,
-        converged: false,
-    })
 }
 
 /// Bracket consumed by [`brent_zero`].
@@ -259,6 +161,24 @@ pub(crate) fn interpolation_step_accepted(p: f64, q: f64, midpoint: f64, tol: f6
 /// Inverse golden ratio used by Brent minimization: `(3 - sqrt(5)) / 2`.
 const CGOLD: f64 = 0.381_966_011_250_105_15;
 
+fn half_difference(a: f64, b: f64) -> f64 {
+    let difference = a - b;
+    if difference.is_finite() {
+        0.5 * difference
+    } else {
+        0.5 * a - 0.5 * b
+    }
+}
+
+fn interval_point(a: f64, b: f64, fraction: f64) -> f64 {
+    let difference = b - a;
+    if difference.is_finite() {
+        a + fraction * difference
+    } else {
+        (1.0 - fraction).mul_add(a, fraction * b)
+    }
+}
+
 /// Bounded scalar minimization following Brent's method (Numerical Recipes §10.2).
 ///
 /// The function `function` is evaluated through the standard scalar dispatcher.
@@ -267,12 +187,14 @@ const CGOLD: f64 = 0.381_966_011_250_105_15;
 /// `Display = 'iter'`).
 pub(crate) async fn brent_min(
     name: &str,
+    cooperation: &mut ScalarCooperation,
     function: &Value,
     a: f64,
     b: f64,
     params: BrentParams,
     mut observer: Option<&mut dyn BrentMinObserver>,
 ) -> BuiltinResult<BrentMinResult> {
+    cooperation.completed(0).await?;
     if !a.is_finite() || !b.is_finite() {
         return Err(optim_error(
             name,
@@ -284,9 +206,10 @@ pub(crate) async fn brent_min(
     let scale = a.abs().max(b.abs()).max(1.0);
     if width.abs() <= f64::EPSILON * scale {
         let x = a + width * 0.5;
-        let fx = call_scalar_function(name, function, x).await?;
+        let fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x, cooperation).await?;
+        cooperation.completed(0).await?;
         if let Some(observer) = observer.as_deref_mut() {
-            observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial);
+            observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial)?;
         }
         return Ok(BrentMinResult {
             x,
@@ -297,10 +220,11 @@ pub(crate) async fn brent_min(
         });
     }
 
-    let mut x = a + CGOLD * (b - a);
+    let mut x = interval_point(a, b, CGOLD);
     let mut w = x;
     let mut v = x;
-    let mut fx = call_scalar_function(name, function, x).await?;
+    let mut fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x, cooperation).await?;
+    cooperation.completed(0).await?;
     let mut fw = fx;
     let mut fv = fx;
     let mut func_count = 1usize;
@@ -308,11 +232,12 @@ pub(crate) async fn brent_min(
     let mut e = 0.0_f64;
 
     if let Some(observer) = observer.as_deref_mut() {
-        observer.on_iteration(0, func_count, x, fx, BrentStepKind::Initial);
+        observer.on_iteration(0, func_count, x, fx, BrentStepKind::Initial)?;
     }
 
     for iter in 1..=params.max_iter {
-        let xm = 0.5 * (a + b);
+        cooperation.completed(1).await?;
+        let xm = interval_point(a, b, 0.5);
         let tol1 = brent_min_tolerance(x, params);
         let tol2 = 2.0 * tol1;
         if (x - xm).abs() <= tol2 - 0.5 * (b - a) {
@@ -338,8 +263,14 @@ pub(crate) async fn brent_min(
             q = q.abs();
             let etemp = e;
             e = d;
-            if p.abs() < (0.5 * q * etemp).abs() && p > q * (a - x) && p < q * (b - x) {
-                d = p / q;
+            let proposed = p / q;
+            if proposed.is_finite()
+                && etemp.is_finite()
+                && proposed.abs() < 0.5 * etemp.abs()
+                && proposed > a - x
+                && proposed < b - x
+            {
+                d = proposed;
                 let u = x + d;
                 if (u - a) < tol2 || (b - u) < tol2 {
                     d = with_sign(tol1, xm - x);
@@ -349,8 +280,9 @@ pub(crate) async fn brent_min(
             }
         }
         if !use_parabolic {
-            e = if x >= xm { a - x } else { b - x };
-            d = CGOLD * e;
+            let edge = if x >= xm { a } else { b };
+            e = edge - x;
+            d = interval_point(x, edge, CGOLD) - x;
         }
 
         let u = if d.abs() >= tol1 {
@@ -367,7 +299,8 @@ pub(crate) async fn brent_min(
                 converged: false,
             });
         }
-        let fu = call_scalar_function(name, function, u).await?;
+        let fu = call_scalar_function(name, OptimSolver::Fminbnd, function, u, cooperation).await?;
+        cooperation.completed(0).await?;
         func_count += 1;
 
         if fu <= fx {
@@ -400,7 +333,7 @@ pub(crate) async fn brent_min(
         }
 
         if let Some(observer) = observer.as_deref_mut() {
-            observer.on_iteration(iter, func_count, x, fx, step_kind);
+            observer.on_iteration(iter, func_count, x, fx, step_kind)?;
         }
     }
 
@@ -422,48 +355,8 @@ fn with_sign(magnitude: f64, sign_source: f64) -> f64 {
 }
 
 pub(crate) fn brent_min_tolerance(x: f64, params: BrentParams) -> f64 {
-    params.tol_x + 3.0 * x.abs() * f64::EPSILON.sqrt()
+    params.tol_x + (3.0 * f64::EPSILON.sqrt()) * x.abs()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn interpolation_acceptance_uses_signed_q() {
-        assert!(!interpolation_step_accepted(1.0, -2.0, 1.0, 0.1, 10.0));
-        assert!(interpolation_step_accepted(1.0, -2.0, -1.0, 0.1, 10.0));
-    }
-
-    #[test]
-    fn brent_zero_rejects_nonzero_collapsed_bracket() {
-        let err = futures::executor::block_on(brent_zero(
-            "fzero",
-            &Value::FunctionHandle("sin".into()),
-            BrentZeroBracket {
-                a: 1.0,
-                b: 1.0,
-                fa: 1.0,
-                fb: 1.0,
-                evals: 0,
-            },
-            BrentParams {
-                tol_x: 1.0e-6,
-                max_iter: 10,
-                max_fun_evals: 10,
-            },
-            false,
-            None,
-        ))
-        .unwrap_err();
-        assert!(err.message().contains("invalid bracket"));
-    }
-
-    #[test]
-    fn with_sign_matches_fortran_semantics() {
-        assert_eq!(with_sign(1.0, 0.5), 1.0);
-        assert_eq!(with_sign(1.0, -0.5), -1.0);
-        assert_eq!(with_sign(1.0, 0.0), 1.0);
-        assert_eq!(with_sign(-1.0, -1.0), -1.0);
-    }
-}
+mod tests;

@@ -1,12 +1,9 @@
 use runmat_accelerate_api::{
-    AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, IntegerElementType,
-    ProviderPrecision,
+    GpuTensorHandle, GpuTensorStorage, IntegerElementType, ProviderPrecision,
 };
-use runmat_builtins::BuiltinIntegerClass;
 use std::borrow::Cow;
 
-use runmat_builtins::Type;
-use runmat_value::{IntegerStorage, NumericDType, NumericScalar, Tensor, Value};
+use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -16,18 +13,6 @@ pub(crate) enum ColorLayout {
     Truecolor { rows: usize, cols: usize },
     Colormap { rows: usize },
 }
-
-pub(crate) const DOCUMENTED_IMAGE_INTEGER_CLASSES: [BuiltinIntegerClass; 2] =
-    [BuiltinIntegerClass::Uint8, BuiltinIntegerClass::Uint16];
-
-pub(crate) const REJECTED_IMAGE_INTEGER_CLASSES: [BuiltinIntegerClass; 6] = [
-    BuiltinIntegerClass::Int8,
-    BuiltinIntegerClass::Int16,
-    BuiltinIntegerClass::Int32,
-    BuiltinIntegerClass::Int64,
-    BuiltinIntegerClass::Uint32,
-    BuiltinIntegerClass::Uint64,
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StackedColorLayout {
@@ -86,21 +71,16 @@ pub(crate) async fn gather_value(name: &'static str, value: &Value) -> BuiltinRe
         .map_err(|err| map_flow(name, err))
 }
 
-#[derive(Clone)]
-struct ResidentMetadata {
-    logical: bool,
-    transpose: Option<runmat_accelerate_api::TransposeInfo>,
-    class_name: Option<String>,
-}
-
+// View and physical facts are immutable. Retain borrowed views through await
+// and restore only the external residency registration.
 pub(crate) struct ResidentInputGuard {
-    entries: Vec<(GpuTensorHandle, ResidentMetadata)>,
+    entries: Vec<GpuTensorHandle>,
 }
 
 impl ResidentInputGuard {
     pub(crate) fn restore(&self) {
-        for (handle, metadata) in &self.entries {
-            metadata.restore(handle);
+        for handle in &self.entries {
+            runmat_accelerate_api::mark_residency(handle);
         }
     }
 }
@@ -113,65 +93,8 @@ impl Drop for ResidentInputGuard {
 
 pub(crate) fn protect_resident_inputs(sources: &[GpuTensorHandle]) -> ResidentInputGuard {
     ResidentInputGuard {
-        entries: sources
-            .iter()
-            .cloned()
-            .map(|handle| {
-                let metadata = ResidentMetadata::capture(&handle);
-                (handle, metadata)
-            })
-            .collect(),
+        entries: sources.to_vec(),
     }
-}
-
-impl ResidentMetadata {
-    fn capture(handle: &GpuTensorHandle) -> Self {
-        Self {
-            logical: runmat_accelerate_api::handle_is_logical(handle),
-            transpose: runmat_accelerate_api::handle_transpose_info(handle),
-            class_name: runmat_accelerate_api::handle_class_name(handle),
-        }
-    }
-
-    fn restore(&self, handle: &GpuTensorHandle) {
-        runmat_accelerate_api::set_handle_logical(handle, self.logical);
-        match self.transpose {
-            Some(info) => runmat_accelerate_api::record_handle_transpose(
-                handle,
-                info.base_rows,
-                info.base_cols,
-            ),
-            None => runmat_accelerate_api::clear_handle_transpose(handle),
-        }
-        match self.class_name.as_ref() {
-            Some(value) => runmat_accelerate_api::set_handle_class_name(handle, value.clone()),
-            None => runmat_accelerate_api::clear_handle_class_name(handle),
-        }
-        runmat_accelerate_api::mark_residency(handle);
-    }
-}
-
-fn exact_owner(
-    handle: &GpuTensorHandle,
-    name: &'static str,
-) -> BuiltinResult<&'static dyn AccelProvider> {
-    let owner = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-        builtin_error(
-            name,
-            format!("{name}: no acceleration provider owns the input handle"),
-        )
-    })?;
-    if owner.device_id() != handle.device_id {
-        return Err(builtin_error(
-            name,
-            format!(
-                "{name}: input handle device {} is not owned by the selected provider device {}",
-                handle.device_id,
-                owner.device_id()
-            ),
-        ));
-    }
-    Ok(owner)
 }
 
 pub(crate) fn restore_resident_numeric_result_for_sources(
@@ -187,119 +110,57 @@ pub(crate) fn restore_resident_numeric_result_for_sources(
         .find(|handle| runmat_accelerate_api::handle_is_explicit(handle))
         .unwrap_or(first_source);
     for input in sources {
-        exact_owner(input, name)?;
+        // Host computation may have suspended while reading back an operand.
+        // Revalidate every borrowed source before entering any upload hook.
+        super::resident_owner::validate_live(input, name)?;
     }
-    let owner = exact_owner(source, name)?;
-    let snapshots: Vec<_> = sources
-        .iter()
-        .map(|handle| ResidentMetadata::capture(handle))
-        .collect();
-    let tensor = match tensor::value_into_tensor_for(name, value.clone()) {
-        Ok(tensor) => tensor,
-        Err(_) => {
+    let _residency = protect_resident_inputs(sources);
+    let restore = |value| {
+        crate::builtins::common::gpu_helpers::restore_class_preserving_value_protecting(
+            source,
+            value,
+            name,
+            &sources.iter().collect::<Vec<_>>(),
+        )
+        .map_err(|error| map_flow(name, error))
+    };
+    match value {
+        // Transfer the existing native payload, and let the shared scalar
+        // adapter preserve Num when automatic restoration is unsupported.
+        value @ (Value::Tensor(_) | Value::Num(_)) => restore(value),
+        Value::Int(integer) => {
+            let tensor = tensor::value_into_tensor_for(name, Value::Int(integer.clone()))
+                .map_err(|error| builtin_error(name, error))?;
+            match restore(Value::Tensor(tensor))? {
+                Value::Tensor(_) => Ok(Value::Int(integer)),
+                restored => Ok(restored),
+            }
+        }
+        Value::Bool(bit) => match restore(Value::Num(if bit { 1.0 } else { 0.0 }))? {
+            Value::Num(_) => Ok(Value::Bool(bit)),
+            restored => Ok(restored),
+        },
+        Value::LogicalArray(logical) => {
+            // This helper produces numeric color data, not a logical relabel.
+            // Keep the original only for a legal automatic host fallback; the
+            // converted floating allocation is necessary, not a payload clone.
+            let tensor =
+                tensor::logical_to_tensor(&logical).map_err(|error| builtin_error(name, error))?;
+            match restore(Value::Tensor(tensor))? {
+                Value::Tensor(_) => Ok(Value::LogicalArray(logical)),
+                restored => Ok(restored),
+            }
+        }
+        value => {
             if runmat_accelerate_api::handle_is_explicit(source) {
                 return Err(builtin_error(
                     name,
                     format!("{name}: explicit gpuArray result cannot remain resident"),
                 ));
             }
-            return Ok(value);
+            Ok(value)
         }
-    };
-    let expected_integer = tensor.integer_storage().map(|storage| match storage {
-        IntegerStorage::I8(_) => IntegerElementType::I8,
-        IntegerStorage::I16(_) => IntegerElementType::I16,
-        IntegerStorage::I32(_) => IntegerElementType::I32,
-        IntegerStorage::I64(_) => IntegerElementType::I64,
-        IntegerStorage::U8(_) => IntegerElementType::U8,
-        IntegerStorage::U16(_) => IntegerElementType::U16,
-        IntegerStorage::U32(_) => IntegerElementType::U32,
-        IntegerStorage::U64(_) => IntegerElementType::U64,
-    });
-    let expected_precision = expected_integer
-        .is_none()
-        .then_some(match tensor.numeric_dtype() {
-            NumericDType::F32 => ProviderPrecision::F32,
-            _ => ProviderPrecision::F64,
-        });
-    if expected_precision.is_some_and(|precision| precision != owner.precision()) {
-        if runmat_accelerate_api::handle_is_explicit(source) {
-            return Err(builtin_error(
-                name,
-                format!(
-                    "{name}: explicit gpuArray result requires {expected_precision:?}, but its owner uses {:?}",
-                    owner.precision()
-                ),
-            ));
-        }
-        return Ok(value);
     }
-    let mut output = match crate::builtins::common::gpu_helpers::upload_tensor(owner, &tensor) {
-        Ok(output) => output,
-        Err(error) => {
-            for (input, snapshot) in sources.iter().zip(&snapshots) {
-                snapshot.restore(input);
-            }
-            return Err(builtin_error(
-                name,
-                format!("{name}: failed to restore GPU result: {error}"),
-            ));
-        }
-    };
-    let aliases_input = sources
-        .iter()
-        .any(|input| output.device_id == input.device_id && output.buffer_id == input.buffer_id);
-    if aliases_input {
-        for (input, snapshot) in sources.iter().zip(&snapshots) {
-            snapshot.restore(input);
-        }
-        return Err(builtin_error(
-            name,
-            format!("{name}: provider aliased a protected input while restoring the result"),
-        ));
-    }
-    let valid = output.shape == tensor.shape
-        && output.device_id == owner.device_id()
-        && runmat_accelerate_api::provider_for_handle(&output).is_some_and(|candidate| {
-            candidate.device_id() == output.device_id && std::ptr::eq(candidate, owner)
-        })
-        && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(&output) == expected_integer
-        && expected_precision.is_none_or(|precision| {
-            runmat_accelerate_api::handle_precision(&output) == Some(precision)
-        })
-        && !runmat_accelerate_api::handle_is_logical(&output)
-        && crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
-            &output,
-            expected_precision,
-            expected_integer,
-            false,
-        );
-    if !valid {
-        if let Some(actual_owner) = runmat_accelerate_api::provider_for_handle(&output)
-            .filter(|candidate| candidate.device_id() == output.device_id)
-        {
-            if actual_owner.free(&output).is_ok() {
-                runmat_accelerate_api::clear_handle_metadata(&output);
-            }
-        }
-        for (input, snapshot) in sources.iter().zip(&snapshots) {
-            snapshot.restore(input);
-        }
-        return Err(builtin_error(
-            name,
-            format!("{name}: provider returned an invalid restored result"),
-        ));
-    }
-    for (input, snapshot) in sources.iter().zip(&snapshots) {
-        snapshot.restore(input);
-    }
-    runmat_accelerate_api::set_handle_provenance(
-        &mut output,
-        runmat_accelerate_api::handle_provenance(source).unwrap_or(GpuHandleProvenance::Automatic),
-    );
-    runmat_accelerate_api::mark_residency(&output);
-    Ok(Value::GpuTensor(output))
 }
 
 pub(crate) fn restore_resident_numeric_result(
@@ -319,7 +180,7 @@ pub(crate) fn resident_numeric_dtype(
     handle: &GpuTensorHandle,
     name: &'static str,
 ) -> BuiltinResult<NumericDType> {
-    let owner = exact_owner(handle, name)?;
+    super::resident_owner::validate_live(handle, name)?;
     if runmat_accelerate_api::handle_is_logical(handle)
         || runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
     {
@@ -348,15 +209,6 @@ pub(crate) fn resident_numeric_dtype(
             format!("{name}: GPU precision metadata is unavailable"),
         )
     })?;
-    if precision != owner.precision() {
-        return Err(builtin_error(
-            name,
-            format!(
-                "{name}: GPU precision metadata {precision:?} does not match owner precision {:?}",
-                owner.precision()
-            ),
-        ));
-    }
     let dtype = match precision {
         ProviderPrecision::F32 => NumericDType::F32,
         ProviderPrecision::F64 => NumericDType::F64,
@@ -370,12 +222,12 @@ fn validate_class_name(
     dtype: NumericDType,
     name: &'static str,
 ) -> BuiltinResult<()> {
-    if let Some(class_name) = runmat_accelerate_api::handle_class_name(handle) {
-        if class_name != dtype.class_name() {
+    if let Some(class_identity) = runmat_accelerate_api::handle_class_identity(handle) {
+        if class_identity != dtype.class_identity() {
             return Err(builtin_error(
                 name,
                 format!(
-                    "{name}: GPU class metadata {class_name} conflicts with {} storage",
+                    "{name}: GPU class metadata {class_identity} conflicts with {} storage",
                     dtype.class_name()
                 ),
             ));
@@ -423,7 +275,7 @@ pub(crate) fn tensor_with_dtype(
 }
 
 pub(crate) fn color_layout(tensor: &Tensor, name: &'static str) -> BuiltinResult<ColorLayout> {
-    let shape = &tensor.shape;
+    let shape = tensor.shape();
     if shape.len() == 3 && shape[2] == 3 {
         let rows = shape[0];
         let cols = shape[1];
@@ -455,26 +307,26 @@ pub(crate) fn stacked_color_layout(
     tensor: &Tensor,
     name: &'static str,
 ) -> BuiltinResult<StackedColorLayout> {
-    if tensor.shape.len() == 2 && tensor.shape[1] == 3 && tensor.shape[0] > 0 {
+    let shape = tensor.shape();
+    if shape.len() == 2 && shape[1] == 3 && shape[0] > 0 {
         return Ok(StackedColorLayout {
-            plane_pixels: tensor.shape[0],
+            plane_pixels: shape[0],
             stacks: 1,
-            shape: tensor.shape.clone(),
+            shape: shape.to_vec(),
         });
     }
-    if tensor.shape.len() >= 3 && tensor.shape[0] > 0 && tensor.shape[1] > 0 && tensor.shape[2] == 3
-    {
-        let plane_pixels = tensor.shape[0]
-            .checked_mul(tensor.shape[1])
+    if shape.len() >= 3 && shape[0] > 0 && shape[1] > 0 && shape[2] == 3 {
+        let plane_pixels = shape[0]
+            .checked_mul(shape[1])
             .ok_or_else(|| builtin_error(name, format!("{name}: RGB image dimensions overflow")))?;
-        let stacks = tensor.shape[3..]
+        let stacks = shape[3..]
             .iter()
             .try_fold(1usize, |product, &dimension| product.checked_mul(dimension))
             .ok_or_else(|| builtin_error(name, format!("{name}: RGB image dimensions overflow")))?;
         return Ok(StackedColorLayout {
             plane_pixels,
             stacks,
-            shape: tensor.shape.clone(),
+            shape: shape.to_vec(),
         });
     }
     Err(builtin_error(
@@ -487,7 +339,7 @@ pub(crate) fn grayscale_shape(
     tensor: &Tensor,
     name: &'static str,
 ) -> BuiltinResult<(usize, usize)> {
-    let shape = &tensor.shape;
+    let shape = tensor.shape();
     if shape.len() == 2 {
         return Ok((shape[0], shape[1]));
     }
@@ -565,96 +417,5 @@ pub(crate) fn image_output_dtype(input: NumericDType) -> NumericDType {
     }
 }
 
-pub(crate) fn same_shape_type(args: &[Type]) -> Type {
-    match args.first() {
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Some(Type::Num) | Some(Type::Int) | Some(Type::Bool) => Type::Num,
-        _ => Type::tensor(),
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::builtins::common::{gpu_helpers, test_support};
-    use runmat_value::{IntValue, IntegerStorage};
-
-    #[test]
-    fn image_scalar_collapse_reads_authoritative_storage() {
-        let single = Tensor::from_f32(vec![0.25], vec![1, 1]).unwrap();
-        assert_eq!(image_value_from_tensor(single), Value::Num(0.25));
-
-        let wide = u64::MAX - 1;
-        let integer = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-        assert_eq!(
-            image_value_from_tensor(integer),
-            Value::Int(IntValue::U64(wide))
-        );
-    }
-
-    #[test]
-    fn image_arrays_remain_tensors() {
-        let tensor = Tensor::from_f32(vec![0.25, 0.5], vec![1, 2]).unwrap();
-        let Value::Tensor(output) = image_value_from_tensor(tensor) else {
-            panic!("expected tensor output");
-        };
-        assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(output.materialize_f64(), vec![0.25, 0.5]);
-    }
-
-    #[test]
-    fn rejects_legacy_global_provider_fallback_for_foreign_device_handle() {
-        test_support::with_test_provider(|provider| {
-            let handle = GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: provider.device_id().wrapping_add(1000),
-                buffer_id: u64::MAX - 21,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                match provider.precision() {
-                    runmat_accelerate_api::ProviderPrecision::F32 => {
-                        runmat_accelerate_api::NumericElementType::F32
-                    }
-                    runmat_accelerate_api::ProviderPrecision::F64 => {
-                        runmat_accelerate_api::NumericElementType::F64
-                    }
-                },
-                GpuTensorStorage::Real,
-            );
-            let error = resident_numeric_dtype(&handle, "color-test")
-                .expect_err("global fallback is not exact ownership");
-            assert!(error.message().contains("not owned"));
-        });
-    }
-
-    #[test]
-    fn precision_mismatch_returns_host_only_for_automatic_residency() {
-        test_support::with_test_provider(|provider| {
-            let source_tensor =
-                Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
-            let source = gpu_helpers::upload_tensor(provider, &source_tensor).unwrap();
-            let single = Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap());
-
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-            assert!(matches!(
-                restore_resident_numeric_result(Some(&source), single.clone(), "color-test")
-                    .unwrap(),
-                Value::Tensor(_)
-            ));
-
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-            let error = restore_resident_numeric_result(Some(&source), single, "color-test")
-                .expect_err("explicit residency cannot silently become host");
-            assert!(error
-                .message()
-                .contains("explicit gpuArray result requires"));
-            provider.free(&source).unwrap();
-            runmat_accelerate_api::clear_handle_metadata(&source);
-        });
-    }
-}
+mod tests;

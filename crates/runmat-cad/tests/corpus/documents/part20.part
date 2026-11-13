@@ -1,0 +1,22 @@
+runmat 0.7
+std 1
+
+part p {
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])
+        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 40 mm])
+        l3 = line(start = [40 mm, 40 mm], end = [0 mm, 40 mm])
+        l4 = line(start = [0 mm, 40 mm], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s, distance = 20 mm)
+    feature dr = draft(
+        faces = [
+            feature.body.face.side(s.l1),
+            feature.body.face.side(s.l2),
+            feature.body.face.side(s.l3),
+            feature.body.face.side(s.l4)
+        ],
+        neutral = origin.xy,
+        angle = 4 deg
+    )
+}

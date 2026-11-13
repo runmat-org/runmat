@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "scope": "Static conservation of Linux scientific workloads across a cfg(test) WASM fixture correction; no claim that pending browser CI has passed",
+  "path": "crates/runmat-wasm/src/runtime/execution/service.rs",
+  "before_blob": "7a290632f6a5d8300085babc4e858d92fc0640ec",
+  "after_blob": "7486798778a7ce81af78250029eb156ccd535dd6",
+  "unchanged_production_prefix_sha256": "4a30b40f1013768d606caad7b14a00abeaea7a9acaeede824426bf0e2e561394",
+  "exact_edit": {
+    "before": "let service = Rc::new(BrowserExecutionService::new(None).unwrap());",
+    "after": "let service = BrowserExecutionService::new(None).unwrap();"
+  },
+  "reason": "WASM-only cfg(test) fixture removes a redundant Rc wrapper: BrowserExecutionService::new already returns Rc<Self>. All production bytes before the test module and every assertion remain identical. This file is not executed by either Linux scientific cohort; no solver, mesher or numerical behavior changes.",
+  "prior_qualification": {
+    "path": "qualification/products/cross-platform-r1322.json",
+    "sha256": "2aab1877b5e9e23714b47198c3ed68226fcb8f1caf78e090ca21458456db227d"
+  }
+}

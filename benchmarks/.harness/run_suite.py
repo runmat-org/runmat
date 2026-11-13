@@ -375,6 +375,8 @@ def _summarize_runmat_telemetry(results: List[Dict[str, Any]], x_param: Optional
 
     if calibration_runs:
         calib_payload: Dict[str, Any] = {
+            "schema_version": 2,
+            "unit_policy": "diagnostic-residual-v1",
             "runs": calibration_runs,
             "cpu_time_ms": {
                 "elementwise": calib_elem_time,
@@ -519,7 +521,9 @@ def _run_auto_calibrate(results_path: Path, dry_run: bool, json_report: Optional
             f"runmat binary not found at {bin_path}. Re-run without --auto-calibrate or build the release binary."
         )
 
-    cmd = [str(bin_path), "accel-calibrate", str(results_path)]
+    # Residual category allocation remains diagnostic telemetry, never a
+    # source of CPU rate coefficients. Reuse the runtime's measured templates.
+    cmd = [str(bin_path), "accel-calibrate", "--refresh"]
     if dry_run:
         cmd.append("--dry-run")
 
@@ -539,7 +543,8 @@ def _run_auto_calibrate(results_path: Path, dry_run: bool, json_report: Optional
             json.dumps(
                 {
                     "AUTO_CALIBRATION": {
-                        "input": str(results_path),
+                        "benchmark_context": str(results_path),
+                        "source": "automatic-templates",
                         "dry_run": dry_run,
                         "report": str(json_report),
                     }
@@ -567,7 +572,7 @@ def main() -> None:
     ap.add_argument(
         "--auto-calibrate",
         action="store_true",
-        help="After the suite finishes, apply auto-offload calibration using runmat accel calibrate.",
+        help="After the suite finishes, refresh calibration using the runtime's original CPU templates.",
     )
     ap.add_argument(
         "--auto-calibration-dry-run",
@@ -747,6 +752,8 @@ def main() -> None:
     results["suite"]["finished_at"] = datetime.utcnow().isoformat() + "Z"
     if suite_calibration.get("runs", 0) > 0:
         suite_calib_payload: Dict[str, Any] = {
+            "schema_version": 2,
+            "unit_policy": "diagnostic-residual-v1",
             "runs": suite_calibration["runs"],
             "cpu_time_ms": suite_calibration["cpu_time_ms"],
             "units": suite_calibration["units"],
@@ -761,22 +768,8 @@ def main() -> None:
     print(json.dumps({"WROTE": str(out)}, indent=2))
 
     if args.auto_calibrate:
-        calib_exists = "auto_offload_calibration" in results["suite"]
-        if not calib_exists:
-            print(
-                json.dumps(
-                    {
-                        "AUTO_CALIBRATION": {
-                            "status": "skipped",
-                            "reason": "no auto_offload_calibration sample present",
-                        }
-                    },
-                    indent=2,
-                )
-            )
-        else:
-            report_path = Path(args.auto_calibration_report).resolve() if args.auto_calibration_report else None
-            _run_auto_calibrate(out, args.auto_calibration_dry_run, report_path)
+        report_path = Path(args.auto_calibration_report).resolve() if args.auto_calibration_report else None
+        _run_auto_calibrate(out, args.auto_calibration_dry_run, report_path)
 
 
 if __name__ == "__main__":

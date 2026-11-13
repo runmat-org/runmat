@@ -1,14 +1,9 @@
 use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
-use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, LoweringContext, Span};
-use runmat_runtime::analysis::{
-    analysis_plan_study_op, analysis_plan_study_sweep_op, analysis_validate_study_op,
-    analysis_validate_study_sweep_op, is_fea_file_path, load_fea_document_from_path_async,
-    AnalysisStudyPlanData, AnalysisStudySweepPlanData, AnalysisStudySweepValidateData,
-    AnalysisStudyValidateResult, FeaResolvedDocument,
-};
-use runmat_runtime::operations::{OperationContext, OperationErrorEnvelope};
-use serde::Serialize;
+use runmat_hir::{HirDiagnostic, HirDiagnosticSeverity, Span};
+use runmat_static_analysis::project::check_report::{project_diagnostic, source_position};
+use runmat_static_analysis::project::{ProjectAnalysis, ProjectSource};
+use runmat_types::ProgramSourceId;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -18,19 +13,65 @@ use crate::diagnostics::parser_compat;
 use crate::presentation::{self, StreamStyles, Tone};
 use crate::AlreadyReportedCliError;
 
+/// Options for `runmat check`, shared by `.m` and `.fea` sources.
+pub struct CheckRequest {
+    pub root: crate::cli::FeaRootArgs,
+    pub json: bool,
+    pub verbose: bool,
+    pub deny: Vec<String>,
+    pub search_paths: Vec<PathBuf>,
+    /// Circuits: leave out the simulation sections.
+    pub no_simulate: bool,
+}
+
 pub async fn execute_check(
     file: PathBuf,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
-    json: bool,
-    verbose: bool,
-    deny: Vec<String>,
-    search_paths: Vec<PathBuf>,
+    request: CheckRequest,
 ) -> Result<()> {
+    let CheckRequest {
+        root,
+        json,
+        verbose,
+        deny,
+        search_paths,
+        no_simulate,
+    } = request;
     let deny_warnings = parse_denied_levels(&deny)?;
+    if crate::commands::circuit_checks::is_circuit(&file) {
+        if !root.is_empty() || !search_paths.is_empty() {
+            anyhow::bail!(
+                "--study, --sweep and --path apply to .fea and .m sources; {} is a circuit",
+                file.display()
+            );
+        }
+        let report = crate::commands::circuit_checks::check_file(&file, !no_simulate)?;
+        let mut passed =
+            crate::commands::circuit_checks::print_reports(std::slice::from_ref(&report), json)?;
+        if deny_warnings && report.0.warnings > 0 {
+            passed = false;
+        }
+        return if passed {
+            Ok(())
+        } else {
+            Err(AlreadyReportedCliError.into())
+        };
+    }
     let file = resolve_script_input(file)?;
-    if is_fea_file_path(&file) {
-        return check_fea_file(file, config, json).await;
+    if crate::commands::fea::source::is_fea_source_path(&file) {
+        if !search_paths.is_empty() {
+            anyhow::bail!(
+                "--path adds MATLAB lookup roots; .fea documents import their functions explicitly"
+            );
+        }
+        return check_fea_file(file, cli, config, root, json, deny_warnings).await;
+    }
+    if !root.is_empty() {
+        anyhow::bail!(
+            "--study and --sweep select a root of a .fea document; {} is not one",
+            file.display()
+        );
     }
     if is_matlab_file(&file) {
         return check_m_file(
@@ -48,7 +89,7 @@ pub async fn execute_check(
     }
 
     anyhow::bail!(
-        "runmat check supports .m scripts and .fea documents; got {}",
+        "runmat check supports .m scripts, .fea documents and .circuit or .circuit.layout files; got {}",
         file.display()
     )
 }
@@ -74,110 +115,244 @@ fn parse_denied_levels(levels: &[String]) -> Result<bool> {
     Ok(deny_warnings)
 }
 
-async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool) -> Result<()> {
-    if !json {
-        let styles = presentation::stderr();
-        eprintln!(
-            "{} {}",
-            styles.heading("Checking"),
-            styles.path(path.display())
+/// Checks a `.fea` document with every rule its run applies before meshing (the runtime's
+/// checked source carries the static run admission), and resolves `--study`/`--sweep` exactly
+/// as `runmat run` does.
+async fn check_fea_file(
+    path: PathBuf,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    root: crate::cli::FeaRootArgs,
+    json: bool,
+    deny_warnings: bool,
+) -> Result<()> {
+    let checked = crate::commands::fea::source::check_source(&path, cli, config).await?;
+    let report = checked.check_result();
+    let roots = checked.root_selectors();
+    let selection = if report.status.is_valid() {
+        crate::commands::fea::command::root_selector(&root)
+            .map(|selector| checked.resolve_root(Some(&selector)).map(|_| selector))
+            .transpose()
+    } else {
+        Ok(None)
+    };
+    let selection_error = selection.as_ref().err().map(ToString::to_string);
+    let warnings = report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == runmat_analysis_language::FeaDiagnosticSeverity::Warning
+    });
+    let valid =
+        report.status.is_valid() && selection_error.is_none() && !(deny_warnings && warnings);
+    if json {
+        // The full checked-source report (program, source index, previews, diagnostics) plus
+        // the root summary and selection; `status` reflects the selection and `-D warnings`.
+        let mut payload = serde_json::to_value(&report)?;
+        let object = payload
+            .as_object_mut()
+            .context("FEA check report serializes as an object")?;
+        object.insert("kind".into(), json!("fea"));
+        object.insert(
+            "status".into(),
+            json!(if valid { "valid" } else { "invalid" }),
         );
-        eprintln!("  {}", styles.muted("loading study document"));
+        object.insert("studies".into(), json!(checked.program.studies.len()));
+        object.insert("sweeps".into(), json!(checked.program.sweeps.len()));
+        object.insert("roots".into(), json!(roots));
+        object.insert(
+            "selected".into(),
+            json!(selection.as_ref().ok().cloned().flatten()),
+        );
+        object.insert("selection_error".into(), json!(selection_error));
+        println!("{}", serde_json::to_string(&payload)?);
+        return if valid {
+            Ok(())
+        } else {
+            Err(AlreadyReportedCliError.into())
+        };
     }
-    let document = load_fea_document_from_path_async(&path)
-        .await
-        .map_err(|err| anyhow::anyhow!("Failed to load FEA file {}: {err}", path.display()))?;
-    let context = OperationContext::new(None, None);
-    match document {
-        FeaResolvedDocument::Study(spec) => {
-            if !json {
-                let styles = presentation::stderr();
-                eprintln!(
-                    "  {} {} ({:?}, {:?})",
-                    styles.label("study:"),
-                    styles.identifier(&spec.study_id),
-                    spec.run_kind,
-                    spec.backend
-                );
-                eprintln!(
-                    "  {} {} regions, {} meshes",
-                    styles.label("geometry:"),
-                    spec.geometry.regions.len(),
-                    spec.geometry.meshes.len()
-                );
-                eprintln!("  {}", styles.info("validating"));
-            }
-            let validation = analysis_validate_study_op(&spec, context.clone())
-                .map_err(report_operation_error)?;
-            if !validation.data.valid {
-                if json {
-                    print_payload("study", "invalid", &validation.data, config.runtime.verbose)?;
-                } else {
-                    print_study_validation_failure(&validation.data);
-                }
-                return Err(AlreadyReportedCliError.into());
-            }
-            if !json {
-                eprintln!("  {}", presentation::stderr().info("planning"));
-            }
-            let plan = analysis_plan_study_op(&spec, context).map_err(report_operation_error)?;
-            if json {
-                print_payload(
-                    "study",
-                    "valid",
-                    &json!({
-                        "validation": validation.data,
-                        "plan": plan.data,
-                    }),
-                    config.runtime.verbose,
-                )?;
-            } else {
-                print_study_check_summary(&validation.data, &plan.data, config.runtime.verbose);
-            }
-        }
-        FeaResolvedDocument::Sweep(spec) => {
-            if !json {
-                let styles = presentation::stderr();
-                eprintln!(
-                    "  {} {} ({} studies, fail_fast: {})",
-                    styles.label("sweep:"),
-                    styles.identifier(&spec.sweep_id),
-                    spec.studies.len(),
-                    spec.fail_fast
-                );
-                eprintln!("  {}", styles.info("validating"));
-            }
-            let validation = analysis_validate_study_sweep_op(&spec, context.clone())
-                .map_err(report_operation_error)?;
-            if !validation.data.valid {
-                if json {
-                    print_payload("sweep", "invalid", &validation.data, config.runtime.verbose)?;
-                } else {
-                    print_sweep_validation_failure(&validation.data);
-                }
-                return Err(AlreadyReportedCliError.into());
-            }
-            if !json {
-                eprintln!("  {}", presentation::stderr().info("planning"));
-            }
-            let plan =
-                analysis_plan_study_sweep_op(&spec, context).map_err(report_operation_error)?;
-            if json {
-                print_payload(
-                    "sweep",
-                    "valid",
-                    &json!({
-                        "validation": validation.data,
-                        "plan": plan.data,
-                    }),
-                    config.runtime.verbose,
-                )?;
-            } else {
-                print_sweep_check_summary(&validation.data, &plan.data);
-            }
-        }
+    let styles = presentation::stdout();
+    let sources = FeaDiagnosticSources::new(&path, &checked.root_module, &checked.source_root);
+    let counts = print_fea_diagnostics(&report.diagnostics, &sources, &styles, false);
+    if let Some(error) = &selection_error {
+        println!("{}", styles.error(format!("error: {error}")));
+    }
+    if let Ok(Some(selected)) = &selection {
+        println!(
+            "  {} {} {}",
+            styles.label("selected:"),
+            selected.kind(),
+            styles.identifier(selected.id())
+        );
+    } else if roots.len() > 1 {
+        println!(
+            "  {} {}",
+            styles.label("runnable roots:"),
+            roots
+                .iter()
+                .map(|root| format!("--{} {}", root.kind(), root.id()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    println!("{}", counts.summary(&path, &styles));
+    if !valid {
+        return Err(AlreadyReportedCliError.into());
     }
     Ok(())
+}
+
+/// Error and warning totals for one check, printed as the `checked …` summary line.
+pub(crate) struct DiagnosticCounts {
+    pub errors: usize,
+    pub warnings: usize,
+}
+
+impl DiagnosticCounts {
+    pub(crate) fn summary(&self, path: &Path, styles: &StreamStyles) -> String {
+        let summary = format!(
+            "checked {}: {} error(s), {} warning(s)",
+            path.display(),
+            self.errors,
+            self.warnings
+        );
+        if self.errors > 0 {
+            styles.error(summary)
+        } else if self.warnings > 0 {
+            styles.warning(summary)
+        } else {
+            styles.success(summary)
+        }
+    }
+}
+
+/// Maps the logical module paths in FEA diagnostics to the files the user names on the command
+/// line, so located FEA diagnostics read like `.m` diagnostics.
+pub(crate) struct FeaDiagnosticSources<'a> {
+    entry_path: &'a Path,
+    root_module: &'a runmat_analysis_language::LogicalSourcePath,
+    source_root: &'a Path,
+}
+
+impl<'a> FeaDiagnosticSources<'a> {
+    pub(crate) fn new(
+        entry_path: &'a Path,
+        root_module: &'a runmat_analysis_language::LogicalSourcePath,
+        source_root: &'a Path,
+    ) -> Self {
+        Self {
+            entry_path,
+            root_module,
+            source_root,
+        }
+    }
+
+    fn display_path(&self, module: &runmat_analysis_language::LogicalSourcePath) -> PathBuf {
+        if module == self.root_module {
+            return self.entry_path.to_path_buf();
+        }
+        let physical = self.source_root.join(module.as_str());
+        runmat_filesystem::current_dir()
+            .ok()
+            .and_then(|cwd| physical.strip_prefix(cwd).ok().map(Path::to_path_buf))
+            .unwrap_or(physical)
+    }
+
+    fn source(&self, module: &runmat_analysis_language::LogicalSourcePath) -> Option<String> {
+        let physical = if module == self.root_module {
+            self.entry_path.to_path_buf()
+        } else {
+            self.source_root.join(module.as_str())
+        };
+        std::fs::read_to_string(physical).ok()
+    }
+}
+
+/// Prints FEA diagnostics in the same located form `runmat check` uses for `.m` files and returns
+/// the error and warning totals.
+pub(crate) fn print_fea_diagnostics(
+    diagnostics: &[runmat_analysis_language::FeaDiagnostic],
+    sources: &FeaDiagnosticSources<'_>,
+    styles: &StreamStyles,
+    to_stderr: bool,
+) -> DiagnosticCounts {
+    let mut counts = DiagnosticCounts {
+        errors: 0,
+        warnings: 0,
+    };
+    for diagnostic in diagnostics {
+        match diagnostic.severity {
+            runmat_analysis_language::FeaDiagnosticSeverity::Error => counts.errors += 1,
+            runmat_analysis_language::FeaDiagnosticSeverity::Warning => counts.warnings += 1,
+        }
+        let rendered = render_fea_diagnostic(diagnostic, sources, styles);
+        if to_stderr {
+            eprintln!("{rendered}");
+        } else {
+            println!("{rendered}");
+        }
+    }
+    counts
+}
+
+fn render_fea_diagnostic(
+    diagnostic: &runmat_analysis_language::FeaDiagnostic,
+    sources: &FeaDiagnosticSources<'_>,
+    styles: &StreamStyles,
+) -> String {
+    let severity = match diagnostic.severity {
+        runmat_analysis_language::FeaDiagnosticSeverity::Error => HirDiagnosticSeverity::Error,
+        runmat_analysis_language::FeaDiagnosticSeverity::Warning => HirDiagnosticSeverity::Warning,
+    };
+    let located = diagnostic.location.as_ref().and_then(|location| {
+        sources
+            .source(&location.path)
+            .map(|source| (sources.display_path(&location.path), source, location.span))
+    });
+    let mut rendered = match &located {
+        Some((path, source, span)) => render_located(
+            &LocatedDiagnostic {
+                severity: &severity,
+                code: &diagnostic.code,
+                message: &diagnostic.message,
+                span: *span,
+                label: diagnostic.label.as_deref(),
+            },
+            path,
+            source,
+            styles,
+        ),
+        None => {
+            let (severity, tone) = severity_presentation(&severity);
+            format!(
+                "{}[{}]: {}",
+                styles.paint(tone, severity),
+                styles.identifier(&diagnostic.code),
+                diagnostic.message
+            )
+        }
+    };
+    for related in &diagnostic.related {
+        let location = match sources.source(&related.location.path) {
+            Some(source) => {
+                let (line, column, _, _) = source_line(&source, related.location.span.start);
+                format!(
+                    "{}:{line}:{column}",
+                    sources.display_path(&related.location.path).display()
+                )
+            }
+            None => sources
+                .display_path(&related.location.path)
+                .display()
+                .to_string(),
+        };
+        rendered.push_str(&format!(
+            "\n  {} {} {}: {}",
+            styles.muted("="),
+            styles.info("related:"),
+            styles.path(location),
+            related.message
+        ));
+    }
+    rendered
 }
 
 async fn check_m_file(
@@ -186,7 +361,10 @@ async fn check_m_file(
     config: &RunMatRuntimeConfig,
     options: CheckOutputOptions,
 ) -> Result<()> {
-    let content = runmat_filesystem::read_to_string_async(&path)
+    let (source_provider, resolved_primary) = runmat_filesystem::capture_provider_path(&path)
+        .context("Failed to capture script filesystem authority")?;
+    let path_namespace = source_provider.path_namespace();
+    let content = read_project_source(source_provider.as_ref(), &resolved_primary)
         .await
         .with_context(|| format!("Failed to read script file: {}", path.display()))?;
     let cwd = runmat_filesystem::current_dir().context("Failed to read current directory")?;
@@ -215,7 +393,7 @@ async fn check_m_file(
     }
 
     for search_path in &options.search_paths {
-        let root = if search_path.is_absolute() {
+        let root = if path_namespace.is_absolute(search_path) {
             search_path.clone()
         } else {
             cwd.join(search_path)
@@ -233,30 +411,32 @@ async fn check_m_file(
         }
     }
 
-    let known_symbols = source_catalog
-        .as_ref()
-        .map(|catalog| &catalog.symbols)
-        .cloned()
-        .unwrap_or_default();
-    let lowering_context = LoweringContext::empty()
-        .with_runmat_extensions_enabled(
-            parser_compat(config.language.compat).allows_runmat_extensions(),
-        )
-        .with_known_project_symbols(&known_symbols);
-    let mut analysis = runmat_static_analysis::frontend::analyze_source_with_catalog(
-        &content,
+    let mut project = runmat_static_analysis::project::analyze_project_source(
+        ProjectSource {
+            path: resolved_primary,
+            text: content,
+        },
+        path_namespace,
         parser_compat(config.language.compat),
-        &lowering_context,
         source_catalog.as_ref(),
+        |definition| {
+            let provider = source_provider.clone();
+            async move {
+                read_project_source(provider.as_ref(), &definition.source_path)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+        },
+    )
+    .await
+    .with_context(|| format!("Failed to analyze project source: {}", path.display()))?;
+    project.analysis.extend_diagnostics(
+        catalog_diagnostics,
+        runmat_static_analysis::frontend::DiagnosticStage::Resolution,
     );
-    analysis.diagnostics.extend(catalog_diagnostics);
-    analysis.diagnostics.sort_by_key(|diagnostic| {
-        (
-            diagnostic.primary.span.start,
-            diagnostic.primary.span.end,
-            diagnostic.code.clone(),
-        )
-    });
+    project.analysis.sort_diagnostics(false);
+    let analysis = &project.analysis;
+    let sources = CheckSources::Project(&project, &path);
 
     let error_count = analysis
         .diagnostics
@@ -277,7 +457,12 @@ async fn check_m_file(
         let diagnostics = analysis
             .diagnostics
             .iter()
-            .map(|diagnostic| CheckDiagnostic::from_hir(diagnostic, &content))
+            .enumerate()
+            .map(|(index, diagnostic)| {
+                project_diagnostic(diagnostic, analysis.diagnostic_stage(index), |id| {
+                    sources.source(id)
+                })
+            })
             .collect::<Vec<_>>();
         let payload = json!({
             "schema_version": 1,
@@ -286,7 +471,11 @@ async fn check_m_file(
             "path": path,
             "project_revision": analysis.project_revision,
             "analysis": analysis.domains,
+            "analysis_incomplete_sources": project.incomplete_sources,
+            "call_context_budget_exhausted": project.call_context_budget_exhausted,
+            "call_context_precision_withheld": project.call_context_precision_withheld,
             "resolution": analysis.resolution,
+            "sources": project_source_paths(&project, &path),
             "diagnostics": diagnostics,
             "summary": {
                 "errors": error_count,
@@ -303,11 +492,23 @@ async fn check_m_file(
         for diagnostic in &analysis.diagnostics {
             println!(
                 "{}",
-                render_check_diagnostic_with_styles(diagnostic, &path, &content, &styles)
+                render_check_diagnostic_with_sources(diagnostic, &sources, &styles)
             );
         }
         if options.verbose {
             println!("analysis: {}", serde_json::to_string(&analysis.domains)?);
+            if project.call_context_budget_exhausted {
+                println!("analysis partial: call-context analysis budget exhausted");
+            }
+            if project.call_context_precision_withheld {
+                println!("analysis partial: unsupported call-context precision withheld");
+            }
+            for source in &project.incomplete_sources {
+                println!(
+                    "analysis partial: companion source not composed: {}",
+                    source.display()
+                );
+            }
         }
         let summary = format!(
             "checked {}: {} error(s), {} warning(s)",
@@ -329,6 +530,17 @@ async fn check_m_file(
     Ok(())
 }
 
+// Reading remains adapter-owned. Both primary and selected sources use the
+// original captured provider; analysis receives only its pure namespace grammar.
+async fn read_project_source(
+    provider: &dyn runmat_filesystem::FsProvider,
+    path: &Path,
+) -> std::io::Result<String> {
+    let bytes = provider.read(path).await?;
+    String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
 fn merge_source_catalog(
     destination: &mut Option<runmat_package::DiscoveredSourceSymbols>,
     mut additional: runmat_package::DiscoveredSourceSymbols,
@@ -345,108 +557,51 @@ fn merge_source_catalog(
     }
 }
 
-#[derive(Serialize)]
-struct CheckDiagnostic<'a> {
-    code: &'a str,
-    severity: &'static str,
-    message: &'a str,
-    category: Option<&'a str>,
-    primary: CheckDiagnosticSpan<'a>,
-    secondary: Vec<CheckDiagnosticSpan<'a>>,
-    notes: Vec<&'a str>,
-    help: Option<&'a str>,
-    suggestions: Vec<CheckSuggestion<'a>>,
+// Project source IDs are positions in the shared owner's source table. Publish
+// only display paths, not source text, so resolution spans remain attributable
+// even when no diagnostic happens to refer to the same document.
+fn project_source_paths(
+    project: &ProjectAnalysis,
+    primary_display_path: &Path,
+) -> Vec<serde_json::Value> {
+    project
+        .sources
+        .iter()
+        .enumerate()
+        .map(|(source_id, source)| {
+            json!({
+                "source_id": source_id,
+                "path": if source_id == 0 { primary_display_path } else { source.path.as_path() },
+            })
+        })
+        .collect()
 }
 
-#[derive(Serialize)]
-struct CheckDiagnosticSpan<'a> {
-    start: usize,
-    end: usize,
-    line: usize,
-    column: usize,
-    end_line: usize,
-    end_column: usize,
-    label: Option<&'a str>,
+enum CheckSources<'a> {
+    Project(&'a ProjectAnalysis, &'a Path),
+    #[cfg(test)]
+    Single(&'a Path, &'a str),
 }
 
-#[derive(Serialize)]
-struct CheckSuggestion<'a> {
-    span: CheckDiagnosticSpan<'a>,
-    replacement: &'a str,
-    message: &'a str,
-}
-
-impl<'a> CheckDiagnostic<'a> {
-    fn from_hir(diagnostic: &'a HirDiagnostic, source: &str) -> Self {
-        Self {
-            code: &diagnostic.code,
-            severity: diagnostic_severity_name(&diagnostic.severity),
-            message: &diagnostic.message,
-            category: diagnostic.category.as_deref(),
-            primary: CheckDiagnosticSpan::from_hir(
-                diagnostic.primary.span,
-                diagnostic.primary.label.as_deref(),
-                source,
-            ),
-            secondary: diagnostic
-                .secondary
-                .iter()
-                .map(|span| CheckDiagnosticSpan::from_hir(span.span, span.label.as_deref(), source))
-                .collect(),
-            notes: diagnostic
-                .notes
-                .iter()
-                .map(|note| note.message.as_str())
-                .collect(),
-            help: diagnostic.help.as_deref(),
-            suggestions: diagnostic
-                .suggestions
-                .iter()
-                .map(|suggestion| CheckSuggestion {
-                    span: CheckDiagnosticSpan::from_hir(suggestion.span, None, source),
-                    replacement: &suggestion.replacement,
-                    message: &suggestion.message,
-                })
-                .collect(),
+impl<'a> CheckSources<'a> {
+    fn source(&self, id: Option<ProgramSourceId>) -> Option<(&'a Path, &'a str)> {
+        match self {
+            Self::Project(project, primary_display_path) => project.source(id).map(|source| {
+                let path = if id.is_none_or(|id| id == ProgramSourceId(0)) {
+                    *primary_display_path
+                } else {
+                    source.path.as_path()
+                };
+                (path, source.text.as_str())
+            }),
+            #[cfg(test)]
+            Self::Single(path, text) if id.is_none_or(|id| id == ProgramSourceId(0)) => {
+                Some((path, text))
+            }
+            #[cfg(test)]
+            Self::Single(_, _) => None,
         }
     }
-}
-
-impl<'a> CheckDiagnosticSpan<'a> {
-    fn from_hir(span: Span, label: Option<&'a str>, source: &str) -> Self {
-        let (line, column) = source_position(source, span.start);
-        let (end_line, end_column) = source_position(source, span.end);
-        Self {
-            start: span.start,
-            end: span.end,
-            line,
-            column,
-            end_line,
-            end_column,
-            label,
-        }
-    }
-}
-
-fn diagnostic_severity_name(severity: &HirDiagnosticSeverity) -> &'static str {
-    match severity {
-        HirDiagnosticSeverity::Error => "error",
-        HirDiagnosticSeverity::Warning => "warning",
-        HirDiagnosticSeverity::Information => "information",
-        HirDiagnosticSeverity::Help => "help",
-    }
-}
-
-fn source_position(source: &str, offset: usize) -> (usize, usize) {
-    let offset = offset.min(source.len());
-    let line_start = source[..offset].rfind('\n').map_or(0, |index| index + 1);
-    let line = source[..line_start]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1;
-    let column = source[line_start..offset].chars().count() + 1;
-    (line, column)
 }
 
 fn source_catalog_diagnostic(message: String) -> HirDiagnostic {
@@ -465,10 +620,19 @@ fn render_check_diagnostic(diagnostic: &HirDiagnostic, path: &Path, source: &str
     render_check_diagnostic_with_styles(diagnostic, path, source, &StreamStyles::plain())
 }
 
+#[cfg(test)]
 fn render_check_diagnostic_with_styles(
     diagnostic: &HirDiagnostic,
     path: &Path,
     source: &str,
+    styles: &StreamStyles,
+) -> String {
+    render_check_diagnostic_with_sources(diagnostic, &CheckSources::Single(path, source), styles)
+}
+
+fn render_check_diagnostic_with_sources(
+    diagnostic: &HirDiagnostic,
+    sources: &CheckSources<'_>,
     styles: &StreamStyles,
 ) -> String {
     let (severity, severity_tone) = match diagnostic.severity {
@@ -477,54 +641,75 @@ fn render_check_diagnostic_with_styles(
         HirDiagnosticSeverity::Information => ("info", Tone::Info),
         HirDiagnosticSeverity::Help => ("help", Tone::Help),
     };
-    let (line, column, line_start, line_text) = source_line(source, diagnostic.primary.span.start);
-    let primary_start = diagnostic.primary.span.start.min(source.len());
-    let primary_end = diagnostic
-        .primary
-        .span
-        .end
-        .min(source.len())
-        .max(primary_start);
-    let prefix_width = source[line_start..primary_start].chars().count();
-    let span_len = source[primary_start..primary_end]
-        .split('\n')
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .count()
-        .max(1)
-        .min(
-            line_text
-                .chars()
-                .count()
-                .saturating_sub(prefix_width)
-                .max(1),
-        );
-    let gutter = line.to_string().len();
-    let severity = styles.paint(severity_tone, severity);
-    let code = styles.identifier(&diagnostic.code);
-    let location = styles.path(format!("{}:{line}:{column}", path.display()));
-    let arrow = styles.muted("-->");
-    let separator = styles.muted("|");
-    let carets = styles.paint(severity_tone, "^".repeat(span_len));
-    let mut rendered = format!(
+    let mut rendered = if let Some((path, source)) = sources.source(diagnostic.primary.source) {
+        let (line, column, line_start, line_text) =
+            source_line(source, diagnostic.primary.span.start);
+        let primary_start = diagnostic.primary.span.start.min(source.len());
+        let primary_end = diagnostic
+            .primary
+            .span
+            .end
+            .min(source.len())
+            .max(primary_start);
+        let prefix_width = source[line_start..primary_start].chars().count();
+        let span_len = source[primary_start..primary_end]
+            .split('\n')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .count()
+            .max(1)
+            .min(
+                line_text
+                    .chars()
+                    .count()
+                    .saturating_sub(prefix_width)
+                    .max(1),
+            );
+        let gutter = line.to_string().len();
+        let severity = styles.paint(severity_tone, severity);
+        let code = styles.identifier(&diagnostic.code);
+        let location = styles.path(format!("{}:{line}:{column}", path.display()));
+        let arrow = styles.muted("-->");
+        let separator = styles.muted("|");
+        let carets = styles.paint(severity_tone, "^".repeat(span_len));
+        format!(
         "{severity}[{code}]: {}\n {arrow} {location}\n{:gutter$} {separator}\n{line:>gutter$} {separator} {line_text}\n{:gutter$} {separator} {}{carets}",
         diagnostic.message,
         "",
         "",
         " ".repeat(prefix_width),
-    );
+    )
+    } else {
+        format!(
+            "{}[{}]: {}\n {} <unavailable source {}>:bytes {}..{}",
+            styles.paint(severity_tone, severity),
+            styles.identifier(&diagnostic.code),
+            diagnostic.message,
+            styles.muted("-->"),
+            diagnostic.primary.source.unwrap_or(ProgramSourceId(0)).0,
+            diagnostic.primary.span.start,
+            diagnostic.primary.span.end,
+        )
+    };
     if let Some(label) = &diagnostic.primary.label {
         rendered.push(' ');
         rendered.push_str(&styles.paint(severity_tone, label));
     }
     for secondary in &diagnostic.secondary {
-        let (secondary_line, secondary_column, _, _) = source_line(source, secondary.span.start);
         let related = styles.info("related:");
-        let location = styles.path(format!(
-            "{}:{secondary_line}:{secondary_column}",
-            path.display()
-        ));
+        let location = match sources.source(secondary.source) {
+            Some((path, source)) => {
+                let (line, column) = source_position(source, secondary.span.start);
+                styles.path(format!("{}:{line}:{column}", path.display()))
+            }
+            None => styles.path(format!(
+                "<unavailable source {}>:bytes {}..{}",
+                secondary.source.unwrap_or(ProgramSourceId(0)).0,
+                secondary.span.start,
+                secondary.span.end,
+            )),
+        };
         rendered.push_str(&format!("\n  {} {related} {location}", styles.muted("=")));
         if let Some(label) = &secondary.label {
             rendered.push_str(&format!(": {label}"));
@@ -548,6 +733,71 @@ fn render_check_diagnostic_with_styles(
     rendered
 }
 
+struct LocatedDiagnostic<'a> {
+    severity: &'a HirDiagnosticSeverity,
+    code: &'a str,
+    message: &'a str,
+    span: Span,
+    label: Option<&'a str>,
+}
+
+fn severity_presentation(severity: &HirDiagnosticSeverity) -> (&'static str, Tone) {
+    match severity {
+        HirDiagnosticSeverity::Error => ("error", Tone::Error),
+        HirDiagnosticSeverity::Warning => ("warning", Tone::Warning),
+        HirDiagnosticSeverity::Information => ("info", Tone::Info),
+        HirDiagnosticSeverity::Help => ("help", Tone::Help),
+    }
+}
+
+/// Renders `severity[code]: message`, the `-->` location, and the source line with a caret
+/// underline and label. The snippet drops the line's leading indentation; the reported column
+/// stays the column in the file.
+fn render_located(
+    diagnostic: &LocatedDiagnostic<'_>,
+    path: &Path,
+    source: &str,
+    styles: &StreamStyles,
+) -> String {
+    let (severity, severity_tone) = severity_presentation(diagnostic.severity);
+    let (line, column, line_start, line_text) = source_line(source, diagnostic.span.start);
+    let primary_start = diagnostic.span.start.min(source.len());
+    let primary_end = diagnostic.span.end.min(source.len()).max(primary_start);
+    let indentation = line_text.len() - line_text.trim_start().len();
+    let snippet = &line_text[indentation..];
+    let prefix_width = source[line_start..primary_start]
+        .chars()
+        .count()
+        .saturating_sub(line_text[..indentation].chars().count());
+    let span_len = source[primary_start..primary_end]
+        .split('\n')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .count()
+        .max(1)
+        .min(snippet.chars().count().saturating_sub(prefix_width).max(1));
+    let gutter = line.to_string().len();
+    let severity = styles.paint(severity_tone, severity);
+    let code = styles.identifier(diagnostic.code);
+    let location = styles.path(format!("{}:{line}:{column}", path.display()));
+    let arrow = styles.muted("-->");
+    let separator = styles.muted("|");
+    let carets = styles.paint(severity_tone, "^".repeat(span_len));
+    let mut rendered = format!(
+        "{severity}[{code}]: {}\n {arrow} {location}\n{:gutter$} {separator}\n{line:>gutter$} {separator} {snippet}\n{:gutter$} {separator} {}{carets}",
+        diagnostic.message,
+        "",
+        "",
+        " ".repeat(prefix_width),
+    );
+    if let Some(label) = diagnostic.label {
+        rendered.push(' ');
+        rendered.push_str(&styles.paint(severity_tone, label));
+    }
+    rendered
+}
+
 fn source_line(source: &str, offset: usize) -> (usize, usize, usize, &str) {
     let offset = offset.min(source.len());
     let line_start = source[..offset].rfind('\n').map_or(0, |index| index + 1);
@@ -560,134 +810,13 @@ fn source_line(source: &str, offset: usize) -> (usize, usize, usize, &str) {
         .count()
         + 1;
     let column = source[line_start..offset].chars().count() + 1;
-    (line, column, line_start, &source[line_start..line_end])
-}
-
-fn print_study_check_summary(
-    validation: &AnalysisStudyValidateResult,
-    plan: &AnalysisStudyPlanData,
-    verbose: bool,
-) {
-    let styles = presentation::stdout();
-    println!(
-        "{} {}",
-        styles.success("OK"),
-        styles.identifier(&plan.study_id)
-    );
-    println!("  {} {:?}", styles.label("kind:"), plan.run_kind);
-    println!("  {} {:?}", styles.label("backend:"), plan.backend);
-    println!(
-        "  {} {}",
-        styles.label("model:"),
-        styles.identifier(&plan.model_id)
-    );
-    println!(
-        "  {} {} ({} issues)",
-        styles.label("validation:"),
-        styles.success("passed"),
-        validation.issues.len()
-    );
-    println!(
-        "  {} {} ({})",
-        styles.label("run op:"),
-        styles.identifier(&plan.run_operation),
-        plan.run_op_version
-    );
-    println!(
-        "  {} {}",
-        styles.label("evidence:"),
-        styles.path(&plan.evidence_artifact_path)
-    );
-    if verbose {
-        println!("  study fingerprint: {}", plan.study_fingerprint);
-        println!("  operations:");
-        for operation in &plan.operation_sequence {
-            println!("    {operation}");
-        }
-    }
-}
-
-fn print_study_validation_failure(validation: &AnalysisStudyValidateResult) {
-    let styles = presentation::stdout();
-    println!("{} validation", styles.error("FAILED"));
-    println!(
-        "  {} {}",
-        styles.label("evidence:"),
-        styles.path(&validation.evidence_artifact_path)
-    );
-    for issue in &validation.issues {
-        println!("  {}: {}", styles.identifier(&issue.code), issue.message);
-    }
-}
-
-fn print_sweep_check_summary(
-    validation: &AnalysisStudySweepValidateData,
-    plan: &AnalysisStudySweepPlanData,
-) {
-    let styles = presentation::stdout();
-    println!(
-        "{} {}",
-        styles.success("OK"),
-        styles.identifier(&plan.sweep_id)
-    );
-    println!("  studies: {}", plan.study_count);
-    println!("  planned: {}", plan.planned_count);
-    println!("  failed: {}", plan.failed_count);
-    println!(
-        "  validation: passed ({} study entries)",
-        validation.study_entries.len()
-    );
-    println!("  evidence: {}", plan.evidence_artifact_path);
-    for entry in &plan.plan_entries {
-        println!(
-            "  {}: {} ({})",
-            entry.study_id, entry.run_operation, entry.run_op_version
-        );
-    }
-}
-
-fn print_sweep_validation_failure(validation: &AnalysisStudySweepValidateData) {
-    let styles = presentation::stdout();
-    println!(
-        "{} {}",
-        styles.error("FAILED"),
-        styles.identifier(&validation.sweep_id)
-    );
-    println!("  evidence: {}", validation.evidence_artifact_path);
-    for entry in &validation.study_entries {
-        if entry.valid {
-            continue;
-        }
-        println!("  {}", entry.study_id);
-        for issue in &entry.issues {
-            println!("    {}: {}", issue.code, issue.message);
-        }
-    }
-}
-
-fn print_payload<T: Serialize>(
-    document_kind: &'static str,
-    status: &'static str,
-    data: &T,
-    include_metadata: bool,
-) -> Result<()> {
-    if include_metadata {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&json!({
-                "document_kind": document_kind,
-                "status": status,
-                "data": data,
-            }))
-            .context("Failed to serialize check result")?
-        );
-    } else {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(data).context("Failed to serialize check result")?
-        );
-    }
-    Ok(())
+    let text = &source[line_start..line_end];
+    (
+        line,
+        column,
+        line_start,
+        text.strip_suffix('\r').unwrap_or(text),
+    )
 }
 
 fn is_matlab_file(path: &Path) -> bool {
@@ -696,13 +825,9 @@ fn is_matlab_file(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
 }
 
-fn report_operation_error(error: OperationErrorEnvelope) -> anyhow::Error {
-    match serde_json::to_string_pretty(&error) {
-        Ok(payload) => eprintln!("{payload}"),
-        Err(_) => eprintln!("{}: {}", error.error_code, error.message.replace('\n', " ")),
-    }
-    AlreadyReportedCliError.into()
-}
+#[cfg(test)]
+#[path = "check/project_diagnostic_tests.rs"]
+mod project_diagnostic_tests;
 
 #[cfg(test)]
 mod script_check_tests {
@@ -751,10 +876,15 @@ mod script_check_tests {
 
     #[test]
     fn source_coordinates_count_unicode_columns() {
-        let source = "% π\nvalue = 1;";
-        let offset = source.find("value").unwrap();
-        let (line, column, line_start, text) = source_line(source, offset);
-        assert_eq!((line, column, line_start, text), (2, 1, 5, "value = 1;"));
+        for newline in ["\n", "\r\n"] {
+            let source = format!("% π{newline}value = 1;{newline}");
+            let offset = source.find("value").unwrap();
+            let (line, column, line_start, text) = source_line(&source, offset);
+            assert_eq!(
+                (line, column, line_start, text),
+                (2, 1, offset, "value = 1;")
+            );
+        }
     }
 
     fn strip_ansi(value: &str) -> String {

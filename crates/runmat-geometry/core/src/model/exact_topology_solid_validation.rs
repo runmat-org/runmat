@@ -65,11 +65,21 @@ impl ExactBRepTopology {
                         }
                     }
                 }
-                for uses in edge_uses.values() {
+                for (edge_id, uses) in edge_uses {
                     if uses.len() != 2 || uses[0] == uses[1] {
+                        let edge = edges
+                            .get(edge_id)
+                            .ok_or_else(|| incomplete("boundary edge"))?;
                         return Err(GeometryContractError::invalid(
                             "solid shell boundary",
-                            "each nondegenerate edge requires exactly two oppositely oriented uses within its shell",
+                            format!(
+                                "nondegenerate edge `{}` requires exactly two oppositely oriented uses but has {uses:?} (closed={}, periodic={}, start={:?}, end={:?})",
+                                edge_id.source_topology_id,
+                                edge.is_closed,
+                                edge.is_periodic,
+                                edge.start_vertex_id.as_ref().map(|id| &id.source_topology_id),
+                                edge.end_vertex_id.as_ref().map(|id| &id.source_topology_id),
+                            ),
                         ));
                     }
                 }

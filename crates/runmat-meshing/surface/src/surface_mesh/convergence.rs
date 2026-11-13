@@ -1,4 +1,14 @@
+mod encoding;
+pub use encoding::PreparedExactSurfacePassEncoding;
+mod owned;
+pub use owned::{
+    decide_exact_surface_pass_owned, decide_exact_surface_pass_owned_admitted,
+    AcceptedExactSurfacePass,
+};
+pub(super) mod validation;
+use super::control::checkpoint;
 use runmat_geometry_core::ExactBRepTopology;
+use runmat_meshing_core::MeshingCancellationSignal;
 use runmat_meshing_curve::{
     apply_shared_curve_splits, canonicalize_shared_curve_splits, validate_shared_curve_split_set,
     SharedCurveDiscretizationOptions, SharedCurveErrorKind, SharedCurveEvaluationContext,
@@ -6,7 +16,6 @@ use runmat_meshing_curve::{
 };
 
 use super::{
-    join_exact_face_mesh_batches, validate_exact_face_partition_result_with_boundary,
     ExactFaceMeshBatch, ExactFacePartitionOutcome, ExactFacePartitionResult,
     ExactSurfaceJoinOptions, ExactSurfaceMesh, ExactSurfaceMeshErrorKind, ExactSurfacePassOutcome,
     ExactSurfacePassResult, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
@@ -75,19 +84,62 @@ pub fn decide_exact_surface_pass(
     topology: &ExactBRepTopology,
     surface_options: ExactSurfaceJoinOptions,
 ) -> Result<ExactSurfacePassResult, ExactSurfaceConvergenceError> {
-    let ordered = validate_result_set(current_curves, results, topology)?;
+    decide_with_control(current_curves, results, topology, surface_options, None)
+}
+
+pub fn decide_exact_surface_pass_with_cancellation(
+    current_curves: &SharedCurveMesh,
+    results: &[ExactFacePartitionResult],
+    topology: &ExactBRepTopology,
+    surface_options: ExactSurfaceJoinOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<ExactSurfacePassResult, ExactSurfaceConvergenceError> {
+    decide_with_control(
+        current_curves,
+        results,
+        topology,
+        surface_options,
+        Some(cancellation),
+    )
+}
+
+pub(super) fn decide_with_control(
+    current_curves: &SharedCurveMesh,
+    results: &[ExactFacePartitionResult],
+    topology: &ExactBRepTopology,
+    surface_options: ExactSurfaceJoinOptions,
+    control: Option<&dyn MeshingCancellationSignal>,
+) -> Result<ExactSurfacePassResult, ExactSurfaceConvergenceError> {
+    checkpoint(control).map_err(surface_error)?;
+    let ordered = validate_result_set(current_curves, results, topology, control)?;
     let mut splits = Vec::new();
     for result in &ordered {
+        checkpoint(control).map_err(surface_error)?;
         if let ExactFacePartitionOutcome::RequiresCurveSplits {
             splits: result_splits,
         } = &result.outcome
         {
-            splits.extend(result_splits.iter().cloned());
+            for split in result_splits {
+                checkpoint(control).map_err(surface_error)?;
+                splits.push(split.clone());
+            }
         }
     }
     if !splits.is_empty() {
         canonicalize_shared_curve_splits(&mut splits);
-        validate_shared_curve_split_set(current_curves, topology, &splits).map_err(curve_error)?;
+        checkpoint(control).map_err(surface_error)?;
+        match control {
+            Some(control) => {
+                runmat_meshing_curve::validate_shared_curve_split_set_with_cancellation(
+                    current_curves,
+                    topology,
+                    &splits,
+                    control,
+                )
+            }
+            None => validate_shared_curve_split_set(current_curves, topology, &splits),
+        }
+        .map_err(curve_error)?;
         return Ok(ExactSurfacePassResult {
             schema_version: EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
             outcome: ExactSurfacePassOutcome::RequiresCurveSplits { splits },
@@ -99,14 +151,14 @@ pub fn decide_exact_surface_pass(
             ExactFacePartitionOutcome::Converged { faces } => Ok(ExactFaceMeshBatch {
                 schema_version: EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
                 partition: result.partition.clone(),
-                faces: faces.clone(),
+                faces: super::copy::clone_faces(faces, control).map_err(surface_error)?,
             }),
             ExactFacePartitionOutcome::RequiresCurveSplits { .. } => Err(invalid(
                 "surface convergence lost a validated curve-restart outcome",
             )),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    join_exact_face_mesh_batches(topology, batches, surface_options)
+    super::join::join_with_control(topology, batches, surface_options, control)
         .map(|surface| ExactSurfacePassResult {
             schema_version: EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
             outcome: ExactSurfacePassOutcome::Converged { surface },
@@ -118,20 +170,38 @@ fn validate_result_set<'a>(
     curves: &SharedCurveMesh,
     results: &'a [ExactFacePartitionResult],
     topology: &ExactBRepTopology,
+    control: Option<&dyn MeshingCancellationSignal>,
 ) -> Result<Vec<&'a ExactFacePartitionResult>, ExactSurfaceConvergenceError> {
     if results.is_empty() || results.len() > MAX_EXACT_FACE_PARTITIONS {
         return Err(invalid(
             "surface convergence requires a bounded nonempty result set",
         ));
     }
-    let boundary = crate::build_exact_surface_boundary(topology, curves)
-        .map_err(|error| invalid(error.to_string()))?;
+    let boundary = match control {
+        Some(control) => {
+            crate::build_exact_surface_boundary_with_cancellation(topology, curves, control)
+        }
+        None => crate::build_exact_surface_boundary(topology, curves),
+    }
+    .map_err(|error| {
+        if error.kind == crate::ExactSurfaceBoundaryErrorKind::Cancelled {
+            surface_error(super::ExactSurfaceMeshError::new(
+                ExactSurfaceMeshErrorKind::Cancelled,
+                error.to_string(),
+            ))
+        } else {
+            invalid(error.to_string())
+        }
+    })?;
     let mut ordered = results.iter().collect::<Vec<_>>();
     ordered.sort_by_key(|result| result.partition.partition_index);
     let mut covered_faces = Vec::new();
     for (index, result) in ordered.iter().enumerate() {
-        validate_exact_face_partition_result_with_boundary(result, topology, curves, &boundary)
-            .map_err(surface_error)?;
+        checkpoint(control).map_err(surface_error)?;
+        super::partition_result::validate_with_boundary(
+            result, topology, curves, &boundary, control,
+        )
+        .map_err(surface_error)?;
         if result.partition.partition_index != index as u32
             || result.partition.partition_count != ordered.len() as u32
         {
@@ -144,13 +214,12 @@ fn validate_result_set<'a>(
             .entity_range
             .as_ref()
             .expect("partition result validated");
-        covered_faces.extend(
-            topology
-                .faces
-                .iter()
-                .filter(|face| face.id >= range.first && face.id <= range.last)
-                .map(|face| &face.id),
-        );
+        for face in &topology.faces {
+            checkpoint(control).map_err(surface_error)?;
+            if face.id >= range.first && face.id <= range.last {
+                covered_faces.push(&face.id);
+            }
+        }
     }
     if covered_faces.len() != topology.faces.len()
         || covered_faces

@@ -26,7 +26,7 @@ pub(crate) fn slice_value_for_preview(
 }
 
 fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Option<NumericStorage> {
-    if tensor.shape.is_empty() || slice.shape.contains(&0) {
+    if tensor.shape().is_empty() || slice.shape.contains(&0) {
         return None;
     }
     let total: usize = slice.shape.iter().product();
@@ -34,9 +34,9 @@ fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Option
         return None;
     }
     let mut indices = Vec::with_capacity(total);
-    let mut coords = vec![0usize; tensor.shape.len()];
-    visit_slice_coords(&tensor.shape, slice, 0, &mut coords, &mut |coords| {
-        indices.push(column_major_index(&tensor.shape, coords));
+    let mut coords = vec![0usize; tensor.shape().len()];
+    visit_slice_coords(tensor.shape(), slice, 0, &mut coords, &mut |coords| {
+        indices.push(column_major_index(tensor.shape(), coords));
     });
     if indices.len() != total {
         None
@@ -82,8 +82,8 @@ fn visit_slice_coords<F: FnMut(&[usize])>(
 pub(crate) fn gpu_dtype_label(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static str> {
-    let precision = runmat_accelerate_api::handle_precision(handle)
-        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
+    let precision =
+        runmat_accelerate_api::handle_precision(handle).unwrap_or(ProviderPrecision::F64);
     match precision {
         ProviderPrecision::F32 => Some("single"),
         ProviderPrecision::F64 => Some("double"),
@@ -91,17 +91,15 @@ pub(crate) fn gpu_dtype_label(
 }
 
 pub(crate) fn gpu_size_bytes(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<u64> {
-    let precision = runmat_accelerate_api::handle_precision(handle)
-        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
-    let element_size = match precision {
-        ProviderPrecision::F32 => 4u64,
-        ProviderPrecision::F64 => 8u64,
-    };
-    let elements: u64 = handle
-        .shape
-        .iter()
-        .try_fold(1u64, |acc, &d| acc.checked_mul(d as u64))?;
-    elements.checked_mul(element_size)
+    // Report the view's typed payload size, not allocator padding or the
+    // provider's preferred arithmetic precision.
+    let bytes = runmat_accelerate_api::native_buffer_byte_length(
+        handle.shape(),
+        handle.physical().element_type(),
+        handle.physical().storage(),
+    )
+    .ok()?;
+    u64::try_from(bytes).ok()
 }
 
 pub(crate) async fn gather_gpu_preview_values(
@@ -175,8 +173,9 @@ pub(crate) async fn gather_gpu_preview_values(
         .download(&gathered)
         .await
         .map_err(|e| anyhow::anyhow!("gpu preview download: {e}"))?;
-    // Best-effort cleanup.
-    let _ = provider.free(&gathered);
+    // Release this preview's reference. Other views retain their own leases;
+    // download failure or cancellation releases this reference through Drop.
+    drop(gathered);
 
     Ok(Some((host.data, truncated)))
 }
@@ -185,6 +184,48 @@ pub(crate) async fn gather_gpu_preview_values(
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn gpu_preview_size_uses_typed_view_storage() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, GpuTensorView, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        for (element, storage, expected) in [
+            (NumericElementType::U8, GpuTensorStorage::Real, 6),
+            (NumericElementType::I64, GpuTensorStorage::Real, 48),
+            (
+                NumericElementType::F32,
+                GpuTensorStorage::ComplexInterleaved,
+                48,
+            ),
+            (
+                NumericElementType::F64,
+                GpuTensorStorage::ComplexInterleaved,
+                96,
+            ),
+        ] {
+            let allocation = owner.allocate_zeroed(vec![2, 3], element, storage).unwrap();
+            assert_eq!(gpu_size_bytes(&allocation.handle), Some(expected));
+            let alias = allocation
+                .handle
+                .with_view(GpuTensorView::contiguous(vec![3, 2]))
+                .unwrap();
+            assert_eq!(gpu_size_bytes(&alias), Some(expected));
+            drop(allocation.handle);
+            assert_eq!(allocation.probe.retirements(), 0);
+            drop(alias);
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
+        let empty = owner
+            .allocate_zeroed(
+                vec![usize::MAX, usize::MAX, 0],
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert_eq!(gpu_size_bytes(&empty.handle), Some(0));
+    }
 
     #[test]
     fn preview_slice_preserves_exact_uint64_storage() {
@@ -202,7 +243,7 @@ mod tests {
             panic!("expected tensor preview");
         };
 
-        assert_eq!(preview.shape, vec![2, 1]);
+        assert_eq!(preview.shape(), &[2, 1]);
         assert_eq!(
             preview.integer_storage(),
             Some(&IntegerStorage::U64(vec![values[2], values[3]]))
@@ -223,7 +264,7 @@ mod tests {
         else {
             panic!("expected tensor preview");
         };
-        assert_eq!(preview.shape, vec![2, 1]);
+        assert_eq!(preview.shape(), &[2, 1]);
         assert_eq!(
             preview.into_numeric_storage(),
             Ok(NumericStorage::F32(vec![values[2], values[3]]))

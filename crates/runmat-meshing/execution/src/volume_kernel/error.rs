@@ -8,7 +8,12 @@ use runmat_meshing_tetrahedron::cdt::{
 };
 
 pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFailure> {
+    let accounting_error = match error.kind {
+        DelaunayVolumeMeshErrorKind::Accounting(cause) => Some(cause),
+        _ => None,
+    };
     let category = match error.kind {
+        DelaunayVolumeMeshErrorKind::Accounting(_) => MeshingFailureCategory::NumericalAccounting,
         DelaunayVolumeMeshErrorKind::InvalidOptions => {
             MeshingFailureCategory::InternalInvariantViolation
         }
@@ -24,18 +29,39 @@ pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFai
         DelaunayVolumeMeshErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
         DelaunayVolumeMeshErrorKind::ResourceLimit => resource_category(error.stage),
     };
+    let remediation = if accounting_error.is_some() {
+        "resolve numerical operation admission and retry the volume mesh"
+    } else {
+        "repair the exact boundary, increase its resource budget, or relax volume quality targets"
+    };
+    let mut failure = volume_failure(category, remediation, &error.to_string());
+    failure.accounting_error = accounting_error;
+    failure
+}
+
+pub(super) fn map_diagnostic_error(error: crate::MeshingSubtaskCacheError) -> Box<MeshingFailure> {
+    let (category, reason) = match error {
+        crate::MeshingSubtaskCacheError::Control(error) => {
+            (crate::geometry_failure::category(error.kind), error.reason)
+        }
+        crate::MeshingSubtaskCacheError::Storage(reason) => {
+            (MeshingFailureCategory::ArtifactBudgetExceeded, reason)
+        }
+    };
     volume_failure(
         category,
-        "repair the exact boundary, increase its resource budget, or relax volume quality targets",
-        &error.to_string(),
+        "inspect the bounded volume diagnostic persistence",
+        &reason,
     )
 }
 
 pub(super) fn map_codec_error(error: DelaunayVolumeMeshCodecError) -> Box<MeshingFailure> {
     let category = match error.kind {
-        DelaunayVolumeMeshCodecErrorKind::InvalidEncoding => {
+        DelaunayVolumeMeshCodecErrorKind::InvalidEncoding
+        | DelaunayVolumeMeshCodecErrorKind::ResourceLimit => {
             MeshingFailureCategory::ArtifactBudgetExceeded
         }
+        DelaunayVolumeMeshCodecErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
         DelaunayVolumeMeshCodecErrorKind::InvalidMesh => {
             MeshingFailureCategory::InternalInvariantViolation
         }
@@ -52,12 +78,13 @@ fn resource_category(stage: DelaunayVolumeMeshStage) -> MeshingFailureCategory {
         DelaunayVolumeMeshStage::PointSet | DelaunayVolumeMeshStage::Refinement => {
             MeshingFailureCategory::NodeBudgetExceeded
         }
-        DelaunayVolumeMeshStage::SegmentRecovery | DelaunayVolumeMeshStage::FacetRecovery => {
-            MeshingFailureCategory::SearchWorkBudgetExceeded
-        }
+        DelaunayVolumeMeshStage::SegmentRecovery
+        | DelaunayVolumeMeshStage::FacetRecovery
+        | DelaunayVolumeMeshStage::Optimization => MeshingFailureCategory::SearchWorkBudgetExceeded,
         DelaunayVolumeMeshStage::Constraints
         | DelaunayVolumeMeshStage::Carving
         | DelaunayVolumeMeshStage::Provenance
+        | DelaunayVolumeMeshStage::CoordinateMaterialization
         | DelaunayVolumeMeshStage::Quality => MeshingFailureCategory::ElementBudgetExceeded,
     }
 }
@@ -89,6 +116,7 @@ pub(super) fn volume_failure(
             value: MeshingDiagnosticValue::Text(detail),
             unit: None,
         }],
+        accounting_error: None,
         remediation: remediation.into(),
     })
 }

@@ -40,6 +40,7 @@ describe("BrowserTestSnapshotPreparer", () => {
     const preparer = new BrowserTestSnapshotPreparer(
       {
         projectTestLayout: vi.fn(async () => ({
+          compatibilityMode: "runmat" as const,
           sourceRoots: ["src"],
           testRoots: ["tests"],
           testPaths: [],
@@ -61,6 +62,7 @@ describe("BrowserTestSnapshotPreparer", () => {
 
     expect(freezeTestSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
+        compatibilityMode: "runmat",
         graphDigest: "sha256:graph",
         baseSourceDigest: "sha256:sources",
         savedSources: [

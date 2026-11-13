@@ -1,0 +1,45 @@
+runmat 0.7
+std 1
+
+// The zinc-alloy element of a 20 A automotive blade fuse: two 6 x 18 mm blades, 0.8 mm thick,
+// joined across a 6 mm gap by a fusible link 0.6 mm wide. The link carries all the current
+// through 0.48 mm^2, so it runs far hotter than the blades and melts first.
+// Sizing at 20 A: R_link = rho L / A = 5.9e-8 Ohm m x 6 mm / 0.48 mm^2 = 0.74 mOhm, 0.30 W,
+// against about 0.02 W in each blade. Change `link_width` to set the rating: the link's heat
+// goes as 1 / width.
+part fuse_element {
+    input blade_width : length = 6 mm
+    input blade_length : length = 18 mm
+    input gap : length = 6 mm
+    input thickness : length = 0.8 mm
+    input link_width : length = 0.6 mm
+    input link_height : length = 16 mm
+
+    let b = input.blade_width
+    let x2 = input.blade_width + input.gap
+    let x3 = input.blade_width * 2 + input.gap
+    let h = input.blade_length
+    let lo = input.link_height - input.link_width / 2
+    let hi = input.link_height + input.link_width / 2
+
+    sketch element_s on origin.xy {
+        terminal_a = line(start = [0 mm, 0 mm], end = [let.b, 0 mm])
+        blade_a_inner = line(start = [let.b, 0 mm], end = [let.b, let.lo])
+        link_lower = line(start = [let.b, let.lo], end = [let.x2, let.lo])
+        blade_b_inner = line(start = [let.x2, let.lo], end = [let.x2, 0 mm])
+        terminal_b = line(start = [let.x2, 0 mm], end = [let.x3, 0 mm])
+        blade_b_outer = line(start = [let.x3, 0 mm], end = [let.x3, let.h])
+        head_b = line(start = [let.x3, let.h], end = [let.x2, let.h])
+        blade_b_upper = line(start = [let.x2, let.h], end = [let.x2, let.hi])
+        link_upper = line(start = [let.x2, let.hi], end = [let.b, let.hi])
+        blade_a_upper = line(start = [let.b, let.hi], end = [let.b, let.h])
+        head_a = line(start = [let.b, let.h], end = [0 mm, let.h])
+        blade_a_outer = line(start = [0 mm, let.h], end = [0 mm, 0 mm])
+    }
+    feature element = extrude(profile = sketch.element_s, distance = input.thickness)
+
+    region terminal_a : face = { select = [feature.element.face.side(element_s.terminal_a)], expect = exactly_one, label = "Terminal A" }
+    region terminal_b : face = { select = [feature.element.face.side(element_s.terminal_b)], expect = exactly_one, label = "Terminal B" }
+
+    output element = { body = feature.element.body, label = "Fuse link", part_number = "BF-20A", material = "zinc_alloy", color = "#C9CCD1" }
+}

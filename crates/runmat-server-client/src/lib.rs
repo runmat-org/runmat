@@ -1,5 +1,12 @@
 pub mod auth;
+pub mod endpoint;
 pub mod execution;
+pub mod fea;
+pub mod simulation;
 pub mod package_snapshot;
 pub mod packages;
 pub mod public_api;
+pub mod ids;
+mod lease_http;
+pub mod lease_retry;
+pub use lease_http::ServerLeaseTransportError;
